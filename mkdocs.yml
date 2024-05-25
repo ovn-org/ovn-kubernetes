@@ -99,6 +99,7 @@ nav:
       - Debugging: developer-guide/debugging.md
       - Releasing: developer-guide/release.md
   - API Reference Guide:
+      - Introduction: api-reference/introduction.md
       - EgressIP: api-reference/egress-ip-api-spec.md
       - EgressService: api-reference/egress-service-api-spec.md
       - EgressQoS: api-reference/egress-qos-api-spec.md
