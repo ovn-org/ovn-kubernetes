@@ -357,6 +357,20 @@ func (_m *SriovnetOps) GetVfRepresentorDPU(pfID string, vfIndex string) (string,
 	return r0, r1
 }
 
+// IsVfPciVfioBound provides a mock function with given fields: pciAddr
+func (_m *SriovnetOps) IsVfPciVfioBound(pciAddr string) bool {
+	ret := _m.Called(pciAddr)
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func(string) bool); ok {
+		r0 = rf(pciAddr)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
+}
+
 type mockConstructorTestingTNewSriovnetOps interface {
 	mock.TestingT
 	Cleanup(func())

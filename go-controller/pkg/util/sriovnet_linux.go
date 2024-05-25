@@ -26,6 +26,7 @@ type SriovnetOps interface {
 	GetPfPciFromVfPci(vfPciAddress string) (string, error)
 	GetPfPciFromAux(auxDev string) (string, error)
 	GetVfRepresentorDPU(pfID, vfIndex string) (string, error)
+	IsVfPciVfioBound(pciAddr string) bool
 	GetRepresentorPeerMacAddress(netdev string) (net.HardwareAddr, error)
 	GetRepresentorPortFlavour(netdev string) (sriovnet.PortFlavour, error)
 }
@@ -175,4 +176,31 @@ func GetNetdevNameFromDeviceId(deviceId string, deviceInfo nadapi.DeviceInfo) (s
 		return "", fmt.Errorf("failed to get one netdevice interface (count %d) per Device ID %s", numNetDevices, deviceId)
 	}
 	return netdevices[0], nil
+}
+
+func (defaultSriovnetOps) IsVfPciVfioBound(pciAddr string) bool {
+	return sriovnet.IsVfPciVfioBound(pciAddr)
+}
+
+// SetVFHardwreAddress sets mac address for a VF interface
+func SetVFHardwreAddress(deviceID string, mac net.HardwareAddr) error {
+	// get uplink netdevice name and its netlink object
+	uplink, err := GetSriovnetOps().GetUplinkRepresentor(deviceID)
+	if err != nil {
+		return err
+	}
+	uplinkObj, err := GetNetLinkOps().LinkByName(uplink)
+	if err != nil {
+		return err
+	}
+	// get VF index from PCI
+	vfIndex, err := GetSriovnetOps().GetVfIndexByPciAddress(deviceID)
+	if err != nil {
+		return err
+	}
+	// set MAC address through VF representor
+	if err := GetNetLinkOps().LinkSetVfHardwareAddr(uplinkObj, vfIndex, mac); err != nil {
+		return err
+	}
+	return nil
 }

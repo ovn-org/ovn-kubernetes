@@ -180,6 +180,7 @@ func cniRequestToPodRequest(cr *Request) (*PodRequest, error) {
 	if conf.DeviceID != "" {
 		if util.IsPCIDeviceName(conf.DeviceID) {
 			// DeviceID is a PCI address
+			req.IsVFIO = util.GetSriovnetOps().IsVfPciVfioBound(conf.DeviceID)
 		} else if util.IsAuxDeviceName(conf.DeviceID) {
 			// DeviceID is an Auxiliary device name - <driver_name>.<kind_of_a_type>.<id>
 			chunks := strings.Split(conf.DeviceID, ".")
