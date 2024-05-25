@@ -91,12 +91,6 @@ nav:
       - Contributing Guide: governance/CONTRIBUTING.md
       - Reviewing Guide: governance/REVIEWING.md
       - Coding Guide: developer-guide/developer.md
-      - Kubernetes CRD API-Reference Guide:
-        - EgressIP: developer-guide/egress-ip-api-spec.md
-        - EgressService: developer-guide/egress-service-api-spec.md
-        - EgressQoS: developer-guide/egress-qos-api-spec.md
-        - EgressFirewall: developer-guide/egress-firewall-api-spec.md
-        - AdminPolicyBasedExternalRoutes: developer-guide/admin-epbr-api-spec.md
       - OVN-Kubernetes Container Images: developer-guide/image-build.md
       - Documentation Guide: developer-guide/documentation.md
       - Local Testing Guide: developer-guide/testing.md
@@ -104,6 +98,12 @@ nav:
       - Web Design Guide: developer-guide/web-design.md
       - Debugging: developer-guide/debugging.md
       - Releasing: developer-guide/release.md
+  - API Reference Guide:
+      - EgressIP: api-reference/egress-ip-api-spec.md
+      - EgressService: api-reference/egress-service-api-spec.md
+      - EgressQoS: api-reference/egress-qos-api-spec.md
+      - EgressFirewall: api-reference/egress-firewall-api-spec.md
+      - AdminPolicyBasedExternalRoutes: api-reference/admin-epbr-api-spec.md
   - Features:
     - ClusterEgressControls:
       - EgressIP: features/cluster-egress-controls/egress-ip.md
@@ -132,7 +132,7 @@ nav:
     - Logging: troubleshooting/logging.md
   - Observability:
     - Metrics: observability/metrics.md
-  - EnhancementProposals:
+  - Enhancement Proposals:
     # - FeatureName: okeps/<filename.md>
     - Template: okeps/okep-4368-template.md
   - Blog:
