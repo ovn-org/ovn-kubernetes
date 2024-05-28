@@ -18,7 +18,6 @@ export KUBECONFIG=${KUBECONFIG:-${HOME}/ovn.conf}
 # https://github.com/ovn-org/ovn-kubernetes/issues/4131 for details.
 # TODO: Fix EIP tests. See https://github.com/ovn-org/ovn-kubernetes/issues/4130 for details.
 # TODO: Fix EFW tests. See https://github.com/ovn-org/ovn-kubernetes/issues/4133 for details.
-# TODO: Fix CPU Pinning tests. See https://github.com/ovn-org/ovn-kubernetes/issues/4134 for details.
 # TODO: Fix MTU tests. See https://github.com/ovn-org/ovn-kubernetes/issues/4160 for details.
 IPV6_SKIPPED_TESTS="Should be allowed by externalip services|\
 should provide connection to external host by DNS name from a pod|\
@@ -38,7 +37,6 @@ can retrieve multicast IGMP query|\
 test node readiness according to its defaults interface MTU size|\
 egress IP validation|\
 e2e egress firewall policy validation|\
-OVS CPU affinity pinning|\
 Pod to pod TCP with low MTU|\
 queries to the hostNetworked server pod on another node shall work for TCP|\
 queries to the hostNetworked server pod on another node shall work for UDP|\
