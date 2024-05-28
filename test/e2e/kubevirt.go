@@ -270,19 +270,10 @@ var _ = Describe("Kubevirt Virtual Machines", func() {
 
 		checkEastWestTraffic = func(vmi *kubevirtv1.VirtualMachineInstance, podIPsByName map[string][]string, stage string) {
 			GinkgoHelper()
-			polling := 15 * time.Second
-			timeout := time.Minute
 			for podName, podIPs := range podIPsByName {
 				for _, podIP := range podIPs {
-					output := ""
-					Eventually(func() error {
-						var err error
-						output, err = kubevirt.RunCommand(vmi, fmt.Sprintf("curl http://%s", net.JoinHostPort(podIP, "8000")), polling)
-						return err
-					}).
-						WithPolling(polling).
-						WithTimeout(timeout).
-						Should(Succeed(), func() string { return stage + ": " + podName + ": " + output })
+					output, err := kubevirt.RunCommand(vmi, fmt.Sprintf("curl http://%s", net.JoinHostPort(podIP, "8000")), 5*time.Second)
+					Expect(err).ShouldNot(HaveOccurred(), func() string { return stage + ": " + podName + ": " + output })
 				}
 			}
 		}
@@ -334,26 +325,15 @@ var _ = Describe("Kubevirt Virtual Machines", func() {
 			}
 			err := crClient.Get(context.TODO(), crclient.ObjectKeyFromObject(vmi), vmi)
 			Expect(err).ToNot(HaveOccurred())
-			polling := 15 * time.Second
-			timeout := time.Minute
 			step := by(vmName, stage+": Check tcp connection is not broken")
-			Eventually(func() error { return sendEchos(endpoints) }).
-				WithPolling(polling).
-				WithTimeout(timeout).
-				Should(Succeed(), step)
+			Expect(sendEchos(endpoints)).To(Succeed(), step)
 
 			stage = by(vmName, stage+": Check e/w tcp traffic")
 			checkEastWestTraffic(vmi, httpServerTestPodsDefaultNetworkIPs(), stage)
 
 			step = by(vmName, stage+": Check n/s tcp traffic")
-			output := ""
-			Eventually(func() error {
-				output, err = kubevirt.RunCommand(vmi, "curl -kL https://kubernetes.default.svc.cluster.local", polling)
-				return err
-			}).
-				WithPolling(polling).
-				WithTimeout(timeout).
-				Should(Succeed(), func() string { return step + ": " + output })
+			output, err := kubevirt.RunCommand(vmi, "curl -kL https://kubernetes.default.svc.cluster.local", 5*time.Second)
+			Expect(err).ToNot(HaveOccurred(), func() string { return step + ": " + output })
 		}
 
 		checkConnectivityAndNetworkPolicies = func(vmName string, endpoints []*net.TCPConn, stage string) {
