@@ -126,6 +126,7 @@ nav:
     - Hardware Offload:
       - OVS Offload: features/hardware-offload/ovs_offload.md
       - Support DPU Acceleration: features/hardware-offload/dpu-acceleration.md
+      - OVS_DOCA: features/hardware-offload/ovs-doca.md
   - Troubleshooting:
     - Introduction: troubleshooting/debugging.md
     - OVNKube Trace: troubleshooting/ovnkube-trace.md
