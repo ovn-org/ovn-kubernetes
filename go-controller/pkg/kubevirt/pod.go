@@ -1,6 +1,7 @@
 package kubevirt
 
 import (
+	"bytes"
 	"fmt"
 	"net"
 
@@ -8,6 +9,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ktypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/retry"
+	"k8s.io/klog/v2"
 
 	kubevirtv1 "kubevirt.io/api/core/v1"
 
@@ -146,6 +148,31 @@ func AllVMPodsAreCompleted(client *factory.WatchFactory, pod *corev1.Pod) (bool,
 	return true, nil
 }
 
+// isLiveMigrationInProgress return true if a live migration is still progressing
+func isLiveMigrationInProgress(client *factory.WatchFactory, pod *corev1.Pod) (bool, error) {
+	if !IsPodLiveMigratable(pod) {
+		return false, nil
+	}
+
+	vmPods, err := findVMRelatedPods(client, pod)
+	if err != nil {
+		return false, fmt.Errorf("failed finding related pods for pod %s/%s when checking if they are completed: %v", pod.Namespace, pod.Name, err)
+	}
+
+	vmPods = append(vmPods, pod)
+
+	numberOfRunningPods := 0
+	for _, vmPod := range vmPods {
+		if util.PodRunning(vmPod) {
+			numberOfRunningPods++
+		}
+		if numberOfRunningPods > 1 {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // IsMigratedSourcePodStale return false if the pod is live migratable,
 // not completed and is the running VM pod with newest creation timestamp
 func IsMigratedSourcePodStale(client *factory.WatchFactory, pod *corev1.Pod) (bool, error) {
@@ -197,6 +224,29 @@ func nodeContainsPodSubnet(watchFactory *factory.WatchFactory, nodeName string, 
 		}
 	}
 	return false, nil
+}
+
+// findNodeOwningSubnet will return the node owning the subnet
+// contains the subnets from the argument
+func findNodeOwningSubnet(watchFactory *factory.WatchFactory, podAnnotation *util.PodAnnotation, nadName string) (*corev1.Node, error) {
+	nodes, err := watchFactory.GetNodes()
+	if err != nil {
+		return nil, err
+	}
+	for _, node := range nodes {
+		nodeHostSubNets, err := util.ParseNodeHostSubnetAnnotation(node, nadName)
+		if err != nil {
+			return nil, err
+		}
+		for _, subnet := range podAnnotation.IPs {
+			for _, nodeHostSubNet := range nodeHostSubNets {
+				if nodeHostSubNet.Contains(subnet.IP) {
+					return node, nil
+				}
+			}
+		}
+	}
+	return nil, nil
 }
 
 // ExtractVMNameFromPod retunes namespace and name of vm backed up but the pod
@@ -342,4 +392,42 @@ func ZoneContainsPodSubnetOrUntracked(watchFactory *factory.WatchFactory, lsMana
 	// we can just use one of the IPs to check if it belongs to a subnet assigned
 	// to a node
 	return hostSubnets, !util.IsContainedInAnyCIDR(annotation.IPs[0], hostSubnets...), nil
+}
+
+func findRunningPodsIPsFromPodSubnet(watchFactory *factory.WatchFactory, podAnnotation *util.PodAnnotation, nadName string) ([]*net.IPNet, error) {
+	nodeOwningSubnet, err := findNodeOwningSubnet(watchFactory, podAnnotation, nadName)
+	if err != nil {
+		return nil, err
+	}
+	if nodeOwningSubnet == nil {
+		return nil, nil
+	}
+
+	pods, err := watchFactory.GetAllPods()
+	if err != nil {
+		return nil, err
+	}
+	ipsToNotify := []*net.IPNet{}
+	for _, podToNotify := range pods {
+		if podToNotify.Spec.NodeName != nodeOwningSubnet.Name {
+			continue
+		}
+		sameSubnetPodAnnotation, err := util.UnmarshalPodAnnotation(podToNotify.Annotations, nadName)
+		if err != nil {
+			klog.Errorf("failed unmarshaling pod ovn for pod %s/%s annotations before GARP: %v", podToNotify.Namespace, podToNotify.Name, err)
+			continue
+		}
+
+		if util.PodCompleted(podToNotify) {
+			continue
+		}
+
+		//FIXME: Is comparing MAC enough to discard pod's from same VM
+		if bytes.Equal(sameSubnetPodAnnotation.MAC, podAnnotation.MAC) {
+			continue
+		}
+
+		ipsToNotify = append(ipsToNotify, sameSubnetPodAnnotation.IPs...)
+	}
+	return ipsToNotify, nil
 }

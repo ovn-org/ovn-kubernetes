@@ -1,9 +1,15 @@
 package kubevirt
 
 import (
+	"fmt"
+	"net"
+	"net/netip"
 	"strings"
 
+	"github.com/mdlayher/arp"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 )
 
 const (
@@ -18,6 +24,10 @@ const (
 	// ARPProxyMAC is a generated mac from ARPProxyIPv4, it's generated with
 	// the mechanism at `util.IPAddrToHWAddr`
 	ARPProxyMAC = "0a:58:a9:fe:01:01"
+)
+
+var (
+	broadcastMAC = net.HardwareAddr{0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
 )
 
 // ComposeARPProxyLSPOption returns the "arp_proxy" field needed at router type
@@ -52,4 +62,40 @@ func ComposeARPProxyLSPOption() string {
 		arpProxy = append(arpProxy, clusterSubnet.CIDR.String())
 	}
 	return strings.Join(arpProxy, " ")
+}
+
+// notifyARPProxyMACForIP will send an GARP to force arp caches to clean up
+// at pods and reference to the arp proxy gw mac
+func notifyARPProxyMACForIPs(ips []*net.IPNet, dstMAC net.HardwareAddr) error {
+	mgmtIntf, err := net.InterfaceByName(types.K8sMgmtIntfName)
+	if err != nil {
+		return err
+	}
+
+	c, err := arp.Dial(mgmtIntf)
+	if err != nil {
+		return fmt.Errorf("failed dialing logical switch mgmt interface: %w", err)
+	}
+	defer c.Close()
+	arpProxyHardwareAddr, err := net.ParseMAC(ARPProxyMAC)
+	if err != nil {
+		return err
+	}
+	for _, ip := range ips {
+		if ip.IP.To4() != nil {
+			addr, err := netip.ParseAddr(ip.IP.String())
+			if err != nil {
+				return fmt.Errorf("failed converting net.IP to netip.Addr: %w", err)
+			}
+			p, err := arp.NewPacket(arp.OperationReply, arpProxyHardwareAddr, addr, net.HardwareAddr{0, 0, 0, 0, 0, 0}, addr)
+			if err != nil {
+				return fmt.Errorf("failed create GARP: %w", err)
+			}
+			err = c.WriteTo(p, dstMAC)
+			if err != nil {
+				return fmt.Errorf("failed sending GARP: %w", err)
+			}
+		}
+	}
+	return nil
 }
