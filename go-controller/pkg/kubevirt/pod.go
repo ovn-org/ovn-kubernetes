@@ -148,31 +148,6 @@ func AllVMPodsAreCompleted(client *factory.WatchFactory, pod *corev1.Pod) (bool,
 	return true, nil
 }
 
-// isLiveMigrationInProgress return true if a live migration is still progressing
-func isLiveMigrationInProgress(client *factory.WatchFactory, pod *corev1.Pod) (bool, error) {
-	if !IsPodLiveMigratable(pod) {
-		return false, nil
-	}
-
-	vmPods, err := findVMRelatedPods(client, pod)
-	if err != nil {
-		return false, fmt.Errorf("failed finding related pods for pod %s/%s when checking if they are completed: %v", pod.Namespace, pod.Name, err)
-	}
-
-	vmPods = append(vmPods, pod)
-
-	numberOfRunningPods := 0
-	for _, vmPod := range vmPods {
-		if util.PodRunning(vmPod) {
-			numberOfRunningPods++
-		}
-		if numberOfRunningPods > 1 {
-			return true, nil
-		}
-	}
-	return false, nil
-}
-
 // IsMigratedSourcePodStale return false if the pod is live migratable,
 // not completed and is the running VM pod with newest creation timestamp
 func IsMigratedSourcePodStale(client *factory.WatchFactory, pod *corev1.Pod) (bool, error) {

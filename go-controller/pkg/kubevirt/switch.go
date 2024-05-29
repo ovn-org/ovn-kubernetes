@@ -7,9 +7,15 @@ import (
 	"strings"
 
 	"github.com/mdlayher/arp"
+	corev1 "k8s.io/api/core/v1"
 
+	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
 const (
@@ -95,6 +101,32 @@ func notifyARPProxyMACForIPs(ips []*net.IPNet, dstMAC net.HardwareAddr) error {
 			if err != nil {
 				return fmt.Errorf("failed sending GARP: %w", err)
 			}
+		}
+	}
+	return nil
+}
+
+func deleteStaleLogicalSwitchPorts(watchFactory *factory.WatchFactory, nbClient libovsdbclient.Client, pod *corev1.Pod) error {
+	vmPods, err := findVMRelatedPods(watchFactory, pod)
+	if err != nil {
+		return err
+	}
+	for _, vmPod := range vmPods {
+		if util.PodCompleted(vmPod) {
+			continue
+		}
+		lsp := &nbdb.LogicalSwitchPort{
+			Name: util.GetLogicalPortName(pod.Namespace, pod.Name),
+		}
+		lsp, err := libovsdbops.GetLogicalSwitchPort(nbClient, lsp)
+		if err != nil {
+			continue
+		}
+		logicalSwitch := &nbdb.LogicalSwitch{
+			Name: vmPod.Spec.NodeName,
+		}
+		if err := libovsdbops.DeleteLogicalSwitchPorts(nbClient, logicalSwitch, lsp); err != nil {
+			return err
 		}
 	}
 	return nil

@@ -2,12 +2,9 @@ package kubevirt
 
 import (
 	"fmt"
-	"net"
 	"os"
-	"time"
 
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
 	kubevirtv1 "kubevirt.io/api/core/v1"
@@ -264,7 +261,10 @@ func EnsureRemoteZonePodAddressesToNodeRoute(controllerName string, watchFactory
 			return err
 		}
 		if !vmRunningAtNodeOwningSubnet && currentNodeOwnsSubnet {
-			if err := notifyARPProxyMACUntilLiveMigrationFinished(watchFactory, pod, podAnnotation.IPs); err != nil {
+			if err := deleteStaleLogicalSwitchPorts(watchFactory, nbClient, pod); err != nil {
+				return err
+			}
+			if err := notifyARPProxyMACForIPs(podAnnotation.IPs, broadcastMAC); err != nil {
 				return err
 			}
 		}
@@ -294,25 +294,4 @@ func virtualMachineReady(watchFactory *factory.WatchFactory, pod *corev1.Pod) (b
 
 	// VM is ready to receive traffic
 	return targetNode == pod.Spec.NodeName || targetReadyTimestamp != "", nil
-}
-
-func notifyARPProxyMACUntilLiveMigrationFinished(watchFactory *factory.WatchFactory, pod *corev1.Pod, podIPs []*net.IPNet) error {
-	for {
-		klog.Infof("Sending GARP after live migration for %s/%s",
-			pod.Namespace,
-			pod.Name,
-		)
-		if err := notifyARPProxyMACForIPs(podIPs, broadcastMAC); err != nil {
-			return fmt.Errorf("failed sending GARP after kubevirt live migration: %w", err)
-		}
-		liveMigrationInProgress, err := isLiveMigrationInProgress(watchFactory, pod)
-		if err != nil {
-			return fmt.Errorf("failed checking if live migration is still in progress: %w", err)
-		}
-		if !liveMigrationInProgress {
-			break
-		}
-		time.Sleep(time.Second)
-	}
-	return nil
 }
