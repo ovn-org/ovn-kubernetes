@@ -268,7 +268,7 @@ var _ = Describe("Kubevirt Virtual Machines", func() {
 			return fr.ClientSet.NetworkingV1().NetworkPolicies(namespace).Create(context.TODO(), policy, metav1.CreateOptions{})
 		}
 
-		checkEastWestTraffic = func(vmi *kubevirtv1.VirtualMachineInstance, podIPsByName map[string][]string, stage string) {
+		checkEastWestTrafficFromVM = func(vmi *kubevirtv1.VirtualMachineInstance, vmiAddresses []string, podIPsByName map[string][]string, stage string) {
 			GinkgoHelper()
 			for podName, podIPs := range podIPsByName {
 				for _, podIP := range podIPs {
@@ -276,6 +276,29 @@ var _ = Describe("Kubevirt Virtual Machines", func() {
 					Expect(err).ShouldNot(HaveOccurred(), func() string { return stage + ": " + podName + ": " + output })
 				}
 			}
+		}
+
+		checkEastWestTrafficFromPod = func(vmi *kubevirtv1.VirtualMachineInstance, vmiAddresses []string, podIPsByName map[string][]string, stage string) {
+			GinkgoHelper()
+			for podName, _ := range podIPsByName {
+				for _, vmiAddress := range vmiAddresses {
+					expectedOutput := "test"
+					timeout := 5 * time.Second
+					if ip := net.ParseIP(vmiAddress); ip != nil && ip.IsLinkLocalUnicast() {
+						continue
+					}
+					netcatCmd := fmt.Sprintf("echo -n %s | nc -N -w %d %s %d", expectedOutput, timeout/time.Second, vmiAddress, tcpServerPort)
+					obtainedOutput, err := ForPod(namespace, podName, "agnhost-container").Exec("bash", "-ec", netcatCmd)
+					Expect(err).ToNot(HaveOccurred(), func() string { return stage + ": " + podName + ": " + obtainedOutput })
+					Expect(obtainedOutput).To(Equal(expectedOutput), func() string { return stage + ": " + podName + ": " + obtainedOutput })
+				}
+			}
+		}
+
+		checkEastWestTraffic = func(vmi *kubevirtv1.VirtualMachineInstance, vmiAddresses []string, podIPsByName map[string][]string, stage string) {
+			GinkgoHelper()
+			checkEastWestTrafficFromPod(vmi, vmiAddresses, podIPsByName, stage)
+			checkEastWestTrafficFromVM(vmi, vmiAddresses, podIPsByName, stage)
 		}
 
 		httpServerTestPodsDefaultNetworkIPs = func() map[string][]string {
@@ -314,7 +337,7 @@ var _ = Describe("Kubevirt Virtual Machines", func() {
 			return ips
 		}
 
-		checkConnectivity = func(vmName string, endpoints []*net.TCPConn, stage string) {
+		checkConnectivity = func(vmName string, vmiAddresses []string, endpoints []*net.TCPConn, stage string) {
 			GinkgoHelper()
 			by(vmName, "Check connectivity "+stage)
 			vmi := &kubevirtv1.VirtualMachineInstance{
@@ -329,16 +352,16 @@ var _ = Describe("Kubevirt Virtual Machines", func() {
 			Expect(sendEchos(endpoints)).To(Succeed(), step)
 
 			stage = by(vmName, stage+": Check e/w tcp traffic")
-			checkEastWestTraffic(vmi, httpServerTestPodsDefaultNetworkIPs(), stage)
+			checkEastWestTraffic(vmi, vmiAddresses, httpServerTestPodsDefaultNetworkIPs(), stage)
 
 			step = by(vmName, stage+": Check n/s tcp traffic")
 			output, err := kubevirt.RunCommand(vmi, "curl -kL https://kubernetes.default.svc.cluster.local", 5*time.Second)
 			Expect(err).ToNot(HaveOccurred(), func() string { return step + ": " + output })
 		}
 
-		checkConnectivityAndNetworkPolicies = func(vmName string, endpoints []*net.TCPConn, stage string) {
+		checkConnectivityAndNetworkPolicies = func(vmName string, vmiAddresses []string, endpoints []*net.TCPConn, stage string) {
 			GinkgoHelper()
-			checkConnectivity(vmName, endpoints, stage)
+			checkConnectivity(vmName, vmiAddresses, endpoints, stage)
 			step := by(vmName, stage+": Create deny all network policy")
 			policy, err := createDenyAllPolicy(vmName)
 			Expect(err).ToNot(HaveOccurred(), step)
@@ -503,8 +526,8 @@ var _ = Describe("Kubevirt Virtual Machines", func() {
 			return nil
 		}
 
-		addressByFamily = func(familyFn func(iface kubevirt.Interface) []kubevirt.Address, vmi *kubevirtv1.VirtualMachineInstance) func() ([]kubevirt.Address, error) {
-			return func() ([]kubevirt.Address, error) {
+		addressByFamily = func(familyFn func(iface kubevirt.Interface) []kubevirt.Address, vmi *kubevirtv1.VirtualMachineInstance) func() ([]string, error) {
+			return func() ([]string, error) {
 				networkState, err := kubevirt.RetrieveNetworkState(vmi)
 				if err != nil {
 					return nil, err
@@ -513,7 +536,11 @@ var _ = Describe("Kubevirt Virtual Machines", func() {
 				if iface == nil {
 					return nil, fmt.Errorf("missing non loopback interface")
 				}
-				return familyFn(*iface), nil
+				addresses := []string{}
+				for _, address := range familyFn(*iface) {
+					addresses = append(addresses, address.Ip)
+				}
+				return addresses, nil
 			}
 
 		}
@@ -583,7 +610,7 @@ var _ = Describe("Kubevirt Virtual Machines", func() {
 				)))
 		}
 
-		waitVirtualMachineAddresses = func(vmi *kubevirtv1.VirtualMachineInstance) []kubevirt.Address {
+		waitVirtualMachineAddresses = func(vmi *kubevirtv1.VirtualMachineInstance) []string {
 			GinkgoHelper()
 			step := by(vmi.Name, "Wait for virtual machine to receive IPv4 address from DHCP")
 			Eventually(addressByFamily(ipv4, vmi)).
@@ -798,10 +825,10 @@ passwd:
 			}
 			return vms, nil
 		}
-		liveMigrateAndCheck = func(vmName string, migrationMode kubevirtv1.MigrationMode, endpoints []*net.TCPConn, step string) {
+		liveMigrateAndCheck = func(vmName string, migrationMode kubevirtv1.MigrationMode, vmiAddresses []string, endpoints []*net.TCPConn, step string) {
 			liveMigrateVirtualMachine(vmName)
 			checkLiveMigrationSucceeded(vmName, migrationMode)
-			checkConnectivityAndNetworkPolicies(vmName, endpoints, step)
+			checkConnectivityAndNetworkPolicies(vmName, vmiAddresses, endpoints, step)
 		}
 
 		runLiveMigrationTest = func(td liveMigrationTestData, vm *kubevirtv1.VirtualMachine) {
@@ -819,7 +846,7 @@ passwd:
 			Expect(err).ToNot(HaveOccurred())
 			Expect(kubevirt.LoginToFedora(vmi, "core", "fedora")).To(Succeed(), step)
 
-			waitVirtualMachineAddresses(vmi)
+			vmiAddresses := waitVirtualMachineAddresses(vmi)
 
 			step = by(vm.Name, "Expose tcpServer as a service")
 			svc, err := fr.ClientSet.CoreV1().Services(namespace).Create(context.TODO(), composeService("tcpserver", vm.Name, tcpServerPort), metav1.CreateOptions{})
@@ -836,23 +863,23 @@ passwd:
 			endpoints, err := dialServiceNodePort(svc)
 			Expect(err).ToNot(HaveOccurred(), step)
 
-			checkConnectivityAndNetworkPolicies(vm.Name, endpoints, "before live migration")
+			checkConnectivityAndNetworkPolicies(vm.Name, vmiAddresses, endpoints, "before live migration")
 			// Do just one migration that will fail
 			if td.shouldExpectFailure {
 				by(vm.Name, "Live migrate virtual machine to check failed migration")
 				liveMigrateVirtualMachine(vm.Name)
 				checkLiveMigrationFailed(vm.Name)
-				checkConnectivityAndNetworkPolicies(vm.Name, endpoints, "after live migrate to check failed migration")
+				checkConnectivityAndNetworkPolicies(vm.Name, vmiAddresses, endpoints, "after live migrate to check failed migration")
 			} else {
 				originalNode := vmi.Status.NodeName
 				by(vm.Name, "Live migrate for the first time")
-				liveMigrateAndCheck(vm.Name, td.mode, endpoints, "after live migrate for the first time")
+				liveMigrateAndCheck(vm.Name, td.mode, vmiAddresses, endpoints, "after live migrate for the first time")
 
 				by(vm.Name, "Live migrate for the second time to a node not owning the subnet")
 				// Remove the node selector label from original node to force
 				// live migration to a different one.
 				Expect(unlabelNode(originalNode, namespace)).To(Succeed())
-				liveMigrateAndCheck(vm.Name, td.mode, endpoints, "after live migration for the second time to node not owning subnet")
+				liveMigrateAndCheck(vm.Name, td.mode, vmiAddresses, endpoints, "after live migration for the second time to node not owning subnet")
 
 				by(vm.Name, "Live migrate for the third time to the node owning the subnet")
 				// Patch back the original node with the label and remove it
@@ -863,7 +890,7 @@ passwd:
 						Expect(unlabelNode(selectedNode.Name, namespace)).To(Succeed())
 					}
 				}
-				liveMigrateAndCheck(vm.Name, td.mode, endpoints, "after live migration to node owning the subnet")
+				liveMigrateAndCheck(vm.Name, td.mode, vmiAddresses, endpoints, "after live migration to node owning the subnet")
 			}
 
 		}
@@ -1235,18 +1262,19 @@ passwd:
 			// going to have an ipv6 address at the interface
 			testPodsIPs = filterOutIPv6(testPodsIPs)
 
-			checkEastWestTraffic(vmi, testPodsIPs, step)
+			obtainedAddresses := virtualMachineAddressesFromStatus(vmi, 2 /*two addresses, dual stack*/)
+			Expect(obtainedAddresses).To(Equal(expectedAddreses))
+
+			checkEastWestTrafficFromVM(vmi, obtainedAddresses, testPodsIPs, step)
 
 			by(vmi.Name, fmt.Sprintf("Running %s for %s", td.test.description, td.resource.description))
 			td.test.cmd()
 
 			step = by(vm.Name, fmt.Sprintf("Login to virtual machine after %s %s", td.resource.description, td.test.description))
 			Expect(kubevirt.LoginToFedora(vmi, "core", "fedora")).To(Succeed(), step)
-			obtainedAddresses := virtualMachineAddressesFromStatus(vmi, 2 /*two addresses, dual stack*/)
-			Expect(obtainedAddresses).To(Equal(expectedAddreses))
 
 			step = by(vmi.Name, fmt.Sprintf("Check east/west traffic after %s %s", td.resource.description, td.test.description))
-			checkEastWestTraffic(vmi, testPodsIPs, step)
+			checkEastWestTrafficFromVM(vmi, obtainedAddresses, testPodsIPs, step)
 		},
 			func(td testData) string {
 				return fmt.Sprintf("after %s of %s with %s", td.test.description, td.resource.description, td.topology)
