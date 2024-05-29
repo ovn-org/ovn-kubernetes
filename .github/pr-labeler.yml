@@ -1,0 +1,64 @@
+name: "Pull Request Labeler"
+on:
+- pull_request_target
+
+jobs:
+  labeler:
+    permissions:
+      contents: read
+      pull-requests: write
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/labeler@v5
+      with:
+        # Add 'Documentation' label to any change to .md files within the entire repository 
+        kind/documentation:
+        - changed-files:
+          - any-glob-to-any-file: '**/*.md'
+        feature/admin-network-policy:
+        - changed-files:
+          - any-glob-to-any-file:
+            - 'go-controller/pkg/ovn/controller/admin_network_policy/*'
+            - 'test/conformance/*'
+        feature/egress-service:
+        - changed-files:
+          - any-glob-to-any-file:
+            - 'go-controller/pkg/ovn/controller/egressservice/*'
+            - 'test/e2e/egress_services.go'
+            - 'go-controller/pkg/clustermanager/egressservice/*'
+            - 'go-controller/pkg/clustermanager/egressservice_cluster_test.go'
+        feature/services&endpoints:
+        - changed-files:
+          - any-glob-to-any-file:
+            - 'go-controller/pkg/ovn/controller/services/*'
+            - 'go-controller/pkg/ovn/controller/unidling/*'
+            - 'test/e2e/service.go'
+        feature/egress-gateway:
+        - changed-files:
+          - any-glob-to-any-file:
+            - 'go-controller/pkg/ovn/controller/apbroute/*'
+            - 'test/e2e/external_gateways.go'
+            - 'go-controller/pkg/ovn/egressgw.go'
+            - 'go-controller/pkg/ovn/egressgw_test.go'
+        feature/egress-qos:
+        - changed-files:
+          - any-glob-to-any-file:
+            - 'go-controller/pkg/ovn/egressqos.go'
+            - 'go-controller/pkg/ovn/egressqos_test.go'
+            - 'test/e2e/egressqos.go'
+        feature/egress-ip:
+        - changed-files:
+          - any-glob-to-any-file:
+            - 'go-controller/pkg/ovn/egressip.go'
+            - 'go-controller/pkg/ovn/egressip_test.go'
+            - 'test/e2e/egressip.go'
+            - 'go-controller/pkg/clustermanager/egressip_controller.go'
+            - 'go-controller/pkg/clustermanager/egressip_controller_test.go'
+            - 'go-controller/pkg/clustermanager/egressip_event_handler.go'
+        # Add 'area/e2e-testing' label to any changes within 'e2e' folder or any subfolders
+        area/e2e-testing:
+        - changed-files:
+          - any-glob-to-any-file: test/e2e/**
+        area/unit-testing:
+        - changed-files:
+          - any-glob-to-any-file: '**/*_test.go'
