@@ -15,6 +15,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -84,7 +85,7 @@ func (c *Controller) syncAdminNetworkPolicy(key string) error {
 	if err != nil {
 		// we can ignore the error if status update doesn't succeed; best effort
 		_ = c.updateANPStatusToNotReady(anp.Name, err.Error())
-		if !errors.Is(err, ErrorANPPriorityUnsupported) && !errors.Is(err, ErrorANPWithDuplicatePriority) {
+		if !errors.Is(err, ErrorANPPriorityUnsupported) {
 			// we don't want to retry for these specific errors since they
 			// need manual intervention from users to update their CRDs
 			return nil
@@ -111,12 +112,7 @@ func (c *Controller) ensureAdminNetworkPolicy(anp *anpapi.AdminNetworkPolicy) er
 	if err != nil {
 		return err
 	}
-	// At a given time only 1 ANP can exist at a given priority. If two ANPs exist with same priority
-	// the behaviour is undefined upstream but in OVNK we do not allow that
-	if existingName, loaded := c.anpPriorityMap[desiredANPState.anpPriority]; loaded && existingName != anp.Name {
-		return fmt.Errorf("error attempting to add ANP %s with priority %d when another ANP %s, "+
-			"%w", anp.Name, anp.Spec.Priority, existingName, ErrorANPWithDuplicatePriority)
-	}
+
 	// fetch the anpState from our cache if it exists
 	currentANPState, loaded := c.anpCache[anp.Name]
 	// Based on the latest kapi ANP, namespace and pod objects:
@@ -145,8 +141,22 @@ func (c *Controller) ensureAdminNetworkPolicy(anp *anpapi.AdminNetworkPolicy) er
 		if err != nil {
 			return fmt.Errorf("failed to create ANP %s: %v", desiredANPState.name, err)
 		}
-		// Let us update the anpPriorityMap cache by adding this new priority to it
-		c.anpPriorityMap[desiredANPState.anpPriority] = anp.Name
+		// If an ANP is created at the same priority as another one, let us trigger an event before
+		// applying it warning the user to verify there are no overlapping rules to rule out undefined
+		// behaviour. Do this once during creation.
+		if existingName, loaded := c.anpPriorityMap[desiredANPState.anpPriority]; loaded && existingName != anp.Name {
+			klog.Warningf("Warning against attempting to add ANP %s with priority %d when at least one other ANP %s, "+
+				"exists with the same priority", anp.Name, anp.Spec.Priority, existingName)
+			c.eventRecorder.Eventf(&v1.ObjectReference{
+				Kind: "AdminNetworkPolicy",
+				Name: anp.Name,
+			}, v1.EventTypeWarning, ANPWithDuplicatePriorityEvent, "This ANP %s has a conflicting priority with ANP %s: %s;"+
+				"Please verify your rules are non-lapping between all policies at same priority to avoid undefined behavior", anp.Name, existingName)
+		} else {
+			// Let us update the anpPriorityMap cache by adding this new priority to it
+			// only if there wasn't an already existing entry at that priority - in which case we don't need to update the cache
+			c.anpPriorityMap[desiredANPState.anpPriority] = anp.Name
+		}
 		// since transact was successful we can finally populate the cache
 		c.anpCache[anp.Name] = desiredANPState
 		metrics.IncrementANPCount()
@@ -159,7 +169,7 @@ func (c *Controller) ensureAdminNetworkPolicy(anp *anpapi.AdminNetworkPolicy) er
 	if err != nil {
 		return fmt.Errorf("failed to update ANP %s: %v", desiredANPState.name, err)
 	}
-	// We also need to update c.anpPriorityMap cache
+	// We also need to update c.anpPriorityMap cache if this ANP was stored in it
 	if hasPriorityChanged {
 		klog.V(3).Infof("Deleting and re-adding correct priority (old %d, new %d) from anpPriorityMap for %s",
 			currentANPState.anpPriority, desiredANPState.anpPriority, desiredANPState.name)
@@ -167,7 +177,19 @@ func (c *Controller) ensureAdminNetworkPolicy(anp *anpapi.AdminNetworkPolicy) er
 			delete(c.anpPriorityMap, currentANPState.anpPriority)
 		}
 		// Let us update the anpPriorityMap cache by adding this new priority to it
-		c.anpPriorityMap[desiredANPState.anpPriority] = anp.Name
+		if existingName, loaded := c.anpPriorityMap[desiredANPState.anpPriority]; loaded && existingName != desiredANPState.name {
+			klog.Warningf("Warning against attempting to update ANP %s with priority %d when at least one other ANP %s, "+
+				"exists with the same priority", desiredANPState.name, anp.Spec.Priority, existingName)
+			c.eventRecorder.Eventf(&v1.ObjectReference{
+				Kind: "AdminNetworkPolicy",
+				Name: anp.Name,
+			}, v1.EventTypeWarning, ANPWithDuplicatePriorityEvent, "This ANP %s has a conflicting priority with ANP %s: %s;"+
+				"Please verify your rules are non-lapping between all policies at same priority to avoid undefined behavior", anp.Name, existingName)
+		} else {
+			// Let us update the anpPriorityMap cache by adding this new priority to it
+			// only if there wasn't an already existing entry at that priority - in which case we don't need to update the cache
+			c.anpPriorityMap[desiredANPState.anpPriority] = anp.Name
+		}
 	}
 	// since transact was successful we can finally replace the currentANPState in the cache with the latest desired one
 	c.anpCache[anp.Name] = desiredANPState
@@ -508,7 +530,9 @@ func (c *Controller) clearAdminNetworkPolicy(anpName string) error {
 		return fmt.Errorf("failed to delete address-sets for ANP %s/%d: %w", anp.name, anp.anpPriority, err)
 	}
 	// we can delete the object from the cache now.
-	delete(c.anpPriorityMap, anp.anpPriority)
+	if existingName, loaded := c.anpPriorityMap[anp.anpPriority]; loaded && existingName == anpName {
+		delete(c.anpPriorityMap, anp.anpPriority)
+	}
 	delete(c.anpCache, anpName)
 	metrics.DecrementANPCount()
 
