@@ -8,6 +8,7 @@ import (
 	"time"
 
 	. "github.com/onsi/ginkgo"
+	"github.com/onsi/ginkgo/extensions/table"
 	. "github.com/onsi/gomega"
 
 	"github.com/urfave/cli/v2"
@@ -28,20 +29,23 @@ import (
 )
 
 type secondaryNetInfo struct {
-	netName  string
-	nadName  string
-	podIP    string
-	podMAC   string
-	topology string
+	netName              string
+	nadName              string
+	podIP                string
+	podMAC               string
+	topology             string
+	disablePortSecurity  bool
+	allowUnkownL2Traffic bool
 }
 
+const (
+	dummyMACAddr         = "02:03:04:05:06:07"
+	nadName              = "blue-net"
+	ns                   = "namespace1"
+	secondaryNetworkName = "isolatednet"
+)
+
 var _ = Describe("OVN Multi-Homed pod operations", func() {
-	const (
-		nadName              = "blue-net"
-		nodeName             = "node1"
-		ns                   = "namespace1"
-		secondaryNetworkName = "isolatednet"
-	)
 	var (
 		app       *cli.App
 		fakeOvn   *FakeOVN
@@ -69,108 +73,98 @@ var _ = Describe("OVN Multi-Homed pod operations", func() {
 		fakeOvn.shutdown()
 	})
 
-	It("reconciles a new pod", func() {
-		app.Action = func(ctx *cli.Context) error {
-			namespaceT := *newNamespace(ns)
-			isolatedNetInfo := secondaryNetInfo{
-				netName:  secondaryNetworkName,
-				nadName:  namespacedName(ns, nadName),
-				podMAC:   "02:03:04:05:06:07",
-				podIP:    "192.168.200.10",
-				topology: ovntypes.Layer2Topology,
+	table.DescribeTable(
+		"reconciles a new",
+		func(netInfo secondaryNetInfo, expectationOptions ...option) {
+			podInfo := dummyTestPod(ns, netInfo)
+			app.Action = func(ctx *cli.Context) error {
+				nad, err := newNetworkAttachmentDefinition(
+					ns,
+					nadName,
+					*netInfo.netconf(),
+				)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(netInfo.setupOVNDependencies(&initialDB)).To(Succeed())
+
+				fakeOvn.startWithDBSetup(
+					initialDB,
+					&v1.NamespaceList{
+						Items: []v1.Namespace{
+							*newNamespace(ns),
+						},
+					},
+					&v1.NodeList{
+						Items: []v1.Node{
+							*newNode(nodeName, "192.168.126.202/24"),
+						},
+					},
+					&v1.PodList{
+						Items: []v1.Pod{
+							*newMultiHomedPod(podInfo.namespace, podInfo.podName, podInfo.nodeName, podInfo.podIP, netInfo),
+						},
+					},
+					&nadapi.NetworkAttachmentDefinitionList{
+						Items: []nadapi.NetworkAttachmentDefinition{*nad},
+					},
+				)
+				podInfo.populateLogicalSwitchCache(fakeOvn)
+
+				// pod exists, networks annotations don't
+				pod, err := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(podInfo.namespace).Get(context.TODO(), podInfo.podName, metav1.GetOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				_, ok := pod.Annotations[util.OvnPodAnnotationName]
+				Expect(ok).To(BeFalse())
+
+				Expect(fakeOvn.controller.WatchNamespaces()).NotTo(HaveOccurred())
+				Expect(fakeOvn.controller.WatchPods()).NotTo(HaveOccurred())
+				secondaryNetController, ok := fakeOvn.secondaryControllers[secondaryNetworkName]
+				Expect(ok).To(BeTrue())
+
+				podInfo.populateSecondaryNetworkLogicalSwitchCache(fakeOvn, secondaryNetController)
+				Expect(secondaryNetController.bnc.WatchNodes()).To(Succeed())
+				Expect(secondaryNetController.bnc.WatchPods()).To(Succeed())
+
+				// check that after start networks annotations and nbdb will be updated
+				Eventually(func() string {
+					return getPodAnnotations(fakeOvn.fakeClient.KubeClient, podInfo.namespace, podInfo.podName)
+				}).WithTimeout(2 * time.Second).Should(MatchJSON(podInfo.getAnnotationsJson()))
+
+				Eventually(fakeOvn.nbClient).Should(
+					libovsdbtest.HaveData(
+						append(
+							getExpectedDataPodsAndSwitches([]testPod{podInfo}, []string{nodeName}),
+							newSecondaryNetworkExpectationMachine(
+								fakeOvn,
+								[]testPod{podInfo},
+								expectationOptions...,
+							).expectedLogicalSwitchesAndPorts()...)))
+
+				return nil
 			}
-			t := newMultiHomedTestPod(
-				nodeName,
-				"10.128.1.0/24",
-				"10.128.1.2",
-				"10.128.1.1",
-				"myPod",
-				"10.128.1.3",
-				"0a:58:0a:80:01:03",
-				namespaceT.Name,
-				isolatedNetInfo,
-			)
 
-			netConf := newNetconf(
-				isolatedNetInfo.netName,
-				isolatedNetInfo.topology,
-				isolatedNetInfo.nadName,
-			)
-			nad, err := newNetworkAttachmentDefinition(
-				ns,
-				nadName,
-				netConf,
-			)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(isolatedNetInfo.setupOVNDependencies(&initialDB, netConf)).To(Succeed())
-
-			fakeOvn.startWithDBSetup(
-				initialDB,
-				&v1.NamespaceList{
-					Items: []v1.Namespace{
-						namespaceT,
-					},
-				},
-				&v1.NodeList{
-					Items: []v1.Node{
-						*newNode(nodeName, "192.168.126.202/24"),
-					},
-				},
-				&v1.PodList{
-					Items: []v1.Pod{
-						*newMultiHomedPod(t.namespace, t.podName, t.nodeName, t.podIP, isolatedNetInfo),
-					},
-				},
-				&nadapi.NetworkAttachmentDefinitionList{
-					Items: []nadapi.NetworkAttachmentDefinition{*nad},
-				},
-			)
-			t.populateLogicalSwitchCache(fakeOvn)
-
-			// pod exists, networks annotations don't
-			pod, err := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Get(context.TODO(), t.podName, metav1.GetOptions{})
-			Expect(err).NotTo(HaveOccurred())
-			_, ok := pod.Annotations[util.OvnPodAnnotationName]
-			Expect(ok).To(BeFalse())
-
-			Expect(fakeOvn.controller.WatchNamespaces()).NotTo(HaveOccurred())
-			Expect(fakeOvn.controller.WatchPods()).NotTo(HaveOccurred())
-			secondaryNetController, ok := fakeOvn.secondaryControllers[secondaryNetworkName]
-			Expect(ok).To(BeTrue())
-
-			t.populateSecondaryNetworkLogicalSwitchCache(fakeOvn, secondaryNetController)
-			Expect(secondaryNetController.bnc.WatchNodes()).To(Succeed())
-			Expect(secondaryNetController.bnc.WatchPods()).To(Succeed())
-
-			// check that after start networks annotations and nbdb will be updated
-			Eventually(func() string {
-				return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName)
-			}).WithTimeout(2 * time.Second).Should(MatchJSON(t.getAnnotationsJson()))
-
-			Eventually(fakeOvn.nbClient).Should(
-				libovsdbtest.HaveData(
-					append(
-						getExpectedDataPodsAndSwitches([]testPod{t}, []string{nodeName}),
-						getExpectedDataPodsAndSwitchesForSecondaryNetwork(fakeOvn, []testPod{t})...)))
-			return nil
-		}
-
-		Expect(app.Run([]string{app.Name})).To(Succeed())
-	})
-})
-
-func newNetconf(networkName, topology, nadName string, subnets ...string) ovncnitypes.NetConf {
-	const plugin = "ovn-k8s-cni-overlay"
-	return ovncnitypes.NetConf{
-		NetConf: cnitypes.NetConf{
-			Name: networkName,
-			Type: plugin,
+			Expect(app.Run([]string{app.Name})).To(Succeed())
 		},
-		Topology: topology,
-		NADName:  nadName,
-		Subnets:  strings.Join(subnets, ","),
-	}
-}
+		table.Entry("pod with port security and not allowing unknown MAC addresses",
+			dummySecondaryNetInfo(),
+		),
+
+		table.Entry("pod without port security, and not allowing unknown MAC addresses",
+			dummySecondaryNetInfoWithoutPortSec(),
+			withoutPortSecurity(),
+		),
+
+		table.Entry("pod with port security, and allowing unknown addresses",
+			dummySecondaryNetInfoAllowingL2Traffic(),
+			allowSendingToUnknownL2Addrs(),
+		),
+
+		table.Entry("pod without port security and allowing unknown addresses",
+			dummySecondaryNetInfoWithoutPortSecAndAllowingL2Traffic(),
+			withoutPortSecurity(),
+			allowSendingToUnknownL2Addrs(),
+		),
+	)
+})
 
 func newMultiHomedTestPod(
 	nodeName, nodeSubnet, nodeMgtIP, nodeGWIP, podName, podIPs, podMAC, namespace string,
@@ -197,7 +191,7 @@ func newMultiHomedPod(namespace, name, node, podIP string, multiHomingConfigs ..
 	var secondaryNetworks []nadapi.NetworkSelectionElement
 	for _, multiHomingConf := range multiHomingConfigs {
 		nadNamePair := strings.Split(multiHomingConf.nadName, "/")
-		ns := namespace
+		ns := pod.Namespace
 		attachmentName := multiHomingConf.nadName
 		if len(nadNamePair) > 1 {
 			ns = nadNamePair[0]
@@ -220,8 +214,8 @@ func newMultiHomedPod(namespace, name, node, podIP string, multiHomingConfigs ..
 
 func namespacedName(ns, name string) string { return fmt.Sprintf("%s/%s", ns, name) }
 
-func (sni *secondaryNetInfo) setupOVNDependencies(dbData *libovsdbtest.TestSetup, netConf ovncnitypes.NetConf) error {
-	netInfo, err := util.NewNetInfo(&netConf)
+func (sni *secondaryNetInfo) setupOVNDependencies(dbData *libovsdbtest.TestSetup) error {
+	netInfo, err := util.NewNetInfo(sni.netconf())
 	if err != nil {
 		return err
 	}
@@ -243,4 +237,62 @@ func (sni *secondaryNetInfo) setupOVNDependencies(dbData *libovsdbtest.TestSetup
 		return fmt.Errorf("missing topology in the network configuration: %v", sni)
 	}
 	return nil
+}
+
+func (sni *secondaryNetInfo) netconf(subnets ...string) *ovncnitypes.NetConf {
+	const plugin = "ovn-k8s-cni-overlay"
+	return &ovncnitypes.NetConf{
+		NetConf: cnitypes.NetConf{
+			Name: sni.netName,
+			Type: plugin,
+		},
+		Topology:            sni.topology,
+		NADName:             sni.nadName,
+		Subnets:             strings.Join(subnets, ","),
+		DisablePortSecurity: sni.disablePortSecurity,
+		EnableL2Unknown:     sni.allowUnkownL2Traffic,
+	}
+}
+
+func dummyTestPod(nsName string, info ...secondaryNetInfo) testPod {
+	return newMultiHomedTestPod(
+		nodeName,
+		"10.128.1.0/24",
+		"10.128.1.2",
+		"10.128.1.1",
+		"myPod",
+		"10.128.1.3",
+		"0a:58:0a:80:01:03",
+		nsName,
+		info...,
+	)
+}
+
+func dummySecondaryNetInfo() secondaryNetInfo {
+	return secondaryNetInfo{
+		netName:  secondaryNetworkName,
+		nadName:  namespacedName(ns, nadName),
+		podMAC:   dummyMACAddr,
+		podIP:    "192.168.200.10",
+		topology: ovntypes.Layer2Topology,
+	}
+}
+
+func dummySecondaryNetInfoWithoutPortSec() secondaryNetInfo {
+	secondaryNet := dummySecondaryNetInfo()
+	secondaryNet.disablePortSecurity = true
+	return secondaryNet
+}
+
+func dummySecondaryNetInfoAllowingL2Traffic() secondaryNetInfo {
+	secondaryNet := dummySecondaryNetInfo()
+	secondaryNet.allowUnkownL2Traffic = true
+	return secondaryNet
+}
+
+func dummySecondaryNetInfoWithoutPortSecAndAllowingL2Traffic() secondaryNetInfo {
+	secondaryNet := dummySecondaryNetInfo()
+	secondaryNet.disablePortSecurity = true
+	secondaryNet.allowUnkownL2Traffic = true
+	return secondaryNet
 }
