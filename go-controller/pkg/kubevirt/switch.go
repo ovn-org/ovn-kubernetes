@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"github.com/mdlayher/arp"
+	"github.com/mdlayher/ndp"
+
 	corev1 "k8s.io/api/core/v1"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
@@ -100,6 +102,56 @@ func notifyARPProxyMACForIPs(ips []*net.IPNet, dstMAC net.HardwareAddr) error {
 			err = c.WriteTo(p, dstMAC)
 			if err != nil {
 				return fmt.Errorf("failed sending GARP: %w", err)
+			}
+		}
+	}
+	return nil
+}
+
+// notifyARPProxyMACForIP will send an GARP to force arp caches to clean up
+// at pods and reference to the arp proxy gw mac
+func notifyUnsolicitedNeighborAdvertisementForIPs(targetIPs []*net.IPNet, dstIPs []*net.IPNet) error {
+	mgmtIntf, err := net.InterfaceByName(types.K8sMgmtIntfName)
+	if err != nil {
+		return err
+	}
+
+	c, _, err := ndp.Listen(mgmtIntf, ndp.Unspecified)
+	if err != nil {
+		return fmt.Errorf("failed ndp listening at logical switch mgmt interface: %w", err)
+	}
+	defer c.Close()
+	arpProxyHardwareAddr, err := net.ParseMAC(ARPProxyMAC)
+	if err != nil {
+		return err
+	}
+	for _, targetIP := range targetIPs {
+		if targetIP.IP.To4() == nil {
+			targetAddr, err := netip.ParseAddr(targetIP.IP.String())
+			if err != nil {
+				return fmt.Errorf("failed converting ipv6 NDP target address net.IP to netip.Addr: %w", err)
+			}
+			m := &ndp.NeighborAdvertisement{
+				Solicited:     false,
+				Override:      true,
+				TargetAddress: targetAddr,
+				Options: []ndp.Option{
+					&ndp.LinkLayerAddress{
+						Addr:      arpProxyHardwareAddr,
+						Direction: ndp.Target,
+					},
+				},
+			}
+			for _, dstIP := range dstIPs {
+				if dstIP.IP.To4() == nil {
+					dstAddr, err := netip.ParseAddr(dstIP.IP.String())
+					if err != nil {
+						return fmt.Errorf("failed converting ipv6 NDP destination address net.IP to netip.Addr: %w", err)
+					}
+					if err := c.WriteTo(m, nil, dstAddr); err != nil {
+						return fmt.Errorf("failed sending unsolicited neighbor advertisment: %w", err)
+					}
+				}
 			}
 		}
 	}

@@ -389,7 +389,7 @@ func findRunningPodsIPsFromPodSubnet(watchFactory *factory.WatchFactory, podAnno
 		}
 		sameSubnetPodAnnotation, err := util.UnmarshalPodAnnotation(podToNotify.Annotations, nadName)
 		if err != nil {
-			klog.Errorf("failed unmarshaling pod ovn for pod %s/%s annotations before GARP: %v", podToNotify.Namespace, podToNotify.Name, err)
+			klog.Errorf("Failed unmarshaling pod ovn for pod %s/%s annotations before GARP: %v", podToNotify.Namespace, podToNotify.Name, err)
 			continue
 		}
 
