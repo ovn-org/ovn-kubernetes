@@ -29,6 +29,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kubevirt"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/egressip"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/egressservice"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/linkmanager"
@@ -106,6 +107,7 @@ type DefaultNodeNetworkController struct {
 	retryEndpointSlices *retry.RetryFramework
 
 	apbExternalRouteNodeController *apbroute.ExternalGatewayNodeController
+	kubevirtNeighborsController    *kubevirt.NeighborsController
 }
 
 func newDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, stopChan chan struct{},
@@ -146,6 +148,8 @@ func NewDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo) (*D
 	if err != nil {
 		return nil, err
 	}
+
+	nc.kubevirtNeighborsController = kubevirt.NewNeighborsController(nc.watchFactory.(*factory.WatchFactory), config.IPv4Mode, config.IPv6Mode, nc.name, types.DefaultNetworkName)
 
 	nc.initRetryFrameworkForNode()
 
@@ -1119,6 +1123,10 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 
 	linkManager.Run(nc.stopChan, nc.wg)
 
+	if err := nc.kubevirtNeighborsController.Start(); err != nil {
+		return fmt.Errorf("failed starting kubevirt neighbors controller: %v", err)
+	}
+
 	nc.wg.Add(1)
 	go func() {
 		defer nc.wg.Done()
@@ -1132,6 +1140,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 // Stop gracefully stops the controller
 // deleteLogicalEntities will never be true for default network
 func (nc *DefaultNodeNetworkController) Stop() {
+	nc.kubevirtNeighborsController.Stop()
 	close(nc.stopChan)
 	nc.wg.Wait()
 }
