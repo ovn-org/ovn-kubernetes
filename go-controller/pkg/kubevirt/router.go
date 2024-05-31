@@ -159,24 +159,13 @@ func EnsureLocalZonePodAddressesToNodeRoute(watchFactory *factory.WatchFactory, 
 
 	}
 
-	// TODO: Implement neighbours update for non IC
-	if config.OVNKubernetesFeature.EnableInterconnect {
-		currentNodeOwnsSubnet, err := nodeContainsPodSubnet(watchFactory, os.Getenv("K8S_NODE"), podAnnotation, nadName)
-		if err != nil {
+	currentNodeOwnsSubnet, err := nodeContainsPodSubnet(watchFactory, os.Getenv("K8S_NODE"), podAnnotation, nadName)
+	if err != nil {
+		return err
+	}
+	if !vmRunningAtNodeOwningSubnet && currentNodeOwnsSubnet {
+		if err := deleteStaleLogicalSwitchPorts(watchFactory, nbClient, pod); err != nil {
 			return err
-		}
-		if !currentNodeOwnsSubnet && pod.Spec.NodeName == os.Getenv("K8S_NODE") {
-			ipsToNotify, err := findRunningPodsIPsFromPodSubnet(watchFactory, podAnnotation, nadName)
-			if err != nil {
-				return fmt.Errorf("failed discovering pod IPs within VM's subnet to update neighbors VM: %w", err)
-			}
-			if err := notifyARPProxyMACForIPs(ipsToNotify, podAnnotation.MAC); err != nil {
-				return fmt.Errorf("failed sending GARP to VM after live migration: %w", err)
-			}
-			// TODO: Check if there is IPv6
-			if err := notifyUnsolicitedNeighborAdvertisementForIPs(ipsToNotify, podAnnotation.IPs); err != nil {
-				return fmt.Errorf("failed sending unsolicited na to VM after live migration: %w", err)
-			}
 		}
 	}
 	return nil
@@ -258,28 +247,13 @@ func EnsureRemoteZonePodAddressesToNodeRoute(controllerName string, watchFactory
 
 	}
 
-	//TODO: Implement neighbour update for non IC
-	if config.OVNKubernetesFeature.EnableInterconnect {
-		currentNodeOwnsSubnet, err := nodeContainsPodSubnet(watchFactory, os.Getenv("K8S_NODE"), podAnnotation, nadName)
-		if err != nil {
+	currentNodeOwnsSubnet, err := nodeContainsPodSubnet(watchFactory, os.Getenv("K8S_NODE"), podAnnotation, nadName)
+	if err != nil {
+		return err
+	}
+	if !vmRunningAtNodeOwningSubnet && currentNodeOwnsSubnet {
+		if err := deleteStaleLogicalSwitchPorts(watchFactory, nbClient, pod); err != nil {
 			return err
-		}
-		if !vmRunningAtNodeOwningSubnet && currentNodeOwnsSubnet {
-			if err := deleteStaleLogicalSwitchPorts(watchFactory, nbClient, pod); err != nil {
-				return err
-			}
-			if err := notifyARPProxyMACForIPs(podAnnotation.IPs, broadcastMAC); err != nil {
-				return err
-			}
-			//TODO check if we are at ipv6
-			ipsToNotify, err := findRunningPodsIPsFromPodSubnet(watchFactory, podAnnotation, nadName)
-			if err != nil {
-				return fmt.Errorf("failed discovering pod IPs within VM's subnet to update neighbors at VM: %w", err)
-			}
-			//TODO can we use some kind of multicast so we don't have to send one NA per ip ?
-			if err := notifyUnsolicitedNeighborAdvertisementForIPs(podAnnotation.IPs, ipsToNotify); err != nil {
-				return err
-			}
 		}
 	}
 
