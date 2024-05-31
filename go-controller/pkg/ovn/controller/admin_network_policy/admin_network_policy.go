@@ -105,6 +105,11 @@ func (c *Controller) ensureAdminNetworkPolicy(anp *anpapi.AdminNetworkPolicy) er
 	// supports upto 1000. The 0 (highest) corresponds to 30,000 in OVN world and
 	// 99 (lowest) corresponds to 20,100 in OVN world
 	if anp.Spec.Priority > ovnkSupportedPriorityUpperBound {
+		c.eventRecorder.Eventf(&v1.ObjectReference{
+			Kind: "AdminNetworkPolicy",
+			Name: anp.Name,
+		}, v1.EventTypeWarning, ANPWithUnsupportedPriorityEvent, "This ANP %s has an unsupported priority %d; "+
+			"Please update the priority to a value between 0(highest priority) and 99(lowest priority)", anp.Name, anp.Spec.Priority)
 		return fmt.Errorf("error attempting to add ANP %s with priority %d because, "+
 			"%w", anp.Name, anp.Spec.Priority, ErrorANPPriorityUnsupported)
 	}

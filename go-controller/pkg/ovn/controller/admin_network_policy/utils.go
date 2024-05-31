@@ -23,6 +23,7 @@ import (
 
 var ErrorANPPriorityUnsupported = errors.New("OVNK only supports priority ranges 0-99")
 var ANPWithDuplicatePriorityEvent = "ANPWithDuplicatePriority"
+var ANPWithUnsupportedPriorityEvent = "ANPWithUnsupportedPriority"
 
 func GetANPPortGroupDbIDs(anpName string, isBanp bool, controller string) *libovsdbops.DbObjectIDs {
 	idsType := libovsdbops.PortGroupAdminNetworkPolicy

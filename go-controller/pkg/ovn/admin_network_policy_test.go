@@ -1490,35 +1490,6 @@ var _ = ginkgo.Describe("OVN ANP Operations", func() {
 			err := app.Run([]string{app.Name})
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 		})
-		ginkgo.It("should not be able to create admin network policy with priority > 99", func() {
-			app.Action = func(ctx *cli.Context) error {
-				fakeOVN.start()
-				fakeOVN.InitAndRunANPController()
-				anpSubject := newANPSubjectObject(
-					&metav1.LabelSelector{
-						MatchLabels: anpLabel,
-					},
-					nil,
-				)
-				anp := newANPObject("harry-potter", 100, anpSubject, []anpapi.AdminNetworkPolicyIngressRule{}, []anpapi.AdminNetworkPolicyEgressRule{})
-				anp.ResourceVersion = "1"
-				anp, err := fakeOVN.fakeClient.ANPClient.PolicyV1alpha1().AdminNetworkPolicies().Create(context.TODO(), anp, metav1.CreateOptions{})
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				gomega.Eventually(func() int {
-					anp, err = fakeOVN.fakeClient.ANPClient.PolicyV1alpha1().AdminNetworkPolicies().Get(context.TODO(), "harry-potter", metav1.GetOptions{})
-					gomega.Expect(err).NotTo(gomega.HaveOccurred())
-					return len(anp.Status.Conditions)
-				}).Should(gomega.Equal(1))
-				gomega.Expect(anp.Status.Conditions[0].Type).To(gomega.Equal("Ready-In-Zone-global"))
-				gomega.Expect(anp.Status.Conditions[0].Message).To(gomega.Equal("error attempting to add ANP harry-potter with " +
-					"priority 100 because, OVNK only supports priority ranges 0-99"))
-				gomega.Expect(anp.Status.Conditions[0].Reason).To(gomega.Equal("SetupFailed"))
-				gomega.Expect(anp.Status.Conditions[0].Status).To(gomega.Equal(metav1.ConditionFalse))
-				return nil
-			}
-			err := app.Run([]string{app.Name})
-			gomega.Expect(err).ToNot(gomega.HaveOccurred())
-		})
 		ginkgo.It("ACL Logging for ANP", func() {
 			app.Action = func(ctx *cli.Context) error {
 				config.IPv4Mode = true
@@ -2116,6 +2087,83 @@ var _ = ginkgo.Describe("OVN ANP Operations", func() {
 				}, "2s").Should(gomega.Equal(1))
 				recordedEvent := <-fakeOVN.fakeRecorder.Events // FIFO dequeued
 				gomega.Expect(recordedEvent).To(gomega.ContainSubstring(anpovn.ANPWithDuplicatePriorityEvent))
+				gomega.Expect(len(fakeOVN.fakeRecorder.Events)).To(gomega.Equal(0))
+				return nil
+			}
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).ToNot(gomega.HaveOccurred())
+		})
+	})
+	ginkgo.Context("Priority upper bound limits", func() {
+		anpSubject := newANPSubjectObject(
+			&metav1.LabelSelector{
+				MatchLabels: anpLabel,
+			},
+			nil,
+		)
+		ginkgo.BeforeEach(func() {
+			fakeOVN.start()
+			fakeOVN.InitAndRunANPController()
+		})
+		ginkgo.It("should not be able to create admin network policy with priority > 99", func() {
+			app.Action = func(ctx *cli.Context) error {
+				anp := newANPObject("harry-potter", 100, anpSubject, []anpapi.AdminNetworkPolicyIngressRule{}, []anpapi.AdminNetworkPolicyEgressRule{})
+				anp.ResourceVersion = "1"
+				anp, err := fakeOVN.fakeClient.ANPClient.PolicyV1alpha1().AdminNetworkPolicies().Create(context.TODO(), anp, metav1.CreateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Eventually(func() int {
+					anp, err = fakeOVN.fakeClient.ANPClient.PolicyV1alpha1().AdminNetworkPolicies().Get(context.TODO(), "harry-potter", metav1.GetOptions{})
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					return len(anp.Status.Conditions)
+				}).Should(gomega.Equal(1))
+				gomega.Expect(anp.Status.Conditions[0].Type).To(gomega.Equal("Ready-In-Zone-global"))
+				gomega.Expect(anp.Status.Conditions[0].Message).To(gomega.Equal("error attempting to add ANP harry-potter with " +
+					"priority 100 because, OVNK only supports priority ranges 0-99"))
+				gomega.Expect(anp.Status.Conditions[0].Reason).To(gomega.Equal("SetupFailed"))
+				gomega.Expect(anp.Status.Conditions[0].Status).To(gomega.Equal(metav1.ConditionFalse))
+				return nil
+			}
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).ToNot(gomega.HaveOccurred())
+		})
+		ginkgo.It("should not be able to update admin network policy to a priority > 99", func() {
+			app.Action = func(ctx *cli.Context) error {
+				ginkgo.By("create ANP at priority 5")
+				anp := newANPObject("harry-potter", 5, anpSubject, []anpapi.AdminNetworkPolicyIngressRule{}, []anpapi.AdminNetworkPolicyEgressRule{})
+				anp.ResourceVersion = "1"
+				anp, err := fakeOVN.fakeClient.ANPClient.PolicyV1alpha1().AdminNetworkPolicies().Create(context.TODO(), anp, metav1.CreateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Eventually(func() int {
+					anp, err = fakeOVN.fakeClient.ANPClient.PolicyV1alpha1().AdminNetworkPolicies().Get(context.TODO(), "harry-potter", metav1.GetOptions{})
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					return len(anp.Status.Conditions)
+				}).Should(gomega.Equal(1))
+				gomega.Expect(anp.Status.Conditions[0].Type).To(gomega.Equal("Ready-In-Zone-global"))
+				gomega.Expect(anp.Status.Conditions[0].Message).To(gomega.Equal("Setting up OVN DB plumbing was successful"))
+				gomega.Expect(anp.Status.Conditions[0].Reason).To(gomega.Equal("SetupSucceeded"))
+				gomega.Expect(anp.Status.Conditions[0].Status).To(gomega.Equal(metav1.ConditionTrue))
+
+				ginkgo.By("update ANP priority to 500 and fail updation; event must be generated")
+				anp, err = fakeOVN.fakeClient.ANPClient.PolicyV1alpha1().AdminNetworkPolicies().Get(context.TODO(), "harry-potter", metav1.GetOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				anp.ResourceVersion = "2"
+				anp.Spec.Priority = 500
+				_, err = fakeOVN.fakeClient.ANPClient.PolicyV1alpha1().AdminNetworkPolicies().Update(context.TODO(), anp, metav1.UpdateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Eventually(func() string {
+					anp, err = fakeOVN.fakeClient.ANPClient.PolicyV1alpha1().AdminNetworkPolicies().Get(context.TODO(), "harry-potter", metav1.GetOptions{})
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					return anp.Status.Conditions[0].Message
+				}).Should(gomega.Equal("error attempting to add ANP harry-potter with " +
+					"priority 500 because, OVNK only supports priority ranges 0-99"))
+				gomega.Expect(anp.Status.Conditions[0].Type).To(gomega.Equal("Ready-In-Zone-global"))
+				gomega.Expect(anp.Status.Conditions[0].Reason).To(gomega.Equal("SetupFailed"))
+				gomega.Expect(anp.Status.Conditions[0].Status).To(gomega.Equal(metav1.ConditionFalse))
+				gomega.Eventually(func() int {
+					return len(fakeOVN.fakeRecorder.Events)
+				}, "2s").Should(gomega.Equal(1))
+				recordedEvent := <-fakeOVN.fakeRecorder.Events // FIFO dequeued
+				gomega.Expect(recordedEvent).To(gomega.ContainSubstring(anpovn.ANPWithUnsupportedPriorityEvent))
 				gomega.Expect(len(fakeOVN.fakeRecorder.Events)).To(gomega.Equal(0))
 				return nil
 			}
