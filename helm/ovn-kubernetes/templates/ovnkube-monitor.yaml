@@ -6,6 +6,9 @@ kind: ServiceMonitor
 metadata:
   labels:
     k8s-app: ovnkube-master
+    {{- with .Values.monitoring.commonServiceMonitorSelectorLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
   name: monitor-ovnkube-master
   namespace: ovn-kubernetes
 spec:
@@ -47,6 +50,9 @@ kind: ServiceMonitor
 metadata:
   labels:
     k8s-app: ovnkube-node
+    {{- with .Values.monitoring.commonServiceMonitorSelectorLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
   name: monitor-ovnkube-node
   namespace: ovn-kubernetes
 spec:
@@ -104,6 +110,9 @@ kind: ServiceMonitor
 metadata:
   labels:
     k8s-app: ovnkube-cluster-manager
+    {{- with .Values.monitoring.commonServiceMonitorSelectorLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
   name: monitor-ovnkube-cluster-manager
   namespace: ovn-kubernetes
 spec:
