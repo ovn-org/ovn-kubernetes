@@ -283,6 +283,8 @@ ovn_enable_multi_external_gateway=${OVN_ENABLE_MULTI_EXTERNAL_GATEWAY:-false}
 ovn_enable_ovnkube_identity=${OVN_ENABLE_OVNKUBE_IDENTITY:-true}
 #OVN_ENABLE_PERSISTENT_IPS - enable IPAM for virtualization workloads (KubeVirt persistent IPs)
 ovn_enable_persistent_ips=${OVN_ENABLE_PERSISTENT_IPS:-false}
+# OVN_ENABLE_INSECURE_LSP -- allow user to skip port security of a logical switch port
+ovn_enable_insecure_lsp=${OVN_ENABLE_INSECURE_LSP:-false}
 
 # OVNKUBE_NODE_MODE - is the mode which ovnkube node operates
 ovnkube_node_mode=${OVNKUBE_NODE_MODE:-"full"}
@@ -1249,6 +1251,12 @@ ovn-master() {
   fi
   echo "ovn_enable_svc_template_support_flag=${ovn_enable_svc_template_support_flag}"
 
+  ovn_enable_insecure_lsp_flag=
+  if [[ ${ovn_enable_insecure_lsp} == "true" ]]; then
+    ovn_enable_insecure_lsp_flag="--enable-insecure-lsp"
+  fi
+  echo "ovn_enable_insecure_lsp_flag=${ovn_enable_insecure_lsp_flag}"
+
   init_node_flags=
   if [[ ${ovnkube_compact_mode_enable} == "true" ]]; then
     init_node_flags="--init-node ${K8S_NODE} --nodeport"
@@ -1273,6 +1281,7 @@ ovn-master() {
     ${egressip_healthcheck_port_flag} \
     ${egressqos_enabled_flag} \
     ${egressservice_enabled_flag} \
+    ${ovn_enable_insecure_lsp_flag} \
     ${empty_lb_events_flag} \
     ${hybrid_overlay_flags} \
     ${init_node_flags} \

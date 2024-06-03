@@ -6,7 +6,10 @@ import (
 
 	kapi "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
+	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/tools/record"
+	ref "k8s.io/client-go/tools/reference"
 	"k8s.io/klog/v2"
 
 	ipamclaimsapi "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1"
@@ -17,7 +20,15 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
-type baseNetworkControllerEventHandler struct{}
+type baseNetworkControllerEventHandler struct {
+	recorder record.EventRecorder
+}
+
+func newBaseNetworkControllerEventHandler(recorder record.EventRecorder) baseNetworkControllerEventHandler {
+	return baseNetworkControllerEventHandler{
+		recorder: recorder,
+	}
+}
 
 // hasResourceAnUpdateFunc returns true if the given resource type has a dedicated update function.
 // It returns false if, upon an update event on this resource type, we instead need to first delete the old
@@ -265,5 +276,17 @@ func (h *baseNetworkControllerEventHandler) recordSuccessEvent(objType reflect.T
 		mnp := obj.(*mnpapi.MultiNetworkPolicy)
 		klog.V(5).Infof("Recording success event on multinetwork policy %s/%s", mnp.Namespace, mnp.Name)
 		metrics.GetConfigDurationRecorder().End("multinetworkpolicy", mnp.Namespace, mnp.Name)
+	}
+}
+
+func (h *baseNetworkControllerEventHandler) recordErrorEvent(objType reflect.Type, obj interface{}, reason string, err error) {
+	switch objType {
+	case factory.PodType:
+		pod := obj.(*kapi.Pod)
+		if podRef, refErr := ref.GetReference(scheme.Scheme, pod); refErr != nil {
+			klog.Errorf("Couldn't get a reference to pod %s/%s to post an event: '%v'", pod.Namespace, pod.Name, refErr)
+		} else {
+			h.recorder.Eventf(podRef, kapi.EventTypeWarning, reason, err.Error())
+		}
 	}
 }

@@ -57,6 +57,8 @@ type PodInterfaceInfo struct {
 	NetName string `json:"netName"`
 	// NADName, for default network, it is "default", otherwise, in the form of net-attach-def's <Namespace>/<Name>
 	NADName string `json:"nadName"`
+	// SkipSpoofCheck, skip setting port security on Logical Switch Port
+	SkipSpoofCheck bool `json:"skip-spoof-check"`
 }
 
 // Explicit type for CNI commands the server handles
