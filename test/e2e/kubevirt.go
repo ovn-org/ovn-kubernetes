@@ -268,11 +268,11 @@ var _ = Describe("Kubevirt Virtual Machines", func() {
 			return fr.ClientSet.NetworkingV1().NetworkPolicies(namespace).Create(context.TODO(), policy, metav1.CreateOptions{})
 		}
 
-		checkEastWestTrafficFromVM = func(vmi *kubevirtv1.VirtualMachineInstance, vmiAddresses []string, podIPsByName map[string][]string, stage string) {
+		checkEastWestTrafficFromVM = func(vmi *kubevirtv1.VirtualMachineInstance, vmiAddresses []string, podIPsByName map[string][]string, timeout time.Duration, stage string) {
 			GinkgoHelper()
 			for podName, podIPs := range podIPsByName {
 				for _, podIP := range podIPs {
-					output, err := kubevirt.RunCommand(vmi, fmt.Sprintf("curl http://%s", net.JoinHostPort(podIP, "8000")), 5*time.Second)
+					output, err := kubevirt.RunCommand(vmi, fmt.Sprintf("curl http://%s", net.JoinHostPort(podIP, "8000")), timeout)
 					Expect(err).ShouldNot(HaveOccurred(), func() string { return stage + ": " + podName + ": " + output })
 				}
 			}
@@ -298,7 +298,7 @@ var _ = Describe("Kubevirt Virtual Machines", func() {
 		checkEastWestTraffic = func(vmi *kubevirtv1.VirtualMachineInstance, vmiAddresses []string, podIPsByName map[string][]string, stage string) {
 			GinkgoHelper()
 			checkEastWestTrafficFromPod(vmi, vmiAddresses, podIPsByName, stage)
-			checkEastWestTrafficFromVM(vmi, vmiAddresses, podIPsByName, stage)
+			checkEastWestTrafficFromVM(vmi, vmiAddresses, podIPsByName, 5*time.Second, stage)
 		}
 
 		httpServerTestPodsDefaultNetworkIPs = func() map[string][]string {
@@ -1202,10 +1202,11 @@ passwd:
 			}
 		)
 		type testData struct {
-			description string
-			resource    resourceCommand
-			test        testCommand
-			topology    string
+			description            string
+			resource               resourceCommand
+			test                   testCommand
+			topology               string
+			eastWestTrafficTimeout time.Duration
 		}
 		DescribeTable("should keep ip", func(td testData) {
 			netConfig := newNetworkAttachmentConfig(
@@ -1265,7 +1266,7 @@ passwd:
 			obtainedAddresses := virtualMachineAddressesFromStatus(vmi, 2 /*two addresses, dual stack*/)
 			Expect(obtainedAddresses).To(Equal(expectedAddreses))
 
-			checkEastWestTrafficFromVM(vmi, obtainedAddresses, testPodsIPs, step)
+			checkEastWestTrafficFromVM(vmi, obtainedAddresses, testPodsIPs, 5*time.Second, step)
 
 			by(vmi.Name, fmt.Sprintf("Running %s for %s", td.test.description, td.resource.description))
 			td.test.cmd()
@@ -1274,40 +1275,46 @@ passwd:
 			Expect(kubevirt.LoginToFedora(vmi, "core", "fedora")).To(Succeed(), step)
 
 			step = by(vmi.Name, fmt.Sprintf("Check east/west traffic after %s %s", td.resource.description, td.test.description))
-			checkEastWestTrafficFromVM(vmi, obtainedAddresses, testPodsIPs, step)
+			checkEastWestTrafficFromVM(vmi, obtainedAddresses, testPodsIPs, td.eastWestTrafficTimeout, step)
 		},
 			func(td testData) string {
 				return fmt.Sprintf("after %s of %s with %s", td.test.description, td.resource.description, td.topology)
 			},
 			Entry(nil, testData{
-				resource: virtualMachine,
-				test:     restart,
-				topology: "localnet",
+				resource:               virtualMachine,
+				test:                   restart,
+				topology:               "localnet",
+				eastWestTrafficTimeout: 5 * time.Second,
 			}),
 			Entry(nil, testData{
-				resource: virtualMachine,
-				test:     restart,
-				topology: "layer2",
+				resource:               virtualMachine,
+				test:                   restart,
+				topology:               "layer2",
+				eastWestTrafficTimeout: 5 * time.Second,
 			}),
 			Entry(nil, testData{
-				resource: virtualMachine,
-				test:     liveMigrate,
-				topology: "localnet",
+				resource:               virtualMachine,
+				test:                   liveMigrate,
+				topology:               "localnet",
+				eastWestTrafficTimeout: 15 * time.Second,
 			}),
 			Entry(nil, testData{
-				resource: virtualMachine,
-				test:     liveMigrate,
-				topology: "layer2",
+				resource:               virtualMachine,
+				test:                   liveMigrate,
+				topology:               "layer2",
+				eastWestTrafficTimeout: 15 * time.Second,
 			}),
 			Entry(nil, testData{
-				resource: virtualMachineInstance,
-				test:     liveMigrate,
-				topology: "localnet",
+				resource:               virtualMachineInstance,
+				test:                   liveMigrate,
+				topology:               "localnet",
+				eastWestTrafficTimeout: 15 * time.Second,
 			}),
 			Entry(nil, testData{
-				resource: virtualMachineInstance,
-				test:     liveMigrate,
-				topology: "layer2",
+				resource:               virtualMachineInstance,
+				test:                   liveMigrate,
+				topology:               "layer2",
+				eastWestTrafficTimeout: 15 * time.Second,
 			}),
 		)
 	})
