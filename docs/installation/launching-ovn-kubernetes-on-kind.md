@@ -1,4 +1,4 @@
-# OVN kubernetes KIND Setup
+# OVN-Kubernetes KIND Setup
 
 KIND (Kubernetes in Docker) deployment of OVN kubernetes is a fast and easy means to quickly install and test kubernetes with OVN kubernetes CNI. The value proposition is really for developers who want to reproduce an issue or test a fix in an environment that can be brought up locally and within a few minutes.
 
@@ -16,20 +16,19 @@ KIND (Kubernetes in Docker) deployment of OVN kubernetes is a fast and easy mean
 - [kubectl]( https://kubernetes.io/docs/tasks/tools/install-kubectl/ )
 - Python and pip
 - jq
+- openssl
+- openvswitch
 
 **NOTE :**  In certain operating systems such as CentOS 8.x, pip2 and pip3 binaries are installed instead of pip. In such situations create a softlink for "pip" that points to "pip2".
-
-### Run the KIND deployment with docker
 
 For OVN kubernetes KIND deployment, use the `kind.sh` script.
 
 First Download and build the OVN-Kubernetes repo: 
 
 ```
-$ go env -w GO111MODULE=auto
-$ go get github.com/ovn-org/ovn-kubernetes; cd $(go env GOPATH)/src/github.com/ovn-org/ovn-kubernetes
+git clone github.com/ovn-org/ovn-kubernetes; 
+cd ovn-kubernetes
 ```
-
 The `kind.sh` script builds OVN-Kubernetes into a container image. To verify
 local changes before building in KIND, run the following:
 
@@ -37,18 +36,52 @@ local changes before building in KIND, run the following:
 $ pushd go-controller
 $ make
 $ popd
+```
 
+### Run the KIND deployment with docker
+
+Build the image for fedora and launch the KIND Deployment
+
+```
 $ pushd dist/images
+$ make fedora
+$ popd
+
+$ pushd contrib
+$ export KUBECONFIG=${HOME}/ovn.conf
+$ ./kind.sh
+$ popd
+```
+
+### Run the KIND deployment with podman
+
+To verify local changes, the steps are mostly the same as with docker, except the `fedora` make target:
+
+```
+$ pushd dist/images
+```
+
+Then Edit the makefile, changing 
+
+```
+$ OCI_BIN=podman
+```
+
+Then build,
+
+```
 $ make fedora
 $ popd
 ```
 
-Launch the KIND Deployment.
+To deploy KIND however, you need to start it as root and then copy root's kube config to use it as non-root:
 
 ```
 $ pushd contrib
-$ export KUBECONFIG=${HOME}/ovn.conf
-$ ./kind.sh
+$ sudo ./kind.sh -ep podman
+$ sudo cp /root/ovn.conf ~/.kube/kind-config
+$ sudo chown $(id -u):$(id -g) ~/.kube/kind-config
+$ export KUBECONFIG=~/.kube/kind-config
 $ popd
 ```
 
@@ -143,25 +176,6 @@ usage: kind.sh [[[-cf |--config-file <file>] [-kt|keep-taint] [-ha|--ha-enabled]
 ```
 
 As seen above, if you do not specify any options the script will assume the default values.
-
-### Run the KIND deployment with podman
-
-To verify local changes, the steps are mostly the same as with docker, except the `fedora` make target:
-
-```
-$ OCI_BIN=podman make fedora
-```
-
-To deploy KIND however, you need to start it as root and then copy root's kube config to use it as non-root:
-
-```
-$ pushd contrib
-$ sudo ./kind.sh -ep podman
-$ sudo cp /root/ovn.conf ~/.kube/kind-config
-$ sudo chown $(id -u):$(id -g) ~/.kube/kind-config
-$ export KUBECONFIG=~/.kube/kind-config
-$ popd
-```
 
 **Notes / troubleshooting:**
 

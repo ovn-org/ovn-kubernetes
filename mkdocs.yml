@@ -93,7 +93,8 @@ nav:
       - Coding Guide: developer-guide/developer.md
       - OVN-Kubernetes Container Images: developer-guide/image-build.md
       - Documentation Guide: developer-guide/documentation.md
-      - Local Testing Guide: developer-guide/testing.md
+      - Launching OVN-Kubernetes: installation/launching-ovn-kubernetes-on-kind.md
+      - Local Testing Guide: developer-guide/local_testing_guide.md
       - CI Testing Guide: ci/ci.md
       - Debugging: developer-guide/debugging.md
       - Releasing: developer-guide/release.md
