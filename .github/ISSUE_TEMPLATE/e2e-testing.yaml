@@ -1,6 +1,6 @@
 name: Enhancing E2E Test Coverage
 description: Provide supporting details for enhancements to our existing e2e test coverage
-labels: e2e-testing
+labels: area/e2e-testing
 body:
   - type: textarea
     id: e2e-testing

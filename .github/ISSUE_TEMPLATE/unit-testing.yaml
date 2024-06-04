@@ -1,6 +1,6 @@
 name: Enhancing Unit Test Coverage
 description: Provide supporting details for enhancements to our existing unit test coverage
-labels: unit-testing
+labels: area/unit-testing
 body:
   - type: textarea
     id: unit-testing
