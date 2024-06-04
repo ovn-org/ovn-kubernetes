@@ -14,6 +14,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/egressservice"
 	nodeipt "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"
+	nodenft "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/nftables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -29,6 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
+	"sigs.k8s.io/knftables"
 )
 
 const (
@@ -510,21 +512,29 @@ func addServiceRules(service *kapi.Service, localEndpoints []string, svcHasLocal
 			errors = append(errors, err)
 		}
 		npw.ofm.requestFlowSync()
-		if !npw.dpuMode {
-			// add iptable rules only in full mode
-			if err = insertIptRules(getGatewayIPTRules(service, localEndpoints, svcHasLocalHostNetEndPnt)); err != nil {
-				errors = append(errors, fmt.Errorf("failed to add iptables rules for service: %v", err))
+	}
+
+	if npw == nil || !npw.dpuMode {
+		// add iptables/nftables rules only in full mode
+		iptRules := getGatewayIPTRules(service, localEndpoints, svcHasLocalHostNetEndPnt)
+		if len(iptRules) > 0 {
+			if err := insertIptRules(iptRules); err != nil {
+				err = fmt.Errorf("failed to add iptables rules for service %s/%s: %v",
+					service.Namespace, service.Name, err)
+				errors = append(errors, err)
 			}
 		}
-	} else {
-		// For Host Only Mode
-		if err = insertIptRules(getGatewayIPTRules(service, localEndpoints, svcHasLocalHostNetEndPnt)); err != nil {
-			errors = append(errors, fmt.Errorf("failed to add iptables rules for service: %v", err))
+		nftElems := getGatewayNFTRules(service, localEndpoints, svcHasLocalHostNetEndPnt)
+		if len(nftElems) > 0 {
+			if err := nodenft.UpdateNFTElements(nftElems); err != nil {
+				err = fmt.Errorf("failed to update nftables rules for service %s/%s: %v",
+					service.Namespace, service.Name, err)
+				errors = append(errors, err)
+			}
 		}
-
 	}
-	return apierrors.NewAggregate(errors)
 
+	return apierrors.NewAggregate(errors)
 }
 
 // delServiceRules deletes all possible iptables rules and OpenFlow physical
@@ -538,49 +548,55 @@ func delServiceRules(service *kapi.Service, localEndpoints []string, npw *nodePo
 			errors = append(errors, fmt.Errorf("error updating service flow cache: %v", err))
 		}
 		npw.ofm.requestFlowSync()
-		if !npw.dpuMode {
-			// Always try and delete all rules here in full mode & in host only mode. We don't touch iptables in dpu mode.
-			// +--------------------------+-----------------------+-----------------------+--------------------------------+
-			// | svcHasLocalHostNetEndPnt | ExternalTrafficPolicy | InternalTrafficPolicy |     Scenario for deletion      |
-			// |--------------------------|-----------------------|-----------------------|--------------------------------|
-			// |                          |                       |                       |      deletes the MARK          |
-			// |         false            |         cluster       |          local        |      rules for itp=local       |
-			// |                          |                       |                       |       called from mangle       |
-			// |--------------------------|-----------------------|-----------------------|--------------------------------|
-			// |                          |                       |                       |      deletes the REDIRECT      |
-			// |         true             |         cluster       |          local        |      rules towards target      |
-			// |                          |                       |                       |       port for itp=local       |
-			// |--------------------------|-----------------------|-----------------------|--------------------------------|
-			// |                          |                       |                       | deletes the DNAT rules for     |
-			// |         false            |          local        |          cluster      |    non-local-host-net          |
-			// |                          |                       |                       | eps towards masqueradeIP +     |
-			// |                          |                       |                       | DNAT rules towards clusterIP   |
-			// |--------------------------|-----------------------|-----------------------|--------------------------------|
-			// |                          |                       |                       |    deletes the DNAT rules      |
-			// |       false||true        |          cluster      |          cluster      |   	towards clusterIP          |
-			// |                          |                       |                       |       for the default case     |
-			// |--------------------------|-----------------------|-----------------------|--------------------------------|
-			// |                          |                       |                       |      deletes all the rules     |
-			// |       false||true        |          local        |          local        |   for etp=local + itp=local    |
-			// |                          |                       |                       |   + default dnat towards CIP   |
-			// +--------------------------+-----------------------+-----------------------+--------------------------------+
+	}
 
-			if err = nodeipt.DelRules(getGatewayIPTRules(service, localEndpoints, true)); err != nil {
-				errors = append(errors, fmt.Errorf("error updating service flow cache: %v", err))
-			}
-			if err = nodeipt.DelRules(getGatewayIPTRules(service, localEndpoints, false)); err != nil {
-				errors = append(errors, fmt.Errorf("error updating service flow cache: %v", err))
+	if npw == nil || !npw.dpuMode {
+		// Always try and delete all rules here in full mode & in host only mode. We don't touch iptables in dpu mode.
+		// +--------------------------+-----------------------+-----------------------+--------------------------------+
+		// | svcHasLocalHostNetEndPnt | ExternalTrafficPolicy | InternalTrafficPolicy |     Scenario for deletion      |
+		// |--------------------------|-----------------------|-----------------------|--------------------------------|
+		// |                          |                       |                       |      deletes the MARK          |
+		// |         false            |         cluster       |          local        |      rules for itp=local       |
+		// |                          |                       |                       |       called from mangle       |
+		// |--------------------------|-----------------------|-----------------------|--------------------------------|
+		// |                          |                       |                       |      deletes the REDIRECT      |
+		// |         true             |         cluster       |          local        |      rules towards target      |
+		// |                          |                       |                       |       port for itp=local       |
+		// |--------------------------|-----------------------|-----------------------|--------------------------------|
+		// |                          |                       |                       | deletes the DNAT rules for     |
+		// |         false            |          local        |          cluster      |    non-local-host-net          |
+		// |                          |                       |                       | eps towards masqueradeIP +     |
+		// |                          |                       |                       | DNAT rules towards clusterIP   |
+		// |--------------------------|-----------------------|-----------------------|--------------------------------|
+		// |                          |                       |                       |    deletes the DNAT rules      |
+		// |       false||true        |          cluster      |          cluster      |     towards clusterIP          |
+		// |                          |                       |                       |       for the default case     |
+		// |--------------------------|-----------------------|-----------------------|--------------------------------|
+		// |                          |                       |                       |      deletes all the rules     |
+		// |       false||true        |          local        |          local        |   for etp=local + itp=local    |
+		// |                          |                       |                       |   + default dnat towards CIP   |
+		// +--------------------------+-----------------------+-----------------------+--------------------------------+
+
+		iptRules := getGatewayIPTRules(service, localEndpoints, true)
+		iptRules = append(iptRules, getGatewayIPTRules(service, localEndpoints, false)...)
+		if len(iptRules) > 0 {
+			if err := nodeipt.DelRules(iptRules); err != nil {
+				err := fmt.Errorf("failed to delete iptables rules for service %s/%s: %v",
+					service.Namespace, service.Name, err)
+				errors = append(errors, err)
 			}
 		}
-	} else {
-
-		if err = nodeipt.DelRules(getGatewayIPTRules(service, localEndpoints, true)); err != nil {
-			errors = append(errors, fmt.Errorf("error updating service flow cache: %v", err))
-		}
-		if err = nodeipt.DelRules(getGatewayIPTRules(service, localEndpoints, false)); err != nil {
-			errors = append(errors, fmt.Errorf("error updating service flow cache: %v", err))
+		nftElems := getGatewayNFTRules(service, localEndpoints, true)
+		nftElems = append(nftElems, getGatewayNFTRules(service, localEndpoints, false)...)
+		if len(nftElems) > 0 {
+			if err := nodenft.DeleteNFTElements(nftElems); err != nil {
+				err = fmt.Errorf("failed to delete nftables rules for service %s/%s: %v",
+					service.Namespace, service.Name, err)
+				errors = append(errors, err)
+			}
 		}
 	}
+
 	return apierrors.NewAggregate(errors)
 }
 
@@ -757,7 +773,8 @@ func (npw *nodePortWatcher) DeleteService(service *kapi.Service) error {
 func (npw *nodePortWatcher) SyncServices(services []interface{}) error {
 	var err error
 	var errors []error
-	keepIPTRules := []nodeipt.Rule{}
+	var keepIPTRules []nodeipt.Rule
+	var keepNFTElems []*knftables.Element
 	for _, serviceInterface := range services {
 		name := ktypes.NamespacedName{Namespace: serviceInterface.(*kapi.Service).Namespace, Name: serviceInterface.(*kapi.Service).Name}
 
@@ -793,24 +810,32 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) error {
 		if err = npw.updateServiceFlowCache(service, true, hasLocalHostNetworkEp); err != nil {
 			errors = append(errors, err)
 		}
-		// Add correct iptables rules only for Full mode
+		// Add correct netfilter rules only for Full mode
 		if !npw.dpuMode {
-			keepIPTRules = append(keepIPTRules, getGatewayIPTRules(service, sets.List(localEndpoints), hasLocalHostNetworkEp)...)
+			localEndpointsArray := sets.List(localEndpoints)
+			keepIPTRules = append(keepIPTRules, getGatewayIPTRules(service, localEndpointsArray, hasLocalHostNetworkEp)...)
+			keepNFTElems = append(keepNFTElems, getGatewayNFTRules(service, localEndpointsArray, hasLocalHostNetworkEp)...)
 		}
 	}
 
 	// sync OF rules once
 	npw.ofm.requestFlowSync()
-	// sync IPtables rules once only for Full mode
+	// sync netfilter rules once only for Full mode
 	if !npw.dpuMode {
 		// (NOTE: Order is important, add jump to iptableETPChain before jump to NP/EIP chains)
-		for _, chain := range []string{iptableITPChain, egressservice.Chain, iptableNodePortChain, iptableExternalIPChain, iptableETPChain, iptableMgmPortChain} {
+		for _, chain := range []string{iptableITPChain, egressservice.Chain, iptableNodePortChain, iptableExternalIPChain, iptableETPChain} {
 			if err = recreateIPTRules("nat", chain, keepIPTRules); err != nil {
 				errors = append(errors, err)
 			}
 		}
 		if err = recreateIPTRules("mangle", iptableITPChain, keepIPTRules); err != nil {
 			errors = append(errors, err)
+		}
+
+		for _, set := range []string{nftablesMgmtPortNoSNATNodePorts, nftablesMgmtPortNoSNATServicesV4, nftablesMgmtPortNoSNATServicesV6} {
+			if err = recreateNFTSet(set, keepNFTElems); err != nil {
+				errors = append(errors, err)
+			}
 		}
 	}
 	return apierrors.NewAggregate(errors)
@@ -1062,6 +1087,7 @@ func (npwipt *nodePortWatcherIptables) SyncServices(services []interface{}) erro
 	var err error
 	var errors []error
 	keepIPTRules := []nodeipt.Rule{}
+	keepNFTElems := []*knftables.Element{}
 	for _, serviceInterface := range services {
 		service, ok := serviceInterface.(*kapi.Service)
 		if !ok {
@@ -1076,11 +1102,17 @@ func (npwipt *nodePortWatcherIptables) SyncServices(services []interface{}) erro
 		// Add correct iptables rules.
 		// TODO: ETP and ITP is not implemented for smart NIC mode.
 		keepIPTRules = append(keepIPTRules, getGatewayIPTRules(service, nil, false)...)
+		keepNFTElems = append(keepNFTElems, getGatewayNFTRules(service, nil, false)...)
 	}
 
-	// sync IPtables rules once
+	// sync rules once
 	for _, chain := range []string{iptableNodePortChain, iptableExternalIPChain} {
 		if err = recreateIPTRules("nat", chain, keepIPTRules); err != nil {
+			errors = append(errors, err)
+		}
+	}
+	for _, set := range []string{nftablesMgmtPortNoSNATNodePorts, nftablesMgmtPortNoSNATServicesV4, nftablesMgmtPortNoSNATServicesV6} {
+		if err = recreateNFTSet(set, keepNFTElems); err != nil {
 			errors = append(errors, err)
 		}
 	}
