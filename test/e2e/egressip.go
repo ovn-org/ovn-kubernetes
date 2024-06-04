@@ -762,19 +762,19 @@ spec:
 	   4. Check that the status is of length one and that it is assigned to egress1Node
 	   5. Create one pod matching the EgressIP: running on egress1Node
 	   6. Check connectivity from pod to an external "node" and verify that the srcIP is the expected egressIP
-	   7. Check connectivity from pod to another node (egress2Node) primary IP and verify that the srcIP is the expected nodeIP
-	   8. Check connectivity from pod to another node (egress2Node) secondary IP and verify that the srcIP is the expected nodeIP
+	   7. Check connectivity from pod to another node (egress2Node) primary IP and verify that the srcIP is the expected podIP
+	   8. Check connectivity from pod to another node (egress2Node) secondary IP and verify that the srcIP is the expected podIP
 	   9. Add the "k8s.ovn.org/egress-assignable" label to egress2Node
 	   10. Remove the "k8s.ovn.org/egress-assignable" label from egress1Node
 	   11. Check that the status is of length one and that it is assigned to egress2Node
 	   12. Check connectivity from pod to an external "node" and verify that the srcIP is the expected egressIP
-	   13. Check connectivity from pod to another node (egress2Node) primary IP and verify that the srcIP is the expected nodeIP
-	   14. Check connectivity from pod to another node (egress2Node) secondary IP and verify that the srcIP is the expected nodeIP
+	   13. Check connectivity from pod to another node (egress2Node) primary IP and verify that the srcIP is the expected podIP
+	   14. Check connectivity from pod to another node (egress2Node) secondary IP and verify that the srcIP is the expected podIP
 	   15. Create second pod not matching the EgressIP: running on egress1Node
 	   16. Check connectivity from second pod to external node and verify that the srcIP is the expected nodeIP
 	   17. Add pod selector label to make second pod egressIP managed
 	   18. Check connectivity from second pod to external node and verify that the srcIP is the expected egressIP
-	   19. Check connectivity from second pod to another node (egress2Node) primary IP and verify that the srcIP is the expected nodeIP (this verifies SNAT's towards nodeIP are not deleted for pods unless pod is on its own egressNode)
+	   19. Check connectivity from second pod to another node (egress2Node) primary IP and verify that the srcIP is the expected podIP (this verifies SNAT's towards nodeIP are not deleted for pods unless pod is on its own egressNode)
 	   20. Check connectivity from second pod to another node (egress2Node) secondary IP and verify that the srcIP is the expected nodeIP (this verifies SNAT's towards nodeIP are not deleted for pods unless pod is on its own egressNode)
 	*/
 	ginkgo.It("[OVN network] Should validate the egress IP SNAT functionality against host-networked pods", func() {
@@ -869,10 +869,11 @@ spec:
 		ginkgo.By("5. Create one pod matching the EgressIP: running on egress1Node")
 		createGenericPodWithLabel(f, pod1Name, pod2Node.name, f.Namespace.Name, command, podEgressLabel)
 
+		var pod1IP net.IP
 		err = wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
 			kubectlOut := getPodAddress(pod1Name, f.Namespace.Name)
-			srcIP := net.ParseIP(kubectlOut)
-			if srcIP == nil {
+			pod1IP = net.ParseIP(kubectlOut)
+			if pod1IP == nil {
 				return false, nil
 			}
 			return true, nil
@@ -884,12 +885,12 @@ spec:
 		err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(targetNode, pod1Name, podNamespace.Name, true, []string{egressIP1.String()}))
 		framework.ExpectNoError(err, "Step 6. Check connectivity from pod to an external node and verify that the srcIP is the expected egressIP, failed: %v", err)
 
-		ginkgo.By("7. Check connectivity from pod to another node primary IP and verify that the srcIP is the expected nodeIP")
-		err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(hostNetPod, pod1Name, podNamespace.Name, true, []string{egressNodeIP.String()}))
+		ginkgo.By("7. Check connectivity from pod to another node primary IP and verify that the srcIP is the expected podIP")
+		err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(hostNetPod, pod1Name, podNamespace.Name, true, []string{pod1IP.String()}))
 		framework.ExpectNoError(err, "Step 7. Check connectivity from pod to another node primary IP and verify that the srcIP is the expected nodeIP, failed: %v", err)
 
-		ginkgo.By("8. Check connectivity from pod to another node secondary IP and verify that the srcIP is the expected nodeIP")
-		err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(otherHostNetPodIP, pod1Name, podNamespace.Name, true, []string{egressNodeIP.String()}))
+		ginkgo.By("8. Check connectivity from pod to another node secondary IP and verify that the srcIP is the expected podIP")
+		err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(otherHostNetPodIP, pod1Name, podNamespace.Name, true, []string{pod1IP.String()}))
 		framework.ExpectNoError(err, "Step 8. Check connectivity from pod to another node secondary IP and verify that the srcIP is the expected nodeIP, failed: %v", err)
 
 		ginkgo.By("9. Add the \"k8s.ovn.org/egress-assignable\" label to egress2Node")
@@ -913,12 +914,12 @@ spec:
 		err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(targetNode, pod1Name, podNamespace.Name, true, []string{egressIP1.String()}))
 		framework.ExpectNoError(err, "Step 12. Check connectivity from pod to an external \"node\" and verify that the srcIP is the expected egressIP, failed, err: %v", err)
 
-		ginkgo.By("13. Check connectivity from pod to another node primary IP and verify that the srcIP is the expected nodeIP")
-		err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(hostNetPod, pod1Name, podNamespace.Name, true, []string{egressNodeIP.String()}))
+		ginkgo.By("13. Check connectivity from pod to another node primary IP and verify that the srcIP is the expected podIP")
+		err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(hostNetPod, pod1Name, podNamespace.Name, true, []string{pod1IP.String()}))
 		framework.ExpectNoError(err, "Step 13. Check connectivity from pod to another node and verify that the srcIP is the expected nodeIP, failed: %v", err)
 
-		ginkgo.By("14. Check connectivity from pod to another node secondary IP and verify that the srcIP is the expected nodeIP")
-		err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(otherHostNetPodIP, pod1Name, podNamespace.Name, true, []string{egressNodeIP.String()}))
+		ginkgo.By("14. Check connectivity from pod to another node secondary IP and verify that the srcIP is the expected podIP")
+		err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(otherHostNetPodIP, pod1Name, podNamespace.Name, true, []string{pod1IP.String()}))
 		framework.ExpectNoError(err, "Step 14. Check connectivity from pod to another node secondary IP and verify that the srcIP is the expected nodeIP, failed: %v", err)
 
 		ginkgo.By("15. Create second pod not matching the EgressIP: running on egress1Node")
@@ -947,6 +948,7 @@ spec:
 		err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(targetNode, pod2Name, podNamespace.Name, true, []string{egressIP1.String()}))
 		framework.ExpectNoError(err, "Step 18. Check connectivity from second pod to external node and verify that the srcIP is the expected egressIP, failed: %v", err)
 
+		/** TODO(trozet): this shoudl probably now be changed to check the actual OVN NBDB to make sure the entries are still there
 		ginkgo.By("19. Check connectivity from second pod to another node primary IP and verify that the srcIP is the expected nodeIP (this verifies SNAT's towards nodeIP are not deleted unless node is egressNode)")
 		err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(hostNetPod, pod2Name, podNamespace.Name, true, []string{egressNodeIP.String()}))
 		framework.ExpectNoError(err, "Step 19. Check connectivity from second pod to another node and verify that the srcIP is the expected nodeIP (this verifies SNAT's towards nodeIP are not deleted unless node is egressNode), failed: %v", err)
@@ -954,6 +956,7 @@ spec:
 		ginkgo.By("20. Check connectivity from second pod to another node secondary IP and verify that the srcIP is the expected nodeIP (this verifies SNAT's towards nodeIP are not deleted unless node is egressNode)")
 		err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(otherHostNetPodIP, pod2Name, podNamespace.Name, true, []string{egressNodeIP.String()}))
 		framework.ExpectNoError(err, "Step 20. Check connectivity from second pod to another node secondary IP and verify that the srcIP is the expected nodeIP (this verifies SNAT's towards nodeIP are not deleted unless node is egressNode), failed: %v", err)
+		*/
 	})
 
 	// Validate the egress IP with stateful sets or pods recreated with same name

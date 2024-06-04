@@ -1796,7 +1796,10 @@ spec:
 		checkNumberOfETPRules := func(value int, pattern string) wait.ConditionFunc {
 			return func() (bool, error) {
 				numberOfETPRules := pokeIPTableRules(backendNodeName, pattern)
-				return (numberOfETPRules == value), nil
+				if numberOfETPRules != value {
+					framework.Logf("Number of iptables rules found: %d, does not match expected: %d", numberOfETPRules, value)
+				}
+				return numberOfETPRules == value, nil
 			}
 		}
 		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(2, "OVN-KUBE-ETP"))
@@ -1829,7 +1832,7 @@ spec:
 
 		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(10, "OVN-KUBE-ETP"))
 		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(11, "OVN-KUBE-SNAT-MGMTPORT"))
+		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(19, "OVN-KUBE-SNAT-MGMTPORT"))
 		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
 
 		ginkgo.By("by sending a TCP packet to service " + svcName + " with type=LoadBalancer in namespace " + namespaceName + " with backend pod " + backendName)
@@ -1855,7 +1858,7 @@ spec:
 		// number of iptable rules should have decreased by 2
 		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(8, "OVN-KUBE-ETP"))
 		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(9, "OVN-KUBE-SNAT-MGMTPORT"))
+		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(15, "OVN-KUBE-SNAT-MGMTPORT"))
 		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
 
 		ginkgo.By("by sending a TCP packet to service " + svcName + " with type=LoadBalancer in namespace " + namespaceName + " with backend pod " + backendName)

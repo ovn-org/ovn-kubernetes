@@ -330,12 +330,17 @@ spec:
 			ginkgo.By("Creating the backend pods")
 			podsCreateSync := errgroup.Group{}
 			podsToNodeMapping := make(map[string]v1.Node, 3)
+			podIPs := make(map[string][]string, 3)
 			for i, name := range pods {
 				name := name
 				i := i
+				podIPs[name] = []string{}
 				podsCreateSync.Go(func() error {
 					p, err := createGenericPodWithLabel(f, name, nodes[i].Name, f.Namespace.Name, command, podsLabels)
 					framework.Logf("%s podIPs are: %v", p.Name, p.Status.PodIPs)
+					for _, podIP := range p.Status.PodIPs {
+						podIPs[name] = append(podIPs[name], podIP.IP)
+					}
 					return err
 				})
 				podsToNodeMapping[name] = nodes[i]
@@ -410,15 +415,20 @@ spec:
 			}
 			ginkgo.By("Verifying traffic from all the 3 backend pods should exit with their node's IP when going towards other nodes in cluster")
 			for _, pod := range pods { // loop through all the pods, ensure the curl to other node is always going via nodeIP of the node where the pod lives
-				srcNode := podsToNodeMapping[pod]
-				if srcNode.Name == dstNode.Name {
-					framework.Logf("Skipping check for pod %s because its on the destination node; srcIP will be podIP", pod)
-					continue // traffic flow is pod -> mp0 -> local host: This won't have nodeIP as SNAT
+				var expectedsrcIP string
+				for _, ip := range podIPs[pod] {
+					if utilnet.IsIPv4String(ip) && protocol == v1.IPv4Protocol {
+						expectedsrcIP = ip
+						break
+					}
+
+					if utilnet.IsIPv6String(ip) && protocol == v1.IPv6Protocol {
+						expectedsrcIP = ip
+						break
+					}
 				}
-				v4, v6 = getNodeAddresses(&srcNode)
-				expectedsrcIP := v4
-				if protocol == v1.IPv6Protocol {
-					expectedsrcIP = v6
+				if len(expectedsrcIP) == 0 {
+					framework.Failf("no valid IP found for protocol %s, pod ips: %#v", protocol, podIPs[pod])
 				}
 				gomega.Consistently(func() error {
 					return curlAgnHostClientIPFromPod(f.Namespace.Name, pod, expectedsrcIP, dstIP, podHTTPPort)
