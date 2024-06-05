@@ -86,7 +86,7 @@ nav:
     - Run OVN-Kubernetes From Release Image: getting-started/running-release.md
     - Run OVN-Kubernetes From RPM: getting-started/running-rpm.md
     - CLI Guide: getting-started/cli-guide.md
-    - Configuration Guide: developer-guide/configuration.md
+    - Configuration Guide: getting-started/configuration.md
   - Developer Guide:
       - Contributing Guide: governance/CONTRIBUTING.md
       - Reviewing Guide: governance/REVIEWING.md
