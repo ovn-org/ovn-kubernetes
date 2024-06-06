@@ -374,13 +374,13 @@ install_kubevirt() {
 }
 
 install_kubevirt_ipam_claims() {
+  local kubevirt_ipclaims_manifest=$1
   local cert_manager_version="v1.14.4"
   echo "Installing cert-manager ..."
   manifest="https://github.com/cert-manager/cert-manager/releases/download/${cert_manager_version}/cert-manager.yaml"
   run_kubectl apply -f "$manifest"
 
   echo "Installing KubeVirt IPAM manager ..."
-  manifest="https://raw.githubusercontent.com/maiqueb/kubevirt-ipam-claims/main/dist/install.yaml"
-  run_kubectl apply -f "$manifest"
+  run_kubectl apply -f "${kubevirt_ipclaims_manifest}"
   kubectl wait -n kubevirt-ipam-claims-system deployment kubevirt-ipam-claims-controller-manager --for condition=Available --timeout 2m
 }

@@ -495,6 +495,7 @@ set_default_params() {
   KIND_INSTALL_METALLB=${KIND_INSTALL_METALLB:-false}
   KIND_INSTALL_PLUGINS=${KIND_INSTALL_PLUGINS:-false}
   KIND_INSTALL_KUBEVIRT=${KIND_INSTALL_KUBEVIRT:-false}
+  KIND_KUBEVIRT_IPAMCLAIMS_MANIFEST=${KIND_KUBEVIRT_IPAMCLAIMS_MANIFEST:-https://raw.githubusercontent.com/maiqueb/kubevirt-ipam-claims/main/dist/install.yaml}
   OVN_HA=${OVN_HA:-false}
   KIND_LOCAL_REGISTRY=${KIND_LOCAL_REGISTRY:-false}
   KIND_LOCAL_REGISTRY_NAME=${KIND_LOCAL_REGISTRY_NAME:-kind-registry}
@@ -1193,5 +1194,5 @@ if [ "$KIND_INSTALL_PLUGINS" == true ]; then
 fi
 if [ "$KIND_INSTALL_KUBEVIRT" == true ]; then
   install_kubevirt
-  install_kubevirt_ipam_claims
+  install_kubevirt_ipam_claims ${KIND_KUBEVIRT_IPAMCLAIMS_MANIFEST}
 fi
