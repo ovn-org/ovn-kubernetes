@@ -620,11 +620,13 @@ func (m leaderMetrics) Off(string) {
 	}
 }
 
+func (m leaderMetrics) SlowpathExercised(string) {}
+
 type ovnkubeMetricsProvider struct {
 	runMode *ovnkubeRunMode
 }
 
-func (p ovnkubeMetricsProvider) NewLeaderMetric() leaderelection.SwitchMetric {
+func (p ovnkubeMetricsProvider) NewLeaderMetric() leaderelection.LeaderMetric {
 	return &leaderMetrics{p.runMode}
 }
 
