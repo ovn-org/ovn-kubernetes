@@ -1,0 +1,12 @@
+{{- if eq .Values.global.enableDPUDashboards false}}
+apiVersion: "v1"
+data:
+  sdn-host-controller.json: |-
+{{- .Files.Get "json/sdn-host-controller-without-dpu.json" | nindent 4 }}
+kind: "ConfigMap"
+metadata:
+  name: "grafana-sdn-dashboard-host-controller"
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    grafana_dashboard: "1"
+{{- end }}

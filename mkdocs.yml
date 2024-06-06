@@ -132,6 +132,7 @@ nav:
     - Logging: troubleshooting/logging.md
   - Observability:
     - Metrics: observability/metrics.md
+    - SDN Dashboard: installation/helm/sdn-dashboard.md
   - Enhancement Proposals:
     # - FeatureName: okeps/<filename.md>
     - Template: okeps/okep-4368-template.md

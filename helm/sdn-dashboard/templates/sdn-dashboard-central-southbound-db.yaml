@@ -1,0 +1,10 @@
+apiVersion: "v1"
+data:
+  sdn-central-southbound-db.json: |-
+{{- .Files.Get "json/sdn-central-southbound-db.json" | nindent 4 }}
+kind: "ConfigMap"
+metadata:
+  name: "grafana-sdn-dashboard-central-southbound-db"
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    grafana_dashboard: "1"
