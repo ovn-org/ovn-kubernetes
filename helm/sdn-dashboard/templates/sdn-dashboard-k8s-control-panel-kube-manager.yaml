@@ -1,0 +1,10 @@
+apiVersion: "v1"
+data:
+  sdn-k8s-control-panel-kube-manager.json: |-
+{{- .Files.Get "json/sdn-k8s-control-panel-kube-manager.json" | nindent 4 }}
+kind: "ConfigMap"
+metadata:
+  name: "grafana-sdn-dashboard-k8s-control-panel-kube-manager"
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    grafana_dashboard: "1"
