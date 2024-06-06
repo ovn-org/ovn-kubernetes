@@ -24,6 +24,7 @@ spec:
         component: network
         type: infra
         kubernetes.io/os: "linux"
+        ovn-db-pod: "true"
       annotations:
         scheduler.alpha.kubernetes.io/critical-pod: ''
     spec:

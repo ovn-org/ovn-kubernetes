@@ -113,7 +113,7 @@ var ovnNorthdStopwatchShowMetricsMap = map[string]*stopwatchMetricDetails{
 
 func RegisterOvnNorthdMetrics(clientset kubernetes.Interface, k8sNodeName string, stopChan <-chan struct{}) {
 	err := wait.PollUntilContextTimeout(context.Background(), 1*time.Second, 300*time.Second, true, func(ctx context.Context) (bool, error) {
-		return checkPodRunsOnGivenNode(clientset, []string{"app=ovnkube-master", "name=ovnkube-master"}, k8sNodeName, true)
+		return checkPodRunsOnGivenNode(clientset, []string{"ovn-db-pod=true"}, k8sNodeName, true)
 	})
 	if err != nil {
 		klog.Infof("Not registering OVN North Metrics because OVNKube Master Pod was not found running on this "+
