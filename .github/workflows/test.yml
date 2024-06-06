@@ -16,8 +16,8 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  GO_VERSION: "1.21"
-  K8S_VERSION: v1.29.2
+  GO_VERSION: 1.22.0
+  K8S_VERSION: v1.30.2
   KIND_CLUSTER_NAME: ovn
   KIND_INSTALL_INGRESS: true
   KIND_ALLOW_SYSTEM_WRITES: true

@@ -370,14 +370,15 @@ sudo ln -s /usr/bin/kubectl-v1.17.3 /usr/bin/kubectl
 Download and install latest version of `kubectl`:
 
 ```
-$ K8S_VERSION=v1.29.2
+$ K8S_VERSION=v1.30.2
 $ curl -LO https://storage.googleapis.com/kubernetes-release/release/$K8S_VERSION/bin/linux/amd64/kubectl
 $ chmod +x kubectl
 $ sudo mv kubectl /usr/bin/kubectl-$K8S_VERSION
 $ sudo rm /usr/bin/kubectl
 $ sudo ln -s /usr/bin/kubectl-$K8S_VERSION /usr/bin/kubectl
 $ kubectl version --client
-Client Version: version.Info{Major:"1", Minor:"28", GitVersion:"v1.18.0", GitCommit:"9e991415386e4cf155a24b1da15becaa390438d8", GitTreeState:"clean", BuildDate:"2020-03-25T14:58:59Z", GoVersion:"go1.13.8", Compiler:"gc", Platform:"linux/amd64"}
+Client Version: v1.30.2
+Kustomize Version: v5.0.4-0.20230601165947-6ce0bf390ce3
 ```
 
 ### Docker Changes For Dual-stack
@@ -425,7 +426,7 @@ $ cd ../dist/images/
 $ make fedora
 
 $ cd ../../contrib/
-$ KIND_IPV4_SUPPORT=true KIND_IPV6_SUPPORT=true K8S_VERSION=v1.29.2 ./kind.sh
+$ KIND_IPV4_SUPPORT=true KIND_IPV6_SUPPORT=true K8S_VERSION=v1.30.2 ./kind.sh
 ```
 
 Once `kind.sh` completes, setup kube config file:
@@ -451,7 +452,7 @@ one (or both of) the following variables:
 
 ```
 $ cd ../../contrib/
-$ KIND_IMAGE=example.com/kindest/node K8S_VERSION=v1.29.2 ./kind.sh
+$ KIND_IMAGE=example.com/kindest/node K8S_VERSION=v1.30.2 ./kind.sh
 ```
 
 ### Using kind local registry to deploy non ovn-k containers
