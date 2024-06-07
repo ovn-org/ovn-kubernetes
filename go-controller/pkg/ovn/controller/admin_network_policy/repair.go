@@ -3,13 +3,11 @@ package adminnetworkpolicy
 import (
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/klog/v2"
 	anpapi "sigs.k8s.io/network-policy-api/apis/v1alpha1"
@@ -37,18 +35,6 @@ func (c *Controller) repairAdminNetworkPolicies() error {
 	existingANPs := map[string]*anpapi.AdminNetworkPolicy{}
 	for _, anp := range anps {
 		existingANPs[anp.Name] = anp
-		// let's populate the anpPriorityMap cache and add the correct ANP at the right priority
-		if anp.Spec.Priority > ovnkSupportedPriorityUpperBound {
-			// we don't want to add this ANP to the cache since we don't support this priority range
-			continue
-		}
-		status := meta.FindStatusCondition(anp.Status.Conditions, policyReadyStatusType+c.zone)
-		if status != nil && strings.Contains(status.Message, ErrorANPWithDuplicatePriority.Error()) {
-			// we don't want to add this ANP to the priority cache because this ANP's setup was never done
-			continue
-		}
-		klog.Infof("Adding ANP %s at priority %d/%d to the anpPriority cache", anp.Name, anp.Spec.Priority, anp.Spec.Priority)
-		c.anpPriorityMap[anp.Spec.Priority] = anp.Name
 	}
 
 	// Deal with PortGroup Repairs first - this will auto cleanup ACLs so no need to specifically delete ACLs
