@@ -1,4 +1,12 @@
-## Disable Forwarding Config
+# Config Variables
+
+Let us look at the supported configuration variables by OVN-Kubernetes
+
+## Default Config
+
+## Gateway Config
+
+### Disable Forwarding Config
 
 OVN-Kubernetes allows to enable or disable IP forwarding for all traffic on OVN-Kubernetes managed interfaces (such as br-ex). By default forwarding is enabled and this allows host to forward traffic across OVN-Kubernetes managed interfaces. If forwarding is disabled then Kubernetes related traffic is still forwarded appropriately, but other IP traffic will not be routed by cluster nodes.
 
@@ -37,3 +45,25 @@ Additionally following iptables rules are added at FORWARD chain to forward clus
 -A FORWARD -i breth1 -j DROP
 -A FORWARD -o breth1 -j DROP
 ```
+
+## Logging Config
+
+## Monitoring Config
+
+## IPFIX Config
+
+## CNI Config
+
+## Kubernetes Config
+
+## Metrics Config
+
+## OVN-Kubernetes Feature Config
+
+## HA Config
+
+## OVN Auth Config
+
+## Hybrid Overlay Config
+
+## Cluster Manager Config
