@@ -85,7 +85,7 @@ spec:
             memory: 500Mi
         env:
         - name: OVN_DAEMONSET_VERSION
-          value: "3"
+          value: "1.0.0"
         lifecycle:
           preStop:
             exec:

@@ -3,7 +3,7 @@ docker run --pid host --network host --user=0 --name ovn-node -dit --cap-add=NET
   -v /var/log/ovn-kubernetes:/var/log/ovn-kubernetes  -v /var/run/openvswitch:/var/run/openvswitch/ \
   -v /var/run/openvswitch:/var/run/ovn/ -v /var/run/ovn-kubernetes:/var/run/ovn-kubernetes \
   -v /etc/ovn:/ovn-cert:ro -v /var/lib/openvswitch:/etc/openvswitch:ro -v /var/lib/openvswitch:/etc/ovn:ro \
-  -e OVN_DAEMONSET_VERSION=3 -e OVN_LOGLEVEL_CONTROLLER="-vconsole:info" \
+  -e OVN_DAEMONSET_VERSION=1.0.0 -e OVN_LOGLEVEL_CONTROLLER="-vconsole:info" \
   -e OVN_NET_CIDR=$OVN_NET_CIDR -e OVN_SVC_CIDR=$OVN_SVC_CIDR -e K8S_NODE=$K8S_NODE  \
   -e OVN_GATEWAY_MODE="shared" -e OVN_GATEWAY_ROUTER_SUBNET=$OVN_GATEWAY_ROUTER_SUBNET \
   -e OVN_REMOTE_PROBE_INTERVAL=100000 -e K8S_APISERVER=$K8S_APISERVER \

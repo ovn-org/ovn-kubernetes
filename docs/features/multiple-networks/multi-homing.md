@@ -46,7 +46,7 @@ metadata:
 spec:
   config: |2
     {
-            "cniVersion": "0.3.1",
+            "cniVersion": "1.0.0",
             "name": "l3-network",
             "type": "ovn-k8s-cni-overlay",
             "topology":"layer3",
@@ -87,7 +87,7 @@ metadata:
 spec:
   config: |2
     {
-            "cniVersion": "0.3.1",
+            "cniVersion": "1.0.0",
             "name": "l2-network",
             "type": "ovn-k8s-cni-overlay",
             "topology":"layer2",
@@ -133,7 +133,7 @@ metadata:
 spec:
   config: |2
     {
-            "cniVersion": "0.3.1",
+            "cniVersion": "1.0.0",
             "name": "localnet-network",
             "type": "ovn-k8s-cni-overlay",
             "topology":"localnet",

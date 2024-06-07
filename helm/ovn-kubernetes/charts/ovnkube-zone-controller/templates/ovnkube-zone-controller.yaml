@@ -74,7 +74,7 @@ spec:
             memory: 300Mi
         env:
         - name: OVN_DAEMONSET_VERSION
-          value: "3"
+          value: "1.0.0"
         - name: OVN_LOGLEVEL_NB
           value:  {{ default "-vconsole:info -vfile:info" .Values.nbLogLevel | quote }}
         - name: K8S_APISERVER
@@ -136,7 +136,7 @@ spec:
             memory: 300Mi
         env:
         - name: OVN_DAEMONSET_VERSION
-          value: "3"
+          value: "1.0.0"
         - name: OVN_LOGLEVEL_SB
           value: {{ default "-vconsole:info -vfile:info" .Values.sbLogLevel | quote }}
         - name: K8S_APISERVER
@@ -197,7 +197,7 @@ spec:
             memory: 300Mi
         env:
         - name: OVN_DAEMONSET_VERSION
-          value: "3"
+          value: "1.0.0"
         - name: OVN_LOGLEVEL_NORTHD
           value: {{ default "-vconsole:info -vfile:info" .Values.northdLogLevel | quote }}
         - name: K8S_APISERVER
@@ -250,7 +250,7 @@ spec:
             memory: 300Mi
         env:
         - name: OVN_DAEMONSET_VERSION
-          value: "3"
+          value: "1.0.0"
         - name: OVNKUBE_LOGLEVEL
           value: {{ default 4 .Values.ovnkubeLocalLogLevel | quote }}
         - name: OVNKUBE_LOGFILE_MAXSIZE
