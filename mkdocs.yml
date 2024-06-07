@@ -94,7 +94,7 @@ nav:
       - Local Testing Guide: developer-guide/local_testing_guide.md
       - CI Testing Guide: ci/ci.md
       - Debugging: developer-guide/debugging.md
-      - Releasing: developer-guide/release.md
+      - Release Guide: developer-guide/release.md
   - API Reference Guide:
       - Introduction: api-reference/introduction.md
       - EgressIP: api-reference/egress-ip-api-spec.md
