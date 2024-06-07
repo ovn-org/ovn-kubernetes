@@ -2,5 +2,5 @@ apiVersion: v2
 name: ovnkube-zone-controller
 description: Helm chart to deploy zone controller
 type: application
-version: 0.1.0
+version: 1.0.0
 appVersion: "1.16.0"

@@ -1,16 +1,4 @@
-# sdn-dashboard
-
------------------------
-
-![Version: 1.0.0](https://img.shields.io/badge/Version-1.0.0-informational?style=flat-square) ![AppVersion: 1.0.0](https://img.shields.io/badge/AppVersion-1.0.0-informational?style=flat-square) 
-
-**Homepage:** <https://www.ovn.org/>
-
-## Source Code
-
-* <https://github.com/ovn-org/ovn-kubernetes>
-
-# sdn-dashboard
+# SDN Dashboards
 
 This helm chart installs the dashboards for ovn-kubernetes. The dashboards are installed for the following SDN components:
   - OVN Central / North Daemon

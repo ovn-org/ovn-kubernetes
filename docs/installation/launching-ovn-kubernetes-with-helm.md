@@ -1,15 +1,4 @@
-# ovn-kubernetes
-
------------------------
-
-![Version: 1.0.0](https://img.shields.io/badge/Version-1.0.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 1.16.0](https://img.shields.io/badge/AppVersion-1.16.0-informational?style=flat-square)
-
-**Homepage:** <https://ovn-kubernetes.io/>
-
-## Source Code
-
-* <https://github.com/ovn-org/ovn-kubernetes>
-* <https://github.com/ovn-org/ovn>
+# Launching OVN-Kubernetes using Helm Charts
 
 ## Introduction
 
@@ -667,4 +656,3 @@ false
 		</tr>
 	</tbody>
 </table>
-

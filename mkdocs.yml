@@ -80,6 +80,7 @@ nav:
   - Getting Started:
     - OVN-Kubernetes Overview: getting-started/overview.md
     - Launching OVN-Kubernetes: getting-started/launching-ovn-kubernetes.md
+    - Launching OVN-Kubernetes Using Helm: installation/launching-ovn-kubernetes-with-helm.md
     - Deploying Workloads on OVN-Kubernetes cluster: getting-started/example-pod-creation.md
     - Deploying Services on OVN-Kubernetes cluster: getting-started/example-service-creation.md
     - Setup and Building: getting-started/building-ovn-kubernetes.md
@@ -133,7 +134,7 @@ nav:
     - Logging: troubleshooting/logging.md
   - Observability:
     - Metrics: observability/metrics.md
-    - SDN Dashboard: installation/helm/sdn-dashboard.md
+    - SDN Dashboard: observability/sdn-dashboard.md
   - Enhancement Proposals:
     # - FeatureName: okeps/<filename.md>
     - Template: okeps/okep-4368-template.md
