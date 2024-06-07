@@ -92,6 +92,7 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPorts() 
 				}
 				if em.allowSendingToUnknown {
 					lsp.Addresses = append(lsp.Addresses, "unknown")
+					lsp.Options["force_fdb_lookup"] = "true"
 				}
 
 				if pod.noIfaceIdVer {
