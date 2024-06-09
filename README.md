@@ -34,13 +34,13 @@ Here are some links to help in your ovn-kubernetes journey:
 
 - [Welcome to ovn-kubernetes](https://ovn-kubernetes.io/) for overview of ovn-kubernetes.
 - [Architecture of ovn-kubernetes](https://ovn-kubernetes.io/design/architecture/)
-- [Deploying OVN Kubernetes cluster using KIND](.docs/getting-started/ovn-kubernetes-using-kind.md)
-- [Deploying OVN Kubernetes CNI using Helm](.docs/getting-started/ovn-kubernetes-using-helm.md)
+- [Deploying OVN Kubernetes cluster using KIND](https://ovn-kubernetes.io/installation/launching-ovn-kubernetes-on-kind/)
+- [Deploying OVN Kubernetes CNI using Helm](https://ovn-kubernetes.io/installation/helm)
 - [Setup and Building OVN Kubernetes](https://ovn-kubernetes.io/getting-started/building-ovn-kubernetes/) for instructions
   on setting up your development environment and building ovn kubernetes.
 - [Contributing to OVN Kubernetes](https://ovn-kubernetes.io/governance/CONTRIBUTING/) for how to get involved
   in our project
-- [Meet the Community](docs/governance/MEETINGS.md) for details on community
+- [Meet the Community](https://ovn-kubernetes.io/governance/MEETINGS/) for details on community
   meeting details.
 
 ## License
