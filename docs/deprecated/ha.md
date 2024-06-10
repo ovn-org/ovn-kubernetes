@@ -86,6 +86,8 @@ On the master nodes, we can either
    * start ovnkube with '-init-master'
      This should be a deployment running on master nodes. Eg.
 
+```
+
 IP1="$MASTER1"
 IP2="$MASTER2"
 IP3="$MASTER3"
@@ -105,6 +107,8 @@ nohup sudo ovnkube -k8s-kubeconfig kubeconfig.yaml \
  -nb-address="${ovn_nb}" \
  -sb-address="${ovn_sb}"  2>&1 &
 
+```
+
  * start 'ovnkube -init-cluster-manager' and 'ovnkube -init-ovnkube-controller'
    This should be a deployment with these 2 as containers
 
@@ -119,6 +123,7 @@ and ovnkube-controller.  If the user desires to run cluster-manager
 and ovnkube-controller separately, then it is possible to do
 so by running 
 
+```
 nohup sudo ovnkube -k8s-kubeconfig kubeconfig.yaml \
  -loglevel=4 \
  -k8s-apiserver="http://$K8S_APISERVER_IP:8080" \
@@ -140,6 +145,8 @@ nohup sudo ovnkube -k8s-kubeconfig kubeconfig.yaml \
  -k8s-service-cidr="$SERVICE_IP_SUBNET" \
  -k8s-token="$TOKEN" \
  -nodeport  2>&1 &
+
+```
 
 ## start ovn-northd
 
