@@ -532,27 +532,49 @@ func (bnc *BaseNetworkController) deleteNamespaceLocked(ns string) (*namespaceIn
 		}
 
 		// Delete the address set after a short delay.
-		// This is so NetworkPolicy handlers can converge and stop referencing it.
+		// This is to avoid OVN warnings while the address set is still
+		// referenced from NBDB ACLs until the NetworkPolicy handlers remove
+		// them.
 		addressSet := nsInfo.addressSet
 		go func() {
 			select {
 			case <-bnc.stopChan:
 				return
 			case <-time.After(20 * time.Second):
-				// Check to see if the NS was re-added in the meanwhile. If so,
-				// only delete if the new NS's AddressSet shouldn't exist.
-				nsInfo, nsUnlock := bnc.getNamespaceLocked(ns, true)
-				if nsInfo != nil {
-					defer nsUnlock()
-					if nsInfo.addressSet != nil {
-						klog.V(5).Infof("Skipping deferred deletion of AddressSet for NS %s: re-created", ns)
-						return
+				maybeDeleteAddressSet := func() bool {
+					bnc.namespacesMutex.Lock()
+					nsInfo := bnc.namespaces[ns]
+					if nsInfo == nil {
+						defer bnc.namespacesMutex.Unlock()
+					} else {
+						bnc.namespacesMutex.Unlock()
+						nsInfo.Lock()
+						defer nsInfo.Unlock()
+						bnc.namespacesMutex.Lock()
+						defer bnc.namespacesMutex.Unlock()
+						if nsInfo != bnc.namespaces[ns] {
+							// somebody deleted the namespace while waiting for
+							// its lock, check again in case it was added back
+							return false
+						}
+						// if somebody recreated the namespace during the delay,
+						// check if it has an address set
+						if nsInfo.addressSet != nil {
+							klog.V(5).Infof("Skipping deferred deletion of AddressSet for NS %s: recreated", ns)
+							return true
+						}
 					}
+					klog.V(5).Infof("Finishing deferred deletion of AddressSet for NS %s", ns)
+					if err := addressSet.Destroy(); err != nil {
+						klog.Errorf("Failed to delete AddressSet for NS %s: %v", ns, err.Error())
+					}
+					return true
 				}
-
-				klog.V(5).Infof("Finishing deferred deletion of AddressSet for NS %s", ns)
-				if err := addressSet.Destroy(); err != nil {
-					klog.Errorf("Failed to delete AddressSet for NS %s: %v", ns, err.Error())
+				for {
+					done := maybeDeleteAddressSet()
+					if done {
+						break
+					}
 				}
 			}
 		}()
