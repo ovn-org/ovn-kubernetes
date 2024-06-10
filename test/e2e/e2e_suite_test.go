@@ -43,7 +43,7 @@ func handleFlags() {
 
 var _ = ginkgo.BeforeSuite(func() {
 	// Make sure the framework's kubeconfig is set.
-	framework.ExpectNotEqual(framework.TestContext.KubeConfig, "", fmt.Sprintf("%s env var not set", clientcmd.RecommendedConfigPathEnvVar))
+	gomega.Expect(framework.TestContext.KubeConfig).NotTo(gomega.Equal(""), fmt.Sprintf("%s env var not set", clientcmd.RecommendedConfigPathEnvVar))
 
 	_, err := framework.LoadClientset()
 	framework.ExpectNoError(err)
