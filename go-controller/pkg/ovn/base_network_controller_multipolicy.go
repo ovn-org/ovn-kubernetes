@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	mnpapi "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta1"
+	mnpapi "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta2"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	knet "k8s.io/api/networking/v1"
@@ -76,6 +76,7 @@ func convertMultiNetPolicyToNetPolicy(mpolicy *mnpapi.MultiNetworkPolicy, allowP
 			ingress.Ports[j] = knet.NetworkPolicyPort{
 				Protocol: mport.Protocol,
 				Port:     mport.Port,
+				EndPort:  mport.EndPort,
 			}
 		}
 		ingress.From = make([]knet.NetworkPolicyPeer, len(mingress.From))
@@ -103,6 +104,7 @@ func convertMultiNetPolicyToNetPolicy(mpolicy *mnpapi.MultiNetworkPolicy, allowP
 			egress.Ports[j] = knet.NetworkPolicyPort{
 				Protocol: mport.Protocol,
 				Port:     mport.Port,
+				EndPort:  mport.EndPort,
 			}
 		}
 		egress.To = make([]knet.NetworkPolicyPeer, len(megress.To))

@@ -20,8 +20,8 @@ import (
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/kubernetes/test/e2e/framework"
 
-	mnpapi "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta1"
-	mnpclient "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/client/clientset/versioned/typed/k8s.cni.cncf.io/v1beta1"
+	mnpapi "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta2"
+	mnpclient "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/client/clientset/versioned/typed/k8s.cni.cncf.io/v1beta2"
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	nadclient "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/typed/k8s.cni.cncf.io/v1"
 )
@@ -47,7 +47,7 @@ var _ = Describe("Multi Homing", func() {
 	var (
 		cs        clientset.Interface
 		nadClient nadclient.K8sCniCncfIoV1Interface
-		mnpClient mnpclient.K8sCniCncfIoV1beta1Interface
+		mnpClient mnpclient.K8sCniCncfIoV1beta2Interface
 	)
 
 	BeforeEach(func() {
@@ -1657,7 +1657,7 @@ func assertServerPodIPInRange(cidr string, serverIP string, netPrefixLengthPerNo
 	ExpectWithOffset(1, inRange(subnet, serverIP)).To(Succeed())
 }
 
-func createMultiNetworkPolicy(mnpClient mnpclient.K8sCniCncfIoV1beta1Interface, namespace string, policy *mnpapi.MultiNetworkPolicy) error {
+func createMultiNetworkPolicy(mnpClient mnpclient.K8sCniCncfIoV1beta2Interface, namespace string, policy *mnpapi.MultiNetworkPolicy) error {
 	By("provisioning the multi-network policy")
 	_, err := mnpClient.MultiNetworkPolicies(namespace).Create(
 		context.Background(),

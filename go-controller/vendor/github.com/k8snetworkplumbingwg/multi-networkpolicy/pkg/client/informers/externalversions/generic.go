@@ -1,5 +1,5 @@
 /*
-Copyright 2020 The Kubernetes Authors
+Copyright 2022 The Kubernetes Authors
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -22,6 +22,7 @@ import (
 	"fmt"
 
 	v1beta1 "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta1"
+	v1beta2 "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta2"
 	schema "k8s.io/apimachinery/pkg/runtime/schema"
 	cache "k8s.io/client-go/tools/cache"
 )
@@ -55,6 +56,10 @@ func (f *sharedInformerFactory) ForResource(resource schema.GroupVersionResource
 	// Group=k8s.cni.cncf.io, Version=v1beta1
 	case v1beta1.SchemeGroupVersion.WithResource("multi-networkpolicies"):
 		return &genericInformer{resource: resource.GroupResource(), informer: f.K8sCniCncfIo().V1beta1().MultiNetworkPolicies().Informer()}, nil
+
+		// Group=k8s.cni.cncf.io, Version=v1beta2
+	case v1beta2.SchemeGroupVersion.WithResource("multi-networkpolicies"):
+		return &genericInformer{resource: resource.GroupResource(), informer: f.K8sCniCncfIo().V1beta2().MultiNetworkPolicies().Informer()}, nil
 
 	}
 

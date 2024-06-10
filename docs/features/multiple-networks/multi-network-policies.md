@@ -31,7 +31,7 @@ spec:
         "subnets": "192.168.100.0/24"
     }'
 ---
-apiVersion: k8s.cni.cncf.io/v1beta1
+apiVersion: k8s.cni.cncf.io/v1beta2
 kind: MultiNetworkPolicy
 metadata:
   annotations:

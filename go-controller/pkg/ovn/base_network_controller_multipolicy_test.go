@@ -7,7 +7,7 @@ import (
 	netv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta1"
+	mnpapi "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta2"
 )
 
 var _ = Describe("convertMultiNetPolicyToNetPolicy", func() {
@@ -194,14 +194,14 @@ func sameLabelsEverywhere() *metav1.LabelSelector {
 	}
 }
 
-func multiNetPolicyWithIngressIPBlock() *v1beta1.MultiNetworkPolicy {
-	return &v1beta1.MultiNetworkPolicy{
-		Spec: v1beta1.MultiNetworkPolicySpec{
-			Ingress: []v1beta1.MultiNetworkPolicyIngressRule{
+func multiNetPolicyWithIngressIPBlock() *mnpapi.MultiNetworkPolicy {
+	return &mnpapi.MultiNetworkPolicy{
+		Spec: mnpapi.MultiNetworkPolicySpec{
+			Ingress: []mnpapi.MultiNetworkPolicyIngressRule{
 				{
-					From: []v1beta1.MultiNetworkPolicyPeer{
+					From: []mnpapi.MultiNetworkPolicyPeer{
 						{
-							IPBlock: &v1beta1.IPBlock{
+							IPBlock: &mnpapi.IPBlock{
 								CIDR: "10.10.0.0/16",
 							},
 						},
@@ -212,14 +212,14 @@ func multiNetPolicyWithIngressIPBlock() *v1beta1.MultiNetworkPolicy {
 	}
 }
 
-func multiNetPolicyWithEgressIPBlock() *v1beta1.MultiNetworkPolicy {
-	return &v1beta1.MultiNetworkPolicy{
-		Spec: v1beta1.MultiNetworkPolicySpec{
-			Egress: []v1beta1.MultiNetworkPolicyEgressRule{
+func multiNetPolicyWithEgressIPBlock() *mnpapi.MultiNetworkPolicy {
+	return &mnpapi.MultiNetworkPolicy{
+		Spec: mnpapi.MultiNetworkPolicySpec{
+			Egress: []mnpapi.MultiNetworkPolicyEgressRule{
 				{
-					To: []v1beta1.MultiNetworkPolicyPeer{
+					To: []mnpapi.MultiNetworkPolicyPeer{
 						{
-							IPBlock: &v1beta1.IPBlock{
+							IPBlock: &mnpapi.IPBlock{
 								CIDR: "10.10.0.0/16",
 							},
 						},
@@ -230,52 +230,52 @@ func multiNetPolicyWithEgressIPBlock() *v1beta1.MultiNetworkPolicy {
 	}
 }
 
-func multiNetPolicyWithIngressPodSelector(policyName string) *v1beta1.MultiNetworkPolicy {
-	return &v1beta1.MultiNetworkPolicy{
+func multiNetPolicyWithIngressPodSelector(policyName string) *mnpapi.MultiNetworkPolicy {
+	return &mnpapi.MultiNetworkPolicy{
 		ObjectMeta: metav1.ObjectMeta{Name: policyName},
-		Spec: v1beta1.MultiNetworkPolicySpec{
-			Ingress: []v1beta1.MultiNetworkPolicyIngressRule{
+		Spec: mnpapi.MultiNetworkPolicySpec{
+			Ingress: []mnpapi.MultiNetworkPolicyIngressRule{
 				{
-					From: []v1beta1.MultiNetworkPolicyPeer{{PodSelector: sameLabelsEverywhere()}},
+					From: []mnpapi.MultiNetworkPolicyPeer{{PodSelector: sameLabelsEverywhere()}},
 				},
 			},
 		},
 	}
 }
 
-func multiNetPolicyWithEgressPodSelector(policyName string) *v1beta1.MultiNetworkPolicy {
-	return &v1beta1.MultiNetworkPolicy{
+func multiNetPolicyWithEgressPodSelector(policyName string) *mnpapi.MultiNetworkPolicy {
+	return &mnpapi.MultiNetworkPolicy{
 		ObjectMeta: metav1.ObjectMeta{Name: policyName},
-		Spec: v1beta1.MultiNetworkPolicySpec{
-			Egress: []v1beta1.MultiNetworkPolicyEgressRule{
+		Spec: mnpapi.MultiNetworkPolicySpec{
+			Egress: []mnpapi.MultiNetworkPolicyEgressRule{
 				{
-					To: []v1beta1.MultiNetworkPolicyPeer{{PodSelector: sameLabelsEverywhere()}},
+					To: []mnpapi.MultiNetworkPolicyPeer{{PodSelector: sameLabelsEverywhere()}},
 				},
 			},
 		},
 	}
 }
 
-func multiNetPolicyWithIngressNamespaceSelector(policyName string) *v1beta1.MultiNetworkPolicy {
-	return &v1beta1.MultiNetworkPolicy{
+func multiNetPolicyWithIngressNamespaceSelector(policyName string) *mnpapi.MultiNetworkPolicy {
+	return &mnpapi.MultiNetworkPolicy{
 		ObjectMeta: metav1.ObjectMeta{Name: policyName},
-		Spec: v1beta1.MultiNetworkPolicySpec{
-			Ingress: []v1beta1.MultiNetworkPolicyIngressRule{
+		Spec: mnpapi.MultiNetworkPolicySpec{
+			Ingress: []mnpapi.MultiNetworkPolicyIngressRule{
 				{
-					From: []v1beta1.MultiNetworkPolicyPeer{{NamespaceSelector: sameLabelsEverywhere()}},
+					From: []mnpapi.MultiNetworkPolicyPeer{{NamespaceSelector: sameLabelsEverywhere()}},
 				},
 			},
 		},
 	}
 }
 
-func multiNetPolicyWithEgressNamespaceSelector(policyName string) *v1beta1.MultiNetworkPolicy {
-	return &v1beta1.MultiNetworkPolicy{
+func multiNetPolicyWithEgressNamespaceSelector(policyName string) *mnpapi.MultiNetworkPolicy {
+	return &mnpapi.MultiNetworkPolicy{
 		ObjectMeta: metav1.ObjectMeta{Name: policyName},
-		Spec: v1beta1.MultiNetworkPolicySpec{
-			Egress: []v1beta1.MultiNetworkPolicyEgressRule{
+		Spec: mnpapi.MultiNetworkPolicySpec{
+			Egress: []mnpapi.MultiNetworkPolicyEgressRule{
 				{
-					To: []v1beta1.MultiNetworkPolicyPeer{{NamespaceSelector: sameLabelsEverywhere()}},
+					To: []mnpapi.MultiNetworkPolicyPeer{{NamespaceSelector: sameLabelsEverywhere()}},
 				},
 			},
 		},

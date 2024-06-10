@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	cnitypes "github.com/containernetworking/cni/pkg/types"
-	mnpapi "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta1"
+	mnpapi "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta2"
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	"github.com/onsi/ginkgo"
 	"github.com/onsi/ginkgo/extensions/table"
@@ -44,6 +44,7 @@ func convertNetPolicyToMultiNetPolicy(policy *knet.NetworkPolicy) *mnpapi.MultiN
 			mingress.Ports[j] = mnpapi.MultiNetworkPolicyPort{
 				Protocol: port.Protocol,
 				Port:     port.Port,
+				EndPort:  port.EndPort,
 			}
 		}
 		mingress.From = make([]mnpapi.MultiNetworkPolicyPeer, len(ingress.From))
@@ -68,6 +69,7 @@ func convertNetPolicyToMultiNetPolicy(policy *knet.NetworkPolicy) *mnpapi.MultiN
 			megress.Ports[j] = mnpapi.MultiNetworkPolicyPort{
 				Protocol: port.Protocol,
 				Port:     port.Port,
+				EndPort:  port.EndPort,
 			}
 		}
 		megress.To = make([]mnpapi.MultiNetworkPolicyPeer, len(egress.To))
@@ -446,11 +448,11 @@ var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
 				startOvn(initialDB, watchNodes, []v1.Node{node}, []v1.Namespace{namespace1, namespace2}, nil, nil,
 					[]nettypes.NetworkAttachmentDefinition{*nad}, nil, nil)
 
-				_, err = fakeOvn.fakeClient.MultiNetworkPolicyClient.K8sCniCncfIoV1beta1().MultiNetworkPolicies(mpolicy.Namespace).
+				_, err = fakeOvn.fakeClient.MultiNetworkPolicyClient.K8sCniCncfIoV1beta2().MultiNetworkPolicies(mpolicy.Namespace).
 					Create(context.TODO(), mpolicy, metav1.CreateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				_, err = fakeOvn.fakeClient.MultiNetworkPolicyClient.K8sCniCncfIoV1beta1().MultiNetworkPolicies(mpolicy.Namespace).
+				_, err = fakeOvn.fakeClient.MultiNetworkPolicyClient.K8sCniCncfIoV1beta2().MultiNetworkPolicies(mpolicy.Namespace).
 					Get(context.TODO(), mpolicy.Name, metav1.GetOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -514,11 +516,11 @@ var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
 				mpolicy := convertNetPolicyToMultiNetPolicy(networkPolicy)
 				mpolicy.Annotations = map[string]string{PolicyForAnnotation: nadNamespacedName}
 
-				_, err = fakeOvn.fakeClient.MultiNetworkPolicyClient.K8sCniCncfIoV1beta1().MultiNetworkPolicies(mpolicy.Namespace).
+				_, err = fakeOvn.fakeClient.MultiNetworkPolicyClient.K8sCniCncfIoV1beta2().MultiNetworkPolicies(mpolicy.Namespace).
 					Create(context.TODO(), mpolicy, metav1.CreateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				_, err = fakeOvn.fakeClient.MultiNetworkPolicyClient.K8sCniCncfIoV1beta1().MultiNetworkPolicies(mpolicy.Namespace).
+				_, err = fakeOvn.fakeClient.MultiNetworkPolicyClient.K8sCniCncfIoV1beta2().MultiNetworkPolicies(mpolicy.Namespace).
 					Get(context.TODO(), mpolicy.Name, metav1.GetOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -539,7 +541,7 @@ var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
 
 				// Delete the multi network policy
 				ginkgo.By("Deleting the multi network policy")
-				err = fakeOvn.fakeClient.MultiNetworkPolicyClient.K8sCniCncfIoV1beta1().MultiNetworkPolicies(mpolicy.Namespace).
+				err = fakeOvn.fakeClient.MultiNetworkPolicyClient.K8sCniCncfIoV1beta2().MultiNetworkPolicies(mpolicy.Namespace).
 					Delete(context.TODO(), mpolicy.Name, metav1.DeleteOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedData1))
