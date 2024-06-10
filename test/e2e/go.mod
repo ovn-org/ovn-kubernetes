@@ -59,6 +59,7 @@ require (
 	github.com/go-openapi/swag v0.22.3 // indirect
 	github.com/go-task/slim-sprig v0.0.0-20230315185526-52ccab3ef572 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
+	github.com/golang/glog v1.2.0 // indirect
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/google/cel-go v0.17.8 // indirect
@@ -154,7 +155,6 @@ require (
 	k8s.io/klog/v2 v2.120.1 // indirect
 	k8s.io/kms v0.30.2 // indirect
 	k8s.io/kube-openapi v0.0.0-20240228011516-70dd3763d340 // indirect
-	k8s.io/kubectl v0.30.2 // indirect
 	k8s.io/kubelet v0.30.2 // indirect
 	kubevirt.io/containerized-data-importer-api v1.57.0-alpha1 // indirect
 	kubevirt.io/controller-lifecycle-operator-sdk/api v0.0.0-20220329064328-f3cc58c6ed90 // indirect
@@ -175,6 +175,7 @@ require (
 	github.com/ovn-org/ovn-kubernetes/go-controller v0.0.0-20230914190234-9cbdd02db9c6
 	go.universe.tf/metallb v0.0.0-00010101000000-000000000000
 	google.golang.org/grpc v1.63.2
+	k8s.io/kubectl v0.30.2
 	kubevirt.io/api v1.0.0
 	sigs.k8s.io/controller-runtime v0.18.4
 )
