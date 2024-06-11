@@ -399,6 +399,7 @@ type OVNKubernetesFeatureConfig struct {
 	EnableEgressService             bool `gcfg:"enable-egress-service"`
 	EgressIPNodeHealthCheckPort     int  `gcfg:"egressip-node-healthcheck-port"`
 	EnableMultiNetwork              bool `gcfg:"enable-multi-network"`
+	EnableNetworkSegmentation       bool `gcfg:"enable-network-segmentation"`
 	EnableMultiNetworkPolicy        bool `gcfg:"enable-multi-networkpolicy"`
 	EnableStatelessNetPol           bool `gcfg:"enable-stateless-netpol"`
 	EnableInterconnect              bool `gcfg:"enable-interconnect"`
@@ -1019,6 +1020,12 @@ var OVNK8sFeatureFlags = []cli.Flag{
 		Usage:       "Configure to use MultiNetworkPolicy CRD feature with ovn-kubernetes.",
 		Destination: &cliConfig.OVNKubernetesFeature.EnableMultiNetworkPolicy,
 		Value:       OVNKubernetesFeature.EnableMultiNetworkPolicy,
+	},
+	&cli.BoolFlag{
+		Name:        "enable-network-segmentation",
+		Usage:       "Configure to use network segmentation feature with ovn-kubernetes.",
+		Destination: &cliConfig.OVNKubernetesFeature.EnableNetworkSegmentation,
+		Value:       OVNKubernetesFeature.EnableNetworkSegmentation,
 	},
 	&cli.BoolFlag{
 		Name:        "enable-stateless-netpol",
