@@ -567,7 +567,6 @@ func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 		// same process. TODO(tssurya): In upstream ovnk, its possible to run these as different processes
 		// in which case this flushing feature is not supported.
 		if config.OVNKubernetesFeature.EnableInterconnect && oc.zone != ovntypes.OvnDefaultZone {
-			util.SetARPTimeout()
 			// every minute cleanup stale conntrack entries if any
 			go wait.Until(func() {
 				oc.checkAndDeleteStaleConntrackEntries()
