@@ -5,13 +5,15 @@ package util
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"net"
+	"net/netip"
 	"reflect"
 	"strings"
 	"time"
 
-	"github.com/j-keck/arping"
+	"github.com/mdlayher/arp"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
@@ -409,12 +411,24 @@ func LinkNeighAdd(link netlink.Link, neighIP net.IP, neighMAC net.HardwareAddr) 
 	return nil
 }
 
-func SetARPTimeout() {
-	arping.SetTimeout(50 * time.Millisecond) // hard-coded for now
-}
-
 func GetMACAddressFromARP(neighIP net.IP) (net.HardwareAddr, error) {
-	hwAddr, _, err := arping.Ping(neighIP)
+	selectedIface, err := findUsableInterfaceForNetwork(neighIP)
+	if err != nil {
+		return nil, err
+	}
+	cli, err := arp.Dial(selectedIface)
+	if err != nil {
+		return nil, err
+	}
+	defer cli.Close()
+	if err := cli.SetDeadline(time.Now().Add(50 * time.Millisecond)); err != nil { // hard-coded for now
+		return nil, err
+	}
+	neighAddr, err := netip.ParseAddr(neighIP.String())
+	if err != nil {
+		return nil, err
+	}
+	hwAddr, err := cli.Resolve(neighAddr)
 	if err != nil {
 		return nil, err
 	}
@@ -680,4 +694,49 @@ func GetIPFamily(v6 bool) int {
 
 func (defaultNetLinkOps) LinkSetVfHardwareAddr(pfLink netlink.Link, vfIndex int, hwaddr net.HardwareAddr) error {
 	return netlink.LinkSetVfHardwareAddr(pfLink, vfIndex, hwaddr)
+}
+
+func findUsableInterfaceForNetwork(ipAddr net.IP) (*net.Interface, error) {
+	ifaces, err := net.Interfaces()
+
+	if err != nil {
+		return nil, err
+	}
+
+	isDown := func(iface net.Interface) bool {
+		return iface.Flags&1 == 0
+	}
+
+	for _, iface := range ifaces {
+		if isDown(iface) {
+			continue
+		}
+		found, err := ipAddrExistsAtInterface(ipAddr, iface)
+		if err != nil {
+			return nil, err
+		}
+		if !found {
+			continue
+		}
+
+		return &iface, nil
+	}
+	return nil, errors.New("no usable interface found")
+}
+
+func ipAddrExistsAtInterface(ipAddr net.IP, iface net.Interface) (bool, error) {
+	addrs, err := iface.Addrs()
+
+	if err != nil {
+		return false, err
+	}
+
+	for _, a := range addrs {
+		if ipnet, ok := a.(*net.IPNet); ok {
+			if ipnet.Contains(ipAddr) {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
 }
