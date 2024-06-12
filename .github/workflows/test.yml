@@ -509,7 +509,7 @@ jobs:
     - name: Run Tests
       # e2e tests take ~60 minutes normally, 120 should be more than enough
       # set 3 hours for control-plane tests as these might take a while
-      timeout-minutes: ${{ matrix.target == 'control-plane' && 180 || matrix.target == 'external-gateway' && 180 || 120 }}
+      timeout-minutes: ${{ matrix.target == 'control-plane' && 180 || matrix.target == 'control-plane-helm' && 180 || matrix.target == 'external-gateway' && 180 || 120 }}
       run: |
         # used by e2e diagnostics package
         export OVN_IMAGE="ovn-daemonset-fedora:pr"
@@ -528,6 +528,7 @@ jobs:
           make -C test control-plane WHAT="Kubevirt Virtual Machines"
         elif [ "${{ matrix.target }}" == "control-plane-helm" ]; then
           make -C test control-plane
+          make -C test conformance
         elif [ "${{ matrix.target }}" == "network-segmentation" ]; then
           make -C test control-plane WHAT="Network Segmentation"
         elif [ "${{ matrix.target }}" == "tools" ]; then
