@@ -67,6 +67,11 @@ type NetworkControllerManager interface {
 	CleanupDeletedNetworks(allControllers []NetworkController) error
 }
 
+type NetAttachDefinitionManager interface {
+	OnAddNetAttachDef(*nettypes.NetworkAttachmentDefinition, util.NetInfo) error
+	OnDelNetAttachDef(nadName, netName string) error
+}
+
 type networkNADInfo struct {
 	nadNames  map[string]struct{}
 	nc        NetworkController
@@ -84,6 +89,7 @@ type NetAttachDefinitionController struct {
 	loopPeriod         time.Duration
 	stopChan           chan struct{}
 	wg                 sync.WaitGroup
+	managers           map[string]NetAttachDefinitionManager
 
 	// key is nadName, value is BasicNetInfo
 	perNADNetInfo *syncmap.SyncMap[util.BasicNetInfo]
@@ -114,6 +120,7 @@ func NewNetAttachDefinitionController(name string, ncm NetworkControllerManager,
 		queue:              workqueue.NewNamedRateLimitingQueue(rateLimiter, "net-attach-def"),
 		loopPeriod:         time.Second,
 		stopChan:           make(chan struct{}),
+		managers:           map[string]NetAttachDefinitionManager{},
 		perNADNetInfo:      syncmap.NewSyncMap[util.BasicNetInfo](),
 		perNetworkNADInfo:  syncmap.NewSyncMap[*networkNADInfo](),
 	}
@@ -128,6 +135,10 @@ func NewNetAttachDefinitionController(name string, ncm NetworkControllerManager,
 	}
 	return nadController, nil
 
+}
+
+func (nadController *NetAttachDefinitionController) AddManager(key string, manager NetAttachDefinitionManager) {
+	nadController.managers[key] = manager
 }
 
 func (nadController *NetAttachDefinitionController) Start() error {
@@ -381,6 +392,14 @@ func (nadController *NetAttachDefinitionController) AddNetAttachDef(ncm NetworkC
 				nadController.perNADNetInfo.Delete(nadName)
 				return nil
 			}
+
+			for managerName, manager := range nadController.managers {
+				if err := manager.OnAddNetAttachDef(netattachdef, nInfo); err != nil {
+					nadController.perNADNetInfo.Delete(nadName)
+					return fmt.Errorf("failed running OnAddNetAttachDef at nad manager '%s': %w", managerName, err)
+				}
+			}
+
 			klog.V(5).Infof("%s: net-attach-def %s network %s first seen", nadController.name, nadName, netName)
 			err = nadController.addNADToController(ncm, nadName, nInfo, doStart)
 			if err != nil {
@@ -451,6 +470,14 @@ func (nadController *NetAttachDefinitionController) DeleteNetAttachDef(netAttach
 			return nil
 		}
 		netName := existingNadNetConfInfo.GetNetworkName()
+
+		for managerName, manager := range nadController.managers {
+			if err := manager.OnDelNetAttachDef(nadName, netName); err != nil {
+				nadController.perNADNetInfo.Delete(nadName)
+				return fmt.Errorf("failed running OnDelNetAttachDef at nad manager '%s': %w", managerName, err)
+			}
+		}
+
 		err := nadController.deleteNADFromController(netName, nadName)
 		if err != nil {
 			klog.Errorf("%s: Failed to delete net-attach-def %s from network %s: %v", nadController.name, nadName, netName, err)
