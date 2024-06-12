@@ -110,6 +110,10 @@ spec:
 - `excludeSubnets` (string, optional): a comma separated list of CIDRs / IPs.
   These IPs will be removed from the assignable IP pool, and never handed over
   to the pods.
+- `allowPersistentIPs` (boolean, optional): persist the OVN Kubernetes assigned
+   IP addresses in a `ipamclaims.k8s.cni.cncf.io` object. This IP addresses will
+   be reused by other pods if requested. Useful for KubeVirt VMs. Only makes
+   sense if the `subnets` attribute is also defined.
 
 **NOTE**
 - when the subnets attribute is omitted, the logical switch implementing the
@@ -161,6 +165,10 @@ localnet network.
   These IPs will be removed from the assignable IP pool, and never handed over
   to the pods.
 - `vlanID` (integer, optional): assign VLAN tag. Defaults to none.
+- `allowPersistentIPs` (boolean, optional): persist the OVN Kubernetes assigned
+   IP addresses in a `ipamclaims.k8s.cni.cncf.io` object. This IP addresses will
+   be reused by other pods if requested. Useful for KubeVirt VMs. Only makes
+   sense if the `subnets` attribute is also defined.
 
 **NOTE**
 - when the subnets attribute is omitted, the logical switch implementing the
@@ -231,6 +239,75 @@ spec:
   **only** for an L2 or localnet attachment.
 - specifying a static IP address for the pod is only possible when the
   attachment configuration does **not** feature subnets.
+
+## Persistent IP addresses for virtualization workloads
+OVN-Kubernetes provides persistent IP addresses for virtualization workloads,
+allowing VMs to have the same IP addresses when they migrate, when they restart,
+and when they stop, the resume operation.
+
+For that, the network admin must configure the network accordingly - the
+`allowPersistentIPs` flag must be enabled in the NAD of the network. As with the
+other network knobs, all NADs pointing to the same network **must** feature the
+same configuration - i.e. all NADs in the network must either allow (or reject)
+persistent IPs.
+
+The client application (which creates the VM, and manages its lifecycle) is
+responsible for creating the `ipamclaims.k8s.cni.cncf.io` object, and point to
+it in the network selection element upon pod creation; OVN-Kubernetes will then
+persist the IP addresses it has allocated the pod in the `IPAMClaim`. This flow
+is portrayed in the sequence diagram below.
+
+```mermaid
+sequenceDiagram
+  actor user
+  participant KubeVirt
+  participant apiserver
+  participant OVN-Kubernetes
+
+  user->>KubeVirt: createVM(name=vm-a)
+  KubeVirt-->>user: OK
+
+  KubeVirt->>apiserver: createIPAMClaims(networks=...)
+  apiserver-->>KubeVirt: OK
+
+  KubeVirt->>apiserver: createPOD(ipamClaims=...)
+  apiserver-->>KubeVirt: OK
+
+  apiserver->>OVN-Kubernetes: reconcilePod(podKey=...)
+  OVN-Kubernetes->>OVN-Kubernetes: ips = AllocateNextIPs(nad.subnet)
+  OVN-Kubernetes->>apiserver: IPAMClaim.UpdateStatus(status.ips = ips)
+  apiserver-->>OVN-Kubernetes: OK
+```
+
+Whenever a VM is migrated, restarted, or stopped / then started a new pod will
+be scheduled to host the VM; it will also point to the same `IPAMClaim`s, and
+OVN-Kubernetes will fulfill the IP addresses being requested by the client.
+This flow is shown in the sequence diagram below.
+
+```mermaid
+sequenceDiagram
+  actor user
+  participant KubeVirt
+  participant apiserver
+  participant OVN-Kubernetes
+
+  user->>KubeVirt: startVM(vmName) or migrateVM(vmName)
+  KubeVirt-->>user: OK
+
+  note over KubeVirt: podName := "launcher-<vm name>"
+  KubeVirt->>apiserver: createPod(name=podName, ipam-claims=...)
+  apiserver-->>KubeVirt: OK
+
+  apiserver->>OVN-Kubernetes: reconcilePod(podKey=...)
+  OVN-Kubernetes->>OVN-Kubernetes: ipamClaim := readIPAMClaim(claimName)
+  OVN-Kubernetes->>OVN-Kubernetes: allocatePodIPs(ipamClaim.Status.IPs)
+```
+
+Managing the life-cycle of the `IPAMClaim`s objects is the responsibility of the
+client application that created them in the first place. In this case, KubeVirt.
+
+This feature is described in detail in the following KubeVirt
+[design proposal](https://github.com/kubevirt/community/pull/279).
 
 ## Limitations
 OVN-K currently does **not** support:
