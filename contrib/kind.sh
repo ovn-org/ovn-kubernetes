@@ -310,6 +310,8 @@ parse_args() {
                                                 ;;
             -mne | --multi-network-enable )     ENABLE_MULTI_NET=true
                                                 ;;
+            -nse | --network-segmentation-enable) ENABLE_NETWORK_SEGMENTATION=true
+                                                  ;;
             -ic | --enable-interconnect )       OVN_ENABLE_INTERCONNECT=true
                                                 ;;
             --disable-ovnkube-identity)         OVN_ENABLE_OVNKUBE_IDENTITY=false
@@ -391,6 +393,7 @@ print_params() {
      echo "OVN_METRICS_SCALE_ENABLE = $OVN_METRICS_SCALE_ENABLE"
      echo "OVN_ISOLATED = $OVN_ISOLATED"
      echo "ENABLE_MULTI_NET = $ENABLE_MULTI_NET"
+     echo "ENABLE_NETWORK_SEGMENTATION= $ENABLE_NETWORK_SEGMENTATION"
      echo "OVN_ENABLE_INTERCONNECT = $OVN_ENABLE_INTERCONNECT"
      if [ "$OVN_ENABLE_INTERCONNECT" == true ]; then
        echo "KIND_NUM_NODES_PER_ZONE = $KIND_NUM_NODES_PER_ZONE"
@@ -589,6 +592,7 @@ set_default_params() {
     OVN_GATEWAY_OPTS="--allow-no-uplink --gateway-interface=br-ex"
   fi
   ENABLE_MULTI_NET=${ENABLE_MULTI_NET:-false}
+  ENABLE_NETWORK_SEGMENTATION=${ENABLE_NETWORK_SEGMENTATION:-false}
   OVN_COMPACT_MODE=${OVN_COMPACT_MODE:-false}
   if [ "$OVN_COMPACT_MODE" == true ]; then
     KIND_NUM_WORKER=0
@@ -829,6 +833,7 @@ create_ovn_kube_manifests() {
     --v6-transit-switch-subnet="${TRANSIT_SWITCH_SUBNET_IPV6}" \
     --ex-gw-network-interface="${OVN_EX_GW_NETWORK_INTERFACE}" \
     --multi-network-enable="${ENABLE_MULTI_NET}" \
+    --network-segmentation-enable="${ENABLE_NETWORK_SEGMENTATION}" \
     --ovnkube-metrics-scale-enable="${OVN_METRICS_SCALE_ENABLE}" \
     --compact-mode="${OVN_COMPACT_MODE}" \
     --enable-interconnect="${OVN_ENABLE_INTERCONNECT}" \
