@@ -100,3 +100,7 @@ rules:
           - adminnetworkpolicies/status
           - baselineadminnetworkpolicies/status
       verbs: [ "patch" ]
+    - apiGroups: [""]
+      resources:
+          - namespaces/status
+      verbs: [ "patch" ]
