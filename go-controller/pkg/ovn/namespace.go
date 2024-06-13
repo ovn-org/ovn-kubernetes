@@ -100,6 +100,15 @@ func (oc *DefaultNetworkController) AddNamespace(ns *kapi.Namespace) error {
 	klog.Infof("[%s] adding namespace", ns.Name)
 	// Keep track of how long syncs take.
 	start := time.Now()
+
+	if util.IsNetworkSegmentationSupportEnabled() {
+		if _, ok := ns.Annotations[util.ActiveNetworkAnnotation]; !ok {
+			if err := util.UpdateNamespaceActiveNetwork(oc.kube.KClient, ns, types.DefaultNetworkName); err != nil {
+				return fmt.Errorf("failed annotating namesspace with active-network=default: %w", err)
+			}
+		}
+	}
+
 	defer func() {
 		klog.Infof("[%s] adding namespace took %v", ns.Name, time.Since(start))
 	}()

@@ -32,6 +32,7 @@ import (
 	testutils "k8s.io/kubernetes/test/utils"
 	admissionapi "k8s.io/pod-security-admission/api"
 	utilnet "k8s.io/utils/net"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const (
@@ -1239,4 +1240,14 @@ func getGatewayMTUSupport(node *v1.Node) bool {
 		return true
 	}
 	return false
+}
+
+func thisNamespace(cli kubernetes.Interface, namespace *v1.Namespace) func() (*v1.Namespace, error) {
+	return func() (*v1.Namespace, error) {
+		return cli.CoreV1().Namespaces().Get(context.Background(), namespace.Name, metav1.GetOptions{})
+	}
+}
+
+func getAnnotations(obj client.Object) map[string]string {
+	return obj.GetAnnotations()
 }
