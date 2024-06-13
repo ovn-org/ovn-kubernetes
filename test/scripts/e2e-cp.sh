@@ -161,6 +161,15 @@ if [ "${WHAT}" != "${KV_LIVE_MIGRATION_TESTS}" ]; then
   SKIPPED_TESTS+=$KV_LIVE_MIGRATION_TESTS
 fi
 
+# Only run network segmentation tests if they are explicitly requested
+KV_NETWORK_SEGMENTATION_TESTS="Network Segmentation"
+if [ "${WHAT}" != "${KV_NETWORK_SEGMENTATION_TESTS}" ]; then
+  if [ "$SKIPPED_TESTS" != "" ]; then
+	SKIPPED_TESTS+="|"
+  fi
+  SKIPPED_TESTS+=$KV_NETWORK_SEGMENTATION_TESTS
+fi
+
 # setting these is required to make RuntimeClass tests work ... :/
 export KUBE_CONTAINER_RUNTIME=remote
 export KUBE_CONTAINER_RUNTIME_ENDPOINT=unix:///run/containerd/containerd.sock
