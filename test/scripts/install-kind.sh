@@ -45,7 +45,7 @@ install_kind() {
 }
 
 pushd $TMP_DIR
-K8S_VERSION="v1.29.2"
+K8S_VERSION="v1.30.2"
 
 # Install kubectl for K8S_VERSION in use
 # (to get latest stable version: $(curl -s https://storage.googleapis.com/kubernetes-release/release/stable.txt )
