@@ -155,8 +155,9 @@ func (c *Controller) ensureAdminNetworkPolicy(anp *anpapi.AdminNetworkPolicy) er
 			c.eventRecorder.Eventf(&v1.ObjectReference{
 				Kind: "AdminNetworkPolicy",
 				Name: anp.Name,
-			}, v1.EventTypeWarning, ANPWithDuplicatePriorityEvent, "This ANP %s has a conflicting priority with ANP %s: %s;"+
-				"Please verify your rules are non-lapping between all policies at same priority to avoid undefined behavior", anp.Name, existingName)
+			}, v1.EventTypeWarning, ANPWithDuplicatePriorityEvent, "This ANP %s has a conflicting priority with ANP %s:"+
+				"Please verify your rules are non-lapping between all policies at same priority to avoid undefined behavior",
+				anp.Name, existingName)
 		} else {
 			// Let us update the anpPriorityMap cache by adding this new priority to it
 			// only if there wasn't an already existing entry at that priority - in which case we don't need to update the cache
@@ -188,8 +189,9 @@ func (c *Controller) ensureAdminNetworkPolicy(anp *anpapi.AdminNetworkPolicy) er
 			c.eventRecorder.Eventf(&v1.ObjectReference{
 				Kind: "AdminNetworkPolicy",
 				Name: anp.Name,
-			}, v1.EventTypeWarning, ANPWithDuplicatePriorityEvent, "This ANP %s has a conflicting priority with ANP %s: %s;"+
-				"Please verify your rules are non-lapping between all policies at same priority to avoid undefined behavior", anp.Name, existingName)
+			}, v1.EventTypeWarning, ANPWithDuplicatePriorityEvent, "This ANP %s has a conflicting priority with ANP %s:"+
+				"Please verify your rules are non-lapping between all policies at same priority to avoid undefined behavior",
+				anp.Name, existingName)
 		} else {
 			// Let us update the anpPriorityMap cache by adding this new priority to it
 			// only if there wasn't an already existing entry at that priority - in which case we don't need to update the cache
