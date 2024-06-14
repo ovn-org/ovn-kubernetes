@@ -2,32 +2,33 @@
 
 ## Introduction
 
-OVS supports [Hardware Offload features](https://docs.openvswitch.org/en/latest/howto/tc-offload/#flow-hardware-offload) which allows to offload OVS packet processing to the hardware (switch chassis, NIC etc.) while maintaining OVS control path (client facing apis and tools etc.) unmodified. It utilizes [Single Root-IO Virtualization (SR-IOV)](https://learn.microsoft.com/en-us/windows-hardware/drivers/network/overview-of-single-root-i-o-virtualization--sr-iov-) technology with [VF representor](https://docs.openvswitch.org/en/latest/topics/dpdk/phy/#representors) host net-device.
-OVS offloading with kernel data path is documented [here](https://ovn-kubernetes.io/features/hardware-offload/ovs_offload/)
+OVS supports [Hardware Acceleration features](https://docs.openvswitch.org/en/latest/howto/tc-offload/#flow-hardware-offload) which allows to offload OVS packet processing to the hardware (switch chassis, NIC etc.) while maintaining OVS control path (client facing apis and tools etc.) unmodified. It utilizes [Single Root-IO Virtualization (SR-IOV)](https://learn.microsoft.com/en-us/windows-hardware/drivers/network/overview-of-single-root-i-o-virtualization--sr-iov-) technology with [VF representor](https://docs.openvswitch.org/en/latest/topics/dpdk/phy/#representors) host net-device.
 
 DOCA (Data Center Infrastructure-on-a-Chip Architecture) is a software stack for NVIDIA Smart NIC (ConnectX) and Data Processing Unit (BlueField) product lines. It contains a runtime and development environment, including libraries and drivers for device management and programmability, for the host (Smart NIC) or as part of the Data Processing Unit (DPU).
 
-OVS-DOCA extends traditional OVS-DPDK and OVS-Kernel data-path offload interfaces (DPIF), adds  OVS-DOCA as an additional DPIF implementation. It preserves the same interfaces as OVS-DPDK and OVS-Kernel while utilizing the DOCA Flow library. OVS-DOCA uses unique hardware offload mechanisms and application techniques to maximize performance and adds other features.
+OVS-DOCA extends traditional OVS-DPDK and OVS-Kernel data-path offload interfaces (DPIF), adds  OVS-DOCA as an additional DPIF implementation. It preserves the same interfaces as OVS-DPDK and OVS-Kernel while utilizing the DOCA Flow library. OVS-DOCA uses unique hardware offload mechanisms and application techniques to maximize performance and adds other features. OVS Acceleration with kernel datapath is documented [here](https://ovn-kubernetes.io/features/hardware-offload/ovs_acceleration/)
 
 ![ovs-datapath-offload-interfaces](../../images/ovs-datapath-offload-interfaces.png)
 
 ## Motivation: Why use ovs-doca instead of ovs-dpdk
 
 OVS-DOCA is also a userland based virtual switch application like OVS-DPDK. Like OVS-DPDK it uses DPDK and PMD (Poll Mode Driver). It preserves the existing north bound APIs (Openflow) and is a drop in replacement for upstream OVS. But the main difference is that OVS-DOCA uses the DOCA-flow api instead of the rte_flow used by DPDK. This allows it to use hardware steering for offloads instead of software steering. The main benefits are:
-* Enhanced performance, scalability and faster feature rollouts
-* Huge scale up in insertion rate and Connection Tracking (CT)
-* Optimized OVS data path offloads
-* Make better use of capabilities of the DOCA platform
-* Future HW compatible - DOCA API compatibility
+
+- Enhanced performance, scalability and faster feature rollouts
+- Huge scale up in insertion rate and Connection Tracking (CT)
+- Optimized OVS data path offloads
+- Make better use of capabilities of the DOCA platform
+- Future HW compatible - DOCA API compatibility
 
 ## Supported Controllers
 
-- Nvidia ConnectX-6DX NIC
+- Nvidia ConnectX-6DX/LX NIC
 - Nvidia ConnectX-7 NIC and newer
 - Nvidia BlueField 2/3 DPU and newer
 
 ## Installing OVS-DOCA
-OVS-DOCA is part of the DOCA-Host package. DOCA-Host is available in different installation profiles, each of which provides subset of the full DOCA installation. For the purposes of OVN-Kubernetes we need the DOCA packaged version of OVS which is available in the `doca-networking` profile. This includes
+OVS-DOCA is part of the DOCA-Host package. DOCA-Host is available in different installation profiles, each of which provides subset of the full DOCA installation. For the purposes of OVN-Kubernetes we need the DOCA packaged version of OVS which is available in the `doca-networking` profile. This includes:
+
 - MLNX_OFED drivers and tools
 - DOCA Core
 - MLNX-DPDK
@@ -35,11 +36,8 @@ OVS-DOCA is part of the DOCA-Host package. DOCA-Host is available in different i
 - DOCA Flow
 - DOCA IPsec
 
-Read more details including supported OS and kernel versions at: [DOCA-Profiles](https://docs.nvidia.com/doca/sdk/nvidia+doca+profiles/index.html)
-
-Installation packages for various distributions are found [here](https://docs.nvidia.com/doca/sdk/nvidia+doca+installation+guide+for+linux/index.html#src-2654401500_id-.NVIDIADOCAInstallationGuideforLinuxv2.7.0-BlueFieldNetworkingPlatformImageInstallation)
-
-Installation instructions on the Host are found [here](https://docs.nvidia.com/doca/sdk/nvidia+doca+installation+guide+for+linux/index.html#src-2654401500_id-.NVIDIADOCAInstallationGuideforLinuxv2.7.0-InstallingSoftwareonHost)
+See more details including supported OS and kernel versions, installation packages and instructions for installation at the corresponding product page for DOCA and OVS-DOCA.
+Additional tuning options for OVS are also provided there.
 
 ## Worker Node Configuation
 
@@ -219,16 +217,5 @@ OVN-Kubernetes will detect the datapath type and set interface configurations as
 
 Also, the external bridge may be also set to type `netdev`.
 
-Fine tuning OVS configuration may be desirable in some contexts. These configuation options are documented [here](https://docs.nvidia.com/doca/sdk/ovs-doca+hardware+offloads/index.html#src-2799467441_id-.OVSDOCAHardwareOffloadsv2.7.0-other_config)
-
-# References
-
-* [DOCA](https://developer.nvidia.com/networking/doca)
-* [OVS in DOCA](https://docs.nvidia.com/doca/sdk/openvswitch+offload+(ovs+in+doca)/index.html)
-* [DOCA-Profiles](https://docs.nvidia.com/doca/sdk/nvidia+doca+profiles/index.html)
-
-* [Installation packages for various distributions](https://docs.nvidia.com/doca/sdk/nvidia+doca+installation+guide+for+linux/index.html#src-2654401500_id-.NVIDIADOCAInstallationGuideforLinuxv2.7.0-BlueFieldNetworkingPlatformImageInstallation)
-
-* [Installation instructions on the Host](https://docs.nvidia.com/doca/sdk/nvidia+doca+installation+guide+for+linux/index.html#src-2654401500_id-.NVIDIADOCAInstallationGuideforLinuxv2.7.0-InstallingSoftwareonHost)
-
+Fine tuning OVS configuration may be desirable in some contexts. For those refer to the product documentation pages.
 
