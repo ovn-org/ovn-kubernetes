@@ -98,7 +98,7 @@ to be a highly scalable and performant Networking Platform.
 
 For more details, please see the following:
 
-- [OVN-Kubernetes Overview](getting-started/overview.md) for an overview of ovn-kubernetes.
+- [OVN-Kubernetes Architecture](https://ovn-kubernetes.io/design/architecture/)
 - [Deploying OVN-Kubernetes cluster using KIND](installation/launching-ovn-kubernetes-on-kind.md)
 - [Deploying OVN-Kubernetes CNI using Helm](installation/launching-ovn-kubernetes-with-helm.md)
 - [Setup and Building OVN-Kubernetes](developer-guide/documentation.md) for instructions
