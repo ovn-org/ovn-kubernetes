@@ -2,7 +2,7 @@ name: ovn-docker-images
 
 on:
   push:
-    branches: [ master ]
+    branches: [ master,release-1.0 ]
 
 permissions:
   contents: read
@@ -13,8 +13,8 @@ env:
   REGISTRY: ghcr.io 
   OWNER: ovn-org
   REPOSITORY: ovn-kubernetes
-  FEDORA_IMAGE_NAME: ovn-kube-f
-  UBUNTU_IMAGE_NAME: ovn-kube-u
+  FEDORA_IMAGE_NAME: ovn-kube-fedora
+  UBUNTU_IMAGE_NAME: ovn-kube-ubuntu
 
 jobs:
   build:
