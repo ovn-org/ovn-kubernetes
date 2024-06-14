@@ -124,9 +124,8 @@ nav:
     - Multicast: features/multicast.md
     - LiveMigration: features/live-migration.md
     - HybridOverlay: features/hybrid-overlay.md
-    - Hardware Offload:
-      - OVS Offload: features/hardware-offload/ovs_offload.md
-      - Support DPU Acceleration: features/hardware-offload/dpu-acceleration.md
+    - Hardware Acceleration:
+      - OVS Acceleration with kernel datapath: features/hardware-offload/ovs_acceleration.md
       - OVS_DOCA: features/hardware-offload/ovs-doca.md
   - Troubleshooting:
     - Introduction: troubleshooting/debugging.md
