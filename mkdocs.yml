@@ -122,8 +122,8 @@ nav:
     - LiveMigration: features/live-migration.md
     - HybridOverlay: features/hybrid-overlay.md
     - Hardware Acceleration:
-      - OVS Acceleration with kernel datapath: features/hardware-offload/ovs_acceleration.md
-      - OVS_DOCA: features/hardware-offload/ovs-doca.md
+      - OVS Acceleration with kernel datapath: features/hardware-offload/ovs-kernel.md
+      - OVS Acceleration with DOCA datapath: features/hardware-offload/ovs-doca.md
   - Troubleshooting:
     - Introduction: troubleshooting/debugging.md
     - OVNKube Trace: troubleshooting/ovnkube-trace.md

@@ -1,4 +1,4 @@
-# OVS-DOCA
+# OVS Acceleration with DOCA datapath
 
 ## Introduction
 
