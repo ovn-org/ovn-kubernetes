@@ -91,7 +91,7 @@ spec:
             memory: 300Mi
         env:
         - name: OVN_DAEMONSET_VERSION
-          value: "3"
+          value: "1.0.0"
         - name: OVN_LOGLEVEL_NB
           value: "{{ ovn_loglevel_nb }}"
         - name: OVN_NORTHD_BACKOFF_INTERVAL
@@ -161,7 +161,7 @@ spec:
             memory: 300Mi
         env:
         - name: OVN_DAEMONSET_VERSION
-          value: "3"
+          value: "1.0.0"
         - name: OVN_LOGLEVEL_SB
           value: "{{ ovn_loglevel_sb }}"
         - name: K8S_APISERVER
@@ -228,7 +228,7 @@ spec:
             memory: 300Mi
         env:
         - name: OVN_DAEMONSET_VERSION
-          value: "3"
+          value: "1.0.0"
         - name: OVN_LOGLEVEL_NORTHD
           value: "{{ ovn_loglevel_northd }}"
         - name: K8S_APISERVER
@@ -286,7 +286,7 @@ spec:
             memory: 300Mi
         env:
         - name: OVN_DAEMONSET_VERSION
-          value: "3"
+          value: "1.0.0"
         - name: OVNKUBE_LOGLEVEL
           value: "{{ ovnkube_local_loglevel }}"
         - name: OVNKUBE_LOGFILE_MAXSIZE

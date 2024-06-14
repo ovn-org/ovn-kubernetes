@@ -64,8 +64,8 @@ markdown_extensions:
   - toc:
       permalink: true
 nav:
-  - Introduction: index.md
   - Overview:
+    - Introduction: index.md
     - Architecture: design/architecture.md
     - Network Topology: design/topology.md
     - Gateway Modes: design/gateway-modes.md
@@ -78,26 +78,23 @@ nav:
     - Internal Subnets: design/ovn-kubernetes-subnets.md
     - Kubevirt VM Live Migration: design/live-migration.md
   - Getting Started:
-    - OVN-Kubernetes Overview: getting-started/overview.md
-    - Launching OVN-Kubernetes: getting-started/launching-ovn-kubernetes.md
+    - Launching OVN-Kubernetes: installation/launching-ovn-kubernetes-on-kind.md
+    - Launching OVN-Kubernetes Using Helm: installation/launching-ovn-kubernetes-with-helm.md
+    - Configuration Guide: getting-started/configuration.md
+    - CLI Guide: getting-started/cli-guide.md
     - Deploying Workloads on OVN-Kubernetes cluster: getting-started/example-pod-creation.md
     - Deploying Services on OVN-Kubernetes cluster: getting-started/example-service-creation.md
     - Setup and Building: getting-started/building-ovn-kubernetes.md
-    - Run OVN-Kubernetes From Release Image: getting-started/running-release.md
-    - Run OVN-Kubernetes From RPM: getting-started/running-rpm.md
-    - CLI Guide: getting-started/cli-guide.md
-    - Configuration Guide: getting-started/configuration.md
   - Developer Guide:
       - Contributing Guide: governance/CONTRIBUTING.md
       - Reviewing Guide: governance/REVIEWING.md
       - Coding Guide: developer-guide/developer.md
       - OVN-Kubernetes Container Images: developer-guide/image-build.md
       - Documentation Guide: developer-guide/documentation.md
-      - Launching OVN-Kubernetes: installation/launching-ovn-kubernetes-on-kind.md
       - Local Testing Guide: developer-guide/local_testing_guide.md
       - CI Testing Guide: ci/ci.md
       - Debugging: developer-guide/debugging.md
-      - Releasing: developer-guide/release.md
+      - Release Guide: developer-guide/release.md
   - API Reference Guide:
       - Introduction: api-reference/introduction.md
       - EgressIP: api-reference/egress-ip-api-spec.md
@@ -133,7 +130,7 @@ nav:
     - Logging: troubleshooting/logging.md
   - Observability:
     - Metrics: observability/metrics.md
-    - SDN Dashboard: installation/helm/sdn-dashboard.md
+    - SDN Dashboard: observability/sdn-dashboard.md
   - Enhancement Proposals:
     # - FeatureName: okeps/<filename.md>
     - Template: okeps/okep-4368-template.md
