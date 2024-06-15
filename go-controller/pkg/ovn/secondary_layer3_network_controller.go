@@ -282,6 +282,7 @@ func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netI
 		podAnnotationAllocator := pod.NewPodAnnotationAllocator(
 			netInfo,
 			cnci.watchFactory.PodCoreInformer().Lister(),
+			cnci.watchFactory.NamespaceCoreInformer().Lister(),
 			cnci.kube,
 			nil)
 		oc.podAnnotationAllocator = podAnnotationAllocator
