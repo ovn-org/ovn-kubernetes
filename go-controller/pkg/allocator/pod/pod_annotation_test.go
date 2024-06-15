@@ -10,6 +10,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	cnitypes "github.com/containernetworking/cni/pkg/types"
+	mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/client-go/listers/core/v1"
+	"github.com/stretchr/testify/mock"
 
 	ipamclaimsapi "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1"
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
@@ -115,6 +117,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 		ipam                      bool
 		idAllocation              bool
 		persistentIPAllocation    bool
+		primaryNetwork            bool
 		podAnnotation             *util.PodAnnotation
 		invalidNetworkAnnotation  bool
 		wantUpdatedPod            bool
@@ -157,9 +160,11 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 				},
 			},
 			wantUpdatedPod: true,
+			primaryNetwork: true,
 			wantPodAnnotation: &util.PodAnnotation{
-				IPs: ovntest.MustParseIPNets("192.168.0.4/24"),
-				MAC: util.IPAddrToHWAddr(ovntest.MustParseIPNets("192.168.0.4/24")[0].IP),
+				IPs:     ovntest.MustParseIPNets("192.168.0.4/24"),
+				MAC:     util.IPAddrToHWAddr(ovntest.MustParseIPNets("192.168.0.4/24")[0].IP),
+				Primary: true,
 			},
 		},
 		{
@@ -175,11 +180,13 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 					netxtIPs: ovntest.MustParseIPNets("192.168.0.3/24"),
 				},
 			},
+			primaryNetwork: true,
 			wantUpdatedPod: true,
 			wantPodAnnotation: &util.PodAnnotation{
 				IPs:      ovntest.MustParseIPNets("192.168.0.4/24"),
 				MAC:      util.IPAddrToHWAddr(ovntest.MustParseIPNets("192.168.0.4/24")[0].IP),
 				Gateways: ovntest.MustParseIPs("192.168.0.1"),
+				Primary:  true,
 			},
 		},
 		{
@@ -216,6 +223,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 						NextHop: ovntest.MustParseIP("192.168.0.1").To4(),
 					},
 				},
+				Primary: true, // default network's netInfo
 			},
 			wantReleasedIPsOnRollback: ovntest.MustParseIPNets("192.168.0.3/24"),
 		},
@@ -225,15 +233,17 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 			name: "expect no updates, annotated, IPAM",
 			ipam: true,
 			podAnnotation: &util.PodAnnotation{
-				IPs: ovntest.MustParseIPNets("192.168.0.3/24"),
-				MAC: util.IPAddrToHWAddr(ovntest.MustParseIPNets("192.168.0.3/24")[0].IP),
+				IPs:     ovntest.MustParseIPNets("192.168.0.3/24"),
+				MAC:     util.IPAddrToHWAddr(ovntest.MustParseIPNets("192.168.0.3/24")[0].IP),
+				Primary: true, // default network netInfo,
 			},
 			args: args{
 				ipAllocator: &ipAllocatorStub{},
 			},
 			wantPodAnnotation: &util.PodAnnotation{
-				IPs: ovntest.MustParseIPNets("192.168.0.3/24"),
-				MAC: util.IPAddrToHWAddr(ovntest.MustParseIPNets("192.168.0.3/24")[0].IP),
+				IPs:     ovntest.MustParseIPNets("192.168.0.3/24"),
+				MAC:     util.IPAddrToHWAddr(ovntest.MustParseIPNets("192.168.0.3/24")[0].IP),
+				Primary: true, // default network netInfo,
 			},
 			wantReleasedIPsOnRollback: ovntest.MustParseIPNets("192.168.0.3/24"),
 		},
@@ -243,8 +253,9 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 			name: "expect no updates, annotated, already allocated, IPAM",
 			ipam: true,
 			podAnnotation: &util.PodAnnotation{
-				IPs: ovntest.MustParseIPNets("192.168.0.3/24"),
-				MAC: util.IPAddrToHWAddr(ovntest.MustParseIPNets("192.168.0.3/24")[0].IP),
+				IPs:     ovntest.MustParseIPNets("192.168.0.3/24"),
+				MAC:     util.IPAddrToHWAddr(ovntest.MustParseIPNets("192.168.0.3/24")[0].IP),
+				Primary: true, // default network netInfo
 			},
 			args: args{
 				ipAllocator: &ipAllocatorStub{
@@ -252,8 +263,9 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 				},
 			},
 			wantPodAnnotation: &util.PodAnnotation{
-				IPs: ovntest.MustParseIPNets("192.168.0.3/24"),
-				MAC: util.IPAddrToHWAddr(ovntest.MustParseIPNets("192.168.0.3/24")[0].IP),
+				IPs:     ovntest.MustParseIPNets("192.168.0.3/24"),
+				MAC:     util.IPAddrToHWAddr(ovntest.MustParseIPNets("192.168.0.3/24")[0].IP),
+				Primary: true, // default network netInfo
 			},
 		},
 		{
@@ -297,6 +309,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 						NextHop: ovntest.MustParseIP("192.168.0.1").To4(),
 					},
 				},
+				Primary: true, // default network's netInfo
 			},
 			wantReleasedIPsOnRollback: ovntest.MustParseIPNets("192.168.0.4/24"),
 		},
@@ -326,6 +339,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 						NextHop: ovntest.MustParseIP("192.168.0.1").To4(),
 					},
 				},
+				Primary: true, // default network netInfo
 			},
 		},
 		{
@@ -354,6 +368,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 						NextHop: ovntest.MustParseIP("192.168.0.1").To4(),
 					},
 				},
+				Primary: true, // default network netInfo
 			},
 			wantReleasedIPsOnRollback: ovntest.MustParseIPNets("192.168.0.3/24"),
 		},
@@ -410,6 +425,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 						NextHop: ovntest.MustParseIP("192.168.0.1").To4(),
 					},
 				},
+				Primary: true, // default network netInfo
 			},
 			wantReleasedIPsOnRollback: ovntest.MustParseIPNets("192.168.0.3/24"),
 		},
@@ -600,7 +616,9 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var err error
-
+			config.OVNKubernetesFeature.EnableMultiNetwork = true
+			config.OVNKubernetesFeature.EnableNetworkSegmentation = true
+			namespaceListerMock := &mocks.NamespaceLister{}
 			g := gomega.NewWithT(t)
 
 			network := tt.args.network
@@ -627,6 +645,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 					NADName:            nadName,
 					Subnets:            subnets,
 					AllowPersistentIPs: tt.persistentIPAllocation,
+					PrimaryNetwork:     tt.primaryNetwork,
 				})
 				if err != nil {
 					t.Fatalf("failed to create NetInfo: %v", err)
@@ -634,7 +653,12 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 			}
 
 			config.OVNKubernetesFeature.EnableInterconnect = tt.idAllocation
-
+			namespaceListerMock.On("Get", mock.AnythingOfType("string")).Return(&v1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        "namespace",
+					Annotations: map[string]string{util.ActiveNetworkAnnotation: types.DefaultNetworkName},
+				},
+			}, nil)
 			pod := &v1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "pod",
@@ -666,6 +690,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 			}
 
 			pod, podAnnotation, rollback, err := allocatePodAnnotationWithRollback(
+				namespaceListerMock,
 				tt.args.ipAllocator,
 				tt.args.idAllocator,
 				netInfo,

@@ -493,6 +493,7 @@ func TestPodAllocator_reconcileForNAD(t *testing.T) {
 			idallocator := &idAllocatorStub{}
 
 			podListerMock := &v1mocks.PodLister{}
+			namespaceListerMock := &v1mocks.NamespaceLister{}
 			kubeMock := &kubemocks.InterfaceOVN{}
 			podNamespaceLister := &v1mocks.PodNamespaceLister{}
 
@@ -541,6 +542,7 @@ func TestPodAllocator_reconcileForNAD(t *testing.T) {
 			podAnnotationAllocator := pod.NewPodAnnotationAllocator(
 				netInfo,
 				podListerMock,
+				namespaceListerMock,
 				kubeMock,
 				ipamClaimsReconciler,
 			)

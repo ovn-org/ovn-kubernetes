@@ -864,14 +864,31 @@ func (bnc *BaseNetworkController) allocatePodAnnotation(pod *kapi.Pod, existingL
 		}
 	}
 	podAnnotation = &util.PodAnnotation{
-		IPs: podIfAddrs,
-		MAC: podMac,
+		IPs:     podIfAddrs,
+		MAC:     podMac,
+		Primary: false,
 	}
 	var nodeSubnets []*net.IPNet
 	if nodeSubnets = bnc.lsManager.GetSwitchSubnets(switchName); nodeSubnets == nil && bnc.doesNetworkRequireIPAM() {
 		return nil, false, fmt.Errorf("cannot retrieve subnet for assigning gateway routes for pod %s, switch: %s",
 			podDesc, switchName)
 	}
+
+	if util.IsNetworkSegmentationSupportEnabled() {
+		podNamespace, err := bnc.watchFactory.GetNamespace(pod.Namespace)
+		if err != nil {
+			return nil, false, err
+		}
+		activeNetworkForPod := util.GetNamespaceActiveNetwork(podNamespace)
+		if activeNetworkForPod == nadName {
+			podAnnotation.Primary = true
+		}
+	} else {
+		// if user defined network segmentation is not enabled
+		// then we know pod's primary network is "default"
+		podAnnotation.Primary = true
+	}
+
 	err = util.AddRoutesGatewayIP(bnc.NetInfo, pod, podAnnotation, network)
 	if err != nil {
 		return nil, false, err
