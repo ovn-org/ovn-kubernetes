@@ -204,6 +204,12 @@ rules:
           - pods/status # In IC ovnkube-controller, and ovnkube-node in DPU mode updates pod annotations for local pods
           - nodes/status
       verbs: [ "patch", "update" ]
+    {% if ovn_enable_dnsnameresolver == "true" -%}
+    - apiGroups: ["network.openshift.io"]
+      resources:
+          - dnsnameresolvers
+      verbs: [ "get", "list", "watch" ]
+    {%- endif %}
 
 # Without IC endpoints are read by ovnkube-node on startup
 # With IC endpoints are created by ovnkube-zone-controller/sb-ovsdb startup script in multinode-zone for IC

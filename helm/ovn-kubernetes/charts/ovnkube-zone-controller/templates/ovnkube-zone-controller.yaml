@@ -346,6 +346,8 @@ spec:
           value: "local"
         - name: OVN_SOUTH
           value: "local"
+        - name: OVN_ENABLE_DNSNAMERESOLVER
+          value: {{ hasKey .Values.global "enableDNSNameResolver" | ternary .Values.global.enableDNSNameResolver false | quote }}
       # end of container
       volumes:
       # Common volumes

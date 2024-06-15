@@ -125,6 +125,12 @@ rules:
       verbs: [ "create", "update", "delete", "deletecollection" ]
     {%- endif %}
 
+    {% if ovn_enable_dnsnameresolver == "true" -%}
+    - apiGroups: ["network.openshift.io"]
+      resources:
+          - dnsnameresolvers
+      verbs: [ "create", "delete", "list", "patch", "update", "watch" ]
+    {%- endif %}
 
 
 # https://github.com/ovn-org/ovn-kubernetes/blob/e1e7d40f9a6c6038b52696c1b8f8915a4d73160e/go-controller/pkg/ovn/topology_version.go#L28
