@@ -181,6 +181,7 @@ func (ncc *networkClusterController) init() error {
 		podAllocationAnnotator = annotationalloc.NewPodAnnotationAllocator(
 			ncc.NetInfo,
 			ncc.watchFactory.PodCoreInformer().Lister(),
+			ncc.watchFactory.NamespaceCoreInformer().Lister(),
 			ncc.kube,
 			ipamClaimsReconciler,
 		)

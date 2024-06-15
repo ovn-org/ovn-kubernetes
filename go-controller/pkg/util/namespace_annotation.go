@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -82,4 +83,13 @@ func UpdateNamespaceActiveNetwork(k kubernetes.Interface, namespace *corev1.Name
 		return fmt.Errorf("failed setting annotation on namespace %s: %w", namespace.Name, err)
 	}
 	return nil
+}
+
+func GetNamespaceActiveNetwork(namespace *corev1.Namespace) string {
+	activeNetwork, ok := namespace.Annotations[ActiveNetworkAnnotation]
+	if !ok {
+		return ovntypes.DefaultNetworkName
+	}
+
+	return activeNetwork
 }
