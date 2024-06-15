@@ -100,3 +100,9 @@ rules:
           - adminnetworkpolicies/status
           - baselineadminnetworkpolicies/status
       verbs: [ "patch" ]
+    {% if ovn_enable_dnsnameresolver == "true" -%}
+    - apiGroups: ["network.openshift.io"]
+      resources:
+          - dnsnameresolvers
+      verbs: [ "create", "create", "delete", "list", "patch", "update", "watch" ]
+    {%- endif %}

@@ -78,6 +78,7 @@ usage() {
     echo "                 [-cm | --compact-mode]"
     echo "                 [-ic | --enable-interconnect]"
     echo "                 [--isolated]"
+    echo "                 [-dns | --enable-dnsnameresolver]"
     echo "                 [-h]]"
     echo ""
     echo "-cf  | --config-file                Name of the KIND J2 configuration file."
@@ -139,6 +140,7 @@ usage() {
     echo "--delete                            Delete current cluster"
     echo "--deploy                            Deploy ovn kubernetes without restarting kind"
     echo "--add-nodes                         Adds nodes to an existing cluster. The number of nodes to be added is specified by --num-workers. Also use -ic if the cluster is using interconnect."
+    echo "-dns | --enable-dnsnameresolver     Enable DNSNameResolver for resolving the DNS names used in the DNS rules of EgressFirewall."
     echo ""
 }
 
@@ -327,6 +329,8 @@ parse_args() {
             --add-nodes)                        KIND_ADD_NODES=true
                                                 KIND_CREATE=false
                                                 ;;
+            -dns | --enable-dnsnameresolver )   OVN_ENABLE_DNSNAMERESOLVER=true
+                                                ;;
             -h | --help )                       usage
                                                 exit
                                                 ;;
@@ -405,6 +409,7 @@ print_params() {
      echo "OVN_ENABLE_OVNKUBE_IDENTITY = $OVN_ENABLE_OVNKUBE_IDENTITY"
      echo "KIND_NUM_WORKER = $KIND_NUM_WORKER"
      echo "OVN_MTU= $OVN_MTU"
+     echo "OVN_ENABLE_DNSNAMERESOLVER= $OVN_ENABLE_DNSNAMERESOLVER"
      echo ""
 }
 
@@ -598,6 +603,11 @@ set_default_params() {
     KIND_NUM_WORKER=0
   fi
   OVN_MTU=${OVN_MTU:-1400}
+  OVN_ENABLE_DNSNAMERESOLVER=${OVN_ENABLE_DNSNAMERESOLVER:-false}
+  if [ "$OVN_ENABLE_DNSNAMERESOLVER" == true ]; then
+    COREDNS_WITH_OCP_DNSNAMERESOLVER="localhost/coredns-with-ocp-dnsnameresolver:latest"
+    DNSNAMERESOLVER_OPERATOR="localhost/dnsnameresolver-operator:latest"
+  fi
 }
 
 check_ipv6() {
@@ -707,6 +717,10 @@ scale_kind_cluster() {
     set_ovn_image
   fi
   install_ovn_image
+  if [ "$OVN_ENABLE_DNSNAMERESOLVER" == true ]; then
+    set_dnsnameresolver_images
+    install_dnsnameresolver_images
+  fi
 }
 
 create_kind_cluster() {
@@ -840,7 +854,8 @@ create_ovn_kube_manifests() {
     --enable-multi-external-gateway=true \
     --enable-ovnkube-identity="${OVN_ENABLE_OVNKUBE_IDENTITY}" \
     --enable-persistent-ips=true \
-    --mtu="${OVN_MTU}"
+    --mtu="${OVN_MTU}" \
+    --enable-dnsnameresolver="${OVN_ENABLE_DNSNAMERESOLVER}"
   popd
 }
 
@@ -1127,6 +1142,149 @@ add_dns_hostnames() {
   done
 }
 
+set_dnsnameresolver_images() {
+  if [ "$KIND_LOCAL_REGISTRY" == true ];then
+    COREDNS_WITH_OCP_DNSNAMERESOLVER="localhost:5000/coredns-with-ocp-dnsnameresolver:latest"
+    DNSNAMERESOLVER_OPERATOR="localhost:5000/dnsnameresolver-operator:latest"
+  else
+    COREDNS_WITH_OCP_DNSNAMERESOLVER="localhost/coredns-with-ocp-dnsnameresolver:dev"
+    DNSNAMERESOLVER_OPERATOR="localhost/dnsnameresolver-operator:dev"
+  fi
+}
+
+# build_image accepts three arguments. The first argument is the absolute path to the directory
+# which contains the Dockerfile. The second argument is the image name along with the tag. The
+# third argument is the name of the Dockerfile to use for building the image. 
+build_image() {
+  pushd ${1}
+  $OCI_BIN build -t "${2}" -f ${3} .
+
+  # store in local registry
+  if [ "$KIND_LOCAL_REGISTRY" == true ];then
+    echo "Pushing built image (${2}) to local $OCI_BIN registry"
+    $OCI_BIN push "${2}"
+  fi
+  popd
+}
+
+build_dnsnameresolver_images() {
+  set_dnsnameresolver_images
+  rm -rf /tmp/coredns-ocp-dnsnameresolver
+  git clone https://github.com/openshift/coredns-ocp-dnsnameresolver.git /tmp/coredns-ocp-dnsnameresolver
+ 
+  build_image /tmp/coredns-ocp-dnsnameresolver ${COREDNS_WITH_OCP_DNSNAMERESOLVER} Dockerfile.upstream
+
+  build_image /tmp/coredns-ocp-dnsnameresolver/operator ${DNSNAMERESOLVER_OPERATOR} Dockerfile
+}
+
+# install_image accepts the image name along with the tag as an argument and installs it.
+install_image() {
+  # If local registry is being used push image there for consumption by kind cluster
+  if [ "$KIND_LOCAL_REGISTRY" == true ]; then
+    echo "${1} should already be avaliable in local registry, not loading"
+  else
+    if [ "$OCI_BIN" == "podman" ]; then
+      # podman: cf https://github.com/kubernetes-sigs/kind/issues/2027
+      rm -f /tmp/image.tar
+      podman save -o /tmp/image.tar "${1}"
+      kind load image-archive /tmp/image.tar --name "${KIND_CLUSTER_NAME}"
+    else
+      kind load docker-image "${1}" --name "${KIND_CLUSTER_NAME}"
+    fi
+  fi
+}
+
+install_dnsnameresolver_images() {
+  install_image ${COREDNS_WITH_OCP_DNSNAMERESOLVER}
+  install_image ${DNSNAMERESOLVER_OPERATOR}
+}
+
+install_dnsnameresolver_operator() {
+  pushd /tmp/coredns-ocp-dnsnameresolver/operator
+  
+  # Before installing DNSNameResolver operator, update the args so that the operator
+  # is configured with the correct values.
+  sed -i -e 's/^\(.*--coredns-namespace=\).*/\1kube-system/' \
+    -e 's/^\(.*--coredns-service-name=\).*/\1kube-dns/' \
+    -e 's/^\(.*--dns-name-resolver-namespace=\).*/\1ovn-kubernetes/' \
+    -e 's/^\(.*--coredns-port=\).*/\153/' config/default/manager_auth_proxy_patch.yaml
+
+  make install
+  make deploy IMG=${DNSNAMERESOLVER_OPERATOR}
+  popd
+}
+
+update_clusterrole_coredns() {
+  original_clusterrole=$(kubectl get clusterrole system:coredns -oyaml)
+  echo "Original CoreDNS clusterrole:"
+  echo "${original_clusterrole}"
+  additional_permissions=$(printf '%s' '
+- apiGroups:
+  - network.openshift.io
+  resources:
+  - dnsnameresolvers
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - network.openshift.io
+  resources:
+  - dnsnameresolvers/status
+  verbs:
+  - update
+  - get
+  - patch
+')
+  updated_clusterrole="${original_clusterrole}${additional_permissions}"
+  echo "Patched CoreDNS clusterrole:"
+  echo "${updated_clusterrole}"
+  printf '%s' "${updated_clusterrole}" | kubectl apply -f -
+}
+
+add_ocp_dnsnameresolver_to_coredns_config() {
+  original_corefile=$(kubectl get -n=kube-system configmap/coredns -o=jsonpath="{.data['Corefile']}")
+  if ! grep -wq "ocp_dnsnameresolver" ${original_corefile}; then
+    echo "Original CoreDNS Corefile:"
+    echo "${original_corefile}"
+    updated_corefile=$(
+      printf '%s' "${original_corefile}" | sed -e 's/^\(.*\)\(forward.*\)/\1ocp_dnsnameresolver {\n\1   namespaces ovn-kubernetes\n\1}\n\1\2/'
+    )
+    echo "Patched CoreDNS Corefile:"
+    echo "${updated_corefile}"
+    printf '%s' "${updated_corefile}" > /tmp/Corefile.json
+    updated_coredns=$(kubectl create configmap coredns -n=kube-system --from-file=Corefile=/tmp/Corefile.json -oyaml --dry-run=client)
+    echo "Patched CoreDNS config:"
+    echo "${updated_coredns}"
+    printf '%s' "${updated_coredns}" | kubectl apply -f -
+  fi
+}
+
+update_coredns_deployment_image() {
+  original_coredns_deploy=$(kubectl get -n=kube-system deploy/coredns -oyaml)
+  echo "Original CoreDNS deployment:"
+  echo "${original_coredns_deploy}"
+  updated_coredns_deployment=$(
+    printf '%s' "${original_coredns_deploy}" | sed -e "s|^\(.*image: \).*|\1${COREDNS_WITH_OCP_DNSNAMERESOLVER}|"
+  )
+  echo "Patched CoreDNS deployment:"
+  echo "${updated_coredns_deployment}"
+  printf '%s' "${updated_coredns_deployment}" | kubectl apply -f -
+}
+
+# kubectl_wait_dnsnameresolver_pods will set a total timeout of 60s and wait for the pods
+# related to the dns name resolver feature to become "Ready".
+kubectl_wait_dnsnameresolver_pods() {
+  TIMEOUT=60
+
+  # We will make sure that we timeout all commands at current seconds + the desired timeout.
+  endtime=$(( SECONDS + TIMEOUT ))
+
+  timeout=$(calculate_timeout ${endtime})
+  echo "Waiting for pods in dnsnameresolver-operator namespace to become ready (timeout ${timeout})..."
+  kubectl wait -n dnsnameresolver-operator --for=condition=ready pods --all --timeout=${timeout}s
+}
+
 check_dependencies
 # In order to allow providing arguments with spaces, e.g. "-vconsole:info -vfile:info"
 # the original command <parse_args $*> was replaced by <parse_args "$@">
@@ -1168,6 +1326,14 @@ if [ "$KIND_CREATE" == true ]; then
       add_dns_hostnames
     fi
 fi
+if [ "$OVN_ENABLE_DNSNAMERESOLVER" == true ]; then
+    build_dnsnameresolver_images
+    install_dnsnameresolver_images
+    install_dnsnameresolver_operator
+    update_clusterrole_coredns
+    add_ocp_dnsnameresolver_to_coredns_config
+    update_coredns_deployment_image
+fi
 build_ovn_image
 detect_apiserver_url
 create_ovn_kube_manifests
@@ -1184,6 +1350,9 @@ if [ "$ENABLE_MULTI_NET" == true ]; then
 fi
 kubectl_wait_pods
 sleep_until_pods_settle
+if [ "$OVN_ENABLE_DNSNAMERESOLVER" == true ]; then
+    kubectl_wait_dnsnameresolver_pods
+fi
 # Launch IPsec pods last to make sure that CSR signing logic works
 # Launch csr_signer in background
 # Wait for DaemonSet to rollout
