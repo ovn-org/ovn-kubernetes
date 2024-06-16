@@ -32,6 +32,18 @@ type NetConf struct {
 	// they are originally created - e.g. a KubeVirt VM's migration, or
 	// restart.
 	AllowPersistentIPs bool `json:"allowPersistentIPs,omitempty"`
+	// DisablePortSecurity is valid on both localnet / layer2 topologies.
+	// It allows the admin to opt out of port security, allowing nested
+	// virtualization scenarios, where traffic from multiple MAC addresses
+	// (bridged VMs) can egress over the OVN port
+	DisablePortSecurity bool `json:"disablePortSecurity,omitempty"`
+	// enableL2Unknown is valid on both localnet / layer2 topologies.
+	// This allows the logical switch ports attaching to this network to have
+	// an unknown set of Ethernet addresses. When an OVN logical switch
+	// processes a unicast Ethernet frame whose destination MAC address is not
+	// in any logical port’s addresses column, it delivers it to the port (or
+	// ports) whose addresses columns include unknown.
+	EnableL2Unknown bool `json:"enableL2Unknown,omitempty"`
 
 	// PciAddrs in case of using sriov or Auxiliry device name in case of SF
 	DeviceID string `json:"deviceID,omitempty"`

@@ -337,6 +337,107 @@ func TestParseNetconf(t *testing.T) {
 `,
 			expectedError: fmt.Errorf("layer3 topology does not allow persistent IPs"),
 		},
+		{
+			desc: "disabling port security on a layer2 topology with a subnet is valid",
+			inputNetAttachDefConfigSpec: `
+    {
+            "name": "tenantred",
+            "type": "ovn-k8s-cni-overlay",
+            "topology": "layer2",
+			"subnets": "192.168.200.0/16",
+			"disablePortSecurity": true,
+			"netAttachDefName": "ns1/nad1"
+    }
+`,
+			expectedNetConf: &ovncnitypes.NetConf{
+				Topology:            "layer2",
+				NADName:             "ns1/nad1",
+				MTU:                 1400,
+				DisablePortSecurity: true,
+				Subnets:             "192.168.200.0/16",
+				NetConf:             cnitypes.NetConf{Name: "tenantred", Type: "ovn-k8s-cni-overlay"},
+			},
+		},
+		{
+			desc: "disabling port security on a localnet topology with a subnet is valid",
+			inputNetAttachDefConfigSpec: `
+    {
+            "name": "tenantred",
+            "type": "ovn-k8s-cni-overlay",
+            "topology": "localnet",
+			"subnets": "192.168.200.0/16",
+			"disablePortSecurity": true,
+			"netAttachDefName": "ns1/nad1"
+    }
+`,
+			expectedNetConf: &ovncnitypes.NetConf{
+				Topology:            "localnet",
+				NADName:             "ns1/nad1",
+				MTU:                 1400,
+				DisablePortSecurity: true,
+				Subnets:             "192.168.200.0/16",
+				NetConf:             cnitypes.NetConf{Name: "tenantred", Type: "ovn-k8s-cni-overlay"},
+			},
+		},
+		{
+			desc: "disabling port security on a layer3 topology with a subnet is valid",
+			inputNetAttachDefConfigSpec: `
+    {
+            "name": "tenantred",
+            "type": "ovn-k8s-cni-overlay",
+            "topology": "layer3",
+			"subnets": "192.168.200.0/16",
+			"disablePortSecurity": true,
+			"netAttachDefName": "ns1/nad1"
+    }
+`,
+			expectedNetConf: &ovncnitypes.NetConf{
+				Topology:            "layer3",
+				NADName:             "ns1/nad1",
+				MTU:                 1400,
+				DisablePortSecurity: true,
+				Subnets:             "192.168.200.0/16",
+				NetConf:             cnitypes.NetConf{Name: "tenantred", Type: "ovn-k8s-cni-overlay"},
+			},
+		},
+		{
+			desc: "disabling port security on a layer2 topology without subnets is valid",
+			inputNetAttachDefConfigSpec: `
+    {
+            "name": "tenantred",
+            "type": "ovn-k8s-cni-overlay",
+            "topology": "layer2",
+			"disablePortSecurity": true,
+			"netAttachDefName": "ns1/nad1"
+    }
+`,
+			expectedNetConf: &ovncnitypes.NetConf{
+				Topology:            "layer2",
+				NADName:             "ns1/nad1",
+				MTU:                 1400,
+				DisablePortSecurity: true,
+				NetConf:             cnitypes.NetConf{Name: "tenantred", Type: "ovn-k8s-cni-overlay"},
+			},
+		},
+		{
+			desc: "disabling port security on a localnet topology without subnets is valid",
+			inputNetAttachDefConfigSpec: `
+    {
+            "name": "tenantred",
+            "type": "ovn-k8s-cni-overlay",
+            "topology": "localnet",
+			"disablePortSecurity": true,
+			"netAttachDefName": "ns1/nad1"
+    }
+`,
+			expectedNetConf: &ovncnitypes.NetConf{
+				Topology:            "localnet",
+				NADName:             "ns1/nad1",
+				MTU:                 1400,
+				DisablePortSecurity: true,
+				NetConf:             cnitypes.NetConf{Name: "tenantred", Type: "ovn-k8s-cni-overlay"},
+			},
+		},
 	}
 
 	for _, test := range tests {

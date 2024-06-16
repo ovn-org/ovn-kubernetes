@@ -2,7 +2,6 @@ package ovn
 
 import (
 	"context"
-	"fmt"
 	"net"
 	"strings"
 
@@ -145,75 +144,26 @@ func (p testPod) populateSecondaryNetworkLogicalSwitchCache(fakeOvn *FakeOVN, oc
 		podInfo := p.secondaryPodInfos[ocInfo.bnc.GetNetworkName()]
 		err = ocInfo.bnc.lsManager.AddOrUpdateSwitch(ocInfo.bnc.GetNetworkScopedName(p.nodeName), []*net.IPNet{ovntest.MustParseIPNet(podInfo.nodeSubnet)})
 	case ovntypes.Layer2Topology:
-		subnet := ocInfo.bnc.Subnets()[0]
-		err = ocInfo.bnc.lsManager.AddOrUpdateSwitch(ocInfo.bnc.GetNetworkScopedName(ovntypes.OVNLayer2Switch), []*net.IPNet{subnet.CIDR})
+		err = ocInfo.bnc.lsManager.AddOrUpdateSwitch(
+			ocInfo.bnc.GetNetworkScopedName(ovntypes.OVNLayer2Switch),
+			subnetCIDR(ocInfo.bnc.Subnets()),
+		)
 	case ovntypes.LocalnetTopology:
-		subnet := ocInfo.bnc.Subnets()[0]
-		err = ocInfo.bnc.lsManager.AddOrUpdateSwitch(ocInfo.bnc.GetNetworkScopedName(ovntypes.OVNLocalnetSwitch), []*net.IPNet{subnet.CIDR})
+		err = ocInfo.bnc.lsManager.AddOrUpdateSwitch(
+			ocInfo.bnc.GetNetworkScopedName(ovntypes.OVNLocalnetSwitch),
+			subnetCIDR(ocInfo.bnc.Subnets()),
+		)
 	}
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 }
 
-func getExpectedDataPodsAndSwitchesForSecondaryNetwork(fakeOvn *FakeOVN, pods []testPod) []libovsdb.TestData {
-	data := []libovsdb.TestData{}
-	for _, ocInfo := range fakeOvn.secondaryControllers {
-		nodeslsps := make(map[string][]string)
-		var switchName string
-		for _, pod := range pods {
-			podInfo, ok := pod.secondaryPodInfos[ocInfo.bnc.GetNetworkName()]
-			if !ok {
-				continue
-			}
-			for nad, portInfo := range podInfo.allportInfo {
-				portName := portInfo.portName
-				var lspUUID string
-				if len(portInfo.portUUID) == 0 {
-					lspUUID = portName + "-UUID"
-				} else {
-					lspUUID = portInfo.portUUID
-				}
-				podAddr := fmt.Sprintf("%s %s", portInfo.podMAC, portInfo.podIP)
-				lsp := &nbdb.LogicalSwitchPort{
-					UUID:      lspUUID,
-					Name:      portName,
-					Addresses: []string{podAddr},
-					ExternalIDs: map[string]string{
-						"pod":                       "true",
-						"namespace":                 pod.namespace,
-						ovntypes.NetworkExternalID:  ocInfo.bnc.GetNetworkName(),
-						ovntypes.NADExternalID:      nad,
-						ovntypes.TopologyExternalID: ocInfo.bnc.TopologyType(),
-					},
-					Options: map[string]string{
-						"requested-chassis": pod.nodeName,
-						"iface-id-ver":      pod.podName,
-					},
-
-					PortSecurity: []string{podAddr},
-				}
-				if pod.noIfaceIdVer {
-					delete(lsp.Options, "iface-id-ver")
-				}
-				data = append(data, lsp)
-				switch ocInfo.bnc.TopologyType() {
-				case ovntypes.Layer3Topology:
-					switchName = ocInfo.bnc.GetNetworkScopedName(pod.nodeName)
-				case ovntypes.Layer2Topology:
-					switchName = ocInfo.bnc.GetNetworkScopedName(ovntypes.OVNLayer2Switch)
-				case ovntypes.LocalnetTopology:
-					switchName = ocInfo.bnc.GetNetworkScopedName(ovntypes.OVNLocalnetSwitch)
-				}
-				nodeslsps[switchName] = append(nodeslsps[switchName], lspUUID)
-			}
-			data = append(data, &nbdb.LogicalSwitch{
-				UUID:        switchName + "-UUID",
-				Name:        switchName,
-				Ports:       nodeslsps[switchName],
-				ExternalIDs: map[string]string{ovntypes.NetworkExternalID: ocInfo.bnc.GetNetworkName()},
-			})
-		}
+func subnetCIDR(subnets []config.CIDRNetworkEntry) []*net.IPNet {
+	var subnetCIDRs []*net.IPNet
+	if len(subnets) > 0 {
+		subnet := subnets[0]
+		subnetCIDRs = []*net.IPNet{subnet.CIDR}
 	}
-	return data
+	return subnetCIDRs
 }
 
 var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
@@ -417,7 +367,10 @@ var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
 
 	getUpdatedInitialDB := func(tPods []testPod) []libovsdb.TestData {
 		updatedSwitchAndPods := getExpectedDataPodsAndSwitches(tPods, []string{nodeName})
-		secondarySwitchAndPods := getExpectedDataPodsAndSwitchesForSecondaryNetwork(fakeOvn, tPods)
+		secondarySwitchAndPods := newSecondaryNetworkExpectationMachine(
+			fakeOvn,
+			tPods,
+		).expectedLogicalSwitchesAndPorts()
 		if len(secondarySwitchAndPods) != 0 {
 			updatedSwitchAndPods = append(updatedSwitchAndPods, secondarySwitchAndPods...)
 		}

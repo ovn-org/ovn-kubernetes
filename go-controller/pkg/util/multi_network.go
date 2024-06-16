@@ -36,6 +36,8 @@ type BasicNetInfo interface {
 	ExcludeSubnets() []*net.IPNet
 	Vlan() uint
 	AllowsPersistentIPs() bool
+	DisablePortSecurity() bool
+	AllowL2Unknown() bool
 
 	// utility methods
 	CompareNetInfo(BasicNetInfo) bool
@@ -133,13 +135,25 @@ func (nInfo *DefaultNetInfo) AllowsPersistentIPs() bool {
 	return false
 }
 
+// DisablePortSecurity returns the defaultNetConfInfo's DisablePortSecurity value
+func (nInfo *DefaultNetInfo) DisablePortSecurity() bool {
+	return false
+}
+
+// AllowL2Unknown returns the defaultNetConfInfo's AllowL2Unknown value
+func (nInfo *DefaultNetInfo) AllowL2Unknown() bool {
+	return false
+}
+
 // SecondaryNetInfo holds the network name information for secondary network if non-nil
 type secondaryNetInfo struct {
-	netName            string
-	topology           string
-	mtu                int
-	vlan               uint
-	allowPersistentIPs bool
+	netName             string
+	topology            string
+	mtu                 int
+	vlan                uint
+	allowPersistentIPs  bool
+	disablePortSecurity bool
+	allowL2Unknown      bool
 
 	ipv4mode, ipv6mode bool
 	subnets            []config.CIDRNetworkEntry
@@ -230,6 +244,16 @@ func (nInfo *secondaryNetInfo) ExcludeSubnets() []*net.IPNet {
 	return nInfo.excludeSubnets
 }
 
+// DisablePortSecurity returns the defaultNetConfInfo's DisablePortSecurity value
+func (nInfo *secondaryNetInfo) DisablePortSecurity() bool {
+	return nInfo.disablePortSecurity
+}
+
+// AllowL2Unknown returns the defaultNetConfInfo's AllowL2Unknown value
+func (nInfo *secondaryNetInfo) AllowL2Unknown() bool {
+	return nInfo.allowL2Unknown
+}
+
 // CompareNetInfo compares for equality this network information with the other
 func (nInfo *secondaryNetInfo) CompareNetInfo(other BasicNetInfo) bool {
 	if nInfo.netName != other.GetNetworkName() {
@@ -245,6 +269,12 @@ func (nInfo *secondaryNetInfo) CompareNetInfo(other BasicNetInfo) bool {
 		return false
 	}
 	if nInfo.allowPersistentIPs != other.AllowsPersistentIPs() {
+		return false
+	}
+	if nInfo.disablePortSecurity != other.DisablePortSecurity() {
+		return false
+	}
+	if nInfo.allowL2Unknown != other.AllowL2Unknown() {
 		return false
 	}
 
@@ -264,10 +294,11 @@ func newLayer3NetConfInfo(netconf *ovncnitypes.NetConf) (NetInfo, error) {
 	}
 
 	ni := &secondaryNetInfo{
-		netName:  netconf.Name,
-		topology: types.Layer3Topology,
-		subnets:  subnets,
-		mtu:      netconf.MTU,
+		netName:             netconf.Name,
+		topology:            types.Layer3Topology,
+		subnets:             subnets,
+		mtu:                 netconf.MTU,
+		disablePortSecurity: netconf.DisablePortSecurity,
 	}
 	ni.ipv4mode, ni.ipv6mode = getIPMode(subnets)
 	return ni, nil
@@ -280,12 +311,14 @@ func newLayer2NetConfInfo(netconf *ovncnitypes.NetConf) (NetInfo, error) {
 	}
 
 	ni := &secondaryNetInfo{
-		netName:            netconf.Name,
-		topology:           types.Layer2Topology,
-		subnets:            subnets,
-		excludeSubnets:     excludes,
-		mtu:                netconf.MTU,
-		allowPersistentIPs: netconf.AllowPersistentIPs,
+		netName:             netconf.Name,
+		topology:            types.Layer2Topology,
+		subnets:             subnets,
+		excludeSubnets:      excludes,
+		mtu:                 netconf.MTU,
+		allowPersistentIPs:  netconf.AllowPersistentIPs,
+		disablePortSecurity: netconf.DisablePortSecurity,
+		allowL2Unknown:      netconf.EnableL2Unknown,
 	}
 	ni.ipv4mode, ni.ipv6mode = getIPMode(subnets)
 	return ni, nil
@@ -298,13 +331,15 @@ func newLocalnetNetConfInfo(netconf *ovncnitypes.NetConf) (NetInfo, error) {
 	}
 
 	ni := &secondaryNetInfo{
-		netName:            netconf.Name,
-		topology:           types.LocalnetTopology,
-		subnets:            subnets,
-		excludeSubnets:     excludes,
-		mtu:                netconf.MTU,
-		vlan:               uint(netconf.VLANID),
-		allowPersistentIPs: netconf.AllowPersistentIPs,
+		netName:             netconf.Name,
+		topology:            types.LocalnetTopology,
+		subnets:             subnets,
+		excludeSubnets:      excludes,
+		mtu:                 netconf.MTU,
+		vlan:                uint(netconf.VLANID),
+		allowPersistentIPs:  netconf.AllowPersistentIPs,
+		disablePortSecurity: netconf.DisablePortSecurity,
+		allowL2Unknown:      netconf.EnableL2Unknown,
 	}
 	ni.ipv4mode, ni.ipv6mode = getIPMode(subnets)
 	return ni, nil

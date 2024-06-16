@@ -566,7 +566,17 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *kapi.Pod, nadName
 	}
 
 	// CNI depends on the flows from port security, delay setting it until end
-	lsp.PortSecurity = addresses
+	if !bnc.DisablePortSecurity() {
+		lsp.PortSecurity = append(lsp.PortSecurity, lsp.Addresses...)
+	}
+	if bnc.AllowL2Unknown() {
+		const (
+			allowUnknownAddresses = "unknown"
+			useFDB                = "force_fdb_lookup"
+		)
+		lsp.Addresses = append(lsp.Addresses, allowUnknownAddresses)
+		lsp.Options[useFDB] = "true"
+	}
 
 	// On layer2 topology with interconnect, we need to add specific port config
 	if bnc.isLayer2Interconnect() {
