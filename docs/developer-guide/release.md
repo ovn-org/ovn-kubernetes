@@ -15,7 +15,7 @@ Each new release of OVN-Kubernetes is defined with a "version" that represents t
   * `ovnkube-identity`: is the executable that is invoked to run ovn-kubernetes identity manager, which includes the admission webhook and the CertificateSigningRequest approver
 * `ovnkube` API configuration 
 * scripts used to deploy OVN-Kubernetes including helm charts
-* Images for [fedora](https://github.com/ovn-org/ovn-kubernetes/pkgs/container/ovn-kubernetes%2Fovn-kube-f) and [ubuntu](https://github.com/ovn-org/ovn-kubernetes/pkgs/container/ovn-kubernetes%2Fovn-kube-u)
+* Images for [fedora](https://github.com/ovn-org/ovn-kubernetes/pkgs/container/ovn-kubernetes%2Fovn-kube-fedora) and [ubuntu](https://github.com/ovn-org/ovn-kubernetes/pkgs/container/ovn-kubernetes%2Fovn-kube-ubuntu)
 
 ## Release Planning
 

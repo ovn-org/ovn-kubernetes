@@ -4,7 +4,7 @@
 set -ex
 
 export KUBECONFIG=${KUBECONFIG:-${HOME}/ovn.conf}
-export OVN_IMAGE=${OVN_IMAGE:-ovn-daemonset-f:pr}
+export OVN_IMAGE=${OVN_IMAGE:-ovn-daemonset-fedora:pr}
 
 kubectl_wait_pods() {
   # Check that everything is fine and running. IPv6 cluster seems to take a little
@@ -260,7 +260,7 @@ set_cluster_cidr_ip_families() {
 KIND_CLUSTER_NAME=${KIND_CLUSTER_NAME:-ovn} # Set default values
 
 # setup env needed for regenerating ovn resources from the checked-out branch
-# this will use the new OVN image as well: ovn-daemonset-f:pr
+# this will use the new OVN image as well: ovn-daemonset-fedora:pr
 set_default_ovn_manifest_params
 print_ovn_manifest_params
 
