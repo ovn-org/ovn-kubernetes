@@ -60,6 +60,28 @@ Additionally following iptables rules are added at FORWARD chain to forward clus
 
 ## OVN-Kubernetes Feature Config
 
+### Enable Multiple Networks
+
+Users can create pods with multiple interfaces such that each interface is hooked to
+a separate network thereby enabling multiple networks for a given pod;
+a.k.a multi-homing. All networks that are created as additions to the primary
+default Kubernetes network are fondly called `secondary networks`. This feature
+can be enabled by using the `--enable-multi-network` flag on OVN-Kubernetes clusters.
+
+
+### Enable Network Segmentation
+
+Users can enable the network-segmentation feature using `--enable-network-segmentation`
+flag on a KIND cluster. This allows users to be able to design native isolation between
+their tenant namespaces by coupling all namespaces that belong to the same
+tenant under the same secondary network and then making this network the primary network
+for the pod. Each network is isolated and cannot talk to other user
+defined network. Check out the feature docs for more information on how to segment your
+cluster on a network level.
+
+NOTE: This feature only works if `--enable-multi-network` is
+also enabled since it leverages the secondary networks feature.
+
 ## HA Config
 
 ## OVN Auth Config
