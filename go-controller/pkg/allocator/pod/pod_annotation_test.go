@@ -223,8 +223,10 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 						NextHop: ovntest.MustParseIP("192.168.0.1").To4(),
 					},
 				},
+				Primary: true,
 			},
 			wantReleasedIPsOnRollback: ovntest.MustParseIPNets("192.168.0.3/24"),
+			isPrimaryNetwork:          true,
 		},
 		{
 			// on networks with IPAM, if pod is already annotated, expect no
@@ -304,8 +306,10 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 						NextHop: ovntest.MustParseIP("192.168.0.1").To4(),
 					},
 				},
+				Primary: true,
 			},
 			wantReleasedIPsOnRollback: ovntest.MustParseIPNets("192.168.0.4/24"),
+			isPrimaryNetwork:          true,
 		},
 		{
 			// on networks with IPAM, try to honor IP request that is already
@@ -333,7 +337,9 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 						NextHop: ovntest.MustParseIP("192.168.0.1").To4(),
 					},
 				},
+				Primary: true,
 			},
+			isPrimaryNetwork: true,
 		},
 		{
 			// on networks with IPAM, trying to honor IP request but
@@ -361,8 +367,10 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 						NextHop: ovntest.MustParseIP("192.168.0.1").To4(),
 					},
 				},
+				Primary: true,
 			},
 			wantReleasedIPsOnRollback: ovntest.MustParseIPNets("192.168.0.3/24"),
+			isPrimaryNetwork:          true,
 		},
 		{
 			// on networks with IPAM, expect error on an invalid IP request
@@ -417,8 +425,10 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 						NextHop: ovntest.MustParseIP("192.168.0.1").To4(),
 					},
 				},
+				Primary: true,
 			},
 			wantReleasedIPsOnRollback: ovntest.MustParseIPNets("192.168.0.3/24"),
+			isPrimaryNetwork:          true, // has to be true for default routes to be set
 		},
 		{
 			// on networks with IPAM, expect error on an invalid network
