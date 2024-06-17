@@ -23,7 +23,9 @@ var _ = Describe("Network Segmentation", func() {
 	type activeNetworkTest struct {
 		nads                  []networkAttachmentConfigParams
 		podsBeforeNADs        []podConfiguration
+		podsAfterNADs         []podConfiguration
 		expectedActiveNetwork string
+		deleteNADs            []string
 	}
 	DescribeTable("should annotate namespace with proper active-network", func(td activeNetworkTest) {
 		nadClient, err := nadclient.NewForConfig(f.ClientConfig())
@@ -54,12 +56,35 @@ var _ = Describe("Network Segmentation", func() {
 			Expect(err).NotTo(HaveOccurred())
 		}
 
-		By("Wait for active-network annotation")
+		By("Create pods after network attachment definition")
+		podsAfterNADs := []*corev1.Pod{}
+		for _, pod := range td.podsAfterNADs {
+			pod, err := f.ClientSet.CoreV1().Pods(f.Namespace.Name).Create(
+				context.Background(),
+				generatePodSpec(pod),
+				metav1.CreateOptions{},
+			)
+			Expect(err).NotTo(HaveOccurred())
+			podsAfterNADs = append(podsAfterNADs, pod)
+		}
+		for _, nadNameToDelete := range td.deleteNADs {
+			Expect(nadClient.NetworkAttachmentDefinitions(f.Namespace.Name).Delete(
+				context.Background(),
+				nadNameToDelete,
+				metav1.DeleteOptions{},
+			)).To(Succeed())
+		}
+
+		By("Wait for expected active-network annotation")
+		activeNetworkMatch := HaveKeyWithValue(activeNetworkAnnotation, td.expectedActiveNetwork)
+		if td.expectedActiveNetwork == "" {
+			activeNetworkMatch = Not(HaveKey(activeNetworkAnnotation))
+		}
+
 		Eventually(thisNamespace(f.ClientSet, f.Namespace)).
 			WithPolling(time.Second / 2).
 			WithTimeout(5 * time.Second).
-			Should(WithTransform(getAnnotations,
-				HaveKeyWithValue(activeNetworkAnnotation, td.expectedActiveNetwork)))
+			Should(WithTransform(getAnnotations, activeNetworkMatch))
 
 	},
 		Entry("without primary network nads to 'default'", activeNetworkTest{
@@ -154,6 +179,53 @@ var _ = Describe("Network Segmentation", func() {
 				topology:       "layer2",
 				primaryNetwork: true,
 			}},
+			expectedActiveNetwork: "unknown",
+		}),
+		Entry("with two primaryNetwork nads and different network created and then one delete with networkName", activeNetworkTest{
+			nads: []networkAttachmentConfigParams{
+				{
+					name:           "tenant-blue-l3",
+					networkName:    "net-l3",
+					cidr:           "10.128.0.0/16/24",
+					topology:       "layer3",
+					primaryNetwork: true,
+				},
+				{
+					name:           "tenant-blue-l2",
+					networkName:    "net-l2",
+					cidr:           "10.128.0.0/24",
+					topology:       "layer2",
+					primaryNetwork: true,
+				},
+			},
+			deleteNADs:            []string{"tenant-blue-l3"},
+			expectedActiveNetwork: "net-l2",
+		}),
+		Entry("with one primaryNetwork nad deleted and no pods should annotate back to 'default'", activeNetworkTest{
+			nads: []networkAttachmentConfigParams{
+				{
+					name:           "tenant-blue-l3",
+					networkName:    "net-l3",
+					cidr:           "10.128.0.0/16/24",
+					topology:       "layer3",
+					primaryNetwork: true,
+				},
+			},
+			deleteNADs:            []string{"tenant-blue-l3"},
+			expectedActiveNetwork: "default",
+		}),
+		Entry("with one primaryNetwork nad deleted and pods should annotate to 'unknown'", activeNetworkTest{
+			nads: []networkAttachmentConfigParams{
+				{
+					name:           "tenant-blue-l3",
+					networkName:    "net-l3",
+					cidr:           "10.128.0.0/16/24",
+					topology:       "layer3",
+					primaryNetwork: true,
+				},
+			},
+			podsAfterNADs:         []podConfiguration{{name: "pod1"}},
+			deleteNADs:            []string{"tenant-blue-l3"},
 			expectedActiveNetwork: "unknown",
 		}),
 	)
