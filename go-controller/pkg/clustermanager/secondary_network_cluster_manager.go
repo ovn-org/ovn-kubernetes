@@ -57,7 +57,7 @@ func newSecondaryNetworkClusterManager(ovnClient *util.OVNClusterManagerClientse
 		return nil, err
 	}
 	if util.IsNetworkSegmentationSupportEnabled() {
-		sncm.nadController.AddManager("network segmentation", nad.NewNetworkSegmentationManager(ovnClient.KubeClient, wf))
+		sncm.nadController.AddManager("network segmentation", nad.NewNetworkSegmentationManager(ovnClient.KubeClient, wf, ovnClient.NetworkAttchDefClient))
 	}
 	return sncm, nil
 }
