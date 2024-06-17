@@ -44,7 +44,7 @@ sudo sysctl fs.inotify.max_user_instances=512
 # build image
 cd ../dist/images
 make ubuntu
-docker tag ovn-kube-u:latest ghcr.io/ovn-org/ovn-kubernetes/ovn-kube-u:master
+docker tag ovn-kube-ubuntu:latest ghcr.io/ovn-org/ovn-kubernetes/ovn-kube-ubuntu:master
 # create a cluster, with 1 controller and 1 worker node
 kind_cluster_name=ovn-helm
 cat <<EOT > /tmp/kind.yaml
@@ -59,9 +59,9 @@ networking:
 EOT
 kind delete clusters $kind_cluster_name
 kind create cluster --name $kind_cluster_name --config /tmp/kind.yaml
-kind load docker-image --name $kind_cluster_name ghcr.io/ovn-org/ovn-kubernetes/ovn-kube-u:master
+kind load docker-image --name $kind_cluster_name ghcr.io/ovn-org/ovn-kubernetes/ovn-kube-ubuntu:master
 cd ../../helm/ovn-kubernetes
 helm install ovn-kubernetes . -f values.yaml \
     --set k8sAPIServer="https://$(kubectl get pods -n kube-system -l component=kube-apiserver -o jsonpath='{.items[0].status.hostIP}'):6443" \
     --set ovnkube-identity.replicas=$(kubectl get node -l node-role.kubernetes.io/control-plane --no-headers | wc -l) \
-    --set global.image.repository=ghcr.io/ovn-org/ovn-kubernetes/ovn-kube-u --set global.image.tag=master
+    --set global.image.repository=ghcr.io/ovn-org/ovn-kubernetes/ovn-kube-ubuntu --set global.image.tag=master

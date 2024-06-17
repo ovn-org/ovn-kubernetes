@@ -739,9 +739,9 @@ create_kind_cluster() {
 set_ovn_image() {
   # if we're using the local registry and still need to build, push to local registry
   if [ "$KIND_LOCAL_REGISTRY" == true ];then
-    OVN_IMAGE="localhost:5000/ovn-daemonset-f:latest"
+    OVN_IMAGE="localhost:5000/ovn-daemonset-fedora:latest"
   else
-    OVN_IMAGE="localhost/ovn-daemonset-f:dev"
+    OVN_IMAGE="localhost/ovn-daemonset-fedora:dev"
   fi
 }
 
@@ -846,9 +846,9 @@ install_ovn_image() {
   else
     if [ "$OCI_BIN" == "podman" ]; then
       # podman: cf https://github.com/kubernetes-sigs/kind/issues/2027
-      rm -f /tmp/ovn-kube-f.tar
-      podman save -o /tmp/ovn-kube-f.tar "${OVN_IMAGE}"
-      kind load image-archive /tmp/ovn-kube-f.tar --name "${KIND_CLUSTER_NAME}"
+      rm -f /tmp/ovn-kube-fedora.tar
+      podman save -o /tmp/ovn-kube-fedora.tar "${OVN_IMAGE}"
+      kind load image-archive /tmp/ovn-kube-fedora.tar --name "${KIND_CLUSTER_NAME}"
     else
       kind load docker-image "${OVN_IMAGE}" --name "${KIND_CLUSTER_NAME}"
     fi

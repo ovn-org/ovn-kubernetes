@@ -448,14 +448,14 @@ echo "ref: $(git rev-parse  --symbolic-full-name HEAD)  commit: $(git rev-parse 
 
 Now, build and push the image with:
 ~~~
-OVN_IMAGE=192.168.123.254:5000/ovn-daemonset-f:latest
+OVN_IMAGE=192.168.123.254:5000/ovn-daemonset-fedora:latest
 buildah bud -t $OVN_IMAGE -f Dockerfile.fedora .
 podman push $OVN_IMAGE
 ~~~
 
 Next, run:
 ~~~
-OVN_IMAGE=192.168.123.254:5000/ovn-daemonset-f:latest
+OVN_IMAGE=192.168.123.254:5000/ovn-daemonset-fedora:latest
 MASTER_IP=192.168.123.1
 NET_CIDR="172.16.0.0/16/24"
 SVC_CIDR="172.17.0.0/16"
