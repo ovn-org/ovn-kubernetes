@@ -83,8 +83,8 @@ jobs:
             exit 0
         fi
 
-        if docker pull ghcr.io/ovn-org/ovn-kubernetes/ovn-kube-f:master; then
-            docker tag ghcr.io/ovn-org/ovn-kubernetes/ovn-kube-f:master ovn-daemonset-f:dev
+        if docker pull ghcr.io/ovn-org/ovn-kubernetes/ovn-kube-fedora:master; then
+            docker tag ghcr.io/ovn-org/ovn-kubernetes/ovn-kube-fedora:master ovn-daemonset-fedora:dev
 
             echo "MASTER_IMAGE_RESTORED=true" >> "$GITHUB_OUTPUT"
             exit 0
@@ -120,7 +120,7 @@ jobs:
           sudo cp -f ../../go-controller/_output/go/bin/ovn* .
           sudo cp -f ../../go-controller/_output/go/bin/hybrid-overlay-node .
           echo "ref: $(git rev-parse  --symbolic-full-name HEAD)  commit: $(git rev-parse  HEAD)" > git_info
-          docker build -t ovn-daemonset-f:dev -f Dockerfile.fedora .
+          docker build -t ovn-daemonset-fedora:dev -f Dockerfile.fedora .
         popd
 
     - name: Cache master image
@@ -134,7 +134,7 @@ jobs:
         if [ -f ${CI_IMAGE_CACHE}${CI_IMAGE_MASTER_TAR}.gz ]; then
             rm -f ${CI_IMAGE_CACHE}${CI_IMAGE_MASTER_TAR}.gz
         fi
-        docker save ovn-daemonset-f:dev -o ${CI_IMAGE_MASTER_TAR}
+        docker save ovn-daemonset-fedora:dev -o ${CI_IMAGE_MASTER_TAR}
         mkdir -p ${CI_IMAGE_CACHE}
         cp ${CI_IMAGE_MASTER_TAR} ${CI_IMAGE_CACHE}${CI_IMAGE_MASTER_TAR}
         gzip ${CI_IMAGE_CACHE}${CI_IMAGE_MASTER_TAR}
@@ -202,9 +202,9 @@ jobs:
           sudo cp -f ../../go-controller/_output/go/bin/ovn* .
           sudo cp -f ../../go-controller/_output/go/bin/hybrid-overlay-node .
           echo "ref: $(git rev-parse  --symbolic-full-name HEAD)  commit: $(git rev-parse  HEAD)" > git_info
-          docker build -t ovn-daemonset-f:pr -f Dockerfile.fedora .
+          docker build -t ovn-daemonset-fedora:pr -f Dockerfile.fedora .
           mkdir _output
-          docker save ovn-daemonset-f:pr > _output/${CI_IMAGE_PR_TAR}
+          docker save ovn-daemonset-fedora:pr > _output/${CI_IMAGE_PR_TAR}
         popd
 
     - name: Submit code coverage to Coveralls
@@ -313,7 +313,7 @@ jobs:
 
     - name: kind setup
       run: |
-        export OVN_IMAGE="ovn-daemonset-f:dev"
+        export OVN_IMAGE="ovn-daemonset-fedora:dev"
         make -C test install-kind
 
     - name: Export kind logs
@@ -351,7 +351,7 @@ jobs:
 
     - name: ovn upgrade
       run: |
-        export OVN_IMAGE="ovn-daemonset-f:pr"
+        export OVN_IMAGE="ovn-daemonset-fedora:pr"
         make -C test upgrade-ovn
 
     - name: Runner Diagnostics
@@ -497,7 +497,7 @@ jobs:
     - name: kind setup
       timeout-minutes: 30
       run: |
-        export OVN_IMAGE="ovn-daemonset-f:pr"
+        export OVN_IMAGE="ovn-daemonset-fedora:pr"
         make -C test install-kind
 
     - name: Runner Diagnostics
@@ -509,7 +509,7 @@ jobs:
       timeout-minutes: ${{ matrix.target == 'control-plane' && 180 || matrix.target == 'external-gateway' && 180 || 120 }}
       run: |
         # used by e2e diagnostics package
-        export OVN_IMAGE="ovn-daemonset-f:pr"
+        export OVN_IMAGE="ovn-daemonset-fedora:pr"
         
         if [ "${{ matrix.target }}" == "multi-homing" ]; then
           make -C test control-plane WHAT="Multi Homing"
@@ -607,7 +607,7 @@ jobs:
 
     - name: kind IPv4 setup
       run: |
-        export OVN_IMAGE="ovn-daemonset-f:pr"
+        export OVN_IMAGE="ovn-daemonset-fedora:pr"
         make -C test install-kind
 
     - name: Convert IPv4 cluster to Dual Stack

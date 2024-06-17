@@ -1,5 +1,5 @@
 #
-# The standard name for this image is ovn-kube-u
+# The standard name for this image is ovn-kube-ubuntu
 
 # Notes:
 # This is for a development build where the ovn-kubernetes utilities
