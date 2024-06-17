@@ -35,7 +35,7 @@ RUN INSTALL_PKGS=" \
 
 # Clone OVS Source Code.
 ARG OVS_REPO=https://github.com/openvswitch/ovs.git
-ARG OVS_BRANCH=master
+ARG OVS_BRANCH=main
 WORKDIR /root
 RUN git clone $OVS_REPO --single-branch --branch=$OVS_BRANCH
 
