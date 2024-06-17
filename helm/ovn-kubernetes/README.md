@@ -81,14 +81,14 @@ networking:
 ```
 # cd dist/images
 # make ubuntu
-# docker tag ovn-kube-u:latest ghcr.io/ovn-org/ovn-kubernetes/ovn-kube-u:master
-# kind load docker-image ghcr.io/ovn-org/ovn-kubernetes/ovn-kube-u:master
+# docker tag ovn-kube-ubuntu:latest ghcr.io/ovn-org/ovn-kubernetes/ovn-kube-ubuntu:master
+# kind load docker-image ghcr.io/ovn-org/ovn-kubernetes/ovn-kube-ubuntu:master
 ```
 
 - Run `helm install` with propery `k8sAPIServer`, `ovnkube-identity.replicas`, image repo and tag
 ```
 # cd helm/ovn-kubernetes
-# helm install ovn-kubernetes . -f values.yaml --set k8sAPIServer="https://$(kubectl get pods -n kube-system -l component=kube-apiserver -o jsonpath='{.items[0].status.hostIP}'):6443" --set ovnkube-identity.replicas=$(kubectl get node -l node-role.kubernetes.io/control-plane --no-headers | wc -l) --set global.image.repository=ghcr.io/ovn-org/ovn-kubernetes/ovn-kube-u --set global.image.tag=master
+# helm install ovn-kubernetes . -f values.yaml --set k8sAPIServer="https://$(kubectl get pods -n kube-system -l component=kube-apiserver -o jsonpath='{.items[0].status.hostIP}'):6443" --set ovnkube-identity.replicas=$(kubectl get node -l node-role.kubernetes.io/control-plane --no-headers | wc -l) --set global.image.repository=ghcr.io/ovn-org/ovn-kubernetes/ovn-kube-ubuntu --set global.image.tag=master
 ```
 
 ## Notes:
@@ -400,7 +400,7 @@ true
 			<td>global.image.repository</td>
 			<td>string</td>
 			<td><pre lang="json">
-"ghcr.io/ovn-org/ovn-kubernetes/ovn-kube-u"
+"ghcr.io/ovn-org/ovn-kubernetes/ovn-kube-ubuntu"
 </pre>
 </td>
 			<td>Image repository for ovn-kubernetes components</td>
