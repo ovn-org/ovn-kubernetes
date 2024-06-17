@@ -28,6 +28,7 @@ var (
 type BasicNetInfo interface {
 	// basic network information
 	GetNetworkName() string
+	IsPrimaryNetwork() bool
 	IsSecondary() bool
 	TopologyType() string
 	MTU() int
@@ -57,6 +58,15 @@ type DefaultNetInfo struct{}
 // GetNetworkName returns the network name
 func (nInfo *DefaultNetInfo) GetNetworkName() string {
 	return types.DefaultNetworkName
+}
+
+// IsPrimaryNetwork always returns false for default network.
+// The boolean indicates if this secondary network is
+// meant to be the primary network for the pod. Since default
+// network is never a secondary network this is always false.
+// This cannot be true if IsSecondary() is not true.
+func (nInfo *DefaultNetInfo) IsPrimaryNetwork() bool {
+	return false
 }
 
 // IsSecondary returns if this network is secondary
@@ -135,7 +145,10 @@ func (nInfo *DefaultNetInfo) AllowsPersistentIPs() bool {
 
 // SecondaryNetInfo holds the network name information for secondary network if non-nil
 type secondaryNetInfo struct {
-	netName            string
+	netName string
+	// Should this secondary network be used
+	// as the pod's primary network?
+	primaryNetwork     bool
 	topology           string
 	mtu                int
 	vlan               uint
@@ -153,6 +166,13 @@ type secondaryNetInfo struct {
 // GetNetworkName returns the network name
 func (nInfo *secondaryNetInfo) GetNetworkName() string {
 	return nInfo.netName
+}
+
+// IsPrimaryNetwork returns if this secondary network
+// should be used as the primaryNetwork for the pod
+// to achieve native network segmentation
+func (nInfo *secondaryNetInfo) IsPrimaryNetwork() bool {
+	return nInfo.primaryNetwork
 }
 
 // IsSecondary returns if this network is secondary
@@ -247,6 +267,9 @@ func (nInfo *secondaryNetInfo) CompareNetInfo(other BasicNetInfo) bool {
 	if nInfo.allowPersistentIPs != other.AllowsPersistentIPs() {
 		return false
 	}
+	if nInfo.primaryNetwork != other.IsPrimaryNetwork() {
+		return false
+	}
 
 	lessCIDRNetworkEntry := func(a, b config.CIDRNetworkEntry) bool { return a.String() < b.String() }
 	if !cmp.Equal(nInfo.subnets, other.Subnets(), cmpopts.SortSlices(lessCIDRNetworkEntry)) {
@@ -264,10 +287,11 @@ func newLayer3NetConfInfo(netconf *ovncnitypes.NetConf) (NetInfo, error) {
 	}
 
 	ni := &secondaryNetInfo{
-		netName:  netconf.Name,
-		topology: types.Layer3Topology,
-		subnets:  subnets,
-		mtu:      netconf.MTU,
+		netName:        netconf.Name,
+		primaryNetwork: netconf.PrimaryNetwork,
+		topology:       types.Layer3Topology,
+		subnets:        subnets,
+		mtu:            netconf.MTU,
 	}
 	ni.ipv4mode, ni.ipv6mode = getIPMode(subnets)
 	return ni, nil
@@ -281,6 +305,7 @@ func newLayer2NetConfInfo(netconf *ovncnitypes.NetConf) (NetInfo, error) {
 
 	ni := &secondaryNetInfo{
 		netName:            netconf.Name,
+		primaryNetwork:     netconf.PrimaryNetwork,
 		topology:           types.Layer2Topology,
 		subnets:            subnets,
 		excludeSubnets:     excludes,
@@ -439,6 +464,10 @@ func ParseNetConf(netattachdef *nettypes.NetworkAttachmentDefinition) (*ovncnity
 		return nil, fmt.Errorf("layer3 topology does not allow persistent IPs")
 	}
 
+	if netconf.PrimaryNetwork && netconf.Topology == types.LocalnetTopology {
+		return nil, fmt.Errorf("localnet topology does not allow primaryNetwork:true")
+	}
+
 	if netconf.IPAM.Type != "" {
 		return nil, fmt.Errorf("error parsing Network Attachment Definition %s/%s: %v", netattachdef.Namespace, netattachdef.Name, UnsupportedIPAMKeyError)
 	}
@@ -500,6 +529,10 @@ func GetPodNADToNetworkMapping(pod *kapi.Pod, nInfo NetInfo) (bool, map[string]*
 
 func IsMultiNetworkPoliciesSupportEnabled() bool {
 	return config.OVNKubernetesFeature.EnableMultiNetwork && config.OVNKubernetesFeature.EnableMultiNetworkPolicy
+}
+
+func IsNetworkSegmentationSupportEnabled() bool {
+	return config.OVNKubernetesFeature.EnableMultiNetwork && config.OVNKubernetesFeature.EnableNetworkSegmentation
 }
 
 func DoesNetworkRequireIPAM(netInfo NetInfo) bool {
