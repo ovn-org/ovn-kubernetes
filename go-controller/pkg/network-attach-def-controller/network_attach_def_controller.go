@@ -48,6 +48,7 @@ type BaseNetworkController interface {
 	Start(ctx context.Context) error
 	Stop()
 	GetNetworkName() string
+	TopologyType() string
 }
 
 type NetworkController interface {
