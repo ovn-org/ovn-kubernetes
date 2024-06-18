@@ -1179,7 +1179,6 @@ fi
 if [ "$ENABLE_MULTI_NET" == true ]; then
   install_multus
   install_mpolicy_crd
-  install_ipamclaim_crd
   docker_create_second_disconnected_interface "underlay"  # localnet scenarios require an extra interface
 fi
 kubectl_wait_pods
@@ -1198,5 +1197,6 @@ if [ "$KIND_INSTALL_PLUGINS" == true ]; then
 fi
 if [ "$KIND_INSTALL_KUBEVIRT" == true ]; then
   install_kubevirt
+  install_ipamclaim_crd
   install_kubevirt_ipam_claims
 fi
