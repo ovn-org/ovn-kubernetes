@@ -9,16 +9,22 @@ local workflow that controls the test run is located in
 [ovn-kubernetes/.github/workflows/test.yml](https://github.com/ovn-org/ovn-kubernetes/blob/master/.github/workflows/test.yml).
 
 The following tasks are performed:
+
 - Build OVN-Kubernetes
 - Check out the Kubernetes source tree and compiles some dependencies
 - Install KIND
 - Run a matrix of End-To-End Tests using KIND
 
-The following sections should help you understand (and if needed modify) the set of tests that run and how to run these tests locally.
+The full matrix of e2e tests found [here](https://github.com/ovn-org/ovn-kubernetes/blob/master/.github/workflows/test.yml)
+are also run periodically (twice daily) using an OVN-Kubernetes build based on the currently merged code base.
+
+The following sections should help you understand (and if needed modify) the set of tests that run and how to run these
+tests locally.
 
 ## Understanding the CI Test Suite
 
-The tests are broken into 2 categories, `shard` tests which execute tests from the Kubernetes E2E test suite and the `control-plane` tests which run locally defined tests.
+The tests are broken into 2 categories, `shard` tests which execute tests from the Kubernetes E2E test suite and the
+`control-plane` tests which run locally defined tests.
 
 ### Shard tests
 
@@ -26,6 +32,7 @@ The shard tests are broken into a set of shards, which is just a grouping of tes
 and each shard is run in a separate job in parallel. Shards execute the `shard-%` target in 
 [ovn-kubernetes/test/Makefile](https://github.com/ovn-org/ovn-kubernetes/blob/master/test/Makefile).
 The set of shards may change in the future. Below is an example of the shards at time of this writing:
+
 - shard-network
   - All E2E tests that match `[sig-network]`
 - shard-conformance
@@ -35,7 +42,8 @@ The set of shards may change in the future. Below is an example of the shards at
   - When selecting the `shard-test` target, you focus on a specific test by appending `WHAT=<test name>` to the make command.
   - See bottom of this document for an example.
 
-Shards use the [E2E framework](https://kubernetes.io/blog/2019/03/22/kubernetes-end-to-end-testing-for-everyone/). By selecting a specific shard, you modify ginkgo's `--focus` parameter.
+Shards use the [E2E framework](https://kubernetes.io/blog/2019/03/22/kubernetes-end-to-end-testing-for-everyone/). By
+selecting a specific shard, you modify ginkgo's `--focus` parameter.
 
 The regex expression for determining which E2E test is run in which shard, as
 well as the list of skipped tests is defined in
@@ -46,6 +54,7 @@ well as the list of skipped tests is defined in
 In addition to the `shard-%` tests, there is also a `control-plane` target in 
 [ovn-kubernetes/test/Makefile](https://github.com/ovn-org/ovn-kubernetes/blob/master/test/Makefile).
 Below is a description of this target:
+
 - control-plane
   - All locally defined tests by default.
   - You can focus on a specific test by appending `WHAT=<test name>` to the make command.
@@ -106,7 +115,8 @@ $ PATH=/home/$USER/src/golang/go1-12-1/go/bin:$GOPATH/src/k8s.io/kubernetes/_out
 
 Determine which version of Kubernetes is currently used in CI (See
 [ovn-kubernetes/.github/workflows/test.yml](https://github.com/ovn-org/ovn-kubernetes/blob/master/.github/workflows/test.yml))
-and set the environmental variable `K8S_VERSION` to the same value. Also make sure to export a GOPATH which points to your go directory with `export GOPATH=(...)`.
+and set the environmental variable `K8S_VERSION` to the same value. Also make sure to export a GOPATH which points to
+your go directory with `export GOPATH=(...)`.
 
 ```
 K8S_VERSION=v1.28.0
@@ -201,7 +211,8 @@ tests look for the kube config file in a special location, so make a copy:
 cp ~/ovn.conf ~/.kube/kind-config-kind
 ```
 
-To run the desired shard, first make sure that the necessary environment variables are exported (see section above). Then, go to the location of your local copy of the `ovn-kubernetes` repository:
+To run the desired shard, first make sure that the necessary environment variables are exported (see section above).
+Then, go to the location of your local copy of the `ovn-kubernetes` repository:
 ```
 $ REPO=$GOPATH/src/github.com/ovn-org/ovn-kubernetes
 $ cd $REPO
@@ -291,7 +302,8 @@ Test Suite Passed
 
 #### Running a control-plane test
 
-All local tests are defined as `control-plane` tests. To run a single `control-plane` test, target the `control-plane` action and append the `WHAT=<test name>` parameter, as follows:
+All local tests are defined as `control-plane` tests. To run a single `control-plane` test, target the `control-plane`
+action and append the `WHAT=<test name>` parameter, as follows:
 
 ```
 $ cd $REPO
@@ -300,7 +312,9 @@ $ make control-plane WHAT="should be able to send multicast UDP traffic between 
 $ popd
 ```
 
-The value of `WHAT=` will be used to modify the `-ginkgo.focus` parameter. Individual tests can be retrieved from this repository under [test/e2e](https://github.com/ovn-org/ovn-kubernetes/tree/master/test/e2e). To see a list of individual tests, one could run:
+The value of `WHAT=` will be used to modify the `-ginkgo.focus` parameter. Individual tests can be retrieved from this
+repository under [test/e2e](https://github.com/ovn-org/ovn-kubernetes/tree/master/test/e2e). To see a list of individual
+tests, one could run:
 ~~~
 grep -R ginkgo.It test/
 ~~~
