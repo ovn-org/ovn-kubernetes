@@ -120,6 +120,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 		primaryNetwork            bool
 		podAnnotation             *util.PodAnnotation
 		invalidNetworkAnnotation  bool
+		unknownActiveNetework     bool
 		wantUpdatedPod            bool
 		wantGeneratedMac          bool
 		wantPodAnnotation         *util.PodAnnotation
@@ -128,6 +129,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 		wantReleaseID             bool
 		wantRelasedIDOnRollback   bool
 		wantErr                   bool
+		wantErrMsg                string
 	}{
 		{
 			// on secondary L2 networks with no IPAM, we expect to generate a
@@ -189,6 +191,16 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 				Primary:  true,
 			},
 		},
+		{
+			// on secondary L2 network with no IPAM, honor static IP and gateway
+			// requests present in the network selection annotation
+			name:                  "expect error, on primary network and unknown active-network at namespace",
+			primaryNetwork:        true,
+			unknownActiveNetework: true,
+			ipam:                  true,
+			wantErrMsg:            "unknown active-network at namespace",
+		},
+
 		{
 			// on networks with IPAM, expect error if static IP request present
 			// in the network selection annotation
@@ -653,10 +665,14 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 			}
 
 			config.OVNKubernetesFeature.EnableInterconnect = tt.idAllocation
+			activeNetwork := types.DefaultNetworkName
+			if tt.unknownActiveNetework {
+				activeNetwork = types.UnknownNetworkName
+			}
 			namespaceListerMock.On("Get", mock.AnythingOfType("string")).Return(&v1.Namespace{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:        "namespace",
-					Annotations: map[string]string{util.ActiveNetworkAnnotation: types.DefaultNetworkName},
+					Annotations: map[string]string{util.ActiveNetworkAnnotation: activeNetwork},
 				},
 			}, nil)
 			pod := &v1.Pod{
@@ -728,6 +744,9 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 				// check the expected error after we have checked above that the
 				// rollback has behaved as expected
 				g.Expect(err).To(gomega.HaveOccurred(), "Expected error")
+				return
+			} else if tt.wantErrMsg != "" {
+				g.Expect(err).To(gomega.MatchError(gomega.ContainSubstring(tt.wantErrMsg), "Expected error"))
 				return
 			}
 			g.Expect(err).NotTo(gomega.HaveOccurred(), "Did not expect error")

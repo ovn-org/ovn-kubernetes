@@ -1248,6 +1248,16 @@ func thisNamespace(cli kubernetes.Interface, namespace *v1.Namespace) func() (*v
 	}
 }
 
+func thisPod(cli kubernetes.Interface, pod *v1.Pod) func() (*v1.Pod, error) {
+	return func() (*v1.Pod, error) {
+		return cli.CoreV1().Pods(pod.Namespace).Get(context.Background(), pod.Name, metav1.GetOptions{})
+	}
+}
+
 func getAnnotations(obj client.Object) map[string]string {
 	return obj.GetAnnotations()
+}
+
+func getPodPhase(pod *v1.Pod) v1.PodPhase {
+	return pod.Status.Phase
 }

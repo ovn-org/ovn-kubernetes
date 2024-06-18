@@ -9,6 +9,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 
 	nadclient "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/typed/k8s.cni.cncf.io/v1"
 )
@@ -25,6 +26,7 @@ var _ = Describe("Network Segmentation", func() {
 		podsBeforeNADs        []podConfiguration
 		podsAfterNADs         []podConfiguration
 		expectedActiveNetwork string
+		expectedPodsPhase     *corev1.PodPhase
 		deleteNADs            []string
 	}
 	DescribeTable("should annotate namespace with proper active-network", func(td activeNetworkTest) {
@@ -86,6 +88,20 @@ var _ = Describe("Network Segmentation", func() {
 			WithTimeout(5 * time.Second).
 			Should(WithTransform(getAnnotations, activeNetworkMatch))
 
+		if td.expectedPodsPhase != nil {
+			for _, podConfig := range td.podsAfterNADs {
+				pod := generatePodSpec(podConfig)
+				pod.Namespace = f.Namespace.Name
+				Eventually(thisPod(f.ClientSet, pod)).
+					WithPolling(time.Second / 2).
+					WithTimeout(5 * time.Second).
+					Should(WithTransform(getPodPhase, Equal(*td.expectedPodsPhase)))
+				Consistently(thisPod(f.ClientSet, pod)).
+					WithPolling(time.Second / 2).
+					WithTimeout(5 * time.Second).
+					Should(WithTransform(getPodPhase, Equal(*td.expectedPodsPhase)))
+			}
+		}
 	},
 		Entry("without primary network nads to 'default'", activeNetworkTest{
 			nads:                  []networkAttachmentConfigParams{},
@@ -149,7 +165,7 @@ var _ = Describe("Network Segmentation", func() {
 			},
 			expectedActiveNetwork: "net-l2",
 		}),
-		Entry("with two primaryNetwork nads and different network with 'unknown'", activeNetworkTest{
+		Entry("with two primaryNetwork nads and different network with 'unknown' and pods phase to pending", activeNetworkTest{
 			nads: []networkAttachmentConfigParams{
 				{
 					name:           "tenant-blue-l3",
@@ -166,7 +182,11 @@ var _ = Describe("Network Segmentation", func() {
 					primaryNetwork: true,
 				},
 			},
+			podsAfterNADs: []podConfiguration{{
+				name: "pod1",
+			}},
 			expectedActiveNetwork: "unknown",
+			expectedPodsPhase:     ptr.To(corev1.PodPending),
 		}),
 		Entry("with one primaryNetwork nad pods at the namespace with 'unknown'", activeNetworkTest{
 			podsBeforeNADs: []podConfiguration{{

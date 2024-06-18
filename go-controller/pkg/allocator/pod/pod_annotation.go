@@ -286,6 +286,11 @@ func allocatePodAnnotationWithRollback(
 				return
 			}
 			activeNetworkForPod := util.GetNamespaceActiveNetwork(podNamespace)
+			if activeNetworkForPod == types.UnknownNetworkName {
+				// TODO event
+				err = fmt.Errorf("unknown active-network at namespace %s", podNamespace)
+				return
+			}
 			if activeNetworkForPod == nadName {
 				tentative.Primary = true
 			}
