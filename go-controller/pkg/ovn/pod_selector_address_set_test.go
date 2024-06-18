@@ -25,6 +25,20 @@ func getPolicyKeyWithKind(policy *knet.NetworkPolicy) string {
 	return fmt.Sprintf("%v/%v/%v", "NetworkPolicy", policy.Namespace, policy.Name)
 }
 
+func eventuallyExpectAddressSetsWithIP(fakeOvn *FakeOVN, peer knet.NetworkPolicyPeer, namespace, ip string) {
+	if peer.PodSelector != nil {
+		dbIDs := getPodSelectorAddrSetDbIDs(getPodSelectorKey(peer.PodSelector, peer.NamespaceSelector, namespace), DefaultNetworkControllerName)
+		fakeOvn.asf.EventuallyExpectAddressSetWithAddresses(dbIDs, []string{ip})
+	}
+}
+
+func eventuallyExpectEmptyAddressSetsExist(fakeOvn *FakeOVN, peer knet.NetworkPolicyPeer, namespace string) {
+	if peer.PodSelector != nil {
+		dbIDs := getPodSelectorAddrSetDbIDs(getPodSelectorKey(peer.PodSelector, peer.NamespaceSelector, namespace), DefaultNetworkControllerName)
+		fakeOvn.asf.EventuallyExpectEmptyAddressSetExist(dbIDs)
+	}
+}
+
 var _ = ginkgo.Describe("OVN PodSelectorAddressSet", func() {
 	const (
 		namespaceName1 = "namespace1"

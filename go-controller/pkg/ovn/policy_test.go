@@ -489,20 +489,6 @@ func getHairpinningACLsV4AndPortGroup() []libovsdbtest.TestData {
 	return []libovsdbtest.TestData{egressACL, ingressACL, clusterPortGroup}
 }
 
-func eventuallyExpectAddressSetsWithIP(fakeOvn *FakeOVN, peer knet.NetworkPolicyPeer, namespace, ip string) {
-	if peer.PodSelector != nil {
-		dbIDs := getPodSelectorAddrSetDbIDs(getPodSelectorKey(peer.PodSelector, peer.NamespaceSelector, namespace), DefaultNetworkControllerName)
-		fakeOvn.asf.EventuallyExpectAddressSetWithAddresses(dbIDs, []string{ip})
-	}
-}
-
-func eventuallyExpectEmptyAddressSetsExist(fakeOvn *FakeOVN, peer knet.NetworkPolicyPeer, namespace string) {
-	if peer.PodSelector != nil {
-		dbIDs := getPodSelectorAddrSetDbIDs(getPodSelectorKey(peer.PodSelector, peer.NamespaceSelector, namespace), DefaultNetworkControllerName)
-		fakeOvn.asf.EventuallyExpectEmptyAddressSetExist(dbIDs)
-	}
-}
-
 func getMatchLabelsNetworkPolicy(policyName, netpolNamespace, peerNamespace, peerPodName string, ingress, egress bool) *knet.NetworkPolicy {
 	netPolPeer := knet.NetworkPolicyPeer{}
 	if peerPodName != "" {
