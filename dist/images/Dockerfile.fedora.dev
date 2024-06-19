@@ -22,25 +22,19 @@ USER root
 ENV PYTHONDONTWRITEBYTECODE yes
 
 # Install tools that are required for building ovs/ovn.
-RUN INSTALL_PKGS=" \
-    python3-pip python3-pyyaml bind-utils procps-ng openssl numactl-libs firewalld-filesystem \
-    libpcap hostname util-linux\
-    python3-openvswitch python3-pyOpenSSL \
-    autoconf automake libtool g++ gcc fedora-packager rpmdevtools \
-    unbound unbound-devel groff python3-sphinx graphviz openssl openssl-devel \
-    libbpf-devel libxdp-devel numactl-devel \
-    checkpolicy libcap-ng-devel selinux-policy-devel" && \
-    dnf install --best --refresh -y --setopt=tsflags=nodocs $INSTALL_PKGS && \
-    dnf clean all && rm -rf /var/cache/dnf/*
+RUN INSTALL_PKGS="git rpm-build dnf-plugins-core" && \
+    dnf install --best --refresh -y --setopt=tsflags=nodocs $INSTALL_PKGS
 
 # Clone OVS Source Code.
 ARG OVS_REPO=https://github.com/openvswitch/ovs.git
-ARG OVS_BRANCH=master
+ARG OVS_BRANCH=main
 WORKDIR /root
 RUN git clone $OVS_REPO --single-branch --branch=$OVS_BRANCH
 
 # Build OVS rpms.
 WORKDIR /root/ovs
+RUN sed -e 's/@VERSION@/0.0.1/' rhel/openvswitch-fedora.spec.in > /tmp/ovs.spec
+RUN dnf builddep -y /tmp/ovs.spec
 RUN ./boot.sh
 RUN ./configure
 RUN make rpm-fedora
@@ -56,6 +50,8 @@ RUN git clone $OVN_REPO --single-branch --branch=$OVN_BRANCH
 
 # Build OVN rpms.
 WORKDIR /root/ovn/
+RUN sed -e 's/@VERSION@/0.0.1/' rhel/ovn-fedora.spec.in > /tmp/ovn.spec
+RUN dnf builddep -y /tmp/ovn.spec
 RUN ./boot.sh
 RUN ./configure --with-ovs-source=/root/ovs/
 RUN make rpm-fedora
