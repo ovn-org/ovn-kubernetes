@@ -8,7 +8,7 @@ do
     PLATFORMS=$PLATFORMS,linux/${LINUX_ARCH[$i]}
 done
 
-IMAGES_OVN=${1:-ovn-daemonset-u}
+IMAGES_OVN=${1:-ovn-daemonset-ubuntu}
 BRANCH_TAG=${2:-latest}
 DOCKER_REPOSITORY=${3:-docker.io/ovnkube}
 MANITOOL_VERSION=${4:-v1.0.0}
