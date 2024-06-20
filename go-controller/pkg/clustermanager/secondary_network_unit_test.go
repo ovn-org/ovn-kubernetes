@@ -22,7 +22,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip"
 	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	ovnkconfig "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -61,11 +60,12 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 			app.Action = func(ctx *cli.Context) error {
 				kubeFakeClient := fake.NewSimpleClientset(&v1.NodeList{Items: nodes()})
 				fakeClient := &util.OVNClusterManagerClientset{
-					KubeClient:       kubeFakeClient,
-					IPAMClaimsClient: fakeipamclaimclient.NewSimpleClientset(),
+					KubeClient:            kubeFakeClient,
+					IPAMClaimsClient:      fakeipamclaimclient.NewSimpleClientset(),
+					NetworkAttchDefClient: fakenadclient.NewSimpleClientset(),
 				}
 
-				gomega.Expect(initConfig(ctx, ovnkconfig.OVNKubernetesFeatureConfig{})).To(gomega.Succeed())
+				gomega.Expect(initConfig(ctx, config.OVNKubernetesFeatureConfig{EnableMultiNetwork: true})).To(gomega.Succeed())
 				var err error
 				f, err = factory.NewClusterManagerWatchFactory(fakeClient)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -112,7 +112,7 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 				}
 
 				gomega.Expect(
-					initConfig(ctx, ovnkconfig.OVNKubernetesFeatureConfig{
+					initConfig(ctx, config.OVNKubernetesFeatureConfig{
 						EnableMultiNetwork: true,
 						EnableInterconnect: true},
 					)).To(gomega.Succeed())
@@ -184,10 +184,11 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 					Items: nodes,
 				})
 				fakeClient := &util.OVNClusterManagerClientset{
-					KubeClient: kubeFakeClient,
+					KubeClient:            kubeFakeClient,
+					NetworkAttchDefClient: fakenadclient.NewSimpleClientset(),
 				}
 
-				gomega.Expect(initConfig(ctx, ovnkconfig.OVNKubernetesFeatureConfig{})).To(gomega.Succeed())
+				gomega.Expect(initConfig(ctx, config.OVNKubernetesFeatureConfig{EnableMultiNetwork: true})).To(gomega.Succeed())
 				var err error
 				f, err = factory.NewClusterManagerWatchFactory(fakeClient)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -324,10 +325,11 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 							IPAMClaimsClient: fakeipamclaimclient.NewSimpleClientset(
 								ipamClaimWithIPAddr(claimName, namespace, networkName, subnetIP),
 							),
+							NetworkAttchDefClient: fakenadclient.NewSimpleClientset(),
 						}
 
 						gomega.Expect(
-							initConfig(ctx, ovnkconfig.OVNKubernetesFeatureConfig{
+							initConfig(ctx, config.OVNKubernetesFeatureConfig{
 								EnableMultiNetwork:  true,
 								EnableInterconnect:  true,
 								EnablePersistentIPs: true},
@@ -370,10 +372,11 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 							IPAMClaimsClient: fakeipamclaimclient.NewSimpleClientset(
 								ipamClaimWithIPAddr(claimName, namespace, someOtherNetwork, subnetIP),
 							),
+							NetworkAttchDefClient: fakenadclient.NewSimpleClientset(),
 						}
 
 						gomega.Expect(
-							initConfig(ctx, ovnkconfig.OVNKubernetesFeatureConfig{
+							initConfig(ctx, config.OVNKubernetesFeatureConfig{
 								EnableMultiNetwork:  true,
 								EnableInterconnect:  true,
 								EnablePersistentIPs: true},
@@ -415,12 +418,13 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 							ipamClaimWithIPAddr(claimName, namespace, networkName, subnetIP),
 						)
 						fakeClient := &util.OVNClusterManagerClientset{
-							KubeClient:       fake.NewSimpleClientset(),
-							IPAMClaimsClient: ipamClaimsClient,
+							KubeClient:            fake.NewSimpleClientset(),
+							IPAMClaimsClient:      ipamClaimsClient,
+							NetworkAttchDefClient: fakenadclient.NewSimpleClientset(),
 						}
 
 						gomega.Expect(
-							initConfig(ctx, ovnkconfig.OVNKubernetesFeatureConfig{
+							initConfig(ctx, config.OVNKubernetesFeatureConfig{
 								EnableMultiNetwork:  true,
 								EnableInterconnect:  true,
 								EnablePersistentIPs: true},
@@ -482,12 +486,13 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 							ipamClaimWithIPAddr(someOtherNetworkClaimName, namespace, someOtherNetwork, subnetIP),
 						)
 						fakeClient := &util.OVNClusterManagerClientset{
-							KubeClient:       fake.NewSimpleClientset(),
-							IPAMClaimsClient: ipamClaimsClient,
+							KubeClient:            fake.NewSimpleClientset(),
+							IPAMClaimsClient:      ipamClaimsClient,
+							NetworkAttchDefClient: fakenadclient.NewSimpleClientset(),
 						}
 
 						gomega.Expect(
-							initConfig(ctx, ovnkconfig.OVNKubernetesFeatureConfig{
+							initConfig(ctx, config.OVNKubernetesFeatureConfig{
 								EnableMultiNetwork:  true,
 								EnableInterconnect:  true,
 								EnablePersistentIPs: true},
@@ -554,10 +559,11 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 							IPAMClaimsClient: fakeipamclaimclient.NewSimpleClientset(
 								ipamClaimWithIPAddr(claimName, namespace, networkName, subnetIP),
 							),
+							NetworkAttchDefClient: fakenadclient.NewSimpleClientset(),
 						}
 
 						gomega.Expect(
-							initConfig(ctx, ovnkconfig.OVNKubernetesFeatureConfig{
+							initConfig(ctx, config.OVNKubernetesFeatureConfig{
 								EnableMultiNetwork:  true,
 								EnableInterconnect:  true,
 								EnablePersistentIPs: true},
@@ -616,7 +622,7 @@ func nodes() []v1.Node {
 	}
 }
 
-func initConfig(ctx *cli.Context, ovkConfig ovnkconfig.OVNKubernetesFeatureConfig) error {
+func initConfig(ctx *cli.Context, ovkConfig config.OVNKubernetesFeatureConfig) error {
 	_, err := config.InitConfig(ctx, nil, nil)
 	if err != nil {
 		return err

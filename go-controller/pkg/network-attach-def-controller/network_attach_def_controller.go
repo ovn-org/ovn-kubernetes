@@ -18,8 +18,7 @@ import (
 	"k8s.io/klog/v2"
 
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
-	nadclientset "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned"
-	nadinformers "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/informers/externalversions"
+	nadinformers "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/informers/externalversions/k8s.cni.cncf.io/v1"
 	nadlisters "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -73,11 +72,14 @@ type networkNADInfo struct {
 	isStarted bool
 }
 
+type watchFactory interface {
+	NADInformer() nadinformers.NetworkAttachmentDefinitionInformer
+}
+
 type NetAttachDefinitionController struct {
 	name               string
 	recorder           record.EventRecorder
 	ncm                NetworkControllerManager
-	nadFactory         nadinformers.SharedInformerFactory
 	netAttachDefLister nadlisters.NetworkAttachmentDefinitionLister
 	netAttachDefSynced cache.InformerSynced
 	queue              workqueue.RateLimitingInterface
@@ -93,31 +95,25 @@ type NetAttachDefinitionController struct {
 	perNetworkNADInfo *syncmap.SyncMap[*networkNADInfo]
 }
 
-func NewNetAttachDefinitionController(name string, ncm NetworkControllerManager, networkAttchDefClient nadclientset.Interface,
-	recorder record.EventRecorder) (*NetAttachDefinitionController, error) {
-	nadFactory := nadinformers.NewSharedInformerFactoryWithOptions(
-		networkAttchDefClient,
-		avoidResync,
-	)
-	netAttachDefInformer := nadFactory.K8sCniCncfIo().V1().NetworkAttachmentDefinitions()
+func NewNetAttachDefinitionController(name string, ncm NetworkControllerManager, wf watchFactory, recorder record.EventRecorder) (*NetAttachDefinitionController, error) {
 	rateLimiter := workqueue.NewMaxOfRateLimiter(
 		workqueue.NewItemExponentialFailureRateLimiter(5*time.Millisecond, 1000*time.Second),
-		&workqueue.BucketRateLimiter{Limiter: rate.NewLimiter(rate.Limit(qps), qps*5)})
-
+		&workqueue.BucketRateLimiter{Limiter: rate.NewLimiter(rate.Limit(qps), qps*5)},
+	)
+	nadInformer := wf.NADInformer()
 	nadController := &NetAttachDefinitionController{
 		name:               name,
 		recorder:           recorder,
 		ncm:                ncm,
-		nadFactory:         nadFactory,
-		netAttachDefLister: netAttachDefInformer.Lister(),
-		netAttachDefSynced: netAttachDefInformer.Informer().HasSynced,
+		netAttachDefLister: nadInformer.Lister(),
+		netAttachDefSynced: nadInformer.Informer().HasSynced,
 		queue:              workqueue.NewNamedRateLimitingQueue(rateLimiter, "net-attach-def"),
 		loopPeriod:         time.Second,
 		stopChan:           make(chan struct{}),
 		perNADNetInfo:      syncmap.NewSyncMap[util.BasicNetInfo](),
 		perNetworkNADInfo:  syncmap.NewSyncMap[*networkNADInfo](),
 	}
-	_, err := netAttachDefInformer.Informer().AddEventHandler(
+	_, err := nadInformer.Informer().AddEventHandler(
 		cache.ResourceEventHandlerFuncs{
 			AddFunc:    nadController.onNetworkAttachDefinitionAdd,
 			UpdateFunc: nadController.onNetworkAttachDefinitionUpdate,
@@ -140,7 +136,6 @@ func (nadController *NetAttachDefinitionController) Start() error {
 }
 
 func (nadController *NetAttachDefinitionController) start() error {
-	nadController.nadFactory.Start(nadController.stopChan)
 	if !util.WaitForInformerCacheSyncWithTimeout(nadController.name, nadController.stopChan, nadController.netAttachDefSynced) {
 		return fmt.Errorf("stop requested while syncing %s caches", nadController.name)
 	}
