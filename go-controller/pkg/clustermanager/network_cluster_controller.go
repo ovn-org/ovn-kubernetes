@@ -16,6 +16,7 @@ import (
 	"k8s.io/klog/v2"
 
 	ipamclaimsapi "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1"
+	networkattchmentdefclientset "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned"
 
 	idallocator "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/id"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip/subnet"
@@ -62,6 +63,9 @@ type networkClusterController struct {
 	subnetAllocator     subnet.Allocator
 
 	util.NetInfo
+
+	// TODO: this should be a watch grabbed from the watch factory
+	nadClient networkattchmentdefclientset.Interface
 }
 
 func newNetworkClusterController(networkIDAllocator idallocator.NamedAllocator, netInfo util.NetInfo, ovnClient *util.OVNClusterManagerClientset, wf *factory.WatchFactory) *networkClusterController {
@@ -81,6 +85,7 @@ func newNetworkClusterController(networkIDAllocator idallocator.NamedAllocator, 
 		stopChan:           make(chan struct{}),
 		wg:                 wg,
 		networkIDAllocator: networkIDAllocator,
+		nadClient:          ovnClient.NetworkAttchDefClient,
 	}
 
 	return ncc
@@ -186,7 +191,26 @@ func (ncc *networkClusterController) init() error {
 			ipamClaimsReconciler,
 		)
 
-		ncc.podAllocator = pod.NewPodAllocator(ncc.NetInfo, podAllocationAnnotator, ipAllocator, ipamClaimsReconciler)
+		// TODO: get rid of these logs below
+		klog.Infof(
+			"DEBUG| creating pod allocator for netInfo: %q. Is it primary ? %t",
+			ncc.NetInfo.GetNetworkName(),
+			ncc.NetInfo.IsPrimaryNetwork(),
+		)
+
+		klog.Infof(
+			"DEBUG| creating pod allocator for netInfo: %q. Is it secondary ? %t",
+			ncc.NetInfo.GetNetworkName(),
+			ncc.NetInfo.IsSecondary(),
+		)
+
+		ncc.podAllocator = pod.NewPodAllocator(
+			ncc.NetInfo,
+			podAllocationAnnotator,
+			ipAllocator,
+			ipamClaimsReconciler,
+			ncc.watchFactory.NamespaceCoreInformer().Lister(),
+		)
 		if err := ncc.podAllocator.Init(); err != nil {
 			return fmt.Errorf("failed to initialize pod ip allocator: %w", err)
 		}
