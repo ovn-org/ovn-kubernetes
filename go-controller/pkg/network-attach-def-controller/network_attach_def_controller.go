@@ -11,7 +11,6 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/tools/cache"
-	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 
@@ -71,7 +70,6 @@ func NewNetAttachDefinitionController(
 	name string,
 	ncm NetworkControllerManager,
 	wf watchFactory,
-	recorder record.EventRecorder,
 ) (*NetAttachDefinitionController, error) {
 	nadInformer := wf.NADInformer()
 	nadController := &NetAttachDefinitionController{
