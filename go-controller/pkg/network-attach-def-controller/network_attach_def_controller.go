@@ -52,8 +52,8 @@ type BaseNetworkController interface {
 type NetworkController interface {
 	BaseNetworkController
 	CompareNetInfo(util.BasicNetInfo) bool
-	AddNAD(nadName string)
-	DeleteNAD(nadName string)
+	AddNADs(nadName ...string)
+	DeleteNADs(nadName ...string)
 	HasNAD(nadName string) bool
 	// Cleanup cleans up the NetworkController-owned resources, it could be called to clean up network controllers that are deleted when
 	// ovn-k8s is down; so it's receiver could be a dummy network controller, it just needs to know its network name.
@@ -501,11 +501,11 @@ func (nadController *NetAttachDefinitionController) addNADToController(ncm Netwo
 		}
 		if !nadExists {
 			nni.nadNames[nadName] = struct{}{}
-			nni.nc.AddNAD(nadName)
+			nni.nc.AddNADs(nadName)
 			defer func() {
 				if err != nil {
 					delete(nni.nadNames, nadName)
-					nni.nc.DeleteNAD(nadName)
+					nni.nc.DeleteNADs(nadName)
 				}
 			}()
 		}
@@ -554,7 +554,7 @@ func (nadController *NetAttachDefinitionController) deleteNADFromController(netN
 			}
 			nadController.perNetworkNADInfo.Delete(networkName)
 		}
-		nni.nc.DeleteNAD(nadName)
+		nni.nc.DeleteNADs(nadName)
 		klog.V(5).Infof("%s: Delete NAD %s from controller of network %s", nadController.name, nadName, networkName)
 		return nil
 	})

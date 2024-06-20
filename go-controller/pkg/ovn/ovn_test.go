@@ -453,7 +453,7 @@ func (o *FakeOVN) NewSecondaryNetworkController(netattachdef *nettypes.NetworkAt
 	}
 
 	ginkgo.By(fmt.Sprintf("OVN test init: add NAD %s to secondary network controller of %s network %s", nadName, topoType, netName))
-	secondaryController.AddNAD(nadName)
+	secondaryController.AddNADs(nadName)
 	return nil
 }
 

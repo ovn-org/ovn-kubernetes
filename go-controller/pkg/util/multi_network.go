@@ -11,6 +11,7 @@ import (
 	"github.com/google/go-cmp/cmp/cmpopts"
 
 	kapi "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 	knet "k8s.io/utils/net"
 
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
@@ -49,9 +50,11 @@ type BasicNetInfo interface {
 // network information
 type NetInfo interface {
 	BasicNetInfo
-	AddNAD(nadName string)
-	DeleteNAD(nadName string)
+	GetNADs() []string
 	HasNAD(nadName string) bool
+	SetNADs(nadName ...string)
+	AddNADs(nadName ...string)
+	DeleteNADs(nadName ...string)
 }
 
 type DefaultNetInfo struct{}
@@ -92,19 +95,31 @@ func (nInfo *DefaultNetInfo) RemoveNetworkScopeFromName(name string) string {
 	return name
 }
 
-// AddNAD adds the specified NAD, no op for default network
-func (nInfo *DefaultNetInfo) AddNAD(nadName string) {
-	panic("unexpected call for default network")
-}
-
-// DeleteNAD deletes the specified NAD, no op for default network
-func (nInfo *DefaultNetInfo) DeleteNAD(nadName string) {
+// GetNADs returns the NADs associated with the network, no op for default
+// network
+func (nInfo *DefaultNetInfo) GetNADs() []string {
 	panic("unexpected call for default network")
 }
 
 // HasNAD returns true if the given NAD exists, already return true for
 // default network
 func (nInfo *DefaultNetInfo) HasNAD(nadName string) bool {
+	panic("unexpected call for default network")
+}
+
+// SetNADs replaces the NADs associated with the network, no op for default
+// network
+func (nInfo *DefaultNetInfo) SetNADs(nadName ...string) {
+	panic("unexpected call for default network")
+}
+
+// AddNAD adds the specified NAD, no op for default network
+func (nInfo *DefaultNetInfo) AddNADs(nadName ...string) {
+	panic("unexpected call for default network")
+}
+
+// DeleteNAD deletes the specified NAD, no op for default network
+func (nInfo *DefaultNetInfo) DeleteNADs(nadName ...string) {
 	panic("unexpected call for default network")
 }
 
@@ -166,7 +181,8 @@ type secondaryNetInfo struct {
 
 	// all net-attach-def NAD names for this network, used to determine if a pod needs
 	// to be plumbed for this network
-	nadNames sync.Map
+	sync.Mutex
+	nadNames sets.Set[string]
 }
 
 // GetNetworkName returns the network name
@@ -209,21 +225,40 @@ func (nInfo *secondaryNetInfo) getPrefix() string {
 	return GetSecondaryNetworkPrefix(nInfo.netName)
 }
 
-// AddNAD adds the specified NAD
-func (nInfo *secondaryNetInfo) AddNAD(nadName string) {
-	nInfo.nadNames.Store(nadName, true)
-}
-
-// DeleteNAD deletes the specified NAD
-func (nInfo *secondaryNetInfo) DeleteNAD(nadName string) {
-	nInfo.nadNames.Delete(nadName)
+// GetNADs returns all the NADs associated with this network
+func (nInfo *secondaryNetInfo) GetNADs() []string {
+	nInfo.Lock()
+	defer nInfo.Unlock()
+	return nInfo.nadNames.UnsortedList()
 }
 
 // HasNAD returns true if the given NAD exists, used
 // to check if the network needs to be plumbed over
 func (nInfo *secondaryNetInfo) HasNAD(nadName string) bool {
-	_, ok := nInfo.nadNames.Load(nadName)
-	return ok
+	nInfo.Lock()
+	defer nInfo.Unlock()
+	return nInfo.nadNames.Has(nadName)
+}
+
+// SetNADs replaces the NADs associated with the network
+func (nInfo *secondaryNetInfo) SetNADs(nadName ...string) {
+	nInfo.Lock()
+	defer nInfo.Unlock()
+	nInfo.nadNames = sets.New(nadName...)
+}
+
+// AddNAD adds the specified NAD
+func (nInfo *secondaryNetInfo) AddNADs(nadName ...string) {
+	nInfo.Lock()
+	defer nInfo.Unlock()
+	nInfo.nadNames.Insert(nadName...)
+}
+
+// DeleteNAD deletes the specified NAD
+func (nInfo *secondaryNetInfo) DeleteNADs(nadName ...string) {
+	nInfo.Lock()
+	defer nInfo.Unlock()
+	nInfo.nadNames.Delete(nadName...)
 }
 
 // TopologyType returns the topology type
@@ -303,6 +338,7 @@ func newLayer3NetConfInfo(netconf *ovncnitypes.NetConf) (NetInfo, error) {
 		topology:       types.Layer3Topology,
 		subnets:        subnets,
 		mtu:            netconf.MTU,
+		nadNames:       sets.Set[string]{},
 	}
 	ni.ipv4mode, ni.ipv6mode = getIPMode(subnets)
 	return ni, nil
@@ -322,6 +358,7 @@ func newLayer2NetConfInfo(netconf *ovncnitypes.NetConf) (NetInfo, error) {
 		excludeSubnets:     excludes,
 		mtu:                netconf.MTU,
 		allowPersistentIPs: netconf.AllowPersistentIPs,
+		nadNames:           sets.Set[string]{},
 	}
 	ni.ipv4mode, ni.ipv6mode = getIPMode(subnets)
 	return ni, nil
@@ -341,6 +378,7 @@ func newLocalnetNetConfInfo(netconf *ovncnitypes.NetConf) (NetInfo, error) {
 		mtu:                netconf.MTU,
 		vlan:               uint(netconf.VLANID),
 		allowPersistentIPs: netconf.AllowPersistentIPs,
+		nadNames:           sets.Set[string]{},
 	}
 	ni.ipv4mode, ni.ipv6mode = getIPMode(subnets)
 	return ni, nil
