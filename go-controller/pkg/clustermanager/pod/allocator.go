@@ -3,6 +3,7 @@ package pod
 import (
 	"fmt"
 	"k8s.io/client-go/listers/core/v1"
+	"net"
 	"sync"
 
 	corev1 "k8s.io/api/core/v1"
@@ -150,10 +151,17 @@ func (a *PodAllocator) reconcile(old, new *corev1.Pod, releaseFromAllocator bool
 		activeNetworkName,
 	)
 	if hasAnActiveNetwork && activeNetworkName != "default" {
+		var gws []net.IP
+		for _, networkCIDR := range a.netInfo.Subnets() {
+			subnetGW := util.GetNodeGatewayIfAddr(networkCIDR.CIDR).IP
+			gws = append(gws, subnetGW)
+		}
+
 		network := &nettypes.NetworkSelectionElement{
 			// TODO: below we need to have the NAD name, *not* the network name
-			Name:      activeNetworkName,
-			Namespace: pod.Namespace,
+			Name:           activeNetworkName,
+			Namespace:      pod.Namespace,
+			GatewayRequest: gws,
 		}
 		nadName := fmt.Sprintf("%s/%s", pod.Namespace, activeNetworkName)
 		if err := a.reconcileForNAD(old, new, nadName, network, releaseFromAllocator); err != nil {
