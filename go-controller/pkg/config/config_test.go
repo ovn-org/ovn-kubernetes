@@ -236,6 +236,7 @@ v6-transit-switch-subnet=fd98::/64
 
 [userdefinednetworks]
 max-networks=40000
+ct-mark-base=3
 `
 
 	var newData string
@@ -344,6 +345,7 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(OVNKubernetesFeature.EnableAdminNetworkPolicy).To(gomega.BeFalse())
 			gomega.Expect(OVNKubernetesFeature.EnablePersistentIPs).To(gomega.BeFalse())
 			gomega.Expect(UserDefinedNetworks.MaxNetworks).To(gomega.Equal(uint(30000)))
+			gomega.Expect(UserDefinedNetworks.ConntrackMarkBase).To(gomega.Equal(uint(0)))
 
 			for _, a := range []OvnAuthConfig{OvnNorth, OvnSouth} {
 				gomega.Expect(a.Scheme).To(gomega.Equal(OvnDBSchemeUnix))
@@ -806,6 +808,7 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(ClusterManager.V4TransitSwitchSubnet).To(gomega.Equal("100.90.0.0/16"))
 			gomega.Expect(ClusterManager.V6TransitSwitchSubnet).To(gomega.Equal("fd96::/64"))
 			gomega.Expect(UserDefinedNetworks.MaxNetworks).To(gomega.Equal(uint(20000)))
+			gomega.Expect(UserDefinedNetworks.ConntrackMarkBase).To(gomega.Equal(uint(6)))
 
 			return nil
 		}
@@ -879,6 +882,7 @@ var _ = Describe("Config Operations", func() {
 			"-cluster-manager-v4-transit-switch-subnet=100.90.0.0/16",
 			"-cluster-manager-v6-transit-switch-subnet=fd96::/64",
 			"-max-user-defined-networks=20000",
+			"-user-defined-networks-ct-mark-base=6",
 		}
 		err = app.Run(cliArgs)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1310,6 +1314,7 @@ enable-pprof=true
 			gomega.Expect(OVNKubernetesFeature.EgressIPReachabiltyTotalTimeout).To(gomega.Equal(3))
 			gomega.Expect(OVNKubernetesFeature.EgressIPNodeHealthCheckPort).To(gomega.Equal(12345))
 			gomega.Expect(UserDefinedNetworks.MaxNetworks).To(gomega.Equal(uint(5000)))
+			gomega.Expect(UserDefinedNetworks.ConntrackMarkBase).To(gomega.Equal(uint(7)))
 			return nil
 		}
 		cliArgs := []string{
@@ -1351,6 +1356,7 @@ enable-pprof=true
 			"-egressip-reachability-total-timeout=3",
 			"-egressip-node-healthcheck-port=12345",
 			"-max-user-defined-networks=5000",
+			"-user-defined-networks-ct-mark-base=7",
 		}
 		err = app.Run(cliArgs)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())

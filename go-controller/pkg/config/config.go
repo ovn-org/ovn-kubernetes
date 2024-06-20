@@ -198,7 +198,8 @@ var (
 	}
 
 	UserDefinedNetworks = UserDefinedNetworksConfig{
-		MaxNetworks: 30000, // we can only allocate around 65k ct-marks and we need a pair of masquerades addresses so that's around 64k/2
+		MaxNetworks:       30000, // we can only allocate around 65k ct-marks and we need a pair of masquerades addresses so that's around 64k/2
+		ConntrackMarkBase: 0,
 	}
 )
 
@@ -529,6 +530,9 @@ type UserDefinedNetworksConfig struct {
 	// MaxNetworks is the value of max number
 	// of user defined network that users can configure
 	MaxNetworks uint `gcfg:"max-networks"`
+	// ConntrackMarkBase will be the base to calculate the
+	// ct_mark for a user defined network, that's ct_mark=base+network-id
+	ConntrackMarkBase uint `gcfg:"ct-mark-base"`
 }
 
 // OvnDBScheme describes the OVN database connection transport method
@@ -1433,6 +1437,7 @@ var OVNGatewayFlags = []cli.Flag{
 		Usage:       "Allow the external gateway bridge without an uplink port in local gateway mode",
 		Destination: &cliConfig.Gateway.AllowNoUplink,
 	},
+
 	// Deprecated CLI options
 	&cli.BoolFlag{
 		Name:        "init-gateways",
@@ -1569,6 +1574,12 @@ var UserDefinedNetworksFlags = []cli.Flag{
 		Usage:       "The maximum number of user defined networks that are allowed (inclusive of both primary and secondary), default value 30000",
 		Value:       UserDefinedNetworks.MaxNetworks,
 		Destination: &cliConfig.UserDefinedNetworks.MaxNetworks,
+	},
+	&cli.UintFlag{
+		Name:        "user-defined-networks-ct-mark-base",
+		Usage:       "The base to calculate user defined network egress ct-mark based on the allocated network id, default value 0",
+		Value:       UserDefinedNetworks.ConntrackMarkBase,
+		Destination: &cliConfig.UserDefinedNetworks.ConntrackMarkBase,
 	},
 }
 
