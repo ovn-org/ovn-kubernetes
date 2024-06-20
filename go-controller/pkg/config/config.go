@@ -196,6 +196,10 @@ var (
 		V4TransitSwitchSubnet: "100.88.0.0/16",
 		V6TransitSwitchSubnet: "fd97::/64",
 	}
+
+	UserDefinedNetworks = UserDefinedNetworksConfig{
+		MaxNetworks: 30000, // we can only allocate around 65k ct-marks and we need a pair of masquerades addresses so that's around 64k/2
+	}
 )
 
 const (
@@ -519,6 +523,14 @@ type ClusterManagerConfig struct {
 	V6TransitSwitchSubnet string `gcfg:"v6-transit-switch-subnet"`
 }
 
+// UserDefinedNetworksConfig holds configuration specific to user defined
+// networks for features like egress at shared and local gateway
+type UserDefinedNetworksConfig struct {
+	// MaxNetworks is the value of max number
+	// of user defined network that users can configure
+	MaxNetworks uint `gcfg:"max-networks"`
+}
+
 // OvnDBScheme describes the OVN database connection transport method
 type OvnDBScheme string
 
@@ -549,6 +561,7 @@ type config struct {
 	HybridOverlay        HybridOverlayConfig
 	OvnKubeNode          OvnKubeNodeConfig
 	ClusterManager       ClusterManagerConfig
+	UserDefinedNetworks  UserDefinedNetworksConfig
 }
 
 var (
@@ -568,6 +581,7 @@ var (
 	savedHybridOverlay        HybridOverlayConfig
 	savedOvnKubeNode          OvnKubeNodeConfig
 	savedClusterManager       ClusterManagerConfig
+	savedUserDefinedNetworks  UserDefinedNetworksConfig
 
 	// legacy service-cluster-ip-range CLI option
 	serviceClusterIPRange string
@@ -599,6 +613,7 @@ func init() {
 	savedHybridOverlay = HybridOverlay
 	savedOvnKubeNode = OvnKubeNode
 	savedClusterManager = ClusterManager
+	savedUserDefinedNetworks = UserDefinedNetworks
 	cli.VersionPrinter = func(c *cli.Context) {
 		fmt.Printf("Version: %s\n", Version)
 		fmt.Printf("Git commit: %s\n", Commit)
@@ -629,6 +644,7 @@ func PrepareTestConfig() error {
 	HybridOverlay = savedHybridOverlay
 	OvnKubeNode = savedOvnKubeNode
 	ClusterManager = savedClusterManager
+	UserDefinedNetworks = savedUserDefinedNetworks
 	EnableMulticast = false
 
 	if err := completeConfig(); err != nil {
@@ -1546,6 +1562,16 @@ var ClusterManagerFlags = []cli.Flag{
 	},
 }
 
+// UserDefinedNetworksFlags captures configuration for user defined networks
+var UserDefinedNetworksFlags = []cli.Flag{
+	&cli.UintFlag{
+		Name:        "max-user-defined-networks",
+		Usage:       "The maximum number of user defined networks that are allowed (inclusive of both primary and secondary), default value 30000",
+		Value:       UserDefinedNetworks.MaxNetworks,
+		Destination: &cliConfig.UserDefinedNetworks.MaxNetworks,
+	},
+}
+
 // Flags are general command-line flags. Apps should add these flags to their
 // own urfave/cli flags and call InitConfig() early in the application.
 var Flags []cli.Flag
@@ -1568,6 +1594,7 @@ func GetFlags(customFlags []cli.Flag) []cli.Flag {
 	flags = append(flags, IPFIXFlags...)
 	flags = append(flags, OvnKubeNodeFlags...)
 	flags = append(flags, ClusterManagerFlags...)
+	flags = append(flags, UserDefinedNetworksFlags...)
 	flags = append(flags, customFlags...)
 	return flags
 }
@@ -2037,6 +2064,20 @@ func buildClusterManagerConfig(ctx *cli.Context, cli, file *config) error {
 	return nil
 }
 
+func buildUserDefinedNetworksConfig(ctx *cli.Context, cli, file *config) error {
+	// Copy config file values over default values
+	if err := overrideFields(&UserDefinedNetworks, &file.UserDefinedNetworks, &savedUserDefinedNetworks); err != nil {
+		return err
+	}
+
+	// And CLI overrides over config file and default values
+	if err := overrideFields(&UserDefinedNetworks, &cli.UserDefinedNetworks, &savedUserDefinedNetworks); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 // completeClusterManagerConfig completes the ClusterManager config by parsing raw values
 // into their final form.
 func completeClusterManagerConfig() error {
@@ -2157,6 +2198,7 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 		HybridOverlay:        savedHybridOverlay,
 		OvnKubeNode:          savedOvnKubeNode,
 		ClusterManager:       savedClusterManager,
+		UserDefinedNetworks:  savedUserDefinedNetworks,
 	}
 
 	configFile, configFileIsDefault = getConfigFilePath(ctx)
@@ -2278,6 +2320,10 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 		return "", err
 	}
 
+	if err = buildUserDefinedNetworksConfig(ctx, &cliConfig, &cfg); err != nil {
+		return "", err
+	}
+
 	tmpAuth, err := buildOvnAuth(exec, true, &cliConfig.OvnNorth, &cfg.OvnNorth, defaults.OvnNorthAddress)
 	if err != nil {
 		return "", err
@@ -2306,6 +2352,7 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 	klog.V(5).Infof("Hybrid Overlay config: %+v", HybridOverlay)
 	klog.V(5).Infof("Ovnkube Node config: %+v", OvnKubeNode)
 	klog.V(5).Infof("Ovnkube Cluster Manager config: %+v", ClusterManager)
+	klog.V(5).Infof("User Defined Networks config: %+v", UserDefinedNetworks)
 
 	return retConfigFile, nil
 }
