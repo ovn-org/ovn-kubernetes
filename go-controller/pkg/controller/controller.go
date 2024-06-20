@@ -68,22 +68,12 @@ type controller[T any] struct {
 // NewReconciler creates a new basic level-driven controller. It should be
 // started and stopped using Start/StartWithInitialSync/Stop functions.
 func NewReconciler(name string, config *ReconcilerConfig) Reconciler {
-	return &controller[string]{
-		name: name,
-		config: &ControllerConfig[string]{
-			RateLimiter: config.RateLimiter,
-			Reconcile:   config.Reconcile,
-			Threadiness: config.Threadiness,
-		},
-		queue: workqueue.NewRateLimitingQueueWithConfig(
-			config.RateLimiter,
-			workqueue.RateLimitingQueueConfig{
-				Name: name,
-			},
-		),
-		stopChan: make(chan struct{}),
-		wg:       &sync.WaitGroup{},
+	controllerConfig := &ControllerConfig[string]{
+		RateLimiter: config.RateLimiter,
+		Reconcile:   config.Reconcile,
+		Threadiness: config.Threadiness,
 	}
+	return NewController(name, controllerConfig)
 }
 
 // NewController creates a new level-driven controller. It should be started and
