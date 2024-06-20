@@ -60,7 +60,7 @@ func NewController(ovnClient *util.OVNClusterManagerClientset, wf *factory.Watch
 func (c *Controller) initControllers(watchFactory *factory.WatchFactory) {
 	efSharedIndexInformer := watchFactory.EgressFirewallInformer().Informer()
 	c.efLister = watchFactory.EgressFirewallInformer().Lister()
-	efConfig := &controller.Config[egressfirewall.EgressFirewall]{
+	efConfig := &controller.ControllerConfig[egressfirewall.EgressFirewall]{
 		RateLimiter:    workqueue.NewItemFastSlowRateLimiter(time.Second, 5*time.Second, 5),
 		Informer:       efSharedIndexInformer,
 		Lister:         c.efLister.List,
@@ -72,7 +72,7 @@ func (c *Controller) initControllers(watchFactory *factory.WatchFactory) {
 
 	dnsSharedIndexInformer := watchFactory.DNSNameResolverInformer().Informer()
 	c.dnsLister = ocpnetworklisterv1alpha1.NewDNSNameResolverLister(dnsSharedIndexInformer.GetIndexer())
-	dnsConfig := &controller.Config[ocpnetworkapiv1alpha1.DNSNameResolver]{
+	dnsConfig := &controller.ControllerConfig[ocpnetworkapiv1alpha1.DNSNameResolver]{
 		RateLimiter:    workqueue.NewItemFastSlowRateLimiter(time.Second, 5*time.Second, 5),
 		Informer:       dnsSharedIndexInformer,
 		Lister:         c.dnsLister.List,
@@ -107,7 +107,7 @@ func dnsNeedsUpdate(oldObj, newObj *ocpnetworkapiv1alpha1.DNSNameResolver) bool 
 // Start initializes the handlers for EgressFirewall and DNSNameResolver
 // by watching the corresponding resource types.
 func (c *Controller) Start() error {
-	if err := controller.StartControllersWithInitialSync(c.syncDNSNames, c.efController, c.dnsController); err != nil {
+	if err := controller.StartWithInitialSync(c.syncDNSNames, c.efController, c.dnsController); err != nil {
 		return fmt.Errorf("unable to start egress firewall and dns name resolver controllers %w", err)
 	}
 	return nil
@@ -116,7 +116,7 @@ func (c *Controller) Start() error {
 // Stop gracefully stops the controller. The handlers for EgressFirewall
 // and DNSNameResolver are removed.
 func (c *Controller) Stop() {
-	controller.StopControllers(c.efController, c.dnsController)
+	controller.Stop(c.efController, c.dnsController)
 }
 
 // syncDNSNames syncs the existing EgressFirewall and DNSNameResolver objects
