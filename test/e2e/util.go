@@ -167,7 +167,7 @@ func newAnnotationNotSetError(format string, args ...interface{}) error {
 }
 
 // UnmarshalPodAnnotation returns the default network info from pod.Annotations
-func unmarshalPodAnnotation(annotations map[string]string) (*PodAnnotation, error) {
+func unmarshalPodAnnotation(annotations map[string]string, networkName string) (*PodAnnotation, error) {
 	ovnAnnotation, ok := annotations[podNetworkAnnotation]
 	if !ok {
 		return nil, newAnnotationNotSetError("could not find OVN pod annotation in %v", annotations)
@@ -178,7 +178,7 @@ func unmarshalPodAnnotation(annotations map[string]string) (*PodAnnotation, erro
 		return nil, fmt.Errorf("failed to unmarshal ovn pod annotation %q: %v",
 			ovnAnnotation, err)
 	}
-	tempA := podNetworks["default"]
+	tempA := podNetworks[networkName]
 	a := &tempA
 
 	podAnnotation := &PodAnnotation{}
