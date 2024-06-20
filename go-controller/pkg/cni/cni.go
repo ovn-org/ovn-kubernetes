@@ -1,8 +1,12 @@
 package cni
 
 import (
+	"context"
 	"fmt"
 	"net"
+	"time"
+
+	v1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -10,6 +14,7 @@ import (
 	utilnet "k8s.io/utils/net"
 
 	current "github.com/containernetworking/cni/pkg/types/100"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/udn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kubevirt"
@@ -131,8 +136,9 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, clientset *ClientSet) (*Resp
 	}
 	// Get the IP address and MAC address of the pod
 	// for DPU, ensure connection-details is present
-	pod, annotations, podNADAnnotation, err := GetPodWithAnnotations(pr.ctx, clientset, namespace, podName,
-		pr.nadName, annotCondFn)
+
+	userDefinedPrimaryNetwork := udn.NewPrimaryNetwork(clientset.nadLister)
+	pod, annotations, podNADAnnotation, err := GetPodWithAnnotations(pr.ctx, clientset, namespace, podName, pr.nadName, userDefinedPrimaryNetwork.WaitForPrimaryAnnotationFn(namespace, annotCondFn))
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pod annotation: %v", err)
 	}
@@ -153,6 +159,19 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, clientset *ClientSet) (*Resp
 		response.Result, err = pr.getCNIResult(clientset, podInterfaceInfo)
 		if err != nil {
 			return nil, err
+		}
+		if userDefinedPrimaryNetwork.Found() {
+			klog.Infof("About to plumb the user defined NET for %q on pod %q", userDefinedPrimaryNetwork.NetworkName(), podName)
+			userDefinedNetPodInfo, err := pr.newUserDefinedPrimaryNetworkPodInterfaceInfo(annotations, userDefinedPrimaryNetwork)
+			if err != nil {
+				return nil, err
+			}
+			klog.Infof("Creating the user defined net request for %q on pod %q", userDefinedPrimaryNetwork.NetworkName(), podName)
+			userDefinedRequest := pr.newUserDefinedPrimaryNetworkPodRequest(pod, userDefinedPrimaryNetwork)
+			//TODO: Should we use the response here so we can override the pod.Status.IPs ?
+			if _, err := userDefinedRequest.getCNIResult(clientset, userDefinedNetPodInfo); err != nil {
+				return nil, err
+			}
 		}
 	} else {
 		response.PodIFInfo = podInterfaceInfo
@@ -328,4 +347,39 @@ func (pr *PodRequest) getCNIResult(getter PodInfoGetter, podInterfaceInfo *PodIn
 		Interfaces: interfacesArray,
 		IPs:        ips,
 	}, nil
+}
+
+func (pr *PodRequest) newUserDefinedPrimaryNetworkPodRequest(
+	pod *kapi.Pod,
+	userDefinedPrimaryNetwork *udn.UserDefinedPrimaryNetwork,
+) *PodRequest {
+	req := &PodRequest{
+		Command:      pr.Command,
+		PodNamespace: pod.Namespace,
+		PodName:      pod.Name,
+		PodUID:       string(pod.UID),
+		SandboxID:    pr.SandboxID,
+		Netns:        pr.Netns,
+		IfName:       userDefinedPrimaryNetwork.InterfaceName(),
+		CNIConf:      userDefinedPrimaryNetwork.NetConf(),
+		timestamp:    time.Now(),
+		IsVFIO:       pr.IsVFIO,
+		netName:      userDefinedPrimaryNetwork.NetworkName(),
+		nadName:      userDefinedPrimaryNetwork.NADName(),
+		deviceInfo:   v1.DeviceInfo{},
+	}
+	req.ctx, req.cancel = context.WithTimeout(context.Background(), 2*time.Minute)
+	return req
+}
+
+func (pr *PodRequest) newUserDefinedPrimaryNetworkPodInterfaceInfo(annotations map[string]string, userDefinedPrimaryNetwork *udn.UserDefinedPrimaryNetwork) (*PodInterfaceInfo, error) {
+	return PodAnnotation2PodInfo(
+		annotations,
+		userDefinedPrimaryNetwork.Annotation(),
+		pr.PodUID,
+		"",
+		userDefinedPrimaryNetwork.NADName(),
+		userDefinedPrimaryNetwork.NetworkName(),
+		pr.CNIConf.MTU,
+	)
 }
