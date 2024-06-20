@@ -298,6 +298,12 @@ func (nInfo *secondaryNetInfo) ExcludeSubnets() []*net.IPNet {
 
 // CompareNetInfo compares for equality this network information with the other
 func (nInfo *secondaryNetInfo) CompareNetInfo(other BasicNetInfo) bool {
+	if (nInfo == nil) != (other == nil) {
+		return false
+	}
+	if nInfo == nil && other == nil {
+		return true
+	}
 	if nInfo.netName != other.GetNetworkName() {
 		return false
 	}
