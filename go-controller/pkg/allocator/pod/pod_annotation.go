@@ -358,8 +358,8 @@ func allocatePodAnnotationWithRollback(
 			// IPs allocated or we will allocate a new set of IPs, reset the error
 			err = nil
 		}
-
-		if len(tentative.IPs) == 0 {
+		skipIPAllocation := util.SkipIPAllocationForNad(pod.Annotations, nadName)
+		if len(tentative.IPs) == 0 && !skipIPAllocation {
 			tentative.IPs, err = ipAllocator.AllocateNextIPs()
 			if err != nil {
 				err = fmt.Errorf("failed to assign pod addresses for %s: %w", podDesc, err)

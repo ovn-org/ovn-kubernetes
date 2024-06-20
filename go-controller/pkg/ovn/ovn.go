@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"reflect"
+	"strings"
 	"sync"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kubevirt"
 	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	anpcontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/admin_network_policy"
 	egresssvc_zone "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/egressservice"
@@ -168,6 +170,14 @@ func (oc *DefaultNetworkController) ensureLocalZonePod(oldPod, pod *kapi.Pod, ad
 			return fmt.Errorf("addLogicalPort failed for %s/%s: %w", pod.Namespace, pod.Name, err)
 		}
 	} else {
+		// update `port-security` field if annotation changes
+		if util.PortSecurityAnnotationChanged(oldPod, pod) {
+			if err := oc.updatePortSecurity(oldPod, pod); err != nil {
+				klog.Errorf(err.Error())
+				oc.recordPodEvent("ErrorUpdatingPortSecurity", err, pod)
+				return err
+			}
+		}
 		// either pod is host-networked or its an update for a normal pod (addPort=false case)
 		if oldPod == nil || exGatewayAnnotationsChanged(oldPod, pod) || networkStatusAnnotationsChanged(oldPod, pod) {
 			if err := oc.addPodExternalGW(pod); err != nil {
@@ -504,4 +514,16 @@ func (oc *DefaultNetworkController) newANPController() error {
 		oc.recorder,
 	)
 	return err
+}
+
+func getAllowedMacAddress(lsp *nbdb.LogicalSwitchPort) string {
+	if len(lsp.PortSecurity) == 0 {
+		return ""
+	}
+	for _, str := range strings.Split(lsp.PortSecurity[0], " ") {
+		if _, err := net.ParseMAC(str); err == nil {
+			return str
+		}
+	}
+	return ""
 }

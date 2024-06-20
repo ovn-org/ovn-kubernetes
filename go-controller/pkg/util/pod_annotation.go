@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"strings"
 
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	nadutils "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/utils"
@@ -14,6 +15,7 @@ import (
 
 	v1 "k8s.io/api/core/v1"
 	listers "k8s.io/client-go/listers/core/v1"
+	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 )
 
@@ -51,6 +53,10 @@ const (
 	OvnPodAnnotationName = "k8s.ovn.org/pod-networks"
 	// DefNetworkAnnotation is the pod annotation for the cluster-wide default network
 	DefNetworkAnnotation = "v1.multus-cni.io/default-network"
+	// SkipIPOnNetworksAnnotation specifies the NADs that don't require IP allocation
+	SkipIPOnNetworksAnnotation = "k8s.ovn.org/skip-ip-on-networks"
+	// PortSecurityInfoAnnotation specifies custom port security config need to be applied in lsp
+	PortSecurityInfoAnnotation = "k8s.ovn.org/port-security-info"
 )
 
 var ErrNoPodIPFound = errors.New("no pod IPs found")
@@ -545,4 +551,56 @@ func AddRoutesGatewayIP(
 	}
 
 	return nil
+}
+
+// SkipIPAllocationForNad return true if nadName is part of value of skipIPOnNetworksAnnotation annotation
+func SkipIPAllocationForNad(annotations map[string]string, nadName string) bool {
+	skipIPNetworks := annotations[SkipIPOnNetworksAnnotation]
+	if skipIPNetworks == "" {
+		return false
+	}
+	for _, skipNadName := range strings.Split(skipIPNetworks, ",") {
+		if skipNadName == nadName {
+			return true
+		}
+	}
+	return false
+}
+
+type portSecurityInfo struct {
+	IPs []string `json:"ips"`
+}
+
+// return per-NAD portSecurityInfo map, where nadName is namespace/name of the secondary network NAD
+// and "default" for default network NAD
+func GetPortSecurityInfo(annotations map[string]string) (map[string]*portSecurityInfo, error) {
+	portSecurityInfoMap := make(map[string]*portSecurityInfo)
+	annotPortSecInfo := annotations[PortSecurityInfoAnnotation]
+	if annotPortSecInfo == "" {
+		return portSecurityInfoMap, nil
+	}
+	if err := json.Unmarshal([]byte(annotPortSecInfo), &portSecurityInfoMap); err != nil {
+		return portSecurityInfoMap, fmt.Errorf("failed to unmarshal port security info %q: %v", annotPortSecInfo, err)
+	}
+	// validate IPs
+	for _, psi := range portSecurityInfoMap {
+		validIPs := []string{}
+		for _, strIP := range psi.IPs {
+			if ip := net.ParseIP(strIP); ip == nil {
+				klog.Warningf("The IP address provided in %s annotation is invalid: %s", PortSecurityInfoAnnotation, strIP)
+				continue
+			}
+			validIPs = append(validIPs, strIP)
+		}
+		psi.IPs = validIPs
+	}
+	return portSecurityInfoMap, nil
+}
+
+func PortSecurityAnnotationChanged(oldPod, newPod *v1.Pod) bool {
+	if oldPod == nil {
+		// not an update event, creation flow will handle port_security
+		return false
+	}
+	return oldPod.Annotations[PortSecurityInfoAnnotation] != newPod.Annotations[PortSecurityInfoAnnotation]
 }

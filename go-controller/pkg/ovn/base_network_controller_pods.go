@@ -448,6 +448,18 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *kapi.Pod, nadName
 	var ls *nbdb.LogicalSwitch
 
 	podDesc := fmt.Sprintf("%s/%s/%s", nadName, pod.Namespace, pod.Name)
+	skipIPAllocation := util.SkipIPAllocationForNad(pod.Annotations, nadName)
+	if skipIPAllocation {
+		if !bnc.IsSecondary() {
+			// skip-ipam not allowed on default network
+			err = fmt.Errorf("%s is not allowed on default network", util.SkipIPOnNetworksAnnotation)
+			return
+		} else if bnc.TopologyType() != ovntypes.Layer2Topology && bnc.TopologyType() != ovntypes.LocalnetTopology {
+			// skip-ipam only allowed on localnet and layer2 topology
+			err = fmt.Errorf("%s is allowed on localnet and layer2 networks only", util.SkipIPOnNetworksAnnotation)
+			return
+		}
+	}
 	switchName, err := bnc.getExpectedSwitchName(pod)
 	if err != nil {
 		return nil, nil, nil, false, fmt.Errorf("[%s] failed geting expected switch name when adding logical switch port: %v", podDesc, err)
@@ -567,6 +579,19 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *kapi.Pod, nadName
 
 	// CNI depends on the flows from port security, delay setting it until end
 	lsp.PortSecurity = addresses
+	// if pod is annotated with `k8s.ovn.org/port-security-info`, inject the addresses to `port-security` field
+	// this is usually used together with skip-ip-allocation feature to allow traffic with specified IPs to go through a port
+	if portSecInfo, err := util.GetPortSecurityInfo(pod.Annotations); err != nil {
+		return nil, nil, nil, false, err
+	} else if allowedIPs := portSecInfo[nadName]; allowedIPs != nil && len(allowedIPs.IPs) > 0 {
+		allowedAddresses := []string{}
+		for _, ip := range allowedIPs.IPs {
+			allowedAddresses = append(allowedAddresses, fmt.Sprintf("%s %s", podAnnotation.MAC.String(), ip))
+			lsp.PortSecurity = allowedAddresses
+		}
+	} else {
+		klog.V(5).Infof("No allowed IPs are specified for port %s, adding default mac %s only", portName, podAnnotation.MAC.String())
+	}
 
 	// On layer2 topology with interconnect, we need to add specific port config
 	if bnc.isLayer2Interconnect() {
@@ -629,7 +654,8 @@ func (bnc *BaseNetworkController) getPortAddresses(switchName string, existingLS
 	podMac, podIPs, err := libovsdbutil.ExtractPortAddresses(existingLSP)
 	if err != nil {
 		return nil, nil, err
-	} else if podMac == nil || len(podIPs) == 0 {
+	} else if podMac == nil && len(podIPs) == 0 {
+		// MAC address need to be reused for skip-ipam feature
 		return nil, nil, nil
 	}
 
@@ -1147,4 +1173,71 @@ func (bnc *BaseNetworkController) wasPodReleasedBeforeStartup(uid, nad string) b
 		return false
 	}
 	return bnc.releasedPodsBeforeStartup[nad].Has(uid)
+}
+
+func (bnc *BaseNetworkController) updatePortSecurity(oldPod, newPod *kapi.Pod) (err error) {
+	if util.PodWantsHostNetwork(newPod) {
+		return nil
+	}
+	nadNames := bnc.getPodNADNames(newPod)
+	for _, nadName := range nadNames {
+		oldPortSecInfoMap, err := util.GetPortSecurityInfo(oldPod.Annotations)
+		if err != nil {
+			return err
+		}
+		newPortSecInfoMap, err := util.GetPortSecurityInfo(newPod.Annotations)
+		if err != nil {
+			return err
+		}
+		oldPortSecInfo, oldPortSecInfoExists := oldPortSecInfoMap[nadName]
+		newPortSecInfo, newPortSecInfoExists := newPortSecInfoMap[nadName]
+		if !oldPortSecInfoExists && !newPortSecInfoExists {
+			// port security info for this nad doesn't exist before and now
+			continue
+		}
+		// generate port name
+		portName := bnc.GetLogicalPortName(newPod, nadName)
+		lsp := &nbdb.LogicalSwitchPort{Name: portName}
+		ctx, cancel := context.WithTimeout(context.Background(), ovntypes.OVSDBTimeout)
+		err = bnc.nbClient.Get(ctx, lsp)
+		if err != nil {
+			cancel()
+			return fmt.Errorf("unable to get lsp %s for updating: %v", portName, err)
+		}
+		cancel()
+		// get allowed mac from port_security
+		allowedMac := getAllowedMacAddress(lsp)
+		if allowedMac == "" {
+			// get mac from addresses
+			if portMac, _, err := libovsdbutil.ExtractPortAddresses(lsp); err != nil {
+				return err
+			} else {
+				allowedMac = portMac.String()
+			}
+		}
+		addresses := []string{}
+		if newPortSecInfo != nil && len(newPortSecInfo.IPs) > 0 {
+			for _, ip := range newPortSecInfo.IPs {
+				addresses = append(addresses, fmt.Sprintf("%s %s", allowedMac, ip))
+			}
+		} else if oldPortSecInfo != nil && len(oldPortSecInfo.IPs) > 0 {
+			// lsp previously had allowed IPs in port_security but removed now,
+			// remove IPs from port security and retain mac only
+			addresses = append(addresses, allowedMac)
+		}
+		if len(addresses) == 0 {
+			// nothing to change
+			continue
+		}
+		klog.V(4).Infof("Updating lsp %s's port_security to %v", portName, strings.Join(addresses, ","))
+		lsp.PortSecurity = addresses
+		op, err := bnc.nbClient.Where(lsp).Update(lsp, &lsp.PortSecurity)
+		if err != nil {
+			return fmt.Errorf("could not create commands to update lsp %s: %v", portName, err)
+		}
+		if _, err = libovsdbops.TransactAndCheckAndSetUUIDs(bnc.nbClient, lsp, op); err != nil {
+			return fmt.Errorf("failed to update port_security for lsp %s: %v", portName, err)
+		}
+	}
+	return nil
 }
