@@ -1,8 +1,12 @@
 package cni
 
 import (
+	"context"
 	"fmt"
+	"github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+	types2 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"net"
+	"time"
 
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -131,8 +135,39 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, clientset *ClientSet) (*Resp
 	}
 	// Get the IP address and MAC address of the pod
 	// for DPU, ensure connection-details is present
+
+	var (
+		hasUserDefinedPrimaryNetwork        bool
+		userDefinedPrimaryNetworkAnnotation *util.PodAnnotation
+		userDefinedNetworkName              string
+	)
 	pod, annotations, podNADAnnotation, err := GetPodWithAnnotations(pr.ctx, clientset, namespace, podName,
-		pr.nadName, annotCondFn)
+		pr.nadName, func(annotations map[string]string, nadName string) (*util.PodAnnotation, bool) {
+			// TODO: we need to simplify this function.
+			annotation, isReady := annotCondFn(annotations, nadName)
+			if nadName == "default" {
+				if annotation.Primary {
+					return annotation, isReady // on the default network case we return here, so we don't impact too much
+				}
+				podNetworks, err := util.UnmarshalPodAnnotationAllNetworks(annotations)
+				if err != nil {
+					return nil, false
+				}
+				for netName, podNetwork := range podNetworks {
+					if podNetwork.Primary {
+						hasUserDefinedPrimaryNetwork = true
+						userDefinedNetworkName = netName
+						userDefinedPrimaryNetworkAnnotation, err = util.UnmarshalPodAnnotation(annotations, netName)
+						if err != nil {
+							return nil, false
+						}
+						return annotation, true
+					}
+				}
+				return nil, false
+			}
+			return annotation, isReady
+		})
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pod annotation: %v", err)
 	}
@@ -148,11 +183,44 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, clientset *ClientSet) (*Resp
 
 	podInterfaceInfo.SkipIPConfig = kubevirt.IsPodLiveMigratable(pod)
 
+	var userDefinedNetPodInfo *PodInterfaceInfo
+	if hasUserDefinedPrimaryNetwork {
+		klog.Infof("About to plumb the user defined NET for %q on pod %q", userDefinedNetworkName, podName)
+		userDefinedNetPodInfo, err = PodAnnotation2PodInfo(
+			annotations,
+			userDefinedPrimaryNetworkAnnotation,
+			pr.PodUID,
+			"",
+			userDefinedNetworkName, // TODO: we need to find a way to have here access to the network name
+			userDefinedNetworkName, // TODO: we can have the NAD name from the annotations. But the network name is missing. maybe we can add that to the annotations
+			pr.CNIConf.MTU,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+	}
+
 	response := &Response{KubeAuth: kubeAuth}
 	if !config.UnprivilegedMode {
 		response.Result, err = pr.getCNIResult(clientset, podInterfaceInfo)
 		if err != nil {
 			return nil, err
+		}
+		if hasUserDefinedPrimaryNetwork && userDefinedNetPodInfo != nil {
+			klog.Infof("creating the user defined net request for %q on pod %q", userDefinedNetworkName, podName)
+			userDefinedRequest := newUserDefinedPrimaryNetworkPodRequest(
+				pr.Command,
+				pod,
+				pr.SandboxID,
+				pr.Netns,
+				"sdn1", // TODO: need to find a name here. This one is OK I guess
+				userDefinedNetworkName,
+				userDefinedNetPodInfo.NADName,
+			)
+			if _, err := userDefinedRequest.getCNIResult(clientset, userDefinedNetPodInfo); err != nil {
+				return nil, err
+			}
 		}
 	} else {
 		response.PodIFInfo = podInterfaceInfo
@@ -328,4 +396,33 @@ func (pr *PodRequest) getCNIResult(getter PodInfoGetter, podInterfaceInfo *PodIn
 		Interfaces: interfacesArray,
 		IPs:        ips,
 	}, nil
+}
+
+// TODO: if we're actually taking this route, maybe what we want to to build a REQ from the default network REQ since half of it can be copied (pod UID / netns path / ...)
+func newUserDefinedPrimaryNetworkPodRequest(
+	cmd command,
+	pod *kapi.Pod,
+	containerID string,
+	netns string,
+	ifaceName string,
+	networkName string,
+	nadName string,
+) *PodRequest {
+	req := &PodRequest{
+		Command:      cmd,
+		PodNamespace: pod.Namespace,
+		PodName:      pod.Name,
+		PodUID:       string(pod.UID),
+		SandboxID:    containerID,
+		Netns:        netns,
+		IfName:       ifaceName,
+		CNIConf:      &types2.NetConf{}, // TODO: I think we will really need to have the NAD's contents here ...
+		timestamp:    time.Now(),
+		IsVFIO:       false,
+		netName:      networkName,
+		nadName:      nadName,
+		deviceInfo:   v1.DeviceInfo{},
+	}
+	req.ctx, req.cancel = context.WithTimeout(context.Background(), 2*time.Minute)
+	return req
 }
