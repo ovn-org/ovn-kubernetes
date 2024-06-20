@@ -115,9 +115,9 @@ func findAllSecondaryNetworkLogicalEntities(nbClient libovsdbclient.Client) ([]*
 }
 
 func (cm *NetworkControllerManager) CleanupDeletedNetworks(allControllers []nad.NetworkController) error {
-	existingNetworksMap := map[string]struct{}{}
+	existingNetworksMap := map[string]string{}
 	for _, oc := range allControllers {
-		existingNetworksMap[oc.GetNetworkName()] = struct{}{}
+		existingNetworksMap[oc.GetNetworkName()] = oc.TopologyType()
 	}
 
 	// Get all the existing secondary networks and its logical entities
@@ -129,12 +129,12 @@ func (cm *NetworkControllerManager) CleanupDeletedNetworks(allControllers []nad.
 	staleNetworkControllers := map[string]nad.NetworkController{}
 	for _, ls := range switches {
 		netName := ls.ExternalIDs[ovntypes.NetworkExternalID]
-		if _, ok := existingNetworksMap[netName]; ok {
+		// TopologyExternalID always co-exists with NetworkExternalID
+		topoType := ls.ExternalIDs[ovntypes.TopologyExternalID]
+		if existingNetworksMap[netName] == topoType {
 			// network still exists, no cleanup to do
 			continue
 		}
-		// TopologyExternalID always co-exists with NetworkExternalID
-		topoType := ls.ExternalIDs[ovntypes.TopologyExternalID]
 		// Create dummy network controllers to clean up logical entities
 		klog.V(5).Infof("Found stale %s network %s", topoType, netName)
 		if oc, err := cm.newDummyNetworkController(topoType, netName); err == nil {
@@ -144,12 +144,12 @@ func (cm *NetworkControllerManager) CleanupDeletedNetworks(allControllers []nad.
 	}
 	for _, lr := range routers {
 		netName := lr.ExternalIDs[ovntypes.NetworkExternalID]
-		if _, ok := existingNetworksMap[netName]; ok {
+		// TopologyExternalID always co-exists with NetworkExternalID
+		topoType := lr.ExternalIDs[ovntypes.TopologyExternalID]
+		if existingNetworksMap[netName] == topoType {
 			// network still exists, no cleanup to do
 			continue
 		}
-		// TopologyExternalID always co-exists with NetworkExternalID
-		topoType := lr.ExternalIDs[ovntypes.TopologyExternalID]
 		// Create dummy network controllers to clean up logical entities
 		klog.V(5).Infof("Found stale %s network %s", topoType, netName)
 		if oc, err := cm.newDummyNetworkController(topoType, netName); err == nil {
