@@ -538,8 +538,10 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *kapi.Pod, nadName
 	// it for the default network as well. If at all possible, keep them
 	// functionally equivalent going forward.
 	var annotationUpdated bool
-	if bnc.IsSecondary() {
+	if bnc.IsSecondary() || bnc.IsPrimaryNetwork() {
+		klog.Infof("DEBUG| allocating logical port %s for pod %q on switch %s", portName, pod.Name, switchName)
 		podAnnotation, annotationUpdated, err = bnc.allocatePodAnnotationForSecondaryNetwork(pod, existingLSP, nadName, network)
+		klog.Infof("DEBUG| err: %v; annotation: %v", err, podAnnotation)
 	} else {
 		podAnnotation, annotationUpdated, err = bnc.allocatePodAnnotation(pod, existingLSP, podDesc, nadName, network)
 	}
