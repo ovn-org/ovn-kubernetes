@@ -740,6 +740,63 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 				err = app.Run([]string{app.Name})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			})
+			ginkgo.It(fmt.Sprintf("egress firewall with node selector updates during node delete, gateway mode %s", gwMode), func() {
+				config.Gateway.Mode = gwMode
+				var err error
+				nodeName := "node1"
+				nodeIP := "9.9.9.9"
+				nodeIP2 := "11.11.11.11"
+				nodeIP3 := "fc00:f853:ccd:e793::2"
+				config.IPv4Mode = true
+				config.IPv6Mode = true
+
+				app.Action = func(ctx *cli.Context) error {
+					namespace1 := *newNamespace("namespace1")
+					labelKey := "name"
+					labelValue := "test"
+					selector := metav1.LabelSelector{MatchLabels: map[string]string{labelKey: labelValue}}
+					egressFirewall := newEgressFirewallObject("default", namespace1.Name, []egressfirewallapi.EgressFirewallRule{
+						{
+							Type: "Allow",
+							To: egressfirewallapi.EgressFirewallDestination{
+								NodeSelector: &selector,
+							},
+						},
+					})
+
+					startOvnWithNodes(dbSetup, []v1.Namespace{namespace1}, []egressfirewallapi.EgressFirewall{*egressFirewall},
+						[]v1.Node{
+							{
+								ObjectMeta: metav1.ObjectMeta{
+									Name: nodeName,
+									Annotations: map[string]string{
+										util.OVNNodeHostCIDRs: fmt.Sprintf("[\"%s/24\",\"%s/24\",\"%s/64\"]", nodeIP, nodeIP2, nodeIP3),
+									},
+									Labels: map[string]string{labelKey: labelValue},
+								},
+							},
+						}, true)
+
+					expectedDatabaseState := getEFExpectedDb(initialData,
+						fakeOVN, namespace1.Name,
+						fmt.Sprintf("(ip4.dst == %s || ip4.dst == %s || ip6.dst == %s)", nodeIP2, nodeIP, nodeIP3), "", nbdb.ACLActionAllow)
+					gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+
+					ginkgo.By("Deleting a node")
+					// trigger delete event
+					err = fakeOVN.fakeClient.KubeClient.CoreV1().Nodes().Delete(context.TODO(), nodeName,
+						metav1.DeleteOptions{})
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+					expectedDatabaseState = getEFExpectedDbAfterDelete(expectedDatabaseState)
+					gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+
+					return nil
+				}
+
+				err = app.Run([]string{app.Name})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			})
 			ginkgo.It(fmt.Sprintf("egress firewall with node selector doesn't affect node handler, gateway mode %s", gwMode), func() {
 				config.Gateway.Mode = gwMode
 				nodeName := "node1"
