@@ -81,6 +81,7 @@ type OVNMasterClientset struct {
 	EgressServiceClient      egressserviceclientset.Interface
 	AdminPolicyRouteClient   adminpolicybasedrouteclientset.Interface
 	IPAMClaimsClient         ipamclaimssclientset.Interface
+	NetworkAttchDefClient    networkattchmentdefclientset.Interface
 }
 
 // OVNNetworkControllerManagerClientset
@@ -95,6 +96,7 @@ type OVNKubeControllerClientset struct {
 	EgressServiceClient      egressserviceclientset.Interface
 	AdminPolicyRouteClient   adminpolicybasedrouteclientset.Interface
 	IPAMClaimsClient         ipamclaimssclientset.Interface
+	NetworkAttchDefClient    networkattchmentdefclientset.Interface
 }
 
 type OVNNodeClientset struct {
@@ -141,6 +143,7 @@ func (cs *OVNClientset) GetMasterClientset() *OVNMasterClientset {
 		EgressServiceClient:      cs.EgressServiceClient,
 		AdminPolicyRouteClient:   cs.AdminPolicyRouteClient,
 		IPAMClaimsClient:         cs.IPAMClaimsClient,
+		NetworkAttchDefClient:    cs.NetworkAttchDefClient,
 	}
 }
 
@@ -156,6 +159,7 @@ func (cs *OVNMasterClientset) GetOVNKubeControllerClientset() *OVNKubeController
 		EgressServiceClient:      cs.EgressServiceClient,
 		AdminPolicyRouteClient:   cs.AdminPolicyRouteClient,
 		IPAMClaimsClient:         cs.IPAMClaimsClient,
+		NetworkAttchDefClient:    cs.NetworkAttchDefClient,
 	}
 }
 
@@ -171,6 +175,7 @@ func (cs *OVNClientset) GetOVNKubeControllerClientset() *OVNKubeControllerClient
 		EgressServiceClient:      cs.EgressServiceClient,
 		AdminPolicyRouteClient:   cs.AdminPolicyRouteClient,
 		IPAMClaimsClient:         cs.IPAMClaimsClient,
+		NetworkAttchDefClient:    cs.NetworkAttchDefClient,
 	}
 }
 

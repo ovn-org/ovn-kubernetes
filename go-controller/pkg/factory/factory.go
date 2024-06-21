@@ -42,9 +42,11 @@ import (
 	egressqosinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/informers/externalversions"
 	egressqosinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/informers/externalversions/egressqos/v1"
 
-	"github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1/apis/informers/externalversions/ipamclaims/v1alpha1"
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	nadscheme "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/scheme"
+	nadfactory "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/informers/externalversions"
+	nadinformer "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/informers/externalversions/k8s.cni.cncf.io/v1"
+	nadlister "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
 
 	mnpapi "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta1"
 	mnpscheme "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/client/clientset/versioned/scheme"
@@ -64,6 +66,7 @@ import (
 	ipamclaimsapi "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1"
 	ipamclaimsscheme "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1/apis/clientset/versioned/scheme"
 	ipamclaimsfactory "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1/apis/informers/externalversions"
+	ipamclaimsinformer "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1/apis/informers/externalversions/ipamclaims/v1alpha1"
 	ipamclaimslister "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1/apis/listers/ipamclaims/v1alpha1"
 
 	kapi "k8s.io/api/core/v1"
@@ -103,6 +106,7 @@ type WatchFactory struct {
 	egressServiceFactory egressserviceinformerfactory.SharedInformerFactory
 	apbRouteFactory      adminbasedpolicyinformerfactory.SharedInformerFactory
 	ipamClaimsFactory    ipamclaimsfactory.SharedInformerFactory
+	nadFactory           nadfactory.SharedInformerFactory
 	informers            map[reflect.Type]*informer
 
 	stopChan chan struct{}
@@ -252,6 +256,10 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 		wf.ipamClaimsFactory = ipamclaimsfactory.NewSharedInformerFactory(ovnClientset.IPAMClaimsClient, resyncInterval)
 	}
 
+	if util.IsNetworkSegmentationSupportEnabled() {
+		wf.nadFactory = nadfactory.NewSharedInformerFactory(ovnClientset.NetworkAttchDefClient, resyncInterval)
+	}
+
 	if err := anpapi.AddToScheme(anpscheme.Scheme); err != nil {
 		return nil, err
 	}
@@ -385,6 +393,13 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 		}
 	}
 
+	if util.IsNetworkSegmentationSupportEnabled() {
+		wf.informers[NetworkAttachmentDefinitionType], err = newInformer(NetworkAttachmentDefinitionType, wf.nadFactory.K8sCniCncfIo().V1().NetworkAttachmentDefinitions().Informer())
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	if util.IsMultiNetworkPoliciesSupportEnabled() {
 		wf.informers[MultiNetworkPolicyType], err = newInformer(MultiNetworkPolicyType, wf.mnpFactory.K8sCniCncfIo().V1beta1().MultiNetworkPolicies().Informer())
 		if err != nil {
@@ -495,6 +510,15 @@ func (wf *WatchFactory) Start() error {
 		}
 	}
 
+	if util.IsNetworkSegmentationSupportEnabled() && wf.nadFactory != nil {
+		wf.nadFactory.Start(wf.stopChan)
+		for oType, synced := range waitForCacheSyncWithTimeout(wf.nadFactory, wf.stopChan) {
+			if !synced {
+				return fmt.Errorf("error in syncing cache for %v informer", oType)
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -531,6 +555,10 @@ func (wf *WatchFactory) Stop() {
 	if wf.ipamClaimsFactory != nil {
 		wf.ipamClaimsFactory.Shutdown()
 	}
+	/* FIXME(tssurya) when https://github.com/k8snetworkplumbingwg/multi-networkpolicy/issues/22 is resolved
+	if wf.nadFactory != nil {
+		wf.nadFactory.Shutdown()
+	}*/
 }
 
 // NewNodeWatchFactory initializes a watch factory with significantly fewer
@@ -677,6 +705,10 @@ func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset
 		wf.ipamClaimsFactory = ipamclaimsfactory.NewSharedInformerFactory(ovnClientset.IPAMClaimsClient, resyncInterval)
 	}
 
+	if util.IsNetworkSegmentationSupportEnabled() {
+		wf.nadFactory = nadfactory.NewSharedInformerFactory(ovnClientset.NetworkAttchDefClient, resyncInterval)
+	}
+
 	if err := egressipapi.AddToScheme(egressipscheme.Scheme); err != nil {
 		return nil, err
 	}
@@ -685,6 +717,9 @@ func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset
 		return nil, err
 	}
 	if err := ipamclaimsapi.AddToScheme(ipamclaimsscheme.Scheme); err != nil {
+		return nil, err
+	}
+	if err := nadapi.AddToScheme(nadscheme.Scheme); err != nil {
 		return nil, err
 	}
 	if err := egressfirewallapi.AddToScheme(egressfirewallscheme.Scheme); err != nil {
@@ -763,6 +798,13 @@ func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset
 			if err != nil {
 				return nil, err
 			}
+		}
+	}
+
+	if util.IsNetworkSegmentationSupportEnabled() {
+		wf.informers[NetworkAttachmentDefinitionType], err = newInformer(NetworkAttachmentDefinitionType, wf.nadFactory.K8sCniCncfIo().V1().NetworkAttachmentDefinitions().Informer())
+		if err != nil {
+			return nil, err
 		}
 	}
 
@@ -1345,10 +1387,22 @@ func (wf *WatchFactory) CertificateSigningRequestInformer() certificatesinformer
 	return wf.iFactory.Certificates().V1().CertificateSigningRequests()
 }
 
-// GetIPAMClaim gets a specific multinetwork policy by the namespace/name
+// GetIPAMClaim gets a specific IPAMClaim by the namespace/name
 func (wf *WatchFactory) GetIPAMClaim(namespace, name string) (*ipamclaimsapi.IPAMClaim, error) {
 	ipamClaimsLister := wf.informers[IPAMClaimsType].lister.(ipamclaimslister.IPAMClaimLister)
 	return ipamClaimsLister.IPAMClaims(namespace).Get(name)
+}
+
+// GetNAD gets a specific NAD by the namespace/name
+func (wf *WatchFactory) GetNAD(namespace, name string) (*nadapi.NetworkAttachmentDefinition, error) {
+	nadLister := wf.informers[NetworkAttachmentDefinitionType].lister.(nadlister.NetworkAttachmentDefinitionLister)
+	return nadLister.NetworkAttachmentDefinitions(namespace).Get(name)
+}
+
+// GetNAD gets all NADs by the namespace
+func (wf *WatchFactory) GetNADs(namespace string) ([]*nadapi.NetworkAttachmentDefinition, error) {
+	nadLister := wf.informers[NetworkAttachmentDefinitionType].lister.(nadlister.NetworkAttachmentDefinitionLister)
+	return nadLister.NetworkAttachmentDefinitions(namespace).List(labels.Everything())
 }
 
 func (wf *WatchFactory) NodeInformer() cache.SharedIndexInformer {
@@ -1425,8 +1479,12 @@ func (wf *WatchFactory) EgressFirewallInformer() egressfirewallinformer.EgressFi
 	return wf.efFactory.K8s().V1().EgressFirewalls()
 }
 
-func (wf *WatchFactory) IPAMClaimsInformer() v1alpha1.IPAMClaimInformer {
+func (wf *WatchFactory) IPAMClaimsInformer() ipamclaimsinformer.IPAMClaimInformer {
 	return wf.ipamClaimsFactory.K8s().V1alpha1().IPAMClaims()
+}
+
+func (wf *WatchFactory) NADInformer() nadinformer.NetworkAttachmentDefinitionInformer {
+	return wf.nadFactory.K8sCniCncfIo().V1().NetworkAttachmentDefinitions()
 }
 
 func (wf *WatchFactory) DNSNameResolverInformer() ocpnetworkinformerv1alpha1.DNSNameResolverInformer {
