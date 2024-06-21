@@ -1374,12 +1374,12 @@ func commonFlows(subnets []*net.IPNet, bridge *bridgeConfiguration) ([]string, e
 
 	var dftFlows []string
 
-	if ofPortPhys != "" {
-		// table 0, we check to see if this dest mac is the shared mac, if so flood to both ports
-		dftFlows = append(dftFlows,
-			fmt.Sprintf("cookie=%s, priority=10, table=0, in_port=%s, dl_dst=%s, actions=output:%s,output:%s",
-				defaultOpenFlowCookie, ofPortPhys, bridgeMacAddress, ofPortPatch, ofPortHost))
-	}
+	//	if ofPortPhys != "" {
+	// table 0, we check to see if this dest mac is the shared mac, if so flood to both ports
+	//	dftFlows = append(dftFlows,
+	//		fmt.Sprintf("cookie=%s, priority=10, table=0, in_port=%s, dl_dst=%s, actions=output:%s,output:%s",
+	//			defaultOpenFlowCookie, ofPortPhys, bridgeMacAddress, ofPortPatch, ofPortHost))
+	//	}
 
 	// table 0, check packets coming from OVN have the correct mac address. Low priority flows that are a catch all
 	// for non-IP packets that would normally be forwarded with NORMAL action (table 0, priority 0 flow).
