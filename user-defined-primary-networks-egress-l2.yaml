@@ -1,0 +1,47 @@
+---
+apiVersion: k8s.cni.cncf.io/v1
+kind: NetworkAttachmentDefinition
+metadata:
+  name: access-tenant-blue
+  namespace: default
+spec:
+  config: |2
+
+    {
+            "cniVersion": "0.3.0",
+            "name": "tenantblue",
+            "type": "ovn-k8s-cni-overlay",
+            "topology":"layer2",
+            "subnets": "10.128.0.0/16",
+            "mtu": 1300,
+            "netAttachDefName": "default/access-tenant-blue",
+            "role": "primary"
+    }
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pod
+  namespace: default
+  annotations:
+    k8s.v1.cni.cncf.io/networks: '[
+      {
+        "name": "access-tenant-blue",
+        "namespace": "default"
+      }
+    ]'
+spec:
+  containers:
+  - args:
+    - pause
+    image: registry.k8s.io/e2e-test-images/agnhost:2.45
+    imagePullPolicy: IfNotPresent
+    name: agnhost-container
+  nodeName: ovn-worker
+  restartPolicy: Always
+  securityContext: {}
+  serviceAccount: default
+  serviceAccountName: default
+
+
+
