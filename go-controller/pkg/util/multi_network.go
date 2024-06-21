@@ -332,6 +332,28 @@ func (nInfo *secondaryNetInfo) CompareNetInfo(other BasicNetInfo) bool {
 	return cmp.Equal(nInfo.excludeSubnets, other.ExcludeSubnets(), cmpopts.SortSlices(lessIPNet))
 }
 
+func (nInfo *secondaryNetInfo) copy() *secondaryNetInfo {
+	nInfo.Lock()
+	defer nInfo.Unlock()
+
+	// everything is immutable except the NADs
+	c := &secondaryNetInfo{
+		netName:            nInfo.netName,
+		primaryNetwork:     nInfo.primaryNetwork,
+		topology:           nInfo.topology,
+		mtu:                nInfo.mtu,
+		vlan:               nInfo.vlan,
+		allowPersistentIPs: nInfo.allowPersistentIPs,
+		ipv4mode:           nInfo.ipv4mode,
+		ipv6mode:           nInfo.ipv6mode,
+		subnets:            nInfo.subnets,
+		excludeSubnets:     nInfo.excludeSubnets,
+		nadNames:           nInfo.nadNames.Clone(),
+	}
+
+	return c
+}
+
 func newLayer3NetConfInfo(netconf *ovncnitypes.NetConf) (NetInfo, error) {
 	subnets, _, err := parseSubnets(netconf.Subnets, "", types.Layer3Topology)
 	if err != nil {
@@ -528,6 +550,18 @@ func ParseNetConf(netattachdef *nettypes.NetworkAttachmentDefinition) (*ovncnity
 	}
 
 	return netconf, nil
+}
+
+func CopyNetInfo(netInfo NetInfo) NetInfo {
+	switch t := netInfo.(type) {
+	case *DefaultNetInfo:
+		// immutable
+		return netInfo
+	case *secondaryNetInfo:
+		return t.copy()
+	default:
+		panic("program error: unrecognized NetInfo")
+	}
 }
 
 // GetPodNADToNetworkMapping sees if the given pod needs to plumb over this given network specified by netconf,
