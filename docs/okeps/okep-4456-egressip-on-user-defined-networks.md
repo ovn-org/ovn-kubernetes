@@ -8,7 +8,7 @@ OVN-Kubernetes today allows multiple different types of networks per secondary n
 
 Additionally, multiple and different instances of primary networks may co-exist for different users, and they will provide native network isolation.
 
-Once this flexibility is provided on the pod's primary network, then there should be an ability for EgressIP to support egress traffic on these user defined networks.
+Once this flexibility is provided on the pod's primary network, then there should be an ability for EgressIP to support egress traffic on these user defined networks (UDN).
 
 ## Goals
 
@@ -63,8 +63,18 @@ both pods are served by same EgressIP 1.1.1.1, now two pods are trying to connec
 
 When traffic from both EgressIP and Non-EgressIP pods arrive at br-ex with GR masquerade IP used as the source IP address, there should be a way to distinguish which packets require SNAT for EgressIP, otherwise it would be SNATed with the node's IP address. The EgressIP pod is packet marked using OVN's Logical Router Policy (LRP) and flow rule in br-ex match on `pkt_mark` to apply SNAT.
 
-There is a need for each EgressIP object mapped with a unique packet mark identifier so that we can distinguish which packets required SNAT'ing to the relevant EgressIP IP. We do not require a packet mark per IP within each EgressIP CR because only one IP maybe assigned per node and a node controller can deduce which IP that is.
-Since the name of the EgressIP object is a unique value globally, this can be used to derive packet marker identifiers using go libraries like `hash/fnv`, The maximum allowed value for the identifier is 2^32-1.
+### Packet marks
+We do not require a packet mark per IP within each EgressIP CR because only one IP is assigned per node per EgressIP CR.
+Packet mark allocation must not conflict with other features using packet marks, be within the specific integer range defined by
+the linux kernel and also not conflict with other features utilizing packet marks.
+
+There isn't a reliable way for each node controller to generate a deterministic packet mark based on the constraints mentioned previously
+for each EgressIP CR.
+
+Packet marks (integer) will be centrally allocated by a cluster manager managed allocator and annotated on each EgressIP CR.
+If cluster manager restarts or another instance takes over, it can rebuild its allocator cache from the existing EgressIP CRs.
+
+The node controllers will refer to this integer to determine the packet mark for a given EgressIP CR.
 
 ### Handling of EgressIP in layer 3 default cluster network and user defined network
 
@@ -167,15 +177,30 @@ The following diagrams provides how EgressIP flow is handled in L2 user defined 
 
 ### EgressIP assigned to a secondary host interface
 
-The packet marking is done on the EgressIP's ovn-cluster-router Logical Router Policy and the pod IP address is SNATed with Gateway Router IP address before it's sent onto kernel's mp0-net. The SNATing is needed here to avoid the collision that was discussed before.
+OVN-Kubernetes will reserve an extra IP from the masquerade subnet per network. This masquerade IP will be used to SNAT
+egress packets from pods leaving via a networks mp0. The SNAT will be performed by ovn_cluster_router for layer 3 networks and
+the gateway router (GR) for layer 2 networks.
 
-The IP rule on the host which matches on packet marking, then forwards the packet a custom routing table something like this.
+For CDN & UDN L3 networks configured with IC, the packet marking is performed on the egress nodes LR ovn-cluster-router
+using an LRP and redirected to the associated egress nodes management port.
+
+For CDN & UDN L3 networks configured with non-IC, the packet marking cannot be performed by LR ovn-cluster-router as marks
+will not persist when packets traverse nodes. Also, the marking of a packet cannot be accomplished by IPTable rules when 
+packets leave the networks management port because we cannot match on a pods source IP since it has been masqueraded by OVN
+before being sent out the networks management port.
+Solution to this issue is TBD.
+
+For UDN L2 networks, the packet marking will occur on the egress nodes GR. Other nodes GW routers will redirect selected pods
+to egress nodes GR.
+
+On an egress node, the IP rule on the host which matches on packet marking, then forwards the packet a custom routing table:
 
 ```
 999:	fwmark 0xa lookup 1111
 ```
 
-The existing IP rule to skip Non-Egress IP pod and host networked pod traffic to go over via custom routing table is no longer needed because of packet marking now. This can be safely removed.
+The existing IP rule to skip Non-Egress IP pod and host networked pod traffic to go over via custom routing table is no
+longer needed because of packet marking now. This can be safely removed.
 
 ```
 5999:	from all fwmark 0x3f0 lookup main
@@ -187,17 +212,16 @@ The EgressIPs assigned to secondary interfaces IP rule priorities need to be hig
  1000:	from all lookup [l3mdev-table]
  ```
 
-EgressIP hosted by a secondary host interface uses a routing table per egress interface.The table integer is derived like this: `1000 + ifIndex`. The table must not clash with VRF created routing tables for UDNs.
-The EgressIP on user defined networks can continue to use the same VRF table for the routing.
-The routing in the VRF table doesn’t need to introduce any new changes, it can just continue to have a default route and import existing routes for the interface from the default VRF table.
+EgressIP hosted by a secondary host interface uses a routing table per egress interface.
+This approach can be continued for CDN and UDN networks.
 
 ```
 sh-5.2# ip route show table 1111
 default dev eth1
 ```
 
-The ip table entry in OVN-KUBE-EGRESS-IP-MULTI-NIC chain would be changed to match only on packet mark to do SNAT with EgressIP address.
-This alleviates the need for ip table entry per pod.
+The IPTable entry in OVN-KUBE-EGRESS-IP-MULTI-NIC chain would be changed to match only on packet mark and SNAT to the associated EgressIP address.
+This alleviates the need for IPTable entry per pod.
 
 ```
 -A OVN-KUBE-EGRESS-IP-MULTI-NIC -m mark --mark 0xa -o eth1 -j SNAT --to-source 1.1.1.1
@@ -212,11 +236,9 @@ This alleviates the need for ip table entry per pod.
 +--------------------------------------------+--------------------------------------------------+---------------------------+------------------------+
 | Ovn_cluster_router                         | Ovn_cluster_router                               | Ovn_cluster_router        | Do nothing             |
 | - LRPs                                     | - LRPs                                           | - LRPs                    |                        |
-| Gw router                                  | Node GW router                                   | Node GW router            |                        |
-| - LRPs                                     | - LRPs                                           | - LRPs                    |                        |
 |   - Redirect to its mgnt port and pkt mark |   - Redirect to its mgnt port and pkt mark       |   - Redirect to remote ts |                        |
 | IP rules                                   | IP rules                                         | IP rules                  |                        |
-| - Match on mark and redirect to vrf        | - Match on mark and redirect to vrf              | IPTables                  |                        |
+| - Match on mark and redirect to table      | - Match on mark and redirect to table            | IPTables                  |                        |
 | IPTables                                   | IPTables                                         |                           |                        |
 | - SNAT back on pkt mark                    | - SNAT back on pkt mark                          |                           |                        |
 | - Save mark for rpl                        | - Save mark for rpl                              |                           |                        |
@@ -228,21 +250,15 @@ secondaryeip - EgressIP is node's secondary interface(s).
 +-----------------------------------------------------------+
 | secondaryeip-cdn-l3-non-ic and secondaryeip-udn-l3-non-ic |
 +===========================================================+
-| Ovn_cluster_router                                        |
-| - LRPs                                                    |
-|   - Redirect to egress node GW router port                |
-| Egress node GW router                                     |
-| - LRPs                                                    |
-|   - Redirect to mgnt port pkt mark                        |
-| IP rules on egress node                                   |
-| - Match on mark and redirect to vrf                       |
-| IPTables on egress node                                   |
-| - SNAT when leaving egress inf                            |
-| - Save pkt mark                                           |
+| TBD                                                       |
 +-----------------------------------------------------------+
 ```
 
-The handling of L2 user defined networks for Multi NIC is same except packet marking and SNATing happen at ovn-gateway-router. It must also redirect the packet to the management port using GR LRPs.
+L2 UDNs for EgressIPs assigned to host secondary interfaces, packet marking and SNATing happen at an egress
+nodes GR. The egress nodes GR must also redirect the packet to the management port using LRPs.
+For an EgressIP selected pod that is associated with a node gateway that is not an egress node, an LRP must be added to
+redirect the traffic to an egress node GR. This egress node GR router will then packet mark and redirect to its nodes'
+management port.
 
 ```
 +----------------------------------------------+
@@ -256,7 +272,7 @@ The handling of L2 user defined networks for Multi NIC is same except packet mar
 | - LRPs                                       |
 |   - Redirect to mgnt port pkt mark           |
 | IP rules                                     |
-| - Match on mark and redirect to vrf          |
+| - Match on mark and redirect to route table  |
 | IPTables on egress node                      |
 | - SNAT when leaving egress inf               |
 | - Save pkt mark                              |
@@ -286,9 +302,9 @@ The marking of EgressIPReplyTrafficConnectionMark (42) is done via QoS rule and 
 
 ### Upgrade risks for both IC / non-IC for Cluster Default Network
 
-The Upgrade may have a minimal impact for a shorter period of time particularly for pod's egress traffic for both primary and secondary EgressIPs.
+The upgrade may have a minimal impact for a shorter period of time particularly for pod's egress traffic for both primary and secondary EgressIPs.
 For primary EgressIP, the new design has to reconcile existing ovn-cluster-router LRPs and ovn-gateway-router SNATs with new LRPs and corresponding br-ex SNAT entries.
-For secondary EgressIP, it has to reconcile existing ip and ip table rules because the new rules match only on packet marking.
+For secondary EgressIP, it has to reconcile existing ip rule and IPTable rules because the new rules match only on packet marking.
 
 This impact on primary EgressIP may be solved by making EgressIP resync logic to create br-ex SNAT entries, LRP on ovn-gateway-router for packet marking first and then delete existing ovn-gateway-router SNATs.
 
