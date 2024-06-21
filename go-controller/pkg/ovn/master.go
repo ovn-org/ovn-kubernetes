@@ -106,53 +106,7 @@ func (oc *DefaultNetworkController) SetupMaster(existingNodeNames []string) erro
 	}
 
 	// Create OVNJoinSwitch that will be used to connect gateway routers to the distributed router.
-	logicalSwitch := nbdb.LogicalSwitch{
-		Name: oc.GetNetworkScopedJoinSwitchName(),
-	}
-	// nothing is updated here, so no reason to pass fields
-	err = libovsdbops.CreateOrUpdateLogicalSwitch(oc.nbClient, &logicalSwitch)
-	if err != nil {
-		return fmt.Errorf("failed to create logical switch %+v: %v", logicalSwitch, err)
-	}
-
-	// Connect the distributed router to OVNJoinSwitch.
-	drSwitchPort := types.JoinSwitchToGWRouterPrefix + types.OVNClusterRouter
-	drRouterPort := types.GWRouterToJoinSwitchPrefix + types.OVNClusterRouter
-
-	gwLRPMAC := util.IPAddrToHWAddr(oc.ovnClusterLRPToJoinIfAddrs[0].IP)
-	gwLRPNetworks := []string{}
-	for _, gwLRPIfAddr := range oc.ovnClusterLRPToJoinIfAddrs {
-		gwLRPNetworks = append(gwLRPNetworks, gwLRPIfAddr.String())
-	}
-	logicalRouterPort := nbdb.LogicalRouterPort{
-		Name:     drRouterPort,
-		MAC:      gwLRPMAC.String(),
-		Networks: gwLRPNetworks,
-	}
-
-	err = libovsdbops.CreateOrUpdateLogicalRouterPort(oc.nbClient, logicalRouter,
-		&logicalRouterPort, nil, &logicalRouterPort.MAC, &logicalRouterPort.Networks)
-	if err != nil {
-		return fmt.Errorf("failed to add logical router port %+v on router %s: %v", logicalRouterPort, logicalRouter.Name, err)
-	}
-
-	// Create OVNJoinSwitch that will be used to connect gateway routers to the
-	// distributed router and connect it to said dsitributed router.
-	logicalSwitchPort := nbdb.LogicalSwitchPort{
-		Name: drSwitchPort,
-		Type: "router",
-		Options: map[string]string{
-			"router-port": drRouterPort,
-		},
-		Addresses: []string{"router"},
-	}
-	sw := nbdb.LogicalSwitch{Name: oc.GetNetworkScopedJoinSwitchName()}
-	err = libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitch(oc.nbClient, &sw, &logicalSwitchPort)
-	if err != nil {
-		return fmt.Errorf("failed to create logical switch port %+v and switch %s: %v", logicalSwitchPort, sw.Name, err)
-	}
-
-	return nil
+	return oc.createJoinSwitch(logicalRouter)
 }
 
 func (oc *DefaultNetworkController) syncNodeManagementPort(node *kapi.Node, hostSubnets []*net.IPNet) error {
@@ -830,34 +784,6 @@ func (oc *DefaultNetworkController) deleteOVNNodeEvent(node *kapi.Node) error {
 	oc.syncHostNetAddrSetFailed.Delete(node.Name)
 
 	return nil
-}
-
-// getOVNClusterRouterPortToJoinSwitchIPs returns the IP addresses for the
-// logical router port "GwRouterToJoinSwitchPrefix + OVNClusterRouter" from the
-// config.Gateway.V4JoinSubnet and  config.Gateway.V6JoinSubnet. This will
-// always be the first IP from these subnets.
-func (oc *DefaultNetworkController) getOVNClusterRouterPortToJoinSwitchIfAddrs() (gwLRPIPs []*net.IPNet, err error) {
-	joinSubnetsConfig := []string{}
-	if config.IPv4Mode {
-		joinSubnetsConfig = append(joinSubnetsConfig, config.Gateway.V4JoinSubnet)
-	}
-	if config.IPv6Mode {
-		joinSubnetsConfig = append(joinSubnetsConfig, config.Gateway.V6JoinSubnet)
-	}
-	for _, joinSubnetString := range joinSubnetsConfig {
-		_, joinSubnet, err := net.ParseCIDR(joinSubnetString)
-		if err != nil {
-			return nil, fmt.Errorf("error parsing join subnet string %s: %v", joinSubnetString, err)
-		}
-		joinSubnetBaseIP := utilnet.BigForIP(joinSubnet.IP)
-		ipnet := &net.IPNet{
-			IP:   utilnet.AddIPOffset(joinSubnetBaseIP, 1),
-			Mask: joinSubnet.Mask,
-		}
-		gwLRPIPs = append(gwLRPIPs, ipnet)
-	}
-
-	return gwLRPIPs, nil
 }
 
 // addUpdateHoNodeEvent reconsile ovn nodes when a hybrid overlay node is added.

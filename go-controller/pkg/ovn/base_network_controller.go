@@ -146,6 +146,10 @@ type BaseNetworkController struct {
 	// use a chain of cancelable contexts for this
 	cancelableCtx util.CancelableContext
 
+	// IP addresses of OVN Cluster logical router port ("GwRouterToJoinSwitchPrefix + OVNClusterRouter")
+	// connecting to the join switch
+	ovnClusterLRPToJoinIfAddrs []*net.IPNet
+
 	// List of nodes which belong to the local zone (stored as a sync map)
 	// If the map is nil, it means the controller is not tracking the node events
 	// and all the nodes are considered as local zone nodes.
@@ -253,6 +257,99 @@ func (bnc *BaseNetworkController) createOvnClusterRouter() (*nbdb.LogicalRouter,
 	}
 
 	return &logicalRouter, nil
+}
+
+// getOVNClusterRouterPortToJoinSwitchIPs returns the IP addresses for the
+// logical router port "GwRouterToJoinSwitchPrefix + OVNClusterRouter" from the
+// config.Gateway.V4JoinSubnet and  config.Gateway.V6JoinSubnet. This will
+// always be the first IP from these subnets.
+//
+// TODO (dceara): THE JOIN SUBNETS NEED TO BE PASSED AS ARG.  THEY NEED TO BE
+// UNIQUE PER NETWORK.
+func (bnc *BaseNetworkController) getOVNClusterRouterPortToJoinSwitchIfAddrs() (gwLRPIPs []*net.IPNet, err error) {
+	joinSubnetsConfig := []string{}
+	if config.IPv4Mode {
+		joinSubnetsConfig = append(joinSubnetsConfig, config.Gateway.V4JoinSubnet)
+	}
+	if config.IPv6Mode {
+		joinSubnetsConfig = append(joinSubnetsConfig, config.Gateway.V6JoinSubnet)
+	}
+	for _, joinSubnetString := range joinSubnetsConfig {
+		_, joinSubnet, err := net.ParseCIDR(joinSubnetString)
+		if err != nil {
+			return nil, fmt.Errorf("error parsing join subnet string %s: %v", joinSubnetString, err)
+		}
+		joinSubnetBaseIP := utilnet.BigForIP(joinSubnet.IP)
+		ipnet := &net.IPNet{
+			IP:   utilnet.AddIPOffset(joinSubnetBaseIP, 1),
+			Mask: joinSubnet.Mask,
+		}
+		gwLRPIPs = append(gwLRPIPs, ipnet)
+	}
+
+	return gwLRPIPs, nil
+}
+
+// Create OVNJoinSwitch that will be used to connect gateway routers to the distributed router.
+func (bnc *BaseNetworkController) createJoinSwitch(clusterRouter *nbdb.LogicalRouter) error {
+	// Allocate IPs for logical router port "GwRouterToJoinSwitchPrefix + OVNClusterRouter". This should always
+	// allocate the first IPs in the join switch subnets.
+	gwLRPIfAddrs, err := bnc.getOVNClusterRouterPortToJoinSwitchIfAddrs()
+	if err != nil {
+		return fmt.Errorf("failed to allocate join switch IP address connected to %s: %v", clusterRouter.Name, err)
+	}
+
+	//TODO (dceara): are we OK with this side effect?
+	bnc.ovnClusterLRPToJoinIfAddrs = gwLRPIfAddrs
+
+	joinSwitchName := bnc.GetNetworkScopedJoinSwitchName()
+	logicalSwitch := nbdb.LogicalSwitch{
+		Name: joinSwitchName,
+	}
+	// nothing is updated here, so no reason to pass fields
+	err = libovsdbops.CreateOrUpdateLogicalSwitch(bnc.nbClient, &logicalSwitch)
+	if err != nil {
+		return fmt.Errorf("failed to create logical switch %+v: %v", logicalSwitch, err)
+	}
+
+	// Connect the distributed router to OVNJoinSwitch.
+	drSwitchPort := types.JoinSwitchToGWRouterPrefix + clusterRouter.Name
+	drRouterPort := types.GWRouterToJoinSwitchPrefix + clusterRouter.Name
+
+	gwLRPMAC := util.IPAddrToHWAddr(bnc.ovnClusterLRPToJoinIfAddrs[0].IP)
+	gwLRPNetworks := []string{}
+	for _, gwLRPIfAddr := range bnc.ovnClusterLRPToJoinIfAddrs {
+		gwLRPNetworks = append(gwLRPNetworks, gwLRPIfAddr.String())
+	}
+	logicalRouterPort := nbdb.LogicalRouterPort{
+		Name:     drRouterPort,
+		MAC:      gwLRPMAC.String(),
+		Networks: gwLRPNetworks,
+	}
+
+	err = libovsdbops.CreateOrUpdateLogicalRouterPort(bnc.nbClient, clusterRouter,
+		&logicalRouterPort, nil, &logicalRouterPort.MAC, &logicalRouterPort.Networks)
+	if err != nil {
+		return fmt.Errorf("failed to add logical router port %+v on router %s: %v", logicalRouterPort, clusterRouter.Name, err)
+	}
+
+	// Create OVNJoinSwitch that will be used to connect gateway routers to the
+	// distributed router and connect it to said dsitributed router.
+	logicalSwitchPort := nbdb.LogicalSwitchPort{
+		Name: drSwitchPort,
+		Type: "router",
+		Options: map[string]string{
+			"router-port": drRouterPort,
+		},
+		Addresses: []string{"router"},
+	}
+	sw := nbdb.LogicalSwitch{Name: joinSwitchName}
+	err = libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitch(bnc.nbClient, &sw, &logicalSwitchPort)
+	if err != nil {
+		return fmt.Errorf("failed to create logical switch port %+v and switch %s: %v", logicalSwitchPort, joinSwitchName, err)
+	}
+
+	return nil
 }
 
 // syncNodeClusterRouterPort ensures a node's LS to the cluster router's LRP is created.
