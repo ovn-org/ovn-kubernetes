@@ -71,6 +71,13 @@ type PodAnnotation struct {
 
 	// TunnelID assigned to each pod for layer2 secondary networks
 	TunnelID int
+
+	// Set to true if this network is asked to be the default network
+	// for the pod. The "default" network is the primary network
+	// unless user-defined-network-segmentation feature has been activated
+	// At a given time a pod can have only 1 network with this flag set
+	// to true.
+	Primary bool
 }
 
 // PodRoute describes any routes to be added to the pod's network namespace
@@ -95,7 +102,8 @@ type podAnnotation struct {
 	IP      string `json:"ip_address,omitempty"`
 	Gateway string `json:"gateway_ip,omitempty"`
 
-	TunnelID int `json:"tunnel_id,omitempty"`
+	TunnelID int  `json:"tunnel_id,omitempty"`
+	Primary  bool `json:"primary"`
 }
 
 // Internal struct used to marshal PodRoute to the pod annotation
@@ -116,6 +124,7 @@ func MarshalPodAnnotation(annotations map[string]string, podInfo *PodAnnotation,
 	pa := podAnnotation{
 		TunnelID: podInfo.TunnelID,
 		MAC:      podInfo.MAC.String(),
+		Primary:  podInfo.Primary,
 	}
 
 	if len(podInfo.IPs) == 1 {
@@ -191,6 +200,7 @@ func UnmarshalPodAnnotation(annotations map[string]string, nadName string) (*Pod
 
 	podAnnotation := &PodAnnotation{
 		TunnelID: a.TunnelID,
+		Primary:  a.Primary,
 	}
 	podAnnotation.MAC, err = net.ParseMAC(a.MAC)
 	if err != nil {
