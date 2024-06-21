@@ -22,7 +22,7 @@ import (
 
 var (
 	ErrorAttachDefNotOvnManaged = errors.New("net-attach-def not managed by OVN")
-	UnsupportedIPAMKeyError     = errors.New("IPAM key is not supported. Use OVN-K provided IPAM via the `subnets` attribute")
+	ErrorUnsupportedIPAMKey     = errors.New("IPAM key is not supported. Use OVN-K provided IPAM via the `subnets` attribute")
 )
 
 // BasicNetInfo is interface which holds basic network information
@@ -546,7 +546,7 @@ func ParseNetConf(netattachdef *nettypes.NetworkAttachmentDefinition) (*ovncnity
 	}
 
 	if netconf.IPAM.Type != "" {
-		return nil, fmt.Errorf("error parsing Network Attachment Definition %s/%s: %v", netattachdef.Namespace, netattachdef.Name, UnsupportedIPAMKeyError)
+		return nil, fmt.Errorf("error parsing Network Attachment Definition %s/%s: %w", netattachdef.Namespace, netattachdef.Name, ErrorUnsupportedIPAMKey)
 	}
 
 	return netconf, nil

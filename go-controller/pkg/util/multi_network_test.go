@@ -408,7 +408,7 @@ func TestParseNetconf(t *testing.T) {
 				})
 			if test.expectedError != nil {
 				_, err := ParseNetConf(networkAttachmentDefinition)
-				g.Expect(err).To(gomega.MatchError(test.expectedError))
+				g.Expect(err).To(gomega.MatchError(test.expectedError.Error()))
 			} else {
 				g.Expect(ParseNetConf(networkAttachmentDefinition)).To(gomega.Equal(test.expectedNetConf))
 			}
