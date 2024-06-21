@@ -112,7 +112,7 @@ func (nm *networkManagerImpl) sync(network string) error {
 
 	// we will dispose of the old network if deletion is in progress or if
 	// configuration changed
-	dispose := have != nil && (have.stoppedAndDeleting || !have.controller.CompareNetInfo(want))
+	dispose := have != nil && (have.stoppedAndDeleting || !have.controller.Equals(want))
 
 	if dispose {
 		if !have.stoppedAndDeleting {

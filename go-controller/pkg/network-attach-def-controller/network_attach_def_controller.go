@@ -199,7 +199,7 @@ func (nadController *NetAttachDefinitionController) syncNAD(key string, nad *net
 		// the NAD refers to a new network, ensure it
 		ensureNetwork = nadNetwork
 		nadController.networks[nadNetworkName] = ensureNetwork
-	case currentNetwork.CompareNetInfo(nadNetwork):
+	case currentNetwork.Equals(nadNetwork):
 		// the NAD refers to an existing compatible network, ensure that
 		// existing network holds a reference to this NAD
 		ensureNetwork = currentNetwork

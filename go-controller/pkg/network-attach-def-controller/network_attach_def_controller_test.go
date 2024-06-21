@@ -396,7 +396,7 @@ func TestNetAttachDefinitionController(t *testing.T) {
 
 					// test that the controller have the expected config and NADs
 					g.Expect(tncm.controllers).To(gomega.HaveKey(testNetworkKey))
-					g.Expect(tncm.controllers[testNetworkKey].CompareNetInfo(netInfo)).To(gomega.BeTrue(),
+					g.Expect(tncm.controllers[testNetworkKey].Equals(netInfo)).To(gomega.BeTrue(),
 						fmt.Sprintf("matching network config for network %s", name))
 					g.Expect(tncm.controllers[testNetworkKey].GetNADs()).To(gomega.ConsistOf(expected.nads),
 						fmt.Sprintf("matching NADs for network %s", name))

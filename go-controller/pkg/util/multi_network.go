@@ -41,7 +41,7 @@ type BasicNetInfo interface {
 	AllowsPersistentIPs() bool
 
 	// utility methods
-	CompareNetInfo(BasicNetInfo) bool
+	Equals(BasicNetInfo) bool
 	GetNetworkScopedName(name string) string
 	RemoveNetworkScopeFromName(name string) string
 }
@@ -123,7 +123,7 @@ func (nInfo *DefaultNetInfo) DeleteNADs(nadName ...string) {
 	panic("unexpected call for default network")
 }
 
-func (nInfo *DefaultNetInfo) CompareNetInfo(netBasicInfo BasicNetInfo) bool {
+func (nInfo *DefaultNetInfo) Equals(netBasicInfo BasicNetInfo) bool {
 	_, ok := netBasicInfo.(*DefaultNetInfo)
 	return ok
 }
@@ -296,8 +296,8 @@ func (nInfo *secondaryNetInfo) ExcludeSubnets() []*net.IPNet {
 	return nInfo.excludeSubnets
 }
 
-// CompareNetInfo compares for equality this network information with the other
-func (nInfo *secondaryNetInfo) CompareNetInfo(other BasicNetInfo) bool {
+// Equals compares for equality this network information with the other
+func (nInfo *secondaryNetInfo) Equals(other BasicNetInfo) bool {
 	if (nInfo == nil) != (other == nil) {
 		return false
 	}
