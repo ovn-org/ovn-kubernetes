@@ -453,7 +453,15 @@ func (oc *SecondaryLayer3NetworkController) WatchNodes() error {
 }
 
 func (oc *SecondaryLayer3NetworkController) Init(ctx context.Context) error {
-	_, err := oc.createOvnClusterRouter()
+	logicalRouter, err := oc.createOvnClusterRouter()
+	if err != nil {
+		return err
+	}
+
+	// Only configure join switch and GR for user defined primary networks.
+	if util.IsNetworkSegmentationSupportEnabled() && oc.IsPrimaryNetwork() {
+		err = oc.createJoinSwitch(logicalRouter)
+	}
 	return err
 }
 
