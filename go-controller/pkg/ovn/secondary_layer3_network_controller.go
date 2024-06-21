@@ -338,6 +338,10 @@ func (oc *SecondaryLayer3NetworkController) newRetryFramework(
 // Start starts the secondary layer3 controller, handles all events and creates all needed logical entities
 func (oc *SecondaryLayer3NetworkController) Start(ctx context.Context) error {
 	klog.Infof("Start secondary %s network controller of network %s", oc.TopologyType(), oc.GetNetworkName())
+	if err := oc.BaseNetworkController.init(); err != nil {
+		return err
+	}
+
 	if err := oc.Init(ctx); err != nil {
 		return err
 	}
@@ -454,7 +458,15 @@ func (oc *SecondaryLayer3NetworkController) WatchNodes() error {
 }
 
 func (oc *SecondaryLayer3NetworkController) Init(ctx context.Context) error {
-	_, err := oc.createOvnClusterRouter()
+	clusterRouter, err := oc.createOvnClusterRouter()
+	if err != nil {
+		return err
+	}
+
+	// Only configure join switch and GR for user defined primary networks.
+	if util.IsNetworkSegmentationSupportEnabled() && oc.IsPrimaryNetwork() {
+		err = oc.createJoinSwitch(clusterRouter)
+	}
 	return err
 }
 

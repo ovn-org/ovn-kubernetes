@@ -206,6 +206,18 @@ func NewCommonNetworkControllerInfo(client clientset.Interface, kube *kube.KubeO
 	}, nil
 }
 
+func (bnc *BaseNetworkController) init() error {
+	// Allocate IPs for logical router port "GwRouterToJoinSwitchPrefix + OVNClusterRouter". This should always
+	// allocate the first IPs in the join switch subnets.
+	gwLRPIfAddrs, err := bnc.getOVNClusterRouterPortToJoinSwitchIfAddrs()
+	if err != nil {
+		return fmt.Errorf("failed to allocate join switch IP for network %s: %v", bnc.GetNetworkName(), err)
+	}
+
+	bnc.ovnClusterLRPToJoinIfAddrs = gwLRPIfAddrs
+	return nil
+}
+
 func (bnc *BaseNetworkController) GetLogicalPortName(pod *kapi.Pod, nadName string) string {
 	if !bnc.IsSecondary() {
 		return util.GetLogicalPortName(pod.Namespace, pod.Name)
@@ -285,6 +297,78 @@ func (bnc *BaseNetworkController) getOVNClusterRouterPortToJoinSwitchIfAddrs() (
 	}
 
 	return gwLRPIPs, nil
+}
+
+// Create OVNJoinSwitch that will be used to connect gateway routers to the distributed router.
+func (bnc *BaseNetworkController) createJoinSwitch(clusterRouter *nbdb.LogicalRouter) error {
+	joinSwitchName := bnc.GetNetworkScopedJoinSwitchName()
+	logicalSwitch := nbdb.LogicalSwitch{
+		Name: joinSwitchName,
+	}
+	if bnc.IsSecondary() {
+		logicalSwitch.ExternalIDs = map[string]string{
+			types.NetworkExternalID:  bnc.GetNetworkName(),
+			types.TopologyExternalID: bnc.TopologyType(),
+		}
+	}
+
+	// nothing is updated here, so no reason to pass fields
+	err := libovsdbops.CreateOrUpdateLogicalSwitch(bnc.nbClient, &logicalSwitch)
+	if err != nil {
+		return fmt.Errorf("failed to create logical switch %+v: %v", logicalSwitch, err)
+	}
+
+	// Connect the distributed router to OVNJoinSwitch.
+	drSwitchPort := types.JoinSwitchToGWRouterPrefix + clusterRouter.Name
+	drRouterPort := types.GWRouterToJoinSwitchPrefix + clusterRouter.Name
+
+	gwLRPMAC := util.IPAddrToHWAddr(bnc.ovnClusterLRPToJoinIfAddrs[0].IP)
+	gwLRPNetworks := []string{}
+	for _, gwLRPIfAddr := range bnc.ovnClusterLRPToJoinIfAddrs {
+		gwLRPNetworks = append(gwLRPNetworks, gwLRPIfAddr.String())
+	}
+	logicalRouterPort := nbdb.LogicalRouterPort{
+		Name:     drRouterPort,
+		MAC:      gwLRPMAC.String(),
+		Networks: gwLRPNetworks,
+	}
+	if bnc.IsSecondary() {
+		logicalRouterPort.ExternalIDs = map[string]string{
+			types.NetworkExternalID:  bnc.GetNetworkName(),
+			types.TopologyExternalID: bnc.TopologyType(),
+		}
+	}
+
+	err = libovsdbops.CreateOrUpdateLogicalRouterPort(bnc.nbClient, clusterRouter,
+		&logicalRouterPort, nil, &logicalRouterPort.MAC, &logicalRouterPort.Networks)
+	if err != nil {
+		return fmt.Errorf("failed to add logical router port %+v on router %s: %v", logicalRouterPort, clusterRouter.Name, err)
+	}
+
+	// Create OVNJoinSwitch that will be used to connect gateway routers to the
+	// distributed router and connect it to said dsitributed router.
+	logicalSwitchPort := nbdb.LogicalSwitchPort{
+		Name: drSwitchPort,
+		Type: "router",
+		Options: map[string]string{
+			"router-port": drRouterPort,
+		},
+		Addresses: []string{"router"},
+	}
+	if bnc.IsSecondary() {
+		logicalSwitchPort.ExternalIDs = map[string]string{
+			types.NetworkExternalID:  bnc.GetNetworkName(),
+			types.TopologyExternalID: bnc.TopologyType(),
+		}
+	}
+
+	sw := nbdb.LogicalSwitch{Name: joinSwitchName}
+	err = libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitch(bnc.nbClient, &sw, &logicalSwitchPort)
+	if err != nil {
+		return fmt.Errorf("failed to create logical switch port %+v and switch %s: %v", logicalSwitchPort, joinSwitchName, err)
+	}
+
+	return nil
 }
 
 // syncNodeClusterRouterPort ensures a node's LS to the cluster router's LRP is created.

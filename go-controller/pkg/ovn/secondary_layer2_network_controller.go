@@ -299,6 +299,10 @@ func (oc *SecondaryLayer2NetworkController) Start(ctx context.Context) error {
 		klog.Infof("Starting controller for secondary network %s took %v", oc.GetNetworkName(), time.Since(start))
 	}()
 
+	if err := oc.BaseNetworkController.init(); err != nil {
+		return err
+	}
+
 	if err := oc.Init(); err != nil {
 		return err
 	}
