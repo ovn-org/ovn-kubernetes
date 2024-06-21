@@ -338,6 +338,7 @@ func (oc *SecondaryLayer3NetworkController) newRetryFramework(
 // Start starts the secondary layer3 controller, handles all events and creates all needed logical entities
 func (oc *SecondaryLayer3NetworkController) Start(ctx context.Context) error {
 	klog.Infof("Start secondary %s network controller of network %s", oc.TopologyType(), oc.GetNetworkName())
+
 	if err := oc.Init(ctx); err != nil {
 		return err
 	}
@@ -454,8 +455,22 @@ func (oc *SecondaryLayer3NetworkController) WatchNodes() error {
 }
 
 func (oc *SecondaryLayer3NetworkController) Init(ctx context.Context) error {
-	_, err := oc.createOvnClusterRouter()
-	return err
+	if err := oc.gatherJoinSwitchIPs(); err != nil {
+		return fmt.Errorf("failed to gather join switch IPs for network %s: %v", oc.GetNetworkName(), err)
+	}
+
+	clusterRouter, err := oc.createOvnClusterRouter()
+	if err != nil {
+		return fmt.Errorf("failed to create OVN cluster router for network %q: %v", oc.GetNetworkName(), err)
+	}
+
+	// Only configure join switch and GR for user defined primary networks.
+	if util.IsNetworkSegmentationSupportEnabled() && oc.IsPrimaryNetwork() {
+		if err := oc.createJoinSwitch(clusterRouter); err != nil {
+			return fmt.Errorf("failed to create join switch for network %q: %v", oc.GetNetworkName(), err)
+		}
+	}
+	return nil
 }
 
 func (oc *SecondaryLayer3NetworkController) addUpdateLocalNodeEvent(node *kapi.Node, nSyncs *nodeSyncs) error {
@@ -648,5 +663,17 @@ func (oc *SecondaryLayer3NetworkController) syncNodes(nodes []interface{}) error
 		}
 	}
 
+	return nil
+}
+
+func (oc *SecondaryLayer3NetworkController) gatherJoinSwitchIPs() error {
+	// Allocate IPs for logical router port prefixed with
+	// `GwRouterToJoinSwitchPrefix` for the network managed by this controller.
+	// This should always allocate the first IPs in the join switch subnets.
+	gwLRPIfAddrs, err := oc.getOVNClusterRouterPortToJoinSwitchIfAddrs()
+	if err != nil {
+		return fmt.Errorf("failed to allocate join switch IP for network %s: %v", oc.GetNetworkName(), err)
+	}
+	oc.ovnClusterLRPToJoinIfAddrs = gwLRPIfAddrs
 	return nil
 }
