@@ -531,6 +531,13 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *kapi.Pod, nadName
 	// rescheduled.
 	lsp.Options["requested-chassis"] = pod.Spec.NodeName
 
+	// let's calculate if this is a primary network and pass that information
+	// while determining the podAnnotations
+	isPrimaryNetwork, err := bnc.isPrimaryNetwork(pod)
+	if err != nil {
+		return nil, nil, nil, false, err
+	}
+
 	// Although we have different code to allocate the pod annotation for the
 	// default network and secondary networks, at the time of this writing they
 	// are functionally equivalent and the only reason to keep them separated is
@@ -539,9 +546,9 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *kapi.Pod, nadName
 	// functionally equivalent going forward.
 	var annotationUpdated bool
 	if bnc.IsSecondary() {
-		podAnnotation, annotationUpdated, err = bnc.allocatePodAnnotationForSecondaryNetwork(pod, existingLSP, nadName, network)
+		podAnnotation, annotationUpdated, err = bnc.allocatePodAnnotationForSecondaryNetwork(pod, existingLSP, nadName, network, isPrimaryNetwork)
 	} else {
-		podAnnotation, annotationUpdated, err = bnc.allocatePodAnnotation(pod, existingLSP, podDesc, nadName, network)
+		podAnnotation, annotationUpdated, err = bnc.allocatePodAnnotation(pod, existingLSP, podDesc, nadName, network, isPrimaryNetwork)
 	}
 
 	if err != nil {
@@ -755,7 +762,7 @@ func calculateStaticMAC(podDesc string, mac string) (net.HardwareAddr, error) {
 }
 
 // allocatePodAnnotation and update the corresponding pod annotation.
-func (bnc *BaseNetworkController) allocatePodAnnotation(pod *kapi.Pod, existingLSP *nbdb.LogicalSwitchPort, podDesc, nadName string, network *nadapi.NetworkSelectionElement) (*util.PodAnnotation, bool, error) {
+func (bnc *BaseNetworkController) allocatePodAnnotation(pod *kapi.Pod, existingLSP *nbdb.LogicalSwitchPort, podDesc, nadName string, network *nadapi.NetworkSelectionElement, isPrimaryNetwork bool) (*util.PodAnnotation, bool, error) {
 	var releaseIPs bool
 	var podMac net.HardwareAddr
 	var podIfAddrs []*net.IPNet
@@ -864,8 +871,9 @@ func (bnc *BaseNetworkController) allocatePodAnnotation(pod *kapi.Pod, existingL
 		}
 	}
 	podAnnotation = &util.PodAnnotation{
-		IPs: podIfAddrs,
-		MAC: podMac,
+		IPs:     podIfAddrs,
+		MAC:     podMac,
+		Primary: isPrimaryNetwork,
 	}
 	var nodeSubnets []*net.IPNet
 	if nodeSubnets = bnc.lsManager.GetSwitchSubnets(switchName); nodeSubnets == nil && bnc.doesNetworkRequireIPAM() {
@@ -893,7 +901,8 @@ func (bnc *BaseNetworkController) allocatePodAnnotation(pod *kapi.Pod, existingL
 
 // allocatePodAnnotationForSecondaryNetwork and update the corresponding pod
 // annotation.
-func (bnc *BaseNetworkController) allocatePodAnnotationForSecondaryNetwork(pod *kapi.Pod, lsp *nbdb.LogicalSwitchPort, nadName string, network *nadapi.NetworkSelectionElement) (*util.PodAnnotation, bool, error) {
+func (bnc *BaseNetworkController) allocatePodAnnotationForSecondaryNetwork(pod *kapi.Pod, lsp *nbdb.LogicalSwitchPort,
+	nadName string, network *nadapi.NetworkSelectionElement, isPrimaryNetwork bool) (*util.PodAnnotation, bool, error) {
 	switchName, err := bnc.getExpectedSwitchName(pod)
 	if err != nil {
 		return nil, false, err
@@ -940,6 +949,7 @@ func (bnc *BaseNetworkController) allocatePodAnnotationForSecondaryNetwork(pod *
 		pod,
 		network,
 		reallocate,
+		isPrimaryNetwork,
 	)
 
 	if err != nil {

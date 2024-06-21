@@ -31,6 +31,11 @@ func TestMarshalPodAnnotation(t *testing.T) {
 			expectedOutput: map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":null,"mac_address":"","primary":false}}`},
 		},
 		{
+			desc:           "PodAnnotation instance when primary is set to true",
+			inpPodAnnot:    PodAnnotation{Primary: true},
+			expectedOutput: map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":null,"mac_address":"","primary":true}}`},
+		},
+		{
 			desc: "single IP assigned to pod with MAC, Gateway, Routes NOT SPECIFIED",
 			inpPodAnnot: PodAnnotation{
 				IPs: []*net.IPNet{ovntest.MustParseIPNet("192.168.0.5/24")},

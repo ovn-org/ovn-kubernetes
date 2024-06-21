@@ -56,7 +56,7 @@ func (allocator *PodAnnotationAllocator) AllocatePodAnnotation(
 	ipAllocator subnet.NamedAllocator,
 	pod *v1.Pod,
 	network *nadapi.NetworkSelectionElement,
-	reallocateIP bool) (
+	reallocateIP, isPrimaryNetwork bool) (
 	*v1.Pod,
 	*util.PodAnnotation,
 	error) {
@@ -70,6 +70,7 @@ func (allocator *PodAnnotationAllocator) AllocatePodAnnotation(
 		network,
 		allocator.ipamClaimsReconciler,
 		reallocateIP,
+		isPrimaryNetwork,
 	)
 }
 
@@ -81,7 +82,7 @@ func allocatePodAnnotation(
 	pod *v1.Pod,
 	network *nadapi.NetworkSelectionElement,
 	claimsReconciler persistentips.PersistentAllocations,
-	reallocateIP bool) (
+	reallocateIP, isPrimaryNetwork bool) (
 	updatedPod *v1.Pod,
 	podAnnotation *util.PodAnnotation,
 	err error) {
@@ -98,7 +99,9 @@ func allocatePodAnnotation(
 			pod,
 			network,
 			claimsReconciler,
-			reallocateIP)
+			reallocateIP,
+			isPrimaryNetwork,
+		)
 		return pod, rollback, err
 	}
 
@@ -130,7 +133,7 @@ func (allocator *PodAnnotationAllocator) AllocatePodAnnotationWithTunnelID(
 	idAllocator id.NamedAllocator,
 	pod *v1.Pod,
 	network *nadapi.NetworkSelectionElement,
-	reallocateIP bool) (
+	reallocateIP, isPrimaryNetwork bool) (
 	*v1.Pod,
 	*util.PodAnnotation,
 	error) {
@@ -145,6 +148,7 @@ func (allocator *PodAnnotationAllocator) AllocatePodAnnotationWithTunnelID(
 		network,
 		allocator.ipamClaimsReconciler,
 		reallocateIP,
+		isPrimaryNetwork,
 	)
 }
 
@@ -157,7 +161,7 @@ func allocatePodAnnotationWithTunnelID(
 	pod *v1.Pod,
 	network *nadapi.NetworkSelectionElement,
 	claimsReconciler persistentips.PersistentAllocations,
-	reallocateIP bool) (
+	reallocateIP, isPrimaryNetwork bool) (
 	updatedPod *v1.Pod,
 	podAnnotation *util.PodAnnotation,
 	err error) {
@@ -171,7 +175,9 @@ func allocatePodAnnotationWithTunnelID(
 			pod,
 			network,
 			claimsReconciler,
-			reallocateIP)
+			reallocateIP,
+			isPrimaryNetwork,
+		)
 		return pod, rollback, err
 	}
 
@@ -213,7 +219,7 @@ func allocatePodAnnotationWithRollback(
 	pod *v1.Pod,
 	network *nadapi.NetworkSelectionElement,
 	claimsReconciler persistentips.PersistentAllocations,
-	reallocateIP bool) (
+	reallocateIP, isPrimaryNetwork bool) (
 	updatedPod *v1.Pod,
 	podAnnotation *util.PodAnnotation,
 	rollback func(),
@@ -265,6 +271,7 @@ func allocatePodAnnotationWithRollback(
 		IPs:      podAnnotation.IPs,
 		MAC:      podAnnotation.MAC,
 		TunnelID: podAnnotation.TunnelID,
+		Primary:  isPrimaryNetwork,
 	}
 
 	hasIDAllocation := util.DoesNetworkRequireTunnelIDs(netInfo)

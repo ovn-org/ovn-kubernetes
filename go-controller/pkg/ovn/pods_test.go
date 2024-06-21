@@ -335,7 +335,7 @@ func (p testPod) getAnnotationsJson() string {
 			Gateway:  nodeGWIP,
 			Gateways: nodeGWIPs,
 			Routes:   routes,
-			Primary:  false,
+			Primary:  true, // all tests here run with network-segmentation disabled
 		},
 	}
 

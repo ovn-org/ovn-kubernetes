@@ -115,6 +115,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 		ipam                      bool
 		idAllocation              bool
 		persistentIPAllocation    bool
+		isPrimaryNetwork          bool
 		podAnnotation             *util.PodAnnotation
 		invalidNetworkAnnotation  bool
 		wantUpdatedPod            bool
@@ -138,10 +139,12 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 			// annotated with a random MAC, we expect no further changes
 			name: "expect no updates, has mac, no IPAM",
 			podAnnotation: &util.PodAnnotation{
-				MAC: randomMac,
+				MAC:     randomMac,
+				Primary: true,
 			},
 			wantPodAnnotation: &util.PodAnnotation{
-				MAC: randomMac,
+				MAC:     randomMac,
+				Primary: true,
 			},
 		},
 		{
@@ -158,9 +161,11 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 			},
 			wantUpdatedPod: true,
 			wantPodAnnotation: &util.PodAnnotation{
-				IPs: ovntest.MustParseIPNets("192.168.0.4/24"),
-				MAC: util.IPAddrToHWAddr(ovntest.MustParseIPNets("192.168.0.4/24")[0].IP),
+				IPs:     ovntest.MustParseIPNets("192.168.0.4/24"),
+				MAC:     util.IPAddrToHWAddr(ovntest.MustParseIPNets("192.168.0.4/24")[0].IP),
+				Primary: true,
 			},
+			isPrimaryNetwork: true,
 		},
 		{
 			// on secondary L2 network with no IPAM, honor static IP and gateway
@@ -180,7 +185,9 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 				IPs:      ovntest.MustParseIPNets("192.168.0.4/24"),
 				MAC:      util.IPAddrToHWAddr(ovntest.MustParseIPNets("192.168.0.4/24")[0].IP),
 				Gateways: ovntest.MustParseIPs("192.168.0.1"),
+				Primary:  false,
 			},
+			isPrimaryNetwork: false,
 		},
 		{
 			// on networks with IPAM, expect error if static IP request present
@@ -529,9 +536,11 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 			wantPodAnnotation: &util.PodAnnotation{
 				MAC:      randomMac,
 				TunnelID: 100,
+				Primary:  true,
 			},
 			wantUpdatedPod:          true,
 			wantRelasedIDOnRollback: true,
+			isPrimaryNetwork:        true,
 		},
 		{
 			// on networks with ID allocation, already allocated, expect
@@ -627,6 +636,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 					NADName:            nadName,
 					Subnets:            subnets,
 					AllowPersistentIPs: tt.persistentIPAllocation,
+					PrimaryNetwork:     tt.isPrimaryNetwork,
 				})
 				if err != nil {
 					t.Fatalf("failed to create NetInfo: %v", err)
@@ -673,6 +683,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 				network,
 				claimsReconciler,
 				tt.args.reallocate,
+				tt.isPrimaryNetwork,
 			)
 
 			if tt.args.ipAllocator != nil {
@@ -713,7 +724,6 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 				g.Expect(podAnnotation.MAC[0]&2).To(gomega.BeEquivalentTo(2), "Expected local MAC")
 				return
 			}
-
 			g.Expect(podAnnotation).To(gomega.Equal(tt.wantPodAnnotation))
 
 			if tt.wantUpdatedPod {
