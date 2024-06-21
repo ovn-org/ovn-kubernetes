@@ -363,6 +363,84 @@ var _ = Describe("Network Segmentation", func() {
 				),
 			),
 		)
+
+		Context("an HTTP service which is deployed outside the Kubernetes cluster", func() {
+			const (
+				externalContainerName = "ovn-k-egress-test-helper"
+			)
+			var externalIpv4 string
+			BeforeEach(func() {
+				externalIpv4, _ = createClusterExternalContainer(
+					externalContainerName,
+					"registry.k8s.io/e2e-test-images/agnhost:2.45",
+					runExternalContainerCmd(),
+					httpServerContainerCmd(port),
+				)
+
+				DeferCleanup(func() {
+					deleteClusterExternalContainer(externalContainerName)
+				})
+			})
+
+			XDescribeTable(
+				"can be accessed to from the pods running in the Kubernetes cluster",
+				func(netConfigParams networkAttachmentConfigParams, clientPodConfig podConfiguration) {
+					netConfig := newNetworkAttachmentConfig(netConfigParams)
+
+					netConfig.namespace = f.Namespace.Name
+					clientPodConfig.namespace = f.Namespace.Name
+
+					By("creating the attachment configuration")
+					_, err := nadClient.NetworkAttachmentDefinitions(f.Namespace.Name).Create(
+						context.Background(),
+						generateNAD(netConfig),
+						metav1.CreateOptions{},
+					)
+					Expect(err).NotTo(HaveOccurred())
+
+					By("instantiating the client pod")
+					clientPod, err := cs.CoreV1().Pods(clientPodConfig.namespace).Create(
+						context.Background(),
+						generatePodSpec(clientPodConfig),
+						metav1.CreateOptions{},
+					)
+					Expect(err).NotTo(HaveOccurred())
+					Expect(clientPod).NotTo(BeNil())
+
+					By("asserting the client pod reaches the `Ready` state")
+					Eventually(func() v1.PodPhase {
+						updatedPod, err := cs.CoreV1().Pods(f.Namespace.Name).Get(context.Background(), clientPod.GetName(), metav1.GetOptions{})
+						if err != nil {
+							return v1.PodFailed
+						}
+						return updatedPod.Status.Phase
+					}, 2*time.Minute, 6*time.Second).Should(Equal(v1.PodRunning))
+
+					By("asserting the *client* pod can contact the server located outside the cluster")
+					Eventually(func() error {
+						return connectToServer(clientPodConfig, externalIpv4, port)
+					}, 2*time.Minute, 6*time.Second).Should(Succeed())
+				},
+				Entry("by one pod with a single IPv4 address over a layer2 network",
+					networkAttachmentConfigParams{
+						name:     userDefinedNetworkName,
+						topology: "layer2",
+						cidr:     userDefinedNetworkIPv4Subnet,
+						role:     "primary",
+					},
+					*podConfig("client-pod"),
+				),
+				Entry("by one pod with a single IPv4 address over a layer3 network",
+					networkAttachmentConfigParams{
+						name:     userDefinedNetworkName,
+						topology: "layer3",
+						cidr:     userDefinedNetworkIPv4Subnet,
+						role:     "primary",
+					},
+					*podConfig("client-pod"),
+				),
+			)
+		})
 	})
 })
 
@@ -452,4 +530,8 @@ func runUDNPod(cs clientset.Interface, namespace string, serverPodConfig podConf
 		return updatedPod.Status.Phase
 	}, 2*time.Minute, 6*time.Second).Should(Equal(v1.PodRunning))
 	return updatedPod
+}
+
+func runExternalContainerCmd() []string {
+	return []string{"--network", "kind"}
 }
