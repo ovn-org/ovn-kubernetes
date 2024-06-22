@@ -1,25 +1,142 @@
 # NetworkPolicy
 
+## Introduction
+
+Network Policy is a new resource, which helps enforce the network isolation of pods. By default, the network traffic from and to K8s pods are not restricted in any way: NetworkPolicy resources allow us to enable and/or disable specific dataflows at a pod level.
+
+## Motivation
+
+The goal behind this feature is to create application or namespace scope policies that regulate intertenant communication. 
+
+This feature is intended to allow application developers to secure their applications and namespaces using namespace scoped Network Policies.
+
+This feature is not intended for Network Administrators, who should refer to AdminNetworkPolicies for higher level cluster scoped policies.
+
+## How to enable this feature on an OVN-Kubernetes cluster?
+
+Feature is always enabled and triggered upon creation of NetworkPolicy CRD's.
+
+## Workflow Description
+
+### Anatomy of a NetworkPolicy
+
 [Kubernetes NetworkPolicy documentation](https://kubernetes.io/docs/concepts/services-networking/network-policies)
 
 [Kubernetes NetworkPolicy API reference](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.19/#networkpolicy-v1-networking-k8s-io)
 
-By default, the network traffic from and to K8s pods is not restricted in any way. Using NetworkPolicy is a way to enforce network isolation of selected pods. When a pod is selected by a NetworkPolicy allowed traffic is specified by the `Ingress` and `Egress` sections.  
+```
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: sample-network-policy
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+      matchLabels:
+        project: myproject
+  egress:
+  - to:
+    - namespaceSelector:
+      matchLabels:
+        project: myproject
 
-Each NetworkPolicy object consists of four sections:
+```
 
-1. `podSelector`: a label selector that determines which pods the NetworkPolicy applies to
+Each NetworkPolicy object (example above) consists of four sections:
+
+1. `podSelector`: a mandatory label selector that determines which pods the NetworkPolicy applies to
 2. `policyTypes`: determines which policy types are included, if none are selected then `Ingress` will always be set and `Egress` will be set if any `Egress` rules are applied 
-3. `Ingress rules`: determines the sources that pods selected by the ingress rule can receive traffic from 
-4. `Egress rules`: determines the sinks that pods selected by the egress rule can send trafic to 
+3. `Ingress rules`: determines the sources that pods selected by the ingress rule can receive traffic from. If no ingress rules are specified and the policyType includes `Ingress` the NetworkPolicy blocks all ingress traffic.
+4. `Egress rules`: determines the sinks that pods selected by the egress rule can send trafic to. If no egress rules are specified and the policyType is includes `Egress` the NetworkPolicy blocks all egress traffic.
 
-# NetworkPolicy features 
+When a pod is selected by a NetworkPolicy allowed traffic is specified by the `Ingress` and `Egress` sections. 
 
-These are described in order and are additive 
 
-## **Unicast default-deny**
+#### **Applying the network policy to specific pods using `spec.podSelector`**
 
-When a pod is selected by one or more NetworkPolicies, the `policyTypes` is set to both `Ingress` and `Egress`, and if no rules are specified it becomes isolated and all unicast ingress and egress traffic is blocked for pods in the same namespce as the NetworkPolicy. 
+In some cases only certain pods in a Namespace may need to be selected by a NetworkPolicy. To handle this feature the `spec.podSelector` field can be used as follows 
+
+The `spec.podSelector` is a label selector, which can be either a list of labels (`app=nginx`) or a match expression. Only pods in the same Namespace as the NetworkPolicy can be selected by it. The end result is a list of zero or more pods to which this NetworkPolicy's `Ingress` and `Egress` sections will be applied.
+
+#### **Applying Ingress and Egress Rules using `spec.Ingress` and `spec.Egress`** 
+
+In some cases we need to explicilty define what sources and sinks a pod is allowed to communicate with, to handle this feature the `spec.Ingress` and `spec.Egress` fields of a NeworkPolicy can be used 
+
+These sections contain a list of ingress or egress "peers" (the `from` section for `ingress` and the `to` section for `egress`) and a list of IP ports/protocols (the `ports` section) to or from which traffic should be allowed. Each list element of each section is logically OR-ed with other elements.
+
+Each `from`/`to` section can contain the following selectors 
+
+1. `namespaceSelector`: a label selector matching all pods in zero or more Namespaces
+2. `podSelector`: a label selector matching zero or more pods in the same Namespace as the NetworkPolicy
+3. `namespaceSelector` and `podSelector`: when both are present in an element, selects only pods matching the `podSelector` from Namespaces matching the `namespaceSelector`
+4. `ipBlock`: an IP network in CIDR notation that can be either internal or external, with optional exceptions
+
+#### `spec.ingress`
+
+Rules defined in `spec.Ingress` can match on two main sections, 1.`spec.Ingress.from` and 2.`spec.Ingress.ports`
+
+1. `spec.Ingress.from` 
+
+    Specifies FROM what sources a network policy will allow traffic 
+
+    It contains three selectors which are described further below 
+
+    - `spec.Ingress.from.ipBlock` 
+        
+        The ip addresses from which to allow traffic, contains fields `spec.Ingress.from.ipBlock.cidr` to specify which ip address are allowed and 
+        `spec.Ingress.from.ipBlock.except` to specifiy which address's are not allowed 
+    
+      - `spec.Ingress.from.namespaceSelector` 
+
+          The Namespaces from which to allow traffic, uses matchLabels to select much like the [`spec.Podselector` field](#applying-the-network-policy-to-specific-pods-using-specpodselector)
+    
+    - `spec.Ingress.from.podSelector` 
+
+        The pods from which to allow traffic, matches the same as described [above](#applying-the-network-policy-to-specific-pods-using-specpodselector)
+    
+2. `spec.Ingress.ports`
+    
+    The ports that the `Ingress` rule matches on, contains fields `spec.Ingress.ports.port` which can be either numerical or named, if set all port names and numbers will be matched, and `spec.Ingress.ports.protocol` matches to the protocol of the provided port 
+
+
+
+#### `spec.egress` 
+
+Rules defined in `spec.Egress` can match on two main sections, 1.`spec.Egress.to` and 2.`spec.Egress.ports`
+
+1. `spec.Egress.to` 
+
+    specifies TO what destinations a network policy will allow a pod to send traffic 
+
+    It contains three selectors which are described further below 
+
+    - `spec.Egress.to.ipBlock` 
+        
+        The ip addresses which a pod can send traffic to, contains fields `spec.Egress.from.ipBlock.cidr` to specify which ip address are allowed and 
+        `spec.Egress.from.ipBlock.except` to specifiy which address's are not allowed
+    
+    - `spec.Egress.to.namespaceSelector` 
+
+        The Namespaces allowed to receive traffic, uses matchLabels to select much like the [`spec.Podselector` field](#applying-the-network-policy-to-specific-pods-using-specpodselector)
+    
+    - `spec.Egress.to.podSelector` 
+
+        The pods allowed to receive traffic, uses matchLabels to select much like described [`spec.Podselector` field](#applying-the-network-policy-to-specific-pods-using-specpodselector)
+    
+2. `spec.Egress.ports`
+
+    The ports that the `Egress` rule matches on, contains fields `spec.Egress.ports.port` which can be either numerical or named, if set all port names and numbers will be matched, and `spec.Egress.ports.protocol` matches to the protocol of the provided port 
+
+### Sample NetworkPolicy Configurations
+
+#### **Unicast default-deny**
+
+When a pod is selected by one or more NetworkPolicies, the `policyTypes` is set to both `Ingress` and `Egress`, and no rules are specified, it becomes isolated. This means that for the selected pod, all unicast ingress and egress traffic is blocked 
 
 ```
 apiVersion: networking.k8s.io/v1
@@ -33,7 +150,9 @@ spec:
   - Egress
 ```
 
-If only ingress traffic to all pods in a namespace needs to be blocked the following can be used 
+#### **Ingress default-deny**
+
+When the podSelector field is wildcarded, the `policyTypes` is set to `Ingress`, and no ingress rules are specified, all ingress traffic to the namespace is blocked.
 
 ```
 apiVersion: networking.k8s.io/v1
@@ -46,7 +165,9 @@ spec:
   - Ingress
 ```
 
-And finally if only Egress traffic from all pods in a Namespace needs to be blocked 
+#### **Egress default-deny**
+
+When the podSelector field is wildcarded, the `policyTypes` is set to `Egress`, and no egress rules are specified, all egress traffic to the namespace is blocked.
 
 ```
 apiVersion: networking.k8s.io/v1
@@ -58,7 +179,72 @@ spec:
   policyTypes:
   - Egress
 ```
-**OVN-Implementation:**
+
+#### **Selector Based Denial**
+
+We can extend the default denial behavior by using the `podSelector` field to selectively block all traffic from/to certain pods.
+
+```
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+spec:
+  podSelector:
+    matchLabels:
+          app: demo
+  policyTypes:
+  - Ingress
+  - Egress
+```
+
+#### **Selector Based filtering**
+
+The `from` selector for an ingress and the `to` selector for an egress can be used to select particular pods or namespaces that will be allowed as destinations or sources of data, as in the example below, which allows all incoming traffic from the namespace db_app into the application namespace.
+
+```
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-db-source
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - namespaceSelector:
+          matchLabels:
+          name: db_app
+```
+
+
+#### **CIDR Based Matching**
+
+The `from` selector for an ingress and the `to` selector for an egress can also be used to specify specific CIDR ranges or `ip blocks`, allowing developers to create granular ACLs. In the example below, we allow all source connections from the 10.16.3.0/24 subnet that are communicating on the mySQL port tcp/3306
+```
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-db-source
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - ipBlock:
+        cidr: 10.16.3.0/24
+        except:
+        - 10.16.3.1
+    ports:
+    - protocol: tcp
+      port: 3306
+```
+
+## Implementation Details
+ 
+### OVN-Implementation:
 
 Every new NetworkPolicy creates a port group named `FOO_bar` where `FOO` is the policy's Namespace and `bar` is the policy's name.  All pods that the policy's `podSelector` selects are added to the port group.
 
@@ -116,97 +302,6 @@ priority            : 1001
 severity            : []
 
 ```
-
-## **Applying the network policy to specific pods using `spec.podSelector`**
-
-In some cases only certain pods in a Namespace may need to be selected by a NetworkPolicy. To handle this feature the `spec.podSelector` field can be used as follows 
-
-The `spec.podSelector` is a label selector, which can be either a list of labels (`app=nginx`) or a match expression. Only pods in the same Namespace as the NetworkPolicy can be selected by it. The end result is a list of zero or more pods to which this NetworkPolicy's `Ingress` and `Egress` sections will be applied.
-
-For example, to block all traffic to and from a pod labeled with `app=demo` the following can be used 
-
-```
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: default-deny-all
-spec:
-  podSelector:
-    matchLabels:
-          app: demo
-  policyTypes:
-  - Ingress
-  - Egress
-```
-
-## **Applying Ingress and Egress Rules using `spec.Ingress` and `spec.Egress`** 
-
-In some cases we need to explicilty define what sources and sinks a pod is allowed to communicate with, to handle this feature the `spec.Ingress` and `spec.Egress` fields of a NeworkPolicy can be used 
-
-These sections contain a list of ingress or egress "peers" (the `from` section for `ingress` and the `to` section for `egress`) and a list of IP ports/protocols (the `ports` section) to or from which traffic should be allowed. Each list element of each section is logically OR-ed with other elements.
-
-Each `from`/`to` section can contain the following selectors 
-
-1. `namespaceSelector`: a label selector matching all pods in zero or more Namespaces
-2. `podSelector`: a label selector matching zero or more pods in the same Namespace as the NetworkPolicy
-3. `namespaceSelector` and `podSelector`: when both are present in an element, selects only pods matching the `podSelector` from Namespaces matching the `namespaceSelector`
-4. `ipBlock`: an IP network in CIDR notation that can be either internal or external, with optional exceptions
-
-### `spec.ingress`
-
-Rules defined in `spec.Ingress` can match on two main sections, 1.`spec.Ingress.from` and 2.`spec.Ingress.ports`
-
-1. `spec.Ingress.from` 
-
-    Specifies FROM what sources a network policy will allow traffic 
-
-    It contains three selectors which are described further below 
-
-    - `spec.Ingress.from.ipBlock` 
-        
-        The ip addresses from which to allow traffic, contains fields `spec.Ingress.from.ipBlock.cidr` to specify which ip address are allowed and 
-        `spec.Ingress.from.ipBlock.except` to specifiy which address's are not allowed 
-    
-      - `spec.Ingress.from.namespaceSelector` 
-
-          The Namespaces from which to allow traffic, uses matchLabels to select much like the [`spec.Podselector` field](#applying-the-network-policy-to-specific-pods-using-specpodselector)
-    
-    - `spec.Ingress.from.podSelector` 
-
-        The pods from which to allow traffic, matches the same as described [above](#applying-the-network-policy-to-specific-pods-using-specpodselector)
-    
-2. `spec.Ingress.ports`
-    
-    The ports that the `Ingress` rule matches on, contains fields `spec.Ingress.ports.port` which can be either numerical or named, if set all port names and numbers will be matched, and `spec.Ingress.ports.protocol` matches to the protocol of the provided port 
-
-
-
-### `spec.egress` 
-
-Rules defined in `spec.Egress` can match on two main sections, 1.`spec.Egress.to` and 2.`spec.Egress.ports`
-
-1. `spec.Egress.to` 
-
-    specifies TO what destinations a network policy will allow a pod to send traffic 
-
-    It contains three selectors which are described further below 
-
-    - `spec.Egress.to.ipBlock` 
-        
-        The ip addresses which a pod can send traffic to, contains fields `spec.Egress.from.ipBlock.cidr` to specify which ip address are allowed and 
-        `spec.Egress.from.ipBlock.except` to specifiy which address's are not allowed
-    
-    - `spec.Egress.to.namespaceSelector` 
-
-        The Namespaces allowed to receive traffic, uses matchLabels to select much like the [`spec.Podselector` field](#applying-the-network-policy-to-specific-pods-using-specpodselector)
-    
-    - `spec.Egress.to.podSelector` 
-
-        The pods allowed to receive traffic, uses matchLabels to select much like described [`spec.Podselector` field](#applying-the-network-policy-to-specific-pods-using-specpodselector)
-    
-2. `spec.Egress.ports`
-
-    The ports that the `Egress` rule matches on, contains fields `spec.Egress.ports.port` which can be either numerical or named, if set all port names and numbers will be matched, and `spec.Egress.ports.protocol` matches to the protocol of the provided port 
 
 ### `spec.ingress` and `spec.egress` OVN implementation 
 
@@ -361,7 +456,25 @@ Rules defined in `spec.Egress` can match on two main sections, 1.`spec.Egress.to
 
   ```
 
-TODO: Add more examples(good for first PRs), specifically replicate above scenario by matching on the pod's network(`ip_block`) rather than the pod itself 
+## Troubleshooting
+
+## Best Practices
+
+NetworkPolicies work as whitelists not blacklists, so it is not the best tool for specifically denying specific dataflows. 
+
+## Future Items
+
+## Known Limitations
+
+The whitelist nature of network policies means that you cannot specifically deny certain traffic
+
+## References
+
+[Kubernetes NetworkPolicy documentation](https://kubernetes.io/docs/concepts/services-networking/network-policies)
+
+[Kubernetes NetworkPolicy API reference](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.19/#networkpolicy-v1-networking-k8s-io)
+
+
 
 
 
