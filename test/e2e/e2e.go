@@ -248,7 +248,7 @@ func getPodGWRoute(f *framework.Framework, nodeName string, podName string) net.
 	if err != nil {
 		framework.Failf("Error trying to get the pod object")
 	}
-	annotation, err := unmarshalPodAnnotation(podGet.Annotations)
+	annotation, err := unmarshalPodAnnotation(podGet.Annotations, "default")
 	if err != nil {
 		framework.Failf("Error trying to unmarshal pod annotations")
 	}

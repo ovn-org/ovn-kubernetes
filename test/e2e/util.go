@@ -69,6 +69,8 @@ type PodAnnotation struct {
 	Gateways []net.IP
 	// Routes are additional routes to add to the pod's network namespace
 	Routes []PodRoute
+	// Primary reveals if this network is the primary network of the pod or not
+	Primary bool
 }
 
 // PodRoute describes any routes to be added to the pod's network namespace
@@ -88,6 +90,7 @@ type podAnnotation struct {
 
 	IP      string `json:"ip_address,omitempty"`
 	Gateway string `json:"gateway_ip,omitempty"`
+	Primary bool   `json:"primary"`
 }
 
 // Internal struct used to marshal PodRoute to the pod annotation
@@ -166,7 +169,7 @@ func newAnnotationNotSetError(format string, args ...interface{}) error {
 }
 
 // UnmarshalPodAnnotation returns the default network info from pod.Annotations
-func unmarshalPodAnnotation(annotations map[string]string) (*PodAnnotation, error) {
+func unmarshalPodAnnotation(annotations map[string]string, networkName string) (*PodAnnotation, error) {
 	ovnAnnotation, ok := annotations[podNetworkAnnotation]
 	if !ok {
 		return nil, newAnnotationNotSetError("could not find OVN pod annotation in %v", annotations)
@@ -177,10 +180,10 @@ func unmarshalPodAnnotation(annotations map[string]string) (*PodAnnotation, erro
 		return nil, fmt.Errorf("failed to unmarshal ovn pod annotation %q: %v",
 			ovnAnnotation, err)
 	}
-	tempA := podNetworks["default"]
+	tempA := podNetworks[networkName]
 	a := &tempA
 
-	podAnnotation := &PodAnnotation{}
+	podAnnotation := &PodAnnotation{Primary: a.Primary}
 	var err error
 
 	podAnnotation.MAC, err = net.ParseMAC(a.MAC)
