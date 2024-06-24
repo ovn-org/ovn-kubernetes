@@ -245,6 +245,8 @@ func (bnc *BaseNetworkController) createOvnClusterRouter() (*nbdb.LogicalRouter,
 		return nil, fmt.Errorf("unable to create router control plane protection: %w", err)
 	}
 
+	bnc.defaultCOPPUUID = defaultCOPPUUID
+
 	// Create a single common distributed router for the cluster.
 	logicalRouterName := bnc.GetNetworkScopedClusterRouterName()
 	logicalRouter := nbdb.LogicalRouter{
@@ -255,7 +257,7 @@ func (bnc *BaseNetworkController) createOvnClusterRouter() (*nbdb.LogicalRouter,
 		Options: map[string]string{
 			"always_learn_from_arp_request": "false",
 		},
-		Copp: &defaultCOPPUUID,
+		Copp: &bnc.defaultCOPPUUID,
 	}
 	if bnc.IsSecondary() {
 		logicalRouter.ExternalIDs[types.NetworkExternalID] = bnc.GetNetworkName()
