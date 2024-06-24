@@ -237,6 +237,7 @@ v6-transit-switch-subnet=fd98::/64
 [userdefinednetworks]
 max-networks=40000
 ct-mark-base=3
+vrf-table-base=4
 `
 
 	var newData string
@@ -346,7 +347,7 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(OVNKubernetesFeature.EnablePersistentIPs).To(gomega.BeFalse())
 			gomega.Expect(UserDefinedNetworks.MaxNetworks).To(gomega.Equal(uint(30000)))
 			gomega.Expect(UserDefinedNetworks.ConntrackMarkBase).To(gomega.Equal(uint(0)))
-
+			gomega.Expect(UserDefinedNetworks.VRFTableBase).To(gomega.Equal(uint(256)))
 			for _, a := range []OvnAuthConfig{OvnNorth, OvnSouth} {
 				gomega.Expect(a.Scheme).To(gomega.Equal(OvnDBSchemeUnix))
 				gomega.Expect(a.PrivKey).To(gomega.Equal(""))
@@ -809,6 +810,7 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(ClusterManager.V6TransitSwitchSubnet).To(gomega.Equal("fd96::/64"))
 			gomega.Expect(UserDefinedNetworks.MaxNetworks).To(gomega.Equal(uint(20000)))
 			gomega.Expect(UserDefinedNetworks.ConntrackMarkBase).To(gomega.Equal(uint(6)))
+			gomega.Expect(UserDefinedNetworks.VRFTableBase).To(gomega.Equal(uint(9)))
 
 			return nil
 		}
@@ -883,6 +885,7 @@ var _ = Describe("Config Operations", func() {
 			"-cluster-manager-v6-transit-switch-subnet=fd96::/64",
 			"-max-user-defined-networks=20000",
 			"-user-defined-networks-ct-mark-base=6",
+			"-user-defined-networks-vrf-table-base=9",
 		}
 		err = app.Run(cliArgs)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1315,6 +1318,7 @@ enable-pprof=true
 			gomega.Expect(OVNKubernetesFeature.EgressIPNodeHealthCheckPort).To(gomega.Equal(12345))
 			gomega.Expect(UserDefinedNetworks.MaxNetworks).To(gomega.Equal(uint(5000)))
 			gomega.Expect(UserDefinedNetworks.ConntrackMarkBase).To(gomega.Equal(uint(7)))
+			gomega.Expect(UserDefinedNetworks.VRFTableBase).To(gomega.Equal(uint(10)))
 			return nil
 		}
 		cliArgs := []string{
@@ -1357,6 +1361,7 @@ enable-pprof=true
 			"-egressip-node-healthcheck-port=12345",
 			"-max-user-defined-networks=5000",
 			"-user-defined-networks-ct-mark-base=7",
+			"-user-defined-networks-vrf-table-base=10",
 		}
 		err = app.Run(cliArgs)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
