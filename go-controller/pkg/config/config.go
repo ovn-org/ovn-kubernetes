@@ -200,6 +200,7 @@ var (
 	UserDefinedNetworks = UserDefinedNetworksConfig{
 		MaxNetworks:       30000, // we can only allocate around 65k ct-marks and we need a pair of masquerades addresses so that's around 64k/2
 		ConntrackMarkBase: 0,
+		VRFTableBase:      256, // 0, 253, 254 and 255 are reserved by linux
 	}
 )
 
@@ -533,6 +534,9 @@ type UserDefinedNetworksConfig struct {
 	// ConntrackMarkBase will be the base to calculate the
 	// ct_mark for a user defined network, that's ct_mark=base+network-id
 	ConntrackMarkBase uint `gcfg:"ct-mark-base"`
+	// VRFTableBase will be the base to calculate the
+	// vrf table id for a user defined network, that's table=base+network-id
+	VRFTableBase uint `gcfg:"vrf-table-base"`
 }
 
 // OvnDBScheme describes the OVN database connection transport method
@@ -1437,7 +1441,6 @@ var OVNGatewayFlags = []cli.Flag{
 		Usage:       "Allow the external gateway bridge without an uplink port in local gateway mode",
 		Destination: &cliConfig.Gateway.AllowNoUplink,
 	},
-
 	// Deprecated CLI options
 	&cli.BoolFlag{
 		Name:        "init-gateways",
@@ -1580,6 +1583,12 @@ var UserDefinedNetworksFlags = []cli.Flag{
 		Usage:       "The base to calculate user defined network egress ct-mark based on the allocated network id, default value 0",
 		Value:       UserDefinedNetworks.ConntrackMarkBase,
 		Destination: &cliConfig.UserDefinedNetworks.ConntrackMarkBase,
+	},
+	&cli.UintFlag{
+		Name:        "user-defined-networks-vrf-table-base",
+		Usage:       "The base to calculate user defined network local gateway egress vrf table id based on the allocated network id, default value 256",
+		Value:       UserDefinedNetworks.VRFTableBase,
+		Destination: &cliConfig.UserDefinedNetworks.VRFTableBase,
 	},
 }
 
