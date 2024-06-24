@@ -40,7 +40,6 @@ func (oc *DefaultNetworkController) SetupMaster(existingNodeNames []string) erro
 	if err != nil {
 		return err
 	}
-	oc.defaultCOPPUUID = *(logicalRouter.Copp)
 
 	pgIDs := oc.getClusterPortGroupDbIDs(types.ClusterPortGroupNameBase)
 	pg := &nbdb.PortGroup{
