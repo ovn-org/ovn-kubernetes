@@ -3,7 +3,7 @@ name: ovn-ci
 on:
   merge_group:
   pull_request:
-    branches: [ master ]
+    branches: [ release-1.0 ]
   schedule:
     - cron: '0 */12 * * *'
 
@@ -26,7 +26,7 @@ env:
 
   # This must be a directory
   CI_IMAGE_CACHE: tmp/image_cache/
-  CI_IMAGE_MASTER_TAR: image-master.tar
+  CI_IMAGE_RELEASE_1_0_TAR: image-release-1-0.tar
   CI_IMAGE_PR_TAR: image-pr.tar
   CI_DIST_IMAGES_OUTPUT: dist/images/_output/
 
@@ -54,57 +54,57 @@ jobs:
         working-directory: go-controller
         args: --modules-download-mode=vendor --timeout=15m0s --verbose
 
-  build-master:
-    name: Build-master
+  build-release-1_0:
+    name: Build-release-1.0
     runs-on: ubuntu-latest
     steps:
-    # Create a cache for the built master image
-    - name: Restore master image cache
-      id: image_cache_master
+    # Create a cache for the built release-1.0 image
+    - name: Restore release-1.0 image cache
+      id: image_cache_release_1_0
       uses: actions/cache@v4
       with:
         path: |
           ${{ env.CI_IMAGE_CACHE }}
-        key: ${{ github.run_id }}-image-cache-master
-    # if CI_IMAGE_MASTER_TAR isn't in cache, try pulling it and saving to the cache rather
+        key: ${{ github.run_id }}-image-cache-release-1-0
+    # if CI_IMAGE_RELEASE_1_0_TAR isn't in cache, try pulling it and saving to the cache rather
     # than building, resort back to building if the cache isn't populated and
     # pulling the image fails.
-    - name: Check if master image build is needed
-      id: is_master_image_build_needed
+    - name: Check if release-1.0 image build is needed
+      id: is_release_1_0_image_build_needed
       continue-on-error: false
       run: |
         set -x
-        if [ -f ${CI_IMAGE_CACHE}${CI_IMAGE_MASTER_TAR}.gz ]; then
-            cp ${CI_IMAGE_CACHE}/${CI_IMAGE_MASTER_TAR}.gz ${CI_IMAGE_MASTER_TAR}.gz
-            gunzip ${CI_IMAGE_MASTER_TAR}.gz
-            echo "MASTER_IMAGE_RESTORED_FROM_CACHE=true" >> "$GITHUB_OUTPUT"
-            echo "MASTER_IMAGE_RESTORED=true" >> "$GITHUB_OUTPUT"
+        if [ -f ${CI_IMAGE_CACHE}${CI_IMAGE_RELEASE_1_0_TAR}.gz ]; then
+            cp ${CI_IMAGE_CACHE}/${CI_IMAGE_RELEASE_1_0_TAR}.gz ${CI_IMAGE_RELEASE_1_0_TAR}.gz
+            gunzip ${CI_IMAGE_RELEASE_1_0_TAR}.gz
+            echo "RELEASE_1_0_IMAGE_RESTORED_FROM_CACHE=true" >> "$GITHUB_OUTPUT"
+            echo "RELEASE_1_0_IMAGE_RESTORED=true" >> "$GITHUB_OUTPUT"
             exit 0
         fi
 
-        if docker pull ghcr.io/ovn-org/ovn-kubernetes/ovn-kube-fedora:master; then
-            docker tag ghcr.io/ovn-org/ovn-kubernetes/ovn-kube-fedora:master ovn-daemonset-fedora:dev
+        if docker pull ghcr.io/ovn-org/ovn-kubernetes/ovn-kube-fedora:release-1.0; then
+            docker tag ghcr.io/ovn-org/ovn-kubernetes/ovn-kube-fedora:release-1.0 ovn-daemonset-fedora:dev
 
-            echo "MASTER_IMAGE_RESTORED=true" >> "$GITHUB_OUTPUT"
+            echo "RELEASE_1_0_IMAGE_RESTORED=true" >> "$GITHUB_OUTPUT"
             exit 0
         fi
-    # only run the following steps if the master image was not found in the cache
-    - name: Check out code into the Go module directory - from master branch
-      if: steps.is_master_image_build_needed.outputs.MASTER_IMAGE_RESTORED != 'true' && success()
+    # only run the following steps if the release-1.0 image was not found in the cache
+    - name: Check out code into the Go module directory - from release-1.0 branch
+      if: steps.is_release_1_0_image_build_needed.outputs.RELEASE_1_0_IMAGE_RESTORED != 'true' && success()
       uses: actions/checkout@v4
       with:
-        ref: master
+        ref: release-1.0
 
     - name: Set up Go
-      if: steps.is_master_image_build_needed.outputs.MASTER_IMAGE_RESTORED != 'true' && success()
+      if: steps.is_release_1_0_image_build_needed.outputs.RELEASE_1_0_IMAGE_RESTORED != 'true' && success()
       uses: actions/setup-go@v5
       with:
         go-version: ${{ env.GO_VERSION }}
         cache-dependency-path: "**/*.sum"
       id: go
 
-    - name: Build - from master branch
-      if: steps.is_master_image_build_needed.outputs.MASTER_IMAGE_RESTORED != 'true' && success()
+    - name: Build - from release-1.0 branch
+      if: steps.is_release_1_0_image_build_needed.outputs.RELEASE_1_0_IMAGE_RESTORED != 'true' && success()
       run: |
         set -x
         pushd go-controller
@@ -112,8 +112,8 @@ jobs:
            make windows
         popd
 
-    - name: Build docker image - from master branch
-      if: steps.is_master_image_build_needed.outputs.MASTER_IMAGE_RESTORED != 'true' && success()
+    - name: Build docker image - from release-1.0 branch
+      if: steps.is_release_1_0_image_build_needed.outputs.RELEASE_1_0_IMAGE_RESTORED != 'true' && success()
       run: |
         pushd dist/images
           sudo cp -f ../../go-controller/_output/go/bin/ovn* .
@@ -122,27 +122,27 @@ jobs:
           docker build -t ovn-daemonset-fedora:dev -f Dockerfile.fedora .
         popd
 
-    - name: Cache master image
-      if: steps.is_master_image_build_needed.outputs.MASTER_IMAGE_RESTORED_FROM_CACHE != 'true' && success()
+    - name: Cache release-1.0 image
+      if: steps.is_release_1_0_image_build_needed.outputs.RELEASE_1_0_IMAGE_RESTORED_FROM_CACHE != 'true' && success()
       continue-on-error: false
       run: |
         set -x
-        if [ -f ${CI_IMAGE_CACHE}${CI_IMAGE_MASTER_TAR} ]; then
-            rm -f ${CI_IMAGE_CACHE}${CI_IMAGE_MASTER_TAR}
+        if [ -f ${CI_IMAGE_CACHE}${CI_IMAGE_RELEASE_1_0_TAR} ]; then
+            rm -f ${CI_IMAGE_CACHE}${CI_IMAGE_RELEASE_1_0_TAR}
         fi
-        if [ -f ${CI_IMAGE_CACHE}${CI_IMAGE_MASTER_TAR}.gz ]; then
-            rm -f ${CI_IMAGE_CACHE}${CI_IMAGE_MASTER_TAR}.gz
+        if [ -f ${CI_IMAGE_CACHE}${CI_IMAGE_RELEASE_1_0_TAR}.gz ]; then
+            rm -f ${CI_IMAGE_CACHE}${CI_IMAGE_RELEASE_1_0_TAR}.gz
         fi
-        docker save ovn-daemonset-fedora:dev -o ${CI_IMAGE_MASTER_TAR}
+        docker save ovn-daemonset-fedora:dev -o ${CI_IMAGE_RELEASE_1_0_TAR}
         mkdir -p ${CI_IMAGE_CACHE}
-        cp ${CI_IMAGE_MASTER_TAR} ${CI_IMAGE_CACHE}${CI_IMAGE_MASTER_TAR}
-        gzip ${CI_IMAGE_CACHE}${CI_IMAGE_MASTER_TAR}
+        cp ${CI_IMAGE_RELEASE_1_0_TAR} ${CI_IMAGE_CACHE}${CI_IMAGE_RELEASE_1_0_TAR}
+        gzip ${CI_IMAGE_CACHE}${CI_IMAGE_RELEASE_1_0_TAR}
 
     # run the following always if none of the steps before failed
     - uses: actions/upload-artifact@v4
       with:
-        name: test-image-master
-        path: ${{ env.CI_IMAGE_MASTER_TAR }}
+        name: test-image-release_1_0
+        path: ${{ env.CI_IMAGE_RELEASE_1_0_TAR }}
 
   build-pr:
     name: Build-PR
@@ -246,12 +246,12 @@ jobs:
         path: ${{ env.CI_DIST_IMAGES_OUTPUT }}/${{ env.CI_IMAGE_PR_TAR }}
 
   ovn-upgrade-e2e:
-    name: Upgrade OVN from Master to PR branch based image
+    name: Upgrade OVN from Release-1.0 to PR branch based image
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 120
     needs:
-      - build-master
+      - build-release-1_0
       - build-pr
     strategy:
       fail-fast: false
@@ -266,10 +266,10 @@ jobs:
       OVN_GATEWAY_MODE: "${{ matrix.gateway-mode }}"
       OVN_MULTICAST_ENABLE:  "false"
     steps:
-    - name: Check out code into the Go module directory - from Master branch
+    - name: Check out code into the Go module directory - from Release-1.0 branch
       uses: actions/checkout@v4
       with:
-          ref: master
+          ref: release-1.0
 
     - name: Set up Go
       uses: actions/setup-go@v5
@@ -295,10 +295,10 @@ jobs:
           msbuild mysql-server-core-* php-* php7* \
           powershell temurin-* zulu-*
 
-    - name: Download test-image-master
+    - name: Download test-image-release_1_0
       uses: actions/download-artifact@v4
       with:
-        name: test-image-master
+        name: test-image-release_1_0
 
     - name: Disable ufw
       # For IPv6 and Dualstack, ufw (Uncomplicated Firewall) should be disabled.
@@ -308,7 +308,7 @@ jobs:
 
     - name: Load docker image
       run: |
-        docker load --input ${CI_IMAGE_MASTER_TAR} && rm -rf ${CI_IMAGE_MASTER_TAR}
+        docker load --input ${CI_IMAGE_RELEASE_1_0_TAR} && rm -rf ${CI_IMAGE_RELEASE_1_0_TAR}
 
     - name: kind setup
       run: |
