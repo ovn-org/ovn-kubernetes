@@ -178,7 +178,7 @@ func (oc *DefaultNetworkController) syncNodeManagementPort(node *kapi.Node, host
 	return nil
 }
 
-func (oc *DefaultNetworkController) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig *util.L3GatewayConfig,
+func (oc *DefaultNetworkController) syncDefaultGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig *util.L3GatewayConfig,
 	hostSubnets []*net.IPNet, hostAddrs []string) error {
 	var err error
 	var gwLRPIPs, clusterSubnets []*net.IPNet
@@ -191,30 +191,7 @@ func (oc *DefaultNetworkController) syncGatewayLogicalNetwork(node *kapi.Node, l
 		return fmt.Errorf("failed to get join switch port IP address for node %s: %v", node.Name, err)
 	}
 
-	enableGatewayMTU := util.ParseNodeGatewayMTUSupport(node)
-
-	err = oc.gatewayInit(node.Name, clusterSubnets, hostSubnets, l3GatewayConfig, oc.SCTPSupport, gwLRPIPs, oc.ovnClusterLRPToJoinIfAddrs,
-		enableGatewayMTU)
-	if err != nil {
-		return fmt.Errorf("failed to init shared interface gateway: %v", err)
-	}
-
-	for _, subnet := range hostSubnets {
-		hostIfAddr := util.GetNodeManagementIfAddr(subnet)
-		l3GatewayConfigIP, err := util.MatchFirstIPNetFamily(utilnet.IsIPv6(hostIfAddr.IP), l3GatewayConfig.IPAddresses)
-		if err != nil {
-			return err
-		}
-		relevantHostIPs, err := util.MatchAllIPStringFamily(utilnet.IsIPv6(hostIfAddr.IP), hostAddrs)
-		if err != nil && err != util.ErrorNoIP {
-			return err
-		}
-		if err := oc.addPolicyBasedRoutes(node.Name, hostIfAddr.IP.String(), l3GatewayConfigIP, relevantHostIPs); err != nil {
-			return err
-		}
-	}
-
-	return err
+	return oc.syncGatewayLogicalNetwork(node, l3GatewayConfig, hostSubnets, hostAddrs, clusterSubnets, gwLRPIPs)
 }
 
 func (oc *DefaultNetworkController) addNode(node *kapi.Node) ([]*net.IPNet, error) {
@@ -650,7 +627,7 @@ func (oc *DefaultNetworkController) addUpdateLocalNodeEvent(node *kapi.Node, nSy
 	}
 
 	if nSyncs.syncGw {
-		err := oc.syncNodeGateway(node, nil)
+		err := oc.syncDefaultNodeGateway(node, nil)
 		if err != nil {
 			errs = append(errs, err)
 			oc.gatewaysFailed.Store(node.Name, true)
