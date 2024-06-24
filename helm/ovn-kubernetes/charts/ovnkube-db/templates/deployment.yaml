@@ -26,11 +26,11 @@ spec:
   template:
     metadata:
       labels:
-        ovn-db-pod: "true"
         name: ovnkube-db
         component: network
         type: infra
         kubernetes.io/os: "linux"
+        ovn-db-pod: "true"
     spec:
       priorityClassName: "system-cluster-critical"
       # Requires fairly broad permissions - ability to read all services and network functions as well
