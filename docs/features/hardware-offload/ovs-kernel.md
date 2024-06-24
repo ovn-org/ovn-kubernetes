@@ -1,4 +1,4 @@
-# OVS Acceleration with kernel datapath
+# OVS Acceleration with Kernel datapath
 
 The OVS software based solution is CPU intensive, affecting system performance
 and preventing fully utilizing available bandwidth. OVS 2.8 and above support
