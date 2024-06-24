@@ -73,21 +73,6 @@ type DefaultNetworkController struct {
 	egressQoSNodeSynced cache.InformerSynced
 	egressQoSNodeQueue  workqueue.RateLimitingInterface
 
-	// Cluster wide Load_Balancer_Group UUID.
-	// Includes all node switches and node gateway routers.
-	clusterLoadBalancerGroupUUID string
-
-	// Cluster wide switch Load_Balancer_Group UUID.
-	// Includes all node switches.
-	switchLoadBalancerGroupUUID string
-
-	// Cluster wide router Load_Balancer_Group UUID.
-	// Includes all node gateway routers.
-	routerLoadBalancerGroupUUID string
-
-	// Cluster-wide router default Control Plane Protection (COPP) UUID
-	defaultCOPPUUID string
-
 	// Controller used for programming OVN for egress IP
 	eIPC egressIPZoneController
 
@@ -214,13 +199,10 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 			watchFactory:       cnci.watchFactory,
 			nodeZoneState:      syncmap.NewSyncMap[bool](),
 		},
-		loadbalancerClusterCache:     make(map[kapi.Protocol]string),
-		clusterLoadBalancerGroupUUID: "",
-		switchLoadBalancerGroupUUID:  "",
-		routerLoadBalancerGroupUUID:  "",
-		svcController:                svcController,
-		zoneChassisHandler:           zoneChassisHandler,
-		apbExternalRouteController:   apbExternalRouteController,
+		loadbalancerClusterCache:   make(map[kapi.Protocol]string),
+		svcController:              svcController,
+		zoneChassisHandler:         zoneChassisHandler,
+		apbExternalRouteController: apbExternalRouteController,
 	}
 	if err = oc.BaseNetworkController.init(); err != nil {
 		return nil, err

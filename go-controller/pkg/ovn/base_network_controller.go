@@ -164,6 +164,24 @@ type BaseNetworkController struct {
 	// might have been already be released on startup
 	releasedPodsBeforeStartup  map[string]sets.Set[string]
 	releasedPodsOnStartupMutex sync.Mutex
+
+	//TODO(dceara): [START] move these to a better place?
+
+	// Cluster wide Load_Balancer_Group UUID.
+	// Includes all node switches and node gateway routers.
+	clusterLoadBalancerGroupUUID string
+
+	// Cluster wide switch Load_Balancer_Group UUID.
+	// Includes all node switches.
+	switchLoadBalancerGroupUUID string
+
+	// Cluster wide router Load_Balancer_Group UUID.
+	// Includes all node gateway routers.
+	routerLoadBalancerGroupUUID string
+
+	// Cluster-wide router default Control Plane Protection (COPP) UUID
+	defaultCOPPUUID string
+	//TODO(dceara): [END] move these to a better place?
 }
 
 // BaseSecondaryNetworkController structure holds per-network fields and network specific
@@ -527,6 +545,51 @@ func (bnc *BaseNetworkController) createNodeLogicalSwitch(nodeName string, hostS
 	}
 
 	return bnc.lsManager.AddOrUpdateSwitch(logicalSwitch.Name, hostSubnets, migratableIPsByPod...)
+}
+
+// syncNodeGateway ensures a node's gateway router is configured according to the L3 config and host subnets
+func (bnc *BaseNetworkController) syncNodeGateway(node *kapi.Node, l3GatewayConfig *util.L3GatewayConfig, hostSubnets []*net.IPNet, hostAddrs []string,
+	clusterSubnets, gwLRPIPs []*net.IPNet) error {
+	if l3GatewayConfig.Mode == config.GatewayModeDisabled {
+		if err := bnc.gatewayCleanup(node.Name); err != nil {
+			return fmt.Errorf("error cleaning up gateway for node %s: %v", node.Name, err)
+		}
+	} else if hostSubnets != nil {
+		if err := bnc.syncGatewayLogicalNetwork(node, l3GatewayConfig, hostSubnets, hostAddrs, clusterSubnets, gwLRPIPs); err != nil {
+			return fmt.Errorf("error creating gateway for node %s: %v", node.Name, err)
+		}
+	}
+	return nil
+}
+
+func (bnc *BaseNetworkController) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig *util.L3GatewayConfig,
+	hostSubnets []*net.IPNet, hostAddrs []string, clusterSubnets []*net.IPNet, gwLRPIPs []*net.IPNet) error {
+	var err error
+
+	enableGatewayMTU := util.ParseNodeGatewayMTUSupport(node)
+
+	err = bnc.gatewayInit(node.Name, clusterSubnets, hostSubnets, l3GatewayConfig, bnc.SCTPSupport, gwLRPIPs, bnc.ovnClusterLRPToJoinIfAddrs,
+		enableGatewayMTU)
+	if err != nil {
+		return fmt.Errorf("failed to init shared interface gateway: %v", err)
+	}
+
+	for _, subnet := range hostSubnets {
+		hostIfAddr := util.GetNodeManagementIfAddr(subnet)
+		l3GatewayConfigIP, err := util.MatchFirstIPNetFamily(utilnet.IsIPv6(hostIfAddr.IP), l3GatewayConfig.IPAddresses)
+		if err != nil {
+			return err
+		}
+		relevantHostIPs, err := util.MatchAllIPStringFamily(utilnet.IsIPv6(hostIfAddr.IP), hostAddrs)
+		if err != nil && err != util.ErrorNoIP {
+			return err
+		}
+		if err := bnc.addPolicyBasedRoutes(node.Name, hostIfAddr.IP.String(), l3GatewayConfigIP, relevantHostIPs); err != nil {
+			return err
+		}
+	}
+
+	return err
 }
 
 // deleteNodeLogicalNetwork removes the logical switch and logical router port associated with the node
