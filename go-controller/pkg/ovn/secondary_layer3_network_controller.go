@@ -545,8 +545,47 @@ func (oc *SecondaryLayer3NetworkController) addUpdateLocalNodeEvent(node *kapi.N
 
 	if util.IsNetworkSegmentationSupportEnabled() && oc.IsPrimaryNetwork() {
 		if nSyncs.syncGw {
-			// TODO(dceara): pass l3GatewayConfig, hostSubnets, hostAddrs, clusterSubnets, hostSubnets as last 5 arguments
-			err := oc.syncNodeGateway(node, nil, nil, nil, nil, nil)
+			// TODO(dceara): hardcoded
+			l3GatewayConfig, _ := util.ParseNodeL3GatewayAnnotation(node)
+			l3GatewayConfig.InterfaceID = "breth1_tenantblue_ovn-worker"
+			l3GatewayConfig.IPAddresses = append(l3GatewayConfig.IPAddresses,
+				&net.IPNet{
+					IP:   net.ParseIP("169.254.169.42"),
+					Mask: net.CIDRMask(24, 32),
+				})
+			// TODO(dceara): use the same l3GatewayConfig.NextHops as on the
+			// default network
+
+			// TODO(dceara): hardcoded
+			hostSubnets := []*net.IPNet{
+				{
+					IP:   net.ParseIP("10.128.0.0"),
+					Mask: net.CIDRMask(16, 32),
+				},
+			}
+
+			// TODO(dceara): hardcoded
+			hostAddrs := []string{
+				"169.254.169.42",
+			}
+
+			// TODO(dceara): hardcoded
+			clusterSubnets := []*net.IPNet{
+				{
+					IP:   net.ParseIP("10.128.0.0"),
+					Mask: net.CIDRMask(16, 32),
+				},
+			}
+
+			// TODO(dceara): hardcoded should be something depending on the join subnet or network
+			gwLRPIPs := []*net.IPNet{
+				{
+					IP:   net.ParseIP("100.64.0.3"),
+					Mask: net.CIDRMask(16, 32),
+				},
+			}
+
+			err := oc.syncNodeGateway(node, l3GatewayConfig, hostSubnets, hostAddrs, clusterSubnets, gwLRPIPs)
 			if err != nil {
 				errs = append(errs, err)
 				oc.gatewaysFailed.Store(node.Name, true)
