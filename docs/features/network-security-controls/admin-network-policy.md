@@ -1,10 +1,10 @@
 # AdminNetworkPolicy
 
-Kubernetes AdminNetworkPolicy documentation: https://network-policy-api.sigs.k8s.io/
+## Introduction
 
-Kubernetes AdminNetworkPolicy API reference: https://github.com/kubernetes-sigs/network-policy-api/blob/429a9e6ae89d411f89d5a16aba38a5d920c969ee/apis/v1alpha1/adminnetworkpolicy_types.go
+AdminNetworkPolicy is a cluster scoped CRD that allows network or cluster administrators to protect the safety of their cluster or enforce segmentation in multi-tenant clusters   
 
-NOTE: This documentation focuses on OVNK's implementation of ANP and is more for developers than for users.
+## Motivation
 
 NetworkPolicy API was designed mainly for namespace owners or application developers. They are thus namespace scoped. NetworkPolicy API is not suitable for administrators/network-administrators/security-operators of the cluster because of two main reasons:
 
@@ -12,7 +12,46 @@ NetworkPolicy API was designed mainly for namespace owners or application develo
 * They cannot be created before the namespace is created (kapi server expects the namespace to be created first); thus they cannot satisfy the requirements where admins may want policies in the cluster to be in place before the workloads are even created.
 * The design of NetworkPolicy API is implicit which means the deny is already set in place when we create a policy and then we are expected to do an allowList of rules in the policy. Network administrators prefer to have the power of defining what exactly to deny and allow instead of this implicit model.
 
-Sample API:
+## How to enable this feature on an OVN-Kubernetes cluster
+
+This feature is under the techPreview feature gate and as such in order to begin using it you must first enable the techPreview feature gate.
+
+The following commands will allow you to enable all techPreview features
+
+``
+kubectl edit featuregate cluster
+``
+
+modify the file, changing
+
+```
+...
+spec:
+  featureSet: {}
+...
+```
+
+to 
+
+```
+...
+spec:
+  featureSet: TechPreviewNoUpgrade
+...
+```
+
+This will take a long time, so be prepared to wait. All nodes will begin cycling between `Ready,SchedulingDisabled` to `NotReady` to `Ready` as a sign of its completion.
+
+
+## Workflow Description
+
+Kubernetes AdminNetworkPolicy documentation: https://network-policy-api.sigs.k8s.io/
+
+Kubernetes AdminNetworkPolicy API reference: https://github.com/kubernetes-sigs/network-policy-api/blob/429a9e6ae89d411f89d5a16aba38a5d920c969ee/apis/v1alpha1/adminnetworkpolicy_types.go
+
+### Anatomy of an AdminNetworkPolicy
+
+Each AdminNetworkPolicy can be broken down into two sections, the subject and the policies sections.
 
 ```
 apiVersion: policy.networking.k8s.io/v1alpha1
@@ -25,6 +64,14 @@ spec:
     namespaces:
       matchLabels:
           conformance-house: gryffindor
+```
+
+The target section of the AdminNetworkPolicy sets two important fields
+
+1. `priority`: Sets the priority of the policy. Lower values have higher precendence and apply first, however it is **illegal** to have two AdminNetworkPolicies that share the same priority value.
+2. `subject`: Sets the target of the policy. Can either be a namespace selector or a pod selector
+
+```
   ingress:
   - name: "deny-all-ingress-from-slytherin"
     action: "Deny"
@@ -43,7 +90,154 @@ spec:
             conformance-house: slytherin
 ```
 
-**OVN-Implementation:**
+The next section of the AdminNetworkPolicy is nearly identical to the ingress/egress rules of a regular NetworkPolicy. It is a list of ingress / egress rules with the same precendence and matching rules as a regular NetworkPolicy. **The exception being: ipBlock matching is not supported**. For details refer back to: https://ovn-kubernetes.io/features/network-security-controls/network-policy/. The one important field here is the `action` field.
+
+**`action`: This field specifies the three different actions that can be taken by the AdminNetworkPolicy**
+
+1. `Pass`: Passes the action taken to either the NetworkPolicy applied by the developer/tenant or the BaselineAdminNetworkPolicy applied by the cluster administrator. 
+2. `Deny`: Blocks all traffic to that source/destination regardless of underlying policy. 
+3. `Allow`: allows all traffic to that source/destination regardless of underlying policy. 
+
+### AdminNetworkPolicy Examples
+
+#### **Basic AdminNetworkPolicy**
+
+This is a simple AdminNetworkPolicy that matches on the monitoring namespace and prevents ingress to tenant1. This blocking is called `strong` because it cannot be overriden.
+
+```
+apiVersion: policy.networking.k8s.io/v1alpha1
+kind: AdminNetworkPolicy
+metadata:
+  name: simple-admin-policy
+spec:
+  priority: 10
+  subject:
+    namespaces:
+      matchLabels:
+          name: monitoring
+  ingress:
+  - name: "deny-all-ingress-tenant1"
+    action: "Deny"
+    from:
+    - namespaces:
+        namespaceSelector:
+          matchLabels:
+            name: tenant1
+  
+```
+
+#### **Tenant Segmentation AdminNetworkPolicy**
+
+This is an example of how AdminNetworkPolicies can be used to segment two tenants in a multi-tenant cluster. It uses both an egress and ingress just like a networkPolicy but applies to an entire namespace instead of a set of pods. Again this is a `strong` block because it cannot be overriden.
+
+```
+apiVersion: policy.networking.k8s.io/v1alpha1
+kind: AdminNetworkPolicy
+metadata:
+  name: segment-admin-policy
+spec:
+  priority: 11
+  subject:
+    namespaces:
+      matchLabels:
+          name: tenant1
+  ingress:
+  - name: "deny-all-communication-tenant2"
+    action: "Deny"
+    from:
+    - namespaces:
+        namespaceSelector:
+          matchLabels:
+            name: tenant2
+  egress:
+  - name: "deny-all-egress-tenant2"
+    action: "Deny"
+    to:
+    - namespaces:
+        namespaceSelector:
+          matchLabels:
+            name: tenant2
+  
+```
+
+#### **Pass AdminNetworkPolicy**
+
+Pass will delegate processing of the selected rules to NetworkPolicies created by developers and BaselineAdminNetworkPolicies if the NetworkPolicies dont exist. This means that this AdminNetworkPolicfy does not do anything by default and lets developers choose how they want to use that dataflow.
+
+```
+apiVersion: policy.networking.k8s.io/v1alpha1
+kind: AdminNetworkPolicy
+metadata:
+  name: segment-admin-policy
+spec:
+  priority: 12
+  subject:
+    namespaces:
+      matchLabels:
+          name: tenant1
+  ingress:
+  - name: "shared-storage"
+    action: "Pass"
+    from:
+    - namespaces:
+        namespaceSelector:
+          matchLabels:
+            name: shared_storage
+  
+```
+
+#### **Combination AdminNetworkPolicy**
+
+This AdminNetworkPolicy combines all of the other policies together. It segments two tenants while allowing shared access to another namespace using pass statements.
+
+```
+apiVersion: policy.networking.k8s.io/v1alpha1
+kind: AdminNetworkPolicy
+metadata:
+  name: segment-admin-policy
+spec:
+  priority: 12
+  subject:
+    namespaces:
+      matchLabels:
+          name: tenant1
+  ingress:
+  - name: "deny-all-communication-tenant2"
+    action: "Deny"
+    from:
+    - namespaces:
+        namespaceSelector:
+          matchLabels:
+            name: tenant2
+  egress:
+  - name: "deny-all-egress-tenant2"
+    action: "Deny"
+    to:
+    - namespaces:
+        namespaceSelector:
+          matchLabels:
+            name: tenant2
+  ingress:
+  - name: "shared-storage"
+    action: "Pass"
+    from:
+    - namespaces:
+        namespaceSelector:
+          matchLabels:
+            name: shared_storage
+  egress:
+  - name: "shared-services"
+    action: "Pass"
+    to:
+    - namespaces:
+        namespaceSelector:
+          matchLabels:
+            name: shared_services
+
+```
+
+
+## Implementation Details
 
 * Each AdminNetworkPolicy CRD will have a `.spec.priority` field. The lower the number the higher the precedence. Thus 0 is the highest priority and 1000 (the largest number supported by upstream sig-network-policy-api) is the lowest priority. However the number of admin policies in a cluster are usually expected to be of a maximum of say 30-50 and not more than that based on use cases for which this API was defined for. OVNK plugin will support 100 policies max in a cluster. If anyone creates more than 100, it will not work properly. Thus supported priority values in OVNK are from 0 to 99.
 * Each AdminNetworkPolicy CRD can have upto 100 ingress rules and 100 egress rules, thus 200 rules in total. The ordering of each rule is important. If the rule is at the top of the list then it has the highest precedence and if the rule is at the bottom it has the lowest prededence. Each rule translates to one ACL.
@@ -178,103 +372,16 @@ tier                : 1
 
 If we now define a networkpolicy that matches the same set of subjects as our pass-example admin-network-policy, that network-policy will take effect. This is how administrators can delegate a decision making to the namespace owners in a cluster.
 
-# BaselineAdminNetworkPolicy
+## Troubleshooting
 
-Kubernetes AdminNetworkPolicy API reference: https://github.com/kubernetes-sigs/network-policy-api/blob/429a9e6ae89d411f89d5a16aba38a5d920c969ee/apis/v1alpha1/baseline_adminnetworkpolicy_types.go
+## Best Practices
 
-Since we can delegate decisions from administrators to namespace owners, what if namespace owners don't have policies in place for the same set of subjects? Admins in such cases might want to keep a default set of guardrails in the cluster. Thus we allow one BANP to be created in the cluster with the name `default`. The rules in `default` BANP are created in Tier3.
+* Dont use an AdminNetworkPolicy to accomplish things that can be done with a lower overhead NetworkPolicy
+* Using two AdminNetworkPolicies with equal priority values will result in a non-determistic and unsupported outcome
+* OVNK supports a maximum of 100 AdminNetworkPolicy CRD's
+* Each AdminNetworkPolicy can have a maximum of 100 egress and 100 ingress rules
 
-Sample API:
-
-```
-apiVersion: policy.networking.k8s.io/v1alpha1
-kind: BaselineAdminNetworkPolicy
-metadata:
-  name: default
-spec:
-  subject:
-    namespaces:
-      matchLabels:
-          conformance-house: gryffindor
-  ingress:
-  - name: "deny-all-ingress-from-slytherin"
-    action: "Deny"
-    from:
-    - namespaces:
-        namespaceSelector:
-          matchLabels:
-            conformance-house: slytherin
-  egress:
-  - name: "deny-all-egress-to-slytherin"
-    action: "Deny"
-    to:
-    - namespaces:
-        namespaceSelector:
-          matchLabels:
-            conformance-house: slytherin
-```
-
-* BANP doesn't have any priority field, since we can have only one in the cluster
-* We keep nbdb.ACL's priority range 1750 - 1649 range reserved for BANP rules in the cluster.
-* Rest of the implementation details for ANP is applicable to BANP as well.
-
-Corresponding ACLs:
-
-```
-_uuid               : 436b5a0f-9616-42b5-865d-489ec1d42666
-action              : drop
-direction           : to-lport
-external_ids        : {direction=BANPIngress, "k8s.ovn.org/id"="admin-network-policy-controller:BaselineAdminNetworkPolicy:default:BANPIngress:1750", "k8s.ovn.org/name"=default, "k8s.ovn.org/owner-controller"=admin-network-policy-controller, "k8s.ovn.org/owner-type"=BaselineAdminNetworkPolicy, priority="1750"}
-label               : 0
-log                 : false
-match               : "((ip4.src == $a2535546904205657311)) && (outport == @a16982411286042166782)"
-meter               : acl-logging
-name                : default_BANPIngress_1750
-options             : {}
-priority            : 1750
-severity            : debug
-tier                : 3
-===
-_uuid               : d42cb240-fac1-4429-a1bc-02efddda69cf
-action              : drop
-direction           : from-lport
-external_ids        : {direction=BANPEgress, "k8s.ovn.org/id"="admin-network-policy-controller:BaselineAdminNetworkPolicy:default:BANPEgress:1750", "k8s.ovn.org/name"=default, "k8s.ovn.org/owner-controller"=admin-network-policy-controller, "k8s.ovn.org/owner-type"=BaselineAdminNetworkPolicy, priority="1750"}
-label               : 0
-log                 : false
-match               : "((ip4.dst == $a6430502402203365)) && (inport == @a16982411286042166782)"
-meter               : acl-logging
-name                : default_BANPEgress_1750
-options             : {apply-after-lb="true"}
-priority            : 1750
-severity            : debug
-tier                : 3
-```
-
-The Address-Set for the above BaselineAdminNetworkPolicy is:
-
-```
-_uuid               : a3ac7d6b-9185-4099-84f8-92d28460b4c3
-addresses           : ["10.244.0.5", "10.244.1.6"]
-external_ids        : {direction=BANPIngress, ip-family=v4, "k8s.ovn.org/id"="admin-network-policy-controller:BaselineAdminNetworkPolicy:default:BANPIngress:1750:v4", "k8s.ovn.org/name"=default, "k8s.ovn.org/owner-controller"=admin-network-policy-controller, "k8s.ovn.org/owner-type"=BaselineAdminNetworkPolicy, priority="1750"}
-name                : a2535546904205657311
-===
-_uuid               : b3e08332-e6bb-4f4e-bbc4-c36f717f149a
-addresses           : ["10.244.0.5", "10.244.1.6"]
-external_ids        : {direction=BANPEgress, ip-family=v4, "k8s.ovn.org/id"="admin-network-policy-controller:BaselineAdminNetworkPolicy:default:BANPEgress:1750:v4", "k8s.ovn.org/name"=default, "k8s.ovn.org/owner-controller"=admin-network-policy-controller, "k8s.ovn.org/owner-type"=BaselineAdminNetworkPolicy, priority="1750"}
-name                : a6430502402203365
-```
-
-The PortGroup for the above AdminNetworkPolicy is:
-
-```
-_uuid               : 9ec16567-6f51-49fb-aedb-40c477ad470d
-acls                : [436b5a0f-9616-42b5-865d-489ec1d42666, d42cb240-fac1-4429-a1bc-02efddda69cf]
-external_ids        : {BaselineAdminNetworkPolicy=default}
-name                : a16982411286042166782
-ports               : [a22a4c3a-bb65-4b22-8bc1-13e1e8899a7b, c7e4ffe3-73df-4db5-a3bc-a9649394d549]
-```
-
-# TODO
+## Future Items
 
 This section tracks the remaining work (some of these items are work-in-progress already and will be merged in future PRs) that are future items and outside the scope of the initial PR (https://github.com/ovn-org/ovn-kubernetes/pull/3659)
 
@@ -293,7 +400,7 @@ This section tracks the remaining work (some of these items are work-in-progress
       across namespaces maybe we can combine per namespace ones with an || expression
       but need to see if its worth the effort): https://github.com/ovn-org/ovn-kubernetes/pull/2740
 
-# Constraints
+## Known Limitations
 
 * The v1alpha1 CRDs upstream support upto 1000 priorities (`.Spec.Priority`) but OVNK only allows users to have maximum 100 ANPs in a cluster.
   This means you can create an ANP with priority between 0 and 99 - we do not support creating ANPs with higher priorities in OVNK.
@@ -301,3 +408,9 @@ This section tracks the remaining work (some of these items are work-in-progress
   Changing this to support beyond 200 will need OVN RFEs
 * It is for the best if two ANPs are not created with the same priority. The outcome is nondeterministic and this is a case we do not support. So ensure
   your policies have unique priorities
+
+## References
+
+Kubernetes AdminNetworkPolicy documentation: https://network-policy-api.sigs.k8s.io/
+
+Kubernetes AdminNetworkPolicy API reference: https://github.com/kubernetes-sigs/network-policy-api/blob/429a9e6ae89d411f89d5a16aba38a5d920c969ee/apis/v1alpha1/adminnetworkpolicy_types.go

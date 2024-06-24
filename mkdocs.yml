@@ -111,6 +111,7 @@ nav:
     - NetworkSecurityControls:
       - NetworkPolicy: features/network-security-controls/network-policy.md
       - AdminNetworkPolicy: features/network-security-controls/admin-network-policy.md
+      - BaselineAdminNetworkPolicy: features/network-security-controls/baseline-admin-network-policy.md
       - EgressFirewall: features/network-security-controls/egress-firewall.md
     - InfrastructureSecurityControls:
       - NodeIdentity: features/infrastructure-security-controls/node-identity.md
