@@ -157,6 +157,7 @@ func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net
 		return nil
 	}
 	gw.watchFactory = watchFactory.(*factory.WatchFactory)
+
 	klog.Info("Local Gateway Creation Complete")
 	return gw, nil
 }
