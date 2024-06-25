@@ -619,6 +619,17 @@ func (bnc *BaseNetworkController) recordNodeErrorEvent(node *kapi.Node, nodeErr 
 	bnc.recorder.Eventf(nodeRef, kapi.EventTypeWarning, "ErrorReconcilingNode", nodeErr.Error())
 }
 
+func (bnc *BaseNetworkController) recordPodErrorEvent(pod *kapi.Pod, podErr error) {
+	podRef, err := ref.GetReference(scheme.Scheme, pod)
+	if err != nil {
+		klog.Errorf("Couldn't get a reference to pod %s/%s to post an event: '%v'",
+			pod.Namespace, pod.Name, err)
+	} else {
+		klog.V(5).Infof("Posting a %s event for Pod %s/%s", kapi.EventTypeWarning, pod.Namespace, pod.Name)
+		bnc.recorder.Eventf(podRef, kapi.EventTypeWarning, "ErrorReconcilingPod", podErr.Error())
+	}
+}
+
 func (bnc *BaseNetworkController) doesNetworkRequireIPAM() bool {
 	return util.DoesNetworkRequireIPAM(bnc.NetInfo)
 }
@@ -703,10 +714,11 @@ func (bnc *BaseNetworkController) isPrimaryNetwork(pod *kapi.Pod) (bool, error) 
 		return false, err
 	}
 	if activeNetwork == types.UnknownNetworkName {
-		return false, fmt.Errorf("unable to determine what is the"+
+		err := fmt.Errorf("unable to determine what is the"+
 			"primary network for this pod %s; please remove multiple primary network"+
 			"NADs from namespace %s", pod.Name, pod.Namespace)
-		// TODO emit event
+		bnc.recordPodErrorEvent(pod, err)
+		return false, err
 	}
 	return activeNetwork == bnc.GetNetworkName(), nil
 }

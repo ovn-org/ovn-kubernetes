@@ -118,10 +118,11 @@ func (a *PodAllocator) isPrimaryNetwork(pod *corev1.Pod) (bool, error) {
 		return false, err
 	}
 	if activeNetwork == types.UnknownNetworkName {
+		// FIXME(tssurya) emit event here; add support for
+		// recorder in the NCM controller
 		return false, fmt.Errorf("unable to determine what is the"+
 			"primary network for this pod %s; please remove multiple primary network"+
 			"NADs from namespace %s", pod.Name, pod.Namespace)
-		// TODO emit event
 	}
 	return activeNetwork == a.netInfo.GetNetworkName(), nil
 }
