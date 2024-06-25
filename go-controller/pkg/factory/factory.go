@@ -298,7 +298,7 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 			kapi.NamespaceAll,
 			resyncPeriod,
 			cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
-			withServiceNameAndNoHeadlessServiceSelector())
+			getEndpointSliceSelector())
 	})
 
 	var err error
@@ -617,7 +617,7 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeName string) (
 			kapi.NamespaceAll,
 			resyncPeriod,
 			cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
-			withServiceNameAndNoHeadlessServiceSelector())
+			getEndpointSliceSelector())
 	})
 
 	wf.informers[NamespaceType], err = newInformer(NamespaceType, wf.iFactory.Core().V1().Namespaces().Informer())
@@ -733,7 +733,7 @@ func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset
 			kapi.NamespaceAll,
 			resyncPeriod,
 			cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
-			withServiceNameAndNoHeadlessServiceSelector())
+			getEndpointSliceSelector())
 	})
 
 	var err error
@@ -1509,6 +1509,22 @@ func withServiceNameAndNoHeadlessServiceSelector() func(options *metav1.ListOpti
 	}
 }
 
+// noHeadlessServiceSelector returns a LabelSelector (added to the
+// watcher for EndpointSlices) that will only choose EndpointSlices without "service.kubernetes.io/headless"
+// label.
+func noHeadlessServiceSelector() func(options *metav1.ListOptions) {
+	// headless service label must not be there
+	noHeadlessService, err := labels.NewRequirement(kapi.IsHeadlessService, selection.DoesNotExist, nil)
+	if err != nil {
+		// cannot occur
+		panic(err)
+	}
+
+	return func(options *metav1.ListOptions) {
+		options.LabelSelector = noHeadlessService.String()
+	}
+}
+
 // noAlternateProxySelector is a LabelSelector added to the watch for
 // services that excludes services with a well-known label indicating
 // proxying is via an alternate proxy.
@@ -1560,4 +1576,17 @@ type waitForCacheSyncer interface {
 
 func waitForCacheSyncWithTimeout(factory waitForCacheSyncer, stopCh <-chan struct{}) map[reflect.Type]bool {
 	return factory.WaitForCacheSync(util.GetChildStopChanWithTimeout(stopCh, types.InformerSyncTimeout))
+}
+
+// getEndpointSliceSelector returns an EndpointSlice selector function used in watchers.
+// When network segmentation is enabled it returns a selector that ignores EndpointSlices for headless services.
+// Otherwise, it returns a selector that excludes EndpointSlices a with missing default service name too.
+func getEndpointSliceSelector() func(options *metav1.ListOptions) {
+	endpointSliceSelector := withServiceNameAndNoHeadlessServiceSelector()
+	if util.IsNetworkSegmentationSupportEnabled() {
+		// When network segmentation is enabled we need to watch for mirrored EndpointSlices that do not contain the
+		// default service name.
+		endpointSliceSelector = noHeadlessServiceSelector()
+	}
+	return endpointSliceSelector
 }

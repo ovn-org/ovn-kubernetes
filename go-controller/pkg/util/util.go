@@ -23,6 +23,7 @@ import (
 
 	"github.com/urfave/cli/v2"
 	v1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
@@ -473,4 +474,16 @@ func GenerateId(length int) string {
 		b[i] = chars[int(b[i])%charsLength]
 	}
 	return string(b)
+}
+
+// IsMirrorEndpointSlice checks if the provided EndpointSlice is meant for the user defined network
+func IsMirrorEndpointSlice(endpointSlice *discoveryv1.EndpointSlice) bool {
+	_, ok := endpointSlice.Labels[types.LabelUserDefinedServiceName]
+	return ok
+}
+
+// IsDefaultEndpointSlice checks if the provided EndpointSlice is meant for the default network
+func IsDefaultEndpointSlice(endpointSlice *discoveryv1.EndpointSlice) bool {
+	_, ok := endpointSlice.Labels[discoveryv1.LabelServiceName]
+	return ok
 }
