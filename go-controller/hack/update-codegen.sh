@@ -113,5 +113,7 @@ echo "Copying adminpolicybasedexternalroutes CRD"
 cp _output/crds/k8s.ovn.org_adminpolicybasedexternalroutes.yaml ../dist/templates/k8s.ovn.org_adminpolicybasedexternalroutes.yaml.j2
 echo "Copying egressService CRD"
 cp _output/crds/k8s.ovn.org_egressservices.yaml ../dist/templates/k8s.ovn.org_egressservices.yaml.j2
+echo "Copying routeAdvertisements CRD"
+cp _output/crds/k8s.ovn.org_routeadvertisements.yaml ../dist/templates/k8s.ovn.org_routeadvertisements.yaml.j2
 echo "Copying IPAMClaim CRD"
 curl -sSL https://raw.githubusercontent.com/k8snetworkplumbingwg/ipamclaims/v0.4.0-alpha/artifacts/k8s.cni.cncf.io_ipamclaims.yaml -o ../dist/templates/k8s.cni.cncf.io_ipamclaims.yaml
