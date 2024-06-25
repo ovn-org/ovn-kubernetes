@@ -764,6 +764,13 @@ func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset
 				return nil, err
 			}
 		}
+
+		if util.IsNetworkSegmentationSupportEnabled() {
+			wf.informers[NamespaceType], err = newInformer(NamespaceType, wf.iFactory.Core().V1().Namespaces().Informer())
+			if err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	if config.OVNKubernetesFeature.EnableMultiExternalGateway {

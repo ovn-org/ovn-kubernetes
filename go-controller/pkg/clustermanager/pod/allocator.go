@@ -2,6 +2,8 @@ package pod
 
 import (
 	"fmt"
+	"k8s.io/client-go/listers/core/v1"
+	"net"
 	"sync"
 
 	corev1 "k8s.io/api/core/v1"
@@ -41,6 +43,8 @@ type PodAllocator struct {
 	// release more than once
 	releasedPods      map[string]sets.Set[string]
 	releasedPodsMutex sync.Mutex
+
+	namespaceLister v1.NamespaceLister
 }
 
 // NewPodAllocator builds a new PodAllocator
@@ -49,12 +53,14 @@ func NewPodAllocator(
 	podAnnotationAllocator *pod.PodAnnotationAllocator,
 	ipAllocator subnet.Allocator,
 	claimsReconciler persistentips.PersistentAllocations,
+	namespaceLister v1.NamespaceLister,
 ) *PodAllocator {
 	podAllocator := &PodAllocator{
 		netInfo:                netInfo,
 		releasedPods:           map[string]sets.Set[string]{},
 		releasedPodsMutex:      sync.Mutex{},
 		podAnnotationAllocator: podAnnotationAllocator,
+		namespaceLister:        namespaceLister,
 	}
 
 	// this network might not have IPAM, we will just allocate MAC addresses
@@ -129,6 +135,38 @@ func (a *PodAllocator) reconcile(old, new *corev1.Pod, releaseFromAllocator bool
 	}
 	if new != nil {
 		pod = new
+	}
+
+	ns, err := a.namespaceLister.Get(pod.Namespace)
+	if err != nil {
+		return err
+	}
+	activeNetworkName, hasAnActiveNetwork := ns.Annotations["k8s.ovn.org/active-network"]
+
+	// TODO: get rid of this log below
+	klog.Infof(
+		"DEBUG| reconciling pod %q; has an active network ? %t; Active net name: %q",
+		pod.Name,
+		hasAnActiveNetwork,
+		activeNetworkName,
+	)
+	if hasAnActiveNetwork && activeNetworkName != "default" {
+		var gws []net.IP
+		for _, networkCIDR := range a.netInfo.Subnets() {
+			subnetGW := util.GetNodeGatewayIfAddr(networkCIDR.CIDR).IP
+			gws = append(gws, subnetGW)
+		}
+
+		network := &nettypes.NetworkSelectionElement{
+			// TODO: below we need to have the NAD name, *not* the network name
+			Name:           activeNetworkName,
+			Namespace:      pod.Namespace,
+			GatewayRequest: gws,
+		}
+		nadName := fmt.Sprintf("%s/%s", pod.Namespace, activeNetworkName)
+		if err := a.reconcileForNAD(old, new, nadName, network, releaseFromAllocator); err != nil {
+			return err
+		}
 	}
 
 	podScheduled := util.PodScheduled(pod)

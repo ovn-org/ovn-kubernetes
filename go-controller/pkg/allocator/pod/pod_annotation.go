@@ -22,8 +22,9 @@ import (
 
 // PodAnnotationAllocator is a utility to handle allocation of the PodAnnotation to Pods.
 type PodAnnotationAllocator struct {
-	podLister listers.PodLister
-	kube      kube.InterfaceOVN
+	podLister       listers.PodLister
+	namespaceLister listers.NamespaceLister
+	kube            kube.InterfaceOVN
 
 	netInfo              util.NetInfo
 	ipamClaimsReconciler persistentips.PersistentAllocations
@@ -32,11 +33,13 @@ type PodAnnotationAllocator struct {
 func NewPodAnnotationAllocator(
 	netInfo util.NetInfo,
 	podLister listers.PodLister,
+	nsLister listers.NamespaceLister,
 	kube kube.InterfaceOVN,
 	claimsReconciler persistentips.PersistentAllocations,
 ) *PodAnnotationAllocator {
 	return &PodAnnotationAllocator{
 		podLister:            podLister,
+		namespaceLister:      nsLister,
 		kube:                 kube,
 		netInfo:              netInfo,
 		ipamClaimsReconciler: claimsReconciler,
@@ -63,6 +66,7 @@ func (allocator *PodAnnotationAllocator) AllocatePodAnnotation(
 
 	return allocatePodAnnotation(
 		allocator.podLister,
+		allocator.namespaceLister,
 		allocator.kube,
 		ipAllocator,
 		allocator.netInfo,
@@ -75,6 +79,7 @@ func (allocator *PodAnnotationAllocator) AllocatePodAnnotation(
 
 func allocatePodAnnotation(
 	podLister listers.PodLister,
+	namespaceLister listers.NamespaceLister,
 	kube kube.Interface,
 	ipAllocator subnet.NamedAllocator,
 	netInfo util.NetInfo,
@@ -92,6 +97,7 @@ func allocatePodAnnotation(
 	allocateToPodWithRollback := func(pod *v1.Pod) (*v1.Pod, func(), error) {
 		var rollback func()
 		pod, podAnnotation, rollback, err = allocatePodAnnotationWithRollback(
+			namespaceLister,
 			ipAllocator,
 			idAllocator,
 			netInfo,
@@ -137,6 +143,7 @@ func (allocator *PodAnnotationAllocator) AllocatePodAnnotationWithTunnelID(
 
 	return allocatePodAnnotationWithTunnelID(
 		allocator.podLister,
+		allocator.namespaceLister,
 		allocator.kube,
 		ipAllocator,
 		idAllocator,
@@ -150,6 +157,7 @@ func (allocator *PodAnnotationAllocator) AllocatePodAnnotationWithTunnelID(
 
 func allocatePodAnnotationWithTunnelID(
 	podLister listers.PodLister,
+	namespaceLister listers.NamespaceLister,
 	kube kube.Interface,
 	ipAllocator subnet.NamedAllocator,
 	idAllocator id.NamedAllocator,
@@ -165,6 +173,7 @@ func allocatePodAnnotationWithTunnelID(
 	allocateToPodWithRollback := func(pod *v1.Pod) (*v1.Pod, func(), error) {
 		var rollback func()
 		pod, podAnnotation, rollback, err = allocatePodAnnotationWithRollback(
+			namespaceLister,
 			ipAllocator,
 			idAllocator,
 			netInfo,
@@ -207,6 +216,7 @@ func allocatePodAnnotationWithTunnelID(
 // implementations. Use an inlined implementation if you want to extract
 // information from it as a side-effect.
 func allocatePodAnnotationWithRollback(
+	namespaceLister listers.NamespaceLister,
 	ipAllocator subnet.NamedAllocator,
 	idAllocator id.NamedAllocator,
 	netInfo util.NetInfo,
@@ -265,6 +275,25 @@ func allocatePodAnnotationWithRollback(
 		IPs:      podAnnotation.IPs,
 		MAC:      podAnnotation.MAC,
 		TunnelID: podAnnotation.TunnelID,
+		Primary:  false,
+	}
+	if util.IsNetworkSegmentationSupportEnabled() {
+		tentative.Primary = netInfo.IsSecondary() && netInfo.IsPrimaryNetwork()
+		if !netInfo.IsSecondary() { // only do this extra bit if needed
+			var podNamespace *v1.Namespace
+			podNamespace, err = namespaceLister.Get(pod.Namespace)
+			if err != nil {
+				return
+			}
+			activeNetworkForPod := util.GetNamespaceActiveNetwork(podNamespace)
+			if activeNetworkForPod == nadName {
+				tentative.Primary = true
+			}
+		}
+	} else if !netInfo.IsSecondary() {
+		// if user defined network segmentation is not enabled
+		// then we know pod's primary network is "default"
+		tentative.Primary = true
 	}
 
 	hasIDAllocation := util.DoesNetworkRequireTunnelIDs(netInfo)

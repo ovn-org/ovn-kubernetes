@@ -32,6 +32,7 @@ import (
 	testutils "k8s.io/kubernetes/test/utils"
 	admissionapi "k8s.io/pod-security-admission/api"
 	utilnet "k8s.io/utils/net"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const (
@@ -166,7 +167,7 @@ func newAnnotationNotSetError(format string, args ...interface{}) error {
 }
 
 // UnmarshalPodAnnotation returns the default network info from pod.Annotations
-func unmarshalPodAnnotation(annotations map[string]string) (*PodAnnotation, error) {
+func unmarshalPodAnnotation(annotations map[string]string, networkName string) (*PodAnnotation, error) {
 	ovnAnnotation, ok := annotations[podNetworkAnnotation]
 	if !ok {
 		return nil, newAnnotationNotSetError("could not find OVN pod annotation in %v", annotations)
@@ -177,7 +178,7 @@ func unmarshalPodAnnotation(annotations map[string]string) (*PodAnnotation, erro
 		return nil, fmt.Errorf("failed to unmarshal ovn pod annotation %q: %v",
 			ovnAnnotation, err)
 	}
-	tempA := podNetworks["default"]
+	tempA := podNetworks[networkName]
 	a := &tempA
 
 	podAnnotation := &PodAnnotation{}
@@ -1239,4 +1240,14 @@ func getGatewayMTUSupport(node *v1.Node) bool {
 		return true
 	}
 	return false
+}
+
+func thisNamespace(cli kubernetes.Interface, namespace *v1.Namespace) func() (*v1.Namespace, error) {
+	return func() (*v1.Namespace, error) {
+		return cli.CoreV1().Namespaces().Get(context.Background(), namespace.Name, metav1.GetOptions{})
+	}
+}
+
+func getAnnotations(obj client.Object) map[string]string {
+	return obj.GetAnnotations()
 }

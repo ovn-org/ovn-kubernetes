@@ -69,6 +69,7 @@ func NewSecondaryLocalnetNetworkController(cnci *CommonNetworkControllerInfo, ne
 		oc.podAnnotationAllocator = pod.NewPodAnnotationAllocator(
 			netInfo,
 			cnci.watchFactory.PodCoreInformer().Lister(),
+			cnci.watchFactory.NamespaceCoreInformer().Lister(),
 			cnci.kube,
 			claimsReconciler)
 	}

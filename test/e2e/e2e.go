@@ -203,59 +203,6 @@ func checkConnectivityPingToHost(f *framework.Framework, nodeName, podName, host
 	return err
 }
 
-// Place the workload on the specified node and return pod gw route
-func getPodGWRoute(f *framework.Framework, nodeName string, podName string) net.IP {
-	command := []string{"bash", "-c", "sleep 20000"}
-	contName := fmt.Sprintf("%s-container", podName)
-	pod := &v1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: podName,
-		},
-		Spec: v1.PodSpec{
-			Containers: []v1.Container{
-				{
-					Name:    contName,
-					Image:   agnhostImage,
-					Command: command,
-				},
-			},
-			NodeName:      nodeName,
-			RestartPolicy: v1.RestartPolicyNever,
-		},
-	}
-	podClient := f.ClientSet.CoreV1().Pods(f.Namespace.Name)
-	_, err := podClient.Create(context.Background(), pod, metav1.CreateOptions{})
-	if err != nil {
-		framework.Failf("Error trying to create pod")
-	}
-
-	// Wait for pod network setup to be almost ready
-	wait.PollImmediate(1*time.Second, 30*time.Second, func() (bool, error) {
-		podGet, err := podClient.Get(context.Background(), podName, metav1.GetOptions{})
-		if err != nil {
-			return false, nil
-		}
-		if podGet.Annotations != nil && podGet.Annotations[podNetworkAnnotation] != "" {
-			return true, nil
-		}
-		return false, nil
-	})
-	if err != nil {
-		framework.Failf("Error trying to get the pod annotations")
-	}
-
-	podGet, err := podClient.Get(context.Background(), podName, metav1.GetOptions{})
-	if err != nil {
-		framework.Failf("Error trying to get the pod object")
-	}
-	annotation, err := unmarshalPodAnnotation(podGet.Annotations)
-	if err != nil {
-		framework.Failf("Error trying to unmarshal pod annotations")
-	}
-
-	return annotation.Gateways[0]
-}
-
 // Create a pod on the specified node using the agnostic host image
 func createGenericPod(f *framework.Framework, podName, nodeSelector, namespace string, command []string) (*v1.Pod, error) {
 	return createPod(f, podName, nodeSelector, namespace, command, nil)

@@ -538,8 +538,10 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *kapi.Pod, nadName
 	// it for the default network as well. If at all possible, keep them
 	// functionally equivalent going forward.
 	var annotationUpdated bool
-	if bnc.IsSecondary() {
+	if bnc.IsSecondary() || bnc.IsPrimaryNetwork() {
+		klog.Infof("DEBUG| allocating logical port %s for pod %q on switch %s", portName, pod.Name, switchName)
 		podAnnotation, annotationUpdated, err = bnc.allocatePodAnnotationForSecondaryNetwork(pod, existingLSP, nadName, network)
+		klog.Infof("DEBUG| err: %v; annotation: %v", err, podAnnotation)
 	} else {
 		podAnnotation, annotationUpdated, err = bnc.allocatePodAnnotation(pod, existingLSP, podDesc, nadName, network)
 	}
@@ -864,14 +866,31 @@ func (bnc *BaseNetworkController) allocatePodAnnotation(pod *kapi.Pod, existingL
 		}
 	}
 	podAnnotation = &util.PodAnnotation{
-		IPs: podIfAddrs,
-		MAC: podMac,
+		IPs:     podIfAddrs,
+		MAC:     podMac,
+		Primary: false,
 	}
 	var nodeSubnets []*net.IPNet
 	if nodeSubnets = bnc.lsManager.GetSwitchSubnets(switchName); nodeSubnets == nil && bnc.doesNetworkRequireIPAM() {
 		return nil, false, fmt.Errorf("cannot retrieve subnet for assigning gateway routes for pod %s, switch: %s",
 			podDesc, switchName)
 	}
+
+	if util.IsNetworkSegmentationSupportEnabled() {
+		podNamespace, err := bnc.watchFactory.GetNamespace(pod.Namespace)
+		if err != nil {
+			return nil, false, err
+		}
+		activeNetworkForPod := util.GetNamespaceActiveNetwork(podNamespace)
+		if activeNetworkForPod == nadName {
+			podAnnotation.Primary = true
+		}
+	} else {
+		// if user defined network segmentation is not enabled
+		// then we know pod's primary network is "default"
+		podAnnotation.Primary = true
+	}
+
 	err = util.AddRoutesGatewayIP(bnc.NetInfo, pod, podAnnotation, network)
 	if err != nil {
 		return nil, false, err

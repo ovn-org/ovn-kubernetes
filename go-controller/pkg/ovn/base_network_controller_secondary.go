@@ -235,6 +235,15 @@ func (bsnc *BaseSecondaryNetworkController) ensurePodForSecondaryNetwork(pod *ka
 		return err
 	}
 
+	if bsnc.IsPrimaryNetwork() && (bsnc.TopologyType() == "layer2" || bsnc.TopologyType() == "layer3") {
+		network := &nadapi.NetworkSelectionElement{
+			// TODO: we need to get the NAD name here, not the network name.
+			Name:      bsnc.GetNetworkName(),
+			Namespace: pod.Namespace,
+		}
+		return bsnc.ensurePodForUserDefinedPrimaryNet(pod, network)
+	}
+
 	on, networkMap, err := util.GetPodNADToNetworkMapping(pod, bsnc.NetInfo)
 	if err != nil {
 		// configuration error, no need to retry, do not return error
@@ -679,4 +688,29 @@ func (oc *BaseSecondaryNetworkController) allowPersistentIPs() bool {
 		oc.NetInfo.AllowsPersistentIPs() &&
 		util.DoesNetworkRequireIPAM(oc.NetInfo) &&
 		(oc.NetInfo.TopologyType() == types.Layer2Topology || oc.NetInfo.TopologyType() == types.LocalnetTopology)
+}
+
+func (bsnc *BaseSecondaryNetworkController) ensurePodForUserDefinedPrimaryNet(pod *kapi.Pod, network *nadapi.NetworkSelectionElement) error {
+	klog.Infof("DEBUG| invoking the port builder for the defined network")
+	switchName, err := bsnc.getExpectedSwitchName(pod)
+	if err != nil {
+		return err
+	}
+
+	nadName := fmt.Sprintf("%s/%s", pod.Namespace, network.Name)
+	var errs []error
+	if err := bsnc.addLogicalPortToNetworkForNAD(pod, nadName, switchName, network); err != nil {
+		errs = append(
+			errs,
+			fmt.Errorf(
+				"failed to add logical port of Pod %s/%s for NAD %s: %w",
+				pod.Namespace,
+				pod.Name,
+				nadName,
+				err,
+			),
+		)
+	}
+
+	return nil
 }
