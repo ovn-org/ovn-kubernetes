@@ -11,6 +11,7 @@ import (
 
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 
+	nadlister "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/id"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip/subnet"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/pod"
@@ -37,6 +38,8 @@ type PodAllocator struct {
 
 	ipamClaimsReconciler persistentips.PersistentAllocations
 
+	nadLister nadlister.NetworkAttachmentDefinitionLister
+
 	// track pods that have been released but not deleted yet so that we don't
 	// release more than once
 	releasedPods      map[string]sets.Set[string]
@@ -49,12 +52,14 @@ func NewPodAllocator(
 	podAnnotationAllocator *pod.PodAnnotationAllocator,
 	ipAllocator subnet.Allocator,
 	claimsReconciler persistentips.PersistentAllocations,
+	nadLister nadlister.NetworkAttachmentDefinitionLister,
 ) *PodAllocator {
 	podAllocator := &PodAllocator{
 		netInfo:                netInfo,
 		releasedPods:           map[string]sets.Set[string]{},
 		releasedPodsMutex:      sync.Mutex{},
 		podAnnotationAllocator: podAnnotationAllocator,
+		nadLister:              nadLister,
 	}
 
 	// this network might not have IPAM, we will just allocate MAC addresses
@@ -91,6 +96,35 @@ func (a *PodAllocator) Init() error {
 	}
 
 	return nil
+}
+
+// getActiveNetworkForNamespace returns the active network for the given namespace
+// and is a wrapper around util.GetActiveNetworkForNamespace
+func (a *PodAllocator) getActiveNetworkForNamespace(namespace string) (string, error) {
+	return util.GetActiveNetworkForNamespace(namespace, a.nadLister)
+}
+
+// isPrimaryNetwork returns if pod's primary network is same
+// as this controller's network
+func (a *PodAllocator) isPrimaryNetwork(pod *corev1.Pod) (bool, error) {
+	if !util.IsNetworkSegmentationSupportEnabled() {
+		// if user defined network segmentation is not enabled
+		// then we know pod's primary network is "default" and
+		// pod's secondary network is NOT its primary network
+		return a.netInfo.IsDefault(), nil
+	}
+	activeNetwork, err := a.getActiveNetworkForNamespace(pod.Namespace)
+	if err != nil {
+		return false, err
+	}
+	if activeNetwork == types.UnknownNetworkName {
+		// FIXME(tssurya) emit event here; add support for
+		// recorder in the NCM controller
+		return false, fmt.Errorf("unable to determine what is the"+
+			"primary network for this pod %s; please remove multiple primary network"+
+			"NADs from namespace %s", pod.Name, pod.Namespace)
+	}
+	return activeNetwork == a.netInfo.GetNetworkName(), nil
 }
 
 // Reconcile allocates or releases IPs for pods updating the pod annotation
@@ -180,7 +214,8 @@ func (a *PodAllocator) reconcileForNAD(old, new *corev1.Pod, nad string, network
 	return a.allocatePodOnNAD(pod, nad, network)
 }
 
-func (a *PodAllocator) releasePodOnNAD(pod *corev1.Pod, nad string, network *nettypes.NetworkSelectionElement, podDeleted, releaseFromAllocator bool) error {
+func (a *PodAllocator) releasePodOnNAD(pod *corev1.Pod, nad string, network *nettypes.NetworkSelectionElement,
+	podDeleted, releaseFromAllocator bool) error {
 	podAnnotation, _ := util.UnmarshalPodAnnotation(pod.Annotations, nad)
 	if podAnnotation == nil {
 		// track release pods even if they have no annotation in case a user
@@ -269,13 +304,17 @@ func (a *PodAllocator) allocatePodOnNAD(pod *corev1.Pod, nad string, network *ne
 
 	// don't reallocate to new IPs if currently annotated IPs fail to alloccate
 	reallocate := false
-
+	isPrimaryNetwork, err := a.isPrimaryNetwork(pod)
+	if err != nil {
+		return err
+	}
 	updatedPod, podAnnotation, err := a.podAnnotationAllocator.AllocatePodAnnotationWithTunnelID(
 		ipAllocator,
 		idAllocator,
 		pod,
 		network,
 		reallocate,
+		isPrimaryNetwork,
 	)
 
 	if err != nil {

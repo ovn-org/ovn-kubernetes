@@ -299,6 +299,7 @@ func (p testPod) getAnnotationsJson() string {
 		Gateways []string   `json:"gateway_ips,omitempty"`
 		Routes   []podRoute `json:"routes,omitempty"`
 		TunnelID int        `json:"tunnel_id,omitempty"`
+		Primary  bool       `json:"primary"`
 	}
 
 	var address string
@@ -334,6 +335,7 @@ func (p testPod) getAnnotationsJson() string {
 			Gateway:  nodeGWIP,
 			Gateways: nodeGWIPs,
 			Routes:   routes,
+			Primary:  true, // all tests here run with network-segmentation disabled
 		},
 	}
 

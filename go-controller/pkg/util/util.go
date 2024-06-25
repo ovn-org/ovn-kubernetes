@@ -14,7 +14,9 @@ import (
 	"golang.org/x/exp/constraints"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"k8s.io/apimachinery/pkg/labels"
 
+	nadlister "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
 	"crypto/rand"
@@ -315,6 +317,42 @@ func IsClusterIP(svcVIP string) bool {
 		}
 	}
 	return false
+}
+
+// GetActiveNetworkForNamespace returns the active network for the given namespace
+// based on the NADs present in that namespace.
+// active network here means the network managing this namespace and responsible for
+// plumbing all the entities for this namespace
+// this is:
+// 1) "default" if there are no NADs in the namespace OR all NADs are primaryNetwork:false
+// 2) "<secondary-network-name>" if there is exactly ONE NAD with primaryNetwork:true
+// 3) "unknown" under all other conditions
+func GetActiveNetworkForNamespace(namespace string, nadLister nadlister.NetworkAttachmentDefinitionLister) (string, error) {
+	var activeNetwork string
+	namespaceNADs, err := nadLister.NetworkAttachmentDefinitions(namespace).List(labels.Everything())
+	if err != nil {
+		return activeNetwork, err
+	}
+	if len(namespaceNADs) == 0 {
+		return types.DefaultNetworkName, nil
+	}
+	numberOfPrimaryNetworks := 0
+	for _, nad := range namespaceNADs {
+		nadInfo, err := ParseNADInfo(nad)
+		if err != nil {
+			return activeNetwork, err
+		}
+		if nadInfo.IsPrimaryNetwork() {
+			activeNetwork = nadInfo.GetNetworkName()
+			numberOfPrimaryNetworks++
+		}
+	}
+	if numberOfPrimaryNetworks == 1 {
+		return activeNetwork, nil
+	} else if numberOfPrimaryNetworks == 0 {
+		return types.DefaultNetworkName, nil
+	}
+	return types.UnknownNetworkName, nil
 }
 
 func GetSecondaryNetworkLogicalPortName(podNamespace, podName, nadName string) string {

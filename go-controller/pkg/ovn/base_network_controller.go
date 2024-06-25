@@ -619,6 +619,17 @@ func (bnc *BaseNetworkController) recordNodeErrorEvent(node *kapi.Node, nodeErr 
 	bnc.recorder.Eventf(nodeRef, kapi.EventTypeWarning, "ErrorReconcilingNode", nodeErr.Error())
 }
 
+func (bnc *BaseNetworkController) recordPodErrorEvent(pod *kapi.Pod, podErr error) {
+	podRef, err := ref.GetReference(scheme.Scheme, pod)
+	if err != nil {
+		klog.Errorf("Couldn't get a reference to pod %s/%s to post an event: '%v'",
+			pod.Namespace, pod.Name, err)
+	} else {
+		klog.V(5).Infof("Posting a %s event for Pod %s/%s", kapi.EventTypeWarning, pod.Namespace, pod.Name)
+		bnc.recorder.Eventf(podRef, kapi.EventTypeWarning, "ErrorReconcilingPod", podErr.Error())
+	}
+}
+
 func (bnc *BaseNetworkController) doesNetworkRequireIPAM() bool {
 	return util.DoesNetworkRequireIPAM(bnc.NetInfo)
 }
@@ -681,6 +692,35 @@ func (bnc *BaseNetworkController) isLocalZoneNode(node *kapi.Node) bool {
 	}
 	/** HACK END **/
 	return util.GetNodeZone(node) == bnc.zone
+}
+
+// getActiveNetworkForNamespace returns the active network for the given namespace
+// and is a wrapper around util.GetActiveNetworkForNamespace
+func (bnc *BaseNetworkController) getActiveNetworkForNamespace(namespace string) (string, error) {
+	return util.GetActiveNetworkForNamespace(namespace, bnc.watchFactory.NADInformer().Lister())
+}
+
+// isPrimaryNetwork returns if pod's primary network is same
+// as this controller's network
+func (bnc *BaseNetworkController) isPrimaryNetwork(pod *kapi.Pod) (bool, error) {
+	if !util.IsNetworkSegmentationSupportEnabled() {
+		// if user defined network segmentation is not enabled
+		// then we know pod's primary network is "default" and
+		// pod's secondary network is not its NOT primary network
+		return bnc.IsDefault(), nil
+	}
+	activeNetwork, err := bnc.getActiveNetworkForNamespace(pod.Namespace)
+	if err != nil {
+		return false, err
+	}
+	if activeNetwork == types.UnknownNetworkName {
+		err := fmt.Errorf("unable to determine what is the"+
+			"primary network for this pod %s; please remove multiple primary network"+
+			"NADs from namespace %s", pod.Name, pod.Namespace)
+		bnc.recordPodErrorEvent(pod, err)
+		return false, err
+	}
+	return activeNetwork == bnc.GetNetworkName(), nil
 }
 
 func (bnc *BaseNetworkController) isLayer2Interconnect() bool {

@@ -16,6 +16,7 @@ import (
 	"k8s.io/klog/v2"
 
 	ipamclaimsapi "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1"
+	nadlister "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
 
 	idallocator "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/id"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip/subnet"
@@ -166,6 +167,7 @@ func (ncc *networkClusterController) init() error {
 		var (
 			podAllocationAnnotator *annotationalloc.PodAnnotationAllocator
 			ipamClaimsReconciler   persistentips.PersistentAllocations
+			nadLister              nadlister.NetworkAttachmentDefinitionLister
 		)
 
 		if ncc.allowPersistentIPs() {
@@ -184,8 +186,11 @@ func (ncc *networkClusterController) init() error {
 			ncc.kube,
 			ipamClaimsReconciler,
 		)
-
-		ncc.podAllocator = pod.NewPodAllocator(ncc.NetInfo, podAllocationAnnotator, ipAllocator, ipamClaimsReconciler)
+		if util.IsNetworkSegmentationSupportEnabled() {
+			nadLister = ncc.watchFactory.NADInformer().Lister()
+		}
+		ncc.podAllocator = pod.NewPodAllocator(ncc.NetInfo, podAllocationAnnotator, ipAllocator,
+			ipamClaimsReconciler, nadLister)
 		if err := ncc.podAllocator.Init(); err != nil {
 			return fmt.Errorf("failed to initialize pod ip allocator: %w", err)
 		}

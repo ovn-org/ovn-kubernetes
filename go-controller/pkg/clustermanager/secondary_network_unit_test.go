@@ -17,6 +17,7 @@ import (
 
 	ipamclaimsapi "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1"
 	fakeipamclaimclient "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1/apis/clientset/versioned/fake"
+	fakenadclient "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/fake"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip"
 	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
@@ -105,8 +106,9 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 		ginkgo.It("Attach secondary layer2 network", func() {
 			app.Action = func(ctx *cli.Context) error {
 				fakeClient := &util.OVNClusterManagerClientset{
-					KubeClient:       fake.NewSimpleClientset(&v1.NodeList{Items: nodes()}),
-					IPAMClaimsClient: fakeipamclaimclient.NewSimpleClientset(),
+					KubeClient:            fake.NewSimpleClientset(&v1.NodeList{Items: nodes()}),
+					IPAMClaimsClient:      fakeipamclaimclient.NewSimpleClientset(),
+					NetworkAttchDefClient: fakenadclient.NewSimpleClientset(),
 				}
 
 				gomega.Expect(

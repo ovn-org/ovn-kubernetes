@@ -28,6 +28,7 @@ var (
 type BasicNetInfo interface {
 	// basic network information
 	GetNetworkName() string
+	IsDefault() bool
 	IsPrimaryNetwork() bool
 	IsSecondary() bool
 	TopologyType() string
@@ -58,6 +59,11 @@ type DefaultNetInfo struct{}
 // GetNetworkName returns the network name
 func (nInfo *DefaultNetInfo) GetNetworkName() string {
 	return types.DefaultNetworkName
+}
+
+// IsDefault always returns true for default network.
+func (nInfo *DefaultNetInfo) IsDefault() bool {
+	return true
 }
 
 // IsPrimaryNetwork always returns false for default network.
@@ -166,6 +172,11 @@ type secondaryNetInfo struct {
 // GetNetworkName returns the network name
 func (nInfo *secondaryNetInfo) GetNetworkName() string {
 	return nInfo.netName
+}
+
+// IsDefault always returns false for all secondary networks.
+func (nInfo *secondaryNetInfo) IsDefault() bool {
+	return false
 }
 
 // IsPrimaryNetwork returns if this secondary network
