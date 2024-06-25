@@ -487,6 +487,58 @@ func TestIsPrimaryNetwork(t *testing.T) {
 	}
 }
 
+func TestIsDefault(t *testing.T) {
+	type testConfig struct {
+		desc               string
+		inputNetConf       *ovncnitypes.NetConf
+		expectedDefaultVal bool
+	}
+
+	tests := []testConfig{
+		{
+			desc: "defaultNetInfo",
+			inputNetConf: &ovncnitypes.NetConf{
+				NetConf:  cnitypes.NetConf{Name: ovntypes.DefaultNetworkName},
+				Topology: ovntypes.Layer3Topology,
+			},
+			expectedDefaultVal: true,
+		},
+		{
+			desc: "secondaryNetInfoL3 with primary set to false",
+			inputNetConf: &ovncnitypes.NetConf{
+				NetConf:  cnitypes.NetConf{Name: "l3-network"},
+				Topology: ovntypes.Layer3Topology,
+			},
+			expectedDefaultVal: false,
+		},
+		{
+			desc: "secondaryNetInfoL2 with primary set to false",
+			inputNetConf: &ovncnitypes.NetConf{
+				NetConf:  cnitypes.NetConf{Name: "l2-network"},
+				Topology: ovntypes.Layer2Topology,
+			},
+			expectedDefaultVal: false,
+		},
+		{
+			desc: "secondaryNetInfoLocalNet with primary set to true",
+			inputNetConf: &ovncnitypes.NetConf{
+				NetConf:  cnitypes.NetConf{Name: "localnet-network"},
+				Topology: ovntypes.LocalnetTopology,
+			},
+			expectedDefaultVal: false,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.desc, func(t *testing.T) {
+			g := gomega.NewWithT(t)
+			netInfo, err := NewNetInfo(test.inputNetConf)
+			g.Expect(err).To(gomega.BeNil())
+			g.Expect(netInfo.IsDefault()).To(gomega.Equal(test.expectedDefaultVal))
+		})
+	}
+}
+
 func applyNADDefaults(nad *nadv1.NetworkAttachmentDefinition) *nadv1.NetworkAttachmentDefinition {
 	const (
 		name      = "nad1"
