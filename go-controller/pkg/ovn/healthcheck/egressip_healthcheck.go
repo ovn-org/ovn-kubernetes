@@ -1,6 +1,8 @@
 package healthcheck
 
 import (
+	"errors"
+	"fmt"
 	"net"
 	"strconv"
 	"sync"
@@ -20,6 +22,8 @@ import (
 const (
 	serviceEgressIPNode = "Service_Egress_IP"
 )
+
+var ErrNotServing = errors.New("not serving")
 
 // UnimplementedHealthServer must be embedded to have forward compatible implementations.
 type healthServer struct {
@@ -122,105 +126,123 @@ func (ehs *egressIPHealthServer) Run(stopCh <-chan struct{}) {
 // EgressIPHealthClient interface offers the functions needed for connecting to
 // the egress ip health check service.
 type EgressIPHealthClient interface {
-	IsConnected() bool
-	Connect(dialCtx context.Context, mgmtIPs []net.IP, healthCheckPort int) bool
+	Probe(dialCtx context.Context) error
 	Disconnect()
-	Probe(dialCtx context.Context) bool
 }
 
 type egressIPHealthClient struct {
 	nodeName string
-	nodeAddr string
+	nodeIPs  []net.IP
+	port     int
 	conn     *grpc.ClientConn
-	// the probeFailed state is used to mitigate situations when
-	// connection just went down. With that, we do not declare node
-	// unreachable unless connection could not be re-established.
-	probeFailed bool
 }
 
 // NewEgressIPHealthClient allocates an Egress IP health client.
-func NewEgressIPHealthClient(nodeName string) EgressIPHealthClient {
-	return &egressIPHealthClient{nodeName: nodeName}
+func NewEgressIPHealthClient(nodeName string, nodeIPs []net.IP, port int) EgressIPHealthClient {
+	return &egressIPHealthClient{
+		nodeName: nodeName,
+		nodeIPs:  nodeIPs,
+		port:     port,
+	}
 }
 
-// IsConnected returns whether client session is established or not.
-func (ehc *egressIPHealthClient) IsConnected() bool {
+// Disconnect stops gRPC session with the egress ip health check service.
+func (ehc *egressIPHealthClient) Disconnect() {
+	if ehc.conn != nil {
+		klog.V(5).Infof("Closing connection with %s (%s)", ehc.nodeName, ehc.conn.Target())
+		ehc.conn.Close()
+		ehc.conn = nil
+	}
+}
+
+// Probe checks the health of egress ip service using a gRPC session.
+func (ehc *egressIPHealthClient) Probe(dialCtx context.Context) error {
+	if ehc.isConnected() {
+		err := ehc.probe(dialCtx)
+		if err == nil {
+			return nil
+		}
+	}
+
+	// make sure we attempt to connect again in case the connection went down
+	// from the previous Probe
+	var err error
+	for _, nodeIP := range ehc.nodeIPs {
+		err = ehc.connectAndProbe(dialCtx, nodeIP, ehc.port)
+		if err == nil {
+			return nil
+		}
+		klog.V(5).Infof("Probe failed %s (%s): %v", ehc.nodeName, nodeIP, err)
+	}
+
+	return err
+}
+
+// isConnected returns whether client session is established or not.
+func (ehc *egressIPHealthClient) isConnected() bool {
 	return ehc.conn != nil
 }
 
-// Connect attempts to establish gRPC session with the egress ip health check service.
-func (ehc *egressIPHealthClient) Connect(dialCtx context.Context, mgmtIPs []net.IP, healthCheckPort int) bool {
+func (ehc *egressIPHealthClient) connectAndProbe(dialCtx context.Context, nodeIP net.IP, healthCheckPort int) error {
+	err := ehc.connect(dialCtx, nodeIP, healthCheckPort)
+	if err != nil {
+		return err
+	}
+
+	return ehc.probe(dialCtx)
+}
+
+// connect attempts to establish gRPC session with the egress ip health check service.
+func (ehc *egressIPHealthClient) connect(dialCtx context.Context, mgmtIP net.IP, healthCheckPort int) error {
 	var conn *grpc.ClientConn
 	var nodeAddr string
 	var err error
 
 	opts := []grpc.DialOption{
-		grpc.WithBlock(),
 		grpc.WithContextDialer(func(ctx context.Context, s string) (net.Conn, error) {
 			return proxy.Dial(ctx, "tcp", s)
 		}),
 	}
 	cfg := &config.OvnNorth
 	if cfg.CACert == "" || cfg.CertCommonName == "" {
-		klog.Warning("Health checking using insecure connection")
+		klog.V(5).Info("Health checking using insecure connection")
 		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	} else {
 		// Set up the credentials for the connection.
 		creds, err := credentials.NewClientTLSFromFile(cfg.CACert, cfg.CertCommonName)
 		if err != nil {
-			klog.Errorf("Health checking TLS key failed: %v", err)
-			return false
+			return fmt.Errorf("health check TLS key failed: %v", err)
 		}
 		opts = append(opts, grpc.WithTransportCredentials(creds))
 	}
-	for _, nodeMgmtIP := range mgmtIPs {
-		nodeAddr = net.JoinHostPort(nodeMgmtIP.String(), strconv.Itoa(healthCheckPort))
-		conn, err = grpc.DialContext(dialCtx, nodeAddr, opts...)
-		if err == nil && conn != nil {
-			break
-		}
-		klog.Warningf("Could not connect to %s (%s): %v", ehc.nodeName, nodeAddr, err)
-	}
-	if conn == nil {
-		return false
+
+	nodeAddr = net.JoinHostPort(mgmtIP.String(), strconv.Itoa(healthCheckPort))
+	conn, err = grpc.DialContext(dialCtx, nodeAddr, opts...)
+
+	if err != nil {
+		return err
 	}
 
-	klog.Infof("Connected to %s (%s)", ehc.nodeName, nodeAddr)
-	ehc.nodeAddr = nodeAddr
 	ehc.conn = conn
-	return true
+	return nil
 }
 
-// Disconnect stops gRPC session with the egress ip health check service.
-func (ehc *egressIPHealthClient) Disconnect() {
-	if ehc.conn != nil {
-		klog.Infof("Closing connection with %s (%s)", ehc.nodeName, ehc.nodeAddr)
-		ehc.conn.Close()
-		ehc.conn = nil
-	}
-}
-
-// Probe checks the health of egress ip service using a connected gRPC session.
-func (ehc *egressIPHealthClient) Probe(dialCtx context.Context) bool {
+func (ehc *egressIPHealthClient) probe(dialCtx context.Context) error {
 	if ehc.conn == nil {
 		// should never happen
-		klog.Warningf("Unexpected probing before connecting %s", ehc.nodeName)
-		return false
+		return fmt.Errorf("unexpected probing before connecting %s", ehc.nodeName)
 	}
 
 	response, err := NewHealthClient(ehc.conn).Check(dialCtx, &HealthCheckRequest{Service: serviceEgressIPNode})
 	if err != nil {
-		// check failed. What we will return here will depend on ehc.probeFailed. If this is the first failure,
-		// let's tolerate it to account for cases where session went down and we just need it re-established.
-		// Otherwise, declare it failed.
-		klog.V(5).Infof("Probe failed %s (%s): %s", ehc.nodeName, ehc.nodeAddr, err)
 		ehc.Disconnect()
-		prevProbeFailed := ehc.probeFailed
-		ehc.probeFailed = true
-		return !prevProbeFailed
+		return err
 	}
 
-	ehc.probeFailed = false
-	klog.V(5).Infof("Got response from %s (%s): %v", ehc.nodeName, ehc.nodeAddr, response.GetStatus())
-	return response.GetStatus() == HealthCheckResponse_SERVING
+	if response.GetStatus() != HealthCheckResponse_SERVING {
+		klog.V(5).Infof("Unexpected response to probing from node %s: %v", ehc.nodeName, response.GetStatus())
+		return ErrNotServing
+	}
+
+	return nil
 }

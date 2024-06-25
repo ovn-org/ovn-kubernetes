@@ -335,14 +335,9 @@ func (c *Controller) repair() error {
 			continue
 		}
 
-		node, found := allNodes[svcHost]
+		_, found := allNodes[svcHost]
 		if !found {
 			klog.Errorf("Node %s not found: %v", svcHost, err)
-			continue
-		}
-
-		if !nodeIsReady(node) {
-			klog.Infof("Node %s is not ready, it can not be used for egress service %s", svcHost, key)
 			continue
 		}
 
@@ -756,7 +751,7 @@ func (c *Controller) syncEgressService(key string) error {
 
 	node, ok := c.nodes[state.node]
 	if !ok || node.draining {
-		klog.Warningf("EgressService %s/%s is configured on non-existing or not ready node %s, removing", namespace, name, state.node)
+		klog.Warningf("EgressService %s/%s is configured on non-existing node %s, removing", namespace, name, state.node)
 		return c.clearServiceResourcesAndRequeue(key, state)
 	}
 

@@ -2,8 +2,9 @@ package controller
 
 import (
 	"fmt"
-	"golang.org/x/sync/errgroup"
 	"sync"
+
+	"golang.org/x/sync/errgroup"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -17,9 +18,17 @@ import (
 
 const maxRetries = 15
 
-// Controller is a level-driven controller that is shut down after Stop() call.
-type Controller interface {
+// Reconciler is the interface of a level-driven controller with basic
+// functionality to reconcile one or all items
+type Reconciler interface {
+	Reconcile(key string)
 	ReconcileAll()
+}
+
+// Controller is a Reconciler that can be started (with StartControllers) or
+// stopped (with StopControllers)
+type Controller interface {
+	Reconciler
 	addHandler() error
 	startWorkers() error
 	stop()
@@ -193,6 +202,10 @@ func (c *controller[T]) processNextQueueItem() bool {
 	}
 	c.queue.Forget(key)
 	return true
+}
+
+func (c *controller[T]) Reconcile(key string) {
+	c.queue.Add(key)
 }
 
 func (c *controller[T]) ReconcileAll() {
