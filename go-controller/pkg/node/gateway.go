@@ -423,6 +423,11 @@ func (g *gateway) addAllServices() []error {
 	return errs
 }
 
+type bridgeNetConfiguration struct {
+	patchPort   string
+	ofPortPatch string
+}
+
 type bridgeConfiguration struct {
 	sync.Mutex
 	bridgeName  string
@@ -430,10 +435,19 @@ type bridgeConfiguration struct {
 	ips         []*net.IPNet
 	interfaceID string
 	macAddress  net.HardwareAddr
-	patchPort   string
-	ofPortPatch string
+	netConfig   map[string]*bridgeNetConfiguration
 	ofPortPhys  string
 	ofPortHost  string
+}
+
+func (b *bridgeConfiguration) getBridgePorts() ([]bridgeNetConfiguration, string, string) {
+	b.Lock()
+	defer b.Unlock()
+	netConfigs := make([]bridgeNetConfiguration, len(b.netConfig))
+	for _, netConfig := range b.netConfig {
+		netConfigs = append(netConfigs, *netConfig)
+	}
+	return netConfigs, b.uplinkName, b.ofPortPhys
 }
 
 // updateInterfaceIPAddresses sets and returns the bridge's current ips
@@ -467,7 +481,12 @@ func (b *bridgeConfiguration) updateInterfaceIPAddresses(node *kapi.Node) ([]*ne
 }
 
 func bridgeForInterface(intfName, nodeName, physicalNetworkName string, gwIPs []*net.IPNet) (*bridgeConfiguration, error) {
-	res := bridgeConfiguration{}
+	defaultNetConfig := &bridgeNetConfiguration{}
+	res := bridgeConfiguration{
+		netConfig: map[string]*bridgeNetConfiguration{
+			types.DefaultNetworkName: defaultNetConfig,
+		},
+	}
 	gwIntf := intfName
 
 	if bridgeName, _, err := util.RunOVSVsctl("port-to-br", intfName); err == nil {
@@ -529,7 +548,7 @@ func bridgeForInterface(intfName, nodeName, physicalNetworkName string, gwIPs []
 
 	// the name of the patch port created by ovn-controller is of the form
 	// patch-<logical_port_name_of_localnet_port>-to-br-int
-	res.patchPort = "patch-" + res.bridgeName + "_" + nodeName + "-to-br-int"
+	defaultNetConfig.patchPort = "patch-" + res.bridgeName + "_" + nodeName + "-to-br-int"
 
 	// for DPU we use the host MAC address for the Gateway configuration
 	if config.OvnKubeNode.Mode == types.NodeModeDPU {
