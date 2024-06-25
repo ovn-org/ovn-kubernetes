@@ -267,6 +267,7 @@ To implement live migration ovn-kubernetes do the following:
 - Send DHCP replies advertising the allocated IP address to the guest VM (via OVN-Kubernetes DHCP options configured for the logical switch ports).
 - A point to point routing is used so one node's subnet IP can be routed from different node
 - The VM's gateway IP and MAC are independent of the node they are running on using proxy arp
+- Send GARPs and unsolicited NAs after live migration to fix neighbors tables and point to gw mac
 
 **Point to point routing:**
 
@@ -427,6 +428,80 @@ The point to point routing cleanup (remove of static routes and policies) will b
 - VM is deleted, all the routing related to the VM is removed at all the ovn zones.
 - VM is live migrated back to the node that owns its IP, all the routing related to the VM is removed at all the ovn zones.
 - ovn-kubernetes controllers are restarted, stale routing is removed.
+
+**Advertising neighbors:**
+To improve the connectivity after live migration  ovn-k sends GARPs and unsolicited NAs to pods at node owning the subnet and 
+to VM at running at migration target node.
+
+To understand it first we have to check how the neighbors tables looks before live migration at vm and pods running at the same
+node.
+
+Let's first look at the logical switch ports of one vm and one pod running at the same node and their neighbors tables
+
+```text
+    ┌───────────────────────────────┐
+    │     logical switch node1      │
+    │       (10.244.0.0/24)         │
+    └───────────────────────────────┘ 
+┌──────────────────────┐  │     │   ┌──────────────────────┐      
+│ lsp ns-virt-launcher1│──┘     └───│ lsp pod1             │     
+│ address:             │            │ address:             │    
+│  0a:58:0a:f4:00:01   │            │  0a:58:0a:f4:00:02   │
+│  10.244.0.8          │            │  10.244.0.9          │
+└──────────────────────┘            └──────────────────────┘
+neighbors table vm:
+┌─────────────────────────────────┐
+│ 10.244.0.9 -> 0a:58:0a:f4:00:02 │
+└─────────────────────────────────┘
+neighbors table pod1:
+┌─────────────────────────────────┐
+│ 10.244.0.8 -> 0a:58:0a:f4:00:01 │
+└─────────────────────────────────┘
+```
+
+Now after live migration from node1 to node2 the situation is the following:
+
+
+```text
+    ┌────────────────────────┐ ┌────────────────────────┐
+    │logical switch node2    │ │logic switch node1      │ 
+    │   (10.244.1.0/24)      │ │   (10.244.0.0/24)      │
+    └────────────────────────┘ └────────────────────────┘ 
+┌──────────────────────┐  │     │   ┌──────────────────────┐      
+│ lsp ns-virt-launcher1│──┘     └───│ lsp pod1             │     
+│ address:             │            │ address:             │    
+│  0a:58:0a:f4:00:01   │            │  0a:58:0a:f4:00:02   │
+│  10.244.0.8          │            │  10.244.0.9          │
+└──────────────────────┘            └──────────────────────┘
+neighbors table vm:
+┌─────────────────────────────────┐
+│ 10.244.0.9 -> 0a:58:0a:f4:00:02 │
+└─────────────────────────────────┘
+neighbors table pod1:
+┌─────────────────────────────────┐
+│ 10.244.0.8 -> 0a:58:0a:f4:00:01 │
+└─────────────────────────────────┘
+```
+
+Now the neighbors tables are incorrect since none of those mac addresses are 
+are part of the logical switches, after some time or traffic neighbors cache
+get invalidated and updated so they will point to the arp_proxy mac `0a:58:0a:f3:00:00`, problem
+is that it may take too much time and connections will be broken.
+
+To improve the situation ovn-k sends the following GARPs and unsolicited NA taking
+into account that the arp proxy mac is `0a:58:0a:f3:00:00`:
+
+At node1 broadcast vm's IP should use arp proxy mac
+- `GARP(10.244.0.8 -> 0a:58:0a:f3:00:00, broadcast mac)`
+- one per migrated VM
+
+At node2 advertise to VM that pod's from the same subnet should go over proxy_arp:
+- `GARP(10.244.0.9 -> 0a:58:0a:f3:00:00, vm mac(0a:58:0a:f4:00:01))`
+- one per pod on the same subnet (in this example, only for pod1).
+
+Also ovn-k removes the mac address from the VM's old LSP after live migration
+to be sure that generated ARP's from pods are not answered back with VM's mac
+instead of arp proxy.
 
 ## Future Items
 

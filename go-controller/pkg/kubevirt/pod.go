@@ -1,6 +1,7 @@
 package kubevirt
 
 import (
+	"bytes"
 	"fmt"
 	"net"
 
@@ -8,6 +9,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ktypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/retry"
+	"k8s.io/klog/v2"
 
 	kubevirtv1 "kubevirt.io/api/core/v1"
 
@@ -199,6 +201,29 @@ func nodeContainsPodSubnet(watchFactory *factory.WatchFactory, nodeName string, 
 	return false, nil
 }
 
+// findNodeOwningSubnet returns the node owning the subnet found in the pod
+// annotation passed as input
+func findNodeOwningSubnet(watchFactory *factory.WatchFactory, podAnnotation *util.PodAnnotation, nadName string) (*corev1.Node, error) {
+	nodes, err := watchFactory.GetNodes()
+	if err != nil {
+		return nil, err
+	}
+	for _, node := range nodes {
+		nodeHostSubNets, err := util.ParseNodeHostSubnetAnnotation(node, nadName)
+		if err != nil {
+			return nil, err
+		}
+		for _, subnet := range podAnnotation.IPs {
+			for _, nodeHostSubNet := range nodeHostSubNets {
+				if nodeHostSubNet.Contains(subnet.IP) {
+					return node, nil
+				}
+			}
+		}
+	}
+	return nil, nil
+}
+
 // ExtractVMNameFromPod retunes namespace and name of vm backed up but the pod
 // for regular pods return nil
 func ExtractVMNameFromPod(pod *corev1.Pod) *ktypes.NamespacedName {
@@ -342,4 +367,42 @@ func ZoneContainsPodSubnetOrUntracked(watchFactory *factory.WatchFactory, lsMana
 	// we can just use one of the IPs to check if it belongs to a subnet assigned
 	// to a node
 	return hostSubnets, !util.IsContainedInAnyCIDR(annotation.IPs[0], hostSubnets...), nil
+}
+
+func findRunningPodsIPsFromPodSubnet(watchFactory *factory.WatchFactory, podAnnotation *util.PodAnnotation, nadName string) ([]*net.IPNet, error) {
+	nodeOwningSubnet, err := findNodeOwningSubnet(watchFactory, podAnnotation, nadName)
+	if err != nil {
+		return nil, err
+	}
+	if nodeOwningSubnet == nil {
+		return nil, nil
+	}
+
+	pods, err := watchFactory.GetAllPods()
+	if err != nil {
+		return nil, err
+	}
+	ipsToNotify := []*net.IPNet{}
+	for _, podToNotify := range pods {
+		if podToNotify.Spec.NodeName != nodeOwningSubnet.Name {
+			continue
+		}
+		sameSubnetPodAnnotation, err := util.UnmarshalPodAnnotation(podToNotify.Annotations, nadName)
+		if err != nil {
+			klog.Errorf("Failed unmarshaling pod ovn for pod %s/%s annotations before GARP: %v", podToNotify.Namespace, podToNotify.Name, err)
+			continue
+		}
+
+		if util.PodCompleted(podToNotify) {
+			continue
+		}
+
+		//FIXME: Is comparing MAC enough to discard pod's from same VM
+		if bytes.Equal(sameSubnetPodAnnotation.MAC, podAnnotation.MAC) {
+			continue
+		}
+
+		ipsToNotify = append(ipsToNotify, sameSubnetPodAnnotation.IPs...)
+	}
+	return ipsToNotify, nil
 }

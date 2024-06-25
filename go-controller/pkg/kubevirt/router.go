@@ -2,6 +2,7 @@ package kubevirt
 
 import (
 	"fmt"
+	"os"
 
 	corev1 "k8s.io/api/core/v1"
 	utilnet "k8s.io/utils/net"
@@ -155,6 +156,17 @@ func EnsureLocalZonePodAddressesToNodeRoute(watchFactory *factory.WatchFactory, 
 		}); err != nil {
 			return fmt.Errorf("failed adding static route: %v", err)
 		}
+
+	}
+
+	currentNodeOwnsSubnet, err := nodeContainsPodSubnet(watchFactory, os.Getenv("K8S_NODE"), podAnnotation, nadName)
+	if err != nil {
+		return err
+	}
+	if !vmRunningAtNodeOwningSubnet && currentNodeOwnsSubnet {
+		if err := deleteStaleLogicalSwitchPorts(watchFactory, nbClient, pod); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -232,7 +244,19 @@ func EnsureRemoteZonePodAddressesToNodeRoute(controllerName string, watchFactory
 		}); err != nil {
 			return fmt.Errorf("failed adding static route to remote pod: %v", err)
 		}
+
 	}
+
+	currentNodeOwnsSubnet, err := nodeContainsPodSubnet(watchFactory, os.Getenv("K8S_NODE"), podAnnotation, nadName)
+	if err != nil {
+		return err
+	}
+	if !vmRunningAtNodeOwningSubnet && currentNodeOwnsSubnet {
+		if err := deleteStaleLogicalSwitchPorts(watchFactory, nbClient, pod); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
