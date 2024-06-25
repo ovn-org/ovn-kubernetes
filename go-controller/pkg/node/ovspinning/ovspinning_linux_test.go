@@ -6,7 +6,6 @@ package ovspinning
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"os/exec"
 	"runtime"
@@ -20,7 +19,6 @@ import (
 )
 
 func TestAlignCPUAffinity(t *testing.T) {
-
 	ovsDBPid, ovsDBStop := mockOvsdbProcess(t)
 	defer ovsDBStop()
 
@@ -69,7 +67,7 @@ func TestAlignCPUAffinity(t *testing.T) {
 	}
 
 	// Disable the feature by making the enabler file empty
-	ioutil.WriteFile(featureEnablerFile, []byte(""), 0)
+	os.WriteFile(featureEnablerFile, []byte(""), 0)
 	assert.NoError(t, err)
 
 	var tmpCPUset unix.CPUSet
@@ -82,14 +80,13 @@ func TestAlignCPUAffinity(t *testing.T) {
 }
 
 func TestIsFileNotEmpty(t *testing.T) {
-
 	defer mockFeatureEnableFile(t, "")()
 
 	result, err := isFileNotEmpty(featureEnablerFile)
 	assert.NoError(t, err)
 	assert.False(t, result)
 
-	ioutil.WriteFile(featureEnablerFile, []byte("1"), 0)
+	os.WriteFile(featureEnablerFile, []byte("1"), 0)
 	result, err = isFileNotEmpty(featureEnablerFile)
 	assert.NoError(t, err)
 	assert.True(t, result)
@@ -135,7 +132,6 @@ func TestPrintCPUSetRanges(t *testing.T) {
 
 func mockOvsdbProcess(t *testing.T) (int, func()) {
 	ctx, stopCmd := context.WithCancel(context.Background())
-	defer stopCmd()
 
 	cmd := exec.CommandContext(ctx, "sleep", "10")
 
@@ -155,10 +151,8 @@ func mockOvsdbProcess(t *testing.T) (int, func()) {
 
 func mockOvsVSwitchdProcess(t *testing.T) (int, func()) {
 	ctx, stopCmd := context.WithCancel(context.Background())
-	defer stopCmd()
 
-	cmd := exec.CommandContext(ctx, "sleep", "10")
-
+	cmd := exec.CommandContext(ctx, "go", "run", "testdata/fake_thread_process.go")
 	err := cmd.Start()
 	assert.NoError(t, err)
 
@@ -166,6 +160,13 @@ func mockOvsVSwitchdProcess(t *testing.T) (int, func()) {
 	getOvsVSwitchdPIDFn = func() (string, error) {
 		return fmt.Sprintf("%d", cmd.Process.Pid), nil
 	}
+
+	// Ensure the fake process has some thread
+	assert.Eventually(t, func() bool {
+		tasks, err := getThreadsOfProcess(cmd.Process.Pid)
+		assert.NoError(t, err)
+		return len(tasks) > 1
+	}, time.Second, 100*time.Millisecond, "ovs-vswitchd fake process does not have enough threads")
 
 	return cmd.Process.Pid, func() {
 		stopCmd()
@@ -184,13 +185,13 @@ func setTickDuration(d time.Duration) func() {
 
 func mockFeatureEnableFile(t *testing.T, data string) func() {
 
-	f, err := ioutil.TempFile("", "enable_dynamic_cpu_affinity")
+	f, err := os.CreateTemp("", "enable_dynamic_cpu_affinity")
 	assert.NoError(t, err)
 
 	previousValue := featureEnablerFile
 	featureEnablerFile = f.Name()
 
-	ioutil.WriteFile(featureEnablerFile, []byte(data), 0)
+	os.WriteFile(featureEnablerFile, []byte(data), 0)
 	assert.NoError(t, err)
 
 	return func() {
@@ -207,6 +208,16 @@ func assertPIDHasSchedAffinity(t *testing.T, pid int, expectedCPUSet unix.CPUSet
 
 		return actual == expectedCPUSet
 	}, time.Second, 10*time.Millisecond, "pid[%d] Expected CPUSet %0x != Actual CPUSet %0x", pid, expectedCPUSet, actual)
+
+	tasks, err := getThreadsOfProcess(pid)
+	assert.NoError(t, err)
+
+	for _, task := range tasks {
+		err := unix.SchedGetaffinity(task, &actual)
+		assert.NoError(t, err)
+		assert.Equal(t, expectedCPUSet, actual,
+			"task[%d] of process[%d] Expected CPUSet %0x != Actual CPUSet %0x", task, pid, expectedCPUSet, actual)
+	}
 }
 
 func assertNeverPIDHasSchedAffinity(t *testing.T, pid int, targetCPUSet unix.CPUSet) {
