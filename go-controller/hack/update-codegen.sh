@@ -53,7 +53,7 @@ for crd in ${crds}; do
     --output-base "${SCRIPT_ROOT}" \
     --output-package github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/v1/apis/clientset \
     --apply-configuration-package github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/v1/apis/applyconfiguration \
-    --plural-exceptions="EgressQoS:EgressQoSes" \
+    --plural-exceptions="EgressQoS:EgressQoSes,RouteAdvertisements:RouteAdvertisements" \
     "$@"
 
   echo "Generating listers for $crd"
@@ -62,7 +62,7 @@ for crd in ${crds}; do
     --input-dirs github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/v1 \
     --output-base "${SCRIPT_ROOT}" \
     --output-package github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/v1/apis/listers \
-    --plural-exceptions="EgressQoS:EgressQoSes" \
+    --plural-exceptions="EgressQoS:EgressQoSes,RouteAdvertisements:RouteAdvertisements" \
     "$@"
 
   echo "Generating informers for $crd"
@@ -73,7 +73,7 @@ for crd in ${crds}; do
     --listers-package  github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/v1/apis/listers \
     --output-base "${SCRIPT_ROOT}" \
     --output-package github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/v1/apis/informers \
-    --plural-exceptions="EgressQoS:EgressQoSes" \
+    --plural-exceptions="EgressQoS:EgressQoSes,RouteAdvertisements:RouteAdvertisements" \
     "$@"
 
   echo "Copying apis for $crd"
@@ -113,5 +113,7 @@ echo "Copying adminpolicybasedexternalroutes CRD"
 cp _output/crds/k8s.ovn.org_adminpolicybasedexternalroutes.yaml ../dist/templates/k8s.ovn.org_adminpolicybasedexternalroutes.yaml.j2
 echo "Copying egressService CRD"
 cp _output/crds/k8s.ovn.org_egressservices.yaml ../dist/templates/k8s.ovn.org_egressservices.yaml.j2
+echo "Copying routeAdvertisements CRD"
+cp _output/crds/k8s.ovn.org_routeadvertisements.yaml ../dist/templates/k8s.ovn.org_routeadvertisements.yaml.j2
 echo "Copying IPAMClaim CRD"
 curl -sSL https://raw.githubusercontent.com/k8snetworkplumbingwg/ipamclaims/v0.4.0-alpha/artifacts/k8s.cni.cncf.io_ipamclaims.yaml -o ../dist/templates/k8s.cni.cncf.io_ipamclaims.yaml
