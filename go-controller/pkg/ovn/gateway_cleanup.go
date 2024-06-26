@@ -93,7 +93,7 @@ func (oc *DefaultNetworkController) delPbrAndNatRules(nodeName string, lrpTypes 
 	mgmtPortName := oc.GetNetworkScopedK8sMgmtIntfName(nodeName)
 	nat := libovsdbops.BuildDNATAndSNAT(nil, nil, mgmtPortName, "", nil)
 	logicalRouter := nbdb.LogicalRouter{
-		Name: types.OVNClusterRouter,
+		Name: oc.GetNetworkScopedClusterRouterName(),
 	}
 	err := libovsdbops.DeleteNATs(oc.nbClient, &logicalRouter, nat)
 	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {

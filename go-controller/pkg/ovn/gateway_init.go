@@ -357,9 +357,9 @@ func (oc *DefaultNetworkController) gatewayInit(nodeName string, clusterIPSubnet
 				libovsdbops.PolicyEqualPredicate(lrsr.Policy, item.Policy)
 		}
 		err := libovsdbops.CreateOrReplaceLogicalRouterStaticRouteWithPredicate(oc.nbClient,
-			types.OVNClusterRouter, &lrsr, p, &lrsr.Nexthop)
+			oc.GetNetworkScopedClusterRouterName(), &lrsr, p, &lrsr.Nexthop)
 		if err != nil {
-			return fmt.Errorf("error creating static route %+v in %s: %v", lrsr, types.OVNClusterRouter, err)
+			return fmt.Errorf("error creating static route %+v in %s: %v", lrsr, oc.GetNetworkScopedClusterRouterName(), err)
 		}
 	}
 
@@ -370,7 +370,7 @@ func (oc *DefaultNetworkController) gatewayInit(nodeName string, clusterIPSubnet
 		if err != nil {
 			return fmt.Errorf("failed to add source IP address based "+
 				"routes in distributed router %s: %v",
-				types.OVNClusterRouter, err)
+				oc.GetNetworkScopedClusterRouterName(), err)
 		}
 
 		lrsr := nbdb.LogicalRouterStaticRoute{
@@ -389,10 +389,10 @@ func (oc *DefaultNetworkController) gatewayInit(nodeName string, clusterIPSubnet
 			mgmtIfAddr := util.GetNodeManagementIfAddr(hostSubnet)
 			oc.staticRouteCleanup([]net.IP{mgmtIfAddr.IP})
 
-			err := libovsdbops.CreateOrReplaceLogicalRouterStaticRouteWithPredicate(oc.nbClient, types.OVNClusterRouter,
+			err := libovsdbops.CreateOrReplaceLogicalRouterStaticRouteWithPredicate(oc.nbClient, oc.GetNetworkScopedClusterRouterName(),
 				&lrsr, p, &lrsr.Nexthop)
 			if err != nil {
-				return fmt.Errorf("error creating static route %+v in GR %s: %v", lrsr, types.OVNClusterRouter, err)
+				return fmt.Errorf("error creating static route %+v in GR %s: %v", lrsr, oc.GetNetworkScopedClusterRouterName(), err)
 			}
 		} else if config.Gateway.Mode == config.GatewayModeLocal {
 			// If migrating from shared to local gateway, let's remove the static routes towards
@@ -403,9 +403,9 @@ func (oc *DefaultNetworkController) gatewayInit(nodeName string, clusterIPSubnet
 				return item.IPPrefix == lrsr.IPPrefix && item.Policy != nil && *item.Policy == *lrsr.Policy &&
 					config.ContainsJoinIP(net.ParseIP(item.Nexthop))
 			}
-			err := libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicate(oc.nbClient, types.OVNClusterRouter, p)
+			err := libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicate(oc.nbClient, oc.GetNetworkScopedClusterRouterName(), p)
 			if err != nil {
-				return fmt.Errorf("error deleting static route %+v in GR %s: %v", lrsr, types.OVNClusterRouter, err)
+				return fmt.Errorf("error deleting static route %+v in GR %s: %v", lrsr, oc.GetNetworkScopedClusterRouterName(), err)
 			}
 		}
 	}
@@ -702,7 +702,7 @@ func (oc *DefaultNetworkController) syncPolicyBasedRoutes(nodeName string, match
 				if policy.Nexthops[0] != nexthop {
 					if err := oc.deletePolicyBasedRoutes(policy.UUID, priority); err != nil {
 						return fmt.Errorf("failed to delete policy route '%s' for host %q on %s "+
-							"error: %v", policy.UUID, nodeName, types.OVNClusterRouter, err)
+							"error: %v", policy.UUID, nodeName, oc.GetNetworkScopedClusterRouterName(), err)
 					}
 					continue
 				}
@@ -717,7 +717,7 @@ func (oc *DefaultNetworkController) syncPolicyBasedRoutes(nodeName string, match
 				if !desiredMatchFound {
 					if err := oc.deletePolicyBasedRoutes(policy.UUID, priority); err != nil {
 						return fmt.Errorf("failed to delete policy route '%s' for host %q on %s "+
-							"error: %v", policy.UUID, nodeName, types.OVNClusterRouter, err)
+							"error: %v", policy.UUID, nodeName, oc.GetNetworkScopedClusterRouterName(), err)
 					}
 					continue
 				}
@@ -731,7 +731,7 @@ func (oc *DefaultNetworkController) syncPolicyBasedRoutes(nodeName string, match
 	for match := range matchTracker {
 		if err := oc.createPolicyBasedRoutes(match, priority, nexthop); err != nil {
 			return fmt.Errorf("failed to add policy route '%s' for host %q on %s "+
-				"error: %v", match, nodeName, types.OVNClusterRouter, err)
+				"error: %v", match, nodeName, oc.GetNetworkScopedClusterRouterName(), err)
 		}
 	}
 	return nil
@@ -763,10 +763,10 @@ func (oc *DefaultNetworkController) createPolicyBasedRoutes(match, priority, nex
 		return item.Priority == lrp.Priority && item.Match == lrp.Match
 	}
 
-	err := libovsdbops.CreateOrUpdateLogicalRouterPolicyWithPredicate(oc.nbClient, types.OVNClusterRouter, &lrp, p,
+	err := libovsdbops.CreateOrUpdateLogicalRouterPolicyWithPredicate(oc.nbClient, oc.GetNetworkScopedClusterRouterName(), &lrp, p,
 		&lrp.Nexthops, &lrp.Action)
 	if err != nil {
-		return fmt.Errorf("error creating policy %+v on router %s: %v", lrp, types.OVNClusterRouter, err)
+		return fmt.Errorf("error creating policy %+v on router %s: %v", lrp, oc.GetNetworkScopedClusterRouterName(), err)
 	}
 
 	return nil
@@ -774,7 +774,7 @@ func (oc *DefaultNetworkController) createPolicyBasedRoutes(match, priority, nex
 
 func (oc *DefaultNetworkController) deletePolicyBasedRoutes(policyID, priority string) error {
 	lrp := nbdb.LogicalRouterPolicy{UUID: policyID}
-	err := libovsdbops.DeleteLogicalRouterPolicies(oc.nbClient, types.OVNClusterRouter, &lrp)
+	err := libovsdbops.DeleteLogicalRouterPolicies(oc.nbClient, oc.GetNetworkScopedClusterRouterName(), &lrp)
 	if err != nil {
 		return fmt.Errorf("error deleting policy %s: %v", policyID, err)
 	}
