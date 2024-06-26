@@ -55,6 +55,22 @@ func (c *openflowManager) setDefaultBridgeMAC(macAddr net.HardwareAddr) {
 	c.defaultBridge.macAddress = macAddr
 }
 
+// TODO(dceara):
+func (c *openflowManager) addNetwork(networkName string) {
+	c.defaultBridge.addBridgeNetConfig(networkName)
+	if c.externalGatewayBridge != nil {
+		c.externalGatewayBridge.addBridgeNetConfig(networkName)
+	}
+}
+
+// TODO(dceara):
+func (c *openflowManager) delNetwork(networkName string) {
+	c.defaultBridge.delBridgeNetConfig(networkName)
+	if c.externalGatewayBridge != nil {
+		c.externalGatewayBridge.delBridgeNetConfig(networkName)
+	}
+}
+
 func (c *openflowManager) updateFlowCacheEntry(key string, flows []string) {
 	c.flowMutex.Lock()
 	defer c.flowMutex.Unlock()

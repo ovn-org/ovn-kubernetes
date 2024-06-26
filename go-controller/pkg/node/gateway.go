@@ -34,6 +34,13 @@ type Gateway interface {
 	Reconcile() error
 }
 
+// TODO: better name?
+type SecondaryNetworkGateway interface {
+	//TODO
+	AddNetwork(networkName string)
+	DelNetwork(networkName string)
+}
+
 type gateway struct {
 	// loadBalancerHealthChecker is a health check server for load-balancer type services
 	loadBalancerHealthChecker informer.ServiceAndEndpointsEventHandler
@@ -53,6 +60,43 @@ type gateway struct {
 	watchFactory *factory.WatchFactory // used for retry
 	stopChan     <-chan struct{}
 	wg           *sync.WaitGroup
+}
+
+// TODO(dceara): move?
+func (g *gateway) AddNetwork(networkName string) {
+	if g.openflowManager != nil {
+		g.openflowManager.addNetwork(networkName)
+
+		waiter := newStartupWaiter()
+		readyFunc := func() (bool, error) {
+			//TODO: this should be run for the network config only.
+			time.Sleep(5 * time.Second)
+			setBridgeOfPorts(g.openflowManager.defaultBridge)
+			if g.openflowManager.externalGatewayBridge != nil {
+				setBridgeOfPorts(g.openflowManager.externalGatewayBridge)
+			}
+			return true, nil
+		}
+		postFunc := func() error {
+			g.Reconcile()
+			// g.openflowManager.requestFlowSync()
+			return nil
+		}
+		waiter.AddWait(readyFunc, postFunc)
+		if err := waiter.Wait(); err != nil {
+			//return err
+			//TODO
+		}
+	}
+}
+
+// TODO(dceara): move?
+func (g *gateway) DelNetwork(networkName string) {
+	if g.openflowManager != nil {
+		g.openflowManager.delNetwork(networkName)
+		//TODO: trigger resync and wait?
+		g.openflowManager.requestFlowSync()
+	}
 }
 
 func (g *gateway) AddService(svc *kapi.Service) error {
@@ -430,6 +474,7 @@ type bridgeNetConfiguration struct {
 
 type bridgeConfiguration struct {
 	sync.Mutex
+	nodeName    string
 	bridgeName  string
 	uplinkName  string
 	ips         []*net.IPNet
@@ -438,6 +483,39 @@ type bridgeConfiguration struct {
 	netConfig   map[string]*bridgeNetConfiguration
 	ofPortPhys  string
 	ofPortHost  string
+}
+
+// TODO(dceara)
+// the name of the patch port created by ovn-controller is of the form
+// patch-<logical_port_name_of_localnet_port>-to-br-int
+func (b *bridgeConfiguration) getNetworkScopedPatchPortName(networkName string) string {
+	if networkName == types.DefaultNetworkName {
+		return "patch-" + b.bridgeName + "_" + b.nodeName + "-to-br-int"
+	} else {
+		return "patch-" + b.bridgeName + "_" + networkName + "_" + b.nodeName + "-to-br-int"
+	}
+}
+
+func (b *bridgeConfiguration) addBridgeNetConfig(netName string) error {
+	b.Lock()
+	defer b.Unlock()
+
+	patchPort := b.getNetworkScopedPatchPortName(netName)
+	if _, found := b.netConfig[netName]; found {
+		return fmt.Errorf("failed to add network config %s to bridge %s: network already exists", netName, b.bridgeName)
+	}
+
+	b.netConfig[netName] = &bridgeNetConfiguration{
+		patchPort: patchPort,
+	}
+	return nil
+}
+
+func (b *bridgeConfiguration) delBridgeNetConfig(netName string) {
+	b.Lock()
+	defer b.Unlock()
+
+	delete(b.netConfig, netName)
 }
 
 func (b *bridgeConfiguration) getBridgePorts() ([]bridgeNetConfiguration, string, string) {
@@ -483,6 +561,7 @@ func (b *bridgeConfiguration) updateInterfaceIPAddresses(node *kapi.Node) ([]*ne
 func bridgeForInterface(intfName, nodeName, physicalNetworkName string, gwIPs []*net.IPNet) (*bridgeConfiguration, error) {
 	defaultNetConfig := &bridgeNetConfiguration{}
 	res := bridgeConfiguration{
+		nodeName: nodeName,
 		netConfig: map[string]*bridgeNetConfiguration{
 			types.DefaultNetworkName: defaultNetConfig,
 		},
@@ -548,7 +627,7 @@ func bridgeForInterface(intfName, nodeName, physicalNetworkName string, gwIPs []
 
 	// the name of the patch port created by ovn-controller is of the form
 	// patch-<logical_port_name_of_localnet_port>-to-br-int
-	defaultNetConfig.patchPort = "patch-" + res.bridgeName + "_" + nodeName + "-to-br-int"
+	defaultNetConfig.patchPort = res.getNetworkScopedPatchPortName(types.DefaultNetworkName)
 
 	// for DPU we use the host MAC address for the Gateway configuration
 	if config.OvnKubeNode.Mode == types.NodeModeDPU {

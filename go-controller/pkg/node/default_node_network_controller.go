@@ -91,11 +91,19 @@ func NewCommonNodeNetworkControllerInfo(kubeClient clientset.Interface, apbExter
 	return newCommonNodeNetworkControllerInfo(kubeClient, &kube.Kube{KClient: kubeClient}, apbExternalRouteClient, wf, eventRecorder, name)
 }
 
+// TODO
+type NodeSecondaryGatewayManager interface {
+	AddNetwork(networkName string)
+	DelNetwork(networkName string)
+}
+
 // DefaultNodeNetworkController is the object holder for utilities meant for node management of default network
 type DefaultNodeNetworkController struct {
 	BaseNodeNetworkController
 
-	gateway Gateway
+	gateway                 Gateway
+	secondaryNetworkGateway SecondaryNetworkGateway
+
 	// Node healthcheck server for cloud load balancers
 	healthzServer *proxierHealthUpdater
 	routeManager  *routemanager.Controller
@@ -106,6 +114,16 @@ type DefaultNodeNetworkController struct {
 	retryEndpointSlices *retry.RetryFramework
 
 	apbExternalRouteNodeController *apbroute.ExternalGatewayNodeController
+}
+
+// TODO(dceara): move?
+func (nc *DefaultNodeNetworkController) AddNetwork(networkName string) {
+	nc.secondaryNetworkGateway.AddNetwork(networkName)
+}
+
+// TODO(dceara): move?
+func (nc *DefaultNodeNetworkController) DelNetwork(networkName string) {
+	nc.secondaryNetworkGateway.DelNetwork(networkName)
 }
 
 func newDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, stopChan chan struct{},
