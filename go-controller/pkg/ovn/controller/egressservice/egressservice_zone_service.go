@@ -250,7 +250,7 @@ func (c *Controller) createOrUpdateLogicalRouterPoliciesOps(key, v4MgmtIP, v6Mgm
 			return item.Match == lrp.Match && item.Priority == lrp.Priority && item.ExternalIDs[svcExternalIDKey] == key
 		}
 
-		allOps, err = libovsdbops.CreateOrUpdateLogicalRouterPolicyWithPredicateOps(c.nbClient, allOps, ovntypes.OVNClusterRouter, lrp, p)
+		allOps, err = libovsdbops.CreateOrUpdateLogicalRouterPolicyWithPredicateOps(c.nbClient, allOps, c.GetNetworkScopedClusterRouterName(), lrp, p)
 		if err != nil {
 			return nil, err
 		}
@@ -270,7 +270,7 @@ func (c *Controller) createOrUpdateLogicalRouterPoliciesOps(key, v4MgmtIP, v6Mgm
 			return item.Match == lrp.Match && item.Priority == lrp.Priority && item.ExternalIDs[svcExternalIDKey] == key
 		}
 
-		allOps, err = libovsdbops.CreateOrUpdateLogicalRouterPolicyWithPredicateOps(c.nbClient, allOps, ovntypes.OVNClusterRouter, lrp, p)
+		allOps, err = libovsdbops.CreateOrUpdateLogicalRouterPolicyWithPredicateOps(c.nbClient, allOps, c.GetNetworkScopedClusterRouterName(), lrp, p)
 		if err != nil {
 			return nil, err
 		}
@@ -291,7 +291,7 @@ func (c *Controller) deleteLogicalRouterPoliciesOps(key string, v4Endpoints, v6E
 			return item.Match == match && item.Priority == ovntypes.EgressSVCReroutePriority && item.ExternalIDs[svcExternalIDKey] == key
 		}
 
-		allOps, err = libovsdbops.DeleteLogicalRouterPolicyWithPredicateOps(c.nbClient, allOps, ovntypes.OVNClusterRouter, p)
+		allOps, err = libovsdbops.DeleteLogicalRouterPolicyWithPredicateOps(c.nbClient, allOps, c.GetNetworkScopedClusterRouterName(), p)
 		if err != nil {
 			return nil, err
 		}
@@ -303,7 +303,7 @@ func (c *Controller) deleteLogicalRouterPoliciesOps(key string, v4Endpoints, v6E
 			return item.Match == match && item.Priority == ovntypes.EgressSVCReroutePriority && item.ExternalIDs[svcExternalIDKey] == key
 		}
 
-		allOps, err = libovsdbops.DeleteLogicalRouterPolicyWithPredicateOps(c.nbClient, allOps, ovntypes.OVNClusterRouter, p)
+		allOps, err = libovsdbops.DeleteLogicalRouterPolicyWithPredicateOps(c.nbClient, allOps, c.GetNetworkScopedClusterRouterName(), p)
 		if err != nil {
 			return nil, err
 		}
