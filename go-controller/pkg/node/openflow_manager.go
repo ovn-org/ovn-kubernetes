@@ -253,7 +253,7 @@ func checkPorts(patchIntf, ofPortPatch, physIntf, ofPortPhys string) error {
 
 // bootstrapOVSFlows handles ensuring basic, required flows are in place. This is done before OpenFlow manager has
 // been created/started, and only done when there is just a NORMAL flow programmed and OVN/OVS is already setup
-func bootstrapOVSFlows() error {
+func bootstrapOVSFlows(nodeName string) error {
 	// see if patch port exists already
 	var portsOutput string
 	var stderr string
@@ -266,8 +266,11 @@ func bootstrapOVSFlows() error {
 
 	var bridge string
 	var patchPort string
-	// patch-br-int-to-<bridge name>_<node>
-	r := regexp.MustCompile("^patch-(.*)_.*?-to-br-int$")
+	// This needs to work with:
+	// - default network: patch-<bridge name>_<node>-to-br-int
+	// but not with:
+	// - secondary network: patch-<bridge name>_<node>-to-br-int
+	r := regexp.MustCompile(fmt.Sprintf("^patch-([^_]*)_%s-to-br-int$", nodeName))
 	for _, line := range strings.Split(portsOutput, "\n") {
 		matches := r.FindStringSubmatch(line)
 		if len(matches) == 2 {
