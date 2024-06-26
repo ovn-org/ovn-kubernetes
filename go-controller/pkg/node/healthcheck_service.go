@@ -6,6 +6,7 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube/healthcheck"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 
@@ -46,7 +47,7 @@ func (l *loadBalancerHealthChecker) AddService(svc *kapi.Service) error {
 		if err := l.server.SyncServices(l.services); err != nil {
 			return fmt.Errorf("unable to sync service %v; err: %v", name, err)
 		}
-		epSlices, err := l.watchFactory.GetServiceEndpointSlices(svc.Namespace, svc.Name)
+		epSlices, err := l.watchFactory.GetServiceEndpointSlices(svc.Namespace, svc.Name, types.DefaultNetworkName)
 		if err != nil {
 			return fmt.Errorf("could not fetch endpointslices "+
 				"for service %s/%s during health check update service: %v",
@@ -103,7 +104,7 @@ func (l *loadBalancerHealthChecker) SyncEndPointSlices(epSlice *discovery.Endpoi
 	if err != nil {
 		return fmt.Errorf("skipping %s/%s: %v", epSlice.Namespace, epSlice.Name, err)
 	}
-	epSlices, err := l.watchFactory.GetServiceEndpointSlices(epSlice.Namespace, epSlice.Labels[discovery.LabelServiceName])
+	epSlices, err := l.watchFactory.GetServiceEndpointSlices(epSlice.Namespace, epSlice.Labels[discovery.LabelServiceName], types.DefaultNetworkName)
 	if err != nil {
 		// should be a rare occurence
 		return fmt.Errorf("could not fetch all endpointslices for service %s during health check", namespacedName.String())

@@ -488,9 +488,9 @@ func (_m *NodeWatchFactory) GetService(namespace string, name string) (*corev1.S
 	return r0, r1
 }
 
-// GetServiceEndpointSlices provides a mock function with given fields: namespace, svcName
-func (_m *NodeWatchFactory) GetServiceEndpointSlices(namespace string, svcName string) ([]*discoveryv1.EndpointSlice, error) {
-	ret := _m.Called(namespace, svcName)
+// GetServiceEndpointSlices provides a mock function with given fields: namespace, svcName, network
+func (_m *NodeWatchFactory) GetServiceEndpointSlices(namespace string, svcName string, network string) ([]*discoveryv1.EndpointSlice, error) {
+	ret := _m.Called(namespace, svcName, network)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetServiceEndpointSlices")
@@ -498,19 +498,19 @@ func (_m *NodeWatchFactory) GetServiceEndpointSlices(namespace string, svcName s
 
 	var r0 []*discoveryv1.EndpointSlice
 	var r1 error
-	if rf, ok := ret.Get(0).(func(string, string) ([]*discoveryv1.EndpointSlice, error)); ok {
-		return rf(namespace, svcName)
+	if rf, ok := ret.Get(0).(func(string, string, string) ([]*discoveryv1.EndpointSlice, error)); ok {
+		return rf(namespace, svcName, network)
 	}
-	if rf, ok := ret.Get(0).(func(string, string) []*discoveryv1.EndpointSlice); ok {
-		r0 = rf(namespace, svcName)
+	if rf, ok := ret.Get(0).(func(string, string, string) []*discoveryv1.EndpointSlice); ok {
+		r0 = rf(namespace, svcName, network)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]*discoveryv1.EndpointSlice)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(string, string) error); ok {
-		r1 = rf(namespace, svcName)
+	if rf, ok := ret.Get(1).(func(string, string, string) error); ok {
+		r1 = rf(namespace, svcName, network)
 	} else {
 		r1 = ret.Error(1)
 	}
