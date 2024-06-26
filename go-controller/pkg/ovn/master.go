@@ -200,7 +200,7 @@ func (oc *DefaultNetworkController) syncNodeManagementPort(node *kapi.Node, host
 
 	// Create this node's management logical port on the node switch
 	logicalSwitchPort := nbdb.LogicalSwitchPort{
-		Name:      types.K8sPrefix + node.Name,
+		Name:      oc.GetNetworkScopedK8sMgmtIntfName(node.Name),
 		Addresses: []string{addresses},
 	}
 	sw := nbdb.LogicalSwitch{Name: node.Name}
