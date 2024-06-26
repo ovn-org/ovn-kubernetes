@@ -44,6 +44,7 @@ type BasicNetInfo interface {
 	Equals(BasicNetInfo) bool
 	GetNetworkScopedName(name string) string
 	RemoveNetworkScopeFromName(name string) string
+	GetNetworkScopedK8sMgmtIntfName(nodeName string) string
 }
 
 // NetInfo correlates which NADs refer to a network in addition to the basic
@@ -93,6 +94,10 @@ func (nInfo *DefaultNetInfo) GetNetworkScopedName(name string) string {
 func (nInfo *DefaultNetInfo) RemoveNetworkScopeFromName(name string) string {
 	// for the default network, names are not scoped
 	return name
+}
+
+func (nInfo *DefaultNetInfo) GetNetworkScopedK8sMgmtIntfName(nodeName string) string {
+	return GetK8sMgmtIntfName(nInfo.GetNetworkScopedName(nodeName))
 }
 
 // GetNADs returns the NADs associated with the network, no op for default
@@ -218,6 +223,10 @@ func (nInfo *secondaryNetInfo) GetNetworkScopedName(name string) string {
 func (nInfo *secondaryNetInfo) RemoveNetworkScopeFromName(name string) string {
 	// for the default network, names are not scoped
 	return strings.Trim(name, nInfo.getPrefix())
+}
+
+func (nInfo *secondaryNetInfo) GetNetworkScopedK8sMgmtIntfName(nodeName string) string {
+	return GetK8sMgmtIntfName(nInfo.GetNetworkScopedName(nodeName))
 }
 
 // getPrefix returns if the logical entities prefix for this network
