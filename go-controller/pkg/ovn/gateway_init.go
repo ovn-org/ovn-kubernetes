@@ -49,11 +49,11 @@ func (oc *DefaultNetworkController) cleanupStalePodSNATs(nodeName string, nodeIP
 			nodeName, err)
 	}
 	gatewayRouter := nbdb.LogicalRouter{
-		Name: types.GWRouterPrefix + nodeName,
+		Name: oc.GetNetworkScopedGWRouterName(nodeName),
 	}
 	routerNats, err := libovsdbops.GetRouterNATs(oc.nbClient, &gatewayRouter)
 	if err != nil && errors.Is(err, libovsdbclient.ErrNotFound) {
-		return fmt.Errorf("unable to get NAT entries for router on node %s: %w", nodeName, err)
+		return fmt.Errorf("unable to get NAT entries for router %s on node %s: %w", gatewayRouter.Name, nodeName, err)
 	}
 	podIPsOnNode := sets.NewString() // collects all podIPs on node
 	for _, pod := range pods {
@@ -120,7 +120,7 @@ func (oc *DefaultNetworkController) gatewayInit(nodeName string, clusterIPSubnet
 	}
 
 	// Create a gateway router.
-	gatewayRouter := types.GWRouterPrefix + nodeName
+	gatewayRouter := oc.GetNetworkScopedGWRouterName(nodeName)
 	physicalIPs := make([]string, len(l3GatewayConfig.IPAddresses))
 	for i, ip := range l3GatewayConfig.IPAddresses {
 		physicalIPs[i] = ip.IP.String()

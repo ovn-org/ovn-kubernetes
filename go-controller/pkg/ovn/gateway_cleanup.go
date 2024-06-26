@@ -21,7 +21,7 @@ import (
 
 // gatewayCleanup removes all the NB DB objects created for a node's gateway
 func (oc *DefaultNetworkController) gatewayCleanup(nodeName string) error {
-	gatewayRouter := types.GWRouterPrefix + nodeName
+	gatewayRouter := oc.GetNetworkScopedGWRouterName(nodeName)
 
 	// Get the gateway router port's IP address (connected to join switch)
 	var nextHops []net.IP
