@@ -13,9 +13,11 @@ import (
 
 	"golang.org/x/exp/constraints"
 
+	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"k8s.io/apimachinery/pkg/labels"
 
+	cnitypes "github.com/containernetworking/cni/pkg/types"
 	nadlister "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
@@ -341,40 +343,52 @@ func IsClusterIP(svcVIP string) bool {
 	return false
 }
 
-// GetActiveNetworkForNamespace returns the active network for the given namespace
-// based on the NADs present in that namespace.
+func defaultNetConf() *ovncnitypes.NetConf {
+	return &ovncnitypes.NetConf{NetConf: cnitypes.NetConf{Name: types.DefaultNetworkName}}
+}
+
+// FindActiveNetworkForNamespace returns the active network for the given namespace
+// based on the NADs present in that namespace a pointer to NetConf struct.
 // active network here means the network managing this namespace and responsible for
 // plumbing all the entities for this namespace
 // this is:
-// 1) "default" if there are no NADs in the namespace OR all NADs are primaryNetwork:false
-// 2) "<secondary-network-name>" if there is exactly ONE NAD with primaryNetwork:true
-// 3) "unknown" under all other conditions
-func GetActiveNetworkForNamespace(namespace string, nadLister nadlister.NetworkAttachmentDefinitionLister) (string, error) {
-	var activeNetwork string
+// 1) &NetConf{Name: "default"} if there are no NADs in the namespace OR all NADs are primaryNetwork:false
+// 2) &NetConf{Name: "<secondary-network-name>"} if there is exactly ONE NAD with primaryNetwork:true
+// 3) nil under all other conditions
+func FindActiveNetworkForNamespace(namespace string, nadLister nadlister.NetworkAttachmentDefinitionLister) (*ovncnitypes.NetConf, error) {
+	if !IsNetworkSegmentationSupportEnabled() {
+		return defaultNetConf(), nil
+	}
 	namespaceNADs, err := nadLister.NetworkAttachmentDefinitions(namespace).List(labels.Everything())
 	if err != nil {
-		return activeNetwork, err
+		return nil, err
 	}
 	if len(namespaceNADs) == 0 {
-		return types.DefaultNetworkName, nil
+		return defaultNetConf(), nil
 	}
 	numberOfPrimaryNetworks := 0
+	var lastPrimaryNetwork *ovncnitypes.NetConf
 	for _, nad := range namespaceNADs {
-		nadInfo, err := ParseNADInfo(nad)
+		netconf, err := ParseNetConf(nad)
 		if err != nil {
-			return activeNetwork, err
+			return nil, err
+		}
+
+		nadInfo, err := NewNetInfo(netconf)
+		if err != nil {
+			return nil, err
 		}
 		if nadInfo.IsPrimaryNetwork() {
-			activeNetwork = nadInfo.GetNetworkName()
+			lastPrimaryNetwork = netconf
 			numberOfPrimaryNetworks++
 		}
 	}
 	if numberOfPrimaryNetworks == 1 {
-		return activeNetwork, nil
+		return lastPrimaryNetwork, nil
 	} else if numberOfPrimaryNetworks == 0 {
-		return types.DefaultNetworkName, nil
+		return defaultNetConf(), nil
 	}
-	return types.UnknownNetworkName, nil
+	return nil, nil
 }
 
 func GetSecondaryNetworkLogicalPortName(podNamespace, podName, nadName string) string {

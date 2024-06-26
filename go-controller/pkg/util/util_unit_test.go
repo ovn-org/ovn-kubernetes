@@ -9,7 +9,10 @@ import (
 	"strconv"
 	"testing"
 
+	cnitypes "github.com/containernetworking/cni/pkg/types"
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"k8s.io/apimachinery/pkg/labels"
@@ -246,11 +249,13 @@ func TestFilterIPsSlice(t *testing.T) {
 
 func TestGetActiveNetworkForNamespace(t *testing.T) {
 
+	config.OVNKubernetesFeature.EnableMultiNetwork = true
+	config.OVNKubernetesFeature.EnableNetworkSegmentation = true
 	var tests = []struct {
 		name                  string
 		nads                  []*nadapi.NetworkAttachmentDefinition
 		namespace             string
-		expectedActiveNetwork string
+		expectedActiveNetwork *ovncnitypes.NetConf
 		expectedErr           error
 	}{
 		{
@@ -263,7 +268,7 @@ func TestGetActiveNetworkForNamespace(t *testing.T) {
 			},
 			expectedErr:           nil,
 			namespace:             "default",
-			expectedActiveNetwork: types.UnknownNetworkName,
+			expectedActiveNetwork: nil,
 		},
 		{
 			name: "0 NADs found in the provided namespace",
@@ -275,7 +280,7 @@ func TestGetActiveNetworkForNamespace(t *testing.T) {
 			},
 			expectedErr:           nil,
 			namespace:             "default",
-			expectedActiveNetwork: types.DefaultNetworkName,
+			expectedActiveNetwork: defaultNetConf(),
 		},
 		{
 			name: "exactly 1 primary NAD found in the provided namespace",
@@ -285,16 +290,27 @@ func TestGetActiveNetworkForNamespace(t *testing.T) {
 				ovntest.GenerateNAD("surya", "quique", "ns2",
 					types.Layer2Topology, "10.100.200.0/24", types.NetworkRoleSecondary),
 			},
-			expectedErr:           nil,
-			namespace:             "ns1",
-			expectedActiveNetwork: "surya",
+			expectedErr: nil,
+			namespace:   "ns1",
+			expectedActiveNetwork: &ovncnitypes.NetConf{
+				NetConf: cnitypes.NetConf{
+					CNIVersion: "0.4.0",
+					Name:       "surya",
+					Type:       "ovn-k8s-cni-overlay",
+				},
+				Role:     types.NetworkRolePrimary,
+				Topology: "layer3",
+				NADName:  "ns1/quique",
+				MTU:      1300,
+				Subnets:  "100.128.0.0/16",
+			},
 		},
 		{
 			name:                  "no NADs found in provided namespace",
 			nads:                  []*nadapi.NetworkAttachmentDefinition{},
 			expectedErr:           nil,
 			namespace:             "default",
-			expectedActiveNetwork: types.DefaultNetworkName,
+			expectedActiveNetwork: defaultNetConf(),
 		},
 		{
 			name: "no primary NADs found in the provided namespace",
@@ -306,7 +322,7 @@ func TestGetActiveNetworkForNamespace(t *testing.T) {
 			},
 			expectedErr:           nil,
 			namespace:             "default",
-			expectedActiveNetwork: types.DefaultNetworkName,
+			expectedActiveNetwork: defaultNetConf(),
 		},
 	}
 
@@ -322,7 +338,7 @@ func TestGetActiveNetworkForNamespace(t *testing.T) {
 				}
 			}
 			nadNamespaceLister.On("List", labels.Everything()).Return(mockedNADs, nil)
-			activeNetwork, err := GetActiveNetworkForNamespace(tc.namespace, &nadLister)
+			activeNetwork, err := FindActiveNetworkForNamespace(tc.namespace, &nadLister)
 			assert.Equal(t, tc.expectedErr, err)
 			assert.Equal(t, tc.expectedActiveNetwork, activeNetwork)
 		})

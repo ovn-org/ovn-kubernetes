@@ -15,6 +15,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/id"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip/subnet"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/pod"
+	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/persistentips"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -100,8 +101,8 @@ func (a *PodAllocator) Init() error {
 
 // getActiveNetworkForNamespace returns the active network for the given namespace
 // and is a wrapper around util.GetActiveNetworkForNamespace
-func (a *PodAllocator) getActiveNetworkForNamespace(namespace string) (string, error) {
-	return util.GetActiveNetworkForNamespace(namespace, a.nadLister)
+func (a *PodAllocator) findActiveNetworkForNamespace(namespace string) (*ovncnitypes.NetConf, error) {
+	return util.FindActiveNetworkForNamespace(namespace, a.nadLister)
 }
 
 // GetNetworkRole returns the role of this controller's
@@ -137,18 +138,18 @@ func (a *PodAllocator) GetNetworkRole(pod *corev1.Pod) (string, error) {
 		}
 		return types.NetworkRoleSecondary, nil
 	}
-	activeNetwork, err := a.getActiveNetworkForNamespace(pod.Namespace)
+	activeNetwork, err := a.findActiveNetworkForNamespace(pod.Namespace)
 	if err != nil {
 		return "", err
 	}
-	if activeNetwork == types.UnknownNetworkName {
+	if activeNetwork == nil {
 		// FIXME(tssurya) emit event here; add support for
 		// recorder in the NCM controller
 		return "", fmt.Errorf("unable to determine what is the"+
 			"primary network for this pod %s; please remove multiple primary network"+
 			"NADs from namespace %s", pod.Name, pod.Namespace)
 	}
-	if activeNetwork == a.netInfo.GetNetworkName() {
+	if activeNetwork.Name == a.netInfo.GetNetworkName() {
 		return types.NetworkRolePrimary, nil
 	}
 	if a.netInfo.IsDefault() {
