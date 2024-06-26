@@ -219,7 +219,7 @@ func (nb *northBoundClient) deletePodSNAT(nodeName string, extIPs, podIPNets []*
 		return err
 	}
 	logicalRouter := nbdb.LogicalRouter{
-		Name: types.GWRouterPrefix + nodeName,
+		Name: util.GetGatewayRouterFromNode(nodeName),
 	}
 	err = libovsdbops.DeleteNATs(nb.nbClient, &logicalRouter, nats...)
 	if err != nil {
