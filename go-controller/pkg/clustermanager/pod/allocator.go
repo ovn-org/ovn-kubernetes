@@ -201,7 +201,12 @@ func (a *PodAllocator) reconcile(old, new *corev1.Pod, releaseFromAllocator bool
 		return nil
 	}
 
-	onNetwork, networkMap, err := util.GetPodNADToNetworkMapping(pod, a.netInfo)
+	activeNetwork, err := a.getActiveNetworkForNamespace(pod.Namespace)
+	if err != nil {
+		return fmt.Errorf("failed looking for an active network: %w", err)
+	}
+
+	onNetwork, networkMap, err := util.GetPodNADToNetworkMappingWithActiveNetwork(pod, a.netInfo, activeNetwork)
 	if err != nil {
 		return fmt.Errorf("failed to get NAD to network mapping: %w", err)
 	}

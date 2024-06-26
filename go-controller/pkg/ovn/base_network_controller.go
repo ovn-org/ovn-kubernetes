@@ -36,6 +36,8 @@ import (
 	ref "k8s.io/client-go/tools/reference"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
+
+	nadlister "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
 )
 
 // CommonNetworkControllerInfo structure is place holder for all fields shared among controllers.
@@ -770,7 +772,11 @@ func (bnc *BaseNetworkController) isLocalZoneNode(node *kapi.Node) bool {
 // getActiveNetworkForNamespace returns the active network for the given namespace
 // and is a wrapper around util.GetActiveNetworkForNamespace
 func (bnc *BaseNetworkController) getActiveNetworkForNamespace(namespace string) (util.NetInfo, error) {
-	return util.GetActiveNetworkForNamespace(namespace, bnc.watchFactory.NADInformer().Lister())
+	var nadLister nadlister.NetworkAttachmentDefinitionLister
+	if util.IsNetworkSegmentationSupportEnabled() {
+		nadLister = bnc.watchFactory.NADInformer().Lister()
+	}
+	return util.GetActiveNetworkForNamespace(namespace, nadLister)
 }
 
 // GetNetworkRole returns the role of this controller's
