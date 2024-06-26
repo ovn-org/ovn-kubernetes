@@ -162,7 +162,7 @@ func (oc *DefaultNetworkController) syncNodeManagementPort(node *kapi.Node, host
 	}
 
 	if hostSubnets == nil {
-		hostSubnets, err = util.ParseNodeHostSubnetAnnotation(node, types.DefaultNetworkName)
+		hostSubnets, err = util.ParseNodeHostSubnetAnnotation(node, oc.GetNetworkName())
 		if err != nil {
 			return err
 		}
@@ -267,7 +267,7 @@ func (oc *DefaultNetworkController) addNode(node *kapi.Node) ([]*net.IPNet, erro
 	// Node subnet for the default network is allocated by cluster manager.
 	// Make sure that the node is allocated with the subnet before proceeding
 	// to create OVN Northbound resources.
-	hostSubnets, err := util.ParseNodeHostSubnetAnnotation(node, types.DefaultNetworkName)
+	hostSubnets, err := util.ParseNodeHostSubnetAnnotation(node, oc.GetNetworkName())
 	if err != nil {
 		return nil, err
 	}
@@ -862,7 +862,7 @@ func (oc *DefaultNetworkController) getOVNClusterRouterPortToJoinSwitchIfAddrs()
 
 // addUpdateHoNodeEvent reconsile ovn nodes when a hybrid overlay node is added.
 func (oc *DefaultNetworkController) addUpdateHoNodeEvent(node *kapi.Node) error {
-	if subnets, _ := util.ParseNodeHostSubnetAnnotation(node, types.DefaultNetworkName); len(subnets) > 0 {
+	if subnets, _ := util.ParseNodeHostSubnetAnnotation(node, oc.GetNetworkName()); len(subnets) > 0 {
 		klog.Infof("Node %q is used to be a OVN-K managed node, deleting it from OVN topology", node.Name)
 		if err := oc.deleteOVNNodeEvent(node); err != nil {
 			return err
