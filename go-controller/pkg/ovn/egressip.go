@@ -1285,7 +1285,7 @@ func (oc *DefaultNetworkController) addEgressNode(node *v1.Node) error {
 			// NOTE3: When the node gets deleted we do not remove this route intentionally because
 			// on IC if the node is gone, then the ovn_cluster_router is also gone along with all
 			// the routes on it.
-			if err := libovsdbutil.CreateDefaultRouteToExternal(oc.nbClient, oc.GetNetworkScopedClusterRouterName(), node.Name); err != nil {
+			if err := libovsdbutil.CreateDefaultRouteToExternal(oc.nbClient, oc.GetNetworkScopedClusterRouterName(), oc.GetNetworkScopedGWRouterName(node.Name)); err != nil {
 				return err
 			}
 		}
