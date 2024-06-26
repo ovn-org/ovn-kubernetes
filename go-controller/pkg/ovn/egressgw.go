@@ -744,10 +744,10 @@ func (oc *DefaultNetworkController) addHybridRoutePolicyForPod(podIP net.IP, nod
 		p := func(item *nbdb.LogicalRouterPolicy) bool {
 			return item.Priority == logicalRouterPolicy.Priority && strings.Contains(item.Match, matchSrcAS)
 		}
-		err = libovsdbops.CreateOrUpdateLogicalRouterPolicyWithPredicate(oc.nbClient, types.OVNClusterRouter,
+		err = libovsdbops.CreateOrUpdateLogicalRouterPolicyWithPredicate(oc.nbClient, oc.GetNetworkScopedClusterRouterName(),
 			&logicalRouterPolicy, p, &logicalRouterPolicy.Nexthops, &logicalRouterPolicy.Match, &logicalRouterPolicy.Action)
 		if err != nil {
-			return fmt.Errorf("failed to add policy route %+v to %s: %v", logicalRouterPolicy, types.OVNClusterRouter, err)
+			return fmt.Errorf("failed to add policy route %+v to %s: %v", logicalRouterPolicy, oc.GetNetworkScopedClusterRouterName(), err)
 		}
 	}
 	return nil
@@ -809,9 +809,9 @@ func (oc *DefaultNetworkController) delHybridRoutePolicyForPod(podIP net.IP, nod
 			p := func(item *nbdb.LogicalRouterPolicy) bool {
 				return item.Priority == types.HybridOverlayReroutePriority && item.Match == matchStr
 			}
-			err := libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(oc.nbClient, types.OVNClusterRouter, p)
+			err := libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(oc.nbClient, oc.GetNetworkScopedClusterRouterName(), p)
 			if err != nil {
-				return fmt.Errorf("error deleting policy %s on router %s: %v", matchStr, types.OVNClusterRouter, err)
+				return fmt.Errorf("error deleting policy %s on router %s: %v", matchStr, oc.GetNetworkScopedClusterRouterName(), err)
 			}
 		}
 		if len(ipv4PodIPs) == 0 && len(ipv6PodIPs) == 0 {
@@ -834,9 +834,9 @@ func (oc *DefaultNetworkController) delAllHybridRoutePolicies() error {
 	policyPred := func(item *nbdb.LogicalRouterPolicy) bool {
 		return item.Priority == types.HybridOverlayReroutePriority
 	}
-	err := libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(oc.nbClient, types.OVNClusterRouter, policyPred)
+	err := libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(oc.nbClient, oc.GetNetworkScopedClusterRouterName(), policyPred)
 	if err != nil {
-		return fmt.Errorf("error deleting hybrid route policies on %s: %v", types.OVNClusterRouter, err)
+		return fmt.Errorf("error deleting hybrid route policies on %s: %v", oc.GetNetworkScopedClusterRouterName(), err)
 	}
 
 	// nuke all the address-sets.
@@ -865,9 +865,9 @@ func (oc *DefaultNetworkController) delAllLegacyHybridRoutePolicies() error {
 		}
 		return true
 	}
-	err := libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(oc.nbClient, types.OVNClusterRouter, p)
+	err := libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(oc.nbClient, oc.GetNetworkScopedClusterRouterName(), p)
 	if err != nil {
-		return fmt.Errorf("error deleting legacy hybrid route policies on %s: %v", types.OVNClusterRouter, err)
+		return fmt.Errorf("error deleting legacy hybrid route policies on %s: %v", oc.GetNetworkScopedClusterRouterName(), err)
 	}
 
 	return nil
