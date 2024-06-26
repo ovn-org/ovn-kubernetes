@@ -223,7 +223,7 @@ func (bnc *BaseNetworkController) createOvnClusterRouter() (*nbdb.LogicalRouter,
 	}
 
 	// Create a single common distributed router for the cluster.
-	logicalRouterName := bnc.GetNetworkScopedName(types.OVNClusterRouter)
+	logicalRouterName := bnc.GetNetworkScopedClusterRouterName()
 	logicalRouter := nbdb.LogicalRouter{
 		Name: logicalRouterName,
 		ExternalIDs: map[string]string{
@@ -284,7 +284,7 @@ func (bnc *BaseNetworkController) syncNodeClusterRouterPort(node *kapi.Node, hos
 	}
 
 	switchName := bnc.GetNetworkScopedName(node.Name)
-	logicalRouterName := bnc.GetNetworkScopedName(types.OVNClusterRouter)
+	logicalRouterName := bnc.GetNetworkScopedClusterRouterName()
 	lrpName := types.RouterToSwitchPrefix + switchName
 	lrpNetworks := []string{}
 	for _, hostSubnet := range hostSubnets {
@@ -432,7 +432,7 @@ func (bnc *BaseNetworkController) deleteNodeLogicalNetwork(nodeName string) erro
 		return fmt.Errorf("failed to delete logical switch %s: %v", switchName, err)
 	}
 
-	logicalRouterName := bnc.GetNetworkScopedName(types.OVNClusterRouter)
+	logicalRouterName := bnc.GetNetworkScopedClusterRouterName()
 	logicalRouter := nbdb.LogicalRouter{Name: logicalRouterName}
 	logicalRouterPort := nbdb.LogicalRouterPort{
 		Name: types.RouterToSwitchPrefix + switchName,
