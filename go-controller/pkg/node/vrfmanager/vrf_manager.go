@@ -132,7 +132,7 @@ func (vm *Controller) addVrf(vrf *vrf) error {
 func (vm *Controller) delVrf(vrf *vrf) error {
 	vm.mu.Lock()
 	defer vm.mu.Unlock()
-	return vm.sync(vrf)
+	return vm.deleteVRF(vrf)
 }
 
 func (vm *Controller) reconcile() error {
@@ -176,13 +176,13 @@ func (vm *Controller) sync(vrf *vrf) error {
 	if vrf == nil {
 		return nil
 	}
-	vrfLink, err := netlink.LinkByName(vrf.name)
+	vrfLink, err := util.GetNetLinkOps().LinkByName(vrf.name)
 	if err == nil {
-		vrfDev, ok := vrfLink.(*netlink.Vrf)
-		if !ok {
+		if vrfLink.Type() != "vrf" {
 			return errors.New("node has another non vrf device with same name")
 		}
-		if vrfDev.Table != vrf.table {
+		vrfDev, ok := vrfLink.(*netlink.Vrf)
+		if ok && vrfDev.Table != vrf.table {
 			return errors.New("found conflict with existing vrf device table id")
 		}
 	}
@@ -192,27 +192,30 @@ func (vm *Controller) sync(vrf *vrf) error {
 			LinkAttrs: netlink.LinkAttrs{Name: vrf.name},
 			Table:     vrf.table,
 		}
-		if err = netlink.LinkAdd(vrfLink); err != nil {
+		if err = util.GetNetLinkOps().LinkAdd(vrfLink); err != nil {
 			return err
 		}
 	}
 	if err != nil {
 		return err
 	}
-
+	vrfLink, err = util.GetNetLinkOps().LinkByName(vrf.name)
+	if err != nil {
+		return err
+	}
 	if vrfLink.Attrs().OperState != netlink.OperUp {
-		if err = netlink.LinkSetUp(vrfLink); err != nil {
+		if err = util.GetNetLinkOps().LinkSetUp(vrfLink); err != nil {
 			return err
 		}
 	}
-
 	// Ensure enslave interface(s) are synced up with the cache.
-	var existingEnslaves sets.Set[string]
-	links, err := netlink.LinkList()
+	existingEnslaves := make(sets.Set[string])
+	links, err := util.GetNetLinkOps().LinkList()
 	if err != nil {
 		return err
 	}
 	for _, link := range links {
+		klog.Infof("Vrf Manager: link name %s, master index: %d, vrf index: %d", link.Attrs().Name, link.Attrs().MasterIndex, vrfLink.Attrs().Index)
 		if link.Attrs().MasterIndex == vrfLink.Attrs().Index {
 			existingEnslaves.Insert(link.Attrs().Name)
 		}
@@ -224,7 +227,7 @@ func (vm *Controller) sync(vrf *vrf) error {
 		if !existingEnslaves.Has(iface) {
 			err = enslaveInterfaceToVRF(vrf.name, iface)
 			if err != nil {
-				return fmt.Errorf("failed to enslave inteface %s into vrf %s", iface, vrf.name)
+				return fmt.Errorf("failed to enslave inteface %s into vrf device: %s, err: %v", iface, vrf.name, err)
 			}
 		}
 	}
@@ -232,7 +235,7 @@ func (vm *Controller) sync(vrf *vrf) error {
 		if !vrf.interfaces.Has(iface) {
 			err = removeInterfaceFromVRF(vrf.name, iface)
 			if err != nil {
-				return fmt.Errorf("failed to remove inteface %s from vrf %s", iface, vrf.name)
+				return fmt.Errorf("failed to remove inteface %s from vrf device: %s, err: %v", iface, vrf.name, err)
 			}
 		}
 	}
@@ -243,25 +246,25 @@ func (vm *Controller) deleteVRF(vrf *vrf) error {
 	if vrf == nil {
 		return nil
 	}
-	link, err := netlink.LinkByName(vrf.name)
+	link, err := util.GetNetLinkOps().LinkByName(vrf.name)
 	if err != nil && util.GetNetLinkOps().IsLinkNotFoundError(err) {
 		return nil
 	} else if err != nil {
 		return err
 	}
-	return netlink.LinkDel(link)
+	return util.GetNetLinkOps().LinkDelete(link)
 }
 
 func enslaveInterfaceToVRF(vrfName, ifName string) error {
-	iface, err := netlink.LinkByName(ifName)
+	iface, err := util.GetNetLinkOps().LinkByName(ifName)
 	if err != nil {
 		return err
 	}
-	vrfLink, err := netlink.LinkByName(vrfName)
+	vrfLink, err := util.GetNetLinkOps().LinkByName(vrfName)
 	if err != nil {
 		return err
 	}
-	err = netlink.LinkSetMaster(iface, vrfLink)
+	err = util.GetNetLinkOps().LinkSetMaster(iface, vrfLink)
 	if err != nil {
 		return fmt.Errorf("failed to enslave interface %s to VRF %s: %v", ifName, vrfName, err)
 	}
@@ -269,11 +272,11 @@ func enslaveInterfaceToVRF(vrfName, ifName string) error {
 }
 
 func removeInterfaceFromVRF(vrfName, ifName string) error {
-	iface, err := netlink.LinkByName(ifName)
+	iface, err := util.GetNetLinkOps().LinkByName(ifName)
 	if err != nil {
 		return err
 	}
-	err = netlink.LinkSetMaster(iface, nil)
+	err = util.GetNetLinkOps().LinkSetMaster(iface, nil)
 	if err != nil {
 		return fmt.Errorf("failed to remove interface %s from VRF %s: %v", ifName, vrfName, err)
 	}
