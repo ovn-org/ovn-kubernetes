@@ -63,9 +63,8 @@ func GetGatewayPhysicalIPs(nbClient libovsdbclient.Client, gatewayRouter string)
 
 // CreateDummyGWMacBindings creates mac bindings (ipv4 and ipv6) for a fake next hops
 // used by host->service traffic
-func CreateDummyGWMacBindings(nbClient libovsdbclient.Client, nodeName string) error {
-	nodeGWRouter := util.GetGatewayRouterFromNode(nodeName)
-	logicalPort := ovntypes.GWRouterToExtSwitchPrefix + nodeGWRouter
+func CreateDummyGWMacBindings(nbClient libovsdbclient.Client, gwRouterName string) error {
+	logicalPort := ovntypes.GWRouterToExtSwitchPrefix + gwRouterName
 	dummyNextHopIPs := node.DummyNextHopIPs()
 	smbs := make([]*nbdb.StaticMACBinding, len(dummyNextHopIPs))
 	for i := range dummyNextHopIPs {
@@ -81,7 +80,7 @@ func CreateDummyGWMacBindings(nbClient libovsdbclient.Client, nodeName string) e
 	if err := libovsdbops.CreateOrUpdateStaticMacBinding(nbClient, smbs...); err != nil {
 		return fmt.Errorf(
 			"failed to create MAC Binding for dummy nexthop %s: %v",
-			nodeName,
+			gwRouterName,
 			err)
 	}
 
@@ -90,9 +89,8 @@ func CreateDummyGWMacBindings(nbClient libovsdbclient.Client, nodeName string) e
 
 // DeleteDummyGWMacBindings removes mac bindings (ipv4 and ipv6) for a fake next hops
 // used by host->service traffic
-func DeleteDummyGWMacBindings(nbClient libovsdbclient.Client, nodeName string) error {
-	nodeGWRouter := util.GetGatewayRouterFromNode(nodeName)
-	logicalPort := ovntypes.GWRouterToExtSwitchPrefix + nodeGWRouter
+func DeleteDummyGWMacBindings(nbClient libovsdbclient.Client, gwRouterName string) error {
+	logicalPort := ovntypes.GWRouterToExtSwitchPrefix + gwRouterName
 	dummyNextHopIPs := node.DummyNextHopIPs()
 	smbs := make([]*nbdb.StaticMACBinding, len(dummyNextHopIPs))
 	for i := range dummyNextHopIPs {

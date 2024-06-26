@@ -290,7 +290,7 @@ func (oc *DefaultNetworkController) gatewayInit(nodeName string, clusterIPSubnet
 
 	nextHops := l3GatewayConfig.NextHops
 
-	if err := gateway.CreateDummyGWMacBindings(oc.nbClient, nodeName); err != nil {
+	if err := gateway.CreateDummyGWMacBindings(oc.nbClient, gatewayRouter); err != nil {
 		return err
 	}
 

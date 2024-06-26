@@ -498,7 +498,7 @@ func (oc *DefaultNetworkController) addGWRoutesForPod(gateways []*gatewayInfo, p
 		return nil
 	}
 
-	gr := util.GetGatewayRouterFromNode(node)
+	gr := oc.GetNetworkScopedGWRouterName(node)
 
 	routesAdded := 0
 	portPrefix, err := oc.extSwitchPrefix(node)

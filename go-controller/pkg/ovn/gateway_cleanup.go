@@ -57,7 +57,7 @@ func (oc *DefaultNetworkController) gatewayCleanup(nodeName string) error {
 	}
 
 	// Remove the static mac bindings of the gateway router
-	err = gateway.DeleteDummyGWMacBindings(oc.nbClient, nodeName)
+	err = gateway.DeleteDummyGWMacBindings(oc.nbClient, gatewayRouter)
 	if err != nil {
 		return fmt.Errorf("failed to delete GR dummy mac bindings for node %s: %w", nodeName, err)
 	}
