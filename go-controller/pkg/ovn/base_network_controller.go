@@ -26,7 +26,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-
 	kapi "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
@@ -37,6 +36,8 @@ import (
 	ref "k8s.io/client-go/tools/reference"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
+
+	nadlister "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
 )
 
 // CommonNetworkControllerInfo structure is place holder for all fields shared among controllers.
@@ -861,7 +862,11 @@ func (bnc *BaseNetworkController) isLocalZoneNode(node *kapi.Node) bool {
 // getActiveNetworkForNamespace returns the active network for the given namespace
 // and is a wrapper around util.GetActiveNetworkForNamespace
 func (bnc *BaseNetworkController) findActiveNetworkForNamespace(namespace string) (*ovncnitypes.NetConf, error) {
-	return util.FindActiveNetworkForNamespace(namespace, bnc.watchFactory.NADInformer().Lister())
+	var nadLister nadlister.NetworkAttachmentDefinitionLister
+	if util.IsNetworkSegmentationSupportEnabled() {
+		nadLister = bnc.watchFactory.NADInformer().Lister()
+	}
+	return util.FindActiveNetworkForNamespace(namespace, nadLister)
 }
 
 // GetNetworkRole returns the role of this controller's

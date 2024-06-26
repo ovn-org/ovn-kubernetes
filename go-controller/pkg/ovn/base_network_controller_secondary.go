@@ -236,7 +236,12 @@ func (bsnc *BaseSecondaryNetworkController) ensurePodForSecondaryNetwork(pod *ka
 		return err
 	}
 
-	on, networkMap, err := util.GetPodNADToNetworkMapping(pod, bsnc.NetInfo)
+	activeNetwork, err := bsnc.findActiveNetworkForNamespace(pod.Namespace)
+	if err != nil {
+		return fmt.Errorf("filed looking for the active network at namespace '%s': %w", pod.Namespace, err)
+	}
+
+	on, networkMap, err := util.GetPodNADToNetworkMappingWithActiveNetwork(pod, bsnc.NetInfo, activeNetwork)
 	if err != nil {
 		// configuration error, no need to retry, do not return error
 		klog.Errorf("Error getting network-attachment for pod %s/%s network %s: %v",

@@ -693,6 +693,20 @@ func GetPodNADToNetworkMapping(pod *kapi.Pod, nInfo NetInfo) (bool, map[string]*
 	return true, networkSelections, nil
 }
 
+func GetPodNADToNetworkMappingWithActiveNetwork(pod *kapi.Pod, nInfo NetInfo, activeNetwork *ovncnitypes.NetConf) (bool, map[string]*nettypes.NetworkSelectionElement, error) {
+	if activeNetwork != nil && activeNetwork.Name == nInfo.GetNetworkName() && (nInfo.TopologyType() == types.Layer2Topology || nInfo.TopologyType() == types.Layer3Topology) {
+		nadKey := strings.Split(activeNetwork.NADName, "/")
+		return true, map[string]*nettypes.NetworkSelectionElement{
+			activeNetwork.NADName: {
+				Namespace: nadKey[0],
+				Name:      nadKey[1],
+			}}, nil
+	}
+
+	return GetPodNADToNetworkMapping(pod, nInfo)
+
+}
+
 func IsMultiNetworkPoliciesSupportEnabled() bool {
 	return config.OVNKubernetesFeature.EnableMultiNetwork && config.OVNKubernetesFeature.EnableMultiNetworkPolicy
 }
