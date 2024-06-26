@@ -499,7 +499,7 @@ func (oc *SecondaryLayer3NetworkController) getNodeGatewayConfig(node *kapi.Node
 		if err != nil {
 			return nil, fmt.Errorf("failed to get v4 masquerade IP, network %s (%d): %v", oc.GetNetworkName(), oc.networkID, err)
 		}
-		v4MasqIP = &net.IPNet{IP: v4MasqIPs.OVN, Mask: net.CIDRMask(16, 32)} // TODO (dceara): hardcoded
+		v4MasqIP = &net.IPNet{IP: v4MasqIPs.Shared, Mask: net.CIDRMask(16, 32)} // TODO (dceara): hardcoded
 		masqIPs = append(masqIPs, v4MasqIP)
 	}
 	if config.IPv6Mode {
@@ -507,7 +507,7 @@ func (oc *SecondaryLayer3NetworkController) getNodeGatewayConfig(node *kapi.Node
 		if err != nil {
 			return nil, fmt.Errorf("failed to get v6 masquerade IP, network %s (%d): %v", oc.GetNetworkName(), oc.networkID, err)
 		}
-		v6MasqIP = &net.IPNet{IP: v6MasqIPs.OVN, Mask: net.CIDRMask(64, 128)} // TODO (dceara): hardcoded
+		v6MasqIP = &net.IPNet{IP: v6MasqIPs.Shared, Mask: net.CIDRMask(64, 128)} // TODO (dceara): hardcoded
 		masqIPs = append(masqIPs, v6MasqIP)
 	}
 

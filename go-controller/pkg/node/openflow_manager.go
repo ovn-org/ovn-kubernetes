@@ -55,6 +55,25 @@ func (c *openflowManager) setDefaultBridgeMAC(macAddr net.HardwareAddr) {
 	c.defaultBridge.macAddress = macAddr
 }
 
+func (c *openflowManager) addNetwork(nInfo util.NetInfo, masqCTMark uint) error {
+	if err := c.defaultBridge.addBridgeNetConfig(nInfo, masqCTMark); err != nil {
+		return fmt.Errorf("failed to add default bridge network config for network '%s': %w", nInfo.GetNetworkName(), err)
+	}
+	if c.externalGatewayBridge != nil {
+		if err := c.externalGatewayBridge.addBridgeNetConfig(nInfo, masqCTMark); err != nil {
+			return fmt.Errorf("failed to add external gw bridge network config for network '%s': %w", nInfo.GetNetworkName(), err)
+		}
+	}
+	return nil
+}
+
+func (c *openflowManager) delNetwork(nInfo util.NetInfo) {
+	c.defaultBridge.delBridgeNetConfig(nInfo)
+	if c.externalGatewayBridge != nil {
+		c.externalGatewayBridge.delBridgeNetConfig(nInfo)
+	}
+}
+
 func (c *openflowManager) updateFlowCacheEntry(key string, flows []string) {
 	c.flowMutex.Lock()
 	defer c.flowMutex.Unlock()
