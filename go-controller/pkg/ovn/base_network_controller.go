@@ -769,7 +769,7 @@ func (bnc *BaseNetworkController) isLocalZoneNode(node *kapi.Node) bool {
 
 // getActiveNetworkForNamespace returns the active network for the given namespace
 // and is a wrapper around util.GetActiveNetworkForNamespace
-func (bnc *BaseNetworkController) getActiveNetworkForNamespace(namespace string) (string, error) {
+func (bnc *BaseNetworkController) getActiveNetworkForNamespace(namespace string) (util.NetInfo, error) {
 	return util.GetActiveNetworkForNamespace(namespace, bnc.watchFactory.NADInformer().Lister())
 }
 
@@ -808,16 +808,12 @@ func (bnc *BaseNetworkController) GetNetworkRole(pod *kapi.Pod) (string, error) 
 	}
 	activeNetwork, err := bnc.getActiveNetworkForNamespace(pod.Namespace)
 	if err != nil {
+		if util.IsUnknownActiveNetworkError(err) {
+			bnc.recordPodErrorEvent(pod, err)
+		}
 		return "", err
 	}
-	if activeNetwork == types.UnknownNetworkName {
-		err := fmt.Errorf("unable to determine what is the"+
-			"primary network for this pod %s; please remove multiple primary network"+
-			"NADs from namespace %s", pod.Name, pod.Namespace)
-		bnc.recordPodErrorEvent(pod, err)
-		return "", err
-	}
-	if activeNetwork == bnc.GetNetworkName() {
+	if activeNetwork.GetNetworkName() == bnc.GetNetworkName() {
 		return types.NetworkRolePrimary, nil
 	}
 	if bnc.IsDefault() {
