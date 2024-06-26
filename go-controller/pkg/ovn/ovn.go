@@ -479,7 +479,7 @@ func (oc *DefaultNetworkController) InitEgressServiceZoneController() (*egresssv
 		createDefaultNodeRouteToExternal = libovsdbutil.CreateDefaultRouteToExternal
 	}
 
-	return egresssvc_zone.NewController(DefaultNetworkControllerName, oc.client, oc.nbClient, oc.addressSetFactory,
+	return egresssvc_zone.NewController(oc.NetInfo, DefaultNetworkControllerName, oc.client, oc.nbClient, oc.addressSetFactory,
 		initClusterEgressPolicies, ensureNodeNoReroutePolicies, deleteLegacyDefaultNoRerouteNodePolicies,
 		createDefaultNodeRouteToExternal,
 		oc.stopChan, oc.watchFactory.EgressServiceInformer(), oc.watchFactory.ServiceCoreInformer(),

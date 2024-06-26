@@ -52,6 +52,9 @@ type DeleteLegacyDefaultNoRerouteNodePoliciesFunc func(libovsdbclient.Client, st
 type CreateDefaultRouteToExternalFunc func(nbClient libovsdbclient.Client, nodeName string) error
 
 type Controller struct {
+	// network information
+	util.NetInfo
+
 	controllerName string
 	client         kubernetes.Interface
 	nbClient       libovsdbclient.Client
@@ -112,6 +115,7 @@ type nodeState struct {
 }
 
 func NewController(
+	netInfo util.NetInfo,
 	controllerName string,
 	client kubernetes.Interface,
 	nbClient libovsdbclient.Client,
@@ -129,6 +133,7 @@ func NewController(
 	klog.Info("Setting up event handlers for Egress Services")
 
 	c := &Controller{
+		NetInfo:                                  netInfo,
 		controllerName:                           controllerName,
 		client:                                   client,
 		nbClient:                                 nbClient,
