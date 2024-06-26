@@ -190,10 +190,10 @@ func (oc *DefaultNetworkController) syncNodeManagementPort(node *kapi.Node, host
 			p := func(item *nbdb.LogicalRouterStaticRoute) bool {
 				return item.IPPrefix == lrsr.IPPrefix && libovsdbops.PolicyEqualPredicate(lrsr.Policy, item.Policy)
 			}
-			err := libovsdbops.CreateOrReplaceLogicalRouterStaticRouteWithPredicate(oc.nbClient, types.OVNClusterRouter,
+			err := libovsdbops.CreateOrReplaceLogicalRouterStaticRouteWithPredicate(oc.nbClient, oc.GetNetworkScopedClusterRouterName(),
 				&lrsr, p, &lrsr.Nexthop)
 			if err != nil {
-				return fmt.Errorf("error creating static route %+v on router %s: %v", lrsr, types.OVNClusterRouter, err)
+				return fmt.Errorf("error creating static route %+v on router %s: %v", lrsr, oc.GetNetworkScopedClusterRouterName(), err)
 			}
 		}
 	}
