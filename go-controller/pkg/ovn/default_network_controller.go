@@ -211,6 +211,7 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 		},
 		externalGatewayRouteInfo: apbExternalRouteController.ExternalGWRouteInfoCache,
 		eIPC: egressIPZoneController{
+			NetInfo:            &util.DefaultNetInfo{},
 			nodeUpdateMutex:    &sync.Mutex{},
 			podAssignmentMutex: &sync.Mutex{},
 			podAssignment:      make(map[string]*podAssignmentState),
