@@ -156,7 +156,7 @@ func (c *Controller) syncNode(key string) error {
 
 	// At this point the node exists and is ready
 	if config.OVNKubernetesFeature.EnableInterconnect && c.zone != types.OvnDefaultZone && c.isNodeInLocalZone(n) {
-		if err := c.createDefaultRouteToExternalForIC(c.nbClient, nodeName); err != nil {
+		if err := c.createDefaultRouteToExternalForIC(c.nbClient, c.GetNetworkScopedClusterRouterName(), nodeName); err != nil {
 			return err
 		}
 	}

@@ -470,7 +470,7 @@ func (oc *DefaultNetworkController) InitEgressServiceZoneController() (*egresssv
 	}
 	deleteLegacyDefaultNoRerouteNodePolicies := func(libovsdbclient.Client, string) error { return nil }
 	// used only when IC=true
-	createDefaultNodeRouteToExternal := func(libovsdbclient.Client, string) error { return nil }
+	createDefaultNodeRouteToExternal := func(libovsdbclient.Client, string, string) error { return nil }
 
 	if !config.OVNKubernetesFeature.EnableEgressIP {
 		initClusterEgressPolicies = InitClusterEgressPolicies
