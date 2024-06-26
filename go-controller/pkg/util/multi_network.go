@@ -45,6 +45,7 @@ type BasicNetInfo interface {
 	GetNetworkScopedName(name string) string
 	RemoveNetworkScopeFromName(name string) string
 	GetNetworkScopedK8sMgmtIntfName(nodeName string) string
+	GetNetworkScopedClusterRouterName() string
 }
 
 // NetInfo correlates which NADs refer to a network in addition to the basic
@@ -98,6 +99,10 @@ func (nInfo *DefaultNetInfo) RemoveNetworkScopeFromName(name string) string {
 
 func (nInfo *DefaultNetInfo) GetNetworkScopedK8sMgmtIntfName(nodeName string) string {
 	return GetK8sMgmtIntfName(nInfo.GetNetworkScopedName(nodeName))
+}
+
+func (nInfo *DefaultNetInfo) GetNetworkScopedClusterRouterName() string {
+	return nInfo.GetNetworkScopedName(types.OVNClusterRouter)
 }
 
 // GetNADs returns the NADs associated with the network, no op for default
@@ -227,6 +232,10 @@ func (nInfo *secondaryNetInfo) RemoveNetworkScopeFromName(name string) string {
 
 func (nInfo *secondaryNetInfo) GetNetworkScopedK8sMgmtIntfName(nodeName string) string {
 	return GetK8sMgmtIntfName(nInfo.GetNetworkScopedName(nodeName))
+}
+
+func (nInfo *secondaryNetInfo) GetNetworkScopedClusterRouterName() string {
+	return nInfo.GetNetworkScopedName(types.OVNClusterRouter)
 }
 
 // getPrefix returns if the logical entities prefix for this network
