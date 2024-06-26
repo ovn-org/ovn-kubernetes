@@ -643,7 +643,7 @@ func waitClusterHealthy(f *framework.Framework, numControlPlanePods int, control
 			return false, fmt.Errorf("failed to list ovn-kube master pods: %w", err)
 		}
 		if len(podList.Items) != numControlPlanePods {
-			framework.Logf("Not enough running %s pods, want %d, have %d", numControlPlanePods, numControlPlanePods, len(podList.Items))
+			framework.Logf("Not enough running %s pods, want %d, have %d", controlPlanePodName, numControlPlanePods, len(podList.Items))
 			return false, nil
 		}
 

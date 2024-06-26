@@ -1421,7 +1421,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 							responses.Insert(epHostname, epClientIP)
 
 							if responses.Equal(expectedResponses) {
-								framework.Logf("Validated local endpoint on node %s with address %s, and packet src IP ", node.Name, nodeAddress.Address, epClientIP)
+								framework.Logf("Validated local endpoint on node %s with address %s, and packet src IP %s", node.Name, nodeAddress.Address, epClientIP)
 								valid = true
 								break
 							}
