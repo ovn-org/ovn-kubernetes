@@ -268,12 +268,12 @@ func TestUpdateNodeSwitchExcludeIPs(t *testing.T) {
 			var e error
 			if tc.setCfgHybridOvlyEnabled {
 				config.HybridOverlay.Enabled = true
-				if e = UpdateNodeSwitchExcludeIPs(nbClient, ovnutil.GetK8sMgmtIntfName(nodeName), nodeName, ipnet); e != nil {
+				if e = UpdateNodeSwitchExcludeIPs(nbClient, ovnutil.GetK8sMgmtIntfName(nodeName), nodeName, nodeName, ipnet); e != nil {
 					t.Fatal(fmt.Errorf("failed to update NodeSwitchExcludeIPs with Hybrid Overlay enabled err: %v", e))
 				}
 				config.HybridOverlay.Enabled = false
 			} else {
-				if e = UpdateNodeSwitchExcludeIPs(nbClient, ovnutil.GetK8sMgmtIntfName(nodeName), nodeName, ipnet); e != nil {
+				if e = UpdateNodeSwitchExcludeIPs(nbClient, ovnutil.GetK8sMgmtIntfName(nodeName), nodeName, nodeName, ipnet); e != nil {
 					t.Fatal(fmt.Errorf("failed to update NodeSwitchExcludeIPs with Hybrid Overlay disabled err: %v", e))
 				}
 

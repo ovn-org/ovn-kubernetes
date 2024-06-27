@@ -113,14 +113,14 @@ func (oc *DefaultNetworkController) handleHybridOverlayPort(node *kapi.Node, ann
 			Name:      portName,
 			Addresses: []string{portMAC.String()},
 		}
-		sw := nbdb.LogicalSwitch{Name: node.Name}
+		sw := nbdb.LogicalSwitch{Name: oc.GetNetworkScopedSwitchName(node.Name)}
 
 		err := libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitch(oc.nbClient, &sw, &lsp)
 		if err != nil {
 			return fmt.Errorf("failed to add hybrid overlay port %+v for node %s: %w", lsp, node.Name, err)
 		}
 		for _, subnet := range subnets {
-			if err := libovsdbutil.UpdateNodeSwitchExcludeIPs(oc.nbClient, oc.GetNetworkScopedK8sMgmtIntfName(node.Name), node.Name, subnet); err != nil {
+			if err := libovsdbutil.UpdateNodeSwitchExcludeIPs(oc.nbClient, oc.GetNetworkScopedK8sMgmtIntfName(node.Name), oc.GetNetworkScopedSwitchName(node.Name), node.Name, subnet); err != nil {
 				return err
 			}
 		}
@@ -140,7 +140,7 @@ func (oc *DefaultNetworkController) deleteHybridOverlayPort(node *kapi.Node) err
 	klog.Infof("Removing node %s hybrid overlay port", node.Name)
 	portName := util.GetHybridOverlayPortName(node.Name)
 	lsp := nbdb.LogicalSwitchPort{Name: portName}
-	sw := nbdb.LogicalSwitch{Name: node.Name}
+	sw := nbdb.LogicalSwitch{Name: oc.GetNetworkScopedSwitchName(node.Name)}
 	if err := libovsdbops.DeleteLogicalSwitchPorts(oc.nbClient, &sw, &lsp); err != nil {
 		return err
 	}

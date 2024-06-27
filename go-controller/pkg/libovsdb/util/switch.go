@@ -23,7 +23,7 @@ var updateNodeSwitchLock sync.Mutex
 // is added to the logical switch's exclude_ips. This prevents ovn-northd log
 // spam about duplicate IP addresses.
 // See https://github.com/ovn-org/ovn-kubernetes/pull/779
-func UpdateNodeSwitchExcludeIPs(nbClient libovsdbclient.Client, mgmtIfName, nodeName string, subnet *net.IPNet) error {
+func UpdateNodeSwitchExcludeIPs(nbClient libovsdbclient.Client, mgmtIfName, switchName, nodeName string, subnet *net.IPNet) error {
 	if utilnet.IsIPv6CIDR(subnet) {
 		// We don't exclude any IPs in IPv6
 		return nil
@@ -77,7 +77,7 @@ func UpdateNodeSwitchExcludeIPs(nbClient libovsdbclient.Client, mgmtIfName, node
 	}
 
 	sw := nbdb.LogicalSwitch{
-		Name:        nodeName,
+		Name:        switchName,
 		OtherConfig: map[string]string{"exclude_ips": excludeIPs},
 	}
 	err = libovsdbops.UpdateLogicalSwitchSetOtherConfig(nbClient, &sw)
