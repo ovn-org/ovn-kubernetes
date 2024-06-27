@@ -115,6 +115,13 @@ func (oc *SecondaryLocalnetNetworkController) Init() error {
 		return err
 	}
 
+	localnetPortNetNameOption := map[string]string{
+		"network_name": oc.GetNetworkName(),
+	}
+	if oc.NetInfo.Alias() != "" {
+		localnetPortNetNameOption["network_name"] = oc.NetInfo.Alias()
+	}
+
 	// Add external interface as a logical port to external_switch.
 	// This is a learning switch port with "unknown" address. The external
 	// world is accessed via this port.
@@ -122,9 +129,7 @@ func (oc *SecondaryLocalnetNetworkController) Init() error {
 		Name:      oc.GetNetworkScopedName(types.OVNLocalnetPort),
 		Addresses: []string{"unknown"},
 		Type:      "localnet",
-		Options: map[string]string{
-			"network_name": oc.GetNetworkName(),
-		},
+		Options:   localnetPortNetNameOption,
 	}
 	intVlanID := int(oc.Vlan())
 	if intVlanID != 0 {
