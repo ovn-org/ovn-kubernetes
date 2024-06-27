@@ -40,10 +40,10 @@ func (oc *DefaultNetworkController) gatewayCleanup(nodeName string) error {
 	// Remove the patch port that connects join switch to gateway router
 	portName := types.JoinSwitchToGWRouterPrefix + gatewayRouter
 	lsp := nbdb.LogicalSwitchPort{Name: portName}
-	sw := nbdb.LogicalSwitch{Name: types.OVNJoinSwitch}
+	sw := nbdb.LogicalSwitch{Name: oc.GetNetworkScopedJoinSwitchName()}
 	err = libovsdbops.DeleteLogicalSwitchPorts(oc.nbClient, &sw, &lsp)
 	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
-		return fmt.Errorf("failed to delete logical switch port %s from switch %s: %w", portName, types.OVNJoinSwitch, err)
+		return fmt.Errorf("failed to delete logical switch port %s from switch %s: %w", portName, sw.Name, err)
 	}
 
 	// Remove the logical router port on the gateway router that connects to the join switch

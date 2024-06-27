@@ -107,7 +107,7 @@ func (oc *DefaultNetworkController) SetupMaster(existingNodeNames []string) erro
 
 	// Create OVNJoinSwitch that will be used to connect gateway routers to the distributed router.
 	logicalSwitch := nbdb.LogicalSwitch{
-		Name: types.OVNJoinSwitch,
+		Name: oc.GetNetworkScopedJoinSwitchName(),
 	}
 	// nothing is updated here, so no reason to pass fields
 	err = libovsdbops.CreateOrUpdateLogicalSwitch(oc.nbClient, &logicalSwitch)
@@ -146,10 +146,10 @@ func (oc *DefaultNetworkController) SetupMaster(existingNodeNames []string) erro
 		},
 		Addresses: []string{"router"},
 	}
-	sw := nbdb.LogicalSwitch{Name: types.OVNJoinSwitch}
+	sw := nbdb.LogicalSwitch{Name: oc.GetNetworkScopedJoinSwitchName()}
 	err = libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitch(oc.nbClient, &sw, &logicalSwitchPort)
 	if err != nil {
-		return fmt.Errorf("failed to create logical switch port %+v and switch %s: %v", logicalSwitchPort, types.OVNJoinSwitch, err)
+		return fmt.Errorf("failed to create logical switch port %+v and switch %s: %v", logicalSwitchPort, sw.Name, err)
 	}
 
 	return nil
