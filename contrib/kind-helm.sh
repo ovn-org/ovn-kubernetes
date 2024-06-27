@@ -22,6 +22,7 @@ set_default_params() {
   export OVN_HYBRID_OVERLAY_ENABLE=${OVN_HYBRID_OVERLAY_ENABLE:-false}
   export OVN_EMPTY_LB_EVENTS=${OVN_EMPTY_LB_EVENTS:-false}
   export KIND_REMOVE_TAINT=${KIND_REMOVE_TAINT:-true}
+  export ENABLE_MULTI_NET=${ENABLE_MULTI_NET:-false}
   export KIND_NUM_WORKER=${KIND_NUM_WORKER:-2}
   export KIND_CLUSTER_NAME=${KIND_CLUSTER_NAME:-ovn}
   export OVN_IMAGE=${OVN_IMAGE:-'ghcr.io/ovn-org/ovn-kubernetes/ovn-kube-ubuntu:helm'}
@@ -68,6 +69,7 @@ usage() {
     echo "       [ -mlb | --install-metallb ]"
     echo "       [ -pl  | --install-cni-plugins ]"
     echo "       [ -ikv | --install-kubevirt ]"
+    echo "       [ -mne | --multi-network-enable ]"
     echo "       [ -wk  | --num-workers <num> ]"
     echo "       [ -cn  | --cluster-name ]"
     echo "       [ -h ]"
@@ -83,6 +85,7 @@ usage() {
     echo "-mlb | --install-metallb            Install metallb to test service type LoadBalancer deployments"
     echo "-pl  | --install-cni-plugins        Install CNI plugins"
     echo "-ikv | --install-kubevirt           Install kubevirt"
+    echo "-mne | --multi-network-enable       Enable multi networks. DEFAULT: Disabled"
     echo "-ha  | --ha-enabled                 Enable high availability. DEFAULT: HA Disabled"
     echo "-wk  | --num-workers                Number of worker nodes. DEFAULT: 2 workers"
     echo "-cn  | --cluster-name               Configure the kind cluster's name"
@@ -111,6 +114,8 @@ parse_args() {
             -pl | --install-cni-plugins )       KIND_INSTALL_PLUGINS=true
                                                 ;;
             -ikv | --install-kubevirt)          KIND_INSTALL_KUBEVIRT=true
+                                                ;;
+            -mne | --multi-network-enable )     ENABLE_MULTI_NET=true
                                                 ;;
             -ha | --ha-enabled )                OVN_HA=true
                                                 KIND_NUM_MASTER=3
@@ -149,6 +154,7 @@ print_params() {
      echo "OVN_EMPTY_LB_EVENTS = $OVN_EMPTY_LB_EVENTS"
      echo "KIND_CLUSTER_NAME = $KIND_CLUSTER_NAME"
      echo "KIND_REMOVE_TAINT = $KIND_REMOVE_TAINT"
+     echo "ENABLE_MULTI_NET = $ENABLE_MULTI_NET"
      echo "OVN_IMAGE = $OVN_IMAGE"
      echo "KIND_NUM_MASTER = $KIND_NUM_MASTER"
      echo "KIND_NUM_WORKER = $KIND_NUM_WORKER"
@@ -277,6 +283,7 @@ create_ovn_kubernetes() {
         --set global.image.tag=$(get_tag) \
         --set global.enableAdminNetworkPolicy=true \
         --set global.enableMulticast=$(if [ "${OVN_MULTICAST_ENABLE}" == "true" ]; then echo "true"; else echo "false"; fi) \
+        --set global.enableMultiNetwork=$(if [ "${ENABLE_MULTI_NET}" == "true" ]; then echo "true"; else echo "false"; fi) \
         --set global.enableHybridOverlay=$(if [ "${OVN_HYBRID_OVERLAY_ENABLE}" == "true" ]; then echo "true"; else echo "false"; fi) \
         --set global.emptyLbEvents=$(if [ "${OVN_EMPTY_LB_EVENTS}" == "true" ]; then echo "true"; else echo "false"; fi) \
         --set tags.ovnkube-db-raft=$(if [ "${OVN_HA}" == "true" ]; then echo "true"; else echo "false"; fi) \
@@ -312,6 +319,10 @@ create_ovn_kubernetes
 install_online_ovn_kubernetes_crds
 if [ "$KIND_INSTALL_INGRESS" == true ]; then
   install_ingress
+fi
+
+if [ "$ENABLE_MULTI_NET" == true ]; then
+  enable_multi_net
 fi
 
 kubectl_wait_pods
