@@ -203,7 +203,7 @@ func (oc *DefaultNetworkController) syncNodeManagementPort(node *kapi.Node, host
 		Name:      oc.GetNetworkScopedK8sMgmtIntfName(node.Name),
 		Addresses: []string{addresses},
 	}
-	sw := nbdb.LogicalSwitch{Name: node.Name}
+	sw := nbdb.LogicalSwitch{Name: oc.GetNetworkScopedSwitchName(node.Name)}
 	err = libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitch(oc.nbClient, &sw, &logicalSwitchPort)
 	if err != nil {
 		return err
