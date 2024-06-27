@@ -128,7 +128,6 @@ func (nc *DefaultNodeNetworkController) DelNetwork(nInfo util.NetInfo) {
 
 func newDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, stopChan chan struct{},
 	wg *sync.WaitGroup) *DefaultNodeNetworkController {
-
 	return &DefaultNodeNetworkController{
 		BaseNodeNetworkController: BaseNodeNetworkController{
 			CommonNodeNetworkControllerInfo: *cnnci,
