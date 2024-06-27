@@ -102,10 +102,11 @@ func (h *secondaryLayer3NetworkControllerEventHandler) AddResource(obj interface
 			if fromRetryLoop {
 				_, nodeSync := h.oc.addNodeFailed.Load(node.Name)
 				_, clusterRtrSync := h.oc.nodeClusterRouterPortFailed.Load(node.Name)
+				_, syncMgmtPort := h.oc.mgmtPortFailed.Load(node.Name)
 				_, syncZoneIC := h.oc.syncZoneICFailed.Load(node.Name)
-				nodeParams = &nodeSyncs{syncNode: nodeSync, syncClusterRouterPort: clusterRtrSync, syncZoneIC: syncZoneIC}
+				nodeParams = &nodeSyncs{syncNode: nodeSync, syncClusterRouterPort: clusterRtrSync, syncMgmtPort: syncMgmtPort, syncZoneIC: syncZoneIC}
 			} else {
-				nodeParams = &nodeSyncs{syncNode: true, syncClusterRouterPort: true, syncZoneIC: config.OVNKubernetesFeature.EnableInterconnect}
+				nodeParams = &nodeSyncs{syncNode: true, syncClusterRouterPort: true, syncMgmtPort: true, syncZoneIC: config.OVNKubernetesFeature.EnableInterconnect}
 			}
 			if err := h.oc.addUpdateLocalNodeEvent(node, nodeParams); err != nil {
 				klog.Errorf("Node add failed for %s, will try again later: %v",
@@ -148,14 +149,15 @@ func (h *secondaryLayer3NetworkControllerEventHandler) UpdateResource(oldObj, ne
 				_, nodeSync := h.oc.addNodeFailed.Load(newNode.Name)
 				_, failed := h.oc.nodeClusterRouterPortFailed.Load(newNode.Name)
 				clusterRtrSync := failed || nodeChassisChanged(oldNode, newNode) || nodeSubnetChanged
+				syncMgmtPort := failed || macAddressChanged(oldNode, newNode) || nodeSubnetChanged
 				_, syncZoneIC := h.oc.syncZoneICFailed.Load(newNode.Name)
 				syncZoneIC = syncZoneIC || zoneClusterChanged
-				nodeSyncsParam = &nodeSyncs{syncNode: nodeSync, syncClusterRouterPort: clusterRtrSync, syncZoneIC: syncZoneIC}
+				nodeSyncsParam = &nodeSyncs{syncNode: nodeSync, syncClusterRouterPort: clusterRtrSync, syncMgmtPort: syncMgmtPort, syncZoneIC: syncZoneIC}
 			} else {
 				klog.Infof("Node %s moved from the remote zone %s to local zone %s.",
 					newNode.Name, util.GetNodeZone(oldNode), util.GetNodeZone(newNode))
 				// The node is now a local zone node. Trigger a full node sync.
-				nodeSyncsParam = &nodeSyncs{syncNode: true, syncClusterRouterPort: true, syncZoneIC: config.OVNKubernetesFeature.EnableInterconnect}
+				nodeSyncsParam = &nodeSyncs{syncNode: true, syncClusterRouterPort: true, syncMgmtPort: true, syncZoneIC: config.OVNKubernetesFeature.EnableInterconnect}
 			}
 
 			return h.oc.addUpdateLocalNodeEvent(newNode, nodeSyncsParam)
@@ -235,6 +237,7 @@ type SecondaryLayer3NetworkController struct {
 	BaseSecondaryNetworkController
 
 	// Node-specific syncMaps used by node event handler
+	mgmtPortFailed              sync.Map
 	addNodeFailed               sync.Map
 	nodeClusterRouterPortFailed sync.Map
 	syncZoneICFailed            sync.Map
@@ -273,6 +276,7 @@ func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netI
 				cancelableCtx:               util.NewCancelableContext(),
 			},
 		},
+		mgmtPortFailed:              sync.Map{},
 		addNodeFailed:               sync.Map{},
 		nodeClusterRouterPortFailed: sync.Map{},
 		syncZoneICFailed:            sync.Map{},
@@ -474,6 +478,7 @@ func (oc *SecondaryLayer3NetworkController) addUpdateLocalNodeEvent(node *kapi.N
 		if hostSubnets, err = oc.addNode(node); err != nil {
 			oc.addNodeFailed.Store(node.Name, true)
 			oc.nodeClusterRouterPortFailed.Store(node.Name, true)
+			oc.mgmtPortFailed.Store(node.Name, true)
 			oc.syncZoneICFailed.Store(node.Name, true)
 			err = fmt.Errorf("nodeAdd: error adding node %q for network %s: %w", node.Name, oc.GetNetworkName(), err)
 			oc.recordNodeErrorEvent(node, err)
@@ -488,6 +493,24 @@ func (oc *SecondaryLayer3NetworkController) addUpdateLocalNodeEvent(node *kapi.N
 			oc.nodeClusterRouterPortFailed.Store(node.Name, true)
 		} else {
 			oc.nodeClusterRouterPortFailed.Delete(node.Name)
+		}
+	}
+
+	if util.IsNetworkSegmentationSupportEnabled() && oc.IsPrimaryNetwork() {
+		if nSyncs.syncMgmtPort {
+			hostSubnets, err := util.ParseNodeHostSubnetAnnotation(node, oc.GetNetworkName())
+			if err != nil {
+				errs = append(errs, err)
+				oc.mgmtPortFailed.Store(node.Name, true)
+			} else {
+				_, err = oc.syncNodeManagementPortRouteHostSubnets(node, oc.GetNetworkScopedSwitchName(node.Name), hostSubnets)
+				if err != nil {
+					errs = append(errs, err)
+					oc.mgmtPortFailed.Store(node.Name, true)
+				} else {
+					oc.mgmtPortFailed.Delete(node.Name)
+				}
+			}
 		}
 	}
 
@@ -562,6 +585,7 @@ func (oc *SecondaryLayer3NetworkController) deleteNodeEvent(node *kapi.Node) err
 
 	oc.lsManager.DeleteSwitch(oc.GetNetworkScopedName(node.Name))
 	oc.addNodeFailed.Delete(node.Name)
+	oc.mgmtPortFailed.Delete(node.Name)
 	oc.nodeClusterRouterPortFailed.Delete(node.Name)
 	if config.OVNKubernetesFeature.EnableInterconnect {
 		if err := oc.zoneICHandler.DeleteNode(node); err != nil {
