@@ -11,6 +11,7 @@ import (
 	"github.com/google/go-cmp/cmp/cmpopts"
 
 	kapi "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 	knet "k8s.io/utils/net"
 
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
@@ -21,7 +22,7 @@ import (
 
 var (
 	ErrorAttachDefNotOvnManaged = errors.New("net-attach-def not managed by OVN")
-	UnsupportedIPAMKeyError     = errors.New("IPAM key is not supported. Use OVN-K provided IPAM via the `subnets` attribute")
+	ErrorUnsupportedIPAMKey     = errors.New("IPAM key is not supported. Use OVN-K provided IPAM via the `subnets` attribute")
 )
 
 // BasicNetInfo is interface which holds basic network information
@@ -40,7 +41,7 @@ type BasicNetInfo interface {
 	AllowsPersistentIPs() bool
 
 	// utility methods
-	CompareNetInfo(BasicNetInfo) bool
+	Equals(BasicNetInfo) bool
 	GetNetworkScopedName(name string) string
 	RemoveNetworkScopeFromName(name string) string
 }
@@ -49,9 +50,11 @@ type BasicNetInfo interface {
 // network information
 type NetInfo interface {
 	BasicNetInfo
-	AddNAD(nadName string)
-	DeleteNAD(nadName string)
+	GetNADs() []string
 	HasNAD(nadName string) bool
+	SetNADs(nadName ...string)
+	AddNADs(nadName ...string)
+	DeleteNADs(nadName ...string)
 }
 
 type DefaultNetInfo struct{}
@@ -92,13 +95,9 @@ func (nInfo *DefaultNetInfo) RemoveNetworkScopeFromName(name string) string {
 	return name
 }
 
-// AddNAD adds the specified NAD, no op for default network
-func (nInfo *DefaultNetInfo) AddNAD(nadName string) {
-	panic("unexpected call for default network")
-}
-
-// DeleteNAD deletes the specified NAD, no op for default network
-func (nInfo *DefaultNetInfo) DeleteNAD(nadName string) {
+// GetNADs returns the NADs associated with the network, no op for default
+// network
+func (nInfo *DefaultNetInfo) GetNADs() []string {
 	panic("unexpected call for default network")
 }
 
@@ -108,7 +107,23 @@ func (nInfo *DefaultNetInfo) HasNAD(nadName string) bool {
 	panic("unexpected call for default network")
 }
 
-func (nInfo *DefaultNetInfo) CompareNetInfo(netBasicInfo BasicNetInfo) bool {
+// SetNADs replaces the NADs associated with the network, no op for default
+// network
+func (nInfo *DefaultNetInfo) SetNADs(nadName ...string) {
+	panic("unexpected call for default network")
+}
+
+// AddNAD adds the specified NAD, no op for default network
+func (nInfo *DefaultNetInfo) AddNADs(nadName ...string) {
+	panic("unexpected call for default network")
+}
+
+// DeleteNAD deletes the specified NAD, no op for default network
+func (nInfo *DefaultNetInfo) DeleteNADs(nadName ...string) {
+	panic("unexpected call for default network")
+}
+
+func (nInfo *DefaultNetInfo) Equals(netBasicInfo BasicNetInfo) bool {
 	_, ok := netBasicInfo.(*DefaultNetInfo)
 	return ok
 }
@@ -166,7 +181,8 @@ type secondaryNetInfo struct {
 
 	// all net-attach-def NAD names for this network, used to determine if a pod needs
 	// to be plumbed for this network
-	nadNames sync.Map
+	sync.Mutex
+	nadNames sets.Set[string]
 }
 
 // GetNetworkName returns the network name
@@ -209,21 +225,40 @@ func (nInfo *secondaryNetInfo) getPrefix() string {
 	return GetSecondaryNetworkPrefix(nInfo.netName)
 }
 
-// AddNAD adds the specified NAD
-func (nInfo *secondaryNetInfo) AddNAD(nadName string) {
-	nInfo.nadNames.Store(nadName, true)
-}
-
-// DeleteNAD deletes the specified NAD
-func (nInfo *secondaryNetInfo) DeleteNAD(nadName string) {
-	nInfo.nadNames.Delete(nadName)
+// GetNADs returns all the NADs associated with this network
+func (nInfo *secondaryNetInfo) GetNADs() []string {
+	nInfo.Lock()
+	defer nInfo.Unlock()
+	return nInfo.nadNames.UnsortedList()
 }
 
 // HasNAD returns true if the given NAD exists, used
 // to check if the network needs to be plumbed over
 func (nInfo *secondaryNetInfo) HasNAD(nadName string) bool {
-	_, ok := nInfo.nadNames.Load(nadName)
-	return ok
+	nInfo.Lock()
+	defer nInfo.Unlock()
+	return nInfo.nadNames.Has(nadName)
+}
+
+// SetNADs replaces the NADs associated with the network
+func (nInfo *secondaryNetInfo) SetNADs(nadName ...string) {
+	nInfo.Lock()
+	defer nInfo.Unlock()
+	nInfo.nadNames = sets.New(nadName...)
+}
+
+// AddNAD adds the specified NAD
+func (nInfo *secondaryNetInfo) AddNADs(nadName ...string) {
+	nInfo.Lock()
+	defer nInfo.Unlock()
+	nInfo.nadNames.Insert(nadName...)
+}
+
+// DeleteNAD deletes the specified NAD
+func (nInfo *secondaryNetInfo) DeleteNADs(nadName ...string) {
+	nInfo.Lock()
+	defer nInfo.Unlock()
+	nInfo.nadNames.Delete(nadName...)
 }
 
 // TopologyType returns the topology type
@@ -261,8 +296,14 @@ func (nInfo *secondaryNetInfo) ExcludeSubnets() []*net.IPNet {
 	return nInfo.excludeSubnets
 }
 
-// CompareNetInfo compares for equality this network information with the other
-func (nInfo *secondaryNetInfo) CompareNetInfo(other BasicNetInfo) bool {
+// Equals compares for equality this network information with the other
+func (nInfo *secondaryNetInfo) Equals(other BasicNetInfo) bool {
+	if (nInfo == nil) != (other == nil) {
+		return false
+	}
+	if nInfo == nil && other == nil {
+		return true
+	}
 	if nInfo.netName != other.GetNetworkName() {
 		return false
 	}
@@ -291,6 +332,28 @@ func (nInfo *secondaryNetInfo) CompareNetInfo(other BasicNetInfo) bool {
 	return cmp.Equal(nInfo.excludeSubnets, other.ExcludeSubnets(), cmpopts.SortSlices(lessIPNet))
 }
 
+func (nInfo *secondaryNetInfo) copy() *secondaryNetInfo {
+	nInfo.Lock()
+	defer nInfo.Unlock()
+
+	// everything is immutable except the NADs
+	c := &secondaryNetInfo{
+		netName:            nInfo.netName,
+		primaryNetwork:     nInfo.primaryNetwork,
+		topology:           nInfo.topology,
+		mtu:                nInfo.mtu,
+		vlan:               nInfo.vlan,
+		allowPersistentIPs: nInfo.allowPersistentIPs,
+		ipv4mode:           nInfo.ipv4mode,
+		ipv6mode:           nInfo.ipv6mode,
+		subnets:            nInfo.subnets,
+		excludeSubnets:     nInfo.excludeSubnets,
+		nadNames:           nInfo.nadNames.Clone(),
+	}
+
+	return c
+}
+
 func newLayer3NetConfInfo(netconf *ovncnitypes.NetConf) (NetInfo, error) {
 	subnets, _, err := parseSubnets(netconf.Subnets, "", types.Layer3Topology)
 	if err != nil {
@@ -303,6 +366,7 @@ func newLayer3NetConfInfo(netconf *ovncnitypes.NetConf) (NetInfo, error) {
 		topology:       types.Layer3Topology,
 		subnets:        subnets,
 		mtu:            netconf.MTU,
+		nadNames:       sets.Set[string]{},
 	}
 	ni.ipv4mode, ni.ipv6mode = getIPMode(subnets)
 	return ni, nil
@@ -322,6 +386,7 @@ func newLayer2NetConfInfo(netconf *ovncnitypes.NetConf) (NetInfo, error) {
 		excludeSubnets:     excludes,
 		mtu:                netconf.MTU,
 		allowPersistentIPs: netconf.AllowPersistentIPs,
+		nadNames:           sets.Set[string]{},
 	}
 	ni.ipv4mode, ni.ipv6mode = getIPMode(subnets)
 	return ni, nil
@@ -341,6 +406,7 @@ func newLocalnetNetConfInfo(netconf *ovncnitypes.NetConf) (NetInfo, error) {
 		mtu:                netconf.MTU,
 		vlan:               uint(netconf.VLANID),
 		allowPersistentIPs: netconf.AllowPersistentIPs,
+		nadNames:           sets.Set[string]{},
 	}
 	ni.ipv4mode, ni.ipv6mode = getIPMode(subnets)
 	return ni, nil
@@ -480,10 +546,22 @@ func ParseNetConf(netattachdef *nettypes.NetworkAttachmentDefinition) (*ovncnity
 	}
 
 	if netconf.IPAM.Type != "" {
-		return nil, fmt.Errorf("error parsing Network Attachment Definition %s/%s: %v", netattachdef.Namespace, netattachdef.Name, UnsupportedIPAMKeyError)
+		return nil, fmt.Errorf("error parsing Network Attachment Definition %s/%s: %w", netattachdef.Namespace, netattachdef.Name, ErrorUnsupportedIPAMKey)
 	}
 
 	return netconf, nil
+}
+
+func CopyNetInfo(netInfo NetInfo) NetInfo {
+	switch t := netInfo.(type) {
+	case *DefaultNetInfo:
+		// immutable
+		return netInfo
+	case *secondaryNetInfo:
+		return t.copy()
+	default:
+		panic("program error: unrecognized NetInfo")
+	}
 }
 
 // GetPodNADToNetworkMapping sees if the given pod needs to plumb over this given network specified by netconf,

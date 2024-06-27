@@ -524,7 +524,7 @@ func TestPodAllocator_reconcileForNAD(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Invalid netConf")
 			}
-			netInfo.AddNAD("namespace/nad")
+			netInfo.AddNADs("namespace/nad")
 
 			var ipamClaimsReconciler persistentips.PersistentAllocations
 			if tt.ipam && tt.args.ipamClaim != nil {

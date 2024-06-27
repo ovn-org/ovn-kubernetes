@@ -44,7 +44,7 @@ import (
 
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	nadscheme "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/scheme"
-	nadfactory "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/informers/externalversions"
+	nadinformerfactory "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/informers/externalversions"
 	nadinformer "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/informers/externalversions/k8s.cni.cncf.io/v1"
 	nadlister "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
 
@@ -106,7 +106,7 @@ type WatchFactory struct {
 	egressServiceFactory egressserviceinformerfactory.SharedInformerFactory
 	apbRouteFactory      adminbasedpolicyinformerfactory.SharedInformerFactory
 	ipamClaimsFactory    ipamclaimsfactory.SharedInformerFactory
-	nadFactory           nadfactory.SharedInformerFactory
+	nadFactory           nadinformerfactory.SharedInformerFactory
 	informers            map[reflect.Type]*informer
 
 	stopChan chan struct{}
@@ -250,16 +250,6 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 		stopChan:             make(chan struct{}),
 	}
 
-	if config.OVNKubernetesFeature.EnableMultiNetwork &&
-		config.OVNKubernetesFeature.EnablePersistentIPs &&
-		!config.OVNKubernetesFeature.EnableInterconnect {
-		wf.ipamClaimsFactory = ipamclaimsfactory.NewSharedInformerFactory(ovnClientset.IPAMClaimsClient, resyncInterval)
-	}
-
-	if util.IsNetworkSegmentationSupportEnabled() {
-		wf.nadFactory = nadfactory.NewSharedInformerFactory(ovnClientset.NetworkAttchDefClient, resyncInterval)
-	}
-
 	if err := anpapi.AddToScheme(anpscheme.Scheme); err != nil {
 		return nil, err
 	}
@@ -384,19 +374,19 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 		}
 	}
 
-	if config.OVNKubernetesFeature.EnableMultiNetwork &&
-		config.OVNKubernetesFeature.EnablePersistentIPs &&
-		!config.OVNKubernetesFeature.EnableInterconnect {
-		wf.informers[IPAMClaimsType], err = newInformer(IPAMClaimsType, wf.ipamClaimsFactory.K8s().V1alpha1().IPAMClaims().Informer())
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	if util.IsNetworkSegmentationSupportEnabled() {
+	if config.OVNKubernetesFeature.EnableMultiNetwork {
+		wf.nadFactory = nadinformerfactory.NewSharedInformerFactory(ovnClientset.NetworkAttchDefClient, resyncInterval)
 		wf.informers[NetworkAttachmentDefinitionType], err = newInformer(NetworkAttachmentDefinitionType, wf.nadFactory.K8sCniCncfIo().V1().NetworkAttachmentDefinitions().Informer())
 		if err != nil {
 			return nil, err
+		}
+
+		if config.OVNKubernetesFeature.EnablePersistentIPs && !config.OVNKubernetesFeature.EnableInterconnect {
+			wf.ipamClaimsFactory = ipamclaimsfactory.NewSharedInformerFactory(ovnClientset.IPAMClaimsClient, resyncInterval)
+			wf.informers[IPAMClaimsType], err = newInformer(IPAMClaimsType, wf.ipamClaimsFactory.K8s().V1alpha1().IPAMClaims().Informer())
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 
@@ -510,7 +500,7 @@ func (wf *WatchFactory) Start() error {
 		}
 	}
 
-	if util.IsNetworkSegmentationSupportEnabled() && wf.nadFactory != nil {
+	if wf.nadFactory != nil {
 		wf.nadFactory.Start(wf.stopChan)
 		for oType, synced := range waitForCacheSyncWithTimeout(wf.nadFactory, wf.stopChan) {
 			if !synced {
@@ -546,6 +536,7 @@ func (wf *WatchFactory) Stop() {
 	}
 	// FIXME(trozet) when https://github.com/k8snetworkplumbingwg/multi-networkpolicy/issues/22 is resolved
 	// wf.mnpFactory.Shutdown()
+	// wf.nadFactory.Shutdown()
 	if wf.egressServiceFactory != nil {
 		wf.egressServiceFactory.Shutdown()
 	}
@@ -555,10 +546,6 @@ func (wf *WatchFactory) Stop() {
 	if wf.ipamClaimsFactory != nil {
 		wf.ipamClaimsFactory.Shutdown()
 	}
-	/* FIXME(tssurya) when https://github.com/k8snetworkplumbingwg/multi-networkpolicy/issues/22 is resolved
-	if wf.nadFactory != nil {
-		wf.nadFactory.Shutdown()
-	}*/
 }
 
 // NewNodeWatchFactory initializes a watch factory with significantly fewer
@@ -584,6 +571,9 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeName string) (
 		return nil, err
 	}
 	if err := adminbasedpolicyapi.AddToScheme(adminbasedpolicyscheme.Scheme); err != nil {
+		return nil, err
+	}
+	if err := nadapi.AddToScheme(nadscheme.Scheme); err != nil {
 		return nil, err
 	}
 
@@ -679,6 +669,15 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeName string) (
 		wf.apbRouteFactory.K8s().V1().AdminPolicyBasedExternalRoutes().Informer()
 	}
 
+	// need to configure OVS interfaces for Pods on secondary networks in the DPU mode
+	if config.OVNKubernetesFeature.EnableMultiNetwork && config.OvnKubeNode.Mode == types.NodeModeDPU {
+		wf.nadFactory = nadinformerfactory.NewSharedInformerFactory(ovnClientset.NetworkAttchDefClient, resyncInterval)
+		wf.informers[NetworkAttachmentDefinitionType], err = newInformer(NetworkAttachmentDefinitionType, wf.nadFactory.K8sCniCncfIo().V1().NetworkAttachmentDefinitions().Informer())
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	return wf, nil
 }
 
@@ -697,16 +696,6 @@ func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset
 		egressQoSFactory:     egressqosinformerfactory.NewSharedInformerFactory(ovnClientset.EgressQoSClient, resyncInterval),
 		informers:            make(map[reflect.Type]*informer),
 		stopChan:             make(chan struct{}),
-	}
-
-	if config.OVNKubernetesFeature.EnableMultiNetwork &&
-		config.OVNKubernetesFeature.EnablePersistentIPs &&
-		config.OVNKubernetesFeature.EnableInterconnect {
-		wf.ipamClaimsFactory = ipamclaimsfactory.NewSharedInformerFactory(ovnClientset.IPAMClaimsClient, resyncInterval)
-	}
-
-	if util.IsNetworkSegmentationSupportEnabled() {
-		wf.nadFactory = nadfactory.NewSharedInformerFactory(ovnClientset.NetworkAttchDefClient, resyncInterval)
 	}
 
 	if err := egressipapi.AddToScheme(egressipscheme.Scheme); err != nil {
@@ -787,24 +776,26 @@ func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset
 		}
 	}
 
-	if config.OVNKubernetesFeature.EnableInterconnect && config.OVNKubernetesFeature.EnableMultiNetwork {
-		wf.informers[PodType], err = newQueuedInformer(PodType, wf.iFactory.Core().V1().Pods().Informer(), wf.stopChan, defaultNumEventQueues)
-		if err != nil {
-			return nil, err
-		}
-
-		if config.OVNKubernetesFeature.EnablePersistentIPs {
-			wf.informers[IPAMClaimsType], err = newInformer(IPAMClaimsType, wf.ipamClaimsFactory.K8s().V1alpha1().IPAMClaims().Informer())
-			if err != nil {
-				return nil, err
-			}
-		}
-	}
-
-	if util.IsNetworkSegmentationSupportEnabled() {
+	if config.OVNKubernetesFeature.EnableMultiNetwork {
+		wf.nadFactory = nadinformerfactory.NewSharedInformerFactory(ovnClientset.NetworkAttchDefClient, resyncInterval)
 		wf.informers[NetworkAttachmentDefinitionType], err = newInformer(NetworkAttachmentDefinitionType, wf.nadFactory.K8sCniCncfIo().V1().NetworkAttachmentDefinitions().Informer())
 		if err != nil {
 			return nil, err
+		}
+
+		if config.OVNKubernetesFeature.EnableInterconnect {
+			wf.informers[PodType], err = newQueuedInformer(PodType, wf.iFactory.Core().V1().Pods().Informer(), wf.stopChan, defaultNumEventQueues)
+			if err != nil {
+				return nil, err
+			}
+
+			if config.OVNKubernetesFeature.EnablePersistentIPs {
+				wf.ipamClaimsFactory = ipamclaimsfactory.NewSharedInformerFactory(ovnClientset.IPAMClaimsClient, resyncInterval)
+				wf.informers[IPAMClaimsType], err = newInformer(IPAMClaimsType, wf.ipamClaimsFactory.K8s().V1alpha1().IPAMClaims().Informer())
+				if err != nil {
+					return nil, err
+				}
+			}
 		}
 	}
 

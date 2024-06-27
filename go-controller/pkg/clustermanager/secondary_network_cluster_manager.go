@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"github.com/containernetworking/cni/pkg/types"
-	"k8s.io/client-go/tools/record"
 	"k8s.io/klog/v2"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/id"
@@ -33,8 +32,7 @@ type secondaryNetworkClusterManager struct {
 	networkIDAllocator id.Allocator
 }
 
-func newSecondaryNetworkClusterManager(ovnClient *util.OVNClusterManagerClientset,
-	wf *factory.WatchFactory, recorder record.EventRecorder) (*secondaryNetworkClusterManager, error) {
+func newSecondaryNetworkClusterManager(ovnClient *util.OVNClusterManagerClientset, wf *factory.WatchFactory) (*secondaryNetworkClusterManager, error) {
 	klog.Infof("Creating secondary network cluster manager")
 	networkIDAllocator, err := id.NewIDAllocator("NetworkIDs", maxSecondaryNetworkIDs)
 	if err != nil {
@@ -51,8 +49,7 @@ func newSecondaryNetworkClusterManager(ovnClient *util.OVNClusterManagerClientse
 		networkIDAllocator: networkIDAllocator,
 	}
 
-	sncm.nadController, err = nad.NewNetAttachDefinitionController(
-		"cluster-manager", sncm, ovnClient.NetworkAttchDefClient, recorder)
+	sncm.nadController, err = nad.NewNetAttachDefinitionController("cluster-manager", sncm, wf)
 	if err != nil {
 		return nil, err
 	}

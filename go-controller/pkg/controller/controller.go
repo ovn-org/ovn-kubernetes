@@ -2,8 +2,9 @@ package controller
 
 import (
 	"fmt"
-	"golang.org/x/sync/errgroup"
 	"sync"
+
+	"golang.org/x/sync/errgroup"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -17,30 +18,46 @@ import (
 
 const maxRetries = 15
 
-// Controller is a level-driven controller that is shut down after Stop() call.
-type Controller interface {
-	ReconcileAll()
+// Reconciler is a basic level-driven controller that is fed externally of items
+// to reconcile through its Reconcile method
+type Reconciler interface {
+	Reconcile(key string)
 	addHandler() error
 	startWorkers() error
 	stop()
 }
 
-type Config[T any] struct {
+// Controller is a level-driven controller that is fed of items to reconcile
+// through a provided informer
+type Controller interface {
+	Reconciler
+	ReconcileAll()
+}
+
+type ReconcilerConfig struct {
 	RateLimiter workqueue.RateLimiter
+	Reconcile   func(key string) error
+	// How many workers should be started for this reconciler.
+	Threadiness int
+}
+
+type ControllerConfig[T any] struct {
+	RateLimiter workqueue.RateLimiter
+	Reconcile   func(key string) error
+	// How many workers should be started for this controller.
+	Threadiness int
 	Informer    cache.SharedIndexInformer
 	Lister      func(selector labels.Selector) (ret []*T, err error)
 	// ObjNeedsUpdate tells if object should be reconciled.
 	// May be called with oldObj = nil on Add, won't be called on Delete.
 	ObjNeedsUpdate func(oldObj, newObj *T) bool
-	Reconcile      func(key string) error
-	// How many workers should be started for this controller.
-	Threadiness int
 }
 
-// controller has the basic functionality, and may have some wrappers to provide different Start() method options.
+// controller has the basic functionality, and may have some wrappers to provide
+// different Start() method options.
 type controller[T any] struct {
 	name         string
-	config       *Config[T]
+	config       *ControllerConfig[T]
 	eventHandler cache.ResourceEventHandlerRegistration
 
 	queue    workqueue.RateLimitingInterface
@@ -48,9 +65,20 @@ type controller[T any] struct {
 	wg       *sync.WaitGroup
 }
 
-// NewController creates a new level-driven controller.
-// It should be started and stopped using StartControllers and StopControllers functions.
-func NewController[T any](name string, config *Config[T]) Controller {
+// NewReconciler creates a new basic level-driven controller. It should be
+// started and stopped using Start/StartWithInitialSync/Stop functions.
+func NewReconciler(name string, config *ReconcilerConfig) Reconciler {
+	controllerConfig := &ControllerConfig[string]{
+		RateLimiter: config.RateLimiter,
+		Reconcile:   config.Reconcile,
+		Threadiness: config.Threadiness,
+	}
+	return NewController(name, controllerConfig)
+}
+
+// NewController creates a new level-driven controller. It should be started and
+// stopped using Start/StartWithInitialSync/Stop functions.
+func NewController[T any](name string, config *ControllerConfig[T]) Controller {
 	return &controller[T]{
 		name:   name,
 		config: config,
@@ -66,6 +94,10 @@ func NewController[T any](name string, config *Config[T]) Controller {
 }
 
 func (c *controller[T]) addHandler() error {
+	if c.config.Informer == nil {
+		return nil
+	}
+
 	klog.Infof("Adding controller %v event handlers", c.name)
 
 	var err error
@@ -170,8 +202,9 @@ func (c *controller[T]) onDelete(objInterface interface{}) {
 	c.queue.Add(key)
 }
 
-// processNextQueueItem returns false when the queue is shutdown and the handling should be stopped.
-// Otherwise, it handles the next item from the queue and always returns true.
+// processNextQueueItem returns false when the queue is shutdown and the
+// handling should be stopped. Otherwise, it handles the next item from the
+// queue and always returns true.
 func (c *controller[T]) processNextQueueItem() bool {
 	key, shutdown := c.queue.Get()
 
@@ -195,7 +228,15 @@ func (c *controller[T]) processNextQueueItem() bool {
 	return true
 }
 
+func (c *controller[T]) Reconcile(key string) {
+	c.queue.Add(key)
+}
+
 func (c *controller[T]) ReconcileAll() {
+	if c.config.Lister == nil {
+		panic("ReconcileAll needs a Lister that was not provided")
+	}
+
 	klog.Infof("Controller %s: full reconcile", c.name)
 	objs, err := c.config.Lister(labels.Everything())
 	if err != nil {
@@ -212,22 +253,24 @@ func (c *controller[T]) ReconcileAll() {
 	}
 }
 
-// StartControllers starts one or multiple controllers. If initial sync is required, use StartControllersWithInitialSync
-func StartControllers(controllers ...Controller) (err error) {
-	return StartControllersWithInitialSync(nil, controllers...)
+// Start starts one or multiple controllers. If initial sync is required, use
+// StartWithInitialSync
+func Start(controllers ...Reconciler) (err error) {
+	return StartWithInitialSync(nil, controllers...)
 }
 
-// StartControllersWithInitialSync starts one or multiple controllers that share initialSync function.
-// initialSync will be called after all event handlers for given controllers were added, but before queue handlers are started.
-// It ensures no events will be missed.
-// A user of this package that manages multiple controllers would most likely do a single call to this function
-// if it needs to use this sync to take an initial action (i.e. building up its own cache) correlating the information
-// from all the initialized informers.
-// If initial sync is not required, use StartControllers.
-func StartControllersWithInitialSync(initialSync func() error, controllers ...Controller) (err error) {
+// StartWithInitialSync starts one or multiple controllers that share
+// initialSync function. initialSync will be called after all event handlers for
+// given controllers were added to the informer (if any), but before queue
+// handlers are started. It ensures no events will be missed. A user of this
+// package that manages multiple controllers would most likely do a single call
+// to this function if it needs to use this sync to take an initial action (i.e.
+// building up its own cache) correlating the information from all the
+// initialized informers. If initial sync is not required, use Start.
+func StartWithInitialSync(initialSync func() error, controllers ...Reconciler) (err error) {
 	defer func() {
 		if err != nil {
-			StopControllers(controllers...)
+			Stop(controllers...)
 		}
 	}()
 
@@ -242,10 +285,10 @@ func StartControllersWithInitialSync(initialSync func() error, controllers ...Co
 		return err
 	}
 
-	// now we have already started receiving events and putting keys in the queue.
-	// If initial sync is needed, we can do it now, by listing all existing objects.
-	// Since we are receiving all events already, we know every change that happens after the following
-	// List call, will be handled.
+	// now we have already started receiving events and putting keys in the
+	// queue. If initial sync is needed, we can do it now, by listing all
+	// existing objects. Since we are receiving all events already, we know
+	// every change that happens after the following List call, will be handled.
 	if initialSync != nil {
 		if err = initialSync(); err != nil {
 			return fmt.Errorf("initial sync failed: %w", err)
@@ -259,7 +302,7 @@ func StartControllersWithInitialSync(initialSync func() error, controllers ...Co
 	return nil
 }
 
-func StopControllers(controllers ...Controller) {
+func Stop(controllers ...Reconciler) {
 	for _, subcontroller := range controllers {
 		subcontroller.stop()
 	}

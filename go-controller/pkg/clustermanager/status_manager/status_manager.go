@@ -59,7 +59,7 @@ func newStatusManager[T any](name string, informer cache.SharedIndexInformer,
 		resource:       resource,
 		withZonesRLock: withZonesRLock,
 	}
-	controllerConfig := &controller.Config[T]{
+	controllerConfig := &controller.ControllerConfig[T]{
 		Informer:       informer,
 		Lister:         lister,
 		RateLimiter:    workqueue.NewItemFastSlowRateLimiter(time.Second, 5*time.Second, 5),
@@ -79,11 +79,11 @@ func (m *typedStatusManager[T]) needsUpdate(oldObj, newObj *T) bool {
 }
 
 func (m *typedStatusManager[T]) Start() error {
-	return controller.StartControllers(m.objController)
+	return controller.Start(m.objController)
 }
 
 func (m *typedStatusManager[T]) Stop() {
-	controller.StopControllers(m.objController)
+	controller.Stop(m.objController)
 }
 
 func (m *typedStatusManager[T]) updateStatus(key string) error {

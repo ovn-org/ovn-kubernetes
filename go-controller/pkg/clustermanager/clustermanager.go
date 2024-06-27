@@ -72,7 +72,7 @@ func NewClusterManager(ovnClient *util.OVNClusterManagerClientset, wf *factory.W
 	}
 
 	if config.OVNKubernetesFeature.EnableMultiNetwork {
-		cm.secondaryNetClusterManager, err = newSecondaryNetworkClusterManager(ovnClient, wf, recorder)
+		cm.secondaryNetClusterManager, err = newSecondaryNetworkClusterManager(ovnClient, wf)
 		if err != nil {
 			return nil, err
 		}

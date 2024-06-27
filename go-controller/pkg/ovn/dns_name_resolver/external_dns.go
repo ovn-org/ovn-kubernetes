@@ -61,7 +61,7 @@ func NewExternalEgressDNS(
 	}
 
 	extEgDNS.dnsLister = ocpnetworklisterv1alpha1.NewDNSNameResolverLister(dnsSharedIndexInformer.GetIndexer())
-	dnsConfig := &controller.Config[ocpnetworkapiv1alpha1.DNSNameResolver]{
+	dnsConfig := &controller.ControllerConfig[ocpnetworkapiv1alpha1.DNSNameResolver]{
 		RateLimiter:    workqueue.NewItemFastSlowRateLimiter(time.Second, 5*time.Second, 5),
 		Informer:       dnsSharedIndexInformer,
 		Lister:         extEgDNS.dnsLister.List,
@@ -177,12 +177,12 @@ func (extEgDNS *ExternalEgressDNS) Delete(namespace string) error {
 
 // Run starts the DNSNameResolver controller.
 func (extEgDNS *ExternalEgressDNS) Run() error {
-	return controller.StartControllers(extEgDNS.controller)
+	return controller.Start(extEgDNS.controller)
 }
 
 // Shutdown stops the DNSNameResolver controller.
 func (extEgDNS *ExternalEgressDNS) Shutdown() {
-	controller.StopControllers(extEgDNS.controller)
+	controller.Stop(extEgDNS.controller)
 
 }
 
