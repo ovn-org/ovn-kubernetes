@@ -155,81 +155,12 @@ func (oc *DefaultNetworkController) SetupMaster(existingNodeNames []string) erro
 	return nil
 }
 
-func (oc *DefaultNetworkController) syncNodeManagementPort(node *kapi.Node, hostSubnets []*net.IPNet) error {
-	macAddress, err := util.ParseNodeManagementPortMACAddress(node)
-	if err != nil {
-		return err
+func (oc *DefaultNetworkController) syncNodeManagementPortDefault(node *kapi.Node, switchName string, hostSubnets []*net.IPNet) error {
+	mgmtPortIPs, err := oc.syncNodeManagementPortRouteHostSubnets(node, switchName, hostSubnets)
+	if err == nil {
+		return oc.setupUDNACLs(mgmtPortIPs)
 	}
-
-	if hostSubnets == nil {
-		hostSubnets, err = util.ParseNodeHostSubnetAnnotation(node, oc.GetNetworkName())
-		if err != nil {
-			return err
-		}
-	}
-
-	var v4Subnet *net.IPNet
-	addresses := macAddress.String()
-	mgmtPortIPs := []net.IP{}
-	for _, hostSubnet := range hostSubnets {
-		mgmtIfAddr := util.GetNodeManagementIfAddr(hostSubnet)
-		addresses += " " + mgmtIfAddr.IP.String()
-		mgmtPortIPs = append(mgmtPortIPs, mgmtIfAddr.IP)
-
-		if err := oc.addAllowACLFromNode(node.Name, mgmtIfAddr.IP); err != nil {
-			return err
-		}
-
-		if !utilnet.IsIPv6CIDR(hostSubnet) {
-			v4Subnet = hostSubnet
-		}
-		if config.Gateway.Mode == config.GatewayModeLocal {
-			lrsr := nbdb.LogicalRouterStaticRoute{
-				Policy:   &nbdb.LogicalRouterStaticRoutePolicySrcIP,
-				IPPrefix: hostSubnet.String(),
-				Nexthop:  mgmtIfAddr.IP.String(),
-			}
-			p := func(item *nbdb.LogicalRouterStaticRoute) bool {
-				return item.IPPrefix == lrsr.IPPrefix && libovsdbops.PolicyEqualPredicate(lrsr.Policy, item.Policy)
-			}
-			err := libovsdbops.CreateOrReplaceLogicalRouterStaticRouteWithPredicate(oc.nbClient, oc.GetNetworkScopedClusterRouterName(),
-				&lrsr, p, &lrsr.Nexthop)
-			if err != nil {
-				return fmt.Errorf("error creating static route %+v on router %s: %v", lrsr, oc.GetNetworkScopedClusterRouterName(), err)
-			}
-		}
-	}
-	// It is a part of DefaultNetworkController, but this check is added in case it will ever be moved to bnc.
-	if oc.GetNetworkName() == types.DefaultNetworkName {
-		if err := oc.setupUDNACLs(mgmtPortIPs); err != nil {
-			return err
-		}
-	}
-
-	// Create this node's management logical port on the node switch
-	logicalSwitchPort := nbdb.LogicalSwitchPort{
-		Name:      oc.GetNetworkScopedK8sMgmtIntfName(node.Name),
-		Addresses: []string{addresses},
-	}
-	sw := nbdb.LogicalSwitch{Name: oc.GetNetworkScopedSwitchName(node.Name)}
-	err = libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitch(oc.nbClient, &sw, &logicalSwitchPort)
-	if err != nil {
-		return err
-	}
-
-	err = libovsdbops.AddPortsToPortGroup(oc.nbClient, oc.getClusterPortGroupName(types.ClusterPortGroupNameBase), logicalSwitchPort.UUID)
-	if err != nil {
-		klog.Errorf(err.Error())
-		return err
-	}
-
-	if v4Subnet != nil {
-		if err := libovsdbutil.UpdateNodeSwitchExcludeIPs(oc.nbClient, oc.GetNetworkScopedK8sMgmtIntfName(node.Name), oc.GetNetworkScopedSwitchName(node.Name), node.Name, v4Subnet); err != nil {
-			return err
-		}
-	}
-
-	return nil
+	return err
 }
 
 func (oc *DefaultNetworkController) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig *util.L3GatewayConfig,
@@ -667,12 +598,22 @@ func (oc *DefaultNetworkController) addUpdateLocalNodeEvent(node *kapi.Node, nSy
 	}
 
 	if nSyncs.syncMgmtPort {
-		err := oc.syncNodeManagementPort(node, hostSubnets)
-		if err != nil {
-			errs = append(errs, err)
-			oc.mgmtPortFailed.Store(node.Name, true)
-		} else {
-			oc.mgmtPortFailed.Delete(node.Name)
+		if hostSubnets == nil {
+			hostSubnets, err = util.ParseNodeHostSubnetAnnotation(node, oc.GetNetworkName())
+			if err != nil {
+				errs = append(errs, err)
+				oc.mgmtPortFailed.Store(node.Name, true)
+			}
+		}
+
+		// If we succcessfully discovered the host subnets then add the management port.
+		if hostSubnets != nil {
+			if err = oc.syncNodeManagementPortDefault(node, oc.GetNetworkScopedSwitchName(node.Name), hostSubnets); err != nil {
+				errs = append(errs, err)
+				oc.mgmtPortFailed.Store(node.Name, true)
+			} else {
+				oc.mgmtPortFailed.Delete(node.Name)
+			}
 		}
 	}
 

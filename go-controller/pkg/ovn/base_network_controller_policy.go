@@ -250,13 +250,13 @@ func getAllowFromNodeACLDbIDs(nodeName, mgmtPortIP, controller string) *libovsdb
 // There is no delete function for this ACL type, because the ACL is applied on a node switch.
 // When the node is deleted, switch will be deleted by the node sync, and the dependent ACLs will be
 // garbage-collected.
-func (bnc *BaseNetworkController) addAllowACLFromNode(nodeName string, mgmtPortIP net.IP) error {
+func (bnc *BaseNetworkController) addAllowACLFromNode(switchName string, mgmtPortIP net.IP) error {
 	ipFamily := "ip4"
 	if utilnet.IsIPv6(mgmtPortIP) {
 		ipFamily = "ip6"
 	}
 	match := fmt.Sprintf("%s.src==%s", ipFamily, mgmtPortIP.String())
-	dbIDs := getAllowFromNodeACLDbIDs(nodeName, mgmtPortIP.String(), bnc.controllerName)
+	dbIDs := getAllowFromNodeACLDbIDs(switchName, mgmtPortIP.String(), bnc.controllerName)
 	nodeACL := libovsdbutil.BuildACL(dbIDs, types.DefaultAllowPriority, match,
 		nbdb.ACLActionAllowRelated, nil, libovsdbutil.LportIngress)
 
@@ -265,9 +265,9 @@ func (bnc *BaseNetworkController) addAllowACLFromNode(nodeName string, mgmtPortI
 		return fmt.Errorf("failed to create or update ACL %v: %v", nodeACL, err)
 	}
 
-	ops, err = libovsdbops.AddACLsToLogicalSwitchOps(bnc.nbClient, ops, nodeName, nodeACL)
+	ops, err = libovsdbops.AddACLsToLogicalSwitchOps(bnc.nbClient, ops, switchName, nodeACL)
 	if err != nil {
-		return fmt.Errorf("failed to add ACL %v to switch %s: %v", nodeACL, nodeName, err)
+		return fmt.Errorf("failed to add ACL %v to switch %s: %v", nodeACL, switchName, err)
 	}
 
 	_, err = libovsdbops.TransactAndCheck(bnc.nbClient, ops)

@@ -1151,7 +1151,7 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 			ginkgo.By("Syncing node with OVNK")
 			node, err := oc.kube.GetNode(testNode.Name)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			err = oc.syncNodeManagementPort(node, []*net.IPNet{subnet})
+			err = oc.syncNodeManagementPortDefault(node, node.Name, []*net.IPNet{subnet})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = oc.syncGatewayLogicalNetwork(node, l3GatewayConfig, []*net.IPNet{subnet}, []string{node1.NodeIP})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
