@@ -575,7 +575,7 @@ func (oc *DefaultNetworkController) addExternalSwitch(prefix, interfaceID, nodeN
 	// and add external interface as a logical port to external_switch.
 	// This is a learning switch port with "unknown" address. The external
 	// world is accessed via this port.
-	externalSwitch := externalSwitchName(prefix, nodeName)
+	externalSwitch := prefix + oc.GetNetworkScopedExtSwitchName(nodeName)
 	externalLogicalSwitchPort := nbdb.LogicalSwitchPort{
 		Addresses: []string{"unknown"},
 		Type:      "localnet",
@@ -780,8 +780,4 @@ func (oc *DefaultNetworkController) deletePolicyBasedRoutes(policyID, priority s
 	}
 
 	return nil
-}
-
-func externalSwitchName(prefix string, nodeName string) string {
-	return fmt.Sprintf("%s%s%s", prefix, types.ExternalSwitchPrefix, nodeName)
 }

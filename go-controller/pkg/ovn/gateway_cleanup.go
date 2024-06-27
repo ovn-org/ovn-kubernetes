@@ -69,13 +69,13 @@ func (oc *DefaultNetworkController) gatewayCleanup(nodeName string) error {
 	}
 
 	// Remove external switch
-	externalSwitch := types.ExternalSwitchPrefix + nodeName
+	externalSwitch := oc.GetNetworkScopedExtSwitchName(nodeName)
 	err = libovsdbops.DeleteLogicalSwitch(oc.nbClient, externalSwitch)
 	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
 		return fmt.Errorf("failed to delete external switch %s: %w", externalSwitch, err)
 	}
 
-	exGWexternalSwitch := types.EgressGWSwitchPrefix + types.ExternalSwitchPrefix + nodeName
+	exGWexternalSwitch := types.EgressGWSwitchPrefix + externalSwitch
 	err = libovsdbops.DeleteLogicalSwitch(oc.nbClient, exGWexternalSwitch)
 	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
 		return fmt.Errorf("failed to delete external switch %s: %w", exGWexternalSwitch, err)
