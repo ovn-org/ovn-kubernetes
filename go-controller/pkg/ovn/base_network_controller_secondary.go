@@ -13,6 +13,7 @@ import (
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/ovsdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/udn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
@@ -329,6 +330,37 @@ func (bsnc *BaseSecondaryNetworkController) addLogicalPortToNetworkForNAD(pod *k
 			return err
 		}
 		ops = append(ops, addOps...)
+	}
+
+	// TODO(dceara): REMOVE NATS on pod deletion
+	// Pods on user defined secondary networks should be able to communicate
+	// to the outside.  Add SNATs for them.
+	if util.IsNetworkSegmentationSupportEnabled() && bsnc.IsPrimaryNetwork() {
+		if config.Gateway.DisableSNATMultipleGWs {
+			// Add NAT rules to pods if disable SNAT is set and does not have
+			// namespace annotations to go through external egress router
+
+			// TODO (dceara): very similar to SecondaryLayer3NetworkController.getNodeGatewayConfig()
+			var masqIPs []*net.IPNet
+			if config.IPv4Mode {
+				v4MasqIPs, err := udn.AllocateV4MasqueradeIPs(bsnc.networkID)
+				if err != nil {
+					return fmt.Errorf("failed to get v4 masquerade IP, network %s (%d): %v", bsnc.GetNetworkName(), bsnc.networkID, err)
+				}
+				masqIPs = append(masqIPs, &net.IPNet{IP: v4MasqIPs.Shared, Mask: net.CIDRMask(16, 32)})
+			}
+			if config.IPv6Mode {
+				v6MasqIPs, err := udn.AllocateV6MasqueradeIPs(bsnc.networkID)
+				if err != nil {
+					return fmt.Errorf("failed to get v6 masquerade IP, network %s (%d): %v", bsnc.GetNetworkName(), bsnc.networkID, err)
+				}
+				masqIPs = append(masqIPs, &net.IPNet{IP: v6MasqIPs.Shared, Mask: net.CIDRMask(64, 128)})
+			}
+
+			if ops, err = addOrUpdatePodSNATOps(bsnc.nbClient, bsnc.GetNetworkScopedGWRouterName(pod.Spec.NodeName), masqIPs, podAnnotation.IPs, ops); err != nil {
+				return err
+			}
+		}
 	}
 
 	recordOps, txOkCallBack, _, err := bsnc.AddConfigDurationRecord("pod", pod.Namespace, pod.Name)
