@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"golang.org/x/exp/constraints"
+	"k8s.io/client-go/tools/cache"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"k8s.io/apimachinery/pkg/labels"
@@ -486,4 +487,26 @@ func IsMirrorEndpointSlice(endpointSlice *discoveryv1.EndpointSlice) bool {
 func IsDefaultEndpointSlice(endpointSlice *discoveryv1.EndpointSlice) bool {
 	_, ok := endpointSlice.Labels[discoveryv1.LabelServiceName]
 	return ok
+}
+
+// GetDefaultEndpointSlicesEventHandler returns an event handler based on the provided handlerFuncs
+// If IsNetworkSegmentationSupportEnabled returns true it returns a handler that filters out the mirrored EndpointSlices.
+// Otherwise, returns handlerFuncs as is.
+func GetDefaultEndpointSlicesEventHandler(handlerFuncs cache.ResourceEventHandlerFuncs) cache.ResourceEventHandler {
+	var eventHandler cache.ResourceEventHandler
+	eventHandler = handlerFuncs
+	if IsNetworkSegmentationSupportEnabled() {
+		// Filter out objects without the default serviceName label to exclude mirrored EndpointSlices
+		eventHandler = cache.FilteringResourceEventHandler{
+			FilterFunc: func(obj interface{}) bool {
+				if endpointSlice, ok := obj.(*discoveryv1.EndpointSlice); ok {
+					return IsDefaultEndpointSlice(endpointSlice)
+				}
+				klog.Errorf("Failed to cast the object to *discovery.EndpointSlice: %v", obj)
+				return true
+			},
+			Handler: handlerFuncs,
+		}
+	}
+	return eventHandler
 }

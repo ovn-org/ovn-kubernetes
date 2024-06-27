@@ -48,29 +48,29 @@ func (_m *NodeWatchFactory) APBRouteInformer() v1.AdminPolicyBasedExternalRouteI
 	return r0
 }
 
-// AddEndpointSliceHandler provides a mock function with given fields: handlerFuncs, processExisting
-func (_m *NodeWatchFactory) AddEndpointSliceHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*factory.Handler, error) {
-	ret := _m.Called(handlerFuncs, processExisting)
+// AddFilteredEndpointSliceHandler provides a mock function with given fields: namespace, sel, handlerFuncs, processExisting
+func (_m *NodeWatchFactory) AddFilteredEndpointSliceHandler(namespace string, sel labels.Selector, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*factory.Handler, error) {
+	ret := _m.Called(namespace, sel, handlerFuncs, processExisting)
 
 	if len(ret) == 0 {
-		panic("no return value specified for AddEndpointSliceHandler")
+		panic("no return value specified for AddFilteredEndpointSliceHandler")
 	}
 
 	var r0 *factory.Handler
 	var r1 error
-	if rf, ok := ret.Get(0).(func(cache.ResourceEventHandler, func([]interface{}) error) (*factory.Handler, error)); ok {
-		return rf(handlerFuncs, processExisting)
+	if rf, ok := ret.Get(0).(func(string, labels.Selector, cache.ResourceEventHandler, func([]interface{}) error) (*factory.Handler, error)); ok {
+		return rf(namespace, sel, handlerFuncs, processExisting)
 	}
-	if rf, ok := ret.Get(0).(func(cache.ResourceEventHandler, func([]interface{}) error) *factory.Handler); ok {
-		r0 = rf(handlerFuncs, processExisting)
+	if rf, ok := ret.Get(0).(func(string, labels.Selector, cache.ResourceEventHandler, func([]interface{}) error) *factory.Handler); ok {
+		r0 = rf(namespace, sel, handlerFuncs, processExisting)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*factory.Handler)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(cache.ResourceEventHandler, func([]interface{}) error) error); ok {
-		r1 = rf(handlerFuncs, processExisting)
+	if rf, ok := ret.Get(1).(func(string, labels.Selector, cache.ResourceEventHandler, func([]interface{}) error) error); ok {
+		r1 = rf(namespace, sel, handlerFuncs, processExisting)
 	} else {
 		r1 = ret.Error(1)
 	}
