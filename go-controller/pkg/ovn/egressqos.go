@@ -1020,7 +1020,7 @@ func (oc *DefaultNetworkController) syncEgressQoSNode(key string) error {
 	klog.V(5).Infof("EgressQoS %s node retrieved from lister: %v", n.Name, n)
 
 	nodeSw := &nbdb.LogicalSwitch{
-		Name: n.Name,
+		Name: oc.GetNetworkScopedSwitchName(n.Name),
 	}
 	nodeSw, err = libovsdbops.GetLogicalSwitch(oc.nbClient, nodeSw)
 	if err != nil {

@@ -2096,12 +2096,13 @@ func (oc *DefaultNetworkController) ensureDefaultNoRerouteQoSRules(nodeName stri
 		}
 	}
 	if len(existingQoSes) > 0 {
+		nodeSwitchName := oc.GetNetworkScopedSwitchName(nodeName)
 		if qosExists {
 			// check if these rules were already added to the existing switch or not
 			addQoSToSwitch := false
-			nodeSwitch, err := libovsdbops.GetLogicalSwitch(oc.nbClient, &nbdb.LogicalSwitch{Name: nodeName})
+			nodeSwitch, err := libovsdbops.GetLogicalSwitch(oc.nbClient, &nbdb.LogicalSwitch{Name: nodeSwitchName})
 			if err != nil {
-				return fmt.Errorf("cannot fetch switch for node %s: %v", nodeName, err)
+				return fmt.Errorf("cannot fetch switch for node %s: %v", nodeSwitchName, err)
 			}
 			for _, qos := range existingQoSes {
 				if slices.Contains(nodeSwitch.QOSRules, qos.UUID) {
@@ -2115,7 +2116,7 @@ func (oc *DefaultNetworkController) ensureDefaultNoRerouteQoSRules(nodeName stri
 				return nil
 			}
 		}
-		ops, err = libovsdbops.AddQoSesToLogicalSwitchOps(oc.nbClient, ops, nodeName, existingQoSes...)
+		ops, err = libovsdbops.AddQoSesToLogicalSwitchOps(oc.nbClient, ops, nodeSwitchName, existingQoSes...)
 		if err != nil {
 			return err
 		}
