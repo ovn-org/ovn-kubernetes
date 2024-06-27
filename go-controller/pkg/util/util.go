@@ -138,6 +138,13 @@ func GetExtSwitchFromNode(node string) string {
 	return types.ExternalSwitchPrefix + node
 }
 
+// GetVrfDeviceName determines the name of the vrf device created for every user defined
+// primary network in local gateway mode.
+// TODO: should we chek if device name shouldn't go beyond 15 characters ?
+func GetVrfDeviceName(netName string) string {
+	return GetSecondaryNetworkPrefix(netName) + types.VrfDeviceSuffix
+}
+
 // GetNodeInternalAddrs returns the first IPv4 and/or IPv6 InternalIP defined
 // for the node. On certain cloud providers (AWS) the egress IP will be added to
 // the list of node IPs as an InternalIP address, we don't want to create the
@@ -473,4 +480,13 @@ func GenerateId(length int) string {
 		b[i] = chars[int(b[i])%charsLength]
 	}
 	return string(b)
+}
+
+// TODO temporary function for net mgmt link, would move to right place.
+func GetIfIndex(ifName string) (int, error) {
+	link, err := GetNetLinkOps().LinkByName(ifName)
+	if err != nil {
+		return -1, err
+	}
+	return link.Attrs().Index, nil
 }

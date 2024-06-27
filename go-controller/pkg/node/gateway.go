@@ -6,19 +6,26 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/udn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iprulemanager"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/vrfmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
+	"github.com/vishvananda/netlink"
 
 	"github.com/safchain/ethtool"
 	kapi "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
+	utiliptables "k8s.io/kubernetes/pkg/util/iptables"
 )
 
 // Gateway responds to Service and Endpoint K8s events
@@ -34,6 +41,12 @@ type Gateway interface {
 	Reconcile() error
 }
 
+// TODO (dceara): better name?
+type SecondaryNetworkGateway interface {
+	AddNetwork(nInfo util.NetInfo, masqCTMark uint) error
+	DelNetwork(nInfo util.NetInfo) error
+}
+
 type gateway struct {
 	// loadBalancerHealthChecker is a health check server for load-balancer type services
 	loadBalancerHealthChecker informer.ServiceAndEndpointsEventHandler
@@ -45,6 +58,9 @@ type gateway struct {
 	nodePortWatcher informer.ServiceAndEndpointsEventHandler
 	openflowManager *openflowManager
 	nodeIPManager   *addressManager
+	vrfManager      *vrfmanager.Controller
+	ruleManager     *iprulemanager.Controller
+	ipTablesManager *iptables.Controller
 	initFunc        func() error
 	readyFunc       func() (bool, error)
 
@@ -53,6 +69,82 @@ type gateway struct {
 	watchFactory *factory.WatchFactory // used for retry
 	stopChan     <-chan struct{}
 	wg           *sync.WaitGroup
+}
+
+// TODO(dceara): move?
+func (g *gateway) AddNetwork(nInfo util.NetInfo, masqCTMark uint) error {
+	if g.vrfManager == nil {
+		return nil
+	}
+	mgmtPortLinkName := util.GetSecondaryNetworkPrefix(nInfo.GetNetworkName()) + types.K8sMgmtIntfName
+	vrfDeviceName := util.GetVrfDeviceName(nInfo.GetNetworkName())
+	vrfTableId, err := util.GetIfIndex(mgmtPortLinkName)
+	if err != nil {
+		return err
+	}
+	enslaveInterfaces := make(sets.Set[string])
+	enslaveInterfaces.Insert(mgmtPortLinkName)
+	err = g.vrfManager.AddVrf(vrfDeviceName, uint32(vrfTableId), enslaveInterfaces, nil)
+	if err != nil {
+		return err
+	}
+	// Get node information
+	node, err := g.watchFactory.GetNode(g.nodeIPManager.nodeName)
+	if err != nil {
+		return err
+	}
+	networkID, err := util.ParseNetworkIDAnnotation(node, nInfo.GetNetworkName())
+	if err != nil {
+		return err
+	}
+	var masqIPv4, masqIPv6 *net.IP
+	var masqIPRules []netlink.Rule
+	if config.IPv4Mode {
+		masqIPs, err := udn.AllocateV4MasqueradeIPs(networkID)
+		if err != nil {
+			return err
+		}
+		masqIPRules = append(masqIPRules, generateIPRuleForMasqIP(masqIPs.Local, false, uint(vrfTableId)))
+		masqIPv4 = &masqIPs.Local
+	}
+	if config.IPv6Mode {
+		masqIPs, err := udn.AllocateV6MasqueradeIPs(networkID)
+		if err != nil {
+			return err
+		}
+		masqIPRules = append(masqIPRules, generateIPRuleForMasqIP(masqIPs.Local, false, uint(vrfTableId)))
+		masqIPv6 = &masqIPs.Local
+	}
+	for _, rule := range masqIPRules {
+		err = g.ruleManager.Add(rule)
+		if err != nil {
+			return err
+		}
+	}
+	if masqIPv4 != nil {
+		err = g.ipTablesManager.EnsureRule(utiliptables.TableNAT, utiliptables.ChainPostrouting, utiliptables.ProtocolIPv4,
+			generateIPTablesSNATRuleArg(*masqIPv4, false, g.nodeIPManager.gwIntf, string(g.nodeIPManager.nodePrimaryAddr)))
+		if err != nil {
+			return err
+		}
+	}
+	if masqIPv6 != nil {
+		err = g.ipTablesManager.EnsureRule(utiliptables.TableNAT, utiliptables.ChainPostrouting, utiliptables.ProtocolIPv6,
+			generateIPTablesSNATRuleArg(*masqIPv6, true, g.nodeIPManager.gwIntf, string(g.nodeIPManager.nodePrimaryAddr)))
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// TODO(dceara): move?
+func (g *gateway) DelNetwork(nInfo util.NetInfo) error {
+	if g.vrfManager == nil {
+		return nil
+	}
+	// TODO
+	return nil
 }
 
 func (g *gateway) AddService(svc *kapi.Service) error {

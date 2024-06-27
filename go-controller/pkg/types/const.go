@@ -1,6 +1,10 @@
 package types
 
-import "time"
+import (
+	"time"
+
+	utiliptables "k8s.io/kubernetes/pkg/util/iptables"
+)
 
 const (
 	// Default network name
@@ -225,4 +229,12 @@ const (
 	// UserDefinedNetworkMasqueradeIPBase define the base to calculate udn
 	// masquerade IPs
 	UserDefinedNetworkMasqueradeIPBase = 10
+
+	// VrfDeviceSuffix vrf device suffix associated with every user defined primary network.
+	VrfDeviceSuffix = "-vrf"
+	// MasqueradeIPRulePriority the priority of the ip routing rules created for masquerade IP address
+	// allocated for every user defined network.
+	MasqueradeIPRulePriority = 2000
+	UserNetIPChainName       = "OVN-KUBE-USER-SEGMENTATION-NET"
+	UserNetIPTableChainName  = utiliptables.Chain(UserNetIPChainName)
 )

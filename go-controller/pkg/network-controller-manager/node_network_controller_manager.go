@@ -31,6 +31,7 @@ type nodeNetworkControllerManager struct {
 	recorder      record.EventRecorder
 
 	defaultNodeNetworkController nad.BaseNetworkController
+	secondaryGatewayManager      node.NodeSecondaryGatewayManager
 
 	// net-attach-def controller handle net-attach-def and create/delete secondary controllers
 	// nil in dpu-host mode
@@ -42,7 +43,7 @@ func (ncm *nodeNetworkControllerManager) NewNetworkController(nInfo util.NetInfo
 	topoType := nInfo.TopologyType()
 	switch topoType {
 	case ovntypes.Layer3Topology, ovntypes.Layer2Topology, ovntypes.LocalnetTopology:
-		return node.NewSecondaryNodeNetworkController(ncm.newCommonNetworkControllerInfo(), nInfo), nil
+		return node.NewSecondaryNodeNetworkController(ncm.newCommonNetworkControllerInfo(), nInfo, ncm.secondaryGatewayManager), nil
 	}
 	return nil, fmt.Errorf("topology type %s not supported", topoType)
 }
@@ -90,6 +91,10 @@ func (ncm *nodeNetworkControllerManager) initDefaultNodeNetworkController() erro
 	// otherwise we would initialize the interface with a nil implementation
 	// which is not the same as nil interface.
 	ncm.defaultNodeNetworkController = defaultNodeNetworkController
+
+	//TODO(dceara): weird?
+	ncm.secondaryGatewayManager = defaultNodeNetworkController
+
 	return nil
 }
 

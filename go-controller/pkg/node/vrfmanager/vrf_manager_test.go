@@ -5,6 +5,7 @@ import (
 
 	"github.com/onsi/ginkgo"
 	"github.com/onsi/gomega"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	netlink_mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/vishvananda/netlink"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
@@ -16,6 +17,7 @@ import (
 var _ = ginkgo.Describe("Vrf manager", func() {
 
 	var (
+		c               *Controller
 		vrfLinkName1    = "vrf-blue"
 		enslaveLinkName = "dev100"
 		vrfLinkName2    = "vrf-red"
@@ -54,6 +56,8 @@ var _ = ginkgo.Describe("Vrf manager", func() {
 	}
 
 	ginkgo.BeforeEach(func() {
+		c = NewController(routemanager.NewController())
+
 		nlMock = &mocks.NetLinkOps{}
 		vrfLinkMock1 = new(netlink_mocks.Link)
 		enslaveLinkMock = new(netlink_mocks.Link)
@@ -83,7 +87,6 @@ var _ = ginkgo.Describe("Vrf manager", func() {
 
 	ginkgo.Context("Vrfs", func() {
 		ginkgo.It("add vrf with an enslave interface", func() {
-			c := NewController()
 			enslaveInfaces := sets.Set[string]{}
 			enslaveInfaces.Insert(enslaveLinkName)
 			vrf := &vrf{name: vrfLinkName1, table: 10, interfaces: enslaveInfaces}
@@ -95,7 +98,6 @@ var _ = ginkgo.Describe("Vrf manager", func() {
 		ginkgo.It("update vrf with removing associated stale enslave interface", func() {
 			nlMock.On("LinkSetMaster", enslaveLinkMock, nil).Return(nil)
 			enslaveLinkMock.On("Attrs").Return(&netlink.LinkAttrs{Name: enslaveLinkName, MasterIndex: getLinkMasterIndex(enslaveLinkName), Index: getLinkIndex(enslaveLinkName)}, nil)
-			c := NewController()
 			vrf := &vrf{name: vrfLinkName1, table: 10, interfaces: sets.Set[string]{}}
 			c.vrfs[vrfLinkName1] = vrf
 			err := c.addVrf(vrf)
@@ -103,15 +105,13 @@ var _ = ginkgo.Describe("Vrf manager", func() {
 		})
 
 		ginkgo.It("delete vrf", func() {
-			c := NewController()
 			vrf := &vrf{name: vrfLinkName2, table: 20, interfaces: sets.Set[string]{}, delete: true}
-			c.vrfs[vrfLinkName1] = vrf
+			c.vrfs[vrfLinkName2] = vrf
 			err := c.delVrf(vrf)
 			gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 		})
 
 		ginkgo.It("reconcile vrfs", func() {
-			c := NewController()
 			enslaveInfaces := sets.Set[string]{}
 			enslaveInfaces.Insert(enslaveLinkName)
 			c.vrfs[vrfLinkName1] = &vrf{name: vrfLinkName1, table: 10, interfaces: enslaveInfaces}

@@ -2,6 +2,7 @@ package node
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -14,13 +15,18 @@ import (
 // and reacting upon the watched resources (e.g. pods, endpoints) for secondary network
 type SecondaryNodeNetworkController struct {
 	BaseNodeNetworkController
+
+	gatewayManager NodeSecondaryGatewayManager
+
 	// pod events factory handler
 	podHandler *factory.Handler
+
+	networkID int
 }
 
 // NewSecondaryNodeNetworkController creates a new OVN controller for creating logical network
 // infrastructure and policy for default l3 network
-func NewSecondaryNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, netInfo util.NetInfo) *SecondaryNodeNetworkController {
+func NewSecondaryNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, netInfo util.NetInfo, gwManager NodeSecondaryGatewayManager) *SecondaryNodeNetworkController {
 	return &SecondaryNodeNetworkController{
 		BaseNodeNetworkController: BaseNodeNetworkController{
 			CommonNodeNetworkControllerInfo: *cnnci,
@@ -28,6 +34,7 @@ func NewSecondaryNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, n
 			stopChan:                        make(chan struct{}),
 			wg:                              &sync.WaitGroup{},
 		},
+		gatewayManager: gwManager,
 	}
 }
 
@@ -39,6 +46,18 @@ func (nc *SecondaryNodeNetworkController) Start(ctx context.Context) error {
 		return err
 	}
 	nc.podHandler = handler
+
+	if err := nc.ensureNetworkID(); err != nil {
+		return fmt.Errorf("failed ensuring network id at user defined node controller for network '%s': %w", nc.GetNetworkName(), err)
+	}
+
+	// Generate a per network conntrack mark to be used for egress traffic.
+	masqCTMark := ctMarkUDNBase + uint(nc.networkID)
+
+	if err := nc.gatewayManager.AddNetwork(nc.NetInfo, masqCTMark); err != nil {
+		return fmt.Errorf("failed to add network to node gateway for network '%s': %w", nc.GetNetworkName(), err)
+	}
+
 	return nil
 }
 
@@ -51,9 +70,39 @@ func (nc *SecondaryNodeNetworkController) Stop() {
 	if nc.podHandler != nil {
 		nc.watchFactory.RemovePodHandler(nc.podHandler)
 	}
+
+	//TODO (dceara): does this need to go in Cleanup?
+	if err := nc.gatewayManager.DelNetwork(nc); err != nil {
+		// TODO (dceara): handle error
+		klog.Errorf("Failed to delete network from node gateway for network '%s'", nc.GetNetworkName())
+	}
 }
 
 // Cleanup cleans up node entities for the given secondary network
 func (nc *SecondaryNodeNetworkController) Cleanup() error {
+	return nil
+}
+
+// TODO(dceara): identical to BaseSecondaryNetworkController.ensureNetworkID()
+func (nc *SecondaryNodeNetworkController) ensureNetworkID() error {
+	if nc.networkID != 0 {
+		return nil
+	}
+	nodes, err := nc.watchFactory.GetNodes()
+	if err != nil {
+		return fmt.Errorf("failed to get nodes: %v", err)
+	}
+	networkID := util.InvalidNetworkID
+	for _, node := range nodes {
+		networkID, err = util.ParseNetworkIDAnnotation(node, nc.GetNetworkName())
+		if err != nil {
+			//TODO Warning
+			continue
+		}
+	}
+	if networkID == util.InvalidNetworkID {
+		return fmt.Errorf("missing network id for network '%s'", nc.GetNetworkName())
+	}
+	nc.networkID = networkID
 	return nil
 }

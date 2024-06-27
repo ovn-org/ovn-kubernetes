@@ -410,6 +410,7 @@ func (nc *DefaultNodeNetworkController) initGateway(subnets []*net.IPNet, nodeAn
 
 	waiter.AddWait(readyGwFunc, initGwFunc)
 	nc.gateway = gw
+	nc.secondaryNetworkGateway = gw
 
 	return nc.validateVTEPInterfaceMTU()
 }

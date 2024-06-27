@@ -37,26 +37,28 @@ type addressManager struct {
 	// compare node primary IP change
 	nodePrimaryAddr net.IP
 	gatewayBridge   *bridgeConfiguration
+	gwIntf          string
 
 	OnChanged func()
 	sync.Mutex
 }
 
 // initializes a new address manager which will hold all the IPs on a node
-func newAddressManager(nodeName string, k kube.Interface, config *managementPortConfig, watchFactory factory.NodeWatchFactory, gwBridge *bridgeConfiguration) *addressManager {
-	return newAddressManagerInternal(nodeName, k, config, watchFactory, gwBridge, true)
+func newAddressManager(nodeName, gwIntf string, k kube.Interface, config *managementPortConfig, watchFactory factory.NodeWatchFactory, gwBridge *bridgeConfiguration) *addressManager {
+	return newAddressManagerInternal(nodeName, gwIntf, k, config, watchFactory, gwBridge, true)
 }
 
 // newAddressManagerInternal creates a new address manager; this function is
 // only expose for testcases to disable netlink subscription to ensure
 // reproducibility of unit tests.
-func newAddressManagerInternal(nodeName string, k kube.Interface, config *managementPortConfig, watchFactory factory.NodeWatchFactory, gwBridge *bridgeConfiguration, useNetlink bool) *addressManager {
+func newAddressManagerInternal(nodeName, gwIntf string, k kube.Interface, config *managementPortConfig, watchFactory factory.NodeWatchFactory, gwBridge *bridgeConfiguration, useNetlink bool) *addressManager {
 	mgr := &addressManager{
 		nodeName:       nodeName,
 		watchFactory:   watchFactory,
 		cidrs:          sets.New[string](),
 		mgmtPortConfig: config,
 		gatewayBridge:  gwBridge,
+		gwIntf:         gwIntf,
 		OnChanged:      func() {},
 		useNetlink:     useNetlink,
 		syncPeriod:     30 * time.Second,

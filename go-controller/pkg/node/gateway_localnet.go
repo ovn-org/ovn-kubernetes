@@ -7,14 +7,20 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iprulemanager"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/vrfmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
+	"github.com/vishvananda/netlink"
+	utiliptables "k8s.io/kubernetes/pkg/util/iptables"
 
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
@@ -82,7 +88,7 @@ func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net
 
 		}
 
-		gw.nodeIPManager = newAddressManager(nodeName, kube, cfg, watchFactory, gwBridge)
+		gw.nodeIPManager = newAddressManager(nodeName, gwIntf, kube, cfg, watchFactory, gwBridge)
 
 		if err := setNodeMasqueradeIPOnExtBridge(gwBridge.bridgeName); err != nil {
 			return fmt.Errorf("failed to set the node masquerade IP on the ext bridge %s: %v", gwBridge.bridgeName, err)
@@ -140,6 +146,46 @@ func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net
 	}
 	gw.watchFactory = watchFactory.(*factory.WatchFactory)
 
+	gw.vrfManager = vrfmanager.NewController(routeManager)
+	gw.ruleManager = iprulemanager.NewController(config.IPv4Mode, config.IPv6Mode)
+	gw.ipTablesManager = iptables.NewController()
+
+	gw.wg.Add(1)
+	go func() {
+		defer gw.wg.Done()
+		gw.vrfManager.Run(gw.stopChan, gw.wg)
+	}()
+
+	gw.wg.Add(1)
+	go func() {
+		defer gw.wg.Done()
+		gw.ruleManager.Run(gw.stopChan, 5*time.Minute)
+	}()
+
+	gw.wg.Add(1)
+	go func() {
+		defer gw.wg.Done()
+		gw.ipTablesManager.Run(gw.stopChan, 5*time.Minute)
+	}()
+
+	iptJumpRule := iptables.RuleArg{Args: []string{"-j", types.UserNetIPChainName}}
+	if config.IPv4Mode {
+		if err := gw.ipTablesManager.OwnChain(utiliptables.TableNAT, types.UserNetIPTableChainName, utiliptables.ProtocolIPv4); err != nil {
+			return nil, fmt.Errorf("unable to own chain %s: %v", types.UserNetIPTableChainName, err)
+		}
+		if err = gw.ipTablesManager.EnsureRule(utiliptables.TableNAT, utiliptables.ChainPostrouting, utiliptables.ProtocolIPv4, iptJumpRule); err != nil {
+			return nil, fmt.Errorf("failed to create rule in chain %s to jump to chain %s: %v", utiliptables.ChainPostrouting, types.UserNetIPTableChainName, err)
+		}
+	}
+	if config.IPv6Mode {
+		if err := gw.ipTablesManager.OwnChain(utiliptables.TableNAT, types.UserNetIPTableChainName, utiliptables.ProtocolIPv6); err != nil {
+			return nil, fmt.Errorf("unable to own chain %s: %v", types.UserNetIPTableChainName, err)
+		}
+		if err = gw.ipTablesManager.EnsureRule(utiliptables.TableNAT, utiliptables.ChainPostrouting, utiliptables.ProtocolIPv6, iptJumpRule); err != nil {
+			return nil, fmt.Errorf("failed to create rule in chain %s to jump to chain %s: %v", utiliptables.ChainPostrouting, types.UserNetIPTableChainName, err)
+		}
+	}
+
 	klog.Info("Local Gateway Creation Complete")
 	return gw, nil
 }
@@ -192,4 +238,31 @@ func cleanupLocalnetGateway(physnet string) error {
 		}
 	}
 	return err
+}
+
+func generateIPRuleForMasqIP(masqIP net.IP, isIPv6 bool, vrfTableId uint) netlink.Rule {
+	r := *netlink.NewRule()
+	r.Table = int(vrfTableId)
+	r.Priority = types.MasqueradeIPRulePriority
+	var ipFullMask string
+	if isIPv6 {
+		ipFullMask = fmt.Sprintf("%s/128", masqIP.String())
+		r.Family = netlink.FAMILY_V6
+	} else {
+		ipFullMask = fmt.Sprintf("%s/32", masqIP.String())
+		r.Family = netlink.FAMILY_V4
+	}
+	_, ipNet, _ := net.ParseCIDR(ipFullMask)
+	r.Dst = ipNet
+	return r
+}
+
+func generateIPTablesSNATRuleArg(masqIP net.IP, isIPv6 bool, gwinfName, snatIP string) iptables.RuleArg {
+	var srcIPFullMask string
+	if isIPv6 {
+		srcIPFullMask = fmt.Sprintf("%s/128", masqIP.String())
+	} else {
+		srcIPFullMask = fmt.Sprintf("%s/32", masqIP.String())
+	}
+	return iptables.RuleArg{Args: []string{"-s", srcIPFullMask, "-o", gwinfName, "-j", "SNAT", "--to-source", snatIP}}
 }

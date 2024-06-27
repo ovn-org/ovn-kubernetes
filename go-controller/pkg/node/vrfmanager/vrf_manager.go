@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/vishvananda/netlink"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -16,22 +17,25 @@ type vrf struct {
 	name       string
 	table      uint32
 	interfaces sets.Set[string]
+	routes     []netlink.Route
 	delete     bool
 }
 
 type Controller struct {
-	mu       *sync.Mutex
-	vrfs     map[string]*vrf
-	addVrfCh chan vrf
-	delVrfCh chan vrf
+	routeManager *routemanager.Controller
+	mu           *sync.Mutex
+	vrfs         map[string]*vrf
+	addVrfCh     chan vrf
+	delVrfCh     chan vrf
 }
 
-func NewController() *Controller {
+func NewController(rc *routemanager.Controller) *Controller {
 	return &Controller{
-		mu:       &sync.Mutex{},
-		vrfs:     make(map[string]*vrf),
-		addVrfCh: make(chan vrf, 5),
-		delVrfCh: make(chan vrf, 5),
+		routeManager: rc,
+		mu:           &sync.Mutex{},
+		vrfs:         make(map[string]*vrf),
+		addVrfCh:     make(chan vrf, 5),
+		delVrfCh:     make(chan vrf, 5),
 	}
 }
 
@@ -58,7 +62,7 @@ func (vm *Controller) Run(stopCh <-chan struct{}, doneWg *sync.WaitGroup) {
 
 type subscribeFn func() (bool, chan netlink.LinkUpdate, error)
 
-func (vm *Controller) runInternal(stopChan <-chan struct{}, doneWg *sync.WaitGroup, subscribe subscribeFn) {
+func (c *Controller) runInternal(stopChan <-chan struct{}, doneWg *sync.WaitGroup, subscribe subscribeFn) {
 	doneWg.Add(1)
 	go func() {
 		defer doneWg.Done()
@@ -81,28 +85,20 @@ func (vm *Controller) runInternal(stopChan <-chan struct{}, doneWg *sync.WaitGro
 					}
 					continue
 				}
-				if err = vm.syncLink(a.Link); err != nil {
+				if err = c.syncLink(a.Link); err != nil {
 					klog.Errorf("Vrf manager: Error while syncing link %q: %v", a.Link.Attrs().Name, err)
 				}
 
 			case <-linkSyncTimer.C:
 				if subscribed {
 					klog.V(5).Info("Vrf manager calling sync() explicitly")
-					if err = vm.reconcile(); err != nil {
+					if err = c.reconcile(); err != nil {
 						klog.Errorf("Vrf manager: Error while reconciling vrfs: %v", err)
 					}
 				} else {
 					if subscribed, addrChan, err = subscribe(); err != nil {
 						klog.Errorf("Vrf manager: Error during netlink re-subscribe for Link Manager: %v", err)
 					}
-				}
-			case newVrf := <-vm.addVrfCh:
-				if err = vm.addVrf(&newVrf); err != nil {
-					klog.Errorf("Vrf manager: failed to add vrf (%v): %v", newVrf, err)
-				}
-			case delVrf := <-vm.delVrfCh:
-				if err = vm.delVrf(&delVrf); err != nil {
-					klog.Errorf("Vrf Manager: failed to delete vrf (%v): %v", delVrf, err)
 				}
 			case <-stopChan:
 				return
@@ -113,66 +109,90 @@ func (vm *Controller) runInternal(stopChan <-chan struct{}, doneWg *sync.WaitGro
 	klog.Info("Vrf manager is running")
 }
 
-// Add submits a request to add a Vrf
-func (vm *Controller) Add(name string, table uint32, interfaces sets.Set[string]) {
-	vm.addVrfCh <- vrf{name, table, interfaces, false}
+// AddVrf adds a Vrf device into the node.
+func (c *Controller) AddVrf(name string, table uint32, interfaces sets.Set[string], routes []netlink.Route) error {
+	return c.addVrf(&vrf{name, table, interfaces, routes, false})
 }
 
-// Del submits a request to del a Vrf
-func (vm *Controller) Del(name string, table uint32, interfaces sets.Set[string]) {
-	vm.delVrfCh <- vrf{name, table, interfaces, true}
+// DeleteVrf deletes given Vrf device from the node.
+func (c *Controller) DeleteVrf(name string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	vrf, ok := c.vrfs[name]
+	if !ok {
+		klog.V(5).Infof("Vrf Manager: vrf %s not found in cache for deletion", name)
+		return nil
+	}
+	vrf.delete = true
+	return c.delVrf(vrf)
 }
 
-func (vm *Controller) addVrf(vrf *vrf) error {
-	vm.mu.Lock()
-	defer vm.mu.Unlock()
-	return vm.sync(vrf)
+func (c *Controller) addVrf(vrf *vrf) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	vrf, ok := c.vrfs[vrf.name]
+	if ok {
+		klog.V(5).Infof("Vrf Manager: vrf %s already found in the cache", vrf.name)
+		return nil
+	}
+	return c.sync(vrf)
 }
 
-func (vm *Controller) delVrf(vrf *vrf) error {
-	vm.mu.Lock()
-	defer vm.mu.Unlock()
-	return vm.deleteVRF(vrf)
+func (c *Controller) delVrf(vrf *vrf) (err error) {
+	c.mu.Lock()
+	defer func() {
+		if err == nil {
+			delete(c.vrfs, vrf.name)
+		}
+		c.mu.Unlock()
+	}()
+	vrf, ok := c.vrfs[vrf.name]
+	if !ok {
+		klog.V(5).Infof("Vrf Manager: vrf %s not found in cache", vrf.name)
+		return nil
+	}
+	err = c.deleteVRF(vrf)
+	return
 }
 
-func (vm *Controller) reconcile() error {
-	vm.mu.Lock()
-	defer vm.mu.Unlock()
+func (c *Controller) reconcile() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	start := time.Now()
 	defer func() {
 		klog.V(5).Infof("Vrf Manager: reconciling VRFs took %v", time.Since(start))
 	}()
 
 	vrfsToKeep := make(map[string]*vrf)
-	for _, vrf := range vm.vrfs {
+	for _, vrf := range c.vrfs {
 		if vrf.delete {
-			err := vm.deleteVRF(vrf)
+			err := c.deleteVRF(vrf)
 			if err != nil {
 				return err
 			}
 			continue
 		}
-		err := vm.sync(vrf)
+		err := c.sync(vrf)
 		if err != nil {
 			return err
 		}
 		vrfsToKeep[vrf.name] = vrf
 	}
-	vm.vrfs = vrfsToKeep
+	c.vrfs = vrfsToKeep
 	return nil
 }
 
-func (vm *Controller) syncLink(link netlink.Link) error {
-	vm.mu.Lock()
-	defer vm.mu.Unlock()
-	vrf, ok := vm.vrfs[link.Attrs().Name]
+func (c *Controller) syncLink(link netlink.Link) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	vrf, ok := c.vrfs[link.Attrs().Name]
 	if !ok {
 		return nil
 	}
-	return vm.sync(vrf)
+	return c.sync(vrf)
 }
 
-func (vm *Controller) sync(vrf *vrf) error {
+func (c *Controller) sync(vrf *vrf) error {
 	if vrf == nil {
 		return nil
 	}
@@ -239,10 +259,14 @@ func (vm *Controller) sync(vrf *vrf) error {
 			}
 		}
 	}
+	// Handover vrf routes into route manager to manage it.
+	for _, route := range vrf.routes {
+		c.routeManager.Add(route)
+	}
 	return nil
 }
 
-func (vm *Controller) deleteVRF(vrf *vrf) error {
+func (c *Controller) deleteVRF(vrf *vrf) error {
 	if vrf == nil {
 		return nil
 	}
@@ -251,6 +275,10 @@ func (vm *Controller) deleteVRF(vrf *vrf) error {
 		return nil
 	} else if err != nil {
 		return err
+	}
+	// Request route manager to delete vrf associated routes.
+	for _, route := range vrf.routes {
+		c.routeManager.Del(route)
 	}
 	return util.GetNetLinkOps().LinkDelete(link)
 }

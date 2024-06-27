@@ -44,6 +44,9 @@ const (
 	ctMarkOVN = "0x1"
 	// ctMarkHost is the conntrack mark value for host traffic
 	ctMarkHost = "0x2"
+	// ctMarkUDNBase is the conntrack mark base value for user defined networks to use
+	// Each network gets its own mark == base + network-id
+	ctMarkUDNBase = 3
 	// ovnkubeITPMark is the fwmark used for host->ITP=local svc traffic. Note that the fwmark is not a part
 	// of the packet, but just stored by kernel in its memory to track/filter packet. Hence fwmark is lost as
 	// soon as packet exits the host.
@@ -1757,7 +1760,7 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 				return err
 			}
 		}
-		gw.nodeIPManager = newAddressManager(nodeName, kube, cfg, watchFactory, gwBridge)
+		gw.nodeIPManager = newAddressManager(nodeName, gwIntf, kube, cfg, watchFactory, gwBridge)
 		nodeIPs := gw.nodeIPManager.ListAddresses()
 
 		if config.OvnKubeNode.Mode == types.NodeModeFull {
