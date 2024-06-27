@@ -315,7 +315,7 @@ func (oc *DefaultNetworkController) allocateSyncPodsIPs(pod *kapi.Pod) (string, 
 	if err != nil {
 		return "", nil, nil
 	}
-	expectedLogicalPortName, err := oc.allocatePodIPsOnSwitch(pod, annotations, ovntypes.DefaultNetworkName, pod.Spec.NodeName)
+	expectedLogicalPortName, err := oc.allocatePodIPsOnSwitch(pod, annotations, oc.GetNetworkName(), oc.GetNetworkScopedSwitchName(pod.Spec.NodeName))
 	if err != nil {
 		return "", nil, err
 	}
@@ -326,7 +326,7 @@ func (oc *DefaultNetworkController) allocateSyncMigratablePodIPsOnZone(vms map[k
 	allocatePodIPsOnSwitchWrapFn := func(liveMigratablePod *kapi.Pod, liveMigratablePodAnnotation *util.PodAnnotation, switchName, nadName string) (string, error) {
 		return oc.allocatePodIPsOnSwitch(liveMigratablePod, liveMigratablePodAnnotation, switchName, nadName)
 	}
-	vmKey, expectedLogicalPortName, podAnnotation, err := kubevirt.AllocateSyncMigratablePodIPsOnZone(oc.watchFactory, oc.lsManager, ovntypes.DefaultNetworkName, pod, allocatePodIPsOnSwitchWrapFn)
+	vmKey, expectedLogicalPortName, podAnnotation, err := kubevirt.AllocateSyncMigratablePodIPsOnZone(oc.watchFactory, oc.lsManager, oc.GetNetworkName(), pod, allocatePodIPsOnSwitchWrapFn)
 	if err != nil {
 		return nil, "", nil, err
 	}
