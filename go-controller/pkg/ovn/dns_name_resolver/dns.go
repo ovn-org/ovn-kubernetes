@@ -135,11 +135,7 @@ func (e *EgressDNS) Delete(namespace string) error {
 		return err
 	}
 	for _, name := range dnsNamesToDelete {
-		e.dns.Delete(name)
-		// send a message to the "deleted" buffered channel so that Run() stops using
-		// the deleted domain name. (channel is buffered so that sending values to it
-		// blocks only if Run() is busy updating its internal values)
-		e.deleted <- name
+		go e.deleteFromDNS(name)
 	}
 	return nil
 }
@@ -197,6 +193,14 @@ func (e *EgressDNS) addToDNS(dnsName string) {
 	default:
 		klog.V(5).Infof("Recalculation of next query time already requested")
 	}
+}
+
+func (e *EgressDNS) deleteFromDNS(dnsName string) {
+	e.dns.Delete(dnsName)
+	// send a message to the "deleted" buffered channel so that Run() stops using
+	// the deleted domain name. (channel is buffered so that sending values to it
+	// blocks only if Run() is busy updating its internal values)
+	e.deleted <- dnsName
 }
 
 // Run spawns a goroutine that handles updates to the dns entries for domain names used in
