@@ -302,7 +302,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 						false,
 						purgeIDs.GetExternalIDs(),
 						nil,
-						t.PlaceHolderACLTier,
+						t.PrimaryACLTier,
 					)
 					purgeACL.UUID = "purgeACL-UUID"
 					// no externalIDs present => dbIDs can't be built
@@ -319,7 +319,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 						nil,
 						// we should not be in a situation where we have ACLs without externalIDs
 						// but if we do have such lame ACLs then they will interfere with AdminNetPol logic
-						t.PlaceHolderACLTier,
+						t.PrimaryACLTier,
 					)
 					purgeACL2.UUID = "purgeACL2-UUID"
 
@@ -346,7 +346,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 						false,
 						updateIDs.GetExternalIDs(),
 						nil,
-						t.PlaceHolderACLTier,
+						t.PrimaryACLTier,
 					)
 					updateACL.UUID = "updateACL-UUID"
 
@@ -364,7 +364,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 						nil,
 						// we should not be in a situation where we have unknown ACL that doesn't belong to any feature
 						// but if we do have such lame ACLs then they will interfere with AdminNetPol logic
-						t.PlaceHolderACLTier,
+						t.PrimaryACLTier,
 					)
 					ignoreACL.UUID = "ignoreACL-UUID"
 

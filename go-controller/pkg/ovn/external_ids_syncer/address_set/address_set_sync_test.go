@@ -404,7 +404,7 @@ var _ = ginkgo.Describe("OVN Address Set Syncer", func() {
 			false,
 			map[string]string{egressFirewallACLExtIdKey: "egressfirewall1"},
 			nil,
-			types.PlaceHolderACLTier,
+			types.PrimaryACLTier,
 		)
 		acl.UUID = "acl-UUID"
 		initialDb := []libovsdbtest.TestData{
@@ -447,7 +447,7 @@ var _ = ginkgo.Describe("OVN Address Set Syncer", func() {
 			map[string]string{
 				"apply-after-lb": "true",
 			},
-			types.PlaceHolderACLTier,
+			types.PrimaryACLTier,
 		)
 		acl1.UUID = "acl1-UUID"
 		acl2 := libovsdbops.BuildACL(
@@ -461,7 +461,7 @@ var _ = ginkgo.Describe("OVN Address Set Syncer", func() {
 			false,
 			nil,
 			nil,
-			types.PlaceHolderACLTier,
+			types.PrimaryACLTier,
 		)
 		acl2.UUID = "acl2-UUID"
 		initialDb := []libovsdbtest.TestData{
@@ -498,7 +498,7 @@ var _ = ginkgo.Describe("OVN Address Set Syncer", func() {
 			false,
 			map[string]string{egressFirewallACLExtIdKey: "egressfirewall1"},
 			nil,
-			types.PlaceHolderACLTier,
+			types.PrimaryACLTier,
 		)
 		acl.UUID = "acl-UUID"
 		initialDb := []libovsdbtest.TestData{

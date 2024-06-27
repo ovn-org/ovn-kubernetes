@@ -2115,7 +2115,7 @@ func getAllowFromNodeStaleACL(nodeName, mgmtIP string, logicalSwitch *nbdb.Logic
 	newName := ""
 	acl.Name = &newName
 	// re-setting the tier to 0 to test that the stale ACL gets updated to 2 eventually
-	acl.Tier = types.PlaceHolderACLTier
+	acl.Tier = types.PrimaryACLTier
 	return acl
 }
 

@@ -158,16 +158,16 @@ func (syncer *ACLSyncer) SyncACLs(existingNodes []*v1.Node) error {
 	// Once all the staleACLs are deleted and the externalIDs have been updated (externalIDs update should be a one-time
 	// upgrade operation), let us now update the tier's of all existing ACLs to types.DefaultACLTier. During upgrades after
 	// the OVN schema changes are applied, the nbdb.ACL.Tier column will be added and every row will be updated to 0 by
-	// default (types.PlaceHolderACLTier). For all features using ACLs (egressFirewall, NetworkPolicy, NodeACLs) we want to
+	// default (types.PrimaryACLTier). For all features using ACLs (egressFirewall, NetworkPolicy, NodeACLs) we want to
 	// move them to Tier2. We need to do this in reverse order of ACL priority to avoid network traffic disruption during
 	// upgrades window (if not done according to priorities we might end up in a window where the ACL with priority 1000
 	// for default deny is in tier0 while 1001 ACL for allow-ing traffic is in tier2 for a given namespace network policy).
-	// NOTE: This is a one-time operation as no ACLs should ever be created in types.PlaceHolderACLTier moving forward.
-	// Fetch all ACLs in types.PlaceHolderACLTier (Tier0); update their Tier to 2 and batch the ACL update.
+	// NOTE: This is a one-time operation as no ACLs should ever be created in types.PrimaryACLTier moving forward.
+	// Fetch all ACLs in types.PrimaryACLTier (Tier0); update their Tier to 2 and batch the ACL update.
 	klog.Info("Updating Tier of existing ACLs...")
 	start := time.Now()
 	aclPred := func(item *nbdb.ACL) bool {
-		return item.Tier == types.PlaceHolderACLTier
+		return item.Tier == types.PrimaryACLTier
 	}
 	aclsInTier0, err := libovsdbops.FindACLsWithPredicate(syncer.nbClient, aclPred)
 	if err != nil {
