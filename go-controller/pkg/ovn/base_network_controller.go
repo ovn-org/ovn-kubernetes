@@ -317,7 +317,7 @@ func (bnc *BaseNetworkController) createNodeLogicalSwitch(nodeName string, hostS
 	clusterLoadBalancerGroupUUID, switchLoadBalancerGroupUUID string) error {
 	// logical router port MAC is based on IPv4 subnet if there is one, else IPv6
 	var nodeLRPMAC net.HardwareAddr
-	switchName := bnc.GetNetworkScopedName(nodeName)
+	switchName := bnc.GetNetworkScopedSwitchName(nodeName)
 	for _, hostSubnet := range hostSubnets {
 		gwIfAddr := util.GetNodeGatewayIfAddr(hostSubnet)
 		nodeLRPMAC = util.IPAddrToHWAddr(gwIfAddr.IP)

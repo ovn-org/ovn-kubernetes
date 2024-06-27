@@ -113,7 +113,7 @@ func (oc *SecondaryLayer2NetworkController) Cleanup() error {
 }
 
 func (oc *SecondaryLayer2NetworkController) Init() error {
-	switchName := oc.GetNetworkScopedName(types.OVNLayer2Switch)
+	switchName := oc.GetNetworkScopedSwitchName(types.OVNLayer2Switch)
 
 	_, err := oc.initializeLogicalSwitch(switchName, oc.Subnets(), oc.ExcludeSubnets())
 	return err
