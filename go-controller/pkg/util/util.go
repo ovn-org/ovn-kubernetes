@@ -121,6 +121,11 @@ func GetGatewayRouterFromNode(node string) string {
 	return types.GWRouterPrefix + node
 }
 
+// GetGatewayRouterFromNode determines a node's corresponding gateway router name
+func GetExtSwitchFromNode(node string) string {
+	return types.ExternalSwitchPrefix + node
+}
+
 // GetNodeInternalAddrs returns the first IPv4 and/or IPv6 InternalIP defined
 // for the node. On certain cloud providers (AWS) the egress IP will be added to
 // the list of node IPs as an InternalIP address, we don't want to create the

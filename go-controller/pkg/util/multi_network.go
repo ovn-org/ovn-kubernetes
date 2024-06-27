@@ -49,6 +49,7 @@ type BasicNetInfo interface {
 	GetNetworkScopedGWRouterName(nodeName string) string
 	GetNetworkScopedSwitchName(nodeName string) string
 	GetNetworkScopedJoinSwitchName() string
+	GetNetworkScopedExtSwitchName(nodeName string) string
 }
 
 // NetInfo correlates which NADs refer to a network in addition to the basic
@@ -118,6 +119,10 @@ func (nInfo *DefaultNetInfo) GetNetworkScopedSwitchName(nodeName string) string 
 
 func (nInfo *DefaultNetInfo) GetNetworkScopedJoinSwitchName() string {
 	return nInfo.GetNetworkScopedName(types.OVNJoinSwitch)
+}
+
+func (nInfo *DefaultNetInfo) GetNetworkScopedExtSwitchName(nodeName string) string {
+	return GetExtSwitchFromNode(nInfo.GetNetworkScopedName(nodeName))
 }
 
 // GetNADs returns the NADs associated with the network, no op for default
@@ -263,6 +268,10 @@ func (nInfo *secondaryNetInfo) GetNetworkScopedSwitchName(nodeName string) strin
 
 func (nInfo *secondaryNetInfo) GetNetworkScopedJoinSwitchName() string {
 	return nInfo.GetNetworkScopedName(types.OVNJoinSwitch)
+}
+
+func (nInfo *secondaryNetInfo) GetNetworkScopedExtSwitchName(nodeName string) string {
+	return GetExtSwitchFromNode(nInfo.GetNetworkScopedName(nodeName))
 }
 
 // getPrefix returns if the logical entities prefix for this network
