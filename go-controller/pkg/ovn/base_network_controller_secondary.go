@@ -331,6 +331,21 @@ func (bsnc *BaseSecondaryNetworkController) addLogicalPortToNetworkForNAD(pod *k
 		ops = append(ops, addOps...)
 	}
 
+	// TODO(dceara): REMOVE NATS on pod deletion
+	// Pods on user defined secondary networks should be able to communicate
+	// to the outside.  Add SNATs for them.
+	if util.IsNetworkSegmentationSupportEnabled() && bsnc.IsPrimaryNetwork() {
+		if config.Gateway.DisableSNATMultipleGWs {
+			// Add NAT rules to pods if disable SNAT is set and does not have
+			// namespace annotations to go through external egress router
+			if extIPs, err := getExternalIPsGR(bsnc.watchFactory, pod.Spec.NodeName); err != nil {
+				return err
+			} else if ops, err = addOrUpdatePodSNATOps(bsnc.nbClient, bsnc.GetNetworkScopedGWRouterName(pod.Spec.NodeName), extIPs, podAnnotation.IPs, ops); err != nil {
+				return err
+			}
+		}
+	}
+
 	recordOps, txOkCallBack, _, err := bsnc.AddConfigDurationRecord("pod", pod.Namespace, pod.Name)
 	if err != nil {
 		klog.Errorf("Config duration recorder: %v", err)
