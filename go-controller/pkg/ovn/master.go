@@ -108,14 +108,15 @@ func (oc *DefaultNetworkController) SetupMaster(existingNodeNames []string) erro
 	return oc.createJoinSwitch(logicalRouter)
 }
 
-func (oc *DefaultNetworkController) syncNodeManagementPort(node *kapi.Node, hostSubnets []*net.IPNet) error {
+// TODO(dceara): move this to base_network_controller.go?
+func (bnc *BaseNetworkController) syncNodeManagementPort(node *kapi.Node, hostSubnets []*net.IPNet) error {
 	macAddress, err := util.ParseNodeManagementPortMACAddress(node)
 	if err != nil {
 		return err
 	}
 
 	if hostSubnets == nil {
-		hostSubnets, err = util.ParseNodeHostSubnetAnnotation(node, oc.GetNetworkName())
+		hostSubnets, err = util.ParseNodeHostSubnetAnnotation(node, bnc.GetNetworkName())
 		if err != nil {
 			return err
 		}
@@ -127,7 +128,7 @@ func (oc *DefaultNetworkController) syncNodeManagementPort(node *kapi.Node, host
 		mgmtIfAddr := util.GetNodeManagementIfAddr(hostSubnet)
 		addresses += " " + mgmtIfAddr.IP.String()
 
-		if err := oc.addAllowACLFromNode(node.Name, mgmtIfAddr.IP); err != nil {
+		if err := bnc.addAllowACLFromNode(node.Name, mgmtIfAddr.IP); err != nil {
 			return err
 		}
 
@@ -143,33 +144,33 @@ func (oc *DefaultNetworkController) syncNodeManagementPort(node *kapi.Node, host
 			p := func(item *nbdb.LogicalRouterStaticRoute) bool {
 				return item.IPPrefix == lrsr.IPPrefix && libovsdbops.PolicyEqualPredicate(lrsr.Policy, item.Policy)
 			}
-			err := libovsdbops.CreateOrReplaceLogicalRouterStaticRouteWithPredicate(oc.nbClient, oc.GetNetworkScopedClusterRouterName(),
+			err := libovsdbops.CreateOrReplaceLogicalRouterStaticRouteWithPredicate(bnc.nbClient, bnc.GetNetworkScopedClusterRouterName(),
 				&lrsr, p, &lrsr.Nexthop)
 			if err != nil {
-				return fmt.Errorf("error creating static route %+v on router %s: %v", lrsr, oc.GetNetworkScopedClusterRouterName(), err)
+				return fmt.Errorf("error creating static route %+v on router %s: %v", lrsr, bnc.GetNetworkScopedClusterRouterName(), err)
 			}
 		}
 	}
 
 	// Create this node's management logical port on the node switch
 	logicalSwitchPort := nbdb.LogicalSwitchPort{
-		Name:      oc.GetNetworkScopedK8sMgmtIntfName(node.Name),
+		Name:      bnc.GetNetworkScopedK8sMgmtIntfName(node.Name),
 		Addresses: []string{addresses},
 	}
-	sw := nbdb.LogicalSwitch{Name: oc.GetNetworkScopedSwitchName(node.Name)}
-	err = libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitch(oc.nbClient, &sw, &logicalSwitchPort)
+	sw := nbdb.LogicalSwitch{Name: bnc.GetNetworkScopedSwitchName(node.Name)}
+	err = libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitch(bnc.nbClient, &sw, &logicalSwitchPort)
 	if err != nil {
 		return err
 	}
 
-	err = libovsdbops.AddPortsToPortGroup(oc.nbClient, oc.getClusterPortGroupName(types.ClusterPortGroupNameBase), logicalSwitchPort.UUID)
+	err = libovsdbops.AddPortsToPortGroup(bnc.nbClient, bnc.getClusterPortGroupName(types.ClusterPortGroupNameBase), logicalSwitchPort.UUID)
 	if err != nil {
 		klog.Errorf(err.Error())
 		return err
 	}
 
 	if v4Subnet != nil {
-		if err := libovsdbutil.UpdateNodeSwitchExcludeIPs(oc.nbClient, oc.GetNetworkScopedK8sMgmtIntfName(node.Name), oc.GetNetworkScopedSwitchName(node.Name), node.Name, v4Subnet); err != nil {
+		if err := libovsdbutil.UpdateNodeSwitchExcludeIPs(bnc.nbClient, bnc.GetNetworkScopedK8sMgmtIntfName(node.Name), bnc.GetNetworkScopedSwitchName(node.Name), node.Name, v4Subnet); err != nil {
 			return err
 		}
 	}
