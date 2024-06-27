@@ -26,7 +26,7 @@ const (
 
 // setupUDNACLs should be called after the node's management port was configured
 // Only used on default network switches.
-func (oc *DefaultNetworkController) setupUDNACLs(mgmtPortIPs []net.IP) error {
+func (oc *BaseNetworkController) setupUDNACLs(mgmtPortIPs []net.IP) error {
 	if !util.IsNetworkSegmentationSupportEnabled() {
 		return nil
 	}
@@ -122,14 +122,14 @@ func (oc *DefaultNetworkController) setupUDNACLs(mgmtPortIPs []net.IP) error {
 	return err
 }
 
-func (oc *DefaultNetworkController) getSecondaryPodsPortGroupDbIDs() *libovsdbops.DbObjectIDs {
+func (oc *BaseNetworkController) getSecondaryPodsPortGroupDbIDs() *libovsdbops.DbObjectIDs {
 	return libovsdbops.NewDbObjectIDs(libovsdbops.PortGroupUDN, oc.controllerName,
 		map[libovsdbops.ExternalIDKey]string{
 			libovsdbops.ObjectNameKey: "SecondaryPods",
 		})
 }
 
-func (oc *DefaultNetworkController) getUDNACLDbIDs(name string, aclDir libovsdbutil.ACLDirection) *libovsdbops.DbObjectIDs {
+func (oc *BaseNetworkController) getUDNACLDbIDs(name string, aclDir libovsdbutil.ACLDirection) *libovsdbops.DbObjectIDs {
 	return libovsdbops.NewDbObjectIDs(libovsdbops.ACLUDN, oc.controllerName,
 		map[libovsdbops.ExternalIDKey]string{
 			libovsdbops.ObjectNameKey:      name,
