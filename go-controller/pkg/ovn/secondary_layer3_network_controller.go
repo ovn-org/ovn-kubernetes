@@ -585,7 +585,12 @@ func (oc *SecondaryLayer3NetworkController) addUpdateLocalNodeEvent(node *kapi.N
 				},
 			}
 
-			err := oc.syncNodeGateway(node, l3GatewayConfig, hostSubnets, hostAddrs, clusterSubnets, gwLRPIPs)
+			// TODO(dceara): hardcoded always SNAT to the per net MASQ IP
+			externalIPs := []net.IP{
+				net.ParseIP("169.254.169.42"),
+			}
+
+			err := oc.syncNodeGateway(node, l3GatewayConfig, hostSubnets, hostAddrs, clusterSubnets, gwLRPIPs, externalIPs)
 			if err != nil {
 				errs = append(errs, err)
 				oc.gatewaysFailed.Store(node.Name, true)

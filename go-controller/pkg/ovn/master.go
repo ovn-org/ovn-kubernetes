@@ -128,7 +128,11 @@ func (oc *DefaultNetworkController) syncDefaultGatewayLogicalNetwork(node *kapi.
 		return fmt.Errorf("failed to get join switch port IP address for node %s: %v", node.Name, err)
 	}
 
-	return oc.syncGatewayLogicalNetwork(node, l3GatewayConfig, hostSubnets, hostAddrs, clusterSubnets, gwLRPIPs)
+	externalIPs := make([]net.IP, len(l3GatewayConfig.IPAddresses))
+	for i, ip := range l3GatewayConfig.IPAddresses {
+		externalIPs[i] = ip.IP
+	}
+	return oc.syncGatewayLogicalNetwork(node, l3GatewayConfig, hostSubnets, hostAddrs, clusterSubnets, gwLRPIPs, externalIPs)
 }
 
 func (oc *DefaultNetworkController) addNode(node *kapi.Node) ([]*net.IPNet, error) {

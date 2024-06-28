@@ -115,7 +115,7 @@ func (bnc *BaseNetworkController) cleanupStalePodSNATs(nodeName string, nodeIPs 
 // gatewayInit creates a gateway router for the local chassis.
 // enableGatewayMTU enables options:gateway_mtu for gateway routers.
 func (bnc *BaseNetworkController) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*net.IPNet,
-	l3GatewayConfig *util.L3GatewayConfig, sctpSupport bool, gwLRPIfAddrs, drLRPIfAddrs []*net.IPNet,
+	l3GatewayConfig *util.L3GatewayConfig, sctpSupport bool, gwLRPIfAddrs, drLRPIfAddrs []*net.IPNet, externalIPs []net.IP,
 	enableGatewayMTU bool) error {
 
 	gwLRPIPs := make([]net.IP, 0)
@@ -419,13 +419,14 @@ func (bnc *BaseNetworkController) gatewayInit(nodeName string, clusterIPSubnet [
 		}
 	}
 
+	// TODO(dceara): double check comment
 	// if config.Gateway.DisabledSNATMultipleGWs is not set (by default it is not),
 	// the NAT rules for pods not having annotations to route through either external
 	// gws or pod CNFs will be added within pods.go addLogicalPort
-	externalIPs := make([]net.IP, len(l3GatewayConfig.IPAddresses))
-	for i, ip := range l3GatewayConfig.IPAddresses {
-		externalIPs[i] = ip.IP
-	}
+	// externalIPs := make([]net.IP, len(l3GatewayConfig.IPAddresses))
+	// for i, ip := range l3GatewayConfig.IPAddresses {
+	// 	externalIPs[i] = ip.IP
+	// }
 	var natsToUpdate []*nbdb.NAT
 	// If l3gatewayAnnotation.IPAddresses changed, we need to update the SNATs on the GR
 	oldNATs := []*nbdb.NAT{}

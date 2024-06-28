@@ -551,13 +551,13 @@ func (bnc *BaseNetworkController) createNodeLogicalSwitch(nodeName string, hostS
 
 // syncNodeGateway ensures a node's gateway router is configured according to the L3 config and host subnets
 func (bnc *BaseNetworkController) syncNodeGateway(node *kapi.Node, l3GatewayConfig *util.L3GatewayConfig, hostSubnets []*net.IPNet, hostAddrs []string,
-	clusterSubnets, gwLRPIPs []*net.IPNet) error {
+	clusterSubnets, gwLRPIPs []*net.IPNet, externalIPs []net.IP) error {
 	if l3GatewayConfig.Mode == config.GatewayModeDisabled {
 		if err := bnc.gatewayCleanup(node.Name); err != nil {
 			return fmt.Errorf("error cleaning up gateway for node %s: %v", node.Name, err)
 		}
 	} else if hostSubnets != nil {
-		if err := bnc.syncGatewayLogicalNetwork(node, l3GatewayConfig, hostSubnets, hostAddrs, clusterSubnets, gwLRPIPs); err != nil {
+		if err := bnc.syncGatewayLogicalNetwork(node, l3GatewayConfig, hostSubnets, hostAddrs, clusterSubnets, gwLRPIPs, externalIPs); err != nil {
 			return fmt.Errorf("error creating gateway for node %s: %v", node.Name, err)
 		}
 	}
@@ -565,13 +565,13 @@ func (bnc *BaseNetworkController) syncNodeGateway(node *kapi.Node, l3GatewayConf
 }
 
 func (bnc *BaseNetworkController) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig *util.L3GatewayConfig,
-	hostSubnets []*net.IPNet, hostAddrs []string, clusterSubnets []*net.IPNet, gwLRPIPs []*net.IPNet) error {
+	hostSubnets []*net.IPNet, hostAddrs []string, clusterSubnets []*net.IPNet, gwLRPIPs []*net.IPNet, externalIPs []net.IP) error {
 	var err error
 
 	enableGatewayMTU := util.ParseNodeGatewayMTUSupport(node)
 
 	err = bnc.gatewayInit(node.Name, clusterSubnets, hostSubnets, l3GatewayConfig, bnc.SCTPSupport, gwLRPIPs, bnc.ovnClusterLRPToJoinIfAddrs,
-		enableGatewayMTU)
+		externalIPs, enableGatewayMTU)
 	if err != nil {
 		return fmt.Errorf("failed to init shared interface gateway: %v", err)
 	}
