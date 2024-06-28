@@ -166,6 +166,24 @@ var _ = ginkgo.Describe("e2e egress firewall policy validation", func() {
 				externalContainer2IP = externalContainer2IPV4
 			}
 
+			gomega.Eventually(func() bool {
+				cmd := []string{"docker", "exec", externalContainerName1, "nc", "-vz", "-w", fmt.Sprint(testTimeout), externalContainer2IP, fmt.Sprint(externalContainerPort2)}
+				framework.Logf("Running command %v", cmd)
+				_, err := runCommand(cmd...)
+				if err != nil {
+					framework.Logf("Failed: %v", err)
+					return false
+				}
+				cmd = []string{"docker", "exec", externalContainerName2, "nc", "-vz", "-w", fmt.Sprint(testTimeout), externalContainer1IP, fmt.Sprint(externalContainerPort1)}
+				framework.Logf("Running command %v", cmd)
+				_, err = runCommand(cmd...)
+				if err != nil {
+					framework.Logf("Failed: %v", err)
+					return false
+				}
+				return true
+			}, 10*time.Second, 500*time.Millisecond).Should(gomega.BeTrue(), "expected external containers %s to be connected")
+
 			singleIPMask = "32"
 			subnetMask = "24"
 			if IsIPv6Cluster(f.ClientSet) {
