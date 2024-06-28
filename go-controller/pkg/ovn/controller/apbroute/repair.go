@@ -269,7 +269,8 @@ func (c *ExternalGatewayMasterController) processOVNRoute(ovnRoute *ovnRoute, gw
 				if noDbChanges {
 					return true
 				}
-				err := c.nbClient.updateExternalGWInfoCacheForPodIPWithGatewayIP(podIP, ovnRoute.nextHop, managedIPGWInfo.nodeName, gwInfo.BFDEnabled, managedIPGWInfo.namespacedName)
+				err := c.nbClient.updateExternalGWInfoCacheForPodIPWithGatewayIP(podIP, ovnRoute.nextHop, managedIPGWInfo.nodeName,
+					util.GetGatewayRouterFromNode(managedIPGWInfo.nodeName), gwInfo.BFDEnabled, managedIPGWInfo.namespacedName)
 				if err == nil {
 					return true
 				}

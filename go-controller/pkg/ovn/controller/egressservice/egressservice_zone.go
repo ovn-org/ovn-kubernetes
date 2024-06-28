@@ -45,13 +45,16 @@ const (
 )
 
 type InitClusterEgressPoliciesFunc func(client libovsdbclient.Client, addressSetFactory addressset.AddressSetFactory,
-	controllerName string) error
+	controllerName, clusterRouter string) error
 type EnsureNoRerouteNodePoliciesFunc func(client libovsdbclient.Client, addressSetFactory addressset.AddressSetFactory,
-	controllerName string, nodeLister corelisters.NodeLister) error
-type DeleteLegacyDefaultNoRerouteNodePoliciesFunc func(libovsdbclient.Client, string) error
-type CreateDefaultRouteToExternalFunc func(nbClient libovsdbclient.Client, nodeName string) error
+	controllerName, clusterRouter string, nodeLister corelisters.NodeLister) error
+type DeleteLegacyDefaultNoRerouteNodePoliciesFunc func(nbClient libovsdbclient.Client, clusterRouter, nodeName string) error
+type CreateDefaultRouteToExternalFunc func(nbClient libovsdbclient.Client, clusterRouter, gwRouterName string) error
 
 type Controller struct {
+	// network information
+	util.NetInfo
+
 	controllerName string
 	client         kubernetes.Interface
 	nbClient       libovsdbclient.Client
@@ -112,6 +115,7 @@ type nodeState struct {
 }
 
 func NewController(
+	netInfo util.NetInfo,
 	controllerName string,
 	client kubernetes.Interface,
 	nbClient libovsdbclient.Client,
@@ -129,6 +133,7 @@ func NewController(
 	klog.Info("Setting up event handlers for Egress Services")
 
 	c := &Controller{
+		NetInfo:                                  netInfo,
 		controllerName:                           controllerName,
 		client:                                   client,
 		nbClient:                                 nbClient,
@@ -226,7 +231,7 @@ func (c *Controller) Run(wg *sync.WaitGroup, threadiness int) error {
 		klog.Errorf("Failed to repair Egress Services entries: %v", err)
 	}
 
-	err = c.initClusterEgressPolicies(c.nbClient, c.addressSetFactory, c.controllerName)
+	err = c.initClusterEgressPolicies(c.nbClient, c.addressSetFactory, c.controllerName, c.GetNetworkScopedClusterRouterName())
 	if err != nil {
 		klog.Errorf("Failed to init Egress Services cluster policies: %v", err)
 	}
@@ -456,10 +461,10 @@ func (c *Controller) repair() error {
 
 	errorList := []error{}
 	ops := []libovsdb.Operation{}
-	ops, err = libovsdbops.DeleteLogicalRouterPolicyWithPredicateOps(c.nbClient, ops, ovntypes.OVNClusterRouter, lrpPredicate)
+	ops, err = libovsdbops.DeleteLogicalRouterPolicyWithPredicateOps(c.nbClient, ops, c.GetNetworkScopedClusterRouterName(), lrpPredicate)
 	if err != nil {
 		errorList = append(errorList,
-			fmt.Errorf("failed to create ops for deleting stale logical router policies from router %s: %v", ovntypes.OVNClusterRouter, err))
+			fmt.Errorf("failed to create ops for deleting stale logical router policies from router %s: %v", c.GetNetworkScopedClusterRouterName(), err))
 	}
 
 	if config.OVNKubernetesFeature.EnableInterconnect {
@@ -527,10 +532,10 @@ func (c *Controller) repair() error {
 			svcKeyToRemoteConfiguredV6Endpoints[svcKey] = append(svcKeyToLocalConfiguredV6Endpoints[svcKey], logicalIP)
 			return false
 		}
-		ops, err = libovsdbops.DeleteLogicalRouterPolicyWithPredicateOps(c.nbClient, ops, ovntypes.OVNClusterRouter, lrpICPredicate)
+		ops, err = libovsdbops.DeleteLogicalRouterPolicyWithPredicateOps(c.nbClient, ops, c.GetNetworkScopedClusterRouterName(), lrpICPredicate)
 		if err != nil {
 			errorList = append(errorList,
-				fmt.Errorf("failed to create ops for deleting stale logical router policies from router %s: %v", ovntypes.OVNClusterRouter, err))
+				fmt.Errorf("failed to create ops for deleting stale logical router policies from router %s: %v", c.GetNetworkScopedClusterRouterName(), err))
 		}
 	}
 
@@ -881,7 +886,7 @@ func (c *Controller) clearServiceResourcesAndRequeue(key string, svcState *svcSt
 	}
 
 	deleteOps := []libovsdb.Operation{}
-	deleteOps, err := libovsdbops.DeleteLogicalRouterPolicyWithPredicateOps(c.nbClient, deleteOps, ovntypes.OVNClusterRouter, p)
+	deleteOps, err := libovsdbops.DeleteLogicalRouterPolicyWithPredicateOps(c.nbClient, deleteOps, c.GetNetworkScopedClusterRouterName(), p)
 	if err != nil {
 		return err
 	}

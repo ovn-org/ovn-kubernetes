@@ -123,13 +123,13 @@ func (c *Controller) syncNode(key string) error {
 		delete(c.nodesZoneState, nodeName)
 	}
 
-	if err := c.deleteLegacyDefaultNoRerouteNodePolicies(c.nbClient, nodeName); err != nil {
+	if err := c.deleteLegacyDefaultNoRerouteNodePolicies(c.nbClient, c.GetNetworkScopedClusterRouterName(), nodeName); err != nil {
 		return err
 	}
 
 	// We ensure node no re-route policies contemplating possible node IP
 	// address changes regardless of allocated services.
-	err = c.ensureNoRerouteNodePolicies(c.nbClient, c.addressSetFactory, c.controllerName, c.nodeLister)
+	err = c.ensureNoRerouteNodePolicies(c.nbClient, c.addressSetFactory, c.controllerName, c.GetNetworkScopedClusterRouterName(), c.nodeLister)
 	if err != nil {
 		return err
 	}
@@ -156,7 +156,7 @@ func (c *Controller) syncNode(key string) error {
 
 	// At this point the node exists and is ready
 	if config.OVNKubernetesFeature.EnableInterconnect && c.zone != types.OvnDefaultZone && c.isNodeInLocalZone(n) {
-		if err := c.createDefaultRouteToExternalForIC(c.nbClient, nodeName); err != nil {
+		if err := c.createDefaultRouteToExternalForIC(c.nbClient, c.GetNetworkScopedClusterRouterName(), c.GetNetworkScopedGWRouterName(nodeName)); err != nil {
 			return err
 		}
 	}

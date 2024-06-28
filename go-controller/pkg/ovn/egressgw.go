@@ -498,7 +498,7 @@ func (oc *DefaultNetworkController) addGWRoutesForPod(gateways []*gatewayInfo, p
 		return nil
 	}
 
-	gr := util.GetGatewayRouterFromNode(node)
+	gr := oc.GetNetworkScopedGWRouterName(node)
 
 	routesAdded := 0
 	portPrefix, err := oc.extSwitchPrefix(node)
@@ -580,14 +580,14 @@ func (oc *DefaultNetworkController) deletePodSNAT(nodeName string, extIPs, podIP
 		klog.V(4).Infof("Node %s is not in the local zone %s", nodeName, oc.zone)
 		return nil
 	}
-	ops, err := deletePodSNATOps(oc.nbClient, nil, nodeName, extIPs, podIPNets)
+	ops, err := deletePodSNATOps(oc.nbClient, nil, oc.GetNetworkScopedGWRouterName(nodeName), extIPs, podIPNets)
 	if err != nil {
 		return err
 	}
 
 	_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
 	if err != nil {
-		return fmt.Errorf("failed to delete SNAT rule for pod on gateway router %s: %w", types.GWRouterPrefix+nodeName, err)
+		return fmt.Errorf("failed to delete SNAT rule for pod on gateway router %s: %w", oc.GetNetworkScopedGWRouterName(nodeName), err)
 	}
 	return nil
 }
@@ -630,13 +630,13 @@ func getExternalIPsGR(watchFactory *factory.WatchFactory, nodeName string) ([]*n
 
 // deletePodSNATOps creates ovsdb operation that removes per pod SNAT rules towards the nodeIP that are applied to the GR where the pod resides
 // used when disableSNATMultipleGWs=true
-func deletePodSNATOps(nbClient libovsdbclient.Client, ops []ovsdb.Operation, nodeName string, extIPs, podIPNets []*net.IPNet) ([]ovsdb.Operation, error) {
+func deletePodSNATOps(nbClient libovsdbclient.Client, ops []ovsdb.Operation, gwRouterName string, extIPs, podIPNets []*net.IPNet) ([]ovsdb.Operation, error) {
 	nats, err := buildPodSNAT(extIPs, podIPNets)
 	if err != nil {
 		return nil, err
 	}
 	logicalRouter := nbdb.LogicalRouter{
-		Name: types.GWRouterPrefix + nodeName,
+		Name: gwRouterName,
 	}
 	ops, err = libovsdbops.DeleteNATsOps(nbClient, ops, &logicalRouter, nats...)
 	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
@@ -647,13 +647,13 @@ func deletePodSNATOps(nbClient libovsdbclient.Client, ops []ovsdb.Operation, nod
 
 // addOrUpdatePodSNAT adds or updates per pod SNAT rules towards the nodeIP that are applied to the GR where the pod resides
 // used when disableSNATMultipleGWs=true
-func addOrUpdatePodSNAT(nbClient libovsdbclient.Client, nodeName string, extIPs, podIfAddrs []*net.IPNet) error {
+func addOrUpdatePodSNAT(nbClient libovsdbclient.Client, gwRouterName string, extIPs, podIfAddrs []*net.IPNet) error {
 	nats, err := buildPodSNAT(extIPs, podIfAddrs)
 	if err != nil {
 		return err
 	}
 	logicalRouter := nbdb.LogicalRouter{
-		Name: types.GWRouterPrefix + nodeName,
+		Name: gwRouterName,
 	}
 	if err := libovsdbops.CreateOrUpdateNATs(nbClient, &logicalRouter, nats...); err != nil {
 		return fmt.Errorf("failed to update SNAT for pods of router %s: %v", logicalRouter.Name, err)
@@ -664,15 +664,14 @@ func addOrUpdatePodSNAT(nbClient libovsdbclient.Client, nodeName string, extIPs,
 // addOrUpdatePodSNATOps returns the operation that adds or updates per pod SNAT rules towards the nodeIP that are
 // applied to the GR where the pod resides
 // used when disableSNATMultipleGWs=true
-func addOrUpdatePodSNATOps(nbClient libovsdbclient.Client, nodeName string, extIPs, podIfAddrs []*net.IPNet, ops []ovsdb.Operation) ([]ovsdb.Operation, error) {
-	gr := types.GWRouterPrefix + nodeName
-	router := &nbdb.LogicalRouter{Name: gr}
+func addOrUpdatePodSNATOps(nbClient libovsdbclient.Client, gwRouterName string, extIPs, podIfAddrs []*net.IPNet, ops []ovsdb.Operation) ([]ovsdb.Operation, error) {
+	router := &nbdb.LogicalRouter{Name: gwRouterName}
 	nats, err := buildPodSNAT(extIPs, podIfAddrs)
 	if err != nil {
 		return nil, err
 	}
 	if ops, err = libovsdbops.CreateOrUpdateNATsOps(nbClient, ops, router, nats...); err != nil {
-		return nil, fmt.Errorf("failed to update SNAT for pods of router: %s, error: %v", gr, err)
+		return nil, fmt.Errorf("failed to update SNAT for pods of router: %s, error: %v", gwRouterName, err)
 	}
 	return ops, nil
 }
@@ -708,7 +707,7 @@ func (oc *DefaultNetworkController) addHybridRoutePolicyForPod(podIP net.IP, nod
 		}
 
 		// get the GR to join switch ip address
-		grJoinIfAddrs, err := libovsdbutil.GetLRPAddrs(oc.nbClient, types.GWRouterToJoinSwitchPrefix+types.GWRouterPrefix+node)
+		grJoinIfAddrs, err := libovsdbutil.GetLRPAddrs(oc.nbClient, types.GWRouterToJoinSwitchPrefix+oc.GetNetworkScopedGWRouterName(node))
 		if err != nil {
 			return fmt.Errorf("unable to find IP address for node: %s, %s port, err: %v", node, types.GWRouterToJoinSwitchPrefix, err)
 		}
@@ -744,10 +743,10 @@ func (oc *DefaultNetworkController) addHybridRoutePolicyForPod(podIP net.IP, nod
 		p := func(item *nbdb.LogicalRouterPolicy) bool {
 			return item.Priority == logicalRouterPolicy.Priority && strings.Contains(item.Match, matchSrcAS)
 		}
-		err = libovsdbops.CreateOrUpdateLogicalRouterPolicyWithPredicate(oc.nbClient, types.OVNClusterRouter,
+		err = libovsdbops.CreateOrUpdateLogicalRouterPolicyWithPredicate(oc.nbClient, oc.GetNetworkScopedClusterRouterName(),
 			&logicalRouterPolicy, p, &logicalRouterPolicy.Nexthops, &logicalRouterPolicy.Match, &logicalRouterPolicy.Action)
 		if err != nil {
-			return fmt.Errorf("failed to add policy route %+v to %s: %v", logicalRouterPolicy, types.OVNClusterRouter, err)
+			return fmt.Errorf("failed to add policy route %+v to %s: %v", logicalRouterPolicy, oc.GetNetworkScopedClusterRouterName(), err)
 		}
 	}
 	return nil
@@ -809,9 +808,9 @@ func (oc *DefaultNetworkController) delHybridRoutePolicyForPod(podIP net.IP, nod
 			p := func(item *nbdb.LogicalRouterPolicy) bool {
 				return item.Priority == types.HybridOverlayReroutePriority && item.Match == matchStr
 			}
-			err := libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(oc.nbClient, types.OVNClusterRouter, p)
+			err := libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(oc.nbClient, oc.GetNetworkScopedClusterRouterName(), p)
 			if err != nil {
-				return fmt.Errorf("error deleting policy %s on router %s: %v", matchStr, types.OVNClusterRouter, err)
+				return fmt.Errorf("error deleting policy %s on router %s: %v", matchStr, oc.GetNetworkScopedClusterRouterName(), err)
 			}
 		}
 		if len(ipv4PodIPs) == 0 && len(ipv6PodIPs) == 0 {
@@ -834,9 +833,9 @@ func (oc *DefaultNetworkController) delAllHybridRoutePolicies() error {
 	policyPred := func(item *nbdb.LogicalRouterPolicy) bool {
 		return item.Priority == types.HybridOverlayReroutePriority
 	}
-	err := libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(oc.nbClient, types.OVNClusterRouter, policyPred)
+	err := libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(oc.nbClient, oc.GetNetworkScopedClusterRouterName(), policyPred)
 	if err != nil {
-		return fmt.Errorf("error deleting hybrid route policies on %s: %v", types.OVNClusterRouter, err)
+		return fmt.Errorf("error deleting hybrid route policies on %s: %v", oc.GetNetworkScopedClusterRouterName(), err)
 	}
 
 	// nuke all the address-sets.
@@ -865,9 +864,9 @@ func (oc *DefaultNetworkController) delAllLegacyHybridRoutePolicies() error {
 		}
 		return true
 	}
-	err := libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(oc.nbClient, types.OVNClusterRouter, p)
+	err := libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(oc.nbClient, oc.GetNetworkScopedClusterRouterName(), p)
 	if err != nil {
-		return fmt.Errorf("error deleting legacy hybrid route policies on %s: %v", types.OVNClusterRouter, err)
+		return fmt.Errorf("error deleting legacy hybrid route policies on %s: %v", oc.GetNetworkScopedClusterRouterName(), err)
 	}
 
 	return nil

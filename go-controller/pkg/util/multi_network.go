@@ -44,6 +44,12 @@ type BasicNetInfo interface {
 	Equals(BasicNetInfo) bool
 	GetNetworkScopedName(name string) string
 	RemoveNetworkScopeFromName(name string) string
+	GetNetworkScopedK8sMgmtIntfName(nodeName string) string
+	GetNetworkScopedClusterRouterName() string
+	GetNetworkScopedGWRouterName(nodeName string) string
+	GetNetworkScopedSwitchName(nodeName string) string
+	GetNetworkScopedJoinSwitchName() string
+	GetNetworkScopedExtSwitchName(nodeName string) string
 }
 
 // NetInfo correlates which NADs refer to a network in addition to the basic
@@ -93,6 +99,30 @@ func (nInfo *DefaultNetInfo) GetNetworkScopedName(name string) string {
 func (nInfo *DefaultNetInfo) RemoveNetworkScopeFromName(name string) string {
 	// for the default network, names are not scoped
 	return name
+}
+
+func (nInfo *DefaultNetInfo) GetNetworkScopedK8sMgmtIntfName(nodeName string) string {
+	return GetK8sMgmtIntfName(nInfo.GetNetworkScopedName(nodeName))
+}
+
+func (nInfo *DefaultNetInfo) GetNetworkScopedClusterRouterName() string {
+	return nInfo.GetNetworkScopedName(types.OVNClusterRouter)
+}
+
+func (nInfo *DefaultNetInfo) GetNetworkScopedGWRouterName(nodeName string) string {
+	return GetGatewayRouterFromNode(nInfo.GetNetworkScopedName(nodeName))
+}
+
+func (nInfo *DefaultNetInfo) GetNetworkScopedSwitchName(nodeName string) string {
+	return nInfo.GetNetworkScopedName(nodeName)
+}
+
+func (nInfo *DefaultNetInfo) GetNetworkScopedJoinSwitchName() string {
+	return nInfo.GetNetworkScopedName(types.OVNJoinSwitch)
+}
+
+func (nInfo *DefaultNetInfo) GetNetworkScopedExtSwitchName(nodeName string) string {
+	return GetExtSwitchFromNode(nInfo.GetNetworkScopedName(nodeName))
 }
 
 // GetNADs returns the NADs associated with the network, no op for default
@@ -218,6 +248,30 @@ func (nInfo *secondaryNetInfo) GetNetworkScopedName(name string) string {
 func (nInfo *secondaryNetInfo) RemoveNetworkScopeFromName(name string) string {
 	// for the default network, names are not scoped
 	return strings.Trim(name, nInfo.getPrefix())
+}
+
+func (nInfo *secondaryNetInfo) GetNetworkScopedK8sMgmtIntfName(nodeName string) string {
+	return GetK8sMgmtIntfName(nInfo.GetNetworkScopedName(nodeName))
+}
+
+func (nInfo *secondaryNetInfo) GetNetworkScopedClusterRouterName() string {
+	return nInfo.GetNetworkScopedName(types.OVNClusterRouter)
+}
+
+func (nInfo *secondaryNetInfo) GetNetworkScopedGWRouterName(nodeName string) string {
+	return GetGatewayRouterFromNode(nInfo.GetNetworkScopedName(nodeName))
+}
+
+func (nInfo *secondaryNetInfo) GetNetworkScopedSwitchName(nodeName string) string {
+	return nInfo.GetNetworkScopedName(nodeName)
+}
+
+func (nInfo *secondaryNetInfo) GetNetworkScopedJoinSwitchName() string {
+	return nInfo.GetNetworkScopedName(types.OVNJoinSwitch)
+}
+
+func (nInfo *secondaryNetInfo) GetNetworkScopedExtSwitchName(nodeName string) string {
+	return GetExtSwitchFromNode(nInfo.GetNetworkScopedName(nodeName))
 }
 
 // getPrefix returns if the logical entities prefix for this network

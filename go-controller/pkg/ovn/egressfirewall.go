@@ -189,9 +189,9 @@ func (oc *DefaultNetworkController) deleteStaleACLs() error {
 	p := func(item *nbdb.LogicalRouterPolicy) bool {
 		return item.Priority <= types.EgressFirewallStartPriority && item.Priority >= types.MinimumReservedEgressFirewallPriority
 	}
-	err := libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(oc.nbClient, types.OVNClusterRouter, p)
+	err := libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(oc.nbClient, oc.GetNetworkScopedClusterRouterName(), p)
 	if err != nil {
-		return fmt.Errorf("error deleting egress firewall policies on router %s: %v", types.OVNClusterRouter, err)
+		return fmt.Errorf("error deleting egress firewall policies on router %s: %v", oc.GetNetworkScopedClusterRouterName(), err)
 	}
 
 	// delete acls from all switches, they reside on the port group now

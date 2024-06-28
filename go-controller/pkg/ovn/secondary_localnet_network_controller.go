@@ -108,7 +108,7 @@ func (oc *SecondaryLocalnetNetworkController) Cleanup() error {
 }
 
 func (oc *SecondaryLocalnetNetworkController) Init() error {
-	switchName := oc.GetNetworkScopedName(types.OVNLocalnetSwitch)
+	switchName := oc.GetNetworkScopedSwitchName(types.OVNLocalnetSwitch)
 
 	logicalSwitch, err := oc.initializeLogicalSwitch(switchName, oc.Subnets(), oc.ExcludeSubnets())
 	if err != nil {

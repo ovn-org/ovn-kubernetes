@@ -112,16 +112,16 @@ func (bnc *BaseNetworkController) deleteStaleLogicalSwitchPorts(expectedLogicalP
 		switchNames = make([]string, 0, len(nodes))
 		for _, n := range nodes {
 			// skip nodes that are not running ovnk (inferred from host subnets)
-			switchName := bnc.GetNetworkScopedName(n.Name)
+			switchName := bnc.GetNetworkScopedSwitchName(n.Name)
 			if bnc.lsManager.IsNonHostSubnetSwitch(switchName) {
 				continue
 			}
 			switchNames = append(switchNames, switchName)
 		}
 	} else if topoType == ovntypes.Layer2Topology {
-		switchNames = []string{bnc.GetNetworkScopedName(ovntypes.OVNLayer2Switch)}
+		switchNames = []string{bnc.GetNetworkScopedSwitchName(ovntypes.OVNLayer2Switch)}
 	} else if topoType == ovntypes.LocalnetTopology {
-		switchNames = []string{bnc.GetNetworkScopedName(ovntypes.OVNLocalnetSwitch)}
+		switchNames = []string{bnc.GetNetworkScopedSwitchName(ovntypes.OVNLocalnetSwitch)}
 	} else {
 		return fmt.Errorf("topology type %s not supported", topoType)
 	}
@@ -405,11 +405,11 @@ func (bnc *BaseNetworkController) getExpectedSwitchName(pod *kapi.Pod) (string, 
 		topoType := bnc.TopologyType()
 		switch topoType {
 		case ovntypes.Layer3Topology:
-			switchName = bnc.GetNetworkScopedName(pod.Spec.NodeName)
+			switchName = bnc.GetNetworkScopedSwitchName(pod.Spec.NodeName)
 		case ovntypes.Layer2Topology:
-			switchName = bnc.GetNetworkScopedName(ovntypes.OVNLayer2Switch)
+			switchName = bnc.GetNetworkScopedSwitchName(ovntypes.OVNLayer2Switch)
 		case ovntypes.LocalnetTopology:
-			switchName = bnc.GetNetworkScopedName(ovntypes.OVNLocalnetSwitch)
+			switchName = bnc.GetNetworkScopedSwitchName(ovntypes.OVNLocalnetSwitch)
 		default:
 			return "", fmt.Errorf("topology type %s not supported", topoType)
 		}

@@ -660,7 +660,7 @@ func (oc *DefaultNetworkController) egressQoSSwitches() ([]string, error) {
 	// Find all node switches
 	p := func(item *nbdb.LogicalSwitch) bool {
 		// Ignore external and Join switches(both legacy and current)
-		return !(strings.HasPrefix(item.Name, types.JoinSwitchPrefix) || item.Name == types.OVNJoinSwitch || item.Name == types.TransitSwitch || strings.HasPrefix(item.Name, types.ExternalSwitchPrefix))
+		return !(strings.HasPrefix(item.Name, types.JoinSwitchPrefix) || oc.RemoveNetworkScopeFromName(item.Name) == types.OVNJoinSwitch || item.Name == types.TransitSwitch || strings.HasPrefix(item.Name, types.ExternalSwitchPrefix))
 	}
 
 	nodeLocalSwitches, err := libovsdbops.FindLogicalSwitchesWithPredicate(oc.nbClient, p)
@@ -1020,7 +1020,7 @@ func (oc *DefaultNetworkController) syncEgressQoSNode(key string) error {
 	klog.V(5).Infof("EgressQoS %s node retrieved from lister: %v", n.Name, n)
 
 	nodeSw := &nbdb.LogicalSwitch{
-		Name: n.Name,
+		Name: oc.GetNetworkScopedSwitchName(n.Name),
 	}
 	nodeSw, err = libovsdbops.GetLogicalSwitch(oc.nbClient, nodeSw)
 	if err != nil {

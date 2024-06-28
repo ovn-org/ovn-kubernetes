@@ -21,7 +21,7 @@ import (
 
 // gatewayCleanup removes all the NB DB objects created for a node's gateway
 func (oc *DefaultNetworkController) gatewayCleanup(nodeName string) error {
-	gatewayRouter := types.GWRouterPrefix + nodeName
+	gatewayRouter := oc.GetNetworkScopedGWRouterName(nodeName)
 
 	// Get the gateway router port's IP address (connected to join switch)
 	var nextHops []net.IP
@@ -40,10 +40,10 @@ func (oc *DefaultNetworkController) gatewayCleanup(nodeName string) error {
 	// Remove the patch port that connects join switch to gateway router
 	portName := types.JoinSwitchToGWRouterPrefix + gatewayRouter
 	lsp := nbdb.LogicalSwitchPort{Name: portName}
-	sw := nbdb.LogicalSwitch{Name: types.OVNJoinSwitch}
+	sw := nbdb.LogicalSwitch{Name: oc.GetNetworkScopedJoinSwitchName()}
 	err = libovsdbops.DeleteLogicalSwitchPorts(oc.nbClient, &sw, &lsp)
 	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
-		return fmt.Errorf("failed to delete logical switch port %s from switch %s: %w", portName, types.OVNJoinSwitch, err)
+		return fmt.Errorf("failed to delete logical switch port %s from switch %s: %w", portName, sw.Name, err)
 	}
 
 	// Remove the logical router port on the gateway router that connects to the join switch
@@ -57,7 +57,7 @@ func (oc *DefaultNetworkController) gatewayCleanup(nodeName string) error {
 	}
 
 	// Remove the static mac bindings of the gateway router
-	err = gateway.DeleteDummyGWMacBindings(oc.nbClient, nodeName)
+	err = gateway.DeleteDummyGWMacBindings(oc.nbClient, gatewayRouter)
 	if err != nil {
 		return fmt.Errorf("failed to delete GR dummy mac bindings for node %s: %w", nodeName, err)
 	}
@@ -69,13 +69,13 @@ func (oc *DefaultNetworkController) gatewayCleanup(nodeName string) error {
 	}
 
 	// Remove external switch
-	externalSwitch := types.ExternalSwitchPrefix + nodeName
+	externalSwitch := oc.GetNetworkScopedExtSwitchName(nodeName)
 	err = libovsdbops.DeleteLogicalSwitch(oc.nbClient, externalSwitch)
 	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
 		return fmt.Errorf("failed to delete external switch %s: %w", externalSwitch, err)
 	}
 
-	exGWexternalSwitch := types.EgressGWSwitchPrefix + types.ExternalSwitchPrefix + nodeName
+	exGWexternalSwitch := types.EgressGWSwitchPrefix + externalSwitch
 	err = libovsdbops.DeleteLogicalSwitch(oc.nbClient, exGWexternalSwitch)
 	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
 		return fmt.Errorf("failed to delete external switch %s: %w", exGWexternalSwitch, err)
@@ -90,10 +90,10 @@ func (oc *DefaultNetworkController) delPbrAndNatRules(nodeName string, lrpTypes 
 	// delete the dnat_and_snat entry that we added for the management port IP
 	// Note: we don't need to delete any MAC bindings that are dynamically learned from OVN SB DB
 	// because there will be none since this NAT is only for outbound traffic and not for inbound
-	mgmtPortName := types.K8sPrefix + nodeName
+	mgmtPortName := oc.GetNetworkScopedK8sMgmtIntfName(nodeName)
 	nat := libovsdbops.BuildDNATAndSNAT(nil, nil, mgmtPortName, "", nil)
 	logicalRouter := nbdb.LogicalRouter{
-		Name: types.OVNClusterRouter,
+		Name: oc.GetNetworkScopedClusterRouterName(),
 	}
 	err := libovsdbops.DeleteNATs(oc.nbClient, &logicalRouter, nat)
 	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {

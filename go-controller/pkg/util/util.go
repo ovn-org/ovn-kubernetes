@@ -98,12 +98,17 @@ func GetIPFullMask(ip net.IP) net.IPMask {
 	return net.CIDRMask(32, 32)
 }
 
+// GetK8sMgmtIntfName returns the management port name for a given node.
+func GetK8sMgmtIntfName(nodeName string) string {
+	return types.K8sPrefix + nodeName
+}
+
 // GetLegacyK8sMgmtIntfName returns legacy management ovs-port name
 func GetLegacyK8sMgmtIntfName(nodeName string) string {
 	if len(nodeName) > 11 {
 		return types.K8sPrefix + (nodeName[:11])
 	}
-	return types.K8sPrefix + nodeName
+	return GetK8sMgmtIntfName(nodeName)
 }
 
 // GetWorkerFromGatewayRouter determines a node's corresponding worker switch name from a gateway router name
@@ -114,6 +119,11 @@ func GetWorkerFromGatewayRouter(gr string) string {
 // GetGatewayRouterFromNode determines a node's corresponding gateway router name
 func GetGatewayRouterFromNode(node string) string {
 	return types.GWRouterPrefix + node
+}
+
+// GetGatewayRouterFromNode determines a node's corresponding gateway router name
+func GetExtSwitchFromNode(node string) string {
+	return types.ExternalSwitchPrefix + node
 }
 
 // GetNodeInternalAddrs returns the first IPv4 and/or IPv6 InternalIP defined

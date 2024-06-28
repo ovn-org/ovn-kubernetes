@@ -22,6 +22,7 @@ import (
 	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
 // Admin Policy Based Route services
@@ -182,7 +183,7 @@ func (c *ExternalGatewayMasterController) DelAllLegacyHybridRoutePolicies() erro
 
 // DeletePodSNAT exposes the function deletePodSNAT
 func (c *ExternalGatewayMasterController) DeletePodSNAT(nodeName string, extIPs, podIPNets []*net.IPNet) error {
-	return c.nbClient.deletePodSNAT(nodeName, extIPs, podIPNets)
+	return c.nbClient.deletePodSNAT(nodeName, util.GetGatewayRouterFromNode(nodeName), extIPs, podIPNets)
 }
 
 func (c *ExternalGatewayMasterController) GetAPBRoutePolicyStatus(policyName string) (*adminpolicybasedrouteapi.AdminPolicyBasedRouteStatus, error) {

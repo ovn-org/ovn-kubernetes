@@ -3097,7 +3097,7 @@ var _ = ginkgo.Describe("OVN for APB External Route Operations", func() {
 
 				_, fullMaskPodNet, _ := net.ParseCIDR("10.128.1.3/32")
 				gomega.Expect(
-					addOrUpdatePodSNAT(fakeOvn.controller.nbClient, pod[0].Spec.NodeName, extIPs, []*net.IPNet{fullMaskPodNet}),
+					addOrUpdatePodSNAT(fakeOvn.controller.nbClient, util.GetGatewayRouterFromNode(pod[0].Spec.NodeName), extIPs, []*net.IPNet{fullMaskPodNet}),
 				).To(gomega.Succeed())
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(finalNB))
 				finalNB = []libovsdbtest.TestData{
