@@ -338,9 +338,15 @@ func (bsnc *BaseSecondaryNetworkController) addLogicalPortToNetworkForNAD(pod *k
 		if config.Gateway.DisableSNATMultipleGWs {
 			// Add NAT rules to pods if disable SNAT is set and does not have
 			// namespace annotations to go through external egress router
-			if extIPs, err := getExternalIPsGR(bsnc.watchFactory, pod.Spec.NodeName); err != nil {
-				return err
-			} else if ops, err = addOrUpdatePodSNATOps(bsnc.nbClient, bsnc.GetNetworkScopedGWRouterName(pod.Spec.NodeName), extIPs, podAnnotation.IPs, ops); err != nil {
+
+			//TODO(dceara): HARDCODED this should be the per-network MASQ address.
+			extIPs := []*net.IPNet{
+				{
+					IP:   net.ParseIP("169.254.169.42"),
+					Mask: net.CIDRMask(16, 32),
+				},
+			}
+			if ops, err = addOrUpdatePodSNATOps(bsnc.nbClient, bsnc.GetNetworkScopedGWRouterName(pod.Spec.NodeName), extIPs, podAnnotation.IPs, ops); err != nil {
 				return err
 			}
 		}
