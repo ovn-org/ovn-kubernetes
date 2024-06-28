@@ -1,0 +1,58 @@
+dir: pkg/testing/mocks/{{.PackagePath}}
+with-expecter: false
+filename: "{{.InterfaceName}}.go"
+mockname: "{{.InterfaceName}}"
+outpkg: "mocks"
+packages:
+  github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory:
+    interfaces:
+      NodeWatchFactory:
+      ObjectCacheInterface:
+    config:
+      dir: pkg/factory/mocks/
+  github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni:
+    interfaces:
+      CNIPluginLibOps:
+      NetNS:
+    config:
+      dir: pkg/cni/mocks
+  github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube:
+    config:
+      all: true
+      dir: pkg/kube/mocks
+  github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube/healthcheck:
+    config:
+      all: true
+      dir: pkg/kube/mocks
+  github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set:
+    config:
+      all: true
+      dir: pkg/ovn/address_set/mocks
+  github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util:
+    interfaces:
+      DNSOps:
+      ExecRunner:
+      FileSystemOps:
+      NetLinkOps:
+      SriovnetOps:
+      VdpaDevice:
+      VdpaOps:
+    config:
+      dir: pkg/util/mocks
+  k8s.io/utils/exec:
+    config:
+      all: true
+  github.com/vishvananda/netlink:
+    interfaces:
+      Link:
+  github.com/containernetworking/cni/pkg/types:
+    interfaces:
+      Result:
+  github.com/containernetworking/plugins/pkg/ns:
+    interfaces:
+      NetNS:
+  github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1:
+    interfaces:
+      NetworkAttachmentDefinitionLister:
+      NetworkAttachmentDefinitionNamespaceLister:
+
