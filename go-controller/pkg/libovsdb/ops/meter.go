@@ -1,6 +1,7 @@
 package ops
 
 import (
+	"context"
 	"reflect"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
@@ -8,6 +9,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 )
 
 func equalsMeterBand(a, b *nbdb.MeterBand) bool {
@@ -47,6 +49,17 @@ func CreateOrUpdateMeterBandOps(nbClient libovsdbclient.Client, ops []ovsdb.Oper
 
 	m := newModelClient(nbClient)
 	return m.CreateOrUpdateOps(ops, opModels...)
+}
+
+type MeterBandPredicate func(*nbdb.MeterBand) bool
+
+// FindBFDWithPredicate looks up MeterBands from the cache based on a given predicate
+func FindMeterBandWithPredicate(nbClient libovsdbclient.Client, p MeterBandPredicate) ([]*nbdb.MeterBand, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	defer cancel()
+	found := []*nbdb.MeterBand{}
+	err := nbClient.WhereCache(p).List(ctx, &found)
+	return found, err
 }
 
 // CreateOrUpdateMeterOps creates or updates the provided meter associated to
