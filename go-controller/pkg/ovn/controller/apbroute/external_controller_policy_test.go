@@ -16,6 +16,7 @@ import (
 	adminpolicybasedrouteclient "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/clientset/versioned/fake"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
@@ -276,6 +277,16 @@ var _ = Describe("OVN External Gateway policy", func() {
 				&nbdb.LogicalRouter{
 					UUID: "GR_node-UUID",
 					Name: "GR_node",
+				},
+				&nbdb.MeterBand{
+					UUID:        "bfdUUID",
+					Action:      nbdb.MeterBandActionDrop,
+					Rate:        types.BFDRateLimit,
+					ExternalIDs: map[string]string{"bfd-" + types.OvnRateLimitingMeter: "true"},
+				},
+				&nbdb.Meter{
+					UUID:  "meterUUID",
+					Bands: []string{"bfdUUID"},
 				},
 			},
 		}
@@ -684,6 +695,62 @@ var _ = Describe("OVN External Gateway policy", func() {
 
 			eventuallyExpectNumberOfPolicies(1)
 			eventuallyExpectConfig(policyName, expectedPolicy, expectedRefs)
+		})
+		It("validates that BFD Rate limiter increases proportionally to number of BFD connections", func() {
+
+			staticMultiIPPolicy := newPolicy("multiIPPolicy",
+				&v1.LabelSelector{MatchLabels: targetNamespace1Match},
+				sets.New("10.10.10.1"),
+				nil, nil,
+				true,
+			)
+			initController([]runtime.Object{namespaceGW, namespaceTarget, targetPod1}, []runtime.Object{staticMultiIPPolicy})
+
+			policyName := staticMultiIPPolicy.Name
+			staticRoutes := []string{"10.10.10.1"}
+			expectedPolicy, expectedRefs := expectedPolicyStateAndRefs(
+				[]*namespaceWithPods{namespaceTargetWithPod},
+				staticRoutes,
+				nil, true)
+
+			eventuallyExpectNumberOfPolicies(1)
+			eventuallyExpectConfig(policyName, expectedPolicy, expectedRefs)
+
+			pd := func(item *nbdb.MeterBand) bool {
+				return item.ExternalIDs["bfd-"+types.OvnRateLimitingMeter] == "true"
+			}
+			bfdBands, err := libovsdbops.FindMeterBandWithPredicate(nbClient, pd)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(len(bfdBands)).To(Equal(1))
+			Expect(bfdBands[0].Rate).To(Equal(types.BFDRateLimit))
+
+			// increase number of bfd connections to 60
+			p, err := fakeRouteClient.K8sV1().AdminPolicyBasedExternalRoutes().Get(context.TODO(), staticMultiIPPolicy.Name, v1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			for i := 2; i <= 60; i++ { // default BFD rate is 50
+				p.Spec.NextHops.StaticHops = append(p.Spec.NextHops.StaticHops,
+					&adminpolicybasedrouteapi.StaticHop{
+						IP:         fmt.Sprintf("10.10.10.%d", i),
+						BFDEnabled: true,
+					},
+				)
+				staticRoutes = append(staticRoutes, fmt.Sprintf("10.10.10.%d", i))
+			}
+			p.Generation++
+			_, err = fakeRouteClient.K8sV1().AdminPolicyBasedExternalRoutes().Update(context.Background(), p, v1.UpdateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+
+			expectedPolicy, expectedRefs = expectedPolicyStateAndRefs(
+				[]*namespaceWithPods{namespaceTargetWithPod},
+				staticRoutes,
+				nil, true)
+
+			eventuallyExpectNumberOfPolicies(1)
+			eventuallyExpectConfig(policyName, expectedPolicy, expectedRefs)
+			bfdBands, err = libovsdbops.FindMeterBandWithPredicate(nbClient, pd)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(len(bfdBands)).To(Equal(1))
+			Expect(bfdBands[0].Rate).To(Equal(70)) // increase it to 10 plus existing BFD connections(60)
 		})
 		It("validates that removing a duplicated static hop IP from an overlapping policy static hop will keep the static IP in the route policy", func() {
 
