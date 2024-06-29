@@ -19,9 +19,9 @@ func equalsMeterBand(a, b *nbdb.MeterBand) bool {
 
 // CreateOrUpdateMeterBandOps creates or updates the provided meter bands
 func CreateOrUpdateMeterBandOps(nbClient libovsdbclient.Client, ops []ovsdb.Operation, meterBands []*nbdb.MeterBand) ([]ovsdb.Operation, error) {
-	bands := []*nbdb.MeterBand{}
 	opModels := make([]operationModel, 0, len(meterBands))
 	for i := range meterBands {
+		bands := []*nbdb.MeterBand{}
 		meterBand := meterBands[i]
 		opModel := operationModel{
 			Model:          meterBand,
