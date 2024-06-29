@@ -8,7 +8,7 @@ import (
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 )
 
-func TestCreateMeterBandOps(t *testing.T) {
+func TestCreateOrUpdateMeterBandOps(t *testing.T) {
 	firstUUID := "b9998337-2498-4d1e-86e6-fc0417abb2f0"
 	secondUUID := "b9998337-2498-4d1e-86e6-fc0417abb2f1"
 	thirdUUID := "b9998337-2498-4d1e-86e6-fc0417abb2f2"
@@ -19,10 +19,11 @@ func TestCreateMeterBandOps(t *testing.T) {
 		initialNbdb       libovsdbtest.TestSetup
 	}{
 		{
-			desc:           "create meter band when multiple equal bands exist",
-			inputMeterBand: &nbdb.MeterBand{},
+			desc:           "update 1st meter band when multiple equal bands exist",
+			inputMeterBand: &nbdb.MeterBand{ExternalIDs: map[string]string{"foo": "bar"}},
 			expectedMeterBand: &nbdb.MeterBand{
-				UUID: firstUUID,
+				UUID:        firstUUID,
+				ExternalIDs: map[string]string{"foo": "bar"},
 			},
 			initialNbdb: libovsdbtest.TestSetup{
 				NBData: []libovsdbtest.TestData{
@@ -34,7 +35,8 @@ func TestCreateMeterBandOps(t *testing.T) {
 						UUID: secondUUID,
 					},
 					&nbdb.MeterBand{
-						UUID: firstUUID,
+						UUID:        firstUUID,
+						ExternalIDs: map[string]string{"foo": "bar"},
 					},
 					&nbdb.MeterBand{
 						UUID: thirdUUID,
@@ -52,7 +54,7 @@ func TestCreateMeterBandOps(t *testing.T) {
 			t.Cleanup(cleanup.Cleanup)
 
 			meterBand := tt.inputMeterBand.DeepCopy()
-			_, err = CreateMeterBandOps(nbClient, nil, meterBand)
+			_, err = CreateOrUpdateMeterBandOps(nbClient, nil, []*nbdb.MeterBand{meterBand})
 			if err != nil {
 				t.Fatal(fmt.Errorf("%s: got unexpected error: %v", tt.desc, err))
 			}
