@@ -214,7 +214,7 @@ func generateGatewayInitExpectedNB(testData []libovsdbtest.TestData, expectedOVN
 	testData = append(testData, &nbdb.MeterBand{
 		UUID:   "25-pktps-rate-limiter-UUID",
 		Action: types.MeterAction,
-		Rate:   int(25),
+		Rate:   types.DefaultRateLimit,
 	})
 	meters := map[string]string{
 		OVNARPRateLimiter:              getMeterNameForProtocol(OVNARPRateLimiter),
