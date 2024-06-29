@@ -56,7 +56,7 @@ func EnsureDefaultCOPP(nbClient libovsdbclient.Client) (string, error) {
 
 	band := &nbdb.MeterBand{
 		Action: types.MeterAction,
-		Rate:   int(25), // hard-coding for now. TODO(tssurya): make this configurable if needed
+		Rate:   types.DefaultRateLimit, // hard-coding for now. TODO(tssurya): make this configurable if needed
 	}
 	ops, err = libovsdbops.CreateMeterBandOps(nbClient, ops, band)
 	if err != nil {

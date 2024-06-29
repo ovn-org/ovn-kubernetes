@@ -19,7 +19,7 @@ func TestEnsureDefaultCOPP(t *testing.T) {
 	meterBand := &nbdb.MeterBand{
 		UUID:   "meter-band-UUID",
 		Action: types.MeterAction,
-		Rate:   int(25), // hard-coding for now. TODO(tssurya): make this configurable if needed
+		Rate:   types.DefaultRateLimit, // hard-coding for now. TODO(tssurya): make this configurable if needed
 	}
 
 	var meters []*nbdb.Meter
