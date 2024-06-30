@@ -274,44 +274,53 @@ func (oc *DefaultNetworkController) createBFDStaticRoute(bfdEnabled bool, gw str
 
 	if bfdEnabled {
 		// determine if the BFD rate limits need to be increased (we need to do this only if the BFD Create/Update succeeded)
-		// Fetch all current BFD ECMP routes on this GR
-		bfdPredicate := func(item *nbdb.BFD) bool {
-			return item.LogicalPort == port
-		}
-		bfds, err := libovsdbops.FindBFDWithPredicate(oc.nbClient, bfdPredicate)
-		if err != nil {
-			return fmt.Errorf("failed to list bfds for %s: %w", gr, err)
-		}
-		bandPredicate := func(item *nbdb.MeterBand) bool {
-			return item.ExternalIDs["bfd-"+types.OvnRateLimitingMeter] == "true"
-		}
-		bfdBands, err := libovsdbops.FindMeterBandWithPredicate(oc.nbClient, bandPredicate)
-		if err != nil {
-			return fmt.Errorf("failed to list bfd band for %s: %w", gr, err)
-		}
-		if len(bfdBands) == 0 {
-			return nil // nothing to do
-		}
-		currentRate := bfdBands[0].Rate
-
-		if len(bfds) > currentRate-10 {
-			// we need to adjust the meterband accordingly
-			// In OVN BFD heartbeats are configured at 1sec interval by default
-			// That means rate of BFD packets per second = number of BFD's configured on the given GR + an extra 10
-			// NOTE: Default value is 50 which already takes the extra 10 into consideration
-			bfdBands[0].Rate = len(bfds) + 10
-			ops, err := libovsdbops.CreateOrUpdateMeterBandOps(oc.nbClient, nil, []*nbdb.MeterBand{bfdBands[0]})
-			if err != nil {
-				return fmt.Errorf("can't update meter band %v: %v", bfdBands[0], err)
-			}
-			_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
-			if err != nil {
-				return fmt.Errorf("error transacting static route: %v", err)
-			}
-			return nil
-		}
+		return oc.calculateDynamicBFDPktRateLimit(port, gr, true)
 	}
 
+	return nil
+}
+
+func (oc *DefaultNetworkController) calculateDynamicBFDPktRateLimit(logicalPort, gr string, increase bool) error {
+	// Fetch all current BFD ECMP routes on this GR
+	bfdPredicate := func(item *nbdb.BFD) bool {
+		return item.LogicalPort == logicalPort
+	}
+	bfds, err := libovsdbops.FindBFDWithPredicate(oc.nbClient, bfdPredicate)
+	if err != nil {
+		return fmt.Errorf("failed to list bfds for %s: %w", gr, err)
+	}
+	bandPredicate := func(item *nbdb.MeterBand) bool {
+		return item.ExternalIDs["bfd-"+types.OvnRateLimitingMeter] == "true"
+	}
+	bfdBands, err := libovsdbops.FindMeterBandWithPredicate(oc.nbClient, bandPredicate)
+	if err != nil {
+		return fmt.Errorf("failed to list bfd band for %s: %w", gr, err)
+	}
+	if len(bfdBands) == 0 {
+		return nil // nothing to do
+	}
+	currentRate := bfdBands[0].Rate
+	var rateChange bool
+	if increase {
+		rateChange = len(bfds) > currentRate-10
+	} else {
+		rateChange = len(bfds) < currentRate-10
+	}
+	if rateChange {
+		// we need to adjust the meterband accordingly
+		// In OVN BFD heartbeats are configured at 1sec interval by default
+		// That means rate of BFD packets per second = number of BFD's configured on the given GR + an extra 10
+		// NOTE: Default value is 50 which already takes the extra 10 into consideration
+		bfdBands[0].Rate = len(bfds) + 10
+		ops, err := libovsdbops.CreateOrUpdateMeterBandOps(oc.nbClient, nil, []*nbdb.MeterBand{bfdBands[0]})
+		if err != nil {
+			return fmt.Errorf("can't update meter band %v: %v", bfdBands[0], err)
+		}
+		_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
+		if err != nil {
+			return fmt.Errorf("error transacting static route: %v", err)
+		}
+	}
 	return nil
 }
 
@@ -940,43 +949,7 @@ func (oc *DefaultNetworkController) cleanUpBFDEntry(gatewayIP, gatewayRouter, pr
 	}
 
 	// determine if the BFD rate limits need to be decreased (we need to do this only if the BFD Delete succeeded)
-	// Fetch all current BFD sessions on this GR
-	bfdPredicate := func(item *nbdb.BFD) bool {
-		return item.LogicalPort == portName
-	}
-	bfds, err := libovsdbops.FindBFDWithPredicate(oc.nbClient, bfdPredicate)
-	if err != nil {
-		return fmt.Errorf("failed to list bfds for %s: %w", gatewayRouter, err)
-	}
-	bandPredicate := func(item *nbdb.MeterBand) bool {
-		return item.ExternalIDs["bfd-"+types.OvnRateLimitingMeter] == "true"
-	}
-	bfdBands, err := libovsdbops.FindMeterBandWithPredicate(oc.nbClient, bandPredicate)
-	if err != nil {
-		return fmt.Errorf("failed to list bfd band for %s: %w", gatewayRouter, err)
-	}
-	if len(bfdBands) == 0 {
-		return nil // nothing to do
-	}
-	currentRate := bfdBands[0].Rate
-
-	if len(bfds) < currentRate-10 {
-		// we need to adjust the meterband accordingly
-		// In OVN BFD heartbeats are configured at 1sec interval by default
-		// That means rate of BFD packets per second = number of BFD's configured on the given GR + an extra 10
-		bfdBands[0].Rate = len(bfds) + 10
-		ops, err := libovsdbops.CreateOrUpdateMeterBandOps(oc.nbClient, nil, []*nbdb.MeterBand{bfdBands[0]})
-		if err != nil {
-			return fmt.Errorf("can't update meter band %v: %v", bfdBands[0], err)
-		}
-		_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
-		if err != nil {
-			return fmt.Errorf("error transacting static route: %v", err)
-		}
-		return nil
-	}
-
-	return nil
+	return oc.calculateDynamicBFDPktRateLimit(portName, gatewayRouter, false)
 }
 
 // extSwitchPrefix returns the prefix of the external switch to use for
