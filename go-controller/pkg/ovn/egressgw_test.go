@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"strings"
 	"sync"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -1943,6 +1944,150 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				gomega.Eventually(func() string {
 					return getNamespaceAnnotations(fakeOvn.fakeClient.KubeClient, namespaceT.Name)[util.ExternalGatewayPodIPsAnnotation]
 				}).Should(gomega.Equal("10.0.0.1"))
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+		ginkgo.It("validates that BFD Rate limiter increases proportionally to number of BFD connections", func() {
+			app.Action = func(ctx *cli.Context) error {
+				staticRoutes := []string{"9.0.0.1"}
+				namespaceT := *newNamespace(namespaceName)
+				namespaceT.Annotations = map[string]string{"k8s.ovn.org/routing-external-gws": staticRoutes[0]}
+				namespaceT.Annotations["k8s.ovn.org/bfd-enabled"] = ""
+				gr := &nbdb.LogicalRouter{
+					UUID: "GR_node1-UUID",
+					Name: "GR_node1",
+				}
+				bfdBand := &nbdb.MeterBand{
+					UUID:        "bfdUUID",
+					Action:      nbdb.MeterBandActionDrop,
+					Rate:        types.BFDRateLimit,
+					ExternalIDs: map[string]string{"bfd-" + types.OvnRateLimitingMeter: "true"},
+				}
+				t := newTPod("node1", "10.128.1.0/24", "10.128.1.2", "10.128.1.1", "myPod", "10.128.1.3", "0a:58:0a:80:01:03", namespaceT.Name)
+				fakeOvn.startWithDBSetup(
+					libovsdbtest.TestSetup{
+						NBData: []libovsdbtest.TestData{
+							&nbdb.LogicalSwitch{
+								UUID: "node1",
+								Name: "node1",
+							},
+							gr,
+							bfdBand,
+							&nbdb.Meter{
+								UUID:  "meterUUID",
+								Bands: []string{"bfdUUID"},
+							},
+						},
+					},
+					&v1.NamespaceList{
+						Items: []v1.Namespace{
+							namespaceT,
+						},
+					},
+					&v1.NodeList{
+						Items: []v1.Node{
+							*newNode("node1", "192.168.126.202/24"),
+						},
+					},
+					&v1.PodList{
+						Items: []v1.Pod{
+							*newPod(t.namespace, t.podName, t.nodeName, t.podIP),
+						},
+					},
+				)
+				t.populateLogicalSwitchCache(fakeOvn)
+				injectNode(fakeOvn)
+				err := fakeOvn.controller.WatchNamespaces()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = fakeOvn.controller.WatchPods()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				gr.StaticRoutes = []string{"static-route-1-UUID"}
+				finalNB := []libovsdbtest.TestData{
+					&nbdb.LogicalSwitchPort{
+						UUID:      "lsp1",
+						Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
+						ExternalIDs: map[string]string{
+							"pod":       "true",
+							"namespace": namespaceName,
+						},
+						Name: "namespace1_myPod",
+						Options: map[string]string{
+							"iface-id-ver":      "myPod",
+							"requested-chassis": "node1",
+						},
+						PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
+					},
+					&nbdb.LogicalSwitch{
+						UUID:  "node1",
+						Name:  "node1",
+						Ports: []string{"lsp1"},
+					},
+					bfdBand,
+					&nbdb.Meter{
+						UUID:  "meterUUID",
+						Bands: []string{"bfdUUID"},
+					},
+					&nbdb.BFD{
+						UUID:        bfd1NamedUUID,
+						DstIP:       "9.0.0.1",
+						LogicalPort: "rtoe-GR_node1",
+					},
+					&nbdb.LogicalRouterStaticRoute{
+						UUID:       "static-route-1-UUID",
+						IPPrefix:   "10.128.1.3/32",
+						Nexthop:    "9.0.0.1",
+						BFD:        &bfd1NamedUUID,
+						Policy:     &nbdb.LogicalRouterStaticRoutePolicySrcIP,
+						OutputPort: &logicalRouterPort,
+						Options: map[string]string{
+							"ecmp_symmetric_reply": "true",
+						},
+					},
+					gr,
+				}
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(finalNB))
+
+				// increase the number of BFD connections to 50
+				for i := 2; i <= 41; i++ { // default BFD rate is 50; so this is the tipping point to enable dynamic rate limtis
+					staticRoutes = append(staticRoutes, fmt.Sprintf("9.0.0.%d", i))
+					bfdUUID := fmt.Sprintf("bfd-%d-UUID", i)
+					finalNB = append(finalNB,
+						&nbdb.BFD{
+							UUID:        bfdUUID,
+							DstIP:       fmt.Sprintf("9.0.0.%d", i),
+							LogicalPort: "rtoe-GR_node1",
+						},
+						&nbdb.LogicalRouterStaticRoute{
+							UUID:       fmt.Sprintf("static-route-%d-UUID", i),
+							IPPrefix:   "10.128.1.3/32",
+							Nexthop:    fmt.Sprintf("9.0.0.%d", i),
+							BFD:        &bfdUUID,
+							Policy:     &nbdb.LogicalRouterStaticRoutePolicySrcIP,
+							OutputPort: &logicalRouterPort,
+							Options: map[string]string{
+								"ecmp_symmetric_reply": "true",
+							},
+						},
+					)
+					gr.StaticRoutes = append(gr.StaticRoutes, fmt.Sprintf("static-route-%d-UUID", i))
+				}
+				newAnnotationVal := strings.Join(staticRoutes, ",")
+				namespaceT.Annotations = map[string]string{
+					"k8s.ovn.org/routing-external-gws": newAnnotationVal,
+					"k8s.ovn.org/bfd-enabled":          "",
+				}
+				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Update(context.Background(), &namespaceT, metav1.UpdateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Eventually(func() string {
+					return getNamespaceAnnotations(fakeOvn.fakeClient.KubeClient, namespaceT.Name)["k8s.ovn.org/routing-external-gws"]
+				}).Should(gomega.Equal(newAnnotationVal))
+				// change bfd band rate (number of current bfd connections+10)
+				bfdBand.Rate = 51
+				gomega.Eventually(fakeOvn.nbClient, "10s").Should(libovsdbtest.HaveDataIgnoringUUIDs(finalNB))
 				return nil
 			}
 
