@@ -9,10 +9,14 @@ import (
 // NetConf is CNI NetConf with DeviceID
 type NetConf struct {
 	types.NetConf
-	// PrimaryNetwork is valid on only L3 / L2 topologies. Not on localnet.
-	// It allows for using this secondary network as the primary network
-	// for the pod in order to achieve native network segmentation
-	PrimaryNetwork bool `json:"primaryNetwork,omitempty"`
+	// Role is valid only on L3 / L2 topologies. Not on localnet.
+	// It allows for using this network to be either secondary or
+	// primary user defined network for the pod.
+	// primary user defined networks are used in order to achieve
+	// native network isolation.
+	// In order to ensure backwards compatibility, if empty the
+	// network is considered secondary
+	Role string `json:"role,omitempty"`
 	// specifies the OVN topology for this network configuration
 	// when not specified, by default it is Layer3AttachDefTopoType
 	Topology string `json:"topology,omitempty"`

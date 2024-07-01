@@ -337,60 +337,96 @@ func TestParseNetconf(t *testing.T) {
 			expectedError: fmt.Errorf("layer3 topology does not allow persistent IPs"),
 		},
 		{
-			desc: "valid attachment definition for a layer2 topology with primaryNetwork:true",
+			desc: "valid attachment definition for a layer2 topology with role:primary",
 			inputNetAttachDefConfigSpec: `
     {
             "name": "tenant-red",
             "type": "ovn-k8s-cni-overlay",
             "topology": "layer2",
 			"subnets": "192.168.200.0/16",
-			"primaryNetwork": true,
+			"role": "primary",
             "netAttachDefName": "ns1/nad1"
     }
 `,
 			expectedNetConf: &ovncnitypes.NetConf{
-				Topology:       "layer2",
-				NADName:        "ns1/nad1",
-				MTU:            1400,
-				PrimaryNetwork: true,
-				Subnets:        "192.168.200.0/16",
-				NetConf:        cnitypes.NetConf{Name: "tenant-red", Type: "ovn-k8s-cni-overlay"},
+				Topology: "layer2",
+				NADName:  "ns1/nad1",
+				MTU:      1400,
+				Role:     "primary",
+				Subnets:  "192.168.200.0/16",
+				NetConf:  cnitypes.NetConf{Name: "tenant-red", Type: "ovn-k8s-cni-overlay"},
 			},
 		},
 		{
-			desc: "valid attachment definition for a layer3 topology with primaryNetwork:true",
+			desc: "valid attachment definition for a layer3 topology with role:primary",
 			inputNetAttachDefConfigSpec: `
     {
             "name": "tenant-red",
             "type": "ovn-k8s-cni-overlay",
             "topology": "layer3",
 			"subnets": "192.168.200.0/16",
-			"primaryNetwork": true,
+			"role": "primary",
 			"netAttachDefName": "ns1/nad1"
     }
 `,
 			expectedNetConf: &ovncnitypes.NetConf{
-				Topology:       "layer3",
-				NADName:        "ns1/nad1",
-				MTU:            1400,
-				PrimaryNetwork: true,
-				Subnets:        "192.168.200.0/16",
-				NetConf:        cnitypes.NetConf{Name: "tenant-red", Type: "ovn-k8s-cni-overlay"},
+				Topology: "layer3",
+				NADName:  "ns1/nad1",
+				MTU:      1400,
+				Role:     "primary",
+				Subnets:  "192.168.200.0/16",
+				NetConf:  cnitypes.NetConf{Name: "tenant-red", Type: "ovn-k8s-cni-overlay"},
 			},
 		},
 		{
-			desc: "invalid attachment definition for a localnet topology with primaryNetwork:true",
+			desc: "valid attachment definition for a layer3 topology with role:secondary",
+			inputNetAttachDefConfigSpec: `
+    {
+            "name": "tenant-red",
+            "type": "ovn-k8s-cni-overlay",
+            "topology": "layer3",
+			"subnets": "192.168.200.0/16",
+			"role": "secondary",
+			"netAttachDefName": "ns1/nad1"
+    }
+`,
+			expectedNetConf: &ovncnitypes.NetConf{
+				Topology: "layer3",
+				NADName:  "ns1/nad1",
+				MTU:      1400,
+				Role:     "secondary",
+				Subnets:  "192.168.200.0/16",
+				NetConf:  cnitypes.NetConf{Name: "tenant-red", Type: "ovn-k8s-cni-overlay"},
+			},
+		},
+		{
+			desc: "invalid attachment definition for a layer3 topology with role:Primary",
+			inputNetAttachDefConfigSpec: `
+    {
+            "name": "tenant-red",
+            "type": "ovn-k8s-cni-overlay",
+            "topology": "layer3",
+			"subnets": "192.168.200.0/16",
+			"role": "Primary",
+			"netAttachDefName": "ns1/nad1"
+    }
+`,
+			expectedError: fmt.Errorf("invalid network role value Primary"),
+		},
+		{
+			desc: "invalid attachment definition for a localnet topology with role:primary",
 			inputNetAttachDefConfigSpec: `
     {
             "name": "tenantred",
             "type": "ovn-k8s-cni-overlay",
             "topology": "localnet",
 			"subnets": "192.168.200.0/16",
-			"primaryNetwork": true,
+			"role": "primary",
             "netAttachDefName": "ns1/nad1"
     }
 `,
-			expectedError: fmt.Errorf("localnet topology does not allow primaryNetwork:true"),
+			expectedError: fmt.Errorf("unexpected network field \"role\" primary for \"localnet\" topology, " +
+				"localnet topology does not allow network roles to be set since its always a secondary network"),
 		},
 	}
 
@@ -425,7 +461,7 @@ func TestIsPrimaryNetwork(t *testing.T) {
 
 	tests := []testConfig{
 		{
-			desc: "defaultNetInfo with primary unspecified",
+			desc: "defaultNetInfo with role unspecified",
 			inputNetConf: &ovncnitypes.NetConf{
 				NetConf:  cnitypes.NetConf{Name: ovntypes.DefaultNetworkName},
 				Topology: ovntypes.Layer3Topology,
@@ -433,16 +469,25 @@ func TestIsPrimaryNetwork(t *testing.T) {
 			expectedPrimary: false,
 		},
 		{
-			desc: "defaultNetInfo with primary set to true",
+			desc: "defaultNetInfo with role set to primary",
 			inputNetConf: &ovncnitypes.NetConf{
-				NetConf:        cnitypes.NetConf{Name: ovntypes.DefaultNetworkName},
-				Topology:       ovntypes.Layer3Topology,
-				PrimaryNetwork: true,
+				NetConf:  cnitypes.NetConf{Name: ovntypes.DefaultNetworkName},
+				Topology: ovntypes.Layer3Topology,
+				Role:     ovntypes.NetworkRolePrimary,
 			},
 			expectedPrimary: false,
 		},
 		{
-			desc: "secondaryNetInfoL3 with primary set to false",
+			desc: "defaultNetInfo with role set to secondary",
+			inputNetConf: &ovncnitypes.NetConf{
+				NetConf:  cnitypes.NetConf{Name: ovntypes.DefaultNetworkName},
+				Topology: ovntypes.Layer3Topology,
+				Role:     ovntypes.NetworkRoleSecondary,
+			},
+			expectedPrimary: false,
+		},
+		{
+			desc: "secondaryNetInfoL3 with role unspecified",
 			inputNetConf: &ovncnitypes.NetConf{
 				NetConf:  cnitypes.NetConf{Name: "l3-network"},
 				Topology: ovntypes.Layer3Topology,
@@ -450,16 +495,25 @@ func TestIsPrimaryNetwork(t *testing.T) {
 			expectedPrimary: false,
 		},
 		{
-			desc: "secondaryNetInfoL3 with primary set to true",
+			desc: "secondaryNetInfoL3 with role set to primary",
 			inputNetConf: &ovncnitypes.NetConf{
-				NetConf:        cnitypes.NetConf{Name: "l3-network"},
-				Topology:       ovntypes.Layer3Topology,
-				PrimaryNetwork: true,
+				NetConf:  cnitypes.NetConf{Name: "l3-network"},
+				Topology: ovntypes.Layer3Topology,
+				Role:     ovntypes.NetworkRolePrimary,
 			},
 			expectedPrimary: true,
 		},
 		{
-			desc: "secondaryNetInfoL2 with primary set to false",
+			desc: "secondaryNetInfoL3 with role set to secondary",
+			inputNetConf: &ovncnitypes.NetConf{
+				NetConf:  cnitypes.NetConf{Name: "l3-network"},
+				Topology: ovntypes.Layer3Topology,
+				Role:     ovntypes.NetworkRoleSecondary,
+			},
+			expectedPrimary: false,
+		},
+		{
+			desc: "secondaryNetInfoL2 with role unspecified",
 			inputNetConf: &ovncnitypes.NetConf{
 				NetConf:  cnitypes.NetConf{Name: "l2-network"},
 				Topology: ovntypes.Layer2Topology,
@@ -467,13 +521,22 @@ func TestIsPrimaryNetwork(t *testing.T) {
 			expectedPrimary: false,
 		},
 		{
-			desc: "secondaryNetInfoL2 with primary set to true",
+			desc: "secondaryNetInfoL2 with role set to primary",
 			inputNetConf: &ovncnitypes.NetConf{
-				NetConf:        cnitypes.NetConf{Name: "l2-network"},
-				Topology:       ovntypes.Layer2Topology,
-				PrimaryNetwork: true,
+				NetConf:  cnitypes.NetConf{Name: "l2-network"},
+				Topology: ovntypes.Layer2Topology,
+				Role:     ovntypes.NetworkRolePrimary,
 			},
 			expectedPrimary: true,
+		},
+		{
+			desc: "secondaryNetInfoL2 with role set to secondary",
+			inputNetConf: &ovncnitypes.NetConf{
+				NetConf:  cnitypes.NetConf{Name: "l2-network"},
+				Topology: ovntypes.Layer2Topology,
+				Role:     ovntypes.NetworkRoleSecondary,
+			},
+			expectedPrimary: false,
 		},
 	}
 
@@ -504,7 +567,7 @@ func TestIsDefault(t *testing.T) {
 			expectedDefaultVal: true,
 		},
 		{
-			desc: "secondaryNetInfoL3 with primary set to false",
+			desc: "secondaryNetInfoL3 with role unspecified",
 			inputNetConf: &ovncnitypes.NetConf{
 				NetConf:  cnitypes.NetConf{Name: "l3-network"},
 				Topology: ovntypes.Layer3Topology,
@@ -512,15 +575,16 @@ func TestIsDefault(t *testing.T) {
 			expectedDefaultVal: false,
 		},
 		{
-			desc: "secondaryNetInfoL2 with primary set to false",
+			desc: "secondaryNetInfoL2 with role set to primary",
 			inputNetConf: &ovncnitypes.NetConf{
 				NetConf:  cnitypes.NetConf{Name: "l2-network"},
 				Topology: ovntypes.Layer2Topology,
+				Role:     ovntypes.NetworkRolePrimary,
 			},
 			expectedDefaultVal: false,
 		},
 		{
-			desc: "secondaryNetInfoLocalNet with primary set to true",
+			desc: "secondaryNetInfoLocalNet with role unspecified",
 			inputNetConf: &ovncnitypes.NetConf{
 				NetConf:  cnitypes.NetConf{Name: "localnet-network"},
 				Topology: ovntypes.LocalnetTopology,

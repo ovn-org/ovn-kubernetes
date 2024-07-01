@@ -174,6 +174,11 @@ const (
 	Layer2Topology   = "layer2"
 	LocalnetTopology = "localnet"
 
+	// different types of network roles
+	// defined in CNI netconf as a user defined network
+	NetworkRolePrimary   = "primary"
+	NetworkRoleSecondary = "secondary"
+
 	// db index keys
 	// PrimaryIDKey is used as a primary client index
 	PrimaryIDKey = OvnK8sPrefix + "/id"

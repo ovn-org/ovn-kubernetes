@@ -115,7 +115,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 		ipam                      bool
 		idAllocation              bool
 		persistentIPAllocation    bool
-		isPrimaryNetwork          bool
+		role                      string
 		podAnnotation             *util.PodAnnotation
 		invalidNetworkAnnotation  bool
 		wantUpdatedPod            bool
@@ -165,7 +165,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 				MAC:     util.IPAddrToHWAddr(ovntest.MustParseIPNets("192.168.0.4/24")[0].IP),
 				Primary: true,
 			},
-			isPrimaryNetwork: true,
+			role: types.NetworkRolePrimary,
 		},
 		{
 			// on secondary L2 network with no IPAM, honor static IP and gateway
@@ -187,7 +187,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 				Gateways: ovntest.MustParseIPs("192.168.0.1"),
 				Primary:  false,
 			},
-			isPrimaryNetwork: false,
+			role: types.NetworkRoleSecondary,
 		},
 		{
 			// on networks with IPAM, expect error if static IP request present
@@ -226,7 +226,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 				Primary: true,
 			},
 			wantReleasedIPsOnRollback: ovntest.MustParseIPNets("192.168.0.3/24"),
-			isPrimaryNetwork:          true,
+			role:                      types.NetworkRolePrimary,
 		},
 		{
 			// on networks with IPAM, if pod is already annotated, expect no
@@ -309,7 +309,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 				Primary: true,
 			},
 			wantReleasedIPsOnRollback: ovntest.MustParseIPNets("192.168.0.4/24"),
-			isPrimaryNetwork:          true,
+			role:                      types.NetworkRolePrimary,
 		},
 		{
 			// on networks with IPAM, try to honor IP request that is already
@@ -339,7 +339,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 				},
 				Primary: true,
 			},
-			isPrimaryNetwork: true,
+			role: types.NetworkRolePrimary,
 		},
 		{
 			// on networks with IPAM, trying to honor IP request but
@@ -370,7 +370,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 				Primary: true,
 			},
 			wantReleasedIPsOnRollback: ovntest.MustParseIPNets("192.168.0.3/24"),
-			isPrimaryNetwork:          true,
+			role:                      types.NetworkRolePrimary,
 		},
 		{
 			// on networks with IPAM, expect error on an invalid IP request
@@ -428,7 +428,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 				Primary: true,
 			},
 			wantReleasedIPsOnRollback: ovntest.MustParseIPNets("192.168.0.3/24"),
-			isPrimaryNetwork:          true, // has to be true for default routes to be set
+			role:                      types.NetworkRolePrimary, // has to be primary network for default routes to be set
 		},
 		{
 			// on networks with IPAM, expect error on an invalid network
@@ -550,7 +550,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 			},
 			wantUpdatedPod:          true,
 			wantRelasedIDOnRollback: true,
-			isPrimaryNetwork:        true,
+			role:                    types.NetworkRolePrimary,
 		},
 		{
 			// on networks with ID allocation, already allocated, expect
@@ -646,7 +646,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 					NADName:            nadName,
 					Subnets:            subnets,
 					AllowPersistentIPs: tt.persistentIPAllocation,
-					PrimaryNetwork:     tt.isPrimaryNetwork,
+					Role:               tt.role,
 				})
 				if err != nil {
 					t.Fatalf("failed to create NetInfo: %v", err)
@@ -693,7 +693,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 				network,
 				claimsReconciler,
 				tt.args.reallocate,
-				tt.isPrimaryNetwork,
+				tt.role == types.NetworkRolePrimary,
 			)
 
 			if tt.args.ipAllocator != nil {
