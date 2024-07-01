@@ -105,6 +105,7 @@ func (n tNode) gatewayConfig(gatewayMode config.GatewayMode, vlanID uint) *util.
 	return &util.L3GatewayConfig{
 		Mode:           gatewayMode,
 		ChassisID:      n.SystemID,
+		BridgeID:       n.PhysicalBridgeName,
 		InterfaceID:    n.ifaceID(),
 		MACAddress:     ovntest.MustParseMAC(n.PhysicalBridgeMAC),
 		IPAddresses:    ovntest.MustParseIPNets(n.GatewayRouterIPMask),
