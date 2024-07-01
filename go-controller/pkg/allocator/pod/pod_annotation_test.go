@@ -139,12 +139,12 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 			// annotated with a random MAC, we expect no further changes
 			name: "expect no updates, has mac, no IPAM",
 			podAnnotation: &util.PodAnnotation{
-				MAC:     randomMac,
-				Primary: true,
+				MAC:  randomMac,
+				Role: types.NetworkRolePrimary,
 			},
 			wantPodAnnotation: &util.PodAnnotation{
-				MAC:     randomMac,
-				Primary: true,
+				MAC:  randomMac,
+				Role: types.NetworkRolePrimary,
 			},
 		},
 		{
@@ -161,9 +161,9 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 			},
 			wantUpdatedPod: true,
 			wantPodAnnotation: &util.PodAnnotation{
-				IPs:     ovntest.MustParseIPNets("192.168.0.4/24"),
-				MAC:     util.IPAddrToHWAddr(ovntest.MustParseIPNets("192.168.0.4/24")[0].IP),
-				Primary: true,
+				IPs:  ovntest.MustParseIPNets("192.168.0.4/24"),
+				MAC:  util.IPAddrToHWAddr(ovntest.MustParseIPNets("192.168.0.4/24")[0].IP),
+				Role: types.NetworkRolePrimary,
 			},
 			role: types.NetworkRolePrimary,
 		},
@@ -185,7 +185,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 				IPs:      ovntest.MustParseIPNets("192.168.0.4/24"),
 				MAC:      util.IPAddrToHWAddr(ovntest.MustParseIPNets("192.168.0.4/24")[0].IP),
 				Gateways: ovntest.MustParseIPs("192.168.0.1"),
-				Primary:  false,
+				Role:     types.NetworkRoleSecondary,
 			},
 			role: types.NetworkRoleSecondary,
 		},
@@ -223,7 +223,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 						NextHop: ovntest.MustParseIP("192.168.0.1").To4(),
 					},
 				},
-				Primary: true,
+				Role: types.NetworkRolePrimary,
 			},
 			wantReleasedIPsOnRollback: ovntest.MustParseIPNets("192.168.0.3/24"),
 			role:                      types.NetworkRolePrimary,
@@ -306,7 +306,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 						NextHop: ovntest.MustParseIP("192.168.0.1").To4(),
 					},
 				},
-				Primary: true,
+				Role: types.NetworkRolePrimary,
 			},
 			wantReleasedIPsOnRollback: ovntest.MustParseIPNets("192.168.0.4/24"),
 			role:                      types.NetworkRolePrimary,
@@ -337,7 +337,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 						NextHop: ovntest.MustParseIP("192.168.0.1").To4(),
 					},
 				},
-				Primary: true,
+				Role: types.NetworkRolePrimary,
 			},
 			role: types.NetworkRolePrimary,
 		},
@@ -367,7 +367,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 						NextHop: ovntest.MustParseIP("192.168.0.1").To4(),
 					},
 				},
-				Primary: true,
+				Role: types.NetworkRolePrimary,
 			},
 			wantReleasedIPsOnRollback: ovntest.MustParseIPNets("192.168.0.3/24"),
 			role:                      types.NetworkRolePrimary,
@@ -425,7 +425,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 						NextHop: ovntest.MustParseIP("192.168.0.1").To4(),
 					},
 				},
-				Primary: true,
+				Role: types.NetworkRolePrimary,
 			},
 			wantReleasedIPsOnRollback: ovntest.MustParseIPNets("192.168.0.3/24"),
 			role:                      types.NetworkRolePrimary, // has to be primary network for default routes to be set
@@ -546,7 +546,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 			wantPodAnnotation: &util.PodAnnotation{
 				MAC:      randomMac,
 				TunnelID: 100,
-				Primary:  true,
+				Role:     types.NetworkRolePrimary,
 			},
 			wantUpdatedPod:          true,
 			wantRelasedIDOnRollback: true,
@@ -693,7 +693,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 				network,
 				claimsReconciler,
 				tt.args.reallocate,
-				tt.role == types.NetworkRolePrimary,
+				tt.role,
 			)
 
 			if tt.args.ipAllocator != nil {

@@ -178,6 +178,12 @@ const (
 	// defined in CNI netconf as a user defined network
 	NetworkRolePrimary   = "primary"
 	NetworkRoleSecondary = "secondary"
+	// defined internally by ovnkube to recognize "default"
+	// network's role as a "infrastructure-locked" network
+	// when user defined network is the primary network for
+	// the pod which makes "default" network niether primary
+	// nor secondary
+	NetworkRoleInfrastructure = "infrastructure-locked"
 
 	// db index keys
 	// PrimaryIDKey is used as a primary client index
