@@ -182,11 +182,18 @@ func setProcessCPUAffinity(targetPIDStr string) error {
 		return nil
 	}
 
-	klog.Infof("Setting CPU affinity of PID(%d) to %s, was %s", targetPID, printCPUSet(currentProcessCPUs), printCPUSet(targetProcessCPUs))
-
-	err = unix.SchedSetaffinity(targetPID, &currentProcessCPUs)
+	taskIDs, err := getThreadsOfProcess(targetPID)
 	if err != nil {
-		return fmt.Errorf("can't set CPU affinity of PID(%d) to %s: %w", targetPID, printCPUSet(currentProcessCPUs), err)
+		return fmt.Errorf("can't get tasks of PID(%d):%w", targetPID, err)
+	}
+
+	klog.Infof("Setting CPU affinity of PID(%d) (ntasks=%d) to %s, was %s", targetPID, len(taskIDs), printCPUSet(currentProcessCPUs), printCPUSet(targetProcessCPUs))
+	for _, taskID := range taskIDs {
+		err = unix.SchedSetaffinity(taskID, &currentProcessCPUs)
+		if err != nil {
+			// The task may have been stopped, don't break the loop and continue setting CPU affinity on other tasks.
+			klog.Warningf("Error while setting CPU affinity of task(%d) PID(%d) to %s: %v", taskID, targetPID, printCPUSet(currentProcessCPUs), err)
+		}
 	}
 
 	return nil
@@ -236,4 +243,24 @@ func printCPUSet(cpus unix.CPUSet) string {
 		result.WriteString(",")
 	}
 	return strings.TrimRight(result.String(), ",")
+}
+
+// getThreadsOfProcess returns the list of thread IDs of the given process
+func getThreadsOfProcess(pid int) ([]int, error) {
+	taskFolders, err := os.ReadDir(fmt.Sprintf("/proc/%d/task", pid))
+	if err != nil {
+		return nil, fmt.Errorf("unable to find %d tasks: %v", pid, err)
+	}
+
+	ret := []int{}
+	for _, taskFolder := range taskFolders {
+		taskID, err := strconv.Atoi(taskFolder.Name())
+		if err != nil {
+			return nil, fmt.Errorf("unable to get task ID of %d: %s, %v", pid, taskFolder.Name(), err)
+		}
+
+		ret = append(ret, taskID)
+	}
+
+	return ret, nil
 }
