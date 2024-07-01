@@ -337,6 +337,7 @@ func gatewayInitInternal(nodeName, gwIntf, egressGatewayIntf string, gwNextHops 
 	l3GwConfig := util.L3GatewayConfig{
 		Mode:           config.Gateway.Mode,
 		ChassisID:      chassisID,
+		BridgeID:       gatewayBridge.bridgeName,
 		InterfaceID:    gatewayBridge.interfaceID,
 		MACAddress:     gatewayBridge.macAddress,
 		IPAddresses:    gatewayBridge.ips,
