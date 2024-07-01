@@ -37,8 +37,8 @@ type Gateway interface {
 // TODO: better name?
 type SecondaryNetworkGateway interface {
 	//TODO
-	AddNetwork(networkName string, masqCTMark int)
-	DelNetwork(networkName string)
+	AddNetwork(nInfo util.NetInfo, masqCTMark int)
+	DelNetwork(nInfo util.NetInfo)
 }
 
 type gateway struct {
@@ -63,9 +63,9 @@ type gateway struct {
 }
 
 // TODO(dceara): move?
-func (g *gateway) AddNetwork(networkName string, masqCTMark int) {
+func (g *gateway) AddNetwork(nInfo util.NetInfo, masqCTMark int) {
 	if g.openflowManager != nil {
-		g.openflowManager.addNetwork(networkName, masqCTMark)
+		g.openflowManager.addNetwork(nInfo, masqCTMark)
 
 		waiter := newStartupWaiter()
 		readyFunc := func() (bool, error) {
@@ -91,9 +91,9 @@ func (g *gateway) AddNetwork(networkName string, masqCTMark int) {
 }
 
 // TODO(dceara): move?
-func (g *gateway) DelNetwork(networkName string) {
+func (g *gateway) DelNetwork(nInfo util.NetInfo) {
 	if g.openflowManager != nil {
-		g.openflowManager.delNetwork(networkName)
+		g.openflowManager.delNetwork(nInfo)
 		//TODO: trigger resync and wait?
 		g.openflowManager.requestFlowSync()
 	}
@@ -487,22 +487,12 @@ type bridgeConfiguration struct {
 	ofPortHost  string
 }
 
-// TODO(dceara)
-// the name of the patch port created by ovn-controller is of the form
-// patch-<logical_port_name_of_localnet_port>-to-br-int
-func (b *bridgeConfiguration) getNetworkScopedPatchPortName(networkName string) string {
-	if networkName == types.DefaultNetworkName {
-		return "patch-" + b.bridgeName + "_" + b.nodeName + "-to-br-int"
-	} else {
-		return "patch-" + b.bridgeName + "_" + networkName + "_" + b.nodeName + "-to-br-int"
-	}
-}
-
-func (b *bridgeConfiguration) addBridgeNetConfig(netName string, masqCTMark int) error {
+func (b *bridgeConfiguration) addBridgeNetConfig(nInfo util.NetInfo, masqCTMark int) error {
 	b.Lock()
 	defer b.Unlock()
 
-	patchPort := b.getNetworkScopedPatchPortName(netName)
+	netName := nInfo.GetNetworkName()
+	patchPort := nInfo.GetNetworkScopedPatchPortName(b.bridgeName, b.nodeName)
 	if _, found := b.netConfig[netName]; found {
 		return fmt.Errorf("failed to add network config %s to bridge %s: network already exists", netName, b.bridgeName)
 	}
@@ -514,11 +504,11 @@ func (b *bridgeConfiguration) addBridgeNetConfig(netName string, masqCTMark int)
 	return nil
 }
 
-func (b *bridgeConfiguration) delBridgeNetConfig(netName string) {
+func (b *bridgeConfiguration) delBridgeNetConfig(nInfo util.NetInfo) {
 	b.Lock()
 	defer b.Unlock()
 
-	delete(b.netConfig, netName)
+	delete(b.netConfig, nInfo.GetNetworkName())
 }
 
 func (b *bridgeConfiguration) getBridgePorts() ([]bridgeNetConfiguration, string, string) {
@@ -632,7 +622,7 @@ func bridgeForInterface(intfName, nodeName, physicalNetworkName string, gwIPs []
 
 	// the name of the patch port created by ovn-controller is of the form
 	// patch-<logical_port_name_of_localnet_port>-to-br-int
-	defaultNetConfig.patchPort = res.getNetworkScopedPatchPortName(types.DefaultNetworkName)
+	defaultNetConfig.patchPort = (&util.DefaultNetInfo{}).GetNetworkScopedPatchPortName(res.bridgeName, nodeName)
 
 	// for DPU we use the host MAC address for the Gateway configuration
 	if config.OvnKubeNode.Mode == types.NodeModeDPU {

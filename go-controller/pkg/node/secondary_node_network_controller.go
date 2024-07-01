@@ -52,7 +52,7 @@ func (nc *SecondaryNodeNetworkController) Start(ctx context.Context) error {
 	// secondary_layer3_network_controller.go:addUpdateLocalNodeEvent()
 	masqCTMark := 42
 
-	nc.gatewayManager.AddNetwork(nc.GetNetworkName(), masqCTMark)
+	nc.gatewayManager.AddNetwork(nc, masqCTMark)
 	return nil
 }
 
@@ -67,7 +67,7 @@ func (nc *SecondaryNodeNetworkController) Stop() {
 	}
 
 	//TODO: does this need to go in Cleanup?
-	nc.gatewayManager.DelNetwork(nc.GetNetworkName())
+	nc.gatewayManager.DelNetwork(nc)
 }
 
 // Cleanup cleans up node entities for the given secondary network

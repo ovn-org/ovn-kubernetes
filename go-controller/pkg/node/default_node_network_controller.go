@@ -93,8 +93,8 @@ func NewCommonNodeNetworkControllerInfo(kubeClient clientset.Interface, apbExter
 
 // TODO
 type NodeSecondaryGatewayManager interface {
-	AddNetwork(networkName string, masqCTMark int)
-	DelNetwork(networkName string)
+	AddNetwork(nInfo util.NetInfo, masqCTMark int)
+	DelNetwork(nInfo util.NetInfo)
 }
 
 // DefaultNodeNetworkController is the object holder for utilities meant for node management of default network
@@ -117,13 +117,13 @@ type DefaultNodeNetworkController struct {
 }
 
 // TODO(dceara): move?
-func (nc *DefaultNodeNetworkController) AddNetwork(networkName string, masqCTMark int) {
-	nc.secondaryNetworkGateway.AddNetwork(networkName, masqCTMark)
+func (nc *DefaultNodeNetworkController) AddNetwork(nInfo util.NetInfo, masqCTMark int) {
+	nc.secondaryNetworkGateway.AddNetwork(nInfo, masqCTMark)
 }
 
 // TODO(dceara): move?
-func (nc *DefaultNodeNetworkController) DelNetwork(networkName string) {
-	nc.secondaryNetworkGateway.DelNetwork(networkName)
+func (nc *DefaultNodeNetworkController) DelNetwork(nInfo util.NetInfo) {
+	nc.secondaryNetworkGateway.DelNetwork(nInfo)
 }
 
 func newDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, stopChan chan struct{},

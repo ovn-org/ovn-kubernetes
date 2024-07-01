@@ -56,18 +56,18 @@ func (c *openflowManager) setDefaultBridgeMAC(macAddr net.HardwareAddr) {
 }
 
 // TODO(dceara):
-func (c *openflowManager) addNetwork(networkName string, masqCTMark int) {
-	c.defaultBridge.addBridgeNetConfig(networkName, masqCTMark)
+func (c *openflowManager) addNetwork(nInfo util.NetInfo, masqCTMark int) {
+	c.defaultBridge.addBridgeNetConfig(nInfo, masqCTMark)
 	if c.externalGatewayBridge != nil {
-		c.externalGatewayBridge.addBridgeNetConfig(networkName, masqCTMark)
+		c.externalGatewayBridge.addBridgeNetConfig(nInfo, masqCTMark)
 	}
 }
 
 // TODO(dceara):
-func (c *openflowManager) delNetwork(networkName string) {
-	c.defaultBridge.delBridgeNetConfig(networkName)
+func (c *openflowManager) delNetwork(nInfo util.NetInfo) {
+	c.defaultBridge.delBridgeNetConfig(nInfo)
 	if c.externalGatewayBridge != nil {
-		c.externalGatewayBridge.delBridgeNetConfig(networkName)
+		c.externalGatewayBridge.delBridgeNetConfig(nInfo)
 	}
 }
 
