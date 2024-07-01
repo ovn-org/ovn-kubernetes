@@ -337,6 +337,9 @@ func (oc *SecondaryLayer3NetworkController) newRetryFramework(
 
 // Start starts the secondary layer3 controller, handles all events and creates all needed logical entities
 func (oc *SecondaryLayer3NetworkController) Start(ctx context.Context) error {
+	if err := oc.ensureNetworkID(); err != nil {
+		return fmt.Errorf("failed ensuring network id at user defined network controller for network '%s': %w", oc.GetNetworkName(), err)
+	}
 	klog.Infof("Start secondary %s network controller of network %s", oc.TopologyType(), oc.GetNetworkName())
 	if err := oc.Init(ctx); err != nil {
 		return err
