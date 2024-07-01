@@ -409,6 +409,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			l3GatewayConfig := &util.L3GatewayConfig{
 				Mode:           config.GatewayModeLocal,
 				ChassisID:      "SYSTEM-ID",
+				BridgeID:       "BRIDGE-ID",
 				InterfaceID:    "INTERFACE-ID",
 				MACAddress:     ovntest.MustParseMAC("11:22:33:44:55:66"),
 				IPAddresses:    ovntest.MustParseIPNets("169.254.33.2/24"),
@@ -486,6 +487,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			l3GatewayConfig := &util.L3GatewayConfig{
 				Mode:           config.GatewayModeLocal,
 				ChassisID:      "SYSTEM-ID",
+				BridgeID:       "BRIDGE-ID",
 				InterfaceID:    "INTERFACE-ID",
 				MACAddress:     ovntest.MustParseMAC("11:22:33:44:55:66"),
 				IPAddresses:    ovntest.MustParseIPNets("169.254.33.2/24"),
@@ -555,6 +557,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			l3GatewayConfig := &util.L3GatewayConfig{
 				Mode:           config.GatewayModeLocal,
 				ChassisID:      "SYSTEM-ID",
+				BridgeID:       "BRIDGE-ID",
 				InterfaceID:    "INTERFACE-ID",
 				MACAddress:     ovntest.MustParseMAC("11:22:33:44:55:66"),
 				IPAddresses:    ovntest.MustParseIPNets("169.254.33.2/24"),
@@ -637,6 +640,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			l3GatewayConfig := &util.L3GatewayConfig{
 				Mode:           config.GatewayModeLocal,
 				ChassisID:      "SYSTEM-ID",
+				BridgeID:       "BRIDGE-ID",
 				InterfaceID:    "INTERFACE-ID",
 				MACAddress:     ovntest.MustParseMAC("11:22:33:44:55:66"),
 				IPAddresses:    ovntest.MustParseIPNets("169.254.33.2/24"),
@@ -731,6 +735,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			l3GatewayConfig := &util.L3GatewayConfig{
 				Mode:           config.GatewayModeLocal,
 				ChassisID:      "SYSTEM-ID",
+				BridgeID:       "BRIDGE-ID",
 				InterfaceID:    "INTERFACE-ID",
 				MACAddress:     ovntest.MustParseMAC("11:22:33:44:55:66"),
 				IPAddresses:    ovntest.MustParseIPNets("fd99::2/64"),
@@ -800,6 +805,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			l3GatewayConfig := &util.L3GatewayConfig{
 				Mode:           config.GatewayModeLocal,
 				ChassisID:      "SYSTEM-ID",
+				BridgeID:       "BRIDGE-ID",
 				InterfaceID:    "INTERFACE-ID",
 				MACAddress:     ovntest.MustParseMAC("11:22:33:44:55:66"),
 				IPAddresses:    ovntest.MustParseIPNets("fd99::2/64"),
@@ -873,6 +879,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			l3GatewayConfig := &util.L3GatewayConfig{
 				Mode:           config.GatewayModeLocal,
 				ChassisID:      "SYSTEM-ID",
+				BridgeID:       "BRIDGE-ID",
 				InterfaceID:    "INTERFACE-ID",
 				MACAddress:     ovntest.MustParseMAC("11:22:33:44:55:66"),
 				IPAddresses:    ovntest.MustParseIPNets("169.254.33.2/24", "fd99::2/64"),
@@ -942,6 +949,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			l3GatewayConfig := &util.L3GatewayConfig{
 				Mode:           config.GatewayModeLocal,
 				ChassisID:      "SYSTEM-ID",
+				BridgeID:       "BRIDGE-ID",
 				InterfaceID:    "INTERFACE-ID",
 				MACAddress:     ovntest.MustParseMAC("11:22:33:44:55:66"),
 				IPAddresses:    ovntest.MustParseIPNets("169.254.33.2/24"),
@@ -1044,6 +1052,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			l3GatewayConfig := &util.L3GatewayConfig{
 				Mode:           config.GatewayModeLocal,
 				ChassisID:      "SYSTEM-ID",
+				BridgeID:       "BRIDGE-ID",
 				InterfaceID:    "INTERFACE-ID",
 				MACAddress:     ovntest.MustParseMAC("11:22:33:44:55:66"),
 				IPAddresses:    ovntest.MustParseIPNets("169.254.33.2/24"),
@@ -1148,6 +1157,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			l3GatewayConfig := &util.L3GatewayConfig{
 				Mode:           config.GatewayModeLocal,
 				ChassisID:      "SYSTEM-ID",
+				BridgeID:       "BRIDGE-ID",
 				InterfaceID:    "INTERFACE-ID",
 				MACAddress:     ovntest.MustParseMAC("11:22:33:44:55:66"),
 				IPAddresses:    ovntest.MustParseIPNets("169.254.33.2/24", "fd99::2/64"),
@@ -1226,6 +1236,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			l3GatewayConfig := &util.L3GatewayConfig{
 				Mode:           config.GatewayModeLocal,
 				ChassisID:      "SYSTEM-ID",
+				BridgeID:       "BRIDGE-ID",
 				InterfaceID:    "INTERFACE-ID",
 				MACAddress:     ovntest.MustParseMAC("11:22:33:44:55:66"),
 				IPAddresses:    ovntest.MustParseIPNets("169.254.33.2/24"),
@@ -1333,6 +1344,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			l3GatewayConfig := &util.L3GatewayConfig{
 				Mode:           config.GatewayModeLocal,
 				ChassisID:      "SYSTEM-ID",
+				BridgeID:       "BRIDGE-ID",
 				InterfaceID:    "INTERFACE-ID",
 				MACAddress:     ovntest.MustParseMAC("11:22:33:44:55:66"),
 				IPAddresses:    ovntest.MustParseIPNets("169.254.33.2/24"),
