@@ -1,0 +1,209 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.14.0
+  name: userdefinednetworks.k8s.ovn.org
+spec:
+  group: k8s.ovn.org
+  names:
+    kind: UserDefinedNetwork
+    listKind: UserDefinedNetworkList
+    plural: userdefinednetworks
+    shortNames:
+    - udn
+    singular: userdefinednetwork
+  scope: Namespaced
+  versions:
+  - name: v1
+    schema:
+      openAPIV3Schema:
+        description: UserDefinedNetwork describe network request for a Namespace.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: UserDefinedNetworkSpec defines the desired state of UserDefinedNetworkSpec.
+            properties:
+              excludeSubnets:
+                description: |-
+                  A list of CIDRs.
+                  IP addresses are removed from the assignable IP address pool and are never passed to the pods.
+                items:
+                  type: string
+                type: array
+              ipamLifecycle:
+                description: |-
+                  Control IP addresses management lifecycle.
+                  When `Persistent` is specified it enable workloads have persistent IP addresses.
+                  For example: Virtual Machines will have the same IP addresses along their lifecycle (stop, start migration, reboots).
+                  Supported by Topology `Layer2` and `Localnet`.
+                enum:
+                - Persistent
+                type: string
+              joinSubnets:
+                description: |-
+                  Subnet used inside the OVN network topology.
+                  This field is ignored for non-primary networks (e.g.: Role Secondary).
+                  When omitted, this means no opinion and the platform is left to choose a reasonable default which is subject to change over time.
+                items:
+                  type: string
+                type: array
+                x-kubernetes-validations:
+                - message: Unexpected number of join subnets
+                  rule: 1 <= size(self) && size(self) <= 2
+              mtu:
+                description: |-
+                  The maximum transmission unit (MTU).
+                  MTU is optional, if not provided the globally configured value in OVN-Kubernetes (defaults to 1400) is used for the network.
+                type: integer
+              role:
+                description: 'The network role in the pod (e.g.: Primary, Secondary).'
+                enum:
+                - Primary
+                - Secondary
+                type: string
+              subnets:
+                description: |-
+                  The subnet to use for the pod network across the cluster.
+
+
+                  Dual-stack clusters may set 2 subnets (one for each IP family),
+                  otherwise only 1 subnet is allowed.
+
+
+                  When topology is `Layer3`, the given subnet is split into smaller subnets for every node.
+                  To specify how the subnet should be split, the following format is supported for `Layer3` network:
+                  `10.128.0.0/16/24`, which means that every host will get a `/24` subnet.
+                  If host subnet mask is not set (for example, `10.128.0.0/16`), it will be assigned automatically.
+
+
+                  For `Layer2` and `Localnet` topology types, the format should match standard CIDR notation, without
+                  providing any host subnet mask.
+                  This field may be omitted for `Layer2` and `Localnet` topologies.
+                  In that case the logical switch implementing the network only provides layer 2 communication,
+                  and users must configure IP addresses for the pods.
+                  Port security only prevents MAC spoofing
+                items:
+                  type: string
+                type: array
+              topology:
+                description: The topological configuration for the network.
+                enum:
+                - Layer2
+                - Layer3
+                - Localnet
+                type: string
+            required:
+            - role
+            - topology
+            type: object
+            x-kubernetes-validations:
+            - message: Spec is immutable
+              rule: self == oldSelf
+            - message: Subnets is required for Layer3 topology
+              rule: self.topology != 'Layer3'   || (self.topology == 'Layer3' && size(self.subnets)
+                > 0)
+            - message: Localnet topology is not supported for primary network
+              rule: self.topology != 'Localnet' || (self.topology == 'Localnet' &&
+                self.role == 'Secondary')
+            - message: IPAMLifecycle is supported for Layer2 and Localnet topologies
+              rule: '!has(self.ipamLifecycle)    || (self.ipamLifecycle == ''Persistent''
+                && (self.topology == ''Layer2'' || self.topology == ''Localnet''))'
+          status:
+            description: UserDefinedNetworkStatus contains the observed status of
+              the UserDefinedNetwork.
+            properties:
+              conditions:
+                items:
+                  description: "Condition contains details for one aspect of the current
+                    state of this API Resource.\n---\nThis struct is intended for
+                    direct use as an array at the field path .status.conditions.  For
+                    example,\n\n\n\ttype FooStatus struct{\n\t    // Represents the
+                    observations of a foo's current state.\n\t    // Known .status.conditions.type
+                    are: \"Available\", \"Progressing\", and \"Degraded\"\n\t    //
+                    +patchMergeKey=type\n\t    // +patchStrategy=merge\n\t    // +listType=map\n\t
+                    \   // +listMapKey=type\n\t    Conditions []metav1.Condition `json:\"conditions,omitempty\"
+                    patchStrategy:\"merge\" patchMergeKey:\"type\" protobuf:\"bytes,1,rep,name=conditions\"`\n\n\n\t
+                    \   // other fields\n\t}"
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: |-
+                        type of condition in CamelCase or in foo.example.com/CamelCase.
+                        ---
+                        Many .condition.type values are consistent across resources like Available, but because arbitrary conditions can be
+                        useful (see .node.status.conditions), the ability to deconflict is important.
+                        The regex it matches is (dns1123SubdomainFmt/)?(qualifiedNameFmt)
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
