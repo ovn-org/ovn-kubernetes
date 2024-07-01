@@ -48,7 +48,11 @@ func (nc *SecondaryNodeNetworkController) Start(ctx context.Context) error {
 		nc.podHandler = handler
 	}
 
-	nc.gatewayManager.AddNetwork(nc.GetNetworkName())
+	//TODO (dceara): HARDCODED in the same way as in
+	// secondary_layer3_network_controller.go:addUpdateLocalNodeEvent()
+	masqCTMark := 42
+
+	nc.gatewayManager.AddNetwork(nc.GetNetworkName(), masqCTMark)
 	return nil
 }
 

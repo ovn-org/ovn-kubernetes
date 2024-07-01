@@ -37,7 +37,7 @@ type Gateway interface {
 // TODO: better name?
 type SecondaryNetworkGateway interface {
 	//TODO
-	AddNetwork(networkName string)
+	AddNetwork(networkName string, masqCTMark int)
 	DelNetwork(networkName string)
 }
 
@@ -63,9 +63,9 @@ type gateway struct {
 }
 
 // TODO(dceara): move?
-func (g *gateway) AddNetwork(networkName string) {
+func (g *gateway) AddNetwork(networkName string, masqCTMark int) {
 	if g.openflowManager != nil {
-		g.openflowManager.addNetwork(networkName)
+		g.openflowManager.addNetwork(networkName, masqCTMark)
 
 		waiter := newStartupWaiter()
 		readyFunc := func() (bool, error) {
@@ -470,6 +470,7 @@ func (g *gateway) addAllServices() []error {
 type bridgeNetConfiguration struct {
 	patchPort   string
 	ofPortPatch string
+	masqCTMark  string // TODO(dceara) just lazy because ctMarkOVN is also a string
 }
 
 type bridgeConfiguration struct {
@@ -496,7 +497,7 @@ func (b *bridgeConfiguration) getNetworkScopedPatchPortName(networkName string) 
 	}
 }
 
-func (b *bridgeConfiguration) addBridgeNetConfig(netName string) error {
+func (b *bridgeConfiguration) addBridgeNetConfig(netName string, masqCTMark int) error {
 	b.Lock()
 	defer b.Unlock()
 
@@ -506,7 +507,8 @@ func (b *bridgeConfiguration) addBridgeNetConfig(netName string) error {
 	}
 
 	b.netConfig[netName] = &bridgeNetConfiguration{
-		patchPort: patchPort,
+		patchPort:  patchPort,
+		masqCTMark: fmt.Sprintf("0x%x", masqCTMark),
 	}
 	return nil
 }
@@ -559,7 +561,9 @@ func (b *bridgeConfiguration) updateInterfaceIPAddresses(node *kapi.Node) ([]*ne
 }
 
 func bridgeForInterface(intfName, nodeName, physicalNetworkName string, gwIPs []*net.IPNet) (*bridgeConfiguration, error) {
-	defaultNetConfig := &bridgeNetConfiguration{}
+	defaultNetConfig := &bridgeNetConfiguration{
+		masqCTMark: ctMarkOVN,
+	}
 	res := bridgeConfiguration{
 		nodeName: nodeName,
 		netConfig: map[string]*bridgeNetConfiguration{

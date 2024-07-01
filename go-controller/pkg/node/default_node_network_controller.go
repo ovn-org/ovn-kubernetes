@@ -93,7 +93,7 @@ func NewCommonNodeNetworkControllerInfo(kubeClient clientset.Interface, apbExter
 
 // TODO
 type NodeSecondaryGatewayManager interface {
-	AddNetwork(networkName string)
+	AddNetwork(networkName string, masqCTMark int)
 	DelNetwork(networkName string)
 }
 
@@ -117,8 +117,8 @@ type DefaultNodeNetworkController struct {
 }
 
 // TODO(dceara): move?
-func (nc *DefaultNodeNetworkController) AddNetwork(networkName string) {
-	nc.secondaryNetworkGateway.AddNetwork(networkName)
+func (nc *DefaultNodeNetworkController) AddNetwork(networkName string, masqCTMark int) {
+	nc.secondaryNetworkGateway.AddNetwork(networkName, masqCTMark)
 }
 
 // TODO(dceara): move?
