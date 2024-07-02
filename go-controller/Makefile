@@ -1,4 +1,4 @@
-OUT_DIR = _output
+OUT_DIR = $(shell pwd)/_output
 export OUT_DIR
 PREFIX ?= ${DESTDIR}/usr
 BINDIR ?= ${PREFIX}/bin
@@ -28,6 +28,13 @@ C_ARGS = -e NOROOT=TRUE
 else
 C_ARGS = --cap-add=NET_ADMIN --cap-add=SYS_ADMIN --privileged
 endif
+
+## Tool Binaries
+MOCKERY = $(OUT_DIR)/mockery-$(MOCKERY_VERSION)
+
+## Tool Versions
+MOCKERY_VERSION ?= v2.43.2
+
 export NOROOT
 
 .PHONY: all build check test
@@ -62,6 +69,10 @@ modelgen: pkg/nbdb/ovn-nb.ovsschema pkg/sbdb/ovn-sb.ovsschema
 codegen:
 	hack/update-codegen.sh
 
+.PHONY: mocksgen
+mocksgen: $(MOCKERY)
+	$(MOCKERY)
+
 install:
 	install -D -m 755 ${OUT_DIR}/go/bin/ovnkube ${BINDIR}/
 	install -D -m 755 ${OUT_DIR}/go/bin/ovn-kube-util ${BINDIR}/
@@ -95,3 +106,26 @@ pkg/nbdb/ovn-nb.ovsschema:
 
 pkg/sbdb/ovn-sb.ovsschema:
 	curl -sSL https://raw.githubusercontent.com/ovn-org/ovn/$(OVN_SCHEMA_VERSION)/ovn-sb.ovsschema -o $@
+
+$(OUT_DIR):
+	mkdir -p $(OUT_DIR)
+
+.PHONY: mockery
+mockery: $(MOCKERY) ## Download mockery locally if necessary.
+$(MOCKERY): $(OUT_DIR)
+	$(call go-install-tool,$(MOCKERY),github.com/vektra/mockery/v2,${MOCKERY_VERSION})
+
+
+# go-install-tool will 'go install' any package with custom target and name of binary, if it doesn't exist
+# $1 - target path with name of binary (ideally with version)
+# $2 - package url which can be installed
+# $3 - specific version of package
+define go-install-tool
+@[ -f $(1) ] || { \
+set -e; \
+package=$(2)@$(3) ;\
+echo "Downloading $${package}" ;\
+GOBIN=$(OUT_DIR) go install $${package} ;\
+mv "$$(echo "$(1)" | sed "s/-$(3)$$//")" $(1) ;\
+}
+endef

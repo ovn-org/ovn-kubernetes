@@ -1,0 +1,27 @@
+dir: pkg/testing/mocks/{{.PackagePath}}
+filename: "{{.InterfaceName}}.go"
+mockname: "{{.InterfaceName}}"
+packages:
+  github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory:
+    interfaces:
+      NodeWatchFactory:
+      ObjectCacheInterface:
+    config:
+      dir: pkg/factory/mocks/
+  k8s.io/utils/exec:
+    config:
+      all: true
+  github.com/vishvananda/netlink:
+    interfaces:
+      Link:
+  github.com/containernetworking/cni/pkg/types:
+    interfaces:
+      Result:
+  github.com/containernetworking/plugins/pkg/ns:
+    interfaces:
+      NetNS:
+  github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1:
+    interfaces:
+      NetworkAttachmentDefinitionLister:
+      NetworkAttachmentDefinitionNamespaceLister:
+
