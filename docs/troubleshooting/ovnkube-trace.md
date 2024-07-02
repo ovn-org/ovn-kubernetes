@@ -8,7 +8,7 @@ A tool to trace packet simulations for arbitrary UDP or TCP traffic between poin
 Given the command-line arguments, ovnkube-trace would inspect the cluster to determine the addresses (MAC and IP) of the source and destination and perform `ovn-trace`, `ovs-appctl ofproto/trace`, and `ovn-detrace` from/to both directions.
 
 ```
-Usage of _output/go/bin/ovnkube-trace:
+Usage of /tmp/go-build1564673416/b001/exe/ovnkube-trace:
   -addr-family string
     	Address family (ip4 or ip6) to be used for tracing (default "ip4")
   -dst string
@@ -19,6 +19,8 @@ Usage of _output/go/bin/ovnkube-trace:
     	k8s namespace of dest pod (default "default")
   -dst-port string
     	dst-port: destination port (default "80")
+  -dump-udn-vrf-table-ids
+    	Dump the VRF table ID per node for all the user defined networks
   -kubeconfig string
     	absolute path to the kubeconfig file
   -loglevel string
