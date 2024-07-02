@@ -16,6 +16,7 @@ import (
 	"k8s.io/client-go/tools/record"
 	"k8s.io/klog/v2"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/userdefinednetwork"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -41,6 +42,8 @@ type ClusterManager struct {
 	egressServiceController *egressservice.Controller
 	// Controller used for maintaining dns name resolver objects
 	dnsNameResolverController *dnsnameresolver.Controller
+	// Controller used for managing user-defined-network
+	userDefinedNetworkController *userdefinednetwork.UserDefineNetworkController
 	// event recorder used to post events to k8s
 	recorder record.EventRecorder
 
@@ -115,6 +118,14 @@ func NewClusterManager(ovnClient *util.OVNClusterManagerClientset, wf *factory.W
 	if util.IsDNSNameResolverEnabled() {
 		cm.dnsNameResolverController = dnsnameresolver.NewController(ovnClient, wf)
 	}
+
+	if util.IsNetworkSegmentationSupportEnabled() {
+		cm.userDefinedNetworkController = userdefinednetwork.NewUserDefineNetworkController(
+			ovnClient.NetworkAttchDefClient,
+			wf.UserDefinedNetworkInformer().Lister(),
+		)
+	}
+
 	return cm, nil
 }
 
@@ -162,6 +173,13 @@ func (cm *ClusterManager) Start(ctx context.Context) error {
 			return err
 		}
 	}
+
+	if util.IsNetworkSegmentationSupportEnabled() {
+		if err := cm.userDefinedNetworkController.Run(); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
