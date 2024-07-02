@@ -12,6 +12,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/pod"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/generator/udn"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
@@ -480,6 +481,83 @@ func (oc *SecondaryLayer3NetworkController) Init(ctx context.Context) error {
 	return err
 }
 
+type SecondaryL3GatewayConfig struct {
+	config      *util.L3GatewayConfig
+	hostSubnets []*net.IPNet
+	gwLRPIPs    []*net.IPNet
+	hostAddrs   []string
+	externalIPs []net.IP
+}
+
+func (oc *SecondaryLayer3NetworkController) getNodeGatewayConfig(node *kapi.Node) (*SecondaryL3GatewayConfig, error) {
+	l3GatewayConfig, err := util.ParseNodeL3GatewayAnnotation(node)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get node %s network %s L3 gateway config: %v", node.Name, oc.GetNetworkName(), err)
+	}
+
+	var masqIPs []*net.IPNet
+	var v4MasqIP *net.IPNet
+	var v6MasqIP *net.IPNet
+	if config.IPv4Mode {
+		v4MasqIPs, err := udn.AllocateV4MasqueradeIPs(oc.networkID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get v4 masquerade IP, network %s (%d): %v", oc.GetNetworkName(), oc.networkID, err)
+		}
+		v4MasqIP = v4MasqIPs.GatewayRouter
+		masqIPs = append(masqIPs, v4MasqIP)
+	}
+	if config.IPv6Mode {
+		v6MasqIPs, err := udn.AllocateV6MasqueradeIPs(oc.networkID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get v6 masquerade IP, network %s (%d): %v", oc.GetNetworkName(), oc.networkID, err)
+		}
+		v6MasqIP = v6MasqIPs.GatewayRouter
+		masqIPs = append(masqIPs, v6MasqIP)
+	}
+
+	// Add masquerade IPs to the network's external IP addresses.
+	l3GatewayConfig.IPAddresses = append(l3GatewayConfig.IPAddresses, masqIPs...)
+
+	// Always SNAT to the per network masquerade IP.
+	var externalIPs []net.IP
+	if config.IPv4Mode {
+		externalIPs = append(externalIPs, v4MasqIP.IP)
+	}
+	if config.IPv6Mode {
+		externalIPs = append(externalIPs, v6MasqIP.IP)
+	}
+
+	var hostAddrs []string
+	for _, externalIP := range externalIPs {
+		hostAddrs = append(hostAddrs, externalIP.String())
+	}
+
+	// Use the host subnets present in the network attachment definition.
+	hostSubnets := make([]*net.IPNet, 0, len(oc.Subnets()))
+	for _, subnet := range oc.Subnets() {
+		hostSubnets = append(hostSubnets, subnet.CIDR)
+	}
+
+	// TODO(dceara): hardcoded should be something depending on the join subnet or network
+	gwLRPIPs := []*net.IPNet{
+		{
+			IP:   net.ParseIP("100.64.0.3"),
+			Mask: net.CIDRMask(16, 32),
+		},
+	}
+
+	// Overwrite the primary interface ID with the correct, per-network one.
+	l3GatewayConfig.InterfaceID = oc.GetNetworkScopedExtPortName(l3GatewayConfig.BridgeID, node.Name)
+
+	return &SecondaryL3GatewayConfig{
+		config:      l3GatewayConfig,
+		hostSubnets: hostSubnets,
+		gwLRPIPs:    gwLRPIPs,
+		hostAddrs:   hostAddrs,
+		externalIPs: externalIPs,
+	}, nil
+}
+
 func (oc *SecondaryLayer3NetworkController) addUpdateLocalNodeEvent(node *kapi.Node, nSyncs *nodeSyncs) error {
 	var hostSubnets []*net.IPNet
 	var errs []error
@@ -545,57 +623,19 @@ func (oc *SecondaryLayer3NetworkController) addUpdateLocalNodeEvent(node *kapi.N
 
 	if util.IsNetworkSegmentationSupportEnabled() && oc.IsPrimaryNetwork() {
 		if nSyncs.syncGw {
-			// TODO(dceara): hardcoded
-			l3GatewayConfig, _ := util.ParseNodeL3GatewayAnnotation(node)
-			l3GatewayConfig.InterfaceID = "breth1_tenantblue_ovn-worker"
-			l3GatewayConfig.IPAddresses = append(l3GatewayConfig.IPAddresses,
-				&net.IPNet{
-					IP:   net.ParseIP("169.254.169.42"),
-					Mask: net.CIDRMask(24, 32),
-				})
-			// TODO(dceara): use the same l3GatewayConfig.NextHops as on the
-			// default network
-
-			// TODO(dceara): hardcoded
-			hostSubnets := []*net.IPNet{
-				{
-					IP:   net.ParseIP("10.128.0.0"),
-					Mask: net.CIDRMask(16, 32),
-				},
-			}
-
-			// TODO(dceara): hardcoded
-			hostAddrs := []string{
-				"169.254.169.42",
-			}
-
-			// TODO(dceara): hardcoded
-			clusterSubnets := []*net.IPNet{
-				{
-					IP:   net.ParseIP("10.128.0.0"),
-					Mask: net.CIDRMask(16, 32),
-				},
-			}
-
-			// TODO(dceara): hardcoded should be something depending on the join subnet or network
-			gwLRPIPs := []*net.IPNet{
-				{
-					IP:   net.ParseIP("100.64.0.3"),
-					Mask: net.CIDRMask(16, 32),
-				},
-			}
-
-			// TODO(dceara): hardcoded always SNAT to the per net MASQ IP
-			externalIPs := []net.IP{
-				net.ParseIP("169.254.169.42"),
-			}
-
-			err := oc.syncNodeGateway(node, l3GatewayConfig, hostSubnets, hostAddrs, clusterSubnets, gwLRPIPs, externalIPs)
+			gwConfig, err := oc.getNodeGatewayConfig(node)
 			if err != nil {
 				errs = append(errs, err)
 				oc.gatewaysFailed.Store(node.Name, true)
 			} else {
-				oc.gatewaysFailed.Delete(node.Name)
+				err := oc.syncNodeGateway(node, gwConfig.config, gwConfig.hostSubnets,
+					gwConfig.hostAddrs, gwConfig.hostSubnets, gwConfig.gwLRPIPs, gwConfig.externalIPs)
+				if err != nil {
+					errs = append(errs, err)
+					oc.gatewaysFailed.Store(node.Name, true)
+				} else {
+					oc.gatewaysFailed.Delete(node.Name)
+				}
 			}
 		}
 
