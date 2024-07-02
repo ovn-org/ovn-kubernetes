@@ -3,7 +3,6 @@ package ovn
 import (
 	"context"
 	"fmt"
-	"net"
 	"reflect"
 	"sync"
 	"time"
@@ -74,21 +73,6 @@ type DefaultNetworkController struct {
 	egressQoSNodeSynced cache.InformerSynced
 	egressQoSNodeQueue  workqueue.RateLimitingInterface
 
-	// Cluster wide Load_Balancer_Group UUID.
-	// Includes all node switches and node gateway routers.
-	clusterLoadBalancerGroupUUID string
-
-	// Cluster wide switch Load_Balancer_Group UUID.
-	// Includes all node switches.
-	switchLoadBalancerGroupUUID string
-
-	// Cluster wide router Load_Balancer_Group UUID.
-	// Includes all node gateway routers.
-	routerLoadBalancerGroupUUID string
-
-	// Cluster-wide router default Control Plane Protection (COPP) UUID
-	defaultCOPPUUID string
-
 	// Controller used for programming OVN for egress IP
 	eIPC egressIPZoneController
 
@@ -131,10 +115,6 @@ type DefaultNetworkController struct {
 	// variable to determine if all pods present on the node during startup have been processed
 	// updated atomically
 	allInitialPodsProcessed uint32
-
-	// IP addresses of OVN Cluster logical router port ("GwRouterToJoinSwitchPrefix + OVNClusterRouter")
-	// connecting to the join switch
-	ovnClusterLRPToJoinIfAddrs []*net.IPNet
 
 	// zoneChassisHandler handles the local node and remote nodes in creating or updating the chassis entries in the OVN Southbound DB.
 	// Please see zone_interconnect/chassis_handler.go for more details.
@@ -219,23 +199,11 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 			watchFactory:       cnci.watchFactory,
 			nodeZoneState:      syncmap.NewSyncMap[bool](),
 		},
-		loadbalancerClusterCache:     make(map[kapi.Protocol]string),
-		clusterLoadBalancerGroupUUID: "",
-		switchLoadBalancerGroupUUID:  "",
-		routerLoadBalancerGroupUUID:  "",
-		svcController:                svcController,
-		zoneChassisHandler:           zoneChassisHandler,
-		apbExternalRouteController:   apbExternalRouteController,
+		loadbalancerClusterCache:   make(map[kapi.Protocol]string),
+		svcController:              svcController,
+		zoneChassisHandler:         zoneChassisHandler,
+		apbExternalRouteController: apbExternalRouteController,
 	}
-
-	// Allocate IPs for logical router port "GwRouterToJoinSwitchPrefix + OVNClusterRouter". This should always
-	// allocate the first IPs in the join switch subnets.
-	gwLRPIfAddrs, err := oc.getOVNClusterRouterPortToJoinSwitchIfAddrs()
-	if err != nil {
-		return nil, fmt.Errorf("failed to allocate join switch IP address connected to %s: %v", ovntypes.OVNClusterRouter, err)
-	}
-
-	oc.ovnClusterLRPToJoinIfAddrs = gwLRPIfAddrs
 
 	oc.initRetryFramework()
 	return oc, nil

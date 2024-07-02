@@ -330,3 +330,37 @@ func RoutePartiallyEqual(r, x netlink.Route) bool {
 		r.Flags == x.Flags &&
 		r.MTU == x.MTU
 }
+
+func GetRoutesFromMainTable(family, table int) ([]netlink.Route, error) {
+	routes, err := netlink.RouteListFiltered(family, &netlink.Route{Table: unix.RT_TABLE_MAIN},
+		netlink.RT_FILTER_TABLE)
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve main routing table: %v", err)
+	}
+	return routes, nil
+}
+
+func GetRoutesForInterface(table, family int, ifName string) ([]netlink.Route, error) {
+	iface, err := netlink.LinkByName(ifName)
+	if err != nil {
+		return nil, err
+	}
+	routes, err := netlink.RouteList(iface, family)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get routes for link %s: %v", ifName, err)
+	}
+	return routes, nil
+}
+
+func GetRoute(table int, dstCIDR, gatewayIP string) (*netlink.Route, error) {
+	gw := net.ParseIP(gatewayIP)
+	dst, err := netlink.ParseIPNet(dstCIDR)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse dstCIDR: %v", err)
+	}
+	return &netlink.Route{
+		Dst:   dst,
+		Gw:    gw,
+		Table: table,
+	}, nil
+}

@@ -126,6 +126,25 @@ func GetExtSwitchFromNode(node string) string {
 	return types.ExternalSwitchPrefix + node
 }
 
+// GetExtPortName determines the name of a node's logical port to the external
+// bridge.
+func GetExtPortName(bridgeID, nodeName string) string {
+	return bridgeID + "_" + nodeName
+}
+
+// GetPatchPortName determines the name of a node's patch port to the external
+// bridge.
+func GetPatchPortName(bridgeID, nodeName string) string {
+	return types.PatchPortPrefix + GetExtPortName(bridgeID, nodeName) + types.PatchPortSuffix
+}
+
+// GetVrfDeviceName determines the name of the vrf device created for every user defined
+// primary network in local gateway mode.
+// TODO: should we chek if device name shouldn't go beyond 15 characters ?
+func GetVrfDeviceName(netMgmtIfName string) string {
+	return netMgmtIfName + types.VrfDeviceSuffix
+}
+
 // GetNodeInternalAddrs returns the first IPv4 and/or IPv6 InternalIP defined
 // for the node. On certain cloud providers (AWS) the egress IP will be added to
 // the list of node IPs as an InternalIP address, we don't want to create the

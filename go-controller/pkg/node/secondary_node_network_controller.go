@@ -4,7 +4,9 @@ import (
 	"context"
 	"sync"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	"k8s.io/klog/v2"
@@ -14,13 +16,16 @@ import (
 // and reacting upon the watched resources (e.g. pods, endpoints) for secondary network
 type SecondaryNodeNetworkController struct {
 	BaseNodeNetworkController
+
+	gatewayManager NodeSecondaryGatewayManager
+
 	// pod events factory handler
 	podHandler *factory.Handler
 }
 
 // NewSecondaryNodeNetworkController creates a new OVN controller for creating logical network
 // infrastructure and policy for default l3 network
-func NewSecondaryNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, netInfo util.NetInfo) *SecondaryNodeNetworkController {
+func NewSecondaryNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, netInfo util.NetInfo, gwManager NodeSecondaryGatewayManager) *SecondaryNodeNetworkController {
 	return &SecondaryNodeNetworkController{
 		BaseNodeNetworkController: BaseNodeNetworkController{
 			CommonNodeNetworkControllerInfo: *cnnci,
@@ -28,17 +33,26 @@ func NewSecondaryNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, n
 			stopChan:                        make(chan struct{}),
 			wg:                              &sync.WaitGroup{},
 		},
+		gatewayManager: gwManager,
 	}
 }
 
 // Start starts the default controller; handles all events and creates all needed logical entities
 func (nc *SecondaryNodeNetworkController) Start(ctx context.Context) error {
 	klog.Infof("Start secondary node network controller of network %s", nc.GetNetworkName())
-	handler, err := nc.watchPodsDPU()
-	if err != nil {
-		return err
+	if config.OvnKubeNode.Mode == ovntypes.NodeModeDPU {
+		handler, err := nc.watchPodsDPU()
+		if err != nil {
+			return err
+		}
+		nc.podHandler = handler
 	}
-	nc.podHandler = handler
+
+	//TODO (dceara): HARDCODED in the same way as in
+	// secondary_layer3_network_controller.go:addUpdateLocalNodeEvent()
+	masqCTMark := 42
+
+	nc.gatewayManager.AddNetwork(nc, masqCTMark)
 	return nil
 }
 
@@ -51,6 +65,9 @@ func (nc *SecondaryNodeNetworkController) Stop() {
 	if nc.podHandler != nil {
 		nc.watchFactory.RemovePodHandler(nc.podHandler)
 	}
+
+	//TODO: does this need to go in Cleanup?
+	nc.gatewayManager.DelNetwork(nc)
 }
 
 // Cleanup cleans up node entities for the given secondary network

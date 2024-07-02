@@ -6,19 +6,26 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/udn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iprulemanager"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/vrfmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
+	"github.com/vishvananda/netlink"
 
 	"github.com/safchain/ethtool"
 	kapi "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
+	utiliptables "k8s.io/kubernetes/pkg/util/iptables"
 )
 
 // Gateway responds to Service and Endpoint K8s events
@@ -34,6 +41,13 @@ type Gateway interface {
 	Reconcile() error
 }
 
+// TODO: better name?
+type SecondaryNetworkGateway interface {
+	//TODO
+	AddNetwork(nInfo util.NetInfo, masqCTMark int)
+	DelNetwork(nInfo util.NetInfo)
+}
+
 type gateway struct {
 	// loadBalancerHealthChecker is a health check server for load-balancer type services
 	loadBalancerHealthChecker informer.ServiceAndEndpointsEventHandler
@@ -45,6 +59,9 @@ type gateway struct {
 	nodePortWatcher informer.ServiceAndEndpointsEventHandler
 	openflowManager *openflowManager
 	nodeIPManager   *addressManager
+	vrfManager      *vrfmanager.Controller
+	ruleManager     *iprulemanager.Controller
+	ipTablesManager *iptables.Controller
 	initFunc        func() error
 	readyFunc       func() (bool, error)
 
@@ -53,6 +70,119 @@ type gateway struct {
 	watchFactory *factory.WatchFactory // used for retry
 	stopChan     <-chan struct{}
 	wg           *sync.WaitGroup
+}
+
+// TODO(dceara): move?
+func (g *gateway) AddNetwork(nInfo util.NetInfo, masqCTMark int) {
+	if g.openflowManager != nil {
+		g.openflowManager.addNetwork(nInfo, masqCTMark)
+
+		waiter := newStartupWaiter()
+		readyFunc := func() (bool, error) {
+			//TODO: this should be run for the network config only.
+			time.Sleep(5 * time.Second)
+			setBridgeOfPorts(g.openflowManager.defaultBridge)
+			if g.openflowManager.externalGatewayBridge != nil {
+				setBridgeOfPorts(g.openflowManager.externalGatewayBridge)
+			}
+			return true, nil
+		}
+		postFunc := func() error {
+			g.Reconcile()
+			// g.openflowManager.requestFlowSync()
+			return nil
+		}
+		waiter.AddWait(readyFunc, postFunc)
+		if err := waiter.Wait(); err != nil {
+			//return err
+			//TODO
+		}
+	}
+
+	if g.vrfManager != nil {
+		netMgmtInf := nInfo.GetNetworkScopedK8sMgmtIntfName(g.nodeIPManager.nodeName)
+		vrfDeviceName := util.GetVrfDeviceName(netMgmtInf)
+		// TODO: change it to use new Allocate API using net name once it's ready
+		vrfTableId, err := udn.AllocateVRFTable(0)
+		if err != nil {
+			// return err
+			// TODO
+		}
+		enslaveInterfaces := make(sets.Set[string])
+		enslaveInterfaces.Insert(netMgmtInf)
+		// TODO: clone required routes into VRF table
+		err = g.vrfManager.AddVrf(vrfDeviceName, uint32(vrfTableId), enslaveInterfaces, nil)
+		if err != nil {
+			// return err
+			// TODO
+		}
+		// Get node information
+		node, err := g.watchFactory.GetNode(g.nodeIPManager.nodeName)
+		if err != nil {
+			// return err
+			// TODO
+		}
+
+		networkID, err := util.ParseNetworkIDAnnotation(node, nInfo.GetNetworkName())
+		if err != nil {
+			// return err
+			// TODO
+		}
+		var masqIPv4, masqIPv6 *net.IP
+		var masqIPRules []netlink.Rule
+		if config.IPv4Mode {
+			masqIPs, err := udn.AllocateV4MasqueradeIPs(networkID)
+			if err != nil {
+				// return err
+				// TODO
+			}
+			masqIPv4 = &masqIPs[0]
+			masqIPRules = append(masqIPRules, generateIPRuleForMasqIP(masqIPs[0], false, vrfTableId))
+		}
+		if config.IPv6Mode {
+			masqIPs, err := udn.AllocateV6MasqueradeIPs(networkID)
+			if err != nil {
+				// return err
+				// TODO
+			}
+			masqIPv6 = &masqIPs[0]
+			masqIPRules = append(masqIPRules, generateIPRuleForMasqIP(masqIPs[0], false, vrfTableId))
+		}
+		for _, rule := range masqIPRules {
+			err = g.ruleManager.Add(rule)
+			if err != nil {
+				// return err
+				// TODO
+			}
+		}
+		if masqIPv4 != nil {
+			err = g.ipTablesManager.EnsureRule(utiliptables.TableNAT, utiliptables.ChainPostrouting, utiliptables.ProtocolIPv4,
+				// TODO replace eth0 with right interface.
+				generateIPTablesSNATRuleArg(*masqIPv4, false, "eth0", string(g.nodeIPManager.nodePrimaryAddr)))
+			if err != nil {
+				// return err
+				// TODO
+			}
+		}
+		if masqIPv6 != nil {
+			err = g.ipTablesManager.EnsureRule(utiliptables.TableNAT, utiliptables.ChainPostrouting, utiliptables.ProtocolIPv6,
+				// TODO replace eth0 with right interface.
+				generateIPTablesSNATRuleArg(*masqIPv6, true, "eth0", string(g.nodeIPManager.nodePrimaryAddr)))
+			if err != nil {
+				// return err
+				// TODO
+			}
+		}
+	}
+}
+
+// TODO(dceara): move?
+func (g *gateway) DelNetwork(nInfo util.NetInfo) {
+	if g.openflowManager != nil {
+		g.openflowManager.delNetwork(nInfo)
+		//TODO: trigger resync and wait?
+		g.openflowManager.requestFlowSync()
+	}
 }
 
 func (g *gateway) AddService(svc *kapi.Service) error {
@@ -337,6 +467,7 @@ func gatewayInitInternal(nodeName, gwIntf, egressGatewayIntf string, gwNextHops 
 	l3GwConfig := util.L3GatewayConfig{
 		Mode:           config.Gateway.Mode,
 		ChassisID:      chassisID,
+		BridgeID:       gatewayBridge.bridgeName,
 		InterfaceID:    gatewayBridge.interfaceID,
 		MACAddress:     gatewayBridge.macAddress,
 		IPAddresses:    gatewayBridge.ips,
@@ -423,17 +554,57 @@ func (g *gateway) addAllServices() []error {
 	return errs
 }
 
+type bridgeNetConfiguration struct {
+	patchPort   string
+	ofPortPatch string
+	masqCTMark  string // TODO(dceara) just lazy because ctMarkOVN is also a string
+}
+
 type bridgeConfiguration struct {
 	sync.Mutex
+	nodeName    string
 	bridgeName  string
 	uplinkName  string
 	ips         []*net.IPNet
 	interfaceID string
 	macAddress  net.HardwareAddr
-	patchPort   string
-	ofPortPatch string
+	netConfig   map[string]*bridgeNetConfiguration
 	ofPortPhys  string
 	ofPortHost  string
+}
+
+func (b *bridgeConfiguration) addBridgeNetConfig(nInfo util.NetInfo, masqCTMark int) error {
+	b.Lock()
+	defer b.Unlock()
+
+	netName := nInfo.GetNetworkName()
+	patchPort := nInfo.GetNetworkScopedPatchPortName(b.bridgeName, b.nodeName)
+	if _, found := b.netConfig[netName]; found {
+		return fmt.Errorf("failed to add network config %s to bridge %s: network already exists", netName, b.bridgeName)
+	}
+
+	b.netConfig[netName] = &bridgeNetConfiguration{
+		patchPort:  patchPort,
+		masqCTMark: fmt.Sprintf("0x%x", masqCTMark),
+	}
+	return nil
+}
+
+func (b *bridgeConfiguration) delBridgeNetConfig(nInfo util.NetInfo) {
+	b.Lock()
+	defer b.Unlock()
+
+	delete(b.netConfig, nInfo.GetNetworkName())
+}
+
+func (b *bridgeConfiguration) getBridgePorts() ([]bridgeNetConfiguration, string, string) {
+	b.Lock()
+	defer b.Unlock()
+	netConfigs := make([]bridgeNetConfiguration, len(b.netConfig))
+	for _, netConfig := range b.netConfig {
+		netConfigs = append(netConfigs, *netConfig)
+	}
+	return netConfigs, b.uplinkName, b.ofPortPhys
 }
 
 // updateInterfaceIPAddresses sets and returns the bridge's current ips
@@ -467,7 +638,15 @@ func (b *bridgeConfiguration) updateInterfaceIPAddresses(node *kapi.Node) ([]*ne
 }
 
 func bridgeForInterface(intfName, nodeName, physicalNetworkName string, gwIPs []*net.IPNet) (*bridgeConfiguration, error) {
-	res := bridgeConfiguration{}
+	defaultNetConfig := &bridgeNetConfiguration{
+		masqCTMark: ctMarkOVN,
+	}
+	res := bridgeConfiguration{
+		nodeName: nodeName,
+		netConfig: map[string]*bridgeNetConfiguration{
+			types.DefaultNetworkName: defaultNetConfig,
+		},
+	}
 	gwIntf := intfName
 
 	if bridgeName, _, err := util.RunOVSVsctl("port-to-br", intfName); err == nil {
@@ -529,7 +708,7 @@ func bridgeForInterface(intfName, nodeName, physicalNetworkName string, gwIPs []
 
 	// the name of the patch port created by ovn-controller is of the form
 	// patch-<logical_port_name_of_localnet_port>-to-br-int
-	res.patchPort = "patch-" + res.bridgeName + "_" + nodeName + "-to-br-int"
+	defaultNetConfig.patchPort = (&util.DefaultNetInfo{}).GetNetworkScopedPatchPortName(res.bridgeName, nodeName)
 
 	// for DPU we use the host MAC address for the Gateway configuration
 	if config.OvnKubeNode.Mode == types.NodeModeDPU {

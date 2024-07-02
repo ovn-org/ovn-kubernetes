@@ -331,6 +331,27 @@ func (bsnc *BaseSecondaryNetworkController) addLogicalPortToNetworkForNAD(pod *k
 		ops = append(ops, addOps...)
 	}
 
+	// TODO(dceara): REMOVE NATS on pod deletion
+	// Pods on user defined secondary networks should be able to communicate
+	// to the outside.  Add SNATs for them.
+	if util.IsNetworkSegmentationSupportEnabled() && bsnc.IsPrimaryNetwork() {
+		if config.Gateway.DisableSNATMultipleGWs {
+			// Add NAT rules to pods if disable SNAT is set and does not have
+			// namespace annotations to go through external egress router
+
+			//TODO(dceara): HARDCODED this should be the per-network MASQ address.
+			extIPs := []*net.IPNet{
+				{
+					IP:   net.ParseIP("169.254.169.42"),
+					Mask: net.CIDRMask(16, 32),
+				},
+			}
+			if ops, err = addOrUpdatePodSNATOps(bsnc.nbClient, bsnc.GetNetworkScopedGWRouterName(pod.Spec.NodeName), extIPs, podAnnotation.IPs, ops); err != nil {
+				return err
+			}
+		}
+	}
+
 	recordOps, txOkCallBack, _, err := bsnc.AddConfigDurationRecord("pod", pod.Namespace, pod.Name)
 	if err != nil {
 		klog.Errorf("Config duration recorder: %v", err)
@@ -679,4 +700,26 @@ func (oc *BaseSecondaryNetworkController) allowPersistentIPs() bool {
 		oc.NetInfo.AllowsPersistentIPs() &&
 		util.DoesNetworkRequireIPAM(oc.NetInfo) &&
 		(oc.NetInfo.TopologyType() == types.Layer2Topology || oc.NetInfo.TopologyType() == types.LocalnetTopology)
+}
+
+func (oc *BaseSecondaryNetworkController) ensureNetworkID() error {
+	if oc.networkID != 0 {
+	}
+	nodes, err := oc.watchFactory.GetNodes()
+	if err != nil {
+		return fmt.Errorf("failed to get nodes: %v", err)
+	}
+	networkID := util.InvalidNetworkID
+	for _, node := range nodes {
+		networkID, err = util.ParseNetworkIDAnnotation(node, oc.GetNetworkName())
+		if err != nil {
+			//TODO Warning
+			continue
+		}
+	}
+	if networkID == util.InvalidNetworkID {
+		return fmt.Errorf("missing network id for network '%s'", oc.GetNetworkName())
+	}
+	oc.networkID = networkID
+	return nil
 }
