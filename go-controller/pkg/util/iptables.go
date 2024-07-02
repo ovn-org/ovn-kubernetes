@@ -5,6 +5,7 @@ package util
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 
@@ -36,6 +37,8 @@ type IPTablesHelper interface {
 	Delete(string, string, ...string) error
 	// Restore uses iptables-restore to restore rules for multiple chains in a table at once
 	Restore(table string, rulesMap map[string][][]string) error
+	// ChangePolicy changes the policy on the chain to target
+	ChangePolicy(table, chain, target string) error
 }
 
 var helpers = make(map[iptables.Protocol]IPTablesHelper)
@@ -79,11 +82,23 @@ func (t *FakeTable) getChain(chainName string) ([]string, error) {
 	return chain, nil
 }
 
+type FakePolicyKey struct {
+	Table string
+	Chain string
+}
+
 // FakeIPTables is a mock implementation of go-iptables
 type FakeIPTables struct {
-	proto  iptables.Protocol
-	tables map[string]*FakeTable
+	proto    iptables.Protocol
+	tables   map[string]*FakeTable
+	policies map[FakePolicyKey]string
 	sync.Mutex
+}
+
+// ChangePolicy sets an entry in FakeIPTables.policies using "table/chain" as key and target as value
+func (f *FakeIPTables) ChangePolicy(table, chain, target string) error {
+	f.policies[FakePolicyKey{Table: table, Chain: chain}] = target
+	return nil
 }
 
 // SetFakeIPTablesHelpers populates `helpers` with FakeIPTablesHelper that can be used in unit tests
@@ -97,8 +112,9 @@ func SetFakeIPTablesHelpers() (IPTablesHelper, IPTablesHelper) {
 
 func newFakeWithProtocol(protocol iptables.Protocol) *FakeIPTables {
 	ipt := &FakeIPTables{
-		proto:  protocol,
-		tables: make(map[string]*FakeTable),
+		proto:    protocol,
+		tables:   make(map[string]*FakeTable),
+		policies: make(map[FakePolicyKey]string),
 	}
 	// Prepopulate some common tables
 	ipt.tables["nat"] = newFakeTable()
@@ -304,9 +320,9 @@ func (f *FakeIPTables) Restore(tableName string, rulesMap map[string][][]string)
 	return nil
 }
 
-// MatchState matches the expected state against the actual rules
+// MatchState matches the expected state against the actual rules and policies
 // code under test added to iptables
-func (f *FakeIPTables) MatchState(tables map[string]FakeTable) error {
+func (f *FakeIPTables) MatchState(tables map[string]FakeTable, policies map[FakePolicyKey]string) error {
 	f.Lock()
 	defer f.Unlock()
 	if len(tables) != len(f.tables) {
@@ -341,6 +357,10 @@ func (f *FakeIPTables) MatchState(tables map[string]FakeTable) error {
 				}
 			}
 		}
+	}
+
+	if policies != nil && !reflect.DeepEqual(policies, f.policies) {
+		return fmt.Errorf("expected %v policies, got %v", policies, f.policies)
 	}
 	return nil
 }

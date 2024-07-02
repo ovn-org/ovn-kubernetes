@@ -233,23 +233,12 @@ func setupManagementPortIPFamilyConfig(routeManager *routemanager.Controller, mp
 		return warnings, err
 	}
 
-	createForwardingRule := func(family string) error {
-		stdout, stderr, err := util.RunSysctl("-w", fmt.Sprintf("net.%s.conf.%s.forwarding=1", family, types.K8sMgmtIntfName))
-		if err != nil || stdout != fmt.Sprintf("net.%s.conf.%s.forwarding = 1", family, types.K8sMgmtIntfName) {
-			return fmt.Errorf("could not set the correct forwarding value for interface %s: stdout: %v, stderr: %v, err: %v",
-				types.K8sMgmtIntfName, stdout, stderr, err)
-		}
-		return nil
-	}
-
+	// IPv6 forwarding is enabled globally
 	if mpcfg.ipv4 != nil && cfg == mpcfg.ipv4 {
-		if err := createForwardingRule("ipv4"); err != nil {
-			return warnings, fmt.Errorf("could not add IPv4 forwarding rule: %v", err)
-		}
-	}
-	if mpcfg.ipv6 != nil && cfg == mpcfg.ipv6 {
-		if err := createForwardingRule("ipv6"); err != nil {
-			return warnings, fmt.Errorf("could not add IPv6 forwarding rule: %v", err)
+		stdout, stderr, err := util.RunSysctl("-w", fmt.Sprintf("net.ipv4.conf.%s.forwarding=1", types.K8sMgmtIntfName))
+		if err != nil || stdout != fmt.Sprintf("net.ipv4.conf.%s.forwarding = 1", types.K8sMgmtIntfName) {
+			return warnings, fmt.Errorf("could not set the correct forwarding value for interface %s: stdout: %v, stderr: %v, err: %v",
+				types.K8sMgmtIntfName, stdout, stderr, err)
 		}
 	}
 
