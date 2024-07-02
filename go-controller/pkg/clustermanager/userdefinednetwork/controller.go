@@ -64,6 +64,8 @@ func (c *UserDefineNetworkController) sync(key string) error {
 	c.syncLock.Lock()
 	defer c.syncLock.Unlock()
 
+	klog.Infof("DEBUG: sync start, got key %q", key)
+
 	namespace, name, err := cache.SplitMetaNamespaceKey(key)
 	if err != nil {
 		klog.Errorf("failed to split meta namespace cache key %q for user-define-network: %v", key, err)

@@ -175,6 +175,7 @@ func (cm *ClusterManager) Start(ctx context.Context) error {
 	}
 
 	if util.IsNetworkSegmentationSupportEnabled() {
+		klog.Info("DEBUG: start controller")
 		if err := cm.userDefinedNetworkController.Run(); err != nil {
 			return err
 		}
