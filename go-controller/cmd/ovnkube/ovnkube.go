@@ -585,12 +585,16 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 func newWatchFactory(runMode *ovnkubeRunMode, ovnClientset *util.OVNClientset) (watchFactory *factory.WatchFactory, err error) {
 	switch {
 	case runMode.clusterManager && runMode.ovnkubeController:
+		klog.Infof("DEBUG: runmode A")
 		watchFactory, err = factory.NewMasterWatchFactory(ovnClientset.GetMasterClientset())
 	case runMode.clusterManager:
+		klog.Infof("DEBUG: runmode B")
 		watchFactory, err = factory.NewClusterManagerWatchFactory(ovnClientset.GetClusterManagerClientset())
 	case runMode.ovnkubeController:
+		klog.Infof("DEBUG: runmode C")
 		watchFactory, err = factory.NewOVNKubeControllerWatchFactory(ovnClientset.GetOVNKubeControllerClientset())
 	case runMode.node:
+		klog.Infof("DEBUG: runmode D")
 		watchFactory, err = factory.NewNodeWatchFactory(ovnClientset.GetNodeClientset(), runMode.identity)
 	default:
 		err = fmt.Errorf("unsupported ovnkube run mode: %+v", runMode)
