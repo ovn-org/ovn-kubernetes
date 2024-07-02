@@ -628,7 +628,7 @@ func generateRoutesForLink(link netlink.Link, isV6 bool) ([]netlink.Route, error
 		return nil, fmt.Errorf("failed to get routes for link %s: %v", link.Attrs().Name, err)
 	}
 	linkRoutes = ensureAtLeastOneDefaultRoute(linkRoutes, link.Attrs().Index, isV6)
-	overwriteRoutesTableID(linkRoutes, getRouteTableID(link.Attrs().Index))
+	overwriteRoutesTableID(linkRoutes, util.CalculateRouteTableID(link.Attrs().Index))
 	return linkRoutes, nil
 }
 
@@ -877,7 +877,7 @@ func (c *Controller) repairNode() error {
 				assignedAddrStrToAddrs[addressStr] = address
 			}
 		}
-		filter, mask := filterRouteByLinkTable(linkIdx, getRouteTableID(linkIdx))
+		filter, mask := filterRouteByLinkTable(linkIdx, util.CalculateRouteTableID(linkIdx))
 		existingRoutes, err := util.GetNetLinkOps().RouteListFiltered(netlink.FAMILY_ALL, filter, mask)
 		if err != nil {
 			return fmt.Errorf("unable to get route list using filter (%s): %v", filter.String(), err)
@@ -1320,10 +1320,6 @@ func overwriteRoutesTableID(routes []netlink.Route, tableID int) {
 	}
 }
 
-func getRouteTableID(ifIndex int) int {
-	return ifIndex + routingTableIDStart
-}
-
 func findLinkOnSameNetworkAsIP(ip net.IP, v4, v6 bool) (bool, netlink.Link, error) {
 	found, link, err := findLinkOnSameNetworkAsIPUsingLPM(ip, v4, v6)
 	if err != nil {
@@ -1437,7 +1433,7 @@ func getNetlinkAddress(addr *net.IPNet, ifindex int) *netlink.Addr {
 // from the links 'ifindex'
 func generateIPRule(srcIP net.IP, isIPv6 bool, ifIndex int) netlink.Rule {
 	r := *netlink.NewRule()
-	r.Table = getRouteTableID(ifIndex)
+	r.Table = util.CalculateRouteTableID(ifIndex)
 	r.Priority = rulePriority
 	var ipFullMask string
 	if isIPv6 {
