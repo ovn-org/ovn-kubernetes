@@ -6,19 +6,21 @@ import (
 	"net"
 	"sync"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/dnsnameresolver"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/egressservice"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/endpointslicemirror"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/status_manager"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/unidling"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/healthcheck"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/klog/v2"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/dnsnameresolver"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/egressservice"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/endpointslicemirror"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/status_manager"
+	udncontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/userdefinednetwork"
+	udntemplate "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/userdefinednetwork/template"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/unidling"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/healthcheck"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
@@ -43,6 +45,8 @@ type ClusterManager struct {
 	endpointSliceMirrorController *endpointslicemirror.Controller
 	// Controller used for maintaining dns name resolver objects
 	dnsNameResolverController *dnsnameresolver.Controller
+	// Controller for managing user-defined-network CRD
+	userDefinedNetworkController *udncontroller.Controller
 	// event recorder used to post events to k8s
 	recorder record.EventRecorder
 
@@ -123,6 +127,16 @@ func NewClusterManager(ovnClient *util.OVNClusterManagerClientset, wf *factory.W
 	if util.IsDNSNameResolverEnabled() {
 		cm.dnsNameResolverController = dnsnameresolver.NewController(ovnClient, wf)
 	}
+
+	if util.IsNetworkSegmentationSupportEnabled() {
+		udnController := udncontroller.New(
+			ovnClient.NetworkAttchDefClient, wf.NADInformer(),
+			ovnClient.UserDefinedNetworkClient, wf.UserDefinedNetworkInformer(),
+			udntemplate.RenderNetAttachDefManifest,
+		)
+		cm.userDefinedNetworkController = udnController
+	}
+
 	return cm, nil
 }
 
@@ -175,6 +189,12 @@ func (cm *ClusterManager) Start(ctx context.Context) error {
 			return err
 		}
 	}
+
+	if util.IsNetworkSegmentationSupportEnabled() {
+		if err := cm.userDefinedNetworkController.Run(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -198,5 +218,8 @@ func (cm *ClusterManager) Stop() {
 	cm.statusManager.Stop()
 	if util.IsDNSNameResolverEnabled() {
 		cm.dnsNameResolverController.Stop()
+	}
+	if util.IsNetworkSegmentationSupportEnabled() {
+		cm.userDefinedNetworkController.Shutdown()
 	}
 }
