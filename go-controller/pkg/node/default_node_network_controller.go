@@ -91,11 +91,19 @@ func NewCommonNodeNetworkControllerInfo(kubeClient clientset.Interface, apbExter
 	return newCommonNodeNetworkControllerInfo(kubeClient, &kube.Kube{KClient: kubeClient}, apbExternalRouteClient, wf, eventRecorder, name)
 }
 
+// TODO
+type NodeSecondaryGatewayManager interface {
+	AddNetwork(nInfo util.NetInfo, masqCTMark uint) error
+	DelNetwork(nInfo util.NetInfo) error
+}
+
 // DefaultNodeNetworkController is the object holder for utilities meant for node management of default network
 type DefaultNodeNetworkController struct {
 	BaseNodeNetworkController
 
-	gateway Gateway
+	gateway                 Gateway
+	secondaryNetworkGateway SecondaryNetworkGateway
+
 	// Node healthcheck server for cloud load balancers
 	healthzServer *proxierHealthUpdater
 	routeManager  *routemanager.Controller
@@ -106,6 +114,16 @@ type DefaultNodeNetworkController struct {
 	retryEndpointSlices *retry.RetryFramework
 
 	apbExternalRouteNodeController *apbroute.ExternalGatewayNodeController
+}
+
+// TODO(dceara): move?
+func (nc *DefaultNodeNetworkController) AddNetwork(nInfo util.NetInfo, masqCTMark uint) error {
+	return nc.secondaryNetworkGateway.AddNetwork(nInfo, masqCTMark)
+}
+
+// TODO(dceara): move?
+func (nc *DefaultNodeNetworkController) DelNetwork(nInfo util.NetInfo) error {
+	return nc.secondaryNetworkGateway.DelNetwork(nInfo)
 }
 
 func newDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, stopChan chan struct{},
@@ -705,7 +723,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	}()
 
 	// Bootstrap flows in OVS if just normal flow is present
-	if err := bootstrapOVSFlows(); err != nil {
+	if err := bootstrapOVSFlows(nc.name); err != nil {
 		return fmt.Errorf("failed to bootstrap OVS flows: %w", err)
 	}
 

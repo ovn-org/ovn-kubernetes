@@ -48,6 +48,8 @@ const (
 	EXTSwitchToGWRouterPrefix    = "etor-"
 	GWRouterToExtSwitchPrefix    = "rtoe-"
 	EgressGWSwitchPrefix         = "exgw-"
+	PatchPortPrefix              = "patch-"
+	PatchPortSuffix              = "-to-br-int"
 
 	NodeLocalSwitch = "node_local_switch"
 
@@ -213,4 +215,8 @@ const (
 	// entry for the gateway routers. After this time, the entry is removed and
 	// may be refreshed with a new ARP request.
 	GRMACBindingAgeThreshold = "300"
+
+	// UserDefinedNetworkMasqueradeIPBase define the base to calculate udn
+	// masquerade IPs
+	UserDefinedNetworkMasqueradeIPBase = 10
 )
