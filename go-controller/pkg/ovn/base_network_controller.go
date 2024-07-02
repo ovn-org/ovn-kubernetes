@@ -9,6 +9,7 @@ import (
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/pod"
+	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
@@ -25,7 +26,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-
 	kapi "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
@@ -36,6 +36,8 @@ import (
 	ref "k8s.io/client-go/tools/reference"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
+
+	nadlister "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
 )
 
 // CommonNetworkControllerInfo structure is place holder for all fields shared among controllers.
@@ -696,8 +698,12 @@ func (bnc *BaseNetworkController) isLocalZoneNode(node *kapi.Node) bool {
 
 // getActiveNetworkForNamespace returns the active network for the given namespace
 // and is a wrapper around util.GetActiveNetworkForNamespace
-func (bnc *BaseNetworkController) getActiveNetworkForNamespace(namespace string) (string, error) {
-	return util.GetActiveNetworkForNamespace(namespace, bnc.watchFactory.NADInformer().Lister())
+func (bnc *BaseNetworkController) findActiveNetworkForNamespace(namespace string) (*ovncnitypes.NetConf, error) {
+	var nadLister nadlister.NetworkAttachmentDefinitionLister
+	if util.IsNetworkSegmentationSupportEnabled() {
+		nadLister = bnc.watchFactory.NADInformer().Lister()
+	}
+	return util.FindActiveNetworkForNamespace(namespace, nadLister)
 }
 
 // GetNetworkRole returns the role of this controller's
@@ -733,18 +739,18 @@ func (bnc *BaseNetworkController) GetNetworkRole(pod *kapi.Pod) (string, error) 
 		}
 		return types.NetworkRoleSecondary, nil
 	}
-	activeNetwork, err := bnc.getActiveNetworkForNamespace(pod.Namespace)
+	activeNetwork, err := bnc.findActiveNetworkForNamespace(pod.Namespace)
 	if err != nil {
 		return "", err
 	}
-	if activeNetwork == types.UnknownNetworkName {
+	if activeNetwork == nil {
 		err := fmt.Errorf("unable to determine what is the"+
 			"primary network for this pod %s; please remove multiple primary network"+
 			"NADs from namespace %s", pod.Name, pod.Namespace)
 		bnc.recordPodErrorEvent(pod, err)
 		return "", err
 	}
-	if activeNetwork == bnc.GetNetworkName() {
+	if activeNetwork.Name == bnc.GetNetworkName() {
 		return types.NetworkRolePrimary, nil
 	}
 	if bnc.IsDefault() {

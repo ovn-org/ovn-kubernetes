@@ -5,7 +5,6 @@ import "time"
 const (
 	// Default network name
 	DefaultNetworkName    = "default"
-	UnknownNetworkName    = "unknown"
 	K8sPrefix             = "k8s-"
 	HybridOverlayPrefix   = "int-"
 	HybridOverlayGRSubfix = "-gr"
