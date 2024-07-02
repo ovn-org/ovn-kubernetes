@@ -637,6 +637,10 @@ func (oc *DefaultNetworkController) addUpdateLocalNodeEvent(node *kapi.Node, nSy
 			return fmt.Errorf("nodeAdd: error adding node %q: %w", node.Name, err)
 		}
 		oc.addNodeFailed.Delete(node.Name)
+		// delete stale chassis in SBDB if any
+		if err := oc.deleteStaleNodeChassis(node); err != nil {
+			errs = append(errs, err)
+		}
 	}
 
 	// since the nodeSync objects are created knowing if hybridOverlay is enabled this should work
@@ -666,11 +670,6 @@ func (oc *DefaultNetworkController) addUpdateLocalNodeEvent(node *kapi.Node, nSy
 		} else {
 			oc.mgmtPortFailed.Delete(node.Name)
 		}
-	}
-
-	// delete stale chassis in SBDB if any
-	if err := oc.deleteStaleNodeChassis(node); err != nil {
-		errs = append(errs, err)
 	}
 
 	annotator := kube.NewNodeAnnotator(oc.kube, node.Name)
