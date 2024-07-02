@@ -31,6 +31,10 @@ spec:
         type: infra
         kubernetes.io/os: "linux"
     spec:
+      {{- if hasKey .Values.global "imagePullSecretName" }}
+      imagePullSecrets:
+      - name: {{ .Values.global.imagePullSecretName }}
+      {{- end }}
       priorityClassName: "system-cluster-critical"
       # Requires fairly broad permissions - ability to read all services and network functions as well
       # as all pods.

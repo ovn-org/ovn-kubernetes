@@ -25,6 +25,10 @@ spec:
         openshift.io/component: network
         kubernetes.io/os: "linux"
     spec:
+      {{- if hasKey .Values.global "imagePullSecretName" }}
+      imagePullSecrets:
+      - name: {{ .Values.global.imagePullSecretName }}
+      {{- end }}
       affinity:
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:

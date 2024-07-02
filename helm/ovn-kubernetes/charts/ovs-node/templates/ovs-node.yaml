@@ -27,6 +27,10 @@ spec:
         kubernetes.io/os: "linux"
       annotations:
     spec:
+      {{- if hasKey .Values.global "imagePullSecretName" }}
+      imagePullSecrets:
+      - name: {{ .Values.global.imagePullSecretName }}
+      {{- end }}
       priorityClassName: "system-cluster-critical"
       hostNetwork: true
       dnsPolicy: Default
