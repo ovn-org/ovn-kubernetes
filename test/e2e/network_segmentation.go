@@ -65,40 +65,8 @@ var _ = Describe("Network Segmentation", func() {
 				)
 				Expect(err).NotTo(HaveOccurred())
 
-				By("instantiating the server pod")
-				serverPod, err := cs.CoreV1().Pods(serverPodConfig.namespace).Create(
-					context.Background(),
-					generatePodSpec(serverPodConfig),
-					metav1.CreateOptions{},
-				)
-				Expect(err).NotTo(HaveOccurred())
-				Expect(serverPod).NotTo(BeNil())
-
-				By("asserting the server pod reaches the `Ready` state")
-				Eventually(func() v1.PodPhase {
-					updatedPod, err := cs.CoreV1().Pods(f.Namespace.Name).Get(context.Background(), serverPod.GetName(), metav1.GetOptions{})
-					if err != nil {
-						return v1.PodFailed
-					}
-					return updatedPod.Status.Phase
-				}, 2*time.Minute, 6*time.Second).Should(Equal(v1.PodRunning))
-
-				By("instantiating the *client* pod")
-				clientPod, err := cs.CoreV1().Pods(clientPodConfig.namespace).Create(
-					context.Background(),
-					generatePodSpec(clientPodConfig),
-					metav1.CreateOptions{},
-				)
-				Expect(err).NotTo(HaveOccurred())
-
-				By("asserting the client pod reaches the `Ready` state")
-				Eventually(func() v1.PodPhase {
-					updatedPod, err := cs.CoreV1().Pods(f.Namespace.Name).Get(context.Background(), clientPod.GetName(), metav1.GetOptions{})
-					if err != nil {
-						return v1.PodFailed
-					}
-					return updatedPod.Status.Phase
-				}, 2*time.Minute, 6*time.Second).Should(Equal(v1.PodRunning))
+				runUDNPod(cs, f.Namespace.Name, serverPodConfig, nil)
+				runUDNPod(cs, f.Namespace.Name, clientPodConfig, nil)
 
 				var serverIP string
 				for i, cidr := range strings.Split(netConfig.cidr, ",") {
@@ -107,8 +75,8 @@ var _ = Describe("Network Segmentation", func() {
 						serverIP, err = podIPsForUserDefinedPrimaryNetwork(
 							cs,
 							f.Namespace.Name,
-							serverPod.GetName(),
-							namespacedName(serverPod.Namespace, netConfig.name),
+							serverPodConfig.name,
+							namespacedName(f.Namespace.Name, netConfig.name),
 							i,
 						)
 						Expect(err).NotTo(HaveOccurred())
@@ -229,4 +197,30 @@ func userDefinedNetworkStatus(pod *v1.Pod, networkName string) (PodAnnotation, e
 	}
 
 	return *netStatus, nil
+}
+
+func runUDNPod(cs clientset.Interface, namespace string, serverPodConfig podConfiguration, podSpecTweak func(*v1.Pod)) *v1.Pod {
+	By(fmt.Sprintf("instantiating the UDN pod %s", serverPodConfig.name))
+	podSpec := generatePodSpec(serverPodConfig)
+	if podSpecTweak != nil {
+		podSpecTweak(podSpec)
+	}
+	serverPod, err := cs.CoreV1().Pods(serverPodConfig.namespace).Create(
+		context.Background(),
+		podSpec,
+		metav1.CreateOptions{},
+	)
+	Expect(err).NotTo(HaveOccurred())
+	Expect(serverPod).NotTo(BeNil())
+
+	By(fmt.Sprintf("asserting the UDN pod %s reaches the `Ready` state", serverPodConfig.name))
+	var updatedPod *v1.Pod
+	Eventually(func() v1.PodPhase {
+		updatedPod, err = cs.CoreV1().Pods(namespace).Get(context.Background(), serverPod.GetName(), metav1.GetOptions{})
+		if err != nil {
+			return v1.PodFailed
+		}
+		return updatedPod.Status.Phase
+	}, 2*time.Minute, 6*time.Second).Should(Equal(v1.PodRunning))
+	return updatedPod
 }
