@@ -247,7 +247,7 @@ func (cm *NetworkControllerManager) createACLLoggingMeter() error {
 		Action: ovntypes.MeterAction,
 		Rate:   config.Logging.ACLLoggingRateLimit,
 	}
-	ops, err := libovsdbops.CreateMeterBandOps(cm.nbClient, nil, band)
+	ops, err := libovsdbops.CreateOrUpdateMeterBandOps(cm.nbClient, nil, []*nbdb.MeterBand{band})
 	if err != nil {
 		return fmt.Errorf("can't create meter band %v: %v", band, err)
 	}

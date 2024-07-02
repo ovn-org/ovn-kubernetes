@@ -19,7 +19,13 @@ func TestEnsureDefaultCOPP(t *testing.T) {
 	meterBand := &nbdb.MeterBand{
 		UUID:   "meter-band-UUID",
 		Action: types.MeterAction,
-		Rate:   int(25), // hard-coding for now. TODO(tssurya): make this configurable if needed
+		Rate:   types.DefaultRateLimit, // hard-coding for now. TODO(tssurya): make this configurable if needed
+	}
+	bfdBand := &nbdb.MeterBand{
+		UUID:        "bfd-meter-band-UUID",
+		Action:      types.MeterAction,
+		Rate:        types.BFDRateLimit,
+		ExternalIDs: map[string]string{getMeterNameForProtocol(OVNBFDRateLimiter): "true"},
 	}
 
 	var meters []*nbdb.Meter
@@ -32,6 +38,9 @@ func TestEnsureDefaultCOPP(t *testing.T) {
 			Unit:  types.PacketsPerSecond,
 			Bands: []string{meterBand.UUID},
 		})
+		if defaultProtocolNames[i] == OVNBFDRateLimiter {
+			meters[len(meters)-1].Bands = []string{bfdBand.UUID}
+		}
 	}
 
 	expectedNBData := []libovsdbtest.TestData{
@@ -41,6 +50,7 @@ func TestEnsureDefaultCOPP(t *testing.T) {
 			Meters: meterMap,
 		},
 		meterBand,
+		bfdBand,
 	}
 	for _, m := range meters {
 		expectedNBData = append(expectedNBData, m)
@@ -53,6 +63,7 @@ func TestEnsureDefaultCOPP(t *testing.T) {
 			Meters: meterMap,
 		},
 		meterBand,
+		bfdBand,
 	}
 	for _, m := range meters {
 		existingNamedCOPPNBData = append(existingNamedCOPPNBData, m)
@@ -72,6 +83,7 @@ func TestEnsureDefaultCOPP(t *testing.T) {
 			Meters: meterMap,
 		},
 		meterBand,
+		bfdBand,
 	}
 	for _, m := range meters {
 		multipleEmptyCOPPNameNBData = append(multipleEmptyCOPPNameNBData, m)
@@ -96,6 +108,7 @@ func TestEnsureDefaultCOPP(t *testing.T) {
 			Meters: meterMap,
 		},
 		meterBand,
+		bfdBand,
 	}
 	for _, m := range meters {
 		multipleEmptyAndNamedCOPPNBData = append(multipleEmptyAndNamedCOPPNBData, m)
@@ -160,7 +173,7 @@ func TestEnsureDefaultCOPP(t *testing.T) {
 				t.Fatal(fmt.Errorf("EnsureDefaultCOPP() error = %v", err))
 			}
 
-			matcher := libovsdbtest.HaveData(tt.expectedNbdb.NBData)
+			matcher := libovsdbtest.HaveDataIgnoringUUIDs(tt.expectedNbdb.NBData)
 			success, err := matcher.Match(nbClient)
 
 			if !success {

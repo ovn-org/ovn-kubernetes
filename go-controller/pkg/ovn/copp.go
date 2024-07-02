@@ -43,6 +43,13 @@ func getMeterNameForProtocol(protocol string) string {
 	return protocol + "-" + types.OvnRateLimitingMeter
 }
 
+func getMeterBand(rate int) *nbdb.MeterBand {
+	return &nbdb.MeterBand{
+		Action: types.MeterAction,
+		Rate:   rate,
+	}
+}
+
 // EnsureDefaultCOPP creates the default COPP that needs to be added to each GR
 // if not already present. Also cleans up old COPP entries if required.
 func EnsureDefaultCOPP(nbClient libovsdbclient.Client) (string, error) {
@@ -54,13 +61,12 @@ func EnsureDefaultCOPP(nbClient libovsdbclient.Client) (string, error) {
 		return "", fmt.Errorf("failed to delete duplicate COPPs: %w", err)
 	}
 
-	band := &nbdb.MeterBand{
-		Action: types.MeterAction,
-		Rate:   int(25), // hard-coding for now. TODO(tssurya): make this configurable if needed
-	}
-	ops, err = libovsdbops.CreateMeterBandOps(nbClient, ops, band)
+	defaultBand := getMeterBand(types.DefaultRateLimit)
+	bfdBand := getMeterBand(types.BFDRateLimit)
+	bfdBand.ExternalIDs = map[string]string{getMeterNameForProtocol(OVNBFDRateLimiter): "true"}
+	ops, err = libovsdbops.CreateOrUpdateMeterBandOps(nbClient, ops, []*nbdb.MeterBand{defaultBand, bfdBand})
 	if err != nil {
-		return "", fmt.Errorf("can't create meter band %v: %v", band, err)
+		return "", fmt.Errorf("can't create meter bands %v/%v: %v", defaultBand, bfdBand, err)
 	}
 
 	meterNames := make(map[string]string, len(defaultProtocolNames))
@@ -75,7 +81,11 @@ func EnsureDefaultCOPP(nbClient libovsdbclient.Client) (string, error) {
 			Fair: &meterFairness,
 			Unit: types.PacketsPerSecond,
 		}
-		ops, err = libovsdbops.CreateOrUpdateMeterOps(nbClient, ops, meter, []*nbdb.MeterBand{band},
+		requiredBand := defaultBand
+		if protocol == OVNBFDRateLimiter {
+			requiredBand = bfdBand
+		}
+		ops, err = libovsdbops.CreateOrUpdateMeterOps(nbClient, ops, meter, []*nbdb.MeterBand{requiredBand},
 			&meter.Bands, &meter.Fair, &meter.Unit)
 		if err != nil {
 			return "", fmt.Errorf("can't create meter %v: %v", meter, err)
