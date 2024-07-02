@@ -53,6 +53,8 @@ type BasicNetInfo interface {
 	GetNetworkScopedSwitchName(nodeName string) string
 	GetNetworkScopedJoinSwitchName() string
 	GetNetworkScopedExtSwitchName(nodeName string) string
+	GetNetworkScopedPatchPortName(bridgeID, nodeName string) string
+	GetNetworkScopedExtPortName(bridgeID, nodeName string) string
 }
 
 // NetInfo correlates which NADs refer to a network in addition to the basic
@@ -126,6 +128,14 @@ func (nInfo *DefaultNetInfo) GetNetworkScopedJoinSwitchName() string {
 
 func (nInfo *DefaultNetInfo) GetNetworkScopedExtSwitchName(nodeName string) string {
 	return GetExtSwitchFromNode(nInfo.GetNetworkScopedName(nodeName))
+}
+
+func (nInfo *DefaultNetInfo) GetNetworkScopedPatchPortName(bridgeID, nodeName string) string {
+	return GetPatchPortName(bridgeID, nInfo.GetNetworkScopedName(nodeName))
+}
+
+func (nInfo *DefaultNetInfo) GetNetworkScopedExtPortName(bridgeID, nodeName string) string {
+	return GetExtPortName(bridgeID, nInfo.GetNetworkScopedName(nodeName))
 }
 
 // GetNADs returns the NADs associated with the network, no op for default
@@ -317,6 +327,14 @@ func (nInfo *secondaryNetInfo) GetNetworkScopedJoinSwitchName() string {
 
 func (nInfo *secondaryNetInfo) GetNetworkScopedExtSwitchName(nodeName string) string {
 	return GetExtSwitchFromNode(nInfo.GetNetworkScopedName(nodeName))
+}
+
+func (nInfo *secondaryNetInfo) GetNetworkScopedPatchPortName(bridgeID, nodeName string) string {
+	return GetPatchPortName(bridgeID, nInfo.GetNetworkScopedName(nodeName))
+}
+
+func (nInfo *secondaryNetInfo) GetNetworkScopedExtPortName(bridgeID, nodeName string) string {
+	return GetExtPortName(bridgeID, nInfo.GetNetworkScopedName(nodeName))
 }
 
 // getPrefix returns if the logical entities prefix for this network
