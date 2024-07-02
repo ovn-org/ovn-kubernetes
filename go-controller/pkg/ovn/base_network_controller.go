@@ -700,27 +700,60 @@ func (bnc *BaseNetworkController) getActiveNetworkForNamespace(namespace string)
 	return util.GetActiveNetworkForNamespace(namespace, bnc.watchFactory.NADInformer().Lister())
 }
 
-// isPrimaryNetwork returns if pod's primary network is same
-// as this controller's network
-func (bnc *BaseNetworkController) isPrimaryNetwork(pod *kapi.Pod) (bool, error) {
+// GetNetworkRole returns the role of this controller's
+// network for the given pod
+// Expected values are:
+// (1) "primary" if this network is the primary network of the pod.
+//
+//	The "default" network is the primary network of any pod usually
+//	unless user-defined-network-segmentation feature has been activated.
+//	If network segmentation feature is enabled then any user defined
+//	network can be the primary network of the pod.
+//
+// (2) "secondary" if this network is the secondary network of the pod.
+//
+//	Only user defined networks can be secondary networks for a pod.
+//
+// (3) "infrastructure-locked" is applicable only to "default" network if
+//
+//	a user defined network is the "primary" network for this pod. This
+//	signifies the "default" network is only used for probing and
+//	is otherwise locked for all intents and purposes.
+//
+// NOTE: Like in other places, expectation is this function is always called
+// from controller's that have some relation to the given pod, unrelated
+// networks are treated as secondary networks so caller has to be careful
+func (bnc *BaseNetworkController) GetNetworkRole(pod *kapi.Pod) (string, error) {
 	if !util.IsNetworkSegmentationSupportEnabled() {
 		// if user defined network segmentation is not enabled
 		// then we know pod's primary network is "default" and
 		// pod's secondary network is not its NOT primary network
-		return bnc.IsDefault(), nil
+		if bnc.IsDefault() {
+			return types.NetworkRolePrimary, nil
+		}
+		return types.NetworkRoleSecondary, nil
 	}
 	activeNetwork, err := bnc.getActiveNetworkForNamespace(pod.Namespace)
 	if err != nil {
-		return false, err
+		return "", err
 	}
 	if activeNetwork == types.UnknownNetworkName {
 		err := fmt.Errorf("unable to determine what is the"+
 			"primary network for this pod %s; please remove multiple primary network"+
 			"NADs from namespace %s", pod.Name, pod.Namespace)
 		bnc.recordPodErrorEvent(pod, err)
-		return false, err
+		return "", err
 	}
-	return activeNetwork == bnc.GetNetworkName(), nil
+	if activeNetwork == bnc.GetNetworkName() {
+		return types.NetworkRolePrimary, nil
+	}
+	if bnc.IsDefault() {
+		// if default network was not the primary network,
+		// then when UDN is turned on, default network is the
+		// infrastructure-locked network forthis pod
+		return types.NetworkRoleInfrastructure, nil
+	}
+	return types.NetworkRoleSecondary, nil
 }
 
 func (bnc *BaseNetworkController) isLayer2Interconnect() bool {

@@ -416,7 +416,7 @@ func newLayer3NetConfInfo(netconf *ovncnitypes.NetConf) (NetInfo, error) {
 
 	ni := &secondaryNetInfo{
 		netName:        netconf.Name,
-		primaryNetwork: netconf.PrimaryNetwork,
+		primaryNetwork: netconf.Role == types.NetworkRolePrimary,
 		topology:       types.Layer3Topology,
 		subnets:        subnets,
 		mtu:            netconf.MTU,
@@ -434,7 +434,7 @@ func newLayer2NetConfInfo(netconf *ovncnitypes.NetConf) (NetInfo, error) {
 
 	ni := &secondaryNetInfo{
 		netName:            netconf.Name,
-		primaryNetwork:     netconf.PrimaryNetwork,
+		primaryNetwork:     netconf.Role == types.NetworkRolePrimary,
 		topology:           types.Layer2Topology,
 		subnets:            subnets,
 		excludeSubnets:     excludes,
@@ -595,8 +595,13 @@ func ParseNetConf(netattachdef *nettypes.NetworkAttachmentDefinition) (*ovncnity
 		return nil, fmt.Errorf("layer3 topology does not allow persistent IPs")
 	}
 
-	if netconf.PrimaryNetwork && netconf.Topology == types.LocalnetTopology {
-		return nil, fmt.Errorf("localnet topology does not allow primaryNetwork:true")
+	if netconf.Role != "" && netconf.Topology == types.LocalnetTopology {
+		return nil, fmt.Errorf("unexpected network field \"role\" %s for \"localnet\" topology, "+
+			"localnet topology does not allow network roles to be set since its always a secondary network", netconf.Role)
+	}
+
+	if netconf.Role != "" && netconf.Role != types.NetworkRolePrimary && netconf.Role != types.NetworkRoleSecondary {
+		return nil, fmt.Errorf("invalid network role value %s", netconf.Role)
 	}
 
 	if netconf.IPAM.Type != "" {

@@ -7,7 +7,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-func GenerateNAD(networkName, name, namespace, topology, cidr string, isPrimary bool) *nadapi.NetworkAttachmentDefinition {
+func GenerateNAD(networkName, name, namespace, topology, cidr, role string) *nadapi.NetworkAttachmentDefinition {
 	nadSpec := fmt.Sprintf(
 		`
 {
@@ -18,14 +18,14 @@ func GenerateNAD(networkName, name, namespace, topology, cidr string, isPrimary 
         "subnets": %q,
         "mtu": 1300,
         "netAttachDefName": %q,
-        "primaryNetwork": %t
+        "role": %q
 }
 `,
 		networkName,
 		topology,
 		cidr,
 		fmt.Sprintf("%s/%s", namespace, name),
-		isPrimary,
+		role,
 	)
 	return &nadapi.NetworkAttachmentDefinition{
 		ObjectMeta: metav1.ObjectMeta{

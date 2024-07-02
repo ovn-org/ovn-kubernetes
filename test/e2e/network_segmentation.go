@@ -128,12 +128,12 @@ var _ = Describe("Network Segmentation", func() {
 			Entry(
 				"two pods connected over a L2 dualstack primary UDN",
 				networkAttachmentConfigParams{
-					name:           nadName,
-					networkName:    userDefinedNetworkName,
-					topology:       "layer2",
-					cidr:           fmt.Sprintf("%s,%s", userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
-					excludeCIDRs:   []string{gatewayIPv4Address + "/32", gatewayIPv6Address + "/128"},
-					primaryNetwork: true,
+					name:         nadName,
+					networkName:  userDefinedNetworkName,
+					topology:     "layer2",
+					cidr:         fmt.Sprintf("%s,%s", userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+					excludeCIDRs: []string{gatewayIPv4Address + "/32", gatewayIPv6Address + "/128"},
+					role:         "primary",
 				},
 				*podConfig(
 					"client-pod",
@@ -152,12 +152,12 @@ var _ = Describe("Network Segmentation", func() {
 			Entry(
 				"two pods connected over a L3 dualstack primary UDN",
 				networkAttachmentConfigParams{
-					name:           nadName,
-					networkName:    userDefinedNetworkName,
-					topology:       "layer3",
-					cidr:           fmt.Sprintf("%s,%s", userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
-					excludeCIDRs:   []string{gatewayIPv4Address + "/32", gatewayIPv6Address + "/128"},
-					primaryNetwork: true,
+					name:         nadName,
+					networkName:  userDefinedNetworkName,
+					topology:     "layer3",
+					cidr:         fmt.Sprintf("%s,%s", userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+					excludeCIDRs: []string{gatewayIPv4Address + "/32", gatewayIPv6Address + "/128"},
+					role:         "primary",
 				},
 				*podConfig(
 					"client-pod",
