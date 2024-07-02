@@ -1,10 +1,11 @@
 # Name of the Feature
 
 * Add diagrams wherever possible to explain things better
-* Keep the end user in mind as target audience when you write this documentation; not an ovn expert
+* Keep the end user, new community contributors in mind as target audience when you write this documentation; not an ovn expert
 * Remove sections if they are not relevant for your feature
 * Add new sections if your feature needs them
-* This document should empower end users to start playing around with this feature
+* This document should empower end users to start playing around with this feature and understand implementation details
+* If you are looking for inspiration see admin network policies feature docs for a good example.
 
 ## Introduction
 
