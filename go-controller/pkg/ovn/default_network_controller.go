@@ -262,7 +262,7 @@ func (oc *DefaultNetworkController) initRetryFramework() {
 func (oc *DefaultNetworkController) newRetryFramework(
 	objectType reflect.Type) *retry.RetryFramework {
 	eventHandler := &defaultNetworkControllerEventHandler{
-		baseHandler:     baseNetworkControllerEventHandler{},
+		baseHandler:     newBaseNetworkControllerEventHandler(oc.recorder),
 		objType:         objectType,
 		watchFactory:    oc.watchFactory,
 		oc:              oc,

@@ -573,7 +573,17 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *kapi.Pod, nadName
 	}
 
 	// CNI depends on the flows from port security, delay setting it until end
-	lsp.PortSecurity = addresses
+	if skipPortSecurity := util.SkipSpoofCheckForNAD(pod.Annotations, nadName); skipPortSecurity {
+		if config.OVNKubernetesFeature.EnableInsecureLogicalSwitchPort {
+			// There are pods which requires the spoof check to be disabled, skip setting port security
+			klog.V(5).Infof("Skip setting port security for port %s on NAD %s", portName, nadName)
+		} else {
+			err = fmt.Errorf("feature allow-insecure-lsp is not enabled, will not skip spoof check")
+			return
+		}
+	} else {
+		lsp.PortSecurity = addresses
+	}
 
 	// On layer2 topology with interconnect, we need to add specific port config
 	if bnc.isLayer2Interconnect() {

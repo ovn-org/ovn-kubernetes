@@ -302,6 +302,8 @@ spec:
               key: host_network_namespace
         - name: OVN_ENABLE_PERSISTENT_IPS
           value: "{{ ovn_enable_persistent_ips }}"
+        - name: OVN_ENABLE_INSECURE_LSP
+          value: "{{ ovn_enable_insecure_lsp }}"
       # end of container
 
       volumes:

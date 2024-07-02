@@ -478,6 +478,15 @@ unlimited
 			<td>Separate log file for libovsdb client </td>
 		</tr>
 		<tr>
+			<td>global.enableInsecureLsp</td>
+			<td>bool</td>
+			<td><pre lang="json">
+""
+</pre>
+</td>
+			<td>Allow user to skip port security for a pod's network </td>
+		</tr>
+		<tr>
 			<td>global.monitorAll</td>
 			<td>string</td>
 			<td><pre lang="json">

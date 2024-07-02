@@ -129,6 +129,7 @@ func PodAnnotation2PodInfo(podAnnotation map[string]string, podNADAnnotation *ut
 		NetName:              netName,
 		NADName:              nadName,
 		EnableUDPAggregation: config.Default.EnableUDPAggregation,
+		SkipSpoofCheck:       util.SkipSpoofCheckForNAD(podAnnotation, nadName),
 	}
 	return podInterfaceInfo, nil
 }

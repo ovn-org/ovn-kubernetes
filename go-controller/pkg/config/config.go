@@ -407,6 +407,7 @@ type OVNKubernetesFeatureConfig struct {
 	EnablePersistentIPs             bool `gcfg:"enable-persistent-ips"`
 	EnableDNSNameResolver           bool `gcfg:"enable-dns-name-resolver"`
 	EnableServiceTemplateSupport    bool `gcfg:"enable-svc-template-support"`
+	EnableInsecureLogicalSwitchPort bool `gcfg:"enable-insecure-lsp"`
 }
 
 // GatewayMode holds the node gateway mode
@@ -1068,6 +1069,12 @@ var OVNK8sFeatureFlags = []cli.Flag{
 		Usage:       "Configure to use svc-template with ovn-kubernetes.",
 		Destination: &cliConfig.OVNKubernetesFeature.EnableServiceTemplateSupport,
 		Value:       OVNKubernetesFeature.EnableServiceTemplateSupport,
+	},
+	&cli.BoolFlag{
+		Name:        "enable-insecure-lsp",
+		Usage:       "Allow users to skip port security of a logical switch port ",
+		Destination: &cliConfig.OVNKubernetesFeature.EnableInsecureLogicalSwitchPort,
+		Value:       OVNKubernetesFeature.EnableInsecureLogicalSwitchPort,
 	},
 }
 

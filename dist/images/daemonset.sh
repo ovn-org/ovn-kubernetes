@@ -98,6 +98,7 @@ OVN_ENABLE_SVC_TEMPLATE_SUPPORT="true"
 IN_UPGRADE=
 # northd-backoff-interval, in ms
 OVN_NORTHD_BACKOFF_INTERVAL=
+OVN_ENABLE_INSECURE_LSP="false"
 
 # Parse parameters given as arguments to this script.
 while [ "$1" != "" ]; do
@@ -350,6 +351,9 @@ while [ "$1" != "" ]; do
   --enable-svc-template-support)
     OVN_ENABLE_SVC_TEMPLATE_SUPPORT=$VALUE
     ;;
+  --enable-insecure-lsp)
+    OVN_ENABLE_INSECURE_LSP=$VALUE
+    ;;
   *)
     echo "WARNING: unknown parameter \"$PARAM\""
     exit 1
@@ -536,6 +540,9 @@ echo "ovn_enable_persistent_ips: ${ovn_enable_persistent_ips}"
 
 ovn_enable_svc_template_support=${OVN_ENABLE_SVC_TEMPLATE_SUPPORT}
 echo "ovn_enable_svc_template_support: ${ovn_enable_svc_template_support}"
+
+ovn_enable_insecure_lsp=${OVN_ENABLE_INSECURE_LSP}
+echo "ovn_enable_insecure_lsp: ${ovn_enable_insecure_lsp}"
 
 ovn_image=${ovnkube_image} \
   ovnkube_compact_mode_enable=${ovnkube_compact_mode_enable} \
@@ -725,6 +732,7 @@ ovn_image=${ovnkube_image} \
   ovn_enable_ovnkube_identity=${ovn_enable_ovnkube_identity} \
   ovn_enable_persistent_ips=${ovn_enable_persistent_ips} \
   ovn_enable_svc_template_support=${ovn_enable_svc_template_support} \
+  ovn_enable_insecure_lsp=${ovn_enable_insecure_lsp} \
   jinjanate ../templates/ovnkube-master.yaml.j2 -o ${output_dir}/ovnkube-master.yaml
 
 ovn_image=${ovnkube_image} \

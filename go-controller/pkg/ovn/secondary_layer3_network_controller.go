@@ -78,6 +78,7 @@ func (h *secondaryLayer3NetworkControllerEventHandler) RecordSuccessEvent(obj in
 
 // RecordErrorEvent records the error event on this given object.
 func (h *secondaryLayer3NetworkControllerEventHandler) RecordErrorEvent(obj interface{}, reason string, err error) {
+	h.baseHandler.recordErrorEvent(h.objType, obj, reason, err)
 }
 
 // IsResourceScheduled returns true if the given object has been scheduled.
@@ -311,7 +312,7 @@ func (oc *SecondaryLayer3NetworkController) initRetryFramework() {
 func (oc *SecondaryLayer3NetworkController) newRetryFramework(
 	objectType reflect.Type) *retry.RetryFramework {
 	eventHandler := &secondaryLayer3NetworkControllerEventHandler{
-		baseHandler:  baseNetworkControllerEventHandler{},
+		baseHandler:  newBaseNetworkControllerEventHandler(oc.recorder),
 		objType:      objectType,
 		watchFactory: oc.watchFactory,
 		oc:           oc,
