@@ -13,6 +13,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/pod"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/generator/udn"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
@@ -586,28 +587,21 @@ func (oc *SecondaryLayer3NetworkController) addUpdateLocalNodeEvent(node *kapi.N
 				oc.watchFactory,
 			)
 
-			// TODO: fill these w/ actual values
-			var (
-				l3GWConfig     *util.L3GatewayConfig
-				hostAddresses  []string
-				clusterSubnets []*net.IPNet
-				gwLRPIps       []*net.IPNet
-				externalIPs    []net.IP
-			)
-
-			// TODO: remove this if once we have all the values to sync the GW
-			if l3GWConfig != nil {
-
+			gwConfig, err := oc.nodeGatewayConfig(node)
+			if err != nil {
+				errs = append(errs, fmt.Errorf("failed to generate node GW configuration: %v", err))
+				oc.gatewaysFailed.Store(node.Name, true)
+			} else {
 				if err := gwManager.syncNodeGateway(
 					node,
-					l3GWConfig,
-					hostSubnets,
-					hostAddresses,
-					clusterSubnets,
-					gwLRPIps,
+					gwConfig.config,
+					gwConfig.hostSubnets,
+					gwConfig.hostAddrs,
+					gwConfig.hostSubnets,
+					gwConfig.gwLRPIPs,
 					oc.SCTPSupport,
 					oc.ovnClusterLRPToJoinIfAddrs,
-					externalIPs,
+					gwConfig.externalIPs,
 				); err != nil {
 					errs = append(errs, fmt.Errorf(
 						"failed to sync node GW for network %q: %v",
@@ -618,7 +612,6 @@ func (oc *SecondaryLayer3NetworkController) addUpdateLocalNodeEvent(node *kapi.N
 				} else {
 					oc.gatewaysFailed.Delete(node.Name)
 				}
-
 			}
 		}
 
@@ -773,4 +766,86 @@ func (oc *SecondaryLayer3NetworkController) gatherJoinSwitchIPs() error {
 	}
 	oc.ovnClusterLRPToJoinIfAddrs = gwLRPIfAddrs
 	return nil
+}
+
+type SecondaryL3GatewayConfig struct {
+	config      *util.L3GatewayConfig
+	hostSubnets []*net.IPNet
+	gwLRPIPs    []*net.IPNet
+	hostAddrs   []string
+	externalIPs []net.IP
+}
+
+func (oc *SecondaryLayer3NetworkController) nodeGatewayConfig(node *kapi.Node) (*SecondaryL3GatewayConfig, error) {
+	l3GatewayConfig, err := util.ParseNodeL3GatewayAnnotation(node)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get node %s network %s L3 gateway config: %v", node.Name, oc.GetNetworkName(), err)
+	}
+
+	networkName := oc.GetNetworkName()
+	networkID, err := oc.getNetworkID()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get networkID for network %q: %v", networkName, err)
+	}
+
+	var (
+		masqIPs  []*net.IPNet
+		v4MasqIP *net.IPNet
+		v6MasqIP *net.IPNet
+	)
+
+	if config.IPv4Mode {
+		v4MasqIPs, err := udn.AllocateV4MasqueradeIPs(networkID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get v4 masquerade IP, network %s (%d): %v", networkName, networkID, err)
+		}
+		v4MasqIP = v4MasqIPs.GatewayRouter
+		masqIPs = append(masqIPs, v4MasqIP)
+	}
+	if config.IPv6Mode {
+		v6MasqIPs, err := udn.AllocateV6MasqueradeIPs(networkID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get v6 masquerade IP, network %s (%d): %v", networkName, networkID, err)
+		}
+		v6MasqIP = v6MasqIPs.GatewayRouter
+		masqIPs = append(masqIPs, v6MasqIP)
+	}
+
+	l3GatewayConfig.IPAddresses = append(l3GatewayConfig.IPAddresses, masqIPs...)
+
+	// Always SNAT to the per network masquerade IP.
+	var externalIPs []net.IP
+	if config.IPv4Mode && v4MasqIP != nil {
+		externalIPs = append(externalIPs, v4MasqIP.IP)
+	}
+	if config.IPv6Mode && v6MasqIP != nil {
+		externalIPs = append(externalIPs, v6MasqIP.IP)
+	}
+
+	var hostAddrs []string
+	for _, externalIP := range externalIPs {
+		hostAddrs = append(hostAddrs, externalIP.String())
+	}
+
+	// Use the host subnets present in the network attachment definition.
+	hostSubnets := make([]*net.IPNet, 0, len(oc.Subnets()))
+	for _, subnet := range oc.Subnets() {
+		hostSubnets = append(hostSubnets, subnet.CIDR)
+	}
+
+	gwLRPIPs, err := util.ParseNodeGatewayRouterJoinAddrs(node, oc.GetNetworkName())
+	if err != nil {
+		return nil, fmt.Errorf("failed extracting node %q GW router join subnet IP for layer3 network %q: %w", node.Name, networkName, err)
+	}
+
+	// Overwrite the primary interface ID with the correct, per-network one.
+	l3GatewayConfig.InterfaceID = oc.GetNetworkScopedExtPortName(l3GatewayConfig.BridgeID, node.Name)
+
+	return &SecondaryL3GatewayConfig{
+		config:      l3GatewayConfig,
+		hostSubnets: hostSubnets,
+		gwLRPIPs:    gwLRPIPs,
+		hostAddrs:   hostAddrs,
+		externalIPs: externalIPs,
+	}, nil
 }
