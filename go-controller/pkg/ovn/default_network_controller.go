@@ -854,7 +854,7 @@ func (h *defaultNetworkControllerEventHandler) AddResource(obj interface{}, from
 
 	case factory.EgressFwNodeType:
 		node := obj.(*kapi.Node)
-		if err = h.oc.updateEgressFirewallForNode(nil, node); err != nil {
+		if err = h.oc.updateEgressFirewallForNode(node.Name); err != nil {
 			klog.Infof("Node add failed during egress firewall eval for node: %s, will try again later: %v",
 				node.Name, err)
 			return err
@@ -1035,9 +1035,8 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 		return nil
 
 	case factory.EgressFwNodeType:
-		oldNode := oldObj.(*kapi.Node)
 		newNode := newObj.(*kapi.Node)
-		return h.oc.updateEgressFirewallForNode(oldNode, newNode)
+		return h.oc.updateEgressFirewallForNode(newNode.Name)
 
 	case factory.NamespaceType:
 		oldNs, newNs := oldObj.(*kapi.Namespace), newObj.(*kapi.Namespace)
@@ -1113,7 +1112,7 @@ func (h *defaultNetworkControllerEventHandler) DeleteResource(obj, cachedObj int
 		if !ok {
 			return fmt.Errorf("could not cast obj of type %T to *knet.Node", obj)
 		}
-		return h.oc.updateEgressFirewallForNode(node, nil)
+		return h.oc.updateEgressFirewallForNode(node.Name)
 
 	case factory.NamespaceType:
 		ns := obj.(*kapi.Namespace)
