@@ -51,6 +51,8 @@ const (
 	EXTSwitchToGWRouterPrefix    = "etor-"
 	GWRouterToExtSwitchPrefix    = "rtoe-"
 	EgressGWSwitchPrefix         = "exgw-"
+	PatchPortPrefix              = "patch-"
+	PatchPortSuffix              = "-to-br-int"
 
 	NodeLocalSwitch = "node_local_switch"
 
