@@ -3,6 +3,7 @@ package ovn
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -21,6 +22,7 @@ import (
 	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 
 	kapi "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -59,8 +61,9 @@ type destination struct {
 	// Based on this flag we can omit clusterSubnet exclusion from the related ACL.
 	// For dns-based rules, EgressDNS won't add ips from clusterSubnet to the address set.
 	clusterSubnetIntersection bool
-	nodeAddrs                 sets.Set[string]
-	nodeSelector              *metav1.LabelSelector
+	// nodeName: nodeIPs
+	nodeAddrs    map[string][]string
+	nodeSelector *metav1.LabelSelector
 }
 
 // cloneEgressFirewall shallow copies the egressfirewallapi.EgressFirewall object provided.
@@ -93,7 +96,7 @@ func (oc *DefaultNetworkController) newEgressFirewallRule(rawEgressFirewallRule 
 	}
 	// If nodeSelector is set then fetch the node addresses.
 	if efr.to.nodeSelector != nil {
-		efr.to.nodeAddrs = sets.New[string]()
+		efr.to.nodeAddrs = map[string][]string{}
 		nodes, err := oc.watchFactory.GetNodesByLabelSelector(*rawEgressFirewallRule.To.NodeSelector)
 		if err != nil {
 			return efr, fmt.Errorf("unable to query nodes for egress firewall: %w", err)
@@ -103,7 +106,7 @@ func (oc *DefaultNetworkController) newEgressFirewallRule(rawEgressFirewallRule 
 			if err != nil {
 				return efr, fmt.Errorf("unable to get node host CIDRs for egress firewall, node: %s: %w", node.Name, err)
 			}
-			efr.to.nodeAddrs.Insert(hostAddresses...)
+			efr.to.nodeAddrs[node.Name] = hostAddresses
 		}
 	}
 	efr.ports = rawEgressFirewallRule.Ports
@@ -387,9 +390,15 @@ func (oc *DefaultNetworkController) addEgressFirewallRules(ef *egressFirewall, p
 			action = nbdb.ACLActionDrop
 		}
 		if len(rule.to.nodeAddrs) > 0 {
-			for _, addr := range sets.List(rule.to.nodeAddrs) {
-				// ideally we don't care about sorting this list, but this is being done to ensure Unit Test consistency
-				// and its not like this nodeAddrs can be super large per node EFW rule to cause scale issues
+			// sort node ips to ensure the same order when no changes are present
+			// this ensure ACL recalculation won't happen just because of the order changes
+			allIPs := []string{}
+			for _, nodeIPs := range rule.to.nodeAddrs {
+				allIPs = append(allIPs, nodeIPs...)
+			}
+			slices.Sort(allIPs)
+
+			for _, addr := range allIPs {
 				if utilnet.IsIPv6String(addr) {
 					matchTargets = append(matchTargets, matchTarget{matchKindV6CIDR, addr, false})
 				} else {
@@ -732,19 +741,17 @@ func (oc *DefaultNetworkController) getEgressFirewallACLDbIDs(namespace string, 
 		})
 }
 
-func (oc *DefaultNetworkController) updateEgressFirewallForNode(oldNode, newNode *kapi.Node) error {
-	var addressesToAdd []string
-	var addressesToRemove []string
-	var err error
-	if oldNode != nil {
-		addressesToRemove, err = util.GetNodeHostAddrs(oldNode)
-		if err != nil {
-			return err
-		}
+func (oc *DefaultNetworkController) updateEgressFirewallForNode(nodeName string) error {
+	node, err := oc.watchFactory.GetNode(nodeName)
+	// It´s unlikely that we have an error different that "Not Found Object"
+	// because we are getting the object from the informer´s cache
+	if err != nil && !apierrors.IsNotFound(err) {
+		return err
 	}
 
-	if newNode != nil {
-		addressesToAdd, err = util.GetNodeHostAddrs(newNode)
+	var nodeIPs []string
+	if node != nil {
+		nodeIPs, err = util.GetNodeHostAddrs(node)
 		if err != nil {
 			return err
 		}
@@ -771,10 +778,10 @@ func (oc *DefaultNetworkController) updateEgressFirewallForNode(oldNode, newNode
 			}
 			// no need to check selector on old node here, ips are unique and regardless of if selector
 			// matches or not we shouldn't have those addresses anymore
-			rule.to.nodeAddrs.Delete(addressesToRemove...)
+			delete(rule.to.nodeAddrs, nodeName)
 			// check if selector matches
-			if newNode != nil && selector.Matches(labels.Set(newNode.Labels)) {
-				rule.to.nodeAddrs.Insert(addressesToAdd...)
+			if node != nil && selector.Matches(labels.Set(node.Labels)) {
+				rule.to.nodeAddrs[nodeName] = nodeIPs
 			}
 			modifiedRuleIDs = append(modifiedRuleIDs, rule.id)
 		}

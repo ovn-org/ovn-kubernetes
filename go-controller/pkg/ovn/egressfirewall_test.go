@@ -34,7 +34,6 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/sets"
 	utilnet "k8s.io/utils/net"
 )
 
@@ -1647,7 +1646,7 @@ var _ = ginkgo.Describe("OVN test basic functions", func() {
 				output: egressFirewallRule{
 					id:     1,
 					access: egressfirewallapi.EgressFirewallRuleAllow,
-					to: destination{nodeAddrs: sets.New[string](), nodeSelector: &metav1.LabelSelector{
+					to: destination{nodeAddrs: map[string][]string{}, nodeSelector: &metav1.LabelSelector{
 						MatchLabels: map[string]string{"no": "match"}}},
 				},
 			},
@@ -1662,7 +1661,7 @@ var _ = ginkgo.Describe("OVN test basic functions", func() {
 				output: egressFirewallRule{
 					id:     1,
 					access: egressfirewallapi.EgressFirewallRuleAllow,
-					to:     destination{nodeAddrs: sets.New("10.10.10.10", "9.9.9.9"), nodeSelector: &metav1.LabelSelector{}},
+					to:     destination{nodeAddrs: map[string][]string{node1Name: {node1Addr}, node2Name: {node2Addr}}, nodeSelector: &metav1.LabelSelector{}},
 				},
 			},
 			// match one node
@@ -1676,7 +1675,7 @@ var _ = ginkgo.Describe("OVN test basic functions", func() {
 				output: egressFirewallRule{
 					id:     1,
 					access: egressfirewallapi.EgressFirewallRuleAllow,
-					to:     destination{nodeAddrs: sets.New(node1Addr), nodeSelector: &metav1.LabelSelector{MatchLabels: nodeLabel}},
+					to:     destination{nodeAddrs: map[string][]string{node1Name: {node1Addr}}, nodeSelector: &metav1.LabelSelector{MatchLabels: nodeLabel}},
 				},
 			},
 		}
