@@ -680,3 +680,25 @@ func (oc *BaseSecondaryNetworkController) allowPersistentIPs() bool {
 		util.DoesNetworkRequireIPAM(oc.NetInfo) &&
 		(oc.NetInfo.TopologyType() == types.Layer2Topology || oc.NetInfo.TopologyType() == types.LocalnetTopology)
 }
+
+func (oc *BaseSecondaryNetworkController) ensureNetworkID() error {
+	if oc.networkID != 0 {
+	}
+	nodes, err := oc.watchFactory.GetNodes()
+	if err != nil {
+		return fmt.Errorf("failed to get nodes: %v", err)
+	}
+	networkID := util.InvalidNetworkID
+	for _, node := range nodes {
+		networkID, err = util.ParseNetworkIDAnnotation(node, oc.GetNetworkName())
+		if err != nil {
+			//TODO Warning
+			continue
+		}
+	}
+	if networkID == util.InvalidNetworkID {
+		return fmt.Errorf("missing network id for network '%s'", oc.GetNetworkName())
+	}
+	oc.networkID = networkID
+	return nil
+}

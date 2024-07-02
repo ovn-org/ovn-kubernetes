@@ -1321,7 +1321,10 @@ func overwriteRoutesTableID(routes []netlink.Route, tableID int) {
 }
 
 func getRouteTableID(ifIndex int) int {
-	return ifIndex + routingTableIDStart
+	if !util.IsNetworkSegmentationSupportEnabled() {
+		return ifIndex + routingTableIDStart
+	}
+	return ifIndex + int(ovnconfig.UserDefinedNetworks.VRFTableBase) + int(ovnconfig.UserDefinedNetworks.MaxNetworks)
 }
 
 func findLinkOnSameNetworkAsIP(ip net.IP, v4, v6 bool) (bool, netlink.Link, error) {
