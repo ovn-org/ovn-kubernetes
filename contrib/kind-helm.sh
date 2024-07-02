@@ -13,6 +13,7 @@ source "${DIR}/kind-common"
 set_default_params() {
 
   # Set default values
+  export KIND_CONFIG=${KIND_CONFIG:-}
   export KIND_INSTALL_INGRESS=${KIND_INSTALL_INGRESS:-false}
   export KIND_INSTALL_METALLB=${KIND_INSTALL_METALLB:-false}
   export KIND_INSTALL_PLUGINS=${KIND_INSTALL_PLUGINS:-false}
@@ -22,6 +23,7 @@ set_default_params() {
   export OVN_HYBRID_OVERLAY_ENABLE=${OVN_HYBRID_OVERLAY_ENABLE:-false}
   export OVN_EMPTY_LB_EVENTS=${OVN_EMPTY_LB_EVENTS:-false}
   export KIND_REMOVE_TAINT=${KIND_REMOVE_TAINT:-true}
+  export ENABLE_MULTI_NET=${ENABLE_MULTI_NET:-false}
   export KIND_NUM_WORKER=${KIND_NUM_WORKER:-2}
   export KIND_CLUSTER_NAME=${KIND_CLUSTER_NAME:-ovn}
   export OVN_IMAGE=${OVN_IMAGE:-'ghcr.io/ovn-org/ovn-kubernetes/ovn-kube-ubuntu:helm'}
@@ -59,6 +61,7 @@ set_default_params() {
 
 usage() {
     echo "usage: kind-helm.sh [--delete]"
+    echo "       [ -cf  | --config-file <file> ]"
     echo "       [ -kt  | --keep-taint ]"
     echo "       [ -ha  | --ha-enabled ]"
     echo "       [ -me  | --multicast-enabled ]"
@@ -68,11 +71,13 @@ usage() {
     echo "       [ -mlb | --install-metallb ]"
     echo "       [ -pl  | --install-cni-plugins ]"
     echo "       [ -ikv | --install-kubevirt ]"
+    echo "       [ -mne | --multi-network-enable ]"
     echo "       [ -wk  | --num-workers <num> ]"
     echo "       [ -cn  | --cluster-name ]"
     echo "       [ -h ]"
     echo ""
     echo "--delete                            Delete current cluster"
+    echo "-cf  | --config-file                Name of the KIND configuration file"
     echo "-kt  | --keep-taint                 Do not remove taint components"
     echo "                                    DEFAULT: Remove taint components"
     echo "-me  | --multicast-enabled          Enable multicast. DEFAULT: Disabled"
@@ -83,6 +88,7 @@ usage() {
     echo "-mlb | --install-metallb            Install metallb to test service type LoadBalancer deployments"
     echo "-pl  | --install-cni-plugins        Install CNI plugins"
     echo "-ikv | --install-kubevirt           Install kubevirt"
+    echo "-mne | --multi-network-enable       Enable multi networks. DEFAULT: Disabled"
     echo "-ha  | --ha-enabled                 Enable high availability. DEFAULT: HA Disabled"
     echo "-wk  | --num-workers                Number of worker nodes. DEFAULT: 2 workers"
     echo "-cn  | --cluster-name               Configure the kind cluster's name"
@@ -95,6 +101,14 @@ parse_args() {
         case $1 in
             --delete )                          delete
                                                 exit
+                                                ;;
+            -cf | --config-file )               shift
+                                                if test ! -f "$1"; then
+                                                    echo "$1 does not  exist"
+                                                    usage
+                                                    exit 1
+                                                fi
+                                                KIND_CONFIG=$1
                                                 ;;
             -kt | --keep-taint )                KIND_REMOVE_TAINT=false
                                                 ;;
@@ -111,6 +125,8 @@ parse_args() {
             -pl | --install-cni-plugins )       KIND_INSTALL_PLUGINS=true
                                                 ;;
             -ikv | --install-kubevirt)          KIND_INSTALL_KUBEVIRT=true
+                                                ;;
+            -mne | --multi-network-enable )     ENABLE_MULTI_NET=true
                                                 ;;
             -ha | --ha-enabled )                OVN_HA=true
                                                 KIND_NUM_MASTER=3
@@ -138,6 +154,7 @@ parse_args() {
 print_params() {
      echo "Using these parameters to deploy KIND + helm"
      echo ""
+     echo "KIND_CONFIG_FILE = $KIND_CONFIG"
      echo "KUBECONFIG = $KUBECONFIG"
      echo "KIND_INSTALL_INGRESS = $KIND_INSTALL_INGRESS"
      echo "KIND_INSTALL_METALLB = $KIND_INSTALL_METALLB"
@@ -149,6 +166,7 @@ print_params() {
      echo "OVN_EMPTY_LB_EVENTS = $OVN_EMPTY_LB_EVENTS"
      echo "KIND_CLUSTER_NAME = $KIND_CLUSTER_NAME"
      echo "KIND_REMOVE_TAINT = $KIND_REMOVE_TAINT"
+     echo "ENABLE_MULTI_NET = $ENABLE_MULTI_NET"
      echo "OVN_IMAGE = $OVN_IMAGE"
      echo "KIND_NUM_MASTER = $KIND_NUM_MASTER"
      echo "KIND_NUM_WORKER = $KIND_NUM_WORKER"
@@ -208,16 +226,27 @@ get_tag() {
 }
 
 create_kind_cluster() {
+  [ -n "${KIND_CONFIG}" ] || {
+    KIND_CONFIG='/tmp/kind.yaml'
+
     # Start of the kind configuration
     cat <<EOT > /tmp/kind.yaml
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 nodes:
+- role: control-plane
+  kubeadmConfigPatches:
+  - |
+    kind: InitConfiguration
+    nodeRegistration:
+      kubeletExtraArgs:
+        node-labels: "ingress-ready=true"
+        authorization-mode: "AlwaysAllow"
 EOT
+  }
 
     # Add control-plane nodes based on OVN_HA status. If there are 2 or more worker nodes, use
     # 2 of them them to host databases instead of creating additional control plane nodes.
-    echo "- role: control-plane" >> /tmp/kind.yaml  # Add a single control-plane node if not HA
     if [ "$OVN_HA" == true ] && [ "$KIND_NUM_WORKER" -lt 2 ]; then
         for i in {2..3}; do  # Have 3 control-plane nodes for HA
             echo "- role: control-plane" >> /tmp/kind.yaml
@@ -234,10 +263,12 @@ EOT
 networking:
   disableDefaultCNI: true
   kubeProxyMode: none
+  podSubnet: $NET_CIDR_IPV4
+  serviceSubnet: $SVC_CIDR_IPV4
 EOT
 
     kind delete clusters $KIND_CLUSTER_NAME ||:
-    kind create cluster --name $KIND_CLUSTER_NAME --config /tmp/kind.yaml
+    kind create cluster --name $KIND_CLUSTER_NAME --config "${KIND_CONFIG}" --retain
     kind load docker-image --name $KIND_CLUSTER_NAME $OVN_IMAGE
 
     # When using HA, label nodes to host db.
@@ -277,6 +308,7 @@ create_ovn_kubernetes() {
         --set global.image.tag=$(get_tag) \
         --set global.enableAdminNetworkPolicy=true \
         --set global.enableMulticast=$(if [ "${OVN_MULTICAST_ENABLE}" == "true" ]; then echo "true"; else echo "false"; fi) \
+        --set global.enableMultiNetwork=$(if [ "${ENABLE_MULTI_NET}" == "true" ]; then echo "true"; else echo "false"; fi) \
         --set global.enableHybridOverlay=$(if [ "${OVN_HYBRID_OVERLAY_ENABLE}" == "true" ]; then echo "true"; else echo "false"; fi) \
         --set global.emptyLbEvents=$(if [ "${OVN_EMPTY_LB_EVENTS}" == "true" ]; then echo "true"; else echo "false"; fi) \
         --set tags.ovnkube-db-raft=$(if [ "${OVN_HA}" == "true" ]; then echo "true"; else echo "false"; fi) \
@@ -299,8 +331,8 @@ install_online_ovn_kubernetes_crds() {
 
 check_dependencies
 set_default_params
-print_params
 parse_args "$@"
+print_params
 helm_prereqs
 build_ovn_image
 create_kind_cluster
@@ -312,6 +344,10 @@ create_ovn_kubernetes
 install_online_ovn_kubernetes_crds
 if [ "$KIND_INSTALL_INGRESS" == true ]; then
   install_ingress
+fi
+
+if [ "$ENABLE_MULTI_NET" == true ]; then
+  enable_multi_net
 fi
 
 kubectl_wait_pods
