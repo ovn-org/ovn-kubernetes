@@ -34,6 +34,12 @@ type Gateway interface {
 	Reconcile() error
 }
 
+// TODO (dceara): better name?
+type SecondaryNetworkGateway interface {
+	AddNetwork(nInfo util.NetInfo, masqCTMark uint) error
+	DelNetwork(nInfo util.NetInfo) error
+}
+
 type gateway struct {
 	// loadBalancerHealthChecker is a health check server for load-balancer type services
 	loadBalancerHealthChecker informer.ServiceAndEndpointsEventHandler
@@ -53,6 +59,61 @@ type gateway struct {
 	watchFactory *factory.WatchFactory // used for retry
 	stopChan     <-chan struct{}
 	wg           *sync.WaitGroup
+}
+
+// TODO(dceara): move?
+func (g *gateway) AddNetwork(nInfo util.NetInfo, masqCTMark uint) error {
+	if g.openflowManager != nil {
+		if err := g.openflowManager.addNetwork(nInfo, masqCTMark); err != nil {
+			// TODO (dceara): handle error
+			return err
+		}
+
+		waiter := newStartupWaiter()
+		readyFunc := func() (bool, error) {
+			// TODO (dceara): this should be run for the network config only.
+			time.Sleep(5 * time.Second)
+			if err := setBridgeOfPorts(g.openflowManager.defaultBridge); err != nil {
+				// TODO (dceara): handle error
+				return false, err
+			}
+			if g.openflowManager.externalGatewayBridge != nil {
+				if err := setBridgeOfPorts(g.openflowManager.externalGatewayBridge); err != nil {
+					//TODO (dceara): handle error
+					return false, err
+				}
+			}
+			return true, nil
+		}
+		postFunc := func() error {
+			// TODO (dceara): Do we need to reconcile all flows? Is this heavy?
+			if err := g.Reconcile(); err != nil {
+				// TODO (dceara): handle error
+				return err
+			}
+			return nil
+		}
+		waiter.AddWait(readyFunc, postFunc)
+		if err := waiter.Wait(); err != nil {
+			// TODO (dceara): handle error
+			return err
+		}
+	}
+	return nil
+}
+
+// TODO(dceara): move?
+func (g *gateway) DelNetwork(nInfo util.NetInfo) error {
+	if g.openflowManager != nil {
+		g.openflowManager.delNetwork(nInfo)
+
+		// TODO (dceara): Do we need to reconcile all flows? Is this heavy?
+		if err := g.Reconcile(); err != nil {
+			// TODO (dceara): handle error
+			return err
+		}
+	}
+	return nil
 }
 
 func (g *gateway) AddService(svc *kapi.Service) error {
@@ -337,6 +398,7 @@ func gatewayInitInternal(nodeName, gwIntf, egressGatewayIntf string, gwNextHops 
 	l3GwConfig := util.L3GatewayConfig{
 		Mode:           config.Gateway.Mode,
 		ChassisID:      chassisID,
+		BridgeID:       gatewayBridge.bridgeName,
 		InterfaceID:    gatewayBridge.interfaceID,
 		MACAddress:     gatewayBridge.macAddress,
 		IPAddresses:    gatewayBridge.ips,
@@ -423,17 +485,57 @@ func (g *gateway) addAllServices() []error {
 	return errs
 }
 
+type bridgeNetConfiguration struct {
+	patchPort   string
+	ofPortPatch string
+	masqCTMark  string // TODO(dceara) just lazy because ctMarkOVN is also a string
+}
+
 type bridgeConfiguration struct {
 	sync.Mutex
+	nodeName    string
 	bridgeName  string
 	uplinkName  string
 	ips         []*net.IPNet
 	interfaceID string
 	macAddress  net.HardwareAddr
-	patchPort   string
-	ofPortPatch string
+	netConfig   map[string]*bridgeNetConfiguration
 	ofPortPhys  string
 	ofPortHost  string
+}
+
+func (b *bridgeConfiguration) addBridgeNetConfig(nInfo util.NetInfo, masqCTMark uint) error {
+	b.Lock()
+	defer b.Unlock()
+
+	netName := nInfo.GetNetworkName()
+	patchPort := nInfo.GetNetworkScopedPatchPortName(b.bridgeName, b.nodeName)
+	if _, found := b.netConfig[netName]; found {
+		return fmt.Errorf("failed to add network config %s to bridge %s: network already exists", netName, b.bridgeName)
+	}
+
+	b.netConfig[netName] = &bridgeNetConfiguration{
+		patchPort:  patchPort,
+		masqCTMark: fmt.Sprintf("0x%x", masqCTMark),
+	}
+	return nil
+}
+
+func (b *bridgeConfiguration) delBridgeNetConfig(nInfo util.NetInfo) {
+	b.Lock()
+	defer b.Unlock()
+
+	delete(b.netConfig, nInfo.GetNetworkName())
+}
+
+func (b *bridgeConfiguration) getBridgePorts() ([]bridgeNetConfiguration, string, string) {
+	b.Lock()
+	defer b.Unlock()
+	netConfigs := make([]bridgeNetConfiguration, len(b.netConfig))
+	for _, netConfig := range b.netConfig {
+		netConfigs = append(netConfigs, *netConfig)
+	}
+	return netConfigs, b.uplinkName, b.ofPortPhys
 }
 
 // updateInterfaceIPAddresses sets and returns the bridge's current ips
@@ -467,7 +569,15 @@ func (b *bridgeConfiguration) updateInterfaceIPAddresses(node *kapi.Node) ([]*ne
 }
 
 func bridgeForInterface(intfName, nodeName, physicalNetworkName string, gwIPs []*net.IPNet) (*bridgeConfiguration, error) {
-	res := bridgeConfiguration{}
+	defaultNetConfig := &bridgeNetConfiguration{
+		masqCTMark: ctMarkOVN,
+	}
+	res := bridgeConfiguration{
+		nodeName: nodeName,
+		netConfig: map[string]*bridgeNetConfiguration{
+			types.DefaultNetworkName: defaultNetConfig,
+		},
+	}
 	gwIntf := intfName
 
 	if bridgeName, _, err := util.RunOVSVsctl("port-to-br", intfName); err == nil {
@@ -529,7 +639,7 @@ func bridgeForInterface(intfName, nodeName, physicalNetworkName string, gwIPs []
 
 	// the name of the patch port created by ovn-controller is of the form
 	// patch-<logical_port_name_of_localnet_port>-to-br-int
-	res.patchPort = "patch-" + res.bridgeName + "_" + nodeName + "-to-br-int"
+	defaultNetConfig.patchPort = (&util.DefaultNetInfo{}).GetNetworkScopedPatchPortName(res.bridgeName, nodeName)
 
 	// for DPU we use the host MAC address for the Gateway configuration
 	if config.OvnKubeNode.Mode == types.NodeModeDPU {
