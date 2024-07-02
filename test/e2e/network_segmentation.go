@@ -19,7 +19,8 @@ var _ = Describe("Network Segmentation", func() {
 	f := wrappedTestFramework("network-segmentation")
 	Context("a user defined primary network", func() {
 		const (
-			externalServiceIPv4IP        = "10.128.0.1"
+			gatewayIPv4Address           = "10.128.0.1"
+			gatewayIPv6Address           = "2014:100:200::1"
 			nodeHostnameKey              = "kubernetes.io/hostname"
 			port                         = 9000
 			userDefinedNetworkIPv4Subnet = "10.128.0.0/16"
@@ -131,7 +132,7 @@ var _ = Describe("Network Segmentation", func() {
 					networkName:    userDefinedNetworkName,
 					topology:       "layer2",
 					cidr:           fmt.Sprintf("%s,%s", userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
-					excludeCIDRs:   []string{externalServiceIPv4IP + "/32"},
+					excludeCIDRs:   []string{gatewayIPv4Address + "/32", gatewayIPv6Address + "/128"},
 					primaryNetwork: true,
 				},
 				*podConfig(
@@ -155,7 +156,7 @@ var _ = Describe("Network Segmentation", func() {
 					networkName:    userDefinedNetworkName,
 					topology:       "layer3",
 					cidr:           fmt.Sprintf("%s,%s", userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
-					excludeCIDRs:   []string{externalServiceIPv4IP + "/32"},
+					excludeCIDRs:   []string{gatewayIPv4Address + "/32", gatewayIPv6Address + "/128"},
 					primaryNetwork: true,
 				},
 				*podConfig(
