@@ -26,7 +26,6 @@ var _ = Describe("Network Segmentation", func() {
 			port                         = 9000
 			userDefinedNetworkIPv4Subnet = "10.128.0.0/16"
 			userDefinedNetworkIPv6Subnet = "2014:100:200::0/60"
-			userDefinedNetworkName       = "hogwarts"
 			nadName                      = "gryffindor"
 			workerOneNodeName            = "ovn-worker"
 			workerTwoNodeName            = "ovn-worker2"
@@ -154,7 +153,7 @@ var _ = Describe("Network Segmentation", func() {
 				})
 			})
 
-			PDescribeTable(
+			DescribeTable(
 				"can be accessed to from the pods running in the Kubernetes cluster",
 				func(netConfigParams networkAttachmentConfigParams, clientPodConfig podConfiguration) {
 					netConfig := newNetworkAttachmentConfig(netConfigParams)
@@ -192,11 +191,11 @@ var _ = Describe("Network Segmentation", func() {
 						return connectToServer(clientPodConfig, externalIpv4, port)
 					}, 2*time.Minute, 6*time.Second).Should(Succeed())
 				},
-				Entry("by one pod with a single IPv4 address",
+				Entry("one pod connected over a L3 dualstack primary UDN",
 					networkAttachmentConfigParams{
-						name:         userDefinedNetworkName,
-						topology:     "layer2",
-						cidr:         userDefinedNetworkIPv4Subnet,
+						name:         nadName,
+						topology:     "layer3",
+						cidr:         fmt.Sprintf("%s,%s", userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
 						excludeCIDRs: []string{gatewayIPv4Address + "/32", gatewayIPv6Address + "/128"},
 						role:         "primary",
 					},
