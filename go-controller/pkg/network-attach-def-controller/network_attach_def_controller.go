@@ -239,6 +239,11 @@ func (nadController *NetAttachDefinitionController) syncNAD(key string, nad *net
 		return err
 	}
 
+	if ensureNetwork.IsDefault() {
+		klog.V(5).Infof("%s: NAD add for default network (key %s), skip it", nadController.name, key)
+		return nil
+	}
+
 	// ensure the network associated with the NAD
 	ensureNetwork.AddNADs(key)
 	nadController.nads[key] = ensureNetwork.GetNetworkName()

@@ -105,6 +105,15 @@ func TestNetAttachDefinitionController(t *testing.T) {
 		MTU: 1400,
 	}
 
+	network_Default := &ovncnitypes.NetConf{
+		Topology: types.Layer3Topology,
+		NetConf: cnitypes.NetConf{
+			Name: "default",
+			Type: "ovn-k8s-cni-overlay",
+		},
+		MTU: 1400,
+	}
+
 	type args struct {
 		nad     string
 		network *ovncnitypes.NetConf
@@ -119,6 +128,16 @@ func TestNetAttachDefinitionController(t *testing.T) {
 		args     []args
 		expected []expected
 	}{
+		{
+			name: "NAD on default network should be skipped",
+			args: []args{
+				{
+					nad:     "test/nad_1",
+					network: network_Default,
+				},
+			},
+			expected: []expected{},
+		},
 		{
 			name: "NAD added",
 			args: []args{
