@@ -1179,48 +1179,12 @@ func main() {
 	udp := flag.Bool("udp", false, "use udp transport protocol")
 	addressFamily := flag.String("addr-family", ip4, "Address family (ip4 or ip6) to be used for tracing")
 	skipOvnDetrace := flag.Bool("skip-detrace", false, "skip ovn-detrace command")
+	dumpVRFTableIDs := flag.Bool("dump-udn-vrf-table-ids", false, "Dump the VRF table ID per node for all the user defined networks")
 	loglevel := flag.String("loglevel", "0", "loglevel: klog level")
 	flag.Parse()
 
 	// Set the application's log level.
 	setLogLevel(*loglevel)
-
-	// Verify CLI flags.
-	if *srcPodName == "" {
-		klog.Exitf("Usage: source pod must be specified")
-	}
-	if !*tcp && !*udp {
-		klog.Exitf("Usage: either tcp or udp must be specified")
-	}
-	if *udp && *tcp {
-		klog.Exitf("Usage: Both tcp and udp cannot be specified at the same time")
-	}
-	if *tcp {
-		protocol = "tcp"
-	}
-	if *udp {
-		if *dstSvcName != "" {
-			klog.Exitf("Usage: udp option is not compatible with destination service trace")
-		}
-		protocol = "udp"
-	}
-	targetOptions := 0
-	if *dstPodName != "" {
-		targetOptions++
-	}
-	if *dstSvcName != "" {
-		targetOptions++
-	}
-	if *dstIP != "" {
-		targetOptions++
-		parsedDstIP = net.ParseIP(*dstIP)
-		if parsedDstIP == nil {
-			klog.Exitf("Usage: cannot parse IP address provided in -dst-ip")
-		}
-	}
-	if targetOptions != 1 {
-		klog.Exitf("Usage: exactly one of -dst, -service or -dst-ip must be set")
-	}
 
 	// Get the ClientConfig.
 	// This might work better?  https://godoc.org/sigs.k8s.io/controller-runtime/pkg/client/config
@@ -1258,7 +1222,54 @@ func main() {
 	if err != nil {
 		klog.Exitf(" Unexpected error: %v", err)
 	}
+
 	klog.V(5).Infof("OVN Kubernetes namespace is %s", ovnNamespace)
+
+	if *dumpVRFTableIDs {
+		nodesVRFTableIDs, err := findUserDefinedNetworkVRFTableIDs(coreclient, restconfig, ovnNamespace)
+		if err != nil {
+			klog.Exitf("Failed dumping VRF table IDs: %s", err)
+		}
+		fmt.Println(string(nodesVRFTableIDs))
+		return
+	}
+
+	// Verify CLI flags.
+	if *srcPodName == "" {
+		klog.Exitf("Usage: source pod must be specified")
+	}
+	if !*tcp && !*udp {
+		klog.Exitf("Usage: either tcp or udp must be specified")
+	}
+	if *udp && *tcp {
+		klog.Exitf("Usage: Both tcp and udp cannot be specified at the same time")
+	}
+	if *tcp {
+		protocol = "tcp"
+	}
+	if *udp {
+		if *dstSvcName != "" {
+			klog.Exitf("Usage: udp option is not compatible with destination service trace")
+		}
+		protocol = "udp"
+	}
+	targetOptions := 0
+	if *dstPodName != "" {
+		targetOptions++
+	}
+	if *dstSvcName != "" {
+		targetOptions++
+	}
+	if *dstIP != "" {
+		targetOptions++
+		parsedDstIP = net.ParseIP(*dstIP)
+		if parsedDstIP == nil {
+			klog.Exitf("Usage: cannot parse IP address provided in -dst-ip")
+		}
+	}
+	if targetOptions != 1 {
+		klog.Exitf("Usage: exactly one of -dst, -service or -dst-ip must be set")
+	}
 
 	// Show some information about the nodes in this cluster - only if log level 5 or higher.
 	if lvl, err := strconv.Atoi(*loglevel); err == nil && lvl >= 5 {
