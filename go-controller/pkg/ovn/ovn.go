@@ -322,31 +322,6 @@ func (oc *DefaultNetworkController) WatchEgressFirewall() error {
 	return err
 }
 
-// WatchEgressNodes starts the watching of egress assignable nodes and calls
-// back the appropriate handler logic.
-func (oc *DefaultNetworkController) WatchEgressNodes() error {
-	_, err := oc.retryEgressNodes.WatchResource()
-	return err
-}
-
-// WatchEgressIP starts the watching of egressip resource and calls back the
-// appropriate handler logic. It also initiates the other dedicated resource
-// handlers for egress IP setup: namespaces, pods.
-func (oc *DefaultNetworkController) WatchEgressIP() error {
-	_, err := oc.retryEgressIPs.WatchResource()
-	return err
-}
-
-func (oc *DefaultNetworkController) WatchEgressIPNamespaces() error {
-	_, err := oc.retryEgressIPNamespaces.WatchResource()
-	return err
-}
-
-func (oc *DefaultNetworkController) WatchEgressIPPods() error {
-	_, err := oc.retryEgressIPPods.WatchResource()
-	return err
-}
-
 // syncDefaultNodeGateway ensures a node's gateway router is configured
 func (oc *DefaultNetworkController) syncDefaultNodeGateway(node *kapi.Node, hostSubnets []*net.IPNet) error {
 	l3GatewayConfig, err := util.ParseNodeL3GatewayAnnotation(node)

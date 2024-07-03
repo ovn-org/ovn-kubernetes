@@ -91,6 +91,14 @@ type BaseNetworkController struct {
 	retryNetworkPolicies *ovnretry.RetryFramework
 	// retry framework for IPAMClaims
 	retryIPAMClaims *ovnretry.RetryFramework
+	// retry framework for egress IP
+	retryEgressIPs *ovnretry.RetryFramework
+	// retry framework for egress IP Namespaces
+	retryEgressIPNamespaces *ovnretry.RetryFramework
+	// retry framework for egress IP Pods
+	retryEgressIPPods *ovnretry.RetryFramework
+	// retry framework for Egress nodes
+	retryEgressNodes *ovnretry.RetryFramework
 
 	// pod events factory handler
 	podHandler *factory.Handler
@@ -184,6 +192,9 @@ type BaseNetworkController struct {
 	// Cluster-wide router default Control Plane Protection (COPP) UUID
 	defaultCOPPUUID string
 	//TODO(dceara): [END] move these to a better place?
+
+	// Controller used for programming OVN for egress IP
+	eIPC egressIPZoneController
 }
 
 // BaseSecondaryNetworkController structure holds per-network fields and network specific
@@ -848,6 +859,31 @@ func (bnc *BaseNetworkController) WatchNodes() error {
 	if err == nil {
 		bnc.nodeHandler = handler
 	}
+	return err
+}
+
+// WatchEgressNodes starts the watching of egress assignable nodes and calls
+// back the appropriate handler logic.
+func (bnc *BaseNetworkController) WatchEgressNodes() error {
+	_, err := bnc.retryEgressNodes.WatchResource()
+	return err
+}
+
+// WatchEgressIP starts the watching of egressip resource and calls back the
+// appropriate handler logic. It also initiates the other dedicated resource
+// handlers for egress IP setup: namespaces, pods.
+func (bnc *BaseNetworkController) WatchEgressIP() error {
+	_, err := bnc.retryEgressIPs.WatchResource()
+	return err
+}
+
+func (bnc *BaseNetworkController) WatchEgressIPNamespaces() error {
+	_, err := bnc.retryEgressIPNamespaces.WatchResource()
+	return err
+}
+
+func (bnc *BaseNetworkController) WatchEgressIPPods() error {
+	_, err := bnc.retryEgressIPPods.WatchResource()
 	return err
 }
 
