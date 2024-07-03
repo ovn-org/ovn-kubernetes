@@ -20,6 +20,7 @@ func FullDatabaseModel() (model.ClientDBModel, error) {
 		"Connection":                  &Connection{},
 		"Copp":                        &Copp{},
 		"DHCP_Options":                &DHCPOptions{},
+		"DHCP_Relay":                  &DHCPRelay{},
 		"DNS":                         &DNS{},
 		"Forwarding_Group":            &ForwardingGroup{},
 		"Gateway_Chassis":             &GatewayChassis{},
@@ -48,7 +49,7 @@ func FullDatabaseModel() (model.ClientDBModel, error) {
 
 var schema = `{
   "name": "OVN_Northbound",
-  "version": "7.3.0",
+  "version": "7.4.0",
   "tables": {
     "ACL": {
       "columns": {
@@ -477,6 +478,47 @@ var schema = `{
             },
             "min": 0,
             "max": "unlimited"
+          }
+        }
+      },
+      "isRoot": true
+    },
+    "DHCP_Relay": {
+      "columns": {
+        "external_ids": {
+          "type": {
+            "key": {
+              "type": "string"
+            },
+            "value": {
+              "type": "string"
+            },
+            "min": 0,
+            "max": "unlimited"
+          }
+        },
+        "name": {
+          "type": "string"
+        },
+        "options": {
+          "type": {
+            "key": {
+              "type": "string"
+            },
+            "value": {
+              "type": "string"
+            },
+            "min": 0,
+            "max": "unlimited"
+          }
+        },
+        "servers": {
+          "type": {
+            "key": {
+              "type": "string"
+            },
+            "min": 0,
+            "max": 1
           }
         }
       },
@@ -1034,6 +1076,17 @@ var schema = `{
     },
     "Logical_Router_Port": {
       "columns": {
+        "dhcp_relay": {
+          "type": {
+            "key": {
+              "type": "uuid",
+              "refTable": "DHCP_Relay",
+              "refType": "strong"
+            },
+            "min": 0,
+            "max": 1
+          }
+        },
         "enabled": {
           "type": {
             "key": {
@@ -1740,6 +1793,9 @@ var schema = `{
             "max": 1
           }
         },
+        "match": {
+          "type": "string"
+        },
         "options": {
           "type": {
             "key": {
@@ -1750,6 +1806,15 @@ var schema = `{
             },
             "min": 0,
             "max": "unlimited"
+          }
+        },
+        "priority": {
+          "type": {
+            "key": {
+              "type": "integer",
+              "minInteger": 0,
+              "maxInteger": 32767
+            }
           }
         },
         "type": {

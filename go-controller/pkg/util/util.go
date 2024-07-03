@@ -482,11 +482,19 @@ func GenerateId(length int) string {
 	return string(b)
 }
 
-// TODO temporary function for net mgmt link, would move to right place.
+// TODO temporary functions for net mgmt link, would move to right place.
 func GetIfIndex(ifName string) (int, error) {
 	link, err := GetNetLinkOps().LinkByName(ifName)
 	if err != nil {
 		return -1, err
 	}
 	return link.Attrs().Index, nil
+}
+
+func GetIfMacAddress(ifName string) (string, error) {
+	link, err := GetNetLinkOps().LinkByName(ifName)
+	if err != nil {
+		return "", err
+	}
+	return link.Attrs().HardwareAddr.String(), nil
 }
