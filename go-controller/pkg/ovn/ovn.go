@@ -322,31 +322,6 @@ func (oc *DefaultNetworkController) WatchEgressFirewall() error {
 	return err
 }
 
-// WatchEgressNodes starts the watching of egress assignable nodes and calls
-// back the appropriate handler logic.
-func (oc *DefaultNetworkController) WatchEgressNodes() error {
-	_, err := oc.retryEgressNodes.WatchResource()
-	return err
-}
-
-// WatchEgressIP starts the watching of egressip resource and calls back the
-// appropriate handler logic. It also initiates the other dedicated resource
-// handlers for egress IP setup: namespaces, pods.
-func (oc *DefaultNetworkController) WatchEgressIP() error {
-	_, err := oc.retryEgressIPs.WatchResource()
-	return err
-}
-
-func (oc *DefaultNetworkController) WatchEgressIPNamespaces() error {
-	_, err := oc.retryEgressIPNamespaces.WatchResource()
-	return err
-}
-
-func (oc *DefaultNetworkController) WatchEgressIPPods() error {
-	_, err := oc.retryEgressIPPods.WatchResource()
-	return err
-}
-
 // syncNodeGateway ensures a node's gateway router is configured
 func (oc *DefaultNetworkController) syncNodeGateway(node *kapi.Node, hostSubnets []*net.IPNet) error {
 	l3GatewayConfig, err := util.ParseNodeL3GatewayAnnotation(node)
@@ -457,7 +432,7 @@ func (oc *DefaultNetworkController) StartServiceController(wg *sync.WaitGroup, r
 func (oc *DefaultNetworkController) InitEgressServiceZoneController() (*egresssvc_zone.Controller, error) {
 	// If the EgressIP controller is enabled it will take care of creating the
 	// "no reroute" policies - we can pass "noop" functions to the egress service controller.
-	initClusterEgressPolicies := func(libovsdbclient.Client, addressset.AddressSetFactory, string, string) error { return nil }
+	initClusterEgressPolicies := func(libovsdbclient.Client, addressset.AddressSetFactory, string, ...string) error { return nil }
 	ensureNodeNoReroutePolicies := func(libovsdbclient.Client, addressset.AddressSetFactory, string, string, listers.NodeLister) error {
 		return nil
 	}

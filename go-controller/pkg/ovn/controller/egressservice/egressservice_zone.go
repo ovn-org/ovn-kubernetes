@@ -44,7 +44,7 @@ const (
 )
 
 type InitClusterEgressPoliciesFunc func(client libovsdbclient.Client, addressSetFactory addressset.AddressSetFactory,
-	controllerName, clusterRouter string) error
+	controllerName string, clusterRouters ...string) error
 type EnsureNoRerouteNodePoliciesFunc func(client libovsdbclient.Client, addressSetFactory addressset.AddressSetFactory,
 	controllerName, clusterRouter string, nodeLister corelisters.NodeLister) error
 type DeleteLegacyDefaultNoRerouteNodePoliciesFunc func(nbClient libovsdbclient.Client, clusterRouter, nodeName string) error

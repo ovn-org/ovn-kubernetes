@@ -90,9 +90,6 @@ type DefaultNetworkController struct {
 	// Cluster-wide router default Control Plane Protection (COPP) UUID
 	defaultCOPPUUID string
 
-	// Controller used for programming OVN for egress IP
-	eIPC egressIPZoneController
-
 	// Controller used to handle services
 	svcController *svccontroller.Controller
 	// Controller used to handle egress services
@@ -110,15 +107,6 @@ type DefaultNetworkController struct {
 
 	// retry framework for egress firewall
 	retryEgressFirewalls *retry.RetryFramework
-
-	// retry framework for egress IP
-	retryEgressIPs *retry.RetryFramework
-	// retry framework for egress IP Namespaces
-	retryEgressIPNamespaces *retry.RetryFramework
-	// retry framework for egress IP Pods
-	retryEgressIPPods *retry.RetryFramework
-	// retry framework for Egress nodes
-	retryEgressNodes *retry.RetryFramework
 
 	// Node-specific syncMaps used by node event handler
 	gatewaysFailed              sync.Map
@@ -207,17 +195,17 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 			localZoneNodes:              &sync.Map{},
 			zoneICHandler:               zoneICHandler,
 			cancelableCtx:               util.NewCancelableContext(),
+			eIPC: egressIPZoneController{
+				NetInfo:            &util.DefaultNetInfo{},
+				nodeUpdateMutex:    &sync.Mutex{},
+				podAssignmentMutex: &sync.Mutex{},
+				podAssignment:      make(map[string]*podAssignmentState),
+				nbClient:           cnci.nbClient,
+				watchFactory:       cnci.watchFactory,
+				nodeZoneState:      syncmap.NewSyncMap[bool](),
+			},
 		},
-		externalGatewayRouteInfo: apbExternalRouteController.ExternalGWRouteInfoCache,
-		eIPC: egressIPZoneController{
-			NetInfo:            &util.DefaultNetInfo{},
-			nodeUpdateMutex:    &sync.Mutex{},
-			podAssignmentMutex: &sync.Mutex{},
-			podAssignment:      make(map[string]*podAssignmentState),
-			nbClient:           cnci.nbClient,
-			watchFactory:       cnci.watchFactory,
-			nodeZoneState:      syncmap.NewSyncMap[bool](),
-		},
+		externalGatewayRouteInfo:     apbExternalRouteController.ExternalGWRouteInfoCache,
 		loadbalancerClusterCache:     make(map[kapi.Protocol]string),
 		clusterLoadBalancerGroupUUID: "",
 		switchLoadBalancerGroupUUID:  "",
