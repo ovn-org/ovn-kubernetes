@@ -649,3 +649,61 @@ get_kubevirt_release_url() {
 
     echo "$kubevirt_release_url"
 }
+
+readonly FRR_K8S_VERSION=v0.0.14
+readonly FRR_TMP_DIR=$(mktemp -d -u)
+
+clone_frr() {
+  [ -d "$FRR_TMP_DIR" ] || {
+    mkdir -p "$FRR_TMP_DIR" && trap 'rm -rf $FRR_TMP_DIR' EXIT
+    pushd "$FRR_TMP_DIR" || exit 1
+    git clone --depth 1 --branch $FRR_K8S_VERSION https://github.com/metallb/frr-k8s
+    popd || exit 1
+  }
+}
+
+deploy_frr_external_container() {
+  echo "Deploying FRR external container ..."
+  clone_frr
+ 
+  pushd "$FRR_TMP_DIR" || exit 1
+  run_kubectl apply -f frr-k8s/charts/frr-k8s/charts/crds/templates/frrk8s.metallb.io_frrconfigurations.yaml
+  popd || exit 1
+ 
+  # apply the demo which will deploy an external FRR container that the cluster
+  # can peer with acting as BGP (reflector) external gateway
+  pushd "${FRR_TMP_DIR}"/frr-k8s/hack/demo || exit 1
+  # modify config template to configure neighbors as route reflector clients
+  sed -i '/remote-as 64512/a \ neighbor {{ . }} route-reflector-client' frr/frr.conf.tmpl
+  ./demo.sh
+  popd || exit 1
+
+  # this container will act as the gateway for the cluster and will masquerade
+  # towards the external world
+  $OCI_BIN exec frr iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
+  # set default route
+  FRR_IP=$($OCI_BIN inspect -f "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}" frr)
+  KIND_NODES=$(kind_get_nodes)
+  for n in $KIND_NODES; do
+    $OCI_BIN exec "$n" ip route replace default via "$FRR_IP"
+  done
+}
+
+install_ffr_k8s() {
+  echo "Installing frr-k8s ..."
+  clone_frr
+
+  # apply frr-k8s
+  kubectl apply -f "${FRR_TMP_DIR}"/frr-k8s/config/all-in-one/frr-k8s.yaml
+  kubectl wait -n frr-k8s-system deployment frr-k8s-webhook-server --for condition=Available --timeout 2m
+  kubectl rollout status -n frr-k8s-system daemonset frr-k8s-daemon --timeout 2m
+
+  # apply a BGP peer configration with the external gateway that does not
+  # exchange routes
+  pushd "${FRR_TMP_DIR}"/frr-k8s/hack/demo/configs || exit 1
+  sed 's/all$/filtered/g' receive_all.yaml > receive_filtered.yaml
+  kubectl apply -f receive_filtered.yaml
+  popd || exit 1
+
+  rm -rf "${FRR_TMP_DIR}"
+}
