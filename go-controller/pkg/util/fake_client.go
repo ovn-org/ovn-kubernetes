@@ -19,6 +19,8 @@ import (
 	egressqosfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/clientset/versioned/fake"
 	egressservice "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1"
 	egressservicefake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/clientset/versioned/fake"
+	routeadvertisements "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1"
+	routeadvertisementsfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/clientset/versioned/fake"
 	udnfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/clientset/versioned/fake"
 
 	v1 "k8s.io/api/core/v1"
@@ -42,6 +44,7 @@ func GetOVNClientset(objects ...runtime.Object) *OVNClientset {
 	nads := []runtime.Object{}
 	cloudObjects := []runtime.Object{}
 	dnsNameResolverObjects := []runtime.Object{}
+	raObjects := []runtime.Object{}
 	for _, object := range objects {
 		switch object.(type) {
 		case *egressip.EgressIP:
@@ -64,23 +67,26 @@ func GetOVNClientset(objects ...runtime.Object) *OVNClientset {
 			anpObjects = append(anpObjects, object)
 		case *ocpnetworkapiv1alpha1.DNSNameResolver:
 			dnsNameResolverObjects = append(dnsNameResolverObjects, object)
+		case *routeadvertisements.RouteAdvertisements:
+			raObjects = append(raObjects, object)
 		default:
 			v1Objects = append(v1Objects, object)
 		}
 	}
 	return &OVNClientset{
-		KubeClient:               fake.NewSimpleClientset(v1Objects...),
-		ANPClient:                anpfake.NewSimpleClientset(anpObjects...),
-		EgressIPClient:           egressipfake.NewSimpleClientset(egressIPObjects...),
-		EgressFirewallClient:     egressfirewallfake.NewSimpleClientset(egressFirewallObjects...),
-		CloudNetworkClient:       cloudservicefake.NewSimpleClientset(cloudObjects...),
-		EgressQoSClient:          egressqosfake.NewSimpleClientset(egressQoSObjects...),
-		NetworkAttchDefClient:    nadfake.NewSimpleClientset(nads...),
-		MultiNetworkPolicyClient: mnpfake.NewSimpleClientset(multiNetworkPolicyObjects...),
-		EgressServiceClient:      egressservicefake.NewSimpleClientset(egressServiceObjects...),
-		AdminPolicyRouteClient:   adminpolicybasedroutefake.NewSimpleClientset(apbExternalRouteObjects...),
-		OCPNetworkClient:         ocpnetworkclientfake.NewSimpleClientset(dnsNameResolverObjects...),
-		UserDefinedNetworkClient: udnfake.NewSimpleClientset(),
+		KubeClient:                fake.NewSimpleClientset(v1Objects...),
+		ANPClient:                 anpfake.NewSimpleClientset(anpObjects...),
+		EgressIPClient:            egressipfake.NewSimpleClientset(egressIPObjects...),
+		EgressFirewallClient:      egressfirewallfake.NewSimpleClientset(egressFirewallObjects...),
+		CloudNetworkClient:        cloudservicefake.NewSimpleClientset(cloudObjects...),
+		EgressQoSClient:           egressqosfake.NewSimpleClientset(egressQoSObjects...),
+		NetworkAttchDefClient:     nadfake.NewSimpleClientset(nads...),
+		MultiNetworkPolicyClient:  mnpfake.NewSimpleClientset(multiNetworkPolicyObjects...),
+		EgressServiceClient:       egressservicefake.NewSimpleClientset(egressServiceObjects...),
+		AdminPolicyRouteClient:    adminpolicybasedroutefake.NewSimpleClientset(apbExternalRouteObjects...),
+		OCPNetworkClient:          ocpnetworkclientfake.NewSimpleClientset(dnsNameResolverObjects...),
+		UserDefinedNetworkClient:  udnfake.NewSimpleClientset(),
+		RouteAdvertisementsClient: routeadvertisementsfake.NewSimpleClientset(raObjects...),
 	}
 }
 
