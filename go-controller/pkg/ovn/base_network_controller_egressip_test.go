@@ -2827,8 +2827,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						return ok
 					}).Should(gomega.BeFalse())
 
-					// W0608 12:53:33.728205 1161455 egressip.go:2030] Unable to retrieve gateway IP for node: node1, protocol is IPv6: false, err: attempt at finding node gateway router network information failed, err: unable to find router port rtoj-GR_node1: object not found
-					// 2023-04-25T11:01:13.2804834Z W0425 11:01:13.280407   21055 egressip.go:2036] Unable to fetch transit switch IP for node: node1: err: failed to get node node1: node "node1" not found
+					// W0608 12:53:33.728205 1161455 base_network_controller_egressip.go:2030] Unable to retrieve gateway IP for node: node1, protocol is IPv6: false, err: attempt at finding node gateway router network information failed, err: unable to find router port rtoj-GR_node1: object not found
+					// 2023-04-25T11:01:13.2804834Z W0425 11:01:13.280407   21055 base_network_controller_egressip.go:2036] Unable to fetch transit switch IP for node: node1: err: failed to get node node1: node "node1" not found
 					fakeOvn.patchEgressIPObj(node2Name, egressIPName, egressIP, node2IPv4Net)
 					gomega.Eventually(getEgressIPStatusLen(egressIPName)).Should(gomega.Equal(1))
 					gomega.Eventually(nodeSwitch).Should(gomega.Equal(node2.Name)) // egressIP successfully reassigned to node2
