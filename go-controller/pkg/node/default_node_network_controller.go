@@ -1333,7 +1333,7 @@ func (nc *DefaultNodeNetworkController) validateVTEPInterfaceMTU() error {
 }
 
 func configureSvcRouteViaBridge(routeManager *routemanager.Controller, bridge string) error {
-	return configureSvcRouteViaInterface(routeManager, bridge, DummyNextHopIPs())
+	return configureSvcRouteViaInterface(routeManager, bridge, DummyNextHopIPs(), 0)
 }
 
 // DummyNextHopIPs returns the fake next hops used for service traffic routing.

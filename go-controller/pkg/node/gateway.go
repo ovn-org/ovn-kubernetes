@@ -13,6 +13,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iprulemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/vrfmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -58,6 +59,7 @@ type gateway struct {
 	nodePortWatcher informer.ServiceAndEndpointsEventHandler
 	openflowManager *openflowManager
 	nodeIPManager   *addressManager
+	routeManager    *routemanager.Controller
 	vrfManager      *vrfmanager.Controller
 	ruleManager     *iprulemanager.Controller
 	ipTablesManager *iptables.Controller

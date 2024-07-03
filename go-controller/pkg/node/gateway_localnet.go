@@ -147,6 +147,7 @@ func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net
 	gw.watchFactory = watchFactory.(*factory.WatchFactory)
 
 	gw.vrfManager = vrfmanager.NewController(routeManager)
+	gw.routeManager = routeManager
 	gw.ruleManager = iprulemanager.NewController(config.IPv4Mode, config.IPv6Mode)
 	gw.ipTablesManager = iptables.NewController()
 
@@ -188,6 +189,15 @@ func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net
 
 	klog.Info("Local Gateway Creation Complete")
 	return gw, nil
+}
+
+func (g *gateway) programRoutesForUDN(nInfo util.NetInfo, vrfTableId int) error {
+	err := configureSvcRouteViaInterface(g.routeManager, g.GetGatewayBridgeIface(), DummyNextHopIPs(), vrfTableId)
+	if err != nil {
+		return err
+	}
+	// TODO add other routes.
+	return nil
 }
 
 func getGatewayFamilyAddrs(gatewayIfAddrs []*net.IPNet) (string, string) {

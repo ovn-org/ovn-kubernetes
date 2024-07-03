@@ -1576,7 +1576,7 @@ var _ = Describe("Gateway unit tests", func() {
 				close(stopCh)
 				wg.Wait()
 			}()
-			err = configureSvcRouteViaInterface(rm, "ens1f0", gwIPs)
+			err = configureSvcRouteViaInterface(rm, "ens1f0", gwIPs, 0)
 			Expect(err).ToNot(HaveOccurred())
 		})
 
@@ -1630,7 +1630,7 @@ var _ = Describe("Gateway unit tests", func() {
 				wg.Wait()
 			}()
 
-			err = configureSvcRouteViaInterface(rm, "ens1f0", gwIPs)
+			err = configureSvcRouteViaInterface(rm, "ens1f0", gwIPs, 0)
 			Expect(err).ToNot(HaveOccurred())
 		})
 
@@ -1651,7 +1651,7 @@ var _ = Describe("Gateway unit tests", func() {
 				close(stopCh)
 				wg.Wait()
 			}()
-			err := configureSvcRouteViaInterface(rm, "ens1f0", gwIPs)
+			err := configureSvcRouteViaInterface(rm, "ens1f0", gwIPs, 0)
 			Expect(err).To(HaveOccurred())
 		})
 
@@ -1676,7 +1676,7 @@ var _ = Describe("Gateway unit tests", func() {
 				close(stopCh)
 				wg.Wait()
 			}()
-			err = configureSvcRouteViaInterface(rm, "ens1f0", gwIPs)
+			err = configureSvcRouteViaInterface(rm, "ens1f0", gwIPs, 0)
 			Expect(err).To(HaveOccurred())
 		})
 	})

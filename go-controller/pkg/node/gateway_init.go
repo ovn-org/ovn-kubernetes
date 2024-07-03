@@ -280,7 +280,7 @@ func getInterfaceByIP(ip net.IP) (string, error) {
 }
 
 // configureSvcRouteViaInterface routes svc traffic through the provided interface
-func configureSvcRouteViaInterface(routeManager *routemanager.Controller, iface string, gwIPs []net.IP) error {
+func configureSvcRouteViaInterface(routeManager *routemanager.Controller, iface string, gwIPs []net.IP, tableId int) error {
 	link, err := util.LinkSetUp(iface)
 	if err != nil {
 		return fmt.Errorf("unable to get link for %s, error: %v", iface, err)
@@ -303,7 +303,7 @@ func configureSvcRouteViaInterface(routeManager *routemanager.Controller, iface 
 		}
 		subnetCopy := *subnet
 		gwIPCopy := gwIP[0]
-		routeManager.Add(netlink.Route{LinkIndex: link.Attrs().Index, Gw: gwIPCopy, Dst: &subnetCopy, Src: srcIP, MTU: mtu})
+		routeManager.Add(netlink.Route{LinkIndex: link.Attrs().Index, Gw: gwIPCopy, Dst: &subnetCopy, Src: srcIP, MTU: mtu, Table: tableId})
 	}
 	return nil
 }
@@ -466,7 +466,7 @@ func (nc *DefaultNodeNetworkController) initGatewayDPUHost(kubeNodeIP net.IP) er
 		return fmt.Errorf("failed to set the node masquerade route to OVN: %v", err)
 	}
 
-	err = configureSvcRouteViaInterface(nc.routeManager, gatewayIntf, gatewayNextHops)
+	err = configureSvcRouteViaInterface(nc.routeManager, gatewayIntf, gatewayNextHops, 0)
 	if err != nil {
 		return err
 	}
