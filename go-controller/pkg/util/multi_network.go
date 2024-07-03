@@ -1004,6 +1004,12 @@ func IsNetworkSegmentationSupportEnabled() bool {
 	return config.OVNKubernetesFeature.EnableMultiNetwork && config.OVNKubernetesFeature.EnableNetworkSegmentation
 }
 
+func IsRouteAdvertisementsEnabled() bool {
+	// for now, we require multi-network to be enabled because we rely on NADs,
+	// even for the default network
+	return config.OVNKubernetesFeature.EnableMultiNetwork && config.OVNKubernetesFeature.EnableRouteAdvertisements
+}
+
 func DoesNetworkRequireIPAM(netInfo NetInfo) bool {
 	return !((netInfo.TopologyType() == types.Layer2Topology || netInfo.TopologyType() == types.LocalnetTopology) && len(netInfo.Subnets()) == 0)
 }
