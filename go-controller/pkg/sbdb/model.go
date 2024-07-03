@@ -52,7 +52,7 @@ func FullDatabaseModel() (model.ClientDBModel, error) {
 
 var schema = `{
   "name": "OVN_Southbound",
-  "version": "20.33.0",
+  "version": "20.34.0",
   "tables": {
     "Address_Set": {
       "columns": {
@@ -833,6 +833,9 @@ var schema = `{
             "min": 0,
             "max": "unlimited"
           }
+        },
+        "protocol": {
+          "type": "string"
         }
       },
       "indexes": [
