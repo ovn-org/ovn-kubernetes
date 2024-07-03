@@ -3,11 +3,13 @@ package ovn
 import (
 	"fmt"
 	"net"
+	"sync"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 
 	corev1 "k8s.io/api/core/v1"
@@ -21,6 +23,12 @@ import (
 // configuration for secondary layer2/localnet network controller
 type BaseSecondaryLayer2NetworkController struct {
 	BaseSecondaryNetworkController
+
+	// OVN L2 switch name (depending on L2 network type)
+	switchName string
+
+	// Node-specific syncMaps used by node event handler
+	mgmtPortFailed sync.Map
 }
 
 // stop gracefully stops the controller, and delete all logical entities for this network if requested
@@ -147,26 +155,41 @@ func (oc *BaseSecondaryLayer2NetworkController) initializeLogicalSwitch(switchNa
 	return &logicalSwitch, nil
 }
 
-func (oc *BaseSecondaryLayer2NetworkController) addUpdateNodeEvent(node *corev1.Node) error {
-	if oc.isLocalZoneNode(node) {
-		return oc.addUpdateLocalNodeEvent(node)
-	}
-	return oc.addUpdateRemoteNodeEvent(node)
-}
+func (oc *BaseSecondaryLayer2NetworkController) addUpdateLocalNodeEvent(node *corev1.Node, nSyncs *nodeSyncs) error {
+	var errs []error
 
-func (oc *BaseSecondaryLayer2NetworkController) addUpdateLocalNodeEvent(node *corev1.Node) error {
+	if util.IsNetworkSegmentationSupportEnabled() && oc.IsPrimaryNetwork() {
+		if nSyncs.syncMgmtPort {
+			// Layer 2 networks have a single, large subnet, that's the one
+			// associated to the controller.  Take the management port IP from
+			// there.
+			subnets := oc.Subnets()
+			hostSubnets := make([]*net.IPNet, 0, len(subnets))
+			for _, subnet := range oc.Subnets() {
+				hostSubnets = append(hostSubnets, subnet.CIDR)
+			}
+			if err := oc.syncNodeManagementPortNoRouteHostSubnets(node, oc.switchName, hostSubnets); err != nil {
+				errs = append(errs, err)
+				oc.mgmtPortFailed.Store(node.Name, true)
+			} else {
+				oc.mgmtPortFailed.Delete(node.Name)
+			}
+		}
+	}
+
 	_, present := oc.localZoneNodes.LoadOrStore(node.Name, true)
 
 	if !present {
 		// process all pods so they are reconfigured as local
-		errs := oc.addAllPodsOnNode(node.Name)
-		if errs != nil {
-			err := utilerrors.Join(errs...)
-			return err
-		}
+		errors := oc.addAllPodsOnNode(node.Name)
+		errs = append(errs, errors...)
 	}
 
-	return nil
+	err := utilerrors.Join(errs...)
+	if err != nil {
+		oc.recordNodeErrorEvent(node, err)
+	}
+	return err
 }
 
 func (oc *BaseSecondaryLayer2NetworkController) addUpdateRemoteNodeEvent(node *corev1.Node) error {
@@ -191,6 +214,7 @@ func (oc *BaseSecondaryLayer2NetworkController) addUpdateRemoteNodeEvent(node *c
 
 func (oc *BaseSecondaryLayer2NetworkController) deleteNodeEvent(node *corev1.Node) error {
 	oc.localZoneNodes.Delete(node.Name)
+	oc.mgmtPortFailed.Delete(node.Name)
 	return nil
 }
 

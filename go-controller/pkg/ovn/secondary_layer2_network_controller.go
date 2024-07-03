@@ -252,6 +252,8 @@ func NewSecondaryLayer2NetworkController(cnci *CommonNetworkControllerInfo, netI
 					cancelableCtx:               util.NewCancelableContext(),
 				},
 			},
+			switchName:     netInfo.GetNetworkScopedSwitchName(types.OVNLayer2Switch),
+			mgmtPortFailed: sync.Map{},
 		},
 		mgmtPortFailed: sync.Map{},
 	}
