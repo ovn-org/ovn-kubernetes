@@ -1159,6 +1159,9 @@ if [ "$OVN_ENABLE_DNSNAMERESOLVER" == true ]; then
     add_ocp_dnsnameresolver_to_coredns_config
     update_coredns_deployment_image
 fi
+if [ "$ENABLE_ROUTE_ADVERTISEMENTS" == true ]; then
+  deploy_frr_external_container
+fi
 build_ovn_image
 detect_apiserver_url
 create_ovn_kube_manifests
@@ -1196,4 +1199,7 @@ if [ "$KIND_INSTALL_KUBEVIRT" == true ]; then
   if [ "$KIND_OPT_OUT_KUBEVIRT_IPAM" != true ]; then
     install_kubevirt_ipam_controller
   fi
+fi
+if [ "$ENABLE_ROUTE_ADVERTISEMENTS" == true ]; then
+  install_ffr_k8s
 fi
