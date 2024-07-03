@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -16,6 +17,7 @@ import (
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
@@ -290,6 +292,11 @@ func (oc *DefaultNetworkController) gatewayInit(nodeName string, clusterIPSubnet
 
 	nextHops := l3GatewayConfig.NextHops
 
+	// Remove stale OVN resources with any old masquerade IP
+	if err := deleteStaleMasqueradeResources(oc.nbClient, gatewayRouter, nodeName, oc.watchFactory); err != nil {
+		return fmt.Errorf("failed to remove stale masquerade resources from northbound database: %w", err)
+	}
+
 	if err := gateway.CreateDummyGWMacBindings(oc.nbClient, gatewayRouter); err != nil {
 		return err
 	}
@@ -301,9 +308,10 @@ func (oc *DefaultNetworkController) gatewayInit(nodeName string, clusterIPSubnet
 			prefix = config.Gateway.V6MasqueradeSubnet
 		}
 		lrsr := nbdb.LogicalRouterStaticRoute{
-			IPPrefix:   prefix,
-			Nexthop:    nextHop.String(),
-			OutputPort: &externalRouterPort,
+			IPPrefix:    prefix,
+			Nexthop:     nextHop.String(),
+			OutputPort:  &externalRouterPort,
+			ExternalIDs: map[string]string{util.OvnNodeMasqCIDR: ""},
 		}
 		p := func(item *nbdb.LogicalRouterStaticRoute) bool {
 			return item.OutputPort != nil && *item.OutputPort == *lrsr.OutputPort && item.IPPrefix == lrsr.IPPrefix &&
@@ -779,5 +787,144 @@ func (oc *DefaultNetworkController) deletePolicyBasedRoutes(policyID, priority s
 		return fmt.Errorf("error deleting policy %s: %v", policyID, err)
 	}
 
+	return nil
+}
+
+// cleanupStaleMasqueradeData removes following from northbound database
+//   - LogicalRouterStaticRoute for rtoe-<GW_router> OutputPort anf IPPrefix is same as v4 or v6
+//     StaleMasqueradeSubnet
+//   - StaticMACBinding for rtoe-<GW_router> LogicalPort and referencing old DummyNextHopMasqueradeIP
+func deleteStaleMasqueradeResources(nbClient libovsdbclient.Client, routerName, nodeName string, wf *factory.WatchFactory) error {
+	var staleMasqueradeIPs config.MasqueradeIPsConfig
+	var nextHops []net.IP
+	logicalport := types.GWRouterToExtSwitchPrefix + routerName
+
+	// we first examine the kapi node to see if we can determine if there is a stale masquerade subnet
+	// if the masquerade subnet on the kapi node matches whats configured for this controller, it
+	// doesn't necessarily mean there is not still a stale masquerade config in nbdb because
+	// node could have already updated before this process runs.
+	// As a backup, if we don't find the positive match in kapi, we execute a negative lookup in NBDB
+
+	node, err := wf.GetNode(nodeName)
+	if err != nil {
+		if kerrors.IsNotFound(err) {
+			// node doesn't exist for some reason, assume we should still try to clean up with auto-detection
+			if err := deleteStaleMasqueradeRouteAndMACBinding(nbClient, routerName, nextHops); err != nil {
+				return fmt.Errorf("failed to remove stale MAC binding and static route for logical port %s: %w", logicalport, err)
+			}
+			return nil
+		}
+		return err
+	}
+
+	subnets, err := util.ParseNodeMasqueradeSubnet(node)
+	if err != nil {
+		if util.IsAnnotationNotSetError(err) {
+			// no annotation set, must be initial bring up, nothing to clean
+			return nil
+		}
+		return err
+	}
+
+	var v4ConfiguredMasqueradeNet, v6ConfiguredMasqueradeNet *net.IPNet
+
+	for _, subnet := range subnets {
+		if utilnet.IsIPv6CIDR(subnet) {
+			v6ConfiguredMasqueradeNet = subnet
+		} else if utilnet.IsIPv4CIDR(subnet) {
+			v4ConfiguredMasqueradeNet = subnet
+		} else {
+			return fmt.Errorf("invalid subnet for masquerade annotation: %s", subnet)
+		}
+	}
+
+	// Check for KAPI telling us there is a stale masquerade
+	if v4ConfiguredMasqueradeNet != nil && config.Gateway.V4MasqueradeSubnet != v4ConfiguredMasqueradeNet.String() {
+		if err := config.AllocateV4MasqueradeIPs(v4ConfiguredMasqueradeNet.IP, &staleMasqueradeIPs); err != nil {
+			return fmt.Errorf("unable to determine stale V4MasqueradeIPs: %s", err)
+		}
+		nextHops = append(nextHops, staleMasqueradeIPs.V4DummyNextHopMasqueradeIP)
+	}
+
+	if v6ConfiguredMasqueradeNet != nil && config.Gateway.V6MasqueradeSubnet != v6ConfiguredMasqueradeNet.String() {
+		if err := config.AllocateV6MasqueradeIPs(v6ConfiguredMasqueradeNet.IP, &staleMasqueradeIPs); err != nil {
+			return fmt.Errorf("unable to determine stale V6MasqueradeIPs: %s", err)
+		}
+		nextHops = append(nextHops, staleMasqueradeIPs.V6DummyNextHopMasqueradeIP)
+	}
+
+	if err := deleteStaleMasqueradeRouteAndMACBinding(nbClient, routerName, nextHops); err != nil {
+		return fmt.Errorf("failed to remove stale MAC binding and static route for logical port %s: %w", logicalport, err)
+	}
+
+	return nil
+}
+
+// deleteStaleMasqueradeRouteAndMACBinding will attempt to remove the corresponding routes and MAC bindings given the
+// list of nextHopIPs. If nextHopIPs is empty, then an attempt will be made to detect the stale route and MAC bindings
+func deleteStaleMasqueradeRouteAndMACBinding(nbClient libovsdbclient.Client, routerName string, nextHopIPs []net.IP) error {
+	logicalport := types.GWRouterToExtSwitchPrefix + routerName
+	if len(nextHopIPs) == 0 {
+		// build valid values
+		validNextHops := []net.IP{config.Gateway.MasqueradeIPs.V4DummyNextHopMasqueradeIP, config.Gateway.MasqueradeIPs.V6DummyNextHopMasqueradeIP}
+		// lookup routes for external id that dont match currently configured masquerade subnets
+		for _, validNextHop := range validNextHops {
+			staticRoutePredicate := func(item *nbdb.LogicalRouterStaticRoute) bool {
+				if item.OutputPort != nil && *item.OutputPort == logicalport &&
+					item.Nexthop != validNextHop.String() && utilnet.IPFamilyOfString(item.Nexthop) == utilnet.IPFamilyOf(validNextHop) {
+					if _, ok := item.ExternalIDs[util.OvnNodeMasqCIDR]; ok {
+						return true
+					}
+				}
+				return false
+			}
+
+			staleRoutes, err := libovsdbops.FindLogicalRouterStaticRoutesWithPredicate(nbClient, staticRoutePredicate)
+			if err != nil {
+				return fmt.Errorf("failed to search for stale masquerade routes: %w", err)
+			}
+
+			for _, staleRoute := range staleRoutes {
+				klog.Infof("Stale masquerade route found: %#v", *staleRoute)
+				// found stale routes, derive nexthop and flush the route and mac binding if it exists
+				staleNextHop := staleRoute.Nexthop
+
+				macBindingPredicate := func(item *nbdb.StaticMACBinding) bool {
+					return item.LogicalPort == logicalport && item.IP == staleNextHop &&
+						utilnet.IPFamilyOfString(item.IP) == utilnet.IPFamilyOfString(staleNextHop)
+				}
+				if err := libovsdbops.DeleteStaticMACBindingWithPredicate(nbClient, macBindingPredicate); err != nil {
+					return fmt.Errorf("failed to delete static MAC binding for logical port %s: %v", logicalport, err)
+				}
+			}
+			if err := libovsdbops.DeleteLogicalRouterStaticRoutes(nbClient, routerName, staleRoutes...); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	for _, nextHop := range nextHopIPs {
+		staticRoutePredicate := func(item *nbdb.LogicalRouterStaticRoute) bool {
+			if item.OutputPort != nil && *item.OutputPort == logicalport &&
+				item.Nexthop == nextHop.String() && utilnet.IPFamilyOfString(item.Nexthop) == utilnet.IPFamilyOf(nextHop) {
+				if _, ok := item.ExternalIDs[util.OvnNodeMasqCIDR]; ok {
+					return true
+				}
+			}
+			return false
+		}
+		if err := libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicate(nbClient, routerName, staticRoutePredicate); err != nil {
+			return fmt.Errorf("failed to delete static route from gateway router %s: %v", routerName, err)
+		}
+
+		macBindingPredicate := func(item *nbdb.StaticMACBinding) bool {
+			return item.LogicalPort == logicalport && item.IP == nextHop.String() &&
+				utilnet.IPFamilyOfString(item.IP) == utilnet.IPFamilyOf(nextHop)
+		}
+		if err := libovsdbops.DeleteStaticMACBindingWithPredicate(nbClient, macBindingPredicate); err != nil {
+			return fmt.Errorf("failed to delete static MAC binding for logical port %s: %v", logicalport, err)
+		}
+	}
 	return nil
 }

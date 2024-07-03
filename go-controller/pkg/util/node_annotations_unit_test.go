@@ -302,7 +302,7 @@ func TestParseNodeL3GatewayAnnotation(t *testing.T) {
 			desc: "error: annotation for network not found",
 			inpNode: &v1.Node{
 				ObjectMeta: metav1.ObjectMeta{
-					Annotations: map[string]string{"k8s.ovn.org/l3-gateway-config": `{"nondefault":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"169.254.33.2/24", "next-hop":"169.254.33.1"}}`},
+					Annotations: map[string]string{"k8s.ovn.org/l3-gateway-config": `{"nondefault":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"169.255.33.2/24", "next-hop":"169.255.33.1"}}`},
 				},
 			},
 			errAssert: true,
@@ -312,7 +312,7 @@ func TestParseNodeL3GatewayAnnotation(t *testing.T) {
 			desc: "error: nod chassis ID annotation not found",
 			inpNode: &v1.Node{
 				ObjectMeta: metav1.ObjectMeta{
-					Annotations: map[string]string{"k8s.ovn.org/l3-gateway-config": `{"default":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"169.254.33.2/24", "next-hop":"169.254.33.1"}}`},
+					Annotations: map[string]string{"k8s.ovn.org/l3-gateway-config": `{"default":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"169.255.33.2/24", "next-hop":"169.255.33.1"}}`},
 				},
 			},
 			errAssert: true,
@@ -323,7 +323,7 @@ func TestParseNodeL3GatewayAnnotation(t *testing.T) {
 			inpNode: &v1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Annotations: map[string]string{
-						"k8s.ovn.org/l3-gateway-config": `{"default":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"169.254.33.2/24", "next-hop":"169.254.33.1"}}`,
+						"k8s.ovn.org/l3-gateway-config": `{"default":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"169.255.33.2/24", "next-hop":"169.255.33.1"}}`,
 						"k8s.ovn.org/node-chassis-id":   "79fdcfc4-6fe6-4cd3-8242-c0f85a4668ec",
 					},
 				},
@@ -362,7 +362,7 @@ func TestNodeL3GatewayAnnotationChanged(t *testing.T) {
 			newNode: &v1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Annotations: map[string]string{
-						"k8s.ovn.org/l3-gateway-config": `{"default":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"169.254.33.2/24", "next-hop":"169.254.33.1"}}`,
+						"k8s.ovn.org/l3-gateway-config": `{"default":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"169.255.33.2/24", "next-hop":"169.255.33.1"}}`,
 					},
 				},
 			},
@@ -373,14 +373,14 @@ func TestNodeL3GatewayAnnotationChanged(t *testing.T) {
 			newNode: &v1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Annotations: map[string]string{
-						"k8s.ovn.org/l3-gateway-config": `{"default":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"169.254.33.3/24", "next-hop":"169.254.33.1"}}`,
+						"k8s.ovn.org/l3-gateway-config": `{"default":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"169.254.33.3/24", "next-hop":"169.255.33.1"}}`,
 					},
 				},
 			},
 			oldNode: &v1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Annotations: map[string]string{
-						"k8s.ovn.org/l3-gateway-config": `{"default":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"169.254.33.2/24", "next-hop":"169.254.33.1"}}`,
+						"k8s.ovn.org/l3-gateway-config": `{"default":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"169.255.33.2/24", "next-hop":"169.255.33.1"}}`,
 					},
 				},
 			},
@@ -391,14 +391,14 @@ func TestNodeL3GatewayAnnotationChanged(t *testing.T) {
 			newNode: &v1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Annotations: map[string]string{
-						"k8s.ovn.org/l3-gateway-config": `{"default":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"169.254.33.2/24", "next-hop":"169.254.33.1"}}`,
+						"k8s.ovn.org/l3-gateway-config": `{"default":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"169.255.33.2/24", "next-hop":"169.255.33.1"}}`,
 					},
 				},
 			},
 			oldNode: &v1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Annotations: map[string]string{
-						"k8s.ovn.org/l3-gateway-config": `{"default":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"169.254.33.2/24", "next-hop":"169.254.33.1"}}`,
+						"k8s.ovn.org/l3-gateway-config": `{"default":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"169.255.33.2/24", "next-hop":"169.255.33.1"}}`,
 					},
 				},
 			},

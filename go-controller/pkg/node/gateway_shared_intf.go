@@ -1761,12 +1761,24 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 		nodeIPs := gw.nodeIPManager.ListAddresses()
 
 		if config.OvnKubeNode.Mode == types.NodeModeFull {
+			// Delete stale masquerade resources if there are any. This is to make sure that there
+			// are no Linux resources with IP from old masquerade subnet when masquerade subnet
+			// gets changed as part of day2 operation.
+			if err := deleteStaleMasqueradeResources(gwBridge.bridgeName, nodeName, watchFactory); err != nil {
+				return fmt.Errorf("failed to remove stale masquerade resources: %w", err)
+			}
+
 			if err := setNodeMasqueradeIPOnExtBridge(gwBridge.bridgeName); err != nil {
 				return fmt.Errorf("failed to set the node masquerade IP on the ext bridge %s: %v", gwBridge.bridgeName, err)
 			}
 
 			if err := addMasqueradeRoute(routeManager, gwBridge.bridgeName, nodeName, gwIPs, watchFactory); err != nil {
 				return fmt.Errorf("failed to set the node masquerade route to OVN: %v", err)
+			}
+
+			// Masquerade config mostly done on node, update annotation
+			if err := updateMasqueradeAnnotation(nodeName, kube); err != nil {
+				return fmt.Errorf("failed to update masquerade subnet annotation on node: %s, error: %v", nodeName, err)
 			}
 		}
 
@@ -1812,7 +1824,7 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 		}
 
 		if err := addHostMACBindings(gwBridge.bridgeName); err != nil {
-			return fmt.Errorf("failed to add MAC bindings for service routing")
+			return fmt.Errorf("failed to add MAC bindings for service routing: %w", err)
 		}
 
 		return nil
@@ -2129,6 +2141,19 @@ func addHostMACBindings(bridgeName string) error {
 	return nil
 }
 
+func updateMasqueradeAnnotation(nodeName string, kube kube.Interface) error {
+	_, v4MasqueradeCIDR, _ := net.ParseCIDR(config.Gateway.V4MasqueradeSubnet)
+	_, v6MasqueradeCIDR, _ := net.ParseCIDR(config.Gateway.V6MasqueradeSubnet)
+	nodeAnnotation, err := util.CreateNodeMasqueradeSubnetAnnotation(nil, v4MasqueradeCIDR, v6MasqueradeCIDR)
+	if err != nil {
+		return fmt.Errorf("unable to generate masquerade subnet annotation update: %w", err)
+	}
+	if err := kube.SetAnnotationsOnNode(nodeName, nodeAnnotation); err != nil {
+		return fmt.Errorf("unable to set node masquerade subnet annotation update: %w", err)
+	}
+	return nil
+}
+
 // generateIPFragmentReassemblyFlow adds flows in table 0 that send packets to a
 // specific conntrack zone for reassembly with the same priority as node port
 // flows that match on L4 fields. After reassembly packets are reinjected to
@@ -2157,4 +2182,137 @@ func generateIPFragmentReassemblyFlow(ofPortPhys string) []string {
 	}
 
 	return flows
+}
+
+// deleteStaleMasqueradeResources removes stale Linux resources when config.Gateway.V4MasqueradeSubnet
+// or config.Gateway.V6MasqueradeSubnet gets changed at day 2.
+func deleteStaleMasqueradeResources(bridgeName, nodeName string, wf factory.NodeWatchFactory) error {
+	var staleMasqueradeIPs config.MasqueradeIPsConfig
+	node, err := wf.GetNode(nodeName)
+	if err != nil {
+		return err
+	}
+	subnets, err := util.ParseNodeMasqueradeSubnet(node)
+	if err != nil {
+		if util.IsAnnotationNotSetError(err) {
+			// no annotation set, must be initial bring up, nothing to clean
+			return nil
+		}
+		return err
+	}
+
+	var v4ConfiguredMasqueradeNet, v6ConfiguredMasqueradeNet *net.IPNet
+
+	for _, subnet := range subnets {
+		if utilnet.IsIPv6CIDR(subnet) {
+			v6ConfiguredMasqueradeNet = subnet
+		} else if utilnet.IsIPv4CIDR(subnet) {
+			v4ConfiguredMasqueradeNet = subnet
+		} else {
+			return fmt.Errorf("invalid subnet for masquerade annotation: %s", subnet)
+		}
+	}
+
+	if v4ConfiguredMasqueradeNet != nil && config.Gateway.V4MasqueradeSubnet != v4ConfiguredMasqueradeNet.String() {
+		if err := config.AllocateV4MasqueradeIPs(v4ConfiguredMasqueradeNet.IP, &staleMasqueradeIPs); err != nil {
+			return fmt.Errorf("unable to determine stale V4MasqueradeIPs: %s", err)
+		}
+	}
+	if v6ConfiguredMasqueradeNet != nil && config.Gateway.V6MasqueradeSubnet != v6ConfiguredMasqueradeNet.String() {
+		if err := config.AllocateV6MasqueradeIPs(v6ConfiguredMasqueradeNet.IP, &staleMasqueradeIPs); err != nil {
+			return fmt.Errorf("unable to determine stale V6MasqueradeIPs: %s", err)
+		}
+	}
+	link, err := util.LinkByName(bridgeName)
+	if err != nil {
+		return fmt.Errorf("unable to get link for %s, error: %v", bridgeName, err)
+	}
+
+	if staleMasqueradeIPs.V4HostMasqueradeIP != nil || staleMasqueradeIPs.V6HostMasqueradeIP != nil {
+		if err = deleteMasqueradeResources(link, &staleMasqueradeIPs); err != nil {
+			klog.Errorf("Unable to delete masquerade resources! Some configuration for the masquerade subnet "+
+				"may be left on the node and may cause issues! Errors: %v", err)
+		}
+	}
+
+	return nil
+}
+
+// deleteMasqueradeResources removes following Linux resources given a config.MasqueradeIPsConfig
+// struct and netlink.Link:
+// - neighbour object for IPv4 and IPv6 OVNMasqueradeIP and DummyNextHopMasqueradeIP.
+// - masquerade route added by addMasqueradeRoute function while starting up the gateway.
+// - iptables rules created for masquerade subnet based on ipForwarding and Gateway mode.
+// - stale HostMasqueradeIP address from gateway bridge
+func deleteMasqueradeResources(link netlink.Link, staleMasqueradeIPs *config.MasqueradeIPsConfig) error {
+	var subnets []*net.IPNet
+	var neighborIPs []net.IP
+	var aggregatedErrors []error
+	klog.Infof("Stale masquerade resources detected, cleaning IPs: %s, %s, %s, %s",
+		staleMasqueradeIPs.V4HostMasqueradeIP,
+		staleMasqueradeIPs.V6HostMasqueradeIP,
+		staleMasqueradeIPs.V4OVNMasqueradeIP,
+		staleMasqueradeIPs.V6OVNMasqueradeIP)
+	if config.IPv4Mode && staleMasqueradeIPs.V4HostMasqueradeIP != nil {
+		// Delete any stale masquerade IP from external bridge.
+		hostMasqIPNet, err := util.LinkAddrGetIPNet(link, staleMasqueradeIPs.V4HostMasqueradeIP)
+		if err != nil {
+			aggregatedErrors = append(aggregatedErrors, fmt.Errorf("unable to get IPNet from link %s: %w", link, err))
+		}
+		if hostMasqIPNet != nil {
+			if err := util.LinkAddrDel(link, hostMasqIPNet); err != nil {
+				aggregatedErrors = append(aggregatedErrors, fmt.Errorf("failed to remove masquerade IP from bridge %s: %w", link, err))
+			}
+		}
+
+		_, masqIPNet, err := net.ParseCIDR(fmt.Sprintf("%s/32", staleMasqueradeIPs.V4OVNMasqueradeIP.String()))
+		if err != nil {
+			aggregatedErrors = append(aggregatedErrors,
+				fmt.Errorf("failed to parse V4OVNMasqueradeIP %s: %v", staleMasqueradeIPs.V4OVNMasqueradeIP.String(), err))
+		}
+		subnets = append(subnets, masqIPNet)
+		neighborIPs = append(neighborIPs, staleMasqueradeIPs.V4OVNMasqueradeIP, staleMasqueradeIPs.V4DummyNextHopMasqueradeIP)
+		if err := nodeipt.DelRules(getStaleMasqueradeIptablesRules(staleMasqueradeIPs.V4OVNMasqueradeIP)); err != nil {
+			aggregatedErrors = append(aggregatedErrors,
+				fmt.Errorf("failed to delete forwarding iptables rules for stale masquerade subnet %s: ", err))
+		}
+	}
+
+	if config.IPv6Mode && staleMasqueradeIPs.V6HostMasqueradeIP != nil {
+		// Delete any stale masquerade IP from external bridge.
+		hostMasqIPNet, err := util.LinkAddrGetIPNet(link, staleMasqueradeIPs.V6HostMasqueradeIP)
+		if err != nil {
+			aggregatedErrors = append(aggregatedErrors, fmt.Errorf("unable to get IPNet from link %s: %w", link, err))
+		}
+		if hostMasqIPNet != nil {
+			if err := util.LinkAddrDel(link, hostMasqIPNet); err != nil {
+				aggregatedErrors = append(aggregatedErrors, fmt.Errorf("failed to remove masquerade IP from bridge %s: %w", link, err))
+			}
+		}
+
+		_, masqIPNet, err := net.ParseCIDR(fmt.Sprintf("%s/128", staleMasqueradeIPs.V6OVNMasqueradeIP.String()))
+		if err != nil {
+			return fmt.Errorf("failed to parse V6OVNMasqueradeIP %s: %v", staleMasqueradeIPs.V6OVNMasqueradeIP.String(), err)
+		}
+		subnets = append(subnets, masqIPNet)
+		neighborIPs = append(neighborIPs, staleMasqueradeIPs.V6OVNMasqueradeIP, staleMasqueradeIPs.V6DummyNextHopMasqueradeIP)
+		if err := nodeipt.DelRules(getStaleMasqueradeIptablesRules(staleMasqueradeIPs.V6OVNMasqueradeIP)); err != nil {
+			return fmt.Errorf("failed to delete forwarding iptables rules for stale masquerade subnet %s: ", err)
+		}
+	}
+
+	for _, ip := range neighborIPs {
+		if err := util.LinkNeighDel(link, ip); err != nil {
+			aggregatedErrors = append(aggregatedErrors, fmt.Errorf("failed to remove IP neighbour entry for ip %s, "+
+				"on iface %s: %v", ip, link.Attrs().Name, err))
+		}
+	}
+
+	if len(subnets) != 0 {
+		if err := util.LinkRoutesDel(link, subnets); err != nil {
+			aggregatedErrors = append(aggregatedErrors, fmt.Errorf("failed to list addresses for the link %s: %v", link.Attrs().Name, err))
+		}
+	}
+
+	return utilerrors.Join(aggregatedErrors...)
 }

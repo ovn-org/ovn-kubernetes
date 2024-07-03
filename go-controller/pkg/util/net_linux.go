@@ -180,6 +180,15 @@ func getFamily(ip net.IP) int {
 	}
 }
 
+// LinkByName returns the netlink device
+func LinkByName(interfaceName string) (netlink.Link, error) {
+	link, err := netLinkOps.LinkByName(interfaceName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to lookup link %s: %w", interfaceName, err)
+	}
+	return link, nil
+}
+
 // LinkSetUp returns the netlink device with its state marked up
 func LinkSetUp(interfaceName string) (netlink.Link, error) {
 	link, err := netLinkOps.LinkByName(interfaceName)
@@ -240,6 +249,21 @@ func LinkAddrExist(link netlink.Link, address *net.IPNet) (bool, error) {
 	return false, nil
 }
 
+// LinkAddrGetIPNet returns IPNet given the IP of an address present on given link
+func LinkAddrGetIPNet(link netlink.Link, ip net.IP) (*net.IPNet, error) {
+	addrs, err := netLinkOps.AddrList(link, getFamily(ip))
+	if err != nil {
+		return nil, fmt.Errorf("failed to list addresses for the link %s: %v",
+			link.Attrs().Name, err)
+	}
+	for _, addr := range addrs {
+		if addr.IPNet.IP.Equal(ip) {
+			return addr.IPNet, nil
+		}
+	}
+	return nil, nil
+}
+
 // LinkAddrAdd adds a new address. If both preferredLifetime & validLifetime,
 // are zero, then they are not applied, but if either parameters are not zero, both are applied.
 func LinkAddrAdd(link netlink.Link, address *net.IPNet, flags, preferredLifetime, validLifetime int) error {
@@ -247,6 +271,7 @@ func LinkAddrAdd(link netlink.Link, address *net.IPNet, flags, preferredLifetime
 	if err != nil {
 		return fmt.Errorf("failed to add address %s on link %s: %v", address.String(), link.Attrs().Name, err)
 	}
+
 	return nil
 }
 

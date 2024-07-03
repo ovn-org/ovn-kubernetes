@@ -41,6 +41,50 @@ func TestGetFamily(t *testing.T) {
 	}
 }
 
+func TestLinkByName(t *testing.T) {
+	mockNetLinkOps := new(mocks.NetLinkOps)
+	mockLink := new(netlink_mocks.Link)
+	// below is defined in net_linux.go
+	netLinkOps = mockNetLinkOps
+
+	tests := []struct {
+		desc                     string
+		input                    string
+		errExp                   bool
+		onRetArgsNetLinkLibOpers []ovntest.TestifyMockHelper
+	}{
+		{
+			desc:   "fails to look up link",
+			input:  "invalidIfaceName",
+			errExp: true,
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "LinkByName", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{nil, fmt.Errorf("mock error")}},
+			},
+		},
+		{
+			desc:   "sets up the link successfully",
+			input:  "testIfaceName",
+			errExp: false,
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "LinkByName", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{mockLink, nil}},
+			},
+		},
+	}
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			ovntest.ProcessMockFnList(&mockNetLinkOps.Mock, tc.onRetArgsNetLinkLibOpers)
+			res, err := LinkByName(tc.input)
+			t.Log(res, err)
+			if tc.errExp {
+				assert.Error(t, err)
+			} else {
+				assert.NotNil(t, res)
+			}
+			mockNetLinkOps.AssertExpectations(t)
+		})
+	}
+}
+
 func TestLinkSetUp(t *testing.T) {
 	mockNetLinkOps := new(mocks.NetLinkOps)
 	mockLink := new(netlink_mocks.Link)

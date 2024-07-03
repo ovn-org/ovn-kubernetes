@@ -457,12 +457,24 @@ func (nc *DefaultNodeNetworkController) initGatewayDPUHost(kubeNodeIP net.IP) er
 		return err
 	}
 
+	// Delete stale masquerade resources if there are any. This is to make sure that there
+	// are no Linux resources with IP from old masquerade subnet when masquerade subnet
+	// gets changed as part of day2 operation.
+	if err := deleteStaleMasqueradeResources(gwIntf, nc.name, nc.watchFactory); err != nil {
+		return fmt.Errorf("failed to remove stale masquerade resources: %w", err)
+	}
+
 	if err := setNodeMasqueradeIPOnExtBridge(gwIntf); err != nil {
 		return fmt.Errorf("failed to set the node masquerade IP on the ext bridge %s: %v", gwIntf, err)
 	}
 
 	if err := addMasqueradeRoute(nc.routeManager, gwIntf, nc.name, ifAddrs, nc.watchFactory); err != nil {
 		return fmt.Errorf("failed to set the node masquerade route to OVN: %v", err)
+	}
+
+	// Masquerade config mostly done on node, update annotation
+	if err := updateMasqueradeAnnotation(nc.name, nc.Kube); err != nil {
+		return fmt.Errorf("failed to update masquerade subnet annotation on node: %s, error: %v", nc.name, err)
 	}
 
 	err = configureSvcRouteViaInterface(nc.routeManager, gatewayIntf, gatewayNextHops)
