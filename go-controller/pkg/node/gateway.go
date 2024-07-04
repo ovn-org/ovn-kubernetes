@@ -78,7 +78,7 @@ func (g *gateway) AddNetwork(nInfo util.NetInfo, masqCTMark uint) error {
 	if g.vrfManager == nil {
 		return nil
 	}
-	mgmtPortLinkName := util.GetSecondaryNetworkPrefix(nInfo.GetNetworkName()) + types.K8sMgmtIntfName
+	mgmtPortLinkName := util.GetNetMgmtLinkName(nInfo.GetNetworkName())
 	vrfDeviceName := util.GetVrfDeviceName(nInfo.GetNetworkName())
 	vrfTableId, err := util.GetIfIndex(mgmtPortLinkName)
 	if err != nil {
@@ -87,6 +87,10 @@ func (g *gateway) AddNetwork(nInfo util.NetInfo, masqCTMark uint) error {
 	enslaveInterfaces := make(sets.Set[string])
 	enslaveInterfaces.Insert(mgmtPortLinkName)
 	err = g.vrfManager.AddVrf(vrfDeviceName, uint32(vrfTableId), enslaveInterfaces, nil)
+	if err != nil {
+		return err
+	}
+	err = g.programRoutesForUDN(nInfo, vrfTableId)
 	if err != nil {
 		return err
 	}

@@ -145,6 +145,13 @@ func GetVrfDeviceName(netName string) string {
 	return GetSecondaryNetworkPrefix(netName) + types.VrfDeviceSuffix
 }
 
+// GetNetMgmtLinkName determines name of the mp0 interface created for user defined primary
+// network in local gateway mode.
+// TODO: should we chek if device name shouldn't go beyond 15 characters ?
+func GetNetMgmtLinkName(netName string) string {
+	return GetSecondaryNetworkPrefix(netName) + types.K8sMgmtIntfName
+}
+
 // GetNodeInternalAddrs returns the first IPv4 and/or IPv6 InternalIP defined
 // for the node. On certain cloud providers (AWS) the egress IP will be added to
 // the list of node IPs as an InternalIP address, we don't want to create the

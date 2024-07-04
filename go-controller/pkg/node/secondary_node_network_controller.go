@@ -3,8 +3,10 @@ package node
 import (
 	"context"
 	"fmt"
+	"net"
 	"sync"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -53,6 +55,15 @@ func (nc *SecondaryNodeNetworkController) Start(ctx context.Context) error {
 
 	// Generate a per network conntrack mark to be used for egress traffic.
 	masqCTMark := ctMarkUDNBase + uint(nc.networkID)
+
+	if config.Gateway.Mode == config.GatewayModeLocal {
+		mgmtPortLinkName := util.GetNetMgmtLinkName(nc.NetInfo.GetNetworkName())
+		//TODO; handle returned config, configure ip address
+		_, err := newUserNetManagementPortConfig(mgmtPortLinkName, []*net.IPNet{})
+		if err != nil {
+			return err
+		}
+	}
 
 	if err := nc.gatewayManager.AddNetwork(nc.NetInfo, masqCTMark); err != nil {
 		return fmt.Errorf("failed to add network to node gateway for network '%s': %w", nc.GetNetworkName(), err)
