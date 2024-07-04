@@ -41,3 +41,7 @@ conformance:
 	E2E_REPORT_DIR=$(E2E_REPORT_DIR) \
 	E2E_REPORT_PREFIX=$(JOB_NAME)_ \
 	./scripts/conformance.sh
+
+.PHONY: tools
+tools:
+	./scripts/test-ovnkube-trace.sh
