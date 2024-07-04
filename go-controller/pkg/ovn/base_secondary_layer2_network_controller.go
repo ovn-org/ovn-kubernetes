@@ -178,6 +178,7 @@ func (h *baseSecondaryLayer2NetworkControllerEventHandler) IsObjectInTerminalSta
 // configuration for secondary layer2/localnet network controller
 type BaseSecondaryLayer2NetworkController struct {
 	BaseSecondaryNetworkController
+	buildEventHandler func(reflect.Type) retry.EventHandler
 }
 
 func (oc *BaseSecondaryLayer2NetworkController) initRetryFramework() {
@@ -199,13 +200,7 @@ func (oc *BaseSecondaryLayer2NetworkController) initRetryFramework() {
 // newRetryFramework builds and returns a retry framework for the input resource type;
 func (oc *BaseSecondaryLayer2NetworkController) newRetryFramework(
 	objectType reflect.Type) *retry.RetryFramework {
-	eventHandler := &baseSecondaryLayer2NetworkControllerEventHandler{
-		baseHandler:  baseNetworkControllerEventHandler{},
-		objType:      objectType,
-		watchFactory: oc.watchFactory,
-		oc:           oc,
-		syncFunc:     nil,
-	}
+	eventHandler := oc.buildEventHandler(objectType)
 	resourceHandler := &retry.ResourceHandler{
 		HasUpdateFunc:          hasResourceAnUpdateFunc(objectType),
 		NeedsUpdateDuringRetry: needsUpdateDuringRetry(objectType),

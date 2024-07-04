@@ -2,6 +2,7 @@ package ovn
 
 import (
 	"context"
+	"reflect"
 	"sync"
 	"time"
 
@@ -11,12 +12,17 @@ import (
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/persistentips"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	"k8s.io/klog/v2"
 )
+
+type secondaryLocalnetNetworkControllerEventHandler struct {
+	baseSecondaryLayer2NetworkControllerEventHandler
+}
 
 // SecondaryLocalnetNetworkController is created for logical network infrastructure and policy
 // for a secondary localnet network
@@ -53,6 +59,18 @@ func NewSecondaryLocalnetNetworkController(cnci *CommonNetworkControllerInfo, ne
 				},
 			},
 		},
+	}
+
+	oc.BaseSecondaryLayer2NetworkController.buildEventHandler = func(objectType reflect.Type) retry.EventHandler {
+		return &secondaryLocalnetNetworkControllerEventHandler{
+			baseSecondaryLayer2NetworkControllerEventHandler: baseSecondaryLayer2NetworkControllerEventHandler{
+				baseHandler:  baseNetworkControllerEventHandler{},
+				objType:      objectType,
+				watchFactory: oc.watchFactory,
+				oc:           &oc.BaseSecondaryLayer2NetworkController,
+				syncFunc:     nil,
+			},
+		}
 	}
 
 	if oc.allocatesPodAnnotation() {

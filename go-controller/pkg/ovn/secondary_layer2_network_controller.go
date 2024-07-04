@@ -2,6 +2,7 @@ package ovn
 
 import (
 	"context"
+	"reflect"
 	"sync"
 	"time"
 
@@ -11,12 +12,19 @@ import (
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	zoneinterconnect "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/zone_interconnect"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/persistentips"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	"k8s.io/klog/v2"
 )
+
+// method/structure shared by all layer 2 network controller, including localnet and layer2 network controllres.
+
+type secondaryLayer2NetworkControllerEventHandler struct {
+	baseSecondaryLayer2NetworkControllerEventHandler
+}
 
 // SecondaryLayer2NetworkController is created for logical network infrastructure and policy
 // for a secondary layer2 network
@@ -34,6 +42,7 @@ func NewSecondaryLayer2NetworkController(cnci *CommonNetworkControllerInfo, netI
 
 	oc := &SecondaryLayer2NetworkController{
 		BaseSecondaryLayer2NetworkController{
+
 			BaseSecondaryNetworkController: BaseSecondaryNetworkController{
 				BaseNetworkController: BaseNetworkController{
 					CommonNetworkControllerInfo: *cnci,
@@ -54,6 +63,18 @@ func NewSecondaryLayer2NetworkController(cnci *CommonNetworkControllerInfo, netI
 				},
 			},
 		},
+	}
+
+	oc.BaseSecondaryLayer2NetworkController.buildEventHandler = func(objectType reflect.Type) retry.EventHandler {
+		return &secondaryLayer2NetworkControllerEventHandler{
+			baseSecondaryLayer2NetworkControllerEventHandler: baseSecondaryLayer2NetworkControllerEventHandler{
+				baseHandler:  baseNetworkControllerEventHandler{},
+				objType:      objectType,
+				watchFactory: oc.watchFactory,
+				oc:           &oc.BaseSecondaryLayer2NetworkController,
+				syncFunc:     nil,
+			},
+		}
 	}
 
 	if config.OVNKubernetesFeature.EnableInterconnect {
