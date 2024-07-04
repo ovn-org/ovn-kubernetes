@@ -913,6 +913,16 @@ func (bnc *BaseNetworkController) recordPodErrorEvent(pod *kapi.Pod, podErr erro
 	}
 }
 
+func (bnc *BaseNetworkController) recordNamespaceErrorEvent(ns *kapi.Namespace, nsErr error) {
+	nsRef, err := ref.GetReference(scheme.Scheme, ns)
+	if err != nil {
+		klog.Errorf("Couldn't get a reference to Namespace %s to post an event: '%v'", ns.Name, err)
+	} else {
+		klog.V(5).Infof("Posting a %s event for Namespace %s", kapi.EventTypeWarning, ns.Name)
+		bnc.recorder.Eventf(nsRef, kapi.EventTypeWarning, "ErrorReconcilingNamespace", nsErr.Error())
+	}
+}
+
 func (bnc *BaseNetworkController) doesNetworkRequireIPAM() bool {
 	return util.DoesNetworkRequireIPAM(bnc.NetInfo)
 }
@@ -987,7 +997,7 @@ func (bnc *BaseNetworkController) getActiveNetworkForNamespace(namespace string)
 	return util.GetActiveNetworkForNamespace(namespace, nadLister)
 }
 
-// GetNetworkRole returns the role of this controller's
+// GetNetworkRoleForPod returns the role of this controller's
 // network for the given pod
 // Expected values are:
 // (1) "primary" if this network is the primary network of the pod.
@@ -1010,7 +1020,7 @@ func (bnc *BaseNetworkController) getActiveNetworkForNamespace(namespace string)
 // NOTE: Like in other places, expectation is this function is always called
 // from controller's that have some relation to the given pod, unrelated
 // networks are treated as secondary networks so caller has to be careful
-func (bnc *BaseNetworkController) GetNetworkRole(pod *kapi.Pod) (string, error) {
+func (bnc *BaseNetworkController) GetNetworkRoleForPod(pod *kapi.Pod) (string, error) {
 	if !util.IsNetworkSegmentationSupportEnabled() {
 		// if user defined network segmentation is not enabled
 		// then we know pod's primary network is "default" and
@@ -1024,6 +1034,58 @@ func (bnc *BaseNetworkController) GetNetworkRole(pod *kapi.Pod) (string, error) 
 	if err != nil {
 		if util.IsUnknownActiveNetworkError(err) {
 			bnc.recordPodErrorEvent(pod, err)
+		}
+		return "", err
+	}
+	if activeNetwork.GetNetworkName() == bnc.GetNetworkName() {
+		return types.NetworkRolePrimary, nil
+	}
+	if bnc.IsDefault() {
+		// if default network was not the primary network,
+		// then when UDN is turned on, default network is the
+		// infrastructure-locked network forthis pod
+		return types.NetworkRoleInfrastructure, nil
+	}
+	return types.NetworkRoleSecondary, nil
+}
+
+// GetNetworkRoleForNamespace returns the role of this controller's
+// network for the given namespace
+// Expected values are:
+// (1) "primary" if this network is the primary network of the namespace.
+//
+//	The "default" network is the primary network of any namespace usually
+//	unless user-defined-network-segmentation feature has been activated.
+//	If network segmentation feature is enabled then any user defined
+//	network can be the primary network of the namespace.
+//
+// (2) "secondary" if this network is the secondary network of the namespace.
+//
+//	Only user defined networks can be secondary networks for a namespace.
+//
+// (3) "infrastructure-locked" is applicable only to "default" network if
+//
+//	a user defined network is the "primary" network for this namespace. This
+//	signifies the "default" network is only used for probing and
+//	is otherwise locked for all intents and purposes.
+//
+// NOTE: Like in other places, expectation is this function is always called
+// from controller's that have some relation to the given namespace, unrelated
+// networks are treated as secondary networks so caller has to be careful
+func (bnc *BaseNetworkController) GetNetworkRoleForNamespace(ns *kapi.Namespace) (string, error) {
+	if !util.IsNetworkSegmentationSupportEnabled() {
+		// if user defined network segmentation is not enabled
+		// then we know pod's primary network is "default" and
+		// pod's secondary network is not its NOT primary network
+		if bnc.IsDefault() {
+			return types.NetworkRolePrimary, nil
+		}
+		return types.NetworkRoleSecondary, nil
+	}
+	activeNetwork, err := bnc.getActiveNetworkForNamespace(ns.Name)
+	if err != nil {
+		if util.IsUnknownActiveNetworkError(err) {
+			bnc.recordNamespaceErrorEvent(ns, err)
 		}
 		return "", err
 	}
