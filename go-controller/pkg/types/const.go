@@ -62,7 +62,7 @@ const (
 	TransitSwitchToRouterPrefix = "tstor-"
 	RouterToTransitSwitchPrefix = "rtots-"
 
-	// ACL Priorities
+	// ACL Default Tier Priorities
 
 	// Default routed multicast allow acl rule priority
 	DefaultRoutedMcastAllowPriority = 1013
@@ -74,6 +74,11 @@ const (
 	DefaultAllowPriority = 1001
 	// Default deny acl rule priority
 	DefaultDenyPriority = 1000
+
+	// ACL PlaceHolderACL Tier Priorities
+	PrimaryUDNAllowPriority = 1001
+	// Default deny acl rule priority
+	PrimaryUDNDenyPriority = 1000
 
 	// ACL Tiers
 	// Tier 0 is called Primary as it is evaluated before any other feature-related Tiers.

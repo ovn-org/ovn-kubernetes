@@ -23,6 +23,8 @@ const (
 	LportIngress ACLPipelineType = "to-lport"
 	// LportEgressAfterLB will be converted to direction="from-lport", options={"apply-after-lb": "true"} ACL
 	LportEgressAfterLB ACLPipelineType = "from-lport-after-lb"
+	// LportEgress will be converted to direction="from-lport", matched before loadbalancing
+	LportEgress ACLPipelineType = "from-lport"
 )
 
 func PolicyTypeToAclPipeline(policyType knet.PolicyType) ACLPipelineType {
@@ -93,6 +95,8 @@ func BuildACL(dbIDs *libovsdbops.DbObjectIDs, priority int, match, action string
 	var options map[string]string
 	var direction string
 	switch aclT {
+	case LportEgress:
+		direction = nbdb.ACLDirectionFromLport
 	case LportEgressAfterLB:
 		direction = nbdb.ACLDirectionFromLport
 		options = map[string]string{

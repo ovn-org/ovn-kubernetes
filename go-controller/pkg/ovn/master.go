@@ -170,9 +170,11 @@ func (oc *DefaultNetworkController) syncNodeManagementPort(node *kapi.Node, host
 
 	var v4Subnet *net.IPNet
 	addresses := macAddress.String()
+	mgmtPortIPs := []net.IP{}
 	for _, hostSubnet := range hostSubnets {
 		mgmtIfAddr := util.GetNodeManagementIfAddr(hostSubnet)
 		addresses += " " + mgmtIfAddr.IP.String()
+		mgmtPortIPs = append(mgmtPortIPs, mgmtIfAddr.IP)
 
 		if err := oc.addAllowACLFromNode(node.Name, mgmtIfAddr.IP); err != nil {
 			return err
@@ -195,6 +197,12 @@ func (oc *DefaultNetworkController) syncNodeManagementPort(node *kapi.Node, host
 			if err != nil {
 				return fmt.Errorf("error creating static route %+v on router %s: %v", lrsr, oc.GetNetworkScopedClusterRouterName(), err)
 			}
+		}
+	}
+	// It is a part of DefaultNetworkController, but this check is added in case it will ever be moved to bnc.
+	if oc.GetNetworkName() == types.DefaultNetworkName {
+		if err := oc.setupUDNACLs(mgmtPortIPs); err != nil {
+			return err
 		}
 	}
 

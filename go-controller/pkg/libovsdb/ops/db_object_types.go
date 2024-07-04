@@ -37,6 +37,8 @@ const (
 	NetworkPolicyPortIndexOwnerType ownerType = "NetworkPolicyPortIndexOwnerType"
 	// ClusterOwnerType means the object is cluster-scoped and doesn't belong to any k8s objects
 	ClusterOwnerType ownerType = "Cluster"
+	// UDNIsolationOwnerType means the object is needed to implement UserDefinedNetwork isolation
+	UDNIsolationOwnerType ownerType = "UDNIsolation"
 
 	// owner extra IDs, make sure to define only 1 ExternalIDKey for every string value
 	PriorityKey           ExternalIDKey = "priority"
@@ -240,6 +242,13 @@ var ACLEgressFirewall = newObjectIDsType(acl, EgressFirewallOwnerType, []Externa
 	RuleIndex,
 })
 
+var ACLUDN = newObjectIDsType(acl, UDNIsolationOwnerType, []ExternalIDKey{
+	// name of a UDN-related ACL
+	ObjectNameKey,
+	// egress or ingress
+	PolicyDirectionKey,
+})
+
 var VirtualMachineDHCPOptions = newObjectIDsType(dhcpOptions, VirtualMachineOwnerType, []ExternalIDKey{
 	// We can have multiple VMs with same CIDR they  may have different
 	// hostname.
@@ -281,6 +290,13 @@ var PortGroupBaselineAdminNetworkPolicy = newObjectIDsType(portGroup, BaselineAd
 var PortGroupCluster = newObjectIDsType(portGroup, ClusterOwnerType, []ExternalIDKey{
 	// name of a global port group
 	// currently ClusterPortGroup and ClusterRtrPortGroup are present
+	ObjectNameKey,
+})
+
+var PortGroupUDN = newObjectIDsType(portGroup, UDNIsolationOwnerType, []ExternalIDKey{
+	// name of a UDN port group
+	// currently uses:
+	// secondaryPods - on default network switch to distinguish non-primary pods
 	ObjectNameKey,
 })
 
