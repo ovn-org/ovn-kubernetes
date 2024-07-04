@@ -497,6 +497,9 @@ if ovnkube_trace ${src_pods[0]} ${dst_svc[0]} -udp; then
   exit 1
 fi
 
+echo "Run ovnkube-trace to dump UDN VRF table IDs"
+ovnkube_trace --dump-udn-vrf-table-ids
+
 if [ ${POST_CLEANUP} == true ]; then
   cleanup
 fi
