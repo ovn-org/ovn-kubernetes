@@ -8,6 +8,7 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	"k8s.io/klog/v2"
@@ -43,11 +44,13 @@ func NewSecondaryNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, n
 // Start starts the default controller; handles all events and creates all needed logical entities
 func (nc *SecondaryNodeNetworkController) Start(ctx context.Context) error {
 	klog.Infof("Start secondary node network controller of network %s", nc.GetNetworkName())
-	handler, err := nc.watchPodsDPU()
-	if err != nil {
-		return err
+	if config.OvnKubeNode.Mode == ovntypes.NodeModeDPU {
+		handler, err := nc.watchPodsDPU()
+		if err != nil {
+			return err
+		}
+		nc.podHandler = handler
 	}
-	nc.podHandler = handler
 
 	if err := nc.ensureNetworkID(); err != nil {
 		return fmt.Errorf("failed ensuring network id at user defined node controller for network '%s': %w", nc.GetNetworkName(), err)
@@ -61,6 +64,7 @@ func (nc *SecondaryNodeNetworkController) Start(ctx context.Context) error {
 		//TODO; handle returned config, configure ip address
 		_, err := newUserNetManagementPortConfig(mgmtPortLinkName, []*net.IPNet{})
 		if err != nil {
+			klog.Errorf("Failed to configure user net management port, err: %v", err)
 			return err
 		}
 	}

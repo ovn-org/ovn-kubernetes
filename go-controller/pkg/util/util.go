@@ -140,16 +140,19 @@ func GetExtSwitchFromNode(node string) string {
 
 // GetVrfDeviceName determines the name of the vrf device created for every user defined
 // primary network in local gateway mode.
-// TODO: should we chek if device name shouldn't go beyond 15 characters ?
 func GetVrfDeviceName(netName string) string {
-	return GetSecondaryNetworkPrefix(netName) + types.VrfDeviceSuffix
+	return GetNetMgmtLinkName(netName) + types.VrfDeviceSuffix
 }
 
 // GetNetMgmtLinkName determines name of the mp0 interface created for user defined primary
 // network in local gateway mode.
-// TODO: should we chek if device name shouldn't go beyond 15 characters ?
 func GetNetMgmtLinkName(netName string) string {
-	return GetSecondaryNetworkPrefix(netName) + types.K8sMgmtIntfName
+	name := strings.ReplaceAll(netName, "/", "-")
+	mgmtIfaceMaxLength := 11
+	if len(name) < mgmtIfaceMaxLength {
+		return name
+	}
+	return name[:mgmtIfaceMaxLength]
 }
 
 // GetNodeInternalAddrs returns the first IPv4 and/or IPv6 InternalIP defined

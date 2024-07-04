@@ -130,7 +130,7 @@ func (c *Controller) DeleteVrf(name string) error {
 func (c *Controller) addVrf(vrf *vrf) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	vrf, ok := c.vrfs[vrf.name]
+	_, ok := c.vrfs[vrf.name]
 	if ok {
 		klog.V(5).Infof("Vrf Manager: vrf %s already found in the cache", vrf.name)
 		return nil
@@ -212,9 +212,7 @@ func (c *Controller) sync(vrf *vrf) error {
 			LinkAttrs: netlink.LinkAttrs{Name: vrf.name},
 			Table:     vrf.table,
 		}
-		if err = util.GetNetLinkOps().LinkAdd(vrfLink); err != nil {
-			return err
-		}
+		err = util.GetNetLinkOps().LinkAdd(vrfLink)
 	}
 	if err != nil {
 		return err

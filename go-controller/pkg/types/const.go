@@ -235,6 +235,6 @@ const (
 	// MasqueradeIPRulePriority the priority of the ip routing rules created for masquerade IP address
 	// allocated for every user defined network.
 	MasqueradeIPRulePriority = 2000
-	UserNetIPChainName       = "OVN-KUBE-USER-SEGMENTATION-NET"
+	UserNetIPChainName       = "OVN-KUBE-USER-NET"
 	UserNetIPTableChainName  = utiliptables.Chain(UserNetIPChainName)
 )

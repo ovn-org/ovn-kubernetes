@@ -128,15 +128,15 @@ func (g *gateway) AddNetwork(nInfo util.NetInfo, masqCTMark uint) error {
 		}
 	}
 	if masqIPv4 != nil {
-		err = g.ipTablesManager.EnsureRule(utiliptables.TableNAT, utiliptables.ChainPostrouting, utiliptables.ProtocolIPv4,
-			generateIPTablesSNATRuleArg(*masqIPv4, false, g.nodeIPManager.gwIntf, string(g.nodeIPManager.nodePrimaryAddr)))
+		err = g.ipTablesManager.EnsureRule(utiliptables.TableNAT, types.UserNetIPTableChainName, utiliptables.ProtocolIPv4,
+			generateIPTablesSNATRuleArg(*masqIPv4, false, g.nodeIPManager.gatewayBridge.bridgeName, g.nodeIPManager.nodePrimaryAddr.String()))
 		if err != nil {
 			return err
 		}
 	}
 	if masqIPv6 != nil {
-		err = g.ipTablesManager.EnsureRule(utiliptables.TableNAT, utiliptables.ChainPostrouting, utiliptables.ProtocolIPv6,
-			generateIPTablesSNATRuleArg(*masqIPv6, true, g.nodeIPManager.gwIntf, string(g.nodeIPManager.nodePrimaryAddr)))
+		err = g.ipTablesManager.EnsureRule(utiliptables.TableNAT, types.UserNetIPTableChainName, utiliptables.ProtocolIPv6,
+			generateIPTablesSNATRuleArg(*masqIPv6, true, g.nodeIPManager.gatewayBridge.bridgeName, g.nodeIPManager.nodePrimaryAddr.String()))
 		if err != nil {
 			return err
 		}
