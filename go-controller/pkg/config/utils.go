@@ -166,6 +166,7 @@ const (
 	configSubnetService    configSubnetType = "service subnet"
 	configSubnetHybrid     configSubnetType = "hybrid overlay subnet"
 	configSubnetMasquerade configSubnetType = "masquerade subnet"
+	configSubnetTransit    configSubnetType = "transit switch subnet"
 )
 
 type configSubnet struct {
@@ -191,7 +192,7 @@ func newConfigSubnets() *configSubnets {
 // append adds a single subnet to cs
 func (cs *configSubnets) append(subnetType configSubnetType, subnet *net.IPNet) {
 	cs.subnets = append(cs.subnets, configSubnet{subnetType: subnetType, subnet: subnet})
-	if subnetType != configSubnetJoin && subnetType != configSubnetMasquerade {
+	if subnetType != configSubnetJoin && subnetType != configSubnetMasquerade && subnetType != configSubnetTransit {
 		if utilnet.IsIPv6CIDR(subnet) {
 			cs.v6[subnetType] = true
 		} else {

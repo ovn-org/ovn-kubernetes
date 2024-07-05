@@ -1175,7 +1175,7 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 	ginkgo.Context("Transit switch port IP allocations", func() {
 		ginkgo.It("Interconnect enabled", func() {
 			config.ClusterManager.V4TransitSwitchSubnet = "100.89.0.0/16"
-			config.ClusterManager.V6TransitSwitchSubnet = "fd98::/64"
+			config.ClusterManager.V6TransitSwitchSubnet = "fd99::/64"
 			app.Action = func(ctx *cli.Context) error {
 				nodes := []v1.Node{
 					{

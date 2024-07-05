@@ -2039,18 +2039,19 @@ func buildClusterManagerConfig(ctx *cli.Context, cli, file *config) error {
 
 // completeClusterManagerConfig completes the ClusterManager config by parsing raw values
 // into their final form.
-func completeClusterManagerConfig() error {
+func completeClusterManagerConfig(allSubnets *configSubnets) error {
 	// Validate v4 and v6 transit switch subnets
-	v4IP, _, err := net.ParseCIDR(ClusterManager.V4TransitSwitchSubnet)
+	v4IP, v4TransitCIDR, err := net.ParseCIDR(ClusterManager.V4TransitSwitchSubnet)
 	if err != nil || utilnet.IsIPv6(v4IP) {
 		return fmt.Errorf("invalid transit switch v4 subnet specified, subnet: %s: error: %v", ClusterManager.V4TransitSwitchSubnet, err)
 	}
 
-	v6IP, _, err := net.ParseCIDR(ClusterManager.V6TransitSwitchSubnet)
+	v6IP, v6TransitCIDR, err := net.ParseCIDR(ClusterManager.V6TransitSwitchSubnet)
 	if err != nil || !utilnet.IsIPv6(v6IP) {
 		return fmt.Errorf("invalid transit switch v6 subnet specified, subnet: %s: error: %v", ClusterManager.V6TransitSwitchSubnet, err)
 	}
-
+	allSubnets.append(configSubnetTransit, v4TransitCIDR)
+	allSubnets.append(configSubnetTransit, v6TransitCIDR)
 	return nil
 }
 
@@ -2330,7 +2331,7 @@ func completeConfig() error {
 		return err
 	}
 
-	if err := completeClusterManagerConfig(); err != nil {
+	if err := completeClusterManagerConfig(allSubnets); err != nil {
 		return err
 	}
 
