@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/udn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
@@ -248,6 +249,71 @@ func cleanupLocalnetGateway(physnet string) error {
 		}
 	}
 	return err
+}
+
+func (g *gateway) getMasqIPRules(nInfo util.NetInfo) ([]netlink.Rule, error) {
+	vrfTableId, err := util.GetIfIndex(util.GetNetMgmtLinkName(nInfo.GetNetworkName()))
+	if err != nil {
+		return nil, err
+	}
+	var masqIPRules []netlink.Rule
+	masqIPv4, err := g.getV4MasqueradeIP(nInfo)
+	if err != nil {
+		return nil, err
+	}
+	if masqIPv4 != nil {
+		masqIPRules = append(masqIPRules, generateIPRuleForMasqIP(*masqIPv4, false, uint(vrfTableId)))
+	}
+	masqIPv6, err := g.getV6MasqueradeIP(nInfo)
+	if err != nil {
+		return nil, err
+	}
+	if masqIPv6 != nil {
+		masqIPRules = append(masqIPRules, generateIPRuleForMasqIP(*masqIPv6, false, uint(vrfTableId)))
+	}
+	return masqIPRules, nil
+}
+
+func (g *gateway) getV4MasqueradeIP(nInfo util.NetInfo) (*net.IP, error) {
+	if !config.IPv4Mode {
+		return nil, nil
+	}
+	networkID, err := g.getNetworkID(nInfo)
+	if err != nil {
+		return nil, err
+	}
+	masqIPs, err := udn.AllocateV4MasqueradeIPs(networkID)
+	if err != nil {
+		return nil, err
+	}
+	return &masqIPs.Local, nil
+}
+
+func (g *gateway) getV6MasqueradeIP(nInfo util.NetInfo) (*net.IP, error) {
+	if !config.IPv6Mode {
+		return nil, nil
+	}
+	networkID, err := g.getNetworkID(nInfo)
+	if err != nil {
+		return nil, err
+	}
+	masqIPs, err := udn.AllocateV6MasqueradeIPs(networkID)
+	if err != nil {
+		return nil, err
+	}
+	return &masqIPs.Local, nil
+}
+
+func (g *gateway) getNetworkID(nInfo util.NetInfo) (int, error) {
+	node, err := g.watchFactory.GetNode(g.nodeIPManager.nodeName)
+	if err != nil {
+		return 0, err
+	}
+	networkID, err := util.ParseNetworkIDAnnotation(node, nInfo.GetNetworkName())
+	if err != nil {
+		return 0, err
+	}
+	return networkID, nil
 }
 
 func generateIPRuleForMasqIP(masqIP net.IP, isIPv6 bool, vrfTableId uint) netlink.Rule {

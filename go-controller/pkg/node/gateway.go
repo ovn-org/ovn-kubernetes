@@ -6,7 +6,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/udn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
@@ -19,7 +18,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
-	"github.com/vishvananda/netlink"
 
 	"github.com/safchain/ethtool"
 	kapi "k8s.io/api/core/v1"
@@ -86,6 +84,7 @@ func (g *gateway) AddNetwork(nInfo util.NetInfo, masqCTMark uint) error {
 	}
 	enslaveInterfaces := make(sets.Set[string])
 	enslaveInterfaces.Insert(mgmtPortLinkName)
+	// TODO: we may have to associate every route with vrf to avoid any race condtion (can it happen ?)
 	err = g.vrfManager.AddVrf(vrfDeviceName, uint32(vrfTableId), enslaveInterfaces, nil)
 	if err != nil {
 		return err
@@ -94,32 +93,9 @@ func (g *gateway) AddNetwork(nInfo util.NetInfo, masqCTMark uint) error {
 	if err != nil {
 		return err
 	}
-	// Get node information
-	node, err := g.watchFactory.GetNode(g.nodeIPManager.nodeName)
+	masqIPRules, err := g.getMasqIPRules(nInfo)
 	if err != nil {
 		return err
-	}
-	networkID, err := util.ParseNetworkIDAnnotation(node, nInfo.GetNetworkName())
-	if err != nil {
-		return err
-	}
-	var masqIPv4, masqIPv6 *net.IP
-	var masqIPRules []netlink.Rule
-	if config.IPv4Mode {
-		masqIPs, err := udn.AllocateV4MasqueradeIPs(networkID)
-		if err != nil {
-			return err
-		}
-		masqIPRules = append(masqIPRules, generateIPRuleForMasqIP(masqIPs.Local, false, uint(vrfTableId)))
-		masqIPv4 = &masqIPs.Local
-	}
-	if config.IPv6Mode {
-		masqIPs, err := udn.AllocateV6MasqueradeIPs(networkID)
-		if err != nil {
-			return err
-		}
-		masqIPRules = append(masqIPRules, generateIPRuleForMasqIP(masqIPs.Local, false, uint(vrfTableId)))
-		masqIPv6 = &masqIPs.Local
 	}
 	for _, rule := range masqIPRules {
 		err = g.ruleManager.Add(rule)
@@ -127,12 +103,20 @@ func (g *gateway) AddNetwork(nInfo util.NetInfo, masqCTMark uint) error {
 			return err
 		}
 	}
+	masqIPv4, err := g.getV4MasqueradeIP(nInfo)
+	if err != nil {
+		return err
+	}
 	if masqIPv4 != nil {
 		err = g.ipTablesManager.EnsureRule(utiliptables.TableNAT, types.UserNetIPTableChainName, utiliptables.ProtocolIPv4,
 			generateIPTablesSNATRuleArg(*masqIPv4, false, g.nodeIPManager.gatewayBridge.bridgeName, g.nodeIPManager.nodePrimaryAddr.String()))
 		if err != nil {
 			return err
 		}
+	}
+	masqIPv6, err := g.getV6MasqueradeIP(nInfo)
+	if err != nil {
+		return err
 	}
 	if masqIPv6 != nil {
 		err = g.ipTablesManager.EnsureRule(utiliptables.TableNAT, types.UserNetIPTableChainName, utiliptables.ProtocolIPv6,
@@ -149,7 +133,22 @@ func (g *gateway) DelNetwork(nInfo util.NetInfo) error {
 	if g.vrfManager == nil {
 		return nil
 	}
-	// TODO
+	vrfDeviceName := util.GetVrfDeviceName(nInfo.GetNetworkName())
+	err := g.vrfManager.DeleteVrf(vrfDeviceName)
+	if err != nil {
+		return err
+	}
+	masqIPRules, err := g.getMasqIPRules(nInfo)
+	if err != nil {
+		return err
+	}
+	for _, rule := range masqIPRules {
+		err = g.ruleManager.Delete(rule)
+		if err != nil {
+			return err
+		}
+	}
+	//TODO delete other objects.
 	return nil
 }
 
