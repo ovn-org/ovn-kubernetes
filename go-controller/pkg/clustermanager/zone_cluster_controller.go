@@ -14,6 +14,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/id"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	ipgenerator "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/generator/ip"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	objretry "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -41,12 +42,12 @@ type zoneClusterController struct {
 	nodeIDAllocator id.Allocator
 
 	// node gateway router port IP generators (connecting to the join switch)
-	nodeGWRouterLRPIPv4Generator *ipGenerator
-	nodeGWRouterLRPIPv6Generator *ipGenerator
+	nodeGWRouterLRPIPv4Generator *ipgenerator.IPGenerator
+	nodeGWRouterLRPIPv6Generator *ipgenerator.IPGenerator
 
 	// Transit switch IP generator. This is required if EnableInterconnect feature is enabled.
-	transitSwitchIPv4Generator *ipGenerator
-	transitSwitchIPv6Generator *ipGenerator
+	transitSwitchIPv4Generator *ipgenerator.IPGenerator
+	transitSwitchIPv6Generator *ipgenerator.IPGenerator
 }
 
 func newZoneClusterController(ovnClient *util.OVNClusterManagerClientset, wf *factory.WatchFactory) (*zoneClusterController, error) {
@@ -69,34 +70,34 @@ func newZoneClusterController(ovnClient *util.OVNClusterManagerClientset, wf *fa
 	}
 	wg := &sync.WaitGroup{}
 
-	var nodeGWRouterLRPIPv4Generator, nodeGWRouterLRPIPv6Generator *ipGenerator
+	var nodeGWRouterLRPIPv4Generator, nodeGWRouterLRPIPv6Generator *ipgenerator.IPGenerator
 
 	if config.IPv4Mode {
-		nodeGWRouterLRPIPv4Generator, err = newIPGenerator(config.Gateway.V4JoinSubnet)
+		nodeGWRouterLRPIPv4Generator, err = ipgenerator.NewIPGenerator(config.Gateway.V4JoinSubnet)
 		if err != nil {
 			return nil, fmt.Errorf("error creating IP Generator for v4 join subnet %s: %w", config.Gateway.V4JoinSubnet, err)
 		}
 	}
 
 	if config.IPv6Mode {
-		nodeGWRouterLRPIPv6Generator, err = newIPGenerator(config.Gateway.V6JoinSubnet)
+		nodeGWRouterLRPIPv6Generator, err = ipgenerator.NewIPGenerator(config.Gateway.V6JoinSubnet)
 		if err != nil {
 			return nil, fmt.Errorf("error creating IP Generator for v6 join subnet %s: %w", config.Gateway.V6JoinSubnet, err)
 		}
 	}
 
-	var transitSwitchIPv4Generator, transitSwitchIPv6Generator *ipGenerator
+	var transitSwitchIPv4Generator, transitSwitchIPv6Generator *ipgenerator.IPGenerator
 
 	if config.OVNKubernetesFeature.EnableInterconnect {
 		if config.IPv4Mode {
-			transitSwitchIPv4Generator, err = newIPGenerator(config.ClusterManager.V4TransitSwitchSubnet)
+			transitSwitchIPv4Generator, err = ipgenerator.NewIPGenerator(config.ClusterManager.V4TransitSwitchSubnet)
 			if err != nil {
 				return nil, fmt.Errorf("error creating IP Generator for v4 transit switch subnet %s: %w", config.ClusterManager.V4TransitSwitchSubnet, err)
 			}
 		}
 
 		if config.IPv6Mode {
-			transitSwitchIPv6Generator, err = newIPGenerator(config.ClusterManager.V6TransitSwitchSubnet)
+			transitSwitchIPv6Generator, err = ipgenerator.NewIPGenerator(config.ClusterManager.V6TransitSwitchSubnet)
 			if err != nil {
 				return nil, fmt.Errorf("error creating IP Generator for v6 transit switch subnet %s: %w", config.ClusterManager.V4TransitSwitchSubnet, err)
 			}
