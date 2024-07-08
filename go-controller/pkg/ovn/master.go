@@ -171,9 +171,17 @@ func (oc *DefaultNetworkController) syncGatewayLogicalNetwork(node *kapi.Node, l
 		clusterSubnets = append(clusterSubnets, clusterSubnet.CIDR)
 	}
 
-	gwLRPIPs, err = util.ParseNodeGatewayRouterLRPAddrs(node)
+	gwLRPIPs, err = util.ParseNodeGatewayRouterJoinAddrs(node, oc.GetNetworkName())
 	if err != nil {
-		return fmt.Errorf("failed to get join switch port IP address for node %s: %v", node.Name, err)
+		if util.IsAnnotationNotSetError(err) {
+			// FIXME(tssurya): This is present for backwards compatibility
+			// Remove me a few months from now
+			var err1 error
+			gwLRPIPs, err1 = util.ParseNodeGatewayRouterLRPAddrs(node)
+			if err1 != nil {
+				return fmt.Errorf("failed to get join switch port IP address for node %s: %v/%v", node.Name, err, err1)
+			}
+		}
 	}
 
 	enableGatewayMTU := util.ParseNodeGatewayMTUSupport(node)

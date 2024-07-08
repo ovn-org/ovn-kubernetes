@@ -18,6 +18,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/urfave/cli/v2"
@@ -27,9 +28,6 @@ import (
 const (
 	// ovnNodeIDAnnotaton is the node annotation name used to store the node id.
 	ovnNodeIDAnnotaton = "k8s.ovn.org/node-id"
-
-	// ovnNodeGRLRPAddrAnnotaton is the node annotation name used to store the node gateway router port ips.
-	ovnNodeGRLRPAddrAnnotaton = "k8s.ovn.org/node-gateway-router-lrp-ifaddr"
 
 	// ovnTransitSwitchPortAddrAnnotation is the node annotation name to store the transit switch port ips.
 	ovnTransitSwitchPortAddrAnnotation = "k8s.ovn.org/node-transit-switch-port-ifaddr"
@@ -916,7 +914,7 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 							return err
 						}
 
-						gwLRPAddrs, err := util.ParseNodeGatewayRouterLRPAddrs(updatedNode)
+						gwLRPAddrs, err := util.ParseNodeGatewayRouterJoinAddrs(updatedNode, types.DefaultNetworkName)
 						if err != nil {
 							return err
 						}
@@ -989,13 +987,13 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 							return err
 						}
 
-						gwLRPAddrs, err := util.ParseNodeGatewayRouterLRPAddrs(updatedNode)
+						gwLRPAddrs, err := util.ParseNodeGatewayRouterJoinAddrs(updatedNode, types.DefaultNetworkName)
 						if err != nil {
 							return err
 						}
 						gomega.Expect(gwLRPAddrs).NotTo(gomega.BeNil())
 						gomega.Expect(len(gwLRPAddrs)).To(gomega.Equal(2))
-						nodeAddrs[n.Name] = updatedNode.Annotations[ovnNodeGRLRPAddrAnnotaton]
+						nodeAddrs[n.Name] = updatedNode.Annotations[util.OVNNodeGRLRPAddrs]
 						return nil
 					}).ShouldNot(gomega.HaveOccurred())
 				}
@@ -1009,7 +1007,7 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 					for k, v := range nodeAnnotations {
 						nodeAnnotator.Set(k, v)
 					}
-					nodeAnnotator.Delete(ovnNodeGRLRPAddrAnnotaton)
+					nodeAnnotator.Delete(util.OVNNodeGRLRPAddrs)
 					err = nodeAnnotator.Run()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				}
@@ -1021,7 +1019,7 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 							return err
 						}
 
-						nodeGWRPIPs, ok := updatedNode.Annotations[ovnNodeGRLRPAddrAnnotaton]
+						nodeGWRPIPs, ok := updatedNode.Annotations[util.OVNNodeGRLRPAddrs]
 						if !ok {
 							return fmt.Errorf("expected node annotation for node %s to have node gateway-router-lrp-ifaddr allocated", n.Name)
 						}
@@ -1092,7 +1090,7 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 							return err
 						}
 
-						gwLRPAddrs, err := util.ParseNodeGatewayRouterLRPAddrs(updatedNode)
+						gwLRPAddrs, err := util.ParseNodeGatewayRouterJoinAddrs(updatedNode, types.DefaultNetworkName)
 						if err != nil {
 							return err
 						}
@@ -1101,7 +1099,7 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 
 						// Store the node 3's gw router port addresses
 						if updatedNode.Name == "node3" {
-							node3GWRPAnnotation = updatedNode.Annotations[ovnNodeGRLRPAddrAnnotaton]
+							node3GWRPAnnotation = updatedNode.Annotations[util.OVNNodeGRLRPAddrs]
 						}
 						return nil
 					}).ShouldNot(gomega.HaveOccurred())
@@ -1149,10 +1147,10 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 						return err
 					}
 
-					node3UpdatedGWRPAnnotation := updatedNode.Annotations[ovnNodeGRLRPAddrAnnotaton]
+					node3UpdatedGWRPAnnotation := updatedNode.Annotations[util.OVNNodeGRLRPAddrs]
 					gomega.Expect(node3UpdatedGWRPAnnotation).NotTo(gomega.Equal(node3GWRPAnnotation))
 
-					gwLRPAddrs, err := util.ParseNodeGatewayRouterLRPAddrs(updatedNode)
+					gwLRPAddrs, err := util.ParseNodeGatewayRouterJoinAddrs(updatedNode, types.DefaultNetworkName)
 					if err != nil {
 						return err
 					}

@@ -348,9 +348,17 @@ func (oc *DefaultNetworkController) getHostNamespaceAddressesForNode(node *kapi.
 	}
 	// for shared gateway mode we will use LRP IPs to SNAT host network traffic
 	// so add these to the address set.
-	lrpIPs, err := util.ParseNodeGatewayRouterLRPAddrs(node)
+	lrpIPs, err := util.ParseNodeGatewayRouterJoinAddrs(node, oc.GetNetworkName())
 	if err != nil {
-		return nil, err
+		if util.IsAnnotationNotSetError(err) {
+			// FIXME(tssurya): This is present for backwards compatibility
+			// Remove me a few months from now
+			var err1 error
+			lrpIPs, err1 = util.ParseNodeGatewayRouterLRPAddrs(node)
+			if err1 != nil {
+				return nil, fmt.Errorf("failed to get join switch port IP address for node %s: %v/%v", node.Name, err, err1)
+			}
+		}
 	}
 
 	for _, lrpIP := range lrpIPs {

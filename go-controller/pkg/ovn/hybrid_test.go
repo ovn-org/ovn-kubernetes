@@ -1638,10 +1638,10 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			}
 			testNode := node1.k8sNode("2")
 			testNode.Annotations = map[string]string{
-				hotypes.HybridOverlayDRIP:                    nodeHOIP,
-				hotypes.HybridOverlayDRMAC:                   nodeHOMAC,
-				"k8s.ovn.org/ovn-node-id":                    "2",
-				"k8s.ovn.org/node-gateway-router-lrp-ifaddr": "{\"ipv4\": \"100.64.0.2/16\"}"}
+				hotypes.HybridOverlayDRIP:  nodeHOIP,
+				hotypes.HybridOverlayDRMAC: nodeHOMAC,
+				"k8s.ovn.org/ovn-node-id":  "2",
+				util.OVNNodeGRLRPAddrs:     "{\"default\":{\"ipv4\":\"100.64.0.2/16\"}}"}
 
 			kubeFakeClient := fake.NewSimpleClientset(&v1.NodeList{
 				Items: []v1.Node{testNode},

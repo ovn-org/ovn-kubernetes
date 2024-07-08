@@ -668,9 +668,17 @@ func (zic *ZoneInterconnectHandler) addRemoteNodeStaticRoutes(node *corev1.Node,
 		return nil
 	}
 
-	nodeGRPIPs, err := util.ParseNodeGatewayRouterLRPAddrs(node)
+	nodeGRPIPs, err := util.ParseNodeGatewayRouterJoinAddrs(node, zic.GetNetworkName())
 	if err != nil {
-		return fmt.Errorf("failed to parse node %s Gateway router LRP Addrs annotation %w", node.Name, err)
+		if util.IsAnnotationNotSetError(err) {
+			// FIXME(tssurya): This is present for backwards compatibility
+			// Remove me a few months from now
+			var err1 error
+			nodeGRPIPs, err1 = util.ParseNodeGatewayRouterLRPAddrs(node)
+			if err1 != nil {
+				return fmt.Errorf("failed to parse node %s Gateway router LRP Addrs annotation %w", node.Name, err1)
+			}
+		}
 	}
 
 	nodeGRPIPStaticRoutes := zic.getStaticRoutes(nodeGRPIPs, nodeTransitSwitchPortIPs, true)
@@ -718,9 +726,17 @@ func (zic *ZoneInterconnectHandler) deleteLocalNodeStaticRoutes(node *corev1.Nod
 	}
 
 	// Clear the routes connecting to the GW Router for the default network
-	nodeGRPIPs, err := util.ParseNodeGatewayRouterLRPAddrs(node)
+	nodeGRPIPs, err := util.ParseNodeGatewayRouterJoinAddrs(node, zic.GetNetworkName())
 	if err != nil {
-		return fmt.Errorf("failed to parse node %s Gateway router LRP Addrs annotation %w", node.Name, err)
+		if util.IsAnnotationNotSetError(err) {
+			// FIXME(tssurya): This is present for backwards compatibility
+			// Remove me a few months from now
+			var err1 error
+			nodeGRPIPs, err1 = util.ParseNodeGatewayRouterLRPAddrs(node)
+			if err1 != nil {
+				return fmt.Errorf("failed to parse node %s Gateway router LRP Addrs annotation %w", node.Name, err1)
+			}
+		}
 	}
 
 	nodenodeGRPIPStaticRoutes := zic.getStaticRoutes(nodeGRPIPs, nodeTransitSwitchPortIPs, true)

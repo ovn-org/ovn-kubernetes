@@ -369,7 +369,7 @@ func (h *zoneClusterControllerEventHandler) AreResourcesEqual(obj1, obj2 interfa
 		if util.NodeIDAnnotationChanged(node1, node2) {
 			return false, nil
 		}
-		if util.NodeGatewayRouterLRPAddrAnnotationChanged(node1, node2) {
+		if util.NodeGatewayRouterLRPAddrsAnnotationChanged(node1, node2) {
 			return false, nil
 		}
 		if util.NodeTransitSwitchPortAddrAnnotationChanged(node1, node2) {

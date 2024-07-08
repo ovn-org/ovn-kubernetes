@@ -876,7 +876,7 @@ func (bnc *BaseNetworkController) nodeZoneClusterChanged(oldNode, newNode *kapi.
 	}
 
 	// NodeGatewayRouterLRPAddrAnnotationChanged would not affect local, nor layer3 secondary network
-	if !newNodeIsLocalZone && !bnc.IsSecondary() && util.NodeGatewayRouterLRPAddrAnnotationChanged(oldNode, newNode) {
+	if !newNodeIsLocalZone && !bnc.IsSecondary() && util.NodeGatewayRouterLRPAddrsAnnotationChanged(oldNode, newNode) {
 		return true
 	}
 

@@ -798,8 +798,8 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 						ObjectMeta: metav1.ObjectMeta{
 							Name: "newNode1",
 							Annotations: map[string]string{
-								"k8s.ovn.org/node-subnets":                   fmt.Sprintf(`{"default":[%q,%q]}`, nodeByName[t.replaceNode].subnetIPv4, nodeByName[t.replaceNode].subnetIPv6),
-								"k8s.ovn.org/node-gateway-router-lrp-ifaddr": `{"ipv4": "100.64.0.2/16"}`,
+								"k8s.ovn.org/node-subnets": fmt.Sprintf(`{"default":[%q,%q]}`, nodeByName[t.replaceNode].subnetIPv4, nodeByName[t.replaceNode].subnetIPv6),
+								util.OVNNodeGRLRPAddrs:     "{\"default\":{\"ipv4\":\"100.64.0.2/16\"}}",
 							},
 						},
 					}
