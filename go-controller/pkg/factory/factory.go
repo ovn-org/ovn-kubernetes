@@ -566,6 +566,15 @@ func (wf *WatchFactory) Start() error {
 		}
 	}
 
+	if config.OVNKubernetesFeature.EnableNetworkQoS && wf.networkQoSFactory != nil {
+		wf.networkQoSFactory.Start(wf.stopChan)
+		for oType, synced := range waitForCacheSyncWithTimeout(wf.networkQoSFactory, wf.stopChan) {
+			if !synced {
+				return fmt.Errorf("error in syncing cache for %v informer", oType)
+			}
+		}
+	}
+
 	if util.IsNetworkSegmentationSupportEnabled() && wf.udnFactory != nil {
 		wf.udnFactory.Start(wf.stopChan)
 		for oType, synced := range waitForCacheSyncWithTimeout(wf.udnFactory, wf.stopChan) {

@@ -12,6 +12,7 @@ import (
 	adminpolicybasedrouteapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1"
 	egressfirewallapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	egressqosapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1"
+	networkqosapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -202,6 +203,16 @@ func NewStatusManager(wf *factory.WatchFactory, ovnClient *util.OVNClusterManage
 			sm.withZonesRLock,
 		)
 		sm.typedManagers["egressqoses"] = egressQoSManager
+	}
+	if config.OVNKubernetesFeature.EnableNetworkQoS {
+		networkQoSManager := newStatusManager[networkqosapi.NetworkQoS](
+			"networkqoses_statusmanager",
+			wf.NetworkQoSInformer().Informer(),
+			wf.NetworkQoSInformer().Lister().List,
+			newNetworkQoSManager(wf.NetworkQoSInformer().Lister(), ovnClient.NetworkQoSClient),
+			sm.withZonesRLock,
+		)
+		sm.typedManagers["networkqoses"] = networkQoSManager
 	}
 	return sm
 }
