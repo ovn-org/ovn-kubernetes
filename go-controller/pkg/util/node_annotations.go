@@ -580,23 +580,30 @@ func parsePrimaryIfAddrAnnotation(node *kapi.Node, annotationName string) ([]*ne
 	if nodeIfAddr.IPv4 == "" && nodeIfAddr.IPv6 == "" {
 		return nil, fmt.Errorf("node: %q does not have any IP information set", node.Name)
 	}
+	ipAddrs, err := convertPrimaryIfAddrAnnotationToIPNet(nodeIfAddr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse annotation: %s for node %q, err: %w", annotationName, node.Name, err)
+	}
+	return ipAddrs, nil
+}
+
+func convertPrimaryIfAddrAnnotationToIPNet(ifAddr primaryIfAddrAnnotation) ([]*net.IPNet, error) {
 	var ipAddrs []*net.IPNet
-	if nodeIfAddr.IPv4 != "" {
-		ip, ipNet, err := net.ParseCIDR(nodeIfAddr.IPv4)
+	if ifAddr.IPv4 != "" {
+		ip, ipNet, err := net.ParseCIDR(ifAddr.IPv4)
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse IPv4 address %s from annotation: %s for node %q, err: %w", nodeIfAddr.IPv4, annotationName, node.Name, err)
+			return nil, fmt.Errorf("failed to parse IPv4 address %s, err: %w", ifAddr.IPv4, err)
 		}
 		ipAddrs = append(ipAddrs, &net.IPNet{IP: ip, Mask: ipNet.Mask})
 	}
 
-	if nodeIfAddr.IPv6 != "" {
-		ip, ipNet, err := net.ParseCIDR(nodeIfAddr.IPv6)
+	if ifAddr.IPv6 != "" {
+		ip, ipNet, err := net.ParseCIDR(ifAddr.IPv6)
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse IPv6 address %s from annotation: %s for node %q, err: %w", nodeIfAddr.IPv6, annotationName, node.Name, err)
+			return nil, fmt.Errorf("failed to parse IPv6 address %s, err: %w", ifAddr.IPv6, err)
 		}
 		ipAddrs = append(ipAddrs, &net.IPNet{IP: ip, Mask: ipNet.Mask})
 	}
-
 	return ipAddrs, nil
 }
 
