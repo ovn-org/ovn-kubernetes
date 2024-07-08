@@ -446,7 +446,7 @@ func (zic *ZoneInterconnectHandler) createLocalZoneNodeResources(node *corev1.No
 
 	// Its possible that node is moved from a remote zone to the local zone. Check and delete the remote zone routes
 	// for this node as it's no longer needed.
-	return zic.deleteLocalNodeStaticRoutes(node, nodeID, nodeTransitSwitchPortIPs)
+	return zic.deleteLocalNodeStaticRoutes(node, nodeTransitSwitchPortIPs)
 }
 
 // createRemoteZoneNodeResources creates the remote zone node resources
@@ -693,7 +693,7 @@ func (zic *ZoneInterconnectHandler) addRemoteNodeStaticRoutes(node *corev1.Node,
 }
 
 // deleteLocalNodeStaticRoutes deletes the static routes added by the function addRemoteNodeStaticRoutes
-func (zic *ZoneInterconnectHandler) deleteLocalNodeStaticRoutes(node *corev1.Node, nodeID int, nodeTransitSwitchPortIPs []*net.IPNet) error {
+func (zic *ZoneInterconnectHandler) deleteLocalNodeStaticRoutes(node *corev1.Node, nodeTransitSwitchPortIPs []*net.IPNet) error {
 	deleteRoute := func(prefix, nexthop string) error {
 		p := func(lrsr *nbdb.LogicalRouterStaticRoute) bool {
 			return lrsr.IPPrefix == prefix &&
