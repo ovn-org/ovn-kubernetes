@@ -192,7 +192,7 @@ func setupNetwork(link netlink.Link, ifInfo *PodInterfaceInfo) error {
 	}
 	for _, gw := range ifInfo.Gateways {
 		if err := cniPluginLibOps.AddRoute(nil, gw, link, ifInfo.RoutableMTU); err != nil {
-			return fmt.Errorf("failed to add gateway route: %v", err)
+			return fmt.Errorf("failed to add gateway route to link '%s': %v", link.Attrs().Name, err)
 		}
 	}
 	for _, route := range ifInfo.Routes {
@@ -438,8 +438,8 @@ func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 		return fmt.Errorf("failed to get datapath type for bridge br-int : %v", err)
 	}
 
-	klog.Infof("ConfigureOVS: namespace: %s, podName: %s, network: %s, NAD %s, SandboxID: %q, PCI device ID: %s, UID: %q, MAC: %s, IPs: %v",
-		namespace, podName, ifInfo.NetName, ifInfo.NADName, sandboxID, deviceID, initialPodUID, ifInfo.MAC, ipStrs)
+	klog.Infof("ConfigureOVS: namespace: %s, podName: %s, hostIfaceName: %s, network: %s, NAD %s, SandboxID: %q, PCI device ID: %s, UID: %q, MAC: %s, IPs: %v",
+		namespace, podName, hostIfaceName, ifInfo.NetName, ifInfo.NADName, sandboxID, deviceID, initialPodUID, ifInfo.MAC, ipStrs)
 
 	// Find and remove any existing OVS port with this iface-id. Pods can
 	// have multiple sandboxes if some are waiting for garbage collection,
