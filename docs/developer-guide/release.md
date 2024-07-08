@@ -40,6 +40,7 @@ Each new release of OVN-Kubernetes is defined with a "version" that represents t
 * See [sample release PR](https://github.com/ovn-org/ovn-kubernetes/pull/4333) which
   will become the head commit for a given release.
 * Branch will be cut on the day of release once the release PR merges.
+* CI-CD for the release branch will be added to the [GitHub Workflow](https://github.com/ovn-org/ovn-kubernetes/blob/master/.github/workflows/test.yml#L6).
 
 ## BackPort Request
 
