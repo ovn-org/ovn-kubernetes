@@ -11,7 +11,6 @@ import (
 
 	iputils "github.com/containernetworking/plugins/pkg/ip"
 
-	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	nadclient "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/typed/k8s.cni.cncf.io/v1"
 
 	v1 "k8s.io/api/core/v1"
@@ -106,20 +105,17 @@ var _ = Describe("Network Segmentation", func() {
 			Entry(
 				"two pods connected over a L2 dualstack primary UDN",
 				networkAttachmentConfigParams{
-					name:        nadName,
-					networkName: userDefinedNetworkName,
-					topology:    "layer2",
-					cidr:        fmt.Sprintf("%s,%s", userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
-					role:        "primary",
+					name:     nadName,
+					topology: "layer2",
+					cidr:     fmt.Sprintf("%s,%s", userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+					role:     "primary",
 				},
 				*podConfig(
 					"client-pod",
-					nadName,
 					withNodeSelector(map[string]string{nodeHostnameKey: workerOneNodeName}),
 				),
 				*podConfig(
 					"server-pod",
-					nadName,
 					withCommand(func() []string {
 						return httpServerContainerCmd(port)
 					}),
@@ -129,20 +125,17 @@ var _ = Describe("Network Segmentation", func() {
 			Entry(
 				"two pods connected over a L3 dualstack primary UDN",
 				networkAttachmentConfigParams{
-					name:        nadName,
-					networkName: userDefinedNetworkName,
-					topology:    "layer3",
-					cidr:        fmt.Sprintf("%s,%s", userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
-					role:        "primary",
+					name:     nadName,
+					topology: "layer3",
+					cidr:     fmt.Sprintf("%s,%s", userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+					role:     "primary",
 				},
 				*podConfig(
 					"client-pod",
-					nadName,
 					withNodeSelector(map[string]string{nodeHostnameKey: workerOneNodeName}),
 				),
 				*podConfig(
 					"server-pod",
-					nadName,
 					withCommand(func() []string {
 						return httpServerContainerCmd(port)
 					}),
@@ -340,7 +333,6 @@ var _ = Describe("Network Segmentation", func() {
 				},
 				*podConfig(
 					"udn-pod",
-					nadName,
 					withCommand(func() []string {
 						return httpServerContainerCmd(port)
 					}),
@@ -358,7 +350,6 @@ var _ = Describe("Network Segmentation", func() {
 				},
 				*podConfig(
 					"udn-pod",
-					nadName,
 					withCommand(func() []string {
 						return httpServerContainerCmd(port)
 					}),
@@ -371,10 +362,9 @@ var _ = Describe("Network Segmentation", func() {
 
 type podOption func(*podConfiguration)
 
-func podConfig(podName, nadName string, opts ...podOption) *podConfiguration {
+func podConfig(podName string, opts ...podOption) *podConfiguration {
 	pod := &podConfiguration{
-		attachments: []nadapi.NetworkSelectionElement{{Name: nadName}},
-		name:        podName,
+		name: podName,
 	}
 	for _, opt := range opts {
 		opt(pod)
