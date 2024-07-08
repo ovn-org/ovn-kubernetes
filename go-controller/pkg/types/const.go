@@ -113,6 +113,11 @@ const (
 	EgressIPNodeConnectionMark         = "1008"
 	EgressIPReplyTrafficConnectionMark = 42
 
+	// primary user defined network's default join subnet value
+	// users can configure custom values using NADs
+	UserDefinedPrimaryNetworkJoinSubnetV4 = "100.65.0.0/16"
+	UserDefinedPrimaryNetworkJoinSubnetV6 = "fd99::/64"
+
 	// OpenFlow and Networking constants
 	RouteAdvertisementICMPType    = 134
 	NeighborAdvertisementICMPType = 136

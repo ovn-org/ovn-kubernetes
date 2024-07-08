@@ -37,6 +37,9 @@ type BasicNetInfo interface {
 	IPMode() (bool, bool)
 	Subnets() []config.CIDRNetworkEntry
 	ExcludeSubnets() []*net.IPNet
+	JoinSubnetV4() *net.IPNet
+	JoinSubnetV6() *net.IPNet
+	JoinSubnets() []*net.IPNet
 	Vlan() uint
 	AllowsPersistentIPs() bool
 
@@ -184,6 +187,47 @@ func (nInfo *DefaultNetInfo) ExcludeSubnets() []*net.IPNet {
 	return nil
 }
 
+// JoinSubnetV4 returns the defaultNetConfInfo's JoinSubnetV4 value
+// call when ipv4mode=true
+func (nInfo *DefaultNetInfo) JoinSubnetV4() *net.IPNet {
+	_, cidr, err := net.ParseCIDR(config.Gateway.V4JoinSubnet)
+	if err != nil {
+		// Join subnet should have been validated already by config
+		panic(fmt.Sprintf("Failed to parse join subnet %q: %v", config.Gateway.V4JoinSubnet, err))
+	}
+	return cidr
+}
+
+// JoinSubnetV6 returns the defaultNetConfInfo's JoinSubnetV6 value
+// call when ipv6mode=true
+func (nInfo *DefaultNetInfo) JoinSubnetV6() *net.IPNet {
+	_, cidr, err := net.ParseCIDR(config.Gateway.V6JoinSubnet)
+	if err != nil {
+		// Join subnet should have been validated already by config
+		panic(fmt.Sprintf("Failed to parse join subnet %q: %v", config.Gateway.V6JoinSubnet, err))
+	}
+	return cidr
+}
+
+// JoinSubnets returns the secondaryNetInfo's joinsubnet values (both v4&v6)
+// used from Equals
+func (nInfo *DefaultNetInfo) JoinSubnets() []*net.IPNet {
+	var defaultJoinSubnets []*net.IPNet
+	_, v4, err := net.ParseCIDR(config.Gateway.V4JoinSubnet)
+	if err != nil {
+		// Join subnet should have been validated already by config
+		panic(fmt.Sprintf("Failed to parse join subnet %q: %v", config.Gateway.V4JoinSubnet, err))
+	}
+	defaultJoinSubnets = append(defaultJoinSubnets, v4)
+	_, v6, err := net.ParseCIDR(config.Gateway.V6JoinSubnet)
+	if err != nil {
+		// Join subnet should have been validated already by config
+		panic(fmt.Sprintf("Failed to parse join subnet %q: %v", config.Gateway.V6JoinSubnet, err))
+	}
+	defaultJoinSubnets = append(defaultJoinSubnets, v6)
+	return defaultJoinSubnets
+}
+
 // Vlan returns the defaultNetConfInfo's Vlan value
 func (nInfo *DefaultNetInfo) Vlan() uint {
 	return config.Gateway.VLANID
@@ -208,6 +252,7 @@ type secondaryNetInfo struct {
 	ipv4mode, ipv6mode bool
 	subnets            []config.CIDRNetworkEntry
 	excludeSubnets     []*net.IPNet
+	joinSubnets        []*net.IPNet
 
 	// all net-attach-def NAD names for this network, used to determine if a pod needs
 	// to be plumbed for this network
@@ -350,6 +395,31 @@ func (nInfo *secondaryNetInfo) ExcludeSubnets() []*net.IPNet {
 	return nInfo.excludeSubnets
 }
 
+// JoinSubnetV4 returns the defaultNetConfInfo's JoinSubnetV4 value
+// call when ipv4mode=true
+func (nInfo *secondaryNetInfo) JoinSubnetV4() *net.IPNet {
+	if len(nInfo.joinSubnets) == 0 {
+		return nil // localnet topology
+	}
+	return nInfo.joinSubnets[0]
+}
+
+// JoinSubnetV6 returns the secondaryNetInfo's JoinSubnetV6 value
+// call when ipv6mode=true
+func (nInfo *secondaryNetInfo) JoinSubnetV6() *net.IPNet {
+	if len(nInfo.joinSubnets) <= 1 {
+		return nil // localnet topology
+	}
+	return nInfo.joinSubnets[1]
+}
+
+// JoinSubnets returns the secondaryNetInfo's joinsubnet values (both v4&v6)
+// used from Equals (since localnet doesn't have joinsubnets to compare nil v/s nil
+// we need this util)
+func (nInfo *secondaryNetInfo) JoinSubnets() []*net.IPNet {
+	return nInfo.joinSubnets
+}
+
 // Equals compares for equality this network information with the other
 func (nInfo *secondaryNetInfo) Equals(other BasicNetInfo) bool {
 	if (nInfo == nil) != (other == nil) {
@@ -383,7 +453,10 @@ func (nInfo *secondaryNetInfo) Equals(other BasicNetInfo) bool {
 	}
 
 	lessIPNet := func(a, b net.IPNet) bool { return a.String() < b.String() }
-	return cmp.Equal(nInfo.excludeSubnets, other.ExcludeSubnets(), cmpopts.SortSlices(lessIPNet))
+	if !cmp.Equal(nInfo.excludeSubnets, other.ExcludeSubnets(), cmpopts.SortSlices(lessIPNet)) {
+		return false
+	}
+	return cmp.Equal(nInfo.joinSubnets, other.JoinSubnets(), cmpopts.SortSlices(lessIPNet))
 }
 
 func (nInfo *secondaryNetInfo) copy() *secondaryNetInfo {
@@ -402,6 +475,7 @@ func (nInfo *secondaryNetInfo) copy() *secondaryNetInfo {
 		ipv6mode:           nInfo.ipv6mode,
 		subnets:            nInfo.subnets,
 		excludeSubnets:     nInfo.excludeSubnets,
+		joinSubnets:        nInfo.joinSubnets,
 		nadNames:           nInfo.nadNames.Clone(),
 	}
 
@@ -413,12 +487,16 @@ func newLayer3NetConfInfo(netconf *ovncnitypes.NetConf) (NetInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-
+	joinSubnets, err := parseJoinSubnet(netconf.JoinSubnet)
+	if err != nil {
+		return nil, err
+	}
 	ni := &secondaryNetInfo{
 		netName:        netconf.Name,
 		primaryNetwork: netconf.Role == types.NetworkRolePrimary,
 		topology:       types.Layer3Topology,
 		subnets:        subnets,
+		joinSubnets:    joinSubnets,
 		mtu:            netconf.MTU,
 		nadNames:       sets.Set[string]{},
 	}
@@ -431,12 +509,16 @@ func newLayer2NetConfInfo(netconf *ovncnitypes.NetConf) (NetInfo, error) {
 	if err != nil {
 		return nil, fmt.Errorf("invalid %s netconf %s: %v", netconf.Topology, netconf.Name, err)
 	}
-
+	joinSubnets, err := parseJoinSubnet(netconf.JoinSubnet)
+	if err != nil {
+		return nil, err
+	}
 	ni := &secondaryNetInfo{
 		netName:            netconf.Name,
 		primaryNetwork:     netconf.Role == types.NetworkRolePrimary,
 		topology:           types.Layer2Topology,
 		subnets:            subnets,
+		joinSubnets:        joinSubnets,
 		excludeSubnets:     excludes,
 		mtu:                netconf.MTU,
 		allowPersistentIPs: netconf.AllowPersistentIPs,
@@ -515,6 +597,39 @@ func parseSubnets(subnetsString, excludeSubnetsString, topology string) ([]confi
 	}
 
 	return subnets, excludeIPNets, nil
+}
+
+func parseJoinSubnet(joinSubnet string) ([]*net.IPNet, error) {
+	// assign the default values first
+	// if user provided only 1 family; we still populate the default value
+	// of the other family from the get-go
+	_, v4cidr, err := net.ParseCIDR(types.UserDefinedPrimaryNetworkJoinSubnetV4)
+	if err != nil {
+		return nil, err
+	}
+	_, v6cidr, err := net.ParseCIDR(types.UserDefinedPrimaryNetworkJoinSubnetV6)
+	if err != nil {
+		return nil, err
+	}
+	joinSubnets := []*net.IPNet{v4cidr, v6cidr}
+	if strings.TrimSpace(joinSubnet) == "" {
+		// user has not specified a value; pick the default
+		return joinSubnets, nil
+	}
+
+	// user has provided some value; so let's validate and ensure we can use them
+	joinSubnetCIDREntries, err := config.ParseClusterSubnetEntriesWithDefaults(joinSubnet, 0, 0)
+	if err != nil {
+		return nil, err
+	}
+	for _, joinSubnetCIDREntry := range joinSubnetCIDREntries {
+		if knet.IsIPv4CIDR(joinSubnetCIDREntry.CIDR) {
+			joinSubnets[0] = joinSubnetCIDREntry.CIDR
+		} else {
+			joinSubnets[1] = joinSubnetCIDREntry.CIDR
+		}
+	}
+	return joinSubnets, nil
 }
 
 func getIPMode(subnets []config.CIDRNetworkEntry) (bool, bool) {
@@ -606,6 +721,10 @@ func ParseNetConf(netattachdef *nettypes.NetworkAttachmentDefinition) (*ovncnity
 
 	if netconf.IPAM.Type != "" {
 		return nil, fmt.Errorf("error parsing Network Attachment Definition %s/%s: %w", netattachdef.Namespace, netattachdef.Name, ErrorUnsupportedIPAMKey)
+	}
+
+	if netconf.JoinSubnet != "" && netconf.Topology == types.LocalnetTopology {
+		return nil, fmt.Errorf("localnet topology does not allow specifying join-subnet as services are not supported")
 	}
 
 	return netconf, nil
