@@ -48,7 +48,6 @@ import (
 	egressserviceclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/clientset/versioned"
 	networkqosclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1/apis/clientset/versioned"
 	userdefinednetworkclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/clientset/versioned"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	anpclientset "sigs.k8s.io/network-policy-api/pkg/client/clientset/versioned"
 )
 
