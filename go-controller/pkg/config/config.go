@@ -429,6 +429,7 @@ type OVNKubernetesFeatureConfig struct {
 	EnableDNSNameResolver        bool `gcfg:"enable-dns-name-resolver"`
 	EnableServiceTemplateSupport bool `gcfg:"enable-svc-template-support"`
 	EnableObservability          bool `gcfg:"enable-observability"`
+	EnableNetworkQoS             bool `gcfg:"enable-network-qos"`
 }
 
 // GatewayMode holds the node gateway mode
