@@ -3,7 +3,6 @@ package ovn
 import (
 	"context"
 	"fmt"
-	"net"
 	"reflect"
 	"sync"
 	"time"
@@ -131,10 +130,6 @@ type DefaultNetworkController struct {
 	// variable to determine if all pods present on the node during startup have been processed
 	// updated atomically
 	allInitialPodsProcessed uint32
-
-	// IP addresses of OVN Cluster logical router port ("GwRouterToJoinSwitchPrefix + OVNClusterRouter")
-	// connecting to the join switch
-	ovnClusterLRPToJoinIfAddrs []*net.IPNet
 
 	// zoneChassisHandler handles the local node and remote nodes in creating or updating the chassis entries in the OVN Southbound DB.
 	// Please see zone_interconnect/chassis_handler.go for more details.

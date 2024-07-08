@@ -781,34 +781,6 @@ func (oc *DefaultNetworkController) deleteOVNNodeEvent(node *kapi.Node) error {
 	return nil
 }
 
-// getOVNClusterRouterPortToJoinSwitchIPs returns the IP addresses for the
-// logical router port "GwRouterToJoinSwitchPrefix + OVNClusterRouter" from the
-// config.Gateway.V4JoinSubnet and  config.Gateway.V6JoinSubnet. This will
-// always be the first IP from these subnets.
-func (oc *DefaultNetworkController) getOVNClusterRouterPortToJoinSwitchIfAddrs() (gwLRPIPs []*net.IPNet, err error) {
-	joinSubnetsConfig := []string{}
-	if config.IPv4Mode {
-		joinSubnetsConfig = append(joinSubnetsConfig, config.Gateway.V4JoinSubnet)
-	}
-	if config.IPv6Mode {
-		joinSubnetsConfig = append(joinSubnetsConfig, config.Gateway.V6JoinSubnet)
-	}
-	for _, joinSubnetString := range joinSubnetsConfig {
-		_, joinSubnet, err := net.ParseCIDR(joinSubnetString)
-		if err != nil {
-			return nil, fmt.Errorf("error parsing join subnet string %s: %v", joinSubnetString, err)
-		}
-		joinSubnetBaseIP := utilnet.BigForIP(joinSubnet.IP)
-		ipnet := &net.IPNet{
-			IP:   utilnet.AddIPOffset(joinSubnetBaseIP, 1),
-			Mask: joinSubnet.Mask,
-		}
-		gwLRPIPs = append(gwLRPIPs, ipnet)
-	}
-
-	return gwLRPIPs, nil
-}
-
 // addUpdateHoNodeEvent reconsile ovn nodes when a hybrid overlay node is added.
 func (oc *DefaultNetworkController) addUpdateHoNodeEvent(node *kapi.Node) error {
 	if subnets, _ := util.ParseNodeHostSubnetAnnotation(node, oc.GetNetworkName()); len(subnets) > 0 {

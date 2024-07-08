@@ -162,6 +162,10 @@ type BaseNetworkController struct {
 	// might have been already be released on startup
 	releasedPodsBeforeStartup  map[string]sets.Set[string]
 	releasedPodsOnStartupMutex sync.Mutex
+
+	// IP addresses of OVN Cluster logical router port ("GwRouterToJoinSwitchPrefix + OVNClusterRouter")
+	// connecting to the join switch
+	ovnClusterLRPToJoinIfAddrs []*net.IPNet
 }
 
 // BaseSecondaryNetworkController structure holds per-network fields and network specific
@@ -254,6 +258,30 @@ func (bnc *BaseNetworkController) createOvnClusterRouter() (*nbdb.LogicalRouter,
 	}
 
 	return &logicalRouter, nil
+}
+
+// getOVNClusterRouterPortToJoinSwitchIPs returns the IP addresses for the
+// logical router port "GwRouterToJoinSwitchPrefix + OVNClusterRouter" from the
+// config.Gateway.V4JoinSubnet and  config.Gateway.V6JoinSubnet. This will
+// always be the first IP from these subnets.
+func (bnc *BaseNetworkController) getOVNClusterRouterPortToJoinSwitchIfAddrs() (gwLRPIPs []*net.IPNet, err error) {
+	joinSubnetsConfig := []*net.IPNet{}
+	if config.IPv4Mode {
+		joinSubnetsConfig = append(joinSubnetsConfig, bnc.JoinSubnetV4())
+	}
+	if config.IPv6Mode {
+		joinSubnetsConfig = append(joinSubnetsConfig, bnc.JoinSubnetV6())
+	}
+	for _, joinSubnet := range joinSubnetsConfig {
+		joinSubnetBaseIP := utilnet.BigForIP(joinSubnet.IP)
+		ipnet := &net.IPNet{
+			IP:   utilnet.AddIPOffset(joinSubnetBaseIP, 1),
+			Mask: joinSubnet.Mask,
+		}
+		gwLRPIPs = append(gwLRPIPs, ipnet)
+	}
+
+	return gwLRPIPs, nil
 }
 
 // syncNodeClusterRouterPort ensures a node's LS to the cluster router's LRP is created.
