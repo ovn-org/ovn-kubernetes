@@ -12,6 +12,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	annotatorMock "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube/mocks"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/stretchr/testify/assert"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -502,6 +503,87 @@ func TestParseNodeGatewayRouterLRPAddr(t *testing.T) {
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
 			cfg, e := ParseNodeGatewayRouterLRPAddr(&tc.inpNode)
+			if tc.errExpected {
+				t.Log(e)
+				assert.Error(t, e)
+				assert.Nil(t, cfg)
+			}
+			if tc.expOutput {
+				assert.NotNil(t, cfg)
+			}
+		})
+	}
+}
+
+func TestParseNodeGatewayRouterJoinAddrs(t *testing.T) {
+	tests := []struct {
+		desc        string
+		inpNode     v1.Node
+		netName     string
+		errExpected bool
+		expOutput   bool
+	}{
+		{
+			desc:      "Gateway router LPR IP address annotation not found for node, however, does not return error",
+			inpNode:   v1.Node{},
+			expOutput: false,
+		},
+		{
+			desc: "success: Gateway router parse LPR IP address",
+			inpNode: v1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{"k8s.ovn.org/node-gateway-router-lrp-ifaddrs": `{"default":{"ipv4":"100.64.0.4/16"}}`},
+				},
+			},
+			netName:   types.DefaultNetworkName,
+			expOutput: true,
+		},
+		{
+			desc: "success: Gateway router parse LPR IP address dual stack",
+			inpNode: v1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{"k8s.ovn.org/node-gateway-router-lrp-ifaddrs": `{"default":{"ipv4":"100.64.0.5/16","ipv6":"fd:98::/64"}}`},
+				},
+			},
+			netName:   types.DefaultNetworkName,
+			expOutput: true,
+		},
+		{
+			desc: "success: Gateway router parse LPR IP address dual stack for the right network name",
+			inpNode: v1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{"k8s.ovn.org/node-gateway-router-lrp-ifaddrs": `{"default":{"ipv4":"100.64.0.5/16","ipv6":"fd:98::/64"},"l3-network":{"ipv4":"100.65.0.5/16","ipv6":"fd:99::/64"}}`},
+				},
+			},
+			netName:   "l3-network",
+			expOutput: true,
+		},
+		{
+			desc: "error: Gateway router parse LPR IP address dual stack cannot find the requested network name",
+			inpNode: v1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{"k8s.ovn.org/node-gateway-router-lrp-ifaddrs": `{"default":{"ipv4":"100.64.0.5/16","ipv6":"fd:98::/64"},"l3-network":{"ipv4":"100.65.0.5/16","ipv6":"fd:99::/64"}}`},
+				},
+			},
+			netName:     "l2-network",
+			errExpected: true,
+		},
+		{
+			desc: "error: Gateway router parse LPR IP address error",
+			inpNode: v1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{"k8s.ovn.org/node-gateway-router-lrp-ifaddrs": `{"default":{"ipv4":"100.64.0.5"}}`},
+				},
+			},
+			netName:     types.DefaultNetworkName,
+			errExpected: true,
+		},
+	}
+	config.IPv4Mode = true
+	config.IPv6Mode = true
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			cfg, e := ParseNodeGatewayRouterJoinAddrs(&tc.inpNode, tc.netName)
 			if tc.errExpected {
 				t.Log(e)
 				assert.Error(t, e)

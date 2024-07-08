@@ -469,6 +469,49 @@ func NodeGatewayRouterLRPAddrAnnotationChanged(oldNode, newNode *corev1.Node) bo
 	return oldNode.Annotations[ovnNodeGRLRPAddr] != newNode.Annotations[ovnNodeGRLRPAddr]
 }
 
+func parseJoinSubnetAnnotation(nodeAnnotations map[string]string, annotationName string) (map[string]primaryIfAddrAnnotation, error) {
+	annotation, ok := nodeAnnotations[annotationName]
+	if !ok {
+		return nil, newAnnotationNotSetError("could not find %q annotation", annotationName)
+	}
+	joinSubnetsNetworkMap := make(map[string]primaryIfAddrAnnotation)
+	if err := json.Unmarshal([]byte(annotation), &joinSubnetsNetworkMap); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal annotation: %s, err: %w", annotationName, err)
+	}
+
+	if len(joinSubnetsNetworkMap) == 0 {
+		return nil, fmt.Errorf("unexpected empty %s annotation", annotationName)
+	}
+
+	joinsubnetMap := make(map[string]primaryIfAddrAnnotation)
+	for netName, subnetsStr := range joinSubnetsNetworkMap {
+		subnetVal := primaryIfAddrAnnotation{}
+		if subnetsStr.IPv4 == "" && subnetsStr.IPv6 == "" {
+			return nil, fmt.Errorf("annotation: %s does not have any IP information set", annotationName)
+		}
+		if subnetsStr.IPv4 != "" && config.IPv4Mode {
+			ip, ipNet, err := net.ParseCIDR(subnetsStr.IPv4)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse IPv4 address %s from annotation: %s, err: %w",
+					subnetsStr.IPv4, annotationName, err)
+			}
+			joinIP := &net.IPNet{IP: ip, Mask: ipNet.Mask}
+			subnetVal.IPv4 = joinIP.String()
+		}
+		if subnetsStr.IPv6 != "" && config.IPv6Mode {
+			ip, ipNet, err := net.ParseCIDR(subnetsStr.IPv6)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse IPv6 address %s from annotation: %s, err: %w",
+					subnetsStr.IPv4, annotationName, err)
+			}
+			joinIP := &net.IPNet{IP: ip, Mask: ipNet.Mask}
+			subnetVal.IPv6 = joinIP.String()
+		}
+		joinsubnetMap[netName] = subnetVal
+	}
+	return joinsubnetMap, nil
+}
+
 // CreateNodeTransitSwitchPortAddrAnnotation creates the node annotation for the node's Transit switch port addresses.
 func CreateNodeTransitSwitchPortAddrAnnotation(nodeAnnotation map[string]interface{}, nodeIPNetv4,
 	nodeIPNetv6 *net.IPNet) (map[string]interface{}, error) {
@@ -611,6 +654,22 @@ func convertPrimaryIfAddrAnnotationToIPNet(ifAddr primaryIfAddrAnnotation) ([]*n
 // stored in the 'ovnNodeGRLRPAddr' annotation
 func ParseNodeGatewayRouterLRPAddrs(node *kapi.Node) ([]*net.IPNet, error) {
 	return parsePrimaryIfAddrAnnotation(node, ovnNodeGRLRPAddr)
+}
+
+// ParseNodeGatewayRouterJoinAddrs returns the IPv4 and/or IPv6 addresses for the node's gateway router port
+// stored in the 'OVNNodeGRLRPAddrs' annotation
+func ParseNodeGatewayRouterJoinAddrs(node *kapi.Node, netName string) ([]*net.IPNet, error) {
+	joinSubnetMap, err := parseJoinSubnetAnnotation(node.Annotations, OVNNodeGRLRPAddrs)
+	if err != nil {
+		return nil, fmt.Errorf("unable to parse annotation %s on node %s: err %w",
+			OVNNodeGRLRPAddrs, node.Name, err)
+	}
+	val, ok := joinSubnetMap[netName]
+	if !ok {
+		return nil, fmt.Errorf("unable to fetch annotation value on node %s for network %s",
+			node.Name, netName)
+	}
+	return convertPrimaryIfAddrAnnotationToIPNet(val)
 }
 
 // ParseNodeTransitSwitchPortAddrs returns the IPv4 and/or IPv6 addresses for the node's transit switch port
