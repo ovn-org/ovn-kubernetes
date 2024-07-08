@@ -125,14 +125,14 @@ var _ = ginkgo.Describe("e2e egress firewall policy validation", func() {
 			if shouldSucceed {
 				gomega.Eventually(func() bool {
 					_, err := e2ekubectl.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--",
-						"nc", "-vz", "-w", fmt.Sprint(testTimeout), dstIP, fmt.Sprint(dstPort))
+						"curl", "-s", "--connect-timeout", fmt.Sprint(testTimeout), net.JoinHostPort(dstIP, fmt.Sprint(dstPort)))
 					return err == nil
 				}, time.Duration(2*testTimeout)*time.Second).Should(gomega.BeTrue(),
 					fmt.Sprintf("expected connection from %s to [%s]:%d to suceed", srcPodName, dstIP, dstPort))
 			} else {
 				gomega.Consistently(func() bool {
 					_, err := e2ekubectl.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--",
-						"nc", "-vz", "-w", fmt.Sprint(testTimeout), dstIP, fmt.Sprint(dstPort))
+						"curl", "-s", "--connect-timeout", fmt.Sprint(testTimeout), net.JoinHostPort(dstIP, fmt.Sprint(dstPort)))
 					return err != nil
 				}, time.Duration(2*testTimeout)*time.Second).Should(gomega.BeTrue(),
 					fmt.Sprintf("expected connection from %s to [%s]:%d to fail", srcPodName, dstIP, dstPort))
@@ -140,7 +140,8 @@ var _ = ginkgo.Describe("e2e egress firewall policy validation", func() {
 		}
 
 		checkExternalContainerConnectivity := func(containerName, dstIP string, dstPort int) {
-			cmd := []string{"docker", "exec", containerName, "nc", "-vz", "-w", fmt.Sprint(testTimeout), dstIP, fmt.Sprint(dstPort)}
+			cmd := []string{"docker", "exec", containerName,
+				"curl", "-s", "--connect-timeout", fmt.Sprint(testTimeout), net.JoinHostPort(dstIP, fmt.Sprint(dstPort))}
 			framework.Logf("Running command %v", cmd)
 			_, err := runCommand(cmd...)
 			if err != nil {
@@ -165,6 +166,26 @@ var _ = ginkgo.Describe("e2e egress firewall policy validation", func() {
 				externalContainer1IP = externalContainer1IPV4
 				externalContainer2IP = externalContainer2IPV4
 			}
+
+			gomega.Eventually(func() bool {
+				cmd := []string{"docker", "exec", externalContainerName1,
+					"curl", "-s", "--connect-timeout", fmt.Sprint(testTimeout), net.JoinHostPort(externalContainer2IP, fmt.Sprint(externalContainerPort2))}
+				framework.Logf("Running command %v", cmd)
+				_, err := runCommand(cmd...)
+				if err != nil {
+					framework.Logf("Failed: %v", err)
+					return false
+				}
+				cmd = []string{"docker", "exec", externalContainerName2,
+					"curl", "-s", "--connect-timeout", fmt.Sprint(testTimeout), net.JoinHostPort(externalContainer1IP, fmt.Sprint(externalContainerPort1))}
+				framework.Logf("Running command %v", cmd)
+				_, err = runCommand(cmd...)
+				if err != nil {
+					framework.Logf("Failed: %v", err)
+					return false
+				}
+				return true
+			}, 10*time.Second, 500*time.Millisecond).Should(gomega.BeTrue(), "expected external containers %s to be connected")
 
 			singleIPMask = "32"
 			subnetMask = "24"
