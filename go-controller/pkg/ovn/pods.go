@@ -13,6 +13,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kubevirt"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
+	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -225,6 +226,18 @@ func (oc *DefaultNetworkController) addLogicalPort(pod *kapi.Pod) (err error) {
 	ops, lsp, podAnnotation, newlyCreatedPort, err = oc.addLogicalPortToNetwork(pod, nadName, network)
 	if err != nil {
 		return err
+	}
+
+	// If default network is not primary, update secondaryPods port group to isolate default network
+	networkRole, err := oc.GetNetworkRole(pod)
+	if err != nil {
+		return err
+	}
+	if networkRole != ovntypes.NetworkRolePrimary && util.IsNetworkSegmentationSupportEnabled() {
+		pgName := libovsdbutil.GetPortGroupName(oc.getSecondaryPodsPortGroupDbIDs())
+		if ops, err = libovsdbops.AddPortsToPortGroupOps(oc.nbClient, ops, pgName, lsp.UUID); err != nil {
+			return err
+		}
 	}
 
 	// Ensure the namespace/nsInfo exists

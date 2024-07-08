@@ -55,7 +55,7 @@ func getStaleDefaultDenyACL(netpolName, namespace, match string, deny, egress bo
 		false,
 		aclIDs.GetExternalIDs(),
 		nil,
-		types.PlaceHolderACLTier,
+		types.PrimaryACLTier,
 	)
 	acl.UUID = aclIDs.String() + "-UUID"
 	return acl
@@ -166,7 +166,7 @@ func getStalePolicyACLs(gressIdx int, namespace, policyName string, peerNamespac
 			false,
 			dbIDs.GetExternalIDs(),
 			nil,
-			types.PlaceHolderACLTier,
+			types.PrimaryACLTier,
 		)
 		acl.UUID = dbIDs.String() + "-UUID"
 		acls = append(acls, acl)
