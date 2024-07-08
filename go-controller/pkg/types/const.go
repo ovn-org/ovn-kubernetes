@@ -10,8 +10,11 @@ const (
 	HybridOverlayPrefix   = "int-"
 	HybridOverlayGRSubfix = "-gr"
 
+	// K8sMgmtIntfNamePrefix name to be used as an OVS internal port on the node as prefix for networs
+	K8sMgmtIntfNamePrefix = "ovn-k8s-mp"
+
 	// K8sMgmtIntfName name to be used as an OVS internal port on the node
-	K8sMgmtIntfName = "ovn-k8s-mp0"
+	K8sMgmtIntfName = K8sMgmtIntfNamePrefix + "0"
 
 	// PhysicalNetworkName is the name that maps to an OVS bridge that provides
 	// access to physical/external network

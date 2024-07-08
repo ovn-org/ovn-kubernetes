@@ -111,6 +111,18 @@ func GetLegacyK8sMgmtIntfName(nodeName string) string {
 	return GetK8sMgmtIntfName(nodeName)
 }
 
+// GetNetworkScopedK8sMgmtHostIntfName returns the management port host interface name for a network id
+// NOTE: network id is used instead of name so we don't reach the linux device name limit of 15 chars
+func GetNetworkScopedK8sMgmtHostIntfName(networkID uint) string {
+	intfName := types.K8sMgmtIntfNamePrefix + fmt.Sprintf("%d", networkID)
+	// We are over linux 15 chars limit for network devices, let's trim it
+	// for the prefix so we keep networkID as much as possible
+	if len(intfName) > 15 {
+		return intfName[:15]
+	}
+	return intfName
+}
+
 // GetWorkerFromGatewayRouter determines a node's corresponding worker switch name from a gateway router name
 func GetWorkerFromGatewayRouter(gr string) string {
 	return strings.TrimPrefix(gr, types.GWRouterPrefix)

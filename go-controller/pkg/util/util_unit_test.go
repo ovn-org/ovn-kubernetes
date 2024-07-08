@@ -335,3 +335,8 @@ func TestGenerateId(t *testing.T) {
 	matchesPattern, _ := regexp.MatchString("([a-zA-Z0-9-]*)", id)
 	assert.True(t, matchesPattern)
 }
+
+func TestGetNetworkScopedK8sMgmtHostIntfName(t *testing.T) {
+	intfName := GetNetworkScopedK8sMgmtHostIntfName(1245678)
+	assert.Equal(t, "ovn-k8s-mp12456", intfName)
+}

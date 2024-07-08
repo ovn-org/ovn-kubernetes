@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 
 	types "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -11,6 +12,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/rest"
+	"k8s.io/utils/ptr"
 )
 
 func findUserDefinedNetworkVRFTableIDs(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, ovnNamespace string) (string, error) {
@@ -20,17 +22,19 @@ func findUserDefinedNetworkVRFTableIDs(coreclient *corev1client.CoreV1Client, re
 	}
 	nodesTableIDs := map[string]map[string]uint{}
 	for _, node := range nodeList.Items {
-		networks, err := findNetworks(&node)
+		networks, err := findUDNNetworks(&node)
 		if err != nil {
 			return "", err
 		}
 		networksTableIDs := map[string]uint{}
-		for _, networkName := range networks {
-			tableID, err := findUserDefinedNetworkVRFTableID(coreclient, restconfig, &node, ovnNamespace, networkName)
+		for networkName, networkID := range networks {
+			tableID, err := findUserDefinedNetworkVRFTableID(coreclient, restconfig, &node, ovnNamespace, networkID)
 			if err != nil {
 				return "", err
 			}
-			networksTableIDs[networkName] = tableID
+			if tableID != nil {
+				networksTableIDs[networkName] = *tableID
+			}
 		}
 		nodesTableIDs[node.Name] = networksTableIDs
 	}
@@ -41,42 +45,46 @@ func findUserDefinedNetworkVRFTableIDs(coreclient *corev1client.CoreV1Client, re
 	return string(nodesTableIDsJSON), nil
 }
 
-func findUserDefinedNetworkVRFTableID(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, node *corev1.Node, ovnNamespace, networkName string) (uint, error) {
+func findUserDefinedNetworkVRFTableID(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, node *corev1.Node, ovnNamespace string, networkID string) (*uint, error) {
 	ovnKubePodName, err := getOvnKubePodOnNode(coreclient, ovnNamespace, node.Name)
 	if err != nil {
-		return 0, err
-	}
-
-	mgmtPortLinkName := util.GetSecondaryNetworkPrefix(networkName) + types.K8sMgmtIntfName
-	ipLinkCmd := "ip -j link show dev " + mgmtPortLinkName
-	stdout, stderr, err := execInPod(coreclient, restconfig, ovnNamespace, ovnKubePodName, ovnKubeNodePodContainers[1], ipLinkCmd, "")
-	if err != nil {
-		return 0, fmt.Errorf("%s: %s: %w", stdout, stderr, err)
-	}
-	links := []struct {
-		Index uint `json:"ifindex"`
-	}{}
-	if err := json.Unmarshal([]byte(stdout), &links); err != nil {
-		return 0, err
-	}
-	if len(links) < 1 {
-		return 0, fmt.Errorf("link '%s' not found", mgmtPortLinkName)
-	}
-	return uint(util.CalculateRouteTableID(int(links[0].Index))), nil
-}
-
-func findNetworks(node *corev1.Node) ([]string, error) {
-	annotation, ok := node.Annotations["k8s.ovn.org/network-ids"]
-	if !ok {
-		return []string{}, nil
-	}
-	networkIDs := make(map[string]json.RawMessage)
-	if err := json.Unmarshal([]byte(annotation), &networkIDs); err != nil {
 		return nil, err
 	}
-	networks := []string{}
-	for networkName := range networkIDs {
-		networks = append(networks, networkName)
+
+	ipLinksCmd := "ip -j link"
+	stdout, stderr, err := execInPod(coreclient, restconfig, ovnNamespace, ovnKubePodName, ovnKubeNodePodContainers[1], ipLinksCmd, "")
+	if err != nil {
+		return nil, fmt.Errorf("%s: %s: %w", stdout, stderr, err)
 	}
+	links := []struct {
+		Name  string `json:"ifname"`
+		Index uint   `json:"ifindex"`
+	}{}
+	if err := json.Unmarshal([]byte(stdout), &links); err != nil {
+		return nil, err
+	}
+	networkIDInt, err := strconv.Atoi(networkID)
+	if err != nil {
+		return nil, fmt.Errorf("unpexpected networkID '%s': %w", networkID, err)
+	}
+	mgmtPortLinkName := util.GetNetworkScopedK8sMgmtHostIntfName(uint(networkIDInt))
+	for _, link := range links {
+		if link.Name == mgmtPortLinkName {
+			return ptr.To(uint(util.CalculateRouteTableID(int(link.Index)))), nil
+		}
+	}
+	return nil, nil
+}
+
+func findUDNNetworks(node *corev1.Node) (map[string]string, error) {
+	annotation, ok := node.Annotations["k8s.ovn.org/network-ids"]
+	if !ok {
+		return nil, nil
+	}
+	networks := map[string]string{}
+	if err := json.Unmarshal([]byte(annotation), &networks); err != nil {
+		return nil, err
+	}
+	delete(networks, types.DefaultNetworkName)
 	return networks, nil
 }
