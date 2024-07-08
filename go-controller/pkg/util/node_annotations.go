@@ -13,6 +13,7 @@ import (
 	kapi "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
+	utilnet "k8s.io/utils/net"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
@@ -467,6 +468,67 @@ func CreateNodeGatewayRouterLRPAddrAnnotation(nodeAnnotation map[string]interfac
 
 func NodeGatewayRouterLRPAddrAnnotationChanged(oldNode, newNode *corev1.Node) bool {
 	return oldNode.Annotations[ovnNodeGRLRPAddr] != newNode.Annotations[ovnNodeGRLRPAddr]
+}
+
+// UpdateNodeGatewayRouterLRPAddrsAnnotation updates a "k8s.ovn.org/node-gateway-router-lrp-ifaddrs" annotation for network "netName",
+// with the specified network, suitable for passing to kube.SetAnnotationsOnNode. If joinSubnets is empty,
+// it deletes the "k8s.ovn.org/node-gateway-router-lrp-ifaddrs" annotation for network "netName"
+func UpdateNodeGatewayRouterLRPAddrsAnnotation(annotations map[string]string, joinSubnets []*net.IPNet, netName string) (map[string]string, error) {
+	if annotations == nil {
+		annotations = map[string]string{}
+	}
+	err := updateJoinSubnetAnnotation(annotations, OVNNodeGRLRPAddrs, netName, joinSubnets)
+	if err != nil {
+		return nil, err
+	}
+	return annotations, nil
+}
+
+// updateJoinSubnetAnnotation add the joinSubnets of the given network to the input node annotations;
+// input annotations is not nil
+// if joinSubnets is empty, deletes the existing subnet annotation for given network from the input node annotations.
+func updateJoinSubnetAnnotation(annotations map[string]string, annotationName, netName string, joinSubnets []*net.IPNet) error {
+	var bytes []byte
+
+	// First get the all host subnets for all existing networks
+	subnetsMap, err := parseJoinSubnetAnnotation(annotations, annotationName)
+	if err != nil {
+		if !IsAnnotationNotSetError(err) {
+			return fmt.Errorf("failed to parse join subnet annotation %q: %w",
+				annotations, err)
+		}
+		// in the case that the annotation does not exist
+		subnetsMap = map[string]primaryIfAddrAnnotation{}
+	}
+
+	// add or delete host subnet of the specified network
+	if len(joinSubnets) != 0 {
+		subnetVal := primaryIfAddrAnnotation{}
+		for _, net := range joinSubnets {
+			if utilnet.IsIPv4CIDR(net) {
+				subnetVal.IPv4 = net.String()
+			} else {
+				subnetVal.IPv6 = net.String()
+			}
+		}
+		subnetsMap[netName] = subnetVal
+	} else {
+		delete(subnetsMap, netName)
+	}
+
+	// if no host subnet left, just delete the host subnet annotation from node annotations.
+	if len(subnetsMap) == 0 {
+		delete(annotations, annotationName)
+		return nil
+	}
+
+	// Marshal all host subnets of all networks back to annotations.
+	bytes, err = json.Marshal(subnetsMap)
+	if err != nil {
+		return err
+	}
+	annotations[annotationName] = string(bytes)
+	return nil
 }
 
 func parseJoinSubnetAnnotation(nodeAnnotations map[string]string, annotationName string) (map[string]primaryIfAddrAnnotation, error) {

@@ -596,6 +596,45 @@ func TestParseNodeGatewayRouterJoinAddrs(t *testing.T) {
 	}
 }
 
+func TestCreateNodeGatewayRouterLRPAddrsAnnotation(t *testing.T) {
+	tests := []struct {
+		desc            string
+		inpDefSubnetIps []*net.IPNet
+		outExp          map[string]string
+		errExp          bool
+	}{
+		{
+			desc:            "success path, valid default subnets",
+			inpDefSubnetIps: ovntest.MustParseIPNets("192.168.1.12/24"),
+			outExp: map[string]string{
+				"k8s.ovn.org/node-gateway-router-lrp-ifaddrs": "{\"default\":{\"ipv4\":\"192.168.1.12/24\"}}",
+			},
+		},
+		{
+			desc:            "success path, valid default dualstack subnets",
+			inpDefSubnetIps: ovntest.MustParseIPNets("192.168.1.12/24", "fd:98::5/64"),
+			outExp: map[string]string{
+				"k8s.ovn.org/node-gateway-router-lrp-ifaddrs": "{\"default\":{\"ipv4\":\"192.168.1.12/24\",\"ipv6\":\"fd:98::5/64\"}}",
+			},
+		},
+		{
+			desc:   "success path, inpDefSubnetIps is nil",
+			outExp: map[string]string{},
+		},
+	}
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			res, err := UpdateNodeGatewayRouterLRPAddrsAnnotation(nil, tc.inpDefSubnetIps, types.DefaultNetworkName)
+			t.Log(res, err)
+			if tc.errExp {
+				assert.NotNil(t, err)
+			} else {
+				assert.True(t, reflect.DeepEqual(res, tc.outExp))
+			}
+		})
+	}
+}
+
 func TestSetGatewayMTUSupport(t *testing.T) {
 	mockAnnotator := new(annotatorMock.Annotator)
 
