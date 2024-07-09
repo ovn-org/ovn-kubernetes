@@ -534,7 +534,7 @@ func (bnc *BaseNetworkController) addEgressIPAssignments(name string, statusAssi
 		if role != types.NetworkRolePrimary {
 			// nothing to clean up as this network is not the primary network of this namespace. We don't have to be concerned
 			// if network role changes from primary, because the network will be deleted and recreated by net-con-mgr.
-			return nil
+			continue
 		}
 		if err := bnc.addNamespaceEgressIPAssignments(name, statusAssignments, namespace, podSelector); err != nil {
 			return err
@@ -613,6 +613,18 @@ func (bnc *BaseNetworkController) addPodEgressIPAssignments(name string, statusA
 	var remainingAssignments []egressipv1.EgressIPStatusItem
 	var podIPs []*net.IPNet
 	var err error
+	nadName := bnc.GetNetworkName()
+	if util.IsNetworkSegmentationSupportEnabled() && bnc.IsSecondary() {
+		ni, err := bnc.getActiveNetworkForNamespace(pod.Namespace)
+		if err != nil {
+			return fmt.Errorf("failed to get active network for Namespace %s: %v", pod.Name, err)
+		}
+		nadNames := ni.GetNADs()
+		if len(nadNames) == 0 {
+			return fmt.Errorf("expected at least one NAD name for Namespace %s", pod.Namespace)
+		}
+		nadName = nadNames[0] // there should only be one active network
+	}
 	if bnc.isPodScheduledinLocalZone(pod) {
 		// Retrieve the pod's networking configuration from the
 		// logicalPortCache. The reason for doing this: a) only normal network
@@ -620,7 +632,7 @@ func (bnc *BaseNetworkController) addPodEgressIPAssignments(name string, statusA
 		// addLogicalPort has finished successfully setting up networking for
 		// the pod, so we can proceed with retrieving its IP and deleting the
 		// external GW configuration created in addLogicalPort for the pod.
-		logicalPort, err := bnc.logicalPortCache.get(pod, types.DefaultNetworkName)
+		logicalPort, err := bnc.logicalPortCache.get(pod, nadName)
 		if err != nil {
 			return nil
 		}
@@ -636,10 +648,11 @@ func (bnc *BaseNetworkController) addPodEgressIPAssignments(name string, statusA
 		}
 		podIPs = logicalPort.ips
 	} else { // means this is egress node's local master
-		podIPs, err = util.GetPodCIDRsWithFullMask(pod, bnc.NetInfo)
+		podAnnot, err := util.UnmarshalPodAnnotation(pod.Annotations, nadName)
 		if err != nil {
-			return err
+			return nil
 		}
+		podIPNets = podAnnot.IPs
 	}
 	podState, exists := bnc.eIPC.podAssignment[podKey]
 	if !exists {
@@ -1271,6 +1284,20 @@ func (bnc *BaseNetworkController) generateCacheForEgressIP() (map[string]egressI
 				klog.Errorf("Error building egress IP sync cache, cannot retrieve pods for namespace: %s and egress IP: %s, err: %v", namespace.Name, egressIP.Name, err)
 				continue
 			}
+			nadName := bnc.GetNetworkName()
+			if util.IsNetworkSegmentationSupportEnabled() && bnc.IsSecondary() {
+				ni, err := bnc.getActiveNetworkForNamespace(namespace.Name)
+				if err != nil {
+					klog.Errorf("Error build egress IP sync cache, failed to get active network for Namespace %s: %v", namespace.Name, err)
+					continue
+				}
+				nadNames := ni.GetNADs()
+				if len(nadNames) == 0 {
+					klog.Errorf("Error build egress IP sync cache, expected at least one NAD name for Namespace %s", namespace.Name)
+					continue
+				}
+				nadName = nadNames[0] // there should only be one active network
+			}
 			for _, pod := range pods {
 				if util.PodCompleted(pod) {
 					continue
@@ -1279,7 +1306,7 @@ func (bnc *BaseNetworkController) generateCacheForEgressIP() (map[string]egressI
 					continue // don't process anything on master's that have nothing to do with the pod
 				}
 				// FIXME(trozet): potential race where pod is not yet added in the cache by the pod handler
-				logicalPort, err := bnc.logicalPortCache.get(pod, types.DefaultNetworkName)
+				logicalPort, err := bnc.logicalPortCache.get(pod, nadName)
 				if err != nil {
 					klog.Errorf("Error getting logical port %s, err: %v", util.GetLogicalPortName(pod.Namespace, pod.Name), err)
 					continue
