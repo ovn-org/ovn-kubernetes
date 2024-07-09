@@ -18,6 +18,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	clientset "k8s.io/client-go/kubernetes"
+	"k8s.io/kubectl/pkg/util/podutils"
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2ekubectl "k8s.io/kubernetes/test/e2e/framework/kubectl"
 	utilnet "k8s.io/utils/net"
@@ -181,6 +182,17 @@ var _ = Describe("Network Segmentation", func() {
 				Expect(err).NotTo(HaveOccurred())
 
 				udnPod := runUDNPod(cs, f.Namespace.Name, udnPodConfig, func(pod *v1.Pod) {
+					pod.Spec.Containers[0].ReadinessProbe = &v1.Probe{
+						ProbeHandler: v1.ProbeHandler{
+							HTTPGet: &v1.HTTPGetAction{
+								Path: "/healthz",
+								Port: intstr.FromInt32(port),
+							},
+						},
+						InitialDelaySeconds: 1,
+						PeriodSeconds:       1,
+						FailureThreshold:    1,
+					}
 					pod.Spec.Containers[0].LivenessProbe = &v1.Probe{
 						ProbeHandler: v1.ProbeHandler{
 							HTTPGet: &v1.HTTPGetAction{
@@ -190,6 +202,7 @@ var _ = Describe("Network Segmentation", func() {
 						},
 						InitialDelaySeconds: 1,
 						PeriodSeconds:       1,
+						FailureThreshold:    1,
 					}
 					// add NET_ADMIN to change pod routes
 					pod.Spec.Containers[0].SecurityContext = &v1.SecurityContext{
@@ -248,6 +261,9 @@ var _ = Describe("Network Segmentation", func() {
 				}
 
 				By("asserting healthcheck works (kubelet can access the UDN pod)")
+				// The pod should be ready
+				Expect(podutils.IsPodReady(udnPod)).To(BeTrue())
+
 				// connectivity check is run every second + 1sec initialDelay
 				// By this time we have spent at least 8 seconds doing the above checks
 				udnPod, err = cs.CoreV1().Pods(udnPod.Namespace).Get(context.Background(), udnPod.Name, metav1.GetOptions{})
