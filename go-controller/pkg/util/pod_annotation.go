@@ -300,6 +300,21 @@ func GetPodCIDRsWithFullMask(pod *v1.Pod, nInfo NetInfo) ([]*net.IPNet, error) {
 	return ips, nil
 }
 
+// GetPodCIDRsWithFullMaskOfNetwork returns the pod's IP addresses in a CIDR with FullMask format
+// from a pod network annotation 'k8s.ovn.org/pod-networks' using key nadName.
+func GetPodCIDRsWithFullMaskOfNetwork(pod *v1.Pod, nadName string) []*net.IPNet {
+	ips := getAnnotatedPodIPs(pod, nadName)
+	ipNets := make([]*net.IPNet, 0, len(ips))
+	for _, ip := range ips {
+		ipNet := net.IPNet{
+			IP:   ip,
+			Mask: GetIPFullMask(ip),
+		}
+		ipNets = append(ipNets, &ipNet)
+	}
+	return ipNets
+}
+
 // GetPodIPsOfNetwork returns the pod's IP addresses, first from the OVN annotation
 // and then falling back to the Pod Status IPs. This function is intended to
 // also return IPs for HostNetwork and other non-OVN-IPAM-ed pods.
