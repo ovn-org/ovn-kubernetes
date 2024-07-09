@@ -252,10 +252,11 @@ func cleanupLocalnetGateway(physnet string) error {
 }
 
 func (g *gateway) getMasqIPRules(nInfo util.NetInfo) ([]netlink.Rule, error) {
-	vrfTableId, err := util.GetIfIndex(util.GetNetMgmtLinkName(nInfo.GetNetworkName()))
+	ifIndex, err := util.GetIfIndex(util.GetNetMgmtLinkName(nInfo.GetNetworkName()))
 	if err != nil {
 		return nil, err
 	}
+	vrfTableId := util.CalculateRouteTableID(ifIndex)
 	var masqIPRules []netlink.Rule
 	masqIPv4, err := g.getV4MasqueradeIP(nInfo)
 	if err != nil {

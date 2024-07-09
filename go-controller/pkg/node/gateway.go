@@ -78,10 +78,11 @@ func (g *gateway) AddNetwork(nInfo util.NetInfo, masqCTMark uint) error {
 	}
 	mgmtPortLinkName := util.GetNetMgmtLinkName(nInfo.GetNetworkName())
 	vrfDeviceName := util.GetVrfDeviceName(nInfo.GetNetworkName())
-	vrfTableId, err := util.GetIfIndex(mgmtPortLinkName)
+	ifIndex, err := util.GetIfIndex(mgmtPortLinkName)
 	if err != nil {
 		return err
 	}
+	vrfTableId := util.CalculateRouteTableID(ifIndex)
 	enslaveInterfaces := make(sets.Set[string])
 	enslaveInterfaces.Insert(mgmtPortLinkName)
 	// TODO: we may have to associate every route with vrf to avoid any race condtion (can it happen ?)
