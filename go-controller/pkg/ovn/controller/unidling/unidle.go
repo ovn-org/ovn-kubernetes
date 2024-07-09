@@ -9,8 +9,8 @@ import (
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/model"
 	"github.com/ovn-org/libovsdb/ovsdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
-	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	kapi "k8s.io/api/core/v1"
@@ -62,7 +62,7 @@ func NewController(recorder record.EventRecorder, serviceInformer cache.SharedIn
 	klog.Info("Populating Initial ContollerEvent events")
 
 	var controllerEvents []sbdb.ControllerEvent
-	ctx, cancel := context.WithTimeout(context.Background(), ovntypes.OVSDBTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), config.Default.OVSDBTxnTimeout)
 	defer cancel()
 	err := sbClient.List(ctx, &controllerEvents)
 	if err != nil {
@@ -178,7 +178,7 @@ func (uc *unidlingController) handleLbEmptyBackendsEvent(event sbdb.ControllerEv
 	if err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), ovntypes.OVSDBTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), config.Default.OVSDBTxnTimeout)
 	defer cancel()
 	result, err := uc.sbClient.Transact(ctx, op...)
 	if err != nil {

@@ -6,8 +6,8 @@ import (
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	libovsdb "github.com/ovn-org/libovsdb/ovsdb"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 )
 
 type addressSetPredicate func(*nbdb.AddressSet) bool
@@ -33,7 +33,7 @@ func getNonZeroAddressSetMutableFields(as *nbdb.AddressSet) []interface{} {
 // FindAddressSetsWithPredicate looks up address sets from the cache based on a
 // given predicate
 func FindAddressSetsWithPredicate(nbClient libovsdbclient.Client, p addressSetPredicate) ([]*nbdb.AddressSet, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), config.Default.OVSDBTxnTimeout)
 	defer cancel()
 	found := []*nbdb.AddressSet{}
 	err := nbClient.WhereCache(p).List(ctx, &found)

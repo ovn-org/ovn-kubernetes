@@ -1365,7 +1365,7 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 				gomega.BeNil(),             // oldObj should be nil
 				gomega.Not(gomega.BeNil()), // newObj should not be nil
 			)
-			connCtx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+			connCtx, cancel := context.WithTimeout(context.Background(), config.Default.OVSDBTxnTimeout)
 			defer cancel()
 			ginkgo.By("bring up NBDB")
 			resetNBClient(connCtx, oc.nbClient)
@@ -1420,7 +1420,7 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			// sleep long enough for TransactWithRetry to fail, causing LS (and other rows related to node) delete to fail
-			time.Sleep(types.OVSDBTimeout + time.Second)
+			time.Sleep(config.Default.OVSDBTxnTimeout + time.Second)
 
 			// check the retry entry for this node
 			ginkgo.By("retry entry: old obj should not be nil, new obj should be nil")
@@ -1432,7 +1432,7 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 			)
 
 			// reconnect nbdb
-			connCtx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+			connCtx, cancel := context.WithTimeout(context.Background(), config.Default.OVSDBTxnTimeout)
 			defer cancel()
 			resetNBClient(connCtx, oc.nbClient)
 

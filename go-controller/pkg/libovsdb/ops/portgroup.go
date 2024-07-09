@@ -5,8 +5,8 @@ import (
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	libovsdb "github.com/ovn-org/libovsdb/ovsdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 )
 
 type portGroupPredicate func(group *nbdb.PortGroup) bool
@@ -14,7 +14,7 @@ type portGroupPredicate func(group *nbdb.PortGroup) bool
 // FindPortGroupsWithPredicate looks up port groups from the cache based on a
 // given predicate
 func FindPortGroupsWithPredicate(nbClient libovsdbclient.Client, p portGroupPredicate) ([]*nbdb.PortGroup, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), config.Default.OVSDBTxnTimeout)
 	defer cancel()
 	found := []*nbdb.PortGroup{}
 	err := nbClient.WhereCache(p).List(ctx, &found)

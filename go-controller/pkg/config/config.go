@@ -35,6 +35,8 @@ const DefaultAPIServer = "http://localhost:8443"
 // Default IANA-assigned UDP port number for VXLAN
 const DefaultVXLANPort = 4789
 
+const DefaultDBTxnTimeout = time.Second * 100
+
 // The following are global config parameters that other modules may access directly
 var (
 	// Build information. Populated at build-time.
@@ -67,6 +69,7 @@ var (
 		OpenFlowProbe:         180,    // in Seconds
 		OfctrlWaitBeforeClear: 0,      // in Milliseconds
 		MonitorAll:            true,
+		OVSDBTxnTimeout:       DefaultDBTxnTimeout,
 		LFlowCacheEnable:      true,
 		RawClusterSubnets:     "10.128.0.0/14/23",
 		Zone:                  types.OvnDefaultZone,
@@ -247,6 +250,9 @@ type DefaultConfig struct {
 	// instead of conditionally monitoring the data relevant to this node only.
 	// By default monitor-all is enabled.
 	MonitorAll bool `gcfg:"monitor-all"`
+	// OVSDBTxnTimeout is the timeout for db transaction, may be useful to increase for high-scale clusters.
+	// default value is 100 seconds.
+	OVSDBTxnTimeout time.Duration `gcfg:"db-txn-timeout"`
 	// The  boolean  flag  indicates  if  ovn-controller  should
 	// enable/disable the logical flow in-memory cache  it  uses
 	// when processing Southbound database logical flow changes.
@@ -630,6 +636,7 @@ func PrepareTestConfig() error {
 	OvnKubeNode = savedOvnKubeNode
 	ClusterManager = savedClusterManager
 	EnableMulticast = false
+	Default.OVSDBTxnTimeout = 5 * time.Second
 
 	if err := completeConfig(); err != nil {
 		return err
@@ -798,6 +805,13 @@ var CommonFlags = []cli.Flag{
 			"By default it is enabled.",
 		Destination: &cliConfig.Default.MonitorAll,
 		Value:       Default.MonitorAll,
+	},
+	&cli.DurationFlag{
+		Name: "db-txn-timeout",
+		Usage: "OVSDBTxnTimeout is the timeout for db transaction in seconds, " +
+			"may be useful to increase for high-scale clusters. default value is 60 seconds.",
+		Destination: &cliConfig.Default.OVSDBTxnTimeout,
+		Value:       Default.OVSDBTxnTimeout,
 	},
 	&cli.BoolFlag{
 		Name: "enable-lflow-cache",

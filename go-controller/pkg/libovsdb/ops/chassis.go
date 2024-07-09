@@ -6,13 +6,13 @@ import (
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"k8s.io/apimachinery/pkg/util/sets"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 )
 
 // ListChassis looks up all chassis from the cache
 func ListChassis(sbClient libovsdbclient.Client) ([]*sbdb.Chassis, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), config.Default.OVSDBTxnTimeout)
 	defer cancel()
 	searchedChassis := []*sbdb.Chassis{}
 	err := sbClient.List(ctx, &searchedChassis)
@@ -21,7 +21,7 @@ func ListChassis(sbClient libovsdbclient.Client) ([]*sbdb.Chassis, error) {
 
 // ListChassisPrivate looks up all chassis private models from the cache
 func ListChassisPrivate(sbClient libovsdbclient.Client) ([]*sbdb.ChassisPrivate, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), config.Default.OVSDBTxnTimeout)
 	defer cancel()
 	found := []*sbdb.ChassisPrivate{}
 	err := sbClient.List(ctx, &found)

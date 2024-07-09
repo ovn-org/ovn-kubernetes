@@ -8,8 +8,8 @@ import (
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	libovsdb "github.com/ovn-org/libovsdb/ovsdb"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 )
 
 // LOGICAL_SWITCH OPs
@@ -20,7 +20,7 @@ type switchPredicate func(*nbdb.LogicalSwitch) bool
 // based on a given predicate
 func FindLogicalSwitchesWithPredicate(nbClient libovsdbclient.Client, p switchPredicate) ([]*nbdb.LogicalSwitch, error) {
 	found := []*nbdb.LogicalSwitch{}
-	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), config.Default.OVSDBTxnTimeout)
 	defer cancel()
 	err := nbClient.WhereCache(p).List(ctx, &found)
 	return found, err

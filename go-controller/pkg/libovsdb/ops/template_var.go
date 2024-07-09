@@ -5,15 +5,15 @@ import (
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	libovsdb "github.com/ovn-org/libovsdb/ovsdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 )
 
 type chassisTemplateVarPredicate func(*nbdb.ChassisTemplateVar) bool
 
 // ListTemplateVar looks up all chassis template variables.
 func ListTemplateVar(nbClient libovsdbclient.Client) ([]*nbdb.ChassisTemplateVar, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), config.Default.OVSDBTxnTimeout)
 	defer cancel()
 
 	templatesList := []*nbdb.ChassisTemplateVar{}
