@@ -15,6 +15,7 @@ import (
 	"time"
 
 	ocpcloudnetworkapi "github.com/openshift/api/cloudnetwork/v1"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/id"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -114,39 +115,6 @@ func (e *egressNode) getAllocationCountForEgressIP(name string) (count int) {
 		}
 	}
 	return
-}
-
-type EgressIPPatchStatus struct {
-	Op    string                    `json:"op"`
-	Path  string                    `json:"path"`
-	Value egressipv1.EgressIPStatus `json:"value"`
-}
-
-// patchReplaceEgressIPStatus performs a replace patch operation of the egress
-// IP status by replacing the status with the provided value. This allows us to
-// update only the status field, without overwriting any other. This is
-// important because processing egress IPs can take a while (when running on a
-// public cloud and in the worst case), hence we don't want to perform a full
-// object update which risks resetting the EgressIP object's fields to the state
-// they had when we started processing the change.
-func (eIPC *egressIPClusterController) patchReplaceEgressIPStatus(name string, statusItems []egressipv1.EgressIPStatusItem) error {
-	klog.Infof("Patching status on EgressIP %s: %v", name, statusItems)
-	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		t := []EgressIPPatchStatus{
-			{
-				Op:   "replace",
-				Path: "/status",
-				Value: egressipv1.EgressIPStatus{
-					Items: statusItems,
-				},
-			},
-		}
-		op, err := json.Marshal(&t)
-		if err != nil {
-			return fmt.Errorf("error serializing status patch operation: %+v, err: %v", statusItems, err)
-		}
-		return eIPC.kube.PatchEgressIP(name, op)
-	})
 }
 
 func (eIPC *egressIPClusterController) getAllocationTotalCount() float64 {
@@ -368,6 +336,7 @@ type egressIPClusterController struct {
 	// nodeAllocator is a cache of egress IP centric data needed to when both route
 	// health-checking and tracking allocations made
 	nodeAllocator nodeAllocator
+	markAllocator id.Allocator
 	// watchFactory watching k8s objects
 	watchFactory *factory.WatchFactory
 	// EgressIP Node reachability total timeout configuration
@@ -396,6 +365,8 @@ func newEgressIPController(ovnClient *util.OVNClusterManagerClientset, wf *facto
 		EIPClient:          ovnClient.EgressIPClient,
 		CloudNetworkClient: ovnClient.CloudNetworkClient,
 	}
+	markAllocator, _ := getEgressIPMarkAllocator()
+
 	wg := &sync.WaitGroup{}
 	eIPC := &egressIPClusterController{
 		kube:                              kube,
@@ -404,6 +375,7 @@ func newEgressIPController(ovnClient *util.OVNClusterManagerClientset, wf *facto
 		pendingCloudPrivateIPConfigsMutex: &sync.Mutex{},
 		pendingCloudPrivateIPConfigsOps:   make(map[string]map[string]*cloudPrivateIPConfigOp),
 		nodeAllocator:                     nodeAllocator{&sync.Mutex{}, make(map[string]*egressNode)},
+		markAllocator:                     markAllocator,
 		watchFactory:                      wf,
 		recorder:                          recorder,
 		egressIPTotalTimeout:              config.OVNKubernetesFeature.EgressIPReachabiltyTotalTimeout,
@@ -926,6 +898,8 @@ func (eIPC *egressIPClusterController) reconcileEgressIP(old, new *egressipv1.Eg
 				}
 			}
 		}
+	} else {
+		eIPC.deallocMark(name)
 	}
 
 	// Validate the spec and use only the valid egress IPs when performing any
@@ -971,6 +945,20 @@ func (eIPC *egressIPClusterController) reconcileEgressIP(old, new *egressipv1.Eg
 		statusToRemove = append(statusToRemove, status)
 		ipsToRemove.Insert(status.EgressIP)
 	}
+	// Adding the mark to annotations is bundled with status update in-order to minimise updates, cover the case where there is no update to status
+	// and mark annotation has been modified / removed. This should only occur for an update and the mark was previous set.
+	if old != nil && new != nil {
+		if ipsToAssign.Len() == 0 && ipsToRemove.Len() == 0 && util.IsEgressIPMarkSet(old.Annotations) &&
+			util.EgressIPMarkAnnotationChanged(old.Annotations, new.Annotations) {
+			mark, err := eIPC.getOrAllocMark(name)
+			if err != nil {
+				klog.Errorf("Failed to restore EgressIP %s mark because unable to retrieve mark: %v", name, err)
+			} else if err = eIPC.patchEgressIP(name, generateMarkPatchOp(mark)); err != nil {
+				klog.Errorf("Failed to restore EgressIP %s mark because patching failed: %v", name, err)
+			}
+		}
+	}
+
 	if ipsToRemove.Len() > 0 {
 		// The following is added as to ensure that we only add after having
 		// successfully removed egress IPs. This case is not very important on
@@ -1020,7 +1008,7 @@ func (eIPC *egressIPClusterController) reconcileEgressIP(old, new *egressipv1.Eg
 		// Update the object only on an ADD/UPDATE. If we are processing a
 		// DELETE, new will be nil and we should not update the object.
 		if len(statusToAdd) > 0 || (len(statusToRemove) > 0 && new != nil) {
-			if err := eIPC.patchReplaceEgressIPStatus(name, statusToKeep); err != nil {
+			if err := eIPC.patchEgressIP(name, eIPC.generateEgressIPPatches(name, new.Annotations, statusToKeep)...); err != nil {
 				return err
 			}
 		}
@@ -1048,7 +1036,7 @@ func (eIPC *egressIPClusterController) reconcileEgressIP(old, new *egressipv1.Eg
 			// Update the object only on an ADD/UPDATE. If we are processing a
 			// DELETE, new will be nil and we should not update the object.
 			if new != nil {
-				if err := eIPC.patchReplaceEgressIPStatus(name, statusToKeep); err != nil {
+				if err := eIPC.patchEgressIP(name, eIPC.generateEgressIPPatches(name, new.Annotations, statusToKeep)...); err != nil {
 					return err
 				}
 			}
@@ -1132,7 +1120,7 @@ func (eIPC *egressIPClusterController) syncCloudPrivateIPConfigs(objs []interfac
 		if cloudPrivateIPNotFound {
 			// There could be one or more stale entry found in egress ip object, remove it by patching egressip
 			// object with updated status.
-			err = eIPC.patchReplaceEgressIPStatus(egressIP.Name, updatedStatus)
+			err = eIPC.patchEgressIP(egressIP.Name, eIPC.generateEgressIPPatches(egressIP.Name, egressIP.Annotations, updatedStatus)...)
 			if err != nil {
 				return fmt.Errorf("syncCloudPrivateIPConfigs unable to update EgressIP status: %w", err)
 			}
@@ -1557,7 +1545,7 @@ func (eIPC *egressIPClusterController) reconcileCloudPrivateIPConfig(old, new *o
 					updatedStatus = append(updatedStatus, status)
 				}
 			}
-			if err := eIPC.patchReplaceEgressIPStatus(egressIP.Name, updatedStatus); err != nil {
+			if err := eIPC.patchEgressIP(egressIP.Name, eIPC.generateEgressIPPatches(egressIP.Name, egressIP.Annotations, updatedStatus)...); err != nil {
 				return err
 			}
 		}
@@ -1604,7 +1592,7 @@ func (eIPC *egressIPClusterController) reconcileCloudPrivateIPConfig(old, new *o
 		}
 		if !hasStatus {
 			statusToKeep := append(egressIP.Status.Items, statusItem)
-			if err := eIPC.patchReplaceEgressIPStatus(egressIP.Name, statusToKeep); err != nil {
+			if err := eIPC.patchEgressIP(egressIP.Name, eIPC.generateEgressIPPatches(egressIP.Name, egressIP.Annotations, statusToKeep)...); err != nil {
 				return err
 			}
 		}
@@ -1722,4 +1710,150 @@ func (eIPC *egressIPClusterController) removePendingOpsAndGetResyncs(egressIPNam
 		}
 	}
 	return resyncs, nil
+}
+
+// jsonPatchOperation contains all the info needed to perform a JSON path operation to a k8 object
+type jsonPatchOperation struct {
+	Operation string      `json:"op"`
+	Path      string      `json:"path"`
+	Value     interface{} `json:"value,omitempty"`
+}
+
+// patchEgressIP performs a patch operation on an EgressIP.
+// There are two possible patches operations.
+// 1. Mandatory, replace operation of egress IP status field. This allows us to
+// update only the status field, without overwriting any other. This is
+// important because processing egress IPs can take a while (when running on a
+// public cloud and in the worst case), hence we don't want to perform a full
+// object update which risks resetting the EgressIP object's fields to the state
+// they had when we started processing the change.
+// 2. Optional, add operation to its metadata.annotations field.
+func (eIPC *egressIPClusterController) patchEgressIP(name string, patches ...jsonPatchOperation) error {
+	klog.Infof("Patching status on EgressIP %s: %v", name, patches)
+	op, err := json.Marshal(patches)
+	if err != nil {
+		return fmt.Errorf("error serializing patch operation: %+v, err: %v", patches, err)
+	}
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		return eIPC.kube.PatchEgressIP(name, op)
+	})
+}
+
+// generateEgressIPPatches conditionally generates a mark patch if the mark doesn't exist. If it fails to allocate a mark,
+// log an error instead of failing because we do not wish to block primary default network egress IP assignments due to potential
+// mark range exhaustion. Primary default network egress IP currently does not utilize marks to config EgressIP.
+// Generating the status patch is mandatory
+func (eIPC *egressIPClusterController) generateEgressIPPatches(name string, annotations map[string]string,
+	statusItems []egressipv1.EgressIPStatusItem) []jsonPatchOperation {
+	patches := make([]jsonPatchOperation, 0, 1)
+	if !util.IsEgressIPMarkSet(annotations) {
+		if mark, err := eIPC.getOrAllocMark(name); err != nil {
+			klog.Errorf("Failed to get mark for EgressIP %s: %v", name, err)
+		} else {
+			patches = append(patches, generateMarkPatchOp(mark))
+		}
+	}
+	return append(patches, generateStatusPatchOp(statusItems))
+}
+
+func generateMarkPatchOp(mark int) jsonPatchOperation {
+	return jsonPatchOperation{
+		Operation: "add",
+		Path:      "/metadata/annotations",
+		Value:     createAnnotWithMark(mark),
+	}
+}
+
+func createAnnotWithMark(mark int) map[string]string {
+	return map[string]string{util.EgressIPMarkAnnotation: fmt.Sprintf("%d", mark)}
+}
+
+func generateStatusPatchOp(statusItems []egressipv1.EgressIPStatusItem) jsonPatchOperation {
+	return jsonPatchOperation{
+		Operation: "replace",
+		Path:      "/status",
+		Value: egressipv1.EgressIPStatus{
+			Items: statusItems,
+		},
+	}
+}
+
+// syncEgressIPMarkAllocator iterates over all existing EgressIPs. It builds a mark cache of existing marks stored on each
+// EgressIP annotation or allocates and adds a new mark to an EgressIP if it doesn't exist
+func (eIPC *egressIPClusterController) syncEgressIPMarkAllocator(egressIPs []interface{}) error {
+	for _, object := range egressIPs {
+		egressIP, ok := object.(*egressipv1.EgressIP)
+		if !ok {
+			return fmt.Errorf("failed to cast %T to *egressipv1.EgressIP", egressIP)
+		}
+		if util.IsEgressIPMarkSet(egressIP.Annotations) {
+			mark, err := util.ParseEgressIPMark(egressIP.Annotations)
+			if err != nil {
+				return fmt.Errorf("failed to get mark from EgressIP %s: %v", egressIP.Name, err)
+			}
+			if !mark.IsValid() {
+				return fmt.Errorf("EgressIP %s mark %q is invalid", egressIP.Name, mark.ToString())
+			}
+			if err = eIPC.reserveMark(egressIP.Name, mark.ToInt()); err != nil {
+				return fmt.Errorf("failed to reserve mark for EgressIP %s: %v", egressIP.Name, err)
+			}
+		} else {
+			mark, err := eIPC.getOrAllocMark(egressIP.Name)
+			if err != nil {
+				klog.Errorf("Failed to sync mark allocator: unable to allocate for EgressIP %s: %v", egressIP.Name, err)
+			} else {
+				if err = eIPC.patchEgressIP(egressIP.Name, generateMarkPatchOp(mark)); err != nil {
+					return fmt.Errorf("failed to patch EgressIP %s: %v", egressIP.Name, err)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func getEgressIPMarkAllocator() (id.Allocator, error) {
+	return id.NewIDAllocator("eip_mark", util.EgressIPMarkMax-util.EgressIPMarkBase)
+}
+
+// getOrAllocMark allocates a new mark integer for name using round-robin strategy if none was already allocated for name otherwise
+// returns the previously allocated mark.
+// The mark is bounded by util.EgressIPMarkBase & util.EgressIPMarkMax inclusive.
+// If range is exhausted, error is returned. Before calling this func, syncEgressIPMarkAllocator must be called
+// to build the initial mark cache
+func (eIPC *egressIPClusterController) getOrAllocMark(name string) (int, error) {
+	if name == "" {
+		panic("EIP getOrAllocMark(): name cannot be blank")
+	}
+	mark, err := eIPC.markAllocator.AllocateID(name)
+	if err != nil {
+		return 0, fmt.Errorf("failed to allocate mark: %v", err)
+	}
+	mark = mark + util.EgressIPMarkBase
+	if !util.IsEgressIPMarkValid(mark) {
+		return 0, fmt.Errorf("mark %d allocated is invalid. Must be between %d and %d", mark, util.EgressIPMarkBase, util.EgressIPMarkMax)
+	}
+	return mark, nil
+}
+
+// deallocMark de-allocates a mark
+func (eIPC *egressIPClusterController) deallocMark(name string) {
+	if name == "" {
+		panic("EIP deallocMark(): name cannot be blank")
+	}
+	eIPC.markAllocator.ReleaseID(name)
+}
+
+// reserveMark reserves a previously assigned mark to the mark cache
+func (eIPC *egressIPClusterController) reserveMark(name string, mark int) error {
+	if name == "" {
+		panic("EIP reserveMark(): name cannot be blank")
+	}
+	mark = mark - util.EgressIPMarkBase
+	if mark < 0 {
+		return fmt.Errorf("unable to reserve mark because calculated offset is less than zero")
+	}
+	if err := eIPC.markAllocator.ReserveID(name, mark); err != nil {
+		return fmt.Errorf("failed to reserve mark: %v", err)
+	}
+	return nil
 }
