@@ -31,6 +31,10 @@ func NewL2SwitchManager() *LogicalSwitchManager {
 	}
 }
 
+func NewL2SwitchManagerForUserDefinedPrimaryNetwork() *LogicalSwitchManager {
+	return NewLogicalSwitchManager()
+}
+
 // AddOrUpdateSwitch adds/updates a switch to the logical switch manager for subnet
 // and IPAM management.
 func (manager *LogicalSwitchManager) AddOrUpdateSwitch(switchName string, hostSubnets []*net.IPNet, excludeSubnets ...*net.IPNet) error {

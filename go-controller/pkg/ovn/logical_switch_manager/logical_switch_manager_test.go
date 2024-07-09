@@ -150,3 +150,45 @@ var _ = ginkgo.Describe("OVN Logical Switch Manager operations", func() {
 		})
 	})
 })
+
+var _ = ginkgo.Describe("OVN Logical Switch Manager operations for layer2 user defined networks", func() {
+	const (
+		switchName = "testSwitch"
+		ipv4Subnet = "192.168.200.0/24"
+		ipv6Subnet = "fd12:1500::0/64"
+	)
+	var lsManager *LogicalSwitchManager
+
+	ginkgo.BeforeEach(func() {
+		lsManager = NewL2SwitchManagerForUserDefinedPrimaryNetwork()
+		gomega.Expect(lsManager.AddOrUpdateSwitch(
+			switchName,
+			ovntest.MustParseIPNets(ipv4Subnet, ipv6Subnet),
+		)).NotTo(gomega.HaveOccurred())
+		gomega.Expect(lsManager.isAllocatedIP(switchName, "192.168.200.1/24")).To(gomega.BeTrue())
+		gomega.Expect(lsManager.isAllocatedIP(switchName, "192.168.200.2/24")).To(gomega.BeTrue())
+		gomega.Expect(lsManager.isAllocatedIP(switchName, "fd12:1500::1/64")).To(gomega.BeTrue())
+		gomega.Expect(lsManager.isAllocatedIP(switchName, "fd12:1500::2/64")).To(gomega.BeTrue())
+	})
+
+	ginkgo.It("the first allocatable address for the workloads is the .3 IP", func() {
+		allocatedIP, err := lsManager.AllocateNextIPs(switchName)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		gomega.Expect(allocatedIP).To(
+			gomega.ConsistOf(
+				&net.IPNet{
+					IP:   net.ParseIP("192.168.200.3"),
+					Mask: net.CIDRMask(24, 32),
+				},
+				&net.IPNet{
+					IP:   net.ParseIP("fd12:1500::3"),
+					Mask: net.CIDRMask(64, 128),
+				},
+			),
+		)
+
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		gomega.Expect(lsManager.isAllocatedIP(switchName, "192.168.200.3/24")).To(gomega.BeTrue())
+		gomega.Expect(lsManager.isAllocatedIP(switchName, "fd12:1500::3/64")).To(gomega.BeTrue())
+	})
+})
