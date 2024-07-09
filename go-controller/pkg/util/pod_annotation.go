@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"strings"
 
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	nadutils "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/utils"
@@ -51,6 +52,9 @@ const (
 	OvnPodAnnotationName = "k8s.ovn.org/pod-networks"
 	// DefNetworkAnnotation is the pod annotation for the cluster-wide default network
 	DefNetworkAnnotation = "v1.multus-cni.io/default-network"
+	// skipSpoofCheckAnnotationName skips setting Port security on Logical Switch Ports that are
+	// part of the specified networks
+	skipSpoofCheckAnnotationName = "k8s.ovn.org/skip-spoofchk-on-networks"
 )
 
 var ErrNoPodIPFound = errors.New("no pod IPs found")
@@ -598,4 +602,19 @@ func AddRoutesGatewayIP(
 	}
 
 	return nil
+}
+
+// SkipSpoofCheckForNAD checks whether we should skip spoof check for the given NAD
+func SkipSpoofCheckForNAD(annotations map[string]string, nadName string) bool {
+	skipSpoofCheckForNetworks, ok := annotations[skipSpoofCheckAnnotationName]
+	if !ok {
+		return false
+	}
+	for _, name := range strings.Split(skipSpoofCheckForNetworks, ",") {
+		name = strings.TrimSpace(name)
+		if name == nadName || (nadName == "default" && name == "default/ovn-primary") {
+			return true
+		}
+	}
+	return false
 }

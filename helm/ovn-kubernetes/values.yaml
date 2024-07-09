@@ -136,6 +136,8 @@ global:
   ofctrlWaitBeforeClear: ""
   # -- Separate log file for libovsdb client 
   libovsdbClientLogFile: ""
+  # -- Allow user to skip port security for a pod's network
+  enableInsecureLsp: false
   image:
     # -- Image repository for ovn-kubernetes components
     repository: ghcr.io/ovn-org/ovn-kubernetes/ovn-kube-ubuntu
