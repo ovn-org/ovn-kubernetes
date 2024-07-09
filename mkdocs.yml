@@ -103,15 +103,15 @@ nav:
       - EgressFirewall: api-reference/egress-firewall-api-spec.md
       - AdminPolicyBasedExternalRoutes: api-reference/admin-epbr-api-spec.md
   - Features:
+    - NetworkSecurityControls:
+      - AdminNetworkPolicy: features/network-security-controls/admin-network-policy.md
+      - NetworkPolicy: features/network-security-controls/network-policy.md
+      - EgressFirewall: features/network-security-controls/egress-firewall.md
     - ClusterEgressControls:
       - EgressIP: features/cluster-egress-controls/egress-ip.md
       - EgressService: features/cluster-egress-controls/egress-service.md
       - EgressQoS: features/cluster-egress-controls/egress-qos.md
       - EgressGateway: features/cluster-egress-controls/egress-gateway.md
-    - NetworkSecurityControls:
-      - NetworkPolicy: features/network-security-controls/network-policy.md
-      - AdminNetworkPolicy: features/network-security-controls/admin-network-policy.md
-      - EgressFirewall: features/network-security-controls/egress-firewall.md
     - InfrastructureSecurityControls:
       - NodeIdentity: features/infrastructure-security-controls/node-identity.md
     - MultiNetworking:
