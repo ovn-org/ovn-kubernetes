@@ -1643,7 +1643,7 @@ func (e *egressIPZoneController) addPodEgressIPAssignment(egressIPName string, s
 	}
 	var ops []ovsdb.Operation
 	if loadedEgressNode && isLocalZoneEgressNode {
-		if isOVNNetwork {
+		if e.IsDefault() && isOVNNetwork {
 			ops, err = e.createNATRuleOps(nil, podIPs, status, egressIPName)
 			if err != nil {
 				return fmt.Errorf("unable to create NAT rule ops for status: %v, err: %v", status, err)
@@ -1736,9 +1736,11 @@ func (e *egressIPZoneController) deletePodEgressIPAssignment(egressIPName string
 				return fmt.Errorf("unable to delete logical router static route ops %v, err: %v", status, err)
 			}
 		}
-		ops, err = e.deleteNATRuleOps(ops, podIPs, status, egressIPName)
-		if err != nil {
-			return fmt.Errorf("unable to delete NAT rule for status: %v, err: %v", status, err)
+		if e.IsDefault() {
+			ops, err = e.deleteNATRuleOps(ops, podIPs, status, egressIPName)
+			if err != nil {
+				return fmt.Errorf("unable to delete NAT rule for status: %v, err: %v", status, err)
+			}
 		}
 	}
 	_, err = libovsdbops.TransactAndCheck(e.nbClient, ops)
@@ -2041,7 +2043,7 @@ func (e *egressIPZoneController) deleteEgressIPStatusSetup(name string, status e
 	}
 
 	isLocalZoneEgressNode, loadedEgressNode := e.nodeZoneState.Load(status.Node)
-	if loadedEgressNode && isLocalZoneEgressNode {
+	if e.IsDefault() && loadedEgressNode && isLocalZoneEgressNode {
 		routerName := e.GetNetworkScopedGWRouterName(status.Node)
 		natPred := func(nat *nbdb.NAT) bool {
 			// We should delete NATs only from the status.Node that was passed into this function
