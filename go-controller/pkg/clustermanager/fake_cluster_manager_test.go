@@ -100,14 +100,16 @@ func (o *FakeClusterManager) init() {
 }
 
 func (o *FakeClusterManager) shutdown() {
-	o.watcher.Shutdown()
-	if config.OVNKubernetesFeature.EnableEgressIP {
+	if o.watcher != nil {
+		o.watcher.Shutdown()
+	}
+	if config.OVNKubernetesFeature.EnableEgressIP && o.eIPC != nil {
 		o.eIPC.Stop()
 	}
-	if config.OVNKubernetesFeature.EnableEgressService {
+	if config.OVNKubernetesFeature.EnableEgressService && o.esvc != nil {
 		o.esvc.Stop()
 	}
-	if util.IsNetworkSegmentationSupportEnabled() {
+	if util.IsNetworkSegmentationSupportEnabled() && o.epsMirror != nil {
 		o.epsMirror.Stop()
 	}
 }
