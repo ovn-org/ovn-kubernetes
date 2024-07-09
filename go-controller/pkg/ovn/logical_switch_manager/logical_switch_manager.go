@@ -17,7 +17,8 @@ type LogicalSwitchManager struct {
 	reserveIPs bool
 }
 
-// Initializes a new logical switch manager for L3 networks
+// NewLogicalSwitchManager initializes a new logical switch manager for L3
+// networks.
 func NewLogicalSwitchManager() *LogicalSwitchManager {
 	return &LogicalSwitchManager{
 		allocator:  subnet.NewAllocator(),
@@ -25,12 +26,24 @@ func NewLogicalSwitchManager() *LogicalSwitchManager {
 	}
 }
 
+// NewL2SwitchManager initializes a new logical switch manager for L2 secondary
+// networks.
+// In L2, we do not auto-reserve the GW and mp0 IPs on the subnet - the reasons
+// are different depending on the topology though:
+//   - localnet: it is the user's responsibility to know which IPs to exclude
+//     from the physical network
+//   - layer2: this is a disconnected network, thus it doesn't have a GW, nor a
+//     management port
 func NewL2SwitchManager() *LogicalSwitchManager {
 	return &LogicalSwitchManager{
 		allocator: subnet.NewAllocator(),
 	}
 }
 
+// NewL2SwitchManagerForUserDefinedPrimaryNetwork initializes a new logical
+// switch manager for L2 primary networks.
+// A user defined primary network auto-reserves the .1 and .2 IP addresses,
+// which are required for egressing the cluster over this user defined network.
 func NewL2SwitchManagerForUserDefinedPrimaryNetwork() *LogicalSwitchManager {
 	return NewLogicalSwitchManager()
 }
