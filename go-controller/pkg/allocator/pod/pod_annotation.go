@@ -377,6 +377,9 @@ func allocatePodAnnotationWithRollback(
 				err = fmt.Errorf("failed to assign pod addresses for %s: %w", podDesc, err)
 				return
 			}
+			if netInfo.IsPrimaryNetwork() {
+				klog.Infof("DELETEME, primary-network: %s, tentative.IP: %s", netInfo.GetNetworkName(), tentative.IPs[0])
+			}
 
 			// copy the IPs that would need to be released
 			releaseIPs = util.CopyIPNets(tentative.IPs)

@@ -7,6 +7,7 @@ import (
 	ipam "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip/subnet"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"k8s.io/klog/v2"
 )
 
 var SwitchNotFound = subnet.ErrSubnetNotFound
@@ -51,6 +52,7 @@ func NewL2SwitchManagerForUserDefinedPrimaryNetwork() *LogicalSwitchManager {
 // AddOrUpdateSwitch adds/updates a switch to the logical switch manager for subnet
 // and IPAM management.
 func (manager *LogicalSwitchManager) AddOrUpdateSwitch(switchName string, hostSubnets []*net.IPNet, excludeSubnets ...*net.IPNet) error {
+	klog.Infof("DELETEME, AddOrUpdateSwitch, switchName: %s, reserveIPs: %t, hostSubnets: %+v", switchName, manager.reserveIPs, hostSubnets)
 	if manager.reserveIPs {
 		for _, hostSubnet := range hostSubnets {
 			for _, ip := range []*net.IPNet{util.GetNodeGatewayIfAddr(hostSubnet), util.GetNodeManagementIfAddr(hostSubnet)} {
@@ -60,6 +62,7 @@ func (manager *LogicalSwitchManager) AddOrUpdateSwitch(switchName string, hostSu
 			}
 		}
 	}
+	klog.Infof("DELETEME, AddOrUpdateSwitch, switchName: %s, reserveIPs: %t, hostSubnets: %+v, excludeSubnets: %+v", switchName, manager.reserveIPs, hostSubnets, excludeSubnets)
 	return manager.allocator.AddOrUpdateSubnet(switchName, hostSubnets, excludeSubnets...)
 }
 

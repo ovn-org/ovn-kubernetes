@@ -33,7 +33,9 @@ func NewSecondaryLayer2NetworkController(cnci *CommonNetworkControllerInfo, netI
 	addressSetFactory := addressset.NewOvnAddressSetFactory(cnci.nbClient, ipv4Mode, ipv6Mode)
 
 	lsManagerFactoryFn := lsm.NewL2SwitchManager
+	klog.Infof("DELETEME, NewSecondaryLayer2NetworkController")
 	if netInfo.IsPrimaryNetwork() {
+		klog.Infof("DELETEME, NewSecondaryLayer2NetworkController, primary")
 		lsManagerFactoryFn = lsm.NewL2SwitchManagerForUserDefinedPrimaryNetwork
 	}
 	oc := &SecondaryLayer2NetworkController{
