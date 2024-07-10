@@ -543,17 +543,37 @@ func newIPAllocatorForNetwork(netInfo util.NetInfo) (subnet.Allocator, error) {
 
 	subnets := netInfo.Subnets()
 	ipNets := make([]*net.IPNet, 0, len(subnets))
+	excludeSubnets := netInfo.ExcludeSubnets()
 	for _, subnet := range subnets {
 		ipNets = append(ipNets, subnet.CIDR)
+		if isLayer2UserDefinedPrimaryNetwork(netInfo) {
+			excludeSubnets = append(
+				excludeSubnets,
+				autoExcludeCIDRs(subnet.CIDR)...,
+			)
+		}
 	}
 
 	if err := ipAllocator.AddOrUpdateSubnet(
 		netInfo.GetNetworkName(),
 		ipNets,
-		netInfo.ExcludeSubnets()...,
+		excludeSubnets...,
 	); err != nil {
 		return nil, err
 	}
 
 	return ipAllocator, nil
+}
+
+func isLayer2UserDefinedPrimaryNetwork(netInfo util.NetInfo) bool {
+	return netInfo.IsPrimaryNetwork() && netInfo.TopologyType() == types.Layer2Topology
+}
+
+func autoExcludeCIDRs(subnet *net.IPNet) []*net.IPNet {
+	gwIP := util.GetNodeGatewayIfAddr(subnet).IP
+	mgmtPortIP := util.GetNodeManagementIfAddr(subnet).IP
+	return []*net.IPNet{
+		{IP: gwIP, Mask: util.GetIPFullMask(gwIP)},
+		{IP: mgmtPortIP, Mask: util.GetIPFullMask(mgmtPortIP)},
+	}
 }

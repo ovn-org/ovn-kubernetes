@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"strings"
 	"sync"
 
 	"github.com/containernetworking/cni/pkg/types"
@@ -102,50 +103,104 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 
-		ginkgo.It("Attach secondary layer2 network", func() {
-			app.Action = func(ctx *cli.Context) error {
-				fakeClient := &util.OVNClusterManagerClientset{
+		ginkgo.When("Attaching to a layer2 network", func() {
+			const subnets = "192.168.200.0/24,fd12:1234::0/64"
+			var (
+				fakeClient *util.OVNClusterManagerClientset
+				netInfo    util.NetInfo
+			)
+
+			ginkgo.BeforeEach(func() {
+				fakeClient = &util.OVNClusterManagerClientset{
 					KubeClient:            fake.NewSimpleClientset(&v1.NodeList{Items: nodes()}),
 					IPAMClaimsClient:      fakeipamclaimclient.NewSimpleClientset(),
 					NetworkAttchDefClient: fakenadclient.NewSimpleClientset(),
 				}
 
-				gomega.Expect(
-					initConfig(ctx, config.OVNKubernetesFeatureConfig{
-						EnableMultiNetwork: true,
-						EnableInterconnect: true},
-					)).To(gomega.Succeed())
 				var err error
-				f, err = factory.NewClusterManagerWatchFactory(fakeClient)
+				netInfo, err = util.NewNetInfo(
+					&ovncnitypes.NetConf{
+						NetConf:  types.NetConf{Name: "blue"},
+						Topology: ovntypes.Layer2Topology,
+						Subnets:  subnets,
+					})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				err = f.Start()
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-				sncm, err := newSecondaryNetworkClusterManager(fakeClient, f)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				netInfo, err := util.NewNetInfo(&ovncnitypes.NetConf{NetConf: types.NetConf{Name: "blue"}, Topology: ovntypes.Layer2Topology})
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-				config.OVNKubernetesFeature.EnableInterconnect = false
-				nc, err := sncm.NewNetworkController(netInfo)
-				gomega.Expect(err).To(gomega.Equal(nad.ErrNetworkControllerTopologyNotManaged))
-				gomega.Expect(nc).To(gomega.BeNil())
-
-				config.OVNKubernetesFeature.EnableInterconnect = true
-				nc, err = sncm.NewNetworkController(netInfo)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				gomega.Expect(nc).NotTo(gomega.BeNil())
-
-				err = nc.Start(ctx.Context)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-				return nil
-			}
-
-			err := app.Run([]string{
-				app.Name,
 			})
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			ginkgo.It("The secondary network controller starts successfully", func() {
+				app.Action = func(ctx *cli.Context) error {
+					gomega.Expect(
+						initConfig(ctx, config.OVNKubernetesFeatureConfig{
+							EnableMultiNetwork: true,
+							EnableInterconnect: true},
+						)).To(gomega.Succeed())
+					var err error
+					f, err = factory.NewClusterManagerWatchFactory(fakeClient)
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					err = f.Start()
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+					sncm, err := newSecondaryNetworkClusterManager(fakeClient, f)
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+					config.OVNKubernetesFeature.EnableInterconnect = false
+					nc, err := sncm.NewNetworkController(netInfo)
+					gomega.Expect(err).To(gomega.Equal(nad.ErrNetworkControllerTopologyNotManaged))
+					gomega.Expect(nc).To(gomega.BeNil())
+
+					config.OVNKubernetesFeature.EnableInterconnect = true
+					nc, err = sncm.NewNetworkController(netInfo)
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					gomega.Expect(nc).NotTo(gomega.BeNil())
+
+					err = nc.Start(ctx.Context)
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+					return nil
+				}
+
+				err := app.Run([]string{
+					app.Name,
+				})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			})
+
+			ginkgo.It("There aren't any automatically reserved IP addresses", func() {
+				app.Action = func(ctx *cli.Context) error {
+					gomega.Expect(
+						initConfig(ctx, config.OVNKubernetesFeatureConfig{
+							EnableMultiNetwork: true,
+							EnableInterconnect: true},
+						)).To(gomega.Succeed())
+
+					var err error
+					f, err = factory.NewClusterManagerWatchFactory(fakeClient)
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					gomega.Expect(f.Start()).NotTo(gomega.HaveOccurred())
+
+					sncm, err := newSecondaryNetworkClusterManager(fakeClient, f)
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+					namedIDAllocator := sncm.networkIDAllocator.ForName(netInfo.GetNetworkName())
+					nc := newNetworkClusterController(
+						namedIDAllocator,
+						netInfo,
+						sncm.ovnClient,
+						sncm.watchFactory,
+					)
+					gomega.Expect(nc.init()).To(gomega.Succeed())
+					gomega.Expect(nc.Start(ctx.Context)).To(gomega.Succeed())
+
+					namedSubnetAllocator := nc.subnetAllocator.ForSubnet(netInfo.GetNetworkName())
+
+					firstAllocatableIPs := "192.168.200.1/24,fd12:1234::1/64"
+					allocatableIPs, err := util.ParseIPNets(strings.Split(firstAllocatableIPs, ","))
+					gomega.Expect(namedSubnetAllocator.AllocateIPs(allocatableIPs)).To(gomega.Succeed())
+					return nil
+				}
+
+				gomega.Expect(app.Run([]string{app.Name})).To(gomega.Succeed())
+			})
 		})
 
 		ginkgo.It("Cleanup", func() {
@@ -597,6 +652,87 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 					gomega.Expect(app.Run([]string{app.Name})).To(gomega.Succeed())
 				})
 			})
+		})
+	})
+
+	ginkgo.Context("User defined primary networks", func() {
+
+		ginkgo.When("Attaching to a layer2 network", func() {
+			const subnets = "192.168.200.0/24,fd12:1234::0/64"
+
+			var (
+				fakeClient *util.OVNClusterManagerClientset
+				netInfo    util.NetInfo
+			)
+
+			ginkgo.BeforeEach(func() {
+				var err error
+				netInfo, err = util.NewNetInfo(
+					&ovncnitypes.NetConf{
+						NetConf:  types.NetConf{Name: "blue"},
+						Role:     ovntypes.NetworkRolePrimary,
+						Subnets:  subnets,
+						Topology: ovntypes.Layer2Topology,
+					})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				fakeClient = &util.OVNClusterManagerClientset{
+					KubeClient:            fake.NewSimpleClientset(&v1.NodeList{Items: nodes()}),
+					IPAMClaimsClient:      fakeipamclaimclient.NewSimpleClientset(),
+					NetworkAttchDefClient: fakenadclient.NewSimpleClientset(),
+				}
+			})
+
+			ginkgo.It("Automatically reserves IPs for the GW (.1) and mgmt port (.2)", func() {
+				app.Action = func(ctx *cli.Context) error {
+					gomega.Expect(
+						initConfig(ctx, config.OVNKubernetesFeatureConfig{
+							EnableMultiNetwork: true,
+							EnableInterconnect: true},
+						)).To(gomega.Succeed())
+
+					var err error
+					f, err = factory.NewClusterManagerWatchFactory(fakeClient)
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					gomega.Expect(f.Start()).NotTo(gomega.HaveOccurred())
+
+					sncm, err := newSecondaryNetworkClusterManager(fakeClient, f)
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+					namedIDAllocator := sncm.networkIDAllocator.ForName(netInfo.GetNetworkName())
+					nc := newNetworkClusterController(
+						namedIDAllocator,
+						netInfo,
+						sncm.ovnClient,
+						sncm.watchFactory,
+					)
+					gomega.Expect(nc.init()).To(gomega.Succeed())
+					gomega.Expect(nc.Start(ctx.Context)).To(gomega.Succeed())
+
+					namedSubnetAllocator := nc.subnetAllocator.ForSubnet(netInfo.GetNetworkName())
+					for _, alreadyAllocatedIP := range []string{
+						"192.168.200.1/24",
+						"192.168.200.2/24",
+						"fd12:1234::1/64",
+						"fd12:1234::2/64",
+					} {
+						autoExcludedIP, err := util.ParseIPNets([]string{alreadyAllocatedIP})
+						gomega.Expect(err).NotTo(gomega.HaveOccurred())
+						gomega.Expect(namedSubnetAllocator.AllocateIPs(autoExcludedIP)).To(
+							gomega.MatchError(ip.ErrAllocated),
+							fmt.Sprintf("expected to fail allocating IP: %q", alreadyAllocatedIP),
+						)
+					}
+
+					firstAllocatableIPs := "192.168.200.3/24,fd12:1234::3/64"
+					allocatableIPs, err := util.ParseIPNets(strings.Split(firstAllocatableIPs, ","))
+					gomega.Expect(namedSubnetAllocator.AllocateIPs(allocatableIPs)).To(gomega.Succeed())
+					return nil
+				}
+
+				gomega.Expect(app.Run([]string{app.Name})).To(gomega.Succeed())
+			})
+
 		})
 	})
 })
