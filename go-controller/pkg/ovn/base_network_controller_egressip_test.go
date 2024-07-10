@@ -6690,7 +6690,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				// recreate pod with same name immediately; simulating handler race (pods v/s egressip) condition,
 				// so instead of proper pod create, we try out egressIP pod setup which will be a no-op since pod doesn't exist
 				ginkgo.By("should not add egress IP setup for a deleted pod whose entry exists in logicalPortCache")
-				err = fakeOvn.controller.addPodEgressIPAssignments(egressIPName, eIP.Status.Items, &egressPod1)
+				err = fakeOvn.controller.addPodEgressIPAssignments(egressIPName, eIP.Status.Items, util.EgressIPMark{}, &egressPod1)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				// pod is gone but logicalPortCache holds the entry for 60seconds
 				egressPodPortInfo, err = fakeOvn.controller.logicalPortCache.get(&egressPod1, types.DefaultNetworkName)

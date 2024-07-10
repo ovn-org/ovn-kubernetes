@@ -110,11 +110,17 @@ func (bnc *BaseNetworkController) reconcileEgressIP(old, new *egressipv1.EgressI
 			}
 		}
 	}
+
+	var mark util.EgressIPMark
+	if new != nil && bnc.IsSecondary() {
+		mark = getEgressIPPktMark(new.Name, new.Annotations)
+	}
+
 	// CASE 2: EIP object addition, we need to setup database configuration for all the statuses
 	if old == nil && new != nil {
 		addStatus := new.Status.Items
 		if len(addStatus) > 0 {
-			if err := bnc.addEgressIPAssignments(new.Name, addStatus, new.Spec.NamespaceSelector, new.Spec.PodSelector); err != nil {
+			if err := bnc.addEgressIPAssignments(new.Name, addStatus, mark, new.Spec.NamespaceSelector, new.Spec.PodSelector); err != nil {
 				return err
 			}
 		}
@@ -158,7 +164,7 @@ func (bnc *BaseNetworkController) reconcileEgressIP(old, new *egressipv1.EgressI
 				statusToAdd = append(statusToAdd, newStatus)
 			}
 			if len(statusToAdd) > 0 {
-				if err := bnc.addEgressIPAssignments(new.Name, statusToAdd, new.Spec.NamespaceSelector, new.Spec.PodSelector); err != nil {
+				if err := bnc.addEgressIPAssignments(new.Name, statusToAdd, mark, new.Spec.NamespaceSelector, new.Spec.PodSelector); err != nil {
 					return err
 				}
 			}
@@ -208,7 +214,7 @@ func (bnc *BaseNetworkController) reconcileEgressIP(old, new *egressipv1.EgressI
 					}
 				}
 				if newNamespaceSelector.Matches(namespaceLabels) && !oldNamespaceSelector.Matches(namespaceLabels) {
-					if err := bnc.addNamespaceEgressIPAssignments(newEIP.Name, newEIP.Status.Items, namespace, newEIP.Spec.PodSelector); err != nil {
+					if err := bnc.addNamespaceEgressIPAssignments(newEIP.Name, newEIP.Status.Items, mark, namespace, newEIP.Spec.PodSelector); err != nil {
 						return err
 					}
 				}
@@ -249,7 +255,7 @@ func (bnc *BaseNetworkController) reconcileEgressIP(old, new *egressipv1.EgressI
 						continue
 					}
 					if newPodSelector.Matches(podLabels) && !oldPodSelector.Matches(podLabels) {
-						if err := bnc.addPodEgressIPAssignmentsWithLock(newEIP.Name, newEIP.Status.Items, pod); err != nil {
+						if err := bnc.addPodEgressIPAssignmentsWithLock(newEIP.Name, newEIP.Status.Items, mark, pod); err != nil {
 							return err
 						}
 					}
@@ -296,7 +302,7 @@ func (bnc *BaseNetworkController) reconcileEgressIP(old, new *egressipv1.EgressI
 					for _, pod := range pods {
 						podLabels := labels.Set(pod.Labels)
 						if newPodSelector.Matches(podLabels) {
-							if err := bnc.addPodEgressIPAssignmentsWithLock(newEIP.Name, newEIP.Status.Items, pod); err != nil {
+							if err := bnc.addPodEgressIPAssignmentsWithLock(newEIP.Name, newEIP.Status.Items, mark, pod); err != nil {
 								return err
 							}
 						}
@@ -320,7 +326,7 @@ func (bnc *BaseNetworkController) reconcileEgressIP(old, new *egressipv1.EgressI
 							continue
 						}
 						if newPodSelector.Matches(podLabels) && !oldPodSelector.Matches(podLabels) {
-							if err := bnc.addPodEgressIPAssignmentsWithLock(newEIP.Name, newEIP.Status.Items, pod); err != nil {
+							if err := bnc.addPodEgressIPAssignmentsWithLock(newEIP.Name, newEIP.Status.Items, mark, pod); err != nil {
 								return err
 							}
 						}
@@ -383,8 +389,12 @@ func (bnc *BaseNetworkController) reconcileEgressIPNamespace(old, new *v1.Namesp
 				return err
 			}
 		}
+		var mark util.EgressIPMark
+		if bnc.IsSecondary() {
+			mark = getEgressIPPktMark(egressIP.Name, egressIP.Annotations)
+		}
 		if !namespaceSelector.Matches(oldLabels) && namespaceSelector.Matches(newLabels) {
-			if err := bnc.addNamespaceEgressIPAssignments(egressIP.Name, egressIP.Status.Items, newNamespace, egressIP.Spec.PodSelector); err != nil {
+			if err := bnc.addNamespaceEgressIPAssignments(egressIP.Name, egressIP.Status.Items, mark, newNamespace, egressIP.Spec.PodSelector); err != nil {
 				return err
 			}
 		}
@@ -458,6 +468,10 @@ func (bnc *BaseNetworkController) reconcileEgressIPPod(old, new *v1.Pod) (err er
 			return err
 		}
 		if namespaceSelector.Matches(namespaceLabels) {
+			var mark util.EgressIPMark
+			if bnc.IsSecondary() {
+				mark = getEgressIPPktMark(egressIP.Name, egressIP.Annotations)
+			}
 			// If the namespace the pod belongs to matches this object then
 			// check the if there's a podSelector defined on the EgressIP
 			// object. If there is one: the user intends the EgressIP object to
@@ -495,7 +509,7 @@ func (bnc *BaseNetworkController) reconcileEgressIPPod(old, new *v1.Pod) (err er
 				// IPs assigned at that point and we need to continue trying the
 				// pod setup for every pod update as to make sure we process the
 				// pod IP assignment.
-				if err := bnc.addPodEgressIPAssignmentsWithLock(egressIP.Name, egressIP.Status.Items, newPod); err != nil {
+				if err := bnc.addPodEgressIPAssignmentsWithLock(egressIP.Name, egressIP.Status.Items, mark, newPod); err != nil {
 					return err
 				}
 				continue
@@ -510,7 +524,7 @@ func (bnc *BaseNetworkController) reconcileEgressIPPod(old, new *v1.Pod) (err er
 				continue
 			}
 			// For all else, perform a setup for the pod
-			if err := bnc.addPodEgressIPAssignmentsWithLock(egressIP.Name, egressIP.Status.Items, newPod); err != nil {
+			if err := bnc.addPodEgressIPAssignmentsWithLock(egressIP.Name, egressIP.Status.Items, mark, newPod); err != nil {
 				return err
 			}
 		}
@@ -520,7 +534,8 @@ func (bnc *BaseNetworkController) reconcileEgressIPPod(old, new *v1.Pod) (err er
 
 // main reconcile functions end here and local zone controller functions begin
 
-func (bnc *BaseNetworkController) addEgressIPAssignments(name string, statusAssignments []egressipv1.EgressIPStatusItem, namespaceSelector, podSelector metav1.LabelSelector) error {
+func (bnc *BaseNetworkController) addEgressIPAssignments(name string, statusAssignments []egressipv1.EgressIPStatusItem, mark util.EgressIPMark,
+	namespaceSelector, podSelector metav1.LabelSelector) error {
 	namespaces, err := bnc.watchFactory.GetNamespacesBySelector(namespaceSelector)
 	if err != nil {
 		return err
@@ -537,14 +552,15 @@ func (bnc *BaseNetworkController) addEgressIPAssignments(name string, statusAssi
 			// if network role changes from primary, because the network will be deleted and recreated by net-con-mgr.
 			continue
 		}
-		if err := bnc.addNamespaceEgressIPAssignments(name, statusAssignments, namespace, podSelector); err != nil {
+		if err := bnc.addNamespaceEgressIPAssignments(name, statusAssignments, mark, namespace, podSelector); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (bnc *BaseNetworkController) addNamespaceEgressIPAssignments(name string, statusAssignments []egressipv1.EgressIPStatusItem, namespace *kapi.Namespace, podSelector metav1.LabelSelector) error {
+func (bnc *BaseNetworkController) addNamespaceEgressIPAssignments(name string, statusAssignments []egressipv1.EgressIPStatusItem,
+	mark util.EgressIPMark, namespace *kapi.Namespace, podSelector metav1.LabelSelector) error {
 	var pods []*kapi.Pod
 	var err error
 	selector, err := metav1.LabelSelectorAsSelector(&podSelector)
@@ -563,24 +579,26 @@ func (bnc *BaseNetworkController) addNamespaceEgressIPAssignments(name string, s
 		}
 	}
 	for _, pod := range pods {
-		if err := bnc.addPodEgressIPAssignmentsWithLock(name, statusAssignments, pod); err != nil {
+		if err := bnc.addPodEgressIPAssignmentsWithLock(name, statusAssignments, mark, pod); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (bnc *BaseNetworkController) addPodEgressIPAssignmentsWithLock(name string, statusAssignments []egressipv1.EgressIPStatusItem, pod *kapi.Pod) error {
+func (bnc *BaseNetworkController) addPodEgressIPAssignmentsWithLock(name string, statusAssignments []egressipv1.EgressIPStatusItem,
+	mark util.EgressIPMark, pod *kapi.Pod) error {
 	bnc.eIPC.podAssignmentMutex.Lock()
 	defer bnc.eIPC.podAssignmentMutex.Unlock()
-	return bnc.addPodEgressIPAssignments(name, statusAssignments, pod)
+	return bnc.addPodEgressIPAssignments(name, statusAssignments, mark, pod)
 }
 
 // addPodEgressIPAssignments tracks the setup made for each egress IP matching
 // pod w.r.t to each status. This is mainly done to avoid a lot of duplicated
 // work on ovnkube-master restarts when all egress IP handlers will most likely
 // match and perform the setup for the same pod and status multiple times over.
-func (bnc *BaseNetworkController) addPodEgressIPAssignments(name string, statusAssignments []egressipv1.EgressIPStatusItem, pod *kapi.Pod) error {
+func (bnc *BaseNetworkController) addPodEgressIPAssignments(name string, statusAssignments []egressipv1.EgressIPStatusItem,
+	mark util.EgressIPMark, pod *kapi.Pod) error {
 	podKey := getPodKey(pod)
 	// If pod is already in succeeded or failed state, return it without proceeding further.
 	if util.PodCompleted(pod) {
@@ -710,7 +728,7 @@ func (bnc *BaseNetworkController) addPodEgressIPAssignments(name string, statusA
 		err = bnc.eIPC.nodeZoneState.DoWithLock(status.Node, func(key string) error {
 			if status.Node == pod.Spec.NodeName {
 				// we are safe, no need to grab lock again
-				if err := bnc.eIPC.addPodEgressIPAssignment(name, status, pod, podIPNets); err != nil {
+				if err := bnc.eIPC.addPodEgressIPAssignment(name, status, mark, pod, podIPNets); err != nil {
 					return fmt.Errorf("unable to create egressip configuration for pod %s/%s/%v, err: %w", pod.Namespace, pod.Name, podIPNets, err)
 				}
 				podState.egressStatuses.statusMap[status] = ""
@@ -718,7 +736,7 @@ func (bnc *BaseNetworkController) addPodEgressIPAssignments(name string, statusA
 			}
 			return bnc.eIPC.nodeZoneState.DoWithLock(pod.Spec.NodeName, func(key string) error {
 				// we need to grab lock again for pod's node
-				if err := bnc.eIPC.addPodEgressIPAssignment(name, status, pod, podIPNets); err != nil {
+				if err := bnc.eIPC.addPodEgressIPAssignment(name, status, mark, pod, podIPNets); err != nil {
 					return fmt.Errorf("unable to create egressip configuration for pod %s/%s/%v, err: %w", pod.Namespace, pod.Name, podIPNets, err)
 				}
 				podState.egressStatuses.statusMap[status] = ""
@@ -1577,6 +1595,7 @@ func (bnc *BaseNetworkController) addStandByEgressIPAssignment(podKey string, po
 	eipsToAssign := podStatus.standbyEgressIPNames.UnsortedList()
 	var eipToAssign string
 	var eip *egressipv1.EgressIP
+	var mark util.EgressIPMark
 	for _, eipName := range eipsToAssign {
 		eip, err = bnc.watchFactory.GetEgressIP(eipName)
 		if err != nil {
@@ -1586,6 +1605,9 @@ func (bnc *BaseNetworkController) addStandByEgressIPAssignment(podKey string, po
 			continue
 		}
 		eipToAssign = eipName // use the first EIP we find successfully
+		if bnc.IsSecondary() {
+			mark = getEgressIPPktMark(eip.Name, eip.Annotations)
+		}
 		break
 	}
 	if eipToAssign == "" {
@@ -1600,7 +1622,7 @@ func (bnc *BaseNetworkController) addStandByEgressIPAssignment(podKey string, po
 	}
 	bnc.eIPC.podAssignment[podKey] = podState
 	// NOTE: We let addPodEgressIPAssignments take care of setting egressIPName and egressStatuses and removing it from standBy
-	err = bnc.addPodEgressIPAssignments(eipToAssign, eip.Status.Items, pod)
+	err = bnc.addPodEgressIPAssignments(eipToAssign, eip.Status.Items, mark, pod)
 	if err != nil {
 		return err
 	}
@@ -1611,8 +1633,8 @@ func (bnc *BaseNetworkController) addStandByEgressIPAssignment(podKey string, po
 // (routing pod traffic to the egress node) and NAT objects on the egress node
 // (SNAT-ing to the egress IP).
 // This function should be called with lock on nodeZoneState cache key status.Node and pod.Spec.NodeName
-func (e *egressIPZoneController) addPodEgressIPAssignment(egressIPName string, status egressipv1.EgressIPStatusItem, pod *kapi.Pod,
-	podIPs []*net.IPNet) (err error) {
+func (e *egressIPZoneController) addPodEgressIPAssignment(egressIPName string, status egressipv1.EgressIPStatusItem, mark util.EgressIPMark,
+	pod *kapi.Pod, podIPs []*net.IPNet) (err error) {
 	if config.Metrics.EnableScaleMetrics {
 		start := time.Now()
 		defer func() {
@@ -1643,15 +1665,23 @@ func (e *egressIPZoneController) addPodEgressIPAssignment(egressIPName string, s
 	}
 	var ops []ovsdb.Operation
 	if loadedEgressNode && isLocalZoneEgressNode {
-		if e.IsDefault() && isOVNNetwork {
-			ops, err = e.createNATRuleOps(nil, podIPs, status, egressIPName)
-			if err != nil {
-				return fmt.Errorf("unable to create NAT rule ops for status: %v, err: %v", status, err)
+		if isOVNNetwork {
+			if e.IsDefault() {
+				ops, err = e.createNATRuleOps(nil, podIPs, status, egressIPName)
+				if err != nil {
+					return fmt.Errorf("unable to create NAT rule ops for status: %v, err: %v", status, err)
+				}
+			}
+			if e.IsSecondary() {
+				ops, err = e.createGWMarkPolicyOps(ops, podIPs, status, mark, egressIPName)
+				if err != nil {
+					return fmt.Errorf("unable to create GW router LRP ops to packet mark pod %s/%s: %v", pod.Namespace, pod.Name, err)
+				}
 			}
 		}
 		if config.OVNKubernetesFeature.EnableInterconnect && !isOVNNetwork && (loadedPodNode && !isLocalZonePod) {
 			// configure reroute for non-local-zone pods on egress nodes
-			ops, err = e.createReroutePolicyOps(ops, podIPs, status, egressIPName, nextHopIP)
+			ops, err = e.createReroutePolicyOps(ops, podIPs, status, mark, egressIPName, nextHopIP)
 			if err != nil {
 				return fmt.Errorf("unable to create logical router policy ops %v, err: %v", status, err)
 			}
@@ -1661,7 +1691,7 @@ func (e *egressIPZoneController) addPodEgressIPAssignment(egressIPName string, s
 	// exec when node is local OR when pods are local
 	// don't add a reroute policy if the egress node towards which we are adding this doesn't exist
 	if loadedEgressNode && loadedPodNode && isLocalZonePod {
-		ops, err = e.createReroutePolicyOps(ops, podIPs, status, egressIPName, nextHopIP)
+		ops, err = e.createReroutePolicyOps(ops, podIPs, status, mark, egressIPName, nextHopIP)
 		if err != nil {
 			return fmt.Errorf("unable to create logical router policy ops, err: %v", err)
 		}
@@ -1740,6 +1770,12 @@ func (e *egressIPZoneController) deletePodEgressIPAssignment(egressIPName string
 			ops, err = e.deleteNATRuleOps(ops, podIPs, status, egressIPName)
 			if err != nil {
 				return fmt.Errorf("unable to delete NAT rule for status: %v, err: %v", status, err)
+			}
+		}
+		if e.IsSecondary() {
+			ops, err = e.deleteGWMarkPolicyOps(ops, podIPs, status, egressIPName)
+			if err != nil {
+				return fmt.Errorf("unable to create GW router packet mark LRPs delete ops for pod %s/%s: %v", pod.Namespace, pod.Name, err)
 			}
 		}
 	}
@@ -1940,8 +1976,16 @@ func (e *egressIPZoneController) getNextHop(egressNodeName, egressIP, egressIPNa
 // to redirect the pods to the appropriate management port or if interconnect is
 // enabled, the appropriate transit switch port.
 // This function should be called with lock on nodeZoneState cache key status.Node
-func (e *egressIPZoneController) createReroutePolicyOps(ops []ovsdb.Operation, podIPNets []*net.IPNet, status egressipv1.EgressIPStatusItem, egressIPName, nextHopIP string) ([]ovsdb.Operation, error) {
+func (e *egressIPZoneController) createReroutePolicyOps(ops []ovsdb.Operation, podIPNets []*net.IPNet, status egressipv1.EgressIPStatusItem,
+	mark util.EgressIPMark, egressIPName, nextHopIP string) ([]ovsdb.Operation, error) {
 	isEgressIPv6 := utilnet.IsIPv6String(status.EgressIP)
+	options := make(map[string]string)
+	if e.IsSecondary() {
+		if !mark.IsAvailable() {
+			return nil, fmt.Errorf("egressIP object must contain a mark for user defined networks")
+		}
+		addPktMarkToLRPOptions(options, mark.ToString())
+	}
 	var err error
 	// Handle all pod IPs that match the egress IP address family
 	for _, podIPNet := range util.MatchAllIPNetFamily(isEgressIPv6, podIPNets) {
@@ -1953,6 +1997,7 @@ func (e *egressIPZoneController) createReroutePolicyOps(ops []ovsdb.Operation, p
 			ExternalIDs: map[string]string{
 				"name": egressIPName,
 			},
+			Options: options,
 		}
 		p := func(item *nbdb.LogicalRouterPolicy) bool {
 			return item.Match == lrp.Match && item.Priority == lrp.Priority && item.ExternalIDs["name"] == lrp.ExternalIDs["name"]
@@ -2005,6 +2050,60 @@ func (e *egressIPZoneController) deleteReroutePolicyOps(ops []ovsdb.Operation, p
 	return ops, nil
 }
 
+func (e *egressIPZoneController) createGWMarkPolicyOps(ops []ovsdb.Operation, podIPNets []*net.IPNet, status egressipv1.EgressIPStatusItem,
+	mark util.EgressIPMark, egressIPName string) ([]ovsdb.Operation, error) {
+	isEgressIPv6 := utilnet.IsIPv6String(status.EgressIP)
+	routerName := e.GetNetworkScopedGWRouterName(status.Node)
+	options := make(map[string]string)
+	if !mark.IsAvailable() {
+		return nil, fmt.Errorf("egressIP object must contain a mark for user defined networks")
+	}
+	addPktMarkToLRPOptions(options, mark.ToString())
+	var err error
+	ovnIPFamilyName := ipFamilyName(isEgressIPv6)
+	// Handle all pod IPs that match the egress IP address family
+	for _, podIPNet := range util.MatchAllIPNetFamily(isEgressIPv6, podIPNets) {
+		lrp := nbdb.LogicalRouterPolicy{
+			Match:    fmt.Sprintf("%s.src == %s && pkt.mark == 0", ovnIPFamilyName, podIPNet.IP.String()), // only add pkt mark if one already doesn't exist
+			Priority: types.EgressIPMarkPriority,
+			Action:   nbdb.LogicalRouterPolicyActionAllow,
+			ExternalIDs: map[string]string{
+				"name": egressIPName,
+			},
+			Options: options,
+		}
+		p := func(item *nbdb.LogicalRouterPolicy) bool {
+			return item.Match == lrp.Match && item.Priority == lrp.Priority && item.ExternalIDs["name"] == lrp.ExternalIDs["name"]
+		}
+
+		ops, err = libovsdbops.CreateOrUpdateLogicalRouterPolicyWithPredicateOps(e.nbClient, ops, routerName, &lrp, p)
+		if err != nil {
+			return nil, fmt.Errorf("error creating logical router policy %+v create/update ops for packet marking on router %s: %v", lrp, routerName, err)
+		}
+	}
+	return ops, nil
+}
+
+func (e *egressIPZoneController) deleteGWMarkPolicyOps(ops []ovsdb.Operation, podIPNets []*net.IPNet, status egressipv1.EgressIPStatusItem,
+	egressIPName string) ([]ovsdb.Operation, error) {
+	isEgressIPv6 := utilnet.IsIPv6String(status.EgressIP)
+	routerName := e.GetNetworkScopedGWRouterName(status.Node)
+	var err error
+	ovnIPFamilyName := ipFamilyName(isEgressIPv6)
+	// Handle all pod IPs that match the egress IP address family
+	for _, podIPNet := range util.MatchAllIPNetFamily(isEgressIPv6, podIPNets) {
+		filterOption := fmt.Sprintf("%s.src == %s", ovnIPFamilyName, podIPNet.IP.String())
+		p := func(item *nbdb.LogicalRouterPolicy) bool {
+			return item.Match == filterOption && item.Priority == types.EgressIPMarkPriority && item.ExternalIDs["name"] == egressIPName
+		}
+		ops, err = libovsdbops.DeleteLogicalRouterPolicyWithPredicateOps(e.nbClient, ops, routerName, p)
+		if err != nil {
+			return nil, fmt.Errorf("error creating logical router policy delete ops for packet marking on router %s: %v", routerName, err)
+		}
+	}
+	return ops, nil
+}
+
 // deleteEgressIPStatusSetup deletes the entire set up in the NB DB for an
 // EgressIPStatusItem. The set up in the NB DB gets tagged with the name of the
 // EgressIP, hence lookup the LRP and NAT objects which match that as well as
@@ -2043,17 +2142,25 @@ func (e *egressIPZoneController) deleteEgressIPStatusSetup(name string, status e
 	}
 
 	isLocalZoneEgressNode, loadedEgressNode := e.nodeZoneState.Load(status.Node)
-	if e.IsDefault() && loadedEgressNode && isLocalZoneEgressNode {
-		routerName := e.GetNetworkScopedGWRouterName(status.Node)
-		natPred := func(nat *nbdb.NAT) bool {
-			// We should delete NATs only from the status.Node that was passed into this function
-			return nat.ExternalIDs["name"] == name && nat.ExternalIP == status.EgressIP && nat.LogicalPort != nil && *nat.LogicalPort == e.GetNetworkScopedK8sMgmtIntfName(status.Node)
+	if loadedEgressNode && isLocalZoneEgressNode {
+		if e.IsDefault() {
+			routerName := e.GetNetworkScopedGWRouterName(status.Node)
+			natPred := func(nat *nbdb.NAT) bool {
+				// We should delete NATs only from the status.Node that was passed into this function
+				return nat.ExternalIDs["name"] == name && nat.ExternalIP == status.EgressIP && nat.LogicalPort != nil && *nat.LogicalPort == e.GetNetworkScopedK8sMgmtIntfName(status.Node)
+			}
+			ops, err = libovsdbops.DeleteNATsWithPredicateOps(e.nbClient, ops, natPred)
+			if err != nil {
+				return fmt.Errorf("error removing egress ip %s nats on router %s: %v", name, routerName, err)
+			}
 		}
-		ops, err = libovsdbops.DeleteNATsWithPredicateOps(e.nbClient, ops, natPred)
-		if err != nil {
-			return fmt.Errorf("error removing egress ip %s nats on router %s: %v", name, routerName, err)
+		if e.IsSecondary() {
+			if ops, err = e.deleteGWMarkPolicyForStatusOps(ops, status, name); err != nil {
+				return fmt.Errorf("failed to delete gateway mark policy: %v", err)
+			}
 		}
 	}
+
 	_, err = libovsdbops.TransactAndCheck(e.nbClient, ops)
 	if err != nil {
 		return fmt.Errorf("error transacting ops %+v: %v", ops, err)
@@ -2519,4 +2626,20 @@ func getFirstNonNilNamespace(n1, n2 *v1.Namespace) *v1.Namespace {
 		return n2
 	}
 	panic("getNonNilNamespace(): received two nil Namespace pointers")
+}
+
+func addPktMarkToLRPOptions(options map[string]string, mark string) {
+	options["pkt_mark"] = mark
+}
+
+func getEgressIPPktMark(eipName string, annotations map[string]string) util.EgressIPMark {
+	var err error
+	var mark util.EgressIPMark
+	if util.IsNetworkSegmentationSupportEnabled() && util.IsEgressIPMarkSet(annotations) {
+		mark, err = util.ParseEgressIPMark(annotations)
+		if err != nil {
+			klog.Errorf("Failed to get EgressIP %s packet mark from annotations: %v", eipName, err)
+		}
+	}
+	return mark
 }
