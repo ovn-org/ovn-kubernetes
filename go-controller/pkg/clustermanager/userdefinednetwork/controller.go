@@ -7,10 +7,12 @@ import (
 	"fmt"
 	"reflect"
 	"slices"
+	"time"
 
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	corev1informer "k8s.io/client-go/informers/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
@@ -32,6 +34,7 @@ import (
 	cnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/controller"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
 type RenderNetAttachDefManifest func(*userdefinednetworkv1.UserDefinedNetwork) (*netv1.NetworkAttachmentDefinition, error)
@@ -47,7 +50,13 @@ type Controller struct {
 	nadLister   netv1lister.NetworkAttachmentDefinitionLister
 
 	renderNadFn RenderNetAttachDefManifest
+
+	podInformer corev1informer.PodInformer
+
+	networkInUseRequeueInterval time.Duration
 }
+
+const defaultNetworkInUseCheckInterval = 1 * time.Minute
 
 func New(
 	nadClient netv1clientset.Interface,
@@ -55,14 +64,17 @@ func New(
 	udnClient userdefinednetworkclientset.Interface,
 	udnInformer userdefinednetworkinformer.UserDefinedNetworkInformer,
 	renderNadFn RenderNetAttachDefManifest,
+	podInformer corev1informer.PodInformer,
 ) *Controller {
 	udnLister := udnInformer.Lister()
 	c := &Controller{
-		nadClient:   nadClient,
-		nadLister:   nadInfomer.Lister(),
-		udnClient:   udnClient,
-		udnLister:   udnLister,
-		renderNadFn: renderNadFn,
+		nadClient:                   nadClient,
+		nadLister:                   nadInfomer.Lister(),
+		udnClient:                   udnClient,
+		udnLister:                   udnLister,
+		renderNadFn:                 renderNadFn,
+		podInformer:                 podInformer,
+		networkInUseRequeueInterval: defaultNetworkInUseCheckInterval,
 	}
 	cfg := &controller.ControllerConfig[userdefinednetworkv1.UserDefinedNetwork]{
 		RateLimiter:    workqueue.DefaultControllerRateLimiter(),
@@ -128,7 +140,21 @@ func (c *Controller) reconcile(key string) error {
 
 	updateStatusErr := c.updateUserDefinedNetworkStatus(udnCopy, nadCopy, syncErr)
 
+	var networkInUse *networkInUseError
+	if errors.As(syncErr, &networkInUse) {
+		c.Controller.ReconcileAfter(key, c.networkInUseRequeueInterval)
+		return updateStatusErr
+	}
+
 	return errors.Join(syncErr, updateStatusErr)
+}
+
+type networkInUseError struct {
+	err error
+}
+
+func (n *networkInUseError) Error() string {
+	return n.err.Error()
 }
 
 func (c *Controller) syncUserDefinedNetwork(udn *userdefinednetworkv1.UserDefinedNetwork, nad *netv1.NetworkAttachmentDefinition) (*netv1.NetworkAttachmentDefinition, error) {
@@ -143,7 +169,9 @@ func (c *Controller) syncUserDefinedNetwork(udn *userdefinednetworkv1.UserDefine
 				metav1.IsControlledBy(nad, udn) &&
 				controllerutil.ContainsFinalizer(nad, template.FinalizerUserDefinedNetwork) {
 
-				// TODO: verify no pod is using the NAD before removing finalizer from NAD
+				if err := c.verifyNetAttachDefNotInUse(nad); err != nil {
+					return nil, fmt.Errorf("failed to verify NAD not in use [%s/%s]: %w", nad.Namespace, nad.Name, &networkInUseError{err: err})
+				}
 
 				controllerutil.RemoveFinalizer(nad, template.FinalizerUserDefinedNetwork)
 				nad, err := c.nadClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(nad.Namespace).Update(context.Background(), nad, metav1.UpdateOptions{})
@@ -225,6 +253,29 @@ func primaryNetwork(spec userdefinednetworkv1.UserDefinedNetworkSpec) bool {
 	}
 
 	return role == userdefinednetworkv1.NetworkRolePrimary
+}
+
+func (c *Controller) verifyNetAttachDefNotInUse(nad *netv1.NetworkAttachmentDefinition) error {
+	pods, err := c.podInformer.Lister().Pods(nad.Namespace).List(labels.Everything())
+	if err != nil {
+		return fmt.Errorf("failed to list pods at target namesapce %q: %w", nad.Namespace, err)
+	}
+
+	nadName := util.GetNADName(nad.Namespace, nad.Name)
+	var connectedPods []string
+	for _, pod := range pods {
+		podNetworks, err := util.UnmarshalPodAnnotationAllNetworks(pod.Annotations)
+		if err != nil && !util.IsAnnotationNotSetError(err) {
+			return fmt.Errorf("failed to unmarshal pod annotation [%s/%s]: %w", pod.Namespace, pod.Name, err)
+		}
+		if _, ok := podNetworks[nadName]; ok {
+			connectedPods = append(connectedPods, pod.Namespace+"/"+pod.Name)
+		}
+	}
+	if len(connectedPods) > 0 {
+		return fmt.Errorf("network in use by the following pods: %v", connectedPods)
+	}
+	return nil
 }
 
 func validatePrimaryNetworkNADNotExist(nads []*netv1.NetworkAttachmentDefinition) error {

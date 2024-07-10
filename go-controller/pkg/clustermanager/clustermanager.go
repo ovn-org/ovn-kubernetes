@@ -133,6 +133,7 @@ func NewClusterManager(ovnClient *util.OVNClusterManagerClientset, wf *factory.W
 			ovnClient.NetworkAttchDefClient, wf.NADInformer(),
 			ovnClient.UserDefinedNetworkClient, wf.UserDefinedNetworkInformer(),
 			udntemplate.RenderNetAttachDefManifest,
+			wf.PodCoreInformer(),
 		)
 		cm.userDefinedNetworkController = udnController
 	}

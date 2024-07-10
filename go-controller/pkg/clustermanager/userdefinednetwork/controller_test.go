@@ -3,16 +3,20 @@ package userdefinednetwork
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/ginkgo/extensions/table"
 	. "github.com/onsi/gomega"
 
+	corev1 "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	informerfactory "k8s.io/client-go/informers"
+	corev1informer "k8s.io/client-go/informers/core/v1"
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/testing"
 	"k8s.io/utils/pointer"
@@ -38,6 +42,8 @@ var _ = Describe("User Defined Network Controller", func() {
 		nadClient   *netv1fakeclientset.Clientset
 		udnInformer udninformer.UserDefinedNetworkInformer
 		nadInformer netv1Informer.NetworkAttachmentDefinitionInformer
+		kubeClient  *fake.Clientset
+		podInformer corev1informer.PodInformer
 	)
 
 	BeforeEach(func() {
@@ -45,6 +51,10 @@ var _ = Describe("User Defined Network Controller", func() {
 		udnInformer = udninformerfactory.NewSharedInformerFactory(udnClient, 15).K8s().V1().UserDefinedNetworks()
 		nadClient = netv1fakeclientset.NewSimpleClientset()
 		nadInformer = netv1informerfactory.NewSharedInformerFactory(nadClient, 15).K8sCniCncfIo().V1().NetworkAttachmentDefinitions()
+
+		kubeClient = fake.NewSimpleClientset()
+		sharedInformer := informerfactory.NewSharedInformerFactoryWithOptions(kubeClient, 15)
+		podInformer = sharedInformer.Core().V1().Pods()
 	})
 
 	Context("controller", func() {
@@ -57,7 +67,7 @@ var _ = Describe("User Defined Network Controller", func() {
 			config.OVNKubernetesFeature.EnableNetworkSegmentation = true
 
 			fakeClient := &util.OVNClusterManagerClientset{
-				KubeClient:               fake.NewSimpleClientset(),
+				KubeClient:               kubeClient,
 				NetworkAttchDefClient:    nadClient,
 				UserDefinedNetworkClient: udnClient,
 			}
@@ -77,7 +87,7 @@ var _ = Describe("User Defined Network Controller", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			expectedNAD := testNAD()
-			c := New(nadClient, f.NADInformer(), udnClient, f.UserDefinedNetworkInformer(), renderNadStub(expectedNAD))
+			c := New(nadClient, f.NADInformer(), udnClient, f.UserDefinedNetworkInformer(), renderNadStub(expectedNAD), f.PodCoreInformer())
 			Expect(c.Run()).To(Succeed())
 
 			Eventually(func() []metav1.Condition {
@@ -104,7 +114,7 @@ var _ = Describe("User Defined Network Controller", func() {
 
 			renderErr := errors.New("render NAD fails")
 
-			c := New(nadClient, f.NADInformer(), udnClient, f.UserDefinedNetworkInformer(), failRenderNadStub(renderErr))
+			c := New(nadClient, f.NADInformer(), udnClient, f.UserDefinedNetworkInformer(), failRenderNadStub(renderErr), f.PodCoreInformer())
 			Expect(c.Run()).To(Succeed())
 
 			Eventually(func() []metav1.Condition {
@@ -131,7 +141,7 @@ var _ = Describe("User Defined Network Controller", func() {
 				return true, nil, expectedError
 			})
 
-			c := New(nadClient, f.NADInformer(), udnClient, f.UserDefinedNetworkInformer(), noopRenderNadStub())
+			c := New(nadClient, f.NADInformer(), udnClient, f.UserDefinedNetworkInformer(), noopRenderNadStub(), f.PodCoreInformer())
 			Expect(c.Run()).To(Succeed())
 
 			Eventually(func() []metav1.Condition {
@@ -161,7 +171,7 @@ var _ = Describe("User Defined Network Controller", func() {
 			foreignNad, err = nadClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(udn.Namespace).Create(context.Background(), foreignNad, metav1.CreateOptions{})
 			Expect(err).NotTo(HaveOccurred())
 
-			c := New(nadClient, f.NADInformer(), udnClient, f.UserDefinedNetworkInformer(), noopRenderNadStub())
+			c := New(nadClient, f.NADInformer(), udnClient, f.UserDefinedNetworkInformer(), noopRenderNadStub(), f.PodCoreInformer())
 			Expect(c.Run()).To(Succeed())
 
 			Eventually(func() []metav1.Condition {
@@ -184,7 +194,7 @@ var _ = Describe("User Defined Network Controller", func() {
 
 			expectedNAD := testNAD()
 
-			c := New(nadClient, f.NADInformer(), udnClient, f.UserDefinedNetworkInformer(), renderNadStub(expectedNAD))
+			c := New(nadClient, f.NADInformer(), udnClient, f.UserDefinedNetworkInformer(), renderNadStub(expectedNAD), f.PodCoreInformer())
 			Expect(c.Run()).To(Succeed())
 
 			Eventually(func() []metav1.Condition {
@@ -217,7 +227,7 @@ var _ = Describe("User Defined Network Controller", func() {
 			udn, err := udnClient.K8sV1().UserDefinedNetworks(udn.Namespace).Create(context.Background(), udn, metav1.CreateOptions{})
 			Expect(err).NotTo(HaveOccurred())
 
-			c := New(nadClient, f.NADInformer(), udnClient, f.UserDefinedNetworkInformer(), renderNadStub(expectedNAD))
+			c := New(nadClient, f.NADInformer(), udnClient, f.UserDefinedNetworkInformer(), renderNadStub(expectedNAD), f.PodCoreInformer())
 			Expect(c.Run()).To(Succeed())
 
 			Eventually(func() []metav1.Condition {
@@ -277,7 +287,7 @@ var _ = Describe("User Defined Network Controller", func() {
 			primaryUDN, err = udnClient.K8sV1().UserDefinedNetworks(targetNs).Create(context.Background(), primaryUDN, metav1.CreateOptions{})
 			Expect(err).NotTo(HaveOccurred())
 
-			c := New(nadClient, f.NADInformer(), udnClient, f.UserDefinedNetworkInformer(), noopRenderNadStub())
+			c := New(nadClient, f.NADInformer(), udnClient, f.UserDefinedNetworkInformer(), noopRenderNadStub(), f.PodCoreInformer())
 			Expect(c.Run()).To(Succeed())
 
 			Eventually(func() []metav1.Condition {
@@ -306,7 +316,7 @@ var _ = Describe("User Defined Network Controller", func() {
 			primaryUDN, err = udnClient.K8sV1().UserDefinedNetworks(targetNs).Create(context.Background(), primaryUDN, metav1.CreateOptions{})
 			Expect(err).NotTo(HaveOccurred())
 
-			c := New(nadClient, f.NADInformer(), udnClient, f.UserDefinedNetworkInformer(), noopRenderNadStub())
+			c := New(nadClient, f.NADInformer(), udnClient, f.UserDefinedNetworkInformer(), noopRenderNadStub(), f.PodCoreInformer())
 			Expect(c.Run()).To(Succeed())
 
 			Eventually(func() []metav1.Condition {
@@ -327,7 +337,7 @@ var _ = Describe("User Defined Network Controller", func() {
 			udn, err := udnClient.K8sV1().UserDefinedNetworks(udn.Namespace).Create(context.Background(), udn, metav1.CreateOptions{})
 			Expect(err).NotTo(HaveOccurred())
 
-			c := New(nadClient, f.NADInformer(), udnClient, f.UserDefinedNetworkInformer(), noopRenderNadStub())
+			c := New(nadClient, f.NADInformer(), udnClient, f.UserDefinedNetworkInformer(), noopRenderNadStub(), f.PodCoreInformer())
 			Expect(c.Run()).To(Succeed())
 
 			Eventually(func() []string {
@@ -347,7 +357,7 @@ var _ = Describe("User Defined Network Controller", func() {
 				return true, nil, expectedErr
 			})
 
-			c := New(nadClient, f.NADInformer(), udnClient, f.UserDefinedNetworkInformer(), noopRenderNadStub())
+			c := New(nadClient, f.NADInformer(), udnClient, f.UserDefinedNetworkInformer(), noopRenderNadStub(), f.PodCoreInformer())
 			Expect(c.Run()).To(Succeed())
 
 			Eventually(func() []metav1.Condition {
@@ -361,6 +371,51 @@ var _ = Describe("User Defined Network Controller", func() {
 				Message: `failed to add finalizer to UserDefinedNetwork: ` + expectedErr.Error(),
 			}}))
 		})
+
+		It("when UDN is being deleted, NAD exist, 2 pods using UDN, should remove finalizers once no pod uses the network", func() {
+			udn := testsUDNWithDeletionTimestamp(time.Now())
+			udn, err := udnClient.K8sV1().UserDefinedNetworks(udn.Namespace).Create(context.Background(), udn, metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+
+			nad, err := nadClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(udn.Namespace).Create(context.Background(), testNAD(), metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+
+			podMeta := metav1.ObjectMeta{
+				Namespace:   udn.Namespace,
+				Annotations: map[string]string{util.OvnPodAnnotationName: `{"default": {"role":"primary"}, "test/test": {"role": "secondary"}}`},
+			}
+
+			podInf := f.PodCoreInformer()
+			var testPods []corev1.Pod
+			for i := 0; i < 2; i++ {
+				pod := corev1.Pod{ObjectMeta: podMeta}
+				pod.Name = fmt.Sprintf("pod-%d", i)
+				Expect(podInf.Informer().GetIndexer().Add(&pod)).Should(Succeed())
+				testPods = append(testPods, pod)
+			}
+
+			c := New(nadClient, f.NADInformer(), udnClient, f.UserDefinedNetworkInformer(), renderNadStub(nad), podInf)
+			// user short interval to make the controller re-enqueue requests
+			c.networkInUseRequeueInterval = 50 * time.Millisecond
+			Expect(c.Run()).To(Succeed())
+
+			assertFinalizersPresent(udnClient, nadClient, udn, testPods...)
+
+			Expect(podInf.Informer().GetIndexer().Delete(&testPods[0])).To(Succeed())
+
+			assertFinalizersPresent(udnClient, nadClient, udn, testPods[1])
+
+			Expect(podInf.Informer().GetIndexer().Delete(&testPods[1])).To(Succeed())
+
+			Eventually(func() []string {
+				udn, err = udnClient.K8sV1().UserDefinedNetworks(udn.Namespace).Get(context.Background(), udn.Name, metav1.GetOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				return udn.Finalizers
+			}).Should(BeEmpty(), "should remove finalizer on UDN following deletion and not being used")
+			nad, err = nadClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(nad.Namespace).Get(context.Background(), nad.Name, metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(nad.Finalizers).To(BeEmpty(), "should remove finalizer on NAD following deletion and not being used")
+		})
 	})
 
 	Context("UserDefinedNetwork object sync", func() {
@@ -370,7 +425,7 @@ var _ = Describe("User Defined Network Controller", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			nad := testNAD()
-			c := New(nadClient, nadInformer, udnClient, udnInformer, renderNadStub(nad))
+			c := New(nadClient, nadInformer, udnClient, udnInformer, renderNadStub(nad), nil)
 
 			mutetedNAD := nad.DeepCopy()
 			mutetedNAD.ObjectMeta.OwnerReferences = []metav1.OwnerReference{{Kind: "DifferentKind"}}
@@ -382,7 +437,7 @@ var _ = Describe("User Defined Network Controller", func() {
 		})
 
 		It("when UDN is being deleted, should not remove finalizer from non managed NAD", func() {
-			c := New(nadClient, nadInformer, udnClient, udnInformer, noopRenderNadStub())
+			c := New(nadClient, nadInformer, udnClient, udnInformer, noopRenderNadStub(), podInformer)
 
 			udn := testsUDNWithDeletionTimestamp(time.Now())
 			udn, err := udnClient.K8sV1().UserDefinedNetworks(udn.Namespace).Create(context.Background(), udn, metav1.CreateOptions{})
@@ -401,7 +456,7 @@ var _ = Describe("User Defined Network Controller", func() {
 			Expect(unmanagedNAD.Finalizers).To(Equal(expectedFinalizers))
 		})
 		It("when UDN is being deleted, and NAD exist, should remove finalizer from NAD", func() {
-			c := New(nadClient, nadInformer, udnClient, udnInformer, noopRenderNadStub())
+			c := New(nadClient, nadInformer, udnClient, udnInformer, noopRenderNadStub(), podInformer)
 
 			udn := testsUDNWithDeletionTimestamp(time.Now())
 			udn, err := udnClient.K8sV1().UserDefinedNetworks(udn.Namespace).Create(context.Background(), udn, metav1.CreateOptions{})
@@ -416,7 +471,7 @@ var _ = Describe("User Defined Network Controller", func() {
 			Expect(nad.Finalizers).To(BeEmpty())
 		})
 		It("when UDN is being deleted, and NAD exist, should fail when remove NAD finalizer fails", func() {
-			c := New(nadClient, nadInformer, udnClient, udnInformer, noopRenderNadStub())
+			c := New(nadClient, nadInformer, udnClient, udnInformer, noopRenderNadStub(), podInformer)
 
 			udn := testsUDNWithDeletionTimestamp(time.Now())
 			udn, err := udnClient.K8sV1().UserDefinedNetworks(udn.Namespace).Create(context.Background(), udn, metav1.CreateOptions{})
@@ -436,7 +491,7 @@ var _ = Describe("User Defined Network Controller", func() {
 		})
 
 		It("when UDN is being deleted, and NAD exist w/o finalizer, should remove finalizer from UDN", func() {
-			c := New(nadClient, nadInformer, udnClient, udnInformer, noopRenderNadStub())
+			c := New(nadClient, nadInformer, udnClient, udnInformer, noopRenderNadStub(), podInformer)
 
 			udn := testsUDNWithDeletionTimestamp(time.Now())
 			udn, err := udnClient.K8sV1().UserDefinedNetworks(udn.Namespace).Create(context.Background(), udn, metav1.CreateOptions{})
@@ -452,7 +507,7 @@ var _ = Describe("User Defined Network Controller", func() {
 			Expect(udn.Finalizers).To(BeEmpty())
 		})
 		It("when UDN is being deleted, and NAD not exist, should remove finalizer from UDN", func() {
-			c := New(nadClient, nadInformer, udnClient, udnInformer, noopRenderNadStub())
+			c := New(nadClient, nadInformer, udnClient, udnInformer, noopRenderNadStub(), podInformer)
 
 			udn := testsUDNWithDeletionTimestamp(time.Now())
 			udn, err := udnClient.K8sV1().UserDefinedNetworks(udn.Namespace).Create(context.Background(), udn, metav1.CreateOptions{})
@@ -463,7 +518,7 @@ var _ = Describe("User Defined Network Controller", func() {
 			Expect(udn.Finalizers).To(BeEmpty())
 		})
 		It("when UDN is being deleted, should fail removing finalizer from UDN when patch fails", func() {
-			c := New(nadClient, nadInformer, udnClient, udnInformer, noopRenderNadStub())
+			c := New(nadClient, nadInformer, udnClient, udnInformer, noopRenderNadStub(), podInformer)
 
 			udn := testsUDNWithDeletionTimestamp(time.Now())
 			udn, err := udnClient.K8sV1().UserDefinedNetworks(udn.Namespace).Create(context.Background(), udn, metav1.CreateOptions{})
@@ -482,6 +537,92 @@ var _ = Describe("User Defined Network Controller", func() {
 			_, err = c.syncUserDefinedNetwork(udn, nad)
 			Expect(err).To(MatchError(expectedErr))
 		})
+
+		It("when UDN is being deleted, NAD exist, pod exist, should remove finalizers when network not being used", func() {
+			udn := testsUDNWithDeletionTimestamp(time.Now())
+			udn, err := udnClient.K8sV1().UserDefinedNetworks(udn.Namespace).Create(context.Background(), udn, metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+
+			nad := testNAD()
+			nad, err = nadClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(udn.Namespace).Create(context.Background(), nad, metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "pod1", Namespace: udn.Namespace,
+					Annotations: map[string]string{util.OvnPodAnnotationName: `{ 
+                          "default": {"role":"primary", "mac_address":"0a:58:0a:f4:02:03"},
+						  "test/another-network": {"role": "secondary","mac_address":"0a:58:0a:f4:02:01"} 
+                         }`,
+					},
+				},
+			}
+			Expect(podInformer.Informer().GetIndexer().Add(pod)).Should(Succeed())
+			c := New(nadClient, nadInformer, udnClient, udnInformer, renderNadStub(nad), podInformer)
+
+			nad, err = c.syncUserDefinedNetwork(udn, nad)
+			Expect(err).ToNot(HaveOccurred())
+
+			Expect(nad.Finalizers).To(BeEmpty())
+			Expect(udn.Finalizers).To(BeEmpty())
+		})
+
+		DescribeTable("when UDN is being deleted, NAD exist, should not remove finalizers when",
+			func(podOvnAnnotations map[string]string, expectedErr error) {
+				udn := testsUDNWithDeletionTimestamp(time.Now())
+				Expect(udnInformer.Informer().GetIndexer().Add(udn)).To(Succeed())
+
+				nad := testNAD()
+				Expect(nadInformer.Informer().GetIndexer().Add(nad)).To(Succeed())
+
+				for podName, ovnAnnotValue := range podOvnAnnotations {
+					pod := &corev1.Pod{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: podName, Namespace: udn.Namespace,
+							Annotations: map[string]string{util.OvnPodAnnotationName: ovnAnnotValue},
+						},
+					}
+					Expect(podInformer.Informer().GetIndexer().Add(pod)).Should(Succeed())
+				}
+
+				c := New(nadClient, nadInformer, udnClient, udnInformer, renderNadStub(nad), podInformer)
+
+				_, err := c.syncUserDefinedNetwork(udn, nad)
+				Expect(err).To(MatchError(ContainSubstring(expectedErr.Error())))
+
+				actual, _, err := nadInformer.Informer().GetIndexer().Get(nad)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(actual.(*netv1.NetworkAttachmentDefinition).Finalizers).To(Equal([]string{"k8s.ovn.org/user-defined-network-protection"}),
+					"finalizer should remain until no pod uses the network")
+
+				actualUDN, _, err := udnInformer.Informer().GetIndexer().Get(udn)
+				Expect(actualUDN.(*udnv1.UserDefinedNetwork).Finalizers).To(Equal([]string{"k8s.ovn.org/user-defined-network-protection"}),
+					"finalizer should remain until no pod uses the network")
+				Expect(err).NotTo(HaveOccurred())
+			},
+			Entry("pod connected to user-defined-network primary network",
+				map[string]string{
+					"test-pod": `{"default":{"role":"infrastructure-locked", "mac_address":"0a:58:0a:f4:02:03"},` +
+						`"test/test":{"role": "primary","mac_address":"0a:58:0a:f4:02:01"}}`,
+				},
+				errors.New("network in use by the following pods: [test/test-pod]"),
+			),
+			Entry("pod connected to default primary network, and user-defined-network secondary network",
+				map[string]string{
+					"test-pod": `{"default":{"role":"primary", "mac_address":"0a:58:0a:f4:02:03"},` +
+						`"test/test":{"role": "secondary","mac_address":"0a:58:0a:f4:02:01"}}`,
+				},
+				errors.New("network in use by the following pods: [test/test-pod]"),
+			),
+			Entry("1 pod connected to network, 1 pod has invalid annotation",
+				map[string]string{
+					"test-pod": `{"default":{"role":"primary", "mac_address":"0a:58:0a:f4:02:03"},` +
+						`"test/test":{"role": "secondary","mac_address":"0a:58:0a:f4:02:01"}}`,
+					"test-pod-invalid-ovn-annot": `invalid`,
+				},
+				errors.New("failed to unmarshal pod annotation [test/test-pod-invalid-ovn-annot]"),
+			),
+		)
 	})
 
 	Context("UserDefinedNetwork status update", func() {
@@ -491,7 +632,7 @@ var _ = Describe("User Defined Network Controller", func() {
 				udn, err := udnClient.K8sV1().UserDefinedNetworks(udn.Namespace).Create(context.Background(), udn, metav1.CreateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 
-				c := New(nadClient, nadInformer, udnClient, udnInformer, noopRenderNadStub())
+				c := New(nadClient, nadInformer, udnClient, udnInformer, noopRenderNadStub(), podInformer)
 
 				Expect(c.updateUserDefinedNetworkStatus(udn, nad, syncErr)).To(Succeed(), "should update status successfully")
 
@@ -546,7 +687,7 @@ var _ = Describe("User Defined Network Controller", func() {
 			udn, err := udnClient.K8sV1().UserDefinedNetworks(udn.Namespace).Create(context.Background(), udn, metav1.CreateOptions{})
 			Expect(err).NotTo(HaveOccurred())
 
-			c := New(nadClient, nadInformer, udnClient, udnInformer, noopRenderNadStub())
+			c := New(nadClient, nadInformer, udnClient, udnInformer, noopRenderNadStub(), podInformer)
 
 			nad := testNAD()
 			syncErr := errors.New("sync error")
@@ -581,7 +722,7 @@ var _ = Describe("User Defined Network Controller", func() {
 		})
 
 		It("should fail when client update status fails", func() {
-			c := New(nadClient, nadInformer, udnClient, udnInformer, noopRenderNadStub())
+			c := New(nadClient, nadInformer, udnClient, udnInformer, noopRenderNadStub(), podInformer)
 
 			expectedError := errors.New("test err")
 			udnClient.PrependReactor("patch", "userdefinednetworks/status", func(action testing.Action) (bool, runtime.Object, error) {
@@ -602,6 +743,37 @@ func assertUserDefinedNetworkStatus(udnClient *udnfakeclient.Clientset, udn *udn
 	normalizeConditions(actualUDN.Status.Conditions)
 
 	Expect(actualUDN.Status).To(Equal(*expectedStatus))
+}
+
+func assertFinalizersPresent(
+	udnClient *udnfakeclient.Clientset,
+	nadClient *netv1fakeclientset.Clientset,
+	udn *udnv1.UserDefinedNetwork,
+	pods ...corev1.Pod,
+) {
+	var podNames []string
+	for _, pod := range pods {
+		podNames = append(podNames, pod.Namespace+"/"+pod.Name)
+	}
+	expectedConditionMsg := fmt.Sprintf(`failed to verify NAD not in use [%s/%s]: network in use by the following pods: %v`,
+		udn.Namespace, udn.Name, podNames)
+
+	Eventually(func() []metav1.Condition {
+		updatedUDN, err := udnClient.K8sV1().UserDefinedNetworks(udn.Namespace).Get(context.Background(), udn.Name, metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		return normalizeConditions(updatedUDN.Status.Conditions)
+	}).Should(Equal([]metav1.Condition{{
+		Type:    "NetworkReady",
+		Status:  "False",
+		Reason:  "SyncError",
+		Message: expectedConditionMsg,
+	}}))
+	udn, err := udnClient.K8sV1().UserDefinedNetworks(udn.Namespace).Get(context.Background(), udn.Name, metav1.GetOptions{})
+	Expect(err).NotTo(HaveOccurred())
+	Expect(udn.Finalizers).To(ConsistOf("k8s.ovn.org/user-defined-network-protection"))
+	nad, err := nadClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(udn.Namespace).Get(context.Background(), udn.Name, metav1.GetOptions{})
+	Expect(err).NotTo(HaveOccurred())
+	Expect(nad.Finalizers).To(ConsistOf("k8s.ovn.org/user-defined-network-protection"))
 }
 
 func normalizeConditions(conditions []metav1.Condition) []metav1.Condition {
