@@ -22,6 +22,7 @@ import (
 	ovniptables "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/linkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
+	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	corev1 "k8s.io/api/core/v1"
@@ -229,14 +230,16 @@ func setupFakeTestNode(nodeInitialState nodeConfig) (ns.NetNS, cleanupFn, error)
 	return testNS, cleanupFn, nil
 }
 
-func initController(namespaces []corev1.Namespace, pods []corev1.Pod, egressIPs []egressipv1.EgressIP, node nodeConfig, v4, v6, createEIPAnnot bool) (*Controller, *egressipfake.Clientset, error) {
-
+func initController(testNS ns.NetNS, namespaces []corev1.Namespace, pods []corev1.Pod, egressIPs []egressipv1.EgressIP,
+	node nodeConfig, v4, v6, createEIPAnnot bool, gatewayMode ovnconfig.GatewayMode) (*Controller, *egressipfake.Clientset,
+	error) {
 	kubeClient := fake.NewSimpleClientset(&corev1.NodeList{Items: []corev1.Node{getNodeObj(node, createEIPAnnot)}},
 		&corev1.NamespaceList{Items: namespaces}, &corev1.PodList{Items: pods})
 	egressIPClient := egressipfake.NewSimpleClientset(&egressipv1.EgressIPList{Items: egressIPs})
 	ovnNodeClient := &util.OVNNodeClientset{KubeClient: kubeClient, EgressIPClient: egressIPClient}
 	rm := routemanager.NewController()
 	ovnconfig.OVNKubernetesFeature.EnableEgressIP = true
+	ovnconfig.Gateway.Mode = gatewayMode
 	watchFactory, err := factory.NewNodeWatchFactory(ovnNodeClient, node1Name)
 	if err != nil {
 		return nil, nil, err
@@ -245,8 +248,25 @@ func initController(namespaces []corev1.Namespace, pods []corev1.Pod, egressIPs 
 		return nil, nil, err
 	}
 	linkManager := linkmanager.NewController(node1Name, v4, v6, nil)
-	c, err := NewController(&ovnkube.Kube{KClient: kubeClient}, watchFactory.EgressIPInformer(), watchFactory.NodeInformer(), watchFactory.NamespaceInformer(),
-		watchFactory.PodCoreInformer(), rm, v4, v6, node1Name, linkManager)
+	var c *Controller
+	err = testNS.Do(func(netNS ns.NetNS) error {
+		var err error
+		c, err = NewController(
+			&ovnkube.Kube{KClient: kubeClient},
+			watchFactory.EgressIPInformer(),
+			watchFactory.NodeInformer(),
+			watchFactory.NamespaceInformer(),
+			watchFactory.PodCoreInformer(),
+			rm,
+			v4,
+			v6,
+			node1Name,
+			linkManager)
+		if err != nil {
+			return err
+		}
+		return nil
+	})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -326,25 +346,10 @@ func runController(testNS ns.NetNS, c *Controller) (cleanupFn, error) {
 			}(workerFn)
 		}
 	}
+
 	err = testNS.Do(func(netNS ns.NetNS) error {
-		if err = c.ruleManager.OwnPriority(rulePriority); err != nil {
+		if err := c.addIptablesAndIPRules(); err != nil {
 			return err
-		}
-		if c.v4 {
-			if err = c.iptablesManager.OwnChain(utiliptables.TableNAT, iptChainName, utiliptables.ProtocolIPv4); err != nil {
-				return err
-			}
-			if err = c.iptablesManager.EnsureRule(utiliptables.TableNAT, utiliptables.ChainPostrouting, utiliptables.ProtocolIPv4, iptJumpRule); err != nil {
-				return err
-			}
-		}
-		if c.v6 {
-			if err = c.iptablesManager.OwnChain(utiliptables.TableNAT, iptChainName, utiliptables.ProtocolIPv6); err != nil {
-				return err
-			}
-			if err = c.iptablesManager.EnsureRule(utiliptables.TableNAT, utiliptables.ChainPostrouting, utiliptables.ProtocolIPv6, iptJumpRule); err != nil {
-				return err
-			}
 		}
 		return nil
 	})
@@ -391,7 +396,7 @@ func runSubControllers(testNS ns.NetNS, c *Controller, wg *sync.WaitGroup, stopC
 // FIXME(mk) - Within GH VM, if I need to create a new NetNs. I see the following error:
 // "failed to create new network namespace: mount --make-rshared /run/user/1001/netns failed: "operation not permitted""
 var _ = table.DescribeTable("EgressIP selectors",
-	func(expectedEIPConfigs []eipConfig, pods []corev1.Pod, namespaces []corev1.Namespace, nodeConfig nodeConfig) {
+	func(expectedEIPConfigs []eipConfig, pods []corev1.Pod, namespaces []corev1.Namespace, nodeConfig nodeConfig, gatewayMode ovnconfig.GatewayMode) {
 		defer ginkgo.GinkgoRecover()
 		if os.Getenv("NOROOT") == "TRUE" {
 			ginkgo.Skip("Test requires root privileges")
@@ -402,6 +407,7 @@ var _ = table.DescribeTable("EgressIP selectors",
 		runtime.LockOSThread()
 		defer runtime.UnlockOSThread()
 		var err error
+
 		egressIPList := make([]egressipv1.EgressIP, 0)
 		for _, expectedEIPConfig := range expectedEIPConfigs {
 			if expectedEIPConfig.eIP == nil {
@@ -412,17 +418,45 @@ var _ = table.DescribeTable("EgressIP selectors",
 		ginkgo.By("setting up test environment")
 		// determine which IP versions we must support from the Egress IPs defined
 		v4, v6 := getEIPsIPVersions(expectedEIPConfigs)
+
+		// Set up fake exec for sysctl commands.
+		fexec := ovntest.NewFakeExec()
+		// fexec.AddFakeCmd(&ovntest.ExpectedCmd{Cmd: expectedCommand})
+		var expectedCommand ovntest.ExpectedCmd
+		if v4 {
+			if gatewayMode == ovnconfig.GatewayModeLocal {
+				expectedCommand = ovntest.ExpectedCmd{
+					Cmd:    "sysctl -w net.ipv4.conf.all.src_valid_mark=1",
+					Output: "net.ipv4.conf.all.src_valid_mark = 1",
+				}
+			} else {
+				expectedCommand = ovntest.ExpectedCmd{
+					Cmd:    "sysctl -w net.ipv4.conf.all.src_valid_mark=0",
+					Output: "net.ipv4.conf.all.src_valid_mark = 0",
+				}
+			}
+			fexec.AddFakeCmd(&expectedCommand)
+			err = util.SetExec(fexec)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		}
+
 		// setup "node" environment before controller is started
 		testNS, cleanupNodeFn, err := setupFakeTestNode(nodeConfig)
 		gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
-		c, eIPClient, err := initController(namespaces, pods, egressIPList, nodeConfig, v4, v6, true) //TODO: test for IPV6
+		c, eIPClient, err := initController(testNS, namespaces, pods, egressIPList, nodeConfig, v4, v6, true, gatewayMode) //TODO: test for IPV6
 		gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 		cleanupControllerFn, err := runController(testNS, c)
 		gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
-		ginkgo.By("verify expected IPTable rules match what was found")
+
+		// Verifications.
+		verifyStaticIPRules(testNS, gatewayMode, v4, v6)
+		verifyStaticEgressIptablesRules(c, testNS, gatewayMode, v4, v6)
+		ginkgo.By("verify expected sysctls were called")
+		gomega.Eventually(gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue(), fexec.ErrorDesc)).WithTimeout(oneSec)
+		ginkgo.By("verify expected IPTable rules for EIPConfigs match what was found")
 		// Ensure only the iptables rules we expect are present on the chain
 		gomega.Eventually(func() error {
-			foundIPTRules, err := getIPTableRules(testNS, c.iptablesManager, v4, v6)
+			foundIPTRules, err := getIPTableRules(testNS, c.iptablesManager, v4, v6, utiliptables.TableNAT, iptChainName)
 			if err != nil {
 				return err
 			}
@@ -599,7 +633,7 @@ var _ = table.DescribeTable("EgressIP selectors",
 		}
 		ginkgo.By("verify IPTable rules are removed")
 		gomega.Eventually(func() error {
-			foundIPTRules, err := getIPTableRules(testNS, c.iptablesManager, v4, v6)
+			foundIPTRules, err := getIPTableRules(testNS, c.iptablesManager, v4, v6, utiliptables.TableNAT, iptChainName)
 			if err != nil {
 				return err
 			}
@@ -691,6 +725,7 @@ var _ = table.DescribeTable("EgressIP selectors",
 			linkConfigs: []linkConfig{{dummyLink1Name, []address{{dummy1IPv4CIDR, false}}},
 				{dummyLink2Name, []address{{dummy2IPv4CIDR, false}}}},
 		},
+		ovnconfig.GatewayModeShared,
 	),
 	table.Entry("configures one IPv4 EIP and one Pod",
 		[]eipConfig{
@@ -715,6 +750,7 @@ var _ = table.DescribeTable("EgressIP selectors",
 			linkConfigs: []linkConfig{{dummyLink1Name, []address{{dummy1IPv4CIDR, false}}},
 				{dummyLink2Name, []address{{dummy2IPv4CIDR, false}}}},
 		},
+		ovnconfig.GatewayModeShared,
 	),
 	table.Entry("configures one IPv6 EIP and one Pod",
 		[]eipConfig{
@@ -740,6 +776,7 @@ var _ = table.DescribeTable("EgressIP selectors",
 			linkConfigs: []linkConfig{{dummyLink1Name, []address{{dummy1IPv6CIDRCompressed, false}}},
 				{dummyLink2Name, []address{{dummy2IPv6CIDRCompressed, false}}}},
 		},
+		ovnconfig.GatewayModeShared,
 	),
 	table.Entry("configures one uncompressed IPv6 EIP and one Pod",
 		[]eipConfig{
@@ -765,6 +802,7 @@ var _ = table.DescribeTable("EgressIP selectors",
 			linkConfigs: []linkConfig{{dummyLink1Name, []address{{dummy1IPv6CIDRCompressed, false}}},
 				{dummyLink2Name, []address{{dummy2IPv6CIDRCompressed, false}}}},
 		},
+		ovnconfig.GatewayModeShared,
 	),
 	table.Entry("configures one IPv4 EIP and multiple pods",
 		// Test pod and namespace selection -
@@ -797,6 +835,7 @@ var _ = table.DescribeTable("EgressIP selectors",
 			linkConfigs: []linkConfig{{dummyLink1Name, []address{{dummy1IPv4CIDR, false}}},
 				{dummyLink2Name, []address{{dummy2IPv4CIDR, false}}}},
 		},
+		ovnconfig.GatewayModeShared,
 	),
 	table.Entry("configures one IPv6 EIP and multiple pods",
 		// Test pod and namespace selection -
@@ -830,6 +869,7 @@ var _ = table.DescribeTable("EgressIP selectors",
 			linkConfigs: []linkConfig{{dummyLink1Name, []address{{dummy1IPv6CIDRNetworkCompressed, false}}},
 				{dummyLink2Name, []address{{dummy2IPv6CIDRCompressed, false}}}},
 		},
+		ovnconfig.GatewayModeShared,
 	),
 	table.Entry("configures one IPv4 EIP and multiple namespaces and multiple pods",
 		[]eipConfig{
@@ -863,6 +903,7 @@ var _ = table.DescribeTable("EgressIP selectors",
 			linkConfigs: []linkConfig{{dummyLink1Name, []address{{dummy1IPv4CIDR, false}}},
 				{dummyLink2Name, []address{{dummy2IPv4CIDR, false}}}},
 		},
+		ovnconfig.GatewayModeShared,
 	),
 	table.Entry("configures one IPv6 EIP and multiple namespaces and multiple pods",
 		[]eipConfig{
@@ -896,6 +937,7 @@ var _ = table.DescribeTable("EgressIP selectors",
 			linkConfigs: []linkConfig{{dummyLink1Name, []address{{dummy1IPv6CIDRCompressed, false}}},
 				{dummyLink2Name, []address{{dummy2IPv6CIDRCompressed, false}}}},
 		},
+		ovnconfig.GatewayModeShared,
 	),
 	table.Entry("configures multiple IPv4 EIPs on different links, multiple namespaces and multiple pods",
 		[]eipConfig{
@@ -950,6 +992,7 @@ var _ = table.DescribeTable("EgressIP selectors",
 				{dummyLink3Name, []address{{dummy3IPv4CIDR, false}}},
 				{dummyLink4Name, []address{{dummy4IPv4CIDR, false}}}},
 		},
+		ovnconfig.GatewayModeShared,
 	),
 	table.Entry("configures multiple IPv6 EIPs on different links, multiple namespaces and multiple pods",
 		[]eipConfig{
@@ -1006,6 +1049,120 @@ var _ = table.DescribeTable("EgressIP selectors",
 				{dummyLink3Name, []address{{dummy3IPv6CIDRCompressed, false}}},
 				{dummyLink4Name, []address{{dummy4IPv6CIDRCompressed, false}}}},
 		},
+		ovnconfig.GatewayModeShared,
+	),
+	table.Entry("configures local gateway multi NIC EIP IP rules and iptables rules for IPv4",
+		[]eipConfig{
+			{
+				eIP: newEgressIP(egressIP1Name, egressIP1IPV4, node1Name, namespace1Label, egressPodLabel),
+			},
+		},
+		[]corev1.Pod{newPodWithLabels(namespace1, pod1Name, node1Name, pod1IPv4, map[string]string{})},
+		[]corev1.Namespace{newNamespaceWithLabels(namespace1, namespace1Label)},
+		nodeConfig{
+			linkConfigs: []linkConfig{{dummyLink1Name, []address{{dummy1IPv4CIDR, false}}},
+				{dummyLink2Name, []address{{dummy2IPv4CIDR, false}}}},
+		},
+		ovnconfig.GatewayModeLocal,
+	),
+	table.Entry("configures local gateway multi NIC EIP IP rules and iptables rules for IPv6",
+		[]eipConfig{
+			{
+				eIP: newEgressIP(egressIP1Name, egressIP1IPV6Compressed, node1Name, namespace1Label, egressPodLabel),
+			},
+		},
+		[]corev1.Pod{newPodWithLabels(namespace1, pod1Name, node1Name, pod1IPv6Compressed, map[string]string{})},
+		[]corev1.Namespace{newNamespaceWithLabels(namespace1, namespace1Label)},
+		nodeConfig{
+			linkConfigs: []linkConfig{{dummyLink1Name, []address{{dummy1IPv6CIDRCompressed, false}}},
+				{dummyLink2Name, []address{{dummy2IPv6CIDRCompressed, false}}}},
+		},
+		ovnconfig.GatewayModeLocal,
+	),
+)
+
+var _ = table.DescribeTable("EgressIP static rules after migration of gateway mode",
+	func(v4, v6 bool, from, to ovnconfig.GatewayMode) {
+		defer ginkgo.GinkgoRecover()
+		if os.Getenv("NOROOT") == "TRUE" {
+			ginkgo.Skip("Test requires root privileges")
+		}
+		if !commandExists("iptables") {
+			ginkgo.Skip("Test requires iptables tools to be available in PATH")
+		}
+		runtime.LockOSThread()
+		defer runtime.UnlockOSThread()
+
+		var (
+			err          error
+			pods         []corev1.Pod
+			namespaces   = []corev1.Namespace{} // newNamespaceWithLabels(namespace1, namespace1Label)}
+			nodeConfig   nodeConfig
+			egressIPList []egressipv1.EgressIP
+		)
+
+		// Setup node.
+		testNS, cleanupNodeFn, err := setupFakeTestNode(nodeConfig)
+		gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+
+		for _, gatewayMode := range []ovnconfig.GatewayMode{from, to} {
+			// Set up fake exec for sysctl commands.
+			fexec := ovntest.NewFakeExec()
+			// fexec.AddFakeCmd(&ovntest.ExpectedCmd{Cmd: expectedCommand})
+			var expectedCommand ovntest.ExpectedCmd
+			if v4 {
+				if gatewayMode == ovnconfig.GatewayModeLocal {
+					expectedCommand = ovntest.ExpectedCmd{
+						Cmd:    "sysctl -w net.ipv4.conf.all.src_valid_mark=1",
+						Output: "net.ipv4.conf.all.src_valid_mark = 1",
+					}
+				} else {
+					expectedCommand = ovntest.ExpectedCmd{
+						Cmd:    "sysctl -w net.ipv4.conf.all.src_valid_mark=0",
+						Output: "net.ipv4.conf.all.src_valid_mark = 0",
+					}
+				}
+				fexec.AddFakeCmd(&expectedCommand)
+				err = util.SetExec(fexec)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			}
+
+			// Setup controller.
+			c, _, err := initController(testNS, namespaces, pods, egressIPList, nodeConfig, v4, v6, true, gatewayMode)
+			gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+			cleanupControllerFn, err := runController(testNS, c)
+			gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+
+			// Verify.
+			verifyStaticIPRules(testNS, gatewayMode, v4, v6)
+			verifyStaticEgressIptablesRules(c, testNS, gatewayMode, v4, v6)
+			ginkgo.By("verify expected sysctls were called")
+			gomega.Eventually(gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue(), fexec.ErrorDesc)).WithTimeout(oneSec)
+
+			// Teardown of EgressIP controller.
+			gomega.Expect(cleanupControllerFn()).ShouldNot(gomega.HaveOccurred())
+		}
+
+		// Cleanup node.
+		gomega.Expect(cleanupNodeFn()).ShouldNot(gomega.HaveOccurred())
+	},
+	table.Entry("IPv4 migration from local gateway to shared gateway",
+		true, false, ovnconfig.GatewayModeLocal, ovnconfig.GatewayModeShared,
+	),
+	table.Entry("IPv6 migration from local gateway to shared gateway",
+		false, true, ovnconfig.GatewayModeLocal, ovnconfig.GatewayModeShared,
+	),
+	table.Entry("dualstack migration from local gateway to shared gateway",
+		true, true, ovnconfig.GatewayModeLocal, ovnconfig.GatewayModeShared,
+	),
+	table.Entry("IPv4 migration from shared gateway to local gateway",
+		true, false, ovnconfig.GatewayModeLocal, ovnconfig.GatewayModeShared,
+	),
+	table.Entry("IPv6 migration from shared gateway to local gateway",
+		false, true, ovnconfig.GatewayModeLocal, ovnconfig.GatewayModeShared,
+	),
+	table.Entry("dualstack migration from shared gateway to local gateway",
+		true, true, ovnconfig.GatewayModeLocal, ovnconfig.GatewayModeShared,
 	),
 )
 
@@ -1045,7 +1202,7 @@ var _ = ginkgo.Describe("label to annotations migration", func() {
 		// set labels on each eip address
 		gomega.Expect(setDepreciatedManagedAddressLabel(testNS, egressIP1IPV4CIDR, egressIP2IPV4CIDR, egressIP3IPCIDR)).ShouldNot(gomega.HaveOccurred())
 		// init controller and set createEIPAnnot to false, therfore no annotation created
-		c, _, err = initController(nil, nil, nil, initLinkConfig, true, false, false)
+		c, _, err = initController(testNS, nil, nil, nil, initLinkConfig, true, false, false, ovnconfig.GatewayModeShared)
 		gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 	})
 
@@ -1100,7 +1257,7 @@ var _ = table.DescribeTable("repair node", func(expectedStateFollowingClean []ei
 	}
 	testNS, cleanupNodeFn, err := setupFakeTestNode(nodeConfigsBeforeRepair)
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
-	c, _, err := initController(namespaces, pods, egressIPList, nodeConfigsBeforeRepair, v4, v6, true)
+	c, _, err := initController(testNS, namespaces, pods, egressIPList, nodeConfigsBeforeRepair, v4, v6, true, ovnconfig.GatewayModeShared)
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 	wg := &sync.WaitGroup{}
 	stopCh := make(chan struct{}, 0)
@@ -1112,7 +1269,7 @@ var _ = table.DescribeTable("repair node", func(expectedStateFollowingClean []ei
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 	// check node
 	ginkgo.By("ensure no stale IPTable rules")
-	foundIPTRules, err := getIPTableRules(testNS, c.iptablesManager, v4, v6)
+	foundIPTRules, err := getIPTableRules(testNS, c.iptablesManager, v4, v6, utiliptables.TableNAT, iptChainName)
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 	var expectedIPTableRuleCount int
 	for _, expectedConfig := range expectedStateFollowingClean {
@@ -1384,19 +1541,19 @@ func getLinkAddresses(testNS ns.NetNS, infs ...string) (map[string][]netlink.Add
 	return linkAddresses, nil
 }
 
-func getIPTableRules(testNS ns.NetNS, iptablesManager *ovniptables.Controller, v4, v6 bool) ([]ovniptables.RuleArg, error) {
+func getIPTableRules(testNS ns.NetNS, iptablesManager *ovniptables.Controller, v4, v6 bool,
+	table utiliptables.Table, chain utiliptables.Chain) ([]ovniptables.RuleArg, error) {
 	var foundIPTRules []ovniptables.RuleArg
-	var err error
-	err = testNS.Do(func(netNS ns.NetNS) error {
+	err := testNS.Do(func(netNS ns.NetNS) error {
 		if v4 {
-			foundIPTRulesV4, err := iptablesManager.GetIPv4ChainRuleArgs(utiliptables.TableNAT, iptChainName)
+			foundIPTRulesV4, err := iptablesManager.GetIPv4ChainRuleArgs(table, chain)
 			if err != nil {
 				return err
 			}
 			foundIPTRules = append(foundIPTRules, foundIPTRulesV4...)
 		}
 		if v6 {
-			foundIPTRulesV6, err := iptablesManager.GetIPv6ChainRuleArgs(utiliptables.TableNAT, iptChainName)
+			foundIPTRulesV6, err := iptablesManager.GetIPv6ChainRuleArgs(table, chain)
 			if err != nil {
 				return err
 			}
@@ -1743,4 +1900,123 @@ func getEIPIPVersions(eip *egressipv1.EgressIP) (bool, bool) {
 		panic("unable to determine an IP version")
 	}
 	return v4, v6
+}
+
+// verifyStaticIPRules verifies the IP rules added/removed by c.addIptablesAndIPRules().
+func verifyStaticIPRules(testNS ns.NetNS, gatewayMode ovnconfig.GatewayMode, v4, v6 bool) {
+	ginkgo.By("verifying expected static IP rules are correct")
+	var rules []netlink.Rule
+	if v4 {
+		rules = append(rules, getNodeIPFwMarkIPRule(netlink.FAMILY_V4))
+	}
+	if v6 {
+		rules = append(rules, getNodeIPFwMarkIPRule(netlink.FAMILY_V6))
+	}
+	gomega.Eventually(func() error {
+		return testNS.Do(func(netNS ns.NetNS) error {
+			foundRules, err := netlink.RuleList(netlink.FAMILY_ALL)
+			if err != nil {
+				return err
+			}
+			for _, r := range rules {
+				ctr := containsIPRule(foundRules, r)
+				if gatewayMode == ovnconfig.GatewayModeLocal {
+					if !ctr {
+						return fmt.Errorf("expected IP rule not found, foundRules: %v, r: %v", foundRules, r)
+					}
+				} else if ctr {
+					return fmt.Errorf("unexpected IP rule found, foundrules: %v, r: %v", foundRules, r)
+				}
+			}
+			return nil
+		})
+	}).WithTimeout(oneSec).Should(gomega.Succeed())
+}
+
+// verifyStaticEgressIptablesRules verifies the Iptables rules added/removed by c.addIptablesAndIPRules().
+func verifyStaticEgressIptablesRules(c *Controller, testNS ns.NetNS, gatewayMode ovnconfig.GatewayMode, v4, v6 bool) {
+	ginkgo.By("verifying expected static IPTables rules are correct")
+	gomega.Eventually(func() error {
+		// Look for the following rules.
+		natJumpRule := ovniptables.RuleArg{Args: []string{"-j", chainName}}
+		mangleRules := []ovniptables.RuleArg{
+			{
+				Args: []string{"-m", "mark", "--mark", "0x3f0", "-j", "CONNMARK", "--save-mark", "--nfmask",
+					"0xffffffff", "--ctmask", "0xffffffff"},
+			},
+			{
+				Args: []string{"-m", "mark", "--mark", "0x0", "-j", "CONNMARK", "--restore-mark", "--nfmask",
+					"0xffffffff", "--ctmask", "0xffffffff"},
+			},
+		}
+		// Verification for IPv4 and IPv6 is the same, so let's wrap this in a function.
+		f := func(v uint8) error {
+			ip4 := true
+			ip6 := false
+			if v == 6 {
+				ip4 = false
+				ip6 = true
+			}
+			natPostroutingRules, err := getIPTableRules(testNS, c.iptablesManager, ip4, ip6, utiliptables.TableNAT,
+				utiliptables.ChainPostrouting)
+			if err != nil {
+				return err
+			}
+			if !containsIptablesRule(natPostroutingRules, natJumpRule) {
+				return fmt.Errorf("expected iptables v%d rule not found, natPostroutingRules: %v, r: %v",
+					v, natPostroutingRules, natJumpRule)
+			}
+
+			manglePreroutingRules, err := getIPTableRules(testNS, c.iptablesManager, ip4, ip6, utiliptables.TableMangle,
+				utiliptables.ChainPrerouting)
+			if err != nil {
+				return err
+			}
+			for _, r := range mangleRules {
+				ctr := containsIptablesRule(manglePreroutingRules, r)
+				if gatewayMode == ovnconfig.GatewayModeLocal {
+					if !ctr {
+						return fmt.Errorf("expected iptables v%d rule not found, manglePreroutingRules: %v, r: %v",
+							v, manglePreroutingRules, r)
+					}
+				} else if ctr {
+					return fmt.Errorf("unexpected iptables v%d rule found, manglePreroutingRules: %v, r: %v",
+						v, manglePreroutingRules, r)
+				}
+			}
+			return nil
+		}
+		// Now check for IPv4 and IPv6.
+		if v4 {
+			if err := f(4); err != nil {
+				return err
+			}
+		}
+		if v6 {
+			if err := f(6); err != nil {
+				return err
+			}
+		}
+		return nil
+	}).WithTimeout(oneSec).Should(gomega.Succeed())
+}
+
+// containsIptablesRule checks if a list of iptables RuleArgs contains a iptables single RuleArg.
+func containsIptablesRule(rules []ovniptables.RuleArg, rule ovniptables.RuleArg) bool {
+	for _, r := range rules {
+		if reflect.DeepEqual(r.Args, rule.Args) {
+			return true
+		}
+	}
+	return false
+}
+
+// containsIPRule checks if a list of IP rules contains a given IP rule.
+func containsIPRule(rules []netlink.Rule, rule netlink.Rule) bool {
+	for _, r := range rules {
+		if r.Family == rule.Family && r.String() == rule.String() {
+			return true
+		}
+	}
+	return false
 }
