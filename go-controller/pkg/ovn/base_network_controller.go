@@ -591,6 +591,79 @@ func (bnc *BaseNetworkController) deleteNamespaceLocked(ns string) (*namespaceIn
 	return nsInfo, nil
 }
 
+func (bnc *BaseNetworkController) syncNodeManagementPort(node *kapi.Node, switchName string, hostSubnets []*net.IPNet, routeHostSubnets bool) ([]net.IP, error) {
+	macAddress, err := util.ParseNodeManagementPortMACAddress(node)
+	if err != nil {
+		return nil, err
+	}
+
+	var v4Subnet *net.IPNet
+	addresses := macAddress.String()
+	mgmtPortIPs := []net.IP{}
+	for _, hostSubnet := range hostSubnets {
+		mgmtIfAddr := util.GetNodeManagementIfAddr(hostSubnet)
+		addresses += " " + mgmtIfAddr.IP.String()
+		mgmtPortIPs = append(mgmtPortIPs, mgmtIfAddr.IP)
+
+		if err := bnc.addAllowACLFromNode(switchName, mgmtIfAddr.IP); err != nil {
+			return nil, err
+		}
+
+		if !utilnet.IsIPv6CIDR(hostSubnet) {
+			v4Subnet = hostSubnet
+		}
+		if config.Gateway.Mode == config.GatewayModeLocal && routeHostSubnets {
+			lrsr := nbdb.LogicalRouterStaticRoute{
+				Policy:   &nbdb.LogicalRouterStaticRoutePolicySrcIP,
+				IPPrefix: hostSubnet.String(),
+				Nexthop:  mgmtIfAddr.IP.String(),
+			}
+			p := func(item *nbdb.LogicalRouterStaticRoute) bool {
+				return item.IPPrefix == lrsr.IPPrefix && libovsdbops.PolicyEqualPredicate(lrsr.Policy, item.Policy)
+			}
+			err := libovsdbops.CreateOrReplaceLogicalRouterStaticRouteWithPredicate(bnc.nbClient, bnc.GetNetworkScopedClusterRouterName(),
+				&lrsr, p, &lrsr.Nexthop)
+			if err != nil {
+				return nil, fmt.Errorf("error creating static route %+v on router %s: %v", lrsr, bnc.GetNetworkScopedClusterRouterName(), err)
+			}
+		}
+	}
+
+	// Create this node's management logical port on the node switch
+	logicalSwitchPort := nbdb.LogicalSwitchPort{
+		Name:      bnc.GetNetworkScopedK8sMgmtIntfName(node.Name),
+		Addresses: []string{addresses},
+	}
+	sw := nbdb.LogicalSwitch{Name: switchName}
+	err = libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitch(bnc.nbClient, &sw, &logicalSwitchPort)
+	if err != nil {
+		return nil, err
+	}
+
+	// TODO(dceara): The cluster port group must be per network.
+	err = libovsdbops.AddPortsToPortGroup(bnc.nbClient, bnc.getClusterPortGroupName(types.ClusterPortGroupNameBase), logicalSwitchPort.UUID)
+	if err != nil {
+		klog.Errorf(err.Error())
+		return nil, err
+	}
+
+	if v4Subnet != nil {
+		if err := libovsdbutil.UpdateNodeSwitchExcludeIPs(bnc.nbClient, bnc.GetNetworkScopedK8sMgmtIntfName(node.Name), bnc.GetNetworkScopedSwitchName(node.Name), node.Name, v4Subnet); err != nil {
+			return nil, err
+		}
+	}
+
+	return mgmtPortIPs, nil
+}
+
+func (bnc *BaseNetworkController) syncNodeManagementPortRouteHostSubnets(node *kapi.Node, switchName string, hostSubnets []*net.IPNet) ([]net.IP, error) {
+	return bnc.syncNodeManagementPort(node, switchName, hostSubnets, true)
+}
+
+func (bnc *BaseNetworkController) syncNodeManagementPortNoRouteHostSubnets(node *kapi.Node, switchName string, hostSubnets []*net.IPNet) ([]net.IP, error) {
+	return bnc.syncNodeManagementPort(node, switchName, hostSubnets, false)
+}
+
 // WatchNodes starts the watching of the nodes resource and calls back the appropriate handler logic
 func (bnc *BaseNetworkController) WatchNodes() error {
 	if bnc.nodeHandler != nil {
