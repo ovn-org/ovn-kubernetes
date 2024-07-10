@@ -138,21 +138,10 @@ func GetExtSwitchFromNode(node string) string {
 	return types.ExternalSwitchPrefix + node
 }
 
-// GetVrfDeviceName determines the name of the vrf device created for every user defined
+// GetVrfDeviceNameForUDNNetwork determines the name of the vrf device created for every user defined
 // primary network in local gateway mode.
-func GetVrfDeviceName(netName string) string {
-	return GetNetMgmtLinkName(netName) + types.VrfDeviceSuffix
-}
-
-// GetNetMgmtLinkName determines name of the mp0 interface created for user defined primary
-// network in local gateway mode.
-func GetNetMgmtLinkName(netName string) string {
-	name := strings.ReplaceAll(netName, "/", "-")
-	mgmtIfaceMaxLength := 11
-	if len(name) < mgmtIfaceMaxLength {
-		return name
-	}
-	return name[:mgmtIfaceMaxLength]
+func GetVrfDeviceNameForUDNNetwork(managementPortName string) string {
+	return managementPortName[8:] + types.VrfDeviceSuffix
 }
 
 // GetNodeInternalAddrs returns the first IPv4 and/or IPv6 InternalIP defined

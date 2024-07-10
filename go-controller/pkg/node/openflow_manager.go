@@ -2,14 +2,15 @@ package node
 
 import (
 	"fmt"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"net"
 	"os"
 	"regexp"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -45,6 +46,7 @@ func (c *openflowManager) getExGwBridgePorts() (string, string, string, string) 
 func (c *openflowManager) getDefaultBridgeName() string {
 	c.defaultBridge.Lock()
 	defer c.defaultBridge.Unlock()
+	klog.Infof("SURYA %v", c.defaultBridge.bridgeName)
 	return c.defaultBridge.bridgeName
 }
 

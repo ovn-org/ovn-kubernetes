@@ -192,13 +192,69 @@ func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net
 	return gw, nil
 }
 
-func (g *gateway) programRoutesForUDN(nInfo util.NetInfo, vrfTableId int) error {
-	err := configureSvcRouteViaInterface(g.routeManager, g.GetGatewayBridgeIface(), DummyNextHopIPs(), vrfTableId)
+func (g *gateway) computeRoutesForUDN(nInfo util.NetInfo, vrfTableId int) ([]netlink.Route, error) {
+	/*err := configureSvcRouteViaInterface(g.routeManager, g.GetGatewayBridgeIface(), DummyNextHopIPs(), vrfTableId)
 	if err != nil {
 		return err
+	}*/
+	interfaceName := g.GetGatewayBridgeIface()
+	link, err := util.LinkSetUp(interfaceName)
+	if err != nil {
+		return nil, fmt.Errorf("unable to get link for %s, error: %v", interfaceName, err)
 	}
+	mtu := config.Default.MTU
+	if config.Default.RoutableMTU != 0 {
+		mtu = config.Default.RoutableMTU
+	}
+	masqIPv4, err := g.getV4MasqueradeIP(nInfo)
+	if err != nil {
+		return nil, err
+	}
+	masqIPv6, err := g.getV6MasqueradeIP(nInfo)
+	if err != nil {
+		return nil, err
+	}
+	var retVal []netlink.Route
 	// TODO add other routes.
-	return nil
+	// Route1: Add serviceCIDR route: 10.96.0.0/16 via 169.254.169.12 dev breth0 mtu 1400
+	for _, serviceSubnet := range config.Kubernetes.ServiceCIDRs {
+		serviceSubnet := serviceSubnet
+		isV6 := utilnet.IsIPv6CIDR(serviceSubnet)
+		gwIP := masqIPv4
+		if isV6 {
+			gwIP = masqIPv6
+		}
+		retVal = append(retVal, netlink.Route{
+			LinkIndex: link.Attrs().Index,
+			Dst:       serviceSubnet,
+			MTU:       mtu,
+			Gw:        *gwIP,
+			Table:     vrfTableId,
+		})
+	}
+	// Route2: Add default route: default via 169.254.169.12 dev breth0 mtu 1400
+	if config.IPv4Mode {
+		_, defaultV4AnyCIDR, _ := net.ParseCIDR("0.0.0.0/0")
+		retVal = append(retVal, netlink.Route{
+			LinkIndex: link.Attrs().Index,
+			Dst:       defaultV4AnyCIDR,
+			MTU:       mtu,
+			Gw:        *masqIPv4,
+			Table:     vrfTableId,
+		})
+	}
+	if config.IPv6Mode {
+		_, defaultV6AnyCIDR, _ := net.ParseCIDR("::/0")
+		retVal = append(retVal, netlink.Route{
+			LinkIndex: link.Attrs().Index,
+			Dst:       defaultV6AnyCIDR,
+			MTU:       mtu,
+			Gw:        *masqIPv6,
+			Table:     vrfTableId,
+		})
+	}
+
+	return retVal, nil
 }
 
 func getGatewayFamilyAddrs(gatewayIfAddrs []*net.IPNet) (string, string) {
@@ -252,7 +308,12 @@ func cleanupLocalnetGateway(physnet string) error {
 }
 
 func (g *gateway) getMasqIPRules(nInfo util.NetInfo) ([]netlink.Rule, error) {
-	ifIndex, err := util.GetIfIndex(util.GetNetMgmtLinkName(nInfo.GetNetworkName()))
+	networkID, err := g.getNetworkID(nInfo)
+	if err != nil {
+		return nil, err
+	}
+	mgmtPortLinkName := util.GetNetworkScopedK8sMgmtHostIntfName(uint(networkID))
+	ifIndex, err := util.GetIfIndex(mgmtPortLinkName)
 	if err != nil {
 		return nil, err
 	}

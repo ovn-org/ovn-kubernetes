@@ -76,8 +76,12 @@ func (g *gateway) AddNetwork(nInfo util.NetInfo, masqCTMark uint) error {
 	if g.vrfManager == nil {
 		return nil
 	}
-	mgmtPortLinkName := util.GetNetMgmtLinkName(nInfo.GetNetworkName())
-	vrfDeviceName := util.GetVrfDeviceName(nInfo.GetNetworkName())
+	networkID, err := g.getNetworkID(nInfo)
+	if err != nil {
+		return err
+	}
+	mgmtPortLinkName := util.GetNetworkScopedK8sMgmtHostIntfName(uint(networkID))
+	vrfDeviceName := util.GetVrfDeviceNameForUDNNetwork(mgmtPortLinkName)
 	ifIndex, err := util.GetIfIndex(mgmtPortLinkName)
 	if err != nil {
 		return err
@@ -86,14 +90,18 @@ func (g *gateway) AddNetwork(nInfo util.NetInfo, masqCTMark uint) error {
 	enslaveInterfaces := make(sets.Set[string])
 	enslaveInterfaces.Insert(mgmtPortLinkName)
 	// TODO: we may have to associate every route with vrf to avoid any race condtion (can it happen ?)
-	err = g.vrfManager.AddVrf(vrfDeviceName, uint32(vrfTableId), enslaveInterfaces, nil)
+	routes, err := g.computeRoutesForUDN(nInfo, vrfTableId)
 	if err != nil {
 		return err
 	}
-	err = g.programRoutesForUDN(nInfo, vrfTableId)
+	err = g.vrfManager.AddVrf(vrfDeviceName, uint32(vrfTableId), enslaveInterfaces, routes)
 	if err != nil {
 		return err
 	}
+	/*err = g.programRoutesForUDN(nInfo, vrfTableId)
+	if err != nil {
+		return err
+	}*/
 	masqIPRules, err := g.getMasqIPRules(nInfo)
 	if err != nil {
 		return err
@@ -134,8 +142,13 @@ func (g *gateway) DelNetwork(nInfo util.NetInfo) error {
 	if g.vrfManager == nil {
 		return nil
 	}
-	vrfDeviceName := util.GetVrfDeviceName(nInfo.GetNetworkName())
-	err := g.vrfManager.DeleteVrf(vrfDeviceName)
+	networkID, err := g.getNetworkID(nInfo)
+	if err != nil {
+		return err
+	}
+	mgmtPortLinkName := util.GetNetworkScopedK8sMgmtHostIntfName(uint(networkID))
+	vrfDeviceName := util.GetVrfDeviceNameForUDNNetwork(mgmtPortLinkName)
+	err = g.vrfManager.DeleteVrf(vrfDeviceName)
 	if err != nil {
 		return err
 	}

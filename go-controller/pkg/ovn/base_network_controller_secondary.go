@@ -417,7 +417,7 @@ func (bsnc *BaseSecondaryNetworkController) buildPodEgressSnatForLGW(podIPs []*n
 			return nil, errors.New("masqIPs can not be empty")
 		}
 		outputPort := types.RouterToSwitchPrefix + nodeName
-		dstMac, err := util.GetIfMacAddress(util.GetNetMgmtLinkName(bsnc.GetNetworkName()))
+		dstMac, err := util.GetIfMacAddress(util.GetNetworkScopedK8sMgmtHostIntfName(uint(networkID)))
 		if err != nil {
 			return nil, err
 		}
