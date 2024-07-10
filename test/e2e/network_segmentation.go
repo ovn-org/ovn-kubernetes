@@ -6,14 +6,11 @@ import (
 	"strings"
 	"time"
 
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
-
 	iputils "github.com/containernetworking/plugins/pkg/ip"
-
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	nadclient "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/typed/k8s.cni.cncf.io/v1"
-
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -106,11 +103,12 @@ var _ = Describe("Network Segmentation", func() {
 			Entry(
 				"two pods connected over a L2 dualstack primary UDN",
 				networkAttachmentConfigParams{
-					name:        nadName,
-					networkName: userDefinedNetworkName,
-					topology:    "layer2",
-					cidr:        fmt.Sprintf("%s,%s", userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
-					role:        "primary",
+					name:         nadName,
+					networkName:  userDefinedNetworkName,
+					topology:     "layer2",
+					cidr:         fmt.Sprintf("%s,%s", userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+					excludeCIDRs: []string{gatewayIPv4Address + "/32", gatewayIPv6Address + "/128"},
+					role:         "primary",
 				},
 				*podConfig(
 					"client-pod",
@@ -129,11 +127,12 @@ var _ = Describe("Network Segmentation", func() {
 			Entry(
 				"two pods connected over a L3 dualstack primary UDN",
 				networkAttachmentConfigParams{
-					name:        nadName,
-					networkName: userDefinedNetworkName,
-					topology:    "layer3",
-					cidr:        fmt.Sprintf("%s,%s", userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
-					role:        "primary",
+					name:         nadName,
+					networkName:  userDefinedNetworkName,
+					topology:     "layer3",
+					cidr:         fmt.Sprintf("%s,%s", userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+					excludeCIDRs: []string{gatewayIPv4Address + "/32", gatewayIPv6Address + "/128"},
+					role:         "primary",
 				},
 				*podConfig(
 					"client-pod",
@@ -332,11 +331,12 @@ var _ = Describe("Network Segmentation", func() {
 			Entry(
 				"with L2 dualstack primary UDN",
 				networkAttachmentConfigParams{
-					name:        nadName,
-					networkName: userDefinedNetworkName,
-					topology:    "layer2",
-					cidr:        fmt.Sprintf("%s,%s", userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
-					role:        "primary",
+					name:         nadName,
+					networkName:  userDefinedNetworkName,
+					topology:     "layer2",
+					cidr:         fmt.Sprintf("%s,%s", userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+					excludeCIDRs: []string{gatewayIPv4Address + "/32", gatewayIPv6Address + "/128"},
+					role:         "primary",
 				},
 				*podConfig(
 					"udn-pod",
@@ -350,11 +350,12 @@ var _ = Describe("Network Segmentation", func() {
 			Entry(
 				"with L3 dualstack primary UDN",
 				networkAttachmentConfigParams{
-					name:        nadName,
-					networkName: userDefinedNetworkName,
-					topology:    "layer3",
-					cidr:        fmt.Sprintf("%s,%s", userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
-					role:        "primary",
+					name:         nadName,
+					networkName:  userDefinedNetworkName,
+					topology:     "layer3",
+					cidr:         fmt.Sprintf("%s,%s", userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+					excludeCIDRs: []string{gatewayIPv4Address + "/32", gatewayIPv6Address + "/128"},
+					role:         "primary",
 				},
 				*podConfig(
 					"udn-pod",
