@@ -75,6 +75,12 @@ func TestParseClusterSubnetEntries(t *testing.T) {
 			expectedErr:     true,
 		},
 		{
+			name:            "IPv4 host Subnet invalid",
+			cmdLineArg:      "10.132.0.0/24/33",
+			clusterNetworks: nil,
+			expectedErr:     true,
+		},
+		{
 			name:            "Test that defaulting to hostsubnetlength with 24 bit cluster prefix fails",
 			cmdLineArg:      "10.128.0.0/24",
 			clusterNetworks: nil,
