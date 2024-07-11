@@ -302,7 +302,7 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 	updatedNode, err := fakeClient.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
 	Expect(err).NotTo(HaveOccurred())
 
-	macFromAnnotation, err := util.ParseNodeManagementPortMACAddress(updatedNode)
+	macFromAnnotation, err := util.ParseNodeManagementPortMACAddresses(updatedNode, types.DefaultNetworkName)
 	Expect(err).NotTo(HaveOccurred())
 	Expect(macFromAnnotation.String()).To(Equal(mgtPortMAC))
 
@@ -401,7 +401,7 @@ func testManagementPortDPU(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.
 	updatedNode, err := fakeClient.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
 	Expect(err).NotTo(HaveOccurred())
 
-	macFromAnnotation, err := util.ParseNodeManagementPortMACAddress(updatedNode)
+	macFromAnnotation, err := util.ParseNodeManagementPortMACAddresses(updatedNode, types.DefaultNetworkName)
 	Expect(err).NotTo(HaveOccurred())
 	Expect(macFromAnnotation.String()).To(Equal(mgtPortMAC))
 

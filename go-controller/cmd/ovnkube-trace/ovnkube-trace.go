@@ -262,7 +262,7 @@ func getPodMAC(client *corev1client.CoreV1Client, pod *kapi.Pod) (podMAC string,
 			return "", err
 		}
 
-		nodeMAC, err := util.ParseNodeManagementPortMACAddress(node)
+		nodeMAC, err := util.ParseNodeManagementPortMACAddresses(node, types.DefaultNetworkName)
 		if err != nil {
 			return "", err
 		}
