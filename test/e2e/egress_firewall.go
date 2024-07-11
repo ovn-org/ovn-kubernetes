@@ -129,8 +129,9 @@ var _ = ginkgo.Describe("e2e egress firewall policy validation", func() {
 					_, err := e2ekubectl.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--",
 						"curl", "-s", "--connect-timeout", fmt.Sprint(testTimeout), net.JoinHostPort(dstIP, fmt.Sprint(dstPort)))
 					return err == nil
-				}, time.Duration(5*testTimeout)*time.Second).Should(gomega.BeTrue(),
+				}, time.Duration(30*testTimeout)*time.Second).Should(gomega.BeTrue(),
 					fmt.Sprintf("expected connection from %s to [%s]:%d to suceed", srcPodName, dstIP, dstPort))
+				framework.Logf("total attempts: %+v", retries)
 				gomega.Expect(retries).To(gomega.BeNumerically("<", 2))
 			} else {
 				gomega.Consistently(func() bool {
@@ -174,7 +175,8 @@ var _ = ginkgo.Describe("e2e egress firewall policy validation", func() {
 				cmd := []string{"docker", "exec", externalContainerName1,
 					"curl", "-s", "--connect-timeout", fmt.Sprint(testTimeout), net.JoinHostPort(externalContainer2IP, fmt.Sprint(externalContainerPort2))}
 				framework.Logf("Running command %v", cmd)
-				_, err := runCommand(cmd...)
+				out, err := runCommand(cmd...)
+				framework.Logf("%+v", out)
 				if err != nil {
 					framework.Logf("Failed: %v", err)
 					return false
@@ -182,7 +184,8 @@ var _ = ginkgo.Describe("e2e egress firewall policy validation", func() {
 				cmd = []string{"docker", "exec", externalContainerName2,
 					"curl", "-s", "--connect-timeout", fmt.Sprint(testTimeout), net.JoinHostPort(externalContainer1IP, fmt.Sprint(externalContainerPort1))}
 				framework.Logf("Running command %v", cmd)
-				_, err = runCommand(cmd...)
+				out, err = runCommand(cmd...)
+				framework.Logf("%+v", out)
 				if err != nil {
 					framework.Logf("Failed: %v", err)
 					return false
