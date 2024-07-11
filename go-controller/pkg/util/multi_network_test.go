@@ -659,6 +659,20 @@ func TestGetPodNADToNetworkMapping(t *testing.T) {
 			},
 			expectedError: fmt.Errorf("unexpected error: more than one of the same NAD ns1/attachment1 specified for pod ns1/test-pod"),
 		},
+		{
+			desc:           "Attaching to a secondary network to a user defined primary network is not supported",
+			inputNamespace: namespaceName,
+			inputNetConf: &ovncnitypes.NetConf{
+				NetConf:  cnitypes.NetConf{Name: "l3-network"},
+				Topology: ovntypes.Layer3Topology,
+				Role:     ovntypes.NetworkRolePrimary,
+				NADName:  GetNADName(namespaceName, attachmentName),
+			},
+			inputPodAnnotations: map[string]string{
+				nadv1.NetworkAttachmentAnnot: GetNADName(namespaceName, attachmentName),
+			},
+			expectedError: fmt.Errorf("unexpected primary network \"l3-network\" specified with a NetworkSelectionElement &{Name:attachment1 Namespace:ns1 IPRequest:[] MacRequest: InfinibandGUIDRequest: InterfaceRequest: PortMappingsRequest:[] BandwidthRequest:<nil> CNIArgs:<nil> GatewayRequest:[] IPAMClaimReference:}"),
+		},
 	}
 
 	for _, test := range tests {
