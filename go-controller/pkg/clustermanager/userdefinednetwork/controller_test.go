@@ -263,6 +263,63 @@ var _ = Describe("User Defined Network Controller", func() {
 				return updatedNAD
 			}).Should(Equal(mutatedNAD))
 		})
+
+		It("given primary UDN, should fail when primary NAD already exist", func() {
+			targetNs := "test"
+
+			primaryNAD := primaryNetNAD()
+			primaryNAD, err := nadClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(targetNs).Create(context.Background(), primaryNAD, metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+
+			primaryUDN := testUDN()
+			primaryUDN.Spec.Topology = udnv1.NetworkTopologyLayer2
+			primaryUDN.Spec.Layer2 = &udnv1.Layer2Config{Role: udnv1.NetworkRolePrimary}
+			primaryUDN, err = udnClient.K8sV1().UserDefinedNetworks(targetNs).Create(context.Background(), primaryUDN, metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+
+			c := New(nadClient, f.NADInformer(), udnClient, f.UserDefinedNetworkInformer(), noopRenderNadStub())
+			Expect(c.Run()).To(Succeed())
+
+			Eventually(func() []metav1.Condition {
+				updatedUDN, err := udnClient.K8sV1().UserDefinedNetworks(primaryUDN.Namespace).Get(context.Background(), primaryUDN.Name, metav1.GetOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				return normalizeConditions(updatedUDN.Status.Conditions)
+			}).Should(Equal([]metav1.Condition{{
+				Type:    "NetworkReady",
+				Status:  "False",
+				Reason:  "SyncError",
+				Message: `primary network already exist in namespace "test": "primary-net-1"`,
+			}}))
+		})
+		It("given primary UDN, should fail when unmarshal primary NAD fails", func() {
+			targetNs := "test"
+
+			primaryNAD := primaryNetNAD()
+			primaryNAD.Name = "another-primary-net"
+			primaryNAD.Spec.Config = "!@#$"
+			primaryNAD, err := nadClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(targetNs).Create(context.Background(), primaryNAD, metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+
+			primaryUDN := testUDN()
+			primaryUDN.Spec.Topology = udnv1.NetworkTopologyLayer3
+			primaryUDN.Spec.Layer3 = &udnv1.Layer3Config{Role: udnv1.NetworkRolePrimary}
+			primaryUDN, err = udnClient.K8sV1().UserDefinedNetworks(targetNs).Create(context.Background(), primaryUDN, metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+
+			c := New(nadClient, f.NADInformer(), udnClient, f.UserDefinedNetworkInformer(), noopRenderNadStub())
+			Expect(c.Run()).To(Succeed())
+
+			Eventually(func() []metav1.Condition {
+				updatedUDN, err := udnClient.K8sV1().UserDefinedNetworks(primaryUDN.Namespace).Get(context.Background(), primaryUDN.Name, metav1.GetOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				return normalizeConditions(updatedUDN.Status.Conditions)
+			}).Should(Equal([]metav1.Condition{{
+				Type:    "NetworkReady",
+				Status:  "False",
+				Reason:  "SyncError",
+				Message: `failed to validate no primary network exist: unmarshal failed [test/another-primary-net]: invalid character '!' looking for beginning of value`,
+			}}))
+		})
 	})
 
 	Context("UserDefinedNetwork object sync", func() {
@@ -440,6 +497,18 @@ func testNAD() *netv1.NetworkAttachmentDefinition {
 			},
 		},
 		Spec: netv1.NetworkAttachmentDefinitionSpec{},
+	}
+}
+
+func primaryNetNAD() *netv1.NetworkAttachmentDefinition {
+	return &netv1.NetworkAttachmentDefinition{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "primary-net-1",
+			Namespace: "test",
+		},
+		Spec: netv1.NetworkAttachmentDefinitionSpec{
+			Config: `{"type":"ovn-k8s-cni-overlay","role": "primary"}`,
+		},
 	}
 }
 

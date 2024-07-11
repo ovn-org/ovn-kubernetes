@@ -2,6 +2,7 @@ package userdefinednetwork
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -9,6 +10,7 @@ import (
 
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
@@ -25,7 +27,10 @@ import (
 	userdefinednetworklister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/listers/userdefinednetwork/v1"
 
 	nadnotifier "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/userdefinednetwork/notifier"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/userdefinednetwork/template"
+	cnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/controller"
+	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 )
 
 type RenderNetAttachDefManifest func(*userdefinednetworkv1.UserDefinedNetwork) (*netv1.NetworkAttachmentDefinition, error)
@@ -135,6 +140,20 @@ func (c *Controller) syncUserDefinedNetwork(udn *userdefinednetworkv1.UserDefine
 		return nil, fmt.Errorf("failed to generate NetworkAttachmentDefinition: %w", err)
 	}
 	if nad == nil {
+		// creating NAD in case no primary network exist should be atomic and synchronized with
+		// any other thread that create NADs.
+		// Since the UserDefinedNetwork controller use single thread (threadiness=1),
+		// and being the only controller that create NADs, this conditions is fulfilled.
+		if primaryNetwork(udn.Spec) {
+			actualNads, lerr := c.nadLister.NetworkAttachmentDefinitions(udn.Namespace).List(labels.Everything())
+			if lerr != nil {
+				return nil, fmt.Errorf("failed to list  NetworkAttachmetDefinition: %w", lerr)
+			}
+			if err := validatePrimaryNetworkNADNotExist(actualNads); err != nil {
+				return nil, err
+			}
+		}
+
 		nad, err = c.nadClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(udn.Namespace).Create(context.Background(), desiredNAD, metav1.CreateOptions{})
 		if err != nil {
 			return nil, fmt.Errorf("failed to create NetworkAttachmentDefinition: %w", err)
@@ -157,6 +176,32 @@ func (c *Controller) syncUserDefinedNetwork(udn *userdefinednetworkv1.UserDefine
 	}
 
 	return nad, nil
+}
+
+func primaryNetwork(spec userdefinednetworkv1.UserDefinedNetworkSpec) bool {
+	var role userdefinednetworkv1.NetworkRole
+	switch spec.Topology {
+	case userdefinednetworkv1.NetworkTopologyLayer3:
+		role = spec.Layer3.Role
+	case userdefinednetworkv1.NetworkTopologyLayer2:
+		role = spec.Layer2.Role
+	}
+
+	return role == userdefinednetworkv1.NetworkRolePrimary
+}
+
+func validatePrimaryNetworkNADNotExist(nads []*netv1.NetworkAttachmentDefinition) error {
+	for _, nad := range nads {
+		var netConf *cnitypes.NetConf
+		if err := json.Unmarshal([]byte(nad.Spec.Config), &netConf); err != nil {
+			return fmt.Errorf("failed to validate no primary network exist: unmarshal failed [%s/%s]: %w",
+				nad.Namespace, nad.Name, err)
+		}
+		if netConf.Type == template.OvnK8sCNIOverlay && netConf.Role == ovntypes.NetworkRolePrimary {
+			return fmt.Errorf("primary network already exist in namespace %q: %q", nad.Namespace, nad.Name)
+		}
+	}
+	return nil
 }
 
 func (c *Controller) updateUserDefinedNetworkStatus(udn *userdefinednetworkv1.UserDefinedNetwork, nad *netv1.NetworkAttachmentDefinition, syncError error) error {

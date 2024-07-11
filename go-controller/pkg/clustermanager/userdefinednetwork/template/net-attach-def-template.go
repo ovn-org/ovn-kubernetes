@@ -18,8 +18,9 @@ import (
 )
 
 const (
+	OvnK8sCNIOverlay = "ovn-k8s-cni-overlay"
+
 	cniVersion              = "1.0.0"
-	ovnK8sCNIOverlay        = "ovn-k8s-cni-overlay"
 	labelUserDefinedNetwork = "k8s.ovn.org/user-defined-network"
 )
 
@@ -74,7 +75,7 @@ func renderCNINetworkConfig(udn *userdefinednetworkv1.UserDefinedNetwork) (map[s
 	netConfSpec := &ovncnitypes.NetConf{
 		NetConf: cnitypes.NetConf{
 			CNIVersion: cniVersion,
-			Type:       ovnK8sCNIOverlay,
+			Type:       OvnK8sCNIOverlay,
 			Name:       networkName,
 		},
 		NADName:  nadName,
@@ -119,7 +120,7 @@ func renderCNINetworkConfig(udn *userdefinednetworkv1.UserDefinedNetwork) (map[s
 	// expected result.
 	cniNetConf := map[string]interface{}{
 		"cniVersion":       cniVersion,
-		"type":             ovnK8sCNIOverlay,
+		"type":             OvnK8sCNIOverlay,
 		"name":             networkName,
 		"netAttachDefName": nadName,
 		"topology":         netConfSpec.Topology,
