@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -329,6 +330,22 @@ func StartNodeCertificateManager(ctx context.Context, wg *sync.WaitGroup, nodeNa
 			if err := os.Remove(certificateStore.CurrentPath()); err != nil {
 				return fmt.Errorf("failed to remove the current certificate file: %w", err)
 			}
+		}
+	}
+
+	// In the unlikely event that the certificate file becomes corrupted, recover by removing
+	// the certificate so the CSR will be created using the bootstrap kubeconfig.
+	var noCertKeyError *certificate.NoCertKeyError
+	if err != nil && !errors.As(err, &noCertKeyError) {
+		var pathErr *os.PathError
+		klog.Errorf("Failed to load the currect certificate file: %v", err)
+		// Do not try to remove the file if os.Stat failed on it
+		if errors.As(err, &pathErr) {
+			return err
+		}
+		klog.Errorf("Removing: %s", certificateStore.CurrentPath())
+		if err := os.Remove(certificateStore.CurrentPath()); err != nil {
+			return fmt.Errorf("failed to remove the current certificate file: %w", err)
 		}
 	}
 
