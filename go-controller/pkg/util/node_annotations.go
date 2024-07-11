@@ -62,6 +62,10 @@ const (
 	// OvnNodeManagementPortMacAddress is the constant string representing the annotation key
 	OvnNodeManagementPortMacAddress = "k8s.ovn.org/node-mgmt-port-mac-address"
 
+	// OvnNodeManagementPortMacAddresses contains all mac addresses of the management ports
+	// on all networks keyed by the network-name
+	OvnNodeManagementPortMacAddresses = "k8s.ovn.org/node-mgmt-port-mac-addresses"
+
 	// OvnNodeChassisID is the systemID of the node needed for creating L3 gateway
 	OvnNodeChassisID = "k8s.ovn.org/node-chassis-id"
 
