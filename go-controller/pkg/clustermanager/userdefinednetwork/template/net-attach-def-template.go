@@ -19,6 +19,8 @@ import (
 )
 
 const (
+	OvnK8sCNIOverlay = "ovn-k8s-cni-overlay"
+
 	cniVersion              = "1.0.0"
 	ovnK8sCNIOverlay        = "ovn-k8s-cni-overlay"
 	labelUserDefinedNetwork = "k8s.ovn.org/user-defined-network"
