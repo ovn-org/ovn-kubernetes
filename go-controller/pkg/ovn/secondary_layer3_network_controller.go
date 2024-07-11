@@ -570,6 +570,11 @@ func (oc *SecondaryLayer3NetworkController) addNode(node *kapi.Node) ([]*net.IPN
 	if err != nil {
 		return nil, err
 	}
+	if util.IsNetworkSegmentationSupportEnabled() && oc.IsPrimaryNetwork() {
+		if err := oc.addNodeSubnetEgressSNAT(hostSubnets, node); err != nil {
+			return nil, err
+		}
+	}
 	return hostSubnets, nil
 }
 

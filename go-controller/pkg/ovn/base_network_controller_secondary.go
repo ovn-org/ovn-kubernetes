@@ -338,20 +338,6 @@ func (bsnc *BaseSecondaryNetworkController) addLogicalPortToNetworkForNAD(pod *k
 		ops = append(ops, addOps...)
 	}
 
-	if util.IsNetworkSegmentationSupportEnabled() && bsnc.IsPrimaryNetwork() &&
-		isLocalPod && config.Gateway.Mode == config.GatewayModeLocal && config.Gateway.DisableSNATMultipleGWs {
-		nats, err := bsnc.buildPodEgressSnatForLGW(podAnnotation.IPs, pod.Spec.NodeName)
-		if err != nil {
-			return err
-		}
-		router := &nbdb.LogicalRouter{
-			Name: bsnc.GetNetworkScopedClusterRouterName(),
-		}
-		if ops, err = libovsdbops.CreateOrUpdateNATsOps(bsnc.nbClient, ops, router, nats...); err != nil {
-			return fmt.Errorf("failed to update SNAT for pod of router: %s, error: %v", bsnc.GetNetworkScopedClusterRouterName(), err)
-		}
-	}
-
 	recordOps, txOkCallBack, _, err := bsnc.AddConfigDurationRecord("pod", pod.Namespace, pod.Name)
 	if err != nil {
 		klog.Errorf("Config duration recorder: %v", err)
@@ -390,22 +376,15 @@ func (bsnc *BaseSecondaryNetworkController) addLogicalPortToNetworkForNAD(pod *k
 	return nil
 }
 
-func (bsnc *BaseSecondaryNetworkController) buildPodEgressSnatForLGW(podIPs []*net.IPNet, nodeName string) ([]*nbdb.NAT, error) {
-	if podIPs == nil {
-		return nil, nil
-	}
-	node, err := bsnc.watchFactory.GetNode(nodeName)
-	if err != nil {
-		return nil, err
-	}
+func (bsnc *BaseSecondaryNetworkController) buildEgressSNAT(localPodSubnets []*net.IPNet, node *kapi.Node) ([]*nbdb.NAT, error) {
 	networkID, err := util.ParseNetworkIDAnnotation(node, bsnc.GetNetworkName())
 	if err != nil {
 		return nil, err
 	}
 	var snats []*nbdb.NAT
-	for _, podIP := range podIPs {
-		var masqIP *udn.MasqueradeIPs
-		if utilnet.IsIPv6(podIP.IP) {
+	var masqIP *udn.MasqueradeIPs
+	for _, localPodSubnet := range localPodSubnets {
+		if utilnet.IsIPv6CIDR(localPodSubnet) {
 			masqIP, err = udn.AllocateV4MasqueradeIPs(networkID)
 		} else {
 			masqIP, err = udn.AllocateV4MasqueradeIPs(networkID)
@@ -416,14 +395,28 @@ func (bsnc *BaseSecondaryNetworkController) buildPodEgressSnatForLGW(podIPs []*n
 		if masqIP == nil {
 			return nil, errors.New("masqIPs can not be empty")
 		}
-		outputPort := types.RouterToSwitchPrefix + nodeName
+		outputPort := types.RouterToSwitchPrefix + bsnc.GetNetworkScopedName(node.Name)
 		dstMac, err := util.GetIfMacAddress(util.GetNetworkScopedK8sMgmtHostIntfName(uint(networkID)))
 		if err != nil {
 			return nil, err
 		}
-		snats = append(snats, libovsdbops.BuildSNATWithMatch(&masqIP.Local, podIP, outputPort, nil, fmt.Sprintf("eth.dst == %s", dstMac)))
+		snats = append(snats, libovsdbops.BuildSNATWithMatch(&masqIP.Local, localPodSubnet, outputPort, nil, fmt.Sprintf("eth.dst == %s", dstMac)))
 	}
 	return snats, nil
+}
+
+func (bsnc *BaseSecondaryNetworkController) addNodeSubnetEgressSNAT(localPodSubnets []*net.IPNet, node *kapi.Node) error {
+	nats, err := bsnc.buildEgressSNAT(localPodSubnets, node)
+	if err != nil {
+		return err
+	}
+	router := &nbdb.LogicalRouter{
+		Name: bsnc.GetNetworkScopedClusterRouterName(),
+	}
+	if err := libovsdbops.CreateOrUpdateNATs(bsnc.nbClient, router, nats...); err != nil {
+		return fmt.Errorf("failed to update SNAT for pod of router: %s, error: %v", bsnc.GetNetworkScopedClusterRouterName(), err)
+	}
+	return nil
 }
 
 // removePodForSecondaryNetwork tried to tear down a pod. It returns nil on success and error on failure;
