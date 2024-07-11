@@ -625,7 +625,7 @@ func (bnc *BaseNetworkController) deleteNamespaceLocked(ns string) (*namespaceIn
 }
 
 func (bnc *BaseNetworkController) syncNodeManagementPort(node *kapi.Node, switchName string, hostSubnets []*net.IPNet, routeHostSubnets bool) ([]net.IP, error) {
-	macAddress, err := util.ParseNodeManagementPortMACAddress(node)
+	macAddress, err := util.ParseNodeManagementPortMACAddresses(node, bnc.GetNetworkName())
 	if err != nil {
 		return nil, err
 	}

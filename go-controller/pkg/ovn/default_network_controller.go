@@ -30,6 +30,7 @@ import (
 	zoneic "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/zone_interconnect"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
@@ -930,7 +931,7 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 				_, failed := h.oc.nodeClusterRouterPortFailed.Load(newNode.Name)
 				clusterRtrSync := failed || nodeChassisChanged(oldNode, newNode) || nodeSubnetChanged
 				_, failed = h.oc.mgmtPortFailed.Load(newNode.Name)
-				mgmtSync := failed || macAddressChanged(oldNode, newNode) || nodeSubnetChanged
+				mgmtSync := failed || macAddressChanged(oldNode, newNode, types.DefaultNetworkName) || nodeSubnetChanged
 				_, failed = h.oc.gatewaysFailed.Load(newNode.Name)
 				gwSync := (failed || gatewayChanged(oldNode, newNode) ||
 					nodeSubnetChanged || hostCIDRsChanged(oldNode, newNode) ||
