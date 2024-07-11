@@ -11,6 +11,9 @@ import (
 
 	nadv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
@@ -599,6 +602,88 @@ func TestIsDefault(t *testing.T) {
 			netInfo, err := NewNetInfo(test.inputNetConf)
 			g.Expect(err).To(gomega.BeNil())
 			g.Expect(netInfo.IsDefault()).To(gomega.Equal(test.expectedDefaultVal))
+		})
+	}
+}
+
+func TestGetPodNADToNetworkMapping(t *testing.T) {
+	const (
+		attachmentName = "attachment1"
+		namespaceName  = "ns1"
+		networkName    = "l3-network"
+	)
+
+	type testConfig struct {
+		desc                          string
+		inputNamespace                string
+		inputNetConf                  *ovncnitypes.NetConf
+		inputPodAnnotations           map[string]string
+		expectedError                 error
+		expectedIsAttachmentRequested bool
+	}
+
+	tests := []testConfig{
+		{
+			desc:                "Looking for a network *not* present in the pod's attachment requests",
+			inputNamespace:      namespaceName,
+			inputPodAnnotations: map[string]string{nadv1.NetworkAttachmentAnnot: "[]"},
+			inputNetConf: &ovncnitypes.NetConf{
+				NetConf:  cnitypes.NetConf{Name: networkName},
+				Topology: ovntypes.Layer3Topology,
+				NADName:  GetNADName(namespaceName, attachmentName),
+			},
+			expectedIsAttachmentRequested: false,
+		},
+		{
+			desc: "Looking for a network present in the pod's attachment requests",
+			inputNetConf: &ovncnitypes.NetConf{
+				NetConf:  cnitypes.NetConf{Name: networkName},
+				Topology: ovntypes.Layer3Topology,
+				NADName:  GetNADName(namespaceName, attachmentName),
+			},
+			inputPodAnnotations: map[string]string{
+				nadv1.NetworkAttachmentAnnot: GetNADName(namespaceName, attachmentName),
+			},
+			expectedIsAttachmentRequested: true,
+		},
+		{
+			desc:           "Multiple attachments to the same network in the same pod are not supported",
+			inputNamespace: namespaceName,
+			inputNetConf: &ovncnitypes.NetConf{
+				NetConf:  cnitypes.NetConf{Name: networkName},
+				Topology: ovntypes.Layer3Topology,
+				NADName:  GetNADName(namespaceName, attachmentName),
+			},
+			inputPodAnnotations: map[string]string{
+				nadv1.NetworkAttachmentAnnot: fmt.Sprintf("%[1]s,%[1]s", GetNADName(namespaceName, attachmentName)),
+			},
+			expectedError: fmt.Errorf("unexpected error: more than one of the same NAD ns1/attachment1 specified for pod ns1/test-pod"),
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.desc, func(t *testing.T) {
+			g := gomega.NewWithT(t)
+			netInfo, err := NewNetInfo(test.inputNetConf)
+			g.Expect(err).To(gomega.BeNil())
+			if test.inputNetConf.NADName != "" {
+				netInfo.AddNADs(test.inputNetConf.NADName)
+			}
+
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        "test-pod",
+					Namespace:   test.inputNamespace,
+					Annotations: test.inputPodAnnotations,
+				},
+			}
+
+			isAttachmentRequested, _, err := GetPodNADToNetworkMapping(pod, netInfo)
+
+			if err != nil {
+				g.Expect(err).To(gomega.MatchError(test.expectedError))
+			}
+			g.Expect(isAttachmentRequested).To(gomega.Equal(test.expectedIsAttachmentRequested))
 		})
 	}
 }
