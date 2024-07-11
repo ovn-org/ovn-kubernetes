@@ -74,7 +74,7 @@ docker_disable_ipv6() {
   # internal bridge has IPv6 disable and can't move the IPv6 from the eth0 interface.
   # We can enable IPv6 always in the container, since the docker setup with IPv4 only
   # is not very common.
-  KIND_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}")
+  KIND_NODES=$(kind_get_nodes)
   for n in $KIND_NODES; do
     $OCI_BIN exec "$n" sysctl --ignore net.ipv6.conf.all.disable_ipv6=0
     $OCI_BIN exec "$n" sysctl --ignore net.ipv6.conf.all.forwarding=1
@@ -167,7 +167,7 @@ install_metallb() {
   # Hence remove node.kubernetes.io/exclude-from-external-load-balancers label from control-plane nodes
   # so that they are also available for advertising bgp routes which are needed for ovnkube's service
   # specific e2e tests.
-  MASTER_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}" | sort | head -n "${KIND_NUM_MASTER}")
+  MASTER_NODES=$(kind_get_nodes | sort | head -n "${KIND_NUM_MASTER}")
   for n in $MASTER_NODES; do
     kubectl label node "$n" node.kubernetes.io/exclude-from-external-load-balancers-
   done
@@ -191,7 +191,7 @@ install_metallb() {
   client_subnets_v6=$(echo "${client_subnets}" | cut -d '#' -f 2)
   echo "client subnet IPv6: ${client_subnets_v6}"
 
-  KIND_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}")
+  KIND_NODES=$(kind_get_nodes)
   for n in ${KIND_NODES}; do
     if [ "$KIND_IPV4_SUPPORT" == true ]; then
         docker exec "${n}" ip route add "${client_subnets_v4}" via "${kind_network_v4}"
@@ -217,7 +217,7 @@ install_plugins() {
   git clone https://github.com/containernetworking/plugins.git
   pushd plugins
   CGO_ENABLED=0 ./build_linux.sh
-  KIND_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}")
+  KIND_NODES=$(kind_get_nodes)
   # Opted for not overwritting the existing plugins
   for node in $KIND_NODES; do
     for plugin in bandwidth bridge dhcp dummy firewall host-device ipvlan macvlan sbr static tuning vlan vrf; do
@@ -383,4 +383,58 @@ install_kubevirt_ipam_controller() {
   manifest="https://raw.githubusercontent.com/kubevirt/ipam-extensions/main/dist/install.yaml"
   run_kubectl apply -f "$manifest"
   kubectl wait -n kubevirt-ipam-controller-system deployment kubevirt-ipam-controller-manager --for condition=Available --timeout 2m
+}
+
+install_multus() {
+  echo "Installing multus-cni daemonset ..."
+  multus_manifest="https://raw.githubusercontent.com/k8snetworkplumbingwg/multus-cni/master/deployments/multus-daemonset.yml"
+  run_kubectl apply -f "$multus_manifest"
+}
+
+install_mpolicy_crd() {
+  echo "Installing multi-network-policy CRD ..."
+  mpolicy_manifest="https://raw.githubusercontent.com/k8snetworkplumbingwg/multi-networkpolicy/master/scheme.yml"
+  run_kubectl apply -f "$mpolicy_manifest"
+}
+
+install_ipamclaim_crd() {
+  echo "Installing IPAMClaim CRD ..."
+  ipamclaims_manifest="https://raw.githubusercontent.com/k8snetworkplumbingwg/ipamclaims/v0.4.0-alpha/artifacts/k8s.cni.cncf.io_ipamclaims.yaml"
+  run_kubectl apply -f "$ipamclaims_manifest"
+}
+
+docker_create_second_disconnected_interface() {
+  echo "adding second interfaces to nodes"
+  local bridge_name="${1:-kindexgw}"
+  echo "bridge: $bridge_name"
+
+  if [ "${OCI_BIN}" = "podman" ]; then
+    # docker and podman do different things with the --internal parameter:
+    # - docker installs iptables rules to drop traffic on a different subnet
+    #   than the bridge and we don't want that.
+    # - podman does not set the bridge as default gateway and we want that.
+    # So we need it with podman but not with docker. Neither allows us to create
+    # a bridge network without IPAM which would be ideal, so perhaps the best
+    # option would be a manual setup.
+    local podman_params="--internal"
+  fi
+
+  # Create the network without subnets; ignore if already exists.
+  "$OCI_BIN" network create --driver=bridge ${podman_params-} "$bridge_name" || true
+
+  KIND_NODES=$(kind_get_nodes)
+  for n in $KIND_NODES; do
+    "$OCI_BIN" network connect "$bridge_name" "$n" || true
+  done
+}
+
+enable_multi_net() {
+  install_multus
+  install_mpolicy_crd
+  install_ipamclaim_crd
+  docker_create_second_disconnected_interface "underlay"  # localnet scenarios require an extra interface
+}
+
+kind_get_nodes() {
+  kind get nodes --name "${KIND_CLUSTER_NAME}" | grep -v external-load-balancer
 }

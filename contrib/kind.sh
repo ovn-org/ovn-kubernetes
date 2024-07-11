@@ -979,24 +979,6 @@ install_ovn() {
   fi
 }
 
-install_multus() {
-  echo "Installing multus-cni daemonset ..."
-  multus_manifest="https://raw.githubusercontent.com/k8snetworkplumbingwg/multus-cni/master/deployments/multus-daemonset.yml"
-  run_kubectl apply -f "$multus_manifest"
-}
-
-install_mpolicy_crd() {
-  echo "Installing multi-network-policy CRD ..."
-  mpolicy_manifest="https://raw.githubusercontent.com/k8snetworkplumbingwg/multi-networkpolicy/master/scheme.yml"
-  run_kubectl apply -f "$mpolicy_manifest"
-}
-
-install_ipamclaim_crd() {
-  echo "Installing IPAMClaim CRD ..."
-  ipamclaims_manifest="https://raw.githubusercontent.com/k8snetworkplumbingwg/ipamclaims/v0.4.0-alpha/artifacts/k8s.cni.cncf.io_ipamclaims.yaml"
-  run_kubectl apply -f "$ipamclaims_manifest"
-}
-
 # install_ipsec will apply the IPsec DaemonSet, create a CA that can be used by the IPsec pods. It will then add it to
 # configmap -n ovn-kubernetes signer-ca. After that, it will monitor all CSRs that are pending and it will sign those
 # with the CA cert. After each iteration, it will check if the ovn-ipsec DaemonSet pods rolled out successfully.
@@ -1055,31 +1037,6 @@ docker_create_second_interface() {
   KIND_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}")
   for n in $KIND_NODES; do
     "$OCI_BIN" network connect kindexgw "$n"
-  done
-}
-
-docker_create_second_disconnected_interface() {
-  echo "adding second interfaces to nodes"
-  local bridge_name="${1:-kindexgw}"
-  echo "bridge: $bridge_name"
-
-  if [ "${OCI_BIN}" = "podman" ]; then
-    # docker and podman do different things with the --internal parameter:
-    # - docker installs iptables rules to drop traffic on a different subnet
-    #   than the bridge and we don't want that.
-    # - podman does not set the bridge as default gateway and we want that.
-    # So we need it with podman but not with docker. Neither allows us to create
-    # a bridge network without IPAM which would be ideal, so perhaps the best
-    # option would be a manual setup.
-    local podman_params="--internal"
-  fi
-
-  # Create the network without subnets; ignore if already exists.
-  "$OCI_BIN" network create --driver=bridge ${podman_params-} "$bridge_name" || true
-
-  KIND_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}")
-  for n in $KIND_NODES; do
-    "$OCI_BIN" network connect "$bridge_name" "$n" || true
   done
 }
 
@@ -1177,10 +1134,7 @@ if [ "$KIND_INSTALL_INGRESS" == true ]; then
   install_ingress
 fi
 if [ "$ENABLE_MULTI_NET" == true ]; then
-  install_multus
-  install_mpolicy_crd
-  install_ipamclaim_crd
-  docker_create_second_disconnected_interface "underlay"  # localnet scenarios require an extra interface
+  enable_multi_net
 fi
 kubectl_wait_pods
 sleep_until_pods_settle
