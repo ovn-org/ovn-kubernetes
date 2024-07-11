@@ -20,6 +20,7 @@ import (
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
+	"github.com/containernetworking/plugins/pkg/ip"
 	v1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	honode "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni"
@@ -40,7 +41,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 
-	"github.com/containernetworking/plugins/pkg/ip"
 	"github.com/vishvananda/netlink"
 )
 
@@ -704,6 +704,10 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		nc.routeManager.Run(nc.stopChan, 4*time.Minute)
 	}()
 
+	if err = configureGlobalForwarding(); err != nil {
+		return err
+	}
+
 	// Bootstrap flows in OVS if just normal flow is present
 	if err := bootstrapOVSFlows(); err != nil {
 		return fmt.Errorf("failed to bootstrap OVS flows: %w", err)
@@ -1329,4 +1333,44 @@ func DummyNextHopIPs() []net.IP {
 		nextHops = append(nextHops, config.Gateway.MasqueradeIPs.V6DummyNextHopMasqueradeIP)
 	}
 	return nextHops
+}
+
+// configureGlobalForwarding configures the global forwarding settings.
+// It sets the FORWARD policy to DROP/ACCEPT based on the config.Gateway.DisableForwarding value for all enabled IP families.
+// For IPv6 it additionally always enables the global forwarding.
+func configureGlobalForwarding() error {
+	// Global forwarding works differently for IPv6:
+	//   conf/all/forwarding - BOOLEAN
+	//    Enable global IPv6 forwarding between all interfaces.
+	//	  IPv4 and IPv6 work differently here; e.g. netfilter must be used
+	//	  to control which interfaces may forward packets and which not.
+	// https://www.kernel.org/doc/Documentation/networking/ip-sysctl.txt
+	//
+	// It is not possible to configure the IPv6 forwarding per interface by
+	// setting the net.ipv6.conf.<ifname>.forwarding sysctl. Instead,
+	// the opposite approach is required where the global forwarding
+	// is enabled and an iptables rule is added to restrict it by default.
+	if config.IPv6Mode {
+		if err := ip.EnableIP6Forward(); err != nil {
+			return fmt.Errorf("could not set the correct global forwarding value for ipv6:  %w", err)
+		}
+
+	}
+
+	for _, proto := range clusterIPTablesProtocols() {
+		ipt, err := util.GetIPTablesHelper(proto)
+		if err != nil {
+			return fmt.Errorf("failed to get the iptables helper: %w", err)
+		}
+
+		target := "ACCEPT"
+		if config.Gateway.DisableForwarding {
+			target = "DROP"
+
+		}
+		if err := ipt.ChangePolicy("filter", "FORWARD", target); err != nil {
+			return fmt.Errorf("failed to change the forward policy to %q: %w", target, err)
+		}
+	}
+	return nil
 }
