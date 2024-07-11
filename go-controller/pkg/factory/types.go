@@ -22,7 +22,7 @@ type ObjectCacheInterface interface {
 	GetNodes() ([]*kapi.Node, error)
 	GetNode(name string) (*kapi.Node, error)
 	GetService(namespace, name string) (*kapi.Service, error)
-	GetEndpointSlices(namespace, svcName string) ([]*discovery.EndpointSlice, error)
+	GetServiceEndpointSlices(namespace, svcName string) ([]*discovery.EndpointSlice, error)
 	GetNamespace(name string) (*kapi.Namespace, error)
 	GetNamespaces() ([]*kapi.Namespace, error)
 }
@@ -70,8 +70,8 @@ type NodeWatchFactory interface {
 
 	GetService(namespace, name string) (*kapi.Service, error)
 	GetServices() ([]*kapi.Service, error)
-	GetEndpointSlices(namespace, svcName string) ([]*discovery.EndpointSlice, error)
 	GetEndpointSlice(namespace, name string) (*discovery.EndpointSlice, error)
+	GetServiceEndpointSlices(namespace, svcName string) ([]*discovery.EndpointSlice, error)
 
 	GetNamespace(name string) (*kapi.Namespace, error)
 }

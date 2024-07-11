@@ -46,7 +46,7 @@ func (l *loadBalancerHealthChecker) AddService(svc *kapi.Service) error {
 		if err := l.server.SyncServices(l.services); err != nil {
 			return fmt.Errorf("unable to sync service %v; err: %v", name, err)
 		}
-		epSlices, err := l.watchFactory.GetEndpointSlices(svc.Namespace, svc.Name)
+		epSlices, err := l.watchFactory.GetServiceEndpointSlices(svc.Namespace, svc.Name)
 		if err != nil {
 			return fmt.Errorf("could not fetch endpointslices "+
 				"for service %s/%s during health check update service: %v",
@@ -103,7 +103,7 @@ func (l *loadBalancerHealthChecker) SyncEndPointSlices(epSlice *discovery.Endpoi
 	if err != nil {
 		return fmt.Errorf("skipping %s/%s: %v", epSlice.Namespace, epSlice.Name, err)
 	}
-	epSlices, err := l.watchFactory.GetEndpointSlices(epSlice.Namespace, epSlice.Labels[discovery.LabelServiceName])
+	epSlices, err := l.watchFactory.GetServiceEndpointSlices(epSlice.Namespace, epSlice.Labels[discovery.LabelServiceName])
 	if err != nil {
 		// should be a rare occurence
 		return fmt.Errorf("could not fetch all endpointslices for service %s during health check", namespacedName.String())

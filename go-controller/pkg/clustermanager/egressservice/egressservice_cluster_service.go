@@ -118,7 +118,7 @@ func (c *Controller) onServiceDelete(obj interface{}) {
 // When all the endpoints of the given service are host-networked,
 // the function returns an empty slice as there is no point of allocating such service.
 func (c *Controller) backendNodesFor(svc *corev1.Service) ([]string, error) {
-	endpointSlices, err := c.watchFactory.GetEndpointSlices(svc.Namespace, svc.Name)
+	endpointSlices, err := c.watchFactory.GetServiceEndpointSlices(svc.Namespace, svc.Name)
 	if err != nil {
 		return nil, err
 	}

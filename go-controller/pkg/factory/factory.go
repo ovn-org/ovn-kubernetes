@@ -1328,13 +1328,22 @@ func (wf *WatchFactory) GetEndpointSlice(namespace, name string) (*discovery.End
 	return endpointSliceLister.EndpointSlices(namespace).Get(name)
 }
 
-// GetServiceEndpointSlice returns the endpointSlice associated with a service
-func (wf *WatchFactory) GetEndpointSlices(namespace, svcName string) ([]*discovery.EndpointSlice, error) {
-	esLabelSelector := labels.Set(map[string]string{
-		discovery.LabelServiceName: svcName,
-	}).AsSelectorPreValidated()
+// GetEndpointSlicesBySelector returns a list of EndpointSlices in a given namespace by the label selector
+func (wf *WatchFactory) GetEndpointSlicesBySelector(namespace string, labelSelector metav1.LabelSelector) ([]*discovery.EndpointSlice, error) {
+	selector, err := metav1.LabelSelectorAsSelector(&labelSelector)
+	if err != nil {
+		return nil, err
+	}
 	endpointSliceLister := wf.informers[EndpointSliceType].lister.(discoverylisters.EndpointSliceLister)
-	return endpointSliceLister.EndpointSlices(namespace).List(esLabelSelector)
+	return endpointSliceLister.EndpointSlices(namespace).List(selector)
+}
+
+// GetServiceEndpointSlices returns the endpointSlice associated with a service
+func (wf *WatchFactory) GetServiceEndpointSlices(namespace, svcName string) ([]*discovery.EndpointSlice, error) {
+	return wf.GetEndpointSlicesBySelector(namespace,
+		metav1.LabelSelector{MatchLabels: map[string]string{
+			discovery.LabelServiceName: svcName,
+		}})
 }
 
 // GetNamespaces returns a list of namespaces in the cluster
