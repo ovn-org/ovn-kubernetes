@@ -1055,7 +1055,6 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		// conntrack on every node. In multi-zone-interconnect case, we will handle the flushing
 		// directly on the ovnkube-controller code to avoid an extra namespace annotation
 		if !config.OVNKubernetesFeature.EnableInterconnect || sbZone == types.OvnDefaultZone {
-			util.SetARPTimeout()
 			err := nc.WatchNamespaces()
 			if err != nil {
 				return fmt.Errorf("failed to watch namespaces: %w", err)
