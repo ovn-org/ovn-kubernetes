@@ -362,7 +362,8 @@ func GetActiveNetworkForNamespace(namespace string, nadLister nadlister.NetworkA
 	for _, nad := range namespaceNADs {
 		nadInfo, err := ParseNADInfo(nad)
 		if err != nil {
-			return activeNetwork, err
+			klog.Warningf("Skipping nad '%s/%s' as active network after failing parsing it with %v", nad.Namespace, nad.Name, err)
+			continue
 		}
 		if nadInfo.IsPrimaryNetwork() {
 			activeNetwork = nadInfo.GetNetworkName()

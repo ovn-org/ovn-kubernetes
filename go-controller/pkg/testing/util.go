@@ -27,11 +27,15 @@ func GenerateNAD(networkName, name, namespace, topology, cidr, role string) *nad
 		fmt.Sprintf("%s/%s", namespace, name),
 		role,
 	)
+	return GenerateNADWithConfig(name, namespace, nadSpec)
+}
+
+func GenerateNADWithConfig(name, namespace, config string) *nadapi.NetworkAttachmentDefinition {
 	return &nadapi.NetworkAttachmentDefinition{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: namespace,
 		},
-		Spec: nadapi.NetworkAttachmentDefinitionSpec{Config: nadSpec},
+		Spec: nadapi.NetworkAttachmentDefinitionSpec{Config: config},
 	}
 }

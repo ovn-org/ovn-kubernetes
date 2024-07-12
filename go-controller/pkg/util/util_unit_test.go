@@ -282,8 +282,15 @@ func TestGetActiveNetworkForNamespace(t *testing.T) {
 			nads: []*nadapi.NetworkAttachmentDefinition{
 				ovntest.GenerateNAD("surya", "quique", "ns1",
 					types.Layer3Topology, "100.128.0.0/16", types.NetworkRolePrimary),
-				ovntest.GenerateNAD("surya", "quique", "ns2",
+				ovntest.GenerateNAD("surya", "quique1", "ns1",
 					types.Layer2Topology, "10.100.200.0/24", types.NetworkRoleSecondary),
+				ovntest.GenerateNADWithConfig("quique2", "ns1", `
+{
+        "cniVersion": "whocares",
+        "nme": bad,
+        "typ": bad,
+}
+`),
 			},
 			expectedErr:           nil,
 			namespace:             "ns1",
