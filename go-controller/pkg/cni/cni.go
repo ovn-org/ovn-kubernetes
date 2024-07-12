@@ -174,9 +174,24 @@ func (pr *PodRequest) cmdAddWithGetCNIResultFunc(kubeAuth *KubeAPIAuth, clientse
 			if err != nil {
 				return nil, err
 			}
-			if _, err := getCNIResultFn(primaryUDNPodRequest, clientset, primaryUDNPodInfo); err != nil {
+			primaryUDNResult, err := getCNIResultFn(primaryUDNPodRequest, clientset, primaryUDNPodInfo)
+			if err != nil {
 				return nil, err
 			}
+
+			defaulClusterNetworkResult := response.Result
+			originalNumberOfIfaces := len(primaryUDNResult.Interfaces)
+			response.Result.Interfaces = append(primaryUDNResult.Interfaces, response.Result.Interfaces...)
+			for i := range response.Result.IPs {
+				ifaceIPConfig := defaulClusterNetworkResult.IPs[i].Copy()
+
+				if ifaceIPConfig.Interface != nil {
+					ifaceIPConfig.Interface = current.Int(*ifaceIPConfig.Interface + originalNumberOfIfaces)
+				}
+				response.Result.IPs = append(primaryUDNResult.IPs, ifaceIPConfig)
+			}
+
+			response.Result.Routes = append(primaryUDNResult.Routes, response.Result.Routes...)
 		}
 	} else {
 		response.PodIFInfo = podInterfaceInfo
