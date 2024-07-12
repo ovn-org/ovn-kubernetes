@@ -10,9 +10,11 @@ import (
 	"testing"
 
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/util/sets"
 
 	v1nadmocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
 	mock_k8s_io_utils_exec "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/utils/exec"
@@ -246,11 +248,13 @@ func TestFilterIPsSlice(t *testing.T) {
 
 func TestGetActiveNetworkForNamespace(t *testing.T) {
 
+	config.OVNKubernetesFeature.EnableMultiNetwork = true
+	config.OVNKubernetesFeature.EnableNetworkSegmentation = true
 	var tests = []struct {
 		name                  string
 		nads                  []*nadapi.NetworkAttachmentDefinition
 		namespace             string
-		expectedActiveNetwork string
+		expectedActiveNetwork NetInfo
 		expectedErr           error
 	}{
 		{
@@ -261,9 +265,9 @@ func TestGetActiveNetworkForNamespace(t *testing.T) {
 				ovntest.GenerateNAD("surya", "miguel", "default",
 					types.Layer2Topology, "10.100.200.0/24", types.NetworkRolePrimary),
 			},
-			expectedErr:           nil,
+			expectedErr:           &UnknownActiveNetworkError{namespace: "default"},
 			namespace:             "default",
-			expectedActiveNetwork: types.UnknownNetworkName,
+			expectedActiveNetwork: nil,
 		},
 		{
 			name: "0 NADs found in the provided namespace",
@@ -275,7 +279,7 @@ func TestGetActiveNetworkForNamespace(t *testing.T) {
 			},
 			expectedErr:           nil,
 			namespace:             "default",
-			expectedActiveNetwork: types.DefaultNetworkName,
+			expectedActiveNetwork: &DefaultNetInfo{},
 		},
 		{
 			name: "exactly 1 primary NAD found in the provided namespace",
@@ -292,28 +296,39 @@ func TestGetActiveNetworkForNamespace(t *testing.T) {
 }
 `),
 			},
-			expectedErr:           nil,
-			namespace:             "ns1",
-			expectedActiveNetwork: "surya",
+			expectedErr: nil,
+			namespace:   "ns1",
+			expectedActiveNetwork: &secondaryNetInfo{
+				netName:        "surya",
+				primaryNetwork: true,
+				topology:       "layer3",
+				nadNames:       sets.New("ns1/quique"),
+				mtu:            1300,
+				ipv4mode:       true,
+				subnets: []config.CIDRNetworkEntry{{
+					CIDR:             ovntest.MustParseIPNet("100.128.0.0/16"),
+					HostSubnetLength: 24,
+				}},
+			},
 		},
 		{
 			name:                  "no NADs found in provided namespace",
 			nads:                  []*nadapi.NetworkAttachmentDefinition{},
 			expectedErr:           nil,
 			namespace:             "default",
-			expectedActiveNetwork: types.DefaultNetworkName,
+			expectedActiveNetwork: &DefaultNetInfo{},
 		},
 		{
 			name: "no primary NADs found in the provided namespace",
 			nads: []*nadapi.NetworkAttachmentDefinition{
 				ovntest.GenerateNAD("quique", "miguel", "default",
-					types.Layer3Topology, "100.128.0.0/16", types.NetworkRoleSecondary),
+					types.Layer3Topology, "100.128.0.0/16/24", types.NetworkRoleSecondary),
 				ovntest.GenerateNAD("quique", "miguel", "default",
 					types.Layer2Topology, "10.100.200.0/24", types.NetworkRoleSecondary),
 			},
 			expectedErr:           nil,
 			namespace:             "default",
-			expectedActiveNetwork: types.DefaultNetworkName,
+			expectedActiveNetwork: &DefaultNetInfo{},
 		},
 	}
 

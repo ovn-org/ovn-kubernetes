@@ -16,7 +16,7 @@ import (
 )
 
 // wait on a certain pod annotation related condition
-type podAnnotWaitCond func(map[string]string, string) (*util.PodAnnotation, bool)
+type podAnnotWaitCond = func(map[string]string, string) (*util.PodAnnotation, bool)
 
 // isOvnReady is a wait condition for OVN master to set pod-networks annotation
 func isOvnReady(podAnnotation map[string]string, nadName string) (*util.PodAnnotation, bool) {

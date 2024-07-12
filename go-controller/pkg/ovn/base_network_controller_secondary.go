@@ -235,7 +235,12 @@ func (bsnc *BaseSecondaryNetworkController) ensurePodForSecondaryNetwork(pod *ka
 		return err
 	}
 
-	on, networkMap, err := util.GetPodNADToNetworkMapping(pod, bsnc.NetInfo)
+	activeNetwork, err := bsnc.getActiveNetworkForNamespace(pod.Namespace)
+	if err != nil {
+		return fmt.Errorf("failed looking for the active network at namespace '%s': %w", pod.Namespace, err)
+	}
+
+	on, networkMap, err := util.GetPodNADToNetworkMappingWithActiveNetwork(pod, bsnc.NetInfo, activeNetwork)
 	if err != nil {
 		// configuration error, no need to retry, do not return error
 		klog.Errorf("Error getting network-attachment for pod %s/%s network %s: %v",
@@ -409,12 +414,18 @@ func (bsnc *BaseSecondaryNetworkController) removePodForSecondaryNetwork(pod *ka
 	if portInfoMap == nil {
 		portInfoMap = map[string]*lpInfo{}
 	}
+
+	activeNetwork, err := bsnc.getActiveNetworkForNamespace(pod.Namespace)
+	if err != nil {
+		return fmt.Errorf("failed looking for the active network at namespace '%s': %w", pod.Namespace, err)
+	}
+
 	for nadName := range podNetworks {
 		if !bsnc.HasNAD(nadName) {
 			continue
 		}
 
-		_, networkMap, err := util.GetPodNADToNetworkMapping(pod, bsnc.NetInfo)
+		_, networkMap, err := util.GetPodNADToNetworkMappingWithActiveNetwork(pod, bsnc.NetInfo, activeNetwork)
 		if err != nil {
 			return err
 		}
@@ -487,7 +498,13 @@ func (bsnc *BaseSecondaryNetworkController) syncPodsForSecondaryNetwork(pods []i
 		if !ok {
 			return fmt.Errorf("spurious object in syncPods: %v", podInterface)
 		}
-		on, networkMap, err := util.GetPodNADToNetworkMapping(pod, bsnc.NetInfo)
+
+		activeNetwork, err := bsnc.getActiveNetworkForNamespace(pod.Namespace)
+		if err != nil {
+			return fmt.Errorf("failed looking for the active network at namespace '%s': %w", pod.Namespace, err)
+		}
+
+		on, networkMap, err := util.GetPodNADToNetworkMappingWithActiveNetwork(pod, bsnc.NetInfo, activeNetwork)
 		if err != nil || !on {
 			if err != nil {
 				klog.Warningf("Failed to determine if pod %s/%s needs to be plumb interface on network %s: %v",

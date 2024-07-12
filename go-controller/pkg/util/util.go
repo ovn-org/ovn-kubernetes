@@ -341,41 +341,64 @@ func IsClusterIP(svcVIP string) bool {
 	return false
 }
 
-// GetActiveNetworkForNamespace returns the active network for the given namespace
-// based on the NADs present in that namespace.
+type UnknownActiveNetworkError struct {
+	namespace string
+}
+
+func (m UnknownActiveNetworkError) Error() string {
+	return fmt.Sprintf("unable to determine what is the "+
+		"primary role network for namespace '%s'; please remove multiple primary role network"+
+		"NADs from it", m.namespace)
+}
+
+func IsUnknownActiveNetworkError(err error) bool {
+	return errors.As(err, &UnknownActiveNetworkError{})
+}
+
+// GetActiveNetworkForNamespace returns the NetInfo struct of the active network
+// for the given namespace based on the NADs present in that namespace.
 // active network here means the network managing this namespace and responsible for
 // plumbing all the entities for this namespace
 // this is:
-// 1) "default" if there are no NADs in the namespace OR all NADs are primaryNetwork:false
-// 2) "<secondary-network-name>" if there is exactly ONE NAD with primaryNetwork:true
-// 3) "unknown" under all other conditions
-func GetActiveNetworkForNamespace(namespace string, nadLister nadlister.NetworkAttachmentDefinitionLister) (string, error) {
-	var activeNetwork string
+// 1) &DefaultNetInfo if there are no NADs in the namespace OR all NADs are Role: "primary"
+// 2) &NetConf{Name: "<secondary-network-name>"} if there is exactly ONE NAD with Role: "primary"
+// 3) Multiple primary network role NADs ActiveNetworkUnknown error
+// 4) error under all other conditions
+func GetActiveNetworkForNamespace(namespace string, nadLister nadlister.NetworkAttachmentDefinitionLister) (NetInfo, error) {
+	if nadLister == nil {
+		return &DefaultNetInfo{}, nil
+	}
+	if !IsNetworkSegmentationSupportEnabled() {
+		return &DefaultNetInfo{}, nil
+	}
 	namespaceNADs, err := nadLister.NetworkAttachmentDefinitions(namespace).List(labels.Everything())
 	if err != nil {
-		return activeNetwork, err
+		return nil, err
 	}
 	if len(namespaceNADs) == 0 {
-		return types.DefaultNetworkName, nil
+		return &DefaultNetInfo{}, nil
 	}
 	numberOfPrimaryNetworks := 0
+	var primaryNetwork NetInfo
 	for _, nad := range namespaceNADs {
-		nadInfo, err := ParseNADInfo(nad)
+		netInfo, err := ParseNADInfo(nad)
 		if err != nil {
 			klog.Warningf("Skipping nad '%s/%s' as active network after failing parsing it with %v", nad.Namespace, nad.Name, err)
 			continue
 		}
-		if nadInfo.IsPrimaryNetwork() {
-			activeNetwork = nadInfo.GetNetworkName()
+
+		if netInfo.IsPrimaryNetwork() {
+			primaryNetwork = netInfo
 			numberOfPrimaryNetworks++
+			primaryNetwork.AddNADs(GetNADName(nad.Namespace, nad.Name))
 		}
 	}
 	if numberOfPrimaryNetworks == 1 {
-		return activeNetwork, nil
+		return primaryNetwork, nil
 	} else if numberOfPrimaryNetworks == 0 {
-		return types.DefaultNetworkName, nil
+		return &DefaultNetInfo{}, nil
 	}
-	return types.UnknownNetworkName, nil
+	return nil, &UnknownActiveNetworkError{namespace: namespace}
 }
 
 func GetSecondaryNetworkLogicalPortName(podNamespace, podName, nadName string) string {

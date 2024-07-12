@@ -8,7 +8,7 @@ import (
 )
 
 func GenerateNAD(networkName, name, namespace, topology, cidr, role string) *nadapi.NetworkAttachmentDefinition {
-	nadSpec := fmt.Sprintf(
+	return GenerateNADWithConfig(name, namespace, fmt.Sprintf(
 		`
 {
         "cniVersion": "0.4.0",
@@ -26,8 +26,27 @@ func GenerateNAD(networkName, name, namespace, topology, cidr, role string) *nad
 		cidr,
 		fmt.Sprintf("%s/%s", namespace, name),
 		role,
-	)
-	return GenerateNADWithConfig(name, namespace, nadSpec)
+	))
+}
+func GenerateNADWithoutMTU(networkName, name, namespace, topology, cidr, role string) *nadapi.NetworkAttachmentDefinition {
+	return GenerateNADWithConfig(name, namespace, fmt.Sprintf(
+		`
+{
+        "cniVersion": "0.4.0",
+        "name": %q,
+        "type": "ovn-k8s-cni-overlay",
+        "topology":%q,
+        "subnets": %q,
+        "netAttachDefName": %q,
+        "role": %q
+}
+`,
+		networkName,
+		topology,
+		cidr,
+		fmt.Sprintf("%s/%s", namespace, name),
+		role,
+	))
 }
 
 func GenerateNADWithConfig(name, namespace, config string) *nadapi.NetworkAttachmentDefinition {
