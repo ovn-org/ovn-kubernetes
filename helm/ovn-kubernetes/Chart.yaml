@@ -4,7 +4,7 @@ description: Helm chart to deploy ovn-kubernetes cni
 type: application
 version: 1.0.0
 appVersion: "1.0.0"
-home: https://www.ovn.org/
+home: https://ovn-kubernetes.io/
 icon: https://www.ovn.org/images/ovn-logo.png
 sources:
   - https://github.com/ovn-org/ovn-kubernetes
