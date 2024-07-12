@@ -32,7 +32,7 @@ spec:
         kubernetes.io/os: "linux"
         ovn-db-pod: "true"
     spec:
-      {{- if hasKey .Values.global "imagePullSecretName" }}
+      {{- if .Values.global.imagePullSecretName }}
       imagePullSecrets:
       - name: {{ .Values.global.imagePullSecretName }}
       {{- end }}
