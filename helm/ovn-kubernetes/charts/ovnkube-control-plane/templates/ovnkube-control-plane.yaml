@@ -31,7 +31,7 @@ spec:
         type: infra
         kubernetes.io/os: "linux"
     spec:
-      {{- if hasKey .Values.global "imagePullSecretName" }}
+      {{- if .Values.global.imagePullSecretName }}
       imagePullSecrets:
       - name: {{ .Values.global.imagePullSecretName }}
       {{- end }}
