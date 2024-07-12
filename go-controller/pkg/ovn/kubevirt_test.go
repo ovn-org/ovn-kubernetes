@@ -7,12 +7,13 @@ import (
 	"strings"
 	"time"
 
-	. "github.com/onsi/ginkgo"
-	. "github.com/onsi/ginkgo/extensions/table"
+	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	kubevirtv1 "kubevirt.io/api/core/v1"
 
 	"github.com/urfave/cli/v2"
+
+	"k8s.io/utils/pointer"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kubevirt"
@@ -22,7 +23,6 @@ import (
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"k8s.io/utils/pointer"
 
 	corev1 "k8s.io/api/core/v1"
 	kapi "k8s.io/api/core/v1"

@@ -26,7 +26,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	utilnet "k8s.io/utils/net"
 
-	"github.com/onsi/ginkgo"
+	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 	"github.com/urfave/cli/v2"
 )

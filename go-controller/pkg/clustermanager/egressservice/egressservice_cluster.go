@@ -138,11 +138,14 @@ func NewController(
 	}
 
 	c.endpointSlicesSynced = wf.EndpointSliceInformer().HasSynced
-	_, err = wf.EndpointSliceInformer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
-		AddFunc:    c.onEndpointSliceAdd,
-		UpdateFunc: c.onEndpointSliceUpdate,
-		DeleteFunc: c.onEndpointSliceDelete,
-	}))
+
+	_, err = wf.EndpointSliceInformer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(
+		// TODO: Stop ignoring mirrored EndpointSlices and add support for user-defined networks
+		util.GetDefaultEndpointSlicesEventHandler(cache.ResourceEventHandlerFuncs{
+			AddFunc:    c.onEndpointSliceAdd,
+			UpdateFunc: c.onEndpointSliceUpdate,
+			DeleteFunc: c.onEndpointSliceDelete,
+		})))
 	if err != nil {
 		return nil, err
 	}

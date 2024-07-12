@@ -1,12 +1,15 @@
 package clustermanager
 
 import (
+	"context"
 	"net"
 
+	nadfake "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/fake"
 	"github.com/onsi/gomega"
 	ocpcloudnetworkapi "github.com/openshift/api/cloudnetwork/v1"
 	cloudservicefake "github.com/openshift/client-go/cloudnetwork/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/egressservice"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/endpointslicemirror"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressip "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	egressipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
@@ -25,6 +28,7 @@ type FakeClusterManager struct {
 	watcher      *factory.WatchFactory
 	eIPC         *egressIPClusterController
 	esvc         *egressservice.Controller
+	epsMirror    *endpointslicemirror.Controller
 	fakeRecorder *record.FakeRecorder
 }
 
@@ -60,6 +64,9 @@ func (o *FakeClusterManager) start(objects ...runtime.Object) {
 		EgressServiceClient: egresssvcfake.NewSimpleClientset(egressSvcObjects...),
 		CloudNetworkClient:  cloudservicefake.NewSimpleClientset(cloudObjects...),
 	}
+	if util.IsNetworkSegmentationSupportEnabled() {
+		o.fakeClient.NetworkAttchDefClient = nadfake.NewSimpleClientset()
+	}
 	o.init()
 }
 
@@ -81,6 +88,13 @@ func (o *FakeClusterManager) init() {
 		err = o.esvc.Start(1)
 		gomega.Expect(err).ToNot(gomega.HaveOccurred())
 	}
+	if util.IsNetworkSegmentationSupportEnabled() {
+		o.epsMirror, err = endpointslicemirror.NewController(o.fakeClient, o.watcher)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+		err = o.epsMirror.Start(context.TODO(), 1)
+		gomega.Expect(err).ToNot(gomega.HaveOccurred())
+	}
 }
 
 func (o *FakeClusterManager) shutdown() {
@@ -90,5 +104,8 @@ func (o *FakeClusterManager) shutdown() {
 	}
 	if config.OVNKubernetesFeature.EnableEgressService {
 		o.esvc.Stop()
+	}
+	if util.IsNetworkSegmentationSupportEnabled() {
+		o.epsMirror.Stop()
 	}
 }

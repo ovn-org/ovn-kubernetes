@@ -192,11 +192,14 @@ func (c *Controller) Run(workers int, stopCh <-chan struct{}, runRepair, useLBGr
 	}
 
 	klog.Info("Setting up event handlers for endpoint slices")
-	endpointHandler, err := c.endpointSliceInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
-		AddFunc:    c.onEndpointSliceAdd,
-		UpdateFunc: c.onEndpointSliceUpdate,
-		DeleteFunc: c.onEndpointSliceDelete,
-	}))
+	endpointHandler, err := c.endpointSliceInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(
+		// Filter out objects without the default serviceName label to exclude mirrored EndpointSlices
+		// This controller instance only handles services in the default cluster network
+		util.GetDefaultEndpointSlicesEventHandler(cache.ResourceEventHandlerFuncs{
+			AddFunc:    c.onEndpointSliceAdd,
+			UpdateFunc: c.onEndpointSliceUpdate,
+			DeleteFunc: c.onEndpointSliceDelete,
+		})))
 	if err != nil {
 		return err
 	}

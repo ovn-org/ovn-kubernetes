@@ -978,10 +978,14 @@ ovn_enable_interconnect=${ovn_enable_interconnect} \
 ovn_enable_ovnkube_identity=${ovn_enable_ovnkube_identity} \
   jinjanate ../templates/rbac-ovnkube-node.yaml.j2 -o ${output_dir}/rbac-ovnkube-node.yaml
 
+ovn_network_segmentation_enable=${ovn_network_segmentation_enable} \
+  jinjanate ../templates/rbac-ovnkube-cluster-manager.yaml.j2 -o ${output_dir}/rbac-ovnkube-cluster-manager.yaml
+
+ovn_network_segmentation_enable=${ovn_network_segmentation_enable} \
+  jinjanate ../templates/rbac-ovnkube-master.yaml.j2 -o ${output_dir}/rbac-ovnkube-master.yaml
+
 cp ../templates/rbac-ovnkube-identity.yaml.j2 ${output_dir}/rbac-ovnkube-identity.yaml
-cp ../templates/rbac-ovnkube-master.yaml.j2 ${output_dir}/rbac-ovnkube-master.yaml
 cp ../templates/rbac-ovnkube-db.yaml.j2 ${output_dir}/rbac-ovnkube-db.yaml
-cp ../templates/rbac-ovnkube-cluster-manager.yaml.j2 ${output_dir}/rbac-ovnkube-cluster-manager.yaml
 cp ../templates/ovnkube-monitor.yaml.j2 ${output_dir}/ovnkube-monitor.yaml
 cp ../templates/k8s.ovn.org_egressfirewalls.yaml.j2 ${output_dir}/k8s.ovn.org_egressfirewalls.yaml
 cp ../templates/k8s.ovn.org_egressips.yaml.j2 ${output_dir}/k8s.ovn.org_egressips.yaml

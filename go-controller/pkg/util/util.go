@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"golang.org/x/exp/constraints"
+	"k8s.io/client-go/tools/cache"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"k8s.io/apimachinery/pkg/labels"
@@ -23,6 +24,7 @@ import (
 
 	"github.com/urfave/cli/v2"
 	v1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
@@ -341,40 +343,60 @@ func IsClusterIP(svcVIP string) bool {
 	return false
 }
 
-// GetActiveNetworkForNamespace returns the active network for the given namespace
-// based on the NADs present in that namespace.
+type UnknownActiveNetworkError struct {
+	namespace string
+}
+
+func (m UnknownActiveNetworkError) Error() string {
+	return fmt.Sprintf("unable to determine what is the"+
+		"primary role network for namespace '%s'; please remove multiple primary role network"+
+		"NADs from it", m.namespace)
+}
+
+func IsUnknownActiveNetworkError(err error, namespace string) bool {
+	return errors.As(err, &UnknownActiveNetworkError{namespace: namespace})
+}
+
+// GetActiveNetworkForNamespace returns the NetInfo struct of the active network
+// for the given namespace based on the NADs present in that namespace.
 // active network here means the network managing this namespace and responsible for
 // plumbing all the entities for this namespace
 // this is:
-// 1) "default" if there are no NADs in the namespace OR all NADs are primaryNetwork:false
-// 2) "<secondary-network-name>" if there is exactly ONE NAD with primaryNetwork:true
-// 3) "unknown" under all other conditions
-func GetActiveNetworkForNamespace(namespace string, nadLister nadlister.NetworkAttachmentDefinitionLister) (string, error) {
-	var activeNetwork string
+// 1) &DefaultNetInfo if there are no NADs in the namespace OR all NADs are Role: "primary"
+// 2) &NetConf{Name: "<secondary-network-name>"} if there is exactly ONE NAD with Role: "primary"
+// 3) Multiple primary network role NADs ActiveNetworkUnknown error
+// 4) error under all other conditions
+func GetActiveNetworkForNamespace(namespace string, nadLister nadlister.NetworkAttachmentDefinitionLister) (NetInfo, error) {
+	if !IsNetworkSegmentationSupportEnabled() {
+		return &DefaultNetInfo{}, nil
+	}
 	namespaceNADs, err := nadLister.NetworkAttachmentDefinitions(namespace).List(labels.Everything())
 	if err != nil {
-		return activeNetwork, err
+		return nil, err
 	}
 	if len(namespaceNADs) == 0 {
-		return types.DefaultNetworkName, nil
+		return &DefaultNetInfo{}, nil
 	}
 	numberOfPrimaryNetworks := 0
+	var primaryNetwork NetInfo
 	for _, nad := range namespaceNADs {
-		nadInfo, err := ParseNADInfo(nad)
+		netInfo, err := ParseNADInfo(nad)
 		if err != nil {
-			return activeNetwork, err
+			return nil, err
 		}
-		if nadInfo.IsPrimaryNetwork() {
-			activeNetwork = nadInfo.GetNetworkName()
+
+		if netInfo.IsPrimaryNetwork() {
+			primaryNetwork = netInfo
 			numberOfPrimaryNetworks++
+			primaryNetwork.AddNADs(GetNADName(nad.Namespace, nad.Name))
 		}
 	}
 	if numberOfPrimaryNetworks == 1 {
-		return activeNetwork, nil
+		return primaryNetwork, nil
 	} else if numberOfPrimaryNetworks == 0 {
-		return types.DefaultNetworkName, nil
+		return &DefaultNetInfo{}, nil
 	}
-	return types.UnknownNetworkName, nil
+	return nil, &UnknownActiveNetworkError{namespace: namespace}
 }
 
 func GetSecondaryNetworkLogicalPortName(podNamespace, podName, nadName string) string {
@@ -449,4 +471,38 @@ func GenerateId(length int) string {
 		b[i] = chars[int(b[i])%charsLength]
 	}
 	return string(b)
+}
+
+// IsMirrorEndpointSlice checks if the provided EndpointSlice is meant for the user defined network
+func IsMirrorEndpointSlice(endpointSlice *discoveryv1.EndpointSlice) bool {
+	_, ok := endpointSlice.Labels[types.LabelUserDefinedServiceName]
+	return ok
+}
+
+// IsDefaultEndpointSlice checks if the provided EndpointSlice is meant for the default network
+func IsDefaultEndpointSlice(endpointSlice *discoveryv1.EndpointSlice) bool {
+	_, ok := endpointSlice.Labels[discoveryv1.LabelServiceName]
+	return ok
+}
+
+// GetDefaultEndpointSlicesEventHandler returns an event handler based on the provided handlerFuncs
+// If IsNetworkSegmentationSupportEnabled returns true it returns a handler that filters out the mirrored EndpointSlices.
+// Otherwise, returns handlerFuncs as is.
+func GetDefaultEndpointSlicesEventHandler(handlerFuncs cache.ResourceEventHandlerFuncs) cache.ResourceEventHandler {
+	var eventHandler cache.ResourceEventHandler
+	eventHandler = handlerFuncs
+	if IsNetworkSegmentationSupportEnabled() {
+		// Filter out objects without the default serviceName label to exclude mirrored EndpointSlices
+		eventHandler = cache.FilteringResourceEventHandler{
+			FilterFunc: func(obj interface{}) bool {
+				if endpointSlice, ok := obj.(*discoveryv1.EndpointSlice); ok {
+					return IsDefaultEndpointSlice(endpointSlice)
+				}
+				klog.Errorf("Failed to cast the object to *discovery.EndpointSlice: %v", obj)
+				return true
+			},
+			Handler: handlerFuncs,
+		}
+	}
+	return eventHandler
 }

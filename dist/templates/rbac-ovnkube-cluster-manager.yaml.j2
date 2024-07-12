@@ -100,3 +100,10 @@ rules:
           - adminnetworkpolicies/status
           - baselineadminnetworkpolicies/status
       verbs: [ "patch" ]
+
+    {% if ovn_network_segmentation_enable == "true" -%}
+    - apiGroups: ["discovery.k8s.io"]
+      resources:
+          - endpointslices
+      verbs: [ "create", "update", "delete", "deletecollection" ]
+    {%- endif %}

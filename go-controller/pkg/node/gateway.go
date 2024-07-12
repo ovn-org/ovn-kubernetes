@@ -14,6 +14,8 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/selection"
 
 	"github.com/safchain/ethtool"
 	kapi "k8s.io/api/core/v1"
@@ -227,6 +229,19 @@ func (g *gateway) Init(stopChan <-chan struct{}, wg *sync.WaitGroup) error {
 	}
 
 	endpointSlicesRetryFramework := g.newRetryFrameworkNode(factory.EndpointSliceForGatewayType)
+
+	if util.IsNetworkSegmentationSupportEnabled() {
+		// Filter out objects without the default serviceName label to exclude mirrored EndpointSlices
+		// Only default EndpointSlices contain the discovery.LabelServiceName label
+		req, err := labels.NewRequirement(discovery.LabelServiceName, selection.Exists, nil)
+		if err != nil {
+			return err
+		}
+		if _, err = endpointSlicesRetryFramework.WatchResourceFiltered("", labels.NewSelector().Add(*req)); err != nil {
+			return fmt.Errorf("gateway init failed to start watching endpointslices: %v", err)
+		}
+		return nil
+	}
 	if _, err = endpointSlicesRetryFramework.WatchResource(); err != nil {
 		return fmt.Errorf("gateway init failed to start watching endpointslices: %v", err)
 	}

@@ -45,36 +45,6 @@ func (_m *ObjectCacheInterface) GetAllPods() ([]*v1.Pod, error) {
 	return r0, r1
 }
 
-// GetEndpointSlices provides a mock function with given fields: namespace, svcName
-func (_m *ObjectCacheInterface) GetEndpointSlices(namespace string, svcName string) ([]*discoveryv1.EndpointSlice, error) {
-	ret := _m.Called(namespace, svcName)
-
-	if len(ret) == 0 {
-		panic("no return value specified for GetEndpointSlices")
-	}
-
-	var r0 []*discoveryv1.EndpointSlice
-	var r1 error
-	if rf, ok := ret.Get(0).(func(string, string) ([]*discoveryv1.EndpointSlice, error)); ok {
-		return rf(namespace, svcName)
-	}
-	if rf, ok := ret.Get(0).(func(string, string) []*discoveryv1.EndpointSlice); ok {
-		r0 = rf(namespace, svcName)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]*discoveryv1.EndpointSlice)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(string, string) error); ok {
-		r1 = rf(namespace, svcName)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
 // GetNamespace provides a mock function with given fields: name
 func (_m *ObjectCacheInterface) GetNamespace(name string) (*v1.Namespace, error) {
 	ret := _m.Called(name)
@@ -278,6 +248,36 @@ func (_m *ObjectCacheInterface) GetService(namespace string, name string) (*v1.S
 
 	if rf, ok := ret.Get(1).(func(string, string) error); ok {
 		r1 = rf(namespace, name)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// GetServiceEndpointSlices provides a mock function with given fields: namespace, svcName, network
+func (_m *ObjectCacheInterface) GetServiceEndpointSlices(namespace string, svcName string, network string) ([]*discoveryv1.EndpointSlice, error) {
+	ret := _m.Called(namespace, svcName, network)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetServiceEndpointSlices")
+	}
+
+	var r0 []*discoveryv1.EndpointSlice
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string, string, string) ([]*discoveryv1.EndpointSlice, error)); ok {
+		return rf(namespace, svcName, network)
+	}
+	if rf, ok := ret.Get(0).(func(string, string, string) []*discoveryv1.EndpointSlice); ok {
+		r0 = rf(namespace, svcName, network)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*discoveryv1.EndpointSlice)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(string, string, string) error); ok {
+		r1 = rf(namespace, svcName, network)
 	} else {
 		r1 = ret.Error(1)
 	}

@@ -5,7 +5,6 @@ import "time"
 const (
 	// Default network name
 	DefaultNetworkName    = "default"
-	UnknownNetworkName    = "unknown"
 	K8sPrefix             = "k8s-"
 	HybridOverlayPrefix   = "int-"
 	HybridOverlayGRSubfix = "-gr"
@@ -109,6 +108,15 @@ const (
 	EgressIPReroutePriority               = 100
 	EgressIPRerouteQoSRulePriority        = 103
 	EgressLiveMigrationReroutePiority     = 10
+
+	// EndpointSliceMirrorControllerName mirror EndpointSlice controller name (used as a value for the "endpointslice.kubernetes.io/managed-by" label)
+	EndpointSliceMirrorControllerName = "endpointslice-mirror-controller.k8s.ovn.org"
+	// EndpointSliceDefaultControllerName default kubernetes EndpointSlice controller name (used as a value for the "endpointslice.kubernetes.io/managed-by" label)
+	EndpointSliceDefaultControllerName = "endpointslice-controller.k8s.io"
+	// LabelUserDefinedEndpointSliceNetwork label key used in mirrored EndpointSlices that contains the current primary user defined network name
+	LabelUserDefinedEndpointSliceNetwork = "k8s.ovn.org/endpointslice-network"
+	// LabelUserDefinedServiceName label key used in mirrored EndpointSlices that contains the service name matching the EndpointSlice
+	LabelUserDefinedServiceName = "k8s.ovn.org/service-name"
 
 	// Packet marking
 	EgressIPNodeConnectionMark         = "1008"

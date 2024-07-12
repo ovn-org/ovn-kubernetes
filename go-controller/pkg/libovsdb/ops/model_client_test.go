@@ -6,7 +6,7 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/onsi/ginkgo"
+	"github.com/onsi/ginkgo/v2"
 
 	"github.com/onsi/gomega/types"
 	"github.com/ovn-org/libovsdb/client"
