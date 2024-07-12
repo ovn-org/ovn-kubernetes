@@ -28,10 +28,6 @@ spec:
       annotations:
         scheduler.alpha.kubernetes.io/critical-pod: ''
     spec:
-      {{- if hasKey .Values.global "imagePullSecretName" }}
-      imagePullSecrets:
-      - name: {{ .Values.global.imagePullSecretName }}
-      {{- end }}
       serviceAccountName: ovnkube-node
       hostNetwork: true
       dnsPolicy: Default
