@@ -311,7 +311,8 @@ func cleanupLocalnetGateway(physnet string) error {
 	return err
 }
 
-func (g *gateway) getMasqIPRules(nInfo util.NetInfo) ([]netlink.Rule, error) {
+func (g *gateway) getUDNVRFRules(nInfo util.NetInfo) ([]netlink.Rule, error) {
+	var masqIPRules []netlink.Rule
 	networkID, err := g.getNetworkID(nInfo)
 	if err != nil {
 		return nil, err
@@ -322,7 +323,7 @@ func (g *gateway) getMasqIPRules(nInfo util.NetInfo) ([]netlink.Rule, error) {
 		return nil, err
 	}
 	vrfTableId := util.CalculateRouteTableID(ifIndex)
-	var masqIPRules []netlink.Rule
+	//return generateIPRulesForVRFInterface(vrfDeviceName, uint(vrfTableId)), nil
 	masqIPv4, err := g.getV4MasqueradeIP(nInfo)
 	if err != nil {
 		return nil, err
@@ -335,7 +336,7 @@ func (g *gateway) getMasqIPRules(nInfo util.NetInfo) ([]netlink.Rule, error) {
 		return nil, err
 	}
 	if masqIPv6 != nil {
-		masqIPRules = append(masqIPRules, generateIPRuleForMasqIP(*masqIPv6, false, uint(vrfTableId)))
+		masqIPRules = append(masqIPRules, generateIPRuleForMasqIP(*masqIPv6, true, uint(vrfTableId)))
 	}
 	return masqIPRules, nil
 }
@@ -386,6 +387,10 @@ func generateIPRuleForMasqIP(masqIP net.IP, isIPv6 bool, vrfTableId uint) netlin
 	r := *netlink.NewRule()
 	r.Table = int(vrfTableId)
 	r.Priority = types.MasqueradeIPRulePriority
+	/*rinput := r
+	rinput.IifName = vrfDeviceName
+	routput := r
+	routput.OifName = vrfDeviceName*/
 	var ipFullMask string
 	if isIPv6 {
 		ipFullMask = fmt.Sprintf("%s/128", masqIP.String())
@@ -396,6 +401,8 @@ func generateIPRuleForMasqIP(masqIP net.IP, isIPv6 bool, vrfTableId uint) netlin
 	}
 	_, ipNet, _ := net.ParseCIDR(ipFullMask)
 	r.Dst = ipNet
+	//klog.Infof("SURYA %v/%v", rinput, routput)
+	//return []netlink.Rule{rinput, routput}
 	return r
 }
 

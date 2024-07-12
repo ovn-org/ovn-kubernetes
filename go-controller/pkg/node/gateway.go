@@ -102,13 +102,16 @@ func (g *gateway) AddNetwork(nInfo util.NetInfo, masqCTMark uint) error {
 	if err != nil {
 		return err
 	}*/
-	masqIPRules, err := g.getMasqIPRules(nInfo)
+	vrfRules, err := g.getUDNVRFRules(nInfo)
 	if err != nil {
 		return err
 	}
-	for _, rule := range masqIPRules {
+	klog.Infof("SURYA %v", vrfRules)
+	for _, rule := range vrfRules {
 		err = g.ruleManager.Add(rule)
+		klog.Infof("SURYA %v/%v/%v", rule.OifName, rule.IifName, err)
 		if err != nil {
+			klog.Infof("SURYA %v/%v", rule, err)
 			return err
 		}
 	}
@@ -162,16 +165,16 @@ func (g *gateway) DelNetwork(nInfo util.NetInfo) error {
 	if err != nil {
 		return err
 	}
-	masqIPRules, err := g.getMasqIPRules(nInfo)
+	/*vrfRules, err := g.getUDNVRFRules(nInfo)
 	if err != nil {
 		return err
 	}
-	for _, rule := range masqIPRules {
+	for _, rule := range vrfRules {
 		err = g.ruleManager.Delete(rule)
 		if err != nil {
 			return err
 		}
-	}
+	}*/
 	//TODO delete other objects.
 	return nil
 }
