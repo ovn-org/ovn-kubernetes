@@ -14,7 +14,7 @@ import (
 	"github.com/urfave/cli/v2"
 	kexec "k8s.io/utils/exec"
 
-	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 )
 
