@@ -72,7 +72,7 @@ var _ = Describe("Mananagement port DPU tests", func() {
 			netlinkOpsMock.On("LinkByName", "non-existent-netdev").Return(nil, fmt.Errorf("netlink mock error"))
 			netlinkOpsMock.On("IsLinkNotFoundError", mock.Anything).Return(false)
 
-			_, err := mgmtPortDpu.Create(nil, nodeAnnotatorMock, waiter)
+			_, err := mgmtPortDpu.Create(nil, nil, nodeAnnotatorMock, waiter)
 			Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc)
 			Expect(err).To(HaveOccurred())
 		})
@@ -87,7 +87,7 @@ var _ = Describe("Mananagement port DPU tests", func() {
 				nil, fmt.Errorf("failed to get interface"))
 			netlinkOpsMock.On("IsLinkNotFoundError", mock.Anything).Return(true)
 
-			_, err := mgmtPortDpu.Create(nil, nodeAnnotatorMock, waiter)
+			_, err := mgmtPortDpu.Create(nil, nil, nodeAnnotatorMock, waiter)
 			Expect(err).To(HaveOccurred())
 		})
 
@@ -110,7 +110,7 @@ var _ = Describe("Mananagement port DPU tests", func() {
 			})
 			mockOVSListInterfaceMgmtPortNotExistCmd(execMock, types.K8sMgmtIntfName+"_0")
 
-			_, err := mgmtPortDpu.Create(nil, nodeAnnotatorMock, waiter)
+			_, err := mgmtPortDpu.Create(nil, nil, nodeAnnotatorMock, waiter)
 			Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc)
 			Expect(err).To(HaveOccurred())
 		})
@@ -146,7 +146,7 @@ var _ = Describe("Mananagement port DPU tests", func() {
 				Cmd: genOVSAddMgmtPortCmd(mgmtPortDpu.nodeName, mgmtPortDpu.repName),
 			})
 
-			mpcfg, err := mgmtPortDpu.Create(nil, nodeAnnotatorMock, waiter)
+			mpcfg, err := mgmtPortDpu.Create(nil, nil, nodeAnnotatorMock, waiter)
 			Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(mpcfg.ifName).To(Equal(types.K8sMgmtIntfName + "_0"))
@@ -177,7 +177,7 @@ var _ = Describe("Mananagement port DPU tests", func() {
 				Cmd: genOVSAddMgmtPortCmd(mgmtPortDpu.nodeName, mgmtPortDpu.repName),
 			})
 
-			mpcfg, err := mgmtPortDpu.Create(nil, nodeAnnotatorMock, waiter)
+			mpcfg, err := mgmtPortDpu.Create(nil, nil, nodeAnnotatorMock, waiter)
 			Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(mpcfg.ifName).To(Equal(types.K8sMgmtIntfName + "_0"))
@@ -193,7 +193,7 @@ var _ = Describe("Mananagement port DPU tests", func() {
 			netlinkOpsMock.On("LinkByName", "non-existent-netdev").Return(nil, fmt.Errorf("netlink mock error"))
 			netlinkOpsMock.On("IsLinkNotFoundError", mock.Anything).Return(false)
 
-			_, err := mgmtPortDpuHost.Create(nil, nil, waiter)
+			_, err := mgmtPortDpuHost.Create(nil, nil, nil, waiter)
 			Expect(err).To(HaveOccurred())
 		})
 
@@ -207,7 +207,7 @@ var _ = Describe("Mananagement port DPU tests", func() {
 				nil, fmt.Errorf("failed to get interface"))
 			netlinkOpsMock.On("IsLinkNotFoundError", mock.Anything).Return(true)
 
-			_, err := mgmtPortDpuHost.Create(nil, nil, waiter)
+			_, err := mgmtPortDpuHost.Create(nil, nil, nil, waiter)
 			Expect(err).To(HaveOccurred())
 		})
 
@@ -244,7 +244,7 @@ var _ = Describe("Mananagement port DPU tests", func() {
 			netlinkOpsMock.On("LinkByName", mock.Anything).Return(nil, fmt.Errorf(
 				"createPlatformManagementPort error"))
 
-			_, err = mgmtPortDpuHost.Create(nil, nil, nil)
+			_, err = mgmtPortDpuHost.Create(nil, nil, nil, nil)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("createPlatformManagementPort error"))
 		})
@@ -270,7 +270,7 @@ var _ = Describe("Mananagement port DPU tests", func() {
 			netlinkOpsMock.On("LinkByName", mock.Anything).Return(nil, fmt.Errorf(
 				"createPlatformManagementPort error")).Once()
 
-			_, err = mgmtPortDpuHost.Create(nil, nil, nil)
+			_, err = mgmtPortDpuHost.Create(nil, nil, nil, nil)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring(
 				"createPlatformManagementPort error"))

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"k8s.io/klog/v2"
 )
@@ -13,7 +14,7 @@ type udnManagementPortConfig struct {
 	managementPortConfig
 }
 
-func (nc *SecondaryNodeNetworkController) newUDNManagementPortConfig() (*udnManagementPortConfig, error) {
+func (nc *SecondaryNodeNetworkController) newUDNManagementPortConfig(nodeAnnotator kube.Annotator) (*udnManagementPortConfig, error) {
 	var err error
 	interfaceName := util.GetNetworkScopedK8sMgmtHostIntfName(uint(nc.networkID))
 	//TODO; handle returned config, configure ip address
@@ -70,6 +71,11 @@ func (nc *SecondaryNodeNetworkController) newUDNManagementPortConfig() (*udnMana
 			return nil, err
 		}
 	}
-
+	klog.Infof("SURYA %v/%v/%v", node.Name, macAddress, nc.GetNetworkName())
+	if err := util.UpdateNodeManagementPortMACAddresses(node, nodeAnnotator, macAddress, nc.GetNetworkName()); err != nil {
+		klog.Infof("SURYA %v", err)
+		return nil, err
+	}
+	klog.Infof("SURYA %v", err)
 	return mpcfg, nil
 }

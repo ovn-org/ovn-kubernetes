@@ -5,6 +5,7 @@ import (
 	"net"
 	"time"
 
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
 
@@ -30,7 +31,7 @@ func newManagementPortRepresentor(nodeName string, hostSubnets []*net.IPNet, rep
 	}
 }
 
-func (mp *managementPortRepresentor) Create(_ *routemanager.Controller, nodeAnnotator kube.Annotator, waiter *startupWaiter) (*managementPortConfig, error) {
+func (mp *managementPortRepresentor) Create(_ *routemanager.Controller, node *v1.Node, nodeAnnotator kube.Annotator, waiter *startupWaiter) (*managementPortConfig, error) {
 	k8sMgmtIntfName := types.K8sMgmtIntfName
 	if config.OvnKubeNode.Mode == types.NodeModeFull {
 		k8sMgmtIntfName += "_0"
@@ -111,7 +112,7 @@ func (mp *managementPortRepresentor) Create(_ *routemanager.Controller, nodeAnno
 	}
 
 	mgmtPortMac := util.IPAddrToHWAddr(util.GetNodeManagementIfAddr(mp.hostSubnets[0]).IP)
-	if err := util.SetNodeManagementPortMACAddress(nodeAnnotator, mgmtPortMac); err != nil {
+	if err := util.UpdateNodeManagementPortMACAddresses(node, nodeAnnotator, mgmtPortMac, types.DefaultNetworkName); err != nil {
 		return nil, err
 	}
 	waiter.AddWait(managementPortReady, nil)
@@ -180,7 +181,7 @@ func newManagementPortNetdev(hostSubnets []*net.IPNet, netdevName string) Manage
 	}
 }
 
-func (mp *managementPortNetdev) Create(routeManager *routemanager.Controller, nodeAnnotator kube.Annotator, waiter *startupWaiter) (*managementPortConfig, error) {
+func (mp *managementPortNetdev) Create(routeManager *routemanager.Controller, node *v1.Node, nodeAnnotator kube.Annotator, waiter *startupWaiter) (*managementPortConfig, error) {
 	klog.Infof("Lookup netdevice link and existing management port using '%v'", mp.netdevName)
 	link, err := util.GetNetLinkOps().LinkByName(mp.netdevName)
 	if err != nil {

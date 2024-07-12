@@ -13,6 +13,7 @@ import (
 	kapi "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/klog/v2"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
@@ -58,9 +59,6 @@ const (
 
 	// OvnNodeManagementPort is the constant string representing the annotation key
 	OvnNodeManagementPort = "k8s.ovn.org/node-mgmt-port"
-
-	// OvnNodeManagementPortMacAddress is the constant string representing the annotation key
-	OvnNodeManagementPortMacAddress = "k8s.ovn.org/node-mgmt-port-mac-address"
 
 	// OvnNodeManagementPortMacAddresses contains all mac addresses of the management ports
 	// on all networks keyed by the network-name
@@ -398,8 +396,21 @@ func ParseNodeManagementPortAnnotation(node *kapi.Node) (int, int, error) {
 	return cfg.PfId, cfg.FuncId, nil
 }
 
-func SetNodeManagementPortMACAddress(nodeAnnotator kube.Annotator, macAddress net.HardwareAddr) error {
-	return nodeAnnotator.Set(OvnNodeManagementPortMacAddress, macAddress.String())
+func UpdateNodeManagementPortMACAddresses(node *kapi.Node, nodeAnnotator kube.Annotator, macAddress net.HardwareAddr, netName string) error {
+	macAddressMap, err := parseNetworkMapAnnotation(node.Annotations, OvnNodeManagementPortMacAddresses)
+	if err != nil {
+		if !IsAnnotationNotSetError(err) {
+			klog.Infof("SURYA %v", err)
+			return fmt.Errorf("failed to parse node network management port annotation %q: %v",
+				node.Annotations, err)
+		}
+		klog.Infof("SURYA %v", err)
+		// in the case that the annotation does not exist
+		macAddressMap = map[string]string{}
+	}
+	macAddressMap[netName] = macAddress.String()
+	klog.Infof("SURYA %v", macAddressMap)
+	return nodeAnnotator.Set(OvnNodeManagementPortMacAddresses, macAddressMap)
 }
 
 // ParseNodeManagementPortMACAddresses parses the 'OvnNodeManagementPortMacAddresses' annotation

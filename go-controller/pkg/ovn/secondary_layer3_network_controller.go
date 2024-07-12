@@ -497,6 +497,7 @@ func (oc *SecondaryLayer3NetworkController) addUpdateLocalNodeEvent(node *kapi.N
 	}
 
 	if util.IsNetworkSegmentationSupportEnabled() && oc.IsPrimaryNetwork() {
+		klog.Infof("SURYA")
 		if nSyncs.syncMgmtPort {
 			hostSubnets, err := util.ParseNodeHostSubnetAnnotation(node, oc.GetNetworkName())
 			if err != nil {

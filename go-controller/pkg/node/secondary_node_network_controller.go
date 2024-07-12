@@ -7,6 +7,7 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -54,15 +55,18 @@ func (nc *SecondaryNodeNetworkController) Start(ctx context.Context) error {
 	if err := nc.ensureNetworkID(); err != nil {
 		return fmt.Errorf("failed ensuring network id at user defined node controller for network '%s': %w", nc.GetNetworkName(), err)
 	}
-
+	nodeAnnotator := kube.NewNodeAnnotator(nc.Kube, nc.name)
 	// Generate a per network conntrack mark to be used for egress traffic.
 	masqCTMark := ctMarkUDNBase + uint(nc.networkID)
-	_, err := nc.newUDNManagementPortConfig()
+	klog.Infof("SURYA %v", nodeAnnotator)
+	_, err := nc.newUDNManagementPortConfig(nodeAnnotator)
 	if err != nil {
 		klog.Errorf("Failed to configure user net management port, err: %v", err)
 		return err
 	}
-
+	if err := nodeAnnotator.Run(); err != nil {
+		return fmt.Errorf("failed to set node %s annotations: %w", nc.name, err)
+	}
 	if err := nc.gatewayManager.AddNetwork(nc.NetInfo, masqCTMark); err != nil {
 		return fmt.Errorf("failed to add network to node gateway for network '%s': %w", nc.GetNetworkName(), err)
 	}

@@ -598,7 +598,7 @@ func (bnc *BaseNetworkController) syncNodeManagementPort(node *kapi.Node, switch
 	if err != nil {
 		return nil, err
 	}
-
+	klog.Infof("SURYA %v", macAddress)
 	var v4Subnet *net.IPNet
 	addresses := macAddress.String()
 	mgmtPortIPs := []net.IP{}
@@ -636,6 +636,7 @@ func (bnc *BaseNetworkController) syncNodeManagementPort(node *kapi.Node, switch
 		Name:      bnc.GetNetworkScopedK8sMgmtIntfName(node.Name),
 		Addresses: []string{addresses},
 	}
+	klog.Infof("SURYA %v/%v", logicalSwitchPort, addresses)
 	sw := nbdb.LogicalSwitch{Name: switchName}
 	err = libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitch(bnc.nbClient, &sw, &logicalSwitchPort)
 	if err != nil {
