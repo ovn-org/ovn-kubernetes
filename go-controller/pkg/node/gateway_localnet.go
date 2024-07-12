@@ -206,31 +206,35 @@ func (g *gateway) computeRoutesForUDN(nInfo util.NetInfo, vrfTableId int) ([]net
 	if config.Default.RoutableMTU != 0 {
 		mtu = config.Default.RoutableMTU
 	}
-	masqIPv4, err := g.getV4MasqueradeIP(nInfo)
+	/*masqIPv4, err := g.getV4MasqueradeIP(nInfo)
 	if err != nil {
 		return nil, err
 	}
 	masqIPv6, err := g.getV6MasqueradeIP(nInfo)
 	if err != nil {
 		return nil, err
-	}
+	}*/
 	var retVal []netlink.Route
 	// TODO add other routes.
 	// Route1: Add serviceCIDR route: 10.96.0.0/16 via 169.254.169.12 dev breth0 mtu 1400
 	for _, serviceSubnet := range config.Kubernetes.ServiceCIDRs {
 		serviceSubnet := serviceSubnet
 		isV6 := utilnet.IsIPv6CIDR(serviceSubnet)
-		gwIP := masqIPv4
+		gwIP := config.Gateway.MasqueradeIPs.V4DummyNextHopMasqueradeIP
 		if isV6 {
-			gwIP = masqIPv6
+			gwIP = config.Gateway.MasqueradeIPs.V6DummyNextHopMasqueradeIP
 		}
 		retVal = append(retVal, netlink.Route{
 			LinkIndex: link.Attrs().Index,
 			Dst:       serviceSubnet,
 			MTU:       mtu,
-			Gw:        *gwIP,
+			Gw:        gwIP,
 			Table:     vrfTableId,
 		})
+	}
+	nextHops, _, err := getGatewayNextHops()
+	if err != nil {
+		return nil, err
 	}
 	// Route2: Add default route: default via 169.254.169.12 dev breth0 mtu 1400
 	if config.IPv4Mode {
@@ -239,7 +243,7 @@ func (g *gateway) computeRoutesForUDN(nInfo util.NetInfo, vrfTableId int) ([]net
 			LinkIndex: link.Attrs().Index,
 			Dst:       defaultV4AnyCIDR,
 			MTU:       mtu,
-			Gw:        *masqIPv4,
+			Gw:        nextHops[0],
 			Table:     vrfTableId,
 		})
 	}
@@ -249,7 +253,7 @@ func (g *gateway) computeRoutesForUDN(nInfo util.NetInfo, vrfTableId int) ([]net
 			LinkIndex: link.Attrs().Index,
 			Dst:       defaultV6AnyCIDR,
 			MTU:       mtu,
-			Gw:        *masqIPv6,
+			Gw:        nextHops[1], // TODO(tssurya): Check out of bounds
 			Table:     vrfTableId,
 		})
 	}
