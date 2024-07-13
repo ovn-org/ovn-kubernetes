@@ -1,7 +1,7 @@
 package util
 
 // RemoveIndexFromSliceUnstable attempts to remove slice index specified by parameter i. Slice order is not preserved.
-func RemoveIndexFromSliceUnstable[T comparable](slice []T, i int) []T {
+func RemoveIndexFromSliceUnstable[T any](slice []T, i int) []T {
 	var t T
 	sliceLen := len(slice)
 	slice[i] = slice[sliceLen-1]
