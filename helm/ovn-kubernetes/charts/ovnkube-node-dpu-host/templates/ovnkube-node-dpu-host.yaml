@@ -194,6 +194,8 @@ spec:
           value: {{ default "" .Values.global.extGatewayNetworkInterface | quote }}
         - name: OVN_ENABLE_OVNKUBE_IDENTITY
           value: {{ hasKey .Values.global "enableOvnKubeIdentity" | ternary .Values.global.enableOvnKubeIdentity true | quote }}
+        - name: OVN_NETWORK_QOS_ENABLE
+          value: {{ hasKey .Values.global "enableNetworkQos" | ternary .Values.global.enableNetworkQos false | quote }}
         - name: OVNKUBE_NODE_MODE
           value: "dpu-host"
         - name: OVNKUBE_NODE_MGMT_PORT_NETDEV
