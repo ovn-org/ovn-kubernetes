@@ -20,3 +20,15 @@ func RemoveItemFromSliceUnstable[T comparable](slice []T, candidate T) []T {
 	}
 	return slice
 }
+
+// IsItemInSlice checks if candidate is equal to at least one entry in slice
+func IsItemInSlice[T comparable](slice []T, candidate T) bool {
+	var found bool
+	for _, sliceEntry := range slice {
+		if sliceEntry == candidate {
+			found = true
+			break
+		}
+	}
+	return found
+}
