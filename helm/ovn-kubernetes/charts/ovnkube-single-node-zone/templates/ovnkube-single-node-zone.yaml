@@ -435,6 +435,8 @@ spec:
           value: {{ hasKey .Values.global "enableDNSNameResolver" | ternary .Values.global.enableDNSNameResolver false | quote }}
         - name: OVN_OBSERV_ENABLE
           value: {{ hasKey .Values.global "enableObservability" | ternary .Values.global.enableObservability false | quote }}
+        - name: OVN_NETWORK_QOS_ENABLE
+          value: {{ hasKey .Values.global "enableNetworkQos" | ternary .Values.global.enableNetworkQos false | quote }}
         readinessProbe:
           exec:
             command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovnkube-node"]
