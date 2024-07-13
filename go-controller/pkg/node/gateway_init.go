@@ -358,11 +358,11 @@ func (nc *DefaultNodeNetworkController) initGateway(subnets []*net.IPNet, nodeAn
 	case config.GatewayModeLocal:
 		klog.Info("Preparing Local Gateway")
 		gw, err = newLocalGateway(nc.name, subnets, gatewayNextHops, gatewayIntf, egressGWInterface, ifAddrs, nodeAnnotator,
-			managementPortConfig, nc.Kube, nc.watchFactory, nc.routeManager)
+			managementPortConfig, nc.Kube, nc.watchFactory, nc.routeManager, nc.linkManager)
 	case config.GatewayModeShared:
 		klog.Info("Preparing Shared Gateway")
 		gw, err = newSharedGateway(nc.name, subnets, gatewayNextHops, gatewayIntf, egressGWInterface, ifAddrs, nodeAnnotator, nc.Kube,
-			managementPortConfig, nc.watchFactory, nc.routeManager)
+			managementPortConfig, nc.watchFactory, nc.routeManager, nc.linkManager)
 	case config.GatewayModeDisabled:
 		var chassisID string
 		klog.Info("Gateway Mode is disabled")
