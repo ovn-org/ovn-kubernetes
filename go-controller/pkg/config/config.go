@@ -1126,6 +1126,12 @@ var OVNK8sFeatureFlags = []cli.Flag{
 		Destination: &cliConfig.OVNKubernetesFeature.EnableObservability,
 		Value:       OVNKubernetesFeature.EnableObservability,
 	},
+	&cli.BoolFlag{
+		Name:        "enable-network-qos",
+		Usage:       "Configure to use NetworkQoS CRD feature with ovn-kubernetes.",
+		Destination: &cliConfig.OVNKubernetesFeature.EnableNetworkQoS,
+		Value:       OVNKubernetesFeature.EnableNetworkQoS,
+	},
 }
 
 // K8sFlags capture Kubernetes-related options
