@@ -387,7 +387,7 @@ install_kubevirt_ipam_controller() {
 
 install_multus() {
   echo "Installing multus-cni daemonset ..."
-  multus_manifest="https://raw.githubusercontent.com/k8snetworkplumbingwg/multus-cni/master/deployments/multus-daemonset.yml"
+  multus_manifest="https://raw.githubusercontent.com/k8snetworkplumbingwg/multus-cni/master/deployments/multus-daemonset-thick.yml"
   run_kubectl apply -f "$multus_manifest"
 }
 
