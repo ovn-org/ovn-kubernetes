@@ -34,6 +34,24 @@ var _ = Describe("NetAttachDefTemplate", func() {
 			Topology: udnv1.NetworkTopologyLocalnet, Role: udnv1.NetworkRolePrimary}),
 		Entry("ipamLifecycle=persistent & topology=Layer3", &udnv1.UserDefinedNetworkSpec{
 			IPAMLifecycle: udnv1.IPAMLifecyclePersistent, Topology: udnv1.NetworkTopologyLayer3}),
+		Entry("invalid join subnets", &udnv1.UserDefinedNetworkSpec{Role: udnv1.NetworkRolePrimary,
+			JoinSubnets: []string{"abc"}}),
+		Entry("invalid dual-stack join subnets, invalid IPv4 CIDR", &udnv1.UserDefinedNetworkSpec{Role: udnv1.NetworkRolePrimary,
+			JoinSubnets: []string{"!", "fd50::0/125"}}),
+		Entry("invalid dual-stack join subnets, invalid IPv6 CIDR", &udnv1.UserDefinedNetworkSpec{Role: udnv1.NetworkRolePrimary,
+			JoinSubnets: []string{"10.10.0.0/24", "!"}}),
+		Entry("invalid dual-stack join subnets, multiple valid IPv4 CIDRs", &udnv1.UserDefinedNetworkSpec{Role: udnv1.NetworkRolePrimary,
+			JoinSubnets: []string{"10.10.0.0/24", "10.20.0.0/24", "10.30.0.0/24"}}),
+		Entry("invalid dual-stack join subnets, multiple valid IPv6 CIDRs", &udnv1.UserDefinedNetworkSpec{Role: udnv1.NetworkRolePrimary,
+			JoinSubnets: []string{"fd40::0/125", "fd10::0/125", "fd50::0/125"}}),
+		Entry("invalid dual-stack join subnets, multiple valid IPv4 & IPv6 CIDRs", &udnv1.UserDefinedNetworkSpec{Role: udnv1.NetworkRolePrimary,
+			JoinSubnets: []string{"fd40::0/125", "10.10.0.0/24", "fd50::0/125", "10.20.0.0/24"}}),
+		Entry("invalid join subnets, overlapping with cluster-default join-subnet, IPv4", &udnv1.UserDefinedNetworkSpec{Role: udnv1.NetworkRolePrimary,
+			JoinSubnets: []string{"100.64.10.0/24"}}),
+		Entry("invalid join subnets, overlapping with cluster-default join-subnet, IPv6", &udnv1.UserDefinedNetworkSpec{Role: udnv1.NetworkRolePrimary,
+			JoinSubnets: []string{"fd98::4/127"}}),
+		Entry("invalid join subnets, overlapping with cluster-default join-subnet, dual-stack", &udnv1.UserDefinedNetworkSpec{Role: udnv1.NetworkRolePrimary,
+			JoinSubnets: []string{"100.64.10.0/24", "fd98::4/127"}}),
 	)
 
 	It("should return nil given no NAD", func() {

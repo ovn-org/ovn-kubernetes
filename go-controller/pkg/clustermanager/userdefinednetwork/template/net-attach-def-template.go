@@ -6,11 +6,14 @@ import (
 	"net"
 	"strings"
 
-	netv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	kutilnet "k8s.io/utils/net"
+
+	netv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 
 	userdefinednetworkv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -79,7 +82,7 @@ func renderCNINetworkConfig(udn *userdefinednetworkv1.UserDefinedNetwork) (map[s
 		if len(udn.Spec.JoinSubnets) == 0 {
 			netConf["joinSubnets"] = types.UserDefinedPrimaryNetworkJoinSubnetV4 + "," + types.UserDefinedPrimaryNetworkJoinSubnetV6
 		} else {
-			if err := validateSubnets(udn.Spec.JoinSubnets); err != nil {
+			if err := validateJoinSubnet(udn.Spec.JoinSubnets); err != nil {
 				return nil, fmt.Errorf("invalid join subnets: %w", err)
 			}
 			netConf["joinSubnets"] = strings.Join(udn.Spec.JoinSubnets, ",")
@@ -118,5 +121,62 @@ func validateSubnets(subnets []string) error {
 			return err
 		}
 	}
+	return nil
+}
+
+func validateJoinSubnet(subnets []string) error {
+	if len(subnets) == 0 {
+		return nil
+	}
+
+	if len(subnets) > 2 {
+		return fmt.Errorf("unexpected number of join-subnets: %v", subnets)
+	}
+
+	_, defaultJoinSubnetV4, err := net.ParseCIDR(config.Gateway.V4JoinSubnet)
+	if err != nil {
+		return err
+	}
+	_, defaultJoinSubnetV6, err := net.ParseCIDR(config.Gateway.V6JoinSubnet)
+	if err != nil {
+		return err
+	}
+	cs := config.NewConfigSubnets()
+	cs.Append("cluster-default-join-subnet", defaultJoinSubnetV4)
+	cs.Append("cluster-default-join-subnet", defaultJoinSubnetV6)
+
+	switch len(subnets) {
+	case 1:
+		_, cidr, err := net.ParseCIDR(subnets[0])
+		if err != nil {
+			return fmt.Errorf("invalid join-subnets %v: %w", subnets[0], err)
+		}
+		cs.Append("user-defined-network-join-subnet", cidr)
+		if err := cs.CheckForOverlaps(); err != nil {
+			return fmt.Errorf("invalid join-subnets, overlaps with cluster default network join-subnet: %w", err)
+		}
+	case 2:
+		_, cidr1, err := net.ParseCIDR(subnets[0])
+		if err != nil {
+			return fmt.Errorf("invalid join-subnets %v: %w", subnets[0], err)
+		}
+		_, cidr2, err := net.ParseCIDR(subnets[1])
+		if err != nil {
+			return fmt.Errorf("invalid join-subnets %v: %w", subnets[1], err)
+		}
+		dualStack, err := kutilnet.IsDualStackCIDRs([]*net.IPNet{cidr1, cidr2})
+		if err != nil {
+			return fmt.Errorf("failed to check dual-stack CIDRs %v: %w", subnets, err)
+		}
+		if !dualStack {
+			return fmt.Errorf("invalid dual-stack join-subnets, expects one IPv4 CIDR & IPv6 CIDR")
+		}
+		cs.Append("user-defined-network-join-subnet", cidr1)
+		cs.Append("user-defined-network-join-subnet", cidr2)
+		if err := cs.CheckForOverlaps(); err != nil {
+			return fmt.Errorf("invalid join subnets, overlaps with cluster default network join-subnets: %w", err)
+		}
+	}
+
 	return nil
 }

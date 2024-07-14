@@ -174,23 +174,23 @@ type configSubnet struct {
 	subnet     *net.IPNet
 }
 
-// configSubnets represents a set of configured subnets (and their names)
-type configSubnets struct {
+// ConfigSubnets represents a set of configured subnets (and their names)
+type ConfigSubnets struct {
 	subnets []configSubnet
 	v4      map[configSubnetType]bool
 	v6      map[configSubnetType]bool
 }
 
-// newConfigSubnets returns a new configSubnets
-func newConfigSubnets() *configSubnets {
-	return &configSubnets{
+// NewConfigSubnets returns a new ConfigSubnets
+func NewConfigSubnets() *ConfigSubnets {
+	return &ConfigSubnets{
 		v4: make(map[configSubnetType]bool),
 		v6: make(map[configSubnetType]bool),
 	}
 }
 
-// append adds a single subnet to cs
-func (cs *configSubnets) append(subnetType configSubnetType, subnet *net.IPNet) {
+// Append adds a single subnet to cs
+func (cs *ConfigSubnets) Append(subnetType configSubnetType, subnet *net.IPNet) {
 	cs.subnets = append(cs.subnets, configSubnet{subnetType: subnetType, subnet: subnet})
 	if subnetType != configSubnetJoin && subnetType != configSubnetMasquerade && subnetType != configSubnetTransit {
 		if utilnet.IsIPv6CIDR(subnet) {
@@ -201,8 +201,8 @@ func (cs *configSubnets) append(subnetType configSubnetType, subnet *net.IPNet) 
 	}
 }
 
-// checkForOverlaps checks if any of the subnets in cs overlap
-func (cs *configSubnets) checkForOverlaps() error {
+// CheckForOverlaps checks if any of the subnets in cs overlap
+func (cs *ConfigSubnets) CheckForOverlaps() error {
 	for i, si := range cs.subnets {
 		for j := 0; j < i; j++ {
 			sj := cs.subnets[j]
@@ -216,7 +216,7 @@ func (cs *configSubnets) checkForOverlaps() error {
 	return nil
 }
 
-func (cs *configSubnets) describeSubnetType(subnetType configSubnetType) string {
+func (cs *ConfigSubnets) describeSubnetType(subnetType configSubnetType) string {
 	ipv4 := cs.v4[subnetType]
 	ipv6 := cs.v6[subnetType]
 	var familyType string
@@ -236,7 +236,7 @@ func (cs *configSubnets) describeSubnetType(subnetType configSubnetType) string 
 // checkIPFamilies determines if cs contains a valid single-stack IPv4 configuration, a
 // valid single-stack IPv6 configuration, a valid dual-stack configuration, or none of the
 // above.
-func (cs *configSubnets) checkIPFamilies() (usingIPv4, usingIPv6 bool, err error) {
+func (cs *ConfigSubnets) checkIPFamilies() (usingIPv4, usingIPv6 bool, err error) {
 	if len(cs.v6) == 0 {
 		// Single-stack IPv4
 		return true, false, nil
