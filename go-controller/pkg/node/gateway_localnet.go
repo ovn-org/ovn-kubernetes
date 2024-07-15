@@ -192,7 +192,7 @@ func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net
 	return gw, nil
 }
 
-func (g *gateway) computeRoutesForUDN(nInfo util.NetInfo, vrfTableId int) ([]netlink.Route, error) {
+func (g *gateway) computeRoutesForUDN(nInfo util.NetInfo, vrfTableId int, managementPortName string) ([]netlink.Route, error) {
 	/*err := configureSvcRouteViaInterface(g.routeManager, g.GetGatewayBridgeIface(), DummyNextHopIPs(), vrfTableId)
 	if err != nil {
 		return err
@@ -206,17 +206,9 @@ func (g *gateway) computeRoutesForUDN(nInfo util.NetInfo, vrfTableId int) ([]net
 	if config.Default.RoutableMTU != 0 {
 		mtu = config.Default.RoutableMTU
 	}
-	/*masqIPv4, err := g.getV4MasqueradeIP(nInfo)
-	if err != nil {
-		return nil, err
-	}
-	masqIPv6, err := g.getV6MasqueradeIP(nInfo)
-	if err != nil {
-		return nil, err
-	}*/
 	var retVal []netlink.Route
 	// TODO add other routes.
-	// Route1: Add serviceCIDR route: 10.96.0.0/16 via 169.254.169.12 dev breth0 mtu 1400
+	// Route1: Add serviceCIDR route: 10.96.0.0/16 via 169.254.169.4 dev breth0 mtu 1400
 	for _, serviceSubnet := range config.Kubernetes.ServiceCIDRs {
 		serviceSubnet := serviceSubnet
 		isV6 := utilnet.IsIPv6CIDR(serviceSubnet)
@@ -236,7 +228,7 @@ func (g *gateway) computeRoutesForUDN(nInfo util.NetInfo, vrfTableId int) ([]net
 	if err != nil {
 		return nil, err
 	}
-	// Route2: Add default route: default via 169.254.169.12 dev breth0 mtu 1400
+	// Route2: Add default route: default via 172.18.0.1 dev breth0 mtu 1400
 	if config.IPv4Mode {
 		_, defaultV4AnyCIDR, _ := net.ParseCIDR("0.0.0.0/0")
 		retVal = append(retVal, netlink.Route{
@@ -257,7 +249,37 @@ func (g *gateway) computeRoutesForUDN(nInfo util.NetInfo, vrfTableId int) ([]net
 			Table:     vrfTableId,
 		})
 	}
-
+	// Route3: Add MasqueradeRoute for reply traffic route: 169.254.169.12 dev ovn-k8s-mpX mtu 1400
+	link, err = util.LinkSetUp(managementPortName)
+	if err != nil {
+		return nil, fmt.Errorf("unable to get link for %s, error: %v", managementPortName, err)
+	}
+	masqIPv4, err := g.getV4MasqueradeIP(nInfo)
+	if err != nil {
+		return nil, err
+	}
+	if config.IPv4Mode && masqIPv4 != nil {
+		retVal = append(retVal, netlink.Route{
+			LinkIndex: link.Attrs().Index,
+			Dst:       util.GetIPNetFullMaskFromIP(*masqIPv4),
+			MTU:       mtu,
+			Table:     vrfTableId,
+		})
+	}
+	masqIPv6, err := g.getV6MasqueradeIP(nInfo)
+	if err != nil {
+		return nil, err
+	}
+	if config.IPv6Mode && masqIPv6 != nil {
+		if config.IPv4Mode && masqIPv4 != nil {
+			retVal = append(retVal, netlink.Route{
+				LinkIndex: link.Attrs().Index,
+				Dst:       util.GetIPNetFullMaskFromIP(*masqIPv6),
+				MTU:       mtu,
+				Table:     vrfTableId,
+			})
+		}
+	}
 	return retVal, nil
 }
 

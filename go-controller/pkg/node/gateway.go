@@ -90,7 +90,7 @@ func (g *gateway) AddNetwork(nInfo util.NetInfo, masqCTMark uint) error {
 	enslaveInterfaces := make(sets.Set[string])
 	enslaveInterfaces.Insert(mgmtPortLinkName)
 	// TODO: we may have to associate every route with vrf to avoid any race condtion (can it happen ?)
-	routes, err := g.computeRoutesForUDN(nInfo, vrfTableId)
+	routes, err := g.computeRoutesForUDN(nInfo, vrfTableId, mgmtPortLinkName)
 	if err != nil {
 		return err
 	}
