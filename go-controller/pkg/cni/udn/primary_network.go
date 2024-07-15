@@ -91,13 +91,11 @@ func (p *UserDefinedPrimaryNetwork) WaitForPrimaryAnnotationFn(namespace string,
 		}
 
 		if err := p.ensureAnnotation(annotations); err != nil {
-			//TODO: Event ?
-			klog.Warningf("Failed looking for primary network annotation: %v", err)
+			klog.Errorf("Failed looking for primary network annotation: %v", err)
 			return nil, false
 		}
 		if err := p.ensureActiveNetwork(namespace); err != nil {
-			//TODO: Event ?
-			klog.Warningf("Failed looking for primary network name: %v", err)
+			klog.Errorf("Failed looking for primary network name: %v", err)
 			return nil, false
 		}
 		return annotation, isReady
