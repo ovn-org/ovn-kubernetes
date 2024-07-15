@@ -39,7 +39,7 @@ type NetworkController interface {
 // NetworkControllerManager manages all network controllers
 type NetworkControllerManager interface {
 	NewNetworkController(netInfo util.NetInfo) (NetworkController, error)
-	CleanupDeletedNetworks(allControllers []NetworkController) error
+	CleanupDeletedNetworks(validNetworks ...util.BasicNetInfo) error
 }
 
 type watchFactory interface {
@@ -97,6 +97,9 @@ func NewNetAttachDefinitionController(
 }
 
 func (nadController *NetAttachDefinitionController) Start() error {
+	// initial sync here will ensure networks in network manager
+	// network manager will use this initial set of ensured networks to consider
+	// any other network stale on its own sync
 	err := controller.StartWithInitialSync(
 		nadController.syncAll,
 		nadController.controller,
