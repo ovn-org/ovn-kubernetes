@@ -168,7 +168,7 @@ func (oc *BaseSecondaryLayer2NetworkController) addUpdateLocalNodeEvent(node *co
 			for _, subnet := range oc.Subnets() {
 				hostSubnets = append(hostSubnets, subnet.CIDR)
 			}
-			if err := oc.syncNodeManagementPortNoRouteHostSubnets(node, oc.switchName, hostSubnets); err != nil {
+			if _, err := oc.syncNodeManagementPortNoRouteHostSubnets(node, oc.switchName, hostSubnets); err != nil {
 				errs = append(errs, err)
 				oc.mgmtPortFailed.Store(node.Name, true)
 			} else {
