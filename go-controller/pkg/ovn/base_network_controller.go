@@ -615,6 +615,7 @@ func (bnc *BaseNetworkController) syncNodeManagementPort(node *kapi.Node, switch
 			v4Subnet = hostSubnet
 		}
 		if config.Gateway.Mode == config.GatewayModeLocal && routeHostSubnets {
+			klog.Infof("SURYA boo")
 			lrsr := nbdb.LogicalRouterStaticRoute{
 				Policy:   &nbdb.LogicalRouterStaticRoutePolicySrcIP,
 				IPPrefix: hostSubnet.String(),
@@ -628,6 +629,7 @@ func (bnc *BaseNetworkController) syncNodeManagementPort(node *kapi.Node, switch
 			if err != nil {
 				return nil, fmt.Errorf("error creating static route %+v on router %s: %v", lrsr, bnc.GetNetworkScopedClusterRouterName(), err)
 			}
+			klog.Infof("SURYA %v/%v/%v", lrsr, mgmtIfAddr.IP.String(), bnc.GetNetworkName())
 		}
 	}
 
@@ -660,6 +662,7 @@ func (bnc *BaseNetworkController) syncNodeManagementPort(node *kapi.Node, switch
 }
 
 func (bnc *BaseNetworkController) syncNodeManagementPortRouteHostSubnets(node *kapi.Node, switchName string, hostSubnets []*net.IPNet) ([]net.IP, error) {
+	klog.Infof("SURYA %v/%v", switchName, bnc.GetNetworkName())
 	return bnc.syncNodeManagementPort(node, switchName, hostSubnets, true)
 }
 

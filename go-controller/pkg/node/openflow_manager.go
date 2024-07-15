@@ -46,7 +46,6 @@ func (c *openflowManager) getExGwBridgePorts() (string, string, string, string) 
 func (c *openflowManager) getDefaultBridgeName() string {
 	c.defaultBridge.Lock()
 	defer c.defaultBridge.Unlock()
-	klog.Infof("SURYA %v", c.defaultBridge.bridgeName)
 	return c.defaultBridge.bridgeName
 }
 
