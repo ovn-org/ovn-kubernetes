@@ -132,10 +132,10 @@ func (sncm *secondaryNetworkClusterManager) isTopologyManaged(nInfo util.NetInfo
 
 // CleanupDeletedNetworks implements the networkAttachDefController.NetworkControllerManager
 // interface function.
-func (sncm *secondaryNetworkClusterManager) CleanupDeletedNetworks(allControllers []nad.NetworkController) error {
+func (sncm *secondaryNetworkClusterManager) CleanupDeletedNetworks(validNetworks ...util.BasicNetInfo) error {
 	existingNetworksMap := map[string]struct{}{}
-	for _, oc := range allControllers {
-		existingNetworksMap[oc.GetNetworkName()] = struct{}{}
+	for _, network := range validNetworks {
+		existingNetworksMap[network.GetNetworkName()] = struct{}{}
 	}
 
 	staleNetworkControllers := map[string]nad.NetworkController{}

@@ -7,15 +7,18 @@ import (
 	"sync"
 	"testing"
 
-	cnitypes "github.com/containernetworking/cni/pkg/types"
-	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	"github.com/onsi/gomega"
 	"github.com/onsi/gomega/format"
+
+	cnitypes "github.com/containernetworking/cni/pkg/types"
+	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/tools/cache"
 
 	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -61,6 +64,8 @@ type testNetworkControllerManager struct {
 	started     []string
 	stopped     []string
 	cleaned     []string
+
+	valid []util.BasicNetInfo
 }
 
 func (tncm *testNetworkControllerManager) NewNetworkController(netInfo util.NetInfo) (NetworkController, error) {
@@ -74,7 +79,8 @@ func (tncm *testNetworkControllerManager) NewNetworkController(netInfo util.NetI
 	return t, nil
 }
 
-func (tncm *testNetworkControllerManager) CleanupDeletedNetworks(allControllers []NetworkController) error {
+func (tncm *testNetworkControllerManager) CleanupDeletedNetworks(validNetworks ...util.BasicNetInfo) error {
+	tncm.valid = validNetworks
 	return nil
 }
 
@@ -371,6 +377,7 @@ func TestNetAttachDefinitionController(t *testing.T) {
 			}
 
 			g.Expect(nadController.networkManager.Start()).To(gomega.Succeed())
+			defer nadController.networkManager.Stop()
 
 			for _, args := range tt.args {
 				namespace, name, err := cache.SplitMetaNamespaceKey(args.nad)
@@ -379,18 +386,8 @@ func TestNetAttachDefinitionController(t *testing.T) {
 				var nad *nettypes.NetworkAttachmentDefinition
 				if args.network != nil {
 					args.network.NADName = args.nad
-					config, err := json.Marshal(args.network)
+					nad, err = buildNAD(name, namespace, args.network)
 					g.Expect(err).ToNot(gomega.HaveOccurred())
-
-					nad = &nettypes.NetworkAttachmentDefinition{
-						ObjectMeta: v1.ObjectMeta{
-							Name:      name,
-							Namespace: namespace,
-						},
-						Spec: nettypes.NetworkAttachmentDefinitionSpec{
-							Config: string(config),
-						},
-					}
 				}
 
 				err = nadController.syncNAD(args.nad, nad)
@@ -433,4 +430,127 @@ func TestNetAttachDefinitionController(t *testing.T) {
 			g.Consistently(meetsExpectations).Should(gomega.Succeed())
 		})
 	}
+}
+
+func TestSyncAll(t *testing.T) {
+	network_A := &ovncnitypes.NetConf{
+		Topology: types.Layer2Topology,
+		NetConf: cnitypes.NetConf{
+			Name: "network_A",
+			Type: "ovn-k8s-cni-overlay",
+		},
+		MTU: 1400,
+	}
+	network_B := &ovncnitypes.NetConf{
+		Topology: types.LocalnetTopology,
+		NetConf: cnitypes.NetConf{
+			Name: "network_B",
+			Type: "ovn-k8s-cni-overlay",
+		},
+		MTU: 1400,
+	}
+	type TestNAD struct {
+		name    string
+		netconf *ovncnitypes.NetConf
+	}
+	tests := []struct {
+		name     string
+		testNADs []TestNAD
+	}{
+		{
+			name: "multiple networks referenced by multiple nads",
+			testNADs: []TestNAD{
+				{
+					name:    "test/nad1",
+					netconf: network_A,
+				},
+				{
+					name:    "test/nad2",
+					netconf: network_B,
+				},
+				{
+					name:    "test/nad3",
+					netconf: network_A,
+				},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := gomega.NewWithT(t)
+
+			config.OVNKubernetesFeature.EnableMultiNetwork = true
+			fakeClient := util.GetOVNClientset().GetOVNKubeControllerClientset()
+			wf, err := factory.NewOVNKubeControllerWatchFactory(fakeClient)
+			g.Expect(err).ToNot(gomega.HaveOccurred())
+
+			tncm := &testNetworkControllerManager{
+				controllers: map[string]NetworkController{},
+			}
+			nadController, err := NewNetAttachDefinitionController(
+				"SUT",
+				tncm,
+				wf,
+			)
+			g.Expect(err).ToNot(gomega.HaveOccurred())
+
+			expectedNetworks := map[string]util.NetInfo{}
+			for _, testNAD := range tt.testNADs {
+				namespace, name, err := cache.SplitMetaNamespaceKey(testNAD.name)
+				g.Expect(err).ToNot(gomega.HaveOccurred())
+				testNAD.netconf.NADName = testNAD.name
+				nad, err := buildNAD(name, namespace, testNAD.netconf)
+				g.Expect(err).ToNot(gomega.HaveOccurred())
+				_, err = fakeClient.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(namespace).Create(
+					context.Background(),
+					nad,
+					v1.CreateOptions{},
+				)
+				g.Expect(err).ToNot(gomega.HaveOccurred())
+				netInfo := expectedNetworks[testNAD.netconf.Name]
+				if netInfo == nil {
+					netInfo, err = util.NewNetInfo(testNAD.netconf)
+					g.Expect(err).ToNot(gomega.HaveOccurred())
+					expectedNetworks[testNAD.netconf.Name] = netInfo
+				}
+			}
+
+			err = wf.Start()
+			g.Expect(err).ToNot(gomega.HaveOccurred())
+			defer wf.Shutdown()
+
+			err = nadController.Start()
+			g.Expect(err).ToNot(gomega.HaveOccurred())
+			// sync has already happened, stop
+			nadController.Stop()
+
+			actualNetworks := map[string]util.BasicNetInfo{}
+			for _, network := range tncm.valid {
+				actualNetworks[network.GetNetworkName()] = network
+			}
+
+			g.Expect(actualNetworks).To(gomega.HaveLen(len(expectedNetworks)))
+			for name, network := range expectedNetworks {
+				g.Expect(actualNetworks).To(gomega.HaveKey(name))
+				g.Expect(actualNetworks[name].Equals(network)).To(gomega.BeTrue())
+			}
+		})
+	}
+}
+
+func buildNAD(name, namespace string, network *ovncnitypes.NetConf) (*nettypes.NetworkAttachmentDefinition, error) {
+	config, err := json.Marshal(network)
+	if err != nil {
+		return nil, err
+	}
+	nad := &nettypes.NetworkAttachmentDefinition{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+		},
+		Spec: nettypes.NetworkAttachmentDefinitionSpec{
+			Config: string(config),
+		},
+	}
+	return nad, nil
 }

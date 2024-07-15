@@ -153,9 +153,11 @@ func (nm *networkManagerImpl) sync(network string) error {
 }
 
 func (nm *networkManagerImpl) syncAll() error {
-	networkControllers := make([]NetworkController, 0, len(nm.networkControllers))
-	for _, networkControllerState := range nm.networkControllers {
-		networkControllers = append(networkControllers, networkControllerState.controller)
+	// as we sync upon start, consider networks that have not been ensured as
+	// stale and clean them up
+	validNetworks := make([]util.BasicNetInfo, 0, len(nm.networks))
+	for _, network := range nm.networks {
+		validNetworks = append(validNetworks, network)
 	}
-	return nm.ncm.CleanupDeletedNetworks(networkControllers)
+	return nm.ncm.CleanupDeletedNetworks(validNetworks...)
 }
