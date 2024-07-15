@@ -210,8 +210,6 @@ func NewSecondaryLocalnetNetworkController(cnci *CommonNetworkControllerInfo, ne
 					localZoneNodes:              &sync.Map{},
 				},
 			},
-			switchName:     netInfo.GetNetworkScopedSwitchName(types.OVNLocalnetSwitch),
-			mgmtPortFailed: sync.Map{},
 		},
 	}
 
@@ -268,7 +266,9 @@ func (oc *SecondaryLocalnetNetworkController) Cleanup() error {
 }
 
 func (oc *SecondaryLocalnetNetworkController) Init() error {
-	logicalSwitch, err := oc.initializeLogicalSwitch(oc.switchName, oc.Subnets(), oc.ExcludeSubnets())
+	switchName := oc.GetNetworkScopedSwitchName(types.OVNLocalnetSwitch)
+
+	logicalSwitch, err := oc.initializeLogicalSwitch(switchName, oc.Subnets(), oc.ExcludeSubnets())
 	if err != nil {
 		return err
 	}
@@ -291,7 +291,7 @@ func (oc *SecondaryLocalnetNetworkController) Init() error {
 
 	err = libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitch(oc.nbClient, logicalSwitch, &logicalSwitchPort)
 	if err != nil {
-		klog.Errorf("Failed to add logical port %+v to switch %s: %v", logicalSwitchPort, oc.switchName, err)
+		klog.Errorf("Failed to add logical port %+v to switch %s: %v", logicalSwitchPort, switchName, err)
 		return err
 	}
 

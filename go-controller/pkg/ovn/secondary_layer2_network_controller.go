@@ -252,8 +252,6 @@ func NewSecondaryLayer2NetworkController(cnci *CommonNetworkControllerInfo, netI
 					cancelableCtx:               util.NewCancelableContext(),
 				},
 			},
-			switchName:     netInfo.GetNetworkScopedSwitchName(types.OVNLayer2Switch),
-			mgmtPortFailed: sync.Map{},
 		},
 		mgmtPortFailed: sync.Map{},
 	}
@@ -386,7 +384,7 @@ func (oc *SecondaryLayer2NetworkController) addUpdateLocalNodeEvent(node *corev1
 		}
 	}
 
-	errs = append(errs, oc.BaseSecondaryLayer2NetworkController.addUpdateLocalNodeEvent(node, nSyncs))
+	errs = append(errs, oc.BaseSecondaryLayer2NetworkController.addUpdateLocalNodeEvent(node))
 
 	err := utilerrors.Join(errs...)
 	if err != nil {
