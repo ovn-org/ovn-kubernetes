@@ -320,6 +320,47 @@ var _ = Describe("User Defined Network Controller", func() {
 				Message: `failed to validate no primary network exist: unmarshal failed [test/another-primary-net]: invalid character '!' looking for beginning of value`,
 			}}))
 		})
+
+		It("should add finalizer to UDN", func() {
+			udn := testUDN()
+			udn.Finalizers = nil
+			udn, err := udnClient.K8sV1().UserDefinedNetworks(udn.Namespace).Create(context.Background(), udn, metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+
+			c := New(nadClient, f.NADInformer(), udnClient, f.UserDefinedNetworkInformer(), noopRenderNadStub())
+			Expect(c.Run()).To(Succeed())
+
+			Eventually(func() []string {
+				udn, err = udnClient.K8sV1().UserDefinedNetworks(udn.Namespace).Get(context.Background(), udn.Name, metav1.GetOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				return udn.Finalizers
+			}).Should(Equal([]string{"k8s.ovn.org/user-defined-network-protection"}))
+		})
+		It("should fail when add finalizer to UDN fails", func() {
+			udn := testUDN()
+			udn.Finalizers = nil
+			udn, err := udnClient.K8sV1().UserDefinedNetworks(udn.Namespace).Create(context.Background(), udn, metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+
+			expectedErr := errors.New("update UDN error")
+			udnClient.PrependReactor("update", "userdefinednetworks", func(action testing.Action) (handled bool, obj runtime.Object, err error) {
+				return true, nil, expectedErr
+			})
+
+			c := New(nadClient, f.NADInformer(), udnClient, f.UserDefinedNetworkInformer(), noopRenderNadStub())
+			Expect(c.Run()).To(Succeed())
+
+			Eventually(func() []metav1.Condition {
+				updatedUDN, err := udnClient.K8sV1().UserDefinedNetworks(udn.Namespace).Get(context.Background(), udn.Name, metav1.GetOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				return normalizeConditions(updatedUDN.Status.Conditions)
+			}).Should(Equal([]metav1.Condition{{
+				Type:    "NetworkReady",
+				Status:  "False",
+				Reason:  "SyncError",
+				Message: `failed to add finalizer to UserDefinedNetwork: ` + expectedErr.Error(),
+			}}))
+		})
 	})
 
 	Context("UserDefinedNetwork object sync", func() {
@@ -338,6 +379,108 @@ var _ = Describe("User Defined Network Controller", func() {
 
 			_, err = c.syncUserDefinedNetwork(udn, mutetedNAD)
 			Expect(err).To(Equal(errors.New("foreign NetworkAttachmentDefinition with the desired name already exist [test/test]")))
+		})
+
+		It("when UDN is being deleted, should not remove finalizer from non managed NAD", func() {
+			c := New(nadClient, nadInformer, udnClient, udnInformer, noopRenderNadStub())
+
+			udn := testsUDNWithDeletionTimestamp(time.Now())
+			udn, err := udnClient.K8sV1().UserDefinedNetworks(udn.Namespace).Create(context.Background(), udn, metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+
+			unmanagedNAD := testNAD()
+			unmanagedNAD.OwnerReferences[0].UID = "99"
+			unmanagedNAD, err = nadClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(udn.Namespace).Create(context.Background(), unmanagedNAD, metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+
+			_, err = c.syncUserDefinedNetwork(udn, unmanagedNAD)
+			Expect(err).ToNot(HaveOccurred())
+
+			expectedFinalizers := testNAD().Finalizers
+
+			Expect(unmanagedNAD.Finalizers).To(Equal(expectedFinalizers))
+		})
+		It("when UDN is being deleted, and NAD exist, should remove finalizer from NAD", func() {
+			c := New(nadClient, nadInformer, udnClient, udnInformer, noopRenderNadStub())
+
+			udn := testsUDNWithDeletionTimestamp(time.Now())
+			udn, err := udnClient.K8sV1().UserDefinedNetworks(udn.Namespace).Create(context.Background(), udn, metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+
+			nad := testNAD()
+			nad, err = nadClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(udn.Namespace).Create(context.Background(), nad, metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+
+			_, err = c.syncUserDefinedNetwork(udn, nad)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(nad.Finalizers).To(BeEmpty())
+		})
+		It("when UDN is being deleted, and NAD exist, should fail when remove NAD finalizer fails", func() {
+			c := New(nadClient, nadInformer, udnClient, udnInformer, noopRenderNadStub())
+
+			udn := testsUDNWithDeletionTimestamp(time.Now())
+			udn, err := udnClient.K8sV1().UserDefinedNetworks(udn.Namespace).Create(context.Background(), udn, metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+
+			nad := testNAD()
+			nad, err = nadClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(udn.Namespace).Create(context.Background(), nad, metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+
+			expectedErr := errors.New("update NAD error")
+			nadClient.PrependReactor("update", "network-attachment-definitions", func(action testing.Action) (bool, runtime.Object, error) {
+				return true, nil, expectedErr
+			})
+
+			_, err = c.syncUserDefinedNetwork(udn, nad)
+			Expect(err).To(MatchError(expectedErr))
+		})
+
+		It("when UDN is being deleted, and NAD exist w/o finalizer, should remove finalizer from UDN", func() {
+			c := New(nadClient, nadInformer, udnClient, udnInformer, noopRenderNadStub())
+
+			udn := testsUDNWithDeletionTimestamp(time.Now())
+			udn, err := udnClient.K8sV1().UserDefinedNetworks(udn.Namespace).Create(context.Background(), udn, metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+
+			nad := testNAD()
+			nad.Finalizers = nil
+			nad, err = nadClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(udn.Namespace).Create(context.Background(), nad, metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+
+			_, err = c.syncUserDefinedNetwork(udn, nad)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(udn.Finalizers).To(BeEmpty())
+		})
+		It("when UDN is being deleted, and NAD not exist, should remove finalizer from UDN", func() {
+			c := New(nadClient, nadInformer, udnClient, udnInformer, noopRenderNadStub())
+
+			udn := testsUDNWithDeletionTimestamp(time.Now())
+			udn, err := udnClient.K8sV1().UserDefinedNetworks(udn.Namespace).Create(context.Background(), udn, metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+
+			_, err = c.syncUserDefinedNetwork(udn, nil)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(udn.Finalizers).To(BeEmpty())
+		})
+		It("when UDN is being deleted, should fail removing finalizer from UDN when patch fails", func() {
+			c := New(nadClient, nadInformer, udnClient, udnInformer, noopRenderNadStub())
+
+			udn := testsUDNWithDeletionTimestamp(time.Now())
+			udn, err := udnClient.K8sV1().UserDefinedNetworks(udn.Namespace).Create(context.Background(), udn, metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+
+			nad := testNAD()
+			nad.Finalizers = nil
+			nad, err = nadClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(udn.Namespace).Create(context.Background(), nad, metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+
+			expectedErr := errors.New("update UDN error")
+			udnClient.PrependReactor("update", "userdefinednetworks", func(action testing.Action) (bool, runtime.Object, error) {
+				return true, nil, expectedErr
+			})
+
+			_, err = c.syncUserDefinedNetwork(udn, nad)
+			Expect(err).To(MatchError(expectedErr))
 		})
 	})
 
@@ -472,19 +615,28 @@ func normalizeConditions(conditions []metav1.Condition) []metav1.Condition {
 func testUDN() *udnv1.UserDefinedNetwork {
 	return &udnv1.UserDefinedNetwork{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test",
-			Namespace: "test",
-			UID:       "1",
+			Name:       "test",
+			Namespace:  "test",
+			UID:        "1",
+			Finalizers: []string{"k8s.ovn.org/user-defined-network-protection"},
 		},
 	}
+}
+
+func testsUDNWithDeletionTimestamp(ts time.Time) *udnv1.UserDefinedNetwork {
+	udn := testUDN()
+	deletionTimestamp := metav1.NewTime(ts)
+	udn.DeletionTimestamp = &deletionTimestamp
+	return udn
 }
 
 func testNAD() *netv1.NetworkAttachmentDefinition {
 	return &netv1.NetworkAttachmentDefinition{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test",
-			Namespace: "test",
-			Labels:    map[string]string{"k8s.ovn.org/user-defined-network": ""},
+			Name:       "test",
+			Namespace:  "test",
+			Labels:     map[string]string{"k8s.ovn.org/user-defined-network": ""},
+			Finalizers: []string{"k8s.ovn.org/user-defined-network-protection"},
 			OwnerReferences: []metav1.OwnerReference{
 				{
 					APIVersion:         udnv1.SchemeGroupVersion.String(),

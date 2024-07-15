@@ -18,7 +18,8 @@ import (
 )
 
 const (
-	OvnK8sCNIOverlay = "ovn-k8s-cni-overlay"
+	OvnK8sCNIOverlay            = "ovn-k8s-cni-overlay"
+	FinalizerUserDefinedNetwork = "k8s.ovn.org/user-defined-network-protection"
 
 	cniVersion              = "1.0.0"
 	labelUserDefinedNetwork = "k8s.ovn.org/user-defined-network"
@@ -52,6 +53,7 @@ func RenderNetAttachDefManifest(udn *userdefinednetworkv1.UserDefinedNetwork) (*
 			Labels: map[string]string{
 				labelUserDefinedNetwork: "",
 			},
+			Finalizers: []string{FinalizerUserDefinedNetwork},
 		},
 		Spec: netv1.NetworkAttachmentDefinitionSpec{
 			Config: string(cniNetConfRaw),

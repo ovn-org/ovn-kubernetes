@@ -243,6 +243,7 @@ var _ = Describe("NetAttachDefTemplate", func() {
 					Name:            "test-net",
 					Labels:          map[string]string{"k8s.ovn.org/user-defined-network": ""},
 					OwnerReferences: []metav1.OwnerReference{ownerRef},
+					Finalizers:      []string{"k8s.ovn.org/user-defined-network-protection"},
 				},
 				Spec: netv1.NetworkAttachmentDefinitionSpec{Config: expectedNadNetConf},
 			}
