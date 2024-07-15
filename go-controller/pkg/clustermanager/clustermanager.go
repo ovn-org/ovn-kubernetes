@@ -56,7 +56,7 @@ type ClusterManager struct {
 func NewClusterManager(ovnClient *util.OVNClusterManagerClientset, wf *factory.WatchFactory,
 	identity string, wg *sync.WaitGroup, recorder record.EventRecorder) (*ClusterManager, error) {
 
-	defaultNetClusterController := newDefaultNetworkClusterController(&util.DefaultNetInfo{}, ovnClient, wf)
+	defaultNetClusterController := newDefaultNetworkClusterController(&util.DefaultNetInfo{}, ovnClient, wf, recorder)
 
 	zoneClusterController, err := newZoneClusterController(ovnClient, wf)
 	if err != nil {
@@ -74,7 +74,7 @@ func NewClusterManager(ovnClient *util.OVNClusterManagerClientset, wf *factory.W
 	}
 
 	if config.OVNKubernetesFeature.EnableMultiNetwork {
-		cm.secondaryNetClusterManager, err = newSecondaryNetworkClusterManager(ovnClient, wf)
+		cm.secondaryNetClusterManager, err = newSecondaryNetworkClusterManager(ovnClient, wf, recorder)
 		if err != nil {
 			return nil, err
 		}

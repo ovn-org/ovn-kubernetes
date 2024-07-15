@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/containernetworking/cni/pkg/types"
+	"k8s.io/client-go/tools/record"
 	"k8s.io/klog/v2"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/id"
@@ -30,9 +31,12 @@ type secondaryNetworkClusterManager struct {
 	watchFactory  *factory.WatchFactory
 	// networkIDAllocator is used to allocate a unique ID for each secondary layer3 network
 	networkIDAllocator id.Allocator
+
+	// event recorder used to post events to k8s
+	recorder record.EventRecorder
 }
 
-func newSecondaryNetworkClusterManager(ovnClient *util.OVNClusterManagerClientset, wf *factory.WatchFactory) (*secondaryNetworkClusterManager, error) {
+func newSecondaryNetworkClusterManager(ovnClient *util.OVNClusterManagerClientset, wf *factory.WatchFactory, recorder record.EventRecorder) (*secondaryNetworkClusterManager, error) {
 	klog.Infof("Creating secondary network cluster manager")
 	networkIDAllocator, err := id.NewIDAllocator("NetworkIDs", maxSecondaryNetworkIDs)
 	if err != nil {
@@ -47,6 +51,7 @@ func newSecondaryNetworkClusterManager(ovnClient *util.OVNClusterManagerClientse
 		ovnClient:          ovnClient,
 		watchFactory:       wf,
 		networkIDAllocator: networkIDAllocator,
+		recorder:           recorder,
 	}
 
 	sncm.nadController, err = nad.NewNetAttachDefinitionController("cluster-manager", sncm, wf)
@@ -109,7 +114,7 @@ func (sncm *secondaryNetworkClusterManager) NewNetworkController(nInfo util.NetI
 	klog.Infof("Creating new network controller for network %s of topology %s", nInfo.GetNetworkName(), nInfo.TopologyType())
 
 	namedIDAllocator := sncm.networkIDAllocator.ForName(nInfo.GetNetworkName())
-	sncc := newNetworkClusterController(namedIDAllocator, nInfo, sncm.ovnClient, sncm.watchFactory)
+	sncc := newNetworkClusterController(namedIDAllocator, nInfo, sncm.ovnClient, sncm.watchFactory, sncm.recorder)
 	return sncc, nil
 }
 
@@ -189,7 +194,7 @@ func (sncm *secondaryNetworkClusterManager) CleanupDeletedNetworks(validNetworks
 func (sncm *secondaryNetworkClusterManager) newDummyLayer3NetworkController(netName string) (nad.NetworkController, error) {
 	netInfo, _ := util.NewNetInfo(&ovncnitypes.NetConf{NetConf: types.NetConf{Name: netName}, Topology: ovntypes.Layer3Topology})
 	namedIDAllocator := sncm.networkIDAllocator.ForName(netInfo.GetNetworkName())
-	nc := newNetworkClusterController(namedIDAllocator, netInfo, sncm.ovnClient, sncm.watchFactory)
+	nc := newNetworkClusterController(namedIDAllocator, netInfo, sncm.ovnClient, sncm.watchFactory, sncm.recorder)
 	err := nc.init()
 	return nc, err
 }
