@@ -222,6 +222,7 @@ func (a *PodAllocator) reconcile(old, new *corev1.Pod, releaseFromAllocator bool
 
 	onNetwork, networkMap, err := util.GetPodNADToNetworkMappingWithActiveNetwork(pod, a.netInfo, activeNetwork)
 	if err != nil {
+		a.recordPodErrorEvent(pod, err)
 		return fmt.Errorf("failed to get NAD to network mapping: %w", err)
 	}
 
