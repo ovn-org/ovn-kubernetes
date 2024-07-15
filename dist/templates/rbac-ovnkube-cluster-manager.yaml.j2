@@ -79,6 +79,7 @@ rules:
       resources:
           - egressips
           - egressservices/status
+          - userdefinednetworks
           - userdefinednetworks/status
       verbs: [ "patch", "update" ]
     - apiGroups: [""]

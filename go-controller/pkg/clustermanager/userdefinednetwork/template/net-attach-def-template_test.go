@@ -78,6 +78,7 @@ var _ = Describe("NetAttachDefTemplate", func() {
 				Labels: map[string]string{
 					"k8s.ovn.org/user-defined-network": "",
 				},
+				Finalizers: []string{"k8s.ovn.org/user-defined-network-protection"},
 				OwnerReferences: []metav1.OwnerReference{
 					{
 						APIVersion:         udnApiVersion,
