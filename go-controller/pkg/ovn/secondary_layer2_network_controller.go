@@ -230,6 +230,10 @@ func NewSecondaryLayer2NetworkController(cnci *CommonNetworkControllerInfo, netI
 	ipv4Mode, ipv6Mode := netInfo.IPMode()
 	addressSetFactory := addressset.NewOvnAddressSetFactory(cnci.nbClient, ipv4Mode, ipv6Mode)
 
+	lsManagerFactoryFn := lsm.NewL2SwitchManager
+	if netInfo.IsPrimaryNetwork() {
+		lsManagerFactoryFn = lsm.NewL2SwitchManagerForUserDefinedPrimaryNetwork
+	}
 	oc := &SecondaryLayer2NetworkController{
 		BaseSecondaryLayer2NetworkController: BaseSecondaryLayer2NetworkController{
 
@@ -238,7 +242,7 @@ func NewSecondaryLayer2NetworkController(cnci *CommonNetworkControllerInfo, netI
 					CommonNetworkControllerInfo: *cnci,
 					controllerName:              getNetworkControllerName(netInfo.GetNetworkName()),
 					NetInfo:                     netInfo,
-					lsManager:                   lsm.NewL2SwitchManager(),
+					lsManager:                   lsManagerFactoryFn(),
 					logicalPortCache:            newPortCache(stopChan),
 					namespaces:                  make(map[string]*namespaceInfo),
 					namespacesMutex:             sync.Mutex{},
