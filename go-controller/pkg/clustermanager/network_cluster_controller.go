@@ -450,6 +450,15 @@ func (ncc *networkClusterController) Cleanup() error {
 	return nil
 }
 
+func (ncc *networkClusterController) Reconcile(netInfo util.NetInfo) error {
+	// update network informaiton, point of no return
+	err := util.ReconcileNetInfo(ncc.ReconcilableNetInfo, netInfo)
+	if err != nil {
+		klog.Errorf("Failed to reconcile network %s: %v", ncc.GetNetworkName(), err)
+	}
+	return nil
+}
+
 // networkClusterControllerEventHandler object handles the events
 // from retry framework.
 type networkClusterControllerEventHandler struct {

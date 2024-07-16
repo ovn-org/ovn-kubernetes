@@ -187,6 +187,41 @@ func (nc *DefaultNodeNetworkController) initRetryFrameworkForNode() {
 	nc.retryEndpointSlices = nc.newRetryFrameworkNode(factory.EndpointSliceForStaleConntrackRemovalType)
 }
 
+func (oc *DefaultNodeNetworkController) shouldReconcileNetworkChange(old, new util.NetInfo) bool {
+	wasPodNetworkAdvertisedAtNode := util.IsPodNetworkAdvertisedAtNode(old, oc.name)
+	isPodNetworkAdverrtisedAtNode := util.IsPodNetworkAdvertisedAtNode(new, oc.name)
+	return wasPodNetworkAdvertisedAtNode != isPodNetworkAdverrtisedAtNode
+}
+
+func (oc *DefaultNodeNetworkController) Reconcile(netInfo util.NetInfo) error {
+	// inspect changes first
+	reconcilePodNetwork := oc.shouldReconcileNetworkChange(oc.ReconcilableNetInfo, netInfo)
+
+	// then update network information, point of no return
+	err := util.ReconcileNetInfo(oc.ReconcilableNetInfo, netInfo)
+	if err != nil {
+		klog.Errorf("Failed to reconcile network %s: %v", oc.GetNetworkName(), err)
+	}
+
+	// then reconcile subcontrollers
+	if reconcilePodNetwork {
+		isPodNetworkAdvertisedAtNode := oc.isPodNetworkAdvertisedAtNode()
+		if oc.Gateway != nil {
+			oc.Gateway.SetPodNetworkAdvertised(isPodNetworkAdvertisedAtNode)
+			err := oc.Gateway.Reconcile()
+			if err != nil {
+				klog.Errorf("Failed to reconcile gateway: %v", err)
+			}
+		}
+	}
+
+	return nil
+}
+
+func (oc *DefaultNodeNetworkController) isPodNetworkAdvertisedAtNode() bool {
+	return util.IsPodNetworkAdvertisedAtNode(oc, oc.name)
+}
+
 func clearOVSFlowTargets() error {
 	_, _, err := util.RunOVSVsctl(
 		"--",
