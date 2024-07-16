@@ -1,6 +1,8 @@
 package factory
 
 import (
+	"net"
+
 	adminpolicybasedrouteinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/informers/externalversions/adminpolicybasedroute/v1"
 	egressipinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/informers/externalversions/egressip/v1"
 
@@ -74,6 +76,8 @@ type NodeWatchFactory interface {
 	GetServiceEndpointSlices(namespace, svcName, network string) ([]*discovery.EndpointSlice, error)
 
 	GetNamespace(name string) (*kapi.Namespace, error)
+
+	GetUDNAllowedServicesIPs() ([]net.IP, error)
 }
 
 type Shutdownable interface {

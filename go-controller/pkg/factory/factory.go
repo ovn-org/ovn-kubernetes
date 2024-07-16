@@ -3,14 +3,18 @@ package factory
 import (
 	"context"
 	"fmt"
+	"net"
 	"reflect"
 	"sync/atomic"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	anpapi "sigs.k8s.io/network-policy-api/apis/v1alpha1"
 	anpscheme "sigs.k8s.io/network-policy-api/pkg/client/clientset/versioned/scheme"
 	anpinformerfactory "sigs.k8s.io/network-policy-api/pkg/client/informers/externalversions"
 	anpinformer "sigs.k8s.io/network-policy-api/pkg/client/informers/externalversions/apis/v1alpha1"
+
+	certificatesinformers "k8s.io/client-go/informers/certificates/v1"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressfirewallapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
@@ -20,7 +24,6 @@ import (
 	egressfirewalllister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/listers/egressfirewall/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	certificatesinformers "k8s.io/client-go/informers/certificates/v1"
 
 	ocpnetworkapiv1alpha1 "github.com/openshift/api/network/v1alpha1"
 	ocpnetworkscheme "github.com/openshift/client-go/network/clientset/versioned/scheme"
@@ -1409,6 +1412,43 @@ func (wf *WatchFactory) GetNAD(namespace, name string) (*nadapi.NetworkAttachmen
 func (wf *WatchFactory) GetNADs(namespace string) ([]*nadapi.NetworkAttachmentDefinition, error) {
 	nadLister := wf.informers[NetworkAttachmentDefinitionType].lister.(nadlister.NetworkAttachmentDefinitionLister)
 	return nadLister.NetworkAttachmentDefinitions(namespace).List(labels.Everything())
+}
+
+// GetUDNAllowedServicesIPs returns the current list of IP addresses for services specified in config.Default.UDNAllowedDefaultServices
+func (wf *WatchFactory) GetUDNAllowedServicesIPs() ([]net.IP, error) {
+	serviceIPs := make([]net.IP, 0, len(config.Default.UDNAllowedDefaultServices.Value()))
+
+	for _, svc := range config.Default.UDNAllowedDefaultServices.Value() {
+		namespace, name, err := cache.SplitMetaNamespaceKey(svc)
+		if err != nil {
+			return nil, err
+		}
+
+		svcObj, err := wf.GetService(namespace, name)
+		if err != nil {
+			if apierrors.IsNotFound(err) {
+				klog.Warningf("service %q does not exist, ignoring", svc)
+				continue
+			}
+			return nil, err
+		}
+
+		if len(svcObj.Spec.ClusterIP) == 0 {
+			klog.Infof("service %q has no ClusterIP address, ignoring", svc)
+			continue
+		}
+		svcIP := net.ParseIP(svcObj.Spec.ClusterIP)
+		if svcIP == nil {
+			return nil, fmt.Errorf("failed to parse service IP %s for service: %q", svcObj.Spec.ClusterIP, svc)
+		}
+
+		if !util.IsClusterIP(svcIP.String()) {
+			return nil, fmt.Errorf("config.Default.ClusterNetworkServices contains an entry that does not belong to the service network: %q", svc)
+		}
+		serviceIPs = append(serviceIPs, svcIP)
+	}
+
+	return serviceIPs, nil
 }
 
 func (wf *WatchFactory) NodeInformer() cache.SharedIndexInformer {

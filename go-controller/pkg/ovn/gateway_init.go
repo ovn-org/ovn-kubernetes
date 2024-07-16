@@ -15,8 +15,9 @@ import (
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node"
@@ -640,6 +641,21 @@ func (oc *DefaultNetworkController) addPolicyBasedRoutes(nodeName, mgmtPortIP st
 			types.RouterToSwitchPrefix, nodeName, l3Prefix, hostIP, nodeName)
 		matches = matches.Insert(matchStr)
 	}
+
+	// TODO: Wrong controller
+	// TODO: This has to be a static route instead of an LRP?
+	//if util.IsNetworkSegmentationSupportEnabled() {
+	//	udnAllowedServicesIPs, err := util.GetUDNAllowedServicesIPs(oc.watchFactory)
+	//	if err != nil {
+	//		return err
+	//	}
+	//	for _, svcIP := range udnAllowedServicesIPs {
+	//		matchStr := fmt.Sprintf(`inport == "%s%s" && %s.dst == %s`,
+	//			types.RouterToSwitchPrefix, nodeName, l3Prefix, svcIP.String())
+	//		matches = matches.Insert(matchStr)
+	//	}
+	//}
+
 	if err := oc.syncPolicyBasedRoutes(nodeName, matches, types.NodeSubnetPolicyPriority, mgmtPortIP); err != nil {
 		return fmt.Errorf("unable to sync node subnet policies, err: %v", err)
 	}

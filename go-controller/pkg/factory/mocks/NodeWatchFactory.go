@@ -20,6 +20,8 @@ import (
 
 	mock "github.com/stretchr/testify/mock"
 
+	net "net"
+
 	v1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/informers/externalversions/adminpolicybasedroute/v1"
 )
 
@@ -536,6 +538,36 @@ func (_m *NodeWatchFactory) GetServices() ([]*corev1.Service, error) {
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]*corev1.Service)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func() error); ok {
+		r1 = rf()
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// GetUDNAllowedServicesIPs provides a mock function with given fields:
+func (_m *NodeWatchFactory) GetUDNAllowedServicesIPs() ([]net.IP, error) {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetUDNAllowedServicesIPs")
+	}
+
+	var r0 []net.IP
+	var r1 error
+	if rf, ok := ret.Get(0).(func() ([]net.IP, error)); ok {
+		return rf()
+	}
+	if rf, ok := ret.Get(0).(func() []net.IP); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]net.IP)
 		}
 	}
 

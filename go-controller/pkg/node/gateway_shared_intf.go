@@ -9,6 +9,9 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/vishvananda/netlink"
+	"golang.org/x/sys/unix"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
@@ -18,8 +21,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
-	"github.com/vishvananda/netlink"
-	"golang.org/x/sys/unix"
 
 	kapi "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
@@ -1085,7 +1086,7 @@ func (npwipt *nodePortWatcherIptables) SyncServices(services []interface{}) erro
 	return utilerrors.Join(errors...)
 }
 
-func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]string, error) {
+func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP, udnAllowedServicesIPs []net.IP) ([]string, error) {
 	// CAUTION: when adding new flows where the in_port is ofPortPatch and the out_port is ofPortPhys, ensure
 	// that dl_src is included in match criteria!
 
@@ -1320,6 +1321,32 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 		dftFlows = append(dftFlows,
 			fmt.Sprintf("cookie=%s, priority=10, table=1, dl_dst=%s, actions=output:%s",
 				defaultOpenFlowCookie, bridgeMacAddress, ofPortHost))
+	}
+
+	for _, svcIP := range udnAllowedServicesIPs {
+		ipPrefix := "ip"
+		masqueradeSubnet := config.Gateway.V4MasqueradeSubnet
+		if !utilnet.IsIPv4(svcIP) {
+			ipPrefix = "ipv6"
+			masqueradeSubnet = config.Gateway.V6MasqueradeSubnet
+		}
+
+		// table 0, user-defined network host -> OVN towards default cluster network services
+		// this has a higher priority than the default service flow(priority=500) to avoid SNATing to the default
+		// masquerade IP if it is not required.
+		dftFlows = append(dftFlows,
+			fmt.Sprintf("cookie=%s, priority=550, in_port=%s, %s, %s_src=%s, %s_dst=%s,"+
+				"actions=ct(commit,zone=%d,table=2)",
+				defaultOpenFlowCookie, ofPortHost, ipPrefix, ipPrefix, masqueradeSubnet, ipPrefix, svcIP, config.Default.HostMasqConntrackZone))
+
+		// table 0, Reply hairpin traffic to host, coming from OVN, unSNAT
+		// this has a lower priority than the default service flow(priority=500) to ensure that svc->host reply for
+		// default network gets un-snated.
+		dftFlows = append(dftFlows,
+			fmt.Sprintf("cookie=%s, priority=450, in_port=%s, %s, %s_src=%s, %s_dst=%s,"+
+				"actions=ct(zone=%d,table=3)",
+				defaultOpenFlowCookie, ofPortPatch, ipPrefix, ipPrefix, svcIP, ipPrefix, masqueradeSubnet,
+				config.Default.HostMasqConntrackZone))
 	}
 
 	// table 2, dispatch from Host -> OVN
@@ -1770,7 +1797,7 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 			}
 		}
 
-		gw.openflowManager, err = newGatewayOpenFlowManager(gwBridge, exGwBridge, subnets, nodeIPs)
+		gw.openflowManager, err = newGatewayOpenFlowManager(gwBridge, exGwBridge, subnets, nodeIPs, watchFactory)
 		if err != nil {
 			return err
 		}

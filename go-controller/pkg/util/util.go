@@ -14,10 +14,12 @@ import (
 	"golang.org/x/exp/constraints"
 	"k8s.io/client-go/tools/cache"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"k8s.io/apimachinery/pkg/labels"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+
 	nadlister "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
 	"crypto/rand"

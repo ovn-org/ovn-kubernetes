@@ -2,14 +2,16 @@ package node
 
 import (
 	"fmt"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"net"
 	"os"
 	"regexp"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -25,7 +27,8 @@ type openflowManager struct {
 	exGWFlowCache map[string][]string
 	exGWFlowMutex sync.Mutex
 	// channel to indicate we need to update flows immediately
-	flowChan chan struct{}
+	flowChan     chan struct{}
+	watchFactory factory.NodeWatchFactory
 }
 
 func (c *openflowManager) getDefaultBridgePorts() (string, string, string, string) {
@@ -132,7 +135,7 @@ func (c *openflowManager) syncFlows() {
 //
 // -- to handle host -> service access, via masquerading from the host to OVN GR
 // -- to handle external -> service(ExternalTrafficPolicy: Local) -> host access without SNAT
-func newGatewayOpenFlowManager(gwBridge, exGWBridge *bridgeConfiguration, subnets []*net.IPNet, extraIPs []net.IP) (*openflowManager, error) {
+func newGatewayOpenFlowManager(gwBridge, exGWBridge *bridgeConfiguration, subnets []*net.IPNet, extraIPs []net.IP, factory factory.NodeWatchFactory) (*openflowManager, error) {
 	// add health check function to check default OpenFlow flows are on the shared gateway bridge
 	ofm := &openflowManager{
 		defaultBridge:         gwBridge,
@@ -142,6 +145,7 @@ func newGatewayOpenFlowManager(gwBridge, exGWBridge *bridgeConfiguration, subnet
 		exGWFlowCache:         make(map[string][]string),
 		exGWFlowMutex:         sync.Mutex{},
 		flowChan:              make(chan struct{}, 1),
+		watchFactory:          factory,
 	}
 
 	if err := ofm.updateBridgeFlowCache(subnets, extraIPs); err != nil {
@@ -196,7 +200,16 @@ func (c *openflowManager) updateBridgeFlowCache(subnets []*net.IPNet, extraIPs [
 	// CAUTION: when adding new flows where the in_port is ofPortPatch and the out_port is ofPortPhys, ensure
 	// that dl_src is included in match criteria!
 
-	dftFlows, err := flowsForDefaultBridge(c.defaultBridge, extraIPs)
+	var udnAllowedServicesIPs []net.IP
+	var err error
+	if util.IsNetworkSegmentationSupportEnabled() {
+		udnAllowedServicesIPs, err = c.watchFactory.GetUDNAllowedServicesIPs()
+		if err != nil {
+			return err
+		}
+	}
+
+	dftFlows, err := flowsForDefaultBridge(c.defaultBridge, extraIPs, udnAllowedServicesIPs)
 	if err != nil {
 		return err
 	}

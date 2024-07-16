@@ -8,6 +8,7 @@ import (
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/ovsdb"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/pod"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -659,6 +660,72 @@ func (bnc *BaseNetworkController) syncNodeManagementPort(node *kapi.Node, switch
 			if err != nil {
 				return nil, fmt.Errorf("error creating static route %+v on router %s: %v", lrsr, bnc.GetNetworkScopedClusterRouterName(), err)
 			}
+		}
+	}
+
+	// synchronize static routes for UDN enabled services in shared gateway
+	if util.IsNetworkSegmentationSupportEnabled() && config.Gateway.Mode == config.GatewayModeShared && bnc.IsPrimaryNetwork() {
+		servicesIPs, err := bnc.watchFactory.GetUDNAllowedServicesIPs()
+		if err != nil {
+			return nil, err
+		}
+
+		const udnEnabledServiceExternalID = "udn-enabled-default-service-route"
+		routesEqual := func(a, b *nbdb.LogicalRouterStaticRoute) bool {
+			_, extIDa := a.GetExternalIDs()[udnEnabledServiceExternalID]
+			_, extIDb := b.GetExternalIDs()[udnEnabledServiceExternalID]
+			if extIDa == false || extIDb == false {
+				return false
+			}
+
+			return a.IPPrefix == b.IPPrefix &&
+				libovsdbops.PolicyEqualPredicate(a.Policy, b.Policy) &&
+				a.Nexthop == b.Nexthop
+
+		}
+
+		staticRoutes := make([]nbdb.LogicalRouterStaticRoute, 0, len(servicesIPs))
+		for _, svcIP := range servicesIPs {
+			mgmtIP, err := util.MatchFirstIPFamily(utilnet.IsIPv6(svcIP), mgmtPortIPs)
+			if err != nil {
+				return nil, err
+			}
+			staticRoutes = append(staticRoutes, nbdb.LogicalRouterStaticRoute{
+				Policy:      &nbdb.LogicalRouterStaticRoutePolicyDstIP,
+				IPPrefix:    svcIP.String(),
+				Nexthop:     mgmtIP.String(),
+				ExternalIDs: map[string]string{udnEnabledServiceExternalID: ""},
+			})
+		}
+
+		delPredicate := func(item *nbdb.LogicalRouterStaticRoute) bool {
+			if _, ok := item.GetExternalIDs()[udnEnabledServiceExternalID]; !ok {
+				return false
+			}
+
+			for _, route := range staticRoutes {
+				if routesEqual(item, &route) {
+					return false
+				}
+			}
+			return true
+		}
+
+		ops, err := libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicateOps(bnc.nbClient, nil, bnc.GetNetworkScopedClusterRouterName(), delPredicate)
+		if err != nil {
+			return nil, err
+		}
+		for _, route := range staticRoutes {
+			ops, err = libovsdbops.CreateOrUpdateLogicalRouterStaticRoutesWithPredicateOps(bnc.nbClient, ops, bnc.GetNetworkScopedClusterRouterName(), &route, func(item *nbdb.LogicalRouterStaticRoute) bool {
+				return routesEqual(item, &route)
+			})
+			if err != nil {
+				return nil, err
+			}
+		}
+		_, err = libovsdbops.TransactAndCheck(bnc.nbClient, ops)
+		if err != nil {
+			return nil, err
 		}
 	}
 
