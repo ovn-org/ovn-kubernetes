@@ -58,6 +58,20 @@ type GatewayManager struct {
 
 type GatewayOption func(*GatewayManager)
 
+func NewGatewayManagerForLayer2Topology(
+	nodeName string,
+	coopUUID string,
+	kube kube.InterfaceOVN,
+	nbClient libovsdbclient.Client,
+	netInfo util.NetInfo,
+	watchFactory *factory.WatchFactory,
+	opts ...GatewayOption,
+) *GatewayManager {
+	gwManager := NewGatewayManager(nodeName, coopUUID, kube, nbClient, netInfo, watchFactory, opts...)
+	gwManager.clusterRouterName = ""
+	return gwManager
+}
+
 func NewGatewayManager(
 	nodeName string,
 	coopUUID string,
