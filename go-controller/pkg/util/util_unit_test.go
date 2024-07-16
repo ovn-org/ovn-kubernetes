@@ -13,7 +13,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/sets"
 
@@ -303,7 +302,6 @@ func TestGetActiveNetworkForNamespace(t *testing.T) {
 				netName:        "surya",
 				primaryNetwork: true,
 				topology:       "layer3",
-				nadNames:       sets.New("ns1/quique"),
 				mtu:            1300,
 				ipv4mode:       true,
 				subnets: []config.CIDRNetworkEntry{{
@@ -311,8 +309,11 @@ func TestGetActiveNetworkForNamespace(t *testing.T) {
 					HostSubnetLength: 24,
 				}},
 				joinSubnets: []*net.IPNet{
-					ovntest.MustParseIPNet(ovntypes.UserDefinedPrimaryNetworkJoinSubnetV4),
-					ovntest.MustParseIPNet(ovntypes.UserDefinedPrimaryNetworkJoinSubnetV6),
+					ovntest.MustParseIPNet(types.UserDefinedPrimaryNetworkJoinSubnetV4),
+					ovntest.MustParseIPNet(types.UserDefinedPrimaryNetworkJoinSubnetV6),
+				},
+				reconcilableNetInfo: reconcilableNetInfo{
+					nads: sets.New("ns1/quique"),
 				},
 			},
 		},
