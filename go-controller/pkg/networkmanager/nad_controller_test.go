@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"reflect"
 	"sync"
 	"testing"
 
@@ -25,7 +24,7 @@ import (
 )
 
 type testNetworkController struct {
-	util.NetInfo
+	util.ReconcilableNetInfo
 	tcm *testControllerManager
 }
 
@@ -53,7 +52,7 @@ func (tnc *testNetworkController) Cleanup() error {
 // GomegaString is used to avoid printing embedded mutexes which can cause a
 // race
 func (tnc *testNetworkController) GomegaString() string {
-	return format.Object(tnc.NetInfo.GetNetworkName(), 1)
+	return format.Object(tnc.GetNetworkName(), 1)
 }
 
 func testNetworkKey(nInfo util.NetInfo) string {
@@ -69,7 +68,7 @@ type testControllerManager struct {
 
 	raiseErrorWhenCreatingController error
 
-	valid []util.BasicNetInfo
+	valid []util.NetInfo
 }
 
 func (tcm *testControllerManager) NewNetworkController(netInfo util.NetInfo) (NetworkController, error) {
@@ -79,14 +78,14 @@ func (tcm *testControllerManager) NewNetworkController(netInfo util.NetInfo) (Ne
 		return nil, tcm.raiseErrorWhenCreatingController
 	}
 	t := &testNetworkController{
-		NetInfo: netInfo,
-		tcm:     tcm,
+		ReconcilableNetInfo: util.NewReconcilableNetInfo(netInfo),
+		tcm:                 tcm,
 	}
 	tcm.controllers[testNetworkKey(netInfo)] = t
 	return t, nil
 }
 
-func (tcm *testControllerManager) CleanupStaleNetworks(validNetworks ...util.BasicNetInfo) error {
+func (tcm *testControllerManager) CleanupStaleNetworks(validNetworks ...util.NetInfo) error {
 	tcm.valid = validNetworks
 	return nil
 }
@@ -476,20 +475,20 @@ func TestNADController(t *testing.T) {
 						defer tcm.Unlock()
 						// test that the controller have the expected config and NADs
 						g.Expect(tcm.controllers).To(gomega.HaveKey(testNetworkKey))
-						g.Expect(tcm.controllers[testNetworkKey].Equals(netInfo)).To(gomega.BeTrue(),
+						g.Expect(util.AreNetworksCompatible(tcm.controllers[testNetworkKey], netInfo)).To(gomega.BeTrue(),
 							fmt.Sprintf("matching network config for network %s", name))
 						g.Expect(tcm.controllers[testNetworkKey].GetNADs()).To(gomega.ConsistOf(expected.nads),
 							fmt.Sprintf("matching NADs for network %s", name))
 					}()
 					expectRunning = append(expectRunning, testNetworkKey)
 					if netInfo.IsPrimaryNetwork() && !netInfo.IsDefault() {
-						netInfo.SetNADs(expected.nads...)
 						key := expected.nads[0]
 						namespace, _, err := cache.SplitMetaNamespaceKey(key)
 						g.Expect(err).ToNot(gomega.HaveOccurred())
 						netInfoFound, err := nadController.GetActiveNetworkForNamespace(namespace)
 						g.Expect(err).ToNot(gomega.HaveOccurred())
-						g.Expect(reflect.DeepEqual(netInfoFound, netInfo)).To(gomega.BeTrue())
+						g.Expect(util.AreNetworksCompatible(netInfoFound, netInfo)).To(gomega.BeTrue())
+						g.Expect(netInfoFound.GetNADs()).To(gomega.ConsistOf(expected.nads))
 					}
 				}
 				tcm.Lock()
@@ -582,7 +581,7 @@ func TestSyncAll(t *testing.T) {
 			g.Expect(err).ToNot(gomega.HaveOccurred())
 
 			expectedNetworks := map[string]util.NetInfo{}
-			expectedPrimaryNetworks := map[string]util.BasicNetInfo{}
+			expectedPrimaryNetworks := map[string]util.NetInfo{}
 			for _, testNAD := range tt.testNADs {
 				namespace, name, err := cache.SplitMetaNamespaceKey(testNAD.name)
 				g.Expect(err).ToNot(gomega.HaveOccurred())
@@ -615,7 +614,7 @@ func TestSyncAll(t *testing.T) {
 			// sync has already happened, stop
 			controller.Stop()
 
-			actualNetworks := map[string]util.BasicNetInfo{}
+			actualNetworks := map[string]util.NetInfo{}
 			for _, network := range tcm.valid {
 				actualNetworks[network.GetNetworkName()] = network
 			}
@@ -623,13 +622,14 @@ func TestSyncAll(t *testing.T) {
 			g.Expect(actualNetworks).To(gomega.HaveLen(len(expectedNetworks)))
 			for name, network := range expectedNetworks {
 				g.Expect(actualNetworks).To(gomega.HaveKey(name))
-				g.Expect(actualNetworks[name].Equals(network)).To(gomega.BeTrue())
+				g.Expect(util.AreNetworksCompatible(actualNetworks[name], network)).To(gomega.BeTrue())
 			}
 
 			actualPrimaryNetwork, err := controller.GetActiveNetworkForNamespace("test")
 			g.Expect(err).ToNot(gomega.HaveOccurred())
 			g.Expect(expectedPrimaryNetworks).To(gomega.HaveKey(actualPrimaryNetwork.GetNetworkName()))
-			g.Expect(expectedPrimaryNetworks[actualPrimaryNetwork.GetNetworkName()].Equals(actualPrimaryNetwork)).To(gomega.BeTrue())
+			expectedPrimaryNetwork := expectedPrimaryNetworks[actualPrimaryNetwork.GetNetworkName()]
+			g.Expect(util.AreNetworksCompatible(expectedPrimaryNetwork, actualPrimaryNetwork)).To(gomega.BeTrue())
 		})
 	}
 }

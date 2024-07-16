@@ -716,7 +716,7 @@ var _ = Describe("OVN Multicast with IP Address Family", func() {
 					ports = append(ports, tPod.portUUID)
 				}
 				expectedData := getMulticastPolicyExpectedData(netInfo, namespace1.Name, ports)
-				expectedData = append(expectedData, getExpectedPodsAndSwitches(bnc.NetInfo, tPods, []string{nodeName})...)
+				expectedData = append(expectedData, getExpectedPodsAndSwitches(bnc.GetNetInfo(), tPods, []string{nodeName})...)
 				Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedData...))
 				asf.ExpectAddressSetWithAddresses(namespace1.Name, tPodIPs)
 				return nil
@@ -791,7 +791,7 @@ var _ = Describe("OVN Multicast with IP Address Family", func() {
 				acl = expectedData[3].(*nbdb.ACL)
 				Expect(acl.Name).To(BeNil())
 				Expect(acl.ExternalIDs[libovsdbops.ObjectNameKey.String()]).To(Equal(longNameSpace2Name))
-				expectedData = append(expectedData, getExpectedPodsAndSwitches(bnc.NetInfo, []testPod{}, []string{node.Name})...)
+				expectedData = append(expectedData, getExpectedPodsAndSwitches(bnc.GetNetInfo(), []testPod{}, []string{node.Name})...)
 				// Enable multicast in the namespace.
 				updateMulticast(fakeOvn, ns1, true)
 				updateMulticast(fakeOvn, ns2, true)

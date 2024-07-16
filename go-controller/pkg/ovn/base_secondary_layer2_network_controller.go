@@ -125,7 +125,7 @@ func (oc *BaseSecondaryLayer2NetworkController) initializeLogicalSwitch(switchNa
 	excludeSubnets []*net.IPNet, clusterLoadBalancerGroupUUID, switchLoadBalancerGroupUUID string) (*nbdb.LogicalSwitch, error) {
 	logicalSwitch := nbdb.LogicalSwitch{
 		Name:        switchName,
-		ExternalIDs: util.GenerateExternalIDsForSwitchOrRouter(oc.NetInfo),
+		ExternalIDs: util.GenerateExternalIDsForSwitchOrRouter(oc.GetNetInfo()),
 	}
 
 	hostSubnets := make([]*net.IPNet, 0, len(clusterSubnets))

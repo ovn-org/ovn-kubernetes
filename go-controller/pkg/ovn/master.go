@@ -56,20 +56,20 @@ func (oc *DefaultNetworkController) SetupMaster(existingNodeNames []string) erro
 	}
 
 	// Create OVNJoinSwitch that will be used to connect gateway routers to the distributed router.
-	return oc.gatewayTopologyFactory.NewJoinSwitch(logicalRouter, oc.NetInfo, oc.ovnClusterLRPToJoinIfAddrs)
+	return oc.gatewayTopologyFactory.NewJoinSwitch(logicalRouter, oc.GetNetInfo(), oc.ovnClusterLRPToJoinIfAddrs)
 }
 
 func (oc *DefaultNetworkController) newClusterRouter() (*nbdb.LogicalRouter, error) {
 	if oc.multicastSupport {
 		return oc.gatewayTopologyFactory.NewClusterRouterWithMulticastSupport(
 			oc.GetNetworkScopedClusterRouterName(),
-			oc.NetInfo,
+			oc.GetNetInfo(),
 			oc.defaultCOPPUUID,
 		)
 	}
 	return oc.gatewayTopologyFactory.NewClusterRouter(
 		oc.GetNetworkScopedClusterRouterName(),
-		oc.NetInfo,
+		oc.GetNetInfo(),
 		oc.defaultCOPPUUID,
 	)
 }
@@ -849,7 +849,7 @@ func (oc *DefaultNetworkController) newGatewayManager(nodeName string) *GatewayM
 		oc.defaultCOPPUUID,
 		oc.kube,
 		oc.nbClient,
-		oc.NetInfo,
+		oc.GetNetInfo(),
 		oc.watchFactory,
 		oc.gatewayOptions()...,
 	)

@@ -27,7 +27,7 @@ func (fcm *FakeControllerManager) NewNetworkController(netInfo util.NetInfo) (ne
 	return &FakeNetworkController{netInfo}, nil
 }
 
-func (fcm *FakeControllerManager) CleanupStaleNetworks(validNetworks ...util.BasicNetInfo) error {
+func (fcm *FakeControllerManager) CleanupStaleNetworks(validNetworks ...util.NetInfo) error {
 	return nil
 }
 

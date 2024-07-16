@@ -152,14 +152,14 @@ func (h *secondaryLayer2NetworkControllerEventHandler) UpdateResource(oldObj, ne
 			return fmt.Errorf("could not cast oldObj of type %T to *kapi.Node", oldObj)
 		}
 		newNodeIsLocalZoneNode := h.oc.isLocalZoneNode(newNode)
-		nodeSubnetChanged := nodeSubnetChanged(oldNode, newNode, h.oc.NetInfo.GetNetworkName())
+		nodeSubnetChanged := nodeSubnetChanged(oldNode, newNode, h.oc.GetNetworkName())
 		if newNodeIsLocalZoneNode {
 			var nodeSyncsParam *nodeSyncs
 			if h.oc.isLocalZoneNode(oldNode) {
 				// determine what actually changed in this update and combine that with what failed previously
 				_, mgmtUpdateFailed := h.oc.mgmtPortFailed.Load(newNode.Name)
 				shouldSyncMgmtPort := mgmtUpdateFailed ||
-					macAddressChanged(oldNode, newNode, h.oc.NetInfo.GetNetworkName()) ||
+					macAddressChanged(oldNode, newNode, h.oc.GetNetworkName()) ||
 					nodeSubnetChanged
 				_, gwUpdateFailed := h.oc.gatewaysFailed.Load(newNode.Name)
 				shouldSyncGW := gwUpdateFailed ||
@@ -299,7 +299,7 @@ func NewSecondaryLayer2NetworkController(
 				BaseNetworkController: BaseNetworkController{
 					CommonNetworkControllerInfo: *cnci,
 					controllerName:              getNetworkControllerName(netInfo.GetNetworkName()),
-					NetInfo:                     netInfo,
+					ReconcilableNetInfo:         util.NewReconcilableNetInfo(netInfo),
 					lsManager:                   lsManagerFactoryFn(),
 					logicalPortCache:            newPortCache(stopChan),
 					namespaces:                  make(map[string]*namespaceInfo),
@@ -323,7 +323,7 @@ func NewSecondaryLayer2NetworkController(
 	}
 
 	if config.OVNKubernetesFeature.EnableInterconnect {
-		oc.zoneICHandler = zoneinterconnect.NewZoneInterconnectHandler(oc.NetInfo, oc.nbClient, oc.sbClient, oc.watchFactory)
+		oc.zoneICHandler = zoneinterconnect.NewZoneInterconnectHandler(oc.GetNetInfo(), oc.nbClient, oc.sbClient, oc.watchFactory)
 	}
 
 	if oc.allocatesPodAnnotation() {
@@ -331,7 +331,7 @@ func NewSecondaryLayer2NetworkController(
 		if oc.allowPersistentIPs() {
 			ipamClaimsReconciler := persistentips.NewIPAMClaimReconciler(
 				oc.kube,
-				oc.NetInfo,
+				oc.GetNetInfo(),
 				oc.watchFactory.IPAMClaimsInformer().Lister(),
 			)
 			oc.ipamClaimsReconciler = ipamClaimsReconciler
@@ -421,7 +421,7 @@ func (oc *SecondaryLayer2NetworkController) Init() error {
 	}
 	oc.defaultCOPPUUID = defaultCOPPUUID
 
-	clusterLBGroupUUID, switchLBGroupUUID, routerLBGroupUUID, err := initLoadBalancerGroups(oc.nbClient, oc.NetInfo)
+	clusterLBGroupUUID, switchLBGroupUUID, routerLBGroupUUID, err := initLoadBalancerGroups(oc.nbClient, oc.GetNetInfo())
 	if err != nil {
 		return err
 	}
@@ -462,7 +462,7 @@ func (oc *SecondaryLayer2NetworkController) Stop() {
 func (oc *SecondaryLayer2NetworkController) initRetryFramework() {
 	oc.retryNodes = oc.newRetryFramework(factory.NodeType)
 	oc.retryPods = oc.newRetryFramework(factory.PodType)
-	if oc.allocatesPodAnnotation() && oc.NetInfo.AllowsPersistentIPs() {
+	if oc.allocatesPodAnnotation() && oc.AllowsPersistentIPs() {
 		oc.retryIPAMClaims = oc.newRetryFramework(factory.IPAMClaimsType)
 	}
 
@@ -751,7 +751,7 @@ func (oc *SecondaryLayer2NetworkController) newGatewayManager(nodeName string) *
 		oc.defaultCOPPUUID,
 		oc.kube,
 		oc.nbClient,
-		oc.NetInfo,
+		oc.GetNetInfo(),
 		oc.watchFactory,
 		oc.gatewayOptions()...,
 	)
