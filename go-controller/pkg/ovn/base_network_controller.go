@@ -191,6 +191,11 @@ type BaseSecondaryNetworkController struct {
 	multiNetPolicyHandler *factory.Handler
 }
 
+func (oc *BaseSecondaryNetworkController) Reconcile(netInfo util.ReconcilableNetInfo) error {
+	oc.SetNADs(netInfo.GetNADs()...)
+	return nil
+}
+
 func getNetworkControllerName(netName string) string {
 	return netName + "-network-controller"
 }
