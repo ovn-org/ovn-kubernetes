@@ -201,7 +201,7 @@ func NewSecondaryLocalnetNetworkController(
 				BaseNetworkController: BaseNetworkController{
 					CommonNetworkControllerInfo: *cnci,
 					controllerName:              getNetworkControllerName(netInfo.GetNetworkName()),
-					NetInfo:                     netInfo,
+					ReconcilableNetInfo:         util.NewReconcilableNetInfo(netInfo),
 					lsManager:                   lsm.NewL2SwitchManager(),
 					logicalPortCache:            newPortCache(stopChan),
 					namespaces:                  make(map[string]*namespaceInfo),
@@ -225,7 +225,7 @@ func NewSecondaryLocalnetNetworkController(
 		if oc.allowPersistentIPs() {
 			ipamClaimsReconciler := persistentips.NewIPAMClaimReconciler(
 				oc.kube,
-				oc.NetInfo,
+				oc.GetNetInfo(),
 				oc.watchFactory.IPAMClaimsInformer().Lister(),
 			)
 			oc.ipamClaimsReconciler = ipamClaimsReconciler
@@ -311,7 +311,7 @@ func (oc *SecondaryLocalnetNetworkController) Stop() {
 func (oc *SecondaryLocalnetNetworkController) initRetryFramework() {
 	oc.retryNodes = oc.newRetryFramework(factory.NodeType)
 	oc.retryPods = oc.newRetryFramework(factory.PodType)
-	if oc.allocatesPodAnnotation() && oc.NetInfo.AllowsPersistentIPs() {
+	if oc.allocatesPodAnnotation() && oc.AllowsPersistentIPs() {
 		oc.retryIPAMClaims = oc.newRetryFramework(factory.IPAMClaimsType)
 	}
 

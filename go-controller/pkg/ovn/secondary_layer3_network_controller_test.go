@@ -313,7 +313,10 @@ var _ = Describe("OVN Multi-Homed pod operations", func() {
 				)
 				Expect(err).NotTo(HaveOccurred())
 
-				networkConfig.SetNADs(util.GetNADName(nad.Namespace, nad.Name))
+				mutableNetworkConfig := util.NewMutableNetInfo(networkConfig)
+				mutableNetworkConfig.SetNADs(util.GetNADName(nad.Namespace, nad.Name))
+				networkConfig = mutableNetworkConfig
+
 				fakeNetworkManager := &testnm.FakeNetworkManager{
 					PrimaryNetworks: make(map[string]util.NetInfo),
 				}

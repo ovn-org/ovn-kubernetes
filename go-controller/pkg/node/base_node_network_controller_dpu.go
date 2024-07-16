@@ -113,7 +113,7 @@ func (bnnc *BaseNodeNetworkController) watchPodsDPU() (*factory.Handler, error) 
 			// For default network, NAD name is DefaultNetworkName.
 			nadToDPUCDMap := map[string]*util.DPUConnectionDetails{}
 			if bnnc.IsSecondary() {
-				on, networkMap, err := util.GetPodNADToNetworkMapping(pod, bnnc.NetInfo)
+				on, networkMap, err := util.GetPodNADToNetworkMapping(pod, bnnc.GetNetInfo())
 				if err != nil || !on {
 					if err != nil {
 						// configuration error, no need to retry, do not return error

@@ -245,7 +245,7 @@ func (bsnc *BaseSecondaryNetworkController) ensurePodForSecondaryNetwork(pod *co
 		return fmt.Errorf("failed looking for the active network at namespace '%s': %w", pod.Namespace, err)
 	}
 
-	on, networkMap, err := util.GetPodNADToNetworkMappingWithActiveNetwork(pod, bsnc.NetInfo, activeNetwork)
+	on, networkMap, err := util.GetPodNADToNetworkMappingWithActiveNetwork(pod, bsnc.GetNetInfo(), activeNetwork)
 	if err != nil {
 		bsnc.recordPodErrorEvent(pod, err)
 		// configuration error, no need to retry, do not return error
@@ -383,9 +383,9 @@ func (bsnc *BaseSecondaryNetworkController) addLogicalPortToNetworkForNAD(pod *c
 	}
 
 	if isLocalPod {
-		bsnc.podRecorder.AddLSP(pod.UID, bsnc.NetInfo)
+		bsnc.podRecorder.AddLSP(pod.UID, bsnc.GetNetInfo())
 		if newlyCreated {
-			metrics.RecordPodCreated(pod, bsnc.NetInfo)
+			metrics.RecordPodCreated(pod, bsnc.GetNetInfo())
 		}
 	}
 
@@ -408,7 +408,7 @@ func (bsnc *BaseSecondaryNetworkController) addPerPodSNATOps(pod *corev1.Pod, po
 		return nil, fmt.Errorf("failed to get masquerade IPs, network %s (%d): %v", bsnc.GetNetworkName(), networkID, err)
 	}
 
-	ops, err := addOrUpdatePodSNATOps(bsnc.nbClient, bsnc.GetNetworkScopedGWRouterName(pod.Spec.NodeName), masqIPs, podIPs, bsnc.NetInfo.GetNetworkScopedClusterSubnetSNATMatch(pod.Spec.NodeName), nil)
+	ops, err := addOrUpdatePodSNATOps(bsnc.nbClient, bsnc.GetNetworkScopedGWRouterName(pod.Spec.NodeName), masqIPs, podIPs, bsnc.GetNetworkScopedClusterSubnetSNATMatch(pod.Spec.NodeName), nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to construct SNAT pods for pod %s/%s which is part of network %s, err: %v",
 			pod.Namespace, pod.Name, bsnc.GetNetworkName(), err)
@@ -467,7 +467,7 @@ func (bsnc *BaseSecondaryNetworkController) removePodForSecondaryNetwork(pod *co
 			continue
 		}
 
-		_, networkMap, err := util.GetPodNADToNetworkMappingWithActiveNetwork(pod, bsnc.NetInfo, activeNetwork)
+		_, networkMap, err := util.GetPodNADToNetworkMappingWithActiveNetwork(pod, bsnc.GetNetInfo(), activeNetwork)
 		if err != nil {
 			bsnc.recordPodErrorEvent(pod, err)
 			return err
@@ -508,7 +508,7 @@ func (bsnc *BaseSecondaryNetworkController) removePodForSecondaryNetwork(pod *co
 				"Pod %s/%s referencing an IPAMClaim on network %q which does not honor it",
 				pod.GetNamespace(),
 				pod.GetName(),
-				bsnc.NetInfo.GetNetworkName(),
+				bsnc.GetNetworkName(),
 			)
 			hasIPAMClaim = false
 		}
@@ -588,7 +588,7 @@ func (bsnc *BaseSecondaryNetworkController) syncPodsForSecondaryNetwork(pods []i
 			return fmt.Errorf("failed looking for the active network at namespace '%s': %w", pod.Namespace, err)
 		}
 
-		on, networkMap, err := util.GetPodNADToNetworkMappingWithActiveNetwork(pod, bsnc.NetInfo, activeNetwork)
+		on, networkMap, err := util.GetPodNADToNetworkMappingWithActiveNetwork(pod, bsnc.GetNetInfo(), activeNetwork)
 		if err != nil || !on {
 			if err != nil {
 				bsnc.recordPodErrorEvent(pod, err)
@@ -784,8 +784,8 @@ func (bsnc *BaseSecondaryNetworkController) WatchIPAMClaims() error {
 
 func (oc *BaseSecondaryNetworkController) allowPersistentIPs() bool {
 	return config.OVNKubernetesFeature.EnablePersistentIPs &&
-		util.DoesNetworkRequireIPAM(oc.NetInfo) &&
-		util.AllowsPersistentIPs(oc.NetInfo)
+		util.DoesNetworkRequireIPAM(oc.GetNetInfo()) &&
+		util.AllowsPersistentIPs(oc.GetNetInfo())
 }
 
 func (oc *BaseSecondaryNetworkController) getNetworkID() (int, error) {
@@ -795,7 +795,7 @@ func (oc *BaseSecondaryNetworkController) getNetworkID() (int, error) {
 		if err != nil {
 			return util.InvalidID, err
 		}
-		*oc.networkID, err = util.GetNetworkID(nodes, oc.NetInfo)
+		*oc.networkID, err = util.GetNetworkID(nodes, oc.GetNetInfo())
 		if err != nil {
 			return util.InvalidID, err
 		}
