@@ -107,7 +107,7 @@ func (pr *PodRequest) checkOrUpdatePodUID(pod *kapi.Pod) error {
 }
 
 func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, clientset *ClientSet,
-	nadController *nad.NetAttachDefinitionController) (*Response, error) {
+	nadController nad.NADController) (*Response, error) {
 	return pr.cmdAddWithGetCNIResultFunc(kubeAuth, clientset, getCNIResult, nadController)
 }
 func (pr *PodRequest) cmdAddWithGetCNIResultFunc(kubeAuth *KubeAPIAuth, clientset *ClientSet,
@@ -293,7 +293,7 @@ func (pr *PodRequest) cmdCheck() error {
 // Argument '*PodRequest' encapsulates all the necessary information
 // kclient is passed in so that clientset can be reused from the server
 // Return value is the actual bytes to be sent back without further processing.
-func HandlePodRequest(request *PodRequest, clientset *ClientSet, kubeAuth *KubeAPIAuth, nadController *nad.NetAttachDefinitionController) ([]byte, error) {
+func HandlePodRequest(request *PodRequest, clientset *ClientSet, kubeAuth *KubeAPIAuth, nadController nad.NADController) ([]byte, error) {
 	var result, resultForLogging []byte
 	var response *Response
 	var err, err1 error

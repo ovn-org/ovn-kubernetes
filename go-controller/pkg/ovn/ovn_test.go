@@ -88,7 +88,7 @@ type FakeOVN struct {
 	egressQoSWg   *sync.WaitGroup
 	egressSVCWg   *sync.WaitGroup
 	anpWg         *sync.WaitGroup
-	nadController *nad.NetAttachDefinitionController
+	nadController nad.NADController
 
 	// information map of all secondary network controllers
 	secondaryControllers map[string]secondaryControllerInfo
@@ -213,7 +213,7 @@ func (o *FakeOVN) init(nadList []nettypes.NetworkAttachmentDefinition) {
 		o.fakeRecorder, o.wg)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	o.controller.multicastSupport = config.EnableMulticast
-	o.nadController = o.controller.nadController.(*nad.NetAttachDefinitionController)
+	o.nadController = o.controller.nadController
 
 	setupCOPP := false
 	setupClusterController(o.controller, setupCOPP)
@@ -327,9 +327,9 @@ func NewOvnController(ovnClient *util.OVNMasterClientset, wf *factory.WatchFacto
 		return nil, err
 	}
 
-	var nadController *nad.NetAttachDefinitionController
+	var nadController nad.NADController
 	if config.OVNKubernetesFeature.EnableMultiNetwork {
-		nadController, err = nad.NewNetAttachDefinitionController("test", &fakenad.FakeNetworkControllerManager{}, wf, nil)
+		nadController, err = nad.NewZoneNADController("test", "zone", &fakenad.FakeNetworkControllerManager{}, wf)
 		if err != nil {
 			return nil, err
 		}

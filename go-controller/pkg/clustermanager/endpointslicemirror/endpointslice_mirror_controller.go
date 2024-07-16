@@ -43,7 +43,7 @@ type Controller struct {
 	endpointSlicesSynced cache.InformerSynced
 	podLister            corelisters.PodLister
 	podsSynced           cache.InformerSynced
-	nadController        *networkAttachDefController.NetAttachDefinitionController
+	nadController        networkAttachDefController.NADController
 	cancel               context.CancelFunc
 }
 
@@ -111,7 +111,7 @@ func (c *Controller) onEndpointSliceAdd(obj interface{}) {
 
 func NewController(
 	ovnClient *util.OVNClusterManagerClientset,
-	wf *factory.WatchFactory, nadController *networkAttachDefController.NetAttachDefinitionController) (*Controller, error) {
+	wf *factory.WatchFactory, nadController networkAttachDefController.NADController) (*Controller, error) {
 
 	wg := &sync.WaitGroup{}
 	c := &Controller{
