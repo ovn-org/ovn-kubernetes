@@ -68,10 +68,13 @@ func testNetworkKey(nInfo util.NetInfo) string {
 
 type testNetworkControllerManager struct {
 	sync.Mutex
-	controllers map[string]NetworkController
-	started     []string
-	stopped     []string
-	cleaned     []string
+
+	defaultNetwork *testNetworkController
+	controllers    map[string]NetworkController
+
+	started []string
+	stopped []string
+	cleaned []string
 
 	valid []util.BasicNetInfo
 }
@@ -90,6 +93,10 @@ func (tncm *testNetworkControllerManager) NewNetworkController(netInfo util.NetI
 func (tncm *testNetworkControllerManager) CleanupDeletedNetworks(validNetworks ...util.BasicNetInfo) error {
 	tncm.valid = validNetworks
 	return nil
+}
+
+func (tncm *testNetworkControllerManager) GetDefaultNetworkController() ReconcilableNetworkController {
+	return tncm.defaultNetwork
 }
 
 func TestNetAttachDefinitionController(t *testing.T) {

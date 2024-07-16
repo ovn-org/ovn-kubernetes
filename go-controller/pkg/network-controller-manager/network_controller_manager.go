@@ -114,6 +114,10 @@ func findAllSecondaryNetworkLogicalEntities(nbClient libovsdbclient.Client) ([]*
 	return nodeSwitches, clusterRouters, nil
 }
 
+func (cm *NetworkControllerManager) GetDefaultNetworkController() nad.ReconcilableNetworkController {
+	return cm.defaultNetworkController
+}
+
 func (cm *NetworkControllerManager) CleanupDeletedNetworks(validNetworks ...util.BasicNetInfo) error {
 	existingNetworksMap := map[string]string{}
 	for _, network := range validNetworks {

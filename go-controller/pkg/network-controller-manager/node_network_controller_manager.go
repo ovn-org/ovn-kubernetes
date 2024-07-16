@@ -47,6 +47,10 @@ func (ncm *nodeNetworkControllerManager) NewNetworkController(nInfo util.NetInfo
 	return nil, fmt.Errorf("topology type %s not supported", topoType)
 }
 
+func (cm *nodeNetworkControllerManager) GetDefaultNetworkController() nad.ReconcilableNetworkController {
+	return cm.defaultNodeNetworkController
+}
+
 // CleanupDeletedNetworks cleans up all stale entities giving list of all existing secondary network controllers
 func (ncm *nodeNetworkControllerManager) CleanupDeletedNetworks(validNetworks ...util.BasicNetInfo) error {
 	return nil
