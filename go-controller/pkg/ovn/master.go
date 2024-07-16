@@ -20,6 +20,7 @@ import (
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/gatewayrouter"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -156,7 +157,9 @@ func (oc *DefaultNetworkController) syncGatewayLogicalNetwork(node *kapi.Node, l
 		if err != nil && err != util.ErrorNoIP {
 			return err
 		}
-		if err := oc.addPolicyBasedRoutes(node.Name, hostIfAddr.IP.String(), l3GatewayConfigIP, relevantHostIPs); err != nil {
+
+		pbrManager := gatewayrouter.NewPolicyBasedRoutesManager(oc.nbClient, oc.GetNetworkScopedClusterRouterName(), oc.NetInfo)
+		if err := pbrManager.Add(node.Name, hostIfAddr.IP.String(), l3GatewayConfigIP, relevantHostIPs); err != nil {
 			return err
 		}
 	}
