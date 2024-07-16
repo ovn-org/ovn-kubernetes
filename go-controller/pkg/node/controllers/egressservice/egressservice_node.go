@@ -118,11 +118,13 @@ func NewController(stopCh <-chan struct{}, returnMark, thisNode string,
 
 	c.endpointSliceLister = discoverylisters.NewEndpointSliceLister(endpointSliceInformer.GetIndexer())
 	c.endpointSlicesSynced = endpointSliceInformer.HasSynced
-	_, err = endpointSliceInformer.AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
-		AddFunc:    c.onEndpointSliceAdd,
-		UpdateFunc: c.onEndpointSliceUpdate,
-		DeleteFunc: c.onEndpointSliceDelete,
-	}))
+	_, err = endpointSliceInformer.AddEventHandler(factory.WithUpdateHandlingForObjReplace(
+		// TODO: Stop ignoring mirrored EndpointSlices and add support for user-defined networks
+		util.GetDefaultEndpointSlicesEventHandler(cache.ResourceEventHandlerFuncs{
+			AddFunc:    c.onEndpointSliceAdd,
+			UpdateFunc: c.onEndpointSliceUpdate,
+			DeleteFunc: c.onEndpointSliceDelete,
+		})))
 	if err != nil {
 		return nil, err
 	}

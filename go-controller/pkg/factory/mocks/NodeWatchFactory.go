@@ -48,29 +48,29 @@ func (_m *NodeWatchFactory) APBRouteInformer() v1.AdminPolicyBasedExternalRouteI
 	return r0
 }
 
-// AddEndpointSliceHandler provides a mock function with given fields: handlerFuncs, processExisting
-func (_m *NodeWatchFactory) AddEndpointSliceHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*factory.Handler, error) {
-	ret := _m.Called(handlerFuncs, processExisting)
+// AddFilteredEndpointSliceHandler provides a mock function with given fields: namespace, sel, handlerFuncs, processExisting
+func (_m *NodeWatchFactory) AddFilteredEndpointSliceHandler(namespace string, sel labels.Selector, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*factory.Handler, error) {
+	ret := _m.Called(namespace, sel, handlerFuncs, processExisting)
 
 	if len(ret) == 0 {
-		panic("no return value specified for AddEndpointSliceHandler")
+		panic("no return value specified for AddFilteredEndpointSliceHandler")
 	}
 
 	var r0 *factory.Handler
 	var r1 error
-	if rf, ok := ret.Get(0).(func(cache.ResourceEventHandler, func([]interface{}) error) (*factory.Handler, error)); ok {
-		return rf(handlerFuncs, processExisting)
+	if rf, ok := ret.Get(0).(func(string, labels.Selector, cache.ResourceEventHandler, func([]interface{}) error) (*factory.Handler, error)); ok {
+		return rf(namespace, sel, handlerFuncs, processExisting)
 	}
-	if rf, ok := ret.Get(0).(func(cache.ResourceEventHandler, func([]interface{}) error) *factory.Handler); ok {
-		r0 = rf(handlerFuncs, processExisting)
+	if rf, ok := ret.Get(0).(func(string, labels.Selector, cache.ResourceEventHandler, func([]interface{}) error) *factory.Handler); ok {
+		r0 = rf(namespace, sel, handlerFuncs, processExisting)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*factory.Handler)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(cache.ResourceEventHandler, func([]interface{}) error) error); ok {
-		r1 = rf(handlerFuncs, processExisting)
+	if rf, ok := ret.Get(1).(func(string, labels.Selector, cache.ResourceEventHandler, func([]interface{}) error) error); ok {
+		r1 = rf(namespace, sel, handlerFuncs, processExisting)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -271,36 +271,6 @@ func (_m *NodeWatchFactory) GetEndpointSlice(namespace string, name string) (*di
 
 	if rf, ok := ret.Get(1).(func(string, string) error); ok {
 		r1 = rf(namespace, name)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// GetEndpointSlices provides a mock function with given fields: namespace, svcName
-func (_m *NodeWatchFactory) GetEndpointSlices(namespace string, svcName string) ([]*discoveryv1.EndpointSlice, error) {
-	ret := _m.Called(namespace, svcName)
-
-	if len(ret) == 0 {
-		panic("no return value specified for GetEndpointSlices")
-	}
-
-	var r0 []*discoveryv1.EndpointSlice
-	var r1 error
-	if rf, ok := ret.Get(0).(func(string, string) ([]*discoveryv1.EndpointSlice, error)); ok {
-		return rf(namespace, svcName)
-	}
-	if rf, ok := ret.Get(0).(func(string, string) []*discoveryv1.EndpointSlice); ok {
-		r0 = rf(namespace, svcName)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]*discoveryv1.EndpointSlice)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(string, string) error); ok {
-		r1 = rf(namespace, svcName)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -511,6 +481,36 @@ func (_m *NodeWatchFactory) GetService(namespace string, name string) (*corev1.S
 
 	if rf, ok := ret.Get(1).(func(string, string) error); ok {
 		r1 = rf(namespace, name)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// GetServiceEndpointSlices provides a mock function with given fields: namespace, svcName, network
+func (_m *NodeWatchFactory) GetServiceEndpointSlices(namespace string, svcName string, network string) ([]*discoveryv1.EndpointSlice, error) {
+	ret := _m.Called(namespace, svcName, network)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetServiceEndpointSlices")
+	}
+
+	var r0 []*discoveryv1.EndpointSlice
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string, string, string) ([]*discoveryv1.EndpointSlice, error)); ok {
+		return rf(namespace, svcName, network)
+	}
+	if rf, ok := ret.Get(0).(func(string, string, string) []*discoveryv1.EndpointSlice); ok {
+		r0 = rf(namespace, svcName, network)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*discoveryv1.EndpointSlice)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(string, string, string) error); ok {
+		r1 = rf(namespace, svcName, network)
 	} else {
 		r1 = ret.Error(1)
 	}

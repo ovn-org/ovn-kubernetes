@@ -298,7 +298,7 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 			kapi.NamespaceAll,
 			resyncPeriod,
 			cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
-			withServiceNameAndNoHeadlessServiceSelector())
+			getEndpointSliceSelector())
 	})
 
 	var err error
@@ -617,7 +617,7 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeName string) (
 			kapi.NamespaceAll,
 			resyncPeriod,
 			cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
-			withServiceNameAndNoHeadlessServiceSelector())
+			getEndpointSliceSelector())
 	})
 
 	wf.informers[NamespaceType], err = newInformer(NamespaceType, wf.iFactory.Core().V1().Namespaces().Informer())
@@ -733,7 +733,7 @@ func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset
 			kapi.NamespaceAll,
 			resyncPeriod,
 			cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
-			withServiceNameAndNoHeadlessServiceSelector())
+			getEndpointSliceSelector())
 	})
 
 	var err error
@@ -987,7 +987,7 @@ func (wf *WatchFactory) GetResourceHandlerFunc(objType reflect.Type) (AddHandler
 	case EndpointSliceForStaleConntrackRemovalType, EndpointSliceForGatewayType:
 		return func(namespace string, sel labels.Selector,
 			funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
-			return wf.AddEndpointSliceHandler(funcs, processExisting)
+			return wf.AddFilteredEndpointSliceHandler(namespace, sel, funcs, processExisting)
 		}, nil
 
 	case IPAMClaimsType:
@@ -1099,9 +1099,9 @@ func (wf *WatchFactory) RemoveServiceHandler(handler *Handler) {
 	wf.removeHandler(ServiceType, handler)
 }
 
-// AddEndpointSliceHandler adds a handler function that will be executed on EndpointSlice object changes
-func (wf *WatchFactory) AddEndpointSliceHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
-	return wf.addHandler(EndpointSliceType, "", nil, handlerFuncs, processExisting, defaultHandlerPriority)
+// AddFilteredEndpointSliceHandler adds a handler function that will be executed on EndpointSlice object changes
+func (wf *WatchFactory) AddFilteredEndpointSliceHandler(namespace string, sel labels.Selector, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
+	return wf.addHandler(EndpointSliceType, namespace, sel, handlerFuncs, processExisting, defaultHandlerPriority)
 }
 
 // RemoveEndpointSliceHandler removes a EndpointSlice object event handler function
@@ -1328,13 +1328,32 @@ func (wf *WatchFactory) GetEndpointSlice(namespace, name string) (*discovery.End
 	return endpointSliceLister.EndpointSlices(namespace).Get(name)
 }
 
-// GetServiceEndpointSlice returns the endpointSlice associated with a service
-func (wf *WatchFactory) GetEndpointSlices(namespace, svcName string) ([]*discovery.EndpointSlice, error) {
-	esLabelSelector := labels.Set(map[string]string{
-		discovery.LabelServiceName: svcName,
-	}).AsSelectorPreValidated()
+// GetEndpointSlicesBySelector returns a list of EndpointSlices in a given namespace by the label selector
+func (wf *WatchFactory) GetEndpointSlicesBySelector(namespace string, labelSelector metav1.LabelSelector) ([]*discovery.EndpointSlice, error) {
+	selector, err := metav1.LabelSelectorAsSelector(&labelSelector)
+	if err != nil {
+		return nil, err
+	}
 	endpointSliceLister := wf.informers[EndpointSliceType].lister.(discoverylisters.EndpointSliceLister)
-	return endpointSliceLister.EndpointSlices(namespace).List(esLabelSelector)
+	return endpointSliceLister.EndpointSlices(namespace).List(selector)
+}
+
+// GetServiceEndpointSlices returns the endpointSlices associated with a service for the specified network
+// if network is DefaultNetworkName the default endpointSlices are returned, otherwise the function looks for mirror endpointslices
+// for the specified network.
+func (wf *WatchFactory) GetServiceEndpointSlices(namespace, svcName, network string) ([]*discovery.EndpointSlice, error) {
+	var selector metav1.LabelSelector
+	if network == types.DefaultNetworkName {
+		selector = metav1.LabelSelector{MatchLabels: map[string]string{
+			discovery.LabelServiceName: svcName,
+		}}
+	} else {
+		selector = metav1.LabelSelector{MatchLabels: map[string]string{
+			types.LabelUserDefinedServiceName:          svcName,
+			types.LabelUserDefinedEndpointSliceNetwork: network,
+		}}
+	}
+	return wf.GetEndpointSlicesBySelector(namespace, selector)
 }
 
 // GetNamespaces returns a list of namespaces in the cluster
@@ -1509,6 +1528,22 @@ func withServiceNameAndNoHeadlessServiceSelector() func(options *metav1.ListOpti
 	}
 }
 
+// noHeadlessServiceSelector returns a LabelSelector (added to the
+// watcher for EndpointSlices) that will only choose EndpointSlices without "service.kubernetes.io/headless"
+// label.
+func noHeadlessServiceSelector() func(options *metav1.ListOptions) {
+	// headless service label must not be there
+	noHeadlessService, err := labels.NewRequirement(kapi.IsHeadlessService, selection.DoesNotExist, nil)
+	if err != nil {
+		// cannot occur
+		panic(err)
+	}
+
+	return func(options *metav1.ListOptions) {
+		options.LabelSelector = noHeadlessService.String()
+	}
+}
+
 // noAlternateProxySelector is a LabelSelector added to the watch for
 // services that excludes services with a well-known label indicating
 // proxying is via an alternate proxy.
@@ -1560,4 +1595,17 @@ type waitForCacheSyncer interface {
 
 func waitForCacheSyncWithTimeout(factory waitForCacheSyncer, stopCh <-chan struct{}) map[reflect.Type]bool {
 	return factory.WaitForCacheSync(util.GetChildStopChanWithTimeout(stopCh, types.InformerSyncTimeout))
+}
+
+// getEndpointSliceSelector returns an EndpointSlice selector function used in watchers.
+// When network segmentation is enabled it returns a selector that ignores EndpointSlices for headless services.
+// Otherwise, it returns a selector that excludes EndpointSlices a with missing default service name too.
+func getEndpointSliceSelector() func(options *metav1.ListOptions) {
+	endpointSliceSelector := withServiceNameAndNoHeadlessServiceSelector()
+	if util.IsNetworkSegmentationSupportEnabled() {
+		// When network segmentation is enabled we need to watch for mirrored EndpointSlices that do not contain the
+		// default service name.
+		endpointSliceSelector = noHeadlessServiceSelector()
+	}
+	return endpointSliceSelector
 }

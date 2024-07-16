@@ -118,6 +118,13 @@ rules:
           - pods/status
           - services/status
       verbs: [ "patch", "update" ]
+    {% if ovn_network_segmentation_enable == "true" -%}
+    - apiGroups: ["discovery.k8s.io"]
+      resources:
+          - endpointslices
+      verbs: [ "create", "update", "delete", "deletecollection" ]
+    {%- endif %}
+
 
 
 # https://github.com/ovn-org/ovn-kubernetes/blob/e1e7d40f9a6c6038b52696c1b8f8915a4d73160e/go-controller/pkg/ovn/topology_version.go#L28

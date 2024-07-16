@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"golang.org/x/exp/constraints"
+	"k8s.io/client-go/tools/cache"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"k8s.io/apimachinery/pkg/labels"
@@ -23,6 +24,7 @@ import (
 
 	"github.com/urfave/cli/v2"
 	v1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
@@ -473,4 +475,38 @@ func GenerateId(length int) string {
 		b[i] = chars[int(b[i])%charsLength]
 	}
 	return string(b)
+}
+
+// IsMirrorEndpointSlice checks if the provided EndpointSlice is meant for the user defined network
+func IsMirrorEndpointSlice(endpointSlice *discoveryv1.EndpointSlice) bool {
+	_, ok := endpointSlice.Labels[types.LabelUserDefinedServiceName]
+	return ok
+}
+
+// IsDefaultEndpointSlice checks if the provided EndpointSlice is meant for the default network
+func IsDefaultEndpointSlice(endpointSlice *discoveryv1.EndpointSlice) bool {
+	_, ok := endpointSlice.Labels[discoveryv1.LabelServiceName]
+	return ok
+}
+
+// GetDefaultEndpointSlicesEventHandler returns an event handler based on the provided handlerFuncs
+// If IsNetworkSegmentationSupportEnabled returns true it returns a handler that filters out the mirrored EndpointSlices.
+// Otherwise, returns handlerFuncs as is.
+func GetDefaultEndpointSlicesEventHandler(handlerFuncs cache.ResourceEventHandlerFuncs) cache.ResourceEventHandler {
+	var eventHandler cache.ResourceEventHandler
+	eventHandler = handlerFuncs
+	if IsNetworkSegmentationSupportEnabled() {
+		// Filter out objects without the default serviceName label to exclude mirrored EndpointSlices
+		eventHandler = cache.FilteringResourceEventHandler{
+			FilterFunc: func(obj interface{}) bool {
+				if endpointSlice, ok := obj.(*discoveryv1.EndpointSlice); ok {
+					return IsDefaultEndpointSlice(endpointSlice)
+				}
+				klog.Errorf("Failed to cast the object to *discovery.EndpointSlice: %v", obj)
+				return true
+			},
+			Handler: handlerFuncs,
+		}
+	}
+	return eventHandler
 }
