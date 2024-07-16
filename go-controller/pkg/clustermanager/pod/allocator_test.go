@@ -8,6 +8,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/onsi/gomega"
 	"github.com/stretchr/testify/mock"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/id"
@@ -16,6 +17,7 @@ import (
 	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/persistentips"
+	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -27,11 +29,14 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	apitypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/client-go/tools/record"
 
 	kubemocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube/mocks"
+	v1nadmocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
 	v1mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/client-go/listers/core/v1"
 )
 
@@ -163,6 +168,7 @@ func TestPodAllocator_reconcileForNAD(t *testing.T) {
 		old       *testPod
 		new       *testPod
 		ipamClaim *ipamclaimsapi.IPAMClaim
+		nads      []*nadapi.NetworkAttachmentDefinition
 		release   bool
 	}
 	tests := []struct {
@@ -171,10 +177,13 @@ func TestPodAllocator_reconcileForNAD(t *testing.T) {
 		ipam            bool
 		idAllocation    bool
 		tracked         bool
+		role            string
 		expectAllocate  bool
 		expectIPRelease bool
 		expectIDRelease bool
 		expectTracked   bool
+		expectEvents    []string
+		expectError     string
 	}{
 		{
 			name: "Pod not scheduled",
@@ -485,10 +494,45 @@ func TestPodAllocator_reconcileForNAD(t *testing.T) {
 			ipam:            true,
 			expectIPRelease: true,
 		},
+		{
+			name: "Pod with primary network NSE, expect event and error",
+			args: args{
+				new: &testPod{
+					scheduled: true,
+					network: &nadapi.NetworkSelectionElement{
+						Namespace: "namespace",
+						Name:      "nad",
+					},
+				},
+				nads: []*nadapi.NetworkAttachmentDefinition{
+					ovntest.GenerateNAD("surya", "nad", "namespace",
+						types.Layer3Topology, "100.128.0.0/16", types.NetworkRolePrimary),
+				},
+			},
+			role:         types.NetworkRolePrimary,
+			expectError:  "failed to get NAD to network mapping: unexpected primary network \"\" specified with a NetworkSelectionElement &{Name:nad Namespace:namespace IPRequest:[] MacRequest: InfinibandGUIDRequest: InterfaceRequest: PortMappingsRequest:[] BandwidthRequest:<nil> CNIArgs:<nil> GatewayRequest:[] IPAMClaimReference:}",
+			expectEvents: []string{"Warning ErrorAllocatingPod unexpected primary network \"\" specified with a NetworkSelectionElement &{Name:nad Namespace:namespace IPRequest:[] MacRequest: InfinibandGUIDRequest: InterfaceRequest: PortMappingsRequest:[] BandwidthRequest:<nil> CNIArgs:<nil> GatewayRequest:[] IPAMClaimReference:}"},
+		},
+		{
+			name: "Pod on a namespace with multiple primary networks; expect event and error",
+			args: args{
+				new: &testPod{
+					scheduled: true,
+				},
+				nads: []*nadapi.NetworkAttachmentDefinition{
+					ovntest.GenerateNAD("surya", "miguel", "namespace",
+						types.Layer3Topology, "100.128.0.0/16", types.NetworkRolePrimary),
+					ovntest.GenerateNAD("surya", "miguel", "namespace",
+						types.Layer2Topology, "10.100.200.0/24", types.NetworkRolePrimary),
+				},
+			},
+			expectError:  "failed looking for an active network: unable to determine what is the primary role network for namespace 'namespace'; please remove multiple primary role networkNADs from it",
+			expectEvents: []string{"Warning ErrorAllocatingPod unable to determine what is the primary role network for namespace 'namespace'; please remove multiple primary role networkNADs from it"},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-
+			g := gomega.NewWithT(t)
 			ipallocator := &ipAllocatorStub{}
 			idallocator := &idAllocatorStub{}
 
@@ -514,6 +558,11 @@ func TestPodAllocator_reconcileForNAD(t *testing.T) {
 				Topology:           types.Layer2Topology,
 				AllowPersistentIPs: tt.ipam && tt.args.ipamClaim != nil,
 			}
+
+			if tt.role != "" {
+				netConf.Role = tt.role
+			}
+
 			if tt.ipam {
 				netConf.Subnets = "10.1.130.0/24"
 			}
@@ -545,6 +594,22 @@ func TestPodAllocator_reconcileForNAD(t *testing.T) {
 				ipamClaimsReconciler,
 			)
 
+			nadLister := v1nadmocks.NetworkAttachmentDefinitionLister{}
+			nadNamespaceLister := v1nadmocks.NetworkAttachmentDefinitionNamespaceLister{}
+			nadLister.On("NetworkAttachmentDefinitions", "namespace").Return(&nadNamespaceLister)
+			mockedNADs := []*nadapi.NetworkAttachmentDefinition{}
+			for _, nad := range tt.args.nads {
+				if nad.Namespace == "namespace" {
+					mockedNADs = append(mockedNADs, nad)
+				}
+			}
+			nadNamespaceLister.On("List", labels.Everything()).Return(mockedNADs, nil)
+
+			fakeRecorder := record.NewFakeRecorder(10)
+
+			config.OVNKubernetesFeature.EnableMultiNetwork = true
+			config.OVNKubernetesFeature.EnableNetworkSegmentation = true
+
 			a := &PodAllocator{
 				netInfo:                netInfo,
 				ipAllocator:            ipallocator,
@@ -553,6 +618,8 @@ func TestPodAllocator_reconcileForNAD(t *testing.T) {
 				releasedPods:           map[string]sets.Set[string]{},
 				releasedPodsMutex:      sync.Mutex{},
 				ipamClaimsReconciler:   ipamClaimsReconciler,
+				recorder:               fakeRecorder,
+				nadLister:              &nadLister,
 			}
 
 			var old, new *corev1.Pod
@@ -569,8 +636,10 @@ func TestPodAllocator_reconcileForNAD(t *testing.T) {
 			}
 
 			err = a.reconcile(old, new, tt.args.release)
-			if err != nil {
-				t.Errorf("reconcile failed: %v", err)
+			if len(tt.expectError) > 0 {
+				g.Expect(err).To(gomega.MatchError(gomega.ContainSubstring(tt.expectError)))
+			} else if err != nil {
+				t.Errorf("reconcile unexpected failure: %v", err)
 			}
 
 			if tt.expectAllocate != allocated {
@@ -588,6 +657,15 @@ func TestPodAllocator_reconcileForNAD(t *testing.T) {
 			if tt.expectTracked != a.releasedPods["namespace/nad"].Has("pod") {
 				t.Errorf("expected pod tracked to be %v but it was %v", tt.expectTracked, a.releasedPods["namespace/nad"].Has("pod"))
 			}
+
+			var obtainedEvents []string
+			for {
+				if len(fakeRecorder.Events) == 0 {
+					break
+				}
+				obtainedEvents = append(obtainedEvents, <-fakeRecorder.Events)
+			}
+			g.Expect(tt.expectEvents).To(gomega.Equal(obtainedEvents))
 		})
 	}
 }
