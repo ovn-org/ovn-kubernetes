@@ -397,6 +397,7 @@ func (nc *DefaultNodeNetworkController) initGateway(subnets []*net.IPNet, nodeAn
 	if portClaimWatcher != nil {
 		gw.portClaimWatcher = portClaimWatcher
 	}
+	gw.isRoutingAdvertised = nc.isRoutingAdvertised()
 
 	initGwFunc := func() error {
 		return gw.Init(nc.stopChan, nc.wg)
