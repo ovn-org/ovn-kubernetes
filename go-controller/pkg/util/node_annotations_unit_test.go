@@ -14,6 +14,7 @@ import (
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/stretchr/testify/assert"
+	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -734,6 +735,70 @@ func TestParseNodeGatewayMTUSupport(t *testing.T) {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
 			res := ParseNodeGatewayMTUSupport(tc.inpNode)
 			assert.Equal(t, tc.res, res)
+		})
+	}
+}
+
+func TestGetNetworkID(t *testing.T) {
+	tests := []struct {
+		desc              string
+		nodes             []*corev1.Node
+		netInfo           NetInfo
+		expectedError     error
+		expectedNetworkID int
+	}{
+		{
+			desc:              "with no nodes should return and error and invalid network ID",
+			netInfo:           newDummyNetInfo("rednamespace", "bluenet"),
+			expectedError:     fmt.Errorf("missing network id for network 'bluenet'"),
+			expectedNetworkID: InvalidNetworkID,
+		},
+		{
+			desc: "with bad network ID annotations should return and error and invalid network ID",
+			nodes: []*corev1.Node{
+				&v1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{
+							"k8s.ovn.org/network-ids": "not a map",
+						},
+					},
+				},
+			},
+			netInfo:           newDummyNetInfo("rednamespace", "bluenet"),
+			expectedError:     fmt.Errorf("could not parse"),
+			expectedNetworkID: InvalidNetworkID,
+		},
+		{
+			desc: "with multiple networks annotation should return expected network ID and no error",
+			nodes: []*corev1.Node{
+				&v1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{
+							"k8s.ovn.org/network-ids": `{"rednet": "5"}`,
+						},
+					},
+				},
+				&v1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{
+							"k8s.ovn.org/network-ids": `{"yellownet": "6", "bluenet": "3"}`,
+						},
+					},
+				},
+			},
+			netInfo:           newDummyNetInfo("rednamespace", "bluenet"),
+			expectedNetworkID: 3,
+		},
+	}
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			obtainedNetworkID, obtainedError := GetNetworkID(tc.nodes, tc.netInfo)
+			if tc.expectedError != nil {
+				assert.Contains(t, obtainedError.Error(), tc.expectedError.Error())
+			} else {
+				assert.NoError(t, obtainedError)
+			}
+			assert.Equal(t, obtainedNetworkID, tc.expectedNetworkID)
 		})
 	}
 }
