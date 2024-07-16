@@ -25,86 +25,101 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
-// cleanupStalePodSNATs removes SNATs against nodeIP for the given node if the SNAT.logicalIP isn't an active podIP on this node
-// We don't have to worry about missing SNATs that should be added because addLogicalPort takes care of this for all pods
-// when RequestRetryObjs is called for each node add.
-// This is executed only when disableSNATMultipleGateways = true
+// cleanupStalePodSNATs removes SNATs against nodeIP for the given node if the
+// SNAT.logicalIP isn't an active podIP,  the pod network is being advertised on
+// this node or disableSNATMultipleGWs=false. We don't have to worry about
+// missing SNATs that should be added because addLogicalPort takes care of this
+// for all pods when RequestRetryObjs is called for each node add.
 // SNATs configured for the join subnet are ignored.
-//
-// NOTE: On startup libovsdb adds back all the pods and this should normally update all existing SNATs
-// accordingly. Due to a stale egressIP cache bug https://issues.redhat.com/browse/OCPBUGS-1520 we ended up adding
-// wrong pod->nodeSNATs which won't get cleared up unless explicitly deleted.
+// NOTE: On startup libovsdb adds back all the pods and this should normally
+// update all existing SNATs accordingly. Due to a stale egressIP cache bug
+// https://issues.redhat.com/browse/OCPBUGS-1520 we ended up adding wrong
+// pod->nodeSNATs which won't get cleared up unless explicitly deleted.
 // NOTE2: egressIP SNATs are synced in EIP controller.
-// TODO (tssurya): Add support cleaning up even if disableSNATMultipleGWs=false, we'd need to remove the perPod
-// SNATs in case someone switches between these modes. See https://github.com/ovn-org/ovn-kubernetes/issues/3232
 func (oc *DefaultNetworkController) cleanupStalePodSNATs(nodeName string, nodeIPs []*net.IPNet) error {
-	if !config.Gateway.DisableSNATMultipleGWs {
-		return nil
+	// collect all the pod IPs for which we should be doing the SNAT; if the pod
+	// network is advertised or DisableSNATMultipleGWs==false we consider all
+	// the SNATs stale
+	podIPsWithSNAT := sets.New[string]()
+	if !oc.isRoutingAdvertised(nodeName) || config.Gateway.DisableSNATMultipleGWs {
+		pods, err := oc.kube.GetPods(metav1.NamespaceAll, metav1.ListOptions{
+			FieldSelector: fields.OneTermEqualSelector("spec.nodeName", nodeName).String(),
+		})
+		if err != nil {
+			return fmt.Errorf("unable to list existing pods on node: %s, %w",
+				nodeName, err)
+		}
+		for _, pod := range pods {
+			pod := *pod
+			if !util.PodScheduled(&pod) { //if the pod is not scheduled we should not remove the nat
+				continue
+			}
+			if util.PodCompleted(&pod) {
+				collidingPod, err := oc.findPodWithIPAddresses([]net.IP{utilnet.ParseIPSloppy(pod.Status.PodIP)}, "") //even if a pod is completed we should still delete the nat if the ip is not in use anymore
+				if err != nil {
+					return fmt.Errorf("lookup for pods with same ip as %s %s failed: %w", pod.Namespace, pod.Name, err)
+				}
+				if collidingPod != nil { //if the ip is in use we should not remove the nat
+					continue
+				}
+			}
+			podIPs, err := util.GetPodIPsOfNetwork(&pod, oc.NetInfo)
+			if err != nil && errors.Is(err, util.ErrNoPodIPFound) {
+				// It is possible that the pod is scheduled during this time, but the LSP add or
+				// IP Allocation has not happened and it is waiting for the WatchPods to start
+				// after WatchNodes completes (This function is called during syncNodes). So since
+				// the pod doesn't have any IPs, there is no SNAT here to keep for this pod so we skip
+				// this pod from processing and move onto the next one.
+				klog.Warningf("Unable to fetch podIPs for pod %s/%s: %v", pod.Namespace, pod.Name, err)
+				continue // no-op
+			} else if err != nil {
+				return fmt.Errorf("unable to fetch podIPs for pod %s/%s: %w", pod.Namespace, pod.Name, err)
+			}
+			for _, podIP := range podIPs {
+				podIPsWithSNAT.Insert(podIP.String())
+			}
+		}
 	}
-	pods, err := oc.kube.GetPods(metav1.NamespaceAll, metav1.ListOptions{
-		FieldSelector: fields.OneTermEqualSelector("spec.nodeName", nodeName).String(),
-	})
-	if err != nil {
-		return fmt.Errorf("unable to list existing pods on node: %s, %w",
-			nodeName, err)
-	}
-	gatewayRouter := nbdb.LogicalRouter{
+
+	gatewayRouter := &nbdb.LogicalRouter{
 		Name: oc.GetNetworkScopedGWRouterName(nodeName),
 	}
-	routerNats, err := libovsdbops.GetRouterNATs(oc.nbClient, &gatewayRouter)
+	routerNats, err := libovsdbops.GetRouterNATs(oc.nbClient, gatewayRouter)
 	if err != nil && errors.Is(err, libovsdbclient.ErrNotFound) {
 		return fmt.Errorf("unable to get NAT entries for router %s on node %s: %w", gatewayRouter.Name, nodeName, err)
 	}
-	podIPsOnNode := sets.NewString() // collects all podIPs on node
-	for _, pod := range pods {
-		pod := *pod
-		if !util.PodScheduled(&pod) { //if the pod is not scheduled we should not remove the nat
-			continue
-		}
-		if util.PodCompleted(&pod) {
-			collidingPod, err := oc.findPodWithIPAddresses([]net.IP{utilnet.ParseIPSloppy(pod.Status.PodIP)}, "") //even if a pod is completed we should still delete the nat if the ip is not in use anymore
-			if err != nil {
-				return fmt.Errorf("lookup for pods with same ip as %s %s failed: %w", pod.Namespace, pod.Name, err)
-			}
-			if collidingPod != nil { //if the ip is in use we should not remove the nat
-				continue
-			}
-		}
-		podIPs, err := util.GetPodIPsOfNetwork(&pod, oc.NetInfo)
-		if err != nil && errors.Is(err, util.ErrNoPodIPFound) {
-			// It is possible that the pod is scheduled during this time, but the LSP add or
-			// IP Allocation has not happened and it is waiting for the WatchPods to start
-			// after WatchNodes completes (This function is called during syncNodes). So since
-			// the pod doesn't have any IPs, there is no SNAT here to keep for this pod so we skip
-			// this pod from processing and move onto the next one.
-			klog.Warningf("Unable to fetch podIPs for pod %s/%s: %v", pod.Namespace, pod.Name, err)
-			continue // no-op
-		} else if err != nil {
-			return fmt.Errorf("unable to fetch podIPs for pod %s/%s: %w", pod.Namespace, pod.Name, err)
-		}
-		for _, podIP := range podIPs {
-			podIPsOnNode.Insert(podIP.String())
-		}
-	}
+
+	nodeIPset := sets.New(util.IPNetsIPToStringSlice(nodeIPs)...)
 	natsToDelete := []*nbdb.NAT{}
 	for _, routerNat := range routerNats {
 		routerNat := routerNat
 		if routerNat.Type != nbdb.NATTypeSNAT {
 			continue
 		}
-		for _, nodeIP := range nodeIPs {
-			logicalIP := net.ParseIP(routerNat.LogicalIP)
-			if routerNat.ExternalIP == nodeIP.IP.String() && !config.ContainsJoinIP(logicalIP) && !podIPsOnNode.Has(routerNat.LogicalIP) {
-				natsToDelete = append(natsToDelete, routerNat)
-			}
+		if !nodeIPset.Has(routerNat.ExternalIP) {
+			continue
 		}
+		if podIPsWithSNAT.Has(routerNat.LogicalIP) {
+			continue
+		}
+		logicalIP := net.ParseIP(routerNat.LogicalIP)
+		if logicalIP == nil {
+			// this is probably a net IP and not a pod IP
+			continue
+		}
+		if config.ContainsJoinIP(logicalIP) {
+			continue
+		}
+		natsToDelete = append(natsToDelete, routerNat)
 	}
+
 	if len(natsToDelete) > 0 {
-		err := libovsdbops.DeleteNATs(oc.nbClient, &gatewayRouter, natsToDelete...)
+		err := libovsdbops.DeleteNATs(oc.nbClient, gatewayRouter, natsToDelete...)
 		if err != nil {
 			return fmt.Errorf("unable to delete NATs %+v from node %s: %w", natsToDelete, nodeName, err)
 		}
 	}
+
 	return nil
 }
 
@@ -502,7 +517,7 @@ func (oc *DefaultNetworkController) gatewayInit(nodeName string, clusterIPSubnet
 
 	nats := make([]*nbdb.NAT, 0, len(clusterIPSubnet))
 	var nat *nbdb.NAT
-	if !config.Gateway.DisableSNATMultipleGWs {
+	if !config.Gateway.DisableSNATMultipleGWs && !oc.isRoutingAdvertised(nodeName) {
 		// Default SNAT rules. DisableSNATMultipleGWs=false in LGW (traffic egresses via mp0) always.
 		// We are not checking for gateway mode to be shared explicitly to reduce topology differences.
 		for _, entry := range clusterIPSubnet {

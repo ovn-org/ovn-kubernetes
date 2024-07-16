@@ -160,6 +160,26 @@ func (nc *DefaultNodeNetworkController) initRetryFrameworkForNode() {
 	nc.retryEndpointSlices = nc.newRetryFrameworkNode(factory.EndpointSliceForStaleConntrackRemovalType)
 }
 
+func (oc *DefaultNodeNetworkController) Reconcile(netInfo util.ReconcilableNetInfo) error {
+	wasAdvertised := len(oc.GetNodeVRFs(oc.name)) > 0
+	isAdvertised := len(netInfo.GetNodeVRFs(oc.name)) > 0
+	oc.SetVRFs(netInfo.GetVRFs())
+	oc.SetNADs(netInfo.GetNADs()...)
+	if oc.gateway != nil && isAdvertised != wasAdvertised {
+		oc.gateway.SetRoutingAdvertised(isAdvertised)
+		err := oc.gateway.Reconcile()
+		// TODO it looks like we need a proper queued reconciliation here
+		if err != nil {
+			klog.Errorf("Failed to reconcile node %s network %s VRFs: %v", oc.name, oc.GetNetworkName(), err)
+		}
+	}
+	return nil
+}
+
+func (oc *DefaultNodeNetworkController) isRoutingAdvertised() bool {
+	return util.IsRoutingAdvertised(oc, oc.name)
+}
+
 func clearOVSFlowTargets() error {
 	_, _, err := util.RunOVSVsctl(
 		"--",

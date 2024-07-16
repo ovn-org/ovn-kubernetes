@@ -48,6 +48,14 @@ func (tnc *testNetworkController) Cleanup() error {
 	return nil
 }
 
+func (tncm *testNetworkController) Reconcile(netInfo util.ReconcilableNetInfo) error {
+	tncm.SetNADs(netInfo.GetNADs()...)
+	if !tncm.IsSecondary() {
+		tncm.SetVRFs(netInfo.GetVRFs())
+	}
+	return nil
+}
+
 // GomegaString is used to avoid printing embedded mutexes which can cause a
 // race
 func (tnc *testNetworkController) GomegaString() string {

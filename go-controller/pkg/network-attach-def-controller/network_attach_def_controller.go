@@ -23,7 +23,12 @@ import (
 
 var ErrNetworkControllerTopologyNotManaged = errors.New("no cluster network controller to manage topology")
 
+type ReconcilableNetworkController interface {
+	Reconcile(util.ReconcilableNetInfo) error
+}
+
 type BaseNetworkController interface {
+	ReconcilableNetworkController
 	Start(ctx context.Context) error
 	Stop()
 }
