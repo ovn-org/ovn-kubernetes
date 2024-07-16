@@ -60,7 +60,7 @@ func (ncm *NodeControllerManager) NewNetworkController(nInfo util.NetInfo) (netw
 }
 
 // CleanupStaleNetworks cleans up all stale entities giving list of all existing secondary network controllers
-func (ncm *NodeControllerManager) CleanupStaleNetworks(validNetworks ...util.BasicNetInfo) error {
+func (ncm *NodeControllerManager) CleanupStaleNetworks(validNetworks ...util.NetInfo) error {
 	if !util.IsNetworkSegmentationSupportEnabled() {
 		return nil
 	}
@@ -79,7 +79,7 @@ func (ncm *NodeControllerManager) CleanupStaleNetworks(validNetworks ...util.Bas
 	return ncm.vrfManager.Repair(validVRFDevices)
 }
 
-func (ncm *NodeControllerManager) getNetworkID(network util.BasicNetInfo) (int, error) {
+func (ncm *NodeControllerManager) getNetworkID(network util.NetInfo) (int, error) {
 	nodes, err := ncm.watchFactory.GetNodes()
 	if err != nil {
 		return util.InvalidID, err

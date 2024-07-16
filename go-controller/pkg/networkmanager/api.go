@@ -47,7 +47,7 @@ func New(
 // case it has clean-up of it's own to do.
 type ControllerManager interface {
 	NewNetworkController(netInfo util.NetInfo) (NetworkController, error)
-	CleanupStaleNetworks(validNetworks ...util.BasicNetInfo) error
+	CleanupStaleNetworks(validNetworks ...util.NetInfo) error
 }
 
 // BaseNetworkController is a network controller that can be started and

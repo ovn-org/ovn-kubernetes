@@ -38,8 +38,8 @@ import (
 func getFakeController(controllerName string) *DefaultNetworkController {
 	controller := &DefaultNetworkController{
 		BaseNetworkController: BaseNetworkController{
-			controllerName: controllerName,
-			NetInfo:        &util.DefaultNetInfo{},
+			controllerName:      controllerName,
+			ReconcilableNetInfo: &util.DefaultNetInfo{},
 		},
 	}
 	return controller
@@ -76,8 +76,8 @@ func newNetworkPolicy(name, namespace string, podSelector metav1.LabelSelector, 
 
 func getFakeBaseController(netInfo util.NetInfo) *BaseNetworkController {
 	return &BaseNetworkController{
-		controllerName: getNetworkControllerName(netInfo.GetNetworkName()),
-		NetInfo:        netInfo,
+		controllerName:      getNetworkControllerName(netInfo.GetNetworkName()),
+		ReconcilableNetInfo: util.NewReconcilableNetInfo(netInfo),
 	}
 }
 

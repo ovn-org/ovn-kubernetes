@@ -188,7 +188,8 @@ func (nadController *nadController) sync(key string) error {
 
 func (nadController *nadController) syncNAD(key string, nad *nettypes.NetworkAttachmentDefinition) error {
 	var nadNetworkName string
-	var nadNetwork, oldNetwork, ensureNetwork util.NetInfo
+	var nadNetwork util.NetInfo
+	var oldNetwork, ensureNetwork util.MutableNetInfo
 	var err error
 
 	namespace, _, err := cache.SplitMetaNamespaceKey(key)
@@ -233,8 +234,8 @@ func (nadController *nadController) syncNAD(key string, nad *nettypes.NetworkAtt
 	switch {
 	case currentNetwork == nil:
 		// the NAD refers to a new network, ensure it
-		ensureNetwork = nadNetwork
-	case currentNetwork.Equals(nadNetwork):
+		ensureNetwork = util.NewMutableNetInfo(nadNetwork)
+	case util.AreNetworksCompatible(currentNetwork, nadNetwork):
 		// the NAD refers to an existing compatible network, ensure that
 		// existing network holds a reference to this NAD
 		ensureNetwork = currentNetwork
@@ -243,7 +244,7 @@ func (nadController *nadController) syncNAD(key string, nad *nettypes.NetworkAtt
 		// network, remove the reference from the old network and ensure that
 		// existing network holds a reference to this NAD
 		oldNetwork = currentNetwork
-		ensureNetwork = nadNetwork
+		ensureNetwork = util.NewMutableNetInfo(nadNetwork)
 	// the NAD refers to an existing incompatible network referred by other
 	// NADs, return error
 	case oldNetwork == nil:
@@ -329,7 +330,7 @@ func (nadController *nadController) GetActiveNetworkForNamespace(namespace strin
 			panic("NAD Controller broken consistency between primary NADs and cached NADs")
 		}
 		network := nadController.networkController.getNetwork(netName)
-		n := util.CopyNetInfo(network)
+		n := util.NewMutableNetInfo(network)
 		// update the returned netInfo copy to only have the primary NAD for this namespace
 		n.SetNADs(primaryNAD)
 		return n, nil

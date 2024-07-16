@@ -146,7 +146,7 @@ func (sncm *secondaryNetworkClusterManager) isTopologyManaged(nInfo util.NetInfo
 // CleanupStaleNetworks cleans of stale data from the OVN database
 // corresponding to networks not included in validNetworks, which are considered
 // stale.
-func (sncm *secondaryNetworkClusterManager) CleanupStaleNetworks(validNetworks ...util.BasicNetInfo) error {
+func (sncm *secondaryNetworkClusterManager) CleanupStaleNetworks(validNetworks ...util.NetInfo) error {
 	existingNetworksMap := map[string]struct{}{}
 	for _, network := range validNetworks {
 		existingNetworksMap[network.GetNetworkName()] = struct{}{}
