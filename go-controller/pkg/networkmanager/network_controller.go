@@ -162,7 +162,7 @@ func (c *networkController) sync(network string) error {
 	}
 
 	// setup & start the new network controller
-	nc, err := c.cm.NewNetworkController(util.NewMutableNetInfo(want))
+	nc, err := c.cm.NewNetworkController(want)
 	if err != nil {
 		return fmt.Errorf("%s: failed to create network %s: %w", c.name, network, err)
 	}
