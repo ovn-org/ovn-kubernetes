@@ -26,7 +26,7 @@ const (
 // by NetAttachDefinitionController to add and delete NADs.
 type secondaryNetworkClusterManager struct {
 	// net-attach-def controller handle net-attach-def and create/delete network controllers
-	nadController *nad.NetAttachDefinitionController
+	nadController *nad.NADController
 	ovnClient     *util.OVNClusterManagerClientset
 	watchFactory  *factory.WatchFactory
 	// networkIDAllocator is used to allocate a unique ID for each secondary layer3 network
@@ -54,7 +54,7 @@ func newSecondaryNetworkClusterManager(ovnClient *util.OVNClusterManagerClientse
 		recorder:           recorder,
 	}
 
-	sncm.nadController, err = nad.NewNetAttachDefinitionController("cluster-manager", sncm, wf)
+	sncm.nadController, err = nad.NewClusterNADController("cluster-manager", sncm, wf)
 	if err != nil {
 		return nil, err
 	}
@@ -104,6 +104,7 @@ func (sncm *secondaryNetworkClusterManager) Stop() {
 }
 
 func (cm *secondaryNetworkClusterManager) GetDefaultNetworkController() nad.ReconcilableNetworkController {
+	// TODO implement
 	return nil
 }
 

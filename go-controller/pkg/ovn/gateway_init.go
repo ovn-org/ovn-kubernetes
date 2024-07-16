@@ -41,7 +41,7 @@ func (oc *DefaultNetworkController) cleanupStalePodSNATs(nodeName string, nodeIP
 	// network is advertised or DisableSNATMultipleGWs==false we consider all
 	// the SNATs stale
 	podIPsWithSNAT := sets.New[string]()
-	if !oc.isRoutingAdvertised(nodeName) || config.Gateway.DisableSNATMultipleGWs {
+	if !oc.isRoutingAdvertised(nodeName) && config.Gateway.DisableSNATMultipleGWs {
 		pods, err := oc.kube.GetPods(metav1.NamespaceAll, metav1.ListOptions{
 			FieldSelector: fields.OneTermEqualSelector("spec.nodeName", nodeName).String(),
 		})
