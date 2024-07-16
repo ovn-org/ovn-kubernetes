@@ -50,7 +50,7 @@ import (
 
 // NewCNIServer creates and returns a new Server object which will listen on a socket in the given path
 func NewCNIServer(factory factory.NodeWatchFactory, kclient kubernetes.Interface,
-	nadController *nad.NetAttachDefinitionController) (*Server, error) {
+	nadController nad.NADController) (*Server, error) {
 	if config.OvnKubeNode.Mode == types.NodeModeDPU {
 		return nil, fmt.Errorf("unsupported ovnkube-node mode for CNI server: %s", config.OvnKubeNode.Mode)
 	}

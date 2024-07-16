@@ -143,7 +143,7 @@ type DefaultNetworkController struct {
 
 // NewDefaultNetworkController creates a new OVN controller for creating logical network
 // infrastructure and policy for default l3 network
-func NewDefaultNetworkController(cnci *CommonNetworkControllerInfo, nadController *nad.NetAttachDefinitionController,
+func NewDefaultNetworkController(cnci *CommonNetworkControllerInfo, nadController nad.NADController,
 	observManager *observability.Manager) (*DefaultNetworkController, error) {
 	stopChan := make(chan struct{})
 	wg := &sync.WaitGroup{}
@@ -152,7 +152,7 @@ func NewDefaultNetworkController(cnci *CommonNetworkControllerInfo, nadControlle
 
 func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 	defaultStopChan chan struct{}, defaultWg *sync.WaitGroup,
-	addressSetFactory addressset.AddressSetFactory, nadController *nad.NetAttachDefinitionController,
+	addressSetFactory addressset.AddressSetFactory, nadController nad.NADController,
 	observManager *observability.Manager) (*DefaultNetworkController, error) {
 
 	if addressSetFactory == nil {
