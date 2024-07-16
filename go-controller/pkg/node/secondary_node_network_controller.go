@@ -8,6 +8,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	"k8s.io/klog/v2"
+	"k8s.io/utils/ptr"
 )
 
 // SecondaryNodeNetworkController structure is the object which holds the controls for starting
@@ -16,6 +17,8 @@ type SecondaryNodeNetworkController struct {
 	BaseNodeNetworkController
 	// pod events factory handler
 	podHandler *factory.Handler
+
+	networkID *int
 }
 
 // NewSecondaryNodeNetworkController creates a new OVN controller for creating logical network
@@ -34,6 +37,7 @@ func NewSecondaryNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, n
 // Start starts the default controller; handles all events and creates all needed logical entities
 func (nc *SecondaryNodeNetworkController) Start(ctx context.Context) error {
 	klog.Infof("Start secondary node network controller of network %s", nc.GetNetworkName())
+
 	handler, err := nc.watchPodsDPU()
 	if err != nil {
 		return err
@@ -56,4 +60,19 @@ func (nc *SecondaryNodeNetworkController) Stop() {
 // Cleanup cleans up node entities for the given secondary network
 func (nc *SecondaryNodeNetworkController) Cleanup() error {
 	return nil
+}
+
+func (oc *SecondaryNodeNetworkController) getNetworkID() (int, error) {
+	if oc.networkID == nil || *oc.networkID == util.InvalidNetworkID {
+		oc.networkID = ptr.To(util.InvalidNetworkID)
+		nodes, err := oc.watchFactory.GetNodes()
+		if err != nil {
+			return util.InvalidNetworkID, err
+		}
+		*oc.networkID, err = util.GetNetworkID(nodes, oc.NetInfo)
+		if err != nil {
+			return util.InvalidNetworkID, err
+		}
+	}
+	return *oc.networkID, nil
 }

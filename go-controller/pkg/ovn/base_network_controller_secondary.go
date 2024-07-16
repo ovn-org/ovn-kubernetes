@@ -26,6 +26,7 @@ import (
 	kapi "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/klog/v2"
+	"k8s.io/utils/ptr"
 )
 
 func (bsnc *BaseSecondaryNetworkController) getPortInfoForSecondaryNetwork(pod *kapi.Pod) map[string]*lpInfo {
@@ -696,4 +697,19 @@ func (oc *BaseSecondaryNetworkController) allowPersistentIPs() bool {
 		oc.NetInfo.AllowsPersistentIPs() &&
 		util.DoesNetworkRequireIPAM(oc.NetInfo) &&
 		(oc.NetInfo.TopologyType() == types.Layer2Topology || oc.NetInfo.TopologyType() == types.LocalnetTopology)
+}
+
+func (oc *BaseSecondaryNetworkController) getNetworkID() (int, error) {
+	if oc.networkID == nil || *oc.networkID == util.InvalidNetworkID {
+		oc.networkID = ptr.To(util.InvalidNetworkID)
+		nodes, err := oc.watchFactory.GetNodes()
+		if err != nil {
+			return util.InvalidNetworkID, err
+		}
+		*oc.networkID, err = util.GetNetworkID(nodes, oc.NetInfo)
+		if err != nil {
+			return util.InvalidNetworkID, err
+		}
+	}
+	return *oc.networkID, nil
 }
