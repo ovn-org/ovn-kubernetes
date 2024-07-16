@@ -465,6 +465,8 @@ func TestParseNetconf(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.desc, func(t *testing.T) {
+			config.IPv4Mode = true
+			config.IPv6Mode = true
 			if test.unsupportedReason != "" {
 				t.Skip(test.unsupportedReason)
 			}
@@ -824,7 +826,9 @@ func TestGetPodNADToNetworkMapping(t *testing.T) {
 			netInfo, err := NewNetInfo(test.inputNetConf)
 			g.Expect(err).To(gomega.BeNil())
 			if test.inputNetConf.NADName != "" {
-				netInfo.AddNADs(test.inputNetConf.NADName)
+				mutableNetInfo := NewMutableNetInfo(netInfo)
+				mutableNetInfo.AddNADs(test.inputNetConf.NADName)
+				netInfo = mutableNetInfo
 			}
 
 			pod := &corev1.Pod{
@@ -1017,7 +1021,9 @@ func TestGetPodNADToNetworkMappingWithActiveNetwork(t *testing.T) {
 			netInfo, err := NewNetInfo(test.inputNetConf)
 			g.Expect(err).To(gomega.BeNil())
 			if test.inputNetConf.NADName != "" {
-				netInfo.AddNADs(test.inputNetConf.NADName)
+				mutableNetInfo := NewMutableNetInfo(netInfo)
+				mutableNetInfo.AddNADs(test.inputNetConf.NADName)
+				netInfo = mutableNetInfo
 			}
 
 			var primaryUDNNetInfo NetInfo
@@ -1025,7 +1031,9 @@ func TestGetPodNADToNetworkMappingWithActiveNetwork(t *testing.T) {
 				primaryUDNNetInfo, err = NewNetInfo(test.inputPrimaryUDNConfig)
 				g.Expect(err).To(gomega.BeNil())
 				if test.inputPrimaryUDNConfig.NADName != "" {
-					primaryUDNNetInfo.AddNADs(test.inputPrimaryUDNConfig.NADName)
+					mutableNetInfo := NewMutableNetInfo(primaryUDNNetInfo)
+					mutableNetInfo.AddNADs(test.inputPrimaryUDNConfig.NADName)
+					primaryUDNNetInfo = mutableNetInfo
 				}
 			}
 

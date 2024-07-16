@@ -159,8 +159,8 @@ func (h *secondaryLayer3NetworkControllerEventHandler) UpdateResource(oldObj, ne
 			return fmt.Errorf("could not cast oldObj of type %T to *kapi.Node", oldObj)
 		}
 		newNodeIsLocalZoneNode := h.oc.isLocalZoneNode(newNode)
-		zoneClusterChanged := h.oc.nodeZoneClusterChanged(oldNode, newNode, newNodeIsLocalZoneNode, h.oc.NetInfo.GetNetworkName())
-		nodeSubnetChanged := nodeSubnetChanged(oldNode, newNode, h.oc.NetInfo.GetNetworkName())
+		zoneClusterChanged := h.oc.nodeZoneClusterChanged(oldNode, newNode, newNodeIsLocalZoneNode, h.oc.GetNetworkName())
+		nodeSubnetChanged := nodeSubnetChanged(oldNode, newNode, h.oc.GetNetworkName())
 		if newNodeIsLocalZoneNode {
 			var nodeSyncsParam *nodeSyncs
 			if h.oc.isLocalZoneNode(oldNode) {
@@ -349,7 +349,7 @@ func NewSecondaryLayer3NetworkController(
 			BaseNetworkController: BaseNetworkController{
 				CommonNetworkControllerInfo: *cnci,
 				controllerName:              getNetworkControllerName(netInfo.GetNetworkName()),
-				NetInfo:                     netInfo,
+				ReconcilableNetInfo:         util.NewReconcilableNetInfo(netInfo),
 				lsManager:                   lsm.NewLogicalSwitchManager(),
 				logicalPortCache:            portCache,
 				namespaces:                  make(map[string]*namespaceInfo),
@@ -619,7 +619,7 @@ func (oc *SecondaryLayer3NetworkController) Init(ctx context.Context) error {
 
 	// Only configure join switch, GR, cluster port groups and multicast default policies for user defined primary networks.
 	if util.IsNetworkSegmentationSupportEnabled() && oc.IsPrimaryNetwork() {
-		if err := oc.gatewayTopologyFactory.NewJoinSwitch(clusterRouter, oc.NetInfo, oc.ovnClusterLRPToJoinIfAddrs); err != nil {
+		if err := oc.gatewayTopologyFactory.NewJoinSwitch(clusterRouter, oc.GetNetInfo(), oc.ovnClusterLRPToJoinIfAddrs); err != nil {
 			return fmt.Errorf("failed to create join switch for network %q: %v", oc.GetNetworkName(), err)
 		}
 
@@ -637,7 +637,7 @@ func (oc *SecondaryLayer3NetworkController) Init(ctx context.Context) error {
 	if _, _, err := util.RunOVNNbctl("--columns=_uuid", "list", "Load_Balancer_Group"); err != nil {
 		klog.Warningf("Load Balancer Group support enabled, however version of OVN in use does not support Load Balancer Groups.")
 	} else {
-		clusterLBGroupUUID, switchLBGroupUUID, routerLBGroupUUID, err := initLoadBalancerGroups(oc.nbClient, oc.NetInfo)
+		clusterLBGroupUUID, switchLBGroupUUID, routerLBGroupUUID, err := initLoadBalancerGroups(oc.nbClient, oc.GetNetInfo())
 		if err != nil {
 			return err
 		}
@@ -764,10 +764,10 @@ func (oc *SecondaryLayer3NetworkController) addUpdateLocalNodeEvent(node *kapi.N
 	}
 
 	if config.OVNKubernetesFeature.EnableEgressIP && util.IsNetworkSegmentationSupportEnabled() && oc.IsPrimaryNetwork() {
-		if err = oc.eIPController.ensureL3ClusterRouterPoliciesForNetwork(oc.NetInfo); err != nil {
-			errs = append(errs, fmt.Errorf("failed to add network %s to EgressIP controller: %v", oc.NetInfo.GetNetworkName(), err))
+		if err = oc.eIPController.ensureL3ClusterRouterPoliciesForNetwork(oc.GetNetInfo()); err != nil {
+			errs = append(errs, fmt.Errorf("failed to add network %s to EgressIP controller: %v", oc.GetNetworkName(), err))
 		}
-		if err = oc.eIPController.ensureL3SwitchPoliciesForNode(oc.NetInfo, node.Name); err != nil {
+		if err = oc.eIPController.ensureL3SwitchPoliciesForNode(oc.GetNetInfo(), node.Name); err != nil {
 			errs = append(errs, fmt.Errorf("failed to ensure EgressIP switch policies: %v", err))
 		}
 	}
@@ -1021,13 +1021,13 @@ func (oc *SecondaryLayer3NetworkController) newClusterRouter() (*nbdb.LogicalRou
 	if oc.multicastSupport {
 		return oc.gatewayTopologyFactory.NewClusterRouterWithMulticastSupport(
 			oc.GetNetworkScopedClusterRouterName(),
-			oc.NetInfo,
+			oc.GetNetInfo(),
 			oc.defaultCOPPUUID,
 		)
 	}
 	return oc.gatewayTopologyFactory.NewClusterRouter(
 		oc.GetNetworkScopedClusterRouterName(),
-		oc.NetInfo,
+		oc.GetNetInfo(),
 		oc.defaultCOPPUUID,
 	)
 }
@@ -1038,7 +1038,7 @@ func (oc *SecondaryLayer3NetworkController) newGatewayManager(nodeName string) *
 		oc.defaultCOPPUUID,
 		oc.kube,
 		oc.nbClient,
-		oc.NetInfo,
+		oc.GetNetInfo(),
 		oc.watchFactory,
 		oc.gatewayOptions()...,
 	)

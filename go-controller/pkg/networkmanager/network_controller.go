@@ -18,7 +18,7 @@ func newNetworkController(name string, cm ControllerManager) *networkController 
 	nc := &networkController{
 		name:               fmt.Sprintf("[%s network controller]", name),
 		cm:                 cm,
-		networks:           map[string]util.NetInfo{},
+		networks:           map[string]util.MutableNetInfo{},
 		networkControllers: map[string]*networkControllerState{},
 	}
 	// this controller does not feed from an informer, networks are manually
@@ -45,7 +45,7 @@ type networkController struct {
 	name               string
 	controller         controller.Reconciler
 	cm                 ControllerManager
-	networks           map[string]util.NetInfo
+	networks           map[string]util.MutableNetInfo
 	networkControllers map[string]*networkControllerState
 }
 
@@ -62,7 +62,7 @@ func (c *networkController) Stop() {
 	}
 }
 
-func (c *networkController) EnsureNetwork(network util.NetInfo) {
+func (c *networkController) EnsureNetwork(network util.MutableNetInfo) {
 	c.setNetwork(network.GetNetworkName(), network)
 	c.controller.Reconcile(network.GetNetworkName())
 }
@@ -72,7 +72,7 @@ func (c *networkController) DeleteNetwork(network string) {
 	c.controller.Reconcile(network)
 }
 
-func (c *networkController) setNetwork(network string, netInfo util.NetInfo) {
+func (c *networkController) setNetwork(network string, netInfo util.MutableNetInfo) {
 	c.Lock()
 	defer c.Unlock()
 	if netInfo == nil {
@@ -82,16 +82,16 @@ func (c *networkController) setNetwork(network string, netInfo util.NetInfo) {
 	c.networks[network] = netInfo
 }
 
-func (c *networkController) getNetwork(network string) util.NetInfo {
+func (c *networkController) getNetwork(network string) util.MutableNetInfo {
 	c.RLock()
 	defer c.RUnlock()
 	return c.networks[network]
 }
 
-func (c *networkController) getAllNetworks() []util.BasicNetInfo {
+func (c *networkController) getAllNetworks() []util.NetInfo {
 	c.RLock()
 	defer c.RUnlock()
-	networks := make([]util.BasicNetInfo, 0, len(c.networks))
+	networks := make([]util.NetInfo, 0, len(c.networks))
 	for _, network := range c.networks {
 		networks = append(networks, network)
 	}
@@ -136,7 +136,7 @@ func (c *networkController) sync(network string) error {
 
 	// we will dispose of the old network if deletion is in progress or if
 	// configuration changed
-	dispose := have != nil && (have.stoppedAndDeleting || !have.controller.Equals(want))
+	dispose := have != nil && (have.stoppedAndDeleting || !util.AreNetworksCompatible(have.controller, want))
 
 	if dispose {
 		if !have.stoppedAndDeleting {
@@ -162,7 +162,7 @@ func (c *networkController) sync(network string) error {
 	}
 
 	// setup & start the new network controller
-	nc, err := c.cm.NewNetworkController(util.CopyNetInfo(want))
+	nc, err := c.cm.NewNetworkController(util.NewMutableNetInfo(want))
 	if err != nil {
 		return fmt.Errorf("%s: failed to create network %s: %w", c.name, network, err)
 	}

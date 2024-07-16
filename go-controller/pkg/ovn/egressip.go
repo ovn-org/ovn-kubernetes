@@ -877,7 +877,7 @@ func (e *EgressIPController) deleteEgressIPAssignments(name string, statusesToRe
 					if err := e.deleteEgressIPStatusSetup(ni, name, statusToRemove); err != nil {
 						return fmt.Errorf("failed to delete EgressIP %s status setup for network %s: %v", name, ni.GetNetworkName(), err)
 					}
-					if cachedNetwork != nil && !cachedNetwork.Equals(ni) {
+					if cachedNetwork != nil && util.AreNetworksCompatible(cachedNetwork, ni) {
 						if err := e.deleteEgressIPStatusSetup(cachedNetwork, name, statusToRemove); err != nil {
 							klog.Errorf("Failed to delete EgressIP %s status setup for network %s: %v", name, cachedNetwork.GetNetworkName(), err)
 						}
@@ -1016,7 +1016,7 @@ func (e *EgressIPController) deletePodEgressIPAssignments(ni util.NetInfo, name 
 func (e *EgressIPController) deletePreviousNetworkPodEgressIPAssignments(ni util.NetInfo, name string, statusesToRemove []egressipv1.EgressIPStatusItem, pod *corev1.Pod) {
 	cachedNetwork := e.getNetworkFromPodAssignmentWithLock(getPodKey(pod))
 	if cachedNetwork != nil {
-		if !cachedNetwork.Equals(ni) {
+		if util.AreNetworksCompatible(cachedNetwork, ni) {
 			if err := e.deletePodEgressIPAssignments(cachedNetwork, name, statusesToRemove, pod); err != nil {
 				// no error is returned because high probability network is deleted
 				klog.Errorf("Failed to delete EgressIP %s assignment for pod %s/%s attached to network %s: %v",

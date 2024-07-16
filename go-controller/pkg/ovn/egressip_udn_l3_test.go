@@ -658,9 +658,9 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 				err = fakeOvn.networkManager.Start()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				// simulate Start() of secondary network controller
-				err = fakeOvn.eIPController.ensureL3ClusterRouterPoliciesForNetwork(secConInfo.bnc.NetInfo)
+				err = fakeOvn.eIPController.ensureL3ClusterRouterPoliciesForNetwork(secConInfo.bnc.GetNetInfo())
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				err = fakeOvn.eIPController.ensureL3SwitchPoliciesForNode(secConInfo.bnc.NetInfo, node1Name)
+				err = fakeOvn.eIPController.ensureL3SwitchPoliciesForNode(secConInfo.bnc.GetNetInfo(), node1Name)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = fakeOvn.controller.WatchEgressIPNamespaces()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())

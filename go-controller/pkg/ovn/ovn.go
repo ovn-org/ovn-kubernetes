@@ -204,7 +204,7 @@ func (oc *DefaultNetworkController) ensureLocalZonePod(oldPod, pod *kapi.Pod, ad
 
 func (oc *DefaultNetworkController) ensureRemotePodIP(oldPod, pod *kapi.Pod, addPort bool) error {
 	if (addPort || (oldPod != nil && len(pod.Status.PodIPs) != len(oldPod.Status.PodIPs))) && !util.PodWantsHostNetwork(pod) {
-		podIfAddrs, err := util.GetPodCIDRsWithFullMask(pod, oc.NetInfo)
+		podIfAddrs, err := util.GetPodCIDRsWithFullMask(pod, oc.GetNetInfo())
 		if err != nil {
 			// not finding pod IPs on a remote pod is common until the other node wires the pod, suppress it
 			return fmt.Errorf("failed to obtain IPs to add remote pod %s/%s: %w",
@@ -324,7 +324,7 @@ func (oc *DefaultNetworkController) removeRemoteZonePod(pod *kapi.Pod) error {
 	}
 
 	if kubevirt.IsPodLiveMigratable(pod) {
-		ips, err := util.GetPodCIDRsWithFullMask(pod, oc.NetInfo)
+		ips, err := util.GetPodCIDRsWithFullMask(pod, oc.GetNetInfo())
 		if err != nil && !errors.Is(err, util.ErrNoPodIPFound) {
 			return fmt.Errorf("failed to get pod ips for the pod %s/%s: %w", pod.Namespace, pod.Name, err)
 		}
@@ -507,7 +507,7 @@ func (oc *DefaultNetworkController) InitEgressServiceZoneController() (*egresssv
 		createDefaultNodeRouteToExternal = libovsdbutil.CreateDefaultRouteToExternal
 	}
 
-	return egresssvc_zone.NewController(oc.NetInfo, DefaultNetworkControllerName, oc.client, oc.nbClient, oc.addressSetFactory,
+	return egresssvc_zone.NewController(oc.GetNetInfo(), DefaultNetworkControllerName, oc.client, oc.nbClient, oc.addressSetFactory,
 		initClusterEgressPolicies, ensureNodeNoReroutePolicies, deleteLegacyDefaultNoRerouteNodePolicies,
 		createDefaultNodeRouteToExternal,
 		oc.stopChan, oc.watchFactory.EgressServiceInformer(), oc.watchFactory.ServiceCoreInformer(),

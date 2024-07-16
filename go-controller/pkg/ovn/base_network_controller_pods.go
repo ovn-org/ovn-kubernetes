@@ -330,7 +330,7 @@ func (bnc *BaseNetworkController) canReleasePodIPs(podIfAddrs []*net.IPNet, node
 		needleIPs = append(needleIPs, podIPNet.IP)
 	}
 
-	collidingPod, err := findPodWithIPAddresses(bnc.watchFactory, bnc.NetInfo, needleIPs, nodeName)
+	collidingPod, err := findPodWithIPAddresses(bnc.watchFactory, bnc.GetNetInfo(), needleIPs, nodeName)
 	if err != nil {
 		return false, fmt.Errorf("unable to determine if pod IPs: %#v are in use by another pod :%w", podIfAddrs, err)
 
@@ -424,7 +424,7 @@ func (bnc *BaseNetworkController) getExpectedSwitchName(pod *kapi.Pod) (string, 
 // controller's zone.
 func (bnc *BaseNetworkController) ensurePodAnnotation(pod *kapi.Pod, nadName string) (*util.PodAnnotation, bool, error) {
 	if kubevirt.IsPodLiveMigratable(pod) {
-		podAnnotation, err := kubevirt.EnsurePodAnnotationForVM(bnc.watchFactory, bnc.kube, pod, bnc.NetInfo, nadName)
+		podAnnotation, err := kubevirt.EnsurePodAnnotationForVM(bnc.watchFactory, bnc.kube, pod, bnc.GetNetInfo(), nadName)
 		if err != nil {
 			return nil, false, err
 		}
@@ -898,7 +898,7 @@ func (bnc *BaseNetworkController) allocatePodAnnotation(pod *kapi.Pod, existingL
 		return nil, false, fmt.Errorf("cannot retrieve subnet for assigning gateway routes for pod %s, switch: %s",
 			podDesc, switchName)
 	}
-	err = util.AddRoutesGatewayIP(bnc.NetInfo, pod, podAnnotation, network)
+	err = util.AddRoutesGatewayIP(bnc.GetNetInfo(), pod, podAnnotation, network)
 	if err != nil {
 		return nil, false, err
 	}
@@ -990,7 +990,7 @@ func (bnc *BaseNetworkController) allocatePodAnnotationForSecondaryNetwork(pod *
 }
 
 func (bnc *BaseNetworkController) allocatesPodAnnotation() bool {
-	switch bnc.NetInfo.TopologyType() {
+	switch bnc.TopologyType() {
 	case ovntypes.Layer2Topology:
 		// on layer2 topologies, cluster manager allocates tunnel IDs, allocates
 		// IPs if the network has IPAM, and sets the PodAnnotation
