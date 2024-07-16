@@ -21,6 +21,10 @@ func (fnc *FakeNetworkController) Cleanup() error {
 	return nil
 }
 
+func (nc *FakeNetworkController) Reconcile(util.NetInfo) error {
+	return nil
+}
+
 type FakeControllerManager struct{}
 
 func (fcm *FakeControllerManager) NewNetworkController(netInfo util.NetInfo) (networkmanager.NetworkController, error) {
