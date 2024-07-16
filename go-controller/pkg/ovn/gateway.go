@@ -58,6 +58,30 @@ type GatewayManager struct {
 
 type GatewayOption func(*GatewayManager)
 
+func NewGatewayManagerForLayer2Topology(
+	nodeName string,
+	coopUUID string,
+	kube kube.InterfaceOVN,
+	nbClient libovsdbclient.Client,
+	netInfo util.NetInfo,
+	watchFactory *factory.WatchFactory,
+	opts ...GatewayOption,
+) *GatewayManager {
+	return newGWManager(
+		nodeName,
+		"",
+		netInfo.GetNetworkScopedGWRouterName(nodeName),
+		netInfo.GetNetworkScopedExtSwitchName(nodeName),
+		netInfo.GetNetworkScopedName(types.OVNLayer2Switch),
+		coopUUID,
+		kube,
+		nbClient,
+		netInfo,
+		watchFactory,
+		opts...,
+	)
+}
+
 func NewGatewayManager(
 	nodeName string,
 	coopUUID string,
@@ -67,12 +91,35 @@ func NewGatewayManager(
 	watchFactory *factory.WatchFactory,
 	opts ...GatewayOption,
 ) *GatewayManager {
+	return newGWManager(
+		nodeName,
+		netInfo.GetNetworkScopedClusterRouterName(),
+		netInfo.GetNetworkScopedGWRouterName(nodeName),
+		netInfo.GetNetworkScopedExtSwitchName(nodeName),
+		netInfo.GetNetworkScopedJoinSwitchName(),
+		coopUUID,
+		kube,
+		nbClient,
+		netInfo,
+		watchFactory,
+		opts...,
+	)
+}
+
+func newGWManager(
+	nodeName, clusterRouterName, gwRouterName, extSwitchName, joinSwitchName string,
+	coopUUID string,
+	kube kube.InterfaceOVN,
+	nbClient libovsdbclient.Client,
+	netInfo util.NetInfo,
+	watchFactory *factory.WatchFactory,
+	opts ...GatewayOption) *GatewayManager {
 	gwManager := &GatewayManager{
 		nodeName:          nodeName,
-		clusterRouterName: netInfo.GetNetworkScopedClusterRouterName(),
-		gwRouterName:      netInfo.GetNetworkScopedGWRouterName(nodeName),
-		extSwitchName:     netInfo.GetNetworkScopedExtSwitchName(nodeName),
-		joinSwitchName:    netInfo.GetNetworkScopedJoinSwitchName(),
+		clusterRouterName: clusterRouterName,
+		gwRouterName:      gwRouterName,
+		extSwitchName:     extSwitchName,
+		joinSwitchName:    joinSwitchName,
 		coppUUID:          coopUUID,
 		kube:              kube,
 		nbClient:          nbClient,
