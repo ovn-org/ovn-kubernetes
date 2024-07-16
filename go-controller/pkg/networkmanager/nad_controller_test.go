@@ -49,6 +49,10 @@ func (tnc *testNetworkController) Cleanup() error {
 	return nil
 }
 
+func (tnc *testNetworkController) Reconcile(netInfo util.NetInfo) error {
+	return util.ReconcileNetInfo(tnc.ReconcilableNetInfo, netInfo)
+}
+
 // GomegaString is used to avoid printing embedded mutexes which can cause a
 // race
 func (tnc *testNetworkController) GomegaString() string {

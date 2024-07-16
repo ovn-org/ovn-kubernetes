@@ -587,6 +587,54 @@ func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 	return nil
 }
 
+func (oc *DefaultNetworkController) Reconcile(netInfo util.NetInfo) error {
+	// gather some information first
+	var err error
+	var retryNodes []*kapi.Node
+	oc.localZoneNodes.Range(func(key, value any) bool {
+		nodeName := key.(string)
+		wasAdvertised := util.IsPodNetworkAdvertisedAtNode(oc, nodeName)
+		isAdvertised := util.IsPodNetworkAdvertisedAtNode(netInfo, nodeName)
+		if wasAdvertised == isAdvertised {
+			// noop
+			return true
+		}
+		var node *kapi.Node
+		node, err = oc.watchFactory.GetNode(nodeName)
+		if err != nil {
+			return false
+		}
+		retryNodes = append(retryNodes, node)
+		return true
+	})
+	if err != nil {
+		return fmt.Errorf("failed to reconcile network %s: %w", oc.GetNetworkName(), err)
+	}
+
+	// update network information, point of no return
+	err = util.ReconcileNetInfo(oc.ReconcilableNetInfo, netInfo)
+	if err != nil {
+		klog.Errorf("Failed to reconcile network %s: %v", oc.GetNetworkName(), err)
+	}
+
+	for _, node := range retryNodes {
+		oc.gatewaysFailed.Store(node.Name, true)
+		err = oc.retryNodes.AddRetryObjWithAddNoBackoff(node)
+		if err != nil {
+			klog.Errorf("Failed to retry node %s for network %s: %v", node.Name, oc.GetNetworkName(), err)
+		}
+	}
+	if len(retryNodes) > 0 {
+		oc.retryNodes.RequestRetryObjs()
+	}
+
+	return nil
+}
+
+func (oc *DefaultNetworkController) isPodNetworkAdvertisedAtNode(node string) bool {
+	return util.IsPodNetworkAdvertisedAtNode(oc, node)
+}
+
 func WithSyncDurationMetric(resourceName string, f func() error) error {
 	start := time.Now()
 	defer func() {
