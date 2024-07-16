@@ -5,7 +5,6 @@
 To enable NetworkQoS, we will use Differentiated Services Code Point (DSCP) which allows us to classify packets by setting a 6-bit field in the IP header, effectively marking the priority of a given packet relative to other packets as "Critical", "High Priority", "Best Effort" and so on.
 
 ## Problem Statement
-
 The workloads running in Kubernetes using OVN-Kubernetes as a networking backend might have different requirements in handling network traffic. For example video streaming application needs low latency and jitter whereas storage application can tolerate with packet loss. Hence NetworkQoS is essential in meeting these SLAs to provide better service quality.
 
 The workload taffic can be either east west (pod to pod traffic) or north south traffic (pod to external traffic) types in a Kubernetes cluster which is limited by finite bandwidth. So NetworkQoS must ensure high priority applications get the necessary NetworkQoS marking so that it can prevent network conjestion.
@@ -19,4 +18,3 @@ The `NetworkQoS` also has `status` field which is populated by ovn-k which helps
 
 ## Sources
 - [OKEP-4380: Network QoS Support](https://github.com/pperiyasamy/ovn-kubernetes/blob/qos-okep/docs/okeps/okep-4380-network-qos.md)
-
