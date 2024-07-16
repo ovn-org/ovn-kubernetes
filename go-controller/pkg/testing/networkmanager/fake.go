@@ -35,6 +35,10 @@ func (fcm *FakeControllerManager) CleanupStaleNetworks(validNetworks ...util.Net
 	return nil
 }
 
+func (fcm *FakeControllerManager) GetDefaultNetworkController() networkmanager.ReconcilableNetworkController {
+	return nil
+}
+
 type FakeNetworkManager struct {
 	// namespace -> netInfo
 	PrimaryNetworks map[string]util.NetInfo
