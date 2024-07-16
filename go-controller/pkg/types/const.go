@@ -107,6 +107,7 @@ const (
 	HybridOverlayReroutePriority          = 501
 	DefaultNoRereoutePriority             = 102
 	EgressSVCReroutePriority              = 101
+	EgressIPMarkPriority                  = 95
 	EgressIPReroutePriority               = 100
 	EgressIPRerouteQoSRulePriority        = 103
 	EgressLiveMigrationReroutePiority     = 10
