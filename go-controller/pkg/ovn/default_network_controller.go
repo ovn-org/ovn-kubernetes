@@ -204,7 +204,7 @@ func newDefaultNetworkControllerCommon(
 		BaseNetworkController: BaseNetworkController{
 			CommonNetworkControllerInfo: *cnci,
 			controllerName:              DefaultNetworkControllerName,
-			NetInfo:                     &util.DefaultNetInfo{},
+			ReconcilableNetInfo:         &util.DefaultNetInfo{},
 			lsManager:                   lsm.NewLogicalSwitchManager(),
 			logicalPortCache:            newPortCache(defaultStopChan),
 			namespaces:                  make(map[string]*namespaceInfo),
@@ -383,7 +383,7 @@ func (oc *DefaultNetworkController) Init(ctx context.Context) error {
 	if _, _, err := util.RunOVNNbctl("--columns=_uuid", "list", "Load_Balancer_Group"); err != nil {
 		klog.Warningf("Load Balancer Group support enabled, however version of OVN in use does not support Load Balancer Groups.")
 	} else {
-		clusterLBGroupUUID, switchLBGroupUUID, routerLBGroupUUID, err := initLoadBalancerGroups(oc.nbClient, oc.NetInfo)
+		clusterLBGroupUUID, switchLBGroupUUID, routerLBGroupUUID, err := initLoadBalancerGroups(oc.nbClient, oc.GetNetInfo())
 		if err != nil {
 			return err
 		}

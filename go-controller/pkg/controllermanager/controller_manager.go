@@ -121,7 +121,7 @@ func findAllSecondaryNetworkLogicalEntities(nbClient libovsdbclient.Client) ([]*
 	return nodeSwitches, clusterRouters, nil
 }
 
-func (cm *ControllerManager) CleanupStaleNetworks(validNetworks ...util.BasicNetInfo) error {
+func (cm *ControllerManager) CleanupStaleNetworks(validNetworks ...util.NetInfo) error {
 	existingNetworksMap := map[string]string{}
 	for _, network := range validNetworks {
 		existingNetworksMap[network.GetNetworkName()] = network.TopologyType()

@@ -494,7 +494,9 @@ func (o *FakeOVN) NewSecondaryNetworkController(netattachdef *nettypes.NetworkAt
 	}
 
 	ginkgo.By(fmt.Sprintf("OVN test init: add NAD %s to secondary network controller of %s network %s", nadName, topoType, netName))
-	secondaryController.AddNADs(nadName)
+	mutableNetInfo := util.NewMutableNetInfo(secondaryController.GetNetInfo())
+	mutableNetInfo.AddNADs(nadName)
+	_ = util.ReconcileNetInfo(secondaryController.ReconcilableNetInfo, mutableNetInfo)
 	return nil
 }
 

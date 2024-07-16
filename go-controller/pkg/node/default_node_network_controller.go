@@ -65,7 +65,7 @@ type BaseNodeNetworkController struct {
 	CommonNodeNetworkControllerInfo
 
 	// network information
-	util.NetInfo
+	util.ReconcilableNetInfo
 
 	// podNADToDPUCDMap tracks the NAD/DPU_ConnectionDetails mapping for all NADs that each pod requests.
 	// Key is pod.UUID; value is nadToDPUCDMap (of map[string]*util.DPUConnectionDetails). Key of nadToDPUCDMap
@@ -137,7 +137,7 @@ func newDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, sto
 	c := &DefaultNodeNetworkController{
 		BaseNodeNetworkController: BaseNodeNetworkController{
 			CommonNodeNetworkControllerInfo: *cnnci,
-			NetInfo:                         &util.DefaultNetInfo{},
+			ReconcilableNetInfo:             &util.DefaultNetInfo{},
 			stopChan:                        stopChan,
 			wg:                              wg,
 		},

@@ -368,8 +368,9 @@ func newDummyNetInfo(namespace, networkName string) NetInfo {
 	netInfo, _ := newLayer2NetConfInfo(&ovncnitypes.NetConf{
 		NetConf: cnitypes.NetConf{Name: networkName},
 	})
-	netInfo.AddNADs(GetNADName(namespace, networkName))
-	return netInfo
+	mutableNetInfo := NewMutableNetInfo(netInfo)
+	mutableNetInfo.AddNADs(GetNADName(namespace, networkName))
+	return mutableNetInfo
 }
 
 func TestUnmarshalUDNOpenPortsAnnotation(t *testing.T) {
