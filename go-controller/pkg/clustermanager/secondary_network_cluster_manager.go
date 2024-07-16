@@ -104,6 +104,10 @@ func (sncm *secondaryNetworkClusterManager) Stop() {
 	klog.Infof("Stopping secondary network cluster manager")
 }
 
+func (sncm *secondaryNetworkClusterManager) GetDefaultNetworkController() networkmanager.ReconcilableNetworkController {
+	return nil
+}
+
 // NewNetworkController implements the networkmanager.ControllerManager
 // interface called by network manager to create or delete a network controller.
 func (sncm *secondaryNetworkClusterManager) NewNetworkController(nInfo util.NetInfo) (networkmanager.NetworkController, error) {
