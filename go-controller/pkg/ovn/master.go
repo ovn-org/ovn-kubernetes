@@ -141,7 +141,8 @@ func (oc *DefaultNetworkController) syncGatewayLogicalNetwork(node *kapi.Node, l
 
 	enableGatewayMTU := util.ParseNodeGatewayMTUSupport(node)
 
-	err = oc.gatewayInit(node.Name, clusterSubnets, hostSubnets, l3GatewayConfig, oc.SCTPSupport, gwLRPIPs, oc.ovnClusterLRPToJoinIfAddrs,
+	gatewayManager := oc.newGatewayManager(node.Name)
+	err = gatewayManager.GatewayInit(node.Name, clusterSubnets, hostSubnets, l3GatewayConfig, oc.SCTPSupport, gwLRPIPs, oc.ovnClusterLRPToJoinIfAddrs,
 		enableGatewayMTU)
 	if err != nil {
 		return fmt.Errorf("failed to init shared interface gateway: %v", err)
@@ -874,4 +875,31 @@ func (oc *DefaultNetworkController) delIPFromHostNetworkNamespaceAddrSet(node *k
 		return err
 	}
 	return nil
+}
+
+func (oc *DefaultNetworkController) newGatewayManager(nodeName string) *GatewayManager {
+	gatewayManager := NewGatewayManager(
+		oc.GetNetworkScopedClusterRouterName(),
+		oc.GetNetworkScopedGWRouterName(nodeName),
+		oc.GetNetworkScopedExtSwitchName(nodeName),
+		oc.GetNetworkScopedJoinSwitchName(),
+		oc.defaultCOPPUUID,
+		oc.kube,
+		oc.nbClient,
+		oc.NetInfo,
+		oc.gatewayOptions()...,
+	)
+	return gatewayManager
+}
+
+func (oc *DefaultNetworkController) gatewayOptions() []GatewayOption {
+	var opts []GatewayOption
+	if oc.clusterLoadBalancerGroupUUID != "" {
+		opts = append(opts, WithLoadBalancerGroups(
+			oc.routerLoadBalancerGroupUUID,
+			oc.clusterLoadBalancerGroupUUID,
+			oc.switchLoadBalancerGroupUUID,
+		))
+	}
+	return opts
 }

@@ -482,7 +482,7 @@ func (bnc *BaseNetworkController) podSelectorPodNeedsDelete(pod *kapi.Pod, podHa
 	}
 
 	// completed pod be deleted a long time ago, check if there is a new pod with that same ip
-	collidingPod, err := bnc.findPodWithIPAddresses(ips, nodeName)
+	collidingPod, err := findPodWithIPAddresses(bnc.watchFactory, bnc.NetInfo, ips, nodeName)
 	if err != nil {
 		return "", fmt.Errorf("lookup for pods with the same IPs [%s] failed: %w", util.JoinIPs(ips, " "), err)
 	}
