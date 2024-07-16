@@ -665,8 +665,10 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeName string) (
 		wf.apbRouteFactory.K8s().V1().AdminPolicyBasedExternalRoutes().Informer()
 	}
 
-	// need to configure OVS interfaces for Pods on secondary networks in the DPU mode
-	if config.OVNKubernetesFeature.EnableMultiNetwork && config.OvnKubeNode.Mode == types.NodeModeDPU {
+	// need to configure OVS interfaces for Pods on secondary networks in the DPU mode.
+	// need to know what is the primary network for a namespace on the CNI side, which
+	// needs the NAD factory whenever the UDN feature is used.
+	if config.OVNKubernetesFeature.EnableMultiNetwork || config.OVNKubernetesFeature.EnableNetworkSegmentation {
 		wf.nadFactory = nadinformerfactory.NewSharedInformerFactory(ovnClientset.NetworkAttchDefClient, resyncInterval)
 		wf.informers[NetworkAttachmentDefinitionType], err = newInformer(NetworkAttachmentDefinitionType, wf.nadFactory.K8sCniCncfIo().V1().NetworkAttachmentDefinitions().Informer())
 		if err != nil {
