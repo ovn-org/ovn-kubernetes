@@ -46,7 +46,9 @@ import (
 	egressipclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned"
 	egressqosclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/clientset/versioned"
 	egressserviceclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/clientset/versioned"
+	networkqosclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1/apis/clientset/versioned"
 	userdefinednetworkclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/clientset/versioned"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	anpclientset "sigs.k8s.io/network-policy-api/pkg/client/clientset/versioned"
 )
 
@@ -65,6 +67,7 @@ type OVNClientset struct {
 	AdminPolicyRouteClient   adminpolicybasedrouteclientset.Interface
 	IPAMClaimsClient         ipamclaimssclientset.Interface
 	UserDefinedNetworkClient userdefinednetworkclientset.Interface
+	NetworkQoSClient         networkqosclientset.Interface
 }
 
 // OVNMasterClientset
@@ -82,6 +85,7 @@ type OVNMasterClientset struct {
 	IPAMClaimsClient         ipamclaimssclientset.Interface
 	NetworkAttchDefClient    networkattchmentdefclientset.Interface
 	UserDefinedNetworkClient userdefinednetworkclientset.Interface
+	NetworkQoSClient         networkqosclientset.Interface
 }
 
 // OVNNetworkControllerManagerClientset
@@ -98,6 +102,7 @@ type OVNKubeControllerClientset struct {
 	IPAMClaimsClient         ipamclaimssclientset.Interface
 	NetworkAttchDefClient    networkattchmentdefclientset.Interface
 	UserDefinedNetworkClient userdefinednetworkclientset.Interface
+	NetworkQoSClient         networkqosclientset.Interface
 }
 
 type OVNNodeClientset struct {
@@ -122,6 +127,7 @@ type OVNClusterManagerClientset struct {
 	IPAMClaimsClient         ipamclaimssclientset.Interface
 	OCPNetworkClient         ocpnetworkclientset.Interface
 	UserDefinedNetworkClient userdefinednetworkclientset.Interface
+	NetworkQoSClient         networkqosclientset.Interface
 }
 
 const (
@@ -149,6 +155,7 @@ func (cs *OVNClientset) GetMasterClientset() *OVNMasterClientset {
 		IPAMClaimsClient:         cs.IPAMClaimsClient,
 		NetworkAttchDefClient:    cs.NetworkAttchDefClient,
 		UserDefinedNetworkClient: cs.UserDefinedNetworkClient,
+		NetworkQoSClient:         cs.NetworkQoSClient,
 	}
 }
 
@@ -166,6 +173,7 @@ func (cs *OVNMasterClientset) GetOVNKubeControllerClientset() *OVNKubeController
 		IPAMClaimsClient:         cs.IPAMClaimsClient,
 		NetworkAttchDefClient:    cs.NetworkAttchDefClient,
 		UserDefinedNetworkClient: cs.UserDefinedNetworkClient,
+		NetworkQoSClient:         cs.NetworkQoSClient,
 	}
 }
 
@@ -183,6 +191,7 @@ func (cs *OVNClientset) GetOVNKubeControllerClientset() *OVNKubeControllerClient
 		IPAMClaimsClient:         cs.IPAMClaimsClient,
 		NetworkAttchDefClient:    cs.NetworkAttchDefClient,
 		UserDefinedNetworkClient: cs.UserDefinedNetworkClient,
+		NetworkQoSClient:         cs.NetworkQoSClient,
 	}
 }
 
@@ -200,6 +209,7 @@ func (cs *OVNClientset) GetClusterManagerClientset() *OVNClusterManagerClientset
 		IPAMClaimsClient:         cs.IPAMClaimsClient,
 		OCPNetworkClient:         cs.OCPNetworkClient,
 		UserDefinedNetworkClient: cs.UserDefinedNetworkClient,
+		NetworkQoSClient:         cs.NetworkQoSClient,
 	}
 }
 
@@ -492,6 +502,11 @@ func NewOVNClientset(conf *config.KubernetesConfig) (*OVNClientset, error) {
 		return nil, err
 	}
 
+	networkqosClientset, err := networkqosclientset.NewForConfig(kconfig)
+	if err != nil {
+		return nil, err
+	}
+
 	return &OVNClientset{
 		KubeClient:               kclientset,
 		ANPClient:                anpClientset,
@@ -506,6 +521,7 @@ func NewOVNClientset(conf *config.KubernetesConfig) (*OVNClientset, error) {
 		AdminPolicyRouteClient:   adminPolicyBasedRouteClientset,
 		IPAMClaimsClient:         ipamClaimsClientset,
 		UserDefinedNetworkClient: userDefinedNetworkClientSet,
+		NetworkQoSClient:         networkqosClientset,
 	}, nil
 }
 

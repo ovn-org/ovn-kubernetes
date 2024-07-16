@@ -26,6 +26,7 @@ import (
 	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
 	egressipv1fake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
 	egressservicefake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/clientset/versioned/fake"
+	networkqosfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
@@ -267,11 +268,12 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 	Expect(err).NotTo(HaveOccurred())
 	kubeInterface := &kube.KubeOVN{Kube: kube.Kube{KClient: fakeClient}, ANPClient: anpfake.NewSimpleClientset(),
 		EIPClient: egressipv1fake.NewSimpleClientset(), EgressFirewallClient: &egressfirewallfake.Clientset{},
-		EgressServiceClient: &egressservicefake.Clientset{}}
+		EgressServiceClient: &egressservicefake.Clientset{}, NetworkQoSClient: &networkqosfake.Clientset{}}
 	nodeAnnotator := kube.NewNodeAnnotator(kubeInterface, existingNode.Name)
 	watchFactory, err := factory.NewNodeWatchFactory(fakeNodeClient, nodeName)
 	Expect(err).NotTo(HaveOccurred())
 	Expect(watchFactory.Start()).To(Succeed())
+
 	waiter := newStartupWaiter()
 	wg := &sync.WaitGroup{}
 	rm := routemanager.NewController()
@@ -372,7 +374,7 @@ func testManagementPortDPU(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.
 	_, err = config.InitConfig(ctx, fexec, nil)
 	Expect(err).NotTo(HaveOccurred())
 
-	kubeInterface := &kube.KubeOVN{Kube: kube.Kube{KClient: fakeClient}, ANPClient: anpfake.NewSimpleClientset(), EIPClient: egressipv1fake.NewSimpleClientset(), EgressFirewallClient: &egressfirewallfake.Clientset{}, EgressServiceClient: &egressservicefake.Clientset{}}
+	kubeInterface := &kube.KubeOVN{Kube: kube.Kube{KClient: fakeClient}, ANPClient: anpfake.NewSimpleClientset(), EIPClient: egressipv1fake.NewSimpleClientset(), EgressFirewallClient: &egressfirewallfake.Clientset{}, EgressServiceClient: &egressservicefake.Clientset{}, NetworkQoSClient: &networkqosfake.Clientset{}}
 	nodeAnnotator := kube.NewNodeAnnotator(kubeInterface, existingNode.Name)
 	watchFactory, err := factory.NewNodeWatchFactory(fakeNodeClient, nodeName)
 	Expect(err).NotTo(HaveOccurred())
