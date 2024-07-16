@@ -727,7 +727,6 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 		runtime.LockOSThread()
 		defer runtime.UnlockOSThread()
 		rm := routemanager.NewController()
-
 		wg.Add(1)
 		go testNS.Do(func(netNS ns.NetNS) error {
 			defer GinkgoRecover()
@@ -1196,7 +1195,6 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 		ip, ipNet, _ := net.ParseCIDR(eth0CIDR)
 		ipNet.IP = ip
 		rm := routemanager.NewController()
-
 		go testNS.Do(func(netNS ns.NetNS) error {
 			defer GinkgoRecover()
 			rm.Run(stop, 10*time.Second)

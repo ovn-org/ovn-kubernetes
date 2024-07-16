@@ -209,7 +209,7 @@ func (o *FakeOVN) init(nadList []nettypes.NetworkAttachmentDefinition) {
 
 	o.networkManager = networkmanager.Default()
 	if config.OVNKubernetesFeature.EnableMultiNetwork {
-		o.networkManager, err = networkmanager.New("test", &testnm.FakeControllerManager{}, o.watcher, nil)
+		o.networkManager, err = networkmanager.NewForZone("test", &testnm.FakeControllerManager{}, o.watcher)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	}
 
