@@ -1737,7 +1737,7 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 	return dftFlows, nil
 }
 
-func commonFlows(subnets []*net.IPNet, bridge *bridgeConfiguration) ([]string, error) {
+func commonFlows(subnets []*net.IPNet, bridge *bridgeConfiguration, isPodNetworkAdvertised bool) ([]string, error) {
 	// CAUTION: when adding new flows where the in_port is ofPortPatch and the out_port is ofPortPhys, ensure
 	// that dl_src is included in match criteria!
 	ofPortPhys := bridge.ofPortPhys
@@ -1927,49 +1927,46 @@ func commonFlows(subnets []*net.IPNet, bridge *bridgeConfiguration) ([]string, e
 	if config.OVNKubernetesFeature.EnableEgressIP {
 		for _, clusterEntry := range config.Default.ClusterSubnets {
 			cidr := clusterEntry.CIDR
-			ipPrefix := "ip"
-			if utilnet.IsIPv6CIDR(cidr) {
-				ipPrefix = "ipv6"
-			}
+			ipv := getIPv(cidr)
 			// table 0, drop packets coming from pods headed externally that were not SNATed.
 			dftFlows = append(dftFlows,
 				fmt.Sprintf("cookie=%s, priority=104, in_port=%s, %s, %s_src=%s, actions=drop",
-					defaultOpenFlowCookie, defaultNetConfig.ofPortPatch, ipPrefix, ipPrefix, cidr))
+					defaultOpenFlowCookie, defaultNetConfig.ofPortPatch, ipv, ipv, cidr))
 		}
 		for _, subnet := range subnets {
-			ipPrefix := "ip"
-			if utilnet.IsIPv6CIDR(subnet) {
-				ipPrefix = "ipv6"
-			}
+			ipv := getIPv(subnet)
 			if ofPortPhys != "" {
 				// table 0, commit connections from local pods.
 				// ICNIv2 requires that local pod traffic can leave the node without SNAT.
 				dftFlows = append(dftFlows,
 					fmt.Sprintf("cookie=%s, priority=109, in_port=%s, dl_src=%s, %s, %s_src=%s"+
 						"actions=ct(commit, zone=%d, exec(set_field:%s->ct_mark)), output:%s",
-						defaultOpenFlowCookie, defaultNetConfig.ofPortPatch, bridgeMacAddress, ipPrefix, ipPrefix, subnet,
+						defaultOpenFlowCookie, defaultNetConfig.ofPortPatch, bridgeMacAddress, ipv, ipv, subnet,
 						config.Default.ConntrackZone, ctMarkOVN, ofPortPhys))
 			}
 		}
 	}
 
 	if ofPortPhys != "" {
-		actions := fmt.Sprintf("output:%s", defaultNetConfig.ofPortPatch)
-
-		if config.Gateway.DisableSNATMultipleGWs {
+		if config.Gateway.DisableSNATMultipleGWs || isPodNetworkAdvertised {
 			// table 1, traffic to pod subnet go directly to OVN
 			for _, clusterEntry := range config.Default.ClusterSubnets {
 				cidr := clusterEntry.CIDR
-				var ipPrefix string
-				if utilnet.IsIPv6CIDR(cidr) {
-					ipPrefix = "ipv6"
-				} else {
-					ipPrefix = "ip"
-				}
+				ipv := getIPv(cidr)
 				dftFlows = append(dftFlows,
 					fmt.Sprintf("cookie=%s, priority=15, table=1, %s, %s_dst=%s, "+
-						"actions=%s",
-						defaultOpenFlowCookie, ipPrefix, ipPrefix, cidr, actions))
+						"actions=output:%s",
+						defaultOpenFlowCookie, ipv, ipv, cidr, defaultNetConfig.ofPortPatch))
+			}
+			// except node management traffic
+			for _, subnet := range subnets {
+				mgmtIP := util.GetNodeManagementIfAddr(subnet)
+				ipv := getIPv(mgmtIP)
+				dftFlows = append(dftFlows,
+					fmt.Sprintf("cookie=%s, priority=16, table=1, %s, %s_dst=%s, "+
+						"actions=output:%s",
+						defaultOpenFlowCookie, ipv, ipv, mgmtIP.IP, ovsLocalPort),
+				)
 			}
 		}
 
@@ -2233,7 +2230,7 @@ func newGateway(
 		// resync flows on IP change
 		gw.nodeIPManager.OnChanged = func() {
 			klog.V(5).Info("Node addresses changed, re-syncing bridge flows")
-			if err := gw.openflowManager.updateBridgeFlowCache(subnets, gw.nodeIPManager.ListAddresses()); err != nil {
+			if err := gw.openflowManager.updateBridgeFlowCache(subnets, gw.nodeIPManager.ListAddresses(), gw.isPodNetworkAdvertised); err != nil {
 				// very unlikely - somehow node has lost its IP address
 				klog.Errorf("Failed to re-generate gateway flows after address change: %v", err)
 			}
@@ -2767,4 +2764,12 @@ func deleteMasqueradeResources(link netlink.Link, staleMasqueradeIPs *config.Mas
 	}
 
 	return utilerrors.Join(aggregatedErrors...)
+}
+
+func getIPv(ipnet *net.IPNet) string {
+	prefix := "ip"
+	if utilnet.IsIPv6CIDR(ipnet) {
+		prefix = "ipv6"
+	}
+	return prefix
 }
