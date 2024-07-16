@@ -851,7 +851,6 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			defer GinkgoRecover()
 			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
 			Expect(err).NotTo(HaveOccurred())
-
 			// make preparations for creating openflow manager in DNCC which can be used for SNCC
 			localGw, err := newGateway(
 				nodeName,
