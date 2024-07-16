@@ -249,10 +249,10 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 		err = nodeAnnotator.Run()
 		Expect(err).NotTo(HaveOccurred())
 		rm := routemanager.NewController()
-		var nadController *networkAttachDefController.NetAttachDefinitionController
+		var nadController networkAttachDefController.NADController
 		if util.IsNetworkSegmentationSupportEnabled() {
 			testNCM := &nad.FakeNetworkControllerManager{}
-			nadController, err = networkAttachDefController.NewNetAttachDefinitionController("test", testNCM, wf, nil)
+			nadController, err = networkAttachDefController.NewNodeNADController("test", "node", testNCM, wf)
 			Expect(err).NotTo(HaveOccurred())
 			err = nadController.Start()
 			Expect(err).NotTo(HaveOccurred())
@@ -677,10 +677,10 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 		runtime.LockOSThread()
 		defer runtime.UnlockOSThread()
 		rm := routemanager.NewController()
-		var nadController *networkAttachDefController.NetAttachDefinitionController
+		var nadController networkAttachDefController.NADController
 		if util.IsNetworkSegmentationSupportEnabled() {
 			testNCM := &nad.FakeNetworkControllerManager{}
-			nadController, err = networkAttachDefController.NewNetAttachDefinitionController("test", testNCM, wf, nil)
+			nadController, err = networkAttachDefController.NewNodeNADController("test", "node", testNCM, wf)
 			Expect(err).NotTo(HaveOccurred())
 			err = nadController.Start()
 			Expect(err).NotTo(HaveOccurred())
@@ -1132,10 +1132,10 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 		ip, ipNet, _ := net.ParseCIDR(eth0CIDR)
 		ipNet.IP = ip
 		rm := routemanager.NewController()
-		var nadController *networkAttachDefController.NetAttachDefinitionController
+		var nadController networkAttachDefController.NADController
 		if util.IsNetworkSegmentationSupportEnabled() {
 			testNCM := &nad.FakeNetworkControllerManager{}
-			nadController, err = networkAttachDefController.NewNetAttachDefinitionController("test", testNCM, wf, nil)
+			nadController, err = networkAttachDefController.NewNodeNADController("test", "node", testNCM, wf)
 			Expect(err).NotTo(HaveOccurred())
 			err = nadController.Start()
 			Expect(err).NotTo(HaveOccurred())

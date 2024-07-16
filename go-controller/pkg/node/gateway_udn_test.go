@@ -576,7 +576,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
 			Expect(err).NotTo(HaveOccurred())
 			testNCM := &fakenad.FakeNetworkControllerManager{}
-			nadController, err := networkAttachDefController.NewNetAttachDefinitionController("test", testNCM, wf, nil)
+			nadController, err := networkAttachDefController.NewNodeNADController("test", "node", testNCM, wf)
 			Expect(err).NotTo(HaveOccurred())
 
 			// make preparations for creating openflow manager in DNCC which can be used for SNCC
@@ -774,7 +774,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
 			Expect(err).NotTo(HaveOccurred())
 			testNCM := &fakenad.FakeNetworkControllerManager{}
-			nadController, err := networkAttachDefController.NewNetAttachDefinitionController("test", testNCM, wf, nil)
+			nadController, err := networkAttachDefController.NewNodeNADController("test", "node", testNCM, wf)
 			Expect(err).NotTo(HaveOccurred())
 			// make preparations for creating openflow manager in DNCC which can be used for SNCC
 			localGw, err := newLocalGateway(nodeName, ovntest.MustParseIPNets(v4NodeSubnet, v6NodeSubnet), gatewayNextHops,

@@ -61,10 +61,10 @@ const (
 // nodePortWatcherIptables manages iptables rules for shared gateway
 // to ensure that services using NodePorts are accessible.
 type nodePortWatcherIptables struct {
-	nadController *nad.NetAttachDefinitionController
+	nadController nad.NADController
 }
 
-func newNodePortWatcherIptables(nadController *nad.NetAttachDefinitionController) *nodePortWatcherIptables {
+func newNodePortWatcherIptables(nadController nad.NADController) *nodePortWatcherIptables {
 	return &nodePortWatcherIptables{
 		nadController: nadController,
 	}
@@ -84,7 +84,7 @@ type nodePortWatcher struct {
 	serviceInfoLock sync.Mutex
 	ofm             *openflowManager
 	nodeIPManager   *addressManager
-	nadController   *nad.NetAttachDefinitionController
+	nadController   nad.NADController
 	watchFactory    factory.NodeWatchFactory
 }
 
@@ -1889,7 +1889,7 @@ func initSvcViaMgmPortRoutingRules(hostSubnets []*net.IPNet) error {
 
 func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP, gwIntf, egressGWIntf string,
 	gwIPs []*net.IPNet, nodeAnnotator kube.Annotator, kube kube.Interface, cfg *managementPortConfig,
-	watchFactory factory.NodeWatchFactory, routeManager *routemanager.Controller, nadController *nad.NetAttachDefinitionController) (*gateway, error) {
+	watchFactory factory.NodeWatchFactory, routeManager *routemanager.Controller, nadController nad.NADController) (*gateway, error) {
 	klog.Info("Creating new shared gateway")
 	gw := &gateway{}
 
@@ -2029,7 +2029,7 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 
 func newNodePortWatcher(gwBridge *bridgeConfiguration, ofm *openflowManager,
 	nodeIPManager *addressManager, watchFactory factory.NodeWatchFactory,
-	nadController *nad.NetAttachDefinitionController) (*nodePortWatcher, error) {
+	nadController nad.NADController) (*nodePortWatcher, error) {
 
 	// Get ofport of physical interface
 	ofportPhys, stderr, err := util.GetOVSOfPort("--if-exists", "get",
