@@ -30,7 +30,7 @@ var _ = ginkgo.Describe("Cluster manager EndpointSlice mirror controller", func(
 		app           *cli.App
 		controller    *Controller
 		fakeClient    *util.OVNClusterManagerClientset
-		nadController *nad.NetAttachDefinitionController
+		nadController nad.NADController
 	)
 
 	start := func(objects ...runtime.Object) {
@@ -40,7 +40,7 @@ var _ = ginkgo.Describe("Cluster manager EndpointSlice mirror controller", func(
 		fakeClient = util.GetOVNClientset(objects...).GetClusterManagerClientset()
 		wf, err := factory.NewClusterManagerWatchFactory(fakeClient)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		nadController, err = nad.NewNetAttachDefinitionController("test", &fakenad.FakeNetworkControllerManager{}, wf, nil)
+		nadController, err = nad.NewClusterNADController("test", &fakenad.FakeNetworkControllerManager{}, wf, nil)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		controller, err = NewController(fakeClient, wf, nadController)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())

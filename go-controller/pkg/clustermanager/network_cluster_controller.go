@@ -62,7 +62,7 @@ type networkClusterController struct {
 	ipamClaimReconciler *persistentips.IPAMClaimReconciler
 	subnetAllocator     subnet.Allocator
 
-	nadController *networkAttachDefController.NetAttachDefinitionController
+	nadController networkAttachDefController.NADController
 
 	// event recorder used to post events to k8s
 	recorder record.EventRecorder
@@ -70,7 +70,7 @@ type networkClusterController struct {
 	util.NetInfo
 }
 
-func newNetworkClusterController(networkIDAllocator idallocator.NamedAllocator, netInfo util.NetInfo, ovnClient *util.OVNClusterManagerClientset, wf *factory.WatchFactory, recorder record.EventRecorder, nadController *networkAttachDefController.NetAttachDefinitionController) *networkClusterController {
+func newNetworkClusterController(networkIDAllocator idallocator.NamedAllocator, netInfo util.NetInfo, ovnClient *util.OVNClusterManagerClientset, wf *factory.WatchFactory, recorder record.EventRecorder, nadController networkAttachDefController.NADController) *networkClusterController {
 	kube := &kube.KubeOVN{
 		Kube: kube.Kube{
 			KClient: ovnClient.KubeClient,
