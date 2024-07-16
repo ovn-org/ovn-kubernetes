@@ -50,8 +50,6 @@ type NetInfo interface {
 	// dynamic information, can change over time
 	GetNADs() []string
 	HasNAD(nadName string) bool
-	// TODO remove at later PR when we are able to reconcile network controllers
-	SetNADs(nadName ...string)
 	// GetPodNetworkAdvertisedVRFs returns the target VRFs where the pod network
 	// is advertised per node, through a map of node names to slice of VRFs.
 	GetPodNetworkAdvertisedVRFs() map[string][]string

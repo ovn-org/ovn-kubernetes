@@ -14,7 +14,7 @@ var ErrNetworkControllerTopologyNotManaged = errors.New("no cluster network cont
 // information to the rest of the project.
 type Interface interface {
 	GetActiveNetworkForNamespace(namespace string) (util.NetInfo, error)
-	GetNetwork(networkName string) (util.NetInfo, error)
+	GetNetwork(networkName string) util.NetInfo
 	// DoWithLock takes care of locking and unlocking while iterating over all role primary user defined networks.
 	DoWithLock(f func(network util.NetInfo) error) error
 	GetActiveNetworkNamespaces(networkName string) ([]string, error)
@@ -34,16 +34,66 @@ func Default() Controller {
 	return def
 }
 
-// New builds a new Controller. It's aware of networks configured in the system,
-// gathers relevant information about them for the project and handles the
-// lifecycle of their corresponding network controllers.
-func New(
-	name string,
+// NewForCluster builds a controller for cluster manager
+func NewForCluster(
 	cm ControllerManager,
 	wf watchFactory,
 	recorder record.EventRecorder,
 ) (Controller, error) {
-	return newController(name, cm, wf, recorder)
+	return new(
+		"clustermanager-nad-controller",
+		"",
+		"",
+		cm,
+		wf,
+		recorder,
+	)
+}
+
+// NewForZone builds a controller for zone manager
+func NewForZone(
+	zone string,
+	cm ControllerManager,
+	wf watchFactory,
+) (Controller, error) {
+	return new(
+		"zone-nad-controller",
+		zone,
+		"",
+		cm,
+		wf,
+		nil,
+	)
+}
+
+// NewForNode builds a controller for node manager
+func NewForNode(
+	node string,
+	cm ControllerManager,
+	wf watchFactory,
+) (Controller, error) {
+	return new(
+		"node-nad-controller",
+		"",
+		node,
+		cm,
+		wf,
+		nil,
+	)
+}
+
+// New builds a new Controller. It's aware of networks configured in the system,
+// gathers relevant information about them for the project and handles the
+// lifecycle of their corresponding network controllers.
+func new(
+	name string,
+	zone string,
+	node string,
+	cm ControllerManager,
+	wf watchFactory,
+	recorder record.EventRecorder,
+) (Controller, error) {
+	return newController(name, zone, node, cm, wf, recorder)
 }
 
 // ControllerManager manages controllers. Needs to be provided in order to build
@@ -51,6 +101,7 @@ func New(
 // case it has clean-up of it's own to do.
 type ControllerManager interface {
 	NewNetworkController(netInfo util.NetInfo) (NetworkController, error)
+	GetDefaultNetworkController() ReconcilableNetworkController
 	CleanupStaleNetworks(validNetworks ...util.NetInfo) error
 }
 
@@ -101,8 +152,8 @@ func (nm defaultNetworkManager) GetActiveNetworkForNamespace(string) (util.NetIn
 	return &util.DefaultNetInfo{}, nil
 }
 
-func (nm defaultNetworkManager) GetNetwork(networkName string) (util.NetInfo, error) {
-	return &util.DefaultNetInfo{}, nil
+func (nm defaultNetworkManager) GetNetwork(networkName string) util.NetInfo {
+	return &util.DefaultNetInfo{}
 }
 
 func (nm defaultNetworkManager) DoWithLock(f func(network util.NetInfo) error) error {

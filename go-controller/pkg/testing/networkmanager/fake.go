@@ -36,6 +36,10 @@ func (fcm *FakeControllerManager) CleanupStaleNetworks(validNetworks ...util.Net
 	return nil
 }
 
+func (fcm *FakeControllerManager) GetDefaultNetworkController() networkmanager.ReconcilableNetworkController {
+	return nil
+}
+
 type FakeNetworkManager struct {
 	// namespace -> netInfo
 	PrimaryNetworks map[string]util.NetInfo
@@ -52,13 +56,13 @@ func (fnm *FakeNetworkManager) GetActiveNetworkForNamespace(namespace string) (u
 	return &util.DefaultNetInfo{}, nil
 }
 
-func (nc *FakeNetworkManager) GetNetwork(networkName string) (util.NetInfo, error) {
+func (nc *FakeNetworkManager) GetNetwork(networkName string) util.NetInfo {
 	for _, ni := range nc.PrimaryNetworks {
 		if ni.GetNetworkName() == networkName {
-			return ni, nil
+			return ni
 		}
 	}
-	return &util.DefaultNetInfo{}, nil
+	return &util.DefaultNetInfo{}
 }
 
 func (nc *FakeNetworkManager) GetActiveNetworkNamespaces(networkName string) ([]string, error) {

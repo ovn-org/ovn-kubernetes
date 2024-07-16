@@ -1422,9 +1422,9 @@ func (e *EgressIPController) syncPodAssignmentCache(egressIPCache egressIPCache)
 					item.ExternalIDs[libovsdbops.OwnerControllerKey.String()] == getNetworkControllerName(networkName) &&
 					strings.HasPrefix(item.ExternalIDs[libovsdbops.ObjectNameKey.String()], egressIPName+dbIDEIPNamePodDivider)
 			}
-			ni, err := e.networkManager.GetNetwork(networkName)
-			if err != nil {
-				return fmt.Errorf("failed to get active network for network name %q: %v", networkName, err)
+			ni := e.networkManager.GetNetwork(networkName)
+			if ni == nil {
+				return fmt.Errorf("failed to get active network for network name %q", networkName)
 			}
 			reRoutePolicies, err := libovsdbops.FindALogicalRouterPoliciesWithPredicate(e.nbClient, ni.GetNetworkScopedClusterRouterName(), p1)
 			if err != nil {
@@ -1625,8 +1625,8 @@ func (e *EgressIPController) syncStaleSNATRules(egressIPCache egressIPCache) err
 			klog.Infof("syncStaleSNATRules will delete %s due to logical ip: %v", egressIPName, item)
 			return true
 		}
-		ni, err := e.networkManager.GetNetwork(types.DefaultNetworkName)
-		if err != nil {
+		ni := e.networkManager.GetNetwork(types.DefaultNetworkName)
+		if ni == nil {
 			klog.Errorf("syncStaleSNATRules failed to find default network in networks cache")
 			return false
 		}
@@ -1960,17 +1960,17 @@ func (e *EgressIPController) addEgressNode(node *corev1.Node) error {
 				}
 				return nil
 			}
-			ni, err := e.networkManager.GetNetwork(types.DefaultNetworkName)
-			if err != nil {
+			ni := e.networkManager.GetNetwork(types.DefaultNetworkName)
+			if ni == nil {
 				return fmt.Errorf("failed to get default network from NAD controller")
 			}
-			if err = processNetworkFn(ni); err != nil {
+			if err := processNetworkFn(ni); err != nil {
 				return fmt.Errorf("failed to process default network: %v", err)
 			}
 			if !util.IsNetworkSegmentationSupportEnabled() {
 				return nil
 			}
-			if err = e.networkManager.DoWithLock(processNetworkFn); err != nil {
+			if err := e.networkManager.DoWithLock(processNetworkFn); err != nil {
 				return fmt.Errorf("failed to process all user defined networks route to external: %v", err)
 			}
 		}
@@ -1988,10 +1988,7 @@ func (e *EgressIPController) addEgressNode(node *corev1.Node) error {
 // continue to do so without any issues.
 func (e *EgressIPController) initClusterEgressPolicies(nodes []interface{}) error {
 	// Init default network
-	defaultNetInfo, err := e.networkManager.GetNetwork(types.DefaultNetworkName)
-	if err != nil {
-		return fmt.Errorf("failed to get default network: %v", err)
-	}
+	defaultNetInfo := e.networkManager.GetNetwork(types.DefaultNetworkName)
 	subnets := util.GetAllClusterSubnetsFromEntries(defaultNetInfo.Subnets())
 	if err := InitClusterEgressPolicies(e.nbClient, e.addressSetFactory, defaultNetInfo, subnets, e.controllerName); err != nil {
 		return fmt.Errorf("failed to initialize networks cluster logical router egress policies for the default network: %v", err)
@@ -2408,7 +2405,7 @@ func (e *EgressIPController) addExternalGWPodSNATOps(ni util.NetInfo, ops []ovsd
 			return nil, nil // nothing to do.
 		}
 
-		if util.IsPodNetworkAdvertisedAtNode(e, pod.Spec.NodeName) {
+		if util.IsPodNetworkAdvertisedAtNode(ni, pod.Spec.NodeName) {
 			// network is advertised so don't setup the SNAT
 			return ops, nil
 		}
@@ -3045,12 +3042,9 @@ func createDefaultReRouteQoSRuleOps(nbClient libovsdbclient.Client, addressSetFa
 func (e *EgressIPController) ensureDefaultNoRerouteQoSRules(nodeName string) error {
 	e.nodeUpdateMutex.Lock()
 	defer e.nodeUpdateMutex.Unlock()
-	defaultNetInfo, err := e.networkManager.GetNetwork(types.DefaultNetworkName)
-	if err != nil {
-		return fmt.Errorf("failed to get default network from NAD controller: %v", err)
-	}
+	defaultNetInfo := e.networkManager.GetNetwork(types.DefaultNetworkName)
 	var ops []libovsdb.Operation
-	ops, err = e.ensureDefaultNoReRouteQosRulesForNode(defaultNetInfo, nodeName, ops)
+	ops, err := e.ensureDefaultNoReRouteQosRulesForNode(defaultNetInfo, nodeName, ops)
 	if err != nil {
 		return fmt.Errorf("failed to process default network: %v", err)
 	}
@@ -3150,11 +3144,8 @@ func (e *EgressIPController) ensureDefaultNoRerouteNodePolicies() error {
 	defer e.nodeUpdateMutex.Unlock()
 	nodeLister := listers.NewNodeLister(e.watchFactory.NodeInformer().GetIndexer())
 	// ensure default network is processed
-	defaultNetInfo, err := e.networkManager.GetNetwork(types.DefaultNetworkName)
-	if err != nil {
-		return fmt.Errorf("failed to get default network: %v", err)
-	}
-	err = ensureDefaultNoRerouteNodePolicies(e.nbClient, e.addressSetFactory, defaultNetInfo.GetNetworkName(), defaultNetInfo.GetNetworkScopedClusterRouterName(),
+	defaultNetInfo := e.networkManager.GetNetwork(types.DefaultNetworkName)
+	err := ensureDefaultNoRerouteNodePolicies(e.nbClient, e.addressSetFactory, defaultNetInfo.GetNetworkName(), defaultNetInfo.GetNetworkScopedClusterRouterName(),
 		e.controllerName, nodeLister, e.v4, e.v6)
 	if err != nil {
 		return fmt.Errorf("failed to ensure default no reroute policies for nodes for default network: %v", err)

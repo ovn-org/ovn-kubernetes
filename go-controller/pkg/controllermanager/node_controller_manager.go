@@ -59,6 +59,10 @@ func (ncm *NodeControllerManager) NewNetworkController(nInfo util.NetInfo) (netw
 	return nil, fmt.Errorf("topology type %s not supported", topoType)
 }
 
+func (ncm *NodeControllerManager) GetDefaultNetworkController() networkmanager.ReconcilableNetworkController {
+	return ncm.defaultNodeNetworkController
+}
+
 // CleanupStaleNetworks cleans up all stale entities giving list of all existing secondary network controllers
 func (ncm *NodeControllerManager) CleanupStaleNetworks(validNetworks ...util.NetInfo) error {
 	if !util.IsNetworkSegmentationSupportEnabled() {
@@ -102,7 +106,8 @@ func (ncm *NodeControllerManager) newCommonNetworkControllerInfo() *node.CommonN
 // (2) primary user defined networks is enabled (all modes)
 func isNetworkManagerRequiredForNode() bool {
 	return (config.OVNKubernetesFeature.EnableMultiNetwork && config.OvnKubeNode.Mode == ovntypes.NodeModeDPU) ||
-		util.IsNetworkSegmentationSupportEnabled()
+		util.IsNetworkSegmentationSupportEnabled() ||
+		util.IsRouteAdvertisementsEnabled()
 }
 
 // NewNodeControllerManager creates a new OVN controller manager to manage all the controller for all networks
@@ -121,10 +126,11 @@ func NewNodeControllerManager(ovnClient *util.OVNClientset, wf factory.NodeWatch
 
 	// need to configure OVS interfaces for Pods on secondary networks in the DPU mode
 	// need to start NAD controller on node side for programming gateway pieces for UDNs
+	// need to start NAD controller on node side for VRF awareness with BGP
 	var err error
 	ncm.networkManager = networkmanager.Default()
 	if isNetworkManagerRequiredForNode() {
-		ncm.networkManager, err = networkmanager.New("node-controller-manager", ncm, wf, nil)
+		ncm.networkManager, err = networkmanager.NewForNode(name, ncm, wf)
 		if err != nil {
 			return nil, err
 		}

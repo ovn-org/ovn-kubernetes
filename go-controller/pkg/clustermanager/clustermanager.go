@@ -88,7 +88,7 @@ func NewClusterManager(ovnClient *util.OVNClusterManagerClientset, wf *factory.W
 			return nil, err
 		}
 
-		cm.networkManager, err = networkmanager.New("cluster-manager", cm.secondaryNetClusterManager, wf, recorder)
+		cm.networkManager, err = networkmanager.NewForCluster(cm.secondaryNetClusterManager, wf, recorder)
 		if err != nil {
 			return nil, err
 		}

@@ -126,6 +126,10 @@ func findAllSecondaryNetworkLogicalEntities(nbClient libovsdbclient.Client) ([]*
 	return nodeSwitches, clusterRouters, nil
 }
 
+func (cm *ControllerManager) GetDefaultNetworkController() networkmanager.ReconcilableNetworkController {
+	return cm.defaultNetworkController
+}
+
 func (cm *ControllerManager) CleanupStaleNetworks(validNetworks ...util.NetInfo) error {
 	existingNetworksMap := map[string]string{}
 	for _, network := range validNetworks {
@@ -214,11 +218,12 @@ func NewControllerManager(ovnClient *util.OVNClientset, wf *factory.WatchFactory
 	var err error
 	cm.networkManager = networkmanager.Default()
 	if config.OVNKubernetesFeature.EnableMultiNetwork {
-		cm.networkManager, err = networkmanager.New("controller-manager", cm, wf, nil)
+		cm.networkManager, err = networkmanager.NewForZone(config.Default.Zone, cm, wf)
 		if err != nil {
 			return nil, err
 		}
 	}
+
 	return cm, nil
 }
 
@@ -403,13 +408,6 @@ func (cm *ControllerManager) Start(ctx context.Context) error {
 		}
 	}
 
-	// nadController is nil if multi-network is disabled
-	if cm.networkManager != nil {
-		if err = cm.networkManager.Start(); err != nil {
-			return fmt.Errorf("failed to start NAD Controller :%v", err)
-		}
-	}
-
 	var observabilityManager *observability.Manager
 	if config.OVNKubernetesFeature.EnableObservability {
 		observabilityManager = observability.NewManager(cm.nbClient)
@@ -437,6 +435,13 @@ func (cm *ControllerManager) Start(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to init default network controller: %v", err)
 	}
+
+	if cm.networkManager != nil {
+		if err = cm.networkManager.Start(); err != nil {
+			return fmt.Errorf("failed to start NAD Controller :%v", err)
+		}
+	}
+
 	err = cm.defaultNetworkController.Start(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to start default network controller: %v", err)
