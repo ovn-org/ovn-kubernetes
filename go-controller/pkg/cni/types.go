@@ -168,7 +168,7 @@ type PodRequest struct {
 	deviceInfo nadapi.DeviceInfo
 }
 
-type podRequestFunc func(request *PodRequest, clientset *ClientSet, kubeAuth *KubeAPIAuth, nadController *nad.NetAttachDefinitionController) ([]byte, error)
+type podRequestFunc func(request *PodRequest, clientset *ClientSet, kubeAuth *KubeAPIAuth, nadController nad.NADController) ([]byte, error)
 type getCNIResultFunc func(request *PodRequest, getter PodInfoGetter, podInterfaceInfo *PodInterfaceInfo) (*current.Result, error)
 
 type PodInfoGetter interface {
@@ -195,5 +195,5 @@ type Server struct {
 	handlePodRequestFunc podRequestFunc
 	clientSet            *ClientSet
 	kubeAuth             *KubeAPIAuth
-	nadController        *nad.NetAttachDefinitionController
+	nadController        nad.NADController
 }

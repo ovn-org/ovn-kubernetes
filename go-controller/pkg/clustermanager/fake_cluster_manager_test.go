@@ -90,7 +90,8 @@ func (o *FakeClusterManager) init() {
 		gomega.Expect(err).ToNot(gomega.HaveOccurred())
 	}
 	if util.IsNetworkSegmentationSupportEnabled() {
-		nadController := &nad.NetAttachDefinitionController{}
+		nadController, err := nad.NewClusterNADController("test", nil, o.watcher, nil)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		o.epsMirror, err = endpointslicemirror.NewController(o.fakeClient, o.watcher, nadController)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
