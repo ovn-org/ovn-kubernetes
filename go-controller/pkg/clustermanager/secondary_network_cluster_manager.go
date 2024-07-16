@@ -103,6 +103,10 @@ func (sncm *secondaryNetworkClusterManager) Stop() {
 	sncm.nadController.Stop()
 }
 
+func (cm *secondaryNetworkClusterManager) GetDefaultNetworkController() nad.ReconcilableNetworkController {
+	return nil
+}
+
 // NewNetworkController implements the networkAttachDefController.NetworkControllerManager
 // interface function. This function is called by the net-attach-def controller when
 // a secondary network is created.
