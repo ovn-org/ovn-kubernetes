@@ -34,7 +34,7 @@ func (oc *DefaultNetworkController) gatewayCleanup(nodeName string) error {
 	for _, gwIPAddr := range gwIPAddrs {
 		nextHops = append(nextHops, gwIPAddr.IP)
 	}
-	oc.staticRouteCleanup(nextHops)
+	staticRouteCleanup(oc.nbClient, nextHops)
 	oc.policyRouteCleanup(nextHops)
 
 	// Remove the patch port that connects join switch to gateway router
@@ -104,7 +104,7 @@ func (oc *DefaultNetworkController) delPbrAndNatRules(nodeName string, lrpTypes 
 	oc.removeLRPolicies(nodeName, lrpTypes)
 }
 
-func (oc *DefaultNetworkController) staticRouteCleanup(nextHops []net.IP) {
+func staticRouteCleanup(nbClient libovsdbclient.Client, nextHops []net.IP) {
 	ips := sets.Set[string]{}
 	for _, nextHop := range nextHops {
 		ips.Insert(nextHop.String())
@@ -112,7 +112,7 @@ func (oc *DefaultNetworkController) staticRouteCleanup(nextHops []net.IP) {
 	p := func(item *nbdb.LogicalRouterStaticRoute) bool {
 		return ips.Has(item.Nexthop)
 	}
-	err := libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicate(oc.nbClient, types.OVNClusterRouter, p)
+	err := libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicate(nbClient, types.OVNClusterRouter, p)
 	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
 		klog.Errorf("Failed to delete static route for nexthops %+v: %v", ips.UnsortedList(), err)
 	}

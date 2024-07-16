@@ -15,6 +15,7 @@ import (
 	ipallocator "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip"
 	subnetipallocator "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip/subnet"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kubevirt"
 	logicalswitchmanager "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -283,8 +284,8 @@ func (bnc *BaseNetworkController) deletePodLogicalPort(pod *kapi.Pod, portInfo *
 // findPodWithIPAddresses finds any pods with the same IPs in a running state on the cluster
 // If nodeName is provided, pods only belonging to the same node will be checked, unless this pod has
 // potentially live migrated.
-func (bnc *BaseNetworkController) findPodWithIPAddresses(needleIPs []net.IP, nodeName string) (*kapi.Pod, error) {
-	allPods, err := bnc.watchFactory.GetAllPods()
+func findPodWithIPAddresses(watchFactory *factory.WatchFactory, netInfo util.NetInfo, needleIPs []net.IP, nodeName string) (*kapi.Pod, error) {
+	allPods, err := watchFactory.GetAllPods()
 	if err != nil {
 		return nil, fmt.Errorf("unable to get pods: %w", err)
 	}
@@ -300,12 +301,12 @@ func (bnc *BaseNetworkController) findPodWithIPAddresses(needleIPs []net.IP, nod
 		// This specifically speeds up a case where a pod may have been annotated by ovnkube-controller, but has not yet
 		// returned from CNI ADD. In that case the GetPodIPsOfNetwork would unmarshal the annotation and take a perf
 		// hit for no reason (since the IP cannot be in the same subnet as what we are looking for).
-		if bnc.TopologyType() == ovntypes.Layer3Topology && !kubevirt.IsPodLiveMigratable(p) && len(nodeName) > 0 && nodeName != p.Spec.NodeName {
+		if netInfo.TopologyType() == ovntypes.Layer3Topology && !kubevirt.IsPodLiveMigratable(p) && len(nodeName) > 0 && nodeName != p.Spec.NodeName {
 			continue
 		}
 
 		// check if the pod addresses match in the OVN annotation
-		haystackPodAddrs, err := util.GetPodIPsOfNetwork(p, bnc.NetInfo)
+		haystackPodAddrs, err := util.GetPodIPsOfNetwork(p, netInfo)
 		if err != nil {
 			continue
 		}
@@ -329,7 +330,7 @@ func (bnc *BaseNetworkController) canReleasePodIPs(podIfAddrs []*net.IPNet, node
 		needleIPs = append(needleIPs, podIPNet.IP)
 	}
 
-	collidingPod, err := bnc.findPodWithIPAddresses(needleIPs, nodeName)
+	collidingPod, err := findPodWithIPAddresses(bnc.watchFactory, bnc.NetInfo, needleIPs, nodeName)
 	if err != nil {
 		return false, fmt.Errorf("unable to determine if pod IPs: %#v are in use by another pod :%w", podIfAddrs, err)
 
