@@ -1,31 +1,81 @@
 # Multihoming
-A K8s pod with more than one network interface is said to be multi-homed. The
-[Network Plumbing Working Group](https://github.com/k8snetworkplumbingwg/multi-net-spec)
-has put forward a [standard](https://github.com/k8snetworkplumbingwg/multi-net-spec)
-describing how to specify the configurations for additional network interfaces.
+## Introduction
+Multihoming allows the configuration of secondary-network interfaces for K8s pods.
+OVN-Kubernetes secondary-network has three configurable topologies: layer 3, layer 2, or localnet.
 
-There are several delegating plugins or meta-plugins (Multus, Genie)
-implementing this standard.
+- A layer 3 topology is a simplification of the topology for the cluster default network - but without egress.
+- A layer 2 topology provides an isolated (no egress) cluster-wide layer2 network providing east-west traffic to the
+  cluster workloads.
+- A localnet topology is based on layer 2 topology, but also allows connecting to an existent (configured) physical
+  network to provide north-south traffic to the workloads.
 
-After a pod is scheduled on a particular Kubernetes node, kubelet will invoke
-the delegating plugin to prepare the pod for networking. This meta-plugin will
-then invoke the CNI responsible for setting up the pod's default cluster
-network, and afterwards it iterates the list of additional attachments on the
-pod, invoking the corresponding delegate CNI implementing the logic to attach
-the pod to that particular network.
+For layer 2 and localnet topologies, multihoming also allows IP features on secondary interfaces such as static IP
+allocation and persistent IP addresses for virtualization workloads.
 
-## Configuring secondary networks
 To allow pods to have multiple network interfaces, the user must provide the
 configurations specifying how to connect to these networks; these
-configurations are defined in a CRD named `NetworkAttachmentDefinition`.
+configurations are defined in a CRD named `NetworkAttachmentDefinition`, defined by
+the [Kubernetes Network Custom Resource Definition De-facto Standard](https://github.com/k8snetworkplumbingwg/multi-net-spec).
 
-Below you will find example attachment configurations for each of the current
-topologies OVN-K allows for secondary networks.
+> [!NOTE]
+> layer 2 and layer 3 topologies are overlays - thus, they do not need **any** previous physical network configuration.
 
-**NOTE**:
-- networks are **not** namespaced - i.e. creating multiple
-  `network-attachment-definition`s with different configurations pointing at the
-  same network (same `NetConf.Name` attribute) is **not** supported.
+## Prerequisites
+- [multus-cni](https://github.com/k8snetworkplumbingwg/multus-cni)
+
+## Motivation
+Multihoming is essential when you need more than one network interface on your pods. This can be useful for various
+use cases, such as virtual network functions (VNFs), firewalls, or virtualization (virt) where the default
+cluster network might not be suitable.
+
+In OVN-K, multihoming supports several virt-specific features. These
+include [persistent IP addresses for virtualization](#persistent-ip-addresses-for-virtualization-workloads) workloads,
+ensuring that VMs retain their IP addresses even when they move across nodes. This enhances workload mobility and
+minimizes disruptions.
+
+Multihoming is also compatible with the [multi-network policy](multi-network-policies.md) API, which can provide further security rules on the
+traffic.
+
+## User-Stories
+- As a Cluster-Admin, I want to configure secondary networks for specific pods so that I can enable
+  specialized/sensitive workloads with distinct network requirements.
+- As a Cluster-Admin, I want to facilitate seamless live migration of VMs within so that I can maintain established TCP
+  connections and preserve VM IP configurations during migration.
+
+## User-Cases
+- cluster-wide overlay network on layer 2:
+  In this case example, two VMs from different namespaces - VMA and VMC - are connected over a secondary-network.
+  VMB is not exposed to this traffic.
+  ![multi-homing-use-case-layer2](multi-homing-use-case-layer2.png)
+- cluster-wide localnet network:
+  In this case example, Pod and VM workloads accessing a relational DB reachable via the physical network (i.e. deployed
+  outside Kubernetes).
+  ![multi-homing-use-case-localnet](multi-homing-use-case-localnet.png)
+
+## How to enable this feature on an OVN-Kubernetes cluster?
+The `multi-network` feature must be enabled in the OVN-Kubernetes configuration.
+Please use the `Feature Config` option `enable-multi-network` under `OVNKubernetesFeatureConfig` config to enable it.
+
+## Workflow Description
+After a pod is scheduled on a particular Kubernetes node, kubelet will invoke
+the meta-plugin installed on the cluster (such as [Multus](https://github.com/k8snetworkplumbingwg/multus-cni)) to
+prepare the pod for networking.
+The meta-plugin will invoke the CNI responsible for setting up the pod's default cluster network.
+After that, the meta-plugin iterates the list of secondary networks, invoking the corresponding CNI implementing
+the logic to attach the pod to that particular secondary-network. The CNI will use the details specified on
+the `network-attachment-definition` in order to do that.
+
+> [!NOTE]
+> networks are **not** namespaced - i.e. creating multiple `network-attachment-definition`s with different
+  configurations pointing at the same network (same `NetConf.Name` attribute) is **not** supported.
+
+## Implementation Details
+## User facing API Changes
+There are no user facing API Changes.
+
+## OVN-Kubernetes Implementation Details
+Below you will find example attachment configurations for each of the current topologies OVN-K allows for secondary
+networks.
 
 ### Routed - layer 3 - topology
 This topology is a simplification of the topology for the cluster default
@@ -47,7 +97,7 @@ spec:
   config: |2
     {
             "cniVersion": "1.0.0",
-            "name": "l3-network",
+            "name": "tenantblue",
             "type": "ovn-k8s-cni-overlay",
             "topology":"layer3",
             "subnets": "10.128.0.0/16/24",
@@ -56,7 +106,8 @@ spec:
     }
 ```
 
-#### Network Configuration reference
+#### Network Configuration reference:
+
 - `name` (string, required): the name of the network. This attribute is **not** namespaced.
 - `type` (string, required): "ovn-k8s-cni-overlay".
 - `topology` (string, required): "layer3".
@@ -66,11 +117,13 @@ spec:
 - `netAttachDefName` (string, required): must match `<namespace>/<net-attach-def name>`
   of the surrounding object.
 
-**NOTE**
-- the `subnets` attribute indicates both the subnet across the cluster, and per node.
+> [!NOTE]
+> the `subnets` attribute indicates both the subnet across the cluster, and per node.
   The example above means you have a /16 subnet for the network, but each **node** has
   a /24 subnet.
-- routed - layer3 - topology networks **only** allow for east/west traffic.
+
+> [!NOTE]
+> routed - layer3 - topology networks **only** allow for east/west traffic.
 
 ### Switched - layer 2 - topology
 This topology interconnects the workloads via a cluster-wide logical switch.
@@ -88,7 +141,7 @@ spec:
   config: |2
     {
             "cniVersion": "1.0.0",
-            "name": "l2-network",
+            "name": "tenantyellow",
             "type": "ovn-k8s-cni-overlay",
             "topology":"layer2",
             "subnets": "10.100.200.0/24",
@@ -111,15 +164,17 @@ spec:
   These IPs will be removed from the assignable IP pool, and never handed over
   to the pods.
 - `allowPersistentIPs` (boolean, optional): persist the OVN Kubernetes assigned
-   IP addresses in a `ipamclaims.k8s.cni.cncf.io` object. This IP addresses will
-   be reused by other pods if requested. Useful for KubeVirt VMs. Only makes
-   sense if the `subnets` attribute is also defined.
+  IP addresses in a `ipamclaims.k8s.cni.cncf.io` object. This IP addresses will
+  be reused by other pods if requested. Useful for KubeVirt VMs. Only makes
+  sense if the `subnets` attribute is also defined.
 
-**NOTE**
-- when the subnets attribute is omitted, the logical switch implementing the
+> [!NOTE]
+> when the subnets attribute is omitted, the logical switch implementing the
   network will only provide layer 2 communication, and the users must configure
   IPs for the pods. Port security will only prevent MAC spoofing.
-- switched - layer2 - secondary networks **only** allow for east/west traffic.
+
+> [!NOTE]
+> switched - layer2 - secondary networks **only** allow for east/west traffic.
 
 ### Switched - localnet - topology
 This topology interconnects the workloads via a cluster-wide logical switch to
@@ -138,7 +193,7 @@ spec:
   config: |2
     {
             "cniVersion": "1.0.0",
-            "name": "localnet-network",
+            "name": "tenantblack",
             "type": "ovn-k8s-cni-overlay",
             "topology":"localnet",
             "subnets": "202.10.130.112/28",
@@ -166,71 +221,17 @@ localnet network.
   to the pods.
 - `vlanID` (integer, optional): assign VLAN tag. Defaults to none.
 - `allowPersistentIPs` (boolean, optional): persist the OVN Kubernetes assigned
-   IP addresses in a `ipamclaims.k8s.cni.cncf.io` object. This IP addresses will
-   be reused by other pods if requested. Useful for KubeVirt VMs. Only makes
-   sense if the `subnets` attribute is also defined.
-- `physicalNetworkName` (string, optional): the name of the physical network to
-  which the OVN overlay will connect. When omitted, it will default to the value
-  of the localnet network `name`.
+  IP addresses in a `ipamclaims.k8s.cni.cncf.io` object. This IP addresses will
+  be reused by other pods if requested. Useful for KubeVirt VMs. Only makes
+  sense if the `subnets` attribute is also defined.
 
-**NOTE**
-- when the subnets attribute is omitted, the logical switch implementing the
+> [!NOTE]
+> when the subnets attribute is omitted, the logical switch implementing the
   network will only provide layer 2 communication, and the users must configure
   IPs for the pods. Port security will only prevent MAC spoofing.
 
-#### Sharing the same physical network mapping
-To prevent the admin from having to reconfigure the cluster nodes whenever they
-want to - let's say - add a VLAN, OVN-Kubernetes allows multiple network
-overlays to re-use the same physical network mapping.
-
-To do this, the cluster admin would provision two different networks (with
-different VLAN tags) using the **same** physical network name. Please check the
-example below for an example of this configuration:
-```yaml
----
-apiVersion: k8s.cni.cncf.io/v1
-kind: NetworkAttachmentDefinition
-metadata:
-  name: bluenet
-  namespace: test
-spec:
-  config: |
-    {
-            "cniVersion": "0.3.1",
-            "name": "tenantblue",
-            "type": "ovn-k8s-cni-overlay",
-            "topology": "localnet",
-            "netAttachDefName": "test/bluenet",
-            "vlanID": 4000,
-            "physicalNetworkName": "physnet"
-    }
----
-apiVersion: k8s.cni.cncf.io/v1
-kind: NetworkAttachmentDefinition
-metadata:
-  name: isolatednet
-  namespace: test
-spec:
-  config: |
-    {
-            "cniVersion": "0.3.1",
-            "name": "sales",
-            "type": "ovn-k8s-cni-overlay",
-            "topology": "localnet",
-            "netAttachDefName": "test/isolatednet",
-            "vlanID": 1234,
-            "physicalNetworkName": "physnet"
-    }
-```
-
-> [!WARNING]
-> Keep in mind OVN-Kubernetes does **not** validate the physical network
-> configurations in any way: the admin must ensure these configurations are
-> holistically healthy - e.g. the defined subnets do not overlap, the MTUs make
-> sense, etc.
-
-## Pod configuration
-The user must specify the secondary network attachments via the
+### Setting a secondary-network on the pod
+The user must specify the secondary-network attachments via the
 `k8s.v1.cni.cncf.io/networks` annotation.
 
 The following example provisions a pod with two secondary attachments, one for
@@ -256,8 +257,8 @@ spec:
 
 ### Setting static IP addresses on a pod
 The user can specify attachment parameters via
-[network-selection-elements](https://github.com/k8snetworkplumbingwg/network-attachment-definition-client/blob/63033d5c63d1cf56f924a5454c8f2ac444b6736d/pkg/apis/k8s.cni.cncf.io/v1/types.go#L137)
-, namely IP, MAC, and interface name.
+[network-selection-elements](https://github.com/k8snetworkplumbingwg/network-attachment-definition-client/blob/63033d5c63d1cf56f924a5454c8f2ac444b6736d/pkg/apis/k8s.cni.cncf.io/v1/types.go#L137),
+namely IP, MAC, and interface name.
 
 Refer to the following yaml for an example on how to request a static IP for a
 pod, a MAC address, and specify the pod interface name.
@@ -288,13 +289,15 @@ spec:
     name: agnhost-container
 ```
 
-**NOTE:**
-- the user can specify the IP address for a pod's secondary attachment
+> [!NOTE]
+> the user can specify the IP address for a pod's secondary attachment
   **only** for an L2 or localnet attachment.
-- specifying a static IP address for the pod is only possible when the
+
+> [!NOTE]
+> specifying a static IP address for the pod is only possible when the
   attachment configuration does **not** feature subnets.
 
-## Persistent IP addresses for virtualization workloads
+### Persistent IP addresses for virtualization workloads
 OVN-Kubernetes provides persistent IP addresses for virtualization workloads,
 allowing VMs to have the same IP addresses when they migrate, when they restart,
 and when they stop, the resume operation.
@@ -305,10 +308,11 @@ other network knobs, all NADs pointing to the same network **must** feature the
 same configuration - i.e. all NADs in the network must either allow (or reject)
 persistent IPs.
 
-The client application (which creates the VM, and manages its lifecycle) is
+The client application (which creates the
+VM, and manages its lifecycle) is
 responsible for creating the `ipamclaims.k8s.cni.cncf.io` object, and point to
-it in the network selection element upon pod creation; OVN-Kubernetes will then
-persist the IP addresses it has allocated the pod in the `IPAMClaim`. This flow
+it in the network selection element upon pod creation;
+OVN-Kubernetes will then persist the IP addresses it has allocated the pod in the `IPAMClaim`. This flow
 is portrayed in the sequence diagram below.
 
 ```mermaid
@@ -382,9 +386,15 @@ overridden with the following command line options:
 - dns-service-name
 
 ## Limitations
-OVN-K currently does **not** support:
+OVN-Kubernetes currently does **not** support:
+
 - the same attachment configured multiple times in the same pod - i.e.
   `k8s.v1.cni.cncf.io/networks: l3-network,l3-network` is invalid.
+- updates to the network-attachment-definition defining the topology. The user must remove all workloads attached to the
+  network in all relevant namespaces, then delete all NADs, then finally re-provision the "new"
+  network-attachment-definition.
 - updates to the network selection elements lists - i.e. `k8s.v1.cni.cncf.io/networks` annotation
+- external IPAM - i.e. the user can't define the IPAM attribute in the configuration. They must use the subnets
+  attribute.
 - IPv6 link local addresses not derived from the MAC address as described in RFC 2373, like  Privacy Extensions defined by RFC 4941, 
   or the Opaque Identifier generation methods defined in RFC 7217.
