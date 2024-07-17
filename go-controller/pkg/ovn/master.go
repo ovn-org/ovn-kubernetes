@@ -171,9 +171,17 @@ func (oc *DefaultNetworkController) syncGatewayLogicalNetwork(node *kapi.Node, l
 		clusterSubnets = append(clusterSubnets, clusterSubnet.CIDR)
 	}
 
-	gwLRPIPs, err = util.ParseNodeGatewayRouterLRPAddrs(node)
+	gwLRPIPs, err = util.ParseNodeGatewayRouterJoinAddrs(node, oc.GetNetworkName())
 	if err != nil {
-		return fmt.Errorf("failed to get join switch port IP address for node %s: %v", node.Name, err)
+		if util.IsAnnotationNotSetError(err) {
+			// FIXME(tssurya): This is present for backwards compatibility
+			// Remove me a few months from now
+			var err1 error
+			gwLRPIPs, err1 = util.ParseNodeGatewayRouterLRPAddrs(node)
+			if err1 != nil {
+				return fmt.Errorf("failed to get join switch port IP address for node %s: %v/%v", node.Name, err, err1)
+			}
+		}
 	}
 
 	enableGatewayMTU := util.ParseNodeGatewayMTUSupport(node)
@@ -779,34 +787,6 @@ func (oc *DefaultNetworkController) deleteOVNNodeEvent(node *kapi.Node) error {
 	oc.syncHostNetAddrSetFailed.Delete(node.Name)
 
 	return nil
-}
-
-// getOVNClusterRouterPortToJoinSwitchIPs returns the IP addresses for the
-// logical router port "GwRouterToJoinSwitchPrefix + OVNClusterRouter" from the
-// config.Gateway.V4JoinSubnet and  config.Gateway.V6JoinSubnet. This will
-// always be the first IP from these subnets.
-func (oc *DefaultNetworkController) getOVNClusterRouterPortToJoinSwitchIfAddrs() (gwLRPIPs []*net.IPNet, err error) {
-	joinSubnetsConfig := []string{}
-	if config.IPv4Mode {
-		joinSubnetsConfig = append(joinSubnetsConfig, config.Gateway.V4JoinSubnet)
-	}
-	if config.IPv6Mode {
-		joinSubnetsConfig = append(joinSubnetsConfig, config.Gateway.V6JoinSubnet)
-	}
-	for _, joinSubnetString := range joinSubnetsConfig {
-		_, joinSubnet, err := net.ParseCIDR(joinSubnetString)
-		if err != nil {
-			return nil, fmt.Errorf("error parsing join subnet string %s: %v", joinSubnetString, err)
-		}
-		joinSubnetBaseIP := utilnet.BigForIP(joinSubnet.IP)
-		ipnet := &net.IPNet{
-			IP:   utilnet.AddIPOffset(joinSubnetBaseIP, 1),
-			Mask: joinSubnet.Mask,
-		}
-		gwLRPIPs = append(gwLRPIPs, ipnet)
-	}
-
-	return gwLRPIPs, nil
 }
 
 // addUpdateHoNodeEvent reconsile ovn nodes when a hybrid overlay node is added.

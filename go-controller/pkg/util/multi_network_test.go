@@ -345,16 +345,18 @@ func TestParseNetconf(t *testing.T) {
             "topology": "layer2",
 			"subnets": "192.168.200.0/16",
 			"role": "primary",
-            "netAttachDefName": "ns1/nad1"
+            "netAttachDefName": "ns1/nad1",
+			"joinSubnet": "100.66.0.0/16,fd99::/64"
     }
 `,
 			expectedNetConf: &ovncnitypes.NetConf{
-				Topology: "layer2",
-				NADName:  "ns1/nad1",
-				MTU:      1400,
-				Role:     "primary",
-				Subnets:  "192.168.200.0/16",
-				NetConf:  cnitypes.NetConf{Name: "tenant-red", Type: "ovn-k8s-cni-overlay"},
+				Topology:   "layer2",
+				NADName:    "ns1/nad1",
+				MTU:        1400,
+				Role:       "primary",
+				Subnets:    "192.168.200.0/16",
+				NetConf:    cnitypes.NetConf{Name: "tenant-red", Type: "ovn-k8s-cni-overlay"},
+				JoinSubnet: "100.66.0.0/16,fd99::/64",
 			},
 		},
 		{
@@ -366,16 +368,18 @@ func TestParseNetconf(t *testing.T) {
             "topology": "layer3",
 			"subnets": "192.168.200.0/16",
 			"role": "primary",
-			"netAttachDefName": "ns1/nad1"
+			"netAttachDefName": "ns1/nad1",
+			"joinSubnet": "100.66.0.0/16"
     }
 `,
 			expectedNetConf: &ovncnitypes.NetConf{
-				Topology: "layer3",
-				NADName:  "ns1/nad1",
-				MTU:      1400,
-				Role:     "primary",
-				Subnets:  "192.168.200.0/16",
-				NetConf:  cnitypes.NetConf{Name: "tenant-red", Type: "ovn-k8s-cni-overlay"},
+				Topology:   "layer3",
+				NADName:    "ns1/nad1",
+				MTU:        1400,
+				Role:       "primary",
+				Subnets:    "192.168.200.0/16",
+				NetConf:    cnitypes.NetConf{Name: "tenant-red", Type: "ovn-k8s-cni-overlay"},
+				JoinSubnet: "100.66.0.0/16",
 			},
 		},
 		{
@@ -428,6 +432,20 @@ func TestParseNetconf(t *testing.T) {
 			expectedError: fmt.Errorf("unexpected network field \"role\" primary for \"localnet\" topology, " +
 				"localnet topology does not allow network roles to be set since its always a secondary network"),
 		},
+		{
+			desc: "invalid attachment definition for a localnet topology with joinsubnet provided",
+			inputNetAttachDefConfigSpec: `
+    {
+            "name": "tenantred",
+            "type": "ovn-k8s-cni-overlay",
+            "topology": "localnet",
+			"subnets": "192.168.200.0/16",
+			"joinSubnet": "100.66.0.0/16",
+            "netAttachDefName": "ns1/nad1"
+    }
+`,
+			expectedError: fmt.Errorf("localnet topology does not allow specifying join-subnet as services are not supported"),
+		},
 	}
 
 	for _, test := range tests {
@@ -447,6 +465,119 @@ func TestParseNetconf(t *testing.T) {
 				g.Expect(err).To(gomega.MatchError(test.expectedError.Error()))
 			} else {
 				g.Expect(ParseNetConf(networkAttachmentDefinition)).To(gomega.Equal(test.expectedNetConf))
+			}
+		})
+	}
+}
+
+func TestJoinSubnets(t *testing.T) {
+	type testConfig struct {
+		desc            string
+		inputNetConf    *ovncnitypes.NetConf
+		expectedSubnets []*net.IPNet
+	}
+
+	tests := []testConfig{
+		{
+			desc: "defaultNetInfo with default join subnet",
+			inputNetConf: &ovncnitypes.NetConf{
+				NetConf:  cnitypes.NetConf{Name: ovntypes.DefaultNetworkName},
+				Topology: ovntypes.Layer3Topology,
+			},
+			expectedSubnets: []*net.IPNet{
+				ovntest.MustParseIPNet(config.Gateway.V4JoinSubnet),
+				ovntest.MustParseIPNet(config.Gateway.V6JoinSubnet),
+			},
+		},
+		{
+			desc: "secondaryL3NetInfo with default join subnet",
+			inputNetConf: &ovncnitypes.NetConf{
+				NetConf:  cnitypes.NetConf{Name: "blue-network"},
+				Topology: ovntypes.Layer3Topology,
+			},
+			expectedSubnets: []*net.IPNet{
+				ovntest.MustParseIPNet(ovntypes.UserDefinedPrimaryNetworkJoinSubnetV4),
+				ovntest.MustParseIPNet(ovntypes.UserDefinedPrimaryNetworkJoinSubnetV6),
+			},
+		},
+		{
+			desc: "secondaryL2NetInfo with default join subnet",
+			inputNetConf: &ovncnitypes.NetConf{
+				NetConf:  cnitypes.NetConf{Name: "blue-network"},
+				Topology: ovntypes.Layer2Topology,
+			},
+			expectedSubnets: []*net.IPNet{
+				ovntest.MustParseIPNet(ovntypes.UserDefinedPrimaryNetworkJoinSubnetV4),
+				ovntest.MustParseIPNet(ovntypes.UserDefinedPrimaryNetworkJoinSubnetV6),
+			},
+		},
+		{
+			desc: "secondaryLocalNetInfo with nil join subnet",
+			inputNetConf: &ovncnitypes.NetConf{
+				NetConf:  cnitypes.NetConf{Name: "blue-network"},
+				Topology: ovntypes.LocalnetTopology,
+			},
+			expectedSubnets: nil,
+		},
+		{
+			desc: "secondaryL2NetInfo with user configured v4 join subnet",
+			inputNetConf: &ovncnitypes.NetConf{
+				NetConf:    cnitypes.NetConf{Name: "blue-network"},
+				Topology:   ovntypes.Layer2Topology,
+				JoinSubnet: "100.68.0.0/16",
+			},
+			expectedSubnets: []*net.IPNet{
+				ovntest.MustParseIPNet("100.68.0.0/16"),
+				ovntest.MustParseIPNet(ovntypes.UserDefinedPrimaryNetworkJoinSubnetV6), // given user only provided v4, we set v6 to default value
+			},
+		},
+		{
+			desc: "secondaryL3NetInfo with user configured v6 join subnet",
+			inputNetConf: &ovncnitypes.NetConf{
+				NetConf:    cnitypes.NetConf{Name: "blue-network"},
+				Topology:   ovntypes.Layer3Topology,
+				JoinSubnet: "2001:db8:abcd:1234::/64",
+			},
+			expectedSubnets: []*net.IPNet{
+				ovntest.MustParseIPNet(ovntypes.UserDefinedPrimaryNetworkJoinSubnetV4),
+				ovntest.MustParseIPNet("2001:db8:abcd:1234::/64"), // given user only provided v4, we set v6 to default value
+			},
+		},
+		{
+			desc: "secondaryL3NetInfo with user configured v4&&v6 join subnet",
+			inputNetConf: &ovncnitypes.NetConf{
+				NetConf:    cnitypes.NetConf{Name: "blue-network"},
+				Topology:   ovntypes.Layer3Topology,
+				JoinSubnet: "100.68.0.0/16,2001:db8:abcd:1234::/64",
+			},
+			expectedSubnets: []*net.IPNet{
+				ovntest.MustParseIPNet("100.68.0.0/16"),
+				ovntest.MustParseIPNet("2001:db8:abcd:1234::/64"), // given user only provided v4, we set v6 to default value
+			},
+		},
+		{
+			desc: "secondaryL2NetInfo with user configured empty join subnet value takes default value",
+			inputNetConf: &ovncnitypes.NetConf{
+				NetConf:    cnitypes.NetConf{Name: "blue-network"},
+				Topology:   ovntypes.Layer2Topology,
+				JoinSubnet: "",
+			},
+			expectedSubnets: []*net.IPNet{
+				ovntest.MustParseIPNet(ovntypes.UserDefinedPrimaryNetworkJoinSubnetV4),
+				ovntest.MustParseIPNet(ovntypes.UserDefinedPrimaryNetworkJoinSubnetV6), // given user only provided v4, we set v6 to default value
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.desc, func(t *testing.T) {
+			g := gomega.NewWithT(t)
+			netInfo, err := NewNetInfo(test.inputNetConf)
+			g.Expect(err).To(gomega.BeNil())
+			g.Expect(netInfo.JoinSubnets()).To(gomega.Equal(test.expectedSubnets))
+			if netInfo.TopologyType() != ovntypes.LocalnetTopology {
+				g.Expect(netInfo.JoinSubnetV4()).To(gomega.Equal(test.expectedSubnets[0]))
+				g.Expect(netInfo.JoinSubnetV6()).To(gomega.Equal(test.expectedSubnets[1]))
 			}
 		})
 	}

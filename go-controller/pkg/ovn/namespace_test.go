@@ -308,7 +308,8 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 			// be in the addressset yet, depending on if the host subnets annotation of the node exists in the informer cache. The addressset
 			// can only be deterministic when WatchNamespaces() handles this host network namespace.
 
-			gwLRPIPs, err := util.ParseNodeGatewayRouterLRPAddrs(&testNode)
+			gwLRPIPs, err := util.ParseNodeGatewayRouterJoinAddrs(&testNode, ovntypes.DefaultNetworkName)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			gomega.Expect(len(gwLRPIPs) != 0).To(gomega.BeTrue())
 
 			err = fakeOvn.controller.WatchNamespaces()

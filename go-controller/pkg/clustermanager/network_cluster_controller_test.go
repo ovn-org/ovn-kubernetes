@@ -54,6 +54,7 @@ var _ = ginkgo.Describe("Network Cluster Controller", func() {
 						ObjectMeta: metav1.ObjectMeta{
 							Name: "node1",
 							Annotations: map[string]string{
+								ovnNodeIDAnnotaton:         "3",
 								"k8s.ovn.org/node-subnets": "{\"default\":[\"10.128.0.0/24\", \"fd02:0:0:2::2895/64\"]}",
 							},
 						},
@@ -104,6 +105,9 @@ var _ = ginkgo.Describe("Network Cluster Controller", func() {
 					{
 						ObjectMeta: metav1.ObjectMeta{
 							Name: "node1",
+							Annotations: map[string]string{
+								ovnNodeIDAnnotaton: "3",
+							},
 						},
 					},
 				}
@@ -154,6 +158,7 @@ var _ = ginkgo.Describe("Network Cluster Controller", func() {
 							Name: "node1",
 							Annotations: map[string]string{
 								"k8s.ovn.org/node-subnets": "{\"default\":[\"10.128.0.0/24\", \"1.2.3.0/24\"]}",
+								ovnNodeIDAnnotaton:         "3",
 							},
 						},
 					},

@@ -443,19 +443,13 @@ func IsValidPodAnnotation(podAnnotation *PodAnnotation) bool {
 	return podAnnotation != nil && len(podAnnotation.MAC) > 0
 }
 
-func joinSubnetToRoute(isIPv6 bool, gatewayIP net.IP) PodRoute {
-	joinSubnet := config.Gateway.V4JoinSubnet
+func joinSubnetToRoute(netinfo NetInfo, isIPv6 bool, gatewayIP net.IP) PodRoute {
+	joinSubnet := netinfo.JoinSubnetV4()
 	if isIPv6 {
-		joinSubnet = config.Gateway.V6JoinSubnet
+		joinSubnet = netinfo.JoinSubnetV6()
 	}
-	_, subnet, err := net.ParseCIDR(joinSubnet)
-	if err != nil {
-		// Join subnet should have been validated already by config
-		panic(fmt.Sprintf("Failed to parse join subnet %q: %v", joinSubnet, err))
-	}
-
 	return PodRoute{
-		Dest:    subnet,
+		Dest:    joinSubnet,
 		NextHop: gatewayIP,
 	}
 }
@@ -506,6 +500,8 @@ func AddRoutesGatewayIP(
 				gatewayIPnet := GetNodeGatewayIfAddr(nodeSubnet)
 				// Ensure default service network traffic always goes to OVN
 				podAnnotation.Routes = append(podAnnotation.Routes, serviceCIDRToRoute(isIPv6, gatewayIPnet.IP)...)
+				// Ensure UDN join subnet traffic always goes to UDN LSP
+				podAnnotation.Routes = append(podAnnotation.Routes, joinSubnetToRoute(netinfo, isIPv6, gatewayIPnet.IP))
 				if network != nil && len(network.GatewayRequest) == 0 { // if specific default route for pod was not requested then add gatewayIP
 					podAnnotation.Gateways = append(podAnnotation.Gateways, gatewayIPnet.IP)
 				}
@@ -532,6 +528,8 @@ func AddRoutesGatewayIP(
 				}
 				// Ensure default service network traffic always goes to OVN
 				podAnnotation.Routes = append(podAnnotation.Routes, serviceCIDRToRoute(isIPv6, gatewayIPnet.IP)...)
+				// Ensure UDN join subnet traffic always goes to UDN LSP
+				podAnnotation.Routes = append(podAnnotation.Routes, joinSubnetToRoute(netinfo, isIPv6, gatewayIPnet.IP))
 				if network != nil && len(network.GatewayRequest) == 0 { // if specific default route for pod was not requested then add gatewayIP
 					podAnnotation.Gateways = append(podAnnotation.Gateways, gatewayIPnet.IP)
 				}
@@ -594,7 +592,7 @@ func AddRoutesGatewayIP(
 		}
 
 		// Ensure default join subnet traffic always goes to OVN
-		podAnnotation.Routes = append(podAnnotation.Routes, joinSubnetToRoute(isIPv6, gatewayIPnet.IP))
+		podAnnotation.Routes = append(podAnnotation.Routes, joinSubnetToRoute(netinfo, isIPv6, gatewayIPnet.IP))
 	}
 
 	return nil

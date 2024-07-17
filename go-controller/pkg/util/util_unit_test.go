@@ -13,6 +13,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/sets"
 
@@ -309,6 +310,10 @@ func TestGetActiveNetworkForNamespace(t *testing.T) {
 					CIDR:             ovntest.MustParseIPNet("100.128.0.0/16"),
 					HostSubnetLength: 24,
 				}},
+				joinSubnets: []*net.IPNet{
+					ovntest.MustParseIPNet(ovntypes.UserDefinedPrimaryNetworkJoinSubnetV4),
+					ovntest.MustParseIPNet(ovntypes.UserDefinedPrimaryNetworkJoinSubnetV6),
+				},
 			},
 		},
 		{
