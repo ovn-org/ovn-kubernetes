@@ -50,6 +50,8 @@ const (
 	EXTSwitchToGWRouterPrefix    = "etor-"
 	GWRouterToExtSwitchPrefix    = "rtoe-"
 	EgressGWSwitchPrefix         = "exgw-"
+	PatchPortPrefix              = "patch-"
+	PatchPortSuffix              = "-to-br-int"
 
 	NodeLocalSwitch = "node_local_switch"
 
@@ -105,6 +107,7 @@ const (
 	HybridOverlayReroutePriority          = 501
 	DefaultNoRereoutePriority             = 102
 	EgressSVCReroutePriority              = 101
+	EgressIPMarkPriority                  = 95
 	EgressIPReroutePriority               = 100
 	EgressIPRerouteQoSRulePriority        = 103
 	EgressLiveMigrationReroutePiority     = 10

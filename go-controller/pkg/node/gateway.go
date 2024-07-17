@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
@@ -36,6 +37,12 @@ type Gateway interface {
 	Reconcile() error
 }
 
+// TODO (dceara): better name?
+type SecondaryNetworkGateway interface {
+	AddNetwork(nInfo util.NetInfo, masqCTMark uint) error
+	DelNetwork(nInfo util.NetInfo) error
+}
+
 type gateway struct {
 	// loadBalancerHealthChecker is a health check server for load-balancer type services
 	loadBalancerHealthChecker informer.ServiceAndEndpointsEventHandler
@@ -44,17 +51,64 @@ type gateway struct {
 	// nodePortWatcherIptables is used in Shared GW mode to handle nodePort IPTable rules
 	nodePortWatcherIptables informer.ServiceEventHandler
 	// nodePortWatcher is used in Local+Shared GW modes to handle nodePort flows in shared OVS bridge
-	nodePortWatcher informer.ServiceAndEndpointsEventHandler
-	openflowManager *openflowManager
-	nodeIPManager   *addressManager
-	initFunc        func() error
-	readyFunc       func() (bool, error)
+	nodePortWatcher      informer.ServiceAndEndpointsEventHandler
+	openflowManager      *openflowManager
+	nodeIPManager        *addressManager
+	bridgeEIPAddrManager *bridgeEIPAddrManager
+	initFunc             func() error
+	readyFunc            func() (bool, error)
 
 	servicesRetryFramework *retry.RetryFramework
 
 	watchFactory *factory.WatchFactory // used for retry
 	stopChan     <-chan struct{}
 	wg           *sync.WaitGroup
+}
+
+// TODO(dceara): move?
+func (g *gateway) AddNetwork(nInfo util.NetInfo, masqCTMark uint) error {
+	if g.openflowManager != nil {
+		g.openflowManager.addNetwork(nInfo, masqCTMark)
+
+		waiter := newStartupWaiter()
+		readyFunc := func() (bool, error) {
+			netName := nInfo.GetNetworkName()
+			if err := setBridgeNetworkOfPorts(g.openflowManager.defaultBridge, netName); err != nil {
+				return false, err
+			}
+			if g.openflowManager.externalGatewayBridge != nil {
+				if err := setBridgeNetworkOfPorts(g.openflowManager.externalGatewayBridge, netName); err != nil {
+					return false, err
+				}
+			}
+			return true, nil
+		}
+		postFunc := func() error {
+			if err := g.Reconcile(); err != nil {
+				return err
+			}
+			return nil
+		}
+		waiter.AddWait(readyFunc, postFunc)
+		if err := waiter.Wait(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// TODO(dceara): move?
+func (g *gateway) DelNetwork(nInfo util.NetInfo) error {
+	if g.openflowManager != nil {
+		g.openflowManager.delNetwork(nInfo)
+
+		// TODO (dceara): Do we need to reconcile all flows? Is this heavy?
+		if err := g.Reconcile(); err != nil {
+			// TODO (dceara): handle error
+			return err
+		}
+	}
+	return nil
 }
 
 func (g *gateway) AddService(svc *kapi.Service) error {
@@ -212,7 +266,71 @@ func (g *gateway) DeleteEndpointSlice(epSlice *discovery.EndpointSlice) error {
 		}
 	}
 	return utilerrors.Join(errors...)
+}
 
+func (g *gateway) AddEgressIP(eip *egressipv1.EgressIP) error {
+	if !util.IsNetworkSegmentationSupportEnabled() || config.Gateway.Mode == config.GatewayModeDisabled {
+		return nil
+	}
+	isSyncRequired, err := g.bridgeEIPAddrManager.addEgressIP(eip)
+	if err != nil {
+		return err
+	}
+	if isSyncRequired {
+		if err = g.Reconcile(); err != nil {
+			return fmt.Errorf("failed to sync gateway: %v", err)
+		}
+		g.openflowManager.requestFlowSync()
+	}
+	return nil
+}
+
+func (g *gateway) UpdateEgressIP(oldEIP, newEIP *egressipv1.EgressIP) error {
+	if !util.IsNetworkSegmentationSupportEnabled() || config.Gateway.Mode == config.GatewayModeDisabled {
+		return nil
+	}
+	isSyncRequired, err := g.bridgeEIPAddrManager.updateEgressIP(oldEIP, newEIP)
+	if err != nil {
+		return err
+	}
+	if isSyncRequired {
+		if err = g.Reconcile(); err != nil {
+			return fmt.Errorf("failed to sync gateway: %v", err)
+		}
+		g.openflowManager.requestFlowSync()
+	}
+	return nil
+}
+
+func (g *gateway) DeleteEgressIP(eip *egressipv1.EgressIP) error {
+	if !util.IsNetworkSegmentationSupportEnabled() || config.Gateway.Mode == config.GatewayModeDisabled {
+		return nil
+	}
+	isSyncRequired, err := g.bridgeEIPAddrManager.deleteEgressIP(eip)
+	if err != nil {
+		return err
+	}
+	if isSyncRequired {
+		if err = g.Reconcile(); err != nil {
+			return fmt.Errorf("failed to sync gateway: %v", err)
+		}
+		g.openflowManager.requestFlowSync()
+	}
+	return nil
+}
+
+func (g *gateway) SyncEgressIP(eips []interface{}) error {
+	if !util.IsNetworkSegmentationSupportEnabled() || config.Gateway.Mode == config.GatewayModeDisabled {
+		return nil
+	}
+	if err := g.bridgeEIPAddrManager.syncEgressIP(eips); err != nil {
+		return err
+	}
+	if err := g.Reconcile(); err != nil {
+		return fmt.Errorf("failed to sync gateway: %v", err)
+	}
+	g.openflowManager.requestFlowSync()
+	return nil
 }
 
 func (g *gateway) Init(stopChan <-chan struct{}, wg *sync.WaitGroup) error {
@@ -240,11 +358,16 @@ func (g *gateway) Init(stopChan <-chan struct{}, wg *sync.WaitGroup) error {
 		if _, err = endpointSlicesRetryFramework.WatchResourceFiltered("", labels.NewSelector().Add(*req)); err != nil {
 			return fmt.Errorf("gateway init failed to start watching endpointslices: %v", err)
 		}
+		eipRetryFramework := g.newRetryFrameworkNode(factory.EgressIPType)
+		if _, err = eipRetryFramework.WatchResource(); err != nil {
+			return fmt.Errorf("gatewat init failed to start watching EgressIPs: %v", err)
+		}
 		return nil
 	}
 	if _, err = endpointSlicesRetryFramework.WatchResource(); err != nil {
 		return fmt.Errorf("gateway init failed to start watching endpointslices: %v", err)
 	}
+
 	return nil
 }
 
@@ -352,6 +475,7 @@ func gatewayInitInternal(nodeName, gwIntf, egressGatewayIntf string, gwNextHops 
 	l3GwConfig := util.L3GatewayConfig{
 		Mode:           config.Gateway.Mode,
 		ChassisID:      chassisID,
+		BridgeID:       gatewayBridge.bridgeName,
 		InterfaceID:    gatewayBridge.interfaceID,
 		MACAddress:     gatewayBridge.macAddress,
 		IPAddresses:    gatewayBridge.ips,
@@ -438,17 +562,84 @@ func (g *gateway) addAllServices() []error {
 	return errs
 }
 
+type bridgeNetConfiguration struct {
+	patchPort   string
+	ofPortPatch string
+	masqCTMark  string // TODO(dceara) just lazy because ctMarkOVN is also a string
+}
+
 type bridgeConfiguration struct {
 	sync.Mutex
+	nodeName    string
 	bridgeName  string
 	uplinkName  string
 	ips         []*net.IPNet
 	interfaceID string
 	macAddress  net.HardwareAddr
-	patchPort   string
-	ofPortPatch string
+	netConfig   map[string]*bridgeNetConfiguration
 	ofPortPhys  string
 	ofPortHost  string
+	eipMarkIPs  *markIPsCache
+}
+
+func (b *bridgeConfiguration) addBridgeNetConfig(nInfo util.NetInfo, masqCTMark uint) {
+	b.Lock()
+	defer b.Unlock()
+
+	netName := nInfo.GetNetworkName()
+	patchPort := nInfo.GetNetworkScopedPatchPortName(b.bridgeName, b.nodeName)
+
+	var netConfig *bridgeNetConfiguration
+	netConfig, found := b.netConfig[netName]
+	if !found {
+		netConfig = &bridgeNetConfiguration{
+			patchPort:  patchPort,
+			masqCTMark: fmt.Sprintf("0x%x", masqCTMark),
+		}
+
+		b.netConfig[netName] = netConfig
+	}
+
+	netConfig.patchPort = patchPort
+	netConfig.masqCTMark = fmt.Sprintf("0x%x", masqCTMark)
+}
+
+func (b *bridgeConfiguration) delBridgeNetConfig(nInfo util.NetInfo) {
+	b.Lock()
+	defer b.Unlock()
+
+	delete(b.netConfig, nInfo.GetNetworkName())
+}
+
+func (b *bridgeConfiguration) getBridgePorts() ([]bridgeNetConfiguration, string, string) {
+	b.Lock()
+	defer b.Unlock()
+	netConfigs := make([]bridgeNetConfiguration, len(b.netConfig))
+	for _, netConfig := range b.netConfig {
+		netConfigs = append(netConfigs, *netConfig)
+	}
+	return netConfigs, b.uplinkName, b.ofPortPhys
+}
+
+func setBridgeNetworkOfPortsInternal(netConfig *bridgeNetConfiguration) error {
+	ofportPatch, stderr, err := util.GetOVSOfPort("get", "Interface", netConfig.patchPort, "ofport")
+	if err != nil {
+		return fmt.Errorf("failed while waiting on patch port %q to be created by ovn-controller and "+
+			"while getting ofport. stderr: %q, error: %v", netConfig.patchPort, stderr, err)
+	}
+	netConfig.ofPortPatch = ofportPatch
+	return nil
+}
+
+func setBridgeNetworkOfPorts(bridge *bridgeConfiguration, netName string) error {
+	bridge.Lock()
+	defer bridge.Unlock()
+
+	netConfig, found := bridge.netConfig[netName]
+	if !found {
+		return fmt.Errorf("failed to find network %s configuration on bridge %s", netName, bridge.bridgeName)
+	}
+	return setBridgeNetworkOfPortsInternal(netConfig)
 }
 
 // updateInterfaceIPAddresses sets and returns the bridge's current ips
@@ -482,7 +673,16 @@ func (b *bridgeConfiguration) updateInterfaceIPAddresses(node *kapi.Node) ([]*ne
 }
 
 func bridgeForInterface(intfName, nodeName, physicalNetworkName string, gwIPs []*net.IPNet) (*bridgeConfiguration, error) {
-	res := bridgeConfiguration{}
+	defaultNetConfig := &bridgeNetConfiguration{
+		masqCTMark: ctMarkOVN,
+	}
+	res := bridgeConfiguration{
+		nodeName: nodeName,
+		netConfig: map[string]*bridgeNetConfiguration{
+			types.DefaultNetworkName: defaultNetConfig,
+		},
+		eipMarkIPs: newMarkIPsCache(),
+	}
 	gwIntf := intfName
 
 	if bridgeName, _, err := util.RunOVSVsctl("port-to-br", intfName); err == nil {
@@ -544,7 +744,7 @@ func bridgeForInterface(intfName, nodeName, physicalNetworkName string, gwIPs []
 
 	// the name of the patch port created by ovn-controller is of the form
 	// patch-<logical_port_name_of_localnet_port>-to-br-int
-	res.patchPort = "patch-" + res.bridgeName + "_" + nodeName + "-to-br-int"
+	defaultNetConfig.patchPort = (&util.DefaultNetInfo{}).GetNetworkScopedPatchPortName(res.bridgeName, nodeName)
 
 	// for DPU we use the host MAC address for the Gateway configuration
 	if config.OvnKubeNode.Mode == types.NodeModeDPU {

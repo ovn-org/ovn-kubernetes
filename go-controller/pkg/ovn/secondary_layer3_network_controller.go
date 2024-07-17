@@ -11,7 +11,9 @@ import (
 	"github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/pod"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/generator/udn"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
@@ -103,10 +105,11 @@ func (h *secondaryLayer3NetworkControllerEventHandler) AddResource(obj interface
 				_, nodeSync := h.oc.addNodeFailed.Load(node.Name)
 				_, clusterRtrSync := h.oc.nodeClusterRouterPortFailed.Load(node.Name)
 				_, syncMgmtPort := h.oc.mgmtPortFailed.Load(node.Name)
+				_, syncGw := h.oc.gatewaysFailed.Load(node.Name)
 				_, syncZoneIC := h.oc.syncZoneICFailed.Load(node.Name)
-				nodeParams = &nodeSyncs{syncNode: nodeSync, syncClusterRouterPort: clusterRtrSync, syncMgmtPort: syncMgmtPort, syncZoneIC: syncZoneIC}
+				nodeParams = &nodeSyncs{syncNode: nodeSync, syncClusterRouterPort: clusterRtrSync, syncMgmtPort: syncMgmtPort, syncGw: syncGw, syncZoneIC: syncZoneIC}
 			} else {
-				nodeParams = &nodeSyncs{syncNode: true, syncClusterRouterPort: true, syncMgmtPort: true, syncZoneIC: config.OVNKubernetesFeature.EnableInterconnect}
+				nodeParams = &nodeSyncs{syncNode: true, syncClusterRouterPort: true, syncMgmtPort: true, syncGw: true, syncZoneIC: config.OVNKubernetesFeature.EnableInterconnect}
 			}
 			if err := h.oc.addUpdateLocalNodeEvent(node, nodeParams); err != nil {
 				klog.Errorf("Node add failed for %s, will try again later: %v",
@@ -118,6 +121,41 @@ func (h *secondaryLayer3NetworkControllerEventHandler) AddResource(obj interface
 				return err
 			}
 		}
+	case factory.EgressIPType:
+		eIP := obj.(*egressipv1.EgressIP)
+		return h.oc.reconcileEgressIP(nil, eIP)
+
+	case factory.EgressIPNamespaceType:
+		namespace := obj.(*kapi.Namespace)
+		return h.oc.reconcileEgressIPNamespace(nil, namespace)
+
+	case factory.EgressIPPodType:
+		pod := obj.(*kapi.Pod)
+		return h.oc.reconcileEgressIPPod(nil, pod)
+
+	case factory.EgressNodeType:
+		node := obj.(*kapi.Node)
+		// Update node in zone cache; value will be true if node is local
+		// to this zone and false if its not
+		h.oc.eIPC.nodeZoneState.LockKey(node.Name)
+		h.oc.eIPC.nodeZoneState.Store(node.Name, h.oc.isLocalZoneNode(node))
+		h.oc.eIPC.nodeZoneState.UnlockKey(node.Name)
+		// add the 103 qos rule to new node's switch
+		// NOTE: We don't need to remove this on node delete since entire node switch will get cleaned up
+		if h.oc.isLocalZoneNode(node) {
+			if err := h.oc.ensureDefaultNoRerouteQoSRules(node.Name); err != nil {
+				return err
+			}
+		}
+		// add the nodeIP to the default LRP (102 priority) destination address-set
+		err := h.oc.ensureDefaultNoRerouteNodePolicies()
+		if err != nil {
+			return err
+		}
+		// Add routing specific to Egress IP NOTE: GARP configuration that
+		// Egress IP depends on is added from the gateway reconciliation logic
+		return h.oc.addEgressNode(node)
+
 	default:
 		return h.oc.AddSecondaryNetworkResourceCommon(h.objType, obj)
 	}
@@ -150,14 +188,18 @@ func (h *secondaryLayer3NetworkControllerEventHandler) UpdateResource(oldObj, ne
 				_, failed := h.oc.nodeClusterRouterPortFailed.Load(newNode.Name)
 				clusterRtrSync := failed || nodeChassisChanged(oldNode, newNode) || nodeSubnetChanged
 				syncMgmtPort := failed || macAddressChanged(oldNode, newNode) || nodeSubnetChanged
+				_, failed = h.oc.gatewaysFailed.Load(newNode.Name)
+				syncGw := (failed || gatewayChanged(oldNode, newNode) ||
+					nodeSubnetChanged || hostCIDRsChanged(oldNode, newNode) ||
+					nodeGatewayMTUSupportChanged(oldNode, newNode))
 				_, syncZoneIC := h.oc.syncZoneICFailed.Load(newNode.Name)
 				syncZoneIC = syncZoneIC || zoneClusterChanged
-				nodeSyncsParam = &nodeSyncs{syncNode: nodeSync, syncClusterRouterPort: clusterRtrSync, syncMgmtPort: syncMgmtPort, syncZoneIC: syncZoneIC}
+				nodeSyncsParam = &nodeSyncs{syncNode: nodeSync, syncClusterRouterPort: clusterRtrSync, syncMgmtPort: syncMgmtPort, syncGw: syncGw, syncZoneIC: syncZoneIC}
 			} else {
 				klog.Infof("Node %s moved from the remote zone %s to local zone %s.",
 					newNode.Name, util.GetNodeZone(oldNode), util.GetNodeZone(newNode))
 				// The node is now a local zone node. Trigger a full node sync.
-				nodeSyncsParam = &nodeSyncs{syncNode: true, syncClusterRouterPort: true, syncMgmtPort: true, syncZoneIC: config.OVNKubernetesFeature.EnableInterconnect}
+				nodeSyncsParam = &nodeSyncs{syncNode: true, syncClusterRouterPort: true, syncMgmtPort: true, syncGw: true, syncZoneIC: config.OVNKubernetesFeature.EnableInterconnect}
 			}
 
 			return h.oc.addUpdateLocalNodeEvent(newNode, nodeSyncsParam)
@@ -173,6 +215,48 @@ func (h *secondaryLayer3NetworkControllerEventHandler) UpdateResource(oldObj, ne
 			}
 			return h.oc.addUpdateRemoteNodeEvent(newNode, syncZoneIC)
 		}
+	case factory.EgressIPType:
+		oldEIP := oldObj.(*egressipv1.EgressIP)
+		newEIP := newObj.(*egressipv1.EgressIP)
+		return h.oc.reconcileEgressIP(oldEIP, newEIP)
+
+	case factory.EgressIPNamespaceType:
+		oldNamespace := oldObj.(*kapi.Namespace)
+		newNamespace := newObj.(*kapi.Namespace)
+		return h.oc.reconcileEgressIPNamespace(oldNamespace, newNamespace)
+
+	case factory.EgressIPPodType:
+		oldPod := oldObj.(*kapi.Pod)
+		newPod := newObj.(*kapi.Pod)
+		return h.oc.reconcileEgressIPPod(oldPod, newPod)
+
+	case factory.EgressNodeType:
+		oldNode := oldObj.(*kapi.Node)
+		newNode := newObj.(*kapi.Node)
+		// Update node in zone cache; value will be true if node is local
+		// to this zone and false if its not
+		h.oc.eIPC.nodeZoneState.LockKey(newNode.Name)
+		h.oc.eIPC.nodeZoneState.Store(newNode.Name, h.oc.isLocalZoneNode(newNode))
+		h.oc.eIPC.nodeZoneState.UnlockKey(newNode.Name)
+		// try to add the 103 qos rule to new node's switch if it doesn't exist
+		// The reason we call this from update is because in case the add node event
+		// did not succeed and we got an update node event which overrides the add event
+		// and removes the add event from retry cache, we'd need to ensure the qos rule exists
+		// NOTE: We don't need to remove this on node delete since entire node switch will get cleaned up
+		if h.oc.isLocalZoneNode(newNode) {
+			if err := h.oc.ensureDefaultNoRerouteQoSRules(newNode.Name); err != nil {
+				return err
+			}
+		}
+		// update the nodeIP in the defalt-reRoute (102 priority) destination address-set
+		if util.NodeHostCIDRsAnnotationChanged(oldNode, newNode) {
+			klog.Infof("Egress IP detected IP address change for node %s. Updating no re-route policies", newNode.Name)
+			err := h.oc.ensureDefaultNoRerouteNodePolicies()
+			if err != nil {
+				return err
+			}
+		}
+		return nil
 	default:
 		return h.oc.UpdateSecondaryNetworkResourceCommon(h.objType, oldObj, newObj, inRetryCache)
 	}
@@ -190,6 +274,30 @@ func (h *secondaryLayer3NetworkControllerEventHandler) DeleteResource(obj, cache
 		}
 		return h.oc.deleteNodeEvent(node)
 
+	case factory.EgressIPType:
+		eIP := obj.(*egressipv1.EgressIP)
+		return h.oc.reconcileEgressIP(eIP, nil)
+
+	case factory.EgressIPNamespaceType:
+		namespace := obj.(*kapi.Namespace)
+		return h.oc.reconcileEgressIPNamespace(namespace, nil)
+
+	case factory.EgressIPPodType:
+		pod := obj.(*kapi.Pod)
+		return h.oc.reconcileEgressIPPod(pod, nil)
+
+	case factory.EgressNodeType:
+		node := obj.(*kapi.Node)
+		// remove the IPs from the destination address-set of the default LRP (102)
+		err := h.oc.ensureDefaultNoRerouteNodePolicies()
+		if err != nil {
+			return err
+		}
+		// Update node in zone cache; remove the node key since node has been deleted.
+		h.oc.eIPC.nodeZoneState.LockKey(node.Name)
+		h.oc.eIPC.nodeZoneState.Delete(node.Name)
+		h.oc.eIPC.nodeZoneState.UnlockKey(node.Name)
+		return nil
 	default:
 		return h.oc.DeleteSecondaryNetworkResourceCommon(h.objType, obj, cachedObj)
 	}
@@ -215,6 +323,16 @@ func (h *secondaryLayer3NetworkControllerEventHandler) SyncFunc(objs []interface
 		case factory.MultiNetworkPolicyType:
 			syncFunc = h.oc.syncMultiNetworkPolicies
 
+		case factory.EgressIPNamespaceType:
+			syncFunc = h.oc.syncEgressIPs
+
+		case factory.EgressNodeType:
+			syncFunc = h.oc.initClusterEgressPolicies
+
+		case factory.EgressIPPodType,
+			factory.EgressIPType:
+			syncFunc = nil
+
 		default:
 			return fmt.Errorf("no sync function for object type %s", h.objType)
 		}
@@ -238,6 +356,7 @@ type SecondaryLayer3NetworkController struct {
 
 	// Node-specific syncMaps used by node event handler
 	mgmtPortFailed              sync.Map
+	gatewaysFailed              sync.Map // TODO(dceara): should this go in the secondary base controller?
 	addNodeFailed               sync.Map
 	nodeClusterRouterPortFailed sync.Map
 	syncZoneICFailed            sync.Map
@@ -274,9 +393,19 @@ func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netI
 				localZoneNodes:              &sync.Map{},
 				zoneICHandler:               zoneICHandler,
 				cancelableCtx:               util.NewCancelableContext(),
+				eIPC: egressIPZoneController{
+					NetInfo:            netInfo,
+					nodeUpdateMutex:    &sync.Mutex{},
+					podAssignmentMutex: &sync.Mutex{},
+					podAssignment:      make(map[string]*podAssignmentState),
+					nbClient:           cnci.nbClient,
+					watchFactory:       cnci.watchFactory,
+					nodeZoneState:      syncmap.NewSyncMap[bool](),
+				},
 			},
 		},
 		mgmtPortFailed:              sync.Map{},
+		gatewaysFailed:              sync.Map{},
 		addNodeFailed:               sync.Map{},
 		nodeClusterRouterPortFailed: sync.Map{},
 		syncZoneICFailed:            sync.Map{},
@@ -302,6 +431,10 @@ func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netI
 func (oc *SecondaryLayer3NetworkController) initRetryFramework() {
 	oc.retryPods = oc.newRetryFramework(factory.PodType)
 	oc.retryNodes = oc.newRetryFramework(factory.NodeType)
+	oc.retryEgressIPs = oc.newRetryFramework(factory.EgressIPType)
+	oc.retryEgressIPNamespaces = oc.newRetryFramework(factory.EgressIPNamespaceType)
+	oc.retryEgressIPPods = oc.newRetryFramework(factory.EgressIPPodType)
+	oc.retryEgressNodes = oc.newRetryFramework(factory.EgressNodeType)
 
 	// For secondary networks, we don't have to watch namespace events if
 	// multi-network policy support is not enabled.
@@ -337,7 +470,14 @@ func (oc *SecondaryLayer3NetworkController) newRetryFramework(
 
 // Start starts the secondary layer3 controller, handles all events and creates all needed logical entities
 func (oc *SecondaryLayer3NetworkController) Start(ctx context.Context) error {
+	if err := oc.ensureNetworkID(); err != nil {
+		return fmt.Errorf("failed ensuring network id at user defined network controller for network '%s': %w", oc.GetNetworkName(), err)
+	}
 	klog.Infof("Start secondary %s network controller of network %s", oc.TopologyType(), oc.GetNetworkName())
+	if err := oc.BaseNetworkController.init(); err != nil {
+		return err
+	}
+
 	if err := oc.Init(ctx); err != nil {
 		return err
 	}
@@ -434,7 +574,30 @@ func (oc *SecondaryLayer3NetworkController) Run() error {
 	if err := oc.WatchMultiNetworkPolicy(); err != nil {
 		return err
 	}
-
+	if config.OVNKubernetesFeature.EnableEgressIP && util.IsNetworkSegmentationSupportEnabled() {
+		// This is probably the best starting order for all egress IP handlers.
+		// WatchEgressIPNamespaces and WatchEgressIPPods only use the informer
+		// cache to retrieve the egress IPs when determining if namespace/pods
+		// match. It is thus better if we initialize them first and allow
+		// WatchEgressNodes / WatchEgressIP to initialize after. Those handlers
+		// might change the assignments of the existing objects. If we do the
+		// inverse and start WatchEgressIPNamespaces / WatchEgressIPPod last, we
+		// risk performing a bunch of modifications on the EgressIP objects when
+		// we restart and then have these handlers act on stale data when they
+		// sync.
+		if err := oc.WatchEgressIPNamespaces(); err != nil {
+			return err
+		}
+		if err := oc.WatchEgressIPPods(); err != nil {
+			return err
+		}
+		if err := oc.WatchEgressNodes(); err != nil {
+			return err
+		}
+		if err := oc.WatchEgressIP(); err != nil {
+			return err
+		}
+	}
 	klog.Infof("Completing all the Watchers for network %s took %v", oc.GetNetworkName(), time.Since(start))
 
 	return nil
@@ -454,8 +617,93 @@ func (oc *SecondaryLayer3NetworkController) WatchNodes() error {
 }
 
 func (oc *SecondaryLayer3NetworkController) Init(ctx context.Context) error {
-	_, err := oc.createOvnClusterRouter()
+	logicalRouter, err := oc.createOvnClusterRouter()
+	if err != nil {
+		return err
+	}
+
+	// Only configure join switch and GR for user defined primary networks.
+	if util.IsNetworkSegmentationSupportEnabled() && oc.IsPrimaryNetwork() {
+		err = oc.createJoinSwitch(logicalRouter)
+	}
 	return err
+}
+
+type SecondaryL3GatewayConfig struct {
+	config      *util.L3GatewayConfig
+	hostSubnets []*net.IPNet
+	gwLRPIPs    []*net.IPNet
+	hostAddrs   []string
+	externalIPs []net.IP
+}
+
+func (oc *SecondaryLayer3NetworkController) getNodeGatewayConfig(node *kapi.Node) (*SecondaryL3GatewayConfig, error) {
+	l3GatewayConfig, err := util.ParseNodeL3GatewayAnnotation(node)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get node %s network %s L3 gateway config: %v", node.Name, oc.GetNetworkName(), err)
+	}
+
+	var masqIPs []*net.IPNet
+	var v4MasqIP *net.IPNet
+	var v6MasqIP *net.IPNet
+	if config.IPv4Mode {
+		v4MasqIPs, err := udn.AllocateV4MasqueradeIPs(oc.networkID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get v4 masquerade IP, network %s (%d): %v", oc.GetNetworkName(), oc.networkID, err)
+		}
+		v4MasqIP = v4MasqIPs.GatewayRouter
+		masqIPs = append(masqIPs, v4MasqIP)
+	}
+	if config.IPv6Mode {
+		v6MasqIPs, err := udn.AllocateV6MasqueradeIPs(oc.networkID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get v6 masquerade IP, network %s (%d): %v", oc.GetNetworkName(), oc.networkID, err)
+		}
+		v6MasqIP = v6MasqIPs.GatewayRouter
+		masqIPs = append(masqIPs, v6MasqIP)
+	}
+
+	// Add masquerade IPs to the network's external IP addresses.
+	l3GatewayConfig.IPAddresses = append(l3GatewayConfig.IPAddresses, masqIPs...)
+
+	// Always SNAT to the per network masquerade IP.
+	var externalIPs []net.IP
+	if config.IPv4Mode {
+		externalIPs = append(externalIPs, v4MasqIP.IP)
+	}
+	if config.IPv6Mode {
+		externalIPs = append(externalIPs, v6MasqIP.IP)
+	}
+
+	var hostAddrs []string
+	for _, externalIP := range externalIPs {
+		hostAddrs = append(hostAddrs, externalIP.String())
+	}
+
+	// Use the host subnets present in the network attachment definition.
+	hostSubnets := make([]*net.IPNet, 0, len(oc.Subnets()))
+	for _, subnet := range oc.Subnets() {
+		hostSubnets = append(hostSubnets, subnet.CIDR)
+	}
+
+	// TODO(dceara): hardcoded should be something depending on the join subnet or network
+	gwLRPIPs := []*net.IPNet{
+		{
+			IP:   net.ParseIP("100.64.0.3"),
+			Mask: net.CIDRMask(16, 32),
+		},
+	}
+
+	// Overwrite the primary interface ID with the correct, per-network one.
+	l3GatewayConfig.InterfaceID = oc.GetNetworkScopedExtPortName(l3GatewayConfig.BridgeID, node.Name)
+
+	return &SecondaryL3GatewayConfig{
+		config:      l3GatewayConfig,
+		hostSubnets: hostSubnets,
+		gwLRPIPs:    gwLRPIPs,
+		hostAddrs:   hostAddrs,
+		externalIPs: externalIPs,
+	}, nil
 }
 
 func (oc *SecondaryLayer3NetworkController) addUpdateLocalNodeEvent(node *kapi.Node, nSyncs *nodeSyncs) error {
@@ -480,6 +728,7 @@ func (oc *SecondaryLayer3NetworkController) addUpdateLocalNodeEvent(node *kapi.N
 			oc.nodeClusterRouterPortFailed.Store(node.Name, true)
 			oc.mgmtPortFailed.Store(node.Name, true)
 			oc.syncZoneICFailed.Store(node.Name, true)
+			oc.gatewaysFailed.Store(node.Name, true)
 			err = fmt.Errorf("nodeAdd: error adding node %q for network %s: %w", node.Name, oc.GetNetworkName(), err)
 			oc.recordNodeErrorEvent(node, err)
 			return err
@@ -518,6 +767,34 @@ func (oc *SecondaryLayer3NetworkController) addUpdateLocalNodeEvent(node *kapi.N
 	if nSyncs.syncNode { // do this only if it is a new node add
 		errors := oc.addAllPodsOnNode(node.Name)
 		errs = append(errs, errors...)
+	}
+
+	if util.IsNetworkSegmentationSupportEnabled() && oc.IsPrimaryNetwork() {
+		if nSyncs.syncGw {
+			gwConfig, err := oc.getNodeGatewayConfig(node)
+			if err != nil {
+				errs = append(errs, err)
+				oc.gatewaysFailed.Store(node.Name, true)
+			} else {
+				err := oc.syncNodeGateway(node, gwConfig.config, gwConfig.hostSubnets,
+					gwConfig.hostAddrs, gwConfig.hostSubnets, gwConfig.gwLRPIPs, gwConfig.externalIPs)
+				if err != nil {
+					errs = append(errs, err)
+					oc.gatewaysFailed.Store(node.Name, true)
+				} else {
+					oc.gatewaysFailed.Delete(node.Name)
+				}
+			}
+		}
+
+		// TODO(dceara): double check this
+		// if per pod SNAT is being used, then l3 gateway config is required to be able to add pods
+		if _, gwFailed := oc.gatewaysFailed.Load(node.Name); !gwFailed || !config.Gateway.DisableSNATMultipleGWs {
+			if nSyncs.syncNode || nSyncs.syncGw { // do this only if it is a new node add or a gateway sync happened
+				errors := oc.addAllPodsOnNode(node.Name)
+				errs = append(errs, errors...)
+			}
+		}
 	}
 
 	if nSyncs.syncZoneIC && config.OVNKubernetesFeature.EnableInterconnect {
@@ -586,6 +863,7 @@ func (oc *SecondaryLayer3NetworkController) deleteNodeEvent(node *kapi.Node) err
 	oc.lsManager.DeleteSwitch(oc.GetNetworkScopedName(node.Name))
 	oc.addNodeFailed.Delete(node.Name)
 	oc.mgmtPortFailed.Delete(node.Name)
+	oc.gatewaysFailed.Delete(node.Name)
 	oc.nodeClusterRouterPortFailed.Delete(node.Name)
 	if config.OVNKubernetesFeature.EnableInterconnect {
 		if err := oc.zoneICHandler.DeleteNode(node); err != nil {
@@ -599,6 +877,12 @@ func (oc *SecondaryLayer3NetworkController) deleteNodeEvent(node *kapi.Node) err
 func (oc *SecondaryLayer3NetworkController) deleteNode(nodeName string) error {
 	if err := oc.deleteNodeLogicalNetwork(nodeName); err != nil {
 		return fmt.Errorf("error deleting node %s logical network: %v", nodeName, err)
+	}
+
+	if util.IsNetworkSegmentationSupportEnabled() && oc.IsPrimaryNetwork() {
+		if err := oc.gatewayCleanup(nodeName); err != nil {
+			return fmt.Errorf("failed to clean up node %s gateway: (%w)", nodeName, err)
+		}
 	}
 
 	return nil

@@ -81,6 +81,9 @@ const (
 	// standard linux interfaces and not interfaces of type OVS.
 	OVNNodeSecondaryHostEgressIPs = "k8s.ovn.org/secondary-host-egress-ips"
 
+	// OVNNodeBridgeEgressIPs contains the EIP addresses that are assigned to default external bridge linux interface of type OVS.
+	OVNNodeBridgeEgressIPs = "k8s.ovn.org/bridge-egress-ips"
+
 	// egressIPConfigAnnotationKey is used to indicate the cloud subnet and
 	// capacity for each node. It is set by
 	// openshift/cloud-network-config-controller
@@ -127,6 +130,7 @@ const (
 type L3GatewayConfig struct {
 	Mode                config.GatewayMode
 	ChassisID           string
+	BridgeID            string
 	InterfaceID         string
 	MACAddress          net.HardwareAddr
 	IPAddresses         []*net.IPNet
@@ -140,6 +144,7 @@ type L3GatewayConfig struct {
 
 type l3GatewayConfigJSON struct {
 	Mode                config.GatewayMode `json:"mode"`
+	BridgeID            string             `json:"bridge-id,omitempty"`
 	InterfaceID         string             `json:"interface-id,omitempty"`
 	MACAddress          string             `json:"mac-address,omitempty"`
 	IPAddresses         []string           `json:"ip-addresses,omitempty"`
@@ -162,6 +167,7 @@ func (cfg *L3GatewayConfig) MarshalJSON() ([]byte, error) {
 		return json.Marshal(&cfgjson)
 	}
 
+	cfgjson.BridgeID = cfg.BridgeID
 	cfgjson.InterfaceID = cfg.InterfaceID
 	cfgjson.MACAddress = cfg.MACAddress.String()
 	cfgjson.EgressGWInterfaceID = cfg.EgressGWInterfaceID
@@ -209,6 +215,7 @@ func (cfg *L3GatewayConfig) UnmarshalJSON(bytes []byte) error {
 		return fmt.Errorf("bad 'mode' value %q", cfgjson.Mode)
 	}
 
+	cfg.BridgeID = cfgjson.BridgeID
 	cfg.InterfaceID = cfgjson.InterfaceID
 	cfg.EgressGWInterfaceID = cfgjson.EgressGWInterfaceID
 
@@ -811,6 +818,27 @@ func ParseNodeSecondaryHostEgressIPsAnnotation(node *kapi.Node) (sets.Set[string
 		return nil, fmt.Errorf("failed to unmarshal %s annotation %s for node %q: %v", OVNNodeSecondaryHostEgressIPs, addrAnnotation, node.Name, err)
 	}
 	return sets.New(cfg...), nil
+}
+
+// IsNodeBridgeEgressIPsAnnotationSet returns true if an annotation that tracks assignment of egress IPs to external bridge (breth0)
+// is set
+func IsNodeBridgeEgressIPsAnnotationSet(node *kapi.Node) bool {
+	_, ok := node.Annotations[OVNNodeBridgeEgressIPs]
+	return ok
+}
+
+// ParseNodeBridgeEgressIPsAnnotation returns egress IPs assigned to the external bridge (breth0)
+func ParseNodeBridgeEgressIPsAnnotation(node *kapi.Node) ([]string, error) {
+	addrAnnotation, ok := node.Annotations[OVNNodeBridgeEgressIPs]
+	if !ok {
+		return nil, newAnnotationNotSetError("%s annotation not found for node %q", OVNNodeBridgeEgressIPs, node.Name)
+	}
+
+	var cfg []string
+	if err := json.Unmarshal([]byte(addrAnnotation), &cfg); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal %s annotation %s for node %q: %v", OVNNodeBridgeEgressIPs, addrAnnotation, node.Name, err)
+	}
+	return cfg, nil
 }
 
 // IsSecondaryHostNetworkContainingIP attempts to find a secondary host network that will host the argument IP. If no network is

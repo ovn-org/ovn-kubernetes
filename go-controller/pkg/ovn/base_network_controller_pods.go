@@ -533,7 +533,7 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *kapi.Pod, nadName
 
 	// let's calculate if this network controller's role for this pod
 	// and pass that information while determining the podAnnotations
-	networkRole, err := bnc.GetNetworkRole(pod)
+	networkRole, err := bnc.GetNetworkRoleForPod(pod)
 	if err != nil {
 		return nil, nil, nil, false, err
 	}

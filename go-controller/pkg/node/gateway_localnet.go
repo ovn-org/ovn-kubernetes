@@ -11,6 +11,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/linkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -22,7 +23,7 @@ import (
 
 func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net.IP, gwIntf, egressGWIntf string, gwIPs []*net.IPNet,
 	nodeAnnotator kube.Annotator, cfg *managementPortConfig, kube kube.Interface, watchFactory factory.NodeWatchFactory,
-	routeManager *routemanager.Controller) (*gateway, error) {
+	routeManager *routemanager.Controller, linkManager *linkmanager.Controller) (*gateway, error) {
 	klog.Info("Creating new local gateway")
 	gw := &gateway{}
 
@@ -52,19 +53,29 @@ func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net
 
 	if exGwBridge != nil {
 		gw.readyFunc = func() (bool, error) {
-			ready, err := gatewayReady(gwBridge.patchPort)
-			if err != nil {
-				return false, err
+			for _, netConfig := range gwBridge.netConfig {
+				ready, err := gatewayReady(netConfig.patchPort)
+				if err != nil || !ready {
+					return false, err
+				}
 			}
-			exGWReady, err := gatewayReady(exGwBridge.patchPort)
-			if err != nil {
-				return false, err
+			for _, netConfig := range exGwBridge.netConfig {
+				exGWReady, err := gatewayReady(netConfig.patchPort)
+				if err != nil || !exGWReady {
+					return false, err
+				}
 			}
-			return ready && exGWReady, nil
+			return true, nil
 		}
 	} else {
 		gw.readyFunc = func() (bool, error) {
-			return gatewayReady(gwBridge.patchPort)
+			for _, netConfig := range gwBridge.netConfig {
+				ready, err := gatewayReady(netConfig.patchPort)
+				if err != nil || !ready {
+					return false, err
+				}
+			}
+			return true, nil
 		}
 	}
 
@@ -81,7 +92,10 @@ func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net
 			}
 
 		}
-
+		if util.IsNetworkSegmentationSupportEnabled() && config.Gateway.Mode != config.GatewayModeDisabled {
+			gw.bridgeEIPAddrManager = newBridgeEIPAddrManager(nodeName, gwBridge.bridgeName, linkManager, kube, watchFactory.EgressIPInformer(), watchFactory.NodeCoreInformer())
+			gwBridge.eipMarkIPs = gw.bridgeEIPAddrManager.GetCache()
+		}
 		gw.nodeIPManager = newAddressManager(nodeName, kube, cfg, watchFactory, gwBridge)
 
 		if err := setNodeMasqueradeIPOnExtBridge(gwBridge.bridgeName); err != nil {

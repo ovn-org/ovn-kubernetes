@@ -140,6 +140,18 @@ func GetExtSwitchFromNode(node string) string {
 	return types.ExternalSwitchPrefix + node
 }
 
+// GetExtPortName determines the name of a node's logical port to the external
+// bridge.
+func GetExtPortName(bridgeID, nodeName string) string {
+	return bridgeID + "_" + nodeName
+}
+
+// GetPatchPortName determines the name of a node's patch port to the external
+// bridge.
+func GetPatchPortName(bridgeID, nodeName string) string {
+	return types.PatchPortPrefix + GetExtPortName(bridgeID, nodeName) + types.PatchPortSuffix
+}
+
 // GetNodeInternalAddrs returns the first IPv4 and/or IPv6 InternalIP defined
 // for the node. On certain cloud providers (AWS) the egress IP will be added to
 // the list of node IPs as an InternalIP address, we don't want to create the
