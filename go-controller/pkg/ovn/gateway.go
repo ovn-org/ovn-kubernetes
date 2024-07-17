@@ -20,6 +20,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
+	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node"
@@ -29,6 +30,7 @@ import (
 )
 
 type GatewayManager struct {
+	nodeName          string
 	clusterRouterName string
 	gwRouterName      string
 	extSwitchName     string
@@ -55,7 +57,7 @@ type GatewayManager struct {
 type GatewayOption func(*GatewayManager)
 
 func NewGatewayManager(
-	clusterRouter, gwRouter, extSwitch, joinSwitch string,
+	nodeName string,
 	coopUUID string,
 	kube kube.InterfaceOVN,
 	nbClient libovsdbclient.Client,
@@ -64,10 +66,11 @@ func NewGatewayManager(
 	opts ...GatewayOption,
 ) *GatewayManager {
 	gwManager := &GatewayManager{
-		clusterRouterName: clusterRouter,
-		gwRouterName:      gwRouter,
-		extSwitchName:     extSwitch,
-		joinSwitchName:    joinSwitch,
+		nodeName:          nodeName,
+		clusterRouterName: netInfo.GetNetworkScopedClusterRouterName(),
+		gwRouterName:      netInfo.GetNetworkScopedGWRouterName(nodeName),
+		extSwitchName:     netInfo.GetNetworkScopedExtSwitchName(nodeName),
+		joinSwitchName:    netInfo.GetNetworkScopedJoinSwitchName(),
 		coppUUID:          coopUUID,
 		kube:              kube,
 		nbClient:          nbClient,
@@ -507,7 +510,7 @@ func (gw *GatewayManager) GatewayInit(nodeName string, clusterIPSubnet []*net.IP
 			// management port interface for the hostSubnet prefix before adding the routes
 			// towards join switch.
 			mgmtIfAddr := util.GetNodeManagementIfAddr(hostSubnet)
-			staticRouteCleanup(gw.nbClient, []net.IP{mgmtIfAddr.IP})
+			gw.staticRouteCleanup([]net.IP{mgmtIfAddr.IP})
 
 			err := libovsdbops.CreateOrReplaceLogicalRouterStaticRouteWithPredicate(gw.nbClient, gw.clusterRouterName,
 				&lrsr, p, &lrsr.Nexthop)
@@ -907,4 +910,175 @@ func deleteStaleMasqueradeRouteAndMACBinding(nbClient libovsdbclient.Client, rou
 		}
 	}
 	return nil
+}
+
+// Cleanup removes all the NB DB objects created for a node's gateway
+func (gw *GatewayManager) Cleanup() error {
+	// Get the gateway router port's IP address (connected to join switch)
+	var nextHops []net.IP
+
+	gwRouterToJoinSwitchPortName := types.GWRouterToJoinSwitchPrefix + gw.gwRouterName
+	gwIPAddrs, err := libovsdbutil.GetLRPAddrs(gw.nbClient, gwRouterToJoinSwitchPortName)
+	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
+		return fmt.Errorf(
+			"failed to get gateway IPs for network %q from LRP %s: %v",
+			gw.netInfo.GetNetworkName(),
+			gwRouterToJoinSwitchPortName,
+			err,
+		)
+	}
+
+	for _, gwIPAddr := range gwIPAddrs {
+		nextHops = append(nextHops, gwIPAddr.IP)
+	}
+	gw.staticRouteCleanup(nextHops)
+	gw.policyRouteCleanup(nextHops)
+
+	// Remove the patch port that connects join switch to gateway router
+	portName := types.JoinSwitchToGWRouterPrefix + gw.gwRouterName
+	lsp := nbdb.LogicalSwitchPort{Name: portName}
+	sw := nbdb.LogicalSwitch{Name: gw.joinSwitchName}
+	err = libovsdbops.DeleteLogicalSwitchPorts(gw.nbClient, &sw, &lsp)
+	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
+		return fmt.Errorf("failed to delete logical switch port %s from switch %s: %w", portName, sw.Name, err)
+	}
+
+	// Remove the logical router port on the gateway router that connects to the join switch
+	logicalRouter := nbdb.LogicalRouter{Name: gw.gwRouterName}
+	logicalRouterPort := nbdb.LogicalRouterPort{
+		Name: gwRouterToJoinSwitchPortName,
+	}
+	err = libovsdbops.DeleteLogicalRouterPorts(gw.nbClient, &logicalRouter, &logicalRouterPort)
+	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
+		return fmt.Errorf("failed to delete port %s on router %s: %w", logicalRouterPort.Name, gw.gwRouterName, err)
+	}
+
+	// Remove the static mac bindings of the gateway router
+	err = gateway.DeleteDummyGWMacBindings(gw.nbClient, gw.gwRouterName)
+	if err != nil {
+		return fmt.Errorf("failed to delete GR dummy mac bindings for node %s: %w", gw.nodeName, err)
+	}
+
+	// Remove the gateway router associated with nodeName
+	err = libovsdbops.DeleteLogicalRouter(gw.nbClient, &logicalRouter)
+	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
+		return fmt.Errorf("failed to delete gateway router %s: %w", gw.gwRouterName, err)
+	}
+
+	// Remove external switch
+	err = libovsdbops.DeleteLogicalSwitch(gw.nbClient, gw.extSwitchName)
+	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
+		return fmt.Errorf("failed to delete external switch %s: %w", gw.extSwitchName, err)
+	}
+
+	exGWexternalSwitch := types.EgressGWSwitchPrefix + gw.extSwitchName
+	err = libovsdbops.DeleteLogicalSwitch(gw.nbClient, exGWexternalSwitch)
+	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
+		return fmt.Errorf("failed to delete external switch %s: %w", exGWexternalSwitch, err)
+	}
+
+	// This will cleanup the NodeSubnetPolicy in local and shared gateway modes. It will be a no-op for any other mode.
+	gw.delPbrAndNatRules(gw.nodeName)
+	return nil
+}
+
+func (gw *GatewayManager) delPbrAndNatRules(nodeName string) {
+	// delete the dnat_and_snat entry that we added for the management port IP
+	// Note: we don't need to delete any MAC bindings that are dynamically learned from OVN SB DB
+	// because there will be none since this NAT is only for outbound traffic and not for inbound
+	mgmtPortName := util.GetK8sMgmtIntfName(gw.netInfo.GetNetworkScopedName(nodeName))
+	nat := libovsdbops.BuildDNATAndSNAT(nil, nil, mgmtPortName, "", nil)
+	logicalRouter := nbdb.LogicalRouter{
+		Name: gw.clusterRouterName,
+	}
+	err := libovsdbops.DeleteNATs(gw.nbClient, &logicalRouter, nat)
+	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
+		klog.Errorf("Failed to delete the dnat_and_snat associated with the management port %s: %v", mgmtPortName, err)
+	}
+
+	// delete all logical router policies on ovn_cluster_router
+	gw.removeLRPolicies(nodeName)
+}
+
+func (gw *GatewayManager) staticRouteCleanup(nextHops []net.IP) {
+	if len(nextHops) == 0 {
+		return // if we do not have next hops, we do not have any routes to cleanup
+	}
+	ips := sets.Set[string]{}
+	for _, nextHop := range nextHops {
+		ips.Insert(nextHop.String())
+	}
+	p := func(item *nbdb.LogicalRouterStaticRoute) bool {
+		networkName, isSecondaryNetwork := item.ExternalIDs[types.NetworkExternalID]
+		if !isSecondaryNetwork {
+			networkName = types.DefaultNetworkName
+		}
+		if networkName != gw.netInfo.GetNetworkName() {
+			return false
+		}
+		return ips.Has(item.Nexthop)
+	}
+	err := libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicate(gw.nbClient, gw.clusterRouterName, p)
+	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
+		klog.Errorf("Failed to delete static route for nexthops %+v: %v", ips.UnsortedList(), err)
+	}
+}
+
+// policyRouteCleanup cleans up all policies on cluster router that have a nextHop
+// in the provided list.
+// - if the LRP exists and has the len(nexthops) > 1: it removes
+// the specified gatewayRouterIP from nexthops
+// - if the LRP exists and has the len(nexthops) == 1: it removes
+// the LRP completely
+func (gw *GatewayManager) policyRouteCleanup(nextHops []net.IP) {
+	for _, nextHop := range nextHops {
+		gwIP := nextHop.String()
+		policyPred := func(item *nbdb.LogicalRouterPolicy) bool {
+			networkName, isSecondaryNetwork := item.ExternalIDs[types.NetworkExternalID]
+			if !isSecondaryNetwork {
+				networkName = types.DefaultNetworkName
+			}
+			if networkName != gw.netInfo.GetNetworkName() {
+				return false
+			}
+			for _, nexthop := range item.Nexthops {
+				if nexthop == gwIP {
+					return true
+				}
+			}
+			return false
+		}
+		err := libovsdbops.DeleteNextHopFromLogicalRouterPoliciesWithPredicate(gw.nbClient, gw.clusterRouterName, policyPred, gwIP)
+		if err != nil && err != libovsdbclient.ErrNotFound {
+			klog.Errorf("Failed to delete policy route from router %q for nexthop %+v: %v", gw.clusterRouterName, nextHop, err)
+		}
+	}
+}
+
+// remove Logical Router Policy on ovn_cluster_router for a specific node.
+// Specify priorities to only delete specific types
+func (gw *GatewayManager) removeLRPolicies(nodeName string) {
+	priorities := []string{types.NodeSubnetPolicyPriority}
+
+	intPriorities := sets.Set[int]{}
+	for _, priority := range priorities {
+		intPriority, _ := strconv.Atoi(priority)
+		intPriorities.Insert(intPriority)
+	}
+
+	managedNetworkName := gw.netInfo.GetNetworkName()
+	p := func(item *nbdb.LogicalRouterPolicy) bool {
+		networkName, isSecondaryNetwork := item.ExternalIDs[types.NetworkExternalID]
+		if !isSecondaryNetwork {
+			networkName = types.DefaultNetworkName
+		}
+		if networkName != managedNetworkName {
+			return false
+		}
+		return strings.Contains(item.Match, fmt.Sprintf("%s ", nodeName)) && intPriorities.Has(item.Priority)
+	}
+	err := libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(gw.nbClient, gw.clusterRouterName, p)
+	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
+		klog.Errorf("Error deleting policies for network %q with priorities %v associated with the node %s: %v", gw.netInfo.GetNetworkName(), priorities, nodeName, err)
+	}
 }
