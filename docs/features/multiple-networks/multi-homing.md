@@ -318,25 +318,28 @@ other network knobs, all NADs pointing to the same network **must** feature the
 same configuration - i.e. all NADs in the network must either allow (or reject)
 persistent IPs.
 
-The client application (which creates the VM, and manages its lifecycle) is
-responsible for creating the `ipamclaims.k8s.cni.cncf.io` object, and point to
-it in the network selection element upon pod creation; OVN-Kubernetes will then
-persist the IP addresses it has allocated the pod in the `IPAMClaim`. This flow
+The client application component: [ipam-extentions](https://github.com/kubevirt/ipam-extensions) (which watches for the VM lifecycle) is
+responsible for creating the `ipamclaims.k8s.cni.cncf.io` object;
+The main client application: [Kubevirt](https://github.com/kubevirt/kubevirt) (which creates the VM, and manages its lifecycle) points to
+the `IPAMClaim` in the network selection element upon pod creation; 
+OVN-Kubernetes will then persist the IP addresses it has allocated the pod in the `IPAMClaim`. This flow
 is portrayed in the sequence diagram below.
 
 ```mermaid
 sequenceDiagram
   actor user
   participant KubeVirt
+  participant ipam-extentions
   participant apiserver
   participant OVN-Kubernetes
 
   user->>KubeVirt: createVM(name=vm-a)
   KubeVirt-->>user: OK
 
-  KubeVirt->>apiserver: createIPAMClaims(networks=...)
-  apiserver-->>KubeVirt: OK
-
+  KubeVirt->>ipam-extentions: createVMI(ipamClaims=...)
+  ipam-extentions->>apiserver: createIPAMClaims(networks=...)
+  apiserver-->>ipam-extentions: OK
+  
   KubeVirt->>apiserver: createPOD(ipamClaims=...)
   apiserver-->>KubeVirt: OK
 
