@@ -362,7 +362,7 @@ func (oc *DefaultNetworkController) syncNodeGateway(node *kapi.Node, hostSubnets
 	}
 
 	if l3GatewayConfig.Mode == config.GatewayModeDisabled {
-		if err := oc.gatewayCleanup(node.Name); err != nil {
+		if err := oc.newGatewayManager(node.Name).Cleanup(); err != nil {
 			return fmt.Errorf("error cleaning up gateway for node %s: %v", node.Name, err)
 		}
 	} else if hostSubnets != nil {
