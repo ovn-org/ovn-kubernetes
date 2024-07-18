@@ -139,7 +139,10 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, clientset *ClientSet) (*Resp
 	// for DPU, ensure connection-details is present
 
 	primaryUDN := udn.NewPrimaryNetwork(clientset.nadLister)
-	pod, annotations, podNADAnnotation, err := GetPodWithAnnotations(pr.ctx, clientset, namespace, podName, pr.nadName, primaryUDN.WaitForPrimaryAnnotationFn(namespace, annotCondFn))
+	if util.IsNetworkSegmentationSupportEnabled() {
+		annotCondFn = primaryUDN.WaitForPrimaryAnnotationFn(namespace, annotCondFn)
+	}
+	pod, annotations, podNADAnnotation, err := GetPodWithAnnotations(pr.ctx, clientset, namespace, podName, pr.nadName, annotCondFn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pod annotation: %v", err)
 	}
