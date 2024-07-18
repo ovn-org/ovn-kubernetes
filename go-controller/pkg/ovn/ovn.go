@@ -373,7 +373,7 @@ func (oc *DefaultNetworkController) syncNodeGateway(node *kapi.Node, hostSubnets
 				return fmt.Errorf("failed to get host CIDRs for node: %s: %v", node.Name, err)
 			}
 		}
-		if err := oc.syncGatewayLogicalNetwork(node, l3GatewayConfig, hostSubnets, hostAddrs); err != nil {
+		if err := oc.syncDefaultGatewayLogicalNetwork(node, l3GatewayConfig, hostSubnets, hostAddrs); err != nil {
 			return fmt.Errorf("error creating gateway for node %s: %v", node.Name, err)
 		}
 	}

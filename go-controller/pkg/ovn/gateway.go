@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	kapi "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
@@ -25,6 +26,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/gateway"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/gatewayrouter"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -1081,4 +1083,52 @@ func (gw *GatewayManager) removeLRPolicies(nodeName string) {
 	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
 		klog.Errorf("Error deleting policies for network %q with priorities %v associated with the node %s: %v", gw.netInfo.GetNetworkName(), priorities, nodeName, err)
 	}
+}
+
+func (gw *GatewayManager) syncGatewayLogicalNetwork(
+	node *kapi.Node,
+	l3GatewayConfig *util.L3GatewayConfig,
+	hostSubnets []*net.IPNet,
+	hostAddrs []string,
+	clusterSubnets []*net.IPNet,
+	gwLRPIPs []*net.IPNet,
+	isSCTPSupported bool,
+	ovnClusterLRPToJoinIfAddrs []*net.IPNet,
+) error {
+	enableGatewayMTU := util.ParseNodeGatewayMTUSupport(node)
+
+	err := gw.GatewayInit(
+		node.Name,
+		clusterSubnets,
+		hostSubnets,
+		l3GatewayConfig,
+		isSCTPSupported,
+		gwLRPIPs,
+		ovnClusterLRPToJoinIfAddrs,
+		enableGatewayMTU,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to init gateway for network %q: %v", gw.netInfo.GetNetworkName(), err)
+	}
+
+	for _, subnet := range hostSubnets {
+		hostIfAddr := util.GetNodeManagementIfAddr(subnet)
+		if hostIfAddr == nil {
+			return fmt.Errorf("host interface address not found for subnet %q on network %q", subnet, gw.netInfo.GetNetworkName())
+		}
+		l3GatewayConfigIP, err := util.MatchFirstIPNetFamily(utilnet.IsIPv6(hostIfAddr.IP), l3GatewayConfig.IPAddresses)
+		if err != nil {
+			return fmt.Errorf("failed to extract the gateway IP addr for network %q: %v", gw.netInfo.GetNetworkName(), err)
+		}
+		relevantHostIPs, err := util.MatchAllIPStringFamily(utilnet.IsIPv6(hostIfAddr.IP), hostAddrs)
+		if err != nil && err != util.ErrorNoIP {
+			return fmt.Errorf("failed to extract the host IP addrs for network %q: %v", gw.netInfo.GetNetworkName(), err)
+		}
+		pbrMngr := gatewayrouter.NewPolicyBasedRoutesManager(gw.nbClient, gw.clusterRouterName, gw.netInfo)
+		if err := pbrMngr.Add(node.Name, hostIfAddr.IP.String(), l3GatewayConfigIP, relevantHostIPs); err != nil {
+			return fmt.Errorf("failed to configure the policy based routes for network %q: %v", gw.netInfo.GetNetworkName(), err)
+		}
+	}
+
+	return nil
 }
