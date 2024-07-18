@@ -8,11 +8,15 @@ import (
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/containernetworking/plugins/pkg/testutils"
 	. "github.com/onsi/ginkgo"
+	"github.com/onsi/gomega"
 	. "github.com/onsi/gomega"
 	"github.com/stretchr/testify/mock"
+	"github.com/vishvananda/netlink"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/klog/v2"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	kubeMocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube/mocks"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/vrfmanager"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
@@ -43,6 +47,13 @@ func getDeletionFakeOVSCommands(fexec *ovntest.FakeExec, mgtPort string) {
 	})
 }
 
+func getVRFCreationFakeOVSCommands(fexec *ovntest.FakeExec) {
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    "ovs-vsctl --timeout=15 port-to-br eth0",
+		Output: "breth0",
+	})
+}
+
 var _ = Describe("UserDefinedNetworkGateway", func() {
 	var (
 		netName                  = "bluenet"
@@ -58,9 +69,11 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		mgtPort           = fmt.Sprintf("%s%s", types.K8sMgmtIntfNamePrefix, netID)
 	)
 	BeforeEach(func() {
+		err := config.PrepareTestConfig()
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		// Set up a fake vsctl command mock interface
 		fexec = ovntest.NewFakeExec()
-		err := util.SetExec(fexec)
+		err = util.SetExec(fexec)
 		Expect(err).NotTo(HaveOccurred())
 		// Set up a fake k8sMgmt interface
 		testNS, err = testutils.NewNS()
@@ -68,6 +81,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		err = testNS.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
 			ovntest.AddLink(mgtPort)
+			ovntest.AddLink("breth0")
 			return nil
 		})
 		Expect(err).NotTo(HaveOccurred())
@@ -195,6 +209,103 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			return nil
 		})
 
+		Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
+	})
+	ovntest.OnSupportedPlatformsIt("should compute correct masquerade reply traffic routes for a user defined network", func() {
+		config.Gateway.Interface = "eth0"
+		config.IPv4Mode = true
+		config.IPv6Mode = true
+		config.Gateway.V6MasqueradeSubnet = "fd69::/112"
+		config.Gateway.V4MasqueradeSubnet = "169.254.0.0/16"
+		node := &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: nodeName,
+			},
+		}
+		nad := ovntest.GenerateNAD(netName, "rednad", "greenamespace",
+			types.Layer3Topology, "100.128.0.0/16/24,ae70::66/60", types.NetworkRolePrimary)
+		netInfo, err := util.ParseNADInfo(nad)
+		Expect(err).NotTo(HaveOccurred())
+		udnGateway := NewUserDefinedNetworkGateway(netInfo, 3, node, nil, vrf)
+		Expect(err).NotTo(HaveOccurred())
+		getVRFCreationFakeOVSCommands(fexec)
+		err = testNS.Do(func(ns.NetNS) error {
+			defer GinkgoRecover()
+			mplink, err := netlink.LinkByName(mgtPort)
+			Expect(err).NotTo(HaveOccurred())
+			bridgelink, err := netlink.LinkByName("breth0")
+			Expect(err).NotTo(HaveOccurred())
+			vrfTableId := util.CalculateRouteTableID(mplink.Attrs().Index)
+
+			routes, err := udnGateway.computeRoutesForUDN(vrfTableId, mplink)
+			Expect(err).NotTo(HaveOccurred())
+			klog.Info(len(routes))
+			Expect(len(routes)).To(Equal(3))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(*routes[0].Dst).To(Equal(*ovntest.MustParseIPNet("172.16.1.0/24"))) // default service subnet
+			Expect(routes[0].LinkIndex).To(Equal(bridgelink.Attrs().Index))
+			Expect(routes[0].Gw).To(Equal(config.Gateway.MasqueradeIPs.V4DummyNextHopMasqueradeIP))
+			cidr, err := util.GetIPNetFullMask("169.254.0.16")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(*routes[1].Dst).To(Equal(*cidr))
+			Expect(routes[1].LinkIndex).To(Equal(mplink.Attrs().Index))
+			cidr, err = util.GetIPNetFullMask("fd69::10")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(*routes[2].Dst).To(Equal(*cidr))
+			Expect(routes[2].LinkIndex).To(Equal(mplink.Attrs().Index))
+			return nil
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
+	})
+	ovntest.OnSupportedPlatformsIt("should compute correct service routes for a user defined network", func() {
+		config.Gateway.Interface = "eth0"
+		config.IPv4Mode = true
+		config.IPv6Mode = true
+		config.Gateway.V6MasqueradeSubnet = "fd69::/112"
+		config.Gateway.V4MasqueradeSubnet = "169.254.0.0/16"
+		config.Kubernetes.ServiceCIDRs = ovntest.MustParseIPNets("10.96.0.0/16", "fd00:10:96::/112")
+		node := &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: nodeName,
+			},
+		}
+		nad := ovntest.GenerateNAD(netName, "rednad", "greenamespace",
+			types.Layer3Topology, "100.128.0.0/16/24,ae70::66/60", types.NetworkRolePrimary)
+		netInfo, err := util.ParseNADInfo(nad)
+		Expect(err).NotTo(HaveOccurred())
+		udnGateway := NewUserDefinedNetworkGateway(netInfo, 3, node, nil, vrf)
+		Expect(err).NotTo(HaveOccurred())
+		getVRFCreationFakeOVSCommands(fexec)
+		err = testNS.Do(func(ns.NetNS) error {
+			defer GinkgoRecover()
+			link, err := netlink.LinkByName("breth0")
+			Expect(err).NotTo(HaveOccurred())
+
+			mplink, err := netlink.LinkByName(mgtPort)
+			Expect(err).NotTo(HaveOccurred())
+			vrfTableId := util.CalculateRouteTableID(mplink.Attrs().Index)
+
+			routes, err := udnGateway.computeRoutesForUDN(vrfTableId, mplink)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(len(routes)).To(Equal(4))
+			Expect(err).NotTo(HaveOccurred())
+			// 1st and 2nd routes are the service routes from user-provided config value
+			Expect(*routes[0].Dst).To(Equal(*config.Kubernetes.ServiceCIDRs[0]))
+			Expect(routes[0].LinkIndex).To(Equal(link.Attrs().Index))
+			Expect(*routes[1].Dst).To(Equal(*config.Kubernetes.ServiceCIDRs[1]))
+			Expect(routes[1].LinkIndex).To(Equal(link.Attrs().Index))
+			cidr, err := util.GetIPNetFullMask("169.254.0.16")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(*routes[2].Dst).To(Equal(*cidr))
+			Expect(routes[2].LinkIndex).To(Equal(mplink.Attrs().Index))
+			cidr, err = util.GetIPNetFullMask("fd69::10")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(*routes[3].Dst).To(Equal(*cidr))
+			Expect(routes[3].LinkIndex).To(Equal(mplink.Attrs().Index))
+			return nil
+		})
+		Expect(err).NotTo(HaveOccurred())
 		Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 	})
 })

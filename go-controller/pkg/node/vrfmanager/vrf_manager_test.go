@@ -5,6 +5,7 @@ import (
 
 	"github.com/onsi/ginkgo"
 	"github.com/onsi/gomega"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	netlink_mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/vishvananda/netlink"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
@@ -56,7 +57,7 @@ var _ = ginkgo.Describe("Vrf manager", func() {
 
 	ginkgo.BeforeEach(func() {
 		c = NewController()
-
+		c.RouteManager = routemanager.NewController()
 		nlMock = &mocks.NetLinkOps{}
 		vrfLinkMock1 = new(netlink_mocks.Link)
 		enslaveLinkMock = new(netlink_mocks.Link)
@@ -91,7 +92,7 @@ var _ = ginkgo.Describe("Vrf manager", func() {
 			vrf := &vrf{name: vrfLinkName1, table: 10, interfaces: enslaveInfaces}
 			// TODO(tssurya): Confirm with peri why we don't do this in the code itself?
 			c.vrfs[vrfLinkName1] = vrf
-			err := c.AddVrf(vrfLinkName1, 10, enslaveInfaces)
+			err := c.AddVrf(vrfLinkName1, 10, enslaveInfaces, nil)
 			gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 		})
 
@@ -100,7 +101,7 @@ var _ = ginkgo.Describe("Vrf manager", func() {
 			enslaveLinkMock.On("Attrs").Return(&netlink.LinkAttrs{Name: enslaveLinkName, MasterIndex: getLinkMasterIndex(enslaveLinkName), Index: getLinkIndex(enslaveLinkName)}, nil)
 			vrf := &vrf{name: vrfLinkName1, table: 10, interfaces: sets.Set[string]{}}
 			c.vrfs[vrfLinkName1] = vrf
-			err := c.AddVrf(vrfLinkName1, 10, sets.Set[string]{})
+			err := c.AddVrf(vrfLinkName1, 10, sets.Set[string]{}, nil)
 			gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 		})
 

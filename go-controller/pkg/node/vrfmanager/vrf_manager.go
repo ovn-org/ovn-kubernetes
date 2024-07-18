@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/vishvananda/netlink"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -16,18 +17,21 @@ type vrf struct {
 	name       string
 	table      uint32
 	interfaces sets.Set[string]
+	routes     []netlink.Route
 	delete     bool
 }
 
 type Controller struct {
-	mu   *sync.Mutex
-	vrfs map[string]*vrf
+	mu           *sync.Mutex
+	vrfs         map[string]*vrf
+	RouteManager *routemanager.Controller
 }
 
 func NewController() *Controller {
 	return &Controller{
-		mu:   &sync.Mutex{},
-		vrfs: make(map[string]*vrf),
+		mu:           &sync.Mutex{},
+		vrfs:         make(map[string]*vrf),
+		RouteManager: routemanager.NewController(),
 	}
 }
 
@@ -202,13 +206,17 @@ func (vrfm *Controller) sync(vrf *vrf) error {
 			}
 		}
 	}
+	// Handover vrf routes into route manager to manage it.
+	for _, route := range vrf.routes {
+		vrfm.RouteManager.Add(route)
+	}
 	// TODO(tssurya): Confirm with peri why we don't do this?
 	vrfm.vrfs[vrf.name] = vrf
 	return nil
 }
 
 // AddVrf adds a Vrf device into the node.
-func (vrfm *Controller) AddVrf(name string, table uint32, interfaces sets.Set[string]) error {
+func (vrfm *Controller) AddVrf(name string, table uint32, interfaces sets.Set[string], routes []netlink.Route) error {
 	vrfm.mu.Lock()
 	defer vrfm.mu.Unlock()
 
@@ -217,7 +225,7 @@ func (vrfm *Controller) AddVrf(name string, table uint32, interfaces sets.Set[st
 		klog.V(5).Infof("Vrf Manager: vrf %s already found in the cache", name)
 		return nil
 	}
-	return vrfm.sync(&vrf{name, table, interfaces, false})
+	return vrfm.sync(&vrf{name, table, interfaces, routes, false})
 }
 
 // DeleteVrf deletes given Vrf device from the node.
@@ -248,6 +256,11 @@ func (vrfm *Controller) deleteVRF(vrf *vrf) error {
 	} else if err != nil {
 		return err
 	}
+	// Request route manager to delete vrf associated routes.
+	for _, route := range vrf.routes {
+		vrfm.RouteManager.Del(route)
+	}
+
 	return util.GetNetLinkOps().LinkDelete(link)
 }
 

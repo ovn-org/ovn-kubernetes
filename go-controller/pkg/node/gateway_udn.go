@@ -6,10 +6,12 @@ import (
 	"strings"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/generator/udn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/vrfmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/vishvananda/netlink"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
@@ -70,7 +72,11 @@ func (udng *UserDefinedNetworkGateway) AddNetwork() error {
 	// TODO(tssurya): check with peri if we really want a list?
 	enslaveInterfaces := make(sets.Set[string])
 	enslaveInterfaces.Insert(mgmtPortName)
-	err = udng.vrfManager.AddVrf(vrfDeviceName, uint32(vrfTableId), enslaveInterfaces)
+	routes, err := udng.computeRoutesForUDN(vrfTableId, mplink)
+	if err != nil {
+		return err
+	}
+	err = udng.vrfManager.AddVrf(vrfDeviceName, uint32(vrfTableId), enslaveInterfaces, routes)
 	if err != nil {
 		return fmt.Errorf("could not add VRF %d for network %s, err: %v", vrfTableId, udng.GetNetworkName(), err)
 	}
@@ -202,4 +208,113 @@ func (udng *UserDefinedNetworkGateway) deleteUDNManagementPort() error {
 	}
 	klog.V(3).Infof("Removed OVS management port interface %s for network %s", interfaceName, udng.GetNetworkName())
 	return nil
+}
+
+// computeRoutesForUDN returns a list of routes programmed into a given UDN's VRF
+// when adding new routes please leave a sample comment on how that route looks like
+func (udng *UserDefinedNetworkGateway) computeRoutesForUDN(vrfTableId int, mpLink netlink.Link) ([]netlink.Route, error) {
+	nextHops, intfName, err := getGatewayNextHops()
+	if err != nil {
+		return nil, fmt.Errorf("unable to get the gateway next hops for node %s, err: %v", udng.node.Name, err)
+	}
+	link, err := util.GetNetLinkOps().LinkByName(intfName)
+	if err != nil {
+		return nil, fmt.Errorf("unable to get link for %s, error: %v", intfName, err)
+	}
+	networkMTU := udng.NetInfo.MTU()
+	if networkMTU == 0 {
+		networkMTU = config.Default.MTU
+	}
+	var retVal []netlink.Route
+	// Route1: Add serviceCIDR route: 10.96.0.0/16 via 169.254.169.4 dev breth0 mtu 1400
+	// necessary for UDN CNI and host-networked pods to talk to services
+	for _, serviceSubnet := range config.Kubernetes.ServiceCIDRs {
+		serviceSubnet := serviceSubnet
+		isV6 := utilnet.IsIPv6CIDR(serviceSubnet)
+		gwIP := config.Gateway.MasqueradeIPs.V4DummyNextHopMasqueradeIP
+		if isV6 {
+			gwIP = config.Gateway.MasqueradeIPs.V6DummyNextHopMasqueradeIP
+		}
+		retVal = append(retVal, netlink.Route{
+			LinkIndex: link.Attrs().Index,
+			Dst:       serviceSubnet,
+			MTU:       networkMTU,
+			Gw:        gwIP,
+			Table:     vrfTableId,
+		})
+	}
+
+	// Route2: Add default route: default via 172.18.0.1 dev breth0 mtu 1400
+	// necessary for UDN CNI and host-networked pods default traffic to go to node's gatewayIP
+	var defaultAnyCIDR *net.IPNet
+	for _, nextHop := range nextHops {
+		isV6 := utilnet.IsIPv6(nextHop)
+		_, defaultAnyCIDR, _ = net.ParseCIDR("0.0.0.0/0")
+		if isV6 {
+			_, defaultAnyCIDR, _ = net.ParseCIDR("::/0")
+		}
+		retVal = append(retVal, netlink.Route{
+			LinkIndex: link.Attrs().Index,
+			Dst:       defaultAnyCIDR,
+			MTU:       networkMTU,
+			Gw:        nextHop,
+			Table:     vrfTableId,
+		})
+	}
+
+	// Route3: Add MasqueradeRoute for reply traffic route: 169.254.169.12 dev ovn-k8s-mpX mtu 1400
+	// necessary for reply traffic towards UDN CNI pods to go into OVN
+	masqIPv4, err := udng.getV4MasqueradeIP()
+	if err != nil {
+		return nil, fmt.Errorf("unable to fetch masqueradeV4 IP for network %s, err: %v", udng.GetNetworkName(), err)
+	}
+	if masqIPv4 != nil {
+		retVal = append(retVal, netlink.Route{
+			LinkIndex: mpLink.Attrs().Index,
+			Dst:       masqIPv4,
+			MTU:       networkMTU,
+			Table:     vrfTableId,
+		})
+	}
+
+	masqIPv6, err := udng.getV6MasqueradeIP()
+	if err != nil {
+		return nil, fmt.Errorf("unable to fetch masqueradeV6 IP for network %s, err: %v", udng.GetNetworkName(), err)
+	}
+	if masqIPv6 != nil {
+		if config.IPv4Mode && masqIPv4 != nil {
+			retVal = append(retVal, netlink.Route{
+				LinkIndex: mpLink.Attrs().Index,
+				Dst:       masqIPv6,
+				MTU:       networkMTU,
+				Table:     vrfTableId,
+			})
+		}
+	}
+
+	return retVal, nil
+}
+
+// getV6MasqueradeIP returns the V4 management port masqueradeIP for this network
+func (udng *UserDefinedNetworkGateway) getV4MasqueradeIP() (*net.IPNet, error) {
+	if !config.IPv4Mode {
+		return nil, nil
+	}
+	masqIPs, err := udn.AllocateV4MasqueradeIPs(udng.networkID)
+	if err != nil {
+		return nil, err
+	}
+	return util.GetIPNetFullMaskFromIP(masqIPs.ManagementPort.IP), nil
+}
+
+// getV6MasqueradeIP returns the V6 management port masqueradeIP for this network
+func (udng *UserDefinedNetworkGateway) getV6MasqueradeIP() (*net.IPNet, error) {
+	if !config.IPv6Mode {
+		return nil, nil
+	}
+	masqIPs, err := udn.AllocateV6MasqueradeIPs(udng.networkID)
+	if err != nil {
+		return nil, err
+	}
+	return util.GetIPNetFullMaskFromIP(masqIPs.ManagementPort.IP), nil
 }
