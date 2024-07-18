@@ -6,10 +6,12 @@ import (
 	"strings"
 
 	v1 "k8s.io/api/core/v1"
+	listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -24,14 +26,18 @@ type UserDefinedNetworkGateway struct {
 	// stores the networkID of this network
 	networkID int
 	// node that its programming things on
-	node *v1.Node
+	node          *v1.Node
+	nodeLister    listers.NodeLister
+	kubeInterface kube.Interface
 }
 
-func NewUserDefinedNetworkGateway(netInfo util.NetInfo, networkID int, node *v1.Node) *UserDefinedNetworkGateway {
+func NewUserDefinedNetworkGateway(netInfo util.NetInfo, networkID int, node *v1.Node, nodeLister listers.NodeLister, kubeInterface kube.Interface) *UserDefinedNetworkGateway {
 	return &UserDefinedNetworkGateway{
-		NetInfo:   netInfo,
-		networkID: networkID,
-		node:      node,
+		NetInfo:       netInfo,
+		networkID:     networkID,
+		node:          node,
+		nodeLister:    nodeLister,
+		kubeInterface: kubeInterface,
 	}
 }
 
@@ -53,6 +59,7 @@ func (udng *UserDefinedNetworkGateway) DelNetwork() error {
 // so that it persists on reboots
 // STEP3: sets up the management port link on the host
 // STEP4: adds the management port IP .2 to the mplink
+// STEP5: adds the mac address to the node management port annotation
 func (udng *UserDefinedNetworkGateway) addUDNManagementPort() error {
 	var err error
 	interfaceName := util.GetNetworkScopedK8sMgmtHostIntfName(uint(udng.networkID))
@@ -120,6 +127,12 @@ func (udng *UserDefinedNetworkGateway) addUDNManagementPort() error {
 			}
 		}
 	}
+
+	// STEP5
+	if err := util.UpdateNodeManagementPortMACAddressesWithRetry(udng.node, udng.nodeLister, udng.kubeInterface, macAddress, udng.GetNetworkName()); err != nil {
+		return fmt.Errorf("unable to update mac address annotation for node %s, for network %s, err: %v", udng.node.Name, udng.GetNetworkName(), err)
+	}
+	klog.V(3).Infof("Added management port mac address information of %s for network %s", interfaceName, udng.GetNetworkName())
 	return nil
 }
 

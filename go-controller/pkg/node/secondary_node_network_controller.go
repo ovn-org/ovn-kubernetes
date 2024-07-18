@@ -60,7 +60,7 @@ func (nc *SecondaryNodeNetworkController) Start(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		nc.gateway = NewUserDefinedNetworkGateway(nc.NetInfo, networkID, node)
+		nc.gateway = NewUserDefinedNetworkGateway(nc.NetInfo, networkID, node, nc.watchFactory.NodeCoreInformer().Lister(), nc.Kube)
 		if err := nc.gateway.AddNetwork(); err != nil {
 			return fmt.Errorf("failed to add network to node gateway for network %s at node %s: %w",
 				nc.GetNetworkName(), nc.name, err)

@@ -14,6 +14,8 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	factoryMocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory/mocks"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	coreinformermocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/client-go/informers/core/v1"
+	v1mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/client-go/listers/core/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -113,6 +115,10 @@ var _ = Describe("SecondaryNodeNetworkController", func() {
 		cnnci := CommonNodeNetworkControllerInfo{name: "worker1", watchFactory: &factoryMock}
 		factoryMock.On("GetNode", "worker1").Return(nodeList[0], nil)
 		factoryMock.On("GetNodes").Return(nodeList, nil)
+		nodeInformer := coreinformermocks.NodeInformer{}
+		factoryMock.On("NodeCoreInformer").Return(&nodeInformer)
+		nodeLister := v1mocks.NodeLister{}
+		nodeInformer.On("Lister").Return(&nodeLister)
 		NetInfo, err := util.ParseNADInfo(nad)
 		Expect(err).NotTo(HaveOccurred())
 		controller := NewSecondaryNodeNetworkController(&cnnci, NetInfo)

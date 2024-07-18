@@ -15,6 +15,8 @@ import (
 	utilMocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
 	"github.com/stretchr/testify/mock"
 	"github.com/vishvananda/netlink"
+	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func genOVSAddMgmtPortCmd(nodeName, repName string) string {
@@ -72,7 +74,7 @@ var _ = Describe("Mananagement port DPU tests", func() {
 			netlinkOpsMock.On("LinkByName", "non-existent-netdev").Return(nil, fmt.Errorf("netlink mock error"))
 			netlinkOpsMock.On("IsLinkNotFoundError", mock.Anything).Return(false)
 
-			_, err := mgmtPortDpu.Create(nil, nodeAnnotatorMock, waiter)
+			_, err := mgmtPortDpu.Create(nil, nil, nil, nil, waiter)
 			Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc)
 			Expect(err).To(HaveOccurred())
 		})
@@ -87,7 +89,7 @@ var _ = Describe("Mananagement port DPU tests", func() {
 				nil, fmt.Errorf("failed to get interface"))
 			netlinkOpsMock.On("IsLinkNotFoundError", mock.Anything).Return(true)
 
-			_, err := mgmtPortDpu.Create(nil, nodeAnnotatorMock, waiter)
+			_, err := mgmtPortDpu.Create(nil, nil, nil, nil, waiter)
 			Expect(err).To(HaveOccurred())
 		})
 
@@ -110,7 +112,7 @@ var _ = Describe("Mananagement port DPU tests", func() {
 			})
 			mockOVSListInterfaceMgmtPortNotExistCmd(execMock, types.K8sMgmtIntfName+"_0")
 
-			_, err := mgmtPortDpu.Create(nil, nodeAnnotatorMock, waiter)
+			_, err := mgmtPortDpu.Create(nil, nil, nil, nil, waiter)
 			Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc)
 			Expect(err).To(HaveOccurred())
 		})
@@ -120,12 +122,20 @@ var _ = Describe("Mananagement port DPU tests", func() {
 			Expect(err).ToNot(HaveOccurred())
 			expectedMgmtPortMac := util.IPAddrToHWAddr(util.GetNodeManagementIfAddr(ipnet).IP)
 			config.Default.MTU = 1400
+			node := &v1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "k8s-worker0",
+					Annotations: map[string]string{
+						"k8s.ovn.org/node-mgmt-port-mac-addresses": fmt.Sprintf(`{"default":"%s"}`, expectedMgmtPortMac.String()),
+					},
+				},
+			}
 			mgmtPortDpu := managementPortRepresentor{
 				nodeName:    "k8s-worker0",
 				hostSubnets: []*net.IPNet{ipnet},
 				repName:     "enp3s0f0v0",
 			}
-			nodeAnnotatorMock.On("Set", mock.Anything, expectedMgmtPortMac.String()).Return(nil)
+			nodeAnnotatorMock.On("Set", mock.Anything, map[string]string{"default": expectedMgmtPortMac.String()}).Return(nil)
 			linkMock := &mocks.Link{}
 			linkMock.On("Attrs").Return(&netlink.LinkAttrs{Name: "enp3s0f0v0", MTU: 1500})
 
@@ -146,7 +156,7 @@ var _ = Describe("Mananagement port DPU tests", func() {
 				Cmd: genOVSAddMgmtPortCmd(mgmtPortDpu.nodeName, mgmtPortDpu.repName),
 			})
 
-			mpcfg, err := mgmtPortDpu.Create(nil, nodeAnnotatorMock, waiter)
+			mpcfg, err := mgmtPortDpu.Create(nil, node, nil, nil, waiter)
 			Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(mpcfg.ifName).To(Equal(types.K8sMgmtIntfName + "_0"))
@@ -158,12 +168,20 @@ var _ = Describe("Mananagement port DPU tests", func() {
 			Expect(err).ToNot(HaveOccurred())
 			expectedMgmtPortMac := util.IPAddrToHWAddr(util.GetNodeManagementIfAddr(ipnet).IP)
 			config.Default.MTU = 1400
+			node := &v1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "k8s-worker0",
+					Annotations: map[string]string{
+						"k8s.ovn.org/node-mgmt-port-mac-addresses": fmt.Sprintf(`{"default":"%s"}`, expectedMgmtPortMac.String()),
+					},
+				},
+			}
 			mgmtPortDpu := managementPortRepresentor{
 				nodeName:    "k8s-worker0",
 				hostSubnets: []*net.IPNet{ipnet},
 				repName:     "enp3s0f0v0",
 			}
-			nodeAnnotatorMock.On("Set", mock.Anything, expectedMgmtPortMac.String()).Return(nil)
+			nodeAnnotatorMock.On("Set", mock.Anything, map[string]string{"default": expectedMgmtPortMac.String()}).Return(nil)
 			linkMock := &mocks.Link{}
 			linkMock.On("Attrs").Return(&netlink.LinkAttrs{Name: "ovn-k8s-mp0_0", MTU: config.Default.MTU})
 
@@ -177,7 +195,7 @@ var _ = Describe("Mananagement port DPU tests", func() {
 				Cmd: genOVSAddMgmtPortCmd(mgmtPortDpu.nodeName, mgmtPortDpu.repName),
 			})
 
-			mpcfg, err := mgmtPortDpu.Create(nil, nodeAnnotatorMock, waiter)
+			mpcfg, err := mgmtPortDpu.Create(nil, node, nil, nil, waiter)
 			Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(mpcfg.ifName).To(Equal(types.K8sMgmtIntfName + "_0"))
@@ -193,7 +211,7 @@ var _ = Describe("Mananagement port DPU tests", func() {
 			netlinkOpsMock.On("LinkByName", "non-existent-netdev").Return(nil, fmt.Errorf("netlink mock error"))
 			netlinkOpsMock.On("IsLinkNotFoundError", mock.Anything).Return(false)
 
-			_, err := mgmtPortDpuHost.Create(nil, nil, waiter)
+			_, err := mgmtPortDpuHost.Create(nil, nil, nil, nil, waiter)
 			Expect(err).To(HaveOccurred())
 		})
 
@@ -207,7 +225,7 @@ var _ = Describe("Mananagement port DPU tests", func() {
 				nil, fmt.Errorf("failed to get interface"))
 			netlinkOpsMock.On("IsLinkNotFoundError", mock.Anything).Return(true)
 
-			_, err := mgmtPortDpuHost.Create(nil, nil, waiter)
+			_, err := mgmtPortDpuHost.Create(nil, nil, nil, nil, waiter)
 			Expect(err).To(HaveOccurred())
 		})
 
@@ -244,7 +262,7 @@ var _ = Describe("Mananagement port DPU tests", func() {
 			netlinkOpsMock.On("LinkByName", mock.Anything).Return(nil, fmt.Errorf(
 				"createPlatformManagementPort error"))
 
-			_, err = mgmtPortDpuHost.Create(nil, nil, nil)
+			_, err = mgmtPortDpuHost.Create(nil, nil, nil, nil, nil)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("createPlatformManagementPort error"))
 		})
@@ -270,7 +288,7 @@ var _ = Describe("Mananagement port DPU tests", func() {
 			netlinkOpsMock.On("LinkByName", mock.Anything).Return(nil, fmt.Errorf(
 				"createPlatformManagementPort error")).Once()
 
-			_, err = mgmtPortDpuHost.Create(nil, nil, nil)
+			_, err = mgmtPortDpuHost.Create(nil, nil, nil, nil, nil)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring(
 				"createPlatformManagementPort error"))
