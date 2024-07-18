@@ -139,6 +139,10 @@ rules:
       resources:
           - endpointslices
       verbs: [ "get", "list", "watch" ]
+    - apiGroups: ["k8s.cni.cncf.io"]
+      resources:
+          - network-attachment-definitions
+      verbs: ["list", "get", "watch"]
     {{- if eq (hasKey .Values.global "enableInterconnect" | ternary .Values.global.enableInterconnect false) true }}
     - apiGroups: ["networking.k8s.io"]
       resources:
@@ -146,7 +150,6 @@ rules:
       verbs: [ "get", "list", "watch" ]
     - apiGroups: ["k8s.cni.cncf.io"]
       resources:
-          - network-attachment-definitions
           - multi-networkpolicies
       verbs: ["list", "get", "watch"]
     - apiGroups: ["k8s.ovn.org"]
