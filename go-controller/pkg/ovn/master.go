@@ -10,7 +10,6 @@ import (
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
-	utilnet "k8s.io/utils/net"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
@@ -20,7 +19,6 @@ import (
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/gatewayrouter"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -118,15 +116,18 @@ func (oc *DefaultNetworkController) syncNodeManagementPortDefault(node *kapi.Nod
 	return err
 }
 
-func (oc *DefaultNetworkController) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig *util.L3GatewayConfig,
-	hostSubnets []*net.IPNet, hostAddrs []string) error {
-	var err error
-	var gwLRPIPs, clusterSubnets []*net.IPNet
+func (oc *DefaultNetworkController) syncDefaultGatewayLogicalNetwork(
+	node *kapi.Node,
+	l3GatewayConfig *util.L3GatewayConfig,
+	hostSubnets []*net.IPNet,
+	hostAddrs []string,
+) error {
+	var clusterSubnets []*net.IPNet
 	for _, clusterSubnet := range config.Default.ClusterSubnets {
 		clusterSubnets = append(clusterSubnets, clusterSubnet.CIDR)
 	}
 
-	gwLRPIPs, err = util.ParseNodeGatewayRouterJoinAddrs(node, oc.GetNetworkName())
+	gwLRPIPs, err := util.ParseNodeGatewayRouterJoinAddrs(node, oc.GetNetworkName())
 	if err != nil {
 		if util.IsAnnotationNotSetError(err) {
 			// FIXME(tssurya): This is present for backwards compatibility
@@ -139,33 +140,16 @@ func (oc *DefaultNetworkController) syncGatewayLogicalNetwork(node *kapi.Node, l
 		}
 	}
 
-	enableGatewayMTU := util.ParseNodeGatewayMTUSupport(node)
-
-	gatewayManager := oc.newGatewayManager(node.Name)
-	err = gatewayManager.GatewayInit(node.Name, clusterSubnets, hostSubnets, l3GatewayConfig, oc.SCTPSupport, gwLRPIPs, oc.ovnClusterLRPToJoinIfAddrs,
-		enableGatewayMTU)
-	if err != nil {
-		return fmt.Errorf("failed to init shared interface gateway: %v", err)
-	}
-
-	for _, subnet := range hostSubnets {
-		hostIfAddr := util.GetNodeManagementIfAddr(subnet)
-		l3GatewayConfigIP, err := util.MatchFirstIPNetFamily(utilnet.IsIPv6(hostIfAddr.IP), l3GatewayConfig.IPAddresses)
-		if err != nil {
-			return err
-		}
-		relevantHostIPs, err := util.MatchAllIPStringFamily(utilnet.IsIPv6(hostIfAddr.IP), hostAddrs)
-		if err != nil && err != util.ErrorNoIP {
-			return err
-		}
-
-		pbrManager := gatewayrouter.NewPolicyBasedRoutesManager(oc.nbClient, oc.GetNetworkScopedClusterRouterName(), oc.NetInfo)
-		if err := pbrManager.Add(node.Name, hostIfAddr.IP.String(), l3GatewayConfigIP, relevantHostIPs); err != nil {
-			return err
-		}
-	}
-
-	return err
+	return oc.newGatewayManager(node.Name).syncGatewayLogicalNetwork(
+		node,
+		l3GatewayConfig,
+		hostSubnets,
+		hostAddrs,
+		clusterSubnets,
+		gwLRPIPs,
+		oc.SCTPSupport,
+		oc.ovnClusterLRPToJoinIfAddrs,
+	)
 }
 
 func (oc *DefaultNetworkController) addNode(node *kapi.Node) ([]*net.IPNet, error) {
@@ -359,6 +343,10 @@ func (oc *DefaultNetworkController) syncNodes(kNodes []interface{}) error {
 
 	// Find stale external logical switches, based on well known prefix and node name
 	lookupExtSwFunction := func(item *nbdb.LogicalSwitch) bool {
+		_, ok := item.ExternalIDs[types.NetworkExternalID]
+		if ok {
+			return false
+		}
 		nodeName := strings.TrimPrefix(item.Name, types.ExternalSwitchPrefix)
 		if nodeName != item.Name && len(nodeName) > 0 && !foundNodes.Has(nodeName) {
 			staleNodes.Insert(nodeName)
@@ -373,6 +361,10 @@ func (oc *DefaultNetworkController) syncNodes(kNodes []interface{}) error {
 
 	// Find stale gateway routers, based on well known prefix and node name
 	lookupGwRouterFunction := func(item *nbdb.LogicalRouter) bool {
+		_, ok := item.ExternalIDs[types.NetworkExternalID]
+		if ok {
+			return false
+		}
 		nodeName := strings.TrimPrefix(item.Name, types.GWRouterPrefix)
 		if nodeName != item.Name && len(nodeName) > 0 && !foundNodes.Has(nodeName) {
 			staleNodes.Insert(nodeName)
