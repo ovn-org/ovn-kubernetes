@@ -127,6 +127,24 @@ func (_m *NetLinkOps) IsLinkNotFoundError(err error) bool {
 	return r0
 }
 
+// LinkAdd provides a mock function with given fields: link
+func (_m *NetLinkOps) LinkAdd(link netlink.Link) error {
+	ret := _m.Called(link)
+
+	if len(ret) == 0 {
+		panic("no return value specified for LinkAdd")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(netlink.Link) error); ok {
+		r0 = rf(link)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
 // LinkByIndex provides a mock function with given fields: index
 func (_m *NetLinkOps) LinkByIndex(index int) (netlink.Link, error) {
 	ret := _m.Called(index)
@@ -289,6 +307,24 @@ func (_m *NetLinkOps) LinkSetMTU(link netlink.Link, mtu int) error {
 	return r0
 }
 
+// LinkSetMaster provides a mock function with given fields: link, master
+func (_m *NetLinkOps) LinkSetMaster(link netlink.Link, master netlink.Link) error {
+	ret := _m.Called(link, master)
+
+	if len(ret) == 0 {
+		panic("no return value specified for LinkSetMaster")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(netlink.Link, netlink.Link) error); ok {
+		r0 = rf(link, master)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
 // LinkSetName provides a mock function with given fields: link, newName
 func (_m *NetLinkOps) LinkSetName(link netlink.Link, newName string) error {
 	ret := _m.Called(link, newName)
@@ -300,6 +336,24 @@ func (_m *NetLinkOps) LinkSetName(link netlink.Link, newName string) error {
 	var r0 error
 	if rf, ok := ret.Get(0).(func(netlink.Link, string) error); ok {
 		r0 = rf(link, newName)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// LinkSetNoMaster provides a mock function with given fields: link
+func (_m *NetLinkOps) LinkSetNoMaster(link netlink.Link) error {
+	ret := _m.Called(link)
+
+	if len(ret) == 0 {
+		panic("no return value specified for LinkSetNoMaster")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(netlink.Link) error); ok {
+		r0 = rf(link)
 	} else {
 		r0 = ret.Error(0)
 	}

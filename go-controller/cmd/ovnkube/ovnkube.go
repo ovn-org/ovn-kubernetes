@@ -533,6 +533,7 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 				ovnClientset,
 				watchFactory,
 				runMode.identity,
+				wg,
 				eventRecorder)
 			if err != nil {
 				nodeErr = fmt.Errorf("failed to create node network controller: %w", err)

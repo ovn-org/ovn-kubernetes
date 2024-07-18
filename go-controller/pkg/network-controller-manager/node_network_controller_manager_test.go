@@ -2,6 +2,7 @@ package networkControllerManager
 
 import (
 	"fmt"
+	"sync"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -123,7 +124,7 @@ var _ = Describe("Healthcheck tests", func() {
 
 		BeforeEach(func() {
 			// setup kube output
-			ncm, err = NewNodeNetworkControllerManager(fakeClient, &factoryMock, nodeName, nil)
+			ncm, err = NewNodeNetworkControllerManager(fakeClient, &factoryMock, nodeName, &sync.WaitGroup{}, nil)
 			Expect(err).NotTo(HaveOccurred())
 			factoryMock.On("GetPods", "").Return(podList, nil)
 		})

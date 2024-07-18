@@ -6,14 +6,17 @@ import (
 	"strings"
 
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 	listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/vrfmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/vishvananda/netlink"
 )
 
 // UserDefinedNetworkGateway contains information
@@ -29,27 +32,49 @@ type UserDefinedNetworkGateway struct {
 	node          *v1.Node
 	nodeLister    listers.NodeLister
 	kubeInterface kube.Interface
+	// vrf manager that creates and manages vrfs for all UDNs
+	// used with a lock since its shared between all network controllers
+	vrfManager *vrfmanager.Controller
 }
 
-func NewUserDefinedNetworkGateway(netInfo util.NetInfo, networkID int, node *v1.Node, nodeLister listers.NodeLister, kubeInterface kube.Interface) *UserDefinedNetworkGateway {
+func NewUserDefinedNetworkGateway(netInfo util.NetInfo, networkID int, node *v1.Node, nodeLister listers.NodeLister,
+	kubeInterface kube.Interface, vrfManager *vrfmanager.Controller) *UserDefinedNetworkGateway {
 	return &UserDefinedNetworkGateway{
 		NetInfo:       netInfo,
 		networkID:     networkID,
 		node:          node,
 		nodeLister:    nodeLister,
 		kubeInterface: kubeInterface,
+		vrfManager:    vrfManager,
 	}
 }
 
 // AddNetwork will be responsible to create all plumbings
 // required by this UDN on the gateway side
 func (udng *UserDefinedNetworkGateway) AddNetwork() error {
-	return udng.addUDNManagementPort()
+	mplink, err := udng.addUDNManagementPort()
+	if err != nil {
+		return fmt.Errorf("could not create management port netdevice for network %s: %w", udng.GetNetworkName(), err)
+	}
+	vrfDeviceName := util.GetVRFDeviceNameForUDN(udng.networkID)
+	vrfTableId := util.CalculateRouteTableID(mplink.Attrs().Index)
+	slaveInterfaces := make(sets.Set[string])
+	slaveInterfaces.Insert(mplink.Attrs().Name)
+	err = udng.vrfManager.AddVRF(vrfDeviceName, slaveInterfaces, uint32(vrfTableId))
+	if err != nil {
+		return fmt.Errorf("could not add VRF %d for network %s, err: %v", vrfTableId, udng.GetNetworkName(), err)
+	}
+	return nil
 }
 
 // DelNetwork will be responsible to remove all plumbings
 // used by this UDN on the gateway side
 func (udng *UserDefinedNetworkGateway) DelNetwork() error {
+	vrfDeviceName := util.GetVRFDeviceNameForUDN(udng.networkID)
+	err := udng.vrfManager.DeleteVRF(vrfDeviceName)
+	if err != nil {
+		return err
+	}
 	return udng.deleteUDNManagementPort()
 }
 
@@ -60,14 +85,14 @@ func (udng *UserDefinedNetworkGateway) DelNetwork() error {
 // STEP3: sets up the management port link on the host
 // STEP4: adds the management port IP .2 to the mplink
 // STEP5: adds the mac address to the node management port annotation
-func (udng *UserDefinedNetworkGateway) addUDNManagementPort() error {
+func (udng *UserDefinedNetworkGateway) addUDNManagementPort() (netlink.Link, error) {
 	var err error
 	interfaceName := util.GetNetworkScopedK8sMgmtHostIntfName(uint(udng.networkID))
 	var networkLocalSubnets []*net.IPNet
 	if udng.TopologyType() == types.Layer3Topology {
 		networkLocalSubnets, err = util.ParseNodeHostSubnetAnnotation(udng.node, udng.GetNetworkName())
 		if err != nil {
-			return fmt.Errorf("waiting for node %s to start, no annotation found on node for network %s: %w",
+			return nil, fmt.Errorf("waiting for node %s to start, no annotation found on node for network %s: %w",
 				udng.node.Name, udng.GetNetworkName(), err)
 		}
 	} else if udng.TopologyType() == types.Layer2Topology {
@@ -86,7 +111,7 @@ func (udng *UserDefinedNetworkGateway) addUDNManagementPort() error {
 		"external-ids:iface-id="+udng.GetNetworkScopedK8sMgmtIntfName(udng.node.Name),
 	)
 	if err != nil {
-		return fmt.Errorf("failed to add port to br-int for network %s, stdout: %q, stderr: %q, error: %w",
+		return nil, fmt.Errorf("failed to add port to br-int for network %s, stdout: %q, stderr: %q, error: %w",
 			udng.GetNetworkName(), stdout, stderr, err)
 	}
 	klog.V(3).Infof("Added OVS management port interface %s for network %s", interfaceName, udng.GetNetworkName())
@@ -94,20 +119,20 @@ func (udng *UserDefinedNetworkGateway) addUDNManagementPort() error {
 	// STEP2
 	macAddress, err := util.GetOVSPortMACAddress(interfaceName)
 	if err != nil {
-		return fmt.Errorf("failed to get management port MAC address for network %s: %v", udng.GetNetworkName(), err)
+		return nil, fmt.Errorf("failed to get management port MAC address for network %s: %v", udng.GetNetworkName(), err)
 	}
 	// persist the MAC address so that upon node reboot we get back the same mac address.
 	_, stderr, err = util.RunOVSVsctl("set", "interface", interfaceName,
 		fmt.Sprintf("mac=%s", strings.ReplaceAll(macAddress.String(), ":", "\\:")))
 	if err != nil {
-		return fmt.Errorf("failed to persist MAC address %q for %q while plumbing network %s: stderr:%s (%v)",
+		return nil, fmt.Errorf("failed to persist MAC address %q for %q while plumbing network %s: stderr:%s (%v)",
 			macAddress.String(), interfaceName, udng.GetNetworkName(), stderr, err)
 	}
 
 	// STEP3
 	mplink, err := util.LinkSetUp(interfaceName)
 	if err != nil {
-		return fmt.Errorf("failed to set the link up for interface %s while plumbing network %s, err: %v",
+		return nil, fmt.Errorf("failed to set the link up for interface %s while plumbing network %s, err: %v",
 			interfaceName, udng.GetNetworkName(), err)
 	}
 	klog.V(3).Infof("Setup management port link %s for network %s succeeded", interfaceName, udng.GetNetworkName())
@@ -122,7 +147,7 @@ func (udng *UserDefinedNetworkGateway) addUDNManagementPort() error {
 				err = util.LinkAddrAdd(mplink, ip, 0, 0, 0)
 			}
 			if err != nil {
-				return fmt.Errorf("failed to add management port IP from subnet %s to netdevice %s for network %s, err: %v",
+				return nil, fmt.Errorf("failed to add management port IP from subnet %s to netdevice %s for network %s, err: %v",
 					subnet, interfaceName, udng.GetNetworkName(), err)
 			}
 		}
@@ -130,10 +155,10 @@ func (udng *UserDefinedNetworkGateway) addUDNManagementPort() error {
 
 	// STEP5
 	if err := util.UpdateNodeManagementPortMACAddressesWithRetry(udng.node, udng.nodeLister, udng.kubeInterface, macAddress, udng.GetNetworkName()); err != nil {
-		return fmt.Errorf("unable to update mac address annotation for node %s, for network %s, err: %v", udng.node.Name, udng.GetNetworkName(), err)
+		return nil, fmt.Errorf("unable to update mac address annotation for node %s, for network %s, err: %v", udng.node.Name, udng.GetNetworkName(), err)
 	}
 	klog.V(3).Infof("Added management port mac address information of %s for network %s", interfaceName, udng.GetNetworkName())
-	return nil
+	return mplink, nil
 }
 
 // deleteUDNManagementPort does the following:
