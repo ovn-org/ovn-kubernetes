@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni"
@@ -12,6 +13,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/vrfmanager"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -35,6 +37,8 @@ type nodeNetworkControllerManager struct {
 	// net-attach-def controller handle net-attach-def and create/delete secondary controllers
 	// nil in dpu-host mode
 	nadController *nad.NetAttachDefinitionController
+	// vrf manager that creates and manages vrfs for all UDNs
+	vrfManager *vrfmanager.Controller
 }
 
 // NewNetworkController create secondary node network controllers for the given NetInfo
@@ -42,7 +46,7 @@ func (ncm *nodeNetworkControllerManager) NewNetworkController(nInfo util.NetInfo
 	topoType := nInfo.TopologyType()
 	switch topoType {
 	case ovntypes.Layer3Topology, ovntypes.Layer2Topology, ovntypes.LocalnetTopology:
-		return node.NewSecondaryNodeNetworkController(ncm.newCommonNetworkControllerInfo(), nInfo), nil
+		return node.NewSecondaryNodeNetworkController(ncm.newCommonNetworkControllerInfo(), nInfo, ncm.vrfManager)
 	}
 	return nil, fmt.Errorf("topology type %s not supported", topoType)
 }
@@ -74,6 +78,9 @@ func NewNodeNetworkControllerManager(ovnClient *util.OVNClientset, wf factory.No
 	var err error
 	if config.OVNKubernetesFeature.EnableMultiNetwork && config.OvnKubeNode.Mode == ovntypes.NodeModeDPU || util.IsNetworkSegmentationSupportEnabled() {
 		ncm.nadController, err = nad.NewNetAttachDefinitionController("node-network-controller-manager", ncm, wf)
+	}
+	if util.IsNetworkSegmentationSupportEnabled() {
+		ncm.vrfManager = vrfmanager.NewController()
 	}
 	if err != nil {
 		return nil, err
@@ -138,7 +145,15 @@ func (ncm *nodeNetworkControllerManager) Start(ctx context.Context) (err error) 
 	if ncm.nadController != nil {
 		err = ncm.nadController.Start()
 	}
-
+	if ncm.vrfManager != nil {
+		// Let's create VRF manager that will manage vrfs for all UDNs
+		wg := &sync.WaitGroup{}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ncm.vrfManager.Run(ncm.stopChan, wg)
+		}()
+	}
 	return err
 }
 

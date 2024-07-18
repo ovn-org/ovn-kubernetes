@@ -3,6 +3,7 @@ package node
 import (
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/containernetworking/plugins/pkg/testutils"
@@ -13,6 +14,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	kubeMocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube/mocks"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/vrfmanager"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -50,6 +52,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		fexec             *ovntest.FakeExec
 		testNS            ns.NetNS
 		nodeAnnotatorMock *kubeMocks.Annotator
+		vrf               *vrfmanager.Controller
 		v4NodeSubnet      = "10.128.0.0/24"
 		v6NodeSubnet      = "ae70::66/112"
 		mgtPort           = fmt.Sprintf("%s%s", types.K8sMgmtIntfNamePrefix, netID)
@@ -69,6 +72,20 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		})
 		Expect(err).NotTo(HaveOccurred())
 		nodeAnnotatorMock = &kubeMocks.Annotator{}
+		wg := &sync.WaitGroup{}
+		vrf = vrfmanager.NewController()
+		stopCh := make(chan struct{})
+		defer func() {
+			close(stopCh)
+			wg.Wait()
+		}()
+		wg.Add(1)
+		go testNS.Do(func(netNS ns.NetNS) error {
+			defer wg.Done()
+			defer GinkgoRecover()
+			vrf.Run(stopCh, wg)
+			return nil
+		})
 	})
 	AfterEach(func() {
 		Expect(testNS.Close()).To(Succeed())
@@ -90,7 +107,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		Expect(err).NotTo(HaveOccurred())
 		nodeAnnotatorMock.On("Set", mock.Anything, map[string]string{netName: mgtPortMAC}).Return(nil)
 		nodeAnnotatorMock.On("Run").Return(nil)
-		udnGateway := NewUserDefinedNetworkGateway(netInfo, 3, node, nodeAnnotatorMock)
+		udnGateway := NewUserDefinedNetworkGateway(netInfo, 3, node, nodeAnnotatorMock, vrf)
 		Expect(err).NotTo(HaveOccurred())
 		getCreationFakeOVSCommands(fexec, mgtPort, mgtPortMAC, netName, nodeName, netInfo.MTU())
 		err = testNS.Do(func(ns.NetNS) error {
@@ -116,7 +133,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			types.Layer3Topology, "100.128.0.0/16/24,ae70::66/60", types.NetworkRolePrimary)
 		netInfo, err := util.ParseNADInfo(nad)
 		Expect(err).NotTo(HaveOccurred())
-		udnGateway := NewUserDefinedNetworkGateway(netInfo, 3, node, nil)
+		udnGateway := NewUserDefinedNetworkGateway(netInfo, 3, node, nil, vrf)
 		Expect(err).NotTo(HaveOccurred())
 		getDeletionFakeOVSCommands(fexec, mgtPort)
 		err = testNS.Do(func(ns.NetNS) error {
@@ -143,7 +160,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		Expect(err).NotTo(HaveOccurred())
 		nodeAnnotatorMock.On("Set", mock.Anything, map[string]string{netName: mgtPortMAC}).Return(nil)
 		nodeAnnotatorMock.On("Run").Return(nil)
-		udnGateway := NewUserDefinedNetworkGateway(netInfo, 3, node, nodeAnnotatorMock)
+		udnGateway := NewUserDefinedNetworkGateway(netInfo, 3, node, nodeAnnotatorMock, vrf)
 		Expect(err).NotTo(HaveOccurred())
 		getCreationFakeOVSCommands(fexec, mgtPort, mgtPortMAC, netName, nodeName, netInfo.MTU())
 		err = testNS.Do(func(ns.NetNS) error {
@@ -168,7 +185,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			types.Layer2Topology, "100.128.0.0/16,ae70::66/60", types.NetworkRolePrimary)
 		netInfo, err := util.ParseNADInfo(nad)
 		Expect(err).NotTo(HaveOccurred())
-		udnGateway := NewUserDefinedNetworkGateway(netInfo, 3, node, nil)
+		udnGateway := NewUserDefinedNetworkGateway(netInfo, 3, node, nil, vrf)
 		Expect(err).NotTo(HaveOccurred())
 		getDeletionFakeOVSCommands(fexec, mgtPort)
 		err = testNS.Do(func(ns.NetNS) error {
