@@ -192,6 +192,14 @@ func (ncm *nodeNetworkControllerManager) Start(ctx context.Context) (err error) 
 		if err != nil {
 			return fmt.Errorf("failed to run VRF Manager: %w", err)
 		}
+		// Let's create VRF manager that will manage vrfs for all UDNs
+		wg := &sync.WaitGroup{}
+		// Let's create Route manager that will manage routes on the vrfs for all UDNs
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ncm.vrfManager.RouteManager.Run(ncm.stopChan, 4*time.Minute)
+		}()
 	}
 
 	return nil
