@@ -69,6 +69,19 @@ func TestWaitForPrimaryAnnotationFn(t *testing.T) {
 			expectedIsReady: true,
 		},
 		{
+			description: "With default network without role should be ready",
+			nadName:     types.DefaultNetworkName,
+			annotationFromFn: &util.PodAnnotation{
+				Role: "",
+			},
+			isReadyFromFn: true,
+			expectedAnnotation: &util.PodAnnotation{
+				Role: types.NetworkRolePrimary,
+			},
+			expectedIsReady: true,
+		},
+
+		{
 			description: "With missing primary annotation and active network should return not ready",
 			nadName:     types.DefaultNetworkName,
 			annotationFromFn: &util.PodAnnotation{
