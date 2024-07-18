@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/containernetworking/plugins/pkg/ns"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
@@ -23,17 +24,20 @@ type vrf struct {
 	// managedSlave is the desired netlink interface who's master will be this VRF.
 	// It cannot be changed after VRF creation.
 	managedSlave string
+	routes       []netlink.Route
 }
 
 type Controller struct {
-	mu   *sync.Mutex
-	vrfs map[int]vrf
+	mu           *sync.Mutex
+	vrfs         map[int]vrf
+	routeManager *routemanager.Controller
 }
 
-func NewController() *Controller {
+func NewController(routeManager *routemanager.Controller) *Controller {
 	return &Controller{
-		mu:   &sync.Mutex{},
-		vrfs: make(map[int]vrf),
+		mu:           &sync.Mutex{},
+		vrfs:         make(map[int]vrf),
+		routeManager: routeManager,
 	}
 }
 
@@ -183,6 +187,9 @@ func (vrfm *Controller) sync(vrf vrf) error {
 	}
 	// Create VRF device if it doesn't exist or if it's needed to be recreated.
 	if util.GetNetLinkOps().IsLinkNotFoundError(err) || mustRecreate {
+		if vrfLink != nil {
+			delete(vrfm.vrfs, vrfLink.Attrs().Index)
+		}
 		vrfLink = &netlink.Vrf{
 			LinkAttrs: netlink.LinkAttrs{Name: vrf.name},
 			Table:     vrf.table,
@@ -213,13 +220,17 @@ func (vrfm *Controller) sync(vrf vrf) error {
 			}
 		}
 	}
+	// Handover vrf routes into route manager to manage it.
+	for _, route := range vrf.routes {
+		vrfm.routeManager.Add(route)
+	}
 
 	vrfm.vrfs[vrfLink.Attrs().Index] = vrf
 	return nil
 }
 
 // AddVRF adds a VRF device into the node.
-func (vrfm *Controller) AddVRF(name string, slaveInterface string, table uint32) error {
+func (vrfm *Controller) AddVRF(name string, slaveInterface string, table uint32, routes []netlink.Route) error {
 	vrfm.mu.Lock()
 	defer vrfm.mu.Unlock()
 
@@ -242,12 +253,12 @@ func (vrfm *Controller) AddVRF(name string, slaveInterface string, table uint32)
 				return fmt.Errorf("VRF Manager: table id mismatch for VRF device %s", name)
 			}
 		} else {
-			vrfDev = vrf{name, table, slaveInterface}
+			vrfDev = vrf{name, table, slaveInterface, routes}
 		}
 	}
 
 	if err != nil && util.GetNetLinkOps().IsLinkNotFoundError(err) {
-		vrfDev = vrf{name, table, slaveInterface}
+		vrfDev = vrf{name, table, slaveInterface, routes}
 	} else if err != nil {
 		return fmt.Errorf("failed to retrieve VRF device %s, err: %v", name, err)
 	}
@@ -312,6 +323,12 @@ func (vrfm *Controller) DeleteVRF(name string) (err error) {
 		klog.V(5).Infof("VRF Manager: VRF %s not found in cache for deletion", name)
 		return nil
 	}
+
+	// Request route manager to delete vrf associated routes.
+	for _, route := range vrf.routes {
+		vrfm.routeManager.Del(route)
+	}
+
 	err = vrfm.deleteVRF(vrfLink)
 	if err != nil {
 		return fmt.Errorf("failed to delete VRF device %s, err: %w", vrf.name, err)

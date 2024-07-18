@@ -8,13 +8,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	utilnet "k8s.io/utils/net"
 	"net"
 	"runtime"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
+
+	utilnet "k8s.io/utils/net"
 
 	"github.com/k8snetworkplumbingwg/sriovnet"
 	"github.com/stretchr/testify/mock"
@@ -795,8 +796,9 @@ func shareGatewayInterfaceDPUHostTest(app *cli.App, testNS ns.NetNS, uplinkName,
 		ip, ipnet, err := net.ParseCIDR(hostIP + "/24")
 		Expect(err).NotTo(HaveOccurred())
 		ipnet.IP = ip
-		cnnci := NewCommonNodeNetworkControllerInfo(kubeFakeClient, fakeClient.AdminPolicyRouteClient, wf, nil, nodeName)
-		nc := newDefaultNodeNetworkController(cnnci, stop, wg)
+		routeManager := routemanager.NewController()
+		cnnci := NewCommonNodeNetworkControllerInfo(kubeFakeClient, fakeClient.AdminPolicyRouteClient, wf, nil, nodeName, routeManager)
+		nc := newDefaultNodeNetworkController(cnnci, stop, wg, routeManager)
 		// must run route manager manually which is usually started with nc.Start()
 		wg.Add(1)
 		go testNS.Do(func(netNS ns.NetNS) error {
