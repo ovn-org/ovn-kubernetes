@@ -7,10 +7,10 @@ in one or more namespaces has a consistent source IP address for services outsid
 East-West traffic (including pod -> node IP) is excluded from Egress IP.  
 
 For more info, consider looking at the following links:
+
 - [Egress IP CRD](https://github.com/ovn-org/ovn-kubernetes/blob/82f167a3920c8c3cd0687ceb3e7a5ba64372be69/go-controller/pkg/crd/egressip/v1/types.go#L47)
 - [Assigning an egress IP address](https://docs.okd.io/latest/networking/ovn_kubernetes_network_provider/assigning-egress-ips-ovn.html)
 - [Managing Egress IP in OpenShift 4 with OVN-Kubernetes](https://rcarrata.com/openshift/egress-ip-ovn/)
-
 
 ## Example
 
@@ -55,6 +55,7 @@ Routing Policies
 
    100 ip4.src == 10.244.1.3                                                                                          reroute  100.64.0.3, 100.64.0.4
 ```
+
 - Rules with `1004` priority are responsible for redirecting `pod -> local host IP` traffic.  
 - Rules with `102` priority are added by OVN-Kubernetes when EgressIP feature is enabled, they ensure that east-west traffic is not using egress IPs.
 - The rule with `100` priority is added for the pod matching `egressip-prod` EgressIP, and it redirects the traffic to one of the egress nodes (ECMP is used to balance the traffic between next hops).
@@ -194,11 +195,12 @@ priority=100,ip,in_port=2 actions=ct(commit,zone=64000,exec(set_field:0x1->ct_ma
 
 ## Special considerations for Egress IPs hosted by standard linux interfaces
 If you wish to assign an Egress IP to a standard linux interface (non OVS type), then the following is required:
-* Link is up
-* IP address must have scope universe / global
-* Links and their addresses must not be removed during runtime after an egress IP is assigned to it. If you wish to remove the link, first
+
+- Link is up
+- IP address must have scope universe / global
+- Links and their addresses must not be removed during runtime after an egress IP is assigned to it. If you wish to remove the link, first
 remove the Egress IP and then remove the address / link.
-* IP forwarding must be enabled for the link
+- IP forwarding must be enabled for the link
 
 ## Egress Nodes
 
@@ -225,8 +227,10 @@ Even though the periodic checking of egress nodes is hard coded to trigger [ever
 This attribute specifies the maximum amount of time, in seconds, that the egressIP operator will wait until it declares the node unreachable. The default value is [1 second](https://github.com/ovn-org/ovn-kubernetes/blob/82f167a3920c8c3cd0687ceb3e7a5ba64372be69/go-controller/pkg/config/config.go#L866).
 
 This value can be set in the following ways:
+
 - ovnkube binary flag: `--egressip-reachability-total-timeout=<TIMEOUT>`
 - inside config specified by `--config-file` flag:
+
 ```
 [ovnkubernetesfeature]
 egressip-reachability-total-timeout=123
@@ -241,8 +245,10 @@ Up until recently, the only method available for determining if an egress node w
 [Later implementation](https://github.com/ovn-org/ovn-kubernetes/pull/3100) of ovn-kubernetes is capable of leveraging secure gRPC sessions in order to probe nodes. That requires the `ovnkube node` pods to be listening on a pre-specified TCP port, in addition to configuring the `ovnkube master` pod(s).
 
 This value can be set in the following ways:
+
 - ovnkube binary flag: `--egressip-node-healthcheck-port=<TCP_PORT>`
 - inside config specified by `--config-file` flag:
+
 ```
 [ovnkubernetesfeature]
 egressip-node-healthcheck-port=9107
