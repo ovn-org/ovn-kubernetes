@@ -192,6 +192,7 @@ type testPod struct {
 	portName     string
 	routes       []util.PodRoute
 	noIfaceIdVer bool
+	networkRole  string
 
 	secondaryPodInfos map[string]*secondaryPodInfo
 }
@@ -226,6 +227,7 @@ func newTPod(nodeName, nodeSubnet, nodeMgtIP, nodeGWIP, podName, podIPs, podMAC,
 		podName:           podName,
 		namespace:         namespace,
 		secondaryPodInfos: map[string]*secondaryPodInfo{},
+		networkRole:       ovntypes.NetworkRolePrimary, // all tests here run with network-segmentation disabled by default by default
 	}
 
 	var routeSources []*net.IPNet
@@ -335,7 +337,7 @@ func (p testPod) getAnnotationsJson() string {
 			Gateway:  nodeGWIP,
 			Gateways: nodeGWIPs,
 			Routes:   routes,
-			Role:     ovntypes.NetworkRolePrimary, // all tests here run with network-segmentation disabled
+			Role:     p.networkRole,
 		},
 	}
 
