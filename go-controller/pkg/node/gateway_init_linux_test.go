@@ -25,6 +25,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 
+	nadfake "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	adminpolicybasedrouteclient "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -1099,6 +1100,9 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 		fakeClient := &util.OVNNodeClientset{
 			KubeClient: kubeFakeClient,
 		}
+		if util.IsNetworkSegmentationSupportEnabled() {
+			fakeClient.NetworkAttchDefClient = nadfake.NewSimpleClientset()
+		}
 
 		stop := make(chan struct{})
 		wf, err := factory.NewNodeWatchFactory(fakeClient, nodeName)
@@ -1244,6 +1248,15 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 				"OVN-KUBE-ITP": []string{},
 			},
 		}
+		if util.IsNetworkSegmentationSupportEnabled() {
+			expectedTables["nat"]["POSTROUTING"] = append(expectedTables["nat"]["POSTROUTING"],
+				"-j OVN-KUBE-UDN-MASQUERADE",
+			)
+			expectedTables["nat"]["OVN-KUBE-UDN-MASQUERADE"] = append(expectedTables["nat"]["OVN-KUBE-UDN-MASQUERADE"],
+				"-s 169.254.169.2/29 -j RETURN",     // this guarantees we don't SNAT default network masqueradeIPs
+				"-s 169.254.169.0/29 -j MASQUERADE", // this guarantees we SNAT all UDN MasqueradeIPs traffic leaving the node
+			)
+		}
 		f4 := iptV4.(*util.FakeIPTables)
 		err = f4.MatchState(expectedTables, map[util.FakePolicyKey]string{{
 			Table: "filter",
@@ -1337,6 +1350,12 @@ var _ = Describe("Gateway Init Operations", func() {
 		})
 
 		ovntest.OnSupportedPlatformsIt("sets up a local gateway with predetermined interface", func() {
+			localGatewayInterfaceTest(app, testNS, eth0Name, eth0MAC, eth0GWIP, eth0CIDR, link)
+		})
+
+		ovntest.OnSupportedPlatformsIt("sets up a local gateway with predetermined interface when network-segmentation is enabled", func() {
+			config.OVNKubernetesFeature.EnableNetworkSegmentation = true
+			config.OVNKubernetesFeature.EnableMultiNetwork = true
 			localGatewayInterfaceTest(app, testNS, eth0Name, eth0MAC, eth0GWIP, eth0CIDR, link)
 		})
 
