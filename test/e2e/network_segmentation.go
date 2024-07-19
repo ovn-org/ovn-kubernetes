@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
@@ -619,6 +620,60 @@ var _ = Describe("Network Segmentation", func() {
 				return err
 			}),
 		)
+		Context("with multicast feature enabled for namespace", func() {
+			var (
+				clientNodeInfo, serverNodeInfo nodeInfo
+			)
+			BeforeEach(func() {
+
+				nodes, err := e2enode.GetBoundedReadySchedulableNodes(context.TODO(), cs, 2)
+				framework.ExpectNoError(err)
+				if len(nodes.Items) < 2 {
+					e2eskipper.Skipf(
+						"Test requires >= 2 Ready nodes, but there are only %v nodes",
+						len(nodes.Items))
+				}
+
+				ips := e2enode.CollectAddresses(nodes, v1.NodeInternalIP)
+
+				clientNodeInfo = nodeInfo{
+					name:   nodes.Items[0].Name,
+					nodeIP: ips[0],
+				}
+
+				serverNodeInfo = nodeInfo{
+					name:   nodes.Items[1].Name,
+					nodeIP: ips[1],
+				}
+
+				enableMulticastForNamespace(f)
+			})
+			DescribeTable("should be able to send multicast UDP traffic between nodes", func(netConfigParams networkAttachmentConfigParams) {
+				ginkgo.By("creating the attachment configuration")
+				netConfigParams.namespace = f.Namespace.Name
+				netConfig := newNetworkAttachmentConfig(netConfigParams)
+				_, err := nadClient.NetworkAttachmentDefinitions(f.Namespace.Name).Create(
+					context.Background(),
+					generateNAD(netConfig),
+					metav1.CreateOptions{},
+				)
+				framework.ExpectNoError(err)
+				testMulticastUDPTraffic(f, clientNodeInfo, serverNodeInfo)
+			},
+				ginkgo.Entry("with primary layer3 UDN", networkAttachmentConfigParams{
+					name:     nadName,
+					topology: "layer3",
+					cidr:     fmt.Sprintf("%s,%s", userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+					role:     "primary",
+				}),
+				ginkgo.Entry("with primary layer2 UDN", networkAttachmentConfigParams{
+					name:     nadName,
+					topology: "layer2",
+					cidr:     fmt.Sprintf("%s,%s", userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+					role:     "primary",
+				}),
+			)
+		})
 	})
 
 	Context("UserDefinedNetwork CRD Controller", func() {
