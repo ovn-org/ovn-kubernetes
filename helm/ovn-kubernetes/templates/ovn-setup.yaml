@@ -63,3 +63,15 @@ kind: Namespace
 metadata:
   name: {{ $hostNetworkNamespace }}
 {{- end }}
+
+{{- if (and .Values.global.dockerConfigSecret .Values.global.dockerConfigSecret.create) }}
+---
+apiVersion: v1
+type: kubernetes.io/dockerconfigjson
+kind: Secret
+metadata:
+  namespace: {{ .Values.global.namespace }}
+  name: {{ .Values.global.imagePullSecretName }}
+data:
+  .dockerconfigjson: {{ include "dockerconfigjson" .Values.global.dockerConfigSecret | b64enc }}
+{{- end }}

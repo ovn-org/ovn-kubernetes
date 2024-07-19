@@ -412,6 +412,7 @@ jobs:
           - {"target": "control-plane",     "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv4",      "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "2br", "ic": "ic-single-node-zones"}
           - {"target": "control-plane",     "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv6",      "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "2br", "ic": "ic-single-node-zones"}
           - {"target": "multi-homing",      "ha": "noHA", "gateway-mode": "local",  "ipfamily": "ipv4",      "disable-snat-multiple-gws": "SnatGW",   "second-bridge": "1br", "ic": "ic-disabled"}
+          - {"target": "multi-homing-helm", "ha": "HA",   "gateway-mode": "shared", "ipfamily": "ipv4",      "disable-snat-multiple-gws": "snatGW",   "second-bridge": "1br", "ic": "ic-disabled"}
           - {"target": "node-ip-mac-migration", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv6",      "disable-snat-multiple-gws": "SnatGW",   "second-bridge": "1br", "ic": "ic-disabled"}
           - {"target": "node-ip-mac-migration", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv4",      "disable-snat-multiple-gws": "SnatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones"}
           - {"target": "compact-mode",      "ha": "noHA", "gateway-mode": "local",  "ipfamily": "ipv4",      "disable-snat-multiple-gws": "snatGW",   "second-bridge": "1br", "ic": "ic-disabled"}
@@ -441,7 +442,7 @@ jobs:
       OVN_SECOND_BRIDGE: "${{ matrix.second-bridge == '2br' }}"
       KIND_IPV4_SUPPORT: "${{ matrix.ipfamily == 'IPv4' || matrix.ipfamily == 'dualstack' }}"
       KIND_IPV6_SUPPORT: "${{ matrix.ipfamily == 'IPv6' || matrix.ipfamily == 'dualstack' }}"
-      ENABLE_MULTI_NET: "${{ matrix.target == 'multi-homing' || matrix.target == 'kv-live-migration' || matrix.target == 'network-segmentation' || matrix.target == 'tools'}}"
+      ENABLE_MULTI_NET: "${{ matrix.target == 'multi-homing' || matrix.target == 'kv-live-migration' || matrix.target == 'network-segmentation' || matrix.target == 'tools' || matrix.target == 'multi-homing-helm' }}"
       ENABLE_NETWORK_SEGMENTATION: "${{ matrix.target == 'network-segmentation' || matrix.target == 'tools'}}"
       KIND_INSTALL_KUBEVIRT: "${{ matrix.target == 'kv-live-migration' }}"
       OVN_COMPACT_MODE: "${{ matrix.target == 'compact-mode' }}"
@@ -450,7 +451,7 @@ jobs:
       KIND_NUM_WORKER: "${{ matrix.num-workers }}"
       KIND_NUM_NODES_PER_ZONE: "${{ matrix.num-nodes-per-zone }}"
       OVN_DISABLE_FORWARDING: "${{ matrix.forwarding == 'disable-forwarding' }}"
-      USE_HELM: "${{ matrix.target == 'control-plane-helm' }}"
+      USE_HELM: "${{ matrix.target == 'control-plane-helm' || matrix.target == 'multi-homing-helm' }}"
     steps:
 
     - name: Free up disk space
@@ -511,12 +512,12 @@ jobs:
     - name: Run Tests
       # e2e tests take ~60 minutes normally, 120 should be more than enough
       # set 3 hours for control-plane tests as these might take a while
-      timeout-minutes: ${{ matrix.target == 'control-plane' && 180 || matrix.target == 'external-gateway' && 180 || 120 }}
+      timeout-minutes: ${{ matrix.target == 'control-plane' && 180 || matrix.target == 'control-plane-helm' && 180 || matrix.target == 'external-gateway' && 180 || 120 }}
       run: |
         # used by e2e diagnostics package
         export OVN_IMAGE="ovn-daemonset-fedora:pr"
         
-        if [ "${{ matrix.target }}" == "multi-homing" ]; then
+        if [ "${{ matrix.target }}" == "multi-homing" ] || [ "${{ matrix.target }}" == "multi-homing-helm" ]; then
           make -C test control-plane WHAT="Multi Homing"
         elif [ "${{ matrix.target }}" == "node-ip-mac-migration" ]; then
           make -C test control-plane WHAT="Node IP and MAC address migration"
@@ -530,6 +531,7 @@ jobs:
           make -C test control-plane WHAT="Kubevirt Virtual Machines"
         elif [ "${{ matrix.target }}" == "control-plane-helm" ]; then
           make -C test control-plane
+          make -C test conformance
         elif [ "${{ matrix.target }}" == "network-segmentation" ]; then
           make -C test control-plane WHAT="Network Segmentation"
         elif [ "${{ matrix.target }}" == "tools" ]; then

@@ -57,3 +57,10 @@ Output "yes" if unprivilegedMode is true, otherwise "no"
   {{- print "no" }}
 {{- end }}
 {{- end }}
+
+{{/*
+Create dockerconfigjson to access container registry
+*/}}
+{{- define "dockerconfigjson" -}}
+{{- printf "{\"auths\": {\"%s\": {\"auth\": \"%s\"}}}" .registry .auth }}
+{{- end }}

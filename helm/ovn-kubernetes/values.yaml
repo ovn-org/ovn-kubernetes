@@ -143,6 +143,13 @@ global:
     tag: master
     # -- Image pull policy
     pullPolicy: IfNotPresent
+  # -- The name of secret used for pulling image. Use only if needed
+  imagePullSecretName: ""
+  # -- The secret used for pulling image. Use only if needed. Set create to have have secret created by helm
+  dockerConfigSecret:
+    registry: ghcr.io
+    auth: blah_blah_blah
+    create: false
 
 ovnkube-identity:
     # -- number of ovnube-identity pods, co-located with kube-apiserver process, so need to be the same number of control plane nodes
