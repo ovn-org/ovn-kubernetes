@@ -140,8 +140,8 @@ var (
 	Gateway = GatewayConfig{
 		V4JoinSubnet:       "100.64.0.0/16",
 		V6JoinSubnet:       "fd98::/64",
-		V4MasqueradeSubnet: "169.254.169.0/29",
-		V6MasqueradeSubnet: "fd69::/125",
+		V4MasqueradeSubnet: "169.254.169.0/24",
+		V6MasqueradeSubnet: "fd69::/112",
 		MasqueradeIPs: MasqueradeIPsConfig{
 			V4OVNMasqueradeIP:               net.ParseIP("169.254.169.1"),
 			V6OVNMasqueradeIP:               net.ParseIP("fd69::1"),
