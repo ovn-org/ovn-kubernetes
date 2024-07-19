@@ -8,6 +8,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iprulemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/vrfmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -31,7 +32,7 @@ type SecondaryNodeNetworkController struct {
 // NewSecondaryNodeNetworkController creates a new OVN controller for creating logical network
 // infrastructure and policy for default l3 network
 func NewSecondaryNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, netInfo util.NetInfo,
-	vrfManager *vrfmanager.Controller) (*SecondaryNodeNetworkController, error) {
+	vrfManager *vrfmanager.Controller, ruleManager *iprulemanager.Controller) (*SecondaryNodeNetworkController, error) {
 	snnc := &SecondaryNodeNetworkController{
 		BaseNodeNetworkController: BaseNodeNetworkController{
 			CommonNodeNetworkControllerInfo: *cnnci,
@@ -50,7 +51,7 @@ func NewSecondaryNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, n
 			return nil, err
 		}
 		nodeAnnotator := kube.NewNodeAnnotator(snnc.Kube, snnc.name)
-		snnc.gateway = NewUserDefinedNetworkGateway(snnc.NetInfo, networkID, node, nodeAnnotator, vrfManager)
+		snnc.gateway = NewUserDefinedNetworkGateway(snnc.NetInfo, networkID, node, nodeAnnotator, vrfManager, ruleManager)
 	}
 	return snnc, nil
 }

@@ -13,6 +13,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iprulemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/vrfmanager"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -39,6 +40,8 @@ type nodeNetworkControllerManager struct {
 	nadController *nad.NetAttachDefinitionController
 	// vrf manager that creates and manages vrfs for all UDNs
 	vrfManager *vrfmanager.Controller
+	// iprule manager that creates and manages iprules for all UDNs
+	ruleManager *iprulemanager.Controller
 }
 
 // NewNetworkController create secondary node network controllers for the given NetInfo
@@ -46,7 +49,7 @@ func (ncm *nodeNetworkControllerManager) NewNetworkController(nInfo util.NetInfo
 	topoType := nInfo.TopologyType()
 	switch topoType {
 	case ovntypes.Layer3Topology, ovntypes.Layer2Topology, ovntypes.LocalnetTopology:
-		return node.NewSecondaryNodeNetworkController(ncm.newCommonNetworkControllerInfo(), nInfo, ncm.vrfManager)
+		return node.NewSecondaryNodeNetworkController(ncm.newCommonNetworkControllerInfo(), nInfo, ncm.vrfManager, ncm.ruleManager)
 	}
 	return nil, fmt.Errorf("topology type %s not supported", topoType)
 }
@@ -81,6 +84,7 @@ func NewNodeNetworkControllerManager(ovnClient *util.OVNClientset, wf factory.No
 	}
 	if util.IsNetworkSegmentationSupportEnabled() {
 		ncm.vrfManager = vrfmanager.NewController()
+		ncm.ruleManager = iprulemanager.NewController(config.IPv4Mode, config.IPv6Mode)
 	}
 	if err != nil {
 		return nil, err
@@ -145,9 +149,9 @@ func (ncm *nodeNetworkControllerManager) Start(ctx context.Context) (err error) 
 	if ncm.nadController != nil {
 		err = ncm.nadController.Start()
 	}
+	wg := &sync.WaitGroup{}
 	if ncm.vrfManager != nil {
 		// Let's create VRF manager that will manage vrfs for all UDNs
-		wg := &sync.WaitGroup{}
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -158,6 +162,14 @@ func (ncm *nodeNetworkControllerManager) Start(ctx context.Context) (err error) 
 		go func() {
 			defer wg.Done()
 			ncm.vrfManager.RouteManager.Run(ncm.stopChan, 4*time.Minute)
+		}()
+	}
+	if ncm.ruleManager != nil {
+		// Let's create Route manager that will manage routes on the vrfs for all UDNs
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ncm.ruleManager.Run(ncm.stopChan, 5*time.Minute)
 		}()
 	}
 	return err

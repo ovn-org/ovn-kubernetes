@@ -2,8 +2,10 @@ package node
 
 import (
 	"fmt"
+	"net"
 	"strings"
 	"sync"
+	"testing"
 
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/containernetworking/plugins/pkg/testutils"
@@ -121,7 +123,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		Expect(err).NotTo(HaveOccurred())
 		nodeAnnotatorMock.On("Set", mock.Anything, map[string]string{netName: mgtPortMAC}).Return(nil)
 		nodeAnnotatorMock.On("Run").Return(nil)
-		udnGateway := NewUserDefinedNetworkGateway(netInfo, 3, node, nodeAnnotatorMock, vrf)
+		udnGateway := NewUserDefinedNetworkGateway(netInfo, 3, node, nodeAnnotatorMock, vrf, nil)
 		Expect(err).NotTo(HaveOccurred())
 		getCreationFakeOVSCommands(fexec, mgtPort, mgtPortMAC, netName, nodeName, netInfo.MTU())
 		err = testNS.Do(func(ns.NetNS) error {
@@ -147,7 +149,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			types.Layer3Topology, "100.128.0.0/16/24,ae70::66/60", types.NetworkRolePrimary)
 		netInfo, err := util.ParseNADInfo(nad)
 		Expect(err).NotTo(HaveOccurred())
-		udnGateway := NewUserDefinedNetworkGateway(netInfo, 3, node, nil, vrf)
+		udnGateway := NewUserDefinedNetworkGateway(netInfo, 3, node, nil, vrf, nil)
 		Expect(err).NotTo(HaveOccurred())
 		getDeletionFakeOVSCommands(fexec, mgtPort)
 		err = testNS.Do(func(ns.NetNS) error {
@@ -174,7 +176,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		Expect(err).NotTo(HaveOccurred())
 		nodeAnnotatorMock.On("Set", mock.Anything, map[string]string{netName: mgtPortMAC}).Return(nil)
 		nodeAnnotatorMock.On("Run").Return(nil)
-		udnGateway := NewUserDefinedNetworkGateway(netInfo, 3, node, nodeAnnotatorMock, vrf)
+		udnGateway := NewUserDefinedNetworkGateway(netInfo, 3, node, nodeAnnotatorMock, vrf, nil)
 		Expect(err).NotTo(HaveOccurred())
 		getCreationFakeOVSCommands(fexec, mgtPort, mgtPortMAC, netName, nodeName, netInfo.MTU())
 		err = testNS.Do(func(ns.NetNS) error {
@@ -199,7 +201,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			types.Layer2Topology, "100.128.0.0/16,ae70::66/60", types.NetworkRolePrimary)
 		netInfo, err := util.ParseNADInfo(nad)
 		Expect(err).NotTo(HaveOccurred())
-		udnGateway := NewUserDefinedNetworkGateway(netInfo, 3, node, nil, vrf)
+		udnGateway := NewUserDefinedNetworkGateway(netInfo, 3, node, nil, vrf, nil)
 		Expect(err).NotTo(HaveOccurred())
 		getDeletionFakeOVSCommands(fexec, mgtPort)
 		err = testNS.Do(func(ns.NetNS) error {
@@ -226,7 +228,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			types.Layer3Topology, "100.128.0.0/16/24,ae70::66/60", types.NetworkRolePrimary)
 		netInfo, err := util.ParseNADInfo(nad)
 		Expect(err).NotTo(HaveOccurred())
-		udnGateway := NewUserDefinedNetworkGateway(netInfo, 3, node, nil, vrf)
+		udnGateway := NewUserDefinedNetworkGateway(netInfo, 3, node, nil, vrf, nil)
 		Expect(err).NotTo(HaveOccurred())
 		getVRFCreationFakeOVSCommands(fexec)
 		err = testNS.Do(func(ns.NetNS) error {
@@ -274,7 +276,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			types.Layer3Topology, "100.128.0.0/16/24,ae70::66/60", types.NetworkRolePrimary)
 		netInfo, err := util.ParseNADInfo(nad)
 		Expect(err).NotTo(HaveOccurred())
-		udnGateway := NewUserDefinedNetworkGateway(netInfo, 3, node, nil, vrf)
+		udnGateway := NewUserDefinedNetworkGateway(netInfo, 3, node, nil, vrf, nil)
 		Expect(err).NotTo(HaveOccurred())
 		getVRFCreationFakeOVSCommands(fexec)
 		err = testNS.Do(func(ns.NetNS) error {
@@ -309,3 +311,96 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 	})
 })
+
+func TestGetUDNVRFIPRules(t *testing.T) {
+	type testRule struct {
+		priority int
+		family   int
+		table    int
+		dst      net.IPNet
+	}
+	type testConfig struct {
+		desc          string
+		vrftableID    int
+		v4mode        bool
+		v6mode        bool
+		expectedRules []testRule
+	}
+
+	tests := []testConfig{
+		{
+			desc:          "empty rules test",
+			vrftableID:    1007,
+			expectedRules: nil,
+		},
+		{
+			desc:       "v4 rule test",
+			vrftableID: 1007,
+			expectedRules: []testRule{
+				{
+					priority: UDNMasqueradeIPRulePriority,
+					family:   netlink.FAMILY_V4,
+					table:    1007,
+					dst:      *util.GetIPNetFullMaskFromIP(ovntest.MustParseIP("169.254.0.16")),
+				},
+			},
+			v4mode: true,
+		},
+		{
+			desc:       "v6 rule test",
+			vrftableID: 1009,
+			expectedRules: []testRule{
+				{
+					priority: UDNMasqueradeIPRulePriority,
+					family:   netlink.FAMILY_V6,
+					table:    1009,
+					dst:      *util.GetIPNetFullMaskFromIP(ovntest.MustParseIP("fd69::10")),
+				},
+			},
+			v6mode: true,
+		},
+		{
+			desc:       "dualstack rule test",
+			vrftableID: 1010,
+			expectedRules: []testRule{
+				{
+					priority: UDNMasqueradeIPRulePriority,
+					family:   netlink.FAMILY_V4,
+					table:    1010,
+					dst:      *util.GetIPNetFullMaskFromIP(ovntest.MustParseIP("169.254.0.16")),
+				},
+				{
+					priority: UDNMasqueradeIPRulePriority,
+					family:   netlink.FAMILY_V6,
+					table:    1010,
+					dst:      *util.GetIPNetFullMaskFromIP(ovntest.MustParseIP("fd69::10")),
+				},
+			},
+			v4mode: true,
+			v6mode: true,
+		},
+	}
+	config.Gateway.V6MasqueradeSubnet = "fd69::/112"
+	config.Gateway.V4MasqueradeSubnet = "169.254.0.0/16"
+	for _, test := range tests {
+		t.Run(test.desc, func(t *testing.T) {
+			g := gomega.NewWithT(t)
+			config.IPv4Mode = test.v4mode
+			config.IPv6Mode = test.v6mode
+			nad := ovntest.GenerateNAD("bluenet", "rednad", "greenamespace",
+				types.Layer3Topology, "100.128.0.0/16/24,ae70::66/60", types.NetworkRolePrimary)
+			netInfo, err := util.ParseNADInfo(nad)
+			g.Expect(err).NotTo(HaveOccurred())
+			udnGateway := NewUserDefinedNetworkGateway(netInfo, 3, nil, nil, nil, nil)
+			g.Expect(err).NotTo(HaveOccurred())
+			rules, err := udnGateway.getUDNVRFIPRules(test.vrftableID)
+			g.Expect(err).To(gomega.BeNil())
+			for i, rule := range rules {
+				g.Expect(rule.Priority).To(gomega.Equal(test.expectedRules[i].priority))
+				g.Expect(rule.Table).To(gomega.Equal(test.expectedRules[i].table))
+				g.Expect(rule.Family).To(gomega.Equal(test.expectedRules[i].family))
+				g.Expect(*rule.Dst).To(gomega.Equal(test.expectedRules[i].dst))
+			}
+		})
+	}
+}
