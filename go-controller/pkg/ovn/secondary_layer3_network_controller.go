@@ -103,10 +103,23 @@ func (h *secondaryLayer3NetworkControllerEventHandler) AddResource(obj interface
 				_, nodeSync := h.oc.addNodeFailed.Load(node.Name)
 				_, clusterRtrSync := h.oc.nodeClusterRouterPortFailed.Load(node.Name)
 				_, syncMgmtPort := h.oc.mgmtPortFailed.Load(node.Name)
+				_, syncGw := h.oc.gatewaysFailed.Load(node.Name)
 				_, syncZoneIC := h.oc.syncZoneICFailed.Load(node.Name)
-				nodeParams = &nodeSyncs{syncNode: nodeSync, syncClusterRouterPort: clusterRtrSync, syncMgmtPort: syncMgmtPort, syncZoneIC: syncZoneIC}
+				nodeParams = &nodeSyncs{
+					syncNode:              nodeSync,
+					syncClusterRouterPort: clusterRtrSync,
+					syncMgmtPort:          syncMgmtPort,
+					syncZoneIC:            syncZoneIC,
+					syncGw:                syncGw,
+				}
 			} else {
-				nodeParams = &nodeSyncs{syncNode: true, syncClusterRouterPort: true, syncMgmtPort: true, syncZoneIC: config.OVNKubernetesFeature.EnableInterconnect}
+				nodeParams = &nodeSyncs{
+					syncNode:              true,
+					syncClusterRouterPort: true,
+					syncMgmtPort:          true,
+					syncZoneIC:            config.OVNKubernetesFeature.EnableInterconnect,
+					syncGw:                true,
+				}
 			}
 			if err := h.oc.addUpdateLocalNodeEvent(node, nodeParams); err != nil {
 				klog.Errorf("Node add failed for %s, will try again later: %v",
@@ -152,12 +165,30 @@ func (h *secondaryLayer3NetworkControllerEventHandler) UpdateResource(oldObj, ne
 				syncMgmtPort := failed || macAddressChanged(oldNode, newNode) || nodeSubnetChanged
 				_, syncZoneIC := h.oc.syncZoneICFailed.Load(newNode.Name)
 				syncZoneIC = syncZoneIC || zoneClusterChanged
-				nodeSyncsParam = &nodeSyncs{syncNode: nodeSync, syncClusterRouterPort: clusterRtrSync, syncMgmtPort: syncMgmtPort, syncZoneIC: syncZoneIC}
+				_, failed = h.oc.gatewaysFailed.Load(newNode.Name)
+				syncGw := failed ||
+					gatewayChanged(oldNode, newNode) ||
+					nodeSubnetChanged ||
+					hostCIDRsChanged(oldNode, newNode) ||
+					nodeGatewayMTUSupportChanged(oldNode, newNode)
+				nodeSyncsParam = &nodeSyncs{
+					syncNode:              nodeSync,
+					syncClusterRouterPort: clusterRtrSync,
+					syncMgmtPort:          syncMgmtPort,
+					syncZoneIC:            syncZoneIC,
+					syncGw:                syncGw,
+				}
 			} else {
 				klog.Infof("Node %s moved from the remote zone %s to local zone %s.",
 					newNode.Name, util.GetNodeZone(oldNode), util.GetNodeZone(newNode))
 				// The node is now a local zone node. Trigger a full node sync.
-				nodeSyncsParam = &nodeSyncs{syncNode: true, syncClusterRouterPort: true, syncMgmtPort: true, syncZoneIC: config.OVNKubernetesFeature.EnableInterconnect}
+				nodeSyncsParam = &nodeSyncs{
+					syncNode:              true,
+					syncClusterRouterPort: true,
+					syncMgmtPort:          true,
+					syncZoneIC:            config.OVNKubernetesFeature.EnableInterconnect,
+					syncGw:                true,
+				}
 			}
 
 			return h.oc.addUpdateLocalNodeEvent(newNode, nodeSyncsParam)
@@ -241,6 +272,7 @@ type SecondaryLayer3NetworkController struct {
 	addNodeFailed               sync.Map
 	nodeClusterRouterPortFailed sync.Map
 	syncZoneICFailed            sync.Map
+	gatewaysFailed              sync.Map
 
 	// Cluster-wide router default Control Plane Protection (COPP) UUID
 	defaultCOPPUUID string
@@ -283,6 +315,7 @@ func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netI
 		addNodeFailed:               sync.Map{},
 		nodeClusterRouterPortFailed: sync.Map{},
 		syncZoneICFailed:            sync.Map{},
+		gatewaysFailed:              sync.Map{},
 	}
 
 	if oc.allocatesPodAnnotation() {
@@ -497,6 +530,7 @@ func (oc *SecondaryLayer3NetworkController) addUpdateLocalNodeEvent(node *kapi.N
 			oc.nodeClusterRouterPortFailed.Store(node.Name, true)
 			oc.mgmtPortFailed.Store(node.Name, true)
 			oc.syncZoneICFailed.Store(node.Name, true)
+			oc.gatewaysFailed.Store(node.Name, true)
 			err = fmt.Errorf("nodeAdd: error adding node %q for network %s: %w", node.Name, oc.GetNetworkName(), err)
 			oc.recordNodeErrorEvent(node, err)
 			return err
@@ -535,6 +569,62 @@ func (oc *SecondaryLayer3NetworkController) addUpdateLocalNodeEvent(node *kapi.N
 	if nSyncs.syncNode { // do this only if it is a new node add
 		errors := oc.addAllPodsOnNode(node.Name)
 		errs = append(errs, errors...)
+	}
+
+	if util.IsNetworkSegmentationSupportEnabled() && oc.IsPrimaryNetwork() {
+		if nSyncs.syncGw {
+			gwManager := NewGatewayManager(
+				node.Name,
+				oc.GetNetworkScopedClusterRouterName(),
+				oc.GetNetworkScopedGWRouterName(node.Name),
+				oc.GetNetworkScopedExtSwitchName(node.Name),
+				oc.GetNetworkScopedJoinSwitchName(),
+				oc.defaultCOPPUUID,
+				oc.kube,
+				oc.nbClient,
+				oc.NetInfo,
+			)
+
+			// TODO: fill these w/ actual values
+			var (
+				l3GWConfig     *util.L3GatewayConfig
+				hostAddresses  []string
+				clusterSubnets []*net.IPNet
+				gwLRPIps       []*net.IPNet
+				externalIPs    []net.IP
+			)
+
+			// TODO: remove this if once we have all the values to sync the GW
+			if l3GWConfig != nil {
+
+				if err := gwManager.syncNodeGateway(
+					node,
+					l3GWConfig,
+					hostSubnets,
+					hostAddresses,
+					clusterSubnets,
+					gwLRPIps,
+					oc.SCTPSupport,
+					oc.ovnClusterLRPToJoinIfAddrs,
+					externalIPs,
+				); err != nil {
+					errs = append(errs, err)
+					oc.gatewaysFailed.Store(node.Name, true)
+				} else {
+					oc.gatewaysFailed.Delete(node.Name)
+				}
+
+			}
+		}
+
+		// if per pod SNAT is being used, then l3 gateway config is required to be able to add pods
+		_, gwFailed := oc.gatewaysFailed.Load(node.Name)
+		if !gwFailed || !config.Gateway.DisableSNATMultipleGWs {
+			if nSyncs.syncNode || nSyncs.syncGw { // do this only if it is a new node add or a gateway sync happened
+				errors := oc.addAllPodsOnNode(node.Name)
+				errs = append(errs, errors...)
+			}
+		}
 	}
 
 	if nSyncs.syncZoneIC && config.OVNKubernetesFeature.EnableInterconnect {
