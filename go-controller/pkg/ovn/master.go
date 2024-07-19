@@ -140,6 +140,11 @@ func (oc *DefaultNetworkController) syncDefaultGatewayLogicalNetwork(
 		}
 	}
 
+	externalIPs := make([]net.IP, len(l3GatewayConfig.IPAddresses))
+	for i, ip := range l3GatewayConfig.IPAddresses {
+		externalIPs[i] = ip.IP
+	}
+
 	return oc.newGatewayManager(node.Name).syncGatewayLogicalNetwork(
 		node,
 		l3GatewayConfig,
@@ -149,6 +154,7 @@ func (oc *DefaultNetworkController) syncDefaultGatewayLogicalNetwork(
 		gwLRPIPs,
 		oc.SCTPSupport,
 		oc.ovnClusterLRPToJoinIfAddrs,
+		externalIPs,
 	)
 }
 
