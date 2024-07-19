@@ -1252,3 +1252,23 @@ func filterIPVersion(cidrs []netip.Prefix, v6 bool) []netip.Prefix {
 	}
 	return validCIDRs
 }
+
+// GetNetworkID will retrieve the network id for the specified network from the
+// first node that contains that network at the network id annotations, it will
+// return at the first ocurrence, rest of nodes will not be parsed.
+func GetNetworkID(nodes []*corev1.Node, nInfo NetInfo) (int, error) {
+	for _, node := range nodes {
+		var err error
+		networkID, err := ParseNetworkIDAnnotation(node, nInfo.GetNetworkName())
+		if err != nil {
+			if IsAnnotationNotSetError(err) {
+				continue
+			}
+			return InvalidNetworkID, err
+		}
+		if networkID != InvalidNetworkID {
+			return networkID, nil
+		}
+	}
+	return InvalidNetworkID, fmt.Errorf("missing network id for network '%s'", nInfo.GetNetworkName())
+}
