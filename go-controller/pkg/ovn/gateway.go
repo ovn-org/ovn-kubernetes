@@ -180,9 +180,16 @@ func (gw *GatewayManager) cleanupStalePodSNATs(nodeName string, nodeIPs []*net.I
 
 // GatewayInit creates a gateway router for the local chassis.
 // enableGatewayMTU enables options:gateway_mtu for gateway routers.
-func (gw *GatewayManager) GatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*net.IPNet,
-	l3GatewayConfig *util.L3GatewayConfig, sctpSupport bool, gwLRPIfAddrs, drLRPIfAddrs []*net.IPNet,
-	enableGatewayMTU bool) error {
+func (gw *GatewayManager) GatewayInit(
+	nodeName string,
+	clusterIPSubnet []*net.IPNet,
+	hostSubnets []*net.IPNet,
+	l3GatewayConfig *util.L3GatewayConfig,
+	sctpSupport bool,
+	gwLRPIfAddrs, drLRPIfAddrs []*net.IPNet,
+	externalIPs []net.IP,
+	enableGatewayMTU bool,
+) error {
 
 	gwLRPIPs := make([]net.IP, 0)
 	for _, gwLRPIfAddr := range gwLRPIfAddrs {
@@ -538,10 +545,6 @@ func (gw *GatewayManager) GatewayInit(nodeName string, clusterIPSubnet []*net.IP
 	// if config.Gateway.DisabledSNATMultipleGWs is not set (by default it is not),
 	// the NAT rules for pods not having annotations to route through either external
 	// gws or pod CNFs will be added within pods.go addLogicalPort
-	externalIPs := make([]net.IP, len(l3GatewayConfig.IPAddresses))
-	for i, ip := range l3GatewayConfig.IPAddresses {
-		externalIPs[i] = ip.IP
-	}
 	var natsToUpdate []*nbdb.NAT
 	// If l3gatewayAnnotation.IPAddresses changed, we need to update the SNATs on the GR
 	oldNATs := []*nbdb.NAT{}
@@ -1094,6 +1097,7 @@ func (gw *GatewayManager) syncGatewayLogicalNetwork(
 	gwLRPIPs []*net.IPNet,
 	isSCTPSupported bool,
 	ovnClusterLRPToJoinIfAddrs []*net.IPNet,
+	externalIPs []net.IP,
 ) error {
 	enableGatewayMTU := util.ParseNodeGatewayMTUSupport(node)
 
@@ -1105,6 +1109,7 @@ func (gw *GatewayManager) syncGatewayLogicalNetwork(
 		isSCTPSupported,
 		gwLRPIPs,
 		ovnClusterLRPToJoinIfAddrs,
+		externalIPs,
 		enableGatewayMTU,
 	)
 	if err != nil {
@@ -1130,5 +1135,38 @@ func (gw *GatewayManager) syncGatewayLogicalNetwork(
 		}
 	}
 
+	return nil
+}
+
+// syncNodeGateway ensures a node's gateway router is configured according to the L3 config and host subnets
+func (gw *GatewayManager) syncNodeGateway(
+	node *kapi.Node,
+	l3GatewayConfig *util.L3GatewayConfig,
+	hostSubnets []*net.IPNet,
+	hostAddrs []string,
+	clusterSubnets, gwLRPIPs []*net.IPNet,
+	isSCTPSupported bool,
+	joinSwitchIPs []*net.IPNet,
+	externalIPs []net.IP,
+) error {
+	if l3GatewayConfig.Mode == config.GatewayModeDisabled {
+		if err := gw.Cleanup(); err != nil {
+			return fmt.Errorf("error cleaning up gateway for node %s: %v", node.Name, err)
+		}
+	} else if hostSubnets != nil {
+		if err := gw.syncGatewayLogicalNetwork(
+			node,
+			l3GatewayConfig,
+			hostSubnets,
+			hostAddrs,
+			clusterSubnets,
+			gwLRPIPs,
+			isSCTPSupported,
+			joinSwitchIPs,
+			externalIPs,
+		); err != nil {
+			return fmt.Errorf("error creating gateway for node %s: %v", node.Name, err)
+		}
+	}
 	return nil
 }
