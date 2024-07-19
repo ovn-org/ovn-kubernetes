@@ -15,6 +15,7 @@ import (
 	"github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/generator/udn"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
@@ -26,6 +27,7 @@ import (
 	kapi "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/klog/v2"
+	utilnet "k8s.io/utils/net"
 	"k8s.io/utils/ptr"
 )
 
@@ -372,6 +374,46 @@ func (bsnc *BaseSecondaryNetworkController) addLogicalPortToNetworkForNAD(pod *k
 		}
 	}
 
+	return nil
+}
+
+func (bsnc *BaseSecondaryNetworkController) buildEgressSNAT(localPodSubnets []*net.IPNet, node *kapi.Node) ([]*nbdb.NAT, error) {
+	var snats []*nbdb.NAT
+	var masqIP *udn.MasqueradeIPs
+	var err error
+	for _, localPodSubnet := range localPodSubnets {
+		if utilnet.IsIPv6CIDR(localPodSubnet) {
+			masqIP, err = udn.AllocateV6MasqueradeIPs(*bsnc.networkID)
+		} else {
+			masqIP, err = udn.AllocateV4MasqueradeIPs(*bsnc.networkID)
+		}
+		if err != nil {
+			return nil, err
+		}
+		if masqIP == nil {
+			return nil, errors.New("masqIPs can not be empty")
+		}
+		outputPort := types.RouterToSwitchPrefix + bsnc.GetNetworkScopedName(node.Name)
+		dstMac, err := util.GetIfMacAddress(util.GetNetworkScopedK8sMgmtHostIntfName(uint(*bsnc.networkID)))
+		if err != nil {
+			return nil, err
+		}
+		snats = append(snats, libovsdbops.BuildSNATWithMatch(&masqIP.ManagementPort.IP, localPodSubnet, outputPort, nil, fmt.Sprintf("eth.dst == %s", dstMac)))
+	}
+	return snats, nil
+}
+
+func (bsnc *BaseSecondaryNetworkController) addNodeSubnetEgressSNAT(localPodSubnets []*net.IPNet, node *kapi.Node) error {
+	nats, err := bsnc.buildEgressSNAT(localPodSubnets, node)
+	if err != nil {
+		return err
+	}
+	router := &nbdb.LogicalRouter{
+		Name: bsnc.GetNetworkScopedClusterRouterName(),
+	}
+	if err := libovsdbops.CreateOrUpdateNATs(bsnc.nbClient, router, nats...); err != nil {
+		return fmt.Errorf("failed to update SNAT for pod of router: %s, error: %v", bsnc.GetNetworkScopedClusterRouterName(), err)
+	}
 	return nil
 }
 

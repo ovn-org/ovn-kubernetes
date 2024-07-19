@@ -519,3 +519,11 @@ func GetDefaultEndpointSlicesEventHandler(handlerFuncs cache.ResourceEventHandle
 	}
 	return eventHandler
 }
+
+func GetIfMacAddress(ifName string) (string, error) {
+	link, err := GetNetLinkOps().LinkByName(ifName)
+	if err != nil {
+		return "", err
+	}
+	return link.Attrs().HardwareAddr.String(), nil
+}
