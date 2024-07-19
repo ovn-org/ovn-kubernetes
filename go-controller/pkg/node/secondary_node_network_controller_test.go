@@ -21,6 +21,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	factoryMocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory/mocks"
 	kubemocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube/mocks"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iprulemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/vrfmanager"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
@@ -41,6 +42,7 @@ var _ = Describe("SecondaryNodeNetworkController", func() {
 		fexec            *ovntest.FakeExec
 		testNS           ns.NetNS
 		vrf              *vrfmanager.Controller
+		ipRulesManager   *iprulemanager.Controller
 		v4NodeSubnet     = "10.128.0.0/24"
 		v6NodeSubnet     = "ae70::66/112"
 		mgtPort          = fmt.Sprintf("%s%d", types.K8sMgmtIntfNamePrefix, netID)
@@ -89,6 +91,13 @@ var _ = Describe("SecondaryNodeNetworkController", func() {
 		go testNS.Do(func(netNS ns.NetNS) error {
 			defer wg.Done()
 			routeManager.Run(stopCh, 2*time.Minute)
+			return nil
+		})
+		ipRulesManager = iprulemanager.NewController(true, true)
+		wg.Add(1)
+		go testNS.Do(func(netNS ns.NetNS) error {
+			defer wg.Done()
+			ipRulesManager.Run(stopCh, 4*time.Minute)
 			return nil
 		})
 		vrf = vrfmanager.NewController(routeManager)
@@ -180,7 +189,7 @@ var _ = Describe("SecondaryNodeNetworkController", func() {
 		factoryMock.On("GetNodes").Return(nodeList, nil)
 		NetInfo, err := util.ParseNADInfo(nad)
 		Expect(err).NotTo(HaveOccurred())
-		controller, err := NewSecondaryNodeNetworkController(&cnnci, NetInfo, nil, &gateway{})
+		controller, err := NewSecondaryNodeNetworkController(&cnnci, NetInfo, nil, nil, &gateway{})
 		Expect(err).NotTo(HaveOccurred())
 		err = controller.Start(context.Background())
 		Expect(err).NotTo(HaveOccurred())
@@ -209,7 +218,7 @@ var _ = Describe("SecondaryNodeNetworkController", func() {
 		nodeInformer.On("Lister").Return(&nodeLister)
 		NetInfo, err := util.ParseNADInfo(nad)
 		Expect(err).NotTo(HaveOccurred())
-		controller, err := NewSecondaryNodeNetworkController(&cnnci, NetInfo, nil, &gateway{})
+		controller, err := NewSecondaryNodeNetworkController(&cnnci, NetInfo, nil, nil, &gateway{})
 		Expect(err).NotTo(HaveOccurred())
 		err = controller.Start(context.Background())
 		Expect(err).To(HaveOccurred()) // we don't have the gateway pieces setup so its expected to fail here
@@ -237,19 +246,21 @@ var _ = Describe("SecondaryNodeNetworkController", func() {
 			types.Layer3Topology, "100.128.0.0/16", types.NetworkRoleSecondary)
 		NetInfo, err := util.ParseNADInfo(nad)
 		Expect(err).NotTo(HaveOccurred())
-		controller, err := NewSecondaryNodeNetworkController(&cnnci, NetInfo, nil, &gateway{})
+		controller, err := NewSecondaryNodeNetworkController(&cnnci, NetInfo, nil, nil, &gateway{})
 		Expect(err).NotTo(HaveOccurred())
 		err = controller.Start(context.Background())
 		Expect(err).NotTo(HaveOccurred())
 		Expect(controller.gateway).To(BeNil())
 	})
-	It("ensure UDNGateway and VRFManager is invoked for Primary UDNs when feature gate is ON", func() {
+	ovntest.OnSupportedPlatformsIt("ensure UDNGateway and VRFManager and IPRulesManager are invoked for Primary UDNs when feature gate is ON", func() {
 		config.OVNKubernetesFeature.EnableNetworkSegmentation = true
 		config.OVNKubernetesFeature.EnableMultiNetwork = true
 		config.Gateway.NextHop = "10.0.0.11"
 		config.Gateway.Interface = gatewayInterface
 		config.Gateway.V6MasqueradeSubnet = "fd69::/112"
 		config.Gateway.V4MasqueradeSubnet = "169.254.0.0/16"
+		config.IPv6Mode = true
+		config.IPv4Mode = true
 
 		By("creating necessary mocks")
 		factoryMock := factoryMocks.NodeWatchFactory{}
@@ -281,9 +292,10 @@ var _ = Describe("SecondaryNodeNetworkController", func() {
 
 		By("creating secondary network controller for user defined primary network")
 		cnnci := CommonNodeNetworkControllerInfo{name: nodeName, watchFactory: &factoryMock}
-		controller, err := NewSecondaryNodeNetworkController(&cnnci, NetInfo, vrf, &gateway{})
+		controller, err := NewSecondaryNodeNetworkController(&cnnci, NetInfo, vrf, ipRulesManager, &gateway{})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(controller.gateway).To(Not(BeNil()))
+		Expect(controller.gateway.ruleManager).To(Not(BeNil()))
 		controller.gateway.kubeInterface = &kubeMock
 
 		err = testNS.Do(func(ns.NetNS) error {
@@ -316,6 +328,17 @@ var _ = Describe("SecondaryNodeNetworkController", func() {
 				return err
 			}).WithTimeout(120 * time.Second).Should(BeNil())
 
+			By("check masquerade iprules are created for the network")
+			rulesFound, err := netlink.RuleList(netlink.FAMILY_ALL)
+			Expect(err).NotTo(HaveOccurred())
+			var udnRules []netlink.Rule
+			for _, rule := range rulesFound {
+				if rule.Priority == UDNMasqueradeIPRulePriority {
+					udnRules = append(udnRules, rule)
+				}
+			}
+			Expect(udnRules).To(HaveLen(2))
+
 			By("delete the network and ensure its associated VRF device is also deleted")
 			cnode = node.DeepCopy()
 			kubeMock.On("UpdateNodeStatus", cnode).Return(nil)
@@ -325,6 +348,17 @@ var _ = Describe("SecondaryNodeNetworkController", func() {
 				_, err := util.GetNetLinkOps().LinkByName(vrfDeviceName)
 				return err
 			}).WithTimeout(120 * time.Second).ShouldNot(BeNil())
+
+			By("check masquerade iprules are deleted for the network")
+			rulesFound, err = netlink.RuleList(netlink.FAMILY_ALL)
+			Expect(err).NotTo(HaveOccurred())
+			udnRules = []netlink.Rule{} // reset
+			for _, rule := range rulesFound {
+				if rule.Priority == UDNMasqueradeIPRulePriority {
+					udnRules = append(udnRules, rule)
+				}
+			}
+			Expect(udnRules).To(HaveLen(0))
 			return nil
 		})
 		Expect(err).NotTo(HaveOccurred())

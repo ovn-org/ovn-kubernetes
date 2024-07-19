@@ -7,6 +7,7 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iprulemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/vrfmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -31,7 +32,7 @@ type SecondaryNodeNetworkController struct {
 // infrastructure and policy for the given secondary network. It supports layer3, layer2 and
 // localnet topology types.
 func NewSecondaryNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, netInfo util.NetInfo,
-	vrfManager *vrfmanager.Controller, defaultNetworkGateway Gateway) (*SecondaryNodeNetworkController, error) {
+	vrfManager *vrfmanager.Controller, ruleManager *iprulemanager.Controller, defaultNetworkGateway Gateway) (*SecondaryNodeNetworkController, error) {
 	snnc := &SecondaryNodeNetworkController{
 		BaseNodeNetworkController: BaseNodeNetworkController{
 			CommonNodeNetworkControllerInfo: *cnnci,
@@ -51,7 +52,8 @@ func NewSecondaryNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, n
 			return nil, fmt.Errorf("error retrieving network id for network %s: %v", netInfo.GetNetworkName(), err)
 		}
 
-		snnc.gateway, err = NewUserDefinedNetworkGateway(snnc.NetInfo, networkID, node, snnc.watchFactory.NodeCoreInformer().Lister(), snnc.Kube, vrfManager, defaultNetworkGateway)
+		snnc.gateway, err = NewUserDefinedNetworkGateway(snnc.NetInfo, networkID, node,
+			snnc.watchFactory.NodeCoreInformer().Lister(), snnc.Kube, vrfManager, ruleManager, defaultNetworkGateway)
 		if err != nil {
 			return nil, fmt.Errorf("error creating UDN gateway for network %s: %v", netInfo.GetNetworkName(), err)
 		}
