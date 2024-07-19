@@ -310,6 +310,20 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 	})
+	ovntest.OnSupportedPlatformsIt("should set rp filer to loose mode for management port interface", func() {
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "sysctl -w net.ipv4.conf.ovn-k8s-mp3.rp_filter=2",
+			Output: "net.ipv4.conf.ovn-k8s-mp3.rp_filter = 2",
+		})
+		err := testNS.Do(func(ns.NetNS) error {
+			defer GinkgoRecover()
+			err := addRPFilterLooseModeForManagementPort(mgtPort)
+			Expect(err).NotTo(HaveOccurred())
+			return nil
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
+	})
 })
 
 func TestGetUDNVRFIPRules(t *testing.T) {
