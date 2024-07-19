@@ -241,6 +241,9 @@ type SecondaryLayer3NetworkController struct {
 	addNodeFailed               sync.Map
 	nodeClusterRouterPortFailed sync.Map
 	syncZoneICFailed            sync.Map
+
+	// Cluster-wide router default Control Plane Protection (COPP) UUID
+	defaultCOPPUUID string
 }
 
 // NewSecondaryLayer3NetworkController create a new OVN controller for the given secondary layer3 NAD
@@ -462,6 +465,8 @@ func (oc *SecondaryLayer3NetworkController) Init(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+
+	oc.defaultCOPPUUID = *(clusterRouter.Copp)
 
 	// Only configure join switch and GR for user defined primary networks.
 	if util.IsNetworkSegmentationSupportEnabled() && oc.IsPrimaryNetwork() {
