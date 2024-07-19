@@ -236,6 +236,11 @@ func (udng *UserDefinedNetworkGateway) AddNetwork() error {
 			return fmt.Errorf("unable to create iprule %v for network %s, err: %v", rule, udng.GetNetworkName(), err)
 		}
 	}
+	// add loose mode for rp filter on management port
+	mgmtPortName := util.GetNetworkScopedK8sMgmtHostIntfName(uint(udng.networkID))
+	if err := addRPFilterLooseModeForManagementPort(mgmtPortName); err != nil {
+		return fmt.Errorf("could not set loose mode for reverse path filtering on management port %s: %v", mgmtPortName, err)
+	}
 	if udng.openflowManager != nil {
 		udng.openflowManager.addNetwork(udng.NetInfo, udng.masqCTMark, udng.v4MasqIP, udng.v6MasqIP)
 
@@ -539,4 +544,19 @@ func generateIPRuleForMasqIP(masqIP net.IP, isIPv6 bool, vrfTableId uint) netlin
 	}
 	r.Dst = util.GetIPNetFullMaskFromIP(masqIP)
 	return r
+}
+
+func addRPFilterLooseModeForManagementPort(mgmtPortName string) error {
+	// update the reverse path filtering options for ovn-k8s-mpX interface to avoid dropping packets with masqueradeIP
+	// coming out of managementport interface
+	// NOTE: v6 doesn't have rp_filter strict mode block
+	rpFilterLooseMode := "2"
+	// TODO: Convert testing framework to mock golang module utilities. Example:
+	// result, err := sysctl.Sysctl(fmt.Sprintf("net/ipv4/conf/%s/rp_filter", types.K8sMgmtIntfName), rpFilterLooseMode)
+	stdout, stderr, err := util.RunSysctl("-w", fmt.Sprintf("net.ipv4.conf.%s.rp_filter=%s", mgmtPortName, rpFilterLooseMode))
+	if err != nil || stdout != fmt.Sprintf("net.ipv4.conf.%s.rp_filter = %s", mgmtPortName, rpFilterLooseMode) {
+		return fmt.Errorf("could not set the correct rp_filter value for interface %s: stdout: %v, stderr: %v, err: %v",
+			mgmtPortName, stdout, stderr, err)
+	}
+	return nil
 }
