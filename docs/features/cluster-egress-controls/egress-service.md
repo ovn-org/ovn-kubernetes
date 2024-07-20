@@ -23,11 +23,12 @@ When that traffic reaches the node's mgmt port it will use its routing table and
 Because of that, it takes care of adding the necessary iptables rules on the selected node to SNAT traffic exiting from these pods to the service's ingress IP.
 
 These goals are achieved by introducing a new resource `EgressService` for users to create alongside LoadBalancer services with the following fields:
+
 - `sourceIPBy`: Determines the source IP of egress traffic originating from the pods backing the Service.
 When "LoadBalancerIP" the source IP is set to the Service's LoadBalancer ingress IP.
 When "Network" the source IP is set according to the interface of the Network, leveraging the masquerade rules that are already in place. Typically these rules specify SNAT to the IP of the outgoing interface, which means the packet will typically leave with the IP of the node.
 
-`nodeSelector`: Allows limiting the nodes that can be selected to handle the service's traffic when sourceIPBy: "LoadBalancerIP".
+- `nodeSelector`: Allows limiting the nodes that can be selected to handle the service's traffic when sourceIPBy: "LoadBalancerIP".
 When present only a node whose labels match the specified selectors can be selected for handling the service's traffic as explained earlier.
 When the field is not specified any node in the cluster can be chosen to manage the service's traffic.
 In addition, if the service's `ExternalTrafficPolicy` is set to `Local` an additional constraint is added that only a node that has an endpoint can be selected - this is important as otherwise new ingress traffic will not work properly if there are no local endpoints on the host to forward to. This also means that when "ETP=Local" only endpoints local to the selected host will be used for ingress traffic and other endpoints will not be used.
