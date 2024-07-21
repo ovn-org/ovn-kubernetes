@@ -50,7 +50,11 @@ func NewSecondaryNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, n
 		if err != nil {
 			return nil, fmt.Errorf("error retrieving network id for network %s: %v", netInfo.GetNetworkName(), err)
 		}
-		snnc.gateway = NewUserDefinedNetworkGateway(snnc.NetInfo, networkID, node, snnc.watchFactory.NodeCoreInformer().Lister(), snnc.Kube, vrfManager)
+		gateway, err := NewUserDefinedNetworkGateway(snnc.NetInfo, networkID, node, snnc.watchFactory.NodeCoreInformer().Lister(), snnc.Kube, vrfManager)
+		if err != nil {
+			return nil, fmt.Errorf("error creating UDN gateway for network %s: %v", netInfo.GetNetworkName(), err)
+		}
+		snnc.gateway = gateway
 	}
 	return snnc, nil
 }

@@ -11,11 +11,18 @@ import (
 	utilnet "k8s.io/utils/net"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/generator/udn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/vrfmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/vishvananda/netlink"
+)
+
+const (
+	// ctMarkUDNBase is the conntrack mark base value for user defined networks to use
+	// Each network gets its own mark == base + network-id
+	ctMarkUDNBase = 3
 )
 
 // UserDefinedNetworkGateway contains information
@@ -34,10 +41,37 @@ type UserDefinedNetworkGateway struct {
 	// vrf manager that creates and manages vrfs for all UDNs
 	// used with a lock since its shared between all network controllers
 	vrfManager *vrfmanager.Controller
+	// masqCTMark holds the mark value for this network
+	// which is used for egress traffic in shared gateway mode
+	masqCTMark uint
+	// v4MasqIP holds the IPv4 masquerade IP for this network
+	v4MasqIP *net.IPNet
+	// v6MasqIP holds the IPv6 masquerade IP for this network
+	v6MasqIP *net.IPNet
 }
 
 func NewUserDefinedNetworkGateway(netInfo util.NetInfo, networkID int, node *v1.Node, nodeLister listers.NodeLister,
-	kubeInterface kube.Interface, vrfManager *vrfmanager.Controller) *UserDefinedNetworkGateway {
+	kubeInterface kube.Interface, vrfManager *vrfmanager.Controller) (*UserDefinedNetworkGateway, error) {
+	// Generate a per network conntrack mark and masquerade IPs to be used for egress traffic.
+	var (
+		v4MasqIP *net.IPNet
+		v6MasqIP *net.IPNet
+	)
+	masqCTMark := ctMarkUDNBase + uint(networkID)
+	if config.IPv4Mode {
+		v4MasqIPs, err := udn.AllocateV4MasqueradeIPs(networkID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get v4 masquerade IP, network %s (%d): %v", netInfo.GetNetworkName(), networkID, err)
+		}
+		v4MasqIP = v4MasqIPs.GatewayRouter
+	}
+	if config.IPv6Mode {
+		v6MasqIPs, err := udn.AllocateV6MasqueradeIPs(networkID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get v6 masquerade IP, network %s (%d): %v", netInfo.GetNetworkName(), networkID, err)
+		}
+		v6MasqIP = v6MasqIPs.GatewayRouter
+	}
 	return &UserDefinedNetworkGateway{
 		NetInfo:       netInfo,
 		networkID:     networkID,
@@ -45,7 +79,10 @@ func NewUserDefinedNetworkGateway(netInfo util.NetInfo, networkID int, node *v1.
 		nodeLister:    nodeLister,
 		kubeInterface: kubeInterface,
 		vrfManager:    vrfManager,
-	}
+		masqCTMark:    masqCTMark,
+		v4MasqIP:      v4MasqIP,
+		v6MasqIP:      v6MasqIP,
+	}, nil
 }
 
 // AddNetwork will be responsible to create all plumbings
