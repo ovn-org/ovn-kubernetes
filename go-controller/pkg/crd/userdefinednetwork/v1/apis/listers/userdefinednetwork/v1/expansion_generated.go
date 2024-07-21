@@ -17,6 +17,10 @@ limitations under the License.
 
 package v1
 
+// ClusterUserDefinedNetworkListerExpansion allows custom methods to be added to
+// ClusterUserDefinedNetworkLister.
+type ClusterUserDefinedNetworkListerExpansion interface{}
+
 // UserDefinedNetworkListerExpansion allows custom methods to be added to
 // UserDefinedNetworkLister.
 type UserDefinedNetworkListerExpansion interface{}
