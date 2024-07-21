@@ -285,7 +285,7 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 			l3Config := node1.gatewayConfig(config.GatewayModeShared, vlanID)
 			err = util.SetL3GatewayConfig(nodeAnnotator, l3Config)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			err = util.SetNodeManagementPortMACAddress(nodeAnnotator, ovntest.MustParseMAC(node1.NodeMgmtPortMAC))
+			err = util.UpdateNodeManagementPortMACAddresses(&testNode, nodeAnnotator, ovntest.MustParseMAC(node1.NodeMgmtPortMAC), ovntypes.DefaultNetworkName)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNets(node1.NodeSubnet))
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())

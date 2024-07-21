@@ -60,8 +60,13 @@ const (
 	// OvnNodeManagementPort is the constant string representing the annotation key
 	OvnNodeManagementPort = "k8s.ovn.org/node-mgmt-port"
 
-	// OvnNodeManagementPortMacAddress is the constant string representing the annotation key
-	OvnNodeManagementPortMacAddress = "k8s.ovn.org/node-mgmt-port-mac-address"
+	// OvnNodeManagementPortMacAddresses contains all mac addresses of the management ports
+	// on all networks keyed by the network-name
+	// k8s.ovn.org/node-mgmt-port-mac-addresses: {
+	// "default":"ca:53:88:23:bc:98",
+	// "l2-network":"5e:52:2a:c0:98:f4",
+	// "l3-network":"1a:2c:34:29:b7:be"}
+	OvnNodeManagementPortMacAddresses = "k8s.ovn.org/node-mgmt-port-mac-addresses"
 
 	// OvnNodeChassisID is the systemID of the node needed for creating L3 gateway
 	OvnNodeChassisID = "k8s.ovn.org/node-chassis-id"
@@ -407,16 +412,31 @@ func ParseNodeManagementPortAnnotation(node *kapi.Node) (int, int, error) {
 	return cfg.PfId, cfg.FuncId, nil
 }
 
-func SetNodeManagementPortMACAddress(nodeAnnotator kube.Annotator, macAddress net.HardwareAddr) error {
-	return nodeAnnotator.Set(OvnNodeManagementPortMacAddress, macAddress.String())
+func UpdateNodeManagementPortMACAddresses(node *kapi.Node, nodeAnnotator kube.Annotator, macAddress net.HardwareAddr, netName string) error {
+	macAddressMap, err := parseNetworkMapAnnotation(node.Annotations, OvnNodeManagementPortMacAddresses)
+	if err != nil {
+		if !IsAnnotationNotSetError(err) {
+			return fmt.Errorf("failed to parse node network management port annotation %q: %v",
+				node.Annotations, err)
+		}
+		// in the case that the annotation does not exist
+		macAddressMap = map[string]string{}
+	}
+	macAddressMap[netName] = macAddress.String()
+	return nodeAnnotator.Set(OvnNodeManagementPortMacAddresses, macAddressMap)
 }
 
-func ParseNodeManagementPortMACAddress(node *kapi.Node) (net.HardwareAddr, error) {
-	macAddress, ok := node.Annotations[OvnNodeManagementPortMacAddress]
-	if !ok {
+// ParseNodeManagementPortMACAddresses parses the 'OvnNodeManagementPortMacAddresses' annotation
+// for the specified network in 'netName' and returns the mac address.
+func ParseNodeManagementPortMACAddresses(node *kapi.Node, netName string) (net.HardwareAddr, error) {
+	macAddressMap, err := parseNetworkMapAnnotation(node.Annotations, OvnNodeManagementPortMacAddresses)
+	if err != nil {
 		return nil, newAnnotationNotSetError("macAddress annotation not found for node %q ", node.Name)
 	}
-
+	macAddress, ok := macAddressMap[netName]
+	if !ok {
+		return nil, newAnnotationNotSetError("node %q has no %q annotation for network %s", node.Name, OvnNodeManagementPortMacAddresses, netName)
+	}
 	return net.ParseMAC(macAddress)
 }
 
@@ -1107,7 +1127,9 @@ func NodeZoneAnnotationChanged(oldNode, newNode *corev1.Node) bool {
 	return oldNode.Annotations[OvnNodeZoneName] != newNode.Annotations[OvnNodeZoneName]
 }
 
-func parseNetworkIDsAnnotation(nodeAnnotations map[string]string, annotationName string) (map[string]string, error) {
+// parseNetworkMapAnnotation parses the provided network aware annotation  which is in map format
+// and returns the corresponding value.
+func parseNetworkMapAnnotation(nodeAnnotations map[string]string, annotationName string) (map[string]string, error) {
 	annotation, ok := nodeAnnotations[annotationName]
 	if !ok {
 		return nil, newAnnotationNotSetError("could not find %q annotation", annotationName)
@@ -1133,7 +1155,7 @@ func parseNetworkIDsAnnotation(nodeAnnotations map[string]string, annotationName
 // ParseNetworkIDAnnotation parses the 'ovnNetworkIDs' annotation for the specified
 // network in 'netName' and returns the network id.
 func ParseNetworkIDAnnotation(node *kapi.Node, netName string) (int, error) {
-	networkIDsMap, err := parseNetworkIDsAnnotation(node.Annotations, ovnNetworkIDs)
+	networkIDsMap, err := parseNetworkMapAnnotation(node.Annotations, ovnNetworkIDs)
 	if err != nil {
 		return InvalidNetworkID, err
 	}
@@ -1153,7 +1175,7 @@ func updateNetworkIDsAnnotation(annotations map[string]string, netName string, n
 	var bytes []byte
 
 	// First get the all network ids for all existing networks
-	networkIDsMap, err := parseNetworkIDsAnnotation(annotations, ovnNetworkIDs)
+	networkIDsMap, err := parseNetworkMapAnnotation(annotations, ovnNetworkIDs)
 	if err != nil {
 		if !IsAnnotationNotSetError(err) {
 			return fmt.Errorf("failed to parse node network id annotation %q: %v",
@@ -1205,7 +1227,7 @@ func UpdateNetworkIDAnnotation(annotations map[string]string, netName string, ne
 // GetNodeNetworkIDsAnnotationNetworkIDs parses the "k8s.ovn.org/network-ids" annotation
 // on a node and returns the map of network name and ids.
 func GetNodeNetworkIDsAnnotationNetworkIDs(node *kapi.Node) (map[string]int, error) {
-	networkIDsStrMap, err := parseNetworkIDsAnnotation(node.Annotations, ovnNetworkIDs)
+	networkIDsStrMap, err := parseNetworkMapAnnotation(node.Annotations, ovnNetworkIDs)
 	if err != nil {
 		return nil, err
 	}

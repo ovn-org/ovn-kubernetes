@@ -413,12 +413,13 @@ func TestNodeL3GatewayAnnotationChanged(t *testing.T) {
 	}
 }
 
-func TestParseNodeManagementPortMACAddress(t *testing.T) {
+func TestParseNodeManagementPortMACAddresses(t *testing.T) {
 	tests := []struct {
 		desc        string
 		inpNode     v1.Node
 		errExpected bool
 		expOutput   bool
+		netName     string
 	}{
 		{
 			desc:      "mac address annotation not found for node, however, does not return error",
@@ -426,28 +427,50 @@ func TestParseNodeManagementPortMACAddress(t *testing.T) {
 			expOutput: false,
 		},
 		{
-			desc: "success: parse mac address",
+			desc: "success: parse mac address for given netName",
 			inpNode: v1.Node{
 				ObjectMeta: metav1.ObjectMeta{
-					Annotations: map[string]string{"k8s.ovn.org/node-mgmt-port-mac-address": "96:8f:e8:25:a2:e5"},
+					Annotations: map[string]string{"k8s.ovn.org/node-mgmt-port-mac-addresses": "{\"default\":\"96:8f:e8:25:a2:e5\",\"blue\":\"d6:bc:85:32:30:fb\",\"red\":\"4a:ea:1d:8d:8f:8c\"}"},
 				},
 			},
 			expOutput: true,
+			netName:   types.DefaultNetworkName,
 		},
 		{
 			desc: "error: parse mac address error",
 			inpNode: v1.Node{
 				ObjectMeta: metav1.ObjectMeta{
-					Annotations: map[string]string{"k8s.ovn.org/node-mgmt-port-mac-address": "96:8f:e8:25:a2:"},
+					Annotations: map[string]string{"k8s.ovn.org/node-mgmt-port-mac-addresses": "{\"default\":\"96:8f:e8:25:a2:\",\"blue\":\"1\",\"red\":\"2\"}"},
 				},
 			},
 			errExpected: true,
+			netName:     types.DefaultNetworkName,
+		},
+		{
+			desc: "error: parse mac address error since value of secondary network is invalid",
+			inpNode: v1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{"k8s.ovn.org/node-mgmt-port-mac-addresses": "{\"default\":\"96:8f:e8:25:a2:\",\"blue\":\"1\",\"red\":\"2\"}"},
+				},
+			},
+			errExpected: true,
+			netName:     "blue",
+		},
+		{
+			desc: "error: parse mac address error since network doesn't exist on the annotation",
+			inpNode: v1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{"k8s.ovn.org/node-mgmt-port-mac-addresses": "{\"default\":\"96:8f:e8:25:a2:\",\"blue\":\"1\",\"red\":\"2\"}"},
+				},
+			},
+			errExpected: true,
+			netName:     "yello",
 		},
 	}
 
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			cfg, e := ParseNodeManagementPortMACAddress(&tc.inpNode)
+			cfg, e := ParseNodeManagementPortMACAddresses(&tc.inpNode, tc.netName)
 			if tc.errExpected {
 				t.Log(e)
 				assert.Error(t, e)
