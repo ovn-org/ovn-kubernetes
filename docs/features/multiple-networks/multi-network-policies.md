@@ -1,20 +1,45 @@
 # MultiNetworkPolicies
-OVN-Kubernetes implements native support for
-[multi-networkpolicy](https://github.com/k8snetworkplumbingwg/multi-networkpolicy),
-an API providing
+
+## Introduction
+
+[multi-networkpolicy](https://github.com/k8snetworkplumbingwg/multi-networkpolicy) provides
 [network policy](https://kubernetes.io/docs/concepts/services-networking/network-policies/)
-features for secondary networks.
+features for secondary networks, and allow enhanced traffic security.
+
+## Motivation
+
+Using traffic restrictions based on user network configuration is a recommended practice. By defining policies that
+specify which services a workload can access, we mitigate supply chain attacks. Even if a component is compromised, it
+won’t be able to jeopardize other components of the system.
+
+## User-Stories
+
+As a cluster administrator, I want to enforce non-overridable admin network policies that must be adhered to by all user
+tenants in the cluster. This will secure my cluster’s network traffic.
+
+## User-case
+
+- Limit access to a database set outside the cluster, connected to VM and Pod workloads via localnet overlay network:
+  In this case example, only the VM has access to the database.
+  ![multi-homing-use-case-localnet](multi-homing-use-case-localnet.png)
+  ![micro-segmentation-use-case](micro-segmentation-use-case.png)
+
+## How to enable this feature on an OVN-Kubernetes cluster?
+
+In order to enable multi-networkPolicies on OVN-Kubernetes the `OVN_MULTI_NETWORK_ENABLE` config flag must be enabled
+
+## Workflow Description
 
 To configure pod isolation, the user must:
+
 - provision a `network-attachment-definition`.
 - provision a `MultiNetworkPolicy` indicating to which secondary networks it
   applies via the
   [policy-for](https://github.com/k8snetworkplumbingwg/multi-networkpolicy#policy-for-annotation)
   annotation.
 
-**NOTE:** the `OVN_MULTI_NETWORK_ENABLE` config flag must be enabled.
-
 Please refer to the following example:
+
 ```yaml
 ---
 apiVersion: k8s.cni.cncf.io/v1
@@ -22,9 +47,9 @@ kind: NetworkAttachmentDefinition
 metadata:
   name: tenant-blue
 spec:
-    config: '{
+  config: '{
         "cniVersion": "0.4.0",
-        "name": "tenant-blue",
+        "name": "tenant-blue-net",
         "netAttachDefName": "default/tenant-blue",
         "topology": "layer2",
         "type": "ovn-k8s-cni-overlay",
@@ -42,13 +67,13 @@ spec:
     matchLabels:
       app: stuff-doer # the policy will **apply** to all pods with this label
   ingress:
-  - ports:
-    - port: 9000
-      protocol: TCP
-    from:
-    - namespaceSelector:
-        matchLabels:
-          role: trusted # only pods on namespaces with this label will be allowed on port 9000
+    - ports:
+        - port: 9000
+          protocol: TCP
+      from:
+        - namespaceSelector:
+            matchLabels:
+              role: trusted # only pods on namespaces with this label will be allowed on port 9000
   policyTypes:
     - Ingress
 ```
@@ -61,3 +86,7 @@ information.
 annotation without the subnet attribute defined are possible if the policy
 **only features** `ipBlock` peers. If the `net-attach-def` features the
 `subnet` attribute, it can also feature `namespaceSelectors` and `podSelectors`.
+
+## User facing API Changes
+
+There are no user facing API Changes.
