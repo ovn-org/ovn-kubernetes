@@ -395,9 +395,9 @@ func hostCIDRsChanged(oldNode, newNode *kapi.Node) bool {
 }
 
 // macAddressChanged() compares old annotations to new and returns true if something has changed.
-func macAddressChanged(oldNode, node *kapi.Node) bool {
-	oldMacAddress, _ := util.ParseNodeManagementPortMACAddress(oldNode)
-	macAddress, _ := util.ParseNodeManagementPortMACAddress(node)
+func macAddressChanged(oldNode, node *kapi.Node, netName string) bool {
+	oldMacAddress, _ := util.ParseNodeManagementPortMACAddresses(oldNode, netName)
+	macAddress, _ := util.ParseNodeManagementPortMACAddresses(node, netName)
 	return !bytes.Equal(oldMacAddress, macAddress)
 }
 

@@ -285,7 +285,7 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 		netdevName, rep := "", ""
 
 		mgmtPorts := NewManagementPorts(nodeName, nodeSubnetCIDRs, netdevName, rep)
-		_, err = mgmtPorts[0].Create(rm, nodeAnnotator, waiter)
+		_, err = mgmtPorts[0].Create(rm, &existingNode, nodeAnnotator, waiter)
 		Expect(err).NotTo(HaveOccurred())
 		checkMgmtTestPortIpsAndRoutes(configs, mgtPort, mgtPortAddrs, expectedLRPMAC)
 		return nil
@@ -302,7 +302,7 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 	updatedNode, err := fakeClient.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
 	Expect(err).NotTo(HaveOccurred())
 
-	macFromAnnotation, err := util.ParseNodeManagementPortMACAddress(updatedNode)
+	macFromAnnotation, err := util.ParseNodeManagementPortMACAddresses(updatedNode, types.DefaultNetworkName)
 	Expect(err).NotTo(HaveOccurred())
 	Expect(macFromAnnotation.String()).To(Equal(mgtPortMAC))
 
@@ -382,7 +382,7 @@ func testManagementPortDPU(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.
 		netdevName, rep := "pf0vf0", "pf0vf0"
 
 		mgmtPorts := NewManagementPorts(nodeName, nodeSubnetCIDRs, netdevName, rep)
-		_, err = mgmtPorts[0].Create(rm, nodeAnnotator, waiter)
+		_, err = mgmtPorts[0].Create(rm, &existingNode, nodeAnnotator, waiter)
 		Expect(err).NotTo(HaveOccurred())
 		// make sure interface was renamed and mtu was set
 		l, err := netlink.LinkByName(mgtPort)
@@ -401,7 +401,7 @@ func testManagementPortDPU(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.
 	updatedNode, err := fakeClient.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
 	Expect(err).NotTo(HaveOccurred())
 
-	macFromAnnotation, err := util.ParseNodeManagementPortMACAddress(updatedNode)
+	macFromAnnotation, err := util.ParseNodeManagementPortMACAddresses(updatedNode, types.DefaultNetworkName)
 	Expect(err).NotTo(HaveOccurred())
 	Expect(macFromAnnotation.String()).To(Equal(mgtPortMAC))
 
@@ -467,7 +467,7 @@ func testManagementPortDPUHost(ctx *cli.Context, fexec *ovntest.FakeExec, testNS
 		netdevName, rep := "pf0vf0", ""
 
 		mgmtPorts := NewManagementPorts(nodeName, nodeSubnetCIDRs, netdevName, rep)
-		_, err = mgmtPorts[0].Create(rm, nil, nil)
+		_, err = mgmtPorts[0].Create(rm, nil, nil, nil)
 		Expect(err).NotTo(HaveOccurred())
 		checkMgmtTestPortIpsAndRoutes(configs, mgtPort, mgtPortAddrs, expectedLRPMAC)
 		// check mgmt port MAC, mtu and link state

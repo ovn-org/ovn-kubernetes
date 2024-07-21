@@ -156,7 +156,7 @@ func (h *secondaryLayer2NetworkControllerEventHandler) UpdateResource(oldObj, ne
 			var nodeSyncsParam *nodeSyncs
 			if h.oc.isLocalZoneNode(oldNode) {
 				// determine what actually changed in this update
-				syncMgmtPort := macAddressChanged(oldNode, newNode) || nodeSubnetChanged
+				syncMgmtPort := macAddressChanged(oldNode, newNode, h.oc.NetInfo.GetNetworkName()) || nodeSubnetChanged
 				nodeSyncsParam = &nodeSyncs{syncMgmtPort: syncMgmtPort}
 			} else {
 				klog.Infof("Node %s moved from the remote zone %s to local zone %s.",
