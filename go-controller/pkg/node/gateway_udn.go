@@ -18,6 +18,12 @@ import (
 	"github.com/vishvananda/netlink"
 )
 
+const (
+	// ctMarkUDNBase is the conntrack mark base value for user defined networks to use
+	// Each network gets its own mark == base + network-id
+	ctMarkUDNBase = 3
+)
+
 // UserDefinedNetworkGateway contains information
 // required to program a UDN at each node's
 // gateway.
@@ -34,6 +40,9 @@ type UserDefinedNetworkGateway struct {
 	// vrf manager that creates and manages vrfs for all UDNs
 	// used with a lock since its shared between all network controllers
 	vrfManager *vrfmanager.Controller
+	// masqCTMark holds the mark value for this network
+	// which is used for egress traffic in shared gateway mode
+	masqCTMark uint
 }
 
 func NewUserDefinedNetworkGateway(netInfo util.NetInfo, networkID int, node *v1.Node, nodeLister listers.NodeLister,
@@ -45,6 +54,8 @@ func NewUserDefinedNetworkGateway(netInfo util.NetInfo, networkID int, node *v1.
 		nodeLister:    nodeLister,
 		kubeInterface: kubeInterface,
 		vrfManager:    vrfManager,
+		// Generate a per network conntrack mark to be used for egress traffic.
+		masqCTMark: ctMarkUDNBase + uint(networkID),
 	}
 }
 
