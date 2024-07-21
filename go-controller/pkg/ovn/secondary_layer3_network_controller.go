@@ -149,7 +149,7 @@ func (h *secondaryLayer3NetworkControllerEventHandler) UpdateResource(oldObj, ne
 				_, nodeSync := h.oc.addNodeFailed.Load(newNode.Name)
 				_, failed := h.oc.nodeClusterRouterPortFailed.Load(newNode.Name)
 				clusterRtrSync := failed || nodeChassisChanged(oldNode, newNode) || nodeSubnetChanged
-				syncMgmtPort := failed || macAddressChanged(oldNode, newNode) || nodeSubnetChanged
+				syncMgmtPort := failed || macAddressChanged(oldNode, newNode, h.oc.GetNetworkName()) || nodeSubnetChanged
 				_, syncZoneIC := h.oc.syncZoneICFailed.Load(newNode.Name)
 				syncZoneIC = syncZoneIC || zoneClusterChanged
 				nodeSyncsParam = &nodeSyncs{syncNode: nodeSync, syncClusterRouterPort: clusterRtrSync, syncMgmtPort: syncMgmtPort, syncZoneIC: syncZoneIC}

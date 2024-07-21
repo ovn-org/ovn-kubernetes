@@ -600,7 +600,7 @@ func createNodeManagementPorts(node *kapi.Node, nodeAnnotator kube.Annotator, wa
 	var mgmtPortConfig *managementPortConfig
 	mgmtPorts := make([]managementPortEntry, 0)
 	for _, port := range ports {
-		config, err := port.Create(routeManager, nodeAnnotator, waiter)
+		config, err := port.Create(routeManager, node, nodeAnnotator, waiter)
 		if err != nil {
 			return nil, nil, err
 		}
