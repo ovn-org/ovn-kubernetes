@@ -14,6 +14,12 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
+const (
+	// ctMarkUDNBase is the conntrack mark base value for user defined networks to use
+	// Each network gets its own mark == base + network-id
+	ctMarkUDNBase = 3
+)
+
 // UserDefinedNetworkGateway contains information
 // required to program a UDN at each node's
 // gateway.
@@ -25,6 +31,9 @@ type UserDefinedNetworkGateway struct {
 	networkID int
 	// node that its programming things on
 	node *v1.Node
+	// masqCTMark holds the mark value for this network
+	// which is used for egress traffic in shared gateway mode
+	masqCTMark uint
 }
 
 func NewUserDefinedNetworkGateway(netInfo util.NetInfo, networkID int, node *v1.Node) *UserDefinedNetworkGateway {
@@ -32,6 +41,9 @@ func NewUserDefinedNetworkGateway(netInfo util.NetInfo, networkID int, node *v1.
 		NetInfo:   netInfo,
 		networkID: networkID,
 		node:      node,
+
+		// Generate a per network conntrack mark to be used for egress traffic.
+		masqCTMark: ctMarkUDNBase + uint(networkID),
 	}
 }
 
