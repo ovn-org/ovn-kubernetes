@@ -1167,9 +1167,12 @@ func (bnc *BaseNetworkController) syncStaleEgressReroutePolicy(egressIPCache map
 }
 
 // This function implements a portion of syncEgressIPs.
-// It removes OVN NAT rules used by EgressIPs deleted while ovnkube-master was down.
+// It removes OVN NAT rules used by EgressIPs deleted while ovnkube-master was down for the default cluster network only.
 // Upon failure, it may be invoked multiple times in order to avoid a pod restart.
 func (bnc *BaseNetworkController) syncStaleSNATRules(egressIPCache map[string]egressIPCacheEntry) error {
+	if bnc.IsSecondary() {
+		return nil
+	}
 	predicate := func(item *nbdb.NAT) bool {
 		egressIPName, exists := item.ExternalIDs["name"]
 		// Exclude rows that have no name or are not the right type
