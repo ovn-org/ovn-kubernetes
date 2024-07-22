@@ -178,11 +178,7 @@ func (oc *DefaultNodeNetworkController) Reconcile(netInfo util.ReconcilableNetIn
 	oc.SetNADs(netInfo.GetNADs()...)
 	if oc.Gateway != nil && isAdvertised != wasAdvertised {
 		oc.Gateway.SetRoutingAdvertised(isAdvertised)
-		err := oc.Gateway.Reconcile()
-		// TODO it looks like we need a proper queued reconciliation here
-		if err != nil {
-			klog.Errorf("Failed to reconcile node %s network %s VRFs: %v", oc.name, oc.GetNetworkName(), err)
-		}
+		oc.Gateway.Reconcile()
 	}
 	return nil
 }
