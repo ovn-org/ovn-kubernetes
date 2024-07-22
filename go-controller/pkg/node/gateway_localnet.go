@@ -11,6 +11,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/openflowmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -22,7 +23,7 @@ import (
 
 func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net.IP, gwIntf, egressGWIntf string, gwIPs []*net.IPNet,
 	nodeAnnotator kube.Annotator, cfg *managementPortConfig, kube kube.Interface, watchFactory factory.NodeWatchFactory,
-	routeManager *routemanager.Controller) (*gateway, error) {
+	routeManager *routemanager.Controller, ofManager *openflowmanager.Controller) (*gateway, error) {
 	klog.Info("Creating new local gateway")
 	gw := &gateway{}
 
@@ -92,7 +93,7 @@ func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net
 			return fmt.Errorf("failed to set the node masquerade route to OVN: %v", err)
 		}
 
-		gw.openflowManager, err = newGatewayOpenFlowManager(gwBridge, exGwBridge, hostSubnets, gw.nodeIPManager.ListAddresses())
+		gw.openflowManager, err = newGatewayOpenFlowManager(gwBridge, exGwBridge, hostSubnets, gw.nodeIPManager.ListAddresses(), ofManager)
 		if err != nil {
 			return err
 		}

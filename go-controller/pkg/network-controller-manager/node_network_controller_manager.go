@@ -12,6 +12,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/openflowmanager"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -30,6 +31,8 @@ type nodeNetworkControllerManager struct {
 	stopChan      chan struct{}
 	recorder      record.EventRecorder
 
+	// openflow manage controller
+	ofmController                *openflowmanager.Controller
 	defaultNodeNetworkController nad.BaseNetworkController
 
 	// net-attach-def controller handle net-attach-def and create/delete secondary controllers
@@ -42,7 +45,7 @@ func (ncm *nodeNetworkControllerManager) NewNetworkController(nInfo util.NetInfo
 	topoType := nInfo.TopologyType()
 	switch topoType {
 	case ovntypes.Layer3Topology, ovntypes.Layer2Topology, ovntypes.LocalnetTopology:
-		return node.NewSecondaryNodeNetworkController(ncm.newCommonNetworkControllerInfo(), nInfo), nil
+		return node.NewSecondaryNodeNetworkController(ncm.newCommonNetworkControllerInfo(), nInfo, ncm.ofmController), nil
 	}
 	return nil, fmt.Errorf("topology type %s not supported", topoType)
 }
@@ -69,6 +72,7 @@ func NewNodeNetworkControllerManager(ovnClient *util.OVNClientset, wf factory.No
 		recorder:      eventRecorder,
 	}
 
+	ncm.ofmController = openflowmanager.NewController(ncm.stopChan)
 	// need to configure OVS interfaces for Pods on secondary networks in the DPU mode
 	var err error
 	if config.OVNKubernetesFeature.EnableMultiNetwork && config.OvnKubeNode.Mode == ovntypes.NodeModeDPU {
@@ -82,7 +86,7 @@ func NewNodeNetworkControllerManager(ovnClient *util.OVNClientset, wf factory.No
 
 // initDefaultNodeNetworkController creates the controller for default network
 func (ncm *nodeNetworkControllerManager) initDefaultNodeNetworkController() error {
-	defaultNodeNetworkController, err := node.NewDefaultNodeNetworkController(ncm.newCommonNetworkControllerInfo())
+	defaultNodeNetworkController, err := node.NewDefaultNodeNetworkController(ncm.newCommonNetworkControllerInfo(), ncm.ofmController)
 	if err != nil {
 		return err
 	}

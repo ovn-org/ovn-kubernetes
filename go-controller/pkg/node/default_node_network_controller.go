@@ -32,6 +32,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/egressip"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/egressservice"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/linkmanager"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/openflowmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/ovspinning"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/apbroute"
@@ -59,6 +60,8 @@ type BaseNodeNetworkController struct {
 
 	// network information
 	util.NetInfo
+
+	ofmController *openflowmanager.Controller
 
 	// podNADToDPUCDMap tracks the NAD/DPU_ConnectionDetails mapping for all NADs that each pod requests.
 	// Key is pod.UUID; value is nadToDPUCDMap (of map[string]*util.DPUConnectionDetails). Key of nadToDPUCDMap
@@ -108,13 +111,14 @@ type DefaultNodeNetworkController struct {
 	apbExternalRouteNodeController *apbroute.ExternalGatewayNodeController
 }
 
-func newDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, stopChan chan struct{},
-	wg *sync.WaitGroup) *DefaultNodeNetworkController {
+func newDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, ofmController *openflowmanager.Controller,
+	stopChan chan struct{}, wg *sync.WaitGroup) *DefaultNodeNetworkController {
 
 	return &DefaultNodeNetworkController{
 		BaseNodeNetworkController: BaseNodeNetworkController{
 			CommonNodeNetworkControllerInfo: *cnnci,
 			NetInfo:                         &util.DefaultNetInfo{},
+			ofmController:                   ofmController,
 			stopChan:                        stopChan,
 			wg:                              wg,
 		},
@@ -123,11 +127,11 @@ func newDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, sto
 }
 
 // NewDefaultNodeNetworkController creates a new network controller for node management of the default network
-func NewDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo) (*DefaultNodeNetworkController, error) {
+func NewDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, ofmController *openflowmanager.Controller) (*DefaultNodeNetworkController, error) {
 	var err error
 	stopChan := make(chan struct{})
 	wg := &sync.WaitGroup{}
-	nc := newDefaultNodeNetworkController(cnnci, stopChan, wg)
+	nc := newDefaultNodeNetworkController(cnnci, ofmController, stopChan, wg)
 
 	if len(config.Kubernetes.HealthzBindAddress) != 0 {
 		klog.Infof("Enable node proxy healthz server on %s", config.Kubernetes.HealthzBindAddress)

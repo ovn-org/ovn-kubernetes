@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/openflowmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	"k8s.io/klog/v2"
@@ -20,13 +21,14 @@ type SecondaryNodeNetworkController struct {
 
 // NewSecondaryNodeNetworkController creates a new OVN controller for creating logical network
 // infrastructure and policy for default l3 network
-func NewSecondaryNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, netInfo util.NetInfo) *SecondaryNodeNetworkController {
+func NewSecondaryNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, netInfo util.NetInfo, ofmContoller *openflowmanager.Controller) *SecondaryNodeNetworkController {
 	return &SecondaryNodeNetworkController{
 		BaseNodeNetworkController: BaseNodeNetworkController{
 			CommonNodeNetworkControllerInfo: *cnnci,
 			NetInfo:                         netInfo,
 			stopChan:                        make(chan struct{}),
 			wg:                              &sync.WaitGroup{},
+			ofmController:                   ofmContoller,
 		},
 	}
 }
