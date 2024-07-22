@@ -727,6 +727,10 @@ func ParseNetConf(netattachdef *nettypes.NetworkAttachmentDefinition) (*ovncnity
 		return nil, fmt.Errorf("localnet topology does not allow specifying join-subnet as services are not supported")
 	}
 
+	if netconf.Role == types.NetworkRolePrimary && netconf.Subnets == "" && netconf.Topology == types.Layer2Topology {
+		return nil, fmt.Errorf("the subnet attribute must be defined for layer2 primary user defined networks")
+	}
+
 	return netconf, nil
 }
 
