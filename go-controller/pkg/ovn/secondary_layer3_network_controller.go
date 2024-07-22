@@ -291,9 +291,9 @@ func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netI
 		oc.podAnnotationAllocator = podAnnotationAllocator
 	}
 
-	// disable multicast support for secondary networks
-	// TBD: changes needs to be made to support multicast in secondary networks
-	oc.multicastSupport = false
+	// enable multicast suppor at UDN only for primaries + multicast enabled
+	// TBD: changes needs to be made to support multicast beyond primary UDN
+	oc.multicastSupport = util.IsNetworkSegmentationSupportEnabled() && config.EnableMulticast
 
 	oc.initRetryFramework()
 	return oc
