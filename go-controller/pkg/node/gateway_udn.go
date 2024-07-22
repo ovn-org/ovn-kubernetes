@@ -50,6 +50,96 @@ type UserDefinedNetworkGateway struct {
 	v6MasqIP *net.IPNet
 }
 
+// UTILS Needed for UDN (also leveraged for default netInfo) in bridgeConfiguration
+
+// getBridgePortConfigurations returns a slice of Network port configurations along with the
+// uplinkName and physical port's ofport value
+func (b *bridgeConfiguration) getBridgePortConfigurations() ([]bridgeUDNConfiguration, string, string) {
+	b.Lock()
+	defer b.Unlock()
+	netConfigs := make([]bridgeUDNConfiguration, len(b.netConfig))
+	for _, netConfig := range b.netConfig {
+		netConfigs = append(netConfigs, *netConfig)
+	}
+	return netConfigs, b.uplinkName, b.ofPortPhys
+}
+
+// addNetworkBridgeConfig adds the patchport and ctMark value for the provided netInfo into the bridge configuration cache
+func (b *bridgeConfiguration) addNetworkBridgeConfig(nInfo util.NetInfo, masqCTMark uint, v4MasqIP, v6MasqIP *net.IPNet) {
+	b.Lock()
+	defer b.Unlock()
+
+	netName := nInfo.GetNetworkName()
+	patchPort := nInfo.GetNetworkScopedPatchPortName(b.bridgeName, b.nodeName)
+
+	_, found := b.netConfig[netName]
+	if !found {
+		netConfig := &bridgeUDNConfiguration{
+			patchPort:  patchPort,
+			masqCTMark: fmt.Sprintf("0x%x", masqCTMark),
+			v4MasqIP:   v4MasqIP,
+			v6MasqIP:   v6MasqIP,
+		}
+
+		b.netConfig[netName] = netConfig
+	} else {
+		klog.Warningf("Trying to update bridge config for network %s which already"+
+			"exists in cache...networks are not mutable...ignoring update", nInfo.GetNetworkName())
+	}
+}
+
+// delNetworkBridgeConfig deletes the provided netInfo from the bridge configuration cache
+func (b *bridgeConfiguration) delNetworkBridgeConfig(nInfo util.NetInfo) {
+	b.Lock()
+	defer b.Unlock()
+
+	delete(b.netConfig, nInfo.GetNetworkName())
+}
+
+func (b *bridgeConfiguration) patchedNetConfigs() []*bridgeUDNConfiguration {
+	result := make([]*bridgeUDNConfiguration, 0, len(b.netConfig))
+	for _, netConfig := range b.netConfig {
+		if netConfig.ofPortPatch == "" {
+			continue
+		}
+		result = append(result, netConfig)
+	}
+	return result
+}
+
+// END UDN UTILs for bridgeConfiguration
+
+// bridgeUDNConfiguration holds the patchport and ctMark
+// information for a given network
+type bridgeUDNConfiguration struct {
+	patchPort   string
+	ofPortPatch string
+	masqCTMark  string
+	v4MasqIP    *net.IPNet
+	v6MasqIP    *net.IPNet
+}
+
+func (netConfig *bridgeUDNConfiguration) setBridgeNetworkOfPortsInternal() error {
+	ofportPatch, stderr, err := util.GetOVSOfPort("get", "Interface", netConfig.patchPort, "ofport")
+	if err != nil {
+		return fmt.Errorf("failed while waiting on patch port %q to be created by ovn-controller and "+
+			"while getting ofport. stderr: %q, error: %v", netConfig.patchPort, stderr, err)
+	}
+	netConfig.ofPortPatch = ofportPatch
+	return nil
+}
+
+func setBridgeNetworkOfPorts(bridge *bridgeConfiguration, netName string) error {
+	bridge.Lock()
+	defer bridge.Unlock()
+
+	netConfig, found := bridge.netConfig[netName]
+	if !found {
+		return fmt.Errorf("failed to find network %s configuration on bridge %s", netName, bridge.bridgeName)
+	}
+	return netConfig.setBridgeNetworkOfPortsInternal()
+}
+
 func NewUserDefinedNetworkGateway(netInfo util.NetInfo, networkID int, node *v1.Node, nodeLister listers.NodeLister,
 	kubeInterface kube.Interface, vrfManager *vrfmanager.Controller) (*UserDefinedNetworkGateway, error) {
 	// Generate a per network conntrack mark and masquerade IPs to be used for egress traffic.
