@@ -448,7 +448,6 @@ type bridgeConfiguration struct {
 	interfaceID string
 	macAddress  net.HardwareAddr
 	patchPort   string
-	ofPortPatch string
 	ofPortPhys  string
 	ofPortHost  string
 	netConfig   map[string]*bridgeUDNConfiguration
