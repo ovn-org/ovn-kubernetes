@@ -12,6 +12,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	nodeipt "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/openflowmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -53,6 +54,8 @@ func initFakeNodePortWatcher(iptV4, iptV6 util.IPTablesHelper) *nodePortWatcher 
 
 	gwMACParsed, _ := net.ParseMAC(gwMAC)
 
+	om := openflowmanager.NewController(nil)
+
 	fNPW := nodePortWatcher{
 		ofportPhys:  "eth0",
 		ofportPatch: "patch-breth0_ov",
@@ -60,8 +63,8 @@ func initFakeNodePortWatcher(iptV4, iptV6 util.IPTablesHelper) *nodePortWatcher 
 		gatewayIPv6: v6localnetGatewayIP,
 		serviceInfo: make(map[k8stypes.NamespacedName]*serviceConfig),
 		ofm: &openflowManager{
-			flowCache:     map[string][]string{},
 			defaultBridge: &bridgeConfiguration{macAddress: gwMACParsed},
+			ofManager:     om,
 		},
 	}
 	return &fNPW
@@ -655,8 +658,7 @@ var _ = Describe("Node Operations", func() {
 				f4 := iptV4.(*util.FakeIPTables)
 				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
-				flows := fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
-				Expect(flows).To(BeNil())
+				Expect(fNPW.ofm.ofManager.CheckFlowEntryMatch(fNPW.ofm.defaultBridge.bridgeName, "NodePort_namespace1_service1_tcp_31111", nil)).To(BeTrue())
 				return nil
 			}
 			err := app.Run([]string{app.Name})
@@ -860,12 +862,9 @@ var _ = Describe("Node Operations", func() {
 				f4 := iptV4.(*util.FakeIPTables)
 				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
-				flows := fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
-				Expect(flows).To(BeNil())
-				flows = fNPW.ofm.flowCache["Ingress_namespace1_service1_5.5.5.5_8080"]
-				Expect(flows).To(Equal(expectedLBIngressFlows))
-				flows = fNPW.ofm.flowCache["External_namespace1_service1_1.1.1.1_8080"]
-				Expect(flows).To(Equal(expectedLBExternalIPFlows))
+				Expect(fNPW.ofm.ofManager.CheckFlowEntryMatch(fNPW.ofm.defaultBridge.bridgeName, "NodePort_namespace1_service1_tcp_31111", nil)).To(BeTrue())
+				Expect(fNPW.ofm.ofManager.CheckFlowEntryMatch(fNPW.ofm.defaultBridge.bridgeName, "Ingress_namespace1_service1_5.5.5.5_8080", expectedLBIngressFlows)).To(BeTrue())
+				Expect(fNPW.ofm.ofManager.CheckFlowEntryMatch(fNPW.ofm.defaultBridge.bridgeName, "External_namespace1_service1_1.1.1.1_8080", expectedLBExternalIPFlows)).To(BeTrue())
 
 				return nil
 			}
@@ -998,8 +997,8 @@ var _ = Describe("Node Operations", func() {
 
 				f4 := iptV4.(*util.FakeIPTables)
 				Expect(f4.MatchState(expectedTables, nil)).To(Succeed())
-				Expect(fNPW.ofm.flowCache["Ingress_namespace1_service1_5.5.5.5_80"]).To(Equal(expectedLBIngressFlows))
-				Expect(fNPW.ofm.flowCache["External_namespace1_service1_1.1.1.1_80"]).To(Equal(expectedLBExternalIPFlows))
+				Expect(fNPW.ofm.ofManager.CheckFlowEntryMatch(fNPW.ofm.defaultBridge.bridgeName, "Ingress_namespace1_service1_5.5.5.5_80", expectedLBIngressFlows)).To(BeTrue())
+				Expect(fNPW.ofm.ofManager.CheckFlowEntryMatch(fNPW.ofm.defaultBridge.bridgeName, "External_namespace1_service1_1.1.1.1_80", expectedLBExternalIPFlows)).To(BeTrue())
 				return nil
 			}
 			Expect(app.Run([]string{app.Name})).To(Succeed())
@@ -1104,12 +1103,9 @@ var _ = Describe("Node Operations", func() {
 				f4 := iptV4.(*util.FakeIPTables)
 				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
-				flows := fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
-				Expect(flows).To(BeNil())
-				flows = fNPW.ofm.flowCache["Ingress_namespace1_service1_5.5.5.5_8080"]
-				Expect(flows).To(Equal(expectedLBIngressFlows))
-				flows = fNPW.ofm.flowCache["External_namespace1_service1_1.1.1.1_8080"]
-				Expect(flows).To(Equal(expectedLBExternalIPFlows))
+				Expect(fNPW.ofm.ofManager.CheckFlowEntryMatch(fNPW.ofm.defaultBridge.bridgeName, "NodePort_namespace1_service1_tcp_31111", nil)).To(BeTrue())
+				Expect(fNPW.ofm.ofManager.CheckFlowEntryMatch(fNPW.ofm.defaultBridge.bridgeName, "Ingress_namespace1_service1_5.5.5.5_8080", expectedLBIngressFlows)).To(BeTrue())
+				Expect(fNPW.ofm.ofManager.CheckFlowEntryMatch(fNPW.ofm.defaultBridge.bridgeName, "External_namespace1_service1_1.1.1.1_8080", expectedLBExternalIPFlows)).To(BeTrue())
 
 				return nil
 			}
@@ -1233,13 +1229,9 @@ var _ = Describe("Node Operations", func() {
 				f4 := iptV4.(*util.FakeIPTables)
 				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
-				flows := fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
-				Expect(flows).To(Equal(expectedNodePortFlows))
-				flows = fNPW.ofm.flowCache["Ingress_namespace1_service1_5.5.5.5_8080"]
-				Expect(flows).To(Equal(expectedLBIngressFlows))
-				flows = fNPW.ofm.flowCache["External_namespace1_service1_1.1.1.1_8080"]
-				Expect(flows).To(Equal(expectedLBExternalIPFlows))
-
+				Expect(fNPW.ofm.ofManager.CheckFlowEntryMatch(fNPW.ofm.defaultBridge.bridgeName, "NodePort_namespace1_service1_tcp_31111", expectedNodePortFlows)).To(BeTrue())
+				Expect(fNPW.ofm.ofManager.CheckFlowEntryMatch(fNPW.ofm.defaultBridge.bridgeName, "Ingress_namespace1_service1_5.5.5.5_8080", expectedLBIngressFlows)).To(BeTrue())
+				Expect(fNPW.ofm.ofManager.CheckFlowEntryMatch(fNPW.ofm.defaultBridge.bridgeName, "External_namespace1_service1_1.1.1.1_8080", expectedLBExternalIPFlows)).To(BeTrue())
 				return nil
 			}
 			err := app.Run([]string{app.Name})
@@ -1798,14 +1790,10 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				Expect(err).NotTo(HaveOccurred())
-				flows := fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
-				Expect(flows).To(BeNil())
-				flows = fNPW.ofm.flowCache["Ingress_namespace1_service1_5.5.5.5_8080"]
-				Expect(flows).To(Equal(expectedLBIngressFlows))
-				flows = fNPW.ofm.flowCache["External_namespace1_service1_1.1.1.1_8080"]
-				Expect(flows).To(Equal(expectedLBExternalIPFlows1))
-				flows = fNPW.ofm.flowCache["External_namespace1_service1_1.1.1.2_8080"]
-				Expect(flows).To(Equal(expectedLBExternalIPFlows2))
+				Expect(fNPW.ofm.ofManager.CheckFlowEntryMatch(fNPW.ofm.defaultBridge.bridgeName, "NodePort_namespace1_service1_tcp_31111", nil)).To(BeTrue())
+				Expect(fNPW.ofm.ofManager.CheckFlowEntryMatch(fNPW.ofm.defaultBridge.bridgeName, "Ingress_namespace1_service1_5.5.5.5_8080", expectedLBIngressFlows)).To(BeTrue())
+				Expect(fNPW.ofm.ofManager.CheckFlowEntryMatch(fNPW.ofm.defaultBridge.bridgeName, "External_namespace1_service1_1.1.1.1_8080", expectedLBExternalIPFlows1)).To(BeTrue())
+				Expect(fNPW.ofm.ofManager.CheckFlowEntryMatch(fNPW.ofm.defaultBridge.bridgeName, "External_namespace1_service1_1.1.1.2_8080", expectedLBExternalIPFlows2)).To(BeTrue())
 
 				addConntrackMocks(netlinkMock, []ctFilterDesc{
 					{"1.1.1.1", 8080},
@@ -1816,14 +1804,10 @@ var _ = Describe("Node Operations", func() {
 				})
 				err = fNPW.DeleteService(&service)
 				Expect(err).NotTo(HaveOccurred())
-				flows = fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
-				Expect(flows).To(BeNil())
-				flows = fNPW.ofm.flowCache["Ingress_namespace1_service1_5.5.5.5_8080"]
-				Expect(flows).To(BeNil())
-				flows = fNPW.ofm.flowCache["External_namespace1_service1_1.1.1.1_8080"]
-				Expect(flows).To(BeNil())
-				flows = fNPW.ofm.flowCache["External_namespace1_service1_1.1.1.2_8080"]
-				Expect(flows).To(BeNil())
+				Expect(fNPW.ofm.ofManager.CheckFlowEntryMatch(fNPW.ofm.defaultBridge.bridgeName, "NodePort_namespace1_service1_tcp_31111", nil)).To(BeTrue())
+				Expect(fNPW.ofm.ofManager.CheckFlowEntryMatch(fNPW.ofm.defaultBridge.bridgeName, "Ingress_namespace1_service1_5.5.5.5_8080", nil)).To(BeTrue())
+				Expect(fNPW.ofm.ofManager.CheckFlowEntryMatch(fNPW.ofm.defaultBridge.bridgeName, "External_namespace1_service1_1.1.1.1_8080", nil)).To(BeTrue())
+				Expect(fNPW.ofm.ofManager.CheckFlowEntryMatch(fNPW.ofm.defaultBridge.bridgeName, "External_namespace1_service1_1.1.1.2_8080", nil)).To(BeTrue())
 
 				return nil
 			}
@@ -2145,8 +2129,7 @@ var _ = Describe("Node Operations", func() {
 				f4 := iptV4.(*util.FakeIPTables)
 				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
-				flows := fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
-				Expect(flows).To(BeNil())
+				Expect(fNPW.ofm.ofManager.CheckFlowEntryMatch(fNPW.ofm.defaultBridge.bridgeName, "NodePort_namespace1_service1_tcp_31111", nil)).To(BeTrue())
 
 				addConntrackMocks(netlinkMock, []ctFilterDesc{{"10.129.0.2", 8080}, {"192.168.18.15", 31111}})
 				err = fNPW.DeleteService(&service)
@@ -2187,9 +2170,7 @@ var _ = Describe("Node Operations", func() {
 				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
 
-				flows = fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
-				Expect(flows).To(BeNil())
-
+				Expect(fNPW.ofm.ofManager.CheckFlowEntryMatch(fNPW.ofm.defaultBridge.bridgeName, "NodePort_namespace1_service1_tcp_31111", nil)).To(BeTrue())
 				return nil
 			}
 			err := app.Run([]string{app.Name})
@@ -2288,8 +2269,7 @@ var _ = Describe("Node Operations", func() {
 				f4 := iptV4.(*util.FakeIPTables)
 				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
-				flows := fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
-				Expect(flows).To(Equal(expectedFlows))
+				Expect(fNPW.ofm.ofManager.CheckFlowEntryMatch(fNPW.ofm.defaultBridge.bridgeName, "NodePort_namespace1_service1_tcp_31111", expectedFlows)).To(BeTrue())
 
 				addConntrackMocks(netlinkMock, []ctFilterDesc{{"10.129.0.2", 8080}, {"192.168.18.15", 31111}})
 				err = fNPW.DeleteService(&service)
@@ -2330,8 +2310,7 @@ var _ = Describe("Node Operations", func() {
 				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
 
-				flows = fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
-				Expect(flows).To(BeNil())
+				Expect(fNPW.ofm.ofManager.CheckFlowEntryMatch(fNPW.ofm.defaultBridge.bridgeName, "NodePort_namespace1_service1_tcp_31111", nil)).To(BeTrue())
 
 				return nil
 			}
@@ -2435,8 +2414,7 @@ var _ = Describe("Node Operations", func() {
 				f4 := iptV4.(*util.FakeIPTables)
 				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
-				flows := fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
-				Expect(flows).To(Equal(expectedFlows))
+				Expect(fNPW.ofm.ofManager.CheckFlowEntryMatch(fNPW.ofm.defaultBridge.bridgeName, "NodePort_namespace1_service1_tcp_31111", expectedFlows)).To(BeTrue())
 
 				addConntrackMocks(netlinkMock, []ctFilterDesc{{"10.129.0.2", 8080}, {"192.168.18.15", 31111}})
 				err = fNPW.DeleteService(&service)
@@ -2477,8 +2455,7 @@ var _ = Describe("Node Operations", func() {
 				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
 
-				flows = fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
-				Expect(flows).To(BeNil())
+				Expect(fNPW.ofm.ofManager.CheckFlowEntryMatch(fNPW.ofm.defaultBridge.bridgeName, "NodePort_namespace1_service1_tcp_31111", nil)).To(BeTrue())
 
 				return nil
 			}
@@ -2579,8 +2556,7 @@ var _ = Describe("Node Operations", func() {
 				f4 := iptV4.(*util.FakeIPTables)
 				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
-				flows := fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
-				Expect(flows).To(Equal(expectedFlows))
+				Expect(fNPW.ofm.ofManager.CheckFlowEntryMatch(fNPW.ofm.defaultBridge.bridgeName, "NodePort_namespace1_service1_tcp_31111", expectedFlows)).To(BeTrue())
 
 				addConntrackMocks(netlinkMock, []ctFilterDesc{{"10.129.0.2", 8080}, {"192.168.18.15", 31111}})
 				err = fNPW.DeleteService(&service)
@@ -2621,8 +2597,7 @@ var _ = Describe("Node Operations", func() {
 				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
 
-				flows = fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
-				Expect(flows).To(BeNil())
+				Expect(fNPW.ofm.ofManager.CheckFlowEntryMatch(fNPW.ofm.defaultBridge.bridgeName, "NodePort_namespace1_service1_tcp_31111", nil)).To(BeTrue())
 
 				return nil
 			}
@@ -2725,8 +2700,7 @@ var _ = Describe("Node Operations", func() {
 				f4 := iptV4.(*util.FakeIPTables)
 				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
-				flows := fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
-				Expect(flows).To(Equal(expectedFlows))
+				Expect(fNPW.ofm.ofManager.CheckFlowEntryMatch(fNPW.ofm.defaultBridge.bridgeName, "NodePort_namespace1_service1_tcp_31111", expectedFlows)).To(BeTrue())
 
 				addConntrackMocks(netlinkMock, []ctFilterDesc{{"10.129.0.2", 8080}, {"192.168.18.15", 31111}})
 				err = fNPW.DeleteService(&service)
@@ -2767,8 +2741,7 @@ var _ = Describe("Node Operations", func() {
 				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
 
-				flows = fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
-				Expect(flows).To(BeNil())
+				Expect(fNPW.ofm.ofManager.CheckFlowEntryMatch(fNPW.ofm.defaultBridge.bridgeName, "NodePort_namespace1_service1_tcp_31111", nil)).To(BeTrue())
 
 				return nil
 			}

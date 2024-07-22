@@ -14,6 +14,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/egressservice"
 	nodeipt "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/openflowmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -166,7 +167,7 @@ func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, add, h
 				key = strings.Join([]string{"NodePort", service.Namespace, service.Name, flowProtocol, fmt.Sprintf("%d", svcPort.NodePort)}, "_")
 				// Delete if needed and skip to next protocol
 				if !add {
-					npw.ofm.deleteFlowsByKey(key)
+					npw.ofm.ofManager.DeleteFlowsByKey(npw.ofm.defaultBridge.bridgeName, key)
 					continue
 				}
 				// This allows external traffic ingress when the svc's ExternalTrafficPolicy is
@@ -200,10 +201,10 @@ func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, add, h
 						// cookie is used since this would be same for all such services.
 						fmt.Sprintf("cookie=%s, priority=110, table=7, "+
 							"actions=output:%s", etpSvcOpenFlowCookie, npw.ofportPhys))
-					npw.ofm.updateFlowCacheEntry(key, nodeportFlows)
+					npw.ofm.ofManager.UpdateFlowCacheEntry(npw.ofm.defaultBridge.bridgeName, key, nodeportFlows)
 				} else if config.Gateway.Mode == config.GatewayModeShared {
 					// case2 (see function description for details)
-					npw.ofm.updateFlowCacheEntry(key, []string{
+					npw.ofm.ofManager.UpdateFlowCacheEntry(npw.ofm.defaultBridge.bridgeName, key, []string{
 						// table=0, matches on service traffic towards nodePort and sends it to OVN pipeline
 						fmt.Sprintf("cookie=%s, priority=110, in_port=%s, %s, tp_dst=%d, "+
 							"actions=%s",
@@ -311,7 +312,7 @@ func (npw *nodePortWatcher) createLbAndExternalSvcFlows(service *kapi.Service, s
 		key := strings.Join([]string{ipType, service.Namespace, service.Name, externalIPOrLBIngressIP, fmt.Sprintf("%d", svcPort.Port)}, "_")
 		// Delete if needed and skip to next protocol
 		if !add {
-			npw.ofm.deleteFlowsByKey(key)
+			npw.ofm.ofManager.DeleteFlowsByKey(npw.ofm.defaultBridge.bridgeName, key)
 			continue
 		}
 		// add the ARP bypass flow regardless of service type or gateway modes since its applicable in all scenarios.
@@ -365,7 +366,7 @@ func (npw *nodePortWatcher) createLbAndExternalSvcFlows(service *kapi.Service, s
 					"actions=output:%s",
 					cookie, npw.ofportPatch, npw.ofm.getDefaultBridgeMAC(), flowProtocol, nwSrc, externalIPOrLBIngressIP, svcPort.Port, npw.ofportPhys))
 		}
-		npw.ofm.updateFlowCacheEntry(key, externalIPFlows)
+		npw.ofm.ofManager.UpdateFlowCacheEntry(npw.ofm.defaultBridge.bridgeName, key, externalIPFlows)
 	}
 
 	return nil
@@ -1715,7 +1716,7 @@ func initSvcViaMgmPortRoutingRules(hostSubnets []*net.IPNet) error {
 
 func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP, gwIntf, egressGWIntf string,
 	gwIPs []*net.IPNet, nodeAnnotator kube.Annotator, kube kube.Interface, cfg *managementPortConfig,
-	watchFactory factory.NodeWatchFactory, routeManager *routemanager.Controller) (*gateway, error) {
+	watchFactory factory.NodeWatchFactory, routeManager *routemanager.Controller, ofManager *openflowmanager.Controller) (*gateway, error) {
 	klog.Info("Creating new shared gateway")
 	gw := &gateway{}
 
@@ -1770,7 +1771,7 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 			}
 		}
 
-		gw.openflowManager, err = newGatewayOpenFlowManager(gwBridge, exGwBridge, subnets, nodeIPs)
+		gw.openflowManager, err = newGatewayOpenFlowManager(gwBridge, exGwBridge, subnets, nodeIPs, ofManager)
 		if err != nil {
 			return err
 		}

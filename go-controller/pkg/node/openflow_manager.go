@@ -2,8 +2,6 @@ package node
 
 import (
 	"fmt"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"net"
 	"os"
 	"regexp"
@@ -11,6 +9,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/openflowmanager"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	"k8s.io/klog/v2"
@@ -19,13 +20,7 @@ import (
 type openflowManager struct {
 	defaultBridge         *bridgeConfiguration
 	externalGatewayBridge *bridgeConfiguration
-	// flow cache, use map instead of array for readability when debugging
-	flowCache     map[string][]string
-	flowMutex     sync.Mutex
-	exGWFlowCache map[string][]string
-	exGWFlowMutex sync.Mutex
-	// channel to indicate we need to update flows immediately
-	flowChan chan struct{}
+	ofManager             *openflowmanager.Controller
 }
 
 func (c *openflowManager) getDefaultBridgePorts() (string, string, string, string) {
@@ -60,67 +55,10 @@ func (c *openflowManager) setDefaultBridgeMAC(macAddr net.HardwareAddr) {
 	c.defaultBridge.macAddress = macAddr
 }
 
-func (c *openflowManager) updateFlowCacheEntry(key string, flows []string) {
-	c.flowMutex.Lock()
-	defer c.flowMutex.Unlock()
-	c.flowCache[key] = flows
-}
-
-func (c *openflowManager) deleteFlowsByKey(key string) {
-	c.flowMutex.Lock()
-	defer c.flowMutex.Unlock()
-	delete(c.flowCache, key)
-}
-
-func (c *openflowManager) updateExBridgeFlowCacheEntry(key string, flows []string) {
-	c.exGWFlowMutex.Lock()
-	defer c.exGWFlowMutex.Unlock()
-	c.exGWFlowCache[key] = flows
-}
-
 func (c *openflowManager) requestFlowSync() {
-	select {
-	case c.flowChan <- struct{}{}:
-		klog.V(5).Infof("Gateway OpenFlow sync requested")
-	default:
-		klog.V(5).Infof("Gateway OpenFlow sync already requested")
-	}
-}
-
-func (c *openflowManager) syncFlows() {
-	// protect gwBridge config from being updated by gw.nodeIPManager
-	c.defaultBridge.Lock()
-	defer c.defaultBridge.Unlock()
-
-	c.flowMutex.Lock()
-	defer c.flowMutex.Unlock()
-
-	flows := []string{}
-	for _, entry := range c.flowCache {
-		flows = append(flows, entry...)
-	}
-
-	_, stderr, err := util.ReplaceOFFlows(c.defaultBridge.bridgeName, flows)
-	if err != nil {
-		klog.Errorf("Failed to add flows, error: %v, stderr, %s, flows: %s", err, stderr, c.flowCache)
-	}
-
+	c.ofManager.RequestFlowSync(c.defaultBridge.bridgeName)
 	if c.externalGatewayBridge != nil {
-		c.externalGatewayBridge.Lock()
-		defer c.externalGatewayBridge.Unlock()
-
-		c.exGWFlowMutex.Lock()
-		defer c.exGWFlowMutex.Unlock()
-
-		flows := []string{}
-		for _, entry := range c.exGWFlowCache {
-			flows = append(flows, entry...)
-		}
-
-		_, stderr, err := util.ReplaceOFFlows(c.externalGatewayBridge.bridgeName, flows)
-		if err != nil {
-			klog.Errorf("Failed to add flows, error: %v, stderr, %s, flows: %s", err, stderr, c.exGWFlowCache)
-		}
+		c.ofManager.RequestFlowSync(c.externalGatewayBridge.bridgeName)
 	}
 }
 
@@ -132,16 +70,12 @@ func (c *openflowManager) syncFlows() {
 //
 // -- to handle host -> service access, via masquerading from the host to OVN GR
 // -- to handle external -> service(ExternalTrafficPolicy: Local) -> host access without SNAT
-func newGatewayOpenFlowManager(gwBridge, exGWBridge *bridgeConfiguration, subnets []*net.IPNet, extraIPs []net.IP) (*openflowManager, error) {
+func newGatewayOpenFlowManager(gwBridge, exGWBridge *bridgeConfiguration, subnets []*net.IPNet, extraIPs []net.IP, ofManager *openflowmanager.Controller) (*openflowManager, error) {
 	// add health check function to check default OpenFlow flows are on the shared gateway bridge
 	ofm := &openflowManager{
 		defaultBridge:         gwBridge,
 		externalGatewayBridge: exGWBridge,
-		flowCache:             make(map[string][]string),
-		flowMutex:             sync.Mutex{},
-		exGWFlowCache:         make(map[string][]string),
-		exGWFlowMutex:         sync.Mutex{},
-		flowChan:              make(chan struct{}, 1),
+		ofManager:             ofManager,
 	}
 
 	if err := ofm.updateBridgeFlowCache(subnets, extraIPs); err != nil {
@@ -175,10 +109,6 @@ func (c *openflowManager) Run(stopChan <-chan struct{}, doneWg *sync.WaitGroup) 
 						continue
 					}
 				}
-				c.syncFlows()
-			case <-c.flowChan:
-				c.syncFlows()
-				timer.Reset(syncPeriod)
 			case <-stopChan:
 				return
 			}
@@ -206,19 +136,19 @@ func (c *openflowManager) updateBridgeFlowCache(subnets []*net.IPNet, extraIPs [
 	}
 	dftFlows = append(dftFlows, dftCommonFlows...)
 
-	c.updateFlowCacheEntry("NORMAL", []string{fmt.Sprintf("table=0,priority=0,actions=%s\n", util.NormalAction)})
-	c.updateFlowCacheEntry("DEFAULT", dftFlows)
+	c.ofManager.UpdateFlowCacheEntry(c.defaultBridge.bridgeName, "NORMAL", []string{fmt.Sprintf("table=0,priority=0,actions=%s\n", util.NormalAction)})
+	c.ofManager.UpdateFlowCacheEntry(c.defaultBridge.bridgeName, "DEFAULT", dftFlows)
 
 	// we consume ex gw bridge flows only if that is enabled
 	if c.externalGatewayBridge != nil {
 		c.externalGatewayBridge.Lock()
 		defer c.externalGatewayBridge.Unlock()
-		c.updateExBridgeFlowCacheEntry("NORMAL", []string{fmt.Sprintf("table=0,priority=0,actions=%s\n", util.NormalAction)})
+		c.ofManager.UpdateFlowCacheEntry(c.externalGatewayBridge.bridgeName, "NORMAL", []string{fmt.Sprintf("table=0,priority=0,actions=%s\n", util.NormalAction)})
 		exGWBridgeDftFlows, err := commonFlows(subnets, c.externalGatewayBridge)
 		if err != nil {
 			return err
 		}
-		c.updateExBridgeFlowCacheEntry("DEFAULT", exGWBridgeDftFlows)
+		c.ofManager.UpdateFlowCacheEntry(c.externalGatewayBridge.bridgeName, "DEFAULT", exGWBridgeDftFlows)
 	}
 	return nil
 }
