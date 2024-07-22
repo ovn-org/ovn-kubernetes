@@ -648,6 +648,9 @@ func (bnc *BaseNetworkController) addPodEgressIPAssignments(name string, statusA
 		klog.Infof("Pod %s is already in completed state, skipping egress ip assignment", podKey)
 		return nil
 	}
+	if util.PodWantsHostNetwork(pod) {
+		return nil
+	}
 	// If statusAssignments is empty just return, not doing this will delete the
 	// external GW set up, even though there might be no egress IP set up to
 	// perform.
