@@ -345,9 +345,7 @@ func (udng *UserDefinedNetworkGateway) AddNetwork() error {
 			return true, nil
 		}
 		postFunc := func() error {
-			if err := udng.Reconcile(); err != nil {
-				return fmt.Errorf("failed to reconcile flows on bridge for network %s; error: %v", udng.GetNetworkName(), err)
-			}
+			udng.Reconcile()
 			return nil
 		}
 		waiter.AddWait(readyFunc, postFunc)
@@ -383,9 +381,7 @@ func (udng *UserDefinedNetworkGateway) DelNetwork() error {
 	// delete the openflows for this network
 	if udng.openflowManager != nil {
 		udng.openflowManager.delNetwork(udng.NetInfo)
-		if err := udng.Reconcile(); err != nil {
-			return fmt.Errorf("failed to reconcile default gateway for network %s, err: %v", udng.GetNetworkName(), err)
-		}
+		udng.Reconcile()
 	}
 	if err := udng.delMarkChain(); err != nil {
 		return err

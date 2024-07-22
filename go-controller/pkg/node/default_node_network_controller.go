@@ -208,10 +208,7 @@ func (oc *DefaultNodeNetworkController) Reconcile(netInfo util.NetInfo) error {
 		isPodNetworkAdvertisedAtNode := oc.isPodNetworkAdvertisedAtNode()
 		if oc.Gateway != nil {
 			oc.Gateway.SetPodNetworkAdvertised(isPodNetworkAdvertisedAtNode)
-			err := oc.Gateway.Reconcile()
-			if err != nil {
-				klog.Errorf("Failed to reconcile gateway: %v", err)
-			}
+			oc.Gateway.Reconcile()
 		}
 	}
 

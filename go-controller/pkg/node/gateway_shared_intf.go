@@ -2132,7 +2132,9 @@ func newGateway(
 	gatewayMode config.GatewayMode,
 ) (*gateway, error) {
 	klog.Info("Creating new gateway")
-	gw := &gateway{}
+	gw := &gateway{
+		reconcile: make(chan struct{}, 1),
+	}
 
 	if gatewayMode == config.GatewayModeLocal {
 		if err := initLocalGateway(subnets, cfg); err != nil {
