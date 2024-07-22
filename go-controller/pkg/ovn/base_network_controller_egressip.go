@@ -1030,11 +1030,12 @@ func (bnc *BaseNetworkController) syncStaleAddressSetIPs(egressIPCache map[strin
 func (bnc *BaseNetworkController) syncPodAssignmentCache(egressIPCache map[string]egressIPCacheEntry) error {
 	bnc.eIPC.podAssignmentMutex.Lock()
 	defer bnc.eIPC.podAssignmentMutex.Unlock()
+	routerName := bnc.GetNetworkScopedClusterRouterName()
 	for egressIPName, state := range egressIPCache {
 		p1 := func(item *nbdb.LogicalRouterPolicy) bool {
 			return item.Priority == types.EgressIPReroutePriority && item.ExternalIDs["name"] == egressIPName
 		}
-		reRoutePolicies, err := libovsdbops.FindLogicalRouterPoliciesWithPredicate(bnc.nbClient, p1)
+		reRoutePolicies, err := libovsdbops.FindALogicalRouterPoliciesWithPredicate(bnc.nbClient, routerName, p1)
 		if err != nil {
 			return err
 		}
