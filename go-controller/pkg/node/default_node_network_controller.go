@@ -97,7 +97,7 @@ func NewCommonNodeNetworkControllerInfo(kubeClient clientset.Interface, apbExter
 type DefaultNodeNetworkController struct {
 	BaseNodeNetworkController
 
-	gateway Gateway
+	Gateway Gateway
 	// Node healthcheck server for cloud load balancers
 	healthzServer *proxierHealthUpdater
 	routeManager  *routemanager.Controller
@@ -712,6 +712,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 
 	// Bootstrap flows in OVS if just normal flow is present
 	if err := bootstrapOVSFlows(); err != nil {
+		klog.Infof("SURYA bootstrapping")
 		return fmt.Errorf("failed to bootstrap OVS flows: %w", err)
 	}
 
@@ -986,7 +987,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	if err := waiter.Wait(); err != nil {
 		return err
 	}
-	nc.gateway.Start()
+	nc.Gateway.Start()
 	klog.Infof("Gateway and management port readiness took %v", time.Since(start))
 
 	// Note(adrianc): DPU deployments are expected to support the new shared gateway changes, upgrade flow
@@ -994,7 +995,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
 		bridgeName := ""
 		if config.OvnKubeNode.Mode == types.NodeModeFull {
-			bridgeName = nc.gateway.GetGatewayBridgeIface()
+			bridgeName = nc.Gateway.GetGatewayBridgeIface()
 			// Configure route for svc towards shared gw bridge
 			// Have to have the route to bridge for multi-NIC mode, where the default gateway may go to a non-OVS interface
 			if err := configureSvcRouteViaBridge(nc.routeManager, bridgeName); err != nil {
