@@ -571,9 +571,8 @@ func (nc *DefaultNodeNetworkController) updateGatewayMAC(link netlink.Link) erro
 	}
 	// MAC must have changed, update node
 	nc.Gateway.SetDefaultGatewayBridgeMAC(link.Attrs().HardwareAddr)
-	if err := nc.Gateway.Reconcile(); err != nil {
-		return fmt.Errorf("failed to reconcile gateway for MAC address update: %w", err)
-	}
+	nc.Gateway.Reconcile()
+
 	nodeAnnotator := kube.NewNodeAnnotator(nc.Kube, node.Name)
 	l3gwConf.MACAddress = link.Attrs().HardwareAddr
 	if err := util.SetL3GatewayConfig(nodeAnnotator, l3gwConf); err != nil {
