@@ -470,7 +470,12 @@ func buildFailOnDuplicateOps(c client.Client, m model.Model) ([]ovsdb.Operation,
 			Function: ovsdb.ConditionEqual,
 			Value:    t.Match,
 		}
-		return c.WhereAll(t, condPriority, condMatch).Wait(
+		condExtID := model.Condition{
+			Field:    &t.ExternalIDs,
+			Function: ovsdb.ConditionIncludes,
+			Value:    t.ExternalIDs,
+		}
+		return c.WhereAll(t, condPriority, condMatch, condExtID).Wait(
 			ovsdb.WaitConditionNotEqual,
 			&timeout,
 			t,
