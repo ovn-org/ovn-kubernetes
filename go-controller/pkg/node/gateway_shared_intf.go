@@ -1619,13 +1619,14 @@ func commonFlows(subnets []*net.IPNet, bridge *bridgeConfiguration) ([]string, e
 }
 
 func setBridgeOfPorts(bridge *bridgeConfiguration) error {
+	bridge.Lock()
+	defer bridge.Unlock()
 	// Get ofport of patchPort
-	ofportPatch, stderr, err := util.GetOVSOfPort("get", "Interface", bridge.patchPort, "ofport")
-	if err != nil {
-		return fmt.Errorf("failed while waiting on patch port %q to be created by ovn-controller and "+
-			"while getting ofport. stderr: %q, error: %v", bridge.patchPort, stderr, err)
+	for _, netConfig := range bridge.netConfig {
+		if err := netConfig.setBridgeNetworkOfPortsInternal(); err != nil {
+			return fmt.Errorf("error setting bridge openflow ports for network with patchport %v: err: %v", netConfig.patchPort, err)
+		}
 	}
-	bridge.ofPortPatch = ofportPatch
 
 	if bridge.uplinkName != "" {
 		// Get ofport of physical interface
@@ -1727,19 +1728,29 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 
 	if exGwBridge != nil {
 		gw.readyFunc = func() (bool, error) {
-			ready, err := gatewayReady(gwBridge.patchPort)
-			if err != nil {
-				return false, err
+			for _, netConfig := range gwBridge.netConfig {
+				ready, err := gatewayReady(netConfig.patchPort)
+				if err != nil || !ready {
+					return false, err
+				}
 			}
-			exGWReady, err := gatewayReady(exGwBridge.patchPort)
-			if err != nil {
-				return false, err
+			for _, netConfig := range exGwBridge.netConfig {
+				exGWReady, err := gatewayReady(netConfig.patchPort)
+				if err != nil || !exGWReady {
+					return false, err
+				}
 			}
-			return ready && exGWReady, nil
+			return true, nil
 		}
 	} else {
 		gw.readyFunc = func() (bool, error) {
-			return gatewayReady(gwBridge.patchPort)
+			for _, netConfig := range gwBridge.netConfig {
+				ready, err := gatewayReady(netConfig.patchPort)
+				if err != nil || !ready {
+					return false, err
+				}
+			}
+			return true, nil
 		}
 	}
 
@@ -1836,12 +1847,14 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 
 func newNodePortWatcher(gwBridge *bridgeConfiguration, ofm *openflowManager,
 	nodeIPManager *addressManager, watchFactory factory.NodeWatchFactory) (*nodePortWatcher, error) {
+	// TODO(dceara): support services for UDNs
+	defaultNetConfig := gwBridge.netConfig[types.DefaultNetworkName]
 	// Get ofport of patchPort
 	ofportPatch, stderr, err := util.GetOVSOfPort("--if-exists", "get",
-		"interface", gwBridge.patchPort, "ofport")
+		"interface", defaultNetConfig.patchPort, "ofport")
 	if err != nil {
 		return nil, fmt.Errorf("failed to get ofport of %s, stderr: %q, error: %v",
-			gwBridge.patchPort, stderr, err)
+			defaultNetConfig.patchPort, stderr, err)
 	}
 
 	// Get ofport of physical interface

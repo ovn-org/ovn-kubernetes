@@ -45,6 +45,87 @@ type UserDefinedNetworkGateway struct {
 	masqCTMark uint
 }
 
+// UTILS Needed for UDN (also leveraged for default netInfo) in openflowmanager
+
+func (c *openflowManager) getDefaultBridgePorts() ([]bridgeUDNConfiguration, string, string) {
+	return c.defaultBridge.getBridgePorts()
+}
+
+func (c *openflowManager) getExGwBridgePorts() ([]bridgeUDNConfiguration, string, string) {
+	return c.externalGatewayBridge.getBridgePorts()
+}
+
+// UTILS Needed for UDN (also leveraged for default netInfo) in bridgeConfiguration
+
+func (b *bridgeConfiguration) getBridgePorts() ([]bridgeUDNConfiguration, string, string) {
+	b.Lock()
+	defer b.Unlock()
+	netConfigs := make([]bridgeUDNConfiguration, len(b.netConfig))
+	for _, netConfig := range b.netConfig {
+		netConfigs = append(netConfigs, *netConfig)
+	}
+	return netConfigs, b.uplinkName, b.ofPortPhys
+}
+
+func (b *bridgeConfiguration) addNetworkBridgeConfig(nInfo util.NetInfo, masqCTMark uint) {
+	b.Lock()
+	defer b.Unlock()
+
+	netName := nInfo.GetNetworkName()
+	patchPort := nInfo.GetNetworkScopedPatchPortName(b.bridgeName, b.nodeName)
+
+	var netConfig *bridgeUDNConfiguration
+	var found bool
+	netConfig, found = b.netConfig[netName]
+	if !found {
+		netConfig = &bridgeUDNConfiguration{
+			patchPort:  patchPort,
+			masqCTMark: fmt.Sprintf("0x%x", masqCTMark),
+		}
+
+		b.netConfig[netName] = netConfig
+	}
+
+	netConfig.patchPort = patchPort
+	netConfig.masqCTMark = fmt.Sprintf("0x%x", masqCTMark)
+}
+
+func (b *bridgeConfiguration) delNetworkBridgeConfig(nInfo util.NetInfo) {
+	b.Lock()
+	defer b.Unlock()
+
+	delete(b.netConfig, nInfo.GetNetworkName())
+}
+
+// bridgeUDNConfiguration holds the patchport and ctMark
+// information for a given network
+type bridgeUDNConfiguration struct {
+	patchPort   string
+	ofPortPatch string
+	masqCTMark  string
+}
+
+func (netConfig *bridgeUDNConfiguration) setBridgeNetworkOfPortsInternal() error {
+	ofportPatch, stderr, err := util.GetOVSOfPort("get", "Interface", netConfig.patchPort, "ofport")
+	if err != nil {
+		return fmt.Errorf("failed while waiting on patch port %q to be created by ovn-controller and "+
+			"while getting ofport. stderr: %q, error: %v", netConfig.patchPort, stderr, err)
+	}
+	netConfig.ofPortPatch = ofportPatch
+	return nil
+}
+
+func setBridgeNetworkOfPorts(bridge *bridgeConfiguration, netName string) error {
+	bridge.Lock()
+	defer bridge.Unlock()
+
+	netConfig, found := bridge.netConfig[netName]
+	if !found {
+		return fmt.Errorf("failed to find network %s configuration on bridge %s", netName, bridge.bridgeName)
+	}
+	return netConfig.setBridgeNetworkOfPortsInternal()
+}
+
 func NewUserDefinedNetworkGateway(netInfo util.NetInfo, networkID int, node *v1.Node, nodeLister listers.NodeLister,
 	kubeInterface kube.Interface, vrfManager *vrfmanager.Controller) *UserDefinedNetworkGateway {
 	return &UserDefinedNetworkGateway{
