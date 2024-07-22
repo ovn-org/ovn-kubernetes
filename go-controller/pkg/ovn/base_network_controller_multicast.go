@@ -1,8 +1,10 @@
 package ovn
 
 import (
+	"errors"
 	"fmt"
 
+	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
@@ -320,5 +322,48 @@ func (bnc *BaseNetworkController) syncNsMulticast(k8sNamespaces map[string]bool)
 	}
 	klog.Infof("Sync multicast removed ACLs for %d stale namespaces", len(staleNamespaces))
 
+	return nil
+}
+
+func (bnc *BaseNetworkController) setupClusterPortGroups() error {
+	pgIDs := bnc.getClusterPortGroupDbIDs(types.ClusterPortGroupNameBase)
+	pg := &nbdb.PortGroup{
+		Name: libovsdbutil.GetPortGroupName(pgIDs),
+	}
+	pg, err := libovsdbops.GetPortGroup(bnc.nbClient, pg)
+	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
+		return err
+	}
+	if pg == nil {
+		// we didn't find an existing clusterPG, let's create a new empty PG (fresh cluster install)
+		// Create a cluster-wide port group that all logical switch ports are part of
+		pg := libovsdbutil.BuildPortGroup(pgIDs, nil, nil)
+		err = libovsdbops.CreateOrUpdatePortGroups(bnc.nbClient, pg)
+		if err != nil {
+			klog.Errorf("Failed to create cluster port group: %v", err)
+			return err
+		}
+	}
+
+	pgIDs = bnc.getClusterPortGroupDbIDs(types.ClusterRtrPortGroupNameBase)
+	pg = &nbdb.PortGroup{
+		Name: libovsdbutil.GetPortGroupName(pgIDs),
+	}
+	pg, err = libovsdbops.GetPortGroup(bnc.nbClient, pg)
+	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
+		return err
+	}
+	if pg == nil {
+		// we didn't find an existing clusterRtrPG, let's create a new empty PG (fresh cluster install)
+		// Create a cluster-wide port group with all node-to-cluster router
+		// logical switch ports. Currently the only user is multicast but it might
+		// be used for other features in the future.
+		pg = libovsdbutil.BuildPortGroup(pgIDs, nil, nil)
+		err = libovsdbops.CreateOrUpdatePortGroups(bnc.nbClient, pg)
+		if err != nil {
+			klog.Errorf("Failed to create cluster port group: %v", err)
+			return err
+		}
+	}
 	return nil
 }
