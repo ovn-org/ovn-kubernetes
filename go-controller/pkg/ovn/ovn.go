@@ -177,7 +177,7 @@ func (oc *DefaultNetworkController) ensureLocalZonePod(oldPod, pod *kapi.Pod, ad
 	}
 
 	if kubevirt.IsPodLiveMigratable(pod) {
-		return kubevirt.EnsureLocalZonePodAddressesToNodeRoute(oc.watchFactory, oc.nbClient, oc.lsManager, pod, ovntypes.DefaultNetworkName)
+		return kubevirt.EnsureLocalZonePodAddressesToNodeRoute(oc.watchFactory, oc.nbClient, oc.lsManager, pod, ovntypes.DefaultNetworkName, util.GetAllClusterSubnets())
 	}
 
 	return nil
@@ -438,7 +438,7 @@ func (oc *DefaultNetworkController) InitEgressServiceZoneController() (*egresssv
 	}
 	deleteLegacyDefaultNoRerouteNodePolicies := func(libovsdbclient.Client, string, string) error { return nil }
 	// used only when IC=true
-	createDefaultNodeRouteToExternal := func(libovsdbclient.Client, string, string) error { return nil }
+	createDefaultNodeRouteToExternal := func(libovsdbclient.Client, string, string, []*net.IPNet) error { return nil }
 
 	if !config.OVNKubernetesFeature.EnableEgressIP {
 		initClusterEgressPolicies = InitClusterEgressPolicies

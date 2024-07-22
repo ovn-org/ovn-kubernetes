@@ -1486,7 +1486,12 @@ func (bnc *BaseNetworkController) addEgressNode(node *v1.Node) error {
 			// NOTE3: When the node gets deleted we do not remove this route intentionally because
 			// on IC if the node is gone, then the ovn_cluster_router is also gone along with all
 			// the routes on it.
-			if err := libovsdbutil.CreateDefaultRouteToExternal(bnc.nbClient, bnc.GetNetworkScopedClusterRouterName(), bnc.GetNetworkScopedGWRouterName(node.Name)); err != nil {
+			clusterSubnetsNetEntry := bnc.Subnets()
+			clusterSubnets := make([]*net.IPNet, 0, len(clusterSubnetsNetEntry))
+			for _, netEntry := range clusterSubnetsNetEntry {
+				clusterSubnets = append(clusterSubnets, netEntry.CIDR)
+			}
+			if err := libovsdbutil.CreateDefaultRouteToExternal(bnc.nbClient, bnc.GetNetworkScopedClusterRouterName(), bnc.GetNetworkScopedGWRouterName(node.Name), clusterSubnets); err != nil {
 				return err
 			}
 		}

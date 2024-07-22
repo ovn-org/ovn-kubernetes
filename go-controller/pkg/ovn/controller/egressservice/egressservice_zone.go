@@ -48,7 +48,7 @@ type InitClusterEgressPoliciesFunc func(client libovsdbclient.Client, addressSet
 type EnsureNoRerouteNodePoliciesFunc func(client libovsdbclient.Client, addressSetFactory addressset.AddressSetFactory,
 	controllerName, clusterRouter string, nodeLister corelisters.NodeLister) error
 type DeleteLegacyDefaultNoRerouteNodePoliciesFunc func(nbClient libovsdbclient.Client, clusterRouter, nodeName string) error
-type CreateDefaultRouteToExternalFunc func(nbClient libovsdbclient.Client, clusterRouter, gwRouterName string) error
+type CreateDefaultRouteToExternalFunc func(nbClient libovsdbclient.Client, clusterRouter, gwRouterName string, clusterSubnets []*net.IPNet) error
 
 type Controller struct {
 	// network information
