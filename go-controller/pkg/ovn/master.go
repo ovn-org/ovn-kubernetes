@@ -51,26 +51,8 @@ func (oc *DefaultNetworkController) SetupMaster(existingNodeNames []string) erro
 		return err
 	}
 
-	// If supported, enable IGMP relay on the router to forward multicast
-	// traffic between nodes.
-	if oc.multicastSupport {
-		// Drop IP multicast globally. Multicast is allowed only if explicitly
-		// enabled in a namespace.
-		if err := oc.createDefaultDenyMulticastPolicy(); err != nil {
-			klog.Errorf("Failed to create default deny multicast policy, error: %v", err)
-			return err
-		}
-
-		// Allow IP multicast from node switch to cluster router and from
-		// cluster router to node switch.
-		if err := oc.createDefaultAllowMulticastPolicy(); err != nil {
-			klog.Errorf("Failed to create default deny multicast policy, error: %v", err)
-			return err
-		}
-	} else {
-		if err = oc.disableMulticast(); err != nil {
-			return fmt.Errorf("failed to delete default multicast policy, error: %v", err)
-		}
+	if err := oc.syncDefaultMulticastPolicies(); err != nil {
+		return err
 	}
 
 	// Create OVNJoinSwitch that will be used to connect gateway routers to the distributed router.
