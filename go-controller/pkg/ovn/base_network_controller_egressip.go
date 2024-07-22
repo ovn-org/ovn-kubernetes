@@ -1511,8 +1511,9 @@ func (bnc *BaseNetworkController) addEgressNode(node *v1.Node) error {
 // away from that node elsewhere so that the pods using the egress IP can
 // continue to do so without any issues.
 func (bnc *BaseNetworkController) initClusterEgressPolicies(nodes []interface{}) error {
-	if err := InitClusterEgressPolicies(bnc.nbClient, bnc.addressSetFactory, bnc.controllerName, bnc.GetNetworkScopedClusterRouterName()); err != nil {
-		return err
+	subnets := util.GetAllClusterSubnetsFromEntries(bnc.Subnets())
+	if err := InitClusterEgressPolicies(bnc.nbClient, bnc.addressSetFactory, subnets, bnc.controllerName, bnc.GetNetworkScopedClusterRouterName()); err != nil {
+		return fmt.Errorf("failed to initialize networks cluster logical router egress policies: %v", err)
 	}
 	for _, node := range nodes {
 		node := node.(*kapi.Node)
@@ -1527,29 +1528,56 @@ func (bnc *BaseNetworkController) initClusterEgressPolicies(nodes []interface{})
 // InitClusterEgressPolicies creates the global no reroute policies and address-sets
 // required by the egressIP and egressServices features.
 func InitClusterEgressPolicies(nbClient libovsdbclient.Client, addressSetFactory addressset.AddressSetFactory,
-	controllerName string, routers ...string) error {
-	v4ClusterSubnet, v6ClusterSubnet := util.GetClusterSubnets()
-
+	clusterSubnets []*net.IPNet, controllerName string, routers ...string) error {
+	var v4ClusterSubnet, v6ClusterSubnet []*net.IPNet
+	for _, subnet := range clusterSubnets {
+		if utilnet.IsIPv6CIDR(subnet) {
+			v6ClusterSubnet = append(v6ClusterSubnet, subnet)
+		} else {
+			v4ClusterSubnet = append(v4ClusterSubnet, subnet)
+		}
+	}
+	var v4JoinSubnet, v6JoinSubnet *net.IPNet
+	var err error
+	if len(v4ClusterSubnet) > 0 {
+		if config.Gateway.V4JoinSubnet == "" {
+			return fmt.Errorf("cannot process IPv4 addresses because no IPv4 join subnet is available")
+		}
+		_, v4JoinSubnet, err = net.ParseCIDR(config.Gateway.V4JoinSubnet)
+		if err != nil {
+			return fmt.Errorf("failed to parse IPv4 join subnet: %v", err)
+		}
+	}
+	if len(v6ClusterSubnet) > 0 {
+		if config.Gateway.V6JoinSubnet == "" {
+			return fmt.Errorf("cannot process IPv6 addresses because no IPv6 join subnet is available")
+		}
+		_, v6JoinSubnet, err = net.ParseCIDR(config.Gateway.V6JoinSubnet)
+		if err != nil {
+			return fmt.Errorf("failed to parse IPv6 join subnet: %v", err)
+		}
+	}
 	for _, router := range routers {
-		if err := createDefaultNoReroutePodPolicies(nbClient, router, v4ClusterSubnet, v6ClusterSubnet); err != nil {
+		if err = createDefaultNoReroutePodPolicies(nbClient, controllerName, router, v4ClusterSubnet, v6ClusterSubnet); err != nil {
 			return err
 		}
-		if err := createDefaultNoRerouteServicePolicies(nbClient, router, v4ClusterSubnet, v6ClusterSubnet); err != nil {
+		if err = createDefaultNoRerouteServicePolicies(nbClient, controllerName, router, v4ClusterSubnet, v6ClusterSubnet,
+			v4JoinSubnet, v6JoinSubnet); err != nil {
 			return err
 		}
-		if err := createDefaultNoRerouteReplyTrafficPolicy(nbClient, router); err != nil {
+		if err = createDefaultNoRerouteReplyTrafficPolicy(nbClient, router, controllerName); err != nil {
 			return err
 		}
 	}
 	// ensure the address-set for storing nodeIPs exists
 	dbIDs := getEgressIPAddrSetDbIDs(NodeIPAddrSetName, controllerName)
-	if _, err := addressSetFactory.EnsureAddressSet(dbIDs); err != nil {
+	if _, err = addressSetFactory.EnsureAddressSet(dbIDs); err != nil {
 		return fmt.Errorf("cannot ensure that addressSet %s exists %v", NodeIPAddrSetName, err)
 	}
 
 	// ensure the address-set for storing egressIP pods exists
 	dbIDs = getEgressIPAddrSetDbIDs(EgressIPServedPodsAddrSetName, controllerName)
-	_, err := addressSetFactory.EnsureAddressSet(dbIDs)
+	_, err = addressSetFactory.EnsureAddressSet(dbIDs)
 	if err != nil {
 		return fmt.Errorf("cannot ensure that addressSet for egressIP pods %s exists %v", EgressIPServedPodsAddrSetName, err)
 	}
@@ -2422,7 +2450,7 @@ func createDefaultNoReroutePodPolicies(nbClient libovsdbclient.Client, controlle
 // in which case we do not need to reRoute to other nodes and if its a service response it is
 // not rerouted since mark will be present.
 func createDefaultReRouteQoSRuleOps(nbClient libovsdbclient.Client, addressSetFactory addressset.AddressSetFactory,
-	controllerName string) ([]*nbdb.QoS, []ovsdb.Operation, error) {
+	controllerName string, isIPv4Mode, isIPv6Mode bool) ([]*nbdb.QoS, []ovsdb.Operation, error) {
 	// fetch the egressIP pods address-set
 	dbIDs := getEgressIPAddrSetDbIDs(EgressIPServedPodsAddrSetName, controllerName)
 	var as addressset.AddressSet
@@ -2438,7 +2466,7 @@ func createDefaultReRouteQoSRuleOps(nbClient libovsdbclient.Client, addressSetFa
 		Action:    map[string]int{"mark": types.EgressIPReplyTrafficConnectionMark},
 		Direction: nbdb.QoSDirectionFromLport,
 	}
-	if config.IPv4Mode {
+	if isIPv4Mode {
 		qosV4Rule := qosRule
 		qosV4Rule.Match = fmt.Sprintf(`ip4.src == $%s && ct.trk && ct.rpl`, ipv4EgressIPServedPodsAS)
 		qosV4Rule.ExternalIDs = getEgressIPQoSRuleDbIDs(IPFamilyValueV4, controllerName).GetExternalIDs()
@@ -2448,7 +2476,7 @@ func createDefaultReRouteQoSRuleOps(nbClient libovsdbclient.Client, addressSetFa
 		}
 		qoses = append(qoses, &qosV4Rule)
 	}
-	if config.IPv6Mode {
+	if isIPv6Mode {
 		qosV6Rule := qosRule
 		qosV6Rule.Match = fmt.Sprintf(`ip6.src == $%s && ct.trk && ct.rpl`, ipv6EgressIPServedPodsAS)
 		qosV6Rule.ExternalIDs = getEgressIPQoSRuleDbIDs(IPFamilyValueV6, controllerName).GetExternalIDs()
@@ -2465,31 +2493,46 @@ func (bnc *BaseNetworkController) ensureDefaultNoRerouteQoSRules(nodeName string
 	bnc.eIPC.nodeUpdateMutex.Lock()
 	defer bnc.eIPC.nodeUpdateMutex.Unlock()
 	var ops []ovsdb.Operation
+	var err error
 	// since this function is called from node update event, let us check
 	// libovsdb cache before trying to create insert/update ops so that it
 	// doesn't cause no-op construction spams at scale (kubelet sends node
 	// update events every 10seconds so we don't want to cause unnecessary
 	// no-op transacts that often and lookup is less expensive)
-	predicateIDs := libovsdbops.NewDbObjectIDs(libovsdbops.LogicalRouterPolicyEgressIP, bnc.controllerName,
-		map[libovsdbops.ExternalIDKey]string{
-			libovsdbops.ObjectNameKey: string(ReplyTrafficMark),
-		})
-	qosPredicate := libovsdbops.GetPredicate[*nbdb.QoS](predicateIDs, nil)
-	existingQoSes, err := libovsdbops.FindQoSesWithPredicate(bnc.nbClient, qosPredicate)
-	if err != nil {
-		return err
+	isIPv4Mode, isIPv6Mode := bnc.IPMode()
+	existingQoSes := make([]*nbdb.QoS, 0, 2)
+	getQOSForFamily := func(ipFamily egressIPFamilyValue, existingQOSes []*nbdb.QoS) ([]*nbdb.QoS, error) {
+		dbIDs := getEgressIPQoSRuleDbIDs(ipFamily, bnc.controllerName)
+		p := libovsdbops.GetPredicate[*nbdb.QoS](dbIDs, nil)
+		existingQoSesForIPFamily, err := libovsdbops.FindQoSesWithPredicate(bnc.nbClient, p)
+		if err != nil {
+			return nil, fmt.Errorf("failed to find QOS with predicate: %v", err)
+		}
+		return append(existingQoSes, existingQoSesForIPFamily...), nil
+	}
+	if isIPv4Mode {
+		existingQoSes, err = getQOSForFamily(IPFamilyValueV4, existingQoSes)
+		if err != nil {
+			return fmt.Errorf("failed to get existing IPv4 QOS rules: %v", err)
+		}
+	}
+	if isIPv6Mode {
+		existingQoSes, err = getQOSForFamily(IPFamilyValueV6, existingQoSes)
+		if err != nil {
+			return fmt.Errorf("failed to get existing IPv6 QOS rules: %v", err)
+		}
 	}
 	qosExists := false
-	if config.IPv4Mode && config.IPv6Mode && len(existingQoSes) == 2 {
+	if isIPv4Mode && isIPv6Mode && len(existingQoSes) == 2 {
 		// no need to create QoS Rule ops; already exists; dualstack
 		qosExists = true
 	}
-	if len(existingQoSes) == 1 && ((config.IPv4Mode && !config.IPv6Mode) || (config.IPv6Mode && !config.IPv4Mode)) {
+	if len(existingQoSes) == 1 && ((isIPv4Mode && !isIPv6Mode) || (isIPv6Mode && !isIPv4Mode)) {
 		// no need to create QoS Rule ops; already exists; single stack
 		qosExists = true
 	}
 	if !qosExists {
-		existingQoSes, ops, err = createDefaultReRouteQoSRuleOps(bnc.nbClient, bnc.addressSetFactory, bnc.controllerName)
+		existingQoSes, ops, err = createDefaultReRouteQoSRuleOps(bnc.nbClient, bnc.addressSetFactory, bnc.controllerName, isIPv4Mode, isIPv6Mode)
 		if err != nil {
 			return fmt.Errorf("cannot create QoS rule ops: %v", err)
 		}
@@ -2530,7 +2573,8 @@ func (bnc *BaseNetworkController) ensureDefaultNoRerouteNodePolicies() error {
 	bnc.eIPC.nodeUpdateMutex.Lock()
 	defer bnc.eIPC.nodeUpdateMutex.Unlock()
 	nodeLister := listers.NewNodeLister(bnc.watchFactory.NodeInformer().GetIndexer())
-	return ensureDefaultNoRerouteNodePolicies(bnc.nbClient, bnc.addressSetFactory, bnc.controllerName, bnc.GetNetworkScopedClusterRouterName(), nodeLister)
+	v4, v6 := bnc.IPMode()
+	return ensureDefaultNoRerouteNodePolicies(bnc.nbClient, bnc.addressSetFactory, bnc.controllerName, bnc.GetNetworkScopedClusterRouterName(), nodeLister, v4, v6)
 }
 
 // ensureDefaultNoRerouteNodePolicies ensures egress pods east<->west traffic with hostNetwork pods,
@@ -2540,13 +2584,14 @@ func (bnc *BaseNetworkController) ensureDefaultNoRerouteNodePolicies() error {
 // All the cluster node's addresses are considered. This is to avoid race conditions after a VIP moves from one node
 // to another where we might process events out of order. For the same reason this function needs to be called under
 // lock.
-func ensureDefaultNoRerouteNodePolicies(nbClient libovsdbclient.Client, addressSetFactory addressset.AddressSetFactory, controllerName, clusterRouter string, nodeLister listers.NodeLister) error {
+func ensureDefaultNoRerouteNodePolicies(nbClient libovsdbclient.Client, addressSetFactory addressset.AddressSetFactory,
+	controllerName, clusterRouter string, nodeLister listers.NodeLister, v4, v6 bool) error {
 	nodes, err := nodeLister.List(labels.Everything())
 	if err != nil {
 		return err
 	}
 
-	v4NodeAddrs, v6NodeAddrs, err := util.GetNodeAddresses(config.IPv4Mode, config.IPv6Mode, nodes...)
+	v4NodeAddrs, v6NodeAddrs, err := util.GetNodeAddresses(v4, v6, nodes...)
 	if err != nil {
 		return err
 	}
