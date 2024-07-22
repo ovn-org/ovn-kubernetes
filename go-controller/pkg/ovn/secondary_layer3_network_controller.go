@@ -303,10 +303,13 @@ func (oc *SecondaryLayer3NetworkController) initRetryFramework() {
 	oc.retryPods = oc.newRetryFramework(factory.PodType)
 	oc.retryNodes = oc.newRetryFramework(factory.NodeType)
 
-	// For secondary networks, we don't have to watch namespace events if
-	// multi-network policy support is not enabled.
-	if util.IsMultiNetworkPoliciesSupportEnabled() {
+	// For secondary networks, we have to watch namespace only either:
+	// - multi-network policy support is enabled
+	// - primary UDN is supported and multicast per namespace can be configured
+	if util.IsMultiNetworkPoliciesSupportEnabled() || (util.IsNetworkSegmentationSupportEnabled() && config.EnableMulticast) {
 		oc.retryNamespaces = oc.newRetryFramework(factory.NamespaceType)
+	}
+	if util.IsMultiNetworkPoliciesSupportEnabled() {
 		oc.retryNetworkPolicies = oc.newRetryFramework(factory.MultiNetworkPolicyType)
 	}
 }
