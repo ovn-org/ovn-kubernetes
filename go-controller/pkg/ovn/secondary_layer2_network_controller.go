@@ -317,8 +317,17 @@ func (oc *SecondaryLayer2NetworkController) Cleanup() error {
 }
 
 func (oc *SecondaryLayer2NetworkController) Init() error {
-	_, err := oc.initializeLogicalSwitch(oc.GetNetworkScopedSwitchName(types.OVNLayer2Switch), oc.Subnets(), oc.ExcludeSubnets())
-	return err
+	if _, err := oc.initializeLogicalSwitch(oc.GetNetworkScopedSwitchName(types.OVNLayer2Switch), oc.Subnets(), oc.ExcludeSubnets()); err != nil {
+		return err
+	}
+
+	if oc.IsPrimaryNetwork() && util.IsNetworkSegmentationSupportEnabled() && oc.multicastSupport {
+		if err := oc.setupClusterPortGroups(); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (oc *SecondaryLayer2NetworkController) Stop() {

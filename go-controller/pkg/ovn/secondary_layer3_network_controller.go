@@ -457,8 +457,17 @@ func (oc *SecondaryLayer3NetworkController) WatchNodes() error {
 }
 
 func (oc *SecondaryLayer3NetworkController) Init(ctx context.Context) error {
-	_, err := oc.createOvnClusterRouter()
-	return err
+	if _, err := oc.createOvnClusterRouter(); err != nil {
+		return err
+	}
+
+	if oc.IsPrimaryNetwork() && util.IsNetworkSegmentationSupportEnabled() && oc.multicastSupport {
+		if err := oc.setupClusterPortGroups(); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (oc *SecondaryLayer3NetworkController) addUpdateLocalNodeEvent(node *kapi.Node, nSyncs *nodeSyncs) error {
