@@ -72,6 +72,7 @@ func newEgressIPMeta(name string) metav1.ObjectMeta {
 		Labels: map[string]string{
 			"name": name,
 		},
+		Annotations: map[string]string{util.EgressIPMarkAnnotation: "50001"},
 	}
 }
 
@@ -83,7 +84,7 @@ type nodeInfo struct {
 
 var egressPodLabel = map[string]string{"egress": "needed"}
 
-var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
+var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network", func() {
 	var (
 		app     *cli.App
 		fakeOvn *FakeOVN
