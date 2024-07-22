@@ -1,6 +1,7 @@
 package ovn
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"reflect"
@@ -1023,6 +1024,47 @@ func initLoadBalancerGroups(nbClient libovsdbclient.Client, netInfo util.NetInfo
 	routerLoadBalancerGroupUUID = clusterRouterLBGroup.UUID
 
 	return
+}
+
+func (bnc *BaseNetworkController) setupClusterPortGroups() error {
+	pgIDs := bnc.getClusterPortGroupDbIDs(types.ClusterPortGroupNameBase)
+	pg := &nbdb.PortGroup{
+		Name: libovsdbutil.GetPortGroupName(pgIDs),
+	}
+	pg, err := libovsdbops.GetPortGroup(bnc.nbClient, pg)
+	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
+		return fmt.Errorf("failed to query cluster port group for network %s: %w", bnc.GetNetworkName(), err)
+	}
+	if pg == nil {
+		// we didn't find an existing clusterPG, let's create a new empty PG (fresh cluster install)
+		// Create a cluster-wide port group that all logical switch ports are part of
+		pg := libovsdbutil.BuildPortGroup(pgIDs, nil, nil)
+		err = libovsdbops.CreateOrUpdatePortGroups(bnc.nbClient, pg)
+		if err != nil {
+			return fmt.Errorf("failed to create cluster port group for network %s: %w", bnc.GetNetworkName(), err)
+		}
+	}
+
+	pgIDs = bnc.getClusterPortGroupDbIDs(types.ClusterRtrPortGroupNameBase)
+	pg = &nbdb.PortGroup{
+		Name: libovsdbutil.GetPortGroupName(pgIDs),
+	}
+	pg, err = libovsdbops.GetPortGroup(bnc.nbClient, pg)
+	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
+		return fmt.Errorf("failed to query cluster router port group for network %s: %w", bnc.GetNetworkName(), err)
+	}
+	if pg == nil {
+		// we didn't find an existing clusterRtrPG, let's create a new empty PG (fresh cluster install)
+		// Create a cluster-wide port group with all node-to-cluster router
+		// logical switch ports. Currently the only user is multicast but it might
+		// be used for other features in the future.
+		pg = libovsdbutil.BuildPortGroup(pgIDs, nil, nil)
+		err = libovsdbops.CreateOrUpdatePortGroups(bnc.nbClient, pg)
+		if err != nil {
+			return fmt.Errorf("failed to create cluster router port group for network %s: %w", bnc.GetNetworkName(), err)
+		}
+	}
+	return nil
 }
 
 func (bnc *BaseNetworkController) GetSamplingConfig() *libovsdbops.SamplingConfig {
