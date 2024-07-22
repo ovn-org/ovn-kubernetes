@@ -36,11 +36,16 @@ const (
 // SetupMaster creates the central router and load-balancers for the network
 func (oc *DefaultNetworkController) SetupMaster(existingNodeNames []string) error {
 	// Create default Control Plane Protection (COPP) entry for routers
-	logicalRouter, err := oc.createOvnClusterRouter()
+	defaultCOPPUUID, err := EnsureDefaultCOPP(oc.nbClient)
+	if err != nil {
+		return fmt.Errorf("unable to create router control plane protection: %w", err)
+	}
+	oc.defaultCOPPUUID = defaultCOPPUUID
+
+	logicalRouter, err := oc.newClusterRouter()
 	if err != nil {
 		return err
 	}
-	oc.defaultCOPPUUID = *(logicalRouter.Copp)
 
 	pgIDs := oc.getClusterPortGroupDbIDs(types.ClusterPortGroupNameBase)
 	pg := &nbdb.PortGroup{
@@ -105,7 +110,22 @@ func (oc *DefaultNetworkController) SetupMaster(existingNodeNames []string) erro
 	}
 
 	// Create OVNJoinSwitch that will be used to connect gateway routers to the distributed router.
-	return oc.createJoinSwitch(logicalRouter)
+	return oc.gatewayTopologyFactory.NewJoinSwitch(logicalRouter, oc.NetInfo, oc.ovnClusterLRPToJoinIfAddrs)
+}
+
+func (oc *DefaultNetworkController) newClusterRouter() (*nbdb.LogicalRouter, error) {
+	if oc.multicastSupport {
+		return oc.gatewayTopologyFactory.NewClusterRouterWithMulticastSupport(
+			oc.GetNetworkScopedClusterRouterName(),
+			oc.NetInfo,
+			oc.defaultCOPPUUID,
+		)
+	}
+	return oc.gatewayTopologyFactory.NewClusterRouter(
+		oc.GetNetworkScopedClusterRouterName(),
+		oc.NetInfo,
+		oc.defaultCOPPUUID,
+	)
 }
 
 func (oc *DefaultNetworkController) syncNodeManagementPortDefault(node *kapi.Node, switchName string, hostSubnets []*net.IPNet) error {

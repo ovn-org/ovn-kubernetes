@@ -17,6 +17,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/topology"
 	zoneic "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/zone_interconnect"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
@@ -277,6 +278,8 @@ type SecondaryLayer3NetworkController struct {
 
 	// Cluster-wide router default Control Plane Protection (COPP) UUID
 	defaultCOPPUUID string
+
+	gatewayTopologyFactory *topology.GatewayTopologyFactory
 }
 
 // NewSecondaryLayer3NetworkController create a new OVN controller for the given secondary layer3 NAD
@@ -317,6 +320,7 @@ func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netI
 		nodeClusterRouterPortFailed: sync.Map{},
 		syncZoneICFailed:            sync.Map{},
 		gatewaysFailed:              sync.Map{},
+		gatewayTopologyFactory:      topology.NewGatewayTopologyFactory(cnci.nbClient),
 	}
 
 	if oc.allocatesPodAnnotation() {
@@ -495,18 +499,38 @@ func (oc *SecondaryLayer3NetworkController) WatchNodes() error {
 }
 
 func (oc *SecondaryLayer3NetworkController) Init(ctx context.Context) error {
-	clusterRouter, err := oc.createOvnClusterRouter()
+	// Create default Control Plane Protection (COPP) entry for routers
+	defaultCOPPUUID, err := EnsureDefaultCOPP(oc.nbClient)
+	if err != nil {
+		return fmt.Errorf("unable to create router control plane protection: %w", err)
+	}
+	oc.defaultCOPPUUID = defaultCOPPUUID
+
+	clusterRouter, err := oc.newClusterRouter()
 	if err != nil {
 		return err
 	}
 
-	oc.defaultCOPPUUID = *(clusterRouter.Copp)
-
 	// Only configure join switch and GR for user defined primary networks.
 	if util.IsNetworkSegmentationSupportEnabled() && oc.IsPrimaryNetwork() {
-		err = oc.createJoinSwitch(clusterRouter)
+		err = oc.gatewayTopologyFactory.NewJoinSwitch(clusterRouter, oc.NetInfo, oc.ovnClusterLRPToJoinIfAddrs)
 	}
 	return err
+}
+
+func (oc *SecondaryLayer3NetworkController) newClusterRouter() (*nbdb.LogicalRouter, error) {
+	if oc.multicastSupport {
+		return oc.gatewayTopologyFactory.NewClusterRouterWithMulticastSupport(
+			oc.GetNetworkScopedClusterRouterName(),
+			oc.NetInfo,
+			oc.defaultCOPPUUID,
+		)
+	}
+	return oc.gatewayTopologyFactory.NewClusterRouter(
+		oc.GetNetworkScopedClusterRouterName(),
+		oc.NetInfo,
+		oc.defaultCOPPUUID,
+	)
 }
 
 func (oc *SecondaryLayer3NetworkController) addUpdateLocalNodeEvent(node *kapi.Node, nSyncs *nodeSyncs) error {

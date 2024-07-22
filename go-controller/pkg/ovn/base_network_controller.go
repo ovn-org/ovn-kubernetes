@@ -235,46 +235,6 @@ func (bnc *BaseNetworkController) AddConfigDurationRecord(kind, namespace, name 
 	return []ovsdb.Operation{}, func() {}, time.Time{}, nil
 }
 
-// createOvnClusterRouter creates the central router for the network
-func (bnc *BaseNetworkController) createOvnClusterRouter() (*nbdb.LogicalRouter, error) {
-	// Create default Control Plane Protection (COPP) entry for routers
-	defaultCOPPUUID, err := EnsureDefaultCOPP(bnc.nbClient)
-	if err != nil {
-		return nil, fmt.Errorf("unable to create router control plane protection: %w", err)
-	}
-
-	// Create a single common distributed router for the cluster.
-	logicalRouterName := bnc.GetNetworkScopedClusterRouterName()
-	logicalRouter := nbdb.LogicalRouter{
-		Name: logicalRouterName,
-		ExternalIDs: map[string]string{
-			"k8s-cluster-router": "yes",
-		},
-		Options: map[string]string{
-			"always_learn_from_arp_request": "false",
-		},
-		Copp: &defaultCOPPUUID,
-	}
-	if bnc.IsSecondary() {
-		logicalRouter.ExternalIDs[types.NetworkExternalID] = bnc.GetNetworkName()
-		logicalRouter.ExternalIDs[types.TopologyExternalID] = bnc.TopologyType()
-	}
-	if bnc.multicastSupport {
-		logicalRouter.Options = map[string]string{
-			"mcast_relay": "true",
-		}
-	}
-
-	err = libovsdbops.CreateOrUpdateLogicalRouter(bnc.nbClient, &logicalRouter, &logicalRouter.Options,
-		&logicalRouter.ExternalIDs, &logicalRouter.Copp)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create distributed router %s, error: %v",
-			logicalRouterName, err)
-	}
-
-	return &logicalRouter, nil
-}
-
 // getOVNClusterRouterPortToJoinSwitchIPs returns the IP addresses for the
 // logical router port "GwRouterToJoinSwitchPrefix + OVNClusterRouter" from the
 // config.Gateway.V4JoinSubnet and  config.Gateway.V6JoinSubnet. This will
@@ -297,78 +257,6 @@ func (bnc *BaseNetworkController) getOVNClusterRouterPortToJoinSwitchIfAddrs() (
 	}
 
 	return gwLRPIPs, nil
-}
-
-// Create OVNJoinSwitch that will be used to connect gateway routers to the distributed router.
-func (bnc *BaseNetworkController) createJoinSwitch(clusterRouter *nbdb.LogicalRouter) error {
-	joinSwitchName := bnc.GetNetworkScopedJoinSwitchName()
-	logicalSwitch := nbdb.LogicalSwitch{
-		Name: joinSwitchName,
-	}
-	if bnc.IsSecondary() {
-		logicalSwitch.ExternalIDs = map[string]string{
-			types.NetworkExternalID:  bnc.GetNetworkName(),
-			types.TopologyExternalID: bnc.TopologyType(),
-		}
-	}
-
-	// nothing is updated here, so no reason to pass fields
-	err := libovsdbops.CreateOrUpdateLogicalSwitch(bnc.nbClient, &logicalSwitch)
-	if err != nil {
-		return fmt.Errorf("failed to create logical switch %+v: %v", logicalSwitch, err)
-	}
-
-	// Connect the distributed router to OVNJoinSwitch.
-	drSwitchPort := types.JoinSwitchToGWRouterPrefix + clusterRouter.Name
-	drRouterPort := types.GWRouterToJoinSwitchPrefix + clusterRouter.Name
-
-	gwLRPMAC := util.IPAddrToHWAddr(bnc.ovnClusterLRPToJoinIfAddrs[0].IP)
-	gwLRPNetworks := []string{}
-	for _, gwLRPIfAddr := range bnc.ovnClusterLRPToJoinIfAddrs {
-		gwLRPNetworks = append(gwLRPNetworks, gwLRPIfAddr.String())
-	}
-	logicalRouterPort := nbdb.LogicalRouterPort{
-		Name:     drRouterPort,
-		MAC:      gwLRPMAC.String(),
-		Networks: gwLRPNetworks,
-	}
-	if bnc.IsSecondary() {
-		logicalRouterPort.ExternalIDs = map[string]string{
-			types.NetworkExternalID:  bnc.GetNetworkName(),
-			types.TopologyExternalID: bnc.TopologyType(),
-		}
-	}
-
-	err = libovsdbops.CreateOrUpdateLogicalRouterPort(bnc.nbClient, clusterRouter,
-		&logicalRouterPort, nil, &logicalRouterPort.MAC, &logicalRouterPort.Networks)
-	if err != nil {
-		return fmt.Errorf("failed to add logical router port %+v on router %s: %v", logicalRouterPort, clusterRouter.Name, err)
-	}
-
-	// Create OVNJoinSwitch that will be used to connect gateway routers to the
-	// distributed router and connect it to said dsitributed router.
-	logicalSwitchPort := nbdb.LogicalSwitchPort{
-		Name: drSwitchPort,
-		Type: "router",
-		Options: map[string]string{
-			"router-port": drRouterPort,
-		},
-		Addresses: []string{"router"},
-	}
-	if bnc.IsSecondary() {
-		logicalSwitchPort.ExternalIDs = map[string]string{
-			types.NetworkExternalID:  bnc.GetNetworkName(),
-			types.TopologyExternalID: bnc.TopologyType(),
-		}
-	}
-
-	sw := nbdb.LogicalSwitch{Name: joinSwitchName}
-	err = libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitch(bnc.nbClient, &sw, &logicalSwitchPort)
-	if err != nil {
-		return fmt.Errorf("failed to create logical switch port %+v and switch %s: %v", logicalSwitchPort, joinSwitchName, err)
-	}
-
-	return nil
 }
 
 // syncNodeClusterRouterPort ensures a node's LS to the cluster router's LRP is created.
