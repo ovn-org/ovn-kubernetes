@@ -28,8 +28,9 @@ type SecondaryNodeNetworkController struct {
 
 // NewSecondaryNodeNetworkController creates a new OVN controller for creating logical network
 // infrastructure and policy for default l3 network
-func NewSecondaryNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, netInfo util.NetInfo) *SecondaryNodeNetworkController {
-	return &SecondaryNodeNetworkController{
+func NewSecondaryNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, netInfo util.NetInfo,
+	defaultNetworkGateway Gateway) (*SecondaryNodeNetworkController, error) {
+	snnc := &SecondaryNodeNetworkController{
 		BaseNodeNetworkController: BaseNodeNetworkController{
 			CommonNodeNetworkControllerInfo: *cnnci,
 			NetInfo:                         netInfo,
@@ -37,6 +38,21 @@ func NewSecondaryNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, n
 			wg:                              &sync.WaitGroup{},
 		},
 	}
+	if util.IsNetworkSegmentationSupportEnabled() && snnc.IsPrimaryNetwork() {
+		node, err := snnc.watchFactory.GetNode(snnc.name)
+		if err != nil {
+			return nil, err
+		}
+		networkID, err := snnc.getNetworkID()
+		if err != nil {
+			return nil, err
+		}
+		snnc.gateway, err = NewUserDefinedNetworkGateway(snnc.NetInfo, networkID, node, defaultNetworkGateway)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return snnc, nil
 }
 
 // Start starts the default controller; handles all events and creates all needed logical entities
@@ -52,15 +68,6 @@ func (nc *SecondaryNodeNetworkController) Start(ctx context.Context) error {
 		nc.podHandler = handler
 	}
 	if util.IsNetworkSegmentationSupportEnabled() && nc.IsPrimaryNetwork() {
-		node, err := nc.watchFactory.GetNode(nc.name)
-		if err != nil {
-			return err
-		}
-		networkID, err := nc.getNetworkID()
-		if err != nil {
-			return err
-		}
-		nc.gateway = NewUserDefinedNetworkGateway(nc.NetInfo, networkID, node)
 		if err := nc.gateway.AddNetwork(); err != nil {
 			return fmt.Errorf("failed to add network to node gateway for network %s at node %s: %w",
 				nc.GetNetworkName(), nc.name, err)
