@@ -1280,26 +1280,23 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 				// table 1, established and related connections in zone 64000 with ct_mark ctMarkOVN go to OVN
 				dftFlows = append(dftFlows,
 					fmt.Sprintf("cookie=%s, priority=100, table=1, ip, ct_state=+trk+est, ct_mark=%s, "+
-						"actions=%s",
-						defaultOpenFlowCookie, ctMarkOVN, actions))
+						"actions=%s", defaultOpenFlowCookie, netConfig.masqCTMark, actions))
 
 				dftFlows = append(dftFlows,
 					fmt.Sprintf("cookie=%s, priority=100, table=1, ip, ct_state=+trk+rel, ct_mark=%s, "+
-						"actions=%s",
-						defaultOpenFlowCookie, ctMarkOVN, actions))
+						"actions=%s", defaultOpenFlowCookie, netConfig.masqCTMark, actions))
+
 			}
 
 			if config.IPv6Mode {
 				// table 1, established and related connections in zone 64000 with ct_mark ctMarkOVN go to OVN
 				dftFlows = append(dftFlows,
 					fmt.Sprintf("cookie=%s, priority=100, table=1, ipv6, ct_state=+trk+est, ct_mark=%s, "+
-						"actions=%s",
-						defaultOpenFlowCookie, ctMarkOVN, actions))
+						"actions=%s", defaultOpenFlowCookie, netConfig.masqCTMark, actions))
 
 				dftFlows = append(dftFlows,
 					fmt.Sprintf("cookie=%s, priority=100, table=1, ipv6, ct_state=+trk+rel, ct_mark=%s, "+
-						"actions=%s",
-						defaultOpenFlowCookie, ctMarkOVN, actions))
+						"actions=%s", defaultOpenFlowCookie, netConfig.masqCTMark, actions))
 			}
 		}
 		if config.IPv4Mode {
@@ -1422,15 +1419,23 @@ func commonFlows(subnets []*net.IPNet, bridge *bridgeConfiguration) ([]string, e
 					fmt.Sprintf("cookie=%s, priority=105, in_port=%s, dl_src=%s, ip, pkt_mark=%s "+
 						"actions=ct(commit, zone=%d, nat(src=%s), exec(set_field:%s->ct_mark)),output:%s",
 						defaultOpenFlowCookie, netConfig.ofPortPatch, bridgeMacAddress, ovnKubeNodeSNATMark,
-						config.Default.ConntrackZone, physicalIP.IP, ctMarkOVN, ofPortPhys))
+						config.Default.ConntrackZone, physicalIP.IP, netConfig.masqCTMark, ofPortPhys))
 
 				// table 0, packets coming from pods headed externally. Commit connections with ct_mark ctMarkOVN
 				// so that reverse direction goes back to the pods.
-				dftFlows = append(dftFlows,
-					fmt.Sprintf("cookie=%s, priority=100, in_port=%s, dl_src=%s, ip, "+
-						"actions=ct(commit, zone=%d, exec(set_field:%s->ct_mark)), output:%s",
-						defaultOpenFlowCookie, netConfig.ofPortPatch, bridgeMacAddress, config.Default.ConntrackZone,
-						ctMarkOVN, ofPortPhys))
+				if netConfig.masqCTMark == ctMarkOVN {
+					dftFlows = append(dftFlows,
+						fmt.Sprintf("cookie=%s, priority=100, in_port=%s, dl_src=%s, ip, "+
+							"actions=ct(commit, zone=%d, exec(set_field:%s->ct_mark)), output:%s",
+							defaultOpenFlowCookie, netConfig.ofPortPatch, bridgeMacAddress, config.Default.ConntrackZone,
+							netConfig.masqCTMark, ofPortPhys))
+				} else {
+					dftFlows = append(dftFlows,
+						fmt.Sprintf("cookie=%s, priority=100, in_port=%s, dl_src=%s, ip, "+
+							"actions=ct(commit, zone=%d, nat(src=%s), exec(set_field:%s->ct_mark)), output:%s",
+							defaultOpenFlowCookie, netConfig.ofPortPatch, bridgeMacAddress, config.Default.ConntrackZone,
+							physicalIP.IP, netConfig.masqCTMark, ofPortPhys))
+				}
 			}
 
 			// table 0, packets coming from host Commit connections with ct_mark ctMarkHost
@@ -1489,14 +1494,22 @@ func commonFlows(subnets []*net.IPNet, bridge *bridgeConfiguration) ([]string, e
 					fmt.Sprintf("cookie=%s, priority=105, in_port=%s, dl_src=%s, ipv6, pkt_mark=%s "+
 						"actions=ct(commit, zone=%d, nat(src=%s), exec(set_field:%s->ct_mark)),output:%s",
 						defaultOpenFlowCookie, netConfig.ofPortPatch, bridgeMacAddress, ovnKubeNodeSNATMark,
-						config.Default.ConntrackZone, physicalIP.IP, ctMarkOVN, ofPortPhys))
+						config.Default.ConntrackZone, physicalIP.IP, netConfig.masqCTMark, ofPortPhys))
 
 				// table 0, packets coming from pods headed externally. Commit connections with ct_mark ctMarkOVN
 				// so that reverse direction goes back to the pods.
-				dftFlows = append(dftFlows,
-					fmt.Sprintf("cookie=%s, priority=100, in_port=%s, dl_src=%s, ipv6, "+
-						"actions=ct(commit, zone=%d, exec(set_field:%s->ct_mark)), output:%s",
-						defaultOpenFlowCookie, netConfig.ofPortPatch, bridgeMacAddress, config.Default.ConntrackZone, ctMarkOVN, ofPortPhys))
+				if netConfig.masqCTMark == ctMarkOVN {
+					dftFlows = append(dftFlows,
+						fmt.Sprintf("cookie=%s, priority=100, in_port=%s, dl_src=%s, ipv6, "+
+							"actions=ct(commit, zone=%d, exec(set_field:%s->ct_mark)), output:%s",
+							defaultOpenFlowCookie, netConfig.ofPortPatch, bridgeMacAddress, config.Default.ConntrackZone, netConfig.masqCTMark, ofPortPhys))
+				} else {
+					dftFlows = append(dftFlows,
+						fmt.Sprintf("cookie=%s, priority=100, in_port=%s, dl_src=%s, ipv6, "+
+							"actions=ct(commit, zone=%d, nat(src=%s), exec(set_field:%s->ct_mark)), output:%s",
+							defaultOpenFlowCookie, netConfig.ofPortPatch, bridgeMacAddress, config.Default.ConntrackZone,
+							physicalIP.IP, netConfig.masqCTMark, ofPortPhys))
+				}
 			}
 
 			// table 0, packets coming from host. Commit connections with ct_mark ctMarkHost
