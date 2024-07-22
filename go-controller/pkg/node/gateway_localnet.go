@@ -52,19 +52,38 @@ func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net
 
 	if exGwBridge != nil {
 		gw.readyFunc = func() (bool, error) {
-			ready, err := gatewayReady(gwBridge.patchPort)
-			if err != nil {
-				return false, err
+			gwBridge.Lock()
+			for _, netConfig := range gwBridge.netConfig {
+				ready, err := gatewayReady(netConfig.patchPort)
+				if err != nil || !ready {
+					gwBridge.Unlock()
+					return false, err
+				}
 			}
-			exGWReady, err := gatewayReady(exGwBridge.patchPort)
-			if err != nil {
-				return false, err
+			gwBridge.Unlock()
+			exGwBridge.Lock()
+			for _, netConfig := range exGwBridge.netConfig {
+				exGWReady, err := gatewayReady(netConfig.patchPort)
+				if err != nil || !exGWReady {
+					exGwBridge.Unlock()
+					return false, err
+				}
 			}
-			return ready && exGWReady, nil
+			exGwBridge.Unlock()
+			return true, nil
 		}
 	} else {
 		gw.readyFunc = func() (bool, error) {
-			return gatewayReady(gwBridge.patchPort)
+			gwBridge.Lock()
+			for _, netConfig := range gwBridge.netConfig {
+				ready, err := gatewayReady(netConfig.patchPort)
+				if err != nil || !ready {
+					gwBridge.Unlock()
+					return false, err
+				}
+			}
+			gwBridge.Unlock()
+			return true, nil
 		}
 	}
 
