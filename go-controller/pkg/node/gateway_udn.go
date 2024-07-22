@@ -46,6 +46,20 @@ func (c *openflowManager) getExGwBridgePorts() ([]bridgeUDNConfiguration, string
 	return c.externalGatewayBridge.getBridgePorts()
 }
 
+func (c *openflowManager) addNetwork(nInfo util.NetInfo, masqCTMark uint) {
+	c.defaultBridge.addBridgeNetConfig(nInfo, masqCTMark)
+	if c.externalGatewayBridge != nil {
+		c.externalGatewayBridge.addBridgeNetConfig(nInfo, masqCTMark)
+	}
+}
+
+func (c *openflowManager) delNetwork(nInfo util.NetInfo) {
+	c.defaultBridge.delBridgeNetConfig(nInfo)
+	if c.externalGatewayBridge != nil {
+		c.externalGatewayBridge.delBridgeNetConfig(nInfo)
+	}
+}
+
 // UTILS Needed for UDN (also leveraged for default netInfo) in bridgeConfiguration
 
 func (b *bridgeConfiguration) getBridgePorts() ([]bridgeUDNConfiguration, string, string) {
