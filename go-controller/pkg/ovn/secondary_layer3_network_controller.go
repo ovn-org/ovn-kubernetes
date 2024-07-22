@@ -607,10 +607,14 @@ func (oc *SecondaryLayer3NetworkController) Init(ctx context.Context) error {
 		return fmt.Errorf("failed to create OVN cluster router for network %q: %v", oc.GetNetworkName(), err)
 	}
 
-	// Only configure join switch and GR for user defined primary networks.
+	// Only configure join switch, GR and cluster port groups for user defined primary networks.
 	if util.IsNetworkSegmentationSupportEnabled() && oc.IsPrimaryNetwork() {
 		if err := oc.gatewayTopologyFactory.NewJoinSwitch(clusterRouter, oc.NetInfo, oc.ovnClusterLRPToJoinIfAddrs); err != nil {
 			return fmt.Errorf("failed to create join switch for network %q: %v", oc.GetNetworkName(), err)
+		}
+
+		if err := oc.setupClusterPortGroups(); err != nil {
+			return fmt.Errorf("failed to create cluster port groups for network %q: %w", oc.GetNetworkName(), err)
 		}
 	}
 

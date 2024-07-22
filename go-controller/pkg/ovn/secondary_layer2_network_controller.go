@@ -437,6 +437,13 @@ func (oc *SecondaryLayer2NetworkController) Init() error {
 		return err
 	}
 
+	// Configure cluster port groups for user defined primary networks.
+	if oc.IsPrimaryNetwork() && util.IsNetworkSegmentationSupportEnabled() {
+		if err := oc.setupClusterPortGroups(); err != nil {
+			return fmt.Errorf("failed to create cluster port groups for network %q: %w", oc.GetNetworkName(), err)
+		}
+	}
+
 	return err
 }
 
