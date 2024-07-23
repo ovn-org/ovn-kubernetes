@@ -451,6 +451,10 @@ func (g *gateway) doReconcile() error {
 	if err := g.openflowManager.updateBridgeFlowCache(subnets, g.nodeIPManager.ListAddresses(), g.isRoutingAdvertised); err != nil {
 		return err
 	}
+	err = g.updateSNATRules()
+	if err != nil {
+		return err
+	}
 	// Services create OpenFlow flows as well, need to update them all
 	if g.servicesRetryFramework != nil {
 		if errs := g.addAllServices(); errs != nil {
@@ -479,6 +483,23 @@ func (g *gateway) addAllServices() []error {
 	}
 	g.servicesRetryFramework.RequestRetryObjs()
 	return errs
+}
+
+func (g *gateway) updateSNATRules() error {
+	var ipnets []*net.IPNet
+	if g.nodeIPManager.mgmtPortConfig.ipv4 != nil {
+		ipnets = append(ipnets, g.nodeIPManager.mgmtPortConfig.ipv4.ifAddr)
+	}
+	if g.nodeIPManager.mgmtPortConfig.ipv6 != nil {
+		ipnets = append(ipnets, g.nodeIPManager.mgmtPortConfig.ipv6.ifAddr)
+	}
+	subnets := util.IPsToNetworkIPs(ipnets...)
+
+	if g.isRoutingAdvertised || config.Gateway.Mode != config.GatewayModeLocal {
+		return delLocalGatewayPodSubnetNATRules(subnets...)
+	}
+
+	return addLocalGatewayPodSubnetNATRules(subnets...)
 }
 
 type bridgeConfiguration struct {
