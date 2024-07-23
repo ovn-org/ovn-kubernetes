@@ -207,7 +207,7 @@ func (oc *DefaultNodeNetworkController) Reconcile(netInfo util.NetInfo) error {
 
 	// then reconcile subcontrollers
 	if reconcilePodNetwork {
-		isPodNetworkAdvertisedAtNode := oc.isPodNetworkAdvertisedAtNode()
+		isPodNetworkAdvertisedAtNode := util.IsPodNetworkAdvertisedAtNode(netInfo, oc.name)
 		if oc.Gateway != nil {
 			oc.Gateway.SetPodNetworkAdvertised(isPodNetworkAdvertisedAtNode)
 			err := oc.Gateway.Reconcile()
