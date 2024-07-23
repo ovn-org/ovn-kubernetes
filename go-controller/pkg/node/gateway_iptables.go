@@ -423,7 +423,7 @@ func getLocalGatewayNATRules(ifname string, cidr *net.IPNet) []nodeipt.Rule {
 	if protocol == iptables.ProtocolIPv6 {
 		masqueradeIP = config.Gateway.MasqueradeIPs.V6OVNMasqueradeIP
 	}
-	return []nodeipt.Rule{
+	rules := []nodeipt.Rule{
 		{
 			Table: "nat",
 			Chain: "POSTROUTING",
@@ -443,6 +443,38 @@ func getLocalGatewayNATRules(ifname string, cidr *net.IPNet) []nodeipt.Rule {
 			Protocol: protocol,
 		},
 	}
+	if util.IsNetworkSegmentationSupportEnabled() {
+		// NOTE: Ordering is important here, the RETURN must come before
+		// the MASQUERADE rule. Please don't change the ordering.
+		srcUDNMasqueradePrefix := config.Gateway.V4MasqueradeSubnet
+		defaultNetworkReservedMasqueradePrefix := config.Gateway.MasqueradeIPs.V4HostMasqueradeIP.String() + "/29"
+		klog.Infof("SURYA %v/%v", srcUDNMasqueradePrefix, defaultNetworkReservedMasqueradePrefix)
+		if protocol == iptables.ProtocolIPv6 {
+			srcUDNMasqueradePrefix = config.Gateway.V6MasqueradeSubnet
+			defaultNetworkReservedMasqueradePrefix = config.Gateway.MasqueradeIPs.V6HostMasqueradeIP.String() + "/125"
+		}
+		rules = append(rules,
+			nodeipt.Rule{
+				Table: "nat",
+				Chain: "POSTROUTING",
+				Args: []string{
+					"-s", defaultNetworkReservedMasqueradePrefix,
+					"-j", "RETURN",
+				},
+				Protocol: protocol,
+			},
+			nodeipt.Rule{
+				Table: "nat",
+				Chain: "POSTROUTING",
+				Args: []string{
+					"-s", srcUDNMasqueradePrefix,
+					"-j", "MASQUERADE",
+				},
+				Protocol: protocol,
+			},
+		)
+	}
+	return rules
 }
 
 // initLocalGatewayNATRules sets up iptables rules for interfaces

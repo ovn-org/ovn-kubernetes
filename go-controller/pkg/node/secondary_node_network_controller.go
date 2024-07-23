@@ -2,9 +2,15 @@ package node
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iprulemanager"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/vrfmanager"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	"k8s.io/klog/v2"
@@ -17,14 +23,17 @@ type SecondaryNodeNetworkController struct {
 	BaseNodeNetworkController
 	// pod events factory handler
 	podHandler *factory.Handler
-
+	// stores the networkID of this network
 	networkID *int
+	// responsible for programing gateway elements for this network
+	gateway *UserDefinedNetworkGateway
 }
 
 // NewSecondaryNodeNetworkController creates a new OVN controller for creating logical network
 // infrastructure and policy for default l3 network
-func NewSecondaryNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, netInfo util.NetInfo) *SecondaryNodeNetworkController {
-	return &SecondaryNodeNetworkController{
+func NewSecondaryNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, netInfo util.NetInfo,
+	vrfManager *vrfmanager.Controller, ruleManager *iprulemanager.Controller) (*SecondaryNodeNetworkController, error) {
+	snnc := &SecondaryNodeNetworkController{
 		BaseNodeNetworkController: BaseNodeNetworkController{
 			CommonNodeNetworkControllerInfo: *cnnci,
 			NetInfo:                         netInfo,
@@ -32,17 +41,38 @@ func NewSecondaryNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, n
 			wg:                              &sync.WaitGroup{},
 		},
 	}
+	if util.IsNetworkSegmentationSupportEnabled() && snnc.IsPrimaryNetwork() {
+		node, err := snnc.watchFactory.GetNode(snnc.name)
+		if err != nil {
+			return nil, err
+		}
+		networkID, err := snnc.getNetworkID()
+		if err != nil {
+			return nil, err
+		}
+		nodeAnnotator := kube.NewNodeAnnotator(snnc.Kube, snnc.name)
+		snnc.gateway = NewUserDefinedNetworkGateway(snnc.NetInfo, networkID, node, nodeAnnotator, vrfManager, ruleManager)
+	}
+	return snnc, nil
 }
 
 // Start starts the default controller; handles all events and creates all needed logical entities
 func (nc *SecondaryNodeNetworkController) Start(ctx context.Context) error {
 	klog.Infof("Start secondary node network controller of network %s", nc.GetNetworkName())
 
-	handler, err := nc.watchPodsDPU()
-	if err != nil {
-		return err
+	if config.OVNKubernetesFeature.EnableMultiNetwork && config.OvnKubeNode.Mode == types.NodeModeDPU {
+		handler, err := nc.watchPodsDPU()
+		if err != nil {
+			return err
+		}
+		nc.podHandler = handler
 	}
-	nc.podHandler = handler
+	if util.IsNetworkSegmentationSupportEnabled() && nc.IsPrimaryNetwork() {
+		if err := nc.gateway.AddNetwork(); err != nil {
+			return fmt.Errorf("failed to add network to node gateway for network %s at node %s: %w",
+				nc.GetNetworkName(), nc.name, err)
+		}
+	}
 	return nil
 }
 
@@ -59,6 +89,9 @@ func (nc *SecondaryNodeNetworkController) Stop() {
 
 // Cleanup cleans up node entities for the given secondary network
 func (nc *SecondaryNodeNetworkController) Cleanup() error {
+	if nc.gateway != nil {
+		return nc.gateway.DelNetwork()
+	}
 	return nil
 }
 
