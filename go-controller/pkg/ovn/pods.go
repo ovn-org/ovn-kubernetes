@@ -16,6 +16,7 @@ import (
 	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	kapi "k8s.io/api/core/v1"
@@ -105,10 +106,26 @@ func (oc *DefaultNetworkController) syncPods(pods []interface{}) error {
 				newRoutes = append(newRoutes, route)
 			}
 		}
+
+		syncPodAnnotations := false
+
 		// checking the length because cannot compare the slices directly and if routes are removed
 		// the length will be different
 		if len(annotations.Routes) != len(newRoutes) {
 			annotations.Routes = newRoutes
+			syncPodAnnotations = true
+		}
+		// the ovn pod annotation role field is mandatory for default pod network, update old pods
+		// it it's missing
+		if util.IsNetworkSegmentationSupportEnabled() {
+			if annotations.Role == "" {
+				// Hardcode directly to primary since we don't support primary role networks at namespaces with
+				// pods in it, do not make sense to call GetNetworkRole here.
+				annotations.Role = types.NetworkRolePrimary
+				syncPodAnnotations = true
+			}
+		}
+		if syncPodAnnotations {
 			err = oc.updatePodAnnotationWithRetry(pod, annotations, ovntypes.DefaultNetworkName)
 			if err != nil {
 				return fmt.Errorf("failed to set annotation on pod %s: %v", pod.Name, err)
