@@ -189,6 +189,18 @@ func (oc *DefaultNetworkController) reconcileEgressIP(old, new *egressipv1.Egres
 				return err
 			}
 			for _, namespace := range namespaces {
+				if util.IsNetworkSegmentationSupportEnabled() {
+					// determine if this network configures EIP for this namespace
+					role, err := oc.GetNetworkRoleForNamespace(namespace)
+					if err != nil {
+						return fmt.Errorf("failed to configure EgressIP for Namespace because unable to retrieve network role: %w", err)
+					}
+					if role != types.NetworkRolePrimary {
+						// nothing to clean up as this network is not the primary network of this namespace. We don't have to be concerned
+						// if network role changes from primary, because the network will be deleted and recreated by net-con-mgr.
+						continue
+					}
+				}
 				namespaceLabels := labels.Set(namespace.Labels)
 				if !newNamespaceSelector.Matches(namespaceLabels) && oldNamespaceSelector.Matches(namespaceLabels) {
 					if err := oc.deleteNamespaceEgressIPAssignment(oldEIP.Name, oldEIP.Status.Items, namespace, oldEIP.Spec.PodSelector); err != nil {
@@ -211,6 +223,18 @@ func (oc *DefaultNetworkController) reconcileEgressIP(old, new *egressipv1.Egres
 				return err
 			}
 			for _, namespace := range namespaces {
+				if util.IsNetworkSegmentationSupportEnabled() {
+					// determine if this network configures EIP for this namespace
+					role, err := oc.GetNetworkRoleForNamespace(namespace)
+					if err != nil {
+						return fmt.Errorf("failed to configure EgressIP for Namespace because unable to retrieve network role: %w", err)
+					}
+					if role != types.NetworkRolePrimary {
+						// nothing to clean up as this network is not the primary network of this namespace. We don't have to be concerned
+						// if network role changes from primary, because the network will be deleted and recreated by net-con-mgr.
+						continue
+					}
+				}
 				pods, err := oc.watchFactory.GetPods(namespace.Name)
 				if err != nil {
 					return err
@@ -242,6 +266,18 @@ func (oc *DefaultNetworkController) reconcileEgressIP(old, new *egressipv1.Egres
 				return err
 			}
 			for _, namespace := range namespaces {
+				if util.IsNetworkSegmentationSupportEnabled() {
+					// determine if this network configures EIP for this namespace
+					role, err := oc.GetNetworkRoleForNamespace(namespace)
+					if err != nil {
+						return fmt.Errorf("failed to configure EgressIP for Namespace because unable to retrieve network role: %w", err)
+					}
+					if role != types.NetworkRolePrimary {
+						// nothing to clean up as this network is not the primary network of this namespace. We don't have to be concerned
+						// if network role changes from primary, because the network will be deleted and recreated by net-con-mgr.
+						continue
+					}
+				}
 				namespaceLabels := labels.Set(namespace.Labels)
 				// If the namespace does not match anymore then there's no
 				// reason to look at the pod selector.
@@ -311,7 +347,16 @@ func (oc *DefaultNetworkController) reconcileEgressIPNamespace(old, new *v1.Name
 	if new != nil {
 		newNamespace = new
 	}
-
+	// determine if this network supports EIP for this namespace
+	role, err := oc.GetNetworkRoleForNamespace(getFirstNonNilNamespace(newNamespace, oldNamespace))
+	if err != nil {
+		return fmt.Errorf("failed to configure EgressIP for Namespace because unable to retrieve network role: %w", err)
+	}
+	if role != types.NetworkRolePrimary {
+		// nothing to clean up as this network is not the primary network of this namespace. We don't have to be concerned
+		// if network role changes from primary, because the network will be deleted and recreated by net-con-mgr.
+		return nil
+	}
 	// If the labels have not changed, then there's no change that we care
 	// about: return.
 	oldLabels := labels.Set(oldNamespace.Labels)
@@ -375,7 +420,18 @@ func (oc *DefaultNetworkController) reconcileEgressIPPod(old, new *v1.Pod) (err 
 			return err
 		}
 	}
-
+	if util.IsNetworkSegmentationSupportEnabled() {
+		// determine if this network supports EIP for this namespace
+		role, err := oc.GetNetworkRoleForNamespace(namespace)
+		if err != nil {
+			return fmt.Errorf("failed to configure EgressIP for Namespace because unable to retrieve network role: %w", err)
+		}
+		if role != types.NetworkRolePrimary {
+			// nothing to clean up as this network is not the primary network of this namespace. We don't have to be concerned
+			// if network role changes from primary, because the network will be deleted and recreated by net-con-mgr.
+			return nil
+		}
+	}
 	newPodLabels := labels.Set(newPod.Labels)
 	oldPodLabels := labels.Set(oldPod.Labels)
 
@@ -474,6 +530,18 @@ func (oc *DefaultNetworkController) addEgressIPAssignments(name string, statusAs
 		return err
 	}
 	for _, namespace := range namespaces {
+		if util.IsNetworkSegmentationSupportEnabled() {
+			// determine if this network configures EIP for this namespace
+			role, err := oc.GetNetworkRoleForNamespace(namespace)
+			if err != nil {
+				return fmt.Errorf("failed to configure EgressIP for Namespace because unable to retrieve network role: %w", err)
+			}
+			if role != types.NetworkRolePrimary {
+				// nothing to clean up as this network is not the primary network of this namespace. We don't have to be concerned
+				// if network role changes from primary, because the network will be deleted and recreated by net-con-mgr.
+				continue
+			}
+		}
 		if err := oc.addNamespaceEgressIPAssignments(name, statusAssignments, namespace, podSelector); err != nil {
 			return err
 		}
@@ -1194,6 +1262,18 @@ func (oc *DefaultNetworkController) generateCacheForEgressIP() (map[string]egres
 			continue
 		}
 		for _, namespace := range namespaces {
+			if util.IsNetworkSegmentationSupportEnabled() {
+				// determine if this network configures EIP for this namespace
+				role, err := oc.GetNetworkRoleForNamespace(namespace)
+				if err != nil {
+					klog.Errorf("Failed to generate EgressIP cache for Namespace %s because unable to retrieve network role: %v", namespace.Name, err)
+					continue
+				}
+				// skip config if network isn't primary
+				if role != types.NetworkRolePrimary {
+					continue
+				}
+			}
 			pods, err := oc.watchFactory.GetPodsBySelector(namespace.Name, egressIP.Spec.PodSelector)
 			if err != nil {
 				klog.Errorf("Error building egress IP sync cache, cannot retrieve pods for namespace: %s and egress IP: %s, err: %v", namespace.Name, egressIP.Name, err)
@@ -2306,4 +2386,15 @@ func getPodKey(pod *kapi.Pod) string {
 func getPodNamespaceAndNameFromKey(podKey string) (string, string) {
 	parts := strings.Split(podKey, "_")
 	return parts[0], parts[1]
+}
+
+// getFirstNonNilNamespace must return a non-nil pointer to a Namespace otherwise panic
+func getFirstNonNilNamespace(n1, n2 *v1.Namespace) *v1.Namespace {
+	if n1 != nil {
+		return n1
+	}
+	if n2 != nil {
+		return n2
+	}
+	panic("getNonNilNamespace(): received two nil Namespace pointers")
 }
