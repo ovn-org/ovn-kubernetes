@@ -2,9 +2,12 @@ package node
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	"k8s.io/klog/v2"
@@ -17,8 +20,10 @@ type SecondaryNodeNetworkController struct {
 	BaseNodeNetworkController
 	// pod events factory handler
 	podHandler *factory.Handler
-
+	// stores the networkID of this network
 	networkID *int
+	// responsible for programing gateway elements for this network
+	gateway *UserDefinedNetworkGateway
 }
 
 // NewSecondaryNodeNetworkController creates a new OVN controller for creating logical network
@@ -38,11 +43,29 @@ func NewSecondaryNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, n
 func (nc *SecondaryNodeNetworkController) Start(ctx context.Context) error {
 	klog.Infof("Start secondary node network controller of network %s", nc.GetNetworkName())
 
-	handler, err := nc.watchPodsDPU()
-	if err != nil {
-		return err
+	// enable adding ovs ports for dpu pods in both primary and secondary user defined networks
+	if (config.OVNKubernetesFeature.EnableMultiNetwork || util.IsNetworkSegmentationSupportEnabled()) && config.OvnKubeNode.Mode == types.NodeModeDPU {
+		handler, err := nc.watchPodsDPU()
+		if err != nil {
+			return err
+		}
+		nc.podHandler = handler
 	}
-	nc.podHandler = handler
+	if util.IsNetworkSegmentationSupportEnabled() && nc.IsPrimaryNetwork() {
+		node, err := nc.watchFactory.GetNode(nc.name)
+		if err != nil {
+			return err
+		}
+		networkID, err := nc.getNetworkID()
+		if err != nil {
+			return err
+		}
+		nc.gateway = NewUserDefinedNetworkGateway(nc.NetInfo, networkID, node)
+		if err := nc.gateway.AddNetwork(); err != nil {
+			return fmt.Errorf("failed to add network to node gateway for network %s at node %s: %w",
+				nc.GetNetworkName(), nc.name, err)
+		}
+	}
 	return nil
 }
 
@@ -59,6 +82,9 @@ func (nc *SecondaryNodeNetworkController) Stop() {
 
 // Cleanup cleans up node entities for the given secondary network
 func (nc *SecondaryNodeNetworkController) Cleanup() error {
+	if nc.gateway != nil {
+		return nc.gateway.DelNetwork()
+	}
 	return nil
 }
 
