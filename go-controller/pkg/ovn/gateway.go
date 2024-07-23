@@ -369,7 +369,7 @@ func (gw *GatewayManager) GatewayInit(
 		nodeName,
 		gatewayRouter,
 		l3GatewayConfig.MACAddress.String(),
-		types.PhysicalNetworkName,
+		physNetName(gw.netInfo),
 		l3GatewayConfig.IPAddresses,
 		l3GatewayConfig.VLANID); err != nil {
 		return err
@@ -1169,4 +1169,12 @@ func (gw *GatewayManager) syncNodeGateway(
 		}
 	}
 	return nil
+}
+
+func physNetName(netInfo util.NetInfo) string {
+	physnetName := types.PhysicalNetworkName
+	if netInfo.IsSecondary() {
+		physnetName = netInfo.GetNetworkName()
+	}
+	return physnetName
 }
