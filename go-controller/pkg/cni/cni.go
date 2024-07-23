@@ -106,6 +106,9 @@ func (pr *PodRequest) checkOrUpdatePodUID(pod *kapi.Pod) error {
 }
 
 func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, clientset *ClientSet) (*Response, error) {
+	return pr.cmdAddWithGetCNIResultFunc(kubeAuth, clientset, getCNIResult)
+}
+func (pr *PodRequest) cmdAddWithGetCNIResultFunc(kubeAuth *KubeAPIAuth, clientset *ClientSet, getCNIResultFn getCNIResultFunc) (*Response, error) {
 	namespace := pr.PodNamespace
 	podName := pr.PodName
 	if namespace == "" || podName == "" {
@@ -139,7 +142,10 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, clientset *ClientSet) (*Resp
 	// for DPU, ensure connection-details is present
 
 	primaryUDN := udn.NewPrimaryNetwork(clientset.nadLister)
-	pod, annotations, podNADAnnotation, err := GetPodWithAnnotations(pr.ctx, clientset, namespace, podName, pr.nadName, primaryUDN.WaitForPrimaryAnnotationFn(namespace, annotCondFn))
+	if util.IsNetworkSegmentationSupportEnabled() {
+		annotCondFn = primaryUDN.WaitForPrimaryAnnotationFn(namespace, annotCondFn)
+	}
+	pod, annotations, podNADAnnotation, err := GetPodWithAnnotations(pr.ctx, clientset, namespace, podName, pr.nadName, annotCondFn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pod annotation: %v", err)
 	}
@@ -158,7 +164,7 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, clientset *ClientSet) (*Resp
 	if !config.UnprivilegedMode {
 		//TODO: There is nothing technical to run this at unprivileged mode but
 		//      we will tackle that later on.
-		response.Result, err = pr.getCNIResult(clientset, podInterfaceInfo)
+		response.Result, err = getCNIResultFn(pr, clientset, podInterfaceInfo)
 		if err != nil {
 			return nil, err
 		}
@@ -168,7 +174,7 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, clientset *ClientSet) (*Resp
 			if err != nil {
 				return nil, err
 			}
-			if _, err := primaryUDNPodRequest.getCNIResult(clientset, primaryUDNPodInfo); err != nil {
+			if _, err := getCNIResultFn(primaryUDNPodRequest, clientset, primaryUDNPodInfo); err != nil {
 				return nil, err
 			}
 		}
@@ -310,7 +316,7 @@ func HandlePodRequest(request *PodRequest, clientset *ClientSet, kubeAuth *KubeA
 // PodInfoGetter is used to check if sandbox is still valid for the current
 // instance of the pod in the apiserver, see checkCancelSandbox for more info.
 // If kube api is not available from the CNI, pass nil to skip this check.
-func (pr *PodRequest) getCNIResult(getter PodInfoGetter, podInterfaceInfo *PodInterfaceInfo) (*current.Result, error) {
+func getCNIResult(pr *PodRequest, getter PodInfoGetter, podInterfaceInfo *PodInterfaceInfo) (*current.Result, error) {
 	interfacesArray, err := pr.ConfigureInterface(getter, podInterfaceInfo)
 	if err != nil {
 		return nil, fmt.Errorf("failed to configure pod interface: %v", err)
