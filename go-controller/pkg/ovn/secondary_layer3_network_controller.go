@@ -461,8 +461,15 @@ func (oc *SecondaryLayer3NetworkController) Init(ctx context.Context) error {
 		return err
 	}
 
-	if oc.IsPrimaryNetwork() && util.IsNetworkSegmentationSupportEnabled() && oc.multicastSupport {
+	// Note we don't check multicast support on purpose, the cluster port
+	// group can go beyond multicast and tye sync defualt multicast policies
+	// also remove then if multicast support is disabled
+	if oc.IsPrimaryNetwork() && util.IsNetworkSegmentationSupportEnabled() {
 		if err := oc.setupClusterPortGroups(); err != nil {
+			return err
+		}
+
+		if err := oc.syncDefaultMulticastPolicies(); err != nil {
 			return err
 		}
 	}
