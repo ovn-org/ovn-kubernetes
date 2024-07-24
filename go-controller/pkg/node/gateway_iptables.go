@@ -12,6 +12,7 @@ import (
 	utilnet "k8s.io/utils/net"
 
 	"github.com/coreos/go-iptables/iptables"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/egressservice"
 	nodeipt "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"
@@ -448,10 +449,12 @@ func getLocalGatewayNATRules(ifname string, cidr *net.IPNet) []nodeipt.Rule {
 		// the MASQUERADE rule. Please don't change the ordering.
 		srcUDNMasqueradePrefix := config.Gateway.V4MasqueradeSubnet
 		defaultNetworkReservedMasqueradePrefix := config.Gateway.MasqueradeIPs.V4HostMasqueradeIP.String() + "/29"
+		ipFamily := utilnet.IPv4
 		klog.Infof("SURYA %v/%v", srcUDNMasqueradePrefix, defaultNetworkReservedMasqueradePrefix)
 		if protocol == iptables.ProtocolIPv6 {
 			srcUDNMasqueradePrefix = config.Gateway.V6MasqueradeSubnet
 			defaultNetworkReservedMasqueradePrefix = config.Gateway.MasqueradeIPs.V6HostMasqueradeIP.String() + "/125"
+			ipFamily = utilnet.IPv6
 		}
 		rules = append(rules,
 			nodeipt.Rule{
@@ -463,6 +466,27 @@ func getLocalGatewayNATRules(ifname string, cidr *net.IPNet) []nodeipt.Rule {
 				},
 				Protocol: protocol,
 			},
+		)
+
+		for _, svcCIDR := range config.Kubernetes.ServiceCIDRs {
+			if utilnet.IPFamilyOfCIDR(svcCIDR) != ipFamily {
+				continue
+			}
+			rules = append(rules,
+				nodeipt.Rule{
+					Table: "nat",
+					Chain: "POSTROUTING",
+					Args: []string{
+						"-d", svcCIDR.String(),
+						"-j", "RETURN",
+					},
+					Protocol: protocol,
+				},
+			)
+
+		}
+
+		rules = append(rules,
 			nodeipt.Rule{
 				Table: "nat",
 				Chain: "POSTROUTING",
