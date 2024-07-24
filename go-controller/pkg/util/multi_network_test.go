@@ -449,6 +449,18 @@ func TestParseNetconf(t *testing.T) {
 `,
 			expectedError: fmt.Errorf("localnet topology does not allow specifying join-subnet as services are not supported"),
 		},
+		{
+			desc: "A layer2 primary UDN requires a subnet",
+			inputNetAttachDefConfigSpec: `
+{
+            "name": "tenantred",
+            "type": "ovn-k8s-cni-overlay",
+            "topology": "layer2",
+            "netAttachDefName": "ns1/nad1",
+            "role": "primary"
+}`,
+			expectedError: fmt.Errorf("the subnet attribute must be defined for layer2 primary user defined networks"),
+		},
 	}
 
 	for _, test := range tests {
