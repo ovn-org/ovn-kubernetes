@@ -32,9 +32,10 @@ type managementPortIPFamilyConfig struct {
 }
 
 type managementPortConfig struct {
-	ifName    string
-	link      netlink.Link
-	routerMAC net.HardwareAddr
+	ifName          string
+	link            netlink.Link
+	routerMAC       net.HardwareAddr
+	reconcilePeriod time.Duration
 
 	ipv4 *managementPortIPFamilyConfig
 	ipv6 *managementPortIPFamilyConfig
@@ -86,7 +87,8 @@ func newManagementPortConfig(interfaceName string, hostSubnets []*net.IPNet) (*m
 	var err error
 
 	mpcfg := &managementPortConfig{
-		ifName: interfaceName,
+		ifName:          interfaceName,
+		reconcilePeriod: 30 * time.Second,
 	}
 	if mpcfg.link, err = util.LinkSetUp(mpcfg.ifName); err != nil {
 		return nil, err
@@ -478,12 +480,10 @@ func DelMgtPortIptRules() {
 // 1. route entries to cluster CIDR and service CIDR through management port
 // 2. ARP entry for the node subnet's gateway ip
 // 3. IPtables chain and rule for SNATing packets entering the logical topology
-func checkManagementPortHealth(routeManager *routemanager.Controller, cfg *managementPortConfig) {
+func checkManagementPortHealth(routeManager *routemanager.Controller, cfg *managementPortConfig) error {
 	warnings, err := setupManagementPortConfig(routeManager, cfg)
 	for _, warning := range warnings {
 		klog.Warningf(warning)
 	}
-	if err != nil {
-		klog.Errorf(err.Error())
-	}
+	return err
 }
