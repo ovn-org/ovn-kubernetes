@@ -35,14 +35,18 @@ import (
 	utilnet "k8s.io/utils/net"
 )
 
-func getFakeController(controllerName string) *DefaultNetworkController {
+func getFakeControllerForNetwork(netInfo util.NetInfo) *DefaultNetworkController {
 	controller := &DefaultNetworkController{
 		BaseNetworkController: BaseNetworkController{
-			controllerName: controllerName,
-			NetInfo:        &util.DefaultNetInfo{},
+			controllerName: getNetworkControllerName(netInfo.GetNetworkName()),
+			NetInfo:        netInfo,
 		},
 	}
 	return controller
+}
+
+func getFakeController() *DefaultNetworkController {
+	return getFakeControllerForNetwork(&util.DefaultNetInfo{})
 }
 
 func newNetworkPolicy(name, namespace string, podSelector metav1.LabelSelector, ingress []knet.NetworkPolicyIngressRule,
@@ -452,7 +456,7 @@ func getNamespaceWithMultiplePoliciesExpectedData(networkPolicies []*knet.Networ
 
 func getHairpinningACLsV4AndPortGroup() []libovsdbtest.TestData {
 	clusterPortGroup := newClusterPortGroup()
-	fakeController := getFakeController(DefaultNetworkControllerName)
+	fakeController := getFakeController()
 	egressIDs := fakeController.getNetpolDefaultACLDbIDs("Egress")
 	egressACL := libovsdbops.BuildACL(
 		"",
@@ -2134,7 +2138,7 @@ var _ = ginkgo.Describe("OVN AllowFromNode ACL low-level operations", func() {
 	)
 
 	getFakeController := func(nbClient libovsdbclient.Client) *DefaultNetworkController {
-		controller := getFakeController(DefaultNetworkControllerName)
+		controller := getFakeController()
 		controller.nbClient = nbClient
 		return controller
 	}
