@@ -417,7 +417,7 @@ func (oc *SecondaryLayer2NetworkController) addUpdateLocalNodeEvent(node *corev1
 		if nSyncs.syncGw {
 			gwManager := NewGatewayManager(
 				node.Name,
-				oc.GetNetworkScopedClusterRouterName(),
+				"",
 				oc.GetNetworkScopedGWRouterName(node.Name),
 				oc.GetNetworkScopedExtSwitchName(node.Name),
 				oc.GetNetworkScopedSwitchName(types.OVNLayer2Switch),
