@@ -1950,23 +1950,34 @@ func commonFlows(subnets []*net.IPNet, bridge *bridgeConfiguration, isPodNetwork
 	if ofPortPhys != "" {
 		if config.Gateway.DisableSNATMultipleGWs || isPodNetworkAdvertised {
 			// table 1, traffic to pod subnet go directly to OVN
+			output := defaultNetConfig.ofPortPatch
+			if isPodNetworkAdvertised && config.Gateway.Mode == config.GatewayModeLocal {
+				// except if advertised through BGP, go to kernel
+				// TODO: MEG enabled pods should still go through the patch port
+				// but holding this until
+				// https://issues.redhat.com/browse/FDP-646 is fixed, for now we
+				// are assuming MEG & BGP are not used together
+				output = ovsLocalPort
+			}
 			for _, clusterEntry := range config.Default.ClusterSubnets {
 				cidr := clusterEntry.CIDR
 				ipv := getIPv(cidr)
 				dftFlows = append(dftFlows,
 					fmt.Sprintf("cookie=%s, priority=15, table=1, %s, %s_dst=%s, "+
 						"actions=output:%s",
-						defaultOpenFlowCookie, ipv, ipv, cidr, defaultNetConfig.ofPortPatch))
+						defaultOpenFlowCookie, ipv, ipv, cidr, output))
 			}
-			// except node management traffic
-			for _, subnet := range subnets {
-				mgmtIP := util.GetNodeManagementIfAddr(subnet)
-				ipv := getIPv(mgmtIP)
-				dftFlows = append(dftFlows,
-					fmt.Sprintf("cookie=%s, priority=16, table=1, %s, %s_dst=%s, "+
-						"actions=output:%s",
-						defaultOpenFlowCookie, ipv, ipv, mgmtIP.IP, ovsLocalPort),
-				)
+			if output == defaultNetConfig.ofPortPatch {
+				// except node management traffic
+				for _, subnet := range subnets {
+					mgmtIP := util.GetNodeManagementIfAddr(subnet)
+					ipv := getIPv(mgmtIP)
+					dftFlows = append(dftFlows,
+						fmt.Sprintf("cookie=%s, priority=16, table=1, %s, %s_dst=%s, "+
+							"actions=output:%s",
+							defaultOpenFlowCookie, ipv, ipv, mgmtIP.IP, ovsLocalPort),
+					)
+				}
 			}
 		}
 
