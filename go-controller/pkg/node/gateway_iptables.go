@@ -12,6 +12,7 @@ import (
 	utilnet "k8s.io/utils/net"
 
 	"github.com/coreos/go-iptables/iptables"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/egressservice"
 	nodeipt "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"
@@ -493,6 +494,7 @@ func getUDNMasqueradeRules(protocol iptables.Protocol) []nodeipt.Rule {
 	// the following rules are actively used only for the UDN Feature:
 	// -A POSTROUTING -j OVN-KUBE-UDN-MASQUERADE
 	// -A OVN-KUBE-UDN-MASQUERADE -s 169.254.0.0/29 -j RETURN
+	// -A OVN-KUBE-UDN-MASQUERADE -d 10.96.0.0/16 -j RETURN
 	// -A OVN-KUBE-UDN-MASQUERADE -s 169.254.0.0/17 -j MASQUERADE
 	// NOTE: Ordering is important here, the RETURN must come before
 	// the MASQUERADE rule. Please don't change the ordering.
@@ -500,11 +502,13 @@ func getUDNMasqueradeRules(protocol iptables.Protocol) []nodeipt.Rule {
 	// defaultNetworkReservedMasqueradePrefix contains the first 6IPs in the masquerade
 	// range that shouldn't be MASQUERADED. Hence /29 and /125 is intentionally hardcoded here
 	defaultNetworkReservedMasqueradePrefix := config.Gateway.MasqueradeIPs.V4HostMasqueradeIP.String() + "/29"
+	ipFamily := utilnet.IPv4
 	if protocol == iptables.ProtocolIPv6 {
 		srcUDNMasqueradePrefix = config.Gateway.V6MasqueradeSubnet
 		defaultNetworkReservedMasqueradePrefix = config.Gateway.MasqueradeIPs.V6HostMasqueradeIP.String() + "/125"
+		ipFamily = utilnet.IPv6
 	}
-	return []nodeipt.Rule{
+	rules := []nodeipt.Rule{
 		{
 			Table:    "nat",
 			Chain:    "POSTROUTING",
@@ -520,7 +524,25 @@ func getUDNMasqueradeRules(protocol iptables.Protocol) []nodeipt.Rule {
 			},
 			Protocol: protocol,
 		},
-		{
+	}
+	for _, svcCIDR := range config.Kubernetes.ServiceCIDRs {
+		if utilnet.IPFamilyOfCIDR(svcCIDR) != ipFamily {
+			continue
+		}
+		rules = append(rules,
+			nodeipt.Rule{
+				Table: "nat",
+				Chain: iptableUDNMasqueradeChain,
+				Args: []string{
+					"-d", svcCIDR.String(),
+					"-j", "RETURN",
+				},
+				Protocol: protocol,
+			},
+		)
+	}
+	rules = append(rules,
+		nodeipt.Rule{
 			Table: "nat",
 			Chain: iptableUDNMasqueradeChain,
 			Args: []string{
@@ -529,7 +551,8 @@ func getUDNMasqueradeRules(protocol iptables.Protocol) []nodeipt.Rule {
 			},
 			Protocol: protocol,
 		},
-	}
+	)
+	return rules
 }
 
 // initLocalGatewayNATRules sets up iptables rules for interfaces
