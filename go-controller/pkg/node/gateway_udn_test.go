@@ -571,7 +571,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		_, _ = util.SetFakeIPTablesHelpers()
-		nft := nodenft.SetFakeNFTablesHelper()
+		_ = nodenft.SetFakeNFTablesHelper()
 
 		cnode := node.DeepCopy()
 		cnode.Annotations[util.OvnNodeManagementPortMacAddresses] = `{"bluenet":"00:00:00:55:66:77"}`
@@ -590,7 +590,6 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			ifName:    nodeName,
 			link:      nil,
 			routerMAC: nil,
-			nft:       nft,
 			ipv4:      &fakeMgmtPortV4IPFamilyConfig,
 			ipv6:      &fakeMgmtPortV6IPFamilyConfig,
 		}
@@ -799,7 +798,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		err = wf.Start()
 
 		_, _ = util.SetFakeIPTablesHelpers()
-		nft := nodenft.SetFakeNFTablesHelper()
+		_ = nodenft.SetFakeNFTablesHelper()
 
 		Expect(err).NotTo(HaveOccurred())
 
@@ -822,7 +821,6 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			ifName:    nodeName,
 			link:      nil,
 			routerMAC: nil,
-			nft:       nft,
 			ipv4:      &fakeMgmtPortV4IPFamilyConfig,
 			ipv6:      &fakeMgmtPortV6IPFamilyConfig,
 		}

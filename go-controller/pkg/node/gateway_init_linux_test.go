@@ -229,7 +229,6 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			ifName:    nodeName,
 			link:      nil,
 			routerMAC: nil,
-			nft:       nft,
 			ipv4:      &fakeMgmtPortIPFamilyConfig,
 			ipv6:      nil,
 		}
@@ -666,12 +665,11 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 			gwIP:       nodeNet.IP,
 		}
 
-		nft := nodenft.SetFakeNFTablesHelper()
+		_ = nodenft.SetFakeNFTablesHelper()
 		fakeMgmtPortConfig := managementPortConfig{
 			ifName:    nodeName,
 			link:      nil,
 			routerMAC: nil,
-			nft:       nft,
 			ipv4:      &fakeMgmtPortIPFamilyConfig,
 			ipv6:      nil,
 		}
@@ -1124,7 +1122,6 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 			ifName:    types.K8sMgmtIntfName,
 			link:      nil,
 			routerMAC: nil,
-			nft:       nft,
 			ipv4:      &fakeMgmtPortIPFamilyConfig,
 			ipv6:      nil,
 		}

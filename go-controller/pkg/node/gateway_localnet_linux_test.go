@@ -300,7 +300,6 @@ var _ = Describe("Node Operations", func() {
 			ifName:    fakeNodeName,
 			link:      nil,
 			routerMAC: nil,
-			nft:       nft,
 			ipv4:      &fakeMgmtPortIPFamilyConfig,
 			ipv6:      nil,
 		}
