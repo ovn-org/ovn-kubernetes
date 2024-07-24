@@ -1229,12 +1229,12 @@ enable-pprof=true
 		cliArgs := []string{
 			app.Name,
 			"-cluster-manager-v4-transit-switch-subnet=100.89.0.0/16",
-			"-cluster-manager-v6-transit-switch-subnet=fd98::/64",
+			"-cluster-manager-v6-transit-switch-subnet=fd99::/64",
 		}
 		err := app.Run(cliArgs)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		gomega.Expect(ClusterManager.V4TransitSwitchSubnet).To(gomega.Equal("100.89.0.0/16"))
-		gomega.Expect(ClusterManager.V6TransitSwitchSubnet).To(gomega.Equal("fd98::/64"))
+		gomega.Expect(ClusterManager.V6TransitSwitchSubnet).To(gomega.Equal("fd99::/64"))
 	})
 	It("overrides config file and defaults with CLI options (multi-master)", func() {
 		kubeconfigFile, _, err := createTempFile("kubeconfig")
