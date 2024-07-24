@@ -129,7 +129,7 @@ var _ = Describe("OVN Multi-Homed pod operations", func() {
 						&nbdb.LogicalRouterPort{
 							Name: fmt.Sprintf("rtos-%s_%s", netInfo.netName, nodeName),
 						},
-						newNetworkClusterPortGroup(getNetworkControllerName(netInfo.netName)),
+						newNetworkClusterPortGroup(networkConfig),
 					)
 				}
 
@@ -294,7 +294,7 @@ var _ = Describe("OVN Multi-Homed pod operations", func() {
 						initialDB.NBData,
 						expectedLayer3EgressEntities(networkConfig, *gwConfig, ovntest.MustParseIPNet(netInfo.hostsubnets))...)
 					initialDB.NBData = append(initialDB.NBData,
-						newNetworkClusterPortGroup(getNetworkControllerName(netInfo.netName)),
+						newNetworkClusterPortGroup(networkConfig),
 					)
 				}
 				initialDB.NBData = append(initialDB.NBData, nbZone)

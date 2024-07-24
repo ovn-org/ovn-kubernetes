@@ -280,7 +280,7 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPorts(is
 				mgmtPortName := managementPortName(ocInfo.bnc.GetNetworkScopedName(nodeName))
 				mgmtPortUUID := mgmtPortName + "-UUID"
 
-				clusterPG := newNetworkClusterPortGroup(getNetworkControllerName(ocInfo.bnc.GetNetworkName()))
+				clusterPG := newNetworkClusterPortGroup(ocInfo.bnc)
 				clusterPG.Ports = []string{mgmtPortUUID}
 				data = append(data, clusterPG)
 			}

@@ -294,14 +294,18 @@ func newTPod(nodeName, nodeSubnet, nodeMgtIP, nodeGWIP, podName, podIPs, podMAC,
 	return to
 }
 
-func (p testPod) populateLogicalSwitchCache(fakeOvn *FakeOVN) {
+func (p testPod) populateControllerLogicalSwitchCache(bnc *BaseNetworkController) {
 	gomega.Expect(p.nodeName).NotTo(gomega.Equal(""))
 	subnets := []*net.IPNet{}
 	for _, subnet := range strings.Split(p.nodeSubnet, " ") {
 		subnets = append(subnets, ovntest.MustParseIPNet(subnet))
 	}
-	err := fakeOvn.controller.lsManager.AddOrUpdateSwitch(p.nodeName, subnets)
+	err := bnc.lsManager.AddOrUpdateSwitch(bnc.GetNetworkScopedSwitchName(p.nodeName), subnets)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+}
+
+func (p testPod) populateLogicalSwitchCache(fakeOvn *FakeOVN) {
+	p.populateControllerLogicalSwitchCache(&fakeOvn.controller.BaseNetworkController)
 }
 
 func (p testPod) getAnnotationsJson() string {
@@ -406,14 +410,27 @@ func setPodAnnotations(podObj *v1.Pod, testPod testPod) {
 }
 
 func getDefaultNetExpectedPodsAndSwitches(pods []testPod, nodes []string) []libovsdbtest.TestData {
-	return getExpectedDataPodsSwitchesPortGroup(pods, nodes, "")
+	return getDefaultNetExpectedDataPodsSwitchesPortGroup(pods, nodes, "")
 }
 
-func getExpectedDataPodsSwitchesPortGroup(pods []testPod, nodes []string, namespacedPortGroup string) []libovsdbtest.TestData {
+func getExpectedPodsAndSwitches(netInfo util.NetInfo, pods []testPod, nodes []string) []libovsdbtest.TestData {
+	return getExpectedDataPodsSwitchesPortGroup(netInfo, pods, nodes, "")
+}
+
+func getDefaultNetExpectedDataPodsSwitchesPortGroup(pods []testPod, nodes []string, namespacedPortGroup string) []libovsdbtest.TestData {
+	return getExpectedDataPodsSwitchesPortGroup(&util.DefaultNetInfo{}, pods, nodes, namespacedPortGroup)
+}
+
+func getExpectedDataPodsSwitchesPortGroup(netInfo util.NetInfo, pods []testPod, nodes []string, namespacedPortGroup string) []libovsdbtest.TestData {
 	nodeslsps := make(map[string][]string)
 	var logicalSwitchPorts []*nbdb.LogicalSwitchPort
 	for _, pod := range pods {
-		portName := util.GetLogicalPortName(pod.namespace, pod.podName)
+		var portName string
+		if netInfo.IsDefault() {
+			portName = util.GetLogicalPortName(pod.namespace, pod.podName)
+		} else {
+			portName = util.GetSecondaryNetworkLogicalPortName(pod.namespace, pod.podName, netInfo.GetNADs()[0])
+		}
 		var lspUUID string
 		if len(pod.portUUID) == 0 {
 			lspUUID = portName + "-UUID"
@@ -438,14 +455,19 @@ func getExpectedDataPodsSwitchesPortGroup(pods []testPod, nodes []string, namesp
 		if pod.noIfaceIdVer {
 			delete(lsp.Options, "iface-id-ver")
 		}
+		if !netInfo.IsDefault() {
+			lsp.ExternalIDs["k8s.ovn.org/network"] = netInfo.GetNetworkName()
+			lsp.ExternalIDs["k8s.ovn.org/nad"] = netInfo.GetNADs()[0]
+			lsp.ExternalIDs["k8s.ovn.org/topology"] = netInfo.TopologyType()
+		}
 		logicalSwitchPorts = append(logicalSwitchPorts, lsp)
 		nodeslsps[pod.nodeName] = append(nodeslsps[pod.nodeName], lspUUID)
 	}
 	var logicalSwitches []*nbdb.LogicalSwitch
 	for _, node := range nodes {
 		logicalSwitches = append(logicalSwitches, &nbdb.LogicalSwitch{
-			UUID:  node + "-UUID",
-			Name:  node,
+			UUID:  netInfo.GetNetworkScopedSwitchName(node) + "-UUID",
+			Name:  netInfo.GetNetworkScopedSwitchName(node),
 			Ports: nodeslsps[node],
 		})
 	}
@@ -575,7 +597,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				}, 2).Should(gomega.MatchJSON(t.getAnnotationsJson()))
 
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(
-					getExpectedDataPodsSwitchesPortGroup([]testPod{t}, []string{"node1"}, namespaceT.Name)))
+					getDefaultNetExpectedDataPodsSwitchesPortGroup([]testPod{t}, []string{"node1"}, namespaceT.Name)))
 
 				return nil
 			}

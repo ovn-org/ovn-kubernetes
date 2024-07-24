@@ -91,7 +91,7 @@ var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 							Name:        fmt.Sprintf("GR_%s_%s", networkConfig.GetNetworkName(), nodeName),
 							ExternalIDs: standardNonDefaultNetworkExtIDs(networkConfig),
 						},
-						newNetworkClusterPortGroup(getNetworkControllerName(netInfo.netName)),
+						newNetworkClusterPortGroup(networkConfig),
 					)
 				}
 
