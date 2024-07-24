@@ -321,7 +321,18 @@ func (oc *SecondaryLayer2NetworkController) Cleanup() error {
 }
 
 func (oc *SecondaryLayer2NetworkController) Init() error {
-	_, err := oc.initializeLogicalSwitch(oc.GetNetworkScopedSwitchName(types.OVNLayer2Switch), oc.Subnets(), oc.ExcludeSubnets())
+	// Create default Control Plane Protection (COPP) entry for routers
+	defaultCOPPUUID, err := EnsureDefaultCOPP(oc.nbClient)
+	if err != nil {
+		return fmt.Errorf("unable to create router control plane protection: %w", err)
+	}
+	oc.defaultCOPPUUID = defaultCOPPUUID
+
+	_, err = oc.initializeLogicalSwitch(
+		oc.GetNetworkScopedSwitchName(types.OVNLayer2Switch),
+		oc.Subnets(),
+		oc.ExcludeSubnets(),
+	)
 	return err
 }
 
