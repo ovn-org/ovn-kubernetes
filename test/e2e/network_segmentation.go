@@ -673,6 +673,31 @@ var _ = Describe("Network Segmentation", func() {
 					role:     "primary",
 				}),
 			)
+			DescribeTable("should be able to receive multicast IGMP query", func(netConfigParams networkAttachmentConfigParams) {
+				ginkgo.By("creating the attachment configuration")
+				netConfigParams.namespace = f.Namespace.Name
+				netConfig := newNetworkAttachmentConfig(netConfigParams)
+				_, err := nadClient.NetworkAttachmentDefinitions(f.Namespace.Name).Create(
+					context.Background(),
+					generateNAD(netConfig),
+					metav1.CreateOptions{},
+				)
+				framework.ExpectNoError(err)
+				testMulticastIGMPQuery(f, clientNodeInfo, serverNodeInfo)
+			},
+				ginkgo.Entry("with primary layer3 UDN", networkAttachmentConfigParams{
+					name:     nadName,
+					topology: "layer3",
+					cidr:     fmt.Sprintf("%s,%s", userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+					role:     "primary",
+				}),
+				ginkgo.Entry("with primary layer2 UDN", networkAttachmentConfigParams{
+					name:     nadName,
+					topology: "layer2",
+					cidr:     fmt.Sprintf("%s,%s", userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+					role:     "primary",
+				}),
+			)
 		})
 	})
 
