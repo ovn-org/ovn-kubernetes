@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net"
 	"strings"
-	"time"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -26,7 +25,7 @@ type ManagementPort interface {
 	Create(routeManager *routemanager.Controller, node *v1.Node, nodeLister listers.NodeLister, kubeInterface kube.Interface, waiter *startupWaiter) (*managementPortConfig, error)
 	// CheckManagementPortHealth checks periodically for management port health until stopChan is posted
 	// or closed and reports any warnings/errors to log
-	CheckManagementPortHealth(routeManager *routemanager.Controller, cfg *managementPortConfig, stopChan chan struct{})
+	CheckManagementPortHealth(routeManager *routemanager.Controller, cfg *managementPortConfig) error
 	// Currently, the management port(s) that doesn't have an assignable IP address are the following cases:
 	//   - Full mode with HW backed device (e.g. Virtual Function Representor).
 	//   - DPU mode with Virtual Function Representor.
@@ -125,13 +124,8 @@ func (mp *managementPort) Create(routeManager *routemanager.Controller, node *v1
 	return cfg, nil
 }
 
-func (mp *managementPort) CheckManagementPortHealth(routeManager *routemanager.Controller, cfg *managementPortConfig, stopChan chan struct{}) {
-	go wait.Until(
-		func() {
-			checkManagementPortHealth(routeManager, cfg)
-		},
-		30*time.Second,
-		stopChan)
+func (mp *managementPort) CheckManagementPortHealth(routeManager *routemanager.Controller, cfg *managementPortConfig) error {
+	return checkManagementPortHealth(routeManager, cfg)
 }
 
 // OVS Internal Port Netdev should have IP addresses assignable to them.
@@ -163,4 +157,50 @@ func managementPortReady() (bool, error) {
 	}
 	klog.Infof("Management port %s is ready", k8sMgmtIntfName)
 	return true, nil
+}
+
+type managementPortEntry struct {
+	port         ManagementPort
+	config       *managementPortConfig
+	routeManager *routemanager.Controller
+	reconcile    chan struct{}
+}
+
+func NewManagementPortEntry(port ManagementPort, cfg *managementPortConfig, routeManager *routemanager.Controller) *managementPortEntry {
+	return &managementPortEntry{
+		port:         port,
+		config:       cfg,
+		routeManager: routeManager,
+		reconcile:    make(chan struct{}, 1),
+	}
+}
+
+func (p *managementPortEntry) Start(stopChan <-chan struct{}) {
+	go func() {
+		for {
+			select {
+			case <-stopChan:
+				return
+			case <-p.reconcile:
+				// TODO retry maybe
+				err := p.doReconcile()
+				if err != nil {
+					klog.Errorf("Failed to reconcile management port %s: %v", p.config.ifName, err)
+				}
+			}
+		}
+	}()
+	go wait.Until(
+		p.Reconcile,
+		p.config.reconcilePeriod,
+		stopChan,
+	)
+}
+
+func (p *managementPortEntry) Reconcile() {
+	p.reconcile <- struct{}{}
+}
+
+func (p *managementPortEntry) doReconcile() error {
+	return p.port.CheckManagementPortHealth(p.routeManager, p.config)
 }
