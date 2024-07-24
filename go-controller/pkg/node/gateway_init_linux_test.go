@@ -24,6 +24,7 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 
 	nadfake "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/fake"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	adminpolicybasedrouteclient "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -1601,7 +1602,6 @@ var _ = Describe("Gateway unit tests", func() {
 			Expect(err).ToNot(HaveOccurred())
 			config.Kubernetes.ServiceCIDRs = []*net.IPNet{ipnet}
 			gwIPs := []net.IP{net.ParseIP("10.0.0.11")}
-			srcIP := config.Gateway.MasqueradeIPs.V4HostMasqueradeIP
 			lnk := &linkMock.Link{}
 			lnkAttr := &netlink.LinkAttrs{
 				Name:  "ens1f0",
@@ -1613,7 +1613,6 @@ var _ = Describe("Gateway unit tests", func() {
 				Scope:     netlink.SCOPE_UNIVERSE,
 				Gw:        gwIPs[0],
 				MTU:       config.Default.MTU - 100,
-				Src:       srcIP,
 			}
 
 			expectedRoute := &netlink.Route{
@@ -1622,7 +1621,6 @@ var _ = Describe("Gateway unit tests", func() {
 				Scope:     netlink.SCOPE_UNIVERSE,
 				Gw:        gwIPs[0],
 				MTU:       config.Default.MTU,
-				Src:       srcIP,
 			}
 
 			lnk.On("Attrs").Return(lnkAttr)
