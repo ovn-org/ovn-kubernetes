@@ -52,18 +52,16 @@ type managementPortIPFamilyConfig struct {
 }
 
 type managementPortConfig struct {
-	ifName    string
-	link      netlink.Link
-	routerMAC net.HardwareAddr
-	nft       knftables.Interface
+	ifName          string
+	link            netlink.Link
+	routerMAC       net.HardwareAddr
+	reconcilePeriod time.Duration
 
 	ipv4 *managementPortIPFamilyConfig
 	ipv6 *managementPortIPFamilyConfig
 }
 
 func newManagementPortIPFamilyConfig(hostSubnet *net.IPNet, isIPv6 bool) (*managementPortIPFamilyConfig, error) {
-	var err error
-
 	cfg := &managementPortIPFamilyConfig{
 		ifAddr: util.GetNodeManagementIfAddr(hostSubnet),
 		gwIP:   util.GetNodeGatewayIfAddr(hostSubnet).IP,
@@ -91,23 +89,15 @@ func newManagementPortIPFamilyConfig(hostSubnet *net.IPNet, isIPv6 bool) (*manag
 		cfg.allSubnets = append(cfg.allSubnets, masqueradeSubnet)
 	}
 
-	if err != nil {
-		return nil, err
-	}
-
 	return cfg, nil
 }
 
 func newManagementPortConfig(interfaceName string, hostSubnets []*net.IPNet) (*managementPortConfig, error) {
-	nft, err := nodenft.GetNFTablesHelper()
-	if err != nil {
-		return nil, err
-	}
-
 	mpcfg := &managementPortConfig{
-		ifName: interfaceName,
-		nft:    nft,
+		ifName:          interfaceName,
+		reconcilePeriod: 30 * time.Second,
 	}
+	var err error
 	if mpcfg.link, err = util.LinkSetUp(mpcfg.ifName); err != nil {
 		return nil, err
 	}
@@ -272,7 +262,12 @@ func setupManagementPortNFTables(cfg *managementPortConfig) error {
 		counterIfDebug = "counter"
 	}
 
-	tx := cfg.nft.NewTransaction()
+	nft, err := nodenft.GetNFTablesHelper()
+	if err != nil {
+		return err
+	}
+
+	tx := nft.NewTransaction()
 	tx.Add(&knftables.Chain{
 		Name:    nftablesMgmtPortChain,
 		Comment: knftables.PtrTo("OVN SNAT to Management Port"),
@@ -352,7 +347,7 @@ func setupManagementPortNFTables(cfg *managementPortConfig) error {
 		})
 	}
 
-	err := cfg.nft.Run(context.TODO(), tx)
+	err = nft.Run(context.TODO(), tx)
 	if err != nil {
 		return fmt.Errorf("could not update nftables rule for management port: %v", err)
 	}
@@ -523,15 +518,14 @@ func DelLegacyMgtPortIptRules() {
 // 1. route entries to cluster CIDR and service CIDR through management port
 // 2. ARP entry for the node subnet's gateway ip
 // 3. nftables rules for SNATing packets entering the logical topology
-func checkManagementPortHealth(routeManager *routemanager.Controller, cfg *managementPortConfig) {
+func checkManagementPortHealth(routeManager *routemanager.Controller, cfg *managementPortConfig) error {
 	warnings, err := setupManagementPortConfig(routeManager, cfg)
 	for _, warning := range warnings {
 		klog.Warningf(warning)
 	}
 	if err != nil {
-		klog.Errorf(err.Error())
+		return err
 	}
-	if err = setupManagementPortNFTables(cfg); err != nil {
-		klog.Errorf(err.Error())
-	}
+
+	return setupManagementPortNFTables(cfg)
 }
