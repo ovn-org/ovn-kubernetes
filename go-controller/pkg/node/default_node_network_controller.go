@@ -125,7 +125,7 @@ type DefaultNodeNetworkController struct {
 }
 
 type preStartSetup struct {
-	mgmtPorts      []managementPortEntry
+	mgmtPorts      []*managementPortEntry
 	mgmtPortConfig *managementPortConfig
 	nodeAddress    net.IP
 	sbZone         string
@@ -479,11 +479,6 @@ func isOVNControllerReady() (bool, error) {
 	return true, nil
 }
 
-type managementPortEntry struct {
-	port   ManagementPort
-	config *managementPortConfig
-}
-
 // getEnvNameFromResourceName gets the device plugin env variable from the device plugin resource name.
 func getEnvNameFromResourceName(resource string) string {
 	res1 := strings.ReplaceAll(resource, ".", "_")
@@ -648,7 +643,7 @@ func getMgmtPortAndRepName(node *kapi.Node) (string, string, error) {
 }
 
 func createNodeManagementPorts(node *kapi.Node, nodeLister listers.NodeLister, nodeAnnotator kube.Annotator, kubeInterface kube.Interface, waiter *startupWaiter,
-	subnets []*net.IPNet, routeManager *routemanager.Controller) ([]managementPortEntry, *managementPortConfig, error) {
+	subnets []*net.IPNet, routeManager *routemanager.Controller) ([]*managementPortEntry, *managementPortConfig, error) {
 	netdevName, rep, err := getMgmtPortAndRepName(node)
 	if err != nil {
 		return nil, nil, err
@@ -663,13 +658,13 @@ func createNodeManagementPorts(node *kapi.Node, nodeLister listers.NodeLister, n
 	ports := NewManagementPorts(node.Name, subnets, netdevName, rep)
 
 	var mgmtPortConfig *managementPortConfig
-	mgmtPorts := make([]managementPortEntry, 0)
+	mgmtPorts := make([]*managementPortEntry, 0)
 	for _, port := range ports {
 		config, err := port.Create(routeManager, node, nodeLister, kubeInterface, waiter)
 		if err != nil {
 			return nil, nil, err
 		}
-		mgmtPorts = append(mgmtPorts, managementPortEntry{port: port, config: config})
+		mgmtPorts = append(mgmtPorts, NewManagementPortEntry(port, config, routeManager))
 		// Save this management port config for later usage.
 		// Since only one OVS internal port / Representor config may exist it is fine just to overwrite it
 		if _, ok := port.(*managementPortNetdev); !ok {
@@ -1172,7 +1167,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 
 	// start management ports health check
 	for _, mgmtPort := range nc.gatewaySetup.mgmtPorts {
-		mgmtPort.port.CheckManagementPortHealth(nc.routeManager, mgmtPort.config, nc.stopChan)
+		mgmtPort.Start(nc.stopChan)
 		if config.OVNKubernetesFeature.EnableEgressIP {
 			// Start the health checking server used by egressip, if EgressIPNodeHealthCheckPort is specified
 			if err := nc.startEgressIPHealthCheckingServer(mgmtPort); err != nil {
@@ -1278,7 +1273,7 @@ func (nc *DefaultNodeNetworkController) Stop() {
 	nc.wg.Wait()
 }
 
-func (nc *DefaultNodeNetworkController) startEgressIPHealthCheckingServer(mgmtPortEntry managementPortEntry) error {
+func (nc *DefaultNodeNetworkController) startEgressIPHealthCheckingServer(mgmtPortEntry *managementPortEntry) error {
 	healthCheckPort := config.OVNKubernetesFeature.EgressIPNodeHealthCheckPort
 	if healthCheckPort == 0 {
 		klog.Infof("Egress IP health check server skipped: no port specified")
