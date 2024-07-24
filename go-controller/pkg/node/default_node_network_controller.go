@@ -25,6 +25,7 @@ import (
 
 	"github.com/containernetworking/plugins/pkg/ip"
 	v1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+	nadinformer "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/informers/externalversions/k8s.cni.cncf.io/v1"
 	honode "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni"
 	config "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -1115,9 +1116,13 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	linkManager := linkmanager.NewController(nc.name, config.IPv4Mode, config.IPv6Mode, nc.updateGatewayMAC)
 
 	if config.OVNKubernetesFeature.EnableEgressIP && !util.PlatformTypeIsEgressIPCloudProvider() {
+		var nadInformer nadinformer.NetworkAttachmentDefinitionInformer = nil
+		if util.IsNetworkSegmentationSupportEnabled() {
+			nadInformer = nc.watchFactory.NADInformer()
+		}
 		c, err := egressip.NewController(nc.Kube, nc.watchFactory.EgressIPInformer(), nc.watchFactory.NodeInformer(),
-			nc.watchFactory.NamespaceInformer(), nc.watchFactory.PodCoreInformer(), nc.routeManager, config.IPv4Mode,
-			config.IPv6Mode, nc.name, linkManager)
+			nc.watchFactory.NamespaceInformer(), nadInformer, nc.watchFactory.PodCoreInformer(),
+			nc.routeManager, config.IPv4Mode, config.IPv6Mode, nc.name, linkManager)
 		if err != nil {
 			return fmt.Errorf("failed to create egress IP controller: %v", err)
 		}

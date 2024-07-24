@@ -38,6 +38,7 @@ import (
 
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/containernetworking/plugins/pkg/testutils"
+	nadfake "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/fake"
 	"github.com/onsi/ginkgo"
 	"github.com/onsi/ginkgo/extensions/table"
 	"github.com/onsi/gomega"
@@ -257,8 +258,10 @@ func initController(namespaces []corev1.Namespace, pods []corev1.Pod, egressIPs 
 	kubeClient := fake.NewSimpleClientset(&corev1.NodeList{Items: []corev1.Node{getNodeObj(node, createEIPAnnot)}},
 		&corev1.NamespaceList{Items: namespaces}, &corev1.PodList{Items: pods})
 	egressIPClient := egressipfake.NewSimpleClientset(&egressipv1.EgressIPList{Items: egressIPs})
-	ovnNodeClient := &util.OVNNodeClientset{KubeClient: kubeClient, EgressIPClient: egressIPClient}
+	nadClient := nadfake.NewSimpleClientset()
+	ovnNodeClient := &util.OVNNodeClientset{KubeClient: kubeClient, EgressIPClient: egressIPClient, NetworkAttchDefClient: nadClient}
 	rm := routemanager.NewController()
+	ovnconfig.OVNKubernetesFeature.EnableMultiNetwork = true // force addition of NAD informer for node watch factory
 	ovnconfig.OVNKubernetesFeature.EnableEgressIP = true
 	watchFactory, err := factory.NewNodeWatchFactory(ovnNodeClient, node1Name)
 	if err != nil {
@@ -269,7 +272,7 @@ func initController(namespaces []corev1.Namespace, pods []corev1.Pod, egressIPs 
 	}
 	linkManager := linkmanager.NewController(node1Name, v4, v6, nil)
 	c, err := NewController(&ovnkube.Kube{KClient: kubeClient}, watchFactory.EgressIPInformer(), watchFactory.NodeInformer(), watchFactory.NamespaceInformer(),
-		watchFactory.PodCoreInformer(), rm, v4, v6, node1Name, linkManager)
+		watchFactory.NADInformer(), watchFactory.PodCoreInformer(), rm, v4, v6, node1Name, linkManager)
 	if err != nil {
 		return nil, nil, err
 	}

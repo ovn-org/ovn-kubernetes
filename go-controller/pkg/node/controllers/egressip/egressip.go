@@ -26,6 +26,8 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 
+	nadv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/informers/externalversions/k8s.cni.cncf.io/v1"
+	nadlister "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -115,10 +117,10 @@ type Controller struct {
 	namespaceLister   corelisters.NamespaceLister
 	namespaceInformer cache.SharedIndexInformer
 	namespaceQueue    workqueue.RateLimitingInterface
-
-	podLister   corelisters.PodLister
-	podInformer cache.SharedIndexInformer
-	podQueue    workqueue.RateLimitingInterface
+	nadLister         nadlister.NetworkAttachmentDefinitionLister
+	podLister         corelisters.PodLister
+	podInformer       cache.SharedIndexInformer
+	podQueue          workqueue.RateLimitingInterface
 
 	// cache is a cache of configuration states for EIPs, key is EgressIP Name.
 	cache *syncmap.SyncMap[*state]
@@ -140,8 +142,9 @@ type Controller struct {
 	v6              bool
 }
 
-func NewController(k kube.Interface, eIPInformer egressipinformer.EgressIPInformer, nodeInformer cache.SharedIndexInformer, namespaceInformer coreinformers.NamespaceInformer,
-	podInformer coreinformers.PodInformer, routeManager *routemanager.Controller, v4, v6 bool, nodeName string, linkManager *linkmanager.Controller) (*Controller, error) {
+func NewController(k kube.Interface, eIPInformer egressipinformer.EgressIPInformer, nodeInformer cache.SharedIndexInformer,
+	namespaceInformer coreinformers.NamespaceInformer, nadInformer nadv1.NetworkAttachmentDefinitionInformer, podInformer coreinformers.PodInformer,
+	routeManager *routemanager.Controller, v4, v6 bool, nodeName string, linkManager *linkmanager.Controller) (*Controller, error) {
 
 	c := &Controller{
 		eIPLister:   eIPInformer.Lister(),
@@ -174,6 +177,9 @@ func NewController(k kube.Interface, eIPInformer egressipinformer.EgressIPInform
 		nodeName:              nodeName,
 		v4:                    v4,
 		v6:                    v6,
+	}
+	if nadInformer != nil {
+		c.nadLister = nadInformer.Lister()
 	}
 	return c, nil
 }
@@ -554,6 +560,16 @@ func (c *Controller) processEIP(eip *eipv1.EgressIP) (*eIPConfig, sets.Set[strin
 		}
 		isEIPV6 := utilnet.IsIPv6(eIPNet.IP)
 		for _, namespace := range namespaces {
+			if util.IsNetworkSegmentationSupportEnabled() {
+				netInfo, err := util.GetActiveNetworkForNamespace(namespace.Name, c.nadLister)
+				if err != nil {
+					return nil, selectedNamespaces, selectedPods, selectedNamespacesPodIPs, fmt.Errorf("failed to get active network for namespace %s: %v", namespace.Name, err)
+				}
+				if netInfo.IsSecondary() {
+					// EIP for secondary host interfaces is not supported for secondary networks
+					continue
+				}
+			}
 			selectedNamespaces.Insert(namespace.Name)
 			pods, err := c.listPodsByNamespaceAndSelector(namespace.Name, &eip.Spec.PodSelector)
 			if err != nil {
@@ -1003,6 +1019,16 @@ func (c *Controller) repairNode() error {
 			for _, namespace := range namespaces {
 				namespaceLabels := labels.Set(namespace.Labels)
 				if namespaceSelector.Matches(namespaceLabels) {
+					if util.IsNetworkSegmentationSupportEnabled() {
+						netInfo, err := util.GetActiveNetworkForNamespace(namespace.Name, c.nadLister)
+						if err != nil {
+							return fmt.Errorf("failed to get active network for namespace %s: %v", namespace.Name, err)
+						}
+						if netInfo.IsSecondary() {
+							// EIP for secondary host interfaces is not supported for secondary networks
+							continue
+						}
+					}
 					pods, err := c.podLister.Pods(namespace.Name).List(podSelector)
 					if err != nil {
 						return fmt.Errorf("failed to list pods using selector %s to configure egress IP %s: %v",
