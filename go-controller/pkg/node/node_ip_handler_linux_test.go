@@ -187,6 +187,8 @@ var _ = Describe("Node IP Handler tests", func() {
 			Output: dummyBrInternalIPv4,
 		})
 		Expect(util.SetExec(fexec)).ShouldNot(HaveOccurred())
+		// Restore global default values before each testcase
+		Expect(config.PrepareTestConfig()).To(Succeed())
 		config.IPv4Mode = true
 		config.IPv6Mode = true
 		tc = configureKubeOVNContextWithNs(nodeName)

@@ -97,38 +97,41 @@ func (oc *DefaultNetworkController) syncPods(pods []interface{}) error {
 			expectedLogicalPorts[expectedLogicalPortName] = true
 		}
 
-		// delete the outdated hybrid overlay subnet route if it exists
-		newRoutes := []util.PodRoute{}
-		// HO is IPv4 only
-		ipv4Subnets := util.MatchAllIPNetFamily(false, oc.lsManager.GetSwitchSubnets(pod.Spec.NodeName))
-		for _, route := range annotations.Routes {
-			if !util.IsNodeHybridOverlayIfAddr(route.NextHop, ipv4Subnets) {
-				newRoutes = append(newRoutes, route)
+		// only update annotations for pods belonging to my zone
+		if oc.isPodScheduledinLocalZone(pod) {
+			// delete the outdated hybrid overlay subnet route if it exists
+			newRoutes := []util.PodRoute{}
+			// HO is IPv4 only
+			ipv4Subnets := util.MatchAllIPNetFamily(false, oc.lsManager.GetSwitchSubnets(pod.Spec.NodeName))
+			for _, route := range annotations.Routes {
+				if !util.IsNodeHybridOverlayIfAddr(route.NextHop, ipv4Subnets) {
+					newRoutes = append(newRoutes, route)
+				}
 			}
-		}
 
-		syncPodAnnotations := false
+			syncPodAnnotations := false
 
-		// checking the length because cannot compare the slices directly and if routes are removed
-		// the length will be different
-		if len(annotations.Routes) != len(newRoutes) {
-			annotations.Routes = newRoutes
-			syncPodAnnotations = true
-		}
-		// the ovn pod annotation role field is mandatory for default pod network, update old pods
-		// it it's missing
-		if util.IsNetworkSegmentationSupportEnabled() {
-			if annotations.Role == "" {
-				// Hardcode directly to primary since we don't support primary role networks at namespaces with
-				// pods in it, do not make sense to call GetNetworkRole here.
-				annotations.Role = types.NetworkRolePrimary
+			// checking the length because cannot compare the slices directly and if routes are removed
+			// the length will be different
+			if len(annotations.Routes) != len(newRoutes) {
+				annotations.Routes = newRoutes
 				syncPodAnnotations = true
 			}
-		}
-		if syncPodAnnotations {
-			err = oc.updatePodAnnotationWithRetry(pod, annotations, ovntypes.DefaultNetworkName)
-			if err != nil {
-				return fmt.Errorf("failed to set annotation on pod %s: %v", pod.Name, err)
+			// the ovn pod annotation role field is mandatory for default pod network, update old pods
+			// it it's missing
+			if util.IsNetworkSegmentationSupportEnabled() {
+				if annotations.Role == "" {
+					// Hardcode directly to primary since we don't support primary role networks at namespaces with
+					// pods in it, do not make sense to call GetNetworkRole here.
+					annotations.Role = types.NetworkRolePrimary
+					syncPodAnnotations = true
+				}
+			}
+			if syncPodAnnotations {
+				err = oc.updatePodAnnotationWithRetry(pod, annotations, ovntypes.DefaultNetworkName)
+				if err != nil {
+					return fmt.Errorf("failed to set annotation on pod %s: %v", pod.Name, err)
+				}
 			}
 		}
 	}
