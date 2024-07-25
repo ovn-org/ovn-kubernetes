@@ -4,14 +4,17 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/containernetworking/plugins/pkg/ns"
+	"github.com/containernetworking/plugins/pkg/testutils"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	factoryMocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory/mocks"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
@@ -97,7 +100,7 @@ var _ = Describe("Healthcheck tests", func() {
 	Describe("checkForStaleOVSRepresentorInterfaces", func() {
 		var ncm *nodeNetworkControllerManager
 		nodeName := "localNode"
-		podList := []*v1.Pod{
+		podList := []*corev1.Pod{
 			{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:        "a-pod",
@@ -105,7 +108,7 @@ var _ = Describe("Healthcheck tests", func() {
 					Annotations: map[string]string{},
 					UID:         "pod-a-uuid-1",
 				},
-				Spec: v1.PodSpec{
+				Spec: corev1.PodSpec{
 					NodeName: nodeName,
 				},
 			},
@@ -116,7 +119,7 @@ var _ = Describe("Healthcheck tests", func() {
 					Annotations: map[string]string{},
 					UID:         "pod-b-uuid-2",
 				},
-				Spec: v1.PodSpec{
+				Spec: corev1.PodSpec{
 					NodeName: nodeName,
 				},
 			},
@@ -163,6 +166,93 @@ var _ = Describe("Healthcheck tests", func() {
 				ncm.checkForStaleOVSRepresentorInterfaces()
 				Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc)
 			})
+		})
+
+	})
+
+	Context("verify cleanup of deleted networks", func() {
+		var (
+			staleNetID uint   = 100
+			nodeName   string = "worker1"
+			nad               = ovntest.GenerateNAD("bluenet", "rednad", "greenamespace",
+				types.Layer3Topology, "100.128.0.0/16", types.NetworkRolePrimary)
+			netName      = "bluenet"
+			netID        = 3
+			v4NodeSubnet = "10.128.0.0/24"
+			v6NodeSubnet = "ae70::66/112"
+			testNS       ns.NetNS
+			fakeClient   *util.OVNClientset
+		)
+
+		BeforeEach(func() {
+			// Restore global default values before each testcase
+			Expect(config.PrepareTestConfig()).To(Succeed())
+
+			testNS, err = testutils.NewNS()
+			Expect(err).NotTo(HaveOccurred())
+			v1Objects := []runtime.Object{}
+			fakeClient = &util.OVNClientset{
+				KubeClient: fake.NewSimpleClientset(v1Objects...),
+			}
+		})
+
+		AfterEach(func() {
+			Expect(testNS.Close()).To(Succeed())
+			Expect(testutils.UnmountNS(testNS)).To(Succeed())
+		})
+
+		It("check vrf devices are cleaned for deleted networks", func() {
+			config.OVNKubernetesFeature.EnableNetworkSegmentation = true
+			config.OVNKubernetesFeature.EnableMultiNetwork = true
+
+			factoryMock := factoryMocks.NodeWatchFactory{}
+			NetInfo, err := util.ParseNADInfo(nad)
+			Expect(err).NotTo(HaveOccurred())
+			node := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: nodeName,
+					Annotations: map[string]string{
+						"k8s.ovn.org/network-ids":  fmt.Sprintf("{\"%s\": \"%d\"}", netName, netID),
+						"k8s.ovn.org/node-subnets": fmt.Sprintf("{\"%s\":[\"%s\", \"%s\"]}", netName, v4NodeSubnet, v6NodeSubnet)},
+				},
+			}
+			nodeList := []*corev1.Node{node}
+			factoryMock.On("GetNode", nodeName).Return(nodeList[0], nil)
+			factoryMock.On("GetNodes").Return(nodeList, nil)
+			factoryMock.On("NADInformer").Return(nil)
+
+			ncm, err := NewNodeNetworkControllerManager(fakeClient, &factoryMock, nodeName, &sync.WaitGroup{}, nil)
+			Expect(err).NotTo(HaveOccurred())
+
+			err = testNS.Do(func(ns.NetNS) error {
+				defer GinkgoRecover()
+
+				staleVrfDevice := util.GetVRFDeviceNameForUDN(int(staleNetID))
+				ovntest.AddVRFLink(staleVrfDevice, uint32(staleNetID))
+				_, err = util.GetNetLinkOps().LinkByName(staleVrfDevice)
+				Expect(err).NotTo(HaveOccurred())
+
+				validVrfDevice := util.GetVRFDeviceNameForUDN(int(netID))
+				ovntest.AddVRFLink(validVrfDevice, uint32(netID))
+				_, err = util.GetNetLinkOps().LinkByName(validVrfDevice)
+				Expect(err).NotTo(HaveOccurred())
+
+				err = ncm.CleanupDeletedNetworks(NetInfo)
+				Expect(err).NotTo(HaveOccurred())
+
+				// Verify CleanupDeletedNetworks cleans up VRF configuration for
+				// already deleted network.
+				_, err = util.GetNetLinkOps().LinkByName(staleVrfDevice)
+				Expect(err).To(HaveOccurred())
+
+				// Verify CleanupDeletedNetworks didn't cleanup VRF configuration for
+				// existing network.
+				_, err = util.GetNetLinkOps().LinkByName(validVrfDevice)
+				Expect(err).NotTo(HaveOccurred())
+
+				return nil
+			})
+			Expect(err).NotTo(HaveOccurred())
 		})
 	})
 })

@@ -27,3 +27,17 @@ func DelLink(name string) {
 	err = netlink.LinkDel(origLink)
 	Expect(err).NotTo(HaveOccurred())
 }
+
+func AddVRFLink(name string, tableId uint32) netlink.Link {
+	vrfLink := &netlink.Vrf{
+		LinkAttrs: netlink.LinkAttrs{Name: name},
+		Table:     tableId,
+	}
+	err := netlink.LinkAdd(vrfLink)
+	Expect(err).NotTo(HaveOccurred())
+	origLink, err := netlink.LinkByName(name)
+	Expect(err).NotTo(HaveOccurred())
+	err = netlink.LinkSetUp(origLink)
+	Expect(err).NotTo(HaveOccurred())
+	return origLink
+}
