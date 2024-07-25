@@ -32,20 +32,25 @@ func NewPolicyBasedRoutesManager(nbClient client.Client, clusterRouterName strin
 }
 
 func (pbr *PolicyBasedRoutesManager) Add(nodeName, mgmtPortIP string, hostIfCIDR *net.IPNet, otherHostAddrs []string) error {
-	var l3Prefix string
-	if utilnet.IsIPv6(hostIfCIDR.IP) {
-		l3Prefix = "ip6"
-	} else {
-		l3Prefix = "ip4"
+	if hostIfCIDR == nil {
+		return fmt.Errorf("<nil> host interface CIDR")
 	}
-
+	if mgmtPortIP == "" || net.ParseIP(mgmtPortIP) == nil {
+		return fmt.Errorf("invalid management port IP address: %q", mgmtPortIP)
+	}
+	if !isHostIPValid(hostIfCIDR.IP) {
+		return fmt.Errorf("invalid host address: %v", hostIfCIDR.String())
+	}
+	if !isHostIPsValid(otherHostAddrs) {
+		return fmt.Errorf("invalid other host address(es): %v", otherHostAddrs)
+	}
+	l3Prefix := getIPPrefix(hostIfCIDR.IP)
 	matches := sets.New[string]()
 	for _, hostIP := range append(otherHostAddrs, hostIfCIDR.IP.String()) {
 		// embed nodeName as comment so that it is easier to delete these rules later on.
 		// logical router policy doesn't support external_ids to stash metadata
 		networkScopedSwitchName := pbr.netInfo.GetNetworkScopedSwitchName(nodeName)
-		matchStr := fmt.Sprintf(`inport == "%s%s" && %s.dst == %s /* %s */`,
-			ovntypes.RouterToSwitchPrefix, networkScopedSwitchName, l3Prefix, hostIP, networkScopedSwitchName)
+		matchStr := generateMatch(networkScopedSwitchName, l3Prefix, hostIP)
 		matches = matches.Insert(matchStr)
 	}
 
@@ -109,8 +114,10 @@ func (pbr *PolicyBasedRoutesManager) sync(nodeName string, matches sets.Set[stri
 				// if the policy is for this node and has the wrong mgmtPortIP as nexthop, remove it
 				// FIXME we currently assume that foundNexthops is a single ip, this may
 				// change in the future.
-
-				if len(policy.Nexthops) > 0 && utilnet.IsIPv6String(policy.Nexthops[0]) != utilnet.IsIPv6String(nexthop) {
+				if len(policy.Nexthops) == 0 {
+					return fmt.Errorf("invalid policy without a next hop")
+				}
+				if utilnet.IsIPv6String(policy.Nexthops[0]) != utilnet.IsIPv6String(nexthop) {
 					continue
 				}
 				if policy.Nexthops[0] != nexthop {
@@ -180,7 +187,10 @@ func (pbr *PolicyBasedRoutesManager) deletePolicyBasedRoutes(policyID string) er
 }
 
 func (pbr *PolicyBasedRoutesManager) createPolicyBasedRoutes(match, priority, nexthops string) error {
-	intPriority, _ := strconv.Atoi(priority)
+	intPriority, err := strconv.Atoi(priority)
+	if err != nil {
+		return fmt.Errorf("failed to convert priority %q to string: %v", priority, err)
+	}
 	lrp := nbdb.LogicalRouterPolicy{
 		Priority: intPriority,
 		Match:    match,
@@ -199,11 +209,43 @@ func (pbr *PolicyBasedRoutesManager) createPolicyBasedRoutes(match, priority, ne
 		return item.Priority == lrp.Priority && item.Match == lrp.Match
 	}
 
-	err := libovsdbops.CreateOrUpdateLogicalRouterPolicyWithPredicate(pbr.nbClient, pbr.clusterRouterName, &lrp, p,
+	err = libovsdbops.CreateOrUpdateLogicalRouterPolicyWithPredicate(pbr.nbClient, pbr.clusterRouterName, &lrp, p,
 		&lrp.Nexthops, &lrp.Action)
 	if err != nil {
 		return fmt.Errorf("error creating policy %+v on router %s: %v", lrp, pbr.clusterRouterName, err)
 	}
 
 	return nil
+}
+
+func generateMatch(switchName, ipPrefix, hostIP string) string {
+	return fmt.Sprintf(`inport == "%s%s" && %s.dst == %s /* %s */`, ovntypes.RouterToSwitchPrefix, switchName, ipPrefix, hostIP, switchName)
+}
+
+func getIPPrefix(ip net.IP) string {
+	if utilnet.IsIPv6(ip) {
+		return "ip6"
+	}
+	return "ip4"
+}
+
+func isHostIPsValid(ips []string) bool {
+	for _, ipStr := range ips {
+		ip := net.ParseIP(ipStr)
+		if !isHostIPValid(ip) {
+			return false
+		}
+	}
+	return true
+}
+
+func isHostIPValid(ip net.IP) bool {
+	if len(ip) == 0 {
+		return false
+	}
+	// ensure host IP doesn't end with .0 or :0
+	if ip[len(ip)-1] == 0 {
+		return false
+	}
+	return true
 }
