@@ -950,8 +950,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			Expect(err).NotTo(HaveOccurred())
 			bridgelink, err := netlink.LinkByName("breth0")
 			Expect(err).NotTo(HaveOccurred())
-			vrfTableId := util.CalculateRouteTableID(mplink.Attrs().Index)
-
+			vrfTableId := util.CalculateUDNRouteTableID(udnGateway.networkID)
 			routes, err := udnGateway.computeRoutesForUDN(vrfTableId, mplink)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(len(routes)).To(Equal(3))
@@ -996,7 +995,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 
 			mplink, err := netlink.LinkByName(mgtPort)
 			Expect(err).NotTo(HaveOccurred())
-			vrfTableId := util.CalculateRouteTableID(mplink.Attrs().Index)
+			vrfTableId := util.CalculateUDNRouteTableID(udnGateway.networkID)
 
 			routes, err := udnGateway.computeRoutesForUDN(vrfTableId, mplink)
 			Expect(err).NotTo(HaveOccurred())

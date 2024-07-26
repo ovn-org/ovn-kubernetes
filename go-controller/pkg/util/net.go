@@ -13,10 +13,6 @@ import (
 	utilnet "k8s.io/utils/net"
 )
 
-const (
-	routingTableIDStart = 1000
-)
-
 var ErrorNoIP = errors.New("no IP available")
 
 // GetOVSPortMACAddress returns the MAC address of a given OVS port
@@ -329,8 +325,13 @@ func IPNetsIPToStringSlice(ips []*net.IPNet) []string {
 	return ipAddrs
 }
 
-// CalculateRouteTableID will calculate route table ID based on the network
+// CalculateEIPRouteTableID will calculate route table ID based on the interface index
+func CalculateEIPRouteTableID(ifIndex int) int {
+	return 1000 + ifIndex
+}
+
+// CalculateUDNRouteTableID will calculate route table ID based on the network networkID
 // interface index
-func CalculateRouteTableID(ifIndex int) int {
-	return ifIndex + routingTableIDStart
+func CalculateUDNRouteTableID(networkID int) int {
+	return 100000 + networkID
 }

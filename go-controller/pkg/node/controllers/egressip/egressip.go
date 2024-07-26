@@ -644,7 +644,7 @@ func generateRoutesForLink(link netlink.Link, isV6 bool) ([]netlink.Route, error
 		return nil, fmt.Errorf("failed to get routes for link %s: %v", link.Attrs().Name, err)
 	}
 	linkRoutes = ensureAtLeastOneDefaultRoute(linkRoutes, link.Attrs().Index, isV6)
-	overwriteRoutesTableID(linkRoutes, util.CalculateRouteTableID(link.Attrs().Index))
+	overwriteRoutesTableID(linkRoutes, util.CalculateEIPRouteTableID(link.Attrs().Index))
 	clearSrcFromRoutes(linkRoutes)
 	return linkRoutes, nil
 }
@@ -902,7 +902,7 @@ func (c *Controller) repairNode() error {
 				assignedAddrStrToAddrs[addressStr] = address
 			}
 		}
-		filter, mask := filterRouteByLinkTable(linkIdx, util.CalculateRouteTableID(linkIdx))
+		filter, mask := filterRouteByLinkTable(linkIdx, util.CalculateEIPRouteTableID(linkIdx))
 		existingRoutes, err := util.GetNetLinkOps().RouteListFiltered(netlink.FAMILY_ALL, filter, mask)
 		if err != nil {
 			return fmt.Errorf("unable to get route list using filter (%s): %v", filter.String(), err)
@@ -1466,7 +1466,7 @@ func getNetlinkAddress(addr *net.IPNet, ifindex int) *netlink.Addr {
 // from the links 'ifindex'
 func generateIPRule(srcIP net.IP, isIPv6 bool, ifIndex int) netlink.Rule {
 	r := *netlink.NewRule()
-	r.Table = util.CalculateRouteTableID(ifIndex)
+	r.Table = util.CalculateEIPRouteTableID(ifIndex)
 	r.Priority = rulePriority
 	var ipFullMask string
 	if isIPv6 {

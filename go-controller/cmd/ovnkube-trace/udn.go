@@ -70,7 +70,7 @@ func findUserDefinedNetworkVRFTableID(coreclient *corev1client.CoreV1Client, res
 	mgmtPortLinkName := util.GetNetworkScopedK8sMgmtHostIntfName(uint(networkIDInt))
 	for _, link := range links {
 		if link.Name == mgmtPortLinkName {
-			return ptr.To(uint(util.CalculateRouteTableID(int(link.Index)))), nil
+			return ptr.To(uint(util.CalculateUDNRouteTableID(networkIDInt))), nil
 		}
 	}
 	return nil, nil
