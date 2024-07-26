@@ -31,7 +31,7 @@ func newManagementPortRepresentor(nodeName string, hostSubnets []*net.IPNet, rep
 	}
 }
 
-func (mp *managementPortRepresentor) Create(_ *routemanager.Controller, node *v1.Node,
+func (mp *managementPortRepresentor) Create(isRoutingAdvertised bool, _ *routemanager.Controller, node *v1.Node,
 	nodeLister listers.NodeLister, kubeInterface kube.Interface, waiter *startupWaiter) (*managementPortConfig, error) {
 	k8sMgmtIntfName := types.K8sMgmtIntfName
 	if config.OvnKubeNode.Mode == types.NodeModeFull {
@@ -112,6 +112,7 @@ func (mp *managementPortRepresentor) Create(_ *routemanager.Controller, node *v1
 		link:            link,
 		reconcilePeriod: 5 * time.Second,
 	}
+	mpcfg.isRoutingAdvertised.Store(isRoutingAdvertised)
 
 	mgmtPortMac := util.IPAddrToHWAddr(util.GetNodeManagementIfAddr(mp.hostSubnets[0]).IP)
 	if err := util.UpdateNodeManagementPortMACAddressesWithRetry(node, nodeLister, kubeInterface, mgmtPortMac, types.DefaultNetworkName); err != nil {
@@ -176,7 +177,7 @@ func newManagementPortNetdev(hostSubnets []*net.IPNet, netdevName string) Manage
 	}
 }
 
-func (mp *managementPortNetdev) Create(routeManager *routemanager.Controller, node *v1.Node,
+func (mp *managementPortNetdev) Create(isRoutingAdvertised bool, routeManager *routemanager.Controller, node *v1.Node,
 	nodeLister listers.NodeLister, kubeInterface kube.Interface, waiter *startupWaiter) (*managementPortConfig, error) {
 	klog.Infof("Lookup netdevice link and existing management port using '%v'", mp.netdevName)
 	link, err := util.GetNetLinkOps().LinkByName(mp.netdevName)
@@ -242,7 +243,7 @@ func (mp *managementPortNetdev) Create(routeManager *routemanager.Controller, no
 	}
 
 	// Setup Iptable and routes
-	cfg, err := createPlatformManagementPort(routeManager, types.K8sMgmtIntfName, mp.hostSubnets)
+	cfg, err := createPlatformManagementPort(routeManager, types.K8sMgmtIntfName, mp.hostSubnets, isRoutingAdvertised)
 	if err != nil {
 		return nil, err
 	}
