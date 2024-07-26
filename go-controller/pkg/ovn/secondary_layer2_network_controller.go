@@ -114,8 +114,9 @@ func (h *secondaryLayer2NetworkControllerEventHandler) AddResource(obj interface
 				nodeParams = &nodeSyncs{syncMgmtPort: true, syncGw: true}
 			}
 			return h.oc.addUpdateLocalNodeEvent(node, nodeParams)
+		} else {
+			return h.oc.addUpdateRemoteNodeEvent(node, config.OVNKubernetesFeature.EnableInterconnect)
 		}
-		return h.oc.addUpdateRemoteNodeEvent(node)
 	default:
 		return h.oc.AddSecondaryNetworkResourceCommon(h.objType, obj)
 	}
@@ -176,7 +177,9 @@ func (h *secondaryLayer2NetworkControllerEventHandler) UpdateResource(oldObj, ne
 
 			return h.oc.addUpdateLocalNodeEvent(newNode, nodeSyncsParam)
 		} else {
-			return h.oc.addUpdateRemoteNodeEvent(newNode)
+			_, syncZoneIC := h.oc.syncZoneICFailed.Load(newNode.Name)
+			syncZoneIC = syncZoneIC || h.oc.isLocalZoneNode(oldNode)
+			return h.oc.addUpdateRemoteNodeEvent(newNode, syncZoneIC)
 		}
 	default:
 		return h.oc.UpdateSecondaryNetworkResourceCommon(h.objType, oldObj, newObj, inRetryCache)
@@ -228,8 +231,9 @@ type SecondaryLayer2NetworkController struct {
 	BaseSecondaryLayer2NetworkController
 
 	// Node-specific syncMaps used by node event handler
-	mgmtPortFailed sync.Map
-	gatewaysFailed sync.Map
+	mgmtPortFailed   sync.Map
+	syncZoneICFailed sync.Map
+	gatewaysFailed   sync.Map
 
 	// Cluster-wide router default Control Plane Protection (COPP) UUID
 	defaultCOPPUUID string
@@ -330,7 +334,16 @@ func (oc *SecondaryLayer2NetworkController) run(ctx context.Context) error {
 // Cleanup cleans up logical entities for the given network, called from net-attach-def routine
 // could be called from a dummy Controller (only has CommonNetworkControllerInfo set)
 func (oc *SecondaryLayer2NetworkController) Cleanup() error {
-	return oc.BaseSecondaryLayer2NetworkController.cleanup()
+	if err := oc.BaseSecondaryLayer2NetworkController.cleanup(); err != nil {
+		return err
+	}
+
+	if config.OVNKubernetesFeature.EnableInterconnect {
+		if err := oc.zoneICHandler.Cleanup(); err != nil {
+			return fmt.Errorf("failed to delete interconnect transit switch of network %s: %v", oc.GetNetworkName(), err)
+		}
+	}
+	return nil
 }
 
 func (oc *SecondaryLayer2NetworkController) Init() error {
@@ -464,7 +477,38 @@ func (oc *SecondaryLayer2NetworkController) addUpdateLocalNodeEvent(node *corev1
 func (oc *SecondaryLayer2NetworkController) deleteNodeEvent(node *corev1.Node) error {
 	oc.localZoneNodes.Delete(node.Name)
 	oc.mgmtPortFailed.Delete(node.Name)
+	if config.OVNKubernetesFeature.EnableInterconnect {
+		if err := oc.zoneICHandler.DeleteNode(node); err != nil {
+			return err
+		}
+		oc.syncZoneICFailed.Delete(node.Name)
+	}
 	return nil
+}
+
+func (oc *SecondaryLayer2NetworkController) addUpdateRemoteNodeEvent(node *kapi.Node, syncZoneIc bool) error {
+	if err := oc.BaseSecondaryLayer2NetworkController.addUpdateRemoteNodeEvent(node); err != nil {
+		return err
+	}
+
+	_, present := oc.localZoneNodes.Load(node.Name)
+
+	if present {
+		if err := oc.deleteNodeEvent(node); err != nil {
+			return err
+		}
+	}
+
+	var err error
+	if syncZoneIc && config.OVNKubernetesFeature.EnableInterconnect {
+		if err = oc.zoneICHandler.AddRemoteZoneNode(node); err != nil {
+			err = fmt.Errorf("failed to add the remote zone node [%s] to the zone interconnect handler, err : %v", node.Name, err)
+			oc.syncZoneICFailed.Store(node.Name, true)
+		} else {
+			oc.syncZoneICFailed.Delete(node.Name)
+		}
+	}
+	return err
 }
 
 type SecondaryL2GatewayConfig struct {
