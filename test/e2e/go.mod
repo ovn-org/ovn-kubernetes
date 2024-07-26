@@ -176,7 +176,7 @@ require (
 	google.golang.org/grpc v1.63.2
 	k8s.io/kubectl v0.30.2
 	kubevirt.io/api v1.0.0
-	sigs.k8s.io/controller-runtime v0.18.4
+	sigs.k8s.io/controller-runtime v0.18.3
 )
 
 replace go.universe.tf/metallb => github.com/metallb/metallb v0.13.12
