@@ -8,8 +8,8 @@ import (
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	libovsdb "github.com/ovn-org/libovsdb/ovsdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 )
 
@@ -39,7 +39,7 @@ func GetLogicalRouter(nbClient libovsdbclient.Client, router *nbdb.LogicalRouter
 // FindLogicalRoutersWithPredicate looks up logical routers from the cache based on a
 // given predicate
 func FindLogicalRoutersWithPredicate(nbClient libovsdbclient.Client, p logicalRouterPredicate) ([]*nbdb.LogicalRouter, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), config.Default.OVSDBTxnTimeout)
 	defer cancel()
 	found := []*nbdb.LogicalRouter{}
 	err := nbClient.WhereCache(p).List(ctx, &found)
@@ -142,7 +142,7 @@ type logicalRouterPortPredicate func(*nbdb.LogicalRouterPort) bool
 // FindLogicalRouterPortWithPredicate looks up logical router port from
 // the cache based on a given predicate
 func FindLogicalRouterPortWithPredicate(nbClient libovsdbclient.Client, p logicalRouterPortPredicate) ([]*nbdb.LogicalRouterPort, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), config.Default.OVSDBTxnTimeout)
 	defer cancel()
 	found := []*nbdb.LogicalRouterPort{}
 	err := nbClient.WhereCache(p).List(ctx, &found)
@@ -249,7 +249,7 @@ type logicalRouterPolicyPredicate func(*nbdb.LogicalRouterPolicy) bool
 // FindLogicalRouterPoliciesWithPredicate looks up logical router policies from
 // the cache based on a given predicate
 func FindLogicalRouterPoliciesWithPredicate(nbClient libovsdbclient.Client, p logicalRouterPolicyPredicate) ([]*nbdb.LogicalRouterPolicy, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), config.Default.OVSDBTxnTimeout)
 	defer cancel()
 	found := []*nbdb.LogicalRouterPolicy{}
 	err := nbClient.WhereCache(p).List(ctx, &found)
@@ -557,7 +557,7 @@ type logicalRouterStaticRoutePredicate func(*nbdb.LogicalRouterStaticRoute) bool
 // FindLogicalRouterStaticRoutesWithPredicate looks up logical router static
 // routes from the cache based on a given predicate
 func FindLogicalRouterStaticRoutesWithPredicate(nbClient libovsdbclient.Client, p logicalRouterStaticRoutePredicate) ([]*nbdb.LogicalRouterStaticRoute, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), config.Default.OVSDBTxnTimeout)
 	defer cancel()
 	found := []*nbdb.LogicalRouterStaticRoute{}
 	err := nbClient.WhereCache(p).List(ctx, &found)
@@ -1001,7 +1001,7 @@ func GetNAT(nbClient libovsdbclient.Client, nat *nbdb.NAT) (*nbdb.NAT, error) {
 // FindNATsWithPredicate looks up NATs from the cache based on a given predicate
 func FindNATsWithPredicate(nbClient libovsdbclient.Client, predicate natPredicate) ([]*nbdb.NAT, error) {
 	nats := []*nbdb.NAT{}
-	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), config.Default.OVSDBTxnTimeout)
 	defer cancel()
 	err := nbClient.WhereCache(predicate).List(ctx, &nats)
 	return nats, err

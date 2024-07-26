@@ -3,11 +3,10 @@ package ops
 import (
 	"context"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	libovsdb "github.com/ovn-org/libovsdb/ovsdb"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 )
 
@@ -133,7 +132,7 @@ func DeleteLoadBalancers(nbClient libovsdbclient.Client, lbs []*nbdb.LoadBalance
 // ListLoadBalancers looks up all load balancers from the cache
 func ListLoadBalancers(nbClient libovsdbclient.Client) ([]*nbdb.LoadBalancer, error) {
 	lbs := []*nbdb.LoadBalancer{}
-	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), config.Default.OVSDBTxnTimeout)
 	defer cancel()
 	err := nbClient.List(ctx, &lbs)
 	return lbs, err

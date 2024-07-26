@@ -12,7 +12,7 @@ import (
 	"github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/model"
 	"github.com/ovn-org/libovsdb/ovsdb"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 )
 
 // TransactWithRetry will attempt a transaction several times if it receives an error indicating that the client
@@ -41,7 +41,7 @@ func TransactAndCheck(c client.Client, ops []ovsdb.Operation) ([]ovsdb.Operation
 
 	klog.V(5).Infof("Configuring OVN: %+v", ops)
 
-	ctx, cancel := context.WithTimeout(context.TODO(), types.OVSDBTimeout)
+	ctx, cancel := context.WithTimeout(context.TODO(), config.Default.OVSDBTxnTimeout)
 	defer cancel()
 
 	results, err := TransactWithRetry(ctx, c, ops)

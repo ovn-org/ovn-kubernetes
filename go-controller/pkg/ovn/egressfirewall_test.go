@@ -948,7 +948,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 					err := fakeOVN.fakeClient.EgressFirewallClient.K8sV1().EgressFirewalls(egressFirewall.Namespace).Delete(context.TODO(), egressFirewall.Name, *metav1.NewDeleteOptions(0))
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					// sleep long enough for TransactWithRetry to fail, causing egress firewall Add to fail
-					time.Sleep(t.OVSDBTimeout + time.Second)
+					time.Sleep(config.Default.OVSDBTxnTimeout + time.Second)
 					// check to see if the retry cache has an entry for this egress firewall
 					key := getEgressFirewallNamespacedName(egressFirewall)
 					ginkgo.By("retry entry: old obj should not be nil, new obj should be nil")
@@ -959,7 +959,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 						gomega.BeNil(),             // newObj should be nil
 					)
 
-					connCtx, cancel := context.WithTimeout(context.Background(), t.OVSDBTimeout)
+					connCtx, cancel := context.WithTimeout(context.Background(), config.Default.OVSDBTxnTimeout)
 					defer cancel()
 					resetNBClient(connCtx, fakeOVN.controller.nbClient)
 					retry.SetRetryObjWithNoBackoff(key, fakeOVN.controller.retryEgressFirewalls)
@@ -1014,7 +1014,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 					_, err = fakeOVN.fakeClient.EgressFirewallClient.K8sV1().EgressFirewalls(egressFirewall1.Namespace).Update(context.TODO(), egressFirewall1, metav1.UpdateOptions{})
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					// sleep long enough for TransactWithRetry to fail, causing egress firewall Add to fail
-					time.Sleep(t.OVSDBTimeout + time.Second)
+					time.Sleep(config.Default.OVSDBTxnTimeout + time.Second)
 					// check to see if the retry cache has an entry for this egress firewall
 					key, err := retry.GetResourceKey(egressFirewall)
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1027,7 +1027,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 						gomega.Not(gomega.BeNil()), // newObj should not be nil
 					)
 
-					connCtx, cancel := context.WithTimeout(context.Background(), t.OVSDBTimeout)
+					connCtx, cancel := context.WithTimeout(context.Background(), config.Default.OVSDBTxnTimeout)
 					defer cancel()
 					ginkgo.By("bringing up NBDB and requesting retry of entry")
 					resetNBClient(connCtx, fakeOVN.controller.nbClient)

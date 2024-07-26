@@ -6,8 +6,8 @@ import (
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	libovsdb "github.com/ovn-org/libovsdb/ovsdb"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 )
 
 // CreateOrUpdateLoadBalancerGroup creates or updates the provided load balancer
@@ -76,7 +76,7 @@ type loadBalancerGroupPredicate func(*nbdb.LoadBalancerGroup) bool
 // FindLoadBalancerGroupsWithPredicate looks up load balancer groups from the
 // cache based on a given predicate
 func FindLoadBalancerGroupsWithPredicate(nbClient libovsdbclient.Client, p loadBalancerGroupPredicate) ([]*nbdb.LoadBalancerGroup, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), config.Default.OVSDBTxnTimeout)
 	defer cancel()
 	groups := []*nbdb.LoadBalancerGroup{}
 	err := nbClient.WhereCache(p).List(ctx, &groups)

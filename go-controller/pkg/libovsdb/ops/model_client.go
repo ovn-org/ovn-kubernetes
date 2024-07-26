@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"reflect"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
 	"github.com/ovn-org/libovsdb/client"
@@ -464,7 +465,7 @@ func (m *modelClient) where(opModel *operationModel) error {
 		// no indexes available
 		return errNoIndexes
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), config.Default.OVSDBTxnTimeout)
 	defer cancel()
 	var err error
 	if err = m.client.Where(copyModel).List(ctx, opModel.ExistingResult); err != nil {
@@ -484,7 +485,7 @@ func (m *modelClient) where(opModel *operationModel) error {
 }
 
 func (m *modelClient) whereCache(opModel *operationModel) error {
-	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), config.Default.OVSDBTxnTimeout)
 	defer cancel()
 	var err error
 	if err = m.client.WhereCache(opModel.ModelPredicate).List(ctx, opModel.ExistingResult); err != nil {
