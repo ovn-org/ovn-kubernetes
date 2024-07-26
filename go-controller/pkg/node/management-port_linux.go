@@ -6,11 +6,12 @@ package node
 import (
 	"fmt"
 	"net"
-	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/coreos/go-iptables/iptables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	nodeipt "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -25,25 +26,23 @@ const (
 )
 
 type managementPortIPFamilyConfig struct {
-	ipt        util.IPTablesHelper
 	allSubnets []*net.IPNet
 	ifAddr     *net.IPNet
 	gwIP       net.IP
 }
 
 type managementPortConfig struct {
-	ifName          string
-	link            netlink.Link
-	routerMAC       net.HardwareAddr
-	reconcilePeriod time.Duration
+	ifName              string
+	link                netlink.Link
+	routerMAC           net.HardwareAddr
+	isRoutingAdvertised atomic.Bool
+	reconcilePeriod     time.Duration
 
 	ipv4 *managementPortIPFamilyConfig
 	ipv6 *managementPortIPFamilyConfig
 }
 
 func newManagementPortIPFamilyConfig(hostSubnet *net.IPNet, isIPv6 bool) (*managementPortIPFamilyConfig, error) {
-	var err error
-
 	cfg := &managementPortIPFamilyConfig{
 		ifAddr: util.GetNodeManagementIfAddr(hostSubnet),
 		gwIP:   util.GetNodeGatewayIfAddr(hostSubnet).IP,
@@ -71,25 +70,18 @@ func newManagementPortIPFamilyConfig(hostSubnet *net.IPNet, isIPv6 bool) (*manag
 		cfg.allSubnets = append(cfg.allSubnets, masqueradeSubnet)
 	}
 
-	if utilnet.IsIPv6CIDR(cfg.ifAddr) {
-		cfg.ipt, err = util.GetIPTablesHelper(iptables.ProtocolIPv6)
-	} else {
-		cfg.ipt, err = util.GetIPTablesHelper(iptables.ProtocolIPv4)
-	}
-	if err != nil {
-		return nil, err
-	}
-
 	return cfg, nil
 }
 
-func newManagementPortConfig(interfaceName string, hostSubnets []*net.IPNet) (*managementPortConfig, error) {
+func newManagementPortConfig(interfaceName string, hostSubnets []*net.IPNet, isRoutingAdvertised bool) (*managementPortConfig, error) {
 	var err error
 
 	mpcfg := &managementPortConfig{
 		ifName:          interfaceName,
 		reconcilePeriod: 30 * time.Second,
 	}
+	mpcfg.isRoutingAdvertised.Store(isRoutingAdvertised)
+
 	if mpcfg.link, err = util.LinkSetUp(mpcfg.ifName); err != nil {
 		return nil, err
 	}
@@ -167,13 +159,21 @@ func tearDownManagementPortConfig(mpcfg *managementPortConfig) error {
 	// all (non-LL) addresses on this link, routes through this link, and
 	// finally any IPtable rules for this link.
 	var ipt4, ipt6 util.IPTablesHelper
+	var err error
 
 	if mpcfg.ipv4 != nil {
-		ipt4 = mpcfg.ipv4.ipt
+		ipt4, err = util.GetIPTablesHelper(iptables.ProtocolIPv4)
+	}
+	if err != nil {
+		return err
 	}
 	if mpcfg.ipv6 != nil {
-		ipt6 = mpcfg.ipv6.ipt
+		ipt6, err = util.GetIPTablesHelper(iptables.ProtocolIPv6)
 	}
+	if err != nil {
+		return err
+	}
+
 	return tearDownInterfaceIPConfig(mpcfg.link, ipt4, ipt6)
 }
 
@@ -235,8 +235,13 @@ func setupManagementPortIPFamilyConfig(routeManager *routemanager.Controller, mp
 		return warnings, err
 	}
 
+	protocol := iptables.ProtocolIPv4
+	if mpcfg.ipv6 != nil && cfg == mpcfg.ipv6 {
+		protocol = iptables.ProtocolIPv6
+	}
+
 	// IPv6 forwarding is enabled globally
-	if mpcfg.ipv4 != nil && cfg == mpcfg.ipv4 {
+	if protocol == iptables.ProtocolIPv4 {
 		stdout, stderr, err := util.RunSysctl("-w", fmt.Sprintf("net.ipv4.conf.%s.forwarding=1", types.K8sMgmtIntfName))
 		if err != nil || stdout != fmt.Sprintf("net.ipv4.conf.%s.forwarding = 1", types.K8sMgmtIntfName) {
 			return warnings, fmt.Errorf("could not set the correct forwarding value for interface %s: stdout: %v, stderr: %v, err: %v",
@@ -244,36 +249,40 @@ func setupManagementPortIPFamilyConfig(routeManager *routemanager.Controller, mp
 		}
 	}
 
-	if _, err = cfg.ipt.List("nat", iptableMgmPortChain); err != nil {
-		warnings = append(warnings, fmt.Sprintf("missing iptables chain %s in the nat table, adding it",
-			iptableMgmPortChain))
-		err = cfg.ipt.NewChain("nat", iptableMgmPortChain)
-	}
+	err = insertIptRules(
+		[]nodeipt.Rule{
+			{
+				Protocol: protocol,
+				Table:    "nat",
+				Chain:    "POSTROUTING",
+				Args:     []string{"-o", mpcfg.ifName, "-j", iptableMgmPortChain},
+			},
+		},
+	)
 	if err != nil {
-		return warnings, fmt.Errorf("could not create iptables nat chain %q for management port: %v",
-			iptableMgmPortChain, err)
+		return warnings, fmt.Errorf("failed to update iptables rules for management port: %w", err)
 	}
-	rule := []string{"-o", mpcfg.ifName, "-j", iptableMgmPortChain}
-	if exists, err = cfg.ipt.Exists("nat", "POSTROUTING", rule...); err == nil && !exists {
-		warnings = append(warnings, fmt.Sprintf("missing iptables postrouting nat chain %s, adding it",
-			iptableMgmPortChain))
-		err = cfg.ipt.Insert("nat", "POSTROUTING", 1, rule...)
+
+	rules := []nodeipt.Rule{
+		{
+			Protocol: protocol,
+			Table:    "nat",
+			Chain:    iptableMgmPortChain,
+			Args: []string{
+				"-o", mpcfg.ifName,
+				"-j", "SNAT",
+				"--to-source", cfg.ifAddr.IP.String(),
+				"-m", "comment", "--comment", "OVN SNAT to Management Port"},
+		},
 	}
-	if err != nil {
-		return warnings, fmt.Errorf("could not insert iptables rule %q for management port: %v",
-			strings.Join(rule, " "), err)
-	}
-	rule = []string{"-o", mpcfg.ifName, "-j", "SNAT", "--to-source", cfg.ifAddr.IP.String(),
-		"-m", "comment", "--comment", "OVN SNAT to Management Port"}
-	if exists, err = cfg.ipt.Exists("nat", iptableMgmPortChain, rule...); err == nil && !exists {
-		warnings = append(warnings, fmt.Sprintf("missing management port nat rule in chain %s, adding it",
-			iptableMgmPortChain))
+	if mpcfg.isRoutingAdvertised.Load() {
+		err = deleteIptRules(rules)
+	} else {
 		// NOTE: SNAT to mp0 rule should be the last in the chain, so append it
-		err = cfg.ipt.Append("nat", iptableMgmPortChain, rule...)
+		err = appendIptRules(rules)
 	}
 	if err != nil {
-		return warnings, fmt.Errorf("could not insert iptable rule %q for management port: %v",
-			strings.Join(rule, " "), err)
+		return warnings, fmt.Errorf("failed to update iptables rules for management port: %w", err)
 	}
 
 	return warnings, nil
@@ -298,11 +307,11 @@ func setupManagementPortConfig(routeManager *routemanager.Controller, cfg *manag
 // createPlatformManagementPort creates a management port attached to the node switch
 // that lets the node access its pods via their private IP address. This is used
 // for health checking and other management tasks.
-func createPlatformManagementPort(routeManager *routemanager.Controller, interfaceName string, localSubnets []*net.IPNet) (*managementPortConfig, error) {
+func createPlatformManagementPort(routeManager *routemanager.Controller, interfaceName string, localSubnets []*net.IPNet, isRoutingAdvertised bool) (*managementPortConfig, error) {
 	var cfg *managementPortConfig
 	var err error
 
-	if cfg, err = newManagementPortConfig(interfaceName, localSubnets); err != nil {
+	if cfg, err = newManagementPortConfig(interfaceName, localSubnets, isRoutingAdvertised); err != nil {
 		return nil, err
 	}
 
