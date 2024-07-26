@@ -547,12 +547,23 @@ func (oc *SecondaryLayer2NetworkController) nodeGatewayConfig(node *corev1.Node)
 		hostSubnets = append(hostSubnets, subnet.CIDR)
 	}
 
+	// at layer2 the GR similar to layer3 ovn_cluster_router so we use
+	// the join subnet too
+	gwLRPIPs := oc.ovnClusterLRPToJoinIfAddrs
+
+	// At layer2 GR LRP acts as the layer3 ovn_cluster_router so we need
+	// to configure here the .1 address, this will work only for IC with
+	// one node per zone, since ARPs for .1 will not go beyond local switch.
+	for _, subnet := range oc.Subnets() {
+		gwLRPIPs = append(gwLRPIPs, util.GetNodeGatewayIfAddr(subnet.CIDR))
+	}
+
 	// Overwrite the primary interface ID with the correct, per-network one.
 	l3GatewayConfig.InterfaceID = oc.GetNetworkScopedExtPortName(l3GatewayConfig.BridgeID, node.Name)
 	return &SecondaryL2GatewayConfig{
 		config:      l3GatewayConfig,
 		hostSubnets: hostSubnets,
-		gwLRPIPs:    oc.ovnClusterLRPToJoinIfAddrs,
+		gwLRPIPs:    gwLRPIPs,
 		hostAddrs:   hostAddrs,
 		externalIPs: externalIPs,
 	}, nil
