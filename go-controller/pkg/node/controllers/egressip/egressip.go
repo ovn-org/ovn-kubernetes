@@ -623,12 +623,27 @@ func generateEIPConfig(link netlink.Link, eIPNet *net.IPNet, isEIPV6 bool) (*eIP
 }
 
 func generateRoutesForLink(link netlink.Link, isV6 bool) ([]netlink.Route, error) {
-	linkRoutes, err := netlink.RouteList(link, util.GetIPFamily(isV6))
+	routeTable := 254 // main table number
+	// check if device is a slave to a VRF device and if so, use VRF devices associated routing table to lookup routes instead of main table
+	if isVRFSlaveDevice(link) {
+		vrfLink, err := util.GetNetLinkOps().LinkByIndex(link.Attrs().MasterIndex)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get VRF link from interface index %d: %v", link.Attrs().MasterIndex, err)
+		}
+		vrf, ok := vrfLink.(*netlink.Vrf)
+		if !ok {
+			return nil, fmt.Errorf("expected link %s to be VRF", vrfLink.Attrs().Name)
+		}
+		routeTable = int(vrf.Table)
+	}
+	filterRoute, filterMask := filterRouteByLinkTable(link.Attrs().Index, routeTable)
+	linkRoutes, err := util.GetNetLinkOps().RouteListFiltered(util.GetIPFamily(isV6), filterRoute, filterMask)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get routes for link %s: %v", link.Attrs().Name, err)
 	}
 	linkRoutes = ensureAtLeastOneDefaultRoute(linkRoutes, link.Attrs().Index, isV6)
 	overwriteRoutesTableID(linkRoutes, util.CalculateRouteTableID(link.Attrs().Index))
+	clearSrcFromRoutes(linkRoutes)
 	return linkRoutes, nil
 }
 
@@ -1320,6 +1335,12 @@ func overwriteRoutesTableID(routes []netlink.Route, tableID int) {
 	}
 }
 
+func clearSrcFromRoutes(routes []netlink.Route) {
+	for i := range routes {
+		routes[i].Src = nil
+	}
+}
+
 func findLinkOnSameNetworkAsIP(ip net.IP, v4, v6 bool) (bool, netlink.Link, error) {
 	found, link, err := findLinkOnSameNetworkAsIPUsingLPM(ip, v4, v6)
 	if err != nil {
@@ -1509,4 +1530,8 @@ func getNodeIPFwMarkIPRule(ipFamily int) netlink.Rule {
 	r.Table = 254 // main
 	r.Family = ipFamily
 	return *r
+}
+
+func isVRFSlaveDevice(link netlink.Link) bool {
+	return link != nil && link.Attrs().Slave != nil && link.Attrs().Slave.SlaveType() == "vrf"
 }
