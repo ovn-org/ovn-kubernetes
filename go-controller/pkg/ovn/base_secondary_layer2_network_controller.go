@@ -61,6 +61,15 @@ func (oc *BaseSecondaryLayer2NetworkController) cleanup() error {
 		return fmt.Errorf("failed to get ops for deleting switches of network %s: %v", netName, err)
 	}
 
+	// now delete cluster router
+	ops, err = libovsdbops.DeleteLogicalRoutersWithPredicateOps(oc.nbClient, ops,
+		func(item *nbdb.LogicalRouter) bool {
+			return item.ExternalIDs[types.NetworkExternalID] == netName
+		})
+	if err != nil {
+		return fmt.Errorf("failed to get ops for deleting routers of network %s: %v", netName, err)
+	}
+
 	ops, err = cleanupPolicyLogicalEntities(oc.nbClient, ops, oc.controllerName)
 	if err != nil {
 		return err
