@@ -160,6 +160,25 @@ func getTransitSwitchName(nInfo util.NetInfo) string {
 	}
 }
 
+func (zic *ZoneInterconnectHandler) getNodeTransitSwitchPortIPs(node *corev1.Node) ([]*net.IPNet, error) {
+	switch zic.TopologyType() {
+	case types.Layer2Topology:
+		return util.ParseNodeGatewayRouterJoinAddrs(node, zic.GetNetworkName())
+	default:
+		return util.ParseNodeTransitSwitchPortAddrs(node)
+	}
+}
+
+func (zic *ZoneInterconnectHandler) getLogicalSwichPortName(nodeName string) string {
+	switch zic.TopologyType() {
+	case types.Layer2Topology:
+		return types.JoinSwitchToGWRouterPrefix + zic.GetNetworkScopedGWRouterName(nodeName)
+	default:
+		return zic.GetNetworkScopedName(types.TransitSwitchToRouterPrefix + nodeName)
+	}
+
+}
+
 func (zic *ZoneInterconnectHandler) createOrUpdateTransitSwitch(networkID int) error {
 	ts := &nbdb.LogicalSwitch{
 		Name: zic.networkTransitSwitchName,
@@ -452,7 +471,7 @@ func (zic *ZoneInterconnectHandler) createLocalZoneNodeResources(node *corev1.No
 	externalIDs := map[string]string{
 		"node": node.Name,
 	}
-	err = zic.addNodeLogicalSwitchPort(zic.networkTransitSwitchName, zic.GetNetworkScopedName(types.TransitSwitchToRouterPrefix+node.Name),
+	err = zic.addNodeLogicalSwitchPort(zic.networkTransitSwitchName, zic.getLogicalSwichPortName(node.Name),
 		lportTypeRouter, []string{lportTypeRouterAddr}, lspOptions, externalIDs)
 	if err != nil {
 		return err
@@ -471,7 +490,7 @@ func (zic *ZoneInterconnectHandler) createLocalZoneNodeResources(node *corev1.No
 //   - binds the remote port to the node remote chassis in SBDB
 //   - adds static routes for the remote node via the remote port ip in the ovn_cluster_router
 func (zic *ZoneInterconnectHandler) createRemoteZoneNodeResources(node *corev1.Node, nodeID int, chassisId string) error {
-	nodeTransitSwitchPortIPs, err := util.ParseNodeTransitSwitchPortAddrs(node)
+	nodeTransitSwitchPortIPs, err := zic.getNodeTransitSwitchPortIPs(node)
 	if err != nil || len(nodeTransitSwitchPortIPs) == 0 {
 		return fmt.Errorf("failed to get the node transit switch port Ips : %w", err)
 	}
@@ -495,7 +514,7 @@ func (zic *ZoneInterconnectHandler) createRemoteZoneNodeResources(node *corev1.N
 		"node": node.Name,
 	}
 
-	remotePortName := zic.GetNetworkScopedName(types.TransitSwitchToRouterPrefix + node.Name)
+	remotePortName := zic.getLogicalSwichPortName(node.Name)
 	if err := zic.addNodeLogicalSwitchPort(zic.networkTransitSwitchName, remotePortName, lportTypeRemote, []string{remotePortAddr}, lspOptions, externalIDs); err != nil {
 		return err
 	}
@@ -584,7 +603,7 @@ func (zic *ZoneInterconnectHandler) cleanupNodeTransitSwitchPort(nodeName string
 		Name: zic.networkTransitSwitchName,
 	}
 	logicalSwitchPort := &nbdb.LogicalSwitchPort{
-		Name: zic.GetNetworkScopedName(types.TransitSwitchToRouterPrefix + nodeName),
+		Name: zic.getLogicalSwichPortName(nodeName),
 	}
 
 	if err := libovsdbops.DeleteLogicalSwitchPorts(zic.nbClient, logicalSwitch, logicalSwitchPort); err != nil {
