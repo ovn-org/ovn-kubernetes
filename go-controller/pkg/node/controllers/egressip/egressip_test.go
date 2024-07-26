@@ -1183,6 +1183,27 @@ var _ = ginkgo.DescribeTable("repair node", func(expectedStateFollowingClean []e
 	})
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 	// check node
+	ginkgo.By("ensure no stale IP rules")
+	foundIPRules, err := getIPRules(testNS, v4, v6)
+	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+	var expectIPRuleCount int
+	for _, expectedConfig := range expectedStateFollowingClean {
+		if len(expectedConfig.podConfigs) == 0 {
+			continue
+		}
+		for _, podConfig := range expectedConfig.podConfigs {
+			if podConfig.ipRule == nil {
+				continue
+			}
+			expectIPRuleCount += 1
+			gomega.Expect(isIPRuleFound(foundIPRules, *podConfig.ipRule))
+		}
+	}
+	gomega.Eventually(func() int {
+		foundIPRules, err := getIPRules(testNS, v4, v6)
+		gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+		return len(foundIPRules)
+	}).Should(gomega.Equal(expectIPRuleCount))
 	ginkgo.By("ensure no stale IPTable rules")
 	foundIPTRules, err := getIPTableRules(testNS, c.iptablesManager, v4, v6)
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
@@ -1265,6 +1286,20 @@ var _ = ginkgo.DescribeTable("repair node", func(expectedStateFollowingClean []e
 		},
 		[]corev1.Pod{},
 		[]corev1.Namespace{}),
+	ginkgo.Entry("should remove stale IP rule",
+		[]eipConfig{
+			{
+				eIP: newEgressIP(egressIP1Name, egressIP1IPV4, node1Name, namespace1Label, egressPodLabel),
+			},
+		},
+		nodeConfig{ // node state before repair
+			linkConfigs: []linkConfig{
+				{dummyLink1Name, []address{{egressIP1IPV4CIDR, true}}},
+			},
+			ipRules: []netlink.Rule{*getRule(pod1IPv4, 1234)}, // invalid table
+		},
+		[]corev1.Pod{newPodWithLabels(namespace1, pod1Name, node1Name, pod1IPv4, egressPodLabel)},
+		[]corev1.Namespace{newNamespaceWithLabels(namespace1, namespace1Label)}),
 	ginkgo.Entry("should remove stale route and EIP address on wrong link",
 		[]eipConfig{
 			{
@@ -1312,6 +1347,15 @@ var _ = ginkgo.DescribeTable("repair node", func(expectedStateFollowingClean []e
 		[]corev1.Pod{newPodWithLabels(namespace1, pod1Name, node1Name, pod1IPv4, egressPodLabel)},
 		[]corev1.Namespace{newNamespaceWithLabels(namespace1, namespace1Label)},
 	))
+
+func isIPRuleFound(ipRules []netlink.Rule, candidateRule netlink.Rule) bool {
+	for _, ipRule := range ipRules {
+		if ipRule.String() == candidateRule.String() {
+			return true
+		}
+	}
+	return false
+}
 
 func isIPTableRuleFound(rules []ovniptables.RuleArg, candidateRule ovniptables.RuleArg) bool {
 	for _, rule := range rules {
@@ -1454,6 +1498,24 @@ func getLinkAddresses(testNS ns.NetNS, infs ...string) (map[string][]netlink.Add
 		return nil, err
 	}
 	return linkAddresses, nil
+}
+
+func getIPRules(testNS ns.NetNS, v4, v6 bool) ([]netlink.Rule, error) {
+	var foundIPRules []netlink.Rule
+	family := netlink.FAMILY_ALL
+	if v4 && !v6 {
+		family = netlink.FAMILY_V4
+	}
+	if !v4 && v6 {
+		family = netlink.FAMILY_V6
+	}
+	filter, mask := filterRuleByPriority(rulePriority)
+	var err error
+	err = testNS.Do(func(netNS ns.NetNS) error {
+		foundIPRules, err = netlink.RuleListFiltered(family, filter, mask)
+		return err
+	})
+	return foundIPRules, err
 }
 
 func getIPTableRules(testNS ns.NetNS, iptablesManager *ovniptables.Controller, v4, v6 bool) ([]ovniptables.RuleArg, error) {
@@ -1725,15 +1787,15 @@ func containsRoutes(routes1 []netlink.Route, routes2 []netlink.Route) bool {
 }
 
 func getRule(podIP string, tableID int) *netlink.Rule {
+	r := netlink.NewRule()
 	ipNet, err := util.GetIPNetFullMask(podIP)
 	if err != nil {
 		panic(err.Error())
 	}
-	return &netlink.Rule{
-		Priority: rulePriority,
-		Src:      ipNet,
-		Table:    tableID,
-	}
+	r.Priority = rulePriority
+	r.Dst = ipNet
+	r.Table = tableID
+	return r
 }
 
 // getLinkIndex is used to map interface name to a link index. When creating dummy type interfaces, we set the
