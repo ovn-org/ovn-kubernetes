@@ -187,6 +187,10 @@ func (oc *DefaultNodeNetworkController) Reconcile(netInfo util.ReconcilableNetIn
 	if oc.Gateway != nil && isAdvertised != wasAdvertised {
 		oc.Gateway.SetRoutingAdvertised(isAdvertised)
 		oc.Gateway.Reconcile()
+		for _, mgmtPort := range oc.gatewaySetup.mgmtPorts {
+			mgmtPort.setRoutingAdvertised(isAdvertised)
+			mgmtPort.Reconcile()
+		}
 	}
 	return nil
 }
@@ -619,7 +623,7 @@ func getMgmtPortAndRepName(node *kapi.Node) (string, string, error) {
 }
 
 func createNodeManagementPorts(node *kapi.Node, nodeLister listers.NodeLister, nodeAnnotator kube.Annotator, kubeInterface kube.Interface, waiter *startupWaiter,
-	subnets []*net.IPNet, routeManager *routemanager.Controller) ([]*managementPortEntry, *managementPortConfig, error) {
+	subnets []*net.IPNet, routeManager *routemanager.Controller, isRoutingAdvertised bool) ([]*managementPortEntry, *managementPortConfig, error) {
 	netdevName, rep, err := getMgmtPortAndRepName(node)
 	if err != nil {
 		return nil, nil, err
@@ -636,11 +640,12 @@ func createNodeManagementPorts(node *kapi.Node, nodeLister listers.NodeLister, n
 	var mgmtPortConfig *managementPortConfig
 	mgmtPorts := make([]*managementPortEntry, 0)
 	for _, port := range ports {
-		config, err := port.Create(routeManager, node, nodeLister, kubeInterface, waiter)
+		config, err := port.Create(isRoutingAdvertised, routeManager, node, nodeLister, kubeInterface, waiter)
 		if err != nil {
 			return nil, nil, err
 		}
 		mgmtPorts = append(mgmtPorts, NewManagementPortEntry(port, config, routeManager))
+
 		// Save this management port config for later usage.
 		// Since only one OVS internal port / Representor config may exist it is fine just to overwrite it
 		if _, ok := port.(*managementPortNetdev); !ok {
@@ -842,8 +847,15 @@ func (nc *DefaultNodeNetworkController) PreStart(ctx context.Context) error {
 	waiter := newStartupWaiter()
 
 	// Setup management ports
-	mgmtPorts, mgmtPortConfig, err := createNodeManagementPorts(node, nc.watchFactory.NodeCoreInformer().Lister(), nodeAnnotator,
-		nc.Kube, waiter, subnets, nc.routeManager)
+	mgmtPorts, mgmtPortConfig, err := createNodeManagementPorts(
+		node,
+		nc.watchFactory.NodeCoreInformer().Lister(),
+		nodeAnnotator,
+		nc.Kube,
+		waiter,
+		subnets,
+		nc.routeManager,
+		nc.isRoutingAdvertised())
 	if err != nil {
 		return err
 	}
