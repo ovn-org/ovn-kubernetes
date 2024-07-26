@@ -54,6 +54,7 @@ const baseNFTRulesFmt = `
 add table inet ovn-kubernetes
 add chain inet ovn-kubernetes mgmtport-snat { type nat hook postrouting priority 100 ; comment "OVN SNAT to Management Port" ; }
 add rule inet ovn-kubernetes mgmtport-snat oifname != %q return
+add rule inet ovn-kubernetes mgmtport-snat meta nfproto ipv4 ip saddr 10.1.1.0 counter return
 add rule inet ovn-kubernetes mgmtport-snat meta l4proto . th dport @mgmtport-no-snat-nodeports counter return
 add rule inet ovn-kubernetes mgmtport-snat ip daddr . meta l4proto . th dport @mgmtport-no-snat-services-v4 counter return
 add rule inet ovn-kubernetes mgmtport-snat counter snat ip to 10.1.1.0

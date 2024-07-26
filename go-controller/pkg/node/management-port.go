@@ -10,7 +10,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/util/retry"
-
 	"k8s.io/klog/v2"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -24,7 +23,7 @@ import (
 type ManagementPort interface {
 	// Create Management port, use annotator to update node annotation with management port details
 	// and waiter to set up condition to wait on for management port creation
-	Create(routeManager *routemanager.Controller, node *v1.Node, nodeLister listers.NodeLister, kubeInterface kube.Interface, waiter *startupWaiter) (*managementPortConfig, error)
+	Create(isRoutingAdvertised bool, routeManager *routemanager.Controller, node *v1.Node, nodeLister listers.NodeLister, kubeInterface kube.Interface, waiter *startupWaiter) (*managementPortConfig, error)
 	// CheckManagementPortHealth checks periodically for management port health until stopChan is posted
 	// or closed and reports any warnings/errors to log
 	CheckManagementPortHealth(routeManager *routemanager.Controller, cfg *managementPortConfig) error
@@ -79,7 +78,7 @@ func newManagementPort(nodeName string, hostSubnets []*net.IPNet) ManagementPort
 	}
 }
 
-func (mp *managementPort) Create(routeManager *routemanager.Controller, node *v1.Node,
+func (mp *managementPort) Create(isRoutingAdvertised bool, routeManager *routemanager.Controller, node *v1.Node,
 	nodeLister listers.NodeLister, kubeInterface kube.Interface, waiter *startupWaiter) (*managementPortConfig, error) {
 	for _, mgmtPortName := range []string{types.K8sMgmtIntfName, types.K8sMgmtIntfName + "_0"} {
 		if err := syncMgmtPortInterface(mp.hostSubnets, mgmtPortName, true); err != nil {
@@ -115,7 +114,7 @@ func (mp *managementPort) Create(routeManager *routemanager.Controller, node *v1
 		return nil, err
 	}
 
-	cfg, err := createPlatformManagementPort(routeManager, types.K8sMgmtIntfName, mp.hostSubnets)
+	cfg, err := createPlatformManagementPort(routeManager, types.K8sMgmtIntfName, mp.hostSubnets, isRoutingAdvertised)
 	if err != nil {
 		return nil, err
 	}
@@ -213,9 +212,17 @@ func (p *managementPortEntry) Start(stopChan <-chan struct{}) {
 }
 
 func (p *managementPortEntry) Reconcile() {
-	p.reconcile <- struct{}{}
+	// trigger a new reconciliation if none was pending
+	select {
+	case p.reconcile <- struct{}{}:
+	default:
+	}
 }
 
 func (p *managementPortEntry) doReconcile() error {
 	return p.port.CheckManagementPortHealth(p.routeManager, p.config)
+}
+
+func (p *managementPortEntry) SetPodNetworkAdvertised(isPodNetworkAdvertised bool) {
+	p.config.isPodNetworkAdvertised.Store(isPodNetworkAdvertised)
 }
