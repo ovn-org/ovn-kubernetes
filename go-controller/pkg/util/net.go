@@ -5,16 +5,13 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"strconv"
 	"strings"
 
 	iputils "github.com/containernetworking/plugins/pkg/ip"
 	utilnet "k8s.io/utils/net"
-)
-
-const (
-	routingTableIDStart = 1000
 )
 
 var ErrorNoIP = errors.New("no IP available")
@@ -332,5 +329,5 @@ func IPNetsIPToStringSlice(ips []*net.IPNet) []string {
 // CalculateRouteTableID will calculate route table ID based on the network
 // interface index
 func CalculateRouteTableID(ifIndex int) int {
-	return ifIndex + routingTableIDStart
+	return math.MaxUint32 - ifIndex
 }
