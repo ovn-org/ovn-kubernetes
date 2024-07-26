@@ -130,6 +130,8 @@ And the default route in the correct table `1111`:
 sh-5.2# ip route show table 1111
 default dev dummy
 ```
+Routes associated with the egress interface are copied from the main routing table to the routing table that was created to support EgressIP, as shown above.
+If the interface is enslaved to a VRF device, routes are copied from the VRF interfaces associated routing table.
 
 No NAT is required on the OVN primary network gateway router.
 OVN-Kubernetes (ovnkube-node) takes care of adding a rule to the rule table with src IP of the pod and routed towards a
