@@ -183,6 +183,13 @@ jobs:
         cache-dependency-path: "**/*.sum"
       id: go
 
+    - name: Install VRF kernel module
+      if: steps.is_pr_image_build_needed.outputs.PR_IMAGE_RESTORED != 'true' && success()
+      run: |
+        set -x
+        sudo apt-get install linux-modules-extra-$(uname -r) -y
+        sudo modprobe vrf
+
     - name: Build and Test - from current pr branch
       if: steps.is_pr_image_build_needed.outputs.PR_IMAGE_RESTORED != 'true' && success()
       run: |
@@ -455,6 +462,12 @@ jobs:
       USE_HELM: "${{ matrix.target == 'control-plane-helm' || matrix.target == 'multi-homing-helm' }}"
       OVN_ENABLE_DNSNAMERESOLVER: "${{ matrix.dns-name-resolver == 'enable-dns-name-resolver' }}"
     steps:
+
+    - name: Install VRF kernel module
+      run: |
+        set -x
+        sudo apt-get install linux-modules-extra-$(uname -r) -y
+        sudo modprobe vrf
 
     - name: Free up disk space
       run: |
