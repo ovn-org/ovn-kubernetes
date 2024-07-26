@@ -536,9 +536,12 @@ func (oc *SecondaryLayer2NetworkController) nodeGatewayConfig(node *corev1.Node)
 		hostSubnets = append(hostSubnets, subnet.CIDR)
 	}
 
-	// at layer2 the GR similar to layer3 ovn_cluster_router so we use
-	// the join subnet too
-	gwLRPIPs := oc.ovnClusterLRPToJoinIfAddrs
+	// at layer2 the GR LRP should be different per node same we do for layer3
+	// since they should not collide at the distributed switch later on
+	gwLRPIPs, err := util.ParseNodeGatewayRouterJoinAddrs(node, networkName)
+	if err != nil {
+		return nil, fmt.Errorf("failed composing LRP addresses for layer2 network %s: %w", oc.GetNetworkName(), err)
+	}
 
 	// At layer2 GR LRP acts as the layer3 ovn_cluster_router so we need
 	// to configure here the .1 address, this will work only for IC with
