@@ -273,6 +273,7 @@ func (c *Controller) sync() {
 				link, err := util.GetNetLinkOps().LinkByIndex(managedRoute.LinkIndex)
 				if err != nil {
 					klog.Errorf("Route Manager: failed to apply route (%s) because unable to retrieve associated link: %v", managedRoute.String(), err)
+					continue
 				}
 				if err := c.applyRoute(link, managedRoute.Gw, managedRoute.Dst, managedRoute.MTU, managedRoute.Src, managedRoute.Table); err != nil {
 					klog.Errorf("Route Manager: failed to apply route (%s): %v", managedRoute.String(), err)
