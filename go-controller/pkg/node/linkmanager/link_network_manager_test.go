@@ -10,6 +10,7 @@ import (
 	"github.com/onsi/ginkgo"
 	"github.com/onsi/ginkgo/extensions/table"
 	"github.com/onsi/gomega"
+	"github.com/stretchr/testify/mock"
 	"github.com/vishvananda/netlink"
 )
 
@@ -79,6 +80,30 @@ var _ = ginkgo.Describe("Link network manager", func() {
 
 	ginkgo.AfterEach(func() {
 		util.ResetNetLinkOpMockInst()
+	})
+
+	ginkgo.It("returns error when address is added but link doesn't exist", func() {
+		linkAddr := newNetlinkAddr(v4CIDR2)
+		nlLink1Mock.On("Attrs").Return(&netlink.LinkAttrs{Name: linkName1, Index: getLinkIndexFromName(linkName1)}, nil)
+		nlMock.On("LinkByIndex").Return(nil, netlink.LinkNotFoundError{})
+		c = NewController("test", v4Enabled, v6Enabled, nil)
+		gomega.Expect(c.AddAddress(linkAddr)).Should(gomega.HaveOccurred())
+	})
+
+	ginkgo.It("doesnt return error when attempting to delete address but link deleted", func() {
+		linkAddr := newNetlinkAddr(v4CIDR2)
+		linkAddr.LinkIndex = getLinkIndexFromName(linkName1)
+		nlLink1Mock.On("Attrs").Return(&netlink.LinkAttrs{Name: linkName1, Index: getLinkIndexFromName(linkName1)}, nil)
+		nlMock.On("LinkList").Return([]netlink.Link{nlLink1Mock}, nil)
+		nlMock.On("LinkByIndex", getLinkIndexFromName(linkName1)).Return(nlLink1Mock, nil)
+		nlMock.On("AddrList", nlLink1Mock, getIPFamilyInt(v4Enabled, v6Enabled)).Return([]netlink.Addr{}, nil)
+		nlMock.On("AddrAdd", nlLink1Mock, &linkAddr).Return(nil)
+		c = NewController("test", v4Enabled, v6Enabled, nil)
+		gomega.Expect(c.AddAddress(linkAddr)).Should(gomega.Succeed())
+		nlMock.Mock.ExpectedCalls = nil
+		nlMock.On("LinkByIndex", getLinkIndexFromName(linkName1)).Return(nil, netlink.LinkNotFoundError{})
+		nlMock.On("IsLinkNotFoundError", mock.Anything).Return(true)
+		gomega.Expect(c.DelAddress(linkAddr)).Should(gomega.Succeed())
 	})
 
 	// Test that:

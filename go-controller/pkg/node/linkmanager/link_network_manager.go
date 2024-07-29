@@ -140,7 +140,13 @@ func (c *Controller) DelAddress(address netlink.Addr) error {
 		return fmt.Errorf("address (%s) is not valid", address.String())
 	}
 	link, err := util.GetNetLinkOps().LinkByIndex(address.LinkIndex)
-	if err != nil && !util.GetNetLinkOps().IsLinkNotFoundError(err) {
+	if err != nil {
+		if util.GetNetLinkOps().IsLinkNotFoundError(err) {
+			c.mu.Lock()
+			c.delLinkFromStoreByIndex(address.LinkIndex)
+			c.mu.Unlock()
+			return nil
+		}
 		return fmt.Errorf("no valid link associated with addresses %s: %v", address.String(), err)
 	}
 	klog.Infof("Link manager: deleting address %s from link %s", address.String(), link.Attrs().Name)
@@ -247,7 +253,26 @@ func (c *Controller) delAddressFromStore(linkName string, address netlink.Addr) 
 			temp = append(temp, addressSaved)
 		}
 	}
-	c.store[linkName] = temp
+	if len(temp) == 0 {
+		delete(c.store, linkName)
+	} else {
+		c.store[linkName] = temp
+	}
+}
+
+func (c *Controller) delLinkFromStoreByIndex(linkToDelIndex int) {
+	var linkNameToDelete string
+	for linkName, addresses := range c.store {
+		if len(addresses) > 0 {
+			if linkToDelIndex == addresses[0].LinkIndex {
+				linkNameToDelete = linkName
+				break
+			}
+		}
+	}
+	if linkNameToDelete != "" {
+		delete(c.store, linkNameToDelete)
+	}
 }
 
 func (c *Controller) isAddressValid(address netlink.Addr) bool {
