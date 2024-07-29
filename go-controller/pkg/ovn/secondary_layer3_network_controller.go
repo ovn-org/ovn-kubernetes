@@ -279,6 +279,7 @@ type SecondaryLayer3NetworkController struct {
 	// Cluster-wide router default Control Plane Protection (COPP) UUID
 	defaultCOPPUUID string
 
+	gatewayManager         *GatewayManager
 	gatewayTopologyFactory *topology.GatewayTopologyFactory
 }
 
@@ -428,6 +429,12 @@ func (oc *SecondaryLayer3NetworkController) Cleanup() error {
 		})
 	if err != nil {
 		return fmt.Errorf("failed to get ops for deleting switches of network %s: %v", netName, err)
+	}
+
+	if oc.gatewayManager != nil {
+		if err := oc.gatewayManager.Cleanup(); err != nil {
+			return fmt.Errorf("failed to cleanup gateway manager for network %q: %w", netName, err)
+		}
 	}
 
 	// now delete cluster router
@@ -600,7 +607,7 @@ func (oc *SecondaryLayer3NetworkController) addUpdateLocalNodeEvent(node *kapi.N
 
 	if util.IsNetworkSegmentationSupportEnabled() && oc.IsPrimaryNetwork() {
 		if nSyncs.syncGw {
-			gwManager := NewGatewayManager(
+			oc.gatewayManager = NewGatewayManager(
 				node.Name,
 				oc.GetNetworkScopedClusterRouterName(),
 				oc.GetNetworkScopedGWRouterName(node.Name),
@@ -617,7 +624,7 @@ func (oc *SecondaryLayer3NetworkController) addUpdateLocalNodeEvent(node *kapi.N
 				errs = append(errs, fmt.Errorf("failed to generate node GW configuration: %v", err))
 				oc.gatewaysFailed.Store(node.Name, true)
 			} else {
-				if err := gwManager.syncNodeGateway(
+				if err := oc.gatewayManager.syncNodeGateway(
 					node,
 					gwConfig.config,
 					gwConfig.hostSubnets,
@@ -630,7 +637,7 @@ func (oc *SecondaryLayer3NetworkController) addUpdateLocalNodeEvent(node *kapi.N
 				); err != nil {
 					errs = append(errs, fmt.Errorf(
 						"failed to sync node GW for network %q: %v",
-						gwManager.netInfo.GetNetworkName(),
+						oc.gatewayManager.netInfo.GetNetworkName(),
 						err,
 					))
 					oc.gatewaysFailed.Store(node.Name, true)
@@ -709,6 +716,12 @@ func (oc *SecondaryLayer3NetworkController) deleteNodeEvent(node *kapi.Node) err
 
 	if err := oc.deleteNode(node.Name); err != nil {
 		return err
+	}
+
+	if oc.gatewayManager != nil {
+		if err := oc.gatewayManager.Cleanup(); err != nil {
+			return fmt.Errorf("failed to cleanup gateway on node %q: %w", node.Name, err)
+		}
 	}
 
 	oc.localZoneNodes.Delete(node.Name)
