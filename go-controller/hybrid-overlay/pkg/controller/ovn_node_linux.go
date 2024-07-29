@@ -499,7 +499,7 @@ func (n *NodeController) EnsureHybridOverlayBridge(node *kapi.Node) error {
 		return nil
 	}
 	if n.gwLRPIP == nil {
-		gwLRPIP, err := util.ParseNodeGatewayRouterLRPAddr(node)
+		gwLRPIP, err := util.ParseNodeGatewayRouterJoinIPv4(node, types.DefaultNetworkName)
 		if err != nil {
 			return fmt.Errorf("invalid Gateway Router LRP IP: %v", err)
 		}

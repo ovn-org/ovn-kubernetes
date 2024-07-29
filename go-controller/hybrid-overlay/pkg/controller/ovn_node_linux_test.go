@@ -391,7 +391,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 		app.Action = func(ctx *cli.Context) error {
 			annotations := createNodeAnnotationsForSubnet(thisNodeSubnet)
 			annotations[hotypes.HybridOverlayDRMAC] = thisNodeDRMAC
-			annotations["k8s.ovn.org/node-gateway-router-lrp-ifaddr"] = "{\"ipv4\":\"100.64.0.3/16\"}"
+			annotations[util.OVNNodeGRLRPAddrs] = "{\"default\":{\"ipv4\":\"100.64.0.3/16\"}}"
 			annotations[hotypes.HybridOverlayDRIP] = thisNodeDRIP
 			node := createNode(thisNode, "linux", thisNodeIP, annotations)
 			fakeClient := fake.NewSimpleClientset(&v1.NodeList{
@@ -457,13 +457,13 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 
 			annotations := createNodeAnnotationsForSubnet(thisNodeSubnet)
 			annotations[hotypes.HybridOverlayDRMAC] = thisNodeDRMAC
-			annotations["k8s.ovn.org/node-gateway-router-lrp-ifaddr"] = "{\"ipv4\":\"100.64.0.3/16\"}"
+			annotations[util.OVNNodeGRLRPAddrs] = "{\"default\":{\"ipv4\":\"100.64.0.3/16\"}}"
 			annotations[hotypes.HybridOverlayDRIP] = thisNodeDRIP
 			node := createNode(thisNode, "linux", thisNodeIP, annotations)
 
 			remoteNodeAnnotations := createNodeAnnotationsForSubnet(remoteNodeSubnet)
 			remoteNodeAnnotations[hotypes.HybridOverlayDRMAC] = remoteNodeDRMAC
-			remoteNodeAnnotations["k8s.ovn.org/node-gateway-router-lrp-ifaddr"] = "{\"ipv4\":\"100.65.0.3/16\"}"
+			remoteNodeAnnotations[util.OVNNodeGRLRPAddrs] = "{\"default\":{\"ipv4\":\"100.65.0.3/16\"}}"
 			remoteNodeAnnotations[hotypes.HybridOverlayDRIP] = "1.2.4.3"
 			remoteNode := createNode(remoteNodeName, "linux", "10.20.20.1", remoteNodeAnnotations)
 
@@ -560,7 +560,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 
 			annotations := createNodeAnnotationsForSubnet(thisNodeSubnet)
 			annotations[hotypes.HybridOverlayDRMAC] = thisNodeDRMAC
-			annotations["k8s.ovn.org/node-gateway-router-lrp-ifaddr"] = "{\"ipv4\":\"100.64.0.3/16\"}"
+			annotations[util.OVNNodeGRLRPAddrs] = "{\"default\":{\"ipv4\":\"100.64.0.3/16\"}}"
 			annotations[hotypes.HybridOverlayDRIP] = thisNodeDRIP
 			node := createNode(thisNode, "linux", thisNodeIP, annotations)
 			testPod := createPod("test", "pod1", thisNode, pod1CIDR, pod1MAC)
@@ -644,7 +644,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 
 			annotations := createNodeAnnotationsForSubnet(thisNodeSubnet)
 			annotations[hotypes.HybridOverlayDRMAC] = thisNodeDRMAC
-			annotations["k8s.ovn.org/node-gateway-router-lrp-ifaddr"] = "{\"ipv4\":\"100.64.0.3/16\"}"
+			annotations[util.OVNNodeGRLRPAddrs] = "{\"default\":{\"ipv4\":\"100.64.0.3/16\"}}"
 			annotations[hotypes.HybridOverlayDRIP] = thisNodeDRIP
 			node := createNode(thisNode, "linux", thisNodeIP, annotations)
 			fakeClient := fake.NewSimpleClientset(&v1.NodeList{
@@ -744,7 +744,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 
 			annotations := createNodeAnnotationsForSubnet(thisNodeSubnet)
 			annotations[hotypes.HybridOverlayDRMAC] = thisNodeDRMAC
-			annotations["k8s.ovn.org/node-gateway-router-lrp-ifaddr"] = "{\"ipv4\":\"100.64.0.3/16\"}"
+			annotations[util.OVNNodeGRLRPAddrs] = "{\"default\":{\"ipv4\":\"100.64.0.3/16\"}}"
 			annotations[hotypes.HybridOverlayDRIP] = thisNodeDRIP
 			node := createNode(thisNode, "linux", thisNodeIP, annotations)
 			fakeClient := fake.NewSimpleClientset(&v1.NodeList{
@@ -884,7 +884,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 
 			annotations := createNodeAnnotationsForSubnet(thisNodeSubnet)
 			annotations[hotypes.HybridOverlayDRMAC] = thisNodeDRMAC
-			annotations["k8s.ovn.org/node-gateway-router-lrp-ifaddr"] = "{\"ipv4\":\"100.64.0.3/16\"}"
+			annotations[util.OVNNodeGRLRPAddrs] = "{\"default\":{\"ipv4\":\"100.64.0.3/16\"}}"
 			annotations[hotypes.HybridOverlayDRIP] = thisNodeDRIP
 			node := createNode(thisNode, "linux", thisNodeIP, annotations)
 			fakeClient := fake.NewSimpleClientset(&v1.NodeList{
@@ -1019,7 +1019,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 
 			annotations := createNodeAnnotationsForSubnet(thisNodeSubnet)
 			annotations[hotypes.HybridOverlayDRMAC] = thisNodeDRMAC
-			annotations["k8s.ovn.org/node-gateway-router-lrp-ifaddr"] = "{\"ipv4\":\"100.64.0.3/16\"}"
+			annotations[util.OVNNodeGRLRPAddrs] = "{\"default\":{\"ipv4\":\"100.64.0.3/16\"}}"
 			annotations[hotypes.HybridOverlayDRIP] = thisNodeDRIP
 			node := createNode(thisNode, "linux", thisNodeIP, annotations)
 			fakeClient := fake.NewSimpleClientset(&v1.NodeList{
