@@ -7,6 +7,9 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/tools/record"
+	ref "k8s.io/client-go/tools/reference"
 	"k8s.io/klog/v2"
 
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
@@ -40,6 +43,9 @@ type PodAllocator struct {
 
 	nadLister nadlister.NetworkAttachmentDefinitionLister
 
+	// event recorder used to post events to k8s
+	recorder record.EventRecorder
+
 	// track pods that have been released but not deleted yet so that we don't
 	// release more than once
 	releasedPods      map[string]sets.Set[string]
@@ -53,6 +59,7 @@ func NewPodAllocator(
 	ipAllocator subnet.Allocator,
 	claimsReconciler persistentips.PersistentAllocations,
 	nadLister nadlister.NetworkAttachmentDefinitionLister,
+	recorder record.EventRecorder,
 ) *PodAllocator {
 	podAllocator := &PodAllocator{
 		netInfo:                netInfo,
@@ -60,6 +67,7 @@ func NewPodAllocator(
 		releasedPodsMutex:      sync.Mutex{},
 		podAnnotationAllocator: podAnnotationAllocator,
 		nadLister:              nadLister,
+		recorder:               recorder,
 	}
 
 	// this network might not have IPAM, we will just allocate MAC addresses
@@ -98,10 +106,18 @@ func (a *PodAllocator) Init() error {
 	return nil
 }
 
-// getActiveNetworkForNamespace returns the active network for the given namespace
+// getActiveNetworkForNamespace returns the active network for the given pod's namespace
 // and is a wrapper around util.GetActiveNetworkForNamespace
-func (a *PodAllocator) getActiveNetworkForNamespace(namespace string) (util.NetInfo, error) {
-	return util.GetActiveNetworkForNamespace(namespace, a.nadLister)
+func (a *PodAllocator) getActiveNetworkForPod(pod *corev1.Pod) (util.NetInfo, error) {
+	activeNetwork, err := util.GetActiveNetworkForNamespace(pod.Namespace, a.nadLister)
+	if err != nil {
+		if util.IsUnknownActiveNetworkError(err) {
+			a.recordPodErrorEvent(pod, err)
+		}
+		return nil, err
+	}
+	return activeNetwork, nil
+
 }
 
 // GetNetworkRole returns the role of this controller's
@@ -137,10 +153,8 @@ func (a *PodAllocator) GetNetworkRole(pod *corev1.Pod) (string, error) {
 		}
 		return types.NetworkRoleSecondary, nil
 	}
-	activeNetwork, err := a.getActiveNetworkForNamespace(pod.Namespace)
+	activeNetwork, err := a.getActiveNetworkForPod(pod)
 	if err != nil {
-		// FIXME(tssurya) emit event here if util.IsUnknownActiveNetworkError; add support for
-		// recorder in the NCM controller
 		return "", err
 	}
 	if activeNetwork.GetNetworkName() == a.netInfo.GetNetworkName() {
@@ -201,13 +215,14 @@ func (a *PodAllocator) reconcile(old, new *corev1.Pod, releaseFromAllocator bool
 		return nil
 	}
 
-	activeNetwork, err := a.getActiveNetworkForNamespace(pod.Namespace)
+	activeNetwork, err := a.getActiveNetworkForPod(pod)
 	if err != nil {
 		return fmt.Errorf("failed looking for an active network: %w", err)
 	}
 
 	onNetwork, networkMap, err := util.GetPodNADToNetworkMappingWithActiveNetwork(pod, a.netInfo, activeNetwork)
 	if err != nil {
+		a.recordPodErrorEvent(pod, err)
 		return fmt.Errorf("failed to get NAD to network mapping: %w", err)
 	}
 
@@ -399,6 +414,17 @@ func (a *PodAllocator) isPodReleased(nad, uid string) bool {
 		return releasedPods.Has(uid)
 	}
 	return false
+}
+
+func (a *PodAllocator) recordPodErrorEvent(pod *corev1.Pod, podErr error) {
+	podRef, err := ref.GetReference(scheme.Scheme, pod)
+	if err != nil {
+		klog.Errorf("Couldn't get a reference to pod %s/%s to post an event: '%v'",
+			pod.Namespace, pod.Name, err)
+	} else {
+		klog.V(5).Infof("Posting a %s event for Pod %s/%s", corev1.EventTypeWarning, pod.Namespace, pod.Name)
+		a.recorder.Eventf(podRef, corev1.EventTypeWarning, "ErrorAllocatingPod", podErr.Error())
+	}
 }
 
 func podIdAllocationName(nad, uid string) string {

@@ -12,6 +12,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	cache "k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 
@@ -62,10 +63,13 @@ type networkClusterController struct {
 	ipamClaimReconciler *persistentips.IPAMClaimReconciler
 	subnetAllocator     subnet.Allocator
 
+	// event recorder used to post events to k8s
+	recorder record.EventRecorder
+
 	util.NetInfo
 }
 
-func newNetworkClusterController(networkIDAllocator idallocator.NamedAllocator, netInfo util.NetInfo, ovnClient *util.OVNClusterManagerClientset, wf *factory.WatchFactory) *networkClusterController {
+func newNetworkClusterController(networkIDAllocator idallocator.NamedAllocator, netInfo util.NetInfo, ovnClient *util.OVNClusterManagerClientset, wf *factory.WatchFactory, recorder record.EventRecorder) *networkClusterController {
 	kube := &kube.KubeOVN{
 		Kube: kube.Kube{
 			KClient: ovnClient.KubeClient,
@@ -82,12 +86,13 @@ func newNetworkClusterController(networkIDAllocator idallocator.NamedAllocator, 
 		stopChan:           make(chan struct{}),
 		wg:                 wg,
 		networkIDAllocator: networkIDAllocator,
+		recorder:           recorder,
 	}
 
 	return ncc
 }
 
-func newDefaultNetworkClusterController(netInfo util.NetInfo, ovnClient *util.OVNClusterManagerClientset, wf *factory.WatchFactory) *networkClusterController {
+func newDefaultNetworkClusterController(netInfo util.NetInfo, ovnClient *util.OVNClusterManagerClientset, wf *factory.WatchFactory, recorder record.EventRecorder) *networkClusterController {
 	// use an allocator that can only allocate a single network ID for the
 	// defaiult network
 	networkIDAllocator, err := idallocator.NewIDAllocator(types.DefaultNetworkName, 1)
@@ -101,7 +106,7 @@ func newDefaultNetworkClusterController(netInfo util.NetInfo, ovnClient *util.OV
 	}
 
 	namedIDAllocator := networkIDAllocator.ForName(types.DefaultNetworkName)
-	return newNetworkClusterController(namedIDAllocator, netInfo, ovnClient, wf)
+	return newNetworkClusterController(namedIDAllocator, netInfo, ovnClient, wf, recorder)
 }
 
 func (ncc *networkClusterController) hasPodAllocation() bool {
@@ -190,7 +195,7 @@ func (ncc *networkClusterController) init() error {
 			nadLister = ncc.watchFactory.NADInformer().Lister()
 		}
 		ncc.podAllocator = pod.NewPodAllocator(ncc.NetInfo, podAllocationAnnotator, ipAllocator,
-			ipamClaimsReconciler, nadLister)
+			ipamClaimsReconciler, nadLister, ncc.recorder)
 		if err := ncc.podAllocator.Init(); err != nil {
 			return fmt.Errorf("failed to initialize pod ip allocator: %w", err)
 		}

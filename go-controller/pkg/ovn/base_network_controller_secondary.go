@@ -243,6 +243,7 @@ func (bsnc *BaseSecondaryNetworkController) ensurePodForSecondaryNetwork(pod *ka
 
 	on, networkMap, err := util.GetPodNADToNetworkMappingWithActiveNetwork(pod, bsnc.NetInfo, activeNetwork)
 	if err != nil {
+		bsnc.recordPodErrorEvent(pod, err)
 		// configuration error, no need to retry, do not return error
 		klog.Errorf("Error getting network-attachment for pod %s/%s network %s: %v",
 			pod.Namespace, pod.Name, bsnc.GetNetworkName(), err)
@@ -428,6 +429,7 @@ func (bsnc *BaseSecondaryNetworkController) removePodForSecondaryNetwork(pod *ka
 
 		_, networkMap, err := util.GetPodNADToNetworkMappingWithActiveNetwork(pod, bsnc.NetInfo, activeNetwork)
 		if err != nil {
+			bsnc.recordPodErrorEvent(pod, err)
 			return err
 		}
 
@@ -508,7 +510,8 @@ func (bsnc *BaseSecondaryNetworkController) syncPodsForSecondaryNetwork(pods []i
 		on, networkMap, err := util.GetPodNADToNetworkMappingWithActiveNetwork(pod, bsnc.NetInfo, activeNetwork)
 		if err != nil || !on {
 			if err != nil {
-				klog.Warningf("Failed to determine if pod %s/%s needs to be plumb interface on network %s: %v",
+				bsnc.recordPodErrorEvent(pod, err)
+				klog.Errorf("Failed to determine if pod %s/%s needs to be plumb interface on network %s: %v",
 					pod.Namespace, pod.Name, bsnc.GetNetworkName(), err)
 			}
 			continue

@@ -347,14 +347,15 @@ type UnknownActiveNetworkError struct {
 	namespace string
 }
 
-func (m UnknownActiveNetworkError) Error() string {
+func (m *UnknownActiveNetworkError) Error() string {
 	return fmt.Sprintf("unable to determine what is the "+
 		"primary role network for namespace '%s'; please remove multiple primary role network"+
 		"NADs from it", m.namespace)
 }
 
 func IsUnknownActiveNetworkError(err error) bool {
-	return errors.As(err, &UnknownActiveNetworkError{})
+	var unknownActiveNetworkError *UnknownActiveNetworkError
+	return errors.As(err, &unknownActiveNetworkError)
 }
 
 // GetActiveNetworkForNamespace returns the NetInfo struct of the active network
