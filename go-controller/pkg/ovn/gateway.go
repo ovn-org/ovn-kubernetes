@@ -983,22 +983,24 @@ func (gw *GatewayManager) syncGatewayLogicalNetwork(
 		return fmt.Errorf("failed to init shared interface gateway: %v", err)
 	}
 
-	for _, subnet := range hostSubnets {
-		hostIfAddr := util.GetNodeManagementIfAddr(subnet)
-		if hostIfAddr == nil {
-			return fmt.Errorf("host interface address not found for subnet %q on network %q", subnet, gw.netInfo.GetNetworkName())
-		}
-		l3GatewayConfigIP, err := util.MatchFirstIPNetFamily(utilnet.IsIPv6(hostIfAddr.IP), l3GatewayConfig.IPAddresses)
-		if err != nil {
-			return err
-		}
-		relevantHostIPs, err := util.MatchAllIPStringFamily(utilnet.IsIPv6(hostIfAddr.IP), hostAddrs)
-		if err != nil && err != util.ErrorNoIP {
-			return err
-		}
-		pbrMngr := gatewayrouter.NewPolicyBasedRoutesManager(gw.nbClient, gw.clusterRouterName, gw.netInfo)
-		if err := pbrMngr.Add(node.Name, hostIfAddr.IP.String(), l3GatewayConfigIP, relevantHostIPs); err != nil {
-			return err
+	if gw.clusterRouterName != "" {
+		for _, subnet := range hostSubnets {
+			hostIfAddr := util.GetNodeManagementIfAddr(subnet)
+			if hostIfAddr == nil {
+				return fmt.Errorf("host interface address not found for subnet %q on network %q", subnet, gw.netInfo.GetNetworkName())
+			}
+			l3GatewayConfigIP, err := util.MatchFirstIPNetFamily(utilnet.IsIPv6(hostIfAddr.IP), l3GatewayConfig.IPAddresses)
+			if err != nil {
+				return err
+			}
+			relevantHostIPs, err := util.MatchAllIPStringFamily(utilnet.IsIPv6(hostIfAddr.IP), hostAddrs)
+			if err != nil && err != util.ErrorNoIP {
+				return err
+			}
+			pbrMngr := gatewayrouter.NewPolicyBasedRoutesManager(gw.nbClient, gw.clusterRouterName, gw.netInfo)
+			if err := pbrMngr.Add(node.Name, hostIfAddr.IP.String(), l3GatewayConfigIP, relevantHostIPs); err != nil {
+				return err
+			}
 		}
 	}
 
