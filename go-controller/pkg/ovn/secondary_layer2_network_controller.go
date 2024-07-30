@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"reflect"
+	"strings"
 	"sync"
 	"time"
 
@@ -13,7 +14,9 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/generator/udn"
+	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	zoneinterconnect "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/zone_interconnect"
@@ -459,7 +462,12 @@ func (oc *SecondaryLayer2NetworkController) addUpdateLocalNodeEvent(node *corev1
 					errs = append(errs, err)
 					oc.gatewaysFailed.Store(node.Name, true)
 				} else {
-					oc.gatewaysFailed.Delete(node.Name)
+					if err := oc.syncARPProxy(node); err != nil {
+						errs = append(errs, err)
+						oc.gatewaysFailed.Store(node.Name, true)
+					} else {
+						oc.gatewaysFailed.Delete(node.Name)
+					}
 				}
 			}
 		}
@@ -587,13 +595,6 @@ func (oc *SecondaryLayer2NetworkController) nodeGatewayConfig(node *corev1.Node)
 		return nil, fmt.Errorf("failed composing LRP addresses for layer2 network %s: %w", oc.GetNetworkName(), err)
 	}
 
-	// At layer2 GR LRP acts as the layer3 ovn_cluster_router so we need
-	// to configure here the .1 address, this will work only for IC with
-	// one node per zone, since ARPs for .1 will not go beyond local switch.
-	for _, subnet := range oc.Subnets() {
-		gwLRPIPs = append(gwLRPIPs, util.GetNodeGatewayIfAddr(subnet.CIDR))
-	}
-
 	// Overwrite the primary interface ID with the correct, per-network one.
 	l3GatewayConfig.InterfaceID = oc.GetNetworkScopedExtPortName(l3GatewayConfig.BridgeID, node.Name)
 	return &SecondaryL2GatewayConfig{
@@ -603,4 +604,38 @@ func (oc *SecondaryLayer2NetworkController) nodeGatewayConfig(node *corev1.Node)
 		hostAddrs:   hostAddrs,
 		externalIPs: externalIPs,
 	}, nil
+}
+
+func (oc *SecondaryLayer2NetworkController) syncARPProxy(node *corev1.Node) error {
+	logicalSwichPort := &nbdb.LogicalSwitchPort{
+		Name: types.JoinSwitchToGWRouterPrefix + oc.GetNetworkScopedGWRouterName(node.Name),
+	}
+	var err error
+	logicalSwichPort, err = libovsdbops.GetLogicalSwitchPort(oc.nbClient, logicalSwichPort)
+	if err != nil {
+		return err
+	}
+
+	gatewayIPs := []net.IP{}
+	for _, subnet := range oc.Subnets() {
+		gatewayIPs = append(gatewayIPs, util.GetNodeGatewayIfAddr(subnet.CIDR).IP)
+	}
+
+	// Generate the ARP proxy MAC from the first gateway IP so the mac address
+	// is the same across nodes, this will help with live migration
+	arpProxyMAC := util.IPAddrToHWAddr(gatewayIPs[0])
+	arpProxy := []string{arpProxyMAC.String()}
+	for _, gatewayIP := range gatewayIPs {
+		arpProxy = append(arpProxy, gatewayIP.String())
+	}
+
+	if logicalSwichPort.Options == nil {
+		logicalSwichPort.Options = map[string]string{}
+	}
+	logicalSwichPort.Options["arp_proxy"] = strings.Join(arpProxy, " ")
+
+	if err := libovsdbops.UpdateLogicalSwitchPortSetOptions(oc.nbClient, logicalSwichPort); err != nil {
+		return fmt.Errorf("failed configuring gateway address for layer2 network '%s' as an arp proxy option: %w", err)
+	}
+	return nil
 }
