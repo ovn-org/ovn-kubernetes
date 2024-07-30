@@ -693,7 +693,7 @@ func expectedExternalSwitchAndLSPs(netInfo util.NetInfo, gwConfig util.L3Gateway
 			Name:        netInfo.GetNetworkScopedExtPortName(gwConfig.BridgeID, nodeName),
 			Addresses:   []string{"unknown"},
 			ExternalIDs: standardNonDefaultNetworkExtIDs(netInfo),
-			Options:     map[string]string{"network_name": netInfo.GetNetworkName()},
+			Options:     map[string]string{"network_name": ovntypes.PhysicalNetworkName},
 			Type:        ovntypes.LocalnetTopology,
 		},
 		&nbdb.LogicalSwitchPort{
