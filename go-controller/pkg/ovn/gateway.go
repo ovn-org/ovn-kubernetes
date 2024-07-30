@@ -1208,9 +1208,8 @@ func (gw *GatewayManager) syncNodeGateway(
 }
 
 func physNetName(netInfo util.NetInfo) string {
-	physnetName := types.PhysicalNetworkName
-	if netInfo.IsSecondary() {
-		physnetName = netInfo.GetNetworkName()
+	if netInfo.IsDefault() || netInfo.IsPrimaryNetwork() {
+		return types.PhysicalNetworkName
 	}
-	return physnetName
+	return netInfo.GetNetworkName()
 }
