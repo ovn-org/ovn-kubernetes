@@ -471,7 +471,11 @@ func updateNodeManagementPortMACAddressesAnnotation(annotations map[string]strin
 		// in the case that the annotation does not exist
 		macAddressMap = map[string]string{}
 	}
-	macAddressMap[netName] = macAddress.String()
+	if len(macAddress.String()) != 0 {
+		macAddressMap[netName] = macAddress.String()
+	} else {
+		delete(macAddressMap, netName)
+	}
 
 	// if no networks left, just delete the network ids annotation from node annotations.
 	if len(macAddressMap) == 0 {

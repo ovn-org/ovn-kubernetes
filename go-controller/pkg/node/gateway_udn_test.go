@@ -145,6 +145,10 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		udnGateway := NewUserDefinedNetworkGateway(netInfo, 3, node, factoryMock.NodeCoreInformer().Lister(), &kubeMock)
 		Expect(err).NotTo(HaveOccurred())
 		getDeletionFakeOVSCommands(fexec, mgtPort)
+		nodeLister.On("Get", mock.AnythingOfType("string")).Return(node, nil)
+		factoryMock.On("GetNode", "worker1").Return(node, nil)
+		cnode := node.DeepCopy()
+		kubeMock.On("UpdateNodeStatus", cnode).Return(nil) // check if network key gets deleted from annotation
 		err = testNS.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
 			Expect(udnGateway.deleteUDNManagementPort()).To(Succeed())
@@ -207,6 +211,10 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		udnGateway := NewUserDefinedNetworkGateway(netInfo, 3, node, factoryMock.NodeCoreInformer().Lister(), &kubeMock)
 		Expect(err).NotTo(HaveOccurred())
 		getDeletionFakeOVSCommands(fexec, mgtPort)
+		nodeLister.On("Get", mock.AnythingOfType("string")).Return(node, nil)
+		factoryMock.On("GetNode", "worker1").Return(node, nil)
+		cnode := node.DeepCopy()
+		kubeMock.On("UpdateNodeStatus", cnode).Return(nil) // check if network key gets deleted from annotation
 		err = testNS.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
 			Expect(udnGateway.deleteUDNManagementPort()).To(Succeed())
