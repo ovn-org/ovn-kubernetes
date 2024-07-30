@@ -313,6 +313,8 @@ ovn_enable_svc_template_support=${OVN_ENABLE_SVC_TEMPLATE_SUPPORT:-true}
 ovn_enable_dnsnameresolver=${OVN_ENABLE_DNSNAMERESOLVER:-false}
 # OVN_OBSERV_ENABLE - enable observability for ovnkube
 ovn_observ_enable=${OVN_OBSERV_ENABLE:-false}
+# OVN_NOHOSTSUBNET_LABEL - node label indicating nodes managing their own network
+ovn_nohostsubnet_label=${OVN_NOHOSTSUBNET_LABEL:-""}
 
 # Determine the ovn rundir.
 if [[ -f /usr/bin/ovn-appctl ]]; then
@@ -1267,6 +1269,11 @@ ovn-master() {
     ovn_observ_enable_flag="--enable-observability"
   fi
   echo "ovn_observ_enable_flag=${ovn_observ_enable_flag}"
+  
+  nohostsubnet_label_option=
+  if [[ ${ovn_nohostsubnet_label} != "" ]]; then
+	  nohostsubnet_label_option="--no-hostsubnet-nodes=${ovn_nohostsubnet_label}"
+  fi
 
   init_node_flags=
   if [[ ${ovnkube_compact_mode_enable} == "true" ]]; then
@@ -1320,6 +1327,7 @@ ovn-master() {
     ${ovn_v6_masquerade_subnet_opt} \
     ${persistent_ips_enabled_flag} \
     ${ovn_enable_dnsnameresolver_flag} \
+    ${nohostsubnet_label_option} \
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
     --gateway-mode=${ovn_gateway_mode} ${ovn_gateway_opts} \
     --host-network-namespace ${ovn_host_network_namespace} \
