@@ -136,6 +136,8 @@ global:
   ofctrlWaitBeforeClear: ""
   # -- Separate log file for libovsdb client 
   libovsdbClientLogFile: ""
+  # -- Label for indicating that the node is managing its own network
+  noHostSubnetLabel: ""
   image:
     # -- Image repository for ovn-kubernetes components
     repository: ghcr.io/ovn-org/ovn-kubernetes/ovn-kube-ubuntu

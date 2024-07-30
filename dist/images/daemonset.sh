@@ -92,6 +92,7 @@ OVN_ENABLE_INTERCONNECT=
 OVN_ENABLE_OVNKUBE_IDENTITY="true"
 OVN_ENABLE_PERSISTENT_IPS=
 OVN_ENABLE_SVC_TEMPLATE_SUPPORT="true"
+OVN_NOHOSTSUBNET_LABEL=""
 # IN_UPGRADE is true only if called by upgrade-ovn.sh during the upgrade test,
 # it will render only the parts in ovn-setup.yaml related to RBAC permissions.
 IN_UPGRADE=
@@ -346,6 +347,9 @@ while [ "$1" != "" ]; do
   --enable-svc-template-support)
     OVN_ENABLE_SVC_TEMPLATE_SUPPORT=$VALUE
     ;;
+  --no-hostsubnet-label)
+    OVN_NOHOSTSUBNET_LABEL=$VALUE
+    ;;
   *)
     echo "WARNING: unknown parameter \"$PARAM\""
     exit 1
@@ -530,6 +534,9 @@ echo "ovn_enable_persistent_ips: ${ovn_enable_persistent_ips}"
 
 ovn_enable_svc_template_support=${OVN_ENABLE_SVC_TEMPLATE_SUPPORT}
 echo "ovn_enable_svc_template_support: ${ovn_enable_svc_template_support}"
+
+ovn_nohostsubnet_label=${OVN_NOHOSTSUBNET_LABEL}
+echo "ovn_nohostsubnet_label: ${ovn_nohostsubnet_label}"
 
 ovn_image=${ovnkube_image} \
   ovnkube_compact_mode_enable=${ovnkube_compact_mode_enable} \
@@ -716,6 +723,7 @@ ovn_image=${ovnkube_image} \
   ovn_enable_ovnkube_identity=${ovn_enable_ovnkube_identity} \
   ovn_enable_persistent_ips=${ovn_enable_persistent_ips} \
   ovn_enable_svc_template_support=${ovn_enable_svc_template_support} \
+  ovn_nohostsubnet_label=${ovn_nohostsubnet_label} \
   jinjanate ../templates/ovnkube-master.yaml.j2 -o ${output_dir}/ovnkube-master.yaml
 
 ovn_image=${ovnkube_image} \

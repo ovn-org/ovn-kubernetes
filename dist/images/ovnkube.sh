@@ -305,6 +305,8 @@ ovnkube_compact_mode_enable=${OVNKUBE_COMPACT_MODE_ENABLE:-false}
 ovn_northd_backoff_interval=${OVN_NORTHD_BACKOFF_INTERVAL:-"300"}
 # OVN_ENABLE_SVC_TEMPLATE_SUPPORT - enable svc template support
 ovn_enable_svc_template_support=${OVN_ENABLE_SVC_TEMPLATE_SUPPORT:-true}
+# OVN_NOHOSTSUBNET_LABEL - node label indicating nodes managing their own network
+ovn_nohostsubnet_label=${OVN_NOHOSTSUBNET_LABEL:-""}
 
 # Determine the ovn rundir.
 if [[ -f /usr/bin/ovn-appctl ]]; then
@@ -1247,6 +1249,11 @@ ovn-master() {
 	  ovn_enable_svc_template_support_flag="--enable-svc-template-support"
   fi
   echo "ovn_enable_svc_template_support_flag=${ovn_enable_svc_template_support_flag}"
+  
+  nohostsubnet_label_option=
+  if [[ ${ovn_nohostsubnet_label} != "" ]]; then
+	  nohostsubnet_label_option="--no-hostsubnet-nodes=${ovn_nohostsubnet_label}"
+  fi
 
   init_node_flags=
   if [[ ${ovnkube_compact_mode_enable} == "true" ]]; then
@@ -1291,6 +1298,7 @@ ovn-master() {
     ${ovn_v6_join_subnet_opt} \
     ${ovn_v6_masquerade_subnet_opt} \
     ${persistent_ips_enabled_flag} \
+    ${nohostsubnet_label_option} \
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
     --gateway-mode=${ovn_gateway_mode} ${ovn_gateway_opts} \
     --host-network-namespace ${ovn_host_network_namespace} \
