@@ -84,7 +84,7 @@ var _ = Describe("OVN Multi-Homed pod operations", func() {
 
 	table.DescribeTable(
 		"reconciles a new",
-		func(netInfo secondaryNetInfo) {
+		func(netInfo secondaryNetInfo, expectationOptions ...option) {
 			podInfo := dummyTestPod(ns, netInfo)
 			app.Action = func(ctx *cli.Context) error {
 				nad, err := newNetworkAttachmentDefinition(
@@ -149,10 +149,24 @@ var _ = Describe("OVN Multi-Homed pod operations", func() {
 				Expect(secondaryNetController.bnc.WatchNodes()).To(Succeed())
 				Expect(secondaryNetController.bnc.WatchPods()).To(Succeed())
 
-				// assert the OVN annotations on the pod are the expected ones
+				// check that after start networks annotations and nbdb will be updated
 				Eventually(func() string {
 					return getPodAnnotations(fakeOvn.fakeClient.KubeClient, podInfo.namespace, podInfo.podName)
 				}).WithTimeout(2 * time.Second).Should(MatchJSON(podInfo.getAnnotationsJson()))
+
+				defaultNetExpectations := getExpectedDataPodsAndSwitches([]testPod{podInfo}, []string{nodeName})
+				if netInfo.isPrimary {
+					defaultNetExpectations = emptyDefaultClusterNetworkNodeSwitch(podInfo.nodeName)
+				}
+				Eventually(fakeOvn.nbClient).Should(
+					libovsdbtest.HaveData(
+						append(
+							defaultNetExpectations,
+							newSecondaryNetworkExpectationMachine(
+								fakeOvn,
+								[]testPod{podInfo},
+								expectationOptions...,
+							).expectedLogicalSwitchesAndPorts()...)))
 
 				return nil
 			}
@@ -165,6 +179,7 @@ var _ = Describe("OVN Multi-Homed pod operations", func() {
 
 		table.Entry("pod on a user defined primary network",
 			dummyPrimaryUserDefinedNetwork("192.168.0.0/16"),
+			withPrimaryUDN(),
 		),
 	)
 
@@ -389,5 +404,106 @@ func dummyIPs() []*net.IPNet {
 			IP:   net.ParseIP("10.10.10.0"),
 			Mask: net.CIDRMask(24, 32),
 		},
+	}
+}
+
+func emptyDefaultClusterNetworkNodeSwitch(nodeName string) []libovsdbtest.TestData {
+	switchUUID := nodeName + "-UUID"
+	return []libovsdbtest.TestData{&nbdb.LogicalSwitch{UUID: switchUUID, Name: nodeName}}
+}
+
+func expectedGWEntities(nodeName string, networkName string) []libovsdbtest.TestData {
+	gwRouterName := fmt.Sprintf("GR_%s_%s", networkName, nodeName)
+	var staticRouteOutputPort = "rtoe-GR_isolatednet_test-node"
+	expectedEntities := []libovsdbtest.TestData{
+		&nbdb.LogicalRouter{
+			Name: gwRouterName,
+			UUID: gwRouterName + "-UUID",
+			ExternalIDs: map[string]string{
+				ovntypes.NetworkExternalID:  networkName,
+				ovntypes.TopologyExternalID: "layer3",
+				"physical_ip":               "10.89.0.14",
+				"physical_ips":              "10.89.0.14,169.254.169.13",
+			},
+			Options: map[string]string{
+				"lb_force_snat_ip":              "router_ip",
+				"snat-ct-zone":                  "0",
+				"mac_binding_age_threshold":     "300",
+				"chassis":                       "abdcef",
+				"always_learn_from_arp_request": "false",
+				"dynamic_neigh_routers":         "true",
+			},
+			Ports:        []string{"rtoj-GR_isolatednet_test-node-UUID", "rtoe-GR_isolatednet_test-node-UUID"},
+			Nat:          []string{"abc-UUID", "cba-UUID"},
+			StaticRoutes: []string{"srA-UUID", "srB-UUID", "srC-UUID"},
+		},
+		&nbdb.LogicalRouterPort{UUID: "rtoj-GR_isolatednet_test-node-UUID", Name: "rtoj-GR_isolatednet_test-node", Networks: []string{"10.10.10.0/24"}, MAC: "0a:58:0a:0a:0a:00", Options: map[string]string{"gateway_mtu": "1400"}, ExternalIDs: map[string]string{"k8s.ovn.org/topology": "layer3", "k8s.ovn.org/network": "isolatednet"}},
+		&nbdb.LogicalRouterPort{UUID: "rtoe-GR_isolatednet_test-node-UUID", Name: "rtoe-GR_isolatednet_test-node", Networks: []string{"10.89.0.14/24", "169.254.169.13/24"}, MAC: "ea:2e:6c:f2:f5:d4", ExternalIDs: map[string]string{"k8s.ovn.org/topology": "layer3", "k8s.ovn.org/network": "isolatednet"}},
+		&nbdb.NAT{UUID: "abc-UUID", ExternalIP: "169.254.169.13", LogicalIP: "10.10.10.0", Options: map[string]string{"stateless": "false"}, Type: "snat"},
+		&nbdb.NAT{UUID: "cba-UUID", ExternalIP: "169.254.169.13", LogicalIP: "192.168.0.0/16", Options: map[string]string{"stateless": "false"}, Type: "snat"},
+		expectedGRStaticRoute("srA-UUID", "192.168.0.0/16", "10.10.10.0", nil, nil),
+		expectedGRStaticRoute("srB-UUID", "0.0.0.0/0", "10.89.0.1", nil, &staticRouteOutputPort),
+		expectedGRStaticRoute("srC-UUID", "169.254.169.0/24", "169.254.169.4", nil, &staticRouteOutputPort),
+		&nbdb.GatewayChassis{UUID: "rtos-isolatednet_test-node-abdcef-UUID", Name: "rtos-isolatednet_test-node-abdcef", Priority: 1, ChassisName: "abdcef"},
+		&nbdb.LogicalSwitch{UUID: "ext-UUID", Name: "ext_isolatednet_test-node", ExternalIDs: map[string]string{"k8s.ovn.org/topology": "layer3", "k8s.ovn.org/network": "isolatednet"}, Ports: []string{"port1-UUID", "port2-UUID"}},
+		&nbdb.LogicalSwitch{UUID: "join-UUID", Name: "isolatednet_join", Ports: []string{"port3-UUID"}},
+		&nbdb.LogicalSwitchPort{UUID: "port1-UUID", Name: "breth0_isolatednet_test-node", Addresses: []string{"unknown"}, ExternalIDs: map[string]string{"k8s.ovn.org/topology": "layer3", "k8s.ovn.org/network": "isolatednet"}, Options: map[string]string{"network_name": "isolatednet"}, Type: "localnet"},
+		&nbdb.LogicalSwitchPort{UUID: "port2-UUID", Name: "etor-GR_isolatednet_test-node", Addresses: []string{"ea:2e:6c:f2:f5:d4"}, ExternalIDs: map[string]string{"k8s.ovn.org/topology": "layer3", "k8s.ovn.org/network": "isolatednet"}, Options: map[string]string{"nat-addresses": "router", "exclude-lb-vips-from-garp": "true", "router-port": "rtoe-GR_isolatednet_test-node"}, Type: "router"},
+		&nbdb.LogicalSwitchPort{UUID: "port3-UUID", Name: "jtor-GR_isolatednet_test-node", Addresses: []string{"router"}, ExternalIDs: map[string]string{"k8s.ovn.org/topology": "layer3", "k8s.ovn.org/network": "isolatednet"}, Options: map[string]string{"router-port": "rtoj-GR_isolatednet_test-node"}, Type: "router"},
+		&nbdb.StaticMACBinding{UUID: "mb1-UUID", IP: "169.254.169.4", LogicalPort: "rtoe-GR_isolatednet_test-node", MAC: "0a:58:a9:fe:a9:04", OverrideDynamicMAC: true},
+	}
+	return expectedEntities
+}
+
+func expectedLayer3EgressEntities(networkName string) []libovsdbtest.TestData {
+	clusterRouterName := fmt.Sprintf("%s_ovn_cluster_router", networkName)
+	expectedEntities := []libovsdbtest.TestData{
+		&nbdb.LogicalRouter{
+			Name:         clusterRouterName,
+			UUID:         clusterRouterName + "-UUID",
+			Ports:        []string{"rtos-isolatednet_test-node-UUID"},
+			StaticRoutes: []string{"sr1-UUID", "sr2-UUID"},
+			Policies:     []string{"lrpol1-UUID", "lrpol2-UUID"},
+		},
+		&nbdb.LogicalRouterPort{UUID: "rtos-isolatednet_test-node-UUID", Name: "rtos-isolatednet_test-node", Networks: []string{"192.168.0.1/16"}, MAC: "0a:58:c0:a8:00:01", GatewayChassis: []string{"rtos-isolatednet_test-node-abdcef-UUID"}},
+		expectedGRStaticRoute("sr1-UUID", "192.168.0.0/16", "10.10.10.0", &nbdb.LogicalRouterStaticRoutePolicySrcIP, nil),
+		expectedGRStaticRoute("sr2-UUID", "10.10.10.0", "10.10.10.0", nil, nil),
+		&nbdb.LogicalRouterPolicy{UUID: "lrpol1-UUID", Action: "reroute", ExternalIDs: map[string]string{"k8s.ovn.org/topology": "layer3", "k8s.ovn.org/network": "isolatednet"}, Match: "inport == \"rtos-isolatednet_test-node\" && ip4.dst == 10.89.0.14 /* isolatednet_test-node */", Nexthops: []string{"192.168.0.2"}, Priority: 1004},
+		&nbdb.LogicalRouterPolicy{UUID: "lrpol2-UUID", Action: "reroute", ExternalIDs: map[string]string{"k8s.ovn.org/topology": "layer3", "k8s.ovn.org/network": "isolatednet"}, Match: "inport == \"rtos-isolatednet_test-node\" && ip4.dst == 169.254.169.13 /* isolatednet_test-node */", Nexthops: []string{"192.168.0.2"}, Priority: 1004},
+	}
+	return expectedEntities
+}
+
+func expectedGRStaticRoute(uuid, ipPrefix, nextHop string, policy *nbdb.LogicalRouterStaticRoutePolicy, outputPort *string) *nbdb.LogicalRouterStaticRoute {
+	return &nbdb.LogicalRouterStaticRoute{
+		UUID:       uuid,
+		IPPrefix:   ipPrefix,
+		OutputPort: outputPort,
+		Nexthop:    nextHop,
+		Policy:     policy,
+		ExternalIDs: map[string]string{
+			"k8s.ovn.org/network":  "isolatednet",
+			"k8s.ovn.org/topology": "layer3",
+		},
+	}
+}
+
+func allowAllFromMgmtPort(aclUUID string, mgmtPortIP string) *nbdb.ACL {
+	meterName := "acl-logging"
+	return &nbdb.ACL{
+		UUID:      aclUUID,
+		Action:    "allow-related",
+		Direction: "to-lport",
+		ExternalIDs: map[string]string{
+			"k8s.ovn.org/name":             "isolatednet_test-node",
+			"ip":                           mgmtPortIP,
+			"k8s.ovn.org/id":               fmt.Sprintf("isolatednet-network-controller:NetpolNode:isolatednet_test-node:%s", mgmtPortIP),
+			"k8s.ovn.org/owner-controller": "isolatednet-network-controller",
+			"k8s.ovn.org/owner-type":       "NetpolNode",
+		},
+		Match:    fmt.Sprintf("ip4.src==%s", mgmtPortIP),
+		Meter:    &meterName,
+		Priority: 1001,
+		Tier:     2,
 	}
 }

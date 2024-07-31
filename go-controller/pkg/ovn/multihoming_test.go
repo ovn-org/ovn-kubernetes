@@ -69,9 +69,9 @@ func splitPodIPMaskLength(podIP string) (int, string) {
 type option func(machine *secondaryNetworkExpectationMachine)
 
 type secondaryNetworkExpectationMachine struct {
-	fakeOvn       *FakeOVN
-	pods          []testPod
-	gatewayConfig *util.L3GatewayConfig
+	fakeOvn      *FakeOVN
+	pods         []testPod
+	isPrimaryUDN bool
 }
 
 func newSecondaryNetworkExpectationMachine(fakeOvn *FakeOVN, pods []testPod, opts ...option) *secondaryNetworkExpectationMachine {
@@ -86,9 +86,9 @@ func newSecondaryNetworkExpectationMachine(fakeOvn *FakeOVN, pods []testPod, opt
 	return machine
 }
 
-func withGatewayConfig(config *util.L3GatewayConfig) option {
+func withPrimaryUDN() option {
 	return func(machine *secondaryNetworkExpectationMachine) {
-		machine.gatewayConfig = config
+		machine.isPrimaryUDN = true
 	}
 }
 
@@ -112,7 +112,7 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPorts() 
 					lspUUID = portInfo.portUUID
 				}
 				podAddr := fmt.Sprintf("%s %s", portInfo.podMAC, portInfo.podIP)
-				lsp := newExpectedSwitchPort(lspUUID, portName, podAddr, pod, ocInfo.bnc, nad)
+				lsp := newExpectedSwitchPort(lspUUID, portName, podAddr, pod, ocInfo, nad)
 
 				if pod.noIfaceIdVer {
 					delete(lsp.Options, "iface-id-ver")
@@ -124,10 +124,10 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPorts() 
 
 					switchToRouterPortName := "stor-" + switchName
 					switchToRouterPortUUID := switchToRouterPortName + "-UUID"
-					data = append(data, newExpectedSwitchToRouterPort(switchToRouterPortUUID, switchToRouterPortName, pod, ocInfo.bnc, nad))
+					data = append(data, newExpectedSwitchToRouterPort(switchToRouterPortUUID, switchToRouterPortName, pod, ocInfo, nad))
 					nodeslsps[switchName] = append(nodeslsps[switchName], switchToRouterPortUUID)
 
-					if em.gatewayConfig != nil {
+					if em.isPrimaryUDN {
 						mgmtPortName := "k8s-isolatednet_test-node"
 						mgmtPortUUID := mgmtPortName + "-UUID"
 						mgmtPort := &nbdb.LogicalSwitchPort{UUID: mgmtPortUUID, Name: mgmtPortName, Addresses: []string{"02:03:04:05:06:07 192.168.0.2"}}
@@ -159,8 +159,8 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPorts() 
 				OtherConfig: otherConfig,
 				ACLs:        acls[switchName],
 			})
-			if em.gatewayConfig != nil {
-				data = append(data, expectedGWEntities(pod.nodeName, ocInfo.bnc, *em.gatewayConfig)...)
+			if em.isPrimaryUDN {
+				data = append(data, expectedGWEntities(pod.nodeName, ocInfo.bnc.GetNetworkName())...)
 				data = append(data, expectedLayer3EgressEntities(ocInfo.bnc.GetNetworkName())...)
 			}
 		}
@@ -169,7 +169,7 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPorts() 
 	return data
 }
 
-func newExpectedSwitchPort(lspUUID string, portName string, podAddr string, pod testPod, netInfo util.NetInfo, nad string) *nbdb.LogicalSwitchPort {
+func newExpectedSwitchPort(lspUUID string, portName string, podAddr string, pod testPod, ocInfo secondaryControllerInfo, nad string) *nbdb.LogicalSwitchPort {
 	return &nbdb.LogicalSwitchPort{
 		UUID:      lspUUID,
 		Name:      portName,
@@ -177,9 +177,9 @@ func newExpectedSwitchPort(lspUUID string, portName string, podAddr string, pod 
 		ExternalIDs: map[string]string{
 			"pod":                       "true",
 			"namespace":                 pod.namespace,
-			ovntypes.NetworkExternalID:  netInfo.GetNetworkName(),
+			ovntypes.NetworkExternalID:  ocInfo.bnc.GetNetworkName(),
 			ovntypes.NADExternalID:      nad,
-			ovntypes.TopologyExternalID: netInfo.TopologyType(),
+			ovntypes.TopologyExternalID: ocInfo.bnc.TopologyType(),
 		},
 		Options: map[string]string{
 			"requested-chassis": pod.nodeName,
@@ -189,8 +189,8 @@ func newExpectedSwitchPort(lspUUID string, portName string, podAddr string, pod 
 	}
 }
 
-func newExpectedSwitchToRouterPort(lspUUID string, portName string, pod testPod, netInfo util.NetInfo, nad string) *nbdb.LogicalSwitchPort {
-	lrp := newExpectedSwitchPort(lspUUID, portName, "router", pod, netInfo, nad)
+func newExpectedSwitchToRouterPort(lspUUID string, portName string, pod testPod, ocInfo secondaryControllerInfo, nad string) *nbdb.LogicalSwitchPort {
+	lrp := newExpectedSwitchPort(lspUUID, portName, "router", pod, ocInfo, nad)
 	lrp.ExternalIDs = nil
 	lrp.Options = map[string]string{
 		"router-port": "rtos-isolatednet_test-node",
