@@ -34,7 +34,7 @@ func TestEnsureStaleLBs(t *testing.T) {
 	staleLBs := []LB{
 		{
 			Name:        "Service_testns/foo_TCP_node_router_node-a",
-			ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
+			ExternalIDs: loadBalancerExternalIDs(namespacedServiceName(namespace, name)),
 			Routers:     []string{"gr-node-a", "non-exisitng-router"},
 			Switches:    []string{"non-exisitng-switch"},
 			Groups:      []string{"non-existing-group"},
@@ -49,7 +49,7 @@ func TestEnsureStaleLBs(t *testing.T) {
 		},
 		{
 			Name:        "Service_testns/foo_TCP_node_is_gone",
-			ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
+			ExternalIDs: loadBalancerExternalIDs(namespacedServiceName(namespace, name)),
 			Routers:     []string{"gr-node-is-gone", "non-exisitng-router"},
 			Switches:    []string{"non-exisitng-switch"},
 			Groups:      []string{"non-existing-group"},
@@ -69,7 +69,7 @@ func TestEnsureStaleLBs(t *testing.T) {
 	LBs := []LB{
 		{
 			Name:        "Service_testns/foo_TCP_node_router_node-a",
-			ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
+			ExternalIDs: loadBalancerExternalIDs(namespacedServiceName(namespace, name)),
 			Routers:     []string{"gr-node-a"},
 			Protocol:    "TCP",
 			Rules: []LBRule{
@@ -114,7 +114,7 @@ func TestEnsureLBs(t *testing.T) {
 			LBs: []LB{
 				{
 					Name:        "Service_foo/testns_TCP_cluster",
-					ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
+					ExternalIDs: loadBalancerExternalIDs(namespacedServiceName(namespace, name)),
 					Routers:     []string{"gr-node-a"},
 					Protocol:    "TCP",
 					Rules: []LBRule{
@@ -138,7 +138,7 @@ func TestEnsureLBs(t *testing.T) {
 				Vips: map[string]string{
 					"192.168.1.1:80": "10.0.244.3:8080",
 				},
-				ExternalIDs:     serviceExternalIDs(namespacedServiceName(namespace, name)),
+				ExternalIDs:     loadBalancerExternalIDs(namespacedServiceName(namespace, name)),
 				SelectionFields: []string{"ip_src", "ip_dst"}, // permanent session affinity, no learn flows
 			},
 		},
@@ -159,7 +159,7 @@ func TestEnsureLBs(t *testing.T) {
 			LBs: []LB{
 				{
 					Name:        "Service_foo/testns_TCP_cluster",
-					ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
+					ExternalIDs: loadBalancerExternalIDs(namespacedServiceName(namespace, name)),
 					Routers:     []string{"gr-node-a"},
 					Protocol:    "TCP",
 					Rules: []LBRule{
@@ -183,7 +183,7 @@ func TestEnsureLBs(t *testing.T) {
 				Vips: map[string]string{
 					"192.168.1.1:80": "10.0.244.3:8080",
 				},
-				ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
+				ExternalIDs: loadBalancerExternalIDs(namespacedServiceName(namespace, name)),
 			},
 		},
 	}
