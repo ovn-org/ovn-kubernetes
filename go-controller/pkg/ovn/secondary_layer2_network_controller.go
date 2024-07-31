@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -462,7 +463,7 @@ func (oc *SecondaryLayer2NetworkController) addUpdateLocalNodeEvent(node *corev1
 					errs = append(errs, err)
 					oc.gatewaysFailed.Store(node.Name, true)
 				} else {
-					if err := oc.syncARPProxy(node); err != nil {
+					if err := oc.syncRouterLSPOptions(node); err != nil {
 						errs = append(errs, err)
 						oc.gatewaysFailed.Store(node.Name, true)
 					} else {
@@ -606,7 +607,7 @@ func (oc *SecondaryLayer2NetworkController) nodeGatewayConfig(node *corev1.Node)
 	}, nil
 }
 
-func (oc *SecondaryLayer2NetworkController) syncARPProxy(node *corev1.Node) error {
+func (oc *SecondaryLayer2NetworkController) syncRouterLSPOptions(node *corev1.Node) error {
 	logicalSwichPort := &nbdb.LogicalSwitchPort{
 		Name: types.JoinSwitchToGWRouterPrefix + oc.GetNetworkScopedGWRouterName(node.Name),
 	}
@@ -629,10 +630,18 @@ func (oc *SecondaryLayer2NetworkController) syncARPProxy(node *corev1.Node) erro
 		arpProxy = append(arpProxy, gatewayIP.String())
 	}
 
+	nodeID := util.GetNodeID(node)
+	if nodeID == -1 {
+		// Don't consider this node as cluster-manager has not allocated node id yet.
+		return fmt.Errorf("when preparing layer2 network '%s': failed to get node id for node - %s", oc.GetNetworkName(), node.Name)
+	}
+
 	if logicalSwichPort.Options == nil {
 		logicalSwichPort.Options = map[string]string{}
 	}
+
 	logicalSwichPort.Options["arp_proxy"] = strings.Join(arpProxy, " ")
+	logicalSwichPort.Options["requested-tnl-key"] = strconv.Itoa(nodeID)
 
 	if err := libovsdbops.UpdateLogicalSwitchPortSetOptions(oc.nbClient, logicalSwichPort); err != nil {
 		return fmt.Errorf("failed configuring gateway address for layer2 network '%s' as an arp proxy option: %w", err)
