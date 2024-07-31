@@ -40,7 +40,7 @@ spec:
       containers:
       {{- if eq (hasKey .Values.global "enableCompactMode" | ternary .Values.global.enableCompactMode false) false }}
       - name: ovnkube-node
-        image: {{ include "getImage" . }}
+        image: {{ include "getDPUImage" . }}
         imagePullPolicy: {{ default "IfNotPresent" .Values.global.image.pullPolicy }}
         {{- if eq (hasKey .Values.global "dummyGatewayBridge" | ternary .Values.global.dummyGatewayBridge false) true }}
         lifecycle:
@@ -164,7 +164,7 @@ spec:
         - name: OVN_EGRESSIP_ENABLE
           value: {{ default "" .Values.global.enableEgressIp | quote }}
         - name: OVN_EGRESSIP_HEALTHCHECK_PORT
-          value: {{ default "" .Values.global.enableEgressIp | quote }}
+          value: {{ default "" .Values.global.egressIpHealthCheckPort | quote }}
         - name: OVN_EGRESSSERVICE_ENABLE
           value: {{ default "" .Values.global.enableEgressService | quote }}
         - name: OVN_HYBRID_OVERLAY_NET_CIDR
@@ -229,8 +229,6 @@ spec:
           value: {{ hasKey .Values.global "enableMultiExternalGateway" | ternary .Values.global.enableMultiExternalGateway false | quote }}
         - name: OVNKUBE_NODE_MODE
           value: "dpu"
-        - name: OVNKUBE_NODE_MGMT_PORT_NETDEV
-          value: {{ default "" .Values.global.nodeMgmtPortNetdev | quote }}
         - name: OVN_HOST_NETWORK_NAMESPACE
           valueFrom:
             configMapKeyRef:
@@ -248,6 +246,91 @@ spec:
           timeoutSeconds: 30
           periodSeconds: 60
       {{- end }}
+      - name: ovn-controller
+        image: {{ include "getDPUImage" . }}
+        imagePullPolicy: {{ default "IfNotPresent" .Values.global.image.pullPolicy }}
+        command: ["/root/ovnkube.sh", "ovn-controller"]
+        securityContext:
+          runAsUser: 0
+          capabilities:
+            add: ["SYS_NICE"]
+        terminationMessagePolicy: FallbackToLogsOnError
+        volumeMounts:
+        - mountPath: /var/run/dbus/
+          name: host-var-run-dbus
+          readOnly: true
+        - mountPath: /var/log/openvswitch/
+          name: host-var-log-ovs
+        - mountPath: /var/log/ovn/
+          name: host-var-log-ovs
+        - mountPath: /var/run/openvswitch/
+          name: host-var-run-ovs
+        - mountPath: /var/run/ovn/
+          name: host-var-run-ovs
+        - mountPath: /ovn-cert
+          name: host-ovn-cert
+          readOnly: true
+        resources:
+          requests:
+            cpu: 100m
+            memory: 300Mi
+        env:
+        - name: OVN_DAEMONSET_VERSION
+          value: "1.0.0"
+        - name: OVN_LOGLEVEL_CONTROLLER
+          value: {{ default "-vconsole:info" .Values.ovnControllerLogLevel | quote }}
+        - name: K8S_APISERVER
+          valueFrom:
+            configMapKeyRef:
+              name: ovn-config
+              key: k8s_apiserver
+        - name: K8S_NODE
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: OVN_KUBERNETES_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: OVN_SSL_ENABLE
+          value: {{ include "isSslEnabled" . | quote }}
+        readinessProbe:
+          exec:
+            command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovn-controller"]
+          initialDelaySeconds: 30
+          timeoutSeconds: 30
+          periodSeconds: 60
+        # ovs-metrics-exporter - v3
+      - name: ovs-metrics-exporter
+        image: {{ include "getDPUImage" . }}
+        imagePullPolicy: {{ default "IfNotPresent" .Values.global.image.pullPolicy }}
+        command: ["/root/ovnkube.sh", "ovs-metrics"]
+        securityContext:
+          runAsUser: 0
+          capabilities:
+            add: ["NET_ADMIN"]
+        terminationMessagePolicy: FallbackToLogsOnError
+        volumeMounts:
+        - mountPath: /var/run/dbus/
+          name: host-var-run-dbus
+          readOnly: true
+        - mountPath: /var/log/openvswitch/
+          name: host-var-log-ovs
+        - mountPath: /var/run/openvswitch/
+          name: host-var-run-ovs
+          readOnly: true
+        resources:
+          requests:
+            cpu: 100m
+            memory: 300Mi
+        env:
+        - name: OVN_DAEMONSET_VERSION
+          value: "1.0.0"
+        - name: K8S_NODE_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.hostIP
+        # end of container
       nodeSelector:
         kubernetes.io/os: "linux"
         k8s.ovn.org/dpu: ""
