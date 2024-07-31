@@ -257,7 +257,10 @@ func newTPod(nodeName, nodeSubnet, nodeMgtIP, nodeGWIP, podName, podIPs, podMAC,
 		routeSources = append(routeSources, ovntest.MustParseIPNet(joinNet))
 	}
 
-	gwIPs := strings.Split(nodeGWIP, " ")
+	var gwIPs []string
+	if nodeGWIP != "" {
+		gwIPs = strings.Split(nodeGWIP, " ")
+	}
 	var gwIPv4, gwIPv6 *net.IP
 	for _, gwIP := range gwIPs {
 		gwNetIP := ovntest.MustParseIP(gwIP)
@@ -273,6 +276,9 @@ func newTPod(nodeName, nodeSubnet, nodeMgtIP, nodeGWIP, podName, podIPs, podMAC,
 		gwIP := gwIPv4
 		if isIPv6 {
 			gwIP = gwIPv6
+		}
+		if gwIP == nil {
+			continue
 		}
 		to.routes = append(to.routes, util.PodRoute{rs, *gwIP})
 	}
@@ -320,7 +326,10 @@ func (p testPod) getAnnotationsJson() string {
 		address = addresses[0]
 	}
 
-	nodeGWIPs := strings.Split(p.nodeGWIP, " ")
+	var nodeGWIPs []string
+	if p.nodeGWIP != "" {
+		nodeGWIPs = strings.Split(p.nodeGWIP, " ")
+	}
 	var nodeGWIP string
 	if len(nodeGWIPs) == 1 {
 		nodeGWIP = nodeGWIPs[0]
