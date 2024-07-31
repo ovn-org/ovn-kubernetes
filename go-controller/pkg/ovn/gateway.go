@@ -631,7 +631,7 @@ func (gw *GatewayManager) GatewayInit(
 		if err != nil {
 			return fmt.Errorf("failed to parse full CIDR mask for join subnet IP: %s", gwLRPIP)
 		}
-		nat := libovsdbops.BuildSNAT(&externalIP[0], joinIPNet, "", extIDs)
+		nat := libovsdbops.BuildSNATWithMatch(&externalIP[0], joinIPNet, "", extIDs, "outport == "+types.GWRouterToExtSwitchPrefix+gatewayRouter)
 		joinNATs = append(joinNATs, nat)
 	}
 	err = libovsdbops.CreateOrUpdateNATs(gw.nbClient, &logicalRouter, joinNATs...)
@@ -650,7 +650,7 @@ func (gw *GatewayManager) GatewayInit(
 				return fmt.Errorf("failed to create default SNAT rules for gateway router %s: %v",
 					gatewayRouter, err)
 			}
-			nat = libovsdbops.BuildSNAT(&externalIP[0], entry, "", nil)
+			nat = libovsdbops.BuildSNATWithMatch(&externalIP[0], entry, "", nil, "outport == "+types.GWRouterToExtSwitchPrefix+gatewayRouter)
 			nats = append(nats, nat)
 		}
 		err := libovsdbops.CreateOrUpdateNATs(gw.nbClient, &logicalRouter, nats...)
@@ -660,7 +660,7 @@ func (gw *GatewayManager) GatewayInit(
 	} else {
 		// ensure we do not have any leftover SNAT entries after an upgrade
 		for _, logicalSubnet := range clusterIPSubnet {
-			nat = libovsdbops.BuildSNAT(nil, logicalSubnet, "", nil)
+			nat = libovsdbops.BuildSNATWithMatch(nil, logicalSubnet, "", nil, "outport == "+types.GWRouterToExtSwitchPrefix+gatewayRouter)
 			nats = append(nats, nat)
 		}
 		err := libovsdbops.DeleteNATs(gw.nbClient, &logicalRouter, nats...)
