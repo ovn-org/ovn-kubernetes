@@ -33,7 +33,6 @@ Should validate conntrack entry deletion for TCP/UDP traffic via multiple extern
 Should validate flow data of br-int is sent to an external gateway with netflow v5|\
 can retrieve multicast IGMP query|\
 test node readiness according to its defaults interface MTU size|\
-egress IP validation|\
 Pod to pod TCP with low MTU|\
 queries to the hostNetworked server pod on another node shall work for TCP|\
 queries to the hostNetworked server pod on another node shall work for UDP|\
