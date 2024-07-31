@@ -99,7 +99,7 @@ var _ = Describe("NetAttachDefTemplate", func() {
 						"topology": "layer2",
 						"role": "primary",
 						"mtu": 1500,
-						"subnets": "192.168.100.0/24,2001:DBB::/64",
+        				"subnets": "192.168.100.0/24/0,2001:dbb::/64/0",
 						"excludeSubnets": "192.168.100.0/26",
 						"joinSubnets": "100.61.0.0/24,fd90::/64",
  						"allowPersistentIPs": true
@@ -134,7 +134,7 @@ var _ = Describe("NetAttachDefTemplate", func() {
 			"netAttachDefName":"mynamespace/test-net",
 			"topology":"layer2",
             "role":"primary",
-			"subnets":"192.168.100.0/24",
+			"subnets":"192.168.100.0/24/0",
 			"joinSubnets":"100.65.0.0/16,fd99::/64"
 		}`
 		Expect(nad.Spec.Config).To(MatchJSON(expectedCNIConf))
