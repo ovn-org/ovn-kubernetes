@@ -207,11 +207,12 @@ type secondaryPodInfo struct {
 }
 
 type portInfo struct {
-	portUUID string
-	podIP    string
-	podMAC   string
-	portName string
-	tunnelID int
+	portUUID  string
+	podIP     string
+	podMAC    string
+	portName  string
+	tunnelID  int
+	prefixLen int
 }
 
 func newTPod(nodeName, nodeSubnet, nodeMgtIP, nodeGWIP, podName, podIPs, podMAC, namespace string) testPod {
@@ -354,6 +355,9 @@ func (p testPod) getAnnotationsJson() string {
 			ipPrefix := 24
 			if ovntest.MustParseIP(p.podIP).To4() == nil {
 				ipPrefix = 64
+			}
+			if portInfo.prefixLen != 0 {
+				ipPrefix = portInfo.prefixLen
 			}
 			ip := fmt.Sprintf("%s/%d", portInfo.podIP, ipPrefix)
 			podAnnotation := podAnnotation{
