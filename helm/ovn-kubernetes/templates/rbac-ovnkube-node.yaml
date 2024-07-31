@@ -175,6 +175,7 @@ rules:
           - egressqoses
           - egressservices
           - adminpolicybasedexternalroutes
+          - networkqoses
       verbs: [ "get", "list", "watch" ]
     {{- if eq (hasKey .Values.global "enableOvnKubeIdentity" | ternary .Values.global.enableOvnKubeIdentity true) true }}
     - apiGroups: ["certificates.k8s.io"]

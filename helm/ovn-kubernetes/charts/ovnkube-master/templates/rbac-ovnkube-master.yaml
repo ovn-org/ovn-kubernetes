@@ -83,6 +83,7 @@ rules:
           - egressqoses
           - egressservices
           - adminpolicybasedexternalroutes
+          - networkqoses
       verbs: [ "get", "list", "watch" ]
     - apiGroups: ["k8s.cni.cncf.io"]
       resources:
@@ -99,9 +100,11 @@ rules:
           - egressfirewalls/status
           - egressips
           - egressqoses
+          - networkqoses
           - egressservices/status
           - adminpolicybasedexternalroutes/status
           - egressqoses/status
+          - networkqoses/status
       verbs: [ "patch", "update" ]
     - apiGroups: [""]
       resources:

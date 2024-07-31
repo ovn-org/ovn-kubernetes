@@ -209,6 +209,8 @@ spec:
           value: "{{ ovn_ex_gw_networking_interface }}"
         - name: OVN_ENABLE_OVNKUBE_IDENTITY
           value: "{{ ovn_enable_ovnkube_identity }}"
+        - name: OVN_NETWORK_QOS_ENABLE
+          value: "{{ ovn_network_qos_enable }}"
         {% if ovnkube_app_name!="ovnkube-node-dpu-host" -%}
         - name: OVN_SSL_ENABLE
           value: "{{ ovn_ssl_en }}"

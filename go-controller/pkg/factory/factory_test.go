@@ -45,6 +45,9 @@ import (
 	ocpconfigapi "github.com/openshift/api/config/v1"
 	ocpcloudnetworkclientsetfake "github.com/openshift/client-go/cloudnetwork/clientset/versioned/fake"
 
+	networkqos "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1"
+	networkqosfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1/apis/clientset/versioned/fake"
+
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 )
@@ -228,6 +231,34 @@ func newIPAMClaim(name string) *ipamclaimsapi.IPAMClaim {
 	}
 }
 
+func newNetworkQoS(name, namespace string) *networkqos.NetworkQoS {
+	return &networkqos.NetworkQoS{
+		ObjectMeta: newObjectMeta(name, namespace),
+		Spec: networkqos.Spec{
+			NetworkAttachmentName: "default/stream",
+			Egress: []networkqos.Rule{
+				{
+					Priority: 100,
+					DSCP:     50,
+					Classifier: networkqos.Classifier{
+						To: []networkqos.Destination{
+							{
+								IPBlock: &knet.IPBlock{
+									CIDR: "1.2.3.4/32",
+								},
+							},
+						},
+					},
+					Bandwidth: networkqos.Bandwidth{
+						Rate:  20000,
+						Burst: 10,
+					},
+				},
+			},
+		},
+	}
+}
+
 func objSetup(c *fake.Clientset, objType string, listFn func(core.Action) (bool, runtime.Object, error)) *watch.FakeWatcher {
 	w := watch.NewFake()
 	c.AddWatchReactor(objType, core.DefaultWatchReactor(w, nil))
@@ -284,6 +315,13 @@ func ipamClaimsObjSetup(c *ipamclaimsapifake.Clientset, objType string, listFn f
 	return w
 }
 
+func networkQoSObjSetup(c *networkqosfake.Clientset, objType string, listFn func(core.Action) (bool, runtime.Object, error)) *watch.FakeWatcher {
+	w := watch.NewFake()
+	c.AddWatchReactor(objType, core.DefaultWatchReactor(w, nil))
+	c.AddReactor("list", objType, listFn)
+	return w
+}
+
 type handlerCalls struct {
 	added   int32
 	updated int32
@@ -315,6 +353,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		adminNetworkPolicyFakeClient        *anpapifake.Clientset
 		ipamClaimsFakeClient                *ipamclaimsapifake.Clientset
 		nadsFakeClient                      *nadsfake.Clientset
+		networkQoSFakeClient                *networkqosfake.Clientset
 		podWatch, namespaceWatch, nodeWatch *watch.FakeWatcher
 		policyWatch, serviceWatch           *watch.FakeWatcher
 		endpointSliceWatch                  *watch.FakeWatcher
@@ -326,6 +365,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		adminNetPolWatch                    *watch.FakeWatcher
 		baselineAdminNetPolWatch            *watch.FakeWatcher
 		ipamClaimsWatch                     *watch.FakeWatcher
+		networkQoSWatch                     *watch.FakeWatcher
 		pods                                []*v1.Pod
 		namespaces                          []*v1.Namespace
 		nodes                               []*v1.Node
@@ -341,6 +381,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		adminNetworkPolicies                []*anpapi.AdminNetworkPolicy
 		baselineAdminNetworkPolicies        []*anpapi.BaselineAdminNetworkPolicy
 		ipamClaims                          []*ipamclaimsapi.IPAMClaim
+		networkQoSes                        []*networkqos.NetworkQoS
 		err                                 error
 		shutdown                            bool
 	)
@@ -360,6 +401,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		config.OVNKubernetesFeature.EnableAdminNetworkPolicy = true
 		config.OVNKubernetesFeature.EnableMultiNetwork = true
 		config.OVNKubernetesFeature.EnablePersistentIPs = true
+		config.OVNKubernetesFeature.EnableNetworkQoS = true
 		config.Kubernetes.PlatformType = string(ocpconfigapi.AWSPlatformType)
 
 		fakeClient = &fake.Clientset{}
@@ -371,6 +413,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		adminNetworkPolicyFakeClient = &anpapifake.Clientset{}
 		ipamClaimsFakeClient = &ipamclaimsapifake.Clientset{}
 		nadsFakeClient = &nadsfake.Clientset{}
+		networkQoSFakeClient = &networkqosfake.Clientset{}
 
 		ovnClientset = &util.OVNMasterClientset{
 			KubeClient:            fakeClient,
@@ -382,6 +425,7 @@ var _ = Describe("Watch Factory Operations", func() {
 			EgressServiceClient:   egressServiceFakeClient,
 			IPAMClaimsClient:      ipamClaimsFakeClient,
 			NetworkAttchDefClient: nadsFakeClient,
+			NetworkQoSClient:      networkQoSFakeClient,
 		}
 		ovnCMClientset = &util.OVNClusterManagerClientset{
 			KubeClient:            fakeClient,
@@ -518,6 +562,16 @@ var _ = Describe("Watch Factory Operations", func() {
 			}
 			return true, obj, nil
 		})
+
+		networkQoSes = make([]*networkqos.NetworkQoS, 0)
+		networkQoSWatch = networkQoSObjSetup(networkQoSFakeClient, "networkqoses", func(core.Action) (bool, runtime.Object, error) {
+			obj := &networkqos.NetworkQoSList{}
+			for _, p := range networkQoSes {
+				obj.Items = append(obj.Items, *p)
+			}
+			return true, obj, nil
+		})
+
 		shutdown = false
 	})
 
@@ -678,6 +732,10 @@ var _ = Describe("Watch Factory Operations", func() {
 			ipamClaims = append(ipamClaims, newIPAMClaim("claim!"))
 			testExisting(IPAMClaimsType, "", nil, defaultHandlerPriority)
 		})
+		It("is called for each existing networkQoS", func() {
+			networkQoSes = append(networkQoSes, newNetworkQoS("myNetworkQoS", "default"))
+			testExisting(NetworkQoSType, "", nil, defaultHandlerPriority)
+		})
 
 		It("is called for each existing pod that matches a given namespace and label", func() {
 			pod := newPod("pod1", "default")
@@ -792,6 +850,12 @@ var _ = Describe("Watch Factory Operations", func() {
 			baselineAdminNetworkPolicies = append(baselineAdminNetworkPolicies, newBaselineAdminNetworkPolicy("myBANP2"))
 			testExisting(BaselineAdminNetworkPolicyType)
 		})
+		It("calls ADD for each existing networkQoS", func() {
+			networkQoSes = append(networkQoSes, newNetworkQoS("myNetworkQoS", "default"))
+			networkQoSes = append(networkQoSes, newNetworkQoS("myNetworkQoS1", "default"))
+			testExisting(NetworkQoSType)
+		})
+
 		It("doesn't deadlock when factory is shutdown", func() {
 			// every queue has length 10, but some events may be handled before the stop channel event is selected,
 			// so multiply by 15 instead of 10 to ensure overflow
@@ -896,6 +960,20 @@ var _ = Describe("Watch Factory Operations", func() {
 		It("does not contain IPAMClaims informer", func() {
 			config.OVNKubernetesFeature.EnablePersistentIPs = false
 			testExisting(IPAMClaimsType)
+		})
+	})
+
+	Context("when NetworkQoS is disabled", func() {
+		testExisting := func(objType reflect.Type) {
+			wf, err = NewMasterWatchFactory(ovnClientset)
+			Expect(err).NotTo(HaveOccurred())
+			err = wf.Start()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(wf.informers).NotTo(HaveKey(objType))
+		}
+		It("does not contain NetworkQoS informer", func() {
+			config.OVNKubernetesFeature.EnableNetworkQoS = false
+			testExisting(NetworkQoSType)
 		})
 	})
 
@@ -2067,6 +2145,43 @@ var _ = Describe("Watch Factory Operations", func() {
 
 		wf.RemoveIPAMClaimsHandler(h)
 	})
+
+	It("responds to networkQoS add/update/delete events", func() {
+		wf, err = NewMasterWatchFactory(ovnClientset)
+		Expect(err).NotTo(HaveOccurred())
+		err = wf.Start()
+		Expect(err).NotTo(HaveOccurred())
+
+		added := newNetworkQoS("myNetworkQoS", "default")
+		h, c := addHandler(wf, NetworkQoSType, cache.ResourceEventHandlerFuncs{
+			AddFunc: func(obj interface{}) {
+				networkQoS := obj.(*networkqos.NetworkQoS)
+				Expect(reflect.DeepEqual(networkQoS, added)).To(BeTrue())
+			},
+			UpdateFunc: func(old, new interface{}) {
+				newNetworkQoS := new.(*networkqos.NetworkQoS)
+				Expect(reflect.DeepEqual(newNetworkQoS, added)).To(BeTrue())
+				Expect(newNetworkQoS.Spec.Egress[0].DSCP).To(Equal(42))
+			},
+			DeleteFunc: func(obj interface{}) {
+				networkQoS := obj.(*networkqos.NetworkQoS)
+				Expect(reflect.DeepEqual(networkQoS, added)).To(BeTrue())
+			},
+		})
+
+		networkQoSes = append(networkQoSes, added)
+		networkQoSWatch.Add(added)
+		Eventually(c.getAdded, 2).Should(Equal(1))
+		added.Spec.Egress[0].DSCP = 42
+		networkQoSWatch.Modify(added)
+		Eventually(c.getUpdated, 2).Should(Equal(1))
+		networkQoSes = networkQoSes[:0]
+		networkQoSWatch.Delete(added)
+		Eventually(c.getDeleted, 2).Should(Equal(1))
+
+		wf.RemoveNetworkQoSHandler(h)
+	})
+
 	It("stops processing events after the handler is removed", func() {
 		wf, err = NewMasterWatchFactory(ovnClientset)
 		Expect(err).NotTo(HaveOccurred())

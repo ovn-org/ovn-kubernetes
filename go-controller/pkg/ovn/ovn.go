@@ -19,6 +19,7 @@ import (
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	anpcontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/admin_network_policy"
 	egresssvc_zone "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/egressservice"
+	nqoscontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/network_qos"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -488,6 +489,24 @@ func (oc *DefaultNetworkController) newANPController() error {
 		oc.kube.ANPClient,
 		oc.watchFactory.ANPInformer(),
 		oc.watchFactory.BANPInformer(),
+		oc.watchFactory.NamespaceCoreInformer(),
+		oc.watchFactory.PodCoreInformer(),
+		oc.watchFactory.NodeCoreInformer(),
+		oc.addressSetFactory,
+		oc.isPodScheduledinLocalZone,
+		oc.zone,
+		oc.recorder,
+	)
+	return err
+}
+
+func (oc *DefaultNetworkController) newNetworkQoSController() error {
+	var err error
+	oc.nqosController, err = nqoscontroller.NewController(
+		DefaultNetworkControllerName,
+		oc.nbClient,
+		oc.kube.NetworkQoSClient,
+		oc.watchFactory.NetworkQoSInformer(),
 		oc.watchFactory.NamespaceCoreInformer(),
 		oc.watchFactory.PodCoreInformer(),
 		oc.watchFactory.NodeCoreInformer(),

@@ -20,6 +20,7 @@ import (
 
 	cloudprivateipconfiglister "github.com/openshift/client-go/cloudnetwork/listers/cloudnetwork/v1"
 	egressiplister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/listers/egressip/v1"
+	networkqoslister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1/apis/listers/networkqos/v1"
 	anplister "sigs.k8s.io/network-policy-api/pkg/client/listers/apis/v1alpha1"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -531,6 +532,8 @@ func newInformerLister(oType reflect.Type, sharedInformer cache.SharedIndexInfor
 		return egressservicelister.NewEgressServiceLister(sharedInformer.GetIndexer()), nil
 	case IPAMClaimsType:
 		return ipamclaimslister.NewIPAMClaimLister(sharedInformer.GetIndexer()), nil
+	case NetworkQoSType:
+		return networkqoslister.NewNetworkQoSLister(sharedInformer.GetIndexer()), nil
 	}
 
 	return nil, fmt.Errorf("cannot create lister from type %v", oType)

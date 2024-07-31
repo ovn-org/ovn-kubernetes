@@ -162,6 +162,7 @@ rules:
           - egressfirewalls/status
           - adminpolicybasedexternalroutes/status
           - egressqoses/status
+          - networkqoses/status
       verbs: [ "patch", "update" ]
     - apiGroups: ["policy.networking.k8s.io"]
       resources:
@@ -181,6 +182,7 @@ rules:
           - egressqoses
           - egressservices
           - adminpolicybasedexternalroutes
+          - networkqoses
       verbs: [ "get", "list", "watch" ]
     {% if ovn_enable_ovnkube_identity == "true" -%}
     - apiGroups: ["certificates.k8s.io"]

@@ -19,11 +19,13 @@ import (
 	adminpolicybasedrouteapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1"
 	egressfirewallapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	egressqosapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1"
+	networkqosapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	v1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -199,6 +201,66 @@ func checkEmptyEQStatusConsistently(egressQoS *egressqosapi.EgressQoS, fakeClien
 	Consistently(func() bool {
 		ef, err := fakeClient.EgressQoSClient.K8sV1().EgressQoSes(egressQoS.Namespace).
 			Get(context.TODO(), egressQoS.Name, metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		return ef.Status.Status == ""
+	}).Should(BeTrue(), "expected Status to be consistently empty")
+}
+
+func newNetworkQoS(namespace string) *networkqosapi.NetworkQoS {
+	return &networkqosapi.NetworkQoS{
+		ObjectMeta: util.NewObjectMeta("default", namespace),
+		Spec: networkqosapi.Spec{
+			NetworkAttachmentName: "default/stream",
+			Egress: []networkqosapi.Rule{
+				{
+					Priority: 100,
+					DSCP:     60,
+					Classifier: networkqosapi.Classifier{
+						To: []networkqosapi.Destination{
+							{
+								IPBlock: &networkingv1.IPBlock{
+									CIDR: "1.2.3.4/32",
+								},
+							},
+						},
+					},
+					Bandwidth: networkqosapi.Bandwidth{
+						Rate:  100,
+						Burst: 1000,
+					},
+				},
+			},
+		},
+	}
+}
+
+func updateNetworkQoSStatus(networkQoS *networkqosapi.NetworkQoS, status *networkqosapi.Status,
+	fakeClient *util.OVNClusterManagerClientset) {
+	networkQoS.Status = *status
+	_, err := fakeClient.NetworkQoSClient.K8sV1().NetworkQoSes(networkQoS.Namespace).
+		Update(context.TODO(), networkQoS, metav1.UpdateOptions{})
+	Expect(err).ToNot(HaveOccurred())
+}
+
+func checkNQStatusEventually(networkQoS *networkqosapi.NetworkQoS, expectFailure bool, expectEmpty bool, fakeClient *util.OVNClusterManagerClientset) {
+	Eventually(func() bool {
+		eq, err := fakeClient.NetworkQoSClient.K8sV1().NetworkQoSes(networkQoS.Namespace).
+			Get(context.TODO(), networkQoS.Name, metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		if expectFailure {
+			return strings.Contains(eq.Status.Status, types.NetworkQoSErrorMsg)
+		} else if expectEmpty {
+			return eq.Status.Status == ""
+		} else {
+			return strings.Contains(eq.Status.Status, "applied")
+		}
+	}).Should(BeTrue(), fmt.Sprintf("expected network QoS status with expectFailure=%v expectEmpty=%v", expectFailure, expectEmpty))
+}
+
+func checkEmptyNQStatusConsistently(networkQoS *networkqosapi.NetworkQoS, fakeClient *util.OVNClusterManagerClientset) {
+	Consistently(func() bool {
+		ef, err := fakeClient.NetworkQoSClient.K8sV1().NetworkQoSes(networkQoS.Namespace).
+			Get(context.TODO(), networkQoS.Name, metav1.GetOptions{})
 		Expect(err).NotTo(HaveOccurred())
 		return ef.Status.Status == ""
 	}).Should(BeTrue(), "expected Status to be consistently empty")
@@ -506,4 +568,96 @@ var _ = Describe("Cluster Manager Status Manager", func() {
 			return atomic.LoadUint32(&banpWerePatched)
 		}).Should(gomega.Equal(uint32(2)))
 	})
+
+	It("updates NetworkQoS status with 1 zone", func() {
+		config.OVNKubernetesFeature.EnableNetworkQoS = true
+		zones := sets.New[string]("zone1")
+		namespace1 := util.NewNamespace(namespace1Name)
+		networkQoS := newNetworkQoS(namespace1.Name)
+		start(zones, namespace1, networkQoS)
+		updateNetworkQoSStatus(networkQoS, &networkqosapi.Status{
+			Conditions: []metav1.Condition{{
+				Type:    "Ready-In-Zone-zone1",
+				Status:  metav1.ConditionTrue,
+				Reason:  "SetupSucceeded",
+				Message: "NetworkQoS Destinations applied",
+			}},
+		}, fakeClient)
+
+		checkNQStatusEventually(networkQoS, false, false, fakeClient)
+	})
+
+	It("updates NetworkQoS status with 2 zones", func() {
+		config.OVNKubernetesFeature.EnableNetworkQoS = true
+		zones := sets.New[string]("zone1", "zone2")
+		namespace1 := util.NewNamespace(namespace1Name)
+		networkQoS := newNetworkQoS(namespace1.Name)
+		start(zones, namespace1, networkQoS)
+
+		updateNetworkQoSStatus(networkQoS, &networkqosapi.Status{
+			Conditions: []metav1.Condition{{
+				Type:    "Ready-In-Zone-zone1",
+				Status:  metav1.ConditionTrue,
+				Reason:  "SetupSucceeded",
+				Message: "NetworkQoS Destinations applied",
+			}},
+		}, fakeClient)
+
+		checkEmptyNQStatusConsistently(networkQoS, fakeClient)
+
+		updateNetworkQoSStatus(networkQoS, &networkqosapi.Status{
+			Conditions: []metav1.Condition{{
+				Type:    "Ready-In-Zone-zone1",
+				Status:  metav1.ConditionTrue,
+				Reason:  "SetupSucceeded",
+				Message: "NetworkQoS Destinations applied",
+			}, {
+				Type:    "Ready-In-Zone-zone2",
+				Status:  metav1.ConditionTrue,
+				Reason:  "SetupSucceeded",
+				Message: "NetworkQoS Destinations applied",
+			}},
+		}, fakeClient)
+		checkNQStatusEventually(networkQoS, false, false, fakeClient)
+
+	})
+
+	It("updates NetworkQoS status with UnknownZone", func() {
+		config.OVNKubernetesFeature.EnableNetworkQoS = true
+		zones := sets.New[string]("zone1", zone_tracker.UnknownZone)
+		namespace1 := util.NewNamespace(namespace1Name)
+		networkQoS := newNetworkQoS(namespace1.Name)
+		start(zones, namespace1, networkQoS)
+
+		// no matter how many messages are in the status, it won't be updated while UnknownZone is present
+		updateNetworkQoSStatus(networkQoS, &networkqosapi.Status{
+			Conditions: []metav1.Condition{{
+				Type:    "Ready-In-Zone-zone1",
+				Status:  metav1.ConditionTrue,
+				Reason:  "SetupSucceeded",
+				Message: "NetworkQoS Destinations applied",
+			}},
+		}, fakeClient)
+		checkEmptyNQStatusConsistently(networkQoS, fakeClient)
+
+		// when UnknownZone is removed, updates will be handled, but status from the new zone is not reported yet
+		statusManager.onZoneUpdate(sets.New[string]("zone1", "zone2"))
+		checkEmptyNQStatusConsistently(networkQoS, fakeClient)
+		// when new zone status is reported, status will be set
+		updateNetworkQoSStatus(networkQoS, &networkqosapi.Status{
+			Conditions: []metav1.Condition{{
+				Type:    "Ready-In-Zone-zone1",
+				Status:  metav1.ConditionTrue,
+				Reason:  "SetupSucceeded",
+				Message: "NetworkQoS Destinations applied",
+			}, {
+				Type:    "Ready-In-Zone-zone2",
+				Status:  metav1.ConditionTrue,
+				Reason:  "SetupSucceeded",
+				Message: "NetworkQoS Destinations applied",
+			}},
+		}, fakeClient)
+		checkNQStatusEventually(networkQoS, false, false, fakeClient)
+	})
+
 })

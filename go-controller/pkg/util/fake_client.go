@@ -19,6 +19,8 @@ import (
 	egressqosfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/clientset/versioned/fake"
 	egressservice "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1"
 	egressservicefake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/clientset/versioned/fake"
+	networkqos "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1"
+	networkqosfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1/apis/clientset/versioned/fake"
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -37,6 +39,7 @@ func GetOVNClientset(objects ...runtime.Object) *OVNClientset {
 	egressServiceObjects := []runtime.Object{}
 	apbExternalRouteObjects := []runtime.Object{}
 	anpObjects := []runtime.Object{}
+	networkQoSObjects := []runtime.Object{}
 	v1Objects := []runtime.Object{}
 	nads := []runtime.Object{}
 	cloudObjects := []runtime.Object{}
@@ -63,6 +66,8 @@ func GetOVNClientset(objects ...runtime.Object) *OVNClientset {
 			anpObjects = append(anpObjects, object)
 		case *ocpnetworkapiv1alpha1.DNSNameResolver:
 			dnsNameResolverObjects = append(dnsNameResolverObjects, object)
+		case *networkqos.NetworkQoS:
+			networkQoSObjects = append(networkQoSObjects, object)
 		default:
 			v1Objects = append(v1Objects, object)
 		}
@@ -79,6 +84,7 @@ func GetOVNClientset(objects ...runtime.Object) *OVNClientset {
 		EgressServiceClient:      egressservicefake.NewSimpleClientset(egressServiceObjects...),
 		AdminPolicyRouteClient:   adminpolicybasedroutefake.NewSimpleClientset(apbExternalRouteObjects...),
 		OCPNetworkClient:         ocpnetworkclientfake.NewSimpleClientset(dnsNameResolverObjects...),
+		NetworkQoSClient:         networkqosfake.NewSimpleClientset(networkQoSObjects...),
 	}
 }
 
