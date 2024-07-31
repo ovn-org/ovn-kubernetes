@@ -34,9 +34,9 @@ func TestEnsureStaleLBs(t *testing.T) {
 	staleLBs := []LB{
 		{
 			Name:        "Service_testns/foo_TCP_node_router_node-a",
-			ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
-			Routers:     []string{"gr-node-a", "non-exisitng-router"},
-			Switches:    []string{"non-exisitng-switch"},
+			ExternalIDs: loadBalancerExternalIDs(namespacedServiceName(namespace, name)),
+			Routers:     []string{"gr-node-a", "non-existing-router"},
+			Switches:    []string{"non-existing-switch"},
 			Groups:      []string{"non-existing-group"},
 			Protocol:    "TCP",
 			Rules: []LBRule{
@@ -49,9 +49,9 @@ func TestEnsureStaleLBs(t *testing.T) {
 		},
 		{
 			Name:        "Service_testns/foo_TCP_node_is_gone",
-			ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
-			Routers:     []string{"gr-node-is-gone", "non-exisitng-router"},
-			Switches:    []string{"non-exisitng-switch"},
+			ExternalIDs: loadBalancerExternalIDs(namespacedServiceName(namespace, name)),
+			Routers:     []string{"gr-node-is-gone", "non-existing-router"},
+			Switches:    []string{"non-existing-switch"},
 			Groups:      []string{"non-existing-group"},
 			Protocol:    "TCP",
 			Rules: []LBRule{
@@ -69,7 +69,7 @@ func TestEnsureStaleLBs(t *testing.T) {
 	LBs := []LB{
 		{
 			Name:        "Service_testns/foo_TCP_node_router_node-a",
-			ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
+			ExternalIDs: loadBalancerExternalIDs(namespacedServiceName(namespace, name)),
 			Routers:     []string{"gr-node-a"},
 			Protocol:    "TCP",
 			Rules: []LBRule{
@@ -114,7 +114,7 @@ func TestEnsureLBs(t *testing.T) {
 			LBs: []LB{
 				{
 					Name:        "Service_foo/testns_TCP_cluster",
-					ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
+					ExternalIDs: loadBalancerExternalIDs(namespacedServiceName(namespace, name)),
 					Routers:     []string{"gr-node-a"},
 					Protocol:    "TCP",
 					Rules: []LBRule{
@@ -131,14 +131,14 @@ func TestEnsureLBs(t *testing.T) {
 				},
 			},
 			finalLB: &nbdb.LoadBalancer{
-				UUID:     loadBalancerClusterWideTCPServiceName(name, namespace),
-				Name:     loadBalancerClusterWideTCPServiceName(name, namespace),
+				UUID:     clusterWideTCPServiceLoadBalancerName(name, namespace),
+				Name:     clusterWideTCPServiceLoadBalancerName(name, namespace),
 				Options:  servicesOptions(),
 				Protocol: &nbdb.LoadBalancerProtocolTCP,
 				Vips: map[string]string{
 					"192.168.1.1:80": "10.0.244.3:8080",
 				},
-				ExternalIDs:     serviceExternalIDs(namespacedServiceName(namespace, name)),
+				ExternalIDs:     loadBalancerExternalIDs(namespacedServiceName(namespace, name)),
 				SelectionFields: []string{"ip_src", "ip_dst"}, // permanent session affinity, no learn flows
 			},
 		},
@@ -159,7 +159,7 @@ func TestEnsureLBs(t *testing.T) {
 			LBs: []LB{
 				{
 					Name:        "Service_foo/testns_TCP_cluster",
-					ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
+					ExternalIDs: loadBalancerExternalIDs(namespacedServiceName(namespace, name)),
 					Routers:     []string{"gr-node-a"},
 					Protocol:    "TCP",
 					Rules: []LBRule{
@@ -176,14 +176,14 @@ func TestEnsureLBs(t *testing.T) {
 				},
 			},
 			finalLB: &nbdb.LoadBalancer{
-				UUID:     loadBalancerClusterWideTCPServiceName(name, namespace),
-				Name:     loadBalancerClusterWideTCPServiceName(name, namespace),
+				UUID:     clusterWideTCPServiceLoadBalancerName(name, namespace),
+				Name:     clusterWideTCPServiceLoadBalancerName(name, namespace),
 				Options:  servicesOptionsWithAffinityTimeout(), // timeout set in the options
 				Protocol: &nbdb.LoadBalancerProtocolTCP,
 				Vips: map[string]string{
 					"192.168.1.1:80": "10.0.244.3:8080",
 				},
-				ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
+				ExternalIDs: loadBalancerExternalIDs(namespacedServiceName(namespace, name)),
 			},
 		},
 	}
@@ -209,7 +209,7 @@ func TestEnsureLBs(t *testing.T) {
 				tt.finalLB,
 				&nbdb.LogicalRouter{
 					Name:         "gr-node-a",
-					LoadBalancer: []string{loadBalancerClusterWideTCPServiceName(name, namespace)},
+					LoadBalancer: []string{clusterWideTCPServiceLoadBalancerName(name, namespace)},
 				},
 			})
 			success, err := matcher.Match(nbClient)

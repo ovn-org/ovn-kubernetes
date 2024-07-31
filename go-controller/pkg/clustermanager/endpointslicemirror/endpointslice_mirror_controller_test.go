@@ -7,11 +7,6 @@ import (
 
 	"github.com/onsi/ginkgo"
 	"github.com/onsi/gomega"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/endpointslicemirror"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/urfave/cli/v2"
 	v1 "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
@@ -23,6 +18,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	kubetest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -100,7 +96,7 @@ var _ = ginkgo.Describe("Cluster manager EndpointSlice mirror controller", func(
 						},
 					},
 				}
-				staleEndpointSlice := mirrorEndpointSlice(&defaultEndpointSlice, "l3-network")
+				staleEndpointSlice := kubetest.MirrorEndpointSlice(&defaultEndpointSlice, "l3-network", false)
 				staleEndpointSlice.Labels[types.LabelSourceEndpointSlice] = "non-existing-endpointslice"
 
 				objs := []runtime.Object{
@@ -150,7 +146,7 @@ var _ = ginkgo.Describe("Cluster manager EndpointSlice mirror controller", func(
 					// new mirrored EndpointSlice should get created
 					mirrorEndpointSliceSelector := labels.Set(map[string]string{
 						types.LabelSourceEndpointSlice: defaultEndpointSlice.Name,
-						discovery.LabelManagedBy: types.EndpointSliceMirrorControllerName,
+						discovery.LabelManagedBy:       types.EndpointSliceMirrorControllerName,
 					}).AsSelectorPreValidated()
 
 					mirroredEndpointSlices, err = fakeClient.KubeClient.DiscoveryV1().EndpointSlices(namespaceT.Name).List(context.TODO(), metav1.ListOptions{LabelSelector: mirrorEndpointSliceSelector.String()})
@@ -304,7 +300,7 @@ var _ = ginkgo.Describe("Cluster manager EndpointSlice mirror controller", func(
 						},
 					},
 				}
-				mirroredEndpointSlice := mirrorEndpointSlice(&defaultEndpointSlice, "l3-network")
+				mirroredEndpointSlice := kubetest.MirrorEndpointSlice(&defaultEndpointSlice, "l3-network", false)
 				objs := []runtime.Object{
 					&v1.PodList{
 						Items: []v1.Pod{
@@ -349,7 +345,7 @@ var _ = ginkgo.Describe("Cluster manager EndpointSlice mirror controller", func(
 					// mirrored EndpointSlices should exist
 					mirrorEndpointSliceSelector := labels.Set(map[string]string{
 						types.LabelSourceEndpointSlice: defaultEndpointSlice.Name,
-						discovery.LabelManagedBy: types.EndpointSliceMirrorControllerName,
+						discovery.LabelManagedBy:       types.EndpointSliceMirrorControllerName,
 					}).AsSelectorPreValidated()
 
 					mirroredEndpointSlices, err = fakeClient.KubeClient.DiscoveryV1().EndpointSlices(namespaceT.Name).List(context.TODO(), metav1.ListOptions{LabelSelector: mirrorEndpointSliceSelector.String()})
@@ -406,7 +402,7 @@ var _ = ginkgo.Describe("Cluster manager EndpointSlice mirror controller", func(
 
 					mirrorEndpointSliceSelector := labels.Set(map[string]string{
 						types.LabelSourceEndpointSlice: defaultEndpointSlice.Name,
-						discovery.LabelManagedBy: types.EndpointSliceMirrorControllerName,
+						discovery.LabelManagedBy:       types.EndpointSliceMirrorControllerName,
 					}).AsSelectorPreValidated()
 
 					mirroredEndpointSlices, err = fakeClient.KubeClient.DiscoveryV1().EndpointSlices(namespaceT.Name).List(context.TODO(), metav1.ListOptions{LabelSelector: mirrorEndpointSliceSelector.String()})
@@ -433,7 +429,7 @@ var _ = ginkgo.Describe("Cluster manager EndpointSlice mirror controller", func(
 				gomega.Eventually(func() error {
 					mirrorEndpointSliceSelector := labels.Set(map[string]string{
 						types.LabelSourceEndpointSlice: defaultEndpointSlice.Name,
-						discovery.LabelManagedBy: types.EndpointSliceMirrorControllerName,
+						discovery.LabelManagedBy:       types.EndpointSliceMirrorControllerName,
 					}).AsSelectorPreValidated()
 
 					mirroredEndpointSlices, err = fakeClient.KubeClient.DiscoveryV1().EndpointSlices(namespaceT.Name).List(context.TODO(), metav1.ListOptions{LabelSelector: mirrorEndpointSliceSelector.String()})
@@ -454,16 +450,3 @@ var _ = ginkgo.Describe("Cluster manager EndpointSlice mirror controller", func(
 
 	})
 })
-
-func mirrorEndpointSlice(defaultEndpointSlice *discovery.EndpointSlice, network string) *discovery.EndpointSlice {
-	var mirror *discovery.EndpointSlice
-
-	mirror = defaultEndpointSlice.DeepCopy()
-	mirror.Name = defaultEndpointSlice.Name + "-mirrored"
-	mirror.Labels[discovery.LabelManagedBy] = types.EndpointSliceMirrorControllerName
-	mirror.Labels[types.LabelSourceEndpointSlice] = defaultEndpointSlice.Name
-	mirror.Labels[types.LabelUserDefinedEndpointSliceNetwork] = network
-	mirror.Labels[types.LabelUserDefinedServiceName] = defaultEndpointSlice.Labels[discovery.LabelServiceName]
-	mirror.Endpoints = nil
-	return mirror
-}

@@ -51,15 +51,17 @@ func MakeTerminatingNonServingEndpoint(node string, addresses ...string) discove
 	}
 }
 
-func MirrorEndpointSlice(defaultEndpointSlice *discovery.EndpointSlice, network string) *discovery.EndpointSlice {
-	var mirror *discovery.EndpointSlice
-
-	mirror = defaultEndpointSlice.DeepCopy()
+func MirrorEndpointSlice(defaultEndpointSlice *discovery.EndpointSlice, network string, keepEndpoints bool) *discovery.EndpointSlice {
+	mirror := defaultEndpointSlice.DeepCopy()
 	mirror.Name = defaultEndpointSlice.Name + "-mirrored"
 	mirror.Labels[discovery.LabelManagedBy] = types.EndpointSliceMirrorControllerName
 	mirror.Labels[types.LabelSourceEndpointSlice] = defaultEndpointSlice.Name
 	mirror.Labels[types.LabelUserDefinedEndpointSliceNetwork] = network
 	mirror.Labels[types.LabelUserDefinedServiceName] = defaultEndpointSlice.Labels[discovery.LabelServiceName]
-	mirror.Endpoints = nil
+
+	if !keepEndpoints {
+		mirror.Endpoints = nil
+	}
+
 	return mirror
 }
