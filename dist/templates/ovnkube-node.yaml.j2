@@ -261,7 +261,7 @@ spec:
           timeoutSeconds: 30
           periodSeconds: 60
       {% endif %}
-      {% if ovnkube_app_name=="ovnkube-node" -%}
+      {% if ovnkube_app_name!="ovnkube-node-dpu-host" -%}
       - name: ovn-controller
         image: "{{ ovn_image | default('docker.io/ovnkube/ovn-daemonset:latest') }}"
         imagePullPolicy: "{{ ovn_image_pull_policy | default('IfNotPresent') }}"

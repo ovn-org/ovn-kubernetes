@@ -2401,6 +2401,15 @@ ovn-node() {
     node_mgmt_port_netdev_flags="$node_mgmt_port_netdev_flags --ovnkube-node-mgmt-port-dp-resource-name ${ovnkube_node_mgmt_port_dp_resource_name}"
   fi
 
+  if [[ ${ovnkube_node_mode} == "dpu" ]]; then
+    # in the case of dpu mode we want the host K8s Node Name and not the DPU K8s Node Name
+    K8S_NODE=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:host-k8s-nodename | tr -d '\"')
+    if [[ ${K8S_NODE} == "" ]]; then
+      echo "Couldn't get the required Host K8s Nodename. Exiting..."
+      exit 1
+    fi
+  fi
+
   local ovn_node_ssl_opts=""
   if [[ ${ovnkube_node_mode} != "dpu-host" ]]; then
       [[ "yes" == ${OVN_SSL_ENABLE} ]] && {
