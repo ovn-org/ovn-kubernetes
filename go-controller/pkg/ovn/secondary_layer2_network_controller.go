@@ -6,7 +6,6 @@ import (
 	"net"
 	"reflect"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -596,6 +595,13 @@ func (oc *SecondaryLayer2NetworkController) nodeGatewayConfig(node *corev1.Node)
 		return nil, fmt.Errorf("failed composing LRP addresses for layer2 network %s: %w", oc.GetNetworkName(), err)
 	}
 
+	// At layer2 GR LRP acts as the layer3 ovn_cluster_router so we need
+	// to configure here the .1 address, this will work only for IC with
+	// one node per zone, since ARPs for .1 will not go beyond local switch.
+	for _, subnet := range oc.Subnets() {
+		gwLRPIPs = append(gwLRPIPs, util.GetNodeGatewayIfAddr(subnet.CIDR))
+	}
+
 	// Overwrite the primary interface ID with the correct, per-network one.
 	l3GatewayConfig.InterfaceID = oc.GetNetworkScopedExtPortName(l3GatewayConfig.BridgeID, node.Name)
 	return &SecondaryL2GatewayConfig{
@@ -624,11 +630,11 @@ func (oc *SecondaryLayer2NetworkController) syncRouterLSPOptions(node *corev1.No
 
 	// Generate the ARP proxy MAC from the first gateway IP so the mac address
 	// is the same across nodes, this will help with live migration
-	arpProxyMAC := util.IPAddrToHWAddr(gatewayIPs[0])
-	arpProxy := []string{arpProxyMAC.String()}
-	for _, gatewayIP := range gatewayIPs {
-		arpProxy = append(arpProxy, gatewayIP.String())
-	}
+	//arpProxyMAC := util.IPAddrToHWAddr(gatewayIPs[0])
+	//arpProxy := []string{arpProxyMAC.String()}
+	//for _, gatewayIP := range gatewayIPs {
+	//	arpProxy = append(arpProxy, gatewayIP.String())
+	//}
 
 	nodeID := util.GetNodeID(node)
 	if nodeID == -1 {
@@ -640,7 +646,7 @@ func (oc *SecondaryLayer2NetworkController) syncRouterLSPOptions(node *corev1.No
 		logicalSwichPort.Options = map[string]string{}
 	}
 
-	logicalSwichPort.Options["arp_proxy"] = strings.Join(arpProxy, " ")
+	//logicalSwichPort.Options["arp_proxy"] = strings.Join(arpProxy, " ")
 	logicalSwichPort.Options["requested-tnl-key"] = strconv.Itoa(nodeID)
 
 	if err := libovsdbops.UpdateLogicalSwitchPortSetOptions(oc.nbClient, logicalSwichPort); err != nil {
