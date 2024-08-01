@@ -210,6 +210,13 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPorts() 
 					"subnet":      subnet.CIDR.String(),
 				}
 			}
+
+			// TODO: once we start the "full" SecondaryLayer2NetworkController (instead of just Base)
+			// we can drop this, and compare all objects created by the controller (right now we're
+			// missing all the meters, and the COPP)
+			if ocInfo.bnc.TopologyType() == ovntypes.Layer2Topology {
+				otherConfig = nil
+			}
 			data = append(data, &nbdb.LogicalSwitch{
 				UUID:        switchName + "-UUID",
 				Name:        switchName,
@@ -219,10 +226,14 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPorts() 
 				ACLs:        acls[switchName],
 			})
 			if em.gatewayConfig != nil {
-				data = append(data, expectedGWEntities(pod.nodeName, ocInfo.bnc, *em.gatewayConfig)...)
-				data = append(data, expectedLayer3EgressEntities(ocInfo.bnc, *em.gatewayConfig)...)
+				if ocInfo.bnc.TopologyType() == ovntypes.Layer3Topology {
+					data = append(data, expectedGWEntities(pod.nodeName, ocInfo.bnc, *em.gatewayConfig)...)
+					data = append(data, expectedLayer3EgressEntities(ocInfo.bnc, *em.gatewayConfig)...)
+				} else {
+					data = append(data, expectedLayer2EgressEntities(ocInfo.bnc.GetNetworkName()))
+				}
 			}
-			if em.isInterconnectCluster {
+			if em.isInterconnectCluster && ocInfo.bnc.TopologyType() == ovntypes.Layer3Topology {
 				transitSwitchName := ocInfo.bnc.GetNetworkName() + "_transit_switch"
 				data = append(data, &nbdb.LogicalSwitch{
 					UUID: transitSwitchName + "-UUID",
