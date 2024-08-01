@@ -1030,7 +1030,8 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 		l3GatewayConfig = node1.gatewayConfig(config.GatewayModeLocal, uint(vlanID))
 		err = util.SetL3GatewayConfig(nodeAnnotator, l3GatewayConfig)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		err = util.SetNodeManagementPortMACAddress(nodeAnnotator, ovntest.MustParseMAC(node1.NodeMgmtPortMAC))
+		err = util.UpdateNodeManagementPortMACAddresses(&testNode, nodeAnnotator,
+			ovntest.MustParseMAC(node1.NodeMgmtPortMAC), types.DefaultNetworkName)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNets(node1.NodeSubnet))
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())

@@ -53,6 +53,7 @@ type NodeWatchFactory interface {
 	RemoveNamespaceHandler(handler *Handler)
 
 	NodeInformer() cache.SharedIndexInformer
+	NodeCoreInformer() coreinformers.NodeInformer
 	LocalPodInformer() cache.SharedIndexInformer
 	NamespaceInformer() coreinformers.NamespaceInformer
 	PodCoreInformer() coreinformers.PodInformer

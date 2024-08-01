@@ -6,7 +6,9 @@ import (
 	"strings"
 	"time"
 
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
+	listers "k8s.io/client-go/listers/core/v1"
 
 	"k8s.io/klog/v2"
 
@@ -21,7 +23,7 @@ import (
 type ManagementPort interface {
 	// Create Management port, use annotator to update node annotation with management port details
 	// and waiter to set up condition to wait on for management port creation
-	Create(routeManager *routemanager.Controller, nodeAnnotator kube.Annotator, waiter *startupWaiter) (*managementPortConfig, error)
+	Create(routeManager *routemanager.Controller, node *v1.Node, nodeLister listers.NodeLister, kubeInterface kube.Interface, waiter *startupWaiter) (*managementPortConfig, error)
 	// CheckManagementPortHealth checks periodically for management port health until stopChan is posted
 	// or closed and reports any warnings/errors to log
 	CheckManagementPortHealth(routeManager *routemanager.Controller, cfg *managementPortConfig, stopChan chan struct{})
@@ -76,7 +78,8 @@ func newManagementPort(nodeName string, hostSubnets []*net.IPNet) ManagementPort
 	}
 }
 
-func (mp *managementPort) Create(routeManager *routemanager.Controller, nodeAnnotator kube.Annotator, waiter *startupWaiter) (*managementPortConfig, error) {
+func (mp *managementPort) Create(routeManager *routemanager.Controller, node *v1.Node,
+	nodeLister listers.NodeLister, kubeInterface kube.Interface, waiter *startupWaiter) (*managementPortConfig, error) {
 	for _, mgmtPortName := range []string{types.K8sMgmtIntfName, types.K8sMgmtIntfName + "_0"} {
 		if err := syncMgmtPortInterface(mp.hostSubnets, mgmtPortName, true); err != nil {
 			return nil, fmt.Errorf("failed to sync management port: %v", err)
@@ -114,7 +117,7 @@ func (mp *managementPort) Create(routeManager *routemanager.Controller, nodeAnno
 		return nil, err
 	}
 
-	if err := util.SetNodeManagementPortMACAddress(nodeAnnotator, macAddress); err != nil {
+	if err := util.UpdateNodeManagementPortMACAddressesWithRetry(node, nodeLister, kubeInterface, macAddress, types.DefaultNetworkName); err != nil {
 		return nil, err
 	}
 

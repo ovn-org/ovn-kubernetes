@@ -3,6 +3,7 @@ package e2e
 import (
 	"context"
 	"fmt"
+	"net"
 	"strings"
 	"time"
 
@@ -326,7 +327,7 @@ var _ = Describe("Network Segmentation", func() {
 				for _, kapiIP := range kapi.Spec.ClusterIPs {
 					By("checking the UDN pod can't reach kapi service on IP " + kapiIP)
 					Consistently(func() bool {
-						return connectToServer(udnPodConfig, kapiIP, int(kapi.Spec.Ports[0].Port)) != nil
+						return connectToServerViaDefaultNetwork(udnPodConfig, kapiIP, int(kapi.Spec.Ports[0].Port)) != nil
 					}, 5*time.Second).Should(BeTrue())
 				}
 			},
@@ -452,4 +453,21 @@ func runUDNPod(cs clientset.Interface, namespace string, serverPodConfig podConf
 		return updatedPod.Status.Phase
 	}, 2*time.Minute, 6*time.Second).Should(Equal(v1.PodRunning))
 	return updatedPod
+}
+
+// connectToServerViaDefaultNetwork sends the traffic via the pod's default interface
+func connectToServerViaDefaultNetwork(clientPodConfig podConfiguration, serverIP string, port int) error {
+	_, err := e2ekubectl.RunKubectl(
+		clientPodConfig.namespace,
+		"exec",
+		clientPodConfig.name,
+		"--",
+		"curl",
+		"--connect-timeout",
+		"2",
+		"--interface",
+		"eth0",
+		net.JoinHostPort(serverIP, fmt.Sprintf("%d", port)),
+	)
+	return err
 }

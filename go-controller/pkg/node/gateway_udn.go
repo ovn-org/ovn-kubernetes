@@ -6,10 +6,12 @@ import (
 	"strings"
 
 	v1 "k8s.io/api/core/v1"
+	listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -24,14 +26,18 @@ type UserDefinedNetworkGateway struct {
 	// stores the networkID of this network
 	networkID int
 	// node that its programming things on
-	node *v1.Node
+	node          *v1.Node
+	nodeLister    listers.NodeLister
+	kubeInterface kube.Interface
 }
 
-func NewUserDefinedNetworkGateway(netInfo util.NetInfo, networkID int, node *v1.Node) *UserDefinedNetworkGateway {
+func NewUserDefinedNetworkGateway(netInfo util.NetInfo, networkID int, node *v1.Node, nodeLister listers.NodeLister, kubeInterface kube.Interface) *UserDefinedNetworkGateway {
 	return &UserDefinedNetworkGateway{
-		NetInfo:   netInfo,
-		networkID: networkID,
-		node:      node,
+		NetInfo:       netInfo,
+		networkID:     networkID,
+		node:          node,
+		nodeLister:    nodeLister,
+		kubeInterface: kubeInterface,
 	}
 }
 
@@ -53,6 +59,7 @@ func (udng *UserDefinedNetworkGateway) DelNetwork() error {
 // so that it persists on reboots
 // STEP3: sets up the management port link on the host
 // STEP4: adds the management port IP .2 to the mplink
+// STEP5: adds the mac address to the node management port annotation
 func (udng *UserDefinedNetworkGateway) addUDNManagementPort() error {
 	var err error
 	interfaceName := util.GetNetworkScopedK8sMgmtHostIntfName(uint(udng.networkID))
@@ -120,23 +127,22 @@ func (udng *UserDefinedNetworkGateway) addUDNManagementPort() error {
 			}
 		}
 	}
+
+	// STEP5
+	if err := util.UpdateNodeManagementPortMACAddressesWithRetry(udng.node, udng.nodeLister, udng.kubeInterface, macAddress, udng.GetNetworkName()); err != nil {
+		return fmt.Errorf("unable to update mac address annotation for node %s, for network %s, err: %v", udng.node.Name, udng.GetNetworkName(), err)
+	}
+	klog.V(3).Infof("Added management port mac address information of %s for network %s", interfaceName, udng.GetNetworkName())
 	return nil
 }
 
 // deleteUDNManagementPort does the following:
-// STEP1: deletes the management port link on the host.
-// STEP2: deletes the OVS interface on br-int for the UDN's management port interface
+// STEP1: deletes the OVS interface on br-int for the UDN's management port interface
+// STEP2: deletes the mac address from the annotation
 func (udng *UserDefinedNetworkGateway) deleteUDNManagementPort() error {
 	var err error
 	interfaceName := util.GetNetworkScopedK8sMgmtHostIntfName(uint(udng.networkID))
-
-	// STEP1 (note: doing step2 also guarantees step1; doing it for posterity)
-	if err := util.LinkDelete(interfaceName); err != nil {
-		return fmt.Errorf("failed to delete link %s for network %s: %v", interfaceName, udng.GetNetworkName(), err)
-	}
-	klog.V(3).Infof("Removed management port link %s for network %s", interfaceName, udng.GetNetworkName())
-
-	// STEP2
+	// STEP1
 	stdout, stderr, err := util.RunOVSVsctl(
 		"--", "--if-exists", "del-port", "br-int", interfaceName,
 	)
@@ -145,5 +151,10 @@ func (udng *UserDefinedNetworkGateway) deleteUDNManagementPort() error {
 			udng.GetNetworkName(), stdout, stderr, err)
 	}
 	klog.V(3).Infof("Removed OVS management port interface %s for network %s", interfaceName, udng.GetNetworkName())
+	// sending nil mac address will delete the network's annotation value
+	if err := util.UpdateNodeManagementPortMACAddressesWithRetry(udng.node, udng.nodeLister, udng.kubeInterface, nil, udng.GetNetworkName()); err != nil {
+		return fmt.Errorf("unable to remove mac address annotation for node %s, for network %s, err: %v", udng.node.Name, udng.GetNetworkName(), err)
+	}
+	klog.V(3).Infof("Removed management port mac address information of %s for network %s", interfaceName, udng.GetNetworkName())
 	return nil
 }

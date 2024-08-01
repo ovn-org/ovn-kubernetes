@@ -55,4 +55,19 @@ packages:
     interfaces:
       NetworkAttachmentDefinitionLister:
       NetworkAttachmentDefinitionNamespaceLister:
+  k8s.io/client-go/informers/core/v1:
+    interfaces:
+      PodInformer:
+      NodeInformer:
+  k8s.io/client-go/listers/core/v1:
+    interfaces:
+      PodLister:
+      PodListerExpansion:
+      PodNamespaceLister:
+      PodNamespaceListerExpansion:
+      PodTemplateLister:
+      PodTemplateListerExpansion:
+      PodTemplateNamespaceLister:
+      PodTemplateNamespaceListerExpansion:
+      NodeLister:
 

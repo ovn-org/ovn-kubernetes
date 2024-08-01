@@ -8,12 +8,17 @@ import (
 	"github.com/containernetworking/plugins/pkg/testutils"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
+	"github.com/stretchr/testify/mock"
 	"github.com/vishvananda/netlink"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	factoryMocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory/mocks"
+	kubemocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube/mocks"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	coreinformermocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/client-go/informers/core/v1"
+	v1mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/client-go/listers/core/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -49,6 +54,9 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		mgtPortMAC   string = "00:00:00:55:66:77" // dummy MAC used for fake commands
 		fexec        *ovntest.FakeExec
 		testNS       ns.NetNS
+		factoryMock  factoryMocks.NodeWatchFactory
+		kubeMock     kubemocks.Interface
+		nodeLister   v1mocks.NodeLister
 		v4NodeSubnet = "100.128.0.0/24"
 		v6NodeSubnet = "ae70::66/112"
 		mgtPort      = fmt.Sprintf("%s%s", types.K8sMgmtIntfNamePrefix, netID)
@@ -71,6 +79,12 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			return nil
 		})
 		Expect(err).NotTo(HaveOccurred())
+		factoryMock = factoryMocks.NodeWatchFactory{}
+		nodeInformer := coreinformermocks.NodeInformer{}
+		factoryMock.On("NodeCoreInformer").Return(&nodeInformer)
+		nodeLister = v1mocks.NodeLister{}
+		nodeInformer.On("Lister").Return(&nodeLister)
+		kubeMock = kubemocks.Interface{}
 	})
 	AfterEach(func() {
 		Expect(testNS.Close()).To(Succeed())
@@ -91,8 +105,13 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			types.Layer3Topology, "100.128.0.0/16/24,ae70::66/60", types.NetworkRolePrimary)
 		netInfo, err := util.ParseNADInfo(nad)
 		Expect(err).NotTo(HaveOccurred())
-		udnGateway := NewUserDefinedNetworkGateway(netInfo, 3, node)
+		udnGateway := NewUserDefinedNetworkGateway(netInfo, 3, node, factoryMock.NodeCoreInformer().Lister(), &kubeMock)
 		getCreationFakeOVSCommands(fexec, mgtPort, mgtPortMAC, netName, nodeName, netInfo.MTU())
+		nodeLister.On("Get", mock.AnythingOfType("string")).Return(node, nil)
+		factoryMock.On("GetNode", "worker1").Return(node, nil)
+		cnode := node.DeepCopy()
+		cnode.Annotations[util.OvnNodeManagementPortMacAddresses] = `{"bluenet":"00:00:00:55:66:77"}`
+		kubeMock.On("UpdateNodeStatus", cnode).Return(nil)
 		err = testNS.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
 			Expect(udnGateway.addUDNManagementPort()).To(Succeed())
@@ -123,9 +142,13 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			types.Layer3Topology, "100.128.0.0/16/24,ae70::66/60", types.NetworkRolePrimary)
 		netInfo, err := util.ParseNADInfo(nad)
 		Expect(err).NotTo(HaveOccurred())
-		udnGateway := NewUserDefinedNetworkGateway(netInfo, 3, node)
+		udnGateway := NewUserDefinedNetworkGateway(netInfo, 3, node, factoryMock.NodeCoreInformer().Lister(), &kubeMock)
 		Expect(err).NotTo(HaveOccurred())
 		getDeletionFakeOVSCommands(fexec, mgtPort)
+		nodeLister.On("Get", mock.AnythingOfType("string")).Return(node, nil)
+		factoryMock.On("GetNode", "worker1").Return(node, nil)
+		cnode := node.DeepCopy()
+		kubeMock.On("UpdateNodeStatus", cnode).Return(nil) // check if network key gets deleted from annotation
 		err = testNS.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
 			Expect(udnGateway.deleteUDNManagementPort()).To(Succeed())
@@ -148,9 +171,14 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			types.Layer2Topology, "100.128.0.0/16,ae70::66/60", types.NetworkRolePrimary)
 		netInfo, err := util.ParseNADInfo(nad)
 		Expect(err).NotTo(HaveOccurred())
-		udnGateway := NewUserDefinedNetworkGateway(netInfo, 3, node)
+		udnGateway := NewUserDefinedNetworkGateway(netInfo, 3, node, factoryMock.NodeCoreInformer().Lister(), &kubeMock)
 		Expect(err).NotTo(HaveOccurred())
 		getCreationFakeOVSCommands(fexec, mgtPort, mgtPortMAC, netName, nodeName, netInfo.MTU())
+		nodeLister.On("Get", mock.AnythingOfType("string")).Return(node, nil)
+		factoryMock.On("GetNode", "worker1").Return(node, nil)
+		cnode := node.DeepCopy()
+		cnode.Annotations[util.OvnNodeManagementPortMacAddresses] = `{"bluenet":"00:00:00:55:66:77"}`
+		kubeMock.On("UpdateNodeStatus", cnode).Return(nil)
 		err = testNS.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
 			Expect(udnGateway.addUDNManagementPort()).To(Succeed())
@@ -180,9 +208,13 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			types.Layer2Topology, "100.128.0.0/16,ae70::66/60", types.NetworkRolePrimary)
 		netInfo, err := util.ParseNADInfo(nad)
 		Expect(err).NotTo(HaveOccurred())
-		udnGateway := NewUserDefinedNetworkGateway(netInfo, 3, node)
+		udnGateway := NewUserDefinedNetworkGateway(netInfo, 3, node, factoryMock.NodeCoreInformer().Lister(), &kubeMock)
 		Expect(err).NotTo(HaveOccurred())
 		getDeletionFakeOVSCommands(fexec, mgtPort)
+		nodeLister.On("Get", mock.AnythingOfType("string")).Return(node, nil)
+		factoryMock.On("GetNode", "worker1").Return(node, nil)
+		cnode := node.DeepCopy()
+		kubeMock.On("UpdateNodeStatus", cnode).Return(nil) // check if network key gets deleted from annotation
 		err = testNS.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
 			Expect(udnGateway.deleteUDNManagementPort()).To(Succeed())

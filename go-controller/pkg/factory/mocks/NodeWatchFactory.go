@@ -638,6 +638,26 @@ func (_m *NodeWatchFactory) NamespaceInformer() informerscorev1.NamespaceInforme
 	return r0
 }
 
+// NodeCoreInformer provides a mock function with given fields:
+func (_m *NodeWatchFactory) NodeCoreInformer() informerscorev1.NodeInformer {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for NodeCoreInformer")
+	}
+
+	var r0 informerscorev1.NodeInformer
+	if rf, ok := ret.Get(0).(func() informerscorev1.NodeInformer); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(informerscorev1.NodeInformer)
+		}
+	}
+
+	return r0
+}
+
 // NodeInformer provides a mock function with given fields:
 func (_m *NodeWatchFactory) NodeInformer() cache.SharedIndexInformer {
 	ret := _m.Called()
