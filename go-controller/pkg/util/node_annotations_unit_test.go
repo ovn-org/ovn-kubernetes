@@ -61,6 +61,7 @@ func TestL3GatewayConfig_MarshalJSON(t *testing.T) {
 			inpL3GwCfg: &L3GatewayConfig{
 				Mode:        config.GatewayModeLocal,
 				VLANID:      &vlanid,
+				BridgeID:    "BRIDGE-ID",
 				InterfaceID: "INTERFACE-ID",
 				MACAddress:  ovntest.MustParseMAC("11:22:33:44:55:66"),
 				IPAddresses: []*net.IPNet{
@@ -72,7 +73,7 @@ func TestL3GatewayConfig_MarshalJSON(t *testing.T) {
 					ovntest.MustParseIP("fd01::1"),
 				},
 			},
-			expOutput: []byte(`{"mode":"local","interface-id":"INTERFACE-ID","mac-address":"11:22:33:44:55:66","ip-addresses":["192.168.1.10/24","fd01::1234/64"],"next-hops":["192.168.1.1","fd01::1"],"node-port-enable":"false","vlan-id":"1024"}`),
+			expOutput: []byte(`{"mode":"local","bridge-id":"BRIDGE-ID","interface-id":"INTERFACE-ID","mac-address":"11:22:33:44:55:66","ip-addresses":["192.168.1.10/24","fd01::1234/64"],"next-hops":["192.168.1.1","fd01::1"],"node-port-enable":"false","vlan-id":"1024"}`),
 		},
 	}
 	for i, tc := range tests {

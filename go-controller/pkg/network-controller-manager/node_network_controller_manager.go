@@ -42,7 +42,11 @@ func (ncm *nodeNetworkControllerManager) NewNetworkController(nInfo util.NetInfo
 	topoType := nInfo.TopologyType()
 	switch topoType {
 	case ovntypes.Layer3Topology, ovntypes.Layer2Topology, ovntypes.LocalnetTopology:
-		return node.NewSecondaryNodeNetworkController(ncm.newCommonNetworkControllerInfo(), nInfo), nil
+		dnnc, ok := ncm.defaultNodeNetworkController.(*node.DefaultNodeNetworkController)
+		if !ok {
+			return nil, fmt.Errorf("unable to deference default node network controller object")
+		}
+		return node.NewSecondaryNodeNetworkController(ncm.newCommonNetworkControllerInfo(), nInfo, dnnc.Gateway)
 	}
 	return nil, fmt.Errorf("topology type %s not supported", topoType)
 }

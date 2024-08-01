@@ -27,6 +27,7 @@ import (
 	addrsetsyncer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/external_ids_syncer/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/external_ids_syncer/port_group"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/topology"
 	zoneic "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/zone_interconnect"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
@@ -134,6 +135,8 @@ type DefaultNetworkController struct {
 	// zoneChassisHandler handles the local node and remote nodes in creating or updating the chassis entries in the OVN Southbound DB.
 	// Please see zone_interconnect/chassis_handler.go for more details.
 	zoneChassisHandler *zoneic.ZoneChassisHandler
+
+	gatewayTopologyFactory *topology.GatewayTopologyFactory
 }
 
 // NewDefaultNetworkController creates a new OVN controller for creating logical network
@@ -221,17 +224,11 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 		svcController:                svcController,
 		zoneChassisHandler:           zoneChassisHandler,
 		apbExternalRouteController:   apbExternalRouteController,
+		gatewayTopologyFactory:       topology.NewGatewayTopologyFactory(cnci.nbClient),
 	}
-
-	// Allocate IPs for logical router port "GwRouterToJoinSwitchPrefix + OVNClusterRouter". This should always
-	// allocate the first IPs in the join switch subnets.
-	gwLRPIfAddrs, err := oc.getOVNClusterRouterPortToJoinSwitchIfAddrs()
-	if err != nil {
-		return nil, fmt.Errorf("failed to allocate join switch IP address connected to %s: %v", ovntypes.OVNClusterRouter, err)
+	if err = oc.BaseNetworkController.init(); err != nil {
+		return nil, err
 	}
-
-	oc.ovnClusterLRPToJoinIfAddrs = gwLRPIfAddrs
-
 	oc.initRetryFramework()
 	return oc, nil
 }

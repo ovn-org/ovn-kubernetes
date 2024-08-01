@@ -2815,7 +2815,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					err = fakeOvn.fakeClient.KubeClient.CoreV1().Nodes().Delete(context.TODO(), node1Name, metav1.DeleteOptions{})
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-					err = fakeOvn.controller.gatewayCleanup(node1Name) // simulate an already deleted node
+					err = newGatewayManager(fakeOvn.controller, node1Name).Cleanup() // simulate an already deleted node
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 					// NOTE: This test checks if plumbing is removed when node is gone but pod on the node is still present (unusual scenario)

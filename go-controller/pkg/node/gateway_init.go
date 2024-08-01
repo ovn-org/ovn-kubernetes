@@ -409,7 +409,7 @@ func (nc *DefaultNodeNetworkController) initGateway(subnets []*net.IPNet, nodeAn
 	}
 
 	waiter.AddWait(readyGwFunc, initGwFunc)
-	nc.gateway = gw
+	nc.Gateway = gw
 
 	return nc.validateVTEPInterfaceMTU()
 }
@@ -496,7 +496,7 @@ func (nc *DefaultNodeNetworkController) initGatewayDPUHost(kubeNodeIP net.IP) er
 	}
 
 	err = gw.Init(nc.stopChan, nc.wg)
-	nc.gateway = gw
+	nc.Gateway = gw
 	return err
 }
 
@@ -530,7 +530,7 @@ func CleanupClusterNode(name string) error {
 }
 
 func (nc *DefaultNodeNetworkController) updateGatewayMAC(link netlink.Link) error {
-	if nc.gateway.GetGatewayBridgeIface() != link.Attrs().Name {
+	if nc.Gateway.GetGatewayBridgeIface() != link.Attrs().Name {
 		return nil
 	}
 
@@ -547,8 +547,8 @@ func (nc *DefaultNodeNetworkController) updateGatewayMAC(link netlink.Link) erro
 		return nil
 	}
 	// MAC must have changed, update node
-	nc.gateway.SetDefaultGatewayBridgeMAC(link.Attrs().HardwareAddr)
-	if err := nc.gateway.Reconcile(); err != nil {
+	nc.Gateway.SetDefaultGatewayBridgeMAC(link.Attrs().HardwareAddr)
+	if err := nc.Gateway.Reconcile(); err != nil {
 		return fmt.Errorf("failed to reconcile gateway for MAC address update: %w", err)
 	}
 	nodeAnnotator := kube.NewNodeAnnotator(nc.Kube, node.Name)

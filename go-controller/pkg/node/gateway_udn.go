@@ -14,6 +14,12 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
+const (
+	// ctMarkUDNBase is the conntrack mark base value for user defined networks to use
+	// Each network gets its own mark == base + network-id
+	ctMarkUDNBase = 3
+)
+
 // UserDefinedNetworkGateway contains information
 // required to program a UDN at each node's
 // gateway.
@@ -25,25 +31,173 @@ type UserDefinedNetworkGateway struct {
 	networkID int
 	// node that its programming things on
 	node *v1.Node
+	// masqCTMark holds the mark value for this network
+	// which is used for egress traffic in shared gateway mode
+	masqCTMark uint
+	// stores a copy of default network's gateway so that
+	// we can leverage it from here to program UDN flows on breth0
+	// Currently we use the openflowmanager and nodeIPManager from
+	// gateway, but maybe we could invoke our own instance of these
+	// for UDNs.
+	*gateway
 }
 
-func NewUserDefinedNetworkGateway(netInfo util.NetInfo, networkID int, node *v1.Node) *UserDefinedNetworkGateway {
+// UTILS Needed for UDN (also leveraged for default netInfo) in openflowmanager
+
+func (c *openflowManager) getDefaultBridgePorts() ([]bridgeUDNConfiguration, string, string) {
+	return c.defaultBridge.getBridgePorts()
+}
+
+func (c *openflowManager) getExGwBridgePorts() ([]bridgeUDNConfiguration, string, string) {
+	return c.externalGatewayBridge.getBridgePorts()
+}
+
+func (c *openflowManager) addNetwork(nInfo util.NetInfo, masqCTMark uint) {
+	c.defaultBridge.addBridgeNetConfig(nInfo, masqCTMark)
+	if c.externalGatewayBridge != nil {
+		c.externalGatewayBridge.addBridgeNetConfig(nInfo, masqCTMark)
+	}
+}
+
+func (c *openflowManager) delNetwork(nInfo util.NetInfo) {
+	c.defaultBridge.delBridgeNetConfig(nInfo)
+	if c.externalGatewayBridge != nil {
+		c.externalGatewayBridge.delBridgeNetConfig(nInfo)
+	}
+}
+
+// UTILS Needed for UDN (also leveraged for default netInfo) in bridgeConfiguration
+
+func (b *bridgeConfiguration) getBridgePorts() ([]bridgeUDNConfiguration, string, string) {
+	b.Lock()
+	defer b.Unlock()
+	netConfigs := make([]bridgeUDNConfiguration, len(b.netConfig))
+	for _, netConfig := range b.netConfig {
+		netConfigs = append(netConfigs, *netConfig)
+	}
+	return netConfigs, b.uplinkName, b.ofPortPhys
+}
+
+func (b *bridgeConfiguration) addBridgeNetConfig(nInfo util.NetInfo, masqCTMark uint) {
+	b.Lock()
+	defer b.Unlock()
+
+	netName := nInfo.GetNetworkName()
+	patchPort := nInfo.GetNetworkScopedPatchPortName(b.bridgeName, b.nodeName)
+
+	var netConfig *bridgeUDNConfiguration
+	var found bool
+	netConfig, found = b.netConfig[netName]
+	if !found {
+		netConfig = &bridgeUDNConfiguration{
+			patchPort:  patchPort,
+			masqCTMark: fmt.Sprintf("0x%x", masqCTMark),
+		}
+
+		b.netConfig[netName] = netConfig
+	}
+
+	netConfig.patchPort = patchPort
+	netConfig.masqCTMark = fmt.Sprintf("0x%x", masqCTMark)
+}
+
+func (b *bridgeConfiguration) delBridgeNetConfig(nInfo util.NetInfo) {
+	b.Lock()
+	defer b.Unlock()
+
+	delete(b.netConfig, nInfo.GetNetworkName())
+}
+
+type bridgeUDNConfiguration struct {
+	patchPort   string
+	ofPortPatch string
+	masqCTMark  string
+}
+
+func (netConfig *bridgeUDNConfiguration) setBridgeNetworkOfPortsInternal() error {
+	ofportPatch, stderr, err := util.GetOVSOfPort("get", "Interface", netConfig.patchPort, "ofport")
+	if err != nil {
+		return fmt.Errorf("failed while waiting on patch port %q to be created by ovn-controller and "+
+			"while getting ofport. stderr: %q, error: %v", netConfig.patchPort, stderr, err)
+	}
+	netConfig.ofPortPatch = ofportPatch
+	return nil
+}
+
+func setBridgeNetworkOfPorts(bridge *bridgeConfiguration, netName string) error {
+	bridge.Lock()
+	defer bridge.Unlock()
+
+	netConfig, found := bridge.netConfig[netName]
+	if !found {
+		return fmt.Errorf("failed to find network %s configuration on bridge %s", netName, bridge.bridgeName)
+	}
+	return netConfig.setBridgeNetworkOfPortsInternal()
+}
+
+func NewUserDefinedNetworkGateway(netInfo util.NetInfo, networkID int, node *v1.Node,
+	defaultNetworkGateway Gateway) (*UserDefinedNetworkGateway, error) {
+	gw, ok := defaultNetworkGateway.(*gateway)
+	if !ok {
+		return nil, fmt.Errorf("unable to deference default node network controller gateway object")
+	}
 	return &UserDefinedNetworkGateway{
 		NetInfo:   netInfo,
 		networkID: networkID,
 		node:      node,
-	}
+
+		// Generate a per network conntrack mark to be used for egress traffic.
+		masqCTMark: ctMarkUDNBase + uint(networkID),
+		gateway:    gw,
+	}, nil
 }
 
 // AddNetwork will be responsible to create all plumbings
 // required by this UDN on the gateway side
 func (udng *UserDefinedNetworkGateway) AddNetwork() error {
-	return udng.addUDNManagementPort()
+	err := udng.addUDNManagementPort()
+	if err != nil {
+		return fmt.Errorf("could not create management port netdevice for network %s: %w", udng.GetNetworkName(), err)
+	}
+	if udng.openflowManager != nil {
+		udng.openflowManager.addNetwork(udng.NetInfo, udng.masqCTMark)
+
+		waiter := newStartupWaiter()
+		readyFunc := func() (bool, error) {
+			if err := setBridgeNetworkOfPorts(udng.openflowManager.defaultBridge, udng.GetNetworkName()); err != nil {
+				return false, err
+			}
+			if udng.openflowManager.externalGatewayBridge != nil {
+				if err := setBridgeNetworkOfPorts(udng.openflowManager.externalGatewayBridge, udng.GetNetworkName()); err != nil {
+					return false, err
+				}
+			}
+			return true, nil
+		}
+		postFunc := func() error {
+			if err := udng.Reconcile(); err != nil {
+				return err
+			}
+			return nil
+		}
+		waiter.AddWait(readyFunc, postFunc)
+		if err := waiter.Wait(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // DelNetwork will be responsible to remove all plumbings
 // used by this UDN on the gateway side
 func (udng *UserDefinedNetworkGateway) DelNetwork() error {
+	if udng.openflowManager != nil {
+		udng.openflowManager.delNetwork(udng.NetInfo)
+		// TODO (dceara): Do we need to reconcile all flows? Is this heavy?
+		if err := udng.Reconcile(); err != nil {
+			return fmt.Errorf("unable to reconcile default gateway for network %s, err: %v", udng.GetNetworkName(), err)
+		}
+	}
 	return udng.deleteUDNManagementPort()
 }
 
