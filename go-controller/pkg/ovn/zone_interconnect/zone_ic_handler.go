@@ -30,6 +30,7 @@ const (
 	lportTypeRemote     = "remote"
 
 	BaseTransitSwitchTunnelKey = 16711683
+	maxOVNLSPTunnelKey         = 32767
 )
 
 /*
@@ -218,12 +219,10 @@ func (zic *ZoneInterconnectHandler) ensureTransitSwitch(nodes []*corev1.Node) er
 // See createLocalZoneNodeResources() below for more details.
 func (zic *ZoneInterconnectHandler) AddLocalZoneNode(node *corev1.Node) error {
 	klog.Infof("Creating interconnect resources for local zone node %s for the network %s", node.Name, zic.GetNetworkName())
-	nodeID := util.GetNodeID(node)
-	if nodeID == -1 {
-		// Don't consider this node as cluster-manager has not allocated node id yet.
-		return fmt.Errorf("failed to get node id for node - %s", node.Name)
+	nodeID, err := zic.getNodeID(node)
+	if err != nil {
+		return err
 	}
-
 	if err := zic.createLocalZoneNodeResources(node, nodeID); err != nil {
 		return fmt.Errorf("creating interconnect resources for local zone node %s for the network %s failed : err - %w", node.Name, zic.GetNetworkName(), err)
 	}
@@ -237,10 +236,9 @@ func (zic *ZoneInterconnectHandler) AddRemoteZoneNode(node *corev1.Node) error {
 	start := time.Now()
 	klog.Infof("Creating interconnect resources for remote zone node %s for the network %s", node.Name, zic.GetNetworkName())
 
-	nodeID := util.GetNodeID(node)
-	if nodeID == -1 {
-		// Don't consider this node as cluster-manager has not allocated node id yet.
-		return fmt.Errorf("failed to get node id for node - %s", node.Name)
+	nodeID, err := zic.getNodeID(node)
+	if err != nil {
+		return err
 	}
 
 	// Get the chassis id.
@@ -254,6 +252,22 @@ func (zic *ZoneInterconnectHandler) AddRemoteZoneNode(node *corev1.Node) error {
 	}
 	klog.Infof("Creating Interconnect resources for node %v took: %s", node.Name, time.Since(start))
 	return nil
+}
+
+func (zic *ZoneInterconnectHandler) getNodeID(node *corev1.Node) (int, error) {
+	nodeID := util.GetNodeID(node)
+	if nodeID == -1 {
+		// Don't consider this node as cluster-manager has not allocated node id yet.
+		return nodeID, fmt.Errorf("failed to get node id for node - %s", node.Name)
+	}
+
+	// At layer2 with primary network pods remote LSPs tunnel keys cannot collide with
+	// node remote LSPs, we account for that counting from the end of the tunnel id range
+	// use the cluster unique nodeID
+	if zic.TopologyType() == types.Layer2Topology && zic.IsPrimaryNetwork() {
+		return maxOVNLSPTunnelKey - nodeID, nil
+	}
+	return nodeID, nil
 }
 
 // DeleteNode deletes the local zone node or remote zone node resources
