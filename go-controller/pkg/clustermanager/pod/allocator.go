@@ -86,6 +86,15 @@ func (a *PodAllocator) Init() error {
 		if err != nil {
 			return err
 		}
+		//FIXME(ellorent) we need separate node id allocator per network
+		limit := 100
+		for i := 1; i < limit; i++ {
+			// Reserve the id 0. We don't want to assign this id to any of the pods.
+			err = a.idAllocator.ReserveID(fmt.Sprintf("dummy-%d", i), i)
+			if err != nil {
+				return err
+			}
+		}
 	}
 
 	if a.netInfo.AllowsPersistentIPs() && a.ipamClaimsReconciler == nil {
