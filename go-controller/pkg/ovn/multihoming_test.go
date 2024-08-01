@@ -97,7 +97,10 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPorts() 
 	for _, ocInfo := range em.fakeOvn.secondaryControllers {
 		nodeslsps := make(map[string][]string)
 		acls := make(map[string][]string)
-		var switchName string
+		var (
+			switchName  string
+			otherConfig map[string]string
+		)
 		for _, pod := range em.pods {
 			podInfo, ok := pod.secondaryPodInfos[ocInfo.bnc.GetNetworkName()]
 			if !ok {
@@ -126,7 +129,13 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPorts() 
 					switchToRouterPortUUID := switchToRouterPortName + "-UUID"
 					data = append(data, newExpectedSwitchToRouterPort(switchToRouterPortUUID, switchToRouterPortName, pod, ocInfo, nad))
 					nodeslsps[switchName] = append(nodeslsps[switchName], switchToRouterPortUUID)
-
+					subnets := subnetsAsString(ocInfo.bnc.Subnets())
+					sn := subnets[0]
+					subnet := strings.TrimSuffix(sn, "/24")
+					otherConfig = map[string]string{
+						"exclude_ips": "192.168.0.2",
+						"subnet":      subnet,
+					}
 					if em.isPrimaryUDN {
 						mgmtPortName := "k8s-isolatednet_test-node"
 						mgmtPortUUID := mgmtPortName + "-UUID"
@@ -139,18 +148,28 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPorts() 
 					}
 				case ovntypes.Layer2Topology:
 					switchName = ocInfo.bnc.GetNetworkScopedName(ovntypes.OVNLayer2Switch)
+					if em.isPrimaryUDN {
+
+						switchToRouterPortName := "jtor-" + switchName
+						switchToRouterPortUUID := switchToRouterPortName + "-UUID"
+						data = append(data, newExpectedSwitchToRouterPort(switchToRouterPortUUID, switchToRouterPortName, pod, ocInfo, nad))
+						nodeslsps[switchName] = append(nodeslsps[switchName], switchToRouterPortUUID)
+
+						mgmtPortName := "k8s-isolatednet_test-node"
+						mgmtPortUUID := mgmtPortName + "-UUID"
+						mgmtPort := &nbdb.LogicalSwitchPort{UUID: mgmtPortUUID, Name: mgmtPortName, Addresses: []string{"02:03:04:05:06:07 192.168.0.2"}}
+						data = append(data, mgmtPort)
+						nodeslsps[switchName] = append(nodeslsps[switchName], mgmtPortUUID)
+						const aclUUID = "acl1-UUID"
+						data = append(data, allowAllFromMgmtPort(aclUUID, "192.168.0.2"))
+						acls[switchName] = append(acls[switchName], aclUUID)
+					}
 				case ovntypes.LocalnetTopology:
 					switchName = ocInfo.bnc.GetNetworkScopedName(ovntypes.OVNLocalnetSwitch)
 				}
 				nodeslsps[switchName] = append(nodeslsps[switchName], lspUUID)
 			}
-			subnets := subnetsAsString(ocInfo.bnc.Subnets())
-			sn := subnets[0]
-			subnet := strings.TrimSuffix(sn, "/24")
-			otherConfig := map[string]string{
-				"exclude_ips": "192.168.0.2",
-				"subnet":      subnet,
-			}
+
 			data = append(data, &nbdb.LogicalSwitch{
 				UUID:        switchName + "-UUID",
 				Name:        switchName,
@@ -161,7 +180,12 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPorts() 
 			})
 			if em.isPrimaryUDN {
 				data = append(data, expectedGWEntities(pod.nodeName, ocInfo.bnc.GetNetworkName())...)
-				data = append(data, expectedLayer3EgressEntities(ocInfo.bnc.GetNetworkName())...)
+				switch ocInfo.bnc.TopologyType() {
+				case ovntypes.Layer3Topology:
+					data = append(data, expectedLayer3EgressEntities(ocInfo.bnc.GetNetworkName())...)
+				case ovntypes.Layer2Topology:
+					data = append(data, expectedLayer2EgressEntities(ocInfo.bnc.GetNetworkName())...)
+				}
 			}
 		}
 

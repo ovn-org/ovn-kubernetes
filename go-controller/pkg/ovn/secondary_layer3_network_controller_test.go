@@ -374,14 +374,15 @@ func newNodeWithSecondaryNets(nodeName string, nodeIPv4CIDR string, netInfos ...
 		ObjectMeta: metav1.ObjectMeta{
 			Name: nodeName,
 			Annotations: map[string]string{
-				"k8s.ovn.org/node-primary-ifaddr":    fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", nodeIPv4CIDR, ""),
-				"k8s.ovn.org/node-subnets":           fmt.Sprintf("{\"default\":\"%s\", %s}", v4Node1Subnet, strings.Join(nodeSubnetInfo, ",")),
-				util.OVNNodeHostCIDRs:                fmt.Sprintf("[\"%s\"]", nodeIPv4CIDR),
-				"k8s.ovn.org/zone-name":              "global",
-				"k8s.ovn.org/l3-gateway-config":      "{\"default\":{\"mode\":\"shared\",\"bridge-id\":\"breth0\",\"interface-id\":\"breth0_ovn-worker\",\"mac-address\":\"ea:2e:6c:f2:f5:d4\",\"ip-addresses\":[\"10.89.0.14/24\"],\"ip-address\":\"10.89.0.14/24\",\"next-hops\":[\"10.89.0.1\"],\"next-hop\":\"10.89.0.1\",\"node-port-enable\":\"true\",\"vlan-id\":\"0\"}}",
-				util.OvnNodeChassisID:                "abdcef",
-				"k8s.ovn.org/network-ids":            "{\"default\":\"0\",\"isolatednet\":\"2\"}",
-				util.OvnNodeManagementPortMacAddress: dummyMACAddr,
+				"k8s.ovn.org/node-primary-ifaddr":      fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", nodeIPv4CIDR, ""),
+				"k8s.ovn.org/node-subnets":             fmt.Sprintf("{\"default\":\"%s\", %s}", v4Node1Subnet, strings.Join(nodeSubnetInfo, ",")),
+				util.OVNNodeHostCIDRs:                  fmt.Sprintf("[\"%s\"]", nodeIPv4CIDR),
+				"k8s.ovn.org/zone-name":                "global",
+				"k8s.ovn.org/l3-gateway-config":        "{\"default\":{\"mode\":\"shared\",\"bridge-id\":\"breth0\",\"interface-id\":\"breth0_ovn-worker\",\"mac-address\":\"ea:2e:6c:f2:f5:d4\",\"ip-addresses\":[\"10.89.0.14/24\"],\"ip-address\":\"10.89.0.14/24\",\"next-hops\":[\"10.89.0.1\"],\"next-hop\":\"10.89.0.1\",\"node-port-enable\":\"true\",\"vlan-id\":\"0\"}}",
+				util.OvnNodeChassisID:                  "abdcef",
+				"k8s.ovn.org/network-ids":              "{\"default\":\"0\",\"isolatednet\":\"2\"}",
+				util.OvnNodeManagementPortMacAddresses: fmt.Sprintf(`{"default": %q, "isolatednet": %q}`, dummyMACAddr, dummyMACAddr),
+				util.OVNNodeGRLRPAddrs:                 `{"default": {"ipv4": "100.64.0.0/16"}, "isolatednet": {"ipv4": "100.65.0.0/16"}}`,
 			},
 			Labels: map[string]string{
 				"k8s.ovn.org/egress-assignable": "",
