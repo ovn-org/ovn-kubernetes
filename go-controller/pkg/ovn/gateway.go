@@ -208,6 +208,13 @@ func (gw *GatewayManager) GatewayInit(
 		"snat-ct-zone":                  "0",
 		"mac_binding_age_threshold":     types.GRMACBindingAgeThreshold,
 	}
+
+	// For layer2 networks (no cluster wide router) all the pods are able
+	// to access each other without routing so no need for LB masquerade
+	if len(drLRPIfAddrs) > 0 {
+		logicalRouterOptions["lb_force_snat_ip"] = "router_ip"
+	}
+
 	logicalRouterExternalIDs := map[string]string{
 		"physical_ip":  physicalIPs[0],
 		"physical_ips": strings.Join(physicalIPs, ","),
