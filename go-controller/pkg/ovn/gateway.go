@@ -318,46 +318,47 @@ func (gw *GatewayManager) GatewayInit(
 	if err != nil {
 		return fmt.Errorf("failed to create port %+v on router %+v: %v", logicalRouterPort, logicalRouter, err)
 	}
-
-	for _, entry := range clusterIPSubnet {
-		drLRPIfAddr, err := util.MatchFirstIPNetFamily(utilnet.IsIPv6CIDR(entry), drLRPIfAddrs)
-		if err != nil {
-			return fmt.Errorf("failed to add a static route in GR %s with distributed "+
-				"router as the nexthop: %v",
-				gatewayRouter, err)
-		}
-
-		// TODO There has to be a better way to do this. It seems like the
-		// whole purpose is to update the appropriate route in case it already
-		// exists *only* in the context of this router. But then it does not
-		// make sense to refresh it on every loop, unless it is also way to
-		// check for duplicate cluster IP subnets for which there would also be
-		// a better way to do it. Adding support for indirection in ModelClients
-		// opModel (being able to operate on thins pointed to from another model)
-		// would be a great way to simplify this.
-		updatedLogicalRouter, err := libovsdbops.GetLogicalRouter(gw.nbClient, &logicalRouter)
-		if err != nil {
-			return fmt.Errorf("unable to retrieve logical router %+v: %v", logicalRouter, err)
-		}
-
-		lrsr := nbdb.LogicalRouterStaticRoute{
-			IPPrefix: entry.String(),
-			Nexthop:  drLRPIfAddr.IP.String(),
-		}
-		if gw.netInfo.IsSecondary() {
-			lrsr.ExternalIDs = map[string]string{
-				types.NetworkExternalID:  gw.netInfo.GetNetworkName(),
-				types.TopologyExternalID: gw.netInfo.TopologyType(),
+	if len(drLRPIfAddrs) > 0 {
+		for _, entry := range clusterIPSubnet {
+			drLRPIfAddr, err := util.MatchFirstIPNetFamily(utilnet.IsIPv6CIDR(entry), drLRPIfAddrs)
+			if err != nil {
+				return fmt.Errorf("failed to add a static route in GR %s with distributed "+
+					"router as the nexthop: %v",
+					gatewayRouter, err)
 			}
-		}
-		p := func(item *nbdb.LogicalRouterStaticRoute) bool {
-			return item.IPPrefix == lrsr.IPPrefix && libovsdbops.PolicyEqualPredicate(item.Policy, lrsr.Policy) &&
-				util.SliceHasStringItem(updatedLogicalRouter.StaticRoutes, item.UUID)
-		}
-		err = libovsdbops.CreateOrReplaceLogicalRouterStaticRouteWithPredicate(gw.nbClient, gatewayRouter, &lrsr, p,
-			&lrsr.Nexthop)
-		if err != nil {
-			return fmt.Errorf("failed to add a static route %+v in GR %s with distributed router as the nexthop, err: %v", lrsr, gatewayRouter, err)
+
+			// TODO There has to be a better way to do this. It seems like the
+			// whole purpose is to update the appropriate route in case it already
+			// exists *only* in the context of this router. But then it does not
+			// make sense to refresh it on every loop, unless it is also way to
+			// check for duplicate cluster IP subnets for which there would also be
+			// a better way to do it. Adding support for indirection in ModelClients
+			// opModel (being able to operate on thins pointed to from another model)
+			// would be a great way to simplify this.
+			updatedLogicalRouter, err := libovsdbops.GetLogicalRouter(gw.nbClient, &logicalRouter)
+			if err != nil {
+				return fmt.Errorf("unable to retrieve logical router %+v: %v", logicalRouter, err)
+			}
+
+			lrsr := nbdb.LogicalRouterStaticRoute{
+				IPPrefix: entry.String(),
+				Nexthop:  drLRPIfAddr.IP.String(),
+			}
+			if gw.netInfo.IsSecondary() {
+				lrsr.ExternalIDs = map[string]string{
+					types.NetworkExternalID:  gw.netInfo.GetNetworkName(),
+					types.TopologyExternalID: gw.netInfo.TopologyType(),
+				}
+			}
+			p := func(item *nbdb.LogicalRouterStaticRoute) bool {
+				return item.IPPrefix == lrsr.IPPrefix && libovsdbops.PolicyEqualPredicate(item.Policy, lrsr.Policy) &&
+					util.SliceHasStringItem(updatedLogicalRouter.StaticRoutes, item.UUID)
+			}
+			err = libovsdbops.CreateOrReplaceLogicalRouterStaticRouteWithPredicate(gw.nbClient, gatewayRouter, &lrsr, p,
+				&lrsr.Nexthop)
+			if err != nil {
+				return fmt.Errorf("failed to add a static route %+v in GR %s with distributed router as the nexthop, err: %v", lrsr, gatewayRouter, err)
+			}
 		}
 	}
 

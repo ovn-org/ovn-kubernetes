@@ -456,7 +456,7 @@ func (oc *SecondaryLayer2NetworkController) addUpdateLocalNodeEvent(node *corev1
 					gwConfig.hostSubnets,
 					gwConfig.gwLRPIPs,
 					oc.SCTPSupport,
-					oc.ovnClusterLRPToJoinIfAddrs,
+					nil, // no need for ovnClusterLRPToJoinIfAddrs
 					gwConfig.externalIPs,
 				); err != nil {
 					errs = append(errs, err)
