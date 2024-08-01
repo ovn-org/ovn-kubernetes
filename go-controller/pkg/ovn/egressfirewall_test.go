@@ -289,7 +289,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 				config.Gateway.Mode = gwMode
 				app.Action = func(ctx *cli.Context) error {
 					// owned by non-existing namespace
-					fakeController := getFakeController(DefaultNetworkControllerName)
+					fakeController := getFakeController()
 					purgeIDs := fakeController.getEgressFirewallACLDbIDs("none", 0)
 					purgeACL := libovsdbops.BuildACL(
 						"purgeACL1",
@@ -489,7 +489,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 				config.Gateway.Mode = gwMode
 				app.Action = func(ctx *cli.Context) error {
 
-					fakeController := getFakeController(DefaultNetworkControllerName)
+					fakeController := getFakeController()
 					fakeOVN.controller = fakeController
 
 					namespace1 := *newNamespace("namespace1")
@@ -522,7 +522,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 					namespace1 := *newNamespace("namespace1")
 					dnsName := util.LowerCaseFQDN("www.example.com")
 
-					fakeController := getFakeController(DefaultNetworkControllerName)
+					fakeController := getFakeController()
 					fakeOVN.controller = fakeController
 
 					// add dns address set along with the acl and pg to the initial db.

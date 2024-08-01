@@ -291,9 +291,9 @@ func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netI
 		oc.podAnnotationAllocator = podAnnotationAllocator
 	}
 
-	// disable multicast support for secondary networks
-	// TBD: changes needs to be made to support multicast in secondary networks
-	oc.multicastSupport = false
+	// enable multicast suppor at UDN only for primaries + multicast enabled
+	// TBD: changes needs to be made to support multicast beyond primary UDN
+	oc.multicastSupport = util.IsNetworkSegmentationSupportEnabled() && config.EnableMulticast
 
 	oc.initRetryFramework()
 	return oc
@@ -303,10 +303,13 @@ func (oc *SecondaryLayer3NetworkController) initRetryFramework() {
 	oc.retryPods = oc.newRetryFramework(factory.PodType)
 	oc.retryNodes = oc.newRetryFramework(factory.NodeType)
 
-	// For secondary networks, we don't have to watch namespace events if
-	// multi-network policy support is not enabled.
-	if util.IsMultiNetworkPoliciesSupportEnabled() {
+	// For secondary networks, we have to watch namespace only either:
+	// - multi-network policy support is enabled
+	// - primary UDN is supported and multicast per namespace can be configured
+	if util.IsMultiNetworkPoliciesSupportEnabled() || (util.IsNetworkSegmentationSupportEnabled() && config.EnableMulticast) {
 		oc.retryNamespaces = oc.newRetryFramework(factory.NamespaceType)
+	}
+	if util.IsMultiNetworkPoliciesSupportEnabled() {
 		oc.retryNetworkPolicies = oc.newRetryFramework(factory.MultiNetworkPolicyType)
 	}
 }
@@ -454,8 +457,24 @@ func (oc *SecondaryLayer3NetworkController) WatchNodes() error {
 }
 
 func (oc *SecondaryLayer3NetworkController) Init(ctx context.Context) error {
-	_, err := oc.createOvnClusterRouter()
-	return err
+	if _, err := oc.createOvnClusterRouter(); err != nil {
+		return err
+	}
+
+	// Note we don't check multicast support on purpose, the cluster port
+	// group can go beyond multicast and tye sync defualt multicast policies
+	// also remove then if multicast support is disabled
+	if oc.IsPrimaryNetwork() && util.IsNetworkSegmentationSupportEnabled() {
+		if err := oc.setupClusterPortGroups(); err != nil {
+			return err
+		}
+
+		if err := oc.syncDefaultMulticastPolicies(); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (oc *SecondaryLayer3NetworkController) addUpdateLocalNodeEvent(node *kapi.Node, nSyncs *nodeSyncs) error {

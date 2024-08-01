@@ -282,9 +282,9 @@ func NewSecondaryLayer2NetworkController(cnci *CommonNetworkControllerInfo, netI
 			claimsReconciler)
 	}
 
-	// disable multicast support for secondary networks
-	// TBD: changes needs to be made to support multicast in secondary networks
-	oc.multicastSupport = false
+	// enable multicast suppor at UDN only for primaries + multicast enabled
+	// TBD: changes needs to be made to support multicast beyond primary UDN
+	oc.multicastSupport = util.IsNetworkSegmentationSupportEnabled() && config.EnableMulticast
 
 	oc.initRetryFramework()
 	return oc
@@ -317,8 +317,24 @@ func (oc *SecondaryLayer2NetworkController) Cleanup() error {
 }
 
 func (oc *SecondaryLayer2NetworkController) Init() error {
-	_, err := oc.initializeLogicalSwitch(oc.GetNetworkScopedSwitchName(types.OVNLayer2Switch), oc.Subnets(), oc.ExcludeSubnets())
-	return err
+	if _, err := oc.initializeLogicalSwitch(oc.GetNetworkScopedSwitchName(types.OVNLayer2Switch), oc.Subnets(), oc.ExcludeSubnets()); err != nil {
+		return err
+	}
+
+	// Note we don't check multicast support on purpose, the cluster port
+	// group can go beyond multicast and tye sync defualt multicast policies
+	// also remove then if multicast support is disabled
+	if oc.IsPrimaryNetwork() && util.IsNetworkSegmentationSupportEnabled() {
+		if err := oc.setupClusterPortGroups(); err != nil {
+			return err
+		}
+
+		if err := oc.syncDefaultMulticastPolicies(); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (oc *SecondaryLayer2NetworkController) Stop() {
