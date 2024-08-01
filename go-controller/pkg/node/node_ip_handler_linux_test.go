@@ -69,6 +69,8 @@ var _ = Describe("Node IP Handler event tests", func() {
 	)
 
 	BeforeEach(func() {
+		// Restore global default values before each testcase
+		Expect(config.PrepareTestConfig()).To(Succeed())
 		fexec := ovntest.NewFakeExec()
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovs-vsctl --timeout=15 get Open_vSwitch . external_ids:ovn-encap-ip",
