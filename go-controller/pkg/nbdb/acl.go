@@ -42,6 +42,8 @@ type ACL struct {
 	Name        *string           `ovsdb:"name"`
 	Options     map[string]string `ovsdb:"options"`
 	Priority    int               `ovsdb:"priority"`
+	SampleEst   *string           `ovsdb:"sample_est"`
+	SampleNew   *string           `ovsdb:"sample_new"`
 	Severity    *ACLSeverity      `ovsdb:"severity"`
 	Tier        int               `ovsdb:"tier"`
 }
@@ -178,6 +180,50 @@ func (a *ACL) GetPriority() int {
 	return a.Priority
 }
 
+func (a *ACL) GetSampleEst() *string {
+	return a.SampleEst
+}
+
+func copyACLSampleEst(a *string) *string {
+	if a == nil {
+		return nil
+	}
+	b := *a
+	return &b
+}
+
+func equalACLSampleEst(a, b *string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	return *a == *b
+}
+
+func (a *ACL) GetSampleNew() *string {
+	return a.SampleNew
+}
+
+func copyACLSampleNew(a *string) *string {
+	if a == nil {
+		return nil
+	}
+	b := *a
+	return &b
+}
+
+func equalACLSampleNew(a, b *string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	return *a == *b
+}
+
 func (a *ACL) GetSeverity() *ACLSeverity {
 	return a.Severity
 }
@@ -210,6 +256,8 @@ func (a *ACL) DeepCopyInto(b *ACL) {
 	b.Meter = copyACLMeter(a.Meter)
 	b.Name = copyACLName(a.Name)
 	b.Options = copyACLOptions(a.Options)
+	b.SampleEst = copyACLSampleEst(a.SampleEst)
+	b.SampleNew = copyACLSampleNew(a.SampleNew)
 	b.Severity = copyACLSeverity(a.Severity)
 }
 
@@ -240,6 +288,8 @@ func (a *ACL) Equals(b *ACL) bool {
 		equalACLName(a.Name, b.Name) &&
 		equalACLOptions(a.Options, b.Options) &&
 		a.Priority == b.Priority &&
+		equalACLSampleEst(a.SampleEst, b.SampleEst) &&
+		equalACLSampleNew(a.SampleNew, b.SampleNew) &&
 		equalACLSeverity(a.Severity, b.Severity) &&
 		a.Tier == b.Tier
 }
