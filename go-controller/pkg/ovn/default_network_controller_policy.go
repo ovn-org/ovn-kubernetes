@@ -42,7 +42,7 @@ func (oc *DefaultNetworkController) addHairpinAllowACL() error {
 	egressACL := libovsdbutil.BuildACL(egressACLIDs, types.DefaultAllowPriority, match,
 		nbdb.ACLActionAllowRelated, nil, libovsdbutil.LportEgressAfterLB)
 
-	ops, err := libovsdbops.CreateOrUpdateACLsOps(oc.nbClient, nil, ingressACL, egressACL)
+	ops, err := libovsdbops.CreateOrUpdateACLsOps(oc.nbClient, nil, nil, ingressACL, egressACL)
 	if err != nil {
 		return fmt.Errorf("failed to create or update hairpin allow ACL %v", err)
 	}
