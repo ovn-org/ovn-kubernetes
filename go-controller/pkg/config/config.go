@@ -128,6 +128,7 @@ var (
 	// OVNKubernetesFeatureConfig holds OVN-Kubernetes feature enhancement config file parameters and command-line overrides
 	OVNKubernetesFeature = OVNKubernetesFeatureConfig{
 		EgressIPReachabiltyTotalTimeout: 1,
+		EnableObservability:             true,
 	}
 
 	// OvnNorth holds northbound OVN database client and server authentication and location details
