@@ -146,7 +146,7 @@ func TestCreateOrUpdateACL(t *testing.T) {
 
 			updatedACL := tt.finalACL.DeepCopy()
 			updatedACL.UUID = initialACLs[0].UUID
-			err = CreateOrUpdateACLs(nbClient, updatedACL)
+			err = CreateOrUpdateACLs(nbClient, nil, updatedACL)
 			if err != nil {
 				t.Fatalf("test: \"%s\" failed to set up test harness: %v", tt.desc, err)
 			}

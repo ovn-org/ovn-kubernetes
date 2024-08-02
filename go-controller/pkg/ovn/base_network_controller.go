@@ -17,6 +17,7 @@ import (
 	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/observability"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	zoneic "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/zone_interconnect"
@@ -167,6 +168,8 @@ type BaseNetworkController struct {
 	// IP addresses of OVN Cluster logical router port ("GwRouterToJoinSwitchPrefix + OVNClusterRouter")
 	// connecting to the join switch
 	ovnClusterLRPToJoinIfAddrs []*net.IPNet
+
+	observManager *observability.Manager
 }
 
 // BaseSecondaryNetworkController structure holds per-network fields and network specific
@@ -934,4 +937,11 @@ func initLoadBalancerGroups(nbClient libovsdbclient.Client, netInfo util.NetInfo
 	routerLoadBalancerGroupUUID = clusterRouterLBGroup.UUID
 
 	return
+}
+
+func (bnc *BaseNetworkController) GetSamplingConfig() *libovsdbops.SamplingConfig {
+	if bnc.observManager != nil {
+		return bnc.observManager.SamplingConfig()
+	}
+	return nil
 }

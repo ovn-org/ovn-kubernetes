@@ -17,6 +17,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/observability"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -284,12 +285,12 @@ func (cm *NetworkControllerManager) newCommonNetworkControllerInfo() (*ovn.Commo
 }
 
 // initDefaultNetworkController creates the controller for default network
-func (cm *NetworkControllerManager) initDefaultNetworkController() error {
+func (cm *NetworkControllerManager) initDefaultNetworkController(observManager *observability.Manager) error {
 	cnci, err := cm.newCommonNetworkControllerInfo()
 	if err != nil {
 		return fmt.Errorf("failed to create common network controller info: %w", err)
 	}
-	defaultController, err := ovn.NewDefaultNetworkController(cnci)
+	defaultController, err := ovn.NewDefaultNetworkController(cnci, observManager)
 	if err != nil {
 		return err
 	}
@@ -385,7 +386,19 @@ func (cm *NetworkControllerManager) Start(ctx context.Context) error {
 	}
 	cm.podRecorder.Run(cm.sbClient, cm.stopChan)
 
-	err = cm.initDefaultNetworkController()
+	var observabilityManager *observability.Manager
+	if config.OVNKubernetesFeature.EnableObservability {
+		observabilityManager = observability.NewManager(cm.nbClient)
+		if err = observabilityManager.Init(); err != nil {
+			return fmt.Errorf("failed to init observability manager: %w", err)
+		}
+	} else {
+		err = observability.Cleanup(cm.nbClient)
+		if err != nil {
+			klog.Warningf("Observability cleanup failed, expected if not all Samples ware deleted yet: %v", err)
+		}
+	}
+	err = cm.initDefaultNetworkController(observabilityManager)
 	if err != nil {
 		return fmt.Errorf("failed to init default network controller: %v", err)
 	}

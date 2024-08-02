@@ -131,7 +131,7 @@ func (syncer *ACLSyncer) SyncACLs(existingNodes []*v1.Node) error {
 
 		// update acls with new ExternalIDs
 		err = batching.Batch[*nbdb.ACL](syncer.txnBatchSize, uniquePrimaryIDACLs, func(batchACLs []*nbdb.ACL) error {
-			return libovsdbops.CreateOrUpdateACLs(syncer.nbClient, batchACLs...)
+			return libovsdbops.CreateOrUpdateACLs(syncer.nbClient, nil, batchACLs...)
 		})
 		if err != nil {
 			return fmt.Errorf("cannot update stale ACLs: %v", err)
@@ -183,7 +183,7 @@ func (syncer *ACLSyncer) SyncACLs(existingNodes []*v1.Node) error {
 		}
 		// batch ACLs together in order of their priority: lowest first and then highest
 		err = batching.Batch[*nbdb.ACL](syncer.txnBatchSize, aclsInTier0, func(batchACLs []*nbdb.ACL) error {
-			return libovsdbops.CreateOrUpdateACLs(syncer.nbClient, batchACLs...)
+			return libovsdbops.CreateOrUpdateACLs(syncer.nbClient, nil, batchACLs...)
 		})
 		if err != nil {
 			return fmt.Errorf("cannot update ACLs to tier2: %v", err)
