@@ -91,40 +91,6 @@ func convertNetPolicyToMultiNetPolicy(policy *knet.NetworkPolicy) *mnpapi.MultiN
 	return &mpolicy
 }
 
-func (p testPod) addNetwork(netName, nadName, nodeSubnet, nodeMgtIP, nodeGWIP, podIP, podMAC string, tunnelID int) {
-	podInfo, ok := p.secondaryPodInfos[netName]
-	if !ok {
-		podInfo = &secondaryPodInfo{
-			nodeSubnet:  nodeSubnet,
-			nodeMgtIP:   nodeMgtIP,
-			nodeGWIP:    nodeGWIP,
-			allportInfo: map[string]portInfo{},
-		}
-		p.secondaryPodInfos[netName] = podInfo
-	}
-	portName := util.GetSecondaryNetworkLogicalPortName(p.namespace, p.podName, nadName)
-	podInfo.allportInfo[nadName] = portInfo{
-		portUUID: portName + "-UUID",
-		podIP:    podIP,
-		podMAC:   podMAC,
-		portName: portName,
-		tunnelID: tunnelID,
-	}
-}
-
-func (p testPod) getNetworkPortInfo(netName, nadName string) *portInfo {
-	podInfo, ok := p.secondaryPodInfos[netName]
-	if !ok {
-		return nil
-	}
-	info, ok := podInfo.allportInfo[nadName]
-	if !ok {
-		return nil
-	}
-
-	return &info
-}
-
 func addPodNetwork(pod *v1.Pod, secondaryPodInfos map[string]*secondaryPodInfo) {
 	nadNames := []string{}
 	for _, podInfo := range secondaryPodInfos {
@@ -481,7 +447,7 @@ var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
 
 				namespace1 := *newNamespace(namespaceName1)
 				nPodTest := getTestPod(namespace1.Name, nodeName)
-				nPodTest.addNetwork(secondaryNetworkName, nadNamespacedName, "", "", "", "10.1.1.1", "0a:58:0a:01:01:01", 1)
+				nPodTest.addNetwork(secondaryNetworkName, nadNamespacedName, "", "", "", "10.1.1.1", "0a:58:0a:01:01:01", "secondary", 1, nil)
 				networkPolicy := getPortNetworkPolicy(netPolicyName1, namespace1.Name, labelName, labelVal, portNum)
 
 				watchNodes := false
@@ -614,7 +580,7 @@ var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
 					ocInfo.asf.EventuallyExpectEmptyAddressSetExist(namespaceName1)
 
 					nPodTest := getTestPod(namespace1.Name, nodeName)
-					nPodTest.addNetwork(secondaryNetworkName, nadNamespacedName, nodeSubnet, "", "", "10.1.1.1", "0a:58:0a:01:01:01", 1)
+					nPodTest.addNetwork(secondaryNetworkName, nadNamespacedName, nodeSubnet, "", "", "10.1.1.1", "0a:58:0a:01:01:01", "secondary", 1, nil)
 					knetPod := newPod(nPodTest.namespace, nPodTest.podName, nPodTest.nodeName, nPodTest.podIP)
 					addPodNetwork(knetPod, nPodTest.secondaryPodInfos)
 					setPodAnnotations(knetPod, nPodTest)

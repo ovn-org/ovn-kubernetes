@@ -105,6 +105,7 @@ func (n tNode) gatewayConfig(gatewayMode config.GatewayMode, vlanID uint) *util.
 	return &util.L3GatewayConfig{
 		Mode:           gatewayMode,
 		ChassisID:      n.SystemID,
+		BridgeID:       n.PhysicalBridgeName,
 		InterfaceID:    n.ifaceID(),
 		MACAddress:     ovntest.MustParseMAC(n.PhysicalBridgeMAC),
 		IPAddresses:    ovntest.MustParseIPNets(n.GatewayRouterIPMask),
@@ -1093,7 +1094,7 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 			clusterSubnets := startFakeController(oc, wg)
 
 			subnet := ovntest.MustParseIPNet(node1.NodeSubnet)
-			err = oc.syncGatewayLogicalNetwork(&testNode, l3GatewayConfig, []*net.IPNet{subnet}, []string{node1.NodeIP})
+			err = oc.syncDefaultGatewayLogicalNetwork(&testNode, l3GatewayConfig, []*net.IPNet{subnet}, []string{node1.NodeIP})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			retry.InitRetryObjWithAdd(testNode, testNode.Name, oc.retryNodes)
 			gomega.Expect(retry.RetryObjsLen(oc.retryNodes)).To(gomega.Equal(1))
@@ -1151,7 +1152,7 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = oc.syncNodeManagementPortDefault(node, node.Name, []*net.IPNet{subnet})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			err = oc.syncGatewayLogicalNetwork(node, l3GatewayConfig, []*net.IPNet{subnet}, []string{node1.NodeIP})
+			err = oc.syncDefaultGatewayLogicalNetwork(node, l3GatewayConfig, []*net.IPNet{subnet}, []string{node1.NodeIP})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			ginkgo.By("Stale route should have been removed")
 
@@ -1182,7 +1183,7 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 			clusterSubnets := startFakeController(oc, wg)
 
 			subnet := ovntest.MustParseIPNet(node1.NodeSubnet)
-			err = oc.syncGatewayLogicalNetwork(&testNode, l3GatewayConfig, []*net.IPNet{subnet}, []string{node1.NodeIP})
+			err = oc.syncDefaultGatewayLogicalNetwork(&testNode, l3GatewayConfig, []*net.IPNet{subnet}, []string{node1.NodeIP})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			skipSnat := false
@@ -1250,7 +1251,7 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 
 			// ensure the stale SNAT's are cleaned up
 			gomega.Expect(oc.StartServiceController(wg, false)).To(gomega.Succeed())
-			err = oc.syncGatewayLogicalNetwork(&testNode, l3GatewayConfig, []*net.IPNet{subnet}, []string{node1.NodeIP})
+			err = oc.syncDefaultGatewayLogicalNetwork(&testNode, l3GatewayConfig, []*net.IPNet{subnet}, []string{node1.NodeIP})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			expectedNBDatabaseState = append(expectedNBDatabaseState,
@@ -1404,7 +1405,7 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 				ip, _, _ := net.ParseCIDR(nodeHostCIDR)
 				nodeHostAddrs = append(nodeHostAddrs, ip.String())
 			}
-			err = oc.syncGatewayLogicalNetwork(&testNode, l3GatewayConfig, []*net.IPNet{subnet}, nodeHostAddrs)
+			err = oc.syncDefaultGatewayLogicalNetwork(&testNode, l3GatewayConfig, []*net.IPNet{subnet}, nodeHostAddrs)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			// inject transient problem, nbdb is down
@@ -1503,7 +1504,7 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 				ip, _, _ := net.ParseCIDR(nodeHostCIDR)
 				nodeHostAddrs = append(nodeHostAddrs, ip.String())
 			}
-			err = oc.syncGatewayLogicalNetwork(&testNode, l3GatewayConfig, []*net.IPNet{subnet}, nodeHostAddrs)
+			err = oc.syncDefaultGatewayLogicalNetwork(&testNode, l3GatewayConfig, []*net.IPNet{subnet}, nodeHostAddrs)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			// Delete the node's gateway Logical Router Port to force node delete to handle a

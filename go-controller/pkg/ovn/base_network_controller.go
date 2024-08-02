@@ -206,6 +206,18 @@ func NewCommonNetworkControllerInfo(client clientset.Interface, kube *kube.KubeO
 	}, nil
 }
 
+func (bnc *BaseNetworkController) init() error {
+	// Allocate IPs for logical router port "GwRouterToJoinSwitchPrefix + OVNClusterRouter". This should always
+	// allocate the first IPs in the join switch subnets.
+	gwLRPIfAddrs, err := bnc.getOVNClusterRouterPortToJoinSwitchIfAddrs()
+	if err != nil {
+		return fmt.Errorf("failed to allocate join switch IP for network %s: %v", bnc.GetNetworkName(), err)
+	}
+
+	bnc.ovnClusterLRPToJoinIfAddrs = gwLRPIfAddrs
+	return nil
+}
+
 func (bnc *BaseNetworkController) GetLogicalPortName(pod *kapi.Pod, nadName string) string {
 	if !bnc.IsSecondary() {
 		return util.GetLogicalPortName(pod.Namespace, pod.Name)
@@ -221,46 +233,6 @@ func (bnc *BaseNetworkController) AddConfigDurationRecord(kind, namespace, name 
 	}
 	// TBD: no op for secondary network for now
 	return []ovsdb.Operation{}, func() {}, time.Time{}, nil
-}
-
-// createOvnClusterRouter creates the central router for the network
-func (bnc *BaseNetworkController) createOvnClusterRouter() (*nbdb.LogicalRouter, error) {
-	// Create default Control Plane Protection (COPP) entry for routers
-	defaultCOPPUUID, err := EnsureDefaultCOPP(bnc.nbClient)
-	if err != nil {
-		return nil, fmt.Errorf("unable to create router control plane protection: %w", err)
-	}
-
-	// Create a single common distributed router for the cluster.
-	logicalRouterName := bnc.GetNetworkScopedClusterRouterName()
-	logicalRouter := nbdb.LogicalRouter{
-		Name: logicalRouterName,
-		ExternalIDs: map[string]string{
-			"k8s-cluster-router": "yes",
-		},
-		Options: map[string]string{
-			"always_learn_from_arp_request": "false",
-		},
-		Copp: &defaultCOPPUUID,
-	}
-	if bnc.IsSecondary() {
-		logicalRouter.ExternalIDs[types.NetworkExternalID] = bnc.GetNetworkName()
-		logicalRouter.ExternalIDs[types.TopologyExternalID] = bnc.TopologyType()
-	}
-	if bnc.multicastSupport {
-		logicalRouter.Options = map[string]string{
-			"mcast_relay": "true",
-		}
-	}
-
-	err = libovsdbops.CreateOrUpdateLogicalRouter(bnc.nbClient, &logicalRouter, &logicalRouter.Options,
-		&logicalRouter.ExternalIDs, &logicalRouter.Copp)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create distributed router %s, error: %v",
-			logicalRouterName, err)
-	}
-
-	return &logicalRouter, nil
 }
 
 // getOVNClusterRouterPortToJoinSwitchIPs returns the IP addresses for the

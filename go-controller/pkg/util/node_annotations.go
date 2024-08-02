@@ -147,6 +147,7 @@ const (
 type L3GatewayConfig struct {
 	Mode                config.GatewayMode
 	ChassisID           string
+	BridgeID            string
 	InterfaceID         string
 	MACAddress          net.HardwareAddr
 	IPAddresses         []*net.IPNet
@@ -160,6 +161,7 @@ type L3GatewayConfig struct {
 
 type l3GatewayConfigJSON struct {
 	Mode                config.GatewayMode `json:"mode"`
+	BridgeID            string             `json:"bridge-id,omitempty"`
 	InterfaceID         string             `json:"interface-id,omitempty"`
 	MACAddress          string             `json:"mac-address,omitempty"`
 	IPAddresses         []string           `json:"ip-addresses,omitempty"`
@@ -182,6 +184,7 @@ func (cfg *L3GatewayConfig) MarshalJSON() ([]byte, error) {
 		return json.Marshal(&cfgjson)
 	}
 
+	cfgjson.BridgeID = cfg.BridgeID
 	cfgjson.InterfaceID = cfg.InterfaceID
 	cfgjson.MACAddress = cfg.MACAddress.String()
 	cfgjson.EgressGWInterfaceID = cfg.EgressGWInterfaceID
@@ -229,6 +232,7 @@ func (cfg *L3GatewayConfig) UnmarshalJSON(bytes []byte) error {
 		return fmt.Errorf("bad 'mode' value %q", cfgjson.Mode)
 	}
 
+	cfg.BridgeID = cfgjson.BridgeID
 	cfg.InterfaceID = cfgjson.InterfaceID
 	cfg.EgressGWInterfaceID = cfgjson.EgressGWInterfaceID
 
