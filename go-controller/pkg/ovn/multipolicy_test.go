@@ -382,7 +382,7 @@ var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
 	}
 
 	getUpdatedInitialDB := func(tPods []testPod) []libovsdb.TestData {
-		updatedSwitchAndPods := getExpectedDataPodsAndSwitches(tPods, []string{nodeName})
+		updatedSwitchAndPods := getDefaultNetExpectedPodsAndSwitches(tPods, []string{nodeName})
 		secondarySwitchAndPods := getExpectedDataPodsAndSwitchesForSecondaryNetwork(fakeOvn, tPods)
 		if len(secondarySwitchAndPods) != 0 {
 			updatedSwitchAndPods = append(updatedSwitchAndPods, secondarySwitchAndPods...)

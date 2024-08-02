@@ -126,7 +126,7 @@ var _ = ginkgo.Describe("OVN Pod Operations with network segmentation", func() {
 
 				// check db values are updated to correlate with test pods settings
 				gomega.Eventually(fakeOvn.nbClient).Should(
-					libovsdbtest.HaveData(getExpectedDataPodsAndSwitches([]testPod{t1}, []string{"node1"})))
+					libovsdbtest.HaveData(getDefaultNetExpectedPodsAndSwitches([]testPod{t1}, []string{"node1"})))
 				// check annotations are updated with role=primary
 				// makes sense only when handling is finished, therefore check after nbdb is updated
 				annotations := getPodAnnotations(fakeOvn.fakeClient.KubeClient, t1.namespace, t1.podName)

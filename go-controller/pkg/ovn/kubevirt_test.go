@@ -224,7 +224,7 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 			for node := range nodeSet {
 				nodes = append(nodes, node)
 			}
-			data := getExpectedDataPodsAndSwitches(testPods, nodes)
+			data := getDefaultNetExpectedPodsAndSwitches(testPods, nodes)
 			for _, d := range data {
 				switch model := d.(type) {
 				case *nbdb.LogicalSwitchPort:

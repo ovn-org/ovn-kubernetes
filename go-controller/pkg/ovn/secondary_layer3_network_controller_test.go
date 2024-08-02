@@ -149,7 +149,7 @@ var _ = Describe("OVN Multi-Homed pod operations", func() {
 					return getPodAnnotations(fakeOvn.fakeClient.KubeClient, podInfo.namespace, podInfo.podName)
 				}).WithTimeout(2 * time.Second).Should(MatchJSON(podInfo.getAnnotationsJson()))
 
-				defaultNetExpectations := getExpectedDataPodsAndSwitches([]testPod{podInfo}, []string{nodeName})
+				defaultNetExpectations := getDefaultNetExpectedPodsAndSwitches([]testPod{podInfo}, []string{nodeName})
 				var expectationOptions []option
 				if netInfo.isPrimary {
 					defaultNetExpectations = emptyDefaultClusterNetworkNodeSwitch(podInfo.nodeName)

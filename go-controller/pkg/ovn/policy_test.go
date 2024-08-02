@@ -701,7 +701,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 	}
 
 	getUpdatedInitialDB := func(tPods []testPod) []libovsdbtest.TestData {
-		updatedSwitchAndPods := getExpectedDataPodsAndSwitches(tPods, []string{nodeName})
+		updatedSwitchAndPods := getDefaultNetExpectedPodsAndSwitches(tPods, []string{nodeName})
 		return append(getHairpinningACLsV4AndPortGroup(), updatedSwitchAndPods...)
 	}
 
