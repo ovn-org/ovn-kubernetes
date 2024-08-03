@@ -90,6 +90,7 @@ type L3Config struct {
 	// Given subnet is split into smaller subnets for every node.
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=2
+	// +kubebuilder:validation:XValidation:rule="size(self) != 2 || isCIDR(self[0].cidr) && isCIDR(self[1].cidr) && cidr(self[0].cidr).ip().family() != cidr(self[1].cidr).ip().family()", message="When 2 CIDRs are set, they must be from different IP families"
 	// +required
 	Subnets []L3Subnet `json:"subnets,omitempty"`
 
@@ -102,6 +103,8 @@ type L3Config struct {
 	JoinSubnets DualStackCIDRs `json:"joinSubnets,omitempty"`
 }
 
+// +kubebuilder:validation:XValidation:rule="!has(self.hostSubnet) || (isCIDR(self.cidr) && self.hostSubnet > cidr(self.cidr).prefixLength())", message="hostSubnet must be smaller than CIDR subnet"
+// +kubebuilder:validation:XValidation:rule="!has(self.hostSubnet) || (isCIDR(self.cidr) && (cidr(self.cidr).ip().family() == 6 || self.hostSubnet < 32))", message="hostSubnet must < 32 for ipv4 CIDR"
 type L3Subnet struct {
 	// cidr specifies L3Subnet, which is split into smaller subnets for every node.
 	// +required
@@ -236,8 +239,10 @@ type UserDefinedNetworkStatus struct {
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
+// +kubebuilder:validation:XValidation:rule="isCIDR(self)", message="CIDR is invalid"
 type CIDR string
 
 // +kubebuilder:validation:MinItems=1
 // +kubebuilder:validation:MaxItems=2
+// +kubebuilder:validation:XValidation:rule="size(self) != 2 || isCIDR(self[0]) && isCIDR(self[1]) && cidr(self[0]).ip().family() != cidr(self[1]).ip().family()", message="When 2 CIDRs are set, they must be from different IP families"
 type DualStackCIDRs []CIDR
