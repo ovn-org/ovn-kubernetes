@@ -567,7 +567,14 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 	// Note: for ovnkube node mode dpu-host no metrics is required as ovs/ovn is not running on the node.
 	if config.OvnKubeNode.Mode != types.NodeModeDPUHost && config.Metrics.OVNMetricsBindAddress != "" {
 		if config.Metrics.ExportOVSMetrics {
-			metrics.RegisterOvsMetricsWithOvnMetrics(ctx.Done())
+			metricsScrapeInterval := 30
+			defer cancel()
+
+			ovsClient, err := libovsdb.NewOVSClient(ctx.Done())
+			if err != nil {
+				return fmt.Errorf("failed to initialize libovsdb vswitchd client: %w", err)
+			}
+			metrics.RegisterOvsMetricsWithOvnMetrics(ovsClient, metricsScrapeInterval, ctx.Done())
 		}
 		metrics.RegisterOvnMetrics(ovnClientset.KubeClient, runMode.identity, ctx.Done())
 		metrics.StartOVNMetricsServer(config.Metrics.OVNMetricsBindAddress,
