@@ -33,6 +33,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/vswitchd"
 )
 
 type TestSetup struct {
@@ -41,8 +42,9 @@ type TestSetup struct {
 	// addition of invalid data (like duplicate indexes).
 	IgnoreConstraints bool
 
-	NBData []TestData
-	SBData []TestData
+	NBData  []TestData
+	SBData  []TestData
+	OVSData []TestData
 }
 
 type TestData interface{}
@@ -58,9 +60,9 @@ type Context struct {
 	serverStopCh chan struct{}
 	serverWg     *sync.WaitGroup
 
-	SBServer *TestOvsdbServer
-	NBServer *TestOvsdbServer
-	VSServer *TestOvsdbServer
+	SBServer  *TestOvsdbServer
+	NBServer  *TestOvsdbServer
+	OVSServer *TestOvsdbServer
 }
 
 func newContext() *Context {
@@ -122,6 +124,44 @@ func NewSBTestHarness(setup TestSetup, testCtx *Context) (libovsdbclient.Client,
 		return nil, nil, err
 	}
 	testCtx.SBServer = server
+
+	return client, testCtx, err
+}
+
+// NewOVSTestHarness runs OVSDB server and returns corresponding client
+func NewOVSTestHarness(setup TestSetup) (libovsdbclient.Client, *Context, error) {
+	testCtx := newContext()
+	randBytes := make([]byte, 16)
+	cryptorand.Read(randBytes)
+	tmpOVSSocketPath := filepath.Join(os.TempDir(), "ovs-"+hex.EncodeToString(randBytes))
+
+	cfg := config.OvnAuthConfig{
+		Scheme:  config.OvnDBSchemeUnix,
+		Address: "unix:" + tmpOVSSocketPath,
+	}
+
+	server, err := newOVSServer(cfg, setup.OVSData, false)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	client, err := newOVSClient(cfg, testCtx)
+	if err != nil {
+		server.Close()
+		return nil, nil, err
+	}
+
+	testCtx.serverWg.Add(1)
+	go func() {
+		defer testCtx.serverWg.Done()
+		<-testCtx.serverStopCh
+		server.Close()
+	}()
+
+	if err != nil {
+		return nil, nil, err
+	}
+	testCtx.OVSServer = server
 
 	return client, testCtx, err
 }
@@ -207,6 +247,26 @@ func newNBServer(cfg config.OvnAuthConfig, data []TestData, ignoreConstraints bo
 	}
 	schema := nbdb.Schema()
 	return newOVSDBServer(cfg, dbModel, schema, data, ignoreConstraints)
+}
+
+func newOVSServer(cfg config.OvnAuthConfig, data []TestData, ignoreConstraints bool) (*TestOvsdbServer, error) {
+	dbModel, err := vswitchd.FullDatabaseModel()
+	if err != nil {
+		return nil, err
+	}
+	schema := vswitchd.Schema()
+	return newOVSDBServer(cfg, dbModel, schema, data, ignoreConstraints)
+}
+
+func newOVSClient(cfg config.OvnAuthConfig, testCtx *Context) (libovsdbclient.Client, error) {
+	stopChan := make(chan struct{})
+	ovsClient, err := libovsdb.NewOVSClientWithConfig(cfg, stopChan)
+	if err != nil {
+		return nil, err
+	}
+
+	clientWaitOnCleanup(testCtx, ovsClient, stopChan)
+	return ovsClient, err
 }
 
 func testDataToOperations(dbMod model.DatabaseModel, data []TestData) ([]ovsdb.Operation, error) {
