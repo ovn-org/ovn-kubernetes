@@ -20,6 +20,8 @@ import (
 
 	mock "github.com/stretchr/testify/mock"
 
+	routeadvertisementsv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/informers/externalversions/routeadvertisements/v1"
+
 	v1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/informers/externalversions/adminpolicybasedroute/v1"
 )
 
@@ -716,6 +718,26 @@ func (_m *NodeWatchFactory) RemovePodHandler(handler *factory.Handler) {
 // RemoveServiceHandler provides a mock function with given fields: handler
 func (_m *NodeWatchFactory) RemoveServiceHandler(handler *factory.Handler) {
 	_m.Called(handler)
+}
+
+// RouteAdvertisementsInformer provides a mock function with given fields:
+func (_m *NodeWatchFactory) RouteAdvertisementsInformer() routeadvertisementsv1.RouteAdvertisementsInformer {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for RouteAdvertisementsInformer")
+	}
+
+	var r0 routeadvertisementsv1.RouteAdvertisementsInformer
+	if rf, ok := ret.Get(0).(func() routeadvertisementsv1.RouteAdvertisementsInformer); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(routeadvertisementsv1.RouteAdvertisementsInformer)
+		}
+	}
+
+	return r0
 }
 
 // Shutdown provides a mock function with given fields:

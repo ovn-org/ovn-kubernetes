@@ -438,3 +438,34 @@ enable_multi_net() {
 kind_get_nodes() {
   kind get nodes --name "${KIND_CLUSTER_NAME}" | grep -v external-load-balancer
 }
+
+install_ffr_k8s() {
+  echo "Installing frr-k8s ..."
+  local tmpdir=$(mktemp -d)
+  pushd $tmpdir
+  git clone --depth 1 --branch v0.0.14 https://github.com/metallb/frr-k8s
+  popd
+
+  # apply the demo which will deploy an external FRR container that the cluster
+  # can peer with
+  pushd ${tmpdir}/frr-k8s/hack/demo
+  ./demo.sh
+  popd
+
+  # apply frr-k8s
+  kubectl apply -f ${tmpdir}/frr-k8s/config/all-in-one/frr-k8s.yaml
+  kubectl wait -n frr-k8s-system deployment frr-k8s-webhook-server --for condition=Available --timeout 2m
+  kubectl rollout status -n frr-k8s-system daemonset frr-k8s-daemon --timeout 2m
+
+  # apply a receive all configuration for a full cluster peering mesh as well as
+  # the external FRR
+  kubectl apply -f ${tmpdir}/frr-k8s/hack/demo/configs/receive_all.yaml
+  for node in $(kubectl get nodes -o jsonpath='{.items[*].metadata.name}' ); do
+    peers=$(kubectl get nodes -o jsonpath="{.items[?(@.metadata.name!='$node')].status.addresses[?(@.type=='InternalIP')].address}")
+    export node=$node
+    export peers=$peers
+    jinjanate --quiet ../dist/templates/ffr-k8s-config.yaml.j2 | kubectl apply -f -
+  done
+
+  rm -rf ${tmpdir}
+}

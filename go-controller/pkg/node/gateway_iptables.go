@@ -416,23 +416,9 @@ func getLocalGatewayFilterRules(ifname string, cidr *net.IPNet) []nodeipt.Rule {
 	}
 }
 
-func getLocalGatewayNATRules(ifname string, cidr *net.IPNet) []nodeipt.Rule {
-	// Allow packets to/from the gateway interface in case defaults deny
+func getLocalGatewayPodSubnetNATRules(cidr *net.IPNet) []nodeipt.Rule {
 	protocol := getIPTablesProtocol(cidr.IP.String())
-	masqueradeIP := config.Gateway.MasqueradeIPs.V4OVNMasqueradeIP
-	if protocol == iptables.ProtocolIPv6 {
-		masqueradeIP = config.Gateway.MasqueradeIPs.V6OVNMasqueradeIP
-	}
 	return []nodeipt.Rule{
-		{
-			Table: "nat",
-			Chain: "POSTROUTING",
-			Args: []string{
-				"-s", masqueradeIP.String(),
-				"-j", "MASQUERADE",
-			},
-			Protocol: protocol,
-		},
 		{
 			Table: "nat",
 			Chain: "POSTROUTING",
@@ -443,6 +429,29 @@ func getLocalGatewayNATRules(ifname string, cidr *net.IPNet) []nodeipt.Rule {
 			Protocol: protocol,
 		},
 	}
+}
+
+func getLocalGatewayNATRules(ifname string, cidr *net.IPNet) []nodeipt.Rule {
+	// Allow packets to/from the gateway interface in case defaults deny
+	protocol := getIPTablesProtocol(cidr.IP.String())
+	masqueradeIP := config.Gateway.MasqueradeIPs.V4OVNMasqueradeIP
+	if protocol == iptables.ProtocolIPv6 {
+		masqueradeIP = config.Gateway.MasqueradeIPs.V6OVNMasqueradeIP
+	}
+	return append(
+		[]nodeipt.Rule{
+			{
+				Table: "nat",
+				Chain: "POSTROUTING",
+				Args: []string{
+					"-s", masqueradeIP.String(),
+					"-j", "MASQUERADE",
+				},
+				Protocol: protocol,
+			},
+		},
+		getLocalGatewayPodSubnetNATRules(cidr)...,
+	)
 }
 
 // initLocalGatewayNATRules sets up iptables rules for interfaces
@@ -457,6 +466,22 @@ func initLocalGatewayNATRules(ifname string, cidr *net.IPNet) error {
 	// append the masquerade rules in POSTROUTING table since that needs to be
 	// evaluated last.
 	return appendIptRules(getLocalGatewayNATRules(ifname, cidr))
+}
+
+func addLocalGatewayPodSubnetNATRules(cidrs ...*net.IPNet) error {
+	var rules []nodeipt.Rule
+	for _, cidr := range cidrs {
+		rules = append(rules, getLocalGatewayPodSubnetNATRules(cidr)...)
+	}
+	return appendIptRules(rules)
+}
+
+func delLocalGatewayPodSubnetNATRules(cidrs ...*net.IPNet) error {
+	var rules []nodeipt.Rule
+	for _, cidr := range cidrs {
+		rules = append(rules, getLocalGatewayPodSubnetNATRules(cidr)...)
+	}
+	return deleteIptRules(rules)
 }
 
 func addChaintoTable(ipt util.IPTablesHelper, tableName, chain string) {

@@ -394,6 +394,7 @@ func (nc *DefaultNodeNetworkController) initGateway(subnets []*net.IPNet, nodeAn
 	if portClaimWatcher != nil {
 		gw.portClaimWatcher = portClaimWatcher
 	}
+	gw.isRoutingAdvertised = nc.isRoutingAdvertised()
 
 	initGwFunc := func() error {
 		return gw.Init(nc.stopChan, nc.wg)
@@ -548,9 +549,8 @@ func (nc *DefaultNodeNetworkController) updateGatewayMAC(link netlink.Link) erro
 	}
 	// MAC must have changed, update node
 	nc.gateway.SetDefaultGatewayBridgeMAC(link.Attrs().HardwareAddr)
-	if err := nc.gateway.Reconcile(); err != nil {
-		return fmt.Errorf("failed to reconcile gateway for MAC address update: %w", err)
-	}
+	nc.gateway.Reconcile()
+
 	nodeAnnotator := kube.NewNodeAnnotator(nc.Kube, node.Name)
 	l3gwConf.MACAddress = link.Attrs().HardwareAddr
 	if err := util.SetL3GatewayConfig(nodeAnnotator, l3gwConf); err != nil {

@@ -1363,7 +1363,7 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 	return dftFlows, nil
 }
 
-func commonFlows(subnets []*net.IPNet, bridge *bridgeConfiguration) ([]string, error) {
+func commonFlows(subnets []*net.IPNet, bridge *bridgeConfiguration, isRoutingAdvertised bool) ([]string, error) {
 	// CAUTION: when adding new flows where the in_port is ofPortPatch and the out_port is ofPortPhys, ensure
 	// that dl_src is included in match criteria!
 	ofPortPhys := bridge.ofPortPhys
@@ -1548,10 +1548,17 @@ func commonFlows(subnets []*net.IPNet, bridge *bridgeConfiguration) ([]string, e
 	}
 
 	if ofPortPhys != "" {
-		actions := fmt.Sprintf("output:%s", ofPortPatch)
-
-		if config.Gateway.DisableSNATMultipleGWs {
+		if config.Gateway.DisableSNATMultipleGWs || isRoutingAdvertised {
 			// table 1, traffic to pod subnet go directly to OVN
+			output := ofPortPatch
+			if isRoutingAdvertised && config.Gateway.Mode == config.GatewayModeLocal {
+				// except if advertised through BGP, go to kernel
+				// TODO: MEG enabled pods should still go through the patch port
+				// but holding this until
+				// https://issues.redhat.com/browse/FDP-646 is fixed, for now we
+				// are assuming MEG & BGP are not used together
+				output = ovsLocalPort
+			}
 			for _, clusterEntry := range config.Default.ClusterSubnets {
 				cidr := clusterEntry.CIDR
 				var ipPrefix string
@@ -1562,8 +1569,8 @@ func commonFlows(subnets []*net.IPNet, bridge *bridgeConfiguration) ([]string, e
 				}
 				dftFlows = append(dftFlows,
 					fmt.Sprintf("cookie=%s, priority=15, table=1, %s, %s_dst=%s, "+
-						"actions=%s",
-						defaultOpenFlowCookie, ipPrefix, ipPrefix, cidr, actions))
+						"actions=output:%s",
+						defaultOpenFlowCookie, ipPrefix, ipPrefix, cidr, output))
 			}
 		}
 
@@ -1778,7 +1785,7 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 		// resync flows on IP change
 		gw.nodeIPManager.OnChanged = func() {
 			klog.V(5).Info("Node addresses changed, re-syncing bridge flows")
-			if err := gw.openflowManager.updateBridgeFlowCache(subnets, gw.nodeIPManager.ListAddresses()); err != nil {
+			if err := gw.openflowManager.updateBridgeFlowCache(subnets, gw.nodeIPManager.ListAddresses(), gw.isRoutingAdvertised); err != nil {
 				// very unlikely - somehow node has lost its IP address
 				klog.Errorf("Failed to re-generate gateway flows after address change: %v", err)
 			}

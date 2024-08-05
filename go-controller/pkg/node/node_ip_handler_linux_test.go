@@ -364,13 +364,11 @@ func configureKubeOVNContext(nodeName string, useNetlink bool) *testCtx {
 		link:      nil,
 		routerMAC: nil,
 		ipv4: &managementPortIPFamilyConfig{
-			ipt:        nil,
 			allSubnets: nil,
 			ifAddr:     tc.mgmtPortIP4,
 			gwIP:       tc.mgmtPortIP4.IP,
 		},
 		ipv6: &managementPortIPFamilyConfig{
-			ipt:        nil,
 			allSubnets: nil,
 			ifAddr:     tc.mgmtPortIP6,
 			gwIP:       tc.mgmtPortIP6.IP,
