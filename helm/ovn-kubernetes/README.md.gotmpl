@@ -54,7 +54,16 @@ some of these subcharts are installed to provide the aforementioned OVN K8s
 CNI features, this can be done by editing `tags` section in values.yaml file.
 
 ## Quickstart:
-Run script `helm/basic-deploy.sh` to set up a basic OVN/Kubernetes cluster.
+- Install Kind, see https://kind.sigs.k8s.io
+- Run script `contrib/kind-helm.sh` to set up a basic OVN/Kubernetes cluster.
+- Run following command to set up a OVN/Kubernetes cluster with single-node-zone interconnect enabled.
+  ```
+  contrib/kind-helm.sh -ic
+  ```
+- Add `-npz` (node-per-zone) to set up cluster with multi-node-zone interconnect 
+  ```
+  contrib/kind-helm.sh -ic -wk 3 -npz 2
+  ```
 
 ## Manual steps:
 - Disable IPv6 of `kind` docker network, otherwise ovnkube-node will fail to start

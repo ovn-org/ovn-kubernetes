@@ -127,7 +127,7 @@ spec:
         - name: OVN_HYBRID_OVERLAY_NET_CIDR
           value: {{ default "" .Values.global.hybridOverlayNetCidr | quote }}
         - name: OVN_DISABLE_SNAT_MULTIPLE_GWS
-          value: {{ default "" .Values.disableSnatMultipleGws | quote }}
+          value: {{ default "" .Values.global.disableSnatMultipleGws | quote }}
         - name: OVN_EMPTY_LB_EVENTS
           value: {{ default "" .Values.global.emptyLbEvents | quote }}
         - name: OVN_V4_JOIN_SUBNET
@@ -151,6 +151,12 @@ spec:
           value: {{ hasKey .Values.global "enableInterconnect" | ternary .Values.global.enableInterconnect false | quote }}
         - name: OVN_ENABLE_MULTI_EXTERNAL_GATEWAY
           value: {{ hasKey .Values.global "enableMultiExternalGateway" | ternary .Values.global.enableMultiExternalGateway false | quote }}
+        - name: OVN_V4_TRANSIT_SWITCH_SUBNET
+          value: {{ default "" .Values.global.v4TransitSwitchSubnet | quote }}
+        - name: OVN_V6_TRANSIT_SWITCH_SUBNET
+          value: {{ default "" .Values.global.v6TransitSwitchSubnet | quote }}
+        - name: OVN_ENABLE_PERSISTENT_IPS
+          value: {{ hasKey .Values.global "enablePersistentIPs" | ternary .Values.global.enablePersistentIPs false | quote }}
         - name: OVN_ENABLE_DNSNAMERESOLVER
           value: {{ hasKey .Values.global "enableDNSNameResolver" | ternary .Values.global.enableDNSNameResolver false | quote }}
       # end of container

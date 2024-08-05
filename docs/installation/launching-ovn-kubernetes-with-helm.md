@@ -233,7 +233,7 @@ false
 			<td>Whether or not to enable hybrid overlay functionality</td>
 		</tr>
 		<tr>
-			<td>global.enableInterConnect</td>
+			<td>global.enableInterconnect</td>
 			<td>bool</td>
 			<td><pre lang="json">
 false

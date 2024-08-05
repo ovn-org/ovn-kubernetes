@@ -150,12 +150,18 @@ rules:
       verbs: [ "get", "list", "watch" ]
     - apiGroups: ["k8s.cni.cncf.io"]
       resources:
+          - ipamclaims
           - multi-networkpolicies
       verbs: ["list", "get", "watch"]
+    - apiGroups: [ "k8s.cni.cncf.io" ]
+      resources:
+          - ipamclaims/status
+      verbs: [ "patch", "update" ]
     - apiGroups: ["k8s.ovn.org"]
       resources:
           - egressfirewalls/status
           - adminpolicybasedexternalroutes/status
+          - egressqoses/status
       verbs: [ "patch", "update" ]
     - apiGroups: ["policy.networking.k8s.io"]
       resources:

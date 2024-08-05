@@ -56,7 +56,16 @@ some of these subcharts are installed to provide the aforementioned OVN K8s
 CNI features, this can be done by editing `tags` section in values.yaml file.
 
 ## Quickstart:
-Run script `helm/basic-deploy.sh` to set up a basic OVN/Kubernetes cluster.
+- Install Kind, see https://kind.sigs.k8s.io
+- Run script `contrib/kind-helm.sh` to set up a basic OVN/Kubernetes cluster.
+- Run following command to set up a OVN/Kubernetes cluster with single-node-zone interconnect enabled.
+  ```
+  contrib/kind-helm.sh -ic
+  ```
+- Add `-npz` (node-per-zone) to set up cluster with multi-node-zone interconnect
+  ```
+  contrib/kind-helm.sh -ic -wk 3 -npz 2
+  ```
 
 ## Manual steps:
 - Disable IPv6 of `kind` docker network, otherwise ovnkube-node will fail to start
@@ -212,6 +221,15 @@ false
 			<td>Enables monitoring OVN-Kubernetes master and OVN configuration duration</td>
 		</tr>
 		<tr>
+			<td>global.enableDNSNameResolver</td>
+			<td>bool</td>
+			<td><pre lang="json">
+false
+</pre>
+</td>
+			<td>Configure to use DNSNameResolver feature with ovn-kubernetes</td>
+		</tr>
+		<tr>
 			<td>global.enableEgressFirewall</td>
 			<td>bool</td>
 			<td><pre lang="json">
@@ -257,7 +275,7 @@ true
 			<td>Whether or not to enable hybrid overlay functionality</td>
 		</tr>
 		<tr>
-			<td>global.enableInterConnect</td>
+			<td>global.enableInterconnect</td>
 			<td>bool</td>
 			<td><pre lang="json">
 false
@@ -602,7 +620,7 @@ false
 			<td>global.v4MasqueradeSubnet</td>
 			<td>string</td>
 			<td><pre lang="json">
-""
+"169.254.0.0/17"
 </pre>
 </td>
 			<td>The v4 masquerade subnet used for assigning masquerade IPv4 addresses</td>
@@ -620,7 +638,7 @@ false
 			<td>global.v6MasqueradeSubnet</td>
 			<td>string</td>
 			<td><pre lang="json">
-""
+"fd69::/112"
 </pre>
 </td>
 			<td>The v6 masquerade subnet used for assigning masquerade IPv6 addresses</td>
@@ -675,6 +693,15 @@ false
 </pre>
 </td>
 			<td>number of ovnube-identity pods, co-located with kube-apiserver process, so need to be the same number of control plane nodes</td>
+		</tr>
+		<tr>
+			<td>ovnkube-master.replicas</td>
+			<td>int</td>
+			<td><pre lang="json">
+1
+</pre>
+</td>
+			<td>number of ovnkube-master pods</td>
 		</tr>
 		<tr>
 			<td>podNetwork</td>
