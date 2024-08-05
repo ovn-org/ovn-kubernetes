@@ -197,7 +197,7 @@ spec:
             memory: 300Mi
         env:
         - name: OVN_DAEMONSET_VERSION
-          value: "1.0.0s"
+          value: "1.0.0"
         - name: OVN_LOGLEVEL_NORTHD
           value: {{ default "-vconsole:info -vfile:info" .Values.northdLogLevel | quote }}
         - name: K8S_APISERVER
@@ -426,7 +426,7 @@ spec:
         - name: OVN_ENABLE_OVNKUBE_IDENTITY
           value: {{ hasKey .Values.global "enableOvnKubeIdentity" | ternary .Values.global.enableOvnKubeIdentity true | quote }}
         - name: OVN_ENABLE_SVC_TEMPLATE_SUPPORT
-          value: {{ hasKey .Values.global "enableSvcTemplate" | ternary .Values.global.enableSvcTemplate true | quote }
+          value: {{ hasKey .Values.global "enableSvcTemplate" | ternary .Values.global.enableSvcTemplate true | quote }}
         - name: OVN_ENABLE_DNSNAMERESOLVER
           value: {{ hasKey .Values.global "enableDNSNameResolver" | ternary .Values.global.enableDNSNameResolver false | quote }}
         readinessProbe:
