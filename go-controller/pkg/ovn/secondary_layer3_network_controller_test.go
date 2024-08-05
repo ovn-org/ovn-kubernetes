@@ -44,6 +44,11 @@ const (
 	secondaryNetworkName = "isolatednet"
 )
 
+type testConfiguration struct {
+	configToOverride   *config.OVNKubernetesFeatureConfig
+	expectationOptions []option
+}
+
 var _ = Describe("OVN Multi-Homed pod operations", func() {
 	var (
 		app       *cli.App
@@ -67,8 +72,7 @@ var _ = Describe("OVN Multi-Homed pod operations", func() {
 			},
 		}
 
-		config.OVNKubernetesFeature.EnableNetworkSegmentation = true
-		config.OVNKubernetesFeature.EnableMultiNetwork = true
+		config.OVNKubernetesFeature = *minimalFeatureConfig()
 		config.Gateway.V4MasqueradeSubnet = dummyMasqueradeSubnet().String()
 	})
 
@@ -78,8 +82,11 @@ var _ = Describe("OVN Multi-Homed pod operations", func() {
 
 	table.DescribeTable(
 		"reconciles a new",
-		func(netInfo secondaryNetInfo) {
+		func(netInfo secondaryNetInfo, testConfig testConfiguration) {
 			podInfo := dummyTestPod(ns, netInfo)
+			if testConfig.configToOverride != nil {
+				config.OVNKubernetesFeature = *testConfig.configToOverride
+			}
 			app.Action = func(ctx *cli.Context) error {
 				nad, err := newNetworkAttachmentDefinition(
 					ns,
@@ -150,7 +157,7 @@ var _ = Describe("OVN Multi-Homed pod operations", func() {
 				}).WithTimeout(2 * time.Second).Should(MatchJSON(podInfo.getAnnotationsJson()))
 
 				defaultNetExpectations := getDefaultNetExpectedPodsAndSwitches([]testPod{podInfo}, []string{nodeName})
-				var expectationOptions []option
+				expectationOptions := testConfig.expectationOptions
 				if netInfo.isPrimary {
 					defaultNetExpectations = emptyDefaultClusterNetworkNodeSwitch(podInfo.nodeName)
 					gwConfig, err := util.ParseNodeL3GatewayAnnotation(testNode)
@@ -175,10 +182,19 @@ var _ = Describe("OVN Multi-Homed pod operations", func() {
 		},
 		table.Entry("pod on a user defined secondary network",
 			dummySecondaryUserDefinedNetwork("192.168.0.0/16"),
+			nonICClusterTestConfiguration(),
 		),
-
 		table.Entry("pod on a user defined primary network",
 			dummyPrimaryUserDefinedNetwork("192.168.0.0/16"),
+			nonICClusterTestConfiguration(),
+		),
+		table.Entry("pod on a user defined secondary network on an interconnect cluster",
+			dummySecondaryUserDefinedNetwork("192.168.0.0/16"),
+			icClusterTestConfiguration(),
+		),
+		table.Entry("pod on a user defined primary network on an interconnect cluster",
+			dummyPrimaryUserDefinedNetwork("192.168.0.0/16"),
+			icClusterTestConfiguration(),
 		),
 	)
 
@@ -754,4 +770,28 @@ func standardNonDefaultNetworkExtIDs(netInfo util.NetInfo) map[string]string {
 		"k8s.ovn.org/topology": netInfo.TopologyType(),
 		"k8s.ovn.org/network":  netInfo.GetNetworkName(),
 	}
+}
+
+func minimalFeatureConfig() *config.OVNKubernetesFeatureConfig {
+	return &config.OVNKubernetesFeatureConfig{
+		EnableNetworkSegmentation: true,
+		EnableMultiNetwork:        true,
+	}
+}
+
+func enableICFeatureConfig() *config.OVNKubernetesFeatureConfig {
+	featConfig := minimalFeatureConfig()
+	featConfig.EnableInterconnect = true
+	return featConfig
+}
+
+func icClusterTestConfiguration() testConfiguration {
+	return testConfiguration{
+		configToOverride:   enableICFeatureConfig(),
+		expectationOptions: []option{withInterconnectCluster()},
+	}
+}
+
+func nonICClusterTestConfiguration() testConfiguration {
+	return testConfiguration{}
 }

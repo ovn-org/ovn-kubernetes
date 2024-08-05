@@ -69,9 +69,10 @@ func splitPodIPMaskLength(podIP string) (int, string) {
 type option func(machine *secondaryNetworkExpectationMachine)
 
 type secondaryNetworkExpectationMachine struct {
-	fakeOvn       *FakeOVN
-	pods          []testPod
-	gatewayConfig *util.L3GatewayConfig
+	fakeOvn               *FakeOVN
+	pods                  []testPod
+	gatewayConfig         *util.L3GatewayConfig
+	isInterconnectCluster bool
 }
 
 func newSecondaryNetworkExpectationMachine(fakeOvn *FakeOVN, pods []testPod, opts ...option) *secondaryNetworkExpectationMachine {
@@ -89,6 +90,12 @@ func newSecondaryNetworkExpectationMachine(fakeOvn *FakeOVN, pods []testPod, opt
 func withGatewayConfig(config *util.L3GatewayConfig) option {
 	return func(machine *secondaryNetworkExpectationMachine) {
 		machine.gatewayConfig = config
+	}
+}
+
+func withInterconnectCluster() option {
+	return func(machine *secondaryNetworkExpectationMachine) {
+		machine.isInterconnectCluster = true
 	}
 }
 
@@ -162,6 +169,20 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPorts() 
 			if em.gatewayConfig != nil {
 				data = append(data, expectedGWEntities(pod.nodeName, ocInfo.bnc, *em.gatewayConfig)...)
 				data = append(data, expectedLayer3EgressEntities(ocInfo.bnc, *em.gatewayConfig)...)
+			}
+			if em.isInterconnectCluster {
+				transitSwitchName := ocInfo.bnc.GetNetworkName() + "_transit_switch"
+				data = append(data, &nbdb.LogicalSwitch{
+					UUID: transitSwitchName + "-UUID",
+					Name: transitSwitchName,
+					OtherConfig: map[string]string{
+						"mcast_querier":            "false",
+						"mcast_flood_unregistered": "true",
+						"interconn-ts":             transitSwitchName,
+						"requested-tnl-key":        "16711685",
+						"mcast_snoop":              "true",
+					},
+				})
 			}
 		}
 
