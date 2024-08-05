@@ -39,9 +39,6 @@ var (
 		},
 	}
 
-	tcpv1 = v1.ProtocolTCP
-	udpv1 = v1.ProtocolUDP
-
 	httpPortName    string = "http"
 	httpPortValue   int32  = int32(80)
 	httpsPortName   string = "https"
@@ -128,9 +125,6 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 	inport1 := int32(81)
 	outport1 := int32(8081)
 	outportstr := intstr.FromInt(int(outport))
-	tcp := v1.ProtocolTCP
-	udp := v1.ProtocolUDP
-
 
 	// make slices
 	// nil slice = don't use this family
@@ -1223,7 +1217,8 @@ func Test_buildClusterLBs(t *testing.T) {
 	defaultGroups := []string{types.ClusterLBGroupName}
 	defaultOpts := LBOpts{Reject: true}
 
-	UDNGroups := []string{clusterLBGroupNameUDN}
+	UDNNetInfo := getSampleUDNNetInfo(namespace)
+	UDNGroups := []string{UDNNetInfo.GetNetworkScopedLoadBalancerGroupName(types.ClusterLBGroupName)}
 
 	tc := []struct {
 		name      string
@@ -1475,6 +1470,8 @@ func Test_buildPerNodeLBs(t *testing.T) {
 
 	name := "foo"
 	namespace := "testns"
+
+	UDNNetInfo := getSampleUDNNetInfo(namespace)
 
 	defaultService := &v1.Service{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
@@ -3260,7 +3257,7 @@ func Test_getEndpointsForService(t *testing.T) {
 			name: "empty slices",
 			args: args{
 				slices: []*discovery.EndpointSlice{},
-				svc:    getSampleServiceWithOnePort(httpPortName, httpPortValue, tcpv1),
+				svc:    getSampleServiceWithOnePort(httpPortName, httpPortValue, tcp),
 			},
 			wantClusterEndpoints: map[string]lbEndpoints{},            // no cluster-wide endpoints
 			wantNodeEndpoints:    map[string]map[string]lbEndpoints{}, // no local endpoints
@@ -3278,7 +3275,7 @@ func Test_getEndpointsForService(t *testing.T) {
 						Ports: []discovery.EndpointPort{
 							{
 								Name:     ptr.To("tcp-example"),
-								Protocol: &tcpv1,
+								Protocol: &tcp,
 								Port:     ptr.To(int32(80)),
 							},
 						},
@@ -3286,11 +3283,11 @@ func Test_getEndpointsForService(t *testing.T) {
 						Endpoints:   kube_test.MakeReadyEndpointList(nodeA, "10.0.0.2"),
 					},
 				},
-				svc:   getSampleServiceWithOnePort("tcp-example", 80, tcpv1),
+				svc:   getSampleServiceWithOnePort("tcp-example", 80, tcp),
 				nodes: sets.New(nodeA), // one-node zone
 			},
 			wantClusterEndpoints: map[string]lbEndpoints{
-				getServicePortKey(tcpv1, "tcp-example"): {V4IPs: []string{"10.0.0.2"}, Port: 80}}, // one cluster-wide endpoint
+				getServicePortKey(tcp, "tcp-example"): {V4IPs: []string{"10.0.0.2"}, Port: 80}}, // one cluster-wide endpoint
 			wantNodeEndpoints: map[string]map[string]lbEndpoints{}, // no need for local endpoints, service is not ETP or ITP local
 		},
 		{
@@ -3306,7 +3303,7 @@ func Test_getEndpointsForService(t *testing.T) {
 						Ports: []discovery.EndpointPort{
 							{
 								Name:     ptr.To("tcp-example"),
-								Protocol: &tcpv1,
+								Protocol: &tcp,
 								Port:     ptr.To(int32(80)),
 							},
 						},
@@ -3314,13 +3311,13 @@ func Test_getEndpointsForService(t *testing.T) {
 						Endpoints:   kube_test.MakeReadyEndpointList(nodeA, "10.0.0.2"),
 					},
 				},
-				svc:   getSampleServiceWithOnePortAndETPLocal("tcp-example", 80, tcpv1),
+				svc:   getSampleServiceWithOnePortAndETPLocal("tcp-example", 80, tcp),
 				nodes: sets.New(nodeA), // one-node zone
 			},
 			wantClusterEndpoints: map[string]lbEndpoints{
-				getServicePortKey(tcpv1, "tcp-example"): {V4IPs: []string{"10.0.0.2"}, Port: 80}}, // one cluster-wide endpoint
+				getServicePortKey(tcp, "tcp-example"): {V4IPs: []string{"10.0.0.2"}, Port: 80}}, // one cluster-wide endpoint
 			wantNodeEndpoints: map[string]map[string]lbEndpoints{
-				getServicePortKey(tcpv1, "tcp-example"): {nodeA: lbEndpoints{V4IPs: []string{"10.0.0.2"}, Port: 80}}}, // ETP=local, one local endpoint
+				getServicePortKey(tcp, "tcp-example"): {nodeA: lbEndpoints{V4IPs: []string{"10.0.0.2"}, Port: 80}}}, // ETP=local, one local endpoint
 		},
 		{
 			name: "slice with one non-local endpoint, ETP=local",
@@ -3335,7 +3332,7 @@ func Test_getEndpointsForService(t *testing.T) {
 						Ports: []discovery.EndpointPort{
 							{
 								Name:     ptr.To("tcp-example"),
-								Protocol: &tcpv1,
+								Protocol: &tcp,
 								Port:     ptr.To(int32(80)),
 							},
 						},
@@ -3343,11 +3340,11 @@ func Test_getEndpointsForService(t *testing.T) {
 						Endpoints:   kube_test.MakeReadyEndpointList(nodeB, "10.0.0.2"),
 					},
 				},
-				svc:   getSampleServiceWithOnePortAndETPLocal("tcp-example", 80, tcpv1),
+				svc:   getSampleServiceWithOnePortAndETPLocal("tcp-example", 80, tcp),
 				nodes: sets.New(nodeA), // one-node zone
 			},
 			wantClusterEndpoints: map[string]lbEndpoints{
-				getServicePortKey(tcpv1, "tcp-example"): {V4IPs: []string{"10.0.0.2"}, Port: 80}}, // one cluster-wide endpoint
+				getServicePortKey(tcp, "tcp-example"): {V4IPs: []string{"10.0.0.2"}, Port: 80}}, // one cluster-wide endpoint
 			wantNodeEndpoints: map[string]map[string]lbEndpoints{}, // ETP=local but no local endpoint
 		},
 		{
@@ -3363,7 +3360,7 @@ func Test_getEndpointsForService(t *testing.T) {
 						Ports: []discovery.EndpointPort{
 							{
 								Name:     ptr.To("tcp-example"),
-								Protocol: &tcpv1,
+								Protocol: &tcp,
 								Port:     ptr.To(int32(80)),
 							},
 						},
@@ -3371,7 +3368,7 @@ func Test_getEndpointsForService(t *testing.T) {
 						Endpoints:   kube_test.MakeReadyEndpointList(nodeA, "example.com"),
 					},
 				},
-				svc:   getSampleServiceWithOnePort("tcp-example", 80, tcpv1),
+				svc:   getSampleServiceWithOnePort("tcp-example", 80, tcp),
 				nodes: sets.New(nodeA), // one-node zone
 			},
 			wantClusterEndpoints: map[string]lbEndpoints{},            // no endpoints
@@ -3390,7 +3387,7 @@ func Test_getEndpointsForService(t *testing.T) {
 						Ports: []discovery.EndpointPort{
 							{
 								Name:     ptr.To("tcp-example"),
-								Protocol: &tcpv1,
+								Protocol: &tcp,
 								Port:     ptr.To(int32(80)),
 							},
 						},
@@ -3398,13 +3395,13 @@ func Test_getEndpointsForService(t *testing.T) {
 						Endpoints:   kube_test.MakeReadyEndpointList(nodeB, "10.0.0.2"),
 					},
 				},
-				svc:   getSampleServiceWithOnePortAndETPLocal("tcp-example", 80, tcpv1),
+				svc:   getSampleServiceWithOnePortAndETPLocal("tcp-example", 80, tcp),
 				nodes: sets.New(nodeA, nodeB), // one-node zone
 			},
 			wantClusterEndpoints: map[string]lbEndpoints{
-				getServicePortKey(tcpv1, "tcp-example"): {V4IPs: []string{"10.0.0.2"}, Port: 80}}, // one cluster-wide endpoint
+				getServicePortKey(tcp, "tcp-example"): {V4IPs: []string{"10.0.0.2"}, Port: 80}}, // one cluster-wide endpoint
 			wantNodeEndpoints: map[string]map[string]lbEndpoints{
-				getServicePortKey(tcpv1, "tcp-example"): {nodeB: lbEndpoints{V4IPs: []string{"10.0.0.2"}, Port: 80}}}, // endpoint on nodeB
+				getServicePortKey(tcp, "tcp-example"): {nodeB: lbEndpoints{V4IPs: []string{"10.0.0.2"}, Port: 80}}}, // endpoint on nodeB
 		},
 		{
 			name: "slice with different port name than the service",
@@ -3427,7 +3424,7 @@ func Test_getEndpointsForService(t *testing.T) {
 						Endpoints:   kube_test.MakeReadyEndpointList(nodeA, "10.0.0.2"),
 					},
 				},
-				svc:   getSampleServiceWithOnePort("tcp-example", 80, tcpv1),
+				svc:   getSampleServiceWithOnePort("tcp-example", 80, tcp),
 				nodes: sets.New(nodeA), // one-node zone
 			},
 			wantClusterEndpoints: map[string]lbEndpoints{},            // no cluster-wide endpoints
@@ -3445,7 +3442,7 @@ func Test_getEndpointsForService(t *testing.T) {
 						},
 						Ports: []discovery.EndpointPort{
 							{
-								Protocol: &tcpv1,
+								Protocol: &tcp,
 								Port:     ptr.To(int32(8080)),
 							},
 						},
@@ -3453,14 +3450,14 @@ func Test_getEndpointsForService(t *testing.T) {
 						Endpoints:   kube_test.MakeReadyEndpointList(nodeA, "10.0.0.2"),
 					},
 				},
-				svc:   getSampleServiceWithOnePortAndETPLocal("", 80, tcpv1), // port with no name
-				nodes: sets.New(nodeA),                                       // one-node zone
+				svc:   getSampleServiceWithOnePortAndETPLocal("", 80, tcp), // port with no name
+				nodes: sets.New(nodeA),                                     // one-node zone
 
 			},
 			wantClusterEndpoints: map[string]lbEndpoints{
-				getServicePortKey(tcpv1, ""): {V4IPs: []string{"10.0.0.2"}, Port: 8080}}, // one cluster-wide endpoint
+				getServicePortKey(tcp, ""): {V4IPs: []string{"10.0.0.2"}, Port: 8080}}, // one cluster-wide endpoint
 			wantNodeEndpoints: map[string]map[string]lbEndpoints{
-				getServicePortKey(tcpv1, ""): {nodeA: lbEndpoints{V4IPs: []string{"10.0.0.2"}, Port: 8080}}}, // one local endpoint
+				getServicePortKey(tcp, ""): {nodeA: lbEndpoints{V4IPs: []string{"10.0.0.2"}, Port: 8080}}}, // one local endpoint
 		},
 		{
 			name: "slice with an IPv6 endpoint",
@@ -3483,11 +3480,11 @@ func Test_getEndpointsForService(t *testing.T) {
 						Endpoints:   kube_test.MakeReadyEndpointList(nodeA, "2001:db2::2"),
 					},
 				},
-				svc:   getSampleServiceWithOnePort("tcp-example", 80, tcpv1),
+				svc:   getSampleServiceWithOnePort("tcp-example", 80, tcp),
 				nodes: sets.New(nodeA), // one-node zone
 			},
 			wantClusterEndpoints: map[string]lbEndpoints{
-				getServicePortKey(tcpv1, "tcp-example"): {V6IPs: []string{"2001:db2::2"}, Port: 80}}, // one cluster-wide endpoint
+				getServicePortKey(tcp, "tcp-example"): {V6IPs: []string{"2001:db2::2"}, Port: 80}}, // one cluster-wide endpoint
 			wantNodeEndpoints: map[string]map[string]lbEndpoints{}, //  local endpoints not filled in, since service is not ETP or ITP local
 		},
 		{
@@ -3527,13 +3524,13 @@ func Test_getEndpointsForService(t *testing.T) {
 						Endpoints:   kube_test.MakeReadyEndpointList(nodeA, "2001:db2::2"),
 					},
 				},
-				svc:   getSampleServiceWithOnePortAndETPLocal("tcp-example", 80, tcpv1),
+				svc:   getSampleServiceWithOnePortAndETPLocal("tcp-example", 80, tcp),
 				nodes: sets.New(nodeA), // one-node zone
 			},
 			wantClusterEndpoints: map[string]lbEndpoints{
-				getServicePortKey(tcpv1, "tcp-example"): {V4IPs: []string{"10.0.0.2"}, V6IPs: []string{"2001:db2::2"}, Port: 80}},
+				getServicePortKey(tcp, "tcp-example"): {V4IPs: []string{"10.0.0.2"}, V6IPs: []string{"2001:db2::2"}, Port: 80}},
 			wantNodeEndpoints: map[string]map[string]lbEndpoints{
-				getServicePortKey(tcpv1, "tcp-example"): {nodeA: lbEndpoints{V4IPs: []string{"10.0.0.2"}, V6IPs: []string{"2001:db2::2"}, Port: 80}}},
+				getServicePortKey(tcp, "tcp-example"): {nodeA: lbEndpoints{V4IPs: []string{"10.0.0.2"}, V6IPs: []string{"2001:db2::2"}, Port: 80}}},
 		},
 		{
 			name: "one slice with a duplicate address in the same endpoint",
@@ -3556,11 +3553,11 @@ func Test_getEndpointsForService(t *testing.T) {
 						Endpoints:   kube_test.MakeReadyEndpointList(nodeA, "10.0.0.2", "10.0.0.2"),
 					},
 				},
-				svc:   getSampleServiceWithOnePort("tcp-example", 80, tcpv1),
+				svc:   getSampleServiceWithOnePort("tcp-example", 80, tcp),
 				nodes: sets.New(nodeA), // one-node zone
 			},
 			wantClusterEndpoints: map[string]lbEndpoints{
-				getServicePortKey(tcpv1, "tcp-example"): {V4IPs: []string{"10.0.0.2"}, Port: 80}},
+				getServicePortKey(tcp, "tcp-example"): {V4IPs: []string{"10.0.0.2"}, Port: 80}},
 			wantNodeEndpoints: map[string]map[string]lbEndpoints{}, // local endpoints not filled in, since service is not ETP or ITP local
 		},
 		{
@@ -3584,11 +3581,11 @@ func Test_getEndpointsForService(t *testing.T) {
 						Endpoints:   []discovery.Endpoint{kube_test.MakeReadyEndpoint(nodeA, "10.0.0.2"), kube_test.MakeReadyEndpoint(nodeA, "10.0.0.2")},
 					},
 				},
-				svc:   getSampleServiceWithOnePort("tcp-example", 80, tcpv1),
+				svc:   getSampleServiceWithOnePort("tcp-example", 80, tcp),
 				nodes: sets.New(nodeA), // one-node zone
 			},
 			wantClusterEndpoints: map[string]lbEndpoints{
-				getServicePortKey(tcpv1, "tcp-example"): {V4IPs: []string{"10.0.0.2"}, Port: 80}},
+				getServicePortKey(tcp, "tcp-example"): {V4IPs: []string{"10.0.0.2"}, Port: 80}},
 			wantNodeEndpoints: map[string]map[string]lbEndpoints{}, // local endpoints not filled in, since service is not ETP or ITP local
 		},
 		{
@@ -3628,11 +3625,11 @@ func Test_getEndpointsForService(t *testing.T) {
 						Endpoints:   kube_test.MakeReadyEndpointList(nodeA, "10.0.0.2", "10.2.2.2"),
 					},
 				},
-				svc:   getSampleServiceWithOnePort("tcp-example", 80, tcpv1),
+				svc:   getSampleServiceWithOnePort("tcp-example", 80, tcp),
 				nodes: sets.New(nodeA), // one-node zone
 			},
 			wantClusterEndpoints: map[string]lbEndpoints{
-				getServicePortKey(tcpv1, "tcp-example"): {V4IPs: []string{"10.0.0.2", "10.1.1.2", "10.2.2.2"}, Port: 80}},
+				getServicePortKey(tcp, "tcp-example"): {V4IPs: []string{"10.0.0.2", "10.1.1.2", "10.2.2.2"}, Port: 80}},
 			wantNodeEndpoints: map[string]map[string]lbEndpoints{}, // local endpoints not filled in, since service is not ETP or ITP local
 		},
 		{
@@ -3672,15 +3669,15 @@ func Test_getEndpointsForService(t *testing.T) {
 						Endpoints:   kube_test.MakeReadyEndpointList(nodeA, "10.0.0.3", "10.2.2.3"),
 					},
 				},
-				svc:   getSampleServiceWithTwoPortsAndETPLocal("tcp-example", "other-port", 80, 8080, tcpv1, tcpv1),
+				svc:   getSampleServiceWithTwoPortsAndETPLocal("tcp-example", "other-port", 80, 8080, tcp, tcp),
 				nodes: sets.New(nodeA), // one-node zone
 			},
 			wantClusterEndpoints: map[string]lbEndpoints{
-				getServicePortKey(tcpv1, "tcp-example"): {V4IPs: []string{"10.0.0.2", "10.1.1.2"}, Port: 80},
-				getServicePortKey(tcpv1, "other-port"):  {V4IPs: []string{"10.0.0.3", "10.2.2.3"}, Port: 8080}},
+				getServicePortKey(tcp, "tcp-example"): {V4IPs: []string{"10.0.0.2", "10.1.1.2"}, Port: 80},
+				getServicePortKey(tcp, "other-port"):  {V4IPs: []string{"10.0.0.3", "10.2.2.3"}, Port: 8080}},
 			wantNodeEndpoints: map[string]map[string]lbEndpoints{
-				getServicePortKey(tcpv1, "tcp-example"): {nodeA: lbEndpoints{V4IPs: []string{"10.0.0.2", "10.1.1.2"}, Port: 80}},
-				getServicePortKey(tcpv1, "other-port"):  {nodeA: lbEndpoints{V4IPs: []string{"10.0.0.3", "10.2.2.3"}, Port: 8080}}},
+				getServicePortKey(tcp, "tcp-example"): {nodeA: lbEndpoints{V4IPs: []string{"10.0.0.2", "10.1.1.2"}, Port: 80}},
+				getServicePortKey(tcp, "other-port"):  {nodeA: lbEndpoints{V4IPs: []string{"10.0.0.3", "10.2.2.3"}, Port: 8080}}},
 		},
 		{
 			name: "multiples slices with different ports, OVN zone with two nodes, ETP=local",
@@ -3719,15 +3716,15 @@ func Test_getEndpointsForService(t *testing.T) {
 						Endpoints:   kube_test.MakeReadyEndpointList(nodeB, "10.0.0.3", "10.2.2.3"),
 					},
 				},
-				svc:   getSampleServiceWithTwoPortsAndETPLocal("tcp-example", "other-port", 80, 8080, tcpv1, tcpv1),
+				svc:   getSampleServiceWithTwoPortsAndETPLocal("tcp-example", "other-port", 80, 8080, tcp, tcp),
 				nodes: sets.New(nodeA, nodeB), // zone with two nodes
 			},
 			wantClusterEndpoints: map[string]lbEndpoints{
-				getServicePortKey(tcpv1, "tcp-example"): {V4IPs: []string{"10.0.0.2", "10.1.1.2"}, Port: 80},
-				getServicePortKey(tcpv1, "other-port"):  {V4IPs: []string{"10.0.0.3", "10.2.2.3"}, Port: 8080}},
+				getServicePortKey(tcp, "tcp-example"): {V4IPs: []string{"10.0.0.2", "10.1.1.2"}, Port: 80},
+				getServicePortKey(tcp, "other-port"):  {V4IPs: []string{"10.0.0.3", "10.2.2.3"}, Port: 8080}},
 			wantNodeEndpoints: map[string]map[string]lbEndpoints{
-				getServicePortKey(tcpv1, "tcp-example"): {nodeA: lbEndpoints{V4IPs: []string{"10.0.0.2", "10.1.1.2"}, Port: 80}},
-				getServicePortKey(tcpv1, "other-port"):  {nodeB: lbEndpoints{V4IPs: []string{"10.0.0.3", "10.2.2.3"}, Port: 8080}}},
+				getServicePortKey(tcp, "tcp-example"): {nodeA: lbEndpoints{V4IPs: []string{"10.0.0.2", "10.1.1.2"}, Port: 80}},
+				getServicePortKey(tcp, "other-port"):  {nodeB: lbEndpoints{V4IPs: []string{"10.0.0.3", "10.2.2.3"}, Port: 8080}}},
 		},
 		{
 			name: "slice with a mix of ready and terminating (serving and non-serving) endpoints",
@@ -3756,12 +3753,12 @@ func Test_getEndpointsForService(t *testing.T) {
 						},
 					},
 				},
-				svc:   getSampleServiceWithOnePort("tcp-example", 80, tcpv1),
+				svc:   getSampleServiceWithOnePort("tcp-example", 80, tcp),
 				nodes: sets.New(nodeA), // one-node zone
 
 			},
 			wantClusterEndpoints: map[string]lbEndpoints{
-				getServicePortKey(tcpv1, "tcp-example"): {V6IPs: []string{"2001:db2::2", "2001:db2::3"}, Port: 80}},
+				getServicePortKey(tcp, "tcp-example"): {V6IPs: []string{"2001:db2::2", "2001:db2::3"}, Port: 80}},
 			wantNodeEndpoints: map[string]map[string]lbEndpoints{}, // local endpoints not filled in, since service is not ETP or ITP local
 		},
 		{
@@ -3790,11 +3787,11 @@ func Test_getEndpointsForService(t *testing.T) {
 						},
 					},
 				},
-				svc:   getSampleServiceWithOnePort("tcp-example", 80, tcpv1),
+				svc:   getSampleServiceWithOnePort("tcp-example", 80, tcp),
 				nodes: sets.New(nodeA), // one-node zone
 			},
 			wantClusterEndpoints: map[string]lbEndpoints{
-				getServicePortKey(tcpv1, "tcp-example"): {V6IPs: []string{"2001:db2::4", "2001:db2::5"}, Port: 80}},
+				getServicePortKey(tcp, "tcp-example"): {V6IPs: []string{"2001:db2::4", "2001:db2::5"}, Port: 80}},
 			wantNodeEndpoints: map[string]map[string]lbEndpoints{}, // local endpoints not filled in, since service is not ETP or ITP local
 		},
 		{
@@ -3821,7 +3818,7 @@ func Test_getEndpointsForService(t *testing.T) {
 						},
 					},
 				},
-				svc:   getSampleServiceWithOnePort("tcp-example", 80, tcpv1),
+				svc:   getSampleServiceWithOnePort("tcp-example", 80, tcp),
 				nodes: sets.New(nodeA), // one-node zone
 			},
 			wantClusterEndpoints: map[string]lbEndpoints{},            // no cluster-wide endpoints
@@ -3871,11 +3868,11 @@ func Test_getEndpointsForService(t *testing.T) {
 						},
 					},
 				},
-				svc:   getSampleServiceWithOnePort("tcp-example", 80, tcpv1),
+				svc:   getSampleServiceWithOnePort("tcp-example", 80, tcp),
 				nodes: sets.New(nodeA), // one-node zone
 			},
 			wantClusterEndpoints: map[string]lbEndpoints{
-				getServicePortKey(tcpv1, "tcp-example"): {V6IPs: []string{"2001:db2::3", "2001:db2::4"}, Port: 80}},
+				getServicePortKey(tcp, "tcp-example"): {V6IPs: []string{"2001:db2::3", "2001:db2::4"}, Port: 80}},
 			wantNodeEndpoints: map[string]map[string]lbEndpoints{}, // local endpoints not filled in, since service is not ETP or ITP local
 		},
 		{
@@ -3919,7 +3916,7 @@ func Test_getEndpointsForService(t *testing.T) {
 						},
 					},
 				},
-				svc:   getSampleServiceWithOnePort("tcp-example", 80, tcpv1),
+				svc:   getSampleServiceWithOnePort("tcp-example", 80, tcp),
 				nodes: sets.New(nodeA), // one-node zone
 			},
 			wantClusterEndpoints: map[string]lbEndpoints{},            // no cluster-wide endpoints
@@ -3971,11 +3968,11 @@ func Test_getEndpointsForService(t *testing.T) {
 						},
 					},
 				},
-				svc:   getSampleServiceWithOnePort("tcp-example", 80, tcpv1),
+				svc:   getSampleServiceWithOnePort("tcp-example", 80, tcp),
 				nodes: sets.New(nodeA), // one-node zone
 			},
 			wantClusterEndpoints: map[string]lbEndpoints{
-				getServicePortKey(tcpv1, "tcp-example"): {V4IPs: []string{"10.0.0.2"}, V6IPs: []string{"2001:db2::2"}, Port: 80}},
+				getServicePortKey(tcp, "tcp-example"): {V4IPs: []string{"10.0.0.2"}, V6IPs: []string{"2001:db2::2"}, Port: 80}},
 			wantNodeEndpoints: map[string]map[string]lbEndpoints{}, // local endpoints not filled in, since service is not ETP or ITP local
 		},
 		{
@@ -4021,11 +4018,11 @@ func Test_getEndpointsForService(t *testing.T) {
 						},
 					},
 				},
-				svc:   getSampleServiceWithOnePort("tcp-example", 80, tcpv1),
+				svc:   getSampleServiceWithOnePort("tcp-example", 80, tcp),
 				nodes: sets.New(nodeA), // one-node zone
 			},
 			wantClusterEndpoints: map[string]lbEndpoints{
-				getServicePortKey(tcpv1, "tcp-example"): {V4IPs: []string{"10.0.0.3"}, V6IPs: []string{"2001:db2::3"}, Port: 80}},
+				getServicePortKey(tcp, "tcp-example"): {V4IPs: []string{"10.0.0.3"}, V6IPs: []string{"2001:db2::3"}, Port: 80}},
 			wantNodeEndpoints: map[string]map[string]lbEndpoints{}, // local endpoints not filled in, since service is not ETP or ITP local
 		},
 		{
@@ -4069,7 +4066,7 @@ func Test_getEndpointsForService(t *testing.T) {
 						},
 					},
 				},
-				svc:   getSampleServiceWithOnePort("tcp-example", 80, tcpv1),
+				svc:   getSampleServiceWithOnePort("tcp-example", 80, tcp),
 				nodes: sets.New(nodeA), // one-node zone
 
 			},
@@ -4121,11 +4118,11 @@ func Test_getEndpointsForService(t *testing.T) {
 						},
 					},
 				},
-				svc:   getSampleServiceWithOnePortAndPublishNotReadyAddresses("tcp-example", 80, tcpv1), // <-- publishNotReadyAddresses=true
-				nodes: sets.New(nodeA),                                                                  // one-node zone
+				svc:   getSampleServiceWithOnePortAndPublishNotReadyAddresses("tcp-example", 80, tcp), // <-- publishNotReadyAddresses=true
+				nodes: sets.New(nodeA),                                                                // one-node zone
 			},
 			wantClusterEndpoints: map[string]lbEndpoints{
-				getServicePortKey(tcpv1, "tcp-example"): {
+				getServicePortKey(tcp, "tcp-example"): {
 					V4IPs: []string{"10.0.0.2", "10.0.0.3", "10.0.0.4"},
 					V6IPs: []string{"2001:db2::2", "2001:db2::3", "2001:db2::4"}, Port: 80}},
 
