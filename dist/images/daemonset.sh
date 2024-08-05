@@ -71,6 +71,7 @@ OVN_EGRESSSERVICE_ENABLE=
 OVN_DISABLE_OVN_IFACE_ID_VER="false"
 OVN_MULTI_NETWORK_ENABLE=
 OVN_NETWORK_SEGMENTATION_ENABLE=
+OVN_ROUTE_ADVERTISEMENTS_ENABLE=
 OVN_V4_JOIN_SUBNET=""
 OVN_V6_JOIN_SUBNET=""
 OVN_V4_MASQUERADE_SUBNET=""
@@ -266,6 +267,9 @@ while [ "$1" != "" ]; do
   --network-segmentation-enable)
     OVN_NETWORK_SEGMENTATION_ENABLE=$VALUE
     ;;
+  --route-advertisements-enable)
+    OVN_ROUTE_ADVERTISEMENTS_ENABLE=$VALUE
+    ;;
   --egress-service-enable)
     OVN_EGRESSSERVICE_ENABLE=$VALUE
     ;;
@@ -440,6 +444,8 @@ ovn_multi_network_enable=${OVN_MULTI_NETWORK_ENABLE}
 echo "ovn_multi_network_enable: ${ovn_multi_network_enable}"
 ovn_network_segmentation_enable=${OVN_NETWORK_SEGMENTATION_ENABLE}
 echo "ovn_network_segmentation_enable: ${ovn_network_segmentation_enable}"
+ovn_route_advertisements_enable=${OVN_ROUTE_ADVERTISEMENTS_ENABLE}
+echo "ovn_route_advertisements_enable: ${ovn_route_advertisements_enable}"
 ovn_hybrid_overlay_net_cidr=${OVN_HYBRID_OVERLAY_NET_CIDR}
 echo "ovn_hybrid_overlay_net_cidr: ${ovn_hybrid_overlay_net_cidr}"
 ovn_disable_snat_multiple_gws=${OVN_DISABLE_SNAT_MULTIPLE_GWS}
@@ -565,6 +571,7 @@ ovn_image=${ovnkube_image} \
   ovn_egress_ip_healthcheck_port=${ovn_egress_ip_healthcheck_port} \
   ovn_multi_network_enable=${ovn_multi_network_enable} \
   ovn_network_segmentation_enable=${ovn_network_segmentation_enable} \
+  ovn_route_advertisements_enable=${ovn_route_advertisements_enable} \
   ovn_egress_service_enable=${ovn_egress_service_enable} \
   ovn_ssl_en=${ovn_ssl_en} \
   ovn_remote_probe_interval=${ovn_remote_probe_interval} \
@@ -616,6 +623,7 @@ ovn_image=${ovnkube_image} \
   ovn_egress_ip_healthcheck_port=${ovn_egress_ip_healthcheck_port} \
   ovn_multi_network_enable=${ovn_multi_network_enable} \
   ovn_network_segmentation_enable=${ovn_network_segmentation_enable} \
+  ovn_route_advertisements_enable=${ovn_route_advertisements_enable} \
   ovn_egress_service_enable=${ovn_egress_service_enable} \
   ovn_ssl_en=${ovn_ssl_en} \
   ovn_remote_probe_interval=${ovn_remote_probe_interval} \
@@ -711,6 +719,7 @@ ovn_image=${ovnkube_image} \
   ovn_egress_qos_enable=${ovn_egress_qos_enable} \
   ovn_multi_network_enable=${ovn_multi_network_enable} \
   ovn_network_segmentation_enable=${ovn_network_segmentation_enable} \
+  ovn_route_advertisements_enable=${ovn_route_advertisements_enable} \
   ovn_egress_service_enable=${ovn_egress_service_enable} \
   ovn_ssl_en=${ovn_ssl_en} \
   ovn_master_count=${ovn_master_count} \
@@ -754,6 +763,7 @@ ovn_image=${ovnkube_image} \
   ovn_egress_qos_enable=${ovn_egress_qos_enable} \
   ovn_multi_network_enable=${ovn_multi_network_enable} \
   ovn_network_segmentation_enable=${ovn_network_segmentation_enable} \
+  ovn_route_advertisements_enable=${ovn_route_advertisements_enable} \
   ovn_egress_service_enable=${ovn_egress_service_enable} \
   ovn_ssl_en=${ovn_ssl_en} \
   ovn_master_count=${ovn_master_count} \
@@ -828,6 +838,7 @@ ovn_image=${ovnkube_image} \
   ovn_egress_qos_enable=${ovn_egress_qos_enable} \
   ovn_multi_network_enable=${ovn_multi_network_enable} \
   ovn_network_segmentation_enable=${ovn_network_segmentation_enable} \
+  ovn_route_advertisements_enable=${ovn_route_advertisements_enable} \
   ovn_egress_service_enable=${ovn_egress_service_enable} \
   ovn_ssl_en=${ovn_ssl_en} \
   ovn_remote_probe_interval=${ovn_remote_probe_interval} \
@@ -889,6 +900,7 @@ ovn_image=${ovnkube_image} \
   ovn_egress_qos_enable=${ovn_egress_qos_enable} \
   ovn_multi_network_enable=${ovn_multi_network_enable} \
   ovn_network_segmentation_enable=${ovn_network_segmentation_enable} \
+  ovn_route_advertisements_enable=${ovn_route_advertisements_enable} \
   ovn_ssl_en=${ovn_ssl_en} \
   ovn_remote_probe_interval=${ovn_remote_probe_interval} \
   ovn_monitor_all=${ovn_monitor_all} \
@@ -992,5 +1004,6 @@ cp ../templates/k8s.ovn.org_egressips.yaml.j2 ${output_dir}/k8s.ovn.org_egressip
 cp ../templates/k8s.ovn.org_egressqoses.yaml.j2 ${output_dir}/k8s.ovn.org_egressqoses.yaml
 cp ../templates/k8s.ovn.org_egressservices.yaml.j2 ${output_dir}/k8s.ovn.org_egressservices.yaml
 cp ../templates/k8s.ovn.org_adminpolicybasedexternalroutes.yaml.j2 ${output_dir}/k8s.ovn.org_adminpolicybasedexternalroutes.yaml
+cp ../templates/k8s.ovn.org_routeadvertisements.yaml.j2 ${output_dir}/k8s.ovn.org_routeadvertisements.yaml
 
 exit 0
