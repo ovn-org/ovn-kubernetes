@@ -53,15 +53,21 @@ rules:
       verbs: [ "get", "list", "watch" ]
     - apiGroups: ["k8s.cni.cncf.io"]
       resources:
+          - ipamclaims
           - network-attachment-definitions
           - multi-networkpolicies
       verbs: ["list", "get", "watch"]
+    - apiGroups: [ "k8s.cni.cncf.io" ]
+      resources:
+      - ipamclaims/status
+      verbs: [ "patch", "update" ]
     - apiGroups: ["k8s.ovn.org"]
       resources:
           - egressips
           - egressservices
           - adminpolicybasedexternalroutes
           - egressfirewalls
+          - egressqoses
       verbs: [ "get", "list", "watch" ]
     - apiGroups: ["k8s.ovn.org"]
       resources:
@@ -82,6 +88,7 @@ rules:
       resources:
         - adminpolicybasedexternalroutes/status
         - egressfirewalls/status
+        - egressqoses/status
       verbs: [ "patch", "update" ]
     {{- if eq (hasKey .Values.global "enableDNSNameResolver" | ternary .Values.global.enableDNSNameResolver false) true }}
     - apiGroups: ["network.openshift.io"]
@@ -89,3 +96,13 @@ rules:
           - dnsnameresolvers
       verbs: [ "create", "delete", "list", "patch", "update", "watch" ]
     {{- end }}
+    - apiGroups: ["policy.networking.k8s.io"]
+      resources:
+          - adminnetworkpolicies
+          - baselineadminnetworkpolicies
+      verbs: [ "list" ]
+    - apiGroups: ["policy.networking.k8s.io"]
+      resources:
+          - adminnetworkpolicies/status
+          - baselineadminnetworkpolicies/status
+      verbs: [ "patch" ]

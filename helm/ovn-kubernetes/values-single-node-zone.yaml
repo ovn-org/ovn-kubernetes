@@ -1,13 +1,15 @@
-# Values for ovn-kubernetes.
+# Values for ovn-kubernetes with single-node zone interconnect
+# Requires: ovnkube-single-node-zone, ovnkube-control-plane
 
 # -- list of dependent subcharts that need to be installed for the given deployment mode, these subcharts haven't been tested yet.
 tags:
   ovn-ipsec: false
-  ovnkube-control-plane: false
+  ovnkube-db: false
   ovnkube-db-raft: false
+  ovnkube-master: false
+  ovnkube-node: false
   ovnkube-node-dpu: false
   ovnkube-node-dpu-host: false
-  ovnkube-single-node-zone: false
   ovnkube-zone-controller: false
 
 # -- Endpoint of Kubernetes api server
@@ -71,7 +73,7 @@ global:
   # -- Use SSL transport to NB/SB db and northd
   enableSsl: false
   # -- Configure to enable interconnecting multiple zones
-  enableInterConnect: false
+  enableInterconnect: true
   # -- Configure to use AdminPolicyBasedExternalRoute CRD feature with ovn-kubernetes
   enableMultiExternalGateway: true
   # -- Configure to use stateless network policy feature with ovn-kubernetes
@@ -87,8 +89,6 @@ global:
   # -- Indicates if ovn-controller should enable/disable the logical flow in-memory cache when processing Southbound database logical flow changes
   # @default -- true
   enableLFlowCache: true
-  # -- Configure to use DNSNameResolver feature with ovn-kubernetes
-  enableDNSNameResolver: false
   # -- Maximum number of logical flow cache entries ovn-controller may create when the logical flow cache is enabled
   # @default -- unlimited
   lFlowCacheLimit: ""
@@ -145,13 +145,6 @@ global:
     tag: master
     # -- Image pull policy
     pullPolicy: IfNotPresent
-  # -- The name of secret used for pulling image. Use only if needed
-  imagePullSecretName: ""
-  # -- The secret used for pulling image. Use only if needed. Set create to have have secret created by helm
-  dockerConfigSecret:
-    registry: ghcr.io
-    auth: blah_blah_blah
-    create: false
 
 ovnkube-identity:
     # -- number of ovnube-identity pods, co-located with kube-apiserver process, so need to be the same number of control plane nodes
