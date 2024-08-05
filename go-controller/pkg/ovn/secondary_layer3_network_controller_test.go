@@ -20,8 +20,12 @@ import (
 
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 
+	libovsdbclient "github.com/ovn-org/libovsdb/client"
+
 	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
@@ -203,6 +207,110 @@ var _ = Describe("OVN Multi-Homed pod operations", func() {
 		),
 	)
 
+	table.DescribeTable(
+		"the gateway is properly cleaned up",
+		func(netInfo secondaryNetInfo, testConfig testConfiguration) {
+			podInfo := dummyTestPod(ns, netInfo)
+			if testConfig.configToOverride != nil {
+				config.OVNKubernetesFeature = *testConfig.configToOverride
+			}
+			app.Action = func(ctx *cli.Context) error {
+				netConf := netInfo.netconf()
+				networkConfig, err := util.NewNetInfo(netConf)
+				Expect(err).NotTo(HaveOccurred())
+
+				nad, err := newNetworkAttachmentDefinition(
+					ns,
+					nadName,
+					*netConf,
+				)
+				Expect(err).NotTo(HaveOccurred())
+
+				const nodeIPv4CIDR = "192.168.126.202/24"
+				testNode, err := newNodeWithSecondaryNets(nodeName, nodeIPv4CIDR, netInfo)
+				Expect(err).NotTo(HaveOccurred())
+
+				defaultNetExpectations := emptyDefaultClusterNetworkNodeSwitch(podInfo.nodeName)
+				gwConfig, err := util.ParseNodeL3GatewayAnnotation(testNode)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(gwConfig.NextHops).NotTo(BeEmpty())
+
+				if netInfo.isPrimary {
+					gwConfig, err := util.ParseNodeL3GatewayAnnotation(testNode)
+					Expect(err).NotTo(HaveOccurred())
+					initialDB.NBData = append(
+						initialDB.NBData,
+						expectedGWEntities(podInfo.nodeName, networkConfig, *gwConfig)...)
+					initialDB.NBData = append(
+						initialDB.NBData,
+						expectedLayer3EgressEntities(networkConfig, *gwConfig)...)
+				}
+
+				fakeOvn.startWithDBSetup(
+					initialDB,
+					&v1.NamespaceList{
+						Items: []v1.Namespace{
+							*newNamespace(ns),
+						},
+					},
+					&v1.NodeList{
+						Items: []v1.Node{*testNode},
+					},
+					&v1.PodList{
+						Items: []v1.Pod{
+							*newMultiHomedPod(podInfo.namespace, podInfo.podName, podInfo.nodeName, podInfo.podIP, netInfo),
+						},
+					},
+					&nadapi.NetworkAttachmentDefinitionList{
+						Items: []nadapi.NetworkAttachmentDefinition{*nad},
+					},
+				)
+
+				Expect(netInfo.setupOVNDependencies(&initialDB)).To(Succeed())
+
+				podInfo.populateLogicalSwitchCache(fakeOvn)
+
+				// pod exists, networks annotations don't
+				pod, err := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(podInfo.namespace).Get(context.Background(), podInfo.podName, metav1.GetOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				_, ok := pod.Annotations[util.OvnPodAnnotationName]
+				Expect(ok).To(BeFalse())
+
+				Expect(fakeOvn.controller.WatchNamespaces()).To(Succeed())
+				Expect(fakeOvn.controller.WatchPods()).To(Succeed())
+				secondaryNetController, ok := fakeOvn.secondaryControllers[secondaryNetworkName]
+				Expect(ok).To(BeTrue())
+
+				secondaryNetController.bnc.ovnClusterLRPToJoinIfAddrs = dummyJoinIPs()
+				podInfo.populateSecondaryNetworkLogicalSwitchCache(fakeOvn, secondaryNetController)
+				Expect(secondaryNetController.bnc.WatchNodes()).To(Succeed())
+				Expect(secondaryNetController.bnc.WatchPods()).To(Succeed())
+
+				Expect(fakeOvn.fakeClient.KubeClient.CoreV1().Pods(pod.Namespace).Delete(context.Background(), pod.Name, metav1.DeleteOptions{})).To(Succeed())
+				Expect(fakeOvn.fakeClient.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(nad.Namespace).Delete(context.Background(), nad.Name, metav1.DeleteOptions{})).To(Succeed())
+
+				// we must access the layer3 controller to be able to issue its cleanup function (to remove the GW related stuff).
+				Expect(
+					newSecondaryLayer3NetworkController(
+						&secondaryNetController.bnc.CommonNetworkControllerInfo,
+						networkConfig,
+						nodeName,
+					).Cleanup()).To(Succeed())
+				Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(defaultNetExpectations))
+
+				return nil
+			}
+			Expect(app.Run([]string{app.Name})).To(Succeed())
+		},
+		table.Entry("pod on a user defined primary network",
+			dummyPrimaryUserDefinedNetwork("192.168.0.0/16"),
+			nonICClusterTestConfiguration(),
+		),
+		table.Entry("pod on a user defined primary network on an interconnect cluster",
+			dummyPrimaryUserDefinedNetwork("192.168.0.0/16"),
+			icClusterTestConfiguration(),
+		),
+	)
 })
 
 func newPodWithPrimaryUDN(
@@ -801,4 +909,30 @@ func icClusterTestConfiguration() testConfiguration {
 
 func nonICClusterTestConfiguration() testConfiguration {
 	return testConfiguration{}
+}
+
+func newSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netInfo util.NetInfo, nodeName string) *SecondaryLayer3NetworkController {
+	layer3NetworkController := NewSecondaryLayer3NetworkController(cnci, netInfo)
+	layer3NetworkController.gatewayManagers.Store(
+		nodeName,
+		newDummyGatewayManager(cnci.kube, cnci.nbClient, netInfo, cnci.watchFactory, nodeName),
+	)
+	return layer3NetworkController
+}
+
+func newDummyGatewayManager(
+	kube kube.InterfaceOVN,
+	nbClient libovsdbclient.Client,
+	netInfo util.NetInfo,
+	factory *factory.WatchFactory,
+	nodeName string,
+) *GatewayManager {
+	return NewGatewayManager(
+		nodeName,
+		"",
+		kube,
+		nbClient,
+		netInfo,
+		factory,
+	)
 }
