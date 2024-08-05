@@ -1877,7 +1877,7 @@ func completeGatewayConfig(allSubnets *configSubnets, masqueradeIPs *MasqueradeI
 	if err != nil || utilnet.IsIPv6(v4MasqueradeCIDR.IP) {
 		return fmt.Errorf("invalid gateway v4 masquerade subnet specified, subnet: %s: error: %v", Gateway.V4MasqueradeSubnet, err)
 	}
-	if err = allocateV4MasqueradeIPs(v4MasqueradeIP, masqueradeIPs); err != nil {
+	if err = AllocateV4MasqueradeIPs(v4MasqueradeIP, masqueradeIPs); err != nil {
 		return fmt.Errorf("unable to allocate V4MasqueradeIPs: %s", err)
 	}
 
@@ -1885,7 +1885,7 @@ func completeGatewayConfig(allSubnets *configSubnets, masqueradeIPs *MasqueradeI
 	if err != nil || !utilnet.IsIPv6(v6MasqueradeCIDR.IP) {
 		return fmt.Errorf("invalid gateway v6 masquerade subnet specified, subnet: %s: error: %v", Gateway.V6MasqueradeSubnet, err)
 	}
-	if err = allocateV6MasqueradeIPs(v6MasqueradeIP, masqueradeIPs); err != nil {
+	if err = AllocateV6MasqueradeIPs(v6MasqueradeIP, masqueradeIPs); err != nil {
 		return fmt.Errorf("unable to allocate V6MasqueradeIPs: %s", err)
 	}
 

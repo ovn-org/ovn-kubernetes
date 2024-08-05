@@ -30,6 +30,7 @@ var commonNodeAnnotationChecks = map[string]checkNodeAnnot{
 	util.OvnNodeL3GatewayConfig:            nil,
 	util.OvnNodeManagementPortMacAddresses: nil,
 	util.OvnNodeIfAddr:                     nil,
+	util.OvnNodeMasqCIDR:                   nil,
 	util.OvnNodeGatewayMtuSupport:          nil,
 	util.OvnNodeManagementPort:             nil,
 	util.OvnNodeChassisID: func(v annotationChange, nodeName string) error {

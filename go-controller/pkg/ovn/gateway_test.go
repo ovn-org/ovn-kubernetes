@@ -9,6 +9,7 @@ import (
 	"github.com/onsi/ginkgo"
 	"github.com/onsi/gomega"
 	"github.com/onsi/gomega/format"
+	v1 "k8s.io/api/core/v1"
 
 	utilnet "k8s.io/utils/net"
 
@@ -116,10 +117,11 @@ func generateGatewayInitExpectedNB(testData []libovsdbtest.TestData, expectedOVN
 		grStaticRoutes = append(grStaticRoutes, staticServiceRouteNamedUUID)
 
 		testData = append(testData, &nbdb.LogicalRouterStaticRoute{
-			UUID:       staticServiceRouteNamedUUID,
-			IPPrefix:   config.Gateway.V4MasqueradeSubnet,
-			Nexthop:    config.Gateway.MasqueradeIPs.V4DummyNextHopMasqueradeIP.String(),
-			OutputPort: &externalRouterPort,
+			UUID:        staticServiceRouteNamedUUID,
+			IPPrefix:    config.Gateway.V4MasqueradeSubnet,
+			Nexthop:     config.Gateway.MasqueradeIPs.V4DummyNextHopMasqueradeIP.String(),
+			OutputPort:  &externalRouterPort,
+			ExternalIDs: map[string]string{util.OvnNodeMasqCIDR: ""},
 		})
 		testData = append(testData, &nbdb.StaticMACBinding{
 			UUID:               "MAC-binding-UUID",
@@ -134,10 +136,11 @@ func generateGatewayInitExpectedNB(testData []libovsdbtest.TestData, expectedOVN
 		grStaticRoutes = append(grStaticRoutes, staticServiceRouteNamedUUID)
 
 		testData = append(testData, &nbdb.LogicalRouterStaticRoute{
-			UUID:       staticServiceRouteNamedUUID,
-			IPPrefix:   config.Gateway.V6MasqueradeSubnet,
-			Nexthop:    config.Gateway.MasqueradeIPs.V6DummyNextHopMasqueradeIP.String(),
-			OutputPort: &externalRouterPort,
+			UUID:        staticServiceRouteNamedUUID,
+			IPPrefix:    config.Gateway.V6MasqueradeSubnet,
+			Nexthop:     config.Gateway.MasqueradeIPs.V6DummyNextHopMasqueradeIP.String(),
+			OutputPort:  &externalRouterPort,
+			ExternalIDs: map[string]string{util.OvnNodeMasqCIDR: ""},
 		})
 		testData = append(testData, &nbdb.StaticMACBinding{
 			UUID:               "MAC-binding-2-UUID",
@@ -411,8 +414,213 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				ChassisID:      "SYSTEM-ID",
 				InterfaceID:    "INTERFACE-ID",
 				MACAddress:     ovntest.MustParseMAC("11:22:33:44:55:66"),
-				IPAddresses:    ovntest.MustParseIPNets("169.254.33.2/24"),
-				NextHops:       ovntest.MustParseIPs("169.254.33.1"),
+				IPAddresses:    ovntest.MustParseIPNets("169.255.33.2/24"),
+				NextHops:       ovntest.MustParseIPs("169.255.33.1"),
+				NodePortEnable: true,
+			}
+			sctpSupport := false
+
+			var err error
+			fakeOvn.controller.defaultCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			err = fakeOvn.controller.gatewayInit(
+				nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs, true)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			testData := []libovsdbtest.TestData{}
+			skipSnat := false
+			expectedOVNClusterRouter.StaticRoutes = []string{} // the leftover LGW route should have got deleted
+			// We don't set up the Allow from mgmt port ACL here
+			mgmtPortIP := ""
+			expectedDatabaseState := generateGatewayInitExpectedNB(testData, expectedOVNClusterRouter, expectedNodeSwitch,
+				nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, joinLRPIPs, defLRPIPs, skipSnat, mgmtPortIP,
+				"1400")
+			gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+		})
+
+		ginkgo.It("removes stale MAC and route for old masquerade subnet using auto-detect", func() {
+			routeUUID := "route-UUID"
+			outputPort := types.GWRouterToExtSwitchPrefix + types.GWRouterPrefix + nodeName
+			leftoverMasqueradeIPRoute := &nbdb.LogicalRouterStaticRoute{
+				Nexthop:     "170.254.169.4",
+				IPPrefix:    "170.254.169.0/16",
+				OutputPort:  &outputPort,
+				UUID:        routeUUID,
+				ExternalIDs: map[string]string{util.OvnNodeMasqCIDR: ""},
+			}
+			leftoverStaticMAC := &nbdb.StaticMACBinding{
+				IP:          "170.254.169.4",
+				LogicalPort: types.GWRouterToExtSwitchPrefix + types.GWRouterPrefix + nodeName,
+			}
+			GRName := "GR_" + nodeName
+			expectedOVNGatewayRouter := &nbdb.LogicalRouter{
+				UUID: GRName + "-UUID",
+				Name: GRName,
+				Options: map[string]string{
+					"lb_force_snat_ip":              "router_ip",
+					"snat-ct-zone":                  "0",
+					"always_learn_from_arp_request": "false",
+					"dynamic_neigh_routers":         "true",
+					"mac_binding_age_threshold":     types.GRMACBindingAgeThreshold,
+				},
+				StaticRoutes: []string{routeUUID},
+			}
+			expectedOVNClusterRouter := &nbdb.LogicalRouter{
+				UUID: types.OVNClusterRouter + "-UUID",
+				Name: types.OVNClusterRouter,
+			}
+			expectedNodeSwitch := &nbdb.LogicalSwitch{
+				UUID: nodeName + "-UUID",
+				Name: nodeName,
+			}
+			expectedClusterLBGroup := &nbdb.LoadBalancerGroup{
+				UUID: types.ClusterLBGroupName + "-UUID",
+				Name: types.ClusterLBGroupName,
+			}
+			expectedSwitchLBGroup := &nbdb.LoadBalancerGroup{
+				UUID: types.ClusterSwitchLBGroupName + "-UUID",
+				Name: types.ClusterSwitchLBGroupName,
+			}
+			expectedRouterLBGroup := &nbdb.LoadBalancerGroup{
+				UUID: types.ClusterRouterLBGroupName + "-UUID",
+				Name: types.ClusterRouterLBGroupName,
+			}
+			fakeOvn.startWithDBSetup(libovsdbtest.TestSetup{
+				NBData: []libovsdbtest.TestData{
+					// tests migration from local to shared
+					leftoverMasqueradeIPRoute,
+					leftoverStaticMAC,
+					&nbdb.LogicalSwitch{
+						UUID: types.OVNJoinSwitch + "-UUID",
+						Name: types.OVNJoinSwitch,
+					},
+					expectedOVNClusterRouter,
+					expectedOVNGatewayRouter,
+					expectedNodeSwitch,
+					expectedClusterLBGroup,
+					expectedSwitchLBGroup,
+					expectedRouterLBGroup,
+				},
+			})
+
+			clusterIPSubnets := ovntest.MustParseIPNets("10.128.0.0/14")
+			hostSubnets := ovntest.MustParseIPNets("10.130.0.0/23")
+			joinLRPIPs := ovntest.MustParseIPNets("100.64.0.3/16")
+			defLRPIPs := ovntest.MustParseIPNets("100.64.0.1/16")
+			l3GatewayConfig := &util.L3GatewayConfig{
+				Mode:           config.GatewayModeLocal,
+				ChassisID:      "SYSTEM-ID",
+				InterfaceID:    "INTERFACE-ID",
+				MACAddress:     ovntest.MustParseMAC("11:22:33:44:55:66"),
+				IPAddresses:    ovntest.MustParseIPNets("169.255.33.2/24"),
+				NextHops:       ovntest.MustParseIPs("169.255.33.1"),
+				NodePortEnable: true,
+			}
+			sctpSupport := false
+
+			var err error
+			fakeOvn.controller.defaultCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			err = fakeOvn.controller.gatewayInit(
+				nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs, true)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			testData := []libovsdbtest.TestData{}
+			skipSnat := false
+			expectedOVNClusterRouter.StaticRoutes = []string{} // the leftover LGW route should have got deleted
+			// We don't set up the Allow from mgmt port ACL here
+			mgmtPortIP := ""
+			expectedDatabaseState := generateGatewayInitExpectedNB(testData, expectedOVNClusterRouter, expectedNodeSwitch,
+				nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, joinLRPIPs, defLRPIPs, skipSnat, mgmtPortIP,
+				"1400")
+			gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+		})
+
+		ginkgo.It("removes stale MAC and route for old masquerade subnet using stale annotation", func() {
+			routeUUID := "route-UUID"
+			outputPort := types.GWRouterToExtSwitchPrefix + types.GWRouterPrefix + nodeName
+			leftoverMasqueradeIPRoute := &nbdb.LogicalRouterStaticRoute{
+				Nexthop:     "170.254.169.4",
+				IPPrefix:    "170.254.169.0/16",
+				OutputPort:  &outputPort,
+				UUID:        routeUUID,
+				ExternalIDs: map[string]string{util.OvnNodeMasqCIDR: ""},
+			}
+			leftoverStaticMAC := &nbdb.StaticMACBinding{
+				IP:          "170.254.169.4",
+				LogicalPort: types.GWRouterToExtSwitchPrefix + types.GWRouterPrefix + nodeName,
+			}
+			GRName := "GR_" + nodeName
+			expectedOVNGatewayRouter := &nbdb.LogicalRouter{
+				UUID: GRName + "-UUID",
+				Name: GRName,
+				Options: map[string]string{
+					"lb_force_snat_ip":              "router_ip",
+					"snat-ct-zone":                  "0",
+					"always_learn_from_arp_request": "false",
+					"dynamic_neigh_routers":         "true",
+					"mac_binding_age_threshold":     types.GRMACBindingAgeThreshold,
+				},
+				StaticRoutes: []string{routeUUID},
+			}
+			expectedOVNClusterRouter := &nbdb.LogicalRouter{
+				UUID: types.OVNClusterRouter + "-UUID",
+				Name: types.OVNClusterRouter,
+			}
+			expectedNodeSwitch := &nbdb.LogicalSwitch{
+				UUID: nodeName + "-UUID",
+				Name: nodeName,
+			}
+			expectedClusterLBGroup := &nbdb.LoadBalancerGroup{
+				UUID: types.ClusterLBGroupName + "-UUID",
+				Name: types.ClusterLBGroupName,
+			}
+			expectedSwitchLBGroup := &nbdb.LoadBalancerGroup{
+				UUID: types.ClusterSwitchLBGroupName + "-UUID",
+				Name: types.ClusterSwitchLBGroupName,
+			}
+			expectedRouterLBGroup := &nbdb.LoadBalancerGroup{
+				UUID: types.ClusterRouterLBGroupName + "-UUID",
+				Name: types.ClusterRouterLBGroupName,
+			}
+			a := newObjectMeta(nodeName, "")
+			a.Annotations = map[string]string{
+				util.OvnNodeMasqCIDR: "{\"ipv4\":\"170.254.169.0/16\",\"ipv6\":\"fd69::/112\"}",
+			}
+			node1 := v1.Node{ObjectMeta: a}
+			fakeOvn.startWithDBSetup(libovsdbtest.TestSetup{
+				NBData: []libovsdbtest.TestData{
+					// tests migration from local to shared
+					leftoverMasqueradeIPRoute,
+					leftoverStaticMAC,
+					&nbdb.LogicalSwitch{
+						UUID: types.OVNJoinSwitch + "-UUID",
+						Name: types.OVNJoinSwitch,
+					},
+					expectedOVNClusterRouter,
+					expectedOVNGatewayRouter,
+					expectedNodeSwitch,
+					expectedClusterLBGroup,
+					expectedSwitchLBGroup,
+					expectedRouterLBGroup,
+				},
+			},
+				&v1.NodeList{Items: []v1.Node{node1}},
+			)
+
+			clusterIPSubnets := ovntest.MustParseIPNets("10.128.0.0/14")
+			hostSubnets := ovntest.MustParseIPNets("10.130.0.0/23")
+			joinLRPIPs := ovntest.MustParseIPNets("100.64.0.3/16")
+			defLRPIPs := ovntest.MustParseIPNets("100.64.0.1/16")
+			l3GatewayConfig := &util.L3GatewayConfig{
+				Mode:           config.GatewayModeLocal,
+				ChassisID:      "SYSTEM-ID",
+				InterfaceID:    "INTERFACE-ID",
+				MACAddress:     ovntest.MustParseMAC("11:22:33:44:55:66"),
+				IPAddresses:    ovntest.MustParseIPNets("169.255.33.2/24"),
+				NextHops:       ovntest.MustParseIPs("169.255.33.1"),
 				NodePortEnable: true,
 			}
 			sctpSupport := false
@@ -488,7 +696,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				ChassisID:      "SYSTEM-ID",
 				InterfaceID:    "INTERFACE-ID",
 				MACAddress:     ovntest.MustParseMAC("11:22:33:44:55:66"),
-				IPAddresses:    ovntest.MustParseIPNets("169.254.33.2/24"),
+				IPAddresses:    ovntest.MustParseIPNets("169.255.33.2/24"),
 				NodePortEnable: true,
 			}
 			sctpSupport := false
@@ -557,8 +765,8 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				ChassisID:      "SYSTEM-ID",
 				InterfaceID:    "INTERFACE-ID",
 				MACAddress:     ovntest.MustParseMAC("11:22:33:44:55:66"),
-				IPAddresses:    ovntest.MustParseIPNets("169.254.33.2/24"),
-				NextHops:       ovntest.MustParseIPs("169.254.33.1"),
+				IPAddresses:    ovntest.MustParseIPNets("169.255.33.2/24"),
+				NextHops:       ovntest.MustParseIPs("169.255.33.1"),
 				NodePortEnable: true,
 			}
 			sctpSupport := false
@@ -639,8 +847,8 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				ChassisID:      "SYSTEM-ID",
 				InterfaceID:    "INTERFACE-ID",
 				MACAddress:     ovntest.MustParseMAC("11:22:33:44:55:66"),
-				IPAddresses:    ovntest.MustParseIPNets("169.254.33.2/24"),
-				NextHops:       ovntest.MustParseIPs("169.254.33.1"),
+				IPAddresses:    ovntest.MustParseIPNets("169.255.33.2/24"),
+				NextHops:       ovntest.MustParseIPs("169.255.33.1"),
 				NodePortEnable: true,
 			}
 			sctpSupport := false
@@ -875,8 +1083,8 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				ChassisID:      "SYSTEM-ID",
 				InterfaceID:    "INTERFACE-ID",
 				MACAddress:     ovntest.MustParseMAC("11:22:33:44:55:66"),
-				IPAddresses:    ovntest.MustParseIPNets("169.254.33.2/24", "fd99::2/64"),
-				NextHops:       ovntest.MustParseIPs("169.254.33.1", "fd99::1"),
+				IPAddresses:    ovntest.MustParseIPNets("169.255.33.2/24", "fd99::2/64"),
+				NextHops:       ovntest.MustParseIPs("169.255.33.1", "fd99::1"),
 				NodePortEnable: true,
 			}
 			sctpSupport := false
@@ -944,8 +1152,8 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				ChassisID:      "SYSTEM-ID",
 				InterfaceID:    "INTERFACE-ID",
 				MACAddress:     ovntest.MustParseMAC("11:22:33:44:55:66"),
-				IPAddresses:    ovntest.MustParseIPNets("169.254.33.2/24"),
-				NextHops:       ovntest.MustParseIPs("169.254.33.1"),
+				IPAddresses:    ovntest.MustParseIPNets("169.255.33.2/24"),
+				NextHops:       ovntest.MustParseIPs("169.255.33.1"),
 				NodePortEnable: true,
 			}
 			sctpSupport := false
@@ -1046,8 +1254,8 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				ChassisID:      "SYSTEM-ID",
 				InterfaceID:    "INTERFACE-ID",
 				MACAddress:     ovntest.MustParseMAC("11:22:33:44:55:66"),
-				IPAddresses:    ovntest.MustParseIPNets("169.254.33.2/24"),
-				NextHops:       ovntest.MustParseIPs("169.254.33.1"),
+				IPAddresses:    ovntest.MustParseIPNets("169.255.33.2/24"),
+				NextHops:       ovntest.MustParseIPs("169.255.33.1"),
 				NodePortEnable: true,
 			}
 			sctpSupport := false
@@ -1150,8 +1358,8 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				ChassisID:      "SYSTEM-ID",
 				InterfaceID:    "INTERFACE-ID",
 				MACAddress:     ovntest.MustParseMAC("11:22:33:44:55:66"),
-				IPAddresses:    ovntest.MustParseIPNets("169.254.33.2/24", "fd99::2/64"),
-				NextHops:       ovntest.MustParseIPs("169.254.33.1", "fd99::1"),
+				IPAddresses:    ovntest.MustParseIPNets("169.255.33.2/24", "fd99::2/64"),
+				NextHops:       ovntest.MustParseIPs("169.255.33.1", "fd99::1"),
 				NodePortEnable: true,
 			}
 			sctpSupport := false
@@ -1228,8 +1436,8 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				ChassisID:      "SYSTEM-ID",
 				InterfaceID:    "INTERFACE-ID",
 				MACAddress:     ovntest.MustParseMAC("11:22:33:44:55:66"),
-				IPAddresses:    ovntest.MustParseIPNets("169.254.33.2/24"),
-				NextHops:       ovntest.MustParseIPs("169.254.33.1"),
+				IPAddresses:    ovntest.MustParseIPNets("169.255.33.2/24"),
+				NextHops:       ovntest.MustParseIPs("169.255.33.1"),
 				NodePortEnable: true,
 			}
 			sctpSupport := false
@@ -1335,8 +1543,8 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				ChassisID:      "SYSTEM-ID",
 				InterfaceID:    "INTERFACE-ID",
 				MACAddress:     ovntest.MustParseMAC("11:22:33:44:55:66"),
-				IPAddresses:    ovntest.MustParseIPNets("169.254.33.2/24"),
-				NextHops:       ovntest.MustParseIPs("169.254.33.1"),
+				IPAddresses:    ovntest.MustParseIPNets("169.255.33.2/24"),
+				NextHops:       ovntest.MustParseIPs("169.255.33.1"),
 				NodePortEnable: true,
 			}
 			sctpSupport := false

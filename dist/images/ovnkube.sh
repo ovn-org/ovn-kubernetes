@@ -2528,6 +2528,16 @@ ovn-node() {
   fi
   echo "ovn_conntrack_zone_flag=${ovn_conntrack_zone_flag}"
 
+  ovn_v4_masquerade_subnet_opt=
+  if [[ -n ${ovn_v4_masquerade_subnet} ]]; then
+      ovn_v4_masquerade_subnet_opt="--gateway-v4-masquerade-subnet=${ovn_v4_masquerade_subnet}"
+  fi
+
+  ovn_v6_masquerade_subnet_opt=
+  if [[ -n ${ovn_v6_masquerade_subnet} ]]; then
+    ovn_v6_masquerade_subnet_opt="--gateway-v6-masquerade-subnet=${ovn_v6_masquerade_subnet}"
+  fi
+
   echo "=============== ovn-node   --init-node"
   /usr/bin/ovnkube --init-node ${K8S_NODE} \
         ${anp_enabled_flag} \
@@ -2557,6 +2567,8 @@ ovn-node() {
         ${ovn_conntrack_zone_flag} \
         ${ovnkube_enable_interconnect_flag} \
         ${ovnkube_enable_multi_external_gateway_flag} \
+        ${ovn_v4_masquerade_subnet_opt} \
+        ${ovn_v6_masquerade_subnet_opt} \
         ${ovnkube_metrics_tls_opts} \
         ${ovnkube_node_certs_flags} \
         ${ovnkube_node_mgmt_port_netdev_flag} \

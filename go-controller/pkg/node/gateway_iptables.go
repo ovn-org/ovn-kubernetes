@@ -341,29 +341,53 @@ func getGatewayForwardRules(cidrs []*net.IPNet) []nodeipt.Rule {
 		if protocol == iptables.ProtocolIPv6 {
 			masqueradeIP = config.Gateway.MasqueradeIPs.V6OVNMasqueradeIP
 		}
-		returnRules = append(returnRules, []nodeipt.Rule{
-			{
-				Table: "filter",
-				Chain: "FORWARD",
-				Args: []string{
-					"-s", masqueradeIP.String(),
-					"-j", "ACCEPT",
-				},
-				Protocol: protocol,
-			},
-			{
-				Table: "filter",
-				Chain: "FORWARD",
-				Args: []string{
-					"-d", masqueradeIP.String(),
-					"-j", "ACCEPT",
-				},
-				Protocol: protocol,
-			},
-		}...)
+		returnRules = append(returnRules, getMasqueradeIpTablesForwardRules(masqueradeIP, protocol)...)
 	}
 
 	return returnRules
+}
+
+// getStaleMasqueradeIptablesRules returns all iptables rules may get added for a given masquerade IP.
+func getStaleMasqueradeIptablesRules(masqueradeIP net.IP) []nodeipt.Rule {
+	return append(getMasqueradeIpTablesForwardRules(masqueradeIP, getIPTablesProtocol(masqueradeIP.String())),
+		getMasqueradeIpTablesNATRules(masqueradeIP, getIPTablesProtocol(masqueradeIP.String()))...)
+}
+
+func getMasqueradeIpTablesForwardRules(masqueradeIP net.IP, protocol iptables.Protocol) []nodeipt.Rule {
+	return []nodeipt.Rule{
+		{
+			Table: "filter",
+			Chain: "FORWARD",
+			Args: []string{
+				"-s", masqueradeIP.String(),
+				"-j", "ACCEPT",
+			},
+			Protocol: protocol,
+		},
+		{
+			Table: "filter",
+			Chain: "FORWARD",
+			Args: []string{
+				"-d", masqueradeIP.String(),
+				"-j", "ACCEPT",
+			},
+			Protocol: protocol,
+		},
+	}
+}
+
+func getMasqueradeIpTablesNATRules(masqueradeIP net.IP, protocol iptables.Protocol) []nodeipt.Rule {
+	return []nodeipt.Rule{
+		{
+			Table: "nat",
+			Chain: "POSTROUTING",
+			Args: []string{
+				"-s", masqueradeIP.String(),
+				"-j", "MASQUERADE",
+			},
+			Protocol: protocol,
+		},
+	}
 }
 
 // initExternalBridgeForwardingRules sets up iptables rules for br-* interface svc traffic forwarding
