@@ -78,6 +78,7 @@ usage() {
     echo "                 [-cm | --compact-mode]"
     echo "                 [-ic | --enable-interconnect]"
     echo "                 [--isolated]"
+    echo "                 [-dns | --enable-dnsnameresolver]"
     echo "                 [-h]]"
     echo ""
     echo "-cf  | --config-file                Name of the KIND J2 configuration file."
@@ -139,6 +140,7 @@ usage() {
     echo "--delete                            Delete current cluster"
     echo "--deploy                            Deploy ovn kubernetes without restarting kind"
     echo "--add-nodes                         Adds nodes to an existing cluster. The number of nodes to be added is specified by --num-workers. Also use -ic if the cluster is using interconnect."
+    echo "-dns | --enable-dnsnameresolver     Enable DNSNameResolver for resolving the DNS names used in the DNS rules of EgressFirewall."
     echo ""
 }
 
@@ -327,6 +329,8 @@ parse_args() {
             --add-nodes)                        KIND_ADD_NODES=true
                                                 KIND_CREATE=false
                                                 ;;
+            -dns | --enable-dnsnameresolver )   OVN_ENABLE_DNSNAMERESOLVER=true
+                                                ;;
             -h | --help )                       usage
                                                 exit
                                                 ;;
@@ -405,6 +409,7 @@ print_params() {
      echo "OVN_ENABLE_OVNKUBE_IDENTITY = $OVN_ENABLE_OVNKUBE_IDENTITY"
      echo "KIND_NUM_WORKER = $KIND_NUM_WORKER"
      echo "OVN_MTU= $OVN_MTU"
+     echo "OVN_ENABLE_DNSNAMERESOLVER= $OVN_ENABLE_DNSNAMERESOLVER"
      echo ""
 }
 
@@ -598,6 +603,7 @@ set_default_params() {
     KIND_NUM_WORKER=0
   fi
   OVN_MTU=${OVN_MTU:-1400}
+  OVN_ENABLE_DNSNAMERESOLVER=${OVN_ENABLE_DNSNAMERESOLVER:-false}
 }
 
 check_ipv6() {
@@ -707,6 +713,10 @@ scale_kind_cluster() {
     set_ovn_image
   fi
   install_ovn_image
+  if [ "$OVN_ENABLE_DNSNAMERESOLVER" == true ]; then
+    set_dnsnameresolver_images
+    install_dnsnameresolver_images
+  fi
 }
 
 create_kind_cluster() {
@@ -840,24 +850,13 @@ create_ovn_kube_manifests() {
     --enable-multi-external-gateway=true \
     --enable-ovnkube-identity="${OVN_ENABLE_OVNKUBE_IDENTITY}" \
     --enable-persistent-ips=true \
-    --mtu="${OVN_MTU}"
+    --mtu="${OVN_MTU}" \
+    --enable-dnsnameresolver="${OVN_ENABLE_DNSNAMERESOLVER}"
   popd
 }
 
 install_ovn_image() {
-  # If local registry is being used push image there for consumption by kind cluster
-  if [ "$KIND_LOCAL_REGISTRY" == true ]; then
-    echo "OVN-K Image: ${OVN_IMAGE} should already be avaliable in local registry, not loading"
-  else
-    if [ "$OCI_BIN" == "podman" ]; then
-      # podman: cf https://github.com/kubernetes-sigs/kind/issues/2027
-      rm -f /tmp/ovn-kube-fedora.tar
-      podman save -o /tmp/ovn-kube-fedora.tar "${OVN_IMAGE}"
-      kind load image-archive /tmp/ovn-kube-fedora.tar --name "${KIND_CLUSTER_NAME}"
-    else
-      kind load docker-image "${OVN_IMAGE}" --name "${KIND_CLUSTER_NAME}"
-    fi
-  fi
+  install_image ${OVN_IMAGE}
 }
 
 install_ovn_global_zone() {
@@ -1125,6 +1124,14 @@ if [ "$KIND_CREATE" == true ]; then
       add_dns_hostnames
     fi
 fi
+if [ "$OVN_ENABLE_DNSNAMERESOLVER" == true ]; then
+    build_dnsnameresolver_images
+    install_dnsnameresolver_images
+    install_dnsnameresolver_operator
+    update_clusterrole_coredns
+    add_ocp_dnsnameresolver_to_coredns_config
+    update_coredns_deployment_image
+fi
 build_ovn_image
 detect_apiserver_url
 create_ovn_kube_manifests
@@ -1137,6 +1144,9 @@ if [ "$ENABLE_MULTI_NET" == true ]; then
   enable_multi_net
 fi
 kubectl_wait_pods
+if [ "$OVN_ENABLE_DNSNAMERESOLVER" == true ]; then
+    kubectl_wait_dnsnameresolver_pods
+fi
 sleep_until_pods_settle
 # Launch IPsec pods last to make sure that CSR signing logic works
 # Launch csr_signer in background

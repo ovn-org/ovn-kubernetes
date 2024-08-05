@@ -83,3 +83,9 @@ rules:
         - adminpolicybasedexternalroutes/status
         - egressfirewalls/status
       verbs: [ "patch", "update" ]
+    {{- if eq (hasKey .Values.global "enableDNSNameResolver" | ternary .Values.global.enableDNSNameResolver false) true }}
+    - apiGroups: ["network.openshift.io"]
+      resources:
+          - dnsnameresolvers
+      verbs: [ "create", "delete", "list", "patch", "update", "watch" ]
+    {{- end }}

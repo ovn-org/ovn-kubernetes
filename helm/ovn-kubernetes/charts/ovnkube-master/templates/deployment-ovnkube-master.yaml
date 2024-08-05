@@ -275,6 +275,8 @@ spec:
             configMapKeyRef:
               name: ovn-config
               key: host_network_namespace
+        - name: OVN_ENABLE_DNSNAMERESOLVER
+          value: {{ hasKey .Values.global "enableDNSNameResolver" | ternary .Values.global.enableDNSNameResolver false | quote }}
       # end of container
       volumes:
       # TODO: Need to check why we need this?
