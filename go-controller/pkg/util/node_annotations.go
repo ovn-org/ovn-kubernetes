@@ -110,6 +110,8 @@ const (
 	// ovnkube-node gets the node's zone from the OVN Southbound database.
 	OvnNodeZoneName = "k8s.ovn.org/zone-name"
 
+	OvnRouteAdvertisements = "k8s.ovn.org/route-advertisements"
+
 	/** HACK BEGIN **/
 	// TODO(tssurya): Remove this annotation a few months from now (when one or two release jump
 	// upgrades are done). This has been added only to minimize disruption for upgrades when

@@ -33,6 +33,7 @@ type Gateway interface {
 	Start()
 	GetGatewayBridgeIface() string
 	SetDefaultGatewayBridgeMAC(addr net.HardwareAddr)
+	SetRoutingAdvertised(bool)
 	Reconcile() error
 }
 
@@ -55,6 +56,8 @@ type gateway struct {
 	watchFactory *factory.WatchFactory // used for retry
 	stopChan     <-chan struct{}
 	wg           *sync.WaitGroup
+
+	isRoutingAdvertised bool
 }
 
 func (g *gateway) AddService(svc *kapi.Service) error {
@@ -394,6 +397,10 @@ func (g *gateway) SetDefaultGatewayBridgeMAC(macAddr net.HardwareAddr) {
 	klog.Infof("Default gateway bridge MAC address updated to %s", macAddr)
 }
 
+func (g *gateway) SetRoutingAdvertised(isRoutingAdvertised bool) {
+	g.isRoutingAdvertised = isRoutingAdvertised
+}
+
 // Reconcile handles triggering updates to different components of a gateway, like OFM, Services
 func (g *gateway) Reconcile() error {
 	klog.Info("Reconciling gateway with updates")
@@ -405,7 +412,7 @@ func (g *gateway) Reconcile() error {
 	if err != nil {
 		return fmt.Errorf("failed to get subnets for node: %s for OpenFlow cache update", node.Name)
 	}
-	if err := g.openflowManager.updateBridgeFlowCache(subnets, g.nodeIPManager.ListAddresses()); err != nil {
+	if err := g.openflowManager.updateBridgeFlowCache(subnets, g.nodeIPManager.ListAddresses(), g.isRoutingAdvertised); err != nil {
 		return err
 	}
 	// Services create OpenFlow flows as well, need to update them all

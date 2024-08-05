@@ -83,6 +83,7 @@ rules:
           - egressqoses
           - egressservices
           - adminpolicybasedexternalroutes
+          - routeadvertisements
       verbs: [ "get", "list", "watch" ]
     - apiGroups: ["k8s.cni.cncf.io"]
       resources:
@@ -107,6 +108,7 @@ rules:
           - egressservices/status
           - adminpolicybasedexternalroutes/status
           - egressqoses/status
+          - routeadvertisements/status
       verbs: [ "patch", "update" ]
     - apiGroups: [""]
       resources:

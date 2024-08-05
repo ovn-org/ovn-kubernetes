@@ -292,6 +292,11 @@ func (ncc *networkClusterController) Cleanup() error {
 	return nil
 }
 
+func (ncc *networkClusterController) Reconcile(netInfo util.ReconcilableNetInfo) error {
+	ncc.SetNADs(netInfo.GetNADs()...)
+	return nil
+}
+
 // networkClusterControllerEventHandler object handles the events
 // from retry framework.
 type networkClusterControllerEventHandler struct {
