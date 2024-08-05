@@ -1,14 +1,16 @@
-# Values for ovn-kubernetes.
+# Values for ovn-kubernetes with multi-node zone interconnect
+# Requires: ovnkube-control-plane, ovnkube-zone-controller, ovnkube-node
+# enableOvnKubeIdentity need to be false 
 
 # -- list of dependent subcharts that need to be installed for the given deployment mode, these subcharts haven't been tested yet.
 tags:
   ovn-ipsec: false
-  ovnkube-control-plane: false
+  ovnkube-db: false
   ovnkube-db-raft: false
+  ovnkube-master: false
   ovnkube-node-dpu: false
   ovnkube-node-dpu-host: false
   ovnkube-single-node-zone: false
-  ovnkube-zone-controller: false
 
 # -- Endpoint of Kubernetes api server
 k8sAPIServer: https://172.25.0.2:6443
@@ -35,15 +37,19 @@ global:
   # -- This allows ovnkube-node to run without SYS_ADMIN capability, by performing interface setup in the CNI plugin
   unprivilegedMode: false
   # -- The v4 join subnet used for assigning join switch IPv4 addresses
-  v4JoinSubnet: ""
+  v4JoinSubnet: "100.64.0.0/16"
   # -- The v4 masquerade subnet used for assigning masquerade IPv4 addresses
-  v4MasqueradeSubnet: ""
+  v4MasqueradeSubnet: "169.254.0.0/17"
+  # -- The v4 subnet for transit switch
+  v4TransitSwitchSubnet: "100.88.0.0/16"
   # -- The v6 join subnet used for assigning join switch IPv6 addresses
-  v6JoinSubnet: ""
+  v6JoinSubnet: "fd98::/64"
   # -- The v6 masquerade subnet used for assigning masquerade IPv6 addresses
-  v6MasqueradeSubnet: ""
+  v6MasqueradeSubnet: "fd69::/112"
+  # -- The v6 subnet for transit switch
+  v6TransitSwitchSubnet: "fd97::/64"
   # -- Whether or not enable ovnkube identity webhook
-  enableOvnKubeIdentity: true
+  enableOvnKubeIdentity: false
   # -- Indicate if ovnkube run master and node in one process
   enableCompactMode: false
   # -- Whether or not to enable hybrid overlay functionality
@@ -71,7 +77,7 @@ global:
   # -- Use SSL transport to NB/SB db and northd
   enableSsl: false
   # -- Configure to enable interconnecting multiple zones
-  enableInterConnect: false
+  enableInterconnect: true
   # -- Configure to use AdminPolicyBasedExternalRoute CRD feature with ovn-kubernetes
   enableMultiExternalGateway: true
   # -- Configure to use stateless network policy feature with ovn-kubernetes
@@ -87,13 +93,16 @@ global:
   # -- Indicates if ovn-controller should enable/disable the logical flow in-memory cache when processing Southbound database logical flow changes
   # @default -- true
   enableLFlowCache: true
-  # -- Configure to use DNSNameResolver feature with ovn-kubernetes
-  enableDNSNameResolver: false
   # -- Maximum number of logical flow cache entries ovn-controller may create when the logical flow cache is enabled
   # @default -- unlimited
   lFlowCacheLimit: ""
   # -- Maximum size of the logical flow cache (in KB) ovn-controller may create when the logical flow cache is enabled
   lFlowCacheLimitKb: ""
+  # -- Indicates if ovnkube-control-plane should enable/disable persistent IP feature
+  # @default -- false
+  enablePersistentIPs: true
+  # -- Configure to use DNSNameResolver feature with ovn-kubernetes
+  enableDNSNameResolver: false
   # -- Whether to disable SNAT of egress traffic in namespaces annotated with routing-external-gws
   disableSnatMultipleGws: ""
   # -- Controls if forwarding is allowed on OVNK controlled interfaces
@@ -145,13 +154,6 @@ global:
     tag: master
     # -- Image pull policy
     pullPolicy: IfNotPresent
-  # -- The name of secret used for pulling image. Use only if needed
-  imagePullSecretName: ""
-  # -- The secret used for pulling image. Use only if needed. Set create to have have secret created by helm
-  dockerConfigSecret:
-    registry: ghcr.io
-    auth: blah_blah_blah
-    create: false
 
 ovnkube-identity:
     # -- number of ovnube-identity pods, co-located with kube-apiserver process, so need to be the same number of control plane nodes
