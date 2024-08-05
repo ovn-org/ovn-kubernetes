@@ -815,7 +815,7 @@ func (oc *DefaultNetworkController) deleteHoNodeEvent(node *kapi.Node) error {
 		if err != nil {
 			return fmt.Errorf("failed to parse hybridOverlay node subnet for node %s: %w", node.Name, err)
 		}
-		err = oc.removeRoutesToHONodeSubnet(nodeSubnet)
+		err = oc.removeRoutesToHONodeSubnet(node.Name, nodeSubnet)
 		if err != nil {
 			return fmt.Errorf("failed to remove hybrid overlay static routes and route policy: %w", err)
 		}
