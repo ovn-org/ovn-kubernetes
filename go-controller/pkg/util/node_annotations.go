@@ -445,7 +445,7 @@ func UpdateNodeManagementPortMACAddressesWithRetry(node *kapi.Node, nodeLister l
 		return kubeInterface.UpdateNodeStatus(cnode)
 	})
 	if resultErr != nil {
-		return fmt.Errorf("failed to update node %s annotation", node.Name)
+		return fmt.Errorf("failed to update node %s annotation: %w", node.Name, resultErr)
 	}
 	return nil
 }
