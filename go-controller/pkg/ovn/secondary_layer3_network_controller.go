@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	nadlister "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
 	"github.com/ovn-org/libovsdb/ovsdb"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/pod"
@@ -15,8 +16,10 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/generator/udn"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
+	svccontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/topology"
 	zoneic "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/zone_interconnect"
@@ -277,15 +280,30 @@ type SecondaryLayer3NetworkController struct {
 	syncZoneICFailed            sync.Map
 	gatewaysFailed              sync.Map
 
+	gatewayManagers        sync.Map
+	gatewayTopologyFactory *topology.GatewayTopologyFactory
+
+	// Cluster wide Load_Balancer_Group UUID.
+	// Includes all node switches and node gateway routers.
+	clusterLoadBalancerGroupUUID string
+
+	// Cluster wide switch Load_Balancer_Group UUID.
+	// Includes all node switches.
+	switchLoadBalancerGroupUUID string
+
+	// Cluster wide router Load_Balancer_Group UUID.
+	// Includes all node gateway routers.
+	routerLoadBalancerGroupUUID string
+
 	// Cluster-wide router default Control Plane Protection (COPP) UUID
 	defaultCOPPUUID string
 
-	gatewayManagers        sync.Map
-	gatewayTopologyFactory *topology.GatewayTopologyFactory
+	// Controller in charge of services
+	svcController *svccontroller.Controller
 }
 
 // NewSecondaryLayer3NetworkController create a new OVN controller for the given secondary layer3 NAD
-func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netInfo util.NetInfo) *SecondaryLayer3NetworkController {
+func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netInfo util.NetInfo) (*SecondaryLayer3NetworkController, error) {
 
 	stopChan := make(chan struct{})
 	ipv4Mode, ipv6Mode := netInfo.IPMode()
@@ -295,6 +313,25 @@ func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netI
 	}
 
 	addressSetFactory := addressset.NewOvnAddressSetFactory(cnci.nbClient, ipv4Mode, ipv6Mode)
+
+	var nadLister nadlister.NetworkAttachmentDefinitionLister
+	var svcController *svccontroller.Controller
+	if util.IsNetworkSegmentationSupportEnabled() && netInfo.IsPrimaryNetwork() {
+		var err error
+		nadLister = cnci.watchFactory.NADInformer().Lister()
+		svcController, err = svccontroller.NewController(
+			cnci.client, cnci.nbClient,
+			cnci.watchFactory.ServiceCoreInformer(),
+			cnci.watchFactory.EndpointSliceCoreInformer(),
+			cnci.watchFactory.NodeCoreInformer(),
+			nadLister,
+			cnci.recorder,
+			netInfo,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("unable to create new service controller for network=%s: %w", netInfo.GetNetworkName(), err)
+		}
+	}
 
 	oc := &SecondaryLayer3NetworkController{
 		BaseSecondaryNetworkController: BaseSecondaryNetworkController{
@@ -324,6 +361,7 @@ func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netI
 		gatewaysFailed:              sync.Map{},
 		gatewayTopologyFactory:      topology.NewGatewayTopologyFactory(cnci.nbClient),
 		gatewayManagers:             sync.Map{},
+		svcController:               svcController,
 	}
 
 	if oc.allocatesPodAnnotation() {
@@ -340,7 +378,7 @@ func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netI
 	oc.multicastSupport = false
 
 	oc.initRetryFramework()
-	return oc
+	return oc, nil
 }
 
 func (oc *SecondaryLayer3NetworkController) initRetryFramework() {
@@ -487,6 +525,18 @@ func (oc *SecondaryLayer3NetworkController) Run() error {
 		return err
 	}
 
+	if oc.svcController != nil {
+		startSvc := time.Now()
+		// Services should be started after nodes to prevent LB churn
+		err := oc.StartServiceController(oc.wg, true)
+		endSvc := time.Since(startSvc)
+
+		metrics.MetricOVNKubeControllerSyncDuration.WithLabelValues("service_" + oc.GetNetworkName()).Set(endSvc.Seconds())
+		if err != nil {
+			return err
+		}
+	}
+
 	if err := oc.WatchPods(); err != nil {
 		return err
 	}
@@ -536,6 +586,20 @@ func (oc *SecondaryLayer3NetworkController) Init(ctx context.Context) error {
 		if err := oc.gatewayTopologyFactory.NewJoinSwitch(clusterRouter, oc.NetInfo, oc.ovnClusterLRPToJoinIfAddrs); err != nil {
 			return fmt.Errorf("failed to create join switch for network %q: %v", oc.GetNetworkName(), err)
 		}
+	}
+
+	// FIXME: When https://github.com/ovn-org/libovsdb/issues/235 is fixed,
+	// use IsTableSupported(nbdb.LoadBalancerGroup).
+	if _, _, err := util.RunOVNNbctl("--columns=_uuid", "list", "Load_Balancer_Group"); err != nil {
+		klog.Warningf("Load Balancer Group support enabled, however version of OVN in use does not support Load Balancer Groups.")
+	} else {
+		clusterLBGroupUUID, switchLBGroupUUID, routerLBGroupUUID, err := initLoadBalancerGroups(oc.nbClient, oc.NetInfo)
+		if err != nil {
+			return err
+		}
+		oc.clusterLoadBalancerGroupUUID = clusterLBGroupUUID
+		oc.switchLoadBalancerGroupUUID = switchLBGroupUUID
+		oc.routerLoadBalancerGroupUUID = routerLBGroupUUID
 	}
 	return nil
 }
@@ -692,7 +756,7 @@ func (oc *SecondaryLayer3NetworkController) addNode(node *kapi.Node) ([]*net.IPN
 		return nil, fmt.Errorf("subnet annotation in the node %q for the layer3 secondary network %s is missing : %w", node.Name, oc.GetNetworkName(), err)
 	}
 
-	err = oc.createNodeLogicalSwitch(node.Name, hostSubnets, "", "")
+	err = oc.createNodeLogicalSwitch(node.Name, hostSubnets, oc.clusterLoadBalancerGroupUUID, oc.switchLoadBalancerGroupUUID)
 	if err != nil {
 		return nil, err
 	}
@@ -898,7 +962,20 @@ func (oc *SecondaryLayer3NetworkController) newGatewayManager(nodeName string) *
 		oc.nbClient,
 		oc.NetInfo,
 		oc.watchFactory,
+		oc.gatewayOptions()...,
 	)
+}
+
+func (oc *SecondaryLayer3NetworkController) gatewayOptions() []GatewayOption {
+	var opts []GatewayOption
+	if oc.clusterLoadBalancerGroupUUID != "" {
+		opts = append(opts, WithLoadBalancerGroups(
+			oc.routerLoadBalancerGroupUUID,
+			oc.clusterLoadBalancerGroupUUID,
+			oc.switchLoadBalancerGroupUUID,
+		))
+	}
+	return opts
 }
 
 func (oc *SecondaryLayer3NetworkController) gatewayManagerForNode(nodeName string) *GatewayManager {
@@ -917,4 +994,19 @@ func (oc *SecondaryLayer3NetworkController) gatewayManagerForNode(nodeName strin
 		}
 		return gwManager
 	}
+}
+
+func (oc *SecondaryLayer3NetworkController) StartServiceController(wg *sync.WaitGroup, runRepair bool) error {
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		useLBGroups := oc.clusterLoadBalancerGroupUUID != ""
+		// use 5 workers like most of the kubernetes controllers in the
+		// kubernetes controller-manager
+		err := oc.svcController.Run(5, oc.stopChan, runRepair, useLBGroups, oc.svcTemplateSupport)
+		if err != nil {
+			klog.Errorf("Error running OVN Kubernetes Services controller: %v", err)
+		}
+	}()
+	return nil
 }

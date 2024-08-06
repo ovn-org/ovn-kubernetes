@@ -62,7 +62,7 @@ func (c *Controller) onEndpointSliceDelete(obj interface{}) {
 
 func (c *Controller) queueServiceForEndpointSlice(endpointSlice *discovery.EndpointSlice) {
 
-	key, err := services.ServiceControllerKey(endpointSlice)
+	key, err := services.GetServiceKeyFromEndpointSliceForDefaultNetwork(endpointSlice)
 	if err != nil {
 		// Do not log endpointsSlices missing service labels as errors.
 		// Once the service label is eventually added, we will get this event

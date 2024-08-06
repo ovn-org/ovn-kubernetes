@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	nadlister "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	globalconfig "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -20,14 +21,15 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	ktypes "k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
+	discoverylisters "k8s.io/client-go/listers/discovery/v1"
 
 	coreinformers "k8s.io/client-go/informers/core/v1"
 	discoveryinformers "k8s.io/client-go/informers/discovery/v1"
 	clientset "k8s.io/client-go/kubernetes"
 	corelisters "k8s.io/client-go/listers/core/v1"
-	discoverylisters "k8s.io/client-go/listers/discovery/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/workqueue"
@@ -47,7 +49,7 @@ const (
 	nodeControllerName = "node-tracker-controller"
 )
 
-var NoServiceLabelError = fmt.Errorf("endpointSlice missing %s label", discovery.LabelServiceName)
+var NoServiceLabelError = fmt.Errorf("endpointSlice missing the service name label")
 
 // NewController returns a new *Controller.
 func NewController(client clientset.Interface,
@@ -55,7 +57,9 @@ func NewController(client clientset.Interface,
 	serviceInformer coreinformers.ServiceInformer,
 	endpointSliceInformer discoveryinformers.EndpointSliceInformer,
 	nodeInformer coreinformers.NodeInformer,
+	nadLister nadlister.NetworkAttachmentDefinitionLister,
 	recorder record.EventRecorder,
+	netInfo util.NetInfo,
 ) (*Controller, error) {
 	klog.V(4).Info("Creating event broadcaster")
 	c := &Controller{
@@ -70,10 +74,13 @@ func NewController(client clientset.Interface,
 		serviceLister:         serviceInformer.Lister(),
 		endpointSliceInformer: endpointSliceInformer,
 		endpointSliceLister:   endpointSliceInformer.Lister(),
-		eventRecorder:         recorder,
-		repair:                newRepair(serviceInformer.Lister(), nbClient),
-		nodeInformer:          nodeInformer,
-		nodesSynced:           nodeInformer.Informer().HasSynced,
+		nadLister:             nadLister,
+
+		eventRecorder: recorder,
+		repair:        newRepair(serviceInformer.Lister(), nbClient),
+		nodeInformer:  nodeInformer,
+		nodesSynced:   nodeInformer.Informer().HasSynced,
+		netInfo:       netInfo,
 	}
 	zone, err := libovsdbutil.GetNBZone(c.nbClient)
 	if err != nil {
@@ -82,11 +89,10 @@ func NewController(client clientset.Interface,
 	// load balancers need to be applied to nodes, so
 	// we need to watch Node objects for changes.
 	// Need to re-sync all services when a node gains its switch or GWR
-	c.nodeTracker = newNodeTracker(zone, c.RequestFullSync)
+	c.nodeTracker = newNodeTracker(zone, c.RequestFullSync, netInfo)
 	if err != nil {
 		return nil, err
 	}
-
 	return c, nil
 }
 
@@ -103,9 +109,9 @@ type Controller struct {
 	serviceLister corelisters.ServiceLister
 
 	endpointSliceInformer discoveryinformers.EndpointSliceInformer
-	// endpointSliceLister is able to list/get endpoint slices and is populated
-	// by the shared informer passed to NewController
-	endpointSliceLister discoverylisters.EndpointSliceLister
+	endpointSliceLister   discoverylisters.EndpointSliceLister
+
+	nadLister nadlister.NetworkAttachmentDefinitionLister
 
 	nodesSynced cache.InformerSynced
 
@@ -154,6 +160,8 @@ type Controller struct {
 
 	// 'true' if Chassis_Template_Var is supported.
 	useTemplates bool
+
+	netInfo util.NetInfo
 }
 
 // Run will not return until stopCh is closed. workers determines how many
@@ -193,13 +201,15 @@ func (c *Controller) Run(workers int, stopCh <-chan struct{}, runRepair, useLBGr
 
 	klog.Info("Setting up event handlers for endpoint slices")
 	endpointHandler, err := c.endpointSliceInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(
-		// Filter out objects without the default serviceName label to exclude mirrored EndpointSlices
-		// This controller instance only handles services in the default cluster network
-		util.GetDefaultEndpointSlicesEventHandler(cache.ResourceEventHandlerFuncs{
-			AddFunc:    c.onEndpointSliceAdd,
-			UpdateFunc: c.onEndpointSliceUpdate,
-			DeleteFunc: c.onEndpointSliceDelete,
-		})))
+		// Filter out endpointslices that don't belong to this network (i.e. keep only kube-generated endpointslices if
+		// on default network, keep only mirrored endpointslices for this network if on UDN)
+		util.GetEndpointSlicesEventHandlerForNetwork(
+			cache.ResourceEventHandlerFuncs{
+				AddFunc:    c.onEndpointSliceAdd,
+				UpdateFunc: c.onEndpointSliceUpdate,
+				DeleteFunc: c.onEndpointSliceDelete,
+			},
+			c.netInfo)))
 	if err != nil {
 		return err
 	}
@@ -213,7 +223,7 @@ func (c *Controller) Run(workers int, stopCh <-chan struct{}, runRepair, useLBGr
 		// Run the repair controller only once
 		// it keeps in sync Kubernetes and OVN
 		// and handles removal of stale data on upgrades
-		c.repair.runBeforeSync(c.useTemplates)
+		c.repair.runBeforeSync(c.useTemplates, c.netInfo)
 	}
 
 	if err := c.initTopLevelCache(); err != nil {
@@ -302,7 +312,7 @@ func (c *Controller) initTopLevelCache() error {
 	}
 
 	// Then list all load balancers and their respective services.
-	services, lbs, err := getServiceLBs(c.nbClient, allTemplates)
+	services, lbs, err := getServiceLBsForNetwork(c.nbClient, allTemplates, c.netInfo)
 	if err != nil {
 		return fmt.Errorf("failed to load balancers: %w", err)
 	}
@@ -380,7 +390,7 @@ func (c *Controller) syncService(key string) error {
 			// worker will be operating at a given service. That is why it is safe to have changes to this cache
 			// from multiple workers, because the `key` is always uniquely hashed to the same worker thread.
 
-			if err := EnsureLBs(c.nbClient, service, existingLBs, nil); err != nil {
+			if err := EnsureLBs(c.nbClient, service, existingLBs, nil, c.netInfo); err != nil {
 				return fmt.Errorf("failed to delete load balancers for service %s/%s: %w",
 					namespace, name, err)
 			}
@@ -394,38 +404,29 @@ func (c *Controller) syncService(key string) error {
 		return nil
 	}
 
-	//
 	// The Service exists in the cache: update it in OVN
+	klog.V(5).Infof("Service %s/%s retrieved from lister for network=%s: %v", service.Namespace, service.Name, c.netInfo.GetNetworkName(), service)
 
-	klog.V(5).Infof("Service %s retrieved from lister: %v", service.Name, service)
-
-	// Get the endpoint slices associated to the Service
-	esLabelSelector := labels.Set(map[string]string{
-		discovery.LabelServiceName: name,
-	}).AsSelectorPreValidated()
-	endpointSlices, err := c.endpointSliceLister.EndpointSlices(namespace).List(esLabelSelector)
+	endpointSlices, err := util.GetServiceEndpointSlices(namespace, service.Name, c.netInfo.GetNetworkName(), c.endpointSliceLister)
 	if err != nil {
-		// Since we're getting stuff from a local cache, it is basically impossible to get this error.
-		c.eventRecorder.Eventf(service, v1.EventTypeWarning, "FailedToListEndpointSlices",
-			"Error listing Endpoint Slices for Service %s/%s: %v", namespace, name, err)
-		return err
+		return fmt.Errorf("service %s/%s for network=%s, %w", service.Namespace, service.Name, c.netInfo.GetNetworkName(), err)
 	}
 
 	// Build the abstract LB configs for this service
-	perNodeConfigs, templateConfigs, clusterConfigs := buildServiceLBConfigs(service, endpointSlices, c.nodeInfos, c.useLBGroups, c.useTemplates)
-	klog.V(5).Infof("Built service %s LB cluster-wide configs %#v", key, clusterConfigs)
-	klog.V(5).Infof("Built service %s LB per-node configs %#v", key, perNodeConfigs)
-	klog.V(5).Infof("Built service %s LB template configs %#v", key, templateConfigs)
+	perNodeConfigs, templateConfigs, clusterConfigs := buildServiceLBConfigs(service, endpointSlices, c.nodeInfos, c.useLBGroups, c.useTemplates, c.netInfo.GetNetworkName())
+	klog.V(5).Infof("Built service %s LB cluster-wide configs for network=%s: %#v", key, c.netInfo.GetNetworkName(), clusterConfigs)
+	klog.V(5).Infof("Built service %s LB per-node configs for network=%s:  %#v", key, c.netInfo.GetNetworkName(), perNodeConfigs)
+	klog.V(5).Infof("Built service %s LB template configs for network=%s: %#v", key, c.netInfo.GetNetworkName(), templateConfigs)
 
 	// Convert the LB configs in to load-balancer objects
-	clusterLBs := buildClusterLBs(service, clusterConfigs, c.nodeInfos, c.useLBGroups)
-	templateLBs := buildTemplateLBs(service, templateConfigs, c.nodeInfos, c.nodeIPv4Templates, c.nodeIPv6Templates)
-	perNodeLBs := buildPerNodeLBs(service, perNodeConfigs, c.nodeInfos)
-	klog.V(5).Infof("Built service %s cluster-wide LB %#v", key, clusterLBs)
-	klog.V(5).Infof("Built service %s per-node LB %#v", key, perNodeLBs)
-	klog.V(5).Infof("Built service %s template LB %#v", key, templateLBs)
-	klog.V(5).Infof("Service %s has %d cluster-wide, %d per-node configs, %d template configs, making %d (cluster) %d (per node) and %d (template) load balancers",
-		key, len(clusterConfigs), len(perNodeConfigs), len(templateConfigs),
+	clusterLBs := buildClusterLBs(service, clusterConfigs, c.nodeInfos, c.useLBGroups, c.netInfo)
+	templateLBs := buildTemplateLBs(service, templateConfigs, c.nodeInfos, c.nodeIPv4Templates, c.nodeIPv6Templates, c.netInfo)
+	perNodeLBs := buildPerNodeLBs(service, perNodeConfigs, c.nodeInfos, c.netInfo)
+	klog.V(5).Infof("Built service %s cluster-wide LB for network=%s: %#v", key, c.netInfo.GetNetworkName(), clusterLBs)
+	klog.V(5).Infof("Built service %s per-node LB for network=%s: %#v", key, c.netInfo.GetNetworkName(), perNodeLBs)
+	klog.V(5).Infof("Built service %s template LB for network=%s:  %#v", key, c.netInfo.GetNetworkName(), templateLBs)
+	klog.V(5).Infof("Service %s for network=%s has %d cluster-wide, %d per-node configs, %d template configs, making %d (cluster) %d (per node) and %d (template) load balancers",
+		key, c.netInfo.GetNetworkName(), len(clusterConfigs), len(perNodeConfigs), len(templateConfigs),
 		len(clusterLBs), len(perNodeLBs), len(templateLBs))
 	lbs := append(clusterLBs, templateLBs...)
 	lbs = append(lbs, perNodeLBs...)
@@ -448,8 +449,8 @@ func (c *Controller) syncService(key string) error {
 		//
 		// Note: this may fail if a node was deleted between listing nodes and applying.
 		// If so, this will fail and we will resync.
-		if err := EnsureLBs(c.nbClient, service, existingLBs, lbs); err != nil {
-			return fmt.Errorf("failed to ensure service %s load balancers: %w", key, err)
+		if err := EnsureLBs(c.nbClient, service, existingLBs, lbs, c.netInfo); err != nil {
+			return fmt.Errorf("failed to ensure service %s load balancers for network=%s: %w", key, c.netInfo.GetNetworkName(), err)
 		}
 
 		c.alreadyAppliedRWLock.Lock()
@@ -544,16 +545,38 @@ func (c *Controller) RequestFullSync(nodeInfos []nodeInfo) {
 
 // handlers
 
+// skipService is used when UDN is enabled to know which services are to be skipped because they don't
+// belong to the network that this service controller is responsible for.
+func (c *Controller) skipService(name, namespace string) bool {
+	if util.IsNetworkSegmentationSupportEnabled() {
+		serviceNetwork, err := util.GetActiveNetworkForNamespace(namespace, c.nadLister)
+		if err != nil {
+			utilruntime.HandleError(fmt.Errorf("failed to retrieve network for service %s/%s: %w",
+				namespace, name, err))
+			return true
+		}
+		if serviceNetwork.GetNetworkName() != c.netInfo.GetNetworkName() {
+			return true
+		}
+	}
+
+	return false
+}
+
 // onServiceAdd queues the Service for processing.
 func (c *Controller) onServiceAdd(obj interface{}) {
 	key, err := cache.MetaNamespaceKeyFunc(obj)
 	if err != nil {
-		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", obj, err))
+		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v for network=%s: %v", obj, c.netInfo.GetNetworkName(), err))
 		return
 	}
-	klog.V(5).Infof("Adding service %s", key)
+
 	service := obj.(*v1.Service)
+	if c.skipService(service.Name, service.Namespace) {
+		return
+	}
 	metrics.GetConfigDurationRecorder().Start("service", service.Namespace, service.Name)
+	klog.V(5).Infof("Adding service %s for network=%s", c.netInfo.GetNetworkName(), key)
 	c.queue.Add(key)
 }
 
@@ -570,6 +593,10 @@ func (c *Controller) onServiceUpdate(oldObj, newObj interface{}) {
 
 	key, err := cache.MetaNamespaceKeyFunc(newObj)
 	if err == nil {
+		if c.skipService(newService.Name, newService.Namespace) {
+			return
+		}
+
 		metrics.GetConfigDurationRecorder().Start("service", newService.Namespace, newService.Name)
 		c.queue.Add(key)
 	}
@@ -584,6 +611,11 @@ func (c *Controller) onServiceDelete(obj interface{}) {
 	}
 	klog.V(4).Infof("Deleting service %s", key)
 	service := obj.(*v1.Service)
+
+	if c.skipService(service.Name, service.Namespace) {
+		return
+	}
+
 	metrics.GetConfigDurationRecorder().Start("service", service.Namespace, service.Name)
 	c.queue.Add(key)
 }
@@ -637,7 +669,7 @@ func (c *Controller) onEndpointSliceDelete(obj interface{}) {
 // queueServiceForEndpointSlice attempts to queue the corresponding Service for
 // the provided EndpointSlice.
 func (c *Controller) queueServiceForEndpointSlice(endpointSlice *discovery.EndpointSlice) {
-	key, err := ServiceControllerKey(endpointSlice)
+	serviceNamespacedName, err := c.getServiceNamespacedNameFromEndpointSlice(endpointSlice)
 	if err != nil {
 		// Do not log endpointsSlices missing service labels as errors.
 		// Once the service label is eventually added, we will get this event
@@ -650,21 +682,49 @@ func (c *Controller) queueServiceForEndpointSlice(endpointSlice *discovery.Endpo
 		return
 	}
 
-	c.queue.Add(key)
+	if c.skipService(serviceNamespacedName.Name, serviceNamespacedName.Namespace) {
+		return
+	}
+	c.queue.Add(serviceNamespacedName.String())
 }
 
-// serviceControllerKey returns a controller key for a Service but derived from
+// GetServiceKeyFromEndpointSliceForDefaultNetwork returns a controller key for a Service but derived from
 // an EndpointSlice.
-func ServiceControllerKey(endpointSlice *discovery.EndpointSlice) (string, error) {
+// Not UDN-aware, is used for egress services
+func GetServiceKeyFromEndpointSliceForDefaultNetwork(endpointSlice *discovery.EndpointSlice) (string, error) {
+	var key string
+	nsn, err := _getServiceNameFromEndpointSlice(endpointSlice, true)
+	if err == nil {
+		key = nsn.String()
+	}
+	return key, err
+}
+
+func (c *Controller) getServiceNamespacedNameFromEndpointSlice(endpointSlice *discovery.EndpointSlice) (ktypes.NamespacedName, error) {
+	if c.netInfo.IsDefault() {
+		return _getServiceNameFromEndpointSlice(endpointSlice, true)
+	} else {
+		return _getServiceNameFromEndpointSlice(endpointSlice, false)
+	}
+}
+
+func _getServiceNameFromEndpointSlice(endpointSlice *discovery.EndpointSlice, inDefaultNetwork bool) (ktypes.NamespacedName, error) {
 	if endpointSlice == nil {
-		return "", fmt.Errorf("nil EndpointSlice passed to serviceControllerKey()")
+		return ktypes.NamespacedName{}, fmt.Errorf("nil EndpointSlice passed to _getServiceNameFromEndpointSlice()")
 	}
-	serviceName, ok := endpointSlice.Labels[discovery.LabelServiceName]
+
+	label := discovery.LabelServiceName
+	errTemplate := NoServiceLabelError
+	if !inDefaultNetwork {
+		label = types.LabelUserDefinedServiceName
+	}
+
+	serviceName, ok := endpointSlice.Labels[label]
 	if !ok || serviceName == "" {
-		return "", fmt.Errorf("%w: endpointSlice: %s/%s", NoServiceLabelError, endpointSlice.Namespace,
-			endpointSlice.Name)
+		return ktypes.NamespacedName{}, fmt.Errorf("%w: endpointSlice: %s/%s",
+			errTemplate, endpointSlice.Namespace, endpointSlice.Name)
 	}
-	return fmt.Sprintf("%s/%s", endpointSlice.Namespace, serviceName), nil
+	return ktypes.NamespacedName{Namespace: endpointSlice.Namespace, Name: serviceName}, nil
 }
 
 // newRateLimiter makes a queue rate limiter. This limits re-queues somewhat more significantly than base qps.

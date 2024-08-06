@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"golang.org/x/exp/maps"
 	kapi "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -268,10 +269,7 @@ func (gw *GatewayManager) GatewayInit(
 	}
 
 	if gw.netInfo.IsSecondary() {
-		networkName := gw.netInfo.GetNetworkName()
-		topologyType := gw.netInfo.TopologyType()
-		logicalRouterExternalIDs[types.NetworkExternalID] = networkName
-		logicalRouterExternalIDs[types.TopologyExternalID] = topologyType
+		maps.Copy(logicalRouterExternalIDs, util.GenerateExternalIDsForSwitchOrRouter(gw.netInfo))
 	}
 
 	logicalRouter := nbdb.LogicalRouter{
@@ -832,10 +830,7 @@ func (gw *GatewayManager) addExternalSwitch(prefix, interfaceID, nodeName, gatew
 	}
 	sw := nbdb.LogicalSwitch{Name: externalSwitch}
 	if gw.netInfo.IsSecondary() {
-		sw.ExternalIDs = map[string]string{
-			types.NetworkExternalID:  gw.netInfo.GetNetworkName(),
-			types.TopologyExternalID: gw.netInfo.TopologyType(),
-		}
+		sw.ExternalIDs = util.GenerateExternalIDsForSwitchOrRouter(gw.netInfo)
 	}
 
 	err = libovsdbops.CreateOrUpdateLogicalSwitchPortsAndSwitch(gw.nbClient, &sw, &externalLogicalSwitchPort, &externalLogicalSwitchPortToRouter)

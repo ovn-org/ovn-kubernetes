@@ -439,7 +439,8 @@ func (o *FakeOVN) NewSecondaryNetworkController(netattachdef *nettypes.NetworkAt
 
 		switch topoType {
 		case types.Layer3Topology:
-			l3Controller := NewSecondaryLayer3NetworkController(cnci, nInfo)
+			l3Controller, err := NewSecondaryLayer3NetworkController(cnci, nInfo)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			l3Controller.addressSetFactory = asf
 			secondaryController = &l3Controller.BaseSecondaryNetworkController
 		case types.Layer2Topology:

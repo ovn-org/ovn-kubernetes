@@ -1374,30 +1374,14 @@ func (wf *WatchFactory) GetEndpointSlice(namespace, name string) (*discovery.End
 
 // GetEndpointSlicesBySelector returns a list of EndpointSlices in a given namespace by the label selector
 func (wf *WatchFactory) GetEndpointSlicesBySelector(namespace string, labelSelector metav1.LabelSelector) ([]*discovery.EndpointSlice, error) {
-	selector, err := metav1.LabelSelectorAsSelector(&labelSelector)
-	if err != nil {
-		return nil, err
-	}
-	endpointSliceLister := wf.informers[EndpointSliceType].lister.(discoverylisters.EndpointSliceLister)
-	return endpointSliceLister.EndpointSlices(namespace).List(selector)
+	return util.GetEndpointSlicesBySelector(namespace, labelSelector, wf.informers[EndpointSliceType].lister.(discoverylisters.EndpointSliceLister))
 }
 
 // GetServiceEndpointSlices returns the endpointSlices associated with a service for the specified network
 // if network is DefaultNetworkName the default endpointSlices are returned, otherwise the function looks for mirror endpointslices
 // for the specified network.
 func (wf *WatchFactory) GetServiceEndpointSlices(namespace, svcName, network string) ([]*discovery.EndpointSlice, error) {
-	var selector metav1.LabelSelector
-	if network == types.DefaultNetworkName {
-		selector = metav1.LabelSelector{MatchLabels: map[string]string{
-			discovery.LabelServiceName: svcName,
-		}}
-	} else {
-		selector = metav1.LabelSelector{MatchLabels: map[string]string{
-			types.LabelUserDefinedServiceName:          svcName,
-			types.LabelUserDefinedEndpointSliceNetwork: network,
-		}}
-	}
-	return wf.GetEndpointSlicesBySelector(namespace, selector)
+	return util.GetServiceEndpointSlices(namespace, svcName, network, wf.informers[EndpointSliceType].lister.(discoverylisters.EndpointSliceLister))
 }
 
 // GetNamespaces returns a list of namespaces in the cluster

@@ -9,7 +9,6 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	kube_test "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
 	"github.com/stretchr/testify/assert"
 	kapi "k8s.io/api/core/v1"
@@ -455,39 +454,6 @@ func TestPodScheduled(t *testing.T) {
 			assert.Equal(t, tc.expResult, res)
 		})
 	}
-}
-
-func TestExternalIDsForObject(t *testing.T) {
-	assert.Equal(t,
-		ExternalIDsForObject(&v1.Service{
-			TypeMeta: metav1.TypeMeta{
-				Kind:       "Service",
-				APIVersion: "v1",
-			},
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "svc-ab23",
-				Namespace: "ns",
-				Labels:    map[string]string{discovery.LabelServiceName: "svc"},
-			},
-		}),
-		map[string]string{
-			types.LoadBalancerKindExternalID:  "Service",
-			types.LoadBalancerOwnerExternalID: "ns/svc-ab23",
-		})
-
-	assert.Equal(t,
-		ExternalIDsForObject(&v1.Service{
-			// also handle no TypeMeta, which can happen.
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "svc-ab23",
-				Namespace: "ns",
-				Labels:    map[string]string{discovery.LabelServiceName: "svc"},
-			},
-		}),
-		map[string]string{
-			types.LoadBalancerKindExternalID:  "Service",
-			types.LoadBalancerOwnerExternalID: "ns/svc-ab23",
-		})
 }
 
 var (

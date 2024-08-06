@@ -836,7 +836,8 @@ func standardNonDefaultNetworkExtIDs(netInfo util.NetInfo) map[string]string {
 }
 
 func newSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netInfo util.NetInfo, nodeName string) *SecondaryLayer3NetworkController {
-	layer3NetworkController := NewSecondaryLayer3NetworkController(cnci, netInfo)
+	layer3NetworkController, err := NewSecondaryLayer3NetworkController(cnci, netInfo)
+	Expect(err).NotTo(HaveOccurred())
 	layer3NetworkController.gatewayManagers.Store(
 		nodeName,
 		newDummyGatewayManager(cnci.kube, cnci.nbClient, netInfo, cnci.watchFactory, nodeName),

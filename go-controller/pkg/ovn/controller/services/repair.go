@@ -8,6 +8,7 @@ import (
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/labels"
@@ -50,7 +51,7 @@ func newRepair(serviceLister corelisters.ServiceLister, nbClient libovsdbclient.
 }
 
 // runBeforeSync performs some cleanup of stale LBs and other miscellaneous setup.
-func (r *repair) runBeforeSync(useTemplates bool) {
+func (r *repair) runBeforeSync(useTemplates bool, netInfo util.NetInfo) {
 	// no need to lock, single-threaded.
 
 	startTime := time.Now()
@@ -80,7 +81,7 @@ func (r *repair) runBeforeSync(useTemplates bool) {
 	}
 
 	// Find all load-balancers associated with Services
-	existingLBs, err := getLBs(r.nbClient, allTemplates)
+	existingLBs, err := getAllLBs(r.nbClient, allTemplates)
 	if err != nil {
 		klog.Errorf("Unable to get service lbs for repair: %v", err)
 	}

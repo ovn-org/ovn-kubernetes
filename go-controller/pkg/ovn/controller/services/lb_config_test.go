@@ -9,6 +9,7 @@ import (
 	globalconfig "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	kube_test "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/stretchr/testify/assert"
 
 	v1 "k8s.io/api/core/v1"
@@ -1178,7 +1179,7 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 		t.Run(fmt.Sprintf("%d_%s", i, tt.name), func(t *testing.T) {
 			// shared gateway mode
 			globalconfig.Gateway.Mode = globalconfig.GatewayModeShared
-			perNode, template, clusterWide := buildServiceLBConfigs(tt.args.service, tt.args.slices, defaultNodes, true, true)
+			perNode, template, clusterWide := buildServiceLBConfigs(tt.args.service, tt.args.slices, defaultNodes, true, true, types.DefaultNetworkName)
 
 			assert.EqualValues(t, tt.resultSharedGatewayNode, perNode, "SGW per-node configs should be equal")
 			assert.EqualValues(t, tt.resultSharedGatewayTemplate, template, "SGW template configs should be equal")
@@ -1186,7 +1187,7 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 
 			// local gateway mode
 			globalconfig.Gateway.Mode = globalconfig.GatewayModeLocal
-			perNode, template, clusterWide = buildServiceLBConfigs(tt.args.service, tt.args.slices, defaultNodes, true, true)
+			perNode, template, clusterWide = buildServiceLBConfigs(tt.args.service, tt.args.slices, defaultNodes, true, true, types.DefaultNetworkName)
 			if tt.resultsSame {
 				assert.EqualValues(t, tt.resultSharedGatewayNode, perNode, "LGW per-node configs should be equal")
 				assert.EqualValues(t, tt.resultSharedGatewayTemplate, template, "LGW template configs should be equal")
@@ -1440,7 +1441,7 @@ func Test_buildClusterLBs(t *testing.T) {
 	}
 	for i, tt := range tc {
 		t.Run(fmt.Sprintf("%d_%s", i, tt.name), func(t *testing.T) {
-			actual := buildClusterLBs(tt.service, tt.configs, tt.nodeInfos, true)
+			actual := buildClusterLBs(tt.service, tt.configs, tt.nodeInfos, true, &util.DefaultNetInfo{})
 			assert.Equal(t, tt.expected, actual)
 		})
 	}
@@ -3094,13 +3095,13 @@ func Test_buildPerNodeLBs(t *testing.T) {
 
 			if tt.expectedShared != nil {
 				globalconfig.Gateway.Mode = globalconfig.GatewayModeShared
-				actual := buildPerNodeLBs(tt.service, tt.configs, defaultNodes)
+				actual := buildPerNodeLBs(tt.service, tt.configs, defaultNodes, &util.DefaultNetInfo{})
 				assert.Equal(t, tt.expectedShared, actual, "shared gateway mode not as expected")
 			}
 
 			if tt.expectedLocal != nil {
 				globalconfig.Gateway.Mode = globalconfig.GatewayModeLocal
-				actual := buildPerNodeLBs(tt.service, tt.configs, defaultNodes)
+				actual := buildPerNodeLBs(tt.service, tt.configs, defaultNodes, &util.DefaultNetInfo{})
 				assert.Equal(t, tt.expectedLocal, actual, "local gateway mode not as expected")
 			}
 
@@ -3114,13 +3115,13 @@ func Test_buildPerNodeLBs(t *testing.T) {
 
 			if tt.expectedShared != nil {
 				globalconfig.Gateway.Mode = globalconfig.GatewayModeShared
-				actual := buildPerNodeLBs(tt.service, tt.configs, defaultNodesV6)
+				actual := buildPerNodeLBs(tt.service, tt.configs, defaultNodesV6, &util.DefaultNetInfo{})
 				assert.Equal(t, tt.expectedShared, actual, "shared gateway mode not as expected")
 			}
 
 			if tt.expectedLocal != nil {
 				globalconfig.Gateway.Mode = globalconfig.GatewayModeLocal
-				actual := buildPerNodeLBs(tt.service, tt.configs, defaultNodesV6)
+				actual := buildPerNodeLBs(tt.service, tt.configs, defaultNodesV6, &util.DefaultNetInfo{})
 				assert.Equal(t, tt.expectedLocal, actual, "local gateway mode not as expected")
 			}
 
@@ -4092,7 +4093,8 @@ func Test_getEndpointsForService(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			portToClusterEndpoints, portToNodeToEndpoints := getEndpointsForService(tt.args.slices, tt.args.svc, tt.args.nodes)
+			portToClusterEndpoints, portToNodeToEndpoints := getEndpointsForService(
+				tt.args.slices, tt.args.svc, tt.args.nodes, types.DefaultNetworkName)
 			assert.Equal(t, tt.wantClusterEndpoints, portToClusterEndpoints)
 			assert.Equal(t, tt.wantNodeEndpoints, portToNodeToEndpoints)
 
