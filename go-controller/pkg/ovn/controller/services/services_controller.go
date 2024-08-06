@@ -61,7 +61,7 @@ func NewController(client clientset.Interface,
 	recorder record.EventRecorder,
 	netInfo util.NetInfo,
 ) (*Controller, error) {
-	klog.V(4).Info("Creating event broadcaster")
+	klog.V(4).Infof("Creating services controller for network=%s", netInfo.GetNetworkName())
 	c := &Controller{
 		client:                client,
 		nbClient:              nbClient,
@@ -93,6 +93,7 @@ func NewController(client clientset.Interface,
 	if err != nil {
 		return nil, err
 	}
+	klog.Infof("Done creating new service controller for network=%s", netInfo.GetNetworkName())
 
 	return c, nil
 }
@@ -173,16 +174,15 @@ func (c *Controller) Run(workers int, stopCh <-chan struct{}, runRepair, useLBGr
 
 	c.useLBGroups = useLBGroups
 	c.useTemplates = useTemplates
-
-	klog.Infof("Starting controller %s", controllerName)
-	defer klog.Infof("Shutting down controller %s", controllerName)
+	klog.Infof("Starting controller %s for network=%s", controllerName, c.netInfo.GetNetworkName())
+	defer klog.Infof("Shutting down controller %s for network=%s", controllerName, c.netInfo.GetNetworkName())
 
 	nodeHandler, err := c.nodeTracker.Start(c.nodeInformer)
 	if err != nil {
 		return err
 	}
 	// We need the node tracker to be synced first, as we rely on it to properly reprogram initial per node load balancers
-	klog.Info("Waiting for node tracker handler to sync")
+	klog.Infof("Waiting for node tracker handler to sync for network=%s", c.netInfo.GetNetworkName())
 	c.startupDoneLock.Lock()
 	c.startupDone = false
 	c.startupDoneLock.Unlock()
@@ -190,7 +190,7 @@ func (c *Controller) Run(workers int, stopCh <-chan struct{}, runRepair, useLBGr
 		return fmt.Errorf("error syncing node tracker handler")
 	}
 
-	klog.Info("Setting up event handlers for services")
+	klog.Infof("Setting up event handlers for services for network=%s", c.netInfo.GetNetworkName())
 	svcHandler, err := c.serviceInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
 		AddFunc:    c.onServiceAdd,
 		UpdateFunc: c.onServiceUpdate,
@@ -200,7 +200,7 @@ func (c *Controller) Run(workers int, stopCh <-chan struct{}, runRepair, useLBGr
 		return err
 	}
 
-	klog.Info("Setting up event handlers for endpoint slices")
+	klog.Infof("Setting up event handlers for endpoint slices for network=%s", c.netInfo.GetNetworkName())
 	endpointHandler, err := c.endpointSliceInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(
 		// Filter out endpointslices that don't belong to this network (i.e. keep only kube-generated endpointslices if
 		// on default network, keep only mirrored endpointslices for this network if on UDN)
@@ -215,7 +215,7 @@ func (c *Controller) Run(workers int, stopCh <-chan struct{}, runRepair, useLBGr
 		return err
 	}
 
-	klog.Info("Waiting for service and endpoint handlers to sync")
+	klog.Infof("Waiting for service and endpoint handlers to sync for network=%s", c.netInfo.GetNetworkName())
 	if !util.WaitForHandlerSyncWithTimeout(controllerName, stopCh, types.HandlerSyncTimeout, svcHandler.HasSynced, endpointHandler.HasSynced) {
 		return fmt.Errorf("error syncing service and endpoint handlers")
 	}
@@ -236,7 +236,7 @@ func (c *Controller) Run(workers int, stopCh <-chan struct{}, runRepair, useLBGr
 	c.startupDoneLock.Unlock()
 
 	// Start the workers after the repair loop to avoid races
-	klog.Info("Starting workers")
+	klog.Infof("Starting workers for network=%s", c.netInfo.GetNetworkName())
 	for i := 0; i < workers; i++ {
 		go wait.Until(c.worker, c.workerLoopPeriod, stopCh)
 	}
@@ -286,7 +286,7 @@ func (c *Controller) handleErr(err error, key interface{}) {
 		return
 	}
 
-	klog.Warningf("Dropping service %q out of the queue: %v", key, err)
+	klog.Warningf("Dropping service %q out of the queue for network=%s: %v", key, c.netInfo.GetNetworkName(), err)
 	metrics.GetConfigDurationRecorder().End("service", ns, name)
 	c.queue.Forget(key)
 	utilruntime.HandleError(err)
@@ -325,8 +325,8 @@ func (c *Controller) initTopLevelCache() error {
 		c.alreadyApplied[service] = append(c.alreadyApplied[service], *lb)
 	}
 
-	klog.Infof("Controller cache of %d load balancers initialized for %d services",
-		len(lbs), len(c.alreadyApplied))
+	klog.Infof("Controller cache of %d load balancers initialized for %d services for network=%s",
+		len(lbs), len(c.alreadyApplied), c.netInfo.GetNetworkName())
 
 	return nil
 }
@@ -343,11 +343,11 @@ func (c *Controller) syncService(key string) error {
 	if err != nil {
 		return err
 	}
-	klog.V(5).Infof("Processing sync for service %s/%s", namespace, name)
+	klog.V(5).Infof("Processing sync for service %s/%s for network=%s", namespace, name, c.netInfo.GetNetworkName())
 	metrics.MetricSyncServiceCount.Inc()
 
 	defer func() {
-		klog.V(5).Infof("Finished syncing service %s on namespace %s : %v", name, namespace, time.Since(startTime))
+		klog.V(5).Infof("Finished syncing service %s on namespace %s for network=%s : %v", name, namespace, c.netInfo.GetNetworkName(), time.Since(startTime))
 		metrics.MetricSyncServiceLatency.Observe(time.Since(startTime).Seconds())
 	}()
 
@@ -443,9 +443,9 @@ func (c *Controller) syncService(key string) error {
 	c.alreadyAppliedRWLock.RUnlock()
 
 	if alreadyAppliedKeyExists && LoadBalancersEqualNoUUID(existingLBs, lbs) {
-		klog.V(5).Infof("Skipping no-op change for service %s", key)
+		klog.V(5).Infof("Skipping no-op change for service %s for network=%s", key, c.netInfo.GetNetworkName())
 	} else {
-		klog.V(5).Infof("Services do not match, existing lbs: %#v, built lbs: %#v", existingLBs, lbs)
+		klog.V(5).Infof("Services do not match for network=%s, existing lbs: %#v, built lbs: %#v", c.netInfo.GetNetworkName(), existingLBs, lbs)
 		// Actually apply load-balancers to OVN.
 		//
 		// Note: this may fail if a node was deleted between listing nodes and applying.
@@ -484,8 +484,8 @@ func (c *Controller) syncNodeInfos(nodeInfos []nodeInfo) {
 		if globalconfig.IPv4Mode {
 			ips, err := util.MatchIPFamily(false, nodeInfo.hostAddresses)
 			if err != nil {
-				klog.Warningf("Error while searching for IPv4 host addresses in %v for node[%s] : %v",
-					nodeInfo.hostAddresses, nodeInfo.name, err)
+				klog.Warningf("Error while searching for IPv4 host addresses in %v for node[%s] for network=%s: %v",
+					nodeInfo.hostAddresses, nodeInfo.name, c.netInfo.GetNetworkName(), err)
 				continue
 			}
 
@@ -497,8 +497,8 @@ func (c *Controller) syncNodeInfos(nodeInfos []nodeInfo) {
 		if globalconfig.IPv6Mode {
 			ips, err := util.MatchIPFamily(true, nodeInfo.hostAddresses)
 			if err != nil {
-				klog.Warningf("Error while searching for IPv6 host addresses in %v for node[%s] : %v",
-					nodeInfo.hostAddresses, nodeInfo.name, err)
+				klog.Warningf("Error while searching for IPv6 host addresses in %v for node[%s] for network=%s: %v",
+					nodeInfo.hostAddresses, nodeInfo.name, c.netInfo.GetNetworkName(), err)
 				continue
 			}
 
@@ -514,14 +514,14 @@ func (c *Controller) syncNodeInfos(nodeInfos []nodeInfo) {
 		c.nodeIPv6Templates.AsTemplateMap(),
 	}
 	if err := svcCreateOrUpdateTemplateVar(c.nbClient, nodeIPTemplates); err != nil {
-		klog.Errorf("Could not sync node IP templates")
+		klog.Errorf("Could not sync node IP templates for network=%s", c.netInfo.GetNetworkName())
 		return
 	}
 }
 
 // RequestFullSync re-syncs every service that currently exists
 func (c *Controller) RequestFullSync(nodeInfos []nodeInfo) {
-	klog.Info("Full service sync requested")
+	klog.Infof("Full service sync requested for network=%s", c.netInfo.GetNetworkName())
 
 	// Resync node infos and node IP templates.
 	c.syncNodeInfos(nodeInfos)
@@ -534,7 +534,7 @@ func (c *Controller) RequestFullSync(nodeInfos []nodeInfo) {
 	if c.startupDone {
 		services, err := c.serviceLister.List(labels.Everything())
 		if err != nil {
-			klog.Errorf("Cached lister failed!? %v", err)
+			klog.Errorf("Cached lister failed (network=%s)!? %v", c.netInfo.GetNetworkName(), err)
 			return
 		}
 
@@ -609,7 +609,7 @@ func (c *Controller) onServiceDelete(obj interface{}) {
 		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", obj, err))
 		return
 	}
-	klog.V(4).Infof("Deleting service %s", key)
+	klog.V(4).Infof("Deleting service %s for network=%s", key, c.netInfo.GetNetworkName())
 	service := obj.(*v1.Service)
 
 	if c.skipService(service, "delete") {
@@ -675,9 +675,9 @@ func (c *Controller) queueServiceForEndpointSlice(endpointSlice *discovery.Endpo
 		// Once the service label is eventually added, we will get this event
 		// and re-process.
 		if errors.Is(err, NoServiceLabelError) {
-			klog.V(5).Infof(err.Error())
+			klog.V(5).Infof("network=%s, error=%s", c.netInfo.GetNetworkName(), err.Error())
 		} else {
-			utilruntime.HandleError(fmt.Errorf("couldn't get key for EndpointSlice %+v: %v", endpointSlice, err))
+			utilruntime.HandleError(fmt.Errorf("network=%s, couldn't get key for EndpointSlice %+v: %v", c.netInfo.GetNetworkName(), endpointSlice, err))
 		}
 		return
 	}
