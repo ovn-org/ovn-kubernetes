@@ -566,13 +566,12 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *kapi.Pod, nadName
 	lsp.Addresses = addresses
 
 	// add external ids
-
-	externalIDs := map[string]string{"namespace": pod.Namespace, "pod": "true"}
+	lsp.ExternalIDs = map[string]string{"namespace": pod.Namespace, "pod": "true"}
 	if bnc.IsSecondary() {
-		externalIDs[ovntypes.NADExternalID] = nadName
-		maps.Copy(externalIDs, bnc.getExternalIDs())
+		lsp.ExternalIDs[ovntypes.NetworkExternalID] = bnc.GetNetworkName()
+		lsp.ExternalIDs[ovntypes.NADExternalID] = nadName
+		lsp.ExternalIDs[ovntypes.TopologyExternalID] = bnc.TopologyType()
 	}
-	lsp.ExternalIDs = externalIDs
 
 	// CNI depends on the flows from port security, delay setting it until end
 	lsp.PortSecurity = addresses
