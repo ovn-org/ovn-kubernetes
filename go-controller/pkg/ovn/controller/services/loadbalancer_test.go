@@ -7,6 +7,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	utilpointer "k8s.io/utils/pointer"
@@ -82,7 +83,7 @@ func TestEnsureStaleLBs(t *testing.T) {
 			UUID: "", // intentionally left empty to make sure EnsureLBs sets it properly
 		},
 	}
-	err = EnsureLBs(nbClient, defaultService, staleLBs, LBs)
+	err = EnsureLBs(nbClient, defaultService, staleLBs, LBs, &util.DefaultNetInfo{})
 	if err != nil {
 		t.Fatalf("Error EnsureLBs: %v", err)
 	}
@@ -208,7 +209,7 @@ func TestEnsureLBs(t *testing.T) {
 			}
 			t.Cleanup(cleanup.Cleanup)
 
-			err = EnsureLBs(nbClient, tt.service, []LB{}, tt.LBs)
+			err = EnsureLBs(nbClient, tt.service, []LB{}, tt.LBs, &util.DefaultNetInfo{})
 			if err != nil {
 				t.Fatalf("Error EnsureLBs: %v", err)
 			}
