@@ -1,3 +1,3 @@
 # OVN kubernetes KIND Setup
 
-Refer to kind.md under the folder docs for the details.
+See [launching-ovn-kubernetes-on-kind.md](/docs/installation/launching-ovn-kubernetes-on-kind.md).
