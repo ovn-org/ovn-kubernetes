@@ -40,7 +40,9 @@ import (
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/tools/record"
 	anpapi "sigs.k8s.io/network-policy-api/apis/v1alpha1"
@@ -117,6 +119,7 @@ func (o *FakeOVN) start(objects ...runtime.Object) {
 	anpObjects := []runtime.Object{}
 	v1Objects := []runtime.Object{}
 	nads := []nettypes.NetworkAttachmentDefinition{}
+	nadClient := fakenadclient.NewSimpleClientset()
 	for _, object := range objects {
 		switch o := object.(type) {
 		case *egressip.EgressIPList:
@@ -132,6 +135,14 @@ func (o *FakeOVN) start(objects ...runtime.Object) {
 		case *egressservice.EgressServiceList:
 			egressServiceObjects = append(egressServiceObjects, object)
 		case *nettypes.NetworkAttachmentDefinitionList:
+			// must provision the NAD tracker manually, as per
+			// https://github.com/ovn-org/ovn-kubernetes/blob/65c79af35b2c22f90c863debefa15c4fb1f088cb/go-controller/vendor/k8s.io/client-go/testing/fixture.go#L341
+			// since the NADs use arbitrary API registration names, which `UnsafeGuessKindToResource` cannot resolve.
+			for _, nad := range o.Items {
+				if err := nadClient.Tracker().Create(schema.GroupVersionResource(nadGVR()), &nad, nad.Namespace); err != nil {
+					panic(err)
+				}
+			}
 			nads = append(nads, o.Items...)
 		case *adminpolicybasedrouteapi.AdminPolicyBasedExternalRouteList:
 			apbExternalRouteObjects = append(apbExternalRouteObjects, object)
@@ -152,7 +163,7 @@ func (o *FakeOVN) start(objects ...runtime.Object) {
 		EgressServiceClient:      egressservicefake.NewSimpleClientset(egressServiceObjects...),
 		AdminPolicyRouteClient:   adminpolicybasedroutefake.NewSimpleClientset(apbExternalRouteObjects...),
 		IPAMClaimsClient:         fakeipamclaimclient.NewSimpleClientset(),
-		NetworkAttchDefClient:    fakenadclient.NewSimpleClientset(),
+		NetworkAttchDefClient:    nadClient,
 	}
 	o.init(nads)
 }
@@ -469,4 +480,12 @@ func (o *FakeOVN) patchEgressIPObj(nodeName, egressIPName, egressIP, network str
 	}
 	err := o.controller.patchReplaceEgressIPStatus(egressIPName, status)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+}
+
+func nadGVR() metav1.GroupVersionResource {
+	return metav1.GroupVersionResource{
+		Group:    "k8s.cni.cncf.io",
+		Version:  "v1",
+		Resource: "network-attachment-definitions",
+	}
 }
