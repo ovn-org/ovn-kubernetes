@@ -515,4 +515,166 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 	})
+	ovntest.OnSupportedPlatformsIt("should create and delete correct openflows on breth0 for a L2 user defined network", func() {
+		config.IPv6Mode = true
+		config.Gateway.Interface = "eth0"
+		config.Gateway.NodeportEnable = true
+		ifAddrs := ovntest.MustParseIPNets("192.168.1.10/24", "fc00:f853:ccd:e793::3/64")
+		node := &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: nodeName,
+				Annotations: map[string]string{
+					"k8s.ovn.org/network-ids":  fmt.Sprintf("{\"%s\": \"%s\"}", netName, netID),
+					"k8s.ovn.org/node-subnets": fmt.Sprintf("{\"default\":[\"%s\"]}", v4NodeSubnet),
+				},
+			},
+		}
+		nad := ovntest.GenerateNAD(netName, "rednad", "greenamespace",
+			types.Layer2Topology, "100.128.0.0/16,ae70::66/60", types.NetworkRolePrimary)
+		netInfo, err := util.ParseNADInfo(nad)
+		Expect(err).NotTo(HaveOccurred())
+		setUpGatewayFakeOVSCommands(fexec)
+		getCreationFakeOVSCommands(fexec, mgtPort, mgtPortMAC, netName, nodeName, netInfo.MTU())
+		setUpUDNOpenflowManagerFakeOVSCommands(fexec)
+		getDeletionFakeOVSCommands(fexec, mgtPort)
+		nodeLister.On("Get", mock.AnythingOfType("string")).Return(node, nil)
+		kubeFakeClient := fake.NewSimpleClientset(
+			&corev1.NodeList{
+				Items: []corev1.Node{*node},
+			},
+		)
+		fakeClient := &util.OVNNodeClientset{
+			KubeClient: kubeFakeClient,
+		}
+
+		stop := make(chan struct{})
+		wf, err := factory.NewNodeWatchFactory(fakeClient, nodeName)
+		Expect(err).NotTo(HaveOccurred())
+		wg := &sync.WaitGroup{}
+		defer func() {
+			close(stop)
+			wf.Shutdown()
+			wg.Wait()
+		}()
+		err = wf.Start()
+		Expect(err).NotTo(HaveOccurred())
+		cnode := node.DeepCopy()
+		cnode.Annotations[util.OvnNodeManagementPortMacAddresses] = `{"bluenet":"00:00:00:55:66:77"}`
+		kubeMock.On("UpdateNodeStatus", cnode).Return(nil)
+		// Make a fake MgmtPortConfig with only the fields we care about
+		fakeMgmtPortV4IPFamilyConfig := managementPortIPFamilyConfig{
+			ifAddr: ovntest.MustParseIPNet(v4NodeSubnet),
+			gwIP:   net.IP(v4NodeSubnet),
+		}
+		fakeMgmtPortV6IPFamilyConfig := managementPortIPFamilyConfig{
+			ifAddr: ovntest.MustParseIPNet(v6NodeSubnet),
+			gwIP:   net.IP(v6NodeSubnet),
+		}
+
+		fakeMgmtPortConfig := managementPortConfig{
+			ifName:    nodeName,
+			link:      nil,
+			routerMAC: nil,
+			ipv4:      &fakeMgmtPortV4IPFamilyConfig,
+			ipv6:      &fakeMgmtPortV6IPFamilyConfig,
+		}
+		nodeAnnotatorMock := &kubemocks.Annotator{}
+		nodeAnnotatorMock.On("Delete", mock.Anything).Return(nil)
+		nodeAnnotatorMock.On("Set", mock.Anything, map[string]*util.L3GatewayConfig{
+			types.DefaultNetworkName: {
+				ChassisID:   "cb9ec8fa-b409-4ef3-9f42-d9283c47aac6",
+				BridgeID:    "breth0",
+				InterfaceID: "breth0_worker1",
+				MACAddress:  ovntest.MustParseMAC("00:00:00:55:66:99"),
+				IPAddresses: ifAddrs,
+				VLANID:      ptr.To(uint(0)),
+			}}).Return(nil)
+		nodeAnnotatorMock.On("Set", mock.Anything, mock.Anything).Return(nil)
+		nodeAnnotatorMock.On("Run").Return(nil)
+		kubeMock.On("SetAnnotationsOnNode", node.Name, map[string]interface{}{
+			"k8s.ovn.org/node-masquerade-subnet": "{\"ipv4\":\"169.254.169.0/29\",\"ipv6\":\"fd69::/125\"}",
+		}).Return(nil)
+
+		rm := routemanager.NewController()
+		wg.Add(1)
+		go testNS.Do(func(netNS ns.NetNS) error {
+			defer GinkgoRecover()
+			rm.Run(stop, 10*time.Second)
+			wg.Done()
+			return nil
+		})
+		err = testNS.Do(func(ns.NetNS) error {
+			defer GinkgoRecover()
+			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
+			Expect(err).NotTo(HaveOccurred())
+
+			// make preparations for creating openflow manager in DNCC which can be used for SNCC
+			localGw, err := newLocalGateway(nodeName, ovntest.MustParseIPNets(v4NodeSubnet, v6NodeSubnet), gatewayNextHops,
+				gatewayIntf, "", ifAddrs, nodeAnnotatorMock, &fakeMgmtPortConfig, &kubeMock, wf, rm)
+			Expect(err).NotTo(HaveOccurred())
+			stop := make(chan struct{})
+			wg := &sync.WaitGroup{}
+			Expect(localGw.Init(stop, wg)).To(Succeed())
+			udnGateway, err := NewUserDefinedNetworkGateway(netInfo, 3, node, wf.NodeCoreInformer().Lister(), &kubeMock, vrf, localGw)
+			Expect(err).NotTo(HaveOccurred())
+			// we cannot start the shared gw directly because it will spawn a goroutine that may not be bound to the test netns
+			// Start does two things, starts nodeIPManager which spawns a go routine and also starts openflow manager by spawning a go routine
+			//sharedGw.Start()
+			localGw.nodeIPManager.sync()
+			// we cannot start openflow manager directly because it spawns a go routine
+			// FIXME: extract openflow manager func from the spawning of a go routine so it can be called directly below.
+			localGw.openflowManager.syncFlows()
+			flowMap := udnGateway.gateway.openflowManager.flowCache
+			Expect(len(flowMap["DEFAULT"])).To(Equal(45))
+			Expect(udnGateway.masqCTMark).To(Equal(udnGateway.masqCTMark))
+			var udnFlows int
+			for _, flows := range flowMap {
+				for _, flow := range flows {
+					mark := fmt.Sprintf("0x%x", udnGateway.masqCTMark)
+					if strings.Contains(flow, mark) {
+						// UDN Flow
+						udnFlows++
+					}
+				}
+			}
+			Expect(udnFlows).To(Equal(0))
+			Expect(len(udnGateway.openflowManager.defaultBridge.netConfig)).To(Equal(1)) // only default network
+
+			Expect(udnGateway.AddNetwork()).To(Succeed())
+			flowMap = udnGateway.gateway.openflowManager.flowCache
+			Expect(len(flowMap["DEFAULT"])).To(Equal(59))                                // 14 UDN Flows are added by default
+			Expect(len(udnGateway.openflowManager.defaultBridge.netConfig)).To(Equal(2)) // default network + UDN network
+			for _, flows := range flowMap {
+				for _, flow := range flows {
+					if strings.Contains(flow, fmt.Sprintf("0x%x", udnGateway.masqCTMark)) {
+						// UDN Flow
+						udnFlows++
+					} else if strings.Contains(flow, fmt.Sprintf("in_port=%s", udnGateway.openflowManager.defaultBridge.netConfig["bluenet"].ofPortPatch)) {
+						udnFlows++
+					}
+				}
+			}
+			Expect(udnFlows).To(Equal(14))
+
+			cnode := node.DeepCopy()
+			kubeMock.On("UpdateNodeStatus", cnode).Return(nil) // check if network key gets deleted from annotation
+			Expect(udnGateway.DelNetwork()).To(Succeed())
+			flowMap = udnGateway.gateway.openflowManager.flowCache
+			Expect(len(flowMap["DEFAULT"])).To(Equal(45))                                // only default network flows are present
+			Expect(len(udnGateway.openflowManager.defaultBridge.netConfig)).To(Equal(1)) // default network only
+			udnFlows = 0
+			for _, flows := range flowMap {
+				for _, flow := range flows {
+					if strings.Contains(flow, fmt.Sprintf("0x%x", udnGateway.masqCTMark)) {
+						// UDN Flow
+						udnFlows++
+					}
+				}
+			}
+			Expect(udnFlows).To(Equal(0))
+			return nil
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
+	})
 })
