@@ -313,6 +313,31 @@ var _ = ginkgo.Describe("Route Manager", func() {
 				return isRouteInTable(testNS, r, loLink.Attrs().Index, MainTableID)
 			}, time.Second).Should(gomega.BeTrue())
 		})
+
+		ginkgo.It("deleting link doesn't cause panic", func() {
+			var link netlink.Link
+			var err error
+			mac, _ := net.ParseMAC("00:00:5e:00:53:44")
+			dummy := &netlink.Dummy{LinkAttrs: netlink.LinkAttrs{
+				Index:        99,
+				MTU:          1500,
+				Name:         "dummy",
+				HardwareAddr: mac,
+			}}
+			gomega.Expect(testNS.Do(func(netNS ns.NetNS) error {
+				if err := netlink.LinkAdd(dummy); err != nil {
+					return err
+				}
+				link, err = netlink.LinkByName("dummy")
+				return err
+			})).Should(gomega.Succeed())
+			r := netlink.Route{LinkIndex: link.Attrs().Index, Dst: v4DefaultRouteIPNet, Table: MainTableID}
+			rm.Add(r)
+			gomega.Expect(testNS.Do(func(netNS ns.NetNS) error {
+				return netlink.LinkDel(link)
+			})).Should(gomega.Succeed())
+			time.Sleep(400 * time.Millisecond) // sync period is 300 ms
+		})
 	})
 })
 

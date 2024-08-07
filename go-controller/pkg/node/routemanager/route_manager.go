@@ -115,6 +115,10 @@ func (c *Controller) delRoute(r netlink.Route) error {
 	klog.Infof("Route Manager: attempting to delete route: %s", r.String())
 	link, err := util.GetNetLinkOps().LinkByIndex(r.LinkIndex)
 	if err != nil {
+		if util.GetNetLinkOps().IsLinkNotFoundError(err) {
+			delete(c.store, r.LinkIndex)
+			return nil
+		}
 		return fmt.Errorf("failed to delete route (%s) because unable to get link: %v", r.String(), err)
 	}
 	if err := c.netlinkDelRoute(link, r.Dst, r.Table); err != nil {
@@ -254,6 +258,7 @@ func (c *Controller) addRouteToStore(r netlink.Route) bool {
 // sync will iterate through all routes seen on a node and ensure any route manager managed routes are applied. Any additional
 // routes for this link are preserved. sync only inspects routes for links which we managed and ignore routes for non-managed links.
 func (c *Controller) sync() {
+	deletedLinkIndexes := make([]int, 0)
 	for linkIndex, managedRoutes := range c.store {
 		for _, managedRoute := range managedRoutes {
 			filterRoute, filterMask := filterRouteByDstAndTable(linkIndex, managedRoute.Dst, managedRoute.Table)
@@ -272,13 +277,22 @@ func (c *Controller) sync() {
 			if !found {
 				link, err := util.GetNetLinkOps().LinkByIndex(managedRoute.LinkIndex)
 				if err != nil {
-					klog.Errorf("Route Manager: failed to apply route (%s) because unable to retrieve associated link: %v", managedRoute.String(), err)
+					if util.GetNetLinkOps().IsLinkNotFoundError(err) {
+						deletedLinkIndexes = append(deletedLinkIndexes, linkIndex)
+					} else {
+						klog.Errorf("Route Manager: failed to apply route (%s) because unable to retrieve associated link: %v", managedRoute.String(), err)
+					}
+					continue
 				}
 				if err := c.applyRoute(link, managedRoute.Gw, managedRoute.Dst, managedRoute.MTU, managedRoute.Src, managedRoute.Table); err != nil {
 					klog.Errorf("Route Manager: failed to apply route (%s): %v", managedRoute.String(), err)
 				}
 			}
 		}
+	}
+	for _, linkIndex := range deletedLinkIndexes {
+		klog.Infof("Route Manager: removing all routes associated with link index %d because link deleted", linkIndex)
+		delete(c.store, linkIndex)
 	}
 }
 

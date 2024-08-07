@@ -229,6 +229,29 @@ func setupFakeTestNode(nodeInitialState nodeConfig) (ns.NetNS, cleanupFn, error)
 	return testNS, cleanupFn, nil
 }
 
+func createVRFAndEnslaveLink(testNS ns.NetNS, linkName, vrfName string, vrfTable uint32) error {
+	vrfLink := &netlink.Vrf{
+		LinkAttrs: netlink.LinkAttrs{Name: vrfName},
+		Table:     vrfTable,
+	}
+	return testNS.Do(func(netNS ns.NetNS) error {
+		if err := netlink.LinkAdd(vrfLink); err != nil {
+			return fmt.Errorf("failed to create VRF link %s and table ID %d: %v", vrfName, vrfTable, err)
+		}
+		if err := netlink.LinkSetUp(vrfLink); err != nil {
+			return fmt.Errorf("failed to set VRF link %s up: %v", vrfName, err)
+		}
+		slaveLink, err := netlink.LinkByName(linkName)
+		if err != nil {
+			return fmt.Errorf("failed to get link %s: %v", linkName, err)
+		}
+		if err = netlink.LinkSetMaster(slaveLink, vrfLink); err != nil {
+			return fmt.Errorf("failed to set link %s master to link %s: %v", linkName, vrfName, err)
+		}
+		return nil
+	})
+}
+
 func initController(namespaces []corev1.Namespace, pods []corev1.Pod, egressIPs []egressipv1.EgressIP, node nodeConfig, v4, v6, createEIPAnnot bool) (*Controller, *egressipfake.Clientset, error) {
 
 	kubeClient := fake.NewSimpleClientset(&corev1.NodeList{Items: []corev1.Node{getNodeObj(node, createEIPAnnot)}},
@@ -697,7 +720,7 @@ var _ = table.DescribeTable("EgressIP selectors",
 			{
 				newEgressIP(egressIP1Name, egressIP1IPV4, node1Name, namespace1Label, egressPodLabel),
 				[]netlink.Route{getDefaultIPv4Route(getLinkIndex(dummyLink1Name)),
-					getDstWithSrcRoute(getLinkIndex(dummyLink1Name), dummy1IPv4CIDRNetwork, dummy1IPv4)},
+					getDstRoute(getLinkIndex(dummyLink1Name), dummy1IPv4CIDRNetwork)},
 				getNetlinkAddr(egressIP1IPV4, egressIPv4Mask),
 				dummyLink1Name,
 				[]testPodConfig{
@@ -772,7 +795,7 @@ var _ = table.DescribeTable("EgressIP selectors",
 			{
 				newEgressIP(egressIP1Name, egressIP1IPV4, node1Name, namespace1Label, egressPodLabel),
 				[]netlink.Route{getDefaultIPv4Route(getLinkIndex(dummyLink1Name)),
-					getDstWithSrcRoute(getLinkIndex(dummyLink1Name), dummy1IPv4CIDRNetwork, dummy1IPv4)},
+					getDstRoute(getLinkIndex(dummyLink1Name), dummy1IPv4CIDRNetwork)},
 				getNetlinkAddr(egressIP1IPV4, egressIPv4Mask),
 				dummyLink1Name,
 				[]testPodConfig{
@@ -836,7 +859,7 @@ var _ = table.DescribeTable("EgressIP selectors",
 			{
 				newEgressIP(egressIP1Name, egressIP1IPV4, node1Name, namespace1Label, egressPodLabel),
 				[]netlink.Route{getDefaultIPv4Route(getLinkIndex(dummyLink1Name)),
-					getDstWithSrcRoute(getLinkIndex(dummyLink1Name), dummy1IPv4CIDRNetwork, dummy1IPv4)},
+					getDstRoute(getLinkIndex(dummyLink1Name), dummy1IPv4CIDRNetwork)},
 				getNetlinkAddr(egressIP1IPV4, egressIPv4Mask),
 				dummyLink1Name,
 				[]testPodConfig{
@@ -902,7 +925,7 @@ var _ = table.DescribeTable("EgressIP selectors",
 			{
 				newEgressIP(egressIP1Name, egressIP1IPV4, node1Name, namespace1Label, egressPodLabel),
 				[]netlink.Route{getDefaultIPv4Route(getLinkIndex(dummyLink1Name)),
-					getDstWithSrcRoute(getLinkIndex(dummyLink1Name), dummy1IPv4CIDRNetwork, dummy1IPv4)},
+					getDstRoute(getLinkIndex(dummyLink1Name), dummy1IPv4CIDRNetwork)},
 				getNetlinkAddr(egressIP1IPV4, egressIPv4Mask),
 				dummyLink1Name,
 				[]testPodConfig{
@@ -921,7 +944,7 @@ var _ = table.DescribeTable("EgressIP selectors",
 			{
 				newEgressIP(egressIP2Name, egressIP2IPV4, node1Name, namespace2Label, egressPodLabel),
 				[]netlink.Route{getDefaultIPv4Route(getLinkIndex(dummyLink2Name)),
-					getDstWithSrcRoute(getLinkIndex(dummyLink2Name), dummy2IPv4CIDRNetwork, dummy2IPv4)},
+					getDstRoute(getLinkIndex(dummyLink2Name), dummy2IPv4CIDRNetwork)},
 				getNetlinkAddr(egressIP2IPV4, egressIPv4Mask),
 				dummyLink2Name,
 				[]testPodConfig{
@@ -1067,6 +1090,51 @@ var _ = ginkgo.Describe("label to annotations migration", func() {
 	ginkgo.AfterEach(func() {
 		defer runtime.UnlockOSThread()
 		gomega.Expect(cleanupFn()).Should(gomega.Succeed())
+	})
+})
+
+var _ = ginkgo.Describe("VRF", func() {
+	ginkgo.It("copies routes from the VRF routing table for a link enslaved by VRF device", func() {
+		defer ginkgo.GinkgoRecover()
+		if os.Getenv("NOROOT") == "TRUE" {
+			ginkgo.Skip("Test requires root privileges")
+		}
+		vrfName := "vrf-dummy"
+		var vrfTable uint32 = 55555
+		ginkgo.By("setup link")
+		nodeConfig := nodeConfig{routes: []netlink.Route{}, linkConfigs: []linkConfig{
+			{dummyLink1Name, []address{{dummy1IPv4CIDR, false}}},
+		}}
+		testNS, cleanupNodeFn, err := setupFakeTestNode(nodeConfig)
+		gomega.Expect(err).ShouldNot(gomega.HaveOccurred(), "fake node setup should succeed")
+		ginkgo.By("create VRF and add link")
+		gomega.Expect(createVRFAndEnslaveLink(testNS, dummyLink1Name, vrfName, vrfTable)).Should(gomega.Succeed())
+		ginkgo.By("add route to routing table associated with VRF")
+		vrfRoute := getDstRouteForTable(getLinkIndex(dummyLink1Name), int(vrfTable), dummy3IPv4CIDR)
+		gomega.Expect(testNS.Do(func(netNS ns.NetNS) error {
+			return netlink.RouteAdd(&vrfRoute)
+		})).Should(gomega.Succeed())
+		egressIPList := []egressipv1.EgressIP{*newEgressIP(egressIP1Name, egressIP1IPV4, node1Name, namespace1Label, egressPodLabel)}
+		pods := []corev1.Pod{newPodWithLabels(namespace1, pod1Name, node1Name, pod1IPv4, egressPodLabel)}
+		namespaces := []corev1.Namespace{newNamespaceWithLabels(namespace1, namespace1Label)}
+		ginkgo.By("start controller")
+		c, _, err := initController(namespaces, pods, egressIPList, nodeConfig, true, false, true)
+		gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+		cleanupControllerFn, err := runController(testNS, c)
+		ginkgo.By("ensure route previously added is copied to new routing table")
+		eipTable := util.CalculateRouteTableID(getLinkIndex(dummyLink1Name))
+		gomega.Eventually(func() bool {
+			eipRoutes, err := getRoutesFromTable(testNS, eipTable, netlink.FAMILY_V4)
+			gomega.Expect(err).Should(gomega.Succeed())
+			for _, eipRoute := range eipRoutes {
+				if eipRoute.Dst.String() == vrfRoute.Dst.String() {
+					return true
+				}
+			}
+			return false
+		}).Should(gomega.BeTrue(), "route should be copied to new routing table")
+		gomega.Expect(cleanupControllerFn()).ShouldNot(gomega.HaveOccurred())
+		gomega.Expect(cleanupNodeFn()).ShouldNot(gomega.HaveOccurred())
 	})
 })
 
@@ -1415,7 +1483,7 @@ func getRoutesForLinkFromTable(testNS ns.NetNS, linkName string) ([]netlink.Rout
 		if err != nil {
 			return err
 		}
-		filterRoute, filterMask := filterRouteByTable(link.Attrs().Index, util.CalculateRouteTableID(link.Attrs().Index))
+		filterRoute, filterMask := filterRouteByLinkTable(link.Attrs().Index, util.CalculateRouteTableID(link.Attrs().Index))
 		routes, err = netlink.RouteListFiltered(netlink.FAMILY_ALL, filterRoute, filterMask)
 		if err != nil {
 			return err
@@ -1425,12 +1493,25 @@ func getRoutesForLinkFromTable(testNS ns.NetNS, linkName string) ([]netlink.Rout
 	return routes, err
 }
 
-func filterRouteByTable(linkIndex, table int) (*netlink.Route, uint64) {
+func getRoutesFromTable(testNS ns.NetNS, table, family int) ([]netlink.Route, error) {
+	var err error
+	var routes []netlink.Route
+	err = testNS.Do(func(netNS ns.NetNS) error {
+		filterRoute, filterMask := filterRouteByTable(table)
+		routes, err = netlink.RouteListFiltered(family, filterRoute, filterMask)
+		if err != nil {
+			return err
+		}
+		return nil
+	})
+	return routes, err
+}
+
+func filterRouteByTable(table int) (*netlink.Route, uint64) {
 	return &netlink.Route{
-			LinkIndex: linkIndex,
-			Table:     table,
+			Table: table,
 		},
-		netlink.RT_FILTER_OIF | netlink.RT_FILTER_TABLE
+		netlink.RT_FILTER_TABLE
 }
 
 func newEgressIPMeta(name string) metav1.ObjectMeta {
@@ -1549,11 +1630,16 @@ func getDefaultIPv6Route(linkIndex int) netlink.Route {
 }
 
 func getDstRoute(linkIndex int, dst string) netlink.Route {
+	return getDstRouteForTable(linkIndex, util.CalculateRouteTableID(linkIndex), dst)
+
+}
+
+func getDstRouteForTable(linkIndex, table int, dst string) netlink.Route {
 	_, dstIPNet, err := net.ParseCIDR(dst)
 	if err != nil {
 		panic(err.Error())
 	}
-	return netlink.Route{LinkIndex: linkIndex, Dst: dstIPNet, Table: util.CalculateRouteTableID(linkIndex)}
+	return netlink.Route{LinkIndex: linkIndex, Dst: dstIPNet, Table: table}
 }
 
 func getDstWithSrcRoute(linkIndex int, dst, src string) netlink.Route {

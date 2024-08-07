@@ -2525,4 +2525,102 @@ spec:
 			podNamespace.Name, true, []string{pod1Node.nodeIP}))
 		framework.ExpectNoError(err, "7. Check connectivity to the host on the OVN network from the pod not selected by EgressIP, failed: %v", err)
 	})
+
+	// Single EgressIP object where the Egress IP of object is hosted on a single interface thats enslaved to a VRF device on a secondary host network
+	// 0. create VRF and enslave expected egress interface
+	// 1. Set one node as available for egress
+	// 2. Create one EgressIP object with one egress IP hosted by a secondary host network
+	// 3. Check that status of EgressIP object is of length one
+	// 4. Create a pod matching the EgressIP
+	// 5. Check connectivity from a pod to an external "node" hosted on a secondary host network and verify the expected IP
+	ginkgo.It("[secondary-host-eip] uses VRF routing table if EIP assigned interface is VRF slave", func() {
+		var egressIP1 string
+		if utilnet.IsIPv6(net.ParseIP(egress1Node.nodeIP)) {
+			egressIP1 = "2001:db8:abcd:1234:c001::"
+		} else {
+			egressIP1 = "10.10.10.100"
+		}
+		ginkgo.By("0. create VRF and enslave expected egress interface")
+		vrfName := "egress-vrf"
+		vrfRoutingTable := "99999"
+		// find the egress interface name
+		out, err := runCommand(containerRuntime, "exec", egress1Node.name, "ip", "-o", "route", "get", egressIP1)
+		if err != nil {
+			framework.Failf("failed to add expected EIP assigned interface, err %v, out: %s", err, out)
+		}
+		var egressInterface string
+		outSplit := strings.Split(out, " ")
+		for i, entry := range outSplit {
+			if entry == "dev" && i+1 < len(outSplit) {
+				egressInterface = outSplit[i+1]
+				break
+			}
+		}
+		if egressInterface == "" {
+			framework.Failf("failed to find egress interface name")
+		}
+		_, err = runCommand(containerRuntime, "exec", egress1Node.name, "ip", "link", "add", vrfName, "type", "vrf", "table", vrfRoutingTable)
+		if err != nil {
+			framework.Failf("failed to add VRF to node %s: %v", egress1Node.name, err)
+		}
+		defer runCommand(containerRuntime, "exec", egress1Node.name, "ip", "link", "del", vrfName)
+		_, err = runCommand(containerRuntime, "exec", egress1Node.name, "ip", "link", "set", "dev", egressInterface, "master", vrfName)
+		if err != nil {
+			framework.Failf("failed to enslave interface %s to VRF %s node %s: %v", egressInterface, vrfName, egress1Node.name, err)
+		}
+		egressNodeAvailabilityHandler := egressNodeAvailabilityHandlerViaLabel{f}
+		ginkgo.By("1. Set one node as available for egress")
+		egressNodeAvailabilityHandler.Enable(egress1Node.name)
+		defer egressNodeAvailabilityHandler.Restore(egress1Node.name)
+		podNamespace := f.Namespace
+		podNamespace.Labels = map[string]string{
+			"name": f.Namespace.Name,
+		}
+		updateNamespace(f, podNamespace)
+
+		ginkgo.By("2. Create one EgressIP object with one egress IP hosted by a secondary host network")
+		egressIPConfig := fmt.Sprintf(`apiVersion: k8s.ovn.org/v1
+kind: EgressIP
+metadata:
+    name: ` + egressIPName + `
+spec:
+    egressIPs:
+    - "` + egressIP1 + `"
+    podSelector:
+        matchLabels:
+            wants: egress
+    namespaceSelector:
+        matchLabels:
+            name: ` + f.Namespace.Name + `
+`)
+
+		if err := os.WriteFile(egressIPYaml, []byte(egressIPConfig), 0644); err != nil {
+			framework.Failf("Unable to write CRD config to disk: %v", err)
+		}
+		defer func() {
+			if err := os.Remove(egressIPYaml); err != nil {
+				framework.Logf("Unable to remove the CRD config from disk: %v", err)
+			}
+		}()
+		e2ekubectl.RunKubectlOrDie("default", "create", "-f", egressIPYaml)
+		ginkgo.By("3. Check that status of EgressIP object is of length one")
+		verifySpecificEgressIPStatusLengthEquals(egressIPName, 1, nil)
+		ginkgo.By("4. Create a pod matching the EgressIP")
+		createGenericPodWithLabel(f, pod1Name, pod1Node.name, f.Namespace.Name, command, podEgressLabel)
+		err = wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
+			kubectlOut := getPodAddress(pod1Name, f.Namespace.Name)
+			srcIP := net.ParseIP(kubectlOut)
+			if srcIP == nil {
+				return false, nil
+			}
+			return true, nil
+		})
+		framework.ExpectNoError(err, "Step 4. Create a pod matching the EgressIP, failed, err: %v", err)
+		ginkgo.By("5. Check connectivity from a pod to an external \"node\" hosted on a secondary host network " +
+			"and verify the expected IP")
+		err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(targetSecondaryNode, pod1Name,
+			podNamespace.Name, true, []string{egressIP1}))
+		framework.ExpectNoError(err, "5. Check connectivity a pod to an external \"node\" hosted on a secondary host network "+
+			"and verify the expected IP, failed for EgressIP %s: %v", egressIPName, err)
+	})
 })
