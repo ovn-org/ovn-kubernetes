@@ -353,7 +353,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 	})
-	ovntest.OnSupportedPlatformsIt("should create correct openflows on breth0 for a L3 user defined network", func() {
+	ovntest.OnSupportedPlatformsIt("should create and delete correct openflows on breth0 for a L3 user defined network", func() {
 		config.IPv6Mode = true
 		config.Gateway.Interface = "eth0"
 		config.Gateway.NodeportEnable = true
@@ -374,6 +374,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		setUpGatewayFakeOVSCommands(fexec)
 		getCreationFakeOVSCommands(fexec, mgtPort, mgtPortMAC, netName, nodeName, netInfo.MTU())
 		setUpUDNOpenflowManagerFakeOVSCommands(fexec)
+		getDeletionFakeOVSCommands(fexec, mgtPort)
 		nodeLister.On("Get", mock.AnythingOfType("string")).Return(node, nil)
 		kubeFakeClient := fake.NewSimpleClientset(
 			&corev1.NodeList{
@@ -492,6 +493,23 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 				}
 			}
 			Expect(udnFlows).To(Equal(14))
+
+			cnode := node.DeepCopy()
+			kubeMock.On("UpdateNodeStatus", cnode).Return(nil) // check if network key gets deleted from annotation
+			Expect(udnGateway.DelNetwork()).To(Succeed())
+			flowMap = udnGateway.gateway.openflowManager.flowCache
+			Expect(len(flowMap["DEFAULT"])).To(Equal(45))                                // only default network flows are present
+			Expect(len(udnGateway.openflowManager.defaultBridge.netConfig)).To(Equal(1)) // default network only
+			udnFlows = 0
+			for _, flows := range flowMap {
+				for _, flow := range flows {
+					if strings.Contains(flow, fmt.Sprintf("0x%x", udnGateway.masqCTMark)) {
+						// UDN Flow
+						udnFlows++
+					}
+				}
+			}
+			Expect(udnFlows).To(Equal(0))
 			return nil
 		})
 		Expect(err).NotTo(HaveOccurred())
