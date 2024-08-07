@@ -404,7 +404,7 @@ func (g *gateway) Reconcile() error {
 	}
 	subnets, err := util.ParseNodeHostSubnetAnnotation(node, types.DefaultNetworkName)
 	if err != nil {
-		return fmt.Errorf("failed to get subnets for node: %s for OpenFlow cache update", node.Name)
+		return fmt.Errorf("failed to get subnets for node: %s for OpenFlow cache update; err: %v", node.Name, err)
 	}
 	if err := g.openflowManager.updateBridgeFlowCache(subnets, g.nodeIPManager.ListAddresses()); err != nil {
 		return err
