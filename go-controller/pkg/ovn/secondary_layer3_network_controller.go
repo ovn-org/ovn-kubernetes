@@ -280,7 +280,7 @@ type SecondaryLayer3NetworkController struct {
 	// Cluster-wide router default Control Plane Protection (COPP) UUID
 	defaultCOPPUUID string
 
-	gatewayManager         *GatewayManager
+	gatewayManagers        sync.Map
 	gatewayTopologyFactory *topology.GatewayTopologyFactory
 }
 
@@ -323,6 +323,7 @@ func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netI
 		syncZoneICFailed:            sync.Map{},
 		gatewaysFailed:              sync.Map{},
 		gatewayTopologyFactory:      topology.NewGatewayTopologyFactory(cnci.nbClient),
+		gatewayManagers:             sync.Map{},
 	}
 
 	if oc.allocatesPodAnnotation() {
@@ -429,11 +430,21 @@ func (oc *SecondaryLayer3NetworkController) Cleanup() error {
 		return fmt.Errorf("failed to get ops for deleting switches of network %s: %v", netName, err)
 	}
 
-	if oc.gatewayManager != nil {
-		if err := oc.gatewayManager.Cleanup(); err != nil {
-			return fmt.Errorf("failed to cleanup gateway manager for network %q: %w", netName, err)
+	oc.gatewayManagers.Range(func(nodeName, value any) bool {
+		gwManager, isGWManagerType := value.(*GatewayManager)
+		if !isGWManagerType {
+			klog.Errorf(
+				"Failed to cleanup GW manager for network %q on node %s: could not retrieve GWManager",
+				netName,
+				nodeName,
+			)
+			return true
 		}
-	}
+		if err := gwManager.Cleanup(); err != nil {
+			klog.Errorf("Failed to cleanup GW manager for network %q on node %s: %v", netName, nodeName, err)
+		}
+		return true
+	})
 
 	// now delete cluster router
 	ops, err = libovsdbops.DeleteLogicalRoutersWithPredicateOps(oc.nbClient, ops,
@@ -594,14 +605,15 @@ func (oc *SecondaryLayer3NetworkController) addUpdateLocalNodeEvent(node *kapi.N
 
 	if util.IsNetworkSegmentationSupportEnabled() && oc.IsPrimaryNetwork() {
 		if nSyncs.syncGw {
-			oc.gatewayManager = oc.newGatewayManager(node.Name)
+			gwManager := oc.gatewayManagerForNode(node.Name)
+			oc.gatewayManagers.Store(node.Name, gwManager)
 
 			gwConfig, err := oc.nodeGatewayConfig(node)
 			if err != nil {
 				errs = append(errs, fmt.Errorf("failed to generate node GW configuration: %v", err))
 				oc.gatewaysFailed.Store(node.Name, true)
 			} else {
-				if err := oc.gatewayManager.syncNodeGateway(
+				if err := gwManager.syncNodeGateway(
 					node,
 					gwConfig.config,
 					gwConfig.hostSubnets,
@@ -614,7 +626,7 @@ func (oc *SecondaryLayer3NetworkController) addUpdateLocalNodeEvent(node *kapi.N
 				); err != nil {
 					errs = append(errs, fmt.Errorf(
 						"failed to sync node GW for network %q: %v",
-						oc.gatewayManager.netInfo.GetNetworkName(),
+						gwManager.netInfo.GetNetworkName(),
 						err,
 					))
 					oc.gatewaysFailed.Store(node.Name, true)
@@ -695,10 +707,10 @@ func (oc *SecondaryLayer3NetworkController) deleteNodeEvent(node *kapi.Node) err
 		return err
 	}
 
-	if err := oc.newGatewayManager(node.Name).Cleanup(); err != nil {
+	if err := oc.gatewayManagerForNode(node.Name).Cleanup(); err != nil {
 		return fmt.Errorf("failed to cleanup gateway on node %q: %w", node.Name, err)
 	}
-
+	oc.gatewayManagers.Delete(node.Name)
 	oc.localZoneNodes.Delete(node.Name)
 
 	oc.lsManager.DeleteSwitch(oc.GetNetworkScopedName(node.Name))
@@ -887,4 +899,22 @@ func (oc *SecondaryLayer3NetworkController) newGatewayManager(nodeName string) *
 		oc.NetInfo,
 		oc.watchFactory,
 	)
+}
+
+func (oc *SecondaryLayer3NetworkController) gatewayManagerForNode(nodeName string) *GatewayManager {
+	obj, isFound := oc.gatewayManagers.Load(nodeName)
+	if !isFound {
+		return oc.newGatewayManager(nodeName)
+	} else {
+		gwManager, isGWManagerType := obj.(*GatewayManager)
+		if !isGWManagerType {
+			klog.Errorf(
+				"failed to extract a gateway manager from the network %q on node %s; creating new one",
+				oc.GetNetworkName(),
+				nodeName,
+			)
+			return oc.newGatewayManager(nodeName)
+		}
+		return gwManager
+	}
 }
