@@ -102,6 +102,7 @@ nav:
       - EgressQoS: api-reference/egress-qos-api-spec.md
       - EgressFirewall: api-reference/egress-firewall-api-spec.md
       - AdminPolicyBasedExternalRoutes: api-reference/admin-epbr-api-spec.md
+      - UserDefinedNetwork: api-reference/userdefinednetwork-api-spec.md
   - Features:
     - NetworkSecurityControls:
       - AdminNetworkPolicy: features/network-security-controls/admin-network-policy.md
