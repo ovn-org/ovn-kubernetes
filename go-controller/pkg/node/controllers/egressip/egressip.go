@@ -243,62 +243,8 @@ func (c *Controller) Run(stopCh <-chan struct{}, wg *sync.WaitGroup, threads int
 		wg.Done()
 	}()
 
-	// Tell rule manager and IPTable manager that we want to fully own all rules at a particular priority/table.
-	// Any rules created with this priority or in that particular IPTables chain, that we do not recognize it, will be
-	// removed by relevant manager.
-	if err := c.ruleManager.OwnPriority(rulePriority); err != nil {
-		return fmt.Errorf("failed to own priority %d for IP rules: %v", rulePriority, err)
-	}
-	if c.v4 {
-		if err := c.iptablesManager.OwnChain(utiliptables.TableNAT, iptChainName, utiliptables.ProtocolIPv4); err != nil {
-			return fmt.Errorf("unable to own chain %s: %v", iptChainName, err)
-		}
-		if err = c.iptablesManager.EnsureRule(utiliptables.TableNAT, utiliptables.ChainPostrouting, utiliptables.ProtocolIPv4, iptJumpRule); err != nil {
-			return fmt.Errorf("failed to create rule in chain %s to jump to chain %s: %v", utiliptables.ChainPostrouting, iptChainName, err)
-		}
-		// for LGW mode, we need to restore pkt mark from conntrack in-order for RP filtering not to fail for return packets from cluster nodes
-		if ovnconfig.Gateway.Mode == ovnconfig.GatewayModeLocal {
-			if err = c.iptablesManager.EnsureRule(utiliptables.TableMangle, utiliptables.ChainPrerouting, utiliptables.ProtocolIPv4, iptRestoreMarkRule); err != nil {
-				return fmt.Errorf("failed to create rule in chain %s to restore pkt marking: %v", utiliptables.ChainPrerouting, err)
-			}
-			if err = c.iptablesManager.EnsureRule(utiliptables.TableMangle, utiliptables.ChainPrerouting, utiliptables.ProtocolIPv4, iptSaveMarkRule); err != nil {
-				return fmt.Errorf("failed to create rule in chain %s to save pkt marking: %v", utiliptables.ChainPrerouting, err)
-			}
-
-			// If dst is a node IP, use main routing table and skip EIP routing tables
-			if err = c.ruleManager.Add(getNodeIPFwMarkIPRule(netlink.FAMILY_V4)); err != nil {
-				return fmt.Errorf("failed to create IPv4 rule for node IPs: %v", err)
-			}
-			// The fwmark of the packet is included in reverse path route lookup. This permits rp_filter to function when the fwmark is
-			// used for routing traffic in both directions.
-			stdout, _, err := util.RunSysctl("-w", "net.ipv4.conf.all.src_valid_mark=1")
-			if err != nil || stdout != "net.ipv4.conf.all.src_valid_mark = 1" {
-				return fmt.Errorf("failed to set sysctl net.ipv4.conf.all.src_valid_mark to 1")
-			}
-		}
-	}
-	if c.v6 {
-		if err := c.iptablesManager.OwnChain(utiliptables.TableNAT, iptChainName, utiliptables.ProtocolIPv6); err != nil {
-			return fmt.Errorf("unable to own chain %s: %v", iptChainName, err)
-		}
-		if err = c.iptablesManager.EnsureRule(utiliptables.TableNAT, utiliptables.ChainPostrouting, utiliptables.ProtocolIPv6, iptJumpRule); err != nil {
-			return fmt.Errorf("unable to ensure iptables rules for jump rule: %v", err)
-		}
-		// for LGW mode, we need to restore pkt mark from conntrack in-order for RP filtering not to fail for return packets from cluster nodes
-		if ovnconfig.Gateway.Mode == ovnconfig.GatewayModeLocal {
-			if err = c.iptablesManager.EnsureRule(utiliptables.TableMangle, utiliptables.ChainPrerouting, utiliptables.ProtocolIPv6, iptRestoreMarkRule); err != nil {
-				return fmt.Errorf("failed to create rule in chain %s to restore pkt marking: %v", utiliptables.ChainPrerouting, err)
-			}
-			if err = c.iptablesManager.EnsureRule(utiliptables.TableMangle, utiliptables.ChainPrerouting, utiliptables.ProtocolIPv6, iptSaveMarkRule); err != nil {
-				return fmt.Errorf("failed to create rule in chain %s to save pkt marking: %v", utiliptables.ChainPrerouting, err)
-			}
-
-			// If dst is a node IP, use main routing table and skip EIP routing tables
-			// src_valid_mark is not applicable to ipv6
-			if err = c.ruleManager.Add(getNodeIPFwMarkIPRule(netlink.FAMILY_V6)); err != nil {
-				return fmt.Errorf("failed to create IPv6 rule for node IPs: %v", err)
-			}
-		}
+	if err := c.addIptablesAndIPRules(); err != nil {
+		return err
 	}
 
 	err = wait.PollUntilContextTimeout(wait.ContextForChannel(stopCh), 1*time.Second, 10*time.Second, true,
@@ -1262,6 +1208,91 @@ func (c *Controller) isIPSupported(isIPV6 bool) bool {
 		return true
 	}
 	return false
+}
+
+// addIptablesAndIPRules configures the static IP rules and iptables rules that are needed to make multi NIC EgressIP
+// work.
+func (c *Controller) addIptablesAndIPRules() error {
+	// Tell rule manager and IPTable manager that we want to fully own all rules at a particular priority/table.
+	// Any rules created with this priority or in that particular IPTables chain, that we do not recognize it, will be
+	// removed by relevant manager.
+	if err := c.ruleManager.OwnPriority(rulePriority); err != nil {
+		return fmt.Errorf("failed to own priority %d for IP rules: %v", rulePriority, err)
+	}
+	if c.v4 {
+		if err := c.addIptablesAndIPRulesForFamily(utiliptables.ProtocolIPv4); err != nil {
+			return err
+		}
+	}
+	if c.v6 {
+		if err := c.addIptablesAndIPRulesForFamily(utiliptables.ProtocolIPv6); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// addIptablesAndIPRules configures the static IP rules and iptables rules that are needed to make multi NIC EgressIP
+// work for the specified IP address family (protocol).
+func (c *Controller) addIptablesAndIPRulesForFamily(protocol utiliptables.Protocol) error {
+	family := netlink.FAMILY_V4
+	if protocol == utiliptables.ProtocolIPv6 {
+		family = netlink.FAMILY_V6
+	}
+	if err := c.iptablesManager.OwnChain(utiliptables.TableNAT, iptChainName, protocol); err != nil {
+		return fmt.Errorf("unable to own iptables %s chain %s: %v", protocol, iptChainName, err)
+	}
+	if err := c.iptablesManager.EnsureRule(utiliptables.TableNAT, utiliptables.ChainPostrouting, protocol, iptJumpRule); err != nil {
+		return fmt.Errorf("failed to create %s rule in chain %s to jump to chain %s: %v",
+			protocol, utiliptables.ChainPostrouting, iptChainName, err)
+	}
+	// for LGW mode, we need to restore pkt mark from conntrack in-order for RP filtering not to fail for return packets from cluster nodes
+	if ovnconfig.Gateway.Mode == ovnconfig.GatewayModeLocal {
+		if err := c.iptablesManager.EnsureRule(utiliptables.TableMangle, utiliptables.ChainPrerouting, protocol, iptRestoreMarkRule); err != nil {
+			return fmt.Errorf("failed to create rule in iptables %s chain %s to restore pkt marking: %v",
+				protocol, utiliptables.ChainPrerouting, err)
+		}
+		if err := c.iptablesManager.EnsureRule(utiliptables.TableMangle, utiliptables.ChainPrerouting, protocol, iptSaveMarkRule); err != nil {
+			return fmt.Errorf("failed to create rule in iptables %s chain %s to save pkt marking: %v",
+				protocol, utiliptables.ChainPrerouting, err)
+		}
+		// If dst is a node IP, use main routing table and skip EIP routing tables.
+		if err := c.ruleManager.Add(getNodeIPFwMarkIPRule(family)); err != nil {
+			return fmt.Errorf("failed to create %s rule for node IPs: %v", protocol, err)
+		}
+		// src_valid_mark is not applicable to ipv6.
+		if protocol == utiliptables.ProtocolIPv4 {
+			// The fwmark of the packet is included in reverse path route lookup. This permits rp_filter to function when the fwmark is
+			// used for routing traffic in both directions.
+			stdout, _, err := util.RunSysctl("-w", "net.ipv4.conf.all.src_valid_mark=1")
+			if err != nil || stdout != "net.ipv4.conf.all.src_valid_mark = 1" {
+				return fmt.Errorf("failed to set sysctl net.ipv4.conf.all.src_valid_mark to 1")
+			}
+		}
+	} else {
+		// For cases where we transition from local gateway mode to shared gateway mode, set src_valid_mark back to "0"
+		// and clean up iptables and ip rules. The cleanups are best effort only, so print a warning instead of an
+		// error if part of the cleanup fails.
+		// src_valid_mark is not applicable to ipv6.
+		if protocol == utiliptables.ProtocolIPv4 {
+			stdout, _, err := util.RunSysctl("-w", "net.ipv4.conf.all.src_valid_mark=0")
+			if err != nil || stdout != "net.ipv4.conf.all.src_valid_mark = 0" {
+				klog.Warning("Failed to set sysctl net.ipv4.conf.all.src_valid_mark to 0")
+			}
+		}
+		if err := c.ruleManager.Delete(getNodeIPFwMarkIPRule(family)); err != nil {
+			klog.Warningf("Failed to delete %s rule for node IPs: %v", protocol, err)
+		}
+		if err := c.iptablesManager.DeleteRule(utiliptables.TableMangle, utiliptables.ChainPrerouting, protocol, iptRestoreMarkRule); err != nil {
+			klog.Warningf("Failed to delete %s rule in chain %s to restore pkt marking: %v",
+				protocol, utiliptables.ChainPrerouting, err)
+		}
+		if err := c.iptablesManager.DeleteRule(utiliptables.TableMangle, utiliptables.ChainPrerouting, protocol, iptSaveMarkRule); err != nil {
+			klog.Warningf("Failed to delete %s rule in chain %s to save pkt marking: %v",
+				protocol, utiliptables.ChainPrerouting, err)
+		}
+	}
+	return nil
 }
 
 // routeDifference returns a slice of routes from routesA that are not in routesB.
