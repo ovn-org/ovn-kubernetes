@@ -126,7 +126,7 @@ func GetNetworkScopedK8sMgmtHostIntfName(networkID uint) string {
 }
 
 func GetVRFDeviceNameForUDN(networkID int) string {
-	return fmt.Sprintf("mp%d%s", networkID, types.UDNVRFDeviceSuffix)
+	return fmt.Sprintf("%s%d%s", types.UDNVRFDevicePrefix, networkID, types.UDNVRFDeviceSuffix)
 }
 
 // GetWorkerFromGatewayRouter determines a node's corresponding worker switch name from a gateway router name

@@ -58,7 +58,7 @@ func (ncm *nodeNetworkControllerManager) CleanupDeletedNetworks(validNetworks ..
 	if !util.IsNetworkSegmentationSupportEnabled() {
 		return nil
 	}
-	validVrfDevices := make(sets.Set[string])
+	validVRFDevices := make(sets.Set[string])
 	for _, network := range validNetworks {
 		if !network.IsPrimaryNetwork() {
 			continue
@@ -68,9 +68,9 @@ func (ncm *nodeNetworkControllerManager) CleanupDeletedNetworks(validNetworks ..
 			klog.Errorf("Failed to get network identifier for network %s, error: %s", network.GetNetworkName(), err)
 			continue
 		}
-		validVrfDevices.Insert(util.GetVRFDeviceNameForUDN(networkID))
+		validVRFDevices.Insert(util.GetVRFDeviceNameForUDN(networkID))
 	}
-	return ncm.vrfManager.Repair(validVrfDevices)
+	return ncm.vrfManager.Repair(validVRFDevices)
 }
 
 func (ncm *nodeNetworkControllerManager) getNetworkID(network util.BasicNetInfo) (int, error) {
@@ -183,19 +183,18 @@ func (ncm *nodeNetworkControllerManager) Start(ctx context.Context) (err error) 
 	if ncm.nadController != nil {
 		err = ncm.nadController.Start()
 		if err != nil {
-			return fmt.Errorf("failed to start default node network controller: %v", err)
+			return fmt.Errorf("failed to start NAD controller: %w", err)
 		}
 	}
-
 	if ncm.vrfManager != nil {
 		// Let's create VRF manager that will manage VRFs for all UDNs
 		err = ncm.vrfManager.Run(ncm.stopChan, ncm.wg)
 		if err != nil {
-			err = fmt.Errorf("failed to run VRF Manager: %v", err)
+			return fmt.Errorf("failed to run VRF Manager: %w", err)
 		}
 	}
 
-	return err
+	return nil
 }
 
 // Stop gracefully stops all managed controllers

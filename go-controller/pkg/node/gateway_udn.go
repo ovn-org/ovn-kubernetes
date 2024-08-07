@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/util/sets"
 	listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
@@ -58,9 +57,7 @@ func (udng *UserDefinedNetworkGateway) AddNetwork() error {
 	}
 	vrfDeviceName := util.GetVRFDeviceNameForUDN(udng.networkID)
 	vrfTableId := util.CalculateRouteTableID(mplink.Attrs().Index)
-	slaveInterfaces := make(sets.Set[string])
-	slaveInterfaces.Insert(mplink.Attrs().Name)
-	err = udng.vrfManager.AddVRF(vrfDeviceName, slaveInterfaces, uint32(vrfTableId))
+	err = udng.vrfManager.AddVRF(vrfDeviceName, mplink.Attrs().Name, uint32(vrfTableId))
 	if err != nil {
 		return fmt.Errorf("could not add VRF %d for network %s, err: %v", vrfTableId, udng.GetNetworkName(), err)
 	}

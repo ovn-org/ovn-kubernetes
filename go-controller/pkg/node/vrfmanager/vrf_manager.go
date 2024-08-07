@@ -2,6 +2,7 @@ package vrfmanager
 
 import (
 	"fmt"
+
 	"strings"
 	"sync"
 	"time"
@@ -9,15 +10,19 @@ import (
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
+
 	"github.com/vishvananda/netlink"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 )
 
 type vrf struct {
-	name               string
-	table              uint32
-	enslavedInterfaces sets.Set[string]
+	name  string
+	table uint32
+	// managedSlave is the desired netlink interface who's master will be this VRF.
+	// It cannot be changed after VRF creation.
+	managedSlave string
 }
 
 type Controller struct {
@@ -116,6 +121,7 @@ func (vrfm *Controller) runInternal(stopChan <-chan struct{}, doneWg *sync.WaitG
 	return nil
 }
 
+// reconcile synchronizes all desired VRFs and removal of stale objects
 func (vrfm *Controller) reconcile() error {
 	vrfm.mu.Lock()
 	defer vrfm.mu.Unlock()
@@ -124,12 +130,25 @@ func (vrfm *Controller) reconcile() error {
 		klog.V(5).Infof("VRF Manager: reconciling VRFs took %v", time.Since(start))
 	}()
 
+	var errorAggregate []error
+	validVRFDevices := make(sets.Set[string])
 	for _, vrf := range vrfm.vrfs {
+		validVRFDevices.Insert(vrf.name)
 		err := vrfm.sync(vrf)
 		if err != nil {
-			klog.Errorf("VRF Manager: error syncing VRF device %s during reconcile, err: %v", vrf.name, err)
+			errorAggregate = append(errorAggregate, fmt.Errorf("error syncing VRF %s: %v", vrf.name, err))
 		}
 	}
+
+	// clean up anything stale
+	if err := vrfm.repair(validVRFDevices); err != nil {
+		errorAggregate = append(errorAggregate, fmt.Errorf("error repairing VRFs: %v", err))
+	}
+
+	if len(errorAggregate) > 0 {
+		return utilerrors.Join(errorAggregate...)
+	}
+
 	return nil
 }
 
@@ -143,6 +162,8 @@ func (vrfm *Controller) syncVRF(link netlink.Link) error {
 	return vrfm.sync(vrf)
 }
 
+// sync ensures that the netlink VRF device exists, and the managedSlave is enslaved to it.
+// It does not handle removal of the VRF or managedSlave, other than if it detects a conflict while adding.
 func (vrfm *Controller) sync(vrf vrf) error {
 	vrfLink, err := util.GetNetLinkOps().LinkByName(vrf.name)
 	var mustRecreate bool
@@ -153,7 +174,7 @@ func (vrfm *Controller) sync(vrf vrf) error {
 		vrfDev, ok := vrfLink.(*netlink.Vrf)
 		if ok && vrfDev.Table != vrf.table {
 			klog.Warningf("Found a conflict with existing VRF device table id for VRF device %s, recreating it", vrf.name)
-			err = vrfm.deleteVRF(vrf)
+			err = vrfm.deleteVRF(vrfLink)
 			if err != nil {
 				return fmt.Errorf("failed to delete existing VRF device %s to recreate, err: %w", vrf.name, err)
 			}
@@ -181,35 +202,24 @@ func (vrfm *Controller) sync(vrf vrf) error {
 			return fmt.Errorf("failed to get VRF device %s operationally up, err: %v", vrf.name, err)
 		}
 	}
-	existingEnslaves, err := getSlaveInterfaceNamesForVRF(vrfLink)
-	if err != nil {
-		return err
-	}
-	if existingEnslaves.Equal(vrf.enslavedInterfaces) {
-		return nil
-	}
-	for _, iface := range vrf.enslavedInterfaces.UnsortedList() {
-		if !existingEnslaves.Has(iface) {
-			err = enslaveInterfaceToVRF(vrf.name, iface)
-			if err != nil {
-				return fmt.Errorf("failed to enslave inteface %s into VRF device: %s, err: %v", iface, vrf.name, err)
+	if len(vrf.managedSlave) > 0 {
+		existingSlaves, err := getSlaveInterfaceNamesForVRF(vrfLink)
+		if err != nil {
+			return fmt.Errorf("failed to get existing slaves for VRF device %s, err: %v", vrfLink.Attrs().Name, err)
+		}
+		if !existingSlaves.Has(vrf.managedSlave) {
+			if err = enslaveInterfaceToVRF(vrf.name, vrf.managedSlave); err != nil {
+				return fmt.Errorf("failed to enslave interface %s into VRF device: %s, err: %v", vrf.managedSlave, vrf.name, err)
 			}
 		}
 	}
-	for _, iface := range existingEnslaves.UnsortedList() {
-		if !vrf.enslavedInterfaces.Has(iface) {
-			err = removeInterfaceFromVRF(vrf.name, iface)
-			if err != nil {
-				return fmt.Errorf("failed to remove inteface %s from VRF device: %s, err: %v", iface, vrf.name, err)
-			}
-		}
-	}
+
 	vrfm.vrfs[vrfLink.Attrs().Index] = vrf
 	return nil
 }
 
 // AddVRF adds a VRF device into the node.
-func (vrfm *Controller) AddVRF(name string, slaveInterfaces sets.Set[string], table uint32) error {
+func (vrfm *Controller) AddVRF(name string, slaveInterface string, table uint32) error {
 	vrfm.mu.Lock()
 	defer vrfm.mu.Unlock()
 
@@ -225,19 +235,19 @@ func (vrfm *Controller) AddVRF(name string, slaveInterfaces sets.Set[string], ta
 		vrfDev, ok = vrfm.vrfs[vrfLink.Attrs().Index]
 		if ok {
 			klog.V(5).Infof("VRF Manager: VRF %s already found in the cache", name)
-			if !vrfDev.enslavedInterfaces.Equal(slaveInterfaces) {
-				return fmt.Errorf("VRF Manager: enslave interfaces mismatch for VRF device %s", name)
+			if vrfDev.managedSlave != slaveInterface {
+				return fmt.Errorf("VRF Manager: slave interface mismatch for VRF device %s", name)
 			}
 			if vrfDev.table != table {
 				return fmt.Errorf("VRF Manager: table id mismatch for VRF device %s", name)
 			}
 		} else {
-			vrfDev = vrf{name, table, slaveInterfaces}
+			vrfDev = vrf{name, table, slaveInterface}
 		}
 	}
 
 	if err != nil && util.GetNetLinkOps().IsLinkNotFoundError(err) {
-		vrfDev = vrf{name, table, slaveInterfaces}
+		vrfDev = vrf{name, table, slaveInterface}
 	} else if err != nil {
 		return fmt.Errorf("failed to retrieve VRF device %s, err: %v", name, err)
 	}
@@ -249,11 +259,15 @@ func (vrfm *Controller) AddVRF(name string, slaveInterfaces sets.Set[string], ta
 // device(s) for which DeleteVRF is never invoked.
 // Assumptions: 1) The validVRFs list must contain device for which AddVRF
 // is already invoked. 2) The device name(s) in validVRFs are suffixed
-// with -vrf.
+// with "-vrf" and prefixed with "mp".
 func (vrfm *Controller) Repair(validVRFs sets.Set[string]) error {
 	vrfm.mu.Lock()
 	defer vrfm.mu.Unlock()
 
+	return vrfm.repair(validVRFs)
+}
+
+func (vrfm *Controller) repair(validVRFs sets.Set[string]) error {
 	links, err := util.GetNetLinkOps().LinkList()
 	if err != nil {
 		return fmt.Errorf("failed to list links on the node, err: %v", err)
@@ -261,8 +275,9 @@ func (vrfm *Controller) Repair(validVRFs sets.Set[string]) error {
 
 	for _, link := range links {
 		name := link.Attrs().Name
-		// Skip if the link is not a vrf type or name is not suffixed with -vrf.
-		if link.Type() != "vrf" || !strings.HasSuffix(name, types.UDNVRFDeviceSuffix) {
+		// Skip if the link is not a vrf type or name is not suffixed with -vrf or is not prefixed with mp.
+		if link.Type() != "vrf" || !strings.HasSuffix(name, types.UDNVRFDeviceSuffix) ||
+			!strings.HasPrefix(name, types.UDNVRFDevicePrefix) {
 			continue
 		}
 		if !validVRFs.Has(name) {
@@ -297,20 +312,14 @@ func (vrfm *Controller) DeleteVRF(name string) (err error) {
 		klog.V(5).Infof("VRF Manager: VRF %s not found in cache for deletion", name)
 		return nil
 	}
-	err = vrfm.deleteVRF(vrf)
+	err = vrfm.deleteVRF(vrfLink)
 	if err != nil {
 		return fmt.Errorf("failed to delete VRF device %s, err: %w", vrf.name, err)
 	}
 	return nil
 }
 
-func (vrfm *Controller) deleteVRF(vrf vrf) error {
-	link, err := util.GetNetLinkOps().LinkByName(vrf.name)
-	if err != nil && util.GetNetLinkOps().IsLinkNotFoundError(err) {
-		return nil
-	} else if err != nil {
-		return fmt.Errorf("failed to retrieve VRF device %s, err: %v", vrf.name, err)
-	}
+func (vrfm *Controller) deleteVRF(link netlink.Link) error {
 	return util.GetNetLinkOps().LinkDelete(link)
 }
 
@@ -329,6 +338,7 @@ func getSlaveInterfaceNamesForVRF(vrfLink netlink.Link) (sets.Set[string], error
 }
 
 func enslaveInterfaceToVRF(vrfName, ifName string) error {
+	klog.V(5).Infof("Enslaving interface %s to VRF: %s", ifName, vrfName)
 	iface, err := util.GetNetLinkOps().LinkByName(ifName)
 	if err != nil {
 		return fmt.Errorf("failed to retrieve interface %s, err: %v", ifName, err)
@@ -340,20 +350,6 @@ func enslaveInterfaceToVRF(vrfName, ifName string) error {
 	err = util.GetNetLinkOps().LinkSetMaster(iface, vrfLink)
 	if err != nil {
 		return fmt.Errorf("failed to enslave interface %s to VRF %s: %v", ifName, vrfName, err)
-	}
-	return nil
-}
-
-func removeInterfaceFromVRF(vrfName, ifName string) error {
-	iface, err := util.GetNetLinkOps().LinkByName(ifName)
-	if err != nil && util.GetNetLinkOps().IsLinkNotFoundError(err) {
-		return nil
-	} else if err != nil {
-		return fmt.Errorf("failed to retrieve interface %s, err: %v", ifName, err)
-	}
-	err = util.GetNetLinkOps().LinkSetNoMaster(iface)
-	if err != nil {
-		return fmt.Errorf("failed to remove interface %s from VRF %s: %v", ifName, vrfName, err)
 	}
 	return nil
 }
