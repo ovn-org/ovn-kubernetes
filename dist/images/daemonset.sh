@@ -1010,5 +1010,6 @@ cp ../templates/k8s.ovn.org_egressips.yaml.j2 ${output_dir}/k8s.ovn.org_egressip
 cp ../templates/k8s.ovn.org_egressqoses.yaml.j2 ${output_dir}/k8s.ovn.org_egressqoses.yaml
 cp ../templates/k8s.ovn.org_egressservices.yaml.j2 ${output_dir}/k8s.ovn.org_egressservices.yaml
 cp ../templates/k8s.ovn.org_adminpolicybasedexternalroutes.yaml.j2 ${output_dir}/k8s.ovn.org_adminpolicybasedexternalroutes.yaml
+cp ../templates/k8s.ovn.org_userdefinednetworks.yaml.j2 ${output_dir}/k8s.ovn.org_userdefinednetworks.yaml
 
 exit 0

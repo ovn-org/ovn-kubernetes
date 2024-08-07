@@ -3,6 +3,7 @@ package controller
 import (
 	"fmt"
 	"sync"
+	"time"
 
 	"golang.org/x/sync/errgroup"
 
@@ -22,6 +23,7 @@ const maxRetries = 15
 // to reconcile through its Reconcile method
 type Reconciler interface {
 	Reconcile(key string)
+	ReconcileAfter(key string, duration time.Duration)
 	addHandler() error
 	startWorkers() error
 	stop()
@@ -230,6 +232,10 @@ func (c *controller[T]) processNextQueueItem() bool {
 
 func (c *controller[T]) Reconcile(key string) {
 	c.queue.Add(key)
+}
+
+func (c *controller[T]) ReconcileAfter(key string, duration time.Duration) {
+	c.queue.AddAfter(key, duration)
 }
 
 func (c *controller[T]) ReconcileAll() {

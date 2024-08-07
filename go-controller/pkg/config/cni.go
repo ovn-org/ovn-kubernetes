@@ -111,7 +111,7 @@ func parseNetConfSingle(bytes []byte) (*ovncnitypes.NetConf, error) {
 		return nil, ErrorAttachDefNotOvnManaged
 	}
 
-	err = validateNetConfNameFields(netconf)
+	err = ValidateNetConfNameFields(netconf)
 	if err != nil {
 		return nil, err
 	}
@@ -137,14 +137,14 @@ func parseNetConfList(confList *libcni.NetworkConfigList) (*ovncnitypes.NetConf,
 	netconf.Name = confList.Name
 	netconf.CNIVersion = confList.CNIVersion
 
-	if err := validateNetConfNameFields(netconf); err != nil {
+	if err := ValidateNetConfNameFields(netconf); err != nil {
 		return nil, err
 	}
 
 	return netconf, nil
 }
 
-func validateNetConfNameFields(netconf *ovncnitypes.NetConf) error {
+func ValidateNetConfNameFields(netconf *ovncnitypes.NetConf) error {
 	if netconf.Topology != "" {
 		if netconf.NADName == "" {
 			return fmt.Errorf("missing NADName in secondary network netconf %s", netconf.Name)

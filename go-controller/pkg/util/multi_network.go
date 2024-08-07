@@ -702,12 +702,12 @@ func ParseNADInfo(netattachdef *nettypes.NetworkAttachmentDefinition) (NetInfo, 
 		return nil, err
 	}
 
-	ni, err := NewNetInfo(netconf)
-	if err != nil {
+	nadName := GetNADName(netattachdef.Namespace, netattachdef.Name)
+	if err := ValidateNetConf(nadName, netconf); err != nil {
 		return nil, err
 	}
 
-	return ni, nil
+	return NewNetInfo(netconf)
 }
 
 // ParseNetConf parses config in NAD spec for secondary networks
@@ -717,39 +717,51 @@ func ParseNetConf(netattachdef *nettypes.NetworkAttachmentDefinition) (*ovncnity
 		return nil, fmt.Errorf("error parsing Network Attachment Definition %s/%s: %v", netattachdef.Namespace, netattachdef.Name, err)
 	}
 
+	nadName := GetNADName(netattachdef.Namespace, netattachdef.Name)
+	if err := ValidateNetConf(nadName, netconf); err != nil {
+		return nil, err
+	}
+
+	return netconf, nil
+}
+
+func ValidateNetConf(nadName string, netconf *ovncnitypes.NetConf) error {
 	if netconf.Name != types.DefaultNetworkName {
-		nadName := GetNADName(netattachdef.Namespace, netattachdef.Name)
 		if netconf.NADName != nadName {
-			return nil, fmt.Errorf("net-attach-def name (%s) is inconsistent with config (%s)", nadName, netconf.NADName)
+			return fmt.Errorf("net-attach-def name (%s) is inconsistent with config (%s)", nadName, netconf.NADName)
 		}
 	}
 
-	if netconf.AllowPersistentIPs && netconf.Topology == types.Layer3Topology {
-		return nil, fmt.Errorf("layer3 topology does not allow persistent IPs")
+	if err := config.ValidateNetConfNameFields(netconf); err != nil {
+		return err
 	}
 
-	if netconf.Role != "" && netconf.Topology == types.LocalnetTopology {
-		return nil, fmt.Errorf("unexpected network field \"role\" %s for \"localnet\" topology, "+
+	if netconf.AllowPersistentIPs && netconf.Topology == types.Layer3Topology {
+		return fmt.Errorf("layer3 topology does not allow persistent IPs")
+	}
+
+	if netconf.Role != "" && netconf.Role != types.NetworkRoleSecondary && netconf.Topology == types.LocalnetTopology {
+		return fmt.Errorf("unexpected network field \"role\" %s for \"localnet\" topology, "+
 			"localnet topology does not allow network roles to be set since its always a secondary network", netconf.Role)
 	}
 
 	if netconf.Role != "" && netconf.Role != types.NetworkRolePrimary && netconf.Role != types.NetworkRoleSecondary {
-		return nil, fmt.Errorf("invalid network role value %s", netconf.Role)
+		return fmt.Errorf("invalid network role value %s", netconf.Role)
 	}
 
 	if netconf.IPAM.Type != "" {
-		return nil, fmt.Errorf("error parsing Network Attachment Definition %s/%s: %w", netattachdef.Namespace, netattachdef.Name, ErrorUnsupportedIPAMKey)
+		return fmt.Errorf("error parsing Network Attachment Definition %s: %w", nadName, ErrorUnsupportedIPAMKey)
 	}
 
 	if netconf.JoinSubnet != "" && netconf.Topology == types.LocalnetTopology {
-		return nil, fmt.Errorf("localnet topology does not allow specifying join-subnet as services are not supported")
+		return fmt.Errorf("localnet topology does not allow specifying join-subnet as services are not supported")
 	}
 
 	if netconf.Role == types.NetworkRolePrimary && netconf.Subnets == "" && netconf.Topology == types.Layer2Topology {
-		return nil, fmt.Errorf("the subnet attribute must be defined for layer2 primary user defined networks")
+		return fmt.Errorf("the subnet attribute must be defined for layer2 primary user defined networks")
 	}
 
-	return netconf, nil
+	return nil
 }
 
 func CopyNetInfo(netInfo NetInfo) NetInfo {

@@ -30,6 +30,8 @@ import (
 	egressqosfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/clientset/versioned/fake"
 	egressservice "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1"
 	egressservicefake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/clientset/versioned/fake"
+	udnclientfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/clientset/versioned/fake"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
@@ -164,6 +166,7 @@ func (o *FakeOVN) start(objects ...runtime.Object) {
 		AdminPolicyRouteClient:   adminpolicybasedroutefake.NewSimpleClientset(apbExternalRouteObjects...),
 		IPAMClaimsClient:         fakeipamclaimclient.NewSimpleClientset(),
 		NetworkAttchDefClient:    nadClient,
+		UserDefinedNetworkClient: udnclientfake.NewSimpleClientset(),
 	}
 	o.init(nads)
 }

@@ -96,6 +96,10 @@ func ParseClusterSubnetEntriesWithDefaults(clusterSubnetCmd string, ipv4HostLeng
 				return nil, fmt.Errorf("IPv6 only supports /64 host subnets")
 			}
 
+			if !ipv6 && parsedClusterEntry.HostSubnetLength > 32 {
+				return nil, fmt.Errorf("invalid host subnet, IPv4 subnet must be < 32")
+			}
+
 			if parsedClusterEntry.HostSubnetLength <= entryMaskLength {
 				return nil, fmt.Errorf("cannot use a host subnet length mask shorter than or equal to the cluster subnet mask. "+
 					"host subnet length: %d, cluster subnet length: %d", parsedClusterEntry.HostSubnetLength, entryMaskLength)
