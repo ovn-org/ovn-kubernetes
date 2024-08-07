@@ -572,7 +572,8 @@ var _ = Describe("Network Segmentation", func() {
 					return connectToServer(clientPodConfig, externalIpv6, port)
 				}, 2*time.Minute, 6*time.Second).Should(Succeed())
 			},
-			Entry("by one pod with a single IPv4 address over a layer2 network",
+			// FIXME(tssurya): Unskip when L2 egress support is done
+			XEntry("by one pod with a single IPv4 address over a layer2 network",
 				networkAttachmentConfigParams{
 					name:     userDefinedNetworkName,
 					topology: "layer2",
