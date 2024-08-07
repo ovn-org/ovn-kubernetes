@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni"
@@ -12,9 +13,11 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/vrfmanager"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/klog/v2"
@@ -28,6 +31,7 @@ type nodeNetworkControllerManager struct {
 	Kube          kube.Interface
 	watchFactory  factory.NodeWatchFactory
 	stopChan      chan struct{}
+	wg            *sync.WaitGroup
 	recorder      record.EventRecorder
 
 	defaultNodeNetworkController nad.BaseNetworkController
@@ -35,6 +39,8 @@ type nodeNetworkControllerManager struct {
 	// net-attach-def controller handle net-attach-def and create/delete secondary controllers
 	// nil in dpu-host mode
 	nadController *nad.NetAttachDefinitionController
+	// vrf manager that creates and manages vrfs for all UDNs
+	vrfManager *vrfmanager.Controller
 }
 
 // NewNetworkController create secondary node network controllers for the given NetInfo
@@ -42,14 +48,41 @@ func (ncm *nodeNetworkControllerManager) NewNetworkController(nInfo util.NetInfo
 	topoType := nInfo.TopologyType()
 	switch topoType {
 	case ovntypes.Layer3Topology, ovntypes.Layer2Topology, ovntypes.LocalnetTopology:
-		return node.NewSecondaryNodeNetworkController(ncm.newCommonNetworkControllerInfo(), nInfo), nil
+		return node.NewSecondaryNodeNetworkController(ncm.newCommonNetworkControllerInfo(), nInfo, ncm.vrfManager)
 	}
 	return nil, fmt.Errorf("topology type %s not supported", topoType)
 }
 
 // CleanupDeletedNetworks cleans up all stale entities giving list of all existing secondary network controllers
 func (ncm *nodeNetworkControllerManager) CleanupDeletedNetworks(validNetworks ...util.BasicNetInfo) error {
-	return nil
+	if !util.IsNetworkSegmentationSupportEnabled() {
+		return nil
+	}
+	validVRFDevices := make(sets.Set[string])
+	for _, network := range validNetworks {
+		if !network.IsPrimaryNetwork() {
+			continue
+		}
+		networkID, err := ncm.getNetworkID(network)
+		if err != nil {
+			klog.Errorf("Failed to get network identifier for network %s, error: %s", network.GetNetworkName(), err)
+			continue
+		}
+		validVRFDevices.Insert(util.GetVRFDeviceNameForUDN(networkID))
+	}
+	return ncm.vrfManager.Repair(validVRFDevices)
+}
+
+func (ncm *nodeNetworkControllerManager) getNetworkID(network util.BasicNetInfo) (int, error) {
+	nodes, err := ncm.watchFactory.GetNodes()
+	if err != nil {
+		return util.InvalidNetworkID, err
+	}
+	networkID, err := util.GetNetworkID(nodes, network)
+	if err != nil {
+		return util.InvalidNetworkID, err
+	}
+	return networkID, nil
 }
 
 // newCommonNetworkControllerInfo creates and returns the base node network controller info
@@ -67,13 +100,14 @@ func isNodeNADControllerRequired() bool {
 
 // NewNodeNetworkControllerManager creates a new OVN controller manager to manage all the controller for all networks
 func NewNodeNetworkControllerManager(ovnClient *util.OVNClientset, wf factory.NodeWatchFactory, name string,
-	eventRecorder record.EventRecorder) (*nodeNetworkControllerManager, error) {
+	wg *sync.WaitGroup, eventRecorder record.EventRecorder) (*nodeNetworkControllerManager, error) {
 	ncm := &nodeNetworkControllerManager{
 		name:          name,
 		ovnNodeClient: &util.OVNNodeClientset{KubeClient: ovnClient.KubeClient, AdminPolicyRouteClient: ovnClient.AdminPolicyRouteClient},
 		Kube:          &kube.Kube{KClient: ovnClient.KubeClient},
 		watchFactory:  wf,
 		stopChan:      make(chan struct{}),
+		wg:            wg,
 		recorder:      eventRecorder,
 	}
 
@@ -82,6 +116,9 @@ func NewNodeNetworkControllerManager(ovnClient *util.OVNClientset, wf factory.No
 	var err error
 	if isNodeNADControllerRequired() {
 		ncm.nadController, err = nad.NewNetAttachDefinitionController("node-network-controller-manager", ncm, wf)
+	}
+	if util.IsNetworkSegmentationSupportEnabled() {
+		ncm.vrfManager = vrfmanager.NewController()
 	}
 	if err != nil {
 		return nil, err
@@ -145,9 +182,19 @@ func (ncm *nodeNetworkControllerManager) Start(ctx context.Context) (err error) 
 	// nadController is nil if multi-network is disabled
 	if ncm.nadController != nil {
 		err = ncm.nadController.Start()
+		if err != nil {
+			return fmt.Errorf("failed to start NAD controller: %w", err)
+		}
+	}
+	if ncm.vrfManager != nil {
+		// Let's create VRF manager that will manage VRFs for all UDNs
+		err = ncm.vrfManager.Run(ncm.stopChan, ncm.wg)
+		if err != nil {
+			return fmt.Errorf("failed to run VRF Manager: %w", err)
+		}
 	}
 
-	return err
+	return nil
 }
 
 // Stop gracefully stops all managed controllers

@@ -2,9 +2,16 @@ package node
 
 import (
 	"context"
+	"fmt"
+	"sync"
+	"time"
 
+	"github.com/containernetworking/plugins/pkg/ns"
+	"github.com/containernetworking/plugins/pkg/testutils"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
+	"github.com/stretchr/testify/mock"
+	"github.com/vishvananda/netlink"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -13,6 +20,8 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	factoryMocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory/mocks"
+	kubemocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube/mocks"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/vrfmanager"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	coreinformermocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/client-go/informers/core/v1"
 	v1mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/client-go/listers/core/v1"
@@ -24,7 +33,62 @@ var _ = Describe("SecondaryNodeNetworkController", func() {
 	var (
 		nad = ovntest.GenerateNAD("bluenet", "rednad", "greenamespace",
 			types.Layer3Topology, "100.128.0.0/16", types.NetworkRolePrimary)
+		netName             = "bluenet"
+		netID               = 3
+		nodeName     string = "worker1"
+		mgtPortMAC   string = "00:00:00:55:66:77"
+		fexec        *ovntest.FakeExec
+		testNS       ns.NetNS
+		vrf          *vrfmanager.Controller
+		v4NodeSubnet = "10.128.0.0/24"
+		v6NodeSubnet = "ae70::66/112"
+		mgtPort      = fmt.Sprintf("%s%d", types.K8sMgmtIntfNamePrefix, netID)
+		stopCh       chan struct{}
+		wg           *sync.WaitGroup
+		kubeMock     kubemocks.Interface
 	)
+	BeforeEach(func() {
+		// Restore global default values before each testcase
+		Expect(config.PrepareTestConfig()).To(Succeed())
+		// Set up a fake vsctl command mock interface
+		kubeMock = kubemocks.Interface{}
+		fexec = ovntest.NewFakeExec()
+		err := util.SetExec(fexec)
+		Expect(err).NotTo(HaveOccurred())
+		// Set up a fake k8sMgmt interface
+		testNS, err = testutils.NewNS()
+		Expect(err).NotTo(HaveOccurred())
+		err = testNS.Do(func(ns.NetNS) error {
+			defer GinkgoRecover()
+			ovntest.AddLink(mgtPort)
+			return nil
+		})
+		Expect(err).NotTo(HaveOccurred())
+		wg = &sync.WaitGroup{}
+		stopCh = make(chan struct{})
+		vrf = vrfmanager.NewController()
+		wg2 := &sync.WaitGroup{}
+		defer func() {
+			wg2.Wait()
+		}()
+		wg2.Add(1)
+		go testNS.Do(func(netNS ns.NetNS) error {
+			defer wg2.Done()
+			defer GinkgoRecover()
+			err = vrf.Run(stopCh, wg)
+			Expect(err).NotTo(HaveOccurred())
+			return nil
+		})
+	})
+	AfterEach(func() {
+		defer func() {
+			close(stopCh)
+			wg.Wait()
+		}()
+		Expect(testNS.Close()).To(Succeed())
+		Expect(testutils.UnmountNS(testNS)).To(Succeed())
+	})
+
 	It("should return networkID from one of the nodes in the cluster", func() {
 		fakeClient := &util.OVNNodeClientset{
 			KubeClient: fake.NewSimpleClientset(&corev1.Node{
@@ -93,7 +157,8 @@ var _ = Describe("SecondaryNodeNetworkController", func() {
 		factoryMock.On("GetNodes").Return(nodeList, nil)
 		NetInfo, err := util.ParseNADInfo(nad)
 		Expect(err).NotTo(HaveOccurred())
-		controller := NewSecondaryNodeNetworkController(&cnnci, NetInfo)
+		controller, err := NewSecondaryNodeNetworkController(&cnnci, NetInfo, nil)
+		Expect(err).NotTo(HaveOccurred())
 		err = controller.Start(context.Background())
 		Expect(err).NotTo(HaveOccurred())
 		Expect(controller.gateway).To(BeNil())
@@ -121,7 +186,8 @@ var _ = Describe("SecondaryNodeNetworkController", func() {
 		nodeInformer.On("Lister").Return(&nodeLister)
 		NetInfo, err := util.ParseNADInfo(nad)
 		Expect(err).NotTo(HaveOccurred())
-		controller := NewSecondaryNodeNetworkController(&cnnci, NetInfo)
+		controller, err := NewSecondaryNodeNetworkController(&cnnci, NetInfo, nil)
+		Expect(err).NotTo(HaveOccurred())
 		err = controller.Start(context.Background())
 		Expect(err).To(HaveOccurred()) // we don't have the gateway pieces setup so its expected to fail here
 		Expect(err.Error()).To(ContainSubstring("no annotation found"))
@@ -148,9 +214,94 @@ var _ = Describe("SecondaryNodeNetworkController", func() {
 			types.Layer3Topology, "100.128.0.0/16", types.NetworkRoleSecondary)
 		NetInfo, err := util.ParseNADInfo(nad)
 		Expect(err).NotTo(HaveOccurred())
-		controller := NewSecondaryNodeNetworkController(&cnnci, NetInfo)
+		controller, err := NewSecondaryNodeNetworkController(&cnnci, NetInfo, nil)
+		Expect(err).NotTo(HaveOccurred())
 		err = controller.Start(context.Background())
 		Expect(err).NotTo(HaveOccurred())
 		Expect(controller.gateway).To(BeNil())
+	})
+	It("ensure UDNGateway and VRFManager is invoked for Primary UDNs when feature gate is ON", func() {
+		config.OVNKubernetesFeature.EnableNetworkSegmentation = true
+		config.OVNKubernetesFeature.EnableMultiNetwork = true
+
+		By("creating necessary mocks")
+		factoryMock := factoryMocks.NodeWatchFactory{}
+		node := &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: nodeName,
+				Annotations: map[string]string{
+					"k8s.ovn.org/network-ids":  fmt.Sprintf("{\"%s\": \"%d\"}", netName, netID),
+					"k8s.ovn.org/node-subnets": fmt.Sprintf("{\"%s\":[\"%s\", \"%s\"]}", netName, v4NodeSubnet, v6NodeSubnet)},
+			},
+		}
+		nodeList := []*corev1.Node{node}
+		factoryMock.On("GetNode", nodeName).Return(nodeList[0], nil)
+		factoryMock.On("GetNodes").Return(nodeList, nil)
+		nodeInformer := coreinformermocks.NodeInformer{}
+		factoryMock.On("NodeCoreInformer").Return(&nodeInformer)
+		nodeLister := v1mocks.NodeLister{}
+		nodeInformer.On("Lister").Return(&nodeLister)
+		nodeLister.On("Get", mock.AnythingOfType("string")).Return(node, nil)
+		cnode := node.DeepCopy()
+		cnode.Annotations[util.OvnNodeManagementPortMacAddresses] = `{"bluenet":"00:00:00:55:66:77"}`
+		kubeMock.On("UpdateNodeStatus", cnode).Return(nil)
+
+		By("creating NAD for primary UDN")
+		nad = ovntest.GenerateNAD("bluenet", "rednad", "greenamespace",
+			types.Layer3Topology, "100.128.0.0/16", types.NetworkRolePrimary)
+		NetInfo, err := util.ParseNADInfo(nad)
+		Expect(err).NotTo(HaveOccurred())
+
+		By("creating secondary network controller for user defined primary network")
+		cnnci := CommonNodeNetworkControllerInfo{name: nodeName, watchFactory: &factoryMock}
+		controller, err := NewSecondaryNodeNetworkController(&cnnci, NetInfo, vrf)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(controller.gateway).To(Not(BeNil()))
+		controller.gateway.kubeInterface = &kubeMock
+
+		err = testNS.Do(func(ns.NetNS) error {
+			defer GinkgoRecover()
+			getCreationFakeOVSCommands(fexec, mgtPort, mgtPortMAC, netName, nodeName, NetInfo.MTU())
+			Expect(err).NotTo(HaveOccurred())
+			getDeletionFakeOVSCommands(fexec, mgtPort)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("starting secondary network controller for user defined primary network")
+			err = controller.Start(context.Background())
+			Expect(err).NotTo(HaveOccurred())
+
+			By("check management interface and VRF device is created for the network")
+			vrfDeviceName := util.GetVRFDeviceNameForUDN(netID)
+			vrfLink, err := util.GetNetLinkOps().LinkByName(vrfDeviceName)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(vrfLink.Type()).To(Equal("vrf"))
+			vrfDev, ok := vrfLink.(*netlink.Vrf)
+			Expect(ok).To(Equal(true))
+			mplink, err := util.GetNetLinkOps().LinkByName(mgtPort)
+			Expect(err).NotTo(HaveOccurred())
+			vrfTableId := util.CalculateRouteTableID(mplink.Attrs().Index)
+			Expect(vrfDev.Table).To(Equal(uint32(vrfTableId)))
+
+			By("delete VRF device explicitly and ensure VRF Manager reconciles it")
+			err = util.GetNetLinkOps().LinkDelete(vrfLink)
+			Expect(err).NotTo(HaveOccurred())
+			Eventually(func() error {
+				_, err := util.GetNetLinkOps().LinkByName(vrfDeviceName)
+				return err
+			}).WithTimeout(120 * time.Second).Should(BeNil())
+
+			By("delete the network and ensure its associated VRF device is also deleted")
+			cnode = node.DeepCopy()
+			kubeMock.On("UpdateNodeStatus", cnode).Return(nil)
+			err = controller.Cleanup()
+			Expect(err).NotTo(HaveOccurred())
+			Eventually(func() error {
+				_, err := util.GetNetLinkOps().LinkByName(vrfDeviceName)
+				return err
+			}).WithTimeout(120 * time.Second).ShouldNot(BeNil())
+			return nil
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 	})
 })

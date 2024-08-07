@@ -28,11 +28,14 @@ type NetLinkOps interface {
 	LinkByName(ifaceName string) (netlink.Link, error)
 	LinkByIndex(index int) (netlink.Link, error)
 	LinkSetDown(link netlink.Link) error
+	LinkAdd(link netlink.Link) error
 	LinkDelete(link netlink.Link) error
 	LinkSetName(link netlink.Link, newName string) error
 	LinkSetUp(link netlink.Link) error
 	LinkSetNsFd(link netlink.Link, fd int) error
 	LinkSetHardwareAddr(link netlink.Link, hwaddr net.HardwareAddr) error
+	LinkSetMaster(link netlink.Link, master netlink.Link) error
+	LinkSetNoMaster(link netlink.Link) error
 	LinkSetMTU(link netlink.Link, mtu int) error
 	LinkSetTxQLen(link netlink.Link, qlen int) error
 	IsLinkNotFoundError(err error) bool
@@ -88,6 +91,10 @@ func (defaultNetLinkOps) LinkSetDown(link netlink.Link) error {
 	return netlink.LinkSetDown(link)
 }
 
+func (defaultNetLinkOps) LinkAdd(link netlink.Link) error {
+	return netlink.LinkAdd(link)
+}
+
 func (defaultNetLinkOps) LinkDelete(link netlink.Link) error {
 	return netlink.LinkDel(link)
 }
@@ -106,6 +113,14 @@ func (defaultNetLinkOps) LinkSetNsFd(link netlink.Link, fd int) error {
 
 func (defaultNetLinkOps) LinkSetHardwareAddr(link netlink.Link, hwaddr net.HardwareAddr) error {
 	return netlink.LinkSetHardwareAddr(link, hwaddr)
+}
+
+func (defaultNetLinkOps) LinkSetMaster(link netlink.Link, master netlink.Link) error {
+	return netlink.LinkSetMaster(link, master)
+}
+
+func (defaultNetLinkOps) LinkSetNoMaster(link netlink.Link) error {
+	return netlink.LinkSetNoMaster(link)
 }
 
 func (defaultNetLinkOps) LinkSetMTU(link netlink.Link, mtu int) error {

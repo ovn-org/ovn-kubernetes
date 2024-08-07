@@ -7,6 +7,7 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/vrfmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -27,9 +28,11 @@ type SecondaryNodeNetworkController struct {
 }
 
 // NewSecondaryNodeNetworkController creates a new OVN controller for creating logical network
-// infrastructure and policy for default l3 network
-func NewSecondaryNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, netInfo util.NetInfo) *SecondaryNodeNetworkController {
-	return &SecondaryNodeNetworkController{
+// infrastructure and policy for the given secondary network. It supports layer3, layer2 and
+// localnet topology types.
+func NewSecondaryNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, netInfo util.NetInfo,
+	vrfManager *vrfmanager.Controller) (*SecondaryNodeNetworkController, error) {
+	snnc := &SecondaryNodeNetworkController{
 		BaseNodeNetworkController: BaseNodeNetworkController{
 			CommonNodeNetworkControllerInfo: *cnnci,
 			NetInfo:                         netInfo,
@@ -37,6 +40,19 @@ func NewSecondaryNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, n
 			wg:                              &sync.WaitGroup{},
 		},
 	}
+	if util.IsNetworkSegmentationSupportEnabled() && snnc.IsPrimaryNetwork() {
+		node, err := snnc.watchFactory.GetNode(snnc.name)
+		if err != nil {
+			return nil, fmt.Errorf("error retrieving node %s while creating node network controller for network %s: %v",
+				snnc.name, netInfo.GetNetworkName(), err)
+		}
+		networkID, err := snnc.getNetworkID()
+		if err != nil {
+			return nil, fmt.Errorf("error retrieving network id for network %s: %v", netInfo.GetNetworkName(), err)
+		}
+		snnc.gateway = NewUserDefinedNetworkGateway(snnc.NetInfo, networkID, node, snnc.watchFactory.NodeCoreInformer().Lister(), snnc.Kube, vrfManager)
+	}
+	return snnc, nil
 }
 
 // Start starts the default controller; handles all events and creates all needed logical entities
@@ -52,15 +68,6 @@ func (nc *SecondaryNodeNetworkController) Start(ctx context.Context) error {
 		nc.podHandler = handler
 	}
 	if util.IsNetworkSegmentationSupportEnabled() && nc.IsPrimaryNetwork() {
-		node, err := nc.watchFactory.GetNode(nc.name)
-		if err != nil {
-			return err
-		}
-		networkID, err := nc.getNetworkID()
-		if err != nil {
-			return err
-		}
-		nc.gateway = NewUserDefinedNetworkGateway(nc.NetInfo, networkID, node, nc.watchFactory.NodeCoreInformer().Lister(), nc.Kube)
 		if err := nc.gateway.AddNetwork(); err != nil {
 			return fmt.Errorf("failed to add network to node gateway for network %s at node %s: %w",
 				nc.GetNetworkName(), nc.name, err)
