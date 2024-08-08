@@ -394,6 +394,7 @@ func (h *networkClusterControllerEventHandler) DeleteResource(obj, cachedObj int
 		if err != nil {
 			klog.Infof("Pod delete failed for %s/%s, will try again later: %v",
 				pod.Namespace, pod.Name, err)
+			return err
 		}
 	case factory.NodeType:
 		node, ok := obj.(*corev1.Node)
