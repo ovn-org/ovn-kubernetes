@@ -2,6 +2,7 @@ package ovn
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"strings"
@@ -12,6 +13,7 @@ import (
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	kapitypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/tools/record"
@@ -1243,8 +1245,6 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				DnatSnatIP:           "169.254.0.1",
 			}
 			testNode := node1.k8sNode("2")
-			hoNode := newTestHONode(hoNodeName, hoNodeSubnet, hoNodeDRMAC)
-
 			kubeFakeClient := fake.NewSimpleClientset(&v1.NodeList{
 				Items: []v1.Node{
 					newTestHONode(hoNodeName, hoNodeSubnet, hoNodeDRMAC),
@@ -1359,8 +1359,15 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			// switch the node to a ovn node
-			hoNode.Labels = map[string]string{}
-			_, err = fakeClient.KubeClient.CoreV1().Nodes().Update(context.TODO(), &hoNode, metav1.UpdateOptions{})
+			ginkgo.By("Removing the windows node label and switching to OVN node")
+			patch := []map[string]string{
+				{"op": "remove", "path": "/metadata/labels"},
+			}
+			patchData, err := json.Marshal(&patch)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			// trigger update event
+			_, err = fakeClient.KubeClient.CoreV1().Nodes().Patch(context.TODO(), hoNodeName,
+				kapitypes.JSONPatchType, patchData, metav1.PatchOptions{})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			//check if the hybrid overlay elements have been cleaned up
