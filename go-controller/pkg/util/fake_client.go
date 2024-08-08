@@ -5,6 +5,8 @@ import (
 	mnpfake "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/client/clientset/versioned/fake"
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	nadfake "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/fake"
+	frrapi "github.com/metallb/frr-k8s/api/v1beta1"
+	frrfake "github.com/metallb/frr-k8s/pkg/client/clientset/versioned/fake"
 	ocpcloudnetworkapi "github.com/openshift/api/cloudnetwork/v1"
 	ocpnetworkapiv1alpha1 "github.com/openshift/api/network/v1alpha1"
 	cloudservicefake "github.com/openshift/client-go/cloudnetwork/clientset/versioned/fake"
@@ -45,6 +47,7 @@ func GetOVNClientset(objects ...runtime.Object) *OVNClientset {
 	cloudObjects := []runtime.Object{}
 	dnsNameResolverObjects := []runtime.Object{}
 	raObjects := []runtime.Object{}
+	frrObjects := []runtime.Object{}
 	for _, object := range objects {
 		switch object.(type) {
 		case *egressip.EgressIP:
@@ -69,6 +72,8 @@ func GetOVNClientset(objects ...runtime.Object) *OVNClientset {
 			dnsNameResolverObjects = append(dnsNameResolverObjects, object)
 		case *routeadvertisements.RouteAdvertisements:
 			raObjects = append(raObjects, object)
+		case *frrapi.FRRConfiguration:
+			frrObjects = append(frrObjects, object)
 		default:
 			v1Objects = append(v1Objects, object)
 		}
@@ -87,6 +92,7 @@ func GetOVNClientset(objects ...runtime.Object) *OVNClientset {
 		OCPNetworkClient:          ocpnetworkclientfake.NewSimpleClientset(dnsNameResolverObjects...),
 		UserDefinedNetworkClient:  udnfake.NewSimpleClientset(),
 		RouteAdvertisementsClient: routeadvertisementsfake.NewSimpleClientset(raObjects...),
+		FRRClient:                 frrfake.NewSimpleClientset(frrObjects...),
 	}
 }
 

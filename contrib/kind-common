@@ -616,11 +616,17 @@ deploy_passt_binary() {
   run_kubectl rollout status -n kube-system daemonset/passt-binding-cni --timeout 2m
 }
 
+readonly FRR_K8S_VERSION=v0.0.14
+
+install_ffr_k8s_crd() {
+   run_kubectl apply -f "https://raw.githubusercontent.com/metallb/frr-k8s/${FRR_K8S_VERSION}/charts/frr-k8s/charts/crds/templates/frrk8s.metallb.io_frrconfigurations.yaml"
+}
+
 install_ffr_k8s() {
   echo "Installing frr-k8s ..."
   local tmpdir=$(mktemp -d)
   pushd "$tmpdir" || exit 1
-  git clone --depth 1 --branch v0.0.14 https://github.com/metallb/frr-k8s
+  git clone --depth 1 --branch $FRR_K8S_VERSION https://github.com/metallb/frr-k8s
   popd || exit 1
 
   # apply the demo which will deploy an external FRR container that the cluster
