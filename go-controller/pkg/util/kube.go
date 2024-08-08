@@ -39,6 +39,7 @@ import (
 	ipamclaimssclientset "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1/apis/clientset/versioned"
 	multinetworkpolicyclientset "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/client/clientset/versioned"
 	networkattchmentdefclientset "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned"
+	frrclientset "github.com/metallb/frr-k8s/pkg/client/clientset/versioned"
 	ocpcloudnetworkclientset "github.com/openshift/client-go/cloudnetwork/clientset/versioned"
 	ocpnetworkclientset "github.com/openshift/client-go/network/clientset/versioned"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -68,6 +69,7 @@ type OVNClientset struct {
 	IPAMClaimsClient          ipamclaimssclientset.Interface
 	UserDefinedNetworkClient  userdefinednetworkclientset.Interface
 	RouteAdvertisementsClient routeadvertisementsclientset.Interface
+	FRRClient                 frrclientset.Interface
 }
 
 // OVNMasterClientset
@@ -86,6 +88,7 @@ type OVNMasterClientset struct {
 	NetworkAttchDefClient     networkattchmentdefclientset.Interface
 	UserDefinedNetworkClient  userdefinednetworkclientset.Interface
 	RouteAdvertisementsClient routeadvertisementsclientset.Interface
+	FRRClient                 frrclientset.Interface
 }
 
 // OVNKubeControllerClientset
@@ -129,6 +132,7 @@ type OVNClusterManagerClientset struct {
 	OCPNetworkClient          ocpnetworkclientset.Interface
 	UserDefinedNetworkClient  userdefinednetworkclientset.Interface
 	RouteAdvertisementsClient routeadvertisementsclientset.Interface
+	FRRClient                 frrclientset.Interface
 }
 
 const (
@@ -157,6 +161,7 @@ func (cs *OVNClientset) GetMasterClientset() *OVNMasterClientset {
 		NetworkAttchDefClient:     cs.NetworkAttchDefClient,
 		UserDefinedNetworkClient:  cs.UserDefinedNetworkClient,
 		RouteAdvertisementsClient: cs.RouteAdvertisementsClient,
+		FRRClient:                 cs.FRRClient,
 	}
 }
 
@@ -211,6 +216,7 @@ func (cs *OVNClientset) GetClusterManagerClientset() *OVNClusterManagerClientset
 		OCPNetworkClient:          cs.OCPNetworkClient,
 		UserDefinedNetworkClient:  cs.UserDefinedNetworkClient,
 		RouteAdvertisementsClient: cs.RouteAdvertisementsClient,
+		FRRClient:                 cs.FRRClient,
 	}
 }
 
@@ -510,6 +516,11 @@ func NewOVNClientset(conf *config.KubernetesConfig) (*OVNClientset, error) {
 		return nil, err
 	}
 
+	frrClientset, err := frrclientset.NewForConfig(kconfig)
+	if err != nil {
+		return nil, err
+	}
+
 	return &OVNClientset{
 		KubeClient:                kclientset,
 		ANPClient:                 anpClientset,
@@ -525,6 +536,7 @@ func NewOVNClientset(conf *config.KubernetesConfig) (*OVNClientset, error) {
 		IPAMClaimsClient:          ipamClaimsClientset,
 		UserDefinedNetworkClient:  userDefinedNetworkClientSet,
 		RouteAdvertisementsClient: routeAdvertisementsClientset,
+		FRRClient:                 frrClientset,
 	}, nil
 }
 
