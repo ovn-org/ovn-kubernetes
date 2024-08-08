@@ -568,8 +568,17 @@ func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 	return nil
 }
 
+type PodRequestInterfaceOps interface {
+	ConfigureInterface(pr *PodRequest, getter PodInfoGetter, ifInfo *PodInterfaceInfo) ([]*current.Interface, error)
+	UnconfigureInterface(pr *PodRequest, ifInfo *PodInterfaceInfo) error
+}
+
+type defaultPodRequestInterfaceOps struct{}
+
+var podRequestInterfaceOps PodRequestInterfaceOps = &defaultPodRequestInterfaceOps{}
+
 // ConfigureInterface sets up the container interface
-func (pr *PodRequest) ConfigureInterface(getter PodInfoGetter, ifInfo *PodInterfaceInfo) ([]*current.Interface, error) {
+func (*defaultPodRequestInterfaceOps) ConfigureInterface(pr *PodRequest, getter PodInfoGetter, ifInfo *PodInterfaceInfo) ([]*current.Interface, error) {
 	netns, err := ns.GetNS(pr.Netns)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open netns %q: %v", pr.Netns, err)
@@ -641,7 +650,7 @@ func (pr *PodRequest) ConfigureInterface(getter PodInfoGetter, ifInfo *PodInterf
 	return []*current.Interface{hostIface, contIface}, nil
 }
 
-func (pr *PodRequest) UnconfigureInterface(ifInfo *PodInterfaceInfo) error {
+func (*defaultPodRequestInterfaceOps) UnconfigureInterface(pr *PodRequest, ifInfo *PodInterfaceInfo) error {
 	podDesc := fmt.Sprintf("for pod %s/%s NAD %s", pr.PodNamespace, pr.PodName, pr.nadName)
 	klog.V(5).Infof("Tear down interface (%+v) %s", *pr, podDesc)
 	if ifInfo.IsDPUHostMode {
