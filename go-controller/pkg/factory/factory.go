@@ -80,6 +80,11 @@ import (
 	routeadvertisementsinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/informers/externalversions"
 	routeadvertisementsinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/informers/externalversions/routeadvertisements/v1"
 
+	frrapi "github.com/metallb/frr-k8s/api/v1beta1"
+	frrscheme "github.com/metallb/frr-k8s/pkg/client/clientset/versioned/scheme"
+	frrinformerfactory "github.com/metallb/frr-k8s/pkg/client/informers/externalversions"
+	frrinformer "github.com/metallb/frr-k8s/pkg/client/informers/externalversions/api/v1beta1"
+
 	kapi "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
 	knet "k8s.io/api/networking/v1"
@@ -120,6 +125,7 @@ type WatchFactory struct {
 	nadFactory           nadinformerfactory.SharedInformerFactory
 	udnFactory           userdefinednetworkapiinformerfactory.SharedInformerFactory
 	raFactory            routeadvertisementsinformerfactory.SharedInformerFactory
+	frrFactory           frrinformerfactory.SharedInformerFactory
 	informers            map[reflect.Type]*informer
 
 	stopChan chan struct{}
@@ -564,6 +570,15 @@ func (wf *WatchFactory) Start() error {
 		}
 	}
 
+	if wf.frrFactory != nil {
+		wf.frrFactory.Start(wf.stopChan)
+		for oType, synced := range waitForCacheSyncWithTimeout(wf.frrFactory, wf.stopChan) {
+			if !synced {
+				return fmt.Errorf("error in syncing cache for %v informer", oType)
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -608,6 +623,9 @@ func (wf *WatchFactory) Stop() {
 
 	if wf.raFactory != nil {
 		wf.raFactory.Shutdown()
+	}
+	if wf.frrFactory != nil {
+		wf.frrFactory.Shutdown()
 	}
 }
 
@@ -810,6 +828,9 @@ func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset
 	if err := routeadvertisementsapi.AddToScheme(routeadvertisementsscheme.Scheme); err != nil {
 		return nil, err
 	}
+	if err := frrapi.AddToScheme(frrscheme.Scheme); err != nil {
+		return nil, err
+	}
 
 	// For Services and Endpoints, pre-populate the shared Informer with one that
 	// has a label selector excluding headless services.
@@ -929,6 +950,10 @@ func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset
 		wf.raFactory = routeadvertisementsinformerfactory.NewSharedInformerFactory(ovnClientset.RouteAdvertisementsClient, resyncInterval)
 		// make sure shared informer is created for a factory, so on wf.raFactory.Start() it is initialized and caches are synced.
 		wf.raFactory.K8s().V1().RouteAdvertisements().Informer()
+
+		wf.frrFactory = frrinformerfactory.NewSharedInformerFactory(ovnClientset.FRRClient, resyncInterval)
+		// make sure shared informer is created for a factory, so on wf.frrFactory.Start() it is initialized and caches are synced.
+		wf.frrFactory.Api().V1beta1().FRRConfigurations().Informer()
 	}
 
 	return wf, nil
@@ -1610,6 +1635,10 @@ func (wf *WatchFactory) DNSNameResolverInformer() ocpnetworkinformerv1alpha1.DNS
 
 func (wf *WatchFactory) RouteAdvertisementsInformer() routeadvertisementsinformer.RouteAdvertisementsInformer {
 	return wf.raFactory.K8s().V1().RouteAdvertisements()
+}
+
+func (wf *WatchFactory) FRRConfigurationsInformer() frrinformer.FRRConfigurationInformer {
+	return wf.frrFactory.Api().V1beta1().FRRConfigurations()
 }
 
 // withServiceNameAndNoHeadlessServiceSelector returns a LabelSelector (added to the
