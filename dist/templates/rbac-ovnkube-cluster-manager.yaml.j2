@@ -127,3 +127,9 @@ rules:
           - dnsnameresolvers
       verbs: [ "create", "delete", "list", "patch", "update", "watch" ]
     {%- endif %}
+    {% if ovn_route_advertisements_enable == "true" -%}
+    - apiGroups: ["frrk8s.metallb.io"]
+      resources:
+          - frrconfigurations
+      verbs: [ "create", "delete", "list", "patch", "update", "watch" ]
+    {%- endif %}
