@@ -21,6 +21,18 @@ import (
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 )
 
+type podRequestInterfaceOpsStub struct {
+	unconfiguredInterfaces []*PodInterfaceInfo
+}
+
+func (stub *podRequestInterfaceOpsStub) ConfigureInterface(pr *PodRequest, getter PodInfoGetter, ifInfo *PodInterfaceInfo) ([]*current.Interface, error) {
+	return nil, nil
+}
+func (stub *podRequestInterfaceOpsStub) UnconfigureInterface(pr *PodRequest, ifInfo *PodInterfaceInfo) error {
+	stub.unconfiguredInterfaces = append(stub.unconfiguredInterfaces, ifInfo)
+	return nil
+}
+
 var _ = Describe("Network Segmentation", func() {
 	var (
 		fakeClientset            *fake.Clientset
@@ -36,6 +48,7 @@ var _ = Describe("Network Segmentation", func() {
 			obtainedPodIterfaceInfos = append(obtainedPodIterfaceInfos, podInterfaceInfo)
 			return nil, nil
 		}
+		prInterfaceOpsStub                            = &podRequestInterfaceOpsStub{}
 		enableMultiNetwork, enableNetworkSegmentation bool
 	)
 
@@ -43,6 +56,8 @@ var _ = Describe("Network Segmentation", func() {
 
 		enableMultiNetwork = config.OVNKubernetesFeature.EnableMultiNetwork
 		enableNetworkSegmentation = config.OVNKubernetesFeature.EnableNetworkSegmentation
+
+		podRequestInterfaceOps = prInterfaceOpsStub
 
 		fakeClientset = fake.NewSimpleClientset()
 		pr = PodRequest{
@@ -82,6 +97,8 @@ var _ = Describe("Network Segmentation", func() {
 	AfterEach(func() {
 		config.OVNKubernetesFeature.EnableMultiNetwork = enableMultiNetwork
 		config.OVNKubernetesFeature.EnableNetworkSegmentation = enableNetworkSegmentation
+
+		podRequestInterfaceOps = &defaultPodRequestInterfaceOps{}
 	})
 
 	Context("with network segmentation fg disabled and annotation without role field", func() {
@@ -103,6 +120,12 @@ var _ = Describe("Network Segmentation", func() {
 			Expect(pr.cmdAddWithGetCNIResultFunc(kubeAuth, clientSet, getCNIResultStub)).NotTo(BeNil())
 			Expect(obtainedPodIterfaceInfos).ToNot(BeEmpty())
 		})
+		It("should not fail at cmdDel", func() {
+			podNamespaceLister.On("Get", pr.PodName).Return(pod, nil)
+			Expect(pr.cmdDel(clientSet)).NotTo(BeNil())
+			Expect(prInterfaceOpsStub.unconfiguredInterfaces).To(HaveLen(1))
+		})
+
 	})
 	Context("with network segmentation fg enabled and annotation with role field", func() {
 		BeforeEach(func() {
@@ -123,6 +146,12 @@ var _ = Describe("Network Segmentation", func() {
 			Expect(pr.cmdAddWithGetCNIResultFunc(kubeAuth, clientSet, getCNIResultStub)).NotTo(BeNil())
 			Expect(obtainedPodIterfaceInfos).ToNot(BeEmpty())
 		})
+		It("should not fail at cmdDel", func() {
+			podNamespaceLister.On("Get", pr.PodName).Return(pod, nil)
+			Expect(pr.cmdDel(clientSet)).NotTo(BeNil())
+			Expect(prInterfaceOpsStub.unconfiguredInterfaces).To(HaveLen(2))
+		})
+
 	})
 
 })
