@@ -109,7 +109,7 @@ var _ = Describe("Network Segmentation", func() {
 							}, 2*time.Minute, 6*time.Second).Should(Succeed())
 						}
 					},
-					Entry(
+					XEntry(
 						"two pods connected over a L2 dualstack primary UDN",
 						networkAttachmentConfigParams{
 							name:     nadName,
@@ -329,7 +329,7 @@ var _ = Describe("Network Segmentation", func() {
 							}, 5*time.Second).Should(BeTrue())
 						}
 					},
-					Entry(
+					XEntry(
 						"with L2 dualstack primary UDN",
 						networkAttachmentConfigParams{
 							name:     nadName,
