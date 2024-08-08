@@ -253,7 +253,7 @@ func checkPorts(patchIntf, ofPortPatch, physIntf, ofPortPhys string) error {
 
 // bootstrapOVSFlows handles ensuring basic, required flows are in place. This is done before OpenFlow manager has
 // been created/started, and only done when there is just a NORMAL flow programmed and OVN/OVS is already setup
-func bootstrapOVSFlows() error {
+func bootstrapOVSFlows(nodeName string) error {
 	// see if patch port exists already
 	var portsOutput string
 	var stderr string
@@ -264,18 +264,7 @@ func bootstrapOVSFlows() error {
 		return fmt.Errorf("failed to list ports on existing bridge br-int: %s, %w", stderr, err)
 	}
 
-	var bridge string
-	var patchPort string
-	// patch-br-int-to-<bridge name>_<node>
-	r := regexp.MustCompile("^patch-(.*)_.*?-to-br-int$")
-	for _, line := range strings.Split(portsOutput, "\n") {
-		matches := r.FindStringSubmatch(line)
-		if len(matches) == 2 {
-			patchPort = matches[0]
-			bridge = matches[1]
-			break
-		}
-	}
+	bridge, patchPort := localnetPortInfo(nodeName, portsOutput)
 
 	if len(bridge) == 0 {
 		// bridge exists but no patch port was found
@@ -337,4 +326,22 @@ func bootstrapOVSFlows() error {
 	}
 
 	return nil
+}
+
+// localnetPortInfo returns the name of the bridge and the patch port name for the default cluster network
+func localnetPortInfo(nodeName string, portsOutput string) (string, string) {
+	// This needs to work with:
+	// - default network: patch-<bridge name>_<node>-to-br-int
+	// but not with:
+	// - user defined primary network: patch-<bridge name>_<network-name>_<node>-to-br-int
+	// - user defined secondary localnet network: patch-<bridge name>_<network-name>_ovn_localnet_port-to-br-int
+	// TODO: going forward, maybe it would preferable to just read the bridge name from the config.
+	r := regexp.MustCompile(fmt.Sprintf("^patch-([^_]*)_%s-to-br-int$", nodeName))
+	for _, line := range strings.Split(portsOutput, "\n") {
+		matches := r.FindStringSubmatch(line)
+		if len(matches) == 2 {
+			return matches[1], matches[0]
+		}
+	}
+	return "", ""
 }

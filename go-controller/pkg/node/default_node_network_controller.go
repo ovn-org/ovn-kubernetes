@@ -712,7 +712,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	}
 
 	// Bootstrap flows in OVS if just normal flow is present
-	if err := bootstrapOVSFlows(); err != nil {
+	if err := bootstrapOVSFlows(nc.name); err != nil {
 		return fmt.Errorf("failed to bootstrap OVS flows: %w", err)
 	}
 
