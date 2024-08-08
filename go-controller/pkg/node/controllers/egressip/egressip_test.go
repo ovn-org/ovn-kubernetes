@@ -22,6 +22,7 @@ import (
 	ovniptables "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/linkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
+	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	corev1 "k8s.io/api/core/v1"
@@ -1136,6 +1137,49 @@ var _ = ginkgo.Describe("VRF", func() {
 			}
 			return false
 		}).Should(gomega.BeTrue(), "route should be copied to new routing table")
+		gomega.Expect(cleanupControllerFn()).ShouldNot(gomega.HaveOccurred())
+		gomega.Expect(cleanupNodeFn()).ShouldNot(gomega.HaveOccurred())
+	})
+
+	ginkgo.It("doesn't configure a link that is enslaved by user defined network VRF", func() {
+		defer ginkgo.GinkgoRecover()
+		if os.Getenv("NOROOT") == "TRUE" {
+			ginkgo.Skip("Test requires root privileges")
+		}
+		vrfName := fmt.Sprintf("%s1234%s", ovntypes.UDNVRFDevicePrefix, ovntypes.UDNVRFDeviceSuffix)
+		var vrfTable uint32 = 55555
+		ginkgo.By("setup link")
+		nodeConfig := nodeConfig{routes: []netlink.Route{}, linkConfigs: []linkConfig{
+			{dummyLink1Name, []address{{dummy1IPv4CIDR, false}}},
+		}}
+		testNS, cleanupNodeFn, err := setupFakeTestNode(nodeConfig)
+		gomega.Expect(err).ShouldNot(gomega.HaveOccurred(), "fake node setup should succeed")
+		ginkgo.By("create VRF and add link")
+		gomega.Expect(createVRFAndEnslaveLink(testNS, dummyLink1Name, vrfName, vrfTable)).Should(gomega.Succeed())
+		ginkgo.By("configure EgressIP to be hosted by enslaved link")
+		egressIPList := []egressipv1.EgressIP{*newEgressIP(egressIP1Name, egressIP1IPV4, node1Name, namespace1Label, egressPodLabel)}
+		pods := []corev1.Pod{newPodWithLabels(namespace1, pod1Name, node1Name, pod1IPv4, egressPodLabel)}
+		namespaces := []corev1.Namespace{newNamespaceWithLabels(namespace1, namespace1Label)}
+		ginkgo.By("start controller")
+		c, _, err := initController(namespaces, pods, egressIPList, nodeConfig, true, false, true)
+		gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+		cleanupControllerFn, err := runController(testNS, c)
+		ginkgo.By("ensure no EgressIP configuration occurred by checking that no EgressIP is configured on link")
+		gomega.Consistently(func() []string {
+			ipsOnLink := make([]string, 0, 1)
+			err := testNS.Do(func(netNS ns.NetNS) error {
+				link, err := netlink.LinkByName(dummyLink1Name)
+				gomega.Expect(err).ShouldNot(gomega.HaveOccurred(), "link dummy1 should be available")
+				addresses, err := netlink.AddrList(link, netlink.FAMILY_V4)
+				gomega.Expect(err).ShouldNot(gomega.HaveOccurred(), "link dummy1 address should be accessible")
+				for _, address := range addresses {
+					ipsOnLink = append(ipsOnLink, address.IP.String())
+				}
+				return nil
+			})
+			gomega.Expect(err).ShouldNot(gomega.HaveOccurred(), "execution in namespace should succeed")
+			return ipsOnLink
+		}).ShouldNot(gomega.ConsistOf(egressIP1IPV4))
 		gomega.Expect(cleanupControllerFn()).ShouldNot(gomega.HaveOccurred())
 		gomega.Expect(cleanupNodeFn()).ShouldNot(gomega.HaveOccurred())
 	})

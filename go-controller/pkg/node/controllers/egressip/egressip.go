@@ -23,6 +23,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/linkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
+	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 
@@ -551,6 +552,15 @@ func (c *Controller) processEIP(eip *eipv1.EgressIP) (*eIPConfig, sets.Set[strin
 				fmt.Errorf("failed to find a network to host EgressIP %s IP %s: %v", eip.Name, status.EgressIP, err)
 		}
 		if !found {
+			continue
+		}
+		isUDNVRFSlave, err := isLinkSlaveToUDNVRF(link)
+		if err != nil {
+			return nil, selectedNamespaces, selectedPods, selectedNamespacesPodIPs,
+				fmt.Errorf("failed to determine if link %s is enslaved by user defined network VRF: %v", link.Attrs().Name, err)
+		}
+		if isUDNVRFSlave {
+			klog.Errorf("EgressIP assigned to a host secondary interface cannot be completed because the link %s is enslaved to user defined network VRF", link.Attrs().Name)
 			continue
 		}
 		// namespace selector is mandatory for EIP
@@ -1562,4 +1572,25 @@ func getNodeIPFwMarkIPRule(ipFamily int) netlink.Rule {
 
 func isVRFSlaveDevice(link netlink.Link) bool {
 	return link.Attrs().Slave != nil && link.Attrs().Slave.SlaveType() == "vrf"
+}
+
+// isLinkSlaveToUDNVRF returns true if the Link is enslaved by a UDN VRF link
+func isLinkSlaveToUDNVRF(link netlink.Link) (bool, error) {
+	if !isVRFSlaveDevice(link) {
+		return false, nil
+	}
+	masterLink, err := util.GetNetLinkOps().LinkByIndex(link.Attrs().MasterIndex)
+	if err != nil {
+		if util.GetNetLinkOps().IsLinkNotFoundError(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to return link %s master interface by index %d: %v", link.Attrs().Name, link.Attrs().Index, err)
+	}
+	if masterLink.Type() != "vrf" {
+		return false, nil
+	}
+	if !strings.HasPrefix(masterLink.Attrs().Name, ovntypes.UDNVRFDevicePrefix) && !strings.HasSuffix(masterLink.Attrs().Name, ovntypes.UDNVRFDeviceSuffix) {
+		return false, nil
+	}
+	return true, nil
 }
