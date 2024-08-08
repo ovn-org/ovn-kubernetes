@@ -1037,10 +1037,12 @@ ovn_enable_dnsnameresolver=${ovn_enable_dnsnameresolver} \
 
 ovn_network_segmentation_enable=${ovn_network_segmentation_enable} \
 ovn_enable_dnsnameresolver=${ovn_enable_dnsnameresolver} \
+ovn_route_advertisements_enable=${ovn_route_advertisements_enable} \
   jinjanate ../templates/rbac-ovnkube-cluster-manager.yaml.j2 -o ${output_dir}/rbac-ovnkube-cluster-manager.yaml
 
 ovn_network_segmentation_enable=${ovn_network_segmentation_enable} \
 ovn_enable_dnsnameresolver=${ovn_enable_dnsnameresolver} \
+ovn_route_advertisements_enable=${ovn_route_advertisements_enable} \
   jinjanate ../templates/rbac-ovnkube-master.yaml.j2 -o ${output_dir}/rbac-ovnkube-master.yaml
 
 cp ../templates/rbac-ovnkube-identity.yaml.j2 ${output_dir}/rbac-ovnkube-identity.yaml
