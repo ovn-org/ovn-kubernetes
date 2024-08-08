@@ -252,9 +252,30 @@ func (pr *PodRequest) cmdDel(clientset *ClientSet) (*Response, error) {
 		NetdevName:    netdevName,
 	}
 	if !config.UnprivilegedMode {
-		err := pr.UnconfigureInterface(podInterfaceInfo)
+		err := podRequestInterfaceOps.UnconfigureInterface(pr, podInterfaceInfo)
 		if err != nil {
 			return nil, err
+		}
+
+		if util.IsNetworkSegmentationSupportEnabled() {
+			pod, err := clientset.getPod(pr.PodNamespace, pr.PodName)
+			if err != nil {
+				return nil, err
+			}
+			primaryUDN := udn.NewPrimaryNetwork(clientset.nadLister)
+			if err := primaryUDN.Ensure(namespace, pod.Annotations, pr.nadName); err != nil {
+				return nil, err
+			}
+			if primaryUDN.Found() {
+				primaryUDNPodRequest := pr.buildPrimaryUDNPodRequest(pod, primaryUDN)
+				primaryUDNPodInfo, err := primaryUDNPodRequest.buildPodInterfaceInfo(pod.Annotations, primaryUDN.Annotation(), primaryUDN.NetworkDevice())
+				if err != nil {
+					return nil, err
+				}
+				if err := podRequestInterfaceOps.UnconfigureInterface(primaryUDNPodRequest, primaryUDNPodInfo); err != nil {
+					return nil, err
+				}
+			}
 		}
 	} else {
 		// pass the isDPU flag and vfNetdevName back to cniShim
@@ -317,7 +338,7 @@ func HandlePodRequest(request *PodRequest, clientset *ClientSet, kubeAuth *KubeA
 // instance of the pod in the apiserver, see checkCancelSandbox for more info.
 // If kube api is not available from the CNI, pass nil to skip this check.
 func getCNIResult(pr *PodRequest, getter PodInfoGetter, podInterfaceInfo *PodInterfaceInfo) (*current.Result, error) {
-	interfacesArray, err := pr.ConfigureInterface(getter, podInterfaceInfo)
+	interfacesArray, err := podRequestInterfaceOps.ConfigureInterface(pr, getter, podInterfaceInfo)
 	if err != nil {
 		return nil, fmt.Errorf("failed to configure pod interface: %v", err)
 	}
