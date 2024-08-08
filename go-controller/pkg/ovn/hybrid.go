@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"regexp"
 	"strings"
 	"sync/atomic"
 
@@ -379,7 +380,7 @@ func (oc *DefaultNetworkController) allocateHybridOverlayDRIP(node *kapi.Node) e
 	return nil
 }
 
-func (oc *DefaultNetworkController) removeRoutesToHONodeSubnet(nodeSubnet *net.IPNet) error {
+func (oc *DefaultNetworkController) removeRoutesToHONodeSubnet(nodeName string, nodeSubnet *net.IPNet) error {
 	klog.Infof("Delete hybrid overlay policy and static routes to %s", nodeSubnet.String())
 
 	// Delete policy to HO subnet from the cluster router
@@ -395,7 +396,10 @@ func (oc *DefaultNetworkController) removeRoutesToHONodeSubnet(nodeSubnet *net.I
 		if !ok {
 			return false
 		}
-		if !strings.Contains(name, ovntypes.HybridSubnetPrefix) || strings.Contains(name, ovntypes.HybridOverlayGRSubfix) {
+		// we delete all the static routes with name match 'hybrid-subnet-<ovn-node-name>:<ho-node-name>'
+		pattern := fmt.Sprintf("^%s.+:%s$", ovntypes.HybridSubnetPrefix, nodeName)
+		re, _ := regexp.Compile(pattern)
+		if !re.MatchString(name) {
 			return false
 		}
 		return item.IPPrefix == nodeSubnet.String() && item.Policy == nil

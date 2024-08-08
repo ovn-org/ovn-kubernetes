@@ -1374,7 +1374,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			gomega.Eventually(func() ([]*nbdb.LogicalRouterStaticRoute, error) {
 				p := func(item *nbdb.LogicalRouterStaticRoute) bool {
 					if item.ExternalIDs["name"] == "hybrid-subnet-node1-gr" ||
-						strings.Contains(item.ExternalIDs["name"], "hybrid-subnet-node1") {
+						item.ExternalIDs["name"] == "hybrid-subnet-node1:node-windows" {
 						return true
 					}
 					return false
