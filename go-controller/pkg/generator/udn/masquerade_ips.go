@@ -46,7 +46,7 @@ func allocateMasqueradeIPs(idName string, masqueradeSubnet string, networkID int
 		return nil, fmt.Errorf("failed initializing generation of network id '%d' %s IPs: %w", networkID, idName, err)
 	}
 	// Let's illustrate the expected IPs for networkID 1 and 2
-	// with userDefinedNetworkMasqueradeIPBase=10 and subnet=169.254.0.0/16
+	// with userDefinedNetworkMasqueradeIPBase=10 and subnet=169.254.0.0/17
 	// networkID=1
 	//  GatewayRouter: 169.254.0.11
 	//  ManagementPort: 169.254.0.12
