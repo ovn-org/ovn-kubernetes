@@ -22,14 +22,14 @@ func TestAllocateMasqueradeIPs(t *testing.T) {
 		{
 			description: "with proper network id 2 should return expected subnets",
 			networkID:   2,
-			subnet:      "169.254.0.0/16",
-			expectedIPs: masqueradeIPs{GatewayRouter: "169.254.0.13/16", ManagementPort: "169.254.0.14/16"},
+			subnet:      "169.254.0.0/17",
+			expectedIPs: masqueradeIPs{GatewayRouter: "169.254.0.13/17", ManagementPort: "169.254.0.14/17"},
 		},
 		{
 			description: "with proper network id 3 should return expected subnets",
 			networkID:   3,
-			subnet:      "169.254.0.0/16",
-			expectedIPs: masqueradeIPs{GatewayRouter: "169.254.0.15/16", ManagementPort: "169.254.0.16/16"},
+			subnet:      "169.254.0.0/17",
+			expectedIPs: masqueradeIPs{GatewayRouter: "169.254.0.15/17", ManagementPort: "169.254.0.16/17"},
 		},
 		{
 			description:   "with one of the two address beyond the subne should return an error",
