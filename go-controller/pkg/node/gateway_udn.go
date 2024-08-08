@@ -218,7 +218,6 @@ func (udng *UserDefinedNetworkGateway) DelNetwork() error {
 	}
 	if udng.openflowManager != nil {
 		udng.openflowManager.delNetwork(udng.NetInfo)
-		// TODO (dceara): Do we need to reconcile all flows? Is this heavy?
 		if err := udng.Reconcile(); err != nil {
 			return fmt.Errorf("failed to reconcile default gateway for network %s, err: %v", udng.GetNetworkName(), err)
 		}
