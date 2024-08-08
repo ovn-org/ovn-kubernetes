@@ -18,6 +18,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	factoryMocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory/mocks"
 	kubemocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube/mocks"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/vrfmanager"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	coreinformermocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/client-go/informers/core/v1"
@@ -101,7 +102,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		kubeMock = kubemocks.Interface{}
 		wg = sync.WaitGroup{}
 		stopCh = make(chan struct{})
-		vrf = vrfmanager.NewController()
+		vrf = vrfmanager.NewController(routemanager.NewController())
 		wg.Add(1)
 		go testNS.Do(func(netNS ns.NetNS) error {
 			defer wg.Done()

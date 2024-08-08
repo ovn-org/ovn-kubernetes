@@ -21,6 +21,7 @@ import (
 type vrf struct {
 	name  string
 	table uint32
+	index int
 	// managedSlave is the desired netlink interface who's master will be this VRF.
 	// It cannot be changed after VRF creation.
 	managedSlave string
@@ -30,14 +31,14 @@ type vrf struct {
 type Controller struct {
 	mu           *sync.Mutex
 	vrfs         map[int]vrf
-	RouteManager *routemanager.Controller
+	routeManager *routemanager.Controller
 }
 
-func NewController() *Controller {
+func NewController(routeManager *routemanager.Controller) *Controller {
 	return &Controller{
 		mu:           &sync.Mutex{},
 		vrfs:         make(map[int]vrf),
-		RouteManager: routemanager.NewController(),
+		routeManager: routeManager,
 	}
 }
 
@@ -187,6 +188,7 @@ func (vrfm *Controller) sync(vrf vrf) error {
 	}
 	// Create VRF device if it doesn't exist or if it's needed to be recreated.
 	if util.GetNetLinkOps().IsLinkNotFoundError(err) || mustRecreate {
+		delete(vrfm.vrfs, vrf.index)
 		vrfLink = &netlink.Vrf{
 			LinkAttrs: netlink.LinkAttrs{Name: vrf.name},
 			Table:     vrf.table,
@@ -219,8 +221,9 @@ func (vrfm *Controller) sync(vrf vrf) error {
 	}
 	// Handover vrf routes into route manager to manage it.
 	for _, route := range vrf.routes {
-		vrfm.RouteManager.Add(route)
+		vrfm.routeManager.Add(route)
 	}
+	vrf.index = vrfLink.Attrs().Index
 	vrfm.vrfs[vrfLink.Attrs().Index] = vrf
 	return nil
 }
@@ -249,12 +252,12 @@ func (vrfm *Controller) AddVRF(name string, slaveInterface string, table uint32,
 				return fmt.Errorf("VRF Manager: table id mismatch for VRF device %s", name)
 			}
 		} else {
-			vrfDev = vrf{name, table, slaveInterface, routes}
+			vrfDev = vrf{name, table, -1, slaveInterface, routes}
 		}
 	}
 
 	if err != nil && util.GetNetLinkOps().IsLinkNotFoundError(err) {
-		vrfDev = vrf{name, table, slaveInterface, routes}
+		vrfDev = vrf{name, table, -1, slaveInterface, routes}
 	} else if err != nil {
 		return fmt.Errorf("failed to retrieve VRF device %s, err: %v", name, err)
 	}
@@ -321,7 +324,7 @@ func (vrfm *Controller) DeleteVRF(name string) (err error) {
 	}
 	// Request route manager to delete vrf associated routes.
 	for _, route := range vrf.routes {
-		vrfm.RouteManager.Del(route)
+		vrfm.routeManager.Del(route)
 	}
 	err = vrfm.deleteVRF(vrfLink)
 	if err != nil {

@@ -60,8 +60,8 @@ var _ = ginkgo.Describe("VRF manager", func() {
 	}
 
 	ginkgo.BeforeEach(func() {
-		c = NewController()
-		c.RouteManager = routemanager.NewController()
+		c = NewController(routemanager.NewController())
+
 		nlMock = &mocks.NetLinkOps{}
 		vrfLinkMock1 = new(netlink_mocks.Link)
 		enslaveLinkMock1 = new(netlink_mocks.Link)
