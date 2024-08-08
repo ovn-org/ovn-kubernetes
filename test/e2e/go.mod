@@ -173,7 +173,7 @@ require (
 	github.com/openshift-kni/k8sreporter v1.0.6
 	github.com/ovn-org/ovn-kubernetes/go-controller v0.0.0-20230914190234-9cbdd02db9c6
 	go.universe.tf/metallb v0.0.0-00010101000000-000000000000
-	google.golang.org/grpc v1.64.0
+	google.golang.org/grpc v1.64.1
 	k8s.io/kubectl v0.30.2
 	kubevirt.io/api v1.0.0
 	sigs.k8s.io/controller-runtime v0.18.4
