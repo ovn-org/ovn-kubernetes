@@ -73,6 +73,7 @@ type secondaryNetworkExpectationMachine struct {
 	pods                  []testPod
 	gatewayConfig         *util.L3GatewayConfig
 	isInterconnectCluster bool
+	isL2Topology          bool
 }
 
 func newSecondaryNetworkExpectationMachine(fakeOvn *FakeOVN, pods []testPod, opts ...option) *secondaryNetworkExpectationMachine {
@@ -90,6 +91,12 @@ func newSecondaryNetworkExpectationMachine(fakeOvn *FakeOVN, pods []testPod, opt
 func withGatewayConfig(config *util.L3GatewayConfig) option {
 	return func(machine *secondaryNetworkExpectationMachine) {
 		machine.gatewayConfig = config
+	}
+}
+
+func withLayer2Topology() option {
+	return func(machine *secondaryNetworkExpectationMachine) {
+		machine.isL2Topology = true
 	}
 }
 
@@ -141,11 +148,37 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPorts() 
 						data = append(data, mgmtPort)
 						nodeslsps[switchName] = append(nodeslsps[switchName], mgmtPortUUID)
 						const aclUUID = "acl1-UUID"
-						data = append(data, allowAllFromMgmtPort(aclUUID, "192.168.0.2"))
+						data = append(data, allowAllFromMgmtPort(aclUUID, "192.168.0.2", "isolatednet_test-node"))
 						acls[switchName] = append(acls[switchName], aclUUID)
 					}
 				case ovntypes.Layer2Topology:
 					switchName = ocInfo.bnc.GetNetworkScopedName(ovntypes.OVNLayer2Switch)
+					if em.gatewayConfig != nil {
+						mgmtPortUUID := managementPortName() + "-UUID"
+						data = append(data, expectedManagementPort(managementPortName()))
+						nodeslsps[switchName] = append(nodeslsps[switchName], mgmtPortUUID)
+
+						gwRouterName := fmt.Sprintf("%s%s", ovntypes.GWRouterPrefix, "isolatednet_test-node")
+						networkSwitchToGWRouterLSPName := ovntypes.JoinSwitchToGWRouterPrefix + gwRouterName
+						networkSwitchToGWRouterLSPUUID := networkSwitchToGWRouterLSPName + "-UUID"
+
+						data = append(data, &nbdb.LogicalSwitchPort{
+							UUID:      networkSwitchToGWRouterLSPUUID,
+							Name:      networkSwitchToGWRouterLSPName,
+							Addresses: []string{"router"},
+							ExternalIDs: map[string]string{
+								"k8s.ovn.org/topology": "layer2",
+								"k8s.ovn.org/network":  "isolatednet",
+							},
+							Options: map[string]string{"router-port": ovntypes.GWRouterToJoinSwitchPrefix + gwRouterName},
+							Type:    "router",
+						})
+						nodeslsps[switchName] = append(nodeslsps[switchName], networkSwitchToGWRouterLSPUUID)
+
+						const aclUUID = "acl1-UUID"
+						data = append(data, allowAllFromMgmtPort(aclUUID, "100.200.0.2", "isolatednet_ovn_layer2_switch"))
+						acls[switchName] = append(acls[switchName], aclUUID)
+					}
 				case ovntypes.LocalnetTopology:
 					switchName = ocInfo.bnc.GetNetworkScopedName(ovntypes.OVNLocalnetSwitch)
 				}
@@ -153,10 +186,18 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPorts() 
 			}
 			subnets := subnetsAsString(ocInfo.bnc.Subnets())
 			sn := subnets[0]
-			subnet := strings.TrimSuffix(sn, "/24")
+			subnet := sn
+			if strings.Count(subnet, "/") == 2 {
+				subnet = strings.TrimSuffix(sn, "/24")
+			}
 			otherConfig := map[string]string{
 				"exclude_ips": "192.168.0.2",
 				"subnet":      subnet,
+			}
+
+			// TODO: why don't L2 switches have otherConfig set ?... Fishy to say the least ...
+			if em.isL2Topology {
+				otherConfig = nil
 			}
 			data = append(data, &nbdb.LogicalSwitch{
 				UUID:        switchName + "-UUID",
@@ -167,10 +208,14 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPorts() 
 				ACLs:        acls[switchName],
 			})
 			if em.gatewayConfig != nil {
-				data = append(data, expectedGWEntities(pod.nodeName, ocInfo.bnc, *em.gatewayConfig)...)
-				data = append(data, expectedLayer3EgressEntities(ocInfo.bnc, *em.gatewayConfig)...)
+				if em.isL2Topology {
+					data = append(data, expectedLayer2EgressEntities(ocInfo.bnc, *em.gatewayConfig, pod.nodeName)...)
+				} else {
+					data = append(data, expectedGWEntities(pod.nodeName, ocInfo.bnc, *em.gatewayConfig)...)
+					data = append(data, expectedLayer3EgressEntities(ocInfo.bnc, *em.gatewayConfig)...)
+				}
 			}
-			if em.isInterconnectCluster {
+			if em.isInterconnectCluster && !em.isL2Topology {
 				transitSwitchName := ocInfo.bnc.GetNetworkName() + "_transit_switch"
 				data = append(data, &nbdb.LogicalSwitch{
 					UUID: transitSwitchName + "-UUID",
@@ -228,4 +273,16 @@ func subnetsAsString(subnetInfo []config.CIDRNetworkEntry) []string {
 		subnets = append(subnets, cidr.String())
 	}
 	return subnets
+}
+
+func expectedManagementPort(name string) *nbdb.LogicalSwitchPort {
+	return &nbdb.LogicalSwitchPort{
+		UUID:      name + "-UUID",
+		Addresses: []string{"02:03:04:05:06:07 100.200.0.2"},
+		Name:      name,
+	}
+}
+
+func managementPortName() string {
+	return fmt.Sprintf("k8s-isolatednet_test-node")
 }
