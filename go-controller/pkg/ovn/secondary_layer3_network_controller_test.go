@@ -509,8 +509,8 @@ func expectedGWRouterPlusNATAndStaticRoutes(
 			Nat:          []string{nat1, nat2},
 			StaticRoutes: []string{staticRoute1, staticRoute2, staticRoute3},
 		},
-		newNATEntry(nat1, dummyJoinIP().IP.String(), gwRouterIPAddress().IP.String()),
-		newNATEntry(nat2, dummyJoinIP().IP.String(), networkSubnet(netInfo)),
+		newNATEntry(nat1, dummyJoinIP().IP.String(), gwRouterIPAddress().IP.String(), standardNonDefaultNetworkExtIDs(netInfo)),
+		newNATEntry(nat2, dummyJoinIP().IP.String(), networkSubnet(netInfo), standardNonDefaultNetworkExtIDs(netInfo)),
 		expectedGRStaticRoute(staticRoute1, ipv4Subnet, dummyJoinIP().IP.String(), nil, nil),
 		expectedGRStaticRoute(staticRoute2, ipv4DefaultRoute, nextHopIP, nil, &staticRouteOutputPort),
 		expectedGRStaticRoute(staticRoute3, masqSubnet, nextHopMasqIP, nil, &staticRouteOutputPort),
@@ -664,13 +664,14 @@ func udnGWSNATAddress() *net.IPNet {
 	}
 }
 
-func newNATEntry(uuid string, externalIP string, logicalIP string) *nbdb.NAT {
+func newNATEntry(uuid string, externalIP string, logicalIP string, extIDs map[string]string) *nbdb.NAT {
 	return &nbdb.NAT{
-		UUID:       uuid,
-		ExternalIP: externalIP,
-		LogicalIP:  logicalIP,
-		Type:       "snat",
-		Options:    map[string]string{"stateless": "false"},
+		UUID:        uuid,
+		ExternalIP:  externalIP,
+		LogicalIP:   logicalIP,
+		Type:        "snat",
+		Options:     map[string]string{"stateless": "false"},
+		ExternalIDs: extIDs,
 	}
 }
 
@@ -692,7 +693,7 @@ func expectedExternalSwitchAndLSPs(netInfo util.NetInfo, gwConfig util.L3Gateway
 			Name:        netInfo.GetNetworkScopedExtPortName(gwConfig.BridgeID, nodeName),
 			Addresses:   []string{"unknown"},
 			ExternalIDs: standardNonDefaultNetworkExtIDs(netInfo),
-			Options:     map[string]string{"network_name": netInfo.GetNetworkName()},
+			Options:     map[string]string{"network_name": ovntypes.PhysicalNetworkName},
 			Type:        ovntypes.LocalnetTopology,
 		},
 		&nbdb.LogicalSwitchPort{
