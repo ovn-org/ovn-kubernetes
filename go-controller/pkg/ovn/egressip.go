@@ -13,6 +13,7 @@ import (
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/ovsdb"
+	libovsdb "github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -1875,23 +1876,11 @@ func (e *egressIPZoneController) deleteReroutePolicyOps(ops []ovsdb.Operation, p
 // This function should be called with a lock on e.nodeZoneState.status.Node
 func (e *egressIPZoneController) deleteEgressIPStatusSetup(name string, status egressipv1.EgressIPStatusItem) ([]net.IP, error) {
 	var err error
-	isLocalZoneEgressNode, loadedEgressNode := e.nodeZoneState.Load(status.Node)
-
 	var ops []ovsdb.Operation
-	var nextHopIP string
-	eNode, err := e.watchFactory.GetNode(status.Node)
-	if err == nil {
-		eIPIP := net.ParseIP(status.EgressIP)
-		if eIPConfig, err := util.GetNodeEIPConfig(eNode); err != nil {
-			klog.Warningf("Failed to get Egress IP config from node annotation %s: %v", status.Node, err)
-		} else {
-			isOVNNetwork := util.IsOVNNetwork(eIPConfig, eIPIP)
-			nextHopIP, err = e.getNextHop(status.Node, status.EgressIP, name, isLocalZoneEgressNode, isOVNNetwork)
-			if err != nil {
-				return nil, fmt.Errorf("failed to delete egress IP %s (%s) because unable to determine next hop: %v",
-					name, status.EgressIP, err)
-			}
-		}
+	nextHopIP, err := e.attemptToGetNextHopIP(name, status)
+	if err != nil {
+		return nil, fmt.Errorf("failed to delete egress IP %s (%s) because unable to determine next hop: %v",
+			name, status.EgressIP, err)
 	}
 
 	if nextHopIP != "" {
@@ -1910,11 +1899,11 @@ func (e *egressIPZoneController) deleteEgressIPStatusSetup(name string, status e
 			return nil, fmt.Errorf("error removing nexthop IP %s from egress ip %s policies on router %s: %v",
 				nextHopIP, name, e.GetNetworkScopedClusterRouterName(), err)
 		}
-	} else {
-		//FIXME: (mk) just nuke everything to do with this 'name'
-		klog.Errorf("Unable to get next hop IP and therefore there could be stale logical route policies for Egress IP %s", status.EgressIP)
+	} else if ops, err = e.ensureOnlyValidNextHops(name, ops); err != nil {
+		return nil, err
 	}
 
+	isLocalZoneEgressNode, loadedEgressNode := e.nodeZoneState.Load(status.Node)
 	var nats []*nbdb.NAT
 	if loadedEgressNode && isLocalZoneEgressNode {
 		routerName := e.GetNetworkScopedGWRouterName(status.Node)
@@ -1943,6 +1932,92 @@ func (e *egressIPZoneController) deleteEgressIPStatusSetup(name string, status e
 	}
 
 	return podIPs, nil
+}
+
+func (e *egressIPZoneController) ensureOnlyValidNextHops(name string, ops []libovsdb.Operation) ([]libovsdb.Operation, error) {
+	// When no nextHopIP is found, This may happen when node object is already deleted.
+	// So compare validNextHopIPs associated with current eIP.Status and Nexthops present
+	// in the LogicalRouterPolicy, then delete nexthop(s) from LogicalRouterPolicy if
+	// it doesn't match with nexthops derived from eIP.Status.
+	policyPred := func(item *nbdb.LogicalRouterPolicy) bool {
+		return item.Priority == types.EgressIPReroutePriority && item.ExternalIDs["name"] == name
+	}
+	eIP, err := e.watchFactory.GetEgressIP(name)
+	if err != nil && !apierrors.IsNotFound(err) {
+		return ops, fmt.Errorf("error retrieving EgressIP %s object for updating logical router policy nexthops, err: %w", name, err)
+	} else if err != nil && apierrors.IsNotFound(err) {
+		// EgressIP object is not found, so delete LRP associated with it.
+		ops, err = libovsdbops.DeleteLogicalRouterPolicyWithPredicateOps(e.nbClient, ops, e.GetNetworkScopedClusterRouterName(), policyPred)
+		if err != nil {
+			return ops, fmt.Errorf("error creating ops to remove logical router policy for EgressIP %s from router %s: %v",
+				name, e.GetNetworkScopedClusterRouterName(), err)
+		}
+	} else {
+		validNextHopIPs := make(sets.Set[string])
+		for _, validStatus := range eIP.Status.Items {
+			nextHopIP, err := e.attemptToGetNextHopIP(name, validStatus)
+			if err != nil {
+				return ops, fmt.Errorf("failed to delete EgressIP %s (%s) because unable to determine next hop: %v",
+					name, validStatus.EgressIP, err)
+			}
+			validNextHopIPs.Insert(nextHopIP)
+		}
+
+		reRoutePolicies, err := libovsdbops.FindLogicalRouterPoliciesWithPredicate(e.nbClient, policyPred)
+		if err != nil {
+			return ops, fmt.Errorf("error finding logical router policy for EgressIP %s: %v", name, err)
+		}
+		if len(validNextHopIPs) == 0 {
+			ops, err = libovsdbops.DeleteLogicalRouterPoliciesOps(e.nbClient, ops, e.GetNetworkScopedClusterRouterName(), reRoutePolicies...)
+			if err != nil {
+				return ops, fmt.Errorf("error creating ops to remove logical router policy for EgressIP %s from router %s: %v",
+					name, e.GetNetworkScopedClusterRouterName(), err)
+			}
+			return ops, nil
+		}
+		for _, policy := range reRoutePolicies {
+			for _, nextHop := range policy.Nexthops {
+				if validNextHopIPs.Has(nextHop) {
+					continue
+				}
+				ops, err = libovsdbops.DeleteNextHopsFromLogicalRouterPolicyOps(e.nbClient, ops, e.GetNetworkScopedClusterRouterName(), []*nbdb.LogicalRouterPolicy{policy}, nextHop)
+				if err != nil {
+					return ops, fmt.Errorf("error creating ops to remove stale next hop IP %s from logical router policy for EgressIP %s from router %s: %v",
+						nextHop, name, e.GetNetworkScopedClusterRouterName(), err)
+				}
+			}
+		}
+	}
+	return ops, nil
+}
+
+// attemptToGetNextHopIP this function attempts to retrieve nexthops associated with logical router policy for the given
+// EgressIP's status. It ensures the following conditions are met.
+// 1) When node is not found, then it must return empty nexthop without an error.
+// 2) When EgressIP belongs to OVN network and node is local, then it must return node's gateway router IP address.
+// 3) When EgressIP belongs to non OVN network and node is local, then it must return node's management port IP address.
+// 4) When EgressIP belongs to remote node in interconnect zone, then it return node's transit switch IP address.
+func (e *egressIPZoneController) attemptToGetNextHopIP(name string, status egressipv1.EgressIPStatusItem) (string, error) {
+	isLocalZoneEgressNode, _ := e.nodeZoneState.Load(status.Node)
+	eNode, err := e.watchFactory.GetNode(status.Node)
+	if err != nil && !apierrors.IsNotFound(err) {
+		return "", fmt.Errorf("unable to get node for Egress IP %s: %v", status.EgressIP, err)
+	} else if err != nil {
+		klog.Errorf("Node is not found for Egress IP %s", status.EgressIP)
+		return "", nil
+	}
+	var nextHopIP string
+	eIPIP := net.ParseIP(status.EgressIP)
+	if eIPConfig, err := util.GetNodeEIPConfig(eNode); err != nil {
+		klog.Warningf("Failed to get Egress IP config from node annotation %s: %v", status.Node, err)
+	} else {
+		isOVNNetwork := util.IsOVNNetwork(eIPConfig, eIPIP)
+		nextHopIP, err = e.getNextHop(status.Node, status.EgressIP, name, isLocalZoneEgressNode, isOVNNetwork)
+		if err != nil {
+			return "", err
+		}
+	}
+	return nextHopIP, nil
 }
 
 func (oc *DefaultNetworkController) addPodIPsToAddressSet(addrSetIPs []net.IP) error {
