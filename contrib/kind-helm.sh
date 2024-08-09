@@ -21,6 +21,7 @@ set_default_params() {
   export OVN_HA=${OVN_HA:-false}
   export OVN_MULTICAST_ENABLE=${OVN_MULTICAST_ENABLE:-false}
   export OVN_HYBRID_OVERLAY_ENABLE=${OVN_HYBRID_OVERLAY_ENABLE:-false}
+  export OVNKUBE_OBSERV_ENABLE=${OVNKUBE_OBSERV_ENABLE:-false}
   export OVN_EMPTY_LB_EVENTS=${OVN_EMPTY_LB_EVENTS:-false}
   export KIND_REMOVE_TAINT=${KIND_REMOVE_TAINT:-true}
   export ENABLE_MULTI_NET=${ENABLE_MULTI_NET:-false}
@@ -86,6 +87,7 @@ usage() {
     echo "                                    DEFAULT: Remove taint components"
     echo "-me  | --multicast-enabled          Enable multicast. DEFAULT: Disabled"
     echo "-ho  | --hybrid-enabled             Enable hybrid overlay. DEFAULT: Disabled"
+    echo "-obs | --observability              Enable observability. DEFAULT: Disabled"
     echo "-el  | --ovn-empty-lb-events        Enable empty-lb-events generation for LB without backends. DEFAULT: Disabled"
     echo "-ii  | --install-ingress            Flag to install Ingress Components."
     echo "                                    DEFAULT: Don't install ingress components."
@@ -120,6 +122,8 @@ parse_args() {
             -me | --multicast-enabled)          OVN_MULTICAST_ENABLE=true
                                                 ;;
             -ho | --hybrid-enabled )            OVN_HYBRID_OVERLAY_ENABLE=true
+                                                ;;
+            -obs | --observability )            OVNKUBE_OBSERV_ENABLE=true
                                                 ;;
             -el | --ovn-empty-lb-events )       OVN_EMPTY_LB_EVENTS=true
                                                 ;;
@@ -170,6 +174,7 @@ print_params() {
      echo "OVN_HA = $OVN_HA"
      echo "OVN_MULTICAST_ENABLE = $OVN_MULTICAST_ENABLE"
      echo "OVN_HYBRID_OVERLAY_ENABLE = $OVN_HYBRID_OVERLAY_ENABLE"
+     echo "OVNKUBE_OBSERV_ENABLE = $OVNKUBE_OBSERV_ENABLE"
      echo "OVN_EMPTY_LB_EVENTS = $OVN_EMPTY_LB_EVENTS"
      echo "KIND_CLUSTER_NAME = $KIND_CLUSTER_NAME"
      echo "KIND_REMOVE_TAINT = $KIND_REMOVE_TAINT"
@@ -318,6 +323,7 @@ create_ovn_kubernetes() {
         --set global.enableMulticast=$(if [ "${OVN_MULTICAST_ENABLE}" == "true" ]; then echo "true"; else echo "false"; fi) \
         --set global.enableMultiNetwork=$(if [ "${ENABLE_MULTI_NET}" == "true" ]; then echo "true"; else echo "false"; fi) \
         --set global.enableHybridOverlay=$(if [ "${OVN_HYBRID_OVERLAY_ENABLE}" == "true" ]; then echo "true"; else echo "false"; fi) \
+        --set global.enableObservability=$(if [ "${OVNKUBE_OBSERV_ENABLE}" == "true" ]; then echo "true"; else echo "false"; fi) \
         --set global.emptyLbEvents=$(if [ "${OVN_EMPTY_LB_EVENTS}" == "true" ]; then echo "true"; else echo "false"; fi) \
         --set global.enableDNSNameResolver=$(if [ "${OVN_ENABLE_DNSNAMERESOLVER}" == "true" ]; then echo "true"; else echo "false"; fi) \
         --set tags.ovnkube-db-raft=$(if [ "${OVN_HA}" == "true" ]; then echo "true"; else echo "false"; fi) \

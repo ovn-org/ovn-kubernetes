@@ -386,6 +386,8 @@ spec:
           value: "local"
         - name: OVN_ENABLE_DNSNAMERESOLVER
           value: "{{ ovn_enable_dnsnameresolver }}"
+        - name: OVNKUBE_OBSERV_ENABLE
+          value: "{{ ovnkube_observ_enable }}"
       # end of container
 
       volumes:

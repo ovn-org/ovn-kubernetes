@@ -8,7 +8,7 @@ import (
 )
 
 type dbObjType int
-type ownerType string
+type ownerType = string
 type ExternalIDKey string
 
 func (key ExternalIDKey) String() string {
@@ -225,7 +225,7 @@ func (objectIDs *DbObjectIDs) GetExternalIDs() map[string]string {
 func (objectIDs *DbObjectIDs) getExternalIDs(allowEmptyKeys bool) map[string]string {
 	externalIDs := map[string]string{
 		OwnerControllerKey.String(): objectIDs.ownerControllerName,
-		OwnerTypeKey.String():       string(objectIDs.idsType.ownerObjectType),
+		OwnerTypeKey.String():       objectIDs.idsType.ownerObjectType,
 	}
 	for key, value := range objectIDs.objectIDs {
 		externalIDs[key.String()] = value
@@ -244,7 +244,7 @@ func (objectIDs *DbObjectIDs) getExternalIDs(allowEmptyKeys bool) map[string]str
 // in the DbObjectIDs.objectIDs, they will be replaced with empty strings.
 // String returns the representation of all the information set in DbObjectIDs.
 func (objectIDs *DbObjectIDs) String() string {
-	id := objectIDs.ownerControllerName + ":" + string(objectIDs.idsType.ownerObjectType)
+	id := objectIDs.ownerControllerName + ":" + objectIDs.idsType.ownerObjectType
 	for _, key := range objectIDs.idsType.GetExternalIDKeys() {
 		id += ":" + objectIDs.objectIDs[key]
 	}
@@ -258,7 +258,7 @@ func (objectIDs *DbObjectIDs) GetIDsType() *ObjectIDsType {
 // getUniqueID returns primary id that is build based on objectIDs values.
 // If at least one required key is missing, an error will be returned.
 func (objectIDs *DbObjectIDs) getUniqueID() (string, error) {
-	id := objectIDs.ownerControllerName + ":" + string(objectIDs.idsType.ownerObjectType)
+	id := objectIDs.ownerControllerName + ":" + objectIDs.idsType.ownerObjectType
 	for _, key := range objectIDs.idsType.GetExternalIDKeys() {
 		value, ok := objectIDs.objectIDs[key]
 		if !ok {
@@ -273,9 +273,9 @@ func (objectIDs *DbObjectIDs) getUniqueID() (string, error) {
 // on OwnerControllerKey key, and verifies OwnerControllerKey value matches given objectIDsType.
 // All the other ids from objectIDsType will be set to DbObjectIDs.objectIDs.
 func NewDbObjectIDsFromExternalIDs(objectIDsType *ObjectIDsType, externalIDs map[string]string) (*DbObjectIDs, error) {
-	if externalIDs[OwnerTypeKey.String()] != string(objectIDsType.ownerObjectType) {
+	if externalIDs[OwnerTypeKey.String()] != objectIDsType.ownerObjectType {
 		return nil, fmt.Errorf("expected ExternalID %s to equal %s, got %s",
-			OwnerTypeKey, string(objectIDsType.ownerObjectType), externalIDs[OwnerTypeKey.String()])
+			OwnerTypeKey, objectIDsType.ownerObjectType, externalIDs[OwnerTypeKey.String()])
 	}
 	if externalIDs[OwnerControllerKey.String()] == "" {
 		return nil, fmt.Errorf("required ExternalID %s is empty", OwnerControllerKey)

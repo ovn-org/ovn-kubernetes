@@ -495,6 +495,7 @@ func (oc *DefaultNetworkController) newANPController() error {
 		oc.isPodScheduledinLocalZone,
 		oc.zone,
 		oc.recorder,
+		oc.observManager,
 	)
 	return err
 }

@@ -476,7 +476,7 @@ func (oc *DefaultNetworkController) createEgressFirewallACLOps(ops []libovsdb.Op
 		libovsdbutil.LportIngress,
 	)
 	var err error
-	ops, err = libovsdbops.CreateOrUpdateACLsOps(oc.nbClient, ops, egressFirewallACL)
+	ops, err = libovsdbops.CreateOrUpdateACLsOps(oc.nbClient, ops, oc.GetSamplingConfig(), egressFirewallACL)
 	if err != nil {
 		return ops, fmt.Errorf("failed to create egressFirewall ACL %v: %v", egressFirewallACL, err)
 	}

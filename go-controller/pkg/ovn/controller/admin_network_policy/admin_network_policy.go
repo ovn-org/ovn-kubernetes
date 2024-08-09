@@ -571,7 +571,7 @@ func (c *Controller) createNewANP(desiredANPState *adminNetworkPolicyState, desi
 		return fmt.Errorf("failed to create address-sets, %v", err)
 	}
 	ops = append(ops, addrSetOps...)
-	ops, err = libovsdbops.CreateOrUpdateACLsOps(c.nbClient, ops, desiredACLs...)
+	ops, err = libovsdbops.CreateOrUpdateACLsOps(c.nbClient, ops, c.GetSamplingConfig(), desiredACLs...)
 	if err != nil {
 		return fmt.Errorf("failed to create ACL ops: %v", err)
 	}
@@ -672,7 +672,7 @@ func (c *Controller) updateExistingANP(currentANPState, desiredANPState *adminNe
 	if fullPeerRecompute || atLeastOneRuleUpdated || hasPriorityChanged || hasACLLoggingParamsChanged {
 		klog.V(3).Infof("ANP %s with priority %d was updated", desiredANPState.name, desiredANPState.anpPriority)
 		// now update the acls to the desired ones
-		ops, err = libovsdbops.CreateOrUpdateACLsOps(c.nbClient, ops, desiredACLs...)
+		ops, err = libovsdbops.CreateOrUpdateACLsOps(c.nbClient, ops, c.GetSamplingConfig(), desiredACLs...)
 		if err != nil {
 			return fmt.Errorf("failed to create new ACL ops for anp %s: %v", desiredANPState.name, err)
 		}
