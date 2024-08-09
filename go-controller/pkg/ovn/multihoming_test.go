@@ -111,7 +111,7 @@ func withInterconnectCluster() option {
 	}
 }
 
-func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPorts() []libovsdbtest.TestData {
+func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPorts(isPrimary bool) []libovsdbtest.TestData {
 	data := []libovsdbtest.TestData{}
 	for _, ocInfo := range em.fakeOvn.secondaryControllers {
 		nodeslsps := make(map[string][]string)
@@ -235,10 +235,13 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPorts() 
 			}
 
 			data = append(data, &nbdb.LogicalSwitch{
-				UUID:        switchName + "-UUID",
-				Name:        switchName,
-				Ports:       nodeslsps[switchName],
-				ExternalIDs: map[string]string{ovntypes.NetworkExternalID: ocInfo.bnc.GetNetworkName()},
+				UUID:  switchName + "-UUID",
+				Name:  switchName,
+				Ports: nodeslsps[switchName],
+				ExternalIDs: map[string]string{
+					ovntypes.NetworkExternalID:     ocInfo.bnc.GetNetworkName(),
+					ovntypes.NetworkRoleExternalID: util.GetUserDefinedNetworkRole(isPrimary),
+				},
 				OtherConfig: otherConfig,
 				ACLs:        acls[switchName],
 			})
@@ -324,10 +327,11 @@ func expectedManagementPort(portName string, ip string) *nbdb.LogicalSwitchPort 
 
 func gwRouterExternalIDs(netInfo util.NetInfo, gwConfig util.L3GatewayConfig) map[string]string {
 	return map[string]string{
-		ovntypes.NetworkExternalID:  netInfo.GetNetworkName(),
-		ovntypes.TopologyExternalID: netInfo.TopologyType(),
-		"physical_ip":               hostPhysicalIP(gwConfig),
-		"physical_ips":              strings.Join(hostIPsFromGWConfig(gwConfig), ","),
+		ovntypes.NetworkExternalID:     netInfo.GetNetworkName(),
+		ovntypes.NetworkRoleExternalID: getNetworkRole(netInfo),
+		ovntypes.TopologyExternalID:    netInfo.TopologyType(),
+		"physical_ip":                  hostPhysicalIP(gwConfig),
+		"physical_ips":                 strings.Join(hostIPsFromGWConfig(gwConfig), ","),
 	}
 }
 

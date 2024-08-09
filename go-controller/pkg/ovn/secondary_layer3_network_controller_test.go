@@ -24,6 +24,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -177,7 +178,7 @@ var _ = Describe("OVN Multi-Homed pod operations", func() {
 								fakeOvn,
 								[]testPod{podInfo},
 								expectationOptions...,
-							).expectedLogicalSwitchesAndPorts()...)))
+							).expectedLogicalSwitchesAndPorts(netInfo.isPrimary)...)))
 
 				return nil
 			}
@@ -225,7 +226,9 @@ var _ = Describe("OVN Multi-Homed pod operations", func() {
 				testNode, err := newNodeWithSecondaryNets(nodeName, nodeIPv4CIDR, netInfo)
 				Expect(err).NotTo(HaveOccurred())
 
+				nbZone := &nbdb.NBGlobal{Name: types.OvnDefaultZone, UUID: types.OvnDefaultZone}
 				defaultNetExpectations := emptyDefaultClusterNetworkNodeSwitch(podInfo.nodeName)
+				defaultNetExpectations = append(defaultNetExpectations, nbZone)
 				gwConfig, err := util.ParseNodeL3GatewayAnnotation(testNode)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(gwConfig.NextHops).NotTo(BeEmpty())
@@ -240,6 +243,7 @@ var _ = Describe("OVN Multi-Homed pod operations", func() {
 						initialDB.NBData,
 						expectedLayer3EgressEntities(networkConfig, *gwConfig)...)
 				}
+				initialDB.NBData = append(initialDB.NBData, nbZone)
 
 				fakeOvn.startWithDBSetup(
 					initialDB,
@@ -357,30 +361,42 @@ func newPodWithPrimaryUDN(
 
 func namespacedName(ns, name string) string { return fmt.Sprintf("%s/%s", ns, name) }
 
+func (sni *secondaryNetInfo) getNetworkRole() string {
+	return util.GetUserDefinedNetworkRole(sni.isPrimary)
+}
+
+func getNetworkRole(netInfo util.NetInfo) string {
+	return util.GetUserDefinedNetworkRole(netInfo.IsPrimaryNetwork())
+}
+
 func (sni *secondaryNetInfo) setupOVNDependencies(dbData *libovsdbtest.TestSetup) error {
 	netInfo, err := util.NewNetInfo(sni.netconf())
 	if err != nil {
 		return err
 	}
 
+	externalIDs := map[string]string{
+		ovntypes.NetworkExternalID:     sni.netName,
+		ovntypes.NetworkRoleExternalID: sni.getNetworkRole(),
+	}
 	switch sni.topology {
 	case ovntypes.Layer2Topology:
 		dbData.NBData = append(dbData.NBData, &nbdb.LogicalSwitch{
 			Name:        netInfo.GetNetworkScopedName(ovntypes.OVNLayer2Switch),
 			UUID:        netInfo.GetNetworkScopedName(ovntypes.OVNLayer2Switch) + "_UUID",
-			ExternalIDs: map[string]string{ovntypes.NetworkExternalID: sni.netName},
+			ExternalIDs: externalIDs,
 		})
 	case ovntypes.Layer3Topology:
 		dbData.NBData = append(dbData.NBData, &nbdb.LogicalSwitch{
 			Name:        netInfo.GetNetworkScopedName(nodeName),
 			UUID:        netInfo.GetNetworkScopedName(nodeName) + "_UUID",
-			ExternalIDs: map[string]string{ovntypes.NetworkExternalID: sni.netName},
+			ExternalIDs: externalIDs,
 		})
 	case ovntypes.LocalnetTopology:
 		dbData.NBData = append(dbData.NBData, &nbdb.LogicalSwitch{
 			Name:        netInfo.GetNetworkScopedName(ovntypes.OVNLocalnetSwitch),
 			UUID:        netInfo.GetNetworkScopedName(ovntypes.OVNLocalnetSwitch) + "_UUID",
-			ExternalIDs: map[string]string{ovntypes.NetworkExternalID: sni.netName},
+			ExternalIDs: externalIDs,
 		})
 	default:
 		return fmt.Errorf("missing topology in the network configuration: %v", sni)
@@ -625,8 +641,8 @@ func expectedLogicalRouterPort(lrpName string, netInfo util.NetInfo, options map
 		MAC:      mac,
 		Options:  options,
 		ExternalIDs: map[string]string{
-			"k8s.ovn.org/topology": netInfo.TopologyType(),
-			"k8s.ovn.org/network":  netInfo.GetNetworkName(),
+			ovntypes.TopologyExternalID: netInfo.TopologyType(),
+			ovntypes.NetworkExternalID:  netInfo.GetNetworkName(),
 		},
 	}
 }
@@ -690,8 +706,8 @@ func expectedGRStaticRoute(uuid, ipPrefix, nextHop string, policy *nbdb.LogicalR
 		Nexthop:    nextHop,
 		Policy:     policy,
 		ExternalIDs: map[string]string{
-			"k8s.ovn.org/network":  netInfo.GetNetworkName(),
-			"k8s.ovn.org/topology": netInfo.TopologyType(),
+			ovntypes.NetworkExternalID:  "isolatednet",
+			ovntypes.TopologyExternalID: netInfo.TopologyType(),
 		},
 	}
 }
@@ -751,7 +767,7 @@ func expectedExternalSwitchAndLSPs(netInfo util.NetInfo, gwConfig util.L3Gateway
 		&nbdb.LogicalSwitch{
 			UUID:        "ext-UUID",
 			Name:        netInfo.GetNetworkScopedExtSwitchName(nodeName),
-			ExternalIDs: standardNonDefaultNetworkExtIDs(netInfo),
+			ExternalIDs: standardNonDefaultNetworkExtIDsForLogicalSwitch(netInfo),
 			Ports:       []string{port1UUID, port2UUID},
 		},
 		&nbdb.LogicalSwitchPort{
@@ -830,9 +846,15 @@ func gwRouterOptions(gwConfig util.L3GatewayConfig) map[string]string {
 
 func standardNonDefaultNetworkExtIDs(netInfo util.NetInfo) map[string]string {
 	return map[string]string{
-		"k8s.ovn.org/topology": netInfo.TopologyType(),
-		"k8s.ovn.org/network":  netInfo.GetNetworkName(),
+		ovntypes.TopologyExternalID: netInfo.TopologyType(),
+		ovntypes.NetworkExternalID:  netInfo.GetNetworkName(),
 	}
+}
+
+func standardNonDefaultNetworkExtIDsForLogicalSwitch(netInfo util.NetInfo) map[string]string {
+	externalIDs := standardNonDefaultNetworkExtIDs(netInfo)
+	externalIDs[ovntypes.NetworkRoleExternalID] = getNetworkRole(netInfo)
+	return externalIDs
 }
 
 func newSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netInfo util.NetInfo, nodeName string) *SecondaryLayer3NetworkController {

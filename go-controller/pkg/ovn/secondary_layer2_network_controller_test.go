@@ -145,7 +145,7 @@ var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 							fakeOvn,
 							[]testPod{podInfo},
 							expectationOptions...,
-						).expectedLogicalSwitchesAndPorts()...))
+						).expectedLogicalSwitchesAndPorts(netInfo.isPrimary)...))
 
 				return nil
 			}

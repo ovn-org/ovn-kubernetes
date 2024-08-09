@@ -785,6 +785,8 @@ func serviceExternalIDs(namespacedServiceName string) map[string]string {
 	return map[string]string{
 		types.LoadBalancerKindExternalID:  "Service",
 		types.LoadBalancerOwnerExternalID: namespacedServiceName,
+		types.NetworkExternalID:           types.DefaultNetworkName,
+		types.NetworkRoleExternalID:       types.NetworkRoleDefault,
 	}
 }
 
