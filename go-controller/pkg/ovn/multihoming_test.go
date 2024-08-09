@@ -3,6 +3,7 @@ package ovn
 import (
 	"fmt"
 	"net"
+	"strings"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
@@ -217,6 +218,7 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPorts() 
 			if ocInfo.bnc.TopologyType() == ovntypes.Layer2Topology {
 				otherConfig = nil
 			}
+
 			data = append(data, &nbdb.LogicalSwitch{
 				UUID:        switchName + "-UUID",
 				Name:        switchName,
@@ -230,7 +232,7 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPorts() 
 					data = append(data, expectedGWEntities(pod.nodeName, ocInfo.bnc, *em.gatewayConfig)...)
 					data = append(data, expectedLayer3EgressEntities(ocInfo.bnc, *em.gatewayConfig)...)
 				} else {
-					data = append(data, expectedLayer2EgressEntities(ocInfo.bnc.GetNetworkName()))
+					data = append(data, expectedLayer2EgressEntities(ocInfo.bnc, *em.gatewayConfig, pod.nodeName)...)
 				}
 			}
 			if em.isInterconnectCluster && ocInfo.bnc.TopologyType() == ovntypes.Layer3Topology {
@@ -303,4 +305,29 @@ func expectedManagementPort(portName string, ip string) *nbdb.LogicalSwitchPort 
 		Addresses: []string{fmt.Sprintf("02:03:04:05:06:07 %s", ip)},
 		Name:      portName,
 	}
+}
+
+func gwRouterExternalIDs(netInfo util.NetInfo, gwConfig util.L3GatewayConfig) map[string]string {
+	return map[string]string{
+		ovntypes.NetworkExternalID:  netInfo.GetNetworkName(),
+		ovntypes.TopologyExternalID: netInfo.TopologyType(),
+		"physical_ip":               hostPhysicalIP(gwConfig),
+		"physical_ips":              strings.Join(hostIPsFromGWConfig(gwConfig), ","),
+	}
+}
+
+func hostPhysicalIP(gwConfig util.L3GatewayConfig) string {
+	var physIP string
+	if len(gwConfig.IPAddresses) > 0 {
+		physIP = gwConfig.IPAddresses[0].IP.String()
+	}
+	return physIP
+}
+
+func hostIPsFromGWConfig(gwConfig util.L3GatewayConfig) []string {
+	var hostIPs []string
+	for _, ip := range append(gwConfig.IPAddresses, dummyJoinIP()) {
+		hostIPs = append(hostIPs, ip.IP.String())
+	}
+	return hostIPs
 }

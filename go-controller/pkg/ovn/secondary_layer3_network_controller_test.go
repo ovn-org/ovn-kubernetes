@@ -579,16 +579,6 @@ func expectedGWRouterPlusNATAndStaticRoutes(
 	gwRouterToExtLRPUUID := fmt.Sprintf("%s%s-UUID", ovntypes.GWRouterToExtSwitchPrefix, gwRouterName)
 	gwRouterToJoinLRPUUID := fmt.Sprintf("%s%s-UUID", ovntypes.GWRouterToJoinSwitchPrefix, gwRouterName)
 
-	var hostIPs []string
-	for _, ip := range append(gwConfig.IPAddresses, dummyJoinIP()) {
-		hostIPs = append(hostIPs, ip.IP.String())
-	}
-
-	var hostPhysicalIP string
-	if len(gwConfig.IPAddresses) > 0 {
-		hostPhysicalIP = gwConfig.IPAddresses[0].IP.String()
-	}
-
 	const (
 		nat1             = "abc-UUID"
 		nat2             = "cba-UUID"
@@ -605,14 +595,9 @@ func expectedGWRouterPlusNATAndStaticRoutes(
 	masqSubnet := config.Gateway.V4MasqueradeSubnet
 	return []libovsdbtest.TestData{
 		&nbdb.LogicalRouter{
-			Name: gwRouterName,
-			UUID: gwRouterName + "-UUID",
-			ExternalIDs: map[string]string{
-				ovntypes.NetworkExternalID:  netInfo.GetNetworkName(),
-				ovntypes.TopologyExternalID: netInfo.TopologyType(),
-				"physical_ip":               hostPhysicalIP,
-				"physical_ips":              strings.Join(hostIPs, ","),
-			},
+			Name:         gwRouterName,
+			UUID:         gwRouterName + "-UUID",
+			ExternalIDs:  gwRouterExternalIDs(netInfo, gwConfig),
 			Options:      gwRouterOptions(gwConfig),
 			Ports:        []string{gwRouterToJoinLRPUUID, gwRouterToExtLRPUUID},
 			Nat:          []string{nat1, nat2},
@@ -620,9 +605,9 @@ func expectedGWRouterPlusNATAndStaticRoutes(
 		},
 		newNATEntry(nat1, dummyJoinIP().IP.String(), gwRouterIPAddress().IP.String(), standardNonDefaultNetworkExtIDs(netInfo)),
 		newNATEntry(nat2, dummyJoinIP().IP.String(), networkSubnet(netInfo), standardNonDefaultNetworkExtIDs(netInfo)),
-		expectedGRStaticRoute(staticRoute1, ipv4Subnet, dummyJoinIP().IP.String(), nil, nil),
-		expectedGRStaticRoute(staticRoute2, ipv4DefaultRoute, nextHopIP, nil, &staticRouteOutputPort),
-		expectedGRStaticRoute(staticRoute3, masqSubnet, nextHopMasqIP, nil, &staticRouteOutputPort),
+		expectedGRStaticRoute(staticRoute1, ipv4Subnet, dummyJoinIP().IP.String(), nil, nil, netInfo),
+		expectedGRStaticRoute(staticRoute2, ipv4DefaultRoute, nextHopIP, nil, &staticRouteOutputPort, netInfo),
+		expectedGRStaticRoute(staticRoute3, masqSubnet, nextHopMasqIP, nil, &staticRouteOutputPort, netInfo),
 	}
 }
 
@@ -702,8 +687,8 @@ func expectedLayer3EgressEntities(netInfo util.NetInfo, gwConfig util.L3GatewayC
 			ExternalIDs:  standardNonDefaultNetworkExtIDs(netInfo),
 		},
 		&nbdb.LogicalRouterPort{UUID: rtosLRPUUID, Name: rtosLRPName, Networks: []string{"192.168.0.1/16"}, MAC: "0a:58:c0:a8:00:01", GatewayChassis: []string{gatewayChassisUUID}},
-		expectedGRStaticRoute(staticRouteUUID1, networkIPv4Subnet, gwRouterIPAddress().IP.String(), &nbdb.LogicalRouterStaticRoutePolicySrcIP, nil),
-		expectedGRStaticRoute(staticRouteUUID2, gwRouterIPAddress().IP.String(), gwRouterIPAddress().IP.String(), nil, nil),
+		expectedGRStaticRoute(staticRouteUUID1, networkIPv4Subnet, gwRouterIPAddress().IP.String(), &nbdb.LogicalRouterStaticRoutePolicySrcIP, nil, netInfo),
+		expectedGRStaticRoute(staticRouteUUID2, gwRouterIPAddress().IP.String(), gwRouterIPAddress().IP.String(), nil, nil, netInfo),
 		expectedLogicalRouterPolicy(routerPolicyUUID1, netInfo, nodeName, nodeIP, managementPortIP(subnet).String()),
 		expectedLogicalRouterPolicy(routerPolicyUUID2, netInfo, nodeName, joinIPAddr, managementPortIP(subnet).String()),
 	}
@@ -727,7 +712,7 @@ func expectedLogicalRouterPolicy(routerPolicyUUID1 string, netInfo util.NetInfo,
 	}
 }
 
-func expectedGRStaticRoute(uuid, ipPrefix, nextHop string, policy *nbdb.LogicalRouterStaticRoutePolicy, outputPort *string) *nbdb.LogicalRouterStaticRoute {
+func expectedGRStaticRoute(uuid, ipPrefix, nextHop string, policy *nbdb.LogicalRouterStaticRoutePolicy, outputPort *string, netInfo util.NetInfo) *nbdb.LogicalRouterStaticRoute {
 	return &nbdb.LogicalRouterStaticRoute{
 		UUID:       uuid,
 		IPPrefix:   ipPrefix,
@@ -735,8 +720,8 @@ func expectedGRStaticRoute(uuid, ipPrefix, nextHop string, policy *nbdb.LogicalR
 		Nexthop:    nextHop,
 		Policy:     policy,
 		ExternalIDs: map[string]string{
-			"k8s.ovn.org/network":  "isolatednet",
-			"k8s.ovn.org/topology": "layer3",
+			"k8s.ovn.org/network":  netInfo.GetNetworkName(),
+			"k8s.ovn.org/topology": netInfo.TopologyType(),
 		},
 	}
 }
@@ -750,7 +735,7 @@ func allowAllFromMgmtPort(aclUUID string, mgmtPortIP string, switchName string) 
 		ExternalIDs: map[string]string{
 			"k8s.ovn.org/name":             switchName,
 			"ip":                           mgmtPortIP,
-			"k8s.ovn.org/id":               fmt.Sprintf("isolatednet-network-controller:NetpolNode:isolatednet_test-node:%s", mgmtPortIP),
+			"k8s.ovn.org/id":               fmt.Sprintf("isolatednet-network-controller:NetpolNode:%s:%s", switchName, mgmtPortIP),
 			"k8s.ovn.org/owner-controller": "isolatednet-network-controller",
 			"k8s.ovn.org/owner-type":       "NetpolNode",
 		},
