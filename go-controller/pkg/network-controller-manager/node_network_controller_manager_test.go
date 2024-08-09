@@ -10,6 +10,7 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	factoryMocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory/mocks"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -100,6 +101,7 @@ var _ = Describe("Healthcheck tests", func() {
 	Describe("checkForStaleOVSRepresentorInterfaces", func() {
 		var ncm *nodeNetworkControllerManager
 		nodeName := "localNode"
+		routeManager := routemanager.NewController()
 		podList := []*corev1.Pod{
 			{
 				ObjectMeta: metav1.ObjectMeta{
@@ -127,7 +129,7 @@ var _ = Describe("Healthcheck tests", func() {
 
 		BeforeEach(func() {
 			// setup kube output
-			ncm, err = NewNodeNetworkControllerManager(fakeClient, &factoryMock, nodeName, &sync.WaitGroup{}, nil)
+			ncm, err = NewNodeNetworkControllerManager(fakeClient, &factoryMock, nodeName, &sync.WaitGroup{}, nil, routeManager)
 			Expect(err).NotTo(HaveOccurred())
 			factoryMock.On("GetPods", "").Return(podList, nil)
 		})
@@ -182,6 +184,7 @@ var _ = Describe("Healthcheck tests", func() {
 			v6NodeSubnet = "ae70::66/112"
 			testNS       ns.NetNS
 			fakeClient   *util.OVNClientset
+			routeManager = routemanager.NewController()
 		)
 
 		BeforeEach(func() {
@@ -221,7 +224,7 @@ var _ = Describe("Healthcheck tests", func() {
 			factoryMock.On("GetNodes").Return(nodeList, nil)
 			factoryMock.On("NADInformer").Return(nil)
 
-			ncm, err := NewNodeNetworkControllerManager(fakeClient, &factoryMock, nodeName, &sync.WaitGroup{}, nil)
+			ncm, err := NewNodeNetworkControllerManager(fakeClient, &factoryMock, nodeName, &sync.WaitGroup{}, nil, routeManager)
 			Expect(err).NotTo(HaveOccurred())
 
 			err = testNS.Do(func(ns.NetNS) error {

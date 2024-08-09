@@ -2,8 +2,10 @@ package vrfmanager
 
 import (
 	"fmt"
+
 	"github.com/onsi/ginkgo"
 	"github.com/onsi/gomega"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	netlink_mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/vishvananda/netlink"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
@@ -58,7 +60,7 @@ var _ = ginkgo.Describe("VRF manager", func() {
 	}
 
 	ginkgo.BeforeEach(func() {
-		c = NewController()
+		c = NewController(routemanager.NewController())
 
 		nlMock = &mocks.NetLinkOps{}
 		vrfLinkMock1 = new(netlink_mocks.Link)
@@ -91,12 +93,12 @@ var _ = ginkgo.Describe("VRF manager", func() {
 			nlMock.On("LinkList").Return([]netlink.Link{vrfLinkMock1, enslaveLinkMock1}, nil)
 			enslaveLinkMock1.On("Attrs").Return(&netlink.LinkAttrs{Name: enslaveLinkName1, MasterIndex: 0, Index: getLinkIndex(enslaveLinkName1)}, nil)
 			nlMock.On("LinkSetMaster", enslaveLinkMock1, vrfLinkMock1).Return(nil)
-			err := c.AddVRF(vrfLinkName1, enslaveLinkName1, 10)
+			err := c.AddVRF(vrfLinkName1, enslaveLinkName1, 10, nil)
 			gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 		})
 
 		ginkgo.It("delete VRF", func() {
-			err := c.AddVRF(vrfLinkName2, "", 20)
+			err := c.AddVRF(vrfLinkName2, "", 20, nil)
 			gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 			err = c.DeleteVRF(vrfLinkName2)
 			gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
@@ -105,9 +107,9 @@ var _ = ginkgo.Describe("VRF manager", func() {
 		ginkgo.It("reconcile VRFs", func() {
 			nlMock.On("LinkList").Return([]netlink.Link{vrfLinkMock1, vrfLinkMock2, enslaveLinkMock1}, nil)
 			enslaveLinkMock1.On("Attrs").Return(&netlink.LinkAttrs{Name: enslaveLinkName1, MasterIndex: getLinkMasterIndex(enslaveLinkName1), Index: getLinkIndex(enslaveLinkName1)}, nil)
-			err := c.AddVRF(vrfLinkName1, enslaveLinkName1, 10)
+			err := c.AddVRF(vrfLinkName1, enslaveLinkName1, 10, nil)
 			gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
-			err = c.AddVRF(vrfLinkName2, "", 20)
+			err = c.AddVRF(vrfLinkName2, "", 20, nil)
 			gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 			err = util.GetNetLinkOps().LinkDelete(vrfLinkMock2)
 			gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
