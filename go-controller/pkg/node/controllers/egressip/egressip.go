@@ -23,9 +23,12 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/linkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
+	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 
+	nadv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/informers/externalversions/k8s.cni.cncf.io/v1"
+	nadlister "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -115,10 +118,10 @@ type Controller struct {
 	namespaceLister   corelisters.NamespaceLister
 	namespaceInformer cache.SharedIndexInformer
 	namespaceQueue    workqueue.RateLimitingInterface
-
-	podLister   corelisters.PodLister
-	podInformer cache.SharedIndexInformer
-	podQueue    workqueue.RateLimitingInterface
+	nadLister         nadlister.NetworkAttachmentDefinitionLister
+	podLister         corelisters.PodLister
+	podInformer       cache.SharedIndexInformer
+	podQueue          workqueue.RateLimitingInterface
 
 	// cache is a cache of configuration states for EIPs, key is EgressIP Name.
 	cache *syncmap.SyncMap[*state]
@@ -140,8 +143,9 @@ type Controller struct {
 	v6              bool
 }
 
-func NewController(k kube.Interface, eIPInformer egressipinformer.EgressIPInformer, nodeInformer cache.SharedIndexInformer, namespaceInformer coreinformers.NamespaceInformer,
-	podInformer coreinformers.PodInformer, routeManager *routemanager.Controller, v4, v6 bool, nodeName string, linkManager *linkmanager.Controller) (*Controller, error) {
+func NewController(k kube.Interface, eIPInformer egressipinformer.EgressIPInformer, nodeInformer cache.SharedIndexInformer,
+	namespaceInformer coreinformers.NamespaceInformer, nadInformer nadv1.NetworkAttachmentDefinitionInformer, podInformer coreinformers.PodInformer,
+	routeManager *routemanager.Controller, v4, v6 bool, nodeName string, linkManager *linkmanager.Controller) (*Controller, error) {
 
 	c := &Controller{
 		eIPLister:   eIPInformer.Lister(),
@@ -174,6 +178,9 @@ func NewController(k kube.Interface, eIPInformer egressipinformer.EgressIPInform
 		nodeName:              nodeName,
 		v4:                    v4,
 		v6:                    v6,
+	}
+	if nadInformer != nil {
+		c.nadLister = nadInformer.Lister()
 	}
 	return c, nil
 }
@@ -547,6 +554,15 @@ func (c *Controller) processEIP(eip *eipv1.EgressIP) (*eIPConfig, sets.Set[strin
 		if !found {
 			continue
 		}
+		isUDNVRFSlave, err := isLinkSlaveToUDNVRF(link)
+		if err != nil {
+			return nil, selectedNamespaces, selectedPods, selectedNamespacesPodIPs,
+				fmt.Errorf("failed to determine if link %s is enslaved by user defined network VRF: %v", link.Attrs().Name, err)
+		}
+		if isUDNVRFSlave {
+			klog.Errorf("EgressIP assigned to a host secondary interface cannot be completed because the link %s is enslaved to user defined network VRF", link.Attrs().Name)
+			continue
+		}
 		// namespace selector is mandatory for EIP
 		namespaces, err := c.listNamespacesBySelector(&eip.Spec.NamespaceSelector)
 		if err != nil {
@@ -554,6 +570,16 @@ func (c *Controller) processEIP(eip *eipv1.EgressIP) (*eIPConfig, sets.Set[strin
 		}
 		isEIPV6 := utilnet.IsIPv6(eIPNet.IP)
 		for _, namespace := range namespaces {
+			if util.IsNetworkSegmentationSupportEnabled() {
+				netInfo, err := util.GetActiveNetworkForNamespace(namespace.Name, c.nadLister)
+				if err != nil {
+					return nil, selectedNamespaces, selectedPods, selectedNamespacesPodIPs, fmt.Errorf("failed to get active network for namespace %s: %v", namespace.Name, err)
+				}
+				if netInfo.IsSecondary() {
+					// EIP for secondary host interfaces is not supported for secondary networks
+					continue
+				}
+			}
 			selectedNamespaces.Insert(namespace.Name)
 			pods, err := c.listPodsByNamespaceAndSelector(namespace.Name, &eip.Spec.PodSelector)
 			if err != nil {
@@ -1003,6 +1029,16 @@ func (c *Controller) repairNode() error {
 			for _, namespace := range namespaces {
 				namespaceLabels := labels.Set(namespace.Labels)
 				if namespaceSelector.Matches(namespaceLabels) {
+					if util.IsNetworkSegmentationSupportEnabled() {
+						netInfo, err := util.GetActiveNetworkForNamespace(namespace.Name, c.nadLister)
+						if err != nil {
+							return fmt.Errorf("failed to get active network for namespace %s: %v", namespace.Name, err)
+						}
+						if netInfo.IsSecondary() {
+							// EIP for secondary host interfaces is not supported for secondary networks
+							continue
+						}
+					}
 					pods, err := c.podLister.Pods(namespace.Name).List(podSelector)
 					if err != nil {
 						return fmt.Errorf("failed to list pods using selector %s to configure egress IP %s: %v",
@@ -1536,4 +1572,25 @@ func getNodeIPFwMarkIPRule(ipFamily int) netlink.Rule {
 
 func isVRFSlaveDevice(link netlink.Link) bool {
 	return link.Attrs().Slave != nil && link.Attrs().Slave.SlaveType() == "vrf"
+}
+
+// isLinkSlaveToUDNVRF returns true if the Link is enslaved by a UDN VRF link
+func isLinkSlaveToUDNVRF(link netlink.Link) (bool, error) {
+	if !isVRFSlaveDevice(link) {
+		return false, nil
+	}
+	masterLink, err := util.GetNetLinkOps().LinkByIndex(link.Attrs().MasterIndex)
+	if err != nil {
+		if util.GetNetLinkOps().IsLinkNotFoundError(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to return link %s master interface by index %d: %v", link.Attrs().Name, link.Attrs().Index, err)
+	}
+	if masterLink.Type() != "vrf" {
+		return false, nil
+	}
+	if !strings.HasPrefix(masterLink.Attrs().Name, ovntypes.UDNVRFDevicePrefix) && !strings.HasSuffix(masterLink.Attrs().Name, ovntypes.UDNVRFDeviceSuffix) {
+		return false, nil
+	}
+	return true, nil
 }
