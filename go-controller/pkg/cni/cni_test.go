@@ -8,24 +8,28 @@ import (
 	. "github.com/onsi/gomega"
 
 	cnitypes "github.com/containernetworking/cni/pkg/types"
-	current "github.com/containernetworking/cni/pkg/types/100"
+	cnitypes100 "github.com/containernetworking/cni/pkg/types/100"
+	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	v1nadmocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/kubernetes/fake"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	v1mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/client-go/listers/core/v1"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+
+	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 )
 
 type podRequestInterfaceOpsStub struct {
 	unconfiguredInterfaces []*PodInterfaceInfo
 }
 
-func (stub *podRequestInterfaceOpsStub) ConfigureInterface(pr *PodRequest, getter PodInfoGetter, ifInfo *PodInterfaceInfo) ([]*current.Interface, error) {
+func (stub *podRequestInterfaceOpsStub) ConfigureInterface(pr *PodRequest, getter PodInfoGetter, ifInfo *PodInterfaceInfo) ([]*cnitypes100.Interface, error) {
 	return nil, nil
 }
 func (stub *podRequestInterfaceOpsStub) UnconfigureInterface(pr *PodRequest, ifInfo *PodInterfaceInfo) error {
@@ -44,19 +48,19 @@ var _ = Describe("Network Segmentation", func() {
 		clientSet                *ClientSet
 		kubeAuth                 *KubeAPIAuth
 		obtainedPodIterfaceInfos []*PodInterfaceInfo
-		getCNIResultStub         = func(request *PodRequest, getter PodInfoGetter, podInterfaceInfo *PodInterfaceInfo) (*current.Result, error) {
+		getCNIResultStub         = func(request *PodRequest, getter PodInfoGetter, podInterfaceInfo *PodInterfaceInfo) (*cnitypes100.Result, error) {
 			obtainedPodIterfaceInfos = append(obtainedPodIterfaceInfos, podInterfaceInfo)
 			return nil, nil
 		}
-		prInterfaceOpsStub                            = &podRequestInterfaceOpsStub{}
+		prInterfaceOpsStub                            *podRequestInterfaceOpsStub
 		enableMultiNetwork, enableNetworkSegmentation bool
 	)
 
 	BeforeEach(func() {
-
 		enableMultiNetwork = config.OVNKubernetesFeature.EnableMultiNetwork
 		enableNetworkSegmentation = config.OVNKubernetesFeature.EnableNetworkSegmentation
 
+		prInterfaceOpsStub = &podRequestInterfaceOpsStub{}
 		podRequestInterfaceOps = prInterfaceOpsStub
 
 		fakeClientset = fake.NewSimpleClientset()
@@ -67,7 +71,7 @@ var _ = Describe("Network Segmentation", func() {
 			SandboxID:    "824bceff24af3",
 			Netns:        "ns",
 			IfName:       "eth0",
-			CNIConf: &types.NetConf{
+			CNIConf: &ovncnitypes.NetConf{
 				NetConf:  cnitypes.NetConf{},
 				DeviceID: "",
 			},
@@ -149,7 +153,49 @@ var _ = Describe("Network Segmentation", func() {
 		It("should not fail at cmdDel", func() {
 			podNamespaceLister.On("Get", pr.PodName).Return(pod, nil)
 			Expect(pr.cmdDel(clientSet)).NotTo(BeNil())
+			Expect(prInterfaceOpsStub.unconfiguredInterfaces).To(HaveLen(1))
+		})
+
+	})
+	Context("with network segmentation fg enabled and annotation with UDN primary network", func() {
+		BeforeEach(func() {
+			config.OVNKubernetesFeature.EnableMultiNetwork = true
+			config.OVNKubernetesFeature.EnableNetworkSegmentation = true
+			pod = &v1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      pr.PodName,
+					Namespace: pr.PodNamespace,
+					Annotations: map[string]string{
+						"k8s.ovn.org/pod-networks": `{"default":{"ip_address":"100.10.10.3/24","mac_address":"0a:58:fd:98:00:01", "role":"infrastructure-locked"},"ns1/bluenad":{"ip_address":"200.10.10.3/24","mac_address":"0a:58:fd:97:00:01", "role":"primary"}}`,
+					},
+				},
+			}
+			nadNamespaceLister := v1nadmocks.NetworkAttachmentDefinitionNamespaceLister{}
+			nadLister.On("NetworkAttachmentDefinitions", pr.PodNamespace).Return(&nadNamespaceLister)
+			nadNamespaceLister.On("List", labels.Everything()).Return(
+				[]*nadapi.NetworkAttachmentDefinition{
+					ovntest.GenerateNAD("rednet", "nadbluenad", pr.PodNamespace,
+						ovntypes.Layer2Topology, "200.10.10.0/24", ovntypes.NetworkRolePrimary),
+				},
+				nil,
+			)
+		})
+		It("should not fail at cmdAdd", func() {
+			podNamespaceLister.On("Get", pr.PodName).Return(pod, nil)
+			Expect(pr.cmdAddWithGetCNIResultFunc(kubeAuth, clientSet, getCNIResultStub)).NotTo(BeNil())
+			Expect(obtainedPodIterfaceInfos).ToNot(BeEmpty())
+		})
+		It("should not fail at cmdDel", func() {
+			podNamespaceLister.On("Get", pr.PodName).Return(pod, nil)
+			Expect(pr.cmdDel(clientSet)).NotTo(BeNil())
 			Expect(prInterfaceOpsStub.unconfiguredInterfaces).To(HaveLen(2))
+			Expect(prInterfaceOpsStub.unconfiguredInterfaces).To(ContainElement(
+				WithTransform(func(podInterfaceInfo *PodInterfaceInfo) string {
+					if podInterfaceInfo == nil {
+						return ""
+					}
+					return podInterfaceInfo.NetName
+				}, Equal("rednet"))))
 		})
 
 	})
