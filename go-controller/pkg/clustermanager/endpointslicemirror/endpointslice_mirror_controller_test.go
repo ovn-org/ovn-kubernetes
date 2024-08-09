@@ -70,7 +70,7 @@ var _ = ginkgo.Describe("Cluster manager EndpointSlice mirror controller", func(
 					ObjectMeta: metav1.ObjectMeta{
 						Name:        "test-pod",
 						Namespace:   namespaceT.Name,
-						Annotations: map[string]string{util.OvnPodAnnotationName: `{"default":{"mac_address":"0a:58:0a:f4:02:03","ip_address":"10.244.2.3/24","role":"infrastructure-locked"},"testns/l3-network":{"mac_address":"0a:58:0a:80:02:04","ip_address":"10.128.2.4/24","role":"primary"}}`},
+						Annotations: map[string]string{util.OvnPodAnnotationName: `{"default":{"mac_address":"0a:58:0a:f4:02:03","ip_address":"10.244.2.3/24","role":"infrastructure-locked"},"testns/l3-network":{"mac_address":"0a:58:0a:84:02:04","ip_address":"10.132.2.4/24","role":"primary"}}`},
 					},
 					Status: v1.PodStatus{Phase: v1.PodRunning},
 				}
@@ -121,7 +121,7 @@ var _ = ginkgo.Describe("Cluster manager EndpointSlice mirror controller", func(
 
 				_, err := fakeClient.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(namespaceT.Name).Create(
 					context.TODO(),
-					testing.GenerateNAD("l3-network", "l3-network", namespaceT.Name, types.Layer3Topology, "10.128.2.0/16/24", types.NetworkRolePrimary),
+					testing.GenerateNAD("l3-network", "l3-network", namespaceT.Name, types.Layer3Topology, "10.132.2.0/16/24", types.NetworkRolePrimary),
 					metav1.CreateOptions{})
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
 
@@ -162,7 +162,7 @@ var _ = ginkgo.Describe("Cluster manager EndpointSlice mirror controller", func(
 				gomega.Expect(mirroredEndpointSlices.Items[0].Endpoints).To(gomega.HaveLen(1))
 				gomega.Expect(mirroredEndpointSlices.Items[0].Endpoints[0].Addresses).To(gomega.HaveLen(1))
 				// check if the Address is set to the primary IP
-				gomega.Expect(mirroredEndpointSlices.Items[0].Endpoints[0].Addresses[0]).To(gomega.BeEquivalentTo("10.128.2.4"))
+				gomega.Expect(mirroredEndpointSlices.Items[0].Endpoints[0].Addresses[0]).To(gomega.BeEquivalentTo("10.132.2.4"))
 
 				return nil
 			}
@@ -181,7 +181,7 @@ var _ = ginkgo.Describe("Cluster manager EndpointSlice mirror controller", func(
 					ObjectMeta: metav1.ObjectMeta{
 						Name:        "test-pod",
 						Namespace:   namespaceT.Name,
-						Annotations: map[string]string{util.OvnPodAnnotationName: `{"default":{"mac_address":"0a:58:0a:f4:02:03","ip_address":"10.244.2.3/24","role":"primary"},"testns/l3-network":{"mac_address":"0a:58:0a:80:02:04","ip_address":"10.128.2.4/24","role":"secondary}}`},
+						Annotations: map[string]string{util.OvnPodAnnotationName: `{"default":{"mac_address":"0a:58:0a:f4:02:03","ip_address":"10.244.2.3/24","role":"primary"},"testns/l3-network":{"mac_address":"0a:58:0a:84:02:04","ip_address":"10.132.2.4/24","role":"secondary}}`},
 					},
 					Status: v1.PodStatus{Phase: v1.PodRunning},
 				}
@@ -229,7 +229,7 @@ var _ = ginkgo.Describe("Cluster manager EndpointSlice mirror controller", func(
 
 				_, err := fakeClient.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(namespaceT.Name).Create(
 					context.TODO(),
-					testing.GenerateNAD("l3-network", "l3-network", namespaceT.Name, types.Layer3Topology, "10.128.2.0/16/24", types.NetworkRoleSecondary),
+					testing.GenerateNAD("l3-network", "l3-network", namespaceT.Name, types.Layer3Topology, "10.132.2.0/16/24", types.NetworkRoleSecondary),
 					metav1.CreateOptions{})
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
 
@@ -273,7 +273,7 @@ var _ = ginkgo.Describe("Cluster manager EndpointSlice mirror controller", func(
 					ObjectMeta: metav1.ObjectMeta{
 						Name:        "test-pod",
 						Namespace:   namespaceT.Name,
-						Annotations: map[string]string{util.OvnPodAnnotationName: `{"default":{"mac_address":"0a:58:0a:f4:02:03","ip_address":"10.244.2.3/24","role":"infrastructure-locked"},"testns/l3-network":{"mac_address":"0a:58:0a:80:02:04","ip_address":"10.128.2.4/24","role":"primary"}}`},
+						Annotations: map[string]string{util.OvnPodAnnotationName: `{"default":{"mac_address":"0a:58:0a:f4:02:03","ip_address":"10.244.2.3/24","role":"infrastructure-locked"},"testns/l3-network":{"mac_address":"0a:58:0a:84:02:04","ip_address":"10.132.2.4/24","role":"primary"}}`},
 					},
 					Status: v1.PodStatus{Phase: v1.PodRunning},
 				}
@@ -323,7 +323,7 @@ var _ = ginkgo.Describe("Cluster manager EndpointSlice mirror controller", func(
 
 				_, err := fakeClient.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(namespaceT.Name).Create(
 					context.TODO(),
-					testing.GenerateNAD("l3-network", "l3-network", namespaceT.Name, types.Layer3Topology, "10.128.2.0/16/24", types.NetworkRolePrimary),
+					testing.GenerateNAD("l3-network", "l3-network", namespaceT.Name, types.Layer3Topology, "10.132.2.0/16/24", types.NetworkRolePrimary),
 					metav1.CreateOptions{})
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
 
@@ -360,14 +360,14 @@ var _ = ginkgo.Describe("Cluster manager EndpointSlice mirror controller", func(
 					return nil
 				}).WithTimeout(5 * time.Second).ShouldNot(gomega.HaveOccurred())
 				gomega.Expect(mirroredEndpointSlices.Items[0].Endpoints[0].Addresses).To(gomega.HaveLen(1))
-				gomega.Expect(mirroredEndpointSlices.Items[0].Endpoints[0].Addresses).To(gomega.BeEquivalentTo([]string{"10.128.2.4"}))
+				gomega.Expect(mirroredEndpointSlices.Items[0].Endpoints[0].Addresses).To(gomega.BeEquivalentTo([]string{"10.132.2.4"}))
 
 				ginkgo.By("when the EndpointSlice changes the mirrored one gets updated")
 				newPod := v1.Pod{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:        "test-pod-new",
 						Namespace:   namespaceT.Name,
-						Annotations: map[string]string{util.OvnPodAnnotationName: `{"default":{"mac_address":"0a:58:0a:f4:02:04","ip_address":"10.244.2.4/24","primary":false},"testns/l3-network":{"mac_address":"0a:58:0a:80:02:05","ip_address":"10.128.2.5/24","primary":true}}`},
+						Annotations: map[string]string{util.OvnPodAnnotationName: `{"default":{"mac_address":"0a:58:0a:f4:02:04","ip_address":"10.244.2.4/24","primary":false},"testns/l3-network":{"mac_address":"0a:58:0a:84:02:05","ip_address":"10.132.2.5/24","primary":true}}`},
 					},
 					Status: v1.PodStatus{Phase: v1.PodRunning},
 				}
@@ -418,8 +418,8 @@ var _ = ginkgo.Describe("Cluster manager EndpointSlice mirror controller", func(
 					return nil
 				}).WithTimeout(5 * time.Second).ShouldNot(gomega.HaveOccurred())
 
-				gomega.Expect(mirroredEndpointSlices.Items[0].Endpoints[0].Addresses[0]).To(gomega.BeEquivalentTo("10.128.2.4"))
-				gomega.Expect(mirroredEndpointSlices.Items[0].Endpoints[1].Addresses[0]).To(gomega.BeEquivalentTo("10.128.2.5"))
+				gomega.Expect(mirroredEndpointSlices.Items[0].Endpoints[0].Addresses[0]).To(gomega.BeEquivalentTo("10.132.2.4"))
+				gomega.Expect(mirroredEndpointSlices.Items[0].Endpoints[1].Addresses[0]).To(gomega.BeEquivalentTo("10.132.2.5"))
 
 				ginkgo.By("when the default EndpointSlice is removed the mirrored one follows")
 				err = fakeClient.KubeClient.DiscoveryV1().EndpointSlices(newPod.Namespace).Delete(context.TODO(), defaultEndpointSlice.Name, metav1.DeleteOptions{})
