@@ -153,6 +153,8 @@ func (nm *networkManagerImpl) sync(network string) error {
 }
 
 func (nm *networkManagerImpl) syncAll() error {
+	nm.Lock()
+	defer nm.Unlock()
 	// as we sync upon start, consider networks that have not been ensured as
 	// stale and clean them up
 	validNetworks := make([]util.BasicNetInfo, 0, len(nm.networks))
