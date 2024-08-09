@@ -22,6 +22,7 @@ import (
 	ovniptables "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/linkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
+	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	corev1 "k8s.io/api/core/v1"
@@ -269,7 +270,7 @@ func initController(namespaces []corev1.Namespace, pods []corev1.Pod, egressIPs 
 	}
 	linkManager := linkmanager.NewController(node1Name, v4, v6, nil)
 	c, err := NewController(&ovnkube.Kube{KClient: kubeClient}, watchFactory.EgressIPInformer(), watchFactory.NodeInformer(), watchFactory.NamespaceInformer(),
-		watchFactory.PodCoreInformer(), rm, v4, v6, node1Name, linkManager)
+		watchFactory.PodCoreInformer(), rm, v4, v6, node1Name, "breth0", linkManager)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -438,6 +439,8 @@ var _ = table.DescribeTable("EgressIP selectors",
 		// setup "node" environment before controller is started
 		testNS, cleanupNodeFn, err := setupFakeTestNode(nodeConfig)
 		gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+		gomega.Expect(util.SetExec(ovntest.NewFakeExec())).To(gomega.Succeed())
+		defer util.ResetRunner()
 		c, eIPClient, err := initController(namespaces, pods, egressIPList, nodeConfig, v4, v6, true) //TODO: test for IPV6
 		gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 		cleanupControllerFn, err := runController(testNS, c)
@@ -1065,6 +1068,7 @@ var _ = ginkgo.Describe("label to annotations migration", func() {
 		// entries for any EIPs.
 		testNS, cleanupFn, err = setupFakeTestNode(initLinkConfig)
 		gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+		gomega.Expect(util.SetExec(ovntest.NewFakeExec())).To(gomega.Succeed())
 		// set labels on each eip address
 		gomega.Expect(setDepreciatedManagedAddressLabel(testNS, egressIP1IPV4CIDR, egressIP2IPV4CIDR, egressIP3IPCIDR)).ShouldNot(gomega.HaveOccurred())
 		// init controller and set createEIPAnnot to false, therfore no annotation created
@@ -1090,6 +1094,7 @@ var _ = ginkgo.Describe("label to annotations migration", func() {
 	ginkgo.AfterEach(func() {
 		defer runtime.UnlockOSThread()
 		gomega.Expect(cleanupFn()).Should(gomega.Succeed())
+		util.ResetRunner()
 	})
 })
 
@@ -1107,6 +1112,8 @@ var _ = ginkgo.Describe("VRF", func() {
 		}}
 		testNS, cleanupNodeFn, err := setupFakeTestNode(nodeConfig)
 		gomega.Expect(err).ShouldNot(gomega.HaveOccurred(), "fake node setup should succeed")
+		gomega.Expect(util.SetExec(ovntest.NewFakeExec())).To(gomega.Succeed())
+		defer util.ResetRunner()
 		ginkgo.By("create VRF and add link")
 		gomega.Expect(createVRFAndEnslaveLink(testNS, dummyLink1Name, vrfName, vrfTable)).Should(gomega.Succeed())
 		ginkgo.By("add route to routing table associated with VRF")
@@ -1168,6 +1175,8 @@ var _ = table.DescribeTable("repair node", func(expectedStateFollowingClean []ei
 	}
 	testNS, cleanupNodeFn, err := setupFakeTestNode(nodeConfigsBeforeRepair)
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+	gomega.Expect(util.SetExec(ovntest.NewFakeExec())).To(gomega.Succeed())
+	defer util.ResetRunner()
 	c, _, err := initController(namespaces, pods, egressIPList, nodeConfigsBeforeRepair, v4, v6, true)
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 	wg := &sync.WaitGroup{}
