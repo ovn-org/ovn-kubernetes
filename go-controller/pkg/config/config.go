@@ -1752,7 +1752,7 @@ func buildKubernetesConfig(exec kexec.Interface, cli, file *config, saPath strin
 
 // completeKubernetesConfig completes the Kubernetes config by parsing raw values
 // into their final form.
-func completeKubernetesConfig(allSubnets *configSubnets) error {
+func completeKubernetesConfig(allSubnets *ConfigSubnets) error {
 	Kubernetes.ServiceCIDRs = []*net.IPNet{}
 	for _, cidrString := range strings.Split(Kubernetes.RawServiceCIDRs, ",") {
 		_, serviceCIDR, err := net.ParseCIDR(cidrString)
@@ -1760,7 +1760,7 @@ func completeKubernetesConfig(allSubnets *configSubnets) error {
 			return fmt.Errorf("kubernetes service network CIDR %q invalid: %v", cidrString, err)
 		}
 		Kubernetes.ServiceCIDRs = append(Kubernetes.ServiceCIDRs, serviceCIDR)
-		allSubnets.append(configSubnetService, serviceCIDR)
+		allSubnets.Append(ConfigSubnetService, serviceCIDR)
 	}
 	if len(Kubernetes.ServiceCIDRs) > 2 {
 		return fmt.Errorf("kubernetes service-cidrs must contain either a single CIDR or else an IPv4/IPv6 pair")
@@ -1858,7 +1858,7 @@ func buildGatewayConfig(ctx *cli.Context, cli, file *config) error {
 	return nil
 }
 
-func completeGatewayConfig(allSubnets *configSubnets, masqueradeIPs *MasqueradeIPsConfig) error {
+func completeGatewayConfig(allSubnets *ConfigSubnets, masqueradeIPs *MasqueradeIPsConfig) error {
 	// Validate v4 and v6 join subnets
 	v4IP, v4JoinCIDR, err := net.ParseCIDR(Gateway.V4JoinSubnet)
 	if err != nil || utilnet.IsIPv6(v4IP) {
@@ -1869,8 +1869,8 @@ func completeGatewayConfig(allSubnets *configSubnets, masqueradeIPs *MasqueradeI
 	if err != nil || !utilnet.IsIPv6(v6IP) {
 		return fmt.Errorf("invalid gateway v6 join subnet specified, subnet: %s: error: %v", Gateway.V6JoinSubnet, err)
 	}
-	allSubnets.append(configSubnetJoin, v4JoinCIDR)
-	allSubnets.append(configSubnetJoin, v6JoinCIDR)
+	allSubnets.Append(ConfigSubnetJoin, v4JoinCIDR)
+	allSubnets.Append(ConfigSubnetJoin, v6JoinCIDR)
 
 	//validate v4 and v6 masquerade subnets
 	v4MasqueradeIP, v4MasqueradeCIDR, err := net.ParseCIDR(Gateway.V4MasqueradeSubnet)
@@ -1889,8 +1889,8 @@ func completeGatewayConfig(allSubnets *configSubnets, masqueradeIPs *MasqueradeI
 		return fmt.Errorf("unable to allocate V6MasqueradeIPs: %s", err)
 	}
 
-	allSubnets.append(configSubnetMasquerade, v4MasqueradeCIDR)
-	allSubnets.append(configSubnetMasquerade, v6MasqueradeCIDR)
+	allSubnets.Append(ConfigSubnetMasquerade, v4MasqueradeCIDR)
+	allSubnets.Append(ConfigSubnetMasquerade, v6MasqueradeCIDR)
 
 	return nil
 }
@@ -2020,7 +2020,7 @@ func buildHybridOverlayConfig(ctx *cli.Context, cli, file *config) error {
 
 // completeHybridOverlayConfig completes the HybridOverlay config by parsing raw values
 // into their final form.
-func completeHybridOverlayConfig(allSubnets *configSubnets) error {
+func completeHybridOverlayConfig(allSubnets *ConfigSubnets) error {
 	if !HybridOverlay.Enabled || len(HybridOverlay.RawClusterSubnets) == 0 {
 		return nil
 	}
@@ -2031,7 +2031,7 @@ func completeHybridOverlayConfig(allSubnets *configSubnets) error {
 		return fmt.Errorf("hybrid overlay cluster subnet invalid: %v", err)
 	}
 	for _, subnet := range HybridOverlay.ClusterSubnets {
-		allSubnets.append(configSubnetHybrid, subnet.CIDR)
+		allSubnets.Append(ConfigSubnetHybrid, subnet.CIDR)
 	}
 
 	return nil
@@ -2053,7 +2053,7 @@ func buildClusterManagerConfig(ctx *cli.Context, cli, file *config) error {
 
 // completeClusterManagerConfig completes the ClusterManager config by parsing raw values
 // into their final form.
-func completeClusterManagerConfig(allSubnets *configSubnets) error {
+func completeClusterManagerConfig(allSubnets *ConfigSubnets) error {
 	// Validate v4 and v6 transit switch subnets
 	v4IP, v4TransitCIDR, err := net.ParseCIDR(ClusterManager.V4TransitSwitchSubnet)
 	if err != nil || utilnet.IsIPv6(v4IP) {
@@ -2064,8 +2064,8 @@ func completeClusterManagerConfig(allSubnets *configSubnets) error {
 	if err != nil || !utilnet.IsIPv6(v6IP) {
 		return fmt.Errorf("invalid transit switch v6 subnet specified, subnet: %s: error: %v", ClusterManager.V6TransitSwitchSubnet, err)
 	}
-	allSubnets.append(configSubnetTransit, v4TransitCIDR)
-	allSubnets.append(configSubnetTransit, v6TransitCIDR)
+	allSubnets.Append(ConfigSubnetTransit, v4TransitCIDR)
+	allSubnets.Append(ConfigSubnetTransit, v6TransitCIDR)
 	return nil
 }
 
@@ -2094,14 +2094,14 @@ func buildDefaultConfig(cli, file *config) error {
 
 // completeDefaultConfig completes the Default config by parsing raw values
 // into their final form.
-func completeDefaultConfig(allSubnets *configSubnets) error {
+func completeDefaultConfig(allSubnets *ConfigSubnets) error {
 	var err error
 	Default.ClusterSubnets, err = ParseClusterSubnetEntries(Default.RawClusterSubnets)
 	if err != nil {
 		return fmt.Errorf("cluster subnet invalid: %v", err)
 	}
 	for _, subnet := range Default.ClusterSubnets {
-		allSubnets.append(configSubnetCluster, subnet.CIDR)
+		allSubnets.Append(ConfigSubnetCluster, subnet.CIDR)
 	}
 
 	Default.HostMasqConntrackZone = Default.ConntrackZone + 1
@@ -2326,7 +2326,7 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 }
 
 func completeConfig() error {
-	allSubnets := newConfigSubnets()
+	allSubnets := NewConfigSubnets()
 
 	if err := completeKubernetesConfig(allSubnets); err != nil {
 		return err
@@ -2349,7 +2349,7 @@ func completeConfig() error {
 		return err
 	}
 
-	if err := allSubnets.checkForOverlaps(); err != nil {
+	if err := allSubnets.CheckForOverlaps(); err != nil {
 		return err
 	}
 

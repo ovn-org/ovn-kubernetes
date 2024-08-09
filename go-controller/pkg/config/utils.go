@@ -162,67 +162,69 @@ func ParseFlowCollectors(flowCollectors string) ([]HostPort, error) {
 	return parsedFlowsCollectors, nil
 }
 
-type configSubnetType string
+type ConfigSubnetType string
 
 const (
-	configSubnetJoin       configSubnetType = "built-in join subnet"
-	configSubnetCluster    configSubnetType = "cluster subnet"
-	configSubnetService    configSubnetType = "service subnet"
-	configSubnetHybrid     configSubnetType = "hybrid overlay subnet"
-	configSubnetMasquerade configSubnetType = "masquerade subnet"
-	configSubnetTransit    configSubnetType = "transit switch subnet"
+	ConfigSubnetJoin       ConfigSubnetType = "built-in join subnet"
+	ConfigSubnetCluster    ConfigSubnetType = "cluster subnet"
+	ConfigSubnetService    ConfigSubnetType = "service subnet"
+	ConfigSubnetHybrid     ConfigSubnetType = "hybrid overlay subnet"
+	ConfigSubnetMasquerade ConfigSubnetType = "masquerade subnet"
+	ConfigSubnetTransit    ConfigSubnetType = "transit switch subnet"
+	UserDefinedSubnets     ConfigSubnetType = "user defined subnet"
+	UserDefinedJoinSubnet  ConfigSubnetType = "user defined join subnet"
 )
 
-type configSubnet struct {
-	subnetType configSubnetType
-	subnet     *net.IPNet
+type ConfigSubnet struct {
+	SubnetType ConfigSubnetType
+	Subnet     *net.IPNet
 }
 
-// configSubnets represents a set of configured subnets (and their names)
-type configSubnets struct {
-	subnets []configSubnet
-	v4      map[configSubnetType]bool
-	v6      map[configSubnetType]bool
+// ConfigSubnets represents a set of configured subnets (and their names)
+type ConfigSubnets struct {
+	Subnets []ConfigSubnet
+	V4      map[ConfigSubnetType]bool
+	V6      map[ConfigSubnetType]bool
 }
 
-// newConfigSubnets returns a new configSubnets
-func newConfigSubnets() *configSubnets {
-	return &configSubnets{
-		v4: make(map[configSubnetType]bool),
-		v6: make(map[configSubnetType]bool),
+// NewConfigSubnets returns a new ConfigSubnets
+func NewConfigSubnets() *ConfigSubnets {
+	return &ConfigSubnets{
+		V4: make(map[ConfigSubnetType]bool),
+		V6: make(map[ConfigSubnetType]bool),
 	}
 }
 
 // append adds a single subnet to cs
-func (cs *configSubnets) append(subnetType configSubnetType, subnet *net.IPNet) {
-	cs.subnets = append(cs.subnets, configSubnet{subnetType: subnetType, subnet: subnet})
-	if subnetType != configSubnetJoin && subnetType != configSubnetMasquerade && subnetType != configSubnetTransit {
+func (cs *ConfigSubnets) Append(subnetType ConfigSubnetType, subnet *net.IPNet) {
+	cs.Subnets = append(cs.Subnets, ConfigSubnet{SubnetType: subnetType, Subnet: subnet})
+	if subnetType == ConfigSubnetCluster || subnetType == ConfigSubnetService || subnetType == ConfigSubnetHybrid {
 		if utilnet.IsIPv6CIDR(subnet) {
-			cs.v6[subnetType] = true
+			cs.V6[subnetType] = true
 		} else {
-			cs.v4[subnetType] = true
+			cs.V4[subnetType] = true
 		}
 	}
 }
 
-// checkForOverlaps checks if any of the subnets in cs overlap
-func (cs *configSubnets) checkForOverlaps() error {
-	for i, si := range cs.subnets {
+// CheckForOverlaps checks if any of the subnets in cs overlap
+func (cs *ConfigSubnets) CheckForOverlaps() error {
+	for i, si := range cs.Subnets {
 		for j := 0; j < i; j++ {
-			sj := cs.subnets[j]
-			if si.subnet.Contains(sj.subnet.IP) || sj.subnet.Contains(si.subnet.IP) {
+			sj := cs.Subnets[j]
+			if si.Subnet.Contains(sj.Subnet.IP) || sj.Subnet.Contains(si.Subnet.IP) {
 				return fmt.Errorf("illegal network configuration: %s %q overlaps %s %q",
-					si.subnetType, si.subnet.String(),
-					sj.subnetType, sj.subnet.String())
+					si.SubnetType, si.Subnet.String(),
+					sj.SubnetType, sj.Subnet.String())
 			}
 		}
 	}
 	return nil
 }
 
-func (cs *configSubnets) describeSubnetType(subnetType configSubnetType) string {
-	ipv4 := cs.v4[subnetType]
-	ipv6 := cs.v6[subnetType]
+func (cs *ConfigSubnets) describeSubnetType(subnetType ConfigSubnetType) string {
+	ipv4 := cs.V4[subnetType]
+	ipv6 := cs.V6[subnetType]
 	var familyType string
 	switch {
 	case ipv4 && !ipv6:
@@ -240,22 +242,22 @@ func (cs *configSubnets) describeSubnetType(subnetType configSubnetType) string 
 // checkIPFamilies determines if cs contains a valid single-stack IPv4 configuration, a
 // valid single-stack IPv6 configuration, a valid dual-stack configuration, or none of the
 // above.
-func (cs *configSubnets) checkIPFamilies() (usingIPv4, usingIPv6 bool, err error) {
-	if len(cs.v6) == 0 {
+func (cs *ConfigSubnets) checkIPFamilies() (usingIPv4, usingIPv6 bool, err error) {
+	if len(cs.V6) == 0 {
 		// Single-stack IPv4
 		return true, false, nil
-	} else if len(cs.v4) == 0 {
+	} else if len(cs.V4) == 0 {
 		// Single-stack IPv6
 		return false, true, nil
-	} else if reflect.DeepEqual(cs.v4, cs.v6) {
+	} else if reflect.DeepEqual(cs.V4, cs.V6) {
 		// Dual-stack
 		return true, true, nil
 	}
 
-	netConfig := cs.describeSubnetType(configSubnetCluster)
-	netConfig += ", " + cs.describeSubnetType(configSubnetService)
-	if cs.v4[configSubnetHybrid] || cs.v6[configSubnetHybrid] {
-		netConfig += ", " + cs.describeSubnetType(configSubnetHybrid)
+	netConfig := cs.describeSubnetType(ConfigSubnetCluster)
+	netConfig += ", " + cs.describeSubnetType(ConfigSubnetService)
+	if cs.V4[ConfigSubnetHybrid] || cs.V6[ConfigSubnetHybrid] {
+		netConfig += ", " + cs.describeSubnetType(ConfigSubnetHybrid)
 	}
 
 	return false, false, fmt.Errorf("illegal network configuration: %s", netConfig)
