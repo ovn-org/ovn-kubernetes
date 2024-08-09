@@ -99,7 +99,7 @@ func withInterconnectCluster() option {
 	}
 }
 
-func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPorts() []libovsdbtest.TestData {
+func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPorts(isPrimary bool) []libovsdbtest.TestData {
 	data := []libovsdbtest.TestData{}
 	for _, ocInfo := range em.fakeOvn.secondaryControllers {
 		nodeslsps := make(map[string][]string)
@@ -159,10 +159,13 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPorts() 
 				"subnet":      subnet,
 			}
 			data = append(data, &nbdb.LogicalSwitch{
-				UUID:        switchName + "-UUID",
-				Name:        switchName,
-				Ports:       nodeslsps[switchName],
-				ExternalIDs: map[string]string{ovntypes.NetworkExternalID: ocInfo.bnc.GetNetworkName()},
+				UUID:  switchName + "-UUID",
+				Name:  switchName,
+				Ports: nodeslsps[switchName],
+				ExternalIDs: map[string]string{
+					ovntypes.NetworkExternalID:     ocInfo.bnc.GetNetworkName(),
+					ovntypes.NetworkRoleExternalID: util.GetNetworkRole(isPrimary),
+				},
 				OtherConfig: otherConfig,
 				ACLs:        acls[switchName],
 			})

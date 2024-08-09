@@ -120,7 +120,7 @@ func (p testPod) populateSecondaryNetworkLogicalSwitchCache(fakeOvn *FakeOVN, oc
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 }
 
-func getExpectedDataPodsAndSwitchesForSecondaryNetwork(fakeOvn *FakeOVN, pods []testPod) []libovsdb.TestData {
+func getExpectedDataPodsAndSwitchesForSecondaryNetwork(fakeOvn *FakeOVN, pods []testPod, netInfo util.NetInfo) []libovsdb.TestData {
 	data := []libovsdb.TestData{}
 	for _, ocInfo := range fakeOvn.secondaryControllers {
 		nodeslsps := make(map[string][]string)
@@ -172,10 +172,13 @@ func getExpectedDataPodsAndSwitchesForSecondaryNetwork(fakeOvn *FakeOVN, pods []
 				nodeslsps[switchName] = append(nodeslsps[switchName], lspUUID)
 			}
 			data = append(data, &nbdb.LogicalSwitch{
-				UUID:        switchName + "-UUID",
-				Name:        switchName,
-				Ports:       nodeslsps[switchName],
-				ExternalIDs: map[string]string{ovntypes.NetworkExternalID: ocInfo.bnc.GetNetworkName()},
+				UUID:  switchName + "-UUID",
+				Name:  switchName,
+				Ports: nodeslsps[switchName],
+				ExternalIDs: map[string]string{
+					ovntypes.NetworkExternalID:     ocInfo.bnc.GetNetworkName(),
+					ovntypes.NetworkRoleExternalID: getNetworkRole(netInfo),
+				},
 			})
 		}
 	}
@@ -264,15 +267,21 @@ var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
 		switch topology {
 		case ovntypes.Layer2Topology:
 			initialDB.NBData = append(initialDB.NBData, &nbdb.LogicalSwitch{
-				Name:        netInfo.GetNetworkScopedName(ovntypes.OVNLayer2Switch),
-				UUID:        netInfo.GetNetworkScopedName(ovntypes.OVNLayer2Switch) + "_UUID",
-				ExternalIDs: map[string]string{ovntypes.NetworkExternalID: secondaryNetworkName},
+				Name: netInfo.GetNetworkScopedName(ovntypes.OVNLayer2Switch),
+				UUID: netInfo.GetNetworkScopedName(ovntypes.OVNLayer2Switch) + "_UUID",
+				ExternalIDs: map[string]string{
+					ovntypes.NetworkExternalID:     secondaryNetworkName,
+					ovntypes.NetworkRoleExternalID: getNetworkRole(netInfo),
+				},
 			})
 		case ovntypes.LocalnetTopology:
 			initialDB.NBData = append(initialDB.NBData, &nbdb.LogicalSwitch{
-				Name:        netInfo.GetNetworkScopedName(ovntypes.OVNLocalnetSwitch),
-				UUID:        netInfo.GetNetworkScopedName(ovntypes.OVNLocalnetSwitch) + "_UUID",
-				ExternalIDs: map[string]string{ovntypes.NetworkExternalID: secondaryNetworkName},
+				Name: netInfo.GetNetworkScopedName(ovntypes.OVNLocalnetSwitch),
+				UUID: netInfo.GetNetworkScopedName(ovntypes.OVNLocalnetSwitch) + "_UUID",
+				ExternalIDs: map[string]string{
+					ovntypes.NetworkExternalID:     secondaryNetworkName,
+					ovntypes.NetworkRoleExternalID: getNetworkRole(netInfo),
+				},
 			})
 		}
 	}
@@ -383,7 +392,7 @@ var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
 
 	getUpdatedInitialDB := func(tPods []testPod) []libovsdb.TestData {
 		updatedSwitchAndPods := getDefaultNetExpectedPodsAndSwitches(tPods, []string{nodeName})
-		secondarySwitchAndPods := getExpectedDataPodsAndSwitchesForSecondaryNetwork(fakeOvn, tPods)
+		secondarySwitchAndPods := getExpectedDataPodsAndSwitchesForSecondaryNetwork(fakeOvn, tPods, netInfo)
 		if len(secondarySwitchAndPods) != 0 {
 			updatedSwitchAndPods = append(updatedSwitchAndPods, secondarySwitchAndPods...)
 		}
@@ -535,7 +544,7 @@ var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
 						nodeSubnet = "10.1.1.0/24"
 					}
 
-					setSecondaryNetworkTestData(topology, subnets)
+					setSecondaryNetworkTestData(topology, subnets) // here I set network role if layer2
 
 					watchNodes := true
 					node := *newNode(nodeName, "192.168.126.202/24")

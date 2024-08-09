@@ -8,6 +8,7 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 )
 
 // getNonZeroLoadBalancerMutableFields builds a list of load balancer
@@ -136,4 +137,16 @@ func ListLoadBalancers(nbClient libovsdbclient.Client) ([]*nbdb.LoadBalancer, er
 	defer cancel()
 	err := nbClient.List(ctx, &lbs)
 	return lbs, err
+}
+
+type loadBalancerPredicate func(*nbdb.LoadBalancer) bool
+
+// FindLoadBalancersWithPredicate looks up loadbalancers from the cache
+// based on a given predicate
+func FindLoadBalancersWithPredicate(nbClient libovsdbclient.Client, p loadBalancerPredicate) ([]*nbdb.LoadBalancer, error) {
+	found := []*nbdb.LoadBalancer{}
+	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	defer cancel()
+	err := nbClient.WhereCache(p).List(ctx, &found)
+	return found, err
 }

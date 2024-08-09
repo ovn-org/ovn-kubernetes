@@ -1,6 +1,7 @@
 package testing
 
 import (
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	discovery "k8s.io/api/discovery/v1"
 	"k8s.io/utils/ptr"
 )
@@ -48,4 +49,19 @@ func MakeTerminatingNonServingEndpoint(node string, addresses ...string) discove
 		Addresses: addresses,
 		NodeName:  &node,
 	}
+}
+
+func MirrorEndpointSlice(defaultEndpointSlice *discovery.EndpointSlice, network string, keepEndpoints bool) *discovery.EndpointSlice {
+	mirror := defaultEndpointSlice.DeepCopy()
+	mirror.Name = defaultEndpointSlice.Name + "-mirrored"
+	mirror.Labels[discovery.LabelManagedBy] = types.EndpointSliceMirrorControllerName
+	mirror.Labels[types.LabelSourceEndpointSlice] = defaultEndpointSlice.Name
+	mirror.Labels[types.LabelUserDefinedEndpointSliceNetwork] = network
+	mirror.Labels[types.LabelUserDefinedServiceName] = defaultEndpointSlice.Labels[discovery.LabelServiceName]
+
+	if !keepEndpoints {
+		mirror.Endpoints = nil
+	}
+
+	return mirror
 }

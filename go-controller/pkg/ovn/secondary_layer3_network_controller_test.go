@@ -173,7 +173,7 @@ var _ = Describe("OVN Multi-Homed pod operations", func() {
 								fakeOvn,
 								[]testPod{podInfo},
 								expectationOptions...,
-							).expectedLogicalSwitchesAndPorts()...)))
+							).expectedLogicalSwitchesAndPorts(netInfo.isPrimary)...)))
 
 				return nil
 			}
@@ -274,30 +274,42 @@ func newMultiHomedPod(namespace, name, node, podIP string, multiHomingConfigs ..
 
 func namespacedName(ns, name string) string { return fmt.Sprintf("%s/%s", ns, name) }
 
+func (sni *secondaryNetInfo) getNetworkRole() string {
+	return util.GetNetworkRole(sni.isPrimary)
+}
+
+func getNetworkRole(netInfo util.NetInfo) string {
+	return util.GetNetworkRole(netInfo.IsPrimaryNetwork())
+}
+
 func (sni *secondaryNetInfo) setupOVNDependencies(dbData *libovsdbtest.TestSetup) error {
 	netInfo, err := util.NewNetInfo(sni.netconf())
 	if err != nil {
 		return err
 	}
 
+	externalIDs := map[string]string{
+		ovntypes.NetworkExternalID:     sni.netName,
+		ovntypes.NetworkRoleExternalID: sni.getNetworkRole(),
+	}
 	switch sni.topology {
 	case ovntypes.Layer2Topology:
 		dbData.NBData = append(dbData.NBData, &nbdb.LogicalSwitch{
 			Name:        netInfo.GetNetworkScopedName(ovntypes.OVNLayer2Switch),
 			UUID:        netInfo.GetNetworkScopedName(ovntypes.OVNLayer2Switch) + "_UUID",
-			ExternalIDs: map[string]string{ovntypes.NetworkExternalID: sni.netName},
+			ExternalIDs: externalIDs,
 		})
 	case ovntypes.Layer3Topology:
 		dbData.NBData = append(dbData.NBData, &nbdb.LogicalSwitch{
 			Name:        netInfo.GetNetworkScopedName(nodeName),
 			UUID:        netInfo.GetNetworkScopedName(nodeName) + "_UUID",
-			ExternalIDs: map[string]string{ovntypes.NetworkExternalID: sni.netName},
+			ExternalIDs: externalIDs,
 		})
 	case ovntypes.LocalnetTopology:
 		dbData.NBData = append(dbData.NBData, &nbdb.LogicalSwitch{
 			Name:        netInfo.GetNetworkScopedName(ovntypes.OVNLocalnetSwitch),
 			UUID:        netInfo.GetNetworkScopedName(ovntypes.OVNLocalnetSwitch) + "_UUID",
-			ExternalIDs: map[string]string{ovntypes.NetworkExternalID: sni.netName},
+			ExternalIDs: externalIDs,
 		})
 	default:
 		return fmt.Errorf("missing topology in the network configuration: %v", sni)
@@ -499,10 +511,11 @@ func expectedGWRouterPlusNATAndStaticRoutes(
 			Name: gwRouterName,
 			UUID: gwRouterName + "-UUID",
 			ExternalIDs: map[string]string{
-				ovntypes.NetworkExternalID:  netInfo.GetNetworkName(),
-				ovntypes.TopologyExternalID: netInfo.TopologyType(),
-				"physical_ip":               hostPhysicalIP,
-				"physical_ips":              strings.Join(hostIPs, ","),
+				ovntypes.NetworkExternalID:     netInfo.GetNetworkName(),
+				ovntypes.NetworkRoleExternalID: getNetworkRole(netInfo),
+				ovntypes.TopologyExternalID:    netInfo.TopologyType(),
+				"physical_ip":                  hostPhysicalIP,
+				"physical_ips":                 strings.Join(hostIPs, ","),
 			},
 			Options:      gwRouterOptions(gwConfig),
 			Ports:        []string{gwRouterToJoinLRPUUID, gwRouterToExtLRPUUID},
@@ -561,8 +574,8 @@ func expectedLogicalRouterPort(lrpName string, netInfo util.NetInfo, options map
 		MAC:      mac,
 		Options:  options,
 		ExternalIDs: map[string]string{
-			"k8s.ovn.org/topology": netInfo.TopologyType(),
-			"k8s.ovn.org/network":  netInfo.GetNetworkName(),
+			ovntypes.TopologyExternalID: netInfo.TopologyType(),
+			ovntypes.NetworkExternalID:  netInfo.GetNetworkName(),
 		},
 	}
 }
@@ -624,8 +637,8 @@ func expectedGRStaticRoute(uuid, ipPrefix, nextHop string, policy *nbdb.LogicalR
 		Nexthop:    nextHop,
 		Policy:     policy,
 		ExternalIDs: map[string]string{
-			"k8s.ovn.org/network":  "isolatednet",
-			"k8s.ovn.org/topology": "layer3",
+			ovntypes.NetworkExternalID:  "isolatednet",
+			ovntypes.TopologyExternalID: "layer3",
 		},
 	}
 }
@@ -684,7 +697,7 @@ func expectedExternalSwitchAndLSPs(netInfo util.NetInfo, gwConfig util.L3Gateway
 		&nbdb.LogicalSwitch{
 			UUID:        "ext-UUID",
 			Name:        netInfo.GetNetworkScopedExtSwitchName(nodeName),
-			ExternalIDs: standardNonDefaultNetworkExtIDs(netInfo),
+			ExternalIDs: standardNonDefaultNetworkExtIDsForLogicalSwitch(netInfo),
 			Ports:       []string{port1UUID, port2UUID},
 		},
 		&nbdb.LogicalSwitchPort{
@@ -767,9 +780,15 @@ func gwRouterOptions(gwConfig util.L3GatewayConfig) map[string]string {
 
 func standardNonDefaultNetworkExtIDs(netInfo util.NetInfo) map[string]string {
 	return map[string]string{
-		"k8s.ovn.org/topology": netInfo.TopologyType(),
-		"k8s.ovn.org/network":  netInfo.GetNetworkName(),
+		ovntypes.TopologyExternalID: netInfo.TopologyType(),
+		ovntypes.NetworkExternalID:  netInfo.GetNetworkName(),
 	}
+}
+
+func standardNonDefaultNetworkExtIDsForLogicalSwitch(netInfo util.NetInfo) map[string]string {
+	externalIDs := standardNonDefaultNetworkExtIDs(netInfo)
+	externalIDs[ovntypes.NetworkRoleExternalID] = getNetworkRole(netInfo)
+	return externalIDs
 }
 
 func minimalFeatureConfig() *config.OVNKubernetesFeatureConfig {

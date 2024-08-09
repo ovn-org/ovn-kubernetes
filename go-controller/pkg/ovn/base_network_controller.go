@@ -24,6 +24,7 @@ import (
 	ovnretry "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
@@ -322,13 +323,8 @@ func (bnc *BaseNetworkController) createNodeLogicalSwitch(nodeName string, hostS
 	logicalSwitch := nbdb.LogicalSwitch{
 		Name: switchName,
 	}
-	if bnc.IsSecondary() {
-		logicalSwitch.ExternalIDs = map[string]string{
-			types.NetworkExternalID:  bnc.GetNetworkName(),
-			types.TopologyExternalID: bnc.TopologyType(),
-		}
-	}
 
+	logicalSwitch.ExternalIDs = util.GenerateExternalIDsForSwitchOrRouter(bnc.NetInfo)
 	var v4Gateway, v6Gateway net.IP
 	logicalSwitch.OtherConfig = map[string]string{}
 	for _, hostSubnet := range hostSubnets {
@@ -762,10 +758,10 @@ func (bnc *BaseNetworkController) isLocalZoneNode(node *kapi.Node) bool {
 
 // getActiveNetworkForNamespace returns the active network for the given namespace
 // and is a wrapper around util.GetActiveNetworkForNamespace
-func (bnc *BaseNetworkController) getActiveNetworkForNamespace(namespace string) (util.NetInfo, error) {
+func (cnci *CommonNetworkControllerInfo) getActiveNetworkForNamespace(namespace string) (util.NetInfo, error) {
 	var nadLister nadlister.NetworkAttachmentDefinitionLister
 	if util.IsNetworkSegmentationSupportEnabled() {
-		nadLister = bnc.watchFactory.NADInformer().Lister()
+		nadLister = cnci.watchFactory.NADInformer().Lister()
 	}
 	return util.GetActiveNetworkForNamespace(namespace, nadLister)
 }
@@ -898,4 +894,41 @@ func (bnc *BaseNetworkController) findMigratablePodIPsForSubnets(subnets []*net.
 		}
 	}
 	return ipList, nil
+}
+
+func initLoadBalancerGroups(nbClient libovsdbclient.Client, netInfo util.NetInfo) (
+	clusterLoadBalancerGroupUUID, switchLoadBalancerGroupUUID, routerLoadBalancerGroupUUID string, err error) {
+
+	loadBalancerGroupName := netInfo.GetNetworkScopedLoadBalancerGroupName(ovntypes.ClusterLBGroupName)
+	loadBalancerGroup := nbdb.LoadBalancerGroup{
+		Name: loadBalancerGroupName,
+	}
+	err = libovsdbops.CreateOrUpdateLoadBalancerGroup(nbClient, &loadBalancerGroup)
+	if err != nil {
+		klog.Errorf("Error creating cluster-wide load balancer group %s: %v", loadBalancerGroupName, err)
+		return
+	}
+	clusterLoadBalancerGroupUUID = loadBalancerGroup.UUID
+	loadBalancerGroupName = netInfo.GetNetworkScopedLoadBalancerGroupName(ovntypes.ClusterSwitchLBGroupName)
+	loadBalancerGroup = nbdb.LoadBalancerGroup{
+		Name: loadBalancerGroupName,
+	}
+	err = libovsdbops.CreateOrUpdateLoadBalancerGroup(nbClient, &loadBalancerGroup)
+	if err != nil {
+		klog.Errorf("Error creating cluster-wide switch load balancer group %s: %v", loadBalancerGroupName, err)
+		return
+	}
+	switchLoadBalancerGroupUUID = loadBalancerGroup.UUID
+
+	loadBalancerGroupName = netInfo.GetNetworkScopedLoadBalancerGroupName(ovntypes.ClusterRouterLBGroupName)
+	loadBalancerGroup = nbdb.LoadBalancerGroup{
+		Name: loadBalancerGroupName,
+	}
+	err = libovsdbops.CreateOrUpdateLoadBalancerGroup(nbClient, &loadBalancerGroup)
+	if err != nil {
+		klog.Errorf("Error creating cluster-wide router load balancer group %s: %v", loadBalancerGroupName, err)
+		return
+	}
+	routerLoadBalancerGroupUUID = loadBalancerGroup.UUID
+	return
 }
