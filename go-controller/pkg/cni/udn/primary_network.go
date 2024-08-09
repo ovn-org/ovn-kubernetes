@@ -64,10 +64,14 @@ func (p *UserDefinedPrimaryNetwork) MTU() int {
 	return p.activeNetwork.MTU()
 }
 
+// Found will return true if a primary UDN is configured for this pod's
+// context
 func (p *UserDefinedPrimaryNetwork) Found() bool {
 	return p.annotation != nil && p.activeNetwork != nil
 }
 
+// WaitForPrimaryAnnotationFn wrap the annotCondFn with a function that will
+// also call "Ensure" to check for UDN primary network
 func (p *UserDefinedPrimaryNetwork) WaitForPrimaryAnnotationFn(namespace string, annotCondFn podAnnotWaitCond) podAnnotWaitCond {
 	return func(annotations map[string]string, nadName string) (*util.PodAnnotation, bool) {
 		annotation, isReady := annotCondFn(annotations, nadName)
@@ -82,10 +86,16 @@ func (p *UserDefinedPrimaryNetwork) WaitForPrimaryAnnotationFn(namespace string,
 	}
 }
 
+// Ensure method filter out non default pod network operations and then look
+// for a primary non default pod network at ovn pod annotations and for the
+// primary UDN nad, if non of those are found it returns an error
 func (p *UserDefinedPrimaryNetwork) Ensure(namespace string, annotations map[string]string, nadName string) error {
 	return p.ensure(namespace, annotations, nadName, nil /* parse annotation */)
 }
 
+// ensure method filter out non default pod network operations and then look
+// for a primary non default pod network at ovn pod annotations and for the
+// primary UDN nad, if non of those are found it returns an error
 func (p *UserDefinedPrimaryNetwork) ensure(namespace string, annotations map[string]string, nadName string, annotation *util.PodAnnotation) error {
 	// non default network is not related to primary UDNs
 	if nadName != types.DefaultNetworkName {
