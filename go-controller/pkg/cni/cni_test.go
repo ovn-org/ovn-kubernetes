@@ -27,9 +27,11 @@ import (
 
 type podRequestInterfaceOpsStub struct {
 	unconfiguredInterfaces []*PodInterfaceInfo
+	configuredInterfaces   []*PodInterfaceInfo
 }
 
 func (stub *podRequestInterfaceOpsStub) ConfigureInterface(pr *PodRequest, getter PodInfoGetter, ifInfo *PodInterfaceInfo) ([]*cnitypes100.Interface, error) {
+	stub.configuredInterfaces = append(stub.configuredInterfaces, ifInfo)
 	return nil, nil
 }
 func (stub *podRequestInterfaceOpsStub) UnconfigureInterface(pr *PodRequest, ifInfo *PodInterfaceInfo) error {
@@ -39,19 +41,14 @@ func (stub *podRequestInterfaceOpsStub) UnconfigureInterface(pr *PodRequest, ifI
 
 var _ = Describe("Network Segmentation", func() {
 	var (
-		fakeClientset            *fake.Clientset
-		pr                       PodRequest
-		pod                      *v1.Pod
-		podLister                v1mocks.PodLister
-		podNamespaceLister       v1mocks.PodNamespaceLister
-		nadLister                v1nadmocks.NetworkAttachmentDefinitionLister
-		clientSet                *ClientSet
-		kubeAuth                 *KubeAPIAuth
-		obtainedPodIterfaceInfos []*PodInterfaceInfo
-		getCNIResultStub         = func(request *PodRequest, getter PodInfoGetter, podInterfaceInfo *PodInterfaceInfo) (*cnitypes100.Result, error) {
-			obtainedPodIterfaceInfos = append(obtainedPodIterfaceInfos, podInterfaceInfo)
-			return nil, nil
-		}
+		fakeClientset                                 *fake.Clientset
+		pr                                            PodRequest
+		pod                                           *v1.Pod
+		podLister                                     v1mocks.PodLister
+		podNamespaceLister                            v1mocks.PodNamespaceLister
+		nadLister                                     v1nadmocks.NetworkAttachmentDefinitionLister
+		clientSet                                     *ClientSet
+		kubeAuth                                      *KubeAPIAuth
 		prInterfaceOpsStub                            *podRequestInterfaceOpsStub
 		enableMultiNetwork, enableNetworkSegmentation bool
 	)
@@ -121,8 +118,8 @@ var _ = Describe("Network Segmentation", func() {
 		})
 		It("should not fail at cmdAdd", func() {
 			podNamespaceLister.On("Get", pr.PodName).Return(pod, nil)
-			Expect(pr.cmdAddWithGetCNIResultFunc(kubeAuth, clientSet, getCNIResultStub)).NotTo(BeNil())
-			Expect(obtainedPodIterfaceInfos).ToNot(BeEmpty())
+			Expect(pr.cmdAdd(kubeAuth, clientSet)).NotTo(BeNil())
+			Expect(prInterfaceOpsStub.configuredInterfaces).To(HaveLen(1))
 		})
 		It("should not fail at cmdDel", func() {
 			podNamespaceLister.On("Get", pr.PodName).Return(pod, nil)
@@ -147,8 +144,8 @@ var _ = Describe("Network Segmentation", func() {
 		})
 		It("should not fail at cmdAdd", func() {
 			podNamespaceLister.On("Get", pr.PodName).Return(pod, nil)
-			Expect(pr.cmdAddWithGetCNIResultFunc(kubeAuth, clientSet, getCNIResultStub)).NotTo(BeNil())
-			Expect(obtainedPodIterfaceInfos).ToNot(BeEmpty())
+			Expect(pr.cmdAdd(kubeAuth, clientSet)).NotTo(BeNil())
+			Expect(prInterfaceOpsStub.configuredInterfaces).To(HaveLen(1))
 		})
 		It("should not fail at cmdDel", func() {
 			podNamespaceLister.On("Get", pr.PodName).Return(pod, nil)
@@ -182,8 +179,15 @@ var _ = Describe("Network Segmentation", func() {
 		})
 		It("should not fail at cmdAdd", func() {
 			podNamespaceLister.On("Get", pr.PodName).Return(pod, nil)
-			Expect(pr.cmdAddWithGetCNIResultFunc(kubeAuth, clientSet, getCNIResultStub)).NotTo(BeNil())
-			Expect(obtainedPodIterfaceInfos).ToNot(BeEmpty())
+			Expect(pr.cmdAdd(kubeAuth, clientSet)).NotTo(BeNil())
+			Expect(prInterfaceOpsStub.configuredInterfaces).To(HaveLen(2))
+			Expect(prInterfaceOpsStub.configuredInterfaces).To(ContainElement(
+				WithTransform(func(podInterfaceInfo *PodInterfaceInfo) string {
+					if podInterfaceInfo == nil {
+						return ""
+					}
+					return podInterfaceInfo.NetName
+				}, Equal("rednet"))))
 		})
 		It("should not fail at cmdDel", func() {
 			podNamespaceLister.On("Get", pr.PodName).Return(pod, nil)
