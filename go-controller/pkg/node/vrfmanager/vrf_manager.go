@@ -221,8 +221,12 @@ func (vrfm *Controller) sync(vrf vrf) error {
 	}
 	// Handover vrf routes into route manager to manage it.
 	for _, route := range vrf.routes {
-		vrfm.routeManager.Add(route)
+		err = vrfm.routeManager.AddRoute(route)
+		if err != nil {
+			klog.Errorf("Error adding route %s into VRF %s: %v", route.String(), vrf.name, err)
+		}
 	}
+
 	vrf.index = vrfLink.Attrs().Index
 	vrfm.vrfs[vrfLink.Attrs().Index] = vrf
 	return nil
@@ -322,10 +326,15 @@ func (vrfm *Controller) DeleteVRF(name string) (err error) {
 		klog.V(5).Infof("VRF Manager: VRF %s not found in cache for deletion", name)
 		return nil
 	}
+
 	// Request route manager to delete vrf associated routes.
 	for _, route := range vrf.routes {
-		vrfm.routeManager.Del(route)
+		err = vrfm.routeManager.DelRoute(route)
+		if err != nil {
+			klog.Errorf("Error removing route %s from VRF %s: %v", route.String(), vrf.name, err)
+		}
 	}
+
 	err = vrfm.deleteVRF(vrfLink)
 	if err != nil {
 		return fmt.Errorf("failed to delete VRF device %s, err: %w", vrf.name, err)
