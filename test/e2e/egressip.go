@@ -2535,7 +2535,8 @@ spec:
 	// 5. Check connectivity from a pod to an external "node" hosted on a secondary host network and verify the expected IP
 	ginkgo.It("[secondary-host-eip] uses VRF routing table if EIP assigned interface is VRF slave", func() {
 		var egressIP1 string
-		if utilnet.IsIPv6(net.ParseIP(egress1Node.nodeIP)) {
+		isV6Node := utilnet.IsIPv6(net.ParseIP(egress1Node.nodeIP))
+		if isV6Node {
 			egressIP1 = "2001:db8:abcd:1234:c001::"
 		} else {
 			egressIP1 = "10.10.10.100"
@@ -2559,6 +2560,35 @@ spec:
 		if egressInterface == "" {
 			framework.Failf("failed to find egress interface name")
 		}
+		// Enslaving a link to a VRF device may cause the removal of the non link local IPv6 address from the interface
+		// Look up the IP address, add it after enslaving the link and perform test.
+		restoreLinkIPv6AddrFn := func() error { return nil }
+		if isV6Node {
+			ginkgo.By("attempting to find IPv6 global address for secondary network")
+			address, err := runCommand(containerRuntime, "inspect", "-f",
+				fmt.Sprintf("'{{ (index .NetworkSettings.Networks \"%s\").GlobalIPv6Address }}'", secondaryNetworkName), egress1Node.name)
+			if err != nil {
+				framework.Failf("failed to get node %s IP address for network %s: %v", egress1Node.name, secondaryNetworkName, err)
+			}
+			address = strings.TrimSuffix(address, "\n")
+			address = strings.Trim(address, "'")
+			ginkgo.By(fmt.Sprintf("found address %q", address))
+			gomega.Expect(net.ParseIP(address)).ShouldNot(gomega.BeNil(), "IPv6 address for secondary network must be present")
+			prefix, err := runCommand(containerRuntime, "inspect", "-f",
+				fmt.Sprintf("'{{ (index .NetworkSettings.Networks \"%s\").GlobalIPv6PrefixLen }}'", secondaryNetworkName), egress1Node.name)
+			if err != nil {
+				framework.Failf("failed to get node %s IP prefix length for network %s: %v", egress1Node.name, secondaryNetworkName, err)
+			}
+			prefix = strings.TrimSuffix(prefix, "\n")
+			prefix = strings.Trim(prefix, "'")
+			_, err = strconv.Atoi(prefix)
+			gomega.Expect(err).ShouldNot(gomega.HaveOccurred(), "requires valid IPv6 address prefix")
+			restoreLinkIPv6AddrFn = func() error {
+				_, err := runCommand(containerRuntime, "exec", egress1Node.name, "ip", "-6", "address", "add",
+					fmt.Sprintf("%s/%s", address, prefix), "dev", egressInterface, "nodad", "scope", "global")
+				return err
+			}
+		}
 		_, err = runCommand(containerRuntime, "exec", egress1Node.name, "ip", "link", "add", vrfName, "type", "vrf", "table", vrfRoutingTable)
 		if err != nil {
 			framework.Failf("failed to add VRF to node %s: %v", egress1Node.name, err)
@@ -2567,6 +2597,9 @@ spec:
 		_, err = runCommand(containerRuntime, "exec", egress1Node.name, "ip", "link", "set", "dev", egressInterface, "master", vrfName)
 		if err != nil {
 			framework.Failf("failed to enslave interface %s to VRF %s node %s: %v", egressInterface, vrfName, egress1Node.name, err)
+		}
+		if isV6Node {
+			gomega.Expect(restoreLinkIPv6AddrFn()).Should(gomega.Succeed(), "restoring IPv6 address should succeed")
 		}
 		egressNodeAvailabilityHandler := egressNodeAvailabilityHandlerViaLabel{f}
 		ginkgo.By("1. Set one node as available for egress")
