@@ -18,6 +18,12 @@ import (
 	"github.com/vishvananda/netlink"
 )
 
+const (
+	// ctMarkUDNBase is the conntrack mark base value for user defined networks to use
+	// Each network gets its own mark == base + network-id
+	ctMarkUDNBase = 3
+)
+
 // UserDefinedNetworkGateway contains information
 // required to program a UDN at each node's
 // gateway.
@@ -34,10 +40,119 @@ type UserDefinedNetworkGateway struct {
 	// vrf manager that creates and manages vrfs for all UDNs
 	// used with a lock since its shared between all network controllers
 	vrfManager *vrfmanager.Controller
+	// masqCTMark holds the mark value for this network
+	// which is used for egress traffic in shared gateway mode
+	masqCTMark uint
+	// stores a copy of default network's gateway so that
+	// we can leverage it from here to program UDN flows on breth0
+	// Currently we use the openflowmanager and nodeIPManager from
+	// gateway, but maybe we could invoke our own instance of these
+	// for UDNs.
+	*gateway
 }
 
-func NewUserDefinedNetworkGateway(netInfo util.NetInfo, networkID int, node *v1.Node, nodeLister listers.NodeLister,
-	kubeInterface kube.Interface, vrfManager *vrfmanager.Controller) *UserDefinedNetworkGateway {
+// UTILS Needed for UDN (also leveraged for default netInfo) in openflowmanager
+
+func (c *openflowManager) getDefaultBridgePorts() ([]bridgeUDNConfiguration, string, string) {
+	return c.defaultBridge.getBridgePorts()
+}
+
+func (c *openflowManager) getExGwBridgePorts() ([]bridgeUDNConfiguration, string, string) {
+	return c.externalGatewayBridge.getBridgePorts()
+}
+
+func (c *openflowManager) addNetwork(nInfo util.NetInfo, masqCTMark uint) {
+	c.defaultBridge.addNetworkBridgeConfig(nInfo, masqCTMark)
+	if c.externalGatewayBridge != nil {
+		c.externalGatewayBridge.addNetworkBridgeConfig(nInfo, masqCTMark)
+	}
+}
+
+func (c *openflowManager) delNetwork(nInfo util.NetInfo) {
+	c.defaultBridge.delNetworkBridgeConfig(nInfo)
+	if c.externalGatewayBridge != nil {
+		c.externalGatewayBridge.delNetworkBridgeConfig(nInfo)
+	}
+}
+
+// UTILS Needed for UDN (also leveraged for default netInfo) in bridgeConfiguration
+
+func (b *bridgeConfiguration) getBridgePorts() ([]bridgeUDNConfiguration, string, string) {
+	b.Lock()
+	defer b.Unlock()
+	netConfigs := make([]bridgeUDNConfiguration, len(b.netConfig))
+	for _, netConfig := range b.netConfig {
+		netConfigs = append(netConfigs, *netConfig)
+	}
+	return netConfigs, b.uplinkName, b.ofPortPhys
+}
+
+func (b *bridgeConfiguration) addNetworkBridgeConfig(nInfo util.NetInfo, masqCTMark uint) {
+	b.Lock()
+	defer b.Unlock()
+
+	netName := nInfo.GetNetworkName()
+	patchPort := nInfo.GetNetworkScopedPatchPortName(b.bridgeName, b.nodeName)
+
+	var netConfig *bridgeUDNConfiguration
+	var found bool
+	netConfig, found = b.netConfig[netName]
+	if !found {
+		netConfig = &bridgeUDNConfiguration{
+			patchPort:  patchPort,
+			masqCTMark: fmt.Sprintf("0x%x", masqCTMark),
+		}
+
+		b.netConfig[netName] = netConfig
+	}
+
+	netConfig.patchPort = patchPort
+	netConfig.masqCTMark = fmt.Sprintf("0x%x", masqCTMark)
+}
+
+func (b *bridgeConfiguration) delNetworkBridgeConfig(nInfo util.NetInfo) {
+	b.Lock()
+	defer b.Unlock()
+
+	delete(b.netConfig, nInfo.GetNetworkName())
+}
+
+// bridgeUDNConfiguration holds the patchport and ctMark
+// information for a given network
+type bridgeUDNConfiguration struct {
+	patchPort   string
+	ofPortPatch string
+	masqCTMark  string
+}
+
+func (netConfig *bridgeUDNConfiguration) setBridgeNetworkOfPortsInternal() error {
+	ofportPatch, stderr, err := util.GetOVSOfPort("get", "Interface", netConfig.patchPort, "ofport")
+	if err != nil {
+		return fmt.Errorf("failed while waiting on patch port %q to be created by ovn-controller and "+
+			"while getting ofport. stderr: %v, error: %v", netConfig.patchPort, stderr, err)
+	}
+	netConfig.ofPortPatch = ofportPatch
+	return nil
+}
+
+func setBridgeNetworkOfPorts(bridge *bridgeConfiguration, netName string) error {
+	bridge.Lock()
+	defer bridge.Unlock()
+
+	netConfig, found := bridge.netConfig[netName]
+	if !found {
+		return fmt.Errorf("failed to find network %s configuration on bridge %s", netName, bridge.bridgeName)
+	}
+	return netConfig.setBridgeNetworkOfPortsInternal()
+}
+
+func NewUserDefinedNetworkGateway(netInfo util.NetInfo, networkID int, node *v1.Node,
+	nodeLister listers.NodeLister, kubeInterface kube.Interface, vrfManager *vrfmanager.Controller,
+	defaultNetworkGateway Gateway) (*UserDefinedNetworkGateway, error) {
+	gw, ok := defaultNetworkGateway.(*gateway)
+	if !ok {
+		return nil, fmt.Errorf("unable to deference default node network controller gateway object")
+	}
 	return &UserDefinedNetworkGateway{
 		NetInfo:       netInfo,
 		networkID:     networkID,
@@ -45,7 +160,10 @@ func NewUserDefinedNetworkGateway(netInfo util.NetInfo, networkID int, node *v1.
 		nodeLister:    nodeLister,
 		kubeInterface: kubeInterface,
 		vrfManager:    vrfManager,
-	}
+		// Generate a per network conntrack mark to be used for egress traffic.
+		masqCTMark: ctMarkUDNBase + uint(networkID),
+		gateway:    gw,
+	}, nil
 }
 
 // AddNetwork will be responsible to create all plumbings
@@ -61,6 +179,32 @@ func (udng *UserDefinedNetworkGateway) AddNetwork() error {
 	if err != nil {
 		return fmt.Errorf("could not add VRF %d for network %s, err: %v", vrfTableId, udng.GetNetworkName(), err)
 	}
+	if udng.openflowManager != nil {
+		udng.openflowManager.addNetwork(udng.NetInfo, udng.masqCTMark)
+
+		waiter := newStartupWaiter()
+		readyFunc := func() (bool, error) {
+			if err := setBridgeNetworkOfPorts(udng.openflowManager.defaultBridge, udng.GetNetworkName()); err != nil {
+				return false, fmt.Errorf("failed to set network %s's openflow ports for default bridge; error: %v", udng.GetNetworkName(), err)
+			}
+			if udng.openflowManager.externalGatewayBridge != nil {
+				if err := setBridgeNetworkOfPorts(udng.openflowManager.externalGatewayBridge, udng.GetNetworkName()); err != nil {
+					return false, fmt.Errorf("failed to set network %s's openflow ports for secondary bridge; error: %v", udng.GetNetworkName(), err)
+				}
+			}
+			return true, nil
+		}
+		postFunc := func() error {
+			if err := udng.Reconcile(); err != nil {
+				return fmt.Errorf("failed to reconcile flows on bridge for network %s; error: %v", udng.GetNetworkName(), err)
+			}
+			return nil
+		}
+		waiter.AddWait(readyFunc, postFunc)
+		if err := waiter.Wait(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -71,6 +215,12 @@ func (udng *UserDefinedNetworkGateway) DelNetwork() error {
 	err := udng.vrfManager.DeleteVRF(vrfDeviceName)
 	if err != nil {
 		return err
+	}
+	if udng.openflowManager != nil {
+		udng.openflowManager.delNetwork(udng.NetInfo)
+		if err := udng.Reconcile(); err != nil {
+			return fmt.Errorf("failed to reconcile default gateway for network %s, err: %v", udng.GetNetworkName(), err)
+		}
 	}
 	return udng.deleteUDNManagementPort()
 }
