@@ -28,6 +28,7 @@ kubeadmConfigPatches:
   apiServer:
     extraArgs:
       "v": "{{ cluster_log_level }}"
+      "enable-admission-plugins": "OwnerReferencesPermissionEnforcement"
   controllerManager:
     extraArgs:
       "v": "{{ cluster_log_level }}"
