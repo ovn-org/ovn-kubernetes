@@ -3,7 +3,6 @@ package ovn
 import (
 	"fmt"
 	"net"
-	"strings"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
@@ -110,6 +109,17 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPorts() 
 			if !ok {
 				continue
 			}
+
+			subnets := ocInfo.bnc.Subnets()
+			var (
+				subnet     config.CIDRNetworkEntry
+				hasSubnets bool
+			)
+			if len(subnets) > 0 {
+				subnet = subnets[0]
+				hasSubnets = true
+			}
+
 			for nad, portInfo := range podInfo.allportInfo {
 				portName := portInfo.portName
 				var lspUUID string
@@ -128,6 +138,7 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPorts() 
 				switch ocInfo.bnc.TopologyType() {
 				case ovntypes.Layer3Topology:
 					switchName = ocInfo.bnc.GetNetworkScopedName(pod.nodeName)
+					managementIP := managementPortIP(subnet)
 
 					switchToRouterPortName := "stor-" + switchName
 					switchToRouterPortUUID := switchToRouterPortName + "-UUID"
@@ -137,11 +148,11 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPorts() 
 					if em.gatewayConfig != nil {
 						mgmtPortName := "k8s-isolatednet_test-node"
 						mgmtPortUUID := mgmtPortName + "-UUID"
-						mgmtPort := &nbdb.LogicalSwitchPort{UUID: mgmtPortUUID, Name: mgmtPortName, Addresses: []string{"02:03:04:05:06:07 192.168.0.2"}}
+						mgmtPort := &nbdb.LogicalSwitchPort{UUID: mgmtPortUUID, Name: mgmtPortName, Addresses: []string{fmt.Sprintf("02:03:04:05:06:07 %s", managementIP)}}
 						data = append(data, mgmtPort)
 						nodeslsps[switchName] = append(nodeslsps[switchName], mgmtPortUUID)
 						const aclUUID = "acl1-UUID"
-						data = append(data, allowAllFromMgmtPort(aclUUID, "192.168.0.2"))
+						data = append(data, allowAllFromMgmtPort(aclUUID, managementIP.String()))
 						acls[switchName] = append(acls[switchName], aclUUID)
 					}
 				case ovntypes.Layer2Topology:
@@ -151,12 +162,13 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPorts() 
 				}
 				nodeslsps[switchName] = append(nodeslsps[switchName], lspUUID)
 			}
-			subnets := subnetsAsString(ocInfo.bnc.Subnets())
-			sn := subnets[0]
-			subnet := strings.TrimSuffix(sn, "/24")
-			otherConfig := map[string]string{
-				"exclude_ips": "192.168.0.2",
-				"subnet":      subnet,
+
+			var otherConfig map[string]string
+			if hasSubnets {
+				otherConfig = map[string]string{
+					"exclude_ips": managementPortIP(subnet).String(),
+					"subnet":      subnet.CIDR.String(),
+				}
 			}
 			data = append(data, &nbdb.LogicalSwitch{
 				UUID:        switchName + "-UUID",

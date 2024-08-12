@@ -689,6 +689,7 @@ func expectedLayer3EgressEntities(netInfo util.NetInfo, gwConfig util.L3GatewayC
 	rtosLRPUUID := rtosLRPName + "-UUID"
 	nodeIP := gwConfig.IPAddresses[0].IP.String()
 	networkIPv4Subnet := networkSubnet(netInfo)
+	subnet := netInfo.Subnets()[0] // egress requires subnets. So far, these helpers do not work for dual-stack
 
 	gatewayChassisUUID := fmt.Sprintf("%s-%s-UUID", rtosLRPName, gwConfig.ChassisID)
 	expectedEntities := []libovsdbtest.TestData{
@@ -703,8 +704,8 @@ func expectedLayer3EgressEntities(netInfo util.NetInfo, gwConfig util.L3GatewayC
 		&nbdb.LogicalRouterPort{UUID: rtosLRPUUID, Name: rtosLRPName, Networks: []string{"192.168.0.1/16"}, MAC: "0a:58:c0:a8:00:01", GatewayChassis: []string{gatewayChassisUUID}},
 		expectedGRStaticRoute(staticRouteUUID1, networkIPv4Subnet, gwRouterIPAddress().IP.String(), &nbdb.LogicalRouterStaticRoutePolicySrcIP, nil),
 		expectedGRStaticRoute(staticRouteUUID2, gwRouterIPAddress().IP.String(), gwRouterIPAddress().IP.String(), nil, nil),
-		expectedLogicalRouterPolicy(routerPolicyUUID1, netInfo, nodeName, nodeIP, managementPortIP().String()),
-		expectedLogicalRouterPolicy(routerPolicyUUID2, netInfo, nodeName, joinIPAddr, managementPortIP().String()),
+		expectedLogicalRouterPolicy(routerPolicyUUID1, netInfo, nodeName, nodeIP, managementPortIP(subnet).String()),
+		expectedLogicalRouterPolicy(routerPolicyUUID2, netInfo, nodeName, joinIPAddr, managementPortIP(subnet).String()),
 	}
 	return expectedEntities
 }
@@ -858,8 +859,8 @@ func gwRouterIPAddress() *net.IPNet {
 	}
 }
 
-func managementPortIP() net.IP {
-	return net.ParseIP("192.168.0.2")
+func managementPortIP(subnet config.CIDRNetworkEntry) net.IP {
+	return util.GetNodeManagementIfAddr(subnet.CIDR).IP
 }
 
 func networkSubnet(netInfo util.NetInfo) string {
