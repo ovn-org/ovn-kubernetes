@@ -8,14 +8,14 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"k8s.io/client-go/util/retry"
-	e2ekubectl "k8s.io/kubernetes/test/e2e/framework/kubectl"
-	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
 
 	v1 "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/util/retry"
 	"k8s.io/kubernetes/test/e2e/framework"
+	e2ekubectl "k8s.io/kubernetes/test/e2e/framework/kubectl"
+	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
 )
 
 const (
