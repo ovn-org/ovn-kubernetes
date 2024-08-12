@@ -88,7 +88,12 @@ func (c *Controller) getDefaultEndpointSliceKey(endpointSlice *v1.EndpointSlice)
 }
 
 func (c *Controller) enqueueEndpointSlice(obj interface{}) {
-	if key := c.getDefaultEndpointSliceKey(obj.(*v1.EndpointSlice)); key != "" {
+	eps, ok := obj.(*v1.EndpointSlice)
+	if !ok {
+		klog.Errorf("Enqueued non-endpointSlice object %+v, skipping", obj)
+		return
+	}
+	if key := c.getDefaultEndpointSliceKey(eps); key != "" {
 		c.queue.AddRateLimited(key)
 	}
 }
