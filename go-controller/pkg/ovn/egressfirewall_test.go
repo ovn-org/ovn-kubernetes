@@ -280,6 +280,9 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 
 	ginkgo.AfterEach(func() {
 		fakeOVN.shutdown()
+		if fakeOVN.controller.efNodeController != nil {
+			controller.Stop(fakeOVN.controller.efNodeController)
+		}
 	})
 
 	for _, gwMode := range []config.GatewayMode{config.GatewayModeLocal, config.GatewayModeShared} {
