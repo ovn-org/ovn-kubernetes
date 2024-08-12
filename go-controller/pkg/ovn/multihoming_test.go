@@ -160,6 +160,43 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPorts() 
 					}
 				case ovntypes.Layer2Topology:
 					switchName = ocInfo.bnc.GetNetworkScopedName(ovntypes.OVNLayer2Switch)
+					managementIP := managementPortIP(subnet)
+
+					if em.gatewayConfig != nil {
+						// there are multiple mgmt ports in the cluster, thus the ports must be scoped with the node name
+						mgmtPortName := managementPortName(ocInfo.bnc.GetNetworkScopedName(nodeName))
+						mgmtPortUUID := mgmtPortName + "-UUID"
+						mgmtPort := expectedManagementPort(mgmtPortName, managementIP.String())
+						data = append(data, mgmtPort)
+						nodeslsps[switchName] = append(nodeslsps[switchName], mgmtPortUUID)
+
+						// there are multiple GRs in the cluster, thus their names must be scoped with the node name
+						gwRouterName := fmt.Sprintf(
+							"%s%s",
+							ovntypes.GWRouterPrefix,
+							ocInfo.bnc.GetNetworkScopedName(nodeName),
+						)
+						networkSwitchToGWRouterLSPName := ovntypes.JoinSwitchToGWRouterPrefix + gwRouterName
+						networkSwitchToGWRouterLSPUUID := networkSwitchToGWRouterLSPName + "-UUID"
+
+						data = append(data, &nbdb.LogicalSwitchPort{
+							UUID:      networkSwitchToGWRouterLSPUUID,
+							Name:      networkSwitchToGWRouterLSPName,
+							Addresses: []string{"router"},
+							ExternalIDs: map[string]string{
+								"k8s.ovn.org/topology": ocInfo.bnc.TopologyType(),
+								"k8s.ovn.org/network":  ocInfo.bnc.GetNetworkName(),
+							},
+							Options: map[string]string{"router-port": ovntypes.GWRouterToJoinSwitchPrefix + gwRouterName},
+							Type:    "router",
+						})
+						nodeslsps[switchName] = append(nodeslsps[switchName], networkSwitchToGWRouterLSPUUID)
+
+						const aclUUID = "acl1-UUID"
+						data = append(data, allowAllFromMgmtPort(aclUUID, managementIP.String(), switchName))
+						acls[switchName] = append(acls[switchName], aclUUID)
+					}
+
 				case ovntypes.LocalnetTopology:
 					switchName = ocInfo.bnc.GetNetworkScopedName(ovntypes.OVNLocalnetSwitch)
 				}
