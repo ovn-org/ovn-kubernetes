@@ -514,9 +514,9 @@ var _ = Describe("Network Segmentation", func() {
 		const (
 			externalContainerName = "ovn-k-egress-test-helper"
 		)
-		var externalIpv4 string
+		var externalIpv4, externalIpv6 string
 		BeforeEach(func() {
-			externalIpv4, _ = createClusterExternalContainer(
+			externalIpv4, externalIpv6 = createClusterExternalContainer(
 				externalContainerName,
 				"registry.k8s.io/e2e-test-images/agnhost:2.45",
 				runExternalContainerCmd(),
@@ -562,9 +562,14 @@ var _ = Describe("Network Segmentation", func() {
 					return updatedPod.Status.Phase
 				}, 2*time.Minute, 6*time.Second).Should(Equal(v1.PodRunning))
 
-				By("asserting the *client* pod can contact the server located outside the cluster")
+				By("asserting the *client* pod can contact the server's v4 IP located outside the cluster")
 				Eventually(func() error {
 					return connectToServer(clientPodConfig, externalIpv4, port)
+				}, 2*time.Minute, 6*time.Second).Should(Succeed())
+
+				By("asserting the *client* pod can contact the server's v6 IP located outside the cluster")
+				Eventually(func() error {
+					return connectToServer(clientPodConfig, externalIpv6, port)
 				}, 2*time.Minute, 6*time.Second).Should(Succeed())
 			},
 			// FIXME(tssurya): Unskip when L2 egress support is done
@@ -572,16 +577,16 @@ var _ = Describe("Network Segmentation", func() {
 				networkAttachmentConfigParams{
 					name:     userDefinedNetworkName,
 					topology: "layer2",
-					cidr:     userDefinedNetworkIPv4Subnet,
+					cidr:     fmt.Sprintf("%s,%s", userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
 					role:     "primary",
 				},
 				*podConfig("client-pod"),
 			),
-			Entry("by one pod with a single IPv4 address over a layer3 network",
+			FEntry("by one pod with a single IPv4 address over a layer3 network",
 				networkAttachmentConfigParams{
 					name:     userDefinedNetworkName,
 					topology: "layer3",
-					cidr:     userDefinedNetworkIPv4Subnet,
+					cidr:     fmt.Sprintf("%s,%s", userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
 					role:     "primary",
 				},
 				*podConfig("client-pod"),
