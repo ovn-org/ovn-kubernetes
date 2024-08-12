@@ -741,14 +741,14 @@ func expectedGRStaticRoute(uuid, ipPrefix, nextHop string, policy *nbdb.LogicalR
 	}
 }
 
-func allowAllFromMgmtPort(aclUUID string, mgmtPortIP string) *nbdb.ACL {
+func allowAllFromMgmtPort(aclUUID string, mgmtPortIP string, switchName string) *nbdb.ACL {
 	meterName := "acl-logging"
 	return &nbdb.ACL{
 		UUID:      aclUUID,
 		Action:    "allow-related",
 		Direction: "to-lport",
 		ExternalIDs: map[string]string{
-			"k8s.ovn.org/name":             "isolatednet_test-node",
+			"k8s.ovn.org/name":             switchName,
 			"ip":                           mgmtPortIP,
 			"k8s.ovn.org/id":               fmt.Sprintf("isolatednet-network-controller:NetpolNode:isolatednet_test-node:%s", mgmtPortIP),
 			"k8s.ovn.org/owner-controller": "isolatednet-network-controller",

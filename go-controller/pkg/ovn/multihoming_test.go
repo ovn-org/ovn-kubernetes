@@ -146,13 +146,16 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPorts() 
 					nodeslsps[switchName] = append(nodeslsps[switchName], switchToRouterPortUUID)
 
 					if em.gatewayConfig != nil {
-						mgmtPortName := "k8s-isolatednet_test-node"
+						mgmtPortName := managementPortName(switchName)
 						mgmtPortUUID := mgmtPortName + "-UUID"
-						mgmtPort := &nbdb.LogicalSwitchPort{UUID: mgmtPortUUID, Name: mgmtPortName, Addresses: []string{fmt.Sprintf("02:03:04:05:06:07 %s", managementIP)}}
+						mgmtPort := expectedManagementPort(mgmtPortName, managementIP.String())
 						data = append(data, mgmtPort)
 						nodeslsps[switchName] = append(nodeslsps[switchName], mgmtPortUUID)
 						const aclUUID = "acl1-UUID"
-						data = append(data, allowAllFromMgmtPort(aclUUID, managementIP.String()))
+						data = append(
+							data,
+							allowAllFromMgmtPort(aclUUID, managementIP.String(), switchName),
+						)
 						acls[switchName] = append(acls[switchName], aclUUID)
 					}
 				case ovntypes.Layer2Topology:
@@ -240,4 +243,16 @@ func subnetsAsString(subnetInfo []config.CIDRNetworkEntry) []string {
 		subnets = append(subnets, cidr.String())
 	}
 	return subnets
+}
+
+func managementPortName(switchName string) string {
+	return fmt.Sprintf("k8s-%s", switchName)
+}
+
+func expectedManagementPort(portName string, ip string) *nbdb.LogicalSwitchPort {
+	return &nbdb.LogicalSwitchPort{
+		UUID:      portName + "-UUID",
+		Addresses: []string{fmt.Sprintf("02:03:04:05:06:07 %s", ip)},
+		Name:      portName,
+	}
 }
