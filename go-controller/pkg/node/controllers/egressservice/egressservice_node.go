@@ -67,12 +67,14 @@ type Controller struct {
 }
 
 type svcState struct {
-	v4LB   string           // IPv4 ingress of the service
-	v4Eps  sets.Set[string] // v4 endpoints that have an SNAT rule configured
-	v6LB   string           // IPv6 ingress of the service
-	v6Eps  sets.Set[string] // v6 endpoints that have an SNAT rule configured
-	net    string           // net corresponding to the spec.Network
-	netEps sets.Set[string] // All endpoints that have an ip rule configured
+	v4LB        string           // IPv4 ingress of the service
+	v4Eps       sets.Set[string] // v4 endpoints that have an SNAT rule configured
+	v6LB        string           // IPv6 ingress of the service
+	v6Eps       sets.Set[string] // v6 endpoints that have an SNAT rule configured
+	net         string           // net corresponding to the spec.Network
+	netEps      sets.Set[string] // All endpoints that have an ip rule configured
+	v4NodePorts sets.Set[int32]  // All v4 nodeports that have an ip rule configured, relevant when ETP=Local
+	v6NodePorts sets.Set[int32]  // All v6 nodeports that have an ip rule configured, relevant when ETP=Local
 
 	stale bool
 }
@@ -227,6 +229,9 @@ func (c *Controller) repair() error {
 	// all the current cluster ips to valid egress services keys
 	cipsToSvcKey := map[string]string{}
 
+	// all the current node ports of ETP=Local services to valid egress services keys
+	nodePortsToSvcKey := map[int32]string{}
+
 	services, err := c.serviceLister.List(labels.Everything())
 	if err != nil {
 		return err
@@ -293,19 +298,31 @@ func (c *Controller) repair() error {
 			cipsToSvcKey[cip] = key
 		}
 
+		// We care about node ports only when the return traffic involves the MASQUERADE IPs.
+		if svc.Spec.ExternalTrafficPolicy == corev1.ServiceExternalTrafficPolicyLocal {
+			for _, p := range svc.Spec.Ports {
+				if p.NodePort == 0 {
+					continue
+				}
+				nodePortsToSvcKey[p.NodePort] = key
+			}
+		}
+
 		c.services[key] = &svcState{
-			v4LB:   v4LB,
-			v4Eps:  sets.New[string](),
-			v6LB:   v6LB,
-			v6Eps:  sets.New[string](),
-			net:    es.Spec.Network,
-			netEps: sets.New[string](),
-			stale:  false,
+			v4LB:        v4LB,
+			v4Eps:       sets.New[string](),
+			v6LB:        v6LB,
+			v6Eps:       sets.New[string](),
+			net:         es.Spec.Network,
+			netEps:      sets.New[string](),
+			v4NodePorts: sets.New[int32](),
+			v6NodePorts: sets.New[int32](),
+			stale:       false,
 		}
 	}
 
 	errorList := []error{}
-	err = c.repairIPRules(v4EndpointsToSvcKey, v6EndpointsToSvcKey, cipsToSvcKey)
+	err = c.repairIPRules(v4EndpointsToSvcKey, v6EndpointsToSvcKey, cipsToSvcKey, nodePortsToSvcKey)
 	if err != nil {
 		errorList = append(errorList, err)
 	}
@@ -322,10 +339,11 @@ func (c *Controller) repair() error {
 // Valid ip rules in this context are those that belong to an existing EgressService, their
 // src points to either an existing ep or cip of the service and the routing table matches the
 // Network field of the service.
-func (c *Controller) repairIPRules(v4EpsToServices, v6EpsToServices, cipsToServices map[string]string) error {
+func (c *Controller) repairIPRules(v4EpsToServices, v6EpsToServices, cipsToServices map[string]string, nodePortsToServices map[int32]string) error {
 	type IPRule struct {
 		Priority int32  `json:"priority"`
 		Src      string `json:"src"`
+		SrcPort  int32  `json:"sport"`
 		Table    string `json:"table"`
 	}
 
@@ -336,8 +354,6 @@ func (c *Controller) repairIPRules(v4EpsToServices, v6EpsToServices, cipsToServi
 		}
 
 		allIPRules := []IPRule{}
-		ipRulesToDelete := []IPRule{}
-
 		stdout, stderr, err := util.RunIP(family, "--json", "rule", "show")
 		if err != nil {
 			return fmt.Errorf("could not list %s rules - stdout: %s, stderr: %s, err: %v", family, stdout, stderr, err)
@@ -348,12 +364,24 @@ func (c *Controller) repairIPRules(v4EpsToServices, v6EpsToServices, cipsToServi
 			return err
 		}
 
+		currEpsIPRules := []IPRule{}
+		currNodePortIPRules := []IPRule{}
 		for _, rule := range allIPRules {
 			if rule.Priority != IPRulePriority {
 				// the priority isn't the fixed one for the controller
 				continue
 			}
 
+			if rule.SrcPort != 0 { // we configure source port only for ETP=Local NodePorts
+				currNodePortIPRules = append(currNodePortIPRules, rule)
+				continue
+			}
+
+			currEpsIPRules = append(currEpsIPRules, rule)
+		}
+
+		ipRulesToDelete := []IPRule{}
+		for _, rule := range currEpsIPRules {
 			svcKey, found := epsToSvcKey[rule.Src]
 			if !found {
 				svcKey, found = cipsToServices[rule.Src]
@@ -381,9 +409,50 @@ func (c *Controller) repairIPRules(v4EpsToServices, v6EpsToServices, cipsToServi
 			state.netEps.Insert(rule.Src)
 		}
 
+		nodePortIPRulesToDelete := []IPRule{}
+		for _, rule := range currNodePortIPRules {
+			svcKey, found := nodePortsToServices[rule.SrcPort]
+			if !found {
+				nodePortIPRulesToDelete = append(nodePortIPRulesToDelete, rule)
+				continue
+			}
+			srcIsV4Masquerade := rule.Src == config.Gateway.MasqueradeIPs.V4HostETPLocalMasqueradeIP.String()
+			srcIsV6Masquerade := rule.Src == config.Gateway.MasqueradeIPs.V6HostETPLocalMasqueradeIP.String()
+			if !srcIsV4Masquerade && !srcIsV6Masquerade {
+				nodePortIPRulesToDelete = append(nodePortIPRulesToDelete, rule)
+				continue
+			}
+
+			state := c.services[svcKey]
+			if state == nil {
+				// the rule belongs to a service that is no longer valid
+				nodePortIPRulesToDelete = append(nodePortIPRulesToDelete, rule)
+				continue
+			}
+
+			if state.net != rule.Table {
+				// the rule points to the wrong routing table
+				nodePortIPRulesToDelete = append(nodePortIPRulesToDelete, rule)
+				continue
+			}
+
+			if srcIsV4Masquerade {
+				state.v4NodePorts.Insert(rule.SrcPort)
+				continue
+			}
+			state.v6NodePorts.Insert(rule.SrcPort)
+		}
+
 		errorList := []error{}
 		for _, rule := range ipRulesToDelete {
 			err := deleteIPRule(family, rule.Priority, rule.Src, rule.Table)
+			if err != nil {
+				errorList = append(errorList, err)
+			}
+		}
+
+		for _, rule := range nodePortIPRulesToDelete {
+			err := deleteNodePortIPRule(family, rule.Priority, rule.Src, rule.SrcPort, rule.Table)
 			if err != nil {
 				errorList = append(errorList, err)
 			}
@@ -711,10 +780,12 @@ func (c *Controller) syncEgressService(key string) error {
 
 	if cachedState == nil {
 		cachedState = &svcState{
-			v4Eps:  sets.New[string](),
-			v6Eps:  sets.New[string](),
-			netEps: sets.New[string](),
-			stale:  false,
+			v4Eps:       sets.New[string](),
+			v6Eps:       sets.New[string](),
+			netEps:      sets.New[string](),
+			v4NodePorts: sets.New[int32](),
+			v6NodePorts: sets.New[int32](),
+			stale:       false,
 		}
 		c.services[key] = cachedState
 	}
@@ -822,6 +893,72 @@ func (c *Controller) syncEgressService(key string) error {
 		cachedState.netEps.Delete(ip)
 	}
 
+	// Now we create the ip rules for the MASQUERADE+NodePort.
+	// This is needed only when ETP=Local, and its purpose is to ensure
+	// that reply for ingress traffic uses the correct network.
+
+	v4NodePortIPRulesToAdd := sets.New[int32]()
+	v6NodePortIPRulesToAdd := sets.New[int32]()
+	v4NodePortIPRulesToDelete := cachedState.v4NodePorts
+	v6NodePortIPRulesToDelete := cachedState.v6NodePorts
+	if svc.Spec.ExternalTrafficPolicy == corev1.ServiceExternalTrafficPolicyLocal {
+		allNodePorts := sets.New[int32]()
+		for _, p := range svc.Spec.Ports {
+			allNodePorts.Insert(p.NodePort)
+		}
+
+		hasV4Ingress, hasV6Ingress := false, false
+		for _, ip := range svc.Status.LoadBalancer.Ingress {
+			if utilnet.IsIPv4String(ip.IP) {
+				hasV4Ingress = true
+				continue
+			}
+			hasV6Ingress = true
+		}
+
+		if hasV4Ingress {
+			v4NodePortIPRulesToAdd = allNodePorts.Difference(cachedState.v4NodePorts)
+			v4NodePortIPRulesToDelete = cachedState.v4NodePorts.Difference(allNodePorts)
+		}
+
+		if hasV6Ingress {
+			v6NodePortIPRulesToAdd = allNodePorts.Difference(cachedState.v6NodePorts)
+			v6NodePortIPRulesToDelete = cachedState.v6NodePorts.Difference(allNodePorts)
+		}
+	}
+
+	for port := range v4NodePortIPRulesToAdd {
+		err := createNodePortIPRule("-4", IPRulePriority, config.Gateway.MasqueradeIPs.V4HostETPLocalMasqueradeIP.String(), port, cachedState.net)
+		if err != nil {
+			return err
+		}
+		cachedState.v4NodePorts.Insert(port)
+	}
+
+	for port := range v4NodePortIPRulesToDelete {
+		err := deleteNodePortIPRule("-4", IPRulePriority, config.Gateway.MasqueradeIPs.V4HostETPLocalMasqueradeIP.String(), port, cachedState.net)
+		if err != nil {
+			return err
+		}
+		cachedState.v4NodePorts.Delete(port)
+	}
+
+	for port := range v6NodePortIPRulesToAdd {
+		err := createNodePortIPRule("-6", IPRulePriority, config.Gateway.MasqueradeIPs.V6HostETPLocalMasqueradeIP.String(), port, cachedState.net)
+		if err != nil {
+			return err
+		}
+		cachedState.v6NodePorts.Insert(port)
+	}
+
+	for port := range v6NodePortIPRulesToDelete {
+		err := deleteNodePortIPRule("-6", IPRulePriority, config.Gateway.MasqueradeIPs.V6HostETPLocalMasqueradeIP.String(), port, cachedState.net)
+		if err != nil {
+			return err
+		}
+		cachedState.v6NodePorts.Delete(port)
+	}
+
 	return nil
 }
 
@@ -891,7 +1028,7 @@ func (c *Controller) clearServiceSNATRules(key string, state *svcState) error {
 	return nil
 }
 
-// Clears all of the FWMark rules of the service.
+// Clears all of the ip rules of the service.
 func (c *Controller) clearServiceIPRules(state *svcState) error {
 	errorList := []error{}
 	for ip := range state.netEps {
@@ -907,6 +1044,23 @@ func (c *Controller) clearServiceIPRules(state *svcState) error {
 		}
 
 		state.netEps.Delete(ip)
+	}
+
+	for port := range state.v4NodePorts {
+		err := deleteNodePortIPRule("-4", IPRulePriority, config.Gateway.MasqueradeIPs.V4HostETPLocalMasqueradeIP.String(), port, state.net)
+		if err != nil {
+			errorList = append(errorList, err)
+			continue
+		}
+		state.v4NodePorts.Delete(port)
+	}
+	for port := range state.v6NodePorts {
+		err := deleteNodePortIPRule("-6", IPRulePriority, config.Gateway.MasqueradeIPs.V6HostETPLocalMasqueradeIP.String(), port, state.net)
+		if err != nil {
+			errorList = append(errorList, err)
+			continue
+		}
+		state.v6NodePorts.Delete(port)
 	}
 
 	return utilerrors.Join(errorList...)
@@ -950,12 +1104,36 @@ func createIPRule(family string, priority int32, src, table string) error {
 	return nil
 }
 
+// Create ip rule with the given fields.
+func createNodePortIPRule(family string, priority int32, src string, srcPort int32, table string) error {
+	prio := fmt.Sprintf("%d", priority)
+	sPort := fmt.Sprintf("%d", srcPort)
+	stdout, stderr, err := util.RunIP(family, "rule", "add", "prio", prio, "from", src, "sport", sPort, "table", table)
+	if err != nil && !strings.Contains(stderr, "File exists") {
+		return fmt.Errorf("could not add rule for src %s sport %s table %s - stdout: %s, stderr: %s, err: %v", src, sPort, table, stdout, stderr, err)
+	}
+
+	return nil
+}
+
 // Delete ip rule with the given fields.
 func deleteIPRule(family string, priority int32, src, table string) error {
 	prio := fmt.Sprintf("%d", priority)
 	stdout, stderr, err := util.RunIP(family, "rule", "del", "prio", prio, "from", src, "table", table)
 	if err != nil && !strings.Contains(stderr, "No such file or directory") {
 		return fmt.Errorf("could not delete rule for src %s table %s - stdout: %s, stderr: %s, err: %v", src, table, stdout, stderr, err)
+	}
+
+	return nil
+}
+
+// Delete ip rule with the given fields.
+func deleteNodePortIPRule(family string, priority int32, src string, srcPort int32, table string) error {
+	prio := fmt.Sprintf("%d", priority)
+	sPort := fmt.Sprintf("%d", srcPort)
+	stdout, stderr, err := util.RunIP(family, "rule", "del", "prio", prio, "from", src, "sport", sPort, "table", table)
+	if err != nil && !strings.Contains(stderr, "No such file or directory") {
+		return fmt.Errorf("could not delete rule for src %s sport %s table %s - stdout: %s, stderr: %s, err: %v", src, sPort, table, stdout, stderr, err)
 	}
 
 	return nil
