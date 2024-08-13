@@ -39,7 +39,6 @@ import (
 )
 
 const (
-	vxlanPort            = "4789" // IANA assigned VXLAN UDP port - rfc7348
 	podNetworkAnnotation = "k8s.ovn.org/pod-networks"
 	retryInterval        = 1 * time.Second  // polling interval timer
 	retryTimeout         = 40 * time.Second // polling timeout
@@ -143,7 +142,7 @@ const (
 )
 
 // Place the workload on the specified node to test external connectivity
-func checkConnectivityPingToHost(f *framework.Framework, nodeName, podName, host string, pingCmd pingCommand, timeout int, exGw bool) error {
+func checkConnectivityPingToHost(f *framework.Framework, nodeName, podName, host string, pingCmd pingCommand, timeout int) error {
 	contName := fmt.Sprintf("%s-container", podName)
 	// Ping options are:
 	// -c sends 3 pings
@@ -644,6 +643,7 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 	var svcname = "nettest"
 
 	f := wrappedTestFramework(svcname)
+
 	var (
 		extDNSIP              string
 		numControlPlanePods   int
@@ -683,7 +683,6 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 		if IsIPv6Cluster(f.ClientSet) {
 			extDNSIP = "2001:4860:4860::8888"
 		}
-
 	})
 
 	ginkgo.It("should provide Internet connection continuously when ovnkube-node pod is killed", func() {
@@ -751,7 +750,7 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 		e2epod.DeletePodWithWaitByName(context.TODO(), f.ClientSet, podName, ovnNs)
 		framework.Logf("Deleted ovnkube control plane pod %q", podName)
 
-		ginkgo.By("Ensring there were no connectivity errors")
+		ginkgo.By("Ensuring there were no connectivity errors")
 		framework.ExpectNoError(<-errChan)
 
 		err = waitClusterHealthy(f, numControlPlanePods, controlPlanePodName)
@@ -965,7 +964,7 @@ var _ = ginkgo.Describe("test e2e pod connectivity to host addresses", func() {
 	ginkgo.It("Should validate connectivity from a pod to a non-node host address on same node", func() {
 		// Spin up another pod that attempts to reach the previously started pod on separate nodes
 		framework.ExpectNoError(
-			checkConnectivityPingToHost(f, ovnWorkerNode, "e2e-src-ping-pod", targetIP, ipv4PingCommand, 30, false))
+			checkConnectivityPingToHost(f, ovnWorkerNode, "e2e-src-ping-pod", targetIP, ipv4PingCommand, 30))
 	})
 })
 
@@ -976,7 +975,6 @@ var _ = ginkgo.Describe("test e2e inter-node connectivity between worker nodes",
 		ovnNs          string = "ovn-kubernetes"
 		ovnWorkerNode  string = "ovn-worker"
 		ovnWorkerNode2 string = "ovn-worker2"
-		jsonFlag       string = "-o=jsonpath='{.items..metadata.name}'"
 		getPodIPRetry  int    = 20
 	)
 
@@ -1016,7 +1014,7 @@ var _ = ginkgo.Describe("test e2e inter-node connectivity between worker nodes",
 		}
 		// Spin up another pod that attempts to reach the previously started pod on separate nodes
 		framework.ExpectNoError(
-			checkConnectivityPingToHost(f, ciWorkerNodeSrc, "e2e-src-ping-pod", pingTarget, ipv4PingCommand, 30, false))
+			checkConnectivityPingToHost(f, ciWorkerNodeSrc, "e2e-src-ping-pod", pingTarget, ipv4PingCommand, 30))
 	})
 })
 
@@ -1935,21 +1933,19 @@ func getNodePodCIDR(nodeName string) (string, error) {
 
 var _ = ginkgo.Describe("e2e delete databases", func() {
 	const (
-		svcname                   string = "delete-db"
-		ovnNs                     string = "ovn-kubernetes"
-		databasePodPrefix         string = "ovnkube-db"
-		databasePodNorthContainer string = "nb-ovsdb"
-		northDBFileName           string = "ovnnb_db.db"
-		southDBFileName           string = "ovnsb_db.db"
-		dirDB                     string = "/etc/ovn"
-		ovnWorkerNode             string = "ovn-worker"
-		ovnWorkerNode2            string = "ovn-worker2"
-		haModeMinDb               int    = 0
-		haModeMaxDb               int    = 2
+		svcname           string = "delete-db"
+		ovnNs             string = "ovn-kubernetes"
+		databasePodPrefix string = "ovnkube-db"
+		northDBFileName   string = "ovnnb_db.db"
+		southDBFileName   string = "ovnsb_db.db"
+		dirDB             string = "/etc/ovn"
+		ovnWorkerNode     string = "ovn-worker"
+		ovnWorkerNode2    string = "ovn-worker2"
+		haModeMinDb       int    = 0
+		haModeMaxDb       int    = 2
 	)
-	var (
-		allDBFiles = []string{path.Join(dirDB, northDBFileName), path.Join(dirDB, southDBFileName)}
-	)
+	var allDBFiles = []string{path.Join(dirDB, northDBFileName), path.Join(dirDB, southDBFileName)}
+
 	f := wrappedTestFramework(svcname)
 
 	// WaitForPodConditionAllowNotFoundError is a wrapper for WaitForPodCondition that allows at most 6 times for the pod not to be found.

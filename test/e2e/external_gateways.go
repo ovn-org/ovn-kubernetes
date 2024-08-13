@@ -698,10 +698,6 @@ var _ = ginkgo.Describe("External Gateway", func() {
 				gatewayPodName2 string = "e2e-gateway-pod2"
 			)
 
-			var (
-				servingNamespace string
-			)
-
 			f := wrappedTestFramework(svcname)
 
 			var (
@@ -710,6 +706,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 				nodes                    *v1.NodeList
 				err                      error
 				clientSet                kubernetes.Interface
+				servingNamespace         string
 			)
 
 			ginkgo.BeforeEach(func() {
@@ -1329,10 +1326,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 				addressesv4, addressesv6 gatewayTestIPs
 				clientSet                kubernetes.Interface
 				servingNamespace         string
-			)
-
-			var (
-				gwContainers []string
+				gwContainers             []string
 			)
 
 			f := wrappedTestFramework(svcname)
@@ -1733,13 +1727,10 @@ var _ = ginkgo.Describe("External Gateway", func() {
 				gatewayPodName2 string = "e2e-gateway-pod2"
 			)
 
-			var (
-				servingNamespace string
-			)
-
 			f := wrappedTestFramework(svcname)
 
 			var (
+				servingNamespace         string
 				addressesv4, addressesv6 gatewayTestIPs
 				sleepCommand             []string
 				nodes                    *v1.NodeList
@@ -1953,10 +1944,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 					addressesv4, addressesv6 gatewayTestIPs
 					clientSet                kubernetes.Interface
 					servingNamespace         string
-				)
-
-				var (
-					gwContainers []string
+					gwContainers             []string
 				)
 
 				f := wrappedTestFramework(svcname)
@@ -2363,10 +2351,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 				addressesv4, addressesv6 gatewayTestIPs
 				clientSet                kubernetes.Interface
 				servingNamespace         string
-			)
-
-			var (
-				gwContainers []string
+				gwContainers             []string
 			)
 
 			f := wrappedTestFramework(svcname)
@@ -2511,18 +2496,15 @@ var _ = ginkgo.Describe("External Gateway", func() {
 			)
 
 			var (
-				servingNamespace string
-			)
-
-			f := wrappedTestFramework(svcname)
-
-			var (
+				servingNamespace         string
 				addressesv4, addressesv6 gatewayTestIPs
 				sleepCommand             []string
 				nodes                    *v1.NodeList
 				err                      error
 				clientSet                kubernetes.Interface
 			)
+
+			f := wrappedTestFramework(svcname)
 
 			ginkgo.BeforeEach(func() {
 				clientSet = f.ClientSet // so it can be used in AfterEach
@@ -2679,7 +2661,6 @@ var _ = ginkgo.Describe("External Gateway", func() {
 			svcname          string = "novxlan-externalgw-ecmp"
 			gwContainer1     string = "gw-test-container1"
 			gwContainer2     string = "gw-test-container2"
-			testTimeout      string = "30"
 			ecmpRetry        int    = 20
 			srcPodName              = "e2e-exgw-src-pod"
 			externalTCPPort         = 80
@@ -3076,19 +3057,6 @@ func annotateNamespaceForGateway(namespace string, bfd bool, gateways ...string)
 		annotateArgs = append(annotateArgs, "k8s.ovn.org/bfd-enabled=\"\"")
 	}
 	framework.Logf("Annotating the external gateway test namespace to container gateways: %s", externalGateways)
-	e2ekubectl.RunKubectlOrDie(namespace, annotateArgs...)
-}
-
-func removeStaticGatewayAnnotationInNamespace(namespace string) {
-
-	// annotate the test namespace with multiple gateways defined
-	annotateArgs := []string{
-		"annotate",
-		"namespace",
-		namespace,
-		"k8s.ovn.org/routing-external-gws-",
-		"--overwrite",
-	}
 	e2ekubectl.RunKubectlOrDie(namespace, annotateArgs...)
 }
 

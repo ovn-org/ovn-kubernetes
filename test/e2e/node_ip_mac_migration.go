@@ -529,7 +529,6 @@ spec:
 							framework.ExpectNoError(err)
 						})
 				}
-
 			})
 		})
 	}
@@ -759,10 +758,7 @@ func findLastFreeSubnetIP(containerName, containerIP string, excludedIPs []strin
 
 	// We are using 172.18.0.0/16 for the docker subnet. We should be able to find something that we need here and
 	// that's not assigned.
-	broadcastIP, err := subnetBroadcastIP(net.IPNet{IP: parsedNetIPMask.IP, Mask: parsedNetIPMask.Mask})
-	if err != nil {
-		return "", err
-	}
+	broadcastIP := subnetBroadcastIP(net.IPNet{IP: parsedNetIPMask.IP, Mask: parsedNetIPMask.Mask})
 	decrementedIPNet := net.IPNet{IP: broadcastIP, Mask: parsedNetIPMask.Mask}
 
 	var isReachable bool
@@ -789,7 +785,7 @@ outer:
 }
 
 // subnetBroadcastIP returns the IP network's broadcast IP.
-func subnetBroadcastIP(ipnet net.IPNet) (net.IP, error) {
+func subnetBroadcastIP(ipnet net.IPNet) net.IP {
 	// For IPv4.
 	if ipnet.IP.To4() != nil {
 		// ip address in uint32
@@ -804,7 +800,7 @@ func subnetBroadcastIP(ipnet net.IPNet) (net.IP, error) {
 		broadcastIPBits := networkIPBits | invertedMaskBits
 		broadcastIP := make(net.IP, 4)
 		binary.BigEndian.PutUint32(broadcastIP, broadcastIPBits)
-		return broadcastIP, nil
+		return broadcastIP
 	}
 	// For IPv6. This conversion is actually easier, it follows the same principle as above.
 	byteIP := []byte(ipnet.IP)                // []byte representation of IP
@@ -815,7 +811,7 @@ func subnetBroadcastIP(ipnet net.IPNet) (net.IP, error) {
 		byteTargetIP[k] = byteIP[k]&byteMask[k] | invertedMask
 	}
 
-	return net.IP(byteTargetIP), nil
+	return net.IP(byteTargetIP)
 }
 
 // isAddressReachableFromContainer will curl towards targetIP. If the curl succeeds, return true. Otherwise, check the
