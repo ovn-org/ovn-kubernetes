@@ -555,7 +555,8 @@ spec:
 		JustAfterEach(func() {
 			if len(workerNodeMAC) > 0 {
 				By("Reverting to original MAC address")
-				setMACAddress(ovnkPod, workerNodeMAC.String())
+				err := setMACAddress(ovnkPod, workerNodeMAC.String())
+				framework.ExpectNoError(err, "failed to revert MAC address")
 			}
 		})
 

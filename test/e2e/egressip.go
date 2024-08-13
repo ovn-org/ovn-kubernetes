@@ -667,10 +667,12 @@ spec:
 
 				ginkgo.By("3. Create two pods matching the EgressIP: one running on each of the egress nodes")
 				command := []string{"/agnhost", "netexec", fmt.Sprintf("--http-port=%s", podHTTPPort)}
-				createGenericPodWithLabel(f, pod1Name, pod1Node.name, f.Namespace.Name, command, podEgressLabel)
-				createGenericPodWithLabel(f, pod2Name, pod2Node.name, f.Namespace.Name, command, podEgressLabel)
+				_, err := createGenericPodWithLabel(f, pod1Name, pod1Node.name, f.Namespace.Name, command, podEgressLabel)
+				framework.ExpectNoError(err, "failed to create pod %s/%s", f.Namespace.Name, pod1Name)
+				_, err = createGenericPodWithLabel(f, pod2Name, pod2Node.name, f.Namespace.Name, command, podEgressLabel)
+				framework.ExpectNoError(err, "failed to create pod %s/%s", f.Namespace.Name, pod2Name)
 
-				err := wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
+				err = wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
 					for _, podName := range []string{pod1Name, pod2Name} {
 						kubectlOut := getPodAddress(podName, f.Namespace.Name)
 						srcIP := net.ParseIP(kubectlOut)
@@ -865,7 +867,8 @@ spec:
 		}
 
 		ginkgo.By("5. Create one pod matching the EgressIP: running on egress1Node")
-		createGenericPodWithLabel(f, pod1Name, pod2Node.name, f.Namespace.Name, command, podEgressLabel)
+		_, err = createGenericPodWithLabel(f, pod1Name, pod2Node.name, f.Namespace.Name, command, podEgressLabel)
+		framework.ExpectNoError(err, "failed to create pod %s/%s", f.Namespace.Name, pod1Name)
 
 		err = wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
 			kubectlOut := getPodAddress(pod1Name, f.Namespace.Name)
@@ -920,7 +923,8 @@ spec:
 		framework.ExpectNoError(err, "Step 14. Check connectivity from pod to another node secondary IP and verify that the srcIP is the expected nodeIP, failed: %v", err)
 
 		ginkgo.By("15. Create second pod not matching the EgressIP: running on egress1Node")
-		createGenericPodWithLabel(f, pod2Name, pod2Node.name, f.Namespace.Name, command, map[string]string{})
+		_, err = createGenericPodWithLabel(f, pod2Name, pod2Node.name, f.Namespace.Name, command, map[string]string{})
+		framework.ExpectNoError(err, "failed to create pod %s/%s", pod2Name, f.Namespace.Name)
 		err = wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
 			kubectlOut := getPodAddress(pod2Name, f.Namespace.Name)
 			srcIP := net.ParseIP(kubectlOut)
@@ -1020,9 +1024,10 @@ spec:
 		}
 
 		ginkgo.By("3. Create one pod matching the EgressIP: running on egress1Node")
-		createGenericPodWithLabel(f, pod1Name, pod2Node.name, f.Namespace.Name, command, podEgressLabel)
+		_, err := createGenericPodWithLabel(f, pod1Name, pod2Node.name, f.Namespace.Name, command, podEgressLabel)
+		framework.ExpectNoError(err, "failed to create pod %s/%s", f.Namespace.Name, pod1Name)
 
-		err := wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
+		err = wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
 			kubectlOut := getPodAddress(pod1Name, f.Namespace.Name)
 			srcIP := net.ParseIP(kubectlOut)
 			if srcIP == nil {
@@ -1045,7 +1050,9 @@ spec:
 			ginkgo.By("5. Delete the egressPod and recreate it immediately with the same name")
 			_, err = e2ekubectl.RunKubectl(f.Namespace.Name, "delete", "pod", pod1Name, "--grace-period=0", "--force")
 			framework.ExpectNoError(err, "5. Run %d: Delete the egressPod and recreate it immediately with the same name, failed: %v", i, err)
-			createGenericPodWithLabel(f, pod1Name, nodeSwapName, f.Namespace.Name, command, podEgressLabel)
+			_, err = createGenericPodWithLabel(f, pod1Name, nodeSwapName, f.Namespace.Name, command, podEgressLabel)
+			framework.ExpectNoError(err, "failed to create pod %s/%s", f.Namespace.Name, pod1Name)
+
 			err = wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
 				kubectlOut := getPodAddress(pod1Name, f.Namespace.Name)
 				srcIP := net.ParseIP(kubectlOut)
@@ -1106,10 +1113,11 @@ spec:
 		updateNamespace(f, podNamespace)
 
 		ginkgo.By("1. Create one pod matching the EgressIP: running on node2 (pod2Node, egress1Node)")
-		createGenericPodWithLabel(f, pod1Name, pod2Node.name, f.Namespace.Name, command, podEgressLabel)
+		_, err := createGenericPodWithLabel(f, pod1Name, pod2Node.name, f.Namespace.Name, command, podEgressLabel)
+		framework.ExpectNoError(err, "failed to create pod %s/%s", f.Namespace.Name, pod1Name)
 
 		var srcPodIP net.IP
-		err := wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
+		err = wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
 			kubectlOut := getPodAddress(pod1Name, f.Namespace.Name)
 			srcPodIP = net.ParseIP(kubectlOut)
 			if srcPodIP == nil {
@@ -1482,7 +1490,8 @@ spec:
 		node1 := statuses[0].Node
 
 		ginkgo.By("3. Create one pod matching the EgressIP")
-		createGenericPodWithLabel(f, pod1Name, pod1Node.name, f.Namespace.Name, command, podEgressLabel)
+		_, err := createGenericPodWithLabel(f, pod1Name, pod1Node.name, f.Namespace.Name, command, podEgressLabel)
+		framework.ExpectNoError(err, "failed to create pod %s/%s", f.Namespace.Name, pod1Name)
 
 		ginkgo.By(fmt.Sprintf("4. Make egress node: %s unreachable", node1))
 		setNodeReachable("iptables", node1, false)
@@ -1502,7 +1511,7 @@ spec:
 		})
 
 		ginkgo.By("6. Check connectivity from pod to an external \"node\" and verify that the IP is the egress IP")
-		err := wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(targetNode, pod1Name, podNamespace.Name, true, []string{egressIP1.String()}))
+		err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(targetNode, pod1Name, podNamespace.Name, true, []string{egressIP1.String()}))
 		framework.ExpectNoError(err, "6. Check connectivity from pod to an external \"node\" and verify that the IP is the egress IP, failed, err: %v", err)
 
 		ginkgo.By("7. Check connectivity from pod to the api-server (running hostNetwork:true) and verifying that the connection is achieved")
@@ -1701,8 +1710,10 @@ spec:
 		e2ekubectl.RunKubectlOrDie(f.Namespace.Name, "create", "-f", egressFirewallYaml)
 
 		ginkgo.By("3. Create two pods, and matching service, matching both egress firewall and egress IP")
-		createGenericPodWithLabel(f, pod1Name, pod1Node.name, f.Namespace.Name, command, podEgressLabel)
-		createGenericPodWithLabel(f, pod2Name, pod2Node.name, f.Namespace.Name, command, podEgressLabel)
+		_, err := createGenericPodWithLabel(f, pod1Name, pod1Node.name, f.Namespace.Name, command, podEgressLabel)
+		framework.ExpectNoError(err, "failed to create pod %s/%s", f.Namespace.Name, pod1Name)
+		_, err = createGenericPodWithLabel(f, pod2Name, pod2Node.name, f.Namespace.Name, command, podEgressLabel)
+		framework.ExpectNoError(err, "failed to create pod %s/%s", f.Namespace.Name, pod2Name)
 		serviceIP, err := createServiceForPodsWithLabel(f, f.Namespace.Name, servicePort, podHTTPPort, "ClusterIP", podEgressLabel)
 		framework.ExpectNoError(err, "Step 3. Create two pods, and matching service, matching both egress firewall and egress IP, failed creating service, err: %v", err)
 
@@ -1985,9 +1996,11 @@ spec:
 		gomega.Expect(verifyEgressIPStatusContainsIPs(statuses, []string{egressIPIP1, egressIPIP2})).Should(gomega.BeTrue())
 
 		ginkgo.By("4. Create two pods matching the EgressIP: one running on each of the egress nodes")
-		createGenericPodWithLabel(f, pod1Name, pod1Node.name, f.Namespace.Name, command, podEgressLabel)
-		createGenericPodWithLabel(f, pod2Name, pod2Node.name, f.Namespace.Name, command, podEgressLabel)
-		err := wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
+		_, err := createGenericPodWithLabel(f, pod1Name, pod1Node.name, f.Namespace.Name, command, podEgressLabel)
+		framework.ExpectNoError(err, "failed to create pod %s/%s", f.Namespace.Name, pod1Name)
+		_, err = createGenericPodWithLabel(f, pod2Name, pod2Node.name, f.Namespace.Name, command, podEgressLabel)
+		framework.ExpectNoError(err, "failed to create pod %s/%s", f.Namespace.Name, pod2Name)
+		err = wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
 			for _, podName := range []string{pod1Name, pod2Name} {
 				kubectlOut := getPodAddress(podName, f.Namespace.Name)
 				srcIP := net.ParseIP(kubectlOut)
@@ -2222,9 +2235,12 @@ spec:
 		gomega.Expect(verifyEgressIPStatusContainsIPs(statuses, []string{egressIPOVN, egressIPSecondaryHost})).Should(gomega.BeTrue())
 
 		ginkgo.By("4. Create two pods matching the EgressIP: one running on each of the egress nodes")
-		createGenericPodWithLabel(f, pod1Name, pod1Node.name, f.Namespace.Name, command, podEgressLabel)
-		createGenericPodWithLabel(f, pod2Name, pod2Node.name, f.Namespace.Name, command, podEgressLabel)
-		err := wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
+		_, err := createGenericPodWithLabel(f, pod1Name, pod1Node.name, f.Namespace.Name, command, podEgressLabel)
+		framework.ExpectNoError(err, "failed to create pod %s/%s", f.Namespace.Name, pod1Name)
+		_, err = createGenericPodWithLabel(f, pod2Name, pod2Node.name, f.Namespace.Name, command, podEgressLabel)
+		framework.ExpectNoError(err, "failed to create pod %s/%s", f.Namespace.Name, pod2Name)
+
+		err = wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
 			for _, podName := range []string{pod1Name, pod2Name} {
 				kubectlOut := getPodAddress(podName, f.Namespace.Name)
 				srcIP := net.ParseIP(kubectlOut)
@@ -2481,12 +2497,14 @@ spec:
 		verifySpecificEgressIPStatusLengthEquals(egressIPName2, 1, nil)
 
 		ginkgo.By("3. Create two pods - one matching each EgressIP")
-		createGenericPodWithLabel(f, pod1Name, pod1Node.name, f.Namespace.Name, command, podEgressLabel)
+		_, err := createGenericPodWithLabel(f, pod1Name, pod1Node.name, f.Namespace.Name, command, podEgressLabel)
+		framework.ExpectNoError(err, "failed to create pod %s/%s", f.Namespace.Name, pod1Name)
 		podEgressLabel2 := map[string]string{
 			"wants": "egress2",
 		}
-		createGenericPodWithLabel(f, pod2Name, pod2Node.name, f.Namespace.Name, command, podEgressLabel2)
-		err := wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
+		_, err = createGenericPodWithLabel(f, pod2Name, pod2Node.name, f.Namespace.Name, command, podEgressLabel2)
+		framework.ExpectNoError(err, "failed to create pod %s/%s", f.Namespace.Name, pod2Name)
+		err = wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
 			for _, podName := range []string{pod1Name, pod2Name} {
 				kubectlOut := getPodAddress(podName, f.Namespace.Name)
 				srcIP := net.ParseIP(kubectlOut)
