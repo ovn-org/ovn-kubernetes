@@ -258,21 +258,19 @@ func (pr *PodRequest) cmdDel(clientset *ClientSet) (*Response, error) {
 		}
 
 		if util.IsNetworkSegmentationSupportEnabled() {
-			pod, err := clientset.getPod(pr.PodNamespace, pr.PodName)
+			// TODO: consider using util.GetActiveNetworkForNamespace instead
+			primaryUDN := udn.NewPrimaryNetwork(clientset.nadLister)
+			primaryNetConf, err := primaryUDN.FindForNamespace(pr.PodNamespace)
 			if err != nil {
 				return nil, err
 			}
-			primaryUDN := udn.NewPrimaryNetwork(clientset.nadLister)
-			if err := primaryUDN.Ensure(namespace, pod.Annotations, pr.nadName); err != nil {
-				return nil, err
-			}
-			if primaryUDN.Found() {
+			if primaryNetConf != nil {
 				primaryUDNPodRequest := pr.buildPrimaryUDNPodRequest(primaryUDN)
-				primaryUDNPodInfo, err := primaryUDNPodRequest.buildPodInterfaceInfo(pod.Annotations, primaryUDN.Annotation(), primaryUDN.NetworkDevice())
-				if err != nil {
-					return nil, err
-				}
-				if err := podRequestInterfaceOps.UnconfigureInterface(primaryUDNPodRequest, primaryUDNPodInfo); err != nil {
+
+				if err := podRequestInterfaceOps.UnconfigureInterface(
+					primaryUDNPodRequest,
+					podInterfaceInfoFromNetConf(primaryNetConf),
+				); err != nil {
 					return nil, err
 				}
 			}
@@ -411,4 +409,13 @@ func (pr *PodRequest) buildPodInterfaceInfo(annotations map[string]string, podAn
 		pr.netName,
 		pr.CNIConf.MTU,
 	)
+}
+
+func podInterfaceInfoFromNetConf(conf *ovncnitypes.NetConf) *PodInterfaceInfo {
+	return &PodInterfaceInfo{
+		NADName:       conf.NADName,
+		NetName:       conf.Name,
+		IsDPUHostMode: false, // TODO: add DPU support
+		NetdevName:    "",    // TODO: add DPU support
+	}
 }

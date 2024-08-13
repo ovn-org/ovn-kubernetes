@@ -13,10 +13,14 @@ import (
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/kubernetes/fake"
+
+	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	v1mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/client-go/listers/core/v1"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 )
@@ -146,10 +150,28 @@ var _ = Describe("Network Segmentation", func() {
 			Expect(pr.cmdAddWithGetCNIResultFunc(kubeAuth, clientSet, getCNIResultStub)).NotTo(BeNil())
 			Expect(obtainedPodIterfaceInfos).ToNot(BeEmpty())
 		})
-		It("should not fail at cmdDel", func() {
-			podNamespaceLister.On("Get", pr.PodName).Return(pod, nil)
-			Expect(pr.cmdDel(clientSet)).NotTo(BeNil())
-			Expect(prInterfaceOpsStub.unconfiguredInterfaces).To(HaveLen(2))
+		When("deleting a workload", func() {
+			BeforeEach(func() {
+				prInterfaceOpsStub.unconfiguredInterfaces = nil
+				nadNamespaceLister := v1nadmocks.NetworkAttachmentDefinitionNamespaceLister{}
+				nadLister.On("NetworkAttachmentDefinitions", pr.PodNamespace).Return(&nadNamespaceLister)
+				mockedNADs := []*nadapi.NetworkAttachmentDefinition{
+					ovntest.GenerateNAD(
+						"surya",
+						"miguel",
+						"default",
+						ovntypes.Layer2Topology,
+						"10.100.200.0/24",
+						ovntypes.NetworkRolePrimary,
+					),
+				}
+				nadNamespaceLister.On("List", labels.Everything()).Return(mockedNADs, nil)
+			})
+
+			It("should not fail at cmdDel", func() {
+				Expect(pr.cmdDel(clientSet)).NotTo(BeNil())
+				Expect(prInterfaceOpsStub.unconfiguredInterfaces).To(HaveLen(2))
+			})
 		})
 
 	})

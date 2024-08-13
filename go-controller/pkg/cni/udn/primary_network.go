@@ -1,12 +1,15 @@
 package udn
 
 import (
+	"encoding/json"
 	"fmt"
 
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/klog/v2"
 
 	nadlister "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
 
+	cnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -157,4 +160,22 @@ func (p *UserDefinedPrimaryNetwork) ensureAnnotation(annotations map[string]stri
 		return fmt.Errorf("missing network annotation with primary role '%+v'", annotations)
 	}
 	return nil
+}
+
+func (p *UserDefinedPrimaryNetwork) FindForNamespace(namespace string) (*cnitypes.NetConf, error) {
+	nads, err := p.nadLister.NetworkAttachmentDefinitions(namespace).List(labels.Everything())
+	if err != nil {
+		return nil, fmt.Errorf("failed to access NADs for namespace %q: %w", namespace, err)
+	}
+	for _, nad := range nads {
+		var netConf cnitypes.NetConf
+		if err := json.Unmarshal([]byte(nad.Spec.Config), &netConf); err != nil {
+			return nil, fmt.Errorf("failed to validate no primary network exist: unmarshal failed [%s/%s]: %w",
+				nad.Namespace, nad.Name, err)
+		}
+		if netConf.Role == types.NetworkRolePrimary {
+			return &netConf, nil
+		}
+	}
+	return nil, nil
 }
