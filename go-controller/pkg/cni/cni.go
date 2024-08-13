@@ -169,7 +169,7 @@ func (pr *PodRequest) cmdAddWithGetCNIResultFunc(kubeAuth *KubeAPIAuth, clientse
 			return nil, err
 		}
 		if primaryUDN.Found() {
-			primaryUDNPodRequest := pr.buildPrimaryUDNPodRequest(pod, primaryUDN)
+			primaryUDNPodRequest := pr.buildPrimaryUDNPodRequest(primaryUDN)
 			primaryUDNPodInfo, err := primaryUDNPodRequest.buildPodInterfaceInfo(annotations, primaryUDN.Annotation(), primaryUDN.NetworkDevice())
 			if err != nil {
 				return nil, err
@@ -267,7 +267,7 @@ func (pr *PodRequest) cmdDel(clientset *ClientSet) (*Response, error) {
 				return nil, err
 			}
 			if primaryUDN.Found() {
-				primaryUDNPodRequest := pr.buildPrimaryUDNPodRequest(pod, primaryUDN)
+				primaryUDNPodRequest := pr.buildPrimaryUDNPodRequest(primaryUDN)
 				primaryUDNPodInfo, err := primaryUDNPodRequest.buildPodInterfaceInfo(pod.Annotations, primaryUDN.Annotation(), primaryUDN.NetworkDevice())
 				if err != nil {
 					return nil, err
@@ -376,14 +376,13 @@ func getCNIResult(pr *PodRequest, getter PodInfoGetter, podInterfaceInfo *PodInt
 }
 
 func (pr *PodRequest) buildPrimaryUDNPodRequest(
-	pod *kapi.Pod,
 	primaryUDN *udn.UserDefinedPrimaryNetwork,
 ) *PodRequest {
 	req := &PodRequest{
 		Command:      pr.Command,
-		PodNamespace: pod.Namespace,
-		PodName:      pod.Name,
-		PodUID:       string(pod.UID),
+		PodNamespace: pr.PodNamespace,
+		PodName:      pr.PodName,
+		PodUID:       pr.PodUID,
 		SandboxID:    pr.SandboxID,
 		Netns:        pr.Netns,
 		IfName:       primaryUDN.InterfaceName(),
