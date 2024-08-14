@@ -137,6 +137,8 @@ func TestParseNetconf(t *testing.T) {
 	type testConfig struct {
 		desc                        string
 		inputNetAttachDefConfigSpec string
+		ipv4Mode                    bool
+		ipv6Mode                    bool
 		expectedNetConf             *ovncnitypes.NetConf
 		expectedError               error
 		unsupportedReason           string
@@ -295,6 +297,7 @@ func TestParseNetconf(t *testing.T) {
             "netAttachDefName": "ns1/nad1"
     }
 `,
+			ipv4Mode: true,
 			expectedNetConf: &ovncnitypes.NetConf{
 				Topology:           "localnet",
 				NADName:            "ns1/nad1",
@@ -316,6 +319,7 @@ func TestParseNetconf(t *testing.T) {
             "netAttachDefName": "ns1/nad1"
     }
 `,
+			ipv4Mode: true,
 			expectedNetConf: &ovncnitypes.NetConf{
 				Topology:           "layer2",
 				NADName:            "ns1/nad1",
@@ -352,6 +356,7 @@ func TestParseNetconf(t *testing.T) {
 			"joinSubnet": "100.66.0.0/16,fd99::/64"
     }
 `,
+			ipv4Mode: true,
 			expectedNetConf: &ovncnitypes.NetConf{
 				Topology:   "layer2",
 				NADName:    "ns1/nad1",
@@ -375,6 +380,7 @@ func TestParseNetconf(t *testing.T) {
 			"joinSubnet": "100.66.0.0/16"
     }
 `,
+			ipv4Mode: true,
 			expectedNetConf: &ovncnitypes.NetConf{
 				Topology:   "layer3",
 				NADName:    "ns1/nad1",
@@ -397,6 +403,7 @@ func TestParseNetconf(t *testing.T) {
 			"netAttachDefName": "ns1/nad1"
     }
 `,
+			ipv4Mode: true,
 			expectedNetConf: &ovncnitypes.NetConf{
 				Topology: "layer3",
 				NADName:  "ns1/nad1",
@@ -461,6 +468,55 @@ func TestParseNetconf(t *testing.T) {
 }`,
 			expectedError: fmt.Errorf("the subnet attribute must be defined for layer2 primary user defined networks"),
 		},
+		{
+			desc: "invalid attachment definition, specifies ipv4 subnet address in ipv6 only cluster",
+			inputNetAttachDefConfigSpec: `
+    {
+            "name": "tenant-red",
+            "type": "ovn-k8s-cni-overlay",
+            "topology": "layer3",
+			"subnets": "192.168.200.0/16",
+			"role": "secondary",
+			"netAttachDefName": "ns1/nad1"
+    }
+`,
+			ipv4Mode:      false,
+			ipv6Mode:      true,
+			expectedError: fmt.Errorf("subnet 192.168.0.0/16/24 for network tenant-red is invalid, cluster does not support ipv4"),
+		},
+		{
+			desc: "invalid attachment definition, specifies ipv4 exception in ipv6 only cluster",
+			inputNetAttachDefConfigSpec: `
+    {
+            "name": "tenant-red",
+            "type": "ovn-k8s-cni-overlay",
+            "topology": "layer3",
+			"subnets": "fd01::1234/32",
+			"excludeSubnets": "192.168.200.0/16",
+			"role": "secondary",
+			"netAttachDefName": "ns1/nad1"
+    }
+`,
+			ipv4Mode:      false,
+			ipv6Mode:      true,
+			expectedError: fmt.Errorf("the provided network subnets [fd01::/32/64] do not contain exluded subnets 192.168.0.0/16"),
+		},
+		{
+			desc: "invalid attachment definition, specifies ipv6 subnet address in ipv4 only cluster",
+			inputNetAttachDefConfigSpec: `
+    {
+            "name": "tenant-red",
+            "type": "ovn-k8s-cni-overlay",
+            "topology": "layer3",
+			"subnets": "fd01::1234/32",
+			"role": "secondary",
+			"netAttachDefName": "ns1/nad1"
+    }
+`,
+			ipv4Mode:      true,
+			ipv6Mode:      false,
+			expectedError: fmt.Errorf("subnet fd01::/32/64 for network tenant-red is invalid, cluster does not support ipv6"),
+		},
 	}
 
 	for _, test := range tests {
@@ -469,6 +525,9 @@ func TestParseNetconf(t *testing.T) {
 				t.Skip(test.unsupportedReason)
 			}
 			g := gomega.NewWithT(t)
+			config.IPv4Mode = test.ipv4Mode
+			config.IPv6Mode = test.ipv6Mode
+
 			networkAttachmentDefinition := applyNADDefaults(
 				&nadv1.NetworkAttachmentDefinition{
 					Spec: nadv1.NetworkAttachmentDefinitionSpec{

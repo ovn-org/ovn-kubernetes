@@ -177,6 +177,7 @@ func TestWaitForPrimaryAnnotationFn(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.description, func(t *testing.T) {
 			g := NewWithT(t)
+			config.IPv4Mode = true
 			nadLister := v1nadmocks.NetworkAttachmentDefinitionLister{}
 			nadNamespaceLister := v1nadmocks.NetworkAttachmentDefinitionNamespaceLister{}
 			nadLister.On("NetworkAttachmentDefinitions", tt.namespace).Return(&nadNamespaceLister)

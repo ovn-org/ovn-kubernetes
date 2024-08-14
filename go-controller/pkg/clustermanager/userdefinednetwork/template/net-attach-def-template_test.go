@@ -10,6 +10,7 @@ import (
 
 	netv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	udnv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1"
 )
 
@@ -226,6 +227,8 @@ var _ = Describe("NetAttachDefTemplate", func() {
 
 	DescribeTable("should create net attach from spec",
 		func(testSpec udnv1.UserDefinedNetworkSpec, expectedNadNetConf string) {
+			config.IPv4Mode = true
+			config.IPv6Mode = true
 			testUdn := &udnv1.UserDefinedNetwork{
 				ObjectMeta: metav1.ObjectMeta{Namespace: "mynamespace", Name: "test-net", UID: "1"},
 				Spec:       testSpec,

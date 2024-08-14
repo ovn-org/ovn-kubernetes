@@ -532,6 +532,7 @@ func TestPodAllocator_reconcileForNAD(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			config.IPv4Mode = true
 			g := gomega.NewWithT(t)
 			ipallocator := &ipAllocatorStub{}
 			idallocator := &idAllocatorStub{}

@@ -146,6 +146,8 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 	})
 	ovntest.OnSupportedPlatformsIt("should delete management port for a L3 user defined network", func() {
+		config.IPv4Mode = true
+		config.IPv6Mode = true
 		node := &corev1.Node{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: nodeName,
@@ -211,6 +213,8 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 	})
 	ovntest.OnSupportedPlatformsIt("should delete management port for a L2 user defined network", func() {
+		config.IPv4Mode = true
+		config.IPv6Mode = true
 		node := &corev1.Node{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: nodeName,

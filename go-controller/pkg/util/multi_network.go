@@ -761,6 +761,21 @@ func ValidateNetConf(nadName string, netconf *ovncnitypes.NetConf) error {
 		return fmt.Errorf("the subnet attribute must be defined for layer2 primary user defined networks")
 	}
 
+	//ensure that the cluster supports ipfamilies that the NAD is using
+	if len(netconf.Subnets) > 0 {
+		subnetList, _, err := parseSubnets(netconf.Subnets, netconf.ExcludeSubnets, netconf.Topology)
+		if err != nil {
+			return err
+		}
+		for _, subnet := range subnetList {
+			if knet.IsIPv6CIDR(subnet.CIDR) && !config.IPv6Mode {
+				return fmt.Errorf("subnet %s for network %s is invalid, cluster does not support ipv6", subnet.String(), netconf.Name)
+			} else if knet.IsIPv4CIDR(subnet.CIDR) && !config.IPv4Mode {
+				return fmt.Errorf("subnet %s for network %s is invalid, cluster does not support ipv4", subnet.String(), netconf.Name)
+			}
+		}
+	}
+
 	return nil
 }
 
