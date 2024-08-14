@@ -186,6 +186,7 @@ var (
 	MultiNetworkPolicyType                reflect.Type = reflect.TypeOf(&mnpapi.MultiNetworkPolicy{})
 	IPAMClaimsType                        reflect.Type = reflect.TypeOf(&ipamclaimsapi.IPAMClaim{})
 	UserDefinedNetworkType                reflect.Type = reflect.TypeOf(&userdefinednetworkapi.UserDefinedNetwork{})
+	ClusterUserDefinedNetworkType         reflect.Type = reflect.TypeOf(&userdefinednetworkapi.ClusterUserDefinedNetwork{})
 
 	// Resource types used in ovnk node
 	NamespaceExGwType                         reflect.Type = reflect.TypeOf(&namespaceExGw{})
@@ -287,6 +288,9 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 	}
 
 	if err := ipamclaimsapi.AddToScheme(ipamclaimsscheme.Scheme); err != nil {
+		return nil, err
+	}
+	if err := userdefinednetworkapi.AddToScheme(userdefinednetworkscheme.Scheme); err != nil {
 		return nil, err
 	}
 
@@ -398,6 +402,11 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 	if util.IsNetworkSegmentationSupportEnabled() {
 		wf.udnFactory = userdefinednetworkapiinformerfactory.NewSharedInformerFactory(ovnClientset.UserDefinedNetworkClient, resyncInterval)
 		wf.informers[UserDefinedNetworkType], err = newInformer(UserDefinedNetworkType, wf.udnFactory.K8s().V1().UserDefinedNetworks().Informer())
+		if err != nil {
+			return nil, err
+		}
+
+		wf.informers[ClusterUserDefinedNetworkType], err = newInformer(ClusterUserDefinedNetworkType, wf.udnFactory.K8s().V1().ClusterUserDefinedNetworks().Informer())
 		if err != nil {
 			return nil, err
 		}
@@ -712,6 +721,11 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeName string) (
 		if err != nil {
 			return nil, err
 		}
+
+		wf.informers[ClusterUserDefinedNetworkType], err = newInformer(ClusterUserDefinedNetworkType, wf.udnFactory.K8s().V1().ClusterUserDefinedNetworks().Informer())
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return wf, nil
@@ -859,6 +873,16 @@ func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset
 		if err != nil {
 			return nil, err
 		}
+		wf.informers[ClusterUserDefinedNetworkType], err = newInformer(ClusterUserDefinedNetworkType, wf.udnFactory.K8s().V1().ClusterUserDefinedNetworks().Informer())
+		if err != nil {
+			return nil, err
+		}
+
+		// make sure namespace informer cache is initialized and synced on Start().
+		wf.iFactory.Core().V1().Namespaces().Informer()
+
+		// make sure pod informer cache is initialized and synced when on Start().
+		wf.iFactory.Core().V1().Pods().Informer()
 	}
 
 	return wf, nil
@@ -1528,6 +1552,10 @@ func (wf *WatchFactory) NADInformer() nadinformer.NetworkAttachmentDefinitionInf
 
 func (wf *WatchFactory) UserDefinedNetworkInformer() userdefinednetworkinformer.UserDefinedNetworkInformer {
 	return wf.udnFactory.K8s().V1().UserDefinedNetworks()
+}
+
+func (wf *WatchFactory) ClusterUserDefinedNetworkInformer() userdefinednetworkinformer.ClusterUserDefinedNetworkInformer {
+	return wf.udnFactory.K8s().V1().ClusterUserDefinedNetworks()
 }
 
 func (wf *WatchFactory) DNSNameResolverInformer() ocpnetworkinformerv1alpha1.DNSNameResolverInformer {
