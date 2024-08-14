@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"k8s.io/client-go/tools/record"
 )
@@ -22,7 +23,10 @@ const (
 // information to the rest of the project.
 type Interface interface {
 	GetActiveNetworkForNamespace(namespace string) (util.NetInfo, error)
-	GetNetwork(networkName string) util.NetInfo
+
+	// GetNetwork returns the network of the given name or nil if unknown
+	GetNetwork(name string) util.NetInfo
+
 	// DoWithLock takes care of locking and unlocking while iterating over all role primary user defined networks.
 	DoWithLock(f func(network util.NetInfo) error) error
 	GetActiveNetworkNamespaces(networkName string) ([]string, error)
@@ -165,7 +169,10 @@ func (nm defaultNetworkManager) GetActiveNetworkForNamespace(string) (util.NetIn
 	return &util.DefaultNetInfo{}, nil
 }
 
-func (nm defaultNetworkManager) GetNetwork(networkName string) util.NetInfo {
+func (nm defaultNetworkManager) GetNetwork(name string) util.NetInfo {
+	if name != types.DefaultNetworkName {
+		return nil
+	}
 	return &util.DefaultNetInfo{}
 }
 

@@ -84,8 +84,5 @@ func (nc *FakeNetworkManager) DoWithLock(f func(network util.NetInfo) error) err
 			errs = append(errs, err)
 		}
 	}
-	if len(errs) > 0 {
-		return errors.Join(errs...)
-	}
-	return nil
+	return errors.Join(errs...)
 }
