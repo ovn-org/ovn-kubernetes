@@ -473,6 +473,10 @@ func (c *nadController) GetActiveNetworkForNamespace(namespace string) (util.Net
 	return &util.DefaultNetInfo{}, nil
 }
 
+func (c *nadController) GetNetwork(name string) util.NetInfo {
+	return c.networkController.getNetwork(name)
+}
+
 // handleNetworkID releases, allocates and annotates network IDs. If both old
 // and new networks are provided, it is assumed they are a different network
 // with the same name and will be allocated the same ID.
