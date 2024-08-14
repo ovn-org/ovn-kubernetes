@@ -208,8 +208,12 @@ func (gw *GatewayManager) GatewayInit(
 		"dynamic_neigh_routers":         "true",
 		"chassis":                       l3GatewayConfig.ChassisID,
 		"lb_force_snat_ip":              "router_ip",
-		"snat-ct-zone":                  "0",
 		"mac_binding_age_threshold":     types.GRMACBindingAgeThreshold,
+	}
+	// set the snat-ct-zone only for the default network
+	// for UDN's OVN will pick a random one
+	if gw.netInfo.GetNetworkName() == types.DefaultNetworkName {
+		logicalRouterOptions["snat-ct-zone"] = "0"
 	}
 	logicalRouterExternalIDs := map[string]string{
 		"physical_ip":  physicalIPs[0],

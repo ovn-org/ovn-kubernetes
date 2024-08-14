@@ -453,12 +453,8 @@ func expectedGWEntities(nodeName string, netInfo util.NetInfo, gwConfig util.L3G
 		expectedGatewayChassis(nodeName, netInfo, gwConfig),
 		expectedStaticMACBinding(gwRouterName, nextHopMasqueradeIP()),
 	)
-	for _, entity := range expectedExternalSwitchAndLSPs(netInfo, gwConfig, nodeName) {
-		expectedEntities = append(expectedEntities, entity)
-	}
-	for _, entity := range expectedJoinSwitchAndLSPs(netInfo, nodeName) {
-		expectedEntities = append(expectedEntities, entity)
-	}
+	expectedEntities = append(expectedEntities, expectedExternalSwitchAndLSPs(netInfo, gwConfig, nodeName)...)
+	expectedEntities = append(expectedEntities, expectedJoinSwitchAndLSPs(netInfo, nodeName)...)
 	return expectedEntities
 }
 
@@ -757,7 +753,6 @@ func networkSubnet(netInfo util.NetInfo) string {
 func gwRouterOptions(gwConfig util.L3GatewayConfig) map[string]string {
 	return map[string]string{
 		"lb_force_snat_ip":              "router_ip",
-		"snat-ct-zone":                  "0",
 		"mac_binding_age_threshold":     "300",
 		"chassis":                       gwConfig.ChassisID,
 		"always_learn_from_arp_request": "false",
