@@ -87,27 +87,25 @@ func NewNetAttachDefinitionController(
 	wf watchFactory,
 	recorder record.EventRecorder,
 ) (*NetAttachDefinitionController, error) {
+	nadInformer := wf.NADInformer()
 	nadController := &NetAttachDefinitionController{
-		name:           fmt.Sprintf("[%s NAD controller]", name),
-		recorder:       recorder,
-		nads:           map[string]string{},
-		primaryNADs:    map[string]string{},
-		networkManager: newNetworkManager(name, ncm),
+		name:               fmt.Sprintf("[%s NAD controller]", name),
+		recorder:           recorder,
+		netAttachDefLister: nadInformer.Lister(),
+		networkManager:     newNetworkManager(name, ncm),
+		nads:               map[string]string{},
+		primaryNADs:        map[string]string{},
 	}
 
 	config := &controller.ControllerConfig[nettypes.NetworkAttachmentDefinition]{
 		RateLimiter:    workqueue.DefaultTypedControllerRateLimiter[string](),
+		Informer:       nadInformer.Informer(),
+		Lister:         nadController.netAttachDefLister.List,
 		Reconcile:      nadController.sync,
 		ObjNeedsUpdate: nadNeedsUpdate,
 		Threadiness:    1,
 	}
 
-	nadInformer := wf.NADInformer()
-	if nadInformer != nil {
-		nadController.netAttachDefLister = nadInformer.Lister()
-		config.Informer = nadInformer.Informer()
-		config.Lister = nadController.netAttachDefLister.List
-	}
 	if util.IsNetworkSegmentationSupportEnabled() {
 		udnInformer := wf.UserDefinedNetworkInformer()
 
