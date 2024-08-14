@@ -90,8 +90,16 @@ func (c *Controller) getDefaultEndpointSliceKey(endpointSlice *v1.EndpointSlice)
 func (c *Controller) enqueueEndpointSlice(obj interface{}) {
 	eps, ok := obj.(*v1.EndpointSlice)
 	if !ok {
-		klog.Errorf("Enqueued non-endpointSlice object %+v, skipping", obj)
-		return
+		tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
+		if !ok {
+			utilruntime.HandleError(fmt.Errorf("passed object is neither an EndpointSlice nor a DeletedFinalStateUnknown type: %#v", obj))
+			return
+		}
+		eps, ok = tombstone.Obj.(*v1.EndpointSlice)
+		if !ok {
+			utilruntime.HandleError(fmt.Errorf("tombstone contained object that is not a EndpointSlice: %#v", obj))
+			return
+		}
 	}
 	if key := c.getDefaultEndpointSliceKey(eps); key != "" {
 		c.queue.AddRateLimited(key)
