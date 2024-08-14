@@ -30,41 +30,13 @@ var _ = Describe("NetAttachDefTemplate", func() {
 		Entry("invalid topology: topology layer2 & layer3 config",
 			&udnv1.UserDefinedNetworkSpec{Topology: udnv1.NetworkTopologyLayer2, Layer3: &udnv1.Layer3Config{}},
 		),
-		Entry("invalid topology: topology layer2 & localnet config",
-			&udnv1.UserDefinedNetworkSpec{Topology: udnv1.NetworkTopologyLayer2, LocalNet: &udnv1.LocalNetConfig{}},
-		),
 		Entry("invalid topology: topology layer3 & layer2 config",
 			&udnv1.UserDefinedNetworkSpec{Topology: udnv1.NetworkTopologyLayer3, Layer2: &udnv1.Layer2Config{}},
-		),
-		Entry("invalid topology: topology layer3 & localnet config",
-			&udnv1.UserDefinedNetworkSpec{Topology: udnv1.NetworkTopologyLayer3, LocalNet: &udnv1.LocalNetConfig{}},
-		),
-		Entry("invalid topology: topology localnet & layer2 config",
-			&udnv1.UserDefinedNetworkSpec{Topology: udnv1.NetworkTopologyLocalNet, Layer2: &udnv1.Layer2Config{}},
-		),
-		Entry("invalid topology: topology localnet & layer3 config",
-			&udnv1.UserDefinedNetworkSpec{Topology: udnv1.NetworkTopologyLocalNet, Layer3: &udnv1.Layer3Config{}},
-		),
-		Entry("topology=localnet & role=primary",
-			&udnv1.UserDefinedNetworkSpec{
-				Topology: udnv1.NetworkTopologyLocalNet,
-				LocalNet: &udnv1.LocalNetConfig{
-					Role: udnv1.NetworkRolePrimary,
-				},
-			},
 		),
 		Entry("invalid layer2 subnets",
 			&udnv1.UserDefinedNetworkSpec{
 				Topology: udnv1.NetworkTopologyLayer2,
 				Layer2: &udnv1.Layer2Config{
-					Subnets: udnv1.DualStackCIDRs{"abc"},
-				},
-			},
-		),
-		Entry("invalid localnet subnets",
-			&udnv1.UserDefinedNetworkSpec{
-				Topology: udnv1.NetworkTopologyLayer2,
-				LocalNet: &udnv1.LocalNetConfig{
 					Subnets: udnv1.DualStackCIDRs{"abc"},
 				},
 			},
@@ -124,15 +96,6 @@ var _ = Describe("NetAttachDefTemplate", func() {
 					Subnets: []udnv1.Layer3Subnet{
 						{CIDR: "10.10.0.0/24", HostSubnet: 33},
 					},
-				},
-			},
-		),
-		Entry("invalid exclude subnets",
-			&udnv1.UserDefinedNetworkSpec{
-				Topology: udnv1.NetworkTopologyLocalNet,
-				LocalNet: &udnv1.LocalNetConfig{
-					Role:           udnv1.NetworkRolePrimary,
-					ExcludeSubnets: []udnv1.CIDR{"abc"},
 				},
 			},
 		),
@@ -343,30 +306,6 @@ var _ = Describe("NetAttachDefTemplate", func() {
 			  "role": "secondary",
 			  "topology": "layer2",
 			  "subnets": "192.168.100.0/24,2001:dbb::/64",
-			  "mtu": 1500,
-			  "allowPersistentIPs": true
-			}`,
-		),
-		Entry("localnet topology, should set exclude-subnets",
-			udnv1.UserDefinedNetworkSpec{
-				Topology: udnv1.NetworkTopologyLocalNet,
-				LocalNet: &udnv1.LocalNetConfig{
-					Role:           udnv1.NetworkRoleSecondary,
-					Subnets:        []udnv1.CIDR{"192.168.100.0/24"},
-					ExcludeSubnets: []udnv1.CIDR{"192.168.100.0/31"},
-					MTU:            1500,
-					IPAMLifecycle:  udnv1.IPAMLifecyclePersistent,
-				},
-			},
-			`{
-			  "cniVersion": "1.0.0",
-			  "type": "ovn-k8s-cni-overlay",
-			  "name": "mynamespace.test-net",
-			  "netAttachDefName": "mynamespace/test-net",
-			  "role": "secondary",
-			  "topology": "localnet",
-			  "subnets": "192.168.100.0/24",
-			  "excludeSubnets": "192.168.100.0/31",
 			  "mtu": 1500,
 			  "allowPersistentIPs": true
 			}`,
