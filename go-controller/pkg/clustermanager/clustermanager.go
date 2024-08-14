@@ -13,6 +13,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/dnsnameresolver"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/egressservice"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/endpointslicemirror"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/routeadvertisements"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/status_manager"
 	udncontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/userdefinednetwork"
 	udntemplate "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/userdefinednetwork/template"
@@ -58,6 +59,8 @@ type ClusterManager struct {
 
 	// networkManager creates and deletes network controllers
 	networkManager networkmanager.Controller
+
+	raController *routeadvertisements.Controller
 }
 
 // NewClusterManager creates a new cluster manager to manage the cluster nodes.
@@ -156,6 +159,10 @@ func NewClusterManager(ovnClient *util.OVNClusterManagerClientset, wf *factory.W
 		}
 	}
 
+	if util.IsRouteAdvertisementsEnabled() {
+		cm.raController = routeadvertisements.NewController(wf, ovnClient)
+	}
+
 	return cm, nil
 }
 
@@ -221,6 +228,14 @@ func (cm *ClusterManager) Start(ctx context.Context) error {
 			return err
 		}
 	}
+
+	if cm.raController != nil {
+		err := cm.raController.Start()
+		if err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -247,5 +262,9 @@ func (cm *ClusterManager) Stop() {
 	}
 	if util.IsNetworkSegmentationSupportEnabled() {
 		cm.userDefinedNetworkController.Shutdown()
+	}
+	if cm.raController != nil {
+		cm.raController.Stop()
+		cm.raController = nil
 	}
 }
