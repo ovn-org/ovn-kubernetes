@@ -50,9 +50,11 @@ func NewSecondaryNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, n
 		if err != nil {
 			return nil, fmt.Errorf("error retrieving network id for network %s: %v", netInfo.GetNetworkName(), err)
 		}
-		snnc.gateway, err = NewUserDefinedNetworkGateway(snnc.NetInfo, networkID, node, snnc.watchFactory.NodeCoreInformer().Lister(), snnc.Kube, vrfManager, defaultNetworkGateway)
-		if err != nil {
-			return nil, fmt.Errorf("error creating UDN gateway %v", err)
+		if snnc.NetInfo.TopologyType() == types.Layer3Topology {
+			snnc.gateway, err = NewUserDefinedNetworkGateway(snnc.NetInfo, networkID, node, snnc.watchFactory.NodeCoreInformer().Lister(), snnc.Kube, vrfManager, defaultNetworkGateway)
+			if err != nil {
+				return nil, fmt.Errorf("error creating UDN gateway %v", err)
+			}
 		}
 	}
 	return snnc, nil
@@ -70,7 +72,7 @@ func (nc *SecondaryNodeNetworkController) Start(ctx context.Context) error {
 		}
 		nc.podHandler = handler
 	}
-	if util.IsNetworkSegmentationSupportEnabled() && nc.IsPrimaryNetwork() {
+	if util.IsNetworkSegmentationSupportEnabled() && nc.IsPrimaryNetwork() && nc.TopologyType() == types.Layer3Topology {
 		if err := nc.gateway.AddNetwork(); err != nil {
 			return fmt.Errorf("failed to add network to node gateway for network %s at node %s: %w",
 				nc.GetNetworkName(), nc.name, err)
