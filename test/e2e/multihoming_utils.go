@@ -520,3 +520,18 @@ func getNetworkGateway(cli *client.Client, networkName string) (string, error) {
 
 	return "", fmt.Errorf("Gateway not found for network %q", networkName)
 }
+
+// in order to ensure that Network Attached Definitions are cleaned up properly the pods must be removed first
+func cleanupPods(cs clientset.Interface, namespace string) error {
+	podList, err := cs.CoreV1().Pods(namespace).List(context.Background(), metav1.ListOptions{})
+	if err != nil {
+		return err
+	}
+	for _, pod := range podList.Items {
+		if err := e2epod.DeletePodWithWait(context.TODO(), cs, &pod); err != nil {
+			return err
+		}
+	}
+	return nil
+
+}

@@ -46,6 +46,10 @@ var _ = Describe("Network Segmentation", func() {
 		nadClient, err = nadclient.NewForConfig(f.ClientConfig())
 		Expect(err).NotTo(HaveOccurred())
 	})
+	AfterEach(func() {
+		err := cleanupPods(cs, f.Namespace.Name)
+		Expect(err).NotTo(HaveOccurred())
+	})
 
 	Context("a user defined primary network", func() {
 		const (
@@ -172,6 +176,8 @@ var _ = Describe("Network Segmentation", func() {
 						}, metav1.CreateOptions{})
 						Expect(err).NotTo(HaveOccurred())
 						defer func() {
+							err := cleanupPods(cs, defaultNetNamespace)
+							Expect(err).NotTo(HaveOccurred())
 							Expect(cs.CoreV1().Namespaces().Delete(context.Background(), defaultNetNamespace, metav1.DeleteOptions{})).To(Succeed())
 						}()
 

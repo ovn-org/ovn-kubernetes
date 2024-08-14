@@ -41,6 +41,10 @@ var _ = Describe("Network Segmentation EndpointSlices mirroring", func() {
 			nadClient, err = nadclient.NewForConfig(f.ClientConfig())
 			Expect(err).NotTo(HaveOccurred())
 		})
+		AfterEach(func() {
+			err := cleanupPods(cs, f.Namespace.Name)
+			Expect(err).NotTo(HaveOccurred())
+		})
 
 		DescribeTable(
 			"mirrors EndpointSlices managed by the default controller for namespaces with user defined primary networks",
