@@ -358,7 +358,7 @@ github.com/openshift/client-go/network/listers/network/v1alpha1
 # github.com/openshift/custom-resource-status v1.1.2
 ## explicit; go 1.12
 github.com/openshift/custom-resource-status/conditions/v1
-# github.com/ovn-org/libovsdb v0.6.1-0.20240125124854-03f787b1a892
+# github.com/ovn-org/libovsdb v0.6.1-0.20240125124854-03f787b1a892 => github.com/npinaeva/libovsdb v0.0.0-20240814141653-f4ace685e8cb
 ## explicit; go 1.18
 github.com/ovn-org/libovsdb/cache
 github.com/ovn-org/libovsdb/client
@@ -1255,3 +1255,4 @@ sigs.k8s.io/yaml/goyaml.v2
 # github.com/coreos/go-iptables => github.com/trozet/go-iptables v0.0.0-20240328221912-077e672b3808
 # github.com/gogo/protobuf => github.com/gogo/protobuf v1.3.2
 # github.com/j-keck/arping => github.com/JacobTanenbaum/arping v0.0.0-20240209152419-3987db83bd51
+# github.com/ovn-org/libovsdb => github.com/npinaeva/libovsdb v0.0.0-20240814141653-f4ace685e8cb
