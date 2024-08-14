@@ -3,6 +3,7 @@ package services
 import (
 	"testing"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -16,7 +17,9 @@ func TestExternalIDsForLoadBalancer(t *testing.T) {
 	name := "svc-ab23"
 	namespace := "ns"
 	defaultNetInfo := util.DefaultNetInfo{}
-	UDNNetInfo := getSampleUDNNetInfo(namespace)
+	config.IPv4Mode = true
+	UDNNetInfo, err := getSampleUDNNetInfo(namespace)
+	assert.Equal(t, err, nil)
 	assert.Equal(t,
 		map[string]string{
 			types.LoadBalancerKindExternalID:  "Service",

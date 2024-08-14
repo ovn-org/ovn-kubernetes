@@ -569,6 +569,8 @@ func TestPodAllocator_reconcileForNAD(t *testing.T) {
 
 			config.OVNKubernetesFeature.EnableInterconnect = tt.idAllocation
 
+			// config.IPv4Mode needs to be set so that the ipv4 of the userdefined primary networks can match the running cluster
+			config.IPv4Mode = true
 			netInfo, err := util.NewNetInfo(netConf)
 			if err != nil {
 				t.Fatalf("Invalid netConf")
