@@ -47,7 +47,9 @@ func (c *openflowManager) addNetwork(nInfo util.NetInfo, masqCTMark uint) {
 }
 
 func (c *openflowManager) delNetwork(nInfo util.NetInfo) {
+	klog.Infof("DEBUG| openflowManager BEFORE delete delete size: %d | ", len(c.defaultBridge.netConfig))
 	c.defaultBridge.delNetworkBridgeConfig(nInfo)
+	klog.Infof("DEBUG| openflowManager AFTER delete size: %d | ", len(c.defaultBridge.netConfig))
 	if c.externalGatewayBridge != nil {
 		c.externalGatewayBridge.delNetworkBridgeConfig(nInfo)
 	}

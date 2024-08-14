@@ -71,6 +71,7 @@ func (nc *SecondaryNodeNetworkController) Start(ctx context.Context) error {
 		nc.podHandler = handler
 	}
 	if util.IsNetworkSegmentationSupportEnabled() && nc.IsPrimaryNetwork() {
+		klog.Infof("DEBUG| reconciling network %s", nc.GetNetworkName())
 		if err := nc.gateway.AddNetwork(); err != nil {
 			return fmt.Errorf("failed to add network to node gateway for network %s at node %s: %w",
 				nc.GetNetworkName(), nc.name, err)
@@ -92,7 +93,9 @@ func (nc *SecondaryNodeNetworkController) Stop() {
 
 // Cleanup cleans up node entities for the given secondary network
 func (nc *SecondaryNodeNetworkController) Cleanup() error {
+	klog.Infof("DEBUG| cleaning up network %q", nc.GetNetworkName())
 	if nc.gateway != nil {
+		klog.Infof("DEBUG| network %q has a GW; let's clean that up", nc.GetNetworkName())
 		return nc.gateway.DelNetwork()
 	}
 	return nil

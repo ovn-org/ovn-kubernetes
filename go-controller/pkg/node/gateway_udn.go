@@ -112,6 +112,7 @@ func (netConfig *bridgeUDNConfiguration) setBridgeNetworkOfPortsInternal() error
 		return fmt.Errorf("failed while waiting on patch port %q to be created by ovn-controller and "+
 			"while getting ofport. stderr: %v, error: %v", netConfig.patchPort, stderr, err)
 	}
+	klog.Infof("DEBUG| invoked setBridgeNetworkOfPortsInternal; ofPatchPort = %s", ofportPatch)
 	netConfig.ofPortPatch = ofportPatch
 	return nil
 }
@@ -124,6 +125,7 @@ func setBridgeNetworkOfPorts(bridge *bridgeConfiguration, netName string) error 
 	if !found {
 		return fmt.Errorf("failed to find network %s configuration on bridge %s", netName, bridge.bridgeName)
 	}
+	klog.Infof("DEBUG| invoked setBridgeNetworkOfPorts for network %s", netName)
 	return netConfig.setBridgeNetworkOfPortsInternal()
 }
 
@@ -165,10 +167,12 @@ func (udng *UserDefinedNetworkGateway) AddNetwork() error {
 
 		waiter := newStartupWaiter()
 		readyFunc := func() (bool, error) {
+			klog.Infof("DEBUG| inside ready fn - supposed to reconcile for network %s", udng.GetNetworkName())
 			if err := setBridgeNetworkOfPorts(udng.openflowManager.defaultBridge, udng.GetNetworkName()); err != nil {
 				return false, fmt.Errorf("failed to set network %s's openflow ports for default bridge; error: %v", udng.GetNetworkName(), err)
 			}
 			if udng.openflowManager.externalGatewayBridge != nil {
+				klog.Infof("DEBUG| inside ready fn - ext br - supposed to reconcile for network %s", udng.GetNetworkName())
 				if err := setBridgeNetworkOfPorts(udng.openflowManager.externalGatewayBridge, udng.GetNetworkName()); err != nil {
 					return false, fmt.Errorf("failed to set network %s's openflow ports for secondary bridge; error: %v", udng.GetNetworkName(), err)
 				}
@@ -195,12 +199,15 @@ func (udng *UserDefinedNetworkGateway) AddNetwork() error {
 // DelNetwork will be responsible to remove all plumbings
 // used by this UDN on the gateway side
 func (udng *UserDefinedNetworkGateway) DelNetwork() error {
+	klog.Infof("DEBUG| network %q DEL net invoked", udng.GetNetworkName())
 	vrfDeviceName := util.GetVRFDeviceNameForUDN(udng.networkID)
 	err := udng.vrfManager.DeleteVRF(vrfDeviceName)
 	if err != nil {
 		return err
 	}
+	klog.Infof("DEBUG| network %q DEL net | will check for openflow mgnr presence", udng.GetNetworkName())
 	if udng.openflowManager != nil {
+		klog.Infof("DEBUG| network %q DEL net | openflow MANAGER found; DELETING NETs", udng.GetNetworkName())
 		udng.openflowManager.delNetwork(udng.NetInfo)
 		if err := udng.Reconcile(); err != nil {
 			return fmt.Errorf("failed to reconcile default gateway for network %s, err: %v", udng.GetNetworkName(), err)

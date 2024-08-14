@@ -1120,7 +1120,8 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 		if err != nil {
 			return nil, fmt.Errorf("unable to determine IPv4 physical IP of host: %v", err)
 		}
-		for _, netConfig := range bridge.netConfig {
+		for netName, netConfig := range bridge.netConfig {
+			klog.Infof("DEBUG| network name: %q; netConfig.ofPortPatch = %s", netName, netConfig.ofPortPatch)
 			// table 0, SVC Hairpin from OVN destined to local host, DNAT and go to table 4
 			dftFlows = append(dftFlows,
 				fmt.Sprintf("cookie=%s, priority=500, in_port=%s, ip, ip_dst=%s, ip_src=%s,"+
@@ -1662,7 +1663,8 @@ func setBridgeOfPorts(bridge *bridgeConfiguration) error {
 	bridge.Lock()
 	defer bridge.Unlock()
 	// Get ofport of patchPort
-	for _, netConfig := range bridge.netConfig {
+	for netName, netConfig := range bridge.netConfig {
+		klog.Infof("DEBUG| invoked setBridgeOfPorts for network %q for bridge %v", netName, bridge)
 		if err := netConfig.setBridgeNetworkOfPortsInternal(); err != nil {
 			return fmt.Errorf("error setting bridge openflow ports for network with patchport %v: err: %v", netConfig.patchPort, err)
 		}
