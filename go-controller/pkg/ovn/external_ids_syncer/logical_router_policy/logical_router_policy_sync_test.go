@@ -12,7 +12,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
-	ginkgotable "github.com/onsi/ginkgo/extensions/table"
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 )
@@ -66,12 +65,12 @@ var _ = ginkgo.Describe("OVN Logical Router Syncer", func() {
 	)
 
 	ginkgo.Context("EgressIP", func() {
-		ginkgotable.DescribeTable("reroutes", func(sync lrpSync) {
+		ginkgo.DescribeTable("reroutes", func(sync lrpSync) {
 			// pod reroutes may not have any owner references besides 'name' which equals EgressIP name
 			performTest(defaultNetworkControllerName, sync.initialLRPs, sync.finalLRPs, sync.v4ClusterSubnets, sync.v6ClusterSubnets,
 				sync.v4JoinSubnet, sync.v6JoinSubnet, sync.pods)
 		},
-			ginkgotable.Entry("add reference to IPv4 LRP with no reference", lrpSync{
+			ginkgo.Entry("add reference to IPv4 LRP with no reference", lrpSync{
 				initialLRPs: []*nbdb.LogicalRouterPolicy{getReRouteLRP(podNamespace, podName, v4PodIPStr, 0, v4IPFamilyValue,
 					v4PodNextHops, map[string]string{"name": egressIPName}, defaultNetworkControllerName)},
 				finalLRPs: []*nbdb.LogicalRouterPolicy{getReRouteLRP(podNamespace, podName, v4PodIPStr, 0, v4IPFamilyValue, v4PodNextHops,
@@ -82,7 +81,7 @@ var _ = ginkgo.Describe("OVN Logical Router Syncer", func() {
 				v4JoinSubnet:     v4JoinSubnet,
 				pods:             podsNetInfo{v4PodNetInfo, v6PodNetInfo, v4Pod2NetInfo},
 			}),
-			ginkgotable.Entry("add reference to IPv6 LRP with no reference", lrpSync{
+			ginkgo.Entry("add reference to IPv6 LRP with no reference", lrpSync{
 				initialLRPs: []*nbdb.LogicalRouterPolicy{getReRouteLRP(podNamespace, podName, v6PodIPStr, 0, v6IPFamilyValue,
 					v6PodNextHops, map[string]string{"name": egressIPName}, defaultNetworkControllerName)},
 				finalLRPs: []*nbdb.LogicalRouterPolicy{getReRouteLRP(podNamespace, podName, v6PodIPStr, 0, v6IPFamilyValue, v6PodNextHops,
@@ -92,7 +91,7 @@ var _ = ginkgo.Describe("OVN Logical Router Syncer", func() {
 				v6JoinSubnet:     v6JoinSubnet,
 				pods:             podsNetInfo{v4PodNetInfo, v6PodNetInfo, v4Pod2NetInfo},
 			}),
-			ginkgotable.Entry("add references to IPv4 & IPv6 (dual) LRP with no references", lrpSync{
+			ginkgo.Entry("add references to IPv4 & IPv6 (dual) LRP with no references", lrpSync{
 				initialLRPs: []*nbdb.LogicalRouterPolicy{
 					getReRouteLRP(podNamespace, podName, v4PodIPStr, 0, v4IPFamilyValue, v4PodNextHops, map[string]string{"name": egressIPName}, defaultNetworkControllerName),
 					getReRouteLRP(podNamespace, podName, v6PodIPStr, 0, v6IPFamilyValue, v6PodNextHops, map[string]string{"name": egressIPName}, defaultNetworkControllerName)},
@@ -107,7 +106,7 @@ var _ = ginkgo.Describe("OVN Logical Router Syncer", func() {
 				v6JoinSubnet:     v6JoinSubnet,
 				pods:             podsNetInfo{v4PodNetInfo, v6PodNetInfo, v4Pod2NetInfo},
 			}),
-			ginkgotable.Entry("does not modify IPv4 LRP which contains a reference", lrpSync{
+			ginkgo.Entry("does not modify IPv4 LRP which contains a reference", lrpSync{
 				initialLRPs: []*nbdb.LogicalRouterPolicy{getReRouteLRP(podNamespace, podName, v4PodIPStr, 0, v4IPFamilyValue, v4PodNextHops,
 					getEgressIPLRPReRouteDbIDs(egressIPName, podNamespace, podName, v4IPFamilyValue, defaultNetworkName, defaultNetworkControllerName).GetExternalIDs(),
 					defaultNetworkControllerName)},
@@ -118,7 +117,7 @@ var _ = ginkgo.Describe("OVN Logical Router Syncer", func() {
 				v4JoinSubnet:     v4JoinSubnet,
 				pods:             podsNetInfo{v4PodNetInfo},
 			}),
-			ginkgotable.Entry("does not return error when unable to build a reference because of failed pod IP lookup", lrpSync{
+			ginkgo.Entry("does not return error when unable to build a reference because of failed pod IP lookup", lrpSync{
 				initialLRPs: []*nbdb.LogicalRouterPolicy{getReRouteLRP(podNamespace, podName, v4PodIPStr, 0, v4IPFamilyValue, v4PodNextHops,
 					map[string]string{"name": egressIPName},
 					defaultNetworkControllerName)},
@@ -131,12 +130,12 @@ var _ = ginkgo.Describe("OVN Logical Router Syncer", func() {
 			}),
 		)
 
-		ginkgotable.DescribeTable("pod to join, pod to pod, pod to node aka 'no reroutes'", func(sync lrpSync) {
+		ginkgo.DescribeTable("pod to join, pod to pod, pod to node aka 'no reroutes'", func(sync lrpSync) {
 			// pod to join LRPs may not have any owner references specified
 			performTest(defaultNetworkControllerName, sync.initialLRPs, sync.finalLRPs, sync.v4ClusterSubnets, sync.v6ClusterSubnets,
 				sync.v4JoinSubnet, sync.v6JoinSubnet, nil)
 		},
-			ginkgotable.Entry("does not modify LRP with owner references", lrpSync{
+			ginkgo.Entry("does not modify LRP with owner references", lrpSync{
 				initialLRPs: []*nbdb.LogicalRouterPolicy{getNoReRouteLRP(fmt.Sprintf("ip4.src == %s && ip4.dst == %s", v4PodClusterSubnetStr, v4JoinSubnetStr),
 					getEgressIPLRPNoReRoutePodToJoinDbIDs(v4IPFamilyValue, defaultNetworkName, "controller").GetExternalIDs(), nil),
 				},
@@ -147,7 +146,7 @@ var _ = ginkgo.Describe("OVN Logical Router Syncer", func() {
 				v4ClusterSubnets: []*net.IPNet{v4PodClusterSubnet},
 				v4JoinSubnet:     v4JoinSubnet,
 			}),
-			ginkgotable.Entry("updates IPv4 pod to pod, pod to join, pod to node with no references and does not modify LRP with references", lrpSync{
+			ginkgo.Entry("updates IPv4 pod to pod, pod to join, pod to node with no references and does not modify LRP with references", lrpSync{
 				initialLRPs: []*nbdb.LogicalRouterPolicy{
 					{
 						Priority: types.DefaultNoRereoutePriority,
@@ -212,7 +211,7 @@ var _ = ginkgo.Describe("OVN Logical Router Syncer", func() {
 				v6ClusterSubnets: []*net.IPNet{v6PodClusterSubnet},
 				v6JoinSubnet:     v6JoinSubnet,
 			}),
-			ginkgotable.Entry("updates IPv6 pod to pod, pod to join with no references and does not modify LRP with references", lrpSync{
+			ginkgo.Entry("updates IPv6 pod to pod, pod to join with no references and does not modify LRP with references", lrpSync{
 				initialLRPs: []*nbdb.LogicalRouterPolicy{
 					{
 						Priority: types.DefaultNoRereoutePriority,
@@ -275,7 +274,7 @@ var _ = ginkgo.Describe("OVN Logical Router Syncer", func() {
 				v6ClusterSubnets: []*net.IPNet{v6PodClusterSubnet},
 				v6JoinSubnet:     v6JoinSubnet,
 			}),
-			ginkgotable.Entry("updates IPv4 & IPv6 pod to pod, pod to join with no references and does not modify LRP with references", lrpSync{
+			ginkgo.Entry("updates IPv4 & IPv6 pod to pod, pod to join with no references and does not modify LRP with references", lrpSync{
 				initialLRPs: []*nbdb.LogicalRouterPolicy{
 					{
 						Priority: types.DefaultNoRereoutePriority,
