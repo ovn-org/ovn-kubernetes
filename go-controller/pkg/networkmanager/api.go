@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"k8s.io/client-go/tools/record"
 )
@@ -22,6 +23,9 @@ const (
 // information to the rest of the project.
 type Interface interface {
 	GetActiveNetworkForNamespace(namespace string) (util.NetInfo, error)
+
+	// GetNetwork returns the network of the given name or nil if unknown
+	GetNetwork(name string) util.NetInfo
 }
 
 // Controller handles the runtime of the package
@@ -159,6 +163,13 @@ func (nm defaultNetworkManager) Stop() {}
 
 func (nm defaultNetworkManager) GetActiveNetworkForNamespace(string) (util.NetInfo, error) {
 	return &util.DefaultNetInfo{}, nil
+}
+
+func (nm defaultNetworkManager) GetNetwork(name string) util.NetInfo {
+	if name != types.DefaultNetworkName {
+		return nil
+	}
+	return &util.DefaultNetInfo{}
 }
 
 var def Controller = &defaultNetworkManager{}
