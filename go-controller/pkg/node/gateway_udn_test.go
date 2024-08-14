@@ -311,6 +311,9 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		}
 		nad := ovntest.GenerateNAD(netName, "rednad", "greenamespace",
 			types.Layer3Topology, "100.128.0.0/16/24,ae70::66/60", types.NetworkRolePrimary)
+		// must be defined so that the primary user defined network can match the ip families of the underlying cluster
+		config.IPv4Mode = true
+		config.IPv6Mode = true
 		netInfo, err := util.ParseNADInfo(nad)
 		Expect(err).NotTo(HaveOccurred())
 		udnGateway, err := NewUserDefinedNetworkGateway(netInfo, 3, node, factoryMock.NodeCoreInformer().Lister(),
@@ -380,6 +383,9 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		}
 		nad := ovntest.GenerateNAD(netName, "rednad", "greenamespace",
 			types.Layer2Topology, "100.128.0.0/16,ae70::66/60", types.NetworkRolePrimary)
+		// must be defined so that the primary user defined network can match the ip families of the underlying cluster
+		config.IPv4Mode = true
+		config.IPv6Mode = true
 		netInfo, err := util.ParseNADInfo(nad)
 		Expect(err).NotTo(HaveOccurred())
 		udnGateway, err := NewUserDefinedNetworkGateway(netInfo, 3, node, factoryMock.NodeCoreInformer().Lister(),

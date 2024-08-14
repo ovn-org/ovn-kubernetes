@@ -177,6 +177,9 @@ func TestWaitForPrimaryAnnotationFn(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.description, func(t *testing.T) {
 			g := NewWithT(t)
+			// needs to be set so the primary user defined networks can use ipfamilies supported by the underlying cluster
+			config.IPv4Mode = true
+			config.IPv6Mode = true
 			nadLister := v1nadmocks.NetworkAttachmentDefinitionLister{}
 			nadNamespaceLister := v1nadmocks.NetworkAttachmentDefinitionNamespaceLister{}
 			nadLister.On("NetworkAttachmentDefinitions", tt.namespace).Return(&nadNamespaceLister)

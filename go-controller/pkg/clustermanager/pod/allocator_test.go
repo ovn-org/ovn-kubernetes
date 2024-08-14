@@ -569,6 +569,8 @@ func TestPodAllocator_reconcileForNAD(t *testing.T) {
 
 			config.OVNKubernetesFeature.EnableInterconnect = tt.idAllocation
 
+			// config.IPv4Mode needs to be set so that the ipv4 of the userdefined primary networks can match the running cluster
+			config.IPv4Mode = true
 			netInfo, err := util.NewNetInfo(netConf)
 			if err != nil {
 				t.Fatalf("Invalid netConf")
@@ -637,6 +639,7 @@ func TestPodAllocator_reconcileForNAD(t *testing.T) {
 
 			err = a.reconcile(old, new, tt.args.release)
 			if len(tt.expectError) > 0 {
+				fmt.Printf("tt.name: %s\n", tt.name)
 				g.Expect(err).To(gomega.MatchError(gomega.ContainSubstring(tt.expectError)))
 			} else if err != nil {
 				t.Errorf("reconcile unexpected failure: %v", err)

@@ -10,6 +10,7 @@ import (
 
 	netv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	udnv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1"
 )
 
@@ -211,6 +212,9 @@ var _ = Describe("NetAttachDefTemplate", func() {
 				Spec: netv1.NetworkAttachmentDefinitionSpec{Config: expectedNadNetConf},
 			}
 
+			// must be defined so the primary user defined network can match the ip families of the underlying cluster
+			config.IPv4Mode = true
+			config.IPv6Mode = true
 			nad, err := RenderNetAttachDefManifest(testUdn)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(nad.TypeMeta).To(Equal(expectedNAD.TypeMeta))

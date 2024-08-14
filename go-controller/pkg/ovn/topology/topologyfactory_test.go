@@ -11,6 +11,7 @@ import (
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 
 	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -33,6 +34,9 @@ var _ = Describe("Topology factory", func() {
 
 	When("the original OVN DBs are empty", func() {
 		BeforeEach(func() {
+			// required so that NewNetInfo can properly determine the IP families the cluster supports
+			config.IPv4Mode = true
+			config.IPv6Mode = true
 			initialNBDB := []libovsdbtest.TestData{}
 			initialSBDB := []libovsdbtest.TestData{}
 			dbSetup := libovsdbtest.TestSetup{
