@@ -151,6 +151,10 @@ rules:
       resources:
           - frrconfigurations
       verbs: [ "create", "delete", "list", "patch", "update", "watch" ]
+    - apiGroups: [ "k8s.cni.cncf.io" ]
+      resources:
+      - network-attachment-definitions
+      verbs: ["patch"]
     {%- endif %}
 
 

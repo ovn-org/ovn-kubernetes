@@ -52,3 +52,7 @@ func (fnm *FakeNetworkManager) GetActiveNetworkForNamespace(namespace string) (u
 	}
 	return &util.DefaultNetInfo{}, nil
 }
+
+func (fnm *FakeNetworkManager) GetNetwork(name string) util.NetInfo {
+	return nil
+}
