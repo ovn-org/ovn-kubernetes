@@ -110,11 +110,11 @@ var _ = Describe("Network Segmentation", func() {
 						}
 					},
 					Entry(
-						"two pods connected over a L2 dualstack primary UDN",
+						"two pods connected over a L2 primary UDN",
 						networkAttachmentConfigParams{
 							name:     nadName,
 							topology: "layer2",
-							cidr:     fmt.Sprintf("%s,%s", userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+							cidr:     correctCIDRFamily(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
 							role:     "primary",
 						},
 						*podConfig(
@@ -130,11 +130,11 @@ var _ = Describe("Network Segmentation", func() {
 						),
 					),
 					Entry(
-						"two pods connected over a L3 dualstack primary UDN",
+						"two pods connected over a L3 primary UDN",
 						networkAttachmentConfigParams{
 							name:     nadName,
 							topology: "layer3",
-							cidr:     fmt.Sprintf("%s,%s", userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+							cidr:     correctCIDRFamily(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
 							role:     "primary",
 						},
 						*podConfig(
@@ -700,7 +700,6 @@ var _ = Describe("Network Segmentation", func() {
 				deleteClusterExternalContainer(externalContainerName)
 			})
 		})
-
 		DescribeTable(
 			"can be accessed to from the pods running in the Kubernetes cluster",
 			func(netConfigParams networkAttachmentConfigParams, clientPodConfig podConfiguration) {
@@ -753,32 +752,25 @@ var _ = Describe("Network Segmentation", func() {
 				podAnno, err := unmarshalPodAnnotation(updatedPod.Annotations, f.Namespace.Name+"/"+userDefinedNetworkName)
 				Expect(err).NotTo(HaveOccurred())
 				framework.Logf("Client pod's annotation for network %s is %v", userDefinedNetworkName, podAnno)
+
 				Expect(podAnno.Routes).To(HaveLen(expectedNumberOfRoutes(netConfig)))
 
-				By("asserting the *client* pod can contact the server's v4 IP located outside the cluster")
-				Eventually(func() error {
-					return connectToServer(clientPodConfig, externalIpv4, port)
-				}, 2*time.Minute, 6*time.Second).Should(Succeed())
-
-				By("asserting the *client* pod can contact the server's v6 IP located outside the cluster")
-				Eventually(func() error {
-					return connectToServer(clientPodConfig, externalIpv6, port)
-				}, 2*time.Minute, 6*time.Second).Should(Succeed())
+				assertClientExternalConnectivity(clientPodConfig, externalIpv4, externalIpv6, port)
 			},
 			Entry("by one pod with dualstack addresses over a layer2 network",
 				networkAttachmentConfigParams{
 					name:     userDefinedNetworkName,
 					topology: "layer2",
-					cidr:     fmt.Sprintf("%s,%s", userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+					cidr:     correctCIDRFamily(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
 					role:     "primary",
 				},
 				*podConfig("client-pod"),
 			),
-			Entry("by one pod with dualstack addresses over a layer3 network",
+			Entry("by one pod over a layer3 network",
 				networkAttachmentConfigParams{
 					name:     userDefinedNetworkName,
 					topology: "layer3",
-					cidr:     fmt.Sprintf("%s,%s", userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+					cidr:     correctCIDRFamily(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
 					role:     "primary",
 				},
 				*podConfig("client-pod"),
@@ -935,10 +927,25 @@ spec:
   topology: Layer3
   layer3:
     role: Primary
-    subnets:
+    subnets: ` + generateCIDRforUDN()
+}
+
+func generateCIDRforUDN() string {
+	cidr := `
+    - cidr: 10.20.100.0/16
+`
+	if isIPv6Supported() && isIPv4Supported() {
+		cidr = `
     - cidr: 10.20.100.0/16
     - cidr: 2014:100:200::0/60
 `
+	} else if isIPv6Supported() {
+		cidr = `
+    - cidr: 2014:100:200::0/60
+`
+	}
+	return cidr
+
 }
 
 type podOption func(*podConfiguration)
@@ -1052,13 +1059,37 @@ func connectToServerViaDefaultNetwork(clientPodConfig podConfiguration, serverIP
 	return err
 }
 
+// assertClientExternalConnectivity checks if the client can connect to an externally created IP outside the cluster
+func assertClientExternalConnectivity(clientPodConfig podConfiguration, externalIpv4 string, externalIpv6 string, port int) {
+	if isIPv4Supported() {
+		By("asserting the *client* pod can contact the server's v4 IP located outside the cluster")
+		Eventually(func() error {
+			return connectToServer(clientPodConfig, externalIpv4, port)
+		}, 2*time.Minute, 6*time.Second).Should(Succeed())
+	}
+
+	if isIPv6Supported() {
+		By("asserting the *client* pod can contact the server's v6 IP located outside the cluster")
+		Eventually(func() error {
+			return connectToServer(clientPodConfig, externalIpv6, port)
+		}, 2*time.Minute, 6*time.Second).Should(Succeed())
+	}
+}
+
 func runExternalContainerCmd() []string {
 	return []string{"--network", "kind"}
 }
 
 func expectedNumberOfRoutes(netConfig networkAttachmentConfig) int {
 	if netConfig.topology == "layer2" {
-		return 4 // 2 routes per family
+		if isIPv6Supported() && isIPv4Supported() {
+			return 4 // 2 routes per family
+		} else {
+			return 2 //one family supported
+		}
 	}
-	return 6 // 3 v4 routes + 3 v6 routes for UDN
+	if isIPv6Supported() && isIPv4Supported() {
+		return 6 // 3 v4 routes + 3 v6 routes for UDN
+	}
+	return 3 //only one family, each has 3 routes
 }
