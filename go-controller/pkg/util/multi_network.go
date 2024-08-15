@@ -682,17 +682,30 @@ func NewNetInfo(netconf *ovncnitypes.NetConf) (NetInfo, error) {
 	if netconf.Name == types.DefaultNetworkName {
 		return &DefaultNetInfo{}, nil
 	}
+	var ni NetInfo
+	var err error
 	switch netconf.Topology {
 	case types.Layer3Topology:
-		return newLayer3NetConfInfo(netconf)
+		ni, err = newLayer3NetConfInfo(netconf)
 	case types.Layer2Topology:
-		return newLayer2NetConfInfo(netconf)
+		ni, err = newLayer2NetConfInfo(netconf)
 	case types.LocalnetTopology:
-		return newLocalnetNetConfInfo(netconf)
+		ni, err = newLocalnetNetConfInfo(netconf)
 	default:
 		// other topology NAD can be supported later
 		return nil, fmt.Errorf("topology %s not supported", netconf.Topology)
 	}
+	if err != nil {
+		return nil, err
+	}
+	ipv4Mode, ipv6Mode := ni.IPMode()
+	if ipv4Mode && !config.IPv4Mode {
+		return nil, fmt.Errorf("network %s is attempting to use ipv4 subnets, which the cluster does not support", ni.GetNetworkName())
+	}
+	if ipv6Mode && !config.IPv6Mode {
+		return nil, fmt.Errorf("network %s is attempting to use ipv6 subnets, which the cluster does not support", ni.GetNetworkName())
+	}
+	return ni, nil
 }
 
 // ParseNADInfo parses config in NAD spec and return a NetAttachDefInfo object for secondary networks
@@ -762,19 +775,21 @@ func ValidateNetConf(nadName string, netconf *ovncnitypes.NetConf) error {
 	}
 
 	//ensure that the cluster supports ipfamilies that the NAD is using
-	if len(netconf.Subnets) > 0 {
-		subnetList, _, err := parseSubnets(netconf.Subnets, netconf.ExcludeSubnets, netconf.Topology)
-		if err != nil {
-			return err
-		}
-		for _, subnet := range subnetList {
-			if knet.IsIPv6CIDR(subnet.CIDR) && !config.IPv6Mode {
-				return fmt.Errorf("subnet %s for network %s is invalid, cluster does not support ipv6", subnet.String(), netconf.Name)
-			} else if knet.IsIPv4CIDR(subnet.CIDR) && !config.IPv4Mode {
-				return fmt.Errorf("subnet %s for network %s is invalid, cluster does not support ipv4", subnet.String(), netconf.Name)
+	/*
+		if len(netconf.Subnets) > 0 {
+			subnetList, _, err := parseSubnets(netconf.Subnets, netconf.ExcludeSubnets, netconf.Topology)
+			if err != nil {
+				return err
+			}
+			for _, subnet := range subnetList {
+				if knet.IsIPv6CIDR(subnet.CIDR) && !config.IPv6Mode {
+					return fmt.Errorf("subnet %s for network %s is invalid, cluster does not support ipv6", subnet.String(), netconf.Name)
+				} else if knet.IsIPv4CIDR(subnet.CIDR) && !config.IPv4Mode {
+					return fmt.Errorf("subnet %s for network %s is invalid, cluster does not support ipv4", subnet.String(), netconf.Name)
+				}
 			}
 		}
-	}
+	*/
 
 	return nil
 }

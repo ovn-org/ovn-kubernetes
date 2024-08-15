@@ -622,6 +622,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 
 			g := gomega.NewWithT(t)
 
+			config.IPv4Mode = true
 			network := tt.args.network
 			if network == nil {
 				network = &nadapi.NetworkSelectionElement{}

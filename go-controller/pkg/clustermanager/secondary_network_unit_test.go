@@ -114,6 +114,7 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 			)
 
 			ginkgo.BeforeEach(func() {
+
 				fakeClient = &util.OVNClusterManagerClientset{
 					KubeClient:            fake.NewSimpleClientset(&v1.NodeList{Items: nodes()}),
 					IPAMClaimsClient:      fakeipamclaimclient.NewSimpleClientset(),
@@ -121,6 +122,7 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 				}
 
 				var err error
+				config.IPv6Mode = true
 				netInfo, err = util.NewNetInfo(
 					&ovncnitypes.NetConf{
 						NetConf:  types.NetConf{Name: "blue"},
@@ -676,6 +678,7 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 
 			ginkgo.BeforeEach(func() {
 				var err error
+				config.IPv6Mode = true
 				netInfo, err = util.NewNetInfo(
 					&ovncnitypes.NetConf{
 						NetConf:  types.NetConf{Name: "blue"},
