@@ -531,6 +531,12 @@ var _ = Describe("Network Segmentation", func() {
 		DescribeTable(
 			"can be accessed to from the pods running in the Kubernetes cluster",
 			func(netConfigParams networkAttachmentConfigParams, clientPodConfig podConfiguration) {
+				if isLocalGWModeEnabled() {
+					const upstreamIssue = "https://github.com/ovn-org/ovn-kubernetes/pull/4554"
+					e2eskipper.Skipf(
+						"These tests are known to fail on Local Gateway deployments. Upstream issue: %s", upstreamIssue,
+					)
+				}
 				netConfig := newNetworkAttachmentConfig(netConfigParams)
 
 				netConfig.namespace = f.Namespace.Name
