@@ -826,7 +826,7 @@ func GetPodNADToNetworkMapping(pod *kapi.Pod, nInfo NetInfo) (bool, map[string]*
 
 	networkSelections := map[string]*nettypes.NetworkSelectionElement{}
 	podDesc := fmt.Sprintf("%s/%s", pod.Namespace, pod.Name)
-	if !nInfo.IsSecondary() && nInfo.IsPrimaryNetwork() {
+	if !nInfo.IsSecondary() {
 		network, err := GetK8sPodDefaultNetworkSelection(pod)
 		if err != nil {
 			// multus won't add this Pod if this fails, should never happen

@@ -644,6 +644,7 @@ var _ = Describe("Multi Homing", func() {
 		Context("localnet OVN-K secondary network", func() {
 			const (
 				clientPodName          = "client-pod"
+				nodeHostnameKey        = "kubernetes.io/hostname"
 				servicePort            = 9000
 				dockerNetworkName      = "underlay"
 				underlayServiceIP      = "60.128.0.1"
@@ -863,7 +864,7 @@ var _ = Describe("Multi Homing", func() {
 								[]mnpapi.MultiPolicyType{mnpapi.PolicyTypeIngress, mnpapi.PolicyTypeEgress},
 								nil,
 								[]mnpapi.MultiNetworkPolicyEgressRule{
-									{},
+									mnpapi.MultiNetworkPolicyEgressRule{},
 								},
 							),
 						),
@@ -878,7 +879,7 @@ var _ = Describe("Multi Homing", func() {
 								[]mnpapi.MultiPolicyType{mnpapi.PolicyTypeEgress},
 								nil,
 								[]mnpapi.MultiNetworkPolicyEgressRule{
-									{},
+									mnpapi.MultiNetworkPolicyEgressRule{},
 								},
 							),
 						),
