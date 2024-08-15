@@ -10,8 +10,9 @@ import (
 )
 
 type startupWaiter struct {
-	tasks []*waitTask
-	wg    *sync.WaitGroup
+	tasks   []*waitTask
+	wg      *sync.WaitGroup
+	timeout time.Duration
 }
 
 type waitFunc func() (bool, error)
@@ -22,11 +23,16 @@ type waitTask struct {
 	postFn postWaitFunc
 }
 
-func newStartupWaiter() *startupWaiter {
+func newStartupWaiterWithTimeout(timeout time.Duration) *startupWaiter {
 	return &startupWaiter{
-		tasks: make([]*waitTask, 0, 2),
-		wg:    &sync.WaitGroup{},
+		tasks:   make([]*waitTask, 0, 2),
+		wg:      &sync.WaitGroup{},
+		timeout: timeout,
 	}
+}
+
+func newStartupWaiter() *startupWaiter {
+	return newStartupWaiterWithTimeout(300 * time.Second)
 }
 
 func (w *startupWaiter) AddWait(waitFn waitFunc, postFn postWaitFunc) {
@@ -42,7 +48,7 @@ func (w *startupWaiter) Wait() error {
 		w.wg.Add(1)
 		go func(task *waitTask) {
 			defer w.wg.Done()
-			err := wait.PollUntilContextTimeout(context.Background(), 500*time.Millisecond, 300*time.Second, true, func(ctx context.Context) (bool, error) {
+			err := wait.PollUntilContextTimeout(context.Background(), 500*time.Millisecond, w.timeout, true, func(ctx context.Context) (bool, error) {
 				return task.waitFn()
 			})
 			if err == nil && task.postFn != nil {
