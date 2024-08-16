@@ -13,9 +13,13 @@ func clearPodBandwidth(sandboxID string) error {
 		return err
 	}
 
+	return clearPodBandwidthForPorts(portList, sandboxID)
+}
+
+func clearPodBandwidthForPorts(portList []string, sandboxID string) error {
 	// Clear the QoS for any ports of this sandbox
 	for _, port := range portList {
-		if err = ovsClear("port", port, "qos"); err != nil {
+		if err := ovsClear("port", port, "qos"); err != nil {
 			return err
 		}
 	}
