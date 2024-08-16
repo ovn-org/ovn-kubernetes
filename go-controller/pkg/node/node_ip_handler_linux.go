@@ -69,10 +69,10 @@ func newAddressManagerInternal(nodeName string, k kube.Interface, config *manage
 
 // updates the address manager with a new IP
 // returns true if there was an update
-func (c *addressManager) addAddr(ipnet net.IPNet) bool {
+func (c *addressManager) addAddr(ipnet net.IPNet, linkIndex int) bool {
 	c.Lock()
 	defer c.Unlock()
-	if !c.cidrs.Has(ipnet.String()) && c.isValidNodeIP(ipnet.IP) {
+	if !c.cidrs.Has(ipnet.String()) && c.isValidNodeIP(ipnet.IP, linkIndex) {
 		klog.Infof("Adding IP: %s, to node IP manager", ipnet)
 		c.cidrs.Insert(ipnet.String())
 		return true
@@ -83,10 +83,10 @@ func (c *addressManager) addAddr(ipnet net.IPNet) bool {
 
 // removes IP from address manager
 // returns true if there was an update
-func (c *addressManager) delAddr(ipnet net.IPNet) bool {
+func (c *addressManager) delAddr(ipnet net.IPNet, linkIndex int) bool {
 	c.Lock()
 	defer c.Unlock()
-	if c.cidrs.Has(ipnet.String()) && c.isValidNodeIP(ipnet.IP) {
+	if c.cidrs.Has(ipnet.String()) && c.isValidNodeIP(ipnet.IP, linkIndex) {
 		klog.Infof("Removing IP: %s, from node IP manager", ipnet)
 		c.cidrs.Delete(ipnet.String())
 		return true
@@ -151,9 +151,9 @@ func (c *addressManager) runInternal(stopChan <-chan struct{}, subscribe subscri
 			}
 			addrChanged := false
 			if a.NewAddr {
-				addrChanged = c.addAddr(a.LinkAddress)
+				addrChanged = c.addAddr(a.LinkAddress, a.LinkIndex)
 			} else {
-				addrChanged = c.delAddr(a.LinkAddress)
+				addrChanged = c.delAddr(a.LinkAddress, a.LinkIndex)
 			}
 
 			c.handleNodePrimaryAddrChange()
@@ -368,7 +368,7 @@ func (c *addressManager) nodePrimaryAddrChanged() (bool, error) {
 
 // detects if the IP is valid for a node
 // excludes things like local IPs, mgmt port ip, special masquerade IP and Egress IPs for non-ovs type interfaces
-func (c *addressManager) isValidNodeIP(addr net.IP) bool {
+func (c *addressManager) isValidNodeIP(addr net.IP, linkIndex int) bool {
 	if addr == nil {
 		return false
 	}
@@ -378,7 +378,7 @@ func (c *addressManager) isValidNodeIP(addr net.IP) bool {
 	if addr.IsLoopback() {
 		return false
 	}
-
+	// check CDN management port
 	if utilnet.IsIPv4(addr) {
 		if c.mgmtPortConfig.ipv4 != nil && c.mgmtPortConfig.ipv4.ifAddr.IP.Equal(addr) {
 			return false
@@ -386,6 +386,16 @@ func (c *addressManager) isValidNodeIP(addr net.IP) bool {
 	} else if utilnet.IsIPv6(addr) {
 		if c.mgmtPortConfig.ipv6 != nil && c.mgmtPortConfig.ipv6.ifAddr.IP.Equal(addr) {
 			return false
+		}
+	}
+	if util.IsNetworkSegmentationSupportEnabled() {
+		// check CDN + UDN management ports
+		if mpLink, err := util.GetNetLinkOps().LinkByIndex(linkIndex); err != nil {
+			klog.Errorf("Unable to determine if link is an OVN management port for address %s and link index %d: %v", addr.String(), linkIndex, err)
+		} else {
+			if strings.HasPrefix(mpLink.Attrs().Name, types.K8sMgmtIntfNamePrefix) {
+				return false
+			}
 		}
 	}
 
@@ -427,7 +437,7 @@ func (c *addressManager) sync() {
 
 	currAddresses := sets.New[string]()
 	for _, addr := range addrs {
-		if !c.isValidNodeIP(addr.IP) {
+		if !c.isValidNodeIP(addr.IP, addr.LinkIndex) {
 			klog.V(5).Infof("Skipping non-useable IP address for host: %s", addr.String())
 			continue
 		}

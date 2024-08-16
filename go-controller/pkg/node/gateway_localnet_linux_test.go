@@ -76,7 +76,8 @@ func startNodePortWatcher(n *nodePortWatcher, fakeClient *util.OVNNodeClientset,
 	n.nodeIPManager = newAddressManagerInternal(fakeNodeName, k, fakeMgmtPortConfig, n.watchFactory, nil, false)
 	localHostNetEp := "192.168.18.15/32"
 	ip, ipnet, _ := net.ParseCIDR(localHostNetEp)
-	n.nodeIPManager.addAddr(net.IPNet{IP: ip, Mask: ipnet.Mask})
+	ipFullNet := net.IPNet{IP: ip, Mask: ipnet.Mask}
+	n.nodeIPManager.cidrs.Insert(ipFullNet.String())
 
 	// Add or delete iptables rules from FORWARD chain based on DisableForwarding. This is
 	// to imitate addition or deletion of iptales rules done in newNodePortWatcher().
@@ -125,7 +126,8 @@ func startNodePortWatcherWithRetry(n *nodePortWatcher, fakeClient *util.OVNNodeC
 	n.nodeIPManager = newAddressManagerInternal(fakeNodeName, k, fakeMgmtPortConfig, n.watchFactory, nil, false)
 	localHostNetEp := "192.168.18.15/32"
 	ip, ipnet, _ := net.ParseCIDR(localHostNetEp)
-	n.nodeIPManager.addAddr(net.IPNet{IP: ip, Mask: ipnet.Mask})
+	ipFullNet := net.IPNet{IP: ip, Mask: ipnet.Mask}
+	n.nodeIPManager.cidrs.Insert(ipFullNet.String())
 
 	nodePortWatcherRetry := n.newRetryFrameworkForTests(factory.ServiceForFakeNodePortWatcherType, stopChan, wg)
 	if _, err := nodePortWatcherRetry.WatchResource(); err != nil {
