@@ -97,13 +97,18 @@ var _ = Describe("OVN Multi-Homed pod operations", func() {
 				Expect(netInfo.setupOVNDependencies(&initialDB)).To(Succeed())
 
 				if netInfo.isPrimary {
+					networkConfig, err := util.NewNetInfo(netInfo.netconf())
+					Expect(err).NotTo(HaveOccurred())
+
 					initialDB.NBData = append(
 						initialDB.NBData,
 						&nbdb.LogicalSwitch{
-							Name: fmt.Sprintf("%s_join", netInfo.netName),
+							Name:        fmt.Sprintf("%s_join", netInfo.netName),
+							ExternalIDs: standardNonDefaultNetworkExtIDs(networkConfig),
 						},
 						&nbdb.LogicalRouter{
-							Name: fmt.Sprintf("%s_ovn_cluster_router", netInfo.netName),
+							Name:        fmt.Sprintf("%s_ovn_cluster_router", netInfo.netName),
+							ExternalIDs: standardNonDefaultNetworkExtIDs(networkConfig),
 						},
 						&nbdb.LogicalRouterPort{
 							Name: fmt.Sprintf("rtos-%s_%s", netInfo.netName, nodeName),
@@ -589,6 +594,7 @@ func expectedLayer3EgressEntities(netInfo util.NetInfo, gwConfig util.L3GatewayC
 			Ports:        []string{rtosLRPUUID},
 			StaticRoutes: []string{staticRouteUUID1, staticRouteUUID2},
 			Policies:     []string{routerPolicyUUID1, routerPolicyUUID2},
+			ExternalIDs:  standardNonDefaultNetworkExtIDs(netInfo),
 		},
 		&nbdb.LogicalRouterPort{UUID: rtosLRPUUID, Name: rtosLRPName, Networks: []string{"192.168.0.1/16"}, MAC: "0a:58:c0:a8:00:01", GatewayChassis: []string{gatewayChassisUUID}},
 		expectedGRStaticRoute(staticRouteUUID1, networkIPv4Subnet, gwRouterIPAddress().IP.String(), &nbdb.LogicalRouterStaticRoutePolicySrcIP, nil),
@@ -719,9 +725,10 @@ func expectedJoinSwitchAndLSPs(netInfo util.NetInfo, nodeName string) []libovsdb
 	gwRouterName := netInfo.GetNetworkScopedGWRouterName(nodeName)
 	expectedData := []libovsdbtest.TestData{
 		&nbdb.LogicalSwitch{
-			UUID:  "join-UUID",
-			Name:  netInfo.GetNetworkScopedJoinSwitchName(),
-			Ports: []string{joinToGRLSPUUID},
+			UUID:        "join-UUID",
+			Name:        netInfo.GetNetworkScopedJoinSwitchName(),
+			Ports:       []string{joinToGRLSPUUID},
+			ExternalIDs: standardNonDefaultNetworkExtIDs(netInfo),
 		},
 		&nbdb.LogicalSwitchPort{
 			UUID:        joinToGRLSPUUID,
