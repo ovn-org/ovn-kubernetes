@@ -17,7 +17,7 @@ DOCKERFILE_ARCH =
 ifeq ($(ARCH),arm64)
         DOCKERFILE_ARCH=.arm64
 endif
-OVS_BRANCH ?= master
+OVS_BRANCH ?= main
 OVN_BRANCH ?= main
 OCI_BIN ?= docker
 
