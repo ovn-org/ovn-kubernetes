@@ -33,14 +33,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
-type secondaryNetInfo struct {
-	netName   string
-	nadName   string
-	subnets   string
-	topology  string
-	isPrimary bool
-}
-
 const (
 	dummyMACAddr         = "02:03:04:05:06:07"
 	nadName              = "blue-net"
@@ -340,7 +332,7 @@ func newPodWithPrimaryUDN(
 		nodeGWIP,
 		"192.168.0.3/16",
 		"0a:58:c0:a8:00:03",
-		"primary",
+		primaryUDNConfig.Role(),
 		0,
 		[]util.PodRoute{
 			{
@@ -393,28 +385,22 @@ func (sni *secondaryNetInfo) setupOVNDependencies(dbData *libovsdbtest.TestSetup
 		return err
 	}
 
+	var switchName string
 	switch sni.topology {
 	case ovntypes.Layer2Topology:
-		dbData.NBData = append(dbData.NBData, &nbdb.LogicalSwitch{
-			Name:        netInfo.GetNetworkScopedName(ovntypes.OVNLayer2Switch),
-			UUID:        netInfo.GetNetworkScopedName(ovntypes.OVNLayer2Switch) + "_UUID",
-			ExternalIDs: map[string]string{ovntypes.NetworkExternalID: sni.netName},
-		})
+		switchName = ovntypes.OVNLayer2Switch
 	case ovntypes.Layer3Topology:
-		dbData.NBData = append(dbData.NBData, &nbdb.LogicalSwitch{
-			Name:        netInfo.GetNetworkScopedName(nodeName),
-			UUID:        netInfo.GetNetworkScopedName(nodeName) + "_UUID",
-			ExternalIDs: map[string]string{ovntypes.NetworkExternalID: sni.netName},
-		})
+		switchName = nodeName
 	case ovntypes.LocalnetTopology:
-		dbData.NBData = append(dbData.NBData, &nbdb.LogicalSwitch{
-			Name:        netInfo.GetNetworkScopedName(ovntypes.OVNLocalnetSwitch),
-			UUID:        netInfo.GetNetworkScopedName(ovntypes.OVNLocalnetSwitch) + "_UUID",
-			ExternalIDs: map[string]string{ovntypes.NetworkExternalID: sni.netName},
-		})
+		switchName = ovntypes.OVNLocalnetSwitch
 	default:
 		return fmt.Errorf("missing topology in the network configuration: %v", sni)
 	}
+	dbData.NBData = append(dbData.NBData, &nbdb.LogicalSwitch{
+		Name:        netInfo.GetNetworkScopedName(switchName),
+		UUID:        netInfo.GetNetworkScopedName(switchName) + "_UUID",
+		ExternalIDs: map[string]string{ovntypes.NetworkExternalID: sni.netName},
+	})
 	return nil
 }
 
@@ -430,10 +416,13 @@ func (sni *secondaryNetInfo) netconf() *ovncnitypes.NetConf {
 			Name: sni.netName,
 			Type: plugin,
 		},
-		Topology: sni.topology,
-		NADName:  sni.nadName,
-		Subnets:  sni.subnets,
-		Role:     role,
+		Topology:        sni.topology,
+		NADName:         sni.nadName,
+		Subnets:         sni.subnets,
+		ExcludeSubnets:  sni.excludeSubnets,
+		ExtraRouteDests: sni.extraDest,
+		Gateways:        sni.gateway,
+		Role:            role,
 	}
 }
 
@@ -461,7 +450,7 @@ func dummyTestPod(nsName string, info secondaryNetInfo) testPod {
 		"",
 		"192.168.0.3/16",
 		"0a:58:c0:a8:00:03",
-		"secondary",
+		info.Role(),
 		0,
 		[]util.PodRoute{
 			{
@@ -490,6 +479,14 @@ func dummyPrimaryUserDefinedNetwork(subnets string) secondaryNetInfo {
 
 func (sni *secondaryNetInfo) String() string {
 	return fmt.Sprintf("%q: %q", sni.netName, sni.subnets)
+}
+
+func (sni *secondaryNetInfo) Role() string {
+	if sni.isPrimary {
+		return "primary"
+	} else {
+		return "secondary"
+	}
 }
 
 func newNodeWithSecondaryNets(nodeName string, nodeIPv4CIDR string, netInfos ...secondaryNetInfo) (*v1.Node, error) {

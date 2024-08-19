@@ -111,11 +111,17 @@ func (p testPod) populateSecondaryNetworkLogicalSwitchCache(fakeOvn *FakeOVN, oc
 		podInfo := p.secondaryPodInfos[ocInfo.bnc.GetNetworkName()]
 		err = ocInfo.bnc.lsManager.AddOrUpdateSwitch(ocInfo.bnc.GetNetworkScopedName(p.nodeName), []*net.IPNet{ovntest.MustParseIPNet(podInfo.nodeSubnet)})
 	case ovntypes.Layer2Topology:
-		subnet := ocInfo.bnc.Subnets()[0]
-		err = ocInfo.bnc.lsManager.AddOrUpdateSwitch(ocInfo.bnc.GetNetworkScopedName(ovntypes.OVNLayer2Switch), []*net.IPNet{subnet.CIDR})
+		subnets := make([]*net.IPNet, len(ocInfo.bnc.Subnets()))
+		for i, subnet := range ocInfo.bnc.Subnets() {
+			subnets[i] = subnet.CIDR
+		}
+		err = ocInfo.bnc.lsManager.AddOrUpdateSwitch(ocInfo.bnc.GetNetworkScopedName(ovntypes.OVNLayer2Switch), subnets, ocInfo.bnc.ExcludeSubnets()...)
 	case ovntypes.LocalnetTopology:
-		subnet := ocInfo.bnc.Subnets()[0]
-		err = ocInfo.bnc.lsManager.AddOrUpdateSwitch(ocInfo.bnc.GetNetworkScopedName(ovntypes.OVNLocalnetSwitch), []*net.IPNet{subnet.CIDR})
+		subnets := make([]*net.IPNet, len(ocInfo.bnc.Subnets()))
+		for i, subnet := range ocInfo.bnc.Subnets() {
+			subnets[i] = subnet.CIDR
+		}
+		err = ocInfo.bnc.lsManager.AddOrUpdateSwitch(ocInfo.bnc.GetNetworkScopedName(ovntypes.OVNLocalnetSwitch), subnets, ocInfo.bnc.ExcludeSubnets()...)
 	}
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 }
