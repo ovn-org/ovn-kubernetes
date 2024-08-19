@@ -256,27 +256,6 @@ func (pr *PodRequest) cmdDel(clientset *ClientSet) (*Response, error) {
 		if err != nil {
 			return nil, err
 		}
-
-		if util.IsNetworkSegmentationSupportEnabled() {
-			pod, err := clientset.getPod(pr.PodNamespace, pr.PodName)
-			if err != nil {
-				return nil, err
-			}
-			primaryUDN := udn.NewPrimaryNetwork(clientset.nadLister)
-			if err := primaryUDN.Ensure(namespace, pod.Annotations, pr.nadName); err != nil {
-				return nil, err
-			}
-			if primaryUDN.Found() {
-				primaryUDNPodRequest := pr.buildPrimaryUDNPodRequest(pod, primaryUDN)
-				primaryUDNPodInfo, err := primaryUDNPodRequest.buildPodInterfaceInfo(pod.Annotations, primaryUDN.Annotation(), primaryUDN.NetworkDevice())
-				if err != nil {
-					return nil, err
-				}
-				if err := podRequestInterfaceOps.UnconfigureInterface(primaryUDNPodRequest, primaryUDNPodInfo); err != nil {
-					return nil, err
-				}
-			}
-		}
 	} else {
 		// pass the isDPU flag and vfNetdevName back to cniShim
 		response.Result = nil
