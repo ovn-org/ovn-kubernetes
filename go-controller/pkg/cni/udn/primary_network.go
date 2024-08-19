@@ -74,50 +74,32 @@ func (p *UserDefinedPrimaryNetwork) WaitForPrimaryAnnotationFn(namespace string,
 		if annotation == nil {
 			return nil, false
 		}
-		if err := p.ensure(namespace, annotations, nadName, annotation); err != nil {
-			klog.Errorf("Failed ensuring user defined primary network: %v", err)
+
+		// CmdAdd from non default network is not realted to primary UDNs
+		if nadName != types.DefaultNetworkName {
+			return annotation, isReady
+		}
+
+		// If these are pods created before primary UDN functionality the
+		// default network without role is the primary network
+		if annotation.Role == "" {
+			annotation.Role = types.NetworkRolePrimary
+		}
+
+		if annotation.Role == types.NetworkRolePrimary {
+			return annotation, isReady
+		}
+
+		if err := p.ensureAnnotation(annotations); err != nil {
+			klog.Errorf("Failed looking for primary network annotation: %v", err)
+			return nil, false
+		}
+		if err := p.ensureActiveNetwork(namespace); err != nil {
+			klog.Errorf("Failed looking for primary network name: %v", err)
 			return nil, false
 		}
 		return annotation, isReady
 	}
-}
-
-func (p *UserDefinedPrimaryNetwork) Ensure(namespace string, annotations map[string]string, nadName string) error {
-	return p.ensure(namespace, annotations, nadName, nil /* parse annotation */)
-}
-
-func (p *UserDefinedPrimaryNetwork) ensure(namespace string, annotations map[string]string, nadName string, annotation *util.PodAnnotation) error {
-	// non default network is not related to primary UDNs
-	if nadName != types.DefaultNetworkName {
-		return nil
-	}
-
-	if annotation == nil {
-		var err error
-		annotation, err = util.UnmarshalPodAnnotation(annotations, nadName)
-		if err != nil {
-			return fmt.Errorf("failed looking for ovn pod annotations for nad '%s': %w", nadName, err)
-		}
-	}
-
-	// If these are pods created before primary UDN functionality the
-	// default network without role is the primary network
-	if annotation.Role == "" {
-		annotation.Role = types.NetworkRolePrimary
-	}
-
-	// If default network is the primary there is nothing else to do
-	if annotation.Role == types.NetworkRolePrimary {
-		return nil
-	}
-
-	if err := p.ensureAnnotation(annotations); err != nil {
-		return fmt.Errorf("failed looking for primary network annotation: %w", err)
-	}
-	if err := p.ensureActiveNetwork(namespace); err != nil {
-		return fmt.Errorf("failed looking for primary network name: %w", err)
-	}
-	return nil
 }
 
 func (p *UserDefinedPrimaryNetwork) ensureActiveNetwork(namespace string) error {
