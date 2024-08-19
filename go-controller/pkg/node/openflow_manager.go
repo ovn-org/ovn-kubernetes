@@ -2,14 +2,15 @@ package node
 
 import (
 	"fmt"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"net"
 	"os"
 	"regexp"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -28,19 +29,31 @@ type openflowManager struct {
 	flowChan chan struct{}
 }
 
-func (c *openflowManager) getDefaultBridgePorts() (string, string, string, string) {
-	c.defaultBridge.Lock()
-	defer c.defaultBridge.Unlock()
-	return c.defaultBridge.patchPort, c.defaultBridge.ofPortPatch,
-		c.defaultBridge.uplinkName, c.defaultBridge.ofPortPhys
+// UTILs Needed for UDN (also leveraged for default netInfo) in openflowmanager
+
+func (c *openflowManager) getDefaultBridgePortConfigurations() ([]bridgeUDNConfiguration, string, string) {
+	return c.defaultBridge.getBridgePortConfigurations()
 }
 
-func (c *openflowManager) getExGwBridgePorts() (string, string, string, string) {
-	c.externalGatewayBridge.Lock()
-	defer c.externalGatewayBridge.Unlock()
-	return c.externalGatewayBridge.patchPort, c.externalGatewayBridge.ofPortPatch,
-		c.externalGatewayBridge.uplinkName, c.externalGatewayBridge.ofPortPhys
+func (c *openflowManager) getExGwBridgePortConfigurations() ([]bridgeUDNConfiguration, string, string) {
+	return c.externalGatewayBridge.getBridgePortConfigurations()
 }
+
+func (c *openflowManager) addNetwork(nInfo util.NetInfo, masqCTMark uint, v4MasqIP, v6MasqIP *net.IPNet) {
+	c.defaultBridge.addNetworkBridgeConfig(nInfo, masqCTMark, v4MasqIP, v6MasqIP)
+	if c.externalGatewayBridge != nil {
+		c.externalGatewayBridge.addNetworkBridgeConfig(nInfo, masqCTMark, v4MasqIP, v6MasqIP)
+	}
+}
+
+func (c *openflowManager) delNetwork(nInfo util.NetInfo) {
+	c.defaultBridge.delNetworkBridgeConfig(nInfo)
+	if c.externalGatewayBridge != nil {
+		c.externalGatewayBridge.delNetworkBridgeConfig(nInfo)
+	}
+}
+
+// END UDN UTILs
 
 func (c *openflowManager) getDefaultBridgeName() string {
 	c.defaultBridge.Lock()
@@ -164,13 +177,13 @@ func (c *openflowManager) Run(stopChan <-chan struct{}, doneWg *sync.WaitGroup) 
 			select {
 			case <-timer.C:
 
-				if err := checkPorts(c.getDefaultBridgePorts()); err != nil {
+				if err := checkPorts(c.getDefaultBridgePortConfigurations()); err != nil {
 					klog.Errorf("Checkports failed %v", err)
 					continue
 				}
 
 				if c.externalGatewayBridge != nil {
-					if err := checkPorts(c.getExGwBridgePorts()); err != nil {
+					if err := checkPorts(c.getExGwBridgePortConfigurations()); err != nil {
 						klog.Errorf("Checkports failed %v", err)
 						continue
 					}
@@ -223,18 +236,23 @@ func (c *openflowManager) updateBridgeFlowCache(subnets []*net.IPNet, extraIPs [
 	return nil
 }
 
-func checkPorts(patchIntf, ofPortPatch, physIntf, ofPortPhys string) error {
+func checkPorts(netConfigs []bridgeUDNConfiguration, physIntf, ofPortPhys string) error {
 	// it could be that the ovn-controller recreated the patch between the host OVS bridge and
 	// the integration bridge, as a result the ofport number changed for that patch interface
-	curOfportPatch, stderr, err := util.GetOVSOfPort("--if-exists", "get", "Interface", patchIntf, "ofport")
-	if err != nil {
-		return fmt.Errorf("failed to get ofport of %s, stderr: %q: %w", patchIntf, stderr, err)
+	for _, netConfig := range netConfigs {
+		if netConfig.ofPortPatch == "" {
+			continue
+		}
+		curOfportPatch, stderr, err := util.GetOVSOfPort("--if-exists", "get", "Interface", netConfig.patchPort, "ofport")
+		if err != nil {
+			return fmt.Errorf("failed to get ofport of %s, stderr: %q: %w", netConfig.patchPort, stderr, err)
 
-	}
-	if ofPortPatch != curOfportPatch {
-		klog.Errorf("Fatal error: patch port %s ofport changed from %s to %s",
-			patchIntf, ofPortPatch, curOfportPatch)
-		os.Exit(1)
+		}
+		if netConfig.ofPortPatch != curOfportPatch {
+			klog.Errorf("Fatal error: patch port %s ofport changed from %s to %s",
+				netConfig.patchPort, netConfig.ofPortPatch, curOfportPatch)
+			os.Exit(1)
+		}
 	}
 
 	// it could be that someone removed the physical interface and added it back on the OVS host

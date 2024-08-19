@@ -31,7 +31,7 @@ type SecondaryNodeNetworkController struct {
 // infrastructure and policy for the given secondary network. It supports layer3, layer2 and
 // localnet topology types.
 func NewSecondaryNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, netInfo util.NetInfo,
-	vrfManager *vrfmanager.Controller) (*SecondaryNodeNetworkController, error) {
+	vrfManager *vrfmanager.Controller, defaultNetworkGateway Gateway) (*SecondaryNodeNetworkController, error) {
 	snnc := &SecondaryNodeNetworkController{
 		BaseNodeNetworkController: BaseNodeNetworkController{
 			CommonNodeNetworkControllerInfo: *cnnci,
@@ -50,7 +50,13 @@ func NewSecondaryNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, n
 		if err != nil {
 			return nil, fmt.Errorf("error retrieving network id for network %s: %v", netInfo.GetNetworkName(), err)
 		}
-		snnc.gateway = NewUserDefinedNetworkGateway(snnc.NetInfo, networkID, node, snnc.watchFactory.NodeCoreInformer().Lister(), snnc.Kube, vrfManager)
+		// FIXME (tssurya): Remove this match when L2 networks are supported
+		if snnc.NetInfo.TopologyType() == types.Layer3Topology {
+			snnc.gateway, err = NewUserDefinedNetworkGateway(snnc.NetInfo, networkID, node, snnc.watchFactory.NodeCoreInformer().Lister(), snnc.Kube, vrfManager, defaultNetworkGateway)
+			if err != nil {
+				return nil, fmt.Errorf("error creating UDN gateway for network %s: %v", netInfo.GetNetworkName(), err)
+			}
+		}
 	}
 	return snnc, nil
 }
@@ -67,7 +73,8 @@ func (nc *SecondaryNodeNetworkController) Start(ctx context.Context) error {
 		}
 		nc.podHandler = handler
 	}
-	if util.IsNetworkSegmentationSupportEnabled() && nc.IsPrimaryNetwork() {
+	// FIXME (tssurya): Remove L3 match when L2 networks are supported
+	if util.IsNetworkSegmentationSupportEnabled() && nc.IsPrimaryNetwork() && nc.TopologyType() == types.Layer3Topology {
 		if err := nc.gateway.AddNetwork(); err != nil {
 			return fmt.Errorf("failed to add network to node gateway for network %s at node %s: %w",
 				nc.GetNetworkName(), nc.name, err)
