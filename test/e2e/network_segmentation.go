@@ -259,14 +259,15 @@ var _ = Describe("Network Segmentation", func() {
 							}, 5*time.Second).Should(BeTrue())
 						}
 
-						By("asserting healthcheck works (kubelet can access the UDN pod)")
-						// The pod should be ready
-						Expect(podutils.IsPodReady(udnPod)).To(BeTrue())
-
 						// connectivity check is run every second + 1sec initialDelay
 						// By this time we have spent at least 8 seconds doing the above checks
 						udnPod, err = cs.CoreV1().Pods(udnPod.Namespace).Get(context.Background(), udnPod.Name, metav1.GetOptions{})
 						Expect(err).NotTo(HaveOccurred())
+
+						By("asserting healthcheck works (kubelet can access the UDN pod)")
+						// The pod should be ready
+						Expect(podutils.IsPodReady(udnPod)).To(BeTrue(), fmt.Sprintf("UDN pod is not ready: %v", udnPod))
+
 						Expect(udnPod.Status.ContainerStatuses[0].RestartCount).To(Equal(int32(0)))
 
 						// TODO
