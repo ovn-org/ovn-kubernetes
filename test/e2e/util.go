@@ -16,6 +16,7 @@ import (
 	"github.com/onsi/gomega"
 
 	v1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
@@ -1246,4 +1247,70 @@ func isKernelModuleLoaded(nodeName, kernelModuleName string) bool {
 		}
 	}
 	return false
+}
+
+// This is a replacement for e2epod.DeletePodWithWait(), which does not handle pods that
+// may be automatically restarted (https://issues.k8s.io/126785)
+func deletePodWithWait(ctx context.Context, c clientset.Interface, pod *v1.Pod) error {
+	if pod == nil {
+		return nil
+	}
+	if pod.ResourceVersion == "" {
+		// We only recurse into deletePodWithWaitByName when ResourceVersion is
+		// *not* set, to avoid infinite loops.
+		return deletePodWithWaitByName(ctx, c, pod.Name, pod.Namespace)
+	}
+	oldResourceVersion := pod.ResourceVersion
+
+	framework.Logf("Deleting pod %q in namespace %q", pod.Name, pod.Namespace)
+	err := c.CoreV1().Pods(pod.Namespace).Delete(ctx, pod.Name, metav1.DeleteOptions{})
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil // assume pod was already deleted
+		}
+		return fmt.Errorf("pod Delete API error: %w", err)
+	}
+	framework.Logf("Wait up to %v for pod %q to be fully deleted", e2epod.PodDeleteTimeout, pod.Name)
+	err = waitForPodNotFoundInNamespace(ctx, c, pod.Name, pod.Namespace, oldResourceVersion, e2epod.PodDeleteTimeout)
+	if err != nil {
+		return fmt.Errorf("pod %q was not deleted: %w", pod.Name, err)
+	}
+	return nil
+}
+
+// This is a replacement for e2epod.DeletePodWithWaitByName(), which does not handle pods
+// that may be automatically restarted (https://issues.k8s.io/126785)
+func deletePodWithWaitByName(ctx context.Context, c clientset.Interface, podName, podNamespace string) error {
+	pod, err := c.CoreV1().Pods(podNamespace).Get(ctx, podName, metav1.GetOptions{})
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil // assume pod was already deleted
+		}
+		return fmt.Errorf("pod Get API error: %w", err)
+	}
+	if pod.ResourceVersion == "" {
+		return fmt.Errorf("unexpected Pod with no ResourceVersion returned from API!")
+	}
+	// We only recurse into deletePodWithWait when ResourceVersion *is* set, to avoid
+	// infinite loops.
+	return deletePodWithWait(ctx, c, pod)
+}
+
+// This is an alternative version of e2epod.WaitForPodNotFoundInNamespace(), which takes
+// a resourceVersion as well.
+func waitForPodNotFoundInNamespace(ctx context.Context, c clientset.Interface, podName, ns, resourceVersion string, timeout time.Duration) error {
+        err := framework.Gomega().Eventually(ctx, framework.HandleRetry(func(ctx context.Context) (*v1.Pod, error) {
+                pod, err := c.CoreV1().Pods(ns).Get(ctx, podName, metav1.GetOptions{})
+                if apierrors.IsNotFound(err) {
+                        return nil, nil
+                }
+		if pod != nil && pod.ResourceVersion != resourceVersion {
+			return nil, nil
+		}
+                return pod, err
+        })).WithTimeout(timeout).Should(gomega.BeNil())
+        if err != nil {
+                return fmt.Errorf("expected pod to not be found: %w", err)
+        }
+        return nil
 }

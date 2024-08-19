@@ -25,7 +25,6 @@ import (
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2ekubectl "k8s.io/kubernetes/test/e2e/framework/kubectl"
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
-	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
 	"k8s.io/kubernetes/test/e2e/framework/skipper"
 	utilnet "k8s.io/utils/net"
 )
@@ -1488,7 +1487,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 					// https://github.com/ovn-org/ovn-kubernetes/pull/4114#issuecomment-1940916326
 					// TODO(trozet) change this back to 2 gateways once github actions kernel is updated
 					ginkgo.By(fmt.Sprintf("Reducing to one gateway. Removing gateway: %s", gatewayPodName2))
-					e2epod.DeletePodWithWaitByName(context.TODO(), f.ClientSet, gatewayPodName2, servingNamespace)
+					deletePodWithWaitByName(context.TODO(), f.ClientSet, gatewayPodName2, servingNamespace)
 					time.Sleep(1 * time.Second)
 
 					ginkgo.By("Checking if one of the external gateways are reachable via Egress")
