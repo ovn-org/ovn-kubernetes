@@ -15,7 +15,6 @@ import (
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 	v1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
@@ -578,18 +577,6 @@ func getMACAddressesForNetwork(container, network string) string {
 		framework.Failf("failed to inspect external test container for its MAC: %v", err)
 	}
 	return strings.TrimSuffix(macAddr, "\n")
-}
-
-// deletePodSyncNS deletes a pod and wait for its deletion.
-// accept the namespace as a parameter.
-func deletePodSyncNS(clientSet kubernetes.Interface, namespace, podName string) {
-	err := clientSet.CoreV1().Pods(namespace).Delete(context.Background(), podName, metav1.DeleteOptions{})
-	framework.ExpectNoError(err, "Failed to delete pod %s in the default namespace", podName)
-
-	gomega.Eventually(func() bool {
-		_, err := clientSet.CoreV1().Pods(namespace).Get(context.Background(), podName, metav1.GetOptions{})
-		return apierrors.IsNotFound(err)
-	}, 3*time.Minute, 5*time.Second).Should(gomega.BeTrue(), "Pod was not being deleted")
 }
 
 // waitClusterHealthy ensures we have a given number of ovn-k worker and master nodes,

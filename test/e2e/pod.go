@@ -234,7 +234,6 @@ var _ = ginkgo.Describe("Pod to pod TCP with low MTU", func() {
 		echoClientPodName         = "echo-client-pod"
 		serverPodPort             = 9899
 		mtu                       = 1400
-		primaryNetworkName        = "kind"
 	)
 
 	f := wrappedTestFramework("pod2pod-tcp-low-mtu")
@@ -354,7 +353,6 @@ var _ = ginkgo.Describe("Pod to pod TCP with low MTU", func() {
 					gomega.Expect(stdout).To(gomega.MatchRegexp("mtu 1342"))
 				}
 			})
-
 		})
 	})
 })

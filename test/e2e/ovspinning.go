@@ -27,5 +27,4 @@ var _ = ginkgo.Describe("OVS CPU affinity pinning", func() {
 		gomega.Expect(err).ToNot(gomega.HaveOccurred())
 		gomega.Expect(disabledNodeLogs).To(gomega.ContainSubstring("OVS CPU affinity pinning disabled"))
 	})
-
 })

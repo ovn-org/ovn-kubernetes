@@ -158,7 +158,6 @@ var _ = ginkgo.Describe("e2e IGMP validation", func() {
 	const (
 		svcname              string = "igmp-test"
 		ovnNs                string = "ovn-kubernetes"
-		port                 string = "8080"
 		ovnWorkerNode        string = "ovn-worker"
 		ovnWorkerNode2       string = "ovn-worker2"
 		mcastGroup           string = "224.1.1.1"
@@ -231,5 +230,4 @@ var _ = ginkgo.Describe("e2e IGMP validation", func() {
 			framework.Failf("failed to retrieve multicast IGMP query: igmp messages on the tcpdump logfile not found")
 		}
 	})
-
 })
