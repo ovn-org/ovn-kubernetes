@@ -747,7 +747,7 @@ var _ = Describe("Network Segmentation", func() {
 				podAnno, err := unmarshalPodAnnotation(updatedPod.Annotations, f.Namespace.Name+"/"+userDefinedNetworkName)
 				Expect(err).NotTo(HaveOccurred())
 				framework.Logf("Client pod's annotation for network %s is %v", userDefinedNetworkName, podAnno)
-				Expect(len(podAnno.Routes)).To(Equal(6)) // 3 v4 routes + 3 v6 routes for UDN
+				Expect(podAnno.Routes).To(HaveLen(expectedNumberOfRoutes(netConfig)))
 
 				By("asserting the *client* pod can contact the server's v4 IP located outside the cluster")
 				Eventually(func() error {
@@ -1048,4 +1048,11 @@ func connectToServerViaDefaultNetwork(clientPodConfig podConfiguration, serverIP
 
 func runExternalContainerCmd() []string {
 	return []string{"--network", "kind"}
+}
+
+func expectedNumberOfRoutes(netConfig networkAttachmentConfig) int {
+	if netConfig.topology == "layer2" {
+		return 4 // 2 routes per family
+	}
+	return 6 // 3 v4 routes + 3 v6 routes for UDN
 }
