@@ -1230,3 +1230,16 @@ func getGatewayMTUSupport(node *v1.Node) bool {
 	}
 	return false
 }
+
+func isKernelModuleLoaded(nodeName, kernelModuleName string) bool {
+	out, err := runCommand(containerRuntime, "exec", nodeName, "lsmod")
+	if err != nil {
+		framework.Failf("failed to list kernel modules for node %s: %v", nodeName, err)
+	}
+	for _, module := range strings.Split(out, "\n") {
+		if strings.HasPrefix(module, kernelModuleName) {
+			return true
+		}
+	}
+	return false
+}

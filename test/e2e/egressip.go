@@ -2532,6 +2532,9 @@ spec:
 	// 4. Create a pod matching the EgressIP
 	// 5. Check connectivity from a pod to an external "node" hosted on a secondary host network and verify the expected IP
 	ginkgo.It("[secondary-host-eip] uses VRF routing table if EIP assigned interface is VRF slave", func() {
+		if !isKernelModuleLoaded(egress1Node.name, "vrf") {
+			ginkgo.Skip("Node doesn't have VRF kernel module loaded")
+		}
 		var egressIP1 string
 		if utilnet.IsIPv6(net.ParseIP(egress1Node.nodeIP)) {
 			egressIP1 = "2001:db8:abcd:1234:c001::"
