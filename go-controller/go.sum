@@ -645,6 +645,8 @@ github.com/openshift/custom-resource-status v1.1.2 h1:C3DL44LEbvlbItfd8mT5jWrqPf
 github.com/openshift/custom-resource-status v1.1.2/go.mod h1:DB/Mf2oTeiAmVVX1gN+NEqweonAPY0TKUwADizj8+ZA=
 github.com/ovn-org/libovsdb v0.6.1-0.20240125124854-03f787b1a892 h1:/yg3/z+RH+iDLMxp6FTnmlk5bStK542/Rge5EBjnA9A=
 github.com/ovn-org/libovsdb v0.6.1-0.20240125124854-03f787b1a892/go.mod h1:LC5DOvcY58jOG3HTvDyCVidoMJDurPeu+xlxv5Krd9Q=
+github.com/ovn-org/libovsdb v0.7.1-0.20240820095311-ce1951614a20 h1:OoDvzyaK7F/ZANIIFOgb4Haj7mye3Hle0fYZZNdidSs=
+github.com/ovn-org/libovsdb v0.7.1-0.20240820095311-ce1951614a20/go.mod h1:dJbxEaalQl83nn904K32FaMjlH/qOObZ0bj4ejQ78AI=
 github.com/pborman/uuid v1.2.0 h1:J7Q5mO4ysT1dv8hyrUGHb9+ooztCXu1D8MY8DZYsu3g=
 github.com/pborman/uuid v1.2.0/go.mod h1:X/NO0urCmaxf9VXbdlT7C2Yzkj2IKimNn4k+gtPdI/k=
 github.com/pelletier/go-toml v1.2.0/go.mod h1:5z9KED0ma1S8pY6P1sdut58dfprrGBbd/94hg7ilaic=

@@ -31,7 +31,7 @@ require (
 	github.com/onsi/gomega v1.32.0
 	github.com/openshift/api v0.0.0-20231120222239-b86761094ee3
 	github.com/openshift/client-go v0.0.0-20231121143148-910ca30a1a9a
-	github.com/ovn-org/libovsdb v0.6.1-0.20240125124854-03f787b1a892
+	github.com/ovn-org/libovsdb v0.7.1-0.20240820095311-ce1951614a20
 	github.com/prometheus/client_golang v1.18.0
 	github.com/prometheus/client_model v0.5.0
 	github.com/safchain/ethtool v0.3.1-0.20231027162144-83e5e0097c91
