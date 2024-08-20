@@ -20,12 +20,8 @@ import (
 
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 
-	libovsdbclient "github.com/ovn-org/libovsdb/client"
-
 	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
@@ -900,21 +896,4 @@ func newSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netI
 		newDummyGatewayManager(cnci.kube, cnci.nbClient, netInfo, cnci.watchFactory, nodeName),
 	)
 	return layer3NetworkController
-}
-
-func newDummyGatewayManager(
-	kube kube.InterfaceOVN,
-	nbClient libovsdbclient.Client,
-	netInfo util.NetInfo,
-	factory *factory.WatchFactory,
-	nodeName string,
-) *GatewayManager {
-	return NewGatewayManager(
-		nodeName,
-		"",
-		kube,
-		nbClient,
-		netInfo,
-		factory,
-	)
 }

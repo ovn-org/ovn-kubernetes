@@ -145,6 +145,108 @@ var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 			dummyPrimaryLayer2UserDefinedNetwork("100.200.0.0/16"),
 		),
 	)
+
+	table.DescribeTable(
+		"the gateway is properly cleaned up",
+		func(netInfo secondaryNetInfo, testConfig testConfiguration) {
+			podInfo := dummyTestPod(ns, netInfo)
+			if testConfig.configToOverride != nil {
+				config.OVNKubernetesFeature = *testConfig.configToOverride
+			}
+			app.Action = func(ctx *cli.Context) error {
+				netConf := netInfo.netconf()
+				networkConfig, err := util.NewNetInfo(netConf)
+				Expect(err).NotTo(HaveOccurred())
+
+				nad, err := newNetworkAttachmentDefinition(
+					ns,
+					nadName,
+					*netConf,
+				)
+				Expect(err).NotTo(HaveOccurred())
+
+				const nodeIPv4CIDR = "192.168.126.202/24"
+				testNode, err := newNodeWithSecondaryNets(nodeName, nodeIPv4CIDR, netInfo)
+				Expect(err).NotTo(HaveOccurred())
+
+				gwConfig, err := util.ParseNodeL3GatewayAnnotation(testNode)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(gwConfig.NextHops).NotTo(BeEmpty())
+
+				if netInfo.isPrimary {
+					gwConfig, err := util.ParseNodeL3GatewayAnnotation(testNode)
+					Expect(err).NotTo(HaveOccurred())
+					initialDB.NBData = append(
+						initialDB.NBData,
+						expectedLayer2EgressEntities(networkConfig, *gwConfig, nodeName)...)
+				}
+
+				fakeOvn.startWithDBSetup(
+					initialDB,
+					&v1.NamespaceList{
+						Items: []v1.Namespace{
+							*newNamespace(ns),
+						},
+					},
+					&v1.NodeList{
+						Items: []v1.Node{*testNode},
+					},
+					&v1.PodList{
+						Items: []v1.Pod{
+							*newMultiHomedPod(podInfo.namespace, podInfo.podName, podInfo.nodeName, podInfo.podIP, netInfo),
+						},
+					},
+					&nadapi.NetworkAttachmentDefinitionList{
+						Items: []nadapi.NetworkAttachmentDefinition{*nad},
+					},
+				)
+
+				Expect(netInfo.setupOVNDependencies(&initialDB)).To(Succeed())
+
+				podInfo.populateLogicalSwitchCache(fakeOvn)
+
+				// pod exists, networks annotations don't
+				pod, err := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(podInfo.namespace).Get(context.Background(), podInfo.podName, metav1.GetOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				_, ok := pod.Annotations[util.OvnPodAnnotationName]
+				Expect(ok).To(BeFalse())
+
+				Expect(fakeOvn.controller.WatchNamespaces()).To(Succeed())
+				Expect(fakeOvn.controller.WatchPods()).To(Succeed())
+				secondaryNetController, ok := fakeOvn.secondaryControllers[secondaryNetworkName]
+				Expect(ok).To(BeTrue())
+
+				secondaryNetController.bnc.ovnClusterLRPToJoinIfAddrs = dummyJoinIPs()
+				podInfo.populateSecondaryNetworkLogicalSwitchCache(fakeOvn, secondaryNetController)
+				Expect(secondaryNetController.bnc.WatchNodes()).To(Succeed())
+				Expect(secondaryNetController.bnc.WatchPods()).To(Succeed())
+
+				Expect(fakeOvn.fakeClient.KubeClient.CoreV1().Pods(pod.Namespace).Delete(context.Background(), pod.Name, metav1.DeleteOptions{})).To(Succeed())
+				Expect(fakeOvn.fakeClient.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(nad.Namespace).Delete(context.Background(), nad.Name, metav1.DeleteOptions{})).To(Succeed())
+
+				// we must access the layer2 controller to be able to issue its cleanup function (to remove the GW related stuff).
+				Expect(
+					newSecondaryLayer2NetworkController(
+						&secondaryNetController.bnc.CommonNetworkControllerInfo,
+						networkConfig,
+						nodeName,
+					).Cleanup()).To(Succeed())
+				Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData([]libovsdbtest.TestData{}))
+
+				return nil
+			}
+			Expect(app.Run([]string{app.Name})).To(Succeed())
+		},
+		table.Entry("pod on a user defined primary network",
+			dummyLayer2PrimaryUserDefinedNetwork("192.168.0.0/16"),
+			nonICClusterTestConfiguration(),
+		),
+		table.Entry("pod on a user defined primary network on an interconnect cluster",
+			dummyLayer2PrimaryUserDefinedNetwork("192.168.0.0/16"),
+			icClusterTestConfiguration(),
+		),
+	)
+
 })
 
 func dummySecondaryLayer2UserDefinedNetwork(subnets string) secondaryNetInfo {
@@ -289,4 +391,28 @@ func ipv4DefaultRoute() *net.IPNet {
 		IP:   net.ParseIP("0.0.0.0"),
 		Mask: net.CIDRMask(0, 32),
 	}
+}
+
+func dummyLayer2SecondaryUserDefinedNetwork(subnets string) secondaryNetInfo {
+	return secondaryNetInfo{
+		netName:  secondaryNetworkName,
+		nadName:  namespacedName(ns, nadName),
+		topology: ovntypes.Layer2Topology,
+		subnets:  subnets,
+	}
+}
+
+func dummyLayer2PrimaryUserDefinedNetwork(subnets string) secondaryNetInfo {
+	secondaryNet := dummyLayer2SecondaryUserDefinedNetwork(subnets)
+	secondaryNet.isPrimary = true
+	return secondaryNet
+}
+
+func newSecondaryLayer2NetworkController(cnci *CommonNetworkControllerInfo, netInfo util.NetInfo, nodeName string) *SecondaryLayer2NetworkController {
+	layer2NetworkController := NewSecondaryLayer2NetworkController(cnci, netInfo)
+	layer2NetworkController.gatewayManagers.Store(
+		nodeName,
+		newDummyGatewayManager(cnci.kube, cnci.nbClient, netInfo, cnci.watchFactory, nodeName),
+	)
+	return layer2NetworkController
 }

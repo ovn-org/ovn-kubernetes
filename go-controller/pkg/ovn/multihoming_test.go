@@ -5,7 +5,11 @@ import (
 	"net"
 	"strings"
 
+	libovsdbclient "github.com/ovn-org/libovsdb/client"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -330,4 +334,21 @@ func hostIPsFromGWConfig(gwConfig util.L3GatewayConfig) []string {
 		hostIPs = append(hostIPs, ip.IP.String())
 	}
 	return hostIPs
+}
+
+func newDummyGatewayManager(
+	kube kube.InterfaceOVN,
+	nbClient libovsdbclient.Client,
+	netInfo util.NetInfo,
+	factory *factory.WatchFactory,
+	nodeName string,
+) *GatewayManager {
+	return NewGatewayManager(
+		nodeName,
+		"",
+		kube,
+		nbClient,
+		netInfo,
+		factory,
+	)
 }
