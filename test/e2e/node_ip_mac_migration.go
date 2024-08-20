@@ -5,10 +5,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"k8s.io/apimachinery/pkg/util/intstr"
-	"k8s.io/apimachinery/pkg/util/wait"
-	e2epodoutput "k8s.io/kubernetes/test/e2e/framework/pod/output"
-	e2eservice "k8s.io/kubernetes/test/e2e/framework/service"
 	"math/big"
 	"math/rand"
 	"net"
@@ -20,12 +16,17 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2ekubectl "k8s.io/kubernetes/test/e2e/framework/kubectl"
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
+	e2epodoutput "k8s.io/kubernetes/test/e2e/framework/pod/output"
+	e2eservice "k8s.io/kubernetes/test/e2e/framework/service"
 	utilnet "k8s.io/utils/net"
 )
 
