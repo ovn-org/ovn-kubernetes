@@ -157,17 +157,17 @@ func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, add, h
 				flowProtocols = append(flowProtocols, protocol+"6")
 			}
 			for _, flowProtocol := range flowProtocols {
-				cookie, err = svcToCookie(service.Namespace, service.Name, flowProtocol, svcPort.NodePort)
-				if err != nil {
-					klog.Warningf("Unable to generate cookie for nodePort svc: %s, %s, %s, %d, error: %v",
-						service.Namespace, service.Name, flowProtocol, svcPort.Port, err)
-					cookie = "0"
-				}
 				key = strings.Join([]string{"NodePort", service.Namespace, service.Name, flowProtocol, fmt.Sprintf("%d", svcPort.NodePort)}, "_")
 				// Delete if needed and skip to next protocol
 				if !add {
 					npw.ofm.deleteFlowsByKey(key)
 					continue
+				}
+				cookie, err = svcToCookie(service.Namespace, service.Name, flowProtocol, svcPort.NodePort)
+				if err != nil {
+					klog.Warningf("Unable to generate cookie for nodePort svc: %s, %s, %s, %d, error: %v",
+						service.Namespace, service.Name, flowProtocol, svcPort.Port, err)
+					cookie = "0"
 				}
 				// This allows external traffic ingress when the svc's ExternalTrafficPolicy is
 				// set to Local, and the backend pod is HostNetworked. We need to add
