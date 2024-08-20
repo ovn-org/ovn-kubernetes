@@ -122,6 +122,10 @@ func setUpGatewayFakeOVSCommands(fexec *ovntest.FakeExec) {
 		Output: "7",
 	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    "ovs-vsctl --timeout=15 get Open_vSwitch . external_ids:ovn-encap-ip",
+		Output: "192.168.1.10",
+	})
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd:    "ip route replace table 7 172.16.1.0/24 via 100.128.0.1 dev ovn-k8s-mp0",
 		Output: "0",
 	})
@@ -184,6 +188,8 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		v4NodeSubnet = "100.128.0.0/24"
 		v6NodeSubnet = "ae70::66/112"
 		mgtPort      = fmt.Sprintf("%s%s", types.K8sMgmtIntfNamePrefix, netID)
+		v4NodeIP     = "192.168.1.10/24"
+		v6NodeIP     = "fc00:f853:ccd:e793::3/64"
 	)
 	BeforeEach(func() {
 		// Restore global default values before each testcase
@@ -203,8 +209,14 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			// given the netdevice is created using add-port command in OVS
 			// we need to mock create a dummy link for things to work in unit tests
 			ovntest.AddLink(mgtPort)
-			ovntest.AddLink("breth0")
-			return nil
+			link := ovntest.AddLink("breth0")
+			addr, _ := netlink.ParseAddr(v4NodeIP)
+			err = netlink.AddrAdd(link, addr)
+			if err != nil {
+				return err
+			}
+			addr, _ = netlink.ParseAddr(v6NodeIP)
+			return netlink.AddrAdd(link, addr)
 		})
 		Expect(err).NotTo(HaveOccurred())
 		factoryMock = factoryMocks.NodeWatchFactory{}
@@ -370,14 +382,19 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		config.IPv6Mode = true
 		config.Gateway.Interface = "eth0"
 		config.Gateway.NodeportEnable = true
-		ifAddrs := ovntest.MustParseIPNets("192.168.1.10/24", "fc00:f853:ccd:e793::3/64")
+		ifAddrs := ovntest.MustParseIPNets(v4NodeIP, v6NodeIP)
 		node := &corev1.Node{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: nodeName,
 				Annotations: map[string]string{
 					"k8s.ovn.org/network-ids":  fmt.Sprintf("{\"%s\": \"%s\"}", netName, netID),
 					"k8s.ovn.org/node-subnets": fmt.Sprintf("{\"default\":[\"%s\"],\"%s\":[\"%s\", \"%s\"]}", v4NodeSubnet, netName, v4NodeSubnet, v6NodeSubnet),
+					"k8s.ovn.org/host-cidrs":   fmt.Sprintf("[\"%s\", \"%s\"]", v4NodeIP, v6NodeIP),
 				},
+			},
+			Status: corev1.NodeStatus{Addresses: []corev1.NodeAddress{
+				{corev1.NodeInternalIP, strings.Split(v4NodeIP, "/")[0]},
+				{corev1.NodeInternalIP, strings.Split(v6NodeIP, "/")[0]}},
 			},
 		}
 		nad := ovntest.GenerateNAD(netName, "rednad", "greenamespace",
@@ -530,14 +547,19 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		config.IPv6Mode = true
 		config.Gateway.Interface = "eth0"
 		config.Gateway.NodeportEnable = true
-		ifAddrs := ovntest.MustParseIPNets("192.168.1.10/24", "fc00:f853:ccd:e793::3/64")
+		ifAddrs := ovntest.MustParseIPNets(v4NodeIP, v6NodeIP)
 		node := &corev1.Node{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: nodeName,
 				Annotations: map[string]string{
 					"k8s.ovn.org/network-ids":  fmt.Sprintf("{\"%s\": \"%s\"}", netName, netID),
 					"k8s.ovn.org/node-subnets": fmt.Sprintf("{\"default\":[\"%s\"]}", v4NodeSubnet),
+					"k8s.ovn.org/host-cidrs":   fmt.Sprintf("[\"%s\", \"%s\"]", v4NodeIP, v6NodeIP),
 				},
+			},
+			Status: corev1.NodeStatus{Addresses: []corev1.NodeAddress{
+				{corev1.NodeInternalIP, strings.Split(v4NodeIP, "/")[0]},
+				{corev1.NodeInternalIP, strings.Split(v6NodeIP, "/")[0]}},
 			},
 		}
 		nad := ovntest.GenerateNAD(netName, "rednad", "greenamespace",

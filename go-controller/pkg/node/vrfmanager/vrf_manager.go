@@ -222,7 +222,9 @@ func (vrfm *Controller) sync(vrf vrf) error {
 	}
 	// Handover vrf routes into route manager to manage it.
 	for _, route := range vrf.routes {
-		vrfm.routeManager.Add(route)
+		if err = vrfm.routeManager.Add(route); err != nil {
+			return fmt.Errorf("failed to add route %v for VRF device %s, err: %w", route, vrf.name, err)
+		}
 	}
 
 	vrfm.vrfs[vrfLink.Attrs().Index] = vrf
@@ -326,7 +328,9 @@ func (vrfm *Controller) DeleteVRF(name string) (err error) {
 
 	// Request route manager to delete vrf associated routes.
 	for _, route := range vrf.routes {
-		vrfm.routeManager.Del(route)
+		if err = vrfm.routeManager.Del(route); err != nil {
+			return fmt.Errorf("failed to delete route %v for VRF device %s, err: %w", route, vrf.name, err)
+		}
 	}
 
 	err = vrfm.deleteVRF(vrfLink)

@@ -303,7 +303,10 @@ func configureSvcRouteViaInterface(routeManager *routemanager.Controller, iface 
 		}
 		subnetCopy := *subnet
 		gwIPCopy := gwIP[0]
-		routeManager.Add(netlink.Route{LinkIndex: link.Attrs().Index, Gw: gwIPCopy, Dst: &subnetCopy, Src: srcIP, MTU: mtu})
+		err = routeManager.Add(netlink.Route{LinkIndex: link.Attrs().Index, Gw: gwIPCopy, Dst: &subnetCopy, Src: srcIP, MTU: mtu})
+		if err != nil {
+			return fmt.Errorf("unable to add gateway IP route for subnet: %v, %v", subnet, err)
+		}
 	}
 	return nil
 }

@@ -739,7 +739,10 @@ func (c *Controller) updateEIP(existing *state, update *config) error {
 		}
 		if !isEIPOnLink {
 			for _, routeToDelete := range existing.eIPConfig.routes {
-				c.routeManager.Del(routeToDelete)
+				err = c.routeManager.Del(routeToDelete)
+				if err != nil {
+					return fmt.Errorf("failed to delete egress IP route: %w", err)
+				}
 			}
 		}
 	} else if update != nil && update.eIPConfig != nil && len(update.eIPConfig.routes) > 0 &&
@@ -747,7 +750,10 @@ func (c *Controller) updateEIP(existing *state, update *config) error {
 		// delete delta between existing and update
 		routesToDelete := routeDifference(existing.eIPConfig.routes, update.eIPConfig.routes)
 		for _, routeToDelete := range routesToDelete {
-			c.routeManager.Del(routeToDelete)
+			err := c.routeManager.Del(routeToDelete)
+			if err != nil {
+				return fmt.Errorf("failed to delete egress IP route: %w", err)
+			}
 		}
 	}
 	// apply new changes
@@ -782,7 +788,9 @@ func (c *Controller) updateEIP(existing *state, update *config) error {
 		existing.eIPConfig.addr = update.eIPConfig.addr
 		// route manager manages retry
 		for _, routeToAdd := range update.eIPConfig.routes {
-			c.routeManager.Add(routeToAdd)
+			if err := c.routeManager.Add(routeToAdd); err != nil {
+				return err
+			}
 		}
 		existing.eIPConfig.routes = update.eIPConfig.routes
 	}
@@ -1232,7 +1240,9 @@ func (c *Controller) removeStaleIPRoutes(staleIPRoutes sets.Set[string], routeSt
 		if !ok {
 			return fmt.Errorf("expected to find route %q in map: %+v", ipRoute, routeStrToNetlinkRoute)
 		}
-		c.routeManager.Del(route)
+		if err := c.routeManager.Del(route); err != nil {
+			return err
+		}
 	}
 	return nil
 }
