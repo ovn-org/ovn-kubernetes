@@ -13,6 +13,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/vrfmanager"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -41,6 +42,8 @@ type nodeNetworkControllerManager struct {
 	nadController *nad.NetAttachDefinitionController
 	// vrf manager that creates and manages vrfs for all UDNs
 	vrfManager *vrfmanager.Controller
+	// route manager that creates and manages routes
+	routeManager *routemanager.Controller
 }
 
 // NewNetworkController create secondary node network controllers for the given NetInfo
@@ -91,7 +94,7 @@ func (ncm *nodeNetworkControllerManager) getNetworkID(network util.BasicNetInfo)
 
 // newCommonNetworkControllerInfo creates and returns the base node network controller info
 func (ncm *nodeNetworkControllerManager) newCommonNetworkControllerInfo() *node.CommonNodeNetworkControllerInfo {
-	return node.NewCommonNodeNetworkControllerInfo(ncm.ovnNodeClient.KubeClient, ncm.ovnNodeClient.AdminPolicyRouteClient, ncm.watchFactory, ncm.recorder, ncm.name)
+	return node.NewCommonNodeNetworkControllerInfo(ncm.ovnNodeClient.KubeClient, ncm.ovnNodeClient.AdminPolicyRouteClient, ncm.watchFactory, ncm.recorder, ncm.name, ncm.routeManager)
 }
 
 // NAD controller should be started on the node side under the following conditions:
@@ -104,7 +107,7 @@ func isNodeNADControllerRequired() bool {
 
 // NewNodeNetworkControllerManager creates a new OVN controller manager to manage all the controller for all networks
 func NewNodeNetworkControllerManager(ovnClient *util.OVNClientset, wf factory.NodeWatchFactory, name string,
-	wg *sync.WaitGroup, eventRecorder record.EventRecorder) (*nodeNetworkControllerManager, error) {
+	wg *sync.WaitGroup, eventRecorder record.EventRecorder, routeManager *routemanager.Controller) (*nodeNetworkControllerManager, error) {
 	ncm := &nodeNetworkControllerManager{
 		name:          name,
 		ovnNodeClient: &util.OVNNodeClientset{KubeClient: ovnClient.KubeClient, AdminPolicyRouteClient: ovnClient.AdminPolicyRouteClient},
@@ -113,6 +116,7 @@ func NewNodeNetworkControllerManager(ovnClient *util.OVNClientset, wf factory.No
 		stopChan:      make(chan struct{}),
 		wg:            wg,
 		recorder:      eventRecorder,
+		routeManager:  routeManager,
 	}
 
 	// need to configure OVS interfaces for Pods on secondary networks in the DPU mode
@@ -122,7 +126,7 @@ func NewNodeNetworkControllerManager(ovnClient *util.OVNClientset, wf factory.No
 		ncm.nadController, err = nad.NewNetAttachDefinitionController("node-network-controller-manager", ncm, wf)
 	}
 	if util.IsNetworkSegmentationSupportEnabled() {
-		ncm.vrfManager = vrfmanager.NewController()
+		ncm.vrfManager = vrfmanager.NewController(ncm.routeManager)
 	}
 	if err != nil {
 		return nil, err
@@ -173,6 +177,13 @@ func (ncm *nodeNetworkControllerManager) Start(ctx context.Context) (err error) 
 			ncm.checkForStaleOVSRepresentorInterfaces()
 		}, time.Minute, ncm.stopChan)
 	}
+
+	// Let's create Route manager that will manage routes.
+	ncm.wg.Add(1)
+	go func() {
+		defer ncm.wg.Done()
+		ncm.routeManager.Run(ncm.stopChan, 2*time.Minute)
+	}()
 
 	err = ncm.initDefaultNodeNetworkController()
 	if err != nil {

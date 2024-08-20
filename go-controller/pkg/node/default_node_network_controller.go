@@ -54,6 +54,8 @@ type CommonNodeNetworkControllerInfo struct {
 	recorder               record.EventRecorder
 	name                   string
 	apbExternalRouteClient adminpolicybasedrouteclientset.Interface
+	// route manager that creates and manages routes
+	routeManager *routemanager.Controller
 }
 
 // BaseNodeNetworkController structure per-network fields and network specific configuration
@@ -76,7 +78,7 @@ type BaseNodeNetworkController struct {
 }
 
 func newCommonNodeNetworkControllerInfo(kubeClient clientset.Interface, kube kube.Interface, apbExternalRouteClient adminpolicybasedrouteclientset.Interface,
-	wf factory.NodeWatchFactory, eventRecorder record.EventRecorder, name string) *CommonNodeNetworkControllerInfo {
+	wf factory.NodeWatchFactory, eventRecorder record.EventRecorder, name string, routeManager *routemanager.Controller) *CommonNodeNetworkControllerInfo {
 
 	return &CommonNodeNetworkControllerInfo{
 		client:                 kubeClient,
@@ -85,13 +87,14 @@ func newCommonNodeNetworkControllerInfo(kubeClient clientset.Interface, kube kub
 		watchFactory:           wf,
 		name:                   name,
 		recorder:               eventRecorder,
+		routeManager:           routeManager,
 	}
 }
 
 // NewCommonNodeNetworkControllerInfo creates and returns the base node network controller info
 func NewCommonNodeNetworkControllerInfo(kubeClient clientset.Interface, apbExternalRouteClient adminpolicybasedrouteclientset.Interface, wf factory.NodeWatchFactory,
-	eventRecorder record.EventRecorder, name string) *CommonNodeNetworkControllerInfo {
-	return newCommonNodeNetworkControllerInfo(kubeClient, &kube.Kube{KClient: kubeClient}, apbExternalRouteClient, wf, eventRecorder, name)
+	eventRecorder record.EventRecorder, name string, routeManager *routemanager.Controller) *CommonNodeNetworkControllerInfo {
+	return newCommonNodeNetworkControllerInfo(kubeClient, &kube.Kube{KClient: kubeClient}, apbExternalRouteClient, wf, eventRecorder, name, routeManager)
 }
 
 // DefaultNodeNetworkController is the object holder for utilities meant for node management of default network
@@ -112,7 +115,7 @@ type DefaultNodeNetworkController struct {
 }
 
 func newDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, stopChan chan struct{},
-	wg *sync.WaitGroup) *DefaultNodeNetworkController {
+	wg *sync.WaitGroup, routeManager *routemanager.Controller) *DefaultNodeNetworkController {
 
 	return &DefaultNodeNetworkController{
 		BaseNodeNetworkController: BaseNodeNetworkController{
@@ -121,7 +124,7 @@ func newDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, sto
 			stopChan:                        stopChan,
 			wg:                              wg,
 		},
-		routeManager: routemanager.NewController(),
+		routeManager: routeManager,
 	}
 }
 
@@ -130,7 +133,7 @@ func NewDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo) (*D
 	var err error
 	stopChan := make(chan struct{})
 	wg := &sync.WaitGroup{}
-	nc := newDefaultNodeNetworkController(cnnci, stopChan, wg)
+	nc := newDefaultNodeNetworkController(cnnci, stopChan, wg, cnnci.routeManager)
 
 	if len(config.Kubernetes.HealthzBindAddress) != 0 {
 		klog.Infof("Enable node proxy healthz server on %s", config.Kubernetes.HealthzBindAddress)
@@ -701,11 +704,6 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	if err := level.Set("5"); err != nil {
 		klog.Errorf("Setting klog \"loglevel\" to 5 failed, err: %v", err)
 	}
-	nc.wg.Add(1)
-	go func() {
-		defer nc.wg.Done()
-		nc.routeManager.Run(nc.stopChan, 4*time.Minute)
-	}()
 
 	if err = configureGlobalForwarding(); err != nil {
 		return err

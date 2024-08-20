@@ -89,6 +89,8 @@ func (c *Controller) Del(r netlink.Route) {
 	c.delRouteCh <- r
 }
 
+// addRoute attempts to add the route and returns with error
+// if it fails to do so.
 func (c *Controller) addRoute(r netlink.Route) error {
 	klog.Infof("Route Manager: attempting to add route: %s", r.String())
 	// If table is unspecified aka 0, then set it to main table ID. This is done by default when adding a route.
@@ -111,6 +113,8 @@ func (c *Controller) addRoute(r netlink.Route) error {
 	return nil
 }
 
+// delRoute attempts to remove the route and returns with error
+// if it fails to do so.
 func (c *Controller) delRoute(r netlink.Route) error {
 	klog.Infof("Route Manager: attempting to delete route: %s", r.String())
 	link, err := util.GetNetLinkOps().LinkByIndex(r.LinkIndex)

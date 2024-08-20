@@ -76,6 +76,15 @@ func GetIPNetFullMask(ipStr string) (*net.IPNet, error) {
 	}, nil
 }
 
+// GetIPNetFullMaskFromIP returns an IPNet object for IPV4 or IPV6 address with a full subnet mask
+func GetIPNetFullMaskFromIP(ip net.IP) *net.IPNet {
+	mask := GetIPFullMask(ip)
+	return &net.IPNet{
+		IP:   ip,
+		Mask: mask,
+	}
+}
+
 // GetIPFullMaskString returns /32 if ip is IPV4 family and /128 if ip is IPV6 family
 func GetIPFullMaskString(ip string) string {
 	const (

@@ -21,6 +21,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	factoryMocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory/mocks"
 	kubemocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube/mocks"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/vrfmanager"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	coreinformermocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/client-go/informers/core/v1"
@@ -33,19 +34,21 @@ var _ = Describe("SecondaryNodeNetworkController", func() {
 	var (
 		nad = ovntest.GenerateNAD("bluenet", "rednad", "greenamespace",
 			types.Layer3Topology, "100.128.0.0/16", types.NetworkRolePrimary)
-		netName             = "bluenet"
-		netID               = 3
-		nodeName     string = "worker1"
-		mgtPortMAC   string = "00:00:00:55:66:77"
-		fexec        *ovntest.FakeExec
-		testNS       ns.NetNS
-		vrf          *vrfmanager.Controller
-		v4NodeSubnet = "10.128.0.0/24"
-		v6NodeSubnet = "ae70::66/112"
-		mgtPort      = fmt.Sprintf("%s%d", types.K8sMgmtIntfNamePrefix, netID)
-		stopCh       chan struct{}
-		wg           *sync.WaitGroup
-		kubeMock     kubemocks.Interface
+		netName                 = "bluenet"
+		netID                   = 3
+		nodeName         string = "worker1"
+		mgtPortMAC       string = "00:00:00:55:66:77"
+		fexec            *ovntest.FakeExec
+		testNS           ns.NetNS
+		vrf              *vrfmanager.Controller
+		v4NodeSubnet     = "10.128.0.0/24"
+		v6NodeSubnet     = "ae70::66/112"
+		mgtPort          = fmt.Sprintf("%s%d", types.K8sMgmtIntfNamePrefix, netID)
+		gatewayInterface = "eth0"
+		gatewayBridge    = "breth0"
+		stopCh           chan struct{}
+		wg               *sync.WaitGroup
+		kubeMock         kubemocks.Interface
 	)
 	BeforeEach(func() {
 		// Restore global default values before each testcase
@@ -63,13 +66,22 @@ var _ = Describe("SecondaryNodeNetworkController", func() {
 		Expect(err).NotTo(HaveOccurred())
 		err = testNS.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
+			ovntest.AddLink(gatewayInterface)
+			ovntest.AddLink(gatewayBridge)
 			ovntest.AddLink(mgtPort)
 			return nil
 		})
 		Expect(err).NotTo(HaveOccurred())
 		wg = &sync.WaitGroup{}
 		stopCh = make(chan struct{})
-		vrf = vrfmanager.NewController()
+		routeManager := routemanager.NewController()
+		wg.Add(1)
+		go testNS.Do(func(netNS ns.NetNS) error {
+			defer wg.Done()
+			routeManager.Run(stopCh, 2*time.Minute)
+			return nil
+		})
+		vrf = vrfmanager.NewController(routeManager)
 		wg2 := &sync.WaitGroup{}
 		defer func() {
 			wg2.Wait()
@@ -84,10 +96,8 @@ var _ = Describe("SecondaryNodeNetworkController", func() {
 		})
 	})
 	AfterEach(func() {
-		defer func() {
-			close(stopCh)
-			wg.Wait()
-		}()
+		close(stopCh)
+		wg.Wait()
 		Expect(testNS.Close()).To(Succeed())
 		Expect(testutils.UnmountNS(testNS)).To(Succeed())
 	})
@@ -226,6 +236,10 @@ var _ = Describe("SecondaryNodeNetworkController", func() {
 	It("ensure UDNGateway and VRFManager is invoked for Primary UDNs when feature gate is ON", func() {
 		config.OVNKubernetesFeature.EnableNetworkSegmentation = true
 		config.OVNKubernetesFeature.EnableMultiNetwork = true
+		config.Gateway.NextHop = "10.0.0.11"
+		config.Gateway.Interface = gatewayInterface
+		config.Gateway.V6MasqueradeSubnet = "fd69::/112"
+		config.Gateway.V4MasqueradeSubnet = "169.254.0.0/16"
 
 		By("creating necessary mocks")
 		factoryMock := factoryMocks.NodeWatchFactory{}
@@ -265,9 +279,8 @@ var _ = Describe("SecondaryNodeNetworkController", func() {
 		err = testNS.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
 			getCreationFakeOVSCommands(fexec, mgtPort, mgtPortMAC, netName, nodeName, NetInfo.MTU())
-			Expect(err).NotTo(HaveOccurred())
+			getVRFCreationFakeOVSCommands(fexec)
 			getDeletionFakeOVSCommands(fexec, mgtPort)
-			Expect(err).NotTo(HaveOccurred())
 
 			By("starting secondary network controller for user defined primary network")
 			err = controller.Start(context.Background())
