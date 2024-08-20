@@ -710,6 +710,12 @@ var _ = Describe("Network Segmentation", func() {
 						"These tests are known to fail on Local Gateway deployments. Upstream issue: %s", upstreamIssue,
 					)
 				}
+				if netConfigParams.topology == "layer2" && !isInterconnectEnabled() {
+					const upstreamIssue = "https://github.com/ovn-org/ovn-kubernetes/issues/4642"
+					e2eskipper.Skipf(
+						"Egress e2e tests for layer2 topologies are known to fail on non-IC deployments. Upstream issue: %s", upstreamIssue,
+					)
+				}
 				netConfig := newNetworkAttachmentConfig(netConfigParams)
 
 				netConfig.namespace = f.Namespace.Name
