@@ -113,8 +113,8 @@ func checkEgressFirewallStatus(namespace string, empty bool, success bool, event
 		return empty && output == "" || success && strings.Contains(output, "EgressFirewall Rules applied")
 	}
 	if eventually {
-		gomega.Eventually(checkStatus, 1*time.Second).Should(gomega.BeTrue())
+		gomega.Eventually(checkStatus, 1*time.Second, 100*time.Millisecond).Should(gomega.BeTrue())
 	} else {
-		gomega.Consistently(checkStatus, 1*time.Second).Should(gomega.BeTrue())
+		gomega.Consistently(checkStatus, 1*time.Second, 100*time.Millisecond).Should(gomega.BeTrue())
 	}
 }
