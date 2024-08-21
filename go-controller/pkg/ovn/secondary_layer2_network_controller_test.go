@@ -327,7 +327,6 @@ func expectedLayer2EgressEntities(netInfo util.NetInfo, gwConfig util.L3GatewayC
 		sr1               = "sr1-UUID"
 		sr2               = "sr2-UUID"
 		routerPolicyUUID1 = "lrp1-UUID"
-		routerPolicyUUID2 = "lrp2-UUID"
 	)
 	gwRouterName := fmt.Sprintf("GR_%s_test-node", netInfo.GetNetworkName())
 	staticRouteOutputPort := ovntypes.GWRouterToExtSwitchPrefix + gwRouterName
@@ -343,7 +342,7 @@ func expectedLayer2EgressEntities(netInfo util.NetInfo, gwConfig util.L3GatewayC
 			StaticRoutes: []string{sr1, sr2},
 			ExternalIDs:  gwRouterExternalIDs(netInfo, gwConfig),
 			Options:      gwRouterOptions(gwConfig),
-			Policies:     []string{routerPolicyUUID1, routerPolicyUUID2},
+			Policies:     []string{routerPolicyUUID1},
 		},
 		expectedGWToNetworkSwitchRouterPort(gwRouterToNetworkSwitchPortName, netInfo, gwRouterIPAddress(), layer2SubnetGWAddr()),
 		expectedGRStaticRoute(sr1, dummyMasqueradeSubnet().String(), nextHopMasqueradeIP().String(), nil, &staticRouteOutputPort, netInfo),
@@ -357,7 +356,6 @@ func expectedLayer2EgressEntities(netInfo util.NetInfo, gwConfig util.L3GatewayC
 		expectedStaticMACBinding(gwRouterName, nextHopMasqueradeIP()),
 
 		expectedLogicalRouterPolicy(routerPolicyUUID1, netInfo, nodeName, nodeIP().IP.String(), managementPortIP(layer2Subnet()).String()),
-		expectedLogicalRouterPolicy(routerPolicyUUID2, netInfo, nodeName, dummyJoinIP().IP.String(), managementPortIP(layer2Subnet()).String()),
 	}
 
 	for _, entity := range expectedExternalSwitchAndLSPs(netInfo, gwConfig, nodeName) {

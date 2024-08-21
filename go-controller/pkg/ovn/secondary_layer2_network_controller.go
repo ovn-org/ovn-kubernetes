@@ -446,7 +446,7 @@ func (oc *SecondaryLayer2NetworkController) addUpdateLocalNodeEvent(node *corev1
 					node,
 					gwConfig.config,
 					gwConfig.hostSubnets,
-					gwConfig.hostAddrs,
+					nil,
 					gwConfig.hostSubnets,
 					gwConfig.gwLRPIPs,
 					oc.SCTPSupport,
@@ -485,7 +485,6 @@ type SecondaryL2GatewayConfig struct {
 	config      *util.L3GatewayConfig
 	hostSubnets []*net.IPNet
 	gwLRPIPs    []*net.IPNet
-	hostAddrs   []string
 	externalIPs []net.IP
 }
 
@@ -535,12 +534,6 @@ func (oc *SecondaryLayer2NetworkController) nodeGatewayConfig(node *corev1.Node)
 		externalIPs = append(externalIPs, v6MasqIP.IP)
 	}
 
-	// TODO: is this right ? just copied from L3
-	var hostAddrs []string
-	for _, externalIP := range externalIPs {
-		hostAddrs = append(hostAddrs, externalIP.String())
-	}
-
 	// Use the host subnets present in the network attachment definition.
 	hostSubnets := make([]*net.IPNet, 0, len(oc.Subnets()))
 	for _, subnet := range oc.Subnets() {
@@ -567,7 +560,6 @@ func (oc *SecondaryLayer2NetworkController) nodeGatewayConfig(node *corev1.Node)
 		config:      l3GatewayConfig,
 		hostSubnets: hostSubnets,
 		gwLRPIPs:    gwLRPIPs,
-		hostAddrs:   hostAddrs,
 		externalIPs: externalIPs,
 	}, nil
 }
