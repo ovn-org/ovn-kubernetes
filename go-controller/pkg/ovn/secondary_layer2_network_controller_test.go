@@ -321,11 +321,13 @@ func dummyL2TestPod(nsName string, info secondaryNetInfo) testPod {
 
 func expectedLayer2EgressEntities(netInfo util.NetInfo, gwConfig util.L3GatewayConfig, nodeName string) []libovsdbtest.TestData {
 	const (
-		nat1 = "nat1-UUID"
-		nat2 = "nat2-UUID"
-		nat3 = "nat3-UUID"
-		sr1  = "sr1-UUID"
-		sr2  = "sr2-UUID"
+		nat1              = "nat1-UUID"
+		nat2              = "nat2-UUID"
+		nat3              = "nat3-UUID"
+		sr1               = "sr1-UUID"
+		sr2               = "sr2-UUID"
+		routerPolicyUUID1 = "lrp1-UUID"
+		routerPolicyUUID2 = "lrp2-UUID"
 	)
 	gwRouterName := fmt.Sprintf("GR_%s_test-node", netInfo.GetNetworkName())
 	staticRouteOutputPort := ovntypes.GWRouterToExtSwitchPrefix + gwRouterName
@@ -341,6 +343,7 @@ func expectedLayer2EgressEntities(netInfo util.NetInfo, gwConfig util.L3GatewayC
 			StaticRoutes: []string{sr1, sr2},
 			ExternalIDs:  gwRouterExternalIDs(netInfo, gwConfig),
 			Options:      gwRouterOptions(gwConfig),
+			Policies:     []string{routerPolicyUUID1, routerPolicyUUID2},
 		},
 		expectedGWToNetworkSwitchRouterPort(gwRouterToNetworkSwitchPortName, netInfo, gwRouterIPAddress(), layer2SubnetGWAddr()),
 		expectedGRStaticRoute(sr1, dummyMasqueradeSubnet().String(), nextHopMasqueradeIP().String(), nil, &staticRouteOutputPort, netInfo),
@@ -352,6 +355,9 @@ func expectedLayer2EgressEntities(netInfo util.NetInfo, gwConfig util.L3GatewayC
 
 		expectedGRToExternalSwitchLRP(gwRouterName, netInfo, nodePhysicalIPAddress(), udnGWSNATAddress()),
 		expectedStaticMACBinding(gwRouterName, nextHopMasqueradeIP()),
+
+		expectedLogicalRouterPolicy(routerPolicyUUID1, netInfo, nodeName, nodeIP().IP.String(), managementPortIP(layer2Subnet()).String()),
+		expectedLogicalRouterPolicy(routerPolicyUUID2, netInfo, nodeName, dummyJoinIP().IP.String(), managementPortIP(layer2Subnet()).String()),
 	}
 
 	for _, entity := range expectedExternalSwitchAndLSPs(netInfo, gwConfig, nodeName) {
@@ -415,4 +421,11 @@ func newSecondaryLayer2NetworkController(cnci *CommonNetworkControllerInfo, netI
 		newDummyGatewayManager(cnci.kube, cnci.nbClient, netInfo, cnci.watchFactory, nodeName),
 	)
 	return layer2NetworkController
+}
+
+func nodeIP() *net.IPNet {
+	return &net.IPNet{
+		IP:   net.ParseIP("192.168.126.202"),
+		Mask: net.CIDRMask(24, 32),
+	}
 }
