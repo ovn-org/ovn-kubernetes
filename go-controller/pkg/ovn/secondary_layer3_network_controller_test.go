@@ -685,8 +685,8 @@ func expectedLayer3EgressEntities(netInfo util.NetInfo, gwConfig util.L3GatewayC
 		&nbdb.LogicalRouterPort{UUID: rtosLRPUUID, Name: rtosLRPName, Networks: []string{"192.168.0.1/16"}, MAC: "0a:58:c0:a8:00:01", GatewayChassis: []string{gatewayChassisUUID}},
 		expectedGRStaticRoute(staticRouteUUID1, networkIPv4Subnet, gwRouterIPAddress().IP.String(), &nbdb.LogicalRouterStaticRoutePolicySrcIP, nil, netInfo),
 		expectedGRStaticRoute(staticRouteUUID2, gwRouterIPAddress().IP.String(), gwRouterIPAddress().IP.String(), nil, nil, netInfo),
-		expectedLogicalRouterPolicy(routerPolicyUUID1, netInfo, nodeName, nodeIP, managementPortIP(subnet).String()),
-		expectedLogicalRouterPolicy(routerPolicyUUID2, netInfo, nodeName, joinIPAddr, managementPortIP(subnet).String()),
+		expectedLogicalRouterPolicy(routerPolicyUUID1, netInfo, nodeName, nodeIP, managementPortIP(subnet.CIDR).String()),
+		expectedLogicalRouterPolicy(routerPolicyUUID2, netInfo, nodeName, joinIPAddr, managementPortIP(subnet.CIDR).String()),
 	}
 	return expectedEntities
 }
@@ -838,10 +838,6 @@ func gwRouterIPAddress() *net.IPNet {
 		IP:   net.ParseIP("100.65.0.4"),
 		Mask: net.CIDRMask(16, 32),
 	}
-}
-
-func managementPortIP(subnet config.CIDRNetworkEntry) net.IP {
-	return util.GetNodeManagementIfAddr(subnet.CIDR).IP
 }
 
 func networkSubnet(netInfo util.NetInfo) string {

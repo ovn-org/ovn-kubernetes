@@ -143,7 +143,7 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPorts() 
 				switch ocInfo.bnc.TopologyType() {
 				case ovntypes.Layer3Topology:
 					switchName = ocInfo.bnc.GetNetworkScopedName(pod.nodeName)
-					managementIP := managementPortIP(subnet)
+					managementIP := managementPortIP(subnet.CIDR)
 
 					switchToRouterPortName := "stor-" + switchName
 					switchToRouterPortUUID := switchToRouterPortName + "-UUID"
@@ -165,7 +165,7 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPorts() 
 					}
 				case ovntypes.Layer2Topology:
 					switchName = ocInfo.bnc.GetNetworkScopedName(ovntypes.OVNLayer2Switch)
-					managementIP := managementPortIP(subnet)
+					managementIP := managementPortIP(subnet.CIDR)
 
 					if em.gatewayConfig != nil {
 						// there are multiple mgmt ports in the cluster, thus the ports must be scoped with the node name
@@ -211,7 +211,7 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPorts() 
 			var otherConfig map[string]string
 			if hasSubnets {
 				otherConfig = map[string]string{
-					"exclude_ips": managementPortIP(subnet).String(),
+					"exclude_ips": managementPortIP(subnet.CIDR).String(),
 					"subnet":      subnet.CIDR.String(),
 				}
 			}
@@ -351,4 +351,8 @@ func newDummyGatewayManager(
 		netInfo,
 		factory,
 	)
+}
+
+func managementPortIP(subnet *net.IPNet) net.IP {
+	return util.GetNodeManagementIfAddr(subnet).IP
 }
