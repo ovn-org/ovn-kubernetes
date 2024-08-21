@@ -617,6 +617,17 @@ jobs:
         echo "GOPATH=$GOPATH" >> $GITHUB_ENV
         echo "$GOPATH/bin" >> $GITHUB_PATH
 
+    - name: Free up disk space
+      run: |
+        sudo rm -rf /usr/local/lib/android/sdk
+        sudo apt-get update
+        sudo eatmydata apt-get purge --auto-remove -y \
+          azure-cli aspnetcore-* dotnet-* ghc-* firefox \
+          google-chrome-stable \
+          llvm-* microsoft-edge-stable mono-* \
+          msbuild mysql-server-core-* php-* php7* \
+          powershell temurin-* zulu-*
+
     - name: Disable ufw
       # For IPv6 and Dualstack, ufw (Uncomplicated Firewall) should be disabled.
       # Not needed for KIND deployments, so just disable all the time.
