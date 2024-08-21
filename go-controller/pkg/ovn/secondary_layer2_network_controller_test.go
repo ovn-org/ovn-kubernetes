@@ -44,8 +44,7 @@ var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 			NBData: []libovsdbtest.TestData{},
 		}
 
-		config.OVNKubernetesFeature.EnableNetworkSegmentation = true
-		config.OVNKubernetesFeature.EnableMultiNetwork = true
+		config.OVNKubernetesFeature = *minimalFeatureConfig()
 		config.Gateway.V4MasqueradeSubnet = dummyMasqueradeSubnet().String()
 	})
 
@@ -55,8 +54,11 @@ var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 
 	table.DescribeTable(
 		"reconciles a new",
-		func(netInfo secondaryNetInfo) {
+		func(netInfo secondaryNetInfo, testConfig testConfiguration) {
 			podInfo := dummyL2TestPod(ns, netInfo)
+			if testConfig.configToOverride != nil {
+				config.OVNKubernetesFeature = *testConfig.configToOverride
+			}
 			app.Action = func(ctx *cli.Context) error {
 				By(fmt.Sprintf("creating a network attachment definition for network: %s", netInfo.netName))
 				nad, err := newNetworkAttachmentDefinition(
@@ -91,12 +93,17 @@ var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 				)
 				podInfo.populateLogicalSwitchCache(fakeOvn)
 
-				By("asserting the pod originally does *not* feature the OVN pod networks annotation")
-				// pod exists, networks annotations don't
-				pod, err := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(podInfo.namespace).Get(context.Background(), podInfo.podName, metav1.GetOptions{})
-				Expect(err).NotTo(HaveOccurred())
-				_, ok := pod.Annotations[util.OvnPodAnnotationName]
-				Expect(ok).To(BeFalse())
+				// on IC, the test itself spits out the pod with the
+				// annotations set, since on production it would be the
+				// clustermanager to annotate the pod.
+				if !config.OVNKubernetesFeature.EnableInterconnect {
+					By("asserting the pod originally does *not* feature the OVN pod networks annotation")
+					// pod exists, networks annotations don't
+					pod, err := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(podInfo.namespace).Get(context.Background(), podInfo.podName, metav1.GetOptions{})
+					Expect(err).NotTo(HaveOccurred())
+					_, ok := pod.Annotations[util.OvnPodAnnotationName]
+					Expect(ok).To(BeFalse())
+				}
 
 				Expect(fakeOvn.controller.WatchNamespaces()).NotTo(HaveOccurred())
 				Expect(fakeOvn.controller.WatchPods()).NotTo(HaveOccurred())
@@ -109,13 +116,21 @@ var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 				Expect(secondaryNetController.bnc.WatchNodes()).To(Succeed())
 				Expect(secondaryNetController.bnc.WatchPods()).To(Succeed())
 
-				By("asserting the pod OVN pod networks annotation are the expected ones")
-				// check that after start networks annotations and nbdb will be updated
-				Eventually(func() string {
-					return getPodAnnotations(fakeOvn.fakeClient.KubeClient, podInfo.namespace, podInfo.podName)
-				}).WithTimeout(2 * time.Second).Should(MatchJSON(podInfo.getAnnotationsJson()))
+				// for layer2 on interconnect, it is the cluster manager that
+				// allocates the OVN annotation; on unit tests, this just
+				// doesn't happen, and we create the pod with these annotations
+				// set. Hence, no point checking they're the expected ones.
+				// TODO: align the mocked annotations with the production code
+				//   - currently missing setting the routes.
+				if !config.OVNKubernetesFeature.EnableInterconnect {
+					By("asserting the pod OVN pod networks annotation are the expected ones")
+					// check that after start networks annotations and nbdb will be updated
+					Eventually(func() string {
+						return getPodAnnotations(fakeOvn.fakeClient.KubeClient, podInfo.namespace, podInfo.podName)
+					}).WithTimeout(2 * time.Second).Should(MatchJSON(podInfo.getAnnotationsJson()))
+				}
 
-				var expectationOptions []option
+				expectationOptions := testConfig.expectationOptions
 				if netInfo.isPrimary {
 					By("configuring the expectation machine with the GW related configuration")
 					gwConfig, err := util.ParseNodeL3GatewayAnnotation(testNode)
@@ -139,10 +154,22 @@ var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 		},
 		table.Entry("pod on a user defined secondary network",
 			dummySecondaryLayer2UserDefinedNetwork("100.200.0.0/16"),
+			nonICClusterTestConfiguration(),
 		),
 
-		table.Entry("pod on a user defined primary network",
+		table.Entry("pod on a user defined primary network on an IC cluster",
 			dummyPrimaryLayer2UserDefinedNetwork("100.200.0.0/16"),
+			icClusterTestConfiguration(),
+		),
+
+		table.Entry("pod on a user defined secondary network",
+			dummySecondaryLayer2UserDefinedNetwork("100.200.0.0/16"),
+			nonICClusterTestConfiguration(),
+		),
+
+		table.Entry("pod on a user defined primary network on an IC cluster",
+			dummyPrimaryLayer2UserDefinedNetwork("100.200.0.0/16"),
+			icClusterTestConfiguration(),
 		),
 	)
 
@@ -205,11 +232,16 @@ var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 
 				podInfo.populateLogicalSwitchCache(fakeOvn)
 
-				// pod exists, networks annotations don't
 				pod, err := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(podInfo.namespace).Get(context.Background(), podInfo.podName, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
-				_, ok := pod.Annotations[util.OvnPodAnnotationName]
-				Expect(ok).To(BeFalse())
+				// on IC, the test itself spits out the pod with the
+				// annotations set, since on production it would be the
+				// clustermanager to annotate the pod.
+				if !config.OVNKubernetesFeature.EnableInterconnect {
+					// pod exists, networks annotations don't
+					_, ok := pod.Annotations[util.OvnPodAnnotationName]
+					Expect(ok).To(BeFalse())
+				}
 
 				Expect(fakeOvn.controller.WatchNamespaces()).To(Succeed())
 				Expect(fakeOvn.controller.WatchPods()).To(Succeed())

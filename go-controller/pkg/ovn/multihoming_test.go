@@ -8,6 +8,8 @@ import (
 
 	v1 "k8s.io/api/core/v1"
 
+	iputils "github.com/containernetworking/plugins/pkg/ip"
+
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
@@ -16,6 +18,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -143,6 +146,9 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPorts() 
 
 				if pod.noIfaceIdVer {
 					delete(lsp.Options, "iface-id-ver")
+				}
+				if ocInfo.bnc.isLayer2Interconnect() {
+					lsp.Options["requested-tnl-key"] = "1" // hardcode this for now.
 				}
 				data = append(data, lsp)
 				switch ocInfo.bnc.TopologyType() {
@@ -408,5 +414,87 @@ func newMultiHomedPod(namespace, name, node, podIP string, multiHomingConfigs ..
 	}
 	serializedNetworkSelectionElements, _ := json.Marshal(secondaryNetworks)
 	pod.Annotations = map[string]string{nadapi.NetworkAttachmentAnnot: string(serializedNetworkSelectionElements)}
+	if config.OVNKubernetesFeature.EnableInterconnect {
+		dummyOVNNetAnnotations := dummyOVNPodNetworkAnnotations(multiHomingConfigs)
+		if dummyOVNNetAnnotations != "{}" {
+			pod.Annotations["k8s.ovn.org/pod-networks"] = dummyOVNNetAnnotations
+		}
+	}
 	return pod
+}
+
+func dummyOVNPodNetworkAnnotations(multiHomingConfigs []secondaryNetInfo) string {
+	var ovnPodNetworksAnnotations []byte
+	podAnnotations := map[string]podAnnotation{}
+	for i, netConfig := range multiHomingConfigs {
+		// we need to inject a dummy OVN annotation into the pods for each multihoming config
+		// for layer2 topology since allocating the annotation for this cluster configuration
+		// is performed by cluster manager - which doesn't exist in the unit tests.
+		if netConfig.topology == ovntypes.Layer2Topology {
+			podAnnotations[netConfig.nadName] = dummyOVNPodNetworkAnnotationForNetwork(netConfig, i+1)
+		}
+	}
+
+	var err error
+	ovnPodNetworksAnnotations, err = json.Marshal(podAnnotations)
+	if err != nil {
+		panic(fmt.Errorf("failed to marshal the pod annotations: %w", err))
+	}
+	return string(ovnPodNetworksAnnotations)
+}
+
+func dummyOVNPodNetworkAnnotationForNetwork(netConfig secondaryNetInfo, tunnelID int) podAnnotation {
+	role := ovntypes.NetworkRoleSecondary
+	if netConfig.isPrimary {
+		role = ovntypes.NetworkRolePrimary
+	}
+	var (
+		gateways []string
+		ips      []string
+	)
+	for _, subnetStr := range strings.Split(netConfig.subnets, ",") {
+		subnet := testing.MustParseIPNet(subnetStr)
+		ips = append(ips, GetWorkloadSecondaryNetworkDummyIP(subnet).String())
+		gateways = append(gateways, util.GetNodeGatewayIfAddr(subnet).IP.String())
+	}
+	return podAnnotation{
+		IPs:      ips,
+		MAC:      util.IPAddrToHWAddr(testing.MustParseIPNet(ips[0]).IP).String(),
+		Gateways: gateways,
+		Routes:   nil, // TODO: must add here the expected routes.
+		TunnelID: tunnelID,
+		Role:     role,
+	}
+}
+
+// GetWorkloadSecondaryNetworkDummyIP returns the workload logical switch port
+// address (the ".3" address), return nil if the subnet is invalid
+func GetWorkloadSecondaryNetworkDummyIP(subnet *net.IPNet) *net.IPNet {
+	mgmtIfAddr := util.GetNodeManagementIfAddr(subnet)
+	if mgmtIfAddr == nil {
+		return nil
+	}
+	return &net.IPNet{IP: iputils.NextIP(mgmtIfAddr.IP), Mask: subnet.Mask}
+}
+
+// Internal struct used to marshal PodAnnotation to the pod annotationç
+// Copied from pkg/util/pod_annotation.go
+type podAnnotation struct {
+	IPs      []string   `json:"ip_addresses"`
+	MAC      string     `json:"mac_address"`
+	Gateways []string   `json:"gateway_ips,omitempty"`
+	Routes   []podRoute `json:"routes,omitempty"`
+
+	IP      string `json:"ip_address,omitempty"`
+	Gateway string `json:"gateway_ip,omitempty"`
+
+	TunnelID int    `json:"tunnel_id,omitempty"`
+	Role     string `json:"role,omitempty"`
+}
+
+// Internal struct used to marshal PodRoute to the pod annotation
+// Copied from pkg/util/pod_annotation.go
+type podRoute struct {
+	Dest    string `json:"dest"`
+	NextHop string `json:"nextHop"`
 }
