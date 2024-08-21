@@ -59,15 +59,22 @@ const (
 // nodePortWatcherIptables manages iptables rules for shared gateway
 // to ensure that services using NodePorts are accessible.
 type nodePortWatcherIptables struct {
+	baseNodeServiceWatcher
 }
 
-func newNodePortWatcherIptables() *nodePortWatcherIptables {
-	return &nodePortWatcherIptables{}
+func newNodePortWatcherIptables(watchFactory factory.NodeWatchFactory) *nodePortWatcherIptables {
+	return &nodePortWatcherIptables{
+		baseNodeServiceWatcher: baseNodeServiceWatcher{
+			watchFactory: watchFactory,
+		},
+	}
 }
 
 // nodePortWatcher manages OpenFlow and iptables rules
 // to ensure that services using NodePorts are accessible
 type nodePortWatcher struct {
+	baseNodeServiceWatcher
+
 	dpuMode       bool
 	gatewayIPv4   string
 	gatewayIPv6   string
@@ -80,7 +87,6 @@ type nodePortWatcher struct {
 	serviceInfoLock sync.Mutex
 	ofm             *openflowManager
 	nodeIPManager   *addressManager
-	watchFactory    factory.NodeWatchFactory
 }
 
 type serviceConfig struct {
@@ -1957,6 +1963,9 @@ func newNodePortWatcher(gwBridge *bridgeConfiguration, ofm *openflowManager,
 	gatewayIPv4, gatewayIPv6 := getGatewayFamilyAddrs(gwBridge.ips)
 
 	npw := &nodePortWatcher{
+		baseNodeServiceWatcher: baseNodeServiceWatcher{
+			watchFactory: watchFactory,
+		},
 		dpuMode:       dpuMode,
 		gatewayIPv4:   gatewayIPv4,
 		gatewayIPv6:   gatewayIPv6,
@@ -1966,7 +1975,6 @@ func newNodePortWatcher(gwBridge *bridgeConfiguration, ofm *openflowManager,
 		serviceInfo:   make(map[ktypes.NamespacedName]*serviceConfig),
 		nodeIPManager: nodeIPManager,
 		ofm:           ofm,
-		watchFactory:  watchFactory,
 	}
 	return npw, nil
 }

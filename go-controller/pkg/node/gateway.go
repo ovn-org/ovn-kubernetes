@@ -21,6 +21,8 @@ import (
 	kapi "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
 	"k8s.io/klog/v2"
+
+	nadlister "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
 )
 
 // Gateway responds to Service and Endpoint K8s events
@@ -568,4 +570,23 @@ func bridgeForInterface(intfName, nodeName, physicalNetworkName string, gwIPs []
 	}
 
 	return &res, nil
+}
+
+// baseNodeServiceWatcher is a base structure to be inherited by all node-side
+// watchers that handle Service changes.
+type baseNodeServiceWatcher struct {
+	watchFactory factory.NodeWatchFactory
+}
+
+// getActiveNetworkForNamespace returns the active network for the given namespace
+// and is a wrapper around util.GetActiveNetworkForNamespace
+//
+// FIXME(dceara): This is inefficient, instead use the new controller that will
+// be added by https://github.com/ovn-org/ovn-kubernetes/pull/4662.
+func (bnsw *baseNodeServiceWatcher) GetActiveNetworkForNamespace(namespace string) (util.NetInfo, error) {
+	var nadLister nadlister.NetworkAttachmentDefinitionLister
+	if util.IsNetworkSegmentationSupportEnabled() {
+		nadLister = bnsw.watchFactory.NADInformer().Lister()
+	}
+	return util.GetActiveNetworkForNamespace(namespace, nadLister)
 }
