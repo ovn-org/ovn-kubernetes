@@ -12,6 +12,17 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
+type secondaryNetInfo struct {
+	netName        string
+	nadName        string
+	subnets        string
+	topology       string
+	excludeSubnets string
+	extraDest      string
+	gateway        string
+	isPrimary      bool
+}
+
 func (p testPod) addNetwork(
 	netName, nadName, nodeSubnet, nodeMgtIP, nodeGWIP, podIP, podMAC, role string,
 	tunnelID int,
@@ -151,12 +162,15 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPorts() 
 				}
 				nodeslsps[switchName] = append(nodeslsps[switchName], lspUUID)
 			}
-			subnets := subnetsAsString(ocInfo.bnc.Subnets())
-			sn := subnets[0]
-			subnet := strings.TrimSuffix(sn, "/24")
-			otherConfig := map[string]string{
-				"exclude_ips": "192.168.0.2",
-				"subnet":      subnet,
+			var otherConfig map[string]string
+			if ocInfo.bnc.TopologyType() == ovntypes.Layer3Topology {
+				subnets := subnetsAsString(ocInfo.bnc.Subnets())
+				sn := subnets[0]
+				subnet := strings.TrimSuffix(sn, "/24")
+				otherConfig = map[string]string{
+					"exclude_ips": "192.168.0.2",
+					"subnet":      subnet,
+				}
 			}
 			data = append(data, &nbdb.LogicalSwitch{
 				UUID:        switchName + "-UUID",

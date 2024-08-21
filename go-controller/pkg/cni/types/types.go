@@ -24,7 +24,7 @@ type NetConf struct {
 	NADName string `json:"netAttachDefName,omitempty"`
 	// Network MTU
 	MTU int `json:"mtu,omitempty"`
-	// comma-seperated subnet cidr
+	// comma-separated subnet cidr
 	// for secondary layer3 network, eg. 10.128.0.0/14/23
 	// for layer2 and localnet network, eg. 10.1.130.0/24
 	Subnets string `json:"subnets,omitempty"`
@@ -49,6 +49,12 @@ type NetConf struct {
 	// they are originally created - e.g. a KubeVirt VM's migration, or
 	// restart.
 	AllowPersistentIPs bool `json:"allowPersistentIPs,omitempty"`
+	// Gateways, valid in localnet topology network
+	// Can be comma-separated and at most two (for IPv4/IPv6)
+	Gateways string `json:"gatewayIP,omitempty"`
+	// comma-separated extra route destination IP ranges routed though this network,
+	// valid in localnet and layer3 network topology for now
+	ExtraRouteDests string `json:"extraRouteDests,omitempty"`
 
 	// PciAddrs in case of using sriov or Auxiliry device name in case of SF
 	DeviceID string `json:"deviceID,omitempty"`
