@@ -18,18 +18,18 @@ limitations under the License.
 package v1
 
 import (
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	v1 "k8s.io/client-go/applyconfigurations/meta/v1"
 )
 
-// EgressFirewallDestinationApplyConfiguration represents an declarative configuration of the EgressFirewallDestination type for use
+// EgressFirewallDestinationApplyConfiguration represents a declarative configuration of the EgressFirewallDestination type for use
 // with apply.
 type EgressFirewallDestinationApplyConfiguration struct {
-	CIDRSelector *string           `json:"cidrSelector,omitempty"`
-	DNSName      *string           `json:"dnsName,omitempty"`
-	NodeSelector *v1.LabelSelector `json:"nodeSelector,omitempty"`
+	CIDRSelector *string                             `json:"cidrSelector,omitempty"`
+	DNSName      *string                             `json:"dnsName,omitempty"`
+	NodeSelector *v1.LabelSelectorApplyConfiguration `json:"nodeSelector,omitempty"`
 }
 
-// EgressFirewallDestinationApplyConfiguration constructs an declarative configuration of the EgressFirewallDestination type for use with
+// EgressFirewallDestinationApplyConfiguration constructs a declarative configuration of the EgressFirewallDestination type for use with
 // apply.
 func EgressFirewallDestination() *EgressFirewallDestinationApplyConfiguration {
 	return &EgressFirewallDestinationApplyConfiguration{}
@@ -54,7 +54,7 @@ func (b *EgressFirewallDestinationApplyConfiguration) WithDNSName(value string) 
 // WithNodeSelector sets the NodeSelector field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
 // If called multiple times, the NodeSelector field is set to the value of the last call.
-func (b *EgressFirewallDestinationApplyConfiguration) WithNodeSelector(value v1.LabelSelector) *EgressFirewallDestinationApplyConfiguration {
-	b.NodeSelector = &value
+func (b *EgressFirewallDestinationApplyConfiguration) WithNodeSelector(value *v1.LabelSelectorApplyConfiguration) *EgressFirewallDestinationApplyConfiguration {
+	b.NodeSelector = value
 	return b
 }

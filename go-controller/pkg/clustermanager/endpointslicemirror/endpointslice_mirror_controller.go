@@ -36,7 +36,7 @@ const maxRetries = 10
 type Controller struct {
 	kubeClient kubernetes.Interface
 	wg         *sync.WaitGroup
-	queue      workqueue.RateLimitingInterface
+	queue      workqueue.TypedRateLimitingInterface[string]
 	name       string
 
 	endpointSliceLister  discoverylisters.EndpointSliceLister
@@ -121,9 +121,9 @@ func NewController(
 		nadController: nadController,
 	}
 
-	c.queue = workqueue.NewRateLimitingQueueWithConfig(
-		workqueue.NewItemFastSlowRateLimiter(1*time.Second, 5*time.Second, 5),
-		workqueue.RateLimitingQueueConfig{Name: c.name},
+	c.queue = workqueue.NewTypedRateLimitingQueueWithConfig(
+		workqueue.NewTypedItemFastSlowRateLimiter[string](1*time.Second, 5*time.Second, 5),
+		workqueue.TypedRateLimitingQueueConfig[string]{Name: c.name},
 	)
 
 	c.podLister = wf.PodCoreInformer().Lister()
@@ -209,7 +209,7 @@ func (c *Controller) processNextEgressServiceWorkItem(ctx context.Context, wg *s
 
 	defer c.queue.Done(key)
 
-	err := c.syncDefaultEndpointSlice(ctx, key.(string))
+	err := c.syncDefaultEndpointSlice(ctx, key)
 	if err == nil {
 		c.queue.Forget(key)
 		return true

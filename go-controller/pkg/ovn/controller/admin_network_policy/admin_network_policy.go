@@ -33,7 +33,7 @@ func (c *Controller) processNextANPWorkItem(wg *sync.WaitGroup) bool {
 	}
 	defer c.anpQueue.Done(anpKey)
 
-	err := c.syncAdminNetworkPolicy(anpKey.(string))
+	err := c.syncAdminNetworkPolicy(anpKey)
 	if err == nil {
 		c.anpQueue.Forget(anpKey)
 		return true

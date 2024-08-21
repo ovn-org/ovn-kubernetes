@@ -37,14 +37,14 @@ type Controller interface {
 }
 
 type ReconcilerConfig struct {
-	RateLimiter workqueue.RateLimiter
+	RateLimiter workqueue.TypedRateLimiter[string]
 	Reconcile   func(key string) error
 	// How many workers should be started for this reconciler.
 	Threadiness int
 }
 
 type ControllerConfig[T any] struct {
-	RateLimiter workqueue.RateLimiter
+	RateLimiter workqueue.TypedRateLimiter[string]
 	Reconcile   func(key string) error
 	// How many workers should be started for this controller.
 	Threadiness int
@@ -62,7 +62,7 @@ type controller[T any] struct {
 	config       *ControllerConfig[T]
 	eventHandler cache.ResourceEventHandlerRegistration
 
-	queue    workqueue.RateLimitingInterface
+	queue    workqueue.TypedRateLimitingInterface[string]
 	stopChan chan struct{}
 	wg       *sync.WaitGroup
 }
@@ -84,9 +84,9 @@ func NewController[T any](name string, config *ControllerConfig[T]) Controller {
 	return &controller[T]{
 		name:   name,
 		config: config,
-		queue: workqueue.NewRateLimitingQueueWithConfig(
+		queue: workqueue.NewTypedRateLimitingQueueWithConfig(
 			config.RateLimiter,
-			workqueue.RateLimitingQueueConfig{
+			workqueue.TypedRateLimitingQueueConfig[string]{
 				Name: name,
 			},
 		),
@@ -216,14 +216,14 @@ func (c *controller[T]) processNextQueueItem() bool {
 
 	defer c.queue.Done(key)
 
-	err := c.config.Reconcile(key.(string))
+	err := c.config.Reconcile(key)
 	if err != nil {
 		if c.queue.NumRequeues(key) < maxRetries {
-			klog.Infof("Controller %s: error found while processing %s: %v", c.name, key.(string), err)
+			klog.Infof("Controller %s: error found while processing %s: %v", c.name, key, err)
 			c.queue.AddRateLimited(key)
 			return true
 		}
-		klog.Warningf("Controller %s: dropping %s out of the queue: %v", c.name, key.(string), err)
+		klog.Warningf("Controller %s: dropping %s out of the queue: %v", c.name, key, err)
 		utilruntime.HandleError(err)
 	}
 	c.queue.Forget(key)
