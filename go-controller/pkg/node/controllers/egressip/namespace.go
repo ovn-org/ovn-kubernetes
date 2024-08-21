@@ -75,22 +75,21 @@ func (c *Controller) runNamespaceWorker(wg *sync.WaitGroup) {
 func (c *Controller) processNextNamespaceWorkItem(wg *sync.WaitGroup) bool {
 	wg.Add(1)
 	defer wg.Done()
-	obj, shutdown := c.namespaceQueue.Get()
+	ns, shutdown := c.namespaceQueue.Get()
 	if shutdown {
 		return false
 	}
-	defer c.namespaceQueue.Done(obj)
-	ns := obj.(*corev1.Namespace)
+	defer c.namespaceQueue.Done(ns)
 	if err := c.syncNamespace(ns); err != nil {
-		if c.namespaceQueue.NumRequeues(obj) < maxRetries {
-			klog.V(4).Infof("Error found while processing namespace %s: %v", obj.(*corev1.Namespace), err)
-			c.namespaceQueue.AddRateLimited(obj)
+		if c.namespaceQueue.NumRequeues(ns) < maxRetries {
+			klog.V(4).Infof("Error found while processing namespace %q: %v", ns.Name, err)
+			c.namespaceQueue.AddRateLimited(ns)
 			return true
 		}
-		klog.Errorf("Dropping namespace %q out of the queue: %v", obj.(*corev1.Namespace).Name, err)
+		klog.Errorf("Dropping namespace %q out of the queue: %v", ns.Name, err)
 		utilruntime.HandleError(err)
 	}
-	c.namespaceQueue.Forget(obj)
+	c.namespaceQueue.Forget(ns)
 	return true
 }
 

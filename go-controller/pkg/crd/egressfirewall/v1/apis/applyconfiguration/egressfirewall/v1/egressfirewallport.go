@@ -17,14 +17,14 @@ limitations under the License.
 
 package v1
 
-// EgressFirewallPortApplyConfiguration represents an declarative configuration of the EgressFirewallPort type for use
+// EgressFirewallPortApplyConfiguration represents a declarative configuration of the EgressFirewallPort type for use
 // with apply.
 type EgressFirewallPortApplyConfiguration struct {
 	Protocol *string `json:"protocol,omitempty"`
 	Port     *int32  `json:"port,omitempty"`
 }
 
-// EgressFirewallPortApplyConfiguration constructs an declarative configuration of the EgressFirewallPort type for use with
+// EgressFirewallPortApplyConfiguration constructs a declarative configuration of the EgressFirewallPort type for use with
 // apply.
 func EgressFirewallPort() *EgressFirewallPortApplyConfiguration {
 	return &EgressFirewallPortApplyConfiguration{}
