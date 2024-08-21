@@ -188,96 +188,17 @@ spec:
                 - message: JoinSubnets is only supported for Primary network
                   rule: '!has(self.joinSubnets) || has(self.role) && self.role ==
                     ''Primary'''
-              localNet:
-                description: LocalNet is the LocalNet topology configuration.
-                properties:
-                  excludeSubnets:
-                    description: |-
-                      ExcludeSubnets is a list of CIDRs that will be removed from the assignable IP address pool specified by the "Subnets" field.
-
-
-                      This field is supported only when "Subnets" field is set.
-
-
-                      In case the subject local network provides various services (e.g.: DHCP server, data-base) their addresses can be excluded
-                      from the IP addresses pool OVN-Kubernetes will use for the subject network workloads (specified by "Subnets" field).
-                    items:
-                      type: string
-                    maxItems: 25
-                    minItems: 1
-                    type: array
-                  ipamLifecycle:
-                    description: |-
-                      IPAMLifecycle controls IP addresses management lifecycle.
-
-
-                      The only allowed value is Persistent. When set, OVN Kubernetes assigned IP addresses will be persisted in an
-                      `ipamclaims.k8s.cni.cncf.io` object. These IP addresses will be reused by other pods if requested.
-                      Only supported when "subnets" are set.
-                    enum:
-                    - Persistent
-                    type: string
-                  mtu:
-                    description: |-
-                      MTU is the maximum transmission unit for a network.
-
-
-                      MTU is optional, if not provided, the globally configured value in OVN-Kubernetes (defaults to 1400) is used for the network.
-                    format: int32
-                    maximum: 65536
-                    minimum: 0
-                    type: integer
-                  role:
-                    description: |-
-                      Role describes the network role in the pod.
-
-
-                      Allowed values are "Primary" and "Secondary".
-                      Must be set to "Secondary".
-                    enum:
-                    - Primary
-                    - Secondary
-                    type: string
-                  subnets:
-                    description: |-
-                      Subnets are used for the pod network across the cluster.
-
-
-                      Dual-stack clusters may set 2 subnets (one for each IP family), otherwise only 1 subnet is allowed.
-                      The format should match standard CIDR notation <example>.
-                      This field may be omitted.
-                      In that case the logical switch implementing the network only provides layer 2 communication,
-                      and users must configure IP addresses for the pods. As a consequence, Port security only prevents MAC spoofing.
-                    items:
-                      type: string
-                    maxItems: 2
-                    minItems: 1
-                    type: array
-                required:
-                - role
-                type: object
-                x-kubernetes-validations:
-                - message: LocalNet topology is only supported for Secondary network
-                  rule: self.role == 'Secondary'
-                - message: ExcludeSubnets is only supported when Subnets is provided
-                  rule: '!has(self.excludeSubnets) || has(self.subnets) && size(self.subnets)
-                    > 0'
-                - message: IPAMLifecycle is only supported when subnets are set
-                  rule: '!has(self.ipamLifecycle) || has(self.subnets) && size(self.subnets)
-                    > 0'
               topology:
                 description: |-
                   Topology describes network configuration.
 
 
-                  Allowed values are "Layer3", "Layer2", "LocalNet".
+                  Allowed values are "Layer3", "Layer2".
                   Layer3 topology creates a layer 2 segment per node, each with a different subnet. Layer 3 routing is used to interconnect node subnets.
                   Layer2 topology creates one logical switch shared by all nodes.
-                  LocalNet topology creates a cluster-wide logical switch connected to a physical network.
                 enum:
                 - Layer2
                 - Layer3
-                - LocalNet
                 type: string
             required:
             - topology
@@ -293,10 +214,6 @@ spec:
                 otherwise
               rule: 'has(self.topology) && self.topology == ''Layer2'' ? has(self.layer2):
                 !has(self.layer2)'
-            - message: spec.localNet is required when topology is LocalNet and forbidden
-                otherwise
-              rule: 'has(self.topology) && self.topology == ''LocalNet'' ? has(self.localNet):
-                !has(self.localNet)'
           status:
             description: UserDefinedNetworkStatus contains the observed status of
               the UserDefinedNetwork.

@@ -63,8 +63,7 @@ func RenderNetAttachDefManifest(udn *userdefinednetworkv1.UserDefinedNetwork) (*
 
 func validateTopology(udn *userdefinednetworkv1.UserDefinedNetwork) error {
 	if udn.Spec.Topology == userdefinednetworkv1.NetworkTopologyLayer3 && udn.Spec.Layer3 == nil ||
-		udn.Spec.Topology == userdefinednetworkv1.NetworkTopologyLayer2 && udn.Spec.Layer2 == nil ||
-		udn.Spec.Topology == userdefinednetworkv1.NetworkTopologyLocalNet && udn.Spec.LocalNet == nil {
+		udn.Spec.Topology == userdefinednetworkv1.NetworkTopologyLayer2 && udn.Spec.Layer2 == nil {
 		return fmt.Errorf("topology %[1]s is specified but %[1]s config is nil", udn.Spec.Topology)
 	}
 	return nil
@@ -98,13 +97,6 @@ func renderCNINetworkConfig(udn *userdefinednetworkv1.UserDefinedNetwork) (map[s
 		netConfSpec.AllowPersistentIPs = cfg.IPAMLifecycle == userdefinednetworkv1.IPAMLifecyclePersistent
 		netConfSpec.Subnets = cidrString(cfg.Subnets)
 		netConfSpec.JoinSubnet = cidrString(renderJoinSubnets(cfg.Role, cfg.JoinSubnets))
-	case userdefinednetworkv1.NetworkTopologyLocalNet:
-		cfg := udn.Spec.LocalNet
-		netConfSpec.Role = strings.ToLower(string(cfg.Role))
-		netConfSpec.MTU = int(cfg.MTU)
-		netConfSpec.AllowPersistentIPs = cfg.IPAMLifecycle == userdefinednetworkv1.IPAMLifecyclePersistent
-		netConfSpec.Subnets = cidrString(cfg.Subnets)
-		netConfSpec.ExcludeSubnets = cidrString(cfg.ExcludeSubnets)
 	}
 
 	if err := util.ValidateNetConf(nadName, netConfSpec); err != nil {
@@ -136,9 +128,6 @@ func renderCNINetworkConfig(udn *userdefinednetworkv1.UserDefinedNetwork) (map[s
 	}
 	if len(netConfSpec.Subnets) > 0 {
 		cniNetConf["subnets"] = netConfSpec.Subnets
-	}
-	if len(netConfSpec.ExcludeSubnets) > 0 {
-		cniNetConf["excludeSubnets"] = netConfSpec.ExcludeSubnets
 	}
 	if netConfSpec.AllowPersistentIPs {
 		cniNetConf["allowPersistentIPs"] = netConfSpec.AllowPersistentIPs

@@ -35,7 +35,6 @@ type UserDefinedNetwork struct {
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf", message="Spec is immutable"
 	// +kubebuilder:validation:XValidation:rule="has(self.topology) && self.topology == 'Layer3' ? has(self.layer3): !has(self.layer3)", message="spec.layer3 is required when topology is Layer3 and forbidden otherwise"
 	// +kubebuilder:validation:XValidation:rule="has(self.topology) && self.topology == 'Layer2' ? has(self.layer2): !has(self.layer2)", message="spec.layer2 is required when topology is Layer2 and forbidden otherwise"
-	// +kubebuilder:validation:XValidation:rule="has(self.topology) && self.topology == 'LocalNet' ? has(self.localNet): !has(self.localNet)", message="spec.localNet is required when topology is LocalNet and forbidden otherwise"
 	// +required
 	Spec UserDefinedNetworkSpec `json:"spec"`
 	// +optional
@@ -47,10 +46,9 @@ type UserDefinedNetwork struct {
 type UserDefinedNetworkSpec struct {
 	// Topology describes network configuration.
 	//
-	// Allowed values are "Layer3", "Layer2", "LocalNet".
+	// Allowed values are "Layer3", "Layer2".
 	// Layer3 topology creates a layer 2 segment per node, each with a different subnet. Layer 3 routing is used to interconnect node subnets.
 	// Layer2 topology creates one logical switch shared by all nodes.
-	// LocalNet topology creates a cluster-wide logical switch connected to a physical network.
 	//
 	// +kubebuilder:validation:Required
 	// +required
@@ -64,19 +62,14 @@ type UserDefinedNetworkSpec struct {
 	// Layer2 is the Layer2 topology configuration.
 	// +optional
 	Layer2 *Layer2Config `json:"layer2,omitempty"`
-
-	// LocalNet is the LocalNet topology configuration.
-	// +optional
-	LocalNet *LocalNetConfig `json:"localNet,omitempty"`
 }
 
-// +kubebuilder:validation:Enum=Layer2;Layer3;LocalNet
+// +kubebuilder:validation:Enum=Layer2;Layer3
 type NetworkTopology string
 
 const (
-	NetworkTopologyLayer2   NetworkTopology = "Layer2"
-	NetworkTopologyLayer3   NetworkTopology = "Layer3"
-	NetworkTopologyLocalNet NetworkTopology = "LocalNet"
+	NetworkTopologyLayer2 NetworkTopology = "Layer2"
+	NetworkTopologyLayer3 NetworkTopology = "Layer3"
 )
 
 // +kubebuilder:validation:XValidation:rule="has(self.subnets) && size(self.subnets) > 0", message="Subnets is required for Layer3 topology"
@@ -185,61 +178,6 @@ type Layer2Config struct {
 	//
 	// +optional
 	JoinSubnets DualStackCIDRs `json:"joinSubnets,omitempty"`
-
-	// IPAMLifecycle controls IP addresses management lifecycle.
-	//
-	// The only allowed value is Persistent. When set, OVN Kubernetes assigned IP addresses will be persisted in an
-	// `ipamclaims.k8s.cni.cncf.io` object. These IP addresses will be reused by other pods if requested.
-	// Only supported when "subnets" are set.
-	//
-	// +optional
-	IPAMLifecycle NetworkIPAMLifecycle `json:"ipamLifecycle,omitempty"`
-}
-
-// +kubebuilder:validation:XValidation:rule="self.role == 'Secondary'", message="LocalNet topology is only supported for Secondary network"
-// +kubebuilder:validation:XValidation:rule="!has(self.excludeSubnets) || has(self.subnets) && size(self.subnets) > 0", message="ExcludeSubnets is only supported when Subnets is provided"
-// +kubebuilder:validation:XValidation:rule="!has(self.ipamLifecycle) || has(self.subnets) && size(self.subnets) > 0", message="IPAMLifecycle is only supported when subnets are set"
-type LocalNetConfig struct {
-	// Role describes the network role in the pod.
-	//
-	// Allowed values are "Primary" and "Secondary".
-	// Must be set to "Secondary".
-	//
-	// +kubebuilder:validation:Required
-	// +required
-	Role NetworkRole `json:"role"`
-
-	// MTU is the maximum transmission unit for a network.
-	//
-	// MTU is optional, if not provided, the globally configured value in OVN-Kubernetes (defaults to 1400) is used for the network.
-	//
-	// +kubebuilder:validation:Minimum=0
-	// +kubebuilder:validation:Maximum=65536
-	// +optional
-	MTU int32 `json:"mtu,omitempty"`
-
-	// Subnets are used for the pod network across the cluster.
-	//
-	// Dual-stack clusters may set 2 subnets (one for each IP family), otherwise only 1 subnet is allowed.
-	// The format should match standard CIDR notation <example>.
-	// This field may be omitted.
-	// In that case the logical switch implementing the network only provides layer 2 communication,
-	// and users must configure IP addresses for the pods. As a consequence, Port security only prevents MAC spoofing.
-	//
-	// +optional
-	Subnets DualStackCIDRs `json:"subnets,omitempty"`
-
-	// ExcludeSubnets is a list of CIDRs that will be removed from the assignable IP address pool specified by the "Subnets" field.
-	//
-	// This field is supported only when "Subnets" field is set.
-	//
-	// In case the subject local network provides various services (e.g.: DHCP server, data-base) their addresses can be excluded
-	// from the IP addresses pool OVN-Kubernetes will use for the subject network workloads (specified by "Subnets" field).
-	//
-	// +kubebuilder:validation:MinItems=1
-	// +kubebuilder:validation:MaxItems=25
-	// +optional
-	ExcludeSubnets []CIDR `json:"excludeSubnets,omitempty"`
 
 	// IPAMLifecycle controls IP addresses management lifecycle.
 	//
