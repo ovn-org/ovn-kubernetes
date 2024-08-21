@@ -46,7 +46,7 @@ func newNetworkManager(name string, ncm NetworkControllerManager) networkManager
 	// this controller does not feed from an informer, networks are manually
 	// added to the queue for processing
 	config := &controller.ReconcilerConfig{
-		RateLimiter: workqueue.DefaultControllerRateLimiter(),
+		RateLimiter: workqueue.DefaultTypedControllerRateLimiter[string](),
 		Reconcile:   nc.sync,
 		Threadiness: 1,
 	}

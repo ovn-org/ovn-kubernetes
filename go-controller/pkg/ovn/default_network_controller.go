@@ -64,16 +64,16 @@ type DefaultNetworkController struct {
 	// EgressQoS
 	egressQoSLister egressqoslisters.EgressQoSLister
 	egressQoSSynced cache.InformerSynced
-	egressQoSQueue  workqueue.RateLimitingInterface
+	egressQoSQueue  workqueue.TypedRateLimitingInterface[string]
 	egressQoSCache  sync.Map
 
 	egressQoSPodLister corev1listers.PodLister
 	egressQoSPodSynced cache.InformerSynced
-	egressQoSPodQueue  workqueue.RateLimitingInterface
+	egressQoSPodQueue  workqueue.TypedRateLimitingInterface[string]
 
 	egressQoSNodeLister corev1listers.NodeLister
 	egressQoSNodeSynced cache.InformerSynced
-	egressQoSNodeQueue  workqueue.RateLimitingInterface
+	egressQoSNodeQueue  workqueue.TypedRateLimitingInterface[string]
 
 	// Cluster wide Load_Balancer_Group UUID.
 	// Includes all node switches and node gateway routers.
