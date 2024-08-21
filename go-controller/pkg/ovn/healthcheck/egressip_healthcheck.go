@@ -154,6 +154,8 @@ func (ehc *egressIPHealthClient) Connect(dialCtx context.Context, mgmtIPs []net.
 	var nodeAddr string
 	var err error
 
+	// Ignore SA1019, PR#4286 should refactor this.
+	// nolint:staticcheck
 	opts := []grpc.DialOption{
 		grpc.WithBlock(),
 		grpc.WithContextDialer(func(ctx context.Context, s string) (net.Conn, error) {
@@ -175,6 +177,8 @@ func (ehc *egressIPHealthClient) Connect(dialCtx context.Context, mgmtIPs []net.
 	}
 	for _, nodeMgmtIP := range mgmtIPs {
 		nodeAddr = net.JoinHostPort(nodeMgmtIP.String(), strconv.Itoa(healthCheckPort))
+		// Ignore SA1019, PR#4286 should refactor this.
+		//nolint:staticcheck
 		conn, err = grpc.DialContext(dialCtx, nodeAddr, opts...)
 		if err == nil && conn != nil {
 			break

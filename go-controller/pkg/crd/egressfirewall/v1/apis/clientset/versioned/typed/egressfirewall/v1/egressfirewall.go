@@ -19,9 +19,6 @@ package v1
 
 import (
 	"context"
-	json "encoding/json"
-	"fmt"
-	"time"
 
 	v1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	egressfirewallv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/applyconfiguration/egressfirewall/v1"
@@ -29,7 +26,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
 	watch "k8s.io/apimachinery/pkg/watch"
-	rest "k8s.io/client-go/rest"
+	gentype "k8s.io/client-go/gentype"
 )
 
 // EgressFirewallsGetter has a method to return a EgressFirewallInterface.
@@ -42,6 +39,7 @@ type EgressFirewallsGetter interface {
 type EgressFirewallInterface interface {
 	Create(ctx context.Context, egressFirewall *v1.EgressFirewall, opts metav1.CreateOptions) (*v1.EgressFirewall, error)
 	Update(ctx context.Context, egressFirewall *v1.EgressFirewall, opts metav1.UpdateOptions) (*v1.EgressFirewall, error)
+	// Add a +genclient:noStatus comment above the type to avoid generating UpdateStatus().
 	UpdateStatus(ctx context.Context, egressFirewall *v1.EgressFirewall, opts metav1.UpdateOptions) (*v1.EgressFirewall, error)
 	Delete(ctx context.Context, name string, opts metav1.DeleteOptions) error
 	DeleteCollection(ctx context.Context, opts metav1.DeleteOptions, listOpts metav1.ListOptions) error
@@ -50,206 +48,25 @@ type EgressFirewallInterface interface {
 	Watch(ctx context.Context, opts metav1.ListOptions) (watch.Interface, error)
 	Patch(ctx context.Context, name string, pt types.PatchType, data []byte, opts metav1.PatchOptions, subresources ...string) (result *v1.EgressFirewall, err error)
 	Apply(ctx context.Context, egressFirewall *egressfirewallv1.EgressFirewallApplyConfiguration, opts metav1.ApplyOptions) (result *v1.EgressFirewall, err error)
+	// Add a +genclient:noStatus comment above the type to avoid generating ApplyStatus().
 	ApplyStatus(ctx context.Context, egressFirewall *egressfirewallv1.EgressFirewallApplyConfiguration, opts metav1.ApplyOptions) (result *v1.EgressFirewall, err error)
 	EgressFirewallExpansion
 }
 
 // egressFirewalls implements EgressFirewallInterface
 type egressFirewalls struct {
-	client rest.Interface
-	ns     string
+	*gentype.ClientWithListAndApply[*v1.EgressFirewall, *v1.EgressFirewallList, *egressfirewallv1.EgressFirewallApplyConfiguration]
 }
 
 // newEgressFirewalls returns a EgressFirewalls
 func newEgressFirewalls(c *K8sV1Client, namespace string) *egressFirewalls {
 	return &egressFirewalls{
-		client: c.RESTClient(),
-		ns:     namespace,
+		gentype.NewClientWithListAndApply[*v1.EgressFirewall, *v1.EgressFirewallList, *egressfirewallv1.EgressFirewallApplyConfiguration](
+			"egressfirewalls",
+			c.RESTClient(),
+			scheme.ParameterCodec,
+			namespace,
+			func() *v1.EgressFirewall { return &v1.EgressFirewall{} },
+			func() *v1.EgressFirewallList { return &v1.EgressFirewallList{} }),
 	}
-}
-
-// Get takes name of the egressFirewall, and returns the corresponding egressFirewall object, and an error if there is any.
-func (c *egressFirewalls) Get(ctx context.Context, name string, options metav1.GetOptions) (result *v1.EgressFirewall, err error) {
-	result = &v1.EgressFirewall{}
-	err = c.client.Get().
-		Namespace(c.ns).
-		Resource("egressfirewalls").
-		Name(name).
-		VersionedParams(&options, scheme.ParameterCodec).
-		Do(ctx).
-		Into(result)
-	return
-}
-
-// List takes label and field selectors, and returns the list of EgressFirewalls that match those selectors.
-func (c *egressFirewalls) List(ctx context.Context, opts metav1.ListOptions) (result *v1.EgressFirewallList, err error) {
-	var timeout time.Duration
-	if opts.TimeoutSeconds != nil {
-		timeout = time.Duration(*opts.TimeoutSeconds) * time.Second
-	}
-	result = &v1.EgressFirewallList{}
-	err = c.client.Get().
-		Namespace(c.ns).
-		Resource("egressfirewalls").
-		VersionedParams(&opts, scheme.ParameterCodec).
-		Timeout(timeout).
-		Do(ctx).
-		Into(result)
-	return
-}
-
-// Watch returns a watch.Interface that watches the requested egressFirewalls.
-func (c *egressFirewalls) Watch(ctx context.Context, opts metav1.ListOptions) (watch.Interface, error) {
-	var timeout time.Duration
-	if opts.TimeoutSeconds != nil {
-		timeout = time.Duration(*opts.TimeoutSeconds) * time.Second
-	}
-	opts.Watch = true
-	return c.client.Get().
-		Namespace(c.ns).
-		Resource("egressfirewalls").
-		VersionedParams(&opts, scheme.ParameterCodec).
-		Timeout(timeout).
-		Watch(ctx)
-}
-
-// Create takes the representation of a egressFirewall and creates it.  Returns the server's representation of the egressFirewall, and an error, if there is any.
-func (c *egressFirewalls) Create(ctx context.Context, egressFirewall *v1.EgressFirewall, opts metav1.CreateOptions) (result *v1.EgressFirewall, err error) {
-	result = &v1.EgressFirewall{}
-	err = c.client.Post().
-		Namespace(c.ns).
-		Resource("egressfirewalls").
-		VersionedParams(&opts, scheme.ParameterCodec).
-		Body(egressFirewall).
-		Do(ctx).
-		Into(result)
-	return
-}
-
-// Update takes the representation of a egressFirewall and updates it. Returns the server's representation of the egressFirewall, and an error, if there is any.
-func (c *egressFirewalls) Update(ctx context.Context, egressFirewall *v1.EgressFirewall, opts metav1.UpdateOptions) (result *v1.EgressFirewall, err error) {
-	result = &v1.EgressFirewall{}
-	err = c.client.Put().
-		Namespace(c.ns).
-		Resource("egressfirewalls").
-		Name(egressFirewall.Name).
-		VersionedParams(&opts, scheme.ParameterCodec).
-		Body(egressFirewall).
-		Do(ctx).
-		Into(result)
-	return
-}
-
-// UpdateStatus was generated because the type contains a Status member.
-// Add a +genclient:noStatus comment above the type to avoid generating UpdateStatus().
-func (c *egressFirewalls) UpdateStatus(ctx context.Context, egressFirewall *v1.EgressFirewall, opts metav1.UpdateOptions) (result *v1.EgressFirewall, err error) {
-	result = &v1.EgressFirewall{}
-	err = c.client.Put().
-		Namespace(c.ns).
-		Resource("egressfirewalls").
-		Name(egressFirewall.Name).
-		SubResource("status").
-		VersionedParams(&opts, scheme.ParameterCodec).
-		Body(egressFirewall).
-		Do(ctx).
-		Into(result)
-	return
-}
-
-// Delete takes name of the egressFirewall and deletes it. Returns an error if one occurs.
-func (c *egressFirewalls) Delete(ctx context.Context, name string, opts metav1.DeleteOptions) error {
-	return c.client.Delete().
-		Namespace(c.ns).
-		Resource("egressfirewalls").
-		Name(name).
-		Body(&opts).
-		Do(ctx).
-		Error()
-}
-
-// DeleteCollection deletes a collection of objects.
-func (c *egressFirewalls) DeleteCollection(ctx context.Context, opts metav1.DeleteOptions, listOpts metav1.ListOptions) error {
-	var timeout time.Duration
-	if listOpts.TimeoutSeconds != nil {
-		timeout = time.Duration(*listOpts.TimeoutSeconds) * time.Second
-	}
-	return c.client.Delete().
-		Namespace(c.ns).
-		Resource("egressfirewalls").
-		VersionedParams(&listOpts, scheme.ParameterCodec).
-		Timeout(timeout).
-		Body(&opts).
-		Do(ctx).
-		Error()
-}
-
-// Patch applies the patch and returns the patched egressFirewall.
-func (c *egressFirewalls) Patch(ctx context.Context, name string, pt types.PatchType, data []byte, opts metav1.PatchOptions, subresources ...string) (result *v1.EgressFirewall, err error) {
-	result = &v1.EgressFirewall{}
-	err = c.client.Patch(pt).
-		Namespace(c.ns).
-		Resource("egressfirewalls").
-		Name(name).
-		SubResource(subresources...).
-		VersionedParams(&opts, scheme.ParameterCodec).
-		Body(data).
-		Do(ctx).
-		Into(result)
-	return
-}
-
-// Apply takes the given apply declarative configuration, applies it and returns the applied egressFirewall.
-func (c *egressFirewalls) Apply(ctx context.Context, egressFirewall *egressfirewallv1.EgressFirewallApplyConfiguration, opts metav1.ApplyOptions) (result *v1.EgressFirewall, err error) {
-	if egressFirewall == nil {
-		return nil, fmt.Errorf("egressFirewall provided to Apply must not be nil")
-	}
-	patchOpts := opts.ToPatchOptions()
-	data, err := json.Marshal(egressFirewall)
-	if err != nil {
-		return nil, err
-	}
-	name := egressFirewall.Name
-	if name == nil {
-		return nil, fmt.Errorf("egressFirewall.Name must be provided to Apply")
-	}
-	result = &v1.EgressFirewall{}
-	err = c.client.Patch(types.ApplyPatchType).
-		Namespace(c.ns).
-		Resource("egressfirewalls").
-		Name(*name).
-		VersionedParams(&patchOpts, scheme.ParameterCodec).
-		Body(data).
-		Do(ctx).
-		Into(result)
-	return
-}
-
-// ApplyStatus was generated because the type contains a Status member.
-// Add a +genclient:noStatus comment above the type to avoid generating ApplyStatus().
-func (c *egressFirewalls) ApplyStatus(ctx context.Context, egressFirewall *egressfirewallv1.EgressFirewallApplyConfiguration, opts metav1.ApplyOptions) (result *v1.EgressFirewall, err error) {
-	if egressFirewall == nil {
-		return nil, fmt.Errorf("egressFirewall provided to Apply must not be nil")
-	}
-	patchOpts := opts.ToPatchOptions()
-	data, err := json.Marshal(egressFirewall)
-	if err != nil {
-		return nil, err
-	}
-
-	name := egressFirewall.Name
-	if name == nil {
-		return nil, fmt.Errorf("egressFirewall.Name must be provided to Apply")
-	}
-
-	result = &v1.EgressFirewall{}
-	err = c.client.Patch(types.ApplyPatchType).
-		Namespace(c.ns).
-		Resource("egressfirewalls").
-		Name(*name).
-		SubResource("status").
-		VersionedParams(&patchOpts, scheme.ParameterCodec).
-		Body(data).
-		Do(ctx).
-		Into(result)
-	return
 }

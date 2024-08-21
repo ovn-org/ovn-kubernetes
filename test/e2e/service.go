@@ -31,6 +31,7 @@ import (
 	e2eservice "k8s.io/kubernetes/test/e2e/framework/service"
 	e2eskipper "k8s.io/kubernetes/test/e2e/framework/skipper"
 	testutils "k8s.io/kubernetes/test/utils"
+	imageutils "k8s.io/kubernetes/test/utils/image"
 	utilnet "k8s.io/utils/net"
 	"k8s.io/utils/pointer"
 )
@@ -164,7 +165,7 @@ var _ = ginkgo.Describe("Services", func() {
 		replicas := 3
 		config := testutils.RCConfig{
 			Client:               cs,
-			Image:                framework.ServeHostnameImage,
+			Image:                imageutils.GetE2EImage(imageutils.Agnhost),
 			Command:              []string{"/agnhost", "serve-hostname"},
 			Name:                 "backend",
 			Labels:               jig.Labels,

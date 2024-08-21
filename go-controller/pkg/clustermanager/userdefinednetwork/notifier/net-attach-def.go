@@ -28,7 +28,7 @@ func NewNetAttachDefNotifier(nadInfomer netv1infomer.NetworkAttachmentDefinition
 
 	nadLister := nadInfomer.Lister()
 	cfg := &controller.ControllerConfig[netv1.NetworkAttachmentDefinition]{
-		RateLimiter:    workqueue.DefaultControllerRateLimiter(),
+		RateLimiter:    workqueue.DefaultTypedControllerRateLimiter[string](),
 		Reconcile:      c.reconcile,
 		ObjNeedsUpdate: c.needUpdate,
 		Threadiness:    1,

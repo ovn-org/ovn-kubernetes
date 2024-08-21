@@ -19,8 +19,8 @@ package v1
 
 import (
 	v1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/client-go/listers"
 	"k8s.io/client-go/tools/cache"
 )
 
@@ -37,25 +37,17 @@ type EgressServiceLister interface {
 
 // egressServiceLister implements the EgressServiceLister interface.
 type egressServiceLister struct {
-	indexer cache.Indexer
+	listers.ResourceIndexer[*v1.EgressService]
 }
 
 // NewEgressServiceLister returns a new EgressServiceLister.
 func NewEgressServiceLister(indexer cache.Indexer) EgressServiceLister {
-	return &egressServiceLister{indexer: indexer}
-}
-
-// List lists all EgressServices in the indexer.
-func (s *egressServiceLister) List(selector labels.Selector) (ret []*v1.EgressService, err error) {
-	err = cache.ListAll(s.indexer, selector, func(m interface{}) {
-		ret = append(ret, m.(*v1.EgressService))
-	})
-	return ret, err
+	return &egressServiceLister{listers.New[*v1.EgressService](indexer, v1.Resource("egressservice"))}
 }
 
 // EgressServices returns an object that can list and get EgressServices.
 func (s *egressServiceLister) EgressServices(namespace string) EgressServiceNamespaceLister {
-	return egressServiceNamespaceLister{indexer: s.indexer, namespace: namespace}
+	return egressServiceNamespaceLister{listers.NewNamespaced[*v1.EgressService](s.ResourceIndexer, namespace)}
 }
 
 // EgressServiceNamespaceLister helps list and get EgressServices.
@@ -73,26 +65,5 @@ type EgressServiceNamespaceLister interface {
 // egressServiceNamespaceLister implements the EgressServiceNamespaceLister
 // interface.
 type egressServiceNamespaceLister struct {
-	indexer   cache.Indexer
-	namespace string
-}
-
-// List lists all EgressServices in the indexer for a given namespace.
-func (s egressServiceNamespaceLister) List(selector labels.Selector) (ret []*v1.EgressService, err error) {
-	err = cache.ListAllByNamespace(s.indexer, s.namespace, selector, func(m interface{}) {
-		ret = append(ret, m.(*v1.EgressService))
-	})
-	return ret, err
-}
-
-// Get retrieves the EgressService from the indexer for a given namespace and name.
-func (s egressServiceNamespaceLister) Get(name string) (*v1.EgressService, error) {
-	obj, exists, err := s.indexer.GetByKey(s.namespace + "/" + name)
-	if err != nil {
-		return nil, err
-	}
-	if !exists {
-		return nil, errors.NewNotFound(v1.Resource("egressservice"), name)
-	}
-	return obj.(*v1.EgressService), nil
+	listers.ResourceIndexer[*v1.EgressService]
 }

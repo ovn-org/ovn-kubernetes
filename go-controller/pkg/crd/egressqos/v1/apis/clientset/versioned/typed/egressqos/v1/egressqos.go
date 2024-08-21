@@ -19,9 +19,6 @@ package v1
 
 import (
 	"context"
-	json "encoding/json"
-	"fmt"
-	"time"
 
 	v1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1"
 	egressqosv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/applyconfiguration/egressqos/v1"
@@ -29,7 +26,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
 	watch "k8s.io/apimachinery/pkg/watch"
-	rest "k8s.io/client-go/rest"
+	gentype "k8s.io/client-go/gentype"
 )
 
 // EgressQoSesGetter has a method to return a EgressQoSInterface.
@@ -42,6 +39,7 @@ type EgressQoSesGetter interface {
 type EgressQoSInterface interface {
 	Create(ctx context.Context, egressQoS *v1.EgressQoS, opts metav1.CreateOptions) (*v1.EgressQoS, error)
 	Update(ctx context.Context, egressQoS *v1.EgressQoS, opts metav1.UpdateOptions) (*v1.EgressQoS, error)
+	// Add a +genclient:noStatus comment above the type to avoid generating UpdateStatus().
 	UpdateStatus(ctx context.Context, egressQoS *v1.EgressQoS, opts metav1.UpdateOptions) (*v1.EgressQoS, error)
 	Delete(ctx context.Context, name string, opts metav1.DeleteOptions) error
 	DeleteCollection(ctx context.Context, opts metav1.DeleteOptions, listOpts metav1.ListOptions) error
@@ -50,206 +48,25 @@ type EgressQoSInterface interface {
 	Watch(ctx context.Context, opts metav1.ListOptions) (watch.Interface, error)
 	Patch(ctx context.Context, name string, pt types.PatchType, data []byte, opts metav1.PatchOptions, subresources ...string) (result *v1.EgressQoS, err error)
 	Apply(ctx context.Context, egressQoS *egressqosv1.EgressQoSApplyConfiguration, opts metav1.ApplyOptions) (result *v1.EgressQoS, err error)
+	// Add a +genclient:noStatus comment above the type to avoid generating ApplyStatus().
 	ApplyStatus(ctx context.Context, egressQoS *egressqosv1.EgressQoSApplyConfiguration, opts metav1.ApplyOptions) (result *v1.EgressQoS, err error)
 	EgressQoSExpansion
 }
 
 // egressQoSes implements EgressQoSInterface
 type egressQoSes struct {
-	client rest.Interface
-	ns     string
+	*gentype.ClientWithListAndApply[*v1.EgressQoS, *v1.EgressQoSList, *egressqosv1.EgressQoSApplyConfiguration]
 }
 
 // newEgressQoSes returns a EgressQoSes
 func newEgressQoSes(c *K8sV1Client, namespace string) *egressQoSes {
 	return &egressQoSes{
-		client: c.RESTClient(),
-		ns:     namespace,
+		gentype.NewClientWithListAndApply[*v1.EgressQoS, *v1.EgressQoSList, *egressqosv1.EgressQoSApplyConfiguration](
+			"egressqoses",
+			c.RESTClient(),
+			scheme.ParameterCodec,
+			namespace,
+			func() *v1.EgressQoS { return &v1.EgressQoS{} },
+			func() *v1.EgressQoSList { return &v1.EgressQoSList{} }),
 	}
-}
-
-// Get takes name of the egressQoS, and returns the corresponding egressQoS object, and an error if there is any.
-func (c *egressQoSes) Get(ctx context.Context, name string, options metav1.GetOptions) (result *v1.EgressQoS, err error) {
-	result = &v1.EgressQoS{}
-	err = c.client.Get().
-		Namespace(c.ns).
-		Resource("egressqoses").
-		Name(name).
-		VersionedParams(&options, scheme.ParameterCodec).
-		Do(ctx).
-		Into(result)
-	return
-}
-
-// List takes label and field selectors, and returns the list of EgressQoSes that match those selectors.
-func (c *egressQoSes) List(ctx context.Context, opts metav1.ListOptions) (result *v1.EgressQoSList, err error) {
-	var timeout time.Duration
-	if opts.TimeoutSeconds != nil {
-		timeout = time.Duration(*opts.TimeoutSeconds) * time.Second
-	}
-	result = &v1.EgressQoSList{}
-	err = c.client.Get().
-		Namespace(c.ns).
-		Resource("egressqoses").
-		VersionedParams(&opts, scheme.ParameterCodec).
-		Timeout(timeout).
-		Do(ctx).
-		Into(result)
-	return
-}
-
-// Watch returns a watch.Interface that watches the requested egressQoSes.
-func (c *egressQoSes) Watch(ctx context.Context, opts metav1.ListOptions) (watch.Interface, error) {
-	var timeout time.Duration
-	if opts.TimeoutSeconds != nil {
-		timeout = time.Duration(*opts.TimeoutSeconds) * time.Second
-	}
-	opts.Watch = true
-	return c.client.Get().
-		Namespace(c.ns).
-		Resource("egressqoses").
-		VersionedParams(&opts, scheme.ParameterCodec).
-		Timeout(timeout).
-		Watch(ctx)
-}
-
-// Create takes the representation of a egressQoS and creates it.  Returns the server's representation of the egressQoS, and an error, if there is any.
-func (c *egressQoSes) Create(ctx context.Context, egressQoS *v1.EgressQoS, opts metav1.CreateOptions) (result *v1.EgressQoS, err error) {
-	result = &v1.EgressQoS{}
-	err = c.client.Post().
-		Namespace(c.ns).
-		Resource("egressqoses").
-		VersionedParams(&opts, scheme.ParameterCodec).
-		Body(egressQoS).
-		Do(ctx).
-		Into(result)
-	return
-}
-
-// Update takes the representation of a egressQoS and updates it. Returns the server's representation of the egressQoS, and an error, if there is any.
-func (c *egressQoSes) Update(ctx context.Context, egressQoS *v1.EgressQoS, opts metav1.UpdateOptions) (result *v1.EgressQoS, err error) {
-	result = &v1.EgressQoS{}
-	err = c.client.Put().
-		Namespace(c.ns).
-		Resource("egressqoses").
-		Name(egressQoS.Name).
-		VersionedParams(&opts, scheme.ParameterCodec).
-		Body(egressQoS).
-		Do(ctx).
-		Into(result)
-	return
-}
-
-// UpdateStatus was generated because the type contains a Status member.
-// Add a +genclient:noStatus comment above the type to avoid generating UpdateStatus().
-func (c *egressQoSes) UpdateStatus(ctx context.Context, egressQoS *v1.EgressQoS, opts metav1.UpdateOptions) (result *v1.EgressQoS, err error) {
-	result = &v1.EgressQoS{}
-	err = c.client.Put().
-		Namespace(c.ns).
-		Resource("egressqoses").
-		Name(egressQoS.Name).
-		SubResource("status").
-		VersionedParams(&opts, scheme.ParameterCodec).
-		Body(egressQoS).
-		Do(ctx).
-		Into(result)
-	return
-}
-
-// Delete takes name of the egressQoS and deletes it. Returns an error if one occurs.
-func (c *egressQoSes) Delete(ctx context.Context, name string, opts metav1.DeleteOptions) error {
-	return c.client.Delete().
-		Namespace(c.ns).
-		Resource("egressqoses").
-		Name(name).
-		Body(&opts).
-		Do(ctx).
-		Error()
-}
-
-// DeleteCollection deletes a collection of objects.
-func (c *egressQoSes) DeleteCollection(ctx context.Context, opts metav1.DeleteOptions, listOpts metav1.ListOptions) error {
-	var timeout time.Duration
-	if listOpts.TimeoutSeconds != nil {
-		timeout = time.Duration(*listOpts.TimeoutSeconds) * time.Second
-	}
-	return c.client.Delete().
-		Namespace(c.ns).
-		Resource("egressqoses").
-		VersionedParams(&listOpts, scheme.ParameterCodec).
-		Timeout(timeout).
-		Body(&opts).
-		Do(ctx).
-		Error()
-}
-
-// Patch applies the patch and returns the patched egressQoS.
-func (c *egressQoSes) Patch(ctx context.Context, name string, pt types.PatchType, data []byte, opts metav1.PatchOptions, subresources ...string) (result *v1.EgressQoS, err error) {
-	result = &v1.EgressQoS{}
-	err = c.client.Patch(pt).
-		Namespace(c.ns).
-		Resource("egressqoses").
-		Name(name).
-		SubResource(subresources...).
-		VersionedParams(&opts, scheme.ParameterCodec).
-		Body(data).
-		Do(ctx).
-		Into(result)
-	return
-}
-
-// Apply takes the given apply declarative configuration, applies it and returns the applied egressQoS.
-func (c *egressQoSes) Apply(ctx context.Context, egressQoS *egressqosv1.EgressQoSApplyConfiguration, opts metav1.ApplyOptions) (result *v1.EgressQoS, err error) {
-	if egressQoS == nil {
-		return nil, fmt.Errorf("egressQoS provided to Apply must not be nil")
-	}
-	patchOpts := opts.ToPatchOptions()
-	data, err := json.Marshal(egressQoS)
-	if err != nil {
-		return nil, err
-	}
-	name := egressQoS.Name
-	if name == nil {
-		return nil, fmt.Errorf("egressQoS.Name must be provided to Apply")
-	}
-	result = &v1.EgressQoS{}
-	err = c.client.Patch(types.ApplyPatchType).
-		Namespace(c.ns).
-		Resource("egressqoses").
-		Name(*name).
-		VersionedParams(&patchOpts, scheme.ParameterCodec).
-		Body(data).
-		Do(ctx).
-		Into(result)
-	return
-}
-
-// ApplyStatus was generated because the type contains a Status member.
-// Add a +genclient:noStatus comment above the type to avoid generating ApplyStatus().
-func (c *egressQoSes) ApplyStatus(ctx context.Context, egressQoS *egressqosv1.EgressQoSApplyConfiguration, opts metav1.ApplyOptions) (result *v1.EgressQoS, err error) {
-	if egressQoS == nil {
-		return nil, fmt.Errorf("egressQoS provided to Apply must not be nil")
-	}
-	patchOpts := opts.ToPatchOptions()
-	data, err := json.Marshal(egressQoS)
-	if err != nil {
-		return nil, err
-	}
-
-	name := egressQoS.Name
-	if name == nil {
-		return nil, fmt.Errorf("egressQoS.Name must be provided to Apply")
-	}
-
-	result = &v1.EgressQoS{}
-	err = c.client.Patch(types.ApplyPatchType).
-		Namespace(c.ns).
-		Resource("egressqoses").
-		Name(*name).
-		SubResource("status").
-		VersionedParams(&patchOpts, scheme.ParameterCodec).
-		Body(data).
-		Do(ctx).
-		Into(result)
-	return
 }

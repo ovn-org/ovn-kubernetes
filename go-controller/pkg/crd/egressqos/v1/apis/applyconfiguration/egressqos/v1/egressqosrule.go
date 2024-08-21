@@ -18,18 +18,18 @@ limitations under the License.
 package v1
 
 import (
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	v1 "k8s.io/client-go/applyconfigurations/meta/v1"
 )
 
-// EgressQoSRuleApplyConfiguration represents an declarative configuration of the EgressQoSRule type for use
+// EgressQoSRuleApplyConfiguration represents a declarative configuration of the EgressQoSRule type for use
 // with apply.
 type EgressQoSRuleApplyConfiguration struct {
-	DSCP        *int              `json:"dscp,omitempty"`
-	DstCIDR     *string           `json:"dstCIDR,omitempty"`
-	PodSelector *v1.LabelSelector `json:"podSelector,omitempty"`
+	DSCP        *int                                `json:"dscp,omitempty"`
+	DstCIDR     *string                             `json:"dstCIDR,omitempty"`
+	PodSelector *v1.LabelSelectorApplyConfiguration `json:"podSelector,omitempty"`
 }
 
-// EgressQoSRuleApplyConfiguration constructs an declarative configuration of the EgressQoSRule type for use with
+// EgressQoSRuleApplyConfiguration constructs a declarative configuration of the EgressQoSRule type for use with
 // apply.
 func EgressQoSRule() *EgressQoSRuleApplyConfiguration {
 	return &EgressQoSRuleApplyConfiguration{}
@@ -54,7 +54,7 @@ func (b *EgressQoSRuleApplyConfiguration) WithDstCIDR(value string) *EgressQoSRu
 // WithPodSelector sets the PodSelector field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
 // If called multiple times, the PodSelector field is set to the value of the last call.
-func (b *EgressQoSRuleApplyConfiguration) WithPodSelector(value v1.LabelSelector) *EgressQoSRuleApplyConfiguration {
-	b.PodSelector = &value
+func (b *EgressQoSRuleApplyConfiguration) WithPodSelector(value *v1.LabelSelectorApplyConfiguration) *EgressQoSRuleApplyConfiguration {
+	b.PodSelector = value
 	return b
 }

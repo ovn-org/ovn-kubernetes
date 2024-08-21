@@ -17,14 +17,14 @@ limitations under the License.
 
 package v1
 
-// EgressFirewallStatusApplyConfiguration represents an declarative configuration of the EgressFirewallStatus type for use
+// EgressFirewallStatusApplyConfiguration represents a declarative configuration of the EgressFirewallStatus type for use
 // with apply.
 type EgressFirewallStatusApplyConfiguration struct {
 	Status   *string  `json:"status,omitempty"`
 	Messages []string `json:"messages,omitempty"`
 }
 
-// EgressFirewallStatusApplyConfiguration constructs an declarative configuration of the EgressFirewallStatus type for use with
+// EgressFirewallStatusApplyConfiguration constructs a declarative configuration of the EgressFirewallStatus type for use with
 // apply.
 func EgressFirewallStatus() *EgressFirewallStatusApplyConfiguration {
 	return &EgressFirewallStatusApplyConfiguration{}

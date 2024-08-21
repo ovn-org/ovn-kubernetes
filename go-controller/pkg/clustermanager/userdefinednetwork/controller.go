@@ -12,6 +12,7 @@ import (
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	metaapplyv1 "k8s.io/client-go/applyconfigurations/meta/v1"
 	corev1informer "k8s.io/client-go/informers/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
@@ -83,7 +84,7 @@ func New(
 		eventRecorder:               eventRecorder,
 	}
 	cfg := &controller.ControllerConfig[userdefinednetworkv1.UserDefinedNetwork]{
-		RateLimiter:    workqueue.DefaultControllerRateLimiter(),
+		RateLimiter:    workqueue.DefaultTypedControllerRateLimiter[string](),
 		Reconcile:      c.reconcile,
 		ObjNeedsUpdate: c.udnNeedUpdate,
 		Threadiness:    1,
@@ -297,9 +298,19 @@ func (c *Controller) updateUserDefinedNetworkStatus(udn *userdefinednetworkv1.Us
 
 	if updated {
 		var err error
+		conditionsApply := make([]*metaapplyv1.ConditionApplyConfiguration, len(conditions))
+		for i := range conditions {
+			conditionsApply[i] = &metaapplyv1.ConditionApplyConfiguration{
+				Type:               &conditions[i].Type,
+				Status:             &conditions[i].Status,
+				LastTransitionTime: &conditions[i].LastTransitionTime,
+				Reason:             &conditions[i].Reason,
+				Message:            &conditions[i].Message,
+			}
+		}
 		udnApplyConf := udnapplyconfkv1.UserDefinedNetwork(udn.Name, udn.Namespace).
 			WithStatus(udnapplyconfkv1.UserDefinedNetworkStatus().
-				WithConditions(conditions...))
+				WithConditions(conditionsApply...))
 		opts := metav1.ApplyOptions{FieldManager: "user-defined-network-controller"}
 		udn, err = c.udnClient.K8sV1().UserDefinedNetworks(udn.Namespace).ApplyStatus(context.Background(), udnApplyConf, opts)
 		if err != nil {
@@ -383,7 +394,15 @@ func (c *Controller) UpdateSubsystemCondition(networkName string, fieldManager s
 		return nil
 	}
 
-	udnStatus := udnapplyconfkv1.UserDefinedNetworkStatus().WithConditions(*condition)
+	applyCondition := &metaapplyv1.ConditionApplyConfiguration{
+		Type:               &condition.Type,
+		Status:             &condition.Status,
+		LastTransitionTime: &condition.LastTransitionTime,
+		Reason:             &condition.Reason,
+		Message:            &condition.Message,
+	}
+
+	udnStatus := udnapplyconfkv1.UserDefinedNetworkStatus().WithConditions(applyCondition)
 
 	applyUDN := udnapplyconfkv1.UserDefinedNetwork(udnName, udnNamespace).WithStatus(udnStatus)
 	opts := metav1.ApplyOptions{

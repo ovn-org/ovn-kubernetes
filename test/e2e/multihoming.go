@@ -790,7 +790,7 @@ var _ = Describe("Multi Homing", func() {
 						Expect(err).NotTo(HaveOccurred())
 
 						By("asserting the *client* pod cannot contact the underlay service after creating the policy")
-						Expect(connectToServer(clientPodConfig, underlayServiceIP, servicePort)).To(MatchError(ContainSubstring("Connection timeout")))
+						Expect(connectToServer(clientPodConfig, underlayServiceIP, servicePort)).To(MatchError(ContainSubstring("exit code 28")))
 					})
 				})
 
@@ -981,9 +981,7 @@ var _ = Describe("Multi Homing", func() {
 					}, 2*time.Minute, 6*time.Second).Should(Succeed())
 
 					By("asserting the *blocked-client* pod **cannot** contact the server pod exposed endpoint")
-					Expect(connectToServer(blockedClientPodConfig, serverIP, port)).To(
-						MatchError(
-							MatchRegexp("Connection timeout after 200[0-9] ms")))
+					Expect(connectToServer(blockedClientPodConfig, serverIP, port)).To(MatchError(ContainSubstring("exit code 28")))
 				},
 				ginkgo.Entry(
 					"for a pure L2 overlay when the multi-net policy describes the allow-list using pod selectors",

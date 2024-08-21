@@ -23,7 +23,7 @@ import (
 	v1 "k8s.io/client-go/applyconfigurations/meta/v1"
 )
 
-// UserDefinedNetworkApplyConfiguration represents an declarative configuration of the UserDefinedNetwork type for use
+// UserDefinedNetworkApplyConfiguration represents a declarative configuration of the UserDefinedNetwork type for use
 // with apply.
 type UserDefinedNetworkApplyConfiguration struct {
 	v1.TypeMetaApplyConfiguration    `json:",inline"`
@@ -32,7 +32,7 @@ type UserDefinedNetworkApplyConfiguration struct {
 	Status                           *UserDefinedNetworkStatusApplyConfiguration `json:"status,omitempty"`
 }
 
-// UserDefinedNetwork constructs an declarative configuration of the UserDefinedNetwork type for use with
+// UserDefinedNetwork constructs a declarative configuration of the UserDefinedNetwork type for use with
 // apply.
 func UserDefinedNetwork(name, namespace string) *UserDefinedNetworkApplyConfiguration {
 	b := &UserDefinedNetworkApplyConfiguration{}
@@ -215,4 +215,10 @@ func (b *UserDefinedNetworkApplyConfiguration) WithSpec(value *UserDefinedNetwor
 func (b *UserDefinedNetworkApplyConfiguration) WithStatus(value *UserDefinedNetworkStatusApplyConfiguration) *UserDefinedNetworkApplyConfiguration {
 	b.Status = value
 	return b
+}
+
+// GetName retrieves the value of the Name field in the declarative configuration.
+func (b *UserDefinedNetworkApplyConfiguration) GetName() *string {
+	b.ensureObjectMetaApplyConfigurationExists()
+	return b.Name
 }

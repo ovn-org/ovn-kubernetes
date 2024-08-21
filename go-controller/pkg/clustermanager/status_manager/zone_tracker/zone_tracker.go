@@ -68,7 +68,7 @@ func NewZoneTracker(nodeInformer coreinformers.NodeInformer, onZonesUpdate func(
 	}
 
 	controllerConfig := &controller.ControllerConfig[corev1.Node]{
-		RateLimiter:    workqueue.NewItemFastSlowRateLimiter(time.Second, 5*time.Second, 5),
+		RateLimiter:    workqueue.NewTypedItemFastSlowRateLimiter[string](time.Second, 5*time.Second, 5),
 		Informer:       nodeInformer.Informer(),
 		Lister:         nodeInformer.Lister().List,
 		ObjNeedsUpdate: zt.needsUpdate,

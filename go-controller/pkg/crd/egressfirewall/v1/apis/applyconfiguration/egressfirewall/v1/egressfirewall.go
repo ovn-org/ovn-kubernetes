@@ -23,7 +23,7 @@ import (
 	v1 "k8s.io/client-go/applyconfigurations/meta/v1"
 )
 
-// EgressFirewallApplyConfiguration represents an declarative configuration of the EgressFirewall type for use
+// EgressFirewallApplyConfiguration represents a declarative configuration of the EgressFirewall type for use
 // with apply.
 type EgressFirewallApplyConfiguration struct {
 	v1.TypeMetaApplyConfiguration    `json:",inline"`
@@ -32,7 +32,7 @@ type EgressFirewallApplyConfiguration struct {
 	Status                           *EgressFirewallStatusApplyConfiguration `json:"status,omitempty"`
 }
 
-// EgressFirewall constructs an declarative configuration of the EgressFirewall type for use with
+// EgressFirewall constructs a declarative configuration of the EgressFirewall type for use with
 // apply.
 func EgressFirewall(name, namespace string) *EgressFirewallApplyConfiguration {
 	b := &EgressFirewallApplyConfiguration{}
@@ -215,4 +215,10 @@ func (b *EgressFirewallApplyConfiguration) WithSpec(value *EgressFirewallSpecApp
 func (b *EgressFirewallApplyConfiguration) WithStatus(value *EgressFirewallStatusApplyConfiguration) *EgressFirewallApplyConfiguration {
 	b.Status = value
 	return b
+}
+
+// GetName retrieves the value of the Name field in the declarative configuration.
+func (b *EgressFirewallApplyConfiguration) GetName() *string {
+	b.ensureObjectMetaApplyConfigurationExists()
+	return b.Name
 }

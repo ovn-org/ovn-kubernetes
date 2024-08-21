@@ -21,7 +21,7 @@ import (
 	v1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1"
 )
 
-// Layer3ConfigApplyConfiguration represents an declarative configuration of the Layer3Config type for use
+// Layer3ConfigApplyConfiguration represents a declarative configuration of the Layer3Config type for use
 // with apply.
 type Layer3ConfigApplyConfiguration struct {
 	Role        *v1.NetworkRole                  `json:"role,omitempty"`
@@ -30,7 +30,7 @@ type Layer3ConfigApplyConfiguration struct {
 	JoinSubnets *v1.DualStackCIDRs               `json:"joinSubnets,omitempty"`
 }
 
-// Layer3ConfigApplyConfiguration constructs an declarative configuration of the Layer3Config type for use with
+// Layer3ConfigApplyConfiguration constructs a declarative configuration of the Layer3Config type for use with
 // apply.
 func Layer3Config() *Layer3ConfigApplyConfiguration {
 	return &Layer3ConfigApplyConfiguration{}

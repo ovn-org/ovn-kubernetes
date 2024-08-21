@@ -7,7 +7,7 @@ import (
 	"k8s.io/klog/v2"
 )
 
-func (m *externalPolicyManager) syncNamespace(namespace *v1.Namespace, routeQueue workqueue.RateLimitingInterface) error {
+func (m *externalPolicyManager) syncNamespace(namespace *v1.Namespace, routeQueue workqueue.TypedRateLimitingInterface[string]) error {
 	policyKeys, err := m.getPoliciesForNamespaceChange(namespace)
 	if err != nil {
 		return err

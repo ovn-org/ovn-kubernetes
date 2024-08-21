@@ -96,7 +96,7 @@ func NewNetAttachDefinitionController(
 	}
 
 	config := &controller.ControllerConfig[nettypes.NetworkAttachmentDefinition]{
-		RateLimiter:    workqueue.DefaultControllerRateLimiter(),
+		RateLimiter:    workqueue.DefaultTypedControllerRateLimiter[string](),
 		Reconcile:      nadController.sync,
 		ObjNeedsUpdate: nadNeedsUpdate,
 		Threadiness:    1,

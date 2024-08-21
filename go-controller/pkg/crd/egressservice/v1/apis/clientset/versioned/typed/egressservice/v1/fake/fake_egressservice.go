@@ -43,22 +43,24 @@ var egressservicesKind = v1.SchemeGroupVersion.WithKind("EgressService")
 
 // Get takes name of the egressService, and returns the corresponding egressService object, and an error if there is any.
 func (c *FakeEgressServices) Get(ctx context.Context, name string, options metav1.GetOptions) (result *v1.EgressService, err error) {
+	emptyResult := &v1.EgressService{}
 	obj, err := c.Fake.
-		Invokes(testing.NewGetAction(egressservicesResource, c.ns, name), &v1.EgressService{})
+		Invokes(testing.NewGetActionWithOptions(egressservicesResource, c.ns, name, options), emptyResult)
 
 	if obj == nil {
-		return nil, err
+		return emptyResult, err
 	}
 	return obj.(*v1.EgressService), err
 }
 
 // List takes label and field selectors, and returns the list of EgressServices that match those selectors.
 func (c *FakeEgressServices) List(ctx context.Context, opts metav1.ListOptions) (result *v1.EgressServiceList, err error) {
+	emptyResult := &v1.EgressServiceList{}
 	obj, err := c.Fake.
-		Invokes(testing.NewListAction(egressservicesResource, egressservicesKind, c.ns, opts), &v1.EgressServiceList{})
+		Invokes(testing.NewListActionWithOptions(egressservicesResource, egressservicesKind, c.ns, opts), emptyResult)
 
 	if obj == nil {
-		return nil, err
+		return emptyResult, err
 	}
 
 	label, _, _ := testing.ExtractFromListOptions(opts)
@@ -77,40 +79,43 @@ func (c *FakeEgressServices) List(ctx context.Context, opts metav1.ListOptions) 
 // Watch returns a watch.Interface that watches the requested egressServices.
 func (c *FakeEgressServices) Watch(ctx context.Context, opts metav1.ListOptions) (watch.Interface, error) {
 	return c.Fake.
-		InvokesWatch(testing.NewWatchAction(egressservicesResource, c.ns, opts))
+		InvokesWatch(testing.NewWatchActionWithOptions(egressservicesResource, c.ns, opts))
 
 }
 
 // Create takes the representation of a egressService and creates it.  Returns the server's representation of the egressService, and an error, if there is any.
 func (c *FakeEgressServices) Create(ctx context.Context, egressService *v1.EgressService, opts metav1.CreateOptions) (result *v1.EgressService, err error) {
+	emptyResult := &v1.EgressService{}
 	obj, err := c.Fake.
-		Invokes(testing.NewCreateAction(egressservicesResource, c.ns, egressService), &v1.EgressService{})
+		Invokes(testing.NewCreateActionWithOptions(egressservicesResource, c.ns, egressService, opts), emptyResult)
 
 	if obj == nil {
-		return nil, err
+		return emptyResult, err
 	}
 	return obj.(*v1.EgressService), err
 }
 
 // Update takes the representation of a egressService and updates it. Returns the server's representation of the egressService, and an error, if there is any.
 func (c *FakeEgressServices) Update(ctx context.Context, egressService *v1.EgressService, opts metav1.UpdateOptions) (result *v1.EgressService, err error) {
+	emptyResult := &v1.EgressService{}
 	obj, err := c.Fake.
-		Invokes(testing.NewUpdateAction(egressservicesResource, c.ns, egressService), &v1.EgressService{})
+		Invokes(testing.NewUpdateActionWithOptions(egressservicesResource, c.ns, egressService, opts), emptyResult)
 
 	if obj == nil {
-		return nil, err
+		return emptyResult, err
 	}
 	return obj.(*v1.EgressService), err
 }
 
 // UpdateStatus was generated because the type contains a Status member.
 // Add a +genclient:noStatus comment above the type to avoid generating UpdateStatus().
-func (c *FakeEgressServices) UpdateStatus(ctx context.Context, egressService *v1.EgressService, opts metav1.UpdateOptions) (*v1.EgressService, error) {
+func (c *FakeEgressServices) UpdateStatus(ctx context.Context, egressService *v1.EgressService, opts metav1.UpdateOptions) (result *v1.EgressService, err error) {
+	emptyResult := &v1.EgressService{}
 	obj, err := c.Fake.
-		Invokes(testing.NewUpdateSubresourceAction(egressservicesResource, "status", c.ns, egressService), &v1.EgressService{})
+		Invokes(testing.NewUpdateSubresourceActionWithOptions(egressservicesResource, "status", c.ns, egressService, opts), emptyResult)
 
 	if obj == nil {
-		return nil, err
+		return emptyResult, err
 	}
 	return obj.(*v1.EgressService), err
 }
@@ -125,7 +130,7 @@ func (c *FakeEgressServices) Delete(ctx context.Context, name string, opts metav
 
 // DeleteCollection deletes a collection of objects.
 func (c *FakeEgressServices) DeleteCollection(ctx context.Context, opts metav1.DeleteOptions, listOpts metav1.ListOptions) error {
-	action := testing.NewDeleteCollectionAction(egressservicesResource, c.ns, listOpts)
+	action := testing.NewDeleteCollectionActionWithOptions(egressservicesResource, c.ns, opts, listOpts)
 
 	_, err := c.Fake.Invokes(action, &v1.EgressServiceList{})
 	return err
@@ -133,11 +138,12 @@ func (c *FakeEgressServices) DeleteCollection(ctx context.Context, opts metav1.D
 
 // Patch applies the patch and returns the patched egressService.
 func (c *FakeEgressServices) Patch(ctx context.Context, name string, pt types.PatchType, data []byte, opts metav1.PatchOptions, subresources ...string) (result *v1.EgressService, err error) {
+	emptyResult := &v1.EgressService{}
 	obj, err := c.Fake.
-		Invokes(testing.NewPatchSubresourceAction(egressservicesResource, c.ns, name, pt, data, subresources...), &v1.EgressService{})
+		Invokes(testing.NewPatchSubresourceActionWithOptions(egressservicesResource, c.ns, name, pt, data, opts, subresources...), emptyResult)
 
 	if obj == nil {
-		return nil, err
+		return emptyResult, err
 	}
 	return obj.(*v1.EgressService), err
 }
@@ -155,11 +161,12 @@ func (c *FakeEgressServices) Apply(ctx context.Context, egressService *egressser
 	if name == nil {
 		return nil, fmt.Errorf("egressService.Name must be provided to Apply")
 	}
+	emptyResult := &v1.EgressService{}
 	obj, err := c.Fake.
-		Invokes(testing.NewPatchSubresourceAction(egressservicesResource, c.ns, *name, types.ApplyPatchType, data), &v1.EgressService{})
+		Invokes(testing.NewPatchSubresourceActionWithOptions(egressservicesResource, c.ns, *name, types.ApplyPatchType, data, opts.ToPatchOptions()), emptyResult)
 
 	if obj == nil {
-		return nil, err
+		return emptyResult, err
 	}
 	return obj.(*v1.EgressService), err
 }
@@ -178,11 +185,12 @@ func (c *FakeEgressServices) ApplyStatus(ctx context.Context, egressService *egr
 	if name == nil {
 		return nil, fmt.Errorf("egressService.Name must be provided to Apply")
 	}
+	emptyResult := &v1.EgressService{}
 	obj, err := c.Fake.
-		Invokes(testing.NewPatchSubresourceAction(egressservicesResource, c.ns, *name, types.ApplyPatchType, data, "status"), &v1.EgressService{})
+		Invokes(testing.NewPatchSubresourceActionWithOptions(egressservicesResource, c.ns, *name, types.ApplyPatchType, data, opts.ToPatchOptions(), "status"), emptyResult)
 
 	if obj == nil {
-		return nil, err
+		return emptyResult, err
 	}
 	return obj.(*v1.EgressService), err
 }
