@@ -261,6 +261,7 @@ func convertMacToLabel(hwAddr net.HardwareAddr) []byte {
 // Conntrack flows with MAC labels that do not belong to any of gwIPsToKeep are removed.
 func SyncConntrackForExternalGateways(gwIPsToKeep sets.Set[string], isPodInLocalZone func(pod *kapi.Pod) (bool, error),
 	podsGetter func() ([]*kapi.Pod, error)) error {
+	return nil
 	ipv6IPs := []string{}
 	ipv4IPs := []string{}
 	for gwIP := range gwIPsToKeep {
