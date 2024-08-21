@@ -110,15 +110,15 @@ type referencedObjects struct {
 type Controller struct {
 	eIPLister         egressiplisters.EgressIPLister
 	eIPInformer       cache.SharedIndexInformer
-	eIPQueue          workqueue.RateLimitingInterface
+	eIPQueue          workqueue.TypedRateLimitingInterface[string]
 	nodeLister        corelisters.NodeLister
 	namespaceLister   corelisters.NamespaceLister
 	namespaceInformer cache.SharedIndexInformer
-	namespaceQueue    workqueue.RateLimitingInterface
+	namespaceQueue    workqueue.TypedRateLimitingInterface[*corev1.Namespace]
 
 	podLister   corelisters.PodLister
 	podInformer cache.SharedIndexInformer
-	podQueue    workqueue.RateLimitingInterface
+	podQueue    workqueue.TypedRateLimitingInterface[*corev1.Pod]
 
 	// cache is a cache of configuration states for EIPs, key is EgressIP Name.
 	cache *syncmap.SyncMap[*state]
@@ -146,22 +146,22 @@ func NewController(k kube.Interface, eIPInformer egressipinformer.EgressIPInform
 	c := &Controller{
 		eIPLister:   eIPInformer.Lister(),
 		eIPInformer: eIPInformer.Informer(),
-		eIPQueue: workqueue.NewNamedRateLimitingQueue(
-			workqueue.NewItemFastSlowRateLimiter(time.Second, 5*time.Second, 5),
-			"eipeip",
+		eIPQueue: workqueue.NewTypedRateLimitingQueueWithConfig(
+			workqueue.NewTypedItemFastSlowRateLimiter[string](time.Second, 5*time.Second, 5),
+			workqueue.TypedRateLimitingQueueConfig[string]{Name: "eipeip"},
 		),
 		nodeLister:        corelisters.NewNodeLister(nodeInformer.GetIndexer()),
 		namespaceLister:   namespaceInformer.Lister(),
 		namespaceInformer: namespaceInformer.Informer(),
-		namespaceQueue: workqueue.NewNamedRateLimitingQueue(
-			workqueue.NewItemFastSlowRateLimiter(time.Second, 5*time.Second, 5),
-			"eipnamespace",
+		namespaceQueue: workqueue.NewTypedRateLimitingQueueWithConfig(
+			workqueue.NewTypedItemFastSlowRateLimiter[*corev1.Namespace](time.Second, 5*time.Second, 5),
+			workqueue.TypedRateLimitingQueueConfig[*corev1.Namespace]{Name: "eipnamespace"},
 		),
 		podLister:   podInformer.Lister(),
 		podInformer: podInformer.Informer(),
-		podQueue: workqueue.NewNamedRateLimitingQueue(
-			workqueue.NewItemFastSlowRateLimiter(time.Second, 5*time.Second, 5),
-			"eippods",
+		podQueue: workqueue.NewTypedRateLimitingQueueWithConfig(
+			workqueue.NewTypedItemFastSlowRateLimiter[*corev1.Pod](time.Second, 5*time.Second, 5),
+			workqueue.TypedRateLimitingQueueConfig[*corev1.Pod]{Name: "eippods"},
 		),
 		cache:                 syncmap.NewSyncMap[*state](),
 		referencedObjectsLock: sync.RWMutex{},
@@ -430,7 +430,7 @@ func (c *Controller) processNextEIPWorkItem(wg *sync.WaitGroup) bool {
 	}
 	defer c.eIPQueue.Done(key)
 	klog.V(4).Infof("Processing Egress IP %s", key)
-	if err := c.syncEIP(key.(string)); err != nil {
+	if err := c.syncEIP(key); err != nil {
 		if c.eIPQueue.NumRequeues(key) < maxRetries {
 			klog.V(4).Infof("Error found while processing Egress IP %s: %v", key, err)
 			c.eIPQueue.AddRateLimited(key)

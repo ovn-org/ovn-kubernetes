@@ -61,10 +61,10 @@ type Controller struct {
 	watchFactory         *factory.WatchFactory
 	egressServiceLister  egressservicelisters.EgressServiceLister
 	egressServiceSynced  cache.InformerSynced
-	egressServiceQueue   workqueue.RateLimitingInterface
+	egressServiceQueue   workqueue.TypedRateLimitingInterface[string]
 	servicesSynced       cache.InformerSynced
 	endpointSlicesSynced cache.InformerSynced
-	nodesQueue           workqueue.RateLimitingInterface
+	nodesQueue           workqueue.TypedRateLimitingInterface[string]
 	nodesSynced          cache.InformerSynced
 
 	IsReachable func(nodeName string, mgmtIPs []net.IP, healthClient healthcheck.EgressIPHealthClient) bool // TODO: make a universal cache instead
@@ -114,9 +114,9 @@ func NewController(
 	esInformer := wf.EgressServiceInformer()
 	c.egressServiceLister = esInformer.Lister()
 	c.egressServiceSynced = esInformer.Informer().HasSynced
-	c.egressServiceQueue = workqueue.NewNamedRateLimitingQueue(
-		workqueue.NewItemFastSlowRateLimiter(1*time.Second, 5*time.Second, 5),
-		"egressservices",
+	c.egressServiceQueue = workqueue.NewTypedRateLimitingQueueWithConfig(
+		workqueue.NewTypedItemFastSlowRateLimiter[string](1*time.Second, 5*time.Second, 5),
+		workqueue.TypedRateLimitingQueueConfig[string]{Name: "egressservices"},
 	)
 	_, err := esInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
 		AddFunc:    c.onEgressServiceAdd,
@@ -151,9 +151,9 @@ func NewController(
 	}
 
 	c.nodesSynced = wf.NodeInformer().HasSynced
-	c.nodesQueue = workqueue.NewNamedRateLimitingQueue(
-		workqueue.NewItemFastSlowRateLimiter(1*time.Second, 5*time.Second, 5),
-		"egressservicenodes",
+	c.nodesQueue = workqueue.NewTypedRateLimitingQueueWithConfig(
+		workqueue.NewTypedItemFastSlowRateLimiter[string](1*time.Second, 5*time.Second, 5),
+		workqueue.TypedRateLimitingQueueConfig[string]{Name: "egressservicenodes"},
 	)
 	_, err = wf.NodeInformer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
 		AddFunc:    c.onNodeAdd,
@@ -443,7 +443,7 @@ func (c *Controller) processNextEgressServiceWorkItem(wg *sync.WaitGroup) bool {
 
 	defer c.egressServiceQueue.Done(key)
 
-	err := c.syncEgressService(key.(string))
+	err := c.syncEgressService(key)
 	if err == nil {
 		c.egressServiceQueue.Forget(key)
 		return true

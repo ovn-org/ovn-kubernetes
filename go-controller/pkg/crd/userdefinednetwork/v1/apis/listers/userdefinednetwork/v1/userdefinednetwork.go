@@ -19,8 +19,8 @@ package v1
 
 import (
 	v1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/client-go/listers"
 	"k8s.io/client-go/tools/cache"
 )
 
@@ -37,25 +37,17 @@ type UserDefinedNetworkLister interface {
 
 // userDefinedNetworkLister implements the UserDefinedNetworkLister interface.
 type userDefinedNetworkLister struct {
-	indexer cache.Indexer
+	listers.ResourceIndexer[*v1.UserDefinedNetwork]
 }
 
 // NewUserDefinedNetworkLister returns a new UserDefinedNetworkLister.
 func NewUserDefinedNetworkLister(indexer cache.Indexer) UserDefinedNetworkLister {
-	return &userDefinedNetworkLister{indexer: indexer}
-}
-
-// List lists all UserDefinedNetworks in the indexer.
-func (s *userDefinedNetworkLister) List(selector labels.Selector) (ret []*v1.UserDefinedNetwork, err error) {
-	err = cache.ListAll(s.indexer, selector, func(m interface{}) {
-		ret = append(ret, m.(*v1.UserDefinedNetwork))
-	})
-	return ret, err
+	return &userDefinedNetworkLister{listers.New[*v1.UserDefinedNetwork](indexer, v1.Resource("userdefinednetwork"))}
 }
 
 // UserDefinedNetworks returns an object that can list and get UserDefinedNetworks.
 func (s *userDefinedNetworkLister) UserDefinedNetworks(namespace string) UserDefinedNetworkNamespaceLister {
-	return userDefinedNetworkNamespaceLister{indexer: s.indexer, namespace: namespace}
+	return userDefinedNetworkNamespaceLister{listers.NewNamespaced[*v1.UserDefinedNetwork](s.ResourceIndexer, namespace)}
 }
 
 // UserDefinedNetworkNamespaceLister helps list and get UserDefinedNetworks.
@@ -73,26 +65,5 @@ type UserDefinedNetworkNamespaceLister interface {
 // userDefinedNetworkNamespaceLister implements the UserDefinedNetworkNamespaceLister
 // interface.
 type userDefinedNetworkNamespaceLister struct {
-	indexer   cache.Indexer
-	namespace string
-}
-
-// List lists all UserDefinedNetworks in the indexer for a given namespace.
-func (s userDefinedNetworkNamespaceLister) List(selector labels.Selector) (ret []*v1.UserDefinedNetwork, err error) {
-	err = cache.ListAllByNamespace(s.indexer, s.namespace, selector, func(m interface{}) {
-		ret = append(ret, m.(*v1.UserDefinedNetwork))
-	})
-	return ret, err
-}
-
-// Get retrieves the UserDefinedNetwork from the indexer for a given namespace and name.
-func (s userDefinedNetworkNamespaceLister) Get(name string) (*v1.UserDefinedNetwork, error) {
-	obj, exists, err := s.indexer.GetByKey(s.namespace + "/" + name)
-	if err != nil {
-		return nil, err
-	}
-	if !exists {
-		return nil, errors.NewNotFound(v1.Resource("userdefinednetwork"), name)
-	}
-	return obj.(*v1.UserDefinedNetwork), nil
+	listers.ResourceIndexer[*v1.UserDefinedNetwork]
 }

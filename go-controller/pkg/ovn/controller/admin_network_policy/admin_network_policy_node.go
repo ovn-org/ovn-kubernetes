@@ -22,7 +22,7 @@ func (c *Controller) processNextANPNodeWorkItem(wg *sync.WaitGroup) bool {
 		return false
 	}
 	defer c.anpNodeQueue.Done(anpNodeKey)
-	err := c.syncAdminNetworkPolicyNode(anpNodeKey.(string))
+	err := c.syncAdminNetworkPolicyNode(anpNodeKey)
 	if err == nil {
 		c.anpNodeQueue.Forget(anpNodeKey)
 		return true
@@ -104,7 +104,7 @@ func (c *Controller) syncAdminNetworkPolicyNode(key string) error {
 // clearNodeFor(B)ANP will handle the logic for figuring out if the provided node name
 // used to match the given anpCache.name policy. If so, it will requeue the anpCache.name key back
 // into the main (b)anpQueue cache for reconciling the db objects. If not, function is a no-op.
-func (c *Controller) clearNodeForANP(name string, anpCache *adminNetworkPolicyState, queue workqueue.RateLimitingInterface) {
+func (c *Controller) clearNodeForANP(name string, anpCache *adminNetworkPolicyState, queue workqueue.TypedRateLimitingInterface[string]) {
 	// (i) check if it used to match any of the .Spec.Egress.Peers requeue it and return
 	for _, rule := range anpCache.egressRules {
 		for _, peer := range rule.peers {
@@ -121,7 +121,7 @@ func (c *Controller) clearNodeForANP(name string, anpCache *adminNetworkPolicySt
 // used to match the given anpCache.name policy or if it started matching the given anpCache.name.
 // If so, it will requeue the anpCache.name key back into the main (b)anpQueue cache for reconciling
 // the db objects. If not, function is a no-op.
-func (c *Controller) setNodeForANP(node *v1.Node, anpCache *adminNetworkPolicyState, queue workqueue.RateLimitingInterface) {
+func (c *Controller) setNodeForANP(node *v1.Node, anpCache *adminNetworkPolicyState, queue workqueue.TypedRateLimitingInterface[string]) {
 	// (i) if above conditions are are false, check if it used to match any of the .Spec.Egress.Peers requeue it and return OR
 	// (ii) check if it started to match any of the .Spec.Egress.Peers requeue it and return
 	// The goal is to check if this node matches the ANP in at least one of the above ways, we immediately add key

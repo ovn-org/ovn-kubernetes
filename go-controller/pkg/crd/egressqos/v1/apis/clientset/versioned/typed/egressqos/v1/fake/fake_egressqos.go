@@ -43,22 +43,24 @@ var egressqosesKind = v1.SchemeGroupVersion.WithKind("EgressQoS")
 
 // Get takes name of the egressQoS, and returns the corresponding egressQoS object, and an error if there is any.
 func (c *FakeEgressQoSes) Get(ctx context.Context, name string, options metav1.GetOptions) (result *v1.EgressQoS, err error) {
+	emptyResult := &v1.EgressQoS{}
 	obj, err := c.Fake.
-		Invokes(testing.NewGetAction(egressqosesResource, c.ns, name), &v1.EgressQoS{})
+		Invokes(testing.NewGetActionWithOptions(egressqosesResource, c.ns, name, options), emptyResult)
 
 	if obj == nil {
-		return nil, err
+		return emptyResult, err
 	}
 	return obj.(*v1.EgressQoS), err
 }
 
 // List takes label and field selectors, and returns the list of EgressQoSes that match those selectors.
 func (c *FakeEgressQoSes) List(ctx context.Context, opts metav1.ListOptions) (result *v1.EgressQoSList, err error) {
+	emptyResult := &v1.EgressQoSList{}
 	obj, err := c.Fake.
-		Invokes(testing.NewListAction(egressqosesResource, egressqosesKind, c.ns, opts), &v1.EgressQoSList{})
+		Invokes(testing.NewListActionWithOptions(egressqosesResource, egressqosesKind, c.ns, opts), emptyResult)
 
 	if obj == nil {
-		return nil, err
+		return emptyResult, err
 	}
 
 	label, _, _ := testing.ExtractFromListOptions(opts)
@@ -77,40 +79,43 @@ func (c *FakeEgressQoSes) List(ctx context.Context, opts metav1.ListOptions) (re
 // Watch returns a watch.Interface that watches the requested egressQoSes.
 func (c *FakeEgressQoSes) Watch(ctx context.Context, opts metav1.ListOptions) (watch.Interface, error) {
 	return c.Fake.
-		InvokesWatch(testing.NewWatchAction(egressqosesResource, c.ns, opts))
+		InvokesWatch(testing.NewWatchActionWithOptions(egressqosesResource, c.ns, opts))
 
 }
 
 // Create takes the representation of a egressQoS and creates it.  Returns the server's representation of the egressQoS, and an error, if there is any.
 func (c *FakeEgressQoSes) Create(ctx context.Context, egressQoS *v1.EgressQoS, opts metav1.CreateOptions) (result *v1.EgressQoS, err error) {
+	emptyResult := &v1.EgressQoS{}
 	obj, err := c.Fake.
-		Invokes(testing.NewCreateAction(egressqosesResource, c.ns, egressQoS), &v1.EgressQoS{})
+		Invokes(testing.NewCreateActionWithOptions(egressqosesResource, c.ns, egressQoS, opts), emptyResult)
 
 	if obj == nil {
-		return nil, err
+		return emptyResult, err
 	}
 	return obj.(*v1.EgressQoS), err
 }
 
 // Update takes the representation of a egressQoS and updates it. Returns the server's representation of the egressQoS, and an error, if there is any.
 func (c *FakeEgressQoSes) Update(ctx context.Context, egressQoS *v1.EgressQoS, opts metav1.UpdateOptions) (result *v1.EgressQoS, err error) {
+	emptyResult := &v1.EgressQoS{}
 	obj, err := c.Fake.
-		Invokes(testing.NewUpdateAction(egressqosesResource, c.ns, egressQoS), &v1.EgressQoS{})
+		Invokes(testing.NewUpdateActionWithOptions(egressqosesResource, c.ns, egressQoS, opts), emptyResult)
 
 	if obj == nil {
-		return nil, err
+		return emptyResult, err
 	}
 	return obj.(*v1.EgressQoS), err
 }
 
 // UpdateStatus was generated because the type contains a Status member.
 // Add a +genclient:noStatus comment above the type to avoid generating UpdateStatus().
-func (c *FakeEgressQoSes) UpdateStatus(ctx context.Context, egressQoS *v1.EgressQoS, opts metav1.UpdateOptions) (*v1.EgressQoS, error) {
+func (c *FakeEgressQoSes) UpdateStatus(ctx context.Context, egressQoS *v1.EgressQoS, opts metav1.UpdateOptions) (result *v1.EgressQoS, err error) {
+	emptyResult := &v1.EgressQoS{}
 	obj, err := c.Fake.
-		Invokes(testing.NewUpdateSubresourceAction(egressqosesResource, "status", c.ns, egressQoS), &v1.EgressQoS{})
+		Invokes(testing.NewUpdateSubresourceActionWithOptions(egressqosesResource, "status", c.ns, egressQoS, opts), emptyResult)
 
 	if obj == nil {
-		return nil, err
+		return emptyResult, err
 	}
 	return obj.(*v1.EgressQoS), err
 }
@@ -125,7 +130,7 @@ func (c *FakeEgressQoSes) Delete(ctx context.Context, name string, opts metav1.D
 
 // DeleteCollection deletes a collection of objects.
 func (c *FakeEgressQoSes) DeleteCollection(ctx context.Context, opts metav1.DeleteOptions, listOpts metav1.ListOptions) error {
-	action := testing.NewDeleteCollectionAction(egressqosesResource, c.ns, listOpts)
+	action := testing.NewDeleteCollectionActionWithOptions(egressqosesResource, c.ns, opts, listOpts)
 
 	_, err := c.Fake.Invokes(action, &v1.EgressQoSList{})
 	return err
@@ -133,11 +138,12 @@ func (c *FakeEgressQoSes) DeleteCollection(ctx context.Context, opts metav1.Dele
 
 // Patch applies the patch and returns the patched egressQoS.
 func (c *FakeEgressQoSes) Patch(ctx context.Context, name string, pt types.PatchType, data []byte, opts metav1.PatchOptions, subresources ...string) (result *v1.EgressQoS, err error) {
+	emptyResult := &v1.EgressQoS{}
 	obj, err := c.Fake.
-		Invokes(testing.NewPatchSubresourceAction(egressqosesResource, c.ns, name, pt, data, subresources...), &v1.EgressQoS{})
+		Invokes(testing.NewPatchSubresourceActionWithOptions(egressqosesResource, c.ns, name, pt, data, opts, subresources...), emptyResult)
 
 	if obj == nil {
-		return nil, err
+		return emptyResult, err
 	}
 	return obj.(*v1.EgressQoS), err
 }
@@ -155,11 +161,12 @@ func (c *FakeEgressQoSes) Apply(ctx context.Context, egressQoS *egressqosv1.Egre
 	if name == nil {
 		return nil, fmt.Errorf("egressQoS.Name must be provided to Apply")
 	}
+	emptyResult := &v1.EgressQoS{}
 	obj, err := c.Fake.
-		Invokes(testing.NewPatchSubresourceAction(egressqosesResource, c.ns, *name, types.ApplyPatchType, data), &v1.EgressQoS{})
+		Invokes(testing.NewPatchSubresourceActionWithOptions(egressqosesResource, c.ns, *name, types.ApplyPatchType, data, opts.ToPatchOptions()), emptyResult)
 
 	if obj == nil {
-		return nil, err
+		return emptyResult, err
 	}
 	return obj.(*v1.EgressQoS), err
 }
@@ -178,11 +185,12 @@ func (c *FakeEgressQoSes) ApplyStatus(ctx context.Context, egressQoS *egressqosv
 	if name == nil {
 		return nil, fmt.Errorf("egressQoS.Name must be provided to Apply")
 	}
+	emptyResult := &v1.EgressQoS{}
 	obj, err := c.Fake.
-		Invokes(testing.NewPatchSubresourceAction(egressqosesResource, c.ns, *name, types.ApplyPatchType, data, "status"), &v1.EgressQoS{})
+		Invokes(testing.NewPatchSubresourceActionWithOptions(egressqosesResource, c.ns, *name, types.ApplyPatchType, data, opts.ToPatchOptions(), "status"), emptyResult)
 
 	if obj == nil {
-		return nil, err
+		return emptyResult, err
 	}
 	return obj.(*v1.EgressQoS), err
 }

@@ -173,7 +173,7 @@ func (c *Controller) onPodUpdate(oldObj, newObj interface{}) {
 		reflect.DeepEqual(o.Status.PodIPs, n.Status.PodIPs) {
 		return
 	}
-	c.podQueue.Add(newObj)
+	c.podQueue.Add(n)
 }
 
 func (c *Controller) onPodDelete(obj interface{}) {
@@ -203,22 +203,21 @@ func (c *Controller) runPodWorker(wg *sync.WaitGroup) {
 func (c *Controller) processNextPodWorkItem(wg *sync.WaitGroup) bool {
 	wg.Add(1)
 	defer wg.Done()
-	obj, shutdown := c.podQueue.Get()
+	p, shutdown := c.podQueue.Get()
 	if shutdown {
 		return false
 	}
-	defer c.podQueue.Done(obj)
-	p := obj.(*corev1.Pod)
+	defer c.podQueue.Done(p)
 	if err := c.syncPod(p); err != nil {
-		if c.podQueue.NumRequeues(obj) < maxRetries {
+		if c.podQueue.NumRequeues(p) < maxRetries {
 			klog.V(4).Infof("Error found while processing pod %s/%s: %v", p.Namespace, p.Name, err)
-			c.podQueue.AddRateLimited(obj)
+			c.podQueue.AddRateLimited(p)
 			return true
 		}
 		klog.Warningf("Dropping pod %s/%s out of the queue: %s", p.Namespace, p.Name, err)
 		utilruntime.HandleError(err)
 	}
-	c.podQueue.Forget(obj)
+	c.podQueue.Forget(p)
 	return true
 }
 

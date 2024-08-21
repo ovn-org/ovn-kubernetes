@@ -21,7 +21,7 @@ import (
 	v1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 )
 
-// EgressFirewallRuleApplyConfiguration represents an declarative configuration of the EgressFirewallRule type for use
+// EgressFirewallRuleApplyConfiguration represents a declarative configuration of the EgressFirewallRule type for use
 // with apply.
 type EgressFirewallRuleApplyConfiguration struct {
 	Type  *v1.EgressFirewallRuleType                   `json:"type,omitempty"`
@@ -29,7 +29,7 @@ type EgressFirewallRuleApplyConfiguration struct {
 	To    *EgressFirewallDestinationApplyConfiguration `json:"to,omitempty"`
 }
 
-// EgressFirewallRuleApplyConfiguration constructs an declarative configuration of the EgressFirewallRule type for use with
+// EgressFirewallRuleApplyConfiguration constructs a declarative configuration of the EgressFirewallRule type for use with
 // apply.
 func EgressFirewallRule() *EgressFirewallRuleApplyConfiguration {
 	return &EgressFirewallRuleApplyConfiguration{}

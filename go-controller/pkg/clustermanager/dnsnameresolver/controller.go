@@ -61,7 +61,7 @@ func (c *Controller) initControllers(watchFactory *factory.WatchFactory) {
 	efSharedIndexInformer := watchFactory.EgressFirewallInformer().Informer()
 	c.efLister = watchFactory.EgressFirewallInformer().Lister()
 	efConfig := &controller.ControllerConfig[egressfirewall.EgressFirewall]{
-		RateLimiter:    workqueue.NewItemFastSlowRateLimiter(time.Second, 5*time.Second, 5),
+		RateLimiter:    workqueue.NewTypedItemFastSlowRateLimiter[string](time.Second, 5*time.Second, 5),
 		Informer:       efSharedIndexInformer,
 		Lister:         c.efLister.List,
 		ObjNeedsUpdate: efNeedsUpdate,
@@ -73,7 +73,7 @@ func (c *Controller) initControllers(watchFactory *factory.WatchFactory) {
 	dnsSharedIndexInformer := watchFactory.DNSNameResolverInformer().Informer()
 	c.dnsLister = ocpnetworklisterv1alpha1.NewDNSNameResolverLister(dnsSharedIndexInformer.GetIndexer())
 	dnsConfig := &controller.ControllerConfig[ocpnetworkapiv1alpha1.DNSNameResolver]{
-		RateLimiter:    workqueue.NewItemFastSlowRateLimiter(time.Second, 5*time.Second, 5),
+		RateLimiter:    workqueue.NewTypedItemFastSlowRateLimiter[string](time.Second, 5*time.Second, 5),
 		Informer:       dnsSharedIndexInformer,
 		Lister:         c.dnsLister.List,
 		ObjNeedsUpdate: dnsNeedsUpdate,

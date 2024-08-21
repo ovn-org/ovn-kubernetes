@@ -17,13 +17,13 @@ limitations under the License.
 
 package v1
 
-// EgressServiceStatusApplyConfiguration represents an declarative configuration of the EgressServiceStatus type for use
+// EgressServiceStatusApplyConfiguration represents a declarative configuration of the EgressServiceStatus type for use
 // with apply.
 type EgressServiceStatusApplyConfiguration struct {
 	Host *string `json:"host,omitempty"`
 }
 
-// EgressServiceStatusApplyConfiguration constructs an declarative configuration of the EgressServiceStatus type for use with
+// EgressServiceStatusApplyConfiguration constructs a declarative configuration of the EgressServiceStatus type for use with
 // apply.
 func EgressServiceStatus() *EgressServiceStatusApplyConfiguration {
 	return &EgressServiceStatusApplyConfiguration{}

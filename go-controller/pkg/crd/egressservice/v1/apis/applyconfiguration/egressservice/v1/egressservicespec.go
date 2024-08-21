@@ -19,18 +19,18 @@ package v1
 
 import (
 	v1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	metav1 "k8s.io/client-go/applyconfigurations/meta/v1"
 )
 
-// EgressServiceSpecApplyConfiguration represents an declarative configuration of the EgressServiceSpec type for use
+// EgressServiceSpecApplyConfiguration represents a declarative configuration of the EgressServiceSpec type for use
 // with apply.
 type EgressServiceSpecApplyConfiguration struct {
-	SourceIPBy   *v1.SourceIPMode      `json:"sourceIPBy,omitempty"`
-	NodeSelector *metav1.LabelSelector `json:"nodeSelector,omitempty"`
-	Network      *string               `json:"network,omitempty"`
+	SourceIPBy   *v1.SourceIPMode                        `json:"sourceIPBy,omitempty"`
+	NodeSelector *metav1.LabelSelectorApplyConfiguration `json:"nodeSelector,omitempty"`
+	Network      *string                                 `json:"network,omitempty"`
 }
 
-// EgressServiceSpecApplyConfiguration constructs an declarative configuration of the EgressServiceSpec type for use with
+// EgressServiceSpecApplyConfiguration constructs a declarative configuration of the EgressServiceSpec type for use with
 // apply.
 func EgressServiceSpec() *EgressServiceSpecApplyConfiguration {
 	return &EgressServiceSpecApplyConfiguration{}
@@ -47,8 +47,8 @@ func (b *EgressServiceSpecApplyConfiguration) WithSourceIPBy(value v1.SourceIPMo
 // WithNodeSelector sets the NodeSelector field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
 // If called multiple times, the NodeSelector field is set to the value of the last call.
-func (b *EgressServiceSpecApplyConfiguration) WithNodeSelector(value metav1.LabelSelector) *EgressServiceSpecApplyConfiguration {
-	b.NodeSelector = &value
+func (b *EgressServiceSpecApplyConfiguration) WithNodeSelector(value *metav1.LabelSelectorApplyConfiguration) *EgressServiceSpecApplyConfiguration {
+	b.NodeSelector = value
 	return b
 }
 

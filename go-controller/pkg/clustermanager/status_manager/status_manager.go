@@ -62,7 +62,7 @@ func newStatusManager[T any](name string, informer cache.SharedIndexInformer,
 	controllerConfig := &controller.ControllerConfig[T]{
 		Informer:       informer,
 		Lister:         lister,
-		RateLimiter:    workqueue.NewItemFastSlowRateLimiter(time.Second, 5*time.Second, 5),
+		RateLimiter:    workqueue.NewTypedItemFastSlowRateLimiter[string](time.Second, 5*time.Second, 5),
 		ObjNeedsUpdate: m.needsUpdate,
 		Reconcile:      m.updateStatus,
 		Threadiness:    1,

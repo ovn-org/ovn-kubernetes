@@ -21,7 +21,7 @@ import (
 	v1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1"
 )
 
-// Layer2ConfigApplyConfiguration represents an declarative configuration of the Layer2Config type for use
+// Layer2ConfigApplyConfiguration represents a declarative configuration of the Layer2Config type for use
 // with apply.
 type Layer2ConfigApplyConfiguration struct {
 	Role          *v1.NetworkRole          `json:"role,omitempty"`
@@ -31,7 +31,7 @@ type Layer2ConfigApplyConfiguration struct {
 	IPAMLifecycle *v1.NetworkIPAMLifecycle `json:"ipamLifecycle,omitempty"`
 }
 
-// Layer2ConfigApplyConfiguration constructs an declarative configuration of the Layer2Config type for use with
+// Layer2ConfigApplyConfiguration constructs a declarative configuration of the Layer2Config type for use with
 // apply.
 func Layer2Config() *Layer2ConfigApplyConfiguration {
 	return &Layer2ConfigApplyConfiguration{}
