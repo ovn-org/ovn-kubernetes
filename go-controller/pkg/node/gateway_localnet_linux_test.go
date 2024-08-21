@@ -14,6 +14,7 @@ import (
 	nodeipt "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
 	"github.com/urfave/cli/v2"
@@ -53,15 +54,23 @@ func initFakeNodePortWatcher(iptV4, iptV6 util.IPTablesHelper) *nodePortWatcher 
 
 	gwMACParsed, _ := net.ParseMAC(gwMAC)
 
+	defaultNetConfig := &bridgeUDNConfiguration{
+		ofPortPatch: "patch-breth0_ov",
+	}
+
 	fNPW := nodePortWatcher{
 		ofportPhys:  "eth0",
-		ofportPatch: "patch-breth0_ov",
 		gatewayIPv4: v4localnetGatewayIP,
 		gatewayIPv6: v6localnetGatewayIP,
 		serviceInfo: make(map[k8stypes.NamespacedName]*serviceConfig),
 		ofm: &openflowManager{
-			flowCache:     map[string][]string{},
-			defaultBridge: &bridgeConfiguration{macAddress: gwMACParsed},
+			flowCache: map[string][]string{},
+			defaultBridge: &bridgeConfiguration{
+				macAddress: gwMACParsed,
+				netConfig: map[string]*bridgeUDNConfiguration{
+					types.DefaultNetworkName: defaultNetConfig,
+				},
+			},
 		},
 	}
 	return &fNPW
