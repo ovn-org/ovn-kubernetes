@@ -91,7 +91,7 @@ var _ = ginkgo.Describe("Route Manager", func() {
 	ginkgo.Context("add route", func() {
 		ginkgo.It("applies default route in custom table", func() {
 			r := netlink.Route{LinkIndex: loLink.Attrs().Index, Dst: v4DefaultRouteIPNet, Table: customTableID}
-			rm.Add(r)
+			gomega.Expect(addRouteViaManager(rm, testNS, r)).Should(gomega.Succeed())
 			gomega.Eventually(func() bool {
 				return isRouteInTable(testNS, r, loLink.Attrs().Index, customTableID)
 			}, time.Second).Should(gomega.BeTrue())
@@ -99,7 +99,7 @@ var _ = ginkgo.Describe("Route Manager", func() {
 
 		ginkgo.It("applies default route with gateway in custom table", func() {
 			r := netlink.Route{LinkIndex: loLink.Attrs().Index, Dst: v4DefaultRouteIPNet, Gw: loIP, Table: customTableID}
-			rm.Add(r)
+			gomega.Expect(addRouteViaManager(rm, testNS, r)).Should(gomega.Succeed())
 			gomega.Eventually(func() bool {
 				return isRouteInTable(testNS, r, loLink.Attrs().Index, customTableID)
 			}, time.Second).Should(gomega.BeTrue())
@@ -107,7 +107,7 @@ var _ = ginkgo.Describe("Route Manager", func() {
 
 		ginkgo.It("applies route with subnet, gateway IP, src IP, MTU", func() {
 			r := netlink.Route{LinkIndex: loLink.Attrs().Index, Dst: loSubnet, Gw: loGWIP, MTU: loMTU, Src: loIP, Table: MainTableID}
-			rm.Add(r)
+			gomega.Expect(addRouteViaManager(rm, testNS, r)).Should(gomega.Succeed())
 			gomega.Eventually(func() bool {
 				return isRouteInTable(testNS, r, loLink.Attrs().Index, MainTableID)
 			}, time.Second).Should(gomega.BeTrue())
@@ -115,7 +115,7 @@ var _ = ginkgo.Describe("Route Manager", func() {
 
 		ginkgo.It("applies route with subnets, gateway IP, src IP", func() {
 			r := netlink.Route{LinkIndex: loLink.Attrs().Index, Gw: loGWIP, Dst: loSubnet, Src: loIP, Table: MainTableID}
-			rm.Add(r)
+			gomega.Expect(addRouteViaManager(rm, testNS, r)).Should(gomega.Succeed())
 			gomega.Eventually(func() bool {
 				return isRouteInTable(testNS, r, loLink.Attrs().Index, MainTableID)
 			}, time.Second).Should(gomega.BeTrue())
@@ -123,7 +123,7 @@ var _ = ginkgo.Describe("Route Manager", func() {
 
 		ginkgo.It("applies route with subnets, gateway IP", func() {
 			r := netlink.Route{LinkIndex: loLink.Attrs().Index, Gw: loGWIP, Dst: loSubnet, Table: MainTableID}
-			rm.Add(r)
+			gomega.Expect(addRouteViaManager(rm, testNS, r)).Should(gomega.Succeed())
 			gomega.Eventually(func() bool {
 				return isRouteInTable(testNS, r, loLink.Attrs().Index, MainTableID)
 			}, time.Second).Should(gomega.BeTrue())
@@ -131,7 +131,7 @@ var _ = ginkgo.Describe("Route Manager", func() {
 
 		ginkgo.It("applies route with subnets", func() {
 			r := netlink.Route{LinkIndex: loLink.Attrs().Index, Dst: loSubnet, Table: MainTableID}
-			rm.Add(r)
+			gomega.Expect(addRouteViaManager(rm, testNS, r)).Should(gomega.Succeed())
 			gomega.Eventually(func() bool {
 				return isRouteInTable(testNS, r, loLink.Attrs().Index, MainTableID)
 			}, time.Second).Should(gomega.BeTrue())
@@ -141,7 +141,7 @@ var _ = ginkgo.Describe("Route Manager", func() {
 			route := netlink.Route{LinkIndex: loLink.Attrs().Index, Dst: loSubnet, MTU: loMTU, Src: loIP, Table: MainTableID}
 			gomega.Expect(addRoute(testNS, route)).Should(gomega.Succeed())
 			r := netlink.Route{LinkIndex: loLink.Attrs().Index, Dst: loSubnet, MTU: loAlternativeMTU, Src: loIP, Table: MainTableID}
-			rm.Add(r)
+			gomega.Expect(addRouteViaManager(rm, testNS, r)).Should(gomega.Succeed())
 			gomega.Eventually(func() bool {
 				return isRouteInTable(testNS, r, loLink.Attrs().Index, MainTableID)
 			}, time.Second).Should(gomega.BeTrue())
@@ -151,7 +151,7 @@ var _ = ginkgo.Describe("Route Manager", func() {
 			route := netlink.Route{LinkIndex: loLink.Attrs().Index, Dst: loSubnet, Src: loIP, Table: MainTableID}
 			gomega.Expect(addRoute(testNS, route)).Should(gomega.Succeed())
 			r := netlink.Route{LinkIndex: loLink.Attrs().Index, Dst: loSubnet, Src: loIPDiff, Table: MainTableID}
-			rm.Add(r)
+			gomega.Expect(addRouteViaManager(rm, testNS, r)).Should(gomega.Succeed())
 			gomega.Eventually(func() bool {
 				return isRouteInTable(testNS, r, loLink.Attrs().Index, MainTableID)
 			}, time.Second).Should(gomega.BeTrue())
@@ -159,7 +159,7 @@ var _ = ginkgo.Describe("Route Manager", func() {
 
 		ginkgo.It("two equal routes, different tables", func() {
 			r := netlink.Route{LinkIndex: loLink.Attrs().Index, Dst: loSubnet, Src: loIPDiff, Table: 5}
-			rm.Add(r)
+			gomega.Expect(addRouteViaManager(rm, testNS, r)).Should(gomega.Succeed())
 			validateRoute := func(testNS ns.NetNS, link netlink.Link, r netlink.Route, family, tableID int) func() bool {
 				return func() bool {
 					return isRouteInTable(testNS, r, loLink.Attrs().Index, tableID)
@@ -167,7 +167,7 @@ var _ = ginkgo.Describe("Route Manager", func() {
 			}
 			gomega.Eventually(validateRoute(testNS, loLink, r, netlink.FAMILY_V4, 5)).WithTimeout(time.Second).Should(gomega.BeTrue())
 			r.Table = 6
-			rm.Add(r)
+			gomega.Expect(addRouteViaManager(rm, testNS, r)).Should(gomega.Succeed())
 			gomega.Eventually(validateRoute(testNS, loLink, r, netlink.FAMILY_V4, 6)).WithTimeout(time.Second).Should(gomega.BeTrue())
 			// delete route in table 6
 			gomega.Eventually(func() error {
@@ -183,11 +183,11 @@ var _ = ginkgo.Describe("Route Manager", func() {
 	ginkgo.Context("del route", func() {
 		ginkgo.It("del route with dst", func() {
 			r := netlink.Route{LinkIndex: loLink.Attrs().Index, Dst: altSubnet, Table: MainTableID}
-			rm.Add(r)
+			gomega.Expect(addRouteViaManager(rm, testNS, r)).Should(gomega.Succeed())
 			gomega.Eventually(func() bool {
 				return isRouteInTable(testNS, r, loLink.Attrs().Index, MainTableID)
 			}, time.Second).Should(gomega.BeTrue())
-			rm.Del(r)
+			gomega.Expect(delRouteViaManager(rm, testNS, r)).Should(gomega.Succeed())
 			gomega.Eventually(func() bool {
 				return isRouteInTable(testNS, r, loLink.Attrs().Index, MainTableID)
 			}, time.Second).Should(gomega.BeFalse())
@@ -195,11 +195,11 @@ var _ = ginkgo.Describe("Route Manager", func() {
 
 		ginkgo.It("del route with dst and gateway", func() {
 			r := netlink.Route{LinkIndex: loLink.Attrs().Index, Dst: altSubnet, Gw: loGWIP, Table: MainTableID}
-			rm.Add(r)
+			gomega.Expect(addRouteViaManager(rm, testNS, r)).Should(gomega.Succeed())
 			gomega.Eventually(func() bool {
 				return isRouteInTable(testNS, r, loLink.Attrs().Index, MainTableID)
 			}, time.Second).Should(gomega.BeTrue())
-			rm.Del(r)
+			gomega.Expect(delRouteViaManager(rm, testNS, r)).Should(gomega.Succeed())
 			gomega.Eventually(func() bool {
 				return isRouteInTable(testNS, r, loLink.Attrs().Index, MainTableID)
 			}, time.Second).Should(gomega.BeFalse())
@@ -207,11 +207,11 @@ var _ = ginkgo.Describe("Route Manager", func() {
 
 		ginkgo.It("del route with dst, gateway and MTU", func() {
 			r := netlink.Route{LinkIndex: loLink.Attrs().Index, Dst: altSubnet, Gw: loGWIP, MTU: loMTU, Table: MainTableID}
-			rm.Add(r)
+			gomega.Expect(addRouteViaManager(rm, testNS, r)).Should(gomega.Succeed())
 			gomega.Eventually(func() bool {
 				return isRouteInTable(testNS, r, loLink.Attrs().Index, MainTableID)
 			}, time.Second).Should(gomega.BeTrue())
-			rm.Del(r)
+			gomega.Expect(delRouteViaManager(rm, testNS, r)).Should(gomega.Succeed())
 			gomega.Eventually(func() bool {
 				return isRouteInTable(testNS, r, loLink.Attrs().Index, MainTableID)
 			}, time.Second).Should(gomega.BeFalse())
@@ -219,16 +219,16 @@ var _ = ginkgo.Describe("Route Manager", func() {
 
 		ginkgo.It("del route amongst multiple managed routes present", func() {
 			rAlt := netlink.Route{LinkIndex: loLink.Attrs().Index, Dst: altSubnet, Table: MainTableID}
-			rm.Add(rAlt)
+			gomega.Expect(addRouteViaManager(rm, testNS, rAlt)).Should(gomega.Succeed())
 			gomega.Eventually(func() bool {
 				return isRouteInTable(testNS, rAlt, loLink.Attrs().Index, MainTableID)
 			}, time.Second).Should(gomega.BeTrue())
 			rDefault := netlink.Route{LinkIndex: loLink.Attrs().Index, Dst: v4DefaultRouteIPNet, Table: MainTableID}
-			rm.Add(rDefault)
+			gomega.Expect(addRouteViaManager(rm, testNS, rDefault)).Should(gomega.Succeed())
 			gomega.Eventually(func() bool {
 				return isRoutesInTable(testNS, []netlink.Route{rDefault, rAlt}, loLink.Attrs().Index, MainTableID)
 			}, time.Second).Should(gomega.BeTrue())
-			rm.Del(rAlt)
+			gomega.Expect(delRouteViaManager(rm, testNS, rAlt)).Should(gomega.Succeed())
 			gomega.Eventually(func() bool {
 				return isRouteInTable(testNS, rAlt, loLink.Attrs().Index, MainTableID)
 			}, time.Second).Should(gomega.BeFalse())
@@ -244,11 +244,11 @@ var _ = ginkgo.Describe("Route Manager", func() {
 				return isRouteInTable(testNS, rAlt, loLink.Attrs().Index, MainTableID)
 			}, time.Second).Should(gomega.BeTrue())
 			rDefault := netlink.Route{LinkIndex: loLink.Attrs().Index, Dst: v4DefaultRouteIPNet, Table: MainTableID}
-			rm.Add(rDefault)
+			gomega.Expect(addRouteViaManager(rm, testNS, rDefault)).Should(gomega.Succeed())
 			gomega.Eventually(func() bool {
 				return isRoutesInTable(testNS, []netlink.Route{rDefault, rAlt}, loLink.Attrs().Index, MainTableID)
 			}, time.Second).Should(gomega.BeTrue())
-			rm.Del(rDefault)
+			gomega.Expect(delRouteViaManager(rm, testNS, rDefault)).Should(gomega.Succeed())
 			gomega.Eventually(func() bool {
 				return isRouteInTable(testNS, rAlt, loLink.Attrs().Index, MainTableID)
 			}, time.Second).Should(gomega.BeTrue())
@@ -256,7 +256,7 @@ var _ = ginkgo.Describe("Route Manager", func() {
 
 		ginkgo.It("del default route in custom route table", func() {
 			r := netlink.Route{LinkIndex: loLink.Attrs().Index, Dst: v4DefaultRouteIPNet, Table: customTableID}
-			rm.Add(r)
+			gomega.Expect(addRouteViaManager(rm, testNS, r)).Should(gomega.Succeed())
 			gomega.Eventually(func() bool {
 				return isRouteInTable(testNS, r, loLink.Attrs().Index, customTableID)
 			}, time.Second).Should(gomega.BeTrue())
@@ -266,7 +266,7 @@ var _ = ginkgo.Describe("Route Manager", func() {
 	ginkgo.Context("runtime sync", func() {
 		ginkgo.It("reapplies managed route that was removed (gw IP, mtu, src IP)", func() {
 			r := netlink.Route{LinkIndex: loLink.Attrs().Index, Gw: loGWIP, Dst: loSubnet, MTU: loMTU, Src: loIP, Table: MainTableID}
-			rm.Add(r)
+			gomega.Expect(addRouteViaManager(rm, testNS, r)).Should(gomega.Succeed())
 			gomega.Eventually(func() bool {
 				return isRouteInTable(testNS, r, loLink.Attrs().Index, MainTableID)
 			}, time.Second).Should(gomega.BeTrue())
@@ -283,7 +283,7 @@ var _ = ginkgo.Describe("Route Manager", func() {
 
 		ginkgo.It("reapplies managed route that was removed (mtu, src IP)", func() {
 			r := netlink.Route{LinkIndex: loLink.Attrs().Index, Dst: loSubnet, MTU: loMTU, Src: loIP, Table: MainTableID}
-			rm.Add(r)
+			gomega.Expect(addRouteViaManager(rm, testNS, r)).Should(gomega.Succeed())
 			gomega.Eventually(func() bool {
 				return isRouteInTable(testNS, r, loLink.Attrs().Index, MainTableID)
 			}, time.Second).Should(gomega.BeTrue())
@@ -300,7 +300,7 @@ var _ = ginkgo.Describe("Route Manager", func() {
 
 		ginkgo.It("reapplies managed route that was removed because link is down", func() {
 			r := netlink.Route{LinkIndex: loLink.Attrs().Index, Dst: loSubnet, MTU: loMTU, Src: loIP, Table: MainTableID}
-			rm.Add(r)
+			gomega.Expect(addRouteViaManager(rm, testNS, r)).Should(gomega.Succeed())
 			gomega.Eventually(func() bool {
 				return isRouteInTable(testNS, r, loLink.Attrs().Index, MainTableID)
 			}, time.Second).Should(gomega.BeTrue())
@@ -328,18 +328,29 @@ var _ = ginkgo.Describe("Route Manager", func() {
 				if err := netlink.LinkAdd(dummy); err != nil {
 					return err
 				}
-				link, err = netlink.LinkByName("dummy")
-				return err
-			})).Should(gomega.Succeed())
-			r := netlink.Route{LinkIndex: link.Attrs().Index, Dst: v4DefaultRouteIPNet, Table: MainTableID}
-			rm.Add(r)
-			gomega.Expect(testNS.Do(func(netNS ns.NetNS) error {
+				if link, err = netlink.LinkByName("dummy"); err != nil {
+					return err
+				}
+				if err = netlink.LinkSetUp(link); err != nil {
+					return err
+				}
+				r := netlink.Route{LinkIndex: link.Attrs().Index, Dst: v4DefaultRouteIPNet, Table: MainTableID}
+				if err = rm.Add(r); err != nil {
+					return err
+				}
 				return netlink.LinkDel(link)
 			})).Should(gomega.Succeed())
 			time.Sleep(400 * time.Millisecond) // sync period is 300 ms
 		})
 	})
 })
+
+func addRouteViaManager(rm *Controller, targetNS ns.NetNS, r netlink.Route) error {
+	return targetNS.Do(func(netNS ns.NetNS) error { return rm.Add(r) })
+}
+func delRouteViaManager(rm *Controller, targetNS ns.NetNS, r netlink.Route) error {
+	return targetNS.Do(func(netNS ns.NetNS) error { return rm.Del(r) })
+}
 
 func addRoute(targetNS ns.NetNS, r netlink.Route) error {
 	return targetNS.Do(func(netNS ns.NetNS) error {

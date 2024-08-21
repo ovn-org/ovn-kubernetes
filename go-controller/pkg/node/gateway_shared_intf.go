@@ -2089,13 +2089,19 @@ func addMasqueradeRoute(routeManager *routemanager.Controller, netIfaceName, nod
 	if ipv4 != nil {
 		_, masqIPNet, _ := net.ParseCIDR(fmt.Sprintf("%s/32", config.Gateway.MasqueradeIPs.V4OVNMasqueradeIP.String()))
 		klog.Infof("Setting OVN Masquerade route with source: %s", ipv4)
-		routeManager.Add(netlink.Route{LinkIndex: netIfaceLink.Attrs().Index, Dst: masqIPNet, MTU: mtu, Src: ipv4})
+		err = routeManager.Add(netlink.Route{LinkIndex: netIfaceLink.Attrs().Index, Dst: masqIPNet, MTU: mtu, Src: ipv4})
+		if err != nil {
+			return fmt.Errorf("failed to add OVN Masquerade route: %w", err)
+		}
 	}
 
 	if ipv6 != nil {
 		_, masqIPNet, _ := net.ParseCIDR(fmt.Sprintf("%s/128", config.Gateway.MasqueradeIPs.V6OVNMasqueradeIP.String()))
 		klog.Infof("Setting OVN Masquerade route with source: %s", ipv6)
-		routeManager.Add(netlink.Route{LinkIndex: netIfaceLink.Attrs().Index, Dst: masqIPNet, MTU: mtu, Src: ipv6})
+		err = routeManager.Add(netlink.Route{LinkIndex: netIfaceLink.Attrs().Index, Dst: masqIPNet, MTU: mtu, Src: ipv6})
+		if err != nil {
+			return fmt.Errorf("failed to add OVN Masquerade route: %w", err)
+		}
 	}
 	return nil
 }
