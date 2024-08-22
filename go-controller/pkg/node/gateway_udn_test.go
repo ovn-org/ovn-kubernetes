@@ -269,9 +269,10 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		kubeMock.On("UpdateNodeStatus", cnode).Return(nil)
 		err = testNS.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
-			mpLink, err := udnGateway.addUDNManagementPort()
+			mpLink, _, err := udnGateway.addUDNManagementPort()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(mpLink).NotTo(BeNil())
+			Expect(udnGateway.addUDNManagementPortIPs(mpLink)).Should(Succeed())
 			exists, err := util.LinkAddrExist(mpLink, ovntest.MustParseIPNet("100.128.0.2/24"))
 			Expect(err).NotTo(HaveOccurred())
 			Expect(exists).To(BeTrue())
@@ -336,9 +337,10 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		kubeMock.On("UpdateNodeStatus", cnode).Return(nil)
 		err = testNS.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
-			mpLink, err := udnGateway.addUDNManagementPort()
+			mpLink, _, err := udnGateway.addUDNManagementPort()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(mpLink).NotTo(BeNil())
+			Expect(udnGateway.addUDNManagementPortIPs(mpLink)).Should(Succeed())
 			exists, err := util.LinkAddrExist(mpLink, ovntest.MustParseIPNet("100.128.0.2/16"))
 			Expect(err).NotTo(HaveOccurred())
 			Expect(exists).To(BeTrue())

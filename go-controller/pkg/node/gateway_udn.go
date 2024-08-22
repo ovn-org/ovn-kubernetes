@@ -198,7 +198,9 @@ func NewUserDefinedNetworkGateway(netInfo util.NetInfo, networkID int, node *v1.
 // AddNetwork will be responsible to create all plumbings
 // required by this UDN on the gateway side
 func (udng *UserDefinedNetworkGateway) AddNetwork() error {
-	mplink, err := udng.addUDNManagementPort()
+	// port is created first and its MAC address configured. The IP(s) on that link are added after enslaving to a VRF device (addUDNManagementPortIPs)
+	// because IPv6 addresses are removed by the kernel (if not link local) when enslaved to a VRF device.
+	mplink, macAddress, err := udng.addUDNManagementPort()
 	if err != nil {
 		return fmt.Errorf("could not create management port netdevice for network %s: %w", udng.GetNetworkName(), err)
 	}
@@ -211,6 +213,13 @@ func (udng *UserDefinedNetworkGateway) AddNetwork() error {
 	err = udng.vrfManager.AddVRF(vrfDeviceName, mplink.Attrs().Name, uint32(vrfTableId), routes)
 	if err != nil {
 		return fmt.Errorf("could not add VRF %d for network %s, err: %v", vrfTableId, udng.GetNetworkName(), err)
+	}
+	err = udng.addUDNManagementPortIPs(mplink)
+	if err != nil {
+		return fmt.Errorf("unable to add management port IP(s) for link %s, for network %s: %w", mplink.Attrs().Name, udng.GetNetworkName(), err)
+	}
+	if err := util.UpdateNodeManagementPortMACAddressesWithRetry(udng.node, udng.nodeLister, udng.kubeInterface, macAddress, udng.GetNetworkName()); err != nil {
+		return fmt.Errorf("unable to update mac address annotation for node %s, for network %s, err: %w", udng.node.Name, udng.GetNetworkName(), err)
 	}
 	if udng.openflowManager != nil {
 		udng.openflowManager.addNetwork(udng.NetInfo, udng.masqCTMark, udng.v4MasqIP, udng.v6MasqIP)
@@ -266,16 +275,54 @@ func (udng *UserDefinedNetworkGateway) DelNetwork() error {
 // STEP2: It saves the MAC address generated on the 1st go as an option on the OVS interface
 // so that it persists on reboots
 // STEP3: sets up the management port link on the host
-// STEP4: adds the management port IP .2 to the mplink
-// STEP5: adds the mac address to the node management port annotation
-func (udng *UserDefinedNetworkGateway) addUDNManagementPort() (netlink.Link, error) {
+// Returns a netlink Link which is the UDN management port interface along with its MAC address
+func (udng *UserDefinedNetworkGateway) addUDNManagementPort() (netlink.Link, net.HardwareAddr, error) {
 	var err error
 	interfaceName := util.GetNetworkScopedK8sMgmtHostIntfName(uint(udng.networkID))
+	// STEP1
+	stdout, stderr, err := util.RunOVSVsctl(
+		"--", "--may-exist", "add-port", "br-int", interfaceName,
+		"--", "set", "interface", interfaceName,
+		"type=internal", "mtu_request="+fmt.Sprintf("%d", udng.NetInfo.MTU()),
+		"external-ids:iface-id="+udng.GetNetworkScopedK8sMgmtIntfName(udng.node.Name),
+	)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to add port to br-int for network %s, stdout: %q, stderr: %q, error: %w",
+			udng.GetNetworkName(), stdout, stderr, err)
+	}
+	klog.V(3).Infof("Added OVS management port interface %s for network %s", interfaceName, udng.GetNetworkName())
+
+	// STEP2
+	macAddress, err := util.GetOVSPortMACAddress(interfaceName)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get management port MAC address for network %s: %v", udng.GetNetworkName(), err)
+	}
+	// persist the MAC address so that upon node reboot we get back the same mac address.
+	_, stderr, err = util.RunOVSVsctl("set", "interface", interfaceName,
+		fmt.Sprintf("mac=%s", strings.ReplaceAll(macAddress.String(), ":", "\\:")))
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to persist MAC address %q for %q while plumbing network %s: stderr:%s (%v)",
+			macAddress.String(), interfaceName, udng.GetNetworkName(), stderr, err)
+	}
+
+	// STEP3
+	mplink, err := util.LinkSetUp(interfaceName)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to set the link up for interface %s while plumbing network %s, err: %v",
+			interfaceName, udng.GetNetworkName(), err)
+	}
+	klog.V(3).Infof("Setup management port link %s for network %s succeeded", interfaceName, udng.GetNetworkName())
+	return mplink, macAddress, nil
+}
+
+func (udng *UserDefinedNetworkGateway) addUDNManagementPortIPs(mpLink netlink.Link) error {
+	var err error
 	var networkLocalSubnets []*net.IPNet
+	// fetch subnets which we will use to get management port IP(s)
 	if udng.TopologyType() == types.Layer3Topology {
 		networkLocalSubnets, err = util.ParseNodeHostSubnetAnnotation(udng.node, udng.GetNetworkName())
 		if err != nil {
-			return nil, fmt.Errorf("waiting for node %s to start, no annotation found on node for network %s: %w",
+			return fmt.Errorf("waiting for node %s to start, no annotation found on node for network %s: %w",
 				udng.node.Name, udng.GetNetworkName(), err)
 		}
 	} else if udng.TopologyType() == types.Layer2Topology {
@@ -285,63 +332,22 @@ func (udng *UserDefinedNetworkGateway) addUDNManagementPort() (netlink.Link, err
 			networkLocalSubnets = append(networkLocalSubnets, globalFlatL2Network.CIDR)
 		}
 	}
-
-	// STEP1
-	stdout, stderr, err := util.RunOVSVsctl(
-		"--", "--may-exist", "add-port", "br-int", interfaceName,
-		"--", "set", "interface", interfaceName,
-		"type=internal", "mtu_request="+fmt.Sprintf("%d", udng.NetInfo.MTU()),
-		"external-ids:iface-id="+udng.GetNetworkScopedK8sMgmtIntfName(udng.node.Name),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to add port to br-int for network %s, stdout: %q, stderr: %q, error: %w",
-			udng.GetNetworkName(), stdout, stderr, err)
-	}
-	klog.V(3).Infof("Added OVS management port interface %s for network %s", interfaceName, udng.GetNetworkName())
-
-	// STEP2
-	macAddress, err := util.GetOVSPortMACAddress(interfaceName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get management port MAC address for network %s: %v", udng.GetNetworkName(), err)
-	}
-	// persist the MAC address so that upon node reboot we get back the same mac address.
-	_, stderr, err = util.RunOVSVsctl("set", "interface", interfaceName,
-		fmt.Sprintf("mac=%s", strings.ReplaceAll(macAddress.String(), ":", "\\:")))
-	if err != nil {
-		return nil, fmt.Errorf("failed to persist MAC address %q for %q while plumbing network %s: stderr:%s (%v)",
-			macAddress.String(), interfaceName, udng.GetNetworkName(), stderr, err)
-	}
-
-	// STEP3
-	mplink, err := util.LinkSetUp(interfaceName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to set the link up for interface %s while plumbing network %s, err: %v",
-			interfaceName, udng.GetNetworkName(), err)
-	}
-	klog.V(3).Infof("Setup management port link %s for network %s succeeded", interfaceName, udng.GetNetworkName())
-
-	// STEP4
+	// extract management port IP from subnets and add it to link
 	for _, subnet := range networkLocalSubnets {
 		if config.IPv6Mode && utilnet.IsIPv6CIDR(subnet) || config.IPv4Mode && utilnet.IsIPv4CIDR(subnet) {
 			ip := util.GetNodeManagementIfAddr(subnet)
 			var err error
 			var exists bool
-			if exists, err = util.LinkAddrExist(mplink, ip); err == nil && !exists {
-				err = util.LinkAddrAdd(mplink, ip, 0, 0, 0)
+			if exists, err = util.LinkAddrExist(mpLink, ip); err == nil && !exists {
+				err = util.LinkAddrAdd(mpLink, ip, 0, 0, 0)
 			}
 			if err != nil {
-				return nil, fmt.Errorf("failed to add management port IP from subnet %s to netdevice %s for network %s, err: %v",
-					subnet, interfaceName, udng.GetNetworkName(), err)
+				return fmt.Errorf("failed to add management port IP from subnet %s to netdevice %s for network %s, err: %v",
+					subnet, mpLink.Attrs().Name, udng.GetNetworkName(), err)
 			}
 		}
 	}
-
-	// STEP5
-	if err := util.UpdateNodeManagementPortMACAddressesWithRetry(udng.node, udng.nodeLister, udng.kubeInterface, macAddress, udng.GetNetworkName()); err != nil {
-		return nil, fmt.Errorf("unable to update mac address annotation for node %s, for network %s, err: %v", udng.node.Name, udng.GetNetworkName(), err)
-	}
-	klog.V(3).Infof("Added management port mac address information of %s for network %s", interfaceName, udng.GetNetworkName())
-	return mplink, nil
+	return nil
 }
 
 // deleteUDNManagementPort does the following:
