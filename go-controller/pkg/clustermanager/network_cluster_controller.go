@@ -8,9 +8,8 @@ import (
 	"reflect"
 	"sync"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	cache "k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/retry"
@@ -31,6 +30,8 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
+
+type NetworkStatusReporter func(networkName string, fieldManager string, condition *metav1.Condition, events ...*util.EventDetails) error
 
 // networkClusterController is the cluster controller for the networks. An
 // instance of this struct is expected to be created for each network. A network
@@ -67,10 +68,21 @@ type networkClusterController struct {
 	// event recorder used to post events to k8s
 	recorder record.EventRecorder
 
+	statusReporter NetworkStatusReporter
+
+	// nodeName: errMessage
+	nodeErrors     map[string]string
+	nodeErrorsLock sync.Mutex
+	// Error condition only reports one of the failed nodes.
+	// To avoid changing that error report with every update, we store reported error node.
+	reportedErrorNode string
+
 	util.NetInfo
 }
 
-func newNetworkClusterController(networkIDAllocator idallocator.NamedAllocator, netInfo util.NetInfo, ovnClient *util.OVNClusterManagerClientset, wf *factory.WatchFactory, recorder record.EventRecorder, nadController *networkAttachDefController.NetAttachDefinitionController) *networkClusterController {
+func newNetworkClusterController(networkIDAllocator idallocator.NamedAllocator, netInfo util.NetInfo,
+	ovnClient *util.OVNClusterManagerClientset, wf *factory.WatchFactory, recorder record.EventRecorder,
+	nadController *networkAttachDefController.NetAttachDefinitionController, errorReporter NetworkStatusReporter) *networkClusterController {
 	kube := &kube.KubeOVN{
 		Kube: kube.Kube{
 			KClient: ovnClient.KubeClient,
@@ -89,6 +101,9 @@ func newNetworkClusterController(networkIDAllocator idallocator.NamedAllocator, 
 		networkIDAllocator: networkIDAllocator,
 		recorder:           recorder,
 		nadController:      nadController,
+		statusReporter:     errorReporter,
+		nodeErrors:         make(map[string]string),
+		nodeErrorsLock:     sync.Mutex{},
 	}
 
 	return ncc
@@ -108,7 +123,7 @@ func newDefaultNetworkClusterController(netInfo util.NetInfo, ovnClient *util.OV
 	}
 
 	namedIDAllocator := networkIDAllocator.ForName(types.DefaultNetworkName)
-	return newNetworkClusterController(namedIDAllocator, netInfo, ovnClient, wf, recorder, nil)
+	return newNetworkClusterController(namedIDAllocator, netInfo, ovnClient, wf, recorder, nil, nil)
 }
 
 func (ncc *networkClusterController) hasPodAllocation() bool {
@@ -147,6 +162,11 @@ func (ncc *networkClusterController) allowPersistentIPs() bool {
 }
 
 func (ncc *networkClusterController) init() error {
+	// report no errors on restart, then propagate any new errors by the started handlers
+	if err := ncc.resetStatus(); err != nil {
+		return fmt.Errorf("failed to reset network status: %w", err)
+	}
+
 	networkID, err := ncc.networkIDAllocator.AllocateID()
 	if err != nil {
 		return err
@@ -200,6 +220,96 @@ func (ncc *networkClusterController) init() error {
 	}
 
 	return nil
+}
+
+// updateNetworkStatus allows to report a status for networkClusterController's network via a UDN status condition
+// of type "NetworkAllocationSucceeded", if the network was created by UDN.
+// When at least one node reports an error, condition will be set to false and an event with node-specific error will be
+// generated.
+// Call this function after every node event handling, set handlerErr to nil to report no error.
+// There are potential optimization to when an error should be reported, see https://github.com/ovn-org/ovn-kubernetes/pull/4647#discussion_r1763352619.
+func (ncc *networkClusterController) updateNetworkStatus(nodeName string, handlerErr error) error {
+	if ncc.statusReporter == nil {
+		return nil
+	}
+	errorMsg := ""
+	if handlerErr != nil {
+		errorMsg = handlerErr.Error()
+	}
+
+	ncc.nodeErrorsLock.Lock()
+	defer ncc.nodeErrorsLock.Unlock()
+	if ncc.nodeErrors[nodeName] == errorMsg {
+		// error message didn't change for that node, no need to update
+		return nil
+	}
+
+	reportedErrorNode := ncc.reportedErrorNode
+	if ncc.reportedErrorNode == "" && errorMsg != "" {
+		reportedErrorNode = nodeName
+	}
+	if ncc.reportedErrorNode == nodeName && errorMsg == "" {
+		// error for this node is fixed, report next error node
+		reportedErrorNode = ""
+		for errorNode := range ncc.nodeErrors {
+			if errorNode != nodeName {
+				reportedErrorNode = errorNode
+				break
+			}
+		}
+	}
+
+	var condition *metav1.Condition
+	if reportedErrorNode != ncc.reportedErrorNode {
+		// We know condition only changes if ncc.reportedErrorNode value changes.
+		// Otherwise, condition will stay nil and the error message will be reflected in an event.
+		condition = getNetworkAllocationUDNCondition(reportedErrorNode)
+	}
+	events := make([]*util.EventDetails, 0, 1)
+	if errorMsg != "" {
+		events = append(events, &util.EventDetails{
+			EventType: util.EventTypeWarning,
+			Reason:    "NetworkAllocationFailed",
+			Note:      fmt.Sprintf("Error occurred for node %s: %s", nodeName, errorMsg),
+		})
+	}
+
+	netName := ncc.NetInfo.GetNetworkName()
+	if err := ncc.statusReporter(netName, "NetworkClusterController", condition, events...); err != nil {
+		return fmt.Errorf("failed to report network status: %w", err)
+	}
+	ncc.nodeErrors[nodeName] = errorMsg
+	ncc.reportedErrorNode = reportedErrorNode
+
+	return nil
+}
+
+// resetStatus should be called on startup before any handler is started to avoid status race.
+func (ncc *networkClusterController) resetStatus() error {
+	if ncc.statusReporter == nil {
+		return nil
+	}
+	netName := ncc.NetInfo.GetNetworkName()
+	return ncc.statusReporter(netName, "NetworkClusterController", getNetworkAllocationUDNCondition(""))
+}
+
+// We only report one failed node in condition to avoid too long messages and too many condition updates.
+// The node to be reported is passed as errorNode, if empty, all nodes are considered to be succeeded.
+func getNetworkAllocationUDNCondition(errorNode string) *metav1.Condition {
+	condition := &metav1.Condition{
+		Type:               "NetworkAllocationSucceeded",
+		LastTransitionTime: metav1.Now(),
+	}
+	if errorNode == "" {
+		condition.Status = metav1.ConditionTrue
+		condition.Reason = "NetworkAllocationSucceeded"
+		condition.Message = "Network allocation succeeded for all synced nodes."
+	} else {
+		condition.Status = metav1.ConditionFalse
+		condition.Reason = "InternalError"
+		condition.Message = fmt.Sprintf("Network allocation failed for at least one node: %v, check UDN events for more info.", errorNode)
+	}
+	return condition
 }
 
 // Start the network cluster controller. Depending on the cluster configuration
@@ -322,12 +432,17 @@ func (h *networkClusterControllerEventHandler) AddResource(obj interface{}, from
 		if !ok {
 			return fmt.Errorf("could not cast %T object to *corev1.Node", obj)
 		}
-		if err = h.ncc.nodeAllocator.HandleAddUpdateNodeEvent(node); err != nil {
-			klog.Infof("Node add failed for %s, will try again later: %v",
-				node.Name, err)
-			return err
+		err = h.ncc.nodeAllocator.HandleAddUpdateNodeEvent(node)
+		if err == nil {
+			h.clearInitialNodeNetworkUnavailableCondition(node)
 		}
-		h.clearInitialNodeNetworkUnavailableCondition(node)
+		statusErr := h.ncc.updateNetworkStatus(node.Name, err)
+		joinedErr := errors.Join(err, statusErr)
+		if joinedErr != nil {
+			klog.Infof("Node add failed for %s, will try again later: %v",
+				node.Name, joinedErr)
+			return joinedErr
+		}
 	case factory.IPAMClaimsType:
 		return nil
 	default:
@@ -361,12 +476,17 @@ func (h *networkClusterControllerEventHandler) UpdateResource(oldObj, newObj int
 		if !ok {
 			return fmt.Errorf("could not cast %T object to *corev1.Node", newObj)
 		}
-		if err = h.ncc.nodeAllocator.HandleAddUpdateNodeEvent(node); err != nil {
+		err = h.ncc.nodeAllocator.HandleAddUpdateNodeEvent(node)
+		if err == nil {
+			h.clearInitialNodeNetworkUnavailableCondition(node)
+		}
+		statusErr := h.ncc.updateNetworkStatus(node.Name, err)
+		joinedErr := errors.Join(err, statusErr)
+		if joinedErr != nil {
 			klog.Infof("Node update failed for %s, will try again later: %v",
 				node.Name, err)
 			return err
 		}
-		h.clearInitialNodeNetworkUnavailableCondition(node)
 	case factory.IPAMClaimsType:
 		return nil
 	default:
@@ -393,7 +513,9 @@ func (h *networkClusterControllerEventHandler) DeleteResource(obj, cachedObj int
 		if !ok {
 			return fmt.Errorf("could not cast obj of type %T to *knet.Node", obj)
 		}
-		return h.ncc.nodeAllocator.HandleDeleteNode(node)
+		err := h.ncc.nodeAllocator.HandleDeleteNode(node)
+		statusErr := h.ncc.updateNetworkStatus(node.Name, err)
+		return errors.Join(err, statusErr)
 	case factory.IPAMClaimsType:
 		ipamClaim, ok := obj.(*ipamclaimsapi.IPAMClaim)
 		if !ok {

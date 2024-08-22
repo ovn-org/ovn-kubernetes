@@ -14,6 +14,8 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	corev1informer "k8s.io/client-go/informers/core/v1"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/reference"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -26,6 +28,7 @@ import (
 	userdefinednetworkv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1"
 	udnapplyconfkv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/applyconfiguration/userdefinednetwork/v1"
 	userdefinednetworkclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/clientset/versioned"
+	userdefinednetworkscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/clientset/versioned/scheme"
 	userdefinednetworkinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/informers/externalversions/userdefinednetwork/v1"
 	userdefinednetworklister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/listers/userdefinednetwork/v1"
 
@@ -54,6 +57,7 @@ type Controller struct {
 	podInformer corev1informer.PodInformer
 
 	networkInUseRequeueInterval time.Duration
+	eventRecorder               record.EventRecorder
 }
 
 const defaultNetworkInUseCheckInterval = 1 * time.Minute
@@ -65,6 +69,7 @@ func New(
 	udnInformer userdefinednetworkinformer.UserDefinedNetworkInformer,
 	renderNadFn RenderNetAttachDefManifest,
 	podInformer corev1informer.PodInformer,
+	eventRecorder record.EventRecorder,
 ) *Controller {
 	udnLister := udnInformer.Lister()
 	c := &Controller{
@@ -75,6 +80,7 @@ func New(
 		renderNadFn:                 renderNadFn,
 		podInformer:                 podInformer,
 		networkInUseRequeueInterval: defaultNetworkInUseCheckInterval,
+		eventRecorder:               eventRecorder,
 	}
 	cfg := &controller.ControllerConfig[userdefinednetworkv1.UserDefinedNetwork]{
 		RateLimiter:    workqueue.DefaultControllerRateLimiter(),
@@ -345,4 +351,51 @@ func updateCondition(conditions []metav1.Condition, cond *metav1.Condition) ([]m
 		return slices.Replace(conditions, idx, idx+1, *cond), true
 	}
 	return conditions, false
+}
+
+// UpdateSubsystemCondition may be used by other controllers handling UDN/NAD/network setup to report conditions that
+// may affect UDN functionality.
+// FieldManager should be unique for every subsystem.
+// If given network is not managed by a UDN, no condition will be reported and no error will be returned.
+// Events may be used to report additional information about the condition to avoid overloading the condition message.
+// When condition should not change, but new events should be reported, pass condition = nil.
+func (c *Controller) UpdateSubsystemCondition(networkName string, fieldManager string, condition *metav1.Condition,
+	events ...*util.EventDetails) error {
+	// try to find udn using network name
+	udnNamespace, udnName := template.ParseNetworkName(networkName)
+	if udnName == "" {
+		return nil
+	}
+	udn, err := c.udnLister.UserDefinedNetworks(udnNamespace).Get(udnName)
+	if err != nil {
+		return nil
+	}
+
+	udnRef, err := reference.GetReference(userdefinednetworkscheme.Scheme, udn)
+	if err != nil {
+		return fmt.Errorf("failed to get object reference for UserDefinedNetwork %s/%s: %w", udnNamespace, udnName, err)
+	}
+	for _, event := range events {
+		c.eventRecorder.Event(udnRef, event.EventType, event.Reason, event.Note)
+	}
+
+	if condition == nil {
+		return nil
+	}
+
+	udnStatus := udnapplyconfkv1.UserDefinedNetworkStatus().WithConditions(*condition)
+
+	applyUDN := udnapplyconfkv1.UserDefinedNetwork(udnName, udnNamespace).WithStatus(udnStatus)
+	opts := metav1.ApplyOptions{
+		FieldManager: fieldManager,
+		Force:        true,
+	}
+	_, err = c.udnClient.K8sV1().UserDefinedNetworks(udnNamespace).ApplyStatus(context.Background(), applyUDN, opts)
+	if err != nil {
+		if kerrors.IsNotFound(err) {
+			return nil
+		}
+		return fmt.Errorf("failed to update UserDefinedNetwork %s/%s status: %w", udnNamespace, udnName, err)
+	}
+	return nil
 }
