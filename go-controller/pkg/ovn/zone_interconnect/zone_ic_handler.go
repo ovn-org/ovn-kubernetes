@@ -662,9 +662,11 @@ func (zic *ZoneInterconnectHandler) addRemoteNodeStaticRoutes(node *corev1.Node,
 		}
 	}
 
-	if zic.IsSecondary() {
+	if zic.IsSecondary() && !(util.IsNetworkSegmentationSupportEnabled() && zic.IsPrimaryNetwork()) {
 		// Secondary network cluster router doesn't connect to a join switch
 		// or to a Gateway router.
+		//
+		// Except for UDN primary L3 networks.
 		return nil
 	}
 
