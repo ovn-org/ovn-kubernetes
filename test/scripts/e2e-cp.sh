@@ -17,7 +17,6 @@ export KUBECONFIG=${KUBECONFIG:-${HOME}/ovn.conf}
 # TODO: Fix metalLB integration with KIND on IPV6 in LGW mode and enable those service tests.See
 # https://github.com/ovn-org/ovn-kubernetes/issues/4131 for details.
 # TODO: Fix EIP tests. See https://github.com/ovn-org/ovn-kubernetes/issues/4130 for details.
-# TODO: Fix EFW tests. See https://github.com/ovn-org/ovn-kubernetes/issues/4133 for details.
 # TODO: Fix MTU tests. See https://github.com/ovn-org/ovn-kubernetes/issues/4160 for details.
 IPV6_SKIPPED_TESTS="Should be allowed by externalip services|\
 should provide connection to external host by DNS name from a pod|\
@@ -25,11 +24,6 @@ should provide Internet connection continuously when ovnkube-node pod is killed|
 should provide Internet connection continuously when pod running master instance of ovnkube-control-plane is killed|\
 should provide Internet connection continuously when all pods are killed on node running master instance of ovnkube-control-plane|\
 should provide Internet connection continuously when all ovnkube-control-plane pods are killed|\
-Should validate ICMP connectivity to multiple external gateways for an ECMP scenario|\
-Should validate ICMP connectivity to an external gateway\'s loopback address via a pod with external gateway annotations enabled|\
-Should validate TCP/UDP connectivity to multiple external gateways for a UDP / TCP scenario|\
-Should validate TCP/UDP connectivity to an external gateway\'s loopback address via a pod with external gateway annotations enabled|\
-Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes|\
 Should validate flow data of br-int is sent to an external gateway with netflow v5|\
 can retrieve multicast IGMP query|\
 test node readiness according to its defaults interface MTU size|\
