@@ -2,7 +2,6 @@ package ovn
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net"
 	"strings"
@@ -353,31 +352,6 @@ func newPodWithPrimaryUDN(
 			},
 		},
 	)
-	return pod
-}
-
-func newMultiHomedPod(namespace, name, node, podIP string, multiHomingConfigs ...secondaryNetInfo) *v1.Pod {
-	pod := newPod(namespace, name, node, podIP)
-	var secondaryNetworks []nadapi.NetworkSelectionElement
-	for _, multiHomingConf := range multiHomingConfigs {
-		if multiHomingConf.isPrimary {
-			continue // these will be automatically plugged in
-		}
-		nadNamePair := strings.Split(multiHomingConf.nadName, "/")
-		ns := pod.Namespace
-		attachmentName := multiHomingConf.nadName
-		if len(nadNamePair) > 1 {
-			ns = nadNamePair[0]
-			attachmentName = nadNamePair[1]
-		}
-		nse := nadapi.NetworkSelectionElement{
-			Name:      attachmentName,
-			Namespace: ns,
-		}
-		secondaryNetworks = append(secondaryNetworks, nse)
-	}
-	serializedNetworkSelectionElements, _ := json.Marshal(secondaryNetworks)
-	pod.Annotations = map[string]string{nadapi.NetworkAttachmentAnnot: string(serializedNetworkSelectionElements)}
 	return pod
 }
 

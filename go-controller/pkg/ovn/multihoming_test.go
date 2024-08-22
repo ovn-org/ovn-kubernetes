@@ -1,9 +1,14 @@
 package ovn
 
 import (
+	"encoding/json"
 	"fmt"
 	"net"
 	"strings"
+
+	v1 "k8s.io/api/core/v1"
+
+	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 
@@ -379,4 +384,29 @@ func icClusterTestConfiguration() testConfiguration {
 
 func nonICClusterTestConfiguration() testConfiguration {
 	return testConfiguration{}
+}
+
+func newMultiHomedPod(namespace, name, node, podIP string, multiHomingConfigs ...secondaryNetInfo) *v1.Pod {
+	pod := newPod(namespace, name, node, podIP)
+	var secondaryNetworks []nadapi.NetworkSelectionElement
+	for _, multiHomingConf := range multiHomingConfigs {
+		if multiHomingConf.isPrimary {
+			continue // these will be automatically plugged in
+		}
+		nadNamePair := strings.Split(multiHomingConf.nadName, "/")
+		ns := pod.Namespace
+		attachmentName := multiHomingConf.nadName
+		if len(nadNamePair) > 1 {
+			ns = nadNamePair[0]
+			attachmentName = nadNamePair[1]
+		}
+		nse := nadapi.NetworkSelectionElement{
+			Name:      attachmentName,
+			Namespace: ns,
+		}
+		secondaryNetworks = append(secondaryNetworks, nse)
+	}
+	serializedNetworkSelectionElements, _ := json.Marshal(secondaryNetworks)
+	pod.Annotations = map[string]string{nadapi.NetworkAttachmentAnnot: string(serializedNetworkSelectionElements)}
+	return pod
 }
