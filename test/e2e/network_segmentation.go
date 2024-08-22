@@ -710,6 +710,12 @@ var _ = Describe("Network Segmentation", func() {
 						"These tests are known to fail on Local Gateway deployments. Upstream issue: %s", upstreamIssue,
 					)
 				}
+				if netConfigParams.topology == "layer2" && !isInterconnectEnabled() {
+					const upstreamIssue = "https://github.com/ovn-org/ovn-kubernetes/issues/4642"
+					e2eskipper.Skipf(
+						"Egress e2e tests for layer2 topologies are known to fail on non-IC deployments. Upstream issue: %s", upstreamIssue,
+					)
+				}
 				netConfig := newNetworkAttachmentConfig(netConfigParams)
 
 				netConfig.namespace = f.Namespace.Name
@@ -747,7 +753,7 @@ var _ = Describe("Network Segmentation", func() {
 				podAnno, err := unmarshalPodAnnotation(updatedPod.Annotations, f.Namespace.Name+"/"+userDefinedNetworkName)
 				Expect(err).NotTo(HaveOccurred())
 				framework.Logf("Client pod's annotation for network %s is %v", userDefinedNetworkName, podAnno)
-				Expect(len(podAnno.Routes)).To(Equal(6)) // 3 v4 routes + 3 v6 routes for UDN
+				Expect(podAnno.Routes).To(HaveLen(expectedNumberOfRoutes(netConfig)))
 
 				By("asserting the *client* pod can contact the server's v4 IP located outside the cluster")
 				Eventually(func() error {
@@ -759,8 +765,7 @@ var _ = Describe("Network Segmentation", func() {
 					return connectToServer(clientPodConfig, externalIpv6, port)
 				}, 2*time.Minute, 6*time.Second).Should(Succeed())
 			},
-			// FIXME(tssurya): Unskip when L2 egress support is done
-			XEntry("by one pod with dualstack addresses over a layer2 network",
+			Entry("by one pod with dualstack addresses over a layer2 network",
 				networkAttachmentConfigParams{
 					name:     userDefinedNetworkName,
 					topology: "layer2",
@@ -1049,4 +1054,11 @@ func connectToServerViaDefaultNetwork(clientPodConfig podConfiguration, serverIP
 
 func runExternalContainerCmd() []string {
 	return []string{"--network", "kind"}
+}
+
+func expectedNumberOfRoutes(netConfig networkAttachmentConfig) int {
+	if netConfig.topology == "layer2" {
+		return 4 // 2 routes per family
+	}
+	return 6 // 3 v4 routes + 3 v6 routes for UDN
 }
