@@ -117,7 +117,7 @@ fi
 
 # Only run Node IP/MAC address migration tests if they are explicitly requested
 IP_MIGRATION_TESTS="Node IP and MAC address migration"
-if [ "${WHAT}" != "${IP_MIGRATION_TESTS}" ]; then
+if [[ "${WHAT}" != "${IP_MIGRATION_TESTS}"* ]]; then
   if [ "$SKIPPED_TESTS" != "" ]; then
 	SKIPPED_TESTS+="|"
   fi
@@ -126,7 +126,7 @@ fi
 
 # Only run Multi node zones interconnect tests if they are explicitly requested
 MULTI_NODE_ZONES_TESTS="Multi node zones interconnect"
-if [ "${WHAT}" != "${MULTI_NODE_ZONES_TESTS}" ]; then
+if [[ "${WHAT}" != "${MULTI_NODE_ZONES_TESTS}"* ]]; then
   if [ "$SKIPPED_TESTS" != "" ]; then
 	SKIPPED_TESTS+="|"
   fi
@@ -144,7 +144,7 @@ fi
 
 # Only run kubevirt virtual machines tests if they are explicitly requested
 KV_LIVE_MIGRATION_TESTS="Kubevirt Virtual Machines"
-if [ "${WHAT}" != "${KV_LIVE_MIGRATION_TESTS}" ]; then
+if [[ "${WHAT}" != "${KV_LIVE_MIGRATION_TESTS}"* ]]; then
   if [ "$SKIPPED_TESTS" != "" ]; then
 	SKIPPED_TESTS+="|"
   fi
