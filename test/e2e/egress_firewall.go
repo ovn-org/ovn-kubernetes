@@ -23,6 +23,7 @@ import (
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2ekubectl "k8s.io/kubernetes/test/e2e/framework/kubectl"
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
+	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
 	utilnet "k8s.io/utils/net"
 )
 
@@ -151,6 +152,36 @@ var _ = ginkgo.Describe("e2e egress firewall policy validation", func() {
 			}
 		}
 
+		// createSrcPodWithRetry creates a pod that can reach the specified destination with a given number of retries.
+		// In our e2e tests, a strange behaviour for ipv6 was seen: newly created pod can't reach ipv6 destination.
+		// But if the same pod is re-created, everything works.
+		// We don't know what causes that behaviour, so given function is a workaround for this issue.
+		// It also only historically fails for the first ef test "Should validate the egress firewall policy functionality for allowed IP",
+		// so only used there for now.
+		createSrcPodWithRetry := func(retries int, reachableDst string, reachablePort int,
+			podName, nodeName string, ipCheckInterval, ipCheckTimeout time.Duration, f *framework.Framework) {
+			for i := 0; i < retries; i++ {
+				createSrcPod(podName, nodeName, ipCheckInterval, ipCheckTimeout, f)
+				testContainer := fmt.Sprintf("%s-container", podName)
+				testContainerFlag := fmt.Sprintf("--container=%s", testContainer)
+				for connectRetry := 0; connectRetry < 5; connectRetry++ {
+					_, err := e2ekubectl.RunKubectl(f.Namespace.Name, "exec", podName, testContainerFlag, "--",
+						"curl", "-s", "--connect-timeout", fmt.Sprint(testTimeout), net.JoinHostPort(reachableDst, fmt.Sprint(reachablePort)))
+					if err == nil {
+						return
+					}
+				}
+				err := e2epod.DeletePodWithWait(context.TODO(), f.ClientSet, &v1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: f.Namespace.Name,
+						Name:      podName,
+					},
+				})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			}
+			framework.Failf("Failed to create pod %s that can reach %s:%d after %d retries", podName, reachableDst, reachablePort, retries)
+		}
+
 		ginkgo.BeforeEach(func() {
 			externalContainer1IPV4, externalContainer1IPV6 := createClusterExternalContainer(externalContainerName1, agnhostImage,
 				[]string{"--network", ciNetworkName, "-p", fmt.Sprintf("%d:%d", externalContainerPort1, externalContainerPort1)},
@@ -203,6 +234,11 @@ var _ = ginkgo.Describe("e2e egress firewall policy validation", func() {
 
 		ginkgo.It("Should validate the egress firewall policy functionality for allowed IP", func() {
 			srcPodName := "e2e-egress-fw-src-pod"
+
+			// create the pod that will be used as the source for the connectivity test
+			createSrcPodWithRetry(3, externalContainer1IP, externalContainerPort1,
+				srcPodName, serverNodeInfo.name, retryInterval, retryTimeout, f)
+
 			// egress firewall crd yaml configuration
 			var egressFirewallConfig = fmt.Sprintf(`kind: EgressFirewall
 apiVersion: k8s.ovn.org/v1
@@ -219,9 +255,6 @@ spec:
       cidrSelector: %s
 `, f.Namespace.Name, externalContainer1IP, singleIPMask, denyAllCIDR)
 			applyEF(egressFirewallConfig, f.Namespace.Name)
-
-			// create the pod that will be used as the source for the connectivity test
-			createSrcPod(srcPodName, serverNodeInfo.name, retryInterval, retryTimeout, f)
 
 			// Verify the remote host/port as explicitly allowed by the firewall policy is reachable
 			ginkgo.By(fmt.Sprintf("Verifying connectivity to an explicitly allowed host %s is permitted as defined "+
