@@ -861,30 +861,6 @@ func standardNonDefaultNetworkExtIDs(netInfo util.NetInfo) map[string]string {
 	}
 }
 
-func minimalFeatureConfig() *config.OVNKubernetesFeatureConfig {
-	return &config.OVNKubernetesFeatureConfig{
-		EnableNetworkSegmentation: true,
-		EnableMultiNetwork:        true,
-	}
-}
-
-func enableICFeatureConfig() *config.OVNKubernetesFeatureConfig {
-	featConfig := minimalFeatureConfig()
-	featConfig.EnableInterconnect = true
-	return featConfig
-}
-
-func icClusterTestConfiguration() testConfiguration {
-	return testConfiguration{
-		configToOverride:   enableICFeatureConfig(),
-		expectationOptions: []option{withInterconnectCluster()},
-	}
-}
-
-func nonICClusterTestConfiguration() testConfiguration {
-	return testConfiguration{}
-}
-
 func newSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netInfo util.NetInfo, nodeName string) *SecondaryLayer3NetworkController {
 	layer3NetworkController := NewSecondaryLayer3NetworkController(cnci, netInfo)
 	layer3NetworkController.gatewayManagers.Store(

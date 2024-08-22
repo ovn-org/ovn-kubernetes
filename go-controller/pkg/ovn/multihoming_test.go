@@ -356,3 +356,27 @@ func newDummyGatewayManager(
 func managementPortIP(subnet *net.IPNet) net.IP {
 	return util.GetNodeManagementIfAddr(subnet).IP
 }
+
+func minimalFeatureConfig() *config.OVNKubernetesFeatureConfig {
+	return &config.OVNKubernetesFeatureConfig{
+		EnableNetworkSegmentation: true,
+		EnableMultiNetwork:        true,
+	}
+}
+
+func enableICFeatureConfig() *config.OVNKubernetesFeatureConfig {
+	featConfig := minimalFeatureConfig()
+	featConfig.EnableInterconnect = true
+	return featConfig
+}
+
+func icClusterTestConfiguration() testConfiguration {
+	return testConfiguration{
+		configToOverride:   enableICFeatureConfig(),
+		expectationOptions: []option{withInterconnectCluster()},
+	}
+}
+
+func nonICClusterTestConfiguration() testConfiguration {
+	return testConfiguration{}
+}
