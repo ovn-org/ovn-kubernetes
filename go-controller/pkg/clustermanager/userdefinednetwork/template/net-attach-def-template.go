@@ -69,8 +69,20 @@ func validateTopology(udn *userdefinednetworkv1.UserDefinedNetwork) error {
 	return nil
 }
 
+func getNetworkName(udn *userdefinednetworkv1.UserDefinedNetwork) string {
+	return udn.Namespace + "." + udn.Name
+}
+
+func ParseNetworkName(networkName string) (udnNamespace, udnName string) {
+	parts := strings.Split(networkName, ".")
+	if len(parts) == 2 {
+		return parts[0], parts[1]
+	}
+	return "", ""
+}
+
 func renderCNINetworkConfig(udn *userdefinednetworkv1.UserDefinedNetwork) (map[string]interface{}, error) {
-	networkName := udn.Namespace + "." + udn.Name
+	networkName := getNetworkName(udn)
 	nadName := util.GetNADName(udn.Namespace, udn.Name)
 
 	netConfSpec := &ovncnitypes.NetConf{
