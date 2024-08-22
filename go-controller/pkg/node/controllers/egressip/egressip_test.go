@@ -1099,6 +1099,9 @@ var _ = ginkgo.Describe("VRF", func() {
 		if os.Getenv("NOROOT") == "TRUE" {
 			ginkgo.Skip("Test requires root privileges")
 		}
+		if !commandExists("iptables") {
+			ginkgo.Skip("Test requires iptables tools to be available in PATH")
+		}
 		vrfName := "vrf-dummy"
 		var vrfTable uint32 = 55555
 		ginkgo.By("setup link")
@@ -1121,6 +1124,7 @@ var _ = ginkgo.Describe("VRF", func() {
 		c, _, err := initController(namespaces, pods, egressIPList, nodeConfig, true, false, true)
 		gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 		cleanupControllerFn, err := runController(testNS, c)
+		gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 		ginkgo.By("ensure route previously added is copied to new routing table")
 		eipTable := util.CalculateRouteTableID(getLinkIndex(dummyLink1Name))
 		gomega.Eventually(func() bool {
