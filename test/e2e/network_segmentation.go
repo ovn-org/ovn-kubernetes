@@ -26,6 +26,7 @@ import (
 	"k8s.io/kubectl/pkg/util/podutils"
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2ekubectl "k8s.io/kubernetes/test/e2e/framework/kubectl"
+	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
 	e2eskipper "k8s.io/kubernetes/test/e2e/framework/skipper"
 	utilnet "k8s.io/utils/net"
 	"k8s.io/utils/pointer"
@@ -636,7 +637,7 @@ var _ = Describe("Network Segmentation", func() {
 			userDefinedNetworkResource = "userdefinednetwork"
 		)
 
-		Context("with L2 secondary network", func() {
+		Context("for L2 secondary network", func() {
 			BeforeEach(func() {
 				By("create tests UserDefinedNetwork")
 				cleanup, err := createManifest(f.Namespace.Name, newL2SecondaryUDNManifest(testUdnName))
@@ -728,6 +729,70 @@ var _ = Describe("Network Segmentation", func() {
 			})
 		})
 
+		It("should correctly report subsystem error on node subnet allocation", func() {
+			cs = f.ClientSet
+
+			nodes, err := e2enode.GetReadySchedulableNodes(context.TODO(), cs)
+			framework.ExpectNoError(err)
+
+			By("create tests UserDefinedNetwork")
+			// create network that only has 2 node subnets (/24 cluster subnet has only 2 /25 node subnets)
+			udnManifest := `
+apiVersion: k8s.ovn.org/v1
+kind: UserDefinedNetwork
+metadata:
+  name: ` + testUdnName + `
+spec:
+  topology: "Layer3"
+  layer3:
+    role: Secondary
+    subnets: 
+      - cidr: "10.10.100.0/24"
+        hostSubnet: 25
+`
+			cleanup, err := createManifest(f.Namespace.Name, udnManifest)
+			defer cleanup()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(waitForUserDefinedNetworkReady(f.Namespace.Name, testUdnName, 5*time.Second)).To(Succeed())
+
+			conditionsJSON, err := e2ekubectl.RunKubectl(f.Namespace.Name, "get", "userdefinednetwork", testUdnName, "-o", "jsonpath={.status.conditions}")
+			Expect(err).NotTo(HaveOccurred())
+			var actualConditions []metav1.Condition
+			Expect(json.Unmarshal([]byte(conditionsJSON), &actualConditions)).To(Succeed())
+
+			netAllocationCondition := "NetworkAllocationSucceeded"
+
+			if len(nodes.Items) <= 2 {
+				By("when cluster has <= 2 nodes, no error is expected")
+				found := false
+				for _, condition := range actualConditions {
+					if condition.Type == netAllocationCondition && condition.Status == metav1.ConditionTrue {
+						found = true
+					}
+				}
+				Expect(found).To(BeTrue(), "NetworkAllocationSucceeded condition should be True when cluster has <= 2 nodes")
+			} else {
+				By("when cluster has > 2 nodes, error is expected")
+				found := false
+				for _, condition := range actualConditions {
+					if condition.Type == netAllocationCondition && condition.Status == metav1.ConditionFalse {
+						found = true
+					}
+				}
+				Expect(found).To(BeTrue(), "NetworkAllocationSucceeded condition should be False when cluster has > 2 nodes")
+				events, err := cs.CoreV1().Events(f.Namespace.Name).List(context.Background(), metav1.ListOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				found = false
+				for _, event := range events.Items {
+					if event.Reason == "NetworkAllocationFailed" && event.LastTimestamp.After(time.Now().Add(-30*time.Second)) &&
+						strings.Contains(event.Message, "error allocating network") {
+						found = true
+						break
+					}
+				}
+				Expect(found).To(BeTrue(), "should have found an event for failed node allocation")
+			}
+		})
 	})
 
 	It("when primary network exist, UserDefinedNetwork status should report not-ready", func() {
@@ -1079,14 +1144,18 @@ func assertUDNStatusReportsConsumers(udnNamesapce, udnName, expectedPodName stri
 	conditions = normalizeConditions(conditions)
 	expectedMsg := fmt.Sprintf("failed to verify NAD not in use [%[1]s/%[2]s]: network in use by the following pods: [%[1]s/%[3]s]",
 		udnNamesapce, udnName, expectedPodName)
-	Expect(conditions).To(Equal([]metav1.Condition{
-		{
+	found := false
+	for _, condition := range conditions {
+		if found, _ = Equal(metav1.Condition{
 			Type:    "NetworkReady",
 			Status:  "False",
 			Reason:  "SyncError",
 			Message: expectedMsg,
-		},
-	}))
+		}).Match(condition); found {
+			break
+		}
+	}
+	Expect(found).To(BeTrue(), "expected condition not found in %v", conditions)
 }
 
 func normalizeConditions(conditions []metav1.Condition) []metav1.Condition {
