@@ -11,6 +11,17 @@ import (
 	"github.com/onsi/gomega"
 	"github.com/onsi/gomega/format"
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
+	"golang.org/x/exp/maps"
+
+	v1 "k8s.io/api/core/v1"
+	discovery "k8s.io/api/discovery/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/tools/record"
+	utilnet "k8s.io/utils/net"
+	utilpointer "k8s.io/utils/pointer"
+
 	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	globalconfig "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -23,16 +34,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/nad"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"golang.org/x/exp/maps"
-
-	v1 "k8s.io/api/core/v1"
-	discovery "k8s.io/api/discovery/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/intstr"
-	"k8s.io/client-go/tools/cache"
-	"k8s.io/client-go/tools/record"
-	utilnet "k8s.io/utils/net"
-	utilpointer "k8s.io/utils/pointer"
 )
 
 var (
@@ -136,10 +137,10 @@ func (c *serviceController) close() {
 	c.libovsdbCleanup.Cleanup()
 }
 
-func getSampleUDNNetInfo(namespace string) (util.NetInfo, error) {
+func getSampleUDNNetInfo(namespace string, topology string) (util.NetInfo, error) {
 	// requires that config.IPv4Mode = true
 	netInfo, err := util.NewNetInfo(&ovncnitypes.NetConf{
-		Topology:   "layer3",
+		Topology:   topology,
 		NADName:    fmt.Sprintf("%s/nad1", namespace),
 		MTU:        1400,
 		Role:       "primary",
@@ -218,7 +219,7 @@ func TestSyncServices(t *testing.T) {
 	_, cidr4, _ := net.ParseCIDR("10.128.0.0/16")
 	_, cidr6, _ := net.ParseCIDR("fe00:0:0:0:5555::0/64")
 	globalconfig.Default.ClusterSubnets = []globalconfig.CIDRNetworkEntry{{cidr4, 26}, {cidr6, 26}}
-	udnNetInfo, err := getSampleUDNNetInfo(ns)
+	udnNetInfo, err := getSampleUDNNetInfo(ns, "layer3")
 	if err != nil {
 		t.Fatalf("Error creating UDNNetInfo: %v", err)
 	}
