@@ -2,6 +2,7 @@ package node
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -14,6 +15,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	"github.com/containernetworking/plugins/pkg/ns"
@@ -175,6 +177,7 @@ var _ = Describe("Node IP Handler tests", func() {
 		dummyBrName              = "breth0"
 		dummyBrInternalIPv4      = "10.1.1.10"
 		dummyAdditionalIPv4CIDR  = "192.168.2.2/24"
+		dummyAdditionalIPv4CIDR2 = "192.168.3.2/24"
 		dummyBrUniqLocalIPv6CIDR = "fd53:6043:6000:e0e0:1::6001/80"
 		dummyMasqIPv4            = "169.254.169.2"
 		dummyMasqIPv4CIDR        = dummyMasqIPv4 + "/29"
@@ -301,6 +304,19 @@ var _ = Describe("Node IP Handler tests", func() {
 				return nodeHasAddress(tc.fakeClient, nodeName, ovntest.MustParseIPNet(dummyMasqIPv4CIDR)) &&
 					nodeHasAddress(tc.fakeClient, nodeName, ovntest.MustParseIPNet(dummyMasqIPv6CIDR))
 			}, 3).Should(BeFalse())
+		})
+
+		ovntest.OnSupportedPlatformsIt("doesn't allow OVN management port IPs", func() {
+			config.OVNKubernetesFeature.EnableMultiNetwork = true
+			config.OVNKubernetesFeature.EnableNetworkSegmentation = true
+			Expect(tc.ns.Do(func(netNS ns.NetNS) error {
+				mpLink := ovntest.AddLink(fmt.Sprintf("%s1234", ovntypes.K8sMgmtIntfNamePrefix))
+				return netlink.AddrAdd(mpLink, &netlink.Addr{LinkIndex: mpLink.Attrs().Index, Scope: unix.RT_SCOPE_UNIVERSE,
+					IPNet: ovntest.MustParseIPNet(dummyAdditionalIPv4CIDR)})
+			})).ShouldNot(HaveOccurred())
+			Consistently(func() bool {
+				return nodeHasAddress(tc.fakeClient, nodeName, ovntest.MustParseIPNet(dummyAdditionalIPv4CIDR))
+			}, 2).Should(BeFalse())
 		})
 	})
 })
