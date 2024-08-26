@@ -13,11 +13,15 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/ginkgo/v2/dsl/table"
 	"github.com/onsi/gomega"
 
+	nadclient "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/typed/k8s.cni.cncf.io/v1"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2ekubectl "k8s.io/kubernetes/test/e2e/framework/kubectl"
@@ -290,7 +294,7 @@ func targetExternalContainerAndTest(targetNode node, podName, podNamespace strin
 	}
 }
 
-var _ = ginkgo.Describe("e2e egress IP validation", func() {
+var _ = ginkgo.DescribeTableSubtree("e2e egress IP validation", func(netConfigParams networkAttachmentConfigParams, isHostNetwork bool) {
 	const (
 		servicePort             int32  = 9999
 		echoServerPodPortMin           = 9900
@@ -550,6 +554,21 @@ var _ = ginkgo.Describe("e2e egress IP validation", func() {
 			waitForNoTaint(node.Name, "node.kubernetes.io/unreachable")
 			waitForNoTaint(node.Name, "node.kubernetes.io/not-ready")
 		}
+		// no further network creation is required if CDN
+		if netConfigParams.networkName == types.DefaultNetworkName {
+			return
+		}
+		// configure UDN
+		nadClient, err := nadclient.NewForConfig(f.ClientConfig())
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		netConfig := newNetworkAttachmentConfig(netConfigParams)
+		netConfig.namespace = f.Namespace.Name
+		_, err = nadClient.NetworkAttachmentDefinitions(f.Namespace.Name).Create(
+			context.Background(),
+			generateNAD(netConfig),
+			metav1.CreateOptions{},
+		)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	})
 
 	ginkgo.AfterEach(func() {
@@ -681,8 +700,20 @@ spec:
 					return true, nil
 				})
 				framework.ExpectNoError(err, "Step 3. Create two pods matching the EgressIP: one running on each of the egress nodes, failed, err: %v", err)
+				var pod2IP string
+				if netConfigParams.networkName == types.DefaultNetworkName {
+					pod2IP = getPodAddress(pod2Name, f.Namespace.Name)
+				} else {
+					pod2IP, err = podIPsForUserDefinedPrimaryNetwork(
+						f.ClientSet,
+						f.Namespace.Name,
+						pod2Name,
+						namespacedName(f.Namespace.Name, netConfigParams.name),
+						0,
+					)
+					framework.ExpectNoError(err, "Step 3. Create two UDN pods matching the EgressIP: one running on each of the egress nodes, failed, err: %v", err)
+				}
 
-				pod2IP := getPodAddress(pod2Name, f.Namespace.Name)
 				ginkgo.By("4. Check connectivity from both to an external \"node\" and verify that the IPs are both of the above")
 				err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(targetNode, pod1Name, podNamespace.Name, true, []string{egressIP1.String(), egressIP2.String()}))
 				framework.ExpectNoError(err, "Step 4. Check connectivity from first to an external \"node\" and verify that the IPs are both of the above, failed: %v", err)
@@ -1091,6 +1122,9 @@ spec:
 	   20. Check connectivity from pod to an external container and verify that the srcIP is the expected nodeIP
 	*/
 	ginkgo.It("Should validate egress IP logic when one pod is managed by more than one egressIP object", func() {
+		if netConfigParams.networkName != types.DefaultNetworkName {
+			ginkgo.Skip("Unsupported for UDNs")
+		}
 
 		command := []string{"/agnhost", "netexec", fmt.Sprintf("--http-port=%s", podHTTPPort)}
 
@@ -1615,7 +1649,9 @@ spec:
 	   8. Check connectivity to the service IP and verify that it works
 	*/
 	ginkgo.It("Should validate the egress IP functionality against remote hosts with egress firewall applied", func() {
-
+		if netConfigParams.networkName != types.DefaultNetworkName {
+			ginkgo.Skip("Unsupported for UDNs")
+		}
 		command := []string{"/agnhost", "netexec", fmt.Sprintf("--http-port=%s", podHTTPPort)}
 
 		ginkgo.By("0. Add the \"k8s.ovn.org/egress-assignable\" label to one nodes")
@@ -1921,6 +1957,9 @@ spec:
 	   26. Check connectivity from the other pod to an external "node" on the secondary host network and verify the expected src IPs
 	*/
 	table.DescribeTable("[secondary-host-eip] Using different methods to disable a node or pod availability for egress", func(egressIPIP1, egressIPIP2 string) {
+		if netConfigParams.networkName != types.DefaultNetworkName {
+			ginkgo.Skip("Unsupported for UDNs")
+		}
 		// get v4, v6 from eips
 		// check that node has both of them
 		v4, v6 := getIPVersions(egressIPIP1, egressIPIP2)
@@ -2161,6 +2200,9 @@ spec:
 	   28. Check connectivity both pods to an external "node" on the secondary host network and verify the src IP is the expected egressIP
 	*/
 	ginkgo.It("[secondary-host-eip] Using different methods to disable a node or pod availability for egress", func() {
+		if netConfigParams.networkName != types.DefaultNetworkName {
+			ginkgo.Skip("Unsupported for UDNs")
+		}
 		if utilnet.IsIPv6(net.ParseIP(egress1Node.nodeIP)) {
 			ginkgo.Skip("Node does not have IPv4 address")
 		}
@@ -2412,6 +2454,9 @@ spec:
 	// 6. Check connectivity to the host on the secondary host network from the pod selected by the other EgressIP
 	// 7. Check connectivity to the host on the OVN network from the pod not selected by EgressIP
 	ginkgo.It("[secondary-host-eip] Multiple EgressIP objects and their Egress IP hosted on the same interface", func() {
+		if netConfigParams.networkName != types.DefaultNetworkName {
+			ginkgo.Skip("Unsupported for UDNs")
+		}
 		var egressIP1, egressIP2 string
 		if utilnet.IsIPv6(net.ParseIP(egress1Node.nodeIP)) {
 			egressIP1 = "2001:db8:abcd:1234:c001::"
@@ -2535,6 +2580,9 @@ spec:
 		if !isKernelModuleLoaded(egress1Node.name, "vrf") {
 			ginkgo.Skip("Node doesn't have VRF kernel module loaded")
 		}
+		if netConfigParams.networkName != types.DefaultNetworkName {
+			ginkgo.Skip("Unsupported for UDNs")
+		}
 		var egressIP1 string
 		isV6Node := utilnet.IsIPv6(net.ParseIP(egress1Node.nodeIP))
 		if isV6Node {
@@ -2657,4 +2705,22 @@ spec:
 		framework.ExpectNoError(err, "5. Check connectivity a pod to an external \"node\" hosted on a secondary host network "+
 			"and verify the expected IP, failed for EgressIP %s: %v", egressIPName, err)
 	})
-})
+},
+	ginkgo.Entry(
+		"L3 CDN", // No UDN attachments
+		networkAttachmentConfigParams{
+			networkName: types.DefaultNetworkName,
+		},
+		false,
+	),
+	ginkgo.Entry(
+		"L3 UDN role primary",
+		networkAttachmentConfigParams{
+			name:     "l3primary",
+			topology: types.Layer3Topology,
+			cidr:     "10.10.0.0/16",
+			role:     "primary",
+		},
+		false,
+	),
+)
