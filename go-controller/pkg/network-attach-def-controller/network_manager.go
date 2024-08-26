@@ -45,7 +45,7 @@ func newNetworkManager(name string, ncm NetworkControllerManager) networkManager
 	// added to the queue for processing
 	config := &controller.ReconcilerConfig{
 		RateLimiter: workqueue.DefaultControllerRateLimiter(),
-		Reconcile:   nc.sync,
+		Reconcile:   nc.syncLocked,
 		Threadiness: 1,
 	}
 	nc.controller = controller.NewReconciler(
@@ -97,10 +97,14 @@ func (nm *networkManagerImpl) DeleteNetwork(network string) {
 	nm.controller.Reconcile(network)
 }
 
-func (nm *networkManagerImpl) sync(network string) error {
+func (nm *networkManagerImpl) syncLocked(network string) error {
 	nm.Lock()
 	defer nm.Unlock()
+	return nm.sync(network)
+}
 
+// sync must be called with nm mutex locked
+func (nm *networkManagerImpl) sync(network string) error {
 	startTime := time.Now()
 	klog.V(5).Infof("%s: sync network %s", nm.name, network)
 	defer func() {
@@ -158,8 +162,27 @@ func (nm *networkManagerImpl) syncAll() error {
 	// as we sync upon start, consider networks that have not been ensured as
 	// stale and clean them up
 	validNetworks := make([]util.BasicNetInfo, 0, len(nm.networks))
-	for _, network := range nm.networks {
+	networkNames := make([]string, 0, len(nm.networks))
+	for name, network := range nm.networks {
 		validNetworks = append(validNetworks, network)
+		networkNames = append(networkNames, name)
 	}
-	return nm.ncm.CleanupDeletedNetworks(validNetworks...)
+	if err := nm.ncm.CleanupDeletedNetworks(validNetworks...); err != nil {
+		return err
+	}
+
+	// sync all known networks. There is no informer for networks. Keys are added by NAD controller.
+	// Certain downstream controllers that handle configuration for multiple networks depend on being
+	// aware of all the existing networks on initialization. To achieve that, we need to start existing
+	// networks synchronously. Otherwise, these controllers might incorrectly assess valid configuration
+	// as stale.
+	start := time.Now()
+	klog.Infof("%s: syncing all networks", nm.name)
+	for _, networkName := range networkNames {
+		if err := nm.sync(networkName); err != nil {
+			return fmt.Errorf("failed to sync network %s: %w", networkName, err)
+		}
+	}
+	klog.Infof("%s: finished syncing all networks. Time taken: %s", nm.name, time.Since(start))
+	return nil
 }
