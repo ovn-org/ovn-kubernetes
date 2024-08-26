@@ -68,10 +68,14 @@ func getEgressIPAddrSetDbIDs(name egressIPAddrSetName, controller string) *libov
 
 func getEgressIPLRPReRouteDbIDs(egressIPName, podNamespace, podName string, ipFamily egressIPFamilyValue, controller string) *libovsdbops.DbObjectIDs {
 	return libovsdbops.NewDbObjectIDs(libovsdbops.LogicalRouterPolicyEgressIP, controller, map[libovsdbops.ExternalIDKey]string{
-		libovsdbops.ObjectNameKey: fmt.Sprintf("%s_%s/%s", egressIPName, podNamespace, podName),
+		libovsdbops.ObjectNameKey: fmt.Sprintf("%s%s%s/%s", egressIPName, getDBIDEIPNamePodDivider(), podNamespace, podName),
 		libovsdbops.PriorityKey:   fmt.Sprintf("%d", types.EgressIPReroutePriority),
 		libovsdbops.IPFamilyKey:   string(ipFamily),
 	})
+}
+
+func getDBIDEIPNamePodDivider() string {
+	return "_"
 }
 
 func getEIPLRPObjK8MetaData(externalIDs map[string]string) (string, string) {
@@ -1265,7 +1269,7 @@ func (bnc *BaseNetworkController) syncPodAssignmentCache(egressIPCache map[strin
 		p1 := func(item *nbdb.LogicalRouterPolicy) bool {
 			return item.Priority == types.EgressIPReroutePriority &&
 				item.ExternalIDs[libovsdbops.OwnerControllerKey.String()] == bnc.controllerName &&
-				strings.HasPrefix(item.ExternalIDs[libovsdbops.ObjectNameKey.String()], egressIPName)
+				strings.HasPrefix(item.ExternalIDs[libovsdbops.ObjectNameKey.String()], egressIPName+getDBIDEIPNamePodDivider())
 		}
 		reRoutePolicies, err := libovsdbops.FindALogicalRouterPoliciesWithPredicate(bnc.nbClient, routerName, p1)
 		if err != nil {
@@ -2382,7 +2386,7 @@ func (e *egressIPZoneController) deleteGWMarkPolicyForStatusOps(ops []ovsdb.Oper
 		})
 	lrpExtIDPredicate := libovsdbops.GetPredicate[*nbdb.LogicalRouterPolicy](predicateIDs, nil)
 	p := func(item *nbdb.LogicalRouterPolicy) bool {
-		return lrpExtIDPredicate(item) && strings.HasPrefix(item.ExternalIDs[libovsdbops.ObjectNameKey.String()], egressIPName)
+		return lrpExtIDPredicate(item) && strings.HasPrefix(item.ExternalIDs[libovsdbops.ObjectNameKey.String()], egressIPName+getDBIDEIPNamePodDivider())
 	}
 	var err error
 	ops, err = libovsdbops.DeleteLogicalRouterPolicyWithPredicateOps(e.nbClient, ops, routerName, p)
@@ -2421,7 +2425,7 @@ func (e *egressIPZoneController) deleteEgressIPStatusSetup(name string, status e
 			item.ExternalIDs[libovsdbops.OwnerControllerKey.String()] == e.controllerName &&
 			item.ExternalIDs[libovsdbops.OwnerTypeKey.String()] == string(libovsdbops.EgressIPOwnerType) &&
 			item.ExternalIDs[libovsdbops.IPFamilyKey.String()] == string(getEIPIPFamily(isIPv6)) &&
-			strings.HasPrefix(item.ExternalIDs[libovsdbops.ObjectNameKey.String()], name)
+			strings.HasPrefix(item.ExternalIDs[libovsdbops.ObjectNameKey.String()], name+getDBIDEIPNamePodDivider())
 	}
 
 	if nextHopIP != "" {
