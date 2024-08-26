@@ -221,6 +221,12 @@ func (ncm *nodeNetworkControllerManager) Start(ctx context.Context) (err error) 
 			defer ncm.wg.Done()
 			ncm.ruleManager.Run(ncm.stopChan, 5*time.Minute)
 		}()
+		// Tell rule manager that we want to fully own all rules at a particular priority.
+		// Any rules created with this priority that we do not recognize it, will be
+		// removed by relevant manager.
+		if err := ncm.ruleManager.OwnPriority(node.UDNMasqueradeIPRulePriority); err != nil {
+			return fmt.Errorf("failed to own priority %d for IP rules: %v", node.UDNMasqueradeIPRulePriority, err)
+		}
 	}
 	return nil
 }
