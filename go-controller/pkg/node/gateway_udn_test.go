@@ -5,11 +5,13 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"testing"
 	"time"
 
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/containernetworking/plugins/pkg/testutils"
 	. "github.com/onsi/ginkgo"
+	"github.com/onsi/gomega"
 	. "github.com/onsi/gomega"
 	"github.com/stretchr/testify/mock"
 	"github.com/vishvananda/netlink"
@@ -22,6 +24,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	factoryMocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory/mocks"
 	kubemocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube/mocks"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iprulemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/vrfmanager"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
@@ -172,24 +175,25 @@ func setUpUDNOpenflowManagerFakeOVSCommands(fexec *ovntest.FakeExec) {
 
 var _ = Describe("UserDefinedNetworkGateway", func() {
 	var (
-		netName             = "bluenet"
-		netID               = "3"
-		nodeName     string = "worker1"
-		mgtPortMAC   string = "00:00:00:55:66:77" // dummy MAC used for fake commands
-		fexec        *ovntest.FakeExec
-		testNS       ns.NetNS
-		factoryMock  factoryMocks.NodeWatchFactory
-		kubeMock     kubemocks.Interface
-		nodeLister   v1mocks.NodeLister
-		vrf          *vrfmanager.Controller
-		rm           *routemanager.Controller
-		wg           sync.WaitGroup
-		stopCh       chan struct{}
-		v4NodeSubnet = "100.128.0.0/24"
-		v6NodeSubnet = "ae70::66/112"
-		mgtPort      = fmt.Sprintf("%s%s", types.K8sMgmtIntfNamePrefix, netID)
-		v4NodeIP     = "192.168.1.10/24"
-		v6NodeIP     = "fc00:f853:ccd:e793::3/64"
+		netName               = "bluenet"
+		netID                 = "3"
+		nodeName       string = "worker1"
+		mgtPortMAC     string = "00:00:00:55:66:77" // dummy MAC used for fake commands
+		fexec          *ovntest.FakeExec
+		testNS         ns.NetNS
+		factoryMock    factoryMocks.NodeWatchFactory
+		kubeMock       kubemocks.Interface
+		nodeLister     v1mocks.NodeLister
+		vrf            *vrfmanager.Controller
+		rm             *routemanager.Controller
+		ipRulesManager *iprulemanager.Controller
+		wg             sync.WaitGroup
+		stopCh         chan struct{}
+		v4NodeSubnet   = "100.128.0.0/24"
+		v6NodeSubnet   = "ae70::66/112"
+		mgtPort        = fmt.Sprintf("%s%s", types.K8sMgmtIntfNamePrefix, netID)
+		v4NodeIP       = "192.168.1.10/24"
+		v6NodeIP       = "fc00:f853:ccd:e793::3/64"
 	)
 	BeforeEach(func() {
 		// Restore global default values before each testcase
@@ -237,6 +241,13 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			Expect(err).NotTo(HaveOccurred())
 			return nil
 		})
+		ipRulesManager = iprulemanager.NewController(true, true)
+		wg.Add(1)
+		go testNS.Do(func(netNS ns.NetNS) error {
+			defer wg.Done()
+			ipRulesManager.Run(stopCh, 4*time.Minute)
+			return nil
+		})
 	})
 	AfterEach(func() {
 		close(stopCh)
@@ -259,7 +270,8 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			types.Layer3Topology, "100.128.0.0/16/24,ae70::66/60", types.NetworkRolePrimary)
 		netInfo, err := util.ParseNADInfo(nad)
 		Expect(err).NotTo(HaveOccurred())
-		udnGateway, err := NewUserDefinedNetworkGateway(netInfo, 3, node, factoryMock.NodeCoreInformer().Lister(), &kubeMock, vrf, &gateway{})
+		udnGateway, err := NewUserDefinedNetworkGateway(netInfo, 3, node, factoryMock.NodeCoreInformer().Lister(),
+			&kubeMock, vrf, nil, &gateway{})
 		Expect(err).NotTo(HaveOccurred())
 		getCreationFakeOVSCommands(fexec, mgtPort, mgtPortMAC, netName, nodeName, netInfo.MTU())
 		nodeLister.On("Get", mock.AnythingOfType("string")).Return(node, nil)
@@ -298,7 +310,8 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			types.Layer3Topology, "100.128.0.0/16/24,ae70::66/60", types.NetworkRolePrimary)
 		netInfo, err := util.ParseNADInfo(nad)
 		Expect(err).NotTo(HaveOccurred())
-		udnGateway, err := NewUserDefinedNetworkGateway(netInfo, 3, node, factoryMock.NodeCoreInformer().Lister(), &kubeMock, vrf, &gateway{})
+		udnGateway, err := NewUserDefinedNetworkGateway(netInfo, 3, node, factoryMock.NodeCoreInformer().Lister(),
+			&kubeMock, vrf, nil, &gateway{})
 		Expect(err).NotTo(HaveOccurred())
 		getDeletionFakeOVSCommands(fexec, mgtPort)
 		nodeLister.On("Get", mock.AnythingOfType("string")).Return(node, nil)
@@ -327,7 +340,8 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			types.Layer2Topology, "100.128.0.0/16,ae70::66/60", types.NetworkRolePrimary)
 		netInfo, err := util.ParseNADInfo(nad)
 		Expect(err).NotTo(HaveOccurred())
-		udnGateway, err := NewUserDefinedNetworkGateway(netInfo, 3, node, factoryMock.NodeCoreInformer().Lister(), &kubeMock, vrf, &gateway{})
+		udnGateway, err := NewUserDefinedNetworkGateway(netInfo, 3, node, factoryMock.NodeCoreInformer().Lister(),
+			&kubeMock, vrf, nil, &gateway{})
 		Expect(err).NotTo(HaveOccurred())
 		getCreationFakeOVSCommands(fexec, mgtPort, mgtPortMAC, netName, nodeName, netInfo.MTU())
 		nodeLister.On("Get", mock.AnythingOfType("string")).Return(node, nil)
@@ -365,7 +379,8 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			types.Layer2Topology, "100.128.0.0/16,ae70::66/60", types.NetworkRolePrimary)
 		netInfo, err := util.ParseNADInfo(nad)
 		Expect(err).NotTo(HaveOccurred())
-		udnGateway, err := NewUserDefinedNetworkGateway(netInfo, 3, node, factoryMock.NodeCoreInformer().Lister(), &kubeMock, vrf, &gateway{})
+		udnGateway, err := NewUserDefinedNetworkGateway(netInfo, 3, node, factoryMock.NodeCoreInformer().Lister(),
+			&kubeMock, vrf, nil, &gateway{})
 		Expect(err).NotTo(HaveOccurred())
 		getDeletionFakeOVSCommands(fexec, mgtPort)
 		nodeLister.On("Get", mock.AnythingOfType("string")).Return(node, nil)
@@ -483,7 +498,8 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			stop := make(chan struct{})
 			wg := &sync.WaitGroup{}
 			Expect(localGw.Init(stop, wg)).To(Succeed())
-			udnGateway, err := NewUserDefinedNetworkGateway(netInfo, 3, node, wf.NodeCoreInformer().Lister(), &kubeMock, vrf, localGw)
+			udnGateway, err := NewUserDefinedNetworkGateway(netInfo, 3, node, wf.NodeCoreInformer().Lister(),
+				&kubeMock, vrf, ipRulesManager, localGw)
 			Expect(err).NotTo(HaveOccurred())
 			// we cannot start the shared gw directly because it will spawn a goroutine that may not be bound to the test netns
 			// Start does two things, starts nodeIPManager which spawns a go routine and also starts openflow manager by spawning a go routine
@@ -650,7 +666,8 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			stop := make(chan struct{})
 			wg := &sync.WaitGroup{}
 			Expect(localGw.Init(stop, wg)).To(Succeed())
-			udnGateway, err := NewUserDefinedNetworkGateway(netInfo, 3, node, wf.NodeCoreInformer().Lister(), &kubeMock, vrf, localGw)
+			udnGateway, err := NewUserDefinedNetworkGateway(netInfo, 3, node, wf.NodeCoreInformer().Lister(),
+				&kubeMock, vrf, ipRulesManager, localGw)
 			Expect(err).NotTo(HaveOccurred())
 			// we cannot start the shared gw directly because it will spawn a goroutine that may not be bound to the test netns
 			// Start does two things, starts nodeIPManager which spawns a go routine and also starts openflow manager by spawning a go routine
@@ -725,7 +742,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			types.Layer3Topology, "100.128.0.0/16/24,ae70::66/60", types.NetworkRolePrimary)
 		netInfo, err := util.ParseNADInfo(nad)
 		Expect(err).NotTo(HaveOccurred())
-		udnGateway, err := NewUserDefinedNetworkGateway(netInfo, 3, node, nil, nil, vrf, &gateway{})
+		udnGateway, err := NewUserDefinedNetworkGateway(netInfo, 3, node, nil, nil, vrf, nil, &gateway{})
 		Expect(err).NotTo(HaveOccurred())
 		getVRFCreationFakeOVSCommands(fexec)
 		err = testNS.Do(func(ns.NetNS) error {
@@ -770,7 +787,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			types.Layer3Topology, "100.128.0.0/16/24,ae70::66/60", types.NetworkRolePrimary)
 		netInfo, err := util.ParseNADInfo(nad)
 		Expect(err).NotTo(HaveOccurred())
-		udnGateway, err := NewUserDefinedNetworkGateway(netInfo, 3, node, nil, nil, vrf, &gateway{})
+		udnGateway, err := NewUserDefinedNetworkGateway(netInfo, 3, node, nil, nil, vrf, nil, &gateway{})
 		Expect(err).NotTo(HaveOccurred())
 		getVRFCreationFakeOVSCommands(fexec)
 		err = testNS.Do(func(ns.NetNS) error {
@@ -805,3 +822,96 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 	})
 })
+
+func TestConstructUDNVRFIPRules(t *testing.T) {
+	type testRule struct {
+		priority int
+		family   int
+		table    int
+		dst      net.IPNet
+	}
+	type testConfig struct {
+		desc          string
+		vrftableID    int
+		v4mode        bool
+		v6mode        bool
+		expectedRules []testRule
+	}
+
+	tests := []testConfig{
+		{
+			desc:          "empty rules test",
+			vrftableID:    1007,
+			expectedRules: nil,
+		},
+		{
+			desc:       "v4 rule test",
+			vrftableID: 1007,
+			expectedRules: []testRule{
+				{
+					priority: UDNMasqueradeIPRulePriority,
+					family:   netlink.FAMILY_V4,
+					table:    1007,
+					dst:      *util.GetIPNetFullMaskFromIP(ovntest.MustParseIP("169.254.0.16")),
+				},
+			},
+			v4mode: true,
+		},
+		{
+			desc:       "v6 rule test",
+			vrftableID: 1009,
+			expectedRules: []testRule{
+				{
+					priority: UDNMasqueradeIPRulePriority,
+					family:   netlink.FAMILY_V6,
+					table:    1009,
+					dst:      *util.GetIPNetFullMaskFromIP(ovntest.MustParseIP("fd69::10")),
+				},
+			},
+			v6mode: true,
+		},
+		{
+			desc:       "dualstack rule test",
+			vrftableID: 1010,
+			expectedRules: []testRule{
+				{
+					priority: UDNMasqueradeIPRulePriority,
+					family:   netlink.FAMILY_V4,
+					table:    1010,
+					dst:      *util.GetIPNetFullMaskFromIP(ovntest.MustParseIP("169.254.0.16")),
+				},
+				{
+					priority: UDNMasqueradeIPRulePriority,
+					family:   netlink.FAMILY_V6,
+					table:    1010,
+					dst:      *util.GetIPNetFullMaskFromIP(ovntest.MustParseIP("fd69::10")),
+				},
+			},
+			v4mode: true,
+			v6mode: true,
+		},
+	}
+	config.Gateway.V6MasqueradeSubnet = "fd69::/112"
+	config.Gateway.V4MasqueradeSubnet = "169.254.0.0/16"
+	for _, test := range tests {
+		t.Run(test.desc, func(t *testing.T) {
+			g := gomega.NewWithT(t)
+			config.IPv4Mode = test.v4mode
+			config.IPv6Mode = test.v6mode
+			nad := ovntest.GenerateNAD("bluenet", "rednad", "greenamespace",
+				types.Layer3Topology, "100.128.0.0/16/24,ae70::66/60", types.NetworkRolePrimary)
+			netInfo, err := util.ParseNADInfo(nad)
+			g.Expect(err).NotTo(HaveOccurred())
+			udnGateway, err := NewUserDefinedNetworkGateway(netInfo, 3, nil, nil, nil, nil, nil, &gateway{})
+			g.Expect(err).NotTo(HaveOccurred())
+			rules, err := udnGateway.constructUDNVRFIPRules(test.vrftableID)
+			g.Expect(err).To(gomega.BeNil())
+			for i, rule := range rules {
+				g.Expect(rule.Priority).To(gomega.Equal(test.expectedRules[i].priority))
+				g.Expect(rule.Table).To(gomega.Equal(test.expectedRules[i].table))
+				g.Expect(rule.Family).To(gomega.Equal(test.expectedRules[i].family))
+				g.Expect(*rule.Dst).To(gomega.Equal(test.expectedRules[i].dst))
+			}
+		})
+	}
+}

@@ -14,6 +14,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/generator/udn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iprulemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/vrfmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -24,10 +25,12 @@ const (
 	// ctMarkUDNBase is the conntrack mark base value for user defined networks to use
 	// Each network gets its own mark == base + network-id
 	ctMarkUDNBase = 3
-
 	// waitForPatchPortTimeout is the maximum time we wait for a UDN's patch
 	// port to be created by OVN.
 	waitForPatchPortTimeout = 30 * time.Second
+	// UDNMasqueradeIPRulePriority the priority of the ip routing rules created for masquerade IP address
+	// allocated for every user defined network.
+	UDNMasqueradeIPRulePriority = 2000
 )
 
 // UserDefinedNetworkGateway contains information
@@ -60,6 +63,9 @@ type UserDefinedNetworkGateway struct {
 	// for UDNs in the future. For now default network and UDNs will
 	// use the same gateway struct instance
 	*gateway
+	// iprules manager that creates and manages iprules for
+	// all UDNs. Must be accessed with a lock
+	ruleManager *iprulemanager.Controller
 }
 
 // UTILS Needed for UDN (also leveraged for default netInfo) in bridgeConfiguration
@@ -153,7 +159,7 @@ func setBridgeNetworkOfPorts(bridge *bridgeConfiguration, netName string) error 
 }
 
 func NewUserDefinedNetworkGateway(netInfo util.NetInfo, networkID int, node *v1.Node, nodeLister listers.NodeLister,
-	kubeInterface kube.Interface, vrfManager *vrfmanager.Controller,
+	kubeInterface kube.Interface, vrfManager *vrfmanager.Controller, ruleManager *iprulemanager.Controller,
 	defaultNetworkGateway Gateway) (*UserDefinedNetworkGateway, error) {
 	// Generate a per network conntrack mark and masquerade IPs to be used for egress traffic.
 	var (
@@ -192,6 +198,7 @@ func NewUserDefinedNetworkGateway(netInfo util.NetInfo, networkID int, node *v1.
 		v4MasqIP:      v4MasqIP,
 		v6MasqIP:      v6MasqIP,
 		gateway:       gw,
+		ruleManager:   ruleManager,
 	}, nil
 }
 
@@ -210,16 +217,24 @@ func (udng *UserDefinedNetworkGateway) AddNetwork() error {
 	if err != nil {
 		return fmt.Errorf("failed to compute routes for network %s, err: %v", udng.GetNetworkName(), err)
 	}
-	err = udng.vrfManager.AddVRF(vrfDeviceName, mplink.Attrs().Name, uint32(vrfTableId), routes)
-	if err != nil {
+	if err = udng.vrfManager.AddVRF(vrfDeviceName, mplink.Attrs().Name, uint32(vrfTableId), routes); err != nil {
 		return fmt.Errorf("could not add VRF %d for network %s, err: %v", vrfTableId, udng.GetNetworkName(), err)
 	}
-	err = udng.addUDNManagementPortIPs(mplink)
-	if err != nil {
+	if err = udng.addUDNManagementPortIPs(mplink); err != nil {
 		return fmt.Errorf("unable to add management port IP(s) for link %s, for network %s: %w", mplink.Attrs().Name, udng.GetNetworkName(), err)
 	}
 	if err := util.UpdateNodeManagementPortMACAddressesWithRetry(udng.node, udng.nodeLister, udng.kubeInterface, macAddress, udng.GetNetworkName()); err != nil {
 		return fmt.Errorf("unable to update mac address annotation for node %s, for network %s, err: %w", udng.node.Name, udng.GetNetworkName(), err)
+	}
+	// create the iprules for this network
+	udnReplyIPRules, err := udng.constructUDNVRFIPRules(vrfTableId)
+	if err != nil {
+		return fmt.Errorf("unable to get iprules for network %s, err: %v", udng.GetNetworkName(), err)
+	}
+	for _, rule := range udnReplyIPRules {
+		if err = udng.ruleManager.AddWithMetadata(rule, udng.GetNetworkRuleMetadata()); err != nil {
+			return fmt.Errorf("unable to create iprule %v for network %s, err: %v", rule, udng.GetNetworkName(), err)
+		}
 	}
 	if udng.openflowManager != nil {
 		udng.openflowManager.addNetwork(udng.NetInfo, udng.masqCTMark, udng.v4MasqIP, udng.v6MasqIP)
@@ -253,20 +268,30 @@ func (udng *UserDefinedNetworkGateway) AddNetwork() error {
 	return nil
 }
 
+func (udng *UserDefinedNetworkGateway) GetNetworkRuleMetadata() string {
+	return fmt.Sprintf("%s-%d", udng.GetNetworkName(), udng.networkID)
+}
+
 // DelNetwork will be responsible to remove all plumbings
 // used by this UDN on the gateway side
 func (udng *UserDefinedNetworkGateway) DelNetwork() error {
 	vrfDeviceName := util.GetVRFDeviceNameForUDN(udng.networkID)
-	err := udng.vrfManager.DeleteVRF(vrfDeviceName)
-	if err != nil {
+	// delete the iprules for this network
+	if err := udng.ruleManager.DeleteWithMetadata(udng.GetNetworkRuleMetadata()); err != nil {
+		return fmt.Errorf("unable to delete iprules for network %s, err: %v", udng.GetNetworkName(), err)
+	}
+	// delete the VRF device for this network
+	if err := udng.vrfManager.DeleteVRF(vrfDeviceName); err != nil {
 		return err
 	}
+	// delete the openflows for this network
 	if udng.openflowManager != nil {
 		udng.openflowManager.delNetwork(udng.NetInfo)
 		if err := udng.Reconcile(); err != nil {
 			return fmt.Errorf("failed to reconcile default gateway for network %s, err: %v", udng.GetNetworkName(), err)
 		}
 	}
+	// delete the management port interface for this network
 	return udng.deleteUDNManagementPort()
 }
 
@@ -478,4 +503,40 @@ func (udng *UserDefinedNetworkGateway) getV6MasqueradeIP() (*net.IPNet, error) {
 		return nil, fmt.Errorf("failed to allocate masquerade IPs for v6 stack for network %s: %w", udng.GetNetworkName(), err)
 	}
 	return util.GetIPNetFullMaskFromIP(masqIPs.ManagementPort.IP), nil
+}
+
+// constructUDNVRFIPRules constructs rules that redirect packets towards the per-UDN masquerade IP
+// into the corresponding UDN VRF routing table.
+// Example:
+// 2000:   from all to 169.254.0.12 lookup 1007
+// 2000:   from all to 169.254.0.14 lookup 1009
+func (udng *UserDefinedNetworkGateway) constructUDNVRFIPRules(vrfTableId int) ([]netlink.Rule, error) {
+	var masqIPRules []netlink.Rule
+	masqIPv4, err := udng.getV4MasqueradeIP()
+	if err != nil {
+		return nil, err
+	}
+	if masqIPv4 != nil {
+		masqIPRules = append(masqIPRules, generateIPRuleForMasqIP(masqIPv4.IP, false, uint(vrfTableId)))
+	}
+	masqIPv6, err := udng.getV6MasqueradeIP()
+	if err != nil {
+		return nil, err
+	}
+	if masqIPv6 != nil {
+		masqIPRules = append(masqIPRules, generateIPRuleForMasqIP(masqIPv6.IP, true, uint(vrfTableId)))
+	}
+	return masqIPRules, nil
+}
+
+func generateIPRuleForMasqIP(masqIP net.IP, isIPv6 bool, vrfTableId uint) netlink.Rule {
+	r := *netlink.NewRule()
+	r.Table = int(vrfTableId)
+	r.Priority = UDNMasqueradeIPRulePriority
+	r.Family = netlink.FAMILY_V4
+	if isIPv6 {
+		r.Family = netlink.FAMILY_V6
+	}
+	r.Dst = util.GetIPNetFullMaskFromIP(masqIP)
+	return r
 }

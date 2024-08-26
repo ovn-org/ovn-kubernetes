@@ -13,6 +13,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iprulemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/vrfmanager"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -44,6 +45,8 @@ type nodeNetworkControllerManager struct {
 	vrfManager *vrfmanager.Controller
 	// route manager that creates and manages routes
 	routeManager *routemanager.Controller
+	// iprule manager that creates and manages iprules for all UDNs
+	ruleManager *iprulemanager.Controller
 }
 
 // NewNetworkController create secondary node network controllers for the given NetInfo
@@ -55,7 +58,8 @@ func (ncm *nodeNetworkControllerManager) NewNetworkController(nInfo util.NetInfo
 		if !ok {
 			return nil, fmt.Errorf("unable to deference default node network controller object")
 		}
-		return node.NewSecondaryNodeNetworkController(ncm.newCommonNetworkControllerInfo(), nInfo, ncm.vrfManager, dnnc.Gateway)
+		return node.NewSecondaryNodeNetworkController(ncm.newCommonNetworkControllerInfo(),
+			nInfo, ncm.vrfManager, ncm.ruleManager, dnnc.Gateway)
 	}
 	return nil, fmt.Errorf("topology type %s not supported", topoType)
 }
@@ -127,6 +131,7 @@ func NewNodeNetworkControllerManager(ovnClient *util.OVNClientset, wf factory.No
 	}
 	if util.IsNetworkSegmentationSupportEnabled() {
 		ncm.vrfManager = vrfmanager.NewController(ncm.routeManager)
+		ncm.ruleManager = iprulemanager.NewController(config.IPv4Mode, config.IPv6Mode)
 	}
 	if err != nil {
 		return nil, err
@@ -209,6 +214,20 @@ func (ncm *nodeNetworkControllerManager) Start(ctx context.Context) (err error) 
 		}
 	}
 
+	if ncm.ruleManager != nil {
+		// Let's create rule manager that will manage rules on the vrfs for all UDNs
+		ncm.wg.Add(1)
+		go func() {
+			defer ncm.wg.Done()
+			ncm.ruleManager.Run(ncm.stopChan, 5*time.Minute)
+		}()
+		// Tell rule manager that we want to fully own all rules at a particular priority.
+		// Any rules created with this priority that we do not recognize it, will be
+		// removed by relevant manager.
+		if err := ncm.ruleManager.OwnPriority(node.UDNMasqueradeIPRulePriority); err != nil {
+			return fmt.Errorf("failed to own priority %d for IP rules: %v", node.UDNMasqueradeIPRulePriority, err)
+		}
+	}
 	return nil
 }
 
