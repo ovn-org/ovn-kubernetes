@@ -1163,5 +1163,6 @@ if [ "$KIND_INSTALL_PLUGINS" == true ]; then
 fi
 if [ "$KIND_INSTALL_KUBEVIRT" == true ]; then
   install_kubevirt
+  deploy_kubevirt_binding
   install_kubevirt_ipam_controller
 fi
