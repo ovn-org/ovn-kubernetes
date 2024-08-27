@@ -225,7 +225,10 @@ func TestSyncServices(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Error creating UDNNetInfo: %v", err)
 	}
-
+	l2UDN, err := getSampleUDNNetInfo(ns, "layer2")
+	if err != nil {
+		t.Fatalf("Error creating UDNNetInfo: %v", err)
+	}
 	// define node configs
 	nodeAInfo := getNodeInfo(nodeA, []string{nodeAHostAddress}, nil)
 	nodeBInfo := getNodeInfo(nodeB, []string{nodeBHostAddress}, nil)
@@ -339,8 +342,8 @@ func TestSyncServices(t *testing.T) {
 					},
 					expectedDb: []libovsdbtest.TestData{
 						&nbdb.LoadBalancer{
-							UUID:     loadBalancerClusterWideTCPServiceName(ns, serviceName),
-							Name:     loadBalancerClusterWideTCPServiceName(ns, serviceName),
+							UUID:     clusterWideTCPServiceLoadBalancerNameForNetwork(ns, serviceName, l3UDN),
+							Name:     clusterWideTCPServiceLoadBalancerNameForNetwork(ns, serviceName, l3UDN),
 							Options:  servicesOptions(),
 							Protocol: &nbdb.LoadBalancerProtocolTCP,
 							Vips: map[string]string{
@@ -361,9 +364,59 @@ func TestSyncServices(t *testing.T) {
 						lbGroup(types.ClusterLBGroupName),
 						lbGroup(types.ClusterSwitchLBGroupName),
 						lbGroup(types.ClusterRouterLBGroupName),
-						lbGroupForNetwork(types.ClusterLBGroupName, l3UDN, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
+						lbGroupForNetwork(types.ClusterLBGroupName, l3UDN, clusterWideTCPServiceLoadBalancerNameForNetwork(ns, serviceName, l3UDN)),
 						lbGroupForNetwork(types.ClusterSwitchLBGroupName, l3UDN),
 						lbGroupForNetwork(types.ClusterRouterLBGroupName, l3UDN),
+
+						nodeIPTemplate(nodeAInfo),
+						nodeIPTemplate(nodeBInfo),
+					},
+				},
+				{
+					netInfo: l2UDN,
+					initialDb: []libovsdbtest.TestData{
+						nodeLogicalSwitch(nodeA, initialLsGroups),
+						nodeLogicalSwitch(nodeB, initialLsGroups),
+						nodeLogicalSwitchForNetwork("", initialLsGroups, l2UDN),
+
+						nodeLogicalRouter(nodeA, initialLrGroups),
+						nodeLogicalRouter(nodeB, initialLrGroups),
+						nodeLogicalRouterForNetwork(nodeA, initialLrGroups, l2UDN),
+						nodeLogicalRouterForNetwork(nodeB, initialLrGroups, l2UDN),
+
+						lbGroup(types.ClusterLBGroupName),
+						lbGroup(types.ClusterSwitchLBGroupName),
+						lbGroup(types.ClusterRouterLBGroupName),
+						lbGroupForNetwork(types.ClusterLBGroupName, l2UDN),
+						lbGroupForNetwork(types.ClusterSwitchLBGroupName, l2UDN),
+						lbGroupForNetwork(types.ClusterRouterLBGroupName, l2UDN),
+					},
+					expectedDb: []libovsdbtest.TestData{
+						&nbdb.LoadBalancer{
+							UUID:     clusterWideTCPServiceLoadBalancerNameForNetwork(ns, serviceName, l2UDN),
+							Name:     clusterWideTCPServiceLoadBalancerNameForNetwork(ns, serviceName, l2UDN),
+							Options:  servicesOptions(),
+							Protocol: &nbdb.LoadBalancerProtocolTCP,
+							Vips: map[string]string{
+								IPAndPort(serviceClusterIP, servicePort): "",
+							},
+							ExternalIDs: loadBalancerExternalIDsForNetwork(namespacedServiceName(ns, serviceName), l2UDN.GetNetworkName()),
+						},
+						nodeLogicalSwitch(nodeA, initialLsGroups),
+						nodeLogicalSwitch(nodeB, initialLsGroups),
+						nodeLogicalSwitchForNetwork("", initialLsGroups, l2UDN),
+
+						nodeLogicalRouter(nodeA, initialLrGroups),
+						nodeLogicalRouter(nodeB, initialLrGroups),
+						nodeLogicalRouterForNetwork(nodeA, initialLrGroups, l2UDN),
+						nodeLogicalRouterForNetwork(nodeB, initialLrGroups, l2UDN),
+
+						lbGroup(types.ClusterLBGroupName),
+						lbGroup(types.ClusterSwitchLBGroupName),
+						lbGroup(types.ClusterRouterLBGroupName),
+						lbGroupForNetwork(types.ClusterLBGroupName, l2UDN, clusterWideTCPServiceLoadBalancerNameForNetwork(ns, serviceName, l2UDN)),
+						lbGroupForNetwork(types.ClusterSwitchLBGroupName, l2UDN),
+						lbGroupForNetwork(types.ClusterRouterLBGroupName, l2UDN),
 
 						nodeIPTemplate(nodeAInfo),
 						nodeIPTemplate(nodeBInfo),
@@ -453,8 +506,8 @@ func TestSyncServices(t *testing.T) {
 					netInfo: l3UDN,
 					initialDb: []libovsdbtest.TestData{
 						&nbdb.LoadBalancer{
-							UUID:     loadBalancerClusterWideTCPServiceName(ns, serviceName),
-							Name:     loadBalancerClusterWideTCPServiceName(ns, serviceName),
+							UUID:     clusterWideTCPServiceLoadBalancerNameForNetwork(ns, serviceName, l3UDN),
+							Name:     clusterWideTCPServiceLoadBalancerNameForNetwork(ns, serviceName, l3UDN),
 							Options:  servicesOptions(),
 							Protocol: &nbdb.LoadBalancerProtocolTCP,
 							Vips: map[string]string{
@@ -483,8 +536,8 @@ func TestSyncServices(t *testing.T) {
 					},
 					expectedDb: []libovsdbtest.TestData{
 						&nbdb.LoadBalancer{
-							UUID:     loadBalancerClusterWideTCPServiceName(ns, serviceName),
-							Name:     loadBalancerClusterWideTCPServiceName(ns, serviceName),
+							UUID:     clusterWideTCPServiceLoadBalancerNameForNetwork(ns, serviceName, l3UDN),
+							Name:     clusterWideTCPServiceLoadBalancerNameForNetwork(ns, serviceName, l3UDN),
 							Options:  servicesOptions(),
 							Protocol: &nbdb.LoadBalancerProtocolTCP,
 							Vips: map[string]string{
@@ -507,9 +560,71 @@ func TestSyncServices(t *testing.T) {
 						lbGroup(types.ClusterLBGroupName),
 						lbGroup(types.ClusterSwitchLBGroupName),
 						lbGroup(types.ClusterRouterLBGroupName),
-						lbGroupForNetwork(types.ClusterLBGroupName, l3UDN, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
+						lbGroupForNetwork(types.ClusterLBGroupName, l3UDN, clusterWideTCPServiceLoadBalancerNameForNetwork(ns, serviceName, l3UDN)),
 						lbGroupForNetwork(types.ClusterSwitchLBGroupName, l3UDN),
 						lbGroupForNetwork(types.ClusterRouterLBGroupName, l3UDN),
+
+						nodeIPTemplate(nodeAInfo),
+						nodeIPTemplate(nodeBInfo),
+					},
+				},
+				{
+					netInfo: l2UDN,
+					initialDb: []libovsdbtest.TestData{
+						&nbdb.LoadBalancer{
+							UUID:     clusterWideTCPServiceLoadBalancerNameForNetwork(ns, serviceName, l2UDN),
+							Name:     clusterWideTCPServiceLoadBalancerNameForNetwork(ns, serviceName, l2UDN),
+							Options:  servicesOptions(),
+							Protocol: &nbdb.LoadBalancerProtocolTCP,
+							Vips: map[string]string{
+								"192.168.0.1:6443": "",
+							},
+							ExternalIDs: loadBalancerExternalIDsForNetwork(namespacedServiceName(ns, serviceName), l2UDN.GetNetworkName()),
+						},
+						nodeLogicalSwitch(nodeA, initialLsGroups),
+						nodeLogicalSwitch(nodeB, initialLsGroups),
+						nodeLogicalSwitchForNetwork("", initialLsGroups, l2UDN),
+
+						nodeLogicalRouter(nodeA, initialLrGroups),
+						nodeLogicalRouter(nodeB, initialLrGroups),
+						nodeLogicalRouterForNetwork(nodeA, initialLrGroups, l2UDN, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
+						nodeLogicalRouterForNetwork(nodeB, initialLrGroups, l2UDN, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
+						nodeLogicalRouterForNetwork("node-c", []string{}, l2UDN, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
+
+						lbGroup(types.ClusterLBGroupName),
+						lbGroup(types.ClusterSwitchLBGroupName),
+						lbGroup(types.ClusterRouterLBGroupName),
+						lbGroupForNetwork(types.ClusterLBGroupName, l2UDN),
+						lbGroupForNetwork(types.ClusterSwitchLBGroupName, l2UDN),
+						lbGroupForNetwork(types.ClusterRouterLBGroupName, l2UDN),
+					},
+					expectedDb: []libovsdbtest.TestData{
+						&nbdb.LoadBalancer{
+							UUID:     clusterWideTCPServiceLoadBalancerNameForNetwork(ns, serviceName, l2UDN),
+							Name:     clusterWideTCPServiceLoadBalancerNameForNetwork(ns, serviceName, l2UDN),
+							Options:  servicesOptions(),
+							Protocol: &nbdb.LoadBalancerProtocolTCP,
+							Vips: map[string]string{
+								IPAndPort(serviceClusterIP, servicePort): "",
+							},
+							ExternalIDs: loadBalancerExternalIDsForNetwork(namespacedServiceName(ns, serviceName), l2UDN.GetNetworkName()),
+						},
+						nodeLogicalSwitch(nodeA, initialLsGroups),
+						nodeLogicalSwitch(nodeB, initialLsGroups),
+						nodeLogicalSwitchForNetwork("", initialLsGroups, l2UDN),
+
+						nodeLogicalRouter(nodeA, initialLrGroups),
+						nodeLogicalRouter(nodeB, initialLrGroups),
+						nodeLogicalRouterForNetwork(nodeA, initialLrGroups, l2UDN),
+						nodeLogicalRouterForNetwork(nodeB, initialLrGroups, l2UDN),
+						nodeLogicalRouterForNetwork("node-c", []string{}, l2UDN),
+
+						lbGroup(types.ClusterLBGroupName),
+						lbGroup(types.ClusterSwitchLBGroupName),
+						lbGroup(types.ClusterRouterLBGroupName),
+						lbGroupForNetwork(types.ClusterLBGroupName, l2UDN, clusterWideTCPServiceLoadBalancerNameForNetwork(ns, serviceName, l2UDN)),
+						lbGroupForNetwork(types.ClusterSwitchLBGroupName, l2UDN),
+						lbGroupForNetwork(types.ClusterRouterLBGroupName, l2UDN),
 
 						nodeIPTemplate(nodeAInfo),
 						nodeIPTemplate(nodeBInfo),
@@ -617,8 +732,8 @@ func TestSyncServices(t *testing.T) {
 					netInfo: l3UDN,
 					initialDb: []libovsdbtest.TestData{
 						&nbdb.LoadBalancer{
-							UUID:     loadBalancerClusterWideTCPServiceName(ns, serviceName),
-							Name:     loadBalancerClusterWideTCPServiceName(ns, serviceName),
+							UUID:     clusterWideTCPServiceLoadBalancerNameForNetwork(ns, serviceName, l3UDN),
+							Name:     clusterWideTCPServiceLoadBalancerNameForNetwork(ns, serviceName, l3UDN),
 							Options:  servicesOptions(),
 							Protocol: &nbdb.LoadBalancerProtocolTCP,
 							Vips: map[string]string{
@@ -628,13 +743,13 @@ func TestSyncServices(t *testing.T) {
 						},
 						nodeLogicalSwitch(nodeA, initialLsGroups),
 						nodeLogicalSwitch(nodeB, initialLsGroups),
-						nodeLogicalSwitchForNetwork(nodeA, initialLsGroups, l3UDN, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
-						nodeLogicalSwitchForNetwork(nodeB, initialLsGroups, l3UDN, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
+						nodeLogicalSwitchForNetwork(nodeA, initialLsGroups, l3UDN, clusterWideTCPServiceLoadBalancerNameForNetwork(ns, serviceName, l3UDN)),
+						nodeLogicalSwitchForNetwork(nodeB, initialLsGroups, l3UDN, clusterWideTCPServiceLoadBalancerNameForNetwork(ns, serviceName, l3UDN)),
 
 						nodeLogicalRouter(nodeA, initialLrGroups),
 						nodeLogicalRouter(nodeB, initialLrGroups),
-						nodeLogicalRouterForNetwork(nodeA, initialLrGroups, l3UDN, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
-						nodeLogicalRouterForNetwork(nodeB, initialLrGroups, l3UDN, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
+						nodeLogicalRouterForNetwork(nodeA, initialLrGroups, l3UDN, clusterWideTCPServiceLoadBalancerNameForNetwork(ns, serviceName, l3UDN)),
+						nodeLogicalRouterForNetwork(nodeB, initialLrGroups, l3UDN, clusterWideTCPServiceLoadBalancerNameForNetwork(ns, serviceName, l3UDN)),
 
 						lbGroup(types.ClusterLBGroupName),
 						lbGroup(types.ClusterSwitchLBGroupName),
@@ -645,8 +760,8 @@ func TestSyncServices(t *testing.T) {
 					},
 					expectedDb: []libovsdbtest.TestData{
 						&nbdb.LoadBalancer{
-							UUID:     loadBalancerClusterWideTCPServiceName(ns, serviceName),
-							Name:     loadBalancerClusterWideTCPServiceName(ns, serviceName),
+							UUID:     clusterWideTCPServiceLoadBalancerNameForNetwork(ns, serviceName, l3UDN),
+							Name:     clusterWideTCPServiceLoadBalancerNameForNetwork(ns, serviceName, l3UDN),
 							Options:  servicesOptions(),
 							Protocol: &nbdb.LoadBalancerProtocolTCP,
 							Vips: map[string]string{
@@ -669,9 +784,71 @@ func TestSyncServices(t *testing.T) {
 						lbGroup(types.ClusterLBGroupName),
 						lbGroup(types.ClusterSwitchLBGroupName),
 						lbGroup(types.ClusterRouterLBGroupName),
-						lbGroupForNetwork(types.ClusterLBGroupName, l3UDN, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
-						lbGroupForNetwork(types.ClusterSwitchLBGroupName, l3UDN, nodeMergedTemplateLoadBalancerName(ns, serviceName, v1.IPv4Protocol)),
-						lbGroupForNetwork(types.ClusterRouterLBGroupName, l3UDN, nodeMergedTemplateLoadBalancerName(ns, serviceName, v1.IPv4Protocol)),
+						lbGroupForNetwork(types.ClusterLBGroupName, l3UDN, clusterWideTCPServiceLoadBalancerNameForNetwork(ns, serviceName, l3UDN)),
+						lbGroupForNetwork(types.ClusterSwitchLBGroupName, l3UDN, nodeMergedTemplateLoadBalancerNameForNetwork(ns, serviceName, v1.IPv4Protocol, l3UDN)),
+						lbGroupForNetwork(types.ClusterRouterLBGroupName, l3UDN, nodeMergedTemplateLoadBalancerNameForNetwork(ns, serviceName, v1.IPv4Protocol, l3UDN)),
+
+						nodeIPTemplate(nodeAInfo),
+						nodeIPTemplate(nodeBInfo),
+					},
+				},
+				{
+					netInfo: l2UDN,
+					initialDb: []libovsdbtest.TestData{
+						&nbdb.LoadBalancer{
+							UUID:     clusterWideTCPServiceLoadBalancerNameForNetwork(ns, serviceName, l2UDN),
+							Name:     clusterWideTCPServiceLoadBalancerNameForNetwork(ns, serviceName, l2UDN),
+							Options:  servicesOptions(),
+							Protocol: &nbdb.LoadBalancerProtocolTCP,
+							Vips: map[string]string{
+								"192.168.0.1:6443": "",
+							},
+							ExternalIDs: loadBalancerExternalIDsForNetwork(namespacedServiceName(ns, serviceName), l2UDN.GetNetworkName()),
+						},
+						nodeLogicalSwitch(nodeA, initialLsGroups),
+						nodeLogicalSwitch(nodeB, initialLsGroups),
+						nodeLogicalSwitchForNetwork("", initialLsGroups, l2UDN, clusterWideTCPServiceLoadBalancerNameForNetwork(ns, serviceName, l2UDN)),
+
+						nodeLogicalRouter(nodeA, initialLrGroups),
+						nodeLogicalRouter(nodeB, initialLrGroups),
+						nodeLogicalRouterForNetwork(nodeA, initialLrGroups, l2UDN, clusterWideTCPServiceLoadBalancerNameForNetwork(ns, serviceName, l2UDN)),
+						nodeLogicalRouterForNetwork(nodeB, initialLrGroups, l2UDN, clusterWideTCPServiceLoadBalancerNameForNetwork(ns, serviceName, l2UDN)),
+
+						lbGroup(types.ClusterLBGroupName),
+						lbGroup(types.ClusterSwitchLBGroupName),
+						lbGroup(types.ClusterRouterLBGroupName),
+						lbGroupForNetwork(types.ClusterLBGroupName, l2UDN),
+						lbGroupForNetwork(types.ClusterSwitchLBGroupName, l2UDN),
+						lbGroupForNetwork(types.ClusterRouterLBGroupName, l2UDN),
+					},
+					expectedDb: []libovsdbtest.TestData{
+						&nbdb.LoadBalancer{
+							UUID:     clusterWideTCPServiceLoadBalancerNameForNetwork(ns, serviceName, l2UDN),
+							Name:     clusterWideTCPServiceLoadBalancerNameForNetwork(ns, serviceName, l2UDN),
+							Options:  servicesOptions(),
+							Protocol: &nbdb.LoadBalancerProtocolTCP,
+							Vips: map[string]string{
+								IPAndPort(serviceClusterIP, servicePort): formatEndpoints(outPort, nodeAEndpoint, nodeBEndpointIP),
+							},
+							ExternalIDs: loadBalancerExternalIDsForNetwork(namespacedServiceName(ns, serviceName), l2UDN.GetNetworkName()),
+						},
+						nodeMergedTemplateLoadBalancerForNetwork(nodePort, serviceName, ns, outPort, l2UDN, nodeAEndpoint, nodeBEndpointIP),
+
+						nodeLogicalSwitch(nodeA, initialLsGroups),
+						nodeLogicalSwitch(nodeB, initialLsGroups),
+						nodeLogicalSwitchForNetwork("", initialLsGroups, l2UDN),
+
+						nodeLogicalRouter(nodeA, initialLrGroups),
+						nodeLogicalRouter(nodeB, initialLrGroups),
+						nodeLogicalRouterForNetwork(nodeA, initialLrGroups, l2UDN),
+						nodeLogicalRouterForNetwork(nodeB, initialLrGroups, l2UDN),
+
+						lbGroup(types.ClusterLBGroupName),
+						lbGroup(types.ClusterSwitchLBGroupName),
+						lbGroup(types.ClusterRouterLBGroupName),
+						lbGroupForNetwork(types.ClusterLBGroupName, l2UDN, clusterWideTCPServiceLoadBalancerNameForNetwork(ns, serviceName, l2UDN)),
+						lbGroupForNetwork(types.ClusterSwitchLBGroupName, l2UDN, nodeMergedTemplateLoadBalancerNameForNetwork(ns, serviceName, v1.IPv4Protocol, l2UDN)),
+						lbGroupForNetwork(types.ClusterRouterLBGroupName, l2UDN, nodeMergedTemplateLoadBalancerNameForNetwork(ns, serviceName, v1.IPv4Protocol, l2UDN)),
 
 						nodeIPTemplate(nodeAInfo),
 						nodeIPTemplate(nodeBInfo),
@@ -801,8 +978,8 @@ func TestSyncServices(t *testing.T) {
 					netInfo: l3UDN,
 					initialDb: []libovsdbtest.TestData{
 						&nbdb.LoadBalancer{
-							UUID:     loadBalancerClusterWideTCPServiceName(ns, serviceName),
-							Name:     loadBalancerClusterWideTCPServiceName(ns, serviceName),
+							UUID:     clusterWideTCPServiceLoadBalancerNameForNetwork(ns, serviceName, l3UDN),
+							Name:     clusterWideTCPServiceLoadBalancerNameForNetwork(ns, serviceName, l3UDN),
 							Options:  servicesOptions(),
 							Protocol: &nbdb.LoadBalancerProtocolTCP,
 							Vips: map[string]string{
@@ -823,14 +1000,14 @@ func TestSyncServices(t *testing.T) {
 						lbGroup(types.ClusterLBGroupName),
 						lbGroup(types.ClusterSwitchLBGroupName),
 						lbGroup(types.ClusterRouterLBGroupName),
-						lbGroupForNetwork(types.ClusterLBGroupName, l3UDN, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
+						lbGroupForNetwork(types.ClusterLBGroupName, l3UDN, clusterWideTCPServiceLoadBalancerNameForNetwork(ns, serviceName, l3UDN)),
 						lbGroupForNetwork(types.ClusterSwitchLBGroupName, l3UDN),
 						lbGroupForNetwork(types.ClusterRouterLBGroupName, l3UDN),
 					},
 					expectedDb: []libovsdbtest.TestData{
 						&nbdb.LoadBalancer{
-							UUID:     loadBalancerClusterWideTCPServiceName(ns, serviceName),
-							Name:     loadBalancerClusterWideTCPServiceName(ns, serviceName),
+							UUID:     clusterWideTCPServiceLoadBalancerNameForNetwork(ns, serviceName, l3UDN),
+							Name:     clusterWideTCPServiceLoadBalancerNameForNetwork(ns, serviceName, l3UDN),
 							Options:  servicesOptions(),
 							Protocol: &nbdb.LoadBalancerProtocolTCP,
 							Vips: map[string]string{
@@ -852,17 +1029,17 @@ func TestSyncServices(t *testing.T) {
 						lbGroup(types.ClusterLBGroupName),
 						lbGroup(types.ClusterSwitchLBGroupName),
 						lbGroup(types.ClusterRouterLBGroupName),
-						lbGroupForNetwork(types.ClusterLBGroupName, l3UDN, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
-						lbGroupForNetwork(types.ClusterSwitchLBGroupName, l3UDN, nodeMergedTemplateLoadBalancerName(ns, serviceName, v1.IPv4Protocol)),
-						lbGroupForNetwork(types.ClusterRouterLBGroupName, l3UDN, nodeMergedTemplateLoadBalancerName(ns, serviceName, v1.IPv4Protocol)),
+						lbGroupForNetwork(types.ClusterLBGroupName, l3UDN, clusterWideTCPServiceLoadBalancerNameForNetwork(ns, serviceName, l3UDN)),
+						lbGroupForNetwork(types.ClusterSwitchLBGroupName, l3UDN, nodeMergedTemplateLoadBalancerNameForNetwork(ns, serviceName, v1.IPv4Protocol, l3UDN)),
+						lbGroupForNetwork(types.ClusterRouterLBGroupName, l3UDN, nodeMergedTemplateLoadBalancerNameForNetwork(ns, serviceName, v1.IPv4Protocol, l3UDN)),
 
 						nodeIPTemplate(nodeAInfo),
 						nodeIPTemplate(nodeBInfo),
 					},
 					dbStateAfterDeleting: []libovsdbtest.TestData{
 						&nbdb.LoadBalancer{
-							UUID:     loadBalancerClusterWideTCPServiceName(ns, serviceName),
-							Name:     loadBalancerClusterWideTCPServiceName(ns, serviceName),
+							UUID:     clusterWideTCPServiceLoadBalancerNameForNetwork(ns, serviceName, l3UDN),
+							Name:     clusterWideTCPServiceLoadBalancerNameForNetwork(ns, serviceName, l3UDN),
 							Options:  servicesOptions(),
 							Protocol: &nbdb.LoadBalancerProtocolTCP,
 							Vips: map[string]string{
@@ -884,9 +1061,101 @@ func TestSyncServices(t *testing.T) {
 						lbGroup(types.ClusterLBGroupName),
 						lbGroup(types.ClusterSwitchLBGroupName),
 						lbGroup(types.ClusterRouterLBGroupName),
-						lbGroupForNetwork(types.ClusterLBGroupName, l3UDN, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
-						lbGroupForNetwork(types.ClusterSwitchLBGroupName, l3UDN, nodeMergedTemplateLoadBalancerName(ns, serviceName, v1.IPv4Protocol)),
-						lbGroupForNetwork(types.ClusterRouterLBGroupName, l3UDN, nodeMergedTemplateLoadBalancerName(ns, serviceName, v1.IPv4Protocol)),
+						lbGroupForNetwork(types.ClusterLBGroupName, l3UDN, clusterWideTCPServiceLoadBalancerNameForNetwork(ns, serviceName, l3UDN)),
+						lbGroupForNetwork(types.ClusterSwitchLBGroupName, l3UDN, nodeMergedTemplateLoadBalancerNameForNetwork(ns, serviceName, v1.IPv4Protocol, l3UDN)),
+						lbGroupForNetwork(types.ClusterRouterLBGroupName, l3UDN, nodeMergedTemplateLoadBalancerNameForNetwork(ns, serviceName, v1.IPv4Protocol, l3UDN)),
+
+						nodeIPTemplate(nodeAInfo),
+						nodeIPTemplate(nodeBInfo),
+					},
+				},
+				{
+					netInfo: l2UDN,
+					initialDb: []libovsdbtest.TestData{
+						&nbdb.LoadBalancer{
+							UUID:     clusterWideTCPServiceLoadBalancerNameForNetwork(ns, serviceName, l2UDN),
+							Name:     clusterWideTCPServiceLoadBalancerNameForNetwork(ns, serviceName, l2UDN),
+							Options:  servicesOptions(),
+							Protocol: &nbdb.LoadBalancerProtocolTCP,
+							Vips: map[string]string{
+								"192.168.0.1:6443": "",
+							},
+							ExternalIDs: loadBalancerExternalIDsForNetwork(namespacedServiceName(ns, serviceName), l2UDN.GetNetworkName()),
+						},
+						nodeLogicalSwitch(nodeA, initialLsGroups),
+						nodeLogicalSwitch(nodeB, initialLsGroups),
+						nodeLogicalSwitchForNetwork("", initialLsGroups, l2UDN),
+
+						nodeLogicalRouter(nodeA, initialLrGroups),
+						nodeLogicalRouter(nodeB, initialLrGroups),
+						nodeLogicalRouterForNetwork(nodeA, initialLrGroups, l2UDN),
+						nodeLogicalRouterForNetwork(nodeB, initialLrGroups, l2UDN),
+
+						lbGroup(types.ClusterLBGroupName),
+						lbGroup(types.ClusterSwitchLBGroupName),
+						lbGroup(types.ClusterRouterLBGroupName),
+						lbGroupForNetwork(types.ClusterLBGroupName, l2UDN, clusterWideTCPServiceLoadBalancerNameForNetwork(ns, serviceName, l2UDN)),
+						lbGroupForNetwork(types.ClusterSwitchLBGroupName, l2UDN),
+						lbGroupForNetwork(types.ClusterRouterLBGroupName, l2UDN),
+					},
+					expectedDb: []libovsdbtest.TestData{
+						&nbdb.LoadBalancer{
+							UUID:     clusterWideTCPServiceLoadBalancerNameForNetwork(ns, serviceName, l2UDN),
+							Name:     clusterWideTCPServiceLoadBalancerNameForNetwork(ns, serviceName, l2UDN),
+							Options:  servicesOptions(),
+							Protocol: &nbdb.LoadBalancerProtocolTCP,
+							Vips: map[string]string{
+								IPAndPort(serviceClusterIP, servicePort): formatEndpoints(outPort, nodeAEndpoint, nodeBEndpointIP),
+							},
+							ExternalIDs: loadBalancerExternalIDsForNetwork(namespacedServiceName(ns, serviceName), l2UDN.GetNetworkName()),
+						},
+						nodeMergedTemplateLoadBalancerForNetwork(nodePort, serviceName, ns, outPort, l2UDN, nodeAEndpoint, nodeBEndpointIP),
+						nodeLogicalSwitch(nodeA, initialLsGroups),
+						nodeLogicalSwitch(nodeB, initialLsGroups),
+						nodeLogicalSwitchForNetwork("", initialLsGroups, l2UDN),
+
+						nodeLogicalRouter(nodeA, initialLrGroups),
+						nodeLogicalRouter(nodeB, initialLrGroups),
+						nodeLogicalRouterForNetwork(nodeA, initialLrGroups, l2UDN),
+						nodeLogicalRouterForNetwork(nodeB, initialLrGroups, l2UDN),
+
+						lbGroup(types.ClusterLBGroupName),
+						lbGroup(types.ClusterSwitchLBGroupName),
+						lbGroup(types.ClusterRouterLBGroupName),
+						lbGroupForNetwork(types.ClusterLBGroupName, l2UDN, clusterWideTCPServiceLoadBalancerNameForNetwork(ns, serviceName, l2UDN)),
+						lbGroupForNetwork(types.ClusterSwitchLBGroupName, l2UDN, nodeMergedTemplateLoadBalancerNameForNetwork(ns, serviceName, v1.IPv4Protocol, l2UDN)),
+						lbGroupForNetwork(types.ClusterRouterLBGroupName, l2UDN, nodeMergedTemplateLoadBalancerNameForNetwork(ns, serviceName, v1.IPv4Protocol, l2UDN)),
+
+						nodeIPTemplate(nodeAInfo),
+						nodeIPTemplate(nodeBInfo),
+					},
+					dbStateAfterDeleting: []libovsdbtest.TestData{
+						&nbdb.LoadBalancer{
+							UUID:     clusterWideTCPServiceLoadBalancerNameForNetwork(ns, serviceName, l2UDN),
+							Name:     clusterWideTCPServiceLoadBalancerNameForNetwork(ns, serviceName, l2UDN),
+							Options:  servicesOptions(),
+							Protocol: &nbdb.LoadBalancerProtocolTCP,
+							Vips: map[string]string{
+								IPAndPort(serviceClusterIP, servicePort): formatEndpoints(outPort, nodeAEndpoint, nodeBEndpointIP),
+							},
+							ExternalIDs: loadBalancerExternalIDsForNetwork(namespacedServiceName(ns, serviceName), l2UDN.GetNetworkName()),
+						},
+						nodeMergedTemplateLoadBalancerForNetwork(nodePort, serviceName, ns, outPort, l2UDN, nodeAEndpoint, nodeBEndpointIP),
+						nodeLogicalSwitch(nodeA, initialLsGroups),
+						nodeLogicalSwitch(nodeB, initialLsGroups),
+						nodeLogicalSwitchForNetwork("", initialLsGroups, l2UDN),
+
+						nodeLogicalRouter(nodeA, initialLrGroups),
+						nodeLogicalRouter(nodeB, initialLrGroups),
+						nodeLogicalRouterForNetwork(nodeA, initialLrGroups, l2UDN),
+						nodeLogicalRouterForNetwork(nodeB, initialLrGroups, l2UDN),
+
+						lbGroup(types.ClusterLBGroupName),
+						lbGroup(types.ClusterSwitchLBGroupName),
+						lbGroup(types.ClusterRouterLBGroupName),
+						lbGroupForNetwork(types.ClusterLBGroupName, l2UDN, clusterWideTCPServiceLoadBalancerNameForNetwork(ns, serviceName, l2UDN)),
+						lbGroupForNetwork(types.ClusterSwitchLBGroupName, l2UDN, nodeMergedTemplateLoadBalancerNameForNetwork(ns, serviceName, v1.IPv4Protocol, l2UDN)),
+						lbGroupForNetwork(types.ClusterRouterLBGroupName, l2UDN, nodeMergedTemplateLoadBalancerNameForNetwork(ns, serviceName, v1.IPv4Protocol, l2UDN)),
 
 						nodeIPTemplate(nodeAInfo),
 						nodeIPTemplate(nodeBInfo),
@@ -1028,8 +1297,8 @@ func TestSyncServices(t *testing.T) {
 					},
 					expectedDb: []libovsdbtest.TestData{
 						&nbdb.LoadBalancer{
-							UUID:     loadBalancerClusterWideTCPServiceName(ns, serviceName),
-							Name:     loadBalancerClusterWideTCPServiceName(ns, serviceName),
+							UUID:     clusterWideTCPServiceLoadBalancerNameForNetwork(ns, serviceName, l3UDN),
+							Name:     clusterWideTCPServiceLoadBalancerNameForNetwork(ns, serviceName, l3UDN),
 							Options:  servicesOptions(),
 							Protocol: &nbdb.LoadBalancerProtocolTCP,
 							Vips: map[string]string{
@@ -1039,8 +1308,8 @@ func TestSyncServices(t *testing.T) {
 							ExternalIDs: loadBalancerExternalIDsForNetwork(namespacedServiceName(ns, serviceName), l3UDN.GetNetworkName()),
 						},
 						&nbdb.LoadBalancer{
-							UUID:     nodeMergedTemplateLoadBalancerName(ns, serviceName, v1.IPv4Protocol),
-							Name:     nodeMergedTemplateLoadBalancerName(ns, serviceName, v1.IPv4Protocol),
+							UUID:     nodeMergedTemplateLoadBalancerNameForNetwork(ns, serviceName, v1.IPv4Protocol, l3UDN),
+							Name:     nodeMergedTemplateLoadBalancerNameForNetwork(ns, serviceName, v1.IPv4Protocol, l3UDN),
 							Options:  templateServicesOptions(),
 							Protocol: &nbdb.LoadBalancerProtocolTCP,
 							Vips: map[string]string{
@@ -1051,8 +1320,8 @@ func TestSyncServices(t *testing.T) {
 							ExternalIDs: loadBalancerExternalIDsForNetwork(namespacedServiceName(ns, serviceName), l3UDN.GetNetworkName()),
 						},
 						&nbdb.LoadBalancer{
-							UUID:     nodeMergedTemplateLoadBalancerName(ns, serviceName, v1.IPv6Protocol),
-							Name:     nodeMergedTemplateLoadBalancerName(ns, serviceName, v1.IPv6Protocol),
+							UUID:     nodeMergedTemplateLoadBalancerNameForNetwork(ns, serviceName, v1.IPv6Protocol, l3UDN),
+							Name:     nodeMergedTemplateLoadBalancerNameForNetwork(ns, serviceName, v1.IPv6Protocol, l3UDN),
 							Options:  templateServicesOptionsV6(),
 							Protocol: &nbdb.LoadBalancerProtocolTCP,
 							Vips: map[string]string{
@@ -1072,15 +1341,100 @@ func TestSyncServices(t *testing.T) {
 						lbGroup(types.ClusterSwitchLBGroupName),
 						lbGroup(types.ClusterRouterLBGroupName),
 
-						lbGroupForNetwork(types.ClusterLBGroupName, l3UDN, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
+						lbGroupForNetwork(types.ClusterLBGroupName, l3UDN, clusterWideTCPServiceLoadBalancerNameForNetwork(ns, serviceName, l3UDN)),
 						lbGroupForNetwork(types.ClusterSwitchLBGroupName,
 							l3UDN,
-							nodeMergedTemplateLoadBalancerName(ns, serviceName, v1.IPv4Protocol),
-							nodeMergedTemplateLoadBalancerName(ns, serviceName, v1.IPv6Protocol)),
+							nodeMergedTemplateLoadBalancerNameForNetwork(ns, serviceName, v1.IPv4Protocol, l3UDN),
+							nodeMergedTemplateLoadBalancerNameForNetwork(ns, serviceName, v1.IPv6Protocol, l3UDN)),
 						lbGroupForNetwork(types.ClusterRouterLBGroupName,
 							l3UDN,
-							nodeMergedTemplateLoadBalancerName(ns, serviceName, v1.IPv4Protocol),
-							nodeMergedTemplateLoadBalancerName(ns, serviceName, v1.IPv6Protocol)),
+							nodeMergedTemplateLoadBalancerNameForNetwork(ns, serviceName, v1.IPv4Protocol, l3UDN),
+							nodeMergedTemplateLoadBalancerNameForNetwork(ns, serviceName, v1.IPv6Protocol, l3UDN)),
+
+						&nbdb.ChassisTemplateVar{
+							UUID: nodeAInfo.chassisID, Chassis: nodeAInfo.chassisID,
+							Variables: map[string]string{
+								makeLBNodeIPTemplateNamePrefix(v1.IPv4Protocol) + "0": nodeAMultiAddressesV4[0],
+								makeLBNodeIPTemplateNamePrefix(v1.IPv4Protocol) + "1": nodeAMultiAddressesV4[1],
+								makeLBNodeIPTemplateNamePrefix(v1.IPv4Protocol) + "2": nodeAMultiAddressesV4[2],
+
+								makeLBNodeIPTemplateNamePrefix(v1.IPv6Protocol) + "0": nodeAMultiAddressesV6[0],
+								makeLBNodeIPTemplateNamePrefix(v1.IPv6Protocol) + "1": nodeAMultiAddressesV6[1],
+							},
+						},
+					},
+				},
+				{
+					netInfo: l2UDN,
+					initialDb: []libovsdbtest.TestData{
+						nodeLogicalSwitch(nodeA, initialLsGroups),
+						nodeLogicalSwitchForNetwork("", initialLsGroups, l2UDN),
+
+						nodeLogicalRouter(nodeA, initialLrGroups),
+						nodeLogicalRouterForNetwork(nodeA, initialLrGroups, l2UDN),
+
+						lbGroup(types.ClusterLBGroupName),
+						lbGroup(types.ClusterSwitchLBGroupName),
+						lbGroup(types.ClusterRouterLBGroupName),
+						lbGroupForNetwork(types.ClusterLBGroupName, l2UDN),
+						lbGroupForNetwork(types.ClusterSwitchLBGroupName, l2UDN),
+						lbGroupForNetwork(types.ClusterRouterLBGroupName, l2UDN),
+					},
+					expectedDb: []libovsdbtest.TestData{
+						&nbdb.LoadBalancer{
+							UUID:     clusterWideTCPServiceLoadBalancerNameForNetwork(ns, serviceName, l2UDN),
+							Name:     clusterWideTCPServiceLoadBalancerNameForNetwork(ns, serviceName, l2UDN),
+							Options:  servicesOptions(),
+							Protocol: &nbdb.LoadBalancerProtocolTCP,
+							Vips: map[string]string{
+								IPAndPort(serviceClusterIP, servicePort):   formatEndpoints(outPort, nodeAEndpoint, nodeAEndpoint2),
+								IPAndPort(serviceClusterIPv6, servicePort): formatEndpoints(outPort, nodeAEndpointV6, nodeAEndpoint2V6),
+							},
+							ExternalIDs: loadBalancerExternalIDsForNetwork(namespacedServiceName(ns, serviceName), l2UDN.GetNetworkName()),
+						},
+						&nbdb.LoadBalancer{
+							UUID:     nodeMergedTemplateLoadBalancerNameForNetwork(ns, serviceName, v1.IPv4Protocol, l2UDN),
+							Name:     nodeMergedTemplateLoadBalancerNameForNetwork(ns, serviceName, v1.IPv4Protocol, l2UDN),
+							Options:  templateServicesOptions(),
+							Protocol: &nbdb.LoadBalancerProtocolTCP,
+							Vips: map[string]string{
+								"^NODEIP_IPv4_1:30123": formatEndpoints(outPort, nodeAEndpoint, nodeAEndpoint2),
+								"^NODEIP_IPv4_2:30123": formatEndpoints(outPort, nodeAEndpoint, nodeAEndpoint2),
+								"^NODEIP_IPv4_0:30123": formatEndpoints(outPort, nodeAEndpoint, nodeAEndpoint2),
+							},
+							ExternalIDs: loadBalancerExternalIDsForNetwork(namespacedServiceName(ns, serviceName), l2UDN.GetNetworkName()),
+						},
+						&nbdb.LoadBalancer{
+							UUID:     nodeMergedTemplateLoadBalancerNameForNetwork(ns, serviceName, v1.IPv6Protocol, l2UDN),
+							Name:     nodeMergedTemplateLoadBalancerNameForNetwork(ns, serviceName, v1.IPv6Protocol, l2UDN),
+							Options:  templateServicesOptionsV6(),
+							Protocol: &nbdb.LoadBalancerProtocolTCP,
+							Vips: map[string]string{
+								"^NODEIP_IPv6_1:30123": formatEndpoints(outPort, nodeAEndpointV6, nodeAEndpoint2V6),
+								"^NODEIP_IPv6_0:30123": formatEndpoints(outPort, nodeAEndpointV6, nodeAEndpoint2V6),
+							},
+							ExternalIDs: loadBalancerExternalIDsForNetwork(namespacedServiceName(ns, serviceName), l2UDN.GetNetworkName()),
+						},
+
+						nodeLogicalSwitchForNetwork("", initialLsGroups, l2UDN),
+						nodeLogicalRouterForNetwork(nodeAInfo.name, initialLrGroups, l2UDN),
+
+						nodeLogicalSwitch(nodeAInfo.name, initialLsGroups),
+						nodeLogicalRouter(nodeAInfo.name, initialLrGroups),
+
+						lbGroup(types.ClusterLBGroupName),
+						lbGroup(types.ClusterSwitchLBGroupName),
+						lbGroup(types.ClusterRouterLBGroupName),
+
+						lbGroupForNetwork(types.ClusterLBGroupName, l2UDN, clusterWideTCPServiceLoadBalancerNameForNetwork(ns, serviceName, l2UDN)),
+						lbGroupForNetwork(types.ClusterSwitchLBGroupName,
+							l2UDN,
+							nodeMergedTemplateLoadBalancerNameForNetwork(ns, serviceName, v1.IPv4Protocol, l2UDN),
+							nodeMergedTemplateLoadBalancerNameForNetwork(ns, serviceName, v1.IPv6Protocol, l2UDN)),
+						lbGroupForNetwork(types.ClusterRouterLBGroupName,
+							l2UDN,
+							nodeMergedTemplateLoadBalancerNameForNetwork(ns, serviceName, v1.IPv4Protocol, l2UDN),
+							nodeMergedTemplateLoadBalancerNameForNetwork(ns, serviceName, v1.IPv6Protocol, l2UDN)),
 
 						&nbdb.ChassisTemplateVar{
 							UUID: nodeAInfo.chassisID, Chassis: nodeAInfo.chassisID,
@@ -1112,9 +1466,9 @@ func TestSyncServices(t *testing.T) {
 				dbStateAfterDeleting := network.dbStateAfterDeleting
 				if !netInfo.IsDefault() {
 					nodeAInfo.gatewayRouterName = netInfo.GetNetworkScopedGWRouterName(nodeAInfo.gatewayRouterName)
-					nodeAInfo.switchName = netInfo.GetNetworkScopedGWRouterName(nodeAInfo.switchName)
+					nodeAInfo.switchName = netInfo.GetNetworkScopedSwitchName(nodeAInfo.switchName)
 					nodeBInfo.gatewayRouterName = netInfo.GetNetworkScopedGWRouterName(nodeBInfo.gatewayRouterName)
-					nodeBInfo.switchName = netInfo.GetNetworkScopedGWRouterName(nodeBInfo.switchName)
+					nodeBInfo.switchName = netInfo.GetNetworkScopedSwitchName(nodeBInfo.switchName)
 
 				}
 
