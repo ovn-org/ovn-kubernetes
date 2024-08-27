@@ -1164,5 +1164,7 @@ fi
 if [ "$KIND_INSTALL_KUBEVIRT" == true ]; then
   install_kubevirt
   deploy_kubevirt_binding
+  deploy_passt_binary
+
   install_kubevirt_ipam_controller
 fi
