@@ -582,3 +582,24 @@ kubectl_wait_dnsnameresolver_pods() {
   echo "Waiting for pods in dnsnameresolver-operator namespace to become ready (timeout ${timeout})..."
   kubectl wait -n dnsnameresolver-operator --for=condition=ready pods --all --timeout=${timeout}s
 }
+
+deploy_kubevirt_binding() {
+  cat <<EOF | run_kubectl apply -f -
+---
+apiVersion: "k8s.cni.cncf.io/v1"
+kind: NetworkAttachmentDefinition
+metadata:
+  name: primary-udn-kubevirt-binding
+  namespace: default
+spec:
+  config: '{
+  "cniVersion": "1.0.0",
+  "name": "primary-udn-kubevirt-binding",
+  "plugins": [
+    {
+      "type": "network-passt-binding"
+    }
+  ]
+}'
+EOF
+}
