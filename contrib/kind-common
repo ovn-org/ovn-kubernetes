@@ -349,6 +349,11 @@ install_kubevirt() {
             kubectl logs --all-containers=true -n kubevirt $p || true
         done
     fi
+
+    kubectl -n kubevirt patch kubevirt kubevirt --type=json --patch '[{"op":"add","path":"/spec/configuration/developerConfiguration","value":{"featureGates":[]}},{"op":"add","path":"/spec/configuration/developerConfiguration/featureGates/-","value":"NetworkBindingPlugins"}]'
+    
+    local passt_binding_image="quay.io/kubevirt/network-passt-binding:${kubevirt_version}"
+    kubectl -n kubevirt patch kubevirt kubevirt --type=json --patch '[{"op":"add","path":"/spec/configuration/network","value":{}},{"op":"add","path":"/spec/configuration/network/binding","value":{"passt":{"computeResourceOverhead":{"requests":{"memory":"500Mi"}},"migration":{"method":"link-refresh"},"networkAttachmentDefinition":"default/primary-udn-kubevirt-binding","sidecarImage":"'"${passt_binding_image}"'"}}}]'
     
     if [ ! -d "./bin" ]
     then
