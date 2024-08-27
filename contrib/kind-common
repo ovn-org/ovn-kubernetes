@@ -603,3 +603,11 @@ spec:
 }'
 EOF
 }
+
+deploy_passt_binary() {
+  echo "Installing passt-binding-cni-ds ..."
+  local manifest="https://raw.githubusercontent.com/kubevirt/ipam-extensions/main/passt/passt-binding-cni-ds.yaml"
+  run_kubectl apply -f "$manifest"
+
+  run_kubectl rollout status -n kube-system daemonset/passt-binding-cni --timeout 2m
+}
