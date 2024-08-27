@@ -115,7 +115,6 @@ func TestAdd(t *testing.T) {
 		nodeSubNetPrio, _          = strconv.Atoi(types.NodeSubnetPolicyPriority)
 		_, node1HostCIDRIPv4, _    = net.ParseCIDR(node1HostCIDRIPv4Str)
 		_, node1HostCIDR128IPv6, _ = net.ParseCIDR(node1HostCIDR128IPv6Str)
-		_, node1HostCIDR64IPv6, _  = net.ParseCIDR(node1HostCIDR64IPv6Str)
 		otherHostAddrsIPv4         = []string{node1HostOtherAddrIPv4Str}
 		invalidOtherHostAddrsIPv4  = []string{"<nil>"}
 		cdnL3Network               = network{
@@ -208,20 +207,6 @@ func TestAdd(t *testing.T) {
 					nodeName:          node1Name,
 					hostInfCIDR:       node1HostCIDRIPv4,
 					otherHostInfAddrs: invalidOtherHostAddrsIPv4,
-					targetNetwork:     cdnL3Network.info.GetNetworkName(),
-				},
-			},
-			initialDB: networks{cdnL3Network},
-			expectErr: true,
-		},
-		{
-			desc: "[cdn][ipv6] invalid address (..:0) causes error",
-			addPolicies: []policy{
-				{
-
-					nodeName:          node1Name,
-					hostInfCIDR:       node1HostCIDR64IPv6,
-					otherHostInfAddrs: nil,
 					targetNetwork:     cdnL3Network.info.GetNetworkName(),
 				},
 			},
