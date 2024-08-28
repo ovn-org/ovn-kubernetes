@@ -38,7 +38,7 @@ func (pbr *PolicyBasedRoutesManager) Add(nodeName, mgmtPortIP string, hostIfCIDR
 	if mgmtPortIP == "" || net.ParseIP(mgmtPortIP) == nil {
 		return fmt.Errorf("invalid management port IP address: %q", mgmtPortIP)
 	}
-	if !isHostIPValid(hostIfCIDR.IP) {
+	if len(hostIfCIDR.IP) == 0 {
 		return fmt.Errorf("invalid host address: %v", hostIfCIDR.String())
 	}
 	if !isHostIPsValid(otherHostAddrs) {
@@ -232,20 +232,9 @@ func getIPPrefix(ip net.IP) string {
 func isHostIPsValid(ips []string) bool {
 	for _, ipStr := range ips {
 		ip := net.ParseIP(ipStr)
-		if !isHostIPValid(ip) {
+		if len(ip) == 0 {
 			return false
 		}
-	}
-	return true
-}
-
-func isHostIPValid(ip net.IP) bool {
-	if len(ip) == 0 {
-		return false
-	}
-	// ensure host IP doesn't end with .0 or :0
-	if ip[len(ip)-1] == 0 {
-		return false
 	}
 	return true
 }
