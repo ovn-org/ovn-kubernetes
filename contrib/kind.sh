@@ -1166,5 +1166,6 @@ if [ "$KIND_INSTALL_KUBEVIRT" == true ]; then
   deploy_primary_udn_nad
   deploy_passt_binary
 
+  install_cert_manager
   install_kubevirt_ipam_controller
 fi
