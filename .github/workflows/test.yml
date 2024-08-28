@@ -453,6 +453,7 @@ jobs:
       ENABLE_MULTI_NET: "${{ matrix.target == 'multi-homing' || matrix.target == 'kv-live-migration' || matrix.target == 'network-segmentation' || matrix.target == 'tools' || matrix.target == 'multi-homing-helm' }}"
       ENABLE_NETWORK_SEGMENTATION: "${{ matrix.target == 'network-segmentation' || matrix.target == 'tools'}}"
       KIND_INSTALL_KUBEVIRT: "${{ matrix.target == 'kv-live-migration' }}"
+      KIND_INSTALL_IPAM_CONTROLLER: "${{ matrix.target == 'kv-live-migration' }}"
       OVN_COMPACT_MODE: "${{ matrix.target == 'compact-mode' }}"
       OVN_DUMMY_GATEWAY_BRIDGE: "${{ matrix.target == 'compact-mode' }}"
       OVN_ENABLE_INTERCONNECT: "${{ matrix.ic == 'ic-single-node-zones' ||  matrix.ic == 'ic-multi-node-zones'}}"
