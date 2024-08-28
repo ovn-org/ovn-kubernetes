@@ -379,12 +379,14 @@ install_kubevirt() {
     chmod +x ./bin/virtctl
 }
 
-install_kubevirt_ipam_controller() {
+install_cert_manager() {
   local cert_manager_version="v1.14.4"
   echo "Installing cert-manager ..."
   manifest="https://github.com/cert-manager/cert-manager/releases/download/${cert_manager_version}/cert-manager.yaml"
   run_kubectl apply -f "$manifest"
+}
 
+install_kubevirt_ipam_controller() {
   echo "Installing KubeVirt IPAM controller manager ..."
   manifest="https://raw.githubusercontent.com/kubevirt/ipam-extensions/main/dist/install.yaml"
   run_kubectl apply -f "$manifest"
