@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 	"net"
 	"os"
 	"strconv"
@@ -112,6 +113,10 @@ type DefaultNodeNetworkController struct {
 	retryEndpointSlices *retry.RetryFramework
 
 	apbExternalRouteNodeController *apbroute.ExternalGatewayNodeController
+
+	nadController *nad.NetAttachDefinitionController
+
+	cniServer *cni.Server
 }
 
 func newDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, stopChan chan struct{},
@@ -129,7 +134,7 @@ func newDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, sto
 }
 
 // NewDefaultNodeNetworkController creates a new network controller for node management of the default network
-func NewDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo) (*DefaultNodeNetworkController, error) {
+func NewDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, nadController *nad.NetAttachDefinitionController) (*DefaultNodeNetworkController, error) {
 	var err error
 	stopChan := make(chan struct{})
 	wg := &sync.WaitGroup{}
@@ -152,6 +157,8 @@ func NewDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo) (*D
 	if err != nil {
 		return nil, err
 	}
+
+	nc.nadController = nadController
 
 	nc.initRetryFrameworkForNode()
 
@@ -792,10 +799,11 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		if !ok {
 			return fmt.Errorf("cannot get kubeclient for starting CNI server")
 		}
-		cniServer, err = cni.NewCNIServer(nc.watchFactory, kclient.KClient)
+		cniServer, err = cni.NewCNIServer(nc.watchFactory, kclient.KClient, nc.nadController)
 		if err != nil {
 			return err
 		}
+		nc.cniServer = cniServer
 	}
 
 	nodeAnnotator := kube.NewNodeAnnotator(nc.Kube, node.Name)
@@ -1082,8 +1090,10 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		}
 	} else {
 		// start the cni server
-		if err := cniServer.Start(cni.ServerRunDir); err != nil {
-			return err
+		if nc.cniServer != nil {
+			if err := nc.cniServer.Start(cni.ServerRunDir); err != nil {
+				return err
+			}
 		}
 
 		// Write CNI config file if it doesn't already exist

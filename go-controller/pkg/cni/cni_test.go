@@ -23,7 +23,9 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	v1nadmocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
 	v1mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/client-go/listers/core/v1"
+	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/nad"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
 type podRequestInterfaceOpsStub struct {
@@ -55,6 +57,7 @@ var _ = Describe("Network Segmentation", func() {
 		}
 		prInterfaceOpsStub                            = &podRequestInterfaceOpsStub{}
 		enableMultiNetwork, enableNetworkSegmentation bool
+		nadController                                 *ovntest.FakeNADController
 	)
 
 	BeforeEach(func() {
@@ -90,7 +93,6 @@ var _ = Describe("Network Segmentation", func() {
 		nadLister = v1nadmocks.NetworkAttachmentDefinitionLister{}
 		clientSet = &ClientSet{
 			podLister: &podLister,
-			nadLister: &nadLister,
 			kclient:   fakeClientset,
 		}
 		kubeAuth = &KubeAPIAuth{
@@ -124,7 +126,7 @@ var _ = Describe("Network Segmentation", func() {
 		})
 		It("should not fail at cmdAdd", func() {
 			podNamespaceLister.On("Get", pr.PodName).Return(pod, nil)
-			Expect(pr.cmdAddWithGetCNIResultFunc(kubeAuth, clientSet, getCNIResultStub)).NotTo(BeNil())
+			Expect(pr.cmdAddWithGetCNIResultFunc(kubeAuth, clientSet, getCNIResultStub, nil)).NotTo(BeNil())
 			Expect(obtainedPodIterfaceInfos).ToNot(BeEmpty())
 		})
 		It("should not fail at cmdDel", func() {
@@ -151,10 +153,13 @@ var _ = Describe("Network Segmentation", func() {
 						},
 					},
 				}
+				nadController = &ovntest.FakeNADController{
+					PrimaryNetworks: make(map[string]util.NetInfo),
+				}
 			})
 			It("should not fail at cmdAdd", func() {
 				podNamespaceLister.On("Get", pr.PodName).Return(pod, nil)
-				Expect(pr.cmdAddWithGetCNIResultFunc(kubeAuth, clientSet, getCNIResultStub)).NotTo(BeNil())
+				Expect(pr.cmdAddWithGetCNIResultFunc(kubeAuth, clientSet, getCNIResultStub, nadController)).NotTo(BeNil())
 				Expect(obtainedPodIterfaceInfos).ToNot(BeEmpty())
 			})
 			It("should not fail at cmdDel", func() {
@@ -214,8 +219,7 @@ var _ = Describe("Network Segmentation", func() {
 						},
 					},
 				}
-				nadNamespaceLister := &v1nadmocks.NetworkAttachmentDefinitionNamespaceLister{}
-				nadNamespaceLister.On("List", labels.Everything()).Return([]*nadv1.NetworkAttachmentDefinition{{
+				nad := &nadv1.NetworkAttachmentDefinition{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      nadName,
 						Namespace: namespace,
@@ -223,15 +227,22 @@ var _ = Describe("Network Segmentation", func() {
 					Spec: nadv1.NetworkAttachmentDefinitionSpec{
 						Config: dummyPrimaryUDNConfig(namespace, nadName),
 					},
-				}}, nil)
+				}
+				nadNamespaceLister := &v1nadmocks.NetworkAttachmentDefinitionNamespaceLister{}
+				nadNamespaceLister.On("List", labels.Everything()).Return([]*nadv1.NetworkAttachmentDefinition{nad}, nil)
 				nadLister.On("NetworkAttachmentDefinitions", "foo-ns").Return(nadNamespaceLister)
-
+				nadNetwork, err := util.ParseNADInfo(nad)
+				Expect(err).NotTo(HaveOccurred())
+				nadController = &ovntest.FakeNADController{
+					PrimaryNetworks: make(map[string]util.NetInfo),
+				}
+				nadController.PrimaryNetworks[nad.Namespace] = nadNetwork
 				getCNIResultStub = dummyGetCNIResult
 			})
 
 			It("should return the information of both the default net and the primary UDN in the result", func() {
 				podNamespaceLister.On("Get", pr.PodName).Return(pod, nil)
-				response, err := pr.cmdAddWithGetCNIResultFunc(kubeAuth, clientSet, getCNIResultStub)
+				response, err := pr.cmdAddWithGetCNIResultFunc(kubeAuth, clientSet, getCNIResultStub, nadController)
 				Expect(err).NotTo(HaveOccurred())
 				// for every interface added, we return 2 interfaces; the host side of the
 				// veth, then the pod side of the veth.

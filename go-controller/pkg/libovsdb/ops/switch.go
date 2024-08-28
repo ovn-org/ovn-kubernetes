@@ -312,6 +312,9 @@ func createOrUpdateLogicalSwitchPortsOps(nbClient libovsdbclient.Client, ops []l
 	m := newModelClient(nbClient)
 	ops, err := m.CreateOrUpdateOps(ops, opModels...)
 	sw.Ports = originalPorts
+	if err != nil && errors.Is(err, libovsdbclient.ErrNotFound) && !createSwitch {
+		err = fmt.Errorf("could not find switch: %q, %w", sw.Name, err)
+	}
 	return ops, err
 }
 

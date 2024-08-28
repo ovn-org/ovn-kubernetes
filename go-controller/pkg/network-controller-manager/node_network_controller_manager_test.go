@@ -129,6 +129,7 @@ var _ = Describe("Healthcheck tests", func() {
 
 		BeforeEach(func() {
 			// setup kube output
+			factoryMock.On("NADInformer").Return(nil)
 			ncm, err = NewNodeNetworkControllerManager(fakeClient, &factoryMock, nodeName, &sync.WaitGroup{}, nil, routeManager)
 			Expect(err).NotTo(HaveOccurred())
 			factoryMock.On("GetPods", "").Return(podList, nil)
@@ -144,7 +145,6 @@ var _ = Describe("Healthcheck tests", func() {
 						"stale-pod-ifc,sandbox=123abcfaa iface-id=stale-ns_stale-pod iface-id-ver=pod-stale-uuid-3 vf-netdev-name=blah\n",
 					Err: nil,
 				})
-
 				// mock calls to remove only stale-port
 				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd:    genDeleteStaleRepPortCmd("stale-pod-ifc"),

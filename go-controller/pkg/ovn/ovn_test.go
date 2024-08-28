@@ -31,6 +31,8 @@ import (
 	egressservice "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1"
 	egressservicefake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/clientset/versioned/fake"
 	udnclientfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/clientset/versioned/fake"
+	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
+	fakenad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/nad"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
@@ -70,20 +72,21 @@ type secondaryControllerInfo struct {
 }
 
 type FakeOVN struct {
-	fakeClient   *util.OVNMasterClientset
-	watcher      *factory.WatchFactory
-	controller   *DefaultNetworkController
-	stopChan     chan struct{}
-	wg           *sync.WaitGroup
-	asf          *addressset.FakeAddressSetFactory
-	fakeRecorder *record.FakeRecorder
-	nbClient     libovsdbclient.Client
-	sbClient     libovsdbclient.Client
-	dbSetup      libovsdbtest.TestSetup
-	nbsbCleanup  *libovsdbtest.Context
-	egressQoSWg  *sync.WaitGroup
-	egressSVCWg  *sync.WaitGroup
-	anpWg        *sync.WaitGroup
+	fakeClient    *util.OVNMasterClientset
+	watcher       *factory.WatchFactory
+	controller    *DefaultNetworkController
+	stopChan      chan struct{}
+	wg            *sync.WaitGroup
+	asf           *addressset.FakeAddressSetFactory
+	fakeRecorder  *record.FakeRecorder
+	nbClient      libovsdbclient.Client
+	sbClient      libovsdbclient.Client
+	dbSetup       libovsdbtest.TestSetup
+	nbsbCleanup   *libovsdbtest.Context
+	egressQoSWg   *sync.WaitGroup
+	egressSVCWg   *sync.WaitGroup
+	anpWg         *sync.WaitGroup
+	nadController *nad.NetAttachDefinitionController
 
 	// information map of all secondary network controllers
 	secondaryControllers map[string]secondaryControllerInfo
@@ -208,17 +211,17 @@ func (o *FakeOVN) init(nadList []nettypes.NetworkAttachmentDefinition) {
 		o.fakeRecorder, o.wg)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	o.controller.multicastSupport = config.EnableMulticast
+	o.nadController = o.controller.nadController.(*nad.NetAttachDefinitionController)
 
 	setupCOPP := false
 	setupClusterController(o.controller, setupCOPP)
+	for _, n := range nadList {
+		err := o.NewSecondaryNetworkController(&n)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	}
 
 	err = o.watcher.Start()
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-	for _, nad := range nadList {
-		err := o.NewSecondaryNetworkController(&nad)
-		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-	}
 
 	existingNodes, err := o.controller.kube.GetNodes()
 	if err == nil {
@@ -231,6 +234,7 @@ func (o *FakeOVN) init(nadList []nettypes.NetworkAttachmentDefinition) {
 			}
 		}
 	}
+
 }
 
 func setupClusterController(clusterController *DefaultNetworkController, setupCOPP bool) {
@@ -321,7 +325,14 @@ func NewOvnController(ovnClient *util.OVNMasterClientset, wf *factory.WatchFacto
 		return nil, err
 	}
 
-	dnc, err := newDefaultNetworkControllerCommon(cnci, stopChan, wg, addressSetFactory, nil)
+	var nadController *nad.NetAttachDefinitionController
+	if config.OVNKubernetesFeature.EnableMultiNetwork {
+		nadController, err = nad.NewNetAttachDefinitionController("test", &fakenad.FakeNetworkControllerManager{}, wf, nil)
+		if err != nil {
+			return nil, err
+		}
+	}
+	dnc, err := newDefaultNetworkControllerCommon(cnci, stopChan, wg, addressSetFactory, nadController, nil)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 	if nbZoneFailed {
@@ -439,20 +450,20 @@ func (o *FakeOVN) NewSecondaryNetworkController(netattachdef *nettypes.NetworkAt
 
 		switch topoType {
 		case types.Layer3Topology:
-			l3Controller, err := NewSecondaryLayer3NetworkController(cnci, nInfo)
+			l3Controller, err := NewSecondaryLayer3NetworkController(cnci, nInfo, o.nadController)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			l3Controller.addressSetFactory = asf
 			secondaryController = &l3Controller.BaseSecondaryNetworkController
 		case types.Layer2Topology:
-			l2Controller := NewSecondaryLayer2NetworkController(cnci, nInfo)
+			l2Controller := NewSecondaryLayer2NetworkController(cnci, nInfo, o.nadController)
 			l2Controller.addressSetFactory = asf
 			secondaryController = &l2Controller.BaseSecondaryNetworkController
 		case types.LocalnetTopology:
-			localnetController := NewSecondaryLocalnetNetworkController(cnci, nInfo)
+			localnetController := NewSecondaryLocalnetNetworkController(cnci, nInfo, o.nadController)
 			localnetController.addressSetFactory = asf
 			secondaryController = &localnetController.BaseSecondaryNetworkController
 		default:
-			return fmt.Errorf("topoloty type %s not supported", topoType)
+			return fmt.Errorf("topology type %s not supported", topoType)
 		}
 		ocInfo = secondaryControllerInfo{bnc: secondaryController, asf: asf}
 		o.secondaryControllers[netName] = ocInfo

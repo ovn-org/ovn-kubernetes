@@ -32,6 +32,8 @@ type networkManager interface {
 
 	// Stop the controller
 	Stop()
+
+	getNetwork(string) util.NetInfo
 }
 
 func newNetworkManager(name string, ncm NetworkControllerManager) networkManager {
@@ -45,7 +47,7 @@ func newNetworkManager(name string, ncm NetworkControllerManager) networkManager
 	// added to the queue for processing
 	config := &controller.ReconcilerConfig{
 		RateLimiter: workqueue.DefaultControllerRateLimiter(),
-		Reconcile:   nc.syncLocked,
+		Reconcile:   nc.sync,
 		Threadiness: 1,
 	}
 	nc.controller = controller.NewReconciler(
@@ -61,7 +63,7 @@ type networkControllerState struct {
 }
 
 type networkManagerImpl struct {
-	sync.Mutex
+	sync.RWMutex
 	name               string
 	controller         controller.Reconciler
 	ncm                NetworkControllerManager
@@ -77,33 +79,73 @@ func (nm *networkManagerImpl) Start() error {
 
 func (nm *networkManagerImpl) Stop() {
 	controller.Stop(nm.controller)
-
-	for _, networkControllerState := range nm.networkControllers {
+	for _, networkControllerState := range nm.getAllNetworkStates() {
 		networkControllerState.controller.Stop()
 	}
 }
 
 func (nm *networkManagerImpl) EnsureNetwork(network util.NetInfo) {
-	nm.Lock()
-	defer nm.Unlock()
-	nm.networks[network.GetNetworkName()] = network
+	nm.setNetwork(network.GetNetworkName(), network)
 	nm.controller.Reconcile(network.GetNetworkName())
 }
 
 func (nm *networkManagerImpl) DeleteNetwork(network string) {
-	nm.Lock()
-	defer nm.Unlock()
-	delete(nm.networks, network)
+	nm.setNetwork(network, nil)
 	nm.controller.Reconcile(network)
 }
 
-func (nm *networkManagerImpl) syncLocked(network string) error {
+func (nm *networkManagerImpl) setNetwork(network string, netInfo util.NetInfo) {
 	nm.Lock()
 	defer nm.Unlock()
-	return nm.sync(network)
+	if netInfo == nil {
+		delete(nm.networks, network)
+		return
+	}
+	nm.networks[network] = netInfo
 }
 
-// sync must be called with nm mutex locked
+func (nm *networkManagerImpl) getNetwork(network string) util.NetInfo {
+	nm.RLock()
+	defer nm.RUnlock()
+	return nm.networks[network]
+}
+
+func (nm *networkManagerImpl) getAllNetworks() []util.BasicNetInfo {
+	nm.RLock()
+	defer nm.RUnlock()
+	networks := make([]util.BasicNetInfo, 0, len(nm.networks))
+	for _, network := range nm.networks {
+		networks = append(networks, network)
+	}
+	return networks
+}
+
+func (nm *networkManagerImpl) setNetworkState(network string, state *networkControllerState) {
+	nm.Lock()
+	defer nm.Unlock()
+	if state == nil {
+		delete(nm.networkControllers, network)
+		return
+	}
+	nm.networkControllers[network] = state
+}
+
+func (nm *networkManagerImpl) getNetworkState(network string) *networkControllerState {
+	nm.RLock()
+	defer nm.RUnlock()
+	return nm.networkControllers[network]
+}
+
+func (nm *networkManagerImpl) getAllNetworkStates() []*networkControllerState {
+	nm.RLock()
+	defer nm.RUnlock()
+	networkStates := make([]*networkControllerState, 0, len(nm.networks))
+	for _, state := range nm.networkControllers {
+		networkStates = append(networkStates, state)
+	}
+	return networkStates
+}
+
 func (nm *networkManagerImpl) sync(network string) error {
 	startTime := time.Now()
 	klog.V(5).Infof("%s: sync network %s", nm.name, network)
@@ -111,8 +153,8 @@ func (nm *networkManagerImpl) sync(network string) error {
 		klog.V(4).Infof("%s: finished syncing network %s, took %v", nm.name, network, time.Since(startTime))
 	}()
 
-	want := nm.networks[network]
-	have := nm.networkControllers[network]
+	want := nm.getNetwork(network)
+	have := nm.getNetworkState(network)
 
 	// we will dispose of the old network if deletion is in progress or if
 	// configuration changed
@@ -127,7 +169,7 @@ func (nm *networkManagerImpl) sync(network string) error {
 		if err != nil {
 			return fmt.Errorf("%s: failed to cleanup network %s: %w", nm.name, network, err)
 		}
-		delete(nm.networkControllers, network)
+		nm.setNetworkState(network, nil)
 	}
 
 	// no network needed so nothing to do
@@ -135,7 +177,7 @@ func (nm *networkManagerImpl) sync(network string) error {
 		return nil
 	}
 
-	// this might just be an update of the network NADs
+	// we didn't dispose of current controller, so this might just be an update of the network NADs
 	if have != nil && !dispose {
 		have.controller.SetNADs(want.GetNADs()...)
 		return nil
@@ -151,22 +193,15 @@ func (nm *networkManagerImpl) sync(network string) error {
 	if err != nil {
 		return fmt.Errorf("%s: failed to start network %s: %w", nm.name, network, err)
 	}
-	nm.networkControllers[network] = &networkControllerState{controller: nc}
+	nm.setNetworkState(network, &networkControllerState{controller: nc})
 
 	return nil
 }
 
 func (nm *networkManagerImpl) syncAll() error {
-	nm.Lock()
-	defer nm.Unlock()
 	// as we sync upon start, consider networks that have not been ensured as
 	// stale and clean them up
-	validNetworks := make([]util.BasicNetInfo, 0, len(nm.networks))
-	networkNames := make([]string, 0, len(nm.networks))
-	for name, network := range nm.networks {
-		validNetworks = append(validNetworks, network)
-		networkNames = append(networkNames, name)
-	}
+	validNetworks := nm.getAllNetworks()
 	if err := nm.ncm.CleanupDeletedNetworks(validNetworks...); err != nil {
 		return err
 	}
@@ -178,9 +213,9 @@ func (nm *networkManagerImpl) syncAll() error {
 	// as stale.
 	start := time.Now()
 	klog.Infof("%s: syncing all networks", nm.name)
-	for _, networkName := range networkNames {
-		if err := nm.sync(networkName); err != nil {
-			return fmt.Errorf("failed to sync network %s: %w", networkName, err)
+	for _, network := range validNetworks {
+		if err := nm.sync(network.GetNetworkName()); err != nil {
+			return fmt.Errorf("failed to sync network %s: %w", network.GetNetworkName(), err)
 		}
 	}
 	klog.Infof("%s: finished syncing all networks. Time taken: %s", nm.name, time.Since(start))

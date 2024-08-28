@@ -114,7 +114,7 @@ func (sncm *secondaryNetworkClusterManager) NewNetworkController(nInfo util.NetI
 	klog.Infof("Creating new network controller for network %s of topology %s", nInfo.GetNetworkName(), nInfo.TopologyType())
 
 	namedIDAllocator := sncm.networkIDAllocator.ForName(nInfo.GetNetworkName())
-	sncc := newNetworkClusterController(namedIDAllocator, nInfo, sncm.ovnClient, sncm.watchFactory, sncm.recorder)
+	sncc := newNetworkClusterController(namedIDAllocator, nInfo, sncm.ovnClient, sncm.watchFactory, sncm.recorder, sncm.nadController)
 	return sncc, nil
 }
 
@@ -194,7 +194,7 @@ func (sncm *secondaryNetworkClusterManager) CleanupDeletedNetworks(validNetworks
 func (sncm *secondaryNetworkClusterManager) newDummyLayer3NetworkController(netName string) (nad.NetworkController, error) {
 	netInfo, _ := util.NewNetInfo(&ovncnitypes.NetConf{NetConf: types.NetConf{Name: netName}, Topology: ovntypes.Layer3Topology})
 	namedIDAllocator := sncm.networkIDAllocator.ForName(netInfo.GetNetworkName())
-	nc := newNetworkClusterController(namedIDAllocator, netInfo, sncm.ovnClient, sncm.watchFactory, sncm.recorder)
+	nc := newNetworkClusterController(namedIDAllocator, netInfo, sncm.ovnClient, sncm.watchFactory, sncm.recorder, sncm.nadController)
 	err := nc.init()
 	return nc, err
 }

@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	cnitypes "github.com/containernetworking/cni/pkg/types"
-	nadlister "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
 	"github.com/onsi/gomega"
 	"github.com/onsi/gomega/format"
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
@@ -18,8 +17,10 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	networkAttachDefController "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 	kubetest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/nad"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"golang.org/x/exp/maps"
@@ -83,9 +84,10 @@ func newControllerWithDBSetupForNetwork(dbSetup libovsdbtest.TestSetup, netInfo 
 			return nil, err
 		}
 	}
-	var nadLister nadlister.NetworkAttachmentDefinitionLister
-	if testUDN {
-		nadLister = factoryMock.NADInformer().Lister()
+	testNCM := &nad.FakeNetworkControllerManager{}
+	nadController, err := networkAttachDefController.NewNetAttachDefinitionController("test", testNCM, factoryMock, nil)
+	if err != nil {
+		return nil, err
 	}
 
 	controller, err := NewController(client.KubeClient,
@@ -93,7 +95,7 @@ func newControllerWithDBSetupForNetwork(dbSetup libovsdbtest.TestSetup, netInfo 
 		factoryMock.ServiceCoreInformer(),
 		factoryMock.EndpointSliceCoreInformer(),
 		factoryMock.NodeCoreInformer(),
-		nadLister,
+		nadController,
 		recorder,
 		netInfo,
 	)
@@ -1106,6 +1108,10 @@ func TestSyncServices(t *testing.T) {
 				if err != nil {
 					t.Fatalf("Error creating controller: %v", err)
 				}
+				if err := controller.nadController.Start(); err != nil {
+					t.Fatalf("Error starting NAD controller: %v", err)
+				}
+				defer controller.nadController.Stop()
 				defer controller.close()
 
 				// Add k8s objects

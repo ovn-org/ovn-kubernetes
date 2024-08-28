@@ -947,7 +947,7 @@ func GetPodNADToNetworkMappingWithActiveNetwork(pod *kapi.Pod, nInfo NetInfo, ac
 	// Add the active network to the NSE map if it is configured
 	activeNetworkNADs := activeNetwork.GetNADs()
 	if len(activeNetworkNADs) < 1 {
-		return false, nil, fmt.Errorf("missing NADs at active network '%s' for namesapce '%s'", activeNetwork.GetNetworkName(), pod.Namespace)
+		return false, nil, fmt.Errorf("missing NADs at active network %q for namespace %q", activeNetwork.GetNetworkName(), pod.Namespace)
 	}
 	activeNetworkNADKey := strings.Split(activeNetworkNADs[0], "/")
 	if len(networkSelections) == 0 {

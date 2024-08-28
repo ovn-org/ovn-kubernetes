@@ -18,6 +18,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
+	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -48,10 +49,12 @@ import (
 // started.
 
 // NewCNIServer creates and returns a new Server object which will listen on a socket in the given path
-func NewCNIServer(factory factory.NodeWatchFactory, kclient kubernetes.Interface) (*Server, error) {
+func NewCNIServer(factory factory.NodeWatchFactory, kclient kubernetes.Interface,
+	nadController *nad.NetAttachDefinitionController) (*Server, error) {
 	if config.OvnKubeNode.Mode == types.NodeModeDPU {
 		return nil, fmt.Errorf("unsupported ovnkube-node mode for CNI server: %s", config.OvnKubeNode.Mode)
 	}
+
 	router := mux.NewRouter()
 
 	s := &Server{
@@ -72,7 +75,7 @@ func NewCNIServer(factory factory.NodeWatchFactory, kclient kubernetes.Interface
 	}
 
 	if util.IsNetworkSegmentationSupportEnabled() {
-		s.clientSet.nadLister = factory.NADInformer().Lister()
+		s.nadController = nadController
 	}
 
 	if len(config.Kubernetes.CAData) > 0 {
@@ -218,7 +221,7 @@ func (s *Server) handleCNIRequest(r *http.Request) ([]byte, error) {
 	}
 	defer req.cancel()
 
-	result, err := s.handlePodRequestFunc(req, s.clientSet, s.kubeAuth)
+	result, err := s.handlePodRequestFunc(req, s.clientSet, s.kubeAuth, s.nadController)
 	if err != nil {
 		// Prefix error with request information for easier debugging
 		return nil, fmt.Errorf("%s %v", req, err)

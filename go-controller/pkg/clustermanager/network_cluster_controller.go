@@ -17,8 +17,6 @@ import (
 	"k8s.io/klog/v2"
 
 	ipamclaimsapi "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1"
-	nadlister "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
-
 	idallocator "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/id"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip/subnet"
 	annotationalloc "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/pod"
@@ -27,6 +25,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	networkAttachDefController "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/persistentips"
 	objretry "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -63,13 +62,15 @@ type networkClusterController struct {
 	ipamClaimReconciler *persistentips.IPAMClaimReconciler
 	subnetAllocator     subnet.Allocator
 
+	nadController *networkAttachDefController.NetAttachDefinitionController
+
 	// event recorder used to post events to k8s
 	recorder record.EventRecorder
 
 	util.NetInfo
 }
 
-func newNetworkClusterController(networkIDAllocator idallocator.NamedAllocator, netInfo util.NetInfo, ovnClient *util.OVNClusterManagerClientset, wf *factory.WatchFactory, recorder record.EventRecorder) *networkClusterController {
+func newNetworkClusterController(networkIDAllocator idallocator.NamedAllocator, netInfo util.NetInfo, ovnClient *util.OVNClusterManagerClientset, wf *factory.WatchFactory, recorder record.EventRecorder, nadController *networkAttachDefController.NetAttachDefinitionController) *networkClusterController {
 	kube := &kube.KubeOVN{
 		Kube: kube.Kube{
 			KClient: ovnClient.KubeClient,
@@ -87,6 +88,7 @@ func newNetworkClusterController(networkIDAllocator idallocator.NamedAllocator, 
 		wg:                 wg,
 		networkIDAllocator: networkIDAllocator,
 		recorder:           recorder,
+		nadController:      nadController,
 	}
 
 	return ncc
@@ -106,7 +108,7 @@ func newDefaultNetworkClusterController(netInfo util.NetInfo, ovnClient *util.OV
 	}
 
 	namedIDAllocator := networkIDAllocator.ForName(types.DefaultNetworkName)
-	return newNetworkClusterController(namedIDAllocator, netInfo, ovnClient, wf, recorder)
+	return newNetworkClusterController(namedIDAllocator, netInfo, ovnClient, wf, recorder, nil)
 }
 
 func (ncc *networkClusterController) hasPodAllocation() bool {
@@ -171,7 +173,6 @@ func (ncc *networkClusterController) init() error {
 		var (
 			podAllocationAnnotator *annotationalloc.PodAnnotationAllocator
 			ipamClaimsReconciler   persistentips.PersistentAllocations
-			nadLister              nadlister.NetworkAttachmentDefinitionLister
 		)
 
 		if ncc.allowPersistentIPs() {
@@ -190,11 +191,9 @@ func (ncc *networkClusterController) init() error {
 			ncc.kube,
 			ipamClaimsReconciler,
 		)
-		if util.IsNetworkSegmentationSupportEnabled() {
-			nadLister = ncc.watchFactory.NADInformer().Lister()
-		}
+
 		ncc.podAllocator = pod.NewPodAllocator(ncc.NetInfo, podAllocationAnnotator, ipAllocator,
-			ipamClaimsReconciler, nadLister, ncc.recorder)
+			ipamClaimsReconciler, ncc.nadController, ncc.recorder)
 		if err := ncc.podAllocator.Init(); err != nil {
 			return fmt.Errorf("failed to initialize pod ip allocator: %w", err)
 		}
