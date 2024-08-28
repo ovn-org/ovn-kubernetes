@@ -26,6 +26,7 @@ const (
 
 // +kubebuilder:validation:XValidation:rule="has(self.subnets) && size(self.subnets) > 0", message="Subnets is required for Layer3 topology"
 // +kubebuilder:validation:XValidation:rule="!has(self.joinSubnets) || has(self.role) && self.role == 'Primary'", message="JoinSubnets is only supported for Primary network"
+// +kubebuilder:validation:XValidation:rule="!has(self.subnets) || !self.subnets.exists_one(i, cidr(i.cidr).ip().family() == 6) || self.mtu >= 1280", message="MTU should be greater than or equal to 1280 when IPv6 subent is used"
 type Layer3Config struct {
 	// Role describes the network role in the pod.
 	//
@@ -41,7 +42,7 @@ type Layer3Config struct {
 	//
 	// MTU is optional, if not provided, the globally configured value in OVN-Kubernetes (defaults to 1400) is used for the network.
 	//
-	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Minimum=576
 	// +kubebuilder:validation:Maximum=65536
 	// +optional
 	MTU int32 `json:"mtu,omitempty"`
@@ -93,6 +94,7 @@ type Layer3Subnet struct {
 // +kubebuilder:validation:XValidation:rule="self.role != 'Primary' || has(self.subnets) && size(self.subnets) > 0", message="Subnets is required for Primary Layer2 topology"
 // +kubebuilder:validation:XValidation:rule="!has(self.joinSubnets) || has(self.role) && self.role == 'Primary'", message="JoinSubnets is only supported for Primary network"
 // +kubebuilder:validation:XValidation:rule="!has(self.ipamLifecycle) || has(self.subnets) && size(self.subnets) > 0", message="IPAMLifecycle is only supported when subnets are set"
+// +kubebuilder:validation:XValidation:rule="!has(self.subnets) || !self.subnets.exists_one(i, cidr(i).ip().family() == 6) || self.mtu >= 1280", message="MTU should be greater than or equal to 1280 when IPv6 subent is used"
 type Layer2Config struct {
 	// Role describes the network role in the pod.
 	//
@@ -106,7 +108,7 @@ type Layer2Config struct {
 	// MTU is the maximum transmission unit for a network.
 	// MTU is optional, if not provided, the globally configured value in OVN-Kubernetes (defaults to 1400) is used for the network.
 	//
-	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Minimum=576
 	// +kubebuilder:validation:Maximum=65536
 	// +optional
 	MTU int32 `json:"mtu,omitempty"`
