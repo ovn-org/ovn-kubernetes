@@ -12,11 +12,10 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
+	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
-	nadlister "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
-
 	kapi "k8s.io/api/core/v1"
 )
 
@@ -169,7 +168,7 @@ type PodRequest struct {
 	deviceInfo nadapi.DeviceInfo
 }
 
-type podRequestFunc func(request *PodRequest, clientset *ClientSet, kubeAuth *KubeAPIAuth) ([]byte, error)
+type podRequestFunc func(request *PodRequest, clientset *ClientSet, kubeAuth *KubeAPIAuth, nadController *nad.NetAttachDefinitionController) ([]byte, error)
 type getCNIResultFunc func(request *PodRequest, getter PodInfoGetter, podInterfaceInfo *PodInterfaceInfo) (*current.Result, error)
 
 type PodInfoGetter interface {
@@ -180,7 +179,6 @@ type ClientSet struct {
 	PodInfoGetter
 	kclient   kubernetes.Interface
 	podLister corev1listers.PodLister
-	nadLister nadlister.NetworkAttachmentDefinitionLister
 }
 
 func NewClientSet(kclient kubernetes.Interface, podLister corev1listers.PodLister) *ClientSet {
@@ -197,4 +195,5 @@ type Server struct {
 	handlePodRequestFunc podRequestFunc
 	clientSet            *ClientSet
 	kubeAuth             *KubeAPIAuth
+	nadController        *nad.NetAttachDefinitionController
 }

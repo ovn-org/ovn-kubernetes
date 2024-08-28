@@ -14,11 +14,11 @@ import (
 
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 
-	nadlister "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/id"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip/subnet"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/pod"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/persistentips"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -41,7 +41,7 @@ type PodAllocator struct {
 
 	ipamClaimsReconciler persistentips.PersistentAllocations
 
-	nadLister nadlister.NetworkAttachmentDefinitionLister
+	nadController nad.NADController
 
 	// event recorder used to post events to k8s
 	recorder record.EventRecorder
@@ -58,7 +58,7 @@ func NewPodAllocator(
 	podAnnotationAllocator *pod.PodAnnotationAllocator,
 	ipAllocator subnet.Allocator,
 	claimsReconciler persistentips.PersistentAllocations,
-	nadLister nadlister.NetworkAttachmentDefinitionLister,
+	nadController nad.NADController,
 	recorder record.EventRecorder,
 ) *PodAllocator {
 	podAllocator := &PodAllocator{
@@ -66,7 +66,7 @@ func NewPodAllocator(
 		releasedPods:           map[string]sets.Set[string]{},
 		releasedPodsMutex:      sync.Mutex{},
 		podAnnotationAllocator: podAnnotationAllocator,
-		nadLister:              nadLister,
+		nadController:          nadController,
 		recorder:               recorder,
 	}
 
@@ -107,11 +107,11 @@ func (a *PodAllocator) Init() error {
 }
 
 // getActiveNetworkForNamespace returns the active network for the given pod's namespace
-// and is a wrapper around util.GetActiveNetworkForNamespace
+// and is a wrapper around GetActiveNetworkForNamespace
 func (a *PodAllocator) getActiveNetworkForPod(pod *corev1.Pod) (util.NetInfo, error) {
-	activeNetwork, err := util.GetActiveNetworkForNamespace(pod.Namespace, a.nadLister)
+	activeNetwork, err := a.nadController.GetActiveNetworkForNamespace(pod.Namespace)
 	if err != nil {
-		if util.IsUnknownActiveNetworkError(err) {
+		if util.IsUnprocessedActiveNetworkError(err) {
 			a.recordPodErrorEvent(pod, err)
 		}
 		return nil, err

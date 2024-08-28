@@ -6,12 +6,12 @@ import (
 	"sync"
 	"time"
 
-	nadlister "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	globalconfig "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
+	networkAttachDefController "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"golang.org/x/time/rate"
@@ -57,7 +57,7 @@ func NewController(client clientset.Interface,
 	serviceInformer coreinformers.ServiceInformer,
 	endpointSliceInformer discoveryinformers.EndpointSliceInformer,
 	nodeInformer coreinformers.NodeInformer,
-	nadLister nadlister.NetworkAttachmentDefinitionLister,
+	nadController networkAttachDefController.NADController,
 	recorder record.EventRecorder,
 	netInfo util.NetInfo,
 ) (*Controller, error) {
@@ -74,7 +74,7 @@ func NewController(client clientset.Interface,
 		serviceLister:         serviceInformer.Lister(),
 		endpointSliceInformer: endpointSliceInformer,
 		endpointSliceLister:   endpointSliceInformer.Lister(),
-		nadLister:             nadLister,
+		nadController:         nadController,
 
 		eventRecorder: recorder,
 		repair:        newRepair(serviceInformer.Lister(), nbClient),
@@ -90,9 +90,6 @@ func NewController(client clientset.Interface,
 	// we need to watch Node objects for changes.
 	// Need to re-sync all services when a node gains its switch or GWR
 	c.nodeTracker = newNodeTracker(zone, c.RequestFullSync, netInfo)
-	if err != nil {
-		return nil, err
-	}
 	return c, nil
 }
 
@@ -111,7 +108,7 @@ type Controller struct {
 	endpointSliceInformer discoveryinformers.EndpointSliceInformer
 	endpointSliceLister   discoverylisters.EndpointSliceLister
 
-	nadLister nadlister.NetworkAttachmentDefinitionLister
+	nadController networkAttachDefController.NADController
 
 	nodesSynced cache.InformerSynced
 
@@ -548,7 +545,7 @@ func (c *Controller) RequestFullSync(nodeInfos []nodeInfo) {
 // belong to the network that this service controller is responsible for.
 func (c *Controller) skipService(name, namespace string) bool {
 	if util.IsNetworkSegmentationSupportEnabled() {
-		serviceNetwork, err := util.GetActiveNetworkForNamespace(namespace, c.nadLister)
+		serviceNetwork, err := c.nadController.GetActiveNetworkForNamespace(namespace)
 		if err != nil {
 			utilruntime.HandleError(fmt.Errorf("failed to retrieve network for service %s/%s: %w",
 				namespace, name, err))

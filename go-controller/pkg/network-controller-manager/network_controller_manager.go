@@ -64,11 +64,11 @@ func (cm *NetworkControllerManager) NewNetworkController(nInfo util.NetInfo) (na
 	topoType := nInfo.TopologyType()
 	switch topoType {
 	case ovntypes.Layer3Topology:
-		return ovn.NewSecondaryLayer3NetworkController(cnci, nInfo)
+		return ovn.NewSecondaryLayer3NetworkController(cnci, nInfo, cm.nadController)
 	case ovntypes.Layer2Topology:
-		return ovn.NewSecondaryLayer2NetworkController(cnci, nInfo), nil
+		return ovn.NewSecondaryLayer2NetworkController(cnci, nInfo, cm.nadController), nil
 	case ovntypes.LocalnetTopology:
-		return ovn.NewSecondaryLocalnetNetworkController(cnci, nInfo), nil
+		return ovn.NewSecondaryLocalnetNetworkController(cnci, nInfo, cm.nadController), nil
 	}
 	return nil, fmt.Errorf("topology type %s not supported", topoType)
 }
@@ -82,11 +82,11 @@ func (cm *NetworkControllerManager) newDummyNetworkController(topoType, netName 
 	netInfo, _ := util.NewNetInfo(&ovncnitypes.NetConf{NetConf: types.NetConf{Name: netName}, Topology: topoType})
 	switch topoType {
 	case ovntypes.Layer3Topology:
-		return ovn.NewSecondaryLayer3NetworkController(cnci, netInfo)
+		return ovn.NewSecondaryLayer3NetworkController(cnci, netInfo, cm.nadController)
 	case ovntypes.Layer2Topology:
-		return ovn.NewSecondaryLayer2NetworkController(cnci, netInfo), nil
+		return ovn.NewSecondaryLayer2NetworkController(cnci, netInfo, cm.nadController), nil
 	case ovntypes.LocalnetTopology:
-		return ovn.NewSecondaryLocalnetNetworkController(cnci, netInfo), nil
+		return ovn.NewSecondaryLocalnetNetworkController(cnci, netInfo, cm.nadController), nil
 	}
 	return nil, fmt.Errorf("topology type %s not supported", topoType)
 }
@@ -285,12 +285,13 @@ func (cm *NetworkControllerManager) newCommonNetworkControllerInfo() (*ovn.Commo
 }
 
 // initDefaultNetworkController creates the controller for default network
-func (cm *NetworkControllerManager) initDefaultNetworkController(observManager *observability.Manager) error {
+func (cm *NetworkControllerManager) initDefaultNetworkController(nadController *nad.NetAttachDefinitionController,
+	observManager *observability.Manager) error {
 	cnci, err := cm.newCommonNetworkControllerInfo()
 	if err != nil {
 		return fmt.Errorf("failed to create common network controller info: %w", err)
 	}
-	defaultController, err := ovn.NewDefaultNetworkController(cnci, observManager)
+	defaultController, err := ovn.NewDefaultNetworkController(cnci, nadController, observManager)
 	if err != nil {
 		return err
 	}
@@ -385,6 +386,12 @@ func (cm *NetworkControllerManager) Start(ctx context.Context) error {
 		metrics.GetConfigDurationRecorder().Run(cm.nbClient, cm.kube, 10, time.Second*5, cm.stopChan)
 	}
 	cm.podRecorder.Run(cm.sbClient, cm.stopChan)
+	// nadController is nil if multi-network is disabled
+	if cm.nadController != nil {
+		if err = cm.nadController.Start(); err != nil {
+			return fmt.Errorf("failed to start NAD Controller :%v", err)
+		}
+	}
 
 	var observabilityManager *observability.Manager
 	if config.OVNKubernetesFeature.EnableObservability {
@@ -398,18 +405,13 @@ func (cm *NetworkControllerManager) Start(ctx context.Context) error {
 			klog.Warningf("Observability cleanup failed, expected if not all Samples ware deleted yet: %v", err)
 		}
 	}
-	err = cm.initDefaultNetworkController(observabilityManager)
+	err = cm.initDefaultNetworkController(cm.nadController, observabilityManager)
 	if err != nil {
 		return fmt.Errorf("failed to init default network controller: %v", err)
 	}
 	err = cm.defaultNetworkController.Start(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to start default network controller: %v", err)
-	}
-
-	// nadController is nil if multi-network is disabled
-	if cm.nadController != nil {
-		return cm.nadController.Start()
 	}
 
 	return nil

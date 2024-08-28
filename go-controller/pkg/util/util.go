@@ -15,11 +15,8 @@ import (
 	"k8s.io/client-go/tools/cache"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
-
-	nadlister "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"crypto/rand"
 
@@ -372,65 +369,23 @@ func IsClusterIP(svcVIP string) bool {
 	return false
 }
 
-type UnknownActiveNetworkError struct {
+type UnprocessedActiveNetworkError struct {
 	namespace string
+	udnName   string
 }
 
-func (m *UnknownActiveNetworkError) Error() string {
-	return fmt.Sprintf("unable to determine what is the "+
-		"primary role network for namespace '%s'; please remove multiple primary role network"+
-		"NADs from it", m.namespace)
+func (m *UnprocessedActiveNetworkError) Error() string {
+	return fmt.Sprintf("primary UDN %q exists in namespace %s, but NAD has not been processed yet",
+		m.udnName, m.namespace)
 }
 
-func IsUnknownActiveNetworkError(err error) bool {
-	var unknownActiveNetworkError *UnknownActiveNetworkError
-	return errors.As(err, &unknownActiveNetworkError)
+func IsUnprocessedActiveNetworkError(err error) bool {
+	var unprocessedActiveNetworkError *UnprocessedActiveNetworkError
+	return errors.As(err, &unprocessedActiveNetworkError)
 }
 
-// GetActiveNetworkForNamespace returns the NetInfo struct of the active network
-// for the given namespace based on the NADs present in that namespace.
-// active network here means the network managing this namespace and responsible for
-// plumbing all the entities for this namespace
-// this is:
-// 1) &DefaultNetInfo if there are no NADs in the namespace OR all NADs are Role: "primary"
-// 2) &NetConf{Name: "<secondary-network-name>"} if there is exactly ONE NAD with Role: "primary"
-// 3) Multiple primary network role NADs ActiveNetworkUnknown error
-// 4) error under all other conditions
-func GetActiveNetworkForNamespace(namespace string, nadLister nadlister.NetworkAttachmentDefinitionLister) (NetInfo, error) {
-	if nadLister == nil {
-		return &DefaultNetInfo{}, nil
-	}
-	if !IsNetworkSegmentationSupportEnabled() {
-		return &DefaultNetInfo{}, nil
-	}
-	namespaceNADs, err := nadLister.NetworkAttachmentDefinitions(namespace).List(labels.Everything())
-	if err != nil {
-		return nil, err
-	}
-	if len(namespaceNADs) == 0 {
-		return &DefaultNetInfo{}, nil
-	}
-	numberOfPrimaryNetworks := 0
-	var primaryNetwork NetInfo
-	for _, nad := range namespaceNADs {
-		netInfo, err := ParseNADInfo(nad)
-		if err != nil {
-			klog.Warningf("Skipping nad '%s/%s' as active network after failing parsing it with %v", nad.Namespace, nad.Name, err)
-			continue
-		}
-
-		if netInfo.IsPrimaryNetwork() {
-			primaryNetwork = netInfo
-			numberOfPrimaryNetworks++
-			primaryNetwork.AddNADs(GetNADName(nad.Namespace, nad.Name))
-		}
-	}
-	if numberOfPrimaryNetworks == 1 {
-		return primaryNetwork, nil
-	} else if numberOfPrimaryNetworks == 0 {
-		return &DefaultNetInfo{}, nil
-	}
-	return nil, &UnknownActiveNetworkError{namespace: namespace}
+func NewUnprocessedActiveNetworkError(namespace, udnName string) *UnprocessedActiveNetworkError {
+	return &UnprocessedActiveNetworkError{namespace: namespace, udnName: udnName}
 }
 
 func GetUserDefinedNetworkRole(isPrimary bool) string {
@@ -441,7 +396,7 @@ func GetUserDefinedNetworkRole(isPrimary bool) string {
 	return networkRole
 }
 
-// generateExternalIDs returns the external IDs for logical switches and logical routers
+// GenerateExternalIDsForSwitchOrRouter returns the external IDs for logical switches and logical routers
 // when it runs on a primary or secondary network. It returns an empty map
 // when on the default cluster network, for backward compatibility.
 func GenerateExternalIDsForSwitchOrRouter(netInfo NetInfo) map[string]string {

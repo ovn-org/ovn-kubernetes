@@ -7,7 +7,6 @@ import (
 	"sync"
 	"time"
 
-	nadlister "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
 	v1 "k8s.io/api/discovery/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/validation"
@@ -23,6 +22,7 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	networkAttachDefController "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -43,8 +43,7 @@ type Controller struct {
 	endpointSlicesSynced cache.InformerSynced
 	podLister            corelisters.PodLister
 	podsSynced           cache.InformerSynced
-	nadLister            nadlister.NetworkAttachmentDefinitionLister
-	nadsSynced           cache.InformerSynced
+	nadController        *networkAttachDefController.NetAttachDefinitionController
 	cancel               context.CancelFunc
 }
 
@@ -112,13 +111,14 @@ func (c *Controller) onEndpointSliceAdd(obj interface{}) {
 
 func NewController(
 	ovnClient *util.OVNClusterManagerClientset,
-	wf *factory.WatchFactory) (*Controller, error) {
+	wf *factory.WatchFactory, nadController *networkAttachDefController.NetAttachDefinitionController) (*Controller, error) {
 
 	wg := &sync.WaitGroup{}
 	c := &Controller{
-		kubeClient: ovnClient.KubeClient,
-		wg:         wg,
-		name:       types.EndpointSliceMirrorControllerName,
+		kubeClient:    ovnClient.KubeClient,
+		wg:            wg,
+		name:          types.EndpointSliceMirrorControllerName,
+		nadController: nadController,
 	}
 
 	c.queue = workqueue.NewRateLimitingQueueWithConfig(
@@ -128,9 +128,6 @@ func NewController(
 
 	c.podLister = wf.PodCoreInformer().Lister()
 	c.podsSynced = wf.PodCoreInformer().Informer().HasSynced
-
-	c.nadLister = wf.NADInformer().Lister()
-	c.nadsSynced = wf.NADInformer().Informer().HasSynced
 
 	endpointSlicesInformer := wf.EndpointSliceCoreInformer()
 	c.endpointSliceLister = endpointSlicesInformer.Lister()
@@ -153,11 +150,6 @@ func (c *Controller) Start(ctx context.Context, threadiness int) error {
 	ctx, cancel := context.WithCancel(ctx)
 	c.cancel = cancel
 	klog.Infof("Starting the EndpointSlice mirror controller")
-	if !util.WaitForInformerCacheSyncWithTimeout(c.name, ctx.Done(), c.endpointSlicesSynced, c.podsSynced,
-		c.nadsSynced) {
-		return fmt.Errorf("timed out waiting for caches to sync")
-	}
-
 	klog.Infof("Repairing EndpointSlice mirrors")
 	err := c.repair(ctx)
 	if err != nil {
@@ -252,7 +244,7 @@ func (c *Controller) syncDefaultEndpointSlice(ctx context.Context, key string) e
 		return err
 	}
 
-	namespacePrimaryNetwork, err := util.GetActiveNetworkForNamespace(namespace, c.nadLister)
+	namespacePrimaryNetwork, err := c.nadController.GetActiveNetworkForNamespace(namespace)
 	if err != nil {
 		return err
 	}

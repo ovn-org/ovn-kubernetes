@@ -30,9 +30,11 @@ import (
 	adminpolicybasedrouteclient "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	networkAttachDefController "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	linkMock "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/vishvananda/netlink"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/nad"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	utilMock "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
@@ -218,7 +220,8 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			Items: []v1.Node{existingNode},
 		})
 		fakeClient := &util.OVNNodeClientset{
-			KubeClient: kubeFakeClient,
+			KubeClient:            kubeFakeClient,
+			NetworkAttchDefClient: nadfake.NewSimpleClientset(),
 		}
 
 		stop := make(chan struct{})
@@ -244,6 +247,16 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 		err = nodeAnnotator.Run()
 		Expect(err).NotTo(HaveOccurred())
 		rm := routemanager.NewController()
+		var nadController *networkAttachDefController.NetAttachDefinitionController
+		if util.IsNetworkSegmentationSupportEnabled() {
+			testNCM := &nad.FakeNetworkControllerManager{}
+			nadController, err = networkAttachDefController.NewNetAttachDefinitionController("test", testNCM, wf, nil)
+			Expect(err).NotTo(HaveOccurred())
+			err = nadController.Start()
+			Expect(err).NotTo(HaveOccurred())
+			defer nadController.Stop()
+		}
+		Expect(err).NotTo(HaveOccurred())
 		wg.Add(1)
 		go testNS.Do(func(netNS ns.NetNS) error {
 			defer GinkgoRecover()
@@ -291,7 +304,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			Expect(err).NotTo(HaveOccurred())
 			ifAddrs := ovntest.MustParseIPNets(eth0CIDR)
 			sharedGw, err := newSharedGateway(nodeName, ovntest.MustParseIPNets(nodeSubnet), gatewayNextHops, gatewayIntf, "", ifAddrs, nodeAnnotator, k,
-				&fakeMgmtPortConfig, wf, rm)
+				&fakeMgmtPortConfig, wf, rm, nadController)
 			Expect(err).NotTo(HaveOccurred())
 			err = sharedGw.Init(stop, wg)
 			Expect(err).NotTo(HaveOccurred())
@@ -622,7 +635,8 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 			Items: []v1.Node{existingNode},
 		})
 		fakeClient := &util.OVNNodeClientset{
-			KubeClient: kubeFakeClient,
+			KubeClient:            kubeFakeClient,
+			NetworkAttchDefClient: nadfake.NewSimpleClientset(),
 		}
 
 		_, nodeNet, err := net.ParseCIDR(nodeSubnet)
@@ -670,6 +684,15 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 		runtime.LockOSThread()
 		defer runtime.UnlockOSThread()
 		rm := routemanager.NewController()
+		var nadController *networkAttachDefController.NetAttachDefinitionController
+		if util.IsNetworkSegmentationSupportEnabled() {
+			testNCM := &nad.FakeNetworkControllerManager{}
+			nadController, err = networkAttachDefController.NewNetAttachDefinitionController("test", testNCM, wf, nil)
+			Expect(err).NotTo(HaveOccurred())
+			err = nadController.Start()
+			Expect(err).NotTo(HaveOccurred())
+			defer nadController.Stop()
+		}
 		wg.Add(1)
 		go testNS.Do(func(netNS ns.NetNS) error {
 			defer GinkgoRecover()
@@ -677,7 +700,7 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 			wg.Done()
 			return nil
 		})
-		// FIXME(mk): starting the gateaway causing go routines to be spawned within sub functions and therefore they escape the
+		// FIXME(mk): starting the gateway causing go routines to be spawned within sub functions and therefore they escape the
 		// netns we wanted to set it to originally here. Refactor test cases to not spawn a go routine or just fake out everything
 		// and remove need to create netns
 		err = testNS.Do(func(ns.NetNS) error {
@@ -686,7 +709,7 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
 			Expect(err).NotTo(HaveOccurred())
 			sharedGw, err := newSharedGateway(nodeName, ovntest.MustParseIPNets(nodeSubnet), gatewayNextHops,
-				gatewayIntf, "", ifAddrs, nodeAnnotator, k, &fakeMgmtPortConfig, wf, rm)
+				gatewayIntf, "", ifAddrs, nodeAnnotator, k, &fakeMgmtPortConfig, wf, rm, nadController)
 			Expect(err).NotTo(HaveOccurred())
 			err = sharedGw.Init(stop, wg)
 			Expect(err).NotTo(HaveOccurred())
@@ -773,6 +796,7 @@ func shareGatewayInterfaceDPUHostTest(app *cli.App, testNS ns.NetNS, uplinkName,
 		fakeClient := &util.OVNNodeClientset{
 			KubeClient:             kubeFakeClient,
 			AdminPolicyRouteClient: adminpolicybasedrouteclient.NewSimpleClientset(),
+			NetworkAttchDefClient:  nadfake.NewSimpleClientset(),
 		}
 
 		stop := make(chan struct{})
@@ -1086,10 +1110,8 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 			&endpointSlice,
 		)
 		fakeClient := &util.OVNNodeClientset{
-			KubeClient: kubeFakeClient,
-		}
-		if util.IsNetworkSegmentationSupportEnabled() {
-			fakeClient.NetworkAttchDefClient = nadfake.NewSimpleClientset()
+			KubeClient:            kubeFakeClient,
+			NetworkAttchDefClient: nadfake.NewSimpleClientset(),
 		}
 
 		stop := make(chan struct{})
@@ -1116,6 +1138,15 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 		ip, ipNet, _ := net.ParseCIDR(eth0CIDR)
 		ipNet.IP = ip
 		rm := routemanager.NewController()
+		var nadController *networkAttachDefController.NetAttachDefinitionController
+		if util.IsNetworkSegmentationSupportEnabled() {
+			testNCM := &nad.FakeNetworkControllerManager{}
+			nadController, err = networkAttachDefController.NewNetAttachDefinitionController("test", testNCM, wf, nil)
+			Expect(err).NotTo(HaveOccurred())
+			err = nadController.Start()
+			Expect(err).NotTo(HaveOccurred())
+			defer nadController.Stop()
+		}
 		go testNS.Do(func(netNS ns.NetNS) error {
 			defer GinkgoRecover()
 			rm.Run(stop, 10*time.Second)
@@ -1129,7 +1160,7 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 			Expect(err).NotTo(HaveOccurred())
 			ifAddrs := ovntest.MustParseIPNets(eth0CIDR)
 			localGw, err := newLocalGateway(nodeName, ovntest.MustParseIPNets(nodeSubnet), gatewayNextHops, gatewayIntf, "", ifAddrs,
-				nodeAnnotator, &fakeMgmtPortConfig, k, wf, rm)
+				nodeAnnotator, &fakeMgmtPortConfig, k, wf, rm, nadController)
 			Expect(err).NotTo(HaveOccurred())
 			err = localGw.Init(stop, wg)
 			Expect(err).NotTo(HaveOccurred())

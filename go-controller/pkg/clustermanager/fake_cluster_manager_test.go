@@ -16,6 +16,7 @@ import (
 	egresssvc "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1"
 	egresssvcfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/healthcheck"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -89,7 +90,8 @@ func (o *FakeClusterManager) init() {
 		gomega.Expect(err).ToNot(gomega.HaveOccurred())
 	}
 	if util.IsNetworkSegmentationSupportEnabled() {
-		o.epsMirror, err = endpointslicemirror.NewController(o.fakeClient, o.watcher)
+		nadController := &nad.NetAttachDefinitionController{}
+		o.epsMirror, err = endpointslicemirror.NewController(o.fakeClient, o.watcher, nadController)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 		err = o.epsMirror.Start(context.TODO(), 1)

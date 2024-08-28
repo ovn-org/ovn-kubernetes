@@ -13,15 +13,16 @@ import (
 
 	"github.com/urfave/cli/v2"
 
+	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
-
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	networkAttachDefController "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/nad"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -122,6 +123,7 @@ var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 					_, ok := pod.Annotations[util.OvnPodAnnotationName]
 					Expect(ok).To(BeFalse())
 				}
+				Expect(fakeOvn.controller.nadController.Start()).NotTo(HaveOccurred())
 
 				Expect(fakeOvn.controller.WatchNamespaces()).NotTo(HaveOccurred())
 				Expect(fakeOvn.controller.WatchPods()).NotTo(HaveOccurred())
@@ -222,6 +224,10 @@ var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 				networkConfig, err := util.NewNetInfo(netConf)
 				Expect(err).NotTo(HaveOccurred())
 
+				nadController := &nad.FakeNADController{
+					PrimaryNetworks: map[string]util.NetInfo{},
+				}
+				nadController.PrimaryNetworks[ns] = networkConfig
 				nad, err := newNetworkAttachmentDefinition(
 					ns,
 					nadName,
@@ -299,6 +305,7 @@ var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 						&secondaryNetController.bnc.CommonNetworkControllerInfo,
 						networkConfig,
 						nodeName,
+						nadController,
 					).Cleanup()).To(Succeed())
 				Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData([]libovsdbtest.TestData{}))
 
@@ -514,8 +521,9 @@ func dummyLayer2PrimaryUserDefinedNetwork(subnets string) secondaryNetInfo {
 	return secondaryNet
 }
 
-func newSecondaryLayer2NetworkController(cnci *CommonNetworkControllerInfo, netInfo util.NetInfo, nodeName string) *SecondaryLayer2NetworkController {
-	layer2NetworkController := NewSecondaryLayer2NetworkController(cnci, netInfo)
+func newSecondaryLayer2NetworkController(cnci *CommonNetworkControllerInfo, netInfo util.NetInfo, nodeName string,
+	nadController networkAttachDefController.NADController) *SecondaryLayer2NetworkController {
+	layer2NetworkController := NewSecondaryLayer2NetworkController(cnci, netInfo, nadController)
 	layer2NetworkController.gatewayManagers.Store(
 		nodeName,
 		newDummyGatewayManager(cnci.kube, cnci.nbClient, netInfo, cnci.watchFactory, nodeName),
