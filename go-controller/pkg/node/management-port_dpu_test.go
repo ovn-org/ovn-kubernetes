@@ -7,6 +7,11 @@ import (
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
+	egressipv1fake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
+	egressservicefake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/clientset/versioned/fake"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	kubeMocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube/mocks"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/vishvananda/netlink"
@@ -17,6 +22,8 @@ import (
 	"github.com/vishvananda/netlink"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes/fake"
+	anpfake "sigs.k8s.io/network-policy-api/pkg/client/clientset/versioned/fake"
 )
 
 func genOVSAddMgmtPortCmd(nodeName, repName string) string {
@@ -83,6 +90,9 @@ var _ = Describe("Mananagement port DPU tests", func() {
 			mgmtPortDpu := managementPortRepresentor{
 				repName: "non-existent-netdev",
 			}
+			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd: genGetOvsEntry("bridge", "br-int", "datapath_type", ""),
+			})
 			netlinkOpsMock.On("LinkByName", "non-existent-netdev").Return(
 				nil, fmt.Errorf("failed to get interface"))
 			netlinkOpsMock.On("LinkByName", types.K8sMgmtIntfName).Return(
@@ -91,6 +101,7 @@ var _ = Describe("Mananagement port DPU tests", func() {
 
 			_, err := mgmtPortDpu.Create(nil, nil, nil, nil, waiter)
 			Expect(err).To(HaveOccurred())
+			Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc)
 		})
 
 		It("Fails if set Name to ovn-k8s-mp0 fails", func() {
@@ -155,8 +166,24 @@ var _ = Describe("Mananagement port DPU tests", func() {
 			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd: genOVSAddMgmtPortCmd(mgmtPortDpu.nodeName, mgmtPortDpu.repName),
 			})
+			fakeClient := fake.NewSimpleClientset(&v1.NodeList{
+				Items: []v1.Node{*node},
+			})
+			kubeInterface := &kube.KubeOVN{
+				Kube:                 kube.Kube{KClient: fakeClient},
+				ANPClient:            anpfake.NewSimpleClientset(),
+				EIPClient:            egressipv1fake.NewSimpleClientset(),
+				EgressFirewallClient: &egressfirewallfake.Clientset{},
+				EgressServiceClient:  &egressservicefake.Clientset{},
+			}
+			fakeNodeClient := &util.OVNNodeClientset{
+				KubeClient: fakeClient,
+			}
+			watchFactory, err := factory.NewNodeWatchFactory(fakeNodeClient, node.Name)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(watchFactory.Start()).To(Succeed())
 
-			mpcfg, err := mgmtPortDpu.Create(nil, node, nil, nil, waiter)
+			mpcfg, err := mgmtPortDpu.Create(nil, node, watchFactory.NodeCoreInformer().Lister(), kubeInterface, waiter)
 			Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(mpcfg.ifName).To(Equal(types.K8sMgmtIntfName + "_0"))
@@ -195,7 +222,24 @@ var _ = Describe("Mananagement port DPU tests", func() {
 				Cmd: genOVSAddMgmtPortCmd(mgmtPortDpu.nodeName, mgmtPortDpu.repName),
 			})
 
-			mpcfg, err := mgmtPortDpu.Create(nil, node, nil, nil, waiter)
+			fakeClient := fake.NewSimpleClientset(&v1.NodeList{
+				Items: []v1.Node{*node},
+			})
+			kubeInterface := &kube.KubeOVN{
+				Kube:                 kube.Kube{KClient: fakeClient},
+				ANPClient:            anpfake.NewSimpleClientset(),
+				EIPClient:            egressipv1fake.NewSimpleClientset(),
+				EgressFirewallClient: &egressfirewallfake.Clientset{},
+				EgressServiceClient:  &egressservicefake.Clientset{},
+			}
+			fakeNodeClient := &util.OVNNodeClientset{
+				KubeClient: fakeClient,
+			}
+			watchFactory, err := factory.NewNodeWatchFactory(fakeNodeClient, node.Name)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(watchFactory.Start()).To(Succeed())
+
+			mpcfg, err := mgmtPortDpu.Create(nil, node, watchFactory.NodeCoreInformer().Lister(), kubeInterface, waiter)
 			Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(mpcfg.ifName).To(Equal(types.K8sMgmtIntfName + "_0"))
