@@ -250,6 +250,13 @@ func newTPod(nodeName, nodeSubnet, nodeMgtIP, nodeGWIP, podName, podIPs, podMAC,
 				routeSources = append(routeSources, sc)
 			}
 		}
+		hairpinMasqueradeIP := config.Gateway.MasqueradeIPs.V4OVNServiceHairpinMasqueradeIP.String()
+		mask := 32
+		if isIPv6 {
+			hairpinMasqueradeIP = config.Gateway.MasqueradeIPs.V6OVNServiceHairpinMasqueradeIP.String()
+			mask = 128
+		}
+		routeSources = append(routeSources, ovntest.MustParseIPNet(fmt.Sprintf("%s/%d", hairpinMasqueradeIP, mask)))
 		joinNet := config.Gateway.V4JoinSubnet
 		if isIPv6 {
 			joinNet = config.Gateway.V6JoinSubnet
