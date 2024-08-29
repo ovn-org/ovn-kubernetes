@@ -10,6 +10,7 @@ import (
 
 	nadlisters "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	corelisters "k8s.io/client-go/listers/core/v1"
@@ -410,7 +411,16 @@ func (nm *networkManagerImpl) setVRFs(network util.NetInfo) error {
 			continue
 		}
 
-		// TODO check RA status
+		accepted := meta.FindStatusCondition(ra.Status.Conditions, "Accepted")
+		if accepted == nil {
+			// if there is no status we can safely ignore
+			continue
+		}
+		if accepted.Status != metav1.ConditionTrue || accepted.ObservedGeneration != ra.Generation {
+			// if the RA is not accepted, we commit to no change, best to
+			// preserve the old config while we can't validate new config
+			return fmt.Errorf("failed to reconcile network %q: RouteAdvertisements %q not in accepted status", network.GetNetworkName(), ra.Name)
+		}
 
 		nodeSelector, err := metav1.LabelSelectorAsSelector(&ra.Spec.NodeSelector)
 		if err != nil {
@@ -450,7 +460,26 @@ func raNeedsUpdate(oldRA, newRA *ratypes.RouteAdvertisements) bool {
 		return false
 	}
 
-	return oldRA.Spec.TargetVRF != newRA.Spec.TargetVRF || !reflect.DeepEqual(oldRA.Spec.NodeSelector, newRA.Spec.NodeSelector)
+	// the RA needs to be accepted on its current generation, otherwise we
+	// commit to no change
+	newCondition := meta.FindStatusCondition(newRA.Status.Conditions, "Accepted")
+	if newCondition == nil {
+		return false
+	}
+	if newCondition.Status != metav1.ConditionTrue {
+		return false
+	}
+	if newCondition.ObservedGeneration != newRA.Generation {
+		return false
+	}
+	// there had to be a change on observed generation or status, otherwise we
+	// already processed this RA in its current form
+	oldCondition := meta.FindStatusCondition(oldRA.Status.Conditions, "Accepted")
+	if oldCondition.ObservedGeneration == newCondition.ObservedGeneration && oldCondition.Status == newCondition.Status {
+		return false
+	}
+
+	return true
 }
 
 func nodeNeedsUpdate(oldNode, newNode *corev1.Node) bool {
