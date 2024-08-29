@@ -209,7 +209,7 @@ jobs:
           sudo cp -f ../../go-controller/_output/go/bin/ovn* .
           sudo cp -f ../../go-controller/_output/go/bin/hybrid-overlay-node .
           echo "ref: $(git rev-parse  --symbolic-full-name HEAD)  commit: $(git rev-parse  HEAD)" > git_info
-          docker build -t ovn-daemonset-fedora:pr -f Dockerfile.fedora .
+          docker build -t ovn-daemonset-fedora:pr -f Dockerfile.fedora.dev .
           mkdir _output
           docker save ovn-daemonset-fedora:pr > _output/${CI_IMAGE_PR_TAR}
         popd

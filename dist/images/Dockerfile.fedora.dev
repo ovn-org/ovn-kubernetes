@@ -44,7 +44,7 @@ RUN git log -n 1
 
 # Clone OVN Source Code.
 ARG OVN_REPO=https://github.com/ovn-org/ovn.git
-ARG OVN_BRANCH=main
+ARG OVN_BRANCH=branch-24.09
 WORKDIR /root
 RUN git clone $OVN_REPO --single-branch --branch=$OVN_BRANCH
 
