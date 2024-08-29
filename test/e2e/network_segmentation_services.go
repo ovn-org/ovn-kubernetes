@@ -256,19 +256,33 @@ var _ = Describe("Network Segmentation: services", func() {
 // TODO Once https://github.com/ovn-org/ovn-kubernetes/pull/4567 merges, use the vendored *TestJig.Run(), which tests
 // the reachability of a service through its name and through its cluster IP. For now only test the cluster IP.
 
-const OVNNodeHostCIDRs = "k8s.ovn.org/host-cidrs"
+const OvnNodeIfAddr = "k8s.ovn.org/node-primary-ifaddr"
 
-// ParseNodeHostCIDRsDropNetMask returns the parsed host IP addresses found on a node's host CIDR annotation. Removes the mask.
-func ParseNodeHostCIDRsDropNetMask(node *kapi.Node) (sets.Set[string], error) {
-	addrAnnotation, ok := node.Annotations[OVNNodeHostCIDRs]
+type primaryIfAddrAnnotation struct {
+	IPv4 string `json:"ipv4,omitempty"`
+	IPv6 string `json:"ipv6,omitempty"`
+}
+
+// ParseNodeHostIPDropNetMask returns the parsed host IP addresses found on a node's host CIDR annotation. Removes the mask.
+func ParseNodeHostIPDropNetMask(node *kapi.Node) (sets.Set[string], error) {
+	nodeIfAddrAnnotation, ok := node.Annotations[OvnNodeIfAddr]
 	if !ok {
-		return nil, newAnnotationNotSetError("%s annotation not found for node %q", OVNNodeHostCIDRs, node.Name)
+		return nil, newAnnotationNotSetError("%s annotation not found for node %q", OvnNodeIfAddr, node.Name)
+	}
+	nodeIfAddr := &primaryIfAddrAnnotation{}
+	if err := json.Unmarshal([]byte(nodeIfAddrAnnotation), nodeIfAddr); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal annotation: %s for node %q, err: %v", OvnNodeIfAddr, node.Name, err)
 	}
 
 	var cfg []string
-	if err := json.Unmarshal([]byte(addrAnnotation), &cfg); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal host cidrs annotation %s for node %q: %v",
-			addrAnnotation, node.Name, err)
+	if nodeIfAddr.IPv4 != "" {
+		cfg = append(cfg, nodeIfAddr.IPv4)
+	}
+	if nodeIfAddr.IPv6 != "" {
+		cfg = append(cfg, nodeIfAddr.IPv6)
+	}
+	if len(cfg) == 0 {
+		return nil, fmt.Errorf("node: %q does not have any IP information set", node.Name)
 	}
 
 	for i, cidr := range cfg {
@@ -376,7 +390,7 @@ func checkConnectionOrNoConnectionToNodePort(f *framework.Framework, clientPod *
 	if !shouldConnect {
 		notStr = "not "
 	}
-	nodeIPs, err := ParseNodeHostCIDRsDropNetMask(node)
+	nodeIPs, err := ParseNodeHostIPDropNetMask(node)
 	Expect(err).NotTo(HaveOccurred())
 
 	for nodeIP := range nodeIPs {
