@@ -43,8 +43,8 @@ RUN rm rpm/rpmbuild/RPMS/x86_64/*devel*
 RUN git log -n 1
 
 # Clone OVN Source Code.
-ARG OVN_REPO=https://github.com/ovn-org/ovn.git
-ARG OVN_BRANCH=main
+ARG OVN_REPO=https://github.com/almusil/ovn.git
+ARG OVN_BRANCH=fix_csum_24.09
 WORKDIR /root
 RUN git clone $OVN_REPO --single-branch --branch=$OVN_BRANCH
 
@@ -64,7 +64,7 @@ FROM fedora:39
 
 # Install needed dependencies.
 RUN INSTALL_PKGS=" \
-    iptables iproute iputils hostname unbound-libs kubernetes-client kmod" && \
+    iptables iproute iputils hostname unbound-libs kubernetes-client kmod socat" && \
     dnf install --best --refresh -y --setopt=tsflags=nodocs $INSTALL_PKGS && \
     dnf clean all && rm -rf /var/cache/dnf/*
 
