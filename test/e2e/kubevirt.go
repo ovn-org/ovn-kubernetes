@@ -1006,7 +1006,7 @@ passwd:
 
 		AfterEach(func() {
 			for _, node := range selectedNodes {
-				unlabelNode(node.Name, namespace)
+				Expect(unlabelNode(node.Name, namespace)).To(Succeed())
 			}
 		})
 
