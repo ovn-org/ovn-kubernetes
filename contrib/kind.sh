@@ -773,7 +773,7 @@ build_ovn_image() {
     # Find all built executables, but ignore the 'windows' directory if it exists
     find ../../go-controller/_output/go/bin/ -maxdepth 1 -type f -exec cp -f {} . \;
     echo "ref: $(git rev-parse  --symbolic-full-name HEAD)  commit: $(git rev-parse  HEAD)" > git_info
-    $OCI_BIN build -t "${OVN_IMAGE}" -f Dockerfile.fedora .
+    $OCI_BIN build -t "${OVN_IMAGE}" -f Dockerfile.fedora.dev .
 
     # store in local registry
     if [ "$KIND_LOCAL_REGISTRY" == true ];then
