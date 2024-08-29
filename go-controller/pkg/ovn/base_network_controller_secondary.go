@@ -524,6 +524,45 @@ func (bsnc *BaseSecondaryNetworkController) removePodForSecondaryNetwork(pod *ka
 		}
 
 		bsnc.forgetPodReleasedBeforeStartup(string(pod.UID), nadName)
+
+		if util.IsNetworkSegmentationSupportEnabled() && bsnc.IsPrimaryNetwork() && config.Gateway.DisableSNATMultipleGWs {
+			// we need to delete per-pod SNATs for UDN networks
+			if err := bsnc.delPerPodSNAT(pod, nadName); err != nil {
+				return fmt.Errorf("failed to delete SNAT for pod %s/%s which is part of network %s, err: %v",
+					pod.Namespace, pod.Name, bsnc.GetNetworkName(), err)
+			}
+		}
+	}
+	return nil
+}
+
+// delPerPodSNAT will delete the SNAT towards masqueradeIP for this given pod
+func (bsnc *BaseSecondaryNetworkController) delPerPodSNAT(pod *kapi.Pod, nadName string) error {
+	if !bsnc.isPodScheduledinLocalZone(pod) {
+		// nothing to do if its a remote zone pod
+		return nil
+	}
+	// we need to add per-pod SNATs for UDN networks
+	networkID, err := bsnc.getNetworkID()
+	if err != nil {
+		return fmt.Errorf("failed to get networkID for network %q: %v", bsnc.GetNetworkName(), err)
+	}
+	masqIPs, err := udn.GetUDNGatewayMasqueradeIPs(networkID)
+	if err != nil {
+		return fmt.Errorf("failed to get masquerade IPs, network %s (%d): %v", bsnc.GetNetworkName(), networkID, err)
+	}
+	podNetAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations, nadName)
+	if err != nil {
+		return fmt.Errorf("failed to fetch annotations for pod %s/%s in network %s; err: %v", pod.Namespace, pod.Name, bsnc.GetNetworkName(), err)
+	}
+	ops, err := deletePodSNATOps(bsnc.nbClient, nil, bsnc.GetNetworkScopedGWRouterName(pod.Spec.NodeName), masqIPs, podNetAnnotation.IPs)
+	if err != nil {
+		return fmt.Errorf("failed to construct SNAT pods for pod %s/%s which is part of network %s, err: %v",
+			pod.Namespace, pod.Name, bsnc.GetNetworkName(), err)
+	}
+	if _, err = libovsdbops.TransactAndCheck(bsnc.nbClient, ops); err != nil {
+		return fmt.Errorf("failed to delete SNAT rule for pod %s/%s in network %s on gateway router %s: %w",
+			pod.Namespace, pod.Name, bsnc.GetNetworkName(), bsnc.GetNetworkScopedGWRouterName(pod.Spec.NodeName), err)
 	}
 	return nil
 }
