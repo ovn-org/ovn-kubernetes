@@ -34,8 +34,17 @@ func TestSetVRFs(t *testing.T) {
 		},
 		MTU: 1400,
 	}
+	primaryNetwork := &ovncnitypes.NetConf{
+		NetConf: cnitypes.NetConf{
+			Name: "primary",
+			Type: "ovn-k8s-cni-overlay",
+		},
+		Topology: "layer3",
+		Role:     "primary",
+		MTU:      1400,
+	}
 
-	podNetworkRA := &ratypes.RouteAdvertisements{
+	podNetworkRA := ratypes.RouteAdvertisements{
 		ObjectMeta: v1.ObjectMeta{
 			Name: testRAName,
 		},
@@ -45,15 +54,37 @@ func TestSetVRFs(t *testing.T) {
 				PodNetwork: true,
 			},
 		},
+		Status: ratypes.RouteAdvertisementsStatus{
+			Conditions: []v1.Condition{
+				{
+					Type:   "Accepted",
+					Status: v1.ConditionTrue,
+				},
+			},
+		},
 	}
-	nonPodNetworkRA := &ratypes.RouteAdvertisements{
+	nonPodNetworkRA := ratypes.RouteAdvertisements{
 		ObjectMeta: v1.ObjectMeta{
 			Name: testRAName,
 		},
 		Spec: ratypes.RouteAdvertisementsSpec{
 			TargetVRF: testVRFName,
 		},
+		Status: ratypes.RouteAdvertisementsStatus{
+			Conditions: []v1.Condition{
+				{
+					Type:   "Accepted",
+					Status: v1.ConditionTrue,
+				},
+			},
+		},
 	}
+	podNetworkRANotAccepted := podNetworkRA
+	podNetworkRANotAccepted.Status = ratypes.RouteAdvertisementsStatus{}
+	podNetworkRARejected := *podNetworkRA.DeepCopy()
+	podNetworkRARejected.Status.Conditions[0].Status = v1.ConditionFalse
+	podNetworkRAOutdated := podNetworkRA
+	podNetworkRAOutdated.Generation = 1
 
 	testNode := corev1.Node{
 		ObjectMeta: v1.ObjectMeta{
@@ -75,25 +106,26 @@ func TestSetVRFs(t *testing.T) {
 	}
 
 	tests := []struct {
-		name     string
-		network  *ovncnitypes.NetConf
-		ra       *ratypes.RouteAdvertisements
-		node     corev1.Node
-		expected map[string][]string
+		name            string
+		network         *ovncnitypes.NetConf
+		ra              *ratypes.RouteAdvertisements
+		node            corev1.Node
+		expectNoNetwork bool
+		expected        map[string][]string
 	}{
 		{
 			name:    "reconciles VRF for selected node of default node network controller",
 			network: defaultNetwork,
-			ra:      podNetworkRA,
+			ra:      &podNetworkRA,
 			node:    testNode,
 			expected: map[string][]string{
 				testNodeName: {testVRFName},
 			},
 		},
 		{
-			name:    "reconciles VRF for selected node in same zone as default OVN network controller",
-			network: defaultNetwork,
-			ra:      podNetworkRA,
+			name:    "reconciles VRF for selected node in same zone as primary OVN network controller",
+			network: primaryNetwork,
+			ra:      &podNetworkRA,
 			node:    testNodeOnZone,
 			expected: map[string][]string{
 				testNodeOnZoneName: {testVRFName},
@@ -102,14 +134,34 @@ func TestSetVRFs(t *testing.T) {
 		{
 			name:    "ignores a route advertisement that is not for the pod network",
 			network: defaultNetwork,
-			ra:      nonPodNetworkRA,
+			ra:      &nonPodNetworkRA,
 			node:    testNode,
 		},
 		{
 			name:    "ignores a route advertisement that is not for applicable node",
 			network: defaultNetwork,
-			ra:      podNetworkRA,
+			ra:      &podNetworkRA,
 			node:    otherNode,
+		},
+		{
+			name:    "ignores a route advertisement that is not accepted",
+			network: defaultNetwork,
+			ra:      &podNetworkRANotAccepted,
+			node:    testNode,
+		},
+		{
+			name:            "fails for route advertisement that is rejected",
+			network:         primaryNetwork,
+			ra:              &podNetworkRARejected,
+			node:            testNode,
+			expectNoNetwork: true,
+		},
+		{
+			name:            "fails for a route advertisement that is old",
+			network:         primaryNetwork,
+			ra:              &podNetworkRAOutdated,
+			node:            testNode,
+			expectNoNetwork: true,
 		},
 	}
 	for _, tt := range tests {
@@ -168,7 +220,12 @@ func TestSetVRFs(t *testing.T) {
 					reconcilable = tncm.controllers[testNetworkKey(netInfo)]
 				}
 
+				if tt.expectNoNetwork {
+					g.Expect(reconcilable).To(gomega.BeNil())
+					return
+				}
 				g.Expect(reconcilable).ToNot(gomega.BeNil())
+
 				if tt.expected == nil {
 					tt.expected = map[string][]string{}
 				}
