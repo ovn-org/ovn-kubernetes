@@ -826,7 +826,7 @@ func (bnc *BaseNetworkController) isLayer2Interconnect() bool {
 	return config.OVNKubernetesFeature.EnableInterconnect && bnc.NetInfo.TopologyType() == types.Layer2Topology
 }
 
-func (bnc *BaseNetworkController) nodeZoneClusterChanged(oldNode, newNode *kapi.Node, newNodeIsLocalZone bool) bool {
+func (bnc *BaseNetworkController) nodeZoneClusterChanged(oldNode, newNode *kapi.Node, newNodeIsLocalZone bool, netName string) bool {
 	// Check if the annotations have changed. Use network topology and local params to skip unnecessary checks
 
 	// NodeIDAnnotationChanged and NodeTransitSwitchPortAddrAnnotationChanged affects local and remote nodes
@@ -839,7 +839,7 @@ func (bnc *BaseNetworkController) nodeZoneClusterChanged(oldNode, newNode *kapi.
 	}
 
 	// NodeGatewayRouterLRPAddrsAnnotationChanged would not affect local, nor localnet secondary network
-	if !newNodeIsLocalZone && bnc.NetInfo.TopologyType() != types.LocalnetTopology && util.NodeGatewayRouterLRPAddrsAnnotationChanged(oldNode, newNode) {
+	if !newNodeIsLocalZone && bnc.NetInfo.TopologyType() != types.LocalnetTopology && joinCIDRChanged(oldNode, newNode, netName) {
 		return true
 	}
 
