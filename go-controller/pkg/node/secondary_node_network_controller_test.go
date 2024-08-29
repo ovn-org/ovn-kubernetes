@@ -302,6 +302,7 @@ var _ = Describe("SecondaryNodeNetworkController", func() {
 			defer GinkgoRecover()
 			getCreationFakeOVSCommands(fexec, mgtPort, mgtPortMAC, netName, nodeName, NetInfo.MTU())
 			getVRFCreationFakeOVSCommands(fexec)
+			getRPFilterLooseModeFakeCommands(fexec)
 			getDeletionFakeOVSCommands(fexec, mgtPort)
 
 			By("starting secondary network controller for user defined primary network")
