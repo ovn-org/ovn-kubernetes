@@ -225,5 +225,7 @@ type UserDefinedNetworkList struct {
 
 // UserDefinedNetworkStatus contains the observed status of the UserDefinedNetwork.
 type UserDefinedNetworkStatus struct {
+	// +listType=map
+	// +listMapKey=type
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
