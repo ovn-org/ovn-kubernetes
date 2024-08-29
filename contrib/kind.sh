@@ -163,6 +163,8 @@ parse_args() {
                                                 ;;
             -ikv | --install-kubevirt)          KIND_INSTALL_KUBEVIRT=true
                                                 ;;
+            -nokvipam | --opt-out-kv-ipam)      KIND_OPT_OUT_KUBEVIRT_IPAM=true
+                                                ;;
             -ha | --ha-enabled )                OVN_HA=true
                                                 ;;
             -me | --multicast-enabled)          OVN_MULTICAST_ENABLE=true
@@ -350,6 +352,7 @@ print_params() {
      echo "KIND_INSTALL_METALLB = $KIND_INSTALL_METALLB"
      echo "KIND_INSTALL_PLUGINS = $KIND_INSTALL_PLUGINS"
      echo "KIND_INSTALL_KUBEVIRT = $KIND_INSTALL_KUBEVIRT"
+     echo "KIND_OPT_OUT_KUBEVIRT_IPAM = $KIND_OPT_OUT_KUBEVIRT_IPAM"
      echo "OVN_HA = $OVN_HA"
      echo "RUN_IN_CONTAINER = $RUN_IN_CONTAINER"
      echo "KIND_CLUSTER_NAME = $KIND_CLUSTER_NAME"
@@ -503,6 +506,7 @@ set_default_params() {
   KIND_INSTALL_METALLB=${KIND_INSTALL_METALLB:-false}
   KIND_INSTALL_PLUGINS=${KIND_INSTALL_PLUGINS:-false}
   KIND_INSTALL_KUBEVIRT=${KIND_INSTALL_KUBEVIRT:-false}
+  KIND_OPT_OUT_KUBEVIRT_IPAM=${KIND_OPT_OUT_KUBEVIRT_IPAM:-false}
   OVN_HA=${OVN_HA:-false}
   KIND_LOCAL_REGISTRY=${KIND_LOCAL_REGISTRY:-false}
   KIND_LOCAL_REGISTRY_NAME=${KIND_LOCAL_REGISTRY_NAME:-kind-registry}
@@ -1167,5 +1171,7 @@ if [ "$KIND_INSTALL_KUBEVIRT" == true ]; then
   deploy_passt_binary
 
   install_cert_manager
-  install_kubevirt_ipam_controller
+  if [ "$KIND_OPT_OUT_KUBEVIRT_IPAM" != true ]; then
+    install_kubevirt_ipam_controller
+  fi
 fi
