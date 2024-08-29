@@ -467,6 +467,20 @@ func serviceCIDRToRoute(isIPv6 bool, gatewayIP net.IP) []PodRoute {
 	return podRoutes
 }
 
+func hairpinMasqueradeIPToRoute(isIPv6 bool, gatewayIP net.IP) PodRoute {
+	ip := config.Gateway.MasqueradeIPs.V4OVNServiceHairpinMasqueradeIP
+	if isIPv6 {
+		ip = config.Gateway.MasqueradeIPs.V6OVNServiceHairpinMasqueradeIP
+	}
+	return PodRoute{
+		Dest: &net.IPNet{
+			IP:   ip,
+			Mask: GetIPFullMask(ip),
+		},
+		NextHop: gatewayIP,
+	}
+}
+
 // addRoutesGatewayIP updates the provided pod annotation for the provided pod
 // with the gateways derived from the allocated IPs
 func AddRoutesGatewayIP(
@@ -581,7 +595,8 @@ func AddRoutesGatewayIP(
 		if podAnnotation.Role == types.NetworkRolePrimary {
 			// Ensure default service network traffic always goes to OVN
 			podAnnotation.Routes = append(podAnnotation.Routes, serviceCIDRToRoute(isIPv6, gatewayIPnet.IP)...)
-
+			// Ensure service hairpin masquerade traffic always goes to OVN
+			podAnnotation.Routes = append(podAnnotation.Routes, hairpinMasqueradeIPToRoute(isIPv6, gatewayIPnet.IP))
 			otherDefaultRoute := otherDefaultRouteV4
 			if isIPv6 {
 				otherDefaultRoute = otherDefaultRouteV6
