@@ -515,7 +515,6 @@ func (gw *GatewayManager) GatewayInit(
 	// to the same gateway router
 	//
 	// This can be removed once https://bugzilla.redhat.com/show_bug.cgi?id=1891516 is fixed.
-	// FIXME(trozet): if LRP IP is changed, we do not remove stale instances of these routes
 	for _, gwLRPIP := range gwLRPIPs {
 		lrsr := nbdb.LogicalRouterStaticRoute{
 			IPPrefix: gwLRPIP.String(),
@@ -526,6 +525,13 @@ func (gw *GatewayManager) GatewayInit(
 				types.NetworkExternalID:  gw.netInfo.GetNetworkName(),
 				types.TopologyExternalID: gw.netInfo.TopologyType(),
 			}
+			if !config.OVNKubernetesFeature.EnableInterconnect {
+				lrsr.ExternalIDs["nodeName"] = nodeName
+			}
+		} else if !config.OVNKubernetesFeature.EnableInterconnect {
+			lrsr.ExternalIDs = map[string]string{
+				"nodeName": nodeName,
+			}
 		}
 		p := func(item *nbdb.LogicalRouterStaticRoute) bool {
 			return item.IPPrefix == lrsr.IPPrefix &&
@@ -533,6 +539,9 @@ func (gw *GatewayManager) GatewayInit(
 		}
 
 		if gw.clusterRouterName != "" {
+			if err = gw.deleteStaleJoinSubnetRoutes(nodeName, gwLRPIP.String()); err != nil {
+				klog.Errorf("Could not remove stale static route %v", err)
+			}
 			err := libovsdbops.CreateOrReplaceLogicalRouterStaticRouteWithPredicate(gw.nbClient,
 				gw.clusterRouterName, &lrsr, p, &lrsr.Nexthop)
 			if err != nil {
@@ -575,7 +584,6 @@ func (gw *GatewayManager) GatewayInit(
 			// towards join switch.
 			mgmtIfAddr := util.GetNodeManagementIfAddr(hostSubnet)
 			gw.staticRouteCleanup([]net.IP{mgmtIfAddr.IP})
-
 			if err := libovsdbops.CreateOrReplaceLogicalRouterStaticRouteWithPredicate(
 				gw.nbClient,
 				gw.clusterRouterName,
@@ -1091,6 +1099,38 @@ func (gw *GatewayManager) staticRouteCleanup(nextHops []net.IP) {
 	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
 		klog.Errorf("Failed to delete static route for nexthops %+v: %v", ips.UnsortedList(), err)
 	}
+}
+
+// deleteStaleJoinSubnetRoutes removes static routes referencing old join switch IP as either NextHop or IPPrefix.
+// It acts on following LRSRs:
+// 100.64.0.4               100.64.0.4 dst-ip
+func (gw *GatewayManager) deleteStaleJoinSubnetRoutes(nodeName, gwLRPIP string) error {
+	p := func(lrsr *nbdb.LogicalRouterStaticRoute) bool {
+		if lrsr.Nexthop != gwLRPIP && utilnet.IPFamilyOfString(lrsr.Nexthop) == utilnet.IPFamilyOfString(gwLRPIP) &&
+			lrsr.Nexthop == lrsr.IPPrefix {
+			networkName, isSecondaryNetwork := lrsr.ExternalIDs[types.NetworkExternalID]
+			if isSecondaryNetwork && networkName == gw.netInfo.GetNetworkName() {
+				if !config.OVNKubernetesFeature.EnableInterconnect && lrsr.ExternalIDs["nodeName"] == nodeName {
+					return true
+				} else if config.OVNKubernetesFeature.EnableInterconnect {
+					return true
+				}
+			} else if !isSecondaryNetwork {
+				if !config.OVNKubernetesFeature.EnableInterconnect && lrsr.ExternalIDs["nodeName"] == nodeName {
+					return true
+				} else if config.OVNKubernetesFeature.EnableInterconnect {
+					return true
+				}
+			}
+		}
+		return false
+	}
+
+	err := libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicate(gw.nbClient, gw.clusterRouterName, p)
+	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
+		return fmt.Errorf("failed to delete static route from router %s: %v", gw.clusterRouterName, err)
+	}
+	return nil
 }
 
 // policyRouteCleanup cleans up all policies on cluster router that have a nextHop

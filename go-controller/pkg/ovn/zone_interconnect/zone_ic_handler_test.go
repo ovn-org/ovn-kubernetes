@@ -575,6 +575,68 @@ var _ = ginkgo.Describe("Zone Interconnect Operations", func() {
 			})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
+
+		ginkgo.It("removes stale static routes", func() {
+			app.Action = func(ctx *cli.Context) error {
+				dbSetup := libovsdbtest.TestSetup{
+					NBData: []libovsdbtest.TestData{
+						&nbdb.LogicalRouterStaticRoute{
+							Nexthop:  "100.90.0.4",
+							IPPrefix: "10.244.4.0/24",
+							UUID:     "route1-UUID",
+							ExternalIDs: map[string]string{
+								types.NetworkExternalID: types.DefaultNetworkName,
+								"ic-node":               testNode3.Name,
+							},
+						},
+						&nbdb.LogicalRouterStaticRoute{
+							Nexthop:  "100.90.0.4",
+							IPPrefix: "10.66.0.4/32",
+							UUID:     "route2-UUID",
+							ExternalIDs: map[string]string{
+								types.NetworkExternalID: types.DefaultNetworkName,
+								"ic-node":               testNode3.Name,
+							},
+						},
+						&nbdb.LogicalRouter{
+							UUID:         types.OVNClusterRouter + "-UUID",
+							Name:         types.OVNClusterRouter,
+							StaticRoutes: []string{"route1-UUID", "route2-UUID"},
+						},
+					},
+					SBData: initialSBDB,
+				}
+
+				_, err := config.InitConfig(ctx, nil, nil)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				config.Kubernetes.HostNetworkNamespace = ""
+
+				var libovsdbOvnNBClient, libovsdbOvnSBClient libovsdbclient.Client
+				libovsdbOvnNBClient, libovsdbOvnSBClient, libovsdbCleanup, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				err = createTransitSwitchPortBindings(libovsdbOvnSBClient, types.DefaultNetworkName, &testNode3)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				zoneICHandler := NewZoneInterconnectHandler(&util.DefaultNetInfo{}, libovsdbOvnNBClient, libovsdbOvnSBClient, nil)
+				err = zoneICHandler.createOrUpdateTransitSwitch(0)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = invokeICHandlerAddNodeFunction("global", zoneICHandler, &testNode3)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = checkInterconnectResources("global", types.DefaultNetworkName, libovsdbOvnNBClient, testNodesRouteInfo, &testNode3)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				return nil
+			}
+
+			err := app.Run([]string{
+				app.Name,
+				"-cluster-subnets=" + clusterCIDR,
+				"-init-cluster-manager",
+				"-zone-join-switch-subnets=" + joinSubnetCIDR,
+				"-enable-interconnect",
+			})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
 	})
 
 	ginkgo.Context("Secondary networks", func() {
