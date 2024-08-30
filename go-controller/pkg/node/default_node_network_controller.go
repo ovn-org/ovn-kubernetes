@@ -292,22 +292,66 @@ func setOVSFlowTargets(node *kapi.Node) error {
 	return nil
 }
 
+// validateEncapIP returns false if there is an error or if the given IP is not known local IP address.
+func validateEncapIP(encapIP string) (bool, error) {
+	links, err := netlink.LinkList()
+	if err != nil {
+		return false, fmt.Errorf("failed to get all the links on the node: %v", err)
+	}
+	for _, link := range links {
+		addrs, err := util.GetFilteredInterfaceAddrs(link, config.IPv4Mode, config.IPv6Mode)
+		if err != nil {
+			return false, err
+		}
+		for _, addr := range addrs {
+			if addr.IP.String() == encapIP {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
 func setupOVNNode(node *kapi.Node) error {
 	var err error
 
+	nodePrimaryIP, err := util.GetNodePrimaryIP(node)
+	if err != nil {
+		return fmt.Errorf("failed to obtain local primary IP from node %q: %v", node.Name, err)
+	}
+
 	encapIP := config.Default.EncapIP
 	if encapIP == "" {
-		encapIP, err = util.GetNodePrimaryIP(node)
-		if err != nil {
-			return fmt.Errorf("failed to obtain local IP from node %q: %v", node.Name, err)
-		}
-		config.Default.EncapIP = encapIP
+		config.Default.EffectiveEncapIP = nodePrimaryIP
 	} else {
 		// OVN allows `external_ids:ovn-encap-ip` to be a list of IPs separated by comma.
+		config.Default.EffectiveEncapIP = encapIP
 		ovnEncapIps := strings.Split(encapIP, ",")
 		for _, ovnEncapIp := range ovnEncapIps {
 			if ip := net.ParseIP(strings.TrimSpace(ovnEncapIp)); ip == nil {
 				return fmt.Errorf("invalid IP address %q in provided encap-ip setting %q", ovnEncapIp, encapIP)
+			}
+		}
+		// if there are more than one encap IPs, it must be configured explicitly. otherwise:
+		if len(ovnEncapIps) == 1 {
+			encapIP = ovnEncapIps[0]
+			if encapIP == nodePrimaryIP {
+				// the current encap IP is node primary IP, unset config.Default.EncapIP to indicate it is
+				// implicitly configured through the old external_ids:ovn-encap-ip value and needs to be updated
+				// if node primary IP changes.
+				config.Default.EncapIP = ""
+			} else {
+				// the encap IP may be incorrectly set or;
+				// previous implicitly set with the old primary node IP through the old external_ids:ovn-encap-ip value,
+				// that has changed when ovnkube-node is down.
+				// validate it to see if it is still a valid local IP address.
+				valid, err := validateEncapIP(encapIP)
+				if err != nil {
+					return fmt.Errorf("invalid encap IP %s: %v", encapIP, err)
+				}
+				if !valid {
+					return fmt.Errorf("invalid encap IP %s: does not exist", encapIP)
+				}
 			}
 		}
 	}
@@ -317,7 +361,7 @@ func setupOVNNode(node *kapi.Node) error {
 		"Open_vSwitch",
 		".",
 		fmt.Sprintf("external_ids:ovn-encap-type=%s", config.Default.EncapType),
-		fmt.Sprintf("external_ids:ovn-encap-ip=%s", encapIP),
+		fmt.Sprintf("external_ids:ovn-encap-ip=%s", config.Default.EffectiveEncapIP),
 		fmt.Sprintf("external_ids:ovn-remote-probe-interval=%d",
 			config.Default.InactivityProbe),
 		fmt.Sprintf("external_ids:ovn-openflow-probe-interval=%d",
@@ -1376,11 +1420,11 @@ func (nc *DefaultNodeNetworkController) WatchNamespaces() error {
 // enough, it will return an error
 func (nc *DefaultNodeNetworkController) validateVTEPInterfaceMTU() error {
 	// OVN allows `external_ids:ovn-encap-ip` to be a list of IPs separated by comma
-	ovnEncapIps := strings.Split(config.Default.EncapIP, ",")
+	ovnEncapIps := strings.Split(config.Default.EffectiveEncapIP, ",")
 	for _, ip := range ovnEncapIps {
 		ovnEncapIP := net.ParseIP(strings.TrimSpace(ip))
 		if ovnEncapIP == nil {
-			return fmt.Errorf("invalid IP address %q in provided encap-ip setting %q", ovnEncapIP, config.Default.EncapIP)
+			return fmt.Errorf("invalid IP address %q in provided encap-ip setting %q", ovnEncapIP, config.Default.EffectiveEncapIP)
 		}
 		interfaceName, mtu, err := util.GetIFNameAndMTUForAddress(ovnEncapIP)
 		if err != nil {

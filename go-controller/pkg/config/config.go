@@ -232,9 +232,11 @@ type DefaultConfig struct {
 	// EncapType value defines the encapsulation protocol to use to transmit packets between
 	// hypervisors. By default the value is 'geneve'
 	EncapType string `gcfg:"encap-type"`
-	// The IP address of the encapsulation endpoint. If not specified, the IP address the
-	// NodeName resolves to will be used
+	// Configured IP address of the encapsulation endpoint.
 	EncapIP string `gcfg:"encap-ip"`
+	// Effective encap IP. It may be different from EncapIP if EncapIP meant to be
+	// the node's primary IP which can be updated when node's primary IP changes.
+	EffectiveEncapIP string
 	// The UDP Port of the encapsulation endpoint. If not specified, the IP default port
 	// of 6081 will be used
 	EncapPort uint `gcfg:"encap-port"`
