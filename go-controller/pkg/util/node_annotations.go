@@ -830,7 +830,7 @@ func ParseNodeGatewayRouterLRPAddrs(node *kapi.Node) ([]*net.IPNet, error) {
 	return parsePrimaryIfAddrAnnotation(node, ovnNodeGRLRPAddr)
 }
 
-func parseNodeGatewayRouterJoinNetwork(node *kapi.Node, netName string) (primaryIfAddrAnnotation, error) {
+func ParseNodeGatewayRouterJoinNetwork(node *kapi.Node, netName string) (primaryIfAddrAnnotation, error) {
 	var val primaryIfAddrAnnotation
 	joinSubnetMap, err := parseJoinSubnetAnnotation(node.Annotations, OVNNodeGRLRPAddrs)
 	if err != nil {
@@ -848,7 +848,7 @@ func parseNodeGatewayRouterJoinNetwork(node *kapi.Node, netName string) (primary
 // ParseNodeGatewayRouterJoinIPv4 returns the IPv4 address for the node's gateway router port
 // stored in the 'OVNNodeGRLRPAddrs' annotation
 func ParseNodeGatewayRouterJoinIPv4(node *kapi.Node, netName string) (net.IP, error) {
-	primaryIfAddr, err := parseNodeGatewayRouterJoinNetwork(node, netName)
+	primaryIfAddr, err := ParseNodeGatewayRouterJoinNetwork(node, netName)
 	if err != nil {
 		return nil, err
 	}
@@ -867,7 +867,7 @@ func ParseNodeGatewayRouterJoinIPv4(node *kapi.Node, netName string) (net.IP, er
 // ParseNodeGatewayRouterJoinAddrs returns the IPv4 and/or IPv6 addresses for the node's gateway router port
 // stored in the 'OVNNodeGRLRPAddrs' annotation
 func ParseNodeGatewayRouterJoinAddrs(node *kapi.Node, netName string) ([]*net.IPNet, error) {
-	primaryIfAddr, err := parseNodeGatewayRouterJoinNetwork(node, netName)
+	primaryIfAddr, err := ParseNodeGatewayRouterJoinNetwork(node, netName)
 	if err != nil {
 		return nil, err
 	}

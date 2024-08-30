@@ -401,9 +401,15 @@ func macAddressChanged(oldNode, node *kapi.Node, netName string) bool {
 	return !bytes.Equal(oldMacAddress, macAddress)
 }
 
-func nodeSubnetChanged(oldNode, node *kapi.Node) bool {
-	oldSubnets, _ := util.ParseNodeHostSubnetAnnotation(oldNode, ovntypes.DefaultNetworkName)
-	newSubnets, _ := util.ParseNodeHostSubnetAnnotation(node, ovntypes.DefaultNetworkName)
+func nodeSubnetChanged(oldNode, node *kapi.Node, netName string) bool {
+	oldSubnets, _ := util.ParseNodeHostSubnetAnnotation(oldNode, netName)
+	newSubnets, _ := util.ParseNodeHostSubnetAnnotation(node, netName)
+	return !reflect.DeepEqual(oldSubnets, newSubnets)
+}
+
+func joinCIDRChanged(oldNode, node *kapi.Node, netName string) bool {
+	oldSubnets, _ := util.ParseNodeGatewayRouterJoinNetwork(oldNode, netName)
+	newSubnets, _ := util.ParseNodeGatewayRouterJoinNetwork(node, netName)
 	return !reflect.DeepEqual(oldSubnets, newSubnets)
 }
 
