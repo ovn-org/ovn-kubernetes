@@ -131,25 +131,30 @@ var _ = Describe("Network Segmentation", func() {
 		BeforeEach(func() {
 			config.OVNKubernetesFeature.EnableMultiNetwork = true
 			config.OVNKubernetesFeature.EnableNetworkSegmentation = true
-			pod = &v1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      pr.PodName,
-					Namespace: pr.PodNamespace,
-					Annotations: map[string]string{
-						"k8s.ovn.org/pod-networks": `{"default":{"ip_address":"100.10.10.3/24","mac_address":"0a:58:fd:98:00:01", "role":"primary"}}`,
+		})
+
+		Context("pod with default primary network", func() {
+			BeforeEach(func() {
+				pod = &v1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      pr.PodName,
+						Namespace: pr.PodNamespace,
+						Annotations: map[string]string{
+							"k8s.ovn.org/pod-networks": `{"default":{"ip_address":"100.10.10.3/24","mac_address":"0a:58:fd:98:00:01", "role":"primary"}}`,
+						},
 					},
-				},
-			}
-		})
-		It("should not fail at cmdAdd", func() {
-			podNamespaceLister.On("Get", pr.PodName).Return(pod, nil)
-			Expect(pr.cmdAddWithGetCNIResultFunc(kubeAuth, clientSet, getCNIResultStub)).NotTo(BeNil())
-			Expect(obtainedPodIterfaceInfos).ToNot(BeEmpty())
-		})
-		It("should not fail at cmdDel", func() {
-			podNamespaceLister.On("Get", pr.PodName).Return(pod, nil)
-			Expect(pr.cmdDel(clientSet)).NotTo(BeNil())
-			Expect(prInterfaceOpsStub.unconfiguredInterfaces).To(HaveLen(2))
+				}
+			})
+			It("should not fail at cmdAdd", func() {
+				podNamespaceLister.On("Get", pr.PodName).Return(pod, nil)
+				Expect(pr.cmdAddWithGetCNIResultFunc(kubeAuth, clientSet, getCNIResultStub)).NotTo(BeNil())
+				Expect(obtainedPodIterfaceInfos).ToNot(BeEmpty())
+			})
+			It("should not fail at cmdDel", func() {
+				podNamespaceLister.On("Get", pr.PodName).Return(pod, nil)
+				Expect(pr.cmdDel(clientSet)).NotTo(BeNil())
+				Expect(prInterfaceOpsStub.unconfiguredInterfaces).To(HaveLen(2))
+			})
 		})
 
 	})
