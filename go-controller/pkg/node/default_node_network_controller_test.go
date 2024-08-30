@@ -74,7 +74,7 @@ var _ = Describe("Node", func() {
 			}
 
 			config.Default.MTU = configDefaultMTU
-			config.Default.EncapIP = "10.1.0.40"
+			config.Default.EffectiveEncapIP = "10.1.0.40"
 
 		})
 
@@ -219,7 +219,7 @@ var _ = Describe("Node", func() {
 			BeforeEach(func() {
 				config.IPv4Mode = true
 				config.IPv6Mode = false
-				config.Default.EncapIP = "10.1.0.40,10.2.0.50"
+				config.Default.EffectiveEncapIP = "10.1.0.40,10.2.0.50"
 				netlinkOpsMock.On("LinkByIndex", 5).Return(netlinkLinkMock, nil)
 			})
 

@@ -50,12 +50,12 @@ func newAddressManager(nodeName string, k kube.Interface, config *managementPort
 // newAddressManagerInternal creates a new address manager; this function is
 // only expose for testcases to disable netlink subscription to ensure
 // reproducibility of unit tests.
-func newAddressManagerInternal(nodeName string, k kube.Interface, config *managementPortConfig, watchFactory factory.NodeWatchFactory, gwBridge *bridgeConfiguration, useNetlink bool) *addressManager {
+func newAddressManagerInternal(nodeName string, k kube.Interface, mgmtConfig *managementPortConfig, watchFactory factory.NodeWatchFactory, gwBridge *bridgeConfiguration, useNetlink bool) *addressManager {
 	mgr := &addressManager{
 		nodeName:       nodeName,
 		watchFactory:   watchFactory,
 		cidrs:          sets.New[string](),
-		mgmtPortConfig: config,
+		mgmtPortConfig: mgmtConfig,
 		gatewayBridge:  gwBridge,
 		OnChanged:      func() {},
 		useNetlink:     useNetlink,
@@ -228,7 +228,7 @@ func (c *addressManager) handleNodePrimaryAddrChange() {
 		klog.Errorf("Address Manager failed to check node primary address change: %v", err)
 		return
 	}
-	if nodePrimaryAddrChanged {
+	if nodePrimaryAddrChanged && config.Default.EncapIP == "" {
 		klog.Infof("Node primary address changed to %v. Updating OVN encap IP.", c.nodePrimaryAddr)
 		updateOVNEncapIPAndReconnect(c.nodePrimaryAddr)
 	}
@@ -536,6 +536,7 @@ func updateOVNEncapIPAndReconnect(newIP net.IP) {
 		}
 	}
 
+	config.Default.EffectiveEncapIP = newIP.String()
 	confCmd := []string{
 		"set",
 		"Open_vSwitch",
