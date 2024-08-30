@@ -9,13 +9,13 @@
 # are built locally and included in the image (instead of the rpm)
 #
 
-FROM fedora:39
+FROM fedora:rawhide
 
 USER root
 
 ENV PYTHONDONTWRITEBYTECODE yes
 
-ARG ovnver=ovn-24.03.2-19.fc39
+ARG ovnver=ovn-24.03.90-6.fc42
 # Automatically populated when using docker buildx
 ARG TARGETPLATFORM
 ARG BUILDPLATFORM
@@ -24,14 +24,14 @@ RUN echo "Running on $BUILDPLATFORM, building for $TARGETPLATFORM"
 
 # install needed rpms - openvswitch must be 2.10.4 or higher
 RUN INSTALL_PKGS=" \
-	python3-pip python3-pyyaml bind-utils procps-ng openssl numactl-libs firewalld-filesystem \
-	libpcap hostname kubernetes-client util-linux \
-        ovn ovn-central ovn-host python3-openvswitch tcpdump openvswitch-test python3-pyOpenSSL \
-	iptables iproute iputils strace socat koji \
-        libreswan openvswitch-ipsec \
-        " && \
-	dnf install --best --refresh -y --setopt=tsflags=nodocs $INSTALL_PKGS && \
-	dnf clean all && rm -rf /var/cache/dnf/*
+    python3-pip python3-pyyaml bind-utils procps-ng openssl numactl-libs firewalld-filesystem \
+    libpcap hostname kubernetes-client util-linux \
+    ovn ovn-central ovn-host python3-openvswitch tcpdump openvswitch-test python3-pyOpenSSL \
+    iptables iproute iputils strace socat koji \
+    libreswan openvswitch-ipsec \
+    " && \
+    dnf install --best --refresh -y --setopt=tsflags=nodocs $INSTALL_PKGS && \
+    dnf clean all && rm -rf /var/cache/dnf/*
 RUN ln -s /usr/bin/python3 /usr/libexec/platform-python
 
 RUN mkdir -p /var/run/openvswitch
