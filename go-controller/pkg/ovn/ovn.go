@@ -439,7 +439,6 @@ func shouldUpdateNode(node, oldNode *kapi.Node) (bool, error) {
 }
 
 func (oc *DefaultNetworkController) StartServiceController(wg *sync.WaitGroup, runRepair bool) error {
-	klog.Infof("Starting OVN Service Controller: Using Endpoint Slices")
 	wg.Add(1)
 	go func() {
 		defer wg.Done()

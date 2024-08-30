@@ -154,7 +154,7 @@ fi
 
 # Only run network segmentation tests if they are explicitly requested
 NETWORK_SEGMENTATION_TESTS="Network Segmentation"
-if [ "${WHAT}" != "${NETWORK_SEGMENTATION_TESTS}" ]; then
+if [[ "${WHAT}" != "${NETWORK_SEGMENTATION_TESTS}"* ]]; then
   if [ "$SKIPPED_TESTS" != "" ]; then
 	SKIPPED_TESTS+="|"
   fi

@@ -8,8 +8,7 @@ import (
 	"testing"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	kube_test "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	kubetest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 
 	"github.com/stretchr/testify/assert"
 	kapi "k8s.io/api/core/v1"
@@ -457,39 +456,6 @@ func TestPodScheduled(t *testing.T) {
 	}
 }
 
-func TestExternalIDsForObject(t *testing.T) {
-	assert.Equal(t,
-		ExternalIDsForObject(&v1.Service{
-			TypeMeta: metav1.TypeMeta{
-				Kind:       "Service",
-				APIVersion: "v1",
-			},
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "svc-ab23",
-				Namespace: "ns",
-				Labels:    map[string]string{discovery.LabelServiceName: "svc"},
-			},
-		}),
-		map[string]string{
-			types.LoadBalancerKindExternalID:  "Service",
-			types.LoadBalancerOwnerExternalID: "ns/svc-ab23",
-		})
-
-	assert.Equal(t,
-		ExternalIDsForObject(&v1.Service{
-			// also handle no TypeMeta, which can happen.
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "svc-ab23",
-				Namespace: "ns",
-				Labels:    map[string]string{discovery.LabelServiceName: "svc"},
-			},
-		}),
-		map[string]string{
-			types.LoadBalancerKindExternalID:  "Service",
-			types.LoadBalancerOwnerExternalID: "ns/svc-ab23",
-		})
-}
-
 var (
 	testNode   string      = "testNode"
 	otherNode              = "otherNode"
@@ -697,9 +663,9 @@ func TestGetEligibleEndpointAddresses(t *testing.T) {
 		{
 			"Get all eligible endpoints from an endpointslice with all ready endpoints, one of which is on a different node",
 			[]discovery.Endpoint{
-				kube_test.MakeReadyEndpoint(testNode, ep1Address),
-				kube_test.MakeReadyEndpoint(testNode, ep2Address),
-				kube_test.MakeReadyEndpoint(otherNode, ep3Address),
+				kubetest.MakeReadyEndpoint(testNode, ep1Address),
+				kubetest.MakeReadyEndpoint(testNode, ep2Address),
+				kubetest.MakeReadyEndpoint(otherNode, ep3Address),
 			},
 			"", // get all endpoints
 			[]string{ep1Address, ep2Address, ep3Address},
@@ -707,9 +673,9 @@ func TestGetEligibleEndpointAddresses(t *testing.T) {
 		{
 			"Get all eligible local endpoints from an endpointslice with all ready endpoints, one of which is on a different node",
 			[]discovery.Endpoint{
-				kube_test.MakeReadyEndpoint(testNode, ep1Address),
-				kube_test.MakeReadyEndpoint(testNode, ep2Address),
-				kube_test.MakeReadyEndpoint(otherNode, ep3Address),
+				kubetest.MakeReadyEndpoint(testNode, ep1Address),
+				kubetest.MakeReadyEndpoint(testNode, ep2Address),
+				kubetest.MakeReadyEndpoint(otherNode, ep3Address),
 			},
 			testNode,
 			[]string{ep1Address, ep2Address},
@@ -717,9 +683,9 @@ func TestGetEligibleEndpointAddresses(t *testing.T) {
 		{
 			"Get all eligible local endpoints from an endpointslice with all ready endpoints, all of which are on another node",
 			[]discovery.Endpoint{
-				kube_test.MakeReadyEndpoint(otherNode, ep1Address),
-				kube_test.MakeReadyEndpoint(otherNode, ep2Address),
-				kube_test.MakeReadyEndpoint(otherNode, ep3Address),
+				kubetest.MakeReadyEndpoint(otherNode, ep1Address),
+				kubetest.MakeReadyEndpoint(otherNode, ep2Address),
+				kubetest.MakeReadyEndpoint(otherNode, ep3Address),
 			},
 			testNode,
 			[]string{},
@@ -727,9 +693,9 @@ func TestGetEligibleEndpointAddresses(t *testing.T) {
 		{
 			"Get all eligible endpoints from an endpointslice with all non-ready, serving, terminating endpoints, one of which is on a different node",
 			[]discovery.Endpoint{
-				kube_test.MakeTerminatingServingEndpoint(testNode, ep1Address),
-				kube_test.MakeTerminatingServingEndpoint(testNode, ep2Address),
-				kube_test.MakeTerminatingServingEndpoint(otherNode, ep3Address),
+				kubetest.MakeTerminatingServingEndpoint(testNode, ep1Address),
+				kubetest.MakeTerminatingServingEndpoint(testNode, ep2Address),
+				kubetest.MakeTerminatingServingEndpoint(otherNode, ep3Address),
 			},
 			"",
 			[]string{ep1Address, ep2Address, ep3Address}, // with no ready endpoints, we fallback to terminating serving endpoints
@@ -737,9 +703,9 @@ func TestGetEligibleEndpointAddresses(t *testing.T) {
 		{
 			"Get all eligible local endpoints from an endpointslice with all non-ready, serving, terminating endpoints, one of which is on a different node",
 			[]discovery.Endpoint{
-				kube_test.MakeTerminatingServingEndpoint(testNode, ep1Address),
-				kube_test.MakeTerminatingServingEndpoint(testNode, ep2Address),
-				kube_test.MakeTerminatingServingEndpoint(otherNode, ep3Address),
+				kubetest.MakeTerminatingServingEndpoint(testNode, ep1Address),
+				kubetest.MakeTerminatingServingEndpoint(testNode, ep2Address),
+				kubetest.MakeTerminatingServingEndpoint(otherNode, ep3Address),
 			},
 			testNode,
 			[]string{ep1Address, ep2Address}, // with no ready endpoints, we fallback to terminating serving endpoints
@@ -747,9 +713,9 @@ func TestGetEligibleEndpointAddresses(t *testing.T) {
 		{
 			"Get all eligible local endpoints from an endpointslice with all non-ready, serving, terminating endpoints, all of which are on a different node",
 			[]discovery.Endpoint{
-				kube_test.MakeTerminatingServingEndpoint(otherNode, ep1Address),
-				kube_test.MakeTerminatingServingEndpoint(otherNode, ep2Address),
-				kube_test.MakeTerminatingServingEndpoint(otherNode, ep3Address),
+				kubetest.MakeTerminatingServingEndpoint(otherNode, ep1Address),
+				kubetest.MakeTerminatingServingEndpoint(otherNode, ep2Address),
+				kubetest.MakeTerminatingServingEndpoint(otherNode, ep3Address),
 			},
 			testNode,
 			[]string{},
@@ -757,9 +723,9 @@ func TestGetEligibleEndpointAddresses(t *testing.T) {
 		{
 			"Get all eligible endpoints from an endpointslice with all non-ready, non-serving, terminating endpoints, one of which is on a different node",
 			[]discovery.Endpoint{
-				kube_test.MakeTerminatingNonServingEndpoint(testNode, ep1Address),
-				kube_test.MakeTerminatingNonServingEndpoint(testNode, ep2Address),
-				kube_test.MakeTerminatingNonServingEndpoint(otherNode, ep3Address),
+				kubetest.MakeTerminatingNonServingEndpoint(testNode, ep1Address),
+				kubetest.MakeTerminatingNonServingEndpoint(testNode, ep2Address),
+				kubetest.MakeTerminatingNonServingEndpoint(otherNode, ep3Address),
 			},
 			"",
 			[]string{},
@@ -767,9 +733,9 @@ func TestGetEligibleEndpointAddresses(t *testing.T) {
 		{
 			"Get all eligible local endpoints from an endpointslice with all non-ready, non-serving, terminating endpoints, one of which is on a different node",
 			[]discovery.Endpoint{
-				kube_test.MakeTerminatingNonServingEndpoint(testNode, ep1Address),
-				kube_test.MakeTerminatingNonServingEndpoint(testNode, ep2Address),
-				kube_test.MakeTerminatingNonServingEndpoint(otherNode, ep3Address),
+				kubetest.MakeTerminatingNonServingEndpoint(testNode, ep1Address),
+				kubetest.MakeTerminatingNonServingEndpoint(testNode, ep2Address),
+				kubetest.MakeTerminatingNonServingEndpoint(otherNode, ep3Address),
 			},
 			testNode,
 			[]string{},
@@ -777,9 +743,9 @@ func TestGetEligibleEndpointAddresses(t *testing.T) {
 		{
 			"Get all eligible local endpoints from an endpointslice with endpoints showing a mix of status conditions, one of which is on a different node",
 			[]discovery.Endpoint{
-				kube_test.MakeReadyEndpoint(testNode, ep1Address),
-				kube_test.MakeTerminatingServingEndpoint(testNode, ep2Address),
-				kube_test.MakeTerminatingNonServingEndpoint(otherNode, ep3Address),
+				kubetest.MakeReadyEndpoint(testNode, ep1Address),
+				kubetest.MakeTerminatingServingEndpoint(testNode, ep2Address),
+				kubetest.MakeTerminatingNonServingEndpoint(otherNode, ep3Address),
 			},
 			testNode,
 			[]string{ep1Address}, // only the ready endpoint is included
@@ -787,9 +753,9 @@ func TestGetEligibleEndpointAddresses(t *testing.T) {
 		{
 			"Get all eligible local endpoints from an endpointslice with endpoints showing a mix of status conditions, all of which are on a different node",
 			[]discovery.Endpoint{
-				kube_test.MakeReadyEndpoint(otherNode, ep1Address),
-				kube_test.MakeTerminatingServingEndpoint(otherNode, ep2Address),
-				kube_test.MakeTerminatingNonServingEndpoint(otherNode, ep3Address),
+				kubetest.MakeReadyEndpoint(otherNode, ep1Address),
+				kubetest.MakeTerminatingServingEndpoint(otherNode, ep2Address),
+				kubetest.MakeTerminatingNonServingEndpoint(otherNode, ep3Address),
 			},
 			testNode,
 			[]string{},
@@ -797,9 +763,9 @@ func TestGetEligibleEndpointAddresses(t *testing.T) {
 		{
 			"Get all eligible endpoints from an endpointslice where all local endpoints are serving and terminating and a remote endpoint is ready",
 			[]discovery.Endpoint{
-				kube_test.MakeTerminatingServingEndpoint(testNode, ep1Address),
-				kube_test.MakeTerminatingServingEndpoint(testNode, ep2Address),
-				kube_test.MakeReadyEndpoint(otherNode, ep3Address),
+				kubetest.MakeTerminatingServingEndpoint(testNode, ep1Address),
+				kubetest.MakeTerminatingServingEndpoint(testNode, ep2Address),
+				kubetest.MakeReadyEndpoint(otherNode, ep3Address),
 			},
 			"",
 			[]string{ep3Address}, // fallback to serving&terminating should apply
@@ -807,9 +773,9 @@ func TestGetEligibleEndpointAddresses(t *testing.T) {
 		{
 			"Get all eligible local endpoints from an endpointslice where all local endpoints are serving and terminating and a remote endpoint is ready",
 			[]discovery.Endpoint{
-				kube_test.MakeTerminatingServingEndpoint(testNode, ep1Address),
-				kube_test.MakeTerminatingServingEndpoint(testNode, ep2Address),
-				kube_test.MakeReadyEndpoint(otherNode, ep3Address),
+				kubetest.MakeTerminatingServingEndpoint(testNode, ep1Address),
+				kubetest.MakeTerminatingServingEndpoint(testNode, ep2Address),
+				kubetest.MakeReadyEndpoint(otherNode, ep3Address),
 			},
 			testNode,
 			[]string{ep1Address, ep2Address}, // fallback to serving&terminating should apply
@@ -817,9 +783,9 @@ func TestGetEligibleEndpointAddresses(t *testing.T) {
 		{
 			"Get all eligible endpoints from an endpointslice where all local endpoints are terminating and not serving and a remote endpoint is ready",
 			[]discovery.Endpoint{
-				kube_test.MakeTerminatingNonServingEndpoint(testNode, ep1Address),
-				kube_test.MakeTerminatingNonServingEndpoint(testNode, ep2Address),
-				kube_test.MakeReadyEndpoint(otherNode, ep3Address),
+				kubetest.MakeTerminatingNonServingEndpoint(testNode, ep1Address),
+				kubetest.MakeTerminatingNonServingEndpoint(testNode, ep2Address),
+				kubetest.MakeReadyEndpoint(otherNode, ep3Address),
 			},
 			"",
 			[]string{ep3Address},
@@ -827,9 +793,9 @@ func TestGetEligibleEndpointAddresses(t *testing.T) {
 		{
 			"Get all eligible local endpoints from an endpointslice where all local endpoints are terminating and not serving and a remote endpoint is ready",
 			[]discovery.Endpoint{
-				kube_test.MakeTerminatingNonServingEndpoint(testNode, ep1Address),
-				kube_test.MakeTerminatingNonServingEndpoint(testNode, ep2Address),
-				kube_test.MakeReadyEndpoint(otherNode, ep3Address),
+				kubetest.MakeTerminatingNonServingEndpoint(testNode, ep1Address),
+				kubetest.MakeTerminatingNonServingEndpoint(testNode, ep2Address),
+				kubetest.MakeReadyEndpoint(otherNode, ep3Address),
 			},
 			testNode,
 			[]string{},

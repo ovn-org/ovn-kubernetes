@@ -160,8 +160,8 @@ var _ = Describe("Topology factory", func() {
 					"0a:58:c0:a8:c8:0a",
 					nil,
 					map[string]string{
-						"k8s.ovn.org/network":  "angrytenant",
-						"k8s.ovn.org/topology": "layer3",
+						ovntypes.NetworkExternalID:  "angrytenant",
+						ovntypes.TopologyExternalID: "layer3",
 					},
 					ips(gwRoutersIPs...)...,
 				),

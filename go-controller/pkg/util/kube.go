@@ -18,9 +18,7 @@ import (
 	certificatesv1 "k8s.io/api/certificates/v1"
 	kapi "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
-	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -49,7 +47,6 @@ import (
 	egressqosclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/clientset/versioned"
 	egressserviceclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/clientset/versioned"
 	userdefinednetworkclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/clientset/versioned"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	anpclientset "sigs.k8s.io/network-policy-api/pkg/client/clientset/versioned"
 )
 
@@ -681,41 +678,6 @@ func EventRecorder(kubeClient kubernetes.Interface) record.EventRecorder {
 		scheme.Scheme,
 		kapi.EventSource{Component: "controlplane"})
 	return recorder
-}
-
-// UseEndpointSlices detect if Endpoints Slices are enabled in the cluster
-func UseEndpointSlices(kubeClient kubernetes.Interface) bool {
-	if _, err := kubeClient.Discovery().ServerResourcesForGroupVersion(discovery.SchemeGroupVersion.String()); err == nil {
-		klog.V(2).Infof("Kubernetes Endpoint Slices enabled on the cluster: %s", discovery.SchemeGroupVersion.String())
-		return true
-	}
-	return false
-}
-
-type K8sObject interface {
-	metav1.Object
-	k8sruntime.Object
-}
-
-func ExternalIDsForObject(obj K8sObject) map[string]string {
-	gk := obj.GetObjectKind().GroupVersionKind().GroupKind()
-	nsn := k8stypes.NamespacedName{
-		Namespace: obj.GetNamespace(),
-		Name:      obj.GetName(),
-	}
-
-	if gk.String() == "" {
-		kinds, _, err := scheme.Scheme.ObjectKinds(obj)
-		if err != nil || len(kinds) == 0 || len(kinds) > 1 {
-			klog.Warningf("Object %v either has no GroupVersionKind or has an ambiguous GroupVersionKind: %#v, err", obj, err)
-		}
-		gk = kinds[0].GroupKind()
-	}
-
-	return map[string]string{
-		types.LoadBalancerOwnerExternalID: nsn.String(),
-		types.LoadBalancerKindExternalID:  gk.String(),
-	}
 }
 
 // IsEndpointReady takes as input an endpoint from an endpoint slice and returns true if the endpoint is

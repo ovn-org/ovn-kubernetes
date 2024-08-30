@@ -131,8 +131,8 @@ func toNBTemplateList(tlbs []*templateLoadBalancer) []TemplateMap {
 //
 // It is assumed that names are meaningful and somewhat stable, to minimize churn. This
 // function doesn't work with Load_Balancers without a name.
-func EnsureLBs(nbClient libovsdbclient.Client, service *corev1.Service, existingCacheLBs []LB, LBs []LB) error {
-	externalIDs := util.ExternalIDsForObject(service)
+func EnsureLBs(nbClient libovsdbclient.Client, service *corev1.Service, existingCacheLBs []LB, LBs []LB, netInfo util.NetInfo) error {
+	externalIDs := getExternalIDsForLoadBalancer(service, netInfo)
 	existingByName := make(map[string]*LB, len(existingCacheLBs))
 	toDelete := make(map[string]*LB, len(existingCacheLBs))
 
@@ -425,25 +425,52 @@ func DeleteLBs(nbClient libovsdbclient.Client, uuids []string) error {
 	return nil
 }
 
-// getLBs returns a slice of load balancers found in OVN.
-func getLBs(nbClient libovsdbclient.Client, allTemplates TemplateMap) ([]*LB, error) {
-	_, out, err := _getLBsCommon(nbClient, allTemplates, false)
+// getAllLBs returns a slice of load balancers found in OVN.
+func getAllLBs(nbClient libovsdbclient.Client, allTemplates TemplateMap) ([]*LB, error) {
+	_, out, err := _getLBsCommon(nbClient, allTemplates, false, true, nil)
 	return out, err
 }
 
-// getServiceLBs returns a set of services as well as a slice of load balancers found in OVN.
-func getServiceLBs(nbClient libovsdbclient.Client, allTemplates TemplateMap) (sets.Set[string], []*LB, error) {
-	return _getLBsCommon(nbClient, allTemplates, true)
+// getServiceLBsForNetwork returns the services and OVN load balancers for the network specified in netInfo.
+func getServiceLBsForNetwork(nbClient libovsdbclient.Client, allTemplates TemplateMap, netInfo util.NetInfo) (sets.Set[string], []*LB, error) {
+	return _getLBsCommon(nbClient, allTemplates, true, false, netInfo)
 }
 
-func _getLBsCommon(nbClient libovsdbclient.Client, allTemplates TemplateMap, withServiceOwner bool) (sets.Set[string], []*LB, error) {
-	lbs, err := libovsdbops.ListLoadBalancers(nbClient)
+func _getLBsCommon(nbClient libovsdbclient.Client, allTemplates TemplateMap, withServiceOwner bool, includeAllNetworks bool, netInfo util.NetInfo) (sets.Set[string], []*LB, error) {
+
+	// Lookup network name and network role in the OVN external IDs to check whether
+	// the OVN element with the input externalIDs belongs to this network.
+	belongsToThisNetwork := func(externalIDs map[string]string) bool {
+		if !util.IsNetworkSegmentationSupportEnabled() {
+			return true
+		}
+
+		network, ok := externalIDs[types.NetworkExternalID]
+
+		if netInfo == nil {
+			return true
+		}
+
+		if netInfo.IsDefault() {
+			return !ok
+		}
+
+		// filter out anything belonging to default and (if any) secondary networks
+		role, ok := externalIDs[types.NetworkRoleExternalID]
+		return ok && role == types.NetworkRolePrimary && network == netInfo.GetNetworkName()
+	}
+
+	p := func(item *nbdb.LoadBalancer) bool {
+		return includeAllNetworks || belongsToThisNetwork(item.ExternalIDs)
+	}
+
+	lbs, err := libovsdbops.FindLoadBalancersWithPredicate(nbClient, p)
 	if err != nil {
 		return nil, nil, fmt.Errorf("could not list load_balancer: %w", err)
 	}
 
-	services := sets.New[string]()
-	outMap := make(map[string]*LB, len(lbs))
+	services := sets.New[string]()           // all services found in load balancers
+	outMap := make(map[string]*LB, len(lbs)) // UUID -> *LB
 	for _, lb := range lbs {
 
 		// Skip load balancers unrelated to service, or w/out an owner (aka namespace+name)
@@ -481,8 +508,9 @@ func _getLBsCommon(nbClient libovsdbclient.Client, allTemplates TemplateMap, wit
 
 	// Switches
 	ps := func(item *nbdb.LogicalSwitch) bool {
-		return len(item.LoadBalancer) > 0
+		return len(item.LoadBalancer) > 0 && (includeAllNetworks || belongsToThisNetwork(item.ExternalIDs))
 	}
+
 	switches, err := libovsdbops.FindLogicalSwitchesWithPredicate(nbClient, ps)
 	if err != nil {
 		return nil, nil, fmt.Errorf("could not list logical switches: %w", err)
@@ -497,7 +525,7 @@ func _getLBsCommon(nbClient libovsdbclient.Client, allTemplates TemplateMap, wit
 
 	// Routers
 	pr := func(item *nbdb.LogicalRouter) bool {
-		return len(item.LoadBalancer) > 0
+		return len(item.LoadBalancer) > 0 && (includeAllNetworks || belongsToThisNetwork(item.ExternalIDs))
 	}
 	routers, err := libovsdbops.FindLogicalRoutersWithPredicate(nbClient, pr)
 	if err != nil {
@@ -511,10 +539,39 @@ func _getLBsCommon(nbClient libovsdbclient.Client, allTemplates TemplateMap, wit
 		}
 	}
 
-	// Groups
+	// LB Groups
 	pg := func(item *nbdb.LoadBalancerGroup) bool {
-		return len(item.LoadBalancer) > 0
+		if len(item.LoadBalancer) == 0 {
+			return false
+		}
+
+		if !util.IsNetworkSegmentationSupportEnabled() || includeAllNetworks {
+			return true
+		}
+
+		if netInfo == nil {
+			return true
+		}
+
+		// LB groups have no external ID in OVN, so parse their name instead
+		if netInfo.IsDefault() {
+			knownDefaultLBGroups := []string{
+				types.ClusterLBGroupName,
+				types.ClusterSwitchLBGroupName,
+				types.ClusterRouterLBGroupName,
+			}
+			for _, knownGroup := range knownDefaultLBGroups {
+				if item.Name == knownGroup {
+					return true
+
+				}
+			}
+			return false
+		}
+		// UDN
+		return strings.HasPrefix(item.Name, netInfo.GetNetworkName())
 	}
+
 	groups, err := libovsdbops.FindLoadBalancerGroupsWithPredicate(nbClient, pg)
 	if err != nil {
 		return nil, nil, fmt.Errorf("could not list load balancer groups: %w", err)

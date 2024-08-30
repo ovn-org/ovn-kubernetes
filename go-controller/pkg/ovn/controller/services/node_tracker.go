@@ -32,6 +32,8 @@ type nodeTracker struct {
 
 	// zone in which this nodeTracker is tracking
 	zone string
+
+	netInfo util.NetInfo
 }
 
 type nodeInfo struct {
@@ -76,11 +78,13 @@ func (ni *nodeInfo) l3gatewayAddressesStr() []string {
 	return out
 }
 
-func newNodeTracker(zone string, resyncFn func(nodes []nodeInfo)) *nodeTracker {
+func newNodeTracker(zone string, resyncFn func(nodes []nodeInfo), netInfo util.NetInfo) *nodeTracker {
+
 	return &nodeTracker{
 		nodes:    map[string]nodeInfo{},
 		zone:     zone,
 		resyncFn: resyncFn,
+		netInfo:  netInfo,
 	}
 }
 
@@ -205,7 +209,7 @@ func (nt *nodeTracker) removeNode(nodeName string) {
 // The gateway router will exist sometime after the L3Gateway annotation is set.
 func (nt *nodeTracker) updateNode(node *v1.Node) {
 	klog.V(2).Infof("Processing possible switch / router updates for node %s", node.Name)
-	hsn, err := util.ParseNodeHostSubnetAnnotation(node, types.DefaultNetworkName)
+	hsn, err := util.ParseNodeHostSubnetAnnotation(node, nt.netInfo.GetNetworkName())
 	if err != nil || hsn == nil || util.NoHostSubnet(node) {
 		// usually normal; means the node's gateway hasn't been initialized yet
 		klog.Infof("Node %s has invalid / no HostSubnet annotations (probably waiting on initialization), or it's a hybrid overlay node: %v", node.Name, err)
@@ -213,7 +217,7 @@ func (nt *nodeTracker) updateNode(node *v1.Node) {
 		return
 	}
 
-	switchName := node.Name
+	switchName := nt.netInfo.GetNetworkScopedSwitchName(node.Name)
 	grName := ""
 	l3gatewayAddresses := []net.IP{}
 	chassisID := ""
@@ -225,7 +229,8 @@ func (nt *nodeTracker) updateNode(node *v1.Node) {
 	if err != nil || gwConf == nil {
 		klog.Infof("Node %s has invalid / no gateway config: %v", node.Name, err)
 	} else if gwConf.Mode != globalconfig.GatewayModeDisabled {
-		grName = util.GetGatewayRouterFromNode(node.Name)
+		grName = nt.netInfo.GetNetworkScopedGWRouterName(node.Name)
+		// L3 GW IP addresses are not network-specific, we can take them from the default L3 GW annotation
 		for _, ip := range gwConf.IPAddresses {
 			l3gatewayAddresses = append(l3gatewayAddresses, ip.IP)
 		}

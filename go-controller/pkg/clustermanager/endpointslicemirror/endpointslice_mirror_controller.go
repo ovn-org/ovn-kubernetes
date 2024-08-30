@@ -27,15 +27,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
-const (
-	maxRetries = 10
-	// LabelSourceEndpointSlice label key used in mirrored EndpointSlice
-	// that has the value of the default EndpointSlice name
-	LabelSourceEndpointSlice = "k8s.ovn.org/source-endpointslice"
-	// LabelSourceEndpointSliceVersion label key used in mirrored EndpointSlice
-	// that has the value of the last known default EndpointSlice ResourceVersion
-	LabelSourceEndpointSliceVersion = "k8s.ovn.org/source-endpointslice-version"
-)
+const maxRetries = 10
 
 // Controller represents the EndpointSlice mirror controller.
 // For namespaces that use a user-defined primary network, this controller mirrors the default EndpointSlices
@@ -62,7 +54,7 @@ type Controller struct {
 // For other EndpointSlices it returns an empty value.
 func (c *Controller) getDefaultEndpointSliceKey(endpointSlice *v1.EndpointSlice) string {
 	if c.isManagedByController(endpointSlice) {
-		defaultEndpointSliceName, found := endpointSlice.Labels[LabelSourceEndpointSlice]
+		defaultEndpointSliceName, found := endpointSlice.Labels[types.LabelSourceEndpointSlice]
 		if !found {
 			utilruntime.HandleError(fmt.Errorf("couldn't determine the source EndpointSlice for %s", cache.MetaObjectToName(endpointSlice)))
 			return ""
@@ -270,8 +262,8 @@ func (c *Controller) syncDefaultEndpointSlice(ctx context.Context, key string) e
 	}
 
 	mirrorEndpointSliceSelector := labels.Set(map[string]string{
-		LabelSourceEndpointSlice: name,
-		v1.LabelManagedBy:        c.name,
+		types.LabelSourceEndpointSlice: name,
+		v1.LabelManagedBy:              c.name,
 	}).AsSelectorPreValidated()
 
 	klog.Infof("Processing %s/%s EndpointSlice in %q primary network", namespace, name, namespacePrimaryNetwork.GetNetworkName())
@@ -302,7 +294,7 @@ func (c *Controller) syncDefaultEndpointSlice(ctx context.Context, key string) e
 
 	if defaultEndpointSlice == nil {
 		if mirroredEndpointSlice != nil {
-			klog.Infof("The default EndpointSlice %s/%s no longer exists, removing the mirrored one: %s", namespace, mirroredEndpointSlice.Labels[LabelSourceEndpointSlice], cache.MetaObjectToName(mirroredEndpointSlice))
+			klog.Infof("The default EndpointSlice %s/%s no longer exists, removing the mirrored one: %s", namespace, mirroredEndpointSlice.Labels[types.LabelSourceEndpointSlice], cache.MetaObjectToName(mirroredEndpointSlice))
 			return c.kubeClient.DiscoveryV1().EndpointSlices(namespace).Delete(ctx, mirroredEndpointSlice.Name, metav1.DeleteOptions{})
 		}
 		klog.Infof("The default EndpointSlice %s/%s no longer exists", namespace, name)
@@ -320,7 +312,7 @@ func (c *Controller) syncDefaultEndpointSlice(ctx context.Context, key string) e
 
 	if mirroredEndpointSlice != nil {
 		// nothing to do if we already reconciled this exact EndpointSlice
-		if mirroredResourceVersion, ok := mirroredEndpointSlice.Labels[LabelSourceEndpointSliceVersion]; ok {
+		if mirroredResourceVersion, ok := mirroredEndpointSlice.Labels[types.LabelSourceEndpointSliceVersion]; ok {
 			if mirroredResourceVersion == defaultEndpointSlice.ResourceVersion {
 				return nil
 			}
@@ -420,8 +412,8 @@ func (c *Controller) mirrorEndpointSlice(mirroredEndpointSlice, defaultEndpointS
 
 	// set the custom labels, generateName and reset the endpoints
 	currentMirror.Labels[v1.LabelManagedBy] = c.name
-	currentMirror.Labels[LabelSourceEndpointSlice] = defaultEndpointSlice.Name
-	currentMirror.Labels[LabelSourceEndpointSliceVersion] = defaultEndpointSlice.ResourceVersion
+	currentMirror.Labels[types.LabelSourceEndpointSlice] = defaultEndpointSlice.Name
+	currentMirror.Labels[types.LabelSourceEndpointSliceVersion] = defaultEndpointSlice.ResourceVersion
 	currentMirror.Labels[types.LabelUserDefinedEndpointSliceNetwork] = network.GetNetworkName()
 	currentMirror.Labels[types.LabelUserDefinedServiceName] = defaultEndpointSlice.Labels[v1.LabelServiceName]
 

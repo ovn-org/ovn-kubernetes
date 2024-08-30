@@ -10,6 +10,7 @@ import (
 	libovsdb "github.com/ovn-org/libovsdb/ovsdb"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -188,10 +189,10 @@ func isLBNodeIPTemplateName(name string) bool {
 
 // makeLBTargetTemplateName builds a load balancer target template name.
 func makeLBTargetTemplateName(service *corev1.Service, proto corev1.Protocol, port int32,
-	family corev1.IPFamily, scope string) string {
+	family corev1.IPFamily, scope string, netInfo util.NetInfo) string {
 	return makeTemplateName(
-		makeLBName(service, proto,
-			fmt.Sprintf("%d_%s_%v", port, scope, family)))
+		makeLBNameForNetwork(service, proto,
+			fmt.Sprintf("%d_%s_%v", port, scope, family), netInfo))
 }
 
 // getTemplatesFromRulesTargets returns the map of template variables referred

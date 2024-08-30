@@ -7,15 +7,14 @@ import (
 	"sync"
 	"time"
 
+	nadlister "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/controller"
 	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	egressqoslisters "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/listers/egressqos/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
-	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	anpcontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/admin_network_policy"
 	apbroutecontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/apbroute"
@@ -90,11 +89,12 @@ type DefaultNetworkController struct {
 	// Cluster-wide router default Control Plane Protection (COPP) UUID
 	defaultCOPPUUID string
 
+	// Controller in charge of services
+	svcController *svccontroller.Controller
+
 	// Controller used for programming OVN for egress IP
 	eIPC egressIPZoneController
 
-	// Controller used to handle services
-	svcController *svccontroller.Controller
 	// Controller used to handle egress services
 	egressSvcController *egresssvc.Controller
 	// Controller used for programming OVN for Admin Network Policy
@@ -156,12 +156,19 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 		addressSetFactory = addressset.NewOvnAddressSetFactory(cnci.nbClient, config.IPv4Mode, config.IPv6Mode)
 	}
 
+	var nadLister nadlister.NetworkAttachmentDefinitionLister
+	if util.IsNetworkSegmentationSupportEnabled() {
+		nadLister = cnci.watchFactory.NADInformer().Lister()
+	}
+
 	svcController, err := svccontroller.NewController(
 		cnci.client, cnci.nbClient,
 		cnci.watchFactory.ServiceCoreInformer(),
 		cnci.watchFactory.EndpointSliceCoreInformer(),
 		cnci.watchFactory.NodeCoreInformer(),
+		nadLister,
 		cnci.recorder,
+		&util.DefaultNetInfo{},
 	)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create new service controller while creating new default network controller: %w", err)
@@ -218,14 +225,11 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 			watchFactory:       cnci.watchFactory,
 			nodeZoneState:      syncmap.NewSyncMap[bool](),
 		},
-		loadbalancerClusterCache:     make(map[kapi.Protocol]string),
-		clusterLoadBalancerGroupUUID: "",
-		switchLoadBalancerGroupUUID:  "",
-		routerLoadBalancerGroupUUID:  "",
-		svcController:                svcController,
-		zoneChassisHandler:           zoneChassisHandler,
-		apbExternalRouteController:   apbExternalRouteController,
-		gatewayTopologyFactory:       topology.NewGatewayTopologyFactory(cnci.nbClient),
+		loadbalancerClusterCache:   make(map[kapi.Protocol]string),
+		zoneChassisHandler:         zoneChassisHandler,
+		apbExternalRouteController: apbExternalRouteController,
+		svcController:              svcController,
+		gatewayTopologyFactory:     topology.NewGatewayTopologyFactory(cnci.nbClient),
 	}
 	// Allocate IPs for logical router port "GwRouterToJoinSwitchPrefix + OVNClusterRouter". This should always
 	// allocate the first IPs in the join switch subnets.
@@ -373,35 +377,13 @@ func (oc *DefaultNetworkController) Init(ctx context.Context) error {
 	if _, _, err := util.RunOVNNbctl("--columns=_uuid", "list", "Load_Balancer_Group"); err != nil {
 		klog.Warningf("Load Balancer Group support enabled, however version of OVN in use does not support Load Balancer Groups.")
 	} else {
-		loadBalancerGroup := nbdb.LoadBalancerGroup{
-			Name: ovntypes.ClusterLBGroupName,
-		}
-		err := libovsdbops.CreateOrUpdateLoadBalancerGroup(oc.nbClient, &loadBalancerGroup)
+		clusterLBGroupUUID, switchLBGroupUUID, routerLBGroupUUID, err := initLoadBalancerGroups(oc.nbClient, oc.NetInfo)
 		if err != nil {
-			klog.Errorf("Error creating cluster-wide load balancer group %s: %v", ovntypes.ClusterLBGroupName, err)
 			return err
 		}
-		oc.clusterLoadBalancerGroupUUID = loadBalancerGroup.UUID
-
-		loadBalancerGroup = nbdb.LoadBalancerGroup{
-			Name: ovntypes.ClusterSwitchLBGroupName,
-		}
-		err = libovsdbops.CreateOrUpdateLoadBalancerGroup(oc.nbClient, &loadBalancerGroup)
-		if err != nil {
-			klog.Errorf("Error creating cluster-wide switch load balancer group %s: %v", ovntypes.ClusterSwitchLBGroupName, err)
-			return err
-		}
-		oc.switchLoadBalancerGroupUUID = loadBalancerGroup.UUID
-
-		loadBalancerGroup = nbdb.LoadBalancerGroup{
-			Name: ovntypes.ClusterRouterLBGroupName,
-		}
-		err = libovsdbops.CreateOrUpdateLoadBalancerGroup(oc.nbClient, &loadBalancerGroup)
-		if err != nil {
-			klog.Errorf("Error creating cluster-wide router load balancer group %s: %v", ovntypes.ClusterRouterLBGroupName, err)
-			return err
-		}
-		oc.routerLoadBalancerGroupUUID = loadBalancerGroup.UUID
+		oc.clusterLoadBalancerGroupUUID = clusterLBGroupUUID
+		oc.switchLoadBalancerGroupUUID = switchLBGroupUUID
+		oc.routerLoadBalancerGroupUUID = routerLBGroupUUID
 	}
 
 	networkID := util.InvalidNetworkID
