@@ -450,6 +450,9 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		}()
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
+
+		_, _ = util.SetFakeIPTablesHelpers()
+
 		cnode := node.DeepCopy()
 		cnode.Annotations[util.OvnNodeManagementPortMacAddresses] = `{"bluenet":"00:00:00:55:66:77"}`
 		kubeMock.On("UpdateNodeStatus", cnode).Return(nil)
@@ -618,6 +621,9 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			wg.Wait()
 		}()
 		err = wf.Start()
+
+		_, _ = util.SetFakeIPTablesHelpers()
+
 		Expect(err).NotTo(HaveOccurred())
 		cnode := node.DeepCopy()
 		cnode.Annotations[util.OvnNodeManagementPortMacAddresses] = `{"bluenet":"00:00:00:55:66:77"}`
