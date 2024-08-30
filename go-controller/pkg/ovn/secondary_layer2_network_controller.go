@@ -500,38 +500,20 @@ func (oc *SecondaryLayer2NetworkController) nodeGatewayConfig(node *corev1.Node)
 		return nil, fmt.Errorf("failed to get networkID for network %q: %v", networkName, err)
 	}
 
-	var (
-		masqIPs  []*net.IPNet
-		v4MasqIP *net.IPNet
-		v6MasqIP *net.IPNet
-	)
-
-	if config.IPv4Mode {
-		v4MasqIPs, err := udn.AllocateV4MasqueradeIPs(networkID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get v4 masquerade IP, network %s (%d): %v", networkName, networkID, err)
-		}
-		v4MasqIP = v4MasqIPs.GatewayRouter
-		masqIPs = append(masqIPs, v4MasqIP)
-	}
-	if config.IPv6Mode {
-		v6MasqIPs, err := udn.AllocateV6MasqueradeIPs(networkID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get v6 masquerade IP, network %s (%d): %v", networkName, networkID, err)
-		}
-		v6MasqIP = v6MasqIPs.GatewayRouter
-		masqIPs = append(masqIPs, v6MasqIP)
+	masqIPs, err := udn.GetUDNGatewayMasqueradeIPs(networkID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get masquerade IPs, network %s (%d): %v", networkName, networkID, err)
 	}
 
 	l3GatewayConfig.IPAddresses = append(l3GatewayConfig.IPAddresses, masqIPs...)
 
 	// Always SNAT to the per network masquerade IP.
 	var externalIPs []net.IP
-	if config.IPv4Mode && v4MasqIP != nil {
-		externalIPs = append(externalIPs, v4MasqIP.IP)
-	}
-	if config.IPv6Mode && v6MasqIP != nil {
-		externalIPs = append(externalIPs, v6MasqIP.IP)
+	for _, masqIP := range masqIPs {
+		if masqIP == nil {
+			continue
+		}
+		externalIPs = append(externalIPs, masqIP.IP)
 	}
 
 	// Use the host subnets present in the network attachment definition.
