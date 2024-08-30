@@ -114,6 +114,22 @@ func (b *bridgeConfiguration) delNetworkBridgeConfig(nInfo util.NetInfo) {
 	delete(b.netConfig, nInfo.GetNetworkName())
 }
 
+// getActiveNetworkBridgeConfig returns a copy of the network configuration corresponding to the
+// provided netInfo.
+//
+// NOTE: if the network configuration can't be found or if the network is not patched by OVN
+// yet this returns nil.
+func (b *bridgeConfiguration) getActiveNetworkBridgeConfig(nInfo util.NetInfo) *bridgeUDNConfiguration {
+	b.Lock()
+	defer b.Unlock()
+
+	if netConfig, found := b.netConfig[nInfo.GetNetworkName()]; found && netConfig.ofPortPatch != "" {
+		result := *netConfig
+		return &result
+	}
+	return nil
+}
+
 func (b *bridgeConfiguration) patchedNetConfigs() []*bridgeUDNConfiguration {
 	result := make([]*bridgeUDNConfiguration, 0, len(b.netConfig))
 	for _, netConfig := range b.netConfig {

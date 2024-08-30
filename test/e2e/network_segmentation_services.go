@@ -156,9 +156,11 @@ var _ = Describe("Network Segmentation: services", func() {
 				By("Connect to the UDN service cluster IP from the UDN client pod on the same node")
 				checkConnectionToClusterIPs(f, udnClientPod, udnService, udnServerPod.Name)
 				checkConnectionToNodePort(f, udnClientPod, udnService, &nodes.Items[0], "endpoint node", udnServerPod.Name)
-				// TODO uncomment below as soon as ovnkube-node supports UDN
-				// checkConnectionToNodePort(f, clientPod2, udnService, &nodes.Items[1], "client node", udnServerPod.Name)
-				// checkConnectionToNodePort(f, clientPod2, udnService, &nodes.Items[2], "other node", udnServerPod.Name)
+				// FIXME(dceara): Remove this check when Local Gateway external->service support is implemented.
+				if !IsGatewayModeLocal() {
+					checkConnectionToNodePort(f, udnClientPod, udnService, &nodes.Items[1], "client node", udnServerPod.Name)
+					checkConnectionToNodePort(f, udnClientPod, udnService, &nodes.Items[2], "other node", udnServerPod.Name)
+				}
 
 				By(fmt.Sprintf("Creating a UDN client pod on a different node (%s)", clientNode))
 				udnClientPod2 := e2epod.NewAgnhostPod(namespace, "udn-client2", nil, nil, nil)
@@ -167,10 +169,12 @@ var _ = Describe("Network Segmentation: services", func() {
 
 				By("Connect to the UDN service from the UDN client pod on a different node")
 				checkConnectionToClusterIPs(f, udnClientPod2, udnService, udnServerPod.Name)
-				// TODO uncomment below as soon as ovnkube-node supports UDN
 				checkConnectionToNodePort(f, udnClientPod2, udnService, &nodes.Items[1], "local node", udnServerPod.Name)
-				// checkConnectionToNodePort(f, clientPod2, udnService, &nodes.Items[0], "server node", udnServerPod.Name)
-				// checkConnectionToNodePort(f, clientPod2, udnService, &nodes.Items[2], "other node", udnServerPod.Name)
+				// FIXME(dceara): Remove this check when Local Gateway external->service support is implemented.
+				if !IsGatewayModeLocal() {
+					checkConnectionToNodePort(f, udnClientPod2, udnService, &nodes.Items[0], "server node", udnServerPod.Name)
+					checkConnectionToNodePort(f, udnClientPod2, udnService, &nodes.Items[2], "other node", udnServerPod.Name)
+				}
 
 				// Default network -> UDN
 				// Check that it cannot connect
@@ -186,12 +190,14 @@ var _ = Describe("Network Segmentation: services", func() {
 				defaultClient, err := createPod(f, "default-net-pod", clientNode, defaultNetNamespace, []string{"sleep", "2000000"}, nil)
 				Expect(err).NotTo(HaveOccurred())
 
-				By("Verify that the client in the default network cannot connect to the UDN service")
+				By("Verify the client in the default network connection to the UDN service")
 				checkNoConnectionToClusterIPs(f, defaultClient, udnService)
 				checkNoConnectionToNodePort(f, defaultClient, udnService, &nodes.Items[1], "local node") // TODO change to checkConnectionToNodePort when we have full UDN support in ovnkube-node
-				// TODO uncomment below as soon as ovnkube-node supports UDN
-				// checkConnectionToNodePort(f, defaultClient, udnService, &nodes.Items[0], "server node")
-				// checkConnectionToNodePort(f, defaultClient, udnService, &nodes.Items[2], "other node")
+				// FIXME(dceara): Remove this check when Local Gateway external->service support is implemented.
+				if !IsGatewayModeLocal() {
+					checkConnectionToNodePort(f, defaultClient, udnService, &nodes.Items[0], "server node", udnServerPod.Name)
+					checkConnectionToNodePort(f, defaultClient, udnService, &nodes.Items[2], "other node", udnServerPod.Name)
+				}
 
 				// UDN -> Default network
 				// Create a backend pod and service in the default network and verify that the client pod in the UDN
@@ -226,7 +232,7 @@ var _ = Describe("Network Segmentation: services", func() {
 				defaultService, err = f.ClientSet.CoreV1().Services(defaultNetNamespace).Create(context.TODO(), defaultService, metav1.CreateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 
-				By("verify that the client pod in the UDN cannot connect to the default-network service")
+				By("Verify the UDN client connection to the default network service")
 				checkNoConnectionToClusterIPs(f, udnClientPod2, defaultService)
 				// TODO uncomment below when below OVN_DISABLE_SNAT_MULTIPLE_GWS=true is supported
 				// checkConnectionToNodePort(f, udnClientPod2, defaultService, &nodes.Items[0], "server node", defaultServerPod.Name)
@@ -256,19 +262,33 @@ var _ = Describe("Network Segmentation: services", func() {
 // TODO Once https://github.com/ovn-org/ovn-kubernetes/pull/4567 merges, use the vendored *TestJig.Run(), which tests
 // the reachability of a service through its name and through its cluster IP. For now only test the cluster IP.
 
-const OVNNodeHostCIDRs = "k8s.ovn.org/host-cidrs"
+const OvnNodeIfAddr = "k8s.ovn.org/node-primary-ifaddr"
 
-// ParseNodeHostCIDRsDropNetMask returns the parsed host IP addresses found on a node's host CIDR annotation. Removes the mask.
-func ParseNodeHostCIDRsDropNetMask(node *kapi.Node) (sets.Set[string], error) {
-	addrAnnotation, ok := node.Annotations[OVNNodeHostCIDRs]
+type primaryIfAddrAnnotation struct {
+	IPv4 string `json:"ipv4,omitempty"`
+	IPv6 string `json:"ipv6,omitempty"`
+}
+
+// ParseNodeHostIPDropNetMask returns the parsed host IP addresses found on a node's host CIDR annotation. Removes the mask.
+func ParseNodeHostIPDropNetMask(node *kapi.Node) (sets.Set[string], error) {
+	nodeIfAddrAnnotation, ok := node.Annotations[OvnNodeIfAddr]
 	if !ok {
-		return nil, newAnnotationNotSetError("%s annotation not found for node %q", OVNNodeHostCIDRs, node.Name)
+		return nil, newAnnotationNotSetError("%s annotation not found for node %q", OvnNodeIfAddr, node.Name)
+	}
+	nodeIfAddr := &primaryIfAddrAnnotation{}
+	if err := json.Unmarshal([]byte(nodeIfAddrAnnotation), nodeIfAddr); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal annotation: %s for node %q, err: %v", OvnNodeIfAddr, node.Name, err)
 	}
 
 	var cfg []string
-	if err := json.Unmarshal([]byte(addrAnnotation), &cfg); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal host cidrs annotation %s for node %q: %v",
-			addrAnnotation, node.Name, err)
+	if nodeIfAddr.IPv4 != "" {
+		cfg = append(cfg, nodeIfAddr.IPv4)
+	}
+	if nodeIfAddr.IPv6 != "" {
+		cfg = append(cfg, nodeIfAddr.IPv6)
+	}
+	if len(cfg) == 0 {
+		return nil, fmt.Errorf("node: %q does not have any IP information set", node.Name)
 	}
 
 	for i, cidr := range cfg {
@@ -376,7 +396,7 @@ func checkConnectionOrNoConnectionToNodePort(f *framework.Framework, clientPod *
 	if !shouldConnect {
 		notStr = "not "
 	}
-	nodeIPs, err := ParseNodeHostCIDRsDropNetMask(node)
+	nodeIPs, err := ParseNodeHostIPDropNetMask(node)
 	Expect(err).NotTo(HaveOccurred())
 
 	for nodeIP := range nodeIPs {
