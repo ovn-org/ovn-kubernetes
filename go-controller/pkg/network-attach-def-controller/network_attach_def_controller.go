@@ -7,10 +7,12 @@ import (
 	"reflect"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 
@@ -56,7 +58,7 @@ type NetAttachDefinitionController struct {
 	name               string
 	netAttachDefLister nadlisters.NetworkAttachmentDefinitionLister
 	controller         controller.Controller
-
+	recorder           record.EventRecorder
 	// networkManager is used to manage the network controllers
 	networkManager networkManager
 
@@ -70,9 +72,11 @@ func NewNetAttachDefinitionController(
 	name string,
 	ncm NetworkControllerManager,
 	wf watchFactory,
+	recorder record.EventRecorder,
 ) (*NetAttachDefinitionController, error) {
 	nadController := &NetAttachDefinitionController{
 		name:           fmt.Sprintf("[%s NAD controller]", name),
+		recorder:       recorder,
 		networkManager: newNetworkManager(name, ncm),
 		networks:       map[string]util.NetInfo{},
 		nads:           map[string]string{},
@@ -182,6 +186,10 @@ func (nadController *NetAttachDefinitionController) syncNAD(key string, nad *net
 	if nad != nil {
 		nadNetwork, err = util.ParseNADInfo(nad)
 		if err != nil {
+			if nadController.recorder != nil {
+				nadController.recorder.Eventf(&corev1.ObjectReference{Kind: nad.Kind, Namespace: nad.Namespace, Name: nad.Name}, corev1.EventTypeWarning,
+					"InvalidConfig", "Failed to parse network config: %v", err.Error())
+			}
 			klog.Errorf("%s: failed parsing NAD %s: %v", nadController.name, key, err)
 			return nil
 		}
