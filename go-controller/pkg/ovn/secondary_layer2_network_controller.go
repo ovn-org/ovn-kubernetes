@@ -319,10 +319,10 @@ func (oc *SecondaryLayer2NetworkController) Start(ctx context.Context) error {
 		return err
 	}
 
-	return oc.run(ctx)
+	return oc.run()
 }
 
-func (oc *SecondaryLayer2NetworkController) run(ctx context.Context) error {
+func (oc *SecondaryLayer2NetworkController) run() error {
 	return oc.BaseSecondaryLayer2NetworkController.run()
 }
 
