@@ -16,6 +16,7 @@ import (
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 
@@ -689,12 +690,16 @@ func expectedLayer3EgressEntities(netInfo util.NetInfo, gwConfig util.L3GatewayC
 		routerPolicyUUID2 = "lrpol2-UUID"
 		staticRouteUUID1  = "sr1-UUID"
 		staticRouteUUID2  = "sr2-UUID"
+		masqSNATUUID1     = "masq-snat1-UUID"
 	)
 	masqIPAddr := dummyMasqueradeIP().IP.String()
 	clusterRouterName := fmt.Sprintf("%s_ovn_cluster_router", netInfo.GetNetworkName())
 	rtosLRPName := fmt.Sprintf("%s%s", ovntypes.RouterToSwitchPrefix, netInfo.GetNetworkScopedName(nodeName))
 	rtosLRPUUID := rtosLRPName + "-UUID"
 	nodeIP := gwConfig.IPAddresses[0].IP.String()
+	masqSNAT := newNATEntry(masqSNATUUID1, "169.254.169.14", nodeSubnet.String(), standardNonDefaultNetworkExtIDs(netInfo))
+	masqSNAT.Match = getMasqueradeManagementIPSNATMatch(dummyMACAddr)
+	masqSNAT.LogicalPort = ptr.To(fmt.Sprintf("rtos-%s_%s", netInfo.GetNetworkName(), nodeName))
 
 	gatewayChassisUUID := fmt.Sprintf("%s-%s-UUID", rtosLRPName, gwConfig.ChassisID)
 	expectedEntities := []libovsdbtest.TestData{
@@ -705,12 +710,14 @@ func expectedLayer3EgressEntities(netInfo util.NetInfo, gwConfig util.L3GatewayC
 			StaticRoutes: []string{staticRouteUUID1, staticRouteUUID2},
 			Policies:     []string{routerPolicyUUID1, routerPolicyUUID2},
 			ExternalIDs:  standardNonDefaultNetworkExtIDs(netInfo),
+			Nat:          []string{masqSNATUUID1},
 		},
 		&nbdb.LogicalRouterPort{UUID: rtosLRPUUID, Name: rtosLRPName, Networks: []string{"192.168.1.1/24"}, MAC: "0a:58:c0:a8:01:01", GatewayChassis: []string{gatewayChassisUUID}},
 		expectedGRStaticRoute(staticRouteUUID1, nodeSubnet.String(), gwRouterJoinIPAddress().IP.String(), &nbdb.LogicalRouterStaticRoutePolicySrcIP, nil, netInfo),
 		expectedGRStaticRoute(staticRouteUUID2, gwRouterJoinIPAddress().IP.String(), gwRouterJoinIPAddress().IP.String(), nil, nil, netInfo),
 		expectedLogicalRouterPolicy(routerPolicyUUID1, netInfo, nodeName, nodeIP, managementPortIP(nodeSubnet).String()),
 		expectedLogicalRouterPolicy(routerPolicyUUID2, netInfo, nodeName, masqIPAddr, managementPortIP(nodeSubnet).String()),
+		masqSNAT,
 	}
 	return expectedEntities
 }
