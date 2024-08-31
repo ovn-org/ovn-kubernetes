@@ -787,6 +787,13 @@ func udnGWSNATAddress() *net.IPNet {
 	}
 }
 
+func newMasqueradeManagementNATEntry(uuid string, externalIP string, logicalIP string, netInfo util.NetInfo) *nbdb.NAT {
+	masqSNAT := newNATEntry(uuid, "169.254.169.14", layer2Subnet().String(), standardNonDefaultNetworkExtIDs(netInfo))
+	masqSNAT.Match = fmt.Sprintf("eth.dst == %s", dummyMACAddr)
+	masqSNAT.LogicalPort = ptr.To(fmt.Sprintf("rtoj-GR_%s_%s", netInfo.GetNetworkName(), nodeName))
+	return masqSNAT
+}
+
 func newNATEntry(uuid string, externalIP string, logicalIP string, extIDs map[string]string) *nbdb.NAT {
 	return &nbdb.NAT{
 		UUID:        uuid,
