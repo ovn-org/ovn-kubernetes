@@ -88,10 +88,6 @@ var _ = Describe("Network Segmentation: services", func() {
 			// -  UDN service --> default-network:
 			//   + clusterIP fails
 			//   + nodeIP:nodePort fails FOR NOW, when we only target the local node (*)
-			//
-			// (*) TODO connect to node ports on other nodes too once ovnkube-node fully supports UDN,
-			//     that is when https://github.com/ovn-org/ovn-kubernetes/pull/4648 and
-			//     https://github.com/ovn-org/ovn-kubernetes/pull/4554 merge
 
 			"should be reachable through their cluster IP and node port",
 			func(
@@ -205,7 +201,7 @@ var _ = Describe("Network Segmentation: services", func() {
 				By(fmt.Sprintf("Creating a backend pod in the default network on node %s", serverPodNodeName))
 				defaultLabels := map[string]string{"app": "default-app"}
 
-				_, err = createPod(f, "backend-pod-default", serverPodNodeName,
+				defaultServerPod, err := createPod(f, "backend-pod-default", serverPodNodeName,
 					defaultNetNamespace, []string{"/agnhost", "netexec", "--udp-port=" + fmt.Sprint(serviceTargetPort)}, defaultLabels,
 					func(pod *v1.Pod) {
 						pod.Spec.Containers[0].Ports = []v1.ContainerPort{{ContainerPort: (serviceTargetPort), Protocol: "UDP"}}
@@ -233,13 +229,13 @@ var _ = Describe("Network Segmentation: services", func() {
 				Expect(err).NotTo(HaveOccurred())
 
 				By("Verify the UDN client connection to the default network service")
-				checkNoConnectionToClusterIPs(f, udnClientPod2, defaultService)
-				// TODO uncomment below when below OVN_DISABLE_SNAT_MULTIPLE_GWS=true is supported
-				// checkConnectionToNodePort(f, udnClientPod2, defaultService, &nodes.Items[0], "server node", defaultServerPod.Name)
-				// TODO change line below to checkConnectionToNodePort when we have full UDN support in ovnkube-node
-				checkNoConnectionToNodePort(f, udnClientPod2, defaultService, &nodes.Items[1], "local node")
-				// TODO uncomment below when OVN_DISABLE_SNAT_MULTIPLE_GWS=true is supported
-				// checkConnectionToNodePort(f, udnClientPod2, defaultService, &nodes.Items[2], "other node", defaultServerPod.Name)
+				checkConnectionToNodePort(f, udnClientPod2, defaultService, &nodes.Items[0], "server node", defaultServerPod.Name)
+				checkConnectionToNodePort(f, udnClientPod2, defaultService, &nodes.Items[1], "local node", defaultServerPod.Name)
+				checkConnectionToNodePort(f, udnClientPod2, defaultService, &nodes.Items[2], "other node", defaultServerPod.Name)
+				// FIXME(tssurya): https://github.com/ovn-org/ovn-kubernetes/issues/4687
+				if !IsGatewayModeLocal() {
+					checkNoConnectionToClusterIPs(f, udnClientPod2, defaultService)
+				}
 			},
 
 			Entry(
