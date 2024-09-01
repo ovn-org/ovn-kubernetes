@@ -1,6 +1,7 @@
 package util
 
 import (
+	"context"
 	mnpapi "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta1"
 	mnpfake "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/client/clientset/versioned/fake"
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
@@ -68,20 +69,28 @@ func GetOVNClientset(objects ...runtime.Object) *OVNClientset {
 			v1Objects = append(v1Objects, object)
 		}
 	}
-	return &OVNClientset{
-		KubeClient:               fake.NewSimpleClientset(v1Objects...),
-		ANPClient:                anpfake.NewSimpleClientset(anpObjects...),
-		EgressIPClient:           egressipfake.NewSimpleClientset(egressIPObjects...),
-		EgressFirewallClient:     egressfirewallfake.NewSimpleClientset(egressFirewallObjects...),
-		CloudNetworkClient:       cloudservicefake.NewSimpleClientset(cloudObjects...),
-		EgressQoSClient:          egressqosfake.NewSimpleClientset(egressQoSObjects...),
-		NetworkAttchDefClient:    nadfake.NewSimpleClientset(nads...),
+	cs := &OVNClientset{
+		KubeClient:           fake.NewSimpleClientset(v1Objects...),
+		ANPClient:            anpfake.NewSimpleClientset(anpObjects...),
+		EgressIPClient:       egressipfake.NewSimpleClientset(egressIPObjects...),
+		EgressFirewallClient: egressfirewallfake.NewSimpleClientset(egressFirewallObjects...),
+		CloudNetworkClient:   cloudservicefake.NewSimpleClientset(cloudObjects...),
+		EgressQoSClient:      egressqosfake.NewSimpleClientset(egressQoSObjects...),
+		// nads can't be created on clientset initialization, they can only be added using Create().
+		// see ObjectTracker.Add() UnsafeGuessKindToResource for more details.
+		NetworkAttchDefClient:    nadfake.NewSimpleClientset(),
 		MultiNetworkPolicyClient: mnpfake.NewSimpleClientset(multiNetworkPolicyObjects...),
 		EgressServiceClient:      egressservicefake.NewSimpleClientset(egressServiceObjects...),
 		AdminPolicyRouteClient:   adminpolicybasedroutefake.NewSimpleClientset(apbExternalRouteObjects...),
 		OCPNetworkClient:         ocpnetworkclientfake.NewSimpleClientset(dnsNameResolverObjects...),
 		UserDefinedNetworkClient: udnfake.NewSimpleClientset(),
 	}
+	for _, nadObj := range nads {
+		nad := nadObj.(*nettypes.NetworkAttachmentDefinition)
+		_, _ = cs.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(nad.Namespace).Create(context.TODO(), nad,
+			metav1.CreateOptions{})
+	}
+	return cs
 }
 
 func NewObjectMeta(name, namespace string) metav1.ObjectMeta {

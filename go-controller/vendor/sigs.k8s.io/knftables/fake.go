@@ -23,11 +23,14 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 )
 
 // Fake is a fake implementation of Interface
 type Fake struct {
 	nftContext
+	// lock is used to protect Table and LastTransaction.
+	lock sync.RWMutex
 
 	nextHandle int
 
@@ -94,6 +97,8 @@ var _ Interface = &Fake{}
 
 // List is part of Interface.
 func (fake *Fake) List(_ context.Context, objectType string) ([]string, error) {
+	fake.lock.RLock()
+	defer fake.lock.RUnlock()
 	if fake.Table == nil {
 		return nil, notFoundError("no such table %q", fake.table)
 	}
@@ -123,6 +128,8 @@ func (fake *Fake) List(_ context.Context, objectType string) ([]string, error) {
 
 // ListRules is part of Interface
 func (fake *Fake) ListRules(_ context.Context, chain string) ([]*Rule, error) {
+	fake.lock.RLock()
+	defer fake.lock.RUnlock()
 	if fake.Table == nil {
 		return nil, notFoundError("no such table %q", fake.table)
 	}
@@ -145,6 +152,8 @@ func (fake *Fake) ListRules(_ context.Context, chain string) ([]*Rule, error) {
 
 // ListElements is part of Interface
 func (fake *Fake) ListElements(_ context.Context, objectType, name string) ([]*Element, error) {
+	fake.lock.RLock()
+	defer fake.lock.RUnlock()
 	if fake.Table == nil {
 		return nil, notFoundError("no such %s %q", objectType, name)
 	}
@@ -169,6 +178,8 @@ func (fake *Fake) NewTransaction() *Transaction {
 
 // Run is part of Interface
 func (fake *Fake) Run(_ context.Context, tx *Transaction) error {
+	fake.lock.Lock()
+	defer fake.lock.Unlock()
 	fake.LastTransaction = tx
 	updatedTable, err := fake.run(tx)
 	if err == nil {
@@ -179,10 +190,13 @@ func (fake *Fake) Run(_ context.Context, tx *Transaction) error {
 
 // Check is part of Interface
 func (fake *Fake) Check(_ context.Context, tx *Transaction) error {
+	fake.lock.RLock()
+	defer fake.lock.RUnlock()
 	_, err := fake.run(tx)
 	return err
 }
 
+// must be called with fake.lock held
 func (fake *Fake) run(tx *Transaction) (*FakeTable, error) {
 	if tx.err != nil {
 		return nil, tx.err
@@ -480,6 +494,8 @@ func checkElementRefs(element *Element, table *FakeTable) error {
 
 // Dump dumps the current contents of fake, in a way that looks like an nft transaction.
 func (fake *Fake) Dump() string {
+	fake.lock.RLock()
+	defer fake.lock.RUnlock()
 	if fake.Table == nil {
 		return ""
 	}
@@ -550,7 +566,7 @@ func (fake *Fake) ParseDump(data string) (err error) {
 		}
 	}()
 	tx := fake.NewTransaction()
-	commonRegexp := regexp.MustCompile(fmt.Sprintf(`add %s %s %s (.*)`, noSpaceGroup, fake.family, fake.table))
+	commonRegexp := regexp.MustCompile(fmt.Sprintf(`add ([^ ]*) %s %s( (.*))?`, fake.family, fake.table))
 
 	for i, line = range lines {
 		line = strings.TrimSpace(line)
@@ -578,7 +594,7 @@ func (fake *Fake) ParseDump(data string) (err error) {
 		default:
 			return fmt.Errorf("unknown object %s", match[1])
 		}
-		err = obj.parse(match[2])
+		err = obj.parse(match[3])
 		if err != nil {
 			return err
 		}

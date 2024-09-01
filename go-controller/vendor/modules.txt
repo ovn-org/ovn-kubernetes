@@ -1232,7 +1232,7 @@ sigs.k8s.io/controller-runtime/pkg/webhook/internal/metrics
 ## explicit; go 1.18
 sigs.k8s.io/json
 sigs.k8s.io/json/internal/golang/encoding/json
-# sigs.k8s.io/knftables v0.0.17
+# sigs.k8s.io/knftables v0.0.17 => github.com/npinaeva/knftables v0.0.0-20240902075500-53185f303a2a
 ## explicit; go 1.20
 sigs.k8s.io/knftables
 # sigs.k8s.io/network-policy-api v0.1.5
@@ -1264,3 +1264,4 @@ sigs.k8s.io/yaml/goyaml.v2
 # github.com/coreos/go-iptables => github.com/trozet/go-iptables v0.0.0-20240328221912-077e672b3808
 # github.com/gogo/protobuf => github.com/gogo/protobuf v1.3.2
 # github.com/j-keck/arping => github.com/JacobTanenbaum/arping v0.0.0-20240209152419-3987db83bd51
+# sigs.k8s.io/knftables => github.com/npinaeva/knftables v0.0.0-20240902075500-53185f303a2a

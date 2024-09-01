@@ -271,8 +271,61 @@ var _ = Describe("Network Segmentation", func() {
 
 						Expect(udnPod.Status.ContainerStatuses[0].RestartCount).To(Equal(int32(0)))
 
-						// TODO
-						//By("checking non-kubelet default network host process can't reach the UDN pod")
+						By("restarting kubelet, pod should stay ready")
+						_, err = runCommand(containerRuntime, "exec", workerOneNodeName,
+							"systemctl", "restart", "kubelet")
+						Expect(err).NotTo(HaveOccurred())
+
+						By("asserting healthcheck still works (kubelet can access the UDN pod)")
+						// The pod should stay ready
+						Consistently(func() bool {
+							return podutils.IsPodReady(udnPod)
+						}, 10*time.Second, 1*time.Second).Should(BeTrue())
+						Expect(udnPod.Status.ContainerStatuses[0].RestartCount).To(Equal(int32(0)))
+
+						By("checking default network hostNetwork pod and non-kubelet host process can't reach the UDN pod")
+						hostNetPod, err := createPod(f, "host-net-pod", udnPodConfig.nodeSelector[nodeHostnameKey],
+							defaultNetNamespace, []string{}, nil, func(pod *v1.Pod) {
+								pod.Spec.HostNetwork = true
+							})
+						Expect(err).NotTo(HaveOccurred())
+
+						// positive check for reachable default network pod
+						for _, destIP := range []string{defaultIPv4, defaultIPv6} {
+							if destIP == "" {
+								continue
+							}
+							By("checking the default network hostNetwork can reach default pod on IP " + destIP)
+							Eventually(func() bool {
+								return connectToServer(podConfiguration{namespace: hostNetPod.Namespace, name: hostNetPod.Name}, destIP, defaultPort) == nil
+							}).Should(BeTrue())
+							By("checking the non-kubelet host process can reach default pod on IP " + destIP)
+							Eventually(func() bool {
+								_, err = runCommand(containerRuntime, "exec", workerOneNodeName,
+									"curl", "--connect-timeout", "2",
+									net.JoinHostPort(destIP, fmt.Sprintf("%d", defaultPort)))
+								return err == nil
+							}).Should(BeTrue())
+						}
+						// negative check for UDN pod
+						for _, destIP := range []string{udnIPv4, udnIPv6} {
+							if destIP == "" {
+								continue
+							}
+
+							By("checking the default network hostNetwork pod can't reach UDN pod on IP " + destIP)
+							Consistently(func() bool {
+								return connectToServer(podConfiguration{namespace: hostNetPod.Namespace, name: hostNetPod.Name}, destIP, port) != nil
+							}, 5*time.Second).Should(BeTrue())
+
+							By("checking the non-kubelet host process can't reach UDN pod on IP " + destIP)
+							Consistently(func() bool {
+								_, err = runCommand(containerRuntime, "exec", workerOneNodeName,
+									"curl", "--connect-timeout", "2",
+									net.JoinHostPort(destIP, fmt.Sprintf("%d", port)))
+								return err != nil
+							}, 5*time.Second).Should(BeTrue())
+						}
 
 						By("asserting UDN pod can't reach host via default network interface")
 						// tweak pod route to use default network interface as default
