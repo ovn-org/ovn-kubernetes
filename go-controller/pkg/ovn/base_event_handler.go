@@ -213,6 +213,10 @@ func (h *baseNetworkControllerEventHandler) isObjectInTerminalState(objType refl
 
 func (h *baseNetworkControllerEventHandler) recordAddEvent(objType reflect.Type, obj interface{}) {
 	switch objType {
+	case factory.PolicyType:
+		np := obj.(*knet.NetworkPolicy)
+		klog.V(5).Infof("Recording add event on network policy %s/%s", np.Namespace, np.Name)
+		metrics.GetConfigDurationRecorder().Start("networkpolicy", np.Namespace, np.Name)
 	case factory.MultiNetworkPolicyType:
 		mnp := obj.(*mnpapi.MultiNetworkPolicy)
 		klog.V(5).Infof("Recording add event on multinetwork policy %s/%s", mnp.Namespace, mnp.Name)
@@ -223,6 +227,10 @@ func (h *baseNetworkControllerEventHandler) recordAddEvent(objType reflect.Type,
 // RecordUpdateEvent records the udpate event on this given object.
 func (h *baseNetworkControllerEventHandler) recordUpdateEvent(objType reflect.Type, obj interface{}) {
 	switch objType {
+	case factory.PolicyType:
+		np := obj.(*knet.NetworkPolicy)
+		klog.V(5).Infof("Recording update event on network policy %s/%s", np.Namespace, np.Name)
+		metrics.GetConfigDurationRecorder().Start("networkpolicy", np.Namespace, np.Name)
 	case factory.MultiNetworkPolicyType:
 		mnp := obj.(*mnpapi.MultiNetworkPolicy)
 		klog.V(5).Infof("Recording update event on multinetwork policy %s/%s", mnp.Namespace, mnp.Name)
@@ -233,6 +241,10 @@ func (h *baseNetworkControllerEventHandler) recordUpdateEvent(objType reflect.Ty
 // RecordDeleteEvent records the delete event on this given object.
 func (h *baseNetworkControllerEventHandler) recordDeleteEvent(objType reflect.Type, obj interface{}) {
 	switch objType {
+	case factory.PolicyType:
+		np := obj.(*knet.NetworkPolicy)
+		klog.V(5).Infof("Recording delete event on network policy %s/%s", np.Namespace, np.Name)
+		metrics.GetConfigDurationRecorder().Start("networkpolicy", np.Namespace, np.Name)
 	case factory.MultiNetworkPolicyType:
 		mnp := obj.(*mnpapi.MultiNetworkPolicy)
 		klog.V(5).Infof("Recording delete event on multinetwork policy %s/%s", mnp.Namespace, mnp.Name)
@@ -243,6 +255,10 @@ func (h *baseNetworkControllerEventHandler) recordDeleteEvent(objType reflect.Ty
 // RecordSuccessEvent records the success event on this given object.
 func (h *baseNetworkControllerEventHandler) recordSuccessEvent(objType reflect.Type, obj interface{}) {
 	switch objType {
+	case factory.PolicyType:
+		np := obj.(*knet.NetworkPolicy)
+		klog.V(5).Infof("Recording success event on network policy %s/%s", np.Namespace, np.Name)
+		metrics.GetConfigDurationRecorder().End("networkpolicy", np.Namespace, np.Name)
 	case factory.MultiNetworkPolicyType:
 		mnp := obj.(*mnpapi.MultiNetworkPolicy)
 		klog.V(5).Infof("Recording success event on multinetwork policy %s/%s", mnp.Namespace, mnp.Name)

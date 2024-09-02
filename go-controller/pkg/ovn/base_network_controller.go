@@ -3,6 +3,7 @@ package ovn
 import (
 	"fmt"
 	"net"
+	"reflect"
 	"sync"
 	"time"
 
@@ -31,6 +32,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
+	knet "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -91,6 +93,8 @@ type BaseNetworkController struct {
 	retryNamespaces *ovnretry.RetryFramework
 	// retry framework for network policies
 	retryNetworkPolicies *ovnretry.RetryFramework
+	// retry framework for network policies
+	retryMultiNetworkPolicies *ovnretry.RetryFramework
 	// retry framework for IPAMClaims
 	retryIPAMClaims *ovnretry.RetryFramework
 
@@ -181,8 +185,10 @@ type BaseSecondaryNetworkController struct {
 
 	networkID *int
 
+	// network policy events factory handler
+	netPolicyHandler *factory.Handler
 	// multi-network policy events factory handler
-	policyHandler *factory.Handler
+	multiNetPolicyHandler *factory.Handler
 }
 
 func getNetworkControllerName(netName string) string {
@@ -926,6 +932,39 @@ func (bnc *BaseNetworkController) findMigratablePodIPsForSubnets(subnets []*net.
 		}
 	}
 	return ipList, nil
+}
+
+func (bnc *BaseNetworkController) AddResourceCommon(objType reflect.Type, obj interface{}) error {
+	switch objType {
+	case factory.PolicyType:
+		np, ok := obj.(*knet.NetworkPolicy)
+		if !ok {
+			return fmt.Errorf("could not cast %T object to *knet.NetworkPolicy", obj)
+		}
+
+		if err := bnc.addNetworkPolicy(np); err != nil {
+			klog.Infof("Network Policy add failed for %s/%s, will try again later: %v",
+				np.Namespace, np.Name, err)
+			return err
+		}
+	default:
+		klog.Errorf("Can not process add resource event, object type %s is not supported", objType)
+	}
+	return nil
+}
+
+func (bnc *BaseNetworkController) DeleteResourceCommon(objType reflect.Type, obj interface{}) error {
+	switch objType {
+	case factory.PolicyType:
+		knp, ok := obj.(*knet.NetworkPolicy)
+		if !ok {
+			return fmt.Errorf("could not cast obj of type %T to *knet.NetworkPolicy", obj)
+		}
+		return bnc.deleteNetworkPolicy(knp)
+	default:
+		klog.Errorf("Can not process delete resource event, object type %s is not supported", objType)
+	}
+	return nil
 }
 
 func initLoadBalancerGroups(nbClient libovsdbclient.Client, netInfo util.NetInfo) (

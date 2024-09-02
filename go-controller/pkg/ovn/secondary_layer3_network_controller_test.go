@@ -238,6 +238,8 @@ var _ = Describe("OVN Multi-Homed pod operations", func() {
 	table.DescribeTable(
 		"the gateway is properly cleaned up",
 		func(netInfo secondaryNetInfo, testConfig testConfiguration) {
+			config.OVNKubernetesFeature.EnableMultiNetwork = true
+			config.OVNKubernetesFeature.EnableNetworkSegmentation = true
 			podInfo := dummyTestPod(ns, netInfo)
 			if testConfig.configToOverride != nil {
 				config.OVNKubernetesFeature = *testConfig.configToOverride
@@ -327,6 +329,10 @@ var _ = Describe("OVN Multi-Homed pod operations", func() {
 				podInfo.populateSecondaryNetworkLogicalSwitchCache(fakeOvn, secondaryNetController)
 				Expect(secondaryNetController.bnc.WatchNodes()).To(Succeed())
 				Expect(secondaryNetController.bnc.WatchPods()).To(Succeed())
+
+				if netInfo.isPrimary {
+					Expect(secondaryNetController.bnc.WatchNetworkPolicy()).To(Succeed())
+				}
 
 				Expect(fakeOvn.fakeClient.KubeClient.CoreV1().Pods(pod.Namespace).Delete(context.Background(), pod.Name, metav1.DeleteOptions{})).To(Succeed())
 				Expect(fakeOvn.fakeClient.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(nad.Namespace).Delete(context.Background(), nad.Name, metav1.DeleteOptions{})).To(Succeed())

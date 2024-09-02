@@ -34,8 +34,11 @@ func (oc *BaseSecondaryLayer2NetworkController) stop() {
 	if oc.ipamClaimsHandler != nil {
 		oc.watchFactory.RemoveIPAMClaimsHandler(oc.ipamClaimsHandler)
 	}
-	if oc.policyHandler != nil {
-		oc.watchFactory.RemoveMultiNetworkPolicyHandler(oc.policyHandler)
+	if oc.netPolicyHandler != nil {
+		oc.watchFactory.RemovePolicyHandler(oc.netPolicyHandler)
+	}
+	if oc.multiNetPolicyHandler != nil {
+		oc.watchFactory.RemoveMultiNetworkPolicyHandler(oc.multiNetPolicyHandler)
 	}
 	if oc.podHandler != nil {
 		oc.watchFactory.RemovePodHandler(oc.podHandler)
@@ -101,9 +104,18 @@ func (oc *BaseSecondaryLayer2NetworkController) run() error {
 		return err
 	}
 
-	// WatchMultiNetworkPolicy depends on WatchPods and WatchNamespaces
-	if err := oc.WatchMultiNetworkPolicy(); err != nil {
-		return err
+	if util.IsMultiNetworkPoliciesSupportEnabled() {
+		// WatchMultiNetworkPolicy depends on WatchPods and WatchNamespaces
+		if err := oc.WatchMultiNetworkPolicy(); err != nil {
+			return err
+		}
+	}
+
+	if oc.IsPrimaryNetwork() {
+		// WatchNetworkPolicy depends on WatchPods and WatchNamespaces
+		if err := oc.WatchNetworkPolicy(); err != nil {
+			return err
+		}
 	}
 
 	return nil

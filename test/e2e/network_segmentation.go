@@ -1050,6 +1050,12 @@ func withNodeSelector(nodeSelector map[string]string) podOption {
 	}
 }
 
+func withLabels(labels map[string]string) podOption {
+	return func(pod *podConfiguration) {
+		pod.labels = labels
+	}
+}
+
 func withNetworkAttachment(networks []nadapi.NetworkSelectionElement) podOption {
 	return func(pod *podConfiguration) {
 		pod.attachments = networks

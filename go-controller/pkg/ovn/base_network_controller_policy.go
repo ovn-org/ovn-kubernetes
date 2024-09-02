@@ -200,6 +200,84 @@ func NewNetworkPolicy(policy *knet.NetworkPolicy) *networkPolicy {
 	return np
 }
 
+func (bnc *BaseNetworkController) syncNetworkPolicies(networkPolicies []interface{}) error {
+	expectedPolicies := make(map[string]map[string]bool)
+	for _, npInterface := range networkPolicies {
+		policy, ok := npInterface.(*knet.NetworkPolicy)
+		if !ok {
+			return fmt.Errorf("spurious object in syncNetworkPolicies: %v", npInterface)
+		}
+		if nsMap, ok := expectedPolicies[policy.Namespace]; ok {
+			nsMap[policy.Name] = true
+		} else {
+			expectedPolicies[policy.Namespace] = map[string]bool{
+				policy.Name: true,
+			}
+		}
+	}
+	err := bnc.syncNetworkPoliciesCommon(expectedPolicies)
+	if err != nil {
+		return err
+	}
+
+	// FIXME: For primary user defined networks, we need the hairpin allow ACL.
+	// The port group is not found error is thrown at line 269. Is that expected ?
+	// (or) should this be fixed https://github.com/ovn-org/ovn-kubernetes/blob/master/go-controller/pkg/ovn/base_network_controller.go#L632 ?
+	if bnc.NetInfo.IsSecondary() {
+		return nil
+	}
+
+	// add default hairpin allow acl
+	err = bnc.addHairpinAllowACL()
+	if err != nil {
+		return fmt.Errorf("failed to create allow hairpin acl: %w", err)
+	}
+
+	return nil
+}
+
+func (bnc *BaseNetworkController) addHairpinAllowACL() error {
+	var v4Match, v6Match, match string
+
+	if config.IPv4Mode {
+		v4Match = fmt.Sprintf("%s.src == %s", "ip4", config.Gateway.MasqueradeIPs.V4OVNServiceHairpinMasqueradeIP.String())
+		match = v4Match
+	}
+	if config.IPv6Mode {
+		v6Match = fmt.Sprintf("%s.src == %s", "ip6", config.Gateway.MasqueradeIPs.V6OVNServiceHairpinMasqueradeIP.String())
+		match = v6Match
+	}
+	if config.IPv4Mode && config.IPv6Mode {
+		match = fmt.Sprintf("(%s || %s)", v4Match, v6Match)
+	}
+
+	ingressACLIDs := bnc.getNetpolDefaultACLDbIDs(string(knet.PolicyTypeIngress))
+	ingressACL := libovsdbutil.BuildACL(ingressACLIDs, types.DefaultAllowPriority, match,
+		nbdb.ACLActionAllowRelated, nil, libovsdbutil.LportIngress)
+
+	egressACLIDs := bnc.getNetpolDefaultACLDbIDs(string(knet.PolicyTypeEgress))
+	egressACL := libovsdbutil.BuildACL(egressACLIDs, types.DefaultAllowPriority, match,
+		nbdb.ACLActionAllowRelated, nil, libovsdbutil.LportEgressAfterLB)
+
+	ops, err := libovsdbops.CreateOrUpdateACLsOps(bnc.nbClient, nil, nil, ingressACL, egressACL)
+	if err != nil {
+		return fmt.Errorf("failed to create or update hairpin allow ACL %v", err)
+	}
+
+	ops, err = libovsdbops.AddACLsToPortGroupOps(bnc.nbClient, ops, bnc.getClusterPortGroupName(types.ClusterPortGroupNameBase),
+		ingressACL, egressACL)
+	if err != nil {
+		return fmt.Errorf("failed to add ACL hairpin allow acl to port group: %v", err)
+	}
+
+	_, err = libovsdbops.TransactAndCheck(bnc.nbClient, ops)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
 // syncNetworkPoliciesCommon syncs logical entities associated with existing network policies.
 // It serves both networkpolicies (for default network) and multi-networkpolicies (for secondary networks)
 func (bnc *BaseNetworkController) syncNetworkPoliciesCommon(expectedPolicies map[string]map[string]bool) error {
@@ -560,7 +638,7 @@ func (bnc *BaseNetworkController) getNewLocalPolicyPorts(np *networkPolicy,
 
 // getExistingLocalPolicyPorts will find and return port info for every given pod obj, that is present in np.localPods.
 func (bnc *BaseNetworkController) getExistingLocalPolicyPorts(np *networkPolicy,
-	objs ...interface{}) (policyPortsToUUIDs map[string]string, policyPortUUIDs []string) {
+	objs ...interface{}) (policyPortsToUUIDs map[string]string, policyPortUUIDs []string, err error) {
 	klog.Infof("Processing NetworkPolicy %s/%s to delete %d local pods...", np.namespace, np.name, len(objs))
 
 	policyPortUUIDs = []string{}
@@ -767,7 +845,10 @@ func (bnc *BaseNetworkController) handleLocalPodSelectorDelFunc(np *networkPolic
 		return nil
 	}
 
-	portNamesToUUIDs, policyPortUUIDs := bnc.getExistingLocalPolicyPorts(np, objs...)
+	portNamesToUUIDs, policyPortUUIDs, err := bnc.getExistingLocalPolicyPorts(np, objs...)
+	if err != nil {
+		return err
+	}
 
 	if len(portNamesToUUIDs) > 0 {
 		var err error
