@@ -182,8 +182,12 @@ func expectBatchWithValidatedSend(expecter expect.Expecter, batch []expect.Batch
 	return res, err
 }
 
-// LoginToFedora performs a console login to a Fedora base VM
 func LoginToFedora(vmi *kubevirtv1.VirtualMachineInstance, user, password string) error {
+	return LoginToFedoraWithHostname(vmi, user, password, vmi.Name)
+}
+
+// LoginToFedora performs a console login to a Fedora base VM
+func LoginToFedoraWithHostname(vmi *kubevirtv1.VirtualMachineInstance, user, password, hostname string) error {
 	expecter, _, err := newExpecter(vmi, consoleConnectionTimeout, expect.Verbose(true), expect.VerboseWriter(GinkgoWriter))
 	if err != nil {
 		return err
@@ -197,7 +201,7 @@ func LoginToFedora(vmi *kubevirtv1.VirtualMachineInstance, user, password string
 
 	// Do not login, if we already logged in
 	loggedInPromptRegex := fmt.Sprintf(
-		`(\[%s@%s ~\]\$ |\[root@%s %s\]\# )`, user, vmi.Name, vmi.Name, user,
+		`(\[%s@%s ~\]\$ |\[root@%s %s\]\# )`, user, hostname, hostname, user,
 	)
 	b := []expect.Batcher{
 		&expect.BSnd{S: "\n"},
@@ -215,7 +219,7 @@ func LoginToFedora(vmi *kubevirtv1.VirtualMachineInstance, user, password string
 			&expect.Case{
 				// Using only "login: " would match things like "Last failed login: Tue Jun  9 22:25:30 UTC 2020 on ttyS0"
 				// and in case the VM's did not get hostname form DHCP server try the default hostname
-				R:  regexp.MustCompile(fmt.Sprintf(`%s login: `, vmi.Name)),
+				R:  regexp.MustCompile(fmt.Sprintf(`%s login: `, hostname)),
 				S:  user + "\n",
 				T:  expect.Next(),
 				Rt: 10,
