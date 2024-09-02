@@ -86,6 +86,7 @@ var _ = Describe("Node healthcheck tests", func() {
 	)
 
 	BeforeEach(func() {
+		config.PrepareTestConfig()
 		stopCh = make(chan struct{})
 		wg = &sync.WaitGroup{}
 		os.Setenv("POD_NAME", ovnkNodePodName)
