@@ -250,6 +250,9 @@ func (h *secondaryLayer3NetworkControllerEventHandler) SyncFunc(objs []interface
 		case factory.NamespaceType:
 			syncFunc = h.oc.syncNamespaces
 
+		case factory.PolicyType:
+			syncFunc = h.oc.syncNetworkPolicies
+
 		case factory.MultiNetworkPolicyType:
 			syncFunc = h.oc.syncMultiNetworkPolicies
 
@@ -385,11 +388,19 @@ func (oc *SecondaryLayer3NetworkController) initRetryFramework() {
 	oc.retryPods = oc.newRetryFramework(factory.PodType)
 	oc.retryNodes = oc.newRetryFramework(factory.NodeType)
 
+	// When a user-defined network is enabled as a primary network for namespace,
+	// then watch for namespace and network policy events.
+	if oc.IsPrimaryNetwork() {
+		oc.retryNamespaces = oc.newRetryFramework(factory.NamespaceType)
+		oc.retryNetworkPolicies = oc.newRetryFramework(factory.PolicyType)
+	}
+
 	// For secondary networks, we don't have to watch namespace events if
-	// multi-network policy support is not enabled.
+	// multi-network policy support is not enabled. We don't support
+	// multi-network policy for IPAM-less secondary networks either.
 	if util.IsMultiNetworkPoliciesSupportEnabled() {
 		oc.retryNamespaces = oc.newRetryFramework(factory.NamespaceType)
-		oc.retryNetworkPolicies = oc.newRetryFramework(factory.MultiNetworkPolicyType)
+		oc.retryMultiNetworkPolicies = oc.newRetryFramework(factory.MultiNetworkPolicyType)
 	}
 }
 
@@ -438,8 +449,11 @@ func (oc *SecondaryLayer3NetworkController) Stop() {
 	oc.cancelableCtx.Cancel()
 	oc.wg.Wait()
 
-	if oc.policyHandler != nil {
-		oc.watchFactory.RemoveMultiNetworkPolicyHandler(oc.policyHandler)
+	if oc.netPolicyHandler != nil {
+		oc.watchFactory.RemovePolicyHandler(oc.netPolicyHandler)
+	}
+	if oc.multiNetPolicyHandler != nil {
+		oc.watchFactory.RemoveMultiNetworkPolicyHandler(oc.multiNetPolicyHandler)
 	}
 	if oc.podHandler != nil {
 		oc.watchFactory.RemovePodHandler(oc.podHandler)
@@ -544,9 +558,18 @@ func (oc *SecondaryLayer3NetworkController) Run() error {
 		return err
 	}
 
-	// WatchMultiNetworkPolicy depends on WatchPods and WatchNamespaces
-	if err := oc.WatchMultiNetworkPolicy(); err != nil {
-		return err
+	if util.IsMultiNetworkPoliciesSupportEnabled() {
+		// WatchMultiNetworkPolicy depends on WatchPods and WatchNamespaces
+		if err := oc.WatchMultiNetworkPolicy(); err != nil {
+			return err
+		}
+	}
+
+	if oc.IsPrimaryNetwork() {
+		// WatchNetworkPolicy depends on WatchPods and WatchNamespaces
+		if err := oc.WatchNetworkPolicy(); err != nil {
+			return err
+		}
 	}
 
 	klog.Infof("Completing all the Watchers for network %s took %v", oc.GetNetworkName(), time.Since(start))

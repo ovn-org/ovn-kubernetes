@@ -11,6 +11,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"k8s.io/client-go/tools/cache"
 
 	v1 "k8s.io/api/core/v1"
 	listers "k8s.io/client-go/listers/core/v1"
@@ -356,7 +357,14 @@ func SecondaryNetworkPodIPs(pod *v1.Pod, networkInfo NetInfo) ([]net.IP, error) 
 	return ips, nil
 }
 
+// PodNadNames returns pod's NAD names associated with given network specified by netconf.
+// If netinfo belongs to user defined primary network, then retrieve NAD names from
+// netinfo.GetNADs() which is serving pod's namespace.
+// For all other cases, retrieve NAD names for the pod based on NetworkSelectionElement.
 func PodNadNames(pod *v1.Pod, netinfo NetInfo) ([]string, error) {
+	if netinfo.IsPrimaryNetwork() {
+		return GetPrimaryNetworkNADNamesForNamespaceFromNetInfo(pod.Namespace, netinfo)
+	}
 	on, networkMap, err := GetPodNADToNetworkMapping(pod, netinfo)
 	// skip pods that are not on this network
 	if err != nil {
@@ -369,6 +377,20 @@ func PodNadNames(pod *v1.Pod, netinfo NetInfo) ([]string, error) {
 		nadNames = append(nadNames, nadName)
 	}
 	return nadNames, nil
+}
+
+func GetPrimaryNetworkNADNamesForNamespaceFromNetInfo(namespace string, netinfo NetInfo) ([]string, error) {
+	for _, nadName := range netinfo.GetNADs() {
+		ns, _, err := cache.SplitMetaNamespaceKey(nadName)
+		if err != nil {
+			return nil, fmt.Errorf("error parsing nad name %s from network %s: %v", nadName, netinfo.GetNetworkName(), err)
+		}
+		if ns != namespace {
+			continue
+		}
+		return []string{nadName}, nil
+	}
+	return []string{}, nil
 }
 
 func getAnnotatedPodIPs(pod *v1.Pod, nadName string) []net.IP {

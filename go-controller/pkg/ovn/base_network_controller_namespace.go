@@ -71,12 +71,16 @@ func getNamespaceAddrSetDbIDs(namespaceName, controller string) *libovsdbops.DbO
 // WatchNamespaces starts the watching of namespace resource and calls
 // back the appropriate handler logic
 func (bnc *BaseNetworkController) WatchNamespaces() error {
-	if bnc.IsSecondary() {
+	if bnc.IsPrimaryNetwork() && !util.IsNetworkSegmentationSupportEnabled() {
+		// For primary user defined networks, we don't have to watch namespace events if
+		// network segmentation support is not enabled.
+		return nil
+	}
+
+	if bnc.IsSecondary() && !util.IsMultiNetworkPoliciesSupportEnabled() {
 		// For secondary networks, we don't have to watch namespace events if
 		// multi-network policy support is not enabled.
-		if !util.IsMultiNetworkPoliciesSupportEnabled() {
-			return nil
-		}
+		return nil
 	}
 
 	if bnc.namespaceHandler != nil {
@@ -84,9 +88,10 @@ func (bnc *BaseNetworkController) WatchNamespaces() error {
 	}
 
 	handler, err := bnc.retryNamespaces.WatchResource()
-	if err == nil {
-		bnc.namespaceHandler = handler
+	if err != nil {
+		return err
 	}
+	bnc.namespaceHandler = handler
 	return err
 }
 

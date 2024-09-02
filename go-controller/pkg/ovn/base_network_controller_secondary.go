@@ -93,7 +93,7 @@ func (bsnc *BaseSecondaryNetworkController) AddSecondaryNetworkResourceCommon(ob
 		return nil
 
 	default:
-		return fmt.Errorf("object type %s not supported", objType)
+		return bsnc.AddResourceCommon(objType, obj)
 	}
 	return nil
 }
@@ -215,7 +215,7 @@ func (bsnc *BaseSecondaryNetworkController) DeleteSecondaryNetworkResourceCommon
 		klog.Infof("Released IPs %q for network %q", ipamClaim.Status.IPs, ipamClaim.Spec.Network)
 
 	default:
-		return fmt.Errorf("object type %s not supported", objType)
+		return bsnc.DeleteResourceCommon(objType, obj)
 	}
 	return nil
 }
@@ -713,21 +713,32 @@ func (bsnc *BaseSecondaryNetworkController) deleteNamespace4SecondaryNetwork(ns 
 	return nil
 }
 
-// WatchMultiNetworkPolicy starts the watching of multinetworkpolicy resource and calls
+// WatchNetworkPolicy starts the watching of networkpolicy resource and calls
 // back the appropriate handler logic
-func (bsnc *BaseSecondaryNetworkController) WatchMultiNetworkPolicy() error {
-	if !util.IsMultiNetworkPoliciesSupportEnabled() {
-		return nil
-	}
-
-	if bsnc.policyHandler != nil {
+func (bsnc *BaseSecondaryNetworkController) WatchNetworkPolicy() error {
+	if bsnc.netPolicyHandler != nil {
 		return nil
 	}
 	handler, err := bsnc.retryNetworkPolicies.WatchResource()
 	if err != nil {
-		bsnc.policyHandler = handler
+		return err
 	}
-	return err
+	bsnc.netPolicyHandler = handler
+	return nil
+}
+
+// WatchMultiNetworkPolicy starts the watching of multinetworkpolicy resource and calls
+// back the appropriate handler logic
+func (bsnc *BaseSecondaryNetworkController) WatchMultiNetworkPolicy() error {
+	if bsnc.multiNetPolicyHandler != nil {
+		return nil
+	}
+	handler, err := bsnc.retryMultiNetworkPolicies.WatchResource()
+	if err != nil {
+		return err
+	}
+	bsnc.multiNetPolicyHandler = handler
+	return nil
 }
 
 // cleanupPolicyLogicalEntities cleans up all the port groups and address sets that belong to the given controller
