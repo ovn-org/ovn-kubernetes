@@ -12,6 +12,7 @@ import (
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/ovsdb"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
@@ -580,7 +581,8 @@ func (oc *DefaultNetworkController) deletePodSNAT(nodeName string, extIPs, podIP
 		klog.V(4).Infof("Node %s is not in the local zone %s", nodeName, oc.zone)
 		return nil
 	}
-	ops, err := deletePodSNATOps(oc.nbClient, nil, oc.GetNetworkScopedGWRouterName(nodeName), extIPs, podIPNets)
+	// Default network does not set any matches in Pod SNAT
+	ops, err := deletePodSNATOps(oc.nbClient, nil, oc.GetNetworkScopedGWRouterName(nodeName), extIPs, podIPNets, "")
 	if err != nil {
 		return err
 	}
@@ -593,7 +595,7 @@ func (oc *DefaultNetworkController) deletePodSNAT(nodeName string, extIPs, podIP
 }
 
 // buildPodSNAT builds per pod SNAT rules towards the nodeIP that are applied to the GR where the pod resides
-func buildPodSNAT(extIPs, podIPNets []*net.IPNet) ([]*nbdb.NAT, error) {
+func buildPodSNAT(extIPs, podIPNets []*net.IPNet, match string) ([]*nbdb.NAT, error) {
 	nats := make([]*nbdb.NAT, 0, len(extIPs)*len(podIPNets))
 	for _, podIPNet := range podIPNets {
 		fullMaskPodNet := &net.IPNet{
@@ -601,13 +603,13 @@ func buildPodSNAT(extIPs, podIPNets []*net.IPNet) ([]*nbdb.NAT, error) {
 			Mask: util.GetIPFullMask(podIPNet.IP),
 		}
 		if len(extIPs) == 0 {
-			nats = append(nats, libovsdbops.BuildSNAT(nil, fullMaskPodNet, "", nil))
+			nats = append(nats, libovsdbops.BuildSNATWithMatch(nil, fullMaskPodNet, "", nil, match))
 		} else {
 			for _, gwIPNet := range extIPs {
 				if utilnet.IsIPv6CIDR(gwIPNet) != utilnet.IsIPv6CIDR(podIPNet) {
 					continue
 				}
-				nats = append(nats, libovsdbops.BuildSNAT(&gwIPNet.IP, fullMaskPodNet, "", nil))
+				nats = append(nats, libovsdbops.BuildSNATWithMatch(&gwIPNet.IP, fullMaskPodNet, "", nil, match))
 			}
 		}
 	}
@@ -630,8 +632,8 @@ func getExternalIPsGR(watchFactory *factory.WatchFactory, nodeName string) ([]*n
 
 // deletePodSNATOps creates ovsdb operation that removes per pod SNAT rules towards the nodeIP that are applied to the GR where the pod resides
 // used when disableSNATMultipleGWs=true
-func deletePodSNATOps(nbClient libovsdbclient.Client, ops []ovsdb.Operation, gwRouterName string, extIPs, podIPNets []*net.IPNet) ([]ovsdb.Operation, error) {
-	nats, err := buildPodSNAT(extIPs, podIPNets)
+func deletePodSNATOps(nbClient libovsdbclient.Client, ops []ovsdb.Operation, gwRouterName string, extIPs, podIPNets []*net.IPNet, match string) ([]ovsdb.Operation, error) {
+	nats, err := buildPodSNAT(extIPs, podIPNets, match)
 	if err != nil {
 		return nil, err
 	}
@@ -648,7 +650,7 @@ func deletePodSNATOps(nbClient libovsdbclient.Client, ops []ovsdb.Operation, gwR
 // addOrUpdatePodSNAT adds or updates per pod SNAT rules towards the nodeIP that are applied to the GR where the pod resides
 // used when disableSNATMultipleGWs=true
 func addOrUpdatePodSNAT(nbClient libovsdbclient.Client, gwRouterName string, extIPs, podIfAddrs []*net.IPNet) error {
-	nats, err := buildPodSNAT(extIPs, podIfAddrs)
+	nats, err := buildPodSNAT(extIPs, podIfAddrs, "")
 	if err != nil {
 		return err
 	}
@@ -664,9 +666,9 @@ func addOrUpdatePodSNAT(nbClient libovsdbclient.Client, gwRouterName string, ext
 // addOrUpdatePodSNATOps returns the operation that adds or updates per pod SNAT rules towards the nodeIP that are
 // applied to the GR where the pod resides
 // used when disableSNATMultipleGWs=true
-func addOrUpdatePodSNATOps(nbClient libovsdbclient.Client, gwRouterName string, extIPs, podIfAddrs []*net.IPNet, ops []ovsdb.Operation) ([]ovsdb.Operation, error) {
+func addOrUpdatePodSNATOps(nbClient libovsdbclient.Client, gwRouterName string, extIPs, podIfAddrs []*net.IPNet, match string, ops []ovsdb.Operation) ([]ovsdb.Operation, error) {
 	router := &nbdb.LogicalRouter{Name: gwRouterName}
-	nats, err := buildPodSNAT(extIPs, podIfAddrs)
+	nats, err := buildPodSNAT(extIPs, podIfAddrs, match)
 	if err != nil {
 		return nil, err
 	}

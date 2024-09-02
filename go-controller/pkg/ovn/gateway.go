@@ -650,6 +650,7 @@ func (gw *GatewayManager) GatewayInit(
 		if nat.Type != nbdb.NATTypeSNAT {
 			continue
 		}
+
 		// check external ip changed
 		for _, externalIP := range externalIPs {
 			oldExternalIP, err := util.MatchFirstIPFamily(utilnet.IsIPv6(externalIP), oldExtIPs)
@@ -667,6 +668,7 @@ func (gw *GatewayManager) GatewayInit(
 			}
 
 		}
+
 		// note, nat.LogicalIP may be a CIDR or IP, we don't care unless it's an IP
 		parsedLogicalIP := net.ParseIP(nat.LogicalIP)
 		// check if join ip changed
@@ -724,6 +726,7 @@ func (gw *GatewayManager) GatewayInit(
 
 	nats := make([]*nbdb.NAT, 0, len(clusterIPSubnet))
 	var nat *nbdb.NAT
+
 	if !config.Gateway.DisableSNATMultipleGWs {
 		// Default SNAT rules. DisableSNATMultipleGWs=false in LGW (traffic egresses via mp0) always.
 		// We are not checking for gateway mode to be shared explicitly to reduce topology differences.
@@ -733,7 +736,8 @@ func (gw *GatewayManager) GatewayInit(
 				return fmt.Errorf("failed to create default SNAT rules for gateway router %s: %v",
 					gatewayRouter, err)
 			}
-			nat = libovsdbops.BuildSNAT(&externalIP[0], entry, "", extIDs)
+
+			nat = libovsdbops.BuildSNATWithMatch(&externalIP[0], entry, "", extIDs, gw.netInfo.GetNetworkScopedClusterSubnetSNATMatch(nodeName))
 			nats = append(nats, nat)
 		}
 		err := libovsdbops.CreateOrUpdateNATs(gw.nbClient, &logicalRouter, nats...)
@@ -743,7 +747,7 @@ func (gw *GatewayManager) GatewayInit(
 	} else {
 		// ensure we do not have any leftover SNAT entries after an upgrade
 		for _, logicalSubnet := range clusterIPSubnet {
-			nat = libovsdbops.BuildSNAT(nil, logicalSubnet, "", extIDs)
+			nat = libovsdbops.BuildSNATWithMatch(nil, logicalSubnet, "", extIDs, gw.netInfo.GetNetworkScopedClusterSubnetSNATMatch(nodeName))
 			nats = append(nats, nat)
 		}
 		err := libovsdbops.DeleteNATs(gw.nbClient, &logicalRouter, nats...)

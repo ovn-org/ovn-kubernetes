@@ -8,9 +8,10 @@ import (
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	libovsdb "github.com/ovn-org/libovsdb/ovsdb"
+	"k8s.io/apimachinery/pkg/util/sets"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	"k8s.io/apimachinery/pkg/util/sets"
 )
 
 // ROUTER OPs
@@ -975,10 +976,14 @@ func BuildDNATAndSNATWithMatch(
 		match)
 }
 
-// isEquivalentNAT if it has same uuid. Otherwise, check if types match.
-// ExternalIP must be unique amonst non-SNATs;
-// LogicalIP must be unique amonst SNATs;
-// If provided, LogicalPort is expected to match;
+// isEquivalentNAT checks if the `searched` NAT is equivalent to `existing`.
+// Returns true if the UUID is set in `searched` and matches the UUID of `existing`.
+// Otherwise, perform the following checks:
+//   - Compare the Type and Match fields.
+//   - Compare ExternalIP if it is set in `searched`.
+//   - Compare LogicalIP if the Type in `searched` is SNAT.
+//   - Compare LogicalPort if it is set in `searched`.
+//   - Ensure that all ExternalIDs of `searched` exist and have the same value in `existing`.
 func isEquivalentNAT(existing *nbdb.NAT, searched *nbdb.NAT) bool {
 	// Simple case: uuid was provided.
 	if searched.UUID != "" && existing.UUID == searched.UUID {
@@ -986,6 +991,10 @@ func isEquivalentNAT(existing *nbdb.NAT, searched *nbdb.NAT) bool {
 	}
 
 	if searched.Type != existing.Type {
+		return false
+	}
+
+	if searched.Match != existing.Match {
 		return false
 	}
 
