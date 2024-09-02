@@ -175,7 +175,7 @@ require (
 	go.universe.tf/metallb v0.0.0-00010101000000-000000000000
 	google.golang.org/grpc v1.64.0
 	k8s.io/kubectl v0.30.2
-	kubevirt.io/api v1.0.0
+	kubevirt.io/api v1.1.0
 	sigs.k8s.io/controller-runtime v0.18.4
 )
 
