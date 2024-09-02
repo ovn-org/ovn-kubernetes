@@ -2,7 +2,6 @@ package util
 
 import (
 	"fmt"
-	"net"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
@@ -46,11 +45,7 @@ func CreateDefaultRouteToExternal(nbClient libovsdbclient.Client, clusterRouter,
 			Policy:   &nbdb.LogicalRouterStaticRoutePolicySrcIP,
 		}
 		p := func(lrsr *nbdb.LogicalRouterStaticRoute) bool {
-			_, itemCIDR, err := net.ParseCIDR(lrsr.IPPrefix)
-			if err != nil {
-				return false
-			}
-			return util.ContainsCIDR(subnet, itemCIDR) &&
+			return lrsr.IPPrefix == subnet.String() &&
 				lrsr.Nexthop == gatewayIP.IP.String() &&
 				lrsr.Policy != nil && *lrsr.Policy == nbdb.LogicalRouterStaticRoutePolicySrcIP
 		}
