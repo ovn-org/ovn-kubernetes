@@ -255,7 +255,7 @@ func (p *Plugin) CmdAdd(args *skel.CmdArgs) error {
 		}
 
 		// In the case where ovnkube-node is running in Unprivileged mode, all the work
-		result, err = getCNIResult(pr, clientset, response.PodIFInfo)
+		result, err = pr.getCNIResult(clientset, response.PodIFInfo)
 		if err != nil {
 			err = fmt.Errorf("failed to get CNI Result from pod interface info %v: %v", response.PodIFInfo, err)
 			klog.Error(err.Error())

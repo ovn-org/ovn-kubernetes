@@ -106,9 +106,6 @@ func (pr *PodRequest) checkOrUpdatePodUID(pod *kapi.Pod) error {
 }
 
 func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, clientset *ClientSet) (*Response, error) {
-	return pr.cmdAddWithGetCNIResultFunc(kubeAuth, clientset, getCNIResult)
-}
-func (pr *PodRequest) cmdAddWithGetCNIResultFunc(kubeAuth *KubeAPIAuth, clientset *ClientSet, getCNIResultFn getCNIResultFunc) (*Response, error) {
 	namespace := pr.PodNamespace
 	podName := pr.PodName
 	if namespace == "" || podName == "" {
@@ -164,7 +161,7 @@ func (pr *PodRequest) cmdAddWithGetCNIResultFunc(kubeAuth *KubeAPIAuth, clientse
 	if !config.UnprivilegedMode {
 		//TODO: There is nothing technical to run this at unprivileged mode but
 		//      we will tackle that later on.
-		response.Result, err = getCNIResultFn(pr, clientset, podInterfaceInfo)
+		response.Result, err = pr.getCNIResult(clientset, podInterfaceInfo)
 		if err != nil {
 			return nil, err
 		}
@@ -174,7 +171,7 @@ func (pr *PodRequest) cmdAddWithGetCNIResultFunc(kubeAuth *KubeAPIAuth, clientse
 			if err != nil {
 				return nil, err
 			}
-			if _, err := getCNIResultFn(primaryUDNPodRequest, clientset, primaryUDNPodInfo); err != nil {
+			if _, err := primaryUDNPodRequest.getCNIResult(clientset, primaryUDNPodInfo); err != nil {
 				return nil, err
 			}
 		}
@@ -316,7 +313,7 @@ func HandlePodRequest(request *PodRequest, clientset *ClientSet, kubeAuth *KubeA
 // PodInfoGetter is used to check if sandbox is still valid for the current
 // instance of the pod in the apiserver, see checkCancelSandbox for more info.
 // If kube api is not available from the CNI, pass nil to skip this check.
-func getCNIResult(pr *PodRequest, getter PodInfoGetter, podInterfaceInfo *PodInterfaceInfo) (*current.Result, error) {
+func (pr *PodRequest) getCNIResult(getter PodInfoGetter, podInterfaceInfo *PodInterfaceInfo) (*current.Result, error) {
 	interfacesArray, err := podRequestInterfaceOps.ConfigureInterface(pr, getter, podInterfaceInfo)
 	if err != nil {
 		return nil, fmt.Errorf("failed to configure pod interface: %v", err)
