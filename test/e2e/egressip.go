@@ -2705,6 +2705,124 @@ spec:
 		framework.ExpectNoError(err, "5. Check connectivity a pod to an external \"node\" hosted on a secondary host network "+
 			"and verify the expected IP, failed for EgressIP %s: %v", egressIPName, err)
 	})
+
+	ginkgo.DescribeTable("[OVN network] multiple namespaces with different primary networks", func(otherNetworkAttachParms networkAttachmentConfigParams) {
+		ginkgo.By(fmt.Sprintf("Building a namespace api object, basename %s", f.BaseName))
+		otherNetworkNamespace, err := f.CreateNamespace(context.Background(), f.BaseName, map[string]string{
+			"e2e-framework": f.BaseName,
+		})
+		gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+		if netConfigParams.networkName == types.DefaultNetworkName {
+			ginkgo.By("namespace is connected to CDN, create a namespace with primary as a layer3 UDN")
+			// create L3 Primary UDN
+			nadClient, err := nadclient.NewForConfig(f.ClientConfig())
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			netConfig := newNetworkAttachmentConfig(otherNetworkAttachParms)
+			netConfig.namespace = otherNetworkNamespace.Name
+			_, err = nadClient.NetworkAttachmentDefinitions(otherNetworkNamespace.Name).Create(
+				context.Background(),
+				generateNAD(netConfig),
+				metav1.CreateOptions{},
+			)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		} else {
+			// if network is L2,L3 or other, then other network is CDN
+		}
+		egressNodeAvailabilityHandler := egressNodeAvailabilityHandlerViaLabel{f}
+		ginkgo.By("1. Set one node as available for egress")
+		egressNodeAvailabilityHandler.Enable(egress1Node.name)
+		defer egressNodeAvailabilityHandler.Restore(egress1Node.name)
+
+		selectedByEIPLabels := map[string]string{
+			"wants": "egress",
+		}
+		pod1Namespace := f.Namespace
+		pod1Namespace.Labels = selectedByEIPLabels
+		updateNamespace(f, pod1Namespace)
+		pod2OtherNetworkNamespace := otherNetworkNamespace.Name
+		otherNetworkNamespace.Labels = selectedByEIPLabels
+		updateNamespace(f, otherNetworkNamespace)
+
+		ginkgo.By("3. Create an EgressIP object with one egress IP defined")
+		// Assign the egress IP without conflicting with any node IP,
+		// the kind subnet is /16 or /64 so the following should be fine.
+		egressNodeIP := net.ParseIP(egress1Node.nodeIP)
+		egressIP1 := dupIP(egressNodeIP)
+		egressIP1[len(egressIP1)-2]++
+
+		var egressIPConfig = fmt.Sprintf(`apiVersion: k8s.ovn.org/v1
+kind: EgressIP
+metadata:
+    name: ` + egressIPName + `
+spec:
+    egressIPs:
+    - ` + egressIP1.String() + `
+    podSelector:
+        matchLabels:
+            wants: egress
+    namespaceSelector:
+        matchLabels:
+            wants: egress
+`)
+		if err := os.WriteFile(egressIPYaml, []byte(egressIPConfig), 0644); err != nil {
+			framework.Failf("Unable to write CRD config to disk: %v", err)
+		}
+		defer func() {
+			if err := os.Remove(egressIPYaml); err != nil {
+				framework.Logf("Unable to remove the CRD config from disk: %v", err)
+			}
+		}()
+
+		framework.Logf("Create the EgressIP configuration")
+		e2ekubectl.RunKubectlOrDie("default", "create", "-f", egressIPYaml)
+
+		ginkgo.By("4. Check that the status is of length one and that it is assigned to egress1Node")
+		statuses := verifyEgressIPStatusLengthEquals(1, nil)
+		if statuses[0].Node != egress1Node.name {
+			framework.Failf("Step 4. Check that the status is of length one and that it is assigned to egress1Node, failed")
+		}
+
+		ginkgo.By("5. Create two pods matching the EgressIP with each connected to a different network")
+		_, err = createGenericPodWithLabel(f, pod1Name, pod1Node.name, f.Namespace.Name, command, podEgressLabel)
+		framework.ExpectNoError(err, "5. Create one pod matching the EgressIP: running on egress1Node, failed: %v", err)
+		_, err = createGenericPodWithLabel(f, pod2Name, pod2Node.name, otherNetworkNamespace.Name, command, podEgressLabel)
+		framework.ExpectNoError(err, "5. Create one pod matching the EgressIP: running on egress2Node, failed: %v", err)
+
+		err = wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
+			kubectlOut := getPodAddress(pod1Name, f.Namespace.Name)
+			srcIP := net.ParseIP(kubectlOut)
+			if srcIP == nil {
+				return false, nil
+			}
+			return true, nil
+		})
+		framework.ExpectNoError(err, "Step 5. Create one pod matching the EgressIP: running on egress1Node, failed, err: %v", err)
+		framework.Logf("Created pod %s on node %s", pod1Name, pod1Node.name)
+
+		err = wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
+			kubectlOut := getPodAddress(pod2Name, otherNetworkNamespace.Name)
+			srcIP := net.ParseIP(kubectlOut)
+			if srcIP == nil {
+				return false, nil
+			}
+			return true, nil
+		})
+		framework.ExpectNoError(err, "Step 5. Create one pod matching the EgressIP: running on egress2Node, failed, err: %v", err)
+		framework.Logf("Created pod %s on node %s", pod2Name, pod2Node.name)
+
+		ginkgo.By("6. Check connectivity from pod to an external node and verify that the srcIP is the expected egressIP")
+		err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(targetNode, pod1Name, pod1Namespace.Name, true, []string{egressIP1.String()}))
+		framework.ExpectNoError(err, "Step 6. Check connectivity from pod to an external node and verify that the srcIP is the expected egressIP, failed: %v", err)
+
+		ginkgo.By("7. Check connectivity from pod connected to a different network and verify that the srcIP is the expected egressIP")
+		err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(targetNode, pod2Name, pod2OtherNetworkNamespace, true, []string{egressIP1.String()}))
+		framework.ExpectNoError(err, "Step 7. Check connectivity from pod connected to a different network and verify that the srcIP is the expected nodeIP, failed: %v", err)
+	}, ginkgo.Entry("L3 Primary UDN", networkAttachmentConfigParams{
+		name:     "l3primary",
+		topology: types.Layer3Topology,
+		cidr:     "10.10.0.0/16",
+		role:     "primary",
+	}))
 },
 	ginkgo.Entry(
 		"L3 CDN", // No UDN attachments
