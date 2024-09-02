@@ -66,3 +66,23 @@ func allocateMasqueradeIPs(idName string, masqueradeSubnet string, networkID int
 	}
 	return masqueradeIPs, nil
 }
+
+// GetUDNGatewayMasqueradeIPs returns the list of gateway router masqueradeIPs for the given UDN's networkID
+func GetUDNGatewayMasqueradeIPs(networkID int) ([]*net.IPNet, error) {
+	var masqIPs []*net.IPNet
+	if config.IPv4Mode {
+		v4MasqIPs, err := AllocateV4MasqueradeIPs(networkID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get v4 masquerade IP, networkID %d: %v", networkID, err)
+		}
+		masqIPs = append(masqIPs, v4MasqIPs.GatewayRouter)
+	}
+	if config.IPv6Mode {
+		v6MasqIPs, err := AllocateV6MasqueradeIPs(networkID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get v6 masquerade IP, networkID %d: %v", networkID, err)
+		}
+		masqIPs = append(masqIPs, v6MasqIPs.GatewayRouter)
+	}
+	return masqIPs, nil
+}
