@@ -653,7 +653,7 @@ func (oc *SecondaryLayer3NetworkController) addUpdateLocalNodeEvent(node *kapi.N
 				errs = append(errs, err)
 				oc.mgmtPortFailed.Store(node.Name, true)
 			} else {
-				_, err = oc.syncNodeManagementPortRouteHostSubnets(node, oc.GetNetworkScopedSwitchName(node.Name), hostSubnets)
+				_, err = oc.syncNodeManagementPort(node, oc.GetNetworkScopedSwitchName(node.Name), oc.GetNetworkScopedClusterRouterName(), hostSubnets)
 				if err != nil {
 					errs = append(errs, err)
 					oc.mgmtPortFailed.Store(node.Name, true)

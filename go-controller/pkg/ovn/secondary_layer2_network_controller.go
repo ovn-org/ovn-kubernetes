@@ -428,7 +428,7 @@ func (oc *SecondaryLayer2NetworkController) addUpdateLocalNodeEvent(node *corev1
 			for _, subnet := range oc.Subnets() {
 				hostSubnets = append(hostSubnets, subnet.CIDR)
 			}
-			if _, err := oc.syncNodeManagementPortNoRouteHostSubnets(node, oc.GetNetworkScopedSwitchName(types.OVNLayer2Switch), hostSubnets); err != nil {
+			if _, err := oc.syncNodeManagementPort(node, oc.GetNetworkScopedSwitchName(types.OVNLayer2Switch), oc.GetNetworkScopedGWRouterName(node.Name), hostSubnets); err != nil {
 				errs = append(errs, err)
 				oc.mgmtPortFailed.Store(node.Name, true)
 			} else {
