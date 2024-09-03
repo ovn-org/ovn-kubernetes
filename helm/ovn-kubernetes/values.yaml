@@ -101,6 +101,8 @@ global:
   disablePacketMtuCheck: ""
   # -- Deprecated: iface-id-ver is always enabled
   disableIfaceIdVer: false
+  # -- Enable/disable requested-chassis option on lsp during pod creation. Must be set to true when cluster has DPUs
+  disableRequestedchassis: false
   # -- The largest number of messages per second that gets logged before drop
   # @default 20
   aclLoggingRateLimit: 20

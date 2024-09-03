@@ -273,6 +273,8 @@ spec:
             configMapKeyRef:
               name: ovn-config
               key: host_network_namespace
+        - name: OVN_DISABLE_REQUESTEDCHASSIS
+          value: {{ default "false" .Values.global.disableRequestedchassis | quote }}
       # end of container
       volumes:
       # TODO: Need to check why we need this?

@@ -295,6 +295,8 @@ spec:
           value: "{{ ovn_enable_svc_template_support }}"
         - name: OVN_NOHOSTSUBNET_LABEL
           value: "{{ ovn_nohostsubnet_label }}"
+        - name: OVN_DISABLE_REQUESTEDCHASSIS
+          value: "{{ ovn_disable_requestedchassis }}"
         - name: OVN_HOST_NETWORK_NAMESPACE
           valueFrom:
             configMapKeyRef:

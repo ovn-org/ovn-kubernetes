@@ -107,13 +107,14 @@ var (
 
 	// Kubernetes holds Kubernetes-related parsed config file parameters and command-line overrides
 	Kubernetes = KubernetesConfig{
-		APIServer:            DefaultAPIServer,
-		RawServiceCIDRs:      "172.16.1.0/24",
-		OVNConfigNamespace:   "ovn-kubernetes",
-		HostNetworkNamespace: "",
-		PlatformType:         "",
-		DNSServiceNamespace:  "kube-system",
-		DNSServiceName:       "kube-dns",
+		APIServer:               DefaultAPIServer,
+		RawServiceCIDRs:         "172.16.1.0/24",
+		OVNConfigNamespace:      "ovn-kubernetes",
+		HostNetworkNamespace:    "",
+		DisableRequestedChassis: false,
+		PlatformType:            "",
+		DNSServiceNamespace:     "kube-system",
+		DNSServiceName:          "kube-dns",
 		// By default, use a short lifetime length for certificates to ensure that the automatic rotation works well,
 		// might revisit in the future to use a more sensible value
 		CertDuration: 10 * time.Minute,
@@ -340,26 +341,27 @@ type CNIConfig struct {
 
 // KubernetesConfig holds Kubernetes-related parsed config file parameters and command-line overrides
 type KubernetesConfig struct {
-	BootstrapKubeconfig  string        `gcfg:"bootstrap-kubeconfig"`
-	CertDir              string        `gcfg:"cert-dir"`
-	CertDuration         time.Duration `gcfg:"cert-duration"`
-	Kubeconfig           string        `gcfg:"kubeconfig"`
-	CACert               string        `gcfg:"cacert"`
-	CAData               []byte
-	APIServer            string `gcfg:"apiserver"`
-	Token                string `gcfg:"token"`
-	TokenFile            string `gcfg:"tokenFile"`
-	CompatServiceCIDR    string `gcfg:"service-cidr"`
-	RawServiceCIDRs      string `gcfg:"service-cidrs"`
-	ServiceCIDRs         []*net.IPNet
-	OVNConfigNamespace   string `gcfg:"ovn-config-namespace"`
-	OVNEmptyLbEvents     bool   `gcfg:"ovn-empty-lb-events"`
-	PodIP                string `gcfg:"pod-ip"` // UNUSED
-	RawNoHostSubnetNodes string `gcfg:"no-hostsubnet-nodes"`
-	NoHostSubnetNodes    labels.Selector
-	HostNetworkNamespace string `gcfg:"host-network-namespace"`
-	PlatformType         string `gcfg:"platform-type"`
-	HealthzBindAddress   string `gcfg:"healthz-bind-address"`
+	BootstrapKubeconfig     string        `gcfg:"bootstrap-kubeconfig"`
+	CertDir                 string        `gcfg:"cert-dir"`
+	CertDuration            time.Duration `gcfg:"cert-duration"`
+	Kubeconfig              string        `gcfg:"kubeconfig"`
+	CACert                  string        `gcfg:"cacert"`
+	CAData                  []byte
+	APIServer               string `gcfg:"apiserver"`
+	Token                   string `gcfg:"token"`
+	TokenFile               string `gcfg:"tokenFile"`
+	CompatServiceCIDR       string `gcfg:"service-cidr"`
+	RawServiceCIDRs         string `gcfg:"service-cidrs"`
+	ServiceCIDRs            []*net.IPNet
+	OVNConfigNamespace      string `gcfg:"ovn-config-namespace"`
+	OVNEmptyLbEvents        bool   `gcfg:"ovn-empty-lb-events"`
+	PodIP                   string `gcfg:"pod-ip"` // UNUSED
+	RawNoHostSubnetNodes    string `gcfg:"no-hostsubnet-nodes"`
+	NoHostSubnetNodes       labels.Selector
+	HostNetworkNamespace    string `gcfg:"host-network-namespace"`
+	DisableRequestedChassis bool   `gcfg:"disable-requestedchassis"`
+	PlatformType            string `gcfg:"platform-type"`
+	HealthzBindAddress      string `gcfg:"healthz-bind-address"`
 
 	// CompatMetricsBindAddress is overridden by the corresponding option in MetricsConfig
 	CompatMetricsBindAddress string `gcfg:"metrics-bind-address"`
@@ -628,6 +630,7 @@ func PrepareTestConfig() error {
 	HybridOverlay = savedHybridOverlay
 	OvnKubeNode = savedOvnKubeNode
 	ClusterManager = savedClusterManager
+	Kubernetes.DisableRequestedChassis = false
 	EnableMulticast = false
 
 	if err := completeConfig(); err != nil {
@@ -1155,6 +1158,12 @@ var K8sFlags = []cli.Flag{
 		Usage:       "specify a namespace which will be used to classify host network traffic for network policy",
 		Destination: &cliConfig.Kubernetes.HostNetworkNamespace,
 		Value:       Kubernetes.HostNetworkNamespace,
+	},
+	&cli.BoolFlag{
+		Name:        "disable-requestedchassis",
+		Usage:       "If set to true, requested-chassis option will not be set during pod creation",
+		Destination: &cliConfig.Kubernetes.DisableRequestedChassis,
+		Value:       Kubernetes.DisableRequestedChassis,
 	},
 	&cli.StringFlag{
 		Name: "platform-type",
