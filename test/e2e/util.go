@@ -1063,7 +1063,7 @@ func allowOrDropNodeInputTrafficOnPort(op, nodeName, protocol, port string) {
 		if op == "delete" && notFound {
 			// rule is not there
 			return
-		} else if op == "append" && err == nil {
+		} else if op == "insert" && err == nil {
 			// rule is already there
 			return
 		}
