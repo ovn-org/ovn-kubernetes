@@ -315,6 +315,9 @@ ovn_enable_dnsnameresolver=${OVN_ENABLE_DNSNAMERESOLVER:-false}
 ovn_observ_enable=${OVN_OBSERV_ENABLE:-false}
 # OVN_NOHOSTSUBNET_LABEL - node label indicating nodes managing their own network
 ovn_nohostsubnet_label=${OVN_NOHOSTSUBNET_LABEL:-""}
+# OVN_DISABLE_REQUESTEDCHASSIS - disable requested-chassis option during pod creation
+# should be set to true when dpu nodes are in the cluster
+ovn_disable_requestedchassis=${OVN_DISABLE_REQUESTEDCHASSIS:-false}
 
 # Determine the ovn rundir.
 if [[ -f /usr/bin/ovn-appctl ]]; then
@@ -1275,6 +1278,12 @@ ovn-master() {
 	  nohostsubnet_label_option="--no-hostsubnet-nodes=${ovn_nohostsubnet_label}"
   fi
 
+  ovn_disable_requestedchassis_flag=
+  if [[ ${ovn_disable_requestedchassis} == "true" ]]; then
+	  ovn_disable_requestedchassis_flag="--disable-requestedchassis"
+  fi
+  echo "ovn_disable_requestedchassis_flag=${ovn_disable_requestedchassis_flag}"
+
   init_node_flags=
   if [[ ${ovnkube_compact_mode_enable} == "true" ]]; then
     init_node_flags="--init-node ${K8S_NODE} --nodeport"
@@ -1328,6 +1337,7 @@ ovn-master() {
     ${persistent_ips_enabled_flag} \
     ${ovn_enable_dnsnameresolver_flag} \
     ${nohostsubnet_label_option} \
+    ${ovn_disable_requestedchassis_flag} \
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
     --gateway-mode=${ovn_gateway_mode} ${ovn_gateway_opts} \
     --host-network-namespace ${ovn_host_network_namespace} \
