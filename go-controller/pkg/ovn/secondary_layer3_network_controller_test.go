@@ -730,7 +730,7 @@ func expectedLogicalRouterPolicy(routerPolicyUUID1 string, netInfo util.NetInfo,
 		priority      = 1004
 		rerouteAction = "reroute"
 	)
-	networkScopedNodeName := netInfo.GetNetworkScopedName(nodeName)
+	networkScopedNodeName := netInfo.GetNetworkScopedSwitchName(nodeName)
 	lrpName := fmt.Sprintf("%s%s", ovntypes.RouterToSwitchPrefix, networkScopedNodeName)
 	return &nbdb.LogicalRouterPolicy{
 		UUID:        routerPolicyUUID1,

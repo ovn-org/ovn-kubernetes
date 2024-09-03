@@ -328,6 +328,10 @@ func (nInfo *secondaryNetInfo) GetNetworkScopedGWRouterName(nodeName string) str
 }
 
 func (nInfo *secondaryNetInfo) GetNetworkScopedSwitchName(nodeName string) string {
+	// In Layer2Topology there is just one global switch
+	if nInfo.TopologyType() == types.Layer2Topology {
+		return fmt.Sprintf("%s%s", nInfo.getPrefix(), types.OVNLayer2Switch)
+	}
 	return nInfo.GetNetworkScopedName(nodeName)
 }
 
