@@ -145,7 +145,7 @@ spec:
               name: ovn-config
               key: routable_mtu
               optional: true
-        - name: K8S_NODE
+        - name: K8S_NODE_DPU
           valueFrom:
             fieldRef:
               fieldPath: spec.nodeName
@@ -284,7 +284,7 @@ spec:
             configMapKeyRef:
               name: ovn-config
               key: k8s_apiserver
-        - name: K8S_NODE
+        - name: K8S_NODE_DPU
           valueFrom:
             fieldRef:
               fieldPath: spec.nodeName
