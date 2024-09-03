@@ -24,6 +24,7 @@ import (
 	userdefinednetworkinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/informers/externalversions/userdefinednetwork/v1"
 	userdefinednetworklister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/listers/userdefinednetwork/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	utiludn "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/udn"
 )
 
 var ErrNetworkControllerTopologyNotManaged = errors.New("no cluster network controller to manage topology")
@@ -352,7 +353,7 @@ func (nadController *NetAttachDefinitionController) GetActiveNetworkForNamespace
 		return nil, fmt.Errorf("error getting user defined networks: %w", err)
 	}
 	for _, udn := range udns {
-		if util.IsPrimaryNetwork(udn.Spec) {
+		if utiludn.IsPrimaryNetwork(&udn.Spec) {
 			return nil, util.NewUnprocessedActiveNetworkError(namespace, udn.Name)
 		}
 	}
