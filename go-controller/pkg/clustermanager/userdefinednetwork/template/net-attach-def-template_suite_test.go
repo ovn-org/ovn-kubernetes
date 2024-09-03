@@ -7,7 +7,7 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-func TestNetworkAttachmetDefinitionTemplate(t *testing.T) {
+func TestNetworkAttachmentDefinitionTemplate(t *testing.T) {
 	RegisterFailHandler(Fail)
 	RunSpecs(t, "NetworkAttachmentDefintion Template Suite")
 }
