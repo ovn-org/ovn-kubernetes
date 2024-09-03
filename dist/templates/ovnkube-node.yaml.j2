@@ -259,11 +259,21 @@ spec:
               fieldPath: metadata.name
 
         readinessProbe:
+        {%- if ovnkube_app_name!="ovnkube-node-dpu" %}
           exec:
             command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovnkube-node"]
           initialDelaySeconds: 30
           timeoutSeconds: 30
           periodSeconds: 60
+        {%- else %}
+          httpGet:
+            path: /metrics
+            port: 9476
+            scheme: HTTP
+          initialDelaySeconds: 30
+          timeoutSeconds: 5
+          periodSeconds: 30
+        {%- endif %}
       {% endif %}
       {% if ovnkube_app_name!="ovnkube-node-dpu-host" -%}
       - name: ovn-controller
