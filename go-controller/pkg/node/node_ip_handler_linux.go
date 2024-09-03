@@ -115,6 +115,10 @@ func (c *addressManager) ListAddresses() []net.IP {
 type subscribeFn func() (bool, chan netlink.AddrUpdate, error)
 
 func (c *addressManager) Run(stopChan <-chan struct{}, doneWg *sync.WaitGroup) {
+	if config.OvnKubeNode.Mode == types.NodeModeDPU {
+		return
+	}
+
 	c.addHandlerForPrimaryAddrChange()
 	doneWg.Add(1)
 	go func() {
@@ -407,6 +411,10 @@ func (c *addressManager) isValidNodeIP(addr net.IP) bool {
 }
 
 func (c *addressManager) sync() {
+	if config.OvnKubeNode.Mode == types.NodeModeDPU {
+		return
+	}
+
 	var addrs []netlink.Addr
 
 	if c.useNetlink {
