@@ -18,7 +18,6 @@ import (
 
 	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	userdefinednetworkv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 )
 
@@ -1011,16 +1010,4 @@ func AllowsPersistentIPs(netInfo NetInfo) bool {
 	default:
 		return false
 	}
-}
-
-func IsPrimaryNetwork(spec userdefinednetworkv1.UserDefinedNetworkSpec) bool {
-	var role userdefinednetworkv1.NetworkRole
-	switch spec.Topology {
-	case userdefinednetworkv1.NetworkTopologyLayer3:
-		role = spec.Layer3.Role
-	case userdefinednetworkv1.NetworkTopologyLayer2:
-		role = spec.Layer2.Role
-	}
-
-	return role == userdefinednetworkv1.NetworkRolePrimary
 }

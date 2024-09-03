@@ -755,8 +755,7 @@ func assertFinalizersPresent(
 	for _, pod := range pods {
 		podNames = append(podNames, pod.Namespace+"/"+pod.Name)
 	}
-	expectedConditionMsg := fmt.Sprintf(`failed to verify NAD not in use [%s/%s]: network in use by the following pods: %v`,
-		udn.Namespace, udn.Name, podNames)
+	expectedConditionMsg := fmt.Sprintf(`network in use by the following pods: %v`, podNames)
 
 	Eventually(func() []metav1.Condition {
 		updatedUDN, err := udnClient.K8sV1().UserDefinedNetworks(udn.Namespace).Get(context.Background(), udn.Name, metav1.GetOptions{})

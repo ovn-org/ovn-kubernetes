@@ -2,7 +2,6 @@ package userdefinednetwork
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -35,11 +34,10 @@ import (
 	userdefinednetworklister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/listers/userdefinednetwork/v1"
 
 	nadnotifier "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/userdefinednetwork/notifier"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/userdefinednetwork/template"
-	cnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/controller"
-	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	utiludn "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/udn"
 )
 
 type RenderNetAttachDefManifest func(obj client.Object, targetNamespace string) (*netv1.NetworkAttachmentDefinition, error)
@@ -177,8 +175,12 @@ func (c *Controller) syncUserDefinedNetwork(udn *userdefinednetworkv1.UserDefine
 				metav1.IsControlledBy(nad, udn) &&
 				controllerutil.ContainsFinalizer(nad, template.FinalizerUserDefinedNetwork) {
 
-				if err := c.verifyNetAttachDefNotInUse(nad); err != nil {
-					return nil, fmt.Errorf("failed to verify NAD not in use [%s/%s]: %w", nad.Namespace, nad.Name, &networkInUseError{err: err})
+				pods, err := c.podInformer.Lister().Pods(nad.Namespace).List(labels.Everything())
+				if err != nil {
+					return nil, fmt.Errorf("failed to list pods at target namesapce %q: %w", nad.Namespace, err)
+				}
+				if err := NetAttachDefNotInUse(nad, pods); err != nil {
+					return nil, &networkInUseError{err: err}
 				}
 
 				controllerutil.RemoveFinalizer(nad, template.FinalizerUserDefinedNetwork)
@@ -217,12 +219,12 @@ func (c *Controller) syncUserDefinedNetwork(udn *userdefinednetworkv1.UserDefine
 		// any other thread that create NADs.
 		// Since the UserDefinedNetwork controller use single thread (threadiness=1),
 		// and being the only controller that create NADs, this conditions is fulfilled.
-		if util.IsPrimaryNetwork(udn.Spec) {
+		if utiludn.IsPrimaryNetwork(&udn.Spec) {
 			actualNads, lerr := c.nadLister.NetworkAttachmentDefinitions(udn.Namespace).List(labels.Everything())
 			if lerr != nil {
 				return nil, fmt.Errorf("failed to list  NetworkAttachmetDefinition: %w", lerr)
 			}
-			if err := validatePrimaryNetworkNADNotExist(actualNads); err != nil {
+			if err := PrimaryNetAttachDefNotExist(actualNads); err != nil {
 				return nil, err
 			}
 		}
@@ -249,43 +251,6 @@ func (c *Controller) syncUserDefinedNetwork(udn *userdefinednetworkv1.UserDefine
 	}
 
 	return nad, nil
-}
-
-func (c *Controller) verifyNetAttachDefNotInUse(nad *netv1.NetworkAttachmentDefinition) error {
-	pods, err := c.podInformer.Lister().Pods(nad.Namespace).List(labels.Everything())
-	if err != nil {
-		return fmt.Errorf("failed to list pods at target namesapce %q: %w", nad.Namespace, err)
-	}
-
-	nadName := util.GetNADName(nad.Namespace, nad.Name)
-	var connectedPods []string
-	for _, pod := range pods {
-		podNetworks, err := util.UnmarshalPodAnnotationAllNetworks(pod.Annotations)
-		if err != nil && !util.IsAnnotationNotSetError(err) {
-			return fmt.Errorf("failed to unmarshal pod annotation [%s/%s]: %w", pod.Namespace, pod.Name, err)
-		}
-		if _, ok := podNetworks[nadName]; ok {
-			connectedPods = append(connectedPods, pod.Namespace+"/"+pod.Name)
-		}
-	}
-	if len(connectedPods) > 0 {
-		return fmt.Errorf("network in use by the following pods: %v", connectedPods)
-	}
-	return nil
-}
-
-func validatePrimaryNetworkNADNotExist(nads []*netv1.NetworkAttachmentDefinition) error {
-	for _, nad := range nads {
-		var netConf *cnitypes.NetConf
-		if err := json.Unmarshal([]byte(nad.Spec.Config), &netConf); err != nil {
-			return fmt.Errorf("failed to validate no primary network exist: unmarshal failed [%s/%s]: %w",
-				nad.Namespace, nad.Name, err)
-		}
-		if netConf.Type == template.OvnK8sCNIOverlay && netConf.Role == ovntypes.NetworkRolePrimary {
-			return fmt.Errorf("primary network already exist in namespace %q: %q", nad.Namespace, nad.Name)
-		}
-	}
-	return nil
 }
 
 func (c *Controller) updateUserDefinedNetworkStatus(udn *userdefinednetworkv1.UserDefinedNetwork, nad *netv1.NetworkAttachmentDefinition, syncError error) error {
