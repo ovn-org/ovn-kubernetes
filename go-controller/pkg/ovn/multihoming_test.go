@@ -184,13 +184,7 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPorts(is
 						data = append(data, mgmtPort)
 						nodeslsps[switchName] = append(nodeslsps[switchName], mgmtPortUUID)
 
-						// there are multiple GRs in the cluster, thus their names must be scoped with the node name
-						gwRouterName := fmt.Sprintf(
-							"%s%s",
-							ovntypes.GWRouterPrefix,
-							ocInfo.bnc.GetNetworkScopedName(nodeName),
-						)
-						networkSwitchToGWRouterLSPName := ovntypes.JoinSwitchToGWRouterPrefix + gwRouterName
+						networkSwitchToGWRouterLSPName := ovntypes.SwitchToRouterPrefix + switchName
 						networkSwitchToGWRouterLSPUUID := networkSwitchToGWRouterLSPName + "-UUID"
 
 						data = append(data, &nbdb.LogicalSwitchPort{
@@ -201,7 +195,7 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPorts(is
 								"k8s.ovn.org/topology": ocInfo.bnc.TopologyType(),
 								"k8s.ovn.org/network":  ocInfo.bnc.GetNetworkName(),
 							},
-							Options: map[string]string{"router-port": ovntypes.GWRouterToJoinSwitchPrefix + gwRouterName},
+							Options: map[string]string{"router-port": ovntypes.RouterToSwitchPrefix + switchName},
 							Type:    "router",
 						})
 						nodeslsps[switchName] = append(nodeslsps[switchName], networkSwitchToGWRouterLSPUUID)

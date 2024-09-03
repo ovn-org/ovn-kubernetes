@@ -333,6 +333,15 @@ func (gw *GatewayManager) GatewayInit(
 	gwSwitchPort := types.JoinSwitchToGWRouterPrefix + gatewayRouter
 	gwRouterPort := types.GWRouterToJoinSwitchPrefix + gatewayRouter
 
+	// In Layer2 networks there is no join switch and the gw.joinSwitchName points to the cluster switch.
+	// Ensure that the ports are named appropriately, this is important for the logical router policies
+	// created for local node access.
+	// TODO(kyrtapz): Clean this up for clarity as part of https://github.com/ovn-org/ovn-kubernetes/issues/4689
+	if gw.netInfo.TopologyType() == types.Layer2Topology {
+		gwSwitchPort = types.SwitchToRouterPrefix + gw.joinSwitchName
+		gwRouterPort = types.RouterToSwitchPrefix + gw.joinSwitchName
+	}
+
 	logicalSwitchPort := nbdb.LogicalSwitchPort{
 		Name:      gwSwitchPort,
 		Type:      "router",
@@ -1001,6 +1010,17 @@ func (gw *GatewayManager) Cleanup() error {
 	var nextHops []net.IP
 
 	gwRouterToJoinSwitchPortName := types.GWRouterToJoinSwitchPrefix + gw.gwRouterName
+	portName := types.JoinSwitchToGWRouterPrefix + gw.gwRouterName
+
+	// In Layer2 networks there is no join switch and the gw.joinSwitchName points to the cluster switch.
+	// Ensure that the ports are named appropriately, this is important for the logical router policies
+	// created for local node access.
+	// TODO(kyrtapz): Clean this up for clarity as part of https://github.com/ovn-org/ovn-kubernetes/issues/4689
+	if gw.netInfo.TopologyType() == types.Layer2Topology {
+		gwRouterToJoinSwitchPortName = types.RouterToSwitchPrefix + gw.joinSwitchName
+		portName = types.SwitchToRouterPrefix + gw.joinSwitchName
+	}
+
 	gwIPAddrs, err := libovsdbutil.GetLRPAddrs(gw.nbClient, gwRouterToJoinSwitchPortName)
 	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
 		return fmt.Errorf(
@@ -1018,7 +1038,6 @@ func (gw *GatewayManager) Cleanup() error {
 	gw.policyRouteCleanup(nextHops)
 
 	// Remove the patch port that connects join switch to gateway router
-	portName := types.JoinSwitchToGWRouterPrefix + gw.gwRouterName
 	lsp := nbdb.LogicalSwitchPort{Name: portName}
 	sw := nbdb.LogicalSwitch{Name: gw.joinSwitchName}
 	err = libovsdbops.DeleteLogicalSwitchPorts(gw.nbClient, &sw, &lsp)
