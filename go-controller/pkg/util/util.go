@@ -579,3 +579,13 @@ func GetServiceEndpointSlices(namespace, svcName, network string, endpointSliceL
 	}
 	return GetEndpointSlicesBySelector(namespace, selector, endpointSliceLister)
 }
+
+// IsUDNEnabledService checks whether the provided namespaced name key is a UDN enabled service specified in config.Default.UDNAllowedDefaultServices
+func IsUDNEnabledService(key string) bool {
+	for _, enabledService := range config.Default.UDNAllowedDefaultServices.Value() {
+		if enabledService == key {
+			return true
+		}
+	}
+	return false
+}
