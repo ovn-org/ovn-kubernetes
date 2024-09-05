@@ -50,7 +50,7 @@ func (pbr *PolicyBasedRoutesManager) Add(nodeName, mgmtPortIP string, hostIfCIDR
 		// embed nodeName as comment so that it is easier to delete these rules later on.
 		// logical router policy doesn't support external_ids to stash metadata
 		networkScopedSwitchName := pbr.netInfo.GetNetworkScopedSwitchName(nodeName)
-		matchStr := generateMatch(networkScopedSwitchName, l3Prefix, hostIP)
+		matchStr := generateNodeIPMatch(networkScopedSwitchName, l3Prefix, hostIP)
 		matches = matches.Insert(matchStr)
 	}
 
@@ -218,7 +218,7 @@ func (pbr *PolicyBasedRoutesManager) createPolicyBasedRoutes(match, priority, ne
 	return nil
 }
 
-func generateMatch(switchName, ipPrefix, hostIP string) string {
+func generateNodeIPMatch(switchName, ipPrefix, hostIP string) string {
 	return fmt.Sprintf(`inport == "%s%s" && %s.dst == %s /* %s */`, ovntypes.RouterToSwitchPrefix, switchName, ipPrefix, hostIP, switchName)
 }
 
