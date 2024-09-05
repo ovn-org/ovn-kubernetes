@@ -725,7 +725,7 @@ type ParsedNodeEgressIPConfiguration struct {
 	Capacity Capacity
 }
 
-func getNodeIfAddrAnnotation(node *kapi.Node) (*primaryIfAddrAnnotation, error) {
+func GetNodeIfAddrAnnotation(node *kapi.Node) (*primaryIfAddrAnnotation, error) {
 	nodeIfAddrAnnotation, ok := node.Annotations[OvnNodeIfAddr]
 	if !ok {
 		return nil, newAnnotationNotSetError("%s annotation not found for node %q", OvnNodeIfAddr, node.Name)
@@ -742,7 +742,7 @@ func getNodeIfAddrAnnotation(node *kapi.Node) (*primaryIfAddrAnnotation, error) 
 
 // ParseNodePrimaryIfAddr returns the IPv4 / IPv6 values for the node's primary network interface
 func ParseNodePrimaryIfAddr(node *kapi.Node) (*ParsedNodeEgressIPConfiguration, error) {
-	nodeIfAddr, err := getNodeIfAddrAnnotation(node)
+	nodeIfAddr, err := GetNodeIfAddrAnnotation(node)
 	if err != nil {
 		return nil, err
 	}
@@ -932,7 +932,7 @@ func ParseCloudEgressIPConfig(node *kapi.Node) (*ParsedNodeEgressIPConfiguration
 
 	// ParsedNodeEgressIPConfiguration.V[4|6].IP is used to verify if an egress IP matches node IP to disable its creation
 	// use node IP instead of the value assigned from cloud egress CIDR config
-	nodeIfAddr, err := getNodeIfAddrAnnotation(node)
+	nodeIfAddr, err := GetNodeIfAddrAnnotation(node)
 	if err != nil {
 		return nil, err
 	}
@@ -1080,7 +1080,7 @@ func ParseNodeHostCIDRsExcludeOVNNetworks(node *kapi.Node) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	ovnNetworks, err := getNodeIfAddrAnnotation(node)
+	ovnNetworks, err := GetNodeIfAddrAnnotation(node)
 	if err != nil {
 		return nil, err
 	}
