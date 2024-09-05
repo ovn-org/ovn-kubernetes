@@ -6,6 +6,8 @@ set -ex
 export KUBERNETES_CONFORMANCE_TEST=y
 export KUBECONFIG=${KUBECONFIG:-${HOME}/ovn.conf}
 
+TMP_DIR="$(mktemp -d)"
+
 # Skip tests which are not IPv6 ready yet (see description of https://github.com/ovn-org/ovn-kubernetes/pull/2276)
 # (Note that netflow v5 is IPv4 only)
 # NOTE: Some of these tests that check connectivity to internet cannot be run.
@@ -183,3 +185,38 @@ go test -test.timeout 180m -v . \
         ${NUM_NODES:+"--num-nodes=${NUM_NODES}"} \
         ${E2E_REPORT_DIR:+"--report-dir=${E2E_REPORT_DIR}"}
 popd
+
+if [[ "${WHAT}" == "${NETWORK_SEGMENTATION_TESTS}"* ]]; then
+  pushd "$TMP_DIR"
+  curl -L https://github.com/pperiyasamy/kubernetes/raw/netpol-udn-release-1.30/test/e2e/kubernetes-test-linux-amd64.tar.gz -o kubernetes-test-linux-amd64.tar.gz
+  tar xvzf kubernetes-test-linux-amd64.tar.gz
+  sudo mv e2e.test /usr/local/bin/e2e.test
+  rm kubernetes-test-linux-amd64.tar.gz
+  popd
+
+  export NUM_WORKER_NODES=3
+  if [ "$SINGLE_NODE_CLUSTER" == true ]; then
+    export NUM_WORKER_NODES=1
+  fi
+
+  # Run NetPol conformance tests for layer2 topology.
+  topologies=("layer2")
+  for topology in "${topologies[@]}"
+  do
+    # NetPol with named port is not supported in ovn-kubernetes, so skip those tests.
+    ginkgo --nodes=${NUM_NODES} \
+	    --focus="Netpol" \
+	    --skip="named port.+\[Feature:NetworkPolicy\]" \
+	    --timeout=3h \
+	    --flake-attempts="${FLAKE_ATTEMPTS:-2}" \
+	    /usr/local/bin/e2e.test \
+	    -- \
+	    --kubeconfig="${KUBECONFIG}" \
+	    --provider=local \
+	    --dump-logs-on-failure=false \
+	    --report-dir="${E2E_REPORT_DIR}" \
+	    --disable-log-dump=true \
+	    --num-nodes=${NUM_WORKER_NODES} \
+	    --topology="${topology}"
+  done
+fi
