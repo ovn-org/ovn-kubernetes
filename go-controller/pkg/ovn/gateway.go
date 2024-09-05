@@ -1242,6 +1242,12 @@ func (gw *GatewayManager) syncGatewayLogicalNetwork(
 		if err := pbrMngr.AddSameNodeIPPolicy(node.Name, hostIfAddr.IP.String(), l3GatewayConfigIP, relevantHostIPs); err != nil {
 			return fmt.Errorf("failed to configure the policy based routes for network %q: %v", gw.netInfo.GetNetworkName(), err)
 		}
+		if gw.netInfo.TopologyType() == types.Layer2Topology && config.Gateway.Mode == config.GatewayModeLocal {
+			if err := pbrMngr.AddHostCIDRPolicy(node, hostIfAddr.IP.String(), subnet.String()); err != nil {
+				return fmt.Errorf("failed to configure the hostCIDR policy for L2 network %q on local gateway: %v",
+					gw.netInfo.GetNetworkName(), err)
+			}
+		}
 	}
 
 	return nil
