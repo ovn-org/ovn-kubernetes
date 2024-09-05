@@ -91,7 +91,7 @@ type test struct {
 	expectErr   bool
 }
 
-func TestAdd(t *testing.T) {
+func TestAddSameNodeIPPolicy(t *testing.T) {
 	const (
 		node1Name                 = "node1"
 		node1HostIPv4Str          = "192.168.1.10"
@@ -484,7 +484,7 @@ func TestAdd(t *testing.T) {
 				if utilnet.IsIPv6(p.hostInfCIDR.IP) {
 					mgntIP = targetNet.mgntIPv6
 				}
-				err = mgr.Add(p.nodeName, mgntIP, p.hostInfCIDR, p.otherHostInfAddrs)
+				err = mgr.AddSameNodeIPPolicy(p.nodeName, mgntIP, p.hostInfCIDR, p.otherHostInfAddrs)
 				if tt.expectErr && err == nil {
 					t.Fatalf("test: \"%s\", expected error but none occured", tt.desc)
 				}

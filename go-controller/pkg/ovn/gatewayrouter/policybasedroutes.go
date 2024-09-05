@@ -31,7 +31,7 @@ func NewPolicyBasedRoutesManager(nbClient client.Client, clusterRouterName strin
 	}
 }
 
-func (pbr *PolicyBasedRoutesManager) Add(nodeName, mgmtPortIP string, hostIfCIDR *net.IPNet, otherHostAddrs []string) error {
+func (pbr *PolicyBasedRoutesManager) AddSameNodeIPPolicy(nodeName, mgmtPortIP string, hostIfCIDR *net.IPNet, otherHostAddrs []string) error {
 	if hostIfCIDR == nil {
 		return fmt.Errorf("<nil> host interface CIDR")
 	}
