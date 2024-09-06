@@ -279,9 +279,9 @@ func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, netInf
 
 	// Add flows for default network services that are accessible from UDN networks
 	if util.IsNetworkSegmentationSupportEnabled() {
-		// The flow added below has a higher priority than the default network service flow:
-		//   priority=500,ip,in_port=LOCAL,nw_dst=10.96.0.0/16 actions=ct(commit,table=2,zone=64001,nat(src=169.254.0.2))
-		// This ordering ensures that there is no SNAT for UDN originated traffic.
+		// The flow added below has a higher priority than the per UDN service flow:
+		//   priority=200, table=2, ip, ip_src=169.254.0.<UDN>, actions=set_field:<bridge-mac>->eth_dst,output:<UDN-patch-port>
+		// This ordering ensures that traffic to UDN allowed default services goes to the the default patch port.
 
 		if util.IsUDNEnabledService(ktypes.NamespacedName{Namespace: service.Namespace, Name: service.Name}.String()) {
 			key = strings.Join([]string{"UDNAllowedSVC", service.Namespace, service.Name}, "_")
@@ -295,10 +295,13 @@ func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, netInf
 				ipPrefix = "ipv6"
 				masqueradeSubnet = config.Gateway.V6MasqueradeSubnet
 			}
-			// table 0, user-defined network host -> OVN towards default cluster network services
-			npw.ofm.updateFlowCacheEntry(key, []string{fmt.Sprintf("cookie=%s, priority=600, in_port=%s, %s, %s_src=%s, %s_dst=%s,"+
-				"actions=ct(commit,zone=%d,table=2)",
-				defaultOpenFlowCookie, npw.ofm.defaultBridge.ofPortHost, ipPrefix, ipPrefix, masqueradeSubnet, ipPrefix, service.Spec.ClusterIP, config.Default.HostMasqConntrackZone)})
+			// table 2, user-defined network host -> OVN towards default cluster network services
+			defaultNetConfig := npw.ofm.defaultBridge.netConfig[types.DefaultNetworkName]
+
+			npw.ofm.updateFlowCacheEntry(key, []string{fmt.Sprintf("cookie=%s, priority=300, table=2, %s, %s_src=%s, %s_dst=%s, "+
+				"actions=set_field:%s->eth_dst,output:%s",
+				defaultOpenFlowCookie, ipPrefix, ipPrefix, masqueradeSubnet, ipPrefix, service.Spec.ClusterIP,
+				npw.ofm.getDefaultBridgeMAC().String(), defaultNetConfig.ofPortPatch)})
 		}
 	}
 	return utilerrors.Join(errors...)
@@ -1316,11 +1319,23 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 			masqSubnet = config.Gateway.V6MasqueradeSubnet
 		}
 
-		// table 0, Host -> OVN towards SVC, SNAT to special IP
+		// table 0, Host (default network) -> OVN towards SVC, SNAT to special IP.
 		dftFlows = append(dftFlows,
-			fmt.Sprintf("cookie=%s, priority=500, in_port=%s, %s, %s_dst=%s,"+
+			fmt.Sprintf("cookie=%s, priority=500, in_port=%s, %s, %s_dst=%s, "+
 				"actions=ct(commit,zone=%d,nat(src=%s),table=2)",
-				defaultOpenFlowCookie, ofPortHost, protoPrefix, protoPrefix, svcCIDR, config.Default.HostMasqConntrackZone, masqIP))
+				defaultOpenFlowCookie, ofPortHost, protoPrefix, protoPrefix,
+				svcCIDR, config.Default.HostMasqConntrackZone, masqIP))
+
+		if util.IsNetworkSegmentationSupportEnabled() {
+			// table 0, Host (UDNs) -> OVN towards SVC, SNAT to special IP.
+			// For packets originating from UDN, commit without NATing, those
+			// have already been SNATed to the masq IP of the UDN.
+			dftFlows = append(dftFlows,
+				fmt.Sprintf("cookie=%s, priority=550, in_port=%s, %s, %s_src=%s, %s_dst=%s, "+
+					"actions=ct(commit,zone=%d,table=2)",
+					defaultOpenFlowCookie, ofPortHost, protoPrefix, protoPrefix,
+					masqSubnet, protoPrefix, svcCIDR, config.Default.HostMasqConntrackZone))
+		}
 
 		masqDst := masqIP
 		if util.IsNetworkSegmentationSupportEnabled() {
@@ -1420,8 +1435,38 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 
 	// table 2, dispatch from Host -> OVN
 	dftFlows = append(dftFlows,
-		fmt.Sprintf("cookie=%s, table=2, "+
-			"actions=set_field:%s->eth_dst,output:%s", defaultOpenFlowCookie, bridgeMacAddress, defaultNetConfig.ofPortPatch))
+		fmt.Sprintf("cookie=%s, priority=100, table=2, "+
+			"actions=set_field:%s->eth_dst,output:%s", defaultOpenFlowCookie,
+			bridgeMacAddress, defaultNetConfig.ofPortPatch))
+
+	// table 2, priority 200, dispatch from UDN -> Host -> OVN. These packets have
+	// already been SNATed to the UDN's masq IP.
+	if config.IPv4Mode {
+		for _, netConfig := range bridge.patchedNetConfigs() {
+			if netConfig.masqCTMark == ctMarkOVN {
+				continue
+			}
+			dftFlows = append(dftFlows,
+				fmt.Sprintf("cookie=%s, priority=200, table=2, ip, ip_src=%s, "+
+					"actions=set_field:%s->eth_dst,output:%s",
+					defaultOpenFlowCookie, netConfig.v4MasqIPs.ManagementPort.IP,
+					bridgeMacAddress, netConfig.ofPortPatch))
+		}
+	}
+
+	if config.IPv6Mode {
+		for _, netConfig := range bridge.patchedNetConfigs() {
+			if netConfig.masqCTMark == ctMarkOVN {
+				continue
+			}
+
+			dftFlows = append(dftFlows,
+				fmt.Sprintf("cookie=%s, priority=200, table=2, ip6, ipv6_src=%s, "+
+					"actions=set_field:%s->eth_dst,output:%s",
+					defaultOpenFlowCookie, netConfig.v6MasqIPs.ManagementPort.IP,
+					bridgeMacAddress, netConfig.ofPortPatch))
+		}
+	}
 
 	// table 3, dispatch from OVN -> Host
 	dftFlows = append(dftFlows,
@@ -1522,7 +1567,7 @@ func commonFlows(subnets []*net.IPNet, bridge *bridgeConfiguration) ([]string, e
 					dftFlows = append(dftFlows,
 						fmt.Sprintf("cookie=%s, priority=100, in_port=%s, dl_src=%s, ip, ip_src=%s, "+
 							"actions=ct(commit, zone=%d, nat(src=%s), exec(set_field:%s->ct_mark)), output:%s",
-							defaultOpenFlowCookie, netConfig.ofPortPatch, bridgeMacAddress, netConfig.v4MasqIP.IP, config.Default.ConntrackZone,
+							defaultOpenFlowCookie, netConfig.ofPortPatch, bridgeMacAddress, netConfig.v4MasqIPs.GatewayRouter.IP, config.Default.ConntrackZone,
 							physicalIP.IP, netConfig.masqCTMark, ofPortPhys))
 				}
 			}
@@ -1597,7 +1642,7 @@ func commonFlows(subnets []*net.IPNet, bridge *bridgeConfiguration) ([]string, e
 					dftFlows = append(dftFlows,
 						fmt.Sprintf("cookie=%s, priority=100, in_port=%s, dl_src=%s, ipv6, ipv6_src=%s, "+
 							"actions=ct(commit, zone=%d, nat(src=%s), exec(set_field:%s->ct_mark)), output:%s",
-							defaultOpenFlowCookie, netConfig.ofPortPatch, bridgeMacAddress, netConfig.v6MasqIP.IP, config.Default.ConntrackZone,
+							defaultOpenFlowCookie, netConfig.ofPortPatch, bridgeMacAddress, netConfig.v6MasqIPs.GatewayRouter.IP, config.Default.ConntrackZone,
 							physicalIP.IP, netConfig.masqCTMark, ofPortPhys))
 				}
 			}

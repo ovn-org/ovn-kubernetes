@@ -52,10 +52,10 @@ type UserDefinedNetworkGateway struct {
 	// masqCTMark holds the mark value for this network
 	// which is used for egress traffic in shared gateway mode
 	masqCTMark uint
-	// v4MasqIP holds the IPv4 masquerade IP for this network
-	v4MasqIP *net.IPNet
-	// v6MasqIP holds the IPv6 masquerade IP for this network
-	v6MasqIP *net.IPNet
+	// v4MasqIPs holds the IPv4 masquerade IPs for this network
+	v4MasqIPs *udn.MasqueradeIPs
+	// v6MasqIPs holds the IPv6 masquerade IPs for this network
+	v6MasqIPs *udn.MasqueradeIPs
 	// stores the pointer to default network's gateway so that
 	// we can leverage it from here to program UDN flows on breth0
 	// Currently we use the openflowmanager and nodeIPManager from
@@ -83,7 +83,7 @@ func (b *bridgeConfiguration) getBridgePortConfigurations() ([]bridgeUDNConfigur
 }
 
 // addNetworkBridgeConfig adds the patchport and ctMark value for the provided netInfo into the bridge configuration cache
-func (b *bridgeConfiguration) addNetworkBridgeConfig(nInfo util.NetInfo, masqCTMark uint, v4MasqIP, v6MasqIP *net.IPNet) {
+func (b *bridgeConfiguration) addNetworkBridgeConfig(nInfo util.NetInfo, masqCTMark uint, v4MasqIPs, v6MasqIPs *udn.MasqueradeIPs) {
 	b.Lock()
 	defer b.Unlock()
 
@@ -95,8 +95,8 @@ func (b *bridgeConfiguration) addNetworkBridgeConfig(nInfo util.NetInfo, masqCTM
 		netConfig := &bridgeUDNConfiguration{
 			patchPort:  patchPort,
 			masqCTMark: fmt.Sprintf("0x%x", masqCTMark),
-			v4MasqIP:   v4MasqIP,
-			v6MasqIP:   v6MasqIP,
+			v4MasqIPs:  v4MasqIPs,
+			v6MasqIPs:  v6MasqIPs,
 		}
 
 		b.netConfig[netName] = netConfig
@@ -149,8 +149,8 @@ type bridgeUDNConfiguration struct {
 	patchPort   string
 	ofPortPatch string
 	masqCTMark  string
-	v4MasqIP    *net.IPNet
-	v6MasqIP    *net.IPNet
+	v4MasqIPs   *udn.MasqueradeIPs
+	v6MasqIPs   *udn.MasqueradeIPs
 }
 
 func (netConfig *bridgeUDNConfiguration) setBridgeNetworkOfPortsInternal() error {
@@ -179,23 +179,22 @@ func NewUserDefinedNetworkGateway(netInfo util.NetInfo, networkID int, node *v1.
 	defaultNetworkGateway Gateway) (*UserDefinedNetworkGateway, error) {
 	// Generate a per network conntrack mark and masquerade IPs to be used for egress traffic.
 	var (
-		v4MasqIP *net.IPNet
-		v6MasqIP *net.IPNet
+		v4MasqIPs *udn.MasqueradeIPs
+		v6MasqIPs *udn.MasqueradeIPs
+		err       error
 	)
 	masqCTMark := ctMarkUDNBase + uint(networkID)
 	if config.IPv4Mode {
-		v4MasqIPs, err := udn.AllocateV4MasqueradeIPs(networkID)
+		v4MasqIPs, err = udn.AllocateV4MasqueradeIPs(networkID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get v4 masquerade IP, network %s (%d): %v", netInfo.GetNetworkName(), networkID, err)
 		}
-		v4MasqIP = v4MasqIPs.GatewayRouter
 	}
 	if config.IPv6Mode {
-		v6MasqIPs, err := udn.AllocateV6MasqueradeIPs(networkID)
+		v6MasqIPs, err = udn.AllocateV6MasqueradeIPs(networkID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get v6 masquerade IP, network %s (%d): %v", netInfo.GetNetworkName(), networkID, err)
 		}
-		v6MasqIP = v6MasqIPs.GatewayRouter
 	}
 
 	gw, ok := defaultNetworkGateway.(*gateway)
@@ -211,8 +210,8 @@ func NewUserDefinedNetworkGateway(netInfo util.NetInfo, networkID int, node *v1.
 		kubeInterface: kubeInterface,
 		vrfManager:    vrfManager,
 		masqCTMark:    masqCTMark,
-		v4MasqIP:      v4MasqIP,
-		v6MasqIP:      v6MasqIP,
+		v4MasqIPs:     v4MasqIPs,
+		v6MasqIPs:     v6MasqIPs,
 		gateway:       gw,
 		ruleManager:   ruleManager,
 	}, nil
@@ -258,7 +257,7 @@ func (udng *UserDefinedNetworkGateway) AddNetwork() error {
 		return fmt.Errorf("could not set loose mode for reverse path filtering on management port %s: %v", mgmtPortName, err)
 	}
 	if udng.openflowManager != nil {
-		udng.openflowManager.addNetwork(udng.NetInfo, udng.masqCTMark, udng.v4MasqIP, udng.v6MasqIP)
+		udng.openflowManager.addNetwork(udng.NetInfo, udng.masqCTMark, udng.v4MasqIPs, udng.v6MasqIPs)
 
 		waiter := newStartupWaiterWithTimeout(waitForPatchPortTimeout)
 		readyFunc := func() (bool, error) {

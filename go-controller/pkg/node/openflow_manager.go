@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/generator/udn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -39,10 +40,10 @@ func (c *openflowManager) getExGwBridgePortConfigurations() ([]bridgeUDNConfigur
 	return c.externalGatewayBridge.getBridgePortConfigurations()
 }
 
-func (c *openflowManager) addNetwork(nInfo util.NetInfo, masqCTMark uint, v4MasqIP, v6MasqIP *net.IPNet) {
-	c.defaultBridge.addNetworkBridgeConfig(nInfo, masqCTMark, v4MasqIP, v6MasqIP)
+func (c *openflowManager) addNetwork(nInfo util.NetInfo, masqCTMark uint, v4MasqIPs, v6MasqIPs *udn.MasqueradeIPs) {
+	c.defaultBridge.addNetworkBridgeConfig(nInfo, masqCTMark, v4MasqIPs, v6MasqIPs)
 	if c.externalGatewayBridge != nil {
-		c.externalGatewayBridge.addNetworkBridgeConfig(nInfo, masqCTMark, v4MasqIP, v6MasqIP)
+		c.externalGatewayBridge.addNetworkBridgeConfig(nInfo, masqCTMark, v4MasqIPs, v6MasqIPs)
 	}
 }
 

@@ -249,15 +249,9 @@ var _ = Describe("Network Segmentation: services", func() {
 
 				By("Verify the UDN client connection to the default network service")
 				checkConnectionToNodePort(f, udnClientPod2, defaultService, &nodes.Items[0], "server node", defaultServerPod.Name)
-				// TODO(kyrtapz): This doesn't work in L2, the condtion will change to checkNoConnectionToNodePort in https://github.com/ovn-org/ovn-kubernetes/pull/4705
-				if netConfigParams.topology != types.Layer2Topology {
-					checkConnectionToNodePort(f, udnClientPod2, defaultService, &nodes.Items[1], "local node", defaultServerPod.Name)
-				}
+				checkNoConnectionToNodePort(f, udnClientPod2, defaultService, &nodes.Items[1], "local node")
 				checkConnectionToNodePort(f, udnClientPod2, defaultService, &nodes.Items[2], "other node", defaultServerPod.Name)
-				// FIXME(tssurya): https://github.com/ovn-org/ovn-kubernetes/issues/4687
-				if !IsGatewayModeLocal() {
-					checkNoConnectionToClusterIPs(f, udnClientPod2, defaultService)
-				}
+				checkNoConnectionToClusterIPs(f, udnClientPod2, defaultService)
 			},
 
 			Entry(
