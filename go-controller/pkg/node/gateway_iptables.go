@@ -79,6 +79,18 @@ func deleteIptRules(rules []nodeipt.Rule) error {
 	return nodeipt.DelRules(rules)
 }
 
+// ensureChain ensures that a chain exists within a table
+func ensureChain(table, chain string) error {
+	for _, proto := range clusterIPTablesProtocols() {
+		ipt, err := util.GetIPTablesHelper(proto)
+		if err != nil {
+			return fmt.Errorf("failed to get IPTables helper to add UDN chain: %v", err)
+		}
+		addChaintoTable(ipt, table, chain)
+	}
+	return nil
+}
+
 func getGatewayInitRules(chain string, proto iptables.Protocol) []nodeipt.Rule {
 	iptRules := []nodeipt.Rule{}
 	if chain == egressservice.Chain {

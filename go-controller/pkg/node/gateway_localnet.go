@@ -26,6 +26,11 @@ func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net
 	klog.Info("Creating new local gateway")
 	gw := &gateway{}
 
+	if util.IsNetworkSegmentationSupportEnabled() {
+		if err := ensureChain("nat", iptableUDNMasqueradeChain); err != nil {
+			return nil, fmt.Errorf("failed to ensure chain %s in NAT table: %w", iptableUDNMasqueradeChain, err)
+		}
+	}
 	for _, hostSubnet := range hostSubnets {
 		// local gateway mode uses mp0 as default path for all ingress traffic into OVN
 		var nextHop *net.IPNet
