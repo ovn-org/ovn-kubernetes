@@ -72,6 +72,7 @@ OVN_DISABLE_OVN_IFACE_ID_VER="false"
 OVN_MULTI_NETWORK_ENABLE=
 OVN_NETWORK_SEGMENTATION_ENABLE=
 OVN_ROUTE_ADVERTISEMENTS_ENABLE=
+OVN_ADVERTISE_DEFAULT_NETWORK=
 OVN_V4_JOIN_SUBNET=""
 OVN_V6_JOIN_SUBNET=""
 OVN_V4_MASQUERADE_SUBNET=""
@@ -274,6 +275,9 @@ while [ "$1" != "" ]; do
   --route-advertisements-enable)
     OVN_ROUTE_ADVERTISEMENTS_ENABLE=$VALUE
     ;;
+  --advertise-default-network)
+    OVN_ADVERTISE_DEFAULT_NETWORK=$VALUE
+    ;;
   --egress-service-enable)
     OVN_EGRESSSERVICE_ENABLE=$VALUE
     ;;
@@ -462,6 +466,8 @@ ovn_network_segmentation_enable=${OVN_NETWORK_SEGMENTATION_ENABLE}
 echo "ovn_network_segmentation_enable: ${ovn_network_segmentation_enable}"
 ovn_route_advertisements_enable=${OVN_ROUTE_ADVERTISEMENTS_ENABLE}
 echo "ovn_route_advertisements_enable: ${ovn_route_advertisements_enable}"
+ovn_advertise_default_network=${OVN_ADVERTISE_DEFAULT_NETWORK}
+echo "ovn_advertise_default_network: ${ovn_advertise_default_network}"
 ovn_hybrid_overlay_net_cidr=${OVN_HYBRID_OVERLAY_NET_CIDR}
 echo "ovn_hybrid_overlay_net_cidr: ${ovn_hybrid_overlay_net_cidr}"
 ovn_disable_snat_multiple_gws=${OVN_DISABLE_SNAT_MULTIPLE_GWS}
@@ -1028,6 +1034,7 @@ net_cidr=${net_cidr} svc_cidr=${svc_cidr} \
   mtu_value=${mtu} k8s_apiserver=${k8s_apiserver} \
   host_network_namespace=${host_network_namespace} \
   in_upgrade=${in_upgrade} \
+  advertise_default_network=${ovn_advertise_default_network} \
   jinjanate ../templates/ovn-setup.yaml.j2 -o ${output_dir}/ovn-setup.yaml
 
 ovn_enable_interconnect=${ovn_enable_interconnect} \
