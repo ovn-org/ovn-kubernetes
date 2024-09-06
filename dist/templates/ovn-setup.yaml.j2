@@ -78,3 +78,17 @@ kind: Namespace
 metadata:
   name: "{{ host_network_namespace }}"
 {%- endif %}
+
+{% if advertise_default_network == "true" -%}
+---
+apiVersion: k8s.ovn.org/v1
+kind: RouteAdvertisements
+metadata:
+  name: default
+spec:
+  networkSelector:
+    matchLabels:
+      k8s.ovn.org/default-network: ""
+  advertisements:
+    - "PodNetwork"
+{%- endif %}
