@@ -845,6 +845,213 @@ func TestGetPodNADToNetworkMapping(t *testing.T) {
 	}
 }
 
+func TestGetPodNADToNetworkMappingWithActiveNetwork(t *testing.T) {
+	const (
+		attachmentName = "attachment1"
+		namespaceName  = "ns1"
+		networkName    = "l3-network"
+	)
+
+	type testConfig struct {
+		desc                             string
+		inputNamespace                   string
+		inputNetConf                     *ovncnitypes.NetConf
+		inputPrimaryUDNConfig            *ovncnitypes.NetConf
+		inputPodAnnotations              map[string]string
+		expectedError                    error
+		expectedIsAttachmentRequested    bool
+		expectedNetworkSelectionElements map[string]*nadv1.NetworkSelectionElement
+	}
+
+	tests := []testConfig{
+		{
+			desc: "there isn't a primary UDN",
+			inputNetConf: &ovncnitypes.NetConf{
+				NetConf:  cnitypes.NetConf{Name: networkName},
+				Topology: ovntypes.Layer3Topology,
+				NADName:  GetNADName(namespaceName, attachmentName),
+			},
+			inputPodAnnotations: map[string]string{
+				nadv1.NetworkAttachmentAnnot: GetNADName(namespaceName, attachmentName),
+			},
+			expectedIsAttachmentRequested: true,
+			expectedNetworkSelectionElements: map[string]*nadv1.NetworkSelectionElement{
+				"ns1/attachment1": {
+					Name:      "attachment1",
+					Namespace: "ns1",
+				},
+			},
+		},
+		{
+			desc: "the netinfo is different from the active network",
+			inputNetConf: &ovncnitypes.NetConf{
+				NetConf:  cnitypes.NetConf{Name: networkName},
+				Topology: ovntypes.Layer3Topology,
+				NADName:  GetNADName(namespaceName, attachmentName),
+			},
+			inputPrimaryUDNConfig: &ovncnitypes.NetConf{
+				NetConf:  cnitypes.NetConf{Name: "another-network"},
+				Topology: ovntypes.Layer3Topology,
+				NADName:  GetNADName(namespaceName, "another-network"),
+			},
+			inputPodAnnotations: map[string]string{
+				nadv1.NetworkAttachmentAnnot: GetNADName(namespaceName, "another-network"),
+			},
+			expectedIsAttachmentRequested: false,
+		},
+		{
+			desc: "the network configuration for a primary layer2 UDN features allow persistent IPs but the pod does not request it",
+			inputNetConf: &ovncnitypes.NetConf{
+				NetConf:            cnitypes.NetConf{Name: networkName},
+				Topology:           ovntypes.Layer2Topology,
+				NADName:            GetNADName(namespaceName, attachmentName),
+				Role:               ovntypes.NetworkRolePrimary,
+				AllowPersistentIPs: true,
+			},
+			inputPrimaryUDNConfig: &ovncnitypes.NetConf{
+				NetConf:            cnitypes.NetConf{Name: networkName},
+				Topology:           ovntypes.Layer2Topology,
+				NADName:            GetNADName(namespaceName, attachmentName),
+				Role:               ovntypes.NetworkRolePrimary,
+				AllowPersistentIPs: true,
+			},
+			inputPodAnnotations: map[string]string{
+				nadv1.NetworkAttachmentAnnot: GetNADName(namespaceName, "another-network"),
+			},
+			expectedIsAttachmentRequested: true,
+			expectedNetworkSelectionElements: map[string]*nadv1.NetworkSelectionElement{
+				"ns1/attachment1": {
+					Name:      "attachment1",
+					Namespace: "ns1",
+				},
+			},
+		},
+		{
+			desc: "the network configuration for a primary layer2 UDN features allow persistent IPs, and the pod requests it",
+			inputNetConf: &ovncnitypes.NetConf{
+				NetConf:            cnitypes.NetConf{Name: networkName},
+				Topology:           ovntypes.Layer2Topology,
+				NADName:            GetNADName(namespaceName, attachmentName),
+				Role:               ovntypes.NetworkRolePrimary,
+				AllowPersistentIPs: true,
+			},
+			inputPrimaryUDNConfig: &ovncnitypes.NetConf{
+				NetConf:            cnitypes.NetConf{Name: networkName},
+				Topology:           ovntypes.Layer2Topology,
+				NADName:            GetNADName(namespaceName, attachmentName),
+				Role:               ovntypes.NetworkRolePrimary,
+				AllowPersistentIPs: true,
+			},
+			inputPodAnnotations: map[string]string{
+				nadv1.NetworkAttachmentAnnot: GetNADName(namespaceName, "another-network"),
+				OvnUDNIPAMClaimName:          "the-one-to-the-left-of-the-pony",
+			},
+			expectedIsAttachmentRequested: true,
+			expectedNetworkSelectionElements: map[string]*nadv1.NetworkSelectionElement{
+				"ns1/attachment1": {
+					Name:               "attachment1",
+					Namespace:          "ns1",
+					IPAMClaimReference: "the-one-to-the-left-of-the-pony",
+				},
+			},
+		},
+		{
+			desc: "the network configuration for a secondary layer2 UDN features allow persistent IPs and the pod requests it",
+			inputNetConf: &ovncnitypes.NetConf{
+				NetConf:            cnitypes.NetConf{Name: networkName},
+				Topology:           ovntypes.Layer2Topology,
+				NADName:            GetNADName(namespaceName, attachmentName),
+				Role:               ovntypes.NetworkRoleSecondary,
+				AllowPersistentIPs: true,
+			},
+			inputPrimaryUDNConfig: &ovncnitypes.NetConf{
+				NetConf:            cnitypes.NetConf{Name: networkName},
+				Topology:           ovntypes.Layer2Topology,
+				NADName:            GetNADName(namespaceName, attachmentName),
+				Role:               ovntypes.NetworkRoleSecondary,
+				AllowPersistentIPs: true,
+			},
+			inputPodAnnotations: map[string]string{
+				nadv1.NetworkAttachmentAnnot: GetNADName(namespaceName, "another-network"),
+			},
+			expectedIsAttachmentRequested: true,
+			expectedNetworkSelectionElements: map[string]*nadv1.NetworkSelectionElement{
+				"ns1/attachment1": {
+					Name:      "attachment1",
+					Namespace: "ns1",
+				},
+			},
+		},
+		{
+			desc: "the network configuration for a primary layer3 UDN features allow persistent IPs and the pod requests it",
+			inputNetConf: &ovncnitypes.NetConf{
+				NetConf:            cnitypes.NetConf{Name: networkName},
+				Topology:           ovntypes.Layer3Topology,
+				NADName:            GetNADName(namespaceName, attachmentName),
+				Role:               ovntypes.NetworkRolePrimary,
+				AllowPersistentIPs: true,
+			},
+			inputPrimaryUDNConfig: &ovncnitypes.NetConf{
+				NetConf:            cnitypes.NetConf{Name: networkName},
+				Topology:           ovntypes.Layer3Topology,
+				NADName:            GetNADName(namespaceName, attachmentName),
+				Role:               ovntypes.NetworkRolePrimary,
+				AllowPersistentIPs: true,
+			},
+			inputPodAnnotations: map[string]string{
+				nadv1.NetworkAttachmentAnnot: GetNADName(namespaceName, "another-network"),
+				OvnUDNIPAMClaimName:          "the-one-to-the-left-of-the-pony",
+			},
+			expectedIsAttachmentRequested: true,
+			expectedNetworkSelectionElements: map[string]*nadv1.NetworkSelectionElement{
+				"ns1/attachment1": {
+					Name:      "attachment1",
+					Namespace: "ns1",
+				},
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.desc, func(t *testing.T) {
+			g := gomega.NewWithT(t)
+			netInfo, err := NewNetInfo(test.inputNetConf)
+			g.Expect(err).To(gomega.BeNil())
+			if test.inputNetConf.NADName != "" {
+				netInfo.AddNADs(test.inputNetConf.NADName)
+			}
+
+			var primaryUDNNetInfo NetInfo
+			if test.inputPrimaryUDNConfig != nil {
+				primaryUDNNetInfo, err = NewNetInfo(test.inputPrimaryUDNConfig)
+				g.Expect(err).To(gomega.BeNil())
+				if test.inputPrimaryUDNConfig.NADName != "" {
+					primaryUDNNetInfo.AddNADs(test.inputPrimaryUDNConfig.NADName)
+				}
+			}
+
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        "test-pod",
+					Namespace:   test.inputNamespace,
+					Annotations: test.inputPodAnnotations,
+				},
+			}
+
+			isAttachmentRequested, networkSelectionElements, err := GetPodNADToNetworkMappingWithActiveNetwork(
+				pod,
+				netInfo,
+				primaryUDNNetInfo,
+			)
+
+			if err != nil {
+				g.Expect(err).To(gomega.MatchError(test.expectedError))
+			}
+			g.Expect(isAttachmentRequested).To(gomega.Equal(test.expectedIsAttachmentRequested))
+			g.Expect(networkSelectionElements).To(gomega.Equal(test.expectedNetworkSelectionElements))
+		})
+	}
+}
+
 func TestSubnetOverlapCheck(t *testing.T) {
 	_, cidr4, _ := net.ParseCIDR("10.128.0.0/14")
 	_, cidr6, _ := net.ParseCIDR("fe00::/16")
