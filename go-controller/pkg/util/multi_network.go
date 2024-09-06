@@ -779,6 +779,61 @@ func ValidateNetConf(nadName string, netconf *ovncnitypes.NetConf) error {
 		return fmt.Errorf("the subnet attribute must be defined for layer2 primary user defined networks")
 	}
 
+	if netconf.Topology != types.LocalnetTopology && netconf.Name != types.DefaultNetworkName {
+		if err := subnetOverlapCheck(netconf); err != nil {
+			return fmt.Errorf("invalid subnet cnfiguration: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// subnetOverlapCheck validates whether POD and join subnet mentioned in a net-attach-def with
+// topology "layer2" and "layer3" does not overlap with ClusterSubnets, ServiceCIDRs, join subnet,
+// and masquerade subnet. It also considers excluded subnets mentioned in a net-attach-def.
+func subnetOverlapCheck(netconf *ovncnitypes.NetConf) error {
+	allSubnets := config.NewConfigSubnets()
+	for _, subnet := range config.Default.ClusterSubnets {
+		allSubnets.Append(config.ConfigSubnetCluster, subnet.CIDR)
+	}
+	for _, subnet := range config.Kubernetes.ServiceCIDRs {
+		allSubnets.Append(config.ConfigSubnetService, subnet)
+	}
+	_, v4JoinCIDR, _ := net.ParseCIDR(config.Gateway.V4JoinSubnet)
+	_, v6JoinCIDR, _ := net.ParseCIDR(config.Gateway.V6JoinSubnet)
+
+	allSubnets.Append(config.ConfigSubnetJoin, v4JoinCIDR)
+	allSubnets.Append(config.ConfigSubnetJoin, v6JoinCIDR)
+
+	_, v4MasqueradeCIDR, _ := net.ParseCIDR(config.Gateway.V4MasqueradeSubnet)
+	_, v6MasqueradeCIDR, _ := net.ParseCIDR(config.Gateway.V6MasqueradeSubnet)
+
+	allSubnets.Append(config.ConfigSubnetMasquerade, v4MasqueradeCIDR)
+	allSubnets.Append(config.ConfigSubnetMasquerade, v6MasqueradeCIDR)
+
+	ni, err := NewNetInfo(netconf)
+	if err != nil {
+		return fmt.Errorf("error while parsing subnets: %v", err)
+	}
+	for _, subnet := range ni.Subnets() {
+		allSubnets.Append(config.UserDefinedSubnets, subnet.CIDR)
+	}
+
+	for _, subnet := range ni.JoinSubnets() {
+		allSubnets.Append(config.UserDefinedJoinSubnet, subnet)
+	}
+	if ni.ExcludeSubnets() != nil {
+		for i, configSubnet := range allSubnets.Subnets {
+			if IsContainedInAnyCIDR(configSubnet.Subnet, ni.ExcludeSubnets()...) {
+				allSubnets.Subnets = append(allSubnets.Subnets[:i], allSubnets.Subnets[i+1:]...)
+			}
+		}
+	}
+	err = allSubnets.CheckForOverlaps()
+	if err != nil {
+		return fmt.Errorf("pod or join subnet overlaps with already configured internal subnets: %v", err)
+	}
+
 	return nil
 }
 
