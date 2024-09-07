@@ -1226,24 +1226,24 @@ func (gw *GatewayManager) syncGatewayLogicalNetwork(
 		routerName = gw.gwRouterName
 	}
 	for _, subnet := range hostSubnets {
-		hostIfAddr := util.GetNodeManagementIfAddr(subnet)
-		if hostIfAddr == nil {
-			return fmt.Errorf("host interface address not found for subnet %q on network %q", subnet, gw.netInfo.GetNetworkName())
+		mgmtIfAddr := util.GetNodeManagementIfAddr(subnet)
+		if mgmtIfAddr == nil {
+			return fmt.Errorf("management interface address not found for subnet %q on network %q", subnet, gw.netInfo.GetNetworkName())
 		}
-		l3GatewayConfigIP, err := util.MatchFirstIPNetFamily(utilnet.IsIPv6(hostIfAddr.IP), l3GatewayConfig.IPAddresses)
+		l3GatewayConfigIP, err := util.MatchFirstIPNetFamily(utilnet.IsIPv6(mgmtIfAddr.IP), l3GatewayConfig.IPAddresses)
 		if err != nil {
 			return fmt.Errorf("failed to extract the gateway IP addr for network %q: %v", gw.netInfo.GetNetworkName(), err)
 		}
-		relevantHostIPs, err := util.MatchAllIPStringFamily(utilnet.IsIPv6(hostIfAddr.IP), hostAddrs)
+		relevantHostIPs, err := util.MatchAllIPStringFamily(utilnet.IsIPv6(mgmtIfAddr.IP), hostAddrs)
 		if err != nil && err != util.ErrorNoIP {
 			return fmt.Errorf("failed to extract the host IP addrs for network %q: %v", gw.netInfo.GetNetworkName(), err)
 		}
 		pbrMngr := gatewayrouter.NewPolicyBasedRoutesManager(gw.nbClient, routerName, gw.netInfo)
-		if err := pbrMngr.AddSameNodeIPPolicy(node.Name, hostIfAddr.IP.String(), l3GatewayConfigIP, relevantHostIPs); err != nil {
+		if err := pbrMngr.AddSameNodeIPPolicy(node.Name, mgmtIfAddr.IP.String(), l3GatewayConfigIP, relevantHostIPs); err != nil {
 			return fmt.Errorf("failed to configure the policy based routes for network %q: %v", gw.netInfo.GetNetworkName(), err)
 		}
 		if gw.netInfo.TopologyType() == types.Layer2Topology && config.Gateway.Mode == config.GatewayModeLocal {
-			if err := pbrMngr.AddHostCIDRPolicy(node, hostIfAddr.IP.String(), subnet.String()); err != nil {
+			if err := pbrMngr.AddHostCIDRPolicy(node, mgmtIfAddr.IP.String(), subnet.String()); err != nil {
 				return fmt.Errorf("failed to configure the hostCIDR policy for L2 network %q on local gateway: %v",
 					gw.netInfo.GetNetworkName(), err)
 			}
