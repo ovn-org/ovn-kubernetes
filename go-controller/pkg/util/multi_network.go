@@ -954,9 +954,7 @@ func GetPodNADToNetworkMappingWithActiveNetwork(pod *kapi.Pod, nInfo NetInfo, ac
 		Name:      activeNetworkNADKey[1],
 	}
 
-	if nInfo.IsPrimaryNetwork() &&
-		nInfo.TopologyType() == types.Layer2Topology &&
-		nInfo.AllowsPersistentIPs() {
+	if nInfo.IsPrimaryNetwork() && AllowsPersistentIPs(nInfo) {
 		ipamClaimName, wasPersistentIPRequested := pod.Annotations[OvnUDNIPAMClaimName]
 		if wasPersistentIPRequested {
 			networkSelections[activeNetworkNADs[0]].IPAMClaimReference = ipamClaimName
@@ -981,4 +979,18 @@ func DoesNetworkRequireIPAM(netInfo NetInfo) bool {
 func DoesNetworkRequireTunnelIDs(netInfo NetInfo) bool {
 	// Layer2Topology with IC require that we allocate tunnel IDs for each pod
 	return netInfo.TopologyType() == types.Layer2Topology && config.OVNKubernetesFeature.EnableInterconnect
+}
+
+func AllowsPersistentIPs(netInfo NetInfo) bool {
+	switch {
+	case netInfo.IsPrimaryNetwork():
+		return netInfo.TopologyType() == types.Layer2Topology && netInfo.AllowsPersistentIPs()
+
+	case netInfo.IsSecondary():
+		return (netInfo.TopologyType() == types.Layer2Topology || netInfo.TopologyType() == types.LocalnetTopology) &&
+			netInfo.AllowsPersistentIPs()
+
+	default:
+		return false
+	}
 }

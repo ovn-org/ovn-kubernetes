@@ -773,9 +773,8 @@ func (bsnc *BaseSecondaryNetworkController) WatchIPAMClaims() error {
 
 func (oc *BaseSecondaryNetworkController) allowPersistentIPs() bool {
 	return config.OVNKubernetesFeature.EnablePersistentIPs &&
-		oc.NetInfo.AllowsPersistentIPs() &&
 		util.DoesNetworkRequireIPAM(oc.NetInfo) &&
-		(oc.NetInfo.TopologyType() == types.Layer2Topology || oc.NetInfo.TopologyType() == types.LocalnetTopology)
+		util.AllowsPersistentIPs(oc.NetInfo)
 }
 
 func (oc *BaseSecondaryNetworkController) getNetworkID() (int, error) {
