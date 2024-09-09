@@ -25,6 +25,22 @@ func netCIDR(netCIDR string, netPrefixLengthPerNode int) string {
 	return fmt.Sprintf("%s/%d", netCIDR, netPrefixLengthPerNode)
 }
 
+// takes ipv4 and ipv6 cidrs and returns the correct type for the cluster under test
+func correctCIDRFamily(ipv4CIDR, ipv6CIDR string) string {
+	// dual stack cluster
+	if isIPv6Supported() && isIPv4Supported() {
+		return strings.Join([]string{ipv4CIDR, ipv6CIDR}, ",")
+	}
+	// is an ipv6 only cluster
+	if isIPv6Supported() {
+		return ipv6CIDR
+	}
+
+	//ipv4 only cluster
+	return ipv4CIDR
+
+}
+
 func getNetCIDRSubnet(netCIDR string) (string, error) {
 	subStrings := strings.Split(netCIDR, "/")
 	if len(subStrings) == 3 {

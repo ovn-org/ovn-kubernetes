@@ -185,7 +185,6 @@ func unmarshalPodAnnotation(annotations map[string]string, networkName string) (
 
 	podAnnotation := &PodAnnotation{Primary: a.Primary}
 	var err error
-
 	podAnnotation.MAC, err = net.ParseMAC(a.MAC)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse pod MAC %q: %v", a.MAC, err)

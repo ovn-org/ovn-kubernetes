@@ -964,6 +964,90 @@ func TestSubnetOverlapCheck(t *testing.T) {
 	}
 }
 
+func TestNewNetInfo(t *testing.T) {
+	type testConfig struct {
+		desc          string
+		subnets       string
+		ipv4Cluster   bool
+		ipv6Cluster   bool
+		expectedError error
+	}
+
+	tests := []testConfig{
+		{
+			desc:        "ipv4 primary network in ipv4 cluster",
+			subnets:     "192.168.200.0/16",
+			ipv4Cluster: true,
+		},
+		{
+			desc:          "ipv4 primary network in ipv6 cluster",
+			subnets:       "192.168.200.0/16",
+			ipv6Cluster:   true,
+			expectedError: fmt.Errorf("network l3-network is attempting to use ipv4 subnets but the cluster does not support ipv4"),
+		},
+		{
+			desc:        "ipv4 primary network in dualstack cluster",
+			subnets:     "192.168.200.0/16",
+			ipv4Cluster: true,
+			ipv6Cluster: true,
+		},
+		{
+			desc:          "ipv6 primary network in ipv4 cluster",
+			subnets:       "fda6::/48",
+			ipv4Cluster:   true,
+			expectedError: fmt.Errorf("network l3-network is attempting to use ipv6 subnets but the cluster does not support ipv6"),
+		},
+		{
+			desc:        "ipv6 primary network in ipv6 cluster",
+			subnets:     "fda6::/48",
+			ipv6Cluster: true,
+		},
+		{
+			desc:        "ipv6 primary network in dualstack cluster",
+			subnets:     "fda6::/48",
+			ipv4Cluster: true,
+			ipv6Cluster: true,
+		},
+		{
+			desc:          "dualstack primary network in ipv4 cluster",
+			subnets:       "192.168.200.0/16, fda6::/48",
+			ipv4Cluster:   true,
+			expectedError: fmt.Errorf("network l3-network is attempting to use ipv6 subnets but the cluster does not support ipv6"),
+		},
+		{
+			desc:          "dualstack primary network in ipv6 cluster",
+			subnets:       "192.168.200.0/16, fda6::/48",
+			ipv6Cluster:   true,
+			expectedError: fmt.Errorf("network l3-network is attempting to use ipv4 subnets but the cluster does not support ipv4"),
+		},
+		{
+			desc:        "dualstack primary network in dualstack cluster",
+			subnets:     "192.168.200.0/16, fda6::/48",
+			ipv4Cluster: true,
+			ipv6Cluster: true,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.desc, func(t *testing.T) {
+			inputNetConf := &ovncnitypes.NetConf{
+				NetConf:  cnitypes.NetConf{Name: "l3-network"},
+				Topology: ovntypes.Layer3Topology,
+				Role:     ovntypes.NetworkRolePrimary,
+				Subnets:  test.subnets,
+			}
+			config.IPv4Mode = test.ipv4Cluster
+			config.IPv6Mode = test.ipv6Cluster
+			g := gomega.NewWithT(t)
+			_, err := NewNetInfo(inputNetConf)
+			if test.expectedError == nil {
+				g.Expect(err).To(gomega.BeNil())
+			} else {
+				g.Expect(err).To(gomega.MatchError(test.expectedError.Error()))
+			}
+		})
+	}
+}
+
 func applyNADDefaults(nad *nadv1.NetworkAttachmentDefinition) *nadv1.NetworkAttachmentDefinition {
 	const (
 		name      = "nad1"

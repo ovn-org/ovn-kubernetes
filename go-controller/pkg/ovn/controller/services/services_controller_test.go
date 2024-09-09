@@ -134,8 +134,9 @@ func (c *serviceController) close() {
 	c.libovsdbCleanup.Cleanup()
 }
 
-func getSampleUDNNetInfo(namespace string) util.NetInfo {
-	netInfo, _ := util.NewNetInfo(&ovncnitypes.NetConf{
+func getSampleUDNNetInfo(namespace string) (util.NetInfo, error) {
+	// requires that config.IPv4Mode = true
+	netInfo, err := util.NewNetInfo(&ovncnitypes.NetConf{
 		Topology:   "layer3",
 		NADName:    fmt.Sprintf("%s/nad1", namespace),
 		MTU:        1400,
@@ -144,7 +145,7 @@ func getSampleUDNNetInfo(namespace string) util.NetInfo {
 		NetConf:    cnitypes.NetConf{Name: "tenant-red", Type: "ovn-k8s-cni-overlay"},
 		JoinSubnet: "100.66.0.0/16",
 	})
-	return netInfo
+	return netInfo, err
 }
 
 func addSampleNAD(client *util.OVNKubeControllerClientset, namespace, networkName string) error {
@@ -198,22 +199,27 @@ func TestSyncServices(t *testing.T) {
 		initialLrGroups = []string{types.ClusterLBGroupName, types.ClusterRouterLBGroupName}
 
 		udnNetworkName = "tenant-red"
-		udnNetInfo     = getSampleUDNNetInfo(ns)
 	)
 	// setup global config
 	oldGateway := globalconfig.Gateway.Mode
 	oldClusterSubnet := globalconfig.Default.ClusterSubnets
 	globalconfig.Kubernetes.OVNEmptyLbEvents = true
 	globalconfig.IPv4Mode = true
+	globalconfig.IPv6Mode = true
 	defer func() {
 		globalconfig.Kubernetes.OVNEmptyLbEvents = false
 		globalconfig.IPv4Mode = false
+		globalconfig.IPv6Mode = false
 		globalconfig.Gateway.Mode = oldGateway
 		globalconfig.Default.ClusterSubnets = oldClusterSubnet
 	}()
 	_, cidr4, _ := net.ParseCIDR("10.128.0.0/16")
 	_, cidr6, _ := net.ParseCIDR("fe00:0:0:0:5555::0/64")
 	globalconfig.Default.ClusterSubnets = []globalconfig.CIDRNetworkEntry{{cidr4, 26}, {cidr6, 26}}
+	udnNetInfo, err := getSampleUDNNetInfo(ns)
+	if err != nil {
+		t.Fatalf("Error creating UDNNetInfo: %v", err)
+	}
 
 	// define node configs
 	nodeAInfo := getNodeInfo(nodeA, []string{nodeAHostAddress}, nil)
