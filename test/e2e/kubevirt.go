@@ -30,6 +30,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/retry"
+	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
 	utilnet "k8s.io/utils/net"
 	"k8s.io/utils/pointer"
@@ -86,23 +87,7 @@ var _ = Describe("Kubevirt Virtual Machines", func() {
 		clientSet          kubernetes.Interface
 		// Systemd resolvd prevent resolving kube api service by fqdn, so
 		// we replace it here with NetworkManager
-		labelNode = func(nodeName, label string) error {
-			patch := fmt.Sprintf(`{"metadata": {"labels": {"%s": ""}}}`, label)
-			_, err := fr.ClientSet.CoreV1().Nodes().Patch(context.Background(), nodeName, types.MergePatchType, []byte(patch), metav1.PatchOptions{})
-			if err != nil {
-				return err
-			}
-			return nil
-		}
 
-		unlabelNode = func(nodeName, label string) error {
-			patch := fmt.Sprintf(`[{"op": "remove", "path": "/metadata/labels/%s"}]`, label)
-			_, err := clientSet.CoreV1().Nodes().Patch(context.Background(), nodeName, types.JSONPatchType, []byte(patch), metav1.PatchOptions{})
-			if err != nil {
-				return err
-			}
-			return nil
-		}
 		isDualStack = func() bool {
 			GinkgoHelper()
 			nodeList, err := fr.ClientSet.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{})
@@ -878,16 +863,16 @@ passwd:
 				by(vm.Name, "Live migrate for the second time to a node not owning the subnet")
 				// Remove the node selector label from original node to force
 				// live migration to a different one.
-				Expect(unlabelNode(originalNode, namespace)).To(Succeed())
+				e2enode.RemoveLabelOffNode(fr.ClientSet, originalNode, namespace)
 				liveMigrateAndCheck(vm.Name, td.mode, endpoints, "after live migration for the second time to node not owning subnet")
 
 				by(vm.Name, "Live migrate for the third time to the node owning the subnet")
 				// Patch back the original node with the label and remove it
 				// from the rest of nodes to force live migration target to it.
-				Expect(labelNode(originalNode, namespace)).To(Succeed())
+				e2enode.AddOrUpdateLabelOnNode(fr.ClientSet, originalNode, namespace, "")
 				for _, selectedNode := range selectedNodes {
 					if selectedNode.Name != originalNode {
-						Expect(unlabelNode(selectedNode.Name, namespace)).To(Succeed())
+						e2enode.RemoveLabelOffNode(fr.ClientSet, selectedNode.Name, namespace)
 					}
 				}
 				liveMigrateAndCheck(vm.Name, td.mode, endpoints, "after live migration to node owning the subnet")
@@ -997,7 +982,7 @@ passwd:
 			// configure VM nodeSelector with it and live migration will take only
 			// them into consideration
 			for _, node := range selectedNodes {
-				Expect(labelNode(node.Name, namespace)).To(Succeed())
+				e2enode.AddOrUpdateLabelOnNode(fr.ClientSet, node.Name, namespace, "")
 			}
 
 			prepareHTTPServerPods(map[string]string{}, checkPodHasIPAtStatus)
@@ -1006,7 +991,7 @@ passwd:
 
 		AfterEach(func() {
 			for _, node := range selectedNodes {
-				unlabelNode(node.Name, namespace)
+				e2enode.RemoveLabelOffNode(fr.ClientSet, node.Name, namespace)
 			}
 		})
 
