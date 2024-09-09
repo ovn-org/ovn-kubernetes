@@ -628,6 +628,20 @@ var _ = Describe("Network Segmentation", func() {
 				Expect(waitForUserDefinedNetworkReady(c.namespace, c.name, 5*time.Second)).To(Succeed())
 				return err
 			}),
+			Entry("ClusterUserDefinedNetwork", func(c networkAttachmentConfigParams) error {
+				cudnManifest := generateClusterUserDefinedNetworkManifest(&c)
+				cleanup, err := createManifest("", cudnManifest)
+				DeferCleanup(func() {
+					cleanup()
+					By("delete pods in test namespace to unblock CUDN CR & associate NAD deletion")
+					_, err := e2ekubectl.RunKubectl(c.namespace, "delete", "pod", "--all")
+					Expect(err).NotTo(HaveOccurred())
+					_, err = e2ekubectl.RunKubectl("", "delete", "clusteruserdefinednetwork", c.name)
+					Expect(err).NotTo(HaveOccurred())
+				})
+				Expect(waitForClusterUserDefinedNetworkReady(c.name, 5*time.Second)).To(Succeed())
+				return err
+			}),
 		)
 	})
 
@@ -1186,6 +1200,20 @@ spec:
 				Expect(waitForUserDefinedNetworkReady(f.Namespace.Name, c.name, 5*time.Second)).To(Succeed())
 				return err
 			}),
+			Entry("ClusterUserDefinedNetwork", func(c networkAttachmentConfigParams) error {
+				cudnManifest := generateClusterUserDefinedNetworkManifest(&c)
+				cleanup, err := createManifest("", cudnManifest)
+				DeferCleanup(func() {
+					cleanup()
+					By("delete pods in test namespace to unblock CUDN CR & associate NAD deletion")
+					_, err := e2ekubectl.RunKubectl(c.namespace, "delete", "pod", "--all")
+					Expect(err).NotTo(HaveOccurred())
+					_, err = e2ekubectl.RunKubectl("", "delete", "clusteruserdefinednetwork", c.name)
+					Expect(err).NotTo(HaveOccurred())
+				})
+				Expect(waitForClusterUserDefinedNetworkReady(c.name, 5*time.Second)).To(Succeed())
+				return err
+			}),
 		)
 	})
 
@@ -1320,6 +1348,27 @@ spec:
 `
 }
 
+func generateClusterUserDefinedNetworkManifest(params *networkAttachmentConfigParams) string {
+	subnets := generateSubnetsYaml(params)
+	return `
+apiVersion: k8s.ovn.org/v1
+kind: ClusterUserDefinedNetwork
+metadata:
+  name: ` + params.name + `
+spec:
+  namespaceSelector:
+    matchExpressions:
+    - key: kubernetes.io/metadata.name
+      operator: In
+      values: [` + params.namespace + `]
+  network:
+    topology: ` + nadToUdnParams[params.topology] + `
+    ` + params.topology + `: 
+      role: ` + nadToUdnParams[params.role] + `
+      subnets: ` + subnets + `
+`
+}
+
 func generateSubnetsYaml(params *networkAttachmentConfigParams) string {
 	if params.topology == "layer3" {
 		l3Subnets := generateLayer3Subnets(params.cidr)
@@ -1358,11 +1407,11 @@ func waitForClusterUserDefinedNetworkReady(name string, timeout time.Duration) e
 func createManifest(namespace, manifest string) (func(), error) {
 	path := "test-" + randString(5) + ".yaml"
 	if err := os.WriteFile(path, []byte(manifest), 0644); err != nil {
-		framework.Failf("Unable to write udn yaml to disk: %v", err)
+		framework.Failf("Unable to write yaml to disk: %v", err)
 	}
 	cleanup := func() {
 		if err := os.Remove(path); err != nil {
-			framework.Logf("Unable to remove udn yaml from disk: %v", err)
+			framework.Logf("Unable to remove yaml from disk: %v", err)
 		}
 	}
 	_, err := e2ekubectl.RunKubectl(namespace, "create", "-f", path)
