@@ -396,6 +396,14 @@ func nonICClusterTestConfiguration() testConfiguration {
 	return testConfiguration{}
 }
 
+func icClusterWithDisableSNATTestConfiguration() testConfiguration {
+	return testConfiguration{
+		configToOverride:   enableICFeatureConfig(),
+		expectationOptions: []option{withInterconnectCluster()},
+		gatewayConfig:      &config.GatewayConfig{DisableSNATMultipleGWs: true},
+	}
+}
+
 func newMultiHomedPod(namespace, name, node, podIP string, multiHomingConfigs ...secondaryNetInfo) *v1.Pod {
 	pod := newPod(namespace, name, node, podIP)
 	var secondaryNetworks []nadapi.NetworkSelectionElement

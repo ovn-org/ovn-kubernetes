@@ -46,6 +46,7 @@ const (
 
 type testConfiguration struct {
 	configToOverride   *config.OVNKubernetesFeatureConfig
+	gatewayConfig      *config.GatewayConfig
 	expectationOptions []option
 }
 
@@ -86,6 +87,9 @@ var _ = Describe("OVN Multi-Homed pod operations", func() {
 			podInfo := dummyTestPod(ns, netInfo)
 			if testConfig.configToOverride != nil {
 				config.OVNKubernetesFeature = *testConfig.configToOverride
+				if testConfig.gatewayConfig != nil {
+					config.Gateway.DisableSNATMultipleGWs = testConfig.gatewayConfig.DisableSNATMultipleGWs
+				}
 			}
 			app.Action = func(ctx *cli.Context) error {
 				nad, err := newNetworkAttachmentDefinition(
@@ -201,6 +205,10 @@ var _ = Describe("OVN Multi-Homed pod operations", func() {
 			dummyPrimaryUserDefinedNetwork("192.168.0.0/16"),
 			icClusterTestConfiguration(),
 		),
+		table.Entry("pod on a user defined primary network on an interconnect cluster",
+			dummyPrimaryUserDefinedNetwork("192.168.0.0/16"),
+			icClusterWithDisableSNATTestConfiguration(),
+		),
 	)
 
 	table.DescribeTable(
@@ -209,6 +217,9 @@ var _ = Describe("OVN Multi-Homed pod operations", func() {
 			podInfo := dummyTestPod(ns, netInfo)
 			if testConfig.configToOverride != nil {
 				config.OVNKubernetesFeature = *testConfig.configToOverride
+				if testConfig.gatewayConfig != nil {
+					config.Gateway.DisableSNATMultipleGWs = testConfig.gatewayConfig.DisableSNATMultipleGWs
+				}
 			}
 			app.Action = func(ctx *cli.Context) error {
 				netConf := netInfo.netconf()
@@ -308,6 +319,10 @@ var _ = Describe("OVN Multi-Homed pod operations", func() {
 		table.Entry("pod on a user defined primary network on an interconnect cluster",
 			dummyPrimaryUserDefinedNetwork("192.168.0.0/16"),
 			icClusterTestConfiguration(),
+		),
+		table.Entry("pod on a user defined primary network on an interconnect cluster",
+			dummyPrimaryUserDefinedNetwork("192.168.0.0/16"),
+			icClusterWithDisableSNATTestConfiguration(),
 		),
 	)
 })
@@ -459,6 +474,11 @@ func dummyTestPod(nsName string, info secondaryNetInfo) testPod {
 	return pod
 }
 
+func dummyTestPodAdditionalNetworkIP() string {
+	secNetInfo := dummyPrimaryLayer2UserDefinedNetwork("192.168.0.0/16")
+	return dummyTestPod(ns, secNetInfo).getNetworkPortInfo(secNetInfo.netName, secNetInfo.nadName).podIP
+}
+
 func dummySecondaryUserDefinedNetwork(subnets string) secondaryNetInfo {
 	return secondaryNetInfo{
 		netName:  secondaryNetworkName,
@@ -568,6 +588,7 @@ func expectedGWRouterPlusNATAndStaticRoutes(
 	const (
 		nat1             = "abc-UUID"
 		nat2             = "cba-UUID"
+		perPodSNAT       = "pod-snat-UUID"
 		staticRoute1     = "srA-UUID"
 		staticRoute2     = "srB-UUID"
 		staticRoute3     = "srC-UUID"
@@ -579,22 +600,33 @@ func expectedGWRouterPlusNATAndStaticRoutes(
 	ipv4Subnet := networkSubnet(netInfo)
 	nextHopMasqIP := nextHopMasqueradeIP().String()
 	masqSubnet := config.Gateway.V4MasqueradeSubnet
-	return []libovsdbtest.TestData{
+	var nat []string
+	if config.Gateway.DisableSNATMultipleGWs {
+		nat = append(nat, perPodSNAT)
+	} else {
+		nat = append(nat, nat1, nat2)
+	}
+	expectedEntities := []libovsdbtest.TestData{
 		&nbdb.LogicalRouter{
 			Name:         gwRouterName,
 			UUID:         gwRouterName + "-UUID",
 			ExternalIDs:  gwRouterExternalIDs(netInfo, gwConfig),
 			Options:      gwRouterOptions(gwConfig),
 			Ports:        []string{gwRouterToJoinLRPUUID, gwRouterToExtLRPUUID},
-			Nat:          []string{nat1, nat2},
+			Nat:          nat,
 			StaticRoutes: []string{staticRoute1, staticRoute2, staticRoute3},
 		},
-		newNATEntry(nat1, dummyJoinIP().IP.String(), gwRouterIPAddress().IP.String(), standardNonDefaultNetworkExtIDs(netInfo)),
-		newNATEntry(nat2, dummyJoinIP().IP.String(), networkSubnet(netInfo), standardNonDefaultNetworkExtIDs(netInfo)),
 		expectedGRStaticRoute(staticRoute1, ipv4Subnet, dummyJoinIP().IP.String(), nil, nil, netInfo),
 		expectedGRStaticRoute(staticRoute2, ipv4DefaultRoute, nextHopIP, nil, &staticRouteOutputPort, netInfo),
 		expectedGRStaticRoute(staticRoute3, masqSubnet, nextHopMasqIP, nil, &staticRouteOutputPort, netInfo),
 	}
+	if config.Gateway.DisableSNATMultipleGWs {
+		expectedEntities = append(expectedEntities, newNATEntry(perPodSNAT, dummyJoinIP().IP.String(), dummyTestPodAdditionalNetworkIP(), nil))
+	} else {
+		expectedEntities = append(expectedEntities, newNATEntry(nat1, dummyJoinIP().IP.String(), gwRouterIPAddress().IP.String(), standardNonDefaultNetworkExtIDs(netInfo)))
+		expectedEntities = append(expectedEntities, newNATEntry(nat2, dummyJoinIP().IP.String(), networkSubnet(netInfo), standardNonDefaultNetworkExtIDs(netInfo)))
+	}
+	return expectedEntities
 }
 
 func expectedStaticMACBinding(gwRouterName string, ip net.IP) *nbdb.StaticMACBinding {
