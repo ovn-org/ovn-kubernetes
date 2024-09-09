@@ -129,7 +129,7 @@ install_metallb() {
   builddir=$(mktemp -d "${METALLB_DIR}/XXXXXX")
 
   pushd "${builddir}"
-  git clone https://github.com/qinqon/metallb.git
+  git clone https://github.com/metallb/metallb.git
   cd metallb
   git checkout $metallb_version
   pip install -r dev-env/requirements.txt
