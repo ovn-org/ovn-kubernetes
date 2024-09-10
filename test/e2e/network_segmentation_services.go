@@ -38,9 +38,8 @@ var _ = Describe("Network Segmentation: services", func() {
 		)
 
 		var (
-			cs                  clientset.Interface
-			nadClient           nadclient.K8sCniCncfIoV1Interface
-			defaultNetNamespace string
+			cs        clientset.Interface
+			nadClient nadclient.K8sCniCncfIoV1Interface
 		)
 
 		BeforeEach(func() {
@@ -49,22 +48,6 @@ var _ = Describe("Network Segmentation: services", func() {
 			var err error
 			nadClient, err = nadclient.NewForConfig(f.ClientConfig())
 			Expect(err).NotTo(HaveOccurred())
-			defaultNetNamespace = ""
-		})
-
-		cleanupFn := func() {
-			By("Removing the namespace so all resources get deleted")
-			err := cs.CoreV1().Namespaces().Delete(context.TODO(), f.Namespace.Name, metav1.DeleteOptions{})
-			framework.ExpectNoError(err, "Failed to remove the namespace %s %v", f.Namespace.Name, err)
-			if defaultNetNamespace != "" {
-				err = cs.CoreV1().Namespaces().Delete(context.TODO(), defaultNetNamespace, metav1.DeleteOptions{})
-				framework.ExpectNoError(err, "Failed to remove the namespace %v", defaultNetNamespace, err)
-			}
-
-		}
-
-		AfterEach(func() {
-			cleanupFn()
 		})
 
 		DescribeTable(
@@ -182,15 +165,16 @@ ips=$(ip -o addr show dev $iface| grep global |awk '{print $4}' | cut -d/ -f1 | 
 				// Default network -> UDN
 				// Check that it cannot connect
 				By(fmt.Sprintf("Create a client pod in the default network on node %s", clientNode))
-				defaultNetNamespace = f.Namespace.Name + "-default"
-				_, err = cs.CoreV1().Namespaces().Create(context.Background(), &v1.Namespace{
+				defaultNetNamespace := &v1.Namespace{
 					ObjectMeta: metav1.ObjectMeta{
-						Name: defaultNetNamespace,
+						Name: f.Namespace.Name + "-default",
 					},
-				}, metav1.CreateOptions{})
+				}
+				f.AddNamespacesToDelete(defaultNetNamespace)
+				_, err = cs.CoreV1().Namespaces().Create(context.Background(), defaultNetNamespace, metav1.CreateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 
-				defaultClient, err := createPod(f, "default-net-pod", clientNode, defaultNetNamespace, []string{"sleep", "2000000"}, nil)
+				defaultClient, err := createPod(f, "default-net-pod", clientNode, defaultNetNamespace.Name, []string{"sleep", "2000000"}, nil)
 				Expect(err).NotTo(HaveOccurred())
 
 				By("Verify the connection of the client in the default network to the UDN service")
@@ -208,7 +192,7 @@ ips=$(ip -o addr show dev $iface| grep global |awk '{print $4}' | cut -d/ -f1 | 
 				defaultLabels := map[string]string{"app": "default-app"}
 
 				defaultServerPod, err := createPod(f, "backend-pod-default", serverPodNodeName,
-					defaultNetNamespace, []string{"/agnhost", "netexec", "--udp-port=" + fmt.Sprint(serviceTargetPort)}, defaultLabels,
+					defaultNetNamespace.Name, []string{"/agnhost", "netexec", "--udp-port=" + fmt.Sprint(serviceTargetPort)}, defaultLabels,
 					func(pod *v1.Pod) {
 						pod.Spec.Containers[0].Ports = []v1.ContainerPort{{ContainerPort: (serviceTargetPort), Protocol: "UDP"}}
 					})
@@ -232,7 +216,7 @@ ips=$(ip -o addr show dev $iface| grep global |awk '{print $4}' | cut -d/ -f1 | 
 					},
 				}
 
-				defaultService, err = f.ClientSet.CoreV1().Services(defaultNetNamespace).Create(context.TODO(), defaultService, metav1.CreateOptions{})
+				defaultService, err = f.ClientSet.CoreV1().Services(defaultNetNamespace.Name).Create(context.TODO(), defaultService, metav1.CreateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 
 				By("Verify the UDN client connection to the default network service")
