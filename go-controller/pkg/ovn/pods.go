@@ -23,6 +23,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 )
 
 func (oc *DefaultNetworkController) syncPods(pods []interface{}) error {
@@ -184,6 +185,15 @@ func (oc *DefaultNetworkController) deleteLogicalPort(pod *kapi.Pod, portInfo *l
 		return err
 	}
 
+	// delete open port ACLs for UDN pods
+	if util.IsNetworkSegmentationSupportEnabled() {
+		// safe to call for non-UDN pods
+		err = oc.setUDNPodOpenPorts(pod.Namespace+"/"+pod.Name, pod.Annotations, "")
+		if err != nil {
+			return fmt.Errorf("failed to cleanup UDN pod %s/%s open ports: %w", pod.Namespace, pod.Name, err)
+		}
+	}
+
 	// do not remove SNATs/GW routes/IPAM for an IP address unless we have validated no other pod is using it
 	if pInfo == nil {
 		return nil
@@ -258,6 +268,13 @@ func (oc *DefaultNetworkController) addLogicalPort(pod *kapi.Pod) (err error) {
 		pgName := libovsdbutil.GetPortGroupName(oc.getSecondaryPodsPortGroupDbIDs())
 		if ops, err = libovsdbops.AddPortsToPortGroupOps(oc.nbClient, ops, pgName, lsp.UUID); err != nil {
 			return err
+		}
+		// set open ports for UDN pods, use function without transact, since lsp is not created yet.
+		var parseErr error
+		ops, parseErr, err = oc.setUDNPodOpenPortsOps(pod.Namespace+"/"+pod.Name, pod.Annotations, lsp.Name, ops)
+		err = utilerrors.Join(parseErr, err)
+		if err != nil {
+			return fmt.Errorf("failed to set UDN pod %s/%s open ports: %w", pod.Namespace, pod.Name, err)
 		}
 	}
 
