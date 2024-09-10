@@ -122,12 +122,13 @@ install_ingress() {
 
 METALLB_DIR="/tmp/metallb"
 install_metallb() {
+  local metallb_version=v0.14.8
   mkdir -p /tmp/metallb
   local builddir
   builddir=$(mktemp -d "${METALLB_DIR}/XXXXXX")
 
   pushd "${builddir}"
-  git clone https://github.com/metallb/metallb.git
+  git clone https://github.com/metallb/metallb.git -b $metallb_version
   cd metallb
   # Use global IP next hops in IPv6
   if  [ "$KIND_IPV6_SUPPORT" == true ]; then
