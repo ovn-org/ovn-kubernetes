@@ -143,8 +143,14 @@ var _ = Describe("Network Segmentation: services", func() {
 					namespace, "backend-pod", nil, nil,
 					[]v1.ContainerPort{
 						{ContainerPort: (serviceTargetPort), Protocol: "UDP"}},
-					"netexec",
-					"--udp-port="+fmt.Sprint(serviceTargetPort))
+					"-c",
+					fmt.Sprintf(`
+set -xe
+iface=ovn-udn1
+ips=$(ip -o addr show dev $iface| grep global |awk '{print $4}' | cut -d/ -f1 | paste -sd, -)
+./agnhost netexec --udp-port=%d --udp-listen-addresses=$ips
+`, serviceTargetPort))
+				udnServerPod.Spec.Containers[0].Command = []string{"/bin/bash"}
 
 				udnServerPod.Labels = jig.Labels
 				udnServerPod.Spec.NodeName = serverPodNodeName
