@@ -10,6 +10,7 @@ import (
 	nadclient "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/typed/k8s.cni.cncf.io/v1"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+
 	kapi "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -35,6 +36,7 @@ var _ = Describe("Network Segmentation: services", func() {
 			serviceTargetPort            = 80
 			userDefinedNetworkIPv4Subnet = "10.128.0.0/16"
 			userDefinedNetworkIPv6Subnet = "2014:100:200::0/60"
+			clientContainer              = "frr"
 		)
 
 		var (
@@ -72,7 +74,7 @@ var _ = Describe("Network Segmentation: services", func() {
 			//   + clusterIP fails
 			//   + nodeIP:nodePort fails FOR NOW, when we only target the local node
 
-			"should be reachable through their cluster IP and node port",
+			"should be reachable through their cluster IP, node port and load balancer",
 			func(
 				netConfigParams networkAttachmentConfigParams,
 			) {
@@ -105,7 +107,7 @@ var _ = Describe("Network Segmentation: services", func() {
 				)
 				Expect(err).NotTo(HaveOccurred())
 
-				By(fmt.Sprintf("Creating a UDN NodePort service"))
+				By(fmt.Sprintf("Creating a UDN LoadBalancer service"))
 				policy := v1.IPFamilyPolicyPreferDualStack
 				udnService, err := jig.CreateUDPService(context.TODO(), func(s *v1.Service) {
 					s.Spec.Ports = []v1.ServicePort{
@@ -116,9 +118,13 @@ var _ = Describe("Network Segmentation: services", func() {
 							TargetPort: intstr.FromInt(serviceTargetPort),
 						},
 					}
-					s.Spec.Type = v1.ServiceTypeNodePort
+					s.Spec.Type = v1.ServiceTypeLoadBalancer
 					s.Spec.IPFamilyPolicy = &policy
 				})
+				framework.ExpectNoError(err)
+
+				By("Wait for UDN LoadBalancer Ingress to pop up")
+				udnService, err = jig.WaitForLoadBalancer(context.TODO(), 180*time.Second)
 				framework.ExpectNoError(err)
 
 				By("Creating a UDN backend pod")
@@ -148,6 +154,7 @@ ips=$(ip -o addr show dev $iface| grep global |awk '{print $4}' | cut -d/ -f1 | 
 				By("Connect to the UDN service cluster IP from the UDN client pod on the same node")
 				checkConnectionToClusterIPs(f, udnClientPod, udnService, udnServerPod.Name)
 				By("Connect to the UDN service nodePort on all 3 nodes from the UDN client pod")
+				checkConnectionToLoadBalancers(f, udnClientPod, udnService, udnServerPod.Name)
 				checkConnectionToNodePort(f, udnClientPod, udnService, &nodes.Items[0], "endpoint node", udnServerPod.Name)
 				checkConnectionToNodePort(f, udnClientPod, udnService, &nodes.Items[1], "other node", udnServerPod.Name)
 				checkConnectionToNodePort(f, udnClientPod, udnService, &nodes.Items[2], "other node", udnServerPod.Name)
@@ -158,9 +165,16 @@ ips=$(ip -o addr show dev $iface| grep global |awk '{print $4}' | cut -d/ -f1 | 
 
 				By("Connect to the UDN service from the UDN client pod on a different node")
 				checkConnectionToClusterIPs(f, udnClientPod2, udnService, udnServerPod.Name)
+				checkConnectionToLoadBalancers(f, udnClientPod2, udnService, udnServerPod.Name)
 				checkConnectionToNodePort(f, udnClientPod2, udnService, &nodes.Items[1], "local node", udnServerPod.Name)
 				checkConnectionToNodePort(f, udnClientPod2, udnService, &nodes.Items[0], "server node", udnServerPod.Name)
 				checkConnectionToNodePort(f, udnClientPod2, udnService, &nodes.Items[2], "other node", udnServerPod.Name)
+
+				By("Connect to the UDN service from the UDN client external container")
+				checkConnectionToLoadBalancersFromExternalContainer(f, clientContainer, udnService, udnServerPod.Name)
+				checkConnectionToNodePortFromExternalContainer(f, clientContainer, udnService, &nodes.Items[0], "server node", udnServerPod.Name)
+				checkConnectionToNodePortFromExternalContainer(f, clientContainer, udnService, &nodes.Items[1], "other node", udnServerPod.Name)
+				checkConnectionToNodePortFromExternalContainer(f, clientContainer, udnService, &nodes.Items[2], "other node", udnServerPod.Name)
 
 				// Default network -> UDN
 				// Check that it cannot connect
@@ -179,7 +193,7 @@ ips=$(ip -o addr show dev $iface| grep global |awk '{print $4}' | cut -d/ -f1 | 
 
 				By("Verify the connection of the client in the default network to the UDN service")
 				checkNoConnectionToClusterIPs(f, defaultClient, udnService)
-
+				checkNoConnectionToLoadBalancers(f, defaultClient, udnService)
 				checkNoConnectionToNodePort(f, defaultClient, udnService, &nodes.Items[1], "local node") // TODO change to checkConnectionToNodePort when we have full UDN support in ovnkube-node
 
 				checkConnectionToNodePort(f, defaultClient, udnService, &nodes.Items[0], "server node", udnServerPod.Name)
@@ -220,6 +234,7 @@ ips=$(ip -o addr show dev $iface| grep global |awk '{print $4}' | cut -d/ -f1 | 
 				Expect(err).NotTo(HaveOccurred())
 
 				By("Verify the UDN client connection to the default network service")
+				checkNoConnectionToLoadBalancers(f, udnClientPod2, defaultService)
 				checkConnectionToNodePort(f, udnClientPod2, defaultService, &nodes.Items[0], "server node", defaultServerPod.Name)
 				checkNoConnectionToNodePort(f, udnClientPod2, defaultService, &nodes.Items[1], "local node")
 				checkConnectionToNodePort(f, udnClientPod2, defaultService, &nodes.Items[2], "other node", defaultServerPod.Name)
@@ -410,5 +425,76 @@ func checkConnectionOrNoConnectionToNodePort(f *framework.Framework, clientPod *
 			err = checkNoConnectionToAgnhostPod(f, clientPod, cmd)
 		}
 		framework.ExpectNoError(err, fmt.Sprintf("Failed to verify that %s", msg))
+	}
+}
+
+func checkConnectionToLoadBalancers(f *framework.Framework, clientPod *v1.Pod, service *v1.Service, expectedOutput string) {
+	checkConnectionOrNoConnectionToLoadBalancers(f, clientPod, service, expectedOutput, true)
+}
+
+func checkNoConnectionToLoadBalancers(f *framework.Framework, clientPod *v1.Pod, service *v1.Service) {
+	checkConnectionOrNoConnectionToLoadBalancers(f, clientPod, service, "", false)
+}
+
+func checkConnectionOrNoConnectionToLoadBalancers(f *framework.Framework, clientPod *v1.Pod, service *v1.Service, expectedOutput string, shouldConnect bool) {
+	var err error
+	port := service.Spec.Ports[0].Port
+	notStr := ""
+	if !shouldConnect {
+		notStr = "not "
+	}
+	for _, lbIngress := range service.Status.LoadBalancer.Ingress {
+		msg := fmt.Sprintf("Client %s/%s should %sreach service %s/%s on LoadBalancer IP %s port %d",
+			clientPod.Namespace, clientPod.Name, notStr, service.Namespace, service.Name, lbIngress.IP, port)
+		By(msg)
+
+		cmd := fmt.Sprintf(`/bin/sh -c 'echo hostname | nc -u -w 1 %s %d '`, lbIngress.IP, port)
+
+		if shouldConnect {
+			err = checkConnectionToAgnhostPod(f, clientPod, expectedOutput, cmd)
+		} else {
+			err = checkNoConnectionToAgnhostPod(f, clientPod, cmd)
+		}
+		framework.ExpectNoError(err, fmt.Sprintf("Failed to verify that %s", msg))
+	}
+}
+
+func checkConnectionToNodePortFromExternalContainer(f *framework.Framework, containerName string, service *v1.Service, node *v1.Node, nodeRoleMsg, expectedOutput string) {
+	GinkgoHelper()
+	var err error
+	nodePort := service.Spec.Ports[0].NodePort
+	nodeIPs, err := ParseNodeHostIPDropNetMask(node)
+	Expect(err).NotTo(HaveOccurred())
+
+	for nodeIP := range nodeIPs {
+		msg := fmt.Sprintf("Client at external container %s should connect to NodePort service %s/%s on %s:%d (node %s, %s)",
+			containerName, service.Namespace, service.Name, nodeIP, nodePort, node.Name, nodeRoleMsg)
+		By(msg)
+		cmd := []string{containerRuntime, "exec", containerName, "/bin/bash", "-c", fmt.Sprintf("echo hostname | nc -u -w 1 %s %d", nodeIP, nodePort)}
+		Eventually(func() (string, error) {
+			return runCommand(cmd...)
+		}).
+			WithTimeout(5*time.Second).
+			WithPolling(200*time.Millisecond).
+			Should(Equal(expectedOutput), "Failed to verify that %s", msg)
+	}
+}
+
+func checkConnectionToLoadBalancersFromExternalContainer(f *framework.Framework, containerName string, service *v1.Service, expectedOutput string) {
+	GinkgoHelper()
+	port := service.Spec.Ports[0].Port
+
+	for _, lbIngress := range service.Status.LoadBalancer.Ingress {
+		msg := fmt.Sprintf("Client at external container %s should reach service %s/%s on LoadBalancer IP %s port %d",
+			containerName, service.Namespace, service.Name, lbIngress.IP, port)
+		By(msg)
+		cmd := []string{containerRuntime, "exec", containerName, "/bin/bash", "-c", fmt.Sprintf("echo hostname | nc -u -w 1 %s %d", lbIngress.IP, port)}
+		Eventually(func() (string, error) {
+			return runCommand(cmd...)
+		}).
+			// It takes some time for the container to receive the dynamic routing
+			WithTimeout(20*time.Second).
+			WithPolling(200*time.Millisecond).
+			Should(Equal(expectedOutput), "Failed to verify that %s", msg)
 	}
 }
