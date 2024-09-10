@@ -54,14 +54,10 @@ var _ = Describe("Network Segmentation: services", func() {
 		})
 
 		cleanupFn := func() {
-			By("Removing the namespace so all resources get deleted")
-			err := cs.CoreV1().Namespaces().Delete(context.TODO(), f.Namespace.Name, metav1.DeleteOptions{})
-			framework.ExpectNoError(err, "Failed to remove the namespace %s %v", f.Namespace.Name, err)
 			if defaultNetNamespace != "" {
-				err = cs.CoreV1().Namespaces().Delete(context.TODO(), defaultNetNamespace, metav1.DeleteOptions{})
+				err := cs.CoreV1().Namespaces().Delete(context.TODO(), defaultNetNamespace, metav1.DeleteOptions{})
 				framework.ExpectNoError(err, "Failed to remove the namespace %v", defaultNetNamespace, err)
 			}
-
 		}
 
 		AfterEach(func() {
