@@ -46,9 +46,69 @@ const (
 	agnhostImage         = "registry.k8s.io/e2e-test-images/agnhost:2.26"
 	iperf3Image          = "quay.io/sronanrh/iperf"
 	ovnNs                = "ovn-kubernetes" //OVN kubernetes namespace
+	redirectIP           = "123.123.123.123"
+	redirectPort         = "13337"
+	exContainerName      = "tcp-continuous-client"
 )
 
 type podCondition = func(pod *v1.Pod) (bool, error)
+
+// setupHostRedirectPod
+func setupHostRedirectPod(f *framework.Framework, node *v1.Node, exContainerName string, isIPv6 bool) error {
+	_, _ = createClusterExternalContainer(exContainerName, externalContainerImage, []string{"-itd", "--privileged", "--network", externalContainerNetwork}, []string{})
+	nodeV4, nodeV6 := getContainerAddressesForNetwork(node.Name, externalContainerNetwork)
+	mask := 32
+	ipCmd := []string{"ip"}
+	nodeIP := nodeV4
+	if isIPv6 {
+		mask = 128
+		ipCmd = []string{"ip", "-6"}
+		nodeIP = nodeV6
+	}
+	cmd := []string{"docker", "exec", exContainerName}
+	cmd = append(cmd, ipCmd...)
+	cmd = append(cmd, "route", "add", fmt.Sprintf("%s/%d", redirectIP, mask), "via", nodeIP)
+	_, err := runCommand(cmd...)
+	if err != nil {
+		return err
+	}
+
+	// setup redirect iptables rule in node
+	ipTablesArgs := []string{"PREROUTING", "-t", "nat", "--dst", redirectIP, "-j", "REDIRECT"}
+	updateIPTablesRulesForNode("insert", node.Name, ipTablesArgs, isIPv6)
+
+	command := []string{
+		"bash", "-c",
+		fmt.Sprintf("set -xe; while true; do nc -l -p %s; done",
+			redirectPort),
+	}
+	tcpServer := "tcp-continuous-server"
+	// setup host networked pod to act as server
+	pod := &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: tcpServer,
+		},
+		Spec: v1.PodSpec{
+			Containers: []v1.Container{
+				{
+					Name:    tcpServer,
+					Image:   agnhostImage,
+					Command: command,
+				},
+			},
+			NodeName:      node.Name,
+			RestartPolicy: v1.RestartPolicyNever,
+			HostNetwork:   true,
+		},
+	}
+	podClient := f.ClientSet.CoreV1().Pods(f.Namespace.Name)
+	_, err = podClient.Create(context.Background(), pod, metav1.CreateOptions{})
+	if err != nil {
+		return err
+	}
+	err = e2epod.WaitForPodNotPending(context.TODO(), f.ClientSet, f.Namespace.Name, tcpServer)
+	return err
+}
 
 // checkContinuousConnectivity creates a pod and checks that it can connect to the given host over tries*2 seconds.
 // The created pod object is sent to the podChan while any errors along the way are sent to the errChan.
@@ -649,6 +709,7 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 		numControlPlanePods   int
 		controlPlanePodName   string
 		controlPlaneLeaseName string
+		nodes                 []v1.Node
 	)
 
 	ginkgo.BeforeEach(func() {
@@ -683,6 +744,14 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 		if IsIPv6Cluster(f.ClientSet) {
 			extDNSIP = "2001:4860:4860::8888"
 		}
+		n, err := e2enode.GetBoundedReadySchedulableNodes(context.TODO(), f.ClientSet, 3)
+		framework.ExpectNoError(err)
+		nodes = n.Items
+
+	})
+
+	ginkgo.AfterEach(func() {
+		deleteClusterExternalContainer(exContainerName)
 	})
 
 	ginkgo.It("should provide Internet connection continuously when ovnkube-node pod is killed", func() {
@@ -700,6 +769,26 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 		testPod := <-podChan
 		nodeName := testPod.Spec.NodeName
 		framework.Logf("Test pod running on %q", nodeName)
+		var targetNode *v1.Node
+		for _, node := range nodes {
+			if node.Name == nodeName {
+				targetNode = &node
+			}
+		}
+		gomega.Expect(targetNode).ToNot(gomega.BeNil())
+		err = setupHostRedirectPod(f, targetNode, exContainerName, IsIPv6Cluster(f.ClientSet))
+		framework.ExpectNoError(err)
+
+		// start TCP client
+		go func() {
+			defer ginkgo.GinkgoRecover()
+			_, _ = runCommand(containerRuntime, "exec", exContainerName, "nc", "--idle-timeout", "120s", redirectIP, redirectPort)
+		}()
+
+		ginkgo.By("Checking that TCP redirect connection entry in conntrack before ovnkube-node restart")
+		gomega.Eventually(func() int {
+			return pokeConntrackEntries(nodeName, redirectIP, "tcp", nil)
+		}, "10s", "1s").ShouldNot(gomega.Equal(0))
 
 		ginkgo.By("Deleting ovn-kube pod on node " + nodeName)
 		err = restartOVNKubeNodePod(f.ClientSet, "ovn-kubernetes", nodeName)
@@ -710,6 +799,11 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 
 		err = waitClusterHealthy(f, numControlPlanePods, controlPlanePodName)
 		framework.ExpectNoError(err, "one or more nodes failed to go back ready, schedulable, and untainted")
+
+		ginkgo.By("Checking that TCP redirect connection entry in conntrack remained after ovnkube-node restart")
+		gomega.Consistently(func() int {
+			return pokeConntrackEntries(nodeName, redirectIP, "tcp", nil)
+		}, "5s", "500ms").ShouldNot(gomega.Equal(0))
 	})
 
 	ginkgo.It("should provide Internet connection continuously when pod running master instance of ovnkube-control-plane is killed", func() {
