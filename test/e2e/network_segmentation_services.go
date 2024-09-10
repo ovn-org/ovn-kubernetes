@@ -144,8 +144,14 @@ var _ = Describe("Network Segmentation: services", func() {
 					namespace, "backend-pod", nil, nil,
 					[]v1.ContainerPort{
 						{ContainerPort: (serviceTargetPort), Protocol: "UDP"}},
-					"netexec",
-					"--udp-port="+fmt.Sprint(serviceTargetPort))
+					"-c",
+					fmt.Sprintf(`
+set -xe
+ipv4=$(ip a show dev ovn-udn1 | grep 'inet ' | awk '{print $2}' | sed 's#/.*##')
+ipv6=$(ip -6 a show dev ovn-udn1 | grep 'global' | awk '{print $2}' | sed 's#/.*##')
+./agnhost netexec --udp-port=%d --udp-listen-addresses=$ipv4,$ipv6
+`, serviceTargetPort))
+				udnServerPod.Spec.Containers[0].Command = []string{"/bin/bash"}
 
 				udnServerPod.Labels = jig.Labels
 				udnServerPod.Spec.NodeName = serverPodNodeName
