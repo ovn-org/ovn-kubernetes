@@ -898,10 +898,10 @@ func (oc *SecondaryLayer3NetworkController) nodeGatewayConfig(node *kapi.Node) (
 		hostAddrs = append(hostAddrs, externalIP.String())
 	}
 
-	// Use the host subnets present in the network attachment definition.
-	hostSubnets := make([]*net.IPNet, 0, len(oc.Subnets()))
-	for _, subnet := range oc.Subnets() {
-		hostSubnets = append(hostSubnets, subnet.CIDR)
+	// Fetch the host subnets present in the node annotation for this network
+	hostSubnets, err := util.ParseNodeHostSubnetAnnotation(node, oc.GetNetworkName())
+	if err != nil {
+		return nil, fmt.Errorf("failed to get node %q subnet annotation for network %q: %v", node.Name, oc.GetNetworkName(), err)
 	}
 
 	gwLRPIPs, err := util.ParseNodeGatewayRouterJoinAddrs(node, oc.GetNetworkName())
