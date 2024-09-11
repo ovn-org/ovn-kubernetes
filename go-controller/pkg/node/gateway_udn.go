@@ -199,7 +199,7 @@ func NewUserDefinedNetworkGateway(netInfo util.NetInfo, networkID int, node *v1.
 
 	gw, ok := defaultNetworkGateway.(*gateway)
 	if !ok {
-		return nil, fmt.Errorf("unable to deference default node network controller gateway object")
+		return nil, fmt.Errorf("unable to dereference default node network controller gateway object")
 	}
 
 	return &UserDefinedNetworkGateway{
