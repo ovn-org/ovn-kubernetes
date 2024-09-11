@@ -527,7 +527,7 @@ func newNodeWithSecondaryNets(nodeName string, nodeIPv4CIDR string, netInfos ...
 				util.OvnNodeChassisID:                  "abdcef",
 				"k8s.ovn.org/network-ids":              "{\"default\":\"0\",\"isolatednet\":\"2\"}",
 				util.OvnNodeManagementPortMacAddresses: fmt.Sprintf("{\"isolatednet\":%q}", dummyMACAddr),
-				util.OVNNodeGRLRPAddrs:                 fmt.Sprintf("{\"isolatednet\":{\"ipv4\":%q}}", gwRouterIPAddress()),
+				util.OVNNodeGRLRPAddrs:                 fmt.Sprintf("{\"isolatednet\":{\"ipv4\":%q}}", gwRouterJoinIPAddress()),
 			},
 			Labels: map[string]string{
 				"k8s.ovn.org/egress-assignable": "",
@@ -545,10 +545,10 @@ func newNodeWithSecondaryNets(nodeName string, nodeIPv4CIDR string, netInfos ...
 }
 
 func dummyJoinIPs() []*net.IPNet {
-	return []*net.IPNet{dummyJoinIP()}
+	return []*net.IPNet{dummyMasqueradeIP()}
 }
 
-func dummyJoinIP() *net.IPNet {
+func dummyMasqueradeIP() *net.IPNet {
 	return &net.IPNet{
 		IP:   net.ParseIP("169.254.169.13"),
 		Mask: net.CIDRMask(24, 32),
@@ -571,7 +571,7 @@ func expectedGWEntities(nodeName, nodeSubnet string, netInfo util.NetInfo, gwCon
 
 	expectedEntities := append(
 		expectedGWRouterPlusNATAndStaticRoutes(nodeName, gwRouterName, netInfo, gwConfig),
-		expectedGRToJoinSwitchLRP(gwRouterName, gwRouterIPAddress(), netInfo),
+		expectedGRToJoinSwitchLRP(gwRouterName, gwRouterJoinIPAddress(), netInfo),
 		expectedGRToExternalSwitchLRP(gwRouterName, netInfo, nodePhysicalIPAddress(), udnGWSNATAddress()),
 		expectedGatewayChassis(nodeName, netInfo, gwConfig),
 		expectedStaticMACBinding(gwRouterName, nextHopMasqueradeIP()),
@@ -605,7 +605,7 @@ func expectedGWRouterPlusNATAndStaticRoutes(
 	masqSubnet := config.Gateway.V4MasqueradeSubnet
 	var nat []string
 	if config.Gateway.DisableSNATMultipleGWs {
-		nat = append(nat, perPodSNAT)
+		nat = append(nat, nat1, perPodSNAT)
 	} else {
 		nat = append(nat, nat1, nat2)
 	}
@@ -619,15 +619,16 @@ func expectedGWRouterPlusNATAndStaticRoutes(
 			Nat:          nat,
 			StaticRoutes: []string{staticRoute1, staticRoute2, staticRoute3},
 		},
-		expectedGRStaticRoute(staticRoute1, netInfo.Subnets()[0].CIDR.String(), dummyJoinIP().IP.String(), nil, nil, netInfo),
+		expectedGRStaticRoute(staticRoute1, netInfo.Subnets()[0].CIDR.String(), dummyMasqueradeIP().IP.String(), nil, nil, netInfo),
 		expectedGRStaticRoute(staticRoute2, ipv4DefaultRoute, nextHopIP, nil, &staticRouteOutputPort, netInfo),
 		expectedGRStaticRoute(staticRoute3, masqSubnet, nextHopMasqIP, nil, &staticRouteOutputPort, netInfo),
 	}
 	if config.Gateway.DisableSNATMultipleGWs {
-		expectedEntities = append(expectedEntities, newNATEntry(perPodSNAT, dummyJoinIP().IP.String(), dummyTestPodAdditionalNetworkIP(), nil))
+		expectedEntities = append(expectedEntities, newNATEntry(nat1, dummyMasqueradeIP().IP.String(), gwRouterJoinIPAddress().IP.String(), standardNonDefaultNetworkExtIDs(netInfo)))
+		expectedEntities = append(expectedEntities, newNATEntry(perPodSNAT, dummyMasqueradeIP().IP.String(), dummyTestPodAdditionalNetworkIP(), nil))
 	} else {
-		expectedEntities = append(expectedEntities, newNATEntry(nat1, dummyJoinIP().IP.String(), gwRouterIPAddress().IP.String(), standardNonDefaultNetworkExtIDs(netInfo)))
-		expectedEntities = append(expectedEntities, newNATEntry(nat2, dummyJoinIP().IP.String(), netInfo.Subnets()[0].CIDR.String(), standardNonDefaultNetworkExtIDs(netInfo)))
+		expectedEntities = append(expectedEntities, newNATEntry(nat1, dummyMasqueradeIP().IP.String(), gwRouterJoinIPAddress().IP.String(), standardNonDefaultNetworkExtIDs(netInfo)))
+		expectedEntities = append(expectedEntities, newNATEntry(nat2, dummyMasqueradeIP().IP.String(), netInfo.Subnets()[0].CIDR.String(), standardNonDefaultNetworkExtIDs(netInfo)))
 	}
 	return expectedEntities
 }
@@ -689,7 +690,7 @@ func expectedLayer3EgressEntities(netInfo util.NetInfo, gwConfig util.L3GatewayC
 		staticRouteUUID1  = "sr1-UUID"
 		staticRouteUUID2  = "sr2-UUID"
 	)
-	joinIPAddr := dummyJoinIP().IP.String()
+	masqIPAddr := dummyMasqueradeIP().IP.String()
 	clusterRouterName := fmt.Sprintf("%s_ovn_cluster_router", netInfo.GetNetworkName())
 	rtosLRPName := fmt.Sprintf("%s%s", ovntypes.RouterToSwitchPrefix, netInfo.GetNetworkScopedName(nodeName))
 	rtosLRPUUID := rtosLRPName + "-UUID"
@@ -706,10 +707,10 @@ func expectedLayer3EgressEntities(netInfo util.NetInfo, gwConfig util.L3GatewayC
 			ExternalIDs:  standardNonDefaultNetworkExtIDs(netInfo),
 		},
 		&nbdb.LogicalRouterPort{UUID: rtosLRPUUID, Name: rtosLRPName, Networks: []string{"192.168.1.1/24"}, MAC: "0a:58:c0:a8:01:01", GatewayChassis: []string{gatewayChassisUUID}},
-		expectedGRStaticRoute(staticRouteUUID1, nodeSubnet.String(), gwRouterIPAddress().IP.String(), &nbdb.LogicalRouterStaticRoutePolicySrcIP, nil, netInfo),
-		expectedGRStaticRoute(staticRouteUUID2, gwRouterIPAddress().IP.String(), gwRouterIPAddress().IP.String(), nil, nil, netInfo),
+		expectedGRStaticRoute(staticRouteUUID1, nodeSubnet.String(), gwRouterJoinIPAddress().IP.String(), &nbdb.LogicalRouterStaticRoutePolicySrcIP, nil, netInfo),
+		expectedGRStaticRoute(staticRouteUUID2, gwRouterJoinIPAddress().IP.String(), gwRouterJoinIPAddress().IP.String(), nil, nil, netInfo),
 		expectedLogicalRouterPolicy(routerPolicyUUID1, netInfo, nodeName, nodeIP, managementPortIP(nodeSubnet).String()),
-		expectedLogicalRouterPolicy(routerPolicyUUID2, netInfo, nodeName, joinIPAddr, managementPortIP(nodeSubnet).String()),
+		expectedLogicalRouterPolicy(routerPolicyUUID2, netInfo, nodeName, masqIPAddr, managementPortIP(nodeSubnet).String()),
 	}
 	return expectedEntities
 }
@@ -856,7 +857,7 @@ func nextHopMasqueradeIP() net.IP {
 	return net.ParseIP("169.254.169.4")
 }
 
-func gwRouterIPAddress() *net.IPNet {
+func gwRouterJoinIPAddress() *net.IPNet {
 	return &net.IPNet{
 		IP:   net.ParseIP("100.65.0.4"),
 		Mask: net.CIDRMask(16, 32),

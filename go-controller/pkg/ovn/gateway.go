@@ -159,6 +159,7 @@ func (gw *GatewayManager) cleanupStalePodSNATs(nodeName string, nodeIPs []*net.I
 	if !config.Gateway.DisableSNATMultipleGWs {
 		return nil
 	}
+
 	pods, err := gw.kube.GetPods(metav1.NamespaceAll, metav1.ListOptions{
 		FieldSelector: fields.OneTermEqualSelector("spec.nodeName", nodeName).String(),
 	})
@@ -166,13 +167,7 @@ func (gw *GatewayManager) cleanupStalePodSNATs(nodeName string, nodeIPs []*net.I
 		return fmt.Errorf("unable to list existing pods on node: %s, %w",
 			nodeName, err)
 	}
-	gatewayRouter := nbdb.LogicalRouter{
-		Name: gw.gwRouterName,
-	}
-	routerNats, err := libovsdbops.GetRouterNATs(gw.nbClient, &gatewayRouter)
-	if err != nil && errors.Is(err, libovsdbclient.ErrNotFound) {
-		return fmt.Errorf("unable to get NAT entries for router %s on node %s: %w", gatewayRouter.Name, nodeName, err)
-	}
+
 	podIPsOnNode := sets.NewString() // collects all podIPs on node
 	for _, pod := range pods {
 		pod := *pod
@@ -204,18 +199,37 @@ func (gw *GatewayManager) cleanupStalePodSNATs(nodeName string, nodeIPs []*net.I
 			podIPsOnNode.Insert(podIP.String())
 		}
 	}
+
+	gatewayRouter := nbdb.LogicalRouter{
+		Name: gw.gwRouterName,
+	}
+	routerNats, err := libovsdbops.GetRouterNATs(gw.nbClient, &gatewayRouter)
+	if err != nil && errors.Is(err, libovsdbclient.ErrNotFound) {
+		return fmt.Errorf("unable to get NAT entries for router %s on node %s: %w", gatewayRouter.Name, nodeName, err)
+	}
+
+	nodeIPset := sets.New(util.IPNetsIPToStringSlice(nodeIPs)...)
 	natsToDelete := []*nbdb.NAT{}
 	for _, routerNat := range routerNats {
 		routerNat := routerNat
 		if routerNat.Type != nbdb.NATTypeSNAT {
 			continue
 		}
-		for _, nodeIP := range nodeIPs {
-			logicalIP := net.ParseIP(routerNat.LogicalIP)
-			if routerNat.ExternalIP == nodeIP.IP.String() && !config.ContainsJoinIP(logicalIP) && !podIPsOnNode.Has(routerNat.LogicalIP) {
-				natsToDelete = append(natsToDelete, routerNat)
-			}
+		if !nodeIPset.Has(routerNat.ExternalIP) {
+			continue
 		}
+		if podIPsOnNode.Has(routerNat.LogicalIP) {
+			continue
+		}
+		logicalIP := net.ParseIP(routerNat.LogicalIP)
+		if logicalIP == nil {
+			// this is probably a CIDR so not a pod IP
+			continue
+		}
+		if gw.containsJoinIP(logicalIP) {
+			continue
+		}
+		natsToDelete = append(natsToDelete, routerNat)
 	}
 	if len(natsToDelete) > 0 {
 		err := libovsdbops.DeleteNATs(gw.nbClient, &gatewayRouter, natsToDelete...)
@@ -592,7 +606,7 @@ func (gw *GatewayManager) GatewayInit(
 			if gw.clusterRouterName != "" {
 				p := func(item *nbdb.LogicalRouterStaticRoute) bool {
 					return item.IPPrefix == lrsr.IPPrefix && item.Policy != nil && *item.Policy == *lrsr.Policy &&
-						config.ContainsJoinIP(net.ParseIP(item.Nexthop))
+						gw.containsJoinIP(net.ParseIP(item.Nexthop))
 				}
 				err := libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicate(gw.nbClient, gw.clusterRouterName, p)
 				if err != nil {
@@ -643,7 +657,7 @@ func (gw *GatewayManager) GatewayInit(
 		// note, nat.LogicalIP may be a CIDR or IP, we don't care unless it's an IP
 		parsedLogicalIP := net.ParseIP(nat.LogicalIP)
 		// check if join ip changed
-		if config.ContainsJoinIP(parsedLogicalIP) {
+		if gw.containsJoinIP(parsedLogicalIP) {
 			// is a join SNAT, check if IP needs updating
 			joinIP, err := util.MatchFirstIPFamily(utilnet.IsIPv6(parsedLogicalIP), gwLRPIPs)
 			if err != nil {
@@ -1150,6 +1164,14 @@ func (gw *GatewayManager) removeLRPolicies(nodeName string) {
 	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
 		klog.Errorf("Error deleting policies for network %q with priorities %v associated with the node %s: %v", gw.netInfo.GetNetworkName(), priorities, nodeName, err)
 	}
+}
+
+func (gw *GatewayManager) containsJoinIP(ip net.IP) bool {
+	ipNet := &net.IPNet{
+		IP:   ip,
+		Mask: util.GetIPFullMask(ip),
+	}
+	return util.IsContainedInAnyCIDR(ipNet, gw.netInfo.JoinSubnets()...)
 }
 
 func (gw *GatewayManager) syncGatewayLogicalNetwork(
