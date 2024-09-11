@@ -1193,5 +1193,5 @@ if [ "$KIND_INSTALL_PLUGINS" == true ]; then
 fi
 if [ "$KIND_INSTALL_KUBEVIRT" == true ]; then
   install_kubevirt
-  install_kubevirt_ipam_claims
+  install_kubevirt_ipam_controller
 fi
