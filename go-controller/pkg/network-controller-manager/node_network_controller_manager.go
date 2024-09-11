@@ -56,7 +56,7 @@ func (ncm *nodeNetworkControllerManager) NewNetworkController(nInfo util.NetInfo
 	case ovntypes.Layer3Topology, ovntypes.Layer2Topology, ovntypes.LocalnetTopology:
 		dnnc, ok := ncm.defaultNodeNetworkController.(*node.DefaultNodeNetworkController)
 		if !ok {
-			return nil, fmt.Errorf("unable to deference default node network controller object")
+			return nil, fmt.Errorf("unable to dereference default node network controller object")
 		}
 		return node.NewSecondaryNodeNetworkController(ncm.newCommonNetworkControllerInfo(),
 			nInfo, ncm.vrfManager, ncm.ruleManager, dnnc.Gateway)
@@ -172,6 +172,7 @@ func (ncm *nodeNetworkControllerManager) Start(ctx context.Context) (err error) 
 	// make sure we clean up after ourselves on failure
 	defer func() {
 		if err != nil {
+			klog.Errorf("Stopping node network controller manager, err=%v", err)
 			ncm.Stop()
 		}
 	}()
