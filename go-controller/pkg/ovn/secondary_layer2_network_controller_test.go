@@ -87,7 +87,7 @@ var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 					&v1.NodeList{Items: []v1.Node{*testNode}},
 					&v1.PodList{
 						Items: []v1.Pod{
-							*newMultiHomedPod(podInfo.namespace, podInfo.podName, podInfo.nodeName, podInfo.podIP, netInfo),
+							*newMultiHomedPod(podInfo, netInfo),
 						},
 					},
 					&nadapi.NetworkAttachmentDefinitionList{
@@ -160,21 +160,21 @@ var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 			nonICClusterTestConfiguration(),
 		),
 
-		table.Entry("pod on a user defined primary network on an IC cluster",
+		table.Entry("pod on a user defined primary network",
 			dummyPrimaryLayer2UserDefinedNetwork("100.200.0.0/16"),
-			icClusterTestConfiguration(),
-		),
-
-		table.Entry("pod on a user defined secondary network",
-			dummySecondaryLayer2UserDefinedNetwork("100.200.0.0/16"),
 			nonICClusterTestConfiguration(),
 		),
 
+		table.Entry("pod on a user defined secondary network on an IC cluster",
+			dummySecondaryLayer2UserDefinedNetwork("100.200.0.0/16"),
+			icClusterTestConfiguration(),
+		),
+
 		table.Entry("pod on a user defined primary network on an IC cluster",
 			dummyPrimaryLayer2UserDefinedNetwork("100.200.0.0/16"),
 			icClusterTestConfiguration(),
 		),
-		table.Entry("pod on a user defined primary network on an IC cluster",
+		table.Entry("pod on a user defined primary network on an IC cluster with per-pod SNATs enabled",
 			dummyPrimaryLayer2UserDefinedNetwork("100.200.0.0/16"),
 			icClusterWithDisableSNATTestConfiguration(),
 		),
@@ -230,7 +230,7 @@ var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 					},
 					&v1.PodList{
 						Items: []v1.Pod{
-							*newMultiHomedPod(podInfo.namespace, podInfo.podName, podInfo.nodeName, podInfo.podIP, netInfo),
+							*newMultiHomedPod(podInfo, netInfo),
 						},
 					},
 					&nadapi.NetworkAttachmentDefinitionList{
@@ -283,11 +283,11 @@ var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 			dummyLayer2PrimaryUserDefinedNetwork("192.168.0.0/16"),
 			nonICClusterTestConfiguration(),
 		),
-		table.Entry("pod on a user defined primary network on an interconnect cluster",
+		table.Entry("pod on a user defined primary network on an IC cluster",
 			dummyLayer2PrimaryUserDefinedNetwork("192.168.0.0/16"),
 			icClusterTestConfiguration(),
 		),
-		table.Entry("pod on a user defined primary network on an interconnect cluster",
+		table.Entry("pod on a user defined primary network on an IC cluster with per-pod SNATs enabled",
 			dummyLayer2PrimaryUserDefinedNetwork("192.168.0.0/16"),
 			icClusterWithDisableSNATTestConfiguration(),
 		),
