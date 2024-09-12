@@ -1037,6 +1037,7 @@ func setUnsetTemplateContainerEnv(c kubernetes.Interface, namespace, resource, c
 // allowOrDropNodeInputTrafficOnPort ensures or deletes a drop iptables
 // input rule for the specified node, protocol and port
 func allowOrDropNodeInputTrafficOnPort(op, nodeName, protocol, port string) {
+	ipTablesArgs := []string{"INPUT", "-p", protocol, "--dport", port, "-j", "DROP"}
 	switch op {
 	case "Allow":
 		op = "delete"
@@ -1045,31 +1046,37 @@ func allowOrDropNodeInputTrafficOnPort(op, nodeName, protocol, port string) {
 	default:
 		framework.Failf("unsupported op %s", op)
 	}
+	updateIPTablesRulesForNode(op, nodeName, ipTablesArgs, false)
+	updateIPTablesRulesForNode(op, nodeName, ipTablesArgs, true)
+}
 
+func updateIPTablesRulesForNode(op, nodeName string, ipTablesArgs []string, ipv6 bool) {
 	args := []string{"get", "pods", "--selector=app=ovnkube-node", "--field-selector", fmt.Sprintf("spec.nodeName=%s", nodeName), "-o", "jsonpath={.items..metadata.name}"}
 	ovnKubePodName := e2ekubectl.RunKubectlOrDie(ovnNamespace, args...)
-	ipTablesArgs := []string{"INPUT", "-p", protocol, "--dport", port, "-j", "DROP"}
-	for _, iptables := range []string{"iptables", "ip6tables"} {
-		args = []string{"exec", ovnKubePodName, "-c", getNodeContainerName(), "--", iptables, "--check"}
-		_, err := e2ekubectl.RunKubectl(ovnNamespace, append(args, ipTablesArgs...)...)
-		// errors known to be equivalent to not found
-		notFound1 := "No chain/target/match by that name"
-		notFound2 := "does a matching rule exist in that chain?"
-		notFound := err != nil && (strings.Contains(err.Error(), notFound1) || strings.Contains(err.Error(), notFound2))
-		if err != nil && !notFound {
-			framework.Failf("failed to check existance of %s rule on node %s: %v", iptables, nodeName, err)
-		}
-		if op == "delete" && notFound {
-			// rule is not there
-			return
-		} else if op == "insert" && err == nil {
-			// rule is already there
-			return
-		}
-		args = []string{"exec", ovnKubePodName, "-c", getNodeContainerName(), "--", iptables, "--" + op}
-		framework.Logf("%s %s input rule for protocol %s port %s action DROP on node %s", op, iptables, protocol, port, nodeName)
-		e2ekubectl.RunKubectlOrDie(ovnNamespace, append(args, ipTablesArgs...)...)
+	iptables := "iptables"
+	if ipv6 {
+		iptables = "ip6tables"
 	}
+
+	args = []string{"exec", ovnKubePodName, "-c", getNodeContainerName(), "--", iptables, "--check"}
+	_, err := e2ekubectl.RunKubectl(ovnNamespace, append(args, ipTablesArgs...)...)
+	// errors known to be equivalent to not found
+	notFound1 := "No chain/target/match by that name"
+	notFound2 := "does a matching rule exist in that chain?"
+	notFound := err != nil && (strings.Contains(err.Error(), notFound1) || strings.Contains(err.Error(), notFound2))
+	if err != nil && !notFound {
+		framework.Failf("failed to check existance of %s rule on node %s: %v", iptables, nodeName, err)
+	}
+	if op == "delete" && notFound {
+		// rule is not there
+		return
+	} else if op == "insert" && err == nil {
+		// rule is already there
+		return
+	}
+	args = []string{"exec", ovnKubePodName, "-c", getNodeContainerName(), "--", iptables, "--" + op}
+	framework.Logf("%s %s rule: %q on node %s", op, iptables, strings.Join(ipTablesArgs, ","), nodeName)
+	e2ekubectl.RunKubectlOrDie(ovnNamespace, append(args, ipTablesArgs...)...)
 }
 
 func randStr(n int) string {
