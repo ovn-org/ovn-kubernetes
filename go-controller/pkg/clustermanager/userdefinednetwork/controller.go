@@ -4,13 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"reflect"
 	"slices"
 	"time"
 
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
 	corev1informer "k8s.io/client-go/informers/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
@@ -33,7 +31,6 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/userdefinednetwork/template"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/controller"
-	utiludn "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/udn"
 )
 
 type RenderNetAttachDefManifest func(obj client.Object, targetNamespace string) (*netv1.NetworkAttachmentDefinition, error)
@@ -163,25 +160,8 @@ func (c *Controller) syncUserDefinedNetwork(udn *userdefinednetworkv1.UserDefine
 
 	if !udn.DeletionTimestamp.IsZero() { // udn is being  deleted
 		if controllerutil.ContainsFinalizer(udn, template.FinalizerUserDefinedNetwork) {
-
-			if nad != nil &&
-				metav1.IsControlledBy(nad, udn) &&
-				controllerutil.ContainsFinalizer(nad, template.FinalizerUserDefinedNetwork) {
-
-				pods, err := c.podInformer.Lister().Pods(nad.Namespace).List(labels.Everything())
-				if err != nil {
-					return nil, fmt.Errorf("failed to list pods at target namesapce %q: %w", nad.Namespace, err)
-				}
-				if err := NetAttachDefNotInUse(nad, pods); err != nil {
-					return nil, &networkInUseError{err: err}
-				}
-
-				controllerutil.RemoveFinalizer(nad, template.FinalizerUserDefinedNetwork)
-				nad, err := c.nadClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(nad.Namespace).Update(context.Background(), nad, metav1.UpdateOptions{})
-				if err != nil {
-					return nil, err
-				}
-				klog.Infof("Finalizer removed from NetworkAttachmetDefinition [%s/%s]", nad.Namespace, nad.Name)
+			if err := c.deleteNAD(udn, nad); err != nil {
+				return nil, fmt.Errorf("failed to delete NetworkAttachmentDefinition [%s/%s]: %w", udn.Namespace, udn.Name, err)
 			}
 
 			controllerutil.RemoveFinalizer(udn, template.FinalizerUserDefinedNetwork)
@@ -203,47 +183,7 @@ func (c *Controller) syncUserDefinedNetwork(udn *userdefinednetworkv1.UserDefine
 		klog.Infof("Added Finalizer to UserDefinedNetwork [%s/%s]", udn.Namespace, udn.Name)
 	}
 
-	desiredNAD, err := c.renderNadFn(udn, udn.Namespace)
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate NetworkAttachmentDefinition: %w", err)
-	}
-	if nad == nil {
-		// creating NAD in case no primary network exist should be atomic and synchronized with
-		// any other thread that create NADs.
-		// Since the UserDefinedNetwork controller use single thread (threadiness=1),
-		// and being the only controller that create NADs, this conditions is fulfilled.
-		if utiludn.IsPrimaryNetwork(&udn.Spec) {
-			actualNads, lerr := c.nadLister.NetworkAttachmentDefinitions(udn.Namespace).List(labels.Everything())
-			if lerr != nil {
-				return nil, fmt.Errorf("failed to list  NetworkAttachmetDefinition: %w", lerr)
-			}
-			if err := PrimaryNetAttachDefNotExist(actualNads); err != nil {
-				return nil, err
-			}
-		}
-
-		nad, err = c.nadClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(udn.Namespace).Create(context.Background(), desiredNAD, metav1.CreateOptions{})
-		if err != nil {
-			return nil, fmt.Errorf("failed to create NetworkAttachmentDefinition: %w", err)
-		}
-		klog.Infof("Created NetworkAttachmentDefinition [%s/%s]", nad.Namespace, nad.Name)
-		return nad, nil
-	}
-
-	if !metav1.IsControlledBy(nad, udn) {
-		return nil, fmt.Errorf("foreign NetworkAttachmentDefinition with the desired name already exist [%s/%s]", nad.Namespace, nad.Name)
-	}
-
-	if !reflect.DeepEqual(nad.Spec, desiredNAD.Spec) {
-		nad.Spec.Config = desiredNAD.Spec.Config
-		nad, err = c.nadClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(nad.Namespace).Update(context.Background(), nad, metav1.UpdateOptions{})
-		if err != nil {
-			return nil, fmt.Errorf("failed to update NetworkAttachmentDefinition: %w", err)
-		}
-		klog.Infof("Updated NetworkAttachmentDefinition [%s/%s]", nad.Namespace, nad.Name)
-	}
-
-	return nad, nil
+	return c.updateNAD(udn, nad)
 }
 
 func (c *Controller) updateUserDefinedNetworkStatus(udn *userdefinednetworkv1.UserDefinedNetwork, nad *netv1.NetworkAttachmentDefinition, syncError error) error {
