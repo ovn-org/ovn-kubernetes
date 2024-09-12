@@ -215,3 +215,14 @@ func cidrString[T cidr](subnets T) string {
 	}
 	return strings.Join(cidrs, ",")
 }
+
+func GetSpec(obj client.Object) SpecGetter {
+	switch o := obj.(type) {
+	case *userdefinednetworkv1.UserDefinedNetwork:
+		return &o.Spec
+	case *userdefinednetworkv1.ClusterUserDefinedNetwork:
+		return &o.Spec.Network
+	default:
+		panic(fmt.Sprintf("unknown type %T", obj))
+	}
+}
