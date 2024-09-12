@@ -124,15 +124,9 @@ func (c *Controller) reconcile(key string) error {
 		return fmt.Errorf("failed to get UserDefinedNetwork %q from cache: %v", key, err)
 	}
 
-	nad, err := c.nadLister.NetworkAttachmentDefinitions(namespace).Get(name)
-	if err != nil && !kerrors.IsNotFound(err) {
-		return fmt.Errorf("failed to get NetworkAttachmentDefinition %q from cache: %v", key, err)
-	}
-
 	udnCopy := udn.DeepCopy()
-	nadCopy := nad.DeepCopy()
 
-	nadCopy, syncErr := c.syncUserDefinedNetwork(udnCopy, nadCopy)
+	nadCopy, syncErr := c.syncUserDefinedNetwork(udnCopy)
 
 	updateStatusErr := c.updateUserDefinedNetworkStatus(udnCopy, nadCopy, syncErr)
 
@@ -153,14 +147,14 @@ func (n *networkInUseError) Error() string {
 	return n.err.Error()
 }
 
-func (c *Controller) syncUserDefinedNetwork(udn *userdefinednetworkv1.UserDefinedNetwork, nad *netv1.NetworkAttachmentDefinition) (*netv1.NetworkAttachmentDefinition, error) {
+func (c *Controller) syncUserDefinedNetwork(udn *userdefinednetworkv1.UserDefinedNetwork) (*netv1.NetworkAttachmentDefinition, error) {
 	if udn == nil {
 		return nil, nil
 	}
 
 	if !udn.DeletionTimestamp.IsZero() { // udn is being  deleted
 		if controllerutil.ContainsFinalizer(udn, template.FinalizerUserDefinedNetwork) {
-			if err := c.deleteNAD(udn, nad); err != nil {
+			if err := c.deleteNAD(udn, udn.Namespace); err != nil {
 				return nil, fmt.Errorf("failed to delete NetworkAttachmentDefinition [%s/%s]: %w", udn.Namespace, udn.Name, err)
 			}
 
@@ -172,7 +166,7 @@ func (c *Controller) syncUserDefinedNetwork(udn *userdefinednetworkv1.UserDefine
 			klog.Infof("Finalizer removed from UserDefinedNetworks [%s/%s]", udn.Namespace, udn.Name)
 		}
 
-		return nad, nil
+		return nil, nil
 	}
 
 	if finalizerAdded := controllerutil.AddFinalizer(udn, template.FinalizerUserDefinedNetwork); finalizerAdded {
@@ -183,7 +177,7 @@ func (c *Controller) syncUserDefinedNetwork(udn *userdefinednetworkv1.UserDefine
 		klog.Infof("Added Finalizer to UserDefinedNetwork [%s/%s]", udn.Namespace, udn.Name)
 	}
 
-	return c.updateNAD(udn, nad)
+	return c.updateNAD(udn, udn.Namespace)
 }
 
 func (c *Controller) updateUserDefinedNetworkStatus(udn *userdefinednetworkv1.UserDefinedNetwork, nad *netv1.NetworkAttachmentDefinition, syncError error) error {

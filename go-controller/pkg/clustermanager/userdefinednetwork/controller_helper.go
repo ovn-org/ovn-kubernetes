@@ -18,14 +18,19 @@ import (
 	utiludn "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/udn"
 )
 
-// TODO: replace NAD with target namespace
-func (c *Controller) updateNAD(obj client.Object, nad *netv1.NetworkAttachmentDefinition) (*netv1.NetworkAttachmentDefinition, error) {
-	desiredNAD, err := c.renderNadFn(obj, obj.GetNamespace())
+func (c *Controller) updateNAD(obj client.Object, namespace string) (*netv1.NetworkAttachmentDefinition, error) {
+	desiredNAD, err := c.renderNadFn(obj, namespace)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate NetworkAttachmentDefinition: %w", err)
 	}
 
-	if nad == nil {
+	nad, err := c.nadLister.NetworkAttachmentDefinitions(namespace).Get(obj.GetName())
+	if err != nil && !kerrors.IsNotFound(err) {
+		return nil, fmt.Errorf("failed to get NetworkAttachmentDefinition %s/%s from cache: %v", namespace, obj.GetName(), err)
+	}
+	nadCopy := nad.DeepCopy()
+
+	if nadCopy == nil {
 		// creating NAD in case no primary network exist should be atomic and synchronized with
 		// any other thread that create NADs.
 		// Since the UserDefinedNetwork controller use single thread (threadiness=1),
@@ -43,51 +48,58 @@ func (c *Controller) updateNAD(obj client.Object, nad *netv1.NetworkAttachmentDe
 		}
 
 		// TODO: add lock for primary NAD creation, avoid conflict with other primary UDN creators
-		nad, err := c.nadClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(obj.GetNamespace()).Create(context.Background(), desiredNAD, metav1.CreateOptions{})
+		newNAD, err := c.nadClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(namespace).Create(context.Background(), desiredNAD, metav1.CreateOptions{})
 		if err != nil {
 			return nil, fmt.Errorf("failed to create NetworkAttachmentDefinition: %w", err)
 		}
-		klog.Infof("Created NetworkAttachmentDefinition [%s/%s]", nad.Namespace, nad.Name)
+		klog.Infof("Created NetworkAttachmentDefinition [%s/%s]", newNAD.Namespace, newNAD.Name)
 
-		return nad, nil
+		return newNAD, nil
 	}
 
-	if !metav1.IsControlledBy(nad, obj) {
-		return nil, fmt.Errorf("foreign NetworkAttachmentDefinition with the desired name already exist [%s/%s]", nad.Namespace, nad.Name)
+	if !metav1.IsControlledBy(nadCopy, obj) {
+		return nil, fmt.Errorf("foreign NetworkAttachmentDefinition with the desired name already exist [%s/%s]", nadCopy.Namespace, nadCopy.Name)
 	}
 
-	if !reflect.DeepEqual(nad.Spec.Config, desiredNAD.Spec.Config) {
-		nad.Spec.Config = desiredNAD.Spec.Config
-		uNAD, uerr := c.nadClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(nad.Namespace).Update(context.Background(), nad, metav1.UpdateOptions{})
-		if uerr != nil {
-			return nil, fmt.Errorf("failed to update NetworkAttachmentDefinition: %w", uerr)
-		}
-		klog.Infof("Updated NetworkAttachmentDefinition [%s/%s]", uNAD.Namespace, uNAD.Name)
-		return uNAD, nil
+	if reflect.DeepEqual(nadCopy.Spec.Config, desiredNAD.Spec.Config) {
+		return nadCopy, nil
 	}
 
-	return nad, nil
+	nadCopy.Spec.Config = desiredNAD.Spec.Config
+	updatedNAD, err := c.nadClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(nadCopy.Namespace).Update(context.Background(), nadCopy, metav1.UpdateOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to update NetworkAttachmentDefinition: %w", err)
+	}
+	klog.Infof("Updated NetworkAttachmentDefinition [%s/%s]", updatedNAD.Namespace, updatedNAD.Name)
+
+	return updatedNAD, nil
 }
 
-func (c *Controller) deleteNAD(obj client.Object, nad *netv1.NetworkAttachmentDefinition) error {
-	if nad == nil ||
-		!metav1.IsControlledBy(nad, obj) ||
-		!controllerutil.ContainsFinalizer(nad, template.FinalizerUserDefinedNetwork) {
+func (c *Controller) deleteNAD(obj client.Object, namespace string) error {
+	nad, err := c.nadLister.NetworkAttachmentDefinitions(namespace).Get(obj.GetName())
+	if err != nil && !kerrors.IsNotFound(err) {
+		return fmt.Errorf("failed to get NetworkAttachmentDefinition %s/%s from cache: %v", namespace, obj.GetName(), err)
+	}
+	nadCopy := nad.DeepCopy()
+
+	if nadCopy == nil ||
+		!metav1.IsControlledBy(nadCopy, obj) ||
+		!controllerutil.ContainsFinalizer(nadCopy, template.FinalizerUserDefinedNetwork) {
 		return nil
 	}
 
-	pods, err := c.podInformer.Lister().Pods(nad.Namespace).List(labels.Everything())
+	pods, err := c.podInformer.Lister().Pods(nadCopy.Namespace).List(labels.Everything())
 	if err != nil {
-		return fmt.Errorf("failed to list pods at target namesapce %q: %w", nad.Namespace, err)
+		return fmt.Errorf("failed to list pods at target namesapce %q: %w", nadCopy.Namespace, err)
 	}
 	// This is best-effort check no pod using the subject NAD,
 	// noting prevent a from being pod creation right after this check.
-	if err := NetAttachDefNotInUse(nad, pods); err != nil {
+	if err := NetAttachDefNotInUse(nadCopy, pods); err != nil {
 		return &networkInUseError{err: err}
 	}
 
-	controllerutil.RemoveFinalizer(nad, template.FinalizerUserDefinedNetwork)
-	updatedNAD, err := c.nadClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(nad.Namespace).Update(context.Background(), nad, metav1.UpdateOptions{})
+	controllerutil.RemoveFinalizer(nadCopy, template.FinalizerUserDefinedNetwork)
+	updatedNAD, err := c.nadClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(nadCopy.Namespace).Update(context.Background(), nadCopy, metav1.UpdateOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to remove NetworkAttachmetDefinition finalizer: %w", err)
 	}
