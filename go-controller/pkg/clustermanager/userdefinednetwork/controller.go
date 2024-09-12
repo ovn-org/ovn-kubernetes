@@ -27,27 +27,40 @@ import (
 	userdefinednetworkinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/informers/externalversions/userdefinednetwork/v1"
 	userdefinednetworklister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/listers/userdefinednetwork/v1"
 
-	nadnotifier "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/userdefinednetwork/notifier"
-
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/userdefinednetwork/notifier"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/userdefinednetwork/template"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/controller"
 )
 
 type RenderNetAttachDefManifest func(obj client.Object, targetNamespace string) (*netv1.NetworkAttachmentDefinition, error)
 
+type networkInUseError struct {
+	err error
+}
+
+func (n *networkInUseError) Error() string {
+	return n.err.Error()
+}
+
 type Controller struct {
-	Controller controller.Controller
-
-	udnClient userdefinednetworkclientset.Interface
-	udnLister userdefinednetworklister.UserDefinedNetworkLister
-
-	nadNotifier *nadnotifier.NetAttachDefNotifier
-	nadClient   netv1clientset.Interface
-	nadLister   netv1lister.NetworkAttachmentDefinitionLister
-
+	// cudnController manage ClusterUserDefinedNetwork CRs.
+	cudnController controller.Controller
+	// udnController manage UserDefinedNetwork CRs.
+	udnController controller.Controller
+	// nadNotifier notifies subscribing controllers about NetworkAttachmentDefinition events.
+	nadNotifier *notifier.NetAttachDefNotifier
+	// namespaceInformer notifies subscribing controllers about Namespace events.
+	namespaceNotifier *notifier.NamespaceNotifier
+	// renderNadFn render NAD manifest from given object, enable replacing in tests.
 	renderNadFn RenderNetAttachDefManifest
 
-	podInformer corev1informer.PodInformer
+	udnClient         userdefinednetworkclientset.Interface
+	udnLister         userdefinednetworklister.UserDefinedNetworkLister
+	cudnLister        userdefinednetworklister.ClusterUserDefinedNetworkLister
+	nadClient         netv1clientset.Interface
+	nadLister         netv1lister.NetworkAttachmentDefinitionLister
+	podInformer       corev1informer.PodInformer
+	namespaceInformer corev1informer.NamespaceInformer
 
 	networkInUseRequeueInterval time.Duration
 }
@@ -59,61 +72,102 @@ func New(
 	nadInfomer netv1infomer.NetworkAttachmentDefinitionInformer,
 	udnClient userdefinednetworkclientset.Interface,
 	udnInformer userdefinednetworkinformer.UserDefinedNetworkInformer,
+	cudnInformer userdefinednetworkinformer.ClusterUserDefinedNetworkInformer,
 	renderNadFn RenderNetAttachDefManifest,
 	podInformer corev1informer.PodInformer,
+	namespaceInformer corev1informer.NamespaceInformer,
 ) *Controller {
 	udnLister := udnInformer.Lister()
+	cudnLister := cudnInformer.Lister()
 	c := &Controller{
 		nadClient:                   nadClient,
 		nadLister:                   nadInfomer.Lister(),
 		udnClient:                   udnClient,
 		udnLister:                   udnLister,
+		cudnLister:                  cudnLister,
 		renderNadFn:                 renderNadFn,
 		podInformer:                 podInformer,
+		namespaceInformer:           namespaceInformer,
 		networkInUseRequeueInterval: defaultNetworkInUseCheckInterval,
 	}
-	cfg := &controller.ControllerConfig[userdefinednetworkv1.UserDefinedNetwork]{
+	udnCfg := &controller.ControllerConfig[userdefinednetworkv1.UserDefinedNetwork]{
 		RateLimiter:    workqueue.DefaultControllerRateLimiter(),
-		Reconcile:      c.reconcile,
+		Reconcile:      c.reconcileUDN,
 		ObjNeedsUpdate: c.udnNeedUpdate,
 		Threadiness:    1,
 		Informer:       udnInformer.Informer(),
 		Lister:         udnLister.List,
 	}
-	c.Controller = controller.NewController[userdefinednetworkv1.UserDefinedNetwork]("user-defined-network-controller", cfg)
+	c.udnController = controller.NewController[userdefinednetworkv1.UserDefinedNetwork]("user-defined-network-controller", udnCfg)
 
-	c.nadNotifier = nadnotifier.NewNetAttachDefNotifier(nadInfomer, c)
+	cudnCfg := &controller.ControllerConfig[userdefinednetworkv1.ClusterUserDefinedNetwork]{
+		RateLimiter:    workqueue.DefaultControllerRateLimiter(),
+		Reconcile:      c.reconcileCUDN,
+		ObjNeedsUpdate: c.cudnNeedUpdate,
+		Threadiness:    1,
+		Informer:       cudnInformer.Informer(),
+		Lister:         cudnLister.List,
+	}
+	c.cudnController = controller.NewController[userdefinednetworkv1.ClusterUserDefinedNetwork]("cluster-user-defined-network-controller", cudnCfg)
+
+	c.nadNotifier = notifier.NewNetAttachDefNotifier(nadInfomer, c)
+	c.namespaceNotifier = notifier.NewNamespaceNotifier(namespaceInformer, c)
 
 	return c
 }
 
-func (c *Controller) ReconcileNetAttachDef(key string) {
-	// enqueue network-attachment-definitions requests in the controller workqueue
-	c.Controller.Reconcile(key)
-}
-
 func (c *Controller) Run() error {
-	klog.Infof("Starting UserDefinedNetworkManager Controllers")
-	if err := controller.Start(c.nadNotifier.Controller, c.Controller); err != nil {
-		return fmt.Errorf("unable to start UserDefinedNetworkManager controller: %v", err)
+	klog.Infof("Starting user-defiend network controllers")
+	if err := controller.Start(
+		c.cudnController,
+		c.udnController,
+		c.nadNotifier.Controller,
+		c.namespaceNotifier.Controller,
+	); err != nil {
+		return fmt.Errorf("unable to start user-defiend network controller: %v", err)
 	}
 
 	return nil
 }
 
 func (c *Controller) Shutdown() {
-	controller.Stop(c.nadNotifier.Controller, c.Controller)
+	controller.Stop(
+		c.cudnController,
+		c.udnController,
+		c.nadNotifier.Controller,
+		c.namespaceNotifier.Controller,
+	)
+}
+
+// ReconcileNetAttachDef enqueue NAD requests following NAD events.
+func (c *Controller) ReconcileNetAttachDef(key string) error {
+	// TODO: send key to the right controller according to the NAD owner reference
+	c.udnController.Reconcile(key)
+
+	_, name, err := cache.SplitMetaNamespaceKey(key)
+	if err != nil {
+		return fmt.Errorf("failed to generate meta namespace key %q: %w", key, err)
+	}
+	c.cudnController.Reconcile(name)
+	return nil
+}
+
+// ReconcileNamespace enqueue relevant Cluster UDN CR requests following namespace events.
+func (c *Controller) ReconcileNamespace(key string) error {
+	// TODO: reconcile affected namespaced only.
+	c.cudnController.Reconcile(key)
+	return nil
 }
 
 func (c *Controller) udnNeedUpdate(_, _ *userdefinednetworkv1.UserDefinedNetwork) bool {
 	return true
 }
 
-// reconcile get the user-defined-network CRD instance key and reconcile it according to spec.
-// It creates network-attachment-definition according to spec at the namespace the UDN object resides.
-// The NAD object are created with the same key as the request NAD, having both kinds have the same key enable
+// reconcileUDN get UserDefinedNetwork CR key and reconcile it according to spec.
+// It creates NAD according to spec at the namespace the CR resides.
+// The NAD objects are created with the same key as the request CR, having both kinds have the same key enable
 // the controller to act on NAD changes as well and reconciles NAD objects (e.g: in case NAD is deleted it will be re-created).
-func (c *Controller) reconcile(key string) error {
+func (c *Controller) reconcileUDN(key string) error {
 	namespace, name, err := cache.SplitMetaNamespaceKey(key)
 	if err != nil {
 		return err
@@ -132,19 +186,11 @@ func (c *Controller) reconcile(key string) error {
 
 	var networkInUse *networkInUseError
 	if errors.As(syncErr, &networkInUse) {
-		c.Controller.ReconcileAfter(key, c.networkInUseRequeueInterval)
+		c.udnController.ReconcileAfter(key, c.networkInUseRequeueInterval)
 		return updateStatusErr
 	}
 
 	return errors.Join(syncErr, updateStatusErr)
-}
-
-type networkInUseError struct {
-	err error
-}
-
-func (n *networkInUseError) Error() string {
-	return n.err.Error()
 }
 
 func (c *Controller) syncUserDefinedNetwork(udn *userdefinednetworkv1.UserDefinedNetwork) (*netv1.NetworkAttachmentDefinition, error) {
@@ -245,4 +291,48 @@ func updateCondition(conditions []metav1.Condition, cond *metav1.Condition) ([]m
 		return slices.Replace(conditions, idx, idx+1, *cond), true
 	}
 	return conditions, false
+}
+
+func (c *Controller) cudnNeedUpdate(_ *userdefinednetworkv1.ClusterUserDefinedNetwork, _ *userdefinednetworkv1.ClusterUserDefinedNetwork) bool {
+	return true
+}
+
+// reconcileUDN get ClusterUserDefinedNetwork CR key and reconcile it according to spec.
+// It creates NADs according to spec at the spesified selected namespaces.
+// The NAD objects are created with the same key as the request CR, having both kinds have the same key enable
+// the controller to act on NAD changes as well and reconciles NAD objects (e.g: in case NAD is deleted it will be re-created).
+func (c *Controller) reconcileCUDN(key string) error {
+	_, name, err := cache.SplitMetaNamespaceKey(key)
+	if err != nil {
+		return err
+	}
+
+	cudn, err := c.cudnLister.Get(name)
+	if err != nil && !kerrors.IsNotFound(err) {
+		return fmt.Errorf("failed to get ClusterUserDefinedNetwork %q from cache: %v", key, err)
+	}
+
+	cudnCopy := cudn.DeepCopy()
+
+	nads, syncErr := c.syncClusterUDN(cudnCopy)
+
+	updateStatusErr := c.updateClusterUDNStatus(cudnCopy, nads, syncErr)
+
+	var networkInUse *networkInUseError
+	if errors.As(syncErr, &networkInUse) {
+		c.cudnController.ReconcileAfter(key, c.networkInUseRequeueInterval)
+		return updateStatusErr
+	}
+
+	return errors.Join(syncErr, updateStatusErr)
+}
+
+func (c *Controller) syncClusterUDN(_ *userdefinednetworkv1.ClusterUserDefinedNetwork) ([]netv1.NetworkAttachmentDefinition, error) {
+	// TODO: implement
+	return nil, fmt.Errorf("implement me")
+}
+
+func (c *Controller) updateClusterUDNStatus(_ *userdefinednetworkv1.ClusterUserDefinedNetwork, _ []netv1.NetworkAttachmentDefinition, _ error) error {
+	// TODO: implement
+	return fmt.Errorf("implement me")
 }

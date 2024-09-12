@@ -58,8 +58,8 @@ var _ = Describe("User Defined Network Controller", func() {
 		Expect(f.Start()).To(Succeed())
 
 		return New(cs.NetworkAttchDefClient, f.NADInformer(),
-			cs.UserDefinedNetworkClient, f.UserDefinedNetworkInformer(),
-			renderNADStub, f.PodCoreInformer(),
+			cs.UserDefinedNetworkClient, f.UserDefinedNetworkInformer(), f.ClusterUserDefinedNetworkInformer(),
+			renderNADStub, f.PodCoreInformer(), f.NamespaceInformer(),
 		)
 	}
 
@@ -620,6 +620,22 @@ var _ = Describe("User Defined Network Controller", func() {
 			udn := testUDN()
 			nad := testNAD()
 			Expect(c.updateUserDefinedNetworkStatus(udn, nad, nil)).To(MatchError(expectedError))
+		})
+	})
+
+	Context("ClusterUserDefinedNetwork object sync", func() {
+		It("should fail", func() {
+			c := newTestController(noopRenderNadStub())
+			_, err := c.syncClusterUDN(nil)
+			Expect(err).To(HaveOccurred())
+		})
+	})
+
+	Context("ClusterUserDefinedNetwork status update", func() {
+		It("should fail", func() {
+			c := newTestController(noopRenderNadStub())
+			err := c.updateClusterUDNStatus(nil, nil, nil)
+			Expect(err).To(HaveOccurred())
 		})
 	})
 })
