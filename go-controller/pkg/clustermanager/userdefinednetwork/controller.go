@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/sets"
 	corev1informer "k8s.io/client-go/informers/core/v1"
 	"k8s.io/client-go/tools/cache"
@@ -55,7 +57,8 @@ type Controller struct {
 	namespaceNotifier *notifier.NamespaceNotifier
 	// namespaceTracker tracks each CUDN CRs affected namespaces, enable finding stale NADs.
 	// Keys are CR name, value is affected namespace names slice.
-	namespaceTracker map[string]sets.Set[string]
+	namespaceTracker     map[string]sets.Set[string]
+	namespaceTrackerLock sync.RWMutex
 	// renderNadFn render NAD manifest from given object, enable replacing in tests.
 	renderNadFn RenderNetAttachDefManifest
 
@@ -155,8 +158,38 @@ func (c *Controller) ReconcileNetAttachDef(key string) error {
 
 // ReconcileNamespace enqueue relevant Cluster UDN CR requests following namespace events.
 func (c *Controller) ReconcileNamespace(key string) error {
-	// TODO: reconcile affected namespaced only.
-	c.cudnController.Reconcile(key)
+	c.namespaceTrackerLock.RLock()
+	defer c.namespaceTrackerLock.RUnlock()
+
+	namespace, err := c.namespaceInformer.Lister().Get(key)
+	if err != nil {
+		return fmt.Errorf("failed to get namespace %q from cahce: %w", key, err)
+	}
+	namespaceLabels := labels.Set(namespace.Labels)
+
+	for cudnName, affectedNamespaces := range c.namespaceTracker {
+		affectedNamespace := affectedNamespaces.Has(key)
+
+		selectedNamespace := false
+
+		if !affectedNamespace {
+			cudn, err := c.cudnLister.Get(cudnName)
+			if err != nil {
+				return fmt.Errorf("faild to get CUDN %q from cache: %w", cudnName, err)
+			}
+			cudnSelector, err := metav1.LabelSelectorAsSelector(&cudn.Spec.NamespaceSelector)
+			if err != nil {
+				return fmt.Errorf("failed to convert CUDN namespace selector: %w", err)
+			}
+			selectedNamespace = cudnSelector.Matches(namespaceLabels)
+		}
+
+		if affectedNamespace || selectedNamespace {
+			klog.Infof("Enqueue ClusterUDN %q following namespace %q event", cudnName, key)
+			c.cudnController.Reconcile(cudnName)
+		}
+	}
+
 	return nil
 }
 
@@ -329,6 +362,9 @@ func (c *Controller) reconcileCUDN(key string) error {
 }
 
 func (c *Controller) syncClusterUDN(cudn *userdefinednetworkv1.ClusterUserDefinedNetwork) ([]netv1.NetworkAttachmentDefinition, error) {
+	c.namespaceTrackerLock.Lock()
+	defer c.namespaceTrackerLock.Unlock()
+
 	if cudn == nil {
 		return nil, nil
 	}
@@ -366,6 +402,11 @@ func (c *Controller) syncClusterUDN(cudn *userdefinednetworkv1.ClusterUserDefine
 		return nil, nil
 	}
 
+	if _, exist := c.namespaceTracker[cudnName]; !exist {
+		// start tracking CR
+		c.namespaceTracker[cudnName] = sets.Set[string]{}
+	}
+
 	if finalizerAdded := controllerutil.AddFinalizer(cudn, template.FinalizerUserDefinedNetwork); finalizerAdded {
 		var err error
 		cudn, err = c.udnClient.K8sV1().ClusterUserDefinedNetworks().Update(context.Background(), cudn, metav1.UpdateOptions{})
@@ -396,9 +437,6 @@ func (c *Controller) syncClusterUDN(cudn *userdefinednetworkv1.ClusterUserDefine
 		if err != nil {
 			errs = append(errs, err)
 		} else {
-			if _, exist := c.namespaceTracker[cudn.Name]; !exist {
-				c.namespaceTracker[cudn.Name] = sets.New[string]()
-			}
 			c.namespaceTracker[cudn.Name].Insert(nsToUpdate)
 			nads = append(nads, *nad)
 		}
