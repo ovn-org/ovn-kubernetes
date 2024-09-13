@@ -595,6 +595,94 @@ var _ = Describe("User Defined Network Controller", func() {
 						return cudn.Finalizers
 					}).Should(BeEmpty(), "should remove finalizer from CR when no pod uses the network")
 				})
+
+				It("when new namespace is created with matching label, should create NAD in newly created namespaces", func() {
+					By("create new namespaces with test label")
+					newNsNames := []string{"black", "gray"}
+					for _, nsName := range newNsNames {
+						ns := testNamespace(nsName)
+						ns.Labels = map[string]string{testLabelKey: testLabelValue}
+						ns, err := cs.KubeClient.CoreV1().Namespaces().Create(context.Background(), ns, metav1.CreateOptions{})
+						Expect(err).NotTo(HaveOccurred())
+					}
+
+					Eventually(func() []metav1.Condition {
+						cudn, err := cs.UserDefinedNetworkClient.K8sV1().ClusterUserDefinedNetworks().Get(context.Background(), cudnName, metav1.GetOptions{})
+						Expect(err).NotTo(HaveOccurred())
+						return normalizeConditions(cudn.Status.Conditions)
+					}).Should(Equal([]metav1.Condition{{
+						Type:    "NetworkReady",
+						Status:  "True",
+						Reason:  "NetworkAttachmentDefinitionReady",
+						Message: "NetworkAttachmentDefinition has been created in following namespaces: [black, gray, green, yellow]",
+					}}), "status should report NAD created in existing and new test namespaces")
+					for _, nsName := range append(connectedNsNames, newNsNames...) {
+						nads, err := cs.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(nsName).List(context.Background(), metav1.ListOptions{})
+						Expect(err).NotTo(HaveOccurred())
+						Expect(nads.Items).To(Equal([]netv1.NetworkAttachmentDefinition{*testClusterUdnNAD(cudnName, nsName)}), "NAD should exist in existing nad new test namespaces")
+					}
+				})
+
+				It("when existing namespace is labeled with matching label, should create NAD in newly labeled matching namespaces", func() {
+					By("add test label to tests disconnected namespaces")
+					for _, nsName := range disconnectedNsNames {
+						p := fmt.Sprintf(`[{"op": "add", "path": "./metadata/labels", "value": {%q: %q}}]`, testLabelKey, testLabelValue)
+						ns, err := cs.KubeClient.CoreV1().Namespaces().Patch(context.Background(), nsName, types.JSONPatchType, []byte(p), metav1.PatchOptions{})
+						Expect(err).NotTo(HaveOccurred())
+						Expect(ns.Labels).To(Equal(map[string]string{testLabelKey: testLabelValue}))
+					}
+
+					Eventually(func() []metav1.Condition {
+						cudn, err := cs.UserDefinedNetworkClient.K8sV1().ClusterUserDefinedNetworks().Get(context.Background(), cudnName, metav1.GetOptions{})
+						Expect(err).NotTo(HaveOccurred())
+						return normalizeConditions(cudn.Status.Conditions)
+					}).Should(Equal([]metav1.Condition{{
+						Type:    "NetworkReady",
+						Status:  "True",
+						Reason:  "NetworkAttachmentDefinitionReady",
+						Message: "NetworkAttachmentDefinition has been created in following namespaces: [blue, green, red, yellow]",
+					}}), "status should report NAD created in existing and new test namespaces")
+					for _, nsName := range append(connectedNsNames, disconnectedNsNames...) {
+						nads, err := cs.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(nsName).List(context.Background(), metav1.ListOptions{})
+						Expect(err).NotTo(HaveOccurred())
+						Expect(nads.Items).To(Equal([]netv1.NetworkAttachmentDefinition{*testClusterUdnNAD(cudnName, nsName)}), "NAD should exist in existing nad new test namespaces")
+					}
+				})
+
+				It("when existing namespace's matching label removed, should delete stale NADs in previously matching namespaces", func() {
+					connectedNsName := connectedNsNames[0]
+					staleNADNsNames := connectedNsNames[1:]
+
+					By("remove label from few connected namespaces")
+					for _, nsName := range staleNADNsNames {
+						p := fmt.Sprintf(`[{"op": "replace", "path": "./metadata/labels", "value": {}}]`)
+						ns, err := cs.KubeClient.CoreV1().Namespaces().Patch(context.Background(), nsName, types.JSONPatchType, []byte(p), metav1.PatchOptions{})
+						Expect(err).NotTo(HaveOccurred())
+						Expect(ns.Labels).To(BeEmpty())
+					}
+
+					Eventually(func() []metav1.Condition {
+						cudn, err := cs.UserDefinedNetworkClient.K8sV1().ClusterUserDefinedNetworks().Get(context.Background(), cudnName, metav1.GetOptions{})
+						Expect(err).NotTo(HaveOccurred())
+						return normalizeConditions(cudn.Status.Conditions)
+					}).Should(Equal([]metav1.Condition{{
+						Type:    "NetworkReady",
+						Status:  "True",
+						Reason:  "NetworkAttachmentDefinitionReady",
+						Message: "NetworkAttachmentDefinition has been created in following namespaces: [" + connectedNsName + "]",
+					}}), "status should report NAD created in label namespace only")
+
+					nads, err := cs.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(connectedNsName).List(context.Background(), metav1.ListOptions{})
+					Expect(err).NotTo(HaveOccurred())
+					Expect(nads.Items).To(Equal([]netv1.NetworkAttachmentDefinition{*testClusterUdnNAD(cudnName, connectedNsName)}),
+						"NAD should exist in matching namespaces only")
+
+					for _, nsName := range staleNADNsNames {
+						nads, err := cs.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(nsName).List(context.Background(), metav1.ListOptions{})
+						Expect(err).ToNot(HaveOccurred())
+						Expect(nads.Items).To(BeEmpty(), "no NAD should exist in non matching namespaces")
+					}
+				})
 			})
 		})
 	})
