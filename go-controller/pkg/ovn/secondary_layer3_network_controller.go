@@ -682,7 +682,7 @@ func (oc *SecondaryLayer3NetworkController) addUpdateLocalNodeEvent(node *kapi.N
 					gwConfig.config,
 					gwConfig.hostSubnets,
 					gwConfig.hostAddrs,
-					gwConfig.hostSubnets,
+					gwConfig.clusterSubnets,
 					gwConfig.gwLRPIPs,
 					oc.SCTPSupport,
 					oc.ovnClusterLRPToJoinIfAddrs,
@@ -858,11 +858,12 @@ func (oc *SecondaryLayer3NetworkController) gatherJoinSwitchIPs() error {
 }
 
 type SecondaryL3GatewayConfig struct {
-	config      *util.L3GatewayConfig
-	hostSubnets []*net.IPNet
-	gwLRPIPs    []*net.IPNet
-	hostAddrs   []string
-	externalIPs []net.IP
+	config         *util.L3GatewayConfig
+	hostSubnets    []*net.IPNet
+	clusterSubnets []*net.IPNet
+	gwLRPIPs       []*net.IPNet
+	hostAddrs      []string
+	externalIPs    []net.IP
 }
 
 func (oc *SecondaryLayer3NetworkController) nodeGatewayConfig(node *kapi.Node) (*SecondaryL3GatewayConfig, error) {
@@ -898,10 +899,16 @@ func (oc *SecondaryLayer3NetworkController) nodeGatewayConfig(node *kapi.Node) (
 		hostAddrs = append(hostAddrs, externalIP.String())
 	}
 
-	// Use the host subnets present in the network attachment definition.
-	hostSubnets := make([]*net.IPNet, 0, len(oc.Subnets()))
+	// Use the cluster subnets present in the network attachment definition.
+	clusterSubnets := make([]*net.IPNet, 0, len(oc.Subnets()))
 	for _, subnet := range oc.Subnets() {
-		hostSubnets = append(hostSubnets, subnet.CIDR)
+		clusterSubnets = append(clusterSubnets, subnet.CIDR)
+	}
+
+	// Fetch the host subnets present in the node annotation for this network
+	hostSubnets, err := util.ParseNodeHostSubnetAnnotation(node, oc.GetNetworkName())
+	if err != nil {
+		return nil, fmt.Errorf("failed to get node %q subnet annotation for network %q: %v", node.Name, oc.GetNetworkName(), err)
 	}
 
 	gwLRPIPs, err := util.ParseNodeGatewayRouterJoinAddrs(node, oc.GetNetworkName())
@@ -913,11 +920,12 @@ func (oc *SecondaryLayer3NetworkController) nodeGatewayConfig(node *kapi.Node) (
 	l3GatewayConfig.InterfaceID = oc.GetNetworkScopedExtPortName(l3GatewayConfig.BridgeID, node.Name)
 
 	return &SecondaryL3GatewayConfig{
-		config:      l3GatewayConfig,
-		hostSubnets: hostSubnets,
-		gwLRPIPs:    gwLRPIPs,
-		hostAddrs:   hostAddrs,
-		externalIPs: externalIPs,
+		config:         l3GatewayConfig,
+		hostSubnets:    hostSubnets,
+		clusterSubnets: clusterSubnets,
+		gwLRPIPs:       gwLRPIPs,
+		hostAddrs:      hostAddrs,
+		externalIPs:    externalIPs,
 	}, nil
 }
 

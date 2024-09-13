@@ -19,6 +19,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -122,14 +123,13 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPorts(is
 			if !ok {
 				continue
 			}
-
-			subnets := ocInfo.bnc.Subnets()
+			subnets := podInfo.nodeSubnet
 			var (
-				subnet     config.CIDRNetworkEntry
+				subnet     *net.IPNet
 				hasSubnets bool
 			)
 			if len(subnets) > 0 {
-				subnet = subnets[0]
+				subnet = ovntest.MustParseIPNet(subnets)
 				hasSubnets = true
 			}
 
@@ -154,7 +154,7 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPorts(is
 				switch ocInfo.bnc.TopologyType() {
 				case ovntypes.Layer3Topology:
 					switchName = ocInfo.bnc.GetNetworkScopedName(pod.nodeName)
-					managementIP := managementPortIP(subnet.CIDR)
+					managementIP := managementPortIP(subnet)
 
 					switchToRouterPortName := "stor-" + switchName
 					switchToRouterPortUUID := switchToRouterPortName + "-UUID"
@@ -176,7 +176,7 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPorts(is
 					}
 				case ovntypes.Layer2Topology:
 					switchName = ocInfo.bnc.GetNetworkScopedName(ovntypes.OVNLayer2Switch)
-					managementIP := managementPortIP(subnet.CIDR)
+					managementIP := managementPortIP(subnet)
 
 					if em.gatewayConfig != nil {
 						// there are multiple mgmt ports in the cluster, thus the ports must be scoped with the node name
@@ -222,8 +222,8 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPorts(is
 			var otherConfig map[string]string
 			if hasSubnets {
 				otherConfig = map[string]string{
-					"exclude_ips": managementPortIP(subnet.CIDR).String(),
-					"subnet":      subnet.CIDR.String(),
+					"exclude_ips": managementPortIP(subnet).String(),
+					"subnet":      subnet.String(),
 				}
 			}
 
@@ -247,8 +247,8 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPorts(is
 			})
 			if em.gatewayConfig != nil {
 				if ocInfo.bnc.TopologyType() == ovntypes.Layer3Topology {
-					data = append(data, expectedGWEntities(pod.nodeName, ocInfo.bnc, *em.gatewayConfig)...)
-					data = append(data, expectedLayer3EgressEntities(ocInfo.bnc, *em.gatewayConfig)...)
+					data = append(data, expectedGWEntities(pod.nodeName, subnets, ocInfo.bnc, *em.gatewayConfig)...)
+					data = append(data, expectedLayer3EgressEntities(ocInfo.bnc, *em.gatewayConfig, subnet)...)
 				} else {
 					data = append(data, expectedLayer2EgressEntities(ocInfo.bnc, *em.gatewayConfig, pod.nodeName)...)
 				}
@@ -464,7 +464,7 @@ func dummyOVNPodNetworkAnnotationForNetwork(netConfig secondaryNetInfo, tunnelID
 		gateways []string
 		ips      []string
 	)
-	for _, subnetStr := range strings.Split(netConfig.subnets, ",") {
+	for _, subnetStr := range strings.Split(netConfig.clustersubnets, ",") {
 		subnet := testing.MustParseIPNet(subnetStr)
 		ips = append(ips, GetWorkloadSecondaryNetworkDummyIP(subnet).String())
 		gateways = append(gateways, util.GetNodeGatewayIfAddr(subnet).IP.String())
