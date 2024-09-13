@@ -372,7 +372,7 @@ var _ = Describe("User Defined Network Controller", func() {
 			}}))
 		})
 
-		It("when UDN is being deleted, NAD exist, 2 pods using UDN, should remove finalizers once no pod uses the network", func() {
+		It("when UDN is being deleted, NAD exist, 2 pods using UDN, should delete NAD once no pod uses the network", func() {
 			udn := testsUDNWithDeletionTimestamp(time.Now())
 			udn, err := udnClient.K8sV1().UserDefinedNetworks(udn.Namespace).Create(context.Background(), udn, metav1.CreateOptions{})
 			Expect(err).NotTo(HaveOccurred())
@@ -413,8 +413,8 @@ var _ = Describe("User Defined Network Controller", func() {
 				return udn.Finalizers
 			}).Should(BeEmpty(), "should remove finalizer on UDN following deletion and not being used")
 			nad, err = nadClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(nad.Namespace).Get(context.Background(), nad.Name, metav1.GetOptions{})
-			Expect(err).NotTo(HaveOccurred())
-			Expect(nad.Finalizers).To(BeEmpty(), "should remove finalizer on NAD following deletion and not being used")
+			Expect(err).To(HaveOccurred())
+			Expect(kerrors.IsNotFound(err)).To(BeTrue())
 		})
 	})
 
@@ -455,7 +455,8 @@ var _ = Describe("User Defined Network Controller", func() {
 
 			Expect(unmanagedNAD.Finalizers).To(Equal(expectedFinalizers))
 		})
-		It("when UDN is being deleted, and NAD exist, should remove finalizer from NAD", func() {
+
+		It("when UDN is being deleted, and NAD exist, should delete NAD", func() {
 			c := New(nadClient, nadInformer, udnClient, udnInformer, noopRenderNadStub(), podInformer, nil)
 
 			udn := testsUDNWithDeletionTimestamp(time.Now())
@@ -468,7 +469,10 @@ var _ = Describe("User Defined Network Controller", func() {
 
 			_, err = c.syncUserDefinedNetwork(udn, nad)
 			Expect(err).ToNot(HaveOccurred())
-			Expect(nad.Finalizers).To(BeEmpty())
+
+			nad, err = nadClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(udn.Namespace).Get(context.Background(), nad.Name, metav1.GetOptions{})
+			Expect(err).To(HaveOccurred())
+			Expect(kerrors.IsNotFound(err)).To(BeTrue())
 		})
 		It("when UDN is being deleted, and NAD exist, should fail when remove NAD finalizer fails", func() {
 			c := New(nadClient, nadInformer, udnClient, udnInformer, noopRenderNadStub(), podInformer, nil)
@@ -538,7 +542,7 @@ var _ = Describe("User Defined Network Controller", func() {
 			Expect(err).To(MatchError(expectedErr))
 		})
 
-		It("when UDN is being deleted, NAD exist, pod exist, should remove finalizers when network not being used", func() {
+		It("when UDN is being deleted, NAD exist, pod exist, should delete NAD when network not being used", func() {
 			udn := testsUDNWithDeletionTimestamp(time.Now())
 			udn, err := udnClient.K8sV1().UserDefinedNetworks(udn.Namespace).Create(context.Background(), udn, metav1.CreateOptions{})
 			Expect(err).NotTo(HaveOccurred())
@@ -563,8 +567,11 @@ var _ = Describe("User Defined Network Controller", func() {
 			nad, err = c.syncUserDefinedNetwork(udn, nad)
 			Expect(err).ToNot(HaveOccurred())
 
-			Expect(nad.Finalizers).To(BeEmpty())
 			Expect(udn.Finalizers).To(BeEmpty())
+
+			nad, err = nadClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(udn.Namespace).Get(context.Background(), nad.Name, metav1.GetOptions{})
+			Expect(err).To(HaveOccurred())
+			Expect(kerrors.IsNotFound(err)).To(BeTrue())
 		})
 
 		DescribeTable("when UDN is being deleted, NAD exist, should not remove finalizers when",
