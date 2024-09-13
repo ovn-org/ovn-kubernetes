@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 	corev1informer "k8s.io/client-go/informers/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
@@ -51,6 +53,9 @@ type Controller struct {
 	nadNotifier *notifier.NetAttachDefNotifier
 	// namespaceInformer notifies subscribing controllers about Namespace events.
 	namespaceNotifier *notifier.NamespaceNotifier
+	// namespaceTracker tracks each CUDN CRs affected namespaces, enable finding stale NADs.
+	// Keys are CR name, value is affected namespace names slice.
+	namespaceTracker map[string]sets.Set[string]
 	// renderNadFn render NAD manifest from given object, enable replacing in tests.
 	renderNadFn RenderNetAttachDefManifest
 
@@ -89,6 +94,7 @@ func New(
 		podInformer:                 podInformer,
 		namespaceInformer:           namespaceInformer,
 		networkInUseRequeueInterval: defaultNetworkInUseCheckInterval,
+		namespaceTracker:            map[string]sets.Set[string]{},
 	}
 	udnCfg := &controller.ControllerConfig[userdefinednetworkv1.UserDefinedNetwork]{
 		RateLimiter:    workqueue.DefaultControllerRateLimiter(),
@@ -141,14 +147,9 @@ func (c *Controller) Shutdown() {
 
 // ReconcileNetAttachDef enqueue NAD requests following NAD events.
 func (c *Controller) ReconcileNetAttachDef(key string) error {
-	// TODO: send key to the right controller according to the NAD owner reference
 	c.udnController.Reconcile(key)
 
-	_, name, err := cache.SplitMetaNamespaceKey(key)
-	if err != nil {
-		return fmt.Errorf("failed to generate meta namespace key %q: %w", key, err)
-	}
-	c.cudnController.Reconcile(name)
+	// TODO: send relevant keys to the cluster UDN controller, according to the NAD owner reference
 	return nil
 }
 
@@ -327,12 +328,171 @@ func (c *Controller) reconcileCUDN(key string) error {
 	return errors.Join(syncErr, updateStatusErr)
 }
 
-func (c *Controller) syncClusterUDN(_ *userdefinednetworkv1.ClusterUserDefinedNetwork) ([]netv1.NetworkAttachmentDefinition, error) {
-	// TODO: implement
-	return nil, fmt.Errorf("implement me")
+func (c *Controller) syncClusterUDN(cudn *userdefinednetworkv1.ClusterUserDefinedNetwork) ([]netv1.NetworkAttachmentDefinition, error) {
+	if cudn == nil {
+		return nil, nil
+	}
+
+	cudnName := cudn.Name
+	affectedNamespaces := c.namespaceTracker[cudnName]
+
+	if !cudn.DeletionTimestamp.IsZero() {
+		if controllerutil.ContainsFinalizer(cudn, template.FinalizerUserDefinedNetwork) {
+			var errs []error
+			for nsToDelete := range affectedNamespaces {
+				if err := c.deleteNAD(cudn, nsToDelete); err != nil {
+					errs = append(errs, fmt.Errorf("failed to delete NetworkAttachmentDefinition [%s/%s]: %w",
+						nsToDelete, cudnName, err))
+				} else {
+					c.namespaceTracker[cudnName].Delete(nsToDelete)
+				}
+			}
+
+			if len(errs) > 0 {
+				return nil, errors.Join(errs...)
+			}
+
+			var err error
+			controllerutil.RemoveFinalizer(cudn, template.FinalizerUserDefinedNetwork)
+			cudn, err = c.udnClient.K8sV1().ClusterUserDefinedNetworks().Update(context.Background(), cudn, metav1.UpdateOptions{})
+			if err != nil {
+				return nil, fmt.Errorf("failed to remove finalizer from ClusterUserDefinedNetwork %q: %w",
+					cudnName, err)
+			}
+			klog.Infof("Finalizer removed from ClusterUserDefinedNetwork %q", cudn.Name)
+			delete(c.namespaceTracker, cudnName)
+		}
+
+		return nil, nil
+	}
+
+	if finalizerAdded := controllerutil.AddFinalizer(cudn, template.FinalizerUserDefinedNetwork); finalizerAdded {
+		var err error
+		cudn, err = c.udnClient.K8sV1().ClusterUserDefinedNetworks().Update(context.Background(), cudn, metav1.UpdateOptions{})
+		if err != nil {
+			return nil, fmt.Errorf("failed to add finalizer to ClusterUserDefinedNetwork %q: %w", cudnName, err)
+		}
+		klog.Infof("Added Finalizer to ClusterUserDefinedNetwork %q", cudnName)
+	}
+
+	selectedNamespaces, err := c.getSelectedNamespaces(cudn.Spec.NamespaceSelector)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get selected namespaces: %w", err)
+	}
+
+	var errs []error
+	for nsToDelete := range affectedNamespaces.Difference(selectedNamespaces) {
+		if err := c.deleteNAD(cudn, nsToDelete); err != nil {
+			errs = append(errs, fmt.Errorf("failed to delete NetworkAttachmentDefinition [%s/%s]: %w",
+				nsToDelete, cudnName, err))
+		} else {
+			c.namespaceTracker[cudnName].Delete(nsToDelete)
+		}
+	}
+
+	var nads []netv1.NetworkAttachmentDefinition
+	for nsToUpdate := range selectedNamespaces {
+		nad, err := c.updateNAD(cudn, nsToUpdate)
+		if err != nil {
+			errs = append(errs, err)
+		} else {
+			if _, exist := c.namespaceTracker[cudn.Name]; !exist {
+				c.namespaceTracker[cudn.Name] = sets.New[string]()
+			}
+			c.namespaceTracker[cudn.Name].Insert(nsToUpdate)
+			nads = append(nads, *nad)
+		}
+	}
+
+	return nads, errors.Join(errs...)
 }
 
-func (c *Controller) updateClusterUDNStatus(_ *userdefinednetworkv1.ClusterUserDefinedNetwork, _ []netv1.NetworkAttachmentDefinition, _ error) error {
-	// TODO: implement
-	return fmt.Errorf("implement me")
+// getSelectedNamespaces list all selected namespaces according to given selector and create
+// a set of the selected namespaces keys.
+func (c *Controller) getSelectedNamespaces(sel metav1.LabelSelector) (sets.Set[string], error) {
+	selectedNamespaces := sets.Set[string]{}
+	labelSelector, err := metav1.LabelSelectorAsSelector(&sel)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create label-selector: %w", err)
+	}
+	selectedNamespacesList, err := c.namespaceInformer.Lister().List(labelSelector)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list namespaces: %w", err)
+	}
+	for _, selectedNs := range selectedNamespacesList {
+		selectedNamespaces.Insert(selectedNs.Name)
+	}
+	return selectedNamespaces, nil
+}
+
+func (c *Controller) updateClusterUDNStatus(cudn *userdefinednetworkv1.ClusterUserDefinedNetwork, nads []netv1.NetworkAttachmentDefinition, syncError error) error {
+	if cudn == nil {
+		return nil
+	}
+
+	// sort NADs by namespace names to avoid redundant updated due to inconsistent ordering
+	slices.SortFunc(nads, func(a, b netv1.NetworkAttachmentDefinition) int {
+		return strings.Compare(a.Namespace, b.Namespace)
+	})
+
+	networkReadyCondition := newClusterNetworkReadyCondition(nads, syncError)
+
+	conditions, updated := updateCondition(cudn.Status.Conditions, networkReadyCondition)
+	if !updated {
+		return nil
+	}
+
+	var err error
+	applyConf := udnapplyconfkv1.ClusterUserDefinedNetwork(cudn.Name).
+		WithStatus(udnapplyconfkv1.ClusterUserDefinedNetworkStatus().
+			WithConditions(conditions...))
+	opts := metav1.ApplyOptions{FieldManager: "user-defined-network-controller"}
+	cudnName := cudn.Name
+	cudn, err = c.udnClient.K8sV1().ClusterUserDefinedNetworks().ApplyStatus(context.Background(), applyConf, opts)
+	if err != nil {
+		if kerrors.IsNotFound(err) {
+			return nil
+		}
+		return fmt.Errorf("failed to update ClusterUserDefinedNetwork status %q: %w", cudnName, err)
+	}
+	klog.Infof("Updated status ClusterUserDefinedNetwork %q", cudn.Name)
+
+	return nil
+}
+
+func newClusterNetworkReadyCondition(nads []netv1.NetworkAttachmentDefinition, syncError error) *metav1.Condition {
+	var namespaces []string
+	for _, nad := range nads {
+		namespaces = append(namespaces, nad.Namespace)
+	}
+	affectedNamespaces := strings.Join(namespaces, ", ")
+
+	now := metav1.Now()
+	condition := &metav1.Condition{
+		Type:               "NetworkReady",
+		Status:             metav1.ConditionTrue,
+		Reason:             "NetworkAttachmentDefinitionReady",
+		Message:            fmt.Sprintf("NetworkAttachmentDefinition has been created in following namespaces: [%s]", affectedNamespaces),
+		LastTransitionTime: now,
+	}
+
+	var deletedNadKeys []string
+	for _, nad := range nads {
+		if nad.DeletionTimestamp != nil {
+			deletedNadKeys = append(deletedNadKeys, nad.Namespace+"/"+nad.Name)
+		}
+	}
+	if len(deletedNadKeys) > 0 {
+		condition.Status = metav1.ConditionFalse
+		condition.Reason = "NetworkAttachmentDefinitionDeleted"
+		condition.Message = fmt.Sprintf("NetworkAttachmentDefinition are being deleted: %v", deletedNadKeys)
+	}
+
+	if syncError != nil {
+		condition.Status = metav1.ConditionFalse
+		condition.Reason = "NetworkAttachmentDefinitionSyncError"
+		condition.Message = syncError.Error()
+	}
+
+	return condition
 }
