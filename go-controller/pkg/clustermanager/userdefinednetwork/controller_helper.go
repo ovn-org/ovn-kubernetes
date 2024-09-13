@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"reflect"
 
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/klog/v2"
@@ -86,11 +87,17 @@ func (c *Controller) deleteNAD(obj client.Object, nad *netv1.NetworkAttachmentDe
 	}
 
 	controllerutil.RemoveFinalizer(nad, template.FinalizerUserDefinedNetwork)
-	nad, err = c.nadClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(nad.Namespace).Update(context.Background(), nad, metav1.UpdateOptions{})
+	updatedNAD, err := c.nadClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(nad.Namespace).Update(context.Background(), nad, metav1.UpdateOptions{})
 	if err != nil {
+		return fmt.Errorf("failed to remove NetworkAttachmetDefinition finalizer: %w", err)
+	}
+	klog.Infof("Finalizer removed from NetworkAttachmetDefinition [%s/%s]", updatedNAD.Namespace, updatedNAD.Name)
+
+	err = c.nadClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(updatedNAD.Namespace).Delete(context.Background(), updatedNAD.Name, metav1.DeleteOptions{})
+	if err != nil && !kerrors.IsNotFound(err) {
 		return err
 	}
-	klog.Infof("Finalizer removed from NetworkAttachmetDefinition [%s/%s]", nad.Namespace, nad.Name)
+	klog.Infof("Deleted NetworkAttachmetDefinition [%s/%s]", updatedNAD.Namespace, updatedNAD.Name)
 
 	return nil
 }
