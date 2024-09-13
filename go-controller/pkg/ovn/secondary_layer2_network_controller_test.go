@@ -297,10 +297,10 @@ var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 
 func dummySecondaryLayer2UserDefinedNetwork(subnets string) secondaryNetInfo {
 	return secondaryNetInfo{
-		netName:  secondaryNetworkName,
-		nadName:  namespacedName(ns, nadName),
-		topology: ovntypes.Layer2Topology,
-		subnets:  subnets,
+		netName:        secondaryNetworkName,
+		nadName:        namespacedName(ns, nadName),
+		topology:       ovntypes.Layer2Topology,
+		clustersubnets: subnets,
 	}
 }
 
@@ -329,7 +329,7 @@ func dummyL2TestPod(nsName string, info secondaryNetInfo) testPod {
 		pod.addNetwork(
 			info.netName,
 			info.nadName,
-			info.subnets,
+			info.clustersubnets,
 			"",
 			"100.200.0.1",
 			"100.200.0.3/16",
@@ -353,7 +353,7 @@ func dummyL2TestPod(nsName string, info secondaryNetInfo) testPod {
 	pod.addNetwork(
 		info.netName,
 		info.nadName,
-		info.subnets,
+		info.clustersubnets,
 		"",
 		"",
 		"100.200.0.1/16",
@@ -459,10 +459,10 @@ func ipv4DefaultRoute() *net.IPNet {
 
 func dummyLayer2SecondaryUserDefinedNetwork(subnets string) secondaryNetInfo {
 	return secondaryNetInfo{
-		netName:  secondaryNetworkName,
-		nadName:  namespacedName(ns, nadName),
-		topology: ovntypes.Layer2Topology,
-		subnets:  subnets,
+		netName:        secondaryNetworkName,
+		nadName:        namespacedName(ns, nadName),
+		topology:       ovntypes.Layer2Topology,
+		clustersubnets: subnets,
 	}
 }
 
