@@ -263,24 +263,6 @@ func (cs *ConfigSubnets) checkIPFamilies() (usingIPv4, usingIPv6 bool, err error
 	return false, false, fmt.Errorf("illegal network configuration: %s", netConfig)
 }
 
-func ContainsJoinIP(ip net.IP) bool {
-	var joinSubnetsConfig []string
-	if IPv4Mode {
-		joinSubnetsConfig = append(joinSubnetsConfig, Gateway.V4JoinSubnet)
-	}
-	if IPv6Mode {
-		joinSubnetsConfig = append(joinSubnetsConfig, Gateway.V6JoinSubnet)
-	}
-
-	for _, subnet := range joinSubnetsConfig {
-		_, joinSubnet, _ := net.ParseCIDR(subnet)
-		if joinSubnet.Contains(ip) {
-			return true
-		}
-	}
-	return false
-}
-
 // masqueradeIP represents the masqueradeIPs used by the masquerade subnets for host to service traffic
 type MasqueradeIPsConfig struct {
 	V4OVNMasqueradeIP               net.IP

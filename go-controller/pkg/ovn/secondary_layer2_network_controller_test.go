@@ -87,7 +87,7 @@ var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 					&v1.NodeList{Items: []v1.Node{*testNode}},
 					&v1.PodList{
 						Items: []v1.Pod{
-							*newMultiHomedPod(podInfo.namespace, podInfo.podName, podInfo.nodeName, podInfo.podIP, netInfo),
+							*newMultiHomedPod(podInfo, netInfo),
 						},
 					},
 					&nadapi.NetworkAttachmentDefinitionList{
@@ -160,21 +160,21 @@ var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 			nonICClusterTestConfiguration(),
 		),
 
-		table.Entry("pod on a user defined primary network on an IC cluster",
+		table.Entry("pod on a user defined primary network",
 			dummyPrimaryLayer2UserDefinedNetwork("100.200.0.0/16"),
-			icClusterTestConfiguration(),
-		),
-
-		table.Entry("pod on a user defined secondary network",
-			dummySecondaryLayer2UserDefinedNetwork("100.200.0.0/16"),
 			nonICClusterTestConfiguration(),
 		),
 
+		table.Entry("pod on a user defined secondary network on an IC cluster",
+			dummySecondaryLayer2UserDefinedNetwork("100.200.0.0/16"),
+			icClusterTestConfiguration(),
+		),
+
 		table.Entry("pod on a user defined primary network on an IC cluster",
 			dummyPrimaryLayer2UserDefinedNetwork("100.200.0.0/16"),
 			icClusterTestConfiguration(),
 		),
-		table.Entry("pod on a user defined primary network on an IC cluster",
+		table.Entry("pod on a user defined primary network on an IC cluster with per-pod SNATs enabled",
 			dummyPrimaryLayer2UserDefinedNetwork("100.200.0.0/16"),
 			icClusterWithDisableSNATTestConfiguration(),
 		),
@@ -230,7 +230,7 @@ var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 					},
 					&v1.PodList{
 						Items: []v1.Pod{
-							*newMultiHomedPod(podInfo.namespace, podInfo.podName, podInfo.nodeName, podInfo.podIP, netInfo),
+							*newMultiHomedPod(podInfo, netInfo),
 						},
 					},
 					&nadapi.NetworkAttachmentDefinitionList{
@@ -283,11 +283,11 @@ var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 			dummyLayer2PrimaryUserDefinedNetwork("192.168.0.0/16"),
 			nonICClusterTestConfiguration(),
 		),
-		table.Entry("pod on a user defined primary network on an interconnect cluster",
+		table.Entry("pod on a user defined primary network on an IC cluster",
 			dummyLayer2PrimaryUserDefinedNetwork("192.168.0.0/16"),
 			icClusterTestConfiguration(),
 		),
-		table.Entry("pod on a user defined primary network on an interconnect cluster",
+		table.Entry("pod on a user defined primary network on an IC cluster with per-pod SNATs enabled",
 			dummyLayer2PrimaryUserDefinedNetwork("192.168.0.0/16"),
 			icClusterWithDisableSNATTestConfiguration(),
 		),
@@ -387,7 +387,7 @@ func expectedLayer2EgressEntities(netInfo util.NetInfo, gwConfig util.L3GatewayC
 
 	var nat []string
 	if config.Gateway.DisableSNATMultipleGWs {
-		nat = append(nat, perPodSNAT)
+		nat = append(nat, nat1, perPodSNAT)
 	} else {
 		nat = append(nat, nat1, nat2, nat3)
 	}
@@ -402,7 +402,7 @@ func expectedLayer2EgressEntities(netInfo util.NetInfo, gwConfig util.L3GatewayC
 			Options:      gwRouterOptions(gwConfig),
 			Policies:     []string{routerPolicyUUID1},
 		},
-		expectedGWToNetworkSwitchRouterPort(gwRouterToNetworkSwitchPortName, netInfo, gwRouterIPAddress(), layer2SubnetGWAddr()),
+		expectedGWToNetworkSwitchRouterPort(gwRouterToNetworkSwitchPortName, netInfo, gwRouterJoinIPAddress(), layer2SubnetGWAddr()),
 		expectedGRStaticRoute(sr1, dummyMasqueradeSubnet().String(), nextHopMasqueradeIP().String(), nil, &staticRouteOutputPort, netInfo),
 		expectedGRStaticRoute(sr2, ipv4DefaultRoute().String(), nodeGateway().IP.String(), nil, &staticRouteOutputPort, netInfo),
 		expectedGRToExternalSwitchLRP(gwRouterName, netInfo, nodePhysicalIPAddress(), udnGWSNATAddress()),
@@ -411,15 +411,14 @@ func expectedLayer2EgressEntities(netInfo util.NetInfo, gwConfig util.L3GatewayC
 		expectedLogicalRouterPolicy(routerPolicyUUID1, netInfo, nodeName, nodeIP().IP.String(), managementPortIP(layer2Subnet()).String()),
 	}
 
-	for _, entity := range expectedExternalSwitchAndLSPs(netInfo, gwConfig, nodeName) {
-		expectedEntities = append(expectedEntities, entity)
-	}
+	expectedEntities = append(expectedEntities, expectedExternalSwitchAndLSPs(netInfo, gwConfig, nodeName)...)
 	if config.Gateway.DisableSNATMultipleGWs {
-		expectedEntities = append(expectedEntities, newNATEntry(perPodSNAT, dummyJoinIP().IP.String(), dummyL2TestPodAdditionalNetworkIP(), nil))
+		expectedEntities = append(expectedEntities, newNATEntry(nat1, dummyMasqueradeIP().IP.String(), gwRouterJoinIPAddress().IP.String(), standardNonDefaultNetworkExtIDs(netInfo)))
+		expectedEntities = append(expectedEntities, newNATEntry(perPodSNAT, dummyMasqueradeIP().IP.String(), dummyL2TestPodAdditionalNetworkIP(), nil))
 	} else {
-		expectedEntities = append(expectedEntities, newNATEntry(nat1, dummyJoinIP().IP.String(), gwRouterIPAddress().IP.String(), standardNonDefaultNetworkExtIDs(netInfo)))
-		expectedEntities = append(expectedEntities, newNATEntry(nat2, dummyJoinIP().IP.String(), layer2Subnet().String(), standardNonDefaultNetworkExtIDs(netInfo)))
-		expectedEntities = append(expectedEntities, newNATEntry(nat3, dummyJoinIP().IP.String(), layer2SubnetGWAddr().IP.String(), standardNonDefaultNetworkExtIDs(netInfo)))
+		expectedEntities = append(expectedEntities, newNATEntry(nat1, dummyMasqueradeIP().IP.String(), gwRouterJoinIPAddress().IP.String(), standardNonDefaultNetworkExtIDs(netInfo)))
+		expectedEntities = append(expectedEntities, newNATEntry(nat2, dummyMasqueradeIP().IP.String(), layer2Subnet().String(), standardNonDefaultNetworkExtIDs(netInfo)))
+		expectedEntities = append(expectedEntities, newNATEntry(nat3, dummyMasqueradeIP().IP.String(), layer2SubnetGWAddr().IP.String(), standardNonDefaultNetworkExtIDs(netInfo)))
 	}
 	return expectedEntities
 }
