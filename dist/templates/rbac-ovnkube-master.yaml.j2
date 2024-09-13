@@ -116,6 +116,9 @@ rules:
           - egressqoses/status
           - userdefinednetworks
           - userdefinednetworks/status
+          - clusteruserdefinednetworks
+          - clusteruserdefinednetworks/status
+          - clusteruserdefinednetworks/finalizers
       verbs: [ "patch", "update" ]
     - apiGroups: [""]
       resources:
