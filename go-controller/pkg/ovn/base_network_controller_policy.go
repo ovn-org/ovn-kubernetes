@@ -260,7 +260,7 @@ func (bnc *BaseNetworkController) addAllowACLFromNode(switchName string, mgmtPor
 	nodeACL := libovsdbutil.BuildACL(dbIDs, types.DefaultAllowPriority, match,
 		nbdb.ACLActionAllowRelated, nil, libovsdbutil.LportIngress)
 
-	ops, err := libovsdbops.CreateOrUpdateACLsOps(bnc.nbClient, nil, nodeACL)
+	ops, err := libovsdbops.CreateOrUpdateACLsOps(bnc.nbClient, nil, bnc.GetSamplingConfig(), nodeACL)
 	if err != nil {
 		return fmt.Errorf("failed to create or update ACL %v: %v", nodeACL, err)
 	}
@@ -365,7 +365,7 @@ func (bnc *BaseNetworkController) createDefaultDenyPGAndACLs(namespace, policy s
 	egressPGIDs := bnc.getDefaultDenyPolicyPortGroupIDs(namespace, libovsdbutil.ACLEgress)
 	egressPGName := libovsdbutil.GetPortGroupName(egressPGIDs)
 	egressDenyACL, egressAllowACL := bnc.buildDenyACLs(namespace, egressPGName, aclLogging, libovsdbutil.ACLEgress)
-	ops, err := libovsdbops.CreateOrUpdateACLsOps(bnc.nbClient, nil, ingressDenyACL, ingressAllowACL, egressDenyACL, egressAllowACL)
+	ops, err := libovsdbops.CreateOrUpdateACLsOps(bnc.nbClient, nil, bnc.GetSamplingConfig(), ingressDenyACL, ingressAllowACL, egressDenyACL, egressAllowACL)
 	if err != nil {
 		return err
 	}
@@ -987,7 +987,7 @@ func (bnc *BaseNetworkController) createNetworkPolicy(policy *knet.NetworkPolicy
 		ops := []ovsdb.Operation{}
 
 		acls := bnc.buildNetworkPolicyACLs(np, aclLogging)
-		ops, err = libovsdbops.CreateOrUpdateACLsOps(bnc.nbClient, ops, acls...)
+		ops, err = libovsdbops.CreateOrUpdateACLsOps(bnc.nbClient, ops, bnc.GetSamplingConfig(), acls...)
 		if err != nil {
 			return fmt.Errorf("failed to create ACL ops: %v", err)
 		}
@@ -1392,7 +1392,7 @@ func (bnc *BaseNetworkController) peerNamespaceUpdate(np *networkPolicy, gp *gre
 	}
 	// buildLocalPodACLs is safe for concurrent use, see function comment for details
 	acls, deletedACLs := gp.buildLocalPodACLs(np.portGroupName, aclLogging)
-	ops, err := libovsdbops.CreateOrUpdateACLsOps(bnc.nbClient, nil, acls...)
+	ops, err := libovsdbops.CreateOrUpdateACLsOps(bnc.nbClient, nil, bnc.GetSamplingConfig(), acls...)
 	if err != nil {
 		return err
 	}

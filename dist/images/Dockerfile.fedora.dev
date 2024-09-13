@@ -83,6 +83,7 @@ COPY ovn-kube-util /usr/bin/
 COPY ovndbchecker /usr/bin/
 COPY hybrid-overlay-node /usr/bin
 COPY ovnkube-identity /usr/bin/
+COPY ovnkube-observ /usr/bin
 COPY ovn-k8s-cni-overlay /usr/libexec/cni/ovn-k8s-cni-overlay
 
 # ovnkube.sh is the entry point. This script examines environment

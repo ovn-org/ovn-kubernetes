@@ -132,6 +132,7 @@ nav:
   - Observability:
     - Metrics: observability/metrics.md
     - SDN Dashboard: observability/sdn-dashboard.md
+    - OVN observability: observability/ovn-observability.md
   - Enhancement Proposals:
     # - FeatureName: okeps/<filename.md>
     - Template: okeps/okep-4368-template.md

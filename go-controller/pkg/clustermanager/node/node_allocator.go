@@ -389,7 +389,7 @@ func (na *NodeAllocator) updateNodeNetworkAnnotationsWithRetry(nodeName string, 
 		return na.kube.UpdateNodeStatus(cnode)
 	})
 	if resultErr != nil {
-		return fmt.Errorf("failed to update node %s annotation", nodeName)
+		return fmt.Errorf("failed to update node %s annotation: %w", nodeName, resultErr)
 	}
 	return nil
 }

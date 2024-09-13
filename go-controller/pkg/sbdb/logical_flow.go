@@ -22,6 +22,7 @@ type LogicalFlow struct {
 	Actions         string              `ovsdb:"actions"`
 	ControllerMeter *string             `ovsdb:"controller_meter"`
 	ExternalIDs     map[string]string   `ovsdb:"external_ids"`
+	FlowDesc        *string             `ovsdb:"flow_desc"`
 	LogicalDatapath *string             `ovsdb:"logical_datapath"`
 	LogicalDpGroup  *string             `ovsdb:"logical_dp_group"`
 	Match           string              `ovsdb:"match"`
@@ -89,6 +90,28 @@ func equalLogicalFlowExternalIDs(a, b map[string]string) bool {
 		}
 	}
 	return true
+}
+
+func (a *LogicalFlow) GetFlowDesc() *string {
+	return a.FlowDesc
+}
+
+func copyLogicalFlowFlowDesc(a *string) *string {
+	if a == nil {
+		return nil
+	}
+	b := *a
+	return &b
+}
+
+func equalLogicalFlowFlowDesc(a, b *string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	return *a == *b
 }
 
 func (a *LogicalFlow) GetLogicalDatapath() *string {
@@ -185,6 +208,7 @@ func (a *LogicalFlow) DeepCopyInto(b *LogicalFlow) {
 	*b = *a
 	b.ControllerMeter = copyLogicalFlowControllerMeter(a.ControllerMeter)
 	b.ExternalIDs = copyLogicalFlowExternalIDs(a.ExternalIDs)
+	b.FlowDesc = copyLogicalFlowFlowDesc(a.FlowDesc)
 	b.LogicalDatapath = copyLogicalFlowLogicalDatapath(a.LogicalDatapath)
 	b.LogicalDpGroup = copyLogicalFlowLogicalDpGroup(a.LogicalDpGroup)
 	b.Tags = copyLogicalFlowTags(a.Tags)
@@ -210,6 +234,7 @@ func (a *LogicalFlow) Equals(b *LogicalFlow) bool {
 		a.Actions == b.Actions &&
 		equalLogicalFlowControllerMeter(a.ControllerMeter, b.ControllerMeter) &&
 		equalLogicalFlowExternalIDs(a.ExternalIDs, b.ExternalIDs) &&
+		equalLogicalFlowFlowDesc(a.FlowDesc, b.FlowDesc) &&
 		equalLogicalFlowLogicalDatapath(a.LogicalDatapath, b.LogicalDatapath) &&
 		equalLogicalFlowLogicalDpGroup(a.LogicalDpGroup, b.LogicalDpGroup) &&
 		a.Match == b.Match &&

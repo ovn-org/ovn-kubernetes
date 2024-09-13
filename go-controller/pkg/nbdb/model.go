@@ -20,6 +20,7 @@ func FullDatabaseModel() (model.ClientDBModel, error) {
 		"Connection":                  &Connection{},
 		"Copp":                        &Copp{},
 		"DHCP_Options":                &DHCPOptions{},
+		"DHCP_Relay":                  &DHCPRelay{},
 		"DNS":                         &DNS{},
 		"Forwarding_Group":            &ForwardingGroup{},
 		"Gateway_Chassis":             &GatewayChassis{},
@@ -42,13 +43,16 @@ func FullDatabaseModel() (model.ClientDBModel, error) {
 		"Port_Group":                  &PortGroup{},
 		"QoS":                         &QoS{},
 		"SSL":                         &SSL{},
+		"Sample":                      &Sample{},
+		"Sample_Collector":            &SampleCollector{},
+		"Sampling_App":                &SamplingApp{},
 		"Static_MAC_Binding":          &StaticMACBinding{},
 	})
 }
 
 var schema = `{
   "name": "OVN_Northbound",
-  "version": "7.3.0",
+  "version": "7.6.0",
   "tables": {
     "ACL": {
       "columns": {
@@ -150,6 +154,28 @@ var schema = `{
               "minInteger": 0,
               "maxInteger": 32767
             }
+          }
+        },
+        "sample_est": {
+          "type": {
+            "key": {
+              "type": "uuid",
+              "refTable": "Sample",
+              "refType": "strong"
+            },
+            "min": 0,
+            "max": 1
+          }
+        },
+        "sample_new": {
+          "type": {
+            "key": {
+              "type": "uuid",
+              "refTable": "Sample",
+              "refType": "strong"
+            },
+            "min": 0,
+            "max": 1
           }
         },
         "severity": {
@@ -477,6 +503,47 @@ var schema = `{
             },
             "min": 0,
             "max": "unlimited"
+          }
+        }
+      },
+      "isRoot": true
+    },
+    "DHCP_Relay": {
+      "columns": {
+        "external_ids": {
+          "type": {
+            "key": {
+              "type": "string"
+            },
+            "value": {
+              "type": "string"
+            },
+            "min": 0,
+            "max": "unlimited"
+          }
+        },
+        "name": {
+          "type": "string"
+        },
+        "options": {
+          "type": {
+            "key": {
+              "type": "string"
+            },
+            "value": {
+              "type": "string"
+            },
+            "min": 0,
+            "max": "unlimited"
+          }
+        },
+        "servers": {
+          "type": {
+            "key": {
+              "type": "string"
+            },
+            "min": 0,
+            "max": 1
           }
         }
       },
@@ -1034,6 +1101,17 @@ var schema = `{
     },
     "Logical_Router_Port": {
       "columns": {
+        "dhcp_relay": {
+          "type": {
+            "key": {
+              "type": "uuid",
+              "refTable": "DHCP_Relay",
+              "refType": "strong"
+            },
+            "min": 0,
+            "max": 1
+          }
+        },
         "enabled": {
           "type": {
             "key": {
@@ -1740,6 +1818,9 @@ var schema = `{
             "max": 1
           }
         },
+        "match": {
+          "type": "string"
+        },
         "options": {
           "type": {
             "key": {
@@ -1750,6 +1831,15 @@ var schema = `{
             },
             "min": 0,
             "max": "unlimited"
+          }
+        },
+        "priority": {
+          "type": {
+            "key": {
+              "type": "integer",
+              "minInteger": 0,
+              "maxInteger": 32767
+            }
           }
         },
         "type": {
@@ -2006,6 +2096,135 @@ var schema = `{
           "type": "string"
         }
       }
+    },
+    "Sample": {
+      "columns": {
+        "collectors": {
+          "type": {
+            "key": {
+              "type": "uuid",
+              "refTable": "Sample_Collector",
+              "refType": "strong"
+            },
+            "min": 0,
+            "max": "unlimited"
+          }
+        },
+        "metadata": {
+          "type": {
+            "key": {
+              "type": "integer",
+              "minInteger": 1,
+              "maxInteger": 4294967295
+            },
+            "min": 1,
+            "max": 1
+          }
+        }
+      },
+      "indexes": [
+        [
+          "metadata"
+        ]
+      ]
+    },
+    "Sample_Collector": {
+      "columns": {
+        "external_ids": {
+          "type": {
+            "key": {
+              "type": "string"
+            },
+            "value": {
+              "type": "string"
+            },
+            "min": 0,
+            "max": "unlimited"
+          }
+        },
+        "id": {
+          "type": {
+            "key": {
+              "type": "integer",
+              "minInteger": 1,
+              "maxInteger": 255
+            }
+          }
+        },
+        "name": {
+          "type": "string"
+        },
+        "probability": {
+          "type": {
+            "key": {
+              "type": "integer",
+              "minInteger": 0,
+              "maxInteger": 65535
+            }
+          }
+        },
+        "set_id": {
+          "type": {
+            "key": {
+              "type": "integer",
+              "minInteger": 1,
+              "maxInteger": 4294967295
+            }
+          }
+        }
+      },
+      "indexes": [
+        [
+          "id"
+        ]
+      ],
+      "isRoot": true
+    },
+    "Sampling_App": {
+      "columns": {
+        "external_ids": {
+          "type": {
+            "key": {
+              "type": "string"
+            },
+            "value": {
+              "type": "string"
+            },
+            "min": 0,
+            "max": "unlimited"
+          }
+        },
+        "id": {
+          "type": {
+            "key": {
+              "type": "integer",
+              "minInteger": 1,
+              "maxInteger": 255
+            }
+          }
+        },
+        "type": {
+          "type": {
+            "key": {
+              "type": "string",
+              "enum": [
+                "set",
+                [
+                  "drop",
+                  "acl-new",
+                  "acl-est"
+                ]
+              ]
+            }
+          }
+        }
+      },
+      "indexes": [
+        [
+          "type"
+        ]
+      ],
+      "isRoot": true
     },
     "Static_MAC_Binding": {
       "columns": {

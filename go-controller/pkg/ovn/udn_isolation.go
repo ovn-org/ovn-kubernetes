@@ -108,7 +108,7 @@ func (oc *DefaultNetworkController) setupUDNACLs(mgmtPortIPs []net.IP) error {
 	match = libovsdbutil.GetACLMatch(pgName, match, libovsdbutil.ACLIngress)
 	ingressAllowACL := libovsdbutil.BuildACL(ingressAllowIDs, types.PrimaryUDNAllowPriority, match, nbdb.ACLActionAllowRelated, nil, libovsdbutil.LportIngress)
 
-	ops, err := libovsdbops.CreateOrUpdateACLsOps(oc.nbClient, nil, egressDenyACL, egressARPACL, ingressARPACL, ingressDenyACL, ingressAllowACL)
+	ops, err := libovsdbops.CreateOrUpdateACLsOps(oc.nbClient, nil, oc.GetSamplingConfig(), egressDenyACL, egressARPACL, ingressARPACL, ingressDenyACL, ingressAllowACL)
 	if err != nil {
 		return fmt.Errorf("failed to create or update UDN ACLs: %v", err)
 	}

@@ -50,6 +50,12 @@ func getUUID(model model.Model) string {
 		return t.UUID
 	case *nbdb.Meter:
 		return t.UUID
+	case *nbdb.Sample:
+		return t.UUID
+	case *nbdb.SampleCollector:
+		return t.UUID
+	case *nbdb.SamplingApp:
+		return t.UUID
 	case *nbdb.StaticMACBinding:
 		return t.UUID
 	case *sbdb.Chassis:
@@ -112,6 +118,12 @@ func setUUID(model model.Model, uuid string) {
 	case *nbdb.MeterBand:
 		t.UUID = uuid
 	case *nbdb.Meter:
+		t.UUID = uuid
+	case *nbdb.Sample:
+		t.UUID = uuid
+	case *nbdb.SampleCollector:
+		t.UUID = uuid
+	case *nbdb.SamplingApp:
 		t.UUID = uuid
 	case *nbdb.StaticMACBinding:
 		t.UUID = uuid
@@ -229,6 +241,21 @@ func copyIndexes(model model.Model) model.Model {
 			UUID: t.UUID,
 			Name: t.Name,
 		}
+	case *nbdb.Sample:
+		return &nbdb.Sample{
+			UUID:     t.UUID,
+			Metadata: t.Metadata,
+		}
+	case *nbdb.SampleCollector:
+		return &nbdb.SampleCollector{
+			UUID: t.UUID,
+			ID:   t.ID,
+		}
+	case *nbdb.SamplingApp:
+		return &nbdb.SamplingApp{
+			UUID: t.UUID,
+			Type: t.Type,
+		}
 	case *nbdb.StaticMACBinding:
 		return &nbdb.StaticMACBinding{
 			UUID:        t.UUID,
@@ -327,6 +354,12 @@ func getListFromModel(model model.Model) interface{} {
 		return &[]*nbdb.MeterBand{}
 	case *nbdb.Meter:
 		return &[]*nbdb.Meter{}
+	case *nbdb.Sample:
+		return &[]*nbdb.Sample{}
+	case *nbdb.SampleCollector:
+		return &[]*nbdb.SampleCollector{}
+	case *nbdb.SamplingApp:
+		return &[]*nbdb.SamplingApp{}
 	case *nbdb.StaticMACBinding:
 		return &[]*nbdb.StaticMACBinding{}
 	case *sbdb.Chassis:
