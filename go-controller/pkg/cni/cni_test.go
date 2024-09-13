@@ -59,6 +59,8 @@ var _ = Describe("Network Segmentation", func() {
 
 	BeforeEach(func() {
 
+		config.IPv4Mode = true
+		config.IPv6Mode = true
 		enableMultiNetwork = config.OVNKubernetesFeature.EnableMultiNetwork
 		enableNetworkSegmentation = config.OVNKubernetesFeature.EnableNetworkSegmentation
 
