@@ -67,6 +67,61 @@ var _ = Describe("Network Segmentation", func() {
 			func(createNetworkFn func(c networkAttachmentConfigParams) error) {
 
 				DescribeTable(
+					"creates a networkStatus Annotation with UDN interface",
+					func(netConfig networkAttachmentConfigParams) {
+						By("creating the network")
+						netConfig.namespace = f.Namespace.Name
+						Expect(createNetworkFn(netConfig)).To(Succeed())
+
+						By("creating a pod on the udn namespace")
+						podConfig := *podConfig("some-pod")
+						podConfig.namespace = f.Namespace.Name
+						pod := runUDNPod(cs, f.Namespace.Name, podConfig, nil)
+
+						By("asserting the pod UDN interface on the network-status annotation")
+						udnNetStat, err := podNetworkStatus(pod, func(status nadapi.NetworkStatus) bool {
+							return status.Default
+						})
+						Expect(err).NotTo(HaveOccurred())
+						const (
+							expectedDefaultNetStatusLen = 1
+							ovnUDNInterface             = "ovn-udn1"
+						)
+						Expect(udnNetStat).To(HaveLen(expectedDefaultNetStatusLen))
+						Expect(udnNetStat[0].Interface).To(Equal(ovnUDNInterface))
+
+						cidrs := strings.Split(netConfig.cidr, ",")
+						for i, serverIP := range udnNetStat[0].IPs {
+							cidr := cidrs[i]
+							if cidr != "" {
+								By("asserting the server pod has an IP from the configured range")
+								const netPrefixLengthPerNode = 24
+								By(fmt.Sprintf("asserting the pod IP %s is from the configured range %s/%d", serverIP, cidr, netPrefixLengthPerNode))
+								subnet, err := getNetCIDRSubnet(cidr)
+								Expect(err).NotTo(HaveOccurred())
+								Expect(inRange(subnet, serverIP)).To(Succeed())
+							}
+						}
+					},
+					Entry("L2 primary UDN",
+						networkAttachmentConfigParams{
+							name:     nadName,
+							topology: "layer2",
+							cidr:     correctCIDRFamily(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+							role:     "primary",
+						},
+					),
+					Entry("L3 primary UDN",
+						networkAttachmentConfigParams{
+							name:     nadName,
+							topology: "layer3",
+							cidr:     correctCIDRFamily(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+							role:     "primary",
+						},
+					),
+				)
+
+				DescribeTable(
 					"can perform east/west traffic between nodes",
 					func(
 						netConfig networkAttachmentConfigParams,
