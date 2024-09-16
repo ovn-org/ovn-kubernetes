@@ -22,7 +22,8 @@ else
 CONTAINER_RUNTIME=docker
 endif
 CONTAINER_RUNNABLE ?= $(shell $(CONTAINER_RUNTIME) -v > /dev/null 2>&1; echo $$?)
-OVN_SCHEMA_VERSION ?= v24.03.1
+# FIXME(tssurya): In one week when OVN 24.09 is released change the schema version
+OVN_SCHEMA_VERSION ?= 8efac26f6637fc
 ifeq ($(NOROOT),TRUE)
 C_ARGS = -e NOROOT=TRUE
 else

@@ -13,7 +13,9 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/generator/udn"
+	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	zoneinterconnect "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/zone_interconnect"
@@ -319,10 +321,10 @@ func (oc *SecondaryLayer2NetworkController) Start(ctx context.Context) error {
 		return err
 	}
 
-	return oc.run(ctx)
+	return oc.run()
 }
 
-func (oc *SecondaryLayer2NetworkController) run(ctx context.Context) error {
+func (oc *SecondaryLayer2NetworkController) run() error {
 	return oc.BaseSecondaryLayer2NetworkController.run()
 }
 
@@ -456,7 +458,14 @@ func (oc *SecondaryLayer2NetworkController) addUpdateLocalNodeEvent(node *corev1
 					errs = append(errs, err)
 					oc.gatewaysFailed.Store(node.Name, true)
 				} else {
-					oc.gatewaysFailed.Delete(node.Name)
+					if util.IsNetworkSegmentationSupportEnabled() && oc.IsPrimaryNetwork() {
+						if err := oc.addUDNClusterSubnetEgressSNAT(gwConfig.hostSubnets, gwManager.gwRouterName, node); err != nil {
+							errs = append(errs, err)
+							oc.gatewaysFailed.Store(node.Name, true)
+						} else {
+							oc.gatewaysFailed.Delete(node.Name)
+						}
+					}
 				}
 			}
 		}
@@ -478,6 +487,35 @@ func (oc *SecondaryLayer2NetworkController) deleteNodeEvent(node *corev1.Node) e
 	oc.gatewayManagers.Delete(node.Name)
 	oc.localZoneNodes.Delete(node.Name)
 	oc.mgmtPortFailed.Delete(node.Name)
+	return nil
+}
+
+// addUDNClusterSubnetEgressSNAT adds the SNAT on each node's GR in L2 networks
+// snat eth.dst == d6:cf:fd:2c:a6:44 169.254.0.12 10.128.0.0/14
+// snat eth.dst == d6:cf:fd:2c:a6:44 169.254.0.12 2010:100:200::/64
+// these SNATs are required for pod2Egress traffic in LGW mode and pod2SameNode traffic in SGW mode to function properly on UDNs
+// SNAT Breakdown:
+// match = "eth.dst == d6:cf:fd:2c:a6:44"; the MAC here is the mpX interface MAC address for this UDN
+// logicalIP = "10.128.0.0/14"; which is the clustersubnet for this L2 UDN
+// externalIP = "169.254.0.12"; which is the masqueradeIP for this L2 UDN
+// so all in all we want to condionally SNAT all packets that are coming from pods hosted on this node,
+// which are leaving via UDN's mpX interface to the UDN's masqueradeIP.
+func (oc *SecondaryLayer2NetworkController) addUDNClusterSubnetEgressSNAT(localPodSubnets []*net.IPNet, routerName string, node *kapi.Node) error {
+	outputPort := types.GWRouterToJoinSwitchPrefix + routerName
+	nats, err := oc.buildUDNEgressSNAT(localPodSubnets, outputPort, node)
+	if err != nil {
+		return err
+	}
+	if len(nats) == 0 {
+		return nil // nothing to do
+	}
+	router := &nbdb.LogicalRouter{
+		Name: routerName,
+	}
+	if err := libovsdbops.CreateOrUpdateNATs(oc.nbClient, router, nats...); err != nil {
+		return fmt.Errorf("failed to update SNAT for cluster on router: %q for network %q, error: %w",
+			routerName, oc.GetNetworkName(), err)
+	}
 	return nil
 }
 

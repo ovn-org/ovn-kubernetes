@@ -379,17 +379,19 @@ func expectedLayer2EgressEntities(netInfo util.NetInfo, gwConfig util.L3GatewayC
 		sr1               = "sr1-UUID"
 		sr2               = "sr2-UUID"
 		routerPolicyUUID1 = "lrp1-UUID"
+		masqSNATUUID1     = "masq-snat1-UUID"
 	)
 	gwRouterName := fmt.Sprintf("GR_%s_test-node", netInfo.GetNetworkName())
 	staticRouteOutputPort := ovntypes.GWRouterToExtSwitchPrefix + gwRouterName
 	gwRouterToNetworkSwitchPortName := ovntypes.GWRouterToJoinSwitchPrefix + gwRouterName
 	gwRouterToExtSwitchPortName := fmt.Sprintf("%s%s", ovntypes.GWRouterToExtSwitchPrefix, gwRouterName)
+	masqSNAT := newMasqueradeManagementNATEntry(masqSNATUUID1, "169.254.169.14", layer2Subnet().String(), netInfo)
 
 	var nat []string
 	if config.Gateway.DisableSNATMultipleGWs {
-		nat = append(nat, nat1, perPodSNAT)
+		nat = append(nat, nat1, perPodSNAT, masqSNATUUID1)
 	} else {
-		nat = append(nat, nat1, nat2, nat3)
+		nat = append(nat, nat1, nat2, nat3, masqSNATUUID1)
 	}
 	expectedEntities := []libovsdbtest.TestData{
 		&nbdb.LogicalRouter{
@@ -407,7 +409,7 @@ func expectedLayer2EgressEntities(netInfo util.NetInfo, gwConfig util.L3GatewayC
 		expectedGRStaticRoute(sr2, ipv4DefaultRoute().String(), nodeGateway().IP.String(), nil, &staticRouteOutputPort, netInfo),
 		expectedGRToExternalSwitchLRP(gwRouterName, netInfo, nodePhysicalIPAddress(), udnGWSNATAddress()),
 		expectedStaticMACBinding(gwRouterName, nextHopMasqueradeIP()),
-
+		masqSNAT,
 		expectedLogicalRouterPolicy(routerPolicyUUID1, netInfo, nodeName, nodeIP().IP.String(), managementPortIP(layer2Subnet()).String()),
 	}
 
