@@ -779,6 +779,139 @@ var _ = Describe("Network Segmentation", func() {
 			}),
 		)
 	})
+	Context("pod2Egress on a user defined primary networks with overlapping CIDRs", func() {
+		const (
+			externalContainerName = "ovn-k-egress-test-helper"
+		)
+		var externalIpv4, externalIpv6 string
+		BeforeEach(func() {
+			externalIpv4, externalIpv6 = createClusterExternalContainer(
+				externalContainerName,
+				"registry.k8s.io/e2e-test-images/agnhost:2.45",
+				runExternalContainerCmd(),
+				httpServerContainerCmd(port),
+			)
+
+			DeferCleanup(func() {
+				deleteClusterExternalContainer(externalContainerName)
+			})
+		})
+		DescribeTableSubtree("created using",
+			func(createNetworkFn func(c networkAttachmentConfigParams) error) {
+
+				DescribeTable(
+					"can be accessed to from the pods running in the Kubernetes cluster",
+					func(netConfigParams networkAttachmentConfigParams, clientPodConfig podConfiguration) {
+						if netConfigParams.topology == "layer2" && IsGatewayModeLocal() {
+							const upstreamIssue = "https://github.com/ovn-org/ovn-kubernetes/issues/4686"
+							e2eskipper.Skipf(
+								"These tests are known to fail on Local Gateway deployments. Upstream issue: %s", upstreamIssue,
+							)
+						}
+						if netConfigParams.topology == "layer2" && !isInterconnectEnabled() {
+							const upstreamIssue = "https://github.com/ovn-org/ovn-kubernetes/issues/4642"
+							e2eskipper.Skipf(
+								"Egress e2e tests for layer2 topologies are known to fail on non-IC deployments. Upstream issue: %s", upstreamIssue,
+							)
+						}
+						red := "red"
+						blue := "blue"
+
+						namespaceRed := f.Namespace.Name + "-" + red
+						namespaceBlue := f.Namespace.Name + "-" + blue
+
+						for _, namespace := range []string{namespaceRed, namespaceBlue} {
+							By("Creating namespace " + namespace)
+							_, err := cs.CoreV1().Namespaces().Create(context.Background(), &v1.Namespace{
+								ObjectMeta: metav1.ObjectMeta{
+									Name: namespace,
+								},
+							}, metav1.CreateOptions{})
+							Expect(err).NotTo(HaveOccurred())
+							defer func() {
+								Expect(cs.CoreV1().Namespaces().Delete(context.Background(), namespace, metav1.DeleteOptions{})).To(Succeed())
+							}()
+						}
+						networkNamespaceMap := map[string]string{namespaceRed: red, namespaceBlue: blue}
+						for namespace, network := range networkNamespaceMap {
+							By("creating the network " + network + " in namespace " + namespace)
+							netConfigParams.namespace = namespace
+							netConfigParams.name = network
+							Expect(createNetworkFn(netConfigParams)).To(Succeed())
+						}
+
+						//By("creating the network")
+						//netConfigParams.namespace = f.Namespace.Name
+						//Expect(createNetworkFn(netConfigParams)).To(Succeed())
+
+						for _, namespace := range []string{namespaceRed, namespaceBlue} {
+							clientPodConfig.namespace = namespace
+							By("instantiating the client pod in " + namespace)
+							clientPod, err := cs.CoreV1().Pods(clientPodConfig.namespace).Create(
+								context.Background(),
+								generatePodSpec(clientPodConfig),
+								metav1.CreateOptions{},
+							)
+							Expect(err).NotTo(HaveOccurred())
+							Expect(clientPod).NotTo(BeNil())
+
+							By("asserting the client pod reaches the `Ready` state")
+							var updatedPod *v1.Pod
+							Eventually(func() v1.PodPhase {
+								updatedPod, err = cs.CoreV1().Pods(clientPodConfig.namespace).Get(context.Background(), clientPod.GetName(), metav1.GetOptions{})
+								if err != nil {
+									return v1.PodFailed
+								}
+								return updatedPod.Status.Phase
+							}, 2*time.Minute, 6*time.Second).Should(Equal(v1.PodRunning))
+							framework.Logf("Client pod was created on node %s in namespace %s", updatedPod.Spec.NodeName, namespace)
+
+							By("asserting UDN pod is connected to UDN network")
+							podAnno, err := unmarshalPodAnnotation(updatedPod.Annotations, clientPodConfig.namespace+"/"+networkNamespaceMap[namespace])
+							Expect(err).NotTo(HaveOccurred())
+							framework.Logf("Client pod's annotation for network %s is %v", userDefinedNetworkName, podAnno)
+
+							Expect(podAnno.Routes).To(HaveLen(expectedNumberOfRoutes(netConfigParams)))
+
+							assertClientExternalConnectivity(clientPodConfig, externalIpv4, externalIpv6, port)
+						}
+
+					},
+					Entry("by one pod over a layer2 network",
+						networkAttachmentConfigParams{
+							name:     userDefinedNetworkName,
+							topology: "layer2",
+							cidr:     correctCIDRFamily(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+							role:     "primary",
+						},
+						*podConfig("client-pod"),
+					),
+					Entry("by one pod over a layer3 network",
+						networkAttachmentConfigParams{
+							name:     userDefinedNetworkName,
+							topology: "layer3",
+							cidr:     correctCIDRFamily(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+							role:     "primary",
+						},
+						*podConfig("client-pod"),
+					),
+				)
+			},
+			Entry("NetworkAttachmentDefinitions", func(c networkAttachmentConfigParams) error {
+				netConfig := newNetworkAttachmentConfig(c)
+				nad := generateNAD(netConfig)
+				_, err := nadClient.NetworkAttachmentDefinitions(c.namespace).Create(context.Background(), nad, metav1.CreateOptions{})
+				return err
+			}),
+			Entry("UserDefinedNetwork", func(c networkAttachmentConfigParams) error {
+				udnManifest := generateUserDefinedNetworkManifest(&c)
+				cleanup, err := createManifest(c.namespace, udnManifest)
+				DeferCleanup(cleanup)
+				Expect(waitForUserDefinedNetworkReady(c.namespace, c.name, 5*time.Second)).To(Succeed())
+				return err
+			}),
+		)
+	})
 })
 
 var nadToUdnParams = map[string]string{
