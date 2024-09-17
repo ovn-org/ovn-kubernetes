@@ -33,10 +33,11 @@ func (c *Controller) updateNAD(obj client.Object, namespace string) (*netv1.Netw
 	if nadCopy == nil {
 		// creating NAD in case no primary network exist should be atomic and synchronized with
 		// any other thread that create NADs.
-		// Since the UserDefinedNetwork controller use single thread (threadiness=1),
-		// and being the only controller that create NADs, this conditions is fulfilled.
 		if utiludn.IsPrimaryNetwork(template.GetSpec(obj)) {
-			actualNads, err := c.nadLister.NetworkAttachmentDefinitions(obj.GetNamespace()).List(labels.Everything())
+			c.createPrimaryNetworkLock.Lock()
+			defer c.createPrimaryNetworkLock.Unlock()
+
+			actualNads, err := c.nadLister.NetworkAttachmentDefinitions(namespace).List(labels.Everything())
 			if err != nil {
 				return nil, fmt.Errorf("failed to list  NetworkAttachmetDefinition: %w", err)
 			}
@@ -47,7 +48,6 @@ func (c *Controller) updateNAD(obj client.Object, namespace string) (*netv1.Netw
 			}
 		}
 
-		// TODO: add lock for primary NAD creation, avoid conflict with other primary UDN creators
 		newNAD, err := c.nadClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(namespace).Create(context.Background(), desiredNAD, metav1.CreateOptions{})
 		if err != nil {
 			return nil, fmt.Errorf("failed to create NetworkAttachmentDefinition: %w", err)

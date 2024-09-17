@@ -61,6 +61,9 @@ type Controller struct {
 	namespaceTrackerLock sync.RWMutex
 	// renderNadFn render NAD manifest from given object, enable replacing in tests.
 	renderNadFn RenderNetAttachDefManifest
+	// createPrimaryNetworkLock lock should held when primary network should be created
+	// to avoid having two components trying to create primary network in the same namespace.
+	createPrimaryNetworkLock sync.Mutex
 
 	udnClient         userdefinednetworkclientset.Interface
 	udnLister         userdefinednetworklister.UserDefinedNetworkLister
