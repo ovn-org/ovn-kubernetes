@@ -644,7 +644,7 @@ func CreateOrReplaceLogicalRouterStaticRouteWithPredicate(nbClient libovsdbclien
 	lr := &nbdb.LogicalRouter{Name: routerName}
 	router, err := GetLogicalRouter(nbClient, lr)
 	if err != nil {
-		return err
+		return fmt.Errorf("unable to get logical router %s: %w", routerName, err)
 	}
 	newPredicate := func(item *nbdb.LogicalRouterStaticRoute) bool {
 		for _, routeUUID := range router.StaticRoutes {
@@ -656,7 +656,7 @@ func CreateOrReplaceLogicalRouterStaticRouteWithPredicate(nbClient libovsdbclien
 	}
 	routes, err := FindLogicalRouterStaticRoutesWithPredicate(nbClient, newPredicate)
 	if err != nil {
-		return err
+		return fmt.Errorf("unable to get logical router static routes with predicate on router %s: %w", routerName, err)
 	}
 
 	var ops []libovsdb.Operation
@@ -697,7 +697,7 @@ func CreateOrReplaceLogicalRouterStaticRouteWithPredicate(nbClient libovsdbclien
 
 	ops, err = CreateOrUpdateLogicalRouterStaticRoutesWithPredicateOps(nbClient, ops, routerName, lrsr, nil, fields...)
 	if err != nil {
-		return err
+		return fmt.Errorf("unable to get create or update logical router static routes on router %s: %w", routerName, err)
 	}
 	_, err = TransactAndCheck(nbClient, ops)
 	return err
