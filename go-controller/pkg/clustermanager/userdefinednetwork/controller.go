@@ -158,9 +158,46 @@ func (c *Controller) Shutdown() {
 
 // ReconcileNetAttachDef enqueue NAD requests following NAD events.
 func (c *Controller) ReconcileNetAttachDef(key string) error {
-	c.udnController.Reconcile(key)
+	namespace, name, err := cache.SplitMetaNamespaceKey(key)
+	if err != nil {
+		return fmt.Errorf("failed to split meta namespace key %q: %v", key, err)
+	}
+	nad, err := c.nadLister.NetworkAttachmentDefinitions(namespace).Get(name)
+	if err != nil {
+		if kerrors.IsNotFound(err) {
+			return nil
+		}
+		return fmt.Errorf("failed to get NetworkAttachmentDefinition %q from cache: %v", key, err)
+	}
+	ownerRef := metav1.GetControllerOf(nad)
+	if ownerRef == nil {
+		return nil
+	}
 
-	// TODO: send relevant keys to the cluster UDN controller, according to the NAD owner reference
+	switch ownerRef.Kind {
+	case "ClusterUserDefinedNetwork":
+		owner, err := c.cudnLister.Get(ownerRef.Name)
+		if err != nil {
+			return fmt.Errorf("failed to get ClusterUserDefinedNetwork %q from cache: %v", ownerRef.Name, err)
+		}
+		ownerKey, err := cache.MetaNamespaceKeyFunc(owner)
+		if err != nil {
+			return fmt.Errorf("failed to generate meta namespace key for CUDN: %v", err)
+		}
+		c.cudnController.Reconcile(ownerKey)
+	case "UserDefinedNetwork":
+		owner, err := c.udnLister.UserDefinedNetworks(nad.Namespace).Get(ownerRef.Name)
+		if err != nil {
+			return fmt.Errorf("failed to get UserDefinedNetwork %q from cache: %v", ownerRef.Name, err)
+		}
+		ownerKey, err := cache.MetaNamespaceKeyFunc(owner)
+		if err != nil {
+			return fmt.Errorf("failed to generate meta namespace key for UDN: %v", err)
+		}
+		c.udnController.Reconcile(ownerKey)
+	default:
+		return nil
+	}
 	return nil
 }
 

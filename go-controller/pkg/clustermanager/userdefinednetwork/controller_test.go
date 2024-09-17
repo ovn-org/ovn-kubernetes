@@ -463,6 +463,23 @@ var _ = Describe("User Defined Network Controller", func() {
 					}
 				})
 
+				It("should reconcile mutated NADs", func() {
+					for _, nsName := range connectedNsNames {
+						p := []byte(`[{"op":"replace","path":"/spec/config","value":"MUTATED"}]`)
+						nad, err := cs.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(nsName).Patch(context.Background(), cudnName, types.JSONPatchType, p, metav1.PatchOptions{})
+						Expect(err).NotTo(HaveOccurred())
+						Expect(nad.Spec.Config).To(Equal("MUTATED"))
+					}
+
+					for _, nsName := range connectedNsNames {
+						Eventually(func() *netv1.NetworkAttachmentDefinition {
+							nad, err := cs.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(nsName).Get(context.Background(), cudnName, metav1.GetOptions{})
+							Expect(err).NotTo(HaveOccurred())
+							return nad
+						}).Should(Equal(testClusterUdnNAD(cudnName, nsName)))
+					}
+				})
+
 				It("when CR selector has selection added, should create NAD in matching namespaces", func() {
 					By("create test new namespaces with new selection label")
 					newNsLabelValue := "us"
