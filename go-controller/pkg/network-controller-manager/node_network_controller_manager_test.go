@@ -223,6 +223,7 @@ var _ = Describe("Healthcheck tests", func() {
 			factoryMock.On("GetNode", nodeName).Return(nodeList[0], nil)
 			factoryMock.On("GetNodes").Return(nodeList, nil)
 			factoryMock.On("NADInformer").Return(nil)
+			factoryMock.On("UserDefinedNetworkInformer").Return(nil)
 
 			ncm, err := NewNodeNetworkControllerManager(fakeClient, &factoryMock, nodeName, &sync.WaitGroup{}, nil, routeManager)
 			Expect(err).NotTo(HaveOccurred())

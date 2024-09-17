@@ -22,6 +22,7 @@ import (
 
 	nadfake "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	udnfakeclient "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	factoryMocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory/mocks"
 	kubemocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube/mocks"
@@ -445,8 +446,9 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			},
 		)
 		fakeClient := &util.OVNNodeClientset{
-			KubeClient:            kubeFakeClient,
-			NetworkAttchDefClient: nadfake.NewSimpleClientset(),
+			KubeClient:               kubeFakeClient,
+			NetworkAttchDefClient:    nadfake.NewSimpleClientset(),
+			UserDefinedNetworkClient: udnfakeclient.NewSimpleClientset(),
 		}
 
 		stop := make(chan struct{})
@@ -619,8 +621,9 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			},
 		)
 		fakeClient := &util.OVNNodeClientset{
-			KubeClient:            kubeFakeClient,
-			NetworkAttchDefClient: nadfake.NewSimpleClientset(),
+			KubeClient:               kubeFakeClient,
+			NetworkAttchDefClient:    nadfake.NewSimpleClientset(),
+			UserDefinedNetworkClient: udnfakeclient.NewSimpleClientset(),
 		}
 
 		stop := make(chan struct{})

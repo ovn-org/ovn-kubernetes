@@ -209,7 +209,7 @@ func (c *Controller) syncUserDefinedNetwork(udn *userdefinednetworkv1.UserDefine
 		// any other thread that create NADs.
 		// Since the UserDefinedNetwork controller use single thread (threadiness=1),
 		// and being the only controller that create NADs, this conditions is fulfilled.
-		if primaryNetwork(udn.Spec) {
+		if util.IsPrimaryNetwork(udn.Spec) {
 			actualNads, lerr := c.nadLister.NetworkAttachmentDefinitions(udn.Namespace).List(labels.Everything())
 			if lerr != nil {
 				return nil, fmt.Errorf("failed to list  NetworkAttachmetDefinition: %w", lerr)
@@ -241,18 +241,6 @@ func (c *Controller) syncUserDefinedNetwork(udn *userdefinednetworkv1.UserDefine
 	}
 
 	return nad, nil
-}
-
-func primaryNetwork(spec userdefinednetworkv1.UserDefinedNetworkSpec) bool {
-	var role userdefinednetworkv1.NetworkRole
-	switch spec.Topology {
-	case userdefinednetworkv1.NetworkTopologyLayer3:
-		role = spec.Layer3.Role
-	case userdefinednetworkv1.NetworkTopologyLayer2:
-		role = spec.Layer2.Role
-	}
-
-	return role == userdefinednetworkv1.NetworkRolePrimary
 }
 
 func (c *Controller) verifyNetAttachDefNotInUse(nad *netv1.NetworkAttachmentDefinition) error {
