@@ -394,7 +394,7 @@ install_kubevirt_ipam_controller() {
 }
 
 install_multus() {
-  local version="v4.1.0"
+  local version="v4.1.1"
   echo "Installing multus-cni $version daemonset ..."
   wget -qO- "https://raw.githubusercontent.com/k8snetworkplumbingwg/multus-cni/${version}/deployments/multus-daemonset.yml" |\
     sed -e "s|multus-cni:snapshot|multus-cni:${version}|g" |\
