@@ -20,6 +20,8 @@ import (
 
 	mock "github.com/stretchr/testify/mock"
 
+	userdefinednetworkv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/informers/externalversions/userdefinednetwork/v1"
+
 	v1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/informers/externalversions/adminpolicybasedroute/v1"
 )
 
@@ -736,6 +738,26 @@ func (_m *NodeWatchFactory) Start() error {
 		r0 = rf()
 	} else {
 		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// UserDefinedNetworkInformer provides a mock function with given fields:
+func (_m *NodeWatchFactory) UserDefinedNetworkInformer() userdefinednetworkv1.UserDefinedNetworkInformer {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for UserDefinedNetworkInformer")
+	}
+
+	var r0 userdefinednetworkv1.UserDefinedNetworkInformer
+	if rf, ok := ret.Get(0).(func() userdefinednetworkv1.UserDefinedNetworkInformer); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(userdefinednetworkv1.UserDefinedNetworkInformer)
+		}
 	}
 
 	return r0

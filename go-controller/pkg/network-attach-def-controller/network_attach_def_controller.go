@@ -21,6 +21,8 @@ import (
 	nadinformers "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/informers/externalversions/k8s.cni.cncf.io/v1"
 	nadlisters "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/controller"
+	userdefinednetworkinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/informers/externalversions/userdefinednetwork/v1"
+	userdefinednetworklister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/listers/userdefinednetwork/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
@@ -47,6 +49,7 @@ type NetworkControllerManager interface {
 
 type watchFactory interface {
 	NADInformer() nadinformers.NetworkAttachmentDefinitionInformer
+	UserDefinedNetworkInformer() userdefinednetworkinformer.UserDefinedNetworkInformer
 }
 
 type NADController interface {
@@ -65,6 +68,7 @@ type NetAttachDefinitionController struct {
 	sync.RWMutex
 	name               string
 	netAttachDefLister nadlisters.NetworkAttachmentDefinitionLister
+	udnLister          userdefinednetworklister.UserDefinedNetworkLister
 	controller         controller.Controller
 	recorder           record.EventRecorder
 	// networkManager is used to manage the network controllers
@@ -103,6 +107,13 @@ func NewNetAttachDefinitionController(
 		nadController.netAttachDefLister = nadInformer.Lister()
 		config.Informer = nadInformer.Informer()
 		config.Lister = nadController.netAttachDefLister.List
+	}
+	if util.IsNetworkSegmentationSupportEnabled() {
+		udnInformer := wf.UserDefinedNetworkInformer()
+
+		if udnInformer != nil {
+			nadController.udnLister = udnInformer.Lister()
+		}
 	}
 
 	nadController.controller = controller.NewController(
@@ -333,6 +344,17 @@ func (nadController *NetAttachDefinitionController) GetActiveNetworkForNamespace
 		// update the returned netInfo copy to only have the primary NAD for this namespace
 		n.SetNADs(primaryNAD)
 		return n, nil
+	}
+
+	// no primary network found, make sure we just haven't processed it yet and no UDN exists
+	udns, err := nadController.udnLister.UserDefinedNetworks(namespace).List(labels.Everything())
+	if err != nil {
+		return nil, fmt.Errorf("error getting user defined networks: %w", err)
+	}
+	for _, udn := range udns {
+		if util.IsPrimaryNetwork(udn.Spec) {
+			return nil, util.NewUnprocessedActiveNetworkError(namespace, udn.Name)
+		}
 	}
 
 	return &util.DefaultNetInfo{}, nil

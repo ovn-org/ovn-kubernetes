@@ -28,6 +28,7 @@ import (
 	nadfake "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	adminpolicybasedrouteclient "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/clientset/versioned/fake"
+	udnfakeclient "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	networkAttachDefController "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
@@ -1110,8 +1111,9 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 			&endpointSlice,
 		)
 		fakeClient := &util.OVNNodeClientset{
-			KubeClient:            kubeFakeClient,
-			NetworkAttchDefClient: nadfake.NewSimpleClientset(),
+			KubeClient:               kubeFakeClient,
+			NetworkAttchDefClient:    nadfake.NewSimpleClientset(),
+			UserDefinedNetworkClient: udnfakeclient.NewSimpleClientset(),
 		}
 
 		stop := make(chan struct{})

@@ -101,11 +101,12 @@ type OVNKubeControllerClientset struct {
 }
 
 type OVNNodeClientset struct {
-	KubeClient             kubernetes.Interface
-	EgressServiceClient    egressserviceclientset.Interface
-	EgressIPClient         egressipclientset.Interface
-	AdminPolicyRouteClient adminpolicybasedrouteclientset.Interface
-	NetworkAttchDefClient  networkattchmentdefclientset.Interface
+	KubeClient               kubernetes.Interface
+	EgressServiceClient      egressserviceclientset.Interface
+	EgressIPClient           egressipclientset.Interface
+	AdminPolicyRouteClient   adminpolicybasedrouteclientset.Interface
+	NetworkAttchDefClient    networkattchmentdefclientset.Interface
+	UserDefinedNetworkClient userdefinednetworkclientset.Interface
 }
 
 type OVNClusterManagerClientset struct {
@@ -164,6 +165,7 @@ func (cs *OVNMasterClientset) GetOVNKubeControllerClientset() *OVNKubeController
 		AdminPolicyRouteClient:   cs.AdminPolicyRouteClient,
 		IPAMClaimsClient:         cs.IPAMClaimsClient,
 		NetworkAttchDefClient:    cs.NetworkAttchDefClient,
+		UserDefinedNetworkClient: cs.UserDefinedNetworkClient,
 	}
 }
 
