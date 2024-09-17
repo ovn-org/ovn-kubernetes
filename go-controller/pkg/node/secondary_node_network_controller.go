@@ -93,7 +93,7 @@ func (nc *SecondaryNodeNetworkController) Stop() {
 	}
 }
 
-// Cleanup cleans up node entities for the given secondary network
+// CleanupUDNHostIsolation cleans up node entities for the given secondary network
 func (nc *SecondaryNodeNetworkController) Cleanup() error {
 	if nc.gateway != nil {
 		return nc.gateway.DelNetwork()

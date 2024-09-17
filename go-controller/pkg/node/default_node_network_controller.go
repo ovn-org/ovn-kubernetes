@@ -112,12 +112,14 @@ type DefaultNodeNetworkController struct {
 	retryEndpointSlices *retry.RetryFramework
 
 	apbExternalRouteNodeController *apbroute.ExternalGatewayNodeController
+
+	udnHostIsolationManager *UDNHostIsolationManager
 }
 
 func newDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, stopChan chan struct{},
 	wg *sync.WaitGroup, routeManager *routemanager.Controller) *DefaultNodeNetworkController {
 
-	return &DefaultNodeNetworkController{
+	c := &DefaultNodeNetworkController{
 		BaseNodeNetworkController: BaseNodeNetworkController{
 			CommonNodeNetworkControllerInfo: *cnnci,
 			NetInfo:                         &util.DefaultNetInfo{},
@@ -126,6 +128,11 @@ func newDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, sto
 		},
 		routeManager: routeManager,
 	}
+	if util.IsNetworkSegmentationSupportEnabled() {
+		c.udnHostIsolationManager = NewUDNHostIsolationManager(config.IPv4Mode, config.IPv6Mode,
+			cnnci.watchFactory.PodCoreInformer(), cnnci.watchFactory.NADInformer().Lister())
+	}
+	return c
 }
 
 // NewDefaultNodeNetworkController creates a new network controller for node management of the default network
@@ -765,6 +772,15 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		err = setupOVNNode(node)
 		if err != nil {
 			return err
+		}
+		if nc.udnHostIsolationManager != nil {
+			if err = nc.udnHostIsolationManager.Start(ctx); err != nil {
+				return err
+			}
+		} else {
+			if err = CleanupUDNHostIsolation(); err != nil {
+				return fmt.Errorf("failed cleaning up UDN host isolation: %w", err)
+			}
 		}
 	}
 

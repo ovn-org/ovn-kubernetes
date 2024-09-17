@@ -8,7 +8,7 @@ case $(uname -m) in
 esac
 
 # from https://github.com/kubernetes-sigs/kind/releases
-KIND_URL=https://kind.sigs.k8s.io/dl/v0.20.0/kind-linux-${ARCH}
+KIND_URL=https://kind.sigs.k8s.io/dl/v0.23.0/kind-linux-${ARCH}
 KIND_SHA_URL=$KIND_URL.sha256sum
 KIND_SHA="$( curl -L -s ${KIND_SHA_URL}| awk '{ print $1 }')"
 KIND_DOWNLOAD_RETRIES=5
@@ -46,6 +46,7 @@ install_kind() {
 
 pushd $TMP_DIR
 K8S_VERSION="v1.30.2"
+K8S_E2E_VERSION="v1.29.2"
 
 # Install kubectl for K8S_VERSION in use
 # (to get latest stable version: $(curl -s https://storage.googleapis.com/kubernetes-release/release/stable.txt )
@@ -54,7 +55,7 @@ chmod +x ./kubectl
 sudo mv ./kubectl /usr/local/bin/kubectl
 
 # Install e2e test binary and ginkgo
-curl -L https://storage.googleapis.com/kubernetes-release/release/${K8S_VERSION}/kubernetes-test-linux-${ARCH}.tar.gz -o kubernetes-test-linux-${ARCH}.tar.gz
+curl -L https://storage.googleapis.com/kubernetes-release/release/${K8S_E2E_VERSION}/kubernetes-test-linux-${ARCH}.tar.gz -o kubernetes-test-linux-${ARCH}.tar.gz
 tar xvzf kubernetes-test-linux-${ARCH}.tar.gz
 sudo mv kubernetes/test/bin/e2e.test /usr/local/bin/e2e.test
 sudo mv kubernetes/test/bin/ginkgo /usr/local/bin/ginkgo
