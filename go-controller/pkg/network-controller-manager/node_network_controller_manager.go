@@ -58,8 +58,8 @@ func (ncm *nodeNetworkControllerManager) NewNetworkController(nInfo util.NetInfo
 		if !ok {
 			return nil, fmt.Errorf("unable to dereference default node network controller object")
 		}
-		return node.NewSecondaryNodeNetworkController(ncm.newCommonNetworkControllerInfo(),
-			nInfo, ncm.vrfManager, ncm.ruleManager, dnnc.Gateway)
+		return node.NewSecondaryNodeNetworkController(ncm.newCommonNetworkControllerInfo(), // SNNC starts
+			nInfo, ncm.vrfManager, ncm.ruleManager, dnnc.Gateway) // TODO <----- dnnc.Gateway must have been created beforehand
 	}
 	return nil, fmt.Errorf("topology type %s not supported", topoType)
 }
@@ -192,22 +192,25 @@ func (ncm *nodeNetworkControllerManager) Start(ctx context.Context) (err error) 
 		ncm.routeManager.Run(ncm.stopChan, 2*time.Minute)
 	}()
 
+	klog.Infof("RICCARDO init DNCC")
 	err = ncm.initDefaultNodeNetworkController() // <--- init DNNC
 	if err != nil {
 		return fmt.Errorf("failed to init default node network controller: %v", err)
 	}
+	klog.Infof("RICCARDO DNNC prestart")
 	err = ncm.defaultNodeNetworkController.PreStart(ctx) // <--- pre start DNNC  (partial gateway init + OpenFlow Manager)
 	if err != nil {
 		return fmt.Errorf("failed to start default node network controller: %v", err)
 	}
 
 	if ncm.nadController != nil {
+		klog.Infof("RICCARDO SNNC start")
 		err = ncm.nadController.Start() // start NAD controller and SNNC controller <--- eventually initializes b.netConfig
 		if err != nil {
 			return fmt.Errorf("failed to start NAD controller: %w", err)
 		}
 	}
-
+	klog.Infof("RICCARDO DNNC start")
 	err = ncm.defaultNodeNetworkController.Start(ctx) // <--- start DNNC
 	if err != nil {
 		return fmt.Errorf("failed to start default node network controller: %v", err)

@@ -1075,7 +1075,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	if err := waiter.Wait(); err != nil {
 		return err
 	}
-	nc.Gateway.Start()
+	nc.Gateway.Start() // Will start a goroutine that runs the OnChange code that was registered before fo g.nodeIPManager and g.openflowManager
 	klog.Infof("Gateway and management port readiness took %v", time.Since(start))
 
 	// Note(adrianc): DPU deployments are expected to support the new shared gateway changes, upgrade flow
