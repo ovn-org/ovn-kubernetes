@@ -1811,7 +1811,7 @@ func setBridgeOfPorts(bridge *bridgeConfiguration) error {
 		bridge.ofPortPhys = ofportPhys
 	}
 
-	// Get ofport represeting the host. That is, host representor port in case of DPUs, ovsLocalPort otherwise.
+	// Get ofport representing the host. That is, host representor port in case of DPUs, ovsLocalPort otherwise.
 	if config.OvnKubeNode.Mode == types.NodeModeDPU {
 		var stderr string
 		hostRep, err := util.GetDPUHostInterface(bridge.bridgeName)
@@ -1981,7 +1981,7 @@ func newGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP, gwIn
 			}
 		}
 
-		gw.openflowManager, err = newGatewayOpenFlowManager(gwBridge, exGwBridge, subnets, nodeIPs)
+		gw.openflowManager, err = newGatewayOpenFlowManager(gwBridge, exGwBridge, subnets, nodeIPs) // TODO this part needs to run before NAD Controller
 		if err != nil {
 			return err
 		}

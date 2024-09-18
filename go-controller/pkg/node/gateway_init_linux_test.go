@@ -308,6 +308,8 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			sharedGw, err := newGateway(nodeName, ovntest.MustParseIPNets(nodeSubnet), gatewayNextHops, gatewayIntf, "", ifAddrs, nodeAnnotator,
 				&fakeMgmtPortConfig, k, wf, rm, nadController, config.GatewayModeShared)
 			Expect(err).NotTo(HaveOccurred())
+			err = sharedGw.initFunc()
+			Expect(err).NotTo(HaveOccurred())
 			err = sharedGw.Init(stop, wg)
 			Expect(err).NotTo(HaveOccurred())
 			err = nodeAnnotator.Run()
@@ -703,6 +705,8 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 			Expect(err).NotTo(HaveOccurred())
 			sharedGw, err := newGateway(nodeName, ovntest.MustParseIPNets(nodeSubnet), gatewayNextHops,
 				gatewayIntf, "", ifAddrs, nodeAnnotator, &fakeMgmtPortConfig, k, wf, rm, nadController, config.GatewayModeShared)
+			Expect(err).NotTo(HaveOccurred())
+			err = sharedGw.initFunc()
 			Expect(err).NotTo(HaveOccurred())
 			err = sharedGw.Init(stop, wg)
 			Expect(err).NotTo(HaveOccurred())
@@ -1155,6 +1159,8 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 			ifAddrs := ovntest.MustParseIPNets(eth0CIDR)
 			localGw, err := newGateway(nodeName, ovntest.MustParseIPNets(nodeSubnet), gatewayNextHops, gatewayIntf, "", ifAddrs,
 				nodeAnnotator, &fakeMgmtPortConfig, k, wf, rm, nadController, config.GatewayModeLocal)
+			Expect(err).NotTo(HaveOccurred())
+			err = localGw.initFunc()
 			Expect(err).NotTo(HaveOccurred())
 			err = localGw.Init(stop, wg)
 			Expect(err).NotTo(HaveOccurred())
