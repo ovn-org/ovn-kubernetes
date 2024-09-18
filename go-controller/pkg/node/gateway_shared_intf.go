@@ -141,7 +141,7 @@ func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, netInf
 	var actions string
 
 	if add {
-		netConfig = npw.ofm.getActiveNetwork(netInfo)
+		netConfig = npw.ofm.getActiveNetwork(netInfo) // TODO This is where the problem initially surfaced
 		if netConfig == nil {
 			return fmt.Errorf("failed to get active network config for network %s", netInfo.GetNetworkName())
 		}
