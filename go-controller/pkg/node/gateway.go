@@ -44,13 +44,16 @@ type gateway struct {
 	// nodePortWatcherIptables is used in Shared GW mode to handle nodePort IPTable rules
 	nodePortWatcherIptables informer.ServiceEventHandler
 	// nodePortWatcher is used in Local+Shared GW modes to handle nodePort flows in shared OVS bridge
-	nodePortWatcher informer.ServiceAndEndpointsEventHandler
-	openflowManager *openflowManager
-	nodeIPManager   *addressManager
-	initFunc        func() error
-	readyFunc       func() (bool, error)
+	nodePortWatcher   informer.ServiceAndEndpointsEventHandler
+	openflowManager   *openflowManager
+	nodeIPManager     *addressManager
+	initFuncPhaseOne  func() error
+	initFuncPhaseTwo  func() error
+	readyFuncPhaseOne func() (bool, error)
 
 	servicesRetryFramework *retry.RetryFramework
+
+	gwBridge, exGwBridge *bridgeConfiguration
 
 	watchFactory *factory.WatchFactory // used for retry
 	stopChan     <-chan struct{}
@@ -220,9 +223,11 @@ func (g *gateway) Init(stopChan <-chan struct{}, wg *sync.WaitGroup) error {
 	g.wg = wg
 
 	var err error
-	if err = g.initFunc(); err != nil {
+
+	if err = g.initFuncPhaseTwo(); err != nil {
 		return err
 	}
+
 	g.servicesRetryFramework = g.newRetryFrameworkNode(factory.ServiceForGatewayType)
 	if _, err = g.servicesRetryFramework.WatchResource(); err != nil {
 		return fmt.Errorf("gateway init failed to start watching services: %v", err)
