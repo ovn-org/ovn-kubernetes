@@ -752,12 +752,6 @@ var _ = Describe("Network Segmentation", func() {
 				DescribeTable(
 					"can be accessed to from the pods running in the Kubernetes cluster",
 					func(netConfigParams networkAttachmentConfigParams, clientPodConfig podConfiguration) {
-						if netConfigParams.topology == "layer2" && IsGatewayModeLocal() {
-							const upstreamIssue = "https://github.com/ovn-org/ovn-kubernetes/issues/4686"
-							e2eskipper.Skipf(
-								"These tests are known to fail on Local Gateway deployments. Upstream issue: %s", upstreamIssue,
-							)
-						}
 						if netConfigParams.topology == "layer2" && !isInterconnectEnabled() {
 							const upstreamIssue = "https://github.com/ovn-org/ovn-kubernetes/issues/4642"
 							e2eskipper.Skipf(

@@ -615,7 +615,7 @@ func (bnc *BaseNetworkController) deleteNamespaceLocked(ns string) (*namespaceIn
 	return nsInfo, nil
 }
 
-func (bnc *BaseNetworkController) syncNodeManagementPort(node *kapi.Node, switchName string, hostSubnets []*net.IPNet, routeHostSubnets bool) ([]net.IP, error) {
+func (bnc *BaseNetworkController) syncNodeManagementPort(node *kapi.Node, switchName, routerName string, hostSubnets []*net.IPNet) ([]net.IP, error) {
 	macAddress, err := util.ParseNodeManagementPortMACAddresses(node, bnc.GetNetworkName())
 	if err != nil {
 		return nil, err
@@ -636,19 +636,25 @@ func (bnc *BaseNetworkController) syncNodeManagementPort(node *kapi.Node, switch
 		if !utilnet.IsIPv6CIDR(hostSubnet) {
 			v4Subnet = hostSubnet
 		}
-		if config.Gateway.Mode == config.GatewayModeLocal && routeHostSubnets {
+		if config.Gateway.Mode == config.GatewayModeLocal {
 			lrsr := nbdb.LogicalRouterStaticRoute{
 				Policy:   &nbdb.LogicalRouterStaticRoutePolicySrcIP,
 				IPPrefix: hostSubnet.String(),
 				Nexthop:  mgmtIfAddr.IP.String(),
 			}
+			if bnc.IsSecondary() {
+				lrsr.ExternalIDs = map[string]string{
+					ovntypes.NetworkExternalID:  bnc.GetNetworkName(),
+					ovntypes.TopologyExternalID: bnc.TopologyType(),
+				}
+			}
 			p := func(item *nbdb.LogicalRouterStaticRoute) bool {
 				return item.IPPrefix == lrsr.IPPrefix && libovsdbops.PolicyEqualPredicate(lrsr.Policy, item.Policy)
 			}
-			err := libovsdbops.CreateOrReplaceLogicalRouterStaticRouteWithPredicate(bnc.nbClient, bnc.GetNetworkScopedClusterRouterName(),
+			err := libovsdbops.CreateOrReplaceLogicalRouterStaticRouteWithPredicate(bnc.nbClient, routerName,
 				&lrsr, p, &lrsr.Nexthop)
 			if err != nil {
-				return nil, fmt.Errorf("error creating static route %+v on router %s: %v", lrsr, bnc.GetNetworkScopedClusterRouterName(), err)
+				return nil, fmt.Errorf("error creating static route %+v on router %s: %v", lrsr, routerName, err)
 			}
 		}
 	}
@@ -678,14 +684,6 @@ func (bnc *BaseNetworkController) syncNodeManagementPort(node *kapi.Node, switch
 	}
 
 	return mgmtPortIPs, nil
-}
-
-func (bnc *BaseNetworkController) syncNodeManagementPortRouteHostSubnets(node *kapi.Node, switchName string, hostSubnets []*net.IPNet) ([]net.IP, error) {
-	return bnc.syncNodeManagementPort(node, switchName, hostSubnets, true)
-}
-
-func (bnc *BaseNetworkController) syncNodeManagementPortNoRouteHostSubnets(node *kapi.Node, switchName string, hostSubnets []*net.IPNet) ([]net.IP, error) {
-	return bnc.syncNodeManagementPort(node, switchName, hostSubnets, false)
 }
 
 // WatchNodes starts the watching of the nodes resource and calls back the appropriate handler logic

@@ -130,7 +130,7 @@ func (oc *DefaultNetworkController) newClusterRouter() (*nbdb.LogicalRouter, err
 }
 
 func (oc *DefaultNetworkController) syncNodeManagementPortDefault(node *kapi.Node, switchName string, hostSubnets []*net.IPNet) error {
-	mgmtPortIPs, err := oc.syncNodeManagementPortRouteHostSubnets(node, switchName, hostSubnets)
+	mgmtPortIPs, err := oc.syncNodeManagementPort(node, switchName, oc.GetNetworkScopedClusterRouterName(), hostSubnets)
 	if err == nil {
 		return oc.setupUDNACLs(mgmtPortIPs)
 	}

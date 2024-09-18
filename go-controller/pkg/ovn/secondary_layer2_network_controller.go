@@ -159,16 +159,18 @@ func (h *secondaryLayer2NetworkControllerEventHandler) UpdateResource(oldObj, ne
 		if newNodeIsLocalZoneNode {
 			var nodeSyncsParam *nodeSyncs
 			if h.oc.isLocalZoneNode(oldNode) {
-				// determine what actually changed in this update
-				syncMgmtPort := macAddressChanged(oldNode, newNode, h.oc.NetInfo.GetNetworkName()) || nodeSubnetChanged
-
+				// determine what actually changed in this update and combine that with what failed previously
+				_, mgmtUpdateFailed := h.oc.mgmtPortFailed.Load(newNode.Name)
+				shouldSyncMgmtPort := mgmtUpdateFailed ||
+					macAddressChanged(oldNode, newNode, h.oc.NetInfo.GetNetworkName()) ||
+					nodeSubnetChanged
 				_, gwUpdateFailed := h.oc.gatewaysFailed.Load(newNode.Name)
 				shouldSyncGW := gwUpdateFailed ||
 					gatewayChanged(oldNode, newNode) ||
 					hostCIDRsChanged(oldNode, newNode) ||
 					nodeGatewayMTUSupportChanged(oldNode, newNode)
 
-				nodeSyncsParam = &nodeSyncs{syncMgmtPort: syncMgmtPort, syncGw: shouldSyncGW}
+				nodeSyncsParam = &nodeSyncs{syncMgmtPort: shouldSyncMgmtPort, syncGw: shouldSyncGW}
 			} else {
 				klog.Infof("Node %s moved from the remote zone %s to local zone %s.",
 					newNode.Name, util.GetNodeZone(oldNode), util.GetNodeZone(newNode))
@@ -419,22 +421,6 @@ func (oc *SecondaryLayer2NetworkController) addUpdateLocalNodeEvent(node *corev1
 	var errs []error
 
 	if util.IsNetworkSegmentationSupportEnabled() && oc.IsPrimaryNetwork() {
-		if nSyncs.syncMgmtPort {
-			// Layer 2 networks have a single, large subnet, that's the one
-			// associated to the controller.  Take the management port IP from
-			// there.
-			subnets := oc.Subnets()
-			hostSubnets := make([]*net.IPNet, 0, len(subnets))
-			for _, subnet := range oc.Subnets() {
-				hostSubnets = append(hostSubnets, subnet.CIDR)
-			}
-			if _, err := oc.syncNodeManagementPortNoRouteHostSubnets(node, oc.GetNetworkScopedSwitchName(types.OVNLayer2Switch), hostSubnets); err != nil {
-				errs = append(errs, err)
-				oc.mgmtPortFailed.Store(node.Name, true)
-			} else {
-				oc.mgmtPortFailed.Delete(node.Name)
-			}
-		}
 		if nSyncs.syncGw {
 			gwManager := oc.gatewayManagerForNode(node.Name)
 			oc.gatewayManagers.Store(node.Name, gwManager)
@@ -467,6 +453,22 @@ func (oc *SecondaryLayer2NetworkController) addUpdateLocalNodeEvent(node *corev1
 						}
 					}
 				}
+			}
+		}
+		if nSyncs.syncMgmtPort {
+			// Layer 2 networks have a single, large subnet, that's the one
+			// associated to the controller.  Take the management port IP from
+			// there.
+			subnets := oc.Subnets()
+			hostSubnets := make([]*net.IPNet, 0, len(subnets))
+			for _, subnet := range oc.Subnets() {
+				hostSubnets = append(hostSubnets, subnet.CIDR)
+			}
+			if _, err := oc.syncNodeManagementPort(node, oc.GetNetworkScopedSwitchName(types.OVNLayer2Switch), oc.GetNetworkScopedGWRouterName(node.Name), hostSubnets); err != nil {
+				errs = append(errs, err)
+				oc.mgmtPortFailed.Store(node.Name, true)
+			} else {
+				oc.mgmtPortFailed.Delete(node.Name)
 			}
 		}
 	}

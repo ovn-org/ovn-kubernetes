@@ -168,6 +168,7 @@ func (h *secondaryLayer3NetworkControllerEventHandler) UpdateResource(oldObj, ne
 				_, nodeSync := h.oc.addNodeFailed.Load(newNode.Name)
 				_, failed := h.oc.nodeClusterRouterPortFailed.Load(newNode.Name)
 				clusterRtrSync := failed || nodeChassisChanged(oldNode, newNode) || nodeSubnetChanged
+				_, failed = h.oc.mgmtPortFailed.Load(newNode.Name)
 				syncMgmtPort := failed || macAddressChanged(oldNode, newNode, h.oc.GetNetworkName()) || nodeSubnetChanged
 				_, syncZoneIC := h.oc.syncZoneICFailed.Load(newNode.Name)
 				syncZoneIC = syncZoneIC || zoneClusterChanged
@@ -653,7 +654,7 @@ func (oc *SecondaryLayer3NetworkController) addUpdateLocalNodeEvent(node *kapi.N
 				errs = append(errs, err)
 				oc.mgmtPortFailed.Store(node.Name, true)
 			} else {
-				_, err = oc.syncNodeManagementPortRouteHostSubnets(node, oc.GetNetworkScopedSwitchName(node.Name), hostSubnets)
+				_, err = oc.syncNodeManagementPort(node, oc.GetNetworkScopedSwitchName(node.Name), oc.GetNetworkScopedClusterRouterName(), hostSubnets)
 				if err != nil {
 					errs = append(errs, err)
 					oc.mgmtPortFailed.Store(node.Name, true)
