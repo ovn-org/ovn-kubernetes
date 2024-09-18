@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 	"net"
 	"os"
 	"strconv"
@@ -33,6 +32,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/egressip"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/egressservice"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/linkmanager"
@@ -845,6 +845,20 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		return err
 	}
 
+	if err := util.SetNodeZone(nodeAnnotator, sbZone); err != nil {
+		return fmt.Errorf("failed to set node zone annotation for node %s: %w", nc.name, err)
+	}
+	if err := nodeAnnotator.Run(); err != nil {
+		return fmt.Errorf("failed to set node %s annotations: %w", nc.name, err)
+	}
+
+	// Connect ovn-controller to SBDB
+	for _, auth := range []config.OvnAuthConfig{config.OvnNorth, config.OvnSouth} {
+		if err := auth.SetDBAuth(); err != nil {
+			return fmt.Errorf("upgrade hack: Unable to set the authentication towards OVN local dbs")
+		}
+	}
+
 	// Initialize gateway
 	if config.OvnKubeNode.Mode == types.NodeModeDPUHost {
 		err = nc.initGatewayDPUHost(nodeAddr)
@@ -852,18 +866,17 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 			return err
 		}
 	} else {
+		// TODO a later commit will split DNNC Start() and run initGatewayPreStart and initGatewayMainStart
+		// separately
+
 		// Initialize gateway for OVS internal port or representor management port
-		if err := nc.initGateway(subnets, nodeAnnotator, waiter, mgmtPortConfig, nodeAddr); err != nil {
+		gw, err := nc.initGatewayPreStart(subnets, nodeAnnotator, mgmtPortConfig, nodeAddr)
+		if err != nil {
 			return err
 		}
-	}
-
-	if err := util.SetNodeZone(nodeAnnotator, sbZone); err != nil {
-		return fmt.Errorf("failed to set node zone annotation for node %s: %w", nc.name, err)
-	}
-
-	if err := nodeAnnotator.Run(); err != nil {
-		return fmt.Errorf("failed to set node %s annotations: %w", nc.name, err)
+		if err := nc.initGatewayMainStart(gw, waiter); err != nil {
+			return err
+		}
 	}
 
 	// If EncapPort is not the default tell sbdb to use specified port.
