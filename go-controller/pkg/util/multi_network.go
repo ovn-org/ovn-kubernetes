@@ -973,9 +973,12 @@ func GetPodNADToNetworkMappingWithActiveNetwork(pod *kapi.Pod, nInfo NetInfo, ac
 	}
 
 	if nInfo.IsPrimaryNetwork() && AllowsPersistentIPs(nInfo) {
-		ipamClaimName, wasPersistentIPRequested := pod.Annotations[OvnUDNIPAMClaimName]
-		if wasPersistentIPRequested {
-			networkSelections[activeNetworkNADs[0]].IPAMClaimReference = ipamClaimName
+		network, err := GetK8sPodDefaultNetworkSelection(pod)
+		if err != nil {
+			return false, nil, fmt.Errorf("error getting default-network's network-attachment for pod: %w", err)
+		}
+		if network != nil {
+			networkSelections[activeNetworkNADs[0]].IPAMClaimReference = network.IPAMClaimReference
 		}
 	}
 

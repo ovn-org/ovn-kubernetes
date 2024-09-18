@@ -943,8 +943,8 @@ func TestGetPodNADToNetworkMappingWithActiveNetwork(t *testing.T) {
 				AllowPersistentIPs: true,
 			},
 			inputPodAnnotations: map[string]string{
-				nadv1.NetworkAttachmentAnnot: GetNADName(namespaceName, "another-network"),
-				OvnUDNIPAMClaimName:          "the-one-to-the-left-of-the-pony",
+				nadv1.NetworkAttachmentAnnot:       GetNADName(namespaceName, "another-network"),
+				"v1.multus-cni.io/default-network": `[{"namespace":"default","name":"ovn-kubernetes","ipam-claim-reference":"the-one-to-the-left-of-the-pony"}]`,
 			},
 			expectedIsAttachmentRequested: true,
 			expectedNetworkSelectionElements: map[string]*nadv1.NetworkSelectionElement{
@@ -999,8 +999,8 @@ func TestGetPodNADToNetworkMappingWithActiveNetwork(t *testing.T) {
 				AllowPersistentIPs: true,
 			},
 			inputPodAnnotations: map[string]string{
-				nadv1.NetworkAttachmentAnnot: GetNADName(namespaceName, "another-network"),
-				OvnUDNIPAMClaimName:          "the-one-to-the-left-of-the-pony",
+				nadv1.NetworkAttachmentAnnot:       GetNADName(namespaceName, "another-network"),
+				"v1.multus-cni.io/default-network": `[{"namespace":"default","name":"ovn-kubernetes","ipam-claim-reference":"the-one-to-the-left-of-the-pony"}]`,
 			},
 			expectedIsAttachmentRequested: true,
 			expectedNetworkSelectionElements: map[string]*nadv1.NetworkSelectionElement{
