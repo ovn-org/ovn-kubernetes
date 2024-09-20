@@ -1673,13 +1673,22 @@ func (e *egressIPZoneController) addExternalGWPodSNATOps(ops []ovsdb.Operation, 
 // deleteExternalGWPodSNATOps creates ops for the required external GW teardown for the given pod
 func (e *egressIPZoneController) deleteExternalGWPodSNATOps(ops []ovsdb.Operation, pod *kapi.Pod, podIPs []*net.IPNet, status egressipv1.EgressIPStatusItem, isOVNNetwork bool) ([]ovsdb.Operation, error) {
 	if config.Gateway.DisableSNATMultipleGWs && status.Node == pod.Spec.NodeName && isOVNNetwork {
+		ip := net.ParseIP(status.EgressIP)
+		var effectedIPs []*net.IPNet
+		// only remove the snats for pod IPs that match the ipfamily of the egressIP
+		for _, podIP := range podIPs {
+			if utilnet.IsIPv6(podIP.IP) == utilnet.IsIPv6(ip) {
+				effectedIPs = append(effectedIPs, podIP)
+			}
+		}
 		// remove snats to->nodeIP (from the node where pod exists if that node is also serving
 		// as an egress node for this pod) for these podIPs before adding the snat to->egressIP
 		extIPs, err := getExternalIPsGR(e.watchFactory, pod.Spec.NodeName)
 		if err != nil {
 			return nil, err
 		}
-		ops, err = deletePodSNATOps(e.nbClient, ops, e.GetNetworkScopedGWRouterName(pod.Spec.NodeName), extIPs, podIPs)
+		ops, err = deletePodSNATOps(e.nbClient, ops, e.GetNetworkScopedGWRouterName(pod.Spec.NodeName), extIPs, effectedIPs)
+
 		if err != nil {
 			return nil, err
 		}
@@ -1805,6 +1814,7 @@ func (e *egressIPZoneController) createReroutePolicyOps(ops []ovsdb.Operation, p
 	var err error
 	// Handle all pod IPs that match the egress IP address family
 	for _, podIPNet := range util.MatchAllIPNetFamily(isEgressIPv6, podIPNets) {
+
 		lrp := nbdb.LogicalRouterPolicy{
 			Match:    fmt.Sprintf("%s.src == %s", ipFamilyName(isEgressIPv6), podIPNet.IP.String()),
 			Priority: types.EgressIPReroutePriority,

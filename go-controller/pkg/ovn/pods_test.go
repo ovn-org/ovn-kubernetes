@@ -52,6 +52,29 @@ func newPodMeta(namespace, name string, additionalLabels map[string]string) meta
 	}
 }
 
+func newPodWithLabelsAllIPFamilies(namespace, name, node string, podIPs []string, additionalLabels map[string]string) *v1.Pod {
+	podIPList := []v1.PodIP{}
+	for _, podIP := range podIPs {
+		podIPList = append(podIPList, v1.PodIP{IP: podIP})
+	}
+	return &v1.Pod{
+		ObjectMeta: newPodMeta(namespace, name, additionalLabels),
+		Spec: v1.PodSpec{
+			Containers: []v1.Container{
+				{
+					Name:  "containerName",
+					Image: "containerImage",
+				},
+			},
+			NodeName: node,
+		},
+		Status: v1.PodStatus{
+			Phase:  v1.PodRunning,
+			PodIP:  podIPList[0].IP,
+			PodIPs: podIPList,
+		},
+	}
+}
 func newPodWithLabels(namespace, name, node, podIP string, additionalLabels map[string]string) *v1.Pod {
 	podIPs := []v1.PodIP{}
 	if podIP != "" {
