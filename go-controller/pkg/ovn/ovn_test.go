@@ -17,6 +17,7 @@ import (
 	ocpnetworkapiv1alpha1 "github.com/openshift/api/network/v1alpha1"
 	ocpnetworkfake "github.com/openshift/client-go/network/clientset/versioned/fake"
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
+
 	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	adminpolicybasedrouteapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1"
@@ -34,6 +35,14 @@ import (
 	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 	fakenad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/nad"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/kubernetes/fake"
+	"k8s.io/client-go/tools/record"
+	anpapi "sigs.k8s.io/network-policy-api/apis/v1alpha1"
+	anpfake "sigs.k8s.io/network-policy-api/pkg/client/clientset/versioned/fake"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
@@ -44,13 +53,6 @@ import (
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/client-go/kubernetes/fake"
-	"k8s.io/client-go/tools/record"
-	anpapi "sigs.k8s.io/network-policy-api/apis/v1alpha1"
-	anpfake "sigs.k8s.io/network-policy-api/pkg/client/clientset/versioned/fake"
 )
 
 const (
@@ -455,7 +457,8 @@ func (o *FakeOVN) NewSecondaryNetworkController(netattachdef *nettypes.NetworkAt
 			l3Controller.addressSetFactory = asf
 			secondaryController = &l3Controller.BaseSecondaryNetworkController
 		case types.Layer2Topology:
-			l2Controller := NewSecondaryLayer2NetworkController(cnci, nInfo, o.nadController)
+			l2Controller, err := NewSecondaryLayer2NetworkController(cnci, nInfo, o.nadController)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			l2Controller.addressSetFactory = asf
 			secondaryController = &l2Controller.BaseSecondaryNetworkController
 		case types.LocalnetTopology:

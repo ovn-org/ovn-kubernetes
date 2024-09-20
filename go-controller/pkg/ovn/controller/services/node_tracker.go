@@ -209,7 +209,15 @@ func (nt *nodeTracker) removeNode(nodeName string) {
 // The gateway router will exist sometime after the L3Gateway annotation is set.
 func (nt *nodeTracker) updateNode(node *v1.Node) {
 	klog.V(2).Infof("Processing possible switch / router updates for node %s", node.Name)
-	hsn, err := util.ParseNodeHostSubnetAnnotation(node, nt.netInfo.GetNetworkName())
+	var hsn []*net.IPNet
+	var err error
+	if nt.netInfo.TopologyType() == types.Layer2Topology {
+		for _, subnet := range nt.netInfo.Subnets() {
+			hsn = append(hsn, subnet.CIDR)
+		}
+	} else {
+		hsn, err = util.ParseNodeHostSubnetAnnotation(node, nt.netInfo.GetNetworkName())
+	}
 	if err != nil || hsn == nil || util.NoHostSubnet(node) {
 		// usually normal; means the node's gateway hasn't been initialized yet
 		klog.Infof("Node %s has invalid / no HostSubnet annotations (probably waiting on initialization), or it's a hybrid overlay node: %v", node.Name, err)

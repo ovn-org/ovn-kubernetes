@@ -655,11 +655,11 @@ func expectedGWRouterPlusNATAndStaticRoutes(
 		expectedGRStaticRoute(staticRoute3, masqSubnet, nextHopMasqIP, nil, &staticRouteOutputPort, netInfo),
 	}
 	if config.Gateway.DisableSNATMultipleGWs {
-		expectedEntities = append(expectedEntities, newNATEntry(nat1, dummyMasqueradeIP().IP.String(), gwRouterJoinIPAddress().IP.String(), standardNonDefaultNetworkExtIDs(netInfo)))
-		expectedEntities = append(expectedEntities, newNATEntry(perPodSNAT, dummyMasqueradeIP().IP.String(), dummyTestPodAdditionalNetworkIP(), nil))
+		expectedEntities = append(expectedEntities, newNATEntry(nat1, dummyMasqueradeIP().IP.String(), gwRouterJoinIPAddress().IP.String(), standardNonDefaultNetworkExtIDs(netInfo), ""))
+		expectedEntities = append(expectedEntities, newNATEntry(perPodSNAT, dummyMasqueradeIP().IP.String(), dummyTestPodAdditionalNetworkIP(), nil, ""))
 	} else {
-		expectedEntities = append(expectedEntities, newNATEntry(nat1, dummyMasqueradeIP().IP.String(), gwRouterJoinIPAddress().IP.String(), standardNonDefaultNetworkExtIDs(netInfo)))
-		expectedEntities = append(expectedEntities, newNATEntry(nat2, dummyMasqueradeIP().IP.String(), netInfo.Subnets()[0].CIDR.String(), standardNonDefaultNetworkExtIDs(netInfo)))
+		expectedEntities = append(expectedEntities, newNATEntry(nat1, dummyMasqueradeIP().IP.String(), gwRouterJoinIPAddress().IP.String(), standardNonDefaultNetworkExtIDs(netInfo), ""))
+		expectedEntities = append(expectedEntities, newNATEntry(nat2, dummyMasqueradeIP().IP.String(), netInfo.Subnets()[0].CIDR.String(), standardNonDefaultNetworkExtIDs(netInfo), ""))
 	}
 	return expectedEntities
 }
@@ -728,7 +728,7 @@ func expectedLayer3EgressEntities(netInfo util.NetInfo, gwConfig util.L3GatewayC
 	rtosLRPName := fmt.Sprintf("%s%s", ovntypes.RouterToSwitchPrefix, netInfo.GetNetworkScopedName(nodeName))
 	rtosLRPUUID := rtosLRPName + "-UUID"
 	nodeIP := gwConfig.IPAddresses[0].IP.String()
-	masqSNAT := newNATEntry(masqSNATUUID1, "169.254.169.14", nodeSubnet.String(), standardNonDefaultNetworkExtIDs(netInfo))
+	masqSNAT := newNATEntry(masqSNATUUID1, "169.254.169.14", nodeSubnet.String(), standardNonDefaultNetworkExtIDs(netInfo), "")
 	masqSNAT.Match = getMasqueradeManagementIPSNATMatch(dummyMACAddr)
 	masqSNAT.LogicalPort = ptr.To(fmt.Sprintf("rtos-%s_%s", netInfo.GetNetworkName(), nodeName))
 	if !config.OVNKubernetesFeature.EnableInterconnect {
@@ -765,13 +765,14 @@ func expectedLogicalRouterPolicy(routerPolicyUUID1 string, netInfo util.NetInfo,
 		priority      = 1004
 		rerouteAction = "reroute"
 	)
-	networkScopedNodeName := netInfo.GetNetworkScopedSwitchName(nodeName)
-	lrpName := fmt.Sprintf("%s%s", ovntypes.RouterToSwitchPrefix, networkScopedNodeName)
+	networkScopedSwitchName := netInfo.GetNetworkScopedSwitchName(nodeName)
+	lrpName := fmt.Sprintf("%s%s", ovntypes.RouterToSwitchPrefix, networkScopedSwitchName)
+
 	return &nbdb.LogicalRouterPolicy{
 		UUID:        routerPolicyUUID1,
 		Action:      rerouteAction,
 		ExternalIDs: standardNonDefaultNetworkExtIDs(netInfo),
-		Match:       fmt.Sprintf("inport == %q && ip4.dst == %s /* %s */", lrpName, destIP, networkScopedNodeName),
+		Match:       fmt.Sprintf("inport == %q && ip4.dst == %s /* %s */", lrpName, destIP, networkScopedSwitchName),
 		Nexthops:    []string{nextHop},
 		Priority:    priority,
 	}
@@ -826,17 +827,17 @@ func udnGWSNATAddress() *net.IPNet {
 }
 
 func newMasqueradeManagementNATEntry(uuid string, externalIP string, logicalIP string, netInfo util.NetInfo) *nbdb.NAT {
-	masqSNAT := newNATEntry(uuid, "169.254.169.14", layer2Subnet().String(), standardNonDefaultNetworkExtIDs(netInfo))
-	masqSNAT.Match = fmt.Sprintf("eth.dst == %s", dummyMACAddr)
+	masqSNAT := newNATEntry(uuid, "169.254.169.14", layer2Subnet().String(), standardNonDefaultNetworkExtIDs(netInfo), getMasqueradeManagementIPSNATMatch(dummyMACAddr))
 	masqSNAT.LogicalPort = ptr.To(fmt.Sprintf("rtoj-GR_%s_%s", netInfo.GetNetworkName(), nodeName))
 	return masqSNAT
 }
 
-func newNATEntry(uuid string, externalIP string, logicalIP string, extIDs map[string]string) *nbdb.NAT {
+func newNATEntry(uuid string, externalIP string, logicalIP string, extIDs map[string]string, match string) *nbdb.NAT {
 	return &nbdb.NAT{
 		UUID:        uuid,
 		ExternalIP:  externalIP,
 		LogicalIP:   logicalIP,
+		Match:       match,
 		Type:        "snat",
 		Options:     map[string]string{"stateless": "false"},
 		ExternalIDs: extIDs,

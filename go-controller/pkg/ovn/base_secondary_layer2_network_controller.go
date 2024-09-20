@@ -110,7 +110,7 @@ func (oc *BaseSecondaryLayer2NetworkController) run() error {
 }
 
 func (oc *BaseSecondaryLayer2NetworkController) initializeLogicalSwitch(switchName string, clusterSubnets []config.CIDRNetworkEntry,
-	excludeSubnets []*net.IPNet) (*nbdb.LogicalSwitch, error) {
+	excludeSubnets []*net.IPNet, clusterLoadBalancerGroupUUID, switchLoadBalancerGroupUUID string) (*nbdb.LogicalSwitch, error) {
 	logicalSwitch := nbdb.LogicalSwitch{
 		Name:        switchName,
 		ExternalIDs: util.GenerateExternalIDsForSwitchOrRouter(oc.NetInfo),
@@ -132,6 +132,10 @@ func (oc *BaseSecondaryLayer2NetworkController) initializeLogicalSwitch(switchNa
 		if err != nil {
 			return nil, err
 		}
+	}
+
+	if clusterLoadBalancerGroupUUID != "" && switchLoadBalancerGroupUUID != "" {
+		logicalSwitch.LoadBalancerGroup = []string{clusterLoadBalancerGroupUUID, switchLoadBalancerGroupUUID}
 	}
 
 	err := libovsdbops.CreateOrUpdateLogicalSwitch(oc.nbClient, &logicalSwitch)

@@ -8,6 +8,7 @@ import (
 
 	"github.com/containernetworking/cni/pkg/types"
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
+
 	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -66,7 +67,7 @@ func (cm *NetworkControllerManager) NewNetworkController(nInfo util.NetInfo) (na
 	case ovntypes.Layer3Topology:
 		return ovn.NewSecondaryLayer3NetworkController(cnci, nInfo, cm.nadController)
 	case ovntypes.Layer2Topology:
-		return ovn.NewSecondaryLayer2NetworkController(cnci, nInfo, cm.nadController), nil
+		return ovn.NewSecondaryLayer2NetworkController(cnci, nInfo, cm.nadController)
 	case ovntypes.LocalnetTopology:
 		return ovn.NewSecondaryLocalnetNetworkController(cnci, nInfo, cm.nadController), nil
 	}
@@ -84,7 +85,7 @@ func (cm *NetworkControllerManager) newDummyNetworkController(topoType, netName 
 	case ovntypes.Layer3Topology:
 		return ovn.NewSecondaryLayer3NetworkController(cnci, netInfo, cm.nadController)
 	case ovntypes.Layer2Topology:
-		return ovn.NewSecondaryLayer2NetworkController(cnci, netInfo, cm.nadController), nil
+		return ovn.NewSecondaryLayer2NetworkController(cnci, netInfo, cm.nadController)
 	case ovntypes.LocalnetTopology:
 		return ovn.NewSecondaryLocalnetNetworkController(cnci, netInfo, cm.nadController), nil
 	}

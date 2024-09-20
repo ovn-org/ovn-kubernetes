@@ -1033,7 +1033,7 @@ func (oc *SecondaryLayer3NetworkController) StartServiceController(wg *sync.Wait
 		// kubernetes controller-manager
 		err := oc.svcController.Run(5, oc.stopChan, runRepair, useLBGroups, oc.svcTemplateSupport)
 		if err != nil {
-			klog.Errorf("Error running OVN Kubernetes Services controller: %v", err)
+			klog.Errorf("Error running OVN Kubernetes Services controller for network %s: %v", oc.GetNetworkName(), err)
 		}
 	}()
 	return nil

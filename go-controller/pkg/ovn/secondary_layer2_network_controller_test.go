@@ -242,6 +242,7 @@ var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 				gwConfig, err := util.ParseNodeL3GatewayAnnotation(testNode)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(gwConfig.NextHops).NotTo(BeEmpty())
+				nbZone := &nbdb.NBGlobal{Name: ovntypes.OvnDefaultZone, UUID: ovntypes.OvnDefaultZone}
 
 				if netInfo.isPrimary {
 					gwConfig, err := util.ParseNodeL3GatewayAnnotation(testNode)
@@ -250,6 +251,7 @@ var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 						initialDB.NBData,
 						expectedLayer2EgressEntities(networkConfig, *gwConfig, nodeName)...)
 				}
+				initialDB.NBData = append(initialDB.NBData, nbZone)
 
 				fakeOvn.startWithDBSetup(
 					initialDB,
@@ -307,7 +309,7 @@ var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 						nodeName,
 						nadController,
 					).Cleanup()).To(Succeed())
-				Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData([]libovsdbtest.TestData{}))
+				Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData([]libovsdbtest.TestData{nbZone}))
 
 				return nil
 			}
@@ -463,13 +465,13 @@ func expectedLayer2EgressEntities(netInfo util.NetInfo, gwConfig util.L3GatewayC
 
 	expectedEntities = append(expectedEntities, expectedExternalSwitchAndLSPs(netInfo, gwConfig, nodeName)...)
 	if config.Gateway.DisableSNATMultipleGWs {
-		expectedEntities = append(expectedEntities, newNATEntry(nat1, dummyMasqueradeIP().IP.String(), gwRouterJoinIPAddress().IP.String(), standardNonDefaultNetworkExtIDs(netInfo)))
-		expectedEntities = append(expectedEntities, newNATEntry(nat3, dummyMasqueradeIP().IP.String(), layer2SubnetGWAddr().IP.String(), standardNonDefaultNetworkExtIDs(netInfo)))
-		expectedEntities = append(expectedEntities, newNATEntry(perPodSNAT, dummyMasqueradeIP().IP.String(), dummyL2TestPodAdditionalNetworkIP(), nil))
+		expectedEntities = append(expectedEntities, newNATEntry(nat1, dummyMasqueradeIP().IP.String(), gwRouterJoinIPAddress().IP.String(), standardNonDefaultNetworkExtIDs(netInfo), ""))
+		expectedEntities = append(expectedEntities, newNATEntry(nat3, dummyMasqueradeIP().IP.String(), layer2SubnetGWAddr().IP.String(), standardNonDefaultNetworkExtIDs(netInfo), ""))
+		expectedEntities = append(expectedEntities, newNATEntry(perPodSNAT, dummyMasqueradeIP().IP.String(), dummyL2TestPodAdditionalNetworkIP(), nil, fmt.Sprintf("outport == %q", gwRouterToExtSwitchPortName)))
 	} else {
-		expectedEntities = append(expectedEntities, newNATEntry(nat1, dummyMasqueradeIP().IP.String(), gwRouterJoinIPAddress().IP.String(), standardNonDefaultNetworkExtIDs(netInfo)))
-		expectedEntities = append(expectedEntities, newNATEntry(nat2, dummyMasqueradeIP().IP.String(), layer2Subnet().String(), standardNonDefaultNetworkExtIDs(netInfo)))
-		expectedEntities = append(expectedEntities, newNATEntry(nat3, dummyMasqueradeIP().IP.String(), layer2SubnetGWAddr().IP.String(), standardNonDefaultNetworkExtIDs(netInfo)))
+		expectedEntities = append(expectedEntities, newNATEntry(nat1, dummyMasqueradeIP().IP.String(), gwRouterJoinIPAddress().IP.String(), standardNonDefaultNetworkExtIDs(netInfo), ""))
+		expectedEntities = append(expectedEntities, newNATEntry(nat2, dummyMasqueradeIP().IP.String(), layer2Subnet().String(), standardNonDefaultNetworkExtIDs(netInfo), fmt.Sprintf("outport == %q", gwRouterToExtSwitchPortName)))
+		expectedEntities = append(expectedEntities, newNATEntry(nat3, dummyMasqueradeIP().IP.String(), layer2SubnetGWAddr().IP.String(), standardNonDefaultNetworkExtIDs(netInfo), ""))
 	}
 	return expectedEntities
 }
@@ -524,7 +526,7 @@ func dummyLayer2PrimaryUserDefinedNetwork(subnets string) secondaryNetInfo {
 
 func newSecondaryLayer2NetworkController(cnci *CommonNetworkControllerInfo, netInfo util.NetInfo, nodeName string,
 	nadController networkAttachDefController.NADController) *SecondaryLayer2NetworkController {
-	layer2NetworkController := NewSecondaryLayer2NetworkController(cnci, netInfo, nadController)
+	layer2NetworkController, _ := NewSecondaryLayer2NetworkController(cnci, netInfo, nadController)
 	layer2NetworkController.gatewayManagers.Store(
 		nodeName,
 		newDummyGatewayManager(cnci.kube, cnci.nbClient, netInfo, cnci.watchFactory, nodeName),

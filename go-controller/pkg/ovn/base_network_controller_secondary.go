@@ -13,6 +13,7 @@ import (
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/ovsdb"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/generator/udn"
@@ -405,8 +406,8 @@ func (bsnc *BaseSecondaryNetworkController) addPerPodSNATOps(pod *kapi.Pod, podI
 	if err != nil {
 		return nil, fmt.Errorf("failed to get masquerade IPs, network %s (%d): %v", bsnc.GetNetworkName(), networkID, err)
 	}
-	ops, err := addOrUpdatePodSNATOps(bsnc.nbClient, bsnc.GetNetworkScopedGWRouterName(pod.Spec.NodeName),
-		masqIPs, podIPs, nil)
+
+	ops, err := addOrUpdatePodSNATOps(bsnc.nbClient, bsnc.GetNetworkScopedGWRouterName(pod.Spec.NodeName), masqIPs, podIPs, bsnc.NetInfo.GetNetworkScopedClusterSubnetSNATMatch(pod.Spec.NodeName), nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to construct SNAT pods for pod %s/%s which is part of network %s, err: %v",
 			pod.Namespace, pod.Name, bsnc.GetNetworkName(), err)
@@ -459,7 +460,6 @@ func (bsnc *BaseSecondaryNetworkController) removePodForSecondaryNetwork(pod *ka
 	if err != nil {
 		return fmt.Errorf("failed looking for the active network at namespace '%s': %w", pod.Namespace, err)
 	}
-
 	for nadName := range podNetworks {
 		if !bsnc.HasNAD(nadName) {
 			continue
@@ -475,6 +475,15 @@ func (bsnc *BaseSecondaryNetworkController) removePodForSecondaryNetwork(pod *ka
 		pInfo, err := bsnc.deletePodLogicalPort(pod, portInfoMap[nadName], nadName)
 		if err != nil {
 			return err
+		}
+
+		// Cleanup the SNAT entries before checking whether this controller handled the IP allocation
+		if util.IsNetworkSegmentationSupportEnabled() && bsnc.IsPrimaryNetwork() && config.Gateway.DisableSNATMultipleGWs {
+			// we need to delete per-pod SNATs for UDN networks
+			if err := bsnc.delPerPodSNAT(pod, nadName); err != nil {
+				return fmt.Errorf("failed to delete SNAT for pod %s/%s which is part of network %s, err: %v",
+					pod.Namespace, pod.Name, bsnc.GetNetworkName(), err)
+			}
 		}
 
 		// do not release IP address if this controller does not handle IP allocation
@@ -526,13 +535,6 @@ func (bsnc *BaseSecondaryNetworkController) removePodForSecondaryNetwork(pod *ka
 
 		bsnc.forgetPodReleasedBeforeStartup(string(pod.UID), nadName)
 
-		if util.IsNetworkSegmentationSupportEnabled() && bsnc.IsPrimaryNetwork() && config.Gateway.DisableSNATMultipleGWs {
-			// we need to delete per-pod SNATs for UDN networks
-			if err := bsnc.delPerPodSNAT(pod, nadName); err != nil {
-				return fmt.Errorf("failed to delete SNAT for pod %s/%s which is part of network %s, err: %v",
-					pod.Namespace, pod.Name, bsnc.GetNetworkName(), err)
-			}
-		}
 	}
 	return nil
 }
@@ -556,7 +558,7 @@ func (bsnc *BaseSecondaryNetworkController) delPerPodSNAT(pod *kapi.Pod, nadName
 	if err != nil {
 		return fmt.Errorf("failed to fetch annotations for pod %s/%s in network %s; err: %v", pod.Namespace, pod.Name, bsnc.GetNetworkName(), err)
 	}
-	ops, err := deletePodSNATOps(bsnc.nbClient, nil, bsnc.GetNetworkScopedGWRouterName(pod.Spec.NodeName), masqIPs, podNetAnnotation.IPs)
+	ops, err := deletePodSNATOps(bsnc.nbClient, nil, bsnc.GetNetworkScopedGWRouterName(pod.Spec.NodeName), masqIPs, podNetAnnotation.IPs, bsnc.GetNetworkScopedClusterSubnetSNATMatch(pod.Spec.NodeName))
 	if err != nil {
 		return fmt.Errorf("failed to construct SNAT pods for pod %s/%s which is part of network %s, err: %v",
 			pod.Namespace, pod.Name, bsnc.GetNetworkName(), err)

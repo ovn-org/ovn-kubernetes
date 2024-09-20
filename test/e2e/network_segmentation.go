@@ -330,25 +330,21 @@ var _ = Describe("Network Segmentation", func() {
 						// TODO
 						//By("checking non-kubelet default network host process can't reach the UDN pod")
 
-						// TODO(kyrtapz) remove the condition when L2 services support is added
-						// https://github.com/ovn-org/ovn-kubernetes/pull/4653
-						if netConfigParams.topology != "layer2" {
-							By("asserting UDN pod can reach the kapi service in the default network")
-							// Use the service name to get test the DNS access
-							Consistently(func() bool {
-								_, err := e2ekubectl.RunKubectl(
-									udnPodConfig.namespace,
-									"exec",
-									udnPodConfig.name,
-									"--",
-									"curl",
-									"--connect-timeout",
-									"2",
-									"--insecure",
-									"https://kubernetes.default/healthz")
-								return err == nil
-							}, 5*time.Second).Should(BeTrue())
-						}
+						By("asserting UDN pod can reach the kapi service in the default network")
+						// Use the service name to get test the DNS access
+						Consistently(func() bool {
+							_, err := e2ekubectl.RunKubectl(
+								udnPodConfig.namespace,
+								"exec",
+								udnPodConfig.name,
+								"--",
+								"curl",
+								"--connect-timeout",
+								"2",
+								"--insecure",
+								"https://kubernetes.default/healthz")
+							return err == nil
+						}, 5*time.Second).Should(BeTrue())
 						By("asserting UDN pod can't reach host via default network interface")
 						// tweak pod route to use default network interface as default
 						podAnno, err := unmarshalPodAnnotation(udnPod.Annotations, "default")
