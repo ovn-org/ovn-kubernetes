@@ -422,8 +422,10 @@ func (bnc *BaseNetworkController) createNodeLogicalSwitch(nodeName string, hostS
 		Addresses: []string{"router"},
 		Options: map[string]string{
 			"router-port": types.RouterToSwitchPrefix + switchName,
-			"arp_proxy":   kubevirt.ComposeARPProxyLSPOption(),
 		},
+	}
+	if bnc.IsDefault() {
+		logicalSwitchPort.Options["arp_proxy"] = kubevirt.ComposeARPProxyLSPOption()
 	}
 	sw := nbdb.LogicalSwitch{Name: switchName}
 	err = libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitch(bnc.nbClient, &sw, &logicalSwitchPort)

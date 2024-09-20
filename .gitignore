@@ -5,3 +5,5 @@
 contrib/bin
 
 ovn-kubernetes-anp-test-report.yaml
+
+**/ginkgo.report

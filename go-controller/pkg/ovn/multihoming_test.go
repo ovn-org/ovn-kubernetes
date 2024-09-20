@@ -290,7 +290,6 @@ func newExpectedSwitchToRouterPort(lspUUID string, portName string, pod testPod,
 	lrp.ExternalIDs = nil
 	lrp.Options = map[string]string{
 		"router-port": "rtos-isolatednet_test-node",
-		"arp_proxy":   "0a:58:a9:fe:01:01 169.254.1.1 fe80::1 10.128.0.0/14",
 	}
 	lrp.PortSecurity = nil
 	lrp.Type = "router"
