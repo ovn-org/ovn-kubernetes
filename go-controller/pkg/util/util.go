@@ -14,9 +14,10 @@ import (
 	"golang.org/x/exp/constraints"
 	"k8s.io/client-go/tools/cache"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"crypto/rand"
 
@@ -582,7 +583,7 @@ func GetServiceEndpointSlices(namespace, svcName, network string, endpointSliceL
 
 // IsUDNEnabledService checks whether the provided namespaced name key is a UDN enabled service specified in config.Default.UDNAllowedDefaultServices
 func IsUDNEnabledService(key string) bool {
-	for _, enabledService := range config.Default.UDNAllowedDefaultServices.Value() {
+	for _, enabledService := range config.Default.UDNAllowedDefaultServices {
 		if enabledService == key {
 			return true
 		}
