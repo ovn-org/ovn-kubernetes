@@ -1,14 +1,15 @@
 package util
 
 import (
+	"errors"
 	"fmt"
-	"net"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 )
 
@@ -45,18 +46,30 @@ func CreateDefaultRouteToExternal(nbClient libovsdbclient.Client, clusterRouter,
 			Nexthop:  gatewayIP.IP.String(),
 			Policy:   &nbdb.LogicalRouterStaticRoutePolicySrcIP,
 		}
+		if err = deleteStaleStaticRoutes(nbClient, clusterRouter, subnet.String(), gatewayIP.String()); err != nil {
+			klog.Errorf("Could not remove stale static route %v", err)
+		}
 		p := func(lrsr *nbdb.LogicalRouterStaticRoute) bool {
-			_, itemCIDR, err := net.ParseCIDR(lrsr.IPPrefix)
-			if err != nil {
-				return false
-			}
-			return util.ContainsCIDR(subnet, itemCIDR) &&
+			return lrsr.IPPrefix == subnet.String() &&
 				lrsr.Nexthop == gatewayIP.IP.String() &&
 				lrsr.Policy != nil && *lrsr.Policy == nbdb.LogicalRouterStaticRoutePolicySrcIP
 		}
 		if err := libovsdbops.CreateOrReplaceLogicalRouterStaticRouteWithPredicate(nbClient, clusterRouter, &lrsr, p); err != nil {
 			return fmt.Errorf("unable to create pod to external catch-all reroute for gateway router %s, err: %v", gwRouterName, err)
 		}
+	}
+	return nil
+}
+
+// deleteStaleStaticRoutes removes static route matching ClusterNetwork CIDR and referencing old join switch IP as NextHop.
+func deleteStaleStaticRoutes(nbClient libovsdbclient.Client, clusterRouter, clusterSubnet, gwLRPIP string) error {
+	p := func(lrsr *nbdb.LogicalRouterStaticRoute) bool {
+		return lrsr.Nexthop != gwLRPIP && lrsr.IPPrefix == clusterSubnet && lrsr.Policy != nil &&
+			*lrsr.Policy == nbdb.LogicalRouterStaticRoutePolicySrcIP
+	}
+	err := libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicate(nbClient, clusterRouter, p)
+	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
+		return fmt.Errorf("failed to delete static route from router %s: %v", clusterRouter, err)
 	}
 	return nil
 }

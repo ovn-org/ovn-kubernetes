@@ -759,7 +759,7 @@ func expectedLogicalRouterPolicy(routerPolicyUUID1 string, netInfo util.NetInfo,
 }
 
 func expectedGRStaticRoute(uuid, ipPrefix, nextHop string, policy *nbdb.LogicalRouterStaticRoutePolicy, outputPort *string, netInfo util.NetInfo) *nbdb.LogicalRouterStaticRoute {
-	return &nbdb.LogicalRouterStaticRoute{
+	lrsr := &nbdb.LogicalRouterStaticRoute{
 		UUID:       uuid,
 		IPPrefix:   ipPrefix,
 		OutputPort: outputPort,
@@ -770,6 +770,10 @@ func expectedGRStaticRoute(uuid, ipPrefix, nextHop string, policy *nbdb.LogicalR
 			ovntypes.TopologyExternalID: netInfo.TopologyType(),
 		},
 	}
+	if !config.OVNKubernetesFeature.EnableInterconnect && ipPrefix == nextHop {
+		lrsr.ExternalIDs["nodeName"] = nodeName
+	}
+	return lrsr
 }
 
 func allowAllFromMgmtPort(aclUUID string, mgmtPortIP string, switchName string) *nbdb.ACL {
