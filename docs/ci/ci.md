@@ -7,6 +7,8 @@ and some [locally defined](https://github.com/ovn-org/ovn-kubernetes/tree/master
 are used to run a subset of the Kubernetes E2E tests on each pull request. The
 local workflow that controls the test run is located in
 [ovn-kubernetes/.github/workflows/test.yml](https://github.com/ovn-org/ovn-kubernetes/blob/master/.github/workflows/test.yml).
+They are also run periodically (twice daily) using an OVN-Kubernetes build based on the currently merged code base.
+
 
 The following tasks are performed:
 
@@ -14,9 +16,6 @@ The following tasks are performed:
 - Check out the Kubernetes source tree and compiles some dependencies
 - Install KIND
 - Run a matrix of End-To-End Tests using KIND
-
-The full matrix of e2e tests found [here](https://github.com/ovn-org/ovn-kubernetes/blob/master/.github/workflows/test.yml)
-are also run periodically (twice daily) using an OVN-Kubernetes build based on the currently merged code base.
 
 The following sections should help you understand (and if needed modify) the set of tests that run and how to run these
 tests locally.
