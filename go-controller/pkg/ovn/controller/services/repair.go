@@ -5,6 +5,8 @@ import (
 	"time"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
+	libovsdb "github.com/ovn-org/libovsdb/ovsdb"
+
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -51,7 +53,7 @@ func newRepair(serviceLister corelisters.ServiceLister, nbClient libovsdbclient.
 }
 
 // runBeforeSync performs some cleanup of stale LBs and other miscellaneous setup.
-func (r *repair) runBeforeSync(useTemplates bool, netInfo util.NetInfo) {
+func (r *repair) runBeforeSync(useTemplates bool, netInfo util.NetInfo, nodes map[string]nodeInfo) {
 	// no need to lock, single-threaded.
 
 	startTime := time.Now()
@@ -149,6 +151,42 @@ func (r *repair) runBeforeSync(useTemplates bool, netInfo util.NetInfo) {
 		err = libovsdbops.RemoveACLsFromLogicalSwitchesWithPredicate(r.nbClient, p, acls...)
 		if err != nil {
 			klog.Errorf("Failed to purge existing reject rules: %v", err)
+		}
+	}
+
+	// remove static routes for UDN enabled services that are no longer valid
+	udnDelPredicate := func(route *nbdb.LogicalRouterStaticRoute) bool {
+		if route.ExternalIDs[types.NetworkExternalID] == netInfo.GetNetworkName() &&
+			route.ExternalIDs[types.TopologyExternalID] == netInfo.TopologyType() {
+			if serviceKey, exists := route.ExternalIDs[types.UDNEnabledServiceExternalID]; exists {
+				if !r.unsyncedServices.Has(serviceKey) {
+					// the service doesn't exist
+					return true
+				}
+				if !util.IsUDNEnabledService(serviceKey) {
+					// the service is not a part of UDNAllowedDefaultServices anymore
+					return true
+				}
+			}
+		}
+		return false
+	}
+
+	if netInfo.IsPrimaryNetwork() {
+		var ops []libovsdb.Operation
+		if netInfo.TopologyType() == types.Layer2Topology {
+			for _, node := range nodes {
+				if ops, err = libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicateOps(r.nbClient, ops, netInfo.GetNetworkScopedGWRouterName(node.name), udnDelPredicate); err != nil {
+					klog.Errorf("Failed to create a delete logical router static route op: %v", err)
+				}
+			}
+		} else {
+			if ops, err = libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicateOps(r.nbClient, ops, netInfo.GetNetworkScopedClusterRouterName(), udnDelPredicate); err != nil {
+				klog.Errorf("Failed to create a delete logical router static route op: %v", err)
+			}
+		}
+		if _, err = libovsdbops.TransactAndCheck(r.nbClient, ops); err != nil {
+			klog.Errorf("Failed to delete logical router static routes: %v", err)
 		}
 	}
 }

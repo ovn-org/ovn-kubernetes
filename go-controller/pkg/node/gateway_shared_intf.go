@@ -10,6 +10,9 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/vishvananda/netlink"
+	"golang.org/x/sys/unix"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
@@ -19,8 +22,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
-	"github.com/vishvananda/netlink"
-	"golang.org/x/sys/unix"
 
 	kapi "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
@@ -273,6 +274,31 @@ func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, netInf
 		if err = npw.createLbAndExternalSvcFlows(service, netConfig, &svcPort, add, hasLocalHostNetworkEp, protocol, actions,
 			extParsedIPs, "External", ofPorts); err != nil {
 			errors = append(errors, err)
+		}
+	}
+
+	// Add flows for default network services that are accessible from UDN networks
+	if util.IsNetworkSegmentationSupportEnabled() {
+		// The flow added below has a higher priority than the default network service flow:
+		//   priority=500,ip,in_port=LOCAL,nw_dst=10.96.0.0/16 actions=ct(commit,table=2,zone=64001,nat(src=169.254.0.2))
+		// This ordering ensures that there is no SNAT for UDN originated traffic.
+
+		if util.IsUDNEnabledService(ktypes.NamespacedName{Namespace: service.Namespace, Name: service.Name}.String()) {
+			key = strings.Join([]string{"UDNAllowedSVC", service.Namespace, service.Name}, "_")
+			if !add {
+				npw.ofm.deleteFlowsByKey(key)
+			}
+
+			ipPrefix := "ip"
+			masqueradeSubnet := config.Gateway.V4MasqueradeSubnet
+			if !utilnet.IsIPv4String(service.Spec.ClusterIP) {
+				ipPrefix = "ipv6"
+				masqueradeSubnet = config.Gateway.V6MasqueradeSubnet
+			}
+			// table 0, user-defined network host -> OVN towards default cluster network services
+			npw.ofm.updateFlowCacheEntry(key, []string{fmt.Sprintf("cookie=%s, priority=600, in_port=%s, %s, %s_src=%s, %s_dst=%s,"+
+				"actions=ct(commit,zone=%d,table=2)",
+				defaultOpenFlowCookie, npw.ofm.defaultBridge.ofPortHost, ipPrefix, ipPrefix, masqueradeSubnet, ipPrefix, service.Spec.ClusterIP, config.Default.HostMasqConntrackZone)})
 		}
 	}
 	return utilerrors.Join(errors...)
@@ -1276,17 +1302,18 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 				defaultOpenFlowCookie, ofPortHost, config.Gateway.MasqueradeIPs.V6OVNMasqueradeIP.String(), config.Default.OVNMasqConntrackZone))
 	}
 
-	var protoPrefix string
-	var masqIP string
+	var protoPrefix, masqIP, masqSubnet string
 
 	// table 0, packets coming from Host -> Service
 	for _, svcCIDR := range config.Kubernetes.ServiceCIDRs {
 		if utilnet.IsIPv4CIDR(svcCIDR) {
 			protoPrefix = "ip"
 			masqIP = config.Gateway.MasqueradeIPs.V4HostMasqueradeIP.String()
+			masqSubnet = config.Gateway.V4MasqueradeSubnet
 		} else {
 			protoPrefix = "ipv6"
 			masqIP = config.Gateway.MasqueradeIPs.V6HostMasqueradeIP.String()
+			masqSubnet = config.Gateway.V6MasqueradeSubnet
 		}
 
 		// table 0, Host -> OVN towards SVC, SNAT to special IP
@@ -1295,13 +1322,18 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 				"actions=ct(commit,zone=%d,nat(src=%s),table=2)",
 				defaultOpenFlowCookie, ofPortHost, protoPrefix, protoPrefix, svcCIDR, config.Default.HostMasqConntrackZone, masqIP))
 
+		masqDst := masqIP
+		if util.IsNetworkSegmentationSupportEnabled() {
+			// In UDN match on the whole masquerade subnet to handle replies from UDN enabled services
+			masqDst = masqSubnet
+		}
 		for _, netConfig := range bridge.patchedNetConfigs() {
 			// table 0, Reply hairpin traffic to host, coming from OVN, unSNAT
 			dftFlows = append(dftFlows,
 				fmt.Sprintf("cookie=%s, priority=500, in_port=%s, %s, %s_src=%s, %s_dst=%s,"+
 					"actions=ct(zone=%d,nat,table=3)",
 					defaultOpenFlowCookie, netConfig.ofPortPatch, protoPrefix, protoPrefix, svcCIDR,
-					protoPrefix, masqIP, config.Default.HostMasqConntrackZone))
+					protoPrefix, masqDst, config.Default.HostMasqConntrackZone))
 			// table 0, Reply traffic coming from OVN to outside, drop it if the DNAT wasn't done either
 			// at the GR load balancer or switch load balancer. It means the correct port wasn't provided.
 			// nodeCIDR->serviceCIDR traffic flow is internal and it shouldn't be carried to outside the cluster
@@ -1383,7 +1415,9 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 			fmt.Sprintf("cookie=%s, priority=10, table=1, dl_dst=%s, actions=output:%s",
 				defaultOpenFlowCookie, bridgeMacAddress, ofPortHost))
 	}
+
 	defaultNetConfig := bridge.netConfig[types.DefaultNetworkName]
+
 	// table 2, dispatch from Host -> OVN
 	dftFlows = append(dftFlows,
 		fmt.Sprintf("cookie=%s, table=2, "+

@@ -26,6 +26,7 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 
 	nadfake "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/fake"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	adminpolicybasedrouteclient "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/clientset/versioned/fake"
 	udnfakeclient "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/clientset/versioned/fake"
@@ -1275,6 +1276,7 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 			)
 			expectedTables["nat"]["OVN-KUBE-UDN-MASQUERADE"] = append(expectedTables["nat"]["OVN-KUBE-UDN-MASQUERADE"],
 				"-s 169.254.169.2/29 -j RETURN",     // this guarantees we don't SNAT default network masqueradeIPs
+				"-d 172.16.1.0/24 -j RETURN",        // this guarantees we don't SNAT service traffic
 				"-s 169.254.169.0/29 -j MASQUERADE", // this guarantees we SNAT all UDN MasqueradeIPs traffic leaving the node
 			)
 		}

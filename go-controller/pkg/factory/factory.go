@@ -12,6 +12,13 @@ import (
 	anpinformerfactory "sigs.k8s.io/network-policy-api/pkg/client/informers/externalversions"
 	anpinformer "sigs.k8s.io/network-policy-api/pkg/client/informers/externalversions/apis/v1alpha1"
 
+	certificatesinformers "k8s.io/client-go/informers/certificates/v1"
+
+	ocpnetworkapiv1alpha1 "github.com/openshift/api/network/v1alpha1"
+	ocpnetworkscheme "github.com/openshift/client-go/network/clientset/versioned/scheme"
+	ocpnetworkinformerfactory "github.com/openshift/client-go/network/informers/externalversions"
+	ocpnetworkinformerv1alpha1 "github.com/openshift/client-go/network/informers/externalversions/network/v1alpha1"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressfirewallapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	egressfirewallscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/scheme"
@@ -20,12 +27,6 @@ import (
 	egressfirewalllister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/listers/egressfirewall/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	certificatesinformers "k8s.io/client-go/informers/certificates/v1"
-
-	ocpnetworkapiv1alpha1 "github.com/openshift/api/network/v1alpha1"
-	ocpnetworkscheme "github.com/openshift/client-go/network/clientset/versioned/scheme"
-	ocpnetworkinformerfactory "github.com/openshift/client-go/network/informers/externalversions"
-	ocpnetworkinformerv1alpha1 "github.com/openshift/client-go/network/informers/externalversions/network/v1alpha1"
 
 	egressipapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	egressipscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/scheme"

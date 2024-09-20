@@ -60,19 +60,20 @@ var (
 
 	// Default holds parsed config file parameters and command-line overrides
 	Default = DefaultConfig{
-		MTU:                   1400,
-		ConntrackZone:         64000,
-		EncapType:             "geneve",
-		EncapIP:               "",
-		EncapPort:             DefaultEncapPort,
-		InactivityProbe:       100000, // in Milliseconds
-		OpenFlowProbe:         180,    // in Seconds
-		OfctrlWaitBeforeClear: 0,      // in Milliseconds
-		MonitorAll:            true,
-		OVSDBTxnTimeout:       DefaultDBTxnTimeout,
-		LFlowCacheEnable:      true,
-		RawClusterSubnets:     "10.128.0.0/14/23",
-		Zone:                  types.OvnDefaultZone,
+		MTU:                       1400,
+		ConntrackZone:             64000,
+		EncapType:                 "geneve",
+		EncapIP:                   "",
+		EncapPort:                 DefaultEncapPort,
+		InactivityProbe:           100000, // in Milliseconds
+		OpenFlowProbe:             180,    // in Seconds
+		OfctrlWaitBeforeClear:     0,      // in Milliseconds
+		MonitorAll:                true,
+		OVSDBTxnTimeout:           DefaultDBTxnTimeout,
+		LFlowCacheEnable:          true,
+		RawClusterSubnets:         "10.128.0.0/14/23",
+		Zone:                      types.OvnDefaultZone,
+		UDNAllowedDefaultServices: *cli.NewStringSlice("default/kubernetes", "kube-system/kube-dns"),
 	}
 
 	// Logging holds logging-related parsed config file parameters and command-line overrides
@@ -280,6 +281,10 @@ type DefaultConfig struct {
 
 	// Zone name to which ovnkube-node/ovnkube-controller belongs to
 	Zone string `gcfg:"zone"`
+
+	// UDNAllowedDefaultServices holds a list of namespaced names of
+	// default cluster network services accessible from primary user-defined networks
+	UDNAllowedDefaultServices cli.StringSlice `gcfg:"udn-allowed-default-services"`
 }
 
 // LoggingConfig holds logging-related parsed config file parameters and command-line overrides
@@ -920,6 +925,14 @@ var CommonFlags = []cli.Flag{
 		Usage:       "zone name to which ovnkube-node/ovnkube-controller belongs to",
 		Value:       Default.Zone,
 		Destination: &cliConfig.Default.Zone,
+	},
+	&cli.StringSliceFlag{
+		Name: "udn-allowed-default-services",
+		Usage: "a list of namespaced names of default cluster network services accessible from primary" +
+			"user-defined networks. If not specified defaults to [\"default/kubernetes\", \"kube-system/kube-dns\"]." +
+			"Only used when enable-network-segmentation is set",
+		Value:       &Default.UDNAllowedDefaultServices,
+		Destination: &cliConfig.Default.UDNAllowedDefaultServices,
 	},
 }
 
