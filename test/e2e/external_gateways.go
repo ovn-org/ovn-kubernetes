@@ -730,7 +730,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 				servingNamespace = ns.Name
 
 				addressesv4, addressesv6 = setupGatewayContainersForConntrackTest(f, nodes, gwContainer1, gwContainer2, srcPodName)
-				sleepCommand = []string{"bash", "-c", "sleep 20000"}
+				sleepCommand = []string{"bash", "-c", "trap : TERM INT; sleep infinity & wait"}
 				_, err = createGenericPod(f, gatewayPodName1, nodes.Items[0].Name, servingNamespace, sleepCommand)
 				framework.ExpectNoError(err, "Create and annotate the external gw pods to manage the src app pod namespace, failed: %v", err)
 				_, err = createGenericPod(f, gatewayPodName2, nodes.Items[1].Name, servingNamespace, sleepCommand)
@@ -802,7 +802,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 				ginkgo.Entry("IPV6 udp", &addressesv6, "udp"),
 				ginkgo.Entry("IPV6 tcp", &addressesv6, "tcp"))
 
-			ginkgo.DescribeTable("ExternalGWPod annotation: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes", func(addresses *gatewayTestIPs, protocol string) {
+			ginkgo.DescribeTable("ExternalGWPod annotation: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes", func(addresses *gatewayTestIPs, protocol string, deletePod bool) {
 				if addresses.srcPodIP == "" || addresses.nodeIP == "" {
 					skipper.Skipf("Skipping as pod ip / node ip are not set pod ip %s node ip %s", addresses.srcPodIP, addresses.nodeIP)
 				}
@@ -849,8 +849,16 @@ var _ = ginkgo.Describe("External Gateway", func() {
 				totalPodConnEntries := pokeConntrackEntries(nodeName, addresses.srcPodIP, protocol, nil)
 				gomega.Expect(totalPodConnEntries).To(gomega.Equal(6)) // total conntrack entries for this pod/protocol
 
-				ginkgo.By("Remove second external gateway pod's routing-namespace annotation")
-				annotatePodForGateway(gatewayPodName2, servingNamespace, "", addresses.gatewayIPs[1], false)
+				if deletePod {
+					ginkgo.By(fmt.Sprintf("Delete second external gateway pod %s from ns %s", gatewayPodName2, servingNamespace))
+					err = f.ClientSet.CoreV1().Pods(servingNamespace).Delete(context.TODO(), gatewayPodName2, metav1.DeleteOptions{})
+					framework.ExpectNoError(err, "Delete the gateway pod failed: %v", err)
+					// give some time to handle pod delete event
+					time.Sleep(5 * time.Second)
+				} else {
+					ginkgo.By("Remove second external gateway pod's routing-namespace annotation")
+					annotatePodForGateway(gatewayPodName2, servingNamespace, "", addresses.gatewayIPs[1], false)
+				}
 
 				// ensure the conntrack deletion tracker annotation is updated
 				if !isInterconnectEnabled() {
@@ -889,10 +897,13 @@ var _ = ginkgo.Describe("External Gateway", func() {
 				gomega.Expect(podConnEntriesWithMACLabelsSet).To(gomega.Equal(0)) // we don't have any remaining gateways left
 				gomega.Expect(totalPodConnEntries).To(gomega.Equal(4))            // 6-2
 			},
-				ginkgo.Entry("IPV4 udp", &addressesv4, "udp"),
-				ginkgo.Entry("IPV4 tcp", &addressesv4, "tcp"),
-				ginkgo.Entry("IPV6 udp", &addressesv6, "udp"),
-				ginkgo.Entry("IPV6 tcp", &addressesv6, "tcp"))
+				ginkgo.Entry("IPV4 udp", &addressesv4, "udp", false),
+				ginkgo.Entry("IPV4 tcp", &addressesv4, "tcp", false),
+				ginkgo.Entry("IPV6 udp", &addressesv6, "udp", false),
+				ginkgo.Entry("IPV6 tcp", &addressesv6, "tcp", false),
+				ginkgo.Entry("IPV4 udp + pod delete", &addressesv4, "udp", true),
+				ginkgo.Entry("IPV6 tcp + pod delete", &addressesv6, "tcp", true),
+			)
 		})
 
 		// BFD Tests are dual of external gateway. The only difference is that they enable BFD on ovn and
@@ -2998,7 +3009,7 @@ func reachPodFromGateway(targetAddress, targetPort, targetPodName, srcContainer,
 	gomega.Expect(strings.Trim(res, "\n")).To(gomega.Equal(targetPodName))
 }
 
-func annotatePodForGateway(podName, podNS, namespace, networkIPs string, bfd bool) {
+func annotatePodForGateway(podName, podNS, targetNamespace, networkIPs string, bfd bool) {
 	if !strings.HasPrefix(networkIPs, "\"") {
 		networkIPs = fmt.Sprintf("\"%s\"", networkIPs)
 	}
@@ -3008,7 +3019,7 @@ func annotatePodForGateway(podName, podNS, namespace, networkIPs string, bfd boo
 	annotateArgs := []string{
 		fmt.Sprintf("k8s.v1.cni.cncf.io/network-status=[{\"name\":\"%s\",\"interface\":"+
 			"\"net1\",\"ips\":[%s],\"mac\":\"%s\"}]", "foo", networkIPs, "01:23:45:67:89:10"),
-		fmt.Sprintf("k8s.ovn.org/routing-namespaces=%s", namespace),
+		fmt.Sprintf("k8s.ovn.org/routing-namespaces=%s", targetNamespace),
 		fmt.Sprintf("k8s.ovn.org/routing-network=%s", "foo"),
 	}
 	if bfd {
