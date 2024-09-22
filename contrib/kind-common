@@ -389,7 +389,8 @@ install_cert_manager() {
 install_kubevirt_ipam_controller() {
   echo "Installing KubeVirt IPAM controller manager ..."
   manifest="https://raw.githubusercontent.com/kubevirt/ipam-extensions/main/dist/install.yaml"
-  run_kubectl apply -f "$manifest"
+  curl -sL $manifest | sed 's#ghcr.io/kubevirt/ipam-controller#quay.io/oshoval/kubevirt-ipam-controller#' > ipam.yaml
+  run_kubectl apply -f ipam.yaml
   kubectl wait -n kubevirt-ipam-controller-system deployment kubevirt-ipam-controller-manager --for condition=Available --timeout 2m
 }
 
