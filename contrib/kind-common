@@ -606,6 +606,24 @@ spec:
   ]
 }'
 EOF
+
+  cat <<EOF | oc apply -f -
+---
+apiVersion: "k8s.cni.cncf.io/v1"
+kind: NetworkAttachmentDefinition
+metadata:
+  name: ovn-kubernetes
+  namespace: default
+spec:
+  config: '{
+    "cniVersion": "0.4.0",
+    "name": "ovn-kubernetes",
+    "type": "ovn-k8s-cni-overlay",
+    "ipam": {},
+    "dns": {},
+    "runtimeConfig": {}
+  }'
+EOF
 }
 
 deploy_passt_binary() {
