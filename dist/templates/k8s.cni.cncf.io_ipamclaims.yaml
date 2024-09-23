@@ -1,0 +1,63 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.13.0
+  name: ipamclaims.k8s.cni.cncf.io
+spec:
+  group: k8s.cni.cncf.io
+  names:
+    kind: IPAMClaim
+    listKind: IPAMClaimList
+    plural: ipamclaims
+    singular: ipamclaim
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: IPAMClaim is the Schema for the IPAMClaim API
+        properties:
+          apiVersion:
+            description: 'APIVersion defines the versioned schema of this representation
+              of an object. Servers should convert recognized schemas to the latest
+              internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources'
+            type: string
+          kind:
+            description: 'Kind is a string value representing the REST resource this
+              object represents. Servers may infer this from the endpoint the client
+              submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
+            type: string
+          metadata:
+            type: object
+          spec:
+            properties:
+              interface:
+                description: The pod interface name for which this allocation was
+                  created
+                type: string
+              network:
+                description: The network name for which this persistent allocation
+                  was created
+                type: string
+            required:
+            - interface
+            - network
+            type: object
+          status:
+            properties:
+              ips:
+                description: The list of IP addresses (v4, v6) that were allocated
+                  for the pod interface
+                items:
+                  type: string
+                type: array
+            required:
+            - ips
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
