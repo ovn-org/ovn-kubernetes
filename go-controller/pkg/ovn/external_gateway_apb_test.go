@@ -21,8 +21,8 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
-	"github.com/onsi/ginkgo"
-	"github.com/onsi/ginkgo/extensions/table"
+	"github.com/onsi/ginkgo/v2"
+
 	"github.com/onsi/gomega"
 	"github.com/urfave/cli/v2"
 	v1 "k8s.io/api/core/v1"
@@ -104,7 +104,7 @@ var _ = ginkgo.Describe("OVN for APB External Route Operations", func() {
 
 	ginkgo.Context("on setting namespace gateway static hop", func() {
 
-		table.DescribeTable("reconciles an new pod with namespace single exgw static GW already set", func(bfd bool, finalNB []libovsdbtest.TestData) {
+		ginkgo.DescribeTable("reconciles an new pod with namespace single exgw static GW already set", func(bfd bool, finalNB []libovsdbtest.TestData) {
 			app.Action = func(ctx *cli.Context) error {
 
 				namespaceT := *newNamespace(namespaceName)
@@ -167,7 +167,7 @@ var _ = ginkgo.Describe("OVN for APB External Route Operations", func() {
 
 			err := app.Run([]string{app.Name})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		}, table.Entry("No BFD", false, []libovsdbtest.TestData{
+		}, ginkgo.Entry("No BFD", false, []libovsdbtest.TestData{
 			&nbdb.LogicalSwitchPort{
 				UUID:      "lsp1",
 				Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
@@ -203,7 +203,7 @@ var _ = ginkgo.Describe("OVN for APB External Route Operations", func() {
 				StaticRoutes: []string{"static-route-1-UUID"},
 			},
 		}),
-			table.Entry("BFD Enabled", true, []libovsdbtest.TestData{
+			ginkgo.Entry("BFD Enabled", true, []libovsdbtest.TestData{
 				&nbdb.LogicalSwitchPort{
 					UUID:      "lsp1",
 					Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
@@ -246,7 +246,7 @@ var _ = ginkgo.Describe("OVN for APB External Route Operations", func() {
 				},
 			}))
 
-		table.DescribeTable("reconciles an new pod with namespace single exgw static GW after policy is created", func(bfd bool, finalNB []libovsdbtest.TestData) {
+		ginkgo.DescribeTable("reconciles an new pod with namespace single exgw static GW after policy is created", func(bfd bool, finalNB []libovsdbtest.TestData) {
 			app.Action = func(ctx *cli.Context) error {
 
 				namespaceT := *newNamespace(namespaceName)
@@ -313,7 +313,7 @@ var _ = ginkgo.Describe("OVN for APB External Route Operations", func() {
 
 			err := app.Run([]string{app.Name})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		}, table.Entry("No BFD", false, []libovsdbtest.TestData{
+		}, ginkgo.Entry("No BFD", false, []libovsdbtest.TestData{
 			&nbdb.LogicalSwitchPort{
 				UUID:      "lsp1",
 				Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
@@ -349,7 +349,7 @@ var _ = ginkgo.Describe("OVN for APB External Route Operations", func() {
 				StaticRoutes: []string{"static-route-1-UUID"},
 			},
 		}),
-			table.Entry("BFD Enabled", true, []libovsdbtest.TestData{
+			ginkgo.Entry("BFD Enabled", true, []libovsdbtest.TestData{
 				&nbdb.LogicalSwitchPort{
 					UUID:      "lsp1",
 					Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
@@ -392,7 +392,7 @@ var _ = ginkgo.Describe("OVN for APB External Route Operations", func() {
 				},
 			}))
 
-		table.DescribeTable("reconciles an new pod with namespace single exgw static gateway already set with pod event first", func(bfd bool, finalNB []libovsdbtest.TestData) {
+		ginkgo.DescribeTable("reconciles an new pod with namespace single exgw static gateway already set with pod event first", func(bfd bool, finalNB []libovsdbtest.TestData) {
 			app.Action = func(ctx *cli.Context) error {
 
 				namespaceT := *newNamespace(namespaceName)
@@ -452,7 +452,7 @@ var _ = ginkgo.Describe("OVN for APB External Route Operations", func() {
 
 			err := app.Run([]string{app.Name})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		}, table.Entry("No BFD", false, []libovsdbtest.TestData{
+		}, ginkgo.Entry("No BFD", false, []libovsdbtest.TestData{
 			&nbdb.LogicalSwitchPort{
 				UUID:      "lsp1",
 				Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
@@ -488,7 +488,7 @@ var _ = ginkgo.Describe("OVN for APB External Route Operations", func() {
 				StaticRoutes: []string{"static-route-1-UUID"},
 			},
 		}),
-			table.Entry("BFD Enabled", true, []libovsdbtest.TestData{
+			ginkgo.Entry("BFD Enabled", true, []libovsdbtest.TestData{
 				&nbdb.LogicalSwitchPort{
 					UUID:      "lsp1",
 					Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
@@ -531,7 +531,7 @@ var _ = ginkgo.Describe("OVN for APB External Route Operations", func() {
 				},
 			}))
 
-		table.DescribeTable("reconciles an new pod with namespace double exgw static gateways already set", func(bfd bool, finalNB []libovsdbtest.TestData) {
+		ginkgo.DescribeTable("reconciles an new pod with namespace double exgw static gateways already set", func(bfd bool, finalNB []libovsdbtest.TestData) {
 
 			app.Action = func(ctx *cli.Context) error {
 
@@ -595,7 +595,7 @@ var _ = ginkgo.Describe("OVN for APB External Route Operations", func() {
 			err := app.Run([]string{app.Name})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		},
-			table.Entry("No BFD", false, []libovsdbtest.TestData{
+			ginkgo.Entry("No BFD", false, []libovsdbtest.TestData{
 				&nbdb.LogicalSwitchPort{
 					UUID:      "lsp1",
 					Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
@@ -641,7 +641,7 @@ var _ = ginkgo.Describe("OVN for APB External Route Operations", func() {
 					StaticRoutes: []string{"static-route-1-UUID", "static-route-2-UUID"},
 				},
 			}),
-			table.Entry("BFD Enabled", true, []libovsdbtest.TestData{
+			ginkgo.Entry("BFD Enabled", true, []libovsdbtest.TestData{
 				&nbdb.LogicalSwitchPort{
 					UUID:      "lsp1",
 					Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
@@ -701,7 +701,7 @@ var _ = ginkgo.Describe("OVN for APB External Route Operations", func() {
 			}),
 		)
 
-		table.DescribeTable("reconciles deleting a pod with namespace double exgw static gateway already set",
+		ginkgo.DescribeTable("reconciles deleting a pod with namespace double exgw static gateway already set",
 			func(bfd bool,
 				initNB []libovsdbtest.TestData,
 				syncNB []libovsdbtest.TestData,
@@ -766,7 +766,7 @@ var _ = ginkgo.Describe("OVN for APB External Route Operations", func() {
 				err := app.Run([]string{app.Name})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			},
-			table.Entry("No BFD", false,
+			ginkgo.Entry("No BFD", false,
 				[]libovsdbtest.TestData{
 					&nbdb.LogicalSwitch{
 						UUID: "node1",
@@ -836,7 +836,7 @@ var _ = ginkgo.Describe("OVN for APB External Route Operations", func() {
 					},
 				},
 			),
-			table.Entry("BFD", true,
+			ginkgo.Entry("BFD", true,
 				[]libovsdbtest.TestData{
 					&nbdb.LogicalSwitch{
 						UUID: "node1",
@@ -920,7 +920,7 @@ var _ = ginkgo.Describe("OVN for APB External Route Operations", func() {
 			),
 		)
 
-		table.DescribeTable("reconciles deleting a pod with namespace double exgw static gateway already set IPV6",
+		ginkgo.DescribeTable("reconciles deleting a pod with namespace double exgw static gateway already set IPV6",
 			func(bfd bool,
 				initNB, syncNB, finalNB []libovsdbtest.TestData) {
 				app.Action = func(ctx *cli.Context) error {
@@ -980,7 +980,7 @@ var _ = ginkgo.Describe("OVN for APB External Route Operations", func() {
 				err := app.Run([]string{app.Name})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			},
-			table.Entry("BFD IPV6", true, []libovsdbtest.TestData{
+			ginkgo.Entry("BFD IPV6", true, []libovsdbtest.TestData{
 				&nbdb.LogicalSwitch{
 					UUID: "node1",
 					Name: "node1",
@@ -1062,7 +1062,7 @@ var _ = ginkgo.Describe("OVN for APB External Route Operations", func() {
 			),
 		)
 
-		table.DescribeTable("reconciles deleting a exgw namespace with active pod",
+		ginkgo.DescribeTable("reconciles deleting a exgw namespace with active pod",
 			func(bfd bool,
 				initNB []libovsdbtest.TestData,
 				finalNB []libovsdbtest.TestData,
@@ -1124,7 +1124,7 @@ var _ = ginkgo.Describe("OVN for APB External Route Operations", func() {
 				err := app.Run([]string{app.Name})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			},
-			table.Entry("No BFD", false,
+			ginkgo.Entry("No BFD", false,
 				[]libovsdbtest.TestData{
 					&nbdb.LogicalSwitch{
 						UUID: "node1",
@@ -1183,7 +1183,7 @@ var _ = ginkgo.Describe("OVN for APB External Route Operations", func() {
 					},
 				},
 			),
-			table.Entry("BFD", true,
+			ginkgo.Entry("BFD", true,
 				[]libovsdbtest.TestData{
 					&nbdb.LogicalSwitch{
 						UUID: "node1",
@@ -1257,7 +1257,7 @@ var _ = ginkgo.Describe("OVN for APB External Route Operations", func() {
 	})
 
 	ginkgo.Context("on setting pod dynamic gateways", func() {
-		table.DescribeTable("reconciles a host networked pod acting as a exgw for another namespace for new pod", func(bfd bool, finalNB []libovsdbtest.TestData) {
+		ginkgo.DescribeTable("reconciles a host networked pod acting as a exgw for another namespace for new pod", func(bfd bool, finalNB []libovsdbtest.TestData) {
 			app.Action = func(ctx *cli.Context) error {
 
 				namespaceT := *newNamespace(namespaceName)
@@ -1328,7 +1328,7 @@ var _ = ginkgo.Describe("OVN for APB External Route Operations", func() {
 
 			err := app.Run([]string{app.Name})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		}, table.Entry("No BFD", false, []libovsdbtest.TestData{
+		}, ginkgo.Entry("No BFD", false, []libovsdbtest.TestData{
 			&nbdb.LogicalSwitchPort{
 				UUID:      "lsp1",
 				Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
@@ -1364,7 +1364,7 @@ var _ = ginkgo.Describe("OVN for APB External Route Operations", func() {
 				StaticRoutes: []string{"static-route-1-UUID"},
 			},
 		}),
-			table.Entry("BFD Enabled", true, []libovsdbtest.TestData{
+			ginkgo.Entry("BFD Enabled", true, []libovsdbtest.TestData{
 				&nbdb.LogicalSwitchPort{
 					UUID:      "lsp1",
 					Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
@@ -1407,7 +1407,7 @@ var _ = ginkgo.Describe("OVN for APB External Route Operations", func() {
 				},
 			}))
 
-		table.DescribeTable("reconciles a host networked pod acting as a exgw for another namespace for existing pod", func(bfd bool, finalNB []libovsdbtest.TestData) {
+		ginkgo.DescribeTable("reconciles a host networked pod acting as a exgw for another namespace for existing pod", func(bfd bool, finalNB []libovsdbtest.TestData) {
 			app.Action = func(ctx *cli.Context) error {
 
 				namespaceT := *newNamespace(namespaceName)
@@ -1470,7 +1470,7 @@ var _ = ginkgo.Describe("OVN for APB External Route Operations", func() {
 
 			err := app.Run([]string{app.Name})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		}, table.Entry("No BFD", false, []libovsdbtest.TestData{
+		}, ginkgo.Entry("No BFD", false, []libovsdbtest.TestData{
 			&nbdb.LogicalSwitchPort{
 				UUID:      "lsp1",
 				Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
@@ -1506,7 +1506,7 @@ var _ = ginkgo.Describe("OVN for APB External Route Operations", func() {
 				StaticRoutes: []string{"static-route-1-UUID"},
 			},
 		}),
-			table.Entry("BFD Enabled", true, []libovsdbtest.TestData{
+			ginkgo.Entry("BFD Enabled", true, []libovsdbtest.TestData{
 				&nbdb.LogicalSwitchPort{
 					UUID:      "lsp1",
 					Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
@@ -1549,7 +1549,7 @@ var _ = ginkgo.Describe("OVN for APB External Route Operations", func() {
 				},
 			}))
 
-		table.DescribeTable("reconciles a multus networked pod acting as a exgw for another namespace for new pod", func(bfd bool, finalNB []libovsdbtest.TestData) {
+		ginkgo.DescribeTable("reconciles a multus networked pod acting as a exgw for another namespace for new pod", func(bfd bool, finalNB []libovsdbtest.TestData) {
 			app.Action = func(ctx *cli.Context) error {
 				ns := nettypes.NetworkStatus{Name: "dummy", IPs: []string{"11.0.0.1"}}
 				networkStatuses := []nettypes.NetworkStatus{ns}
@@ -1632,7 +1632,7 @@ var _ = ginkgo.Describe("OVN for APB External Route Operations", func() {
 
 			err := app.Run([]string{app.Name})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		}, table.Entry("No BFD", false, []libovsdbtest.TestData{
+		}, ginkgo.Entry("No BFD", false, []libovsdbtest.TestData{
 			&nbdb.LogicalSwitchPort{
 				UUID:      "lsp1",
 				Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
@@ -1668,7 +1668,7 @@ var _ = ginkgo.Describe("OVN for APB External Route Operations", func() {
 				StaticRoutes: []string{"static-route-1-UUID"},
 			},
 		}),
-			table.Entry("BFD Enabled", true, []libovsdbtest.TestData{
+			ginkgo.Entry("BFD Enabled", true, []libovsdbtest.TestData{
 				&nbdb.LogicalSwitchPort{
 					UUID:      "lsp1",
 					Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
@@ -1711,7 +1711,7 @@ var _ = ginkgo.Describe("OVN for APB External Route Operations", func() {
 				},
 			}))
 
-		table.DescribeTable("reconciles deleting a host networked pod acting as a exgw for another namespace for existing pod",
+		ginkgo.DescribeTable("reconciles deleting a host networked pod acting as a exgw for another namespace for existing pod",
 			func(bfd bool,
 				beforeDeleteNB []libovsdbtest.TestData,
 				afterDeleteNB []libovsdbtest.TestData) {
@@ -1785,7 +1785,7 @@ var _ = ginkgo.Describe("OVN for APB External Route Operations", func() {
 				err := app.Run([]string{app.Name})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			},
-			table.Entry("No BFD", false,
+			ginkgo.Entry("No BFD", false,
 				[]libovsdbtest.TestData{
 					&nbdb.LogicalSwitchPort{
 						UUID:      "lsp1",
@@ -1849,7 +1849,7 @@ var _ = ginkgo.Describe("OVN for APB External Route Operations", func() {
 					},
 				},
 			),
-			table.Entry("BFD Enabled", true, []libovsdbtest.TestData{
+			ginkgo.Entry("BFD Enabled", true, []libovsdbtest.TestData{
 				&nbdb.LogicalSwitchPort{
 					UUID:      "lsp1",
 					Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},

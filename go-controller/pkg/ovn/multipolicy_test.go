@@ -9,8 +9,8 @@ import (
 	cnitypes "github.com/containernetworking/cni/pkg/types"
 	mnpapi "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta1"
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
-	"github.com/onsi/ginkgo"
-	"github.com/onsi/ginkgo/extensions/table"
+	"github.com/onsi/ginkgo/v2"
+
 	"github.com/onsi/gomega"
 	"github.com/onsi/gomega/format"
 	"github.com/urfave/cli/v2"
@@ -532,7 +532,7 @@ var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 
-		table.DescribeTable("correctly adds and deletes pod IPs from secondary network namespace address set",
+		ginkgo.DescribeTable("correctly adds and deletes pod IPs from secondary network namespace address set",
 			func(topology string, remote bool) {
 				app.Action = func(ctx *cli.Context) error {
 					var err error
@@ -623,12 +623,12 @@ var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
 				err := app.Run([]string{app.Name})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			},
-			table.Entry("on local zone for layer3 topology", ovntypes.Layer3Topology, false),
-			table.Entry("on remote zone for layer3 topology", ovntypes.Layer3Topology, true),
-			table.Entry("on local zone for layer2 topology", ovntypes.Layer2Topology, false),
-			table.Entry("on remote zone for layer2 topology", ovntypes.Layer2Topology, true),
-			table.Entry("on local zone for localnet topology", ovntypes.LocalnetTopology, false),
-			table.Entry("on remote zone for localnet topology", ovntypes.LocalnetTopology, true),
+			ginkgo.Entry("on local zone for layer3 topology", ovntypes.Layer3Topology, false),
+			ginkgo.Entry("on remote zone for layer3 topology", ovntypes.Layer3Topology, true),
+			ginkgo.Entry("on local zone for layer2 topology", ovntypes.Layer2Topology, false),
+			ginkgo.Entry("on remote zone for layer2 topology", ovntypes.Layer2Topology, true),
+			ginkgo.Entry("on local zone for localnet topology", ovntypes.LocalnetTopology, false),
+			ginkgo.Entry("on remote zone for localnet topology", ovntypes.LocalnetTopology, true),
 		)
 	})
 })

@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/miekg/dns"
-	"github.com/onsi/ginkgo"
-	"github.com/onsi/ginkgo/extensions/table"
+	"github.com/onsi/ginkgo/v2"
+
 	"github.com/onsi/gomega"
 	"github.com/stretchr/testify/mock"
 	"github.com/urfave/cli/v2"
@@ -513,7 +513,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			})
-			table.DescribeTable("correctly removes stale acl and DNS address set created", func(gwMode config.GatewayMode, oldDNS bool) {
+			ginkgo.DescribeTable("correctly removes stale acl and DNS address set created", func(gwMode config.GatewayMode, oldDNS bool) {
 				if !oldDNS {
 					// enable the dns name resolver flag.
 					config.OVNKubernetesFeature.EnableDNSNameResolver = true
@@ -552,8 +552,8 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			},
-				table.Entry(fmt.Sprintf("correctly removes stale acl and DNS address set created using old dns resolution, gateway mode %s", gwMode), gwMode, true),
-				table.Entry(fmt.Sprintf("correctly removes stale acl and DNS address set created using new dns resolution, gateway mode %s", gwMode), gwMode, false),
+				ginkgo.Entry(fmt.Sprintf("correctly removes stale acl and DNS address set created using old dns resolution, gateway mode %s", gwMode), gwMode, true),
+				ginkgo.Entry(fmt.Sprintf("correctly removes stale acl and DNS address set created using new dns resolution, gateway mode %s", gwMode), gwMode, false),
 			)
 		})
 		ginkgo.Context("during execution", func() {
@@ -1281,7 +1281,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 				err := app.Run([]string{app.Name})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			})
-			table.DescribeTable("correctly cleans up object that failed to be created", func(gwMode config.GatewayMode, oldDNS bool) {
+			ginkgo.DescribeTable("correctly cleans up object that failed to be created", func(gwMode config.GatewayMode, oldDNS bool) {
 				config.Gateway.Mode = gwMode
 				if !oldDNS {
 					// enable the dns name resolver flag.
@@ -1356,10 +1356,10 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 				err := app.Run([]string{app.Name})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			},
-				table.Entry(fmt.Sprintf("correctly cleans up object that failed to be created using old dns resolution, gateway mode %s", gwMode), gwMode, true),
-				table.Entry(fmt.Sprintf("correctly cleans up object that failed to be created using new dns resolution, gateway mode %s", gwMode), gwMode, false),
+				ginkgo.Entry(fmt.Sprintf("correctly cleans up object that failed to be created using old dns resolution, gateway mode %s", gwMode), gwMode, true),
+				ginkgo.Entry(fmt.Sprintf("correctly cleans up object that failed to be created using new dns resolution, gateway mode %s", gwMode), gwMode, false),
 			)
-			table.DescribeTable("correctly creates egress firewall using different dns resolution methods, dns name types and ip families", func(gwMode config.GatewayMode, oldDNS bool, dnsName, resolvedIP string) {
+			ginkgo.DescribeTable("correctly creates egress firewall using different dns resolution methods, dns name types and ip families", func(gwMode config.GatewayMode, oldDNS bool, dnsName, resolvedIP string) {
 				if !oldDNS {
 					// enable the dns name resolver flag.
 					config.OVNKubernetesFeature.EnableDNSNameResolver = true
@@ -1427,12 +1427,12 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 				err := app.Run([]string{app.Name})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			},
-				table.Entry(fmt.Sprintf("correctly creates egress firewall using old dns resolution for regular DNS name with IPv4 address, gateway mode %s", gwMode), gwMode, true, "a.b.c", "2.2.2.2"),
-				table.Entry(fmt.Sprintf("correctly creates egress firewall using new dns resolution for regular DNS name with IPv4 address, gateway mode %s", gwMode), gwMode, false, "a.b.c", "2.2.2.2"),
-				table.Entry(fmt.Sprintf("correctly creates egress firewall using old dns resolution for regular DNS name with IPv6 address, gateway mode %s", gwMode), gwMode, true, "a.b.c", "2002::1234:abcd:ffff:c0a8:101"),
-				table.Entry(fmt.Sprintf("correctly creates egress firewall using new dns resolution for regular DNS name with IPv6 address, gateway mode %s", gwMode), gwMode, false, "a.b.c", "2002::1234:abcd:ffff:c0a8:101"),
-				table.Entry(fmt.Sprintf("correctly creates egress firewall using new dns resolution for wildcard DNS name  with IPv4 address, gateway mode %s", gwMode), gwMode, false, "*.b.c", "2.2.2.2"),
-				table.Entry(fmt.Sprintf("correctly creates egress firewall using new dns resolution for wildcard DNS name  with IPv6 address, gateway mode %s", gwMode), gwMode, false, "*.b.c", "2002::1234:abcd:ffff:c0a8:101"),
+				ginkgo.Entry(fmt.Sprintf("correctly creates egress firewall using old dns resolution for regular DNS name with IPv4 address, gateway mode %s", gwMode), gwMode, true, "a.b.c", "2.2.2.2"),
+				ginkgo.Entry(fmt.Sprintf("correctly creates egress firewall using new dns resolution for regular DNS name with IPv4 address, gateway mode %s", gwMode), gwMode, false, "a.b.c", "2.2.2.2"),
+				ginkgo.Entry(fmt.Sprintf("correctly creates egress firewall using old dns resolution for regular DNS name with IPv6 address, gateway mode %s", gwMode), gwMode, true, "a.b.c", "2002::1234:abcd:ffff:c0a8:101"),
+				ginkgo.Entry(fmt.Sprintf("correctly creates egress firewall using new dns resolution for regular DNS name with IPv6 address, gateway mode %s", gwMode), gwMode, false, "a.b.c", "2002::1234:abcd:ffff:c0a8:101"),
+				ginkgo.Entry(fmt.Sprintf("correctly creates egress firewall using new dns resolution for wildcard DNS name  with IPv4 address, gateway mode %s", gwMode), gwMode, false, "*.b.c", "2.2.2.2"),
+				ginkgo.Entry(fmt.Sprintf("correctly creates egress firewall using new dns resolution for wildcard DNS name  with IPv6 address, gateway mode %s", gwMode), gwMode, false, "*.b.c", "2002::1234:abcd:ffff:c0a8:101"),
 			)
 		})
 	}

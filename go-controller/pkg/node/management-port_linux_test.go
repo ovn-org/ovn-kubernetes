@@ -39,7 +39,7 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	anpfake "sigs.k8s.io/network-policy-api/pkg/client/clientset/versioned/fake"
 
-	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
 

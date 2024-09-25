@@ -2,7 +2,7 @@ package batching
 
 import (
 	"fmt"
-	"github.com/onsi/ginkgo"
+
 	"github.com/onsi/gomega"
 
 	"strings"
@@ -58,7 +58,6 @@ func TestBatch(t *testing.T) {
 
 	for _, tCase := range tt {
 		g := gomega.NewGomegaWithT(t)
-		ginkgo.By(tCase.name)
 		var result []int
 		batchNum := 0
 		err := Batch[int](tCase.batchSize, tCase.data, func(l []int) error {
@@ -199,7 +198,6 @@ func TestBatchMap(t *testing.T) {
 
 	for _, tCase := range tt {
 		g := gomega.NewGomegaWithT(t)
-		ginkgo.By(tCase.name)
 		result := map[string][]int{}
 		batchNum := 0
 		err := BatchMap[int](tCase.batchSize, tCase.data, func(l map[string][]int) error {

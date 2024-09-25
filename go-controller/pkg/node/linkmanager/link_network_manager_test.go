@@ -7,8 +7,8 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
 
-	"github.com/onsi/ginkgo"
-	"github.com/onsi/ginkgo/extensions/table"
+	"github.com/onsi/ginkgo/v2"
+
 	"github.com/onsi/gomega"
 	"github.com/stretchr/testify/mock"
 	"github.com/vishvananda/netlink"
@@ -112,7 +112,7 @@ var _ = ginkgo.Describe("Link network manager", func() {
 	//
 	// There maybe a discrepancy between existingLinkAddr link addresses and existingStore link addresses because a link may
 	// have addresses that aren't managed. Link1 is always the target of the new addresses to add.
-	table.DescribeTable("Add address to link1", func(addrToAdd netlink.Addr, existingLinkAddr []netlink.Addr, existingStore map[string][]netlink.Addr,
+	ginkgo.DescribeTable("Add address to link1", func(addrToAdd netlink.Addr, existingLinkAddr []netlink.Addr, existingStore map[string][]netlink.Addr,
 		v4Enabled, v6Enabled, expectErr, expectAddAddrCalled bool) {
 
 		expectedAddr := addrToAdd
@@ -138,17 +138,17 @@ var _ = ginkgo.Describe("Link network manager", func() {
 		if expectAddAddrCalled {
 			gomega.Expect(nlMock.AssertCalled(ginkgo.GinkgoT(), "AddrAdd", nlLink1Mock, &expectedAddr)).Should(gomega.BeTrue())
 		}
-	}, table.Entry("Add valid IPv4 address with empty store",
+	}, ginkgo.Entry("Add valid IPv4 address with empty store",
 		newNetlinkAddrWithIndexSet(v4CIDR1, linkName1), []netlink.Addr{}, map[string][]netlink.Addr{}, v4Enabled, v6Disabled, noErr, addrAddCalled),
-		table.Entry("Doesn't add IPv4 address when IPv4 is disabled and IPv6 enabled",
+		ginkgo.Entry("Doesn't add IPv4 address when IPv4 is disabled and IPv6 enabled",
 			newNetlinkAddrWithIndexSet(v4CIDR1, linkName1), []netlink.Addr{}, map[string][]netlink.Addr{}, v4Disable, v6Enabled, Err, addrAddNotCalled),
-		table.Entry("Add IPv4 address when it exists in store but not applied",
+		ginkgo.Entry("Add IPv4 address when it exists in store but not applied",
 			newNetlinkAddrWithIndexSet(v4CIDR1, linkName1), []netlink.Addr{},
 			map[string][]netlink.Addr{
 				linkName1: {newNetlinkAddrWithIndexSet(v4CIDR1, linkName1)},
 			},
 			v4Enabled, v6Disabled, noErr, addrAddNotCalled),
-		table.Entry("Doesn't attempt to add an IPv4 address when already applied and exists in store",
+		ginkgo.Entry("Doesn't attempt to add an IPv4 address when already applied and exists in store",
 			newNetlinkAddrWithIndexSet(v4CIDR1, linkName1), []netlink.Addr{newNetlinkAddrWithIndexSet(v4CIDR1, linkName1)},
 			map[string][]netlink.Addr{
 				linkName1: {newNetlinkAddrWithIndexSet(v4CIDR1, linkName1)},
@@ -162,7 +162,7 @@ var _ = ginkgo.Describe("Link network manager", func() {
 	//
 	// There maybe a discrepancy between existingLinkAddr link addresses and existingStore link addresses because a link may
 	// have addresses that aren't managed. Link1 is always the target of the new addresses to delete.
-	table.DescribeTable("Delete address from link1", func(addrToDel netlink.Addr, existingLinkAddr []netlink.Addr, existingStore map[string][]netlink.Addr,
+	ginkgo.DescribeTable("Delete address from link1", func(addrToDel netlink.Addr, existingLinkAddr []netlink.Addr, existingStore map[string][]netlink.Addr,
 		v4Enabled, v6Enabled, expectErr, expectDelAddrCalled bool) {
 
 		expectedAddr := addrToDel
@@ -188,7 +188,7 @@ var _ = ginkgo.Describe("Link network manager", func() {
 		if expectDelAddrCalled {
 			gomega.Expect(nlMock.AssertCalled(ginkgo.GinkgoT(), "AddrDel", nlLink1Mock, &expectedAddr)).Should(gomega.BeTrue())
 		}
-	}, table.Entry("Deletes an IPv4 address which exists in store and is applied",
+	}, ginkgo.Entry("Deletes an IPv4 address which exists in store and is applied",
 		newNetlinkAddrWithIndexSet(v4CIDR1, linkName1), []netlink.Addr{
 			newNetlinkAddrWithIndexSet(v4CIDR1, linkName1),
 			newNetlinkAddrWithIndexSet(v4CIDR2, linkName2),
@@ -196,7 +196,7 @@ var _ = ginkgo.Describe("Link network manager", func() {
 			linkName1: {newNetlinkAddrWithIndexSet(v4CIDR1, linkName1)},
 			linkName2: {newNetlinkAddrWithIndexSet(v4CIDR2, linkName2)},
 		}, v4Enabled, v6Disabled, noErr, addrDelCalled),
-		table.Entry("Doesn't attempt to delete an IPv4 address which exists in store but not applied",
+		ginkgo.Entry("Doesn't attempt to delete an IPv4 address which exists in store but not applied",
 			newNetlinkAddrWithIndexSet(v4CIDR1, linkName1), []netlink.Addr{
 				newNetlinkAddrWithIndexSet(v4CIDR1, linkName1), // different address than the one attempted to be deleted
 				newNetlinkAddrWithIndexSet(v4CIDR2, linkName2),
@@ -204,7 +204,7 @@ var _ = ginkgo.Describe("Link network manager", func() {
 				linkName1: {newNetlinkAddrWithIndexSet(v4CIDR1, linkName1)},
 				linkName2: {newNetlinkAddrWithIndexSet(v4CIDR2, linkName2)},
 			}, v4Enabled, v6Disabled, noErr, addrDelNotCalled),
-		table.Entry("Doesn't delete IPv4 address when IPv4 is disabled and IPv6 enabled",
+		ginkgo.Entry("Doesn't delete IPv4 address when IPv4 is disabled and IPv6 enabled",
 			newNetlinkAddrWithIndexSet(v4CIDR1, linkName1), []netlink.Addr{}, map[string][]netlink.Addr{}, v4Disable, v6Enabled, Err, addrDelNotCalled),
 	)
 })

@@ -15,7 +15,7 @@ import (
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
-	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 )
 
@@ -1626,7 +1626,7 @@ udn-allowed-default-services=namespace/invalid.name,test
 
 	It("accepts a config with valid udn allowed services", func() {
 		err := ioutil.WriteFile(cfgFile.Name(), []byte(`[default]
-udn-allowed-default-services= ns/svc, ns1/svc1 
+udn-allowed-default-services= ns/svc, ns1/svc1
 `), 0o644)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
