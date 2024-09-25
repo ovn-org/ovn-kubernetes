@@ -2,11 +2,11 @@ package persistentips
 
 import (
 	"context"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip"
 	"testing"
 
-	. "github.com/onsi/ginkgo"
-	"github.com/onsi/ginkgo/extensions/table"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip"
+
+	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
 	"github.com/containernetworking/cni/pkg/types"
@@ -79,40 +79,40 @@ var _ = Describe("Persistent IP allocator operations", func() {
 			Expect(ipamClaimsReconciler.Reconcile(nil, nil, namedAllocator)).To(Succeed())
 		})
 
-		table.DescribeTable("reconciling IPAMClaims is successful when provided with", func(oldIPAMClaim, newIPAMClaim *ipamclaimsapi.IPAMClaim) {
+		DescribeTable("reconciling IPAMClaims is successful when provided with", func(oldIPAMClaim, newIPAMClaim *ipamclaimsapi.IPAMClaim) {
 			Expect(ipamClaimsReconciler.Reconcile(oldIPAMClaim, newIPAMClaim, namedAllocator)).To(Succeed())
 			updatedIPAMClaim, err := ovnkapiclient.IPAMClaimsClient.K8sV1alpha1().IPAMClaims(namespace).Get(context.Background(), claimName, metav1.GetOptions{})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(updatedIPAMClaim.Status.IPs).To(ConsistOf(newIPAMClaim.Status.IPs))
 		},
-			table.Entry(
+			Entry(
 				"no IP addresses to persist",
 				nil,
 				emptyDummyIPAMClaim(namespace, claimName, networkName),
 			),
-			table.Entry(
+			Entry(
 				"no IP addresses to persist, but it is nothing new",
 				emptyDummyIPAMClaim(namespace, claimName, networkName),
 				emptyDummyIPAMClaim(namespace, claimName, networkName),
 			),
-			table.Entry(
+			Entry(
 				"an IP addresses to persist",
 				nil,
 				ipamClaimWithIPs(namespace, claimName, networkName),
 			),
-			table.Entry(
+			Entry(
 				"an IP addresses to persist, but already present",
 				ipamClaimWithIPs(namespace, claimName, networkName),
 				ipamClaimWithIPs(namespace, claimName, networkName),
 			),
 		)
 
-		table.DescribeTable("syncing the IP allocator from the IPAMClaims is successful when provided with", func(ipamClaims ...interface{}) {
+		DescribeTable("syncing the IP allocator from the IPAMClaims is successful when provided with", func(ipamClaims ...interface{}) {
 			Expect(ipamClaimsReconciler.Sync(ipamClaims, namedAllocator)).To(Succeed())
 		},
-			table.Entry("no objects to sync with"),
-			table.Entry("an IPAMClaim without persisted IPs", emptyDummyIPAMClaim(namespace, claimName, networkName)),
-			table.Entry("an IPAMClaim with persisted IPs", ipamClaimWithIPs(namespace, claimName, networkName, "192.168.200.2/24", "fd10::1/64")),
+			Entry("no objects to sync with"),
+			Entry("an IPAMClaim without persisted IPs", emptyDummyIPAMClaim(namespace, claimName, networkName)),
+			Entry("an IPAMClaim with persisted IPs", ipamClaimWithIPs(namespace, claimName, networkName, "192.168.200.2/24", "fd10::1/64")),
 		)
 	})
 
@@ -232,7 +232,7 @@ var _ = Describe("Persistent IP allocator operations", func() {
 	})
 
 	Context("retrieving IPAMClaims", func() {
-		table.DescribeTable(
+		DescribeTable(
 			"succeeds",
 			func(
 				netConf *ovncnitypes.NetConf,
@@ -256,14 +256,14 @@ var _ = Describe("Persistent IP allocator operations", func() {
 					),
 				).To(Equal(expectedClaim))
 			},
-			table.Entry(
+			Entry(
 				"when the claim we're looking for is actually passed in layer2 topology",
 				&ovncnitypes.NetConf{Topology: ovnktypes.Layer2Topology, Subnets: "192.10.10.0/24"},
 				&nadapi.NetworkSelectionElement{IPAMClaimReference: claimName, Namespace: namespace},
 				ipamClaimWithIPs(namespace, claimName, networkName, "192.10.10.10/24"),
 				ipamClaimWithIPs(namespace, claimName, networkName, "192.10.10.10/24"),
 			),
-			table.Entry(
+			Entry(
 				"when the claim we're looking for is actually passed in localnet topology",
 				&ovncnitypes.NetConf{Topology: ovnktypes.LocalnetTopology, Subnets: "192.10.10.0/24"},
 				&nadapi.NetworkSelectionElement{IPAMClaimReference: claimName, Namespace: namespace},
@@ -272,7 +272,7 @@ var _ = Describe("Persistent IP allocator operations", func() {
 			),
 		)
 
-		table.DescribeTable(
+		DescribeTable(
 			"fails",
 			func(
 				netConf *ovncnitypes.NetConf,
@@ -295,63 +295,63 @@ var _ = Describe("Persistent IP allocator operations", func() {
 				)
 				Expect(actualError).To(MatchError(expectedError))
 			},
-			table.Entry(
+			Entry(
 				"when an empty claim is passed in layer2 topology",
 				&ovncnitypes.NetConf{Topology: ovnktypes.Layer2Topology},
 				&nadapi.NetworkSelectionElement{IPAMClaimReference: "", Namespace: namespace},
 				nil,
 				ErrPersistentIPsNotAvailableOnNetwork,
 			),
-			table.Entry(
+			Entry(
 				"when an empty claim is passed in localnet topology",
 				&ovncnitypes.NetConf{Topology: ovnktypes.LocalnetTopology},
 				&nadapi.NetworkSelectionElement{IPAMClaimReference: "", Namespace: namespace},
 				nil,
 				ErrPersistentIPsNotAvailableOnNetwork,
 			),
-			table.Entry(
+			Entry(
 				"when an empty claim is passed in layer3 topology",
 				&ovncnitypes.NetConf{Topology: ovnktypes.Layer3Topology},
 				&nadapi.NetworkSelectionElement{IPAMClaimReference: "", Namespace: namespace},
 				nil,
 				ErrPersistentIPsNotAvailableOnNetwork,
 			),
-			table.Entry(
+			Entry(
 				"when an empty datastore is passed in layer2 topology",
 				&ovncnitypes.NetConf{Topology: ovnktypes.Layer2Topology},
 				&nadapi.NetworkSelectionElement{IPAMClaimReference: claimName, Namespace: namespace},
 				nil,
 				ErrPersistentIPsNotAvailableOnNetwork,
 			),
-			table.Entry(
+			Entry(
 				"when an empty datastore is passed in localnet topology",
 				&ovncnitypes.NetConf{Topology: ovnktypes.LocalnetTopology},
 				&nadapi.NetworkSelectionElement{IPAMClaimReference: claimName, Namespace: namespace},
 				nil,
 				ErrPersistentIPsNotAvailableOnNetwork,
 			),
-			table.Entry(
+			Entry(
 				"when an empty datastore is passed in layer3 topology",
 				&ovncnitypes.NetConf{Topology: ovnktypes.Layer3Topology},
 				&nadapi.NetworkSelectionElement{IPAMClaimReference: claimName, Namespace: namespace},
 				nil,
 				ErrPersistentIPsNotAvailableOnNetwork,
 			),
-			table.Entry(
+			Entry(
 				"when the claim we're looking for is actually passed in layer2 topology for a network without subnets",
 				&ovncnitypes.NetConf{Topology: ovnktypes.Layer2Topology},
 				&nadapi.NetworkSelectionElement{IPAMClaimReference: claimName, Namespace: namespace},
 				ipamClaimWithIPs(namespace, claimName, networkName, "192.10.10.10/24"),
 				ErrPersistentIPsNotAvailableOnNetwork,
 			),
-			table.Entry(
+			Entry(
 				"when the claim we're looking for is actually passed in localnet topology for a network without subnets",
 				&ovncnitypes.NetConf{Topology: ovnktypes.LocalnetTopology},
 				&nadapi.NetworkSelectionElement{IPAMClaimReference: claimName, Namespace: namespace},
 				ipamClaimWithIPs(namespace, claimName, networkName, "192.10.10.10/24"),
 				ErrPersistentIPsNotAvailableOnNetwork,
 			),
-			table.Entry(
+			Entry(
 				"when the claim we're looking for is actually passed in layer3 topology",
 				&ovncnitypes.NetConf{Topology: ovnktypes.Layer3Topology, Subnets: "192.10.10.0/16/24"},
 				&nadapi.NetworkSelectionElement{IPAMClaimReference: claimName, Namespace: namespace},
