@@ -19,6 +19,7 @@ import (
 	egressqosfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/clientset/versioned/fake"
 	egressservice "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1"
 	egressservicefake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/clientset/versioned/fake"
+	udnv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1"
 	udnfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/clientset/versioned/fake"
 
 	v1 "k8s.io/api/core/v1"
@@ -43,6 +44,7 @@ func GetOVNClientset(objects ...runtime.Object) *OVNClientset {
 	nads := []runtime.Object{}
 	cloudObjects := []runtime.Object{}
 	dnsNameResolverObjects := []runtime.Object{}
+	udnObjects := []runtime.Object{}
 	for _, object := range objects {
 		switch object.(type) {
 		case *egressip.EgressIP:
@@ -65,6 +67,8 @@ func GetOVNClientset(objects ...runtime.Object) *OVNClientset {
 			anpObjects = append(anpObjects, object)
 		case *ocpnetworkapiv1alpha1.DNSNameResolver:
 			dnsNameResolverObjects = append(dnsNameResolverObjects, object)
+		case *udnv1.UserDefinedNetwork, *udnv1.ClusterUserDefinedNetwork:
+			udnObjects = append(udnObjects, object)
 		default:
 			v1Objects = append(v1Objects, object)
 		}
@@ -89,7 +93,7 @@ func GetOVNClientset(objects ...runtime.Object) *OVNClientset {
 		EgressServiceClient:      egressservicefake.NewSimpleClientset(egressServiceObjects...),
 		AdminPolicyRouteClient:   adminpolicybasedroutefake.NewSimpleClientset(apbExternalRouteObjects...),
 		OCPNetworkClient:         ocpnetworkclientfake.NewSimpleClientset(dnsNameResolverObjects...),
-		UserDefinedNetworkClient: udnfake.NewSimpleClientset(),
+		UserDefinedNetworkClient: udnfake.NewSimpleClientset(udnObjects...),
 	}
 }
 
