@@ -1,7 +1,7 @@
 package ovn
 
 import (
-	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
 	netv1 "k8s.io/api/networking/v1"

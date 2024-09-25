@@ -7,8 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/onsi/ginkgo"
-	ginkgotable "github.com/onsi/ginkgo/extensions/table"
+	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -73,7 +72,7 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 		fakeOVN.shutdown()
 	})
 
-	ginkgotable.DescribeTable("reconciles existing and non-existing egressqoses without PodSelectors",
+	ginkgo.DescribeTable("reconciles existing and non-existing egressqoses without PodSelectors",
 		func(ipv4Mode, ipv6Mode bool, dst1, dst2, match1, match2 string) {
 			app.Action = func(ctx *cli.Context) error {
 				config.IPv4Mode = ipv4Mode
@@ -233,18 +232,18 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 			err := app.Run([]string{app.Name})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		},
-		ginkgotable.Entry("ipv4", true, false, "1.2.3.4/32", "5.6.7.8/32",
+		ginkgo.Entry("ipv4", true, false, "1.2.3.4/32", "5.6.7.8/32",
 			fmt.Sprintf("(ip4.dst == 1.2.3.4/32) && ip4.src == $%s", asv4),
 			fmt.Sprintf("(ip4.dst == 5.6.7.8/32) && ip4.src == $%s", asv4)),
-		ginkgotable.Entry("ipv6", false, true, "2001:0db8:85a3:0000:0000:8a2e:0370:7334/128", "2001:0db8:85a3:0000:0000:8a2e:0370:7335/128",
+		ginkgo.Entry("ipv6", false, true, "2001:0db8:85a3:0000:0000:8a2e:0370:7334/128", "2001:0db8:85a3:0000:0000:8a2e:0370:7335/128",
 			fmt.Sprintf("(ip6.dst == 2001:0db8:85a3:0000:0000:8a2e:0370:7334/128) && ip6.src == $%s", asv6),
 			fmt.Sprintf("(ip6.dst == 2001:0db8:85a3:0000:0000:8a2e:0370:7335/128) && ip6.src == $%s", asv6)),
-		ginkgotable.Entry("dual", true, true, "1.2.3.4/32", "2001:0db8:85a3:0000:0000:8a2e:0370:7335/128",
+		ginkgo.Entry("dual", true, true, "1.2.3.4/32", "2001:0db8:85a3:0000:0000:8a2e:0370:7335/128",
 			fmt.Sprintf("(ip4.dst == 1.2.3.4/32) && (ip4.src == $%s || ip6.src == $%s)", asv4, asv6),
 			fmt.Sprintf("(ip6.dst == 2001:0db8:85a3:0000:0000:8a2e:0370:7335/128) && (ip4.src == $%s || ip6.src == $%s)", asv4, asv6)),
 	)
 
-	ginkgotable.DescribeTable("reconciles existing and non-existing egressqoses with PodSelectors",
+	ginkgo.DescribeTable("reconciles existing and non-existing egressqoses with PodSelectors",
 		func(ipv4Mode, ipv6Mode bool, podIP, dst1, dst2, match1, match2 string) {
 			app.Action = func(ctx *cli.Context) error {
 				config.IPv4Mode = ipv4Mode
@@ -432,13 +431,13 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 			err := app.Run([]string{app.Name})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		},
-		ginkgotable.Entry("ipv4", true, false, "10.128.1.3", "1.2.3.4/32", "5.6.7.8/32",
+		ginkgo.Entry("ipv4", true, false, "10.128.1.3", "1.2.3.4/32", "5.6.7.8/32",
 			fmt.Sprintf("(ip4.dst == 1.2.3.4/32) && ip4.src == $%s", qosASv4),
 			fmt.Sprintf("(ip4.dst == 5.6.7.8/32) && ip4.src == $%s", asv4)),
-		ginkgotable.Entry("ipv6", false, true, "fd00:10:244:2::3", "2001:0db8:85a3:0000:0000:8a2e:0370:7334/128", "2001:0db8:85a3:0000:0000:8a2e:0370:7335/128",
+		ginkgo.Entry("ipv6", false, true, "fd00:10:244:2::3", "2001:0db8:85a3:0000:0000:8a2e:0370:7334/128", "2001:0db8:85a3:0000:0000:8a2e:0370:7335/128",
 			fmt.Sprintf("(ip6.dst == 2001:0db8:85a3:0000:0000:8a2e:0370:7334/128) && ip6.src == $%s", qosASv6),
 			fmt.Sprintf("(ip6.dst == 2001:0db8:85a3:0000:0000:8a2e:0370:7335/128) && ip6.src == $%s", asv6)),
-		ginkgotable.Entry("dual", true, true, "10.128.1.3", "1.2.3.4/32", "2001:0db8:85a3:0000:0000:8a2e:0370:7335/128",
+		ginkgo.Entry("dual", true, true, "10.128.1.3", "1.2.3.4/32", "2001:0db8:85a3:0000:0000:8a2e:0370:7335/128",
 			fmt.Sprintf("(ip4.dst == 1.2.3.4/32) && (ip4.src == $%s || ip6.src == $%s)", qosASv4, qosASv6),
 			fmt.Sprintf("(ip6.dst == 2001:0db8:85a3:0000:0000:8a2e:0370:7335/128) && (ip4.src == $%s || ip6.src == $%s)", asv4, asv6)),
 	)
@@ -939,7 +938,7 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	})
 
-	ginkgotable.DescribeTable("Ensure QoS AddressSet is updated properly for pod events",
+	ginkgo.DescribeTable("Ensure QoS AddressSet is updated properly for pod events",
 		func(podZone string) {
 			namespaceT := *newNamespace("namespace1")
 
@@ -1047,8 +1046,8 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 				fakeOVN.asf.EventuallyExpectAddressSetWithAddresses(qosAS, nil)
 			}
 		},
-		ginkgotable.Entry("create and update pod in local zone", "local"),
-		ginkgotable.Entry("create and update pod in remote zone", "remote"),
+		ginkgo.Entry("create and update pod in local zone", "local"),
+		ginkgo.Entry("create and update pod in remote zone", "remote"),
 	)
 })
 
