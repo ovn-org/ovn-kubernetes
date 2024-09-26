@@ -127,7 +127,8 @@ func (oc *DefaultNetworkController) ensurePod(oldPod, pod *kapi.Pod, addPort boo
 	// skip the pods on no host subnet nodes
 	switchName := pod.Spec.NodeName
 	if oc.lsManager.IsNonHostSubnetSwitch(switchName) {
-		return nil
+		klog.V(5).Infof("Ensuring hybrid overlay Pod %s/%s in node %s", pod.Namespace, pod.Name, pod.Spec.NodeName)
+		return oc.ensureHybridOverlayPod(oldPod, pod, addPort)
 	}
 
 	if oc.isPodScheduledinLocalZone(pod) {
@@ -137,6 +138,23 @@ func (oc *DefaultNetworkController) ensurePod(oldPod, pod *kapi.Pod, addPort boo
 
 	klog.V(5).Infof("Ensuring zone remote for Pod %s/%s in node %s", pod.Namespace, pod.Name, pod.Spec.NodeName)
 	return oc.ensureRemoteZonePod(oldPod, pod, addPort)
+}
+
+// ensureHybridOverlayPod tries to set up a pod in hybrid overlay nodes. It returns nil on success and error on failure; failure
+// indicates the pod set up should be retried later.
+func (oc *DefaultNetworkController) ensureHybridOverlayPod(oldPod, pod *kapi.Pod, addPort bool) error {
+	if (addPort || (oldPod != nil && len(pod.Status.PodIPs) != len(oldPod.Status.PodIPs))) && !util.PodWantsHostNetwork(pod) {
+		podIfAddrs, err := util.GetPodCIDRsWithFullMask(pod, oc.NetInfo)
+		if err != nil {
+			return fmt.Errorf("failed to obtain IPs to add hybrid-overlay pod %s/%s: %w",
+				pod.Namespace, pod.Name, ovntypes.NewSuppressedError(err))
+		}
+		// A pod in hybrid overlay nodes can be seen as remote pod
+		if err := oc.addRemotePodToNamespace(pod.Namespace, podIfAddrs); err != nil {
+			return fmt.Errorf("failed to add hybrid-overlay pod %s/%s to namespace: %w", pod.Namespace, pod.Name, err)
+		}
+	}
+	return nil
 }
 
 // ensureLocalZonePod tries to set up a local zone pod. It returns nil on success and error on failure; failure
