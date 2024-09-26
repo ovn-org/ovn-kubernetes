@@ -69,7 +69,7 @@ func WithIPv6DNSServer(dnsServer string) func(*dhcpConfigs) {
 }
 
 func EnsureDHCPOptionsForMigratablePod(controllerName string, nbClient libovsdbclient.Client, watchFactory *factory.WatchFactory, pod *corev1.Pod, ips []*net.IPNet, lsp *nbdb.LogicalSwitchPort) error {
-	dnsServerIPv4, dnsServerIPv6, err := retrieveDNSServiceClusterIPs(watchFactory)
+	dnsServerIPv4, dnsServerIPv6, err := RetrieveDNSServiceClusterIPs(watchFactory)
 	if err != nil {
 		return fmt.Errorf("failed retrieving dns service cluster ip: %v", err)
 	}
@@ -123,7 +123,7 @@ func composeDHCPConfigs(controllerName string, vmKey ktypes.NamespacedName, podI
 	return dhcpConfigs, nil
 }
 
-func retrieveDNSServiceClusterIPs(k8scli *factory.WatchFactory) (string, string, error) {
+func RetrieveDNSServiceClusterIPs(k8scli *factory.WatchFactory) (string, string, error) {
 	dnsServer, err := k8scli.GetService(config.Kubernetes.DNSServiceNamespace, config.Kubernetes.DNSServiceName)
 	if err != nil {
 		return "", "", err
