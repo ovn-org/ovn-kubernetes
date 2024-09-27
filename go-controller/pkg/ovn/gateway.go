@@ -386,6 +386,11 @@ func (gw *GatewayManager) GatewayInit(
 			types.NetworkExternalID:  gw.netInfo.GetNetworkName(),
 			types.TopologyExternalID: gw.netInfo.TopologyType(),
 		}
+		if gw.netInfo.IsPrimaryNetwork() && gw.netInfo.TopologyType() == types.Layer2Topology {
+			logicalRouterPort.Ipv6RaConfigs = map[string]string{
+				"address_mode": "dhcpv6_stateful",
+			}
+		}
 	}
 
 	err = libovsdbops.CreateOrUpdateLogicalRouterPort(gw.nbClient, &logicalRouter,

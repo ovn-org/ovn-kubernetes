@@ -478,7 +478,11 @@ func expectedLayer2EgressEntities(netInfo util.NetInfo, gwConfig util.L3GatewayC
 
 func expectedGWToNetworkSwitchRouterPort(name string, netInfo util.NetInfo, networks ...*net.IPNet) *nbdb.LogicalRouterPort {
 	options := map[string]string{"gateway_mtu": fmt.Sprintf("%d", 1400)}
-	return expectedLogicalRouterPort(name, netInfo, options, networks...)
+	lrp := expectedLogicalRouterPort(name, netInfo, options, networks...)
+	lrp.Ipv6RaConfigs = map[string]string{
+		"address_mode": "dhcpv6_stateful",
+	}
+	return lrp
 }
 
 func layer2Subnet() *net.IPNet {
