@@ -235,7 +235,7 @@ spec:
 						return isOVNEncapIPReady(workerNode.Name, workerNodeIPs[ipAddrFamily], ovnkubePodWorkerNode.Name)
 					}, pollingTimeout, pollingInterval).Should(BeTrue())
 
-					err = e2epod.DeletePodWithWait(context.TODO(), f.ClientSet, &ovnkubePodWorkerNode)
+					err = deletePodWithWait(context.TODO(), f.ClientSet, &ovnkubePodWorkerNode)
 					Expect(err).NotTo(HaveOccurred())
 
 					By(fmt.Sprintf("Sleeping for %d seconds to give things time to settle", settleTimeout))
@@ -555,7 +555,8 @@ spec:
 		JustAfterEach(func() {
 			if len(workerNodeMAC) > 0 {
 				By("Reverting to original MAC address")
-				setMACAddress(ovnkPod, workerNodeMAC.String())
+				err := setMACAddress(ovnkPod, workerNodeMAC.String())
+				framework.ExpectNoError(err, "failed to revert MAC address")
 			}
 		})
 

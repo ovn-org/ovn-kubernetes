@@ -158,22 +158,27 @@ var _ = ginkgo.Describe("Multi node zones interconnect", func() {
 		e2epod.NewPodClient(fr).CreateSync(context.TODO(), clientPod)
 
 		ginkgo.By("asserting the *client* pod can contact the server pod exposed endpoint")
-		checkPodsInterconnectivity(clientPod, serverPod, fr.Namespace.Name, cs)
+		err := checkPodsInterconnectivity(clientPod, serverPod, fr.Namespace.Name, cs)
+		framework.ExpectNoError(err, "failed to check pods interconnectivity")
 
 		// Change the zone of client-pod node to that of server-pod node
 		s := fmt.Sprintf("Changing the client-pod node %s zone from %s to %s", clientPodNodeName, clientPodNodeZone, serverPodNodeZone)
 		ginkgo.By(s)
-		changeNodeZone(clientPodNode, serverPodNodeZone, cs)
+		err = changeNodeZone(clientPodNode, serverPodNodeZone, cs)
+		framework.ExpectNoError(err, "failed to change node zone")
 
 		ginkgo.By("Checking that the client-pod can connect to the server pod when they are in same zone")
-		checkPodsInterconnectivity(clientPod, serverPod, fr.Namespace.Name, cs)
+		err = checkPodsInterconnectivity(clientPod, serverPod, fr.Namespace.Name, cs)
+		framework.ExpectNoError(err, "failed to check pods interconnectivity")
 
 		// Change back the zone of client-pod node
 		s = fmt.Sprintf("Changing back the client-pod node %s zone from %s to %s", clientPodNodeName, serverPodNodeZone, clientPodNodeZone)
 		ginkgo.By(s)
-		changeNodeZone(clientPodNode, clientPodNodeZone, cs)
+		err = changeNodeZone(clientPodNode, clientPodNodeZone, cs)
+		framework.ExpectNoError(err, "failed to change node zone")
 
 		ginkgo.By("Checking again that the client-pod can connect to the server-pod when they are in different zone")
-		checkPodsInterconnectivity(clientPod, serverPod, fr.Namespace.Name, cs)
+		err = checkPodsInterconnectivity(clientPod, serverPod, fr.Namespace.Name, cs)
+		framework.ExpectNoError(err, "failed to check pods interconnectivity")
 	})
 })

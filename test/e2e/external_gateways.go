@@ -25,7 +25,6 @@ import (
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2ekubectl "k8s.io/kubernetes/test/e2e/framework/kubectl"
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
-	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
 	"k8s.io/kubernetes/test/e2e/framework/skipper"
 	utilnet "k8s.io/utils/net"
 )
@@ -177,7 +176,8 @@ var _ = ginkgo.Describe("External Gateway", func() {
 				framework.Failf("failed to add the loopback ip to dev lo on the test container: %v", err)
 			}
 			// Create the pod that will be used as the source for the connectivity test
-			createGenericPod(f, srcPingPodName, ciWorkerNodeSrc, f.Namespace.Name, command)
+			_, err = createGenericPod(f, srcPingPodName, ciWorkerNodeSrc, f.Namespace.Name, command)
+			framework.ExpectNoError(err, "failed to create pod %s/%s", f.Namespace.Name, srcPingPodName)
 			// wait for pod setup to return a valid address
 			err = wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
 				pingSrc = getPodAddress(srcPingPodName, f.Namespace.Name)
@@ -350,7 +350,8 @@ var _ = ginkgo.Describe("External Gateway", func() {
 			framework.Logf("the pod cidr for node %s is %s", workerNodeInfo.name, podCIDR)
 
 			// Create the pod that will be used as the source for the connectivity test
-			createGenericPod(f, dstPingPodName, workerNodeInfo.name, f.Namespace.Name, command)
+			_, err = createGenericPod(f, dstPingPodName, workerNodeInfo.name, f.Namespace.Name, command)
+			framework.ExpectNoError(err, "failed to create pod %s/%s", f.Namespace.Name, dstPingPodName)
 			// wait for the pod setup to return a valid address
 			err = wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
 				pingDstPod = getPodAddress(dstPingPodName, f.Namespace.Name)
@@ -1488,7 +1489,8 @@ var _ = ginkgo.Describe("External Gateway", func() {
 					// https://github.com/ovn-org/ovn-kubernetes/pull/4114#issuecomment-1940916326
 					// TODO(trozet) change this back to 2 gateways once github actions kernel is updated
 					ginkgo.By(fmt.Sprintf("Reducing to one gateway. Removing gateway: %s", gatewayPodName2))
-					e2epod.DeletePodWithWaitByName(context.TODO(), f.ClientSet, gatewayPodName2, servingNamespace)
+					err := deletePodWithWaitByName(context.TODO(), f.ClientSet, gatewayPodName2, servingNamespace)
+					framework.ExpectNoError(err, "failed to delete pod %s/%s", servingNamespace, gatewayPodName2)
 					time.Sleep(1 * time.Second)
 
 					ginkgo.By("Checking if one of the external gateways are reachable via Egress")
