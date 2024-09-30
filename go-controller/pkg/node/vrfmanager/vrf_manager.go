@@ -96,7 +96,7 @@ func (vrfm *Controller) runInternal(stopChan <-chan struct{}, doneWg *sync.WaitG
 						continue
 					}
 					ifName := linkUpdateEvent.Link.Attrs().Name
-					klog.V(3).Infof("VRF Manager: link update received for interface %s", ifName)
+					klog.V(5).Infof("VRF Manager: link update received for interface %s", ifName)
 					err = vrfm.syncVRF(linkUpdateEvent.Link)
 					if err != nil {
 						klog.Errorf("VRF Manager: Error syncing link %s update event, err: %v", ifName, err)
