@@ -112,7 +112,9 @@ if [ "$ENABLE_MULTI_NET" != "true" ]; then
   if [ "$SKIPPED_TESTS" != "" ]; then
     SKIPPED_TESTS+="|"
   fi
-  SKIPPED_TESTS+="Multi Homing"
+  # Network QoS feature depends on multi-homing to exercise secondary NAD
+  SKIPPED_TESTS+="Multi Homing|\
+e2e NetworkQoS validation"
 fi
 
 # Only run Node IP/MAC address migration tests if they are explicitly requested
