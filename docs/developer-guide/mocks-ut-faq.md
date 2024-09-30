@@ -55,9 +55,11 @@ of the same package as where the interface is defined.
         `docker run -v $PWD:/src -w /src vektra/mockery --all --dir vendor/k8s.io/utils/exec --output pkg/testing/mocks/k8s.io/utils/exec`
     
 ### How to regenerate all existing mocks when interfaces (locally defined or in vendor libraries) are updated?
+    - Execute `make -C go-controller mocksgen`
 
-    - Execute the ```go-controller/hack/regenerate_vendor_mocks.sh``` in situations where all existing mocks have to be regenerated.
-    NOTE: It would take a while(approx 20+ minutes) for all mocks to be regenerated.
+### How to add new pods
+    - Edit go-controller/.mockery.yaml
+    - Execute `make -C go-controller mocksgen`
 
 ### Reference links that explain how to use mocks with testify
 
