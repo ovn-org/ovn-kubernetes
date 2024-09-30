@@ -150,6 +150,8 @@ const (
 	OvnRateLimitingMeter = "rate-limiter"
 	PacketsPerSecond     = "pktps"
 	MeterAction          = "drop"
+	DefaultRateLimit     = 25
+	BFDRateLimit         = 50
 
 	// OVN-K8S annotation & taint constants
 	OvnK8sPrefix = "k8s.ovn.org"

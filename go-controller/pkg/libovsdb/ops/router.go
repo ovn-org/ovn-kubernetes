@@ -835,6 +835,17 @@ func LookupBFD(nbClient libovsdbclient.Client, bfd *nbdb.BFD) (*nbdb.BFD, error)
 	return found[0], nil
 }
 
+type BFDPredicate func(*nbdb.BFD) bool
+
+// FindBFDWithPredicate looks up BFDs from the cache based on a given predicate
+func FindBFDWithPredicate(nbClient libovsdbclient.Client, p BFDPredicate) ([]*nbdb.BFD, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	defer cancel()
+	found := []*nbdb.BFD{}
+	err := nbClient.WhereCache(p).List(ctx, &found)
+	return found, err
+}
+
 // LB OPs
 
 // AddLoadBalancersToLogicalRouterOps adds the provided load balancers to the
