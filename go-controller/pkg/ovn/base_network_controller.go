@@ -941,7 +941,13 @@ func (bnc *BaseNetworkController) AddResourceCommon(objType reflect.Type, obj in
 		if !ok {
 			return fmt.Errorf("could not cast %T object to *knet.NetworkPolicy", obj)
 		}
-
+		netinfo, err := bnc.getActiveNetworkForNamespace(np.Namespace)
+		if err != nil {
+			return fmt.Errorf("could not get active network for namespace %s: %v", np.Namespace, err)
+		}
+		if bnc.GetNetworkName() != netinfo.GetNetworkName() {
+			return nil
+		}
 		if err := bnc.addNetworkPolicy(np); err != nil {
 			klog.Infof("Network Policy add failed for %s/%s, will try again later: %v",
 				np.Namespace, np.Name, err)
@@ -959,6 +965,13 @@ func (bnc *BaseNetworkController) DeleteResourceCommon(objType reflect.Type, obj
 		knp, ok := obj.(*knet.NetworkPolicy)
 		if !ok {
 			return fmt.Errorf("could not cast obj of type %T to *knet.NetworkPolicy", obj)
+		}
+		netinfo, err := bnc.getActiveNetworkForNamespace(knp.Namespace)
+		if err != nil {
+			return fmt.Errorf("could not get active network for namespace %s: %v", knp.Namespace, err)
+		}
+		if bnc.GetNetworkName() != netinfo.GetNetworkName() {
+			return nil
 		}
 		return bnc.deleteNetworkPolicy(knp)
 	default:
