@@ -656,6 +656,7 @@ var _ = Describe("Multi Homing", func() {
 			var underlayBridgeName string
 			var cmdWebServer *exec.Cmd
 
+			underlayIP := underlayServiceIP + "/24"
 			Context("with a service running on the underlay", func() {
 				BeforeEach(func() {
 					netConfig = newNetworkAttachmentConfig(
@@ -685,7 +686,7 @@ var _ = Describe("Multi Homing", func() {
 					underlayBridgeName, err = findInterfaceByIP(gatewayIP)
 					Expect(err).NotTo(HaveOccurred())
 
-					cmd := exec.Command("sudo", "ip", "addr", "add", underlayServiceIP+"/24", "dev", underlayBridgeName)
+					cmd := exec.Command("sudo", "ip", "addr", "add", underlayIP, "dev", underlayBridgeName)
 					cmd.Stderr = os.Stderr
 					err = cmd.Run()
 					Expect(err).NotTo(HaveOccurred())
@@ -695,8 +696,7 @@ var _ = Describe("Multi Homing", func() {
 					By("starting a service, connected to the underlay")
 					cmdWebServer = exec.Command("python3", "-m", "http.server", "--bind", underlayServiceIP, strconv.Itoa(servicePort))
 					cmdWebServer.Stderr = os.Stderr
-					err := cmdWebServer.Start()
-					Expect(err).NotTo(HaveOccurred(), "failed to create web server, port might be busy")
+					Expect(cmdWebServer.Start()).NotTo(HaveOccurred(), "failed to create web server, port might be busy")
 				})
 
 				BeforeEach(func() {
@@ -715,7 +715,7 @@ var _ = Describe("Multi Homing", func() {
 				})
 
 				AfterEach(func() {
-					cmd := exec.Command("sudo", "ip", "addr", "del", underlayServiceIP+"/24", "dev", underlayBridgeName)
+					cmd := exec.Command("sudo", "ip", "addr", "del", underlayIP, "dev", underlayBridgeName)
 					cmd.Stderr = os.Stderr
 					err := cmd.Run()
 					Expect(err).NotTo(HaveOccurred())
@@ -897,6 +897,85 @@ var _ = Describe("Multi Homing", func() {
 							),
 						),
 					)
+				})
+			})
+
+			Context("with a trunked configuration", func() {
+				const vlanID = 20
+				BeforeEach(func() {
+					nodes = ovsPods(cs)
+					Expect(nodes).NotTo(BeEmpty())
+
+					// we are setting up the bridge in trunked mode by not
+					// specifying a particular VLAN ID on the network conf
+					netConfig = newNetworkAttachmentConfig(
+						networkAttachmentConfigParams{
+							name:         secondaryNetworkName,
+							namespace:    f.Namespace.Name,
+							topology:     "localnet",
+							cidr:         secondaryLocalnetNetworkCIDR,
+							excludeCIDRs: []string{underlayServiceIP + "/32"},
+						})
+
+					By("setting up the localnet underlay with a trunked configuration")
+					Expect(setupUnderlay(nodes, secondaryInterfaceName, netConfig)).To(Succeed(), "configuring the OVS bridge")
+
+					By(fmt.Sprintf("creating a VLAN interface on top of the bridge connecting the cluster nodes with IP: %s", underlayIP))
+					cli, err := client.NewClientWithOpts(client.FromEnv)
+					Expect(err).NotTo(HaveOccurred())
+
+					gatewayIP, err := getNetworkGateway(cli, dockerNetworkName)
+					Expect(err).NotTo(HaveOccurred())
+
+					underlayBridgeName, err = findInterfaceByIP(gatewayIP)
+					Expect(err).NotTo(HaveOccurred())
+					Expect(createVLANInterface(underlayBridgeName, strconv.Itoa(vlanID), &underlayIP)).To(
+						Succeed(),
+						"create a VLAN interface on the bridge interconnecting the cluster nodes",
+					)
+
+					By("starting a service, connected to the underlay")
+					cmdWebServer = exec.Command("python3", "-m", "http.server", "--bind", underlayServiceIP, strconv.Itoa(port))
+					cmdWebServer.Stderr = os.Stderr
+					Expect(cmdWebServer.Start()).NotTo(HaveOccurred(), "failed to create web server, port might be busy")
+				})
+
+				AfterEach(func() {
+					Expect(cmdWebServer.Process.Kill()).NotTo(HaveOccurred(), "kill the python webserver")
+					Expect(deleteVLANInterface(underlayBridgeName, strconv.Itoa(vlanID))).NotTo(HaveOccurred(), "remove the underlay physical configuration")
+					Expect(teardownUnderlay(nodes)).To(Succeed(), "tear down the localnet underlay")
+				})
+
+				It("the same bridge mapping can be shared by a separate VLAN by using the physical network name attribute", func() {
+					const otherNetworkName = "different-network"
+					vlan20NetConfig := newNetworkAttachmentConfig(
+						networkAttachmentConfigParams{
+							name:                otherNetworkName,
+							physicalNetworkName: netConfig.networkName,
+							namespace:           f.Namespace.Name,
+							vlanID:              vlanID,
+							topology:            "localnet",
+							cidr:                secondaryLocalnetNetworkCIDR,
+							excludeCIDRs:        []string{underlayServiceIP + "/32"},
+						})
+
+					By("creating the attachment configuration for a separate VLAN")
+					_, err := nadClient.NetworkAttachmentDefinitions(f.Namespace.Name).Create(
+						context.Background(),
+						generateNAD(vlan20NetConfig),
+						metav1.CreateOptions{},
+					)
+					Expect(err).NotTo(HaveOccurred())
+
+					clientPodConfig := podConfiguration{
+						name:        clientPodName,
+						namespace:   f.Namespace.Name,
+						attachments: []nadapi.NetworkSelectionElement{{Name: otherNetworkName}},
+					}
+					kickstartPod(cs, clientPodConfig)
+
+					By(fmt.Sprintf("asserting the *client* pod can contact the underlay service with IP %q on the separate vlan", underlayIP))
+					Expect(connectToServer(clientPodConfig, underlayServiceIP, servicePort)).To(Succeed())
 				})
 			})
 		})
