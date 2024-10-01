@@ -52,15 +52,16 @@ func getNetCIDRSubnet(netCIDR string) (string, error) {
 }
 
 type networkAttachmentConfigParams struct {
-	cidr               string
-	excludeCIDRs       []string
-	namespace          string
-	name               string
-	topology           string
-	networkName        string
-	vlanID             int
-	allowPersistentIPs bool
-	role               string
+	cidr                string
+	excludeCIDRs        []string
+	namespace           string
+	name                string
+	topology            string
+	networkName         string
+	vlanID              int
+	allowPersistentIPs  bool
+	role                string
+	physicalNetworkName string
 }
 
 type networkAttachmentConfig struct {
@@ -96,6 +97,7 @@ func generateNAD(config networkAttachmentConfig) *nadapi.NetworkAttachmentDefini
         "netAttachDefName": %q,
         "vlanID": %d,
         "allowPersistentIPs": %t,
+        "physicalNetworkName": %q,
         "role": %q
 }
 `,
@@ -106,6 +108,7 @@ func generateNAD(config networkAttachmentConfig) *nadapi.NetworkAttachmentDefini
 		namespacedName(config.namespace, config.name),
 		config.vlanID,
 		config.allowPersistentIPs,
+		config.physicalNetworkName,
 		config.role,
 	)
 	return generateNetAttachDef(config.namespace, config.name, nadSpec)
