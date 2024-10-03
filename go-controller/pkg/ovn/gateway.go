@@ -388,7 +388,10 @@ func (gw *GatewayManager) GatewayInit(
 		}
 		if gw.netInfo.IsPrimaryNetwork() && gw.netInfo.TopologyType() == types.Layer2Topology {
 			logicalRouterPort.Ipv6RaConfigs = map[string]string{
-				"address_mode": "dhcpv6_stateful",
+				"address_mode":  "dhcpv6_stateful",
+				"send_periodic": "true",
+				"max_interval":  "900", // 15 minutes
+				"min_interval":  "300", // 5 minutes
 			}
 			if gw.netInfo.MTU() > 0 {
 				logicalRouterPort.Ipv6RaConfigs["mtu"] = fmt.Sprintf("%d", gw.netInfo.MTU())
