@@ -481,6 +481,7 @@ func expectedGWToNetworkSwitchRouterPort(name string, netInfo util.NetInfo, netw
 	lrp := expectedLogicalRouterPort(name, netInfo, options, networks...)
 	lrp.Ipv6RaConfigs = map[string]string{
 		"address_mode": "dhcpv6_stateful",
+		"mtu":          "1400",
 	}
 	return lrp
 }

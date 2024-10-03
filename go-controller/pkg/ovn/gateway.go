@@ -390,6 +390,9 @@ func (gw *GatewayManager) GatewayInit(
 			logicalRouterPort.Ipv6RaConfigs = map[string]string{
 				"address_mode": "dhcpv6_stateful",
 			}
+			if gw.netInfo.MTU() > 0 {
+				logicalRouterPort.Ipv6RaConfigs["mtu"] = fmt.Sprintf("%d", gw.netInfo.MTU())
+			}
 		}
 	}
 
