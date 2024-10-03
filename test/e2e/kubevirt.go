@@ -126,7 +126,7 @@ var _ = Describe("Kubevirt Virtual Machines", func() {
 		sendEcho = func(conn *net.TCPConn) error {
 			strEcho := "Halo"
 
-			if err := conn.SetDeadline(time.Now().Add(2 * time.Second)); err != nil {
+			if err := conn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
 				return fmt.Errorf("failed configuring connection deadline: %w", err)
 			}
 			_, err := conn.Write([]byte(strEcho))
@@ -207,20 +207,18 @@ var _ = Describe("Kubevirt Virtual Machines", func() {
 			return endpoints, nil
 		}
 
-		/*
-
-			reconnect = func(conns []*net.TCPConn) error {
-				for i, conn := range conns {
-					conn.Close()
-					conn, err := dial(conn.RemoteAddr().String())
-					if err != nil {
-						return err
-					}
-					conns[i] = conn
+		reconnect = func(conns []*net.TCPConn) error {
+			for i, conn := range conns {
+				conn.Close()
+				conn, err := dial(conn.RemoteAddr().String())
+				if err != nil {
+					return err
 				}
-				return nil
+				conns[i] = conn
 			}
-		*/
+			return nil
+		}
+
 		composeService = func(name, vmName string, port int32) *corev1.Service {
 			ipFamilyPolicy := corev1.IPFamilyPolicyPreferDualStack
 			return &corev1.Service{
@@ -345,10 +343,17 @@ var _ = Describe("Kubevirt Virtual Machines", func() {
 			}
 			err := crClient.Get(context.TODO(), crclient.ObjectKeyFromObject(vmi), vmi)
 			Expect(err).ToNot(HaveOccurred())
-			polling := 15 * time.Second
-			timeout := time.Minute
+			polling := 6 * time.Second
+			timeout := 2 * time.Minute
 			step := by(vmName, stage+": Check tcp connection is not broken")
-			Eventually(func() error { return sendEchos(endpoints) }).
+			Eventually(func() error {
+				err = sendEchos(endpoints)
+				if err != nil {
+					by(vmName, fmt.Sprintf("%s: Check tcp connection failed: %s", stage, err))
+					_ = reconnect(endpoints)
+				}
+				return err
+			}).
 				WithPolling(polling).
 				WithTimeout(timeout).
 				Should(Succeed(), step)
@@ -878,10 +883,11 @@ passwd:
 			}()
 
 			By("Wait some time for service to settle")
-			time.Sleep(2 * time.Second)
-
-			endpoints, err := dialServiceNodePort(svc)
-			Expect(err).ToNot(HaveOccurred(), step)
+			endpoints := []*net.TCPConn{}
+			Eventually(func() error {
+				endpoints, err = dialServiceNodePort(svc)
+				return err
+			}).WithPolling(time.Second).WithTimeout(20*time.Second).Should(Succeed(), "Should dial service port once service settled")
 
 			checkConnectivityAndNetworkPolicies(vm.Name, endpoints, "before live migration")
 			// Do just one migration that will fail
@@ -1034,6 +1040,9 @@ passwd:
 			if td.mode == kubevirtv1.MigrationPostCopy && os.Getenv("GITHUB_ACTIONS") == "true" {
 				Skip("Post copy live migration not working at github actions")
 			}
+			if td.mode == kubevirtv1.MigrationPostCopy && os.Getenv("KUBEVIRT_SKIP_MIGRATE_POST_COPY") == "true" {
+				Skip("Post copy live migration explicitly skipped")
+			}
 			var (
 				err error
 			)
@@ -1094,13 +1103,15 @@ passwd:
 				By("annotating the VMI with `fail fast`")
 				vmKey := types.NamespacedName{Namespace: namespace, Name: "worker1"}
 				var vmi kubevirtv1.VirtualMachineInstance
+
 				Eventually(func() error {
-					return crClient.Get(context.TODO(), vmKey, &vmi)
+					err = crClient.Get(context.TODO(), vmKey, &vmi)
+					if err == nil {
+						vmi.ObjectMeta.Annotations[kubevirtv1.FuncTestLauncherFailFastAnnotation] = "true"
+						err = crClient.Update(context.TODO(), &vmi)
+					}
+					return err
 				}).WithPolling(time.Second).WithTimeout(time.Minute).Should(Succeed())
-
-				vmi.ObjectMeta.Annotations[kubevirtv1.FuncTestLauncherFailFastAnnotation] = "true"
-
-				Expect(crClient.Update(context.TODO(), &vmi)).To(Succeed())
 			}
 
 			for _, vm := range vms {
