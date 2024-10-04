@@ -222,6 +222,10 @@ func (ncc *networkClusterController) init() error {
 	return nil
 }
 
+func (ncc *networkClusterController) PreStart(ctx context.Context) error {
+	return nil
+}
+
 // updateNetworkStatus allows to report a status for networkClusterController's network via a UDN status condition
 // of type "NetworkAllocationSucceeded", if the network was created by UDN.
 // When at least one node reports an error, condition will be set to false and an event with node-specific error will be
