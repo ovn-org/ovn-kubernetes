@@ -202,6 +202,10 @@ func (ncc *networkClusterController) init() error {
 	return nil
 }
 
+func (ncc *networkClusterController) PreStart(ctx context.Context) error {
+	return nil
+}
+
 // Start the network cluster controller. Depending on the cluster configuration
 // and type of network, it does the following:
 //   - initializes the node allocator and starts listening to node events

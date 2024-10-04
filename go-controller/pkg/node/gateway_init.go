@@ -473,7 +473,9 @@ func interfaceForEXGW(intfName string) string {
 	return intfName
 }
 
-// TODO adapt this too
+// ***********************************
+// TODO split this too!
+// ***********************************
 func (nc *DefaultNodeNetworkController) initGatewayDPUHost(kubeNodeIP net.IP) error {
 	// A DPU host gateway is complementary to the shared gateway running
 	// on the DPU embedded CPU. it performs some initializations and

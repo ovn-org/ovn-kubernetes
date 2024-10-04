@@ -61,6 +61,10 @@ func newSecondaryNetworkClusterManager(ovnClient *util.OVNClusterManagerClientse
 	return sncm, nil
 }
 
+func (sncm *secondaryNetworkClusterManager) PreStart() error {
+	return nil
+}
+
 // Start the secondary layer3 controller, handles all events and creates all
 // needed logical entities
 func (sncm *secondaryNetworkClusterManager) Start() error {
