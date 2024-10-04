@@ -192,6 +192,15 @@ func (ncm *nodeNetworkControllerManager) Start(ctx context.Context) (err error) 
 		ncm.routeManager.Run(ncm.stopChan, 2*time.Minute)
 	}()
 
+	err = ncm.initDefaultNodeNetworkController()
+	if err != nil {
+		return fmt.Errorf("failed to init default node network controller: %v", err)
+	}
+	err = ncm.defaultNodeNetworkController.PreStart(ctx) // partial gateway init + OpenFlow Manager
+	if err != nil {
+		return fmt.Errorf("failed to start default node network controller: %v", err)
+	}
+
 	if ncm.nadController != nil {
 		err = ncm.nadController.Start()
 		if err != nil {
@@ -199,10 +208,6 @@ func (ncm *nodeNetworkControllerManager) Start(ctx context.Context) (err error) 
 		}
 	}
 
-	err = ncm.initDefaultNodeNetworkController()
-	if err != nil {
-		return fmt.Errorf("failed to init default node network controller: %v", err)
-	}
 	err = ncm.defaultNodeNetworkController.Start(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to start default node network controller: %v", err)
