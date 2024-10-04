@@ -277,12 +277,10 @@ func (oc *DefaultNetworkController) removeLocalZonePod(pod *kapi.Pod, portInfo *
 // It removes the remote pod ips from the namespace address set and if its an external gw pod, removes
 // its routes.
 func (oc *DefaultNetworkController) removeRemoteZonePod(pod *kapi.Pod) error {
-	if util.PodWantsHostNetwork(pod) {
-		// Delete the routes in the namespace associated with this remote pod if it was acting as an external GW
-		if err := oc.deletePodExternalGW(pod); err != nil {
-			return fmt.Errorf("unable to delete external gateway routes for remote pod %s: %w",
-				getPodNamespacedName(pod), err)
-		}
+	// Delete the routes in the namespace associated with this remote pod if it was acting as an external GW
+	if err := oc.deletePodExternalGW(pod); err != nil {
+		return fmt.Errorf("unable to delete external gateway routes for remote pod %s: %w",
+			getPodNamespacedName(pod), err)
 	}
 
 	// while this check is only intended for local pods, we also need it for
