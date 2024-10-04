@@ -2,6 +2,7 @@ package nad
 
 import (
 	"context"
+
 	networkAttachDefController "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -11,6 +12,10 @@ type FakeNetworkController struct {
 }
 
 func (nc *FakeNetworkController) Start(ctx context.Context) error {
+	return nil
+}
+
+func (nc *FakeNetworkController) PreStart(ctx context.Context) error {
 	return nil
 }
 
@@ -35,8 +40,9 @@ type FakeNADController struct {
 	PrimaryNetworks map[string]util.NetInfo
 }
 
-func (nc *FakeNADController) Start() error { return nil }
-func (nc *FakeNADController) Stop()        {}
+func (nc *FakeNADController) PreStart() error { return nil }
+func (nc *FakeNADController) Start() error    { return nil }
+func (nc *FakeNADController) Stop()           {}
 func (nc *FakeNADController) GetActiveNetworkForNamespace(namespace string) (util.NetInfo, error) {
 	if primaryNetworks, ok := nc.PrimaryNetworks[namespace]; ok && primaryNetworks != nil {
 		return primaryNetworks, nil
