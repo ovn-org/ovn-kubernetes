@@ -138,13 +138,58 @@ func New(
 
 func (c *Controller) Run() error {
 	klog.Infof("Starting user-defined network controllers")
-	if err := controller.Start(
+	if err := controller.StartWithInitialSync(
+		c.initializeNamespaceTracker,
 		c.cudnController,
 		c.udnController,
 		c.nadNotifier.Controller,
 		c.namespaceNotifier.Controller,
 	); err != nil {
 		return fmt.Errorf("unable to start user-defined network controller: %v", err)
+	}
+
+	return nil
+}
+
+// initializeNamespaceTracker populates the namespace-tracker with NAD namespaces who owned by the controller.
+func (c *Controller) initializeNamespaceTracker() error {
+	cudns, err := c.cudnLister.List(labels.Everything())
+	if err != nil {
+		return err
+	}
+	if len(cudns) == 0 {
+		return nil
+	}
+
+	nads, err := c.nadLister.List(labels.Everything())
+	if err != nil {
+		return err
+	}
+	if len(nads) == 0 {
+		return nil
+	}
+	indexedNADs := map[string]netv1.NetworkAttachmentDefinition{}
+	for _, nad := range nads {
+		if nad != nil {
+			indexedNADs[nad.Namespace+"/"+nad.Name] = *nad.DeepCopy()
+		}
+	}
+
+	for _, cudn := range cudns {
+		c.namespaceTracker[cudn.Name] = sets.New[string]()
+
+		for nadKey, nad := range indexedNADs {
+			if !metav1.IsControlledBy(&nad, cudn) {
+				continue
+			}
+			c.namespaceTracker[cudn.Name].Insert(nad.Namespace)
+
+			// Usually we don't want to mutate an iterated map, in this case
+			// the processed entry is removed because it shouldn't be processed
+			// again and not expected to be visited again, i.e.: the NAD should
+			// be recorded by the namespaceTracker once.
+			delete(indexedNADs, nadKey)
+		}
 	}
 
 	return nil

@@ -701,6 +701,52 @@ var _ = Describe("User Defined Network Controller", func() {
 					}
 				})
 			})
+
+			It("when started, CR exist, stale NADs exist, should deleted stale NADs", func() {
+				var testObjs []runtime.Object
+				staleNADsNsNames := []string{"red", "blue"}
+				staleLabel := map[string]string{"test.io": "stale"}
+				for _, nsName := range staleNADsNsNames {
+					ns := testNamespace(nsName)
+					ns.SetLabels(staleLabel)
+					testObjs = append(testObjs, ns)
+				}
+				connectedNsNames := []string{"green", "yellow"}
+				connectedLabel := map[string]string{"test.io": "connected"}
+				for _, nsName := range connectedNsNames {
+					ns := testNamespace(nsName)
+					ns.SetLabels(connectedLabel)
+					testObjs = append(testObjs, ns)
+				}
+				cudn := testClusterUDN("test")
+				cudn.Spec = udnv1.ClusterUserDefinedNetworkSpec{NamespaceSelector: metav1.LabelSelector{
+					MatchLabels: connectedLabel,
+				}}
+				testObjs = append(testObjs, cudn)
+				for _, nsName := range append(staleNADsNsNames, connectedNsNames...) {
+					testObjs = append(testObjs, testClusterUdnNAD(cudn.Name, nsName))
+				}
+				c = newTestController(renderNadStub(testClusterUdnNAD(cudn.Name, "")), testObjs...)
+				Expect(c.Run()).Should(Succeed())
+
+				Eventually(func() []metav1.Condition {
+					var err error
+					cudn, err = cs.UserDefinedNetworkClient.K8sV1().ClusterUserDefinedNetworks().Get(context.Background(), cudn.Name, metav1.GetOptions{})
+					Expect(err).NotTo(HaveOccurred())
+					return normalizeConditions(cudn.Status.Conditions)
+				}, 50*time.Millisecond).Should(Equal([]metav1.Condition{{
+					Type:    "NetworkReady",
+					Status:  "True",
+					Reason:  "NetworkAttachmentDefinitionReady",
+					Message: "NetworkAttachmentDefinition has been created in following namespaces: [green, yellow]",
+				}}), "status should report NAD created in test labeled namespaces")
+
+				for _, nsName := range staleNADsNsNames {
+					_, err := cs.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(nsName).Get(context.Background(), cudn.Name, metav1.GetOptions{})
+					Expect(err).To(HaveOccurred())
+					Expect(kerrors.IsNotFound(err)).To(Equal(true))
+				}
+			})
 		})
 	})
 
