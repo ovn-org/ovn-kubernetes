@@ -19,7 +19,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -365,20 +364,6 @@ func (zic *ZoneInterconnectHandler) AddTransitPortConfig(remote bool, podAnnotat
 	return nil
 }
 
-func (zic *ZoneInterconnectHandler) BindTransitRemotePort(nodeName, portName string) error {
-	node, err := zic.watchFactory.GetNode(nodeName)
-	if err != nil {
-		return err
-	}
-
-	chassisId, err := util.ParseNodeChassisIDAnnotation(node)
-	if err != nil {
-		return fmt.Errorf("failed to parse node chassis-id for node %s: %w", node.Name, err)
-	}
-
-	return zic.setRemotePortBindingChassis(nodeName, portName, chassisId)
-}
-
 func (zic *ZoneInterconnectHandler) addTransitSwitchConfig(sw *nbdb.LogicalSwitch, networkID int) {
 	if sw.OtherConfig == nil {
 		sw.OtherConfig = map[string]string{}
@@ -475,6 +460,7 @@ func (zic *ZoneInterconnectHandler) createRemoteZoneNodeResources(node *corev1.N
 
 	lspOptions := map[string]string{
 		"requested-tnl-key": strconv.Itoa(nodeID),
+		"requested-chassis": node.Name,
 	}
 	// Store the node name in the external_ids column for book keeping
 	externalIDs := map[string]string{
@@ -483,10 +469,6 @@ func (zic *ZoneInterconnectHandler) createRemoteZoneNodeResources(node *corev1.N
 
 	remotePortName := zic.GetNetworkScopedName(types.TransitSwitchToRouterPrefix + node.Name)
 	if err := zic.addNodeLogicalSwitchPort(zic.networkTransitSwitchName, remotePortName, lportTypeRemote, []string{remotePortAddr}, lspOptions, externalIDs); err != nil {
-		return err
-	}
-	// Set the port binding chassis.
-	if err := zic.setRemotePortBindingChassis(node.Name, remotePortName, chassisId); err != nil {
 		return err
 	}
 
@@ -576,49 +558,6 @@ func (zic *ZoneInterconnectHandler) cleanupNodeTransitSwitchPort(nodeName string
 	if err := libovsdbops.DeleteLogicalSwitchPorts(zic.nbClient, logicalSwitch, logicalSwitchPort); err != nil {
 		return fmt.Errorf("failed to delete logical switch port %s from transit switch %s for the node %s, error: %w", logicalSwitchPort.Name, zic.networkTransitSwitchName, nodeName, err)
 	}
-	return nil
-}
-
-func (zic *ZoneInterconnectHandler) setRemotePortBindingChassis(nodeName, portName, chassisId string) error {
-	remotePort := sbdb.PortBinding{
-		LogicalPort: portName,
-	}
-	chassis := sbdb.Chassis{
-		Hostname: nodeName,
-		Name:     chassisId,
-	}
-
-	// the chassis is created in NBDB by ovnk and takes some time to propagate. Let's make sure it exists before we try
-	// to set the port binding
-	maxTimeout := 10 * time.Second
-	var err1 error
-	err := wait.PollUntilContextTimeout(context.TODO(), 50*time.Millisecond, maxTimeout, true, func(ctx context.Context) (bool, error) {
-		if _, err1 = libovsdbops.GetChassis(zic.sbClient, &chassis); err1 != nil {
-			return false, nil
-		}
-		return true, nil
-	})
-
-	if err != nil {
-		return fmt.Errorf("failed to find chassis: %s, after %s: %w, %v", chassis.Hostname, maxTimeout, err, err1)
-	}
-
-	// Similarly wait for the port binding to exist
-	err = wait.PollUntilContextTimeout(context.TODO(), 50*time.Millisecond, maxTimeout, true, func(ctx context.Context) (bool, error) {
-		if _, err1 = libovsdbops.GetPortBinding(zic.sbClient, &remotePort); err1 != nil {
-			return false, nil
-		}
-		return true, nil
-	})
-
-	if err != nil {
-		return fmt.Errorf("failed to find port binding: %s, after %s: %w, %v", remotePort.LogicalPort, maxTimeout, err, err1)
-	}
-
-	if err := libovsdbops.UpdatePortBindingSetChassis(zic.sbClient, &remotePort, &chassis); err != nil {
-		return fmt.Errorf("failed to update chassis %s for remote port %s, error: %w", nodeName, portName, err)
-	}
-
 	return nil
 }
 

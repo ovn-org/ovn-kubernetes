@@ -371,16 +371,6 @@ func (bsnc *BaseSecondaryNetworkController) addLogicalPortToNetworkForNAD(pod *k
 		_ = bsnc.logicalPortCache.add(pod, switchName, nadName, lsp.UUID, podAnnotation.MAC, podAnnotation.IPs)
 	}
 
-	// we need to create the binding ourselves for the remote ports we create on
-	// layer2 topologies with interconnect
-	isRemotePort := !isLocalPod && bsnc.isLayer2Interconnect()
-	if isRemotePort {
-		err := bsnc.zoneICHandler.BindTransitRemotePort(pod.Spec.NodeName, lsp.Name)
-		if err != nil {
-			return fmt.Errorf("failed to bind remote transit port: %w", err)
-		}
-	}
-
 	if isLocalPod {
 		bsnc.podRecorder.AddLSP(pod.UID, bsnc.NetInfo)
 		if newlyCreated {
