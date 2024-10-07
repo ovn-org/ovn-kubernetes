@@ -106,6 +106,20 @@ func (oc *BaseSecondaryLayer2NetworkController) run() error {
 		return err
 	}
 
+	// start NetworkQoS controller if feature is enabled
+	if config.OVNKubernetesFeature.EnableNetworkQoS {
+		err := oc.newNetworkQoSController()
+		if err != nil {
+			return fmt.Errorf("unable to create network qos controller, err: %w", err)
+		}
+		oc.wg.Add(1)
+		go func() {
+			defer oc.wg.Done()
+			// Until we have scale issues in future let's spawn only one thread
+			oc.nqosController.Run(1, oc.stopChan)
+		}()
+	}
+
 	return nil
 }
 

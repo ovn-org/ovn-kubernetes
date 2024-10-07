@@ -151,6 +151,8 @@ spec:
           value: {{ hasKey .Values.global "enableInterconnect" | ternary .Values.global.enableInterconnect false | quote }}
         - name: OVN_ENABLE_MULTI_EXTERNAL_GATEWAY
           value: {{ hasKey .Values.global "enableMultiExternalGateway" | ternary .Values.global.enableMultiExternalGateway false | quote }}
+        - name: OVN_NETWORK_QOS_ENABLE
+          value: {{ hasKey .Values.global "enableNetworkQos" | ternary .Values.global.enableNetworkQos false | quote }}
         - name: OVN_V4_TRANSIT_SWITCH_SUBNET
           value: {{ default "" .Values.global.v4TransitSwitchSubnet | quote }}
         - name: OVN_V6_TRANSIT_SWITCH_SUBNET

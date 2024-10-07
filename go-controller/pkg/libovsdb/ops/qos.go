@@ -110,7 +110,7 @@ func RemoveQoSesFromLogicalSwitchOps(nbClient libovsdbclient.Client, ops []libov
 	opModels := operationModel{
 		Model:            sw,
 		OnModelMutations: []interface{}{&sw.QOSRules},
-		ErrNotFound:      true,
+		ErrNotFound:      false,
 		BulkOp:           false,
 	}
 
