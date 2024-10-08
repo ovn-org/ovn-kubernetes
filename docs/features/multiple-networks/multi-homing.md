@@ -309,8 +309,28 @@ client application that created them in the first place. In this case, KubeVirt.
 This feature is described in detail in the following KubeVirt
 [design proposal](https://github.com/kubevirt/community/pull/279).
 
+## IPv4 and IPv6 dynamic configuration for virtualization workloads on L2 primary UDN
+For virtualization workloads using a primary UDN with layer2 topology ovn-k 
+configure some DHCP and NDP flows to server ipv4 and ipv6 configuration for them.
+
+For both ipv4 and ipv6 the following parameters are configured using DHCP or RAs:
+- address
+- gateway
+- dns (read notes below)
+- hostname (vm's name)
+- mtu (taken from network attachment definition)
+
+### Configuring dns server
+By default the DHCP server at ovn-kuberntes will configure the kubernetes
+default dns service `kube-system/kube-dns` as the name server. This can be
+overridden with the following command line options:
+- dns-service-namespace
+- dns-service-name
+
 ## Limitations
 OVN-K currently does **not** support:
 - the same attachment configured multiple times in the same pod - i.e.
   `k8s.v1.cni.cncf.io/networks: l3-network,l3-network` is invalid.
 - updates to the network selection elements lists - i.e. `k8s.v1.cni.cncf.io/networks` annotation
+- IPv6 link local addresses not derived from the MAC address as described in RFC 2373, like  Privacy Extensions defined by RFC 4941, 
+  or the Opaque Identifier generation methods defined in RFC 7217.
