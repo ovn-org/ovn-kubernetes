@@ -176,6 +176,24 @@ func (oc *DefaultNetworkController) ensureLocalZonePod(oldPod, pod *kapi.Pod, ad
 		}
 	}
 
+	// update open ports for UDN pods on pod update.
+	if util.IsNetworkSegmentationSupportEnabled() && !util.PodWantsHostNetwork(pod) && !addPort &&
+		pod != nil && oldPod != nil &&
+		pod.Annotations[util.UDNOpenPortsAnnotationName] != oldPod.Annotations[util.UDNOpenPortsAnnotationName] {
+		networkRole, err := oc.GetNetworkRole(pod)
+		if err != nil {
+			return err
+		}
+		if networkRole != ovntypes.NetworkRolePrimary {
+			// only update for non-default network pods
+			portName := oc.GetLogicalPortName(pod, oc.GetNetworkName())
+			err := oc.setUDNPodOpenPorts(pod.Namespace+"/"+pod.Name, pod.Annotations, portName)
+			if err != nil {
+				return fmt.Errorf("failed to update UDN pod  %s/%s open ports: %w", pod.Namespace, pod.Name, err)
+			}
+		}
+	}
+
 	if kubevirt.IsPodLiveMigratable(pod) {
 		return kubevirt.EnsureLocalZonePodAddressesToNodeRoute(oc.watchFactory, oc.nbClient, oc.lsManager, pod, ovntypes.DefaultNetworkName)
 	}

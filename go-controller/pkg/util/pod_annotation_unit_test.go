@@ -371,3 +371,105 @@ func newDummyNetInfo(namespace, networkName string) NetInfo {
 	netInfo.AddNADs(GetNADName(namespace, networkName))
 	return netInfo
 }
+
+func TestUnmarshalUDNOpenPortsAnnotation(t *testing.T) {
+	intRef := func(i int) *int {
+		return &i
+	}
+
+	tests := []struct {
+		desc      string
+		input     string
+		errSubstr string
+		result    []*OpenPort
+	}{
+		{
+			desc:      "protocol without port",
+			input:     `- protocol: tcp`,
+			errSubstr: "port is required",
+		},
+		{
+			desc:      "port without protocol",
+			input:     `- port: 80`,
+			errSubstr: "invalid protocol",
+		},
+		{
+			desc:      "invalid protocol",
+			input:     `- protocol: foo`,
+			errSubstr: "invalid protocol",
+		},
+		{
+			desc: "icmp with port",
+			input: `- protocol: icmp
+  port: 80`,
+			errSubstr: "invalid port 80 for icmp protocol, should be empty",
+		},
+		{
+			desc:  "valid icmp",
+			input: `- protocol: icmp`,
+			result: []*OpenPort{
+				{
+					Protocol: "icmp",
+				},
+			},
+		},
+		{
+			desc: "invalid port",
+			input: `- protocol: tcp
+  port: 100000`,
+			errSubstr: "invalid port",
+		},
+		{
+			desc: "valid tcp",
+			input: `- protocol: tcp
+  port: 80`,
+			result: []*OpenPort{
+				{
+					Protocol: "tcp",
+					Port:     intRef(80),
+				},
+			},
+		},
+		{
+			desc: "valid multiple protocols",
+			input: `- protocol: tcp
+  port: 1
+- protocol: udp
+  port: 2
+- protocol: sctp
+  port: 3
+- protocol: icmp`,
+			result: []*OpenPort{
+				{
+					Protocol: "tcp",
+					Port:     intRef(1),
+				},
+				{
+					Protocol: "udp",
+					Port:     intRef(2),
+				},
+				{
+					Protocol: "sctp",
+					Port:     intRef(3),
+				},
+				{
+					Protocol: "icmp",
+				},
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.desc, func(t *testing.T) {
+			res, err := UnmarshalUDNOpenPortsAnnotation(map[string]string{
+				UDNOpenPortsAnnotationName: tc.input,
+			})
+			if tc.errSubstr != "" {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tc.errSubstr)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tc.result, res)
+			}
+		})
+	}
+}

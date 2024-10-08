@@ -4,16 +4,19 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"strings"
 
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
+	libovsdb "github.com/ovn-org/libovsdb/ovsdb"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 )
 
 const (
@@ -22,6 +25,8 @@ const (
 	AllowHostARPACL       = "AllowHostARPSecondary"
 	AllowHostSecondaryACL = "AllowHostSecondary"
 	DenySecondaryACL      = "DenySecondary"
+	// OpenPortACLPrefix is used to build per-pod ACLs, pod name should be added to the prefix to build a unique name
+	OpenPortACLPrefix = "OpenPort-"
 )
 
 // setupUDNACLs should be called after the node's management port was configured
@@ -133,6 +138,101 @@ func (oc *DefaultNetworkController) getUDNACLDbIDs(name string, aclDir libovsdbu
 	return libovsdbops.NewDbObjectIDs(libovsdbops.ACLUDN, oc.controllerName,
 		map[libovsdbops.ExternalIDKey]string{
 			libovsdbops.ObjectNameKey:      name,
+			libovsdbops.PolicyDirectionKey: string(aclDir),
+		})
+}
+
+func getPortsMatches(podAnnotations map[string]string, lspName string) (string, string, error) {
+	if lspName == "" {
+		return "", "", nil
+	}
+	ports, err := util.UnmarshalUDNOpenPortsAnnotation(podAnnotations)
+	if err != nil {
+		return "", "", err
+	}
+	if len(ports) == 0 {
+		return "", "", nil
+	}
+	// protocol match is only used for ingress rules, use dst match
+	portMatches := []string{}
+	for _, portDef := range ports {
+		if portDef.Protocol == "icmp" {
+			// from the ovn docs:
+			// "icmp expands to icmp4 || icmp6"
+			portMatches = append(portMatches, "icmp")
+		} else {
+			portMatches = append(portMatches, fmt.Sprintf("%s.dst == %d", portDef.Protocol, *portDef.Port))
+		}
+	}
+	protoMatch := strings.Join(portMatches, " || ")
+	// allow ingress for ARP or ND and open ports
+	// allow egress for ARP or ND
+	ingressMatch := fmt.Sprintf(`outport == "%s" && (arp || nd || (%s))`, lspName, protoMatch)
+	egressMatch := fmt.Sprintf(`inport == "%s" && (arp || nd)`, lspName)
+
+	return ingressMatch, egressMatch, nil
+}
+
+// setUDNPodOpenPorts should be called after the pod's lsp is created to add ACLs that allow ingress on required ports.
+// When lspName="", ACLs are removed. If annotation can't be parsed correctly, ACLs will be deleted.
+func (oc *DefaultNetworkController) setUDNPodOpenPorts(podNamespacedName string, podAnnotations map[string]string, lspName string) error {
+	ops, parseErr, err := oc.setUDNPodOpenPortsOps(podNamespacedName, podAnnotations, lspName, nil)
+	if err != nil {
+		return errors.Join(parseErr, err)
+	}
+	_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
+	if err != nil {
+		return utilerrors.Join(parseErr, fmt.Errorf("failed to transact open ports UDN ACLs: %v", err))
+	}
+	return parseErr
+}
+
+// setUDNPodOpenPortsOps returns the operations to add or remove ACLs that allow ingress on required ports.
+// first returned error is parse error, second is db ops error
+func (oc *DefaultNetworkController) setUDNPodOpenPortsOps(podNamespacedName string, podAnnotations map[string]string, lspName string,
+	ops []libovsdb.Operation) ([]libovsdb.Operation, error, error) {
+	udnPGName := libovsdbutil.GetPortGroupName(oc.getSecondaryPodsPortGroupDbIDs())
+
+	ingressMatch, egressMatch, parseErr := getPortsMatches(podAnnotations, lspName)
+	// don't return on parseErr, as we need to cleanup potentially present ACLs from the previous config
+	ingressIDs := oc.getUDNOpenPortDbIDs(podNamespacedName, libovsdbutil.ACLIngress)
+	ingressACL := libovsdbutil.BuildACL(ingressIDs, types.PrimaryUDNAllowPriority,
+		ingressMatch, nbdb.ACLActionAllowRelated, nil, libovsdbutil.LportIngress)
+
+	egressIDs := oc.getUDNOpenPortDbIDs(podNamespacedName, libovsdbutil.ACLEgress)
+	egressACL := libovsdbutil.BuildACL(egressIDs, types.PrimaryUDNAllowPriority,
+		egressMatch, nbdb.ACLActionAllow, nil, libovsdbutil.LportEgress)
+
+	var err error
+	if ingressMatch == "" && egressMatch == "" || parseErr != nil {
+		// no open ports or error parsing annotations, remove ACLs
+		foundACLs, err := libovsdbops.FindACLs(oc.nbClient, []*nbdb.ACL{ingressACL, egressACL})
+		if err != nil {
+			return ops, parseErr, fmt.Errorf("failed to find open ports UDN ACLs: %v", err)
+		}
+		ops, err = libovsdbops.DeleteACLsFromPortGroupOps(oc.nbClient, ops, udnPGName, foundACLs...)
+		if err != nil {
+			return ops, parseErr, fmt.Errorf("failed to remove open ports ACLs from portGroup %s: %v", udnPGName, err)
+		}
+	} else {
+		// update ACLs
+		ops, err = libovsdbops.CreateOrUpdateACLsOps(oc.nbClient, ops, oc.GetSamplingConfig(), ingressACL, egressACL)
+		if err != nil {
+			return ops, parseErr, fmt.Errorf("failed to create or update open ports UDN ACLs: %v", err)
+		}
+
+		ops, err = libovsdbops.AddACLsToPortGroupOps(oc.nbClient, ops, udnPGName, ingressACL, egressACL)
+		if err != nil {
+			return ops, parseErr, fmt.Errorf("failed to add open ports ACLs to portGroup %s: %v", udnPGName, err)
+		}
+	}
+	return ops, parseErr, nil
+}
+
+func (oc *DefaultNetworkController) getUDNOpenPortDbIDs(podNamespacedName string, aclDir libovsdbutil.ACLDirection) *libovsdbops.DbObjectIDs {
+	return libovsdbops.NewDbObjectIDs(libovsdbops.ACLUDN, oc.controllerName,
+		map[libovsdbops.ExternalIDKey]string{
+			libovsdbops.ObjectNameKey:      OpenPortACLPrefix + podNamespacedName,
 			libovsdbops.PolicyDirectionKey: string(aclDir),
 		})
 }

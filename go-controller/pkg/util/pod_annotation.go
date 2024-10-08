@@ -14,8 +14,10 @@ import (
 	"k8s.io/client-go/tools/cache"
 
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 	listers "k8s.io/client-go/listers/core/v1"
 	utilnet "k8s.io/utils/net"
+	"sigs.k8s.io/yaml"
 )
 
 // This handles the "k8s.ovn.org/pod-networks" annotation on Pods, used to pass
@@ -55,6 +57,8 @@ const (
 	// OvnUDNIPAMClaimName is used for workload owners to instruct OVN-K which
 	// IPAMClaim will hold the allocation for the workload
 	OvnUDNIPAMClaimName = "k8s.ovn.org/primary-udn-ipamclaim"
+	// UDNOpenPortsAnnotationName is the pod annotation to open default network pods on UDN pods.
+	UDNOpenPortsAnnotationName = "k8s.ovn.org/open-default-ports"
 )
 
 var ErrNoPodIPFound = errors.New("no pod IPs found")
@@ -123,6 +127,12 @@ type podAnnotation struct {
 type podRoute struct {
 	Dest    string `json:"dest"`
 	NextHop string `json:"nextHop"`
+}
+
+type OpenPort struct {
+	// valid values are tcp, udp, sctp
+	Protocol string `json:"protocol"`
+	Port     *int   `json:"port,omitempty"`
 }
 
 // MarshalPodAnnotation adds the pod's network details of the specified network to the corresponding pod annotation.
@@ -636,4 +646,35 @@ func AddRoutesGatewayIP(
 	}
 
 	return nil
+}
+
+// UnmarshalUDNOpenPortsAnnotation returns the OpenPorts from the pod annotation. If annotation is not present,
+// empty list with no error is returned.
+func UnmarshalUDNOpenPortsAnnotation(annotations map[string]string) ([]*OpenPort, error) {
+	result := []*OpenPort{}
+	ports, ok := annotations[UDNOpenPortsAnnotationName]
+	if !ok {
+		return result, nil
+	}
+	if err := yaml.Unmarshal([]byte(ports), &result); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal UDN open ports annotation %s: %v", ports, err)
+	}
+	allowedProtocols := sets.New("tcp", "udp", "sctp", "icmp")
+
+	for _, portDef := range result {
+		if !allowedProtocols.Has(portDef.Protocol) {
+			return nil, fmt.Errorf("invalid protocol %s", portDef.Protocol)
+		}
+		if portDef.Protocol == "icmp" {
+			if portDef.Port != nil {
+				return nil, fmt.Errorf("invalid port %v for icmp protocol, should be empty", *portDef.Port)
+			}
+		} else if portDef.Port == nil {
+			return nil, fmt.Errorf("port is required for %s protocol", portDef.Protocol)
+		}
+		if portDef.Port != nil && (*portDef.Port > 65535 || *portDef.Port < 0) {
+			return nil, fmt.Errorf("invalid port %v", *portDef.Port)
+		}
+	}
+	return result, nil
 }
