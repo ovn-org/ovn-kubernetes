@@ -204,7 +204,7 @@ var _ = Describe("Healthcheck tests", func() {
 			Expect(testutils.UnmountNS(testNS)).To(Succeed())
 		})
 
-		It("check vrf devices are cleaned for deleted networks", func() {
+		ovntest.OnSupportedPlatformsIt("check vrf devices are cleaned for deleted networks", func() {
 			config.OVNKubernetesFeature.EnableNetworkSegmentation = true
 			config.OVNKubernetesFeature.EnableMultiNetwork = true
 
