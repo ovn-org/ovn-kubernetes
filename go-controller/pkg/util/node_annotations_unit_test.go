@@ -826,3 +826,84 @@ func TestGetNetworkID(t *testing.T) {
 		})
 	}
 }
+
+func TestParseNodeManagementPortIPAddresses(t *testing.T) {
+	net1 := ovntest.MustParseIPNet("1.1.1.0/24")
+	net2 := ovntest.MustParseIPNet("2.2.2.0/24")
+	tests := []struct {
+		desc           string
+		inpNetName     string
+		inpHostSubnets []*net.IPNet
+		inpAnnotations map[string]string
+		errExpected    bool
+		expOutput      map[string]string
+	}{
+		{
+			desc:        "ip address annotation not provided",
+			errExpected: true,
+		},
+		{
+			desc:           "ip address annotation not found for node, however, does not return error",
+			inpNetName:     "default",
+			inpAnnotations: map[string]string{},
+			expOutput: map[string]string{
+				"k8s.ovn.org/node-mgmt-port-info": `{}`,
+			},
+		},
+		{
+			desc:       "ip address annotation removal",
+			inpNetName: "default",
+			inpAnnotations: map[string]string{
+				"k8s.ovn.org/node-mgmt-port-info": `{"default":{"ip-addresses":["1.2.3.4/24"]}}`,
+			},
+			expOutput: map[string]string{
+				"k8s.ovn.org/node-mgmt-port-info": `{}`,
+			},
+		},
+		{
+			desc:       "ip address annotation removal from one of the networks",
+			inpNetName: "one",
+			inpAnnotations: map[string]string{
+				"k8s.ovn.org/node-mgmt-port-info": `{"one":{"ip-addresses":["10.0.0.2/24"]},"default":{"ip-addresses":["11.0.0.2/24"]},"two":{"ip-addresses":["20.0.0.2/24"]}}`,
+			},
+			expOutput: map[string]string{
+				"k8s.ovn.org/node-mgmt-port-info": `{"default":{"ip-addresses":["11.0.0.2/24"]},"two":{"ip-addresses":["20.0.0.2/24"]}}`,
+			},
+		},
+		{
+			desc:           "ip address annotation add new network",
+			inpNetName:     "one",
+			inpHostSubnets: []*net.IPNet{net1},
+			inpAnnotations: map[string]string{
+				"k8s.ovn.org/node-mgmt-port-info": `{"default":{"ip-addresses":["11.0.0.2/24"]},"two":{"ip-addresses":["20.0.0.2/24"]}}`,
+			},
+			expOutput: map[string]string{
+				"k8s.ovn.org/node-mgmt-port-info": `{"default":{"ip-addresses":["11.0.0.2/24"]},"one":{"ip-addresses":["1.1.1.2/24"]},"two":{"ip-addresses":["20.0.0.2/24"]}}`,
+			},
+		},
+		{
+			desc:           "ip address annotation update address of existing network",
+			inpNetName:     "one",
+			inpHostSubnets: []*net.IPNet{net1, net2},
+			inpAnnotations: map[string]string{
+				"k8s.ovn.org/node-mgmt-port-info": `{"default":{"ip-addresses":["11.0.0.2/24"]},"one":{"ip-addresses":["9.9.9.9/24"]},"two":{"ip-addresses":["20.0.0.2/24"]}}`,
+			},
+			expOutput: map[string]string{
+				"k8s.ovn.org/node-mgmt-port-info": `{"default":{"ip-addresses":["11.0.0.2/24"]},"one":{"ip-addresses":["1.1.1.2/24","2.2.2.2/24"]},"two":{"ip-addresses":["20.0.0.2/24"]}}`,
+			},
+		},
+	}
+
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			e := updateNodeMgmtPortInfoIpAddresses(tc.inpNetName, tc.inpHostSubnets, tc.inpAnnotations)
+			if tc.errExpected {
+				t.Log(e)
+				assert.Error(t, e)
+			} else {
+				assert.NoError(t, e)
+			}
+			assert.Equal(t, tc.inpAnnotations, tc.expOutput)
+		})
+	}
+}
