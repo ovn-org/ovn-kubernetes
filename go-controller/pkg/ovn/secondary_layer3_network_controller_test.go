@@ -545,6 +545,11 @@ func newNodeWithSecondaryNets(nodeName string, nodeIPv4CIDR string, netInfos ...
 		nodeSubnetInfo = append(nodeSubnetInfo, info.String())
 	}
 
+	// var nodeMgmtIpInfo []string
+	// for _, info := range netInfos {
+	// 	nodeMgmtIpInfo = append(nodeMgmtIpInfo, info.String())
+	// }
+
 	nodeIP, nodeCIDR, err := net.ParseCIDR(nodeIPv4CIDR)
 	if err != nil {
 		return nil, err
@@ -564,7 +569,8 @@ func newNodeWithSecondaryNets(nodeName string, nodeIPv4CIDR string, netInfos ...
 				util.OvnNodeChassisID:                  "abdcef",
 				"k8s.ovn.org/network-ids":              "{\"default\":\"0\",\"isolatednet\":\"2\"}",
 				util.OvnNodeManagementPortMacAddresses: fmt.Sprintf("{\"isolatednet\":%q}", dummyMACAddr),
-				util.OVNNodeGRLRPAddrs:                 fmt.Sprintf("{\"isolatednet\":{\"ipv4\":%q}}", gwRouterJoinIPAddress()),
+				// util.OvnNodeManagementPortInfo:         fmt.Sprintf("{\"default\":{\"ip-addresses\":["10.128.0.2/16"]}}", ,
+				util.OVNNodeGRLRPAddrs: fmt.Sprintf("{\"isolatednet\":{\"ipv4\":%q}}", gwRouterJoinIPAddress()),
 			},
 			Labels: map[string]string{
 				"k8s.ovn.org/egress-assignable": "",

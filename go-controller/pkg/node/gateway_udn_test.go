@@ -351,6 +351,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		factoryMock.On("GetNode", "worker1").Return(node, nil)
 		cnode := node.DeepCopy()
 		cnode.Annotations[util.OvnNodeManagementPortMacAddresses] = `{"bluenet":"00:00:00:55:66:77"}`
+		cnode.Annotations[util.OvnNodeManagementPortInfo] = `{"bluenet":{"ip-addresses":["10.128.0.2/24","ae70::2/112"]}}`
 		kubeMock.On("UpdateNodeStatus", cnode).Return(nil)
 		err = testNS.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
@@ -424,6 +425,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		factoryMock.On("GetNode", "worker1").Return(node, nil)
 		cnode := node.DeepCopy()
 		cnode.Annotations[util.OvnNodeManagementPortMacAddresses] = `{"bluenet":"00:00:00:55:66:77"}`
+		cnode.Annotations[util.OvnNodeManagementPortInfo] = `{"bluenet":{"ip-addresses":["100.128.0.2/16","ae70::2/60"]}}`
 		kubeMock.On("UpdateNodeStatus", cnode).Return(nil)
 		err = testNS.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
@@ -529,6 +531,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 
 		cnode := node.DeepCopy()
 		cnode.Annotations[util.OvnNodeManagementPortMacAddresses] = `{"bluenet":"00:00:00:55:66:77"}`
+		cnode.Annotations[util.OvnNodeManagementPortInfo] = `{"bluenet":{"ip-addresses":["10.128.0.2/16","ae70::2/60"]}}`
 		kubeMock.On("UpdateNodeStatus", cnode).Return(nil)
 		// Make a fake MgmtPortConfig with only the fields we care about
 		fakeMgmtPortV4IPFamilyConfig := managementPortIPFamilyConfig{
@@ -560,6 +563,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			}}).Return(nil)
 		nodeAnnotatorMock.On("Set", mock.Anything, mock.Anything).Return(nil)
 		nodeAnnotatorMock.On("Run").Return(nil)
+
 		kubeMock.On("SetAnnotationsOnNode", node.Name, map[string]interface{}{
 			"k8s.ovn.org/node-masquerade-subnet": "{\"ipv4\":\"169.254.0.0/17\",\"ipv6\":\"fd69::/112\"}",
 		}).Return(nil)
@@ -727,6 +731,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		Expect(err).NotTo(HaveOccurred())
 		cnode := node.DeepCopy()
 		cnode.Annotations[util.OvnNodeManagementPortMacAddresses] = `{"bluenet":"00:00:00:55:66:77"}`
+		cnode.Annotations[util.OvnNodeManagementPortInfo] = `{"bluenet":{"ip-addresses":["10.128.0.2/16","ae70::2/60"]}}`
 		kubeMock.On("UpdateNodeStatus", cnode).Return(nil)
 		// Make a fake MgmtPortConfig with only the fields we care about
 		fakeMgmtPortV4IPFamilyConfig := managementPortIPFamilyConfig{
