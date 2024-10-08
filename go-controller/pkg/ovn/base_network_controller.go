@@ -222,7 +222,12 @@ func (bnc *BaseNetworkController) GetLogicalPortName(pod *kapi.Pod, nadName stri
 	if !bnc.IsSecondary() {
 		return util.GetLogicalPortName(pod.Namespace, pod.Name)
 	} else {
-		return util.GetSecondaryNetworkLogicalPortName(pod.Namespace, pod.Name, nadName)
+		name := pod.Name
+		vmName := kubevirt.ExtractVMNameFromPod(pod)
+		if vmName != nil {
+			name = vmName.Name
+		}
+		return util.GetSecondaryNetworkLogicalPortName(pod.Namespace, name, nadName)
 	}
 }
 
