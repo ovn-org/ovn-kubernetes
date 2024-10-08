@@ -6,8 +6,6 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/onsi/ginkgo"
-
 	"github.com/onsi/gomega/types"
 	"github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/model"
@@ -44,7 +42,6 @@ type OperationModelTestCase struct {
 }
 
 func runTestCase(t *testing.T, tCase OperationModelTestCase) error {
-	ginkgo.By(tCase.name)
 	dbSetup := libovsdbtest.TestSetup{
 		NBData: tCase.initialDB,
 	}
