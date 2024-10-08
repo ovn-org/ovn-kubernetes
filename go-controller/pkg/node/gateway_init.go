@@ -458,7 +458,7 @@ func (nc *DefaultNodeNetworkController) initGatewayDPUHost(kubeNodeIP net.IP) er
 	}
 	config.Gateway.Interface = gwIntf
 
-	gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
+	_, gatewayIntf, err := getGatewayNextHops()
 	if err != nil {
 		return err
 	}
