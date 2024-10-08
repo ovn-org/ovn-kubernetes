@@ -24,6 +24,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
 	anpapi "sigs.k8s.io/network-policy-api/apis/v1alpha1"
@@ -68,6 +69,14 @@ func GetOVNClientset(objects ...runtime.Object) *OVNClientset {
 			v1Objects = append(v1Objects, object)
 		}
 	}
+
+	nadClient := nadfake.NewSimpleClientset(nads...)
+	// the NAD fake-client tracker must be populated manually because the NAD CRD use arbitrary API registration name
+	// that cannot be resolved by the underlying API machinery [1] [2].
+	// [1] https://github.com/ovn-org/ovn-kubernetes/blob/65c79af35b2c22f90c863debefa15c4fb1f088cb/go-controller/vendor/k8s.io/client-go/testing/fixture.go#L341
+	// [2] https://github.com/ovn-org/ovn-kubernetes/commit/434b0590ce8c61ade75edc996b2f7f83d530f840#diff-ae287d8b2b115068905d4b5bf477d0e8cb6586d271fe872ca3b17acc94f21075R140
+	populateTracker(nadClient, nads...)
+
 	return &OVNClientset{
 		KubeClient:               fake.NewSimpleClientset(v1Objects...),
 		ANPClient:                anpfake.NewSimpleClientset(anpObjects...),
@@ -75,12 +84,28 @@ func GetOVNClientset(objects ...runtime.Object) *OVNClientset {
 		EgressFirewallClient:     egressfirewallfake.NewSimpleClientset(egressFirewallObjects...),
 		CloudNetworkClient:       cloudservicefake.NewSimpleClientset(cloudObjects...),
 		EgressQoSClient:          egressqosfake.NewSimpleClientset(egressQoSObjects...),
-		NetworkAttchDefClient:    nadfake.NewSimpleClientset(nads...),
+		NetworkAttchDefClient:    nadClient,
 		MultiNetworkPolicyClient: mnpfake.NewSimpleClientset(multiNetworkPolicyObjects...),
 		EgressServiceClient:      egressservicefake.NewSimpleClientset(egressServiceObjects...),
 		AdminPolicyRouteClient:   adminpolicybasedroutefake.NewSimpleClientset(apbExternalRouteObjects...),
 		OCPNetworkClient:         ocpnetworkclientfake.NewSimpleClientset(dnsNameResolverObjects...),
 		UserDefinedNetworkClient: udnfake.NewSimpleClientset(),
+	}
+}
+
+// populateTracker populate the NAD fake-client internal tracker with NAD objects
+func populateTracker(nadClient *nadfake.Clientset, objects ...runtime.Object) {
+	nadGVR := schema.GroupVersionResource(metav1.GroupVersionResource{
+		Group:    "k8s.cni.cncf.io",
+		Version:  "v1",
+		Resource: "network-attachment-definitions",
+	})
+	for _, obj := range objects {
+		if nad, ok := obj.(*nettypes.NetworkAttachmentDefinition); ok {
+			if err := nadClient.Tracker().Create(nadGVR, nad, nad.Namespace); err != nil {
+				panic(err)
+			}
+		}
 	}
 }
 
