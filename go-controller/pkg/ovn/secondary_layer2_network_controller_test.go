@@ -480,11 +480,12 @@ func expectedGWToNetworkSwitchRouterPort(name string, netInfo util.NetInfo, netw
 	options := map[string]string{"gateway_mtu": fmt.Sprintf("%d", 1400)}
 	lrp := expectedLogicalRouterPort(name, netInfo, options, networks...)
 	lrp.Ipv6RaConfigs = map[string]string{
-		"address_mode":  "dhcpv6_stateful",
-		"mtu":           "1400",
-		"send_periodic": "true",
-		"max_interval":  "900",
-		"min_interval":  "300",
+		"address_mode":      "dhcpv6_stateful",
+		"mtu":               "1400",
+		"send_periodic":     "true",
+		"max_interval":      "900",
+		"min_interval":      "300",
+		"router_preference": "LOW",
 	}
 	return lrp
 }
