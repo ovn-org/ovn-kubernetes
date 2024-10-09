@@ -350,16 +350,12 @@ func (nc *DefaultNodeNetworkController) initGatewayPhaseOne(subnets []*net.IPNet
 		klog.Errorf("Unable to set primary IP net label on node, err: %v", err)
 	}
 
-	var gw *gateway
+	var gw = &gateway{subnets: subnets}
+
 	switch config.Gateway.Mode {
 	case config.GatewayModeLocal, config.GatewayModeShared:
 		klog.Info("Preparing Gateway")
 		gw, err = newGatewayPhaseOne(nc.name, subnets, gatewayNextHops, gatewayIntf, egressGWInterface, ifAddrs, nodeAnnotator, managementPortConfig, nc.Kube, nc.watchFactory, nc.routeManager)
-		if err != nil {
-			return nil, err
-		}
-
-		err = newGatewayPhaseTwo(gw, subnets, managementPortConfig, nc.watchFactory, nc.nadController, config.Gateway.Mode)
 		if err != nil {
 			return nil, err
 		}
@@ -424,6 +420,12 @@ func (nc *DefaultNodeNetworkController) initGatewayPhaseTwo(gw *gateway, waiter 
 	var portClaimWatcher *portClaimWatcher
 
 	var err error
+
+	err = newGatewayPhaseTwo(gw, nc.gatewaySetup.mgmtPortConfig, nc.watchFactory, nc.nadController, config.Gateway.Mode)
+	if err != nil {
+		return err
+	}
+
 	if config.Gateway.NodeportEnable && config.OvnKubeNode.Mode == types.NodeModeFull {
 		loadBalancerHealthChecker = newLoadBalancerHealthChecker(nc.name, nc.watchFactory)
 		portClaimWatcher, err = newPortClaimWatcher(nc.recorder)

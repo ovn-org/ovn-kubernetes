@@ -54,6 +54,7 @@ type gateway struct {
 	servicesRetryFramework *retry.RetryFramework
 
 	gwBridge, exGwBridge *bridgeConfiguration
+	subnets []*net.IPNet
 
 	watchFactory *factory.WatchFactory // used for retry
 	stopChan     <-chan struct{}

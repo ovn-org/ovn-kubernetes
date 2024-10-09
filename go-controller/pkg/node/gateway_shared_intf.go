@@ -1992,19 +1992,20 @@ func newGatewayPhaseOne(nodeName string, subnets []*net.IPNet, gwNextHops []net.
 	}
 	gw.gwBridge = gwBridge
 	gw.exGwBridge = exGwBridge
+	gw.watchFactory = watchFactory.(*factory.WatchFactory)
 
 	klog.Infof("RICCARDO newGatewayPhaseOne Initial gateway creation complete")
 	return gw, nil
 
 }
 
-func newGatewayPhaseTwo(gw *gateway, subnets []*net.IPNet, cfg *managementPortConfig,
+func newGatewayPhaseTwo(gw *gateway, cfg *managementPortConfig,
 	watchFactory factory.NodeWatchFactory, nadController *nad.NetAttachDefinitionController, gatewayMode config.GatewayMode) error {
 	klog.Infof("RICCARDO newGatewayPhaseTwo Completing gateway creation; gw=%+v", *gw)
 	klog.Infof("RICCARDO newGatewayPhaseTwo gw.openflowManager=%+v", gw.openflowManager)
 
 	if gatewayMode == config.GatewayModeLocal {
-		if err := initLocalGateway(subnets, cfg); err != nil {
+		if err := initLocalGateway(gw.subnets, cfg); err != nil {
 			return fmt.Errorf("failed to initialize new local gateway, err: %w", err)
 		}
 	}
@@ -2013,11 +2014,9 @@ func newGatewayPhaseTwo(gw *gateway, subnets []*net.IPNet, cfg *managementPortCo
 		klog.Infof("RICCARDO gw.initFuncPhaseTwo starts")
 
 		// resync flows on IP change
-		klog.Infof("RICCARDO gw.initFuncPhaseTwo gw.openflowManager=%+v", gw.openflowManager)
-
 		gw.nodeIPManager.OnChanged = func() {
 			klog.V(5).Info("Node addresses changed, re-syncing bridge flows")
-			if err := gw.openflowManager.updateBridgeFlowCache(subnets, gw.nodeIPManager.ListAddresses()); err != nil {
+			if err := gw.openflowManager.updateBridgeFlowCache(gw.subnets, gw.nodeIPManager.ListAddresses()); err != nil {
 				// very unlikely - somehow node has lost its IP address
 				klog.Errorf("Failed to re-generate gateway flows after address change: %v", err)
 			}
@@ -2037,7 +2036,7 @@ func newGatewayPhaseTwo(gw *gateway, subnets []*net.IPNet, cfg *managementPortCo
 			var err error
 			if config.OvnKubeNode.Mode == types.NodeModeFull {
 				// (TODO): Internal Traffic Policy is not supported in DPU mode
-				if err := initSvcViaMgmPortRoutingRules(subnets); err != nil {
+				if err := initSvcViaMgmPortRoutingRules(gw.subnets); err != nil {
 					return err
 				}
 			}
@@ -2058,7 +2057,7 @@ func newGatewayPhaseTwo(gw *gateway, subnets []*net.IPNet, cfg *managementPortCo
 
 		return nil
 	}
-	gw.watchFactory = watchFactory.(*factory.WatchFactory)
+
 	klog.Infof("RICCARDO newGatewayPhaseTwo Gateway Creation Complete")
 	return nil
 }
@@ -2070,8 +2069,8 @@ func newGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP, gwIn
 	if err != nil {
 		return nil, err
 	}
-
-	err = newGatewayPhaseTwo(gw, subnets, cfg, watchFactory, nadController, config.Gateway.Mode)
+	gw.subnets = subnets
+	err = newGatewayPhaseTwo(gw, cfg, watchFactory, nadController, config.Gateway.Mode)
 	if err != nil {
 		return nil, err
 	}
