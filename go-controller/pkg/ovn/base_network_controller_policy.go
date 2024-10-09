@@ -396,8 +396,8 @@ func (bnc *BaseNetworkController) buildDenyACLs(namespace, pgName string, aclLog
 }
 
 func (bnc *BaseNetworkController) addPolicyToDefaultPortGroups(np *networkPolicy, aclLogging *libovsdbutil.ACLLoggingLevels) error {
-	return bnc.sharedNetpolPortGroups.DoWithLock(np.namespace, func(pgKey string) error {
-		sharedPGs, loaded := bnc.sharedNetpolPortGroups.LoadOrStore(pgKey, &defaultDenyPortGroups{
+	return bnc.sharedNetpolDftPortGroups.DoWithLock(np.namespace, func(pgKey string) error {
+		sharedPGs, loaded := bnc.sharedNetpolDftPortGroups.LoadOrStore(pgKey, &defaultDenyPortGroups{
 			ingressPortToPolicies: map[string]sets.Set[string]{},
 			egressPortToPolicies:  map[string]sets.Set[string]{},
 			policies:              map[string]bool{},
@@ -406,7 +406,7 @@ func (bnc *BaseNetworkController) addPolicyToDefaultPortGroups(np *networkPolicy
 			// create port groups with acls
 			err := bnc.createDefaultDenyPGAndACLs(np.namespace, np.name, aclLogging)
 			if err != nil {
-				bnc.sharedNetpolPortGroups.Delete(pgKey)
+				bnc.sharedNetpolDftPortGroups.Delete(pgKey)
 				return fmt.Errorf("failed to create default deny port groups: %v", err)
 			}
 		}
@@ -416,8 +416,8 @@ func (bnc *BaseNetworkController) addPolicyToDefaultPortGroups(np *networkPolicy
 }
 
 func (bnc *BaseNetworkController) delPolicyFromDefaultPortGroups(np *networkPolicy) error {
-	return bnc.sharedNetpolPortGroups.DoWithLock(np.namespace, func(pgKey string) error {
-		sharedPGs, found := bnc.sharedNetpolPortGroups.Load(pgKey)
+	return bnc.sharedNetpolDftPortGroups.DoWithLock(np.namespace, func(pgKey string) error {
+		sharedPGs, found := bnc.sharedNetpolDftPortGroups.Load(pgKey)
 		if !found {
 			return nil
 		}
@@ -428,7 +428,7 @@ func (bnc *BaseNetworkController) delPolicyFromDefaultPortGroups(np *networkPoli
 			if err != nil {
 				return fmt.Errorf("failed to delete defaul deny port group: %v", err)
 			}
-			bnc.sharedNetpolPortGroups.Delete(pgKey)
+			bnc.sharedNetpolDftPortGroups.Delete(pgKey)
 		}
 		return nil
 	})
@@ -505,8 +505,8 @@ func (bnc *BaseNetworkController) updateACLLoggingForPolicy(np *networkPolicy, a
 }
 
 func (bnc *BaseNetworkController) updateACLLoggingForDefaultACLs(ns string, nsInfo *namespaceInfo) error {
-	return bnc.sharedNetpolPortGroups.DoWithLock(ns, func(pgKey string) error {
-		_, loaded := bnc.sharedNetpolPortGroups.Load(pgKey)
+	return bnc.sharedNetpolDftPortGroups.DoWithLock(ns, func(pgKey string) error {
+		_, loaded := bnc.sharedNetpolDftPortGroups.Load(pgKey)
 		if !loaded {
 			// shared port group doesn't exist, nothing to update
 			return nil
@@ -674,14 +674,14 @@ func (bnc *BaseNetworkController) denyPGAddPorts(np *networkPolicy, portNamesToU
 	pgKey := np.namespace
 	// this lock guarantees that sharedPortGroup counters will be updated atomically
 	// with adding port to port group in db.
-	bnc.sharedNetpolPortGroups.LockKey(pgKey)
+	bnc.sharedNetpolDftPortGroups.LockKey(pgKey)
 	pgLocked := true
 	defer func() {
 		if pgLocked {
-			bnc.sharedNetpolPortGroups.UnlockKey(pgKey)
+			bnc.sharedNetpolDftPortGroups.UnlockKey(pgKey)
 		}
 	}()
-	sharedPGs, ok := bnc.sharedNetpolPortGroups.Load(pgKey)
+	sharedPGs, ok := bnc.sharedNetpolDftPortGroups.Load(pgKey)
 	if !ok {
 		// Port group doesn't exist
 		return fmt.Errorf("port groups for ns %s don't exist", np.namespace)
@@ -708,7 +708,7 @@ func (bnc *BaseNetworkController) denyPGAddPorts(np *networkPolicy, portNamesToU
 		}
 	} else {
 		// shared pg was updated and doesn't require db changes, no need to hold the lock
-		bnc.sharedNetpolPortGroups.UnlockKey(pgKey)
+		bnc.sharedNetpolDftPortGroups.UnlockKey(pgKey)
 		pgLocked = false
 	}
 	_, err = libovsdbops.TransactAndCheck(bnc.nbClient, ops)
@@ -738,14 +738,14 @@ func (bnc *BaseNetworkController) denyPGDeletePorts(np *networkPolicy, portNames
 		pgKey := np.namespace
 		// this lock guarantees that sharedPortGroup counters will be updated atomically
 		// with adding port to port group in db.
-		bnc.sharedNetpolPortGroups.LockKey(pgKey)
+		bnc.sharedNetpolDftPortGroups.LockKey(pgKey)
 		pgLocked := true
 		defer func() {
 			if pgLocked {
-				bnc.sharedNetpolPortGroups.UnlockKey(pgKey)
+				bnc.sharedNetpolDftPortGroups.UnlockKey(pgKey)
 			}
 		}()
-		sharedPGs, ok := bnc.sharedNetpolPortGroups.Load(pgKey)
+		sharedPGs, ok := bnc.sharedNetpolDftPortGroups.Load(pgKey)
 		if !ok {
 			// Port group doesn't exist, nothing to clean up
 			klog.Infof("Skip delete ports from default deny port group: port group doesn't exist")
@@ -771,7 +771,7 @@ func (bnc *BaseNetworkController) denyPGDeletePorts(np *networkPolicy, portNames
 				}
 			} else {
 				// shared pg was updated and doesn't require db changes, no need to hold the lock
-				bnc.sharedNetpolPortGroups.UnlockKey(pgKey)
+				bnc.sharedNetpolDftPortGroups.UnlockKey(pgKey)
 				pgLocked = false
 			}
 		}

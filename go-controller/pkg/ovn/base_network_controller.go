@@ -140,7 +140,7 @@ type BaseNetworkController struct {
 	// key is namespace
 	// allowed locking order is namespace Lock -> networkPolicy.Lock -> sharedNetpolPortGroups key Lock
 	// make sure to keep this order to avoid deadlocks
-	sharedNetpolPortGroups *syncmap.SyncMap[*defaultDenyPortGroups]
+	sharedNetpolDftPortGroups *syncmap.SyncMap[*defaultDenyPortGroups]
 
 	podSelectorAddressSets *syncmap.SyncMap[*PodSelectorAddressSet]
 

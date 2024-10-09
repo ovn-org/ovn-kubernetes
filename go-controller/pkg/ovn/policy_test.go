@@ -1678,7 +1678,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				ginkgo.By("Simulate the initial re-add of all network policies during upgrade and ensure we are stable")
 				// pretend controller didn't see this netpol object, all related db rows are still present
 				fakeOvn.controller.networkPolicies.Delete(getPolicyKey(networkPolicy1))
-				fakeOvn.controller.sharedNetpolPortGroups.Delete(networkPolicy1.Namespace)
+				fakeOvn.controller.sharedNetpolDftPortGroups.Delete(networkPolicy1.Namespace)
 				err := fakeOvn.controller.addNetworkPolicy(networkPolicy1)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				return nil
