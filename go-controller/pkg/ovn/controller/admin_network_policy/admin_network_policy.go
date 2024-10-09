@@ -347,12 +347,17 @@ func (c *Controller) expandRulePeers(rule *gressRule) error {
 			if err != nil {
 				return err
 			}
+			netInfo, err := c.nadController.GetActiveNetworkForNamespace(namespace.Name)
+			if err != nil {
+				return err
+			}
 			for _, pod := range pods {
 				// we don't handle HostNetworked or completed pods; unscheduled pods shall be handled via pod update path
 				if util.PodWantsHostNetwork(pod) || util.PodCompleted(pod) || !util.PodScheduled(pod) {
 					continue
 				}
-				podIPs, err := util.GetPodIPsOfNetwork(pod, &util.DefaultNetInfo{})
+
+				podIPs, err := util.GetPodIPsOfNetwork(pod, netInfo)
 				if err != nil {
 					if errors.Is(err, util.ErrNoPodIPFound) {
 						// we ignore podIPsNotFound error here because onANPPodUpdate
@@ -441,11 +446,28 @@ func (c *Controller) convertANPSubjectToLSPs(anp *adminNetworkPolicyState) ([]*n
 		if err != nil {
 			return nil, err
 		}
+		netinfo, err := c.nadController.GetActiveNetworkForNamespace(namespace.Name)
+		if err != nil {
+			return nil, err
+		}
 		for _, pod := range pods {
 			if util.PodWantsHostNetwork(pod) || util.PodCompleted(pod) || !util.PodScheduled(pod) || !c.isPodScheduledinLocalZone(pod) {
 				continue
 			}
-			logicalPortName := util.GetLogicalPortName(pod.Namespace, pod.Name)
+			var logicalPortName string
+			if !netinfo.IsSecondary() {
+				logicalPortName = util.GetLogicalPortName(pod.Namespace, pod.Name)
+			} else {
+				nadNames, err := util.PodNadNames(pod, netinfo)
+				if err != nil {
+					return nil, err
+				}
+				if len(nadNames) == 0 {
+					return nil, fmt.Errorf("pod %s/%s must contain network attach definition for its user defined network %s",
+						pod.Namespace, pod.Name, netinfo.GetNetworkName())
+				}
+				logicalPortName = util.GetSecondaryNetworkLogicalPortName(pod.Namespace, pod.Name, nadNames[0])
+			}
 			lsp := &nbdb.LogicalSwitchPort{Name: logicalPortName}
 			lsp, err = libovsdbops.GetLogicalSwitchPort(c.nbClient, lsp)
 			if err != nil {
@@ -470,7 +492,7 @@ func (c *Controller) convertANPSubjectToLSPs(anp *adminNetworkPolicyState) ([]*n
 				continue
 			}
 			// we need to collect podIP:cPort information
-			podIPs, err := util.GetPodIPsOfNetwork(pod, &util.DefaultNetInfo{})
+			podIPs, err := util.GetPodIPsOfNetwork(pod, netinfo)
 			if err != nil {
 				if errors.Is(err, util.ErrNoPodIPFound) {
 					// we ignore podIPsNotFound error here because onANPPodUpdate
