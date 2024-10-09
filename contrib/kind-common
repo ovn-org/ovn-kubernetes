@@ -615,3 +615,30 @@ deploy_passt_binary() {
 
   run_kubectl rollout status -n kube-system daemonset/passt-binding-cni --timeout 2m
 }
+
+install_ffr_k8s() {
+  echo "Installing frr-k8s ..."
+  local tmpdir=$(mktemp -d)
+  pushd "$tmpdir" || exit 1
+  git clone --depth 1 --branch v0.0.14 https://github.com/metallb/frr-k8s
+  popd || exit 1
+
+  # apply the demo which will deploy an external FRR container that the cluster
+  # can peer with acting as BGP (reflector) external gateway
+  pushd "${tmpdir}"/frr-k8s/hack/demo || exit 1
+  # modify config template to configure neighbors as route reflector clients
+  sed -i '/remote-as 64512/a \ neighbor {{ . }} route-reflector-client' frr/frr.conf.tmpl
+  ./demo.sh
+  popd || exit 1
+
+  # apply frr-k8s
+  kubectl apply -f "${tmpdir}"/frr-k8s/config/all-in-one/frr-k8s.yaml
+  kubectl wait -n frr-k8s-system deployment frr-k8s-webhook-server --for condition=Available --timeout 2m
+  kubectl rollout status -n frr-k8s-system daemonset frr-k8s-daemon --timeout 2m
+
+  # apply a receive all (from the BGP external gateway) configuration for all
+  # cluster nodes 
+  kubectl apply -f "${tmpdir}"/frr-k8s/hack/demo/configs/receive_all.yaml
+
+  rm -rf "${tmpdir}"
+}
