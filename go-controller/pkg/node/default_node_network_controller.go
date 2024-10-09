@@ -856,7 +856,6 @@ func (nc *DefaultNodeNetworkController) PreStart(ctx context.Context) error {
 			return err
 		}
 	} else {
-		// TODO phaseOne should be run BEFORE SNNC is started
 		// Initialize gateway for OVS internal port or representor management port
 		gw, err := nc.initGatewayPreStart(subnets, nodeAnnotator, mgmtPortConfig, nodeAddr)
 		if err != nil {
