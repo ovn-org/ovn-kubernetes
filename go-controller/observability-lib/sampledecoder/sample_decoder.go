@@ -7,8 +7,10 @@ import (
 	"fmt"
 
 	"github.com/ovn-org/libovsdb/client"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/observability-lib/model"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/observability-lib/ovsdb"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
+	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/observability"
 )
@@ -117,11 +119,11 @@ func findACLBySample(nbClient client.Client, acl *nbdb.ACL) ([]*nbdb.ACL, error)
 	return found, err
 }
 
-func (d *SampleDecoder) DecodeCookieIDs(obsDomainID, obsPointID uint32) (string, error) {
+func (d *SampleDecoder) DecodeCookieIDs(obsDomainID, obsPointID uint32) (model.NetworkEvent, error) {
 	// Find sample using obsPointID
 	sample, err := libovsdbops.FindSample(d.nbClient, int(obsPointID))
 	if err != nil || sample == nil {
-		return "", fmt.Errorf("find sample failed: %w", err)
+		return nil, fmt.Errorf("find sample failed: %w", err)
 	}
 	// find db object using observ application ID
 	// Since ACL is indexed both by sample_new and sample_est, when searching by one of them,
@@ -133,74 +135,60 @@ func (d *SampleDecoder) DecodeCookieIDs(obsDomainID, obsPointID uint32) (string,
 	case observability.ACLNewTrafficSamplingID:
 		acls, err := findACLBySample(d.nbClient, &nbdb.ACL{SampleNew: &sample.UUID, SampleEst: &wrongUUID})
 		if err != nil {
-			return "", fmt.Errorf("find acl for sample failed: %w", err)
+			return nil, fmt.Errorf("find acl for sample failed: %w", err)
 		}
 		if len(acls) != 1 {
-			return "", fmt.Errorf("expected 1 ACL, got %d", len(acls))
+			return nil, fmt.Errorf("expected 1 ACL, got %d", len(acls))
 		}
 		dbObj = acls[0]
 	case observability.ACLEstTrafficSamplingID:
 		acls, err := findACLBySample(d.nbClient, &nbdb.ACL{SampleNew: &wrongUUID, SampleEst: &sample.UUID})
 		if err != nil {
-			return "", fmt.Errorf("find acl for sample failed: %w", err)
+			return nil, fmt.Errorf("find acl for sample failed: %w", err)
 		}
 		if len(acls) != 1 {
-			return "", fmt.Errorf("expected 1 ACL, got %d", len(acls))
+			return nil, fmt.Errorf("expected 1 ACL, got %d", len(acls))
 		}
 		dbObj = acls[0]
 	default:
-		return "", fmt.Errorf("unknown app ID: %d", getObservAppID(obsDomainID))
+		return nil, fmt.Errorf("unknown app ID: %d", getObservAppID(obsDomainID))
 	}
-	msg := getMessage(dbObj)
-	if msg == "" {
-		return "", fmt.Errorf("failed to get message for db object %v", dbObj)
-	}
-	return msg, nil
-}
-
-func getMessage(dbObj interface{}) string {
+	var event any
 	switch o := dbObj.(type) {
 	case *nbdb.ACL:
-		var action string
-		switch o.Action {
-		case nbdb.ACLActionAllow, nbdb.ACLActionAllowRelated, nbdb.ACLActionAllowStateless:
-			action = "Allowed"
-		case nbdb.ACLActionDrop:
-			action = "Dropped"
-		case nbdb.ACLActionPass:
-			action = "Delegated to network policy"
-		default:
-			action = "Action " + o.Action
-		}
-		actor := o.ExternalIDs[libovsdbops.OwnerTypeKey.String()]
-		var msg string
-		switch actor {
-		case libovsdbops.AdminNetworkPolicyOwnerType:
-			msg = fmt.Sprintf("admin network policy %s, direction %s", o.ExternalIDs[libovsdbops.ObjectNameKey.String()], o.ExternalIDs[libovsdbops.PolicyDirectionKey.String()])
-		case libovsdbops.BaselineAdminNetworkPolicyOwnerType:
-			msg = fmt.Sprintf("baseline admin network policy %s, direction %s", o.ExternalIDs[libovsdbops.ObjectNameKey.String()], o.ExternalIDs[libovsdbops.PolicyDirectionKey.String()])
-		case libovsdbops.MulticastNamespaceOwnerType:
-			msg = fmt.Sprintf("multicast in namespace %s, direction %s", o.ExternalIDs[libovsdbops.ObjectNameKey.String()], o.ExternalIDs[libovsdbops.PolicyDirectionKey.String()])
-		case libovsdbops.MulticastClusterOwnerType:
-			msg = fmt.Sprintf("cluster multicast policy, direction %s", o.ExternalIDs[libovsdbops.PolicyDirectionKey.String()])
-		case libovsdbops.NetpolNodeOwnerType:
-			msg = "default allow from local node policy, direction ingress"
-		case libovsdbops.NetworkPolicyOwnerType:
-			msg = fmt.Sprintf("network policy %s, direction %s", o.ExternalIDs[libovsdbops.ObjectNameKey.String()], o.ExternalIDs[libovsdbops.PolicyDirectionKey.String()])
-		case libovsdbops.NetpolNamespaceOwnerType:
-			msg = fmt.Sprintf("network policies isolation in namespace %s, direction %s", o.ExternalIDs[libovsdbops.ObjectNameKey.String()], o.ExternalIDs[libovsdbops.PolicyDirectionKey.String()])
-		case libovsdbops.EgressFirewallOwnerType:
-			msg = fmt.Sprintf("egress firewall in namespace %s", o.ExternalIDs[libovsdbops.ObjectNameKey.String()])
-		case libovsdbops.UDNIsolationOwnerType:
-			msg = fmt.Sprintf("UDN isolation of type %s", o.ExternalIDs[libovsdbops.ObjectNameKey.String()])
-		}
-		return fmt.Sprintf("%s by %s", action, msg)
-	default:
-		return ""
+		event = newACLEvent(o)
 	}
+	if event == nil {
+		return nil, fmt.Errorf("failed to build network event for db object %v", dbObj)
+	}
+	return event, nil
 }
 
-func (d *SampleDecoder) DecodeCookieBytes(cookie []byte) (string, error) {
+func newACLEvent(o *nbdb.ACL) *model.ACLEvent {
+	actor := o.ExternalIDs[libovsdbops.OwnerTypeKey.String()]
+	event := model.ACLEvent{
+		Action: o.Action,
+		Actor:  actor,
+	}
+	switch actor {
+	case libovsdbops.AdminNetworkPolicyOwnerType, libovsdbops.BaselineAdminNetworkPolicyOwnerType, libovsdbops.NetworkPolicyOwnerType:
+		event.Name = o.ExternalIDs[libovsdbops.ObjectNameKey.String()]
+		event.Direction = o.ExternalIDs[libovsdbops.PolicyDirectionKey.String()]
+	case libovsdbops.MulticastNamespaceOwnerType, libovsdbops.NetpolNamespaceOwnerType:
+		event.Namespace = o.ExternalIDs[libovsdbops.ObjectNameKey.String()]
+		event.Direction = o.ExternalIDs[libovsdbops.PolicyDirectionKey.String()]
+	case libovsdbops.MulticastClusterOwnerType:
+		event.Direction = o.ExternalIDs[libovsdbops.PolicyDirectionKey.String()]
+	case libovsdbops.EgressFirewallOwnerType:
+		event.Namespace = o.ExternalIDs[libovsdbops.ObjectNameKey.String()]
+		event.Direction = string(libovsdbutil.ACLEgress)
+	case libovsdbops.UDNIsolationOwnerType:
+		event.Name = o.ExternalIDs[libovsdbops.ObjectNameKey.String()]
+	}
+	return &event
+}
+
+func (d *SampleDecoder) DecodeCookieBytes(cookie []byte) (model.NetworkEvent, error) {
 	if uint64(len(cookie)) != CookieSize {
 		return "", fmt.Errorf("invalid cookie size: %d", len(cookie))
 	}
@@ -212,7 +200,7 @@ func (d *SampleDecoder) DecodeCookieBytes(cookie []byte) (string, error) {
 	return d.DecodeCookieIDs(c.ObsDomainID, c.ObsPointID)
 }
 
-func (d *SampleDecoder) DecodeCookie8Bytes(cookie [8]byte) (string, error) {
+func (d *SampleDecoder) DecodeCookie8Bytes(cookie [8]byte) (model.NetworkEvent, error) {
 	c := Cookie{}
 	err := binary.Read(bytes.NewReader(cookie[:]), SampleEndian, &c)
 	if err != nil {
