@@ -214,8 +214,15 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPorts(is
 			var otherConfig map[string]string
 			if hasSubnets {
 				otherConfig = map[string]string{
-					"exclude_ips": managementPortIP(subnet).String(),
-					"subnet":      subnet.String(),
+					"subnet": subnet.String(),
+				}
+				if !ocInfo.bnc.IsPrimaryNetwork() {
+					// FIXME: This is weird that for secondary networks that don't have
+					// management ports these tests are expecting managementportIP to be
+					// excluded for no reason.
+					// FIXME2: Why are we setting exclude_ips on OVN switches when we don't
+					// even use OVN IPAMs.
+					otherConfig["exclude_ips"] = managementPortIP(subnet).String()
 				}
 			}
 
