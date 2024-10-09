@@ -35,6 +35,8 @@ var _ = Describe("SecondaryNodeNetworkController", func() {
 	var (
 		nad = ovntest.GenerateNAD("bluenet", "rednad", "greenamespace",
 			types.Layer3Topology, "100.128.0.0/16", types.NetworkRolePrimary)
+		fexec      *ovntest.FakeExec
+		mgtPortMAC string = "00:00:00:55:66:77" // dummy MAC used for fake commands
 	)
 	BeforeEach(func() {
 		// Restore global default values before each testcase
@@ -42,6 +44,12 @@ var _ = Describe("SecondaryNodeNetworkController", func() {
 		// Use a larger masq subnet to allow OF manager to allocate IPs for UDNs.
 		config.Gateway.V6MasqueradeSubnet = "fd69::/112"
 		config.Gateway.V4MasqueradeSubnet = "169.254.0.0/17"
+		// Set up a fake vsctl command mock interface
+		fexec = ovntest.NewFakeExec()
+		Expect(util.SetExec(fexec)).To(Succeed())
+	})
+	AfterEach(func() {
+		util.ResetRunner()
 	})
 
 	It("should return networkID from one of the nodes in the cluster", func() {
@@ -141,6 +149,7 @@ var _ = Describe("SecondaryNodeNetworkController", func() {
 		nodeInformer.On("Lister").Return(&nodeLister)
 		NetInfo, err := util.ParseNADInfo(nad)
 		Expect(err).NotTo(HaveOccurred())
+		getCreationFakeOVSCommands(fexec, "ovn-k8s-mp3", mgtPortMAC, NetInfo.GetNetworkName(), "worker1", NetInfo.MTU())
 		controller, err := NewSecondaryNodeNetworkController(&cnnci, NetInfo, nil, nil, &gateway{})
 		Expect(err).NotTo(HaveOccurred())
 		err = controller.Start(context.Background())
@@ -265,6 +274,7 @@ var _ = Describe("SecondaryNodeNetworkController: UserDefinedPrimaryNetwork Gate
 		wg.Wait()
 		Expect(testNS.Close()).To(Succeed())
 		Expect(testutils.UnmountNS(testNS)).To(Succeed())
+		util.ResetRunner()
 	})
 
 	ovntest.OnSupportedPlatformsIt("ensure UDNGateway and VRFManager and IPRulesManager are invoked for Primary UDNs when feature gate is ON", func() {
