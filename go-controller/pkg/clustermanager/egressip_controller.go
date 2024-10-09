@@ -751,9 +751,9 @@ func (eIPC *egressIPClusterController) addEgressNode(nodeName string) error {
 	// egress IPs which are missing an assignment. If there are, we need to send a
 	// synthetic update since reconcileEgressIP will then try to assign those IPs to
 	// this node (if possible)
-	egressIPs, err := eIPC.kube.GetEgressIPs()
+	egressIPs, err := eIPC.watchFactory.GetEgressIPs()
 	if err != nil {
-		return fmt.Errorf("unable to list EgressIPs, err: %v", err)
+		return fmt.Errorf("unable to fetch EgressIPs, err: %v", err)
 	}
 	for _, egressIP := range egressIPs {
 		egressIP := *egressIP
@@ -793,9 +793,9 @@ func (eIPC *egressIPClusterController) deleteEgressNode(nodeName string) error {
 	// Since the node has been labelled as "not usable" for egress IP
 	// assignments we need to find all egress IPs which have an assignment to
 	// it, and move them elsewhere.
-	egressIPs, err := eIPC.kube.GetEgressIPs()
+	egressIPs, err := eIPC.watchFactory.GetEgressIPs()
 	if err != nil {
-		return fmt.Errorf("unable to list EgressIPs, err: %v", err)
+		return fmt.Errorf("unable to fetch EgressIPs, err: %v", err)
 	}
 	for _, egressIP := range egressIPs {
 		egressIP := *egressIP
