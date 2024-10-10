@@ -63,10 +63,30 @@ type watchFactory interface {
 	NodeCoreInformer() coreinformers.NodeInformer
 }
 
+// NetworkManager provides information about networks
+type NetworkManager interface {
+	GetActiveNetworkForNamespace(namespace string) (util.NetInfo, error)
+}
+
+type defaultNetworkManager struct{}
+
+func (nm *defaultNetworkManager) GetActiveNetworkForNamespace(string) (util.NetInfo, error) {
+	return &util.DefaultNetInfo{}, nil
+}
+
+var defaultnm = &defaultNetworkManager{}
+
+// GetDefaultNetworkManager returns a NetworkManager that assumes that the
+// default network is the only ever existing network. To be used when there is
+// no need for a NAD controller.
+func GetDefaultNetworkManager() NetworkManager {
+	return defaultnm
+}
+
 type NADController interface {
+	NetworkManager
 	Start() error
 	Stop()
-	GetActiveNetworkForNamespace(namespace string) (util.NetInfo, error)
 }
 
 // NADController handles namespaced scoped NAD events and

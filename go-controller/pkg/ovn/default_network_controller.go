@@ -143,16 +143,16 @@ type DefaultNetworkController struct {
 
 // NewDefaultNetworkController creates a new OVN controller for creating logical network
 // infrastructure and policy for default l3 network
-func NewDefaultNetworkController(cnci *CommonNetworkControllerInfo, nadController nad.NADController,
+func NewDefaultNetworkController(cnci *CommonNetworkControllerInfo, networkManager nad.NetworkManager,
 	observManager *observability.Manager) (*DefaultNetworkController, error) {
 	stopChan := make(chan struct{})
 	wg := &sync.WaitGroup{}
-	return newDefaultNetworkControllerCommon(cnci, stopChan, wg, nil, nadController, observManager)
+	return newDefaultNetworkControllerCommon(cnci, stopChan, wg, nil, networkManager, observManager)
 }
 
 func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 	defaultStopChan chan struct{}, defaultWg *sync.WaitGroup,
-	addressSetFactory addressset.AddressSetFactory, nadController nad.NADController,
+	addressSetFactory addressset.AddressSetFactory, networkManager nad.NetworkManager,
 	observManager *observability.Manager) (*DefaultNetworkController, error) {
 
 	if addressSetFactory == nil {
@@ -164,7 +164,7 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 		cnci.watchFactory.ServiceCoreInformer(),
 		cnci.watchFactory.EndpointSliceCoreInformer(),
 		cnci.watchFactory.NodeCoreInformer(),
-		nadController,
+		networkManager,
 		cnci.recorder,
 		&util.DefaultNetInfo{},
 	)
@@ -213,7 +213,7 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 			zoneICHandler:               zoneICHandler,
 			cancelableCtx:               util.NewCancelableContext(),
 			observManager:               observManager,
-			nadController:               nadController,
+			networkManager:              networkManager,
 		},
 		externalGatewayRouteInfo: apbExternalRouteController.ExternalGWRouteInfoCache,
 		eIPC: egressIPZoneController{

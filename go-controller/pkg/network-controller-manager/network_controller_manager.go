@@ -55,6 +55,10 @@ type NetworkControllerManager struct {
 
 	// net-attach-def controller handle net-attach-def and create/delete network controllers
 	nadController nad.NADController
+	// networkManager is usually the nadController. Except when multi-network is
+	// not enable in which case is a static implementation that assumes that the
+	// default network is the only ever existing network.
+	networkManager nad.NetworkManager
 }
 
 func (cm *NetworkControllerManager) NewNetworkController(nInfo util.NetInfo) (nad.NetworkController, error) {
@@ -65,11 +69,11 @@ func (cm *NetworkControllerManager) NewNetworkController(nInfo util.NetInfo) (na
 	topoType := nInfo.TopologyType()
 	switch topoType {
 	case ovntypes.Layer3Topology:
-		return ovn.NewSecondaryLayer3NetworkController(cnci, nInfo, cm.nadController)
+		return ovn.NewSecondaryLayer3NetworkController(cnci, nInfo, cm.networkManager)
 	case ovntypes.Layer2Topology:
-		return ovn.NewSecondaryLayer2NetworkController(cnci, nInfo, cm.nadController)
+		return ovn.NewSecondaryLayer2NetworkController(cnci, nInfo, cm.networkManager)
 	case ovntypes.LocalnetTopology:
-		return ovn.NewSecondaryLocalnetNetworkController(cnci, nInfo, cm.nadController), nil
+		return ovn.NewSecondaryLocalnetNetworkController(cnci, nInfo, cm.networkManager), nil
 	}
 	return nil, fmt.Errorf("topology type %s not supported", topoType)
 }
@@ -83,11 +87,11 @@ func (cm *NetworkControllerManager) newDummyNetworkController(topoType, netName 
 	netInfo, _ := util.NewNetInfo(&ovncnitypes.NetConf{NetConf: types.NetConf{Name: netName}, Topology: topoType})
 	switch topoType {
 	case ovntypes.Layer3Topology:
-		return ovn.NewSecondaryLayer3NetworkController(cnci, netInfo, cm.nadController)
+		return ovn.NewSecondaryLayer3NetworkController(cnci, netInfo, cm.networkManager)
 	case ovntypes.Layer2Topology:
-		return ovn.NewSecondaryLayer2NetworkController(cnci, netInfo, cm.nadController)
+		return ovn.NewSecondaryLayer2NetworkController(cnci, netInfo, cm.networkManager)
 	case ovntypes.LocalnetTopology:
-		return ovn.NewSecondaryLocalnetNetworkController(cnci, netInfo, cm.nadController), nil
+		return ovn.NewSecondaryLocalnetNetworkController(cnci, netInfo, cm.networkManager), nil
 	}
 	return nil, fmt.Errorf("topology type %s not supported", topoType)
 }
@@ -209,12 +213,14 @@ func NewNetworkControllerManager(ovnClient *util.OVNClientset, wf *factory.Watch
 		multicastSupport: config.EnableMulticast,
 	}
 
-	var err error
+	cm.networkManager = nad.GetDefaultNetworkManager()
 	if config.OVNKubernetesFeature.EnableMultiNetwork {
+		var err error
 		cm.nadController, err = nad.NewZoneNADController("network-controller-manager", config.Default.Zone, cm, wf)
 		if err != nil {
 			return nil, err
 		}
+		cm.networkManager = cm.nadController
 	}
 
 	return cm, nil
@@ -291,13 +297,13 @@ func (cm *NetworkControllerManager) newCommonNetworkControllerInfo() (*ovn.Commo
 }
 
 // initDefaultNetworkController creates the controller for default network
-func (cm *NetworkControllerManager) initDefaultNetworkController(nadController nad.NADController,
+func (cm *NetworkControllerManager) initDefaultNetworkController(networkManager nad.NetworkManager,
 	observManager *observability.Manager) error {
 	cnci, err := cm.newCommonNetworkControllerInfo()
 	if err != nil {
 		return fmt.Errorf("failed to create common network controller info: %w", err)
 	}
-	defaultController, err := ovn.NewDefaultNetworkController(cnci, nadController, observManager)
+	defaultController, err := ovn.NewDefaultNetworkController(cnci, networkManager, observManager)
 	if err != nil {
 		return err
 	}
@@ -411,7 +417,7 @@ func (cm *NetworkControllerManager) Start(ctx context.Context) error {
 			klog.Warningf("Observability cleanup failed, expected if not all Samples ware deleted yet: %v", err)
 		}
 	}
-	err = cm.initDefaultNetworkController(cm.nadController, observabilityManager)
+	err = cm.initDefaultNetworkController(cm.networkManager, observabilityManager)
 	if err != nil {
 		return fmt.Errorf("failed to init default network controller: %v", err)
 	}

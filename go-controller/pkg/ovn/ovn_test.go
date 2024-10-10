@@ -74,21 +74,21 @@ type secondaryControllerInfo struct {
 }
 
 type FakeOVN struct {
-	fakeClient    *util.OVNMasterClientset
-	watcher       *factory.WatchFactory
-	controller    *DefaultNetworkController
-	stopChan      chan struct{}
-	wg            *sync.WaitGroup
-	asf           *addressset.FakeAddressSetFactory
-	fakeRecorder  *record.FakeRecorder
-	nbClient      libovsdbclient.Client
-	sbClient      libovsdbclient.Client
-	dbSetup       libovsdbtest.TestSetup
-	nbsbCleanup   *libovsdbtest.Context
-	egressQoSWg   *sync.WaitGroup
-	egressSVCWg   *sync.WaitGroup
-	anpWg         *sync.WaitGroup
-	nadController nad.NADController
+	fakeClient         *util.OVNMasterClientset
+	watcher            *factory.WatchFactory
+	controller         *DefaultNetworkController
+	stopChan           chan struct{}
+	wg                 *sync.WaitGroup
+	asf                *addressset.FakeAddressSetFactory
+	fakeRecorder       *record.FakeRecorder
+	nbClient           libovsdbclient.Client
+	sbClient           libovsdbclient.Client
+	dbSetup            libovsdbtest.TestSetup
+	nbsbCleanup        *libovsdbtest.Context
+	egressQoSWg        *sync.WaitGroup
+	egressSVCWg        *sync.WaitGroup
+	anpWg              *sync.WaitGroup
+	fakeNetworkManager *fakenad.FakeNetworkManager
 
 	// information map of all secondary network controllers
 	secondaryControllers map[string]secondaryControllerInfo
@@ -101,12 +101,12 @@ func NewFakeOVN(useFakeAddressSet bool) *FakeOVN {
 		asf = addressset.NewFakeAddressSetFactory(DefaultNetworkControllerName)
 	}
 	return &FakeOVN{
-		asf:          asf,
-		fakeRecorder: record.NewFakeRecorder(10),
-		egressQoSWg:  &sync.WaitGroup{},
-		egressSVCWg:  &sync.WaitGroup{},
-		anpWg:        &sync.WaitGroup{},
-
+		asf:                  asf,
+		fakeRecorder:         record.NewFakeRecorder(10),
+		egressQoSWg:          &sync.WaitGroup{},
+		egressSVCWg:          &sync.WaitGroup{},
+		anpWg:                &sync.WaitGroup{},
+		fakeNetworkManager:   &fakenad.FakeNetworkManager{},
 		secondaryControllers: map[string]secondaryControllerInfo{},
 	}
 }
@@ -207,13 +207,19 @@ func (o *FakeOVN) init(nadList []nettypes.NetworkAttachmentDefinition) {
 
 	o.stopChan = make(chan struct{})
 	o.wg = &sync.WaitGroup{}
-	o.controller, err = NewOvnController(o.fakeClient, o.watcher,
-		o.stopChan, o.asf,
-		o.nbClient, o.sbClient,
-		o.fakeRecorder, o.wg)
+	o.controller, err = NewOvnController(
+		o.fakeClient,
+		o.fakeNetworkManager,
+		o.watcher,
+		o.stopChan,
+		o.asf,
+		o.nbClient,
+		o.sbClient,
+		o.fakeRecorder,
+		o.wg,
+	)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	o.controller.multicastSupport = config.EnableMulticast
-	o.nadController = o.controller.nadController
 
 	setupCOPP := false
 	setupClusterController(o.controller, setupCOPP)
@@ -282,9 +288,17 @@ func resetNBClient(ctx context.Context, nbClient libovsdbclient.Client) {
 
 // NewOvnController creates a new OVN controller for creating logical network
 // infrastructure and policy
-func NewOvnController(ovnClient *util.OVNMasterClientset, wf *factory.WatchFactory, stopChan chan struct{},
-	addressSetFactory addressset.AddressSetFactory, libovsdbOvnNBClient libovsdbclient.Client,
-	libovsdbOvnSBClient libovsdbclient.Client, recorder record.EventRecorder, wg *sync.WaitGroup) (*DefaultNetworkController, error) {
+func NewOvnController(
+	ovnClient *util.OVNMasterClientset,
+	networkManager nad.NetworkManager,
+	wf *factory.WatchFactory,
+	stopChan chan struct{},
+	addressSetFactory addressset.AddressSetFactory,
+	libovsdbOvnNBClient libovsdbclient.Client,
+	libovsdbOvnSBClient libovsdbclient.Client,
+	recorder record.EventRecorder,
+	wg *sync.WaitGroup,
+) (*DefaultNetworkController, error) {
 
 	fakeAddr, ok := addressSetFactory.(*addressset.FakeAddressSetFactory)
 	if addressSetFactory == nil || (ok && fakeAddr == nil) {
@@ -327,14 +341,7 @@ func NewOvnController(ovnClient *util.OVNMasterClientset, wf *factory.WatchFacto
 		return nil, err
 	}
 
-	var nadController nad.NADController
-	if config.OVNKubernetesFeature.EnableMultiNetwork {
-		nadController, err = nad.NewZoneNADController("test", "zone", &fakenad.FakeNetworkControllerManager{}, wf)
-		if err != nil {
-			return nil, err
-		}
-	}
-	dnc, err := newDefaultNetworkControllerCommon(cnci, stopChan, wg, addressSetFactory, nadController, nil)
+	dnc, err := newDefaultNetworkControllerCommon(cnci, stopChan, wg, addressSetFactory, networkManager, nil)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 	if nbZoneFailed {
@@ -452,17 +459,17 @@ func (o *FakeOVN) NewSecondaryNetworkController(netattachdef *nettypes.NetworkAt
 
 		switch topoType {
 		case types.Layer3Topology:
-			l3Controller, err := NewSecondaryLayer3NetworkController(cnci, nInfo, o.nadController)
+			l3Controller, err := NewSecondaryLayer3NetworkController(cnci, nInfo, o.fakeNetworkManager)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			l3Controller.addressSetFactory = asf
 			secondaryController = &l3Controller.BaseSecondaryNetworkController
 		case types.Layer2Topology:
-			l2Controller, err := NewSecondaryLayer2NetworkController(cnci, nInfo, o.nadController)
+			l2Controller, err := NewSecondaryLayer2NetworkController(cnci, nInfo, o.fakeNetworkManager)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			l2Controller.addressSetFactory = asf
 			secondaryController = &l2Controller.BaseSecondaryNetworkController
 		case types.LocalnetTopology:
-			localnetController := NewSecondaryLocalnetNetworkController(cnci, nInfo, o.nadController)
+			localnetController := NewSecondaryLocalnetNetworkController(cnci, nInfo, o.fakeNetworkManager)
 			localnetController.addressSetFactory = asf
 			secondaryController = &localnetController.BaseSecondaryNetworkController
 		default:

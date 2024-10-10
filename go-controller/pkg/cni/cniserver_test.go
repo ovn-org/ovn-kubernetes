@@ -49,7 +49,7 @@ func clientDoCNI(t *testing.T, client *http.Client, req *Request) ([]byte, int) 
 
 var expectedResult cnitypes.Result
 
-func serverHandleCNI(request *PodRequest, clientset *ClientSet, kubeAuth *KubeAPIAuth, nadController nad.NADController) ([]byte, error) {
+func serverHandleCNI(request *PodRequest, clientset *ClientSet, kubeAuth *KubeAPIAuth, networkManager nad.NetworkManager) ([]byte, error) {
 	if request.Command == CNIAdd {
 		return json.Marshal(&expectedResult)
 	} else if request.Command == CNIDel || request.Command == CNIUpdate || request.Command == CNICheck {
