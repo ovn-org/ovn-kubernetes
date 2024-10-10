@@ -65,7 +65,7 @@ func updateSubnetAnnotation(annotations map[string]string, annotationName, netNa
 	// if no host subnet left, just delete the host subnet annotation from node annotations.
 	if len(subnetsMap) == 0 {
 		delete(annotations, annotationName)
-		return nil
+		return updateNodeMgmtPortInfoIpAddresses(netName, hostSubnets, annotations)
 	}
 
 	// Marshal all host subnets of all networks back to annotations.
@@ -82,7 +82,7 @@ func updateSubnetAnnotation(annotations map[string]string, annotationName, netNa
 		return err
 	}
 	annotations[annotationName] = string(bytes)
-	return nil
+	return updateNodeMgmtPortInfoIpAddresses(netName, hostSubnets, annotations)
 }
 
 func setSubnetAnnotation(nodeAnnotator kube.Annotator, annotationName string, defaultSubnets []*net.IPNet) error {
