@@ -29,6 +29,7 @@ import (
 var ErrNetworkControllerTopologyNotManaged = errors.New("no cluster network controller to manage topology")
 
 type BaseNetworkController interface {
+	PreStart(ctx context.Context) error
 	Start(ctx context.Context) error
 	Stop()
 }
@@ -53,6 +54,7 @@ type watchFactory interface {
 }
 
 type NADController interface {
+	PreStart() error
 	Start() error
 	Stop()
 	GetActiveNetworkForNamespace(namespace string) (util.NetInfo, error)
@@ -122,6 +124,10 @@ func NewNetAttachDefinitionController(
 	)
 
 	return nadController, nil
+}
+
+func (nadController *NetAttachDefinitionController) PreStart() error {
+	return nil
 }
 
 func (nadController *NetAttachDefinitionController) Start() error {

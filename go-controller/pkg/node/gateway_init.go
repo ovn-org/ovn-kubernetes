@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"time"
 
 	"github.com/vishvananda/netlink"
 	"k8s.io/klog/v2"
@@ -311,26 +312,19 @@ func configureSvcRouteViaInterface(routeManager *routemanager.Controller, iface 
 	return nil
 }
 
-func (nc *DefaultNodeNetworkController) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator,
-	waiter *startupWaiter, managementPortConfig *managementPortConfig, kubeNodeIP net.IP) error {
-	klog.Info("Initializing Gateway Functionality")
+// initGatewayPhaseOne executes the first part of the gateway initialization for the node.
+func (nc *DefaultNodeNetworkController) initGatewayPhaseOne(subnets []*net.IPNet, nodeAnnotator kube.Annotator,
+	managementPortConfig *managementPortConfig, kubeNodeIP net.IP) (*gateway, error) {
+
+	klog.Info("RICCARDO initGatewayPhaseOne Initializing Gateway Functionality Phase 1")
 	var err error
 	var ifAddrs []*net.IPNet
 
-	var loadBalancerHealthChecker *loadBalancerHealthChecker
-	var portClaimWatcher *portClaimWatcher
-
-	if config.Gateway.NodeportEnable && config.OvnKubeNode.Mode == types.NodeModeFull {
-		loadBalancerHealthChecker = newLoadBalancerHealthChecker(nc.name, nc.watchFactory)
-		portClaimWatcher, err = newPortClaimWatcher(nc.recorder)
-		if err != nil {
-			return err
-		}
-	}
+	waiter := newStartupWaiter()
 
 	gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	egressGWInterface := ""
@@ -340,7 +334,7 @@ func (nc *DefaultNodeNetworkController) initGateway(subnets []*net.IPNet, nodeAn
 
 	ifAddrs, err = getNetworkInterfaceIPAddresses(gatewayIntf)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// For DPU need to use the host IP addr which currently is assumed to be K8s Node cluster
@@ -348,7 +342,7 @@ func (nc *DefaultNodeNetworkController) initGateway(subnets []*net.IPNet, nodeAn
 	if config.OvnKubeNode.Mode == types.NodeModeDPU {
 		ifAddrs, err = getDPUHostPrimaryIPAddresses(kubeNodeIP, ifAddrs)
 		if err != nil {
-			return err
+			return nil, err
 		}
 	}
 
@@ -356,27 +350,28 @@ func (nc *DefaultNodeNetworkController) initGateway(subnets []*net.IPNet, nodeAn
 		klog.Errorf("Unable to set primary IP net label on node, err: %v", err)
 	}
 
-	var gw *gateway
+	var gw = &gateway{subnets: subnets}
+
 	switch config.Gateway.Mode {
-	case config.GatewayModeLocal:
-		klog.Info("Preparing Local Gateway")
-		gw, err = newLocalGateway(nc.name, subnets, gatewayNextHops, gatewayIntf, egressGWInterface, ifAddrs, nodeAnnotator,
-			managementPortConfig, nc.Kube, nc.watchFactory, nc.routeManager, nc.nadController)
-	case config.GatewayModeShared:
-		klog.Info("Preparing Shared Gateway")
-		gw, err = newSharedGateway(nc.name, subnets, gatewayNextHops, gatewayIntf, egressGWInterface, ifAddrs, nodeAnnotator, nc.Kube,
-			managementPortConfig, nc.watchFactory, nc.routeManager, nc.nadController)
+	case config.GatewayModeLocal, config.GatewayModeShared:
+		klog.Info("Preparing Gateway")
+		gw, err = newGatewayPhaseOne(nc.name, subnets, gatewayNextHops, gatewayIntf, egressGWInterface, ifAddrs, nodeAnnotator, managementPortConfig, nc.Kube, nc.watchFactory, nc.routeManager)
+		if err != nil {
+			return nil, err
+		}
+
 	case config.GatewayModeDisabled:
 		var chassisID string
 		klog.Info("Gateway Mode is disabled")
 		gw = &gateway{
-			initFunc:     func() error { return nil },
-			readyFunc:    func() (bool, error) { return true, nil },
-			watchFactory: nc.watchFactory.(*factory.WatchFactory),
+			initFuncPhaseOne:  func() error { return nil },
+			initFuncPhaseTwo:  func() error { return nil },
+			readyFuncPhaseOne: func() (bool, error) { return true, nil },
+			watchFactory:      nc.watchFactory.(*factory.WatchFactory),
 		}
 		chassisID, err = util.GetNodeChassisID()
 		if err != nil {
-			return err
+			return nil, err
 		}
 		err = util.SetL3GatewayConfig(nodeAnnotator, &util.L3GatewayConfig{
 			Mode:      config.GatewayModeDisabled,
@@ -384,12 +379,60 @@ func (nc *DefaultNodeNetworkController) initGateway(subnets []*net.IPNet, nodeAn
 		})
 	}
 	if err != nil {
+		return nil, err
+	}
+
+	initGwFunc := func() error {
+		return gw.initFuncPhaseOne()
+	}
+
+	readyGwFunc := func() (bool, error) {
+		controllerReady, err := isOVNControllerReady()
+		if err != nil || !controllerReady {
+			return false, err
+		}
+		return gw.readyFuncPhaseOne()
+	}
+
+	if err := nodeAnnotator.Run(); err != nil {
+		return nil, fmt.Errorf("failed to set node %s annotations: %w", nc.name, err)
+	}
+
+	waiter.AddWait(readyGwFunc, initGwFunc)
+	nc.Gateway = gw
+
+	// Wait for management port and gateway resources to be created by the master
+	klog.Infof("RICCARDO initGatewayPhaseOne Waiting for gateway and management port readiness...")
+	start := time.Now()
+	if err := waiter.Wait(); err != nil {
+		return nil, err
+	}
+	klog.Infof("RICCARDO initGatewayPhaseOne Gateway and management port readiness took %v", time.Since(start))
+
+	return gw, nil
+}
+
+// initGatewayPhaseTwo finishes the gateway initialization for the node.
+func (nc *DefaultNodeNetworkController) initGatewayPhaseTwo(gw *gateway, waiter *startupWaiter) error {
+	klog.Info("RICCARDO initGatewayPhaseTwo Initializing Gateway Functionality Phase 2")
+
+	var loadBalancerHealthChecker *loadBalancerHealthChecker
+	var portClaimWatcher *portClaimWatcher
+
+	var err error
+
+	err = newGatewayPhaseTwo(gw, nc.gatewaySetup.mgmtPortConfig, nc.watchFactory, nc.nadController, config.Gateway.Mode)
+	if err != nil {
 		return err
 	}
-	// a golang interface has two values <type, value>. an interface is nil if both type and
-	// value is nil. so, you cannot directly set the value to an interface and later check if
-	// value was nil by comparing the interface to nil. this is because if the value is `nil`,
-	// then the interface will still hold the type of the value being set.
+
+	if config.Gateway.NodeportEnable && config.OvnKubeNode.Mode == types.NodeModeFull {
+		loadBalancerHealthChecker = newLoadBalancerHealthChecker(nc.name, nc.watchFactory)
+		portClaimWatcher, err = newPortClaimWatcher(nc.recorder)
+		if err != nil {
+			return err
+		}
+	}
 
 	if loadBalancerHealthChecker != nil {
 		gw.loadBalancerHealthChecker = loadBalancerHealthChecker
@@ -403,16 +446,11 @@ func (nc *DefaultNodeNetworkController) initGateway(subnets []*net.IPNet, nodeAn
 	}
 
 	readyGwFunc := func() (bool, error) {
-		controllerReady, err := isOVNControllerReady()
-		if err != nil || !controllerReady {
-			return false, err
-		}
-
-		return gw.readyFunc()
+		return true, nil
 	}
-
 	waiter.AddWait(readyGwFunc, initGwFunc)
 	nc.Gateway = gw
+	klog.Info("RICCARDO initGatewayPhaseTwo Initializing Gateway Functionality Phase 2 DONE")
 
 	return nc.validateVTEPInterfaceMTU()
 }
@@ -435,6 +473,9 @@ func interfaceForEXGW(intfName string) string {
 	return intfName
 }
 
+// ***********************************
+// TODO split this too!
+// ***********************************
 func (nc *DefaultNodeNetworkController) initGatewayDPUHost(kubeNodeIP net.IP) error {
 	// A DPU host gateway is complementary to the shared gateway running
 	// on the DPU embedded CPU. it performs some initializations and
@@ -486,9 +527,10 @@ func (nc *DefaultNodeNetworkController) initGatewayDPUHost(kubeNodeIP net.IP) er
 	}
 
 	gw := &gateway{
-		initFunc:     func() error { return nil },
-		readyFunc:    func() (bool, error) { return true, nil },
-		watchFactory: nc.watchFactory.(*factory.WatchFactory),
+		initFuncPhaseOne:  func() error { return nil },
+		initFuncPhaseTwo:  func() error { return nil },
+		readyFuncPhaseOne: func() (bool, error) { return true, nil },
+		watchFactory:      nc.watchFactory.(*factory.WatchFactory),
 	}
 
 	// TODO(adrianc): revisit if support for nodeIPManager is needed.

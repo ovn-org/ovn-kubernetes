@@ -2,7 +2,6 @@ package node
 
 import (
 	"fmt"
-	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 	"hash/fnv"
 	"math"
 	"net"
@@ -16,6 +15,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/egressservice"
 	nodeipt "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
@@ -141,7 +141,7 @@ func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, netInf
 	var actions string
 
 	if add {
-		netConfig = npw.ofm.getActiveNetwork(netInfo)
+		netConfig = npw.ofm.getActiveNetwork(netInfo) // TODO This is where the problem initially surfaced
 		if netConfig == nil {
 			return fmt.Errorf("failed to get active network config for network %s", netInfo.GetNetworkName())
 		}
@@ -1811,7 +1811,7 @@ func setBridgeOfPorts(bridge *bridgeConfiguration) error {
 		bridge.ofPortPhys = ofportPhys
 	}
 
-	// Get ofport represeting the host. That is, host representor port in case of DPUs, ovsLocalPort otherwise.
+	// Get ofport representing the host. That is, host representor port in case of DPUs, ovsLocalPort otherwise.
 	if config.OvnKubeNode.Mode == types.NodeModeDPU {
 		var stderr string
 		hostRep, err := util.GetDPUHostInterface(bridge.bridgeName)
@@ -1887,20 +1887,22 @@ func initSvcViaMgmPortRoutingRules(hostSubnets []*net.IPNet) error {
 	return nil
 }
 
-func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP, gwIntf, egressGWIntf string,
-	gwIPs []*net.IPNet, nodeAnnotator kube.Annotator, kube kube.Interface, cfg *managementPortConfig,
-	watchFactory factory.NodeWatchFactory, routeManager *routemanager.Controller, nadController *nad.NetAttachDefinitionController) (*gateway, error) {
-	klog.Info("Creating new shared gateway")
+func newGatewayPhaseOne(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP, gwIntf, egressGWIntf string,
+	gwIPs []*net.IPNet, nodeAnnotator kube.Annotator, cfg *managementPortConfig, kube kube.Interface,
+	watchFactory factory.NodeWatchFactory, routeManager *routemanager.Controller) (*gateway, error) {
+	klog.Info("RICCARDO newGatewayPhaseOne Creating initial gateway")
 	gw := &gateway{}
 
 	gwBridge, exGwBridge, err := gatewayInitInternal(
-		nodeName, gwIntf, egressGWIntf, gwNextHops, gwIPs, nodeAnnotator)
+		nodeName, gwIntf, egressGWIntf, gwNextHops, gwIPs, nodeAnnotator) // TODO This eventually sets the L3-gateway-config annotation
 	if err != nil {
 		return nil, err
 	}
 
 	if exGwBridge != nil {
-		gw.readyFunc = func() (bool, error) {
+		gw.readyFuncPhaseOne = func() (bool, error) {
+			klog.Info("RICCARDO gw.readyFunc [br-ex] starts")
+
 			gwBridge.Lock()
 			for _, netConfig := range gwBridge.netConfig {
 				ready, err := gatewayReady(netConfig.patchPort)
@@ -1919,10 +1921,14 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 				}
 			}
 			exGwBridge.Unlock()
+			klog.Info("RICCARDO gw.readyFunc [br-ex] ends")
 			return true, nil
 		}
+
 	} else {
-		gw.readyFunc = func() (bool, error) {
+		gw.readyFuncPhaseOne = func() (bool, error) {
+			klog.Info("RICCARDO gw.readyFuncPhaseOne starts (probing patch port)")
+
 			gwBridge.Lock()
 			for _, netConfig := range gwBridge.netConfig {
 				ready, err := gatewayReady(netConfig.patchPort)
@@ -1932,14 +1938,14 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 				}
 			}
 			gwBridge.Unlock()
+			klog.Info("RICCARDO gw.readyFuncPhaseOne ends")
 			return true, nil
 		}
 	}
 
-	gw.initFunc = func() error {
-		// Program cluster.GatewayIntf to let non-pod traffic to go to host
-		// stack
-		klog.Info("Creating Shared Gateway Openflow Manager")
+	gw.initFuncPhaseOne = func() error {
+		// Program cluster.GatewayIntf to let non-pod traffic to go to host stack
+		klog.Info("RICCARDO gw.initFuncPhaseOne Creating Gateway Openflow Manager")
 		err := setBridgeOfPorts(gwBridge)
 		if err != nil {
 			return err
@@ -1975,15 +1981,42 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 			}
 		}
 
-		gw.openflowManager, err = newGatewayOpenFlowManager(gwBridge, exGwBridge, subnets, nodeIPs)
+		gw.openflowManager, err = newGatewayOpenFlowManager(gwBridge, exGwBridge, subnets, nodeIPs) // TODO this part needs to run before NAD Controller
 		if err != nil {
 			return err
 		}
 
+		klog.Infof("RICCARDO (gw.initFuncPhaseOne) Initial gateway creation complete")
+
+		return nil
+	}
+	gw.gwBridge = gwBridge
+	gw.exGwBridge = exGwBridge
+	gw.watchFactory = watchFactory.(*factory.WatchFactory)
+
+	klog.Infof("RICCARDO newGatewayPhaseOne Initial gateway creation complete")
+	return gw, nil
+
+}
+
+func newGatewayPhaseTwo(gw *gateway, cfg *managementPortConfig,
+	watchFactory factory.NodeWatchFactory, nadController *nad.NetAttachDefinitionController, gatewayMode config.GatewayMode) error {
+	klog.Infof("RICCARDO newGatewayPhaseTwo Completing gateway creation; gw=%+v", *gw)
+	klog.Infof("RICCARDO newGatewayPhaseTwo gw.openflowManager=%+v", gw.openflowManager)
+
+	if gatewayMode == config.GatewayModeLocal {
+		if err := initLocalGateway(gw.subnets, cfg); err != nil {
+			return fmt.Errorf("failed to initialize new local gateway, err: %w", err)
+		}
+	}
+
+	gw.initFuncPhaseTwo = func() error {
+		klog.Infof("RICCARDO gw.initFuncPhaseTwo starts")
+
 		// resync flows on IP change
 		gw.nodeIPManager.OnChanged = func() {
 			klog.V(5).Info("Node addresses changed, re-syncing bridge flows")
-			if err := gw.openflowManager.updateBridgeFlowCache(subnets, gw.nodeIPManager.ListAddresses()); err != nil {
+			if err := gw.openflowManager.updateBridgeFlowCache(gw.subnets, gw.nodeIPManager.ListAddresses()); err != nil {
 				// very unlikely - somehow node has lost its IP address
 				klog.Errorf("Failed to re-generate gateway flows after address change: %v", err)
 			}
@@ -2000,14 +2033,15 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 		}
 
 		if config.Gateway.NodeportEnable {
+			var err error
 			if config.OvnKubeNode.Mode == types.NodeModeFull {
 				// (TODO): Internal Traffic Policy is not supported in DPU mode
-				if err := initSvcViaMgmPortRoutingRules(subnets); err != nil {
+				if err := initSvcViaMgmPortRoutingRules(gw.subnets); err != nil {
 					return err
 				}
 			}
-			klog.Info("Creating Shared Gateway Node Port Watcher")
-			gw.nodePortWatcher, err = newNodePortWatcher(gwBridge, gw.openflowManager, gw.nodeIPManager, watchFactory, nadController)
+			klog.Infof("Creating Gateway Node Port Watcher")
+			gw.nodePortWatcher, err = newNodePortWatcher(gw.gwBridge, gw.openflowManager, gw.nodeIPManager, watchFactory, nadController)
 			if err != nil {
 				return err
 			}
@@ -2016,15 +2050,32 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 			gw.openflowManager.requestFlowSync()
 		}
 
-		if err := addHostMACBindings(gwBridge.bridgeName); err != nil {
+		if err := addHostMACBindings(gw.gwBridge.bridgeName); err != nil {
 			return fmt.Errorf("failed to add MAC bindings for service routing: %w", err)
 		}
+		klog.Infof("RICCARDO gw.initFuncPhaseTwo ends")
 
 		return nil
 	}
-	gw.watchFactory = watchFactory.(*factory.WatchFactory)
-	klog.Info("Shared Gateway Creation Complete")
+
+	klog.Infof("RICCARDO newGatewayPhaseTwo Gateway Creation Complete")
+	return nil
+}
+
+func newGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP, gwIntf, egressGWIntf string,
+	gwIPs []*net.IPNet, nodeAnnotator kube.Annotator, cfg *managementPortConfig, kube kube.Interface,
+	watchFactory factory.NodeWatchFactory, routeManager *routemanager.Controller, nadController *nad.NetAttachDefinitionController, gatewayMode config.GatewayMode) (*gateway, error) {
+	gw, err := newGatewayPhaseOne(nodeName, subnets, gwNextHops, gwIntf, egressGWIntf, gwIPs, nodeAnnotator, cfg, kube, watchFactory, routeManager)
+	if err != nil {
+		return nil, err
+	}
+	gw.subnets = subnets
+	err = newGatewayPhaseTwo(gw, cfg, watchFactory, nadController, config.Gateway.Mode)
+	if err != nil {
+		return nil, err
+	}
 	return gw, nil
+
 }
 
 func newNodePortWatcher(gwBridge *bridgeConfiguration, ofm *openflowManager,
