@@ -1,0 +1,55 @@
+#
+# The standard name for this image is ovn-kube-ubuntu
+
+# Notes:
+# This is for a development build where the ovn-kubernetes utilities
+# are built in this Dockerfile and included in the image (instead of the deb package)
+#
+#
+# So this file will change over time.
+
+FROM ubuntu:24.10
+
+USER root
+
+RUN apt-get update && apt-get install -y iproute2 curl software-properties-common util-linux
+
+RUN curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | apt-key add -
+
+# Install OVS and OVN packages.
+RUN apt-get update && apt-get install -y openvswitch-switch openvswitch-common ovn-central ovn-common ovn-host
+
+RUN curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/arm64/kubectl" \
+    && install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+
+RUN mkdir -p /var/run/openvswitch
+
+# Built in ../../go_controller, then the binaries are copied here.
+# put things where they are in the pkg
+RUN mkdir -p /usr/libexec/cni/
+COPY ovnkube ovn-kube-util ovndbchecker hybrid-overlay-node ovnkube-identity /usr/bin/
+COPY ovn-k8s-cni-overlay /usr/libexec/cni/ovn-k8s-cni-overlay
+
+# ovnkube.sh is the entry point. This script examines environment
+# variables to direct operation and configure ovn
+COPY ovnkube.sh /root/
+COPY ovndb-raft-functions.sh /root/
+# override the pkg's ovn_k8s.conf with this local copy
+COPY ovn_k8s.conf /etc/openvswitch/ovn_k8s.conf
+
+# copy git commit number into image
+COPY git_info /root
+
+# iptables wrappers
+COPY ./iptables-scripts/iptables /usr/sbin/
+COPY ./iptables-scripts/iptables-save /usr/sbin/
+COPY ./iptables-scripts/iptables-restore /usr/sbin/
+COPY ./iptables-scripts/ip6tables /usr/sbin/
+COPY ./iptables-scripts/ip6tables-save /usr/sbin/
+COPY ./iptables-scripts/ip6tables-restore /usr/sbin/
+
+LABEL io.k8s.display-name="ovn-kubernetes" \
+      io.k8s.description="ovnkube ubuntu image" 
+
+WORKDIR /root
+ENTRYPOINT /root/ovnkube.sh

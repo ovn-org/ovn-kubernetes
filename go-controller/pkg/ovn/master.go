@@ -924,6 +924,9 @@ func (oc *DefaultNetworkController) deleteHoNodeEvent(node *kapi.Node) error {
 func (oc *DefaultNetworkController) addIPToHostNetworkNamespaceAddrSet(node *kapi.Node) error {
 	var hostNetworkPolicyIPs []net.IP
 
+	if util.NoHostSubnet(node) {
+		return nil
+	}
 	hostNetworkPolicyIPs, err := oc.getHostNamespaceAddressesForNode(node)
 	if err != nil {
 		parsedErr := err

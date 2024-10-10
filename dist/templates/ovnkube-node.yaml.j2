@@ -149,7 +149,11 @@ spec:
               name: ovn-config
               key: routable_mtu
               optional: true
+       {%-if ovnkube_app_name=="ovnkube-node-dpu" %}
+        - name: K8S_NODE_DPU
+       {%- else %}
         - name: K8S_NODE
+       {%- endif %}
           valueFrom:
             fieldRef:
               fieldPath: spec.nodeName
@@ -255,13 +259,23 @@ spec:
               fieldPath: metadata.name
 
         readinessProbe:
+        {%- if ovnkube_app_name!="ovnkube-node-dpu" %}
           exec:
             command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovnkube-node"]
           initialDelaySeconds: 30
           timeoutSeconds: 30
           periodSeconds: 60
+        {%- else %}
+          httpGet:
+            path: /metrics
+            port: 9476
+            scheme: HTTP
+          initialDelaySeconds: 30
+          timeoutSeconds: 5
+          periodSeconds: 30
+        {%- endif %}
       {% endif %}
-      {% if ovnkube_app_name=="ovnkube-node" -%}
+      {% if ovnkube_app_name!="ovnkube-node-dpu-host" -%}
       - name: ovn-controller
         image: "{{ ovn_image | default('docker.io/ovnkube/ovn-daemonset:latest') }}"
         imagePullPolicy: "{{ ovn_image_pull_policy | default('IfNotPresent') }}"
@@ -304,7 +318,11 @@ spec:
             configMapKeyRef:
               name: ovn-config
               key: k8s_apiserver
+       {%- if ovnkube_app_name=="ovnkube-node-dpu" %}
+        - name: K8S_NODE_DPU
+       {%- else %}
         - name: K8S_NODE
+       {%- endif %}
           valueFrom:
             fieldRef:
               fieldPath: spec.nodeName

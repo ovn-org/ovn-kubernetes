@@ -2,4 +2,6 @@ logLevel: 4
 logFileMaxSize: 100
 logFileMaxBackups: 5
 logFileMaxAge: 5
-ovnControllerLogLevel: 4
+ovnControllerLogLevel: "-vconsole:info"
+# -- TCP port serving metrics
+metricsPort: 9476

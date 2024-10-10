@@ -529,7 +529,10 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *kapi.Pod, nadName
 	// chassis if ovnkube-node isn't running correctly and hasn't cleared
 	// out iface-id for an old instance of this pod, and the pod got
 	// rescheduled.
-	lsp.Options["requested-chassis"] = pod.Spec.NodeName
+
+	if !config.Kubernetes.DisableRequestedChassis {
+		lsp.Options["requested-chassis"] = pod.Spec.NodeName
+	}
 
 	// Although we have different code to allocate the pod annotation for the
 	// default network and secondary networks, at the time of this writing they
