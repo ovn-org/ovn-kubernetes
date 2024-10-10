@@ -39,7 +39,7 @@ type eventHandler struct {
 	// to have a copy of the object that needs deleting
 	deletedIndexer cache.Indexer
 	// workqueue is the queue we use to store work
-	workqueue workqueue.RateLimitingInterface
+	workqueue workqueue.TypedRateLimitingInterface[string]
 	// add is the handler function that gets called when something has been added/updated
 	add func(obj interface{}) error
 	// delete is handler function that gets called when something has been deleted
@@ -91,10 +91,13 @@ func NewDefaultEventHandler(
 		name:           name,
 		informer:       informer,
 		deletedIndexer: cache.NewIndexer(cache.DeletionHandlingMetaNamespaceKeyFunc, cache.Indexers{}),
-		workqueue:      workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), name),
-		add:            addFunc,
-		delete:         deleteFunc,
-		updateFilter:   updateFilterFunc,
+		workqueue: workqueue.NewTypedRateLimitingQueueWithConfig(
+			workqueue.DefaultTypedControllerRateLimiter[string](),
+			workqueue.TypedRateLimitingQueueConfig[string]{Name: name},
+		),
+		add:          addFunc,
+		delete:       deleteFunc,
+		updateFilter: updateFilterFunc,
 	}
 	_, err := informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
@@ -144,10 +147,13 @@ func NewTestEventHandler(
 		name:           name,
 		informer:       informer,
 		deletedIndexer: cache.NewIndexer(cache.DeletionHandlingMetaNamespaceKeyFunc, cache.Indexers{}),
-		workqueue:      workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter()),
-		add:            addFunc,
-		delete:         deleteFunc,
-		updateFilter:   updateFilterFunc,
+		workqueue: workqueue.NewTypedRateLimitingQueueWithConfig(
+			workqueue.DefaultTypedControllerRateLimiter[string](),
+			workqueue.TypedRateLimitingQueueConfig[string]{Name: name},
+		),
+		add:          addFunc,
+		delete:       deleteFunc,
+		updateFilter: updateFilterFunc,
 	}
 	_, err := informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
@@ -277,7 +283,7 @@ func (e *eventHandler) runWorker() {
 // processNextWorkItem processes work items from the queue
 func (e *eventHandler) processNextWorkItem() bool {
 	// get item from the queue
-	obj, shutdown := e.workqueue.Get()
+	key, shutdown := e.workqueue.Get()
 
 	// if we have to shutdown, return now
 	if shutdown {
@@ -285,20 +291,9 @@ func (e *eventHandler) processNextWorkItem() bool {
 	}
 
 	// process the item
-	err := func(obj interface{}) error {
+	err := func(key string) error {
 		// make sure we call Done on the object once we've finshed processing
-		defer e.workqueue.Done(obj)
-
-		var key string
-		var ok bool
-		// items on the queue should always be strings
-		if key, ok = obj.(string); !ok {
-			// As the item in the workqueue is actually invalid, we call
-			// Forget here else we'd go into a loop of attempting to
-			// process a work item that is invalid.
-			e.workqueue.Forget(obj)
-			return fmt.Errorf("expected string in workqueue but got %#v", obj)
-		}
+		defer e.workqueue.Done(key)
 
 		// Run the syncHandler, passing it the namespace/name string of the
 		// resource to be synced.
@@ -310,16 +305,16 @@ func (e *eventHandler) processNextWorkItem() bool {
 				return fmt.Errorf("error syncing '%s': %s, requeuing", key, err.Error())
 			}
 			// if we've exceeded MaxRetries, remove the item from the queue
-			e.workqueue.Forget(obj)
+			e.workqueue.Forget(key)
 			return fmt.Errorf("dropping %s from %s queue as it has failed more than %d times", key, e.name, MaxRetries)
 		}
 		// Finally, if no error occurs we Forget this item so it does not
 		// get queued again until another change happens.
-		e.workqueue.Forget(obj)
+		e.workqueue.Forget(key)
 		klog.Infof("Successfully synced '%s'", key)
 
 		return nil
-	}(obj)
+	}(key)
 
 	// handle any errors that occurred
 	if err != nil {

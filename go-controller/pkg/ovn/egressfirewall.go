@@ -748,7 +748,7 @@ func (oc *DefaultNetworkController) getEgressFirewallACLDbIDs(namespace string, 
 
 func (oc *DefaultNetworkController) newEFNodeController(nodeInformer coreinformers.NodeInformer) controller.Controller {
 	controllerConfig := &controller.ControllerConfig[kapi.Node]{
-		RateLimiter:    workqueue.NewItemFastSlowRateLimiter(time.Second, 5*time.Second, 5),
+		RateLimiter:    workqueue.NewTypedItemFastSlowRateLimiter[string](time.Second, 5*time.Second, 5),
 		Informer:       nodeInformer.Informer(),
 		Lister:         nodeInformer.Lister().List,
 		ObjNeedsUpdate: oc.efNodeNeedsUpdate,
