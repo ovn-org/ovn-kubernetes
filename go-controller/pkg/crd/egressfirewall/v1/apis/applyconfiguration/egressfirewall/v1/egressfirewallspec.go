@@ -17,13 +17,13 @@ limitations under the License.
 
 package v1
 
-// EgressFirewallSpecApplyConfiguration represents an declarative configuration of the EgressFirewallSpec type for use
+// EgressFirewallSpecApplyConfiguration represents a declarative configuration of the EgressFirewallSpec type for use
 // with apply.
 type EgressFirewallSpecApplyConfiguration struct {
 	Egress []EgressFirewallRuleApplyConfiguration `json:"egress,omitempty"`
 }
 
-// EgressFirewallSpecApplyConfiguration constructs an declarative configuration of the EgressFirewallSpec type for use with
+// EgressFirewallSpecApplyConfiguration constructs a declarative configuration of the EgressFirewallSpec type for use with
 // apply.
 func EgressFirewallSpec() *EgressFirewallSpecApplyConfiguration {
 	return &EgressFirewallSpecApplyConfiguration{}

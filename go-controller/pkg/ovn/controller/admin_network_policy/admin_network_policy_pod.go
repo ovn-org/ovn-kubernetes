@@ -23,7 +23,7 @@ func (c *Controller) processNextANPPodWorkItem(wg *sync.WaitGroup) bool {
 		return false
 	}
 	defer c.anpPodQueue.Done(anpPodKey)
-	err := c.syncAdminNetworkPolicyPod(anpPodKey.(string))
+	err := c.syncAdminNetworkPolicyPod(anpPodKey)
 	if err == nil {
 		c.anpPodQueue.Forget(anpPodKey)
 		return true
@@ -122,7 +122,7 @@ func (c *Controller) syncAdminNetworkPolicyPod(key string) error {
 // clearPodForANP will handle the logic for figuring out if the provided pod name
 // used to match the given anpCache.name policy. If so, it will requeue the anpCache.name key back
 // into the main (b)anpQueue cache for reconciling the db objects. If not, function is a no-op.
-func (c *Controller) clearPodForANP(namespace, name string, anpCache *adminNetworkPolicyState, queue workqueue.RateLimitingInterface) {
+func (c *Controller) clearPodForANP(namespace, name string, anpCache *adminNetworkPolicyState, queue workqueue.TypedRateLimitingInterface[string]) {
 	// (i) if this pod used to match this ANP's .Spec.Subject requeue it and return
 	// (ii) if (i) is false, check if it used to match any of the .Spec.Ingress.Peers requeue it and return
 	// (iii) if (i) & (ii) are false, check if it used to match any of the .Spec.Egress.Peers requeue it and return
@@ -162,7 +162,7 @@ func (c *Controller) clearPodForANP(namespace, name string, anpCache *adminNetwo
 // used to match the given anpCache.name policy or if it started matching the given anpCache.name.
 // If so, it will requeue the anpCache.name key back into the main (b)anpQueue cache for reconciling
 // the db objects. If not, function is a no-op.
-func (c *Controller) setPodForANP(pod *v1.Pod, anpCache *adminNetworkPolicyState, namespaceLabels labels.Labels, queue workqueue.RateLimitingInterface) {
+func (c *Controller) setPodForANP(pod *v1.Pod, anpCache *adminNetworkPolicyState, namespaceLabels labels.Labels, queue workqueue.TypedRateLimitingInterface[string]) {
 	// (i) if this pod used to match this ANP's .Spec.Subject requeue it and return OR
 	// (ii) if this pod started to match this ANP's .Spec.Subject requeue it and return OR
 	// (iii) if above conditions are are false, check if it used to match any of the .Spec.Ingress.Peers requeue it and return OR

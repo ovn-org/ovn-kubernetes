@@ -27,6 +27,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	kapi "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
+	kapierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ktypes "k8s.io/apimachinery/pkg/types"
 )
@@ -712,8 +713,8 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 						podToCreate.Labels = t.migrationTarget.labels
 						podToCreate.Annotations = t.migrationTarget.annotations
 					}
-					pod, _ := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Get(context.TODO(), podToCreate.Name, metav1.GetOptions{})
-					Expect(pod).To(BeNil())
+					_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Get(context.TODO(), podToCreate.Name, metav1.GetOptions{})
+					Expect(err).To(MatchError(kapierrors.IsNotFound, "IsNotFound"))
 
 					podToCreate.CreationTimestamp = metav1.NewTime(time.Now())
 					_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Create(context.TODO(), podToCreate, metav1.CreateOptions{})
