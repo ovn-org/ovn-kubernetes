@@ -4,13 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 	"net"
 	"os"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 
 	kapi "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
@@ -114,7 +115,7 @@ type DefaultNodeNetworkController struct {
 
 	apbExternalRouteNodeController *apbroute.ExternalGatewayNodeController
 
-	nadController *nad.NetAttachDefinitionController
+	networkManager nad.NetworkManager
 
 	cniServer *cni.Server
 }
@@ -134,7 +135,7 @@ func newDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, sto
 }
 
 // NewDefaultNodeNetworkController creates a new network controller for node management of the default network
-func NewDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, nadController *nad.NetAttachDefinitionController) (*DefaultNodeNetworkController, error) {
+func NewDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, networkManager nad.NetworkManager) (*DefaultNodeNetworkController, error) {
 	var err error
 	stopChan := make(chan struct{})
 	wg := &sync.WaitGroup{}
@@ -158,7 +159,7 @@ func NewDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, nad
 		return nil, err
 	}
 
-	nc.nadController = nadController
+	nc.networkManager = networkManager
 
 	nc.initRetryFrameworkForNode()
 
@@ -168,6 +169,26 @@ func NewDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, nad
 func (nc *DefaultNodeNetworkController) initRetryFrameworkForNode() {
 	nc.retryNamespaces = nc.newRetryFrameworkNode(factory.NamespaceExGwType)
 	nc.retryEndpointSlices = nc.newRetryFrameworkNode(factory.EndpointSliceForStaleConntrackRemovalType)
+}
+
+func (oc *DefaultNodeNetworkController) Reconcile(netInfo util.ReconcilableNetInfo) error {
+	wasAdvertised := len(oc.GetNodeVRFs(oc.name)) > 0
+	isAdvertised := len(netInfo.GetNodeVRFs(oc.name)) > 0
+	oc.SetVRFs(netInfo.GetVRFs())
+	oc.SetNADs(netInfo.GetNADs()...)
+	if oc.Gateway != nil && isAdvertised != wasAdvertised {
+		oc.Gateway.SetRoutingAdvertised(isAdvertised)
+		err := oc.Gateway.Reconcile()
+		// TODO it looks like we need a proper queued reconciliation here
+		if err != nil {
+			klog.Errorf("Failed to reconcile node %s network %s VRFs: %v", oc.name, oc.GetNetworkName(), err)
+		}
+	}
+	return nil
+}
+
+func (oc *DefaultNodeNetworkController) isRoutingAdvertised() bool {
+	return util.IsRoutingAdvertised(oc, oc.name)
 }
 
 func clearOVSFlowTargets() error {
@@ -808,7 +829,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		if !ok {
 			return fmt.Errorf("cannot get kubeclient for starting CNI server")
 		}
-		cniServer, err = cni.NewCNIServer(nc.watchFactory, kclient.KClient, nc.nadController)
+		cniServer, err = cni.NewCNIServer(nc.watchFactory, kclient.KClient, nc.networkManager)
 		if err != nil {
 			return err
 		}

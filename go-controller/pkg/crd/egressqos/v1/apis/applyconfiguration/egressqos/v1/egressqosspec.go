@@ -17,13 +17,13 @@ limitations under the License.
 
 package v1
 
-// EgressQoSSpecApplyConfiguration represents an declarative configuration of the EgressQoSSpec type for use
+// EgressQoSSpecApplyConfiguration represents a declarative configuration of the EgressQoSSpec type for use
 // with apply.
 type EgressQoSSpecApplyConfiguration struct {
 	Egress []EgressQoSRuleApplyConfiguration `json:"egress,omitempty"`
 }
 
-// EgressQoSSpecApplyConfiguration constructs an declarative configuration of the EgressQoSSpec type for use with
+// EgressQoSSpecApplyConfiguration constructs a declarative configuration of the EgressQoSSpec type for use with
 // apply.
 func EgressQoSSpec() *EgressQoSSpecApplyConfiguration {
 	return &EgressQoSSpecApplyConfiguration{}

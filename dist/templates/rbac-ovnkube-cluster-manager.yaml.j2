@@ -74,6 +74,7 @@ rules:
           - egressfirewalls
           - egressqoses
           - userdefinednetworks
+          - routeadvertisements
       verbs: [ "get", "list", "watch" ]
     - apiGroups: ["k8s.ovn.org"]
       resources:
@@ -81,6 +82,7 @@ rules:
           - egressservices/status
           - userdefinednetworks
           - userdefinednetworks/status
+          - routeadvertisements/status
       verbs: [ "patch", "update" ]
     - apiGroups: [""]
       resources:
