@@ -14,6 +14,7 @@ import (
 
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -1246,4 +1247,12 @@ func isKernelModuleLoaded(nodeName, kernelModuleName string) bool {
 		}
 	}
 	return false
+}
+
+func matchIPv4StringFamily(ipStrings []string) (string, error) {
+	return util.MatchIPStringFamily(false /*ipv4*/, ipStrings)
+}
+
+func matchIPv6StringFamily(ipStrings []string) (string, error) {
+	return util.MatchIPStringFamily(true /*ipv6*/, ipStrings)
 }

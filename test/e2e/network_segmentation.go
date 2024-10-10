@@ -356,19 +356,24 @@ var _ = Describe("Network Segmentation", func() {
 							if podIP.IP.To4() == nil {
 								ipCommand = append(ipCommand, "-6")
 							}
-							// 1. Find current default route and delete it
-							defRoute, err := e2ekubectl.RunKubectl(udnPod.Namespace,
+							// 1. Find current default routes and delete them
+							defRoutes, err := e2ekubectl.RunKubectl(udnPod.Namespace,
 								append(ipCommand, "route", "show", "default")...)
 							Expect(err).NotTo(HaveOccurred())
-							defRoute = strings.TrimSpace(defRoute)
-							if defRoute == "" {
+							if defRoutes == "" {
 								continue
 							}
-							framework.Logf("Found default route %v, deleting", defRoute)
+
+							// Remove last new line to propertly split them using new line
+							defRoutes = strings.TrimSuffix(defRoutes, "\n")
+
+							framework.Logf("Found default routes %v, deleting", defRoutes)
 							cmd := append(ipCommand, "route", "del")
-							_, err = e2ekubectl.RunKubectl(udnPod.Namespace,
-								append(cmd, strings.Split(defRoute, " ")...)...)
-							Expect(err).NotTo(HaveOccurred())
+							for _ = range strings.Split(defRoutes, "\n") {
+								_, err = e2ekubectl.RunKubectl(udnPod.Namespace,
+									append(cmd, "default")...)
+								Expect(err).NotTo(HaveOccurred())
+							}
 
 							// 2. Add a new default route to use default network interface
 							gatewayIP := iputils.NextIP(iputils.Network(podIP).IP)

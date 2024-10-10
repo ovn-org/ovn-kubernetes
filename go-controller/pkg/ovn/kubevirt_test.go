@@ -272,13 +272,14 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 		ComposeDHCPv4Options = func(uuid, namespace string, t *testDHCPOptions) *nbdb.DHCPOptions {
 			dhcpOptions := kubevirt.ComposeDHCPv4Options(
 				t.cidr,
-				t.dns,
 				DefaultNetworkControllerName,
 				ktypes.NamespacedName{
 					Namespace: namespace,
 					Name:      t.hostname,
 				},
 			)
+			dhcpOptions.Options["dns_server"] = t.dns
+			dhcpOptions.Options["router"] = kubevirt.ARPProxyIPv4
 			dhcpOptions.UUID = uuid
 
 			return dhcpOptions
@@ -286,7 +287,6 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 		ComposeDHCPv6Options = func(uuid, namespace string, t *testDHCPOptions) *nbdb.DHCPOptions {
 			dhcpOptions := kubevirt.ComposeDHCPv6Options(
 				t.cidr,
-				t.dns,
 				DefaultNetworkControllerName,
 				ktypes.NamespacedName{
 					Namespace: namespace,
@@ -294,6 +294,7 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 				},
 			)
 			dhcpOptions.UUID = uuid
+			dhcpOptions.Options["dns_server"] = t.dns
 			return dhcpOptions
 		}
 		composePolicy = func(uuid string, p testPolicy, t testData) *nbdb.LogicalRouterPolicy {
