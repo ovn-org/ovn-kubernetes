@@ -535,6 +535,8 @@ func newInformerLister(oType reflect.Type, sharedInformer cache.SharedIndexInfor
 		return ipamclaimslister.NewIPAMClaimLister(sharedInformer.GetIndexer()), nil
 	case UserDefinedNetworkType:
 		return userdefinednetworklister.NewUserDefinedNetworkLister(sharedInformer.GetIndexer()), nil
+	case ClusterUserDefinedNetworkType:
+		return userdefinednetworklister.NewClusterUserDefinedNetworkLister(sharedInformer.GetIndexer()), nil
 	}
 
 	return nil, fmt.Errorf("cannot create lister from type %v", oType)

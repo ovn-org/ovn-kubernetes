@@ -27,6 +27,10 @@ type FakeK8sV1 struct {
 	*testing.Fake
 }
 
+func (c *FakeK8sV1) ClusterUserDefinedNetworks() v1.ClusterUserDefinedNetworkInterface {
+	return &FakeClusterUserDefinedNetworks{c}
+}
+
 func (c *FakeK8sV1) UserDefinedNetworks(namespace string) v1.UserDefinedNetworkInterface {
 	return &FakeUserDefinedNetworks{c, namespace}
 }
