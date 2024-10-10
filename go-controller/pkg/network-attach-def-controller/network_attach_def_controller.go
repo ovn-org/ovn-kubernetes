@@ -63,10 +63,15 @@ type watchFactory interface {
 	NodeCoreInformer() coreinformers.NodeInformer
 }
 
+// NetworkManager provides information about networks
+type NetworkManager interface {
+	GetActiveNetworkForNamespace(namespace string) (util.NetInfo, error)
+}
+
 type NADController interface {
+	NetworkManager
 	Start() error
 	Stop()
-	GetActiveNetworkForNamespace(namespace string) (util.NetInfo, error)
 }
 
 // NADController handles namespaced scoped NAD events and

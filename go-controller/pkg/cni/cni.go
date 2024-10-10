@@ -107,11 +107,11 @@ func (pr *PodRequest) checkOrUpdatePodUID(pod *kapi.Pod) error {
 }
 
 func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, clientset *ClientSet,
-	nadController nad.NADController) (*Response, error) {
-	return pr.cmdAddWithGetCNIResultFunc(kubeAuth, clientset, getCNIResult, nadController)
+	networkManager nad.NetworkManager) (*Response, error) {
+	return pr.cmdAddWithGetCNIResultFunc(kubeAuth, clientset, getCNIResult, networkManager)
 }
 func (pr *PodRequest) cmdAddWithGetCNIResultFunc(kubeAuth *KubeAPIAuth, clientset *ClientSet,
-	getCNIResultFn getCNIResultFunc, nadController nad.NADController) (*Response, error) {
+	getCNIResultFn getCNIResultFunc, networkManager nad.NetworkManager) (*Response, error) {
 	namespace := pr.PodNamespace
 	podName := pr.PodName
 	if namespace == "" || podName == "" {
@@ -144,7 +144,7 @@ func (pr *PodRequest) cmdAddWithGetCNIResultFunc(kubeAuth *KubeAPIAuth, clientse
 	// Get the IP address and MAC address of the pod
 	// for DPU, ensure connection-details is present
 
-	primaryUDN := udn.NewPrimaryNetwork(nadController)
+	primaryUDN := udn.NewPrimaryNetwork(networkManager)
 	if util.IsNetworkSegmentationSupportEnabled() {
 		annotCondFn = primaryUDN.WaitForPrimaryAnnotationFn(namespace, annotCondFn)
 	}
@@ -293,7 +293,7 @@ func (pr *PodRequest) cmdCheck() error {
 // Argument '*PodRequest' encapsulates all the necessary information
 // kclient is passed in so that clientset can be reused from the server
 // Return value is the actual bytes to be sent back without further processing.
-func HandlePodRequest(request *PodRequest, clientset *ClientSet, kubeAuth *KubeAPIAuth, nadController nad.NADController) ([]byte, error) {
+func HandlePodRequest(request *PodRequest, clientset *ClientSet, kubeAuth *KubeAPIAuth, networkManager nad.NetworkManager) ([]byte, error) {
 	var result, resultForLogging []byte
 	var response *Response
 	var err, err1 error
@@ -301,7 +301,7 @@ func HandlePodRequest(request *PodRequest, clientset *ClientSet, kubeAuth *KubeA
 	klog.Infof("%s %s starting CNI request %+v", request, request.Command, request)
 	switch request.Command {
 	case CNIAdd:
-		response, err = request.cmdAdd(kubeAuth, clientset, nadController)
+		response, err = request.cmdAdd(kubeAuth, clientset, networkManager)
 	case CNIDel:
 		response, err = request.cmdDel(clientset)
 	case CNICheck:

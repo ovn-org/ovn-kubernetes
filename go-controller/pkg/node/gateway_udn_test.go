@@ -27,7 +27,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	factoryMocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory/mocks"
 	kubemocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube/mocks"
-	networkAttachDefController "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iprulemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/vrfmanager"
@@ -575,13 +574,11 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			defer GinkgoRecover()
 			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
 			Expect(err).NotTo(HaveOccurred())
-			testNCM := &fakenad.FakeNetworkControllerManager{}
-			nadController, err := networkAttachDefController.NewNodeNADController("test", "node", testNCM, wf)
-			Expect(err).NotTo(HaveOccurred())
+			fakeNetworkManager := &fakenad.FakeNetworkManager{}
 
 			// make preparations for creating openflow manager in DNCC which can be used for SNCC
 			localGw, err := newLocalGateway(nodeName, ovntest.MustParseIPNets(v4NodeSubnet, v6NodeSubnet), gatewayNextHops,
-				gatewayIntf, "", ifAddrs, nodeAnnotatorMock, &fakeMgmtPortConfig, &kubeMock, wf, rm, nadController)
+				gatewayIntf, "", ifAddrs, nodeAnnotatorMock, &fakeMgmtPortConfig, &kubeMock, wf, rm, fakeNetworkManager)
 			Expect(err).NotTo(HaveOccurred())
 			stop := make(chan struct{})
 			wg := &sync.WaitGroup{}
@@ -773,12 +770,10 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			defer GinkgoRecover()
 			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
 			Expect(err).NotTo(HaveOccurred())
-			testNCM := &fakenad.FakeNetworkControllerManager{}
-			nadController, err := networkAttachDefController.NewNodeNADController("test", "node", testNCM, wf)
-			Expect(err).NotTo(HaveOccurred())
+			fakeNetworkManager := &fakenad.FakeNetworkManager{}
 			// make preparations for creating openflow manager in DNCC which can be used for SNCC
 			localGw, err := newLocalGateway(nodeName, ovntest.MustParseIPNets(v4NodeSubnet, v6NodeSubnet), gatewayNextHops,
-				gatewayIntf, "", ifAddrs, nodeAnnotatorMock, &fakeMgmtPortConfig, &kubeMock, wf, rm, nadController)
+				gatewayIntf, "", ifAddrs, nodeAnnotatorMock, &fakeMgmtPortConfig, &kubeMock, wf, rm, fakeNetworkManager)
 			Expect(err).NotTo(HaveOccurred())
 			stop := make(chan struct{})
 			wg := &sync.WaitGroup{}

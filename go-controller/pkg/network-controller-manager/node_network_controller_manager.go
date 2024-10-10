@@ -41,6 +41,9 @@ type nodeNetworkControllerManager struct {
 	// net-attach-def controller handle net-attach-def and create/delete secondary controllers
 	// nil in dpu-host mode
 	nadController nad.NADController
+	// networkManager is usually nadController above but might be a static
+	// implementation if there is no need for a controller
+	networkManager nad.NetworkManager
 	// vrf manager that creates and manages vrfs for all UDNs
 	vrfManager *vrfmanager.Controller
 	// route manager that creates and manages routes
@@ -114,6 +117,14 @@ func isNodeNADControllerRequired() bool {
 		util.IsNetworkSegmentationSupportEnabled()
 }
 
+// defaultNetworkManager is a dummy implementation that returns the default
+// network for every namespace. Used when UDN or BGP are not enabled.
+type defaultNetworkManager struct{}
+
+func (nm *defaultNetworkManager) GetActiveNetworkForNamespace(string) (util.NetInfo, error) {
+	return &util.DefaultNetInfo{}, nil
+}
+
 // NewNodeNetworkControllerManager creates a new OVN controller manager to manage all the controller for all networks
 func NewNodeNetworkControllerManager(ovnClient *util.OVNClientset, wf factory.NodeWatchFactory, name string,
 	wg *sync.WaitGroup, eventRecorder record.EventRecorder, routeManager *routemanager.Controller) (*nodeNetworkControllerManager, error) {
@@ -132,11 +143,13 @@ func NewNodeNetworkControllerManager(ovnClient *util.OVNClientset, wf factory.No
 	// need to start NAD controller on node side for programming gateway pieces for UDNs
 	// need to start NAD controller on node side for VRF awareness with BGP
 	var err error
+	ncm.networkManager = &defaultNetworkManager{}
 	if isNodeNADControllerRequired() {
 		ncm.nadController, err = nad.NewNodeNADController("node-network-controller-manager", name, ncm, wf)
 		if err != nil {
 			return nil, err
 		}
+		ncm.networkManager = ncm.nadController
 	}
 	if util.IsNetworkSegmentationSupportEnabled() {
 		ncm.vrfManager = vrfmanager.NewController(ncm.routeManager)
@@ -147,7 +160,7 @@ func NewNodeNetworkControllerManager(ovnClient *util.OVNClientset, wf factory.No
 
 // initDefaultNodeNetworkController creates the controller for default network
 func (ncm *nodeNetworkControllerManager) initDefaultNodeNetworkController() error {
-	defaultNodeNetworkController, err := node.NewDefaultNodeNetworkController(ncm.newCommonNetworkControllerInfo(), ncm.nadController)
+	defaultNodeNetworkController, err := node.NewDefaultNodeNetworkController(ncm.newCommonNetworkControllerInfo(), ncm.networkManager)
 	if err != nil {
 		return err
 	}

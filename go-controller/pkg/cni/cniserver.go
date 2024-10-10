@@ -50,7 +50,7 @@ import (
 
 // NewCNIServer creates and returns a new Server object which will listen on a socket in the given path
 func NewCNIServer(factory factory.NodeWatchFactory, kclient kubernetes.Interface,
-	nadController nad.NADController) (*Server, error) {
+	networkManager nad.NetworkManager) (*Server, error) {
 	if config.OvnKubeNode.Mode == types.NodeModeDPU {
 		return nil, fmt.Errorf("unsupported ovnkube-node mode for CNI server: %s", config.OvnKubeNode.Mode)
 	}
@@ -75,7 +75,7 @@ func NewCNIServer(factory factory.NodeWatchFactory, kclient kubernetes.Interface
 	}
 
 	if util.IsNetworkSegmentationSupportEnabled() {
-		s.nadController = nadController
+		s.networkManager = networkManager
 	}
 
 	if len(config.Kubernetes.CAData) > 0 {
@@ -221,7 +221,7 @@ func (s *Server) handleCNIRequest(r *http.Request) ([]byte, error) {
 	}
 	defer req.cancel()
 
-	result, err := s.handlePodRequestFunc(req, s.clientSet, s.kubeAuth, s.nadController)
+	result, err := s.handlePodRequestFunc(req, s.clientSet, s.kubeAuth, s.networkManager)
 	if err != nil {
 		// Prefix error with request information for easier debugging
 		return nil, fmt.Errorf("%s %v", req, err)
