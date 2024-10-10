@@ -34,7 +34,7 @@ const (
 	OVN_EGRESSIP_LEGACY_HEALTHCHECK_PORT       = "9" // the actual port used by legacy health check
 	primaryNetworkName                         = "kind"
 	secondaryIPV4Subnet                        = "10.10.10.0/24"
-	secondaryIPV6Subnet                        = "2001:db8:abcd:1234:c000::/64"
+	secondaryIPV6Subnet                        = "2001:db8:abcd:1234::/64"
 	secondaryNetworkName                       = "secondary-network"
 )
 

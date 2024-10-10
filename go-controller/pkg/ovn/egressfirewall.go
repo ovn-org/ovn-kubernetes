@@ -733,7 +733,6 @@ func (oc *DefaultNetworkController) getEgressFirewallACLDbIDs(namespace string, 
 }
 
 func (oc *DefaultNetworkController) updateEgressFirewallForNode(oldNode, newNode *kapi.Node) error {
-
 	var addressesToAdd []string
 	var addressesToRemove []string
 	var err error
@@ -774,7 +773,7 @@ func (oc *DefaultNetworkController) updateEgressFirewallForNode(oldNode, newNode
 			// matches or not we shouldn't have those addresses anymore
 			rule.to.nodeAddrs.Delete(addressesToRemove...)
 			// check if selector matches
-			if selector.Matches(labels.Set(newNode.Labels)) {
+			if newNode != nil && selector.Matches(labels.Set(newNode.Labels)) {
 				rule.to.nodeAddrs.Insert(addressesToAdd...)
 			}
 			modifiedRuleIDs = append(modifiedRuleIDs, rule.id)
