@@ -36,6 +36,7 @@ import (
 
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
+	nadtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/nad"
 
 	"github.com/onsi/ginkgo"
 	"github.com/onsi/gomega"
@@ -211,8 +212,17 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			libovsdbOvnNBClient, libovsdbOvnSBClient, libovsdbCleanup, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			clusterController, err := NewOvnController(fakeClient.GetMasterClientset(), f, stopChan, nil, libovsdbOvnNBClient, libovsdbOvnSBClient,
-				record.NewFakeRecorder(10), wg)
+			clusterController, err := NewOvnController(
+				fakeClient.GetMasterClientset(),
+				&nadtest.FakeNetworkManager{},
+				f,
+				stopChan,
+				nil,
+				libovsdbOvnNBClient,
+				libovsdbOvnSBClient,
+				record.NewFakeRecorder(10),
+				wg,
+			)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			c, cancel := context.WithCancel(ctx.Context)
 			defer cancel()
@@ -369,8 +379,17 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			expectedDatabaseState := []libovsdbtest.TestData{ovnClusterRouterLRP}
 			expectedDatabaseState = addNodeLogicalFlows(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, expectedClusterRouterPortGroup, expectedClusterPortGroup, &node1)
 
-			clusterController, err := NewOvnController(fakeClient.GetMasterClientset(), f, stopChan, nil, libovsdbOvnNBClient, libovsdbOvnSBClient,
-				record.NewFakeRecorder(10), wg)
+			clusterController, err := NewOvnController(
+				fakeClient.GetMasterClientset(),
+				&nadtest.FakeNetworkManager{},
+				f,
+				stopChan,
+				nil,
+				libovsdbOvnNBClient,
+				libovsdbOvnSBClient,
+				record.NewFakeRecorder(10),
+				wg,
+			)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			setupCOPP := true
@@ -666,8 +685,17 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			libovsdbOvnNBClient, libovsdbOvnSBClient, libovsdbCleanup, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			clusterController, err := NewOvnController(fakeClient.GetMasterClientset(), f, stopChan, nil, libovsdbOvnNBClient, libovsdbOvnSBClient,
-				record.NewFakeRecorder(10), wg)
+			clusterController, err := NewOvnController(
+				fakeClient.GetMasterClientset(),
+				&nadtest.FakeNetworkManager{},
+				f,
+				stopChan,
+				nil,
+				libovsdbOvnNBClient,
+				libovsdbOvnSBClient,
+				record.NewFakeRecorder(10),
+				wg,
+			)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			setupCOPP := true
@@ -838,8 +866,17 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			expectedDatabaseState := []libovsdbtest.TestData{ovnClusterRouterLRP}
 			expectedDatabaseState = addNodeLogicalFlows(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, expectedClusterRouterPortGroup, expectedClusterPortGroup, &node1)
 
-			clusterController, err := NewOvnController(fakeClient.GetMasterClientset(), f, stopChan, nil, libovsdbOvnNBClient, libovsdbOvnSBClient,
-				record.NewFakeRecorder(10), wg)
+			clusterController, err := NewOvnController(
+				fakeClient.GetMasterClientset(),
+				&nadtest.FakeNetworkManager{},
+				f,
+				stopChan,
+				nil,
+				libovsdbOvnNBClient,
+				libovsdbOvnSBClient,
+				record.NewFakeRecorder(10),
+				wg,
+			)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			setupCOPP := true
@@ -1122,8 +1159,17 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			libovsdbOvnNBClient, libovsdbOvnSBClient, libovsdbCleanup, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			clusterController, err := NewOvnController(fakeClient.GetMasterClientset(), f, stopChan, nil, libovsdbOvnNBClient, libovsdbOvnSBClient,
-				record.NewFakeRecorder(10), wg)
+			clusterController, err := NewOvnController(
+				fakeClient.GetMasterClientset(),
+				&nadtest.FakeNetworkManager{},
+				f,
+				stopChan,
+				nil,
+				libovsdbOvnNBClient,
+				libovsdbOvnSBClient,
+				record.NewFakeRecorder(10),
+				wg,
+			)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			setupCOPP := true
@@ -1324,8 +1370,17 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			libovsdbOvnNBClient, libovsdbOvnSBClient, libovsdbCleanup, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			clusterController, err := NewOvnController(fakeClient.GetMasterClientset(), f, stopChan, nil, libovsdbOvnNBClient, libovsdbOvnSBClient,
-				record.NewFakeRecorder(10), wg)
+			clusterController, err := NewOvnController(
+				fakeClient.GetMasterClientset(),
+				&nadtest.FakeNetworkManager{},
+				f,
+				stopChan,
+				nil,
+				libovsdbOvnNBClient,
+				libovsdbOvnSBClient,
+				record.NewFakeRecorder(10),
+				wg,
+			)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			setupCOPP := true
@@ -1518,8 +1573,17 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			expectedDatabaseState := []libovsdbtest.TestData{ovnClusterRouterLRP}
 			expectedDatabaseState = addNodeLogicalFlows(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, expectedClusterRouterPortGroup, expectedClusterPortGroup, &node1)
 
-			clusterController, err := NewOvnController(fakeClient, f, stopChan, nil, libovsdbOvnNBClient, libovsdbOvnSBClient,
-				record.NewFakeRecorder(10), wg)
+			clusterController, err := NewOvnController(
+				fakeClient,
+				&nadtest.FakeNetworkManager{},
+				f,
+				stopChan,
+				nil,
+				libovsdbOvnNBClient,
+				libovsdbOvnSBClient,
+				record.NewFakeRecorder(10),
+				wg,
+			)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			setupCOPP := true
@@ -1740,8 +1804,17 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			libovsdbOvnNBClient, libovsdbOvnSBClient, libovsdbCleanup, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			clusterController, err := NewOvnController(fakeClient, f, stopChan, nil, libovsdbOvnNBClient, libovsdbOvnSBClient,
-				record.NewFakeRecorder(10), wg)
+			clusterController, err := NewOvnController(
+				fakeClient,
+				&nadtest.FakeNetworkManager{},
+				f,
+				stopChan,
+				nil,
+				libovsdbOvnNBClient,
+				libovsdbOvnSBClient,
+				record.NewFakeRecorder(10),
+				wg,
+			)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			setupCOPP := true

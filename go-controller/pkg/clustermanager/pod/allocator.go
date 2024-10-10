@@ -41,7 +41,7 @@ type PodAllocator struct {
 
 	ipamClaimsReconciler persistentips.PersistentAllocations
 
-	nadController nad.NADController
+	networkManager nad.NetworkManager
 
 	// event recorder used to post events to k8s
 	recorder record.EventRecorder
@@ -58,7 +58,7 @@ func NewPodAllocator(
 	podAnnotationAllocator *pod.PodAnnotationAllocator,
 	ipAllocator subnet.Allocator,
 	claimsReconciler persistentips.PersistentAllocations,
-	nadController nad.NADController,
+	networkManager nad.NetworkManager,
 	recorder record.EventRecorder,
 ) *PodAllocator {
 	podAllocator := &PodAllocator{
@@ -66,7 +66,7 @@ func NewPodAllocator(
 		releasedPods:           map[string]sets.Set[string]{},
 		releasedPodsMutex:      sync.Mutex{},
 		podAnnotationAllocator: podAnnotationAllocator,
-		nadController:          nadController,
+		networkManager:         networkManager,
 		recorder:               recorder,
 	}
 
@@ -109,7 +109,7 @@ func (a *PodAllocator) Init() error {
 // getActiveNetworkForNamespace returns the active network for the given pod's namespace
 // and is a wrapper around GetActiveNetworkForNamespace
 func (a *PodAllocator) getActiveNetworkForPod(pod *corev1.Pod) (util.NetInfo, error) {
-	activeNetwork, err := a.nadController.GetActiveNetworkForNamespace(pod.Namespace)
+	activeNetwork, err := a.networkManager.GetActiveNetworkForNamespace(pod.Namespace)
 	if err != nil {
 		if util.IsUnprocessedActiveNetworkError(err) {
 			a.recordPodErrorEvent(pod, err)

@@ -61,12 +61,12 @@ const (
 // nodePortWatcherIptables manages iptables rules for shared gateway
 // to ensure that services using NodePorts are accessible.
 type nodePortWatcherIptables struct {
-	nadController nad.NADController
+	networkManager nad.NetworkManager
 }
 
-func newNodePortWatcherIptables(nadController nad.NADController) *nodePortWatcherIptables {
+func newNodePortWatcherIptables(networkManager nad.NetworkManager) *nodePortWatcherIptables {
 	return &nodePortWatcherIptables{
-		nadController: nadController,
+		networkManager: networkManager,
 	}
 }
 
@@ -84,7 +84,7 @@ type nodePortWatcher struct {
 	serviceInfoLock sync.Mutex
 	ofm             *openflowManager
 	nodeIPManager   *addressManager
-	nadController   nad.NADController
+	networkManager  nad.NetworkManager
 	watchFactory    factory.NodeWatchFactory
 }
 
@@ -648,7 +648,7 @@ func (npw *nodePortWatcher) AddService(service *kapi.Service) error {
 
 	klog.V(5).Infof("Adding service %s in namespace %s", service.Name, service.Namespace)
 
-	netInfo, err := npw.nadController.GetActiveNetworkForNamespace(service.Namespace)
+	netInfo, err := npw.networkManager.GetActiveNetworkForNamespace(service.Namespace)
 	if err != nil {
 		return fmt.Errorf("error getting active network for service %s in namespace %s: %w", service.Name, service.Namespace, err)
 	}
@@ -719,7 +719,7 @@ func (npw *nodePortWatcher) UpdateService(old, new *kapi.Service) error {
 	if util.ServiceTypeHasClusterIP(new) && util.IsClusterIPSet(new) {
 		klog.V(5).Infof("Adding new service rules for: %v", new)
 
-		netInfo, err := npw.nadController.GetActiveNetworkForNamespace(new.Namespace)
+		netInfo, err := npw.networkManager.GetActiveNetworkForNamespace(new.Namespace)
 		if err != nil {
 			return fmt.Errorf("error getting active network for service %s in namespace %s: %w", new.Name, new.Namespace, err)
 		}
@@ -839,7 +839,7 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) error {
 		hasLocalHostNetworkEp := util.HasLocalHostNetworkEndpoints(localEndpoints, nodeIPs)
 		npw.getAndSetServiceInfo(name, service, hasLocalHostNetworkEp, localEndpoints)
 
-		netInfo, err := npw.nadController.GetActiveNetworkForNamespace(service.Namespace)
+		netInfo, err := npw.networkManager.GetActiveNetworkForNamespace(service.Namespace)
 		if err != nil {
 			errors = append(errors, err)
 			continue
@@ -908,7 +908,7 @@ func (npw *nodePortWatcher) AddEndpointSlice(epSlice *discovery.EndpointSlice) e
 	localEndpoints := npw.GetLocalEligibleEndpointAddresses(epSlices, svc)
 	hasLocalHostNetworkEp := util.HasLocalHostNetworkEndpoints(localEndpoints, nodeIPs)
 
-	netInfo, err := npw.nadController.GetActiveNetworkForNamespace(svc.Namespace)
+	netInfo, err := npw.networkManager.GetActiveNetworkForNamespace(svc.Namespace)
 	if err != nil {
 		return fmt.Errorf("error getting active network for service %s in namespace %s: %w", svc.Name, svc.Namespace, err)
 	}
@@ -971,7 +971,7 @@ func (npw *nodePortWatcher) DeleteEndpointSlice(epSlice *discovery.EndpointSlice
 	}
 	localEndpoints := npw.GetLocalEligibleEndpointAddresses(epSlices, svc)
 	if svcConfig, exists := npw.updateServiceInfo(namespacedName, nil, &hasLocalHostNetworkEp, localEndpoints); exists {
-		netInfo, err := npw.nadController.GetActiveNetworkForNamespace(namespacedName.Namespace)
+		netInfo, err := npw.networkManager.GetActiveNetworkForNamespace(namespacedName.Namespace)
 		if err != nil {
 			return fmt.Errorf("error getting active network for service %s in namespace %s: %w", svc.Name, svc.Namespace, err)
 		}
@@ -1083,7 +1083,7 @@ func (npwipt *nodePortWatcherIptables) AddService(service *kapi.Service) error {
 		return nil
 	}
 
-	netInfo, err := npwipt.nadController.GetActiveNetworkForNamespace(service.Namespace)
+	netInfo, err := npwipt.networkManager.GetActiveNetworkForNamespace(service.Namespace)
 	if err != nil {
 		return fmt.Errorf("error getting active network for service %s in namespace %s: %w", service.Name, service.Namespace, err)
 	}
@@ -1111,7 +1111,7 @@ func (npwipt *nodePortWatcherIptables) UpdateService(old, new *kapi.Service) err
 	}
 
 	if util.ServiceTypeHasClusterIP(new) && util.IsClusterIPSet(new) {
-		netInfo, err := npwipt.nadController.GetActiveNetworkForNamespace(new.Namespace)
+		netInfo, err := npwipt.networkManager.GetActiveNetworkForNamespace(new.Namespace)
 		if err != nil {
 			return fmt.Errorf("error getting active network for service %s in namespace %s: %w", new.Name, new.Namespace, err)
 		}
@@ -1889,7 +1889,7 @@ func initSvcViaMgmPortRoutingRules(hostSubnets []*net.IPNet) error {
 
 func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP, gwIntf, egressGWIntf string,
 	gwIPs []*net.IPNet, nodeAnnotator kube.Annotator, kube kube.Interface, cfg *managementPortConfig,
-	watchFactory factory.NodeWatchFactory, routeManager *routemanager.Controller, nadController nad.NADController) (*gateway, error) {
+	watchFactory factory.NodeWatchFactory, routeManager *routemanager.Controller, networkManager nad.NetworkManager) (*gateway, error) {
 	klog.Info("Creating new shared gateway")
 	gw := &gateway{}
 
@@ -2007,7 +2007,7 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 				}
 			}
 			klog.Info("Creating Shared Gateway Node Port Watcher")
-			gw.nodePortWatcher, err = newNodePortWatcher(gwBridge, gw.openflowManager, gw.nodeIPManager, watchFactory, nadController)
+			gw.nodePortWatcher, err = newNodePortWatcher(gwBridge, gw.openflowManager, gw.nodeIPManager, watchFactory, networkManager)
 			if err != nil {
 				return err
 			}
@@ -2029,7 +2029,7 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 
 func newNodePortWatcher(gwBridge *bridgeConfiguration, ofm *openflowManager,
 	nodeIPManager *addressManager, watchFactory factory.NodeWatchFactory,
-	nadController nad.NADController) (*nodePortWatcher, error) {
+	networkManager nad.NetworkManager) (*nodePortWatcher, error) {
 
 	// Get ofport of physical interface
 	ofportPhys, stderr, err := util.GetOVSOfPort("--if-exists", "get",
@@ -2082,16 +2082,16 @@ func newNodePortWatcher(gwBridge *bridgeConfiguration, ofm *openflowManager,
 	gatewayIPv4, gatewayIPv6 := getGatewayFamilyAddrs(gwBridge.ips)
 
 	npw := &nodePortWatcher{
-		dpuMode:       dpuMode,
-		gatewayIPv4:   gatewayIPv4,
-		gatewayIPv6:   gatewayIPv6,
-		ofportPhys:    ofportPhys,
-		gwBridge:      gwBridge.bridgeName,
-		serviceInfo:   make(map[ktypes.NamespacedName]*serviceConfig),
-		nodeIPManager: nodeIPManager,
-		ofm:           ofm,
-		watchFactory:  watchFactory,
-		nadController: nadController,
+		dpuMode:        dpuMode,
+		gatewayIPv4:    gatewayIPv4,
+		gatewayIPv6:    gatewayIPv6,
+		ofportPhys:     ofportPhys,
+		gwBridge:       gwBridge.bridgeName,
+		serviceInfo:    make(map[ktypes.NamespacedName]*serviceConfig),
+		nodeIPManager:  nodeIPManager,
+		ofm:            ofm,
+		watchFactory:   watchFactory,
+		networkManager: networkManager,
 	}
 	return npw, nil
 }
