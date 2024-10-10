@@ -162,6 +162,8 @@ func (nm *networkManagerImpl) sync(network string) error {
 
 	if dispose {
 		if !have.stoppedAndDeleting {
+			klog.Infof("RICCARDO %s: sync network %s, dispose=%t, !have.stoppedAndDeleting", nm.name, network, dispose)
+
 			have.controller.Stop()
 		}
 		have.stoppedAndDeleting = true
@@ -183,13 +185,16 @@ func (nm *networkManagerImpl) sync(network string) error {
 		return nil
 	}
 
-	// setup & start the new network controller
-	nc, err := nm.ncm.NewNetworkController(util.CopyNetInfo(want))
+	// setup & start the new *secondary* network controller
+	klog.Infof("RICCARDO %s: sync network %s, creating new network controller", nm.name, network)
+
+	nc, err := nm.ncm.NewNetworkController(util.CopyNetInfo(want)) // ****creates SNNC**** // <--- fails here now
 	if err != nil {
 		return fmt.Errorf("%s: failed to create network %s: %w", nm.name, network, err)
 	}
+	klog.Infof("RICCARDO %s: sync network %s, starting new network controller", nm.name, network)
 
-	err = nc.Start(context.Background())
+	err = nc.Start(context.Background()) // **** starts SNNC****
 	if err != nil {
 		return fmt.Errorf("%s: failed to start network %s: %w", nm.name, network, err)
 	}

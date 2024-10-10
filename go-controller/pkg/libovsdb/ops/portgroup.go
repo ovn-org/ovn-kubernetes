@@ -7,6 +7,7 @@ import (
 	libovsdb "github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	"k8s.io/klog/v2"
 )
 
 type portGroupPredicate func(group *nbdb.PortGroup) bool
@@ -109,6 +110,7 @@ func AddPortsToPortGroupOps(nbClient libovsdbclient.Client, ops []libovsdb.Opera
 func AddPortsToPortGroup(nbClient libovsdbclient.Client, name string, ports ...string) error {
 	ops, err := AddPortsToPortGroupOps(nbClient, nil, name, ports...)
 	if err != nil {
+		klog.Infof("Failed to add ports %s to port group %s: %v", ports, name, err)
 		return err
 	}
 

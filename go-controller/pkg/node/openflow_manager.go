@@ -152,6 +152,10 @@ func (c *openflowManager) syncFlows() {
 // -- to handle external -> service(ExternalTrafficPolicy: Local) -> host access without SNAT
 func newGatewayOpenFlowManager(gwBridge, exGWBridge *bridgeConfiguration, subnets []*net.IPNet, extraIPs []net.IP) (*openflowManager, error) {
 	// add health check function to check default OpenFlow flows are on the shared gateway bridge
+	klog.Infof("RICCARDO newGatewayOpenFlowManager: gwBridge=%+v, exGWBridge=%+v",
+		gwBridge,
+		exGWBridge)
+
 	ofm := &openflowManager{
 		defaultBridge:         gwBridge,
 		externalGatewayBridge: exGWBridge,
