@@ -23,6 +23,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/vswitchd"
 	"github.com/prometheus/client_golang/prometheus"
 	"gopkg.in/fsnotify/fsnotify.v1"
 	"gopkg.in/natefinch/lumberjack.v2"
@@ -218,6 +219,47 @@ func NewNBClientWithConfig(cfg config.OvnAuthConfig, promRegistry prometheus.Reg
 	}()
 
 	_, err = c.MonitorAll(ctx)
+	if err != nil {
+		c.Close()
+		return nil, err
+	}
+
+	return c, nil
+}
+
+// NewOVSClient creates a new openvswitch Database client
+func NewOVSClient(stopCh <-chan struct{}) (client.Client, error) {
+	cfg := &config.OvnAuthConfig{
+		Scheme:  config.OvnDBSchemeUnix,
+		Address: "unix:/var/run/openvswitch/db.sock",
+	}
+
+	return NewOVSClientWithConfig(*cfg, stopCh)
+}
+
+func NewOVSClientWithConfig(cfg config.OvnAuthConfig, stopCh <-chan struct{}) (client.Client, error) {
+	dbModel, err := vswitchd.FullDatabaseModel()
+	if err != nil {
+		return nil, err
+	}
+	c, err := newClient(cfg, dbModel, stopCh)
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	go func() {
+		<-stopCh
+		cancel()
+	}()
+
+	_, err = c.Monitor(ctx,
+		c.NewMonitor(
+			client.WithTable(&vswitchd.OpenvSwitch{}),
+			client.WithTable(&vswitchd.Bridge{}),
+			client.WithTable(&vswitchd.Port{}),
+			client.WithTable(&vswitchd.Interface{}),
+		),
+	)
 	if err != nil {
 		c.Close()
 		return nil, err
