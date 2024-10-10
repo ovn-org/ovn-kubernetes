@@ -249,24 +249,16 @@ var _ = Describe("Network Segmentation", func() {
 				// thus, the UDN interface idx will be 3:
 				// idx: iface
 				//   0: host side primary UDN
-				//   1: pod side primary UDN
+				//   1: pod side default network
 				//   2: host side default network
-				//   3: pod side default network
-				podDefaultClusterNetIfaceIDX := 3
-				podUDNIfaceIDX := 1
+				//   3: pod side primary UDN
+				podDefaultClusterNetIfaceIDX := 1
+				podUDNIfaceIDX := 3
 				Expect(response.Result).To(Equal(
 					&current.Result{
 						CNIVersion: "0.3.1",
 						Interfaces: []*current.Interface{
 							{
-								Name: "host_ovn-udn1",
-								Mac:  dummyMACHostSide,
-							},
-							{
-								Name:    "ovn-udn1",
-								Mac:     "02:03:04:05:06:07",
-								Sandbox: "bobloblaw",
-							}, {
 								Name: "host_eth0",
 								Mac:  dummyMACHostSide,
 							},
@@ -275,22 +267,17 @@ var _ = Describe("Network Segmentation", func() {
 								Mac:     "0a:58:fd:98:00:01",
 								Sandbox: "bobloblaw",
 							},
+							{
+								Name: "host_ovn-udn1",
+								Mac:  dummyMACHostSide,
+							},
+							{
+								Name:    "ovn-udn1",
+								Mac:     "02:03:04:05:06:07",
+								Sandbox: "bobloblaw",
+							},
 						},
 						IPs: []*current.IPConfig{
-							{
-								Address: net.IPNet{
-									IP:   net.ParseIP("10.10.10.30"),
-									Mask: net.CIDRMask(24, 32),
-								},
-								Interface: &podUDNIfaceIDX,
-							},
-							{
-								Address: net.IPNet{
-									IP:   net.ParseIP("fd10::3"),
-									Mask: net.CIDRMask(64, 128),
-								},
-								Interface: &podUDNIfaceIDX,
-							},
 							{
 								Address: net.IPNet{
 									IP:   net.ParseIP("100.10.10.3"),
@@ -304,6 +291,20 @@ var _ = Describe("Network Segmentation", func() {
 									Mask: net.CIDRMask(64, 128),
 								},
 								Interface: &podDefaultClusterNetIfaceIDX,
+							},
+							{
+								Address: net.IPNet{
+									IP:   net.ParseIP("10.10.10.30"),
+									Mask: net.CIDRMask(24, 32),
+								},
+								Interface: &podUDNIfaceIDX,
+							},
+							{
+								Address: net.IPNet{
+									IP:   net.ParseIP("fd10::3"),
+									Mask: net.CIDRMask(64, 128),
+								},
+								Interface: &podUDNIfaceIDX,
 							},
 						},
 					},
