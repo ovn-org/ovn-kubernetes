@@ -188,20 +188,20 @@ func TestWaitForPrimaryAnnotationFn(t *testing.T) {
 				return tt.annotationFromFn, tt.isReadyFromFn
 			}
 
-			nadController := &nad.FakeNADController{
+			fakeNetworkManager := &nad.FakeNetworkManager{
 				PrimaryNetworks: map[string]util.NetInfo{},
 			}
 			for _, nad := range tt.nads {
 				nadNetwork, _ := util.ParseNADInfo(nad)
 				nadNetwork.SetNADs(util.GetNADName(nad.Namespace, nad.Name))
 				if nadNetwork.IsPrimaryNetwork() {
-					if _, loaded := nadController.PrimaryNetworks[nad.Namespace]; !loaded {
-						nadController.PrimaryNetworks[nad.Namespace] = nadNetwork
+					if _, loaded := fakeNetworkManager.PrimaryNetworks[nad.Namespace]; !loaded {
+						fakeNetworkManager.PrimaryNetworks[nad.Namespace] = nadNetwork
 					}
 				}
 			}
 
-			userDefinedPrimaryNetwork := NewPrimaryNetwork(nadController)
+			userDefinedPrimaryNetwork := NewPrimaryNetwork(fakeNetworkManager)
 			obtainedAnnotation, obtainedIsReady := userDefinedPrimaryNetwork.WaitForPrimaryAnnotationFn(tt.namespace, waitCond)(tt.annotations, tt.nadName)
 			obtainedFound := userDefinedPrimaryNetwork.Found()
 			obtainedNetworkName := userDefinedPrimaryNetwork.NetworkName()

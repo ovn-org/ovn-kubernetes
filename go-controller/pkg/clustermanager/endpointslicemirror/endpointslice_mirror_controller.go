@@ -43,7 +43,7 @@ type Controller struct {
 	endpointSlicesSynced cache.InformerSynced
 	podLister            corelisters.PodLister
 	podsSynced           cache.InformerSynced
-	nadController        networkAttachDefController.NADController
+	networkManager       networkAttachDefController.NetworkManager
 	cancel               context.CancelFunc
 }
 
@@ -111,14 +111,14 @@ func (c *Controller) onEndpointSliceAdd(obj interface{}) {
 
 func NewController(
 	ovnClient *util.OVNClusterManagerClientset,
-	wf *factory.WatchFactory, nadController networkAttachDefController.NADController) (*Controller, error) {
+	wf *factory.WatchFactory, networkManager networkAttachDefController.NetworkManager) (*Controller, error) {
 
 	wg := &sync.WaitGroup{}
 	c := &Controller{
-		kubeClient:    ovnClient.KubeClient,
-		wg:            wg,
-		name:          types.EndpointSliceMirrorControllerName,
-		nadController: nadController,
+		kubeClient:     ovnClient.KubeClient,
+		wg:             wg,
+		name:           types.EndpointSliceMirrorControllerName,
+		networkManager: networkManager,
 	}
 
 	c.queue = workqueue.NewTypedRateLimitingQueueWithConfig(
@@ -244,7 +244,7 @@ func (c *Controller) syncDefaultEndpointSlice(ctx context.Context, key string) e
 		return err
 	}
 
-	namespacePrimaryNetwork, err := c.nadController.GetActiveNetworkForNamespace(namespace)
+	namespacePrimaryNetwork, err := c.networkManager.GetActiveNetworkForNamespace(namespace)
 	if err != nil {
 		return err
 	}

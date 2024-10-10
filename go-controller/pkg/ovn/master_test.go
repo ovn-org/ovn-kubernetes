@@ -30,6 +30,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
+	nadtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/nad"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/urfave/cli/v2"
@@ -1052,7 +1053,17 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 		recorder = record.NewFakeRecorder(10)
-		oc, err = NewOvnController(fakeClient, f, stopChan, nil, nbClient, sbClient, recorder, wg)
+		oc, err = NewOvnController(
+			fakeClient,
+			&nadtest.FakeNetworkManager{},
+			f,
+			stopChan,
+			nil,
+			nbClient,
+			sbClient,
+			recorder,
+			wg,
+		)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		gomega.Expect(oc).NotTo(gomega.BeNil())
 
@@ -2075,13 +2086,15 @@ func TestController_syncNodes(t *testing.T) {
 
 			controller, err := NewOvnController(
 				fakeClient,
+				&nadtest.FakeNetworkManager{},
 				f,
 				stopChan,
 				nil,
 				nbClient,
 				sbClient,
 				record.NewFakeRecorder(0),
-				wg)
+				wg,
+			)
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 			err = controller.syncNodes([]interface{}{&testNode})
 			if err != nil {
@@ -2176,13 +2189,15 @@ func TestController_deleteStaleNodeChassis(t *testing.T) {
 
 			controller, err := NewOvnController(
 				fakeClient,
+				&nadtest.FakeNetworkManager{},
 				f,
 				stopChan,
 				nil,
 				nbClient,
 				sbClient,
 				record.NewFakeRecorder(0),
-				wg)
+				wg,
+			)
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 
 			err = controller.deleteStaleNodeChassis(&tt.node)

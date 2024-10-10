@@ -62,7 +62,7 @@ type networkClusterController struct {
 	ipamClaimReconciler *persistentips.IPAMClaimReconciler
 	subnetAllocator     subnet.Allocator
 
-	nadController networkAttachDefController.NADController
+	networkManager networkAttachDefController.NetworkManager
 
 	// event recorder used to post events to k8s
 	recorder record.EventRecorder
@@ -70,7 +70,7 @@ type networkClusterController struct {
 	util.NetInfo
 }
 
-func newNetworkClusterController(networkIDAllocator idallocator.NamedAllocator, netInfo util.NetInfo, ovnClient *util.OVNClusterManagerClientset, wf *factory.WatchFactory, recorder record.EventRecorder, nadController networkAttachDefController.NADController) *networkClusterController {
+func newNetworkClusterController(networkIDAllocator idallocator.NamedAllocator, netInfo util.NetInfo, ovnClient *util.OVNClusterManagerClientset, wf *factory.WatchFactory, recorder record.EventRecorder, networkManager networkAttachDefController.NADController) *networkClusterController {
 	kube := &kube.KubeOVN{
 		Kube: kube.Kube{
 			KClient: ovnClient.KubeClient,
@@ -88,7 +88,7 @@ func newNetworkClusterController(networkIDAllocator idallocator.NamedAllocator, 
 		wg:                 wg,
 		networkIDAllocator: networkIDAllocator,
 		recorder:           recorder,
-		nadController:      nadController,
+		networkManager:     networkManager,
 	}
 
 	return ncc
@@ -193,7 +193,7 @@ func (ncc *networkClusterController) init() error {
 		)
 
 		ncc.podAllocator = pod.NewPodAllocator(ncc.NetInfo, podAllocationAnnotator, ipAllocator,
-			ipamClaimsReconciler, ncc.nadController, ncc.recorder)
+			ipamClaimsReconciler, ncc.networkManager, ncc.recorder)
 		if err := ncc.podAllocator.Init(); err != nil {
 			return fmt.Errorf("failed to initialize pod ip allocator: %w", err)
 		}
