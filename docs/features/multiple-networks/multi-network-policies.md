@@ -1,10 +1,34 @@
 # MultiNetworkPolicies
-OVN-Kubernetes implements native support for
-[multi-networkpolicy](https://github.com/k8snetworkplumbingwg/multi-networkpolicy),
-an API providing
+## Introduction
+[multi-networkpolicy](https://github.com/k8snetworkplumbingwg/multi-networkpolicy) provides
 [network policy](https://kubernetes.io/docs/concepts/services-networking/network-policies/)
-features for secondary networks.
+features for secondary networks, and allow enhanced traffic security.
 
+## Motivation
+In Kubernetes the paradigm is that by default all pods can reach other pods, and security is provided by
+implementing [Network Policy](https://kubernetes.io/docs/concepts/services-networking/network-policies/).
+MultiNetworkPolicies provide the same security solution to secondary interfaces.
+For users seeking network security using multi-homing - traffic restrictions based on user network configuration is a
+recommended practice.
+
+For example, by defining policies that specify which services a workload can access, they mitigate supply chain attacks.
+Even if a component is compromised, it won’t be able to jeopardize other components of the system.
+
+## User-Stories
+As a project administrator, I want to enforce network policies that must be adhered to by all workloads on
+my namespace. This will secure my namespace’s network traffic.
+
+## User-case
+- Limit access to a database set outside the cluster, connected to VM and Pod workloads via localnet overlay network:
+  In this case example, only the VM has access to the database.
+  ![multi-homing-use-case-localnet](multi-homing-use-case-localnet.png)
+  ![micro-segmentation-use-case](micro-segmentation-use-case.png)
+
+## How to enable this feature on an OVN-Kubernetes cluster?
+In order to enable multi-networkPolicies on OVN-Kubernetes, the `enable-multi-network` flag
+under `OVNKubernetesFeatureConfig` on the OVN-Kubernetes config must be enabled.
+
+## Workflow Description
 To configure pod isolation, the user must:
 - provision a `network-attachment-definition`.
 - provision a `MultiNetworkPolicy` indicating to which secondary networks it
@@ -12,9 +36,8 @@ To configure pod isolation, the user must:
   [policy-for](https://github.com/k8snetworkplumbingwg/multi-networkpolicy#policy-for-annotation)
   annotation.
 
-**NOTE:** the `OVN_MULTI_NETWORK_ENABLE` config flag must be enabled.
-
 Please refer to the following example:
+
 ```yaml
 ---
 apiVersion: k8s.cni.cncf.io/v1
@@ -24,7 +47,7 @@ metadata:
 spec:
     config: '{
         "cniVersion": "0.4.0",
-        "name": "tenant-blue",
+        "name": "tenant-blue-net",
         "netAttachDefName": "default/tenant-blue",
         "topology": "layer2",
         "type": "ovn-k8s-cni-overlay",
@@ -61,3 +84,6 @@ information.
 annotation without the subnet attribute defined are possible if the policy
 **only features** `ipBlock` peers. If the `net-attach-def` features the
 `subnet` attribute, it can also feature `namespaceSelectors` and `podSelectors`.
+
+## User facing API Changes
+There are no user facing API Changes.
