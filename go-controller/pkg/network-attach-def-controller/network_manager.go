@@ -123,7 +123,6 @@ type networkManagerImpl struct {
 	raLister   ralisters.RouteAdvertisementsLister
 	nodeLister corelisters.NodeLister
 
-	controller        controller.Reconciler
 	networkReconciler controller.Reconciler
 	raController      controller.Controller
 	nodeController    controller.Controller
@@ -166,7 +165,7 @@ func (nm *networkManagerImpl) Stop() {
 
 func (nm *networkManagerImpl) EnsureNetwork(network util.NetInfo) {
 	nm.setNetwork(network.GetNetworkName(), network)
-	nm.controller.Reconcile(network.GetNetworkName())
+	nm.networkReconciler.Reconcile(network.GetNetworkName())
 }
 
 func (nm *networkManagerImpl) DeleteNetwork(network string) {
@@ -178,7 +177,7 @@ func (nm *networkManagerImpl) DeleteNetwork(network string) {
 	default:
 		nm.setNetwork(network, nil)
 	}
-	nm.controller.Reconcile(network)
+	nm.networkReconciler.Reconcile(network)
 }
 
 func (nm *networkManagerImpl) setNetwork(network string, netInfo util.NetInfo) {

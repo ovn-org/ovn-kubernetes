@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"reflect"
 	"sync"
 	"testing"
 
@@ -513,9 +512,9 @@ func TestNetAttachDefinitionController(t *testing.T) {
 								fmt.Sprintf("matching network config for network %s", name))
 							g.Expect(tncm.controllers[testNetworkKey].GetNADs()).To(gomega.ConsistOf(expected.nads),
 								fmt.Sprintf("matching NADs for network %s", name))
+							expectRunning = append(expectRunning, testNetworkKey)
 						}
 					}()
-					expectRunning = append(expectRunning, testNetworkKey)
 					if netInfo.IsPrimaryNetwork() && !netInfo.IsDefault() {
 						key := expected.nads[0]
 						namespace, _, err := cache.SplitMetaNamespaceKey(key)
@@ -523,7 +522,6 @@ func TestNetAttachDefinitionController(t *testing.T) {
 						netInfoFound, err := nadController.GetActiveNetworkForNamespace(namespace)
 						g.Expect(err).ToNot(gomega.HaveOccurred())
 						g.Expect(netInfoFound.Equals(netInfo)).To(gomega.BeTrue())
-						g.Expect(reflect.DeepEqual(netInfoFound, netInfo)).To(gomega.BeTrue())
 						g.Expect(netInfoFound.GetNADs()).To(gomega.ConsistOf(expected.nads))
 					}
 				}
