@@ -458,27 +458,11 @@ func (bsnc *BaseSecondaryNetworkController) removePodForSecondaryNetwork(pod *ka
 	}
 
 	podDesc := pod.Namespace + "/" + pod.Name
-	klog.Infof("Deleting pod: %s for network %s", podDesc, bsnc.GetNetworkName())
 
 	// there is only a logical port for local pods or remote pods of layer2
 	// networks on interconnect, so only delete in these cases
 	isLocalPod := bsnc.isPodScheduledinLocalZone(pod)
 	hasLogicalPort := isLocalPod || bsnc.isLayer2Interconnect()
-
-	// otherwise just delete pod IPs from the namespace address set
-	if !hasLogicalPort {
-		if bsnc.doesNetworkRequireIPAM() &&
-			(util.IsMultiNetworkPoliciesSupportEnabled() || (util.IsNetworkSegmentationSupportEnabled() && bsnc.IsPrimaryNetwork())) {
-			return bsnc.removeRemoteZonePodFromNamespaceAddressSet(pod)
-		}
-
-		// except for localnet networks, continue the delete flow in case a node just
-		// became remote where we might still need to cleanup. On L3 networks
-		// the node switch is removed so there is no need to do this.
-		if bsnc.TopologyType() != types.LocalnetTopology {
-			return nil
-		}
-	}
 
 	// for a specific NAD belongs to this network, Pod's logical port might already be created half-way
 	// without its lpInfo cache being created; need to deleted resources created for that NAD as well.
@@ -492,19 +476,31 @@ func (bsnc *BaseSecondaryNetworkController) removePodForSecondaryNetwork(pod *ka
 		portInfoMap = map[string]*lpInfo{}
 	}
 
-	activeNetwork, err := bsnc.getActiveNetworkForNamespace(pod.Namespace)
-	if err != nil {
-		return fmt.Errorf("failed looking for the active network at namespace '%s': %w", pod.Namespace, err)
-	}
+	var alreadyProcessed bool
 	for nadName := range podNetworks {
 		if !bsnc.HasNAD(nadName) {
 			continue
 		}
 
-		_, networkMap, err := util.GetPodNADToNetworkMappingWithActiveNetwork(pod, bsnc.NetInfo, activeNetwork)
-		if err != nil {
-			bsnc.recordPodErrorEvent(pod, err)
-			return err
+		// pod has a network managed by this controller
+		klog.Infof("Deleting pod: %s for network %s, NAD: %s", podDesc, bsnc.GetNetworkName(), nadName)
+
+		// handle remote pod clean up but only do this one time
+		if !hasLogicalPort && !alreadyProcessed {
+			if bsnc.doesNetworkRequireIPAM() &&
+				// address set is for network policy only. So either multi network policy is enabled or network
+				// segmentation, and it is a primary UDN (regular netpol)
+				(util.IsMultiNetworkPoliciesSupportEnabled() || (util.IsNetworkSegmentationSupportEnabled() && bsnc.IsPrimaryNetwork())) {
+				return bsnc.removeRemoteZonePodFromNamespaceAddressSet(pod)
+			}
+
+			// except for localnet networks, continue the delete flow in case a node just
+			// became remote where we might still need to cleanup. On L3 networks
+			// the node switch is removed so there is no need to do this.
+			if bsnc.TopologyType() != types.LocalnetTopology {
+				return nil
+			}
+			alreadyProcessed = true
 		}
 
 		if kubevirt.IsPodAllowedForMigration(pod, bsnc.NetInfo) {
@@ -538,32 +534,18 @@ func (bsnc *BaseSecondaryNetworkController) removePodForSecondaryNetwork(pod *ka
 			continue
 		}
 
-		network := networkMap[nadName]
-
-		hasPersistentIPs := bsnc.allowPersistentIPs()
-		hasIPAMClaim := network != nil && network.IPAMClaimReference != ""
-		if hasIPAMClaim && !hasPersistentIPs {
-			klog.Errorf(
-				"Pod %s/%s referencing an IPAMClaim on network %q which does not honor it",
-				pod.GetNamespace(),
-				pod.GetName(),
-				bsnc.NetInfo.GetNetworkName(),
-			)
-			hasIPAMClaim = false
-		}
-		if hasIPAMClaim {
-			ipamClaim, err := bsnc.ipamClaimsReconciler.FindIPAMClaim(network.IPAMClaimReference, network.Namespace)
-			hasIPAMClaim = ipamClaim != nil && len(ipamClaim.Status.IPs) > 0
-			if apierrors.IsNotFound(err) {
-				klog.Errorf("Failed to retrieve IPAMClaim %q but will release IPs: %v", network.IPAMClaimReference, err)
-			} else if err != nil {
-				return fmt.Errorf("failed to get IPAMClaim %s/%s: %w", network.Namespace, network.IPAMClaimReference, err)
+		// if we allow for persistent IPs, then we need to check if this pod has an IPAM Claim
+		if bsnc.allowPersistentIPs() {
+			hasIPAMClaim, err := bsnc.hasIPAMClaim(pod, nadName)
+			if err != nil {
+				return fmt.Errorf("unable to determine if pod %s has IPAM Claim: %w", podDesc, err)
+			}
+			// if there is an IPAM claim, don't release the pod IPs
+			if hasIPAMClaim {
+				continue
 			}
 		}
 
-		if hasIPAMClaim {
-			continue
-		}
 		// Releasing IPs needs to happen last so that we can deterministically know that if delete failed that
 		// the IP of the pod needs to be released. Otherwise we could have a completed pod failed to be removed
 		// and we dont know if the IP was released or not, and subsequently could accidentally release the IP
@@ -578,6 +560,45 @@ func (bsnc *BaseSecondaryNetworkController) removePodForSecondaryNetwork(pod *ka
 
 	}
 	return nil
+}
+
+// hasIPAMClaim determines whether a pod's IPAM is being handled by IPAMClaim CR.
+// pod passed should already be validated as having a network connection to nadName
+func (bsnc *BaseSecondaryNetworkController) hasIPAMClaim(pod *kapi.Pod, nadName string) (bool, error) {
+	// FIXME(trozet): relying on NAD/UDN existing can lead to a race condition on deletion and
+	// we should figure out a way to determine if the pod has an IPAMClaim without depending on this
+	activeNetwork, err := bsnc.getActiveNetworkForNamespace(pod.Namespace)
+	if err != nil {
+		return false, fmt.Errorf("failed looking for the active network at namespace '%s': %w", pod.Namespace, err)
+	}
+
+	on, networkMap, err := util.GetPodNADToNetworkMappingWithActiveNetwork(pod, bsnc.NetInfo, activeNetwork)
+	if err != nil {
+		bsnc.recordPodErrorEvent(pod, err)
+		return false, fmt.Errorf("error getting network-attachment for pod %s/%s network %s: %w",
+			pod.Namespace, pod.Name, bsnc.GetNetworkName(), err)
+	}
+
+	if !on {
+		return false, nil
+	}
+
+	network := networkMap[nadName]
+	hasIPAMClaim := network != nil && network.IPAMClaimReference != ""
+	if !hasIPAMClaim {
+		return false, nil
+	}
+
+	ipamClaim, err := bsnc.ipamClaimsReconciler.FindIPAMClaim(network.IPAMClaimReference, network.Namespace)
+	if apierrors.IsNotFound(err) {
+		klog.Errorf("Failed to retrieve IPAMClaim %q but will release IPs: %v", network.IPAMClaimReference, err)
+		return false, nil
+	} else if err != nil {
+		return false, fmt.Errorf("failed to get IPAMClaim %s/%s: %w", network.Namespace, network.IPAMClaimReference, err)
+	}
+
+	hasIPAMClaim = ipamClaim != nil && len(ipamClaim.Status.IPs) > 0
+	return hasIPAMClaim, nil
 }
 
 // delPerPodSNAT will delete the SNAT towards masqueradeIP for this given pod
