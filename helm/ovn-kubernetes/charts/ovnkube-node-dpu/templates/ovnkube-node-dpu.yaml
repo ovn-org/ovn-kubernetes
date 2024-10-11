@@ -104,6 +104,10 @@ spec:
         - mountPath: /etc/ovn/
           name: host-var-lib-ovs
           readOnly: true
+        - mountPath: /run/systemd/private
+          name: run-systemd
+          subPath: private
+          readOnly: true
         resources:
           requests:
             cpu: 100m
@@ -382,5 +386,8 @@ spec:
       - name: host-etc-ovs
         hostPath:
           path: /etc/openvswitch
+      - name: run-systemd
+        hostPath:
+          path: /run/systemd
       tolerations:
       - operator: "Exists"
