@@ -100,6 +100,10 @@ func (rm *Controller) Delete(rule netlink.Rule) error {
 	}
 	if reconcileNeeded {
 		return rm.reconcile()
+	} else {
+		// though we don't need to reconcile because we don't manage this rule, we should still ensure its deleted
+		// from the system. No need for full reconcile.
+		_ = netlink.RuleDel(&rule)
 	}
 	return nil
 }
