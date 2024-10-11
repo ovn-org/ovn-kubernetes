@@ -87,6 +87,10 @@ spec:
         - mountPath: /var/run/netns
           name: host-netns
           mountPropagation: Bidirectional
+        - mountPath: /run/systemd/private
+          name: run-systemd
+          subPath: private
+          readOnly: true
        {%- if ovnkube_app_name!="ovnkube-node-dpu-host" %}
         # ovnkube-node only mounts (non dpu related)
         - mountPath: /var/run/openvswitch/
@@ -426,6 +430,9 @@ spec:
       - name: host-netns
         hostPath:
           path: /var/run/netns
+      - name: run-systemd
+        hostPath:
+          path: /run/systemd
       {%- if ovnkube_app_name!="ovnkube-node-dpu-host" %}
       # non DPU related volumes
       - name: host-var-log-ovs
