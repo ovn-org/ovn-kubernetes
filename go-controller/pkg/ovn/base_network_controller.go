@@ -142,6 +142,8 @@ type BaseNetworkController struct {
 	// make sure to keep this order to avoid deadlocks
 	sharedNetpolDftPortGroups *syncmap.SyncMap[*defaultDenyPortGroups]
 
+	sharedPodSelectorPortGroups *syncmap.SyncMap[*PodSelectorPortGroup]
+
 	podSelectorAddressSets *syncmap.SyncMap[*PodSelectorAddressSet]
 
 	// stopChan per controller

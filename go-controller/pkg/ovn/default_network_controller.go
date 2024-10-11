@@ -207,6 +207,7 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 			networkPolicies:             syncmap.NewSyncMap[*networkPolicy](),
 			sharedNetpolDftPortGroups:   syncmap.NewSyncMap[*defaultDenyPortGroups](),
 			podSelectorAddressSets:      syncmap.NewSyncMap[*PodSelectorAddressSet](),
+			sharedPodSelectorPortGroups: syncmap.NewSyncMap[*PodSelectorPortGroup](),
 			stopChan:                    defaultStopChan,
 			wg:                          defaultWg,
 			localZoneNodes:              &sync.Map{},
@@ -323,6 +324,12 @@ func (oc *DefaultNetworkController) syncDb() error {
 	if err != nil {
 		return fmt.Errorf("cleaning up stale pod selector address sets for network %v failed : %w", oc.GetNetworkName(), err)
 	}
+
+	// TBD Cathy
+	//err = oc.cleanupPodSelectorPortGroups()
+	//if err != nil {
+	//	return fmt.Errorf("cleaning up stale policy local pod selector port groups for network %v failed : %w", oc.GetNetworkName(), err)
+	//}
 	return nil
 }
 

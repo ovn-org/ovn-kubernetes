@@ -207,6 +207,7 @@ func NewSecondaryLocalnetNetworkController(cnci *CommonNetworkControllerInfo, ne
 					networkPolicies:             syncmap.NewSyncMap[*networkPolicy](),
 					sharedNetpolDftPortGroups:   syncmap.NewSyncMap[*defaultDenyPortGroups](),
 					podSelectorAddressSets:      syncmap.NewSyncMap[*PodSelectorAddressSet](),
+					sharedPodSelectorPortGroups: syncmap.NewSyncMap[*PodSelectorPortGroup](),
 					stopChan:                    stopChan,
 					wg:                          &sync.WaitGroup{},
 					cancelableCtx:               util.NewCancelableContext(),

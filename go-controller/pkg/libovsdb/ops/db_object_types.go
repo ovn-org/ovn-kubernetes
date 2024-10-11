@@ -277,6 +277,11 @@ var PortGroupNetworkPolicy = newObjectIDsType(portGroup, NetworkPolicyOwnerType,
 	ObjectNameKey,
 })
 
+var PortGroupPodSelector = newObjectIDsType(portGroup, PodSelectorOwnerType, []ExternalIDKey{
+	// pod selector string representation
+	ObjectNameKey,
+})
+
 var PortGroupAdminNetworkPolicy = newObjectIDsType(portGroup, AdminNetworkPolicyOwnerType, []ExternalIDKey{
 	// ANP name
 	ObjectNameKey,
