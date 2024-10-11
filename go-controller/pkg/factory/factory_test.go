@@ -609,6 +609,12 @@ var _ = Describe("Watch Factory Operations", func() {
 			testExistingFilteredHandler(PodType, LocalPodSelectorType, "default", nil, 3)
 		})
 
+		It("is called for each existing policy: SharedLocalPodSelectorType", func() {
+			policies = append(policies, newPolicy("denyall", "default"))
+			pods = append(pods, newPod("pod1", "default"))
+			testExistingFilteredHandler(PodType, SharedLocalPodSelectorType, "default", nil, 2)
+		})
+
 		It("is called for each existing policy: AddressSetNamespaceAndPodSelectorType", func() {
 			policies = append(policies, newPolicy("denyall", "default"))
 			pods = append(pods, newPod("pod1", "default"))

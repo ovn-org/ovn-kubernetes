@@ -107,7 +107,7 @@ func getStaleDefaultDenyData(networkPolicy *knet.NetworkPolicy) []libovsdbtest.T
 func getStalePolicyACLs(gressIdx int, namespace, policyName string, peerNamespaces []string,
 	peers []knet.NetworkPolicyPeer, policyType knet.PolicyType, netInfo util.NetInfo) []*nbdb.ACL {
 	fakeController := getFakeBaseController(netInfo)
-	pgName := fakeController.getNetworkPolicyPGName(namespace, policyName)
+	pgName := fakeController.getStaleNetworkPolicyPGName(namespace, policyName)
 	controllerName := netInfo.GetNetworkName() + "-network-controller"
 	var portDir string
 	var ipDir string
@@ -188,7 +188,7 @@ func getStalePolicyData(networkPolicy *knet.NetworkPolicy, peerNamespaces []stri
 	}
 
 	fakeController := getFakeBaseController(netInfo)
-	pgDbIDs := fakeController.getNetworkPolicyPortGroupDbIDs(networkPolicy.Namespace, networkPolicy.Name)
+	pgDbIDs := fakeController.getStaleNetworkPolicyPortGroupDbIDs(networkPolicy.Namespace, networkPolicy.Name)
 	pg := libovsdbutil.BuildPortGroup(
 		pgDbIDs,
 		nil,
@@ -316,7 +316,7 @@ var _ = ginkgo.Describe("OVN Stale NetworkPolicy Operations", func() {
 			localASName, _ := addressset.GetHashNamesForAS(staleAddrSetIDs)
 			peerASName, _ := getNsAddrSetHashNames(namespace2.Name)
 			fakeController := getFakeController(DefaultNetworkControllerName)
-			pgName := fakeController.getNetworkPolicyPGName(networkPolicy.Namespace, networkPolicy.Name)
+			pgName := fakeController.getStaleNetworkPolicyPGName(networkPolicy.Namespace, networkPolicy.Name)
 			initialData := getPolicyData(newNetpolDataParams(networkPolicy).withPeerNamespaces(namespace2.Name))
 			staleACL := initialData[0].(*nbdb.ACL)
 			staleACL.Match = fmt.Sprintf("ip4.dst == {$%s, $%s} && inport == @%s", localASName, peerASName, pgName)

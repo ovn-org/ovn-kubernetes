@@ -222,7 +222,7 @@ func getGressACLs(gressIdx int, peers []knet.NetworkPolicyPeer, policyType knet.
 	params *netpolDataParams) []*nbdb.ACL {
 	namespace := params.networkPolicy.Namespace
 	fakeController := getFakeBaseController(params.netInfo)
-	pgName := fakeController.getNetworkPolicyPGName(namespace, params.networkPolicy.Name)
+	pgName := fakeController.getStaleNetworkPolicyPGName(namespace, params.networkPolicy.Name)
 	controllerName := getNetworkControllerName(params.netInfo.GetNetworkName())
 	shouldBeLogged := params.allowLogSeverity != ""
 	var options map[string]string
@@ -362,7 +362,7 @@ func getPolicyData(params *netpolDataParams) []libovsdbtest.TestData {
 	}
 
 	fakeController := getFakeBaseController(params.netInfo)
-	pgDbIDs := fakeController.getNetworkPolicyPortGroupDbIDs(params.networkPolicy.Namespace, params.networkPolicy.Name)
+	pgDbIDs := fakeController.getStaleNetworkPolicyPortGroupDbIDs(params.networkPolicy.Namespace, params.networkPolicy.Name)
 	pg := libovsdbutil.BuildPortGroup(
 		pgDbIDs,
 		lsps,
