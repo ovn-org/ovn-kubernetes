@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"golang.org/x/exp/constraints"
+	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/cache"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -497,11 +498,13 @@ func IsDefaultEndpointSlice(endpointSlice *discoveryv1.EndpointSlice) bool {
 }
 
 // IsEndpointSliceForNetwork checks if the provided EndpointSlice is meant for the given network
-func IsMirroredEndpointSliceForNetwork(endpointSlice *discoveryv1.EndpointSlice, network string) bool {
+// if types.LabelUserDefinedEndpointSliceNetwork is set it compares it to the network name,
+// otherwise it returns true if the network is the default
+func IsEndpointSliceForNetwork(endpointSlice *discoveryv1.EndpointSlice, network NetInfo) bool {
 	if endpointSliceNetwork, ok := endpointSlice.Labels[types.LabelUserDefinedEndpointSliceNetwork]; ok {
-		return endpointSliceNetwork == network
+		return endpointSliceNetwork == network.GetNetworkName()
 	}
-	return false
+	return network.IsDefault()
 }
 
 func GetDefaultEndpointSlicesEventHandler(handlerFuncs cache.ResourceEventHandlerFuncs) cache.ResourceEventHandler {
@@ -536,9 +539,8 @@ func GetEndpointSlicesEventHandlerForNetwork(handlerFuncs cache.ResourceEventHan
 		filterFunc = func(obj interface{}) bool {
 			if endpointSlice, ok := obj.(*discoveryv1.EndpointSlice); ok {
 				isDefault := IsDefaultEndpointSlice(endpointSlice)
-				isMirror := IsMirrorEndpointSlice(endpointSlice)
-				isForThisNetwork := IsMirroredEndpointSliceForNetwork(endpointSlice, netInfo.GetNetworkName())
-				return !isDefault && isMirror && isForThisNetwork
+				isForThisNetwork := IsEndpointSliceForNetwork(endpointSlice, netInfo)
+				return !isDefault && isForThisNetwork
 			}
 			klog.Errorf("Failed to cast the object to *discovery.EndpointSlice: %v", obj)
 			return true
@@ -589,4 +591,24 @@ func IsUDNEnabledService(key string) bool {
 		}
 	}
 	return false
+}
+
+// ServiceFromEndpointSlice returns the namespaced name of the service that corresponds to the given endpointSlice
+// in the given network
+func ServiceFromEndpointSlice(eps *discovery.EndpointSlice, netInfo NetInfo) (k8stypes.NamespacedName, error) {
+	labelKey := discovery.LabelServiceName
+	if netInfo.IsPrimaryNetwork() {
+		if eps.Labels[types.LabelUserDefinedEndpointSliceNetwork] != netInfo.GetNetworkName() {
+			return k8stypes.NamespacedName{}, fmt.Errorf("endpointslice %s/%s does not belong to %s network", eps.Namespace, eps.Name, netInfo.GetNetworkName())
+		}
+		labelKey = types.LabelUserDefinedServiceName
+	}
+	svcName := eps.Labels[labelKey]
+
+	if svcName == "" {
+		return k8stypes.NamespacedName{}, fmt.Errorf("endpointslice %s/%s: empty value for label %s in network %s",
+			eps.Namespace, eps.Name, labelKey, netInfo.GetNetworkName())
+	}
+
+	return k8stypes.NamespacedName{Namespace: eps.Namespace, Name: svcName}, nil
 }

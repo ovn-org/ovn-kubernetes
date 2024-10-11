@@ -6,6 +6,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/safchain/ethtool"
+	kapi "k8s.io/api/core/v1"
+	discovery "k8s.io/api/discovery/v1"
+	"k8s.io/klog/v2"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
@@ -14,13 +19,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
-	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/apimachinery/pkg/selection"
-
-	"github.com/safchain/ethtool"
-	kapi "k8s.io/api/core/v1"
-	discovery "k8s.io/api/discovery/v1"
-	"k8s.io/klog/v2"
 )
 
 // Gateway responds to Service and Endpoint K8s events
@@ -166,8 +164,12 @@ func (g *gateway) AddEndpointSlice(epSlice *discovery.EndpointSlice) error {
 	var errors []error
 
 	if g.loadBalancerHealthChecker != nil {
-		if err = g.loadBalancerHealthChecker.AddEndpointSlice(epSlice); err != nil {
-			errors = append(errors, err)
+		// Filter out objects without the default serviceName label to exclude mirrored EndpointSlices
+		// Only default EndpointSlices contain the discovery.LabelServiceName label
+		if !util.IsNetworkSegmentationSupportEnabled() || epSlice.Labels[discovery.LabelServiceName] != "" {
+			if err = g.loadBalancerHealthChecker.AddEndpointSlice(epSlice); err != nil {
+				errors = append(errors, err)
+			}
 		}
 	}
 	if g.nodePortWatcher != nil {
@@ -184,8 +186,12 @@ func (g *gateway) UpdateEndpointSlice(oldEpSlice, newEpSlice *discovery.Endpoint
 	var errors []error
 
 	if g.loadBalancerHealthChecker != nil {
-		if err = g.loadBalancerHealthChecker.UpdateEndpointSlice(oldEpSlice, newEpSlice); err != nil {
-			errors = append(errors, err)
+		// Filter out objects without the default serviceName label to exclude mirrored EndpointSlices
+		// Only default EndpointSlices contain the discovery.LabelServiceName label
+		if !util.IsNetworkSegmentationSupportEnabled() || newEpSlice.Labels[discovery.LabelServiceName] != "" {
+			if err = g.loadBalancerHealthChecker.UpdateEndpointSlice(oldEpSlice, newEpSlice); err != nil {
+				errors = append(errors, err)
+			}
 		}
 	}
 	if g.nodePortWatcher != nil {
@@ -202,8 +208,12 @@ func (g *gateway) DeleteEndpointSlice(epSlice *discovery.EndpointSlice) error {
 	var errors []error
 
 	if g.loadBalancerHealthChecker != nil {
-		if err = g.loadBalancerHealthChecker.DeleteEndpointSlice(epSlice); err != nil {
-			errors = append(errors, err)
+		// Filter out objects without the default serviceName label to exclude mirrored EndpointSlices
+		// Only default EndpointSlices contain the discovery.LabelServiceName label
+		if !util.IsNetworkSegmentationSupportEnabled() || epSlice.Labels[discovery.LabelServiceName] != "" {
+			if err = g.loadBalancerHealthChecker.DeleteEndpointSlice(epSlice); err != nil {
+				errors = append(errors, err)
+			}
 		}
 	}
 	if g.nodePortWatcher != nil {
@@ -227,19 +237,6 @@ func (g *gateway) Init(stopChan <-chan struct{}, wg *sync.WaitGroup) error {
 	}
 
 	endpointSlicesRetryFramework := g.newRetryFrameworkNode(factory.EndpointSliceForGatewayType)
-
-	if util.IsNetworkSegmentationSupportEnabled() {
-		// Filter out objects without the default serviceName label to exclude mirrored EndpointSlices
-		// Only default EndpointSlices contain the discovery.LabelServiceName label
-		req, err := labels.NewRequirement(discovery.LabelServiceName, selection.Exists, nil)
-		if err != nil {
-			return err
-		}
-		if _, err = endpointSlicesRetryFramework.WatchResourceFiltered("", labels.NewSelector().Add(*req)); err != nil {
-			return fmt.Errorf("gateway init failed to start watching endpointslices: %v", err)
-		}
-		return nil
-	}
 	if _, err = endpointSlicesRetryFramework.WatchResource(); err != nil {
 		return fmt.Errorf("gateway init failed to start watching endpointslices: %v", err)
 	}
