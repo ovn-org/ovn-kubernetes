@@ -13,14 +13,14 @@ import (
 	"strings"
 	"time"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
-
 	"github.com/urfave/cli/v2"
 	gcfg "gopkg.in/gcfg.v1"
 	lumberjack "gopkg.in/natefinch/lumberjack.v2"
+	"k8s.io/apimachinery/pkg/api/validation"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
-
 	kexec "k8s.io/utils/exec"
 	utilnet "k8s.io/utils/net"
 
@@ -60,20 +60,20 @@ var (
 
 	// Default holds parsed config file parameters and command-line overrides
 	Default = DefaultConfig{
-		MTU:                       1400,
-		ConntrackZone:             64000,
-		EncapType:                 "geneve",
-		EncapIP:                   "",
-		EncapPort:                 DefaultEncapPort,
-		InactivityProbe:           100000, // in Milliseconds
-		OpenFlowProbe:             180,    // in Seconds
-		OfctrlWaitBeforeClear:     0,      // in Milliseconds
-		MonitorAll:                true,
-		OVSDBTxnTimeout:           DefaultDBTxnTimeout,
-		LFlowCacheEnable:          true,
-		RawClusterSubnets:         "10.128.0.0/14/23",
-		Zone:                      types.OvnDefaultZone,
-		UDNAllowedDefaultServices: *cli.NewStringSlice("default/kubernetes", "kube-system/kube-dns"),
+		MTU:                          1400,
+		ConntrackZone:                64000,
+		EncapType:                    "geneve",
+		EncapIP:                      "",
+		EncapPort:                    DefaultEncapPort,
+		InactivityProbe:              100000, // in Milliseconds
+		OpenFlowProbe:                180,    // in Seconds
+		OfctrlWaitBeforeClear:        0,      // in Milliseconds
+		MonitorAll:                   true,
+		OVSDBTxnTimeout:              DefaultDBTxnTimeout,
+		LFlowCacheEnable:             true,
+		RawClusterSubnets:            "10.128.0.0/14/23",
+		Zone:                         types.OvnDefaultZone,
+		RawUDNAllowedDefaultServices: "default/kubernetes,kube-system/kube-dns",
 	}
 
 	// Logging holds logging-related parsed config file parameters and command-line overrides
@@ -283,9 +283,13 @@ type DefaultConfig struct {
 	// Zone name to which ovnkube-node/ovnkube-controller belongs to
 	Zone string `gcfg:"zone"`
 
+	// RawUDNAllowedDefaultServices holds the unparsed UDNAllowedDefaultServices. Should only be
+	// used inside config module.
+	RawUDNAllowedDefaultServices string `gcfg:"udn-allowed-default-services"`
+
 	// UDNAllowedDefaultServices holds a list of namespaced names of
 	// default cluster network services accessible from primary user-defined networks
-	UDNAllowedDefaultServices cli.StringSlice `gcfg:"udn-allowed-default-services"`
+	UDNAllowedDefaultServices []string
 }
 
 // LoggingConfig holds logging-related parsed config file parameters and command-line overrides
@@ -929,13 +933,13 @@ var CommonFlags = []cli.Flag{
 		Value:       Default.Zone,
 		Destination: &cliConfig.Default.Zone,
 	},
-	&cli.StringSliceFlag{
+	&cli.StringFlag{
 		Name: "udn-allowed-default-services",
 		Usage: "a list of namespaced names of default cluster network services accessible from primary" +
 			"user-defined networks. If not specified defaults to [\"default/kubernetes\", \"kube-system/kube-dns\"]." +
 			"Only used when enable-network-segmentation is set",
-		Value:       &Default.UDNAllowedDefaultServices,
-		Destination: &cliConfig.Default.UDNAllowedDefaultServices,
+		Value:       Default.RawUDNAllowedDefaultServices,
+		Destination: &cliConfig.Default.RawUDNAllowedDefaultServices,
 	},
 }
 
@@ -2133,11 +2137,37 @@ func completeDefaultConfig(allSubnets *ConfigSubnets) error {
 		allSubnets.Append(ConfigSubnetCluster, subnet.CIDR)
 	}
 
+	Default.UDNAllowedDefaultServices, err = parseServicesNamespacedNames(Default.RawUDNAllowedDefaultServices)
+	if err != nil {
+		return fmt.Errorf("UDN allowed services field is invalid: %v", err)
+	}
+
 	Default.HostMasqConntrackZone = Default.ConntrackZone + 1
 	Default.OVNMasqConntrackZone = Default.ConntrackZone + 2
 	Default.HostNodePortConntrackZone = Default.ConntrackZone + 3
 	Default.ReassemblyConntrackZone = Default.ConntrackZone + 4
 	return nil
+}
+
+// parseServicesNamespacedNames splits the input string by `,` and returns a slice
+// of keys that were verified to be a valid namespaced service name. It ignores spaces between the elements.
+func parseServicesNamespacedNames(servicesRaw string) ([]string, error) {
+	var services []string
+	for _, udnEnabledSVC := range strings.Split(servicesRaw, ",") {
+		svcKey := strings.TrimSpace(udnEnabledSVC)
+		namespace, name, err := cache.SplitMetaNamespaceKey(strings.TrimSpace(svcKey))
+		if namespace == "" {
+			return nil, fmt.Errorf("UDN enabled service %q no namespace set: %v", svcKey, err)
+		}
+		if errs := validation.ValidateNamespaceName(namespace, false); len(errs) != 0 {
+			return nil, fmt.Errorf("UDN enabled service %q has an invalid namespace: %v", svcKey, err)
+		}
+		if errs := validation.NameIsDNSSubdomain(name, false); len(errs) != 0 {
+			return nil, fmt.Errorf("UDN enabled service %q has an invalid name: %v", svcKey, err)
+		}
+		services = append(services, svcKey)
+	}
+	return services, nil
 }
 
 // getConfigFilePath returns config file path and 'true' if the config file is

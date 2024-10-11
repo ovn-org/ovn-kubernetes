@@ -9,10 +9,11 @@ import (
 	"testing"
 	"time"
 
-	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/urfave/cli/v2"
 	kexec "k8s.io/utils/exec"
+
+	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
 	. "github.com/onsi/ginkgo"
 	"github.com/onsi/gomega"
@@ -1603,6 +1604,45 @@ foo=bar
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	})
 
+	It("rejects a config with invalid udn allowed services", func() {
+		err := ioutil.WriteFile(cfgFile.Name(), []byte(`[default]
+udn-allowed-default-services=namespace/invalid.name,test
+`), 0o644)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+		app.Action = func(ctx *cli.Context) error {
+			_, err = InitConfig(ctx, kexec.New(), nil)
+			gomega.Expect(err).To(gomega.HaveOccurred())
+
+			return nil
+		}
+		cliArgs := []string{
+			app.Name,
+			"-config-file=" + cfgFile.Name(),
+		}
+		err = app.Run(cliArgs)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	})
+
+	It("accepts a config with valid udn allowed services", func() {
+		err := ioutil.WriteFile(cfgFile.Name(), []byte(`[default]
+udn-allowed-default-services= ns/svc, ns1/svc1 
+`), 0o644)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+		app.Action = func(ctx *cli.Context) error {
+			_, err = InitConfig(ctx, kexec.New(), nil)
+			gomega.Expect(err).ToNot(gomega.HaveOccurred())
+			gomega.Expect(Default.UDNAllowedDefaultServices).To(gomega.HaveLen(2))
+			return nil
+		}
+		cliArgs := []string{
+			app.Name,
+			"-config-file=" + cfgFile.Name(),
+		}
+		err = app.Run(cliArgs)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	})
 	Describe("OvnDBAuth operations", func() {
 		var certFile, keyFile, caFile string
 
