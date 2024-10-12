@@ -1,6 +1,7 @@
 package ops
 
 import (
+	"context"
 	"reflect"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
@@ -8,6 +9,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 )
 
 func equalsMeterBand(a, b *nbdb.MeterBand) bool {
@@ -17,31 +19,47 @@ func equalsMeterBand(a, b *nbdb.MeterBand) bool {
 		reflect.DeepEqual(a.ExternalIDs, b.ExternalIDs)
 }
 
-// CreateMeterBandOps creates the provided meter band if it does not exist
-func CreateMeterBandOps(nbClient libovsdbclient.Client, ops []ovsdb.Operation, meterBand *nbdb.MeterBand) ([]ovsdb.Operation, error) {
-	bands := []*nbdb.MeterBand{}
-	opModel := operationModel{
-		Model:          meterBand,
-		ModelPredicate: func(item *nbdb.MeterBand) bool { return equalsMeterBand(item, meterBand) },
-		OnModelUpdates: onModelUpdatesNone(),
-		ExistingResult: &bands,
-		DoAfter: func() {
-			// in case we have multiple equal bands, pick the first one for
-			// convergence, OVSDB will remove unreferenced ones
-			if len(bands) > 0 {
-				uuids := sets.NewString()
-				for _, band := range bands {
-					uuids.Insert(band.UUID)
+// CreateOrUpdateMeterBandOps creates or updates the provided meter bands
+func CreateOrUpdateMeterBandOps(nbClient libovsdbclient.Client, ops []ovsdb.Operation, meterBands []*nbdb.MeterBand) ([]ovsdb.Operation, error) {
+	opModels := make([]operationModel, 0, len(meterBands))
+	for i := range meterBands {
+		meterBand := meterBands[i]
+		bands := []*nbdb.MeterBand{}
+		opModel := operationModel{
+			Model:          meterBand,
+			ModelPredicate: func(item *nbdb.MeterBand) bool { return equalsMeterBand(item, meterBand) },
+			OnModelUpdates: onModelUpdatesAllNonDefault(),
+			ExistingResult: &bands,
+			DoAfter: func() {
+				// in case we have multiple equal bands, pick the first one for
+				// convergence, OVSDB will remove unreferenced ones
+				if len(bands) > 0 {
+					uuids := sets.NewString()
+					for _, band := range bands {
+						uuids.Insert(band.UUID)
+					}
+					meterBand.UUID = uuids.List()[0]
 				}
-				meterBand.UUID = uuids.List()[0]
-			}
-		},
-		ErrNotFound: false,
-		BulkOp:      true,
+			},
+			ErrNotFound: false,
+			BulkOp:      true,
+		}
+		opModels = append(opModels, opModel)
 	}
 
 	m := newModelClient(nbClient)
-	return m.CreateOrUpdateOps(ops, opModel)
+	return m.CreateOrUpdateOps(ops, opModels...)
+}
+
+type MeterBandPredicate func(*nbdb.MeterBand) bool
+
+// FindBFDWithPredicate looks up MeterBands from the cache based on a given predicate
+func FindMeterBandWithPredicate(nbClient libovsdbclient.Client, p MeterBandPredicate) ([]*nbdb.MeterBand, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	defer cancel()
+	found := []*nbdb.MeterBand{}
+	err := nbClient.WhereCache(p).List(ctx, &found)
+	return found, err
 }
 
 // CreateOrUpdateMeterOps creates or updates the provided meter associated to
