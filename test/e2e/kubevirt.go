@@ -1212,7 +1212,7 @@ passwd:
 						}, butane)
 					Expect(err).ToNot(HaveOccurred())
 					vm.Spec.Template.Spec.Domain.Devices.Interfaces[0].Bridge = nil
-					vm.Spec.Template.Spec.Domain.Devices.Interfaces[0].Binding = &kubevirtv1.PluginBinding{Name: "passt"}
+					vm.Spec.Template.Spec.Domain.Devices.Interfaces[0].Binding = &kubevirtv1.PluginBinding{Name: "managedTap"}
 					createVirtualMachine(vm)
 					return vm.Name
 				},
@@ -1243,7 +1243,7 @@ passwd:
 						}, butane)
 					Expect(err).ToNot(HaveOccurred())
 					vmi.Spec.Domain.Devices.Interfaces[0].Bridge = nil
-					vmi.Spec.Domain.Devices.Interfaces[0].Binding = &kubevirtv1.PluginBinding{Name: "passt"}
+					vmi.Spec.Domain.Devices.Interfaces[0].Binding = &kubevirtv1.PluginBinding{Name: "managedTap"}
 					createVirtualMachineInstance(vmi)
 					return vmi.Name
 				},
@@ -1328,11 +1328,7 @@ passwd:
 
 			step := by(vmi.Name, "Login to virtual machine for the first time")
 			Eventually(func() error {
-				if td.role != "primary" {
-					return kubevirt.LoginToFedora(vmi, "core", "fedora")
-				} else {
-					return kubevirt.LoginToFedoraWithHostname(vmi, "core", "fedora", "localhost")
-				}
+				return kubevirt.LoginToFedora(vmi, "core", "fedora")
 			}).
 				WithTimeout(5*time.Second).
 				WithPolling(time.Second).
@@ -1361,11 +1357,7 @@ passwd:
 			td.test.cmd()
 
 			step = by(vm.Name, fmt.Sprintf("Login to virtual machine after %s %s", td.resource.description, td.test.description))
-			if td.role != "primary" {
-				Expect(kubevirt.LoginToFedora(vmi, "core", "fedora")).To(Succeed(), step)
-			} else {
-				Expect(kubevirt.LoginToFedoraWithHostname(vmi, "core", "fedora", "localhost")).To(Succeed(), step)
-			}
+			Expect(kubevirt.LoginToFedora(vmi, "core", "fedora")).To(Succeed(), step)
 			var obtainedAddresses []string
 
 			if td.role != "primary" { // expect 2 addresses on dual-stack deployments; 1 on single-stack
