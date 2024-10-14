@@ -7,6 +7,7 @@ import (
 	"github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/model"
 	"github.com/ovn-org/libovsdb/ovsdb"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -487,6 +488,64 @@ func buildFailOnDuplicateOps(c client.Client, m model.Model) ([]ovsdb.Operation,
 		Value:    value,
 	}
 	return c.WhereAny(m, cond).Wait(ovsdb.WaitConditionNotEqual, &timeout, m, field)
+}
+
+// ModelUpdateField enumeration represents fields that can be updated on the supported models
+type ModelUpdateField int
+
+const (
+	LogicalSwitchPortAddresses ModelUpdateField = iota
+	LogicalSwitchPortType
+	LogicalSwitchPortTagRequest
+	LogicalSwitchPortOptions
+	LogicalSwitchPortPortSecurity
+	LogicalSwitchPortEnabled
+
+	PortGroupACLs
+	PortGroupPorts
+	PortGroupExternalIDs
+)
+
+// getFieldsToUpdate gets a model and a list of ModelUpdateField and returns a list of their related interface{} fields.
+func getFieldsToUpdate(model model.Model, fieldNames []ModelUpdateField) []interface{} {
+	var fields []interface{}
+	switch t := model.(type) {
+	case *nbdb.LogicalSwitchPort:
+		for _, field := range fieldNames {
+			switch field {
+			case LogicalSwitchPortAddresses:
+				fields = append(fields, &t.Addresses)
+			case LogicalSwitchPortType:
+				fields = append(fields, &t.Type)
+			case LogicalSwitchPortTagRequest:
+				fields = append(fields, &t.TagRequest)
+			case LogicalSwitchPortOptions:
+				fields = append(fields, &t.Options)
+			case LogicalSwitchPortPortSecurity:
+				fields = append(fields, &t.PortSecurity)
+			case LogicalSwitchPortEnabled:
+				fields = append(fields, &t.Enabled)
+			default:
+				panic(fmt.Sprintf("getFieldsToUpdate: unknown or unsupported field %q for LogicalSwitchPort", field))
+			}
+		}
+	case *nbdb.PortGroup:
+		for _, field := range fieldNames {
+			switch field {
+			case PortGroupACLs:
+				fields = append(fields, &t.ACLs)
+			case PortGroupPorts:
+				fields = append(fields, &t.Ports)
+			case PortGroupExternalIDs:
+				fields = append(fields, &t.ExternalIDs)
+			default:
+				panic(fmt.Sprintf("getFieldsToUpdate: unknown or unsupported field %q for PortGroup", field))
+			}
+		}
+	default:
+		panic(fmt.Sprintf("getFieldsToUpdate: unknown model type %T", t))
+	}
+	return fields
 }
 
 // getAllUpdatableFields returns a list of all of the columns/fields that can be updated for a model
