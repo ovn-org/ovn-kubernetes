@@ -12,6 +12,8 @@ import (
 	"sync"
 	"syscall"
 	"unsafe"
+
+	"k8s.io/klog/v2"
 )
 
 var (
@@ -454,6 +456,7 @@ func SendmsgBuffers(fd int, buffers [][]byte, oob []byte, to Sockaddr, flags int
 	if to != nil {
 		ptr, salen, err = to.sockaddr()
 		if err != nil {
+			klog.Infof("DELETEME, ERROR, to.sockaddr(): %w", err)
 			return 0, err
 		}
 	}

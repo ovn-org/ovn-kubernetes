@@ -2,8 +2,14 @@ package kubevirt
 
 import (
 	"fmt"
+	"net"
+	"net/netip"
+
+	"github.com/mdlayher/ndp"
+	"golang.org/x/net/ipv6"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
 	kubevirtv1 "kubevirt.io/api/core/v1"
@@ -257,4 +263,66 @@ func virtualMachineReady(watchFactory *factory.WatchFactory, pod *corev1.Pod) (b
 
 	// VM is ready to receive traffic
 	return targetNode == pod.Spec.NodeName || targetReadyTimestamp != "", nil
+}
+
+func FlushInvalidLayer2Gateways(watchFactory *factory.WatchFactory, pod *corev1.Pod, netInfo util.NetInfo, ifaceName string) error {
+	nodes, err := watchFactory.GetNodes()
+	if err != nil {
+		return err
+	}
+	for _, node := range nodes {
+		if node.Name == pod.Spec.NodeName {
+			continue
+		}
+		lrpAddress, err := util.ParseNodeGatewayRouterJoinNetwork(node, netInfo.GetNetworkName())
+		if err != nil {
+			return err
+		}
+		if lrpAddress.IPv6 == "" {
+			continue
+		}
+		podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations, netInfo.GetNADs()[0])
+		if err != nil {
+			return err
+		}
+		//TODO: Support ipv6 single stack (mac is generated with ipv6)
+		// LRP's mac is calcualted from the join subnet IPv4
+		raSrcMAC := util.IPAddrToHWAddr(net.ParseIP(lrpAddress.IPv4))
+		raSrcIP := util.HWAddrToIPv6LLA(raSrcMAC)
+		raDstMAC := podAnnotation.MAC
+		raDstIP := util.HWAddrToIPv6LLA(raDstMAC)
+		raDstAddr, ok := netip.AddrFromSlice(raDstIP)
+		if !ok {
+			fmt.Errorf("bad RA destination ip: %s", raDstIP.String())
+		}
+		flushGatewayRA := ndp.RouterAdvertisement{
+			RouterLifetime:  0,
+			ReachableTime:   0,
+			RetransmitTimer: 0,
+			Options: []ndp.Option{
+				&ndp.LinkLayerAddress{
+					Direction: ndp.Source,
+					Addr:      raSrcMAC,
+				},
+				&ndp.LinkLayerAddress{
+					Direction: ndp.Target,
+					Addr:      raDstMAC,
+				},
+			},
+		}
+		iface, err := net.InterfaceByName(ifaceName)
+		if err != nil {
+			return err
+		}
+		klog.Infof("DELETEME, Sending RA to flush gateway %s", raSrcIP.String())
+		c, _, err := ndp.Listen(iface, ndp.LinkLocal)
+		if err != nil {
+			return err
+		}
+		defer c.Close()
+		if err := c.WriteTo(&flushGatewayRA, &ipv6.ControlMessage{Src: raSrcIP, Dst: raDstIP}, raDstAddr); err != nil {
+			return err
+		}
+	}
+	return nil
 }
