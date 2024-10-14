@@ -1,9 +1,18 @@
 package kubevirt
 
 import (
+	"context"
 	"fmt"
+	"net"
+	"syscall"
+
+	"github.com/google/gopacket"
+	"github.com/google/gopacket/layers"
+	"github.com/mdlayher/socket"
+	"golang.org/x/sys/unix"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
 	kubevirtv1 "kubevirt.io/api/core/v1"
@@ -257,4 +266,104 @@ func virtualMachineReady(watchFactory *factory.WatchFactory, pod *corev1.Pod) (b
 
 	// VM is ready to receive traffic
 	return targetNode == pod.Spec.NodeName || targetReadyTimestamp != "", nil
+}
+
+func ReconcileLayer2Gateways(watchFactory *factory.WatchFactory, pod *corev1.Pod, netInfo util.NetInfo, ifaceName string) error {
+	klog.Infof("DELETEME, ReconcileLayer2Gateways")
+	podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations, netInfo.GetNADs()[0])
+	if err != nil {
+		return err
+	}
+	raDstMAC := podAnnotation.MAC
+	raDstIP := util.HWAddrToIPv6LLA(raDstMAC)
+	nodes, err := watchFactory.GetNodes()
+	if err != nil {
+		return err
+	}
+	c, err := socket.Socket(syscall.AF_PACKET, syscall.SOCK_RAW, syscall.ETH_P_ALL, "ra", nil)
+	if err != nil {
+		return err
+	}
+	iface, err := net.InterfaceByName(ifaceName)
+	if err != nil {
+		return err
+	}
+	addr := unix.SockaddrLinklayer{
+		Ifindex: iface.Index,
+	}
+	klog.Infof("DELETEME, ReconcileLayer2Gateways, nodes: %+v", nodes)
+	for _, node := range nodes {
+		lifetime := uint16(0)
+		if node.Name == pod.Spec.NodeName {
+			lifetime = 65535
+		}
+		lrpAddress, err := util.ParseNodeGatewayRouterJoinNetwork(node, netInfo.GetNetworkName())
+		if err != nil {
+			return err
+		}
+		if lrpAddress.IPv6 == "" {
+			continue
+		}
+
+		//TODO: Support ipv6 single stack (mac is generated with ipv6)
+		// LRP's mac is calcualted from the join subnet IPv4
+		lrpAddressIPv4, _, err := net.ParseCIDR(lrpAddress.IPv4)
+		if err != nil {
+			return err
+		}
+		raSrcMAC := util.IPAddrToHWAddr(lrpAddressIPv4)
+		raSrcIP := util.HWAddrToIPv6LLA(raSrcMAC)
+		raBytes, err := generateRA(raSrcMAC, raDstMAC, raSrcIP, raDstIP, lifetime)
+		if err != nil {
+			return err
+		}
+		klog.Infof("DELETEME, ReconcileLayer2Gateways, node: %s, lrpAddress: %+v, %s: %s", node.Name, lrpAddress, raSrcMAC.String(), raSrcIP.String())
+		if err := c.Sendto(context.Background(), raBytes, 0, &addr); err != nil {
+			return err
+		}
+		klog.Infof("DELETEME, ReconcileLayer2Gateways, Flushed node: %s, lrpAddress: %+v, %s: %s", node.Name, lrpAddress, raSrcMAC.String(), raSrcIP.String())
+	}
+	return nil
+}
+
+func generateRA(srcMAC, dstMAC net.HardwareAddr, srcIP, dstIP net.IP, lifetime uint16) ([]byte, error) {
+	ethernetLayer := layers.Ethernet{
+		DstMAC:       dstMAC,
+		SrcMAC:       srcMAC,
+		EthernetType: layers.EthernetTypeIPv6,
+	}
+	ip6Layer := layers.IPv6{
+		Version:    6,
+		NextHeader: layers.IPProtocolICMPv6,
+		HopLimit:   255,
+		SrcIP:      srcIP,
+		DstIP:      dstIP,
+	}
+	icmp6Layer := layers.ICMPv6{
+		TypeCode: layers.CreateICMPv6TypeCode(layers.ICMPv6TypeRouterAdvertisement, 0),
+	}
+	icmp6Layer.SetNetworkLayerForChecksum(&ip6Layer)
+	managedAddressFlag := uint8(0x80)
+	defaultRoutePreferenceFlag := uint8(0x08)
+	raLayer := layers.ICMPv6RouterAdvertisement{
+		HopLimit:       255,
+		Flags:          managedAddressFlag | defaultRoutePreferenceFlag,
+		RouterLifetime: lifetime,
+		ReachableTime:  0,
+		RetransTimer:   0,
+		Options: layers.ICMPv6Options{{
+			Type: layers.ICMPv6OptSourceAddress,
+			Data: srcMAC,
+		}},
+	}
+	serializeBuffer := gopacket.NewSerializeBuffer()
+	if err := gopacket.SerializeLayers(serializeBuffer, gopacket.SerializeOptions{ComputeChecksums: true, FixLengths: true},
+		&ethernetLayer,
+		&ip6Layer,
+		&icmp6Layer,
+		&raLayer,
+	); err != nil {
+		return nil, err
+	}
+	return serializeBuffer.Bytes(), nil
 }

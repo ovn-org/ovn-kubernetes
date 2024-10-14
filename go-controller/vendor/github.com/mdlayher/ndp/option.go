@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"net/netip"
 	"net/url"
@@ -40,8 +41,10 @@ const (
 	optNonce             = 14
 	optRouteInformation  = 24
 	optRDNSS             = 25
+	optRAFlagsExtension  = 26
 	optDNSSL             = 31
 	optCaptivePortal     = 37
+	optPREF64            = 38
 )
 
 // A Direction specifies the direction of a LinkLayerAddress Option as a source
@@ -766,6 +769,185 @@ func (cp *CaptivePortal) unmarshal(b []byte) error {
 	return nil
 }
 
+// PREF64 is a PREF64 option, as described in RFC 8781, Section 4. The prefix
+// must have a prefix length of 96, 64, 56, 40, or 32. The lifetime is used to
+// indicate to clients how long the PREF64 prefix is valid for. A lifetime of 0
+// indicates the prefix is no longer valid. If unsure, refer to RFC 8781
+// Section 4.1 for how to calculate an appropriate lifetime.
+type PREF64 struct {
+	Lifetime time.Duration
+	Prefix   netip.Prefix
+}
+
+func (p *PREF64) Code() byte { return optPREF64 }
+
+func (p *PREF64) marshal() ([]byte, error) {
+	var plc uint8
+	switch p.Prefix.Bits() {
+	case 96:
+		plc = 0
+	case 64:
+		plc = 1
+	case 56:
+		plc = 2
+	case 48:
+		plc = 3
+	case 40:
+		plc = 4
+	case 32:
+		plc = 5
+	default:
+		return nil, errors.New("ndp: invalid pref64 prefix size")
+	}
+
+	scaledLifetime := uint16(math.Round(p.Lifetime.Seconds() / 8))
+
+	// The scaled lifetime must be less than the maximum of 8191.
+	if scaledLifetime > 8191 {
+		return nil, errors.New("ndp: pref64 scaled lifetime is too large")
+	}
+
+	value := []byte{}
+
+	// The scaled lifetime and PLC values live within the same 16-bit field.
+	// Here we move the scaled lifetime to the left-most 13 bits and place the
+	// PLC at the last 3 bits of the 16-bit field.
+	value = binary.BigEndian.AppendUint16(
+		value,
+		(scaledLifetime<<3&(0xffff^0b111))|uint16(plc&0b111),
+	)
+
+	allPrefixBits := p.Prefix.Masked().Addr().As16()
+	optionPrefixBits := allPrefixBits[:96/8]
+	value = append(value, optionPrefixBits...)
+
+	raw := &RawOption{
+		Type:   p.Code(),
+		Length: (uint8(len(value)) + 2) / 8,
+		Value:  value,
+	}
+
+	return raw.marshal()
+}
+
+func (p *PREF64) unmarshal(b []byte) error {
+	raw := new(RawOption)
+	if err := raw.unmarshal(b); err != nil {
+		return err
+	}
+
+	if raw.Type != optPREF64 {
+		return errors.New("ndp: invalid pref64 type")
+	}
+
+	if len(raw.Value) != (96/8)+2 {
+		return errors.New("ndp: invalid pref64 message length")
+	}
+
+	lifetimeAndPlc := binary.BigEndian.Uint16(raw.Value[:2])
+	plc := uint8(lifetimeAndPlc & 0b111)
+
+	var prefixSize int
+	switch plc {
+	case 0:
+		prefixSize = 96
+	case 1:
+		prefixSize = 64
+	case 2:
+		prefixSize = 56
+	case 3:
+		prefixSize = 48
+	case 4:
+		prefixSize = 40
+	case 5:
+		prefixSize = 32
+	default:
+		return errors.New("ndp: invalid pref64 prefix length code")
+	}
+
+	addr := [16]byte{}
+	copy(addr[:], raw.Value[2:])
+	prefix, err := netip.AddrFrom16(addr).Prefix(int(prefixSize))
+	if err != nil {
+		return err
+	}
+
+	scaledLifetime := (lifetimeAndPlc & (0xffff ^ 0b111)) >> 3
+	lifetime := time.Duration(scaledLifetime) * 8 * time.Second
+
+	*p = PREF64{
+		Lifetime: lifetime,
+		Prefix:   prefix,
+	}
+
+	return nil
+}
+
+// A RAFlagsExtension is a Router Advertisement Flags Extension (or Expansion)
+// option, as described in RFC 5175, Section 4.
+type RAFlagsExtension struct {
+	Flags RAFlags
+}
+
+// RAFlags is a bitmask of Router Advertisement flags contained within an
+// RAFlagsExtension.
+type RAFlags []byte
+
+// Code implements Option.
+func (*RAFlagsExtension) Code() byte { return optRAFlagsExtension }
+
+func (ra *RAFlagsExtension) marshal() ([]byte, error) {
+	// "MUST NOT be added to a Router Advertisement message if no flags in the
+	// option are set."
+	//
+	// TODO(mdlayher): replace with slices.IndexFunc when we raise the minimum
+	// Go version.
+	var found bool
+	for _, b := range ra.Flags {
+		if b != 0x00 {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return nil, errors.New("ndp: RA flags extension requires one or more flags to be set")
+	}
+
+	// Enforce the option size matches the next unit of 8 bytes including 2
+	// bytes for code and length.
+	l := len(ra.Flags)
+	if r := (l + 2) % 8; r != 0 {
+		return nil, errors.New("ndp: RA flags extension length is invalid")
+	}
+
+	value := make([]byte, l)
+	copy(value, ra.Flags)
+
+	raw := &RawOption{
+		Type:   ra.Code(),
+		Length: (uint8(l) + 2) / 8,
+		Value:  value,
+	}
+
+	return raw.marshal()
+}
+
+func (ra *RAFlagsExtension) unmarshal(b []byte) error {
+	raw := new(RawOption)
+	if err := raw.unmarshal(b); err != nil {
+		return err
+	}
+
+	// Don't allow short bytes.
+	if len(raw.Value) < 6 {
+		return errors.New("ndp: RA Flags Extension too short")
+	}
+
+	// raw already made a copy.
+	ra.Flags = raw.Value
+	return nil
+}
+
 // A Nonce is a Nonce option, as described in RFC 3971, Section 5.3.2.
 type Nonce struct {
 	b []byte
@@ -926,10 +1108,14 @@ func parseOptions(b []byte) ([]Option, error) {
 			o = new(RouteInformation)
 		case optRDNSS:
 			o = new(RecursiveDNSServer)
+		case optRAFlagsExtension:
+			o = new(RAFlagsExtension)
 		case optDNSSL:
 			o = new(DNSSearchList)
 		case optCaptivePortal:
 			o = new(CaptivePortal)
+		case optPREF64:
+			o = new(PREF64)
 		case optNonce:
 			o = new(Nonce)
 		default:

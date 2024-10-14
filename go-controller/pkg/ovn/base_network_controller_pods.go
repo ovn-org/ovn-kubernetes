@@ -602,9 +602,13 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *kapi.Pod, nadName
 			// it to disable the LSP, let's just do it here at the same operation
 			if kubevirtLiveMigrationStatus.State == kubevirt.LiveMigrationTargetDomainReady {
 				sourcePodLSP := &nbdb.LogicalSwitchPort{
-					Name:    bnc.GetLogicalPortName(kubevirtLiveMigrationStatus.SourcePod, nadName),
-					Enabled: ptr.To(false),
+					Name: bnc.GetLogicalPortName(kubevirtLiveMigrationStatus.SourcePod, nadName),
 				}
+				sourcePodLSP, err = libovsdbops.GetLogicalSwitchPort(bnc.nbClient, sourcePodLSP)
+				if err != nil {
+					return nil, nil, nil, false, err
+				}
+				sourcePodLSP.Enabled = ptr.To(false)
 				lsps = append(lsps, sourcePodLSP)
 				klog.Infof("DELETEME, source.pod: %s, source.enabled: %t", kubevirtLiveMigrationStatus.SourcePod.Name, *sourcePodLSP.Enabled)
 			}

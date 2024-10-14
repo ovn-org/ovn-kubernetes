@@ -14,6 +14,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/generator/udn"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kubevirt"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
@@ -181,6 +182,19 @@ func (h *secondaryLayer2NetworkControllerEventHandler) UpdateResource(oldObj, ne
 			_, syncZoneIC := h.oc.syncZoneICFailed.Load(newNode.Name)
 			return h.oc.addUpdateRemoteNodeEvent(newNode, syncZoneIC)
 		}
+	case factory.PodType:
+		if err := h.oc.UpdateSecondaryNetworkResourceCommon(h.objType, oldObj, newObj, inRetryCache); err != nil {
+			return err
+		}
+		newPod, ok := newObj.(*corev1.Pod)
+		if !ok {
+			return fmt.Errorf("could not cast %T object to Pod", newObj)
+		}
+		oldPod, ok := oldObj.(*kapi.Pod)
+		if !ok {
+			return fmt.Errorf("could not cast oldObj of type %T to *kapi.Pod", oldObj)
+		}
+		return h.oc.updatePod(newPod, oldPod)
 	default:
 		return h.oc.UpdateSecondaryNetworkResourceCommon(h.objType, oldObj, newObj, inRetryCache)
 	}
@@ -792,5 +806,31 @@ func (oc *SecondaryLayer2NetworkController) StartServiceController(wg *sync.Wait
 			klog.Errorf("Error running OVN Kubernetes Services controller for network %s: %v", oc.GetNetworkName(), err)
 		}
 	}()
+	return nil
+}
+
+func (oc *SecondaryLayer2NetworkController) updatePod(oldPod, newPod *corev1.Pod) error {
+	if !oc.isPodScheduledinLocalZone(newPod) || !kubevirt.IsPodOwnedByVirtualMachine(newPod) || !oc.isAllowedForMigration() {
+		return nil
+	}
+
+	kubevirtLiveMigrationStatus, err := kubevirt.DiscoverLiveMigrationStatus(oc.watchFactory, newPod)
+	if err != nil {
+		return err
+	}
+	if kubevirtLiveMigrationStatus == nil || newPod.Name != kubevirtLiveMigrationStatus.TargetPod.Name {
+		return nil
+	}
+
+	if kubevirtLiveMigrationStatus.State != kubevirt.LiveMigrationTargetDomainReady {
+		return nil
+	}
+	networkID, err := oc.getNetworkID()
+	if err != nil {
+		return err
+	}
+	if err := kubevirt.ReconcileLayer2Gateways(oc.watchFactory, newPod, oc.NetInfo, util.GetNetworkScopedK8sMgmtHostIntfName(uint(networkID))); err != nil {
+		return err
+	}
 	return nil
 }

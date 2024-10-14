@@ -4,6 +4,7 @@
 package packet
 
 import (
+	"context"
 	"encoding/binary"
 	"errors"
 	"math"
@@ -29,7 +30,7 @@ func (c *Conn) readFrom(b []byte) (int, net.Addr, error) {
 	//
 	// c.opError will return nil if no error, but either way we return all the
 	// information that we have.
-	n, sa, err := c.c.Recvfrom(b, 0)
+	n, sa, err := c.c.Recvfrom(context.Background(), b, 0)
 	return n, fromSockaddr(sa), c.opError(opRead, err)
 }
 
@@ -42,7 +43,7 @@ func (c *Conn) writeTo(b []byte, addr net.Addr) (int, error) {
 
 	// TODO(mdlayher): it's curious that unix.Sendto does not return the number
 	// of bytes actually sent. Fake it for now, but investigate upstream.
-	if err := c.c.Sendto(b, sa, 0); err != nil {
+	if err := c.c.Sendto(context.Background(), b, 0, sa); err != nil {
 		return 0, c.opError(opWrite, err)
 	}
 
@@ -75,7 +76,7 @@ func (c *Conn) stats() (*Stats, error) {
 	)
 
 	// Try to fetch V3 statistics first, they contain more detailed information.
-	if stats, err := c.c.GetSockoptTpacketStatsV3(level, name); err == nil {
+	if stats, err := c.c.GetsockoptTpacketStatsV3(level, name); err == nil {
 		return &Stats{
 			Packets:          stats.Packets,
 			Drops:            stats.Drops,
@@ -84,7 +85,7 @@ func (c *Conn) stats() (*Stats, error) {
 	}
 
 	// There was an error fetching v3 stats, try to fall back.
-	stats, err := c.c.GetSockoptTpacketStats(level, name)
+	stats, err := c.c.GetsockoptTpacketStats(level, name)
 	if err != nil {
 		return nil, c.opError(opGetsockopt, err)
 	}

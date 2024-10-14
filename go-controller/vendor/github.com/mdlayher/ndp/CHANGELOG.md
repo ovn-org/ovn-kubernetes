@@ -1,5 +1,12 @@
 # CHANGELOG
 
+# v1.1.0
+
+- [Improvement]: updated dependencies, test with Go 1.22.
+- [New API] [PR](https://github.com/mdlayher/ndp/pull/31): `ndp.PREF64`
+  implements the PREF64 option as defined in RFC 8781. Thanks @jmbaur for the
+  contribution.
+
 # v1.0.1
 
 - [Improvement]: updated dependencies, test with Go 1.20.

@@ -8,11 +8,13 @@ Licensed.
 See the [CHANGELOG](./CHANGELOG.md) file for a description of changes between
 releases.
 
-In order to reduce the maintenance burden, this package is only supported on
-Go 1.12+. Older versions of Go lack critical features and APIs which are
-necessary for this package to function correctly.
+This package has a stable v1 API and any future breaking changes will prompt
+the release of a new major version. Features and bug fixes will continue to
+occur in the v1.x.x series.
 
-**If you depend on this package in your applications, please use Go modules.**
+This package only supports the two most recent major versions of Go, mirroring
+Go's own release policy. Older versions of Go may lack critical features and bug
+fixes which are necessary for this package to function correctly.
 
 ## History
 
