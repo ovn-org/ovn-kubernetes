@@ -607,7 +607,7 @@ func restartOVNKubeNodePod(clientset kubernetes.Interface, namespace string, nod
 	}
 
 	framework.Logf("waiting for node %s to have running ovnkube-node pod", nodeName)
-	wait.Poll(2*time.Second, 5*time.Minute, func() (bool, error) {
+	err = wait.Poll(2*time.Second, 3*time.Minute, func() (bool, error) {
 		ovnKubeNodePods, err := clientset.CoreV1().Pods(namespace).List(context.TODO(), metav1.ListOptions{
 			LabelSelector: "name=ovnkube-node",
 			FieldSelector: "spec.nodeName=" + nodeName,
@@ -629,7 +629,7 @@ func restartOVNKubeNodePod(clientset kubernetes.Interface, namespace string, nod
 		return true, nil
 	})
 
-	return nil
+	return err
 }
 
 // restartOVNKubeNodePodsInParallel restarts multiple ovnkube-node pods in parallel. See `restartOVNKubeNodePod`
@@ -986,7 +986,10 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 			}
 
 			// restart ovnkube-node pod to trigger mtu validation
-			if err := restartOVNKubeNodePod(f.ClientSet, ovnNamespace, testNodeName); err != nil {
+			if err := restartOVNKubeNodePod(f.ClientSet, ovnNamespace, testNodeName); err == nil || err != wait.ErrWaitTimeout {
+				if err == nil {
+					framework.Failf("ovnkube-node pod restarted correctly, but wasn't supposed to: %s", err)
+				}
 				framework.Failf("could not restart ovnkube-node pod: %s", err)
 			}
 			node, err := f.ClientSet.CoreV1().Nodes().Get(context.TODO(), testNodeName, metav1.GetOptions{ResourceVersion: "0"})
