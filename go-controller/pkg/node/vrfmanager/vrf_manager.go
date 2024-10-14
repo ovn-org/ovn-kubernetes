@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/containernetworking/plugins/pkg/ns"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -269,6 +270,26 @@ func (vrfm *Controller) AddVRF(name string, slaveInterface string, table uint32,
 	} else if err != nil {
 		return fmt.Errorf("failed to retrieve VRF device %s, err: %v", name, err)
 	}
+
+	return vrfm.sync(vrfDev)
+}
+
+// AddVRFRoutes adds routes to the specified VRF
+func (vrfm *Controller) AddVRFRoutes(name string, routes []netlink.Route) error {
+	vrfm.mu.Lock()
+	defer vrfm.mu.Unlock()
+
+	vrfLink, err := util.GetNetLinkOps().LinkByName(name)
+	if err != nil {
+		return fmt.Errorf("failed to retrieve VRF device %s, err: %v", name, err)
+	}
+
+	vrfDev, ok := vrfm.vrfs[vrfLink.Attrs().Index]
+	if !ok {
+		return fmt.Errorf("failed to find VRF %s", name)
+	}
+
+	vrfDev.routes = append(vrfDev.routes, routes...)
 
 	return vrfm.sync(vrfDev)
 }
