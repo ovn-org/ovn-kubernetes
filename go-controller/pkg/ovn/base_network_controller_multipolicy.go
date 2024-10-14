@@ -11,7 +11,10 @@ import (
 	"k8s.io/klog/v2"
 )
 
-const PolicyForAnnotation = "k8s.v1.cni.cncf.io/policy-for"
+const (
+	PolicyForAnnotation = "k8s.v1.cni.cncf.io/policy-for"
+	MultiNetPolicyLabel = "multinet-policy"
+)
 
 func (bsnc *BaseSecondaryNetworkController) syncMultiNetworkPolicies(multiPolicies []interface{}) error {
 	expectedPolicies := make(map[string]map[string]bool)
@@ -68,6 +71,7 @@ func convertMultiNetPolicyToNetPolicy(mpolicy *mnpapi.MultiNetworkPolicy, allowP
 	policy.Namespace = mpolicy.Namespace
 	policy.Spec.PodSelector = mpolicy.Spec.PodSelector
 	policy.Annotations = mpolicy.Annotations
+	policy.Labels = map[string]string{MultiNetPolicyLabel: ""}
 	policy.Spec.Ingress = make([]knet.NetworkPolicyIngressRule, len(mpolicy.Spec.Ingress))
 	for i, mingress := range mpolicy.Spec.Ingress {
 		var ingress knet.NetworkPolicyIngressRule

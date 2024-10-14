@@ -18,7 +18,7 @@ var _ = Describe("convertMultiNetPolicyToNetPolicy", func() {
 		Expect(convertMultiNetPolicyToNetPolicy(multiNetPolicyWithIngressNamespaceSelector(policyName), allowPeerSelectors)).To(
 			Equal(
 				&netv1.NetworkPolicy{
-					ObjectMeta: metav1.ObjectMeta{Name: policyName},
+					ObjectMeta: metav1.ObjectMeta{Name: policyName, Labels: map[string]string{MultiNetPolicyLabel: ""}},
 					Spec: netv1.NetworkPolicySpec{
 						Ingress: []netv1.NetworkPolicyIngressRule{
 							{
@@ -37,7 +37,7 @@ var _ = Describe("convertMultiNetPolicyToNetPolicy", func() {
 		Expect(convertMultiNetPolicyToNetPolicy(multiNetPolicyWithEgressNamespaceSelector(policyName), allowPeerSelectors)).To(
 			Equal(
 				&netv1.NetworkPolicy{
-					ObjectMeta: metav1.ObjectMeta{Name: policyName},
+					ObjectMeta: metav1.ObjectMeta{Name: policyName, Labels: map[string]string{MultiNetPolicyLabel: ""}},
 					Spec: netv1.NetworkPolicySpec{
 						Ingress: []netv1.NetworkPolicyIngressRule{},
 						Egress: []netv1.NetworkPolicyEgressRule{
@@ -56,7 +56,7 @@ var _ = Describe("convertMultiNetPolicyToNetPolicy", func() {
 		Expect(convertMultiNetPolicyToNetPolicy(multiNetPolicyWithIngressPodSelector(policyName), allowPeerSelectors)).To(
 			Equal(
 				&netv1.NetworkPolicy{
-					ObjectMeta: metav1.ObjectMeta{Name: policyName},
+					ObjectMeta: metav1.ObjectMeta{Name: policyName, Labels: map[string]string{MultiNetPolicyLabel: ""}},
 					Spec: netv1.NetworkPolicySpec{
 						Ingress: []netv1.NetworkPolicyIngressRule{
 							{
@@ -75,7 +75,7 @@ var _ = Describe("convertMultiNetPolicyToNetPolicy", func() {
 		Expect(convertMultiNetPolicyToNetPolicy(multiNetPolicyWithEgressPodSelector(policyName), allowPeerSelectors)).To(
 			Equal(
 				&netv1.NetworkPolicy{
-					ObjectMeta: metav1.ObjectMeta{Name: policyName},
+					ObjectMeta: metav1.ObjectMeta{Name: policyName, Labels: map[string]string{MultiNetPolicyLabel: ""}},
 					Spec: netv1.NetworkPolicySpec{
 						Ingress: []netv1.NetworkPolicyIngressRule{},
 						Egress: []netv1.NetworkPolicyEgressRule{
@@ -93,6 +93,7 @@ var _ = Describe("convertMultiNetPolicyToNetPolicy", func() {
 		allowPeerSelectors := true
 		Expect(convertMultiNetPolicyToNetPolicy(multiNetPolicyWithIngressIPBlock(), allowPeerSelectors)).To(Equal(
 			&netv1.NetworkPolicy{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{MultiNetPolicyLabel: ""}},
 				Spec: netv1.NetworkPolicySpec{
 					Ingress: []netv1.NetworkPolicyIngressRule{
 						{
@@ -111,6 +112,7 @@ var _ = Describe("convertMultiNetPolicyToNetPolicy", func() {
 		allowPeerSelectors := true
 		Expect(convertMultiNetPolicyToNetPolicy(multiNetPolicyWithEgressIPBlock(), allowPeerSelectors)).To(Equal(
 			&netv1.NetworkPolicy{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{MultiNetPolicyLabel: ""}},
 				Spec: netv1.NetworkPolicySpec{
 					Ingress: []netv1.NetworkPolicyIngressRule{},
 					Egress: []netv1.NetworkPolicyEgressRule{
@@ -130,6 +132,7 @@ var _ = Describe("convertMultiNetPolicyToNetPolicy", func() {
 		Expect(convertMultiNetPolicyToNetPolicy(multiNetPolicyWithIngressIPBlock(), allowPeerSelectors)).To(
 			Equal(
 				&netv1.NetworkPolicy{
+					ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{MultiNetPolicyLabel: ""}},
 					Spec: netv1.NetworkPolicySpec{
 						Ingress: []netv1.NetworkPolicyIngressRule{
 							{
@@ -149,6 +152,7 @@ var _ = Describe("convertMultiNetPolicyToNetPolicy", func() {
 		Expect(convertMultiNetPolicyToNetPolicy(multiNetPolicyWithEgressIPBlock(), allowPeerSelectors)).To(
 			Equal(
 				&netv1.NetworkPolicy{
+					ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{MultiNetPolicyLabel: ""}},
 					Spec: netv1.NetworkPolicySpec{
 						Ingress: []netv1.NetworkPolicyIngressRule{},
 						Egress: []netv1.NetworkPolicyEgressRule{
