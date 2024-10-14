@@ -25,6 +25,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
+	"k8s.io/utils/ptr"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/ovsdb"
@@ -585,6 +586,20 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *kapi.Pod, nadName
 		err = bnc.zoneICHandler.AddTransitPortConfig(isRemotePort, podAnnotation, lsp)
 		if err != nil {
 			return nil, nil, nil, false, err
+		}
+	}
+
+	lsp.Enabled = ptr.To(true)
+	if kubevirt.IsPodOwnedByVirtualMachine(pod) &&
+		isAllowedForMigration(bnc.IsSecondary(), bnc.IsPrimaryNetwork(), bnc.isLayer2Interconnect()) {
+		migrationProcessReady, err := kubevirt.IsMigrationReadyForTrafficHandoff(bnc.watchFactory, pod)
+		if err != nil {
+			return nil, nil, nil, false, err
+		}
+
+		if migrationProcessReady || util.PodWantsHostNetwork(pod) {
+			// Perform Traffic handoff by disabling src pod LSP
+			lsp.Enabled = ptr.To(false)
 		}
 	}
 
@@ -1161,4 +1176,8 @@ func (bnc *BaseNetworkController) wasPodReleasedBeforeStartup(uid, nad string) b
 		return false
 	}
 	return bnc.releasedPodsBeforeStartup[nad].Has(uid)
+}
+
+func isAllowedForMigration(isSecondary, isPrimaryNetwork, isl2Topology bool) bool {
+	return isSecondary && !isPrimaryNetwork && isl2Topology
 }

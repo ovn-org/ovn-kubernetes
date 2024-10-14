@@ -349,3 +349,72 @@ func ZoneContainsPodSubnetOrUntracked(watchFactory *factory.WatchFactory, lsMana
 func IsPodOwnedByVirtualMachine(pod *corev1.Pod) bool {
 	return ExtractVMNameFromPod(pod) != nil
 }
+
+func podDuringMigration(vmPods []*corev1.Pod) bool {
+	return len(vmPods) > 0
+}
+
+func isSourcePodAlreadyStale(pod *corev1.Pod, vmPods []*corev1.Pod) bool {
+	if util.PodCompleted(pod) {
+		return true
+	}
+	for _, vmPod := range vmPods {
+		if vmPod.CreationTimestamp.After(pod.CreationTimestamp.Time) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func getTargetPod(vmPods []*corev1.Pod) *corev1.Pod {
+	targetPodNominee := vmPods[0]
+	for i := 1; i < len(vmPods); i++ {
+		if vmPods[i].CreationTimestamp.After(targetPodNominee.CreationTimestamp.Time) {
+			targetPodNominee = vmPods[i]
+		}
+	}
+	return targetPodNominee
+}
+
+func isTargetPodReady(targetPod *corev1.Pod) bool {
+	if targetPod == nil {
+		return false
+	}
+
+	// This annotation only appears on live migration scenarios, and it signals
+	// that target VM pod is ready to receive traffic, so we can route
+	// traffic to it.
+	targetReadyTimestamp := targetPod.Annotations[kubevirtv1.MigrationTargetReadyTimestamp]
+
+	// VM is ready to receive traffic
+	return targetReadyTimestamp != ""
+}
+
+func filterNotComplete(vmPods []*corev1.Pod) []*corev1.Pod {
+	var notCompletePods []*corev1.Pod
+	for _, vmPod := range vmPods {
+		if !util.PodCompleted(vmPod) {
+			notCompletePods = append(notCompletePods, vmPod)
+		}
+	}
+
+	return notCompletePods
+}
+
+func IsMigrationReadyForTrafficHandoff(client *factory.WatchFactory, pod *corev1.Pod) (bool, error) {
+	vmPods, err := findVMRelatedPods(client, pod)
+	if err != nil {
+		return false, fmt.Errorf("failed finding related pods for pod %s/%s when checking live migration left overs: %v", pod.Namespace, pod.Name, err)
+	}
+	vmPods = filterNotComplete(vmPods)
+
+	if !podDuringMigration(vmPods) {
+		return false, nil
+	}
+
+	if isSourcePodAlreadyStale(pod, vmPods) && isTargetPodReady(getTargetPod(vmPods)) {
+		return true, nil
+	}
+	return false, nil
+}
