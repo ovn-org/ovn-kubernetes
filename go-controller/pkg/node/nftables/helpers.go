@@ -11,6 +11,11 @@ import (
 
 const OVNKubernetesNFTablesName = "ovn-kubernetes"
 
+// put all chain names from OVNKubernetesNFTablesName here to avoid conflicts.
+const (
+	UDNIsolationChain = "udn-isolation"
+)
+
 var nftHelper knftables.Interface
 
 // SetFakeNFTablesHelper creates a fake knftables.Interface
