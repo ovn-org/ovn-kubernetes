@@ -83,7 +83,6 @@ var _ = ginkgo.Describe("External Gateway", func() {
 	var _ = ginkgo.Describe("e2e non-vxlan external gateway and update validation", func() {
 		const (
 			svcname             string = "multiple-novxlan-externalgw"
-			ovnNs               string = "ovn-kubernetes"
 			ovnWorkerNode       string = "ovn-worker"
 			ovnContainer        string = "ovnkube-node"
 			gwContainerNameAlt1 string = "gw-novxlan-test-container-alt1"
@@ -3255,10 +3254,10 @@ func pokeHostnameViaNC(podName, namespace, protocol, target string, port int) st
 // pokeConntrackEntries returns the number of conntrack entries that match the provided pattern, protocol and podIP
 func pokeConntrackEntries(nodeName, podIP, protocol string, patterns []string) int {
 	args := []string{"get", "pods", "--selector=app=ovs-node", "--field-selector", fmt.Sprintf("spec.nodeName=%s", nodeName), "-o", "jsonpath={.items..metadata.name}"}
-	ovsPodName, err := e2ekubectl.RunKubectl("ovn-kubernetes", args...)
+	ovsPodName, err := e2ekubectl.RunKubectl(ovnNamespace, args...)
 	framework.ExpectNoError(err, "failed to get the ovs pod on node %s", nodeName)
 	args = []string{"exec", ovsPodName, "--", "ovs-appctl", "dpctl/dump-conntrack"}
-	conntrackEntries, err := e2ekubectl.RunKubectl("ovn-kubernetes", args...)
+	conntrackEntries, err := e2ekubectl.RunKubectl(ovnNamespace, args...)
 	framework.ExpectNoError(err, "failed to get the conntrack entries from node %s", nodeName)
 	numOfConnEntries := 0
 	for _, connEntry := range strings.Split(conntrackEntries, "\n") {
