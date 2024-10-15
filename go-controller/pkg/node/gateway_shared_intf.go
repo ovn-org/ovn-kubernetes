@@ -554,13 +554,17 @@ func addServiceRules(service *kapi.Service, netInfo util.NetInfo, localEndpoints
 		npw.ofm.requestFlowSync()
 		if !npw.dpuMode {
 			// add iptable rules only in full mode
-			if err = insertIptRules(getGatewayIPTRules(service, localEndpoints, svcHasLocalHostNetEndPnt)); err != nil {
+			netConfig := npw.ofm.getActiveNetwork(netInfo)
+			if netConfig == nil {
+				return fmt.Errorf("failed to get active network config for network %s", netInfo.GetNetworkName())
+			}
+			if err = insertIptRules(getGatewayIPTRules(service, localEndpoints, svcHasLocalHostNetEndPnt, netConfig)); err != nil {
 				errors = append(errors, fmt.Errorf("failed to add iptables rules for service: %v", err))
 			}
 		}
 	} else {
 		// For Host Only Mode
-		if err = insertIptRules(getGatewayIPTRules(service, localEndpoints, svcHasLocalHostNetEndPnt)); err != nil {
+		if err = insertIptRules(getGatewayIPTRules(service, localEndpoints, svcHasLocalHostNetEndPnt, nil)); err != nil {
 			errors = append(errors, fmt.Errorf("failed to add iptables rules for service: %v", err))
 		}
 
@@ -605,20 +609,27 @@ func delServiceRules(service *kapi.Service, localEndpoints []string, npw *nodePo
 			// |       false||true        |          local        |          local        |   for etp=local + itp=local    |
 			// |                          |                       |                       |   + default dnat towards CIP   |
 			// +--------------------------+-----------------------+-----------------------+--------------------------------+
-
-			if err = nodeipt.DelRules(getGatewayIPTRules(service, localEndpoints, true)); err != nil {
+			netInfo, err := npw.nadController.GetActiveNetworkForNamespace(service.Namespace)
+			if err != nil {
+				return fmt.Errorf("error getting active network for service %s in namespace %s: %w", service.Name, service.Namespace, err)
+			}
+			netConfig := npw.ofm.getActiveNetwork(netInfo)
+			if netConfig == nil {
+				return fmt.Errorf("failed to get active network config for network %s", netInfo.GetNetworkName())
+			}
+			if err = nodeipt.DelRules(getGatewayIPTRules(service, localEndpoints, true, netConfig)); err != nil {
 				errors = append(errors, fmt.Errorf("error updating service flow cache: %v", err))
 			}
-			if err = nodeipt.DelRules(getGatewayIPTRules(service, localEndpoints, false)); err != nil {
+			if err = nodeipt.DelRules(getGatewayIPTRules(service, localEndpoints, false, netConfig)); err != nil {
 				errors = append(errors, fmt.Errorf("error updating service flow cache: %v", err))
 			}
 		}
 	} else {
 
-		if err = nodeipt.DelRules(getGatewayIPTRules(service, localEndpoints, true)); err != nil {
+		if err = nodeipt.DelRules(getGatewayIPTRules(service, localEndpoints, true, nil)); err != nil {
 			errors = append(errors, fmt.Errorf("error updating service flow cache: %v", err))
 		}
-		if err = nodeipt.DelRules(getGatewayIPTRules(service, localEndpoints, false)); err != nil {
+		if err = nodeipt.DelRules(getGatewayIPTRules(service, localEndpoints, false, nil)); err != nil {
 			errors = append(errors, fmt.Errorf("error updating service flow cache: %v", err))
 		}
 	}
@@ -856,7 +867,11 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) error {
 		}
 		// Add correct iptables rules only for Full mode
 		if !npw.dpuMode {
-			keepIPTRules = append(keepIPTRules, getGatewayIPTRules(service, sets.List(localEndpoints), hasLocalHostNetworkEp)...)
+			netConfig := npw.ofm.getActiveNetwork(netInfo)
+			if netConfig == nil {
+				return fmt.Errorf("failed to get active network config for network %s", netInfo.GetNetworkName())
+			}
+			keepIPTRules = append(keepIPTRules, getGatewayIPTRules(service, sets.List(localEndpoints), hasLocalHostNetworkEp, netConfig)...)
 		}
 	}
 
@@ -1179,7 +1194,7 @@ func (npwipt *nodePortWatcherIptables) SyncServices(services []interface{}) erro
 		}
 		// Add correct iptables rules.
 		// TODO: ETP and ITP is not implemented for smart NIC mode.
-		keepIPTRules = append(keepIPTRules, getGatewayIPTRules(service, nil, false)...)
+		keepIPTRules = append(keepIPTRules, getGatewayIPTRules(service, nil, false, nil)...)
 	}
 
 	// sync IPtables rules once

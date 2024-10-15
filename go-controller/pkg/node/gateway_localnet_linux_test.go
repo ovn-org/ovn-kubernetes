@@ -8,6 +8,9 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/urfave/cli/v2"
+	"github.com/vishvananda/netlink"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
@@ -17,8 +20,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
-	"github.com/urfave/cli/v2"
-	"github.com/vishvananda/netlink"
 
 	"github.com/coreos/go-iptables/iptables"
 	kapi "k8s.io/api/core/v1"
@@ -332,19 +333,13 @@ var _ = Describe("Node Operations", func() {
 					false, false,
 				)
 
-				fakeRules := getExternalIPTRules(service.Spec.Ports[0], externalIP, service.Spec.ClusterIP, false, false)
+				fakeRules := getExternalIPTRules(service.Spec.Ports[0], externalIP, service.Spec.ClusterIP, false, false, nil)
 				Expect(insertIptRules(fakeRules)).To(Succeed())
-				fakeRules = getExternalIPTRules(
-					v1.ServicePort{
-						Port:     27000,
-						Protocol: v1.ProtocolUDP,
-						Name:     "This is going to dissapear I hope",
-					},
-					"10.10.10.10",
-					"172.32.0.12",
-					false,
-					false,
-				)
+				fakeRules = getExternalIPTRules(v1.ServicePort{
+					Port:     27000,
+					Protocol: v1.ProtocolUDP,
+					Name:     "This is going to dissapear I hope",
+				}, "10.10.10.10", "172.32.0.12", false, false, nil)
 				Expect(insertIptRules(fakeRules)).To(Succeed())
 
 				// Inject rules into SNAT MGMT chain that shouldn't exist and should be cleared on a restore, even if the chain has no rules
