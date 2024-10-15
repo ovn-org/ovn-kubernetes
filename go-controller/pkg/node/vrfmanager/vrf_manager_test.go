@@ -2,10 +2,15 @@ package vrfmanager
 
 import (
 	"fmt"
+	"sync"
+	"time"
 
+	"github.com/containernetworking/plugins/pkg/ns"
+	"github.com/containernetworking/plugins/pkg/testutils"
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
+	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	netlink_mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/vishvananda/netlink"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
@@ -14,14 +19,17 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 )
 
+var (
+	c            *Controller
+	vrfLinkName1 = "mp100-udn-vrf"
+	vrfLinkName2 = "mp200-udn-vrf"
+)
+
 var _ = ginkgo.Describe("VRF manager", func() {
 
 	var (
-		c                *Controller
-		vrfLinkName1     = "100-vrf"
 		enslaveLinkName1 = "dev100"
 		enslaveLinkName2 = "dev101"
-		vrfLinkName2     = "200-vrf"
 		nlMock           *mocks.NetLinkOps
 		vrfLinkMock1     *netlink_mocks.Link
 		enslaveLinkMock1 *netlink_mocks.Link
@@ -116,6 +124,9 @@ var _ = ginkgo.Describe("VRF manager", func() {
 			enslaveLinkMock1.On("Type").Return("dummy")
 			err = c.reconcile()
 			gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+			// Invoke reconcile again to ensure both vrf links in sync.
+			err = c.reconcile()
+			gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 		})
 
 		ginkgo.It("repair VRFs", func() {
@@ -128,5 +139,100 @@ var _ = ginkgo.Describe("VRF manager", func() {
 			err := c.Repair(validVRFs)
 			gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 		})
+	})
+})
+
+var _ = ginkgo.Describe("VRF manager tests with a network namespace", func() {
+	var (
+		testNS ns.NetNS
+		stopCh chan struct{}
+		wg     *sync.WaitGroup
+	)
+	ginkgo.BeforeEach(func() {
+		var err error
+		testNS, err = testutils.NewNS()
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+		wg = &sync.WaitGroup{}
+		stopCh = make(chan struct{})
+		routeManager := routemanager.NewController()
+		wg.Add(1)
+		go testNS.Do(func(netNS ns.NetNS) error {
+			defer wg.Done()
+			routeManager.Run(stopCh, 2*time.Minute)
+			return nil
+		})
+		// set vrf manager reconcile period into one second.
+		reconcilePeriod = 1 * time.Second
+		c = NewController(routeManager)
+		wg2 := &sync.WaitGroup{}
+		defer func() {
+			wg2.Wait()
+		}()
+		wg2.Add(1)
+		go testNS.Do(func(netNS ns.NetNS) error {
+			defer func() {
+				ginkgo.GinkgoRecover()
+				wg2.Done()
+			}()
+			err = c.Run(stopCh, wg)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			return nil
+		})
+	})
+	ginkgo.AfterEach(func() {
+		close(stopCh)
+		wg.Wait()
+		gomega.Expect(testNS.Close()).To(gomega.Succeed())
+		gomega.Expect(testutils.UnmountNS(testNS)).To(gomega.Succeed())
+		util.ResetRunner()
+	})
+
+	checkforVrfLinkExistence := func() error {
+		err := testNS.Do(func(ns.NetNS) error {
+			if _, err := util.GetNetLinkOps().LinkByName(vrfLinkName1); err != nil {
+				return err
+			}
+			_, err := util.GetNetLinkOps().LinkByName(vrfLinkName2)
+			return err
+		})
+		return err
+	}
+
+	ovntest.OnSupportedPlatformsIt("ensure VRF manager is reconciling configured VRF devices correctly", func() {
+		err := testNS.Do(func(ns.NetNS) error {
+			defer ginkgo.GinkgoRecover()
+			err := c.AddVRF(vrfLinkName1, "", 10, nil)
+			gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+			err = c.AddVRF(vrfLinkName2, "", 20, nil)
+			gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+
+			wg3 := &sync.WaitGroup{}
+			wg3.Add(1)
+			go func() {
+				defer func() {
+					ginkgo.GinkgoRecover()
+					wg3.Done()
+				}()
+				// wait enough to reconcile ran for few times.
+				time.Sleep(5 * time.Second)
+				err = checkforVrfLinkExistence()
+				gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+			}()
+			wg3.Wait()
+
+			// Invoke reconcile method explicitly few times to ensure it's always working fine.
+			err = c.reconcile()
+			gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+			err = checkforVrfLinkExistence()
+			gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+			err = c.reconcile()
+			gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+			err = checkforVrfLinkExistence()
+			gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+
+			return nil
+		})
+		gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 	})
 })
