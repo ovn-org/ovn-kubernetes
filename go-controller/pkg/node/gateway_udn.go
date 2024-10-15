@@ -26,6 +26,9 @@ const (
 	// ctMarkUDNBase is the conntrack mark base value for user defined networks to use
 	// Each network gets its own mark == base + network-id
 	ctMarkUDNBase = 3
+	// pktMarkBase is the base value for packet mark assigned to user defined networks
+	// Each network has a packet mark equal to base + network-id
+	pktMarkBase = 4096
 	// waitForPatchPortTimeout is the maximum time we wait for a UDN's patch
 	// port to be created by OVN.
 	waitForPatchPortTimeout = 30 * time.Second
@@ -53,6 +56,9 @@ type UserDefinedNetworkGateway struct {
 	// masqCTMark holds the mark value for this network
 	// which is used for egress traffic in shared gateway mode
 	masqCTMark uint
+	// pktMark hold the packets mark value for this network
+	// which is used for directing traffic towards the UDN
+	pktMark uint
 	// v4MasqIPs holds the IPv4 masquerade IPs for this network
 	v4MasqIPs *udn.MasqueradeIPs
 	// v6MasqIPs holds the IPv6 masquerade IPs for this network
@@ -84,7 +90,7 @@ func (b *bridgeConfiguration) getBridgePortConfigurations() ([]bridgeUDNConfigur
 }
 
 // addNetworkBridgeConfig adds the patchport and ctMark value for the provided netInfo into the bridge configuration cache
-func (b *bridgeConfiguration) addNetworkBridgeConfig(nInfo util.NetInfo, masqCTMark uint, v4MasqIPs, v6MasqIPs *udn.MasqueradeIPs) {
+func (b *bridgeConfiguration) addNetworkBridgeConfig(nInfo util.NetInfo, masqCTMark, pktMark uint, v6MasqIPs, v4MasqIPs *udn.MasqueradeIPs) {
 	b.Lock()
 	defer b.Unlock()
 
@@ -96,6 +102,7 @@ func (b *bridgeConfiguration) addNetworkBridgeConfig(nInfo util.NetInfo, masqCTM
 		netConfig := &bridgeUDNConfiguration{
 			patchPort:  patchPort,
 			masqCTMark: fmt.Sprintf("0x%x", masqCTMark),
+			pktMark:    fmt.Sprintf("0x%x", pktMark),
 			v4MasqIPs:  v4MasqIPs,
 			v6MasqIPs:  v6MasqIPs,
 		}
@@ -150,6 +157,7 @@ type bridgeUDNConfiguration struct {
 	patchPort   string
 	ofPortPatch string
 	masqCTMark  string
+	pktMark     string
 	v4MasqIPs   *udn.MasqueradeIPs
 	v6MasqIPs   *udn.MasqueradeIPs
 }
@@ -189,6 +197,7 @@ func NewUserDefinedNetworkGateway(netInfo util.NetInfo, networkID int, node *v1.
 		err       error
 	)
 	masqCTMark := ctMarkUDNBase + uint(networkID)
+	pktMark := pktMarkBase + uint(networkID)
 	if config.IPv4Mode {
 		v4MasqIPs, err = udn.AllocateV4MasqueradeIPs(networkID)
 		if err != nil {
@@ -215,6 +224,7 @@ func NewUserDefinedNetworkGateway(netInfo util.NetInfo, networkID int, node *v1.
 		kubeInterface: kubeInterface,
 		vrfManager:    vrfManager,
 		masqCTMark:    masqCTMark,
+		pktMark:       pktMark,
 		v4MasqIPs:     v4MasqIPs,
 		v6MasqIPs:     v6MasqIPs,
 		gateway:       gw,
@@ -266,7 +276,7 @@ func (udng *UserDefinedNetworkGateway) AddNetwork() error {
 		return fmt.Errorf("could not set loose mode for reverse path filtering on management port %s: %v", mgmtPortName, err)
 	}
 	if udng.openflowManager != nil {
-		udng.openflowManager.addNetwork(udng.NetInfo, udng.masqCTMark, udng.v4MasqIPs, udng.v6MasqIPs)
+		udng.openflowManager.addNetwork(udng.NetInfo, udng.masqCTMark, udng.pktMark, udng.v6MasqIPs, udng.v4MasqIPs)
 
 		waiter := newStartupWaiterWithTimeout(waitForPatchPortTimeout)
 		readyFunc := func() (bool, error) {
@@ -597,30 +607,45 @@ func (udng *UserDefinedNetworkGateway) getV6MasqueradeIP() (*net.IPNet, error) {
 	return util.GetIPNetFullMaskFromIP(masqIPs.ManagementPort.IP), nil
 }
 
-// constructUDNVRFIPRules constructs rules that redirect packets towards the per-UDN masquerade IP
+// constructUDNVRFIPRules constructs rules that redirect matching packets
 // into the corresponding UDN VRF routing table.
 // Example:
+// 2000:   from all fwmark 0x1001 lookup 1007
 // 2000:   from all to 169.254.0.12 lookup 1007
+// 2000:   from all fwmark 0x1002 lookup 1009
 // 2000:   from all to 169.254.0.14 lookup 1009
 func (udng *UserDefinedNetworkGateway) constructUDNVRFIPRules(vrfTableId int) ([]netlink.Rule, error) {
-	var masqIPRules []netlink.Rule
+	var ipRules []netlink.Rule
 	masqIPv4, err := udng.getV4MasqueradeIP()
 	if err != nil {
 		return nil, err
 	}
 	if masqIPv4 != nil {
-		masqIPRules = append(masqIPRules, generateIPRuleForMasqIP(masqIPv4.IP, false, uint(vrfTableId)))
+		ipRules = append(ipRules, generateIPRuleForPacketMark(udng.pktMark, false, uint(vrfTableId)))
+		ipRules = append(ipRules, generateIPRuleForMasqIP(masqIPv4.IP, false, uint(vrfTableId)))
 	}
 	masqIPv6, err := udng.getV6MasqueradeIP()
 	if err != nil {
 		return nil, err
 	}
 	if masqIPv6 != nil {
-		masqIPRules = append(masqIPRules, generateIPRuleForMasqIP(masqIPv6.IP, true, uint(vrfTableId)))
+		ipRules = append(ipRules, generateIPRuleForPacketMark(udng.pktMark, true, uint(vrfTableId)))
+		ipRules = append(ipRules, generateIPRuleForMasqIP(masqIPv6.IP, true, uint(vrfTableId)))
 	}
-	return masqIPRules, nil
+	return ipRules, nil
 }
 
+func generateIPRuleForPacketMark(mark uint, isIPv6 bool, vrfTableId uint) netlink.Rule {
+	r := *netlink.NewRule()
+	r.Table = int(vrfTableId)
+	r.Priority = UDNMasqueradeIPRulePriority
+	r.Family = netlink.FAMILY_V4
+	if isIPv6 {
+		r.Family = netlink.FAMILY_V6
+	}
+	r.Mark = int(mark)
+	return r
+}
 func generateIPRuleForMasqIP(masqIP net.IP, isIPv6 bool, vrfTableId uint) netlink.Rule {
 	r := *netlink.NewRule()
 	r.Table = int(vrfTableId)
