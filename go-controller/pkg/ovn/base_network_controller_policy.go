@@ -1065,6 +1065,14 @@ func (bnc *BaseNetworkController) createNetworkPolicy(policy *knet.NetworkPolicy
 		np.portGroupName = bnc.getPodSelectorPortGroupName(&policy.Spec.PodSelector, np.namespace)
 		acls := bnc.buildNetworkPolicyACLs(np, aclLogging)
 
+		{
+			klog.Infof("Cathy np %s/%s ingressPolicies %+v egressPolicies %+v acls %+v", np.namespace, np.name, np.ingressPolicies,
+				np.egressPolicies, acls)
+			for i, acl := range acls {
+				klog.Infof("Cathy buildNetworkPolicyACLs return %dth acl %+v", i, acl)
+			}
+		}
+
 		// np.namespace will be used when fromJSON.NamespaceSelector = nil
 		portGroupKey, err := bnc.EnsurePodSelectorPortGroup(&policy.Spec.PodSelector, np.namespace, acls, np.getKeyWithKind())
 		if err != nil {
@@ -1281,6 +1289,9 @@ func (bnc *BaseNetworkController) buildNetworkPolicyACLs(np *networkPolicy, aclL
 		acls = append(acls, acl...)
 	}
 
+	for i, acl := range acls {
+		klog.Infof("Cathy buildNetworkPolicyACLs %dth acl %+v", i, acl)
+	}
 	return acls
 }
 
