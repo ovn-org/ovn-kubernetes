@@ -412,6 +412,27 @@ func (bsnc *BaseSecondaryNetworkController) removePodForSecondaryNetwork(pod *ka
 		return nil
 	}
 
+	activeNetwork, err := bsnc.getActiveNetworkForNamespace(pod.Namespace)
+	if err != nil {
+		return fmt.Errorf("failed looking for the active network at namespace '%s': %w", pod.Namespace, err)
+	}
+
+	on, networkMap, err := util.GetPodNADToNetworkMappingWithActiveNetwork(pod, bsnc.NetInfo, activeNetwork)
+	if err != nil {
+		bsnc.recordPodErrorEvent(pod, err)
+		// configuration error, no need to retry, do not return error
+		klog.Errorf("Error getting network-attachment for pod %s/%s network %s: %v",
+			pod.Namespace, pod.Name, bsnc.GetNetworkName(), err)
+		return nil
+	}
+
+	if !on {
+		// the pod is not attached to this specific network
+		klog.V(5).Infof("Pod %s/%s is not attached on this network controller %s",
+			pod.Namespace, pod.Name, bsnc.GetNetworkName())
+		return nil
+	}
+
 	podDesc := pod.Namespace + "/" + pod.Name
 	klog.Infof("Deleting pod: %s for network %s", podDesc, bsnc.GetNetworkName())
 
@@ -446,19 +467,9 @@ func (bsnc *BaseSecondaryNetworkController) removePodForSecondaryNetwork(pod *ka
 		portInfoMap = map[string]*lpInfo{}
 	}
 
-	activeNetwork, err := bsnc.getActiveNetworkForNamespace(pod.Namespace)
-	if err != nil {
-		return fmt.Errorf("failed looking for the active network at namespace '%s': %w", pod.Namespace, err)
-	}
 	for nadName := range podNetworks {
 		if !bsnc.HasNAD(nadName) {
 			continue
-		}
-
-		_, networkMap, err := util.GetPodNADToNetworkMappingWithActiveNetwork(pod, bsnc.NetInfo, activeNetwork)
-		if err != nil {
-			bsnc.recordPodErrorEvent(pod, err)
-			return err
 		}
 
 		bsnc.logicalPortCache.remove(pod, nadName)
