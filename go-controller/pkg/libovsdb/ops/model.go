@@ -493,7 +493,7 @@ func buildFailOnDuplicateOps(c client.Client, m model.Model) ([]ovsdb.Operation,
 func getAllUpdatableFields(model model.Model) []interface{} {
 	switch t := model.(type) {
 	case *nbdb.LogicalSwitchPort:
-		return []interface{}{&t.Addresses, &t.Type, &t.TagRequest, &t.Options, &t.PortSecurity}
+		return []interface{}{&t.Addresses, &t.Type, &t.TagRequest, &t.Options, &t.PortSecurity, &t.Enabled}
 	case *nbdb.PortGroup:
 		return []interface{}{&t.ACLs, &t.Ports, &t.ExternalIDs}
 	default:
