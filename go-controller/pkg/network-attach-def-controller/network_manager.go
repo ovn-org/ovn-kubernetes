@@ -146,11 +146,11 @@ func (nm *networkManagerImpl) getAllNetworkStates() []*networkControllerState {
 	return networkStates
 }
 
-func (nm *networkManagerImpl) sync(network string) error {
+func (nm *networkManagerImpl) sync(network string) (err error) {
 	startTime := time.Now()
 	klog.V(5).Infof("%s: sync network %s", nm.name, network)
 	defer func() {
-		klog.V(4).Infof("%s: finished syncing network %s, took %v", nm.name, network, time.Since(startTime))
+		klog.V(4).Infof("%s: finished syncing network %s, err: %v took %v", nm.name, network, err, time.Since(startTime))
 	}()
 
 	want := nm.getNetwork(network)
@@ -165,7 +165,7 @@ func (nm *networkManagerImpl) sync(network string) error {
 			have.controller.Stop()
 		}
 		have.stoppedAndDeleting = true
-		err := have.controller.Cleanup()
+		err = have.controller.Cleanup()
 		if err != nil {
 			return fmt.Errorf("%s: failed to cleanup network %s: %w", nm.name, network, err)
 		}
@@ -186,6 +186,10 @@ func (nm *networkManagerImpl) sync(network string) error {
 	// setup & start the new network controller
 	nc, err := nm.ncm.NewNetworkController(util.CopyNetInfo(want))
 	if err != nil {
+		if err == ErrNetworkControllerTopologyNotManaged {
+			klog.Infof("Network %s is not managed: %v", network, err)
+			return nil
+		}
 		return fmt.Errorf("%s: failed to create network %s: %w", nm.name, network, err)
 	}
 
