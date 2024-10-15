@@ -2,13 +2,14 @@ package node
 
 import (
 	"fmt"
-	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 	"hash/fnv"
 	"math"
 	"net"
 	"reflect"
 	"strings"
 	"sync"
+
+	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
@@ -1462,7 +1463,7 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 			bridgeMacAddress, defaultNetConfig.ofPortPatch))
 
 	// table 2, priority 200, dispatch from UDN -> Host -> OVN. These packets have
-	// already been SNATed to the UDN's masq IP.
+	// already been SNATed to the UDN's masq IP or have been marked with the UDN's packet mark.
 	if config.IPv4Mode {
 		for _, netConfig := range bridge.patchedNetConfigs() {
 			if netConfig.isDefaultNetwork() {
@@ -1472,6 +1473,11 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 				fmt.Sprintf("cookie=%s, priority=200, table=2, ip, ip_src=%s, "+
 					"actions=set_field:%s->eth_dst,output:%s",
 					defaultOpenFlowCookie, netConfig.v4MasqIPs.ManagementPort.IP,
+					bridgeMacAddress, netConfig.ofPortPatch))
+			dftFlows = append(dftFlows,
+				fmt.Sprintf("cookie=%s, priority=200, table=2, ip, pkt_mark=%s, "+
+					"actions=set_field:%s->eth_dst,output:%s",
+					defaultOpenFlowCookie, netConfig.pktMark,
 					bridgeMacAddress, netConfig.ofPortPatch))
 		}
 	}
@@ -1486,6 +1492,11 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 				fmt.Sprintf("cookie=%s, priority=200, table=2, ip6, ipv6_src=%s, "+
 					"actions=set_field:%s->eth_dst,output:%s",
 					defaultOpenFlowCookie, netConfig.v6MasqIPs.ManagementPort.IP,
+					bridgeMacAddress, netConfig.ofPortPatch))
+			dftFlows = append(dftFlows,
+				fmt.Sprintf("cookie=%s, priority=200, table=2, ip6, pkt_mark=%s, "+
+					"actions=set_field:%s->eth_dst,output:%s",
+					defaultOpenFlowCookie, netConfig.pktMark,
 					bridgeMacAddress, netConfig.ofPortPatch))
 		}
 	}

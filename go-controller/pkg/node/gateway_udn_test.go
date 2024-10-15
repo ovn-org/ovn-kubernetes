@@ -659,7 +659,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 
 			Expect(udnGateway.AddNetwork()).To(Succeed())
 			flowMap = udnGateway.gateway.openflowManager.flowCache
-			Expect(len(flowMap["DEFAULT"])).To(Equal(62))                                // 16 UDN Flows are added by default
+			Expect(len(flowMap["DEFAULT"])).To(Equal(64))                                // 18 UDN Flows are added by default
 			Expect(len(udnGateway.openflowManager.defaultBridge.netConfig)).To(Equal(2)) // default network + UDN network
 			defaultUdnConfig := udnGateway.openflowManager.defaultBridge.netConfig["default"]
 			bridgeUdnConfig := udnGateway.openflowManager.defaultBridge.netConfig["bluenet"]
@@ -863,7 +863,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 
 			Expect(udnGateway.AddNetwork()).To(Succeed())
 			flowMap = udnGateway.gateway.openflowManager.flowCache
-			Expect(len(flowMap["DEFAULT"])).To(Equal(62))                                // 16 UDN Flows are added by default
+			Expect(len(flowMap["DEFAULT"])).To(Equal(64))                                // 18 UDN Flows are added by default
 			Expect(len(udnGateway.openflowManager.defaultBridge.netConfig)).To(Equal(2)) // default network + UDN network
 			defaultUdnConfig := udnGateway.openflowManager.defaultBridge.netConfig["default"]
 			bridgeUdnConfig := udnGateway.openflowManager.defaultBridge.netConfig["bluenet"]
@@ -1080,6 +1080,7 @@ func TestConstructUDNVRFIPRules(t *testing.T) {
 		priority int
 		family   int
 		table    int
+		mark     int
 		dst      net.IPNet
 	}
 	type testConfig struct {
@@ -1104,6 +1105,12 @@ func TestConstructUDNVRFIPRules(t *testing.T) {
 					priority: UDNMasqueradeIPRulePriority,
 					family:   netlink.FAMILY_V4,
 					table:    1007,
+					mark:     0x1003,
+				},
+				{
+					priority: UDNMasqueradeIPRulePriority,
+					family:   netlink.FAMILY_V4,
+					table:    1007,
 					dst:      *util.GetIPNetFullMaskFromIP(ovntest.MustParseIP("169.254.0.16")),
 				},
 			},
@@ -1113,6 +1120,12 @@ func TestConstructUDNVRFIPRules(t *testing.T) {
 			desc:       "v6 rule test",
 			vrftableID: 1009,
 			expectedRules: []testRule{
+				{
+					priority: UDNMasqueradeIPRulePriority,
+					family:   netlink.FAMILY_V6,
+					table:    1009,
+					mark:     0x1003,
+				},
 				{
 					priority: UDNMasqueradeIPRulePriority,
 					family:   netlink.FAMILY_V6,
@@ -1130,7 +1143,19 @@ func TestConstructUDNVRFIPRules(t *testing.T) {
 					priority: UDNMasqueradeIPRulePriority,
 					family:   netlink.FAMILY_V4,
 					table:    1010,
+					mark:     0x1003,
+				},
+				{
+					priority: UDNMasqueradeIPRulePriority,
+					family:   netlink.FAMILY_V4,
+					table:    1010,
 					dst:      *util.GetIPNetFullMaskFromIP(ovntest.MustParseIP("169.254.0.16")),
+				},
+				{
+					priority: UDNMasqueradeIPRulePriority,
+					family:   netlink.FAMILY_V6,
+					table:    1010,
+					mark:     0x1003,
 				},
 				{
 					priority: UDNMasqueradeIPRulePriority,
@@ -1172,7 +1197,11 @@ func TestConstructUDNVRFIPRules(t *testing.T) {
 				g.Expect(rule.Priority).To(gomega.Equal(test.expectedRules[i].priority))
 				g.Expect(rule.Table).To(gomega.Equal(test.expectedRules[i].table))
 				g.Expect(rule.Family).To(gomega.Equal(test.expectedRules[i].family))
-				g.Expect(*rule.Dst).To(gomega.Equal(test.expectedRules[i].dst))
+				if rule.Dst != nil {
+					g.Expect(*rule.Dst).To(gomega.Equal(test.expectedRules[i].dst))
+				} else {
+					g.Expect(rule.Mark).To(gomega.Equal(test.expectedRules[i].mark))
+				}
 			}
 		})
 	}
