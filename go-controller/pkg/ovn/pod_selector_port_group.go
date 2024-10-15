@@ -341,6 +341,10 @@ func (bnc *BaseNetworkController) handleSharedPGPodSelectorAddFunc(podHandlerInf
 	}
 	// get info for new pods that are not listed in np.localPods
 	portNamesToUUIDs, policyPortUUIDs, errs := bnc.getNewLocalPolicyPorts(&podHandlerInfo.localPods, podHandlerInfo.portGroupName, objs...)
+	{
+		klog.Infof("Cathy handleSharedPGPodSelectorAddFunc portGroupKey %s podHandlerInfo %s returns portNamesToUUIDs %v policyPortUUIDs %v",
+			podHandlerInfo.key, podHandlerInfo.portGroupName, portNamesToUUIDs, policyPortUUIDs)
+	}
 	// for multiple objects, try to update the ones that were fetched successfully
 	// return error for errPods in the end
 	if len(portNamesToUUIDs) > 0 {
@@ -351,6 +355,10 @@ func (bnc *BaseNetworkController) handleSharedPGPodSelectorAddFunc(podHandlerInf
 			if err != nil {
 				return fmt.Errorf("unable to get ops to add new pod to policy shared port group %s: %v", podHandlerInfo.portGroupName, err)
 			}
+		}
+		{
+			klog.Infof("Cathy handleSharedPGPodSelectorAddFunc add ports %v to portGroupKey %s portGroupName %s",
+				policyPortUUIDs, podHandlerInfo.key, podHandlerInfo.portGroupName)
 		}
 		// all operations were successful, update np.localPods
 		for portName, portUUID := range portNamesToUUIDs {
@@ -383,12 +391,20 @@ func (bnc *BaseNetworkController) handleSharedPGPodSelectorDelFunc(podHandlerInf
 	if err != nil {
 		return err
 	}
+	{
+		klog.Infof("Cathy handleSharedPGPodSelectorDelFunc portGroupKey %s portGroupName %s returns portNamesToUUIDs %v policyPortUUIDs %v",
+			podHandlerInfo.key, podHandlerInfo.portGroupName, portNamesToUUIDs, policyPortUUIDs)
+	}
 
 	if len(portNamesToUUIDs) > 0 {
 		// del pods from shared pod selector port group
 		err := libovsdbops.DeletePortsFromPortGroup(bnc.nbClient, podHandlerInfo.portGroupName, policyPortUUIDs...)
 		if err != nil {
 			return fmt.Errorf("unable to delete ports from shared policy port group %s: %v", podHandlerInfo.portGroupName, err)
+		}
+		{
+			klog.Infof("Cathy handleSharedPGPodSelectorAddFunc delete ports %v from portGroupKey %s portGroupName %s",
+				policyPortUUIDs, podHandlerInfo.key, podHandlerInfo.portGroupName)
 		}
 		// all operations were successful, update np.localPods
 		for portName := range portNamesToUUIDs {
