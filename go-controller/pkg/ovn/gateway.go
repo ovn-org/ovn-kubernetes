@@ -386,6 +386,18 @@ func (gw *GatewayManager) GatewayInit(
 			types.NetworkExternalID:  gw.netInfo.GetNetworkName(),
 			types.TopologyExternalID: gw.netInfo.TopologyType(),
 		}
+		if gw.netInfo.IsPrimaryNetwork() && gw.netInfo.TopologyType() == types.Layer2Topology {
+			logicalRouterPort.Ipv6RaConfigs = map[string]string{
+				"address_mode":      "dhcpv6_stateful",
+				"send_periodic":     "true",
+				"max_interval":      "900", // 15 minutes
+				"min_interval":      "300", // 5 minutes
+				"router_preference": "LOW", // The static gateway configured by CNI is MEDIUM, so make this SLOW so it has less effect for pods
+			}
+			if gw.netInfo.MTU() > 0 {
+				logicalRouterPort.Ipv6RaConfigs["mtu"] = fmt.Sprintf("%d", gw.netInfo.MTU())
+			}
+		}
 	}
 
 	err = libovsdbops.CreateOrUpdateLogicalRouterPort(gw.nbClient, &logicalRouter,

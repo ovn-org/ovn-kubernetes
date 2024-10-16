@@ -199,7 +199,7 @@ func nodeContainsPodSubnet(watchFactory *factory.WatchFactory, nodeName string, 
 	return false, nil
 }
 
-// ExtractVMNameFromPod retunes namespace and name of vm backed up but the pod
+// ExtractVMNameFromPod returns namespace and name of vm backed up but the pod
 // for regular pods return nil
 func ExtractVMNameFromPod(pod *corev1.Pod) *ktypes.NamespacedName {
 	vmName, ok := pod.Labels[kubevirtv1.VirtualMachineNameLabel]
@@ -342,4 +342,10 @@ func ZoneContainsPodSubnetOrUntracked(watchFactory *factory.WatchFactory, lsMana
 	// we can just use one of the IPs to check if it belongs to a subnet assigned
 	// to a node
 	return hostSubnets, !util.IsContainedInAnyCIDR(annotation.IPs[0], hostSubnets...), nil
+}
+
+// IsPodOwnedByVirtualMachine returns true if the pod is own by a
+// kubevirt virtual machine, false otherwise.
+func IsPodOwnedByVirtualMachine(pod *corev1.Pod) bool {
+	return ExtractVMNameFromPod(pod) != nil
 }

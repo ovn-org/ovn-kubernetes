@@ -61,6 +61,7 @@ type networkAttachmentConfigParams struct {
 	vlanID             int
 	allowPersistentIPs bool
 	role               string
+	mtu                int
 }
 
 type networkAttachmentConfig struct {
@@ -83,6 +84,9 @@ func uniqueNadName(originalNetName string) string {
 }
 
 func generateNAD(config networkAttachmentConfig) *nadapi.NetworkAttachmentDefinition {
+	if config.mtu == 0 {
+		config.mtu = 1300
+	}
 	nadSpec := fmt.Sprintf(
 		`
 {
@@ -92,7 +96,7 @@ func generateNAD(config networkAttachmentConfig) *nadapi.NetworkAttachmentDefini
         "topology":%q,
         "subnets": %q,
         "excludeSubnets": %q,
-        "mtu": 1300,
+        "mtu": %d,
         "netAttachDefName": %q,
         "vlanID": %d,
         "allowPersistentIPs": %t,
@@ -103,6 +107,7 @@ func generateNAD(config networkAttachmentConfig) *nadapi.NetworkAttachmentDefini
 		config.topology,
 		config.cidr,
 		strings.Join(config.excludeCIDRs, ","),
+		config.mtu,
 		namespacedName(config.namespace, config.name),
 		config.vlanID,
 		config.allowPersistentIPs,

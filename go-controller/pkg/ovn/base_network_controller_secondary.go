@@ -17,6 +17,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/generator/udn"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kubevirt"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
@@ -25,6 +26,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 
+	corev1 "k8s.io/api/core/v1"
 	kapi "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/klog/v2"
@@ -369,6 +371,11 @@ func (bsnc *BaseSecondaryNetworkController) addLogicalPortToNetworkForNAD(pod *k
 
 	if lsp != nil {
 		_ = bsnc.logicalPortCache.add(pod, switchName, nadName, lsp.UUID, podAnnotation.MAC, podAnnotation.IPs)
+		if bsnc.requireDHCP(pod) {
+			if err := bsnc.ensureDHCP(pod, podAnnotation, lsp); err != nil {
+				return err
+			}
+		}
 	}
 
 	if isLocalPod {
@@ -837,6 +844,36 @@ func (bsnc *BaseSecondaryNetworkController) buildUDNEgressSNAT(localPodSubnets [
 	return snats, nil
 }
 
+func (bsnc *BaseSecondaryNetworkController) ensureDHCP(pod *corev1.Pod, podAnnotation *util.PodAnnotation, lsp *nbdb.LogicalSwitchPort) error {
+	opts := []kubevirt.DHCPConfigsOpt{}
+
+	ipv4DNSServer, ipv6DNSServer, err := kubevirt.RetrieveDNSServiceClusterIPs(bsnc.watchFactory)
+	if err != nil {
+		return err
+	}
+
+	ipv4Gateway, _ := util.MatchFirstIPFamily(false /*ipv4*/, podAnnotation.Gateways)
+	if ipv4Gateway != nil {
+		opts = append(opts, kubevirt.WithIPv4Router(ipv4Gateway.String()))
+	}
+
+	if bsnc.MTU() > 0 {
+		opts = append(opts, kubevirt.WithIPv4MTU(bsnc.MTU()))
+	}
+
+	opts = append(opts, kubevirt.WithIPv4DNSServer(ipv4DNSServer), kubevirt.WithIPv6DNSServer(ipv6DNSServer))
+
+	return kubevirt.EnsureDHCPOptionsForLSP(bsnc.controllerName, bsnc.nbClient, pod, podAnnotation.IPs, lsp, opts...)
+}
+
 func getMasqueradeManagementIPSNATMatch(dstMac string) string {
 	return fmt.Sprintf("eth.dst == %s", dstMac)
+}
+
+func (bsnc *BaseSecondaryNetworkController) requireDHCP(pod *corev1.Pod) bool {
+	// Configure DHCP only for kubevirt VMs layer2 primary udn with subnets
+	return kubevirt.IsPodOwnedByVirtualMachine(pod) &&
+		util.IsNetworkSegmentationSupportEnabled() &&
+		bsnc.IsPrimaryNetwork() &&
+		bsnc.TopologyType() == types.Layer2Topology
 }

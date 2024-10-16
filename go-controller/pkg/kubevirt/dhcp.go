@@ -22,17 +22,74 @@ const (
 	dhcpLeaseTime = 3500
 )
 
+type DHCPConfigsOpt = func(*dhcpConfigs)
+
 type dhcpConfigs struct {
 	V4 *nbdb.DHCPOptions
 	V6 *nbdb.DHCPOptions
 }
 
+func WithIPv4Router(router string) func(*dhcpConfigs) {
+	return func(configs *dhcpConfigs) {
+		if configs.V4 == nil {
+			return
+		}
+		configs.V4.Options["router"] = router
+	}
+}
+
+func WithIPv4MTU(mtu int) func(*dhcpConfigs) {
+	return func(configs *dhcpConfigs) {
+		if configs.V4 == nil {
+			return
+		}
+		configs.V4.Options["mtu"] = fmt.Sprintf("%d", mtu)
+	}
+}
+
+func WithIPv4DNSServer(dnsServer string) func(*dhcpConfigs) {
+	return func(configs *dhcpConfigs) {
+		if configs.V4 == nil {
+			return
+		}
+		configs.V4.Options["dns_server"] = dnsServer
+	}
+}
+
+func WithIPv6DNSServer(dnsServer string) func(*dhcpConfigs) {
+	return func(configs *dhcpConfigs) {
+		// If there is no ipv6 dns server don't configure the option, this is
+		// quite common at dual stack envs since a ipv4 dns server can serve
+		// ipv6 AAAA records.
+		if dnsServer == "" {
+			return
+		}
+		if configs.V6 == nil {
+			return
+		}
+		configs.V6.Options["dns_server"] = dnsServer
+	}
+}
+
 func EnsureDHCPOptionsForMigratablePod(controllerName string, nbClient libovsdbclient.Client, watchFactory *factory.WatchFactory, pod *corev1.Pod, ips []*net.IPNet, lsp *nbdb.LogicalSwitchPort) error {
+	dnsServerIPv4, dnsServerIPv6, err := RetrieveDNSServiceClusterIPs(watchFactory)
+	if err != nil {
+		return fmt.Errorf("failed retrieving dns service cluster ip: %v", err)
+	}
+
+	return EnsureDHCPOptionsForLSP(controllerName, nbClient, pod, ips, lsp,
+		WithIPv4Router(ARPProxyIPv4),
+		WithIPv4DNSServer(dnsServerIPv4),
+		WithIPv6DNSServer(dnsServerIPv6),
+	)
+}
+
+func EnsureDHCPOptionsForLSP(controllerName string, nbClient libovsdbclient.Client, pod *corev1.Pod, ips []*net.IPNet, lsp *nbdb.LogicalSwitchPort, opts ...DHCPConfigsOpt) error {
 	vmKey := ExtractVMNameFromPod(pod)
 	if vmKey == nil {
 		return fmt.Errorf("missing vm label at pod %s/%s", pod.Namespace, pod.Name)
 	}
-	dhcpConfigs, err := composeDHCPConfigs(watchFactory, controllerName, *vmKey, ips)
+	dhcpConfigs, err := composeDHCPConfigs(controllerName, *vmKey, ips, opts...)
 	if err != nil {
 		return fmt.Errorf("failed composing DHCP options: %v", err)
 	}
@@ -43,17 +100,12 @@ func EnsureDHCPOptionsForMigratablePod(controllerName string, nbClient libovsdbc
 	return nil
 }
 
-func composeDHCPConfigs(k8scli *factory.WatchFactory, controllerName string, vmKey ktypes.NamespacedName, podIPs []*net.IPNet) (*dhcpConfigs, error) {
+func composeDHCPConfigs(controllerName string, vmKey ktypes.NamespacedName, podIPs []*net.IPNet, opts ...DHCPConfigsOpt) (*dhcpConfigs, error) {
 	if len(podIPs) == 0 {
 		return nil, fmt.Errorf("missing podIPs to compose dhcp options")
 	}
 	if vmKey.Name == "" {
 		return nil, fmt.Errorf("missing vmName to compose dhcp options")
-	}
-
-	dnsServerIPv4, dnsServerIPv6, err := retrieveDNSServiceClusterIPs(k8scli)
-	if err != nil {
-		return nil, fmt.Errorf("failed retrieving dns service cluster ip: %v", err)
 	}
 
 	dhcpConfigs := &dhcpConfigs{}
@@ -63,15 +115,18 @@ func composeDHCPConfigs(k8scli *factory.WatchFactory, controllerName string, vmK
 			return nil, fmt.Errorf("failed converting podIPs to cidr to configure dhcp: %v", err)
 		}
 		if utilnet.IsIPv4CIDR(cidr) {
-			dhcpConfigs.V4 = ComposeDHCPv4Options(cidr.String(), dnsServerIPv4, controllerName, vmKey)
+			dhcpConfigs.V4 = ComposeDHCPv4Options(cidr.String(), controllerName, vmKey)
 		} else if utilnet.IsIPv6CIDR(cidr) {
-			dhcpConfigs.V6 = ComposeDHCPv6Options(cidr.String(), dnsServerIPv6, controllerName, vmKey)
+			dhcpConfigs.V6 = ComposeDHCPv6Options(cidr.String(), controllerName, vmKey)
 		}
+	}
+	for _, opt := range opts {
+		opt(dhcpConfigs)
 	}
 	return dhcpConfigs, nil
 }
 
-func retrieveDNSServiceClusterIPs(k8scli *factory.WatchFactory) (string, string, error) {
+func RetrieveDNSServiceClusterIPs(k8scli *factory.WatchFactory) (string, string, error) {
 	dnsServer, err := k8scli.GetService(config.Kubernetes.DNSServiceNamespace, config.Kubernetes.DNSServiceName)
 	if err != nil {
 		return "", "", err
@@ -88,14 +143,12 @@ func retrieveDNSServiceClusterIPs(k8scli *factory.WatchFactory) (string, string,
 	return clusterIPv4, clusterIPv6, nil
 }
 
-func ComposeDHCPv4Options(cidr, dnsServer, controllerName string, vmKey ktypes.NamespacedName) *nbdb.DHCPOptions {
+func ComposeDHCPv4Options(cidr, controllerName string, vmKey ktypes.NamespacedName) *nbdb.DHCPOptions {
 	serverMAC := util.IPAddrToHWAddr(net.ParseIP(ARPProxyIPv4)).String()
 	dhcpOptions := &nbdb.DHCPOptions{
 		Cidr: cidr,
 		Options: map[string]string{
 			"lease_time": fmt.Sprintf("%d", dhcpLeaseTime),
-			"router":     ARPProxyIPv4,
-			"dns_server": dnsServer,
 			"server_id":  ARPProxyIPv4,
 			"server_mac": serverMAC,
 			"hostname":   fmt.Sprintf("%q", vmKey.Name),
@@ -104,16 +157,14 @@ func ComposeDHCPv4Options(cidr, dnsServer, controllerName string, vmKey ktypes.N
 	return composeDHCPOptions(controllerName, vmKey, dhcpOptions)
 }
 
-func ComposeDHCPv6Options(cidr, dnsServer, controllerName string, vmKey ktypes.NamespacedName) *nbdb.DHCPOptions {
+func ComposeDHCPv6Options(cidr, controllerName string, vmKey ktypes.NamespacedName) *nbdb.DHCPOptions {
 	serverMAC := util.IPAddrToHWAddr(net.ParseIP(ARPProxyIPv6)).String()
 	dhcpOptions := &nbdb.DHCPOptions{
 		Cidr: cidr,
 		Options: map[string]string{
 			"server_id": serverMAC,
+			"fqdn":      fmt.Sprintf("%q", vmKey.Name), // equivalent to ipv4 "hostname" option
 		},
-	}
-	if dnsServer != "" {
-		dhcpOptions.Options["dns_server"] = dnsServer
 	}
 	return composeDHCPOptions(controllerName, vmKey, dhcpOptions)
 }
