@@ -23,7 +23,7 @@ func (c *Controller) processNextBANPWorkItem(wg *sync.WaitGroup) bool {
 	}
 	defer c.banpQueue.Done(banpKey)
 
-	err := c.syncBaselineAdminNetworkPolicy(banpKey.(string))
+	err := c.syncBaselineAdminNetworkPolicy(banpKey)
 	if err == nil {
 		c.banpQueue.Forget(banpKey)
 		return true

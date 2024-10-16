@@ -22,7 +22,7 @@ import (
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// AdminPolicyBasedRouteStatusApplyConfiguration represents an declarative configuration of the AdminPolicyBasedRouteStatus type for use
+// AdminPolicyBasedRouteStatusApplyConfiguration represents a declarative configuration of the AdminPolicyBasedRouteStatus type for use
 // with apply.
 type AdminPolicyBasedRouteStatusApplyConfiguration struct {
 	LastTransitionTime *v1.Time                            `json:"lastTransitionTime,omitempty"`
@@ -30,7 +30,7 @@ type AdminPolicyBasedRouteStatusApplyConfiguration struct {
 	Status             *adminpolicybasedroutev1.StatusType `json:"status,omitempty"`
 }
 
-// AdminPolicyBasedRouteStatusApplyConfiguration constructs an declarative configuration of the AdminPolicyBasedRouteStatus type for use with
+// AdminPolicyBasedRouteStatusApplyConfiguration constructs a declarative configuration of the AdminPolicyBasedRouteStatus type for use with
 // apply.
 func AdminPolicyBasedRouteStatus() *AdminPolicyBasedRouteStatusApplyConfiguration {
 	return &AdminPolicyBasedRouteStatusApplyConfiguration{}

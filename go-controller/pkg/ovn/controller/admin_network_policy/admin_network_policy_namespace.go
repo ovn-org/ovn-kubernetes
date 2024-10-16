@@ -23,7 +23,7 @@ func (c *Controller) processNextANPNamespaceWorkItem(wg *sync.WaitGroup) bool {
 	}
 	defer c.anpNamespaceQueue.Done(anpNSKey)
 
-	err := c.syncAdminNetworkPolicyNamespace(anpNSKey.(string))
+	err := c.syncAdminNetworkPolicyNamespace(anpNSKey)
 	if err == nil {
 		c.anpNamespaceQueue.Forget(anpNSKey)
 		return true
@@ -102,7 +102,7 @@ func (c *Controller) syncAdminNetworkPolicyNamespace(key string) error {
 // clearNamespaceFor(B)ANP will handle the logic for figuring out if the provided namespace name
 // used to match the given anpCache.name policy. If so, it will requeue the anpCache.name key back
 // into the main (b)anpQueue cache for reconciling the db objects. If not, function is a no-op.
-func (c *Controller) clearNamespaceForANP(name string, anpCache *adminNetworkPolicyState, queue workqueue.RateLimitingInterface) {
+func (c *Controller) clearNamespaceForANP(name string, anpCache *adminNetworkPolicyState, queue workqueue.TypedRateLimitingInterface[string]) {
 	// (i) if this namespace used to match this ANP's .Spec.Subject requeue it and return
 	// (ii) if (i) is false, check if it used to match any of the .Spec.Ingress.Peers requeue it and return
 	// (iii) if (i) & (ii) are false, check if it used to match any of the .Spec.Egress.Peers requeue it and return
@@ -135,7 +135,7 @@ func (c *Controller) clearNamespaceForANP(name string, anpCache *adminNetworkPol
 // used to match the given anpCache.name policy or if it started matching the given anpCache.name.
 // If so, it will requeue the anpCache.name key back into the main (b)anpQueue cache for reconciling
 // the db objects. If not, function is a no-op.
-func (c *Controller) setNamespaceForANP(namespace *v1.Namespace, anpCache *adminNetworkPolicyState, queue workqueue.RateLimitingInterface) {
+func (c *Controller) setNamespaceForANP(namespace *v1.Namespace, anpCache *adminNetworkPolicyState, queue workqueue.TypedRateLimitingInterface[string]) {
 	// (i) if this namespace used to match this ANP's .Spec.Subject requeue it and return OR
 	// (ii) if this namespace started to match this ANP's .Spec.Subject requeue it and return OR
 	// (iii) if above conditions are are false, check if it used to match any of the .Spec.Ingress.Peers requeue it and return OR
