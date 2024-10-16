@@ -18,10 +18,10 @@ var _ = ginkgo.Describe("VRF manager", func() {
 
 	var (
 		c                *Controller
-		vrfLinkName1     = "100-vrf"
+		vrfLinkName1     = "mp100-udn-vrf"
 		enslaveLinkName1 = "dev100"
 		enslaveLinkName2 = "dev101"
-		vrfLinkName2     = "200-vrf"
+		vrfLinkName2     = "mp200-udn-vrf"
 		nlMock           *mocks.NetLinkOps
 		vrfLinkMock1     *netlink_mocks.Link
 		enslaveLinkMock1 *netlink_mocks.Link
@@ -114,6 +114,9 @@ var _ = ginkgo.Describe("VRF manager", func() {
 			err = util.GetNetLinkOps().LinkDelete(vrfLinkMock2)
 			gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 			enslaveLinkMock1.On("Type").Return("dummy")
+			err = c.reconcile()
+			gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+			// Invoke reconcile again to ensure both vrf links in sync.
 			err = c.reconcile()
 			gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 		})

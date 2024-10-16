@@ -298,8 +298,8 @@ func (vrfm *Controller) repair(validVRFs sets.Set[string]) error {
 			if err != nil {
 				klog.Errorf("VRF Manager: error deleting stale VRF device %s, err: %v", name, err)
 			}
+			delete(vrfm.vrfs, link.Attrs().Index)
 		}
-		delete(vrfm.vrfs, link.Attrs().Index)
 	}
 	return nil
 }
