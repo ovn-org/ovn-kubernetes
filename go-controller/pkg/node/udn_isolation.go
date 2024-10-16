@@ -48,8 +48,8 @@ type UDNHostIsolationManager struct {
 	nadController     *nad.NetAttachDefinitionController
 	kubeletCgroupPath string
 
-	udnPodIPsv4 *nftPodIPSet
-	udnPodIPsv6 *nftPodIPSet
+	udnPodIPsv4 *nftPodElementsSet
+	udnPodIPsv6 *nftPodElementsSet
 }
 
 func NewUDNHostIsolationManager(ipv4, ipv6 bool, podInformer coreinformers.PodInformer,
@@ -59,8 +59,8 @@ func NewUDNHostIsolationManager(ipv4, ipv6 bool, podInformer coreinformers.PodIn
 		nadController: nadController,
 		ipv4:          ipv4,
 		ipv6:          ipv6,
-		udnPodIPsv4:   newNFTPodIPSet(nftablesUDNPodIPsv4),
-		udnPodIPsv6:   newNFTPodIPSet(nftablesUDNPodIPsv6),
+		udnPodIPsv4:   newNFTPodElementsSet(nftablesUDNPodIPsv4),
+		udnPodIPsv6:   newNFTPodElementsSet(nftablesUDNPodIPsv6),
 	}
 	controllerConfig := &controller.ControllerConfig[v1.Pod]{
 		RateLimiter:    workqueue.NewTypedItemFastSlowRateLimiter[string](time.Second, 5*time.Second, 5),
@@ -362,8 +362,8 @@ func (m *UDNHostIsolationManager) updateUDNPodIPs(namespacedName string, podIPs 
 	tx := m.nft.NewTransaction()
 	newV4IPs, newV6IPs := splitIPsPerFamily(podIPs)
 
-	m.udnPodIPsv4.updatePodIPsTX(namespacedName, newV4IPs, tx)
-	m.udnPodIPsv6.updatePodIPsTX(namespacedName, newV6IPs, tx)
+	m.udnPodIPsv4.updatePodElementsTX(namespacedName, newV4IPs, tx)
+	m.udnPodIPsv6.updatePodElementsTX(namespacedName, newV6IPs, tx)
 
 	if tx.NumOperations() == 0 {
 		return nil
@@ -375,73 +375,106 @@ func (m *UDNHostIsolationManager) updateUDNPodIPs(namespacedName string, podIPs 
 	}
 
 	// update internal state only after successful transaction
-	m.udnPodIPsv4.updatePodIPsAfterTX(namespacedName, newV4IPs)
-	m.udnPodIPsv6.updatePodIPsAfterTX(namespacedName, newV6IPs)
+	m.udnPodIPsv4.updatePodElementsAfterTX(namespacedName, newV4IPs)
+	m.udnPodIPsv6.updatePodElementsAfterTX(namespacedName, newV6IPs)
 	return nil
 }
 
-// nftPodIPSet is a helper struct to manage pod IPs in an nftables set.
-// Can be used for ipv4 and ipv6 sets.
-type nftPodIPSet struct {
+// nftPodElementsSet is a helper struct to manage an nftables set with pod-owned elements.
+// Can be used to store pod IPs, or more complex elements.
+type nftPodElementsSet struct {
 	setName string
-	// podName: ips
-	podsIPs map[string]sets.Set[string]
+	// podName: set elements
+	podElements map[string]sets.Set[string]
+	// podIPs may be reused as soon as the pod reaches Terminating state, and delete event may come later.
+	// That means a new pod with the same IP may be added before the previous pod is deleted.
+	// To avoid deleting newly-added pod IP thinking we are deleting old pod IP, we keep track of re-used set elements.
+	elementToPods map[string]sets.Set[string]
 }
 
-func newNFTPodIPSet(setName string) *nftPodIPSet {
-	return &nftPodIPSet{
-		setName: setName,
-		podsIPs: make(map[string]sets.Set[string]),
+func newNFTPodElementsSet(setName string) *nftPodElementsSet {
+	return &nftPodElementsSet{
+		setName:       setName,
+		podElements:   make(map[string]sets.Set[string]),
+		elementToPods: make(map[string]sets.Set[string]),
 	}
 }
 
-// updatePodIPsTX adds transaction operations to update pod IPs in nftables set.
-// To update internal struct, updatePodIPsAfterTX must be called if transaction is successful.
-func (n *nftPodIPSet) updatePodIPsTX(namespacedName string, podIPs sets.Set[string], tx *knftables.Transaction) {
-	if n.podsIPs[namespacedName].Equal(podIPs) {
+// updatePodElementsTX adds transaction operations to update pod elements in nftables set.
+// To update internal struct, updatePodElementsAfterTX must be called if transaction is successful.
+func (n *nftPodElementsSet) updatePodElementsTX(namespacedName string, podElements sets.Set[string], tx *knftables.Transaction) {
+	if n.podElements[namespacedName].Equal(podElements) {
 		return
 	}
-	// always delete all old ips, then add new ips.
-	for existingIP := range n.podsIPs[namespacedName] {
-		tx.Delete(&knftables.Element{
-			Set: n.setName,
-			Key: []string{existingIP},
-		})
+	// always delete all old elements, then add new elements.
+	for existingElem := range n.podElements[namespacedName] {
+		if n.elementToPods[existingElem].Len() == 1 {
+			// only delete element if it is referenced by one pod
+			tx.Delete(&knftables.Element{
+				Set: n.setName,
+				Key: []string{existingElem},
+			})
+		}
 	}
-	for newIP := range podIPs {
+	for newElem := range podElements {
+		// adding existing element is a no-op
 		tx.Add(&knftables.Element{
 			Set: n.setName,
-			Key: []string{newIP},
+			Key: []string{newElem},
 		})
 	}
 }
 
-func (n *nftPodIPSet) updatePodIPsAfterTX(namespacedName string, podIPs sets.Set[string]) {
-	n.podsIPs[namespacedName] = podIPs
+func (n *nftPodElementsSet) updatePodElementsAfterTX(namespacedName string, elements sets.Set[string]) {
+	for existingElem := range n.podElements[namespacedName] {
+		if !elements.Has(existingElem) {
+			// element was removed
+			n.elementToPods[existingElem].Delete(namespacedName)
+			if n.elementToPods[existingElem].Len() == 0 {
+				delete(n.elementToPods, existingElem)
+			}
+		}
+	}
+
+	for elem := range elements {
+		if n.elementToPods[elem] == nil {
+			n.elementToPods[elem] = sets.New[string]()
+		}
+		n.elementToPods[elem].Insert(namespacedName)
+	}
+	if len(elements) == 0 {
+		delete(n.podElements, namespacedName)
+	} else {
+		n.podElements[namespacedName] = elements
+	}
 }
 
-// fullSync should be called on restart to sync all pods IPs.
-// It flushes existing ips, and adds new ips.
-func (n *nftPodIPSet) fullSync(nft knftables.Interface, podsIPs map[string]sets.Set[string]) error {
+// fullSync should be called on restart to sync all pods elements.
+// It flushes existing elements, and adds new elements.
+func (n *nftPodElementsSet) fullSync(nft knftables.Interface, podsElements map[string]sets.Set[string]) error {
 	tx := nft.NewTransaction()
 	tx.Flush(&knftables.Set{
 		Name: n.setName,
 	})
-	for podName, podIPs := range podsIPs {
-		if len(podIPs) == 0 {
+	for podName, podElements := range podsElements {
+		if len(podElements) == 0 {
 			continue
 		}
-		for ip := range podIPs {
+		for elem := range podElements {
 			tx.Add(&knftables.Element{
 				Set: n.setName,
-				Key: []string{ip},
+				Key: []string{elem},
 			})
+			if n.elementToPods[elem] == nil {
+				n.elementToPods[elem] = sets.New[string]()
+			}
+			n.elementToPods[elem].Insert(podName)
 		}
-		n.podsIPs[podName] = podIPs
+		n.podElements[podName] = podElements
 	}
 	err := nft.Run(context.TODO(), tx)
 	if err != nil {
-		clear(n.podsIPs)
+		clear(n.podElements)
 		return fmt.Errorf("initial pods sync for UDN host isolation failed: %w", err)
 	}
 	return nil
