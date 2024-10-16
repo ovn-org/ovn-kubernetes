@@ -17,7 +17,6 @@ import (
 
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/containernetworking/plugins/pkg/testutils"
-	"github.com/coreos/go-iptables/iptables"
 	"github.com/stretchr/testify/mock"
 	"github.com/urfave/cli/v2"
 	"github.com/vishvananda/netlink"
@@ -28,6 +27,7 @@ import (
 	egressservicefake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	nodenft "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/nftables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/vishvananda/netlink"
@@ -59,8 +59,7 @@ func createTempFile(name string) (string, error) {
 }
 
 type managementPortTestConfig struct {
-	family   int
-	protocol iptables.Protocol
+	family int
 
 	clusterCIDR string
 	serviceCIDR string
@@ -84,51 +83,12 @@ func (mptc *managementPortTestConfig) GetMgtPortAddr() *netlink.Addr {
 	return mgtPortAddrs
 }
 
-// setMgmtPortTestIptables sets up fake IPV4 and IPV6 IPTables helpers with needed chains for management port
-func setMgmtPortTestIptables(configs []managementPortTestConfig) (util.IPTablesHelper, util.IPTablesHelper) {
-	var err error
-	iptV4, iptV6 := util.SetFakeIPTablesHelpers()
-	for _, cfg := range configs {
-		if cfg.protocol == iptables.ProtocolIPv4 {
-			err = iptV4.NewChain("nat", "POSTROUTING")
-			Expect(err).NotTo(HaveOccurred())
-			err = iptV4.NewChain("nat", "OVN-KUBE-SNAT-MGMTPORT")
-			Expect(err).NotTo(HaveOccurred())
-		} else {
-			err = iptV6.NewChain("nat", "POSTROUTING")
-			Expect(err).NotTo(HaveOccurred())
-			err = iptV6.NewChain("nat", "OVN-KUBE-SNAT-MGMTPORT")
-			Expect(err).NotTo(HaveOccurred())
-		}
-	}
-	return iptV4, iptV6
-}
+// checkMgmtPortTestNFTables validates nftables rules for management port
+func checkMgmtPortTestNFTables(configs []managementPortTestConfig, mgmtPortName string) {
+	nft := nodenft.SetFakeNFTablesHelper()
 
-// checkMgmtPortTestIptables validates Iptables rules for management port
-func checkMgmtPortTestIptables(configs []managementPortTestConfig, mgmtPortName string,
-	fakeIpv4, fakeIpv6 *util.FakeIPTables) {
-	var err error
-	for _, cfg := range configs {
-		expectedTables := map[string]util.FakeTable{
-			"nat": {
-				"POSTROUTING": []string{
-					"-o " + mgmtPortName + " -j OVN-KUBE-SNAT-MGMTPORT",
-				},
-				"OVN-KUBE-SNAT-MGMTPORT": []string{
-					"-o " + mgmtPortName + " -j SNAT --to-source " + cfg.expectedManagementPortIP + " -m comment --comment OVN SNAT to Management Port",
-				},
-			},
-			"filter": {},
-			"mangle": {},
-		}
-		if cfg.protocol == iptables.ProtocolIPv4 {
-			err = fakeIpv4.MatchState(expectedTables, nil)
-			Expect(err).NotTo(HaveOccurred())
-		} else {
-			err = fakeIpv6.MatchState(expectedTables, nil)
-			Expect(err).NotTo(HaveOccurred())
-		}
-	}
+	expected := "add table inet ovn-kubernetes\n"
+	Expect(nft.Dump()).To(Equal(expected))
 }
 
 // checkMgmtTestPortIpsAndRoutes checks IPs and Routes of the management port
@@ -250,7 +210,7 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 		mgtPortAddrs[i] = cfg.GetMgtPortAddr()
 	}
 
-	iptV4, iptV6 := setMgmtPortTestIptables(configs)
+	nodenft.SetFakeNFTablesHelper()
 
 	existingNode := v1.Node{ObjectMeta: metav1.ObjectMeta{
 		Name: nodeName,
@@ -306,7 +266,7 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 	err = waiter.Wait()
 	Expect(err).NotTo(HaveOccurred())
 
-	checkMgmtPortTestIptables(configs, mgtPort, iptV4.(*util.FakeIPTables), iptV6.(*util.FakeIPTables))
+	checkMgmtPortTestNFTables(configs, mgtPort)
 
 	updatedNode, err := fakeClient.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
 	Expect(err).NotTo(HaveOccurred())
@@ -459,7 +419,7 @@ func testManagementPortDPUHost(ctx *cli.Context, fexec *ovntest.FakeExec, testNS
 		mgtPortAddrs[i] = cfg.GetMgtPortAddr()
 	}
 
-	iptV4, iptV6 := setMgmtPortTestIptables(configs)
+	nodenft.SetFakeNFTablesHelper()
 
 	_, err = config.InitConfig(ctx, fexec, nil)
 	Expect(err).NotTo(HaveOccurred())
@@ -496,7 +456,7 @@ func testManagementPortDPUHost(ctx *cli.Context, fexec *ovntest.FakeExec, testNS
 	})
 	Expect(err).NotTo(HaveOccurred())
 
-	checkMgmtPortTestIptables(configs, mgtPort, iptV4.(*util.FakeIPTables), iptV6.(*util.FakeIPTables))
+	checkMgmtPortTestNFTables(configs, mgtPort)
 
 	Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 }
@@ -824,8 +784,7 @@ var _ = Describe("Management Port Operations", func() {
 					testManagementPort(ctx, fexec, testNS,
 						[]managementPortTestConfig{
 							{
-								family:   netlink.FAMILY_V4,
-								protocol: iptables.ProtocolIPv4,
+								family: netlink.FAMILY_V4,
 
 								clusterCIDR: v4clusterCIDR,
 								nodeSubnet:  v4nodeSubnet,
@@ -848,8 +807,7 @@ var _ = Describe("Management Port Operations", func() {
 					testManagementPort(ctx, fexec, testNS,
 						[]managementPortTestConfig{
 							{
-								family:   netlink.FAMILY_V6,
-								protocol: iptables.ProtocolIPv6,
+								family: netlink.FAMILY_V6,
 
 								clusterCIDR: v6clusterCIDR,
 								serviceCIDR: v6serviceCIDR,
@@ -874,8 +832,7 @@ var _ = Describe("Management Port Operations", func() {
 					testManagementPort(ctx, fexec, testNS,
 						[]managementPortTestConfig{
 							{
-								family:   netlink.FAMILY_V4,
-								protocol: iptables.ProtocolIPv4,
+								family: netlink.FAMILY_V4,
 
 								clusterCIDR: v4clusterCIDR,
 								serviceCIDR: v4serviceCIDR,
@@ -885,8 +842,7 @@ var _ = Describe("Management Port Operations", func() {
 								expectedGatewayIP:        v4gwIP,
 							},
 							{
-								family:   netlink.FAMILY_V6,
-								protocol: iptables.ProtocolIPv6,
+								family: netlink.FAMILY_V6,
 
 								clusterCIDR: v6clusterCIDR,
 								serviceCIDR: v6serviceCIDR,
@@ -925,8 +881,7 @@ var _ = Describe("Management Port Operations", func() {
 					testManagementPortDPU(ctx, fexec, testNS,
 						[]managementPortTestConfig{
 							{
-								family:   netlink.FAMILY_V4,
-								protocol: iptables.ProtocolIPv4,
+								family: netlink.FAMILY_V4,
 
 								clusterCIDR: v4clusterCIDR,
 								serviceCIDR: v4serviceCIDR,
@@ -965,8 +920,7 @@ var _ = Describe("Management Port Operations", func() {
 					testManagementPortDPUHost(ctx, fexec, testNS,
 						[]managementPortTestConfig{
 							{
-								family:   netlink.FAMILY_V4,
-								protocol: iptables.ProtocolIPv4,
+								family: netlink.FAMILY_V4,
 
 								clusterCIDR: v4clusterCIDR,
 								serviceCIDR: v4serviceCIDR,

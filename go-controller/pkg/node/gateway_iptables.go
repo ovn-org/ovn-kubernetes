@@ -208,49 +208,8 @@ func getITPLocalIPTRules(svcPort kapi.ServicePort, clusterIP string, svcHasLocal
 	}
 }
 
-// getNodePortETPLocalIPTRule returns the IPTable REDIRECT or RETURN rules for a service of type nodePort if ETP=local
-// `svcPort` corresponds to port details for this service as specified in the service object
-// `targetIP` corresponds to svc.spec.ClusterIP
-// This function returns a RETURN rule in iptableMgmPortChain to prevent SNAT of sourceIP
-func getNodePortETPLocalIPTRule(svcPort kapi.ServicePort, targetIP string) nodeipt.Rule {
-	return getSkipMgmtSNATRule(string(svcPort.Protocol), fmt.Sprintf("%d", svcPort.NodePort), "", getIPTablesProtocol(targetIP))
-}
-
-// getSkipMgmtSNATRule generates the return iptables rule for avoiding SNAT to mgmt port
-func getSkipMgmtSNATRule(protocol, port, destIP string, ipFamily iptables.Protocol) nodeipt.Rule {
-	args := make([]string, 0, 8)
-	args = append(args, "-p", protocol)
-	if len(destIP) > 0 {
-		args = append(args, "-d", destIP)
-	}
-	args = append(args, "--dport", port, "-j", "RETURN")
-	n := nodeipt.Rule{
-		Table:    "nat",
-		Chain:    iptableMgmPortChain,
-		Args:     args,
-		Protocol: ipFamily,
-	}
-	return n
-}
-
 func computeProbability(n, i int) string {
 	return fmt.Sprintf("%0.10f", 1.0/float64(n-i+1))
-}
-
-func generateSkipMgmtForLocalEndpoints(svcPort kapi.ServicePort, externalIP string, localEndpoints []string) []nodeipt.Rule {
-	iptRules := make([]nodeipt.Rule, 0, len(localEndpoints))
-	for _, localEndpoint := range localEndpoints {
-		if len(localEndpoint) == 0 {
-			continue
-		}
-		iptRules = append([]nodeipt.Rule{getSkipMgmtSNATRule(
-			string(svcPort.Protocol),
-			fmt.Sprintf("%v", int32(svcPort.TargetPort.IntValue())),
-			localEndpoint,
-			getIPTablesProtocol(externalIP),
-		)}, iptRules...)
-	}
-	return iptRules
 }
 
 func generateIPTRulesForLoadBalancersWithoutNodePorts(svcPort kapi.ServicePort, externalIP string, localEndpoints []string) []nodeipt.Rule {
@@ -637,7 +596,9 @@ func recreateIPTRules(table, chain string, keepIPTRules []nodeipt.Rule) error {
 	return utilerrors.Join(errors...)
 }
 
-// getGatewayIPTRules returns ClusterIP, NodePort, ExternalIP and LoadBalancer iptables rules for service.
+// getGatewayIPTRules returns ClusterIP, NodePort, ExternalIP and LoadBalancer iptables
+// rules for service. This must be used in conjunction with getGatewayNFTRules.
+//
 // case1: If !svcHasLocalHostNetEndPnt and svcTypeIsETPLocal rules that redirect traffic
 // to ovn-k8s-mp0 preserving sourceIP are added.
 //
@@ -670,8 +631,7 @@ func getGatewayIPTRules(service *kapi.Service, localEndpoints []string, svcHasLo
 					if config.Gateway.Mode == config.GatewayModeLocal {
 						rules = append(rules, getNodePortIPTRules(svcPort, clusterIP, svcPort.NodePort, svcHasLocalHostNetEndPnt, svcTypeIsETPLocal)...)
 					}
-					// add a skip SNAT rule to OVN-KUBE-SNAT-MGMTPORT to preserve sourceIP for etp=local traffic.
-					rules = append(rules, getNodePortETPLocalIPTRule(svcPort, clusterIP))
+					// Note: getGatewayNFTRules will add rules to ensure that sourceIP is preserved
 				}
 				// case2 (see function description for details)
 				rules = append(rules, getNodePortIPTRules(svcPort, clusterIP, svcPort.Port, svcHasLocalHostNetEndPnt, false)...)
@@ -680,7 +640,6 @@ func getGatewayIPTRules(service *kapi.Service, localEndpoints []string, svcHasLo
 
 		externalIPs := util.GetExternalAndLBIPs(service)
 
-		snatRulesCreated := false
 		for _, externalIP := range externalIPs {
 			err := util.ValidatePort(svcPort.Protocol, svcPort.Port)
 			if err != nil {
@@ -691,14 +650,9 @@ func getGatewayIPTRules(service *kapi.Service, localEndpoints []string, svcHasLo
 				if svcTypeIsETPLocal && !svcHasLocalHostNetEndPnt {
 					// case1 (see function description for details)
 					// DNAT traffic to masqueradeIP:nodePort instead of clusterIP:Port. We are leveraging the existing rules for NODEPORT
-					// service so no need to add skip SNAT rule to OVN-KUBE-SNAT-MGMTPORT since the corresponding nodePort svc would have one.
+					// service so no need to add a rule to skip SNAT since the corresponding nodePort svc would have one.
 					if !util.ServiceTypeHasNodePort(service) {
 						rules = append(rules, generateIPTRulesForLoadBalancersWithoutNodePorts(svcPort, externalIP, localEndpoints)...)
-						// These rules are per endpoint and should only be created one time per endpoint and port combination
-						if !snatRulesCreated {
-							rules = append(rules, generateSkipMgmtForLocalEndpoints(svcPort, externalIP, localEndpoints)...)
-							snatRulesCreated = true
-						}
 					} else {
 						rules = append(rules, getExternalIPTRules(svcPort, externalIP, "", svcHasLocalHostNetEndPnt, svcTypeIsETPLocal)...)
 					}

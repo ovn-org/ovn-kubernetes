@@ -14,6 +14,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	nodenft "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/nftables"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -379,19 +380,20 @@ func configureKubeOVNContext(nodeName string, useNetlink bool) *testCtx {
 		ifName:    nodeName,
 		link:      nil,
 		routerMAC: nil,
+		nft:       nodenft.SetFakeNFTablesHelper(),
 		ipv4: &managementPortIPFamilyConfig{
-			ipt:        nil,
 			allSubnets: nil,
 			ifAddr:     tc.mgmtPortIP4,
 			gwIP:       tc.mgmtPortIP4.IP,
 		},
 		ipv6: &managementPortIPFamilyConfig{
-			ipt:        nil,
 			allSubnets: nil,
 			ifAddr:     tc.mgmtPortIP6,
 			gwIP:       tc.mgmtPortIP6.IP,
 		},
 	}
+	err = setupManagementPortNFTables(fakeMgmtPortConfig)
+	Expect(err).NotTo(HaveOccurred())
 
 	fakeBridgeConfiguration := &bridgeConfiguration{bridgeName: "breth0"}
 
