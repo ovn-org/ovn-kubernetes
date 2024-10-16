@@ -325,11 +325,10 @@ func (oc *DefaultNetworkController) syncDb() error {
 		return fmt.Errorf("cleaning up stale pod selector address sets for network %v failed : %w", oc.GetNetworkName(), err)
 	}
 
-	// TBD Cathy
-	//err = oc.cleanupPodSelectorPortGroups()
-	//if err != nil {
-	//	return fmt.Errorf("cleaning up stale policy local pod selector port groups for network %v failed : %w", oc.GetNetworkName(), err)
-	//}
+	err = oc.deleteStaleNetpolPortGroups()
+	if err != nil {
+		return fmt.Errorf("cleaning up stale network policy port groups for network %v failed : %w", oc.GetNetworkName(), err)
+	}
 	return nil
 }
 

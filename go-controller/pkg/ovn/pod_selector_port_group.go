@@ -406,19 +406,9 @@ func getPodSelectorPortGroupDbIDs(psPgKey, controller string) *libovsdbops.DbObj
 	})
 }
 
-//func (bnc *BaseNetworkController) cleanupPodSelectorPortGroups() error {
-//	err := bnc.deleteStaleNetpolPortGroups()
-//	if err != nil {
-//		return fmt.Errorf("can't delete stale netpol port groups %w", err)
-//	}
-//
-//	predicateIDs := libovsdbops.NewDbObjectIDs(libovsdbops.PortGroupPodSelector, bnc.controllerName, nil)
-//	return libovsdbutil.DeletePortGroupsWithoutACLRef(predicateIDs, bnc.nbClient)
-//}
-//
-//// network policies will start using new shared address sets after the initial Add events handling.
-//// On the next restart old port groups will be unreferenced and can be safely deleted.
-//func (bnc *BaseNetworkController) deleteStaleNetpolPortGroups() error {
-//	predicateIDs := libovsdbops.NewDbObjectIDs(libovsdbops.PortGroupNetworkPolicy, bnc.controllerName, nil)
-//	return libovsdbutil.DeletePortGroupsWithoutACLRef(predicateIDs, bnc.nbClient)
-//}
+// network policies will start using new shared port groups after the initial Add events handling.
+// On the next restart old port groups will be unreferenced and can be safely deleted.
+func (bnc *BaseNetworkController) deleteStaleNetpolPortGroups() error {
+	predicateIDs := libovsdbops.NewDbObjectIDs(libovsdbops.PortGroupNetworkPolicy, bnc.controllerName, nil)
+	return libovsdbutil.DeletePortGroupsWithoutACLRef(predicateIDs, bnc.nbClient)
+}

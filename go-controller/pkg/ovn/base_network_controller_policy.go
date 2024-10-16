@@ -287,24 +287,36 @@ func (bnc *BaseNetworkController) syncNetworkPoliciesCommon(expectedPolicies map
 	// Delete port groups with acls first, since address sets may be referenced in these acls, and
 	// cause SyntaxError in ovn-controller, if address sets deleted first, but acls still reference them.
 
-	// cleanup port groups
-	// netpol-owned port groups first
-	predicateIDs := libovsdbops.NewDbObjectIDs(libovsdbops.PortGroupNetworkPolicy, bnc.controllerName, nil)
-	p := libovsdbops.GetPredicate[*nbdb.PortGroup](predicateIDs, func(item *nbdb.PortGroup) bool {
+	// find all stale network policy based ACLs, remove them from port groups
+	predicateIDs := libovsdbops.NewDbObjectIDs(libovsdbops.ACLNetworkPolicy, bnc.controllerName, nil)
+	p := libovsdbops.GetPredicate[*nbdb.ACL](predicateIDs, func(item *nbdb.ACL) bool {
 		namespace, policyName, err := libovsdbops.ParseNamespaceNameKey(item.ExternalIDs[libovsdbops.ObjectNameKey.String()])
 		if err != nil {
 			klog.Errorf("Failed to sync stale network policy %v: port group IDs parsing failed: %v",
 				item.ExternalIDs[libovsdbops.ObjectNameKey.String()], err)
 			return false
 		}
-		// delete if policy is not present in expectedPolicies
+		// ACL is stale if policy is not present in expectedPolicies
 		return !expectedPolicies[namespace][policyName]
 	})
-	if err := libovsdbops.DeletePortGroupsWithPredicate(bnc.nbClient, p); err != nil {
-		return fmt.Errorf("cannot delete namespace NetworkPolicy port groups: %v", err)
+	staleACLs, err := libovsdbops.FindACLsWithPredicate(bnc.nbClient, p)
+	if err != nil {
+		return fmt.Errorf("unable to find stale ACLs, cannot update stale data: %v", err)
+	}
+	err = libovsdbops.DeleteACLsFromAllPortGroups(bnc.nbClient, staleACLs...)
+	if err != nil {
+		return fmt.Errorf("unable delete stale ACLs from port groups: %v", err)
+	}
+	predicateIDs = libovsdbops.NewDbObjectIDs(libovsdbops.PortGroupPodSelector, bnc.controllerName, nil)
+	predicate := libovsdbops.GetPredicate[*nbdb.PortGroup](predicateIDs, func(item *nbdb.PortGroup) bool {
+		return len(item.ACLs) == 0
+	})
+	err = libovsdbops.DeletePortGroupsWithPredicate(bnc.nbClient, predicate)
+	if err != nil {
+		return fmt.Errorf("unable delete stale pod selector port groups: %v", err)
 	}
 
-	// netpol-namespace-owned default deny port groups
+	// cleanup stale netpol-namespace-owned default deny port groups
 	predicateIDs = libovsdbops.NewDbObjectIDs(libovsdbops.PortGroupNetpolNamespace, bnc.controllerName, nil)
 	p = libovsdbops.GetPredicate[*nbdb.PortGroup](predicateIDs, func(item *nbdb.PortGroup) bool {
 		namespace := item.ExternalIDs[libovsdbops.ObjectNameKey.String()]

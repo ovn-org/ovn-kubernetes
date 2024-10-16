@@ -38,7 +38,7 @@ func BuildPortGroup(pgIDs *libovsdbops.DbObjectIDs, ports []*nbdb.LogicalSwitchP
 	return &pg
 }
 
-// DeleteAddrSetsWithoutACLRef deletes the address sets related to the predicateIDs without any acl reference.
+// DeletePortGroupsWithoutACLRef deletes the port groups related to the predicateIDs without any acl reference.
 func DeletePortGroupsWithoutACLRef(predicateIDs *libovsdbops.DbObjectIDs, nbClient libovsdbclient.Client) error {
 	// Get the list of existing address sets for the predicateIDs. Fill the address set
 	// names and mark them as unreferenced.
