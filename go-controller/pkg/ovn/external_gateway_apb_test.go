@@ -3007,7 +3007,116 @@ var _ = ginkgo.Describe("OVN for APB External Route Operations", func() {
 			err := app.Run([]string{app.Name})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
+		ginkgo.It("correctly repair when a pod has a wrong combination of host network field and routing-network annotation", func() {
+			app.Action = func(ctx *cli.Context) error {
+				config.Gateway.Mode = config.GatewayModeLocal
+				asIndex := apbroute.GetHybridRouteAddrSetDbIDs("node1", DefaultNetworkControllerName)
+				asv4, _ := addressset.GetHashNamesForAS(asIndex)
+
+				node1 := tNode{
+					Name:                 "node1",
+					NodeIP:               "1.2.3.4",
+					NodeLRPMAC:           "0a:58:0a:01:01:01",
+					LrpIP:                "100.64.0.2",
+					LrpIPv6:              "fd98::2",
+					DrLrpIP:              "100.64.0.1",
+					PhysicalBridgeMAC:    "11:22:33:44:55:66",
+					SystemID:             "cb9ec8fa-b409-4ef3-9f42-d9283c47aac6",
+					NodeSubnet:           "10.1.1.0/24",
+					GWRouter:             ovntypes.GWRouterPrefix + "node1",
+					GatewayRouterIPMask:  "172.16.16.2/24",
+					GatewayRouterIP:      "172.16.16.2",
+					GatewayRouterNextHop: "172.16.16.1",
+					PhysicalBridgeName:   "br-eth0",
+					NodeGWIP:             "10.1.1.1/24",
+					NodeMgmtPortIP:       "10.1.1.2",
+					NodeMgmtPortMAC:      "0a:58:0a:01:01:02",
+					DnatSnatIP:           "169.254.0.1",
+				}
+				// create a test node and annotate it with host subnet
+				testNode := node1.k8sNode("2")
+
+				namespaceT := *newNamespace(namespaceName)
+				namespaceX := *newNamespace("namespace2")
+
+				gwPod := *newPod(namespaceX.Name, "gwPod", "node1", "9.0.0.1")
+				gwPod.ObjectMeta.Annotations = map[string]string{
+					"k8s.ovn.org/routing-namespaces": namespaceT.Name,
+					"k8s.ovn.org/routing-network":    "",
+				}
+
+				fakeOvn.startWithDBSetup(
+					libovsdbtest.TestSetup{
+						NBData: []libovsdbtest.TestData{
+							&nbdb.LogicalRouterStaticRoute{
+								UUID:     "static-route-1-UUID",
+								IPPrefix: "10.128.1.3/32",
+								Nexthop:  "9.0.0.1",
+								Options: map[string]string{
+									"ecmp_symmetric_reply": "true",
+								},
+								OutputPort: &logicalRouterPort,
+								Policy:     &nbdb.LogicalRouterStaticRoutePolicySrcIP,
+							},
+							&nbdb.LogicalRouterPolicy{
+								UUID:     "501-new-UUID",
+								Priority: ovntypes.HybridOverlayReroutePriority,
+								Action:   nbdb.LogicalRouterPolicyActionReroute,
+								Nexthops: []string{"100.64.0.4"},
+								Match:    "inport == \"rtos-node1\" && ip4.src == $" + asv4 + " && ip4.dst != 10.128.0.0/14",
+							},
+							&nbdb.LogicalRouter{
+								Name:     ovntypes.OVNClusterRouter,
+								UUID:     ovntypes.OVNClusterRouter + "-UUID",
+								Policies: []string{"501-new-UUID"},
+							},
+							&nbdb.LogicalRouter{
+								UUID:         "GR_node1-UUID",
+								Name:         "GR_node1",
+								Ports:        []string{ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + "node1" + "-UUID"},
+								StaticRoutes: []string{"static-route-1-UUID"},
+							},
+							&nbdb.LogicalRouterPort{
+								UUID:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + "node1" + "-UUID",
+								Name:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + "node1",
+								Networks: []string{"100.64.0.4/32"},
+							},
+						},
+					},
+					&v1.NodeList{
+						Items: []v1.Node{
+							testNode,
+						},
+					},
+					&v1.PodList{
+						Items: []v1.Pod{
+							gwPod,
+						},
+					},
+				)
+
+				nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{KClient: fakeOvn.fakeClient.KubeClient},
+					testNode.Name)
+
+				vlanID := uint(1024)
+				l3Config := node1.gatewayConfig(config.GatewayModeLocal, vlanID)
+				err := util.SetL3GatewayConfig(nodeAnnotator, l3Config)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = nodeAnnotator.Run()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				err = fakeOvn.controller.apbExternalRouteController.Repair()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+
 	})
+
 	ginkgo.Context("SNAT on gateway router operations", func() {
 		ginkgo.It("add/delete SNAT per pod on gateway router", func() {
 			app.Action = func(ctx *cli.Context) error {
