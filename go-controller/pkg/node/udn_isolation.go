@@ -2,6 +2,7 @@ package node
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -29,8 +30,13 @@ import (
 )
 
 const (
-	nftablesUDNPodIPsv4 = "udn-pod-default-ips-v4"
-	nftablesUDNPodIPsv6 = "udn-pod-default-ips-v6"
+	// nftables set names
+	nftablesUDNOpenPortsv4     = "udn-open-ports-v4"
+	nftablesUDNOpenPortsv6     = "udn-open-ports-v6"
+	nftablesUDNOpenPortsICMPv4 = "udn-open-ports-icmp-v4"
+	nftablesUDNOpenPortsICMPv6 = "udn-open-ports-icmp-v6"
+	nftablesUDNPodIPsv4        = "udn-pod-default-ips-v4"
+	nftablesUDNPodIPsv6        = "udn-pod-default-ips-v6"
 )
 
 // UDNHostIsolationManager manages the host isolation for user defined networks.
@@ -46,17 +52,27 @@ type UDNHostIsolationManager struct {
 
 	udnPodIPsv4 *nftPodElementsSet
 	udnPodIPsv6 *nftPodElementsSet
+
+	udnOpenPortsv4 *nftPodElementsSet
+	udnOpenPortsv6 *nftPodElementsSet
+
+	udnOpenPortsICMPv4 *nftPodElementsSet
+	udnOpenPortsICMPv6 *nftPodElementsSet
 }
 
 func NewUDNHostIsolationManager(ipv4, ipv6 bool, podInformer coreinformers.PodInformer,
 	nadController *nad.NetAttachDefinitionController) *UDNHostIsolationManager {
 	m := &UDNHostIsolationManager{
-		podLister:     podInformer.Lister(),
-		nadController: nadController,
-		ipv4:          ipv4,
-		ipv6:          ipv6,
-		udnPodIPsv4:   newNFTPodElementsSet(nftablesUDNPodIPsv4),
-		udnPodIPsv6:   newNFTPodElementsSet(nftablesUDNPodIPsv6),
+		podLister:          podInformer.Lister(),
+		nadController:      nadController,
+		ipv4:               ipv4,
+		ipv6:               ipv6,
+		udnPodIPsv4:        newNFTPodElementsSet(nftablesUDNPodIPsv4, false),
+		udnPodIPsv6:        newNFTPodElementsSet(nftablesUDNPodIPsv6, false),
+		udnOpenPortsv4:     newNFTPodElementsSet(nftablesUDNOpenPortsv4, true),
+		udnOpenPortsv6:     newNFTPodElementsSet(nftablesUDNOpenPortsv6, true),
+		udnOpenPortsICMPv4: newNFTPodElementsSet(nftablesUDNOpenPortsICMPv4, false),
+		udnOpenPortsICMPv6: newNFTPodElementsSet(nftablesUDNOpenPortsICMPv6, false),
 	}
 	controllerConfig := &controller.ControllerConfig[v1.Pod]{
 		RateLimiter:    workqueue.NewTypedItemFastSlowRateLimiter[string](time.Second, 5*time.Second, 5),
@@ -93,6 +109,7 @@ func (m *UDNHostIsolationManager) Start(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed getting nftables helper: %w", err)
 	}
+
 	m.nft = nft
 	if err = m.setupUDNFromHostIsolation(); err != nil {
 		return fmt.Errorf("failed to setup UDN host isolation: %w", err)
@@ -125,6 +142,22 @@ func CleanupUDNHostIsolation() error {
 		Name: nftablesUDNPodIPsv6,
 		Type: "ipv6_addr",
 	})
+	safeDelete(tx, &knftables.Set{
+		Name: nftablesUDNOpenPortsv4,
+		Type: "ipv4_addr . inet_proto . inet_service",
+	})
+	safeDelete(tx, &knftables.Set{
+		Name: nftablesUDNOpenPortsv6,
+		Type: "ipv6_addr . inet_proto . inet_service",
+	})
+	safeDelete(tx, &knftables.Set{
+		Name: nftablesUDNOpenPortsICMPv4,
+		Type: "ipv4_addr",
+	})
+	safeDelete(tx, &knftables.Set{
+		Name: nftablesUDNOpenPortsICMPv6,
+		Type: "ipv6_addr",
+	})
 	return nft.Run(context.TODO(), tx)
 }
 
@@ -139,6 +172,26 @@ func (m *UDNHostIsolationManager) setupUDNFromHostIsolation() error {
 	})
 	tx.Flush(&knftables.Chain{
 		Name: nodenft.UDNIsolationChain,
+	})
+	tx.Add(&knftables.Set{
+		Name:    nftablesUDNOpenPortsv4,
+		Comment: knftables.PtrTo("default network open ports of pods in user defined networks (IPv4)"),
+		Type:    "ipv4_addr . inet_proto . inet_service",
+	})
+	tx.Add(&knftables.Set{
+		Name:    nftablesUDNOpenPortsv6,
+		Comment: knftables.PtrTo("default network open ports of pods in user defined networks (IPv6)"),
+		Type:    "ipv6_addr . inet_proto . inet_service",
+	})
+	tx.Add(&knftables.Set{
+		Name:    nftablesUDNOpenPortsICMPv4,
+		Comment: knftables.PtrTo("default network IPs of pods in user defined networks that allow ICMP (IPv4)"),
+		Type:    "ipv4_addr",
+	})
+	tx.Add(&knftables.Set{
+		Name:    nftablesUDNOpenPortsICMPv6,
+		Comment: knftables.PtrTo("default network IPs of pods in user defined networks that allow ICMP (IPv6)"),
+		Type:    "ipv6_addr",
 	})
 	tx.Add(&knftables.Set{
 		Name:    nftablesUDNPodIPsv4,
@@ -164,6 +217,21 @@ func (m *UDNHostIsolationManager) addRules(tx *knftables.Transaction) {
 		tx.Add(&knftables.Rule{
 			Chain: nodenft.UDNIsolationChain,
 			Rule: knftables.Concat(
+				"ip", "daddr", ".", "meta l4proto", ".", "th dport",
+				"@", nftablesUDNOpenPortsv4, "accept",
+			),
+		})
+		tx.Add(&knftables.Rule{
+			Chain: nodenft.UDNIsolationChain,
+			Rule: knftables.Concat(
+				"ip", "daddr", "@", nftablesUDNOpenPortsICMPv4, "meta l4proto", "icmp",
+				"accept",
+			),
+		})
+
+		tx.Add(&knftables.Rule{
+			Chain: nodenft.UDNIsolationChain,
+			Rule: knftables.Concat(
 				"socket", "cgroupv2", "level 2", m.kubeletCgroupPath,
 				"ip", "daddr", "@", nftablesUDNPodIPsv4, "accept"),
 		})
@@ -174,6 +242,20 @@ func (m *UDNHostIsolationManager) addRules(tx *knftables.Transaction) {
 		})
 	}
 	if m.ipv6 {
+		tx.Add(&knftables.Rule{
+			Chain: nodenft.UDNIsolationChain,
+			Rule: knftables.Concat(
+				"ip6", "daddr", ".", "meta l4proto", ".", "th dport",
+				"@", nftablesUDNOpenPortsv6, "accept",
+			),
+		})
+		tx.Add(&knftables.Rule{
+			Chain: nodenft.UDNIsolationChain,
+			Rule: knftables.Concat(
+				"ip6", "daddr", "@", nftablesUDNOpenPortsICMPv6, "meta l4proto", "icmpv6",
+				"accept",
+			),
+		})
 		tx.Add(&knftables.Rule{
 			Chain: nodenft.UDNIsolationChain,
 			Rule: knftables.Concat(
@@ -261,42 +343,57 @@ func (m *UDNHostIsolationManager) runKubeletRestartTracker(ctx context.Context) 
 }
 
 func (m *UDNHostIsolationManager) podInitialSync() error {
+	udnPodIPsv4 := map[string]sets.Set[string]{}
+	udnPodIPsv6 := map[string]sets.Set[string]{}
+	udnOpenPortsICMPv4 := map[string]sets.Set[string]{}
+	udnOpenPortsICMPv6 := map[string]sets.Set[string]{}
+	udnOpenPortsv4 := map[string]sets.Set[string]{}
+	udnOpenPortsv6 := map[string]sets.Set[string]{}
+
 	pods, err := m.podLister.List(labels.Everything())
 	if err != nil {
 		return fmt.Errorf("failed to list pods: %v", err)
 	}
-	v4PodsIPs := map[string]sets.Set[string]{}
-	v6PodsIPs := map[string]sets.Set[string]{}
-	for _, pod := range pods {
-		// only add pods with primary UDN
-		primaryUDN, err := m.isPodPrimaryUDN(pod)
-		if err != nil {
-			return fmt.Errorf("failed to check if pod %s in namespace %s is in primary UDN: %w", pod.Name, pod.Namespace, err)
-		}
-		if !primaryUDN {
-			continue
-		}
 
-		podIPs, err := util.DefaultNetworkPodIPs(pod)
-		if err != nil {
-			return fmt.Errorf("failed to get pod IPs for pod %s in namespace %s: %v", pod.Name, pod.Namespace, err)
-		}
-		if podIPs == nil {
-			continue
-		}
-		newV4IPs, newV6IPs := splitIPsPerFamily(podIPs)
+	for _, pod := range pods {
 		podKey, err := cache.MetaNamespaceKeyFunc(pod)
 		if err != nil {
 			klog.Warningf("UDNHostIsolationManager failed to get key for pod %s in namespace %s: %v", pod.Name, pod.Namespace, err)
 			continue
 		}
-		v4PodsIPs[podKey] = newV4IPs
-		v6PodsIPs[podKey] = newV6IPs
+		// ignore openPorts parse error in initial sync
+		pi, _, err := m.getPodInfo(podKey, pod)
+		if err != nil {
+			return err
+		}
+		if pi == nil {
+			// this pod doesn't need to be updated
+			continue
+		}
+
+		udnPodIPsv4[podKey] = pi.ipsv4
+		udnPodIPsv6[podKey] = pi.ipsv6
+		udnOpenPortsICMPv4[podKey] = pi.icmpv4
+		udnOpenPortsICMPv6[podKey] = pi.icmpv6
+		udnOpenPortsv4[podKey] = pi.openPortsv4
+		udnOpenPortsv6[podKey] = pi.openPortsv6
 	}
-	if err = m.udnPodIPsv4.fullSync(m.nft, v4PodsIPs); err != nil {
+	if err = m.udnPodIPsv4.fullSync(m.nft, udnPodIPsv4); err != nil {
 		return err
 	}
-	if err = m.udnPodIPsv6.fullSync(m.nft, v6PodsIPs); err != nil {
+	if err = m.udnPodIPsv6.fullSync(m.nft, udnPodIPsv6); err != nil {
+		return err
+	}
+	if err = m.udnOpenPortsICMPv4.fullSync(m.nft, udnOpenPortsICMPv4); err != nil {
+		return err
+	}
+	if err = m.udnOpenPortsICMPv6.fullSync(m.nft, udnOpenPortsICMPv6); err != nil {
+		return err
+	}
+	if err = m.udnOpenPortsv4.fullSync(m.nft, udnOpenPortsv4); err != nil {
+		return err
+	}
+	if err = m.udnOpenPortsv6.fullSync(m.nft, udnOpenPortsv6); err != nil {
 		return err
 	}
 	return nil
@@ -320,43 +417,71 @@ func (m *UDNHostIsolationManager) reconcilePod(key string) error {
 	if err != nil {
 		if kerrors.IsNotFound(err) {
 			// Pod was deleted, clean up.
-			return m.updateUDNPodIPs(key, nil)
+			return m.updateWithPodInfo(key, &podInfo{})
 		}
 		return fmt.Errorf("failed to fetch pod %s in namespace %s", name, namespace)
+	}
+	pi, parseErr, err := m.getPodInfo(key, pod)
+	if err != nil {
+		return err
+	}
+	if pi == nil {
+		// this pod doesn't need to be updated
+		return nil
+	}
+	err = m.updateWithPodInfo(key, pi)
+	return errors.Join(err, parseErr)
+}
+
+type podInfo struct {
+	ipsv4       sets.Set[string]
+	ipsv6       sets.Set[string]
+	icmpv4      sets.Set[string]
+	icmpv6      sets.Set[string]
+	openPortsv4 sets.Set[string]
+	openPortsv6 sets.Set[string]
+}
+
+// getPodInfo returns nftables set elements for a pod.
+// nil is returned when pod should not be updated.
+// empty podInfo will delete the pod from all sets and is returned when nil pod is passed.
+// first error is for parsing openPorts annotation, second error is for fetching pod IPs.
+// parsing error should not stop the update, as we need to cleanup potentially present rules from the previous config.
+func (m *UDNHostIsolationManager) getPodInfo(podKey string, pod *v1.Pod) (*podInfo, error, error) {
+	pi := &podInfo{}
+	if pod == nil {
+		return pi, nil, nil
 	}
 	// only add pods with primary UDN
 	primaryUDN, err := m.isPodPrimaryUDN(pod)
 	if err != nil {
-		return fmt.Errorf("failed to check if pod %s in namespace %s is in primary UDN: %w", name, namespace, err)
+		return nil, nil, fmt.Errorf("failed to check if pod %s is in primary UDN: %w", podKey, err)
 	}
 	if !primaryUDN {
-		return nil
+		return nil, nil, nil
 	}
 	podIPs, err := util.DefaultNetworkPodIPs(pod)
 	if err != nil {
 		// update event should come later with ips
-		klog.V(5).Infof("Failed to get default network pod IPs for pod %s in namespace %s: %v", name, namespace, err)
-		return nil
+		klog.V(5).Infof("Failed to get default network pod IPs for pod %s: %v", podKey, err)
+		return nil, nil, nil
 	}
-	return m.updateUDNPodIPs(key, podIPs)
+	openPorts, parseErr := util.UnmarshalUDNOpenPortsAnnotation(pod.Annotations)
+	pi.ipsv4, pi.ipsv6 = splitIPsPerFamily(podIPs)
+	pi.icmpv4, pi.icmpv6, pi.openPortsv4, pi.openPortsv6 = m.getOpenPortSets(pi.ipsv4, pi.ipsv6, openPorts)
+	return pi, parseErr, nil
 }
 
-func (m *UDNHostIsolationManager) isPodPrimaryUDN(pod *v1.Pod) (bool, error) {
-	activeNetwork, err := m.nadController.GetActiveNetworkForNamespace(pod.Namespace)
-	if err != nil {
-		return false, err
-	}
-	return activeNetwork.IsPrimaryNetwork() && !activeNetwork.IsDefault(), nil
-}
-
-// updateUDNPodIPs updates the nftables set with default-network pod IPs of a UDN pod.
-// nil podIPs will remove the pod from the set.
-func (m *UDNHostIsolationManager) updateUDNPodIPs(namespacedName string, podIPs []net.IP) error {
+// updateWithPodInfo updates the nftables sets with given podInfo for a given pod.
+// empty podInfo will delete the pod from all sets.
+func (m *UDNHostIsolationManager) updateWithPodInfo(podKey string, pi *podInfo) error {
 	tx := m.nft.NewTransaction()
-	newV4IPs, newV6IPs := splitIPsPerFamily(podIPs)
-
-	m.udnPodIPsv4.updatePodElementsTX(namespacedName, newV4IPs, tx)
-	m.udnPodIPsv6.updatePodElementsTX(namespacedName, newV6IPs, tx)
+	m.udnPodIPsv4.updatePodElementsTX(podKey, pi.ipsv4, tx)
+	m.udnPodIPsv6.updatePodElementsTX(podKey, pi.ipsv6, tx)
+	m.udnOpenPortsICMPv4.updatePodElementsTX(podKey, pi.icmpv4, tx)
+	m.udnOpenPortsICMPv6.updatePodElementsTX(podKey, pi.icmpv6, tx)
+	m.udnOpenPortsv4.updatePodElementsTX(podKey, pi.openPortsv4, tx)
+	m.udnOpenPortsv6.updatePodElementsTX(podKey, pi.openPortsv6, tx)
 
 	if tx.NumOperations() == 0 {
 		return nil
@@ -368,9 +493,43 @@ func (m *UDNHostIsolationManager) updateUDNPodIPs(namespacedName string, podIPs 
 	}
 
 	// update internal state only after successful transaction
-	m.udnPodIPsv4.updatePodElementsAfterTX(namespacedName, newV4IPs)
-	m.udnPodIPsv6.updatePodElementsAfterTX(namespacedName, newV6IPs)
+	m.udnPodIPsv4.updatePodElementsAfterTX(podKey, pi.ipsv4)
+	m.udnPodIPsv6.updatePodElementsAfterTX(podKey, pi.ipsv6)
+	m.udnOpenPortsICMPv4.updatePodElementsAfterTX(podKey, pi.icmpv4)
+	m.udnOpenPortsICMPv6.updatePodElementsAfterTX(podKey, pi.icmpv6)
+	m.udnOpenPortsv4.updatePodElementsAfterTX(podKey, pi.openPortsv4)
+	m.udnOpenPortsv6.updatePodElementsAfterTX(podKey, pi.openPortsv6)
 	return nil
+}
+
+func (m *UDNHostIsolationManager) isPodPrimaryUDN(pod *v1.Pod) (bool, error) {
+	activeNetwork, err := m.nadController.GetActiveNetworkForNamespace(pod.Namespace)
+	if err != nil {
+		return false, err
+	}
+	return activeNetwork.IsPrimaryNetwork() && !activeNetwork.IsDefault(), nil
+}
+
+func (m *UDNHostIsolationManager) getOpenPortSets(newV4IPs, newV6IPs sets.Set[string], openPorts []*util.OpenPort) (icmpv4, icmpv6, openPortsv4, openPortsv6 sets.Set[string]) {
+	icmpv4 = sets.New[string]()
+	icmpv6 = sets.New[string]()
+	openPortsv4 = sets.New[string]()
+	openPortsv6 = sets.New[string]()
+
+	for _, openPort := range openPorts {
+		if openPort.Protocol == "icmp" {
+			icmpv4 = newV4IPs
+			icmpv6 = newV6IPs
+		} else {
+			for podIPv4 := range newV4IPs {
+				openPortsv4.Insert(joinNFTSlice([]string{podIPv4, openPort.Protocol, fmt.Sprintf("%d", *openPort.Port)}))
+			}
+			for podIPv6 := range newV6IPs {
+				openPortsv6.Insert(joinNFTSlice([]string{podIPv6, openPort.Protocol, fmt.Sprintf("%d", *openPort.Port)}))
+			}
+		}
+	}
+	return
 }
 
 // nftPodElementsSet is a helper struct to manage an nftables set with pod-owned elements.
@@ -383,14 +542,25 @@ type nftPodElementsSet struct {
 	// That means a new pod with the same IP may be added before the previous pod is deleted.
 	// To avoid deleting newly-added pod IP thinking we are deleting old pod IP, we keep track of re-used set elements.
 	elementToPods map[string]sets.Set[string]
+	// if a set element is composed of multiple strings
+	// set to false to avoid unneeded parsing
+	composedValue bool
 }
 
-func newNFTPodElementsSet(setName string) *nftPodElementsSet {
+func newNFTPodElementsSet(setName string, composedValue bool) *nftPodElementsSet {
 	return &nftPodElementsSet{
 		setName:       setName,
+		composedValue: composedValue,
 		podElements:   make(map[string]sets.Set[string]),
 		elementToPods: make(map[string]sets.Set[string]),
 	}
+}
+
+func (n *nftPodElementsSet) getKey(key string) []string {
+	if n.composedValue {
+		return splitNFTSlice(key)
+	}
+	return []string{key}
 }
 
 // updatePodElementsTX adds transaction operations to update pod elements in nftables set.
@@ -402,10 +572,10 @@ func (n *nftPodElementsSet) updatePodElementsTX(namespacedName string, podElemen
 	// always delete all old elements, then add new elements.
 	for existingElem := range n.podElements[namespacedName] {
 		if n.elementToPods[existingElem].Len() == 1 {
-			// only delete element if it is referenced by one pod
+			// only delete element is it referenced by one pod
 			tx.Delete(&knftables.Element{
 				Set: n.setName,
-				Key: []string{existingElem},
+				Key: n.getKey(existingElem),
 			})
 		}
 	}
@@ -413,7 +583,7 @@ func (n *nftPodElementsSet) updatePodElementsTX(namespacedName string, podElemen
 		// adding existing element is a no-op
 		tx.Add(&knftables.Element{
 			Set: n.setName,
-			Key: []string{newElem},
+			Key: n.getKey(newElem),
 		})
 	}
 }
@@ -456,7 +626,7 @@ func (n *nftPodElementsSet) fullSync(nft knftables.Interface, podsElements map[s
 		for elem := range podElements {
 			tx.Add(&knftables.Element{
 				Set: n.setName,
-				Key: []string{elem},
+				Key: n.getKey(elem),
 			})
 			if n.elementToPods[elem] == nil {
 				n.elementToPods[elem] = sets.New[string]()
@@ -489,4 +659,15 @@ func splitIPsPerFamily(podIPs []net.IP) (sets.Set[string], sets.Set[string]) {
 func safeDelete(tx *knftables.Transaction, obj knftables.Object) {
 	tx.Add(obj)
 	tx.Delete(obj)
+}
+
+// joinNFTSlice converts nft element key or value (type []string) to string to store in the nftElementStorage.
+// The separator is the same as the one used by nft commands, so we know that the parsing is going to be unambiguous.
+func joinNFTSlice(k []string) string {
+	return strings.Join(k, " . ")
+}
+
+// splitNFTSlice converts nftElementStorage key or value string representation back to slice.
+func splitNFTSlice(k string) []string {
+	return strings.Split(k, " . ")
 }
