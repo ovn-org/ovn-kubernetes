@@ -1286,6 +1286,13 @@ spec:
 				defaultNetNamespace, []string{}, nil)
 			Expect(err).NotTo(HaveOccurred())
 
+			By("creating default network hostNetwork client pod")
+			hostNetPod, err := createPod(f, "host-net-client-pod", workerOneNodeName,
+				defaultNetNamespace, []string{}, nil, func(pod *v1.Pod) {
+					pod.Spec.HostNetwork = true
+				})
+			Expect(err).NotTo(HaveOccurred())
+
 			udnIPv4, udnIPv6, err := podIPsForDefaultNetwork(
 				cs,
 				f.Namespace.Name,
@@ -1302,6 +1309,11 @@ spec:
 				Consistently(func() bool {
 					return connectToServer(podConfiguration{namespace: defaultClientPod.Namespace, name: defaultClientPod.Name}, destIP, port) != nil
 				}, 5*time.Second).Should(BeTrue())
+
+				By("checking the default hostNetwork pod can't reach UDN pod on IP " + destIP)
+				Consistently(func() bool {
+					return connectToServer(podConfiguration{namespace: hostNetPod.Namespace, name: hostNetPod.Name}, destIP, port) != nil
+				}, 5*time.Second).Should(BeTrue())
 			}
 
 			By("Open UDN pod port")
@@ -1317,9 +1329,14 @@ spec:
 				if destIP == "" {
 					continue
 				}
-				By("checking the default network pod can't reach UDN pod on IP " + destIP)
+				By("checking the default network pod can reach UDN pod on IP " + destIP)
 				Eventually(func() bool {
 					return connectToServer(podConfiguration{namespace: defaultClientPod.Namespace, name: defaultClientPod.Name}, destIP, port) == nil
+				}, 5*time.Second).Should(BeTrue())
+
+				By("checking the default hostNetwork pod can reach UDN pod on IP " + destIP)
+				Eventually(func() bool {
+					return connectToServer(podConfiguration{namespace: hostNetPod.Namespace, name: hostNetPod.Name}, destIP, port) == nil
 				}, 5*time.Second).Should(BeTrue())
 			}
 
@@ -1339,6 +1356,11 @@ spec:
 				By("checking the default network pod can't reach UDN pod on IP " + destIP)
 				Eventually(func() bool {
 					return connectToServer(podConfiguration{namespace: defaultClientPod.Namespace, name: defaultClientPod.Name}, destIP, port) != nil
+				}, 5*time.Second).Should(BeTrue())
+
+				By("checking the default hostNetwork pod can't reach UDN pod on IP " + destIP)
+				Eventually(func() bool {
+					return connectToServer(podConfiguration{namespace: hostNetPod.Namespace, name: hostNetPod.Name}, destIP, port) != nil
 				}, 5*time.Second).Should(BeTrue())
 			}
 			By("Verify syntax error is reported via event")
