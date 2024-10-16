@@ -64,16 +64,16 @@ type DefaultNetworkController struct {
 	// EgressQoS
 	egressQoSLister egressqoslisters.EgressQoSLister
 	egressQoSSynced cache.InformerSynced
-	egressQoSQueue  workqueue.RateLimitingInterface
+	egressQoSQueue  workqueue.TypedRateLimitingInterface[string]
 	egressQoSCache  sync.Map
 
 	egressQoSPodLister corev1listers.PodLister
 	egressQoSPodSynced cache.InformerSynced
-	egressQoSPodQueue  workqueue.RateLimitingInterface
+	egressQoSPodQueue  workqueue.TypedRateLimitingInterface[string]
 
 	egressQoSNodeLister corev1listers.NodeLister
 	egressQoSNodeSynced cache.InformerSynced
-	egressQoSNodeQueue  workqueue.RateLimitingInterface
+	egressQoSNodeQueue  workqueue.TypedRateLimitingInterface[string]
 
 	// Cluster wide Load_Balancer_Group UUID.
 	// Includes all node switches and node gateway routers.
@@ -553,6 +553,19 @@ func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 				oc.checkAndDeleteStaleConntrackEntries()
 			}, time.Minute*1, oc.stopChan)
 		}
+	}
+
+	if config.OVNKubernetesFeature.EnableNetworkQoS {
+		err := oc.newNetworkQoSController()
+		if err != nil {
+			return fmt.Errorf("unable to create network qos controller, err: %w", err)
+		}
+		oc.wg.Add(1)
+		go func() {
+			defer oc.wg.Done()
+			// Until we have scale issues in future let's spawn only one thread
+			oc.nqosController.Run(1, oc.stopChan)
+		}()
 	}
 
 	end := time.Since(start)

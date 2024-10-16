@@ -70,6 +70,22 @@ func (oc *BaseSecondaryLayer2NetworkController) cleanup() error {
 		return err
 	}
 
+	ops, err = libovsdbops.DeleteQoSesWithPredicateOps(oc.nbClient, ops,
+		func(item *nbdb.QoS) bool {
+			return item.ExternalIDs[types.NetworkExternalID] == netName
+		})
+	if err != nil {
+		return fmt.Errorf("failed to get ops for deleting QoSes of network %s: %v", netName, err)
+	}
+
+	ops, err = libovsdbops.DeleteAddressSetsWithPredicateOps(oc.nbClient, ops,
+		func(item *nbdb.AddressSet) bool {
+			return item.ExternalIDs[types.NetworkExternalID] == netName
+		})
+	if err != nil {
+		return fmt.Errorf("failed to get ops for deleting address sets of network %s: %v", netName, err)
+	}
+
 	_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
 	if err != nil {
 		return fmt.Errorf("failed to deleting switches of network %s: %v", netName, err)
@@ -116,6 +132,20 @@ func (oc *BaseSecondaryLayer2NetworkController) run() error {
 		if err := oc.WatchNetworkPolicy(); err != nil {
 			return err
 		}
+	}
+
+	// start NetworkQoS controller if feature is enabled
+	if config.OVNKubernetesFeature.EnableNetworkQoS {
+		err := oc.newNetworkQoSController()
+		if err != nil {
+			return fmt.Errorf("unable to create network qos controller, err: %w", err)
+		}
+		oc.wg.Add(1)
+		go func() {
+			defer oc.wg.Done()
+			// Until we have scale issues in future let's spawn only one thread
+			oc.nqosController.Run(1, oc.stopChan)
+		}()
 	}
 
 	return nil

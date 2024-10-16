@@ -18,6 +18,7 @@ const (
 	EgressQoSOwnerType                  ownerType = "EgressQoS"
 	AdminNetworkPolicyOwnerType         ownerType = "AdminNetworkPolicy"
 	BaselineAdminNetworkPolicyOwnerType ownerType = "BaselineAdminNetworkPolicy"
+	NetworkQoSOwnerType                 ownerType = "NetworkQoS"
 	// NetworkPolicyOwnerType is deprecated for address sets, should only be used for sync.
 	// New owner of network policy address sets, is PodSelectorOwnerType.
 	NetworkPolicyOwnerType ownerType = "NetworkPolicy"
@@ -128,6 +129,15 @@ var AddressSetEgressIP = newObjectIDsType(addressSet, EgressIPOwnerType, []Exter
 var AddressSetEgressService = newObjectIDsType(addressSet, EgressServiceOwnerType, []ExternalIDKey{
 	// cluster-wide address set name
 	ObjectNameKey,
+	IPFamilyKey,
+})
+
+var AddressSetNetworkQoS = newObjectIDsType(addressSet, NetworkQoSOwnerType, []ExternalIDKey{
+	// nqos namespace:name
+	ObjectNameKey,
+	// rule index
+	RuleIndex,
+	IpBlockIndexKey,
 	IPFamilyKey,
 })
 
@@ -325,4 +335,10 @@ var QoSRuleEgressIP = newObjectIDsType(qos, EgressIPOwnerType, []ExternalIDKey{
 	ObjectNameKey,
 	// the IP Family for this policy, ip4 or ip6 or ip(dualstack)
 	IPFamilyKey,
+})
+
+var NetworkQoS = newObjectIDsType(qos, NetworkQoSOwnerType, []ExternalIDKey{
+	ObjectNameKey,
+	// rule index
+	RuleIndex,
 })
