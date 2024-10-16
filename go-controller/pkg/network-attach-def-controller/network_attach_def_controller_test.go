@@ -29,6 +29,10 @@ type testNetworkController struct {
 	tncm *testNetworkControllerManager
 }
 
+func (tnc *testNetworkController) PreStart(context.Context) error {
+	return nil
+}
+
 func (tnc *testNetworkController) Start(context.Context) error {
 	tnc.tncm.Lock()
 	defer tnc.tncm.Unlock()

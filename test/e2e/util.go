@@ -604,7 +604,7 @@ func waitClusterHealthy(f *framework.Framework, numControlPlanePods int, control
 			return false, nil
 		}
 
-		podClient := f.ClientSet.CoreV1().Pods("ovn-kubernetes")
+		podClient := f.ClientSet.CoreV1().Pods(ovnNamespace)
 		// Ensure all nodes are running and healthy
 		podList, err := podClient.List(context.Background(), metav1.ListOptions{
 			LabelSelector: "app=ovnkube-node",

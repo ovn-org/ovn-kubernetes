@@ -2,7 +2,6 @@ package node
 
 import (
 	"fmt"
-	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 	"hash/fnv"
 	"math"
 	"net"
@@ -16,6 +15,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/egressservice"
 	nodeipt "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
@@ -1811,7 +1811,7 @@ func setBridgeOfPorts(bridge *bridgeConfiguration) error {
 		bridge.ofPortPhys = ofportPhys
 	}
 
-	// Get ofport represeting the host. That is, host representor port in case of DPUs, ovsLocalPort otherwise.
+	// Get ofport representing the host. That is, host representor port in case of DPUs, ovsLocalPort otherwise.
 	if config.OvnKubeNode.Mode == types.NodeModeDPU {
 		var stderr string
 		hostRep, err := util.GetDPUHostInterface(bridge.bridgeName)
@@ -1887,11 +1887,17 @@ func initSvcViaMgmPortRoutingRules(hostSubnets []*net.IPNet) error {
 	return nil
 }
 
-func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP, gwIntf, egressGWIntf string,
-	gwIPs []*net.IPNet, nodeAnnotator kube.Annotator, kube kube.Interface, cfg *managementPortConfig,
-	watchFactory factory.NodeWatchFactory, routeManager *routemanager.Controller, nadController *nad.NetAttachDefinitionController) (*gateway, error) {
-	klog.Info("Creating new shared gateway")
+func newGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP, gwIntf, egressGWIntf string,
+	gwIPs []*net.IPNet, nodeAnnotator kube.Annotator, cfg *managementPortConfig, kube kube.Interface,
+	watchFactory factory.NodeWatchFactory, routeManager *routemanager.Controller, nadController *nad.NetAttachDefinitionController, gatewayMode config.GatewayMode) (*gateway, error) {
+	klog.Info("Creating new gateway")
 	gw := &gateway{}
+
+	if gatewayMode == config.GatewayModeLocal {
+		if err := initLocalGateway(subnets, cfg); err != nil {
+			return nil, fmt.Errorf("failed to initialize new local gateway, err: %w", err)
+		}
+	}
 
 	gwBridge, exGwBridge, err := gatewayInitInternal(
 		nodeName, gwIntf, egressGWIntf, gwNextHops, gwIPs, nodeAnnotator)
@@ -1939,7 +1945,7 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 	gw.initFunc = func() error {
 		// Program cluster.GatewayIntf to let non-pod traffic to go to host
 		// stack
-		klog.Info("Creating Shared Gateway Openflow Manager")
+		klog.Info("Creating Gateway Openflow Manager")
 		err := setBridgeOfPorts(gwBridge)
 		if err != nil {
 			return err
@@ -2006,7 +2012,7 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 					return err
 				}
 			}
-			klog.Info("Creating Shared Gateway Node Port Watcher")
+			klog.Info("Creating Gateway Node Port Watcher")
 			gw.nodePortWatcher, err = newNodePortWatcher(gwBridge, gw.openflowManager, gw.nodeIPManager, watchFactory, nadController)
 			if err != nil {
 				return err
@@ -2023,7 +2029,7 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 		return nil
 	}
 	gw.watchFactory = watchFactory.(*factory.WatchFactory)
-	klog.Info("Shared Gateway Creation Complete")
+	klog.Info("Gateway Creation Complete")
 	return gw, nil
 }
 

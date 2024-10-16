@@ -76,19 +76,19 @@ var _ = Describe("Network Segmentation: services", func() {
 			// We verify the following scenarios:
 			// - UDN client --> UDN service, with backend pod and client running on the same node:
 			//   + clusterIP succeeds
-			//   + nodeIP:nodePort works, when we only target the local node (*)
+			//   + nodeIP:nodePort works, when we only target the local node
 			//
 			// - UDN client --> UDN service, with backend pod and client running on different nodes:
 			//   + clusterIP succeeds
-			//   + nodeIP:nodePort succeeds, when we only target the local node (*)
+			//   + nodeIP:nodePort succeeds, when we only target the local node
 			//
 			// - default-network client --> UDN service:
 			//   + clusterIP fails
-			//   + nodeIP:nodePort fails FOR NOW, when we only target the local node (*)
+			//   + nodeIP:nodePort fails FOR NOW, when we only target the local node
 			//
 			// -  UDN service --> default-network:
 			//   + clusterIP fails
-			//   + nodeIP:nodePort fails FOR NOW, when we only target the local node (*)
+			//   + nodeIP:nodePort fails FOR NOW, when we only target the local node
 
 			"should be reachable through their cluster IP and node port",
 			func(
@@ -200,7 +200,7 @@ var _ = Describe("Network Segmentation: services", func() {
 				defaultClient, err := createPod(f, "default-net-pod", clientNode, defaultNetNamespace, []string{"sleep", "2000000"}, nil)
 				Expect(err).NotTo(HaveOccurred())
 
-				By("Verify the client in the default network connection to the UDN service")
+				By("Verify the connection of the client in the default network to the UDN service")
 				checkNoConnectionToClusterIPs(f, defaultClient, udnService)
 
 				checkNoConnectionToNodePort(f, defaultClient, udnService, &nodes.Items[1], "local node") // TODO change to checkConnectionToNodePort when we have full UDN support in ovnkube-node
@@ -252,6 +252,14 @@ var _ = Describe("Network Segmentation: services", func() {
 				checkNoConnectionToNodePort(f, udnClientPod2, defaultService, &nodes.Items[1], "local node")
 				checkConnectionToNodePort(f, udnClientPod2, defaultService, &nodes.Items[2], "other node", defaultServerPod.Name)
 				checkNoConnectionToClusterIPs(f, udnClientPod2, defaultService)
+
+				// Make sure that restarting OVNK after applying a UDN with an affected service won't result
+				// in OVNK in CLBO state https://issues.redhat.com/browse/OCPBUGS-41499
+				if netConfigParams.topology == "layer3" { // no need to run it for layer 2 as well
+					By("Restart ovnkube-node on one node and verify that the new ovnkube-node pod goes to the running state")
+					err = restartOVNKubeNodePod(cs, ovnNamespace, clientNode)
+					Expect(err).NotTo(HaveOccurred())
+				}
 			},
 
 			Entry(
