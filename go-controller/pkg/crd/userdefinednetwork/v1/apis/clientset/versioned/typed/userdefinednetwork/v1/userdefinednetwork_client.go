@@ -27,12 +27,17 @@ import (
 
 type K8sV1Interface interface {
 	RESTClient() rest.Interface
+	ClusterUserDefinedNetworksGetter
 	UserDefinedNetworksGetter
 }
 
 // K8sV1Client is used to interact with features provided by the k8s.ovn.org group.
 type K8sV1Client struct {
 	restClient rest.Interface
+}
+
+func (c *K8sV1Client) ClusterUserDefinedNetworks() ClusterUserDefinedNetworkInterface {
+	return newClusterUserDefinedNetworks(c)
 }
 
 func (c *K8sV1Client) UserDefinedNetworks(namespace string) UserDefinedNetworkInterface {

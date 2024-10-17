@@ -945,6 +945,7 @@ install_ovn() {
   run_kubectl apply -f k8s.ovn.org_egressservices.yaml
   run_kubectl apply -f k8s.ovn.org_adminpolicybasedexternalroutes.yaml
   run_kubectl apply -f k8s.ovn.org_userdefinednetworks.yaml
+  run_kubectl apply -f k8s.ovn.org_clusteruserdefinednetworks.yaml
   # NOTE: When you update vendoring versions for the ANP & BANP APIs, we must update the version of the CRD we pull from in the below URL
   run_kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/network-policy-api/v0.1.5/config/crd/experimental/policy.networking.k8s.io_adminnetworkpolicies.yaml
   run_kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/network-policy-api/v0.1.5/config/crd/experimental/policy.networking.k8s.io_baselineadminnetworkpolicies.yaml
