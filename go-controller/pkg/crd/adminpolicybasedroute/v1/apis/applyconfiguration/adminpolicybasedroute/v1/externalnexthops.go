@@ -21,14 +21,14 @@ import (
 	v1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1"
 )
 
-// ExternalNextHopsApplyConfiguration represents an declarative configuration of the ExternalNextHops type for use
+// ExternalNextHopsApplyConfiguration represents a declarative configuration of the ExternalNextHops type for use
 // with apply.
 type ExternalNextHopsApplyConfiguration struct {
 	StaticHops  []*v1.StaticHop  `json:"static,omitempty"`
 	DynamicHops []*v1.DynamicHop `json:"dynamic,omitempty"`
 }
 
-// ExternalNextHopsApplyConfiguration constructs an declarative configuration of the ExternalNextHops type for use with
+// ExternalNextHopsApplyConfiguration constructs a declarative configuration of the ExternalNextHops type for use with
 // apply.
 func ExternalNextHops() *ExternalNextHopsApplyConfiguration {
 	return &ExternalNextHopsApplyConfiguration{}

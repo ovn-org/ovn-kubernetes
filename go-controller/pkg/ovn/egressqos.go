@@ -17,11 +17,13 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
+	metaapplyv1 "k8s.io/client-go/applyconfigurations/meta/v1"
 	v1coreinformers "k8s.io/client-go/informers/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
+	"k8s.io/utils/ptr"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressqosapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1"
@@ -190,9 +192,9 @@ func (oc *DefaultNetworkController) initEgressQoSController(
 	klog.Info("Setting up event handlers for EgressQoS")
 	oc.egressQoSLister = eqInformer.Lister()
 	oc.egressQoSSynced = eqInformer.Informer().HasSynced
-	oc.egressQoSQueue = workqueue.NewNamedRateLimitingQueue(
-		workqueue.NewItemFastSlowRateLimiter(1*time.Second, 5*time.Second, 5),
-		"egressqos",
+	oc.egressQoSQueue = workqueue.NewTypedRateLimitingQueueWithConfig(
+		workqueue.NewTypedItemFastSlowRateLimiter[string](1*time.Second, 5*time.Second, 5),
+		workqueue.TypedRateLimitingQueueConfig[string]{Name: "egressqos"},
 	)
 	_, err := eqInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
 		AddFunc:    oc.onEgressQoSAdd,
@@ -206,9 +208,9 @@ func (oc *DefaultNetworkController) initEgressQoSController(
 
 	oc.egressQoSPodLister = podInformer.Lister()
 	oc.egressQoSPodSynced = podInformer.Informer().HasSynced
-	oc.egressQoSPodQueue = workqueue.NewNamedRateLimitingQueue(
-		workqueue.NewItemFastSlowRateLimiter(1*time.Second, 5*time.Second, 5),
-		"egressqospods",
+	oc.egressQoSPodQueue = workqueue.NewTypedRateLimitingQueueWithConfig(
+		workqueue.NewTypedItemFastSlowRateLimiter[string](1*time.Second, 5*time.Second, 5),
+		workqueue.TypedRateLimitingQueueConfig[string]{Name: "egressqospods"},
 	)
 	_, err = podInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
 		AddFunc:    oc.onEgressQoSPodAdd,
@@ -221,9 +223,9 @@ func (oc *DefaultNetworkController) initEgressQoSController(
 
 	oc.egressQoSNodeLister = nodeInformer.Lister()
 	oc.egressQoSNodeSynced = nodeInformer.Informer().HasSynced
-	oc.egressQoSNodeQueue = workqueue.NewNamedRateLimitingQueue(
-		workqueue.NewItemFastSlowRateLimiter(1*time.Second, 5*time.Second, 5),
-		"egressqosnodes",
+	oc.egressQoSNodeQueue = workqueue.NewTypedRateLimitingQueueWithConfig(
+		workqueue.NewTypedItemFastSlowRateLimiter[string](1*time.Second, 5*time.Second, 5),
+		workqueue.TypedRateLimitingQueueConfig[string]{Name: "egressqosnodes"},
 	)
 	_, err = nodeInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    oc.onEgressQoSNodeAdd,    // we only care about new logical switches being added
@@ -357,19 +359,18 @@ func (oc *DefaultNetworkController) processNextEgressQoSWorkItem(wg *sync.WaitGr
 
 	defer oc.egressQoSQueue.Done(key)
 
-	eqKey := key.(string)
-	eq, err := oc.getEgressQoS(eqKey)
+	eq, err := oc.getEgressQoS(key)
 	if err != nil {
-		utilruntime.HandleError(fmt.Errorf("failed to retrieve %s qos object: %v", eqKey, err))
+		utilruntime.HandleError(fmt.Errorf("failed to retrieve %s qos object: %v", key, err))
 		oc.egressQoSQueue.Forget(key)
 		return true
 	}
 
-	err = oc.syncEgressQoS(eqKey, eq)
+	err = oc.syncEgressQoS(key, eq)
 	if err == nil {
 		oc.egressQoSQueue.Forget(key)
 		if err = oc.updateEgressQoSZoneStatusToReady(eq); err != nil {
-			utilruntime.HandleError(fmt.Errorf("failed to update EgressQoS object %s with status: %v", eqKey, err))
+			utilruntime.HandleError(fmt.Errorf("failed to update EgressQoS object %s with status: %v", key, err))
 		}
 		return true
 	}
@@ -382,7 +383,7 @@ func (oc *DefaultNetworkController) processNextEgressQoSWorkItem(wg *sync.WaitGr
 	}
 
 	if err = oc.updateEgressQoSZoneStatusToNotReady(eq, err); err != nil {
-		utilruntime.HandleError(fmt.Errorf("failed to update EgressQoS object %s with status: %v", eqKey, err))
+		utilruntime.HandleError(fmt.Errorf("failed to update EgressQoS object %s with status: %v", key, err))
 	}
 
 	oc.egressQoSQueue.Forget(key)
@@ -905,7 +906,7 @@ func (oc *DefaultNetworkController) processNextEgressQoSPodWorkItem(wg *sync.Wai
 	}
 	defer oc.egressQoSPodQueue.Done(key)
 
-	err := oc.syncEgressQoSPod(key.(string))
+	err := oc.syncEgressQoSPod(key)
 	if err == nil {
 		oc.egressQoSPodQueue.Forget(key)
 		return true
@@ -979,7 +980,7 @@ func (oc *DefaultNetworkController) processNextEgressQoSNodeWorkItem(wg *sync.Wa
 	}
 	defer oc.egressQoSNodeQueue.Done(key)
 
-	err := oc.syncEgressQoSNode(key.(string))
+	err := oc.syncEgressQoSNode(key)
 	if err == nil {
 		oc.egressQoSNodeQueue.Forget(key)
 		return true
@@ -1088,20 +1089,21 @@ func (oc *DefaultNetworkController) updateEgressQoSZoneStatusCondition(newCondit
 	if err != nil {
 		return err
 	}
-	existingCondition := meta.FindStatusCondition(eq.Status.Conditions, newCondition.Type)
-	if existingCondition == nil {
-		newCondition.LastTransitionTime = metav1.NewTime(time.Now())
-	} else {
-		if existingCondition.Status != newCondition.Status {
-			existingCondition.Status = newCondition.Status
-			existingCondition.LastTransitionTime = metav1.NewTime(time.Now())
-		}
-		existingCondition.Reason = newCondition.Reason
-		existingCondition.Message = newCondition.Message
-		newCondition = *existingCondition
+
+	newConditionApply := &metaapplyv1.ConditionApplyConfiguration{
+		Type:    &newCondition.Type,
+		Status:  &newCondition.Status,
+		Reason:  &newCondition.Reason,
+		Message: &newCondition.Message,
 	}
+
+	existingCondition := meta.FindStatusCondition(eq.Status.Conditions, newCondition.Type)
+	if existingCondition == nil || existingCondition.Status != newCondition.Status {
+		newConditionApply.LastTransitionTime = ptr.To(metav1.NewTime(time.Now()))
+	}
+
 	applyObj := egressqosapply.EgressQoS(name, namespace).
-		WithStatus(egressqosapply.EgressQoSStatus().WithConditions(newCondition))
+		WithStatus(egressqosapply.EgressQoSStatus().WithConditions(newConditionApply))
 	_, err = oc.kube.EgressQoSClient.K8sV1().EgressQoSes(namespace).ApplyStatus(context.TODO(),
 		applyObj, metav1.ApplyOptions{FieldManager: oc.zone, Force: true})
 	return err
