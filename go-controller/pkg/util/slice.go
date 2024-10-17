@@ -1,7 +1,7 @@
 package util
 
 // RemoveIndexFromSliceUnstable attempts to remove slice index specified by parameter i. Slice order is not preserved.
-func RemoveIndexFromSliceUnstable[T comparable](slice []T, i int) []T {
+func RemoveIndexFromSliceUnstable[T any](slice []T, i int) []T {
 	var t T
 	sliceLen := len(slice)
 	slice[i] = slice[sliceLen-1]
@@ -19,4 +19,16 @@ func RemoveItemFromSliceUnstable[T comparable](slice []T, candidate T) []T {
 		i++
 	}
 	return slice
+}
+
+// IsItemInSlice checks if candidate is equal to at least one entry in slice
+func IsItemInSlice[T comparable](slice []T, candidate T) bool {
+	var found bool
+	for _, sliceEntry := range slice {
+		if sliceEntry == candidate {
+			found = true
+			break
+		}
+	}
+	return found
 }

@@ -12,6 +12,7 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/pod"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/generator/udn"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
@@ -137,6 +138,41 @@ func (h *secondaryLayer3NetworkControllerEventHandler) AddResource(obj interface
 				return err
 			}
 		}
+	case factory.EgressIPType:
+		eIP := obj.(*egressipv1.EgressIP)
+		return h.oc.reconcileEgressIP(nil, eIP)
+
+	case factory.EgressIPNamespaceType:
+		namespace := obj.(*kapi.Namespace)
+		return h.oc.reconcileEgressIPNamespace(nil, namespace)
+
+	case factory.EgressIPPodType:
+		pod := obj.(*kapi.Pod)
+		return h.oc.reconcileEgressIPPod(nil, pod)
+
+	case factory.EgressNodeType:
+		node := obj.(*kapi.Node)
+		// Update node in zone cache; value will be true if node is local
+		// to this zone and false if its not
+		h.oc.eIPC.nodeZoneState.LockKey(node.Name)
+		h.oc.eIPC.nodeZoneState.Store(node.Name, h.oc.isLocalZoneNode(node))
+		h.oc.eIPC.nodeZoneState.UnlockKey(node.Name)
+		// add the 103 qos rule to new node's switch
+		// NOTE: We don't need to remove this on node delete since entire node switch will get cleaned up
+		if h.oc.isLocalZoneNode(node) {
+			if err := h.oc.ensureDefaultNoRerouteQoSRules(node.Name); err != nil {
+				return err
+			}
+		}
+		// add the nodeIP to the default LRP (102 priority) destination address-set
+		err := h.oc.ensureDefaultNoRerouteNodePolicies()
+		if err != nil {
+			return err
+		}
+		// Add routing specific to Egress IP NOTE: GARP configuration that
+		// Egress IP depends on is added from the gateway reconciliation logic
+		return h.oc.addEgressNode(node)
+
 	default:
 		return h.oc.AddSecondaryNetworkResourceCommon(h.objType, obj)
 	}
@@ -211,6 +247,53 @@ func (h *secondaryLayer3NetworkControllerEventHandler) UpdateResource(oldObj, ne
 			}
 			return h.oc.addUpdateRemoteNodeEvent(newNode, syncZoneIC)
 		}
+	case factory.EgressIPType:
+		oldEIP := oldObj.(*egressipv1.EgressIP)
+		newEIP := newObj.(*egressipv1.EgressIP)
+		return h.oc.reconcileEgressIP(oldEIP, newEIP)
+
+	case factory.EgressIPNamespaceType:
+		oldNamespace := oldObj.(*kapi.Namespace)
+		newNamespace := newObj.(*kapi.Namespace)
+		return h.oc.reconcileEgressIPNamespace(oldNamespace, newNamespace)
+
+	case factory.EgressIPPodType:
+		oldPod := oldObj.(*kapi.Pod)
+		newPod := newObj.(*kapi.Pod)
+		return h.oc.reconcileEgressIPPod(oldPod, newPod)
+
+	case factory.EgressNodeType:
+		oldNode := oldObj.(*kapi.Node)
+		newNode := newObj.(*kapi.Node)
+		// Update node in zone cache; value will be true if node is local
+		// to this zone and false if its not
+		h.oc.eIPC.nodeZoneState.LockKey(newNode.Name)
+		h.oc.eIPC.nodeZoneState.Store(newNode.Name, h.oc.isLocalZoneNode(newNode))
+		h.oc.eIPC.nodeZoneState.UnlockKey(newNode.Name)
+		// try to add the 103 qos rule to new node's switch if it doesn't exist
+		// The reason we call this from update is because in case the add node event
+		// did not succeed and we got an update node event which overrides the add event
+		// and removes the add event from retry cache, we'd need to ensure the qos rule exists
+		// NOTE: We don't need to remove this on node delete since entire node switch will get cleaned up
+		if h.oc.isLocalZoneNode(newNode) {
+			if err := h.oc.ensureDefaultNoRerouteQoSRules(newNode.Name); err != nil {
+				return err
+			}
+			// may need to add the egress node again to ensure the LRSR is created because an add may not complete due
+			// to a race with OVN logical constructs creation.
+			if err := h.oc.addEgressNode(newNode); err != nil {
+				return fmt.Errorf("failed to ensure egress node %s: %v", newNode.Name, err)
+			}
+		}
+		// update the nodeIP in the defalt-reRoute (102 priority) destination address-set
+		if util.NodeHostCIDRsAnnotationChanged(oldNode, newNode) {
+			klog.Infof("Egress IP detected IP address change for node %s. Updating no re-route policies", newNode.Name)
+			err := h.oc.ensureDefaultNoRerouteNodePolicies()
+			if err != nil {
+				return err
+			}
+		}
+		return nil
 	default:
 		return h.oc.UpdateSecondaryNetworkResourceCommon(h.objType, oldObj, newObj, inRetryCache)
 	}
@@ -228,6 +311,30 @@ func (h *secondaryLayer3NetworkControllerEventHandler) DeleteResource(obj, cache
 		}
 		return h.oc.deleteNodeEvent(node)
 
+	case factory.EgressIPType:
+		eIP := obj.(*egressipv1.EgressIP)
+		return h.oc.reconcileEgressIP(eIP, nil)
+
+	case factory.EgressIPNamespaceType:
+		namespace := obj.(*kapi.Namespace)
+		return h.oc.reconcileEgressIPNamespace(namespace, nil)
+
+	case factory.EgressIPPodType:
+		pod := obj.(*kapi.Pod)
+		return h.oc.reconcileEgressIPPod(pod, nil)
+
+	case factory.EgressNodeType:
+		node := obj.(*kapi.Node)
+		// remove the IPs from the destination address-set of the default LRP (102)
+		err := h.oc.ensureDefaultNoRerouteNodePolicies()
+		if err != nil {
+			return err
+		}
+		// Update node in zone cache; remove the node key since node has been deleted.
+		h.oc.eIPC.nodeZoneState.LockKey(node.Name)
+		h.oc.eIPC.nodeZoneState.Delete(node.Name)
+		h.oc.eIPC.nodeZoneState.UnlockKey(node.Name)
+		return nil
 	default:
 		return h.oc.DeleteSecondaryNetworkResourceCommon(h.objType, obj, cachedObj)
 	}
@@ -255,6 +362,16 @@ func (h *secondaryLayer3NetworkControllerEventHandler) SyncFunc(objs []interface
 
 		case factory.MultiNetworkPolicyType:
 			syncFunc = h.oc.syncMultiNetworkPolicies
+
+		case factory.EgressIPNamespaceType:
+			syncFunc = h.oc.syncEgressIPs
+
+		case factory.EgressNodeType:
+			syncFunc = h.oc.initClusterEgressPolicies
+
+		case factory.EgressIPPodType,
+			factory.EgressIPType:
+			syncFunc = nil
 
 		default:
 			return fmt.Errorf("no sync function for object type %s", h.objType)
@@ -355,6 +472,16 @@ func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netI
 				zoneICHandler:               zoneICHandler,
 				cancelableCtx:               util.NewCancelableContext(),
 				nadController:               nadController,
+				eIPC: egressIPZoneController{
+					NetInfo:            netInfo,
+					nodeUpdateMutex:    &sync.Mutex{},
+					podAssignmentMutex: &sync.Mutex{},
+					podAssignment:      make(map[string]*podAssignmentState),
+					nbClient:           cnci.nbClient,
+					watchFactory:       cnci.watchFactory,
+					nodeZoneState:      syncmap.NewSyncMap[bool](),
+					controllerName:     getNetworkControllerName(netInfo.GetNetworkName()),
+				},
 			},
 		},
 		mgmtPortFailed:              sync.Map{},
@@ -387,6 +514,14 @@ func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netI
 func (oc *SecondaryLayer3NetworkController) initRetryFramework() {
 	oc.retryPods = oc.newRetryFramework(factory.PodType)
 	oc.retryNodes = oc.newRetryFramework(factory.NodeType)
+	if config.OVNKubernetesFeature.EnableEgressIP && config.OVNKubernetesFeature.EnableInterconnect &&
+		config.Gateway.Mode != config.GatewayModeDisabled && util.IsNetworkSegmentationSupportEnabled() &&
+		oc.IsPrimaryNetwork() {
+		oc.retryEgressIPs = oc.newRetryFramework(factory.EgressIPType)
+		oc.retryEgressIPNamespaces = oc.newRetryFramework(factory.EgressIPNamespaceType)
+		oc.retryEgressIPPods = oc.newRetryFramework(factory.EgressIPPodType)
+		oc.retryEgressNodes = oc.newRetryFramework(factory.EgressNodeType)
+	}
 
 	// When a user-defined network is enabled as a primary network for namespace,
 	// then watch for namespace and network policy events.
@@ -571,7 +706,32 @@ func (oc *SecondaryLayer3NetworkController) Run() error {
 			return err
 		}
 	}
-
+	if config.OVNKubernetesFeature.EnableEgressIP && config.OVNKubernetesFeature.EnableInterconnect &&
+		config.Gateway.Mode != config.GatewayModeDisabled && util.IsNetworkSegmentationSupportEnabled() &&
+		oc.IsPrimaryNetwork() {
+		// This is probably the best starting order for all egress IP handlers.
+		// WatchEgressIPNamespaces and WatchEgressIPPods only use the informer
+		// cache to retrieve the egress IPs when determining if namespace/pods
+		// match. It is thus better if we initialize them first and allow
+		// WatchEgressNodes / WatchEgressIP to initialize after. Those handlers
+		// might change the assignments of the existing objects. If we do the
+		// inverse and start WatchEgressIPNamespaces / WatchEgressIPPod last, we
+		// risk performing a bunch of modifications on the EgressIP objects when
+		// we restart and then have these handlers act on stale data when they
+		// sync.
+		if err := oc.WatchEgressIPNamespaces(); err != nil {
+			return err
+		}
+		if err := oc.WatchEgressIPPods(); err != nil {
+			return err
+		}
+		if err := oc.WatchEgressNodes(); err != nil {
+			return err
+		}
+		if err := oc.WatchEgressIP(); err != nil {
+			return err
+		}
+	}
 	klog.Infof("Completing all the Watchers for network %s took %v", oc.GetNetworkName(), time.Since(start))
 
 	return nil

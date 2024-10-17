@@ -25,6 +25,7 @@ import (
 	dnsnameresolver "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/dns_name_resolver"
 	aclsyncer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/external_ids_syncer/acl"
 	addrsetsyncer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/external_ids_syncer/address_set"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/external_ids_syncer/logical_router_policy"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/external_ids_syncer/port_group"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/topology"
@@ -93,9 +94,6 @@ type DefaultNetworkController struct {
 	// Controller in charge of services
 	svcController *svccontroller.Controller
 
-	// Controller used for programming OVN for egress IP
-	eIPC egressIPZoneController
-
 	// Controller used to handle egress services
 	egressSvcController *egresssvc.Controller
 	// Controller used for programming OVN for Admin Network Policy
@@ -111,15 +109,6 @@ type DefaultNetworkController struct {
 
 	// retry framework for egress firewall
 	retryEgressFirewalls *retry.RetryFramework
-
-	// retry framework for egress IP
-	retryEgressIPs *retry.RetryFramework
-	// retry framework for egress IP Namespaces
-	retryEgressIPNamespaces *retry.RetryFramework
-	// retry framework for egress IP Pods
-	retryEgressIPPods *retry.RetryFramework
-	// retry framework for Egress nodes
-	retryEgressNodes *retry.RetryFramework
 
 	// Node-specific syncMaps used by node event handler
 	gatewaysFailed              sync.Map
@@ -214,17 +203,18 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 			cancelableCtx:               util.NewCancelableContext(),
 			observManager:               observManager,
 			nadController:               nadController,
+			eIPC: egressIPZoneController{
+				NetInfo:            &util.DefaultNetInfo{},
+				nodeUpdateMutex:    &sync.Mutex{},
+				podAssignmentMutex: &sync.Mutex{},
+				podAssignment:      make(map[string]*podAssignmentState),
+				nbClient:           cnci.nbClient,
+				watchFactory:       cnci.watchFactory,
+				nodeZoneState:      syncmap.NewSyncMap[bool](),
+				controllerName:     DefaultNetworkControllerName,
+			},
 		},
-		externalGatewayRouteInfo: apbExternalRouteController.ExternalGWRouteInfoCache,
-		eIPC: egressIPZoneController{
-			NetInfo:            &util.DefaultNetInfo{},
-			nodeUpdateMutex:    &sync.Mutex{},
-			podAssignmentMutex: &sync.Mutex{},
-			podAssignment:      make(map[string]*podAssignmentState),
-			nbClient:           cnci.nbClient,
-			watchFactory:       cnci.watchFactory,
-			nodeZoneState:      syncmap.NewSyncMap[bool](),
-		},
+		externalGatewayRouteInfo:   apbExternalRouteController.ExternalGWRouteInfoCache,
 		loadbalancerClusterCache:   make(map[kapi.Protocol]string),
 		zoneChassisHandler:         zoneChassisHandler,
 		apbExternalRouteController: apbExternalRouteController,
@@ -322,6 +312,12 @@ func (oc *DefaultNetworkController) syncDb() error {
 	err = oc.cleanupPodSelectorAddressSets()
 	if err != nil {
 		return fmt.Errorf("cleaning up stale pod selector address sets for network %v failed : %w", oc.GetNetworkName(), err)
+	}
+
+	// LRP syncer must only be run once and because default controller always runs, it can perform LRP updates.
+	lrpSyncer := logical_router_policy.NewLRPSyncer(oc.nbClient, oc.controllerName)
+	if err = lrpSyncer.Sync(); err != nil {
+		return fmt.Errorf("failed to sync logical router policies: %v", err)
 	}
 	return nil
 }

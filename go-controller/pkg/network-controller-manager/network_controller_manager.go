@@ -20,6 +20,8 @@ import (
 	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/observability"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
+	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/udnenabledsvc"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -406,6 +408,17 @@ func (cm *NetworkControllerManager) Start(ctx context.Context) error {
 			klog.Warningf("Observability cleanup failed, expected if not all Samples ware deleted yet: %v", err)
 		}
 	}
+
+	if util.IsNetworkSegmentationSupportEnabled() {
+		addressSetFactory := addressset.NewOvnAddressSetFactory(cm.nbClient, config.IPv4Mode, config.IPv6Mode)
+		go func() {
+			if err := udnenabledsvc.NewController(cm.nbClient, addressSetFactory, cm.watchFactory.ServiceCoreInformer(),
+				config.Default.UDNAllowedDefaultServices).Run(cm.stopChan); err != nil {
+				klog.Errorf("UDN enabled service controller failed: %v", err)
+			}
+		}()
+	}
+
 	err = cm.initDefaultNetworkController(cm.nadController, observabilityManager)
 	if err != nil {
 		return fmt.Errorf("failed to init default network controller: %v", err)

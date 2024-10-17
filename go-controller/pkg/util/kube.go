@@ -617,6 +617,14 @@ func GetAllClusterSubnets() []*net.IPNet {
 	return append(v4ClusterSubnets, v6ClusterSubnets...)
 }
 
+func GetAllClusterSubnetsFromEntries(cidrNetEntries []config.CIDRNetworkEntry) []*net.IPNet {
+	subnets := make([]*net.IPNet, 0, len(cidrNetEntries))
+	for _, entry := range cidrNetEntries {
+		subnets = append(subnets, entry.CIDR)
+	}
+	return subnets
+}
+
 // GetNodePrimaryIP extracts the primary IP address from the node status in the  API
 func GetNodePrimaryIP(node *kapi.Node) (string, error) {
 	if node == nil {

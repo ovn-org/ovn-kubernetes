@@ -106,19 +106,23 @@ type referencedObjects struct {
 	eIPPods       sets.Set[ktypes.NamespacedName]
 }
 
+// getActiveNetworkForNamespaceFn returns a NetInfo which contains NADs which refer to a network in addition to the basic
+// network information.
+type getActiveNetworkForNamespaceFn func(namespace string) (util.NetInfo, error)
+
 // Controller implement Egress IP for secondary host networks
 type Controller struct {
-	eIPLister         egressiplisters.EgressIPLister
-	eIPInformer       cache.SharedIndexInformer
-	eIPQueue          workqueue.RateLimitingInterface
-	nodeLister        corelisters.NodeLister
-	namespaceLister   corelisters.NamespaceLister
-	namespaceInformer cache.SharedIndexInformer
-	namespaceQueue    workqueue.RateLimitingInterface
-
-	podLister   corelisters.PodLister
-	podInformer cache.SharedIndexInformer
-	podQueue    workqueue.RateLimitingInterface
+	eIPLister                    egressiplisters.EgressIPLister
+	eIPInformer                  cache.SharedIndexInformer
+	eIPQueue                     workqueue.RateLimitingInterface
+	nodeLister                   corelisters.NodeLister
+	namespaceLister              corelisters.NamespaceLister
+	namespaceInformer            cache.SharedIndexInformer
+	namespaceQueue               workqueue.RateLimitingInterface
+	podLister                    corelisters.PodLister
+	podInformer                  cache.SharedIndexInformer
+	podQueue                     workqueue.RateLimitingInterface
+	getActiveNetworkForNamespace getActiveNetworkForNamespaceFn
 
 	// cache is a cache of configuration states for EIPs, key is EgressIP Name.
 	cache *syncmap.SyncMap[*state]
@@ -140,8 +144,9 @@ type Controller struct {
 	v6              bool
 }
 
-func NewController(k kube.Interface, eIPInformer egressipinformer.EgressIPInformer, nodeInformer cache.SharedIndexInformer, namespaceInformer coreinformers.NamespaceInformer,
-	podInformer coreinformers.PodInformer, routeManager *routemanager.Controller, v4, v6 bool, nodeName string, linkManager *linkmanager.Controller) (*Controller, error) {
+func NewController(k kube.Interface, eIPInformer egressipinformer.EgressIPInformer, nodeInformer cache.SharedIndexInformer,
+	namespaceInformer coreinformers.NamespaceInformer, podInformer coreinformers.PodInformer, getActiveNetworkForNamespaceFn getActiveNetworkForNamespaceFn,
+	routeManager *routemanager.Controller, v4, v6 bool, nodeName string, linkManager *linkmanager.Controller) (*Controller, error) {
 
 	c := &Controller{
 		eIPLister:   eIPInformer.Lister(),
@@ -157,8 +162,9 @@ func NewController(k kube.Interface, eIPInformer egressipinformer.EgressIPInform
 			workqueue.NewItemFastSlowRateLimiter(time.Second, 5*time.Second, 5),
 			"eipnamespace",
 		),
-		podLister:   podInformer.Lister(),
-		podInformer: podInformer.Informer(),
+		getActiveNetworkForNamespace: getActiveNetworkForNamespaceFn,
+		podLister:                    podInformer.Lister(),
+		podInformer:                  podInformer.Informer(),
 		podQueue: workqueue.NewNamedRateLimitingQueue(
 			workqueue.NewItemFastSlowRateLimiter(time.Second, 5*time.Second, 5),
 			"eippods",
@@ -554,6 +560,14 @@ func (c *Controller) processEIP(eip *eipv1.EgressIP) (*eIPConfig, sets.Set[strin
 		}
 		isEIPV6 := utilnet.IsIPv6(eIPNet.IP)
 		for _, namespace := range namespaces {
+			netInfo, err := c.getActiveNetworkForNamespace(namespace.Name)
+			if err != nil {
+				return nil, selectedNamespaces, selectedPods, selectedNamespacesPodIPs, fmt.Errorf("failed to get active network for namespace %s: %v", namespace.Name, err)
+			}
+			if netInfo.IsSecondary() {
+				// EIP for secondary host interfaces is not supported for secondary networks
+				continue
+			}
 			selectedNamespaces.Insert(namespace.Name)
 			pods, err := c.listPodsByNamespaceAndSelector(namespace.Name, &eip.Spec.PodSelector)
 			if err != nil {
@@ -1011,6 +1025,14 @@ func (c *Controller) repairNode() error {
 			for _, namespace := range namespaces {
 				namespaceLabels := labels.Set(namespace.Labels)
 				if namespaceSelector.Matches(namespaceLabels) {
+					netInfo, err := c.getActiveNetworkForNamespace(namespace.Name)
+					if err != nil {
+						return fmt.Errorf("failed to get active network for namespace %s: %v", namespace.Name, err)
+					}
+					if netInfo.IsSecondary() {
+						// EIP for secondary host interfaces is not supported for secondary networks
+						continue
+					}
 					pods, err := c.podLister.Pods(namespace.Name).List(podSelector)
 					if err != nil {
 						return fmt.Errorf("failed to list pods using selector %s to configure egress IP %s: %v",
