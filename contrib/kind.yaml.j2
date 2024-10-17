@@ -31,6 +31,9 @@ kubeadmConfigPatches:
   controllerManager:
     extraArgs:
       "v": "{{ cluster_log_level }}"
+      # Disable service-lb-controller for now
+      # https://github.com/kubernetes/kubernetes/issues/128121
+      "controllers": "*,bootstrap-signer-controller,token-cleaner-controller,-service-lb-controller"
   scheduler:
     extraArgs:
       "v": "{{ cluster_log_level }}"

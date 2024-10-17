@@ -23,7 +23,7 @@ import (
 	v1 "k8s.io/client-go/applyconfigurations/meta/v1"
 )
 
-// EgressIPApplyConfiguration represents an declarative configuration of the EgressIP type for use
+// EgressIPApplyConfiguration represents a declarative configuration of the EgressIP type for use
 // with apply.
 type EgressIPApplyConfiguration struct {
 	v1.TypeMetaApplyConfiguration    `json:",inline"`
@@ -32,7 +32,7 @@ type EgressIPApplyConfiguration struct {
 	Status                           *EgressIPStatusApplyConfiguration `json:"status,omitempty"`
 }
 
-// EgressIP constructs an declarative configuration of the EgressIP type for use with
+// EgressIP constructs a declarative configuration of the EgressIP type for use with
 // apply.
 func EgressIP(name string) *EgressIPApplyConfiguration {
 	b := &EgressIPApplyConfiguration{}
@@ -214,4 +214,10 @@ func (b *EgressIPApplyConfiguration) WithSpec(value *EgressIPSpecApplyConfigurat
 func (b *EgressIPApplyConfiguration) WithStatus(value *EgressIPStatusApplyConfiguration) *EgressIPApplyConfiguration {
 	b.Status = value
 	return b
+}
+
+// GetName retrieves the value of the Name field in the declarative configuration.
+func (b *EgressIPApplyConfiguration) GetName() *string {
+	b.ensureObjectMetaApplyConfigurationExists()
+	return b.Name
 }

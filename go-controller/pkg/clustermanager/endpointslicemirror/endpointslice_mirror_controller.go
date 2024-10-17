@@ -36,14 +36,14 @@ const maxRetries = 10
 type Controller struct {
 	kubeClient kubernetes.Interface
 	wg         *sync.WaitGroup
-	queue      workqueue.RateLimitingInterface
+	queue      workqueue.TypedRateLimitingInterface[string]
 	name       string
 
 	endpointSliceLister  discoverylisters.EndpointSliceLister
 	endpointSlicesSynced cache.InformerSynced
 	podLister            corelisters.PodLister
 	podsSynced           cache.InformerSynced
-	nadController        *networkAttachDefController.NetAttachDefinitionController
+	networkManager       networkAttachDefController.NetworkManager
 	cancel               context.CancelFunc
 }
 
@@ -111,19 +111,19 @@ func (c *Controller) onEndpointSliceAdd(obj interface{}) {
 
 func NewController(
 	ovnClient *util.OVNClusterManagerClientset,
-	wf *factory.WatchFactory, nadController *networkAttachDefController.NetAttachDefinitionController) (*Controller, error) {
+	wf *factory.WatchFactory, networkManager networkAttachDefController.NetworkManager) (*Controller, error) {
 
 	wg := &sync.WaitGroup{}
 	c := &Controller{
-		kubeClient:    ovnClient.KubeClient,
-		wg:            wg,
-		name:          types.EndpointSliceMirrorControllerName,
-		nadController: nadController,
+		kubeClient:     ovnClient.KubeClient,
+		wg:             wg,
+		name:           types.EndpointSliceMirrorControllerName,
+		networkManager: networkManager,
 	}
 
-	c.queue = workqueue.NewRateLimitingQueueWithConfig(
-		workqueue.NewItemFastSlowRateLimiter(1*time.Second, 5*time.Second, 5),
-		workqueue.RateLimitingQueueConfig{Name: c.name},
+	c.queue = workqueue.NewTypedRateLimitingQueueWithConfig(
+		workqueue.NewTypedItemFastSlowRateLimiter[string](1*time.Second, 5*time.Second, 5),
+		workqueue.TypedRateLimitingQueueConfig[string]{Name: c.name},
 	)
 
 	c.podLister = wf.PodCoreInformer().Lister()
@@ -209,7 +209,7 @@ func (c *Controller) processNextEgressServiceWorkItem(ctx context.Context, wg *s
 
 	defer c.queue.Done(key)
 
-	err := c.syncDefaultEndpointSlice(ctx, key.(string))
+	err := c.syncDefaultEndpointSlice(ctx, key)
 	if err == nil {
 		c.queue.Forget(key)
 		return true
@@ -244,7 +244,7 @@ func (c *Controller) syncDefaultEndpointSlice(ctx context.Context, key string) e
 		return err
 	}
 
-	namespacePrimaryNetwork, err := c.nadController.GetActiveNetworkForNamespace(namespace)
+	namespacePrimaryNetwork, err := c.networkManager.GetActiveNetworkForNamespace(namespace)
 	if err != nil {
 		return err
 	}

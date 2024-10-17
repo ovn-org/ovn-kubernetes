@@ -17,14 +17,14 @@ limitations under the License.
 
 package v1
 
-// AdminPolicyBasedExternalRouteSpecApplyConfiguration represents an declarative configuration of the AdminPolicyBasedExternalRouteSpec type for use
+// AdminPolicyBasedExternalRouteSpecApplyConfiguration represents a declarative configuration of the AdminPolicyBasedExternalRouteSpec type for use
 // with apply.
 type AdminPolicyBasedExternalRouteSpecApplyConfiguration struct {
 	From     *ExternalNetworkSourceApplyConfiguration `json:"from,omitempty"`
 	NextHops *ExternalNextHopsApplyConfiguration      `json:"nextHops,omitempty"`
 }
 
-// AdminPolicyBasedExternalRouteSpecApplyConfiguration constructs an declarative configuration of the AdminPolicyBasedExternalRouteSpec type for use with
+// AdminPolicyBasedExternalRouteSpecApplyConfiguration constructs a declarative configuration of the AdminPolicyBasedExternalRouteSpec type for use with
 // apply.
 func AdminPolicyBasedExternalRouteSpec() *AdminPolicyBasedExternalRouteSpecApplyConfiguration {
 	return &AdminPolicyBasedExternalRouteSpecApplyConfiguration{}
