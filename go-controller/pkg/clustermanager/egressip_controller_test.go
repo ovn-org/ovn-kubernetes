@@ -6,9 +6,7 @@ import (
 	"net"
 	"time"
 
-	"github.com/onsi/ginkgo/extensions/table"
-
-	"github.com/onsi/ginkgo"
+	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 	ocpcloudnetworkapi "github.com/openshift/api/cloudnetwork/v1"
 	ocpconfigapi "github.com/openshift/api/config/v1"
@@ -279,7 +277,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 	})
 
 	ginkgo.Context("On node ADD/UPDATE/DELETE", func() {
-		table.DescribeTable("should re-assign EgressIPs and perform proper egressIP allocation changes", func(egressIP, expectedNetwork string) {
+		ginkgo.DescribeTable("should re-assign EgressIPs and perform proper egressIP allocation changes", func(egressIP, expectedNetwork string) {
 			app.Action = func(ctx *cli.Context) error {
 				node1IPv4OVN := "192.168.126.202/24"
 				node1IPv4SecondaryHost := "10.10.10.3/24"
@@ -393,13 +391,13 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				app.Name,
 			})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		}, table.Entry("OVN network", "192.168.126.101", "192.168.126.0/24"),
-			table.Entry("Secondary host network", "10.10.10.100", "10.10.10.0/24"),
-			table.Entry("Secondary host network", "7.7.7.100", "7.7.0.0/16"),
-			table.Entry("Secondary host network", "7.7.8.100", "7.7.0.0/16"),
+		}, ginkgo.Entry("OVN network", "192.168.126.101", "192.168.126.0/24"),
+			ginkgo.Entry("Secondary host network", "10.10.10.100", "10.10.10.0/24"),
+			ginkgo.Entry("Secondary host network", "7.7.7.100", "7.7.0.0/16"),
+			ginkgo.Entry("Secondary host network", "7.7.8.100", "7.7.0.0/16"),
 		)
 
-		table.DescribeTable("should re-assign EgressIPs and perform proper egressIP allocation changes during node deletion", func(egressIP, expectedNetwork string) {
+		ginkgo.DescribeTable("should re-assign EgressIPs and perform proper egressIP allocation changes during node deletion", func(egressIP, expectedNetwork string) {
 			app.Action = func(ctx *cli.Context) error {
 				node1IPv4OVN := "192.168.126.202/24"
 				node1IPv4SecondaryHost := "10.10.10.3/24"
@@ -511,10 +509,10 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 
 			err := app.Run([]string{app.Name})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		}, table.Entry("OVN network", "192.168.126.101", "192.168.126.0/24"),
-			table.Entry("Secondary host network", "10.10.10.100", "10.10.10.0/24"),
-			table.Entry("Secondary host network", "7.7.7.100", "7.7.0.0/16"),
-			table.Entry("Secondary host network", "7.7.8.100", "7.7.0.0/16"),
+		}, ginkgo.Entry("OVN network", "192.168.126.101", "192.168.126.0/24"),
+			ginkgo.Entry("Secondary host network", "10.10.10.100", "10.10.10.0/24"),
+			ginkgo.Entry("Secondary host network", "7.7.7.100", "7.7.0.0/16"),
+			ginkgo.Entry("Secondary host network", "7.7.8.100", "7.7.0.0/16"),
 		)
 		ginkgo.It("should assign EgressIPs to a linux node when there are windows nodes in the cluster", func() {
 			app.Action = func(ctx *cli.Context) error {
@@ -1748,7 +1746,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 
-		table.DescribeTable("should be able to allocate several EgressIPs and avoid the same node", func(egressIP1, egressIP2 string) {
+		ginkgo.DescribeTable("should be able to allocate several EgressIPs and avoid the same node", func(egressIP1, egressIP2 string) {
 			app.Action = func(ctx *cli.Context) error {
 				node1IPv4OVN := ""
 				node1IPv6OVN := "0:0:0:0:0:feff:c0a8:8e0c/64"
@@ -1829,11 +1827,11 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 
 			err := app.Run([]string{app.Name})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		}, table.Entry("OVN egress IPs", "0:0:0:0:0:feff:c0a8:8e0d", "0:0:0:0:0:feff:c0a8:8e0f"),
-			table.Entry("Secondary host egress IPs", "0:0:1:0:0:fecf:c0a8:8e0d", "0:0:1:0:0:febf:c0a8:8e0f"),
-			table.Entry("OVN and secondary host egress IPs", "0:0:1:0:0:fecf:c0a8:8e0d", "0:0:0:0:0:feff:c0a8:8e0f"))
+		}, ginkgo.Entry("OVN egress IPs", "0:0:0:0:0:feff:c0a8:8e0d", "0:0:0:0:0:feff:c0a8:8e0f"),
+			ginkgo.Entry("Secondary host egress IPs", "0:0:1:0:0:fecf:c0a8:8e0d", "0:0:1:0:0:febf:c0a8:8e0f"),
+			ginkgo.Entry("OVN and secondary host egress IPs", "0:0:1:0:0:fecf:c0a8:8e0d", "0:0:0:0:0:feff:c0a8:8e0f"))
 
-		table.DescribeTable("should be able to allocate several EgressIPs and avoid the same node and leave one un-assigned without error", func(egressIP1, egressIP2, egressIP3 string) {
+		ginkgo.DescribeTable("should be able to allocate several EgressIPs and avoid the same node and leave one un-assigned without error", func(egressIP1, egressIP2, egressIP3 string) {
 			app.Action = func(ctx *cli.Context) error {
 				node1IPv4OVN := ""
 				node1IPv6OVN := "0:0:0:0:0:feff:c0a8:8e0c/64"
@@ -1917,8 +1915,8 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 
 			err := app.Run([]string{app.Name})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		}, table.Entry("OVN network", "0:0:0:0:0:feff:c0a8:8e0d", "0:0:0:0:0:feff:c0a8:8e0e", "0:0:0:0:0:feff:c0a8:8e0f"),
-			table.Entry("Secondary host network", "0:0:1:0:0:feff:c0a8:8e0d", "0:0:1:0:0:feff:c0a8:8e0e", "0:0:1:0:0:feff:c0a8:8e0f"),
+		}, ginkgo.Entry("OVN network", "0:0:0:0:0:feff:c0a8:8e0d", "0:0:0:0:0:feff:c0a8:8e0e", "0:0:0:0:0:feff:c0a8:8e0f"),
+			ginkgo.Entry("Secondary host network", "0:0:1:0:0:feff:c0a8:8e0d", "0:0:1:0:0:feff:c0a8:8e0e", "0:0:1:0:0:feff:c0a8:8e0f"),
 		)
 
 		ginkgo.It("should be able to allocate several EgressIPs for OVN and Secondary host networks and avoid the same node and leave multiple EgressIPs un-assigned without error", func() {
@@ -2013,7 +2011,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 
-		table.DescribeTable("should return the already allocated IP with the same node if it is allocated again", func(egressIP string) {
+		ginkgo.DescribeTable("should return the already allocated IP with the same node if it is allocated again", func(egressIP string) {
 			app.Action = func(ctx *cli.Context) error {
 				node1IPv4OVN := ""
 				node1IPv6OVN := "0:0:0:0:0:feff:c0a8:8e0c/64"
@@ -2096,8 +2094,8 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 
 			err := app.Run([]string{app.Name})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		}, table.Entry("OVN network", "0:0:0:0:0:feff:c0a8:8e1a"),
-			table.Entry("Secondary host network", "0:0:1:0:0:feff:c0a8:8e0d"),
+		}, ginkgo.Entry("OVN network", "0:0:0:0:0:feff:c0a8:8e1a"),
+			ginkgo.Entry("Secondary host network", "0:0:1:0:0:feff:c0a8:8e0d"),
 		)
 
 		ginkgo.It("should not be able to allocate node IP", func() {

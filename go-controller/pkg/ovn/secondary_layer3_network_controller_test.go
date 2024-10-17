@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	. "github.com/onsi/ginkgo"
-	"github.com/onsi/ginkgo/extensions/table"
+	. "github.com/onsi/ginkgo/v2"
+
 	. "github.com/onsi/gomega"
 
 	cnitypes "github.com/containernetworking/cni/pkg/types"
@@ -86,7 +86,7 @@ var _ = Describe("OVN Multi-Homed pod operations", func() {
 		fakeOvn.shutdown()
 	})
 
-	table.DescribeTable(
+	DescribeTable(
 		"reconciles a new",
 		func(netInfo secondaryNetInfo, testConfig testConfiguration, gwMode config.GatewayMode) {
 			podInfo := dummyTestPod(ns, netInfo)
@@ -203,39 +203,39 @@ var _ = Describe("OVN Multi-Homed pod operations", func() {
 
 			Expect(app.Run([]string{app.Name})).To(Succeed())
 		},
-		table.Entry("pod on a user defined secondary network",
+		Entry("pod on a user defined secondary network",
 			dummySecondaryLayer3UserDefinedNetwork("192.168.0.0/16", "192.168.1.0/24"),
 			nonICClusterTestConfiguration(),
 			config.GatewayModeShared,
 		),
-		table.Entry("pod on a user defined primary network",
+		Entry("pod on a user defined primary network",
 			dummyPrimaryLayer3UserDefinedNetwork("192.168.0.0/16", "192.168.1.0/24"),
 			nonICClusterTestConfiguration(),
 			config.GatewayModeShared,
 		),
-		table.Entry("pod on a user defined secondary network on an IC cluster",
+		Entry("pod on a user defined secondary network on an IC cluster",
 			dummySecondaryLayer3UserDefinedNetwork("192.168.0.0/16", "192.168.1.0/24"),
 			icClusterTestConfiguration(),
 			config.GatewayModeShared,
 		),
-		table.Entry("pod on a user defined primary network on an IC cluster",
+		Entry("pod on a user defined primary network on an IC cluster",
 			dummyPrimaryLayer3UserDefinedNetwork("192.168.0.0/16", "192.168.1.0/24"),
 			icClusterTestConfiguration(),
 			config.GatewayModeShared,
 		),
-		table.Entry("pod on a user defined primary network on an IC cluster; LGW",
+		Entry("pod on a user defined primary network on an IC cluster; LGW",
 			dummyPrimaryLayer3UserDefinedNetwork("192.168.0.0/16", "192.168.1.0/24"),
 			icClusterTestConfiguration(),
 			config.GatewayModeLocal,
 		),
-		table.Entry("pod on a user defined primary network on an IC cluster with per-pod SNATs enabled",
+		Entry("pod on a user defined primary network on an IC cluster with per-pod SNATs enabled",
 			dummyPrimaryLayer3UserDefinedNetwork("192.168.0.0/16", "192.168.1.0/24"),
 			icClusterWithDisableSNATTestConfiguration(),
 			config.GatewayModeShared,
 		),
 	)
 
-	table.DescribeTable(
+	DescribeTable(
 		"the gateway is properly cleaned up",
 		func(netInfo secondaryNetInfo, testConfig testConfiguration) {
 			config.OVNKubernetesFeature.EnableMultiNetwork = true
@@ -351,15 +351,15 @@ var _ = Describe("OVN Multi-Homed pod operations", func() {
 			}
 			Expect(app.Run([]string{app.Name})).To(Succeed())
 		},
-		table.Entry("pod on a user defined primary network",
+		Entry("pod on a user defined primary network",
 			dummyPrimaryLayer3UserDefinedNetwork("192.168.0.0/16", "192.168.1.0/24"),
 			nonICClusterTestConfiguration(),
 		),
-		table.Entry("pod on a user defined primary network on an IC cluster",
+		Entry("pod on a user defined primary network on an IC cluster",
 			dummyPrimaryLayer3UserDefinedNetwork("192.168.0.0/16", "192.168.1.0/24"),
 			icClusterTestConfiguration(),
 		),
-		table.Entry("pod on a user defined primary network on an IC cluster with per-pod SNATs enabled",
+		Entry("pod on a user defined primary network on an IC cluster with per-pod SNATs enabled",
 			dummyPrimaryLayer3UserDefinedNetwork("192.168.0.0/16", "192.168.1.0/24"),
 			icClusterWithDisableSNATTestConfiguration(),
 		),

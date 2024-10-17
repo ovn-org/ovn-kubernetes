@@ -15,8 +15,7 @@ import (
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
-	"github.com/onsi/ginkgo"
-	"github.com/onsi/ginkgo/extensions/table"
+	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -158,7 +157,7 @@ var _ = ginkgo.Describe("Egress Firewall External DNS Operations", func() {
 			ipV6Mode      ipMode = "ipv6"
 			dualStackMode ipMode = "dual-stack"
 		)
-		table.DescribeTable("Should add addresses for different ip modes with cluster subnet/without cluster subnet", func(mode ipMode, addresses []string, ignoreClusterSubnet bool, expectedAddresses []string) {
+		ginkgo.DescribeTable("Should add addresses for different ip modes with cluster subnet/without cluster subnet", func(mode ipMode, addresses []string, ignoreClusterSubnet bool, expectedAddresses []string) {
 			start()
 
 			switch mode {
@@ -183,15 +182,15 @@ var _ = ginkgo.Describe("Egress Firewall External DNS Operations", func() {
 
 			expectDNSNameWithAddresses(extEgDNS, dnsName, expectedAddresses)
 		},
-			table.Entry("Should add IPv4 addresses", ipV4Mode, []string{"1.1.1.1", "2.2.2.2"}, true, []string{"1.1.1.1", "2.2.2.2"}),
-			table.Entry("Should add IPv6 address", ipV6Mode, []string{"2001:0db8:85a3:0000:0000:8a2e:0370:7334"}, true, []string{"2001:0db8:85a3:0000:0000:8a2e:0370:7334"}),
-			table.Entry("Should support dual stack", dualStackMode, []string{"1.1.1.1", "2.2.2.2", "2001:0db8:85a3:0000:0000:8a2e:0370:7334"}, true, []string{"1.1.1.1", "2.2.2.2", "2001:0db8:85a3:0000:0000:8a2e:0370:7334"}),
-			table.Entry("Should only add supported ipV4 addresses", ipV4Mode, []string{"1.1.1.1", "2.2.2.2", "2001:0db8:85a3:0000:0000:8a2e:0370:7334"}, true, []string{"1.1.1.1", "2.2.2.2"}),
-			table.Entry("Should only add supported ipV6 addresses", ipV6Mode, []string{"1.1.1.1", "2.2.2.2", "2001:0db8:85a3:0000:0000:8a2e:0370:7334"}, true, []string{"2001:0db8:85a3:0000:0000:8a2e:0370:7334"}),
-			table.Entry("Should not add IP addresses matching cluster subnet", ipV4Mode, []string{"10.128.0.1"}, true, []string{}),
-			table.Entry("Should add IP addresses matching cluster subnet", ipV4Mode, []string{"10.128.0.1"}, false, []string{"10.128.0.1"}),
-			table.Entry("Should not add IP addresses matching cluster subnet, should add other IPs", ipV4Mode, []string{"10.128.0.1", "1.1.1.1", "2.2.2.2"}, true, []string{"1.1.1.1", "2.2.2.2"}),
-			table.Entry("Should add IP addresses matching cluster subnet, should add other IPs also", ipV4Mode, []string{"10.128.0.1", "1.1.1.1", "2.2.2.2"}, false, []string{"10.128.0.1", "1.1.1.1", "2.2.2.2"}),
+			ginkgo.Entry("Should add IPv4 addresses", ipV4Mode, []string{"1.1.1.1", "2.2.2.2"}, true, []string{"1.1.1.1", "2.2.2.2"}),
+			ginkgo.Entry("Should add IPv6 address", ipV6Mode, []string{"2001:0db8:85a3:0000:0000:8a2e:0370:7334"}, true, []string{"2001:0db8:85a3:0000:0000:8a2e:0370:7334"}),
+			ginkgo.Entry("Should support dual stack", dualStackMode, []string{"1.1.1.1", "2.2.2.2", "2001:0db8:85a3:0000:0000:8a2e:0370:7334"}, true, []string{"1.1.1.1", "2.2.2.2", "2001:0db8:85a3:0000:0000:8a2e:0370:7334"}),
+			ginkgo.Entry("Should only add supported ipV4 addresses", ipV4Mode, []string{"1.1.1.1", "2.2.2.2", "2001:0db8:85a3:0000:0000:8a2e:0370:7334"}, true, []string{"1.1.1.1", "2.2.2.2"}),
+			ginkgo.Entry("Should only add supported ipV6 addresses", ipV6Mode, []string{"1.1.1.1", "2.2.2.2", "2001:0db8:85a3:0000:0000:8a2e:0370:7334"}, true, []string{"2001:0db8:85a3:0000:0000:8a2e:0370:7334"}),
+			ginkgo.Entry("Should not add IP addresses matching cluster subnet", ipV4Mode, []string{"10.128.0.1"}, true, []string{}),
+			ginkgo.Entry("Should add IP addresses matching cluster subnet", ipV4Mode, []string{"10.128.0.1"}, false, []string{"10.128.0.1"}),
+			ginkgo.Entry("Should not add IP addresses matching cluster subnet, should add other IPs", ipV4Mode, []string{"10.128.0.1", "1.1.1.1", "2.2.2.2"}, true, []string{"1.1.1.1", "2.2.2.2"}),
+			ginkgo.Entry("Should add IP addresses matching cluster subnet, should add other IPs also", ipV4Mode, []string{"10.128.0.1", "1.1.1.1", "2.2.2.2"}, false, []string{"10.128.0.1", "1.1.1.1", "2.2.2.2"}),
 		)
 	})
 

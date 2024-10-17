@@ -3,8 +3,7 @@ package kubevirt
 import (
 	"net"
 
-	. "github.com/onsi/ginkgo"
-	. "github.com/onsi/ginkgo/extensions/table"
+	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
 	ktypes "k8s.io/apimachinery/pkg/types"
