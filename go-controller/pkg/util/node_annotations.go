@@ -1072,7 +1072,7 @@ func GetNodeHostAddrs(node *kapi.Node) ([]string, error) {
 	if err != nil && !IsAnnotationNotSetError(err) {
 		return nil, fmt.Errorf("failed to get node host CIDRs for %s: %s", node.Name, err.Error())
 	}
-	return hostAddresses.UnsortedList(), nil
+	return sets.List(hostAddresses), nil
 }
 
 func ParseNodeHostCIDRsExcludeOVNNetworks(node *kapi.Node) ([]string, error) {
