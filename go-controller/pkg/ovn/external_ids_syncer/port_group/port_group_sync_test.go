@@ -269,6 +269,7 @@ var _ = ginkgo.Describe("OVN Port Group Syncer", func() {
 				{
 					before: createInitialPG(pgName, readableName, networkExternalID,
 						[]string{fakePortUUID}, []string{acl.UUID}),
+					// TBD CATHY
 					after: getPortGroupNetworkPolicyDbIDs(namespaceName, policyName, networkExternalID),
 				},
 			}
