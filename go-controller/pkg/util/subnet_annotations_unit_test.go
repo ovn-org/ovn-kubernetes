@@ -259,12 +259,15 @@ func TestCreateNodeHostSubnetAnnotation(t *testing.T) {
 			desc:            "success path, valid default subnets",
 			inpDefSubnetIps: ovntest.MustParseIPNets("192.168.1.12/24"),
 			outExp: map[string]string{
-				"k8s.ovn.org/node-subnets": "{\"default\":[\"192.168.1.12/24\"]}",
+				"k8s.ovn.org/node-subnets":        "{\"default\":[\"192.168.1.12/24\"]}",
+				"k8s.ovn.org/node-mgmt-port-info": `{"default":{"ip-addresses":["192.168.1.14/24"]}}`,
 			},
 		},
 		{
-			desc:   "success path, inpDefSubnetIps is nil",
-			outExp: map[string]string{},
+			desc: "success path, inpDefSubnetIps is nil",
+			outExp: map[string]string{
+				"k8s.ovn.org/node-mgmt-port-info": "{}",
+			},
 		},
 	}
 	for i, tc := range tests {
