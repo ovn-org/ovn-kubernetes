@@ -4,12 +4,14 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"sync"
 	"time"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	listers "k8s.io/client-go/listers/core/v1"
 
+	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -23,10 +25,10 @@ import (
 type ManagementPort interface {
 	// Create Management port, use annotator to update node annotation with management port details
 	// and waiter to set up condition to wait on for management port creation
-	Create(routeManager *routemanager.Controller, node *v1.Node, nodeLister listers.NodeLister, kubeInterface kube.Interface, waiter *startupWaiter) (*managementPortConfig, error)
+	Create(isRoutingAdvertised bool, routeManager *routemanager.Controller, node *v1.Node, nodeLister listers.NodeLister, kubeInterface kube.Interface, waiter *startupWaiter) (*managementPortConfig, error)
 	// CheckManagementPortHealth checks periodically for management port health until stopChan is posted
 	// or closed and reports any warnings/errors to log
-	CheckManagementPortHealth(routeManager *routemanager.Controller, cfg *managementPortConfig, stopChan chan struct{})
+	CheckManagementPortHealth(routeManager *routemanager.Controller, cfg *managementPortConfig) error
 	// Currently, the management port(s) that doesn't have an assignable IP address are the following cases:
 	//   - Full mode with HW backed device (e.g. Virtual Function Representor).
 	//   - DPU mode with Virtual Function Representor.
@@ -78,7 +80,7 @@ func newManagementPort(nodeName string, hostSubnets []*net.IPNet) ManagementPort
 	}
 }
 
-func (mp *managementPort) Create(routeManager *routemanager.Controller, node *v1.Node,
+func (mp *managementPort) Create(isRoutingAdvertised bool, routeManager *routemanager.Controller, node *v1.Node,
 	nodeLister listers.NodeLister, kubeInterface kube.Interface, waiter *startupWaiter) (*managementPortConfig, error) {
 	for _, mgmtPortName := range []string{types.K8sMgmtIntfName, types.K8sMgmtIntfName + "_0"} {
 		if err := syncMgmtPortInterface(mp.hostSubnets, mgmtPortName, true); err != nil {
@@ -112,7 +114,7 @@ func (mp *managementPort) Create(routeManager *routemanager.Controller, node *v1
 		return nil, err
 	}
 
-	cfg, err := createPlatformManagementPort(routeManager, types.K8sMgmtIntfName, mp.hostSubnets)
+	cfg, err := createPlatformManagementPort(routeManager, types.K8sMgmtIntfName, mp.hostSubnets, isRoutingAdvertised)
 	if err != nil {
 		return nil, err
 	}
@@ -125,13 +127,8 @@ func (mp *managementPort) Create(routeManager *routemanager.Controller, node *v1
 	return cfg, nil
 }
 
-func (mp *managementPort) CheckManagementPortHealth(routeManager *routemanager.Controller, cfg *managementPortConfig, stopChan chan struct{}) {
-	go wait.Until(
-		func() {
-			checkManagementPortHealth(routeManager, cfg)
-		},
-		30*time.Second,
-		stopChan)
+func (mp *managementPort) CheckManagementPortHealth(routeManager *routemanager.Controller, cfg *managementPortConfig) error {
+	return checkManagementPortHealth(routeManager, cfg)
 }
 
 // OVS Internal Port Netdev should have IP addresses assignable to them.
@@ -163,4 +160,69 @@ func managementPortReady() (bool, error) {
 	}
 	klog.Infof("Management port %s is ready", k8sMgmtIntfName)
 	return true, nil
+}
+
+type managementPortEntry struct {
+	sync.Mutex
+	port         ManagementPort
+	config       *managementPortConfig
+	routeManager *routemanager.Controller
+	reconcile    chan struct{}
+}
+
+func NewManagementPortEntry(port ManagementPort, cfg *managementPortConfig, routeManager *routemanager.Controller) *managementPortEntry {
+	return &managementPortEntry{
+		port:         port,
+		config:       cfg,
+		routeManager: routeManager,
+		reconcile:    make(chan struct{}, 1),
+	}
+}
+
+func (p *managementPortEntry) Start(stopChan <-chan struct{}) {
+	go func() {
+		for {
+			select {
+			case <-stopChan:
+				return
+			case <-p.reconcile:
+				err := retry.OnError(
+					wait.Backoff{
+						Duration: 10 * time.Millisecond,
+						Steps:    4,
+						Factor:   5.0,
+						Cap:      p.config.reconcilePeriod,
+					},
+					func(error) bool { return true },
+					p.doReconcile,
+				)
+				if err != nil {
+					klog.Errorf("Failed to reconcile management port %s: %v", p.config.ifName, err)
+				}
+			}
+		}
+	}()
+	go wait.Until(
+		p.Reconcile,
+		p.config.reconcilePeriod,
+		stopChan,
+	)
+}
+
+func (p *managementPortEntry) Reconcile() {
+	// trigger a new reconciliation if none was pending
+	select {
+	case p.reconcile <- struct{}{}:
+	default:
+	}
+}
+
+func (p *managementPortEntry) doReconcile() error {
+	return p.port.CheckManagementPortHealth(p.routeManager, p.config)
+}
+
+func (p *managementPortEntry) setRoutingAdvertised(isRoutingAdvertised bool) {
+	p.Lock()
+	defer p.Unlock()
+	p.config.isRoutingAdvertised.Store(isRoutingAdvertised)
 }

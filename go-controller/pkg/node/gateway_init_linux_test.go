@@ -32,7 +32,6 @@ import (
 	udnfakeclient "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	networkAttachDefController "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	linkMock "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/vishvananda/netlink"
@@ -204,7 +203,6 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 
 		// Make a fake MgmtPortConfig with only the fields we care about
 		fakeMgmtPortIPFamilyConfig := managementPortIPFamilyConfig{
-			ipt:        nil,
 			allSubnets: nil,
 			ifAddr:     nodeNet,
 			gwIP:       nodeNet.IP,
@@ -249,15 +247,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 		err = nodeAnnotator.Run()
 		Expect(err).NotTo(HaveOccurred())
 		rm := routemanager.NewController()
-		var nadController *networkAttachDefController.NetAttachDefinitionController
-		if util.IsNetworkSegmentationSupportEnabled() {
-			testNCM := &nad.FakeNetworkControllerManager{}
-			nadController, err = networkAttachDefController.NewNetAttachDefinitionController("test", testNCM, wf, nil)
-			Expect(err).NotTo(HaveOccurred())
-			err = nadController.Start()
-			Expect(err).NotTo(HaveOccurred())
-			defer nadController.Stop()
-		}
+		fakeNetworkManager := &nad.FakeNetworkManager{}
 		Expect(err).NotTo(HaveOccurred())
 		wg.Add(1)
 		go testNS.Do(func(netNS ns.NetNS) error {
@@ -306,7 +296,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			Expect(err).NotTo(HaveOccurred())
 			ifAddrs := ovntest.MustParseIPNets(eth0CIDR)
 			sharedGw, err := newSharedGateway(nodeName, ovntest.MustParseIPNets(nodeSubnet), gatewayNextHops, gatewayIntf, "", ifAddrs, nodeAnnotator, k,
-				&fakeMgmtPortConfig, wf, rm, nadController)
+				&fakeMgmtPortConfig, wf, rm, fakeNetworkManager)
 			Expect(err).NotTo(HaveOccurred())
 			err = sharedGw.Init(stop, wg)
 			Expect(err).NotTo(HaveOccurred())
@@ -637,7 +627,6 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 
 		// Make a fake MgmtPortConfig with only the fields we care about
 		fakeMgmtPortIPFamilyConfig := managementPortIPFamilyConfig{
-			ipt:        nil,
 			allSubnets: nil,
 			ifAddr:     nodeNet,
 			gwIP:       nodeNet.IP,
@@ -677,15 +666,7 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 		runtime.LockOSThread()
 		defer runtime.UnlockOSThread()
 		rm := routemanager.NewController()
-		var nadController *networkAttachDefController.NetAttachDefinitionController
-		if util.IsNetworkSegmentationSupportEnabled() {
-			testNCM := &nad.FakeNetworkControllerManager{}
-			nadController, err = networkAttachDefController.NewNetAttachDefinitionController("test", testNCM, wf, nil)
-			Expect(err).NotTo(HaveOccurred())
-			err = nadController.Start()
-			Expect(err).NotTo(HaveOccurred())
-			defer nadController.Stop()
-		}
+		fakeNetworkManager := &nad.FakeNetworkManager{}
 		wg.Add(1)
 		go testNS.Do(func(netNS ns.NetNS) error {
 			defer GinkgoRecover()
@@ -702,7 +683,7 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
 			Expect(err).NotTo(HaveOccurred())
 			sharedGw, err := newSharedGateway(nodeName, ovntest.MustParseIPNets(nodeSubnet), gatewayNextHops,
-				gatewayIntf, "", ifAddrs, nodeAnnotator, k, &fakeMgmtPortConfig, wf, rm, nadController)
+				gatewayIntf, "", ifAddrs, nodeAnnotator, k, &fakeMgmtPortConfig, wf, rm, fakeNetworkManager)
 			Expect(err).NotTo(HaveOccurred())
 			err = sharedGw.Init(stop, wg)
 			Expect(err).NotTo(HaveOccurred())
@@ -1081,7 +1062,6 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 
 		// Make a fake MgmtPortConfig with only the fields we care about
 		fakeMgmtPortIPFamilyConfig := managementPortIPFamilyConfig{
-			ipt:        nil,
 			allSubnets: nil,
 			ifAddr:     nodeNet,
 			gwIP:       nodeNet.IP,
@@ -1132,15 +1112,7 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 		ip, ipNet, _ := net.ParseCIDR(eth0CIDR)
 		ipNet.IP = ip
 		rm := routemanager.NewController()
-		var nadController *networkAttachDefController.NetAttachDefinitionController
-		if util.IsNetworkSegmentationSupportEnabled() {
-			testNCM := &nad.FakeNetworkControllerManager{}
-			nadController, err = networkAttachDefController.NewNetAttachDefinitionController("test", testNCM, wf, nil)
-			Expect(err).NotTo(HaveOccurred())
-			err = nadController.Start()
-			Expect(err).NotTo(HaveOccurred())
-			defer nadController.Stop()
-		}
+		fakeNetworkManager := &nad.FakeNetworkManager{}
 		go testNS.Do(func(netNS ns.NetNS) error {
 			defer GinkgoRecover()
 			rm.Run(stop, 10*time.Second)
@@ -1154,7 +1126,7 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 			Expect(err).NotTo(HaveOccurred())
 			ifAddrs := ovntest.MustParseIPNets(eth0CIDR)
 			localGw, err := newLocalGateway(nodeName, ovntest.MustParseIPNets(nodeSubnet), gatewayNextHops, gatewayIntf, "", ifAddrs,
-				nodeAnnotator, &fakeMgmtPortConfig, k, wf, rm, nadController)
+				nodeAnnotator, &fakeMgmtPortConfig, k, wf, rm, fakeNetworkManager)
 			Expect(err).NotTo(HaveOccurred())
 			err = localGw.Init(stop, wg)
 			Expect(err).NotTo(HaveOccurred())

@@ -13,7 +13,7 @@ import (
 	utilnet "k8s.io/utils/net"
 )
 
-func (m *externalPolicyManager) syncPod(pod *v1.Pod, routeQueue workqueue.RateLimitingInterface) error {
+func (m *externalPolicyManager) syncPod(pod *v1.Pod, routeQueue workqueue.TypedRateLimitingInterface[string]) error {
 	policyKeys, err := m.getPoliciesForPodChange(pod)
 	if err != nil {
 		return err

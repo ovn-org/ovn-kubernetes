@@ -256,7 +256,7 @@ type SecondaryLayer2NetworkController struct {
 }
 
 // NewSecondaryLayer2NetworkController create a new OVN controller for the given secondary layer2 nad
-func NewSecondaryLayer2NetworkController(cnci *CommonNetworkControllerInfo, netInfo util.NetInfo, nadController nad.NADController) (*SecondaryLayer2NetworkController, error) {
+func NewSecondaryLayer2NetworkController(cnci *CommonNetworkControllerInfo, netInfo util.NetInfo, networkManager nad.NetworkManager) (*SecondaryLayer2NetworkController, error) {
 
 	stopChan := make(chan struct{})
 
@@ -276,7 +276,7 @@ func NewSecondaryLayer2NetworkController(cnci *CommonNetworkControllerInfo, netI
 			cnci.watchFactory.ServiceCoreInformer(),
 			cnci.watchFactory.EndpointSliceCoreInformer(),
 			cnci.watchFactory.NodeCoreInformer(),
-			nadController,
+			networkManager,
 			cnci.recorder,
 			netInfo,
 		)
@@ -305,7 +305,7 @@ func NewSecondaryLayer2NetworkController(cnci *CommonNetworkControllerInfo, netI
 					wg:                          &sync.WaitGroup{},
 					localZoneNodes:              &sync.Map{},
 					cancelableCtx:               util.NewCancelableContext(),
-					nadController:               nadController,
+					networkManager:              networkManager,
 				},
 			},
 		},

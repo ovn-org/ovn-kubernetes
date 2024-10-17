@@ -23,7 +23,7 @@ import (
 
 func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net.IP, gwIntf, egressGWIntf string, gwIPs []*net.IPNet,
 	nodeAnnotator kube.Annotator, cfg *managementPortConfig, kube kube.Interface, watchFactory factory.NodeWatchFactory,
-	routeManager *routemanager.Controller, nadController *nad.NetAttachDefinitionController) (*gateway, error) {
+	routeManager *routemanager.Controller, networkManager nad.NetworkManager) (*gateway, error) {
 	klog.Info("Creating new local gateway")
 	gw := &gateway{}
 
@@ -136,7 +136,7 @@ func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net
 		// resync flows on IP change
 		gw.nodeIPManager.OnChanged = func() {
 			klog.V(5).Info("Node addresses changed, re-syncing bridge flows")
-			if err := gw.openflowManager.updateBridgeFlowCache(hostSubnets, gw.nodeIPManager.ListAddresses()); err != nil {
+			if err := gw.openflowManager.updateBridgeFlowCache(hostSubnets, gw.nodeIPManager.ListAddresses(), gw.isRoutingAdvertised); err != nil {
 				// very unlikely - somehow node has lost its IP address
 				klog.Errorf("Failed to re-generate gateway flows after address change: %v", err)
 			}
@@ -160,7 +160,7 @@ func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net
 					return err
 				}
 			}
-			gw.nodePortWatcher, err = newNodePortWatcher(gwBridge, gw.openflowManager, gw.nodeIPManager, watchFactory, nadController)
+			gw.nodePortWatcher, err = newNodePortWatcher(gwBridge, gw.openflowManager, gw.nodeIPManager, watchFactory, networkManager)
 			if err != nil {
 				return err
 			}
