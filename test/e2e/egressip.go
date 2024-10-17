@@ -500,6 +500,9 @@ var _ = ginkgo.DescribeTableSubtree("e2e egress IP validation", func(netConfigPa
 
 	// Determine what mode the CI is running in and get relevant endpoint information for the tests
 	ginkgo.BeforeEach(func() {
+		if !isNetworkSegmentationEnabled() && netConfigParams.networkName != types.DefaultNetworkName {
+			ginkgo.Skip("Network segmentation is disabled")
+		}
 		nodes, err := e2enode.GetBoundedReadySchedulableNodes(context.TODO(), f.ClientSet, 3)
 		framework.ExpectNoError(err)
 		if len(nodes.Items) < 3 {
@@ -572,6 +575,9 @@ var _ = ginkgo.DescribeTableSubtree("e2e egress IP validation", func(netConfigPa
 	})
 
 	ginkgo.AfterEach(func() {
+		if !isNetworkSegmentationEnabled() && netConfigParams.networkName != types.DefaultNetworkName {
+			ginkgo.Skip("Network segmentation is disabled")
+		}
 		e2ekubectl.RunKubectlOrDie("default", "delete", "eip", egressIPName, "--ignore-not-found=true")
 		e2ekubectl.RunKubectlOrDie("default", "delete", "eip", egressIPName2, "--ignore-not-found=true")
 		e2ekubectl.RunKubectlOrDie("default", "label", "node", egress1Node.name, "k8s.ovn.org/egress-assignable-")
@@ -2707,6 +2713,9 @@ spec:
 	})
 
 	ginkgo.DescribeTable("[OVN network] multiple namespaces with different primary networks", func(otherNetworkAttachParms networkAttachmentConfigParams) {
+		if !isNetworkSegmentationEnabled() {
+			ginkgo.Skip("Network segmentation is disabled")
+		}
 		ginkgo.By(fmt.Sprintf("Building a namespace api object, basename %s", f.BaseName))
 		otherNetworkNamespace, err := f.CreateNamespace(context.Background(), f.BaseName, map[string]string{
 			"e2e-framework": f.BaseName,
