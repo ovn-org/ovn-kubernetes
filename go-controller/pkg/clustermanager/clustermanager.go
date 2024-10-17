@@ -134,8 +134,12 @@ func NewClusterManager(ovnClient *util.OVNClusterManagerClientset, wf *factory.W
 			ovnClient.UserDefinedNetworkClient, wf.UserDefinedNetworkInformer(),
 			udntemplate.RenderNetAttachDefManifest,
 			wf.PodCoreInformer(),
+			cm.recorder,
 		)
 		cm.userDefinedNetworkController = udnController
+		if cm.secondaryNetClusterManager != nil {
+			cm.secondaryNetClusterManager.SetNetworkStatusReporter(udnController.UpdateSubsystemCondition)
+		}
 	}
 
 	return cm, nil
