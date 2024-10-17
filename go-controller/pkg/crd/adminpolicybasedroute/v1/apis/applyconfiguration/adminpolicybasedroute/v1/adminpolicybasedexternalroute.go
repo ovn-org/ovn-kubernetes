@@ -23,7 +23,7 @@ import (
 	v1 "k8s.io/client-go/applyconfigurations/meta/v1"
 )
 
-// AdminPolicyBasedExternalRouteApplyConfiguration represents an declarative configuration of the AdminPolicyBasedExternalRoute type for use
+// AdminPolicyBasedExternalRouteApplyConfiguration represents a declarative configuration of the AdminPolicyBasedExternalRoute type for use
 // with apply.
 type AdminPolicyBasedExternalRouteApplyConfiguration struct {
 	v1.TypeMetaApplyConfiguration    `json:",inline"`
@@ -32,7 +32,7 @@ type AdminPolicyBasedExternalRouteApplyConfiguration struct {
 	Status                           *AdminPolicyBasedRouteStatusApplyConfiguration       `json:"status,omitempty"`
 }
 
-// AdminPolicyBasedExternalRoute constructs an declarative configuration of the AdminPolicyBasedExternalRoute type for use with
+// AdminPolicyBasedExternalRoute constructs a declarative configuration of the AdminPolicyBasedExternalRoute type for use with
 // apply.
 func AdminPolicyBasedExternalRoute(name string) *AdminPolicyBasedExternalRouteApplyConfiguration {
 	b := &AdminPolicyBasedExternalRouteApplyConfiguration{}
@@ -214,4 +214,10 @@ func (b *AdminPolicyBasedExternalRouteApplyConfiguration) WithSpec(value *AdminP
 func (b *AdminPolicyBasedExternalRouteApplyConfiguration) WithStatus(value *AdminPolicyBasedRouteStatusApplyConfiguration) *AdminPolicyBasedExternalRouteApplyConfiguration {
 	b.Status = value
 	return b
+}
+
+// GetName retrieves the value of the Name field in the declarative configuration.
+func (b *AdminPolicyBasedExternalRouteApplyConfiguration) GetName() *string {
+	b.ensureObjectMetaApplyConfigurationExists()
+	return b.Name
 }
