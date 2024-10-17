@@ -1028,3 +1028,20 @@ func (bnc *BaseNetworkController) GetSamplingConfig() *libovsdbops.SamplingConfi
 	}
 	return nil
 }
+
+func (bnc *BaseNetworkController) cleanupStaleLogicalEntities() error {
+	// sync shared resources
+	// pod selector address sets
+	err := bnc.cleanupPodSelectorAddressSets()
+	if err != nil {
+		return fmt.Errorf("cleaning up stale pod selector address sets for network %v failed : %w", bnc.GetNetworkName(), err)
+	}
+
+	// delete stale network policy port groups
+	err = bnc.deleteStaleNetpolPortGroups()
+	if err != nil {
+		return fmt.Errorf("cleaning up stale network policy port groups for network %v failed : %w", bnc.GetNetworkName(), err)
+	}
+
+	return nil
+}

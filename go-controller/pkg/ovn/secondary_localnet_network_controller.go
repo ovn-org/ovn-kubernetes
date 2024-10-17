@@ -253,7 +253,12 @@ func (oc *SecondaryLocalnetNetworkController) Start(ctx context.Context) error {
 		klog.Infof("Starting controller for secondary network network %s took %v", oc.GetNetworkName(), time.Since(start))
 	}()
 
-	if err := oc.Init(); err != nil {
+	err := oc.cleanupStaleLogicalEntities()
+	if err != nil {
+		return fmt.Errorf("cleaning up stale logical entities for network %v failed : %w", oc.GetNetworkName(), err)
+	}
+
+	if err = oc.Init(); err != nil {
 		return err
 	}
 

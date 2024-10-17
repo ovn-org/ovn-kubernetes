@@ -318,16 +318,10 @@ func (oc *DefaultNetworkController) syncDb() error {
 	if err = portGroupSyncer.SyncPortGroups(); err != nil {
 		return fmt.Errorf("failed to sync port groups on controller init: %v", err)
 	}
-	// sync shared resources
-	// pod selector address sets
-	err = oc.cleanupPodSelectorAddressSets()
-	if err != nil {
-		return fmt.Errorf("cleaning up stale pod selector address sets for network %v failed : %w", oc.GetNetworkName(), err)
-	}
 
-	err = oc.deleteStaleNetpolPortGroups()
+	err = oc.cleanupStaleLogicalEntities()
 	if err != nil {
-		return fmt.Errorf("cleaning up stale network policy port groups for network %v failed : %w", oc.GetNetworkName(), err)
+		return fmt.Errorf("cleaning up stale logical entities for network %v failed : %w", oc.GetNetworkName(), err)
 	}
 	return nil
 }

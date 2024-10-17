@@ -307,25 +307,39 @@ func (bnc *BaseNetworkController) syncNetworkPoliciesCommon(expectedPolicies map
 	if err != nil {
 		return fmt.Errorf("unable delete stale ACLs from port groups: %v", err)
 	}
+
 	predicateIDs = libovsdbops.NewDbObjectIDs(libovsdbops.PortGroupPodSelector, bnc.controllerName, nil)
 	predicate := libovsdbops.GetPredicate[*nbdb.PortGroup](predicateIDs, func(item *nbdb.PortGroup) bool {
 		return len(item.ACLs) == 0
 	})
-	err = libovsdbops.DeletePortGroupsWithPredicate(bnc.nbClient, predicate)
+	ops, err := libovsdbops.DeletePortGroupsWithPredicateOps(bnc.nbClient, nil, predicate)
 	if err != nil {
-		return fmt.Errorf("unable delete stale pod selector port groups: %v", err)
+		return fmt.Errorf("failed to get ops to delete stale pod selector port groups: %v", err)
 	}
+
+	//predicateIDs = libovsdbops.NewDbObjectIDs(libovsdbops.PortGroupNetworkPolicy, bnc.controllerName, nil)
+	//predicate := libovsdbops.GetPredicate[*nbdb.PortGroup](predicateIDs, func(item *nbdb.PortGroup) bool {
+	//	return len(item.ACLs) == 0
+	//})
+	//ops, err = libovsdbops.DeletePortGroupsWithPredicateOps(bnc.nbClient, ops, predicate)
+	//if err != nil {
+	//	return fmt.Errorf("failed to get ops to delete stale network policy port groups: %v", err)
+	//}
 
 	// cleanup stale netpol-namespace-owned default deny port groups
 	predicateIDs = libovsdbops.NewDbObjectIDs(libovsdbops.PortGroupNetpolNamespace, bnc.controllerName, nil)
-	p = libovsdbops.GetPredicate[*nbdb.PortGroup](predicateIDs, func(item *nbdb.PortGroup) bool {
+	predicate = libovsdbops.GetPredicate[*nbdb.PortGroup](predicateIDs, func(item *nbdb.PortGroup) bool {
 		namespace := item.ExternalIDs[libovsdbops.ObjectNameKey.String()]
 		_, ok := expectedPolicies[namespace]
 		// delete default deny port group if no policies in that namespace are found
 		return !ok
 	})
-	if err := libovsdbops.DeletePortGroupsWithPredicate(bnc.nbClient, p); err != nil {
-		return fmt.Errorf("cannot find default deny NetworkPolicy port groups: %v", err)
+	if ops, err = libovsdbops.DeletePortGroupsWithPredicateOps(bnc.nbClient, ops, predicate); err != nil {
+		return fmt.Errorf("failed to get ops to delete stale default deny NetworkPolicy port groups: %v", err)
+	}
+
+	if _, err = libovsdbops.TransactAndCheck(bnc.nbClient, ops); err != nil {
+		return fmt.Errorf("failed to delete stale port groups: %v", err)
 	}
 	return nil
 }
