@@ -20,10 +20,12 @@ DisruptionController
 # FEATURES NOT AVAILABLE IN OUR CI ENVIRONMENT
 \[Feature:Federation\]
 should have ipv4 and ipv6 internal node ip
+# https://github.com/kubernetes/kubernetes/pull/124660#issue-2274259280
+\[Feature:LoadBalancer\]
 
 # TESTS THAT ASSUME KUBE-PROXY
 kube-proxy
-should set TCP CLOSE_WAIT timeout
+KubeProxy
 
 # NOT IMPLEMENTED; SEE DISCUSSION IN https://github.com/ovn-org/ovn-kubernetes/pull/1225
 named port.+\[Feature:NetworkPolicy\]

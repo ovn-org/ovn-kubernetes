@@ -69,9 +69,12 @@ func NewController(client clientset.Interface,
 ) (*Controller, error) {
 	klog.V(4).Infof("Creating services controller for network=%s", netInfo.GetNetworkName())
 	c := &Controller{
-		client:                client,
-		nbClient:              nbClient,
-		queue:                 workqueue.NewNamedRateLimitingQueue(newRatelimiter(100), controllerName),
+		client:   client,
+		nbClient: nbClient,
+		queue: workqueue.NewTypedRateLimitingQueueWithConfig(
+			newRatelimiter(100),
+			workqueue.TypedRateLimitingQueueConfig[string]{Name: controllerName},
+		),
 		workerLoopPeriod:      time.Second,
 		alreadyApplied:        map[string][]LB{},
 		nodeIPv4Templates:     NewNodeIPsTemplates(v1.IPv4Protocol),
@@ -123,7 +126,7 @@ type Controller struct {
 	// more often than services with few pods; it also would cause a
 	// service that's inserted multiple times to be processed more than
 	// necessary.
-	queue workqueue.RateLimitingInterface
+	queue workqueue.TypedRateLimitingInterface[string]
 
 	// workerLoopPeriod is the time between worker runs. The workers process the queue of service and pod changes.
 	workerLoopPeriod time.Duration
@@ -262,14 +265,14 @@ func (c *Controller) processNextWorkItem() bool {
 	}
 	defer c.queue.Done(eKey)
 
-	err := c.syncService(eKey.(string))
+	err := c.syncService(eKey)
 	c.handleErr(err, eKey)
 
 	return true
 }
 
-func (c *Controller) handleErr(err error, key interface{}) {
-	ns, name, keyErr := cache.SplitMetaNamespaceKey(key.(string))
+func (c *Controller) handleErr(err error, key string) {
+	ns, name, keyErr := cache.SplitMetaNamespaceKey(key)
 	if keyErr != nil {
 		klog.ErrorS(err, "Failed to split meta namespace cache key", "key", key)
 	}
@@ -829,9 +832,9 @@ func _getServiceNameFromEndpointSlice(endpointSlice *discovery.EndpointSlice, in
 
 // newRateLimiter makes a queue rate limiter. This limits re-queues somewhat more significantly than base qps.
 // the client-go default qps is 10, but this is low for our level of scale.
-func newRatelimiter(qps int) workqueue.RateLimiter {
-	return workqueue.NewMaxOfRateLimiter(
-		workqueue.NewItemExponentialFailureRateLimiter(5*time.Millisecond, 1000*time.Second),
-		&workqueue.BucketRateLimiter{Limiter: rate.NewLimiter(rate.Limit(qps), qps*5)},
+func newRatelimiter(qps int) workqueue.TypedRateLimiter[string] {
+	return workqueue.NewTypedMaxOfRateLimiter(
+		workqueue.NewTypedItemExponentialFailureRateLimiter[string](5*time.Millisecond, 1000*time.Second),
+		&workqueue.TypedBucketRateLimiter[string]{Limiter: rate.NewLimiter(rate.Limit(qps), qps*5)},
 	)
 }

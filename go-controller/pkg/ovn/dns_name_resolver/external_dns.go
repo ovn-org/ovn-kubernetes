@@ -62,7 +62,7 @@ func NewExternalEgressDNS(
 
 	extEgDNS.dnsLister = ocpnetworklisterv1alpha1.NewDNSNameResolverLister(dnsSharedIndexInformer.GetIndexer())
 	dnsConfig := &controller.ControllerConfig[ocpnetworkapiv1alpha1.DNSNameResolver]{
-		RateLimiter:    workqueue.NewItemFastSlowRateLimiter(time.Second, 5*time.Second, 5),
+		RateLimiter:    workqueue.NewTypedItemFastSlowRateLimiter[string](time.Second, 5*time.Second, 5),
 		Informer:       dnsSharedIndexInformer,
 		Lister:         extEgDNS.dnsLister.List,
 		ObjNeedsUpdate: dnsNeedsUpdate,

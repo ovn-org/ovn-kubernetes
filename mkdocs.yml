@@ -120,6 +120,7 @@ nav:
       - MultiNetworkPolicies: features/multiple-networks/multi-network-policies.md
       - MultiNetworkRails: features/multiple-networks/multi-vtep.md
     - Multicast: features/multicast.md
+    - NetworkQoS: features/network-qos.md
     - LiveMigration: features/live-migration.md
     - HybridOverlay: features/hybrid-overlay.md
     - Hardware Acceleration:

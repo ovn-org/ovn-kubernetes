@@ -19,8 +19,8 @@ package v1
 
 import (
 	v1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/client-go/listers"
 	"k8s.io/client-go/tools/cache"
 )
 
@@ -37,25 +37,17 @@ type EgressQoSLister interface {
 
 // egressQoSLister implements the EgressQoSLister interface.
 type egressQoSLister struct {
-	indexer cache.Indexer
+	listers.ResourceIndexer[*v1.EgressQoS]
 }
 
 // NewEgressQoSLister returns a new EgressQoSLister.
 func NewEgressQoSLister(indexer cache.Indexer) EgressQoSLister {
-	return &egressQoSLister{indexer: indexer}
-}
-
-// List lists all EgressQoSes in the indexer.
-func (s *egressQoSLister) List(selector labels.Selector) (ret []*v1.EgressQoS, err error) {
-	err = cache.ListAll(s.indexer, selector, func(m interface{}) {
-		ret = append(ret, m.(*v1.EgressQoS))
-	})
-	return ret, err
+	return &egressQoSLister{listers.New[*v1.EgressQoS](indexer, v1.Resource("egressqos"))}
 }
 
 // EgressQoSes returns an object that can list and get EgressQoSes.
 func (s *egressQoSLister) EgressQoSes(namespace string) EgressQoSNamespaceLister {
-	return egressQoSNamespaceLister{indexer: s.indexer, namespace: namespace}
+	return egressQoSNamespaceLister{listers.NewNamespaced[*v1.EgressQoS](s.ResourceIndexer, namespace)}
 }
 
 // EgressQoSNamespaceLister helps list and get EgressQoSes.
@@ -73,26 +65,5 @@ type EgressQoSNamespaceLister interface {
 // egressQoSNamespaceLister implements the EgressQoSNamespaceLister
 // interface.
 type egressQoSNamespaceLister struct {
-	indexer   cache.Indexer
-	namespace string
-}
-
-// List lists all EgressQoSes in the indexer for a given namespace.
-func (s egressQoSNamespaceLister) List(selector labels.Selector) (ret []*v1.EgressQoS, err error) {
-	err = cache.ListAllByNamespace(s.indexer, s.namespace, selector, func(m interface{}) {
-		ret = append(ret, m.(*v1.EgressQoS))
-	})
-	return ret, err
-}
-
-// Get retrieves the EgressQoS from the indexer for a given namespace and name.
-func (s egressQoSNamespaceLister) Get(name string) (*v1.EgressQoS, error) {
-	obj, exists, err := s.indexer.GetByKey(s.namespace + "/" + name)
-	if err != nil {
-		return nil, err
-	}
-	if !exists {
-		return nil, errors.NewNotFound(v1.Resource("egressqos"), name)
-	}
-	return obj.(*v1.EgressQoS), nil
+	listers.ResourceIndexer[*v1.EgressQoS]
 }

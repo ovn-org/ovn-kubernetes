@@ -68,6 +68,8 @@ global:
   enableEgressFirewall: true
   # -- Configure to use EgressQoS CRD feature with ovn-kubernetes
   enableEgressQos: true
+  # -- Enables network QoS support from/to pods
+  enableNetworkQos: false
   # -- Enables multicast support between the pods within the same namespace
   enableMulticast: ""
   # -- Configure to use multiple NetworkAttachmentDefinition CRD feature with ovn-kubernetes

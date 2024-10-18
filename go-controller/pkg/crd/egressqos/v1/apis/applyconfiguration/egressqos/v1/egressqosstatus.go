@@ -18,17 +18,17 @@ limitations under the License.
 package v1
 
 import (
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	v1 "k8s.io/client-go/applyconfigurations/meta/v1"
 )
 
-// EgressQoSStatusApplyConfiguration represents an declarative configuration of the EgressQoSStatus type for use
+// EgressQoSStatusApplyConfiguration represents a declarative configuration of the EgressQoSStatus type for use
 // with apply.
 type EgressQoSStatusApplyConfiguration struct {
-	Status     *string        `json:"status,omitempty"`
-	Conditions []v1.Condition `json:"conditions,omitempty"`
+	Status     *string                          `json:"status,omitempty"`
+	Conditions []v1.ConditionApplyConfiguration `json:"conditions,omitempty"`
 }
 
-// EgressQoSStatusApplyConfiguration constructs an declarative configuration of the EgressQoSStatus type for use with
+// EgressQoSStatusApplyConfiguration constructs a declarative configuration of the EgressQoSStatus type for use with
 // apply.
 func EgressQoSStatus() *EgressQoSStatusApplyConfiguration {
 	return &EgressQoSStatusApplyConfiguration{}
@@ -45,9 +45,12 @@ func (b *EgressQoSStatusApplyConfiguration) WithStatus(value string) *EgressQoSS
 // WithConditions adds the given value to the Conditions field in the declarative configuration
 // and returns the receiver, so that objects can be build by chaining "With" function invocations.
 // If called multiple times, values provided by each call will be appended to the Conditions field.
-func (b *EgressQoSStatusApplyConfiguration) WithConditions(values ...v1.Condition) *EgressQoSStatusApplyConfiguration {
+func (b *EgressQoSStatusApplyConfiguration) WithConditions(values ...*v1.ConditionApplyConfiguration) *EgressQoSStatusApplyConfiguration {
 	for i := range values {
-		b.Conditions = append(b.Conditions, values[i])
+		if values[i] == nil {
+			panic("nil value passed to WithConditions")
+		}
+		b.Conditions = append(b.Conditions, *values[i])
 	}
 	return b
 }
