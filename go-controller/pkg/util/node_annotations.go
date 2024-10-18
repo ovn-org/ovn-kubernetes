@@ -2,6 +2,7 @@ package util
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"net"
@@ -61,6 +62,17 @@ const (
 
 	// OvnNodeManagementPort is the constant string representing the annotation key
 	OvnNodeManagementPort = "k8s.ovn.org/node-mgmt-port"
+
+	// OvnNodeManagementPortInfo contains all ips, mac addresses and mgmt ports
+	// on all networks keyed by the network-name
+	// k8s.ovn.org/node-mgmt-port-info: {
+	// 		"default": {
+	// 			"ip-addresses": [ "10.192.13.2/26" ],
+	// 			"mac-address": "ca:53:88:23:bc:98",
+	// 			"function-info": { "PfId": 0, "FuncId": 0 }
+	//      }
+	// }
+	OvnNodeManagementPortInfo = "k8s.ovn.org/node-mgmt-port-info"
 
 	// OvnNodeManagementPortMacAddresses contains all mac addresses of the management ports
 	// on all networks keyed by the network-name
@@ -1453,4 +1465,81 @@ func GetNetworkID(nodes []*corev1.Node, nInfo BasicNetInfo) (int, error) {
 		}
 	}
 	return InvalidNetworkID, fmt.Errorf("missing network id for network '%s'", nInfo.GetNetworkName())
+}
+
+type ManagementPortInfo struct {
+	IpAddresses []string `json:"ip-addresses,omitempty"`
+}
+
+func updateNodeMgmtPortInfoIpAddresses(netName string, hostSubnets []*net.IPNet, annotations map[string]string) error {
+	if annotations == nil {
+		return errors.New("annotations must not be nil")
+	}
+
+	mgmtPortInfoMap, err := parseNodeMgmtPortInfoAnnotation(annotations)
+	if err != nil {
+		return err
+	}
+
+	// Convert IPNet slice into a string slice of CIDRs
+	ipAddressesStr := make([]string, len(hostSubnets))
+	for i, hostSubnet := range hostSubnets {
+		ipNet := GetNodeManagementIfAddr(hostSubnet) // Get the IPNet representation
+		ipAddressesStr[i] = ipNet.String()           // Convert IPNet to CIDR string
+	}
+
+	// Check if the netName already exists in the map
+	if mgmtPortInfo, exists := mgmtPortInfoMap[netName]; exists {
+		// Update the IpAddresses for the specified netName
+		mgmtPortInfo.IpAddresses = ipAddressesStr
+
+		// Check if the netName should be deleted based on conditions
+		if len(ipAddressesStr) == 0 {
+			delete(mgmtPortInfoMap, netName)
+		} else {
+			// Otherwise, update the map with new IpAddresses
+			mgmtPortInfoMap[netName] = mgmtPortInfo
+		}
+	} else if len(ipAddressesStr) > 0 {
+		// If netName doesn't exist and there are IP addresses to set, create a new entry
+		mgmtPortInfoMap[netName] = ManagementPortInfo{
+			IpAddresses: ipAddressesStr,
+		}
+	}
+
+	// Encode the updated map back to JSON
+	bytes, err := encodeNodeMgmtPortInfoAnnotation(mgmtPortInfoMap)
+	if err != nil {
+		return err
+	}
+
+	// Set the JSON-encoded string back into the annotations
+	annotations[OvnNodeManagementPortInfo] = bytes
+	return nil
+}
+
+// ParseAnnotations parses the annotations map and returns a map of ManagementPortInfo
+func parseNodeMgmtPortInfoAnnotation(annotations map[string]string) (map[string]ManagementPortInfo, error) {
+	result := make(map[string]ManagementPortInfo)
+
+	// Check if the annotation exists
+	if value, ok := annotations[OvnNodeManagementPortInfo]; ok {
+		// Parse the JSON data into the result map
+		err := json.Unmarshal([]byte(value), &result)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse annotation %s: %w", OvnNodeManagementPortInfo, err)
+		}
+	}
+
+	return result, nil
+}
+
+// SetManagementPortInfo sets the JSON encoded ManagementPortInfo to the annotations map
+func encodeNodeMgmtPortInfoAnnotation(info map[string]ManagementPortInfo) (string, error) {
+	// JSON encode the map
+	jsonData, err := json.Marshal(info)
+	if err != nil {
+		return "", fmt.Errorf("failed to encode ManagementPortInfo: %w", err)
+	}
+	return string(jsonData), nil
 }
