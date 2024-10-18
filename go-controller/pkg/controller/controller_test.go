@@ -91,6 +91,11 @@ var _ = Describe("Level-driven controller", func() {
 		Stop(controller)
 	})
 
+	It("has idempotent Stop", func() {
+		startController(getDefaultConfig(), nil)
+		Stop(controller)
+		Stop(controller)
+	})
 	It("handles initial objects once", func() {
 		namespace := util.NewNamespace(namespace1Name)
 		pod1 := &v1.Pod{
