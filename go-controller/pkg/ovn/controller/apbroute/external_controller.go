@@ -211,15 +211,15 @@ type externalPolicyManager struct {
 	// route policies
 	routeLister   adminpolicybasedroutelisters.AdminPolicyBasedExternalRouteLister
 	routeInformer cache.SharedIndexInformer
-	routeQueue    workqueue.RateLimitingInterface
+	routeQueue    workqueue.TypedRateLimitingInterface[string]
 
 	// Pods
 	podLister   corev1listers.PodLister
 	podInformer cache.SharedIndexInformer
-	podQueue    workqueue.RateLimitingInterface
+	podQueue    workqueue.TypedRateLimitingInterface[*v1.Pod]
 
 	// Namespaces
-	namespaceQueue    workqueue.RateLimitingInterface
+	namespaceQueue    workqueue.TypedRateLimitingInterface[*v1.Namespace]
 	namespaceLister   corev1listers.NamespaceLister
 	namespaceInformer cache.SharedIndexInformer
 
@@ -249,21 +249,21 @@ func newExternalPolicyManager(
 
 		routeLister:   apbRouteInformer.Lister(),
 		routeInformer: apbRouteInformer.Informer(),
-		routeQueue: workqueue.NewNamedRateLimitingQueue(
-			workqueue.NewItemFastSlowRateLimiter(time.Second, 5*time.Second, 5),
-			"adminpolicybasedexternalroutes",
+		routeQueue: workqueue.NewTypedRateLimitingQueueWithConfig(
+			workqueue.NewTypedItemFastSlowRateLimiter[string](time.Second, 5*time.Second, 5),
+			workqueue.TypedRateLimitingQueueConfig[string]{Name: "adminpolicybasedexternalroutes"},
 		),
 		podLister:   podInformer.Lister(),
 		podInformer: podInformer.Informer(),
-		podQueue: workqueue.NewNamedRateLimitingQueue(
-			workqueue.NewItemFastSlowRateLimiter(time.Second, 5*time.Second, 5),
-			"apbexternalroutepods",
+		podQueue: workqueue.NewTypedRateLimitingQueueWithConfig(
+			workqueue.NewTypedItemFastSlowRateLimiter[*v1.Pod](time.Second, 5*time.Second, 5),
+			workqueue.TypedRateLimitingQueueConfig[*v1.Pod]{Name: "apbexternalroutepods"},
 		),
 		namespaceLister:   namespaceInformer.Lister(),
 		namespaceInformer: namespaceInformer.Informer(),
-		namespaceQueue: workqueue.NewNamedRateLimitingQueue(
-			workqueue.NewItemFastSlowRateLimiter(time.Second, 5*time.Second, 5),
-			"apbexternalroutenamespaces",
+		namespaceQueue: workqueue.NewTypedRateLimitingQueueWithConfig(
+			workqueue.NewTypedItemFastSlowRateLimiter[*v1.Namespace](time.Second, 5*time.Second, 5),
+			workqueue.TypedRateLimitingQueueConfig[*v1.Namespace]{Name: "apbexternalroutenamespaces"},
 		),
 		updatePolicyStatusFunc: updatePolicyStatusFunc,
 	}
@@ -356,13 +356,13 @@ func (m *externalPolicyManager) processNextPolicyWorkItem(wg *sync.WaitGroup) bo
 	defer m.routeQueue.Done(key)
 
 	klog.V(4).Infof("Processing policy %s", key)
-	gwIPs, err := m.syncRoutePolicy(key.(string))
+	gwIPs, err := m.syncRoutePolicy(key)
 	if err != nil {
 		klog.Errorf("Failed to sync APB policy %s: %v", key, err)
 	}
 
 	if m.updatePolicyStatusFunc != nil {
-		statusErr := m.updatePolicyStatusFunc(key.(string), gwIPs, err)
+		statusErr := m.updatePolicyStatusFunc(key, gwIPs, err)
 		if statusErr != nil {
 			klog.Warningf("Failed to update AdminPolicyBasedExternalRoutes %s status: %v", key, statusErr)
 		}
@@ -518,14 +518,14 @@ func (m *externalPolicyManager) processNextNamespaceWorkItem(wg *sync.WaitGroup)
 
 	defer m.namespaceQueue.Done(obj)
 
-	err := m.syncNamespace(obj.(*v1.Namespace), m.routeQueue)
+	err := m.syncNamespace(obj, m.routeQueue)
 	if err != nil {
 		if m.namespaceQueue.NumRequeues(obj) < maxRetries {
-			klog.V(4).Infof("Error found while processing namespace %s:%v", obj.(*v1.Namespace), err)
+			klog.V(4).Infof("Error found while processing namespace %s:%v", obj, err)
 			m.namespaceQueue.AddRateLimited(obj)
 			return true
 		}
-		klog.Warningf("Dropping namespace %q out of the queue: %v", obj.(*v1.Namespace).Name, err)
+		klog.Warningf("Dropping namespace %q out of the queue: %v", obj.Name, err)
 		utilruntime.HandleError(err)
 	}
 	m.namespaceQueue.Forget(obj)
@@ -570,7 +570,7 @@ func (m *externalPolicyManager) onPodUpdate(oldObj, newObj interface{}) {
 		reflect.DeepEqual(o.Annotations[nettypes.NetworkStatusAnnot], n.Annotations[nettypes.NetworkStatusAnnot]) {
 		return
 	}
-	m.podQueue.Add(newObj)
+	m.podQueue.Add(n)
 }
 
 func (m *externalPolicyManager) onPodDelete(obj interface{}) {
@@ -609,15 +609,14 @@ func (m *externalPolicyManager) processNextPodWorkItem(wg *sync.WaitGroup) bool 
 
 	defer m.podQueue.Done(obj)
 
-	p := obj.(*v1.Pod)
-	err := m.syncPod(p, m.routeQueue)
+	err := m.syncPod(obj, m.routeQueue)
 	if err != nil {
 		if m.podQueue.NumRequeues(obj) < maxRetries {
-			klog.V(4).Infof("Error found while processing pod %s/%s:%v", p.Namespace, p.Name, err)
+			klog.V(4).Infof("Error found while processing pod %s/%s:%v", obj.Namespace, obj.Name, err)
 			m.podQueue.AddRateLimited(obj)
 			return true
 		}
-		klog.Warningf("Dropping pod %s/%s out of the queue: %s", p.Namespace, p.Name, err)
+		klog.Warningf("Dropping pod %s/%s out of the queue: %s", obj.Namespace, obj.Name, err)
 		utilruntime.HandleError(err)
 	}
 
