@@ -15,7 +15,7 @@ var MetricCNIRequestDuration = prometheus.NewHistogramVec(prometheus.HistogramOp
 	Subsystem: MetricOvnkubeSubsystemNode,
 	Name:      "cni_request_duration_seconds",
 	Help:      "The duration of CNI server requests.",
-	Buckets:   prometheus.ExponentialBuckets(.1, 2, 15)},
+	Buckets:   prometheus.LinearBuckets(1, 0.5, 15)},
 	//labels
 	[]string{"command", "err"},
 )
