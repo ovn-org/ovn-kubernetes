@@ -448,22 +448,29 @@ func (o *FakeOVN) NewSecondaryNetworkController(netattachdef *nettypes.NetworkAt
 		if err != nil {
 			return err
 		}
+
 		asf := addressset.NewFakeAddressSetFactory(getNetworkControllerName(netName))
 
 		switch topoType {
 		case types.Layer3Topology:
 			l3Controller, err := NewSecondaryLayer3NetworkController(cnci, nInfo, o.nadController)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			l3Controller.addressSetFactory = asf
+			if o.asf != nil { // use fake asf only when enabled
+				l3Controller.addressSetFactory = asf
+			}
 			secondaryController = &l3Controller.BaseSecondaryNetworkController
 		case types.Layer2Topology:
 			l2Controller, err := NewSecondaryLayer2NetworkController(cnci, nInfo, o.nadController)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			l2Controller.addressSetFactory = asf
+			if o.asf != nil { // use fake asf only when enabled
+				l2Controller.addressSetFactory = asf
+			}
 			secondaryController = &l2Controller.BaseSecondaryNetworkController
 		case types.LocalnetTopology:
 			localnetController := NewSecondaryLocalnetNetworkController(cnci, nInfo, o.nadController)
-			localnetController.addressSetFactory = asf
+			if o.asf != nil { // use fake asf only when enabled
+				localnetController.addressSetFactory = asf
+			}
 			secondaryController = &localnetController.BaseSecondaryNetworkController
 		default:
 			return fmt.Errorf("topology type %s not supported", topoType)
