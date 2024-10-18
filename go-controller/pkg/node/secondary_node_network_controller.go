@@ -115,3 +115,8 @@ func (oc *SecondaryNodeNetworkController) getNetworkID() (int, error) {
 	}
 	return *oc.networkID, nil
 }
+
+func (oc *SecondaryNodeNetworkController) Reconcile(netInfo util.ReconcilableNetInfo) error {
+	oc.SetNADs(netInfo.GetNADs()...)
+	return nil
+}
