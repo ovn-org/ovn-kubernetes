@@ -136,12 +136,13 @@ type Controller struct {
 	iptablesManager *iptables.Controller
 	kube            kube.Interface
 	nodeName        string
+	extBridgeName   string
 	v4              bool
 	v6              bool
 }
 
 func NewController(k kube.Interface, eIPInformer egressipinformer.EgressIPInformer, nodeInformer cache.SharedIndexInformer, namespaceInformer coreinformers.NamespaceInformer,
-	podInformer coreinformers.PodInformer, routeManager *routemanager.Controller, v4, v6 bool, nodeName string, linkManager *linkmanager.Controller) (*Controller, error) {
+	podInformer coreinformers.PodInformer, routeManager *routemanager.Controller, v4, v6 bool, nodeName, extBridgeName string, linkManager *linkmanager.Controller) (*Controller, error) {
 
 	c := &Controller{
 		eIPLister:   eIPInformer.Lister(),
@@ -172,6 +173,7 @@ func NewController(k kube.Interface, eIPInformer egressipinformer.EgressIPInform
 		iptablesManager:       iptables.NewController(),
 		kube:                  k,
 		nodeName:              nodeName,
+		extBridgeName:         extBridgeName,
 		v4:                    v4,
 		v6:                    v6,
 	}
@@ -250,6 +252,19 @@ func (c *Controller) Run(stopCh <-chan struct{}, wg *sync.WaitGroup, threads int
 	if err := c.ruleManager.OwnPriority(rulePriority); err != nil {
 		return fmt.Errorf("failed to own priority %d for IP rules: %v", rulePriority, err)
 	}
+
+	if ovnconfig.Gateway.Mode == ovnconfig.GatewayModeLocal {
+		// we use pkt marks for routing and for reply traffic outside the host, it is required to restore a pkts src mark
+		// and then include the pkt mark for RPF test.
+		if err = enableValidSrcMarkByName(c.extBridgeName); err != nil {
+			return fmt.Errorf("failed to enable valid src mark check for RPF on link %s: %v", c.extBridgeName, err)
+		}
+	} else {
+		// restore default to restore settings for the case of GW mode conversion.
+		if err = disableValidSrcMarkByName(c.extBridgeName); err != nil {
+			return fmt.Errorf("failed to enable valid src mark check for RPF on link %s: %v", c.extBridgeName, err)
+		}
+	}
 	if c.v4 {
 		if err := c.iptablesManager.OwnChain(utiliptables.TableNAT, iptChainName, utiliptables.ProtocolIPv4); err != nil {
 			return fmt.Errorf("unable to own chain %s: %v", iptChainName, err)
@@ -269,12 +284,6 @@ func (c *Controller) Run(stopCh <-chan struct{}, wg *sync.WaitGroup, threads int
 			// If dst is a node IP, use main routing table and skip EIP routing tables
 			if err = c.ruleManager.Add(getNodeIPFwMarkIPRule(netlink.FAMILY_V4)); err != nil {
 				return fmt.Errorf("failed to create IPv4 rule for node IPs: %v", err)
-			}
-			// The fwmark of the packet is included in reverse path route lookup. This permits rp_filter to function when the fwmark is
-			// used for routing traffic in both directions.
-			stdout, _, err := util.RunSysctl("-w", "net.ipv4.conf.all.src_valid_mark=1")
-			if err != nil || stdout != "net.ipv4.conf.all.src_valid_mark = 1" {
-				return fmt.Errorf("failed to set sysctl net.ipv4.conf.all.src_valid_mark to 1")
 			}
 		}
 	}
@@ -744,6 +753,10 @@ func (c *Controller) updateEIP(existing *state, update *config) error {
 					return fmt.Errorf("failed to delete egress IP route: %w", err)
 				}
 			}
+			// This feature is only enabled for LGW mode but because we support gateway migration, we must assume it maybe configured when GW is LGW.
+			if err = disableValidSrcMarkByIndex(existing.eIPConfig.addr.LinkIndex); err != nil {
+				return fmt.Errorf("failed to remove consideration of a packets fwmark within reserve path route lookup for link with index %d: %v", update.eIPConfig.addr.LinkIndex, err)
+			}
 		}
 	} else if update != nil && update.eIPConfig != nil && len(update.eIPConfig.routes) > 0 &&
 		existing.eIPConfig != nil && len(existing.eIPConfig.routes) > 0 {
@@ -775,6 +788,13 @@ func (c *Controller) updateEIP(existing *state, update *config) error {
 				if err != nil {
 					return fmt.Errorf("failed to apply pod %s configuration: %v", updatedPodNamespacedName.String(), err)
 				}
+			}
+		}
+		if ovnconfig.Gateway.Mode == ovnconfig.GatewayModeLocal {
+			// The fwmark of the packet is included in reverse path route lookup. This permits rp_filter to function when the fwmark is
+			// used for routing traffic in both directions.
+			if err := enableValidSrcMarkByIndex(update.eIPConfig.addr.LinkIndex); err != nil {
+				return fmt.Errorf("failed to enable fwmark of packet to be included in reserve path route lookup for link with index %d: %v", update.eIPConfig.addr.LinkIndex, err)
 			}
 		}
 		if err := c.addIPToAnnotation(update.eIPConfig.addr.IP.String()); err != nil {
@@ -1546,4 +1566,49 @@ func getNodeIPFwMarkIPRule(ipFamily int) netlink.Rule {
 
 func isVRFSlaveDevice(link netlink.Link) bool {
 	return link.Attrs().Slave != nil && link.Attrs().Slave.SlaveType() == "vrf"
+}
+
+// enableValidSrcMarkByIndex sets src_valid_mark to 1 then the fwmark of the packet is included in reverse path route lookup.
+// This permits rp_filter to function when the fwmark is used for routing traffic in both directions.
+func enableValidSrcMarkByIndex(linkIndex int) error {
+	link, err := util.GetNetLinkOps().LinkByIndex(linkIndex)
+	if err != nil {
+		return fmt.Errorf("failed to get link by index %d: %v", linkIndex, err)
+	}
+	return enableValidSrcMarkByName(link.Attrs().Name)
+}
+
+// enableValidSrcMarkByName sets src_valid_mark to 1 then the fwmark of the packet is included in reverse path route lookup.
+// This permits rp_filter to function when the fwmark is used for routing traffic in both directions.
+func enableValidSrcMarkByName(linkName string) error {
+	infSrcMarkSet := fmt.Sprintf("net.ipv4.conf.%s.src_valid_mark = 1", linkName)
+	stdout, _, err := util.RunSysctl("-w", infSrcMarkSet)
+	if err != nil || stdout != infSrcMarkSet {
+		return fmt.Errorf("failed to set sysctl %s, err %v, stdout: %s", infSrcMarkSet, err, stdout)
+	}
+	return nil
+}
+
+// disableValidSrcMarkByIndex sets src_valid_mark to 0 then the fwmark of the packet is not included in reverse path route lookup.
+// This allows for asymmetric routing configurations utilizing the fwmark in only one direction, e.g., transparent proxying.
+func disableValidSrcMarkByIndex(linkIndex int) error {
+	link, err := util.GetNetLinkOps().LinkByIndex(linkIndex)
+	if err != nil {
+		if util.GetNetLinkOps().IsLinkNotFoundError(err) {
+			return nil
+		}
+		return fmt.Errorf("failed to get link by index %d: %v", linkIndex, err)
+	}
+	return disableValidSrcMarkByName(link.Attrs().Name)
+}
+
+// disableValidSrcMarkByName sets src_valid_mark to 0 then the fwmark of the packet is not included in reverse path route lookup.
+// This allows for asymmetric routing configurations utilizing the fwmark in only one direction, e.g., transparent proxying.
+func disableValidSrcMarkByName(linkName string) error {
+	infSrcMarkSet := fmt.Sprintf("net.ipv4.conf.%s.src_valid_mark = 0", linkName)
+	stdout, _, err := util.RunSysctl("-w", infSrcMarkSet)
+	if err != nil || stdout != infSrcMarkSet {
+		return fmt.Errorf("failed to set sysctl %s, err %v, stdout: %s", infSrcMarkSet, err, stdout)
+	}
+	return nil
 }
