@@ -115,7 +115,6 @@ func (h *egressIPClusterControllerEventHandler) UpdateResource(oldObj, newObj in
 			klog.Infof("Node: %s has been un-labeled, deleting it from egress assignment", newNode.Name)
 			return h.eIPC.deleteEgressNode(oldNode.Name)
 		}
-		isOldReady := h.eIPC.isEgressNodeReady(oldNode)
 		isNewReady := h.eIPC.isEgressNodeReady(newNode)
 		isNewReachable := h.eIPC.isEgressNodeReachable(newNode)
 		isHostCIDRsAltered := util.NodeHostCIDRsAnnotationChanged(oldNode, newNode)
@@ -133,16 +132,12 @@ func (h *egressIPClusterControllerEventHandler) UpdateResource(oldObj, newObj in
 			}
 			return nil
 		}
-		if isOldReady == isNewReady && !isHostCIDRsAltered {
-			return nil
-		}
 		if !isNewReady {
 			klog.Warningf("Node: %s is not ready, deleting it from egress assignment", newNode.Name)
 			if err := h.eIPC.deleteEgressNode(newNode.Name); err != nil {
 				return err
 			}
 		} else if isNewReady && isNewReachable {
-			klog.Infof("Node: %s is ready and reachable, adding it for egress assignment", newNode.Name)
 			h.eIPC.setNodeEgressReachable(newNode.Name, isNewReachable)
 			if err := h.eIPC.addEgressNode(newNode.Name); err != nil {
 				return err
