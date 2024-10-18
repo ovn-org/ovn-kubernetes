@@ -139,7 +139,12 @@ func (c *controller[T]) startWorkers() error {
 }
 
 func (c *controller[T]) stop() {
+	// we assign stopChan to nil to signal that controller was already stopped.
+	if c.stopChan == nil {
+		return
+	}
 	close(c.stopChan)
+	c.stopChan = nil
 	c.cleanup()
 	c.wg.Wait()
 }
