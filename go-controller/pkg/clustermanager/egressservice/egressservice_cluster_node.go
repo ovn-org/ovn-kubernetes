@@ -138,7 +138,7 @@ func (c *Controller) processNextNodeWorkItem(wg *sync.WaitGroup) bool {
 
 	defer c.nodesQueue.Done(key)
 
-	err := c.syncNode(key.(string))
+	err := c.syncNode(key)
 	if err == nil {
 		c.nodesQueue.Forget(key)
 		return true

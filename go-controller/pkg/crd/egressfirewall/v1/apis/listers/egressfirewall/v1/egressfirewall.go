@@ -19,8 +19,8 @@ package v1
 
 import (
 	v1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/client-go/listers"
 	"k8s.io/client-go/tools/cache"
 )
 
@@ -37,25 +37,17 @@ type EgressFirewallLister interface {
 
 // egressFirewallLister implements the EgressFirewallLister interface.
 type egressFirewallLister struct {
-	indexer cache.Indexer
+	listers.ResourceIndexer[*v1.EgressFirewall]
 }
 
 // NewEgressFirewallLister returns a new EgressFirewallLister.
 func NewEgressFirewallLister(indexer cache.Indexer) EgressFirewallLister {
-	return &egressFirewallLister{indexer: indexer}
-}
-
-// List lists all EgressFirewalls in the indexer.
-func (s *egressFirewallLister) List(selector labels.Selector) (ret []*v1.EgressFirewall, err error) {
-	err = cache.ListAll(s.indexer, selector, func(m interface{}) {
-		ret = append(ret, m.(*v1.EgressFirewall))
-	})
-	return ret, err
+	return &egressFirewallLister{listers.New[*v1.EgressFirewall](indexer, v1.Resource("egressfirewall"))}
 }
 
 // EgressFirewalls returns an object that can list and get EgressFirewalls.
 func (s *egressFirewallLister) EgressFirewalls(namespace string) EgressFirewallNamespaceLister {
-	return egressFirewallNamespaceLister{indexer: s.indexer, namespace: namespace}
+	return egressFirewallNamespaceLister{listers.NewNamespaced[*v1.EgressFirewall](s.ResourceIndexer, namespace)}
 }
 
 // EgressFirewallNamespaceLister helps list and get EgressFirewalls.
@@ -73,26 +65,5 @@ type EgressFirewallNamespaceLister interface {
 // egressFirewallNamespaceLister implements the EgressFirewallNamespaceLister
 // interface.
 type egressFirewallNamespaceLister struct {
-	indexer   cache.Indexer
-	namespace string
-}
-
-// List lists all EgressFirewalls in the indexer for a given namespace.
-func (s egressFirewallNamespaceLister) List(selector labels.Selector) (ret []*v1.EgressFirewall, err error) {
-	err = cache.ListAllByNamespace(s.indexer, s.namespace, selector, func(m interface{}) {
-		ret = append(ret, m.(*v1.EgressFirewall))
-	})
-	return ret, err
-}
-
-// Get retrieves the EgressFirewall from the indexer for a given namespace and name.
-func (s egressFirewallNamespaceLister) Get(name string) (*v1.EgressFirewall, error) {
-	obj, exists, err := s.indexer.GetByKey(s.namespace + "/" + name)
-	if err != nil {
-		return nil, err
-	}
-	if !exists {
-		return nil, errors.NewNotFound(v1.Resource("egressfirewall"), name)
-	}
-	return obj.(*v1.EgressFirewall), nil
+	listers.ResourceIndexer[*v1.EgressFirewall]
 }

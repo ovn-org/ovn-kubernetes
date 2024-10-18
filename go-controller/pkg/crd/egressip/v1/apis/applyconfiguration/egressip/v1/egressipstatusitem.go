@@ -17,14 +17,14 @@ limitations under the License.
 
 package v1
 
-// EgressIPStatusItemApplyConfiguration represents an declarative configuration of the EgressIPStatusItem type for use
+// EgressIPStatusItemApplyConfiguration represents a declarative configuration of the EgressIPStatusItem type for use
 // with apply.
 type EgressIPStatusItemApplyConfiguration struct {
 	Node     *string `json:"node,omitempty"`
 	EgressIP *string `json:"egressIP,omitempty"`
 }
 
-// EgressIPStatusItemApplyConfiguration constructs an declarative configuration of the EgressIPStatusItem type for use with
+// EgressIPStatusItemApplyConfiguration constructs a declarative configuration of the EgressIPStatusItem type for use with
 // apply.
 func EgressIPStatusItem() *EgressIPStatusItemApplyConfiguration {
 	return &EgressIPStatusItemApplyConfiguration{}

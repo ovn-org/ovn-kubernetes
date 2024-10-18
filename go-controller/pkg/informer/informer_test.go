@@ -523,7 +523,7 @@ var _ = Describe("Event Handler Internals", func() {
 			name:           "test",
 			informer:       factory.Core().V1().Pods().Informer(),
 			deletedIndexer: cache.NewIndexer(cache.DeletionHandlingMetaNamespaceKeyFunc, cache.Indexers{}),
-			workqueue:      workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter()),
+			workqueue:      workqueue.NewTypedRateLimitingQueue(workqueue.DefaultTypedControllerRateLimiter[string]()),
 			add: func(obj interface{}) error {
 				return nil
 			},
@@ -547,7 +547,7 @@ var _ = Describe("Event Handler Internals", func() {
 			name:           "test",
 			informer:       factory.Core().V1().Pods().Informer(),
 			deletedIndexer: cache.NewIndexer(cache.DeletionHandlingMetaNamespaceKeyFunc, cache.Indexers{}),
-			workqueue:      workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter()),
+			workqueue:      workqueue.NewTypedRateLimitingQueue(workqueue.DefaultTypedControllerRateLimiter[string]()),
 			add: func(obj interface{}) error {
 				return nil
 			},
@@ -576,7 +576,7 @@ var _ = Describe("Event Handler Internals", func() {
 			name:           "test",
 			informer:       factory.Core().V1().Pods().Informer(),
 			deletedIndexer: cache.NewIndexer(cache.DeletionHandlingMetaNamespaceKeyFunc, cache.Indexers{}),
-			workqueue:      workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter()),
+			workqueue:      workqueue.NewTypedRateLimitingQueue(workqueue.DefaultTypedControllerRateLimiter[string]()),
 			add: func(obj interface{}) error {
 				return nil
 			},
