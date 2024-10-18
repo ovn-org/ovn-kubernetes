@@ -301,6 +301,7 @@ func NewSecondaryLayer2NetworkController(cnci *CommonNetworkControllerInfo, netI
 					networkPolicies:             syncmap.NewSyncMap[*networkPolicy](),
 					sharedNetpolPortGroups:      syncmap.NewSyncMap[*defaultDenyPortGroups](),
 					podSelectorAddressSets:      syncmap.NewSyncMap[*PodSelectorAddressSet](),
+					sharedPodSelectorPortGroups: syncmap.NewSyncMap[*PodSelectorPortGroup](),
 					stopChan:                    stopChan,
 					wg:                          &sync.WaitGroup{},
 					localZoneNodes:              &sync.Map{},
@@ -352,6 +353,11 @@ func (oc *SecondaryLayer2NetworkController) Start(ctx context.Context) error {
 	defer func() {
 		klog.Infof("Starting controller for secondary network %s took %v", oc.GetNetworkName(), time.Since(start))
 	}()
+
+	err := oc.syncDBCommon()
+	if err != nil {
+		return fmt.Errorf("cleaning up stale logical entities for network %v failed : %w", oc.GetNetworkName(), err)
+	}
 
 	if err := oc.Init(); err != nil {
 		return err
