@@ -517,6 +517,7 @@ func (oc *DefaultNetworkController) newANPController() error {
 		oc.zone,
 		oc.recorder,
 		oc.observManager,
+		oc.nadController,
 	)
 	return err
 }
