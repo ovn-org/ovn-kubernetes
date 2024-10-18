@@ -273,6 +273,7 @@ jobs:
       OVN_HYBRID_OVERLAY_ENABLE: "false"
       OVN_GATEWAY_MODE: "${{ matrix.gateway-mode }}"
       OVN_MULTICAST_ENABLE:  "false"
+      TRANSIT_SWITCH_SUBNET_IPV4: "172.18.0.0/16"
     steps:
     - name: Check out code into the Go module directory - from Master branch
       uses: actions/checkout@v4
@@ -461,6 +462,7 @@ jobs:
       OVN_DISABLE_FORWARDING: "${{ matrix.forwarding == 'disable-forwarding' }}"
       USE_HELM: "${{ matrix.target == 'control-plane-helm' || matrix.target == 'multi-homing-helm' }}"
       OVN_ENABLE_DNSNAMERESOLVER: "${{ matrix.dns-name-resolver == 'enable-dns-name-resolver' }}"
+      TRANSIT_SWITCH_SUBNET_IPV4: "172.18.0.0/16"
     steps:
 
     - name: Install VRF kernel module
