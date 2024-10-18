@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/ovn-org/libovsdb/ovsdb"
+	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -320,13 +321,25 @@ func (oc *DefaultNetworkController) getAllHostNamespaceAddresses() []net.IP {
 	} else {
 		ips = make([]net.IP, 0, len(existingNodes))
 		for _, node := range existingNodes {
+			var hostNetworkIPs []net.IP
 			if config.HybridOverlay.Enabled && util.NoHostSubnet(node) {
-				// skip hybrid overlay nodes
-				continue
-			}
-			hostNetworkIPs, err := oc.getHostNamespaceAddressesForNode(node)
-			if err != nil {
-				klog.Errorf("Error parsing annotation for node %s: %v", node.Name, err)
+				// during SDN live migration, add the SDN node GW IP to the host network address set.
+				hoSubnet, ok := node.Annotations[hotypes.HybridOverlayNodeSubnet]
+				if !ok {
+					// skip hybrid overlay nodes without per-node subnet
+					continue
+				}
+				_, subnet, err := net.ParseCIDR(hoSubnet)
+				if err != nil {
+					klog.Errorf("Error parsing hybrid overlay subnet %s for node %s: %v", hoSubnet, node.Name, err)
+				}
+				gwIP := util.GetNodeGatewayIfAddr(subnet)
+				ips = append(ips, gwIP.IP)
+			} else {
+				hostNetworkIPs, err = oc.getHostNamespaceAddressesForNode(node)
+				if err != nil {
+					klog.Errorf("Error parsing annotation for node %s: %v", node.Name, err)
+				}
 			}
 			ips = append(ips, hostNetworkIPs...)
 		}

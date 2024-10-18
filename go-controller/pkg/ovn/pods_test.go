@@ -2529,5 +2529,56 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 			err := app.Run([]string{app.Name})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
+
+		ginkgo.It("should correctly handle a pod running on a no host subnet node", func() {
+			app.Action = func(ctx *cli.Context) error {
+				testNs := "namespace1"
+				testPodIP := "10.128.1.3"
+				namespaceT := *newNamespace(testNs)
+				myPod := newPod(testNs, "myPod", node2Name, testPodIP)
+				myPod.Status.Phase = v1.PodRunning
+				initialDB = libovsdbtest.TestSetup{
+					NBData: []libovsdbtest.TestData{},
+				}
+				fakeOvn.startWithDBSetup(initialDB,
+					&v1.NamespaceList{
+						Items: []v1.Namespace{
+							namespaceT,
+						},
+					},
+					&v1.NodeList{
+						Items: []v1.Node{
+							// Add a hybrid overlay node
+							{
+								ObjectMeta: metav1.ObjectMeta{
+									Name: nodeName,
+								},
+								Status: v1.NodeStatus{
+									Conditions: []v1.NodeCondition{
+										{
+											Type:   v1.NodeReady,
+											Status: v1.ConditionTrue,
+										},
+									},
+								},
+							},
+						},
+					},
+					&v1.PodList{
+						Items: []v1.Pod{*myPod},
+					},
+				)
+				fakeOvn.controller.lsManager.AddOrUpdateSwitch(myPod.Spec.NodeName, nil)
+				err := fakeOvn.controller.WatchPods()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				// check that the pod IP is added to the namespace AS
+				fakeOvn.asf.ExpectAddressSetWithAddresses(testNs, []string{testPodIP})
+
+				return nil
+			}
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
 	})
 })
