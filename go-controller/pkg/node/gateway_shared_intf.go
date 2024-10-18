@@ -1443,7 +1443,7 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 	// already been SNATed to the UDN's masq IP.
 	if config.IPv4Mode {
 		for _, netConfig := range bridge.patchedNetConfigs() {
-			if netConfig.masqCTMark == ctMarkOVN {
+			if netConfig.isDefaultNetwork() {
 				continue
 			}
 			dftFlows = append(dftFlows,
@@ -1456,7 +1456,7 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 
 	if config.IPv6Mode {
 		for _, netConfig := range bridge.patchedNetConfigs() {
-			if netConfig.masqCTMark == ctMarkOVN {
+			if netConfig.isDefaultNetwork() {
 				continue
 			}
 
@@ -1556,7 +1556,7 @@ func commonFlows(subnets []*net.IPNet, bridge *bridgeConfiguration) ([]string, e
 
 				// table 0, packets coming from pods headed externally. Commit connections with ct_mark ctMarkOVN
 				// so that reverse direction goes back to the pods.
-				if netConfig.masqCTMark == ctMarkOVN {
+				if netConfig.isDefaultNetwork() {
 					dftFlows = append(dftFlows,
 						fmt.Sprintf("cookie=%s, priority=100, in_port=%s, dl_src=%s, ip, "+
 							"actions=ct(commit, zone=%d, exec(set_field:%s->ct_mark)), output:%s",
@@ -1632,7 +1632,7 @@ func commonFlows(subnets []*net.IPNet, bridge *bridgeConfiguration) ([]string, e
 
 				// table 0, packets coming from pods headed externally. Commit connections with ct_mark ctMarkOVN
 				// so that reverse direction goes back to the pods.
-				if netConfig.masqCTMark == ctMarkOVN {
+				if netConfig.isDefaultNetwork() {
 					dftFlows = append(dftFlows,
 						fmt.Sprintf("cookie=%s, priority=100, in_port=%s, dl_src=%s, ipv6, "+
 							"actions=ct(commit, zone=%d, exec(set_field:%s->ct_mark)), output:%s",
