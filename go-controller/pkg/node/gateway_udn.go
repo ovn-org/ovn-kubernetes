@@ -153,6 +153,10 @@ type bridgeUDNConfiguration struct {
 	v6MasqIPs   *udn.MasqueradeIPs
 }
 
+func (netConfig *bridgeUDNConfiguration) isDefaultNetwork() bool {
+	return netConfig.masqCTMark == ctMarkOVN
+}
+
 func (netConfig *bridgeUDNConfiguration) setBridgeNetworkOfPortsInternal() error {
 	ofportPatch, stderr, err := util.GetOVSOfPort("get", "Interface", netConfig.patchPort, "ofport")
 	if err != nil {
