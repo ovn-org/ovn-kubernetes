@@ -182,16 +182,17 @@ func (pr *PodRequest) cmdAddWithGetCNIResultFunc(kubeAuth *KubeAPIAuth, clientse
 				return nil, err
 			}
 
-			response.Result.Routes = append(primaryUDNResult.Routes, response.Result.Routes...)
-			response.Result.Interfaces = append(primaryUDNResult.Interfaces, response.Result.Interfaces...)
-			response.Result.IPs = append(primaryUDNResult.IPs, response.Result.IPs...)
+			response.Result.Routes = append(response.Result.Routes, primaryUDNResult.Routes...)
+			numOfInitialIPs := len(response.Result.IPs)
+			numOfInitialIfaces := len(response.Result.Interfaces)
+			response.Result.Interfaces = append(response.Result.Interfaces, primaryUDNResult.Interfaces...)
+			response.Result.IPs = append(response.Result.IPs, primaryUDNResult.IPs...)
 
 			// Offset the index of the default network IPs to correctly point to the default network interfaces
-			numOfPrimaryIfaces := len(primaryUDNResult.Interfaces)
-			for i := len(primaryUDNResult.IPs); i < len(response.Result.IPs); i++ {
+			for i := numOfInitialIPs; i < len(response.Result.IPs); i++ {
 				ifaceIPConfig := response.Result.IPs[i].Copy()
 				if response.Result.IPs[i].Interface != nil {
-					response.Result.IPs[i].Interface = current.Int(*ifaceIPConfig.Interface + numOfPrimaryIfaces)
+					response.Result.IPs[i].Interface = current.Int(*ifaceIPConfig.Interface + numOfInitialIfaces)
 				}
 			}
 		}
