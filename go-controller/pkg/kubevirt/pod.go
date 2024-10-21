@@ -3,6 +3,7 @@ package kubevirt
 import (
 	"fmt"
 	"net"
+	"sort"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -350,33 +351,6 @@ func IsPodOwnedByVirtualMachine(pod *corev1.Pod) bool {
 	return ExtractVMNameFromPod(pod) != nil
 }
 
-func podDuringMigration(vmPods []*corev1.Pod) bool {
-	return len(vmPods) > 0
-}
-
-func isSourcePodAlreadyStale(pod *corev1.Pod, vmPods []*corev1.Pod) bool {
-	if util.PodCompleted(pod) {
-		return true
-	}
-	for _, vmPod := range vmPods {
-		if vmPod.CreationTimestamp.After(pod.CreationTimestamp.Time) {
-			return true
-		}
-	}
-
-	return false
-}
-
-func getTargetPod(vmPods []*corev1.Pod) *corev1.Pod {
-	targetPodNominee := vmPods[0]
-	for i := 1; i < len(vmPods); i++ {
-		if vmPods[i].CreationTimestamp.After(targetPodNominee.CreationTimestamp.Time) {
-			targetPodNominee = vmPods[i]
-		}
-	}
-	return targetPodNominee
-}
-
 func isTargetPodReady(targetPod *corev1.Pod) bool {
 	if targetPod == nil {
 		return false
@@ -402,19 +376,56 @@ func filterNotComplete(vmPods []*corev1.Pod) []*corev1.Pod {
 	return notCompletePods
 }
 
-func IsMigrationReadyForTrafficHandoff(client *factory.WatchFactory, pod *corev1.Pod) (bool, error) {
-	vmPods, err := findVMRelatedPods(client, pod)
-	if err != nil {
-		return false, fmt.Errorf("failed finding related pods for pod %s/%s when checking live migration left overs: %v", pod.Namespace, pod.Name, err)
+type LiveMigrationState string
+
+const (
+	LiveMigrationInProgress        LiveMigrationState = "InProgress"
+	LiveMigrationTargetDomainReady LiveMigrationState = "TargetDomainReady"
+	LiveMigrationCompleted         LiveMigrationState = "Completed"
+)
+
+type LiveMigrationStatus struct {
+	SourcePod, TargetPod *corev1.Pod
+	State                LiveMigrationState
+}
+
+func DiscoverLiveMigrationStatus(client *factory.WatchFactory, pod *corev1.Pod) (*LiveMigrationStatus, error) {
+	vmKey := ExtractVMNameFromPod(pod)
+	if vmKey == nil {
+		return nil, nil
 	}
+
+	vmPods, err := client.GetPodsBySelector(pod.Namespace, metav1.LabelSelector{MatchLabels: map[string]string{kubevirtv1.VirtualMachineNameLabel: vmKey.Name}})
+	if err != nil {
+		return nil, err
+	}
+
+	//TODO: cover failed migration
 	vmPods = filterNotComplete(vmPods)
 
-	if !podDuringMigration(vmPods) {
-		return false, nil
+	// no migration
+	if len(vmPods) < 2 {
+		return nil, nil
 	}
 
-	if isSourcePodAlreadyStale(pod, vmPods) && isTargetPodReady(getTargetPod(vmPods)) {
-		return true, nil
+	if len(vmPods) > 2 {
+		return nil, fmt.Errorf("unexpected live migration state at pods: %+v", vmPods)
 	}
-	return false, nil
+
+	// Sort vmPods by creation time
+	sort.Slice(vmPods, func(i, j int) bool {
+		// i less than j
+		return vmPods[j].CreationTimestamp.After(vmPods[i].CreationTimestamp.Time)
+	})
+
+	status := LiveMigrationStatus{
+		SourcePod: vmPods[0],
+		TargetPod: vmPods[1],
+		State:     LiveMigrationInProgress,
+	}
+
+	if isTargetPodReady(status.TargetPod) {
+		status.State = LiveMigrationTargetDomainReady
+	}
+	return &status, nil
 }
