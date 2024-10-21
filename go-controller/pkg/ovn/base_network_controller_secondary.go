@@ -334,7 +334,8 @@ func (bsnc *BaseSecondaryNetworkController) addLogicalPortToNetworkForNAD(pod *k
 		}
 	}
 
-	if bsnc.doesNetworkRequireIPAM() && util.IsMultiNetworkPoliciesSupportEnabled() {
+	if bsnc.doesNetworkRequireIPAM() &&
+		(util.IsMultiNetworkPoliciesSupportEnabled() || (util.IsNetworkSegmentationSupportEnabled() && bsnc.IsPrimaryNetwork())) {
 		// Ensure the namespace/nsInfo exists
 		addOps, err := bsnc.addPodToNamespaceForSecondaryNetwork(pod.Namespace, podAnnotation.IPs)
 		if err != nil {
@@ -429,7 +430,8 @@ func (bsnc *BaseSecondaryNetworkController) removePodForSecondaryNetwork(pod *ka
 
 	// otherwise just delete pod IPs from the namespace address set
 	if !hasLogicalPort {
-		if bsnc.doesNetworkRequireIPAM() && util.IsMultiNetworkPoliciesSupportEnabled() {
+		if bsnc.doesNetworkRequireIPAM() &&
+			(util.IsMultiNetworkPoliciesSupportEnabled() || (util.IsNetworkSegmentationSupportEnabled() && bsnc.IsPrimaryNetwork())) {
 			return bsnc.removeRemoteZonePodFromNamespaceAddressSet(pod)
 		}
 
