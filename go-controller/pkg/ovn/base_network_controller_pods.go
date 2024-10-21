@@ -18,6 +18,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kubevirt"
 	logicalswitchmanager "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	kapi "k8s.io/api/core/v1"
@@ -589,21 +590,29 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *kapi.Pod, nadName
 		}
 	}
 
-	lsp.Enabled = ptr.To(true)
-	if kubevirt.IsPodOwnedByVirtualMachine(pod) &&
-		isAllowedForMigration(bnc.IsSecondary(), bnc.IsPrimaryNetwork(), bnc.isLayer2Interconnect()) {
-		migrationProcessReady, err := kubevirt.IsMigrationReadyForTrafficHandoff(bnc.watchFactory, pod)
+	lsps := []*nbdb.LogicalSwitchPort{lsp}
+	if kubevirt.IsPodOwnedByVirtualMachine(pod) && bnc.isAllowedForMigration() {
+		kubevirtLiveMigrationStatus, err := kubevirt.DiscoverLiveMigrationStatus(bnc.watchFactory, pod)
 		if err != nil {
 			return nil, nil, nil, false, err
 		}
-
-		if migrationProcessReady || util.PodWantsHostNetwork(pod) {
-			// Perform Traffic handoff by disabling src pod LSP
-			lsp.Enabled = ptr.To(false)
+		if kubevirtLiveMigrationStatus != nil && pod.Name == kubevirtLiveMigrationStatus.TargetPod.Name {
+			lsp.Enabled = ptr.To(kubevirtLiveMigrationStatus.State == kubevirt.LiveMigrationTargetDomainReady)
+			// kubevirt do not update source pod, so the controller cannot wait for
+			// it to disable the LSP, let's just do it here at the same operation
+			if kubevirtLiveMigrationStatus.State == kubevirt.LiveMigrationTargetDomainReady {
+				sourcePodLSP := &nbdb.LogicalSwitchPort{
+					Name:    bnc.GetLogicalPortName(kubevirtLiveMigrationStatus.SourcePod, nadName),
+					Enabled: ptr.To(false),
+				}
+				lsps = append(lsps, sourcePodLSP)
+				klog.Infof("DELETEME, source.pod: %s, source.enabled: %t", kubevirtLiveMigrationStatus.SourcePod.Name, *sourcePodLSP.Enabled)
+			}
+			klog.Infof("DELETEME, target.pod: %s, target.enabled: %t", pod.Name, *lsp.Enabled)
 		}
 	}
 
-	ops, err = libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitchOps(bnc.nbClient, nil, ls, lsp)
+	ops, err = libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitchOps(bnc.nbClient, nil, ls, lsps...)
 	if err != nil {
 		return nil, nil, nil, false,
 			fmt.Errorf("error creating logical switch port %+v on switch %+v: %+v", *lsp, *ls, err)
@@ -1178,6 +1187,6 @@ func (bnc *BaseNetworkController) wasPodReleasedBeforeStartup(uid, nad string) b
 	return bnc.releasedPodsBeforeStartup[nad].Has(uid)
 }
 
-func isAllowedForMigration(isSecondary, isPrimaryNetwork, isl2Topology bool) bool {
-	return isSecondary && !isPrimaryNetwork && isl2Topology
+func (bnc *BaseNetworkController) isAllowedForMigration() bool {
+	return bnc.IsSecondary() && bnc.TopologyType() == types.Layer2Topology
 }
