@@ -483,7 +483,7 @@ func (gw *GatewayManager) GatewayInit(
 		return fmt.Errorf("failed to remove stale masquerade resources from northbound database: %w", err)
 	}
 
-	if err := gateway.CreateDummyGWMacBindings(gw.nbClient, gatewayRouter); err != nil {
+	if err := gateway.CreateDummyGWMacBindings(gw.nbClient, gatewayRouter, gw.netInfo); err != nil {
 		return err
 	}
 
@@ -1076,7 +1076,7 @@ func (gw *GatewayManager) Cleanup() error {
 	}
 
 	// Remove the static mac bindings of the gateway router
-	err = gateway.DeleteDummyGWMacBindings(gw.nbClient, gw.gwRouterName)
+	err = gateway.DeleteDummyGWMacBindings(gw.nbClient, gw.gwRouterName, gw.netInfo)
 	if err != nil {
 		return fmt.Errorf("failed to delete GR dummy mac bindings for node %s: %w", gw.nodeName, err)
 	}
