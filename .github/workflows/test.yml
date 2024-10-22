@@ -440,7 +440,7 @@ jobs:
     needs: [ build-pr ]
     env:
       JOB_NAME: "${{ matrix.target }}-${{ matrix.ha }}-${{ matrix.gateway-mode }}-${{ matrix.ipfamily }}-${{ matrix.disable-snat-multiple-gws }}-${{ matrix.second-bridge }}-${{ matrix.ic }}"
-      OVN_HYBRID_OVERLAY_ENABLE: "${{ matrix.target == 'control-plane' || matrix.target == 'control-plane-helm' }}"
+      OVN_HYBRID_OVERLAY_ENABLE: ${{ (matrix.target == 'control-plane' || matrix.target == 'control-plane-helm') && (matrix.ipfamily == 'ipv4' || matrix.ipfamily == 'dualstack' ) }}
       OVN_MULTICAST_ENABLE:  "${{ matrix.target == 'control-plane' || matrix.target == 'control-plane-helm' }}"
       OVN_EMPTY_LB_EVENTS: "${{ matrix.target == 'control-plane' || matrix.target == 'control-plane-helm' }}"
       OVN_HA: "${{ matrix.ha == 'HA' }}"
@@ -531,7 +531,7 @@ jobs:
       run: |
         # used by e2e diagnostics package
         export OVN_IMAGE="ovn-daemonset-fedora:pr"
-        
+
         if [ "${{ matrix.target }}" == "multi-homing" ] || [ "${{ matrix.target }}" == "multi-homing-helm" ]; then
           make -C test control-plane WHAT="Multi Homing"
         elif [ "${{ matrix.target }}" == "node-ip-mac-migration" ]; then
