@@ -17,6 +17,8 @@ import (
 	"syscall"
 	"time"
 	"unsafe"
+
+	"k8s.io/klog/v2"
 )
 
 /*
@@ -1550,6 +1552,7 @@ func sendmsgN(fd int, iov []Iovec, oob []byte, ptr unsafe.Pointer, salen _Sockle
 			var sockType int
 			sockType, err = GetsockoptInt(fd, SOL_SOCKET, SO_TYPE)
 			if err != nil {
+				klog.Infof("DELETEME, ERROR, GetsockoptInt(): %w", err)
 				return 0, err
 			}
 			// send at least one normal byte
@@ -1568,6 +1571,7 @@ func sendmsgN(fd int, iov []Iovec, oob []byte, ptr unsafe.Pointer, salen _Sockle
 		msg.SetIovlen(len(iov))
 	}
 	if n, err = sendmsg(fd, &msg, flags); err != nil {
+		klog.Infof("DELETEME, ERROR, sendmsg(): %w", err)
 		return 0, err
 	}
 	if len(oob) > 0 && empty {
