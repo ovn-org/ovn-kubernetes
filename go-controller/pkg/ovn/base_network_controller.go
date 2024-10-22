@@ -681,16 +681,12 @@ func (bnc *BaseNetworkController) syncNodeManagementPort(node *kapi.Node, switch
 		return nil, err
 	}
 
-	// TODO(dceara): The cluster port group must be per network. So for now skip adding management port to the cluster port
-	// group for secondary network's because the cluster port group is not yet created for secondary networks.
-	if bnc.IsDefault() {
-		clusterPortGroupName := bnc.getClusterPortGroupName(types.ClusterPortGroupNameBase)
-		if err = libovsdbops.AddPortsToPortGroup(bnc.nbClient, clusterPortGroupName, logicalSwitchPort.UUID); err != nil {
-			err1 := fmt.Errorf("failed to add port %s to cluster port group %s (%s): %w",
-				logicalSwitchPort.Name, types.ClusterPortGroupNameBase, clusterPortGroupName, err)
-			klog.Error(err1)
-			return nil, err1
-		}
+	clusterPortGroupName := bnc.getClusterPortGroupName(types.ClusterPortGroupNameBase)
+	if err = libovsdbops.AddPortsToPortGroup(bnc.nbClient, clusterPortGroupName, logicalSwitchPort.UUID); err != nil {
+		err1 := fmt.Errorf("failed to add port %s to cluster port group %s (%s): %w",
+			logicalSwitchPort.Name, types.ClusterPortGroupNameBase, clusterPortGroupName, err)
+		klog.Error(err1)
+		return nil, err1
 	}
 
 	if v4Subnet != nil {
