@@ -56,7 +56,7 @@ func (ncm *nodeNetworkControllerManager) NewNetworkController(nInfo util.NetInfo
 	case ovntypes.Layer3Topology, ovntypes.Layer2Topology, ovntypes.LocalnetTopology:
 		dnnc, ok := ncm.defaultNodeNetworkController.(*node.DefaultNodeNetworkController)
 		if !ok {
-			return nil, fmt.Errorf("unable to deference default node network controller object")
+			return nil, fmt.Errorf("unable to dereference default node network controller object")
 		}
 		return node.NewSecondaryNodeNetworkController(ncm.newCommonNetworkControllerInfo(),
 			nInfo, ncm.vrfManager, ncm.ruleManager, dnnc.Gateway)
@@ -172,6 +172,7 @@ func (ncm *nodeNetworkControllerManager) Start(ctx context.Context) (err error) 
 	// make sure we clean up after ourselves on failure
 	defer func() {
 		if err != nil {
+			klog.Errorf("Stopping node network controller manager, err=%v", err)
 			ncm.Stop()
 		}
 	}()
@@ -191,6 +192,15 @@ func (ncm *nodeNetworkControllerManager) Start(ctx context.Context) (err error) 
 		ncm.routeManager.Run(ncm.stopChan, 2*time.Minute)
 	}()
 
+	err = ncm.initDefaultNodeNetworkController()
+	if err != nil {
+		return fmt.Errorf("failed to init default node network controller: %v", err)
+	}
+	err = ncm.defaultNodeNetworkController.PreStart(ctx) // partial gateway init + OpenFlow Manager
+	if err != nil {
+		return fmt.Errorf("failed to start default node network controller: %v", err)
+	}
+
 	if ncm.nadController != nil {
 		err = ncm.nadController.Start()
 		if err != nil {
@@ -198,10 +208,6 @@ func (ncm *nodeNetworkControllerManager) Start(ctx context.Context) (err error) 
 		}
 	}
 
-	err = ncm.initDefaultNodeNetworkController()
-	if err != nil {
-		return fmt.Errorf("failed to init default node network controller: %v", err)
-	}
 	err = ncm.defaultNodeNetworkController.Start(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to start default node network controller: %v", err)

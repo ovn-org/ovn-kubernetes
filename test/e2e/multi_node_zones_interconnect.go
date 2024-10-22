@@ -40,7 +40,7 @@ func changeNodeZone(node *v1.Node, zone string, cs clientset.Interface) error {
 	framework.ExpectNoError(err)
 
 	// Restart the ovnkube-node on this node
-	err = restartOVNKubeNodePod(cs, "ovn-kubernetes", node.Name)
+	err = restartOVNKubeNodePod(cs, ovnNamespace, node.Name)
 	framework.ExpectNoError(err)
 
 	// Verify that the node is moved to the expected zone

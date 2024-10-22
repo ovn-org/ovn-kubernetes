@@ -243,6 +243,10 @@ func NewSecondaryLocalnetNetworkController(cnci *CommonNetworkControllerInfo, ne
 	return oc
 }
 
+func (oc *SecondaryLocalnetNetworkController) PreStart(ctx context.Context) error {
+	return nil
+}
+
 // Start starts the secondary localnet controller, handles all events and creates all needed logical entities
 func (oc *SecondaryLocalnetNetworkController) Start(ctx context.Context) error {
 	klog.Infof("Starting controller for secondary network network %s", oc.GetNetworkName())

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 	"net"
 	"os"
 	"strconv"
@@ -33,6 +32,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/egressip"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/egressservice"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/linkmanager"
@@ -117,6 +117,15 @@ type DefaultNodeNetworkController struct {
 	nadController *nad.NetAttachDefinitionController
 
 	cniServer *cni.Server
+
+	gatewaySetup *preStartSetup
+}
+
+type preStartSetup struct {
+	mgmtPorts      []managementPortEntry
+	mgmtPortConfig *managementPortConfig
+	nodeAddress    net.IP
+	sbZone         string
 }
 
 func newDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, stopChan chan struct{},
@@ -700,15 +709,18 @@ func portExists(namespace, name string) bool {
 
 /** HACK END **/
 
-// Start learns the subnets assigned to it by the master controller
-// and calls the SetupNode script which establishes the logical switch
-func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
-	klog.Infof("Starting the default node network controller")
+// PreStart executes the first steps to start the DefaultNodeNetworkController.
+// It is split from Start() and executed before SecondaryNodeNetworkController (SNNC),
+// to allow SNNC to reference the openflow manager created in PreStart.
+func (nc *DefaultNodeNetworkController) PreStart(ctx context.Context) error {
+	klog.Infof("PreStarting the default node network controller")
 
 	var err error
 	var node *kapi.Node
 	var subnets []*net.IPNet
 	var cniServer *cni.Server
+
+	gatewaySetup := &preStartSetup{}
 
 	// Setting debug log level during node bring up to expose bring up process.
 	// Log level is returned to configured value when bring up is complete.
@@ -818,6 +830,75 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	nodeAnnotator := kube.NewNodeAnnotator(nc.Kube, node.Name)
 	waiter := newStartupWaiter()
 
+	// Setup management ports
+	mgmtPorts, mgmtPortConfig, err := createNodeManagementPorts(node, nc.watchFactory.NodeCoreInformer().Lister(), nodeAnnotator,
+		nc.Kube, waiter, subnets, nc.routeManager)
+	if err != nil {
+		return err
+	}
+	gatewaySetup.mgmtPorts = mgmtPorts
+	gatewaySetup.mgmtPortConfig = mgmtPortConfig
+
+	if err := util.SetNodeZone(nodeAnnotator, sbZone); err != nil {
+		return fmt.Errorf("failed to set node zone annotation for node %s: %w", nc.name, err)
+	}
+	if err := nodeAnnotator.Run(); err != nil {
+		return fmt.Errorf("failed to set node %s annotations: %w", nc.name, err)
+	}
+
+	// Connect ovn-controller to SBDB
+	for _, auth := range []config.OvnAuthConfig{config.OvnNorth, config.OvnSouth} {
+		if err := auth.SetDBAuth(); err != nil {
+			return fmt.Errorf("unable to set the authentication towards OVN local dbs")
+		}
+	}
+
+	// First part of gateway initialization. It will be completed by (nc *DefaultNodeNetworkController) Start()
+	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
+		// Initialize gateway for OVS internal port or representor management port
+		gw, err := nc.initGatewayPreStart(subnets, nodeAnnotator, mgmtPortConfig, nodeAddr)
+		if err != nil {
+			return err
+		}
+		nc.Gateway = gw
+	}
+
+	if err := level.Set(strconv.Itoa(config.Logging.Level)); err != nil {
+		klog.Errorf("Reset of initial klog \"loglevel\" failed, err: %v", err)
+	}
+	gatewaySetup.sbZone = sbZone
+	nc.gatewaySetup = gatewaySetup
+
+	return nil
+
+}
+
+// Start learns the subnets assigned to it by the master controller
+// and calls the SetupNode script which establishes the logical switch
+func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
+	klog.Infof("Starting the default node network controller")
+
+	var err error
+	var node *kapi.Node
+
+	if nc.gatewaySetup == nil {
+		return fmt.Errorf("default node network controller hasn't been pre-started")
+	}
+
+	// Setting debug log level during node bring up to expose bring up process.
+	// Log level is returned to configured value when bring up is complete.
+	var level klog.Level
+	if err := level.Set("5"); err != nil {
+		klog.Errorf("Setting klog \"loglevel\" to 5 failed, err: %v", err)
+	}
+
+	if node, err = nc.Kube.GetNode(nc.name); err != nil {
+		return fmt.Errorf("error retrieving node %s: %v", nc.name, err)
+	}
+
+	nodeAnnotator := kube.NewNodeAnnotator(nc.Kube, node.Name)
+	waiter := newStartupWaiter()
+
 	// Use the device from environment when the DP resource name is specified.
 	if config.OvnKubeNode.MgmtPortDPResourceName != "" {
 		if err := handleDevicePluginResources(); err != nil {
@@ -838,32 +919,17 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 			config.OvnKubeNode.MgmtPortNetdev, config.OvnKubeNode.MgmtPortDPResourceName)
 	}
 
-	// Setup management ports
-	mgmtPorts, mgmtPortConfig, err := createNodeManagementPorts(node, nc.watchFactory.NodeCoreInformer().Lister(), nodeAnnotator,
-		nc.Kube, waiter, subnets, nc.routeManager)
-	if err != nil {
-		return err
-	}
-
-	// Initialize gateway
+	// Complete gateway initialization
 	if config.OvnKubeNode.Mode == types.NodeModeDPUHost {
-		err = nc.initGatewayDPUHost(nodeAddr)
+		err = nc.initGatewayDPUHost(nc.gatewaySetup.nodeAddress)
 		if err != nil {
 			return err
 		}
 	} else {
-		// Initialize gateway for OVS internal port or representor management port
-		if err := nc.initGateway(subnets, nodeAnnotator, waiter, mgmtPortConfig, nodeAddr); err != nil {
+		gw := nc.Gateway.(*gateway)
+		if err := nc.initGatewayMainStart(gw, waiter); err != nil {
 			return err
 		}
-	}
-
-	if err := util.SetNodeZone(nodeAnnotator, sbZone); err != nil {
-		return fmt.Errorf("failed to set node zone annotation for node %s: %w", nc.name, err)
-	}
-
-	if err := nodeAnnotator.Run(); err != nil {
-		return fmt.Errorf("failed to set node %s annotations: %w", nc.name, err)
 	}
 
 	// If EncapPort is not the default tell sbdb to use specified port.
@@ -899,7 +965,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	//        plumbing (takes 80ms based on what we saw in CI runs so we might still have that small window of disruption).
 	// NOTE: ovnkube-node in DPU host mode doesn't go through upgrades for OVN-IC and has no SBDB to connect to. Thus this part shall be skipped.
 	var syncNodes, syncServices, syncPods bool
-	if config.OvnKubeNode.Mode != types.NodeModeDPUHost && config.OVNKubernetesFeature.EnableInterconnect && sbZone != types.OvnDefaultZone && !util.HasNodeMigratedZone(node) { // so this should be done only once in phase2 (not in phase1)
+	if config.OvnKubeNode.Mode != types.NodeModeDPUHost && config.OVNKubernetesFeature.EnableInterconnect && nc.gatewaySetup.sbZone != types.OvnDefaultZone && !util.HasNodeMigratedZone(node) {
 		klog.Info("Upgrade Hack: Interconnect is enabled")
 		var err1 error
 		start := time.Now()
@@ -981,7 +1047,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("upgrade hack: failed while waiting for the remote ovnkube-controller to be ready: %v, %v", err, err1)
 		}
-		if err := util.SetNodeZoneMigrated(nodeAnnotator, sbZone); err != nil {
+		if err := util.SetNodeZoneMigrated(nodeAnnotator, nc.gatewaySetup.sbZone); err != nil {
 			return fmt.Errorf("upgrade hack: failed to set node zone annotation for node %s: %w", nc.name, err)
 		}
 		if err := nodeAnnotator.Run(); err != nil {
@@ -1018,7 +1084,6 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 				return err
 			}
 		}
-
 	}
 
 	if config.HybridOverlay.Enabled {
@@ -1057,7 +1122,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	}
 
 	// start management ports health check
-	for _, mgmtPort := range mgmtPorts {
+	for _, mgmtPort := range nc.gatewaySetup.mgmtPorts {
 		mgmtPort.port.CheckManagementPortHealth(nc.routeManager, mgmtPort.config, nc.stopChan)
 		if config.OVNKubernetesFeature.EnableEgressIP {
 			// Start the health checking server used by egressip, if EgressIPNodeHealthCheckPort is specified
@@ -1073,7 +1138,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		// "k8s.ovn.org/external-gw-pod-ips". In that case, we need ovnkube-node to flush
 		// conntrack on every node. In multi-zone-interconnect case, we will handle the flushing
 		// directly on the ovnkube-controller code to avoid an extra namespace annotation
-		if !config.OVNKubernetesFeature.EnableInterconnect || sbZone == types.OvnDefaultZone {
+		if !config.OVNKubernetesFeature.EnableInterconnect || nc.gatewaySetup.sbZone == types.OvnDefaultZone {
 			err := nc.WatchNamespaces()
 			if err != nil {
 				return fmt.Errorf("failed to watch namespaces: %w", err)
