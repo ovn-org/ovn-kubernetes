@@ -293,6 +293,9 @@ var _ = Describe("OVN Multi-Homed pod operations", func() {
 					initialDB.NBData = append(
 						initialDB.NBData,
 						expectedLayer3EgressEntities(networkConfig, *gwConfig, ovntest.MustParseIPNet(netInfo.hostsubnets))...)
+					initialDB.NBData = append(initialDB.NBData,
+						newNetworkClusterPortGroup(getNetworkControllerName(netInfo.netName)),
+					)
 				}
 				initialDB.NBData = append(initialDB.NBData, nbZone)
 
