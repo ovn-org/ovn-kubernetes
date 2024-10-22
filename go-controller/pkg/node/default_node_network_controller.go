@@ -11,6 +11,8 @@ import (
 	"sync"
 	"time"
 
+	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
+
 	kapi "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
@@ -25,6 +27,7 @@ import (
 
 	"github.com/containernetworking/plugins/pkg/ip"
 	v1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+
 	honode "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni"
 	config "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -1426,6 +1429,19 @@ func DummyNextHopIPs() []net.IP {
 	}
 	if config.IPv6Mode {
 		nextHops = append(nextHops, config.Gateway.MasqueradeIPs.V6DummyNextHopMasqueradeIP)
+	}
+	return nextHops
+}
+
+// DummyMasqueradeIPs returns the fake host masquerade IPs used for service traffic routing.
+// It is used in: br-ex, where we SNAT the traffic destined towards a service IP
+func DummyMasqueradeIPs() []net.IP {
+	var nextHops []net.IP
+	if config.IPv4Mode {
+		nextHops = append(nextHops, config.Gateway.MasqueradeIPs.V4HostMasqueradeIP)
+	}
+	if config.IPv6Mode {
+		nextHops = append(nextHops, config.Gateway.MasqueradeIPs.V6HostMasqueradeIP)
 	}
 	return nextHops
 }

@@ -623,8 +623,8 @@ func expectedGWEntities(nodeName, nodeSubnet string, netInfo util.NetInfo, gwCon
 		expectedGRToJoinSwitchLRP(gwRouterName, gwRouterJoinIPAddress(), netInfo),
 		expectedGRToExternalSwitchLRP(gwRouterName, netInfo, nodePhysicalIPAddress(), udnGWSNATAddress()),
 		expectedGatewayChassis(nodeName, netInfo, gwConfig),
-		expectedStaticMACBinding(gwRouterName, nextHopMasqueradeIP()),
 	)
+	expectedEntities = append(expectedEntities, expectedStaticMACBindings(gwRouterName, staticMACBindingIPs())...)
 	expectedEntities = append(expectedEntities, expectedExternalSwitchAndLSPs(netInfo, gwConfig, nodeName)...)
 	expectedEntities = append(expectedEntities, expectedJoinSwitchAndLSPs(netInfo, nodeName)...)
 	return expectedEntities
@@ -682,15 +682,19 @@ func expectedGWRouterPlusNATAndStaticRoutes(
 	return expectedEntities
 }
 
-func expectedStaticMACBinding(gwRouterName string, ip net.IP) *nbdb.StaticMACBinding {
+func expectedStaticMACBindings(gwRouterName string, ips []net.IP) []libovsdbtest.TestData {
 	lrpName := fmt.Sprintf("%s%s", ovntypes.GWRouterToExtSwitchPrefix, gwRouterName)
-	return &nbdb.StaticMACBinding{
-		UUID:               lrpName + "static-mac-binding-UUID",
-		IP:                 ip.String(),
-		LogicalPort:        lrpName,
-		MAC:                util.IPAddrToHWAddr(nextHopMasqueradeIP()).String(),
-		OverrideDynamicMAC: true,
+	var bindings []libovsdbtest.TestData
+	for _, ip := range ips {
+		bindings = append(bindings, &nbdb.StaticMACBinding{
+			UUID:               fmt.Sprintf("%sstatic-mac-binding-UUID(%s)", lrpName, ip.String()),
+			IP:                 ip.String(),
+			LogicalPort:        lrpName,
+			MAC:                util.IPAddrToHWAddr(ip).String(),
+			OverrideDynamicMAC: true,
+		})
 	}
+	return bindings
 }
 
 func expectedGatewayChassis(nodeName string, netInfo util.NetInfo, gwConfig util.L3GatewayConfig) *nbdb.GatewayChassis {
@@ -926,6 +930,10 @@ func expectedJoinSwitchAndLSPs(netInfo util.NetInfo, nodeName string) []libovsdb
 
 func nextHopMasqueradeIP() net.IP {
 	return net.ParseIP("169.254.169.4")
+}
+
+func staticMACBindingIPs() []net.IP {
+	return []net.IP{net.ParseIP("169.254.169.4"), net.ParseIP("169.254.169.2")}
 }
 
 func gwRouterJoinIPAddress() *net.IPNet {
