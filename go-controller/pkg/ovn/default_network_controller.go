@@ -998,7 +998,7 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 				return err
 			}
 		}
-		return nil
+		return h.oc.addEgressNode(newNode)
 
 	case factory.NamespaceType:
 		oldNs, newNs := oldObj.(*kapi.Namespace), newObj.(*kapi.Namespace)
