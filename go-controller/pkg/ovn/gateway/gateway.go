@@ -63,15 +63,23 @@ func GetGatewayPhysicalIPs(nbClient libovsdbclient.Client, gatewayRouter string)
 
 // CreateDummyGWMacBindings creates mac bindings (ipv4 and ipv6) for a fake next hops
 // used by host->service traffic
-func CreateDummyGWMacBindings(nbClient libovsdbclient.Client, gwRouterName string) error {
+func CreateDummyGWMacBindings(nbClient libovsdbclient.Client, gwRouterName string, netInfo util.NetInfo) error {
 	logicalPort := ovntypes.GWRouterToExtSwitchPrefix + gwRouterName
-	dummyNextHopIPs := node.DummyNextHopIPs()
-	smbs := make([]*nbdb.StaticMACBinding, len(dummyNextHopIPs))
-	for i := range dummyNextHopIPs {
+	ips := node.DummyNextHopIPs()
+	// In UDN, add static MAC bindings for host masquerade IPs.
+	// This is necessary because the masquerade network is directly
+	// attached to the external port of the gateway router,
+	// and neighbor discovery has to be avoided since these IPs
+	// are the same across all nodes.
+	if netInfo.IsPrimaryNetwork() {
+		ips = append(ips, node.DummyMasqueradeIPs()...)
+	}
+	smbs := make([]*nbdb.StaticMACBinding, len(ips))
+	for i := range ips {
 		smb := &nbdb.StaticMACBinding{
 			LogicalPort:        logicalPort,
-			MAC:                util.IPAddrToHWAddr(dummyNextHopIPs[i]).String(),
-			IP:                 dummyNextHopIPs[i].String(),
+			MAC:                util.IPAddrToHWAddr(ips[i]).String(),
+			IP:                 ips[i].String(),
 			OverrideDynamicMAC: true,
 		}
 		smbs[i] = smb
@@ -89,14 +97,17 @@ func CreateDummyGWMacBindings(nbClient libovsdbclient.Client, gwRouterName strin
 
 // DeleteDummyGWMacBindings removes mac bindings (ipv4 and ipv6) for a fake next hops
 // used by host->service traffic
-func DeleteDummyGWMacBindings(nbClient libovsdbclient.Client, gwRouterName string) error {
+func DeleteDummyGWMacBindings(nbClient libovsdbclient.Client, gwRouterName string, netInfo util.NetInfo) error {
 	logicalPort := ovntypes.GWRouterToExtSwitchPrefix + gwRouterName
-	dummyNextHopIPs := node.DummyNextHopIPs()
-	smbs := make([]*nbdb.StaticMACBinding, len(dummyNextHopIPs))
-	for i := range dummyNextHopIPs {
+	ips := node.DummyNextHopIPs()
+	if netInfo.IsPrimaryNetwork() {
+		ips = append(ips, node.DummyMasqueradeIPs()...)
+	}
+	smbs := make([]*nbdb.StaticMACBinding, len(ips))
+	for i := range ips {
 		smb := &nbdb.StaticMACBinding{
 			LogicalPort: logicalPort,
-			IP:          dummyNextHopIPs[i].String(),
+			IP:          ips[i].String(),
 		}
 		smbs[i] = smb
 	}

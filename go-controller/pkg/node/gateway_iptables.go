@@ -16,6 +16,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/egressservice"
 	nodeipt "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 )
@@ -25,6 +26,7 @@ const (
 	iptableExternalIPChain    = "OVN-KUBE-EXTERNALIP"     // called from nat-PREROUTING and nat-OUTPUT
 	iptableETPChain           = "OVN-KUBE-ETP"            // called from nat-PREROUTING only
 	iptableITPChain           = "OVN-KUBE-ITP"            // called from mangle-OUTPUT and nat-OUTPUT
+	iptableUDNMarkChain       = "OVN-KUBE-UDN-MARK"       // called from mangle-PREROUTING and mangle-OUTPUT
 	iptableUDNMasqueradeChain = "OVN-KUBE-UDN-MASQUERADE" // called from nat-POSTROUTING
 )
 
@@ -146,28 +148,49 @@ func getGatewayInitRules(chain string, proto iptables.Protocol) []nodeipt.Rule {
 //
 // `svcHasLocalHostNetEndPnt` is true if this service has at least one host-networked endpoint that is local to this node
 // `isETPLocal` is true if the svc.Spec.ExternalTrafficPolicy=Local
-func getNodePortIPTRules(svcPort kapi.ServicePort, targetIP string, targetPort int32, svcHasLocalHostNetEndPnt, isETPLocal bool) []nodeipt.Rule {
+// If netConfig is not from the default network adds a rule to mark the packets with the UDN mark
+func getNodePortIPTRules(svcPort kapi.ServicePort, targetIP string, targetPort int32, svcHasLocalHostNetEndPnt, isETPLocal bool, netConfig *bridgeUDNConfiguration) []nodeipt.Rule {
 	chainName := iptableNodePortChain
 	if !svcHasLocalHostNetEndPnt && isETPLocal {
 		// DNAT it to the masqueradeIP:nodePort instead of clusterIP:targetPort
 		targetIP = getMasqueradeVIP(targetIP)
 		chainName = iptableETPChain
 	}
-	return []nodeipt.Rule{
-		{
-			Table: "nat",
-			Chain: chainName,
-			Args: []string{
-				"-p", string(svcPort.Protocol),
-				"-m", "addrtype",
-				"--dst-type", "LOCAL",
-				"--dport", fmt.Sprintf("%d", svcPort.NodePort),
-				"-j", "DNAT",
-				"--to-destination", util.JoinHostPortInt32(targetIP, targetPort),
+	var rules []nodeipt.Rule
+
+	// for non-default networks mark the packets with the UDN mark
+	if netConfig != nil && netConfig.masqCTMark != ctMarkOVN {
+		rules = append(rules,
+			nodeipt.Rule{
+				Table: "mangle",
+				Chain: iptableUDNMarkChain,
+				Args: []string{
+					"-p", string(svcPort.Protocol),
+					"-m", "addrtype",
+					"--dst-type", "LOCAL",
+					"--dport", fmt.Sprintf("%d", svcPort.NodePort),
+					"-j", "MARK",
+					"--set-mark", netConfig.pktMark,
+				},
+				Protocol: getIPTablesProtocol(targetIP),
 			},
-			Protocol: getIPTablesProtocol(targetIP),
-		},
+		)
 	}
+
+	rules = append(rules, nodeipt.Rule{
+		Table: "nat",
+		Chain: chainName,
+		Args: []string{
+			"-p", string(svcPort.Protocol),
+			"-m", "addrtype",
+			"--dst-type", "LOCAL",
+			"--dport", fmt.Sprintf("%d", svcPort.NodePort),
+			"-j", "DNAT",
+			"--to-destination", util.JoinHostPortInt32(targetIP, targetPort),
+		},
+		Protocol: getIPTablesProtocol(targetIP),
+	})
+	return rules
 }
 
 // getITPLocalIPTRules returns the IPTable REDIRECT or MARK rules for the provided service
@@ -293,7 +316,8 @@ func generateIPTRulesForLoadBalancersWithoutNodePorts(svcPort kapi.ServicePort, 
 //
 // `svcHasLocalHostNetEndPnt` is true if this service has at least one host-networked endpoint that is local to this node
 // `isETPLocal` is true if the svc.Spec.ExternalTrafficPolicy=Local
-func getExternalIPTRules(svcPort kapi.ServicePort, externalIP, dstIP string, svcHasLocalHostNetEndPnt, isETPLocal bool) []nodeipt.Rule {
+// If netConfig is not from the default network adds a rule to mark the packets with the UDN mark
+func getExternalIPTRules(svcPort kapi.ServicePort, externalIP, dstIP string, svcHasLocalHostNetEndPnt, isETPLocal bool, netConfig *bridgeUDNConfiguration) []nodeipt.Rule {
 	targetPort := svcPort.Port
 	chainName := iptableExternalIPChain
 	if !svcHasLocalHostNetEndPnt && isETPLocal {
@@ -302,20 +326,39 @@ func getExternalIPTRules(svcPort kapi.ServicePort, externalIP, dstIP string, svc
 		targetPort = svcPort.NodePort
 		chainName = iptableETPChain
 	}
-	return []nodeipt.Rule{
-		{
-			Table: "nat",
-			Chain: chainName,
-			Args: []string{
-				"-p", string(svcPort.Protocol),
-				"-d", externalIP,
-				"--dport", fmt.Sprintf("%v", svcPort.Port),
-				"-j", "DNAT",
-				"--to-destination", util.JoinHostPortInt32(dstIP, targetPort),
+
+	var rules []nodeipt.Rule
+
+	// for non-default networks mark the packets with the UDN mark
+	if netConfig != nil && netConfig.masqCTMark != ctMarkOVN {
+		rules = append(rules,
+			nodeipt.Rule{
+				Table: "mangle",
+				Chain: iptableUDNMarkChain,
+				Args: []string{
+					"-p", string(svcPort.Protocol),
+					"-d", externalIP,
+					"--dport", fmt.Sprintf("%v", svcPort.Port),
+					"-j", "MARK",
+					"--set-mark", netConfig.pktMark,
+				},
+				Protocol: getIPTablesProtocol(externalIP),
 			},
-			Protocol: getIPTablesProtocol(externalIP),
-		},
+		)
 	}
+	rules = append(rules, nodeipt.Rule{
+		Table: "nat",
+		Chain: chainName,
+		Args: []string{
+			"-p", string(svcPort.Protocol),
+			"-d", externalIP,
+			"--dport", fmt.Sprintf("%v", svcPort.Port),
+			"-j", "DNAT",
+			"--to-destination", util.JoinHostPortInt32(dstIP, targetPort),
+		},
+		Protocol: getIPTablesProtocol(externalIP),
+	})
+	return rules
 }
 
 func getGatewayForwardRules(cidrs []*net.IPNet) []nodeipt.Rule {
@@ -484,18 +527,20 @@ func getLocalGatewayNATRules(cidr *net.IPNet) []nodeipt.Rule {
 	// FIXME(tssurya): If the feature is disabled we should be removing
 	// these rules
 	if util.IsNetworkSegmentationSupportEnabled() {
-		rules = append(rules, getUDNMasqueradeRules(protocol)...)
+		rules = append(rules, getUDNRules(protocol)...)
 	}
 	return rules
 }
 
-// getUDNMasqueradeRules is only called for local-gateway-mode
-func getUDNMasqueradeRules(protocol iptables.Protocol) []nodeipt.Rule {
+// getUDNRules is only called for local-gateway-mode
+func getUDNRules(protocol iptables.Protocol) []nodeipt.Rule {
 	// the following rules are actively used only for the UDN Feature:
-	// -A POSTROUTING -j OVN-KUBE-UDN-MASQUERADE
-	// -A OVN-KUBE-UDN-MASQUERADE -s 169.254.0.0/29 -j RETURN
-	// -A OVN-KUBE-UDN-MASQUERADE -d 10.96.0.0/16 -j RETURN
-	// -A OVN-KUBE-UDN-MASQUERADE -s 169.254.0.0/17 -j MASQUERADE
+	// -t mangle -A PREROUTING ! -i ovn-k8s-mp0 -j OVN-KUBE-UDN-MASQUERADE
+	// -t mangle -A OUTPUT -j OVN-KUBE-UDN-MASQUERADE
+	// -t nat -A POSTROUTING -j OVN-KUBE-UDN-MASQUERADE
+	// -t nat -A OVN-KUBE-UDN-MASQUERADE -s 169.254.0.0/29 -j RETURN
+	// -t nat -A OVN-KUBE-UDN-MASQUERADE -d 10.96.0.0/16 -j RETURN
+	// -t nat -A OVN-KUBE-UDN-MASQUERADE -s 169.254.0.0/17 -j MASQUERADE
 	// NOTE: Ordering is important here, the RETURN must come before
 	// the MASQUERADE rule. Please don't change the ordering.
 	srcUDNMasqueradePrefix := config.Gateway.V4MasqueradeSubnet
@@ -509,6 +554,24 @@ func getUDNMasqueradeRules(protocol iptables.Protocol) []nodeipt.Rule {
 		ipFamily = utilnet.IPv6
 	}
 	rules := []nodeipt.Rule{
+		{
+			// Traffic from the default network's management interface
+			// is bypassed to prevent enabling traffic from the default network
+			// to the local node's UDN NodePort.
+			Table: "mangle",
+			Chain: "PREROUTING",
+			Args: []string{
+				"!", "-i", types.K8sMgmtIntfName,
+				"-j",
+				iptableUDNMarkChain},
+			Protocol: protocol,
+		},
+		{
+			Table:    "mangle",
+			Chain:    "OUTPUT",
+			Args:     []string{"-j", iptableUDNMarkChain},
+			Protocol: protocol,
+		},
 		{
 			Table:    "nat",
 			Chain:    "POSTROUTING",
@@ -646,7 +709,7 @@ func recreateIPTRules(table, chain string, keepIPTRules []nodeipt.Rule) error {
 // case3: if svcHasLocalHostNetEndPnt and svcTypeIsITPLocal, rule that redirects clusterIP traffic to host targetPort is added.
 //
 //	if !svcHasLocalHostNetEndPnt and svcTypeIsITPLocal, rule that marks clusterIP traffic to steer it to ovn-k8s-mp0 is added.
-func getGatewayIPTRules(service *kapi.Service, localEndpoints []string, svcHasLocalHostNetEndPnt bool) []nodeipt.Rule {
+func getGatewayIPTRules(service *kapi.Service, localEndpoints []string, svcHasLocalHostNetEndPnt bool, netConfig *bridgeUDNConfiguration) []nodeipt.Rule {
 	rules := make([]nodeipt.Rule, 0)
 	clusterIPs := util.GetClusterIPs(service)
 	svcTypeIsETPLocal := util.ServiceExternalTrafficPolicyLocal(service)
@@ -668,13 +731,13 @@ func getGatewayIPTRules(service *kapi.Service, localEndpoints []string, svcHasLo
 					// case1 (see function description for details)
 					// A DNAT rule to masqueradeIP is added that takes priority over DNAT to clusterIP.
 					if config.Gateway.Mode == config.GatewayModeLocal {
-						rules = append(rules, getNodePortIPTRules(svcPort, clusterIP, svcPort.NodePort, svcHasLocalHostNetEndPnt, svcTypeIsETPLocal)...)
+						rules = append(rules, getNodePortIPTRules(svcPort, clusterIP, svcPort.NodePort, svcHasLocalHostNetEndPnt, svcTypeIsETPLocal, netConfig)...)
 					}
 					// add a skip SNAT rule to OVN-KUBE-SNAT-MGMTPORT to preserve sourceIP for etp=local traffic.
 					rules = append(rules, getNodePortETPLocalIPTRule(svcPort, clusterIP))
 				}
 				// case2 (see function description for details)
-				rules = append(rules, getNodePortIPTRules(svcPort, clusterIP, svcPort.Port, svcHasLocalHostNetEndPnt, false)...)
+				rules = append(rules, getNodePortIPTRules(svcPort, clusterIP, svcPort.Port, svcHasLocalHostNetEndPnt, false, netConfig)...)
 			}
 		}
 
@@ -700,11 +763,11 @@ func getGatewayIPTRules(service *kapi.Service, localEndpoints []string, svcHasLo
 							snatRulesCreated = true
 						}
 					} else {
-						rules = append(rules, getExternalIPTRules(svcPort, externalIP, "", svcHasLocalHostNetEndPnt, svcTypeIsETPLocal)...)
+						rules = append(rules, getExternalIPTRules(svcPort, externalIP, "", svcHasLocalHostNetEndPnt, svcTypeIsETPLocal, netConfig)...)
 					}
 				}
 				// case2 (see function description for details)
-				rules = append(rules, getExternalIPTRules(svcPort, externalIP, clusterIP, svcHasLocalHostNetEndPnt, false)...)
+				rules = append(rules, getExternalIPTRules(svcPort, externalIP, clusterIP, svcHasLocalHostNetEndPnt, false, netConfig)...)
 			}
 		}
 		if svcTypeIsITPLocal {

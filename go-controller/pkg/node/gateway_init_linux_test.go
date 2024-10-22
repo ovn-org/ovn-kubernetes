@@ -1262,6 +1262,9 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 			},
 		}
 		if util.IsNetworkSegmentationSupportEnabled() {
+			expectedTables["mangle"]["OVN-KUBE-UDN-MARK"] = []string{}
+			expectedTables["mangle"]["PREROUTING"] = append(expectedTables["mangle"]["PREROUTING"], "! -i ovn-k8s-mp0 -j OVN-KUBE-UDN-MARK")
+			expectedTables["mangle"]["OUTPUT"] = append(expectedTables["mangle"]["OUTPUT"], "-j OVN-KUBE-UDN-MARK")
 			expectedTables["nat"]["POSTROUTING"] = append(expectedTables["nat"]["POSTROUTING"],
 				"-j OVN-KUBE-UDN-MASQUERADE",
 			)

@@ -5,9 +5,10 @@ package node
 
 import (
 	"fmt"
-	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 	"net"
 	"strings"
+
+	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -30,6 +31,9 @@ func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net
 	if util.IsNetworkSegmentationSupportEnabled() {
 		if err := ensureChain("nat", iptableUDNMasqueradeChain); err != nil {
 			return nil, fmt.Errorf("failed to ensure chain %s in NAT table: %w", iptableUDNMasqueradeChain, err)
+		}
+		if err := ensureChain("mangle", iptableUDNMarkChain); err != nil {
+			return nil, fmt.Errorf("failed to ensure chain %s in mangle table: %w", iptableUDNMarkChain, err)
 		}
 	}
 	for _, hostSubnet := range hostSubnets {
