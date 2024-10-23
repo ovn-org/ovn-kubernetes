@@ -186,6 +186,8 @@ const (
 
 	// key for network name external-id
 	NetworkExternalID = OvnK8sPrefix + "/" + "network"
+	// key for node name external-id
+	NodeExternalID = OvnK8sPrefix + "/" + "node"
 	// key for network role external-id: possible values are "default", "primary", "secondary"
 	NetworkRoleExternalID = OvnK8sPrefix + "/" + "role"
 	// key for NAD name external-id, only used for secondary logical switch port of a pod
