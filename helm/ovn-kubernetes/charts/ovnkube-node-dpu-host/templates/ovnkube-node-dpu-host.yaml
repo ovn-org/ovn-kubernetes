@@ -90,6 +90,10 @@ spec:
         - mountPath: /var/run/netns
           name: host-netns
           mountPropagation: Bidirectional
+        - mountPath: /run/systemd/private
+          name: run-systemd
+          subPath: private
+          readOnly: true
         # ovnkube-node dpu-host mounts
         - mountPath: /var/run/ovn
           name: var-run-ovn
@@ -244,6 +248,9 @@ spec:
       - name: host-netns
         hostPath:
           path: /var/run/netns
+      - name: run-systemd
+        hostPath:
+          path: /run/systemd
       - name: var-run-ovn
         emptyDir: {}
       tolerations:
