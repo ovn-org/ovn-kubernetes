@@ -326,10 +326,6 @@ func (oc *DefaultNetworkController) syncDb() error {
 	return nil
 }
 
-func (oc *DefaultNetworkController) PreStart(ctx context.Context) error {
-	return nil
-}
-
 // Start starts the default controller; handles all events and creates all needed logical entities
 func (oc *DefaultNetworkController) Start(ctx context.Context) error {
 	klog.Infof("Starting the default network controller")

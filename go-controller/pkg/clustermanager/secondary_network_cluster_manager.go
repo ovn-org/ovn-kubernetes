@@ -64,10 +64,6 @@ func newSecondaryNetworkClusterManager(ovnClient *util.OVNClusterManagerClientse
 	return sncm, nil
 }
 
-func (sncm *secondaryNetworkClusterManager) PreStart() error {
-	return nil
-}
-
 func (sncm *secondaryNetworkClusterManager) SetNetworkStatusReporter(errorReporter NetworkStatusReporter) {
 	sncm.errorReporter = errorReporter
 }

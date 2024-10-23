@@ -61,10 +61,6 @@ func NewSecondaryNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, n
 	return snnc, nil
 }
 
-func (nc *SecondaryNodeNetworkController) PreStart(ctx context.Context) error {
-	return nil
-}
-
 // Start starts the default controller; handles all events and creates all needed logical entities
 func (nc *SecondaryNodeNetworkController) Start(ctx context.Context) error {
 	klog.Infof("Start secondary node network controller of network %s", nc.GetNetworkName())

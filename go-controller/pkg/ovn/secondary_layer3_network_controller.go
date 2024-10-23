@@ -428,10 +428,6 @@ func (oc *SecondaryLayer3NetworkController) newRetryFramework(
 	)
 }
 
-func (oc *SecondaryLayer3NetworkController) PreStart(ctx context.Context) error {
-	return nil
-}
-
 // Start starts the secondary layer3 controller, handles all events and creates all needed logical entities
 func (oc *SecondaryLayer3NetworkController) Start(ctx context.Context) error {
 	klog.Infof("Start secondary %s network controller of network %s", oc.TopologyType(), oc.GetNetworkName())
