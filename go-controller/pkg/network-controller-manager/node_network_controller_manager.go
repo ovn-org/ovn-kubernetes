@@ -36,7 +36,7 @@ type nodeNetworkControllerManager struct {
 	wg            *sync.WaitGroup
 	recorder      record.EventRecorder
 
-	defaultNodeNetworkController nad.BaseNetworkController
+	defaultNodeNetworkController *node.DefaultNodeNetworkController
 
 	// net-attach-def controller handle net-attach-def and create/delete secondary controllers
 	// nil in dpu-host mode
@@ -54,12 +54,8 @@ func (ncm *nodeNetworkControllerManager) NewNetworkController(nInfo util.NetInfo
 	topoType := nInfo.TopologyType()
 	switch topoType {
 	case ovntypes.Layer3Topology, ovntypes.Layer2Topology, ovntypes.LocalnetTopology:
-		dnnc, ok := ncm.defaultNodeNetworkController.(*node.DefaultNodeNetworkController)
-		if !ok {
-			return nil, fmt.Errorf("unable to dereference default node network controller object")
-		}
 		return node.NewSecondaryNodeNetworkController(ncm.newCommonNetworkControllerInfo(),
-			nInfo, ncm.vrfManager, ncm.ruleManager, dnnc.Gateway)
+			nInfo, ncm.vrfManager, ncm.ruleManager, ncm.defaultNodeNetworkController.Gateway)
 	}
 	return nil, fmt.Errorf("topology type %s not supported", topoType)
 }

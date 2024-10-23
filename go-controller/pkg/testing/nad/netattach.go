@@ -15,10 +15,6 @@ func (nc *FakeNetworkController) Start(ctx context.Context) error {
 	return nil
 }
 
-func (nc *FakeNetworkController) PreStart(ctx context.Context) error {
-	return nil
-}
-
 func (nc *FakeNetworkController) Stop() {}
 
 func (nc *FakeNetworkController) Cleanup() error {
@@ -40,9 +36,8 @@ type FakeNADController struct {
 	PrimaryNetworks map[string]util.NetInfo
 }
 
-func (nc *FakeNADController) PreStart() error { return nil }
-func (nc *FakeNADController) Start() error    { return nil }
-func (nc *FakeNADController) Stop()           {}
+func (nc *FakeNADController) Start() error { return nil }
+func (nc *FakeNADController) Stop()        {}
 func (nc *FakeNADController) GetActiveNetworkForNamespace(namespace string) (util.NetInfo, error) {
 	if primaryNetworks, ok := nc.PrimaryNetworks[namespace]; ok && primaryNetworks != nil {
 		return primaryNetworks, nil

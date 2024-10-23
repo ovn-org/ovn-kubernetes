@@ -344,10 +344,6 @@ func NewSecondaryLayer2NetworkController(cnci *CommonNetworkControllerInfo, netI
 	return oc, nil
 }
 
-func (oc *SecondaryLayer2NetworkController) PreStart(ctx context.Context) error {
-	return nil
-}
-
 // Start starts the secondary layer2 controller, handles all events and creates all needed logical entities
 func (oc *SecondaryLayer2NetworkController) Start(ctx context.Context) error {
 	klog.Infof("Starting controller for secondary network %s", oc.GetNetworkName())
