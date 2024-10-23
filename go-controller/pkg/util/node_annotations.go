@@ -143,7 +143,16 @@ const (
 	// default network and other layer3 secondary networks by cluster manager.
 	ovnNetworkIDs = "k8s.ovn.org/network-ids"
 
-	// InvalidID signifies its an invalid network id
+	// ovnUDNLayer2NodeGRLRPTunnelIDs is the constant string representing the tunnel id allocated for the
+	// UDN L2 network for this node's GR LRP by cluster manager. This is used to create the remote tunnel
+	// ports for each node.
+	// "k8s.ovn.org/udn-layer2-node-gateway-router-lrp-tunnel-ids": "{
+	//		"l2-network-a":"5",
+	//		"l2-network-b":"10"}
+	// }",
+	ovnUDNLayer2NodeGRLRPTunnelIDs = "k8s.ovn.org/udn-layer2-node-gateway-router-lrp-tunnel-ids"
+
+	// InvalidID signifies its an invalid network id or invalid tunnel id
 	InvalidID = -1
 )
 
@@ -526,6 +535,34 @@ func ParseNodeManagementPortMACAddresses(node *kapi.Node, netName string) (net.H
 		return nil, newAnnotationNotSetError("node %q has no %q annotation for network %s", node.Name, OvnNodeManagementPortMacAddresses, netName)
 	}
 	return net.ParseMAC(macAddress)
+}
+
+// ParseUDNLayer2NodeGRLRPTunnelIDs parses the 'ovnUDNLayer2NodeGRLRPTunnelIDs' annotation
+// for the specified network in 'netName' and returns the tunnelID.
+func ParseUDNLayer2NodeGRLRPTunnelIDs(node *kapi.Node, netName string) (int, error) {
+	tunnelIDsMap, err := parseNetworkMapAnnotation(node.Annotations, ovnUDNLayer2NodeGRLRPTunnelIDs)
+	if err != nil {
+		return InvalidID, err
+	}
+
+	tunnelID, ok := tunnelIDsMap[netName]
+	if !ok {
+		return InvalidID, newAnnotationNotSetError("node %q has no %q annotation for network %s", node.Name, ovnUDNLayer2NodeGRLRPTunnelIDs, netName)
+	}
+
+	return strconv.Atoi(tunnelID)
+}
+
+// UpdateUDNLayer2NodeGRLRPTunnelIDs updates the ovnUDNLayer2NodeGRLRPTunnelIDs annotation for the network name 'netName' with the tunnel id 'tunnelID'.
+// If 'tunnelID' is invalid tunnel ID (-1), then it deletes that network from the tunnel ids annotation.
+func UpdateUDNLayer2NodeGRLRPTunnelIDs(annotations map[string]string, netName string, tunnelID int) (map[string]string, error) {
+	if annotations == nil {
+		annotations = map[string]string{}
+	}
+	if err := updateNetworkAnnotation(annotations, netName, tunnelID, ovnUDNLayer2NodeGRLRPTunnelIDs); err != nil {
+		return nil, err
+	}
+	return annotations, nil
 }
 
 type primaryIfAddrAnnotation struct {

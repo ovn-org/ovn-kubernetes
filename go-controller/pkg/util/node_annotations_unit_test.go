@@ -826,3 +826,69 @@ func TestGetNetworkID(t *testing.T) {
 		})
 	}
 }
+
+func TestParseUDNLayer2NodeGRLRPTunnelIDs(t *testing.T) {
+	tests := []struct {
+		desc        string
+		inpNode     *v1.Node
+		inpNetName  string
+		res         int
+		errExpected bool
+	}{
+		{
+			desc:       "annotation not found for node and invalidID",
+			inpNode:    &v1.Node{},
+			inpNetName: "rednet",
+			res:        -1,
+		},
+		{
+			desc: "parse completed and validID",
+			inpNode: &v1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						"k8s.ovn.org/udn-layer2-node-gateway-router-lrp-tunnel-ids": `{"rednet":"5"}`,
+					},
+				},
+			},
+			inpNetName:  "rednet",
+			errExpected: false,
+			res:         5,
+		},
+		{
+			desc: "parse completed and invalid value",
+			inpNode: &v1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						"k8s.ovn.org/udn-layer2-node-gateway-router-lrp-tunnel-ids": `blah`,
+					},
+				},
+			},
+			errExpected: true,
+			inpNetName:  "rednet",
+			res:         -1,
+		},
+		{
+			desc: "multiple networks; parse completed and validID",
+			inpNode: &v1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						"k8s.ovn.org/udn-layer2-node-gateway-router-lrp-tunnel-ids": `{"rednet":"5", "bluenet":"8"}`,
+					},
+				},
+			},
+			inpNetName:  "bluenet",
+			errExpected: false,
+			res:         8,
+		},
+	}
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			res, err := ParseUDNLayer2NodeGRLRPTunnelIDs(tc.inpNode, tc.inpNetName)
+			if tc.errExpected {
+				t.Log(err)
+				assert.Error(t, err)
+			}
+			assert.Equal(t, tc.res, res)
+		})
+	}
+}
