@@ -170,10 +170,17 @@ export NUM_WORKER_NODES=3
 if [ "$SINGLE_NODE_CLUSTER" == true ]; then
 	export NUM_WORKER_NODES=1
 fi
+
+# Until we know how to make github actions gracefully terminate our tests, this
+# timeout needs to be lower than github's timeout. Otherwise github terminates
+# the job and doesn't give ginkgo a chance to print status so that we know why
+# the timeout happened.
+TEST_TIMEOUT=${TEST_TIMEOUT:-100m}
+
 ginkgo --nodes=${NUM_NODES} \
 	--focus=${FOCUS} \
 	--skip=${SKIPPED_TESTS} \
-	--timeout=3h \
+	--timeout=${TEST_TIMEOUT} \
 	--flake-attempts=${FLAKE_ATTEMPTS} \
 	/usr/local/bin/e2e.test \
 	-- \
