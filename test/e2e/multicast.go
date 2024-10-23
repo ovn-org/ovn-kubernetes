@@ -169,7 +169,7 @@ var _ = ginkgo.Describe("e2e IGMP validation", func() {
 	)
 	var (
 		tcpDumpCommand = []string{"bash", "-c",
-			fmt.Sprintf("apk update; apk add tcpdump ; tcpdump multicast > %s", tcpdumpFileName)}
+			fmt.Sprintf("apk update; apk add tcpdump ; tcpdump -i any igmp > %s", tcpdumpFileName)}
 		// Multicast group (-c 224.1.1.1), UDP (-u), TTL (-T 2), during (-t 3000) seconds, report every (-i 5) seconds
 		multicastSourceCommand = []string{"bash", "-c",
 			fmt.Sprintf("iperf -c %s -u -T 2 -t 3000 -i 5", mcastGroup)}
