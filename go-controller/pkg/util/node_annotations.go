@@ -154,6 +154,9 @@ const (
 
 	// InvalidID signifies its an invalid network id or invalid tunnel id
 	InvalidID = -1
+
+	// NoID signifies its an empty tunnel id (its reserved as un-usable when the allocator is created)
+	NoID = 0
 )
 
 type L3GatewayConfig struct {
