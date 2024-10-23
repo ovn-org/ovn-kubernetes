@@ -775,7 +775,7 @@ func TestGetNetworkID(t *testing.T) {
 			desc:              "with no nodes should return and error and invalid network ID",
 			netInfo:           newDummyNetInfo("rednamespace", "bluenet"),
 			expectedError:     fmt.Errorf("missing network id for network 'bluenet'"),
-			expectedNetworkID: InvalidNetworkID,
+			expectedNetworkID: InvalidID,
 		},
 		{
 			desc: "with bad network ID annotations should return and error and invalid network ID",
@@ -790,7 +790,7 @@ func TestGetNetworkID(t *testing.T) {
 			},
 			netInfo:           newDummyNetInfo("rednamespace", "bluenet"),
 			expectedError:     fmt.Errorf("could not parse"),
-			expectedNetworkID: InvalidNetworkID,
+			expectedNetworkID: InvalidID,
 		},
 		{
 			desc: "with multiple networks annotation should return expected network ID and no error",

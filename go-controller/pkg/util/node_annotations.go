@@ -143,8 +143,8 @@ const (
 	// default network and other layer3 secondary networks by cluster manager.
 	ovnNetworkIDs = "k8s.ovn.org/network-ids"
 
-	// invalidNetworkID signifies its an invalid network id
-	InvalidNetworkID = -1
+	// InvalidID signifies its an invalid network id
+	InvalidID = -1
 )
 
 type L3GatewayConfig struct {
@@ -1295,21 +1295,21 @@ func parseNetworkMapAnnotation(nodeAnnotations map[string]string, annotationName
 		return nil, newAnnotationNotSetError("could not find %q annotation", annotationName)
 	}
 
-	networkIdsStrMap := map[string]string{}
-	networkIds := make(map[string]string)
-	if err := json.Unmarshal([]byte(annotation), &networkIds); err != nil {
+	idsStrMap := map[string]string{}
+	ids := make(map[string]string)
+	if err := json.Unmarshal([]byte(annotation), &ids); err != nil {
 		return nil, fmt.Errorf("could not parse %q annotation %q : %v",
 			annotationName, annotation, err)
 	}
-	for netName, v := range networkIds {
-		networkIdsStrMap[netName] = v
+	for netName, v := range ids {
+		idsStrMap[netName] = v
 	}
 
-	if len(networkIdsStrMap) == 0 {
+	if len(idsStrMap) == 0 {
 		return nil, fmt.Errorf("unexpected empty %s annotation", annotationName)
 	}
 
-	return networkIdsStrMap, nil
+	return idsStrMap, nil
 }
 
 // ParseNetworkIDAnnotation parses the 'ovnNetworkIDs' annotation for the specified
@@ -1317,57 +1317,58 @@ func parseNetworkMapAnnotation(nodeAnnotations map[string]string, annotationName
 func ParseNetworkIDAnnotation(node *kapi.Node, netName string) (int, error) {
 	networkIDsMap, err := parseNetworkMapAnnotation(node.Annotations, ovnNetworkIDs)
 	if err != nil {
-		return InvalidNetworkID, err
+		return InvalidID, err
 	}
 
 	networkID, ok := networkIDsMap[netName]
 	if !ok {
-		return InvalidNetworkID, newAnnotationNotSetError("node %q has no %q annotation for network %s", node.Name, ovnNetworkIDs, netName)
+		return InvalidID, newAnnotationNotSetError("node %q has no %q annotation for network %s", node.Name, ovnNetworkIDs, netName)
 	}
 
 	return strconv.Atoi(networkID)
 }
 
-// updateNetworkIDsAnnotation updates the ovnNetworkIDs annotation in the 'annotations' map
-// with the provided network id in 'networkID'.  If 'networkID' is InvalidNetworkID (-1)
-// it deletes the ovnNetworkIDs annotation from the map.
-func updateNetworkIDsAnnotation(annotations map[string]string, netName string, networkID int) error {
+// updateNetworkAnnotation updates the provided annotationName in the 'annotations' map
+// with the provided ID in 'annotationName's value.  If 'id' is InvalidID (-1)
+// it deletes the annotationName annotation from the map.
+// It is currently used for ovnNetworkIDs annotation updates
+func updateNetworkAnnotation(annotations map[string]string, netName string, id int, annotationName string) error {
 	var bytes []byte
 
-	// First get the all network ids for all existing networks
-	networkIDsMap, err := parseNetworkMapAnnotation(annotations, ovnNetworkIDs)
+	// First get the all ids for all existing networks
+	idsMap, err := parseNetworkMapAnnotation(annotations, annotationName)
 	if err != nil {
 		if !IsAnnotationNotSetError(err) {
 			return fmt.Errorf("failed to parse node network id annotation %q: %v",
 				annotations, err)
 		}
 		// in the case that the annotation does not exist
-		networkIDsMap = map[string]string{}
+		idsMap = map[string]string{}
 	}
 
 	// add or delete network id of the specified network
-	if networkID == InvalidNetworkID {
-		delete(networkIDsMap, netName)
+	if id == InvalidID {
+		delete(idsMap, netName)
 	} else {
-		networkIDsMap[netName] = strconv.Itoa(networkID)
+		idsMap[netName] = strconv.Itoa(id)
 	}
 
-	// if no networks left, just delete the network ids annotation from node annotations.
-	if len(networkIDsMap) == 0 {
-		delete(annotations, ovnNetworkIDs)
+	// if no networks left, just delete the annotation from node annotations.
+	if len(idsMap) == 0 {
+		delete(annotations, annotationName)
 		return nil
 	}
 
 	// Marshal all network ids back to annotations.
-	networkIdsStrMap := make(map[string]string)
-	for n, id := range networkIDsMap {
-		networkIdsStrMap[n] = id
+	idsStrMap := make(map[string]string)
+	for n, id := range idsMap {
+		idsStrMap[n] = id
 	}
-	bytes, err = json.Marshal(networkIdsStrMap)
+	bytes, err = json.Marshal(idsStrMap)
 	if err != nil {
 		return err
 	}
-	annotations[ovnNetworkIDs] = string(bytes)
+	annotations[annotationName] = string(bytes)
 	return nil
 }
 
@@ -1377,7 +1378,7 @@ func UpdateNetworkIDAnnotation(annotations map[string]string, netName string, ne
 	if annotations == nil {
 		annotations = map[string]string{}
 	}
-	err := updateNetworkIDsAnnotation(annotations, netName, networkID)
+	err := updateNetworkAnnotation(annotations, netName, networkID, ovnNetworkIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -1446,11 +1447,11 @@ func GetNetworkID(nodes []*corev1.Node, nInfo BasicNetInfo) (int, error) {
 			if IsAnnotationNotSetError(err) {
 				continue
 			}
-			return InvalidNetworkID, err
+			return InvalidID, err
 		}
-		if networkID != InvalidNetworkID {
+		if networkID != InvalidID {
 			return networkID, nil
 		}
 	}
-	return InvalidNetworkID, fmt.Errorf("missing network id for network '%s'", nInfo.GetNetworkName())
+	return InvalidID, fmt.Errorf("missing network id for network '%s'", nInfo.GetNetworkName())
 }

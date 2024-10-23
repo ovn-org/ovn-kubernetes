@@ -413,8 +413,8 @@ func (na *NodeAllocator) Cleanup() error {
 		}
 
 		hostSubnetsMap := map[string][]*net.IPNet{networkName: nil}
-		// passing util.InvalidNetworkID deletes the network id annotation for the network.
-		err = na.updateNodeNetworkAnnotationsWithRetry(node.Name, hostSubnetsMap, util.InvalidNetworkID, nil)
+		// passing util.InvalidID deletes the network id annotation for the network.
+		err = na.updateNodeNetworkAnnotationsWithRetry(node.Name, hostSubnetsMap, util.InvalidID, nil)
 		if err != nil {
 			return fmt.Errorf("failed to clear node %q subnet annotation for network %s",
 				node.Name, networkName)
