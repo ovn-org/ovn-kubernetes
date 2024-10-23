@@ -295,13 +295,13 @@ func setOVSFlowTargets(node *kapi.Node) error {
 func setupOVNNode(node *kapi.Node) error {
 	var err error
 
-	encapIP := config.Default.EncapIP
+	encapIP := config.Default.EffectiveEncapIP
 	if encapIP == "" {
 		encapIP, err = util.GetNodePrimaryIP(node)
 		if err != nil {
 			return fmt.Errorf("failed to obtain local IP from node %q: %v", node.Name, err)
 		}
-		config.Default.EncapIP = encapIP
+		config.Default.EffectiveEncapIP = encapIP
 	} else {
 		// OVN allows `external_ids:ovn-encap-ip` to be a list of IPs separated by comma.
 		ovnEncapIps := strings.Split(encapIP, ",")
@@ -1376,11 +1376,11 @@ func (nc *DefaultNodeNetworkController) WatchNamespaces() error {
 // enough, it will return an error
 func (nc *DefaultNodeNetworkController) validateVTEPInterfaceMTU() error {
 	// OVN allows `external_ids:ovn-encap-ip` to be a list of IPs separated by comma
-	ovnEncapIps := strings.Split(config.Default.EncapIP, ",")
+	ovnEncapIps := strings.Split(config.Default.EffectiveEncapIP, ",")
 	for _, ip := range ovnEncapIps {
 		ovnEncapIP := net.ParseIP(strings.TrimSpace(ip))
 		if ovnEncapIP == nil {
-			return fmt.Errorf("invalid IP address %q in provided encap-ip setting %q", ovnEncapIP, config.Default.EncapIP)
+			return fmt.Errorf("invalid IP address %q in provided encap-ip setting %q", ovnEncapIP, config.Default.EffectiveEncapIP)
 		}
 		interfaceName, mtu, err := util.GetIFNameAndMTUForAddress(ovnEncapIP)
 		if err != nil {
