@@ -1638,6 +1638,7 @@ ovnkube-controller() {
     --metrics-bind-address ${ovnkube_master_metrics_bind_address} \
     --metrics-enable-pprof \
     --pidfile ${OVN_RUNDIR}/ovnkube-controller.pid \
+    --disable-udn-host-isolation \
     --zone ${ovn_zone} &
 
   echo "=============== ovnkube-controller ========== running"

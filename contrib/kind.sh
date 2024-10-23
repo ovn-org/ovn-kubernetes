@@ -748,7 +748,7 @@ create_kind_cluster() {
   jinjanate "${KIND_CONFIG}" -o "${KIND_CONFIG_LCL}"
 
   # Create KIND cluster. For additional debug, add '--verbosity <int>': 0 None .. 3 Debug
-  if kind get clusters | grep ovn; then
+  if kind get clusters | grep "${KIND_CLUSTER_NAME}"; then
     delete
   fi
   
