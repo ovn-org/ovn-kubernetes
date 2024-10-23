@@ -10,7 +10,6 @@ import (
 	nadclient "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/typed/k8s.cni.cncf.io/v1"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	kapi "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -159,14 +158,12 @@ var _ = Describe("Network Segmentation: services", func() {
 				// UDN -> UDN
 				By("Connect to the UDN service cluster IP from the UDN client pod on the same node")
 				checkConnectionToClusterIPs(f, udnClientPod, udnService, udnServerPod.Name)
+				By("Connect to the UDN service nodePort on all 3 nodes from the UDN client pod")
 				checkConnectionToNodePort(f, udnClientPod, udnService, &nodes.Items[0], "endpoint node", udnServerPod.Name)
 				// FIXME(dceara): Remove this check when Local Gateway external->service support is implemented.
 				if !IsGatewayModeLocal() {
-					// FIXME(kyrtapz): Remove once l2 external->svc is fixed. Client node is nodes.Items[0]
-					if netConfigParams.topology != types.Layer2Topology {
-						checkConnectionToNodePort(f, udnClientPod, udnService, &nodes.Items[1], "other node", udnServerPod.Name)
-						checkConnectionToNodePort(f, udnClientPod, udnService, &nodes.Items[2], "other node", udnServerPod.Name)
-					}
+					checkConnectionToNodePort(f, udnClientPod, udnService, &nodes.Items[1], "other node", udnServerPod.Name)
+					checkConnectionToNodePort(f, udnClientPod, udnService, &nodes.Items[2], "other node", udnServerPod.Name)
 				}
 
 				By(fmt.Sprintf("Creating a UDN client pod on a different node (%s)", clientNode))
@@ -179,11 +176,8 @@ var _ = Describe("Network Segmentation: services", func() {
 				checkConnectionToNodePort(f, udnClientPod2, udnService, &nodes.Items[1], "local node", udnServerPod.Name)
 				// FIXME(dceara): Remove this check when Local Gateway external->service support is implemented.
 				if !IsGatewayModeLocal() {
-					// FIXME(kyrtapz): Remove once l2 external->svc is fixed. Client node is nodes.Items[1]
-					if netConfigParams.topology != types.Layer2Topology {
-						checkConnectionToNodePort(f, udnClientPod2, udnService, &nodes.Items[0], "server node", udnServerPod.Name)
-						checkConnectionToNodePort(f, udnClientPod2, udnService, &nodes.Items[2], "other node", udnServerPod.Name)
-					}
+					checkConnectionToNodePort(f, udnClientPod2, udnService, &nodes.Items[0], "server node", udnServerPod.Name)
+					checkConnectionToNodePort(f, udnClientPod2, udnService, &nodes.Items[2], "other node", udnServerPod.Name)
 				}
 
 				// Default network -> UDN
@@ -207,11 +201,8 @@ var _ = Describe("Network Segmentation: services", func() {
 
 				// FIXME(dceara): Remove this check when Local Gateway external->service support is implemented.
 				if !IsGatewayModeLocal() {
-					// FIXME(kyrtapz): Remove once l2 external->svc is fixed
-					if netConfigParams.topology != types.Layer2Topology {
-						checkConnectionToNodePort(f, defaultClient, udnService, &nodes.Items[0], "server node", udnServerPod.Name)
-						checkConnectionToNodePort(f, defaultClient, udnService, &nodes.Items[2], "other node", udnServerPod.Name)
-					}
+					checkConnectionToNodePort(f, defaultClient, udnService, &nodes.Items[0], "server node", udnServerPod.Name)
+					checkConnectionToNodePort(f, defaultClient, udnService, &nodes.Items[2], "other node", udnServerPod.Name)
 				}
 
 				// UDN -> Default network
