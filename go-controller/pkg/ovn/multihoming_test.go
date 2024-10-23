@@ -84,6 +84,7 @@ type secondaryNetworkExpectationMachine struct {
 	pods                  []testPod
 	gatewayConfig         *util.L3GatewayConfig
 	isInterconnectCluster bool
+	hasClusterPortGroup   bool
 }
 
 func newSecondaryNetworkExpectationMachine(fakeOvn *FakeOVN, pods []testPod, opts ...option) *secondaryNetworkExpectationMachine {
@@ -107,6 +108,12 @@ func withGatewayConfig(config *util.L3GatewayConfig) option {
 func withInterconnectCluster() option {
 	return func(machine *secondaryNetworkExpectationMachine) {
 		machine.isInterconnectCluster = true
+	}
+}
+
+func withClusterPortGroup() option {
+	return func(machine *secondaryNetworkExpectationMachine) {
+		machine.hasClusterPortGroup = true
 	}
 }
 
@@ -268,6 +275,14 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPorts(is
 						"mcast_snoop":              "true",
 					},
 				})
+			}
+			if em.hasClusterPortGroup {
+				mgmtPortName := managementPortName(ocInfo.bnc.GetNetworkScopedName(nodeName))
+				mgmtPortUUID := mgmtPortName + "-UUID"
+
+				clusterPG := newNetworkClusterPortGroup(getNetworkControllerName(ocInfo.bnc.GetNetworkName()))
+				clusterPG.Ports = []string{mgmtPortUUID}
+				data = append(data, clusterPG)
 			}
 		}
 
