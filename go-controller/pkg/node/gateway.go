@@ -16,6 +16,8 @@ import (
 	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/selection"
+	"k8s.io/apimachinery/pkg/util/wait"
+	k8sretry "k8s.io/client-go/util/retry"
 
 	"github.com/safchain/ethtool"
 	kapi "k8s.io/api/core/v1"
@@ -33,7 +35,8 @@ type Gateway interface {
 	Start()
 	GetGatewayBridgeIface() string
 	SetDefaultGatewayBridgeMAC(addr net.HardwareAddr)
-	Reconcile() error
+	SetRoutingAdvertised(bool)
+	Reconcile()
 }
 
 type gateway struct {
@@ -55,6 +58,9 @@ type gateway struct {
 	watchFactory *factory.WatchFactory // used for retry
 	stopChan     <-chan struct{}
 	wg           *sync.WaitGroup
+	reconcile    chan struct{}
+
+	isRoutingAdvertised bool
 }
 
 func (g *gateway) AddService(svc *kapi.Service) error {
@@ -218,6 +224,7 @@ func (g *gateway) DeleteEndpointSlice(epSlice *discovery.EndpointSlice) error {
 func (g *gateway) Init(stopChan <-chan struct{}, wg *sync.WaitGroup) error {
 	g.stopChan = stopChan
 	g.wg = wg
+	g.reconcile = make(chan struct{}, 1)
 
 	var err error
 
@@ -255,6 +262,30 @@ func (g *gateway) Start() {
 		klog.Info("Spawning Conntrack Rule Check Thread")
 		g.openflowManager.Run(g.stopChan, g.wg)
 	}
+
+	g.wg.Add(1)
+	go func() {
+		defer g.wg.Done()
+		for {
+			select {
+			case <-g.stopChan:
+				return
+			case <-g.reconcile:
+				err := k8sretry.OnError(
+					wait.Backoff{
+						Duration: 10 * time.Millisecond,
+						Steps:    4,
+						Factor:   5.0,
+					},
+					func(error) bool { return true },
+					g.doReconcile,
+				)
+				if err != nil {
+					klog.Errorf("Failed to reconcile gateway: %v", err)
+				}
+			}
+		}
+	}()
 }
 
 // sets up an uplink interface for UDP Generic Receive Offload forwarding as part of
@@ -393,8 +424,19 @@ func (g *gateway) SetDefaultGatewayBridgeMAC(macAddr net.HardwareAddr) {
 	klog.Infof("Default gateway bridge MAC address updated to %s", macAddr)
 }
 
+func (g *gateway) SetRoutingAdvertised(isRoutingAdvertised bool) {
+	g.isRoutingAdvertised = isRoutingAdvertised
+}
+
 // Reconcile handles triggering updates to different components of a gateway, like OFM, Services
-func (g *gateway) Reconcile() error {
+func (g *gateway) Reconcile() {
+	select {
+	case g.reconcile <- struct{}{}:
+	default:
+	}
+}
+
+func (g *gateway) doReconcile() error {
 	klog.Info("Reconciling gateway with updates")
 	node, err := g.watchFactory.GetNode(g.nodeIPManager.nodeName)
 	if err != nil {
@@ -404,7 +446,11 @@ func (g *gateway) Reconcile() error {
 	if err != nil {
 		return fmt.Errorf("failed to get subnets for node: %s for OpenFlow cache update; err: %w", node.Name, err)
 	}
-	if err := g.openflowManager.updateBridgeFlowCache(subnets, g.nodeIPManager.ListAddresses()); err != nil {
+	if err := g.openflowManager.updateBridgeFlowCache(subnets, g.nodeIPManager.ListAddresses(), g.isRoutingAdvertised); err != nil {
+		return err
+	}
+	err = g.updateSNATRules()
+	if err != nil {
 		return err
 	}
 	// Services create OpenFlow flows as well, need to update them all
@@ -435,6 +481,23 @@ func (g *gateway) addAllServices() []error {
 	}
 	g.servicesRetryFramework.RequestRetryObjs()
 	return errs
+}
+
+func (g *gateway) updateSNATRules() error {
+	var ipnets []*net.IPNet
+	if g.nodeIPManager.mgmtPortConfig.ipv4 != nil {
+		ipnets = append(ipnets, g.nodeIPManager.mgmtPortConfig.ipv4.ifAddr)
+	}
+	if g.nodeIPManager.mgmtPortConfig.ipv6 != nil {
+		ipnets = append(ipnets, g.nodeIPManager.mgmtPortConfig.ipv6.ifAddr)
+	}
+	subnets := util.IPsToNetworkIPs(ipnets...)
+
+	if g.isRoutingAdvertised || config.Gateway.Mode != config.GatewayModeLocal {
+		return delLocalGatewayPodSubnetNATRules(subnets...)
+	}
+
+	return addLocalGatewayPodSubnetNATRules(subnets...)
 }
 
 type bridgeConfiguration struct {

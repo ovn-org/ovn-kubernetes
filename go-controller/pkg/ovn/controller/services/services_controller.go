@@ -63,7 +63,7 @@ func NewController(client clientset.Interface,
 	serviceInformer coreinformers.ServiceInformer,
 	endpointSliceInformer discoveryinformers.EndpointSliceInformer,
 	nodeInformer coreinformers.NodeInformer,
-	nadController networkAttachDefController.NADController,
+	networkManager networkAttachDefController.NetworkManager,
 	recorder record.EventRecorder,
 	netInfo util.NetInfo,
 ) (*Controller, error) {
@@ -83,7 +83,7 @@ func NewController(client clientset.Interface,
 		serviceLister:         serviceInformer.Lister(),
 		endpointSliceInformer: endpointSliceInformer,
 		endpointSliceLister:   endpointSliceInformer.Lister(),
-		nadController:         nadController,
+		networkManager:        networkManager,
 
 		eventRecorder: recorder,
 		repair:        newRepair(serviceInformer.Lister(), nbClient),
@@ -117,7 +117,7 @@ type Controller struct {
 	endpointSliceInformer discoveryinformers.EndpointSliceInformer
 	endpointSliceLister   discoverylisters.EndpointSliceLister
 
-	nadController networkAttachDefController.NADController
+	networkManager networkAttachDefController.NetworkManager
 
 	nodesSynced cache.InformerSynced
 
@@ -569,7 +569,7 @@ func (c *Controller) RequestFullSync(nodeInfos []nodeInfo) {
 // belong to the network that this service controller is responsible for.
 func (c *Controller) skipService(name, namespace string) bool {
 	if util.IsNetworkSegmentationSupportEnabled() {
-		serviceNetwork, err := c.nadController.GetActiveNetworkForNamespace(namespace)
+		serviceNetwork, err := c.networkManager.GetActiveNetworkForNamespace(namespace)
 		if err != nil {
 			utilruntime.HandleError(fmt.Errorf("failed to retrieve network for service %s/%s: %w",
 				namespace, name, err))

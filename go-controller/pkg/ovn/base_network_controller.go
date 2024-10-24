@@ -164,8 +164,8 @@ type BaseNetworkController struct {
 	// to the cluster router. Please see zone_interconnect/interconnect_handler.go for more details.
 	zoneICHandler *zoneic.ZoneInterconnectHandler
 
-	// nadController used for getting network information for UDNs
-	nadController nad.NADController
+	// networkManager used for getting network information for UDNs
+	networkManager nad.NetworkManager
 	// releasedPodsBeforeStartup tracks pods per NAD (map of NADs to pods UIDs)
 	// might have been already be released on startup
 	releasedPodsBeforeStartup  map[string]sets.Set[string]
@@ -189,6 +189,11 @@ type BaseSecondaryNetworkController struct {
 	netPolicyHandler *factory.Handler
 	// multi-network policy events factory handler
 	multiNetPolicyHandler *factory.Handler
+}
+
+func (oc *BaseSecondaryNetworkController) Reconcile(netInfo util.ReconcilableNetInfo) error {
+	oc.SetNADs(netInfo.GetNADs()...)
+	return nil
 }
 
 func getNetworkControllerName(netName string) string {
@@ -806,7 +811,7 @@ func (bnc *BaseNetworkController) isLocalZoneNode(node *kapi.Node) bool {
 
 // and is a wrapper around GetActiveNetworkForNamespace
 func (bnc *BaseNetworkController) getActiveNetworkForNamespace(namespace string) (util.NetInfo, error) {
-	return bnc.nadController.GetActiveNetworkForNamespace(namespace)
+	return bnc.networkManager.GetActiveNetworkForNamespace(namespace)
 }
 
 // GetNetworkRole returns the role of this controller's

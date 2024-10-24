@@ -592,7 +592,7 @@ func TestPodAllocator_reconcileForNAD(t *testing.T) {
 				}
 			}
 
-			nadController := &nad.FakeNADController{PrimaryNetworks: nadNetworks}
+			fakeNetworkManager := &nad.FakeNetworkManager{PrimaryNetworks: nadNetworks}
 
 			fakeRecorder := record.NewFakeRecorder(10)
 
@@ -608,7 +608,7 @@ func TestPodAllocator_reconcileForNAD(t *testing.T) {
 				releasedPodsMutex:      sync.Mutex{},
 				ipamClaimsReconciler:   ipamClaimsReconciler,
 				recorder:               fakeRecorder,
-				nadController:          nadController,
+				networkManager:         fakeNetworkManager,
 			}
 
 			var old, new *corev1.Pod

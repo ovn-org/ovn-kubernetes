@@ -110,6 +110,9 @@ var _ = Describe("OVN Multi-Homed pod operations", func() {
 					networkConfig, err := util.NewNetInfo(netInfo.netconf())
 					Expect(err).NotTo(HaveOccurred())
 
+					networkConfig.AddNADs(nad.Namespace + "/" + nad.Name)
+					fakeOvn.fakeNetworkManager.PrimaryNetworks = map[string]util.NetInfo{ns: networkConfig}
+
 					initialDB.NBData = append(
 						initialDB.NBData,
 						&nbdb.LogicalSwitch{
@@ -156,8 +159,6 @@ var _ = Describe("OVN Multi-Homed pod operations", func() {
 				_, ok := pod.Annotations[util.OvnPodAnnotationName]
 				Expect(ok).To(BeFalse())
 
-				Expect(fakeOvn.controller.nadController.Start()).NotTo(HaveOccurred())
-
 				Expect(fakeOvn.controller.WatchNamespaces()).NotTo(HaveOccurred())
 				Expect(fakeOvn.controller.WatchPods()).NotTo(HaveOccurred())
 				secondaryNetController, ok := fakeOvn.secondaryControllers[secondaryNetworkName]
@@ -167,12 +168,6 @@ var _ = Describe("OVN Multi-Homed pod operations", func() {
 				podInfo.populateSecondaryNetworkLogicalSwitchCache(fakeOvn, secondaryNetController)
 				Expect(secondaryNetController.bnc.WatchNodes()).To(Succeed())
 				Expect(secondaryNetController.bnc.WatchPods()).To(Succeed())
-
-				if netInfo.isPrimary {
-					ninfo, err := fakeOvn.nadController.GetActiveNetworkForNamespace(ns)
-					Expect(err).NotTo(HaveOccurred())
-					Expect(ninfo.GetNetworkName()).To(Equal(netInfo.netName))
-				}
 
 				// check that after start networks annotations and nbdb will be updated
 				Eventually(func() string {
@@ -260,10 +255,10 @@ var _ = Describe("OVN Multi-Homed pod operations", func() {
 				Expect(err).NotTo(HaveOccurred())
 
 				networkConfig.SetNADs(util.GetNADName(nad.Namespace, nad.Name))
-				nadController := &fakenad.FakeNADController{
+				fakeNetworkManager := &fakenad.FakeNetworkManager{
 					PrimaryNetworks: make(map[string]util.NetInfo),
 				}
-				nadController.PrimaryNetworks[ns] = networkConfig
+				fakeNetworkManager.PrimaryNetworks[ns] = networkConfig
 
 				const nodeIPv4CIDR = "192.168.126.202/24"
 				testNode, err := newNodeWithSecondaryNets(nodeName, nodeIPv4CIDR, netInfo)
@@ -318,8 +313,6 @@ var _ = Describe("OVN Multi-Homed pod operations", func() {
 				_, ok := pod.Annotations[util.OvnPodAnnotationName]
 				Expect(ok).To(BeFalse())
 
-				Expect(fakeOvn.controller.nadController.Start()).NotTo(HaveOccurred())
-
 				Expect(fakeOvn.controller.WatchNamespaces()).To(Succeed())
 				Expect(fakeOvn.controller.WatchPods()).To(Succeed())
 				secondaryNetController, ok := fakeOvn.secondaryControllers[secondaryNetworkName]
@@ -343,7 +336,7 @@ var _ = Describe("OVN Multi-Homed pod operations", func() {
 						&secondaryNetController.bnc.CommonNetworkControllerInfo,
 						networkConfig,
 						nodeName,
-						nadController,
+						fakeNetworkManager,
 					).Cleanup()).To(Succeed())
 				Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(defaultNetExpectations))
 
@@ -946,8 +939,8 @@ func standardNonDefaultNetworkExtIDsForLogicalSwitch(netInfo util.NetInfo) map[s
 	return externalIDs
 }
 
-func newSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netInfo util.NetInfo, nodeName string, nadController networkAttachDefController.NADController) *SecondaryLayer3NetworkController {
-	layer3NetworkController, err := NewSecondaryLayer3NetworkController(cnci, netInfo, nadController)
+func newSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netInfo util.NetInfo, nodeName string, networkManager networkAttachDefController.NetworkManager) *SecondaryLayer3NetworkController {
+	layer3NetworkController, err := NewSecondaryLayer3NetworkController(cnci, netInfo, networkManager)
 	Expect(err).NotTo(HaveOccurred())
 	layer3NetworkController.gatewayManagers.Store(
 		nodeName,

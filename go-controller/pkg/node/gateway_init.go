@@ -359,7 +359,7 @@ func (nc *DefaultNodeNetworkController) initGatewayPreStart(subnets []*net.IPNet
 	case config.GatewayModeLocal, config.GatewayModeShared:
 		klog.Info("Preparing Gateway")
 		gw, err = newGateway(nc.name, subnets, gatewayNextHops, gatewayIntf, egressGWInterface, ifAddrs, nodeAnnotator,
-			managementPortConfig, nc.Kube, nc.watchFactory, nc.routeManager, nc.nadController, config.Gateway.Mode)
+			managementPortConfig, nc.Kube, nc.watchFactory, nc.routeManager, nc.networkManager, config.Gateway.Mode)
 	case config.GatewayModeDisabled:
 		var chassisID string
 		klog.Info("Gateway Mode is disabled")
@@ -435,6 +435,7 @@ func (nc *DefaultNodeNetworkController) initGatewayMainStart(gw *gateway, waiter
 	if portClaimWatcher != nil {
 		gw.portClaimWatcher = portClaimWatcher
 	}
+	gw.isRoutingAdvertised = nc.isRoutingAdvertised()
 
 	initGwFunc := func() error {
 		return gw.Init(nc.stopChan, nc.wg)
@@ -529,7 +530,7 @@ func (nc *DefaultNodeNetworkController) initGatewayDPUHost(kubeNodeIP net.IP) er
 		if err := initSharedGatewayIPTables(); err != nil {
 			return err
 		}
-		gw.nodePortWatcherIptables = newNodePortWatcherIptables(nc.nadController)
+		gw.nodePortWatcherIptables = newNodePortWatcherIptables(nc.networkManager)
 		gw.loadBalancerHealthChecker = newLoadBalancerHealthChecker(nc.name, nc.watchFactory)
 		portClaimWatcher, err := newPortClaimWatcher(nc.recorder)
 		if err != nil {
@@ -602,9 +603,8 @@ func (nc *DefaultNodeNetworkController) updateGatewayMAC(link netlink.Link) erro
 	}
 	// MAC must have changed, update node
 	nc.Gateway.SetDefaultGatewayBridgeMAC(link.Attrs().HardwareAddr)
-	if err := nc.Gateway.Reconcile(); err != nil {
-		return fmt.Errorf("failed to reconcile gateway for MAC address update: %w", err)
-	}
+	nc.Gateway.Reconcile()
+
 	nodeAnnotator := kube.NewNodeAnnotator(nc.Kube, node.Name)
 	l3gwConf.MACAddress = link.Attrs().HardwareAddr
 	if err := util.SetL3GatewayConfig(nodeAnnotator, l3gwConf); err != nil {
