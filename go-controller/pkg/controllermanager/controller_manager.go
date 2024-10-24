@@ -20,6 +20,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/observability"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/routeimport"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -55,6 +56,8 @@ type ControllerManager struct {
 
 	// networkManager creates and deletes network controllers
 	networkManager networkmanager.Controller
+
+	routeImport routeimport.Controller
 }
 
 func (cm *ControllerManager) NewNetworkController(nInfo util.NetInfo) (networkmanager.NetworkController, error) {
@@ -218,6 +221,13 @@ func NewControllerManager(ovnClient *util.OVNClientset, wf *factory.WatchFactory
 		}
 	}
 
+	if util.IsRouteAdvertisementsEnabled() {
+		if !config.OVNKubernetesFeature.EnableInterconnect {
+			return nil, fmt.Errorf("RouteAdvertisements can only be used if Interconnect is enabled")
+		}
+		cm.routeImport = routeimport.New(config.Default.Zone, cm.nbClient)
+	}
+
 	return cm, nil
 }
 
@@ -297,7 +307,7 @@ func (cm *ControllerManager) initDefaultNetworkController(observManager *observa
 	if err != nil {
 		return fmt.Errorf("failed to create common network controller info: %w", err)
 	}
-	defaultController, err := ovn.NewDefaultNetworkController(cnci, observManager, cm.networkManager.Interface())
+	defaultController, err := ovn.NewDefaultNetworkController(cnci, observManager, cm.networkManager.Interface(), cm.routeImport)
 	if err != nil {
 		return err
 	}
@@ -417,6 +427,13 @@ func (cm *ControllerManager) Start(ctx context.Context) error {
 		}
 	}
 
+	if cm.routeImport != nil {
+		err = cm.routeImport.Start()
+		if err != nil {
+			return fmt.Errorf("failed to start route import: %v", err)
+		}
+	}
+
 	err = cm.defaultNetworkController.Start(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to start default network controller: %v", err)
@@ -438,5 +455,9 @@ func (cm *ControllerManager) Stop() {
 	// stop the NAD controller
 	if cm.networkManager != nil {
 		cm.networkManager.Stop()
+	}
+
+	if cm.routeImport != nil {
+		cm.routeImport.Stop()
 	}
 }
