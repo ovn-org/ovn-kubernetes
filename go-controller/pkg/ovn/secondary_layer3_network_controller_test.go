@@ -123,6 +123,7 @@ var _ = Describe("OVN Multi-Homed pod operations", func() {
 						&nbdb.LogicalRouterPort{
 							Name: fmt.Sprintf("rtos-%s_%s", netInfo.netName, nodeName),
 						},
+						newNetworkClusterPortGroup(getNetworkControllerName(netInfo.netName)),
 					)
 				}
 
@@ -187,6 +188,7 @@ var _ = Describe("OVN Multi-Homed pod operations", func() {
 					Expect(err).NotTo(HaveOccurred())
 					Expect(gwConfig.NextHops).NotTo(BeEmpty())
 					expectationOptions = append(expectationOptions, withGatewayConfig(gwConfig))
+					expectationOptions = append(expectationOptions, withClusterPortGroup())
 				}
 				Eventually(fakeOvn.nbClient).Should(
 					libovsdbtest.HaveData(
@@ -285,6 +287,9 @@ var _ = Describe("OVN Multi-Homed pod operations", func() {
 					initialDB.NBData = append(
 						initialDB.NBData,
 						expectedLayer3EgressEntities(networkConfig, *gwConfig, ovntest.MustParseIPNet(netInfo.hostsubnets))...)
+					initialDB.NBData = append(initialDB.NBData,
+						newNetworkClusterPortGroup(getNetworkControllerName(netInfo.netName)),
+					)
 				}
 				initialDB.NBData = append(initialDB.NBData, nbZone)
 

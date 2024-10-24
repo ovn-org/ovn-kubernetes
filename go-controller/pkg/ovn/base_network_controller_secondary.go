@@ -333,10 +333,13 @@ func (bsnc *BaseSecondaryNetworkController) addLogicalPortToNetworkForNAD(pod *k
 			return err
 		}
 	}
-
-	if bsnc.doesNetworkRequireIPAM() && util.IsMultiNetworkPoliciesSupportEnabled() {
+	if bsnc.doesNetworkRequireIPAM() && (util.IsMultiNetworkPoliciesSupportEnabled() || bsnc.multicastSupport) {
 		// Ensure the namespace/nsInfo exists
-		addOps, err := bsnc.addPodToNamespaceForSecondaryNetwork(pod.Namespace, podAnnotation.IPs)
+		portUUID := ""
+		if lsp != nil {
+			portUUID = lsp.UUID
+		}
+		addOps, err := bsnc.addPodToNamespaceForSecondaryNetwork(pod.Namespace, podAnnotation.IPs, portUUID)
 		if err != nil {
 			return err
 		}
@@ -635,8 +638,7 @@ func (bsnc *BaseSecondaryNetworkController) syncPodsForSecondaryNetwork(pods []i
 }
 
 // addPodToNamespaceForSecondaryNetwork returns the ops needed to add pod's IP to the namespace's address set.
-func (bsnc *BaseSecondaryNetworkController) addPodToNamespaceForSecondaryNetwork(ns string, ips []*net.IPNet) ([]ovsdb.Operation, error) {
-	var ops []ovsdb.Operation
+func (bsnc *BaseSecondaryNetworkController) addPodToNamespaceForSecondaryNetwork(ns string, ips []*net.IPNet, portUUID string) ([]ovsdb.Operation, error) {
 	var err error
 	nsInfo, nsUnlock, err := bsnc.ensureNamespaceLockedForSecondaryNetwork(ns, true, nil)
 	if err != nil {
@@ -645,11 +647,7 @@ func (bsnc *BaseSecondaryNetworkController) addPodToNamespaceForSecondaryNetwork
 
 	defer nsUnlock()
 
-	if ops, err = nsInfo.addressSet.AddAddressesReturnOps(util.IPNetsIPToStringSlice(ips)); err != nil {
-		return nil, err
-	}
-
-	return ops, nil
+	return bsnc.addLocalPodToNamespaceLocked(nsInfo, ips, portUUID)
 }
 
 // AddNamespaceForSecondaryNetwork creates corresponding addressset in ovn db for secondary network

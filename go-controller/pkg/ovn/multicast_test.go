@@ -16,6 +16,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
+	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -53,9 +54,9 @@ func setIpMode(m ipMode) {
 	config.IPv6Mode = m.IPv6Mode
 }
 
-func getMulticastDefaultExpectedData(clusterPortGroup, clusterRtrPortGroup *nbdb.PortGroup) []libovsdb.TestData {
+func getMulticastExpectedDataForNetwork(netControllerName string, clusterPortGroup, clusterRtrPortGroup *nbdb.PortGroup) []libovsdb.TestData {
 	match := getMulticastACLMatch()
-	aclIDs := getDefaultMcastACLDbIDs(mcastDefaultDenyID, libovsdbutil.ACLEgress, DefaultNetworkControllerName)
+	aclIDs := getDefaultMcastACLDbIDs(mcastDefaultDenyID, libovsdbutil.ACLEgress, netControllerName)
 	aclName := libovsdbutil.GetACLName(aclIDs)
 	defaultDenyEgressACL := libovsdbops.BuildACL(
 		aclName,
@@ -74,7 +75,7 @@ func getMulticastDefaultExpectedData(clusterPortGroup, clusterRtrPortGroup *nbdb
 	)
 	defaultDenyEgressACL.UUID = "defaultDenyEgressACL_UUID"
 
-	aclIDs = getDefaultMcastACLDbIDs(mcastDefaultDenyID, libovsdbutil.ACLIngress, DefaultNetworkControllerName)
+	aclIDs = getDefaultMcastACLDbIDs(mcastDefaultDenyID, libovsdbutil.ACLIngress, netControllerName)
 	aclName = libovsdbutil.GetACLName(aclIDs)
 	defaultDenyIngressACL := libovsdbops.BuildACL(
 		aclName,
@@ -92,7 +93,7 @@ func getMulticastDefaultExpectedData(clusterPortGroup, clusterRtrPortGroup *nbdb
 	defaultDenyIngressACL.UUID = "defaultDenyIngressACL_UUID"
 	clusterPortGroup.ACLs = []string{defaultDenyEgressACL.UUID, defaultDenyIngressACL.UUID}
 
-	aclIDs = getDefaultMcastACLDbIDs(mcastAllowInterNodeID, libovsdbutil.ACLEgress, DefaultNetworkControllerName)
+	aclIDs = getDefaultMcastACLDbIDs(mcastAllowInterNodeID, libovsdbutil.ACLEgress, netControllerName)
 	aclName = libovsdbutil.GetACLName(aclIDs)
 	egressMatch := libovsdbutil.GetACLMatch(clusterRtrPortGroup.Name, match, libovsdbutil.ACLEgress)
 	defaultAllowEgressACL := libovsdbops.BuildACL(
@@ -112,7 +113,7 @@ func getMulticastDefaultExpectedData(clusterPortGroup, clusterRtrPortGroup *nbdb
 	)
 	defaultAllowEgressACL.UUID = "defaultAllowEgressACL_UUID"
 
-	aclIDs = getDefaultMcastACLDbIDs(mcastAllowInterNodeID, libovsdbutil.ACLIngress, DefaultNetworkControllerName)
+	aclIDs = getDefaultMcastACLDbIDs(mcastAllowInterNodeID, libovsdbutil.ACLIngress, netControllerName)
 	aclName = libovsdbutil.GetACLName(aclIDs)
 	ingressMatch := libovsdbutil.GetACLMatch(clusterRtrPortGroup.Name, match, libovsdbutil.ACLIngress)
 	defaultAllowIngressACL := libovsdbops.BuildACL(
@@ -140,8 +141,8 @@ func getMulticastDefaultExpectedData(clusterPortGroup, clusterRtrPortGroup *nbdb
 	}
 }
 
-func getMulticastDefaultStaleData(clusterPortGroup, clusterRtrPortGroup *nbdb.PortGroup) []libovsdb.TestData {
-	testData := getMulticastDefaultExpectedData(clusterPortGroup, clusterRtrPortGroup)
+func getMulticastStaleDataForNetwork(netControllerName string, clusterPortGroup, clusterRtrPortGroup *nbdb.PortGroup) []libovsdb.TestData {
+	testData := getMulticastExpectedDataForNetwork(netControllerName, clusterPortGroup, clusterRtrPortGroup)
 	defaultDenyIngressACL := testData[0].(*nbdb.ACL)
 	newName := libovsdbutil.JoinACLName(types.ClusterPortGroupNameBase, "DefaultDenyMulticastIngress")
 	defaultDenyIngressACL.Name = &newName
@@ -172,22 +173,19 @@ func getMulticastDefaultStaleData(clusterPortGroup, clusterRtrPortGroup *nbdb.Po
 	}
 }
 
-func getDefaultPortGroups() (clusterPortGroup, clusterRtrPortGroup *nbdb.PortGroup) {
-	clusterPortGroup = newClusterPortGroup()
-	clusterRtrPortGroup = newRouterPortGroup()
-	return
-}
-
 func getMulticastPolicyExpectedData(ns string, ports []string) []libovsdb.TestData {
-	fakeController := getFakeController(DefaultNetworkControllerName)
+	return getMulticastPolicyExpectedDataForNetwork(DefaultNetworkControllerName, ns, ports)
+}
+func getMulticastPolicyExpectedDataForNetwork(netControllerName string, ns string, ports []string) []libovsdb.TestData {
+	fakeController := getFakeController(netControllerName)
 	pg_hash := fakeController.getNamespacePortGroupName(ns)
 	egressMatch := libovsdbutil.GetACLMatch(pg_hash, fakeController.getMulticastACLEgrMatch(), libovsdbutil.ACLEgress)
 
-	ip4AddressSet, ip6AddressSet := getNsAddrSetHashNames(ns)
+	ip4AddressSet, ip6AddressSet := getNsAddrSetHashNamesForNetwork(netControllerName, ns)
 	mcastMatch := getACLMatchAF(getMulticastACLIgrMatchV4(ip4AddressSet), getMulticastACLIgrMatchV6(ip6AddressSet), config.IPv4Mode, config.IPv6Mode)
 	ingressMatch := libovsdbutil.GetACLMatch(pg_hash, mcastMatch, libovsdbutil.ACLIngress)
 
-	aclIDs := getNamespaceMcastACLDbIDs(ns, libovsdbutil.ACLEgress, DefaultNetworkControllerName)
+	aclIDs := getNamespaceMcastACLDbIDs(ns, libovsdbutil.ACLEgress, netControllerName)
 	aclName := libovsdbutil.GetACLName(aclIDs)
 	egressACL := libovsdbops.BuildACL(
 		aclName,
@@ -206,7 +204,7 @@ func getMulticastPolicyExpectedData(ns string, ports []string) []libovsdb.TestDa
 	)
 	egressACL.UUID = ns + "mc-egress-UUID"
 
-	aclIDs = getNamespaceMcastACLDbIDs(ns, libovsdbutil.ACLIngress, DefaultNetworkControllerName)
+	aclIDs = getNamespaceMcastACLDbIDs(ns, libovsdbutil.ACLIngress, netControllerName)
 	aclName = libovsdbutil.GetACLName(aclIDs)
 	ingressACL := libovsdbops.BuildACL(
 		aclName,
@@ -250,8 +248,8 @@ func getNamespacePG(ns, controllerName string) *nbdb.PortGroup {
 	return pg
 }
 
-func getMulticastPolicyStaleData(ns string, ports []string) []libovsdb.TestData {
-	testData := getMulticastPolicyExpectedData(ns, ports)
+func getMulticastPolicyStaleDataForNetwork(netControllerName string, ns string, ports []string) []libovsdb.TestData {
+	testData := getMulticastPolicyExpectedDataForNetwork(netControllerName, ns, ports)
 
 	egressACL := testData[0].(*nbdb.ACL)
 	newName := libovsdbutil.JoinACLName(ns, "MulticastAllowEgress")
@@ -324,6 +322,157 @@ func updateMulticast(fakeOvn *FakeOVN, ns *v1.Namespace, enable bool) {
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 }
 
+func startBaseNetworkController(fakeOvn *FakeOVN, netInfo util.NetInfo, nad *nadapi.NetworkAttachmentDefinition) *BaseNetworkController {
+	if nad != nil {
+		gomega.Expect(fakeOvn.NewSecondaryNetworkController(nad)).To(gomega.Succeed())
+		controller, ok := fakeOvn.secondaryControllers[netInfo.GetNetworkName()]
+		gomega.Expect(ok).To(gomega.BeTrue())
+		return &controller.bnc.BaseNetworkController
+	} else {
+		return &fakeOvn.controller.BaseNetworkController
+	}
+}
+
+func testDefaultMulticastACLCreation(fakeOvn *FakeOVN, netControllerName string, netInfo util.NetInfo, nad *nadapi.NetworkAttachmentDefinition) {
+	clusterPortGroup := newNetworkClusterPortGroup(netControllerName)
+	clusterRtrPortGroup := newNetworkRouterPortGroup(netControllerName)
+	fakeOvn.startWithDBSetup(libovsdb.TestSetup{
+		NBData: []libovsdb.TestData{
+			clusterPortGroup,
+			clusterRtrPortGroup,
+		},
+	})
+	bnc := startBaseNetworkController(fakeOvn, netInfo, nad)
+
+	gomega.Expect(bnc.createDefaultDenyMulticastPolicy()).To(gomega.Succeed())
+	gomega.Expect(bnc.createDefaultAllowMulticastPolicy()).To(gomega.Succeed())
+
+	gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(
+		getMulticastExpectedDataForNetwork(netControllerName, clusterPortGroup, clusterRtrPortGroup)))
+}
+
+func testUpdateStaleDefaultMulticastACLs(fakeOvn *FakeOVN, netControllerName string, netInfo util.NetInfo, nad *nadapi.NetworkAttachmentDefinition) {
+	// start with stale ACLs
+	clusterPortGroup := newNetworkClusterPortGroup(netControllerName)
+	clusterRtrPortGroup := newNetworkRouterPortGroup(netControllerName)
+	fakeOvn.startWithDBSetup(libovsdb.TestSetup{
+		NBData: getMulticastStaleDataForNetwork(netControllerName, clusterPortGroup, clusterRtrPortGroup),
+	})
+	bnc := startBaseNetworkController(fakeOvn, netInfo, nad)
+
+	gomega.Expect(bnc.createDefaultDenyMulticastPolicy()).To(gomega.Succeed())
+	gomega.Expect(bnc.createDefaultAllowMulticastPolicy()).To(gomega.Succeed())
+
+	// check acls are updated
+	gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(
+		getMulticastExpectedDataForNetwork(netControllerName, clusterPortGroup, clusterRtrPortGroup)))
+}
+
+func testCleanupMulticastResourcesOnDisable(fakeOvn *FakeOVN, netControllerName string, netInfo util.NetInfo, nad *nadapi.NetworkAttachmentDefinition) {
+	nsName := "namespace1"
+	clusterPortGroup := newNetworkClusterPortGroup(netControllerName)
+	clusterRtrPortGroup := newNetworkRouterPortGroup(netControllerName)
+	initialData := getMulticastExpectedDataForNetwork(netControllerName, clusterPortGroup, clusterRtrPortGroup)
+
+	nsData := getMulticastPolicyExpectedDataForNetwork(netControllerName, nsName, nil)
+	initialData = append(initialData, nsData...)
+	// namespace is still present, but multicast support is disabled
+	namespace1 := *newNamespace(nsName)
+	fakeOvn.startWithDBSetup(libovsdb.TestSetup{NBData: initialData},
+		&v1.NamespaceList{
+			Items: []v1.Namespace{
+				namespace1,
+			},
+		},
+	)
+	bnc := startBaseNetworkController(fakeOvn, netInfo, nad)
+
+	// this "if !oc.multicastSupport" part of SetupMaster
+	gomega.Expect(bnc.disableMulticast()).To(gomega.Succeed())
+	// check acls are deleted when multicast is disabled
+	clusterPortGroup = newNetworkClusterPortGroup(netControllerName)
+	clusterRtrPortGroup = newNetworkRouterPortGroup(netControllerName)
+	namespacePortGroup := getNamespacePG(nsName, netControllerName)
+	expectedData := []libovsdb.TestData{
+		clusterPortGroup,
+		clusterRtrPortGroup,
+		namespacePortGroup,
+	}
+	gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedData))
+}
+
+func testCreateNamespaceMulticastACLs(fakeOvn *FakeOVN, netControllerName string, netInfo util.NetInfo, nad *nadapi.NetworkAttachmentDefinition) {
+	nsName := "namespace1"
+	clusterPortGroup := newNetworkClusterPortGroup(netControllerName)
+	clusterRtrPortGroup := newNetworkRouterPortGroup(netControllerName)
+	expectedData := getMulticastExpectedDataForNetwork(netControllerName, clusterPortGroup, clusterRtrPortGroup)
+	// namespace exists, but multicast acls do not
+	namespace1 := *newNamespace(nsName)
+	namespace1.Annotations[util.NsMulticastAnnotation] = "true"
+	fakeOvn.startWithDBSetup(libovsdb.TestSetup{NBData: expectedData},
+		&v1.NamespaceList{
+			Items: []v1.Namespace{
+				namespace1,
+			},
+		},
+	)
+	bnc := startBaseNetworkController(fakeOvn, netInfo, nad)
+
+	gomega.Expect(bnc.WatchNamespaces()).To(gomega.Succeed())
+	expectedData = append(expectedData, getMulticastPolicyExpectedDataForNetwork(netControllerName, nsName, nil)...)
+	gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedData))
+}
+
+func testUpdateStaleNamespaceMulticastACLs(fakeOvn *FakeOVN, netControllerName string, netInfo util.NetInfo, nad *nadapi.NetworkAttachmentDefinition) {
+	// start with stale ACLs for existing namespace
+	nsName := "namespace1"
+	clusterPortGroup := newNetworkClusterPortGroup(netControllerName)
+	clusterRtrPortGroup := newNetworkRouterPortGroup(netControllerName)
+	expectedData := getMulticastExpectedDataForNetwork(netControllerName, clusterPortGroup, clusterRtrPortGroup)
+	expectedData = append(expectedData, getMulticastPolicyStaleDataForNetwork(netControllerName, nsName, nil)...)
+	namespace1 := *newNamespace(nsName)
+	namespace1.Annotations[util.NsMulticastAnnotation] = "true"
+	fakeOvn.startWithDBSetup(libovsdb.TestSetup{NBData: expectedData},
+		&v1.NamespaceList{
+			Items: []v1.Namespace{
+				namespace1,
+			},
+		},
+	)
+	bnc := startBaseNetworkController(fakeOvn, netInfo, nad)
+
+	gomega.Expect(bnc.WatchNamespaces()).To(gomega.Succeed())
+	expectedData = getMulticastExpectedDataForNetwork(netControllerName, clusterPortGroup, clusterRtrPortGroup)
+	expectedData = append(expectedData, getMulticastPolicyExpectedDataForNetwork(netControllerName, nsName, nil)...)
+	gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedData))
+}
+
+func testCleanupNamespaceMulticastACLs(fakeOvn *FakeOVN, netControllerName string, netInfo util.NetInfo, nad *nadapi.NetworkAttachmentDefinition) {
+	nsName := "namespace1"
+
+	// start with stale ACLs
+	clusterPortGroup := newNetworkClusterPortGroup(netControllerName)
+	clusterRtrPortGroup := newNetworkRouterPortGroup(netControllerName)
+	defaultMulticastData := getMulticastExpectedDataForNetwork(netControllerName, clusterPortGroup, clusterRtrPortGroup)
+	namespaceMulticastData := getMulticastPolicyExpectedDataForNetwork(netControllerName, nsName, nil)
+	namespace1 := *newNamespace(nsName)
+
+	fakeOvn.startWithDBSetup(libovsdb.TestSetup{NBData: append(defaultMulticastData, namespaceMulticastData...)},
+		&v1.NamespaceList{
+			Items: []v1.Namespace{
+				namespace1,
+			},
+		},
+	)
+	bnc := startBaseNetworkController(fakeOvn, netInfo, nad)
+
+	gomega.Expect(bnc.WatchNamespaces()).To(gomega.Succeed())
+	// only namespaced acls should be dereferenced, default acls will stay
+	namespacePortGroup := getNamespacePG(nsName, netControllerName)
+	expectedData := append(defaultMulticastData, namespacePortGroup)
+	gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedData))
+}
+
 var _ = ginkgo.Describe("OVN Multicast with IP Address Family", func() {
 	const (
 		namespaceName1 = "namespace1"
@@ -362,21 +511,7 @@ var _ = ginkgo.Describe("OVN Multicast with IP Address Family", func() {
 	ginkgo.Context("on startup", func() {
 		ginkgo.It("creates default Multicast ACLs", func() {
 			app.Action = func(ctx *cli.Context) error {
-				clusterPortGroup, clusterRtrPortGroup := getDefaultPortGroups()
-				fakeOvn.startWithDBSetup(libovsdb.TestSetup{
-					NBData: []libovsdb.TestData{
-						clusterPortGroup,
-						clusterRtrPortGroup,
-					},
-				})
-				// this is "if oc.multicastSupport" part of SetupMaster
-				err := fakeOvn.controller.createDefaultDenyMulticastPolicy()
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				err = fakeOvn.controller.createDefaultAllowMulticastPolicy()
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(
-					getMulticastDefaultExpectedData(clusterPortGroup, clusterRtrPortGroup)))
+				testDefaultMulticastACLCreation(fakeOvn, DefaultNetworkControllerName, &util.DefaultNetInfo{}, nil)
 				return nil
 			}
 			err := app.Run([]string{app.Name})
@@ -384,19 +519,7 @@ var _ = ginkgo.Describe("OVN Multicast with IP Address Family", func() {
 		})
 		ginkgo.It("updates stale default Multicast ACLs", func() {
 			app.Action = func(ctx *cli.Context) error {
-				// start with stale ACLs
-				clusterPortGroup, clusterRtrPortGroup := getDefaultPortGroups()
-				fakeOvn.startWithDBSetup(libovsdb.TestSetup{
-					NBData: getMulticastDefaultStaleData(clusterPortGroup, clusterRtrPortGroup),
-				})
-				// this is "if oc.multicastSupport" part of SetupMaster
-				err := fakeOvn.controller.createDefaultDenyMulticastPolicy()
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				err = fakeOvn.controller.createDefaultAllowMulticastPolicy()
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				// check acls are updated
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(
-					getMulticastDefaultExpectedData(clusterPortGroup, clusterRtrPortGroup)))
+				testUpdateStaleDefaultMulticastACLs(fakeOvn, DefaultNetworkControllerName, &util.DefaultNetInfo{}, nil)
 				return nil
 			}
 			err := app.Run([]string{app.Name})
@@ -404,32 +527,7 @@ var _ = ginkgo.Describe("OVN Multicast with IP Address Family", func() {
 		})
 		ginkgo.It("cleans up Multicast resources when multicast is disabled", func() {
 			app.Action = func(ctx *cli.Context) error {
-				clusterPortGroup, clusterRtrPortGroup := getDefaultPortGroups()
-				initialData := getMulticastDefaultExpectedData(clusterPortGroup, clusterRtrPortGroup)
-
-				nsData := getMulticastPolicyExpectedData(namespaceName1, nil)
-				initialData = append(initialData, nsData...)
-				// namespace is still present, but multicast support is disabled
-				namespace1 := *newNamespace(namespaceName1)
-				fakeOvn.startWithDBSetup(libovsdb.TestSetup{NBData: initialData},
-					&v1.NamespaceList{
-						Items: []v1.Namespace{
-							namespace1,
-						},
-					},
-				)
-				// this "if !oc.multicastSupport" part of SetupMaster
-				err := fakeOvn.controller.disableMulticast()
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				// check acls are deleted when multicast is disabled
-				clusterPortGroup, clusterRtrPortGroup = getDefaultPortGroups()
-				namespacePortGroup := getNamespacePG(namespaceName1, fakeOvn.controller.controllerName)
-				expectedData := []libovsdb.TestData{
-					clusterPortGroup,
-					clusterRtrPortGroup,
-					namespacePortGroup,
-				}
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedData))
+				testCleanupMulticastResourcesOnDisable(fakeOvn, DefaultNetworkControllerName, &util.DefaultNetInfo{}, nil)
 				return nil
 			}
 			err := app.Run([]string{app.Name})
@@ -437,22 +535,7 @@ var _ = ginkgo.Describe("OVN Multicast with IP Address Family", func() {
 		})
 		ginkgo.It("creates namespace Multicast ACLs", func() {
 			app.Action = func(ctx *cli.Context) error {
-				clusterPortGroup, clusterRtrPortGroup := getDefaultPortGroups()
-				expectedData := getMulticastDefaultExpectedData(clusterPortGroup, clusterRtrPortGroup)
-				// namespace exists, but multicast acls do not
-				namespace1 := *newNamespace(namespaceName1)
-				namespace1.Annotations[util.NsMulticastAnnotation] = "true"
-				fakeOvn.startWithDBSetup(libovsdb.TestSetup{NBData: expectedData},
-					&v1.NamespaceList{
-						Items: []v1.Namespace{
-							namespace1,
-						},
-					},
-				)
-				err := fakeOvn.controller.WatchNamespaces()
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				expectedData = append(expectedData, getMulticastPolicyExpectedData(namespaceName1, nil)...)
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedData))
+				testCreateNamespaceMulticastACLs(fakeOvn, DefaultNetworkControllerName, &util.DefaultNetInfo{}, nil)
 				return nil
 			}
 			err := app.Run([]string{app.Name})
@@ -460,26 +543,7 @@ var _ = ginkgo.Describe("OVN Multicast with IP Address Family", func() {
 		})
 		ginkgo.It("updates stale namespace Multicast ACLs", func() {
 			app.Action = func(ctx *cli.Context) error {
-				// start with stale ACLs for existing namespace
-				clusterPortGroup, clusterRtrPortGroup := getDefaultPortGroups()
-				expectedData := getMulticastDefaultExpectedData(clusterPortGroup, clusterRtrPortGroup)
-				expectedData = append(expectedData, getMulticastPolicyStaleData(namespaceName1, nil)...)
-				namespace1 := *newNamespace(namespaceName1)
-				namespace1.Annotations[util.NsMulticastAnnotation] = "true"
-				fakeOvn.startWithDBSetup(libovsdb.TestSetup{NBData: expectedData},
-					&v1.NamespaceList{
-						Items: []v1.Namespace{
-							namespace1,
-						},
-					},
-				)
-
-				err := fakeOvn.controller.WatchNamespaces()
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-				expectedData = getMulticastDefaultExpectedData(clusterPortGroup, clusterRtrPortGroup)
-				expectedData = append(expectedData, getMulticastPolicyExpectedData(namespaceName1, nil)...)
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedData))
+				testUpdateStaleNamespaceMulticastACLs(fakeOvn, DefaultNetworkControllerName, &util.DefaultNetInfo{}, nil)
 				return nil
 			}
 
@@ -488,26 +552,7 @@ var _ = ginkgo.Describe("OVN Multicast with IP Address Family", func() {
 		})
 		ginkgo.It("cleans up namespace Multicast ACLs when multicast is disabled for namespace", func() {
 			app.Action = func(ctx *cli.Context) error {
-				// start with stale ACLs
-				clusterPortGroup, clusterRtrPortGroup := getDefaultPortGroups()
-				defaultMulticastData := getMulticastDefaultExpectedData(clusterPortGroup, clusterRtrPortGroup)
-				namespaceMulticastData := getMulticastPolicyExpectedData(namespaceName1, nil)
-				namespace1 := *newNamespace(namespaceName1)
-
-				fakeOvn.startWithDBSetup(libovsdb.TestSetup{NBData: append(defaultMulticastData, namespaceMulticastData...)},
-					&v1.NamespaceList{
-						Items: []v1.Namespace{
-							namespace1,
-						},
-					},
-				)
-
-				err := fakeOvn.controller.WatchNamespaces()
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				// only namespaced acls should be dereferenced, default acls will stay
-				namespacePortGroup := getNamespacePG(namespaceName1, fakeOvn.controller.controllerName)
-				expectedData := append(defaultMulticastData, namespacePortGroup)
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedData))
+				testCleanupNamespaceMulticastACLs(fakeOvn, DefaultNetworkControllerName, &util.DefaultNetInfo{}, nil)
 				return nil
 			}
 			err := app.Run([]string{app.Name})

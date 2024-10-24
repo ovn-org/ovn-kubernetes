@@ -680,16 +680,12 @@ func (bnc *BaseNetworkController) syncNodeManagementPort(node *kapi.Node, switch
 		return nil, err
 	}
 
-	// TODO(dceara): The cluster port group must be per network. So for now skip adding management port to the cluster port
-	// group for secondary network's because the cluster port group is not yet created for secondary networks.
-	if bnc.IsDefault() {
-		clusterPortGroupName := bnc.getClusterPortGroupName(types.ClusterPortGroupNameBase)
-		if err = libovsdbops.AddPortsToPortGroup(bnc.nbClient, clusterPortGroupName, logicalSwitchPort.UUID); err != nil {
-			err1 := fmt.Errorf("failed to add port %s to cluster port group %s (%s): %w",
-				logicalSwitchPort.Name, types.ClusterPortGroupNameBase, clusterPortGroupName, err)
-			klog.Error(err1)
-			return nil, err1
-		}
+	clusterPortGroupName := bnc.getClusterPortGroupName(types.ClusterPortGroupNameBase)
+	if err = libovsdbops.AddPortsToPortGroup(bnc.nbClient, clusterPortGroupName, logicalSwitchPort.UUID); err != nil {
+		err1 := fmt.Errorf("failed to add port %s to cluster port group %s (%s): %w",
+			logicalSwitchPort.Name, types.ClusterPortGroupNameBase, clusterPortGroupName, err)
+		klog.Error(err1)
+		return nil, err1
 	}
 
 	if v4Subnet != nil {
@@ -699,6 +695,26 @@ func (bnc *BaseNetworkController) syncNodeManagementPort(node *kapi.Node, switch
 	}
 
 	return mgmtPortIPs, nil
+}
+
+// addLocalPodToNamespaceLocked returns the ops needed to add the pod's IP to the namespace
+// address set and the port UUID (if applicable) to the namespace port group.
+// This function must be called with the nsInfo lock taken.
+func (bnc *BaseNetworkController) addLocalPodToNamespaceLocked(nsInfo *namespaceInfo, ips []*net.IPNet, portUUID string) ([]ovsdb.Operation, error) {
+	var ops []ovsdb.Operation
+	var err error
+
+	if ops, err = nsInfo.addressSet.AddAddressesReturnOps(util.IPNetsIPToStringSlice(ips)); err != nil {
+		return nil, err
+	}
+
+	if portUUID != "" && nsInfo.portGroupName != "" {
+		if ops, err = libovsdbops.AddPortsToPortGroupOps(bnc.nbClient, ops, nsInfo.portGroupName, portUUID); err != nil {
+			return nil, err
+		}
+	}
+
+	return ops, nil
 }
 
 // WatchNodes starts the watching of the nodes resource and calls back the appropriate handler logic

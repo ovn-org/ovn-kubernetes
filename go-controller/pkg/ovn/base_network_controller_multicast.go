@@ -1,8 +1,10 @@
 package ovn
 
 import (
+	"errors"
 	"fmt"
 
+	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
@@ -320,5 +322,73 @@ func (bnc *BaseNetworkController) syncNsMulticast(k8sNamespaces map[string]bool)
 	}
 	klog.Infof("Sync multicast removed ACLs for %d stale namespaces", len(staleNamespaces))
 
+	return nil
+}
+
+func (bnc *BaseNetworkController) setupClusterPortGroups() error {
+	pgIDs := bnc.getClusterPortGroupDbIDs(types.ClusterPortGroupNameBase)
+	pg := &nbdb.PortGroup{
+		Name: libovsdbutil.GetPortGroupName(pgIDs),
+	}
+	pg, err := libovsdbops.GetPortGroup(bnc.nbClient, pg)
+	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
+		return err
+	}
+	if pg == nil {
+		// we didn't find an existing clusterPG, let's create a new empty PG (fresh cluster install)
+		// Create a cluster-wide port group that all logical switch ports are part of
+		pg := libovsdbutil.BuildPortGroup(pgIDs, nil, nil)
+		err = libovsdbops.CreateOrUpdatePortGroups(bnc.nbClient, pg)
+		if err != nil {
+			klog.Errorf("Failed to create cluster port group: %v", err)
+			return err
+		}
+	}
+
+	pgIDs = bnc.getClusterPortGroupDbIDs(types.ClusterRtrPortGroupNameBase)
+	pg = &nbdb.PortGroup{
+		Name: libovsdbutil.GetPortGroupName(pgIDs),
+	}
+	pg, err = libovsdbops.GetPortGroup(bnc.nbClient, pg)
+	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
+		return err
+	}
+	if pg == nil {
+		// we didn't find an existing clusterRtrPG, let's create a new empty PG (fresh cluster install)
+		// Create a cluster-wide port group with all node-to-cluster router
+		// logical switch ports. Currently the only user is multicast but it might
+		// be used for other features in the future.
+		pg = libovsdbutil.BuildPortGroup(pgIDs, nil, nil)
+		err = libovsdbops.CreateOrUpdatePortGroups(bnc.nbClient, pg)
+		if err != nil {
+			klog.Errorf("Failed to create cluster port group: %v", err)
+			return err
+		}
+	}
+	return nil
+}
+
+func (bnc *BaseNetworkController) syncDefaultMulticastPolicies() error {
+	// If supported, enable IGMP relay on the router to forward multicast
+	// traffic between nodes.
+	if bnc.multicastSupport {
+		// Drop IP multicast globally. Multicast is allowed only if explicitly
+		// enabled in a namespace.
+		if err := bnc.createDefaultDenyMulticastPolicy(); err != nil {
+			klog.Errorf("Failed to create default deny multicast policy, error: %v", err)
+			return err
+		}
+
+		// Allow IP multicast from node switch to cluster router and from
+		// cluster router to node switch.
+		if err := bnc.createDefaultAllowMulticastPolicy(); err != nil {
+			klog.Errorf("Failed to create default deny multicast policy, error: %v", err)
+			return err
+		}
+	} else {
+		if err := bnc.disableMulticast(); err != nil {
+			return fmt.Errorf("failed to delete default multicast policy, error: %v", err)
+		}
+	}
 	return nil
 }

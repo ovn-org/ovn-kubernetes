@@ -336,9 +336,9 @@ func NewSecondaryLayer2NetworkController(cnci *CommonNetworkControllerInfo, netI
 			claimsReconciler)
 	}
 
-	// disable multicast support for secondary networks
-	// TBD: changes needs to be made to support multicast in secondary networks
-	oc.multicastSupport = false
+	// enable multicast suppor at UDN only for primaries + multicast enabled
+	// TBD: changes needs to be made to support multicast beyond primary UDN
+	oc.multicastSupport = util.IsNetworkSegmentationSupportEnabled() && config.EnableMulticast
 
 	oc.initRetryFramework()
 	return oc, nil
@@ -430,6 +430,17 @@ func (oc *SecondaryLayer2NetworkController) Init() error {
 	)
 	if err != nil {
 		return err
+	}
+
+	// Configure cluster port groups abd multicast default policies for user defined primary networks.
+	if oc.IsPrimaryNetwork() && util.IsNetworkSegmentationSupportEnabled() {
+		if err := oc.setupClusterPortGroups(); err != nil {
+			return fmt.Errorf("failed to create cluster port groups for network %q: %v", oc.GetNetworkName(), err)
+		}
+
+		if err := oc.syncDefaultMulticastPolicies(); err != nil {
+			return err
+		}
 	}
 
 	return err
@@ -525,20 +536,22 @@ func (oc *SecondaryLayer2NetworkController) addUpdateLocalNodeEvent(node *corev1
 				}
 			}
 		}
-		if nSyncs.syncMgmtPort {
-			// Layer 2 networks have a single, large subnet, that's the one
-			// associated to the controller.  Take the management port IP from
-			// there.
-			subnets := oc.Subnets()
-			hostSubnets := make([]*net.IPNet, 0, len(subnets))
-			for _, subnet := range oc.Subnets() {
-				hostSubnets = append(hostSubnets, subnet.CIDR)
-			}
-			if _, err := oc.syncNodeManagementPort(node, oc.GetNetworkScopedSwitchName(types.OVNLayer2Switch), oc.GetNetworkScopedGWRouterName(node.Name), hostSubnets); err != nil {
-				errs = append(errs, err)
-				oc.mgmtPortFailed.Store(node.Name, true)
-			} else {
-				oc.mgmtPortFailed.Delete(node.Name)
+		if util.IsNetworkSegmentationSupportEnabled() && oc.IsPrimaryNetwork() {
+			if nSyncs.syncMgmtPort {
+				// Layer 2 networks have a single, large subnet, that's the one
+				// associated to the controller.  Take the management port IP from
+				// there.
+				subnets := oc.Subnets()
+				hostSubnets := make([]*net.IPNet, 0, len(subnets))
+				for _, subnet := range oc.Subnets() {
+					hostSubnets = append(hostSubnets, subnet.CIDR)
+				}
+				if _, err := oc.syncNodeManagementPort(node, oc.GetNetworkScopedSwitchName(types.OVNLayer2Switch), oc.GetNetworkScopedGWRouterName(node.Name), hostSubnets); err != nil {
+					errs = append(errs, err)
+					oc.mgmtPortFailed.Store(node.Name, true)
+				} else {
+					oc.mgmtPortFailed.Delete(node.Name)
+				}
 			}
 		}
 	}
