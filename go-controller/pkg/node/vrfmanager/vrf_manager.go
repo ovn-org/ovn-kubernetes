@@ -18,6 +18,11 @@ import (
 	"k8s.io/klog/v2"
 )
 
+// reconcile period for vrf manager, this would kick in for every 60 seconds if there is no
+// explicit link update events. In the event of link update, reconcile period is automatically
+// extended by another 60 seconds.
+var reconcilePeriod = 60 * time.Second
+
 type vrf struct {
 	name  string
 	table uint32
@@ -82,13 +87,13 @@ func (vrfm *Controller) runInternal(stopChan <-chan struct{}, doneWg *sync.WaitG
 	go func() {
 		defer doneWg.Done()
 		err = currentNs.Do(func(netNS ns.NetNS) error {
-			linkSyncTimer := time.NewTicker(60 * time.Second)
+			linkSyncTimer := time.NewTicker(reconcilePeriod)
 			defer linkSyncTimer.Stop()
 
 			for {
 				select {
 				case linkUpdateEvent, ok := <-linkUpdateCh:
-					linkSyncTimer.Reset(60 * time.Second)
+					linkSyncTimer.Reset(reconcilePeriod)
 					if !ok {
 						if subscribed, linkUpdateCh, err = subscribe(); err != nil {
 							klog.Errorf("VRF Manager: Error during netlink re-subscribe due to channel closing: %v", err)
@@ -293,11 +298,12 @@ func (vrfm *Controller) repair(validVRFs sets.Set[string]) error {
 			!strings.HasPrefix(name, types.UDNVRFDevicePrefix) {
 			continue
 		}
-		if !validVRFs.Has(name) {
-			err = util.GetNetLinkOps().LinkDelete(link)
-			if err != nil {
-				klog.Errorf("VRF Manager: error deleting stale VRF device %s, err: %v", name, err)
-			}
+		if validVRFs.Has(name) {
+			continue
+		}
+		err = util.GetNetLinkOps().LinkDelete(link)
+		if err != nil {
+			klog.Errorf("VRF Manager: error deleting stale VRF device %s, err: %v", name, err)
 		}
 		delete(vrfm.vrfs, link.Attrs().Index)
 	}
