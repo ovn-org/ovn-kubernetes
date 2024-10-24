@@ -6,33 +6,21 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/pointer"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	netv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	udnv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 )
 
 var _ = Describe("NetAttachDefTemplate", func() {
-	const udnTypeName = "UserDefinedNetwork"
-
-	var udnApiVersion = udnv1.SchemeGroupVersion.String()
-
-	DescribeTable("should fail given",
+	DescribeTable("should fail to render NAD spec given",
 		func(spec *udnv1.UserDefinedNetworkSpec) {
-			udn := &udnv1.UserDefinedNetwork{
-				ObjectMeta: metav1.ObjectMeta{Namespace: "mynamespace", Name: "test-net", UID: "1"},
-				Spec:       *spec,
-			}
-			_, err := RenderNetAttachDefManifest(udn)
+			_, err := RenderNADSpec("foo", "bar", spec)
 			Expect(err).To(HaveOccurred())
 		},
-		Entry("invalid topology: topology layer2 & layer3 config",
-			&udnv1.UserDefinedNetworkSpec{Topology: udnv1.NetworkTopologyLayer2, Layer3: &udnv1.Layer3Config{}},
-		),
-		Entry("invalid topology: topology layer3 & layer2 config",
-			&udnv1.UserDefinedNetworkSpec{Topology: udnv1.NetworkTopologyLayer3, Layer2: &udnv1.Layer2Config{}},
-		),
 		Entry("invalid layer2 subnets",
 			&udnv1.UserDefinedNetworkSpec{
 				Topology: udnv1.NetworkTopologyLayer2,
@@ -182,20 +170,57 @@ var _ = Describe("NetAttachDefTemplate", func() {
 		),
 	)
 
-	It("should return nil given no NAD", func() {
-		_, err := RenderNetAttachDefManifest(nil)
+	DescribeTable("should fail to render NAD, given",
+		func(obj client.Object) {
+			_, err := RenderNetAttachDefManifest(obj, "")
+			Expect(err).To(HaveOccurred())
+		},
+		Entry("UDN, invalid topology: topology layer2 & layer3 config",
+			&udnv1.UserDefinedNetwork{Spec: udnv1.UserDefinedNetworkSpec{
+				Topology: udnv1.NetworkTopologyLayer2, Layer3: &udnv1.Layer3Config{}}},
+		),
+		Entry("UDN, invalid topology: topology layer3 & layer2 config",
+			&udnv1.UserDefinedNetwork{Spec: udnv1.UserDefinedNetworkSpec{
+				Topology: udnv1.NetworkTopologyLayer3, Layer2: &udnv1.Layer2Config{}}},
+		),
+		Entry("CUDN, invalid topology: topology layer2 & layer3 config",
+			&udnv1.ClusterUserDefinedNetwork{Spec: udnv1.ClusterUserDefinedNetworkSpec{Network: udnv1.NetworkSpec{
+				Topology: udnv1.NetworkTopologyLayer2, Layer3: &udnv1.Layer3Config{}}}},
+		),
+		Entry("CUDN, invalid topology: topology layer3 & layer2 config",
+			&udnv1.ClusterUserDefinedNetwork{Spec: udnv1.ClusterUserDefinedNetworkSpec{Network: udnv1.NetworkSpec{
+				Topology: udnv1.NetworkTopologyLayer3, Layer2: &udnv1.Layer2Config{}}}},
+		),
+	)
+
+	It("should return no error given no UDN", func() {
+		_, err := RenderNetAttachDefManifest(nil, "")
 		Expect(err).NotTo(HaveOccurred())
 	})
 
-	DescribeTable("should create net attach from spec",
+	It("should fail given no target namespace", func() {
+		cudn := &udnv1.UserDefinedNetwork{Spec: udnv1.UserDefinedNetworkSpec{
+			Topology: udnv1.NetworkTopologyLayer2, Layer2: &udnv1.Layer2Config{}},
+		}
+		_, err := RenderNetAttachDefManifest(cudn, "")
+		Expect(err).To(HaveOccurred())
+	})
+
+	It("should fail given unknown type", func() {
+		_, err := RenderNetAttachDefManifest(&netv1.NetworkAttachmentDefinition{}, "foo")
+		Expect(err).To(HaveOccurred())
+	})
+
+	DescribeTable("should create UDN NAD from spec",
 		func(testSpec udnv1.UserDefinedNetworkSpec, expectedNadNetConf string) {
 			testUdn := &udnv1.UserDefinedNetwork{
 				ObjectMeta: metav1.ObjectMeta{Namespace: "mynamespace", Name: "test-net", UID: "1"},
 				Spec:       testSpec,
 			}
+			testNs := "mynamespace"
 			ownerRef := metav1.OwnerReference{
-				APIVersion:         udnApiVersion,
-				Kind:               udnTypeName,
+				APIVersion:         "k8s.ovn.org/v1",
+				Kind:               "UserDefinedNetwork",
 				Name:               "test-net",
 				UID:                "1",
 				BlockOwnerDeletion: pointer.Bool(true),
@@ -214,7 +239,7 @@ var _ = Describe("NetAttachDefTemplate", func() {
 			// must be defined so the primary user defined network can match the ip families of the underlying cluster
 			config.IPv4Mode = true
 			config.IPv6Mode = true
-			nad, err := RenderNetAttachDefManifest(testUdn)
+			nad, err := RenderNetAttachDefManifest(testUdn, testNs)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(nad.TypeMeta).To(Equal(expectedNAD.TypeMeta))
 			Expect(nad.ObjectMeta).To(Equal(expectedNAD.ObjectMeta))
@@ -305,6 +330,133 @@ var _ = Describe("NetAttachDefTemplate", func() {
 			  "cniVersion": "1.0.0",
 			  "type": "ovn-k8s-cni-overlay",
 			  "name": "mynamespace.test-net",
+			  "netAttachDefName": "mynamespace/test-net",
+			  "role": "secondary",
+			  "topology": "layer2",
+			  "subnets": "192.168.100.0/24,2001:dbb::/64",
+			  "mtu": 1500,
+			  "allowPersistentIPs": true
+			}`,
+		),
+	)
+
+	DescribeTable("should create CUDN NAD from spec",
+		func(testSpec udnv1.NetworkSpec, expectedNadNetConf string) {
+			cudn := &udnv1.ClusterUserDefinedNetwork{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-net", UID: "1"},
+				Spec:       udnv1.ClusterUserDefinedNetworkSpec{Network: testSpec},
+			}
+			testNs := "mynamespace"
+
+			expectedOwnerRef := metav1.OwnerReference{
+				APIVersion:         "k8s.ovn.org/v1",
+				Kind:               "ClusterUserDefinedNetwork",
+				Name:               "test-net",
+				UID:                "1",
+				BlockOwnerDeletion: pointer.Bool(true),
+				Controller:         pointer.Bool(true),
+			}
+			expectedNAD := &netv1.NetworkAttachmentDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:            "test-net",
+					OwnerReferences: []metav1.OwnerReference{expectedOwnerRef},
+					Labels:          map[string]string{"k8s.ovn.org/user-defined-network": ""},
+					Finalizers:      []string{"k8s.ovn.org/user-defined-network-protection"},
+				},
+				Spec: netv1.NetworkAttachmentDefinitionSpec{Config: expectedNadNetConf},
+			}
+
+			nad, err := RenderNetAttachDefManifest(cudn, testNs)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(nad.TypeMeta).To(Equal(expectedNAD.TypeMeta))
+			Expect(nad.ObjectMeta).To(Equal(expectedNAD.ObjectMeta))
+			Expect(nad.Spec.Config).To(MatchJSON(expectedNAD.Spec.Config))
+		},
+		Entry("primary network, layer3",
+			udnv1.NetworkSpec{
+				Topology: udnv1.NetworkTopologyLayer3,
+				Layer3: &udnv1.Layer3Config{
+					Role: udnv1.NetworkRolePrimary,
+					Subnets: []udnv1.Layer3Subnet{
+						{CIDR: "192.168.100.0/16"},
+						{CIDR: "2001:dbb::/60"},
+					},
+					MTU: 1500,
+				},
+			},
+			`{
+				"cniVersion": "1.0.0",
+				"type": "ovn-k8s-cni-overlay",
+				"name": "cluster.udn.test-net",
+				"netAttachDefName": "mynamespace/test-net",
+				"role": "primary",
+				"topology": "layer3",
+				"joinSubnets": "100.65.0.0/16,fd99::/64",
+				"subnets": "192.168.100.0/16,2001:dbb::/60",
+				"mtu": 1500
+			}`,
+		),
+		Entry("primary network, layer2",
+			udnv1.NetworkSpec{
+				Topology: udnv1.NetworkTopologyLayer2,
+				Layer2: &udnv1.Layer2Config{
+					Role:          udnv1.NetworkRolePrimary,
+					Subnets:       udnv1.DualStackCIDRs{"192.168.100.0/24", "2001:dbb::/64"},
+					MTU:           1500,
+					IPAMLifecycle: udnv1.IPAMLifecyclePersistent,
+				},
+			},
+			`{
+			  "cniVersion": "1.0.0",
+			  "type": "ovn-k8s-cni-overlay",
+			  "name": "cluster.udn.test-net",
+			  "netAttachDefName": "mynamespace/test-net",
+			  "role": "primary",
+			  "topology": "layer2",
+			  "joinSubnets": "100.65.0.0/16,fd99::/64",
+			  "subnets": "192.168.100.0/24,2001:dbb::/64",
+			  "mtu": 1500,
+			  "allowPersistentIPs": true
+        	}`,
+		),
+		Entry("primary network, should override join-subnets when specified",
+			udnv1.NetworkSpec{
+				Topology: udnv1.NetworkTopologyLayer2,
+				Layer2: &udnv1.Layer2Config{
+					Role:          udnv1.NetworkRolePrimary,
+					Subnets:       udnv1.DualStackCIDRs{"192.168.100.0/24", "2001:dbb::/64"},
+					JoinSubnets:   udnv1.DualStackCIDRs{"100.62.0.0/24", "fd92::/64"},
+					MTU:           1500,
+					IPAMLifecycle: udnv1.IPAMLifecyclePersistent,
+				},
+			},
+			`{
+			  "cniVersion": "1.0.0",
+			  "type": "ovn-k8s-cni-overlay",
+			  "name": "cluster.udn.test-net",
+			  "netAttachDefName": "mynamespace/test-net",
+			  "role": "primary",
+			  "topology": "layer2",
+			  "joinSubnets": "100.62.0.0/24,fd92::/64",
+			  "subnets": "192.168.100.0/24,2001:dbb::/64",
+			  "mtu": 1500,
+			  "allowPersistentIPs": true
+			}`,
+		),
+		Entry("secondary network",
+			udnv1.NetworkSpec{
+				Topology: udnv1.NetworkTopologyLayer2,
+				Layer2: &udnv1.Layer2Config{
+					Role:          udnv1.NetworkRoleSecondary,
+					Subnets:       udnv1.DualStackCIDRs{"192.168.100.0/24", "2001:dbb::/64"},
+					MTU:           1500,
+					IPAMLifecycle: udnv1.IPAMLifecyclePersistent,
+				},
+			},
+			`{
+			  "cniVersion": "1.0.0",
+			  "type": "ovn-k8s-cni-overlay",
+			  "name": "cluster.udn.test-net",
 			  "netAttachDefName": "mynamespace/test-net",
 			  "role": "secondary",
 			  "topology": "layer2",

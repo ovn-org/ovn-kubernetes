@@ -106,3 +106,5 @@ echo "Copying egressService CRD"
 cp _output/crds/k8s.ovn.org_egressservices.yaml ../dist/templates/k8s.ovn.org_egressservices.yaml.j2
 echo "Copying userdefinednetworks CRD"
 cp _output/crds/k8s.ovn.org_userdefinednetworks.yaml ../dist/templates/k8s.ovn.org_userdefinednetworks.yaml.j2
+echo "Copying clusteruserdefinednetworks CRD"
+cp _output/crds/k8s.ovn.org_clusteruserdefinednetworks.yaml ../dist/templates/k8s.ovn.org_clusteruserdefinednetworks.yaml.j2
