@@ -74,6 +74,7 @@ rules:
           - egressfirewalls
           - egressqoses
           - userdefinednetworks
+          - networkqoses
       verbs: [ "get", "list", "watch" ]
     - apiGroups: ["k8s.ovn.org"]
       resources:
@@ -97,6 +98,7 @@ rules:
         - adminpolicybasedexternalroutes/status
         - egressfirewalls/status
         - egressqoses/status
+        - networkqoses/status
       verbs: [ "patch", "update" ]
     - apiGroups: ["policy.networking.k8s.io"]
       resources:

@@ -53,7 +53,7 @@ for crd in ${crds}; do
     --output-dir "${SCRIPT_ROOT}"/pkg/crd/$crd/v1/apis/clientset \
     --output-pkg github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/v1/apis/clientset \
     --apply-configuration-package github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/v1/apis/applyconfiguration \
-    --plural-exceptions="EgressQoS:EgressQoSes" \
+    --plural-exceptions="EgressQoS:EgressQoSes,NetworkQoS:NetworkQoSes" \
     "$@"
 
   echo "Generating listers for $crd"
@@ -61,7 +61,7 @@ for crd in ${crds}; do
     --go-header-file hack/boilerplate.go.txt \
     --output-dir "${SCRIPT_ROOT}"/pkg/crd/$crd/v1/apis/listers \
     --output-pkg github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/v1/apis/listers \
-    --plural-exceptions="EgressQoS:EgressQoSes" \
+    --plural-exceptions="EgressQoS:EgressQoSes,NetworkQoS:NetworkQoSes" \
     github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/v1 \
     "$@"
 
@@ -72,7 +72,7 @@ for crd in ${crds}; do
     --listers-package  github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/v1/apis/listers \
     --output-dir "${SCRIPT_ROOT}"/pkg/crd/$crd/v1/apis/informers \
     --output-pkg github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/v1/apis/informers \
-    --plural-exceptions="EgressQoS:EgressQoSes" \
+    --plural-exceptions="EgressQoS:EgressQoSes,NetworkQoS:NetworkQoSes" \
     github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/v1 \
     "$@"
 
@@ -104,5 +104,7 @@ echo "Copying adminpolicybasedexternalroutes CRD"
 cp _output/crds/k8s.ovn.org_adminpolicybasedexternalroutes.yaml ../dist/templates/k8s.ovn.org_adminpolicybasedexternalroutes.yaml.j2
 echo "Copying egressService CRD"
 cp _output/crds/k8s.ovn.org_egressservices.yaml ../dist/templates/k8s.ovn.org_egressservices.yaml.j2
+echo "Copying networkQoS CRD"
+cp _output/crds/k8s.ovn.org_networkqoses.yaml ../dist/templates/k8s.ovn.org_networkqoses.yaml.j2
 echo "Copying userdefinednetworks CRD"
 cp _output/crds/k8s.ovn.org_userdefinednetworks.yaml ../dist/templates/k8s.ovn.org_userdefinednetworks.yaml.j2

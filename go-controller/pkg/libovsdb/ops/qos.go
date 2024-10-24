@@ -110,10 +110,35 @@ func RemoveQoSesFromLogicalSwitchOps(nbClient libovsdbclient.Client, ops []libov
 	opModels := operationModel{
 		Model:            sw,
 		OnModelMutations: []interface{}{&sw.QOSRules},
-		ErrNotFound:      true,
+		ErrNotFound:      false,
 		BulkOp:           false,
 	}
 
 	modelClient := newModelClient(nbClient)
 	return modelClient.DeleteOps(ops, opModels)
+}
+
+// DeleteQoSesWithPredicateOps returns the ops to delete QoSes based on a given predicate
+func DeleteQoSesWithPredicateOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, p QoSPredicate) ([]libovsdb.Operation, error) {
+	deleted := []*nbdb.QoS{}
+	opModel := operationModel{
+		ModelPredicate: p,
+		ExistingResult: &deleted,
+		ErrNotFound:    false,
+		BulkOp:         true,
+	}
+
+	m := newModelClient(nbClient)
+	return m.DeleteOps(ops, opModel)
+}
+
+// DeleteQoSesWithPredicate looks up QoSes from the cache based on
+// a given predicate and deletes them
+func DeleteQoSesWithPredicate(nbClient libovsdbclient.Client, p QoSPredicate) error {
+	ops, err := DeleteQoSesWithPredicateOps(nbClient, nil, p)
+	if err != nil {
+		return nil
+	}
+	_, err = TransactAndCheck(nbClient, ops)
+	return err
 }
