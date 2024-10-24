@@ -169,11 +169,65 @@ localnet network.
    IP addresses in a `ipamclaims.k8s.cni.cncf.io` object. This IP addresses will
    be reused by other pods if requested. Useful for KubeVirt VMs. Only makes
    sense if the `subnets` attribute is also defined.
+- `physicalNetworkName` (string, optional): the name of the physical network to
+  which the OVN overlay will connect. When omitted, it will default to the value
+  of the localnet network `name`.
 
 **NOTE**
 - when the subnets attribute is omitted, the logical switch implementing the
   network will only provide layer 2 communication, and the users must configure
   IPs for the pods. Port security will only prevent MAC spoofing.
+
+#### Sharing the same physical network mapping
+To prevent the admin from having to reconfigure the cluster nodes whenever they
+want to - let's say - add a VLAN, OVN-Kubernetes allows multiple network
+overlays to re-use the same physical network mapping.
+
+To do this, the cluster admin would provision two different networks (with
+different VLAN tags) using the **same** physical network name. Please check the
+example below for an example of this configuration:
+```yaml
+---
+apiVersion: k8s.cni.cncf.io/v1
+kind: NetworkAttachmentDefinition
+metadata:
+  name: bluenet
+  namespace: test
+spec:
+  config: |
+    {
+            "cniVersion": "0.3.1",
+            "name": "tenantblue",
+            "type": "ovn-k8s-cni-overlay",
+            "topology": "localnet",
+            "netAttachDefName": "test/bluenet",
+            "vlanID": 4000,
+            "physicalNetworkName": "physnet"
+    }
+---
+apiVersion: k8s.cni.cncf.io/v1
+kind: NetworkAttachmentDefinition
+metadata:
+  name: isolatednet
+  namespace: test
+spec:
+  config: |
+    {
+            "cniVersion": "0.3.1",
+            "name": "sales",
+            "type": "ovn-k8s-cni-overlay",
+            "topology": "localnet",
+            "netAttachDefName": "test/isolatednet",
+            "vlanID": 1234,
+            "physicalNetworkName": "physnet"
+    }
+```
+
+> [!WARNING]
+> Keep in mind OVN-Kubernetes does **not** validate the physical network
+> configurations in any way: the admin must ensure these configurations are
+> holistically healthy - e.g. the defined subnets do not overlap, the MTUs make
+> sense, etc.
 
 ## Pod configuration
 The user must specify the secondary network attachments via the
