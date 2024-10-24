@@ -3,6 +3,7 @@ package kubevirt
 import (
 	"fmt"
 	"net"
+	"sort"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -348,4 +349,83 @@ func ZoneContainsPodSubnetOrUntracked(watchFactory *factory.WatchFactory, lsMana
 // kubevirt virtual machine, false otherwise.
 func IsPodOwnedByVirtualMachine(pod *corev1.Pod) bool {
 	return ExtractVMNameFromPod(pod) != nil
+}
+
+func isTargetPodReady(targetPod *corev1.Pod) bool {
+	if targetPod == nil {
+		return false
+	}
+
+	// This annotation only appears on live migration scenarios, and it signals
+	// that target VM pod is ready to receive traffic, so we can route
+	// traffic to it.
+	targetReadyTimestamp := targetPod.Annotations[kubevirtv1.MigrationTargetReadyTimestamp]
+
+	// VM is ready to receive traffic
+	return targetReadyTimestamp != ""
+}
+
+func filterNotComplete(vmPods []*corev1.Pod) []*corev1.Pod {
+	var notCompletePods []*corev1.Pod
+	for _, vmPod := range vmPods {
+		if !util.PodCompleted(vmPod) {
+			notCompletePods = append(notCompletePods, vmPod)
+		}
+	}
+
+	return notCompletePods
+}
+
+type LiveMigrationState string
+
+const (
+	LiveMigrationInProgress        LiveMigrationState = "InProgress"
+	LiveMigrationTargetDomainReady LiveMigrationState = "TargetDomainReady"
+	LiveMigrationCompleted         LiveMigrationState = "Completed"
+)
+
+type LiveMigrationStatus struct {
+	SourcePod, TargetPod *corev1.Pod
+	State                LiveMigrationState
+}
+
+func DiscoverLiveMigrationStatus(client *factory.WatchFactory, pod *corev1.Pod) (*LiveMigrationStatus, error) {
+	vmKey := ExtractVMNameFromPod(pod)
+	if vmKey == nil {
+		return nil, nil
+	}
+
+	vmPods, err := client.GetPodsBySelector(pod.Namespace, metav1.LabelSelector{MatchLabels: map[string]string{kubevirtv1.VirtualMachineNameLabel: vmKey.Name}})
+	if err != nil {
+		return nil, err
+	}
+
+	//TODO: cover failed migration
+	vmPods = filterNotComplete(vmPods)
+
+	// no migration
+	if len(vmPods) < 2 {
+		return nil, nil
+	}
+
+	if len(vmPods) > 2 {
+		return nil, fmt.Errorf("unexpected live migration state at pods: %+v", vmPods)
+	}
+
+	// Sort vmPods by creation time
+	sort.Slice(vmPods, func(i, j int) bool {
+		// i less than j
+		return vmPods[j].CreationTimestamp.After(vmPods[i].CreationTimestamp.Time)
+	})
+
+	status := LiveMigrationStatus{
+		SourcePod: vmPods[0],
+		TargetPod: vmPods[1],
+		State:     LiveMigrationInProgress,
+	}
+
+	if isTargetPodReady(status.TargetPod) {
+		status.State = LiveMigrationTargetDomainReady
+	}
+	return &status, nil
 }
