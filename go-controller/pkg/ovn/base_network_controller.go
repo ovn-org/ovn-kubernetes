@@ -24,6 +24,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/observability"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/routeimport"
 	zoneic "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/zone_interconnect"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/persistentips"
 	ovnretry "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
@@ -177,6 +178,8 @@ type BaseNetworkController struct {
 	ovnClusterLRPToJoinIfAddrs []*net.IPNet
 
 	observManager *observability.Manager
+
+	routeImportManager routeimport.Manager
 }
 
 // BaseSecondaryNetworkController structure holds per-network fields and network specific
