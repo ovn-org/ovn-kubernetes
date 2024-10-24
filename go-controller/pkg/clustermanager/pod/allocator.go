@@ -60,6 +60,7 @@ func NewPodAllocator(
 	claimsReconciler persistentips.PersistentAllocations,
 	nadController nad.NADController,
 	recorder record.EventRecorder,
+	idAllocator id.Allocator,
 ) *PodAllocator {
 	podAllocator := &PodAllocator{
 		netInfo:                netInfo,
@@ -68,6 +69,7 @@ func NewPodAllocator(
 		podAnnotationAllocator: podAnnotationAllocator,
 		nadController:          nadController,
 		recorder:               recorder,
+		idAllocator:            idAllocator,
 	}
 
 	// this network might not have IPAM, we will just allocate MAC addresses
@@ -81,21 +83,8 @@ func NewPodAllocator(
 	return podAllocator
 }
 
-// Init initializes the allocator with as configured for the network
+// Init checks if persistentIPs controller elements are correctly configured for the network
 func (a *PodAllocator) Init() error {
-	var err error
-	if util.DoesNetworkRequireTunnelIDs(a.netInfo) {
-		a.idAllocator, err = id.NewIDAllocator(a.netInfo.GetNetworkName(), types.MaxLogicalPortTunnelKey)
-		if err != nil {
-			return err
-		}
-		// Reserve the id 0. We don't want to assign this id to any of the pods.
-		err = a.idAllocator.ReserveID("zero", 0)
-		if err != nil {
-			return err
-		}
-	}
-
 	if a.netInfo.AllowsPersistentIPs() && a.ipamClaimsReconciler == nil {
 		return fmt.Errorf(
 			"network %q allows persistent IPs but missing the claims reconciler",

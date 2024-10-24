@@ -61,7 +61,7 @@ var _ = Describe("BaseSecondaryNetworkController", func() {
 
 		networkID, err := controller.bnc.getNetworkID()
 		Expect(err).To(HaveOccurred())
-		Expect(networkID).To(Equal(util.InvalidNetworkID))
+		Expect(networkID).To(Equal(util.InvalidID))
 	})
 	type dhcpTest struct {
 		vmName                string

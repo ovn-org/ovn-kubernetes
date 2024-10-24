@@ -16,6 +16,7 @@ import (
 	"k8s.io/klog/v2"
 
 	ipamclaimsapi "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/id"
 	idallocator "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/id"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip/subnet"
 	annotationalloc "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/pod"
@@ -56,7 +57,8 @@ type networkClusterController struct {
 	// retry framework for persistent ip allocation
 	ipamClaimHandler *factory.Handler
 	retryIPAMClaims  *objretry.RetryFramework
-
+	// tunnelIDAllocator of tunnelIDs within the network
+	tunnelIDAllocator   id.Allocator
 	podAllocator        *pod.PodAllocator
 	nodeAllocator       *node.NodeAllocator
 	networkIDAllocator  idallocator.NamedAllocator
@@ -172,10 +174,47 @@ func (ncc *networkClusterController) init() error {
 		return err
 	}
 
+	if util.DoesNetworkRequireTunnelIDs(ncc.NetInfo) {
+		ncc.tunnelIDAllocator, err = id.NewIDAllocator(ncc.GetNetworkName(), types.MaxLogicalPortTunnelKey)
+		if err != nil {
+			return fmt.Errorf("failed to create new id allocator for network %s, err: %v", ncc.GetNetworkName(), err)
+		}
+		// Reserve the id 0. We don't want to assign this id to any of the pods or nodes.
+		err = ncc.tunnelIDAllocator.ReserveID("zero", 0)
+		if err != nil {
+			return err
+		}
+		if util.IsNetworkSegmentationSupportEnabled() && ncc.IsPrimaryNetwork() {
+			// if the network is a primary L2 UDN network, then we need to reserve
+			// the IDs used by each node in this network's pod allocator
+			nodes, err := ncc.watchFactory.GetNodes()
+			if err != nil {
+				return fmt.Errorf("failed to list node objects: %w", err)
+			}
+			for _, node := range nodes {
+				tunnelID, err := util.ParseUDNLayer2NodeGRLRPTunnelIDs(node, ncc.GetNetworkName())
+				if err != nil {
+					if util.IsAnnotationNotSetError(err) {
+						fmt.Printf("tunnelID annotation does not exist for the node %s for network %s, err: %v; we need to allocate it...",
+							node.Name, ncc.GetNetworkName(), err)
+					} else {
+						return fmt.Errorf("failed to fetch tunnelID annotation from the node %s for network %s, err: %v",
+							node.Name, ncc.GetNetworkName(), err)
+					}
+				}
+				if tunnelID != util.InvalidID {
+					if err := ncc.tunnelIDAllocator.ReserveID(ncc.GetNetworkName()+"_"+node.Name, tunnelID); err != nil {
+						return fmt.Errorf("unable to reserve id for network %s, node %s, err: %v", ncc.GetNetworkName(), node.Name, err)
+					}
+				}
+			}
+		}
+	}
+
 	if ncc.hasNodeAllocation() {
 		ncc.retryNodes = ncc.newRetryFramework(factory.NodeType, true)
 
-		ncc.nodeAllocator = node.NewNodeAllocator(networkID, ncc.NetInfo, ncc.watchFactory.NodeCoreInformer().Lister(), ncc.kube)
+		ncc.nodeAllocator = node.NewNodeAllocator(networkID, ncc.NetInfo, ncc.watchFactory.NodeCoreInformer().Lister(), ncc.kube, ncc.tunnelIDAllocator)
 		err := ncc.nodeAllocator.Init()
 		if err != nil {
 			return fmt.Errorf("failed to initialize host subnet ip allocator: %w", err)
@@ -213,7 +252,7 @@ func (ncc *networkClusterController) init() error {
 		)
 
 		ncc.podAllocator = pod.NewPodAllocator(ncc.NetInfo, podAllocationAnnotator, ipAllocator,
-			ipamClaimsReconciler, ncc.nadController, ncc.recorder)
+			ipamClaimsReconciler, ncc.nadController, ncc.recorder, ncc.tunnelIDAllocator)
 		if err := ncc.podAllocator.Init(); err != nil {
 			return fmt.Errorf("failed to initialize pod ip allocator: %w", err)
 		}

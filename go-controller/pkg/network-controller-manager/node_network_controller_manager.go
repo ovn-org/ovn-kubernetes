@@ -83,11 +83,11 @@ func (ncm *nodeNetworkControllerManager) CleanupDeletedNetworks(validNetworks ..
 func (ncm *nodeNetworkControllerManager) getNetworkID(network util.BasicNetInfo) (int, error) {
 	nodes, err := ncm.watchFactory.GetNodes()
 	if err != nil {
-		return util.InvalidNetworkID, err
+		return util.InvalidID, err
 	}
 	networkID, err := util.GetNetworkID(nodes, network)
 	if err != nil {
-		return util.InvalidNetworkID, err
+		return util.InvalidID, err
 	}
 	return networkID, nil
 }

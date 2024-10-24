@@ -775,7 +775,7 @@ func TestGetNetworkID(t *testing.T) {
 			desc:              "with no nodes should return and error and invalid network ID",
 			netInfo:           newDummyNetInfo("rednamespace", "bluenet"),
 			expectedError:     fmt.Errorf("missing network id for network 'bluenet'"),
-			expectedNetworkID: InvalidNetworkID,
+			expectedNetworkID: InvalidID,
 		},
 		{
 			desc: "with bad network ID annotations should return and error and invalid network ID",
@@ -790,7 +790,7 @@ func TestGetNetworkID(t *testing.T) {
 			},
 			netInfo:           newDummyNetInfo("rednamespace", "bluenet"),
 			expectedError:     fmt.Errorf("could not parse"),
-			expectedNetworkID: InvalidNetworkID,
+			expectedNetworkID: InvalidID,
 		},
 		{
 			desc: "with multiple networks annotation should return expected network ID and no error",
@@ -823,6 +823,72 @@ func TestGetNetworkID(t *testing.T) {
 				assert.NoError(t, obtainedError)
 			}
 			assert.Equal(t, obtainedNetworkID, tc.expectedNetworkID)
+		})
+	}
+}
+
+func TestParseUDNLayer2NodeGRLRPTunnelIDs(t *testing.T) {
+	tests := []struct {
+		desc        string
+		inpNode     *v1.Node
+		inpNetName  string
+		res         int
+		errExpected bool
+	}{
+		{
+			desc:       "annotation not found for node and invalidID",
+			inpNode:    &v1.Node{},
+			inpNetName: "rednet",
+			res:        -1,
+		},
+		{
+			desc: "parse completed and validID",
+			inpNode: &v1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						"k8s.ovn.org/udn-layer2-node-gateway-router-lrp-tunnel-ids": `{"rednet":"5"}`,
+					},
+				},
+			},
+			inpNetName:  "rednet",
+			errExpected: false,
+			res:         5,
+		},
+		{
+			desc: "parse completed and invalid value",
+			inpNode: &v1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						"k8s.ovn.org/udn-layer2-node-gateway-router-lrp-tunnel-ids": `blah`,
+					},
+				},
+			},
+			errExpected: true,
+			inpNetName:  "rednet",
+			res:         -1,
+		},
+		{
+			desc: "multiple networks; parse completed and validID",
+			inpNode: &v1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						"k8s.ovn.org/udn-layer2-node-gateway-router-lrp-tunnel-ids": `{"rednet":"5", "bluenet":"8"}`,
+					},
+				},
+			},
+			inpNetName:  "bluenet",
+			errExpected: false,
+			res:         8,
+		},
+	}
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			res, err := ParseUDNLayer2NodeGRLRPTunnelIDs(tc.inpNode, tc.inpNetName)
+			if tc.errExpected {
+				t.Log(err)
+				assert.Error(t, err)
+			}
+			assert.Equal(t, tc.res, res)
 		})
 	}
 }

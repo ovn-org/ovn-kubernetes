@@ -141,7 +141,7 @@ func NewZoneInterconnectHandler(nInfo util.NetInfo, nbClient, sbClient libovsdbc
 		nbClient:     nbClient,
 		sbClient:     sbClient,
 		watchFactory: watchFactory,
-		networkId:    util.InvalidNetworkID,
+		networkId:    util.InvalidID,
 	}
 
 	zic.networkClusterRouterName = zic.GetNetworkScopedName(types.OVNClusterRouter)
@@ -735,14 +735,14 @@ func (zic *ZoneInterconnectHandler) getStaticRoutes(ipPrefixes []*net.IPNet, nex
 func (zic *ZoneInterconnectHandler) getNetworkId() (int, error) {
 	nodes, err := zic.watchFactory.GetNodes()
 	if err != nil {
-		return util.InvalidNetworkID, err
+		return util.InvalidID, err
 	}
 	return zic.getNetworkIdFromNodes(nodes)
 }
 
 // getNetworkId returns the cached network ID or looks it up in any of the provided nodes
 func (zic *ZoneInterconnectHandler) getNetworkIdFromNodes(nodes []*corev1.Node) (int, error) {
-	if zic.networkId != util.InvalidNetworkID {
+	if zic.networkId != util.InvalidID {
 		return zic.networkId, nil
 	}
 
@@ -756,11 +756,11 @@ func (zic *ZoneInterconnectHandler) getNetworkIdFromNodes(nodes []*corev1.Node) 
 		if err != nil {
 			break
 		}
-		if networkId != util.InvalidNetworkID {
+		if networkId != util.InvalidID {
 			zic.networkId = networkId
 			return zic.networkId, nil
 		}
 	}
 
-	return util.InvalidNetworkID, fmt.Errorf("could not find network ID: %w", err)
+	return util.InvalidID, fmt.Errorf("could not find network ID: %w", err)
 }
