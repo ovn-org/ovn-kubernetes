@@ -433,6 +433,24 @@ func (_m *NetLinkOps) LinkSetVfHardwareAddr(pfLink netlink.Link, vfIndex int, hw
 	return r0
 }
 
+// LinkSubscribeWithOptions provides a mock function with given fields: ch, done, options
+func (_m *NetLinkOps) LinkSubscribeWithOptions(ch chan<- netlink.LinkUpdate, done <-chan struct{}, options netlink.LinkSubscribeOptions) error {
+	ret := _m.Called(ch, done, options)
+
+	if len(ret) == 0 {
+		panic("no return value specified for LinkSubscribeWithOptions")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(chan<- netlink.LinkUpdate, <-chan struct{}, netlink.LinkSubscribeOptions) error); ok {
+		r0 = rf(ch, done, options)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
 // NeighAdd provides a mock function with given fields: neigh
 func (_m *NetLinkOps) NeighAdd(neigh *netlink.Neigh) error {
 	ret := _m.Called(neigh)
@@ -606,6 +624,24 @@ func (_m *NetLinkOps) RouteReplace(route *netlink.Route) error {
 	var r0 error
 	if rf, ok := ret.Get(0).(func(*netlink.Route) error); ok {
 		r0 = rf(route)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// RouteSubscribeWithOptions provides a mock function with given fields: ch, done, options
+func (_m *NetLinkOps) RouteSubscribeWithOptions(ch chan<- netlink.RouteUpdate, done <-chan struct{}, options netlink.RouteSubscribeOptions) error {
+	ret := _m.Called(ch, done, options)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RouteSubscribeWithOptions")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(chan<- netlink.RouteUpdate, <-chan struct{}, netlink.RouteSubscribeOptions) error); ok {
+		r0 = rf(ch, done, options)
 	} else {
 		r0 = ret.Error(0)
 	}

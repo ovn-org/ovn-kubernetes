@@ -22,6 +22,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/udnenabledsvc"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/routeimport"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -56,7 +57,8 @@ type ControllerManager struct {
 	defaultNetworkController networkmanager.BaseNetworkController
 
 	// networkManager creates and deletes network controllers
-	networkManager networkmanager.Controller
+	networkManager     networkmanager.Controller
+	routeImportManager routeimport.Controller
 
 	// eIPController programs OVN to support EgressIP
 	eIPController *ovn.EgressIPController
@@ -224,6 +226,13 @@ func NewControllerManager(ovnClient *util.OVNClientset, wf *factory.WatchFactory
 		}
 	}
 
+	if util.IsRouteAdvertisementsEnabled() {
+		if !config.OVNKubernetesFeature.EnableInterconnect {
+			return nil, fmt.Errorf("RouteAdvertisements can only be used if Interconnect is enabled")
+		}
+		cm.routeImportManager = routeimport.New(config.Default.Zone, cm.nbClient)
+	}
+
 	return cm, nil
 }
 
@@ -303,7 +312,7 @@ func (cm *ControllerManager) initDefaultNetworkController(observManager *observa
 	if err != nil {
 		return fmt.Errorf("failed to create common network controller info: %w", err)
 	}
-	defaultController, err := ovn.NewDefaultNetworkController(cnci, observManager, cm.networkManager.Interface(), cm.eIPController, cm.portCache)
+	defaultController, err := ovn.NewDefaultNetworkController(cnci, observManager, cm.networkManager.Interface(), cm.routeImportManager, cm.eIPController, cm.portCache)
 	if err != nil {
 		return err
 	}
@@ -442,6 +451,13 @@ func (cm *ControllerManager) Start(ctx context.Context) error {
 		}
 	}
 
+	if cm.routeImportManager != nil {
+		err = cm.routeImportManager.Start()
+		if err != nil {
+			return fmt.Errorf("failed to start route import: %v", err)
+		}
+	}
+
 	err = cm.defaultNetworkController.Start(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to start default network controller: %v", err)
@@ -463,6 +479,10 @@ func (cm *ControllerManager) Stop() {
 	// stop the NAD controller
 	if cm.networkManager != nil {
 		cm.networkManager.Stop()
+	}
+
+	if cm.routeImportManager != nil {
+		cm.routeImportManager.Stop()
 	}
 }
 
