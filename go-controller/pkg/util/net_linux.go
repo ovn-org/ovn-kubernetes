@@ -53,6 +53,8 @@ type NetLinkOps interface {
 	NeighList(linkIndex, family int) ([]netlink.Neigh, error)
 	ConntrackDeleteFilter(table netlink.ConntrackTableType, family netlink.InetFamily, filter netlink.CustomConntrackFilter) (uint, error)
 	LinkSetVfHardwareAddr(pfLink netlink.Link, vfIndex int, hwaddr net.HardwareAddr) error
+	RouteSubscribeWithOptions(ch chan<- netlink.RouteUpdate, done <-chan struct{}, options netlink.RouteSubscribeOptions) error
+	LinkSubscribeWithOptions(ch chan<- netlink.LinkUpdate, done <-chan struct{}, options netlink.LinkSubscribeOptions) error
 }
 
 type defaultNetLinkOps struct {
@@ -185,6 +187,14 @@ func (defaultNetLinkOps) NeighList(linkIndex, family int) ([]netlink.Neigh, erro
 
 func (defaultNetLinkOps) ConntrackDeleteFilter(table netlink.ConntrackTableType, family netlink.InetFamily, filter netlink.CustomConntrackFilter) (uint, error) {
 	return netlink.ConntrackDeleteFilter(table, family, filter)
+}
+
+func (defaultNetLinkOps) RouteSubscribeWithOptions(ch chan<- netlink.RouteUpdate, done <-chan struct{}, options netlink.RouteSubscribeOptions) error {
+	return netlink.RouteSubscribeWithOptions(ch, done, options)
+}
+
+func (defaultNetLinkOps) LinkSubscribeWithOptions(ch chan<- netlink.LinkUpdate, done <-chan struct{}, options netlink.LinkSubscribeOptions) error {
+	return netlink.LinkSubscribeWithOptions(ch, done, options)
 }
 
 func getFamily(ip net.IP) int {
