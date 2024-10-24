@@ -50,6 +50,14 @@ type NetConf struct {
 	// restart.
 	AllowPersistentIPs bool `json:"allowPersistentIPs,omitempty"`
 
+	// PhysicalNetworkName indicates the name of the physical network to which
+	// the OVN overlay will connect. Only applies to `localnet` topologies.
+	// When omitted, the physical network name of the network will be the value
+	// of the `name` attribute.
+	// This attribute allows multiple overlays to share the same physical
+	// network mapping in the hosts.
+	PhysicalNetworkName string `json:"physicalNetworkName,omitempty"`
+
 	// PciAddrs in case of using sriov or Auxiliry device name in case of SF
 	DeviceID string `json:"deviceID,omitempty"`
 	// LogFile to log all the messages from cni shim binary to
