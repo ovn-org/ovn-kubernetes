@@ -14,6 +14,7 @@ import (
 	nodeipt "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/nad"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
@@ -72,6 +73,7 @@ func initFakeNodePortWatcher(iptV4, iptV6 util.IPTablesHelper) *nodePortWatcher 
 				},
 			},
 		},
+		networkManager: &nad.FakeNetworkManager{},
 	}
 	return &fNPW
 }
@@ -288,7 +290,6 @@ var _ = Describe("Node Operations", func() {
 		Expect(err).NotTo(HaveOccurred())
 		// Make a fake MgmtPortConfig with only the fields we care about
 		fakeMgmtPortIPFamilyConfig := managementPortIPFamilyConfig{
-			ipt:        nil,
 			allSubnets: nil,
 			ifAddr:     nodeNet,
 			gwIP:       nodeNet.IP,

@@ -186,7 +186,7 @@ type SecondaryLocalnetNetworkController struct {
 
 // NewSecondaryLocalnetNetworkController create a new OVN controller for the given secondary localnet NAD
 func NewSecondaryLocalnetNetworkController(cnci *CommonNetworkControllerInfo, netInfo util.NetInfo,
-	nadController networkAttachDefController.NADController) *SecondaryLocalnetNetworkController {
+	networkManager networkAttachDefController.NetworkManager) *SecondaryLocalnetNetworkController {
 
 	stopChan := make(chan struct{})
 
@@ -211,7 +211,7 @@ func NewSecondaryLocalnetNetworkController(cnci *CommonNetworkControllerInfo, ne
 					wg:                          &sync.WaitGroup{},
 					cancelableCtx:               util.NewCancelableContext(),
 					localZoneNodes:              &sync.Map{},
-					nadController:               nadController,
+					networkManager:              networkManager,
 				},
 			},
 		},
