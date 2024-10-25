@@ -597,24 +597,38 @@ func ServiceInternalTrafficPolicyLocal(service *kapi.Service) bool {
 	return service.Spec.InternalTrafficPolicy != nil && *service.Spec.InternalTrafficPolicy == kapi.ServiceInternalTrafficPolicyLocal
 }
 
-// GetClusterSubnets returns the v4&v6 cluster subnets in a cluster separately
-func GetClusterSubnets() ([]*net.IPNet, []*net.IPNet) {
-	var v4ClusterSubnets = []*net.IPNet{}
-	var v6ClusterSubnets = []*net.IPNet{}
+// GetClusterSubnetsWithHostPrefix returns the v4 and v6 cluster subnets, along with their host prefix,
+// in two separate slices
+func GetClusterSubnetsWithHostPrefix() ([]*config.CIDRNetworkEntry, []*config.CIDRNetworkEntry) {
+	var v4ClusterSubnets = []*config.CIDRNetworkEntry{}
+	var v6ClusterSubnets = []*config.CIDRNetworkEntry{}
 	for _, clusterSubnet := range config.Default.ClusterSubnets {
+		clusterSubnet := clusterSubnet
 		if !utilnet.IsIPv6CIDR(clusterSubnet.CIDR) {
-			v4ClusterSubnets = append(v4ClusterSubnets, clusterSubnet.CIDR)
+			v4ClusterSubnets = append(v4ClusterSubnets, &clusterSubnet)
 		} else {
-			v6ClusterSubnets = append(v6ClusterSubnets, clusterSubnet.CIDR)
+			v6ClusterSubnets = append(v6ClusterSubnets, &clusterSubnet)
 		}
 	}
 	return v4ClusterSubnets, v6ClusterSubnets
 }
 
-// GetAllClusterSubnets returns all (v4&v6) cluster subnets in a cluster
-func GetAllClusterSubnets() []*net.IPNet {
-	v4ClusterSubnets, v6ClusterSubnets := GetClusterSubnets()
-	return append(v4ClusterSubnets, v6ClusterSubnets...)
+// GetClusterSubnets returns the v4 and v6 cluster subnets in two separate slices
+func GetClusterSubnets() ([]*net.IPNet, []*net.IPNet) {
+	var v4ClusterSubnets = []*net.IPNet{}
+	var v6ClusterSubnets = []*net.IPNet{}
+
+	v4ClusterSubnetsWithHostPrefix, v6ClusterSubnetsWithHostPrefix := GetClusterSubnetsWithHostPrefix()
+
+	for _, entry := range v4ClusterSubnetsWithHostPrefix {
+		v4ClusterSubnets = append(v4ClusterSubnets, entry.CIDR)
+	}
+
+	for _, entry := range v6ClusterSubnetsWithHostPrefix {
+		v6ClusterSubnets = append(v6ClusterSubnets, entry.CIDR)
+	}
+
+	return v4ClusterSubnets, v6ClusterSubnets
 }
 
 // GetNodePrimaryIP extracts the primary IP address from the node status in the  API
