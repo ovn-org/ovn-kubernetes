@@ -186,8 +186,7 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPorts(is
 
 						networkSwitchToGWRouterLSPName := ovntypes.SwitchToRouterPrefix + switchName
 						networkSwitchToGWRouterLSPUUID := networkSwitchToGWRouterLSPName + "-UUID"
-
-						data = append(data, &nbdb.LogicalSwitchPort{
+						lsp := &nbdb.LogicalSwitchPort{
 							UUID:      networkSwitchToGWRouterLSPUUID,
 							Name:      networkSwitchToGWRouterLSPName,
 							Addresses: []string{"router"},
@@ -197,7 +196,11 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPorts(is
 							},
 							Options: map[string]string{"router-port": ovntypes.RouterToSwitchPrefix + switchName},
 							Type:    "router",
-						})
+						}
+						data = append(data, lsp)
+						if util.IsNetworkSegmentationSupportEnabled() && ocInfo.bnc.IsPrimaryNetwork() {
+							lsp.Options["requested-tnl-key"] = "25"
+						}
 						nodeslsps[switchName] = append(nodeslsps[switchName], networkSwitchToGWRouterLSPUUID)
 
 						const aclUUID = "acl1-UUID"

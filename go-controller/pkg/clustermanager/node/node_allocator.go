@@ -15,6 +15,7 @@ import (
 	"github.com/google/go-cmp/cmp/cmpopts"
 	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	houtil "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/util"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/id"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	ipgenerator "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/generator/ip"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
@@ -33,7 +34,8 @@ import (
 type NodeAllocator struct {
 	kube       kube.Interface
 	nodeLister listers.NodeLister
-
+	// idAllocator of IDs within the network
+	idAllocator                  id.Allocator
 	clusterSubnetAllocator       SubnetAllocator
 	hybridOverlaySubnetAllocator SubnetAllocator
 	// node gateway router port IP generators (connecting to the join switch)
@@ -46,7 +48,7 @@ type NodeAllocator struct {
 	netInfo util.NetInfo
 }
 
-func NewNodeAllocator(networkID int, netInfo util.NetInfo, nodeLister listers.NodeLister, kube kube.Interface) *NodeAllocator {
+func NewNodeAllocator(networkID int, netInfo util.NetInfo, nodeLister listers.NodeLister, kube kube.Interface, tunnelIDAllocator id.Allocator) *NodeAllocator {
 	na := &NodeAllocator{
 		kube:                         kube,
 		nodeLister:                   nodeLister,
@@ -54,6 +56,7 @@ func NewNodeAllocator(networkID int, netInfo util.NetInfo, nodeLister listers.No
 		netInfo:                      netInfo,
 		clusterSubnetAllocator:       NewSubnetAllocator(),
 		hybridOverlaySubnetAllocator: NewSubnetAllocator(),
+		idAllocator:                  tunnelIDAllocator,
 	}
 
 	if na.hasNodeSubnetAllocation() {
@@ -276,14 +279,36 @@ func (na *NodeAllocator) syncNodeNetworkAnnotations(node *corev1.Node) error {
 			updatedSubnetsMap[networkName] = validExistingSubnets
 		}
 	}
+	newTunnelID := util.NoID
+	if util.IsNetworkSegmentationSupportEnabled() && na.netInfo.IsPrimaryNetwork() && util.DoesNetworkRequireTunnelIDs(na.netInfo) {
+		existingTunnelID, err := util.ParseUDNLayer2NodeGRLRPTunnelIDs(node, networkName)
+		if err != nil && !util.IsAnnotationNotSetError(err) {
+			return fmt.Errorf("failed to fetch tunnelID annotation from the node %s for network %s, err: %v",
+				node.Name, networkName, err)
+		}
+		if existingTunnelID == util.InvalidID {
+			if newTunnelID, err = na.idAllocator.AllocateID(networkName + "_" + node.Name); err != nil {
+				return fmt.Errorf("failed to assign node %s tunnel id for network %s: %w", node.Name, networkName, err)
+			}
+			// This log should be printed only once at start up per network; per node
+			klog.V(4).Infof("Allocating node %s tunnelID %d for network %s", node.Name, newTunnelID, networkName)
+		} else {
+			// calling reserve on already reserved id for the same key is a no-op; so we are fine here
+			if err = na.idAllocator.ReserveID(networkName+"_"+node.Name, existingTunnelID); err != nil {
+				return fmt.Errorf("failed to reserve node %s tunnel id for network %s: %w", node.Name, networkName, err)
+			}
+		}
+	}
 
 	// Also update the node annotation if the networkID doesn't match
-	if len(updatedSubnetsMap) > 0 || na.networkID != networkID || len(allocatedJoinSubnets) > 0 {
-		err = na.updateNodeNetworkAnnotationsWithRetry(node.Name, updatedSubnetsMap, na.networkID, allocatedJoinSubnets)
+	if len(updatedSubnetsMap) > 0 || na.networkID != networkID || len(allocatedJoinSubnets) > 0 || newTunnelID != util.NoID {
+		err = na.updateNodeNetworkAnnotationsWithRetry(node.Name, updatedSubnetsMap, na.networkID, newTunnelID, allocatedJoinSubnets)
 		if err != nil {
 			if errR := na.clusterSubnetAllocator.ReleaseNetworks(node.Name, allocatedSubnets...); errR != nil {
 				klog.Warningf("Error releasing node %s subnets: %v", node.Name, errR)
 			}
+			na.idAllocator.ReleaseID(networkName + "_" + node.Name)
+			klog.Infof("Releasing node %s tunnelID for network %s since annotation update failed", node.Name, networkName)
 			return err
 		}
 	}
@@ -351,7 +376,7 @@ func (na *NodeAllocator) Sync(nodes []interface{}) error {
 }
 
 // updateNodeNetworkAnnotationsWithRetry will update the node's subnet annotation and network id annotation
-func (na *NodeAllocator) updateNodeNetworkAnnotationsWithRetry(nodeName string, hostSubnetsMap map[string][]*net.IPNet, networkId int, joinAddr []*net.IPNet) error {
+func (na *NodeAllocator) updateNodeNetworkAnnotationsWithRetry(nodeName string, hostSubnetsMap map[string][]*net.IPNet, networkId, tunnelID int, joinAddr []*net.IPNet) error {
 	// Retry if it fails because of potential conflict which is transient. Return error in the
 	// case of other errors (say temporary API server down), and it will be taken care of by the
 	// retry mechanism.
@@ -366,8 +391,8 @@ func (na *NodeAllocator) updateNodeNetworkAnnotationsWithRetry(nodeName string, 
 		for netName, hostSubnets := range hostSubnetsMap {
 			cnode.Annotations, err = util.UpdateNodeHostSubnetAnnotation(cnode.Annotations, hostSubnets, netName)
 			if err != nil {
-				return fmt.Errorf("failed to update node %q annotation subnet %s",
-					node.Name, util.JoinIPNets(hostSubnets, ","))
+				return fmt.Errorf("failed to update node %q annotation subnet %s: %w",
+					node.Name, util.JoinIPNets(hostSubnets, ","), err)
 			}
 		}
 
@@ -375,14 +400,20 @@ func (na *NodeAllocator) updateNodeNetworkAnnotationsWithRetry(nodeName string, 
 
 		cnode.Annotations, err = util.UpdateNodeGatewayRouterLRPAddrsAnnotation(cnode.Annotations, joinAddr, networkName)
 		if err != nil {
-			return fmt.Errorf("failed to update node %q annotation LRPAddrAnnotation %s",
-				node.Name, util.JoinIPNets(joinAddr, ","))
+			return fmt.Errorf("failed to update node %q annotation LRPAddrAnnotation %s: %w",
+				node.Name, util.JoinIPNets(joinAddr, ","), err)
 		}
-
 		cnode.Annotations, err = util.UpdateNetworkIDAnnotation(cnode.Annotations, networkName, networkId)
 		if err != nil {
-			return fmt.Errorf("failed to update node %q network id annotation %d for network %s",
-				node.Name, networkId, networkName)
+			return fmt.Errorf("failed to update node %q network id annotation %d for network %s: %w",
+				node.Name, networkId, networkName, err)
+		}
+		if tunnelID != util.NoID {
+			cnode.Annotations, err = util.UpdateUDNLayer2NodeGRLRPTunnelIDs(cnode.Annotations, networkName, tunnelID)
+			if err != nil {
+				return fmt.Errorf("failed to update node %q tunnel id annotation %d for network %s: %w",
+					node.Name, tunnelID, networkName, err)
+			}
 		}
 		// It is possible to update the node annotations using status subresource
 		// because changes to metadata via status subresource are not restricted for nodes.
@@ -413,8 +444,8 @@ func (na *NodeAllocator) Cleanup() error {
 		}
 
 		hostSubnetsMap := map[string][]*net.IPNet{networkName: nil}
-		// passing util.InvalidNetworkID deletes the network id annotation for the network.
-		err = na.updateNodeNetworkAnnotationsWithRetry(node.Name, hostSubnetsMap, util.InvalidNetworkID, nil)
+		// passing util.InvalidID deletes the network/tunnel id annotation for the network.
+		err = na.updateNodeNetworkAnnotationsWithRetry(node.Name, hostSubnetsMap, util.InvalidID, util.InvalidID, nil)
 		if err != nil {
 			return fmt.Errorf("failed to clear node %q subnet annotation for network %s",
 				node.Name, networkName)

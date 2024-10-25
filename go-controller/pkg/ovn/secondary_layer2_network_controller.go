@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net"
 	"reflect"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -113,7 +115,7 @@ func (h *secondaryLayer2NetworkControllerEventHandler) AddResource(obj interface
 			}
 			return h.oc.addUpdateLocalNodeEvent(node, nodeParams)
 		}
-		return h.oc.addUpdateRemoteNodeEvent(node)
+		return h.oc.addUpdateRemoteNodeEvent(node, config.OVNKubernetesFeature.EnableInterconnect)
 	default:
 		return h.oc.AddSecondaryNetworkResourceCommon(h.objType, obj)
 	}
@@ -176,7 +178,8 @@ func (h *secondaryLayer2NetworkControllerEventHandler) UpdateResource(oldObj, ne
 
 			return h.oc.addUpdateLocalNodeEvent(newNode, nodeSyncsParam)
 		} else {
-			return h.oc.addUpdateRemoteNodeEvent(newNode)
+			_, syncZoneIC := h.oc.syncZoneICFailed.Load(newNode.Name)
+			return h.oc.addUpdateRemoteNodeEvent(newNode, syncZoneIC)
 		}
 	default:
 		return h.oc.UpdateSecondaryNetworkResourceCommon(h.objType, oldObj, newObj, inRetryCache)
@@ -231,8 +234,9 @@ type SecondaryLayer2NetworkController struct {
 	BaseSecondaryLayer2NetworkController
 
 	// Node-specific syncMaps used by node event handler
-	mgmtPortFailed sync.Map
-	gatewaysFailed sync.Map
+	mgmtPortFailed   sync.Map
+	gatewaysFailed   sync.Map
+	syncZoneICFailed sync.Map
 
 	// Cluster-wide router default Control Plane Protection (COPP) UUID
 	defaultCOPPUUID string
@@ -309,9 +313,10 @@ func NewSecondaryLayer2NetworkController(cnci *CommonNetworkControllerInfo, netI
 				},
 			},
 		},
-		mgmtPortFailed:  sync.Map{},
-		gatewayManagers: sync.Map{},
-		svcController:   svcController,
+		mgmtPortFailed:   sync.Map{},
+		syncZoneICFailed: sync.Map{},
+		gatewayManagers:  sync.Map{},
+		svcController:    svcController,
 	}
 
 	if config.OVNKubernetesFeature.EnableInterconnect {
@@ -550,6 +555,83 @@ func (oc *SecondaryLayer2NetworkController) addUpdateLocalNodeEvent(node *corev1
 		oc.recordNodeErrorEvent(node, err)
 	}
 	return err
+}
+
+func (oc *SecondaryLayer2NetworkController) addUpdateRemoteNodeEvent(node *corev1.Node, syncZoneIC bool) error {
+	var errs []error
+
+	if util.IsNetworkSegmentationSupportEnabled() && oc.IsPrimaryNetwork() {
+		if syncZoneIC && config.OVNKubernetesFeature.EnableInterconnect {
+			if err := oc.addPortForRemoteNodeGR(node); err != nil {
+				err = fmt.Errorf("failed to add the remote zone node %s's remote LRP, %w", node.Name, err)
+				errs = append(errs, err)
+				oc.syncZoneICFailed.Store(node.Name, true)
+			} else {
+				oc.syncZoneICFailed.Delete(node.Name)
+			}
+		}
+	}
+
+	errs = append(errs, oc.BaseSecondaryLayer2NetworkController.addUpdateRemoteNodeEvent(node))
+
+	err := utilerrors.Join(errs...)
+	if err != nil {
+		oc.recordNodeErrorEvent(node, err)
+	}
+	return err
+}
+
+func (oc *SecondaryLayer2NetworkController) addPortForRemoteNodeGR(node *corev1.Node) error {
+	nodeJoinSubnetIPs, err := util.ParseNodeGatewayRouterJoinAddrs(node, oc.GetNetworkName())
+	if err != nil {
+		if util.IsAnnotationNotSetError(err) {
+			// remote node may not have the annotation yet, suppress it
+			return types.NewSuppressedError(err)
+		}
+		return fmt.Errorf("failed to get the node %s join subnet IPs: %w", node.Name, err)
+	}
+	if len(nodeJoinSubnetIPs) == 0 {
+		return fmt.Errorf("annotation on the node %s had empty join subnet IPs", node.Name)
+	}
+
+	remoteGRPortMac := util.IPAddrToHWAddr(nodeJoinSubnetIPs[0].IP)
+	var remoteGRPortNetworks []string
+	for _, ip := range nodeJoinSubnetIPs {
+		remoteGRPortNetworks = append(remoteGRPortNetworks, ip.String())
+	}
+
+	remotePortAddr := remoteGRPortMac.String() + " " + strings.Join(remoteGRPortNetworks, " ")
+	klog.V(5).Infof("The remote port addresses for node %s in network %s are %s", node.Name, oc.GetNetworkName(), remotePortAddr)
+	logicalSwitchPort := nbdb.LogicalSwitchPort{
+		Name:      types.SwitchToRouterPrefix + oc.GetNetworkScopedSwitchName(types.OVNLayer2Switch) + "_" + node.Name,
+		Type:      "remote",
+		Addresses: []string{remotePortAddr},
+	}
+	logicalSwitchPort.ExternalIDs = map[string]string{
+		types.NetworkExternalID:  oc.GetNetworkName(),
+		types.TopologyExternalID: oc.TopologyType(),
+		types.NodeExternalID:     node.Name,
+	}
+	tunnelID, err := util.ParseUDNLayer2NodeGRLRPTunnelIDs(node, oc.GetNetworkName())
+	if err != nil {
+		if util.IsAnnotationNotSetError(err) {
+			// remote node may not have the annotation yet, suppress it
+			return types.NewSuppressedError(err)
+		}
+		// Don't consider this node as cluster-manager has not allocated node id yet.
+		return fmt.Errorf("failed to fetch tunnelID annotation from the node %s for network %s, err: %w",
+			node.Name, oc.GetNetworkName(), err)
+	}
+	logicalSwitchPort.Options = map[string]string{
+		"requested-tnl-key": strconv.Itoa(tunnelID),
+		"requested-chassis": node.Name,
+	}
+	sw := nbdb.LogicalSwitch{Name: oc.GetNetworkScopedSwitchName(types.OVNLayer2Switch)}
+	err = libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitch(oc.nbClient, &sw, &logicalSwitchPort)
+	if err != nil {
+		return fmt.Errorf("failed to create port %v on logical switch %q: %v", logicalSwitchPort, sw.Name, err)
+	}
+	return nil
 }
 
 func (oc *SecondaryLayer2NetworkController) deleteNodeEvent(node *corev1.Node) error {
