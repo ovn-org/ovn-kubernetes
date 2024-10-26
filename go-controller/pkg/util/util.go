@@ -418,6 +418,10 @@ func GetLogicalPortName(podNamespace, podName string) string {
 	return composePortName(podNamespace, podName)
 }
 
+func GetNamespacePodFromCDNPortName(portName string) (string, string) {
+	return decomposePortName(portName)
+}
+
 func GetSecondaryNetworkIfaceId(podNamespace, podName, nadName string) string {
 	return GetSecondaryNetworkPrefix(nadName) + composePortName(podNamespace, podName)
 }
@@ -434,6 +438,14 @@ func GetIfaceId(podNamespace, podName string) string {
 // identify the network interface of that entity.
 func composePortName(podNamespace, podName string) string {
 	return podNamespace + "_" + podName
+}
+
+func decomposePortName(s string) (string, string) {
+	namespacePod := strings.Split(s, "_")
+	if len(namespacePod) != 2 {
+		return "", ""
+	}
+	return namespacePod[0], namespacePod[1]
 }
 
 func SliceHasStringItem(slice []string, item string) bool {
