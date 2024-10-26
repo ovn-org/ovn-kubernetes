@@ -200,7 +200,7 @@ func NewSecondaryLocalnetNetworkController(cnci *CommonNetworkControllerInfo, ne
 					controllerName:              getNetworkControllerName(netInfo.GetNetworkName()),
 					NetInfo:                     netInfo,
 					lsManager:                   lsm.NewL2SwitchManager(),
-					logicalPortCache:            newPortCache(stopChan),
+					logicalPortCache:            NewPortCache(stopChan),
 					namespaces:                  make(map[string]*namespaceInfo),
 					namespacesMutex:             sync.Mutex{},
 					addressSetFactory:           addressSetFactory,

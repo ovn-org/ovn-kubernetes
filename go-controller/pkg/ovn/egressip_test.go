@@ -5357,7 +5357,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							EgressIP: egressIP2,
 						},
 					}
-					err = fakeOvn.controller.patchReplaceEgressIPStatus(eIP.Name, status)
+					err = fakeOvn.controller.eIPC.patchReplaceEgressIPStatus(eIP.Name, status)
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 					gomega.Eventually(getEgressIPStatusLen(eIP.Name)).Should(gomega.Equal(2))
@@ -5543,7 +5543,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							EgressIP: egressIP2,
 						},
 					}
-					err = fakeOvn.controller.patchReplaceEgressIPStatus(eIP.Name, status)
+					err = fakeOvn.controller.eIPC.patchReplaceEgressIPStatus(eIP.Name, status)
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 					gomega.Eventually(func() []string {
@@ -5993,7 +5993,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					},
 				}
 				fakeOvn.startWithDBSetup(libovsdbtest.TestSetup{})
-				err := fakeOvn.controller.reconcileEgressIP(&eIP, &eIP)
+				err := fakeOvn.controller.eIPC.reconcileEgressIP(&eIP, &eIP)
 				gomega.Expect(err).To(gomega.HaveOccurred())
 				return nil
 			}
@@ -6690,7 +6690,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				// recreate pod with same name immediately; simulating handler race (pods v/s egressip) condition,
 				// so instead of proper pod create, we try out egressIP pod setup which will be a no-op since pod doesn't exist
 				ginkgo.By("should not add egress IP setup for a deleted pod whose entry exists in logicalPortCache")
-				err = fakeOvn.controller.addPodEgressIPAssignments(egressIPName, eIP.Status.Items, &egressPod1)
+				err = fakeOvn.controller.eIPC.addPodEgressIPAssignments(egressIPName, eIP.Status.Items, &egressPod1)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				// pod is gone but logicalPortCache holds the entry for 60seconds
 				egressPodPortInfo, err = fakeOvn.controller.logicalPortCache.get(&egressPod1, types.DefaultNetworkName)
@@ -7264,7 +7264,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							EgressIP: egressIP3,
 						},
 					}
-					err = fakeOvn.controller.patchReplaceEgressIPStatus(egressIP2Name, status)
+					err = fakeOvn.controller.eIPC.patchReplaceEgressIPStatus(egressIP2Name, status)
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 					egressPodPortInfo, err := fakeOvn.controller.logicalPortCache.get(&egressPod1, types.DefaultNetworkName)
@@ -7460,7 +7460,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							EgressIP: egressIP2,
 						},
 					}
-					err = fakeOvn.controller.patchReplaceEgressIPStatus(egressIPName, status)
+					err = fakeOvn.controller.eIPC.patchReplaceEgressIPStatus(egressIPName, status)
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 					// ensure secondIP from first object gets assigned to node2
@@ -7514,9 +7514,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					// replicates controller startup state
 					fakeOvn.controller.eIPC.podAssignmentMutex.Unlock()
 
-					egressIPCache, err := fakeOvn.controller.generateCacheForEgressIP()
+					egressIPCache, err := fakeOvn.controller.eIPC.generateCacheForEgressIP()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
-					err = fakeOvn.controller.syncPodAssignmentCache(egressIPCache)
+					err = fakeOvn.controller.eIPC.syncPodAssignmentCache(egressIPCache)
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 					pas = getPodAssignmentState(&egressPod1)
@@ -7558,7 +7558,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							EgressIP: egressIP3,
 						},
 					}
-					err = fakeOvn.controller.patchReplaceEgressIPStatus(egressIP2Name, status)
+					err = fakeOvn.controller.eIPC.patchReplaceEgressIPStatus(egressIP2Name, status)
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 					gomega.Eventually(func(g gomega.Gomega) {
@@ -7698,9 +7698,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					fakeOvn.controller.eIPC.podAssignment = make(map[string]*podAssignmentState) // replicates controller startup state
 					fakeOvn.controller.eIPC.podAssignmentMutex.Unlock()
 
-					egressIPCache, err = fakeOvn.controller.generateCacheForEgressIP()
+					egressIPCache, err = fakeOvn.controller.eIPC.generateCacheForEgressIP()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
-					err = fakeOvn.controller.syncPodAssignmentCache(egressIPCache)
+					err = fakeOvn.controller.eIPC.syncPodAssignmentCache(egressIPCache)
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 					// we don't have any egressIPs, so cache is nil
@@ -9787,7 +9787,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						EgressIP: egressIP2,
 					},
 				}
-				err = fakeOvn.controller.patchReplaceEgressIPStatus(egressIPName, status)
+				err = fakeOvn.controller.eIPC.patchReplaceEgressIPStatus(egressIPName, status)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				gomega.Eventually(getEgressIPStatusLen(egressIPName)).Should(gomega.Equal(2))
@@ -11031,7 +11031,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						EgressIP: egressIP2,
 					},
 				}
-				err = fakeOvn.controller.patchReplaceEgressIPStatus(egressIPName, status)
+				err = fakeOvn.controller.eIPC.patchReplaceEgressIPStatus(egressIPName, status)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Eventually(getEgressIPStatusLen(egressIPName)).Should(gomega.Equal(2))
 				gomega.Eventually(getEgressIPReassignmentCount).Should(gomega.Equal(0))
@@ -11363,7 +11363,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				// For the sake of unit testing egressip zone controller we need to patch egressIP object manually
 				// There are tests in cluster-manager package covering the patch logic.
 				status = []egressipv1.EgressIPStatusItem{}
-				err = fakeOvn.controller.patchReplaceEgressIPStatus(egressIPName, status)
+				err = fakeOvn.controller.eIPC.patchReplaceEgressIPStatus(egressIPName, status)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				gomega.Eventually(getEgressIPStatusLen(egressIPName)).Should(gomega.Equal(0))
@@ -11799,7 +11799,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						EgressIP: egressIP2,
 					},
 				}
-				err = fakeOvn.controller.patchReplaceEgressIPStatus(egressIPName, status)
+				err = fakeOvn.controller.eIPC.patchReplaceEgressIPStatus(egressIPName, status)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Eventually(getEgressIPStatusLen(egressIPName)).Should(gomega.Equal(2))
 				gomega.Eventually(getEgressIPReassignmentCount).Should(gomega.Equal(0))
@@ -11990,7 +11990,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						EgressIP: egressIP2,
 					},
 				}
-				err = fakeOvn.controller.patchReplaceEgressIPStatus(egressIPName, status)
+				err = fakeOvn.controller.eIPC.patchReplaceEgressIPStatus(egressIPName, status)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Eventually(getEgressIPStatusLen(egressIPName)).Should(gomega.Equal(2))
 				gomega.Eventually(getEgressIPReassignmentCount).Should(gomega.Equal(0))

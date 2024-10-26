@@ -20,6 +20,7 @@ import (
 	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/observability"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
+	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -48,13 +49,15 @@ type NetworkControllerManager struct {
 	// Supports OVN Template Load Balancers?
 	svcTemplateSupport bool
 
-	stopChan chan struct{}
-	wg       *sync.WaitGroup
-
+	stopChan                 chan struct{}
+	wg                       *sync.WaitGroup
+	portCache                *ovn.PortCache
 	defaultNetworkController nad.BaseNetworkController
 
 	// net-attach-def controller handle net-attach-def and create/delete network controllers
 	nadController *nad.NetAttachDefinitionController
+	// eIPController programs OVN to support EgressIP
+	eIPController *ovn.EgressIPController
 }
 
 func (cm *NetworkControllerManager) NewNetworkController(nInfo util.NetInfo) (nad.NetworkController, error) {
@@ -180,7 +183,7 @@ func NewNetworkControllerManager(ovnClient *util.OVNClientset, wf *factory.Watch
 	libovsdbOvnNBClient libovsdbclient.Client, libovsdbOvnSBClient libovsdbclient.Client,
 	recorder record.EventRecorder, wg *sync.WaitGroup) (*NetworkControllerManager, error) {
 	podRecorder := metrics.NewPodRecorder()
-
+	stopCh := make(chan struct{})
 	cm := &NetworkControllerManager{
 		client: ovnClient.KubeClient,
 		kube: &kube.KubeOVN{
@@ -194,13 +197,13 @@ func NewNetworkControllerManager(ovnClient *util.OVNClientset, wf *factory.Watch
 			EgressQoSClient:      ovnClient.EgressQoSClient,
 			IPAMClaimsClient:     ovnClient.IPAMClaimsClient,
 		},
-		stopChan:     make(chan struct{}),
-		watchFactory: wf,
-		recorder:     recorder,
-		nbClient:     libovsdbOvnNBClient,
-		sbClient:     libovsdbOvnSBClient,
-		podRecorder:  &podRecorder,
-
+		stopChan:         stopCh,
+		watchFactory:     wf,
+		recorder:         recorder,
+		nbClient:         libovsdbOvnNBClient,
+		sbClient:         libovsdbOvnSBClient,
+		podRecorder:      &podRecorder,
+		portCache:        ovn.NewPortCache(stopCh),
 		wg:               wg,
 		multicastSupport: config.EnableMulticast,
 	}
@@ -292,7 +295,7 @@ func (cm *NetworkControllerManager) initDefaultNetworkController(nadController *
 	if err != nil {
 		return fmt.Errorf("failed to create common network controller info: %w", err)
 	}
-	defaultController, err := ovn.NewDefaultNetworkController(cnci, nadController, observManager)
+	defaultController, err := ovn.NewDefaultNetworkController(cnci, nadController, observManager, cm.portCache, cm.eIPController)
 	if err != nil {
 		return err
 	}
@@ -405,6 +408,10 @@ func (cm *NetworkControllerManager) Start(ctx context.Context) error {
 		if err != nil {
 			klog.Warningf("Observability cleanup failed, expected if not all Samples ware deleted yet: %v", err)
 		}
+	}
+	if config.OVNKubernetesFeature.EnableEgressIP {
+		cm.eIPController = ovn.NewEIPController(cm.nbClient, cm.kube, cm.watchFactory, cm.recorder, cm.portCache, cm.nadController,
+			addressset.NewOvnAddressSetFactory(cm.nbClient, config.IPv4Mode, config.IPv6Mode), config.IPv4Mode, config.IPv6Mode, zone, ovn.DefaultNetworkControllerName)
 	}
 	err = cm.initDefaultNetworkController(cm.nadController, observabilityManager)
 	if err != nil {
