@@ -69,7 +69,7 @@ func (cm *NetworkControllerManager) NewNetworkController(nInfo util.NetInfo) (na
 	topoType := nInfo.TopologyType()
 	switch topoType {
 	case ovntypes.Layer3Topology:
-		return ovn.NewSecondaryLayer3NetworkController(cnci, nInfo, cm.nadController)
+		return ovn.NewSecondaryLayer3NetworkController(cnci, nInfo, cm.nadController, cm.eIPController, cm.portCache)
 	case ovntypes.Layer2Topology:
 		return ovn.NewSecondaryLayer2NetworkController(cnci, nInfo, cm.nadController)
 	case ovntypes.LocalnetTopology:
@@ -87,7 +87,7 @@ func (cm *NetworkControllerManager) newDummyNetworkController(topoType, netName 
 	netInfo, _ := util.NewNetInfo(&ovncnitypes.NetConf{NetConf: types.NetConf{Name: netName}, Topology: topoType})
 	switch topoType {
 	case ovntypes.Layer3Topology:
-		return ovn.NewSecondaryLayer3NetworkController(cnci, netInfo, cm.nadController)
+		return ovn.NewSecondaryLayer3NetworkController(cnci, netInfo, cm.nadController, cm.eIPController, cm.portCache)
 	case ovntypes.Layer2Topology:
 		return ovn.NewSecondaryLayer2NetworkController(cnci, netInfo, cm.nadController)
 	case ovntypes.LocalnetTopology:
@@ -391,6 +391,12 @@ func (cm *NetworkControllerManager) Start(ctx context.Context) error {
 		metrics.GetConfigDurationRecorder().Run(cm.nbClient, cm.kube, 10, time.Second*5, cm.stopChan)
 	}
 	cm.podRecorder.Run(cm.sbClient, cm.stopChan)
+
+	if config.OVNKubernetesFeature.EnableEgressIP {
+		cm.eIPController = ovn.NewEIPController(cm.nbClient, cm.kube, cm.watchFactory, cm.recorder, cm.portCache, cm.nadController,
+			addressset.NewOvnAddressSetFactory(cm.nbClient, config.IPv4Mode, config.IPv6Mode), config.IPv4Mode, config.IPv6Mode, zone, ovn.DefaultNetworkControllerName)
+	}
+
 	// nadController is nil if multi-network is disabled
 	if cm.nadController != nil {
 		if err = cm.nadController.Start(); err != nil {
@@ -409,10 +415,6 @@ func (cm *NetworkControllerManager) Start(ctx context.Context) error {
 		if err != nil {
 			klog.Warningf("Observability cleanup failed, expected if not all Samples ware deleted yet: %v", err)
 		}
-	}
-	if config.OVNKubernetesFeature.EnableEgressIP {
-		cm.eIPController = ovn.NewEIPController(cm.nbClient, cm.kube, cm.watchFactory, cm.recorder, cm.portCache, cm.nadController,
-			addressset.NewOvnAddressSetFactory(cm.nbClient, config.IPv4Mode, config.IPv6Mode), config.IPv4Mode, config.IPv6Mode, zone, ovn.DefaultNetworkControllerName)
 	}
 
 	if util.IsNetworkSegmentationSupportEnabled() {
