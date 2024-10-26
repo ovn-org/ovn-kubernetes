@@ -29,12 +29,11 @@ import (
 // (TODO: FIXME): With this route, we are officially breaking support for IC with zones that have multiple-nodes
 // NOTE: This route is exactly the same as what is added by pod-live-migration feature and we keep the route exactly
 // same across the 3 features so that if the route already exists on the node, this is just a no-op
-func CreateDefaultRouteToExternal(nbClient libovsdbclient.Client, clusterRouter, gwRouterName string) error {
+func CreateDefaultRouteToExternal(nbClient libovsdbclient.Client, clusterRouter, gwRouterName string, clusterSubnets []*net.IPNet) error {
 	gatewayIPs, err := GetLRPAddrs(nbClient, types.GWRouterToJoinSwitchPrefix+gwRouterName)
 	if err != nil {
 		return fmt.Errorf("attempt at finding node gateway router %s network information failed, err: %w", gwRouterName, err)
 	}
-	clusterSubnets := util.GetAllClusterSubnets()
 	for _, subnet := range clusterSubnets {
 		gatewayIP, err := util.MatchFirstIPNetFamily(utilnet.IsIPv6String(subnet.IP.String()), gatewayIPs)
 		if err != nil {

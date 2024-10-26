@@ -2,6 +2,7 @@ package kubevirt
 
 import (
 	"fmt"
+	"net"
 
 	corev1 "k8s.io/api/core/v1"
 	utilnet "k8s.io/utils/net"
@@ -65,7 +66,8 @@ func DeleteRoutingForMigratedPod(nbClient libovsdbclient.Client, pod *corev1.Pod
 //
 // Both:
 //   - static route with VM ip as dst-ip prefix and output port the LRP pointing to the VM's node switch
-func EnsureLocalZonePodAddressesToNodeRoute(watchFactory *factory.WatchFactory, nbClient libovsdbclient.Client, lsManager *logicalswitchmanager.LogicalSwitchManager, pod *corev1.Pod, nadName string) error {
+func EnsureLocalZonePodAddressesToNodeRoute(watchFactory *factory.WatchFactory, nbClient libovsdbclient.Client,
+	lsManager *logicalswitchmanager.LogicalSwitchManager, pod *corev1.Pod, nadName string, clusterSubnets []*net.IPNet) error {
 	vmReady, err := virtualMachineReady(watchFactory, pod)
 	if err != nil {
 		return err
@@ -94,7 +96,7 @@ func EnsureLocalZonePodAddressesToNodeRoute(watchFactory *factory.WatchFactory, 
 	if config.OVNKubernetesFeature.EnableInterconnect {
 		// NOTE: EIP & ESVC use same route and if this is already present thanks to those features,
 		// this will be a no-op
-		if err := libovsdbutil.CreateDefaultRouteToExternal(nbClient, types.OVNClusterRouter, types.GWRouterPrefix+pod.Spec.NodeName); err != nil {
+		if err := libovsdbutil.CreateDefaultRouteToExternal(nbClient, types.OVNClusterRouter, types.GWRouterPrefix+pod.Spec.NodeName, clusterSubnets); err != nil {
 			return err
 		}
 	}
