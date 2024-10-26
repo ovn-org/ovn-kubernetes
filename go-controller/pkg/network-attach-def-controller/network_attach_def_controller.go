@@ -57,6 +57,8 @@ type NADController interface {
 	Start() error
 	Stop()
 	GetActiveNetworkForNamespace(namespace string) (util.NetInfo, error)
+	GetNetwork(networkName string) (util.NetInfo, error)
+	GetActiveNetworkNamespaces(networkName string) ([]string, error)
 }
 
 // NetAttachDefinitionController handles namespaced scoped NAD events and
@@ -359,4 +361,40 @@ func (nadController *NetAttachDefinitionController) GetActiveNetworkForNamespace
 	}
 
 	return &util.DefaultNetInfo{}, nil
+}
+
+func (nadController *NetAttachDefinitionController) GetNetwork(networkName string) (util.NetInfo, error) {
+	if !util.IsNetworkSegmentationSupportEnabled() {
+		return &util.DefaultNetInfo{}, nil
+	}
+	nadController.RLock()
+	defer nadController.RUnlock()
+	if networkName == "" {
+		return nil, fmt.Errorf("network must not be empty")
+	}
+	if networkName == "default" {
+		return &util.DefaultNetInfo{}, nil
+	}
+	network := nadController.networkManager.getNetwork(networkName)
+	if network == nil {
+		return nil, fmt.Errorf("failed to find network %q", networkName)
+	}
+	return util.CopyNetInfo(network), nil
+}
+
+func (nadController *NetAttachDefinitionController) GetActiveNetworkNamespaces(networkName string) ([]string, error) {
+	if !util.IsNetworkSegmentationSupportEnabled() {
+		return []string{"default"}, nil
+	}
+	namespaces := make([]string, 0)
+	nadController.RLock()
+	defer nadController.RUnlock()
+	for namespaceName, primaryNAD := range nadController.primaryNADs {
+		nadNetworkName := nadController.nads[primaryNAD]
+		if nadNetworkName != networkName {
+			continue
+		}
+		namespaces = append(namespaces, namespaceName)
+	}
+	return namespaces, nil
 }

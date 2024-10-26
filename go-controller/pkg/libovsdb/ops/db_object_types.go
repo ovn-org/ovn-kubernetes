@@ -47,6 +47,7 @@ const (
 	PolicyDirectionKey    ExternalIDKey = "direction"
 	GressIdxKey           ExternalIDKey = "gress-index"
 	IPFamilyKey           ExternalIDKey = "ip-family"
+	NetworkKey            ExternalIDKey = "network"
 	TypeKey               ExternalIDKey = "type"
 	IpKey                 ExternalIDKey = "ip"
 	PortPolicyIndexKey    ExternalIDKey = "port-policy-index"
@@ -125,6 +126,7 @@ var AddressSetEgressIP = newObjectIDsType(addressSet, EgressIPOwnerType, []Exter
 	// cluster-wide address set name
 	ObjectNameKey,
 	IPFamilyKey,
+	NetworkKey,
 })
 
 var AddressSetEgressService = newObjectIDsType(addressSet, EgressServiceOwnerType, []ExternalIDKey{
@@ -316,6 +318,7 @@ var LogicalRouterPolicyEgressIP = newObjectIDsType(logicalRouterPolicy, EgressIP
 	ObjectNameKey,
 	// the IP Family for this policy, ip4 or ip6 or ip(dualstack)
 	IPFamilyKey,
+	NetworkKey,
 })
 
 var NATEgressIP = newObjectIDsType(nat, EgressIPOwnerType, []ExternalIDKey{
