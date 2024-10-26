@@ -1220,3 +1220,22 @@ func DeleteNATsWithPredicateOps(nbClient libovsdbclient.Client, ops []libovsdb.O
 	m := newModelClient(nbClient)
 	return m.DeleteOps(ops, opModels...)
 }
+
+func UpdateNATOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, nats ...*nbdb.NAT) ([]libovsdb.Operation, error) {
+	opModels := make([]operationModel, 0, len(nats))
+	for i := range nats {
+		nat := nats[i]
+		opModel := []operationModel{
+			{
+				Model:          nat,
+				OnModelUpdates: onModelUpdatesAllNonDefault(),
+				ErrNotFound:    true,
+				BulkOp:         false,
+			},
+		}
+		opModels = append(opModels, opModel...)
+	}
+
+	m := newModelClient(nbClient)
+	return m.CreateOrUpdateOps(ops, opModels...)
+}
