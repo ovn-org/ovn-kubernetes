@@ -220,7 +220,7 @@ func TestCreateDefaultRouteToExternal(t *testing.T) {
 				tc.preTestAction()
 			}
 
-			if err = CreateDefaultRouteToExternal(nbClient, ovnClusterRouterName, gwRouterName); err != nil {
+			if err = CreateDefaultRouteToExternal(nbClient, ovnClusterRouterName, gwRouterName, config.Default.ClusterSubnets); err != nil {
 				t.Fatal(fmt.Errorf("failed to run CreateDefaultRouteToExternal: %v", err))
 			}
 

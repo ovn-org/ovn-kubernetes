@@ -44,3 +44,22 @@ func (nc *FakeNADController) GetActiveNetworkForNamespace(namespace string) (uti
 	}
 	return &util.DefaultNetInfo{}, nil
 }
+func (nc *FakeNADController) GetNetwork(networkName string) (util.NetInfo, error) {
+	for _, ni := range nc.PrimaryNetworks {
+		if ni.GetNetworkName() == networkName {
+			return ni, nil
+		}
+	}
+	return &util.DefaultNetInfo{}, nil
+}
+func (nc *FakeNADController) GetActiveNetworkNamespaces(networkName string) ([]string, error) {
+	namespaces := make([]string, 0)
+	for namespaceName, primaryNAD := range nc.PrimaryNetworks {
+		nadNetworkName := primaryNAD.GetNADs()[0]
+		if nadNetworkName != networkName {
+			continue
+		}
+		namespaces = append(namespaces, namespaceName)
+	}
+	return namespaces, nil
+}
