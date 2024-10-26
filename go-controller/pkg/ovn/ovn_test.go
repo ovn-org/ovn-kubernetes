@@ -334,7 +334,10 @@ func NewOvnController(ovnClient *util.OVNMasterClientset, wf *factory.WatchFacto
 			return nil, err
 		}
 	}
-	dnc, err := newDefaultNetworkControllerCommon(cnci, stopChan, wg, addressSetFactory, nadController, nil)
+	portCache := NewPortCache(stopChan)
+	eIPController := NewEIPController(libovsdbOvnNBClient, cnci.kube, wf,
+		recorder, portCache, nadController, addressSetFactory, config.IPv4Mode, config.IPv6Mode, cnci.zone, DefaultNetworkControllerName)
+	dnc, err := newDefaultNetworkControllerCommon(cnci, stopChan, wg, addressSetFactory, nadController, nil, portCache, eIPController)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 	if nbZoneFailed {
@@ -496,7 +499,7 @@ func (o *FakeOVN) patchEgressIPObj(nodeName, egressIPName, egressIP, network str
 			EgressIP: egressIP,
 		},
 	}
-	err := o.controller.patchReplaceEgressIPStatus(egressIPName, status)
+	err := o.controller.eIPC.patchReplaceEgressIPStatus(egressIPName, status)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 }
 

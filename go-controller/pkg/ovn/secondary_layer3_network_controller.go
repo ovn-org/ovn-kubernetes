@@ -342,7 +342,7 @@ func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netI
 				controllerName:              getNetworkControllerName(netInfo.GetNetworkName()),
 				NetInfo:                     netInfo,
 				lsManager:                   lsm.NewLogicalSwitchManager(),
-				logicalPortCache:            newPortCache(stopChan),
+				logicalPortCache:            NewPortCache(stopChan),
 				namespaces:                  make(map[string]*namespaceInfo),
 				namespacesMutex:             sync.Mutex{},
 				addressSetFactory:           addressSetFactory,
