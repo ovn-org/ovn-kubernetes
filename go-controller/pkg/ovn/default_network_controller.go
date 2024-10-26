@@ -25,6 +25,8 @@ import (
 	dnsnameresolver "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/dns_name_resolver"
 	aclsyncer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/external_ids_syncer/acl"
 	addrsetsyncer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/external_ids_syncer/address_set"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/external_ids_syncer/logical_router_policy"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/external_ids_syncer/nat"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/external_ids_syncer/port_group"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/topology"
@@ -314,6 +316,17 @@ func (oc *DefaultNetworkController) syncDb() error {
 	err = oc.cleanupPodSelectorAddressSets()
 	if err != nil {
 		return fmt.Errorf("cleaning up stale pod selector address sets for network %v failed : %w", oc.GetNetworkName(), err)
+	}
+	// LRP syncer must only be run once and because default controller always runs, it can perform LRP updates.
+	lrpSyncer := logical_router_policy.NewLRPSyncer(oc.nbClient, oc.controllerName)
+	if err = lrpSyncer.Sync(); err != nil {
+		return fmt.Errorf("failed to sync logical router policies: %v", err)
+	}
+
+	// NAT syncer must only be run once. It performs OVN NAT updates.
+	nadSyncer := nat.NewNATSyncer(oc.nbClient, oc.controllerName)
+	if err = nadSyncer.Sync(); err != nil {
+		return fmt.Errorf("failed to sync NATs: %v", err)
 	}
 	return nil
 }
