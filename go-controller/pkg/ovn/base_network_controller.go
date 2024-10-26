@@ -116,7 +116,7 @@ type BaseNetworkController struct {
 	ipamClaimsReconciler *persistentips.IPAMClaimReconciler
 
 	// A cache of all logical ports known to the controller
-	logicalPortCache *portCache
+	logicalPortCache *PortCache
 
 	// Info about known namespaces. You must use oc.getNamespaceLocked() or
 	// oc.waitForNamespaceLocked() to read this map, and oc.createNamespaceLocked()
