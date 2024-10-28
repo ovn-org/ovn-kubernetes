@@ -12,8 +12,6 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	iputils "github.com/containernetworking/plugins/pkg/ip"
-
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	nadclient "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/typed/k8s.cni.cncf.io/v1"
 
@@ -347,39 +345,6 @@ var _ = Describe("Network Segmentation", func() {
 							return err == nil
 						}, 5*time.Second).Should(BeTrue())
 						By("asserting UDN pod can't reach host via default network interface")
-						// tweak pod route to use default network interface as default
-						podAnno, err := unmarshalPodAnnotation(udnPod.Annotations, "default")
-						Expect(err).NotTo(HaveOccurred())
-						for _, podIP := range podAnno.IPs {
-							ipCommand := []string{"exec", udnPod.Name, "--", "ip"}
-							if podIP.IP.To4() == nil {
-								ipCommand = append(ipCommand, "-6")
-							}
-							// 1. Find current default routes and delete them
-							defRoutes, err := e2ekubectl.RunKubectl(udnPod.Namespace,
-								append(ipCommand, "route", "show", "default")...)
-							Expect(err).NotTo(HaveOccurred())
-							if defRoutes == "" {
-								continue
-							}
-
-							// Remove last new line to propertly split them using new line
-							defRoutes = strings.TrimSuffix(defRoutes, "\n")
-
-							framework.Logf("Found default routes %v, deleting", defRoutes)
-							cmd := append(ipCommand, "route", "del")
-							for _ = range strings.Split(defRoutes, "\n") {
-								_, err = e2ekubectl.RunKubectl(udnPod.Namespace,
-									append(cmd, "default")...)
-								Expect(err).NotTo(HaveOccurred())
-							}
-
-							// 2. Add a new default route to use default network interface
-							gatewayIP := iputils.NextIP(iputils.Network(podIP).IP)
-							_, err = e2ekubectl.RunKubectl(udnPod.Namespace,
-								append(ipCommand, "route", "add", "default", "via", gatewayIP.String(), "dev", "eth0")...)
-							Expect(err).NotTo(HaveOccurred())
-						}
 						// Now try to reach the host from the UDN pod
 						defaultPodHostIP := udnPod.Status.HostIPs
 						for _, hostIP := range defaultPodHostIP {
@@ -390,7 +355,7 @@ var _ = Describe("Network Segmentation", func() {
 							}
 							Consistently(func() bool {
 								_, err := e2ekubectl.RunKubectl(udnPod.Namespace, "exec", udnPod.Name, "--",
-									ping, "-c", "1", "-W", "1", hostIP.IP,
+									ping, "-I", "eth0", "-c", "1", "-W", "1", hostIP.IP,
 								)
 								return err == nil
 							}, 4*time.Second).Should(BeFalse())
