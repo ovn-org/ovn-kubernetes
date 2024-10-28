@@ -163,39 +163,66 @@ func bridgeMapping(physnet, ovsBridge string) BridgeMapping {
 	}
 }
 
-// TODO: make this function idempotent; use golang netlink instead
-func createVLANInterface(deviceName string, vlanID string, ipAddress *string) error {
-	vlan := vlanName(deviceName, vlanID)
-	cmd := exec.Command("sudo", "ip", "link", "add", "link", deviceName, "name", vlan, "type", "vlan", "id", vlanID)
+type Vlan struct {
+	deviceName string
+	id         string
+	name       string
+	ip         *string
+}
+
+type option func(vlan *Vlan)
+
+func newVLANIface(deviceName string, vlanID int, opts ...option) *Vlan {
+	vlan := &Vlan{
+		deviceName: deviceName,
+		id:         fmt.Sprintf("%d", vlanID),
+	}
+	vlan.name = vlanName(deviceName, vlan.id)
+	for _, opt := range opts {
+		opt(vlan)
+	}
+	return vlan
+}
+
+func withIP(ipAddress string) option {
+	return func(vlan *Vlan) {
+		vlan.ip = &ipAddress
+	}
+}
+
+func (v *Vlan) String() string {
+	return v.name
+}
+
+func (v *Vlan) create() error {
+	cmd := exec.Command("sudo", "ip", "link", "add", "link", v.deviceName, "name", v.name, "type", "vlan", "id", v.id)
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to create vlan interface %s: %v", vlan, err)
+		return fmt.Errorf("failed to create vlan interface %s: %v", v.name, err)
 	}
 
-	cmd = exec.Command("sudo", "ip", "link", "set", "dev", vlan, "up")
+	cmd = exec.Command("sudo", "ip", "link", "set", "dev", v.name, "up")
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to enable vlan interface %s: %v", vlan, err)
+		return fmt.Errorf("failed to enable vlan interface %s: %v", v.name, err)
 	}
 
-	if ipAddress != nil {
-		cmd = exec.Command("sudo", "ip", "addr", "add", *ipAddress, "dev", vlan)
+	if v.ip != nil {
+		cmd = exec.Command("sudo", "ip", "addr", "add", *v.ip, "dev", v.name)
 		cmd.Stderr = os.Stderr
 
 		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("failed to define the vlan interface %q IP Address %s: %v", vlan, *ipAddress, err)
+			return fmt.Errorf("failed to define the vlan interface %q IP Address %s: %v", v.name, *v.ip, err)
 		}
 	}
 	return nil
 }
 
-// TODO: make this function idempotent; use golang netlink instead
-func deleteVLANInterface(deviceName string, vlanID string) error {
-	vlan := vlanName(deviceName, vlanID)
-	cmd := exec.Command("sudo", "ip", "link", "del", vlan)
+func (v *Vlan) delete() error {
+	cmd := exec.Command("sudo", "ip", "link", "del", v.name)
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to delete vlan interface %s: %v", vlan, err)
+		return fmt.Errorf("failed to delete vlan interface %s: %v", v.name, err)
 	}
 	return nil
 }
