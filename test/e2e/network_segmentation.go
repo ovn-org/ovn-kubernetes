@@ -421,11 +421,11 @@ var _ = Describe("Network Segmentation", func() {
 						}
 					},
 					Entry(
-						"with L2 dualstack primary UDN",
+						"with L2 primary UDN",
 						networkAttachmentConfigParams{
 							name:     nadName,
 							topology: "layer2",
-							cidr:     fmt.Sprintf("%s,%s", userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+							cidr:     correctCIDRFamily(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
 							role:     "primary",
 						},
 						*podConfig(
@@ -437,11 +437,11 @@ var _ = Describe("Network Segmentation", func() {
 						),
 					),
 					Entry(
-						"with L3 dualstack primary UDN",
+						"with L3 primary UDN",
 						networkAttachmentConfigParams{
 							name:     nadName,
 							topology: "layer3",
-							cidr:     fmt.Sprintf("%s,%s", userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+							cidr:     correctCIDRFamily(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
 							role:     "primary",
 						},
 						*podConfig(
