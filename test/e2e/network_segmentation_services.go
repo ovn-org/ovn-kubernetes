@@ -254,20 +254,20 @@ var _ = Describe("Network Segmentation: services", func() {
 			},
 
 			Entry(
-				"L3 dualstack primary UDN, cluster-networked pods, NodePort service",
+				"L3 primary UDN, cluster-networked pods, NodePort service",
 				networkAttachmentConfigParams{
 					name:     nadName,
 					topology: "layer3",
-					cidr:     fmt.Sprintf("%s,%s", userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+					cidr:     correctCIDRFamily(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
 					role:     "primary",
 				},
 			),
 			Entry(
-				"L2 dualstack primary UDN, cluster-networked pods, NodePort service",
+				"L2 primary UDN, cluster-networked pods, NodePort service",
 				networkAttachmentConfigParams{
 					name:     nadName,
 					topology: "layer2",
-					cidr:     fmt.Sprintf("%s,%s", userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+					cidr:     correctCIDRFamily(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
 					role:     "primary",
 				},
 			),
