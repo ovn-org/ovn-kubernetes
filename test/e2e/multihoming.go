@@ -931,7 +931,7 @@ var _ = Describe("Multi Homing", func() {
 					underlayBridgeName, err = findInterfaceByIP(gatewayIP)
 					Expect(err).NotTo(HaveOccurred())
 					vlanIface = newVLANIface(underlayBridgeName, vlanID, withIP(underlayIP))
-					Expect(vlanIface.create()).To(
+					Expect(vlanIface.ensureExistence()).To(
 						Succeed(),
 						"create a VLAN interface on the bridge interconnecting the cluster nodes",
 					)

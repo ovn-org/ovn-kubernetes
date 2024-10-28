@@ -2,10 +2,13 @@ package e2e
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
+
+	"github.com/vishvananda/netlink"
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -194,27 +197,57 @@ func (v *Vlan) String() string {
 	return v.name
 }
 
-func (v *Vlan) create() error {
-	cmd := exec.Command("sudo", "ip", "link", "add", "link", v.deviceName, "name", v.name, "type", "vlan", "id", v.id)
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to create vlan interface %s: %v", v.name, err)
-	}
-
-	cmd = exec.Command("sudo", "ip", "link", "set", "dev", v.name, "up")
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to enable vlan interface %s: %v", v.name, err)
+func (v *Vlan) ensureExistence() error {
+	if err := v.ensureVLANEnabled(); err != nil {
+		return err
 	}
 
 	if v.ip != nil {
-		cmd = exec.Command("sudo", "ip", "addr", "add", *v.ip, "dev", v.name)
-		cmd.Stderr = os.Stderr
-
-		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("failed to define the vlan interface %q IP Address %s: %v", v.name, *v.ip, err)
+		if err := v.ensureVLANHasIP(); err != nil {
+			return err
 		}
 	}
+
+	return nil
+}
+
+func (v *Vlan) ensureVLANEnabled() error {
+	_, err := netlink.LinkByName(v.name)
+	if errors.As(err, &netlink.LinkNotFoundError{}) {
+		cmd := exec.Command("sudo", "ip", "link", "add", "link", v.deviceName, "name", v.name, "type", "vlan", "id", v.id)
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("failed to create vlan interface %s: %v", v.name, err)
+		}
+	}
+	linkUpCmd := exec.Command("sudo", "ip", "link", "set", "dev", v.name, "up")
+	linkUpCmd.Stderr = os.Stderr
+	if err := linkUpCmd.Run(); err != nil {
+		return fmt.Errorf("failed to enable vlan interface %s: %w", v.name, err)
+	}
+	return nil
+}
+
+func (v *Vlan) ensureVLANHasIP() error {
+	vlanIface, err := netlink.LinkByName(v.name)
+	if err != nil {
+		return fmt.Errorf("failed to find VLAN interface %s: %w", v.name, err)
+	}
+
+	addr := netlink.Addr{IPNet: v.ip}
+	hasIP, err := isIPInLink(vlanIface, addr)
+	if err != nil {
+		return err
+	}
+
+	if !hasIP {
+		cmd := exec.Command("sudo", "ip", "addr", "add", v.ip.String(), "dev", v.name)
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("failed to define the vlan interface %q IP Address %s: %w", v.name, *v.ip, err)
+		}
+	}
+
 	return nil
 }
 
@@ -233,4 +266,18 @@ func vlanName(deviceName string, vlanID string) string {
 		deviceName = deviceName[:len(deviceName)-len(vlanID)-1]
 	}
 	return fmt.Sprintf("%s.%s", deviceName, vlanID)
+}
+
+func isIPInLink(vlanIface netlink.Link, addr netlink.Addr) (bool, error) {
+	vlanAddrs, err := netlink.AddrList(vlanIface, netlink.FAMILY_ALL)
+	if err != nil {
+		return false, err
+	}
+
+	for _, vlanAddr := range vlanAddrs {
+		if vlanAddr.Equal(addr) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
