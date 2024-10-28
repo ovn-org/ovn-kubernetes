@@ -902,6 +902,7 @@ var _ = Describe("Multi Homing", func() {
 
 			Context("with a trunked configuration", func() {
 				const vlanID = 20
+				var vlanIface *Vlan
 				BeforeEach(func() {
 					nodes = ovsPods(cs)
 					Expect(nodes).NotTo(BeEmpty())
@@ -929,7 +930,8 @@ var _ = Describe("Multi Homing", func() {
 
 					underlayBridgeName, err = findInterfaceByIP(gatewayIP)
 					Expect(err).NotTo(HaveOccurred())
-					Expect(createVLANInterface(underlayBridgeName, strconv.Itoa(vlanID), &underlayIP)).To(
+					vlanIface = newVLANIface(underlayBridgeName, vlanID, withIP(underlayIP))
+					Expect(vlanIface.create()).To(
 						Succeed(),
 						"create a VLAN interface on the bridge interconnecting the cluster nodes",
 					)
@@ -942,7 +944,7 @@ var _ = Describe("Multi Homing", func() {
 
 				AfterEach(func() {
 					Expect(cmdWebServer.Process.Kill()).NotTo(HaveOccurred(), "kill the python webserver")
-					Expect(deleteVLANInterface(underlayBridgeName, strconv.Itoa(vlanID))).NotTo(HaveOccurred(), "remove the underlay physical configuration")
+					Expect(vlanIface.delete()).NotTo(HaveOccurred(), "remove the underlay physical configuration")
 					Expect(teardownUnderlay(nodes)).To(Succeed(), "tear down the localnet underlay")
 				})
 
