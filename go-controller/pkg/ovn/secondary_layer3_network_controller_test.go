@@ -16,6 +16,7 @@ import (
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	knet "k8s.io/utils/net"
 	"k8s.io/utils/ptr"
 
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
@@ -97,6 +98,11 @@ var _ = Describe("OVN Multi-Homed pod operations", func() {
 				}
 			}
 			config.Gateway.Mode = gwMode
+			if knet.IsIPv6CIDRString(netInfo.clustersubnets) {
+				config.IPv6Mode = true
+				// tests dont support dualstack yet
+				config.IPv4Mode = false
+			}
 			app.Action = func(ctx *cli.Context) error {
 				nad, err := newNetworkAttachmentDefinition(
 					ns,

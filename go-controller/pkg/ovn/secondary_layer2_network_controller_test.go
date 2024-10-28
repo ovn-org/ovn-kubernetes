@@ -15,6 +15,7 @@ import (
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	knet "k8s.io/utils/net"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
@@ -64,6 +65,11 @@ var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 				}
 			}
 			config.Gateway.Mode = gatewayMode
+			if knet.IsIPv6CIDRString(netInfo.clustersubnets) {
+				config.IPv6Mode = true
+				// tests dont support dualstack yet
+				config.IPv4Mode = false
+			}
 			app.Action = func(ctx *cli.Context) error {
 				By(fmt.Sprintf("creating a network attachment definition for network: %s", netInfo.netName))
 				nad, err := newNetworkAttachmentDefinition(
@@ -206,6 +212,13 @@ var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 			icClusterWithDisableSNATTestConfiguration(),
 			config.GatewayModeShared,
 		),
+		/** FIXME: tests do not support ipv6 yet
+		Entry("pod on a IPv6 user defined primary network on an IC cluster with per-pod SNATs enabled",
+			dummyPrimaryLayer2UserDefinedNetwork("2001:db8:abcd:0012::/64"),
+			icClusterWithDisableSNATTestConfiguration(),
+			config.GatewayModeShared,
+		),
+		*/
 	)
 
 	DescribeTable(
@@ -478,13 +491,16 @@ func expectedLayer2EgressEntities(netInfo util.NetInfo, gwConfig util.L3GatewayC
 func expectedGWToNetworkSwitchRouterPort(name string, netInfo util.NetInfo, networks ...*net.IPNet) *nbdb.LogicalRouterPort {
 	options := map[string]string{"gateway_mtu": fmt.Sprintf("%d", 1400)}
 	lrp := expectedLogicalRouterPort(name, netInfo, options, networks...)
-	lrp.Ipv6RaConfigs = map[string]string{
-		"address_mode":      "dhcpv6_stateful",
-		"mtu":               "1400",
-		"send_periodic":     "true",
-		"max_interval":      "900",
-		"min_interval":      "300",
-		"router_preference": "LOW",
+
+	if config.IPv6Mode {
+		lrp.Ipv6RaConfigs = map[string]string{
+			"address_mode":      "dhcpv6_stateful",
+			"mtu":               "1400",
+			"send_periodic":     "true",
+			"max_interval":      "900",
+			"min_interval":      "300",
+			"router_preference": "LOW",
+		}
 	}
 	return lrp
 }

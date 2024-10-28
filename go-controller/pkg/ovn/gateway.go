@@ -403,7 +403,8 @@ func (gw *GatewayManager) GatewayInit(
 			types.NetworkExternalID:  gw.netInfo.GetNetworkName(),
 			types.TopologyExternalID: gw.netInfo.TopologyType(),
 		}
-		if gw.netInfo.IsPrimaryNetwork() && gw.netInfo.TopologyType() == types.Layer2Topology {
+		_, isNetIPv6 := gw.netInfo.IPMode()
+		if gw.netInfo.IsPrimaryNetwork() && gw.netInfo.TopologyType() == types.Layer2Topology && isNetIPv6 && config.IPv6Mode {
 			logicalRouterPort.Ipv6RaConfigs = map[string]string{
 				"address_mode":      "dhcpv6_stateful",
 				"send_periodic":     "true",
