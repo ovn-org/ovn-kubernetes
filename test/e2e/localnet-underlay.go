@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"strings"
@@ -170,26 +171,34 @@ type Vlan struct {
 	deviceName string
 	id         string
 	name       string
-	ip         *string
+	ip         *net.IPNet
 }
 
-type option func(vlan *Vlan)
+type option func(vlan *Vlan) error
 
-func newVLANIface(deviceName string, vlanID int, opts ...option) *Vlan {
+func newVLANIface(deviceName string, vlanID int, opts ...option) (*Vlan, error) {
 	vlan := &Vlan{
 		deviceName: deviceName,
 		id:         fmt.Sprintf("%d", vlanID),
 	}
 	vlan.name = vlanName(deviceName, vlan.id)
 	for _, opt := range opts {
-		opt(vlan)
+		if err := opt(vlan); err != nil {
+			return nil, err
+		}
 	}
-	return vlan
+	return vlan, nil
 }
 
 func withIP(ipAddress string) option {
-	return func(vlan *Vlan) {
-		vlan.ip = &ipAddress
+	return func(vlan *Vlan) error {
+		ip, cidr, err := net.ParseCIDR(ipAddress)
+		if err != nil {
+			return fmt.Errorf("failed to parse IP address %s: %w", ipAddress, err)
+		}
+		cidr.IP = ip
+		vlan.ip = cidr
+		return nil
 	}
 }
 
