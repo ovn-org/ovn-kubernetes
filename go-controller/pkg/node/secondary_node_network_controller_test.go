@@ -149,7 +149,7 @@ var _ = Describe("SecondaryNodeNetworkController", func() {
 		nodeInformer.On("Lister").Return(&nodeLister)
 		NetInfo, err := util.ParseNADInfo(nad)
 		Expect(err).NotTo(HaveOccurred())
-		getCreationFakeOVSCommands(fexec, "ovn-k8s-mp3", mgtPortMAC, NetInfo.GetNetworkName(), "worker1", NetInfo.MTU())
+		getCreationFakeCommands(fexec, "ovn-k8s-mp3", mgtPortMAC, NetInfo.GetNetworkName(), "worker1", NetInfo.MTU())
 		controller, err := NewSecondaryNodeNetworkController(&cnnci, NetInfo, nil, nil, &gateway{})
 		Expect(err).NotTo(HaveOccurred())
 		err = controller.Start(context.Background())
@@ -325,7 +325,7 @@ var _ = Describe("SecondaryNodeNetworkController: UserDefinedPrimaryNetwork Gate
 
 		err = testNS.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
-			getCreationFakeOVSCommands(fexec, mgtPort, mgtPortMAC, netName, nodeName, NetInfo.MTU())
+			getCreationFakeCommands(fexec, mgtPort, mgtPortMAC, netName, nodeName, NetInfo.MTU())
 			getVRFCreationFakeOVSCommands(fexec)
 			getRPFilterLooseModeFakeCommands(fexec)
 			getDeletionFakeOVSCommands(fexec, mgtPort)

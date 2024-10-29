@@ -11,6 +11,8 @@ import (
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
+	"github.com/vishvananda/netlink"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/generator/udn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
@@ -18,7 +20,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/vrfmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"github.com/vishvananda/netlink"
 )
 
 const (
@@ -324,6 +325,7 @@ func (udng *UserDefinedNetworkGateway) DelNetwork() error {
 // STEP2: It saves the MAC address generated on the 1st go as an option on the OVS interface
 // so that it persists on reboots
 // STEP3: sets up the management port link on the host
+// STEP4: enables IPv4 forwarding on the interface if the network has a v4 subnet
 // Returns a netlink Link which is the UDN management port interface along with its MAC address
 func (udng *UserDefinedNetworkGateway) addUDNManagementPort() (netlink.Link, net.HardwareAddr, error) {
 	var err error
@@ -361,6 +363,16 @@ func (udng *UserDefinedNetworkGateway) addUDNManagementPort() (netlink.Link, net
 			interfaceName, udng.GetNetworkName(), err)
 	}
 	klog.V(3).Infof("Setup management port link %s for network %s succeeded", interfaceName, udng.GetNetworkName())
+
+	// STEP4
+	// IPv6 forwarding is enabled globally
+	if ipv4, _ := udng.IPMode(); ipv4 {
+		stdout, stderr, err := util.RunSysctl("-w", fmt.Sprintf("net.ipv4.conf.%s.forwarding=1", interfaceName))
+		if err != nil || stdout != fmt.Sprintf("net.ipv4.conf.%s.forwarding = 1", interfaceName) {
+			return nil, nil, fmt.Errorf("could not set the correct forwarding value for interface %s: stdout: %v, stderr: %v, err: %v",
+				interfaceName, stdout, stderr, err)
+		}
+	}
 	return mplink, macAddress, nil
 }
 
