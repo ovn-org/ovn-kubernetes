@@ -920,15 +920,19 @@ var _ = Describe("Multi Homing", func() {
 					By("setting up the localnet underlay with a trunked configuration")
 					Expect(setupUnderlay(nodes, secondaryInterfaceName, netConfig)).To(Succeed(), "configuring the OVS bridge")
 
-					By(fmt.Sprintf("creating a VLAN interface on top of the bridge connecting the cluster nodes with IP: %s", underlayIP))
+					By("creating a CRI API client")
 					cli, err := client.NewClientWithOpts(client.FromEnv)
 					Expect(err).NotTo(HaveOccurred())
 
+					By(fmt.Sprintf("extracting the GW IP on the %q logical network", dockerNetworkName))
 					gatewayIP, err := getNetworkGateway(cli, dockerNetworkName)
 					Expect(err).NotTo(HaveOccurred())
 
+					By(fmt.Sprintf("finding which bridge has the GW IP %q configured", gatewayIP))
 					underlayBridgeName, err = findInterfaceByIP(gatewayIP)
 					Expect(err).NotTo(HaveOccurred())
+
+					By(fmt.Sprintf("creating a VLAN on top of bridge %q with ID: %d", underlayBridgeName, vlanID))
 					vlanIface, err = newVLANIface(underlayBridgeName, vlanID, withIP(underlayIP))
 					Expect(err).NotTo(HaveOccurred())
 					Expect(vlanIface.create()).To(
