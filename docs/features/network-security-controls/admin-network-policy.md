@@ -164,10 +164,10 @@ spec:
     to:
     - pods:
         namespaceSelector:
-          matchlabels:
+          matchLabels:
             kubernetes.io/metadata.name: kube-system
         podSelector:
-          matchlabels:
+          matchLabels:
             app: dns
     ports:
     - portNumber:
@@ -188,7 +188,7 @@ spec:
     action: "Allow"
     to:
     - namespaces:
-        matchlabels:
+        matchLabels:
           tenant: splunk
     ports:
     - portNumber:
@@ -280,14 +280,12 @@ spec:
   - name: "default-deny"
     action: "Deny"
     from:
-    - namespaces:
-        namespaceSelector: {}
+    - namespaces: {}
   egress:
   - name: "default-deny"
     action: "Deny"
     to:
-    - namespaces:
-        namespaceSelector: {}
+    - namespaces: {}
 ```
 
 You can do `oc apply -f default.yaml` to create this ANP in your cluster

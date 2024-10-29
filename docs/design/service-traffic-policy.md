@@ -323,7 +323,7 @@ vips                : {"10.96.115.103:80"="172.19.0.3:8080", "172.19.0.3:31339"=
 9. The routes in the host send this back to breth0:
 
 ```
-169.254.169.1 dev breth0 src 172.19.0.4 mtu 1400 
+169.254.169.1 dev breth0 src 172.19.0.3 mtu 1400 
 ```
 
 10. Traffic leaves to primary interface from breth0:
@@ -359,7 +359,7 @@ cookie=0xdeff105, duration=3189.786s, table=0, n_packets=99979, n_bytes=29802921
 4. From OVN it gets sent back to host and then back from host into breth0 and into the wire:
 
 ```
-  cookie=0xdeff105, duration=2334.510s, table=0, n_packets=18, n_bytes=1452, priority=175,ip,in_port="patch-breth0_ov",nw_src=172.19.0.4 actions=ct(table=4,zone=64001,nat)
+  cookie=0xdeff105, duration=2334.510s, table=0, n_packets=18, n_bytes=1452, priority=175,ip,in_port="patch-breth0_ov",nw_src=172.19.0.3 actions=ct(table=4,zone=64001,nat)
   cookie=0xdeff105, duration=2334.510s, table=4, n_packets=18, n_bytes=1452, ip actions=ct(commit,table=3,zone=64002,nat(src=169.254.169.1))
   cookie=0xdeff105, duration=0.365s, table=3, n_packets=32, n_bytes=2808, actions=move:NXM_OF_ETH_DST[]->NXM_OF_ETH_SRC[],set_field:02:42:ac:13:00:03->eth_dst,LOCAL
   cookie=0xdeff105, duration=2334.510s, table=0, n_packets=7611, n_bytes=754388, priority=100,ip,in_port=LOCAL actions=ct(commit,zone=64000,exec(load:0x2->NXM_NX_CT_MARK[])),output:eth0
@@ -374,17 +374,17 @@ NOTE: We have added a masquerade rule to iptable rules to SNAT towards the netIP
 tcpdump:
 ```
 SYN:
-13:38:52.988279 eth0  In  ifindex 19 02:42:df:4d:b6:d2 ethertype IPv4 (0x0800), length 80: 172.19.0.1.36363 > 172.19.0.4.30950: Flags [S], seq 3548868802, win 64240, options [mss 1460,sackOK,TS val 1854443570 ecr 0,nop,wscale 7], length 0
-13:38:52.988315 breth0 In  ifindex 6 02:42:df:4d:b6:d2 ethertype IPv4 (0x0800), length 80: 172.19.0.1.36363 > 172.19.0.4.30950: Flags [S], seq 3548868802, win 64240, options [mss 1460,sackOK,TS val 1854443570 ecr 0,nop,wscale 7], length 0
+13:38:52.988279 eth0  In  ifindex 19 02:42:df:4d:b6:d2 ethertype IPv4 (0x0800), length 80: 172.19.0.1.36363 > 172.19.0.3.30950: Flags [S], seq 3548868802, win 64240, options [mss 1460,sackOK,TS val 1854443570 ecr 0,nop,wscale 7], length 0
+13:38:52.988315 breth0 In  ifindex 6 02:42:df:4d:b6:d2 ethertype IPv4 (0x0800), length 80: 172.19.0.1.36363 > 172.19.0.3.30950: Flags [S], seq 3548868802, win 64240, options [mss 1460,sackOK,TS val 1854443570 ecr 0,nop,wscale 7], length 0
 13:38:52.988357 breth0 Out ifindex 6 02:42:ac:13:00:04 ethertype IPv4 (0x0800), length 80: 172.19.0.1.36363 > 10.96.211.228.80: Flags [S], seq 3548868802, win 64240, options [mss 1460,sackOK,TS val 1854443570 ecr 0,nop,wscale 7], length 0
-13:38:52.989240 breth0 In  ifindex 6 02:42:ac:13:00:03 ethertype IPv4 (0x0800), length 80: 169.254.169.1.36363 > 172.19.0.3.8080: Flags [S], seq 3548868802, win 64240, options [mss 1460,sackOK,TS val 1854443570 ecr 0,nop,wscale 7], length 0
-13:38:52.989240 breth0 In  ifindex 6 02:42:ac:13:00:03 ethertype IPv4 (0x0800), length 80: 172.19.0.4.31991 > 172.19.0.3.8080: Flags [S], seq 3548868802, win 64240, options [mss 1460,sackOK,TS val 1854443570 ecr 0,nop,wscale 7], length 0
+13:38:52.989240 breth0 In  ifindex 6 02:42:ac:13:00:03 ethertype IPv4 (0x0800), length 80: 169.254.169.1.36363 > 172.19.0.4.8080: Flags [S], seq 3548868802, win 64240, options [mss 1460,sackOK,TS val 1854443570 ecr 0,nop,wscale 7], length 0
+13:38:52.989240 breth0 In  ifindex 6 02:42:ac:13:00:03 ethertype IPv4 (0x0800), length 80: 172.19.0.3.31991 > 172.19.0.4.8080: Flags [S], seq 3548868802, win 64240, options [mss 1460,sackOK,TS val 1854443570 ecr 0,nop,wscale 7], length 0
 SYNACK:
-13:38:52.989515 breth0 Out ifindex 6 02:42:ac:13:00:04 ethertype IPv4 (0x0800), length 80: 172.19.0.3.8080 > 172.19.0.4.31991: Flags [S.], seq 3406651567, ack 3548868803, win 65160, options [mss 1460,sackOK,TS val 2294391439 ecr 1854443570,nop,wscale 7], length 0
-13:38:52.989515 breth0 Out ifindex 6 02:42:ac:13:00:04 ethertype IPv4 (0x0800), length 80: 172.19.0.3.8080 > 169.254.169.1.36363: Flags [S.], seq 3406651567, ack 3548868803, win 65160, options [mss 1460,sackOK,TS val 2294391439 ecr 1854443570,nop,wscale 7], length 0
+13:38:52.989515 breth0 Out ifindex 6 02:42:ac:13:00:04 ethertype IPv4 (0x0800), length 80: 172.19.0.4.8080 > 172.19.0.3.31991: Flags [S.], seq 3406651567, ack 3548868803, win 65160, options [mss 1460,sackOK,TS val 2294391439 ecr 1854443570,nop,wscale 7], length 0
+13:38:52.989515 breth0 Out ifindex 6 02:42:ac:13:00:04 ethertype IPv4 (0x0800), length 80: 172.19.0.4.8080 > 169.254.169.1.36363: Flags [S.], seq 3406651567, ack 3548868803, win 65160, options [mss 1460,sackOK,TS val 2294391439 ecr 1854443570,nop,wscale 7], length 0
 13:38:52.989562 breth0 In  ifindex 6 0a:58:a9:fe:a9:04 ethertype IPv4 (0x0800), length 80: 10.96.211.228.80 > 172.19.0.1.36363: Flags [S.], seq 3406651567, ack 3548868803, win 65160, options [mss 1460,sackOK,TS val 2294391439 ecr 1854443570,nop,wscale 7], length 0
-13:38:52.989571 breth0 Out ifindex 6 02:42:ac:13:00:04 ethertype IPv4 (0x0800), length 80: 172.19.0.4.30950 > 172.19.0.1.36363: Flags [S.], seq 3406651567, ack 3548868803, win 65160, options [mss 1460,sackOK,TS val 2294391439 ecr 1854443570,nop,wscale 7], length 0
-13:38:52.989581 eth0  Out ifindex 19 02:42:ac:13:00:04 ethertype IPv4 (0x0800), length 80: 172.19.0.4.30950 > 172.19.0.1.36363: Flags [S.], seq 3406651567, ack 3548868803, win 65160, options [mss 1460,sackOK,TS val 2294391439 ecr 1854443570,nop,wscale 7], length 0
+13:38:52.989571 breth0 Out ifindex 6 02:42:ac:13:00:04 ethertype IPv4 (0x0800), length 80: 172.19.0.3.30950 > 172.19.0.1.36363: Flags [S.], seq 3406651567, ack 3548868803, win 65160, options [mss 1460,sackOK,TS val 2294391439 ecr 1854443570,nop,wscale 7], length 0
+13:38:52.989581 eth0  Out ifindex 19 02:42:ac:13:00:04 ethertype IPv4 (0x0800), length 80: 172.19.0.3.30950 > 172.19.0.1.36363: Flags [S.], seq 3406651567, ack 3548868803, win 65160, options [mss 1460,sackOK,TS val 2294391439 ecr 1854443570,nop,wscale 7], length 0
 ```
 
 
