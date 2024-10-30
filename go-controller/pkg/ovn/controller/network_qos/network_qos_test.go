@@ -571,6 +571,58 @@ var _ = Describe("NetworkQoS Controller", func() {
 					Expect(qos.Match).Should(Equal(fmt.Sprintf("ip4.src == {$%s} && ip4.dst == 128.115.0.0/17 && ip4.dst != {128.115.0.0,128.115.0.255}", v4HashName)))
 				}
 
+				By("clear QoS attributes of existing NetworkQoS and make sure that is proper")
+				{
+					nqosWithoutSrcSelector := &nqostype.NetworkQoS{
+						ObjectMeta: metav1.ObjectMeta{
+							Namespace: nqosNamespace,
+							Name:      "no-source-selector",
+						},
+						Spec: nqostype.Spec{
+							Egress: []nqostype.Rule{
+								{
+									Priority: 0,
+									DSCP:     50,
+									// Bandwidth: nqostype.Bandwidth{},
+									Classifier: nqostype.Classifier{
+										To: []nqostype.Destination{
+											{
+												IPBlock: &networkingv1.IPBlock{
+													CIDR: "128.115.0.0/17",
+													Except: []string{
+														"128.115.0.0",
+														"123.123.123.123",
+													},
+												},
+											},
+										},
+									},
+								},
+							},
+						},
+					}
+					nqosWithoutSrcSelector.ResourceVersion = time.Now().String()
+					_, err := fakeNQoSClient.K8sV1().NetworkQoSes(nqosNamespace).Update(context.TODO(), nqosWithoutSrcSelector, metav1.UpdateOptions{})
+					Expect(err).NotTo(HaveOccurred())
+
+					dbIDs := libovsdbops.NewDbObjectIDs(libovsdbops.AddressSetNamespace, defaultControllerName, map[libovsdbops.ExternalIDKey]string{
+						libovsdbops.ObjectNameKey: nqosNamespace,
+					})
+					addrset, err := defaultAddrsetFactory.EnsureAddressSet(dbIDs)
+					Expect(err).NotTo(HaveOccurred())
+					v4HashName, _ := addrset.GetASHashNames()
+
+					// Ensure that QoS priority and Bandwidth have been properly changed by OVN
+					var qos *nbdb.QoS
+					Eventually(func() bool {
+						qos, err = findQoS(defaultControllerName, nqosNamespace, "no-source-selector", 0)
+						Expect(err).NotTo(HaveOccurred())
+						Expect(qos).NotTo(BeNil())
+						return qos.Priority == 0 && len(qos.Bandwidth) == 0
+					}).WithTimeout(5 * time.Second).WithPolling(1 * time.Second).Should(BeTrue())
+					Expect(qos.Match).Should(Equal(fmt.Sprintf("ip4.src == {$%s} && ip4.dst == 128.115.0.0/17 && ip4.dst != {128.115.0.0,123.123.123.123}", v4HashName)))
+				}
+
 				By("removes IP from destination address set if pod is deleted")
 				{
 					err := fakeKubeClient.CoreV1().Pods(app1Pod.Namespace).Delete(context.TODO(), app1Pod.Name, metav1.DeleteOptions{})

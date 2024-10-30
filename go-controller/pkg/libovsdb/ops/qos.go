@@ -9,6 +9,11 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 )
 
+func getQoSMutableFields(qos *nbdb.QoS) []interface{} {
+	return []interface{}{&qos.Action, &qos.Bandwidth, &qos.Direction, &qos.ExternalIDs,
+		&qos.Match, &qos.Priority}
+}
+
 type QoSPredicate func(*nbdb.QoS) bool
 
 // FindQoSesWithPredicate looks up QoSes from the cache based on a
@@ -29,7 +34,7 @@ func CreateOrUpdateQoSesOps(nbClient libovsdbclient.Client, ops []libovsdb.Opera
 		qos := qoses[i]
 		opModel := operationModel{
 			Model:          qos,
-			OnModelUpdates: []interface{}{}, // update all fields
+			OnModelUpdates: getQoSMutableFields(qos),
 			ErrNotFound:    false,
 			BulkOp:         false,
 		}
@@ -47,7 +52,7 @@ func UpdateQoSesOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, qo
 		qos := qoses[i]
 		opModel := operationModel{
 			Model:          qos,
-			OnModelUpdates: []interface{}{}, // update all fields
+			OnModelUpdates: getQoSMutableFields(qos),
 			ErrNotFound:    true,
 			BulkOp:         false,
 		}
