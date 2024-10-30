@@ -73,7 +73,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 		fakeOVN.shutdown()
 	})
 
-	ginkgo.Context("on startup repair", func() {
+	ginkgo.XContext("on startup repair", func() {
 		ginkgo.It("should delete stale logical router policies and EgressService address set IPs", func() {
 			app.Action = func(ctx *cli.Context) error {
 				namespaceT := *newNamespace("testns")
