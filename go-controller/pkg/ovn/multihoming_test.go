@@ -8,6 +8,8 @@ import (
 
 	v1 "k8s.io/api/core/v1"
 
+	kubevirtv1 "kubevirt.io/api/core/v1"
+
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
@@ -111,6 +113,10 @@ func withInterconnectCluster() option {
 }
 
 func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPorts(isPrimary bool) []libovsdbtest.TestData {
+	return em.expectedLogicalSwitchesAndPortsWithLspEnabled(isPrimary, nil)
+}
+
+func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPortsWithLspEnabled(isPrimary bool, expectedPodLspEnabled map[string]*bool) []libovsdbtest.TestData {
 	data := []libovsdbtest.TestData{}
 	for _, ocInfo := range em.fakeOvn.secondaryControllers {
 		nodeslsps := make(map[string][]string)
@@ -143,6 +149,9 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPorts(is
 				}
 				podAddr := fmt.Sprintf("%s %s", portInfo.podMAC, portInfo.podIP)
 				lsp := newExpectedSwitchPort(lspUUID, portName, podAddr, pod, ocInfo.bnc, nad)
+				if expectedPodLspEnabled != nil {
+					lsp.Enabled = expectedPodLspEnabled[pod.podName]
+				}
 
 				if pod.noIfaceIdVer {
 					delete(lsp.Options, "iface-id-ver")
@@ -415,6 +424,16 @@ func icClusterWithDisableSNATTestConfiguration() testConfiguration {
 		expectationOptions: []option{withInterconnectCluster()},
 		gatewayConfig:      &config.GatewayConfig{DisableSNATMultipleGWs: true},
 	}
+}
+func newMultiHomedKubevirtPod(vmName string, liveMigrationInfo liveMigrationPodInfo, testPod testPod, multiHomingConfigs ...secondaryNetInfo) *v1.Pod {
+	pod := newMultiHomedPod(testPod, multiHomingConfigs...)
+	pod.Labels[kubevirtv1.VirtualMachineNameLabel] = vmName
+	pod.Status.Phase = liveMigrationInfo.podPhase
+	for key, val := range liveMigrationInfo.annotation {
+		pod.Annotations[key] = val
+	}
+	pod.CreationTimestamp = liveMigrationInfo.creationTimestamp
+	return pod
 }
 
 func newMultiHomedPod(testPod testPod, multiHomingConfigs ...secondaryNetInfo) *v1.Pod {

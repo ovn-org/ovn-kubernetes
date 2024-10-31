@@ -353,6 +353,12 @@ func IsPodOwnedByVirtualMachine(pod *corev1.Pod) bool {
 	return ExtractVMNameFromPod(pod) != nil
 }
 
+func IsPodAllowedForMigration(pod *corev1.Pod, netInfo util.NetInfo) bool {
+	return IsPodOwnedByVirtualMachine(pod) &&
+		netInfo.TopologyType() == ovntypes.Layer2Topology &&
+		(netInfo.IsSecondary() || netInfo.IsPrimaryNetwork())
+}
+
 func isTargetPodReady(targetPod *corev1.Pod) bool {
 	if targetPod == nil {
 		return false
@@ -397,6 +403,10 @@ const (
 type LiveMigrationStatus struct {
 	SourcePod, TargetPod *corev1.Pod
 	State                LiveMigrationState
+}
+
+func (lm LiveMigrationStatus) IsTargetDomainReady() bool {
+	return lm.State == LiveMigrationTargetDomainReady
 }
 
 func DiscoverLiveMigrationStatus(client *factory.WatchFactory, pod *corev1.Pod) (*LiveMigrationStatus, error) {

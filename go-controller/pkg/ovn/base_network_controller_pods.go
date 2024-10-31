@@ -444,7 +444,7 @@ func (bnc *BaseNetworkController) ensurePodAnnotation(pod *kapi.Pod, nadName str
 }
 
 func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *kapi.Pod, nadName string,
-	network *nadapi.NetworkSelectionElement) (ops []ovsdb.Operation,
+	network *nadapi.NetworkSelectionElement, lspOpts ...nbdb.LSPOption) (ops []ovsdb.Operation,
 	lsp *nbdb.LogicalSwitchPort, podAnnotation *util.PodAnnotation, newlyCreatedPort bool, err error) {
 	var ls *nbdb.LogicalSwitch
 
@@ -588,6 +588,7 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *kapi.Pod, nadName
 		}
 	}
 
+	nbdb.ApplyLogicalSwitchPortOpts(lsp, lspOpts...)
 	ops, err = libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitchOps(bnc.nbClient, nil, ls, lsp)
 	if err != nil {
 		return nil, nil, nil, false,

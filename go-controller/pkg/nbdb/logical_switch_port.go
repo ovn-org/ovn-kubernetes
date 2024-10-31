@@ -28,6 +28,20 @@ type LogicalSwitchPort struct {
 	Up               *bool             `ovsdb:"up"`
 }
 
+type LSPOption func(lsp *LogicalSwitchPort)
+
+func WithLogicalSwitchPortEnabled(enabled bool) LSPOption {
+	return func(lsp *LogicalSwitchPort) {
+		lsp.Enabled = &enabled
+	}
+}
+
+func ApplyLogicalSwitchPortOpts(lsp *LogicalSwitchPort, lspOpts ...LSPOption) {
+	for _, f := range lspOpts {
+		f(lsp)
+	}
+}
+
 func (a *LogicalSwitchPort) GetUUID() string {
 	return a.UUID
 }
