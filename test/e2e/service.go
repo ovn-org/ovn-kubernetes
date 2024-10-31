@@ -3613,15 +3613,21 @@ func setupIPv6NetworkForExternalClient(svcLoadBalancerIP string, svcLoadBalancer
 	err = buildAndRunCommand(fmt.Sprintf("sudo ip -6 route add %s via %s", svcLoadBalancerIP, nodeIP))
 	framework.ExpectNoError(err, "failed to add route for external load balancer service")
 
-	err = buildAndRunCommand(fmt.Sprintf("sudo ip6tables -t filter -I FORWARD -d %s -p tcp -m tcp --dport %d -j ACCEPT", svcLoadBalancerIP, svcLoadBalancerPort))
-	framework.ExpectNoError(err, "failed to add iptables rule for service")
+	err = buildAndRunCommand("sudo nft add table inet ovn-kube-e2e")
+	framework.ExpectNoError(err, "failed to add nft rules for service")
+	err = buildAndRunCommand("sudo nft add chain inet ovn-kube-e2e fwd-external-v6 { type filter hook forward priority filter ; }")
+	framework.ExpectNoError(err, "failed to add nft rules for service")
+	err = buildAndRunCommand("sudo nft flush chain inet ovn-kube-e2e fwd-external-v6")
+	framework.ExpectNoError(err, "failed to add nft rules for service")
+	err = buildAndRunCommand(fmt.Sprintf("sudo nft add rule inet ovn-kube-e2e fwd-external-v6 ip6 daddr %s tcp dport %d accept", svcLoadBalancerIP, svcLoadBalancerPort))
+	framework.ExpectNoError(err, "failed to add nft rules for service")
 }
 
 func cleanupIPv6NetworkForExternalClient(svcLoadBalancerIP string, svcLoadBalancerPort int) {
 	cleanupNetNamespace()
 	buildAndRunCommand("sudo ip -6 route delete fc00:f853:ccd:e223::2")
 	buildAndRunCommand(fmt.Sprintf("sudo ip -6 route delete %s", svcLoadBalancerIP))
-	buildAndRunCommand(fmt.Sprintf("sudo ip6tables -t filter -D FORWARD -d %s -p tcp -m tcp --dport %d -j ACCEPT", svcLoadBalancerIP, svcLoadBalancerPort))
+	buildAndRunCommand("sudo nft delete chain inet ovn-kube-e2e fwd-external-v6")
 }
 
 func setupNetNamespaceAndLinks() {

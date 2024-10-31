@@ -60,25 +60,36 @@ const (
 	localNodePortStableProbeCount        = 3
 )
 
-// setupHostRedirectPod
-func setupHostRedirectPod(f *framework.Framework, externalContainer infraapi.ExternalContainer, nodeName, nodeIP string, isIPv6 bool) error {
+// setupHostRedirectPod:
+//   - adds a route to externalContainer for redirectIP pointing to nodeIP
+//   - adds an nftables rule to nodeName redirecting redirectIP traffic to itself
+//   - creates a hostNetwork pod on nodeName that accepts traffic on redirectPort.
+//
+// The net effect is that traffic addressed to redirectIP:redirectPort from
+// externalContainer will end up at the created hostNetwork pod. The returned cleanup
+// function will remove the nftables rules on nodeName.
+//
+// Note that setupHostRedirectPod() is not parallel-safe; you can't call it twice with the
+// same nodeName without cleaning up in between.
+func setupHostRedirectPod(f *framework.Framework, externalContainer infraapi.ExternalContainer, nodeName, nodeIP string, isIPv6 bool) (func() error, error) {
 	mask := 32
 	ipCmd := []string{"ip"}
+	nftFamily := ""
 	if isIPv6 {
 		mask = 128
 		ipCmd = []string{"ip", "-6"}
+		nftFamily = "6"
 	}
+
+	// Add the route to the externalContainer; no cleanup is needed for this part
+	// because external containers only persist for a single test's lifetime.
 	cmd := []string{}
 	cmd = append(cmd, ipCmd...)
 	cmd = append(cmd, "route", "add", fmt.Sprintf("%s/%d", redirectIP, mask), "via", nodeIP)
-	_, err := infraprovider.Get().ExecExternalContainerCommand(externalContainer, cmd) // cleanup not needed because containers persist for a single tests lifetime
+	_, err := infraprovider.Get().ExecExternalContainerCommand(externalContainer, cmd)
 	if err != nil {
-		return err
+		return nil, err
 	}
-
-	// setup redirect iptables rule in node
-	ipTablesArgs := []string{"PREROUTING", "-t", "nat", "--dst", redirectIP, "-j", "REDIRECT"}
-	updateIPTablesRulesForNode("insert", nodeName, ipTablesArgs, isIPv6)
 
 	command := []string{
 		"bash", "-c",
@@ -107,10 +118,24 @@ func setupHostRedirectPod(f *framework.Framework, externalContainer infraapi.Ext
 	podClient := f.ClientSet.CoreV1().Pods(f.Namespace.Name)
 	_, err = podClient.Create(context.Background(), pod, metav1.CreateOptions{})
 	if err != nil {
-		return err
+		return nil, err
 	}
 	err = e2epod.WaitForPodNotPending(context.TODO(), f.ClientSet, f.Namespace.Name, tcpServer)
-	return err
+	if err != nil {
+		return nil, err
+	}
+
+	// setup redirect rule on the node
+	rule := fmt.Sprintf("ip%s daddr %s redirect", nftFamily, redirectIP)
+	execNodeNFT(nodeName, "add table inet ovn-kube-e2e")
+	execNodeNFT(nodeName, "add chain inet ovn-kube-e2e prerouting { type nat hook prerouting priority dstnat ; }")
+	execNodeNFT(nodeName, "flush chain inet ovn-kube-e2e prerouting")
+	execNodeNFT(nodeName, "add rule inet ovn-kube-e2e prerouting "+rule)
+	cleanup := func() error {
+		execNodeNFT(nodeName, "delete chain inet ovn-kube-e2e prerouting")
+		return nil
+	}
+	return cleanup, nil
 }
 
 // checkContinuousConnectivity creates a pod and checks that it can connect to the given host over tries*2 seconds.
@@ -736,8 +761,9 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 		}
 		gomega.Expect(targetNodeIP).NotTo(gomega.BeEmpty(), "unable to find Node IP for secondary network")
 		framework.Logf("Target node is %q and IP is %q", targetNodeName, targetNodeIP)
-		err = setupHostRedirectPod(f, secondaryExternalContainer, targetNodeName, targetNodeIP, IsIPv6Cluster(f.ClientSet))
+		cleanUp, err := setupHostRedirectPod(f, secondaryExternalContainer, targetNodeName, targetNodeIP, IsIPv6Cluster(f.ClientSet))
 		framework.ExpectNoError(err)
+		ginkgo.DeferCleanup(cleanUp)
 
 		// start TCP client
 		go func() {
