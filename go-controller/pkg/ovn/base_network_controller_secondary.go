@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"reflect"
+	"strings"
 	"time"
 
 	ipamclaimsapi "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1"
@@ -564,40 +565,54 @@ func (bsnc *BaseSecondaryNetworkController) removePodForSecondaryNetwork(pod *ka
 
 // hasIPAMClaim determines whether a pod's IPAM is being handled by IPAMClaim CR.
 // pod passed should already be validated as having a network connection to nadName
-func (bsnc *BaseSecondaryNetworkController) hasIPAMClaim(pod *kapi.Pod, nadName string) (bool, error) {
-	// FIXME(trozet): relying on NAD/UDN existing can lead to a race condition on deletion and
-	// we should figure out a way to determine if the pod has an IPAMClaim without depending on this
-	activeNetwork, err := bsnc.getActiveNetworkForNamespace(pod.Namespace)
-	if err != nil {
-		return false, fmt.Errorf("failed looking for the active network at namespace '%s': %w", pod.Namespace, err)
-	}
-
-	on, networkMap, err := util.GetPodNADToNetworkMappingWithActiveNetwork(pod, bsnc.NetInfo, activeNetwork)
-	if err != nil {
-		bsnc.recordPodErrorEvent(pod, err)
-		return false, fmt.Errorf("error getting network-attachment for pod %s/%s network %s: %w",
-			pod.Namespace, pod.Name, bsnc.GetNetworkName(), err)
-	}
-
-	if !on {
+func (bsnc *BaseSecondaryNetworkController) hasIPAMClaim(pod *kapi.Pod, nadNamespacedName string) (bool, error) {
+	if !bsnc.AllowsPersistentIPs() {
 		return false, nil
 	}
 
-	network := networkMap[nadName]
-	hasIPAMClaim := network != nil && network.IPAMClaimReference != ""
-	if !hasIPAMClaim {
+	var ipamClaimName string
+	var wasPersistentIPRequested bool
+	if bsnc.IsPrimaryNetwork() {
+		// primary network ipam reference claim is on the annotation
+		ipamClaimName, wasPersistentIPRequested = pod.Annotations[util.OvnUDNIPAMClaimName]
+	} else {
+		// secondary network the IPAM claim reference is on the network selection element
+		nadKeys := strings.Split(nadNamespacedName, "/")
+		if len(nadKeys) != 2 {
+			return false, fmt.Errorf("invalid NAD name %s", nadNamespacedName)
+		}
+		nadNamespace := nadKeys[0]
+		nadName := nadKeys[1]
+		allNetworks, err := util.GetK8sPodAllNetworkSelections(pod)
+		if err != nil {
+			return false, err
+		}
+		for _, network := range allNetworks {
+			if network.Namespace == nadNamespace && network.Name == nadName {
+				// found network selection element, check if it has IPAM
+				if len(network.IPAMClaimReference) > 0 {
+					ipamClaimName = network.IPAMClaimReference
+					wasPersistentIPRequested = true
+				}
+				break
+			}
+		}
+	}
+
+	if !wasPersistentIPRequested || len(ipamClaimName) == 0 {
 		return false, nil
 	}
 
-	ipamClaim, err := bsnc.ipamClaimsReconciler.FindIPAMClaim(network.IPAMClaimReference, network.Namespace)
+	ipamClaim, err := bsnc.ipamClaimsReconciler.FindIPAMClaim(ipamClaimName, pod.Namespace)
 	if apierrors.IsNotFound(err) {
-		klog.Errorf("Failed to retrieve IPAMClaim %q but will release IPs: %v", network.IPAMClaimReference, err)
+		klog.Errorf("IPAMClaim %q for namespace: %q not found...will release IPs: %v",
+			ipamClaimName, pod.Namespace, err)
 		return false, nil
 	} else if err != nil {
-		return false, fmt.Errorf("failed to get IPAMClaim %s/%s: %w", network.Namespace, network.IPAMClaimReference, err)
+		return false, fmt.Errorf("failed to get IPAMClaim %s/%s: %w", pod.Namespace, ipamClaimName, err)
 	}
 
-	hasIPAMClaim = ipamClaim != nil && len(ipamClaim.Status.IPs) > 0
+	hasIPAMClaim := ipamClaim != nil && len(ipamClaim.Status.IPs) > 0
 	return hasIPAMClaim, nil
 }
 
