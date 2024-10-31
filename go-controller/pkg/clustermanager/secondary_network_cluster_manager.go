@@ -68,7 +68,7 @@ func (sncm *secondaryNetworkClusterManager) SetNetworkStatusReporter(errorReport
 	sncm.errorReporter = errorReporter
 }
 
-// Start the secondary layer3 controller, handles all events and creates all
+// Start the secondary network controller, handles all events and creates all
 // needed logical entities
 func (sncm *secondaryNetworkClusterManager) Start() error {
 	klog.Infof("Starting secondary network cluster manager")
