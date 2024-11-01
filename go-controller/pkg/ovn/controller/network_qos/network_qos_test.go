@@ -475,7 +475,13 @@ var _ = Describe("NetworkQoS Controller", func() {
 						Name:      "stream-qos",
 					},
 					Spec: nqostype.Spec{
-						NetworkAttachmentName: "default/unknown",
+						NetworkAttachmentRefs: []corev1.ObjectReference{
+							{
+								Kind:      "NetworkAttachmentDefinition",
+								Namespace: "default",
+								Name:      "unknown",
+							},
+						},
 						PodSelector: metav1.LabelSelector{
 							MatchLabels: map[string]string{
 								"app": "client",
@@ -516,7 +522,13 @@ var _ = Describe("NetworkQoS Controller", func() {
 
 				By("handles NetworkQos on secondary network")
 				{
-					nqos4StreamNet.Spec.NetworkAttachmentName = "default/stream"
+					nqos4StreamNet.Spec.NetworkAttachmentRefs = []corev1.ObjectReference{
+						{
+							Kind:      "NetworkAttachmentDefinition",
+							Namespace: "default",
+							Name:      "stream",
+						},
+					}
 					nqos4StreamNet.ResourceVersion = time.Now().String()
 					_, err := fakeNQoSClient.K8sV1().NetworkQoSes(nqosNamespace).Update(context.TODO(), nqos4StreamNet, metav1.UpdateOptions{})
 					Expect(err).NotTo(HaveOccurred())

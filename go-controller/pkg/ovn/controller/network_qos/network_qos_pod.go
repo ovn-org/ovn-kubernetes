@@ -146,10 +146,10 @@ func (c *Controller) setPodForNQOS(pod *v1.Pod, nqosState *networkQoSState, name
 	addresses, err := getPodAddresses(pod, c.NetInfo)
 	if err == nil && len(addresses) == 0 {
 		// pod hasn't been annotated with addresses yet, return without retry
-		klog.V(6).Infof("Pod %s/%s doesn't have addresses on network %s, skip NetworkQoS processing", pod.Namespace, pod.Name, nqosState.networkAttachmentName)
+		klog.V(6).Infof("Pod %s/%s doesn't have addresses on network %s, skip NetworkQoS processing", pod.Namespace, pod.Name, c.GetNetworkName())
 		return nil
 	} else if err != nil {
-		return fmt.Errorf("failed to parse addresses for pod %s/%s, network %s, err: %v", pod.Namespace, pod.Name, nqosState.networkAttachmentName, err)
+		return fmt.Errorf("failed to parse addresses for pod %s/%s, network %s, err: %v", pod.Namespace, pod.Name, c.GetNetworkName(), err)
 	}
 	fullPodName := joinMetaNamespaceAndName(pod.Namespace, pod.Name)
 	// is pod in this zone

@@ -65,18 +65,18 @@ func (c *Controller) syncNetworkQoS(key string) error {
 	if err != nil && !apierrors.IsNotFound(err) {
 		return err
 	}
-	if nqos == nil || !c.networkManagedByMe(nqos.Spec.NetworkAttachmentName) {
-		// either networkqos has been deleted, or networkAttachmentName changed to some other value
-		if nqos == nil {
-			klog.V(5).Infof("%s - NetworkQoS %s has gone", c.controllerName, key)
-		} else {
-			klog.V(6).Infof("%s - NetworkQoS %s has net-attach-def %s, not managed by this controller", c.controllerName, key, nqos.Spec.NetworkAttachmentName)
-		}
-		klog.V(4).Infof("%s - try cleaning up networkqos %s", c.controllerName, key)
-		// maybe NetworkAttachmentName has been changed from this one to other value, try cleanup anyway
+	if nqos == nil {
+		klog.V(5).Infof("%s - NetworkQoS %s has gone", c.controllerName, key)
 		return c.nqosCache.DoWithLock(key, func(nqosKey string) error {
 			return c.clearNetworkQos(nqosNamespace, nqosName)
 		})
+	} else {
+		if !c.networkManagedByMe(nqos.Spec.NetworkAttachmentRefs) {
+			// maybe NetworkAttachmentName has been changed from this one to other value, try cleanup anyway
+			return c.nqosCache.DoWithLock(key, func(nqosKey string) error {
+				return c.clearNetworkQos(nqosNamespace, nqosName)
+			})
+		}
 	}
 	klog.V(5).Infof("%s - Processing NetworkQoS %s/%s", c.controllerName, nqos.Namespace, nqos.Name)
 	// at this stage the NQOS exists in the cluster
@@ -97,12 +97,8 @@ func (c *Controller) syncNetworkQoS(key string) error {
 // matching pod or namespace changes.
 func (c *Controller) ensureNetworkQos(nqos *networkqosapi.NetworkQoS) error {
 	desiredNQOSState := &networkQoSState{
-		name:                  nqos.Name,
-		namespace:             nqos.Namespace,
-		networkAttachmentName: nqos.Spec.NetworkAttachmentName,
-	}
-	if desiredNQOSState.networkAttachmentName == "" {
-		desiredNQOSState.networkAttachmentName = types.DefaultNetworkName
+		name:      nqos.Name,
+		namespace: nqos.Namespace,
 	}
 
 	if len(nqos.Spec.PodSelector.MatchLabels) > 0 || len(nqos.Spec.PodSelector.MatchExpressions) > 0 {
@@ -122,8 +118,12 @@ func (c *Controller) ensureNetworkQos(nqos *networkqosapi.NetworkQoS) error {
 		ruleState := &GressRule{
 			Priority: ruleSpec.Priority,
 			Dscp:     ruleSpec.DSCP,
-			Rate:     &bwRate,
-			Burst:    &bwBurst,
+		}
+		if bwRate > 0 {
+			ruleState.Rate = &bwRate
+		}
+		if bwBurst > 0 {
+			ruleState.Burst = &bwBurst
 		}
 		destStates := []*Destination{}
 		for _, destSpec := range ruleSpec.Classifier.To {
@@ -191,6 +191,7 @@ func (c *Controller) clearNetworkQos(nqosNamespace, nqosName string) error {
 	k8sFullName := joinMetaNamespaceAndName(nqosNamespace, nqosName)
 	ovnObjectName := joinMetaNamespaceAndName(nqosNamespace, nqosName, ":")
 
+	klog.V(4).Infof("%s - try cleaning up networkqos %s", c.controllerName, k8sFullName)
 	// remove NBDB objects by NetworkQoS name
 	if err := c.deleteByName(ovnObjectName); err != nil {
 		return fmt.Errorf("failed to delete QoS rules for NetworkQoS %s: %w", k8sFullName, err)
@@ -248,6 +249,7 @@ func (c *Controller) updateNQOStatusCondition(newCondition metav1.Condition, nam
 		return err
 	}
 
+	existingCondition := meta.FindStatusCondition(nqos.Status.Conditions, newCondition.Type)
 	newConditionApply := &metaapplyv1.ConditionApplyConfiguration{
 		Type:               &newCondition.Type,
 		Status:             &newCondition.Status,
@@ -256,9 +258,10 @@ func (c *Controller) updateNQOStatusCondition(newCondition metav1.Condition, nam
 		Message:            &newCondition.Message,
 	}
 
-	existingCondition := meta.FindStatusCondition(nqos.Status.Conditions, newCondition.Type)
 	if existingCondition == nil || existingCondition.Status != newCondition.Status {
 		newConditionApply.LastTransitionTime = ptr.To(metav1.NewTime(time.Now()))
+	} else {
+		newConditionApply.LastTransitionTime = &existingCondition.LastTransitionTime
 	}
 
 	applyObj := nqosapiapply.NetworkQoS(name, namespace).
@@ -292,9 +295,19 @@ func (c *Controller) resyncPods(nqosState *networkQoSState) error {
 	return nil
 }
 
-func (c *Controller) networkManagedByMe(nadKey string) bool {
-	return ((nadKey == "" || nadKey == types.DefaultNetworkName) && c.IsDefault()) ||
-		(!c.IsDefault() && c.HasNAD(nadKey))
+func (c *Controller) networkManagedByMe(nadRefs []corev1.ObjectReference) bool {
+	if len(nadRefs) == 0 {
+		return c.IsDefault()
+	}
+	for _, nadRef := range nadRefs {
+		nadKey := joinMetaNamespaceAndName(nadRef.Namespace, nadRef.Name)
+		if ((nadKey == "" || nadKey == types.DefaultNetworkName) && c.IsDefault()) ||
+			(!c.IsDefault() && c.HasNAD(nadKey)) {
+			return true
+		}
+		klog.V(6).Infof("Net-attach-def %s is not managed by controller %s ", nadKey, c.controllerName)
+	}
+	return false
 }
 
 func (c *Controller) getLogicalSwitchName(nodeName string) string {

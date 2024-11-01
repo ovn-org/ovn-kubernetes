@@ -28,8 +28,6 @@ type networkQoSState struct {
 	name      string
 	namespace string
 
-	networkAttachmentName string
-
 	SrcAddrSet  addressset.AddressSet
 	Pods        sync.Map // pods name -> ips in the srcAddrSet
 	SwitchRefs  sync.Map // switch name -> list of source pods

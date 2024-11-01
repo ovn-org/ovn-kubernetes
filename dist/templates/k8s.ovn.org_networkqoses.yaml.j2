@@ -260,16 +260,62 @@ spec:
                   - priority
                   type: object
                 type: array
-              networkAttachmentName:
+              netAttachRefs:
                 description: |-
-                  networkAttachmentName selects the network-attachment-definition for
-                  which the QoS Rules will be applied. The NAD can be of any type Layer-3,
-                  Layer-2 or Localnet. If not specified, the default cluster-wide network
-                  will be used.
-                type: string
+                  netAttachRefs points to a list of NetworkAttachmentDefinition object,
+                  to which the QoS Rules will be applied. The netAttachRefs can be of
+                  type Layer-3, Layer-2 or Localnet. If not specified, the default cluster-wide
+                   network will be used.
+                items:
+                  description: ObjectReference contains enough information to let
+                    you inspect or modify the referred object.
+                  properties:
+                    apiVersion:
+                      description: API version of the referent.
+                      type: string
+                    fieldPath:
+                      description: |-
+                        If referring to a piece of an object instead of an entire object, this string
+                        should contain a valid JSON/Go field access statement, such as desiredState.manifest.containers[2].
+                        For example, if the object reference is to a container within a pod, this would take on a value like:
+                        "spec.containers{name}" (where "name" refers to the name of the container that triggered
+                        the event) or if no container name is specified "spec.containers[2]" (container with
+                        index 2 in this pod). This syntax is chosen only to have some well-defined way of
+                        referencing a part of an object.
+                      type: string
+                    kind:
+                      description: |-
+                        Kind of the referent.
+                        More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+                      type: string
+                    name:
+                      description: |-
+                        Name of the referent.
+                        More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                      type: string
+                    namespace:
+                      description: |-
+                        Namespace of the referent.
+                        More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/namespaces/
+                      type: string
+                    resourceVersion:
+                      description: |-
+                        Specific resourceVersion to which this reference is made, if any.
+                        More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#concurrency-control-and-consistency
+                      type: string
+                    uid:
+                      description: |-
+                        UID of the referent.
+                        More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#uids
+                      type: string
+                  type: object
+                  x-kubernetes-map-type: atomic
+                type: array
                 x-kubernetes-validations:
-                - message: networkAttachmentName is immutable
+                - message: netAttachRefs is immutable
                   rule: self == oldSelf
+                - message: '"kind" of netAttachRef must be "NetworkAttachmentDefinition"'
+                  rule: self.all(nad, nad.kind == 'NetworkAttachmentDefinition')
               podSelector:
                 description: |-
                   podSelector applies the NetworkQoS rule only to the pods in the namespace whose label
@@ -327,7 +373,7 @@ spec:
             properties:
               conditions:
                 description: An array of condition objects indicating details about
-                  status of EgressNetworkQoS object.
+                  status of NetworkQoS object.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -387,8 +433,8 @@ spec:
                 - type
                 x-kubernetes-list-type: map
               status:
-                description: A concise indication of whether the EgressNetworkQoS
-                  resource is applied with success.
+                description: A concise indication of whether the NetworkQoS resource
+                  is applied with success.
                 type: string
             type: object
         type: object

@@ -17,6 +17,7 @@ limitations under the License.
 package v1
 
 import (
+	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -47,13 +48,14 @@ type NetworkQoS struct {
 
 // Spec defines the desired state of NetworkQoS
 type Spec struct {
-	// networkAttachmentName selects the network-attachment-definition for
-	// which the QoS Rules will be applied. The NAD can be of any type Layer-3,
-	// Layer-2 or Localnet. If not specified, the default cluster-wide network
-	// will be used.
+	// netAttachRefs points to a list of NetworkAttachmentDefinition object,
+	// to which the QoS Rules will be applied. The netAttachRefs can be of
+	// type Layer-3, Layer-2 or Localnet. If not specified, the default cluster-wide
+	//  network will be used.
 	// +optional
-	// +kubebuilder:validation:XValidation:rule="self == oldSelf", message="networkAttachmentName is immutable"
-	NetworkAttachmentName string `json:"networkAttachmentName,omitempty"`
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf", message="netAttachRefs is immutable"
+	// +kubebuilder:validation:XValidation:rule="self.all(nad, nad.kind == 'NetworkAttachmentDefinition')", message="\"kind\" of netAttachRef must be \"NetworkAttachmentDefinition\""
+	NetworkAttachmentRefs []corev1.ObjectReference `json:"netAttachRefs,omitempty"`
 
 	// podSelector applies the NetworkQoS rule only to the pods in the namespace whose label
 	// matches this definition. This field is optional, and in case it is not set
@@ -161,11 +163,11 @@ type Destination struct {
 
 // Status defines the observed state of NetworkQoS
 type Status struct {
-	// A concise indication of whether the EgressNetworkQoS resource is applied with success.
+	// A concise indication of whether the NetworkQoS resource is applied with success.
 	// +optional
 	Status string `json:"status,omitempty"`
 
-	// An array of condition objects indicating details about status of EgressNetworkQoS object.
+	// An array of condition objects indicating details about status of NetworkQoS object.
 	// +optional
 	// +patchMergeKey=type
 	// +patchStrategy=merge

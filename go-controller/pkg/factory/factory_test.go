@@ -235,7 +235,13 @@ func newNetworkQoS(name, namespace string) *networkqos.NetworkQoS {
 	return &networkqos.NetworkQoS{
 		ObjectMeta: newObjectMeta(name, namespace),
 		Spec: networkqos.Spec{
-			NetworkAttachmentName: "default/stream",
+			NetworkAttachmentRefs: []v1.ObjectReference{
+				{
+					Kind:      "NetworkAttachmentDefinition",
+					Namespace: "default",
+					Name:      "stream",
+				},
+			},
 			Egress: []networkqos.Rule{
 				{
 					Priority: 100,
