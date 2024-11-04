@@ -607,6 +607,100 @@ var _ = Describe("Network Segmentation", func() {
 		)
 	})
 
+	Context("a user defined secondary network", func() {
+		const (
+			nodeHostnameKey              = "kubernetes.io/hostname"
+			port                         = 9000
+			userDefinedNetworkIPv4Subnet = "10.128.0.0/16"
+			userDefinedNetworkIPv6Subnet = "2014:100:200::0/60"
+			nadName                      = "gryffindor"
+			workerOneNodeName            = "ovn-worker"
+			workerTwoNodeName            = "ovn-worker2"
+		)
+
+		DescribeTableSubtree("created using",
+			func(createNetworkFn func(c networkAttachmentConfigParams) error) {
+
+				DescribeTable(
+					"can perform east/west traffic between nodes",
+					func(
+						netConfig networkAttachmentConfigParams,
+						clientPodConfig podConfiguration,
+						serverPodConfig podConfiguration,
+					) {
+						By("creating the network")
+						netConfig.namespace = f.Namespace.Name
+						Expect(createNetworkFn(netConfig)).To(Succeed())
+
+						By("creating client/server pods")
+						serverPodConfig.namespace = f.Namespace.Name
+						clientPodConfig.namespace = f.Namespace.Name
+						serverPod := runUDNPod(cs, f.Namespace.Name, serverPodConfig, nil)
+						runUDNPod(cs, f.Namespace.Name, clientPodConfig, nil)
+
+						By("asserting the *client* pod can contact the server pod exposed endpoint")
+						Eventually(func() error {
+							return reachToServerPodFromClient(cs, serverPodConfig, clientPodConfig, serverPod.Status.PodIP, port)
+						}, 2*time.Minute, 6*time.Second).Should(Succeed())
+					},
+					Entry(
+						"two pods connected over a L2 dualstack primary UDN",
+						networkAttachmentConfigParams{
+							name:     nadName,
+							topology: "layer2",
+							cidr:     fmt.Sprintf("%s,%s", userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+							role:     "secondary",
+						},
+						*podConfig(
+							"client-pod",
+							withNodeSelector(map[string]string{nodeHostnameKey: workerOneNodeName}),
+						),
+						*podConfig(
+							"server-pod",
+							withCommand(func() []string {
+								return httpServerContainerCmd(port)
+							}),
+							withNodeSelector(map[string]string{nodeHostnameKey: workerTwoNodeName}),
+						),
+					),
+					Entry(
+						"two pods connected over a L3 dualstack primary UDN",
+						networkAttachmentConfigParams{
+							name:     nadName,
+							topology: "layer3",
+							cidr:     fmt.Sprintf("%s,%s", userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+							role:     "secondary",
+						},
+						*podConfig(
+							"client-pod",
+							withNodeSelector(map[string]string{nodeHostnameKey: workerOneNodeName}),
+						),
+						*podConfig(
+							"server-pod",
+							withCommand(func() []string {
+								return httpServerContainerCmd(port)
+							}),
+							withNodeSelector(map[string]string{nodeHostnameKey: workerTwoNodeName}),
+						),
+					),
+				)
+			},
+			Entry("NetworkAttachmentDefinitions", func(c networkAttachmentConfigParams) error {
+				netConfig := newNetworkAttachmentConfig(c)
+				nad := generateNAD(netConfig)
+				_, err := nadClient.NetworkAttachmentDefinitions(f.Namespace.Name).Create(context.Background(), nad, metav1.CreateOptions{})
+				return err
+			}),
+			Entry("UserDefinedNetwork", func(c networkAttachmentConfigParams) error {
+				udnManifest := generateUserDefinedNetworkManifest(&c)
+				cleanup, err := createManifest(f.Namespace.Name, udnManifest)
+				DeferCleanup(cleanup)
+				Expect(waitForUserDefinedNetworkReady(f.Namespace.Name, c.name, 5*time.Second)).To(Succeed())
+				return err
+			}),
+		)
+	})
+
 	Context("UserDefinedNetwork", func() {
 		const (
 			testUdnName                = "test-net"
