@@ -100,6 +100,9 @@ func NewNetAttachDefinitionController(
 		Reconcile:      nadController.sync,
 		ObjNeedsUpdate: nadNeedsUpdate,
 		Threadiness:    1,
+		SkipRequeuePredicate: func(err error) bool {
+			return errors.Is(err, ErrNetworkControllerTopologyNotManaged)
+		},
 	}
 
 	nadInformer := wf.NADInformer()

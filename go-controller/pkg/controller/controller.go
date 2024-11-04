@@ -52,7 +52,8 @@ type ControllerConfig[T any] struct {
 	Lister      func(selector labels.Selector) (ret []*T, err error)
 	// ObjNeedsUpdate tells if object should be reconciled.
 	// May be called with oldObj = nil on Add, won't be called on Delete.
-	ObjNeedsUpdate func(oldObj, newObj *T) bool
+	ObjNeedsUpdate       func(oldObj, newObj *T) bool
+	SkipRequeuePredicate func(err error) bool
 }
 
 // controller has the basic functionality, and may have some wrappers to provide
@@ -223,12 +224,13 @@ func (c *controller[T]) processNextQueueItem() bool {
 
 	err := c.config.Reconcile(key)
 	if err != nil {
-		if c.queue.NumRequeues(key) < maxRetries {
+		shouldSkipRequeue := c.config.SkipRequeuePredicate(err)
+		if !shouldSkipRequeue && c.queue.NumRequeues(key) < maxRetries {
 			klog.Infof("Controller %s: error found while processing %s: %v", c.name, key, err)
 			c.queue.AddRateLimited(key)
 			return true
 		}
-		klog.Warningf("Controller %s: dropping %s out of the queue: %v", c.name, key, err)
+		klog.Warningf("Controller %s; skipped requeue ? %t| dropping %s out of the queue: %v", c.name, shouldSkipRequeue, key, err)
 		utilruntime.HandleError(err)
 	}
 	c.queue.Forget(key)
