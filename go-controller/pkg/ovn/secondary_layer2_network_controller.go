@@ -511,7 +511,7 @@ func (oc *SecondaryLayer2NetworkController) addUpdateLocalNodeEvent(node *corev1
 					gwConfig.hostSubnets,
 					nil,
 					gwConfig.hostSubnets,
-					gwConfig.gwLRPIPs,
+					gwConfig.gwLRPJoinIPs, // the joinIP allocated to this node for this controller's network
 					oc.SCTPSupport,
 					nil, // no need for ovnClusterLRPToJoinIfAddrs
 					gwConfig.externalIPs,
@@ -672,10 +672,10 @@ func (oc *SecondaryLayer2NetworkController) addUDNClusterSubnetEgressSNAT(localP
 }
 
 type SecondaryL2GatewayConfig struct {
-	config      *util.L3GatewayConfig
-	hostSubnets []*net.IPNet
-	gwLRPIPs    []*net.IPNet
-	externalIPs []net.IP
+	config       *util.L3GatewayConfig
+	hostSubnets  []*net.IPNet
+	gwLRPJoinIPs []*net.IPNet
+	externalIPs  []net.IP
 }
 
 func (oc *SecondaryLayer2NetworkController) nodeGatewayConfig(node *corev1.Node) (*SecondaryL2GatewayConfig, error) {
@@ -714,25 +714,18 @@ func (oc *SecondaryLayer2NetworkController) nodeGatewayConfig(node *corev1.Node)
 
 	// at layer2 the GR LRP should be different per node same we do for layer3
 	// since they should not collide at the distributed switch later on
-	gwLRPIPs, err := util.ParseNodeGatewayRouterJoinAddrs(node, networkName)
+	gwLRPJoinIPs, err := util.ParseNodeGatewayRouterJoinAddrs(node, networkName)
 	if err != nil {
 		return nil, fmt.Errorf("failed composing LRP addresses for layer2 network %s: %w", oc.GetNetworkName(), err)
-	}
-
-	// At layer2 GR LRP acts as the layer3 ovn_cluster_router so we need
-	// to configure here the .1 address, this will work only for IC with
-	// one node per zone, since ARPs for .1 will not go beyond local switch.
-	for _, subnet := range oc.Subnets() {
-		gwLRPIPs = append(gwLRPIPs, util.GetNodeGatewayIfAddr(subnet.CIDR))
 	}
 
 	// Overwrite the primary interface ID with the correct, per-network one.
 	l3GatewayConfig.InterfaceID = oc.GetNetworkScopedExtPortName(l3GatewayConfig.BridgeID, node.Name)
 	return &SecondaryL2GatewayConfig{
-		config:      l3GatewayConfig,
-		hostSubnets: hostSubnets,
-		gwLRPIPs:    gwLRPIPs,
-		externalIPs: externalIPs,
+		config:       l3GatewayConfig,
+		hostSubnets:  hostSubnets,
+		gwLRPJoinIPs: gwLRPJoinIPs,
+		externalIPs:  externalIPs,
 	}, nil
 }
 
