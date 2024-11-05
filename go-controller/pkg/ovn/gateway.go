@@ -356,7 +356,7 @@ func (gw *GatewayManager) GatewayInit(
 			types.NetworkExternalID:  gw.netInfo.GetNetworkName(),
 			types.TopologyExternalID: gw.netInfo.TopologyType(),
 		}
-		if util.IsNetworkSegmentationSupportEnabled() && gw.netInfo.IsPrimaryNetwork() && gw.netInfo.TopologyType() == types.Layer2Topology {
+		if gw.netInfo.TopologyType() == types.Layer2Topology {
 			node, err := gw.watchFactory.GetNode(nodeName)
 			if err != nil {
 				return fmt.Errorf("failed to fetch node %s from watch factory %w", node, err)
@@ -404,7 +404,7 @@ func (gw *GatewayManager) GatewayInit(
 			types.TopologyExternalID: gw.netInfo.TopologyType(),
 		}
 		_, isNetIPv6 := gw.netInfo.IPMode()
-		if gw.netInfo.IsPrimaryNetwork() && gw.netInfo.TopologyType() == types.Layer2Topology && isNetIPv6 && config.IPv6Mode {
+		if gw.netInfo.TopologyType() == types.Layer2Topology && isNetIPv6 && config.IPv6Mode {
 			logicalRouterPort.Ipv6RaConfigs = map[string]string{
 				"address_mode":      "dhcpv6_stateful",
 				"send_periodic":     "true",

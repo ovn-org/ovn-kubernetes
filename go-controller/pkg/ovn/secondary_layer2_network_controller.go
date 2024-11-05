@@ -519,13 +519,11 @@ func (oc *SecondaryLayer2NetworkController) addUpdateLocalNodeEvent(node *corev1
 					errs = append(errs, err)
 					oc.gatewaysFailed.Store(node.Name, true)
 				} else {
-					if util.IsNetworkSegmentationSupportEnabled() && oc.IsPrimaryNetwork() {
-						if err := oc.addUDNClusterSubnetEgressSNAT(gwConfig.hostSubnets, gwManager.gwRouterName, node); err != nil {
-							errs = append(errs, err)
-							oc.gatewaysFailed.Store(node.Name, true)
-						} else {
-							oc.gatewaysFailed.Delete(node.Name)
-						}
+					if err := oc.addUDNClusterSubnetEgressSNAT(gwConfig.hostSubnets, gwManager.gwRouterName, node); err != nil {
+						errs = append(errs, err)
+						oc.gatewaysFailed.Store(node.Name, true)
+					} else {
+						oc.gatewaysFailed.Delete(node.Name)
 					}
 				}
 			}
