@@ -17,4 +17,6 @@ limitations under the License.
 
 package v1
 
+type ClusterUserDefinedNetworkExpansion interface{}
+
 type UserDefinedNetworkExpansion interface{}

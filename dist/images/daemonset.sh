@@ -1040,5 +1040,6 @@ cp ../templates/k8s.ovn.org_egressqoses.yaml.j2 ${output_dir}/k8s.ovn.org_egress
 cp ../templates/k8s.ovn.org_egressservices.yaml.j2 ${output_dir}/k8s.ovn.org_egressservices.yaml
 cp ../templates/k8s.ovn.org_adminpolicybasedexternalroutes.yaml.j2 ${output_dir}/k8s.ovn.org_adminpolicybasedexternalroutes.yaml
 cp ../templates/k8s.ovn.org_userdefinednetworks.yaml.j2 ${output_dir}/k8s.ovn.org_userdefinednetworks.yaml
+cp ../templates/k8s.ovn.org_clusteruserdefinednetworks.yaml.j2 ${output_dir}/k8s.ovn.org_clusteruserdefinednetworks.yaml
 
 exit 0

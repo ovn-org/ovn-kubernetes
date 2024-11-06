@@ -10,7 +10,7 @@ import (
 )
 
 type NetAttachDefReconciler interface {
-	ReconcileNetAttachDef(key string)
+	ReconcileNetAttachDef(key string) error
 }
 
 // NetAttachDefNotifier watches NetworkAttachmentDefinition objects and notify subscribers upon change.
@@ -49,7 +49,9 @@ func (c *NetAttachDefNotifier) reconcile(key string) error {
 		if subscriber != nil {
 			// enqueue the reconciled NAD key in the subscribers workqueue to
 			// enable the subscriber act on NAD changes (e.g.: reflect NAD state is status)
-			subscriber.ReconcileNetAttachDef(key)
+			if err := subscriber.ReconcileNetAttachDef(key); err != nil {
+				return err
+			}
 		}
 	}
 
