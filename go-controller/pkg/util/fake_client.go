@@ -113,6 +113,22 @@ func populateTracker(nadClient *nadfake.Clientset, objects ...runtime.Object) {
 	}
 }
 
+// populateTracker populate the NAD fake-client internal tracker with NAD objects
+func populateTracker(nadClient *nadfake.Clientset, objects ...runtime.Object) {
+	nadGVR := schema.GroupVersionResource(metav1.GroupVersionResource{
+		Group:    "k8s.cni.cncf.io",
+		Version:  "v1",
+		Resource: "network-attachment-definitions",
+	})
+	for _, obj := range objects {
+		if nad, ok := obj.(*nettypes.NetworkAttachmentDefinition); ok {
+			if err := nadClient.Tracker().Create(nadGVR, nad, nad.Namespace); err != nil {
+				panic(err)
+			}
+		}
+	}
+}
+
 func NewObjectMeta(name, namespace string) metav1.ObjectMeta {
 	return metav1.ObjectMeta{
 		UID:       types.UID(namespace + name),
