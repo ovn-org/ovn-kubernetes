@@ -11,7 +11,7 @@ permissions:
 env:
   GO_VERSION: 1.22.0
   REGISTRY: ghcr.io 
-  OWNER: ovn-org
+  OWNER: ovn-kubernetes
   REPOSITORY: ovn-kubernetes
   FEDORA_IMAGE_NAME: ovn-kube-fedora
   UBUNTU_IMAGE_NAME: ovn-kube-ubuntu

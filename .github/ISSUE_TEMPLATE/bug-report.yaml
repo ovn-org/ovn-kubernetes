@@ -8,7 +8,7 @@ body:
       label: What happened?
       description: |
         Please provide as much info as possible. Not doing so may result in your bug not being addressed in a timely manner.
-        If this matter is security related, please disclose it privately via https://github.com/ovn-org/ovn-kubernetes/blob/master/SECURITY.md
+        If this matter is security related, please disclose it privately via https://github.com/ovn-kubernetes/ovn-kubernetes/blob/master/SECURITY.md
     validations:
       required: true
 
