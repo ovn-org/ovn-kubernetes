@@ -112,7 +112,9 @@ var _ = Describe("Persistent IP allocator operations", func() {
 		},
 			Entry("no objects to sync with"),
 			Entry("an IPAMClaim without persisted IPs", emptyDummyIPAMClaim(namespace, claimName, networkName)),
-			Entry("an IPAMClaim with persisted IPs", ipamClaimWithIPs(namespace, claimName, networkName, "192.168.200.2/24", "fd10::1/64")),
+			Entry("an IPAMClaim with persisted IPs",
+				ipamClaimWithIPs(namespace, claimName, networkName, "192.168.200.2/24", "fd10::1/64"),
+				ipamClaimWithIPs(namespace, claimName, networkName, "192.168.200.3/24", "fd10::2/64")),
 		)
 	})
 
