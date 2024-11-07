@@ -191,6 +191,16 @@ func podNetworkStatus(pod *v1.Pod, predicates ...func(nadapi.NetworkStatus) bool
 	return netStatusMeetingPredicates, nil
 }
 
+func podNetworkStatusByNetConfigPredicate(netConfig networkAttachmentConfig) func(nadapi.NetworkStatus) bool {
+	return func(networkStatus nadapi.NetworkStatus) bool {
+		if netConfig.role == "primary" {
+			return networkStatus.Default
+		} else {
+			return networkStatus.Name == netConfig.namespace+"/"+netConfig.name
+		}
+	}
+}
+
 func namespacedName(namespace, name string) string {
 	return fmt.Sprintf("%s/%s", namespace, name)
 }
