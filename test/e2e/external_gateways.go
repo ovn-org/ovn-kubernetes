@@ -1358,7 +1358,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 				servingNamespace = ns.Name
 
 				gwContainers, addressesv4, addressesv6 = setupGatewayContainers(f, nodes, gwContainer1, gwContainer2, srcPingPodName, externalUDPPort, externalTCPPort, ecmpRetry)
-				setupPolicyBasedGatewayPods(f, nodes, gatewayPodName1, gatewayPodName2, servingNamespace, sleepCommand, addressesv4, addressesv6)
+				setupPolicyBasedGatewayPods(f, nodes, gatewayPodName1, gatewayPodName2, servingNamespace, sleepCommand, addressesv4, addressesv6) // what's a GW pod???
 			})
 
 			ginkgo.AfterEach(func() {
@@ -1366,17 +1366,77 @@ var _ = ginkgo.Describe("External Gateway", func() {
 				cleanExGWContainers(clientSet, []string{gwContainer1, gwContainer2}, addressesv4, addressesv6)
 			})
 
-			ginkgo.DescribeTable("Should validate ICMP connectivity to an external gateway's loopback address via a gateway pod",
+			ginkgo.JustAfterEach(func() {
+				// in case of test failure:
+				if ginkgo.CurrentSpecReport().Failed() {
+					// on the external container, run:
+					// "ip route"
+					// "ip neigh"
+					// "ip address"
+					for _, gwContainer := range gwContainers {
+						fmt.Printf("Printing debug information for external container %s\n", gwContainer)
+						output, err := runCommand(containerRuntime, "exec", gwContainer, "ip", "route")
+						if err != nil {
+							fmt.Printf("Failed to run 'ip route' on container %s. err=%v\n", gwContainer, err)
+						}
+						fmt.Printf("ip route:\n%s\n", output)
+
+						output, err = runCommand(containerRuntime, "exec", gwContainer, "ip", "neigh")
+						if err != nil {
+							fmt.Printf("Failed to run 'ip neigh' on container %s. err=%v\n", gwContainer, err)
+						}
+						fmt.Printf("ip neigh:\n%s\n", output)
+
+						output, err = runCommand(containerRuntime, "exec", gwContainer, "ip", "address")
+						if err != nil {
+							fmt.Printf("Failed to run 'ip address' on container %s. err=%v\n", gwContainer, err)
+						}
+						fmt.Printf("ip address:\n%s\n", output)
+					}
+
+					// On the node where the srcPingPod is, run: "ip address"
+					// Print the YAML definition of srcPingPodName pod
+					srcPod, err := f.ClientSet.CoreV1().Pods(f.Namespace.Name).Get(context.TODO(), srcPingPodName, metav1.GetOptions{})
+					if err != nil {
+						fmt.Printf("Failed to get pod %s. err=%v\n", srcPingPodName, err)
+					}
+					fmt.Printf("Pod %s definition:\n%v\n", srcPingPodName, srcPod)
+
+					// Enter node podNode and print the output of the command "ip address"
+					fmt.Printf("'ip address' on node %s:\n%s\n", srcPod.Spec.NodeName, runCommandOnNode(srcPod.Spec.NodeName, "ip", "address"))
+
+					// Run retrieve the yaml of the node where srcPingPod runs, to get the node IP (even though we're interested in the IP of breth1)
+					node, err := f.ClientSet.CoreV1().Nodes().Get(context.TODO(), srcPod.Spec.NodeName, metav1.GetOptions{})
+					if err != nil {
+						fmt.Printf("Failed to get node %s. err=%v\n", srcPod.Spec.NodeName, err)
+					}
+					fmt.Printf("Node %s definition:\n%v\n", srcPod.Spec.NodeName, node)
+
+					// Finally, print the definition of the adminpolicybasedexternalroute named default-route-policy that we added for this test
+					externalRoute, err := e2ekubectl.RunKubectl("", "get", "apbexternalroute", defaultPolicyName, "-o", "yaml")
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					fmt.Printf("AdminPolicyBasedExternalRoute %s definition:\n%s\n", defaultPolicyName, externalRoute)
+
+				}
+
+			})
+
+			ginkgo.DescribeTable("Should validate ICMP connectivity to an external gateway's loopback address via a gateway pod", // fails here
 				func(addresses *gatewayTestIPs, icmpCommand string) {
 					if addresses.srcPodIP == "" || addresses.nodeIP == "" {
 						skipper.Skipf("Skipping as pod ip / node ip are not set pod ip %s node ip %s", addresses.srcPodIP, addresses.nodeIP)
 					}
 					createAPBExternalRouteCRWithDynamicHop(defaultPolicyName, f.Namespace.Name, servingNamespace, false, addresses.gatewayIPs)
 
-					ginkgo.By(fmt.Sprintf("Verifying connectivity to the pod [%s] from external gateways", addresses.srcPodIP))
+					ginkgo.By(fmt.Sprintf("Verifying connectivity to the pod [%s] from external gateways ****", addresses.srcPodIP)) // fails here
 					for _, gwContainer := range gwContainers {
 						// Ping from a common IP address that exists on both gateways to ensure test coverage where ingress reply goes back to the same host.
 						_, err := runCommand(containerRuntime, "exec", gwContainer, "ping", "-I", addresses.targetIPs[0], "-c", testTimeout, addresses.srcPodIP)
+						// if err != nil {
+						// 	// fmt.Printf("Failed to ping %s from container %s. Sleeping now! err=%v", addresses.srcPodIP, gwContainer, err)
+						// 	// time.Sleep(999999999 * time.Second)
+						// 	fmt.Printf("Failed to ping %s from container %s. err=%v", addresses.srcPodIP, gwContainer, err)
+						// }
 						framework.ExpectNoError(err, "Failed to ping %s from container %s", addresses.srcPodIP, gwContainer)
 					}
 
@@ -3249,6 +3309,20 @@ func pokeHostnameViaNC(podName, namespace, protocol, target string, port int) st
 	framework.ExpectNoError(err, "failed to reach %s (%s)", target, protocol)
 	hostname := strings.TrimSuffix(res, "\n")
 	return hostname
+}
+
+// runCommandOnNode runs a command on a node and returns the output
+func runCommandOnNode(nodeName string, cmd ...string) string {
+	// find the ovs pod on the input node
+	args := []string{"get", "pods", "--selector=app=ovs-node", "--field-selector", fmt.Sprintf("spec.nodeName=%s", nodeName), "-o", "jsonpath={.items..metadata.name}"}
+	ovsPodName, err := e2ekubectl.RunKubectl(ovnNamespace, args...)
+	framework.ExpectNoError(err, "failed to get the ovs pod on node %s", nodeName)
+
+	// run the input command on the host-networked ovs pod
+	args = append([]string{"exec", ovsPodName, "--"}, cmd...)
+	output, err := e2ekubectl.RunKubectl(ovnNamespace, args...)
+	framework.ExpectNoError(err, "failed to run command %s on node %s", cmd, nodeName)
+	return output
 }
 
 // pokeConntrackEntries returns the number of conntrack entries that match the provided pattern, protocol and podIP
