@@ -314,6 +314,129 @@ func TestLinkAddrExist(t *testing.T) {
 	}
 }
 
+func TestSyncAddresses(t *testing.T) {
+	mockNetLinkOps := new(mocks.NetLinkOps)
+	mockLink := new(netlink_mocks.Link)
+	// below is defined in net_linux.go
+	netLinkOps = mockNetLinkOps
+	existingIPNet := netlink.Addr{
+		IPNet: ovntest.MustParseIPNet("192.168.1.15/24"),
+	}
+	undesiredExistingIPNet := netlink.Addr{
+		IPNet: ovntest.MustParseIPNet("123.123.123.15/24"),
+	}
+	undesiredExistingIPNet2 := netlink.Addr{
+		IPNet: ovntest.MustParseIPNet("123.123.124.15/24"),
+	}
+	linkLocalAddr := netlink.Addr{
+		IPNet: ovntest.MustParseIPNet("fe80::210:5aff:feaa:20a2/64"),
+	}
+
+	tests := []struct {
+		desc                     string
+		inputLink                netlink.Link
+		inputNewAddrs            []*net.IPNet
+		errExp                   bool
+		onRetArgsNetLinkLibOpers []ovntest.TestifyMockHelper
+		onRetArgsLinkIfaceOpers  []ovntest.TestifyMockHelper
+	}{
+		{
+			desc:                     "specifying multiple address families fails",
+			inputLink:                mockLink,
+			inputNewAddrs:            []*net.IPNet{ovntest.MustParseIPNet("192.168.1.15/24"), ovntest.MustParseIPNet("6b35:d6d1:5789:1b33:8ad4:866c:78c1:a085/128")},
+			errExp:                   true,
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{},
+			onRetArgsLinkIfaceOpers:  []ovntest.TestifyMockHelper{},
+		},
+		{
+			desc:          "link address list failure causes error",
+			inputLink:     mockLink,
+			inputNewAddrs: []*net.IPNet{ovntest.MustParseIPNet("192.168.1.15/24")},
+			errExp:        true,
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "AddrList", OnCallMethodArgType: []string{"*mocks.Link", "int"}, RetArgList: []interface{}{nil, fmt.Errorf("mock error")}},
+			},
+			onRetArgsLinkIfaceOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
+			},
+		},
+		{
+			desc:          "new non-existent address should be added",
+			inputLink:     mockLink,
+			inputNewAddrs: []*net.IPNet{ovntest.MustParseIPNet("192.168.1.15/24")},
+			errExp:        false,
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "AddrList", OnCallMethodArgType: []string{"*mocks.Link", "int"}, RetArgList: []interface{}{[]netlink.Addr{}, nil}},
+				{OnCallMethodName: "AddrAdd", OnCallMethodArgType: []string{"*mocks.Link", "*netlink.Addr"}, RetArgList: []interface{}{nil}},
+			},
+			onRetArgsLinkIfaceOpers: []ovntest.TestifyMockHelper{},
+		},
+		{
+			desc:          "address that already exists should not be added",
+			inputLink:     mockLink,
+			inputNewAddrs: []*net.IPNet{ovntest.MustParseIPNet("192.168.1.15/24")},
+			errExp:        false,
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "AddrList", OnCallMethodArgType: []string{"*mocks.Link", "int"}, RetArgList: []interface{}{[]netlink.Addr{existingIPNet}, nil}},
+			},
+			onRetArgsLinkIfaceOpers: []ovntest.TestifyMockHelper{},
+		},
+		{
+			desc:          "address should be added while undesired address should be removed",
+			inputLink:     mockLink,
+			inputNewAddrs: []*net.IPNet{ovntest.MustParseIPNet("192.168.1.15/24")},
+			errExp:        false,
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "AddrList", OnCallMethodArgType: []string{"*mocks.Link", "int"}, RetArgList: []interface{}{[]netlink.Addr{undesiredExistingIPNet}, nil}},
+				{OnCallMethodName: "AddrDel", OnCallMethodArgType: []string{"*mocks.Link", "*netlink.Addr"}, RetArgList: []interface{}{nil}},
+				{OnCallMethodName: "AddrAdd", OnCallMethodArgType: []string{"*mocks.Link", "*netlink.Addr"}, RetArgList: []interface{}{nil}},
+			},
+			onRetArgsLinkIfaceOpers: []ovntest.TestifyMockHelper{},
+		},
+		{
+			desc:          "multiple addresses should be added while multiple undesired addresses should be removed",
+			inputLink:     mockLink,
+			inputNewAddrs: []*net.IPNet{ovntest.MustParseIPNet("192.168.1.15/24"), ovntest.MustParseIPNet("192.168.1.16/24")},
+			errExp:        false,
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "AddrList", OnCallMethodArgType: []string{"*mocks.Link", "int"}, RetArgList: []interface{}{[]netlink.Addr{undesiredExistingIPNet, undesiredExistingIPNet2}, nil}},
+				{OnCallMethodName: "AddrDel", OnCallMethodArgType: []string{"*mocks.Link", "*netlink.Addr"}, RetArgList: []interface{}{nil}},
+				{OnCallMethodName: "AddrDel", OnCallMethodArgType: []string{"*mocks.Link", "*netlink.Addr"}, RetArgList: []interface{}{nil}},
+				{OnCallMethodName: "AddrAdd", OnCallMethodArgType: []string{"*mocks.Link", "*netlink.Addr"}, RetArgList: []interface{}{nil}},
+				{OnCallMethodName: "AddrAdd", OnCallMethodArgType: []string{"*mocks.Link", "*netlink.Addr"}, RetArgList: []interface{}{nil}},
+			},
+			onRetArgsLinkIfaceOpers: []ovntest.TestifyMockHelper{},
+		},
+		{
+			desc:          "IPv6 LLA addresses should not be touched",
+			inputLink:     mockLink,
+			inputNewAddrs: []*net.IPNet{ovntest.MustParseIPNet("6b35:d6d1:5789:1b33:8ad4:866c:78c1:a085/128")},
+			errExp:        false,
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "AddrList", OnCallMethodArgType: []string{"*mocks.Link", "int"}, RetArgList: []interface{}{[]netlink.Addr{linkLocalAddr}, nil}},
+				{OnCallMethodName: "AddrAdd", OnCallMethodArgType: []string{"*mocks.Link", "*netlink.Addr"}, RetArgList: []interface{}{nil}},
+			},
+			onRetArgsLinkIfaceOpers: []ovntest.TestifyMockHelper{},
+		},
+	}
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+
+			ovntest.ProcessMockFnList(&mockNetLinkOps.Mock, tc.onRetArgsNetLinkLibOpers)
+			ovntest.ProcessMockFnList(&mockLink.Mock, tc.onRetArgsLinkIfaceOpers)
+			err := SyncAddresses(tc.inputLink, tc.inputNewAddrs)
+			t.Log(err)
+			if tc.errExp {
+				assert.Error(t, err)
+			} else {
+				assert.Nil(t, err)
+			}
+			mockNetLinkOps.AssertExpectations(t)
+			mockLink.AssertExpectations(t)
+		})
+	}
+}
+
 func TestLinkAddrAdd(t *testing.T) {
 	mockNetLinkOps := new(mocks.NetLinkOps)
 	mockLink := new(netlink_mocks.Link)
@@ -674,15 +797,15 @@ func TestLinkRouteExists(t *testing.T) {
 			ovntest.ProcessMockFnList(&mockNetLinkOps.Mock, tc.onRetArgsNetLinkLibOpers)
 			ovntest.ProcessMockFnList(&mockLink.Mock, tc.onRetArgsLinkIfaceOpers)
 
-			flag, err := LinkRouteExists(tc.inputLink, tc.inputGwIP, tc.inputSubnet)
-			t.Log(flag, err)
+			route, err := LinkRouteGetByDstAndGw(tc.inputLink, tc.inputGwIP, tc.inputSubnet)
+			t.Log(route, err)
 			if tc.errExp {
 				assert.Error(t, err)
 			} else {
 				assert.Nil(t, err)
 			}
 			if tc.outBoolFlag {
-				assert.True(t, flag)
+				assert.True(t, route != nil)
 			}
 			mockNetLinkOps.AssertExpectations(t)
 			mockLink.AssertExpectations(t)

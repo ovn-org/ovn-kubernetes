@@ -160,48 +160,27 @@ func tearDownInterfaceIPConfig(link netlink.Link, ipt4, ipt6 util.IPTablesHelper
 	return nil
 }
 
-func tearDownManagementPortConfig(mpcfg *managementPortConfig) error {
-	// for the initial setup we need to start from the clean slate, so flush
-	// all (non-LL) addresses on this link, routes through this link, and
-	// finally any IPtable rules for this link.
-	var ipt4, ipt6 util.IPTablesHelper
-
-	if mpcfg.ipv4 != nil {
-		ipt4 = mpcfg.ipv4.ipt
-	}
-	if mpcfg.ipv6 != nil {
-		ipt6 = mpcfg.ipv6.ipt
-	}
-	return tearDownInterfaceIPConfig(mpcfg.link, ipt4, ipt6)
-}
-
 func setupManagementPortIPFamilyConfig(routeManager *routemanager.Controller, mpcfg *managementPortConfig, cfg *managementPortIPFamilyConfig) ([]string, error) {
 	var warnings []string
 	var err error
 	var exists bool
 
-	if exists, err = util.LinkAddrExist(mpcfg.link, cfg.ifAddr); err == nil && !exists {
-		// we should log this so that one can debug as to why addresses are
-		// disappearing
-		warnings = append(warnings, fmt.Sprintf("missing IP address %s on the interface %s, adding it...",
-			cfg.ifAddr, mpcfg.ifName))
-		err = util.LinkAddrAdd(mpcfg.link, cfg.ifAddr, 0, 0, 0)
-	}
+	// synchronize IP addresses, removing undesired addresses
+	// should also remove routes specifying those undesired addresses
+	err = util.SyncAddresses(mpcfg.link, []*net.IPNet{cfg.ifAddr})
 	if err != nil {
 		return warnings, err
 	}
 
+	// now check for addition of any missing routes
 	for _, subnet := range cfg.allSubnets {
-		exists, err = util.LinkRouteExists(mpcfg.link, cfg.gwIP, subnet)
-		if err != nil {
-			return warnings, err
+		route, err := util.LinkRouteGetByDstAndGw(mpcfg.link, cfg.gwIP, subnet)
+		if err != nil || route == nil {
+			// we need to warn so that it can be debugged as to why routes are incorrect
+			warnings = append(warnings, fmt.Sprintf("missing or unable to find route entry for subnet %s "+
+				"via gateway %s on link %v with MTU: %d", subnet, cfg.gwIP, mpcfg.ifName, config.Default.RoutableMTU))
 		}
-		if exists {
-			continue
-		}
-		// we need to warn so that it can be debugged as to why routes are disappearing
-		warnings = append(warnings, fmt.Sprintf("missing route entry for subnet %s via gateway %s on link %v",
-			subnet, cfg.gwIP, mpcfg.ifName))
+
 		subnetCopy := *subnet
 		err = routeManager.Add(netlink.Route{LinkIndex: mpcfg.link.Attrs().Index, Gw: cfg.gwIP, Dst: &subnetCopy, MTU: config.Default.RoutableMTU})
 		if err != nil {
@@ -304,10 +283,6 @@ func createPlatformManagementPort(routeManager *routemanager.Controller, interfa
 	var err error
 
 	if cfg, err = newManagementPortConfig(interfaceName, localSubnets); err != nil {
-		return nil, err
-	}
-
-	if err = tearDownManagementPortConfig(cfg); err != nil {
 		return nil, err
 	}
 
