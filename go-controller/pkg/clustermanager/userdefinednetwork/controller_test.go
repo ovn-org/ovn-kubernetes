@@ -325,25 +325,16 @@ var _ = Describe("User Defined Network Controller", func() {
 				var err error
 				nad := testNAD()
 				udn := testUDN()
-				c = newTestController(renderNadStub(nad), udn)
-				Expect(c.Run()).To(Succeed())
+				udn.SetDeletionTimestamp(&metav1.Time{Time: time.Now()})
 
 				testOVNPodAnnot := map[string]string{util.OvnPodAnnotationName: `{"default": {"role":"primary"}, "test/test": {"role": "secondary"}}`}
 				pod1 := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod-1", Namespace: udn.Namespace, Annotations: testOVNPodAnnot}}
-				pod1, err = cs.KubeClient.CoreV1().Pods(udn.Namespace).Create(context.Background(), pod1, metav1.CreateOptions{})
-				Expect(err).NotTo(HaveOccurred())
 				pod2 := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod-2", Namespace: udn.Namespace, Annotations: testOVNPodAnnot}}
-				pod2, err = cs.KubeClient.CoreV1().Pods(udn.Namespace).Create(context.Background(), pod2, metav1.CreateOptions{})
-				Expect(err).NotTo(HaveOccurred())
 
-				By("mark UDN for deletion")
-				udn.SetDeletionTimestamp(&metav1.Time{Time: time.Now()})
-				udn, err = cs.UserDefinedNetworkClient.K8sV1().UserDefinedNetworks(udn.Namespace).Update(context.Background(), udn, metav1.UpdateOptions{})
-				Expect(err).NotTo(HaveOccurred())
-				Expect(udn.DeletionTimestamp.IsZero()).To(BeFalse())
-
+				c = newTestController(renderNadStub(nad), udn, nad, pod1, pod2)
 				// user short interval to make the controller re-enqueue requests
 				c.networkInUseRequeueInterval = 50 * time.Millisecond
+				Expect(c.Run()).To(Succeed())
 
 				assertFinalizersPresent(cs.UserDefinedNetworkClient, cs.NetworkAttchDefClient, udn, pod1, pod2)
 
