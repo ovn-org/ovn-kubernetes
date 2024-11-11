@@ -307,8 +307,10 @@ func (na *NodeAllocator) syncNodeNetworkAnnotations(node *corev1.Node) error {
 			if errR := na.clusterSubnetAllocator.ReleaseNetworks(node.Name, allocatedSubnets...); errR != nil {
 				klog.Warningf("Error releasing node %s subnets: %v", node.Name, errR)
 			}
-			na.idAllocator.ReleaseID(networkName + "_" + node.Name)
-			klog.Infof("Releasing node %s tunnelID for network %s since annotation update failed", node.Name, networkName)
+			if util.IsNetworkSegmentationSupportEnabled() && na.netInfo.IsPrimaryNetwork() && util.DoesNetworkRequireTunnelIDs(na.netInfo) {
+				na.idAllocator.ReleaseID(networkName + "_" + node.Name)
+				klog.Infof("Releasing node %s tunnelID for network %s since annotation update failed", node.Name, networkName)
+			}
 			return err
 		}
 	}
