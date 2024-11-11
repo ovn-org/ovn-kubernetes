@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
@@ -26,6 +27,7 @@ import (
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2ekubectl "k8s.io/kubernetes/test/e2e/framework/kubectl"
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
+	"k8s.io/kubernetes/test/e2e/framework/pod"
 	e2epodoutput "k8s.io/kubernetes/test/e2e/framework/pod/output"
 	utilnet "k8s.io/utils/net"
 )
@@ -813,7 +815,9 @@ spec:
 	   20. Check connectivity from second pod to another node (egress2Node) secondary IP and verify that the srcIP is the expected nodeIP (this verifies SNAT's towards nodeIP are not deleted for pods unless pod is on its own egressNode)
 	*/
 	ginkgo.It("[OVN network] Should validate the egress IP SNAT functionality against host-networked pods", func() {
-
+		if netConfigParams.topology == types.Layer2Topology {
+			ginkgo.Skip("Layer 2 doesnt support host networked pods")
+		}
 		command := []string{"/agnhost", "netexec", fmt.Sprintf("--http-port=%s", podHTTPPort)}
 
 		ginkgo.By("0. Add the \"k8s.ovn.org/egress-assignable\" label to egress1Node node")
@@ -845,11 +849,20 @@ spec:
 		}
 
 		ginkgo.By("2. Creating host-networked pod, on non-egress node acting as \"another node\"")
-		_, err = createPod(f, egress2Node.name+"-host-net-pod", egress2Node.name, f.Namespace.Name, []string{}, map[string]string{}, func(p *corev1.Pod) {
+		p, err := createPod(f, egress2Node.name+"-host-net-pod", egress2Node.name, f.Namespace.Name, []string{}, map[string]string{}, func(p *corev1.Pod) {
 			p.Spec.HostNetwork = true
 			p.Spec.Containers[0].Image = "docker.io/httpd"
 		})
 		framework.ExpectNoError(err)
+		// block until host network pod is fully deleted because subsequent tests that require binding to the same port may fail
+		defer func() {
+			ctxWithTimeout, cancelFn := context.WithTimeout(context.Background(), time.Second*60)
+			defer cancelFn()
+			err = pod.DeletePodWithWait(ctxWithTimeout, f.ClientSet, p)
+			gomega.Expect(err).ShouldNot(gomega.HaveOccurred(), "deletion of host network pod must succeed")
+			err = pod.WaitForPodNotFoundInNamespace(ctxWithTimeout, f.ClientSet, egress2Node.name+"-host-net-pod", f.Namespace.Name, time.Second*59)
+			gomega.Expect(err).ShouldNot(gomega.HaveOccurred(), "pod must be fully deleted within 60 seconds")
+		}()
 		hostNetPod := node{
 			name:   egress2Node.name + "-host-net-pod",
 			nodeIP: egress2Node.nodeIP,
@@ -2831,7 +2844,14 @@ spec:
 		topology: types.Layer3Topology,
 		cidr:     "10.10.0.0/16",
 		role:     "primary",
-	}))
+	}),
+		ginkgo.Entry("L2 Primary UDN", networkAttachmentConfigParams{
+			name:     "l2primary",
+			topology: types.Layer2Topology,
+			cidr:     "10.10.0.0/16",
+			role:     "primary",
+		}),
+	)
 },
 	ginkgo.Entry(
 		"L3 CDN", // No UDN attachments
@@ -2845,6 +2865,16 @@ spec:
 		networkAttachmentConfigParams{
 			name:     "l3primary",
 			topology: types.Layer3Topology,
+			cidr:     "10.10.0.0/16",
+			role:     "primary",
+		},
+		false,
+	),
+	ginkgo.Entry(
+		"L2 UDN role primary",
+		networkAttachmentConfigParams{
+			name:     "l2primary",
+			topology: types.Layer2Topology,
 			cidr:     "10.10.0.0/16",
 			role:     "primary",
 		},

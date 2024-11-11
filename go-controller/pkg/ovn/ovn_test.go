@@ -474,7 +474,7 @@ func (o *FakeOVN) NewSecondaryNetworkController(netattachdef *nettypes.NetworkAt
 			}
 			secondaryController = &l3Controller.BaseSecondaryNetworkController
 		case types.Layer2Topology:
-			l2Controller, err := NewSecondaryLayer2NetworkController(cnci, nInfo, o.nadController)
+			l2Controller, err := NewSecondaryLayer2NetworkController(cnci, nInfo, o.nadController, o.eIPController, o.portCache)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			if o.asf != nil { // use fake asf only when enabled
 				l2Controller.addressSetFactory = asf
