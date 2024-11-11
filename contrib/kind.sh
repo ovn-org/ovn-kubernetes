@@ -901,6 +901,7 @@ install_ovn_single_node_zones() {
   fi
   run_kubectl apply -f ovnkube-control-plane.yaml
   run_kubectl apply -f ovnkube-single-node-zone.yaml
+  kubectl patch ds -n ovn-kubernetes ovnkube-node --type='json' -p='[{"op": "add", "path": "/spec/updateStrategy/rollingUpdate", "value": {"maxUnavailable": "100%"}}]'
 }
 
 label_ovn_multiple_nodes_zones() {
