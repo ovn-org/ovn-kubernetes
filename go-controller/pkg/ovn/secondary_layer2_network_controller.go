@@ -256,6 +256,9 @@ type SecondaryLayer2NetworkController struct {
 
 	// Controller in charge of services
 	svcController *svccontroller.Controller
+
+	// EgressIP controller utilized only to initialize a network with OVN polices to support EgressIP functionality.
+	eIPController *EgressIPController
 }
 
 // NewSecondaryLayer2NetworkController create a new OVN controller for the given secondary layer2 nad
@@ -263,6 +266,8 @@ func NewSecondaryLayer2NetworkController(
 	cnci *CommonNetworkControllerInfo,
 	netInfo util.NetInfo,
 	networkManager networkmanager.Interface,
+	eIPController *EgressIPController,
+	portCache *PortCache,
 ) (*SecondaryLayer2NetworkController, error) {
 
 	stopChan := make(chan struct{})
@@ -301,7 +306,7 @@ func NewSecondaryLayer2NetworkController(
 					controllerName:              getNetworkControllerName(netInfo.GetNetworkName()),
 					ReconcilableNetInfo:         util.NewReconcilableNetInfo(netInfo),
 					lsManager:                   lsManagerFactoryFn(),
-					logicalPortCache:            NewPortCache(stopChan),
+					logicalPortCache:            portCache,
 					namespaces:                  make(map[string]*namespaceInfo),
 					namespacesMutex:             sync.Mutex{},
 					addressSetFactory:           addressSetFactory,
@@ -320,6 +325,7 @@ func NewSecondaryLayer2NetworkController(
 		syncZoneICFailed: sync.Map{},
 		gatewayManagers:  sync.Map{},
 		svcController:    svcController,
+		eIPController:    eIPController,
 	}
 
 	if config.OVNKubernetesFeature.EnableInterconnect {
@@ -542,22 +548,31 @@ func (oc *SecondaryLayer2NetworkController) addUpdateLocalNodeEvent(node *corev1
 				}
 			}
 		}
-		if util.IsNetworkSegmentationSupportEnabled() && oc.IsPrimaryNetwork() {
-			if nSyncs.syncMgmtPort {
-				// Layer 2 networks have a single, large subnet, that's the one
-				// associated to the controller.  Take the management port IP from
-				// there.
-				subnets := oc.Subnets()
-				hostSubnets := make([]*net.IPNet, 0, len(subnets))
-				for _, subnet := range oc.Subnets() {
-					hostSubnets = append(hostSubnets, subnet.CIDR)
-				}
-				if _, err := oc.syncNodeManagementPort(node, oc.GetNetworkScopedSwitchName(types.OVNLayer2Switch), oc.GetNetworkScopedGWRouterName(node.Name), hostSubnets); err != nil {
-					errs = append(errs, err)
-					oc.mgmtPortFailed.Store(node.Name, true)
-				} else {
-					oc.mgmtPortFailed.Delete(node.Name)
-				}
+
+		if nSyncs.syncMgmtPort {
+			// Layer 2 networks have a single, large subnet, that's the one
+			// associated to the controller.  Take the management port IP from
+			// there.
+			subnets := oc.Subnets()
+			hostSubnets := make([]*net.IPNet, 0, len(subnets))
+			for _, subnet := range oc.Subnets() {
+				hostSubnets = append(hostSubnets, subnet.CIDR)
+			}
+			if _, err := oc.syncNodeManagementPort(node, oc.GetNetworkScopedSwitchName(types.OVNLayer2Switch),
+				oc.GetNetworkScopedGWRouterName(node.Name), hostSubnets); err != nil {
+				errs = append(errs, err)
+				oc.mgmtPortFailed.Store(node.Name, true)
+			} else {
+				oc.mgmtPortFailed.Delete(node.Name)
+			}
+		}
+
+		if config.OVNKubernetesFeature.EnableEgressIP {
+			if err := oc.eIPController.ensureRouterPoliciesForNetwork(oc.GetNetInfo()); err != nil {
+				errs = append(errs, fmt.Errorf("failed to ensure EgressIP router policies for network %s: %v", oc.GetNetworkName(), err))
+			}
+			if err := oc.eIPController.ensureSwitchPoliciesForNode(oc.GetNetInfo(), node.Name); err != nil {
+				errs = append(errs, fmt.Errorf("failed to ensure EgressIP switch policies for network %s: %v", oc.GetNetworkName(), err))
 			}
 		}
 	}

@@ -487,7 +487,7 @@ func (oc *DefaultNetworkController) InitEgressServiceZoneController() (*egresssv
 	// If the EgressIP controller is enabled it will take care of creating the
 	// "no reroute" policies - we can pass "noop" functions to the egress service controller.
 	initClusterEgressPolicies := func(nbClient libovsdbclient.Client, addressSetFactory addressset.AddressSetFactory, ni util.NetInfo,
-		clusterSubnets []*net.IPNet, controllerName string) error {
+		clusterSubnets []*net.IPNet, controllerName, routerName string) error {
 		return nil
 	}
 	ensureNodeNoReroutePolicies := func(nbClient libovsdbclient.Client, addressSetFactory addressset.AddressSetFactory,
