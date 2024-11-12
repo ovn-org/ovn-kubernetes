@@ -35,6 +35,7 @@ import (
 	"k8s.io/client-go/util/retry"
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
+	e2eskipper "k8s.io/kubernetes/test/e2e/framework/skipper"
 	testutils "k8s.io/kubernetes/test/utils"
 	utilnet "k8s.io/utils/net"
 	"k8s.io/utils/pointer"
@@ -301,6 +302,24 @@ var _ = Describe("Kubevirt Virtual Machines", func() {
 						WithTimeout(timeout).
 						Should(Succeed(), func() string { return stage + ": " + podName + ": " + output })
 				}
+			}
+		}
+
+		checkNorthSouthIperfTraffic = func(vmi *kubevirtv1.VirtualMachineInstance, addresses []string, stage string) {
+			GinkgoHelper()
+			Expect(addresses).ToNot(BeEmpty())
+			polling := 15 * time.Second
+			timeout := time.Minute
+			for _, address := range addresses {
+				output := ""
+				Eventually(func() error {
+					var err error
+					output, err = kubevirt.RunCommand(vmi, fmt.Sprintf("iperf3 -t 1 -c %s", address), polling)
+					return err
+				}).
+					WithPolling(polling).
+					WithTimeout(timeout).
+					Should(Succeed(), func() string { return stage + ": external server : " + output })
 			}
 		}
 
@@ -995,6 +1014,23 @@ passwd:
 			waitForPodsCondition(httpServerTestPods, conditionFn)
 			httpServerTestPods = updatePods(httpServerTestPods)
 		}
+
+		prepareIperfServerExternalContainer = func(name string) []string {
+			externalIpv4, externalIpv6 := createClusterExternalContainer(
+				name,
+				iperf3Image,
+				[]string{"--network", "kind", "--entrypoint", "/bin/bash"},
+				[]string{"-c", "iperf3 -s"},
+			)
+			externalAddresses := []string{}
+			if externalIpv4 != "" && isIPv4Supported() {
+				externalAddresses = append(externalAddresses, externalIpv4)
+			}
+			if externalIpv6 != "" && isIPv6Supported() {
+				externalAddresses = append(externalAddresses, externalIpv6)
+			}
+			return externalAddresses
+		}
 	)
 	BeforeEach(func() {
 		namespace = fr.Namespace.Name
@@ -1291,6 +1327,13 @@ chpasswd: { expire: False }`
 			role        string
 		}
 		DescribeTable("should keep ip", func(td testData) {
+			if td.role == "primary" && !isInterconnectEnabled() {
+				const upstreamIssue = "https://github.com/ovn-org/ovn-kubernetes/issues/4528"
+				e2eskipper.Skipf(
+					"The egress check of tests are known to fail on non-IC deployments. Upstream issue: %s", upstreamIssue,
+				)
+			}
+
 			netConfig := newNetworkAttachmentConfig(
 				networkAttachmentConfigParams{
 					namespace:          namespace,
@@ -1329,6 +1372,12 @@ chpasswd: { expire: False }`
 
 			iperfServerTestPods, err = createIperfServerPods(iperfServerPodsAnnotations)
 			Expect(err).ToNot(HaveOccurred())
+
+			externalContainerName := namespace + "-iperf-server"
+			externalAddresses := prepareIperfServerExternalContainer(externalContainerName)
+			DeferCleanup(func() {
+				deleteClusterExternalContainer(externalContainerName)
+			})
 
 			vmiName := td.resource.cmd()
 			vmi = &kubevirtv1.VirtualMachineInstance{
@@ -1381,8 +1430,11 @@ chpasswd: { expire: False }`
 				Should(ConsistOf(expectedAddresesAtGuest), step)
 
 			step = by(vmi.Name, fmt.Sprintf("Check east/west traffic before %s %s", td.resource.description, td.test.description))
-
 			checkEastWestIperfTraffic(vmi, testPodsIPs, step)
+			if td.role == "primary" {
+				step = by(vmi.Name, fmt.Sprintf("Check north/south traffic before %s %s", td.resource.description, td.test.description))
+				checkNorthSouthIperfTraffic(vmi, externalAddresses, step)
+			}
 
 			by(vmi.Name, fmt.Sprintf("Running %s for %s", td.test.description, td.resource.description))
 			td.test.cmd()
@@ -1402,6 +1454,10 @@ chpasswd: { expire: False }`
 
 			step = by(vmi.Name, fmt.Sprintf("Check east/west traffic after %s %s", td.resource.description, td.test.description))
 			checkEastWestIperfTraffic(vmi, testPodsIPs, step)
+			if td.role == "primary" {
+				step = by(vmi.Name, fmt.Sprintf("Check north/south traffic after %s %s", td.resource.description, td.test.description))
+				checkNorthSouthIperfTraffic(vmi, externalAddresses, step)
+			}
 		},
 			func(td testData) string {
 				role := "secondary"
@@ -1436,7 +1492,7 @@ chpasswd: { expire: False }`
 				test:     liveMigrate,
 				topology: "layer2",
 			}),
-			Entry(nil, testData{
+			FEntry(nil, testData{
 				resource: virtualMachineWithUDN,
 				test:     liveMigrate,
 				topology: "layer2",
