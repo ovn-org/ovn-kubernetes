@@ -20,6 +20,8 @@ const (
 	bridgeName = "ovsbr1"
 	add        = "add-br"
 	del        = "del-br"
+	mayExist   = "--may-exist"
+	ifExists   = "--if-exists"
 )
 
 func setupUnderlay(ovsPods []v1.Pod, portName string, nadConfig networkAttachmentConfig) error {
@@ -91,14 +93,14 @@ func removeOVSBridge(ovnNodeName string, bridgeName string) error {
 func ovsBridgeCommand(ovnNodeName string, addOrDeleteCmd string, bridgeName string) []string {
 	return []string{
 		"kubectl", "-n", ovnNamespace, "exec", ovnNodeName, "--",
-		"ovs-vsctl", addOrDeleteCmd, bridgeName,
+		"ovs-vsctl", mayOrIfExists(addOrDeleteCmd), addOrDeleteCmd, bridgeName,
 	}
 }
 
 func ovsAttachPortToBridge(ovsNodeName string, bridgeName string, portName string) error {
 	cmd := []string{
 		"kubectl", "-n", ovnNamespace, "exec", ovsNodeName, "--",
-		"ovs-vsctl", "add-port", bridgeName, portName,
+		"ovs-vsctl", mayExist, "add-port", bridgeName, portName,
 	}
 
 	if _, err := runCommand(cmd...); err != nil {
@@ -111,7 +113,7 @@ func ovsAttachPortToBridge(ovsNodeName string, bridgeName string, portName strin
 func ovsEnableVLANAccessPort(ovsNodeName string, bridgeName string, portName string, vlanID int) error {
 	cmd := []string{
 		"kubectl", "-n", ovnNamespace, "exec", ovsNodeName, "--",
-		"ovs-vsctl", "add-port", bridgeName, portName, fmt.Sprintf("tag=%d", vlanID), "vlan_mode=access",
+		"ovs-vsctl", mayExist, "add-port", bridgeName, portName, fmt.Sprintf("tag=%d", vlanID), "vlan_mode=access",
 	}
 
 	if _, err := runCommand(cmd...); err != nil {
@@ -289,4 +291,11 @@ func isIPInLink(vlanIface netlink.Link, addr netlink.Addr) (bool, error) {
 		}
 	}
 	return false, nil
+}
+
+func mayOrIfExists(addOrDeleteCmd string) string {
+	if addOrDeleteCmd == del {
+		return ifExists
+	}
+	return mayExist
 }
