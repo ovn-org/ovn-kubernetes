@@ -249,6 +249,67 @@ func LinkAddrFlush(link netlink.Link) error {
 	return nil
 }
 
+// SyncAddresses ensures the link has the provided addresses only
+// Ignores IPv6 LLA
+// addresses should all be of the same family
+func SyncAddresses(link netlink.Link, addresses []*net.IPNet) error {
+	if len(addresses) == 0 {
+		return nil
+	}
+	firstFamily := getFamily(addresses[0].IP)
+	for _, addr := range addresses[1:] {
+		if getFamily(addr.IP) != firstFamily {
+			return fmt.Errorf("all addresses are not the same family: %#v", addresses)
+		}
+	}
+
+	addrs, err := netLinkOps.AddrList(link, firstFamily)
+	if err != nil {
+		return fmt.Errorf("failed to list addresses for the link %s: %v",
+			link.Attrs().Name, err)
+	}
+
+	// desired addresses - true if already exist
+	matched := map[*net.IPNet]bool{}
+	for _, desiredAddr := range addresses {
+		matched[desiredAddr] = false
+	}
+
+	// cycle through found addresses
+	for _, addr := range addrs {
+		if utilnet.IsIPv6(addr.IP) && addr.IP.IsLinkLocalUnicast() {
+			continue
+		}
+
+		exists := false
+		for _, desiredAddr := range addresses {
+			if addr.IPNet.String() == desiredAddr.String() {
+				matched[desiredAddr] = true
+				exists = true
+				break
+			}
+		}
+
+		// found address is not in desired list, remove it
+		if !exists {
+			if err := LinkAddrDel(link, addr.IPNet); err != nil {
+				return err
+			}
+		}
+	}
+
+	// cycle through leftover addresses to add
+	for addr, alreadyExists := range matched {
+		if !alreadyExists {
+			if err := LinkAddrAdd(link, addr, 0, 0, 0); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
 // LinkAddrExist returns true if the given address is present on the link
 func LinkAddrExist(link netlink.Link, address *net.IPNet) (bool, error) {
 	addrs, err := netLinkOps.AddrList(link, getFamily(address.IP))
@@ -415,10 +476,10 @@ func LinkRouteGetFilteredRoute(routeFilter *netlink.Route, filterMask uint64) (*
 	return &routes[0], nil
 }
 
-// LinkRouteExists checks for existence of routes for the given subnet through gwIPStr
-func LinkRouteExists(link netlink.Link, gwIP net.IP, subnet *net.IPNet) (bool, error) {
+// LinkRouteGetByDstAndGw checks for existence of routes for the given subnet through gwIPStr
+func LinkRouteGetByDstAndGw(link netlink.Link, gwIP net.IP, subnet *net.IPNet) (*netlink.Route, error) {
 	route, err := LinkRouteGetFilteredRoute(filterRouteByDstAndGw(link, subnet, gwIP))
-	return route != nil, err
+	return route, err
 }
 
 // LinkNeighDel deletes an ip binding for a given link
