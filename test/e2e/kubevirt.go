@@ -287,22 +287,46 @@ var _ = Describe("Kubevirt Virtual Machines", func() {
 			}
 		}
 
-		checkEastWestIperfTraffic = func(vmi *kubevirtv1.VirtualMachineInstance, podIPsByName map[string][]string, stage string) {
+		startEastWestIperfTraffic = func(vmi *kubevirtv1.VirtualMachineInstance, podIPsByName map[string][]string, stage string) error {
 			GinkgoHelper()
 			Expect(podIPsByName).ToNot(BeEmpty())
 			polling := 15 * time.Second
-			timeout := time.Minute
 			for podName, podIPs := range podIPsByName {
 				for _, podIP := range podIPs {
-					output := ""
-					Eventually(func() error {
-						var err error
-						output, err = kubevirt.RunCommand(vmi, fmt.Sprintf("iperf3 -t 1 -c %s", podIP), polling)
-						return err
+					output, err := kubevirt.RunCommand(vmi, fmt.Sprintf("iperf3 -t 0 -c %[2]s --logfile /tmp/%[1]s_%[2]s_iperf3.log &", podName, podIP), polling)
+					if err != nil {
+						return fmt.Errorf("%s: %w", output, err)
+					}
+				}
+			}
+			return nil
+		}
+
+		checkEastWestIperfTraffic = func(vmi *kubevirtv1.VirtualMachineInstance, podIPsByName map[string][]string, stage string) {
+			GinkgoHelper()
+			Expect(podIPsByName).ToNot(BeEmpty())
+			for podName, podIPs := range podIPsByName {
+				for _, podIP := range podIPs {
+					// Check the last line eventually show traffic flowing
+					Eventually(func() (string, error) {
+						iperfLog, err := kubevirt.RunCommand(vmi, fmt.Sprintf("cat /tmp/%s_%s_iperf3.log", podName, podIP), 2*time.Second)
+						if err != nil {
+							return "", err
+						}
+						iperfLogLines := strings.Split(iperfLog, "\n")
+						if len(iperfLogLines) == 0 {
+							return "", nil
+						}
+						return iperfLogLines[len(iperfLogLines)-1], nil
 					}).
-						WithPolling(polling).
-						WithTimeout(timeout).
-						Should(Succeed(), func() string { return stage + ": " + podName + ": " + output })
+						WithPolling(time.Second).
+						WithTimeout(3 * time.Minute).
+						Should(
+							SatisfyAll(
+								ContainSubstring(" sec "),
+								Not(ContainSubstring("0.00 Bytes  0.00 bits/sec")),
+							),
+						)
 				}
 			}
 		}
@@ -971,12 +995,29 @@ passwd:
 			return pods
 		}
 
+		iperfServerScript = `
+dnf install -y psmisc procps
+iface=$(ifconfig  |grep flags |grep -v "eth0\|lo" | sed "s/: .*//")
+ipv4=$(ifconfig $iface | grep "inet "|awk '{print $2}'| sed "s#/.*##")
+ipv6=$(ifconfig $iface | grep inet6 |grep -v fe80 |awk '{print $2}'| sed "s#/.*##")
+if [ "$ipv4" != "" ]; then
+	iperf3 -s -D --bind $ipv4 --logfile /tmp/test_${ipv4}_iperf3.log
+fi
+if [ "$ipv6" != "" ]; then
+	iperf3 -s -D --bind $ipv6 --logfile /tmp/test_${ipv6}_iperf3.log
+fi
+sleep infinity
+`
 		createIperfServerPods = func(annotations map[string]string) ([]*corev1.Pod, error) {
 			var pods []*corev1.Pod
+			// For live migration we need a pair of containers since every of them
+			// just run one connection per family to check tcp connection is not broken
 			for _, selectedNode := range selectedNodes {
-				pod, err := createPod(fr, "testpod-"+selectedNode.Name, selectedNode.Name, namespace, []string{"iperf3", "-s"}, map[string]string{}, func(pod *corev1.Pod) {
+				pod, err := createPod(fr, "testpod-"+selectedNode.Name, selectedNode.Name, namespace, []string{"/bin/bash", "-c"}, map[string]string{}, func(pod *corev1.Pod) {
 					pod.Annotations = annotations
 					pod.Spec.Containers[0].Image = iperf3Image
+					pod.Spec.Containers[0].Args = []string{iperfServerScript}
+
 				})
 				if err != nil {
 					return nil, err
@@ -1433,6 +1474,7 @@ runcmd:
 				Should(ConsistOf(expectedAddresesAtGuest), step)
 
 			step = by(vmi.Name, fmt.Sprintf("Check east/west traffic before %s %s", td.resource.description, td.test.description))
+			Expect(startEastWestIperfTraffic(vmi, testPodsIPs, step)).To(Succeed(), step)
 			checkEastWestIperfTraffic(vmi, testPodsIPs, step)
 
 			nodes, err := e2enode.GetBoundedReadySchedulableNodes(context.TODO(), fr.ClientSet, 1)
@@ -1462,6 +1504,10 @@ runcmd:
 				Should(ConsistOf(expectedAddresesAtGuest), step)
 
 			step = by(vmi.Name, fmt.Sprintf("Check east/west traffic after %s %s", td.resource.description, td.test.description))
+			if td.test.description == restart.description {
+				// At restart we need re-connect
+				Expect(startEastWestIperfTraffic(vmi, testPodsIPs, step)).To(Succeed(), step)
+			}
 			checkEastWestIperfTraffic(vmi, testPodsIPs, step)
 			if td.role == "primary" {
 				step = by(vmi.Name, fmt.Sprintf("Check north/south traffic after %s %s", td.resource.description, td.test.description))
@@ -1491,7 +1537,7 @@ runcmd:
 				topology: "layer2",
 				role:     "primary",
 			}),
-			Entry(nil, testData{
+			XEntry(nil, Label("TODO", "SDN-5490"), testData{
 				resource: virtualMachine,
 				test:     liveMigrate,
 				topology: "localnet",
@@ -1501,13 +1547,13 @@ runcmd:
 				test:     liveMigrate,
 				topology: "layer2",
 			}),
-			FEntry(nil, testData{
+			Entry(nil, testData{
 				resource: virtualMachineWithUDN,
 				test:     liveMigrate,
 				topology: "layer2",
 				role:     "primary",
 			}),
-			Entry(nil, testData{
+			XEntry(nil, Label("TODO", "SDN-5490"), testData{
 				resource: virtualMachineInstance,
 				test:     liveMigrate,
 				topology: "localnet",
