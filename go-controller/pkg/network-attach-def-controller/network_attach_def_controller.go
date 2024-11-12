@@ -10,8 +10,11 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/sets"
+	coreinformers "k8s.io/client-go/informers/core/v1"
+	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/workqueue"
@@ -51,6 +54,8 @@ type NetworkControllerManager interface {
 type watchFactory interface {
 	NADInformer() nadinformers.NetworkAttachmentDefinitionInformer
 	UserDefinedNetworkInformer() userdefinednetworkinformer.UserDefinedNetworkInformer
+	ClusterUserDefinedNetworkInformer() userdefinednetworkinformer.ClusterUserDefinedNetworkInformer
+	NamespaceInformer() coreinformers.NamespaceInformer
 }
 
 type NADController interface {
@@ -70,6 +75,8 @@ type NetAttachDefinitionController struct {
 	name               string
 	netAttachDefLister nadlisters.NetworkAttachmentDefinitionLister
 	udnLister          userdefinednetworklister.UserDefinedNetworkLister
+	cudnLister         userdefinednetworklister.ClusterUserDefinedNetworkLister
+	namespaceLister    corev1listers.NamespaceLister
 	controller         controller.Controller
 	recorder           record.EventRecorder
 	// networkManager is used to manage the network controllers
@@ -110,10 +117,14 @@ func NewNetAttachDefinitionController(
 		config.Lister = nadController.netAttachDefLister.List
 	}
 	if util.IsNetworkSegmentationSupportEnabled() {
-		udnInformer := wf.UserDefinedNetworkInformer()
-
-		if udnInformer != nil {
+		if udnInformer := wf.UserDefinedNetworkInformer(); udnInformer != nil {
 			nadController.udnLister = udnInformer.Lister()
+		}
+		if cudnInformer := wf.ClusterUserDefinedNetworkInformer(); cudnInformer != nil {
+			nadController.cudnLister = cudnInformer.Lister()
+		}
+		if nsInformer := wf.NamespaceInformer(); nsInformer != nil {
+			nadController.namespaceLister = nsInformer.Lister()
 		}
 	}
 
@@ -347,7 +358,7 @@ func (nadController *NetAttachDefinitionController) GetActiveNetworkForNamespace
 		return n, nil
 	}
 
-	// no primary network found, make sure we just haven't processed it yet and no UDN exists
+	// no primary network found, make sure we just haven't processed it yet and no UDN / CUDN exists
 	udns, err := nadController.udnLister.UserDefinedNetworks(namespace).List(labels.Everything())
 	if err != nil {
 		return nil, fmt.Errorf("error getting user defined networks: %w", err)
@@ -355,6 +366,29 @@ func (nadController *NetAttachDefinitionController) GetActiveNetworkForNamespace
 	for _, udn := range udns {
 		if utiludn.IsPrimaryNetwork(&udn.Spec) {
 			return nil, util.NewUnprocessedActiveNetworkError(namespace, udn.Name)
+		}
+	}
+	cudns, err := nadController.cudnLister.List(labels.Everything())
+	if err != nil {
+		return nil, fmt.Errorf("failed to list CUDNs: %w", err)
+	}
+	for _, cudn := range cudns {
+		if !utiludn.IsPrimaryNetwork(&cudn.Spec.Network) {
+			continue
+		}
+		// check the subject namespace referred by the specified namespace-selector
+		cudnNamespaceSelector, err := metav1.LabelSelectorAsSelector(&cudn.Spec.NamespaceSelector)
+		if err != nil {
+			return nil, fmt.Errorf("failed to convert CUDN %q namespaceSelector: %w", cudn.Name, err)
+		}
+		selectedNamespaces, err := nadController.namespaceLister.List(cudnNamespaceSelector)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list namespaces using selector %q: %w", cudnNamespaceSelector, err)
+		}
+		for _, ns := range selectedNamespaces {
+			if ns.Name == namespace {
+				return nil, util.NewUnprocessedActiveNetworkError(namespace, cudn.Name)
+			}
 		}
 	}
 

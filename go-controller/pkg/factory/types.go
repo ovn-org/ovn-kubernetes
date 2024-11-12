@@ -62,6 +62,7 @@ type NodeWatchFactory interface {
 	EgressIPInformer() egressipinformer.EgressIPInformer
 	NADInformer() nadinformer.NetworkAttachmentDefinitionInformer
 	UserDefinedNetworkInformer() userdefinednetworkinformer.UserDefinedNetworkInformer
+	ClusterUserDefinedNetworkInformer() userdefinednetworkinformer.ClusterUserDefinedNetworkInformer
 
 	GetPods(namespace string) ([]*kapi.Pod, error)
 	GetPod(namespace, name string) (*kapi.Pod, error)
