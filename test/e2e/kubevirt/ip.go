@@ -12,9 +12,10 @@ func RetrieveAllGlobalAddressesFromGuest(vmi *v1.VirtualMachineInstance) ([]stri
 	ifaces := []struct {
 		Name      string `json:"ifname"`
 		Addresses []struct {
-			Family string `json:"family"`
-			Scope  string `json:"scope"`
-			Local  string `json:"local"`
+			Family    string `json:"family"`
+			Scope     string `json:"scope"`
+			Local     string `json:"local"`
+			PrefixLen uint   `json:"prefixlen"`
 		} `json:"addr_info"`
 	}{}
 
@@ -31,7 +32,8 @@ func RetrieveAllGlobalAddressesFromGuest(vmi *v1.VirtualMachineInstance) ([]stri
 			continue
 		}
 		for _, address := range iface.Addresses {
-			if address.Scope != "global" {
+			// Skip non DHCPv6 address
+			if address.Family == "inet6" && address.PrefixLen != 128 {
 				continue
 			}
 			addresses = append(addresses, address.Local)
