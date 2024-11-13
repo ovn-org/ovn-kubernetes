@@ -453,6 +453,7 @@ func expectedLayer2EgressEntities(netInfo util.NetInfo, gwConfig util.L3GatewayC
 		Options:      gwRouterOptions(gwConfig),
 		Policies:     []string{routerPolicyUUID1},
 	}
+	gr.Options["lb_force_snat_ip"] = gwRouterJoinIPAddress().IP.String()
 	expectedEntities := []libovsdbtest.TestData{
 		gr,
 		expectedGWToNetworkSwitchRouterPort(gwRouterToNetworkSwitchPortName, netInfo, gwRouterJoinIPAddress(), layer2SubnetGWAddr()),
