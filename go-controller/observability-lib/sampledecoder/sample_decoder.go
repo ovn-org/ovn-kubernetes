@@ -10,7 +10,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/observability-lib/model"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/observability-lib/ovsdb"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
-	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/observability"
 )
@@ -181,7 +180,7 @@ func newACLEvent(o *nbdb.ACL) *model.ACLEvent {
 		event.Direction = o.ExternalIDs[libovsdbops.PolicyDirectionKey.String()]
 	case libovsdbops.EgressFirewallOwnerType:
 		event.Namespace = o.ExternalIDs[libovsdbops.ObjectNameKey.String()]
-		event.Direction = string(libovsdbutil.ACLEgress)
+		event.Direction = "Egress"
 	case libovsdbops.UDNIsolationOwnerType:
 		event.Name = o.ExternalIDs[libovsdbops.ObjectNameKey.String()]
 	}
