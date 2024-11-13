@@ -8,6 +8,7 @@
 [![Go Report Card][go-report-card-badge]][go-report-url]
 [![Go Doc][go-doc-badge]][go-doc-url]
 [![Static Badge][slack-badge]][slack-url]
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fovn-kubernetes%2Fovn-kubernetes.svg?type=shield)](https://app.fossa.com/projects/git%2Bgithub.com%2Fovn-kubernetes%2Fovn-kubernetes?ref=badge_shield)
 
 
 [apache2-badge]: https://img.shields.io/badge/License-Apache%202.0-blue.svg
@@ -44,6 +45,9 @@ Here are some links to help in your ovn-kubernetes journey:
 ## License
 
 Everything is distributed under the terms of the [Apache License] (version 2.0).
+
+
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fovn-kubernetes%2Fovn-kubernetes.svg?type=large)](https://app.fossa.com/projects/git%2Bgithub.com%2Fovn-kubernetes%2Fovn-kubernetes?ref=badge_large)
 
 ## Who uses OVN-Kubernetes?
 
