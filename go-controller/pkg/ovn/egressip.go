@@ -345,7 +345,7 @@ func (e *EgressIPController) reconcileEgressIP(old, new *egressipv1.EgressIP) (e
 						return fmt.Errorf("failed to get active network for namespace %s: %v", namespace.Name, err)
 					}
 					if err := e.deleteNamespaceEgressIPAssignment(ni, oldEIP.Name, oldEIP.Status.Items, namespace, oldEIP.Spec.PodSelector); err != nil {
-						return err
+						return fmt.Errorf("network %s: failed to delete namespace %s egress IP config: %v", ni.GetNetworkName(), namespace.Name, err)
 					}
 				}
 				if newNamespaceSelector.Matches(namespaceLabels) && !oldNamespaceSelector.Matches(namespaceLabels) {
@@ -354,7 +354,7 @@ func (e *EgressIPController) reconcileEgressIP(old, new *egressipv1.EgressIP) (e
 						return fmt.Errorf("failed to get active network for namespace %s: %v", namespace.Name, err)
 					}
 					if err := e.addNamespaceEgressIPAssignments(ni, newEIP.Name, newEIP.Status.Items, mark, namespace, newEIP.Spec.PodSelector); err != nil {
-						return err
+						return fmt.Errorf("network %s: failed to add namespace %s egress IP config: %v", ni.GetNetworkName(), namespace.Name, err)
 					}
 				}
 			}
@@ -380,7 +380,7 @@ func (e *EgressIPController) reconcileEgressIP(old, new *egressipv1.EgressIP) (e
 							return fmt.Errorf("failed to get active network for namespace %s: %v", namespace.Name, err)
 						}
 						if err := e.deletePodEgressIPAssignments(ni, oldEIP.Name, oldEIP.Status.Items, pod); err != nil {
-							return err
+							return fmt.Errorf("network %s: failed to delete pod %s/%s egress IP config: %v", ni.GetNetworkName(), pod.Namespace, pod.Name, err)
 						}
 					}
 					if util.PodCompleted(pod) {
@@ -392,7 +392,7 @@ func (e *EgressIPController) reconcileEgressIP(old, new *egressipv1.EgressIP) (e
 							return fmt.Errorf("failed to get active network for namespace %s: %v", namespace.Name, err)
 						}
 						if err := e.addPodEgressIPAssignmentsWithLock(ni, newEIP.Name, newEIP.Status.Items, mark, pod); err != nil {
-							return err
+							return fmt.Errorf("network %s: failed to add pod %s/%s egress IP config: %v", ni.GetNetworkName(), pod.Namespace, pod.Name, err)
 						}
 					}
 				}
@@ -416,7 +416,7 @@ func (e *EgressIPController) reconcileEgressIP(old, new *egressipv1.EgressIP) (e
 				}
 				if !newNamespaceSelector.Matches(namespaceLabels) && oldNamespaceSelector.Matches(namespaceLabels) {
 					if err := e.deleteNamespaceEgressIPAssignment(ni, oldEIP.Name, oldEIP.Status.Items, namespace, oldEIP.Spec.PodSelector); err != nil {
-						return err
+						return fmt.Errorf("network %s: failed to delete namespace %s egress IP config: %v", ni.GetNetworkName(), namespace.Name, err)
 					}
 				}
 				// If the namespace starts matching, look at the pods selector
@@ -432,7 +432,7 @@ func (e *EgressIPController) reconcileEgressIP(old, new *egressipv1.EgressIP) (e
 						podLabels := labels.Set(pod.Labels)
 						if newPodSelector.Matches(podLabels) {
 							if err := e.addPodEgressIPAssignmentsWithLock(ni, newEIP.Name, newEIP.Status.Items, mark, pod); err != nil {
-								return err
+								return fmt.Errorf("network %s: failed to add pod %s/%s egress IP config: %v", ni.GetNetworkName(), pod.Namespace, pod.Name, err)
 							}
 						}
 					}
@@ -448,7 +448,7 @@ func (e *EgressIPController) reconcileEgressIP(old, new *egressipv1.EgressIP) (e
 						podLabels := labels.Set(pod.Labels)
 						if !newPodSelector.Matches(podLabels) && oldPodSelector.Matches(podLabels) {
 							if err := e.deletePodEgressIPAssignments(ni, oldEIP.Name, oldEIP.Status.Items, pod); err != nil {
-								return err
+								return fmt.Errorf("network %s: failed to delete pod %s/%s egress IP config: %v", ni.GetNetworkName(), pod.Namespace, pod.Name, err)
 							}
 						}
 						if util.PodCompleted(pod) {
@@ -456,7 +456,7 @@ func (e *EgressIPController) reconcileEgressIP(old, new *egressipv1.EgressIP) (e
 						}
 						if newPodSelector.Matches(podLabels) && !oldPodSelector.Matches(podLabels) {
 							if err := e.addPodEgressIPAssignmentsWithLock(ni, newEIP.Name, newEIP.Status.Items, mark, pod); err != nil {
-								return err
+								return fmt.Errorf("network %s: failed to add pod %s/%s egress IP config: %v", ni.GetNetworkName(), pod.Namespace, pod.Name, err)
 							}
 						}
 					}
@@ -513,7 +513,7 @@ func (e *EgressIPController) reconcileEgressIPNamespace(old, new *corev1.Namespa
 				return fmt.Errorf("failed to get active network for namespace %s: %v", namespaceName, err)
 			}
 			if err := e.deleteNamespaceEgressIPAssignment(ni, egressIP.Name, egressIP.Status.Items, oldNamespace, egressIP.Spec.PodSelector); err != nil {
-				return err
+				return fmt.Errorf("network %s: failed to delete namespace %s egress IP config: %v", ni.GetNetworkName(), namespaceName, err)
 			}
 		}
 		if !namespaceSelector.Matches(oldLabels) && namespaceSelector.Matches(newLabels) {
@@ -523,7 +523,7 @@ func (e *EgressIPController) reconcileEgressIPNamespace(old, new *corev1.Namespa
 				return fmt.Errorf("failed to get active network for namespace %s: %v", namespaceName, err)
 			}
 			if err := e.addNamespaceEgressIPAssignments(ni, egressIP.Name, egressIP.Status.Items, mark, newNamespace, egressIP.Spec.PodSelector); err != nil {
-				return err
+				return fmt.Errorf("network %s: failed to add namespace %s egress IP config: %v", ni.GetNetworkName(), namespaceName, err)
 			}
 		}
 	}
@@ -618,7 +618,7 @@ func (e *EgressIPController) reconcileEgressIPPod(old, new *corev1.Pod) (err err
 				// "new" will be nil, so this must account for that case.
 				if !newMatches && oldMatches {
 					if err := e.deletePodEgressIPAssignments(ni, egressIP.Name, egressIP.Status.Items, oldPod); err != nil {
-						return err
+						return fmt.Errorf("network %s: failed to delete pod %s/%s egress IP config: %v", ni.GetNetworkName(), oldPod.Namespace, oldPod.Name, err)
 					}
 					continue
 				}
@@ -630,7 +630,7 @@ func (e *EgressIPController) reconcileEgressIPPod(old, new *corev1.Pod) (err err
 				// pod setup for every pod update as to make sure we process the
 				// pod IP assignment.
 				if err := e.addPodEgressIPAssignmentsWithLock(ni, egressIP.Name, egressIP.Status.Items, mark, newPod); err != nil {
-					return err
+					return fmt.Errorf("network %s: failed to add pod %s/%s egress IP config: %v", ni.GetNetworkName(), newPod.Namespace, newPod.Name, err)
 				}
 				continue
 			}
@@ -639,13 +639,13 @@ func (e *EgressIPController) reconcileEgressIPPod(old, new *corev1.Pod) (err err
 			// "new" will be nil and we need to remove the setup
 			if new == nil {
 				if err := e.deletePodEgressIPAssignments(ni, egressIP.Name, egressIP.Status.Items, oldPod); err != nil {
-					return err
+					return fmt.Errorf("network %s: failed to delete pod %s/%s egress IP config: %v", ni.GetNetworkName(), oldPod.Namespace, oldPod.Name, err)
 				}
 				continue
 			}
 			// For all else, perform a setup for the pod
 			if err := e.addPodEgressIPAssignmentsWithLock(ni, egressIP.Name, egressIP.Status.Items, mark, newPod); err != nil {
-				return err
+				return fmt.Errorf("network %s: failed to add pod %s/%s egress IP config: %v", ni.GetNetworkName(), newPod.Namespace, newPod.Name, err)
 			}
 		}
 	}
@@ -1145,7 +1145,7 @@ func (e *EgressIPController) syncStaleAddressSetIPs(egressIPCache egressIPCache)
 			dbIDs := getEgressIPAddrSetDbIDs(EgressIPServedPodsAddrSetName, networkName, e.controllerName)
 			as, err := e.addressSetFactory.EnsureAddressSet(dbIDs)
 			if err != nil {
-				return fmt.Errorf("cannot ensure that addressSet for egressIP pods %s exists %v", EgressIPServedPodsAddrSetName, err)
+				return fmt.Errorf("network %s: cannot ensure that addressSet for egressIP pods %s exists %v", networkName, EgressIPServedPodsAddrSetName, err)
 			}
 			var allEIPServedPodIPs []net.IP
 			// we only care about local zone pods for the address-set since
@@ -1159,7 +1159,7 @@ func (e *EgressIPController) syncStaleAddressSetIPs(egressIPCache egressIPCache)
 			// we replace all IPs in the address-set based on eIP cache constructed from kapi
 			// note that setIPs is not thread-safe
 			if err = as.SetAddresses(util.StringSlice(allEIPServedPodIPs)); err != nil {
-				return fmt.Errorf("cannot reset egressPodIPs in address set %v: err: %v", EgressIPServedPodsAddrSetName, err)
+				return fmt.Errorf("network %s: cannot reset egressPodIPs in address set %v: err: %v", networkName, EgressIPServedPodsAddrSetName, err)
 			}
 		}
 	}
@@ -1192,7 +1192,7 @@ func (e *EgressIPController) syncStaleGWMarkRules(egressIPCache egressIPCache) e
 				}
 				eIPName, podNamespaceName := getEIPLRPObjK8MetaData(item.ExternalIDs)
 				if eIPName == "" || podNamespaceName == "" {
-					klog.Errorf("Sync stale SNAT Mark rules: unable to process logical router policy because invalid meta data")
+					klog.Errorf("Sync stale SNAT Mark rules for network %s unable to process logical router policy because invalid meta data", networkName)
 					return true
 				}
 				_, exists := egressIPCache.egressIPNameToPods[eIPName]
@@ -1234,7 +1234,7 @@ func (e *EgressIPController) syncStaleGWMarkRules(egressIPCache egressIPCache) e
 			}
 			invalidLRPs, err := libovsdbops.FindLogicalRouterPoliciesWithPredicate(e.nbClient, invalidLRPPredicate)
 			if err != nil {
-				return fmt.Errorf("unable to retrieve invalid SNAT mark logical router polices: %v", err)
+				return fmt.Errorf("network %s: unable to retrieve invalid SNAT mark logical router polices: %v", networkName, err)
 			}
 			if len(invalidLRPs) == 0 {
 				return nil
@@ -1271,10 +1271,10 @@ func (e *EgressIPController) syncStaleGWMarkRules(egressIPCache egressIPCache) e
 					if errors.Is(err, libovsdbclient.ErrNotFound) {
 						continue
 					}
-					return fmt.Errorf("failed to find gateway routers (%s) invalid logical router policies: %v", routerName, err)
+					return fmt.Errorf("network %s: failed to find gateway routers (%s) invalid logical router policies: %v", networkName, routerName, err)
 				}
 				if err = libovsdbops.DeleteLogicalRouterPolicies(e.nbClient, routerName, lrps...); err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
-					return fmt.Errorf("failed to delete gateway routers (%s) invalid logical router policies: %v", routerName, err)
+					return fmt.Errorf("network %s: failed to delete gateway routers (%s) invalid logical router policies: %v", networkName, routerName, err)
 				}
 			}
 
@@ -1311,7 +1311,7 @@ func (e *EgressIPController) syncStaleGWMarkRules(egressIPCache egressIPCache) e
 			p := libovsdbops.GetPredicate[*nbdb.LogicalRouterPolicy](dbIDs, nil)
 			ops, err := libovsdbops.CreateOrUpdateLogicalRouterPolicyWithPredicateOps(e.nbClient, ops, routerName, &lrp, p)
 			if err != nil {
-				return ops, fmt.Errorf("error creating logical router policy %+v create/update ops for packet marking on router %s: %v", lrp, routerName, err)
+				return ops, fmt.Errorf("network %s: error creating logical router policy %+v create/update ops for packet marking on router %s: %v", networkName, lrp, routerName, err)
 			}
 		}
 		return ops, nil
@@ -1341,13 +1341,13 @@ func (e *EgressIPController) syncStaleGWMarkRules(egressIPCache egressIPCache) e
 				for podKey, podIPs := range podCache.egressLocalPods {
 					ops, err = processPodFn(ops, eIPName, podKey, egressIPCache.markCache[eIPName], routerName, networkName, podIPs, isEIPIPv6)
 					if err != nil {
-						return fmt.Errorf("failed to add process local pod pod %s gateway router SNAT mark: %v", podKey, err)
+						return fmt.Errorf("network %s: failed to add process local pod pod %s gateway router SNAT mark: %v", networkName, podKey, err)
 					}
 				}
 				for podKey, podIPs := range podCache.egressRemotePods {
 					ops, err = processPodFn(ops, eIPName, podKey, egressIPCache.markCache[eIPName], routerName, networkName, podIPs, isEIPIPv6)
 					if err != nil {
-						return fmt.Errorf("failed to add process remote pod pod %s gateway router SNAT mark: %v", podKey, err)
+						return fmt.Errorf("network %s: failed to add process remote pod %s gateway router SNAT mark: %v", networkName, podKey, err)
 					}
 				}
 			}
@@ -1397,7 +1397,7 @@ func (e *EgressIPController) syncPodAssignmentCache(egressIPCache egressIPCache)
 			if networkName == types.DefaultNetworkName {
 				egressIPSNATs, err = libovsdbops.FindNATsWithPredicate(e.nbClient, p2)
 				if err != nil {
-					return err
+					return fmt.Errorf("failed to find NATs with predicate for network %s: %v", networkName, err)
 				}
 			}
 			// Because of how we do generateCacheForEgressIP, we will only have pods that are
@@ -1439,7 +1439,7 @@ func (e *EgressIPController) syncPodAssignmentCache(egressIPCache egressIPCache)
 					if podIPsSet.Has(parsedLogicalIP.String()) { // should match for only one egressIP object
 						podState.egressIPName = egressIPName
 						podState.standbyEgressIPNames.Delete(egressIPName)
-						klog.Infof("EgressIP %s is managing pod %s", egressIPName, podKey)
+						klog.Infof("EgressIP %s is managing pod %s for network %s", egressIPName, podKey, networkName)
 					}
 				}
 				// process SNAT only for CDN
@@ -1448,7 +1448,7 @@ func (e *EgressIPController) syncPodAssignmentCache(egressIPCache egressIPCache)
 						if podIPsSet.Has(snat.LogicalIP) { // should match for only one egressIP object
 							podState.egressIPName = egressIPName
 							podState.standbyEgressIPNames.Delete(egressIPName)
-							klog.Infof("EgressIP %s is managing pod %s", egressIPName, podKey)
+							klog.Infof("EgressIP %s is managing pod %s for network %s", egressIPName, podKey, networkName)
 						}
 					}
 				}
@@ -1475,7 +1475,7 @@ func (e *EgressIPController) syncStaleEgressReroutePolicy(cache egressIPCache) e
 				}
 				egressIPName, _ := getEIPLRPObjK8MetaData(item.ExternalIDs)
 				if egressIPName == "" {
-					klog.Errorf("syncStaleEgressReroutePolicy found logical router policy (UUID: %s) with invalid meta data", item.UUID)
+					klog.Errorf("syncStaleEgressReroutePolicy found logical router policy (UUID: %s) with invalid meta data associated with network %s", item.UUID, networkName)
 					return false
 				}
 				splitMatch := strings.Split(item.Match, " ")
@@ -1530,15 +1530,15 @@ func (e *EgressIPController) syncStaleEgressReroutePolicy(cache egressIPCache) e
 
 			err := libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(e.nbClient, cache.networkToRouter[networkName], p)
 			if err != nil {
-				return fmt.Errorf("error deleting stale logical router policies from router %s: %v", cache.networkToRouter[networkName], err)
+				return fmt.Errorf("error deleting stale logical router policies from router %s for network %s: %v", cache.networkToRouter[networkName], networkName, err)
 			}
 
 			// Update Logical Router Policies that have stale nexthops. Notice that we must do this separately
 			// because logicalRouterPolicyStaleNexthops must be populated first
-			klog.Infof("syncStaleEgressReroutePolicy will remove stale nexthops: %+v", logicalRouterPolicyStaleNexthops)
+			klog.Infof("syncStaleEgressReroutePolicy will remove stale nexthops for network %s: %+v", networkName, logicalRouterPolicyStaleNexthops)
 			err = libovsdbops.DeleteNextHopsFromLogicalRouterPolicies(e.nbClient, cache.networkToRouter[networkName], logicalRouterPolicyStaleNexthops...)
 			if err != nil {
-				return fmt.Errorf("unable to remove stale next hops from logical router policies: %v", err)
+				return fmt.Errorf("unable to remove stale next hops from logical router policies for network %s: %v", networkName, err)
 			}
 		}
 	}
@@ -1697,11 +1697,11 @@ func (e *EgressIPController) generateCacheForEgressIP() (egressIPCache, error) {
 				if errors.Is(err, libovsdbclient.ErrNotFound) {
 					continue
 				}
-				return cache, fmt.Errorf("failed to find management port: %v", err)
+				return cache, fmt.Errorf("failed to find management port for node %s: %v", node.Name, err)
 			}
 			mgmtPortAddresses := mgmtPort.GetAddresses()
 			if len(mgmtPortAddresses) == 0 {
-				return cache, fmt.Errorf("management switch port %s does not contain any addresses", ni.GetNetworkScopedK8sMgmtIntfName(node.Name))
+				return cache, fmt.Errorf("management switch port %s for node %s does not contain any addresses", ni.GetNetworkScopedK8sMgmtIntfName(node.Name), node.Name)
 			}
 			// assuming only one IP per IP family
 			for _, mgmtPortAddress := range mgmtPortAddresses {
@@ -1812,7 +1812,7 @@ func (e *EgressIPController) generateCacheForEgressIP() (egressIPCache, error) {
 			if ni.IsSecondary() {
 				nadNames := ni.GetNADs()
 				if len(nadNames) == 0 {
-					klog.Errorf("Error build egress IP sync cache, expected at least one NAD name for Namespace %s", namespace.Name)
+					klog.Errorf("Network %s: error build egress IP sync cache, expected at least one NAD name for Namespace %s", ni.GetNetworkName(), namespace.Name)
 					continue
 				}
 				nadName = nadNames[0] // there should only be one active network
@@ -1826,7 +1826,7 @@ func (e *EgressIPController) generateCacheForEgressIP() (egressIPCache, error) {
 				}
 				podIPs, err := e.getPodIPs(ni, pod, nadName)
 				if err != nil {
-					klog.Errorf("Error build egress IP sync cache, error while trying to get pod %s/%s IPs: %v", pod.Namespace, pod.Name, err)
+					klog.Errorf("Network %s: error build egress IP sync cache, error while trying to get pod %s/%s IPs: %v", ni.GetNetworkName(), pod.Namespace, pod.Name, err)
 					continue
 				}
 				if len(podIPs) == 0 {
@@ -1993,12 +1993,12 @@ func (e *EgressIPController) initClusterEgressPolicies(nodes []interface{}) erro
 		}
 		subnets = util.GetAllClusterSubnetsFromEntries(ni.Subnets())
 		if err := InitClusterEgressPolicies(e.nbClient, e.addressSetFactory, ni, subnets, e.controllerName); err != nil {
-			return fmt.Errorf("failed to initialize networks cluster logical router egress policies: %v", err)
+			return fmt.Errorf("failed to initialize networks cluster logical router egress policies for network %s: %v", ni.GetNetworkName(), err)
 		}
 		for _, node := range nodes {
 			node := node.(*kapi.Node)
 			if err := DeleteLegacyDefaultNoRerouteNodePolicies(e.nbClient, ni.GetNetworkScopedClusterRouterName(), node.Name); err != nil {
-				return err
+				return fmt.Errorf("failed to delete legacy default no reroute node policies for node %s and network %s: %v", node.Name, ni.GetNetworkName(), err)
 			}
 		}
 		processedNetworks[ni.GetNetworkName()] = struct{}{}
@@ -2022,32 +2022,32 @@ func InitClusterEgressPolicies(nbClient libovsdbclient.Client, addressSetFactory
 	var err error
 	if len(v4ClusterSubnet) > 0 {
 		if config.Gateway.V4JoinSubnet == "" {
-			return fmt.Errorf("cannot process IPv4 addresses because no IPv4 join subnet is available")
+			return fmt.Errorf("network %s: cannot process IPv4 addresses because no IPv4 join subnet is available", ni.GetNetworkName())
 		}
 		_, v4JoinSubnet, err = net.ParseCIDR(config.Gateway.V4JoinSubnet)
 		if err != nil {
-			return fmt.Errorf("failed to parse IPv4 join subnet: %v", err)
+			return fmt.Errorf("network %s: failed to parse IPv4 join subnet: %v", ni.GetNetworkName(), err)
 		}
 	}
 	if len(v6ClusterSubnet) > 0 {
 		if config.Gateway.V6JoinSubnet == "" {
-			return fmt.Errorf("cannot process IPv6 addresses because no IPv6 join subnet is available")
+			return fmt.Errorf("network %s: cannot process IPv6 addresses because no IPv6 join subnet is available", ni.GetNetworkName())
 		}
 		_, v6JoinSubnet, err = net.ParseCIDR(config.Gateway.V6JoinSubnet)
 		if err != nil {
-			return fmt.Errorf("failed to parse IPv6 join subnet: %v", err)
+			return fmt.Errorf("network %s: failed to parse IPv6 join subnet: %v", ni.GetNetworkName(), err)
 		}
 	}
 	router := ni.GetNetworkScopedClusterRouterName()
 	if err = createDefaultNoReroutePodPolicies(nbClient, ni.GetNetworkName(), controllerName, router, v4ClusterSubnet, v6ClusterSubnet); err != nil {
-		return err
+		return fmt.Errorf("failed to create no reroute policies for pods on network %s: %v", ni.GetNetworkName(), err)
 	}
 	if err = createDefaultNoRerouteServicePolicies(nbClient, ni.GetNetworkName(), controllerName, router, v4ClusterSubnet, v6ClusterSubnet,
 		v4JoinSubnet, v6JoinSubnet); err != nil {
-		return err
+		return fmt.Errorf("failed to create no reroute policies for services on network %s: %v", ni.GetNetworkName(), err)
 	}
 	if err = createDefaultNoRerouteReplyTrafficPolicy(nbClient, ni.GetNetworkName(), controllerName, router); err != nil {
-		return err
+		return fmt.Errorf("failed to create no reroute reply traffic policy for network %s: %v", ni.GetNetworkName(), err)
 	}
 
 	// ensure the address-set for storing nodeIPs exists
@@ -2061,7 +2061,7 @@ func InitClusterEgressPolicies(nbClient libovsdbclient.Client, addressSetFactory
 	dbIDs = getEgressIPAddrSetDbIDs(EgressIPServedPodsAddrSetName, ni.GetNetworkName(), controllerName)
 	_, err = addressSetFactory.EnsureAddressSet(dbIDs)
 	if err != nil {
-		return fmt.Errorf("cannot ensure that addressSet for egressIP pods %s exists %v", EgressIPServedPodsAddrSetName, err)
+		return fmt.Errorf("cannot ensure that addressSet for egressIP pods %s exists for network %s: %v", EgressIPServedPodsAddrSetName, ni.GetNetworkName(), err)
 	}
 
 	// ensure the address-set for storing egressservice pod backends exists
@@ -2074,7 +2074,7 @@ func InitClusterEgressPolicies(nbClient libovsdbclient.Client, addressSetFactory
 	if !ni.IsDefault() && util.IsNetworkSegmentationSupportEnabled() {
 		v4, v6 := len(v4ClusterSubnet) > 0, len(v6ClusterSubnet) > 0
 		if err = ensureDefaultNoRerouteUDNEnabledSvcPolicies(nbClient, addressSetFactory, ni, controllerName, v4, v6); err != nil {
-			return fmt.Errorf("failed to ensure no reroute for UDN enabled services: %v", err)
+			return fmt.Errorf("failed to ensure no reroute for UDN enabled services for network %s: %v", ni.GetNetworkName(), err)
 		}
 	}
 	return nil
@@ -2176,7 +2176,7 @@ func (e *EgressIPController) addStandByEgressIPAssignment(ni util.NetInfo, podKe
 		return fmt.Errorf("failed to get pod %s/%s IPs using nad name %q: %v", pod.Namespace, pod.Name, nadName, err)
 	}
 	if len(podIPNets) == 0 {
-		return fmt.Errorf("no IP(s) available for pod %s/%s", pod.Namespace, pod.Name)
+		return fmt.Errorf("no IP(s) available for pod %s/%s on network %s", pod.Namespace, pod.Name, ni.GetNetworkName())
 	}
 	podIPs := make([]net.IP, 0, len(podIPNets))
 	for _, podIPNet := range podIPNets {
@@ -2191,7 +2191,7 @@ func (e *EgressIPController) addStandByEgressIPAssignment(ni util.NetInfo, podKe
 	// NOTE: We let addPodEgressIPAssignments take care of setting egressIPName and egressStatuses and removing it from standBy
 	err = e.addPodEgressIPAssignments(ni, eipToAssign, eip.Status.Items, mark, pod)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to add standby pod %s/%s for network %s: %v", pod.Namespace, pod.Name, ni.GetNetworkName(), err)
 	}
 	return nil
 }
@@ -2905,7 +2905,7 @@ func (e *EgressIPController) ensureL3ClusterRouterPoliciesForNetwork(ni util.Net
 	err := ensureDefaultNoRerouteNodePolicies(e.nbClient, e.addressSetFactory, ni.GetNetworkName(), ni.GetNetworkScopedClusterRouterName(),
 		e.controllerName, listers.NewNodeLister(e.watchFactory.NodeInformer().GetIndexer()), e.v4, e.v6)
 	if err != nil {
-		return fmt.Errorf("failed to ensure no reroute node policies: %v", err)
+		return fmt.Errorf("failed to ensure no reroute node policies for network %s: %v", ni.GetNetworkName(), err)
 	}
 	if !config.OVNKubernetesFeature.EnableInterconnect {
 		return nil
@@ -2927,10 +2927,10 @@ func (e *EgressIPController) ensureL3SwitchPoliciesForNode(ni util.NetInfo, node
 	defer e.nodeUpdateMutex.Unlock()
 	ops, err := e.ensureDefaultNoReRouteQosRulesForNode(ni, nodeName, nil)
 	if err != nil {
-		return fmt.Errorf("failed to ensure no reroute QoS rules for node %s: %v", nodeName, err)
+		return fmt.Errorf("failed to ensure no reroute QoS rules for node %s and network %s: %v", nodeName, ni.GetNetworkName(), err)
 	}
 	if _, err = libovsdbops.TransactAndCheck(e.nbClient, ops); err != nil {
-		return fmt.Errorf("unable to ensure default no reroute QoS rules, err: %v", err)
+		return fmt.Errorf("unable to ensure default no reroute QoS rules for network %s, err: %v", ni.GetNetworkName(), err)
 	}
 	return nil
 }
