@@ -153,7 +153,7 @@ func (d *SampleDecoder) DecodeCookieIDs(obsDomainID, obsPointID uint32) (model.N
 	default:
 		return nil, fmt.Errorf("unknown app ID: %d", getObservAppID(obsDomainID))
 	}
-	var event any
+	var event model.NetworkEvent
 	switch o := dbObj.(type) {
 	case *nbdb.ACL:
 		event = newACLEvent(o)
@@ -190,12 +190,12 @@ func newACLEvent(o *nbdb.ACL) *model.ACLEvent {
 
 func (d *SampleDecoder) DecodeCookieBytes(cookie []byte) (model.NetworkEvent, error) {
 	if uint64(len(cookie)) != CookieSize {
-		return "", fmt.Errorf("invalid cookie size: %d", len(cookie))
+		return nil, fmt.Errorf("invalid cookie size: %d", len(cookie))
 	}
 	c := Cookie{}
 	err := binary.Read(bytes.NewReader(cookie), SampleEndian, &c)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	return d.DecodeCookieIDs(c.ObsDomainID, c.ObsPointID)
 }
@@ -204,7 +204,7 @@ func (d *SampleDecoder) DecodeCookie8Bytes(cookie [8]byte) (model.NetworkEvent, 
 	c := Cookie{}
 	err := binary.Read(bytes.NewReader(cookie[:]), SampleEndian, &c)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	return d.DecodeCookieIDs(c.ObsDomainID, c.ObsPointID)
 }

@@ -8,6 +8,7 @@ import (
 )
 
 type NetworkEvent interface {
+	String() string
 }
 
 type ACLEvent struct {
