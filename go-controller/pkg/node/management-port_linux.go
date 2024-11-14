@@ -4,13 +4,14 @@
 package node
 
 import (
+	"context"
 	"fmt"
 	"net"
-	"strings"
 	"time"
 
 	"github.com/coreos/go-iptables/iptables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	nodenft "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/nftables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -18,14 +19,33 @@ import (
 
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
+	"sigs.k8s.io/knftables"
 )
 
 const (
+	// The legacy iptables management port chain
 	iptableMgmPortChain = "OVN-KUBE-SNAT-MGMTPORT"
+
+	// The "mgmtport-snat" chain contains the rules to SNAT traffic sent to the
+	// management port (except for `externalTrafficPolicy: Local` traffic, where
+	// the source IP must be preserved).
+	nftablesMgmtPortChain = "mgmtport-snat"
+
+	// "mgmtport-no-snat-nodeports" is a set containing protocol / nodePort tuples
+	// indicating traffic that should not be SNATted when passing through the
+	// management port because it is addressed to an `externalTrafficPolicy: Local`
+	// NodePort.
+	nftablesMgmtPortNoSNATNodePorts = "mgmtport-no-snat-nodeports"
+
+	// "mgmtport-no-snat-services-v4" and "mgmtport-no-snat-services-v6" are sets
+	// containing loadBalancerIP / protocol / port tuples indicating traffic that
+	// should not be SNATted when passing through the management port because it is
+	// addressed to an `externalTrafficPolicy: Local` load balancer IP.
+	nftablesMgmtPortNoSNATServicesV4 = "mgmtport-no-snat-services-v4"
+	nftablesMgmtPortNoSNATServicesV6 = "mgmtport-no-snat-services-v6"
 )
 
 type managementPortIPFamilyConfig struct {
-	ipt        util.IPTablesHelper
 	allSubnets []*net.IPNet
 	ifAddr     *net.IPNet
 	gwIP       net.IP
@@ -35,6 +55,7 @@ type managementPortConfig struct {
 	ifName    string
 	link      netlink.Link
 	routerMAC net.HardwareAddr
+	nft       knftables.Interface
 
 	ipv4 *managementPortIPFamilyConfig
 	ipv6 *managementPortIPFamilyConfig
@@ -70,11 +91,6 @@ func newManagementPortIPFamilyConfig(hostSubnet *net.IPNet, isIPv6 bool) (*manag
 		cfg.allSubnets = append(cfg.allSubnets, masqueradeSubnet)
 	}
 
-	if utilnet.IsIPv6CIDR(cfg.ifAddr) {
-		cfg.ipt, err = util.GetIPTablesHelper(iptables.ProtocolIPv6)
-	} else {
-		cfg.ipt, err = util.GetIPTablesHelper(iptables.ProtocolIPv4)
-	}
 	if err != nil {
 		return nil, err
 	}
@@ -83,10 +99,14 @@ func newManagementPortIPFamilyConfig(hostSubnet *net.IPNet, isIPv6 bool) (*manag
 }
 
 func newManagementPortConfig(interfaceName string, hostSubnets []*net.IPNet) (*managementPortConfig, error) {
-	var err error
+	nft, err := nodenft.GetNFTablesHelper()
+	if err != nil {
+		return nil, err
+	}
 
 	mpcfg := &managementPortConfig{
 		ifName: interfaceName,
+		nft:    nft,
 	}
 	if mpcfg.link, err = util.LinkSetUp(mpcfg.ifName); err != nil {
 		return nil, err
@@ -137,7 +157,7 @@ func newManagementPortConfig(interfaceName string, hostSubnets []*net.IPNet) (*m
 	return mpcfg, nil
 }
 
-func tearDownInterfaceIPConfig(link netlink.Link, ipt4, ipt6 util.IPTablesHelper) error {
+func tearDownManagementPortConfig(link netlink.Link, nft knftables.Interface) error {
 	if err := util.LinkAddrFlush(link); err != nil {
 		return err
 	}
@@ -145,16 +165,19 @@ func tearDownInterfaceIPConfig(link netlink.Link, ipt4, ipt6 util.IPTablesHelper
 	if err := util.LinkRoutesDel(link, nil); err != nil {
 		return err
 	}
-	if ipt4 != nil {
-		if err := ipt4.ClearChain("nat", iptableMgmPortChain); err != nil {
-			return fmt.Errorf("could not clear the iptables chain for management port: %v", err)
-		}
-	}
 
-	if ipt6 != nil {
-		if err := ipt6.ClearChain("nat", iptableMgmPortChain); err != nil {
-			return fmt.Errorf("could not clear the iptables chain for management port: %v", err)
-		}
+	tx := nft.NewTransaction()
+	// Delete would return an error if we tried to delete a chain that didn't exist, so
+	// we do an Add first (which is a no-op if the chain already exists) and then Delete.
+	tx.Add(&knftables.Chain{
+		Name: nftablesMgmtPortChain,
+	})
+	tx.Delete(&knftables.Chain{
+		Name: nftablesMgmtPortChain,
+	})
+	err := nft.Run(context.TODO(), tx)
+	if err != nil && !knftables.IsNotFound(err) {
+		return fmt.Errorf("could not clear the nftables chain for management port: %v", err)
 	}
 
 	return nil
@@ -216,44 +239,12 @@ func setupManagementPortIPFamilyConfig(routeManager *routemanager.Controller, mp
 	}
 
 	// IPv6 forwarding is enabled globally
-	if mpcfg.ipv4 != nil && cfg == mpcfg.ipv4 {
+	if cfg == mpcfg.ipv4 {
 		stdout, stderr, err := util.RunSysctl("-w", fmt.Sprintf("net.ipv4.conf.%s.forwarding=1", types.K8sMgmtIntfName))
 		if err != nil || stdout != fmt.Sprintf("net.ipv4.conf.%s.forwarding = 1", types.K8sMgmtIntfName) {
 			return warnings, fmt.Errorf("could not set the correct forwarding value for interface %s: stdout: %v, stderr: %v, err: %v",
 				types.K8sMgmtIntfName, stdout, stderr, err)
 		}
-	}
-
-	if _, err = cfg.ipt.List("nat", iptableMgmPortChain); err != nil {
-		warnings = append(warnings, fmt.Sprintf("missing iptables chain %s in the nat table, adding it",
-			iptableMgmPortChain))
-		err = cfg.ipt.NewChain("nat", iptableMgmPortChain)
-	}
-	if err != nil {
-		return warnings, fmt.Errorf("could not create iptables nat chain %q for management port: %v",
-			iptableMgmPortChain, err)
-	}
-	rule := []string{"-o", mpcfg.ifName, "-j", iptableMgmPortChain}
-	if exists, err = cfg.ipt.Exists("nat", "POSTROUTING", rule...); err == nil && !exists {
-		warnings = append(warnings, fmt.Sprintf("missing iptables postrouting nat chain %s, adding it",
-			iptableMgmPortChain))
-		err = cfg.ipt.Insert("nat", "POSTROUTING", 1, rule...)
-	}
-	if err != nil {
-		return warnings, fmt.Errorf("could not insert iptables rule %q for management port: %v",
-			strings.Join(rule, " "), err)
-	}
-	rule = []string{"-o", mpcfg.ifName, "-j", "SNAT", "--to-source", cfg.ifAddr.IP.String(),
-		"-m", "comment", "--comment", "OVN SNAT to Management Port"}
-	if exists, err = cfg.ipt.Exists("nat", iptableMgmPortChain, rule...); err == nil && !exists {
-		warnings = append(warnings, fmt.Sprintf("missing management port nat rule in chain %s, adding it",
-			iptableMgmPortChain))
-		// NOTE: SNAT to mp0 rule should be the last in the chain, so append it
-		err = cfg.ipt.Append("nat", iptableMgmPortChain, rule...)
-	}
-	if err != nil {
-		return warnings, fmt.Errorf("could not insert iptable rule %q for management port: %v",
-			strings.Join(rule, " "), err)
 	}
 
 	return warnings, nil
@@ -275,6 +266,99 @@ func setupManagementPortConfig(routeManager *routemanager.Controller, cfg *manag
 	return allWarnings, err
 }
 
+func setupManagementPortNFTables(cfg *managementPortConfig) error {
+	counterIfDebug := ""
+	if config.Logging.Level > 4 {
+		counterIfDebug = "counter"
+	}
+
+	tx := cfg.nft.NewTransaction()
+	tx.Add(&knftables.Chain{
+		Name:    nftablesMgmtPortChain,
+		Comment: knftables.PtrTo("OVN SNAT to Management Port"),
+
+		Type:     knftables.PtrTo(knftables.NATType),
+		Hook:     knftables.PtrTo(knftables.PostroutingHook),
+		Priority: knftables.PtrTo(knftables.SNATPriority),
+	})
+	tx.Add(&knftables.Set{
+		Name:    nftablesMgmtPortNoSNATNodePorts,
+		Comment: knftables.PtrTo("NodePorts not subject to management port SNAT"),
+		Type:    "inet_proto . inet_service",
+	})
+	tx.Add(&knftables.Set{
+		Name:    nftablesMgmtPortNoSNATServicesV4,
+		Comment: knftables.PtrTo("eTP:Local short-circuit not subject to management port SNAT (IPv4)"),
+		Type:    "ipv4_addr . inet_proto . inet_service",
+	})
+	tx.Add(&knftables.Set{
+		Name:    nftablesMgmtPortNoSNATServicesV6,
+		Comment: knftables.PtrTo("eTP:Local short-circuit not subject to management port SNAT (IPv6)"),
+		Type:    "ipv6_addr . inet_proto . inet_service",
+	})
+
+	tx.Flush(&knftables.Chain{
+		Name: nftablesMgmtPortChain,
+	})
+	tx.Add(&knftables.Rule{
+		Chain: nftablesMgmtPortChain,
+		Rule: knftables.Concat(
+			"oifname", "!=", fmt.Sprintf("%q", cfg.ifName),
+			"return",
+		),
+	})
+	tx.Add(&knftables.Rule{
+		Chain: nftablesMgmtPortChain,
+		Rule: knftables.Concat(
+			"meta l4proto", ".", "th dport", "@", nftablesMgmtPortNoSNATNodePorts,
+			counterIfDebug,
+			"return",
+		),
+	})
+
+	if cfg.ipv4 != nil {
+		tx.Add(&knftables.Rule{
+			Chain: nftablesMgmtPortChain,
+			Rule: knftables.Concat(
+				"ip daddr . meta l4proto . th dport", "@", nftablesMgmtPortNoSNATServicesV4,
+				counterIfDebug,
+				"return",
+			),
+		})
+		tx.Add(&knftables.Rule{
+			Chain: nftablesMgmtPortChain,
+			Rule: knftables.Concat(
+				counterIfDebug,
+				"snat ip to", cfg.ipv4.ifAddr.IP,
+			),
+		})
+	}
+
+	if cfg.ipv6 != nil {
+		tx.Add(&knftables.Rule{
+			Chain: nftablesMgmtPortChain,
+			Rule: knftables.Concat(
+				"ip6 daddr . meta l4proto . th dport", "@", nftablesMgmtPortNoSNATServicesV6,
+				counterIfDebug,
+				"return",
+			),
+		})
+		tx.Add(&knftables.Rule{
+			Chain: nftablesMgmtPortChain,
+			Rule: knftables.Concat(
+				counterIfDebug,
+				"snat ip6 to", cfg.ipv6.ifAddr.IP,
+			),
+		})
+	}
+
+	err := cfg.nft.Run(context.TODO(), tx)
+	if err != nil {
+		return fmt.Errorf("could not update nftables rule for management port: %v", err)
+	}
+	return nil
+}
+
 // createPlatformManagementPort creates a management port attached to the node switch
 // that lets the node access its pods via their private IP address. This is used
 // for health checking and other management tasks.
@@ -290,30 +374,12 @@ func createPlatformManagementPort(routeManager *routemanager.Controller, interfa
 		return nil, err
 	}
 
-	return cfg, nil
-}
-
-func getIPTablesForHostSubnets(hostSubnets []*net.IPNet) (util.IPTablesHelper, util.IPTablesHelper, error) {
-	var ipt4, ipt6 util.IPTablesHelper
-	var err error
-
-	for _, hostSubnet := range hostSubnets {
-		if utilnet.IsIPv6CIDR(hostSubnet) {
-			if ipt6 != nil {
-				continue
-			}
-			ipt6, err = util.GetIPTablesHelper(iptables.ProtocolIPv6)
-		} else {
-			if ipt4 != nil {
-				continue
-			}
-			ipt4, err = util.GetIPTablesHelper(iptables.ProtocolIPv4)
-		}
-		if err != nil {
-			return nil, nil, err
-		}
+	if err = setupManagementPortNFTables(cfg); err != nil {
+		return nil, err
 	}
-	return ipt4, ipt6, nil
+	DelLegacyMgtPortIptRules()
+
+	return cfg, nil
 }
 
 // syncMgmtPortInterface verifies if no other interface configured as management port. This may happen if another
@@ -396,12 +462,12 @@ func unconfigureMgmtNetdevicePort(hostSubnets []*net.IPNet, mgmtPortName string)
 	}
 
 	klog.Infof("Found existing management interface. Unconfiguring it")
-	ipt4, ipt6, err := getIPTablesForHostSubnets(hostSubnets)
+	nft, err := nodenft.GetNFTablesHelper()
 	if err != nil {
-		return fmt.Errorf("failed to get iptables: %v", err)
+		return fmt.Errorf("failed to get nftables: %v", err)
 	}
 
-	if err := tearDownInterfaceIPConfig(link, ipt4, ipt6); err != nil {
+	if err := tearDownManagementPortConfig(link, nft); err != nil {
 		return fmt.Errorf("teardown failed: %v", err)
 	}
 
@@ -432,8 +498,9 @@ func unconfigureMgmtNetdevicePort(hostSubnets []*net.IPNet, mgmtPortName string)
 	return nil
 }
 
-// DelMgtPortIptRules delete all the iptable rules for the management port.
-func DelMgtPortIptRules() {
+// DelLegacyMgtPortIptRules deletes legacy iptables rules for the management port; this is
+// only used for cleaning up stale rules when upgrading, and can eventually be removed.
+func DelLegacyMgtPortIptRules() {
 	// Clean up all iptables and ip6tables remnants that may be left around
 	ipt, err := util.GetIPTablesHelper(iptables.ProtocolIPv4)
 	if err != nil {
@@ -455,13 +522,16 @@ func DelMgtPortIptRules() {
 // checks to make sure that following configurations are present on the k8s node
 // 1. route entries to cluster CIDR and service CIDR through management port
 // 2. ARP entry for the node subnet's gateway ip
-// 3. IPtables chain and rule for SNATing packets entering the logical topology
+// 3. nftables rules for SNATing packets entering the logical topology
 func checkManagementPortHealth(routeManager *routemanager.Controller, cfg *managementPortConfig) {
 	warnings, err := setupManagementPortConfig(routeManager, cfg)
 	for _, warning := range warnings {
 		klog.Warningf(warning)
 	}
 	if err != nil {
+		klog.Errorf(err.Error())
+	}
+	if err = setupManagementPortNFTables(cfg); err != nil {
 		klog.Errorf(err.Error())
 	}
 }

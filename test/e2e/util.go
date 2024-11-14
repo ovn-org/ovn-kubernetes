@@ -887,6 +887,56 @@ func pokeIPTableRules(clientContainer, pattern string) int {
 	return numOfMatchRules
 }
 
+// countNFTablesElements returns the number of nftables elements in the indicated set
+// of the "ovn-kubernetes" table.
+func countNFTablesElements(clientContainer, name string) int {
+	cmd := []string{containerRuntime, "exec", clientContainer}
+
+	nftCmd := append(cmd, "nft", "-j", "list", "set", "inet", "ovn-kubernetes", name)
+	nftElements, err := runCommand(nftCmd...)
+	framework.ExpectNoError(err, "failed to get nftables elements from node %s", clientContainer)
+
+	framework.Logf("DEBUG: Dumping NFTElements %v", nftElements)
+	// The output will look like
+	//
+	// {
+	//   "nftables": [
+	//     {
+	//       "metainfo": {
+	//         ...
+	//       }
+	//     },
+	//     {
+	//       "set": {
+	//         ...
+	//         "elem": [
+	//           ...
+	//         ]
+	//       }
+	//     }
+	//   ]
+	// }
+	//
+	// (Where the "elem" element will be omitted if the set is empty.)
+	// We just parse this optimistically and catch the panic if it fails.
+	count := -1
+	defer func() { 
+		if recover() != nil {
+			framework.Logf("JSON parsing error!")
+		}
+	}()
+
+	jsonResult := map[string][]map[string]map[string]any{}
+	json.Unmarshal([]byte(nftElements), &jsonResult)
+	elem := jsonResult["nftables"][1]["set"]["elem"]
+	if elem == nil {
+		return 0
+	}
+	elemArray := elem.([]any)
+	count = len(elemArray)
+	return count
+}
+
 // isDualStackCluster returns 'true' if at least one of the nodes has more than one node subnet.
 func isDualStackCluster(nodes *v1.NodeList) bool {
 	for _, node := range nodes.Items {
