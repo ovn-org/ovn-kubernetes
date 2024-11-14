@@ -368,7 +368,7 @@ func newEgressIPController(ovnClient *util.OVNClusterManagerClientset, wf *facto
 		EIPClient:          ovnClient.EgressIPClient,
 		CloudNetworkClient: ovnClient.CloudNetworkClient,
 	}
-	markAllocator, _ := getEgressIPMarkAllocator()
+	markAllocator := getEgressIPMarkAllocator()
 
 	wg := &sync.WaitGroup{}
 	eIPC := &egressIPClusterController{
@@ -1812,7 +1812,7 @@ var (
 	eipMarkMin = util.EgressIPMarkBase
 )
 
-func getEgressIPMarkAllocator() (id.Allocator, error) {
+func getEgressIPMarkAllocator() id.Allocator {
 	return id.NewIDAllocator("eip_mark", eipMarkMax-eipMarkMin)
 }
 
