@@ -11,7 +11,6 @@ For more info, consider looking at the following links:
 - [Assigning an egress IP address](https://docs.okd.io/latest/networking/ovn_kubernetes_network_provider/assigning-egress-ips-ovn.html)
 - [Managing Egress IP in OpenShift 4 with OVN-Kubernetes](https://rcarrata.com/openshift/egress-ip-ovn/)
 
-
 ## Example
 
 An example of EgressIP might look like this:
@@ -38,11 +37,16 @@ spec:
 It specifies to use `172.18.0.33` or `172.18.0.44` egressIP for pods that are labeled with `app: web` that run in a namespace without `environment: development` label.
 Both selectors use the [generic kubernetes label selectors](https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/#label-selectors).
 
-## Traffic flows
+## Layer 3 network
+Supported network configs:
+- Cluster default network
+- Role primary user defined networks
+
+### EgressIP IP is assigned to the primary host interface
 If the Egress IP(s) are hosted on the OVN primary network then the implementation is redirecting the POD traffic
 to an egress node where it is SNATed and sent out.  
 
-Using the example EgressIP and a matching pod with `10.244.1.3` IP, the following logical router policies are configured in `ovn_cluster_router`:
+Using the example EgressIP and a matching pod attached to the cluster default network with `10.244.1.3` IP, the following logical router policies are configured in `ovn_cluster_router`:
 ```shell
 Routing Policies
   1004 inport == "rtos-ovn-control-plane" && ip4.dst == 172.18.0.4 /* ovn-control-plane */                            reroute  10.244.0.2
@@ -59,7 +63,7 @@ Routing Policies
 - Rules with `102` priority are added by OVN-Kubernetes when EgressIP feature is enabled, they ensure that east-west traffic is not using egress IPs.
 - The rule with `100` priority is added for the pod matching `egressip-prod` EgressIP, and it redirects the traffic to one of the egress nodes (ECMP is used to balance the traffic between next hops).
 
-Once the redirected traffic reaches one of the egress nodes it gets SNATed in the gateway router:
+For a pod attached to the cluster default network and once the redirected traffic reaches one of the egress nodes it gets SNATed in the gateway router:
 ```shell
 ovn-nbctl lr-nat-list GR_ovn-worker
 TYPE             GATEWAY_PORT          EXTERNAL_IP        EXTERNAL_PORT    LOGICAL_IP          EXTERNAL_MAC         LOGICAL_PORT
@@ -71,6 +75,16 @@ TYPE             GATEWAY_PORT          EXTERNAL_IP        EXTERNAL_PORT    LOGIC
 snat                                   172.18.0.44                         10.244.1.3
 ```
 
+For a pod attached to a role primary user defined network "network1", there is no NAT entry for the pod attached to the egress OVN gateway and
+instead a logical router policy is attached to the egress nodes OVN gateway router:
+```shell
+sh-5.2# ovn-nbctl lr-policy-list GR_network1_ovn-worker
+Routing Policies
+        95             ip4.src == 10.128.1.3 && pkt.mark == 0           allow               pkt_mark=50006
+```
+
+### EgressIP IP is assigned to a secondary host interface
+Note that this is unsupported for user defined networks.
 Lets now imagine the Egress IP(s) mentioned previously, are not hosted by the OVN primary network and is hosted
 by a secondary host network which is assigned to a standard linux interface, a redirect to the egress-able node management port IP address:
 ```shell
@@ -139,6 +153,12 @@ new routing table specifically created to route the traffic out the correct inte
 is created within the chain `OVN-KUBE-EGRESS-IP-Multi-NIC` for each selected pod to allow SNAT to occur when
 egress-ing a particular interface. The routing table number `1111` is generated from the interface name.
 Routes within the main routing table who's output interface share the same interface used for Egress IP are also cloned into the VRF 1111.
+
+## Layer 2 network
+Not supported
+
+## Localnet
+Not supported
 
 ### Pod to node IP traffic
 When a cluster networked pod matched by an egress IP tries to connect to a non-local node IP it hits the following
