@@ -43,7 +43,7 @@ func (e *ACLEvent) String() string {
 	case libovsdbops.MulticastClusterOwnerType:
 		msg = fmt.Sprintf("cluster multicast policy, direction %s", e.Direction)
 	case libovsdbops.NetpolNodeOwnerType:
-		msg = "default allow from local node policy, direction ingress"
+		msg = fmt.Sprintf("default allow from local node policy, direction %s", e.Direction)
 	case libovsdbops.NetworkPolicyOwnerType:
 		msg = fmt.Sprintf("network policy %s, direction %s", e.Name, e.Direction)
 	case libovsdbops.NetpolNamespaceOwnerType:

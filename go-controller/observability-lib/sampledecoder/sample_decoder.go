@@ -183,6 +183,8 @@ func newACLEvent(o *nbdb.ACL) *model.ACLEvent {
 		event.Direction = "Egress"
 	case libovsdbops.UDNIsolationOwnerType:
 		event.Name = o.ExternalIDs[libovsdbops.ObjectNameKey.String()]
+	case libovsdbops.NetpolNodeOwnerType:
+		event.Direction = "Ingress"
 	}
 	return &event
 }

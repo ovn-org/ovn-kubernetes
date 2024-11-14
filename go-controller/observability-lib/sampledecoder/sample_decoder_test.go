@@ -39,4 +39,13 @@ func TestCreateOrUpdateACL(t *testing.T) {
 	})
 	assert.Equal(t, "Allowed by egress firewall in namespace foo", event.String())
 	assert.Equal(t, "Egress", event.Direction)
+
+	event = newACLEvent(&nbdb.ACL{
+		Action: nbdb.ACLActionAllow,
+		ExternalIDs: map[string]string{
+			libovsdbops.OwnerTypeKey.String(): libovsdbops.NetpolNodeOwnerType,
+		},
+	})
+	assert.Equal(t, "Allowed by default allow from local node policy, direction Ingress", event.String())
+	assert.Equal(t, "Ingress", event.Direction)
 }
