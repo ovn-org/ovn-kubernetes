@@ -33,13 +33,13 @@ type idAllocator struct {
 }
 
 // NewIDAllocator returns an IDAllocator
-func NewIDAllocator(name string, maxIds int) (Allocator, error) {
+func NewIDAllocator(name string, maxIds int) Allocator {
 	idBitmap := bitmapallocator.NewRoundRobinAllocationMap(maxIds, name)
 
 	return &idAllocator{
 		nameIdMap: sync.Map{},
 		idBitmap:  idBitmap,
-	}, nil
+	}
 }
 
 // AllocateID allocates an id for the resource 'name' and returns the id.
