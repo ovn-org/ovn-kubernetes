@@ -4237,8 +4237,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 
 	ginkgo.Context("EgressIP Mark cache", func() {
 		ginkgo.It("should round robin when mark range is exhausted", func() {
-			nodeAlloc, err := getEgressIPMarkAllocator()
-			gomega.Expect(err).ShouldNot(gomega.HaveOccurred(), "failed to get egress IP mark allocator")
+			nodeAlloc := getEgressIPMarkAllocator()
 			ecc := &egressIPClusterController{markAllocator: nodeAlloc}
 			eipMarkMin = 50000
 			eipMarkMax = eipMarkMin + 50
