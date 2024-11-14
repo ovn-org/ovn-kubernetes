@@ -3,9 +3,9 @@ package persistentips
 import (
 	"errors"
 	"fmt"
-	ipam "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip"
-	"k8s.io/klog/v2"
 	"net"
+
+	"k8s.io/klog/v2"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
@@ -13,6 +13,7 @@ import (
 	ipamclaimsapi "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1"
 	ipamclaimslister "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1/apis/listers/ipamclaims/v1alpha1"
 
+	ipam "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	ovnktypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -150,7 +151,6 @@ func (icr *IPAMClaimReconciler) FindIPAMClaim(claimName string, namespace string
 // the cluster. For live pods, therse are already allocated, so no error will
 // be thrown (e.g. we ignore the `ipam.IsErrAllocated` error
 func (icr *IPAMClaimReconciler) Sync(objs []interface{}, ipAllocator IPAllocator) error {
-	var ips []*net.IPNet
 	for _, obj := range objs {
 		ipamClaim, ok := obj.(*ipamclaimsapi.IPAMClaim)
 		if !ok {
@@ -169,11 +169,11 @@ func (icr *IPAMClaimReconciler) Sync(objs []interface{}, ipAllocator IPAllocator
 		if err != nil {
 			return fmt.Errorf("failed at parsing IP when allocating persistent IPs: %w", err)
 		}
-		ips = append(ips, ipnets...)
-	}
-	if len(ips) > 0 {
-		if err := ipAllocator.AllocateIPs(ips); err != nil && !ipam.IsErrAllocated(err) {
-			return fmt.Errorf("failed allocating persistent ips: %w", err)
+
+		if len(ipnets) != 0 {
+			if err := ipAllocator.AllocateIPs(ipnets); err != nil && !ipam.IsErrAllocated(err) {
+				return fmt.Errorf("failed syncing persistent ips: %w", err)
+			}
 		}
 	}
 	return nil

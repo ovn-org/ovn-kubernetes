@@ -359,10 +359,12 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 		ginkgo.Context("persistent IP allocations", func() {
 			const (
 				claimName   = "claim1"
+				claimName2  = "claim2"
 				namespace   = "ns"
 				networkName = "blue"
 				subnetCIDR  = "192.168.200.0/24"
 				subnetIP    = "192.168.200.2/24"
+				subnetIP2   = "192.168.200.3/24"
 			)
 
 			var netInfo util.NetInfo
@@ -387,6 +389,7 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 							KubeClient: fake.NewSimpleClientset(),
 							IPAMClaimsClient: fakeipamclaimclient.NewSimpleClientset(
 								ipamClaimWithIPAddr(claimName, namespace, networkName, subnetIP),
+								ipamClaimWithIPAddr(claimName2, namespace, networkName, subnetIP2),
 							),
 							NetworkAttchDefClient: fakenadclient.NewSimpleClientset(),
 						}
@@ -420,8 +423,11 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 
 						ips, err := util.ParseIPNets([]string{subnetIP})
 						gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
 						gomega.Expect(nc.subnetAllocator.AllocateIPs(netInfo.GetNetworkName(), ips)).To(gomega.Equal(ip.ErrAllocated))
+
+						ips2, err := util.ParseIPNets([]string{subnetIP2})
+						gomega.Expect(err).NotTo(gomega.HaveOccurred())
+						gomega.Expect(nc.subnetAllocator.AllocateIPs(netInfo.GetNetworkName(), ips2)).To(gomega.Equal(ip.ErrAllocated))
 
 						return nil
 					}
