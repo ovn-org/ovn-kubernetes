@@ -33,6 +33,11 @@ func externalIDsContainsVM(externalIDs map[string]string, vm *ktypes.NamespacedN
 	if vm == nil {
 		return false
 	}
+	// FIXME: VM IDs have no DB IDs and therefore may clash with other LRPs that do contain DB IBs. They will always have ObjectNameKey
+	// set therefore we now depend on the following key to be present. Remove this when DB IDs are implemented.
+	if _, ok := externalIDs[OvnZoneExternalIDKey]; !ok {
+		return false
+	}
 	externalIDsVM := extractVMFromExternalIDs(externalIDs)
 	if externalIDsVM == nil {
 		return false
@@ -45,6 +50,11 @@ func externalIDsContainsVM(externalIDs map[string]string, vm *ktypes.NamespacedN
 // if the expected ovn zone corresponds with the one it created via the
 // OvnZoneExternalIDKey
 func ownsItAndIsOrphanOrWrongZone(externalIDs map[string]string, vms map[ktypes.NamespacedName]bool) bool {
+	// FIXME: VM IDs have no DB IDs and therefore may clash with other LRPs that do contain DB IBs. They will always have ObjectNameKey
+	// set therefore we now depend on the following key to be present. Remove this when DB IDs are implemented.
+	if _, ok := externalIDs[OvnZoneExternalIDKey]; !ok {
+		return false
+	}
 	vm := extractVMFromExternalIDs(externalIDs)
 	if vm == nil {
 		return false // Not related to kubevirt

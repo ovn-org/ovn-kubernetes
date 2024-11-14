@@ -13,7 +13,7 @@ import (
 	"k8s.io/klog/v2"
 )
 
-type portCache struct {
+type PortCache struct {
 	sync.RWMutex
 	stopChan <-chan struct{}
 
@@ -33,14 +33,14 @@ type lpInfo struct {
 	expires time.Time
 }
 
-func newPortCache(stopChan <-chan struct{}) *portCache {
-	return &portCache{
+func NewPortCache(stopChan <-chan struct{}) *PortCache {
+	return &PortCache{
 		stopChan: stopChan,
 		cache:    make(map[string]map[string]*lpInfo),
 	}
 }
 
-func (c *portCache) get(pod *kapi.Pod, nadName string) (*lpInfo, error) {
+func (c *PortCache) get(pod *kapi.Pod, nadName string) (*lpInfo, error) {
 	var logicalPort string
 
 	podName := fmt.Sprintf("%s/%s", pod.Namespace, pod.Name)
@@ -60,7 +60,7 @@ func (c *portCache) get(pod *kapi.Pod, nadName string) (*lpInfo, error) {
 	return nil, fmt.Errorf("logical port %s for pod %s not found in cache", podName, logicalPort)
 }
 
-func (c *portCache) getAll(pod *kapi.Pod) (map[string]*lpInfo, error) {
+func (c *PortCache) getAll(pod *kapi.Pod) (map[string]*lpInfo, error) {
 	podName := fmt.Sprintf("%s/%s", pod.Namespace, pod.Name)
 	c.RLock()
 	defer c.RUnlock()
@@ -75,7 +75,7 @@ func (c *portCache) getAll(pod *kapi.Pod) (map[string]*lpInfo, error) {
 	return nil, fmt.Errorf("logical port cache for pod %s not found", podName)
 }
 
-func (c *portCache) add(pod *kapi.Pod, logicalSwitch, nadName, uuid string, mac net.HardwareAddr, ips []*net.IPNet) *lpInfo {
+func (c *PortCache) add(pod *kapi.Pod, logicalSwitch, nadName, uuid string, mac net.HardwareAddr, ips []*net.IPNet) *lpInfo {
 	var logicalPort string
 
 	podName := fmt.Sprintf("%s/%s", pod.Namespace, pod.Name)
@@ -105,7 +105,7 @@ func (c *portCache) add(pod *kapi.Pod, logicalSwitch, nadName, uuid string, mac 
 	return portInfo
 }
 
-func (c *portCache) remove(pod *kapi.Pod, nadName string) {
+func (c *PortCache) remove(pod *kapi.Pod, nadName string) {
 	var logicalPort string
 
 	podName := fmt.Sprintf("%s/%s", pod.Namespace, pod.Name)

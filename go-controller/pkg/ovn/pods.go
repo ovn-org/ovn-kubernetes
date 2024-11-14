@@ -260,7 +260,7 @@ func (oc *DefaultNetworkController) addLogicalPort(pod *kapi.Pod) (err error) {
 	}
 
 	// If default network is not primary, update secondaryPods port group to isolate default network
-	networkRole, err := oc.GetNetworkRole(pod)
+	networkRole, err := oc.GetNetworkRoleForPod(pod)
 	if err != nil {
 		return err
 	}
