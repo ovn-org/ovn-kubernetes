@@ -21,7 +21,7 @@ type Allocator interface {
 	DeleteSubnet(name string)
 	GetSubnets(name string) ([]*net.IPNet, error)
 	AllocateUntilFull(name string) error
-	AllocateIPs(name string, ips []*net.IPNet) error
+	AllocateIPPerSubnet(name string, ips []*net.IPNet) error
 	AllocateNextIPs(name string) ([]*net.IPNet, error)
 	ReleaseIPs(name string, ips []*net.IPNet) error
 	ConditionalIPRelease(name string, ips []*net.IPNet, predicate func() (bool, error)) (bool, error)
@@ -159,9 +159,10 @@ func (allocator *allocator) AllocateUntilFull(name string) error {
 	return nil
 }
 
-// AllocateIPs will block off IPs in the ipnets slice as already allocated
-// for a given subnet set
-func (allocator *allocator) AllocateIPs(name string, ips []*net.IPNet) error {
+// AllocateIPPerSubnet will block off IPs in the ipnets slice as already
+// allocated in each of the subnets it manages. ips *must* feature a single IP
+// on each of the subnets managed by the allocator.
+func (allocator *allocator) AllocateIPPerSubnet(name string, ips []*net.IPNet) error {
 	if len(ips) == 0 {
 		return fmt.Errorf("failed to allocate IPs for %s: no IPs provided", name)
 	}
@@ -364,7 +365,7 @@ type IPAllocator struct {
 
 // AllocateIPs allocates the requested IPs
 func (ipAllocator *IPAllocator) AllocateIPs(ips []*net.IPNet) error {
-	return ipAllocator.allocator.AllocateIPs(ipAllocator.name, ips)
+	return ipAllocator.allocator.AllocateIPPerSubnet(ipAllocator.name, ips)
 }
 
 // AllocateNextIPs allocates the next available IPs

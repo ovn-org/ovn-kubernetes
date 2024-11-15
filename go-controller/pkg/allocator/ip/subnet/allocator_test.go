@@ -133,7 +133,7 @@ var _ = ginkgo.Describe("Subnet IP allocator operations", func() {
 				}
 				err = allocator.ReleaseIPs(subnetName, ips)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				err = allocator.AllocateIPs(subnetName, ips)
+				err = allocator.AllocateIPPerSubnet(subnetName, ips)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			}
 		})
@@ -145,7 +145,7 @@ var _ = ginkgo.Describe("Subnet IP allocator operations", func() {
 
 			ips, err := util.ParseIPNets([]string{"10.1.1.1/24", "10.1.1.2/24"})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			gomega.Expect(allocator.AllocateIPs(subnetName, ips)).To(gomega.MatchError(
+			gomega.Expect(allocator.AllocateIPPerSubnet(subnetName, ips)).To(gomega.MatchError(
 				"failed to allocate IP 10.1.1.2 for subnet1: attempted to reserve multiple IPs in the same IPAM instance",
 			))
 		})
@@ -210,7 +210,7 @@ var _ = ginkgo.Describe("Subnet IP allocator operations", func() {
 				gomega.Expect(ip.String()).To(gomega.Equal(expectedIPs[i]))
 			}
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			err = allocator.AllocateIPs(subnetName, ovntest.MustParseIPNets(expectedIPs...))
+			err = allocator.AllocateIPPerSubnet(subnetName, ovntest.MustParseIPNets(expectedIPs...))
 			gomega.Expect(err).To(gomega.MatchError(ipam.ErrAllocated))
 		})
 

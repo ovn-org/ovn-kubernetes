@@ -98,7 +98,7 @@ func (a *ipAllocatorStub) AllocateUntilFull(name string) error {
 	panic("not implemented") // TODO: Implement
 }
 
-func (a *ipAllocatorStub) AllocateIPs(name string, ips []*net.IPNet) error {
+func (a *ipAllocatorStub) AllocateIPPerSubnet(name string, ips []*net.IPNet) error {
 	panic("not implemented") // TODO: Implement
 }
 
