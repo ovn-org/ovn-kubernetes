@@ -2,6 +2,7 @@ package clustermanager
 
 import (
 	"fmt"
+	"maps"
 	"reflect"
 
 	ocpcloudnetworkapi "github.com/openshift/api/cloudnetwork/v1"
@@ -67,6 +68,9 @@ func (h *egressIPClusterControllerEventHandler) AddResource(obj interface{}, fro
 	case factory.CloudPrivateIPConfigType:
 		cloudPrivateIPConfig := obj.(*ocpcloudnetworkapi.CloudPrivateIPConfig)
 		return h.eIPC.reconcileCloudPrivateIPConfig(nil, cloudPrivateIPConfig)
+	case factory.EgressIPNamespaceType:
+		namespace := obj.(*v1.Namespace)
+		return h.eIPC.reconcileNamespace(namespace.Name)
 	default:
 		return fmt.Errorf("no add function for object type %s", h.objType)
 	}
@@ -159,6 +163,13 @@ func (h *egressIPClusterControllerEventHandler) UpdateResource(oldObj, newObj in
 		oldCloudPrivateIPConfig := oldObj.(*ocpcloudnetworkapi.CloudPrivateIPConfig)
 		newCloudPrivateIPConfig := newObj.(*ocpcloudnetworkapi.CloudPrivateIPConfig)
 		return h.eIPC.reconcileCloudPrivateIPConfig(oldCloudPrivateIPConfig, newCloudPrivateIPConfig)
+	case factory.EgressIPNamespaceType:
+		namespaceOld := oldObj.(*v1.Namespace)
+		namespaceNew := newObj.(*v1.Namespace)
+		if maps.Equal(namespaceOld.Labels, namespaceNew.Labels) {
+			return nil
+		}
+		return h.eIPC.reconcileNamespace(namespaceNew.Name)
 	default:
 		return fmt.Errorf("no update function for object type %s", h.objType)
 	}
@@ -190,6 +201,9 @@ func (h *egressIPClusterControllerEventHandler) DeleteResource(obj, cachedObj in
 	case factory.CloudPrivateIPConfigType:
 		cloudPrivateIPConfig := obj.(*ocpcloudnetworkapi.CloudPrivateIPConfig)
 		return h.eIPC.reconcileCloudPrivateIPConfig(cloudPrivateIPConfig, nil)
+	case factory.EgressIPNamespaceType:
+		namespace := obj.(*v1.Namespace)
+		return h.eIPC.reconcileNamespace(namespace.Name)
 	default:
 		return fmt.Errorf("no delete function for object type %s", h.objType)
 	}
@@ -209,7 +223,8 @@ func (h *egressIPClusterControllerEventHandler) SyncFunc(objs []interface{}) err
 			syncFunc = h.eIPC.initEgressNodeReachability
 		case factory.CloudPrivateIPConfigType:
 			syncFunc = h.eIPC.syncCloudPrivateIPConfigs
-
+		case factory.EgressIPNamespaceType:
+			syncFunc = nil
 		default:
 			return fmt.Errorf("no sync function for object type %s", h.objType)
 		}
@@ -239,6 +254,8 @@ func (h *egressIPClusterControllerEventHandler) GetResourceFromInformerCache(key
 		obj, err = h.eIPC.watchFactory.GetCloudPrivateIPConfig(name)
 	case factory.EgressIPType:
 		obj, err = h.eIPC.watchFactory.GetEgressIP(name)
+	case factory.EgressIPNamespaceType:
+		obj, err = h.eIPC.watchFactory.GetNamespace(name)
 
 	default:
 		err = fmt.Errorf("object type %s not supported, cannot retrieve it from informers cache",

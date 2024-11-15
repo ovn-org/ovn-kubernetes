@@ -40,6 +40,10 @@ func (fcm *FakeControllerManager) GetDefaultNetworkController() networkmanager.R
 	return nil
 }
 
+func (fcm *FakeControllerManager) Reconcile(name string, old, new util.NetInfo) error {
+	return nil
+}
+
 type FakeNetworkManager struct {
 	// namespace -> netInfo
 	PrimaryNetworks map[string]util.NetInfo
@@ -50,10 +54,14 @@ func (fnm *FakeNetworkManager) Start() error { return nil }
 func (fnm *FakeNetworkManager) Stop() {}
 
 func (fnm *FakeNetworkManager) GetActiveNetworkForNamespace(namespace string) (util.NetInfo, error) {
+	return fnm.GetActiveNetworkForNamespaceFast(namespace), nil
+}
+
+func (fnm *FakeNetworkManager) GetActiveNetworkForNamespaceFast(namespace string) util.NetInfo {
 	if primaryNetworks, ok := fnm.PrimaryNetworks[namespace]; ok && primaryNetworks != nil {
-		return primaryNetworks, nil
+		return primaryNetworks
 	}
-	return &util.DefaultNetInfo{}, nil
+	return &util.DefaultNetInfo{}
 }
 
 func (nc *FakeNetworkManager) GetNetwork(networkName string) util.NetInfo {

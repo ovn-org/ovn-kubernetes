@@ -116,7 +116,8 @@ type DefaultNodeNetworkController struct {
 
 	apbExternalRouteNodeController *apbroute.ExternalGatewayNodeController
 
-	networkManager networkmanager.Interface
+	networkManager     networkmanager.Interface
+	egressIPController *egressip.Controller
 
 	cniServer *cni.Server
 
@@ -927,6 +928,19 @@ func (nc *DefaultNodeNetworkController) PreStart(ctx context.Context) error {
 	gatewaySetup.sbZone = sbZone
 	nc.gatewaySetup = gatewaySetup
 
+	if config.OVNKubernetesFeature.EnableEgressIP && !util.PlatformTypeIsEgressIPCloudProvider() {
+		nc.egressIPController = egressip.NewController(
+			nc.Kube,
+			nc.watchFactory,
+			nc.networkManager,
+			nc.routeManager,
+			config.IPv4Mode,
+			config.IPv6Mode,
+			nc.name,
+			nc.linkManager,
+		)
+	}
+
 	return nil
 
 }
@@ -1251,20 +1265,13 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		}
 	}
 
-	if config.OVNKubernetesFeature.EnableEgressIP && !util.PlatformTypeIsEgressIPCloudProvider() {
-		c, err := egressip.NewController(nc.Kube, nc.watchFactory.EgressIPInformer(), nc.watchFactory.NodeInformer(),
-			nc.watchFactory.NamespaceInformer(), nc.watchFactory.PodCoreInformer(), nc.networkManager.GetActiveNetworkForNamespace,
-			nc.routeManager, config.IPv4Mode, config.IPv6Mode, nc.name, nc.linkManager)
-		if err != nil {
-			return fmt.Errorf("failed to create egress IP controller: %v", err)
-		}
-		if err = c.Run(nc.stopChan, nc.wg, 1); err != nil {
+	if nc.egressIPController != nil {
+		if err = nc.egressIPController.Run(nc.stopChan, nc.wg, 1); err != nil {
 			return fmt.Errorf("failed to run egress IP controller: %v", err)
 		}
-	} else {
-		klog.Infof("Egress IP for secondary host network is disabled")
 	}
 
+	// run link manager, will work for egress IP as well as monitoring MAC changes to default gw bridge
 	nc.linkManager.Run(nc.stopChan, nc.wg)
 
 	nc.wg.Add(1)
