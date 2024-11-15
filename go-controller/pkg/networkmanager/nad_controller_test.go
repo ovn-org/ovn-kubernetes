@@ -1,4 +1,4 @@
-package networkAttachDefController
+package networkmanager
 
 import (
 	"context"
@@ -26,27 +26,27 @@ import (
 
 type testNetworkController struct {
 	util.NetInfo
-	tncm *testNetworkControllerManager
+	tcm *testControllerManager
 }
 
 func (tnc *testNetworkController) Start(context.Context) error {
-	tnc.tncm.Lock()
-	defer tnc.tncm.Unlock()
+	tnc.tcm.Lock()
+	defer tnc.tcm.Unlock()
 	fmt.Printf("starting network: %s\n", testNetworkKey(tnc))
-	tnc.tncm.started = append(tnc.tncm.started, testNetworkKey(tnc))
+	tnc.tcm.started = append(tnc.tcm.started, testNetworkKey(tnc))
 	return nil
 }
 
 func (tnc *testNetworkController) Stop() {
-	tnc.tncm.Lock()
-	defer tnc.tncm.Unlock()
-	tnc.tncm.stopped = append(tnc.tncm.stopped, testNetworkKey(tnc))
+	tnc.tcm.Lock()
+	defer tnc.tcm.Unlock()
+	tnc.tcm.stopped = append(tnc.tcm.stopped, testNetworkKey(tnc))
 }
 
 func (tnc *testNetworkController) Cleanup() error {
-	tnc.tncm.Lock()
-	defer tnc.tncm.Unlock()
-	tnc.tncm.cleaned = append(tnc.tncm.cleaned, testNetworkKey(tnc))
+	tnc.tcm.Lock()
+	defer tnc.tcm.Unlock()
+	tnc.tcm.cleaned = append(tnc.tcm.cleaned, testNetworkKey(tnc))
 	return nil
 }
 
@@ -60,7 +60,7 @@ func testNetworkKey(nInfo util.NetInfo) string {
 	return nInfo.GetNetworkName() + " " + nInfo.TopologyType()
 }
 
-type testNetworkControllerManager struct {
+type testControllerManager struct {
 	sync.Mutex
 	controllers map[string]NetworkController
 	started     []string
@@ -72,26 +72,26 @@ type testNetworkControllerManager struct {
 	valid []util.BasicNetInfo
 }
 
-func (tncm *testNetworkControllerManager) NewNetworkController(netInfo util.NetInfo) (NetworkController, error) {
-	tncm.Lock()
-	defer tncm.Unlock()
-	if tncm.raiseErrorWhenCreatingController != nil {
-		return nil, tncm.raiseErrorWhenCreatingController
+func (tcm *testControllerManager) NewNetworkController(netInfo util.NetInfo) (NetworkController, error) {
+	tcm.Lock()
+	defer tcm.Unlock()
+	if tcm.raiseErrorWhenCreatingController != nil {
+		return nil, tcm.raiseErrorWhenCreatingController
 	}
 	t := &testNetworkController{
 		NetInfo: netInfo,
-		tncm:    tncm,
+		tcm:     tcm,
 	}
-	tncm.controllers[testNetworkKey(netInfo)] = t
+	tcm.controllers[testNetworkKey(netInfo)] = t
 	return t, nil
 }
 
-func (tncm *testNetworkControllerManager) CleanupDeletedNetworks(validNetworks ...util.BasicNetInfo) error {
-	tncm.valid = validNetworks
+func (tcm *testControllerManager) CleanupStaleNetworks(validNetworks ...util.BasicNetInfo) error {
+	tcm.valid = validNetworks
 	return nil
 }
 
-func TestNetAttachDefinitionController(t *testing.T) {
+func TestNADController(t *testing.T) {
 	networkAPrimary := &ovncnitypes.NetConf{
 		Topology: types.Layer2Topology,
 		NetConf: cnitypes.NetConf{
@@ -432,17 +432,17 @@ func TestNetAttachDefinitionController(t *testing.T) {
 			g.Expect(err).ToNot(gomega.HaveOccurred())
 			config.OVNKubernetesFeature.EnableNetworkSegmentation = true
 			config.OVNKubernetesFeature.EnableMultiNetwork = true
-			tncm := &testNetworkControllerManager{
+			tcm := &testControllerManager{
 				controllers: map[string]NetworkController{},
 			}
-			nadController := &NetAttachDefinitionController{
-				nads:           map[string]string{},
-				networkManager: newNetworkManager("", tncm),
-				primaryNADs:    map[string]string{},
+			nadController := &nadController{
+				nads:              map[string]string{},
+				networkController: newNetworkController("", tcm),
+				primaryNADs:       map[string]string{},
 			}
 
-			g.Expect(nadController.networkManager.Start()).To(gomega.Succeed())
-			defer nadController.networkManager.Stop()
+			g.Expect(nadController.networkController.Start()).To(gomega.Succeed())
+			defer nadController.networkController.Stop()
 
 			for _, args := range tt.args {
 				namespace, name, err := cache.SplitMetaNamespaceKey(args.nad)
@@ -472,13 +472,13 @@ func TestNetAttachDefinitionController(t *testing.T) {
 					name := netInfo.GetNetworkName()
 					testNetworkKey := testNetworkKey(netInfo)
 					func() {
-						tncm.Lock()
-						defer tncm.Unlock()
+						tcm.Lock()
+						defer tcm.Unlock()
 						// test that the controller have the expected config and NADs
-						g.Expect(tncm.controllers).To(gomega.HaveKey(testNetworkKey))
-						g.Expect(tncm.controllers[testNetworkKey].Equals(netInfo)).To(gomega.BeTrue(),
+						g.Expect(tcm.controllers).To(gomega.HaveKey(testNetworkKey))
+						g.Expect(tcm.controllers[testNetworkKey].Equals(netInfo)).To(gomega.BeTrue(),
 							fmt.Sprintf("matching network config for network %s", name))
-						g.Expect(tncm.controllers[testNetworkKey].GetNADs()).To(gomega.ConsistOf(expected.nads),
+						g.Expect(tcm.controllers[testNetworkKey].GetNADs()).To(gomega.ConsistOf(expected.nads),
 							fmt.Sprintf("matching NADs for network %s", name))
 					}()
 					expectRunning = append(expectRunning, testNetworkKey)
@@ -492,13 +492,13 @@ func TestNetAttachDefinitionController(t *testing.T) {
 						g.Expect(reflect.DeepEqual(netInfoFound, netInfo)).To(gomega.BeTrue())
 					}
 				}
-				tncm.Lock()
-				defer tncm.Unlock()
-				expectStopped := sets.New(tncm.started...).Difference(sets.New(expectRunning...)).UnsortedList()
+				tcm.Lock()
+				defer tcm.Unlock()
+				expectStopped := sets.New(tcm.started...).Difference(sets.New(expectRunning...)).UnsortedList()
 				// test that the controllers are started, stopped and cleaned up as expected
-				g.Expect(tncm.started).To(gomega.ContainElements(expectRunning), "started network controllers")
-				g.Expect(tncm.stopped).To(gomega.ConsistOf(expectStopped), "stopped network controllers")
-				g.Expect(tncm.cleaned).To(gomega.ConsistOf(expectStopped), "cleaned up network controllers")
+				g.Expect(tcm.started).To(gomega.ContainElements(expectRunning), "started network controllers")
+				g.Expect(tcm.stopped).To(gomega.ConsistOf(expectStopped), "stopped network controllers")
+				g.Expect(tcm.cleaned).To(gomega.ConsistOf(expectStopped), "cleaned up network controllers")
 			}
 
 			g.Eventually(meetsExpectations).Should(gomega.Succeed())
@@ -566,16 +566,16 @@ func TestSyncAll(t *testing.T) {
 			wf, err := factory.NewOVNKubeControllerWatchFactory(fakeClient)
 			g.Expect(err).ToNot(gomega.HaveOccurred())
 
-			tncm := &testNetworkControllerManager{
+			tcm := &testControllerManager{
 				controllers: map[string]NetworkController{},
 			}
 			if tt.syncAllError != nil {
-				tncm.raiseErrorWhenCreatingController = tt.syncAllError
+				tcm.raiseErrorWhenCreatingController = tt.syncAllError
 			}
 
-			nadController, err := NewNetAttachDefinitionController(
+			controller, err := newController(
 				"SUT",
-				tncm,
+				tcm,
 				wf,
 				nil,
 			)
@@ -610,13 +610,13 @@ func TestSyncAll(t *testing.T) {
 			g.Expect(err).ToNot(gomega.HaveOccurred())
 			defer wf.Shutdown()
 
-			err = nadController.Start()
+			err = controller.Start()
 			g.Expect(err).ToNot(gomega.HaveOccurred())
 			// sync has already happened, stop
-			nadController.Stop()
+			controller.Stop()
 
 			actualNetworks := map[string]util.BasicNetInfo{}
-			for _, network := range tncm.valid {
+			for _, network := range tcm.valid {
 				actualNetworks[network.GetNetworkName()] = network
 			}
 
@@ -626,7 +626,7 @@ func TestSyncAll(t *testing.T) {
 				g.Expect(actualNetworks[name].Equals(network)).To(gomega.BeTrue())
 			}
 
-			actualPrimaryNetwork, err := nadController.GetActiveNetworkForNamespace("test")
+			actualPrimaryNetwork, err := controller.GetActiveNetworkForNamespace("test")
 			g.Expect(err).ToNot(gomega.HaveOccurred())
 			g.Expect(expectedPrimaryNetworks).To(gomega.HaveKey(actualPrimaryNetwork.GetNetworkName()))
 			g.Expect(expectedPrimaryNetworks[actualPrimaryNetwork.GetNetworkName()].Equals(actualPrimaryNetwork)).To(gomega.BeTrue())

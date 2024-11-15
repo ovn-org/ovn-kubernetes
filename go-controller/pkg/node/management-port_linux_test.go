@@ -240,8 +240,6 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 		mgtPortAddrs[i] = cfg.GetMgtPortAddr()
 	}
 
-	nodenft.SetFakeNFTablesHelper()
-
 	existingNode := v1.Node{ObjectMeta: metav1.ObjectMeta{
 		Name: nodeName,
 	}}
@@ -449,8 +447,6 @@ func testManagementPortDPUHost(ctx *cli.Context, fexec *ovntest.FakeExec, testNS
 		mgtPortAddrs[i] = cfg.GetMgtPortAddr()
 	}
 
-	nodenft.SetFakeNFTablesHelper()
-
 	_, err = config.InitConfig(ctx, fexec, nil)
 	Expect(err).NotTo(HaveOccurred())
 	wg := &sync.WaitGroup{}
@@ -518,6 +514,7 @@ var _ = Describe("Management Port Operations", func() {
 			err := util.SetExec(execMock)
 			Expect(err).NotTo(HaveOccurred())
 			util.SetNetLinkOpMockInst(netlinkOpsMock)
+			nodenft.SetFakeNFTablesHelper()
 		})
 
 		AfterEach(func() {

@@ -87,7 +87,7 @@ type OVNMasterClientset struct {
 	RouteAdvertisementsClient routeadvertisementsclientset.Interface
 }
 
-// OVNNetworkControllerManagerClientset
+// OVNKubeControllerClientset
 type OVNKubeControllerClientset struct {
 	KubeClient                kubernetes.Interface
 	ANPClient                 anpclientset.Interface

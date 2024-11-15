@@ -359,8 +359,21 @@ func (nc *DefaultNodeNetworkController) initGatewayPreStart(subnets []*net.IPNet
 	switch config.Gateway.Mode {
 	case config.GatewayModeLocal, config.GatewayModeShared:
 		klog.Info("Preparing Gateway")
-		gw, err = newGateway(nc.name, subnets, gatewayNextHops, gatewayIntf, egressGWInterface, ifAddrs, nodeAnnotator,
-			managementPortConfig, nc.Kube, nc.watchFactory, nc.routeManager, nc.nadController, config.Gateway.Mode)
+		gw, err = newGateway(
+			nc.name,
+			subnets,
+			gatewayNextHops,
+			gatewayIntf,
+			egressGWInterface,
+			ifAddrs,
+			nodeAnnotator,
+			managementPortConfig,
+			nc.Kube,
+			nc.watchFactory,
+			nc.routeManager,
+			nc.networkManager,
+			config.Gateway.Mode,
+		)
 	case config.GatewayModeDisabled:
 		var chassisID string
 		klog.Info("Gateway Mode is disabled")
@@ -530,7 +543,7 @@ func (nc *DefaultNodeNetworkController) initGatewayDPUHost(kubeNodeIP net.IP) er
 		if err := initSharedGatewayIPTables(); err != nil {
 			return err
 		}
-		gw.nodePortWatcherIptables = newNodePortWatcherIptables(nc.nadController)
+		gw.nodePortWatcherIptables = newNodePortWatcherIptables(nc.networkManager)
 		gw.loadBalancerHealthChecker = newLoadBalancerHealthChecker(nc.name, nc.watchFactory)
 		portClaimWatcher, err := newPortClaimWatcher(nc.recorder)
 		if err != nil {
