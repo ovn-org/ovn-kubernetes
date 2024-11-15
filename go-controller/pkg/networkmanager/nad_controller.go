@@ -304,28 +304,19 @@ func nadNeedsUpdate(oldNAD, newNAD *nettypes.NetworkAttachmentDefinition) bool {
 }
 
 func (c *nadController) GetActiveNetworkForNamespace(namespace string) (util.NetInfo, error) {
-	if !util.IsNetworkSegmentationSupportEnabled() {
-		return &util.DefaultNetInfo{}, nil
+	nad, network := c.getActiveNetworkForNamespace(namespace)
+	if nad == "" {
+		// default network, just return
+		return network, nil
 	}
-	c.RLock()
-	defer c.RUnlock()
-	primaryNAD := c.primaryNADs[namespace]
-	if primaryNAD != "" {
-		// we have a primary NAD, get the network
-		netName := c.nads[primaryNAD]
-		if netName == "" {
-			// this should never happen where we have a nad keyed in the primaryNADs
-			// map, but it doesn't exist in the nads map
-			panic("NAD Controller broken consistency between primary NADs and cached NADs")
-		}
-		network := c.networkController.getNetwork(netName)
-		n := util.NewMutableNetInfo(network)
-		// update the returned netInfo copy to only have the primary NAD for this namespace
-		n.SetNADs(primaryNAD)
-		return n, nil
+	if network != nil {
+		// primary network
+		copy := util.NewMutableNetInfo(network)
+		copy.SetNADs(nad)
+		return copy, nil
 	}
 
-	// no primary network found, make sure we just haven't processed it yet and no UDN exists
+	// no network found, make sure we just haven't processed it yet and no UDN exists
 	udns, err := c.udnLister.UserDefinedNetworks(namespace).List(labels.Everything())
 	if err != nil {
 		return nil, fmt.Errorf("error getting user defined networks: %w", err)
@@ -337,4 +328,41 @@ func (c *nadController) GetActiveNetworkForNamespace(namespace string) (util.Net
 	}
 
 	return &util.DefaultNetInfo{}, nil
+}
+
+func (c *nadController) GetActiveNetworkForNamespaceFast(namespace string) util.NetInfo {
+	_, network := c.getActiveNetworkForNamespace(namespace)
+	klog.Errorf("Giving egress ip nodes %v for network %s", network.GetEgressIPAdvertisedVRFs(), network.GetNetworkName())
+	return network
+}
+
+func (c *nadController) getActiveNetworkForNamespace(namespace string) (string, util.NetInfo) {
+	c.RLock()
+	defer c.RUnlock()
+
+	var network util.NetInfo
+	primaryNAD := c.primaryNADs[namespace]
+	switch primaryNAD {
+	case "":
+		// default network
+		network = c.networkController.getNetwork(types.DefaultNetworkName)
+		if network == nil {
+			network = &util.DefaultNetInfo{}
+		}
+	default:
+		// we have a primary netwrok
+		netName := c.nads[primaryNAD]
+		if netName == "" {
+			// this should never happen where we have a nad keyed in the primaryNADs
+			// map, but it doesn't exist in the nads map
+			panic("NAD Controller broken consistency between primary NADs and cached NADs")
+		}
+		network = c.networkController.getNetwork(netName)
+	}
+
+	return primaryNAD, network
+}
+
+func (c *nadController) GetNetwork(name string) util.NetInfo {
+	return c.networkController.getNetwork(name)
 }
