@@ -13,17 +13,19 @@ import (
 	"time"
 
 	ovnconfig "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/controller"
 	eipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
-	egressipinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/informers/externalversions/egressip/v1"
 	egressiplisters "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/listers/egressip/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iprulemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/linkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/egressip"
 	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 
 	corev1 "k8s.io/api/core/v1"
@@ -34,7 +36,6 @@ import (
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
-	coreinformers "k8s.io/client-go/informers/core/v1"
 	corelisters "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/retry"
@@ -108,6 +109,7 @@ type referencedObjects struct {
 
 // Controller implement Egress IP for secondary host networks
 type Controller struct {
+	watchFactory      factory.NodeWatchFactory
 	eIPLister         egressiplisters.EgressIPLister
 	eIPInformer       cache.SharedIndexInformer
 	eIPQueue          workqueue.TypedRateLimitingInterface[string]
@@ -130,6 +132,9 @@ type Controller struct {
 	// key is EIP name.
 	referencedObjects map[string]*referencedObjects
 
+	networkManager    networkmanager.Interface
+	networkReconciler controller.Reconciler
+
 	routeManager    *routemanager.Controller
 	linkManager     *linkmanager.Controller
 	ruleManager     *iprulemanager.Controller
@@ -140,25 +145,24 @@ type Controller struct {
 	v6              bool
 }
 
-func NewController(k kube.Interface, eIPInformer egressipinformer.EgressIPInformer, nodeInformer cache.SharedIndexInformer, namespaceInformer coreinformers.NamespaceInformer,
-	podInformer coreinformers.PodInformer, routeManager *routemanager.Controller, v4, v6 bool, nodeName string, linkManager *linkmanager.Controller) (*Controller, error) {
-
+func NewController(k kube.Interface, wf factory.NodeWatchFactory, networkManager networkmanager.Interface, routeManager *routemanager.Controller, v4, v6 bool, nodeName string, linkManager *linkmanager.Controller) *Controller {
 	c := &Controller{
-		eIPLister:   eIPInformer.Lister(),
-		eIPInformer: eIPInformer.Informer(),
+		watchFactory: wf,
+		eIPLister:    wf.EgressIPInformer().Lister(),
+		eIPInformer:  wf.EgressIPInformer().Informer(),
 		eIPQueue: workqueue.NewTypedRateLimitingQueueWithConfig(
 			workqueue.NewTypedItemFastSlowRateLimiter[string](time.Second, 5*time.Second, 5),
 			workqueue.TypedRateLimitingQueueConfig[string]{Name: "eipeip"},
 		),
-		nodeLister:        corelisters.NewNodeLister(nodeInformer.GetIndexer()),
-		namespaceLister:   namespaceInformer.Lister(),
-		namespaceInformer: namespaceInformer.Informer(),
+		nodeLister:        wf.NodeCoreInformer().Lister(),
+		namespaceLister:   wf.NamespaceInformer().Lister(),
+		namespaceInformer: wf.NamespaceInformer().Informer(),
 		namespaceQueue: workqueue.NewTypedRateLimitingQueueWithConfig(
 			workqueue.NewTypedItemFastSlowRateLimiter[*corev1.Namespace](time.Second, 5*time.Second, 5),
 			workqueue.TypedRateLimitingQueueConfig[*corev1.Namespace]{Name: "eipnamespace"},
 		),
-		podLister:   podInformer.Lister(),
-		podInformer: podInformer.Informer(),
+		podLister:   wf.PodCoreInformer().Lister(),
+		podInformer: wf.PodCoreInformer().Informer(),
 		podQueue: workqueue.NewTypedRateLimitingQueueWithConfig(
 			workqueue.NewTypedItemFastSlowRateLimiter[*corev1.Pod](time.Second, 5*time.Second, 5),
 			workqueue.TypedRateLimitingQueueConfig[*corev1.Pod]{Name: "eippods"},
@@ -166,16 +170,29 @@ func NewController(k kube.Interface, eIPInformer egressipinformer.EgressIPInform
 		cache:                 syncmap.NewSyncMap[*state](),
 		referencedObjectsLock: sync.RWMutex{},
 		referencedObjects:     map[string]*referencedObjects{},
-		routeManager:          routeManager,
-		linkManager:           linkManager,
-		ruleManager:           iprulemanager.NewController(v4, v6),
-		iptablesManager:       iptables.NewController(),
-		kube:                  k,
-		nodeName:              nodeName,
-		v4:                    v4,
-		v6:                    v6,
+
+		networkManager:  networkManager,
+		routeManager:    routeManager,
+		linkManager:     linkManager,
+		ruleManager:     iprulemanager.NewController(v4, v6),
+		iptablesManager: iptables.NewController(),
+		kube:            k,
+		nodeName:        nodeName,
+		v4:              v4,
+		v6:              v6,
 	}
-	return c, nil
+	if egressip.AdvertisementsEnabled() {
+		config := &controller.ReconcilerConfig{
+			RateLimiter: workqueue.DefaultTypedControllerRateLimiter[string](),
+			Reconcile:   c.reconcileNetwork,
+			Threadiness: 1,
+		}
+		c.networkReconciler = controller.NewReconciler(
+			"EgressIP node network controller",
+			config,
+		)
+	}
+	return c
 }
 
 // Run starts the Egress IP that is hosted in secondary host networks. Changes to this function
@@ -341,6 +358,14 @@ func (c *Controller) Run(stopCh <-chan struct{}, wg *sync.WaitGroup, threads int
 			}(workerFn)
 		}
 	}
+
+	if c.networkReconciler != nil {
+		err = controller.Start(c.networkReconciler)
+		if err != nil {
+			return err
+		}
+	}
+
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -349,6 +374,9 @@ func (c *Controller) Run(stopCh <-chan struct{}, wg *sync.WaitGroup, threads int
 		c.eIPQueue.ShutDown()
 		c.podQueue.ShutDown()
 		c.namespaceQueue.ShutDown()
+		if c.networkReconciler != nil {
+			controller.Stop(c.networkReconciler)
+		}
 	}()
 	return nil
 }
@@ -521,7 +549,12 @@ func (c *Controller) processEIP(eip *eipv1.EgressIP) (*eIPConfig, sets.Set[strin
 	selectedPods := sets.Set[ktypes.NamespacedName]{}
 	selectedNamespacesPodIPs := map[string]map[ktypes.NamespacedName]*podIPConfigList{}
 	var eipSpecificConfig *eIPConfig
-	parsedNodeEIPConfig, err := c.getNodeEgressIPConfig()
+	node, err := c.nodeLister.Get(c.nodeName)
+	if err != nil {
+		return nil, selectedNamespaces, selectedPods, selectedNamespacesPodIPs,
+			fmt.Errorf("failed to get node %s from lister: %v", c.nodeName, err)
+	}
+	parsedNodeEIPConfig, err := egressip.GetNodeEIPConfig(node)
 	if err != nil {
 		return nil, selectedNamespaces, selectedPods, selectedNamespacesPodIPs,
 			fmt.Errorf("failed to determine egress IP config for node %s: %w", c.nodeName, err)
@@ -536,7 +569,12 @@ func (c *Controller) processEIP(eip *eipv1.EgressIP) (*eIPConfig, sets.Set[strin
 			return nil, selectedNamespaces, selectedPods, selectedNamespacesPodIPs,
 				fmt.Errorf("failed to generate mask for EgressIP %s IP %s: %v", eip.Name, status.EgressIP, err)
 		}
-		if util.IsOVNNetwork(parsedNodeEIPConfig, eIPNet.IP) {
+		isOVNManaged, err := egressip.IsEgressIPPrimaryOrAdvertised(c.watchFactory, c.networkManager, parsedNodeEIPConfig, node, eip.Name, eIPNet.IP)
+		if err != nil {
+			return nil, selectedNamespaces, selectedPods, selectedNamespacesPodIPs,
+				fmt.Errorf("failed to determine if EgressIP %s IP %s is on an OVN network: %v", eip.Name, status.EgressIP, err)
+		}
+		if isOVNManaged {
 			continue
 		}
 		found, link, err := findLinkOnSameNetworkAsIP(eIPNet.IP, c.v4, c.v6)
@@ -955,7 +993,11 @@ func (c *Controller) repairNode() error {
 	if err != nil {
 		return err
 	}
-	parsedNodeEIPConfig, err := c.getNodeEgressIPConfig()
+	node, err := c.nodeLister.Get(c.nodeName)
+	if err != nil {
+		return err
+	}
+	parsedNodeEIPConfig, err := egressip.GetNodeEIPConfig(node)
 	if err != nil {
 		return fmt.Errorf("failed to get node egress IP config: %v", err)
 	}
@@ -971,7 +1013,11 @@ func (c *Controller) repairNode() error {
 			if err != nil {
 				return err
 			}
-			if util.IsOVNNetwork(parsedNodeEIPConfig, eIPNet.IP) {
+			isOVNManaged, err := egressip.IsEgressIPPrimaryOrAdvertised(c.watchFactory, c.networkManager, parsedNodeEIPConfig, node, egressIP.Name, eIPNet.IP)
+			if err != nil {
+				return err
+			}
+			if isOVNManaged {
 				continue
 			}
 			isEIPV6 := utilnet.IsIPv6(eIPNet.IP)
@@ -1198,14 +1244,6 @@ func (c *Controller) getAnnotation() (sets.Set[string], error) {
 		}
 	}
 	return ips, nil
-}
-
-func (c *Controller) getNodeEgressIPConfig() (*util.ParsedNodeEgressIPConfiguration, error) {
-	node, err := c.nodeLister.Get(c.nodeName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get node %s from lister: %v", c.nodeName, err)
-	}
-	return util.GetNodeEIPConfig(node)
 }
 
 func isEIPStatusItemValid(status eipv1.EgressIPStatusItem, nodeName string) bool {
@@ -1546,4 +1584,61 @@ func getNodeIPFwMarkIPRule(ipFamily int) netlink.Rule {
 
 func isVRFSlaveDevice(link netlink.Link) bool {
 	return link.Attrs().Slave != nil && link.Attrs().Slave.SlaveType() == "vrf"
+}
+
+func (c *Controller) ShouldReconcileNetworkChange(old, new util.NetInfo) bool {
+	if !egressip.AdvertisementsEnabled() {
+		return false
+	}
+
+	return egressip.ReconcileEgressIPNetworkChangeOnNodes([]string{c.nodeName}, old, new)
+}
+
+func (c *Controller) ReconcileNetwork(name string) {
+	if c.networkReconciler != nil {
+		c.networkReconciler.Reconcile(name)
+	}
+}
+
+func (c *Controller) reconcileNetwork(name string) error {
+	eips, err := c.watchFactory.EgressIPInformer().Lister().List(labels.Everything())
+	if err != nil {
+		return err
+	}
+
+	isActiveNetworkForAnyNamespace := func(namespaces []*corev1.Namespace) bool {
+		for _, ns := range namespaces {
+			network := c.networkManager.GetActiveNetworkForNamespaceFast(ns.Name)
+			if network.GetNetworkName() == name {
+				return true
+			}
+		}
+		return false
+	}
+
+	reconcileEIPs := map[string]*eipv1.EgressIP{}
+	for _, eip := range eips {
+		selector, err := metav1.LabelSelectorAsSelector(&eip.Spec.NamespaceSelector)
+		if err != nil {
+			return err
+		}
+		selectedNs, err := c.watchFactory.NamespaceInformer().Lister().List(selector)
+		if err != nil {
+			return err
+		}
+		if isActiveNetworkForAnyNamespace(selectedNs) {
+			reconcileEIPs[eip.Name] = eip
+			break
+		}
+	}
+
+	if len(reconcileEIPs) == 0 {
+		return nil
+	}
+
+	for _, eip := range reconcileEIPs {
+		c.eIPQueue.Add(eip.Name)
+	}
+
+	return nil
 }

@@ -461,3 +461,7 @@ func (cm *ControllerManager) Stop() {
 		cm.routeImport.Stop()
 	}
 }
+
+func (cm *ControllerManager) Reconcile(name string, old, new util.NetInfo) error {
+	return nil
+}

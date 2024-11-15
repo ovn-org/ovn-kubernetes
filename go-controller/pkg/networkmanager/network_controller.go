@@ -301,6 +301,13 @@ func (c *networkController) syncNetwork(network string) error {
 		return nil
 	}
 
+	// inform controller manager of upcoming changes so other controllers are
+	// aware
+	err = c.cm.Reconcile(network, have, want)
+	if err != nil {
+		return fmt.Errorf("failed to reconcile controller manager for network %s: %w", network, err)
+	}
+
 	// ensure the network controller
 	err = c.ensureNetwork(want)
 	if err != nil {
@@ -322,7 +329,7 @@ func (c *networkController) ensureNetwork(network util.MutableNetInfo) error {
 	if reconcilable != nil {
 		err := reconcilable.Reconcile(network)
 		if err != nil {
-			return fmt.Errorf("failed to reconcile network %s: %w", networkName, err)
+			return fmt.Errorf("failed to reconcile controller for network %s: %w", networkName, err)
 		}
 		return nil
 	}
