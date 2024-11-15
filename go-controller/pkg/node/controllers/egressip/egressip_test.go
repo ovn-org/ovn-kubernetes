@@ -18,6 +18,7 @@ import (
 	egressipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	ovnkube "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
 	ovniptables "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/linkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
@@ -269,12 +270,16 @@ func initController(namespaces []corev1.Namespace, pods []corev1.Pod, egressIPs 
 		return nil, nil, err
 	}
 	linkManager := linkmanager.NewController(node1Name, v4, v6, nil)
-	// only CDN network is supported
-	getActiveNetForNsFn := func(namespace string) (util.NetInfo, error) {
-		return &util.DefaultNetInfo{}, nil
-	}
-	c, err := NewController(&ovnkube.Kube{KClient: kubeClient}, watchFactory.EgressIPInformer(), watchFactory.NodeInformer(), watchFactory.NamespaceInformer(),
-		watchFactory.PodCoreInformer(), getActiveNetForNsFn, rm, v4, v6, node1Name, linkManager)
+	c := NewController(
+		&ovnkube.Kube{KClient: kubeClient},
+		watchFactory,
+		networkmanager.Default().Interface(),
+		rm,
+		v4,
+		v6,
+		node1Name,
+		linkManager,
+	)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1547,8 +1552,8 @@ func newEgressIP(name, ip, node string, namespaceLabels, podLabels map[string]st
 		},
 		Status: egressipv1.EgressIPStatus{
 			Items: []egressipv1.EgressIPStatusItem{{
-				node,
-				ip,
+				Node:     node,
+				EgressIP: ip,
 			}},
 		},
 	}
