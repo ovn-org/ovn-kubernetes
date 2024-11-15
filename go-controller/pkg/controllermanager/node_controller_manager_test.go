@@ -1,4 +1,4 @@
-package networkControllerManager
+package controllermanager
 
 import (
 	"fmt"
@@ -22,7 +22,7 @@ import (
 )
 
 func genListStalePortsCmd() string {
-	return fmt.Sprintf("ovs-vsctl --timeout=15 --data=bare --no-headings --columns=name find interface ofport=-1")
+	return "ovs-vsctl --timeout=15 --data=bare --no-headings --columns=name find interface ofport=-1"
 }
 
 func genDeleteStalePortCmd(ifaces ...string) string {
@@ -99,7 +99,7 @@ var _ = Describe("Healthcheck tests", func() {
 	})
 
 	Describe("checkForStaleOVSRepresentorInterfaces", func() {
-		var ncm *nodeNetworkControllerManager
+		var ncm *NodeControllerManager
 		nodeName := "localNode"
 		routeManager := routemanager.NewController()
 		podList := []*corev1.Pod{
@@ -130,7 +130,7 @@ var _ = Describe("Healthcheck tests", func() {
 		BeforeEach(func() {
 			// setup kube output
 			factoryMock.On("NADInformer").Return(nil)
-			ncm, err = NewNodeNetworkControllerManager(fakeClient, &factoryMock, nodeName, &sync.WaitGroup{}, nil, routeManager)
+			ncm, err = NewNodeControllerManager(fakeClient, &factoryMock, nodeName, &sync.WaitGroup{}, nil, routeManager)
 			Expect(err).NotTo(HaveOccurred())
 			factoryMock.On("GetPods", "").Return(podList, nil)
 		})
@@ -227,7 +227,7 @@ var _ = Describe("Healthcheck tests", func() {
 			factoryMock.On("ClusterUserDefinedNetworkInformer").Return(nil)
 			factoryMock.On("NamespaceInformer").Return(nil)
 
-			ncm, err := NewNodeNetworkControllerManager(fakeClient, &factoryMock, nodeName, &sync.WaitGroup{}, nil, routeManager)
+			ncm, err := NewNodeControllerManager(fakeClient, &factoryMock, nodeName, &sync.WaitGroup{}, nil, routeManager)
 			Expect(err).NotTo(HaveOccurred())
 
 			err = testNS.Do(func(ns.NetNS) error {
@@ -243,7 +243,7 @@ var _ = Describe("Healthcheck tests", func() {
 				_, err = util.GetNetLinkOps().LinkByName(validVrfDevice)
 				Expect(err).NotTo(HaveOccurred())
 
-				err = ncm.CleanupDeletedNetworks(NetInfo)
+				err = ncm.CleanupStaleNetworks(NetInfo)
 				Expect(err).NotTo(HaveOccurred())
 
 				// Verify CleanupDeletedNetworks cleans up VRF configuration for

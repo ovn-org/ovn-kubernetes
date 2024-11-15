@@ -17,7 +17,7 @@ import (
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	svccontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
@@ -30,7 +30,6 @@ import (
 	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 
 	corev1 "k8s.io/api/core/v1"
-	kapi "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 )
 
@@ -148,7 +147,7 @@ func (h *secondaryLayer2NetworkControllerEventHandler) UpdateResource(oldObj, ne
 		if !ok {
 			return fmt.Errorf("could not cast %T object to Node", newObj)
 		}
-		oldNode, ok := oldObj.(*kapi.Node)
+		oldNode, ok := oldObj.(*corev1.Node)
 		if !ok {
 			return fmt.Errorf("could not cast oldObj of type %T to *kapi.Node", oldObj)
 		}
@@ -260,7 +259,11 @@ type SecondaryLayer2NetworkController struct {
 }
 
 // NewSecondaryLayer2NetworkController create a new OVN controller for the given secondary layer2 nad
-func NewSecondaryLayer2NetworkController(cnci *CommonNetworkControllerInfo, netInfo util.NetInfo, nadController nad.NADController) (*SecondaryLayer2NetworkController, error) {
+func NewSecondaryLayer2NetworkController(
+	cnci *CommonNetworkControllerInfo,
+	netInfo util.NetInfo,
+	networkManager networkmanager.Interface,
+) (*SecondaryLayer2NetworkController, error) {
 
 	stopChan := make(chan struct{})
 
@@ -280,7 +283,7 @@ func NewSecondaryLayer2NetworkController(cnci *CommonNetworkControllerInfo, netI
 			cnci.watchFactory.ServiceCoreInformer(),
 			cnci.watchFactory.EndpointSliceCoreInformer(),
 			cnci.watchFactory.NodeCoreInformer(),
-			nadController,
+			networkManager,
 			cnci.recorder,
 			netInfo,
 		)
@@ -309,7 +312,7 @@ func NewSecondaryLayer2NetworkController(cnci *CommonNetworkControllerInfo, netI
 					wg:                          &sync.WaitGroup{},
 					localZoneNodes:              &sync.Map{},
 					cancelableCtx:               util.NewCancelableContext(),
-					nadController:               nadController,
+					networkManager:              networkManager,
 				},
 			},
 		},
@@ -665,7 +668,7 @@ func (oc *SecondaryLayer2NetworkController) deleteNodeEvent(node *corev1.Node) e
 // externalIP = "169.254.0.12"; which is the masqueradeIP for this L2 UDN
 // so all in all we want to condionally SNAT all packets that are coming from pods hosted on this node,
 // which are leaving via UDN's mpX interface to the UDN's masqueradeIP.
-func (oc *SecondaryLayer2NetworkController) addUDNClusterSubnetEgressSNAT(localPodSubnets []*net.IPNet, routerName string, node *kapi.Node) error {
+func (oc *SecondaryLayer2NetworkController) addUDNClusterSubnetEgressSNAT(localPodSubnets []*net.IPNet, routerName string, node *corev1.Node) error {
 	outputPort := types.GWRouterToJoinSwitchPrefix + routerName
 	nats, err := oc.buildUDNEgressSNAT(localPodSubnets, outputPort, node)
 	if err != nil {

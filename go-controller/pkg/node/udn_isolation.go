@@ -24,7 +24,6 @@ import (
 	"sigs.k8s.io/knftables"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/controller"
-	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 	nodenft "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/nftables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -50,7 +49,6 @@ type UDNHostIsolationManager struct {
 	ipv4, ipv6        bool
 	podController     controller.Controller
 	podLister         corelisters.PodLister
-	nadController     *nad.NetAttachDefinitionController
 	kubeletCgroupPath string
 
 	udnPodIPsv4 *nftPodElementsSet
@@ -63,11 +61,9 @@ type UDNHostIsolationManager struct {
 	udnOpenPortsICMPv6 *nftPodElementsSet
 }
 
-func NewUDNHostIsolationManager(ipv4, ipv6 bool, podInformer coreinformers.PodInformer,
-	nadController *nad.NetAttachDefinitionController) *UDNHostIsolationManager {
+func NewUDNHostIsolationManager(ipv4, ipv6 bool, podInformer coreinformers.PodInformer) *UDNHostIsolationManager {
 	m := &UDNHostIsolationManager{
 		podLister:          podInformer.Lister(),
-		nadController:      nadController,
 		ipv4:               ipv4,
 		ipv6:               ipv6,
 		udnPodIPsv4:        newNFTPodElementsSet(nftablesUDNPodIPsv4, false),

@@ -25,7 +25,7 @@ import (
 	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
+	networkmanager "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	egresssvc "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/egressservice"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/udnenabledsvc"
@@ -190,8 +190,8 @@ type EgressIPController struct {
 	// A cache that maintains all nodes in the cluster,
 	// value will be true if local to this zone and false otherwise
 	nodeZoneState *syncmap.SyncMap[bool]
-	// nadController used for getting network information for UDNs
-	nadController nad.NADController
+	// networkManager used for getting network information for UDNs
+	networkManager networkmanager.Interface
 	// An address set factory that creates address sets
 	addressSetFactory addressset.AddressSetFactory
 	// Northbound database zone name to which this Controller is connected to - aka local zone
@@ -202,8 +202,19 @@ type EgressIPController struct {
 	controllerName string
 }
 
-func NewEIPController(nbClient libovsdbclient.Client, kube *kube.KubeOVN, watchFactory *factory.WatchFactory, recorder record.EventRecorder,
-	portCache *PortCache, nadController nad.NADController, addressSetFactor addressset.AddressSetFactory, v4, v6 bool, zone, controllerName string) *EgressIPController {
+func NewEIPController(
+	nbClient libovsdbclient.Client,
+	kube *kube.KubeOVN,
+	watchFactory *factory.WatchFactory,
+	recorder record.EventRecorder,
+	portCache *PortCache,
+	networkmanager networkmanager.Interface,
+	addressSetFactor addressset.AddressSetFactory,
+	v4 bool,
+	v6 bool,
+	zone string,
+	controllerName string,
+) *EgressIPController {
 	e := &EgressIPController{
 		nbClient:           nbClient,
 		kube:               kube,
@@ -215,7 +226,7 @@ func NewEIPController(nbClient libovsdbclient.Client, kube *kube.KubeOVN, watchF
 		logicalPortCache:   portCache,
 		nodeZoneState:      syncmap.NewSyncMap[bool](),
 		controllerName:     controllerName,
-		nadController:      nadController,
+		networkManager:     networkmanager,
 		addressSetFactory:  addressSetFactor,
 		zone:               zone,
 		v4:                 v4,
@@ -340,7 +351,7 @@ func (e *EgressIPController) reconcileEgressIP(old, new *egressipv1.EgressIP) (e
 			for _, namespace := range namespaces {
 				namespaceLabels := labels.Set(namespace.Labels)
 				if !newNamespaceSelector.Matches(namespaceLabels) && oldNamespaceSelector.Matches(namespaceLabels) {
-					ni, err := e.nadController.GetActiveNetworkForNamespace(namespace.Name)
+					ni, err := e.networkManager.GetActiveNetworkForNamespace(namespace.Name)
 					if err != nil {
 						return fmt.Errorf("failed to get active network for namespace %s: %v", namespace.Name, err)
 					}
@@ -349,7 +360,7 @@ func (e *EgressIPController) reconcileEgressIP(old, new *egressipv1.EgressIP) (e
 					}
 				}
 				if newNamespaceSelector.Matches(namespaceLabels) && !oldNamespaceSelector.Matches(namespaceLabels) {
-					ni, err := e.nadController.GetActiveNetworkForNamespace(namespace.Name)
+					ni, err := e.networkManager.GetActiveNetworkForNamespace(namespace.Name)
 					if err != nil {
 						return fmt.Errorf("failed to get active network for namespace %s: %v", namespace.Name, err)
 					}
@@ -375,7 +386,7 @@ func (e *EgressIPController) reconcileEgressIP(old, new *egressipv1.EgressIP) (e
 				for _, pod := range pods {
 					podLabels := labels.Set(pod.Labels)
 					if !newPodSelector.Matches(podLabels) && oldPodSelector.Matches(podLabels) {
-						ni, err := e.nadController.GetActiveNetworkForNamespace(namespace.Name)
+						ni, err := e.networkManager.GetActiveNetworkForNamespace(namespace.Name)
 						if err != nil {
 							return fmt.Errorf("failed to get active network for namespace %s: %v", namespace.Name, err)
 						}
@@ -387,7 +398,7 @@ func (e *EgressIPController) reconcileEgressIP(old, new *egressipv1.EgressIP) (e
 						continue
 					}
 					if newPodSelector.Matches(podLabels) && !oldPodSelector.Matches(podLabels) {
-						ni, err := e.nadController.GetActiveNetworkForNamespace(namespace.Name)
+						ni, err := e.networkManager.GetActiveNetworkForNamespace(namespace.Name)
 						if err != nil {
 							return fmt.Errorf("failed to get active network for namespace %s: %v", namespace.Name, err)
 						}
@@ -410,7 +421,7 @@ func (e *EgressIPController) reconcileEgressIP(old, new *egressipv1.EgressIP) (e
 				namespaceLabels := labels.Set(namespace.Labels)
 				// If the namespace does not match anymore then there's no
 				// reason to look at the pod selector.
-				ni, err := e.nadController.GetActiveNetworkForNamespace(namespace.Name)
+				ni, err := e.networkManager.GetActiveNetworkForNamespace(namespace.Name)
 				if err != nil {
 					return fmt.Errorf("failed to get active network for namespace %s: %v", namespace.Name, err)
 				}
@@ -508,7 +519,7 @@ func (e *EgressIPController) reconcileEgressIPNamespace(old, new *corev1.Namespa
 			return err
 		}
 		if namespaceSelector.Matches(oldLabels) && !namespaceSelector.Matches(newLabels) {
-			ni, err := e.nadController.GetActiveNetworkForNamespace(namespaceName)
+			ni, err := e.networkManager.GetActiveNetworkForNamespace(namespaceName)
 			if err != nil {
 				return fmt.Errorf("failed to get active network for namespace %s: %v", namespaceName, err)
 			}
@@ -518,7 +529,7 @@ func (e *EgressIPController) reconcileEgressIPNamespace(old, new *corev1.Namespa
 		}
 		if !namespaceSelector.Matches(oldLabels) && namespaceSelector.Matches(newLabels) {
 			mark := getEgressIPPktMark(egressIP.Name, egressIP.Annotations)
-			ni, err := e.nadController.GetActiveNetworkForNamespace(namespaceName)
+			ni, err := e.networkManager.GetActiveNetworkForNamespace(namespaceName)
 			if err != nil {
 				return fmt.Errorf("failed to get active network for namespace %s: %v", namespaceName, err)
 			}
@@ -598,7 +609,7 @@ func (e *EgressIPController) reconcileEgressIPPod(old, new *corev1.Pod) (err err
 			if err != nil {
 				return err
 			}
-			ni, err := e.nadController.GetActiveNetworkForNamespace(namespace.Name)
+			ni, err := e.networkManager.GetActiveNetworkForNamespace(namespace.Name)
 			if err != nil {
 				return fmt.Errorf("failed to get active network for namespace %s: %v", namespace.Name, err)
 			}
@@ -660,7 +671,7 @@ func (e *EgressIPController) addEgressIPAssignments(name string, statusAssignmen
 		return err
 	}
 	for _, namespace := range namespaces {
-		ni, err := e.nadController.GetActiveNetworkForNamespace(namespace.Name)
+		ni, err := e.networkManager.GetActiveNetworkForNamespace(namespace.Name)
 		if err != nil {
 			return fmt.Errorf("failed to get active network for namespace %s: %v", namespace.Name, err)
 		}
@@ -854,7 +865,7 @@ func (e *EgressIPController) deleteEgressIPAssignments(name string, statusesToRe
 				continue
 			}
 			podNamespace, podName := getPodNamespaceAndNameFromKey(podKey)
-			ni, err := e.nadController.GetActiveNetworkForNamespace(podNamespace)
+			ni, err := e.networkManager.GetActiveNetworkForNamespace(podNamespace)
 			if err != nil {
 				return fmt.Errorf("failed to get active network for namespace %s", podNamespace)
 			}
@@ -1411,7 +1422,7 @@ func (e *EgressIPController) syncPodAssignmentCache(egressIPCache egressIPCache)
 					item.ExternalIDs[libovsdbops.OwnerControllerKey.String()] == getNetworkControllerName(networkName) &&
 					strings.HasPrefix(item.ExternalIDs[libovsdbops.ObjectNameKey.String()], egressIPName+dbIDEIPNamePodDivider)
 			}
-			ni, err := e.nadController.GetNetwork(networkName)
+			ni, err := e.networkManager.GetNetwork(networkName)
 			if err != nil {
 				return fmt.Errorf("failed to get active network for network name %q: %v", networkName, err)
 			}
@@ -1614,7 +1625,7 @@ func (e *EgressIPController) syncStaleSNATRules(egressIPCache egressIPCache) err
 			klog.Infof("syncStaleSNATRules will delete %s due to logical ip: %v", egressIPName, item)
 			return true
 		}
-		ni, err := e.nadController.GetNetwork(types.DefaultNetworkName)
+		ni, err := e.networkManager.GetNetwork(types.DefaultNetworkName)
 		if err != nil {
 			klog.Errorf("syncStaleSNATRules failed to find default network in networks cache")
 			return false
@@ -1709,7 +1720,7 @@ func (e *EgressIPController) generateCacheForEgressIP() (egressIPCache, error) {
 	cache.networkToRouter = map[string]string{}
 	// build a map of networks -> nodes -> redirect IP
 	for _, namespace := range namespaces {
-		ni, err := e.nadController.GetActiveNetworkForNamespace(namespace.Name)
+		ni, err := e.networkManager.GetActiveNetworkForNamespace(namespace.Name)
 		if err != nil {
 			klog.Errorf("Failed to get active network for namespace %s, stale objects may remain: %v", namespace.Name, err)
 			continue
@@ -1827,7 +1838,7 @@ func (e *EgressIPController) generateCacheForEgressIP() (egressIPCache, error) {
 				klog.Errorf("Error building egress IP sync cache, cannot retrieve pods for namespace: %s and egress IP: %s, err: %v", namespace.Name, egressIP.Name, err)
 				continue
 			}
-			ni, err := e.nadController.GetActiveNetworkForNamespace(namespace.Name)
+			ni, err := e.networkManager.GetActiveNetworkForNamespace(namespace.Name)
 			if err != nil {
 				klog.Errorf("Failed to get active network for namespace %s, skipping sync: %v", namespace.Name, err)
 				continue
@@ -1949,7 +1960,7 @@ func (e *EgressIPController) addEgressNode(node *corev1.Node) error {
 				}
 				return nil
 			}
-			ni, err := e.nadController.GetNetwork(types.DefaultNetworkName)
+			ni, err := e.networkManager.GetNetwork(types.DefaultNetworkName)
 			if err != nil {
 				return fmt.Errorf("failed to get default network from NAD controller")
 			}
@@ -1959,7 +1970,7 @@ func (e *EgressIPController) addEgressNode(node *corev1.Node) error {
 			if !util.IsNetworkSegmentationSupportEnabled() {
 				return nil
 			}
-			if err = e.nadController.DoWithLock(processNetworkFn); err != nil {
+			if err = e.networkManager.DoWithLock(processNetworkFn); err != nil {
 				return fmt.Errorf("failed to process all user defined networks route to external: %v", err)
 			}
 		}
@@ -1977,7 +1988,7 @@ func (e *EgressIPController) addEgressNode(node *corev1.Node) error {
 // continue to do so without any issues.
 func (e *EgressIPController) initClusterEgressPolicies(nodes []interface{}) error {
 	// Init default network
-	defaultNetInfo, err := e.nadController.GetNetwork(types.DefaultNetworkName)
+	defaultNetInfo, err := e.networkManager.GetNetwork(types.DefaultNetworkName)
 	if err != nil {
 		return fmt.Errorf("failed to get default network: %v", err)
 	}
@@ -1991,7 +2002,7 @@ func (e *EgressIPController) initClusterEgressPolicies(nodes []interface{}) erro
 			return fmt.Errorf("failed to delete legacy default no reroute to nodes for node %s: %v", node.Name, err)
 		}
 	}
-	return e.nadController.DoWithLock(func(network util.NetInfo) error {
+	return e.networkManager.DoWithLock(func(network util.NetInfo) error {
 		if network.GetNetworkName() == types.DefaultNetworkName {
 			return nil
 		}
@@ -3028,7 +3039,7 @@ func createDefaultReRouteQoSRuleOps(nbClient libovsdbclient.Client, addressSetFa
 func (e *EgressIPController) ensureDefaultNoRerouteQoSRules(nodeName string) error {
 	e.nodeUpdateMutex.Lock()
 	defer e.nodeUpdateMutex.Unlock()
-	defaultNetInfo, err := e.nadController.GetNetwork(types.DefaultNetworkName)
+	defaultNetInfo, err := e.networkManager.GetNetwork(types.DefaultNetworkName)
 	if err != nil {
 		return fmt.Errorf("failed to get default network from NAD controller: %v", err)
 	}
@@ -3037,7 +3048,7 @@ func (e *EgressIPController) ensureDefaultNoRerouteQoSRules(nodeName string) err
 	if err != nil {
 		return fmt.Errorf("failed to process default network: %v", err)
 	}
-	if err = e.nadController.DoWithLock(func(network util.NetInfo) error {
+	if err = e.networkManager.DoWithLock(func(network util.NetInfo) error {
 		if network.GetNetworkName() == types.DefaultNetworkName {
 			return nil
 		}
@@ -3133,7 +3144,7 @@ func (e *EgressIPController) ensureDefaultNoRerouteNodePolicies() error {
 	defer e.nodeUpdateMutex.Unlock()
 	nodeLister := listers.NewNodeLister(e.watchFactory.NodeInformer().GetIndexer())
 	// ensure default network is processed
-	defaultNetInfo, err := e.nadController.GetNetwork(types.DefaultNetworkName)
+	defaultNetInfo, err := e.networkManager.GetNetwork(types.DefaultNetworkName)
 	if err != nil {
 		return fmt.Errorf("failed to get default network: %v", err)
 	}
@@ -3145,7 +3156,7 @@ func (e *EgressIPController) ensureDefaultNoRerouteNodePolicies() error {
 	if !util.IsNetworkSegmentationSupportEnabled() {
 		return nil
 	}
-	if err = e.nadController.DoWithLock(func(network util.NetInfo) error {
+	if err = e.networkManager.DoWithLock(func(network util.NetInfo) error {
 		if network.GetNetworkName() == types.DefaultNetworkName {
 			return nil
 		}

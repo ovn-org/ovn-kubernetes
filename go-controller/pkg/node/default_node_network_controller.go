@@ -33,7 +33,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/egressip"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/egressservice"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/linkmanager"
@@ -116,7 +116,7 @@ type DefaultNodeNetworkController struct {
 
 	apbExternalRouteNodeController *apbroute.ExternalGatewayNodeController
 
-	nadController *nad.NetAttachDefinitionController
+	networkManager networkmanager.Interface
 
 	cniServer *cni.Server
 
@@ -133,7 +133,7 @@ type preStartSetup struct {
 }
 
 func newDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, stopChan chan struct{},
-	wg *sync.WaitGroup, routeManager *routemanager.Controller, nadController *nad.NetAttachDefinitionController) *DefaultNodeNetworkController {
+	wg *sync.WaitGroup, routeManager *routemanager.Controller) *DefaultNodeNetworkController {
 
 	c := &DefaultNodeNetworkController{
 		BaseNodeNetworkController: BaseNodeNetworkController{
@@ -146,18 +146,18 @@ func newDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, sto
 	}
 	if util.IsNetworkSegmentationSupportEnabled() && !config.OVNKubernetesFeature.DisableUDNHostIsolation {
 		c.udnHostIsolationManager = NewUDNHostIsolationManager(config.IPv4Mode, config.IPv6Mode,
-			cnnci.watchFactory.PodCoreInformer(), nadController)
+			cnnci.watchFactory.PodCoreInformer())
 	}
 	c.linkManager = linkmanager.NewController(cnnci.name, config.IPv4Mode, config.IPv6Mode, c.updateGatewayMAC)
 	return c
 }
 
 // NewDefaultNodeNetworkController creates a new network controller for node management of the default network
-func NewDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, nadController *nad.NetAttachDefinitionController) (*DefaultNodeNetworkController, error) {
+func NewDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, networkManager networkmanager.Interface) (*DefaultNodeNetworkController, error) {
 	var err error
 	stopChan := make(chan struct{})
 	wg := &sync.WaitGroup{}
-	nc := newDefaultNodeNetworkController(cnnci, stopChan, wg, cnnci.routeManager, nadController)
+	nc := newDefaultNodeNetworkController(cnnci, stopChan, wg, cnnci.routeManager)
 
 	if len(config.Kubernetes.HealthzBindAddress) != 0 {
 		klog.Infof("Enable node proxy healthz server on %s", config.Kubernetes.HealthzBindAddress)
@@ -177,7 +177,7 @@ func NewDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, nad
 		return nil, err
 	}
 
-	nc.nadController = nadController
+	nc.networkManager = networkManager
 
 	nc.initRetryFrameworkForNode()
 
@@ -839,7 +839,7 @@ func (nc *DefaultNodeNetworkController) PreStart(ctx context.Context) error {
 		if !ok {
 			return fmt.Errorf("cannot get kubeclient for starting CNI server")
 		}
-		cniServer, err = cni.NewCNIServer(nc.watchFactory, kclient.KClient, nc.nadController)
+		cniServer, err = cni.NewCNIServer(nc.watchFactory, kclient.KClient, nc.networkManager)
 		if err != nil {
 			return err
 		}
@@ -1214,7 +1214,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 
 	if config.OVNKubernetesFeature.EnableEgressIP && !util.PlatformTypeIsEgressIPCloudProvider() {
 		c, err := egressip.NewController(nc.Kube, nc.watchFactory.EgressIPInformer(), nc.watchFactory.NodeInformer(),
-			nc.watchFactory.NamespaceInformer(), nc.watchFactory.PodCoreInformer(), nc.nadController.GetActiveNetworkForNamespace,
+			nc.watchFactory.NamespaceInformer(), nc.watchFactory.PodCoreInformer(), nc.networkManager.GetActiveNetworkForNamespace,
 			nc.routeManager, config.IPv4Mode, config.IPv6Mode, nc.name, nc.linkManager)
 		if err != nil {
 			return fmt.Errorf("failed to create egress IP controller: %v", err)

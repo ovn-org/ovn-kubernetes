@@ -32,12 +32,11 @@ import (
 	udnfakeclient "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	networkAttachDefController "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
 	nodenft "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/nftables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	linkMock "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/vishvananda/netlink"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/nad"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	utilMock "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
@@ -289,16 +288,6 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 		err = nodeAnnotator.Run()
 		Expect(err).NotTo(HaveOccurred())
 		rm := routemanager.NewController()
-		var nadController *networkAttachDefController.NetAttachDefinitionController
-		if util.IsNetworkSegmentationSupportEnabled() {
-			testNCM := &nad.FakeNetworkControllerManager{}
-			nadController, err = networkAttachDefController.NewNetAttachDefinitionController("test", testNCM, wf, nil)
-			Expect(err).NotTo(HaveOccurred())
-			err = nadController.Start()
-			Expect(err).NotTo(HaveOccurred())
-			defer nadController.Stop()
-		}
-		Expect(err).NotTo(HaveOccurred())
 		wg.Add(1)
 		go testNS.Do(func(netNS ns.NetNS) error {
 			defer GinkgoRecover()
@@ -345,8 +334,22 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
 			Expect(err).NotTo(HaveOccurred())
 			ifAddrs := ovntest.MustParseIPNets(eth0CIDR)
-			sharedGw, err := newGateway(nodeName, ovntest.MustParseIPNets(nodeSubnet), gatewayNextHops, gatewayIntf, "", ifAddrs, nodeAnnotator,
-				&fakeMgmtPortConfig, k, wf, rm, nil, nadController, config.GatewayModeShared)
+			sharedGw, err := newGateway(
+				nodeName,
+				ovntest.MustParseIPNets(nodeSubnet),
+				gatewayNextHops,
+				gatewayIntf,
+				"",
+				ifAddrs,
+				nodeAnnotator,
+				&fakeMgmtPortConfig,
+				k,
+				wf,
+				rm,
+				nil,
+				networkmanager.Default().Interface(),
+				config.GatewayModeShared,
+			)
 			Expect(err).NotTo(HaveOccurred())
 			err = sharedGw.initFunc()
 			Expect(err).NotTo(HaveOccurred())
@@ -725,15 +728,7 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 		runtime.LockOSThread()
 		defer runtime.UnlockOSThread()
 		rm := routemanager.NewController()
-		var nadController *networkAttachDefController.NetAttachDefinitionController
-		if util.IsNetworkSegmentationSupportEnabled() {
-			testNCM := &nad.FakeNetworkControllerManager{}
-			nadController, err = networkAttachDefController.NewNetAttachDefinitionController("test", testNCM, wf, nil)
-			Expect(err).NotTo(HaveOccurred())
-			err = nadController.Start()
-			Expect(err).NotTo(HaveOccurred())
-			defer nadController.Stop()
-		}
+
 		wg.Add(1)
 		go testNS.Do(func(netNS ns.NetNS) error {
 			defer GinkgoRecover()
@@ -749,8 +744,22 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 
 			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
 			Expect(err).NotTo(HaveOccurred())
-			sharedGw, err := newGateway(nodeName, ovntest.MustParseIPNets(nodeSubnet), gatewayNextHops,
-				gatewayIntf, "", ifAddrs, nodeAnnotator, &fakeMgmtPortConfig, k, wf, rm, nil, nadController, config.GatewayModeShared)
+			sharedGw, err := newGateway(
+				nodeName,
+				ovntest.MustParseIPNets(nodeSubnet),
+				gatewayNextHops,
+				gatewayIntf,
+				"",
+				ifAddrs,
+				nodeAnnotator,
+				&fakeMgmtPortConfig,
+				k,
+				wf,
+				rm,
+				nil,
+				networkmanager.Default().Interface(),
+				config.GatewayModeShared,
+			)
 			Expect(err).NotTo(HaveOccurred())
 			err = sharedGw.initFunc()
 			Expect(err).NotTo(HaveOccurred())
@@ -811,7 +820,7 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 	Expect(err).NotTo(HaveOccurred())
 }
 
-func shareGatewayInterfaceDPUHostTest(app *cli.App, testNS ns.NetNS, uplinkName, hostIP, gwIP string) {
+func shareGatewayInterfaceDPUHostTest(app *cli.App, testNS ns.NetNS, uplinkName, hostIP string) {
 	const (
 		clusterCIDR string = "10.1.0.0/16"
 		svcCIDR     string = "172.16.1.0/24"
@@ -858,7 +867,7 @@ func shareGatewayInterfaceDPUHostTest(app *cli.App, testNS ns.NetNS, uplinkName,
 		ipnet.IP = ip
 		routeManager := routemanager.NewController()
 		cnnci := NewCommonNodeNetworkControllerInfo(kubeFakeClient, fakeClient.AdminPolicyRouteClient, wf, nil, nodeName, routeManager)
-		nc := newDefaultNodeNetworkController(cnnci, stop, wg, routeManager, nil)
+		nc := newDefaultNodeNetworkController(cnnci, stop, wg, routeManager)
 		// must run route manager manually which is usually started with nc.Start()
 		wg.Add(1)
 		go testNS.Do(func(netNS ns.NetNS) error {
@@ -1189,15 +1198,7 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 		ip, ipNet, _ := net.ParseCIDR(eth0CIDR)
 		ipNet.IP = ip
 		rm := routemanager.NewController()
-		var nadController *networkAttachDefController.NetAttachDefinitionController
-		if util.IsNetworkSegmentationSupportEnabled() {
-			testNCM := &nad.FakeNetworkControllerManager{}
-			nadController, err = networkAttachDefController.NewNetAttachDefinitionController("test", testNCM, wf, nil)
-			Expect(err).NotTo(HaveOccurred())
-			err = nadController.Start()
-			Expect(err).NotTo(HaveOccurred())
-			defer nadController.Stop()
-		}
+
 		go testNS.Do(func(netNS ns.NetNS) error {
 			defer GinkgoRecover()
 			rm.Run(stop, 10*time.Second)
@@ -1210,8 +1211,22 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
 			Expect(err).NotTo(HaveOccurred())
 			ifAddrs := ovntest.MustParseIPNets(eth0CIDR)
-			localGw, err := newGateway(nodeName, ovntest.MustParseIPNets(nodeSubnet), gatewayNextHops, gatewayIntf, "", ifAddrs,
-				nodeAnnotator, &fakeMgmtPortConfig, k, wf, rm, nil, nadController, config.GatewayModeLocal)
+			localGw, err := newGateway(
+				nodeName,
+				ovntest.MustParseIPNets(nodeSubnet),
+				gatewayNextHops,
+				gatewayIntf,
+				"",
+				ifAddrs,
+				nodeAnnotator,
+				&fakeMgmtPortConfig,
+				k,
+				wf,
+				rm,
+				nil,
+				networkmanager.Default().Interface(),
+				config.GatewayModeLocal,
+			)
 			Expect(err).NotTo(HaveOccurred())
 			err = localGw.initFunc()
 			Expect(err).NotTo(HaveOccurred())
@@ -1582,7 +1597,7 @@ var _ = Describe("Gateway Operations DPU", func() {
 		})
 
 		ovntest.OnSupportedPlatformsIt("sets up a shared interface gateway DPU host", func() {
-			shareGatewayInterfaceDPUHostTest(app, testNS, uplinkName, hostIP, gwIP)
+			shareGatewayInterfaceDPUHostTest(app, testNS, uplinkName, hostIP)
 		})
 	})
 })

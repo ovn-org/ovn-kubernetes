@@ -14,7 +14,7 @@ import (
 	egressqoslisters "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/listers/egressqos/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
-	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/observability"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	anpcontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/admin_network_policy"
@@ -34,7 +34,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 
@@ -145,17 +144,28 @@ type DefaultNetworkController struct {
 
 // NewDefaultNetworkController creates a new OVN controller for creating logical network
 // infrastructure and policy for default l3 network
-func NewDefaultNetworkController(cnci *CommonNetworkControllerInfo, nadController *nad.NetAttachDefinitionController,
-	observManager *observability.Manager, portCache *PortCache, eIPController *EgressIPController) (*DefaultNetworkController, error) {
+func NewDefaultNetworkController(
+	cnci *CommonNetworkControllerInfo,
+	observManager *observability.Manager,
+	networkManager networkmanager.Interface,
+	eIPController *EgressIPController,
+	portCache *PortCache,
+) (*DefaultNetworkController, error) {
 	stopChan := make(chan struct{})
 	wg := &sync.WaitGroup{}
-	return newDefaultNetworkControllerCommon(cnci, stopChan, wg, nil, nadController, observManager, portCache, eIPController)
+	return newDefaultNetworkControllerCommon(cnci, stopChan, wg, nil, networkManager, observManager, eIPController, portCache)
 }
 
-func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
-	defaultStopChan chan struct{}, defaultWg *sync.WaitGroup,
-	addressSetFactory addressset.AddressSetFactory, nadController *nad.NetAttachDefinitionController,
-	observManager *observability.Manager, portCache *PortCache, eIPController *EgressIPController) (*DefaultNetworkController, error) {
+func newDefaultNetworkControllerCommon(
+	cnci *CommonNetworkControllerInfo,
+	defaultStopChan chan struct{},
+	defaultWg *sync.WaitGroup,
+	addressSetFactory addressset.AddressSetFactory,
+	networkManager networkmanager.Interface,
+	observManager *observability.Manager,
+	eIPController *EgressIPController,
+	portCache *PortCache,
+) (*DefaultNetworkController, error) {
 
 	if addressSetFactory == nil {
 		addressSetFactory = addressset.NewOvnAddressSetFactory(cnci.nbClient, config.IPv4Mode, config.IPv6Mode)
@@ -166,7 +176,7 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 		cnci.watchFactory.ServiceCoreInformer(),
 		cnci.watchFactory.EndpointSliceCoreInformer(),
 		cnci.watchFactory.NodeCoreInformer(),
-		nadController,
+		networkManager,
 		cnci.recorder,
 		&util.DefaultNetInfo{},
 	)
@@ -214,7 +224,7 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 			zoneICHandler:               zoneICHandler,
 			cancelableCtx:               util.NewCancelableContext(),
 			observManager:               observManager,
-			nadController:               nadController,
+			networkManager:              networkManager,
 		},
 		externalGatewayRouteInfo:   apbExternalRouteController.ExternalGWRouteInfoCache,
 		eIPC:                       eIPController,
@@ -228,7 +238,7 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 	// allocate the first IPs in the join switch subnets.
 	gwLRPIfAddrs, err := oc.getOVNClusterRouterPortToJoinSwitchIfAddrs()
 	if err != nil {
-		return nil, fmt.Errorf("failed to allocate join switch IP address connected to %s: %v", ovntypes.OVNClusterRouter, err)
+		return nil, fmt.Errorf("failed to allocate join switch IP address connected to %s: %v", types.OVNClusterRouter, err)
 	}
 
 	oc.ovnClusterLRPToJoinIfAddrs = gwLRPIfAddrs
@@ -551,7 +561,7 @@ func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 		// on ovnkube-controller side and not on ovnkube-node side, since they are run in the
 		// same process. TODO(tssurya): In upstream ovnk, its possible to run these as different processes
 		// in which case this flushing feature is not supported.
-		if config.OVNKubernetesFeature.EnableInterconnect && oc.zone != ovntypes.OvnDefaultZone {
+		if config.OVNKubernetesFeature.EnableInterconnect && oc.zone != types.OvnDefaultZone {
 			// every minute cleanup stale conntrack entries if any
 			go wait.Until(func() {
 				oc.checkAndDeleteStaleConntrackEntries()

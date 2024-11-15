@@ -698,7 +698,8 @@ var _ = Describe("OVN Multicast with IP Address Family", func() {
 					tPod.populateControllerLogicalSwitchCache(bnc)
 				}
 				if nad != nil {
-					Expect(fakeOvn.controller.nadController.Start()).To(Succeed())
+					Expect(fakeOvn.networkManager.Start()).To(Succeed())
+					defer fakeOvn.networkManager.Stop()
 				}
 
 				Expect(bnc.WatchNamespaces()).To(Succeed())
@@ -765,7 +766,8 @@ var _ = Describe("OVN Multicast with IP Address Family", func() {
 				bnc, _ := startBaseNetworkController(fakeOvn, nad)
 
 				if nad != nil {
-					Expect(fakeOvn.controller.nadController.Start()).To(Succeed())
+					Expect(fakeOvn.networkManager.Start()).To(Succeed())
+					defer fakeOvn.networkManager.Stop()
 				}
 
 				Expect(bnc.WatchNamespaces()).To(Succeed())
@@ -847,7 +849,8 @@ var _ = Describe("OVN Multicast with IP Address Family", func() {
 					tPod.populateControllerLogicalSwitchCache(bnc)
 				}
 				if nad != nil {
-					Expect(fakeOvn.controller.nadController.Start()).To(Succeed())
+					Expect(fakeOvn.networkManager.Start()).To(Succeed())
+					defer fakeOvn.networkManager.Stop()
 				}
 
 				Expect(bnc.WatchNamespaces()).To(Succeed())

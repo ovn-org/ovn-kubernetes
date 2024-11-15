@@ -21,9 +21,10 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
 	v1nadmocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
 	v1mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/client-go/listers/core/v1"
-	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/nad"
+	testnm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/networkmanager"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -57,7 +58,6 @@ var _ = Describe("Network Segmentation", func() {
 		}
 		prInterfaceOpsStub                            = &podRequestInterfaceOpsStub{}
 		enableMultiNetwork, enableNetworkSegmentation bool
-		nadController                                 *ovntest.FakeNADController
 	)
 
 	BeforeEach(func() {
@@ -126,7 +126,7 @@ var _ = Describe("Network Segmentation", func() {
 		})
 		It("should not fail at cmdAdd", func() {
 			podNamespaceLister.On("Get", pr.PodName).Return(pod, nil)
-			Expect(pr.cmdAddWithGetCNIResultFunc(kubeAuth, clientSet, getCNIResultStub, nil)).NotTo(BeNil())
+			Expect(pr.cmdAddWithGetCNIResultFunc(kubeAuth, clientSet, getCNIResultStub, networkmanager.Default().Interface())).NotTo(BeNil())
 			Expect(obtainedPodIterfaceInfos).ToNot(BeEmpty())
 		})
 		It("should not fail at cmdDel", func() {
@@ -153,13 +153,10 @@ var _ = Describe("Network Segmentation", func() {
 						},
 					},
 				}
-				nadController = &ovntest.FakeNADController{
-					PrimaryNetworks: make(map[string]util.NetInfo),
-				}
 			})
 			It("should not fail at cmdAdd", func() {
 				podNamespaceLister.On("Get", pr.PodName).Return(pod, nil)
-				Expect(pr.cmdAddWithGetCNIResultFunc(kubeAuth, clientSet, getCNIResultStub, nadController)).NotTo(BeNil())
+				Expect(pr.cmdAddWithGetCNIResultFunc(kubeAuth, clientSet, getCNIResultStub, networkmanager.Default().Interface())).NotTo(BeNil())
 				Expect(obtainedPodIterfaceInfos).ToNot(BeEmpty())
 			})
 			It("should not fail at cmdDel", func() {
@@ -175,6 +172,8 @@ var _ = Describe("Network Segmentation", func() {
 				nadName          = "tenantred"
 				namespace        = "foo-ns"
 			)
+
+			var fakeNetworkManager *testnm.FakeNetworkManager
 
 			dummyGetCNIResult := func(request *PodRequest, getter PodInfoGetter, podInterfaceInfo *PodInterfaceInfo) (*current.Result, error) {
 				var gatewayIP net.IP
@@ -233,16 +232,16 @@ var _ = Describe("Network Segmentation", func() {
 				nadLister.On("NetworkAttachmentDefinitions", "foo-ns").Return(nadNamespaceLister)
 				nadNetwork, err := util.ParseNADInfo(nad)
 				Expect(err).NotTo(HaveOccurred())
-				nadController = &ovntest.FakeNADController{
+				fakeNetworkManager = &testnm.FakeNetworkManager{
 					PrimaryNetworks: make(map[string]util.NetInfo),
 				}
-				nadController.PrimaryNetworks[nad.Namespace] = nadNetwork
+				fakeNetworkManager.PrimaryNetworks[nad.Namespace] = nadNetwork
 				getCNIResultStub = dummyGetCNIResult
 			})
 
 			It("should return the information of both the default net and the primary UDN in the result", func() {
 				podNamespaceLister.On("Get", pr.PodName).Return(pod, nil)
-				response, err := pr.cmdAddWithGetCNIResultFunc(kubeAuth, clientSet, getCNIResultStub, nadController)
+				response, err := pr.cmdAddWithGetCNIResultFunc(kubeAuth, clientSet, getCNIResultStub, fakeNetworkManager)
 				Expect(err).NotTo(HaveOccurred())
 				// for every interface added, we return 2 interfaces; the host side of the
 				// veth, then the pod side of the veth.

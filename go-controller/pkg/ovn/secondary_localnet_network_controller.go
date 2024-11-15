@@ -14,7 +14,7 @@ import (
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	networkAttachDefController "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/persistentips"
@@ -185,8 +185,11 @@ type SecondaryLocalnetNetworkController struct {
 }
 
 // NewSecondaryLocalnetNetworkController create a new OVN controller for the given secondary localnet NAD
-func NewSecondaryLocalnetNetworkController(cnci *CommonNetworkControllerInfo, netInfo util.NetInfo,
-	nadController networkAttachDefController.NADController) *SecondaryLocalnetNetworkController {
+func NewSecondaryLocalnetNetworkController(
+	cnci *CommonNetworkControllerInfo,
+	netInfo util.NetInfo,
+	networkManager networkmanager.Interface,
+) *SecondaryLocalnetNetworkController {
 
 	stopChan := make(chan struct{})
 
@@ -211,7 +214,7 @@ func NewSecondaryLocalnetNetworkController(cnci *CommonNetworkControllerInfo, ne
 					wg:                          &sync.WaitGroup{},
 					cancelableCtx:               util.NewCancelableContext(),
 					localZoneNodes:              &sync.Map{},
-					nadController:               nadController,
+					networkManager:              networkManager,
 				},
 			},
 		},
@@ -256,10 +259,10 @@ func (oc *SecondaryLocalnetNetworkController) Start(ctx context.Context) error {
 		return err
 	}
 
-	return oc.run(ctx)
+	return oc.run()
 }
 
-func (oc *SecondaryLocalnetNetworkController) run(ctx context.Context) error {
+func (oc *SecondaryLocalnetNetworkController) run() error {
 	return oc.BaseSecondaryLayer2NetworkController.run()
 }
 

@@ -19,9 +19,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
-	networkAttachDefController "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 	nodenft "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/nftables"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/nad"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -212,11 +210,10 @@ add set inet ovn-kubernetes %s { type %s ; }
 
 var _ = Describe("UDN Host isolation", func() {
 	var (
-		manager       *UDNHostIsolationManager
-		nadController *networkAttachDefController.NetAttachDefinitionController
-		wf            *factory.WatchFactory
-		fakeClient    *util.OVNNodeClientset
-		nft           *knftables.Fake
+		manager    *UDNHostIsolationManager
+		wf         *factory.WatchFactory
+		fakeClient *util.OVNNodeClientset
+		nft        *knftables.Fake
 	)
 
 	const (
@@ -282,15 +279,9 @@ add rule inet ovn-kubernetes udn-isolation ip6 daddr @udn-pod-default-ips-v6 dro
 		wf, err = factory.NewNodeWatchFactory(fakeClient, "node1")
 		Expect(err).NotTo(HaveOccurred())
 
-		testNCM := &nad.FakeNetworkControllerManager{}
-		nadController, err = networkAttachDefController.NewNetAttachDefinitionController("test", testNCM, wf, nil)
-		Expect(err).NotTo(HaveOccurred())
-
-		manager = NewUDNHostIsolationManager(true, true, wf.PodCoreInformer(), nadController)
+		manager = NewUDNHostIsolationManager(true, true, wf.PodCoreInformer())
 
 		err = wf.Start()
-		Expect(err).NotTo(HaveOccurred())
-		err = nadController.Start()
 		Expect(err).NotTo(HaveOccurred())
 
 		// Copy manager.Start() sequence, but using fake nft and without running systemd tracker
@@ -312,7 +303,6 @@ add rule inet ovn-kubernetes udn-isolation ip6 daddr @udn-pod-default-ips-v6 dro
 
 		wf = nil
 		manager = nil
-		nadController = nil
 	})
 
 	AfterEach(func() {
@@ -321,9 +311,6 @@ add rule inet ovn-kubernetes udn-isolation ip6 daddr @udn-pod-default-ips-v6 dro
 		}
 		if manager != nil {
 			manager.Stop()
-		}
-		if nadController != nil {
-			nadController.Stop()
 		}
 	})
 
