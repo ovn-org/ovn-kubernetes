@@ -614,6 +614,7 @@ func (oc *DefaultNetworkController) Reconcile(netInfo util.NetInfo) error {
 	// gather some information first
 	var err error
 	var retryNodes []*kapi.Node
+	var retryNodeNames []string
 	oc.localZoneNodes.Range(func(key, value any) bool {
 		nodeName := key.(string)
 		wasAdvertised := util.IsPodNetworkAdvertisedAtNode(oc, nodeName)
@@ -628,6 +629,7 @@ func (oc *DefaultNetworkController) Reconcile(netInfo util.NetInfo) error {
 			return false
 		}
 		retryNodes = append(retryNodes, node)
+		retryNodeNames = append(retryNodeNames, node.Name)
 		return true
 	})
 	if err != nil {

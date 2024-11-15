@@ -98,7 +98,7 @@ func NewClusterManager(ovnClient *util.OVNClusterManagerClientset, wf *factory.W
 	}
 
 	if config.OVNKubernetesFeature.EnableEgressIP {
-		cm.eIPC = newEgressIPController(ovnClient, wf, recorder)
+		cm.eIPC = newEgressIPController(ovnClient, wf, cm.networkManager.Interface(), recorder)
 	}
 
 	if config.OVNKubernetesFeature.EnableEgressService {
@@ -272,6 +272,9 @@ func (cm *ClusterManager) CleanupStaleNetworks(validNetworks ...util.NetInfo) er
 func (cm *ClusterManager) Reconcile(name string, old, new util.NetInfo) error {
 	if cm.raController != nil {
 		cm.raController.ReconcileNetwork(name, old, new)
+	}
+	if cm.eIPC != nil {
+		cm.eIPC.ReconcileNetwork(name, old, new)
 	}
 	return nil
 }
