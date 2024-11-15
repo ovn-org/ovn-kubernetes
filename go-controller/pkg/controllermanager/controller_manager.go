@@ -1,4 +1,4 @@
-package networkControllerManager
+package controllermanager
 
 import (
 	"context"
@@ -17,7 +17,7 @@ import (
 	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/observability"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -29,8 +29,8 @@ import (
 	"k8s.io/klog/v2"
 )
 
-// NetworkControllerManager structure is the object manages all controllers for all networks
-type NetworkControllerManager struct {
+// ControllerManager structure is the object manages all controllers
+type ControllerManager struct {
 	client       clientset.Interface
 	kube         *kube.KubeOVN
 	watchFactory *factory.WatchFactory
@@ -51,13 +51,13 @@ type NetworkControllerManager struct {
 	stopChan chan struct{}
 	wg       *sync.WaitGroup
 
-	defaultNetworkController nad.BaseNetworkController
+	defaultNetworkController networkmanager.BaseNetworkController
 
-	// net-attach-def controller handle net-attach-def and create/delete network controllers
-	nadController *nad.NetAttachDefinitionController
+	// networkManager creates and deletes network controllers
+	networkManager networkmanager.Controller
 }
 
-func (cm *NetworkControllerManager) NewNetworkController(nInfo util.NetInfo) (nad.NetworkController, error) {
+func (cm *ControllerManager) NewNetworkController(nInfo util.NetInfo) (networkmanager.NetworkController, error) {
 	cnci, err := cm.newCommonNetworkControllerInfo()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create network controller info %w", err)
@@ -65,17 +65,17 @@ func (cm *NetworkControllerManager) NewNetworkController(nInfo util.NetInfo) (na
 	topoType := nInfo.TopologyType()
 	switch topoType {
 	case ovntypes.Layer3Topology:
-		return ovn.NewSecondaryLayer3NetworkController(cnci, nInfo, cm.nadController)
+		return ovn.NewSecondaryLayer3NetworkController(cnci, nInfo, cm.networkManager.Interface())
 	case ovntypes.Layer2Topology:
-		return ovn.NewSecondaryLayer2NetworkController(cnci, nInfo, cm.nadController)
+		return ovn.NewSecondaryLayer2NetworkController(cnci, nInfo, cm.networkManager.Interface())
 	case ovntypes.LocalnetTopology:
-		return ovn.NewSecondaryLocalnetNetworkController(cnci, nInfo, cm.nadController), nil
+		return ovn.NewSecondaryLocalnetNetworkController(cnci, nInfo, cm.networkManager.Interface()), nil
 	}
 	return nil, fmt.Errorf("topology type %s not supported", topoType)
 }
 
 // newDummyNetworkController creates a dummy network controller used to clean up specific network
-func (cm *NetworkControllerManager) newDummyNetworkController(topoType, netName string) (nad.NetworkController, error) {
+func (cm *ControllerManager) newDummyNetworkController(topoType, netName string) (networkmanager.NetworkController, error) {
 	cnci, err := cm.newCommonNetworkControllerInfo()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create network controller info %w", err)
@@ -83,11 +83,11 @@ func (cm *NetworkControllerManager) newDummyNetworkController(topoType, netName 
 	netInfo, _ := util.NewNetInfo(&ovncnitypes.NetConf{NetConf: types.NetConf{Name: netName}, Topology: topoType})
 	switch topoType {
 	case ovntypes.Layer3Topology:
-		return ovn.NewSecondaryLayer3NetworkController(cnci, netInfo, cm.nadController)
+		return ovn.NewSecondaryLayer3NetworkController(cnci, netInfo, cm.networkManager.Interface())
 	case ovntypes.Layer2Topology:
-		return ovn.NewSecondaryLayer2NetworkController(cnci, netInfo, cm.nadController)
+		return ovn.NewSecondaryLayer2NetworkController(cnci, netInfo, cm.networkManager.Interface())
 	case ovntypes.LocalnetTopology:
-		return ovn.NewSecondaryLocalnetNetworkController(cnci, netInfo, cm.nadController), nil
+		return ovn.NewSecondaryLocalnetNetworkController(cnci, netInfo, cm.networkManager.Interface()), nil
 	}
 	return nil, fmt.Errorf("topology type %s not supported", topoType)
 }
@@ -121,7 +121,7 @@ func findAllSecondaryNetworkLogicalEntities(nbClient libovsdbclient.Client) ([]*
 	return nodeSwitches, clusterRouters, nil
 }
 
-func (cm *NetworkControllerManager) CleanupDeletedNetworks(validNetworks ...util.BasicNetInfo) error {
+func (cm *ControllerManager) CleanupStaleNetworks(validNetworks ...util.BasicNetInfo) error {
 	existingNetworksMap := map[string]string{}
 	for _, network := range validNetworks {
 		existingNetworksMap[network.GetNetworkName()] = network.TopologyType()
@@ -133,7 +133,7 @@ func (cm *NetworkControllerManager) CleanupDeletedNetworks(validNetworks ...util
 		return err
 	}
 
-	staleNetworkControllers := map[string]nad.NetworkController{}
+	staleNetworkControllers := map[string]networkmanager.NetworkController{}
 	for _, ls := range switches {
 		netName := ls.ExternalIDs[ovntypes.NetworkExternalID]
 		// TopologyExternalID always co-exists with NetworkExternalID
@@ -175,13 +175,13 @@ func (cm *NetworkControllerManager) CleanupDeletedNetworks(validNetworks ...util
 	return nil
 }
 
-// NewNetworkControllerManager creates a new ovnkube controller manager to manage all the controller for all networks
-func NewNetworkControllerManager(ovnClient *util.OVNClientset, wf *factory.WatchFactory,
+// NewControllerManager creates a new ovnkube controller manager to manage all the controller for all networks
+func NewControllerManager(ovnClient *util.OVNClientset, wf *factory.WatchFactory,
 	libovsdbOvnNBClient libovsdbclient.Client, libovsdbOvnSBClient libovsdbclient.Client,
-	recorder record.EventRecorder, wg *sync.WaitGroup) (*NetworkControllerManager, error) {
+	recorder record.EventRecorder, wg *sync.WaitGroup) (*ControllerManager, error) {
 	podRecorder := metrics.NewPodRecorder()
 
-	cm := &NetworkControllerManager{
+	cm := &ControllerManager{
 		client: ovnClient.KubeClient,
 		kube: &kube.KubeOVN{
 			Kube:                 kube.Kube{KClient: ovnClient.KubeClient},
@@ -206,8 +206,9 @@ func NewNetworkControllerManager(ovnClient *util.OVNClientset, wf *factory.Watch
 	}
 
 	var err error
+	cm.networkManager = networkmanager.Default()
 	if config.OVNKubernetesFeature.EnableMultiNetwork {
-		cm.nadController, err = nad.NewNetAttachDefinitionController("network-controller-manager", cm, wf, nil)
+		cm.networkManager, err = networkmanager.New("controller-manager", cm, wf, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -215,7 +216,7 @@ func NewNetworkControllerManager(ovnClient *util.OVNClientset, wf *factory.Watch
 	return cm, nil
 }
 
-func (cm *NetworkControllerManager) configureSCTPSupport() error {
+func (cm *ControllerManager) configureSCTPSupport() error {
 	hasSCTPSupport, err := util.DetectSCTPSupport()
 	if err != nil {
 		return err
@@ -230,7 +231,7 @@ func (cm *NetworkControllerManager) configureSCTPSupport() error {
 	return nil
 }
 
-func (cm *NetworkControllerManager) configureSvcTemplateSupport() {
+func (cm *ControllerManager) configureSvcTemplateSupport() {
 	if !config.OVNKubernetesFeature.EnableServiceTemplateSupport {
 		cm.svcTemplateSupport = false
 	} else if _, _, err := util.RunOVNNbctl("--columns=_uuid", "list", "Chassis_Template_Var"); err != nil {
@@ -242,14 +243,14 @@ func (cm *NetworkControllerManager) configureSvcTemplateSupport() {
 	}
 }
 
-func (cm *NetworkControllerManager) configureMetrics(stopChan <-chan struct{}) {
+func (cm *ControllerManager) configureMetrics(stopChan <-chan struct{}) {
 	metrics.RegisterOVNKubeControllerPerformance(cm.nbClient)
 	metrics.RegisterOVNKubeControllerFunctional(stopChan)
 	metrics.RunTimestamp(stopChan, cm.sbClient, cm.nbClient)
 	metrics.MonitorIPSec(cm.nbClient)
 }
 
-func (cm *NetworkControllerManager) createACLLoggingMeter() error {
+func (cm *ControllerManager) createACLLoggingMeter() error {
 	band := &nbdb.MeterBand{
 		Action: ovntypes.MeterAction,
 		Rate:   config.Logging.ACLLoggingRateLimit,
@@ -280,19 +281,18 @@ func (cm *NetworkControllerManager) createACLLoggingMeter() error {
 }
 
 // newCommonNetworkControllerInfo creates and returns the common networkController info
-func (cm *NetworkControllerManager) newCommonNetworkControllerInfo() (*ovn.CommonNetworkControllerInfo, error) {
+func (cm *ControllerManager) newCommonNetworkControllerInfo() (*ovn.CommonNetworkControllerInfo, error) {
 	return ovn.NewCommonNetworkControllerInfo(cm.client, cm.kube, cm.watchFactory, cm.recorder, cm.nbClient,
 		cm.sbClient, cm.podRecorder, cm.SCTPSupport, cm.multicastSupport, cm.svcTemplateSupport)
 }
 
 // initDefaultNetworkController creates the controller for default network
-func (cm *NetworkControllerManager) initDefaultNetworkController(nadController *nad.NetAttachDefinitionController,
-	observManager *observability.Manager) error {
+func (cm *ControllerManager) initDefaultNetworkController(observManager *observability.Manager) error {
 	cnci, err := cm.newCommonNetworkControllerInfo()
 	if err != nil {
 		return fmt.Errorf("failed to create common network controller info: %w", err)
 	}
-	defaultController, err := ovn.NewDefaultNetworkController(cnci, nadController, observManager)
+	defaultController, err := ovn.NewDefaultNetworkController(cnci, observManager, cm.networkManager.Interface())
 	if err != nil {
 		return err
 	}
@@ -304,7 +304,7 @@ func (cm *NetworkControllerManager) initDefaultNetworkController(nadController *
 }
 
 // Start the ovnkube controller
-func (cm *NetworkControllerManager) Start(ctx context.Context) error {
+func (cm *ControllerManager) Start(ctx context.Context) error {
 	klog.Info("Starting the ovnkube controller")
 
 	// Make sure that the ovnkube-controller zone matches with the Northbound db zone.
@@ -387,9 +387,9 @@ func (cm *NetworkControllerManager) Start(ctx context.Context) error {
 		metrics.GetConfigDurationRecorder().Run(cm.nbClient, cm.kube, 10, time.Second*5, cm.stopChan)
 	}
 	cm.podRecorder.Run(cm.sbClient, cm.stopChan)
-	// nadController is nil if multi-network is disabled
-	if cm.nadController != nil {
-		if err = cm.nadController.Start(); err != nil {
+	// networkManager is nil if multi-network is disabled
+	if cm.networkManager != nil {
+		if err = cm.networkManager.Start(); err != nil {
 			return fmt.Errorf("failed to start NAD Controller :%v", err)
 		}
 	}
@@ -406,7 +406,7 @@ func (cm *NetworkControllerManager) Start(ctx context.Context) error {
 			klog.Warningf("Observability cleanup failed, expected if not all Samples ware deleted yet: %v", err)
 		}
 	}
-	err = cm.initDefaultNetworkController(cm.nadController, observabilityManager)
+	err = cm.initDefaultNetworkController(observabilityManager)
 	if err != nil {
 		return fmt.Errorf("failed to init default network controller: %v", err)
 	}
@@ -419,7 +419,7 @@ func (cm *NetworkControllerManager) Start(ctx context.Context) error {
 }
 
 // Stop gracefully stops all managed controllers
-func (cm *NetworkControllerManager) Stop() {
+func (cm *ControllerManager) Stop() {
 	// stop metric recorders
 	close(cm.stopChan)
 
@@ -429,7 +429,7 @@ func (cm *NetworkControllerManager) Stop() {
 	}
 
 	// stop the NAD controller
-	if cm.nadController != nil {
-		cm.nadController.Stop()
+	if cm.networkManager != nil {
+		cm.networkManager.Stop()
 	}
 }

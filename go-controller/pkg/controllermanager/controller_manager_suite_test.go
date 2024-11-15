@@ -1,4 +1,4 @@
-package networkControllerManager
+package controllermanager
 
 import (
 	"testing"
