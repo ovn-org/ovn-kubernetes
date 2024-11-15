@@ -1,8 +1,6 @@
-package networkAttachDefController
+package networkmanager
 
 import (
-	"context"
-	"errors"
 	"fmt"
 	"reflect"
 	"sync"
@@ -30,27 +28,6 @@ import (
 	utiludn "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/udn"
 )
 
-var ErrNetworkControllerTopologyNotManaged = errors.New("no cluster network controller to manage topology")
-
-type BaseNetworkController interface {
-	Start(ctx context.Context) error
-	Stop()
-}
-
-type NetworkController interface {
-	BaseNetworkController
-	util.NetInfo
-	// Cleanup cleans up the NetworkController-owned resources, it could be called to clean up network controllers that are deleted when
-	// ovn-k8s is down; so it's receiver could be a dummy network controller, it just needs to know its network name.
-	Cleanup() error
-}
-
-// NetworkControllerManager manages all network controllers
-type NetworkControllerManager interface {
-	NewNetworkController(netInfo util.NetInfo) (NetworkController, error)
-	CleanupDeletedNetworks(validNetworks ...util.BasicNetInfo) error
-}
-
 type watchFactory interface {
 	NADInformer() nadinformers.NetworkAttachmentDefinitionInformer
 	UserDefinedNetworkInformer() userdefinednetworkinformer.UserDefinedNetworkInformer
@@ -58,29 +35,25 @@ type watchFactory interface {
 	NamespaceInformer() coreinformers.NamespaceInformer
 }
 
-type NADController interface {
-	Start() error
-	Stop()
-	GetActiveNetworkForNamespace(namespace string) (util.NetInfo, error)
-}
-
-// NetAttachDefinitionController handles namespaced scoped NAD events and
+// nadController handles namespaced scoped NAD events and
 // manages cluster scoped networks defined in those NADs. NADs are mostly
 // referenced from pods to give them access to the network. Different NADs can
 // define the same network as long as those definitions are actually equal.
 // Unexpected situations are handled on best effort basis but improper NAD
 // administration can lead to undefined behavior if referenced by running pods.
-type NetAttachDefinitionController struct {
+type nadController struct {
 	sync.RWMutex
-	name               string
-	netAttachDefLister nadlisters.NetworkAttachmentDefinitionLister
-	udnLister          userdefinednetworklister.UserDefinedNetworkLister
-	cudnLister         userdefinednetworklister.ClusterUserDefinedNetworkLister
-	namespaceLister    corev1listers.NamespaceLister
-	controller         controller.Controller
-	recorder           record.EventRecorder
-	// networkManager is used to manage the network controllers
-	networkManager networkManager
+
+	name            string
+	nadLister       nadlisters.NetworkAttachmentDefinitionLister
+	udnLister       userdefinednetworklister.UserDefinedNetworkLister
+	cudnLister      userdefinednetworklister.ClusterUserDefinedNetworkLister
+	namespaceLister corev1listers.NamespaceLister
+	controller      controller.Controller
+	recorder        record.EventRecorder
+
+	// networkController reconciles network specific controllers
+	networkController *networkController
 
 	// nads to network mapping
 	nads map[string]string
@@ -89,18 +62,18 @@ type NetAttachDefinitionController struct {
 	primaryNADs map[string]string
 }
 
-func NewNetAttachDefinitionController(
+func newController(
 	name string,
-	ncm NetworkControllerManager,
+	cm ControllerManager,
 	wf watchFactory,
 	recorder record.EventRecorder,
-) (*NetAttachDefinitionController, error) {
-	nadController := &NetAttachDefinitionController{
-		name:           fmt.Sprintf("[%s NAD controller]", name),
-		recorder:       recorder,
-		nads:           map[string]string{},
-		primaryNADs:    map[string]string{},
-		networkManager: newNetworkManager(name, ncm),
+) (*nadController, error) {
+	nadController := &nadController{
+		name:              fmt.Sprintf("[%s NAD controller]", name),
+		recorder:          recorder,
+		nads:              map[string]string{},
+		primaryNADs:       map[string]string{},
+		networkController: newNetworkController(name, cm),
 	}
 
 	config := &controller.ControllerConfig[nettypes.NetworkAttachmentDefinition]{
@@ -112,9 +85,9 @@ func NewNetAttachDefinitionController(
 
 	nadInformer := wf.NADInformer()
 	if nadInformer != nil {
-		nadController.netAttachDefLister = nadInformer.Lister()
+		nadController.nadLister = nadInformer.Lister()
 		config.Informer = nadInformer.Informer()
-		config.Lister = nadController.netAttachDefLister.List
+		config.Lister = nadController.nadLister.List
 	}
 	if util.IsNetworkSegmentationSupportEnabled() {
 		if udnInformer := wf.UserDefinedNetworkInformer(); udnInformer != nil {
@@ -136,7 +109,11 @@ func NewNetAttachDefinitionController(
 	return nadController, nil
 }
 
-func (nadController *NetAttachDefinitionController) Start() error {
+func (nadController *nadController) Interface() Interface {
+	return nadController
+}
+
+func (nadController *nadController) Start() error {
 	// initial sync here will ensure networks in network manager
 	// network manager will use this initial set of ensured networks to consider
 	// any other network stale on its own sync
@@ -148,7 +125,7 @@ func (nadController *NetAttachDefinitionController) Start() error {
 		return err
 	}
 
-	err = nadController.networkManager.Start()
+	err = nadController.networkController.Start()
 	if err != nil {
 		return err
 	}
@@ -157,14 +134,14 @@ func (nadController *NetAttachDefinitionController) Start() error {
 	return nil
 }
 
-func (nadController *NetAttachDefinitionController) Stop() {
+func (nadController *nadController) Stop() {
 	klog.Infof("%s: shutting down", nadController.name)
 	controller.Stop(nadController.controller)
-	nadController.networkManager.Stop()
+	nadController.networkController.Stop()
 }
 
-func (nadController *NetAttachDefinitionController) syncAll() (err error) {
-	existingNADs, err := nadController.netAttachDefLister.List(labels.Everything())
+func (nadController *nadController) syncAll() (err error) {
+	existingNADs, err := nadController.nadLister.List(labels.Everything())
 	if err != nil {
 		return fmt.Errorf("%s: failed to list NADs: %w", nadController.name, err)
 	}
@@ -188,7 +165,7 @@ func (nadController *NetAttachDefinitionController) syncAll() (err error) {
 	return nil
 }
 
-func (nadController *NetAttachDefinitionController) sync(key string) error {
+func (nadController *nadController) sync(key string) error {
 	startTime := time.Now()
 	klog.V(5).Infof("%s: sync NAD %s", nadController.name, key)
 	defer func() {
@@ -201,7 +178,7 @@ func (nadController *NetAttachDefinitionController) sync(key string) error {
 		return nil
 	}
 
-	nad, err := nadController.netAttachDefLister.NetworkAttachmentDefinitions(namespace).Get(name)
+	nad, err := nadController.nadLister.NetworkAttachmentDefinitions(namespace).Get(name)
 	if err != nil && !apierrors.IsNotFound(err) {
 		return err
 	}
@@ -209,7 +186,7 @@ func (nadController *NetAttachDefinitionController) sync(key string) error {
 	return nadController.syncNAD(key, nad)
 }
 
-func (nadController *NetAttachDefinitionController) syncNAD(key string, nad *nettypes.NetworkAttachmentDefinition) error {
+func (nadController *nadController) syncNAD(key string, nad *nettypes.NetworkAttachmentDefinition) error {
 	var nadNetworkName string
 	var nadNetwork, oldNetwork, ensureNetwork util.NetInfo
 	var err error
@@ -249,9 +226,9 @@ func (nadController *NetAttachDefinitionController) syncNAD(key string, nad *net
 
 	// the NAD refers to a different network than before
 	if nadNetworkName != nadController.nads[key] {
-		oldNetwork = nadController.networkManager.getNetwork(nadController.nads[key])
+		oldNetwork = nadController.networkController.getNetwork(nadController.nads[key])
 	}
-	currentNetwork := nadController.networkManager.getNetwork(nadNetworkName)
+	currentNetwork := nadController.networkController.getNetwork(nadNetworkName)
 
 	switch {
 	case currentNetwork == nil:
@@ -284,9 +261,9 @@ func (nadController *NetAttachDefinitionController) syncNAD(key string, nad *net
 		oldNetworkName := oldNetwork.GetNetworkName()
 		oldNetwork.DeleteNADs(key)
 		if len(oldNetwork.GetNADs()) == 0 {
-			nadController.networkManager.DeleteNetwork(oldNetworkName)
+			nadController.networkController.DeleteNetwork(oldNetworkName)
 		} else {
-			nadController.networkManager.EnsureNetwork(oldNetwork)
+			nadController.networkController.EnsureNetwork(oldNetwork)
 		}
 	}
 
@@ -318,7 +295,7 @@ func (nadController *NetAttachDefinitionController) syncNAD(key string, nad *net
 	}
 
 	// reconcile the network
-	nadController.networkManager.EnsureNetwork(ensureNetwork)
+	nadController.networkController.EnsureNetwork(ensureNetwork)
 	return nil
 }
 
@@ -336,7 +313,7 @@ func nadNeedsUpdate(oldNAD, newNAD *nettypes.NetworkAttachmentDefinition) bool {
 	return !reflect.DeepEqual(oldNAD.Spec, newNAD.Spec)
 }
 
-func (nadController *NetAttachDefinitionController) GetActiveNetworkForNamespace(namespace string) (util.NetInfo, error) {
+func (nadController *nadController) GetActiveNetworkForNamespace(namespace string) (util.NetInfo, error) {
 	if !util.IsNetworkSegmentationSupportEnabled() {
 		return &util.DefaultNetInfo{}, nil
 	}
@@ -351,7 +328,7 @@ func (nadController *NetAttachDefinitionController) GetActiveNetworkForNamespace
 			// map, but it doesn't exist in the nads map
 			panic("NAD Controller broken consistency between primary NADs and cached NADs")
 		}
-		network := nadController.networkManager.getNetwork(netName)
+		network := nadController.networkController.getNetwork(netName)
 		n := util.CopyNetInfo(network)
 		// update the returned netInfo copy to only have the primary NAD for this namespace
 		n.SetNADs(primaryNAD)

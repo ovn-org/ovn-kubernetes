@@ -17,7 +17,6 @@ import (
 
 	ipamclaimsapi "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/id"
-	idallocator "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/id"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip/subnet"
 	annotationalloc "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/pod"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/node"
@@ -25,7 +24,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	networkAttachDefController "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/persistentips"
 	objretry "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -61,11 +60,11 @@ type networkClusterController struct {
 	tunnelIDAllocator   id.Allocator
 	podAllocator        *pod.PodAllocator
 	nodeAllocator       *node.NodeAllocator
-	networkIDAllocator  idallocator.NamedAllocator
+	networkIDAllocator  id.NamedAllocator
 	ipamClaimReconciler *persistentips.IPAMClaimReconciler
 	subnetAllocator     subnet.Allocator
 
-	nadController *networkAttachDefController.NetAttachDefinitionController
+	networkManager networkmanager.Interface
 
 	// event recorder used to post events to k8s
 	recorder record.EventRecorder
@@ -82,9 +81,15 @@ type networkClusterController struct {
 	util.NetInfo
 }
 
-func newNetworkClusterController(networkIDAllocator idallocator.NamedAllocator, netInfo util.NetInfo,
-	ovnClient *util.OVNClusterManagerClientset, wf *factory.WatchFactory, recorder record.EventRecorder,
-	nadController *networkAttachDefController.NetAttachDefinitionController, errorReporter NetworkStatusReporter) *networkClusterController {
+func newNetworkClusterController(
+	networkIDAllocator id.NamedAllocator,
+	netInfo util.NetInfo,
+	ovnClient *util.OVNClusterManagerClientset,
+	wf *factory.WatchFactory,
+	recorder record.EventRecorder,
+	networkManager networkmanager.Interface,
+	errorReporter NetworkStatusReporter,
+) *networkClusterController {
 	kube := &kube.KubeOVN{
 		Kube: kube.Kube{
 			KClient: ovnClient.KubeClient,
@@ -102,7 +107,7 @@ func newNetworkClusterController(networkIDAllocator idallocator.NamedAllocator, 
 		wg:                 wg,
 		networkIDAllocator: networkIDAllocator,
 		recorder:           recorder,
-		nadController:      nadController,
+		networkManager:     networkManager,
 		statusReporter:     errorReporter,
 		nodeErrors:         make(map[string]string),
 		nodeErrorsLock:     sync.Mutex{},
@@ -114,7 +119,7 @@ func newNetworkClusterController(networkIDAllocator idallocator.NamedAllocator, 
 func newDefaultNetworkClusterController(netInfo util.NetInfo, ovnClient *util.OVNClusterManagerClientset, wf *factory.WatchFactory, recorder record.EventRecorder) *networkClusterController {
 	// use an allocator that can only allocate a single network ID for the
 	// defaiult network
-	networkIDAllocator, err := idallocator.NewIDAllocator(types.DefaultNetworkName, 1)
+	networkIDAllocator, err := id.NewIDAllocator(types.DefaultNetworkName, 1)
 	if err != nil {
 		panic(fmt.Errorf("could not build ID allocator for default network: %w", err))
 	}
@@ -125,7 +130,7 @@ func newDefaultNetworkClusterController(netInfo util.NetInfo, ovnClient *util.OV
 	}
 
 	namedIDAllocator := networkIDAllocator.ForName(types.DefaultNetworkName)
-	return newNetworkClusterController(namedIDAllocator, netInfo, ovnClient, wf, recorder, nil, nil)
+	return newNetworkClusterController(namedIDAllocator, netInfo, ovnClient, wf, recorder, networkmanager.Default().Interface(), nil)
 }
 
 func (ncc *networkClusterController) hasPodAllocation() bool {
@@ -250,8 +255,15 @@ func (ncc *networkClusterController) init() error {
 			ipamClaimsReconciler,
 		)
 
-		ncc.podAllocator = pod.NewPodAllocator(ncc.NetInfo, podAllocationAnnotator, ipAllocator,
-			ipamClaimsReconciler, ncc.nadController, ncc.recorder, ncc.tunnelIDAllocator)
+		ncc.podAllocator = pod.NewPodAllocator(
+			ncc.NetInfo,
+			podAllocationAnnotator,
+			ipAllocator,
+			ipamClaimsReconciler,
+			ncc.networkManager,
+			ncc.recorder,
+			ncc.tunnelIDAllocator,
+		)
 		if err := ncc.podAllocator.Init(); err != nil {
 			return fmt.Errorf("failed to initialize pod ip allocator: %w", err)
 		}

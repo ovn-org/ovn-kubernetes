@@ -22,7 +22,7 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
-	networkAttachDefController "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -43,7 +43,7 @@ type Controller struct {
 	endpointSlicesSynced cache.InformerSynced
 	podLister            corelisters.PodLister
 	podsSynced           cache.InformerSynced
-	nadController        *networkAttachDefController.NetAttachDefinitionController
+	networkManager       networkmanager.Interface
 	cancel               context.CancelFunc
 }
 
@@ -111,14 +111,16 @@ func (c *Controller) onEndpointSliceAdd(obj interface{}) {
 
 func NewController(
 	ovnClient *util.OVNClusterManagerClientset,
-	wf *factory.WatchFactory, nadController *networkAttachDefController.NetAttachDefinitionController) (*Controller, error) {
+	wf *factory.WatchFactory,
+	networkManager networkmanager.Interface,
+) (*Controller, error) {
 
 	wg := &sync.WaitGroup{}
 	c := &Controller{
-		kubeClient:    ovnClient.KubeClient,
-		wg:            wg,
-		name:          types.EndpointSliceMirrorControllerName,
-		nadController: nadController,
+		kubeClient:     ovnClient.KubeClient,
+		wg:             wg,
+		name:           types.EndpointSliceMirrorControllerName,
+		networkManager: networkManager,
 	}
 
 	c.queue = workqueue.NewTypedRateLimitingQueueWithConfig(
@@ -244,7 +246,7 @@ func (c *Controller) syncDefaultEndpointSlice(ctx context.Context, key string) e
 		return err
 	}
 
-	namespacePrimaryNetwork, err := c.nadController.GetActiveNetworkForNamespace(namespace)
+	namespacePrimaryNetwork, err := c.networkManager.GetActiveNetworkForNamespace(namespace)
 	if err != nil {
 		return err
 	}

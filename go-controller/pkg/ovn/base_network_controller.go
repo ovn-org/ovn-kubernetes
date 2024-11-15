@@ -20,7 +20,7 @@ import (
 	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/observability"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
@@ -29,7 +29,6 @@ import (
 	ovnretry "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
@@ -165,8 +164,9 @@ type BaseNetworkController struct {
 	// to the cluster router. Please see zone_interconnect/interconnect_handler.go for more details.
 	zoneICHandler *zoneic.ZoneInterconnectHandler
 
-	// nadController used for getting network information for UDNs
-	nadController nad.NADController
+	// networkManager used for getting network information
+	networkManager networkmanager.Interface
+
 	// releasedPodsBeforeStartup tracks pods per NAD (map of NADs to pods UIDs)
 	// might have been already be released on startup
 	releasedPodsBeforeStartup  map[string]sets.Set[string]
@@ -655,8 +655,8 @@ func (bnc *BaseNetworkController) syncNodeManagementPort(node *kapi.Node, switch
 			}
 			if bnc.IsSecondary() {
 				lrsr.ExternalIDs = map[string]string{
-					ovntypes.NetworkExternalID:  bnc.GetNetworkName(),
-					ovntypes.TopologyExternalID: bnc.TopologyType(),
+					types.NetworkExternalID:  bnc.GetNetworkName(),
+					types.TopologyExternalID: bnc.TopologyType(),
 				}
 			}
 			p := func(item *nbdb.LogicalRouterStaticRoute) bool {
@@ -821,11 +821,6 @@ func (bnc *BaseNetworkController) isLocalZoneNode(node *kapi.Node) bool {
 	return util.GetNodeZone(node) == bnc.zone
 }
 
-// and is a wrapper around GetActiveNetworkForNamespace
-func (bnc *BaseNetworkController) getActiveNetworkForNamespace(namespace string) (util.NetInfo, error) {
-	return bnc.nadController.GetActiveNetworkForNamespace(namespace)
-}
-
 // GetNetworkRole returns the role of this controller's
 // network for the given pod
 // Expected values are:
@@ -859,7 +854,7 @@ func (bnc *BaseNetworkController) GetNetworkRole(pod *kapi.Pod) (string, error) 
 		}
 		return types.NetworkRoleSecondary, nil
 	}
-	activeNetwork, err := bnc.getActiveNetworkForNamespace(pod.Namespace)
+	activeNetwork, err := bnc.networkManager.GetActiveNetworkForNamespace(pod.Namespace)
 	if err != nil {
 		if util.IsUnprocessedActiveNetworkError(err) {
 			bnc.recordPodErrorEvent(pod, err)
@@ -963,7 +958,7 @@ func (bnc *BaseNetworkController) AddResourceCommon(objType reflect.Type, obj in
 		if !ok {
 			return fmt.Errorf("could not cast %T object to *knet.NetworkPolicy", obj)
 		}
-		netinfo, err := bnc.getActiveNetworkForNamespace(np.Namespace)
+		netinfo, err := bnc.networkManager.GetActiveNetworkForNamespace(np.Namespace)
 		if err != nil {
 			return fmt.Errorf("could not get active network for namespace %s: %v", np.Namespace, err)
 		}
@@ -988,7 +983,7 @@ func (bnc *BaseNetworkController) DeleteResourceCommon(objType reflect.Type, obj
 		if !ok {
 			return fmt.Errorf("could not cast obj of type %T to *knet.NetworkPolicy", obj)
 		}
-		netinfo, err := bnc.getActiveNetworkForNamespace(knp.Namespace)
+		netinfo, err := bnc.networkManager.GetActiveNetworkForNamespace(knp.Namespace)
 		if err != nil {
 			return fmt.Errorf("could not get active network for namespace %s: %v", knp.Namespace, err)
 		}
@@ -1005,7 +1000,7 @@ func (bnc *BaseNetworkController) DeleteResourceCommon(objType reflect.Type, obj
 func initLoadBalancerGroups(nbClient libovsdbclient.Client, netInfo util.NetInfo) (
 	clusterLoadBalancerGroupUUID, switchLoadBalancerGroupUUID, routerLoadBalancerGroupUUID string, err error) {
 
-	loadBalancerGroupName := netInfo.GetNetworkScopedLoadBalancerGroupName(ovntypes.ClusterLBGroupName)
+	loadBalancerGroupName := netInfo.GetNetworkScopedLoadBalancerGroupName(types.ClusterLBGroupName)
 	clusterLBGroup := nbdb.LoadBalancerGroup{Name: loadBalancerGroupName}
 	ops, err := libovsdbops.CreateOrUpdateLoadBalancerGroupOps(nbClient, nil, &clusterLBGroup)
 	if err != nil {
@@ -1013,7 +1008,7 @@ func initLoadBalancerGroups(nbClient libovsdbclient.Client, netInfo util.NetInfo
 		return
 	}
 
-	loadBalancerGroupName = netInfo.GetNetworkScopedLoadBalancerGroupName(ovntypes.ClusterSwitchLBGroupName)
+	loadBalancerGroupName = netInfo.GetNetworkScopedLoadBalancerGroupName(types.ClusterSwitchLBGroupName)
 	clusterSwitchLBGroup := nbdb.LoadBalancerGroup{Name: loadBalancerGroupName}
 	ops, err = libovsdbops.CreateOrUpdateLoadBalancerGroupOps(nbClient, ops, &clusterSwitchLBGroup)
 	if err != nil {
@@ -1021,7 +1016,7 @@ func initLoadBalancerGroups(nbClient libovsdbclient.Client, netInfo util.NetInfo
 		return
 	}
 
-	loadBalancerGroupName = netInfo.GetNetworkScopedLoadBalancerGroupName(ovntypes.ClusterRouterLBGroupName)
+	loadBalancerGroupName = netInfo.GetNetworkScopedLoadBalancerGroupName(types.ClusterRouterLBGroupName)
 	clusterRouterLBGroup := nbdb.LoadBalancerGroup{Name: loadBalancerGroupName}
 	ops, err = libovsdbops.CreateOrUpdateLoadBalancerGroupOps(nbClient, ops, &clusterRouterLBGroup)
 	if err != nil {
