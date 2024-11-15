@@ -115,7 +115,9 @@ type DefaultNodeNetworkController struct {
 
 	apbExternalRouteNodeController *apbroute.ExternalGatewayNodeController
 
-	networkManager networkmanager.Interface
+	networkManager     networkmanager.Interface
+	egressIPController *egressip.Controller
+	linkManager        *linkmanager.Controller
 
 	cniServer *cni.Server
 
@@ -196,6 +198,7 @@ func (oc *DefaultNodeNetworkController) shouldReconcileNetworkChange(old, new ut
 func (oc *DefaultNodeNetworkController) Reconcile(netInfo util.NetInfo) error {
 	// inspect changes first
 	reconcilePodNetwork := oc.shouldReconcileNetworkChange(oc.ReconcilableNetInfo, netInfo)
+	reconcileEgressIP := oc.egressIPController.ShouldReconcileNetworkChange(oc.ReconcilableNetInfo, netInfo)
 
 	// then update network information, point of no return
 	err := util.ReconcileNetInfo(oc.ReconcilableNetInfo, netInfo)
@@ -214,6 +217,10 @@ func (oc *DefaultNodeNetworkController) Reconcile(netInfo util.NetInfo) error {
 			mgmtPort.SetPodNetworkAdvertised(isPodNetworkAdvertisedAtNode)
 			mgmtPort.Reconcile()
 		}
+	}
+
+	if reconcileEgressIP {
+		oc.egressIPController.ReconcileNetwork(oc.GetNetworkName())
 	}
 
 	return nil
@@ -925,6 +932,21 @@ func (nc *DefaultNodeNetworkController) PreStart(ctx context.Context) error {
 	gatewaySetup.sbZone = sbZone
 	nc.gatewaySetup = gatewaySetup
 
+	nc.linkManager = linkmanager.NewController(nc.name, config.IPv4Mode, config.IPv6Mode, nc.updateGatewayMAC)
+
+	if config.OVNKubernetesFeature.EnableEgressIP && !util.PlatformTypeIsEgressIPCloudProvider() {
+		nc.egressIPController = egressip.NewController(
+			nc.Kube,
+			nc.watchFactory,
+			nc.networkManager,
+			nc.routeManager,
+			config.IPv4Mode,
+			config.IPv6Mode,
+			nc.name,
+			nc.linkManager,
+		)
+	}
+
 	return nil
 
 }
@@ -1249,24 +1271,14 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		}
 	}
 
-	// create link manager, will work for egress IP as well as monitoring MAC changes to default gw bridge
-	linkManager := linkmanager.NewController(nc.name, config.IPv4Mode, config.IPv6Mode, nc.updateGatewayMAC)
-
-	if config.OVNKubernetesFeature.EnableEgressIP && !util.PlatformTypeIsEgressIPCloudProvider() {
-		c, err := egressip.NewController(nc.Kube, nc.watchFactory.EgressIPInformer(), nc.watchFactory.NodeInformer(),
-			nc.watchFactory.NamespaceInformer(), nc.watchFactory.PodCoreInformer(), nc.routeManager, config.IPv4Mode,
-			config.IPv6Mode, nc.name, linkManager)
-		if err != nil {
-			return fmt.Errorf("failed to create egress IP controller: %v", err)
-		}
-		if err = c.Run(nc.stopChan, nc.wg, 1); err != nil {
+	if nc.egressIPController != nil {
+		if err = nc.egressIPController.Run(nc.stopChan, nc.wg, 1); err != nil {
 			return fmt.Errorf("failed to run egress IP controller: %v", err)
 		}
-	} else {
-		klog.Infof("Egress IP for secondary host network is disabled")
 	}
 
-	linkManager.Run(nc.stopChan, nc.wg)
+	// run link manager, will work for egress IP as well as monitoring MAC changes to default gw bridge
+	nc.linkManager.Run(nc.stopChan, nc.wg)
 
 	nc.wg.Add(1)
 	go func() {
