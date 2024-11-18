@@ -45,7 +45,11 @@ func (e *ACLEvent) String() string {
 	case libovsdbops.NetpolNodeOwnerType:
 		msg = fmt.Sprintf("default allow from local node policy, direction %s", e.Direction)
 	case libovsdbops.NetworkPolicyOwnerType:
-		msg = fmt.Sprintf("network policy %s, direction %s", e.Name, e.Direction)
+		if e.Namespace != "" {
+			msg = fmt.Sprintf("network policy %s in namespace %s, direction %s", e.Name, e.Namespace, e.Direction)
+		} else {
+			msg = fmt.Sprintf("network policy %s, direction %s", e.Name, e.Direction)
+		}
 	case libovsdbops.NetpolNamespaceOwnerType:
 		msg = fmt.Sprintf("network policies isolation in namespace %s, direction %s", e.Namespace, e.Direction)
 	case libovsdbops.EgressFirewallOwnerType:
