@@ -23,6 +23,16 @@ func TestCreateOrUpdateACL(t *testing.T) {
 	event = newACLEvent(&nbdb.ACL{
 		Action: nbdb.ACLActionAllow,
 		ExternalIDs: map[string]string{
+			libovsdbops.OwnerTypeKey.String():       libovsdbops.NetworkPolicyOwnerType,
+			libovsdbops.ObjectNameKey.String():      "bar:foo",
+			libovsdbops.PolicyDirectionKey.String(): string(libovsdbutil.ACLIngress),
+		},
+	})
+	assert.Equal(t, "Allowed by network policy foo in namespace bar, direction Ingress", event.String())
+
+	event = newACLEvent(&nbdb.ACL{
+		Action: nbdb.ACLActionAllow,
+		ExternalIDs: map[string]string{
 			libovsdbops.OwnerTypeKey.String():       libovsdbops.AdminNetworkPolicyOwnerType,
 			libovsdbops.ObjectNameKey.String():      "foo",
 			libovsdbops.PolicyDirectionKey.String(): string(libovsdbutil.ACLIngress),

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"strings"
 
 	"github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/observability-lib/model"
@@ -170,7 +171,17 @@ func newACLEvent(o *nbdb.ACL) *model.ACLEvent {
 		Actor:  actor,
 	}
 	switch actor {
-	case libovsdbops.AdminNetworkPolicyOwnerType, libovsdbops.BaselineAdminNetworkPolicyOwnerType, libovsdbops.NetworkPolicyOwnerType:
+	case libovsdbops.NetworkPolicyOwnerType:
+		nsname := strings.SplitN(o.ExternalIDs[libovsdbops.ObjectNameKey.String()], ":", 2)
+		if len(nsname) == 2 {
+			event.Namespace = nsname[0]
+			event.Name = nsname[1]
+		} else {
+			// do not split (which use cases?)
+			event.Name = o.ExternalIDs[libovsdbops.ObjectNameKey.String()]
+		}
+		event.Direction = o.ExternalIDs[libovsdbops.PolicyDirectionKey.String()]
+	case libovsdbops.AdminNetworkPolicyOwnerType, libovsdbops.BaselineAdminNetworkPolicyOwnerType:
 		event.Name = o.ExternalIDs[libovsdbops.ObjectNameKey.String()]
 		event.Direction = o.ExternalIDs[libovsdbops.PolicyDirectionKey.String()]
 	case libovsdbops.MulticastNamespaceOwnerType, libovsdbops.NetpolNamespaceOwnerType:
