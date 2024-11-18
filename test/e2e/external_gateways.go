@@ -1403,7 +1403,9 @@ var _ = ginkgo.Describe("External Gateway", func() {
 					fmt.Printf("Pod %s definition:\n%v\n", srcPingPodName, srcPod)
 
 					// Enter node podNode and print the output of the command "ip address"
-					fmt.Printf("'ip address' on node %s:\n%s\n", srcPod.Spec.NodeName, runCommandOnNode(srcPod.Spec.NodeName, "ip", "address"))
+					ipAddressOutput, err := runCommandOnNode(srcPod.Spec.NodeName, "ip", "address")
+					framework.ExpectNoError(err, "failed to run 'ip address' on node %s, err=%v", srcPod.Spec.NodeName, err)
+					fmt.Printf("'ip address' on node %s:\n%s\n", srcPod.Spec.NodeName, ipAddressOutput)
 
 					// Run retrieve the yaml of the node where srcPingPod runs, to get the node IP (even though we're interested in the IP of breth1)
 					node, err := f.ClientSet.CoreV1().Nodes().Get(context.TODO(), srcPod.Spec.NodeName, metav1.GetOptions{})
@@ -1426,17 +1428,34 @@ var _ = ginkgo.Describe("External Gateway", func() {
 					if addresses.srcPodIP == "" || addresses.nodeIP == "" {
 						skipper.Skipf("Skipping as pod ip / node ip are not set pod ip %s node ip %s", addresses.srcPodIP, addresses.nodeIP)
 					}
+					srcPod, err := f.ClientSet.CoreV1().Pods(f.Namespace.Name).Get(context.TODO(), srcPingPodName, metav1.GetOptions{})
+					if err != nil {
+						fmt.Printf("Failed to get pod %s. err=%v\n", srcPingPodName, err)
+					}
+
 					createAPBExternalRouteCRWithDynamicHop(defaultPolicyName, f.Namespace.Name, servingNamespace, false, addresses.gatewayIPs)
 
 					ginkgo.By(fmt.Sprintf("Verifying connectivity to the pod [%s] from external gateways ****", addresses.srcPodIP)) // fails here
 					for _, gwContainer := range gwContainers {
+						tcpDumpARPSync := sync.WaitGroup{}
+						tcpDumpARPSync.Add(1)
+						// start dumping ARP packets
+						fmt.Printf("Timestamp before starting tcpdump on %s: %v\n", srcPod.Spec.NodeName, time.Now())
+						go dumpARPPacketsOnNode(srcPod.Spec.NodeName, &tcpDumpARPSync)
 						// Ping from a common IP address that exists on both gateways to ensure test coverage where ingress reply goes back to the same host.
+						time.Sleep(1 * time.Second) // allow tcpdump to start
+						fmt.Printf("Timestamp before starting to ping: %v\n", time.Now())
 						_, err := runCommand(containerRuntime, "exec", gwContainer, "ping", "-I", addresses.targetIPs[0], "-c", testTimeout, addresses.srcPodIP)
 						// if err != nil {
 						// 	// fmt.Printf("Failed to ping %s from container %s. Sleeping now! err=%v", addresses.srcPodIP, gwContainer, err)
 						// 	// time.Sleep(999999999 * time.Second)
 						// 	fmt.Printf("Failed to ping %s from container %s. err=%v", addresses.srcPodIP, gwContainer, err)
 						// }
+						fmt.Printf("Timestamp when ping is done: %v\n", time.Now())
+
+						tcpDumpARPSync.Wait()
+						fmt.Printf("Timestamp when tcpdump is done: %v\n", time.Now())
+
 						framework.ExpectNoError(err, "Failed to ping %s from container %s", addresses.srcPodIP, gwContainer)
 					}
 
@@ -3312,7 +3331,7 @@ func pokeHostnameViaNC(podName, namespace, protocol, target string, port int) st
 }
 
 // runCommandOnNode runs a command on a node and returns the output
-func runCommandOnNode(nodeName string, cmd ...string) string {
+func runCommandOnNode(nodeName string, cmd ...string) (string, error) {
 	// find the ovs pod on the input node
 	args := []string{"get", "pods", "--selector=app=ovs-node", "--field-selector", fmt.Sprintf("spec.nodeName=%s", nodeName), "-o", "jsonpath={.items..metadata.name}"}
 	ovsPodName, err := e2ekubectl.RunKubectl(ovnNamespace, args...)
@@ -3321,8 +3340,11 @@ func runCommandOnNode(nodeName string, cmd ...string) string {
 	// run the input command on the host-networked ovs pod
 	args = append([]string{"exec", ovsPodName, "--"}, cmd...)
 	output, err := e2ekubectl.RunKubectl(ovnNamespace, args...)
-	framework.ExpectNoError(err, "failed to run command %s on node %s", cmd, nodeName)
-	return output
+	if err != nil {
+		fmt.Printf("\nFailed to run command %s on node %s: err=%v\n", cmd, nodeName, err) // will handle the error in the caller function
+	}
+	return output, err
+
 }
 
 // pokeConntrackEntries returns the number of conntrack entries that match the provided pattern, protocol and podIP
@@ -3449,6 +3471,24 @@ func checkReceivedPacketsOnContainer(container, srcPodName, link string, filter 
 	_, err := runCommand(args...)
 	framework.ExpectNoError(err, "Failed to detect packets from %s on gateway %s", srcPodName, container)
 	framework.Logf("Packet successfully detected on gateway %s", container)
+}
+
+func dumpARPPacketsOnNode(nodeName string, wg *sync.WaitGroup) {
+	defer ginkgo.GinkgoRecover()
+	defer wg.Done()
+
+	args := []string{"timeout", "20s", "tcpdump", "-vnni", "any", "arp"}
+	output, err := runCommandOnNode(nodeName, args...)
+	framework.Logf("tcpdump output from node %s: %s", nodeName, output)
+	// check the error code in err: if 124, the timeout commnad exited as expected, so it's not an error. Otherwise, it's an error.
+	if err != nil {
+		// if exitErr, ok := err.(*exec.ExitError); ok {
+		// 	if exitErr.ExitCode() != 124 { // 124 is timeout command exit code, as expected
+		// 		framework.ExpectNoError(err, "Failed to detect packets on pod %s", nodeName)
+		// 	}
+		// }
+		framework.Logf("tcpdump from node %s: error=%v", nodeName, err)
+	}
 }
 
 func resetGatewayAnnotations(f *framework.Framework) {
