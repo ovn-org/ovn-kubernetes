@@ -77,40 +77,60 @@ func (e markIPs) containsIP(ip net.IP) bool {
 type markIPsCache struct {
 	mu          sync.Mutex
 	hasSyncOnce bool
-	cache       markIPs
+	markToIPs   markIPs
+	IPToMark    map[string]int
 }
 
 func newMarkIPsCache() *markIPsCache {
 	return &markIPsCache{
 		mu: sync.Mutex{},
-		cache: markIPs{
+		markToIPs: markIPs{
 			v4: make(map[int]string),
 			v6: make(map[int]string),
 		},
+		IPToMark: map[string]int{},
 	}
 }
 
 func (mic *markIPsCache) IsIPPresent(ip net.IP) bool {
 	mic.mu.Lock()
 	defer mic.mu.Unlock()
-	return mic.cache.containsIP(ip)
+	if ip == nil {
+		return false
+	}
+	_, isFound := mic.IPToMark[ip.String()]
+	return isFound
 }
 
 func (mic *markIPsCache) insertMarkIP(pktMark util.EgressIPMark, ip net.IP) {
 	mic.mu.Lock()
-	mic.cache.insert(pktMark, ip)
-	mic.mu.Unlock()
+	defer mic.mu.Unlock()
+	if ip == nil {
+		return
+	}
+	mic.markToIPs.insert(pktMark, ip)
+	mic.IPToMark[ip.String()] = pktMark.ToInt()
 }
 
 func (mic *markIPsCache) deleteMarkIP(pktMark util.EgressIPMark, ip net.IP) {
 	mic.mu.Lock()
-	mic.cache.delete(pktMark, ip)
-	mic.mu.Unlock()
+	defer mic.mu.Unlock()
+	if ip == nil {
+		return
+	}
+	mic.markToIPs.delete(pktMark, ip)
+	delete(mic.IPToMark, ip.String())
 }
 
 func (mic *markIPsCache) replaceAll(markIPs markIPs) {
 	mic.mu.Lock()
-	mic.cache = markIPs
+	mic.markToIPs = markIPs
+	for mark, ipv4 := range markIPs.v4 {
+		mic.IPToMark[ipv4] = mark
+	}
+	for mark, ipv6 := range markIPs.v6 {
+		mic.IPToMark[ipv6] = mark
+	}
 	mic.mu.Unlock()
 }
 
@@ -118,7 +138,7 @@ func (mic *markIPsCache) GetIPv4() map[int]string {
 	mic.mu.Lock()
 	defer mic.mu.Unlock()
 	dupe := make(map[int]string)
-	for key, value := range mic.cache.v4 {
+	for key, value := range mic.markToIPs.v4 {
 		if value == "" {
 			continue
 		}
@@ -131,7 +151,7 @@ func (mic *markIPsCache) GetIPv6() map[int]string {
 	mic.mu.Lock()
 	defer mic.mu.Unlock()
 	dupe := make(map[int]string)
-	for key, value := range mic.cache.v6 {
+	for key, value := range mic.markToIPs.v6 {
 		if value == "" {
 			continue
 		}
