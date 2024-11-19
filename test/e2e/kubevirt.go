@@ -299,51 +299,59 @@ var _ = Describe("Kubevirt Virtual Machines", func() {
 			}
 			return nil
 		}
+		checkIperfTraffic = func(vmi *kubevirtv1.VirtualMachineInstance, iperfLogFile, stage string) {
+			GinkgoHelper()
+			// Check the last line eventually show traffic flowing
+			Eventually(func() (string, error) {
+				iperfLog, err := kubevirt.RunCommand(vmi, fmt.Sprintf("cat %s", iperfLogFile), 2*time.Second)
+				if err != nil {
+					return "", err
+				}
+				iperfLogLines := strings.Split(iperfLog, "\n")
+				if len(iperfLogLines) == 0 {
+					return "", nil
+				}
+				return iperfLogLines[len(iperfLogLines)-1], nil
+			}).
+				WithPolling(time.Second).
+				WithTimeout(3*time.Minute).
+				Should(
+					SatisfyAll(
+						ContainSubstring(" sec "),
+						Not(ContainSubstring("0.00 Bytes  0.00 bits/sec")),
+					),
+					stage+": failed checking iperf3 traffic at "+iperfLogFile,
+				)
+		}
 
 		checkEastWestIperfTraffic = func(vmi *kubevirtv1.VirtualMachineInstance, podIPsByName map[string][]string, stage string) {
 			GinkgoHelper()
 			Expect(podIPsByName).ToNot(BeEmpty())
 			for podName, podIPs := range podIPsByName {
 				for _, podIP := range podIPs {
-					// Check the last line eventually show traffic flowing
-					Eventually(func() (string, error) {
-						iperfLog, err := kubevirt.RunCommand(vmi, fmt.Sprintf("cat /tmp/%s_%s_iperf3.log", podName, podIP), 2*time.Second)
-						if err != nil {
-							return "", err
-						}
-						iperfLogLines := strings.Split(iperfLog, "\n")
-						if len(iperfLogLines) == 0 {
-							return "", nil
-						}
-						return iperfLogLines[len(iperfLogLines)-1], nil
-					}).
-						WithPolling(time.Second).
-						WithTimeout(3 * time.Minute).
-						Should(
-							SatisfyAll(
-								ContainSubstring(" sec "),
-								Not(ContainSubstring("0.00 Bytes  0.00 bits/sec")),
-							),
-						)
+					checkIperfTraffic(vmi, fmt.Sprintf("/tmp/%s_%s_iperf3.log", podName, podIP), stage)
 				}
 			}
 		}
 
-		checkNorthSouthIperfTraffic = func(vmi *kubevirtv1.VirtualMachineInstance, addresses []string, stage string) {
+		startNorthSouthIperfTraffic = func(vmi *kubevirtv1.VirtualMachineInstance, externalIPs []string, stage string) error {
 			GinkgoHelper()
-			Expect(addresses).ToNot(BeEmpty())
+			Expect(externalIPs).ToNot(BeEmpty())
 			polling := 15 * time.Second
-			timeout := time.Minute
-			for _, address := range addresses {
-				output := ""
-				Eventually(func() error {
-					var err error
-					output, err = kubevirt.RunCommand(vmi, fmt.Sprintf("iperf3 -t 1 -c %s", address), polling)
-					return err
-				}).
-					WithPolling(polling).
-					WithTimeout(timeout).
-					Should(Succeed(), func() string { return stage + ": external server : " + output })
+			for _, ip := range externalIPs {
+				output, err := kubevirt.RunCommand(vmi, fmt.Sprintf("iperf3 -t 0 -c %[1]s --logfile /tmp/egress_test_%[1]s_iperf3.log &", ip), polling)
+				if err != nil {
+					return fmt.Errorf("%s: %w", output, err)
+				}
+			}
+			return nil
+		}
+
+		checkNorthSouthIperfTraffic = func(vmi *kubevirtv1.VirtualMachineInstance, externalIPs []string, stage string) {
+			GinkgoHelper()
+			Expect(externalIPs).ToNot(BeEmpty())
+			for _, ip := range externalIPs {
+				checkIperfTraffic(vmi, fmt.Sprintf("/tmp/egress_test_%s_iperf3.log", ip), stage)
 			}
 		}
 
@@ -1055,12 +1063,12 @@ sleep infinity
 			httpServerTestPods = updatePods(httpServerTestPods)
 		}
 
-		prepareIperfServerExternalContainer = func(name, args string) []string {
+		prepareIperfServerExternalContainers = func(name string) []string {
 			externalIpv4, externalIpv6 := createClusterExternalContainer(
 				name,
 				iperf3Image,
 				[]string{"--network", "kind", "--entrypoint", "/bin/bash"},
-				[]string{"-c", "iperf3 -s " + args},
+				[]string{"-c", iperfServerScript},
 			)
 			externalAddresses := []string{}
 			if externalIpv4 != "" && isIPv4Supported() {
@@ -1414,9 +1422,10 @@ chpasswd: { expire: False }`
 			Expect(err).ToNot(HaveOccurred())
 
 			externalContainerName := namespace + "-iperf-server"
-			externalAddresses := prepareIperfServerExternalContainer(externalContainerName, "" /*iperfServerArgs*/)
+			externalAddresses := prepareIperfServerExternalContainers(externalContainerName)
 			DeferCleanup(func() {
-				deleteClusterExternalContainer(externalContainerName)
+				deleteClusterExternalContainer(externalContainerName + "-ipv4")
+				deleteClusterExternalContainer(externalContainerName + "-ipv6")
 			})
 
 			vmiName := td.resource.cmd()
@@ -1474,6 +1483,7 @@ chpasswd: { expire: False }`
 			checkEastWestIperfTraffic(vmi, testPodsIPs, step)
 			if td.role == "primary" {
 				step = by(vmi.Name, fmt.Sprintf("Check north/south traffic before %s %s", td.resource.description, td.test.description))
+				startNorthSouthIperfTraffic(vmi, externalAddresses, step)
 				checkNorthSouthIperfTraffic(vmi, externalAddresses, step)
 			}
 
@@ -1497,6 +1507,9 @@ chpasswd: { expire: False }`
 			if td.test.description == restart.description {
 				// At restart we need re-connect
 				Expect(startEastWestIperfTraffic(vmi, testPodsIPs, step)).To(Succeed(), step)
+				if td.role == "primary" {
+					startNorthSouthIperfTraffic(vmi, externalAddresses, step)
+				}
 			}
 			checkEastWestIperfTraffic(vmi, testPodsIPs, step)
 			if td.role == "primary" {
