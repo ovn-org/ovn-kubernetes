@@ -290,7 +290,7 @@ var _ = Describe("OVN Multi-Homed pod operations", func() {
 						expectedGWEntities(podInfo.nodeName, netInfo.hostsubnets, networkConfig, *gwConfig)...)
 					initialDB.NBData = append(
 						initialDB.NBData,
-						expectedLayer3EgressEntities(networkConfig, *gwConfig, ovntest.MustParseIPNet(netInfo.hostsubnets))...)
+						expectedLayer3EgressEntities(networkConfig, *gwConfig, ovntest.MustParseIPNet(netInfo.hostsubnets), ovntest.MustParseIPNet(netInfo.clustersubnets))...)
 				}
 				initialDB.NBData = append(initialDB.NBData, nbZone)
 
@@ -728,7 +728,7 @@ func expectedLogicalRouterPort(lrpName string, netInfo util.NetInfo, options map
 	}
 }
 
-func expectedLayer3EgressEntities(netInfo util.NetInfo, gwConfig util.L3GatewayConfig, nodeSubnet *net.IPNet) []libovsdbtest.TestData {
+func expectedLayer3EgressEntities(netInfo util.NetInfo, gwConfig util.L3GatewayConfig, nodeSubnet, clusterSubnet *net.IPNet) []libovsdbtest.TestData {
 	const (
 		routerPolicyUUID1 = "lrpol1-UUID"
 		routerPolicyUUID2 = "lrpol2-UUID"
@@ -742,7 +742,7 @@ func expectedLayer3EgressEntities(netInfo util.NetInfo, gwConfig util.L3GatewayC
 	rtosLRPName := fmt.Sprintf("%s%s", ovntypes.RouterToSwitchPrefix, netInfo.GetNetworkScopedName(nodeName))
 	rtosLRPUUID := rtosLRPName + "-UUID"
 	nodeIP := gwConfig.IPAddresses[0].IP.String()
-	masqSNAT := newNATEntry(masqSNATUUID1, "169.254.169.14", nodeSubnet.String(), standardNonDefaultNetworkExtIDs(netInfo), "")
+	masqSNAT := newNATEntry(masqSNATUUID1, "169.254.169.14", clusterSubnet.String(), standardNonDefaultNetworkExtIDs(netInfo), "")
 	masqSNAT.Match = getMasqueradeManagementIPSNATMatch(dummyMACAddr)
 	masqSNAT.LogicalPort = ptr.To(fmt.Sprintf("rtos-%s_%s", netInfo.GetNetworkName(), nodeName))
 	if !config.OVNKubernetesFeature.EnableInterconnect {

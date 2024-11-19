@@ -1963,8 +1963,8 @@ spec:
 	   26. Check connectivity from the other pod to an external "node" on the secondary host network and verify the expected src IPs
 	*/
 	table.DescribeTable("[secondary-host-eip] Using different methods to disable a node or pod availability for egress", func(egressIPIP1, egressIPIP2 string) {
-		if netConfigParams.networkName != types.DefaultNetworkName {
-			ginkgo.Skip("Unsupported for UDNs")
+		if netConfigParams.topology == types.Layer2Topology || netConfigParams.topology == types.LocalnetTopology {
+			ginkgo.Skip("Unsupported for UDNs layer 2 or localnet")
 		}
 		// get v4, v6 from eips
 		// check that node has both of them
@@ -2206,8 +2206,8 @@ spec:
 	   28. Check connectivity both pods to an external "node" on the secondary host network and verify the src IP is the expected egressIP
 	*/
 	ginkgo.It("[secondary-host-eip] Using different methods to disable a node or pod availability for egress", func() {
-		if netConfigParams.networkName != types.DefaultNetworkName {
-			ginkgo.Skip("Unsupported for UDNs")
+		if netConfigParams.topology == types.Layer2Topology || netConfigParams.topology == types.LocalnetTopology {
+			ginkgo.Skip("Unsupported for UDNs layer 2 or localnet")
 		}
 		if utilnet.IsIPv6(net.ParseIP(egress1Node.nodeIP)) {
 			ginkgo.Skip("Node does not have IPv4 address")
@@ -2460,8 +2460,8 @@ spec:
 	// 6. Check connectivity to the host on the secondary host network from the pod selected by the other EgressIP
 	// 7. Check connectivity to the host on the OVN network from the pod not selected by EgressIP
 	ginkgo.It("[secondary-host-eip] Multiple EgressIP objects and their Egress IP hosted on the same interface", func() {
-		if netConfigParams.networkName != types.DefaultNetworkName {
-			ginkgo.Skip("Unsupported for UDNs")
+		if netConfigParams.topology == types.Layer2Topology || netConfigParams.topology == types.LocalnetTopology {
+			ginkgo.Skip("Unsupported for UDNs layer 2 or localnet")
 		}
 		var egressIP1, egressIP2 string
 		if utilnet.IsIPv6(net.ParseIP(egress1Node.nodeIP)) {
@@ -2586,8 +2586,8 @@ spec:
 		if !isKernelModuleLoaded(egress1Node.name, "vrf") {
 			ginkgo.Skip("Node doesn't have VRF kernel module loaded")
 		}
-		if netConfigParams.networkName != types.DefaultNetworkName {
-			ginkgo.Skip("Unsupported for UDNs")
+		if netConfigParams.topology == types.Layer2Topology || netConfigParams.topology == types.LocalnetTopology {
+			ginkgo.Skip("Unsupported for UDNs layer 2 or localnet")
 		}
 		var egressIP1 string
 		isV6Node := utilnet.IsIPv6(net.ParseIP(egress1Node.nodeIP))

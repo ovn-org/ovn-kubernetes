@@ -22,6 +22,7 @@ import (
 // podIPConfig holds pod specific info to implement egress IP for secondary host networks for a single pod IP. A pod may
 // contain multiple IPs (one for single stack, 2 for dual stack).
 type podIPConfig struct {
+	udn         bool
 	failed      bool // used for retry
 	v6          bool
 	ipTableRule iptables.RuleArg
@@ -34,6 +35,9 @@ func newPodIPConfig() *podIPConfig {
 
 func (pIC *podIPConfig) equal(pIC2 *podIPConfig) bool {
 	if pIC.v6 != pIC2.v6 {
+		return false
+	}
+	if pIC.udn != pIC2.udn {
 		return false
 	}
 	if !equal(pIC.ipTableRule.Args, pIC2.ipTableRule.Args) {

@@ -329,7 +329,7 @@ func runController(testNS ns.NetNS, c *Controller) (cleanupFn, error) {
 	runSubControllers(testNS, c, wg, stopCh)
 
 	err := testNS.Do(func(netNS ns.NetNS) error {
-		return c.ruleManager.OwnPriority(rulePriority)
+		return c.ruleManager.OwnPriority(cdnRulePriority)
 	})
 	if err != nil {
 		return nil, err
@@ -355,7 +355,7 @@ func runController(testNS ns.NetNS, c *Controller) (cleanupFn, error) {
 		}
 	}
 	err = testNS.Do(func(netNS ns.NetNS) error {
-		if err = c.ruleManager.OwnPriority(rulePriority); err != nil {
+		if err = c.ruleManager.OwnPriority(cdnRulePriority); err != nil {
 			return err
 		}
 		if c.v4 {
@@ -539,7 +539,7 @@ var _ = ginkgo.DescribeTable("EgressIP selectors",
 					ips, err := util.DefaultNetworkPodIPs(pod)
 					gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 					for _, ip := range ips {
-						expectedRules = append(expectedRules, generateIPRule(ip, utilnet.IsIPv6(ip), getLinkIndex(expectedEIPConfig.inf)))
+						expectedRules = append(expectedRules, generateIPRule(&util.DefaultNetInfo{}, ip, utilnet.IsIPv6(ip), getLinkIndex(expectedEIPConfig.inf), util.EgressIPMark{}))
 					}
 				}
 			}
@@ -563,7 +563,7 @@ var _ = ginkgo.DescribeTable("EgressIP selectors",
 						}
 						temp := foundRules[:0]
 						for _, rule := range foundRules {
-							if rule.Priority == rulePriority {
+							if rule.Priority == cdnRulePriority {
 								temp = append(temp, rule)
 							}
 						}
@@ -660,7 +660,7 @@ var _ = ginkgo.DescribeTable("EgressIP selectors",
 		ginkgo.By("verify IP rules are removed")
 		gomega.Eventually(func() error {
 			return testNS.Do(func(netNS ns.NetNS) error {
-				filter, mask := filterRuleByPriority(rulePriority)
+				filter, mask := filterRuleByPriority(cdnRulePriority)
 				foundRules, err := netlink.RuleListFiltered(netlink.FAMILY_ALL, filter, mask)
 				if err != nil {
 					return err
@@ -1293,7 +1293,7 @@ var _ = ginkgo.DescribeTable("repair node", func(expectedStateFollowingClean []e
 		},
 		nodeConfig{ // node state before repair
 			linkConfigs:  []linkConfig{{dummyLink2Name, nil}},
-			iptableRules: []ovniptables.RuleArg{generateIPTablesSNATRuleArg(net.ParseIP(pod1IPv4), false, dummyLink1Name, egressIP1IPV4)},
+			iptableRules: []ovniptables.RuleArg{generateIPTablesSNATRuleArg(net.ParseIP(pod1IPv4), false, false, dummyLink1Name, egressIP1IPV4, util.EgressIPMark{})},
 		},
 		[]corev1.Pod{},
 		[]corev1.Namespace{}),
@@ -1303,14 +1303,14 @@ var _ = ginkgo.DescribeTable("repair node", func(expectedStateFollowingClean []e
 				eIP: newEgressIP(egressIP1Name, egressIP1IPV4, node1Name, namespace1Label, egressPodLabel),
 				podConfigs: []testPodConfig{
 					{
-						ipTableRule: generateIPTablesSNATRuleArg(net.ParseIP(pod1IPv4), false, dummyLink1Name, egressIP1IPV4),
+						ipTableRule: generateIPTablesSNATRuleArg(net.ParseIP(pod1IPv4), false, false, dummyLink1Name, egressIP1IPV4, util.EgressIPMark{}),
 					},
 				},
 			},
 		},
 		nodeConfig{ // node state before repair
-			iptableRules: []ovniptables.RuleArg{generateIPTablesSNATRuleArg(net.ParseIP(pod1IPv4), false, dummyLink1Name, egressIP1IPV4), // valid
-				generateIPTablesSNATRuleArg(net.ParseIP(pod2IPv4), false, dummyLink1Name, egressIP1IPV4), // invalid
+			iptableRules: []ovniptables.RuleArg{generateIPTablesSNATRuleArg(net.ParseIP(pod1IPv4), false, false, dummyLink1Name, egressIP1IPV4, util.EgressIPMark{}), // valid
+				generateIPTablesSNATRuleArg(net.ParseIP(pod2IPv4), false, false, dummyLink1Name, egressIP1IPV4, util.EgressIPMark{}), // invalid
 			},
 			linkConfigs: []linkConfig{{dummyLink1Name, []address{{dummy1IPv4CIDR, false}}}},
 		},
@@ -1735,7 +1735,7 @@ func getRule(podIP string, tableID int) *netlink.Rule {
 		panic(err.Error())
 	}
 	return &netlink.Rule{
-		Priority: rulePriority,
+		Priority: cdnRulePriority,
 		Src:      ipNet,
 		Table:    tableID,
 	}
