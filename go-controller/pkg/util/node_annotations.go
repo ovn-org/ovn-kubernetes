@@ -2,6 +2,7 @@ package util
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"net"
@@ -61,6 +62,17 @@ const (
 
 	// OvnNodeManagementPort is the constant string representing the annotation key
 	OvnNodeManagementPort = "k8s.ovn.org/node-mgmt-port"
+
+	// OvnNodeManagementPortInfo contains all ips, mac addresses and mgmt ports
+	// on all networks keyed by the network-name
+	// k8s.ovn.org/node-mgmt-port-info: {
+	// 		"default": {
+	// 			"ip-addresses": [ "10.192.13.2/26" ],
+	// 			"mac-address": "ca:53:88:23:bc:98",
+	// 			"function-info": { "PfId": 0, "FuncId": 0 }
+	//      }
+	// }
+	OvnNodeManagementPortInfo = "k8s.ovn.org/node-mgmt-port-info"
 
 	// OvnNodeManagementPortMacAddresses contains all mac addresses of the management ports
 	// on all networks keyed by the network-name
@@ -1494,4 +1506,123 @@ func GetNetworkID(nodes []*corev1.Node, nInfo BasicNetInfo) (int, error) {
 		}
 	}
 	return InvalidID, fmt.Errorf("missing network id for network '%s'", nInfo.GetNetworkName())
+}
+
+type ManagementPortInfo struct {
+	IpAddresses []string `json:"ip-addresses,omitempty"`
+}
+
+// UpdateNodeManagementPortIPddressesWithRetry will update the node's ip address annotation for the provided netName, ip address values
+// Retry if it fails because of potential conflict which is transient. This function can be called from both default network's controller and
+// user defined network's controller as it attempts to add ip addresses of management ports belonging to different networks.
+// Return error in the case of other errors (say temporary API server down), and it will be taken care of by the retry mechanism.
+func UpdateNodeManagementPortIPddressesWithRetry(node *kapi.Node, nodeLister listers.NodeLister, kubeInterface kube.Interface, hostSubnets []*net.IPNet, netName string) error {
+	resultErr := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		// Informer cache should not be mutated, so get a copy of the object
+		node, err := nodeLister.Get(node.Name)
+		if err != nil {
+			return err
+		}
+
+		cnode := node.DeepCopy()
+
+		cnode.Annotations, err = UpdateManagementPortIPAddressesAnnotation(cnode.Annotations, netName, hostSubnets)
+		if err != nil {
+			return fmt.Errorf("failed to update node %q management port ip address annotation %s for network %v",
+				node.Name, hostSubnets, netName)
+		}
+		// It is possible to update the node annotations using status subresource
+		// because changes to metadata via status subresource are not restricted for nodes.
+		return kubeInterface.UpdateNodeStatus(cnode)
+	})
+	if resultErr != nil {
+		return fmt.Errorf("failed to update node %s annotation: %w", node.Name, resultErr)
+	}
+	return nil
+}
+
+// UpdateManagementPortIPAddressesAnnotation updates the OvnNodeManagementPortInfo annotation for the network name 'netName'
+// with the provided IP Address
+func UpdateManagementPortIPAddressesAnnotation(annotations map[string]string, netName string, hostSubnets []*net.IPNet) (map[string]string, error) {
+	if annotations == nil {
+		annotations = map[string]string{}
+	}
+	err := updateNodeManagementPortIPAddressesAnnotation(annotations, netName, hostSubnets)
+	if err != nil {
+		return nil, err
+	}
+	return annotations, nil
+}
+
+func updateNodeManagementPortIPAddressesAnnotation(annotations map[string]string, netName string, hostSubnets []*net.IPNet) error {
+	if annotations == nil {
+		return errors.New("annotations must not be nil")
+	}
+
+	mgmtPortInfoMap, err := parseNodeMgmtPortInfoAnnotation(annotations)
+	if err != nil {
+		return err
+	}
+
+	// Convert IPNet slice into a string slice of CIDRs
+	ipAddressesStr := make([]string, len(hostSubnets))
+	for i, hostSubnet := range hostSubnets {
+		ipNet := GetNodeManagementIfAddr(hostSubnet) // Get the IPNet representation
+		ipAddressesStr[i] = ipNet.String()           // Convert IPNet to CIDR string
+	}
+
+	// Check if the netName already exists in the map
+	if mgmtPortInfo, exists := mgmtPortInfoMap[netName]; exists {
+		// Update the IpAddresses for the specified netName
+		mgmtPortInfo.IpAddresses = ipAddressesStr
+
+		// Check if the netName should be deleted based on conditions
+		if len(ipAddressesStr) == 0 {
+			delete(mgmtPortInfoMap, netName)
+		} else {
+			// Otherwise, update the map with new IpAddresses
+			mgmtPortInfoMap[netName] = mgmtPortInfo
+		}
+	} else if len(ipAddressesStr) > 0 {
+		// If netName doesn't exist and there are IP addresses to set, create a new entry
+		mgmtPortInfoMap[netName] = ManagementPortInfo{
+			IpAddresses: ipAddressesStr,
+		}
+	}
+
+	// Encode the updated map back to JSON
+	bytes, err := encodeNodeMgmtPortInfoAnnotation(mgmtPortInfoMap)
+	if err != nil {
+		return err
+	}
+
+	// Set the JSON-encoded string back into the annotations
+	annotations[OvnNodeManagementPortInfo] = bytes
+	return nil
+}
+
+// ParseAnnotations parses the annotations map and returns a map of ManagementPortInfo
+func parseNodeMgmtPortInfoAnnotation(annotations map[string]string) (map[string]ManagementPortInfo, error) {
+	result := make(map[string]ManagementPortInfo)
+
+	// Check if the annotation exists
+	if value, ok := annotations[OvnNodeManagementPortInfo]; ok {
+		// Parse the JSON data into the result map
+		err := json.Unmarshal([]byte(value), &result)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse annotation %s: %w", OvnNodeManagementPortInfo, err)
+		}
+	}
+
+	return result, nil
+}
+
+// SetManagementPortInfo sets the JSON encoded ManagementPortInfo to the annotations map
+func encodeNodeMgmtPortInfoAnnotation(info map[string]ManagementPortInfo) (string, error) {
+	// JSON encode the map
+	jsonData, err := json.Marshal(info)
+	if err != nil {
+		return "", fmt.Errorf("failed to encode ManagementPortInfo: %w", err)
+	}
+	return string(jsonData), nil
 }

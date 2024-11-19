@@ -551,6 +551,11 @@ func newNodeWithSecondaryNets(nodeName string, nodeIPv4CIDR string, netInfos ...
 		nodeSubnetInfo = append(nodeSubnetInfo, info.String())
 	}
 
+	// var nodeMgmtIpInfo []string
+	// for _, info := range netInfos {
+	// 	nodeMgmtIpInfo = append(nodeMgmtIpInfo, info.String())
+	// }
+
 	nodeIP, nodeCIDR, err := net.ParseCIDR(nodeIPv4CIDR)
 	if err != nil {
 		return nil, err
@@ -571,6 +576,7 @@ func newNodeWithSecondaryNets(nodeName string, nodeIPv4CIDR string, netInfos ...
 				"k8s.ovn.org/network-ids":                                   "{\"default\":\"0\",\"isolatednet\":\"2\"}",
 				util.OvnNodeManagementPortMacAddresses:                      fmt.Sprintf("{\"isolatednet\":%q}", dummyMACAddr),
 				util.OVNNodeGRLRPAddrs:                                      fmt.Sprintf("{\"isolatednet\":{\"ipv4\":%q}}", gwRouterJoinIPAddress()),
+				// util.OvnNodeManagementPortInfo:         fmt.Sprintf("{\"default\":{\"ip-addresses\":["10.128.0.2/16"]}}", ,
 				"k8s.ovn.org/udn-layer2-node-gateway-router-lrp-tunnel-ids": "{\"isolatednet\":\"25\"}",
 			},
 			Labels: map[string]string{

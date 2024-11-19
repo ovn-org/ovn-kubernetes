@@ -408,6 +408,9 @@ func (udng *UserDefinedNetworkGateway) addUDNManagementPortIPs(mpLink netlink.Li
 			}
 		}
 	}
+	if err = util.UpdateNodeManagementPortIPddressesWithRetry(udng.node, udng.nodeLister, udng.kubeInterface, networkLocalSubnets, udng.GetNetworkName()); err != nil {
+		return fmt.Errorf("unable to update ip address annotation for node %s, for network %s, err: %w", udng.node.Name, udng.GetNetworkName(), err)
+	}
 	return nil
 }
 
@@ -429,6 +432,10 @@ func (udng *UserDefinedNetworkGateway) deleteUDNManagementPort() error {
 	// sending nil mac address will delete the network's annotation value
 	if err := util.UpdateNodeManagementPortMACAddressesWithRetry(udng.node, udng.nodeLister, udng.kubeInterface, nil, udng.GetNetworkName()); err != nil {
 		return fmt.Errorf("unable to remove mac address annotation for node %s, for network %s, err: %v", udng.node.Name, udng.GetNetworkName(), err)
+	}
+	// sending nil ip address will delete the network's annotation value
+	if err = util.UpdateNodeManagementPortIPddressesWithRetry(udng.node, udng.nodeLister, udng.kubeInterface, nil, udng.GetNetworkName()); err != nil {
+		return fmt.Errorf("unable to remove ip address annotation for node %s, for network %s, err: %w", udng.node.Name, udng.GetNetworkName(), err)
 	}
 	klog.V(3).Infof("Removed management port mac address information of %s for network %s", interfaceName, udng.GetNetworkName())
 	return nil
