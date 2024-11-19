@@ -1957,25 +1957,8 @@ func (e *EgressIPController) addEgressNode(node *corev1.Node) error {
 			if !util.IsNetworkSegmentationSupportEnabled() {
 				return nil
 			}
-			namespaces, err := e.watchFactory.GetNamespaces()
-			if err != nil {
-				return fmt.Errorf("failed to get all namespaces: %v", err)
-			}
-			processedNetworks := make(map[string]struct{})
-			processedNetworks[types.DefaultNetworkName] = struct{}{}
-			for _, namespace := range namespaces {
-				ni, err = e.nadController.GetActiveNetworkForNamespace(namespace.Name)
-				if err != nil {
-					return fmt.Errorf("failed to get active network for namespace %s: %v", namespace.Name, err)
-				}
-				// skip networks that are already processed
-				if _, ok := processedNetworks[ni.GetNetworkName()]; ok {
-					continue
-				}
-				if err = processNetworkFn(ni); err != nil {
-					return fmt.Errorf("failed to process network %s: %v", ni.GetNetworkName(), err)
-				}
-				processedNetworks[ni.GetNetworkName()] = struct{}{}
+			if err = e.nadController.DoWithLock(processNetworkFn); err != nil {
+				return fmt.Errorf("failed to process all user defined networks route to external: %v", err)
 			}
 		}
 	}
@@ -1991,10 +1974,6 @@ func (e *EgressIPController) addEgressNode(node *corev1.Node) error {
 // away from that node elsewhere so that the pods using the egress IP can
 // continue to do so without any issues.
 func (e *EgressIPController) initClusterEgressPolicies(nodes []interface{}) error {
-	namespaces, err := e.watchFactory.GetNamespaces()
-	if err != nil {
-		return fmt.Errorf("failed to get all namespaces: %v", err)
-	}
 	// Init default network
 	defaultNetInfo, err := e.nadController.GetNetwork(types.DefaultNetworkName)
 	if err != nil {
@@ -2010,30 +1989,22 @@ func (e *EgressIPController) initClusterEgressPolicies(nodes []interface{}) erro
 			return fmt.Errorf("failed to delete legacy default no reroute to nodes for node %s: %v", node.Name, err)
 		}
 	}
-	processedNetworks := make(map[string]struct{})
-	processedNetworks[types.DefaultNetworkName] = struct{}{}
-	for _, namespace := range namespaces {
-		ni, err := e.nadController.GetActiveNetworkForNamespace(namespace.Name)
-		if err != nil {
-			return fmt.Errorf("failed to get active network for namespace %s: %v", namespace.Name, err)
+	return e.nadController.DoWithLock(func(network util.NetInfo) error {
+		if network.GetNetworkName() == types.DefaultNetworkName {
+			return nil
 		}
-		// skip networks that are already processed
-		if _, ok := processedNetworks[ni.GetNetworkName()]; ok {
-			continue
-		}
-		subnets = util.GetAllClusterSubnetsFromEntries(ni.Subnets())
-		if err := InitClusterEgressPolicies(e.nbClient, e.addressSetFactory, ni, subnets, e.controllerName); err != nil {
-			return fmt.Errorf("failed to initialize networks cluster logical router egress policies for network %s: %v", ni.GetNetworkName(), err)
+		subnets = util.GetAllClusterSubnetsFromEntries(network.Subnets())
+		if err := InitClusterEgressPolicies(e.nbClient, e.addressSetFactory, network, subnets, e.controllerName); err != nil {
+			return fmt.Errorf("failed to initialize networks cluster logical router egress policies for network %s: %v", network.GetNetworkName(), err)
 		}
 		for _, node := range nodes {
 			node := node.(*kapi.Node)
-			if err := DeleteLegacyDefaultNoRerouteNodePolicies(e.nbClient, ni.GetNetworkScopedClusterRouterName(), node.Name); err != nil {
-				return fmt.Errorf("failed to delete legacy default no reroute node policies for node %s and network %s: %v", node.Name, ni.GetNetworkName(), err)
+			if err := DeleteLegacyDefaultNoRerouteNodePolicies(e.nbClient, network.GetNetworkScopedClusterRouterName(), node.Name); err != nil {
+				return fmt.Errorf("failed to delete legacy default no reroute node policies for node %s and network %s: %v", node.Name, network.GetNetworkName(), err)
 			}
 		}
-		processedNetworks[ni.GetNetworkName()] = struct{}{}
-	}
-	return nil
+		return nil
+	})
 }
 
 // InitClusterEgressPolicies creates the global no reroute policies and address-sets
@@ -3064,26 +3035,17 @@ func (e *EgressIPController) ensureDefaultNoRerouteQoSRules(nodeName string) err
 	if err != nil {
 		return fmt.Errorf("failed to process default network: %v", err)
 	}
-	processedNetworks := make(map[string]struct{})
-	processedNetworks[types.DefaultNetworkName] = struct{}{}
-	namespaces, err := e.watchFactory.GetNamespaces()
-	if err != nil {
-		return fmt.Errorf("failed to get all namespaces: %v", err)
-	}
-	for _, namespace := range namespaces {
-		ni, err := e.nadController.GetActiveNetworkForNamespace(namespace.Name)
+	if err = e.nadController.DoWithLock(func(network util.NetInfo) error {
+		if network.GetNetworkName() == types.DefaultNetworkName {
+			return nil
+		}
+		ops, err = e.ensureDefaultNoReRouteQosRulesForNode(network, nodeName, ops)
 		if err != nil {
-			return fmt.Errorf("failed to get active network for namespace %s: %v", namespace.Name, err)
+			return fmt.Errorf("failed to process network %s: %v", network.GetNetworkName(), err)
 		}
-		// skip if the network has already been processed
-		if _, ok := processedNetworks[ni.GetNetworkName()]; ok {
-			continue
-		}
-		ops, err = e.ensureDefaultNoReRouteQosRulesForNode(ni, nodeName, ops)
-		if err != nil {
-			return fmt.Errorf("failed to process network %s: %v", ni.GetNetworkName(), err)
-		}
-		processedNetworks[ni.GetNetworkName()] = struct{}{}
+		return nil
+	}); err != nil {
+		return fmt.Errorf("failed to ensure default no reroute QoS rules: %v", err)
 	}
 	if _, err := libovsdbops.TransactAndCheck(e.nbClient, ops); err != nil {
 		return fmt.Errorf("unable to add EgressIP QoS to switch, err: %v", err)
@@ -3168,10 +3130,6 @@ func (e *EgressIPController) ensureDefaultNoRerouteNodePolicies() error {
 	e.nodeUpdateMutex.Lock()
 	defer e.nodeUpdateMutex.Unlock()
 	nodeLister := listers.NewNodeLister(e.watchFactory.NodeInformer().GetIndexer())
-	namespaces, err := e.watchFactory.GetNamespaces()
-	if err != nil {
-		return fmt.Errorf("failed to get all namespaces: %v", err)
-	}
 	// ensure default network is processed
 	defaultNetInfo, err := e.nadController.GetNetwork(types.DefaultNetworkName)
 	if err != nil {
@@ -3182,25 +3140,21 @@ func (e *EgressIPController) ensureDefaultNoRerouteNodePolicies() error {
 	if err != nil {
 		return fmt.Errorf("failed to ensure default no reroute policies for nodes for default network: %v", err)
 	}
-	processedNetworks := make(map[string]struct{})
-	processedNetworks[types.DefaultNetworkName] = struct{}{}
-	// ensure other networks are processed
-	for _, namespace := range namespaces {
-		ni, err := e.nadController.GetActiveNetworkForNamespace(namespace.Name)
-		if err != nil {
-			return fmt.Errorf("failed to get active network for namespace %s: %v", namespace.Name, err)
+	if !util.IsNetworkSegmentationSupportEnabled() {
+		return nil
+	}
+	if err = e.nadController.DoWithLock(func(network util.NetInfo) error {
+		if network.GetNetworkName() == types.DefaultNetworkName {
+			return nil
 		}
-		networkName := ni.GetNetworkName()
-		// skip networks that already have been processed
-		if _, ok := processedNetworks[networkName]; ok {
-			continue
-		}
-		err = ensureDefaultNoRerouteNodePolicies(e.nbClient, e.addressSetFactory, ni.GetNetworkName(), ni.GetNetworkScopedClusterRouterName(),
+		err = ensureDefaultNoRerouteNodePolicies(e.nbClient, e.addressSetFactory, network.GetNetworkName(), network.GetNetworkScopedClusterRouterName(),
 			e.controllerName, nodeLister, e.v4, e.v6)
 		if err != nil {
-			return fmt.Errorf("failed to ensure default no reroute policies for nodes: %v", err)
+			return fmt.Errorf("failed to ensure default no reroute policies for nodes for network %s: %v", network.GetNetworkName(), err)
 		}
-		processedNetworks[networkName] = struct{}{}
+		return nil
+	}); err != nil {
+		return err
 	}
 	return nil
 }
