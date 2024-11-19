@@ -2,6 +2,7 @@ package nad
 
 import (
 	"context"
+	"errors"
 
 	networkAttachDefController "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -62,4 +63,17 @@ func (nc *FakeNADController) GetActiveNetworkNamespaces(networkName string) ([]s
 		namespaces = append(namespaces, namespaceName)
 	}
 	return namespaces, nil
+}
+
+func (nc *FakeNADController) DoWithLock(f func(network util.NetInfo) error) error {
+	var errs []error
+	for _, ni := range nc.PrimaryNetworks {
+		if err := f(ni); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if len(errs) > 0 {
+		return errors.Join(errs...)
+	}
+	return nil
 }
