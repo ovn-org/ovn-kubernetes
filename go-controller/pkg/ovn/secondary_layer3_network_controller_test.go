@@ -23,6 +23,7 @@ import (
 
 	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	networkAttachDefController "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
@@ -195,6 +196,14 @@ var _ = Describe("OVN Multi-Homed pod operations", func() {
 					Expect(gwConfig.NextHops).NotTo(BeEmpty())
 					expectationOptions = append(expectationOptions, withGatewayConfig(gwConfig))
 					expectationOptions = append(expectationOptions, withClusterPortGroup())
+					if testConfig.configToOverride != nil && testConfig.configToOverride.EnableEgressFirewall {
+						defaultNetExpectations = append(defaultNetExpectations,
+							buildNamespacedPortGroup(podInfo.namespace, DefaultNetworkControllerName))
+						secNetPG := buildNamespacedPortGroup(podInfo.namespace, secondaryNetController.bnc.controllerName)
+						portName := util.GetSecondaryNetworkLogicalPortName(podInfo.namespace, podInfo.podName, netInfo.nadName) + "-UUID"
+						secNetPG.Ports = []string{portName}
+						defaultNetExpectations = append(defaultNetExpectations, secNetPG)
+					}
 				}
 				Eventually(fakeOvn.nbClient).Should(
 					libovsdbtest.HaveData(
@@ -238,7 +247,16 @@ var _ = Describe("OVN Multi-Homed pod operations", func() {
 		),
 		Entry("pod on a user defined primary network on an IC cluster with per-pod SNATs enabled",
 			dummyPrimaryLayer3UserDefinedNetwork("192.168.0.0/16", "192.168.1.0/24"),
-			icClusterWithDisableSNATTestConfiguration(),
+			icClusterTestConfiguration(func(testConfig *testConfiguration) {
+				testConfig.gatewayConfig = &config.GatewayConfig{DisableSNATMultipleGWs: true}
+			}),
+			config.GatewayModeShared,
+		),
+		Entry("pod on a user defined primary network on an IC cluster with EgressFirewall enabled",
+			dummyPrimaryLayer3UserDefinedNetwork("192.168.0.0/16", "192.168.1.0/24"),
+			icClusterTestConfiguration(func(config *testConfiguration) {
+				config.configToOverride.EnableEgressFirewall = true
+			}),
 			config.GatewayModeShared,
 		),
 	)
@@ -296,6 +314,10 @@ var _ = Describe("OVN Multi-Homed pod operations", func() {
 					initialDB.NBData = append(initialDB.NBData,
 						newNetworkClusterPortGroup(networkConfig),
 					)
+					if testConfig.configToOverride != nil && testConfig.configToOverride.EnableEgressFirewall {
+						defaultNetExpectations = append(defaultNetExpectations,
+							buildNamespacedPortGroup(podInfo.namespace, DefaultNetworkControllerName))
+					}
 				}
 				initialDB.NBData = append(initialDB.NBData, nbZone)
 
@@ -372,7 +394,15 @@ var _ = Describe("OVN Multi-Homed pod operations", func() {
 		),
 		Entry("pod on a user defined primary network on an IC cluster with per-pod SNATs enabled",
 			dummyPrimaryLayer3UserDefinedNetwork("192.168.0.0/16", "192.168.1.0/24"),
-			icClusterWithDisableSNATTestConfiguration(),
+			icClusterTestConfiguration(func(testConfig *testConfiguration) {
+				testConfig.gatewayConfig = &config.GatewayConfig{DisableSNATMultipleGWs: true}
+			}),
+		),
+		Entry("pod on a user defined primary network on an IC cluster with EgressFirewall enabled",
+			dummyPrimaryLayer3UserDefinedNetwork("192.168.0.0/16", "192.168.1.0/24"),
+			icClusterTestConfiguration(func(config *testConfiguration) {
+				config.configToOverride.EnableEgressFirewall = true
+			}),
 		),
 	)
 })
@@ -966,4 +996,11 @@ func newSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netI
 		newDummyGatewayManager(cnci.kube, cnci.nbClient, netInfo, cnci.watchFactory, nodeName),
 	)
 	return layer3NetworkController
+}
+
+func buildNamespacedPortGroup(namespace, controller string) *nbdb.PortGroup {
+	pgIDs := getNamespacePortGroupDbIDs(namespace, controller)
+	pg := libovsdbutil.BuildPortGroup(pgIDs, nil, nil)
+	pg.UUID = pg.Name + "-UUID"
+	return pg
 }
