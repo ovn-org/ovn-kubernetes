@@ -1297,6 +1297,25 @@ fi
 					checkLiveMigrationSucceeded(vmi.Name, kubevirtv1.MigrationPreCopy)
 				},
 			}
+			liveMigrateFailed = testCommand{
+				description: "live migration failed",
+				cmd: func() {
+					forceLiveMigrationAnnotationName := kubevirtv1.FuncTestForceLauncherMigrationFailureAnnotation
+					By(fmt.Sprintf("Forcing live migration failure by annotating VM with %s", forceLiveMigrationAnnotationName))
+					vmiKey := types.NamespacedName{Namespace: namespace, Name: vmi.Name}
+					Eventually(func() error {
+						err := crClient.Get(context.TODO(), vmiKey, vmi)
+						if err == nil {
+							vmi.ObjectMeta.Annotations[forceLiveMigrationAnnotationName] = "true"
+							err = crClient.Update(context.TODO(), vmi)
+						}
+						return err
+					}).WithPolling(time.Second).WithTimeout(time.Minute).Should(Succeed())
+
+					liveMigrateVirtualMachine(vmi.Name)
+					checkLiveMigrationFailed(vmi.Name)
+				},
+			}
 			networkData = `version: 2
 ethernets:
   eth0:
@@ -1605,6 +1624,12 @@ runcmd:
 			Entry(nil, testData{
 				resource: virtualMachineInstanceWithUDN,
 				test:     liveMigrate,
+				topology: "layer2",
+				role:     "primary",
+			}),
+			Entry(nil, testData{
+				resource: virtualMachineInstanceWithUDN,
+				test:     liveMigrateFailed,
 				topology: "layer2",
 				role:     "primary",
 			}),
