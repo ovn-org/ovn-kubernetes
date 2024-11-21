@@ -509,10 +509,13 @@ func TestSyncAll(t *testing.T) {
 			Name: "network_A",
 			Type: "ovn-k8s-cni-overlay",
 		},
-		Role: types.NetworkRolePrimary,
-		MTU:  1400,
+		Subnets: "10.20.0.0/16/24",
+		Role:    types.NetworkRolePrimary,
+		MTU:     1400,
 	}
 	network_A_Copy := *network_A
+	network_A_Copy_InvalidSubnet := *network_A
+	network_A_Copy_InvalidSubnet.Subnets = "20.20.0.0/16/24" // network subnet was previously defined as "10.20.0.0/16/24"
 	network_B := &ovncnitypes.NetConf{
 		Topology: types.LocalnetTopology,
 		NetConf: cnitypes.NetConf{
@@ -543,6 +546,19 @@ func TestSyncAll(t *testing.T) {
 				{
 					name:    "test2/nad3",
 					netconf: &network_A_Copy,
+				},
+			},
+		},
+		{
+			name: "invalid network reference with erroneous subnet entry doesn't block sync",
+			testNADs: []TestNAD{
+				{
+					name:    "test/nad1",
+					netconf: network_A,
+				},
+				{
+					name:    "test2/nad2",
+					netconf: &network_A_Copy_InvalidSubnet,
 				},
 			},
 		},
