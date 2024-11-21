@@ -20,6 +20,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/apimachinery/pkg/util/rand"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/kubectl/pkg/util/podutils"
 	"k8s.io/kubernetes/test/e2e/framework"
@@ -104,7 +105,7 @@ var _ = Describe("Network Segmentation", func() {
 					},
 					Entry("L2 primary UDN",
 						networkAttachmentConfigParams{
-							name:     nadName,
+							name:     randomNetworkMetaName(),
 							topology: "layer2",
 							cidr:     correctCIDRFamily(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
 							role:     "primary",
@@ -112,7 +113,7 @@ var _ = Describe("Network Segmentation", func() {
 					),
 					Entry("L3 primary UDN",
 						networkAttachmentConfigParams{
-							name:     nadName,
+							name:     randomNetworkMetaName(),
 							topology: "layer3",
 							cidr:     correctCIDRFamily(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
 							role:     "primary",
@@ -166,7 +167,7 @@ var _ = Describe("Network Segmentation", func() {
 					Entry(
 						"two pods connected over a L2 primary UDN",
 						networkAttachmentConfigParams{
-							name:     nadName,
+							name:     randomNetworkMetaName(),
 							topology: "layer2",
 							cidr:     correctCIDRFamily(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
 							role:     "primary",
@@ -186,7 +187,7 @@ var _ = Describe("Network Segmentation", func() {
 					Entry(
 						"two pods connected over a L3 primary UDN",
 						networkAttachmentConfigParams{
-							name:     nadName,
+							name:     randomNetworkMetaName(),
 							topology: "layer3",
 							cidr:     correctCIDRFamily(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
 							role:     "primary",
@@ -398,7 +399,7 @@ var _ = Describe("Network Segmentation", func() {
 					Entry(
 						"with L2 primary UDN",
 						networkAttachmentConfigParams{
-							name:     nadName,
+							name:     randomNetworkMetaName(),
 							topology: "layer2",
 							cidr:     correctCIDRFamily(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
 							role:     "primary",
@@ -414,7 +415,7 @@ var _ = Describe("Network Segmentation", func() {
 					Entry(
 						"with L3 primary UDN",
 						networkAttachmentConfigParams{
-							name:     nadName,
+							name:     randomNetworkMetaName(),
 							topology: "layer3",
 							cidr:     correctCIDRFamily(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
 							role:     "primary",
@@ -438,8 +439,8 @@ var _ = Describe("Network Segmentation", func() {
 
 					) {
 
-						red := "red"
-						blue := "blue"
+						red := "red-" + rand.String(5)
+						blue := "blue-" + rand.String(5)
 
 						namespaceRed := f.Namespace.Name + "-" + red
 						namespaceBlue := f.Namespace.Name + "-" + blue
@@ -823,13 +824,10 @@ spec:
 	})
 
 	Context("ClusterUserDefinedNetwork CRD Controller", func() {
-		const (
-			testClusterUdnName                = "test-cluster-net"
-			clusterUserDefinedNetworkResource = "clusteruserdefinednetwork"
-		)
-		var (
-			testTenantNamespaces []string
-		)
+		const clusterUserDefinedNetworkResource = "clusteruserdefinednetwork"
+
+		var testTenantNamespaces []string
+
 		BeforeEach(func() {
 			testTenantNamespaces = []string{
 				f.Namespace.Name + "blue",
@@ -847,7 +845,10 @@ spec:
 			}
 		})
 
+		var testClusterUdnName string
+
 		BeforeEach(func() {
+			testClusterUdnName = randomNetworkMetaName()
 			By("create test CR")
 			cleanup, err := createManifest("", newClusterUDNManifest(testClusterUdnName, testTenantNamespaces...))
 			DeferCleanup(func() error {
@@ -1066,7 +1067,7 @@ spec:
 		Expect(err).NotTo(HaveOccurred())
 
 		By("create primary Cluster UDN CR")
-		const cudnName = "primary-net"
+		cudnName := randomNetworkMetaName()
 		cleanup, err := createManifest(f.Namespace.Name, newPrimaryClusterUDNManifest(cudnName, testTenantNamespaces...))
 		DeferCleanup(func() error {
 			cleanup()
@@ -1149,9 +1150,9 @@ spec:
 						framework.Logf("Client pod was created on node %s", updatedPod.Spec.NodeName)
 
 						By("asserting UDN pod is connected to UDN network")
-						podAnno, err := unmarshalPodAnnotation(updatedPod.Annotations, f.Namespace.Name+"/"+userDefinedNetworkName)
+						podAnno, err := unmarshalPodAnnotation(updatedPod.Annotations, f.Namespace.Name+"/"+netConfigParams.name)
 						Expect(err).NotTo(HaveOccurred())
-						framework.Logf("Client pod's annotation for network %s is %v", userDefinedNetworkName, podAnno)
+						framework.Logf("Client pod's annotation for network %s is %v", netConfigParams.name, podAnno)
 
 						Expect(podAnno.Routes).To(HaveLen(expectedNumberOfRoutes(netConfigParams)))
 
@@ -1159,7 +1160,7 @@ spec:
 					},
 					Entry("by one pod over a layer2 network",
 						networkAttachmentConfigParams{
-							name:     userDefinedNetworkName,
+							name:     randomNetworkMetaName(),
 							topology: "layer2",
 							cidr:     correctCIDRFamily(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
 							role:     "primary",
@@ -1168,7 +1169,7 @@ spec:
 					),
 					Entry("by one pod over a layer3 network",
 						networkAttachmentConfigParams{
-							name:     userDefinedNetworkName,
+							name:     randomNetworkMetaName(),
 							topology: "layer3",
 							cidr:     correctCIDRFamily(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
 							role:     "primary",
@@ -1318,6 +1319,14 @@ spec:
 		})
 	})
 })
+
+// randomNetworkMetaName return pseudo random name for network related objects (NAD,UDN,CUDN).
+//
+// CUDN is cluster-scoped object, in case tests running in parallel,
+// having random names avoids conflicting with other tests.
+func randomNetworkMetaName() string {
+	return fmt.Sprintf("test-net-%s", rand.String(5))
+}
 
 var nadToUdnParams = map[string]string{
 	"primary":   "Primary",
