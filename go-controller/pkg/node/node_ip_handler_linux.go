@@ -406,14 +406,32 @@ func (c *addressManager) isValidNodeIP(addr net.IP, linkIndex int) bool {
 	if util.IsAddressReservedForInternalUse(addr) {
 		return false
 	}
-	if config.OVNKubernetesFeature.EnableEgressIP && !util.PlatformTypeIsEgressIPCloudProvider() {
-		// IPs assigned to host interfaces to support the egress IP multi NIC feature must be excluded.
-		eipAddresses, err := c.getSecondaryHostEgressIPs()
-		if err != nil {
-			klog.Errorf("Failed to get secondary host assigned Egress IPs and ensure they are excluded: %v", err)
+	if config.OVNKubernetesFeature.EnableEgressIP {
+		// EIP assigned to the primary interface which selects pods with a role primary user defined network must be excluded.
+		if util.IsNetworkSegmentationSupportEnabled() && config.OVNKubernetesFeature.EnableInterconnect && config.Gateway.Mode != config.GatewayModeDisabled {
+			// Two methods to lookup EIPs assigned to the gateway bridge. Fast path from a shared cache or slow path from node annotations.
+			// At startup, gateway bridge cache gets sync
+			if c.gatewayBridge.eipMarkIPs != nil && c.gatewayBridge.eipMarkIPs.HasSyncdOnce() && c.gatewayBridge.eipMarkIPs.IsIPPresent(addr) {
+				return false
+			} else {
+				if eipAddresses, err := c.getPrimaryHostEgressIPs(); err != nil {
+					klog.Errorf("Failed to get primary host assigned Egress IPs and ensure they are excluded: %v", err)
+				} else {
+					if eipAddresses.Has(addr.String()) {
+						return false
+					}
+				}
+			}
 		}
-		if eipAddresses.Has(addr.String()) {
-			return false
+		if !util.PlatformTypeIsEgressIPCloudProvider() {
+			// IPs assigned to host interfaces to support the egress IP multi NIC feature must be excluded.
+			if eipAddresses, err := c.getSecondaryHostEgressIPs(); err != nil {
+				klog.Errorf("Failed to get secondary host assigned Egress IPs and ensure they are excluded: %v", err)
+			} else {
+				if eipAddresses.Has(addr.String()) {
+					return false
+				}
+			}
 		}
 	}
 
@@ -481,6 +499,22 @@ func (c *addressManager) getSecondaryHostEgressIPs() (sets.Set[string], error) {
 		return nil, err
 	}
 	return eipAddrs, nil
+}
+
+func (c *addressManager) getPrimaryHostEgressIPs() (sets.Set[string], error) {
+	node, err := c.watchFactory.GetNode(c.nodeName)
+	if err != nil {
+		return nil, fmt.Errorf("unable to get Node from informer: %v", err)
+	}
+	eipAddrs, err := util.ParseNodeBridgeEgressIPsAnnotation(node)
+	if err != nil {
+		if util.IsAnnotationNotSetError(err) {
+			eipAddrs = make([]string, 0)
+		} else {
+			return nil, err
+		}
+	}
+	return sets.New[string](eipAddrs...), nil
 }
 
 // updateOVNEncapIPAndReconnect updates encap IP to OVS when the node primary IP changed.

@@ -9,6 +9,7 @@ import (
 	cache "k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 
+	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 )
@@ -53,6 +54,15 @@ func (h *gwEventHandler) AreResourcesEqual(obj1, obj2 interface{}) (bool, error)
 		// always run update code
 		return false, nil
 
+	case factory.EgressIPType:
+		// we don't care about pkt mark annotation changing as we assume its value should not change and if it does, we don't
+		// want to react to that.
+		oldEIP, newEIP := obj1.(*egressipv1.EgressIP), obj2.(*egressipv1.EgressIP)
+		if reflect.DeepEqual(oldEIP.Status.Items, newEIP.Status.Items) && reflect.DeepEqual(oldEIP.Spec.EgressIPs, newEIP.Spec.EgressIPs) {
+			return true, nil
+		}
+		return false, nil
+
 	default:
 		return false, fmt.Errorf("no object comparison for type %s", h.objType)
 	}
@@ -79,6 +89,9 @@ func (h *gwEventHandler) GetResourceFromInformerCache(key string) (interface{}, 
 	case factory.ServiceForGatewayType:
 		obj, err = h.g.watchFactory.GetService(namespace, name)
 
+	case factory.EgressIPType:
+		obj, err = h.g.watchFactory.GetEgressIP(name)
+
 	default:
 		err = fmt.Errorf("object type %s not supported, cannot retrieve it from informers cache",
 			h.objType)
@@ -100,6 +113,11 @@ func (h *gwEventHandler) AddResource(obj interface{}, fromRetryLoop bool) error 
 	case factory.EndpointSliceForGatewayType:
 		endpointSlice := obj.(*discovery.EndpointSlice)
 		return h.g.AddEndpointSlice(endpointSlice)
+
+	case factory.EgressIPType:
+		eip := obj.(*egressipv1.EgressIP)
+		return h.g.AddEgressIP(eip)
+
 	default:
 		return fmt.Errorf("no add function for object type %s", h.objType)
 	}
@@ -121,6 +139,11 @@ func (h *gwEventHandler) UpdateResource(oldObj, newObj interface{}, inRetryCache
 		newEndpointSlice := newObj.(*discovery.EndpointSlice)
 		return h.g.UpdateEndpointSlice(oldEndpointSlice, newEndpointSlice)
 
+	case factory.EgressIPType:
+		oldEIP := oldObj.(*egressipv1.EgressIP)
+		newEIP := newObj.(*egressipv1.EgressIP)
+		return h.g.UpdateEgressIP(oldEIP, newEIP)
+
 	default:
 		return fmt.Errorf("no update function for object type %s", h.objType)
 	}
@@ -139,6 +162,11 @@ func (h *gwEventHandler) DeleteResource(obj, cachedObj interface{}) error {
 	case factory.EndpointSliceForGatewayType:
 		endpointSlice := obj.(*discovery.EndpointSlice)
 		return h.g.DeleteEndpointSlice(endpointSlice)
+
+	case factory.EgressIPType:
+		eip := obj.(*egressipv1.EgressIP)
+		return h.g.DeleteEgressIP(eip)
+
 	default:
 		return fmt.Errorf("no delete function for object type %s", h.objType)
 	}
@@ -159,6 +187,9 @@ func (h *gwEventHandler) SyncFunc(objs []interface{}) error {
 
 		case factory.ServiceForGatewayType:
 			syncFunc = h.g.SyncServices
+
+		case factory.EgressIPType:
+			syncFunc = h.g.SyncEgressIP
 
 		default:
 			return fmt.Errorf("no sync function for object type %s", h.objType)

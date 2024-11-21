@@ -1155,6 +1155,11 @@ func isInterconnectEnabled() bool {
 	return present && val == "true"
 }
 
+func isNetworkSegmentationEnabled() bool {
+	val, present := os.LookupEnv("ENABLE_NETWORK_SEGMENTATION")
+	return present && val == "true"
+}
+
 func isLocalGWModeEnabled() bool {
 	val, present := os.LookupEnv("OVN_GATEWAY_MODE")
 	return present && val == "local"

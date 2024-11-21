@@ -6,9 +6,9 @@ import (
 	"net"
 	"strings"
 
-	v1 "k8s.io/api/core/v1"
-
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+	v1 "k8s.io/api/core/v1"
+	utilsnet "k8s.io/utils/net"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 
@@ -247,10 +247,12 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPorts(is
 				OtherConfig: otherConfig,
 				ACLs:        acls[switchName],
 			})
+			clusterSubnets := ocInfo.bnc.Subnets()
+			ipScopedClusterSubnets := util.MatchAllIPNetFamily(utilsnet.IsIPv6CIDR(subnet), util.GetAllClusterSubnetsFromEntries(clusterSubnets))
 			if em.gatewayConfig != nil {
 				if ocInfo.bnc.TopologyType() == ovntypes.Layer3Topology {
 					data = append(data, expectedGWEntities(pod.nodeName, subnets, ocInfo.bnc, *em.gatewayConfig)...)
-					data = append(data, expectedLayer3EgressEntities(ocInfo.bnc, *em.gatewayConfig, subnet)...)
+					data = append(data, expectedLayer3EgressEntities(ocInfo.bnc, *em.gatewayConfig, subnet, ipScopedClusterSubnets[0])...)
 				} else {
 					data = append(data, expectedLayer2EgressEntities(ocInfo.bnc, *em.gatewayConfig, pod.nodeName)...)
 				}

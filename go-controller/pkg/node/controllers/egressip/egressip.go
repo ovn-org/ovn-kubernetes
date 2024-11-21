@@ -23,6 +23,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/linkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 
@@ -48,7 +49,8 @@ import (
 )
 
 const (
-	rulePriority        = 6000 // the priority of the ip routing rules created by the controller. Egress Service priority is 5000.
+	udnRulePriority     = 600
+	cdnRulePriority     = 6000 // the priority of the ip routing rules created by the controller. Egress Service priority is 5000.
 	ruleFwMarkPriority  = 5999 // the priority of the ip routing rules for LGW mode when we want to skip processing eip ip rules because dst is a node ip. Pkt will be fw marked with 1008.
 	routingTableIDStart = 1000
 	chainName           = "OVN-KUBE-EGRESS-IP-MULTI-NIC"
@@ -61,7 +63,7 @@ var (
 	_, defaultV6AnyCIDR, _ = net.ParseCIDR("::/0")
 	_, linkLocalCIDR, _    = net.ParseCIDR("fe80::/64")
 	iptJumpRule            = iptables.RuleArg{Args: []string{"-j", chainName}}
-	iptSaveMarkRule        = iptables.RuleArg{Args: []string{"-m", "mark", "--mark", "1008", "-j", "CONNMARK", "--save-mark"}} // 1008 is pkt mark for node ip
+	iptSaveMarkRule        = iptables.RuleArg{Args: []string{"-j", "CONNMARK", "--save-mark"}} // Supports UDN & node IP routing
 	iptRestoreMarkRule     = iptables.RuleArg{Args: []string{"-m", "mark", "--mark", "0", "-j", "CONNMARK", "--restore-mark"}}
 )
 
@@ -70,6 +72,9 @@ type eIPConfig struct {
 	// EgressIP IP
 	addr   *netlink.Addr
 	routes []netlink.Route
+	// for UDNs only
+	udnIPRule      *netlink.Rule
+	udnIPTableRule iptables.RuleArg
 }
 
 func newEIPConfig() *eIPConfig {
@@ -106,6 +111,10 @@ type referencedObjects struct {
 	eIPPods       sets.Set[ktypes.NamespacedName]
 }
 
+// getActiveNetworkForNamespaceFn returns a NetInfo which contains NADs which refer to a network in addition to the basic
+// network information.
+type getActiveNetworkForNamespaceFn func(namespace string) (util.NetInfo, error)
+
 // Controller implement Egress IP for secondary host networks
 type Controller struct {
 	eIPLister         egressiplisters.EgressIPLister
@@ -116,9 +125,10 @@ type Controller struct {
 	namespaceInformer cache.SharedIndexInformer
 	namespaceQueue    workqueue.TypedRateLimitingInterface[*corev1.Namespace]
 
-	podLister   corelisters.PodLister
-	podInformer cache.SharedIndexInformer
-	podQueue    workqueue.TypedRateLimitingInterface[*corev1.Pod]
+	podLister                    corelisters.PodLister
+	podInformer                  cache.SharedIndexInformer
+	podQueue                     workqueue.TypedRateLimitingInterface[*corev1.Pod]
+	getActiveNetworkForNamespace getActiveNetworkForNamespaceFn
 
 	// cache is a cache of configuration states for EIPs, key is EgressIP Name.
 	cache *syncmap.SyncMap[*state]
@@ -140,8 +150,9 @@ type Controller struct {
 	v6              bool
 }
 
-func NewController(k kube.Interface, eIPInformer egressipinformer.EgressIPInformer, nodeInformer cache.SharedIndexInformer, namespaceInformer coreinformers.NamespaceInformer,
-	podInformer coreinformers.PodInformer, routeManager *routemanager.Controller, v4, v6 bool, nodeName string, linkManager *linkmanager.Controller) (*Controller, error) {
+func NewController(k kube.Interface, eIPInformer egressipinformer.EgressIPInformer, nodeInformer cache.SharedIndexInformer,
+	namespaceInformer coreinformers.NamespaceInformer, podInformer coreinformers.PodInformer, getActiveNetworkForNamespaceFn getActiveNetworkForNamespaceFn,
+	routeManager *routemanager.Controller, v4, v6 bool, nodeName string, linkManager *linkmanager.Controller) (*Controller, error) {
 
 	c := &Controller{
 		eIPLister:   eIPInformer.Lister(),
@@ -163,17 +174,18 @@ func NewController(k kube.Interface, eIPInformer egressipinformer.EgressIPInform
 			workqueue.NewTypedItemFastSlowRateLimiter[*corev1.Pod](time.Second, 5*time.Second, 5),
 			workqueue.TypedRateLimitingQueueConfig[*corev1.Pod]{Name: "eippods"},
 		),
-		cache:                 syncmap.NewSyncMap[*state](),
-		referencedObjectsLock: sync.RWMutex{},
-		referencedObjects:     map[string]*referencedObjects{},
-		routeManager:          routeManager,
-		linkManager:           linkManager,
-		ruleManager:           iprulemanager.NewController(v4, v6),
-		iptablesManager:       iptables.NewController(),
-		kube:                  k,
-		nodeName:              nodeName,
-		v4:                    v4,
-		v6:                    v6,
+		getActiveNetworkForNamespace: getActiveNetworkForNamespaceFn,
+		cache:                        syncmap.NewSyncMap[*state](),
+		referencedObjectsLock:        sync.RWMutex{},
+		referencedObjects:            map[string]*referencedObjects{},
+		routeManager:                 routeManager,
+		linkManager:                  linkManager,
+		ruleManager:                  iprulemanager.NewController(v4, v6),
+		iptablesManager:              iptables.NewController(),
+		kube:                         k,
+		nodeName:                     nodeName,
+		v4:                           v4,
+		v6:                           v6,
 	}
 	return c, nil
 }
@@ -247,35 +259,36 @@ func (c *Controller) Run(stopCh <-chan struct{}, wg *sync.WaitGroup, threads int
 	// Tell rule manager and IPTable manager that we want to fully own all rules at a particular priority/table.
 	// Any rules created with this priority or in that particular IPTables chain, that we do not recognize it, will be
 	// removed by relevant manager.
-	if err := c.ruleManager.OwnPriority(rulePriority); err != nil {
-		return fmt.Errorf("failed to own priority %d for IP rules: %v", rulePriority, err)
+	if err := c.ruleManager.OwnPriority(cdnRulePriority); err != nil {
+		return fmt.Errorf("failed to own priority %d for IP rules: %v", cdnRulePriority, err)
+	}
+	if err := c.ruleManager.OwnPriority(udnRulePriority); err != nil {
+		return fmt.Errorf("failed to own priority %d for IP rules: %v", udnRulePriority, err)
 	}
 	if c.v4 {
 		if err := c.iptablesManager.OwnChain(utiliptables.TableNAT, iptChainName, utiliptables.ProtocolIPv4); err != nil {
 			return fmt.Errorf("unable to own chain %s: %v", iptChainName, err)
 		}
+		// we need to restore pkt mark from conntrack in-order for RP filtering not to fail for return packets from cluster nodes
+		// and route UDN packets
+		if err = c.iptablesManager.EnsureRule(utiliptables.TableMangle, utiliptables.ChainPrerouting, utiliptables.ProtocolIPv4, iptSaveMarkRule); err != nil {
+			return fmt.Errorf("failed to create rule in chain %s to save pkt marking: %v", utiliptables.ChainPrerouting, err)
+		}
+		if err = c.iptablesManager.EnsureRule(utiliptables.TableMangle, utiliptables.ChainPrerouting, utiliptables.ProtocolIPv4, iptRestoreMarkRule); err != nil {
+			return fmt.Errorf("failed to create rule in chain %s to restore pkt marking: %v", utiliptables.ChainPrerouting, err)
+		}
 		if err = c.iptablesManager.EnsureRule(utiliptables.TableNAT, utiliptables.ChainPostrouting, utiliptables.ProtocolIPv4, iptJumpRule); err != nil {
 			return fmt.Errorf("failed to create rule in chain %s to jump to chain %s: %v", utiliptables.ChainPostrouting, iptChainName, err)
 		}
-		// for LGW mode, we need to restore pkt mark from conntrack in-order for RP filtering not to fail for return packets from cluster nodes
-		if ovnconfig.Gateway.Mode == ovnconfig.GatewayModeLocal {
-			if err = c.iptablesManager.EnsureRule(utiliptables.TableMangle, utiliptables.ChainPrerouting, utiliptables.ProtocolIPv4, iptRestoreMarkRule); err != nil {
-				return fmt.Errorf("failed to create rule in chain %s to restore pkt marking: %v", utiliptables.ChainPrerouting, err)
-			}
-			if err = c.iptablesManager.EnsureRule(utiliptables.TableMangle, utiliptables.ChainPrerouting, utiliptables.ProtocolIPv4, iptSaveMarkRule); err != nil {
-				return fmt.Errorf("failed to create rule in chain %s to save pkt marking: %v", utiliptables.ChainPrerouting, err)
-			}
-
-			// If dst is a node IP, use main routing table and skip EIP routing tables
-			if err = c.ruleManager.Add(getNodeIPFwMarkIPRule(netlink.FAMILY_V4)); err != nil {
-				return fmt.Errorf("failed to create IPv4 rule for node IPs: %v", err)
-			}
-			// The fwmark of the packet is included in reverse path route lookup. This permits rp_filter to function when the fwmark is
-			// used for routing traffic in both directions.
-			stdout, _, err := util.RunSysctl("-w", "net.ipv4.conf.all.src_valid_mark=1")
-			if err != nil || stdout != "net.ipv4.conf.all.src_valid_mark = 1" {
-				return fmt.Errorf("failed to set sysctl net.ipv4.conf.all.src_valid_mark to 1")
-			}
+		// If dst is a node IP, use main routing table and skip EIP routing tables
+		if err = c.ruleManager.Add(getNodeIPFwMarkIPRule(netlink.FAMILY_V4)); err != nil {
+			return fmt.Errorf("failed to create IPv4 rule for node IPs: %v", err)
+		}
+		// The fwmark of the packet is included in reverse path route lookup. This permits rp_filter to function when the fwmark is
+		// used for routing traffic in both directions.
+		stdout, _, err := util.RunSysctl("-w", "net.ipv4.conf.all.src_valid_mark=1")
+		if err != nil || stdout != "net.ipv4.conf.all.src_valid_mark = 1" {
+			return fmt.Errorf("failed to set sysctl net.ipv4.conf.all.src_valid_mark to 1")
 		}
 	}
 	if c.v6 {
@@ -285,20 +298,19 @@ func (c *Controller) Run(stopCh <-chan struct{}, wg *sync.WaitGroup, threads int
 		if err = c.iptablesManager.EnsureRule(utiliptables.TableNAT, utiliptables.ChainPostrouting, utiliptables.ProtocolIPv6, iptJumpRule); err != nil {
 			return fmt.Errorf("unable to ensure iptables rules for jump rule: %v", err)
 		}
-		// for LGW mode, we need to restore pkt mark from conntrack in-order for RP filtering not to fail for return packets from cluster nodes
-		if ovnconfig.Gateway.Mode == ovnconfig.GatewayModeLocal {
-			if err = c.iptablesManager.EnsureRule(utiliptables.TableMangle, utiliptables.ChainPrerouting, utiliptables.ProtocolIPv6, iptRestoreMarkRule); err != nil {
-				return fmt.Errorf("failed to create rule in chain %s to restore pkt marking: %v", utiliptables.ChainPrerouting, err)
-			}
-			if err = c.iptablesManager.EnsureRule(utiliptables.TableMangle, utiliptables.ChainPrerouting, utiliptables.ProtocolIPv6, iptSaveMarkRule); err != nil {
-				return fmt.Errorf("failed to create rule in chain %s to save pkt marking: %v", utiliptables.ChainPrerouting, err)
-			}
+		// we need to restore pkt mark from conntrack in-order for RP filtering not to fail for return packets from cluster nodes
+		// and route UDN packets
+		if err = c.iptablesManager.EnsureRule(utiliptables.TableMangle, utiliptables.ChainPrerouting, utiliptables.ProtocolIPv6, iptRestoreMarkRule); err != nil {
+			return fmt.Errorf("failed to create rule in chain %s to restore pkt marking: %v", utiliptables.ChainPrerouting, err)
+		}
+		if err = c.iptablesManager.EnsureRule(utiliptables.TableMangle, utiliptables.ChainPrerouting, utiliptables.ProtocolIPv6, iptSaveMarkRule); err != nil {
+			return fmt.Errorf("failed to create rule in chain %s to save pkt marking: %v", utiliptables.ChainPrerouting, err)
+		}
 
-			// If dst is a node IP, use main routing table and skip EIP routing tables
-			// src_valid_mark is not applicable to ipv6
-			if err = c.ruleManager.Add(getNodeIPFwMarkIPRule(netlink.FAMILY_V6)); err != nil {
-				return fmt.Errorf("failed to create IPv6 rule for node IPs: %v", err)
-			}
+		// If dst is a node IP, use main routing table and skip EIP routing tables
+		// src_valid_mark is not applicable to ipv6
+		if err = c.ruleManager.Add(getNodeIPFwMarkIPRule(netlink.FAMILY_V6)); err != nil {
+			return fmt.Errorf("failed to create IPv6 rule for node IPs: %v", err)
 		}
 	}
 
@@ -526,6 +538,13 @@ func (c *Controller) processEIP(eip *eipv1.EgressIP) (*eIPConfig, sets.Set[strin
 		return nil, selectedNamespaces, selectedPods, selectedNamespacesPodIPs,
 			fmt.Errorf("failed to determine egress IP config for node %s: %w", c.nodeName, err)
 	}
+	var mark util.EgressIPMark
+	if util.IsNetworkSegmentationSupportEnabled() && util.IsEgressIPMarkSet(eip.Annotations) {
+		mark, err = util.ParseEgressIPMark(eip.Annotations)
+		if err != nil {
+			klog.Errorf("Failed to get EgressIP %s packet mark from annotations: %v", eip.Name, err)
+		}
+	}
 	// max of 1 EIP IP is selected. Return when 1 is found.
 	for _, status := range eip.Status.Items {
 		if isValid := isEIPStatusItemValid(status, c.nodeName); !isValid {
@@ -553,7 +572,24 @@ func (c *Controller) processEIP(eip *eipv1.EgressIP) (*eIPConfig, sets.Set[strin
 			return nil, selectedNamespaces, selectedPods, selectedNamespacesPodIPs, fmt.Errorf("failed to list namespaces: %w", err)
 		}
 		isEIPV6 := utilnet.IsIPv6(eIPNet.IP)
+		var udnNetworks []util.NetInfo
 		for _, namespace := range namespaces {
+			netInfo, err := c.getActiveNetworkForNamespace(namespace.Name)
+			if err != nil {
+				return nil, selectedNamespaces, selectedPods, selectedNamespacesPodIPs, fmt.Errorf("failed to get active network for namespace %s: %v", namespace.Name, err)
+			}
+			if netInfo.IsSecondary() && (netInfo.TopologyType() == types.LocalnetTopology || netInfo.TopologyType() == types.Layer2Topology) {
+				// EIP for secondary host interfaces is only supported for Layer 3
+				continue
+			}
+			// A valid mark is a required input for a role primary UDN
+			if netInfo.IsSecondary() {
+				if !mark.IsAvailable() {
+					return nil, selectedNamespaces, selectedPods, selectedNamespacesPodIPs,
+						fmt.Errorf("failed to retrieve packet mark from EgressIP annotations and its required for network %s", netInfo.GetNetworkName())
+				}
+				udnNetworks = append(udnNetworks, netInfo)
+			}
 			selectedNamespaces.Insert(namespace.Name)
 			pods, err := c.listPodsByNamespaceAndSelector(namespace.Name, &eip.Spec.PodSelector)
 			if err != nil {
@@ -565,7 +601,7 @@ func (c *Controller) processEIP(eip *eipv1.EgressIP) (*eIPConfig, sets.Set[strin
 				if util.PodWantsHostNetwork(pod) || util.PodCompleted(pod) || !util.PodScheduled(pod) {
 					continue
 				}
-				ips, err := util.DefaultNetworkPodIPs(pod)
+				ips, err := util.GetPodIPsOfNetwork(pod, netInfo)
 				if err != nil {
 					return nil, selectedNamespaces, selectedPods, selectedNamespacesPodIPs, fmt.Errorf("failed to get pod ips: %w", err)
 				}
@@ -577,13 +613,13 @@ func (c *Controller) processEIP(eip *eipv1.EgressIP) (*eIPConfig, sets.Set[strin
 				if selectedNamespacesPodIPs[namespace.Name] == nil {
 					selectedNamespacesPodIPs[namespace.Name] = make(map[ktypes.NamespacedName]*podIPConfigList)
 				}
-				selectedNamespacesPodIPs[namespace.Name][podNamespaceName] = generatePodConfig(ips, link, eIPNet, isEIPV6)
+				selectedNamespacesPodIPs[namespace.Name][podNamespaceName] = generatePodConfig(netInfo, ips, link, eIPNet, isEIPV6, mark)
 				selectedPods.Insert(podNamespaceName)
 			}
 		}
 		// ensure at least one pod is selected before generating config
 		if len(selectedNamespacesPodIPs) > 0 {
-			eipSpecificConfig, err = generateEIPConfig(link, eIPNet, isEIPV6)
+			eipSpecificConfig, err = generateEIPConfig(c.nodeLister, udnNetworks, link, eIPNet, isEIPV6, mark, c.nodeName)
 			if err != nil {
 				return nil, selectedNamespaces, selectedPods, selectedNamespacesPodIPs,
 					fmt.Errorf("failed to generate EIP configuration for EgressIP %s IP %s: %v", eip.Name, status.EgressIP, err)
@@ -595,7 +631,7 @@ func (c *Controller) processEIP(eip *eipv1.EgressIP) (*eIPConfig, sets.Set[strin
 	return eipSpecificConfig, selectedNamespaces, selectedPods, selectedNamespacesPodIPs, nil
 }
 
-func generatePodConfig(podIPs []net.IP, link netlink.Link, eIPNet *net.IPNet, isEIPV6 bool) *podIPConfigList {
+func generatePodConfig(ni util.NetInfo, podIPs []net.IP, link netlink.Link, eIPNet *net.IPNet, isEIPV6 bool, mark util.EgressIPMark) *podIPConfigList {
 	newPodIPConfigs := newPodIPConfigList()
 	for _, podIP := range podIPs {
 		isPodIPv6 := utilnet.IsIPv6(podIP)
@@ -603,28 +639,86 @@ func generatePodConfig(podIPs []net.IP, link netlink.Link, eIPNet *net.IPNet, is
 			continue
 		}
 		ipConfig := newPodIPConfig()
-		ipConfig.ipTableRule = generateIPTablesSNATRuleArg(podIP, isPodIPv6, link.Attrs().Name, eIPNet.IP.String())
-		ipConfig.ipRule = generateIPRule(podIP, isPodIPv6, link.Attrs().Index)
+		ipConfig.ipTableRule = generateIPTablesSNATRuleArg(podIP, isPodIPv6, ni.IsSecondary(), link.Attrs().Name, eIPNet.IP.String(), mark)
+		ipConfig.ipRule = generateIPRule(ni, podIP, isPodIPv6, link.Attrs().Index, mark)
 		ipConfig.v6 = isPodIPv6
+		ipConfig.udn = ni.IsSecondary()
 		newPodIPConfigs.elems = append(newPodIPConfigs.elems, ipConfig)
 	}
 	return newPodIPConfigs
 }
 
 // generateEIPConfig generates configuration that isn't related to any pod EIPs to support config of a single EIP
-func generateEIPConfig(link netlink.Link, eIPNet *net.IPNet, isEIPV6 bool) (*eIPConfig, error) {
+func generateEIPConfig(nodeLister corelisters.NodeLister, udns []util.NetInfo, link netlink.Link, eIPNet *net.IPNet, isEIPV6 bool,
+	mark util.EgressIPMark, nodeName string) (*eIPConfig, error) {
 	eipConfig := newEIPConfig()
-	linkRoutes, err := generateRoutesForLink(link, isEIPV6)
+	targetRouteTable := util.CalculateRouteTableID(link.Attrs().Index)
+	linkRoutes, err := generateRoutesForLink(link, isEIPV6, targetRouteTable)
 	if err != nil {
 		return nil, err
 	}
-	eipConfig.routes = linkRoutes
+	udnMgntLinkRoutes, err := generateUDNMgntPortRoutes(nodeLister, udns, isEIPV6, targetRouteTable)
+	if err != nil {
+		return nil, fmt.Errorf("failed to gather routes for UDN management ports: %v", err)
+	}
+	eipConfig.routes = append(linkRoutes, udnMgntLinkRoutes...)
 	eipConfig.addr = getNetlinkAddress(eIPNet, link.Attrs().Index)
+	// UDN only
+	// UDNs are secondary networks that are role primary networks
+	if mark.IsValid() {
+		rule := generateIPRuleForRolePrimaryUDN(link.Attrs().Index, mark, isEIPV6)
+		eipConfig.udnIPRule = &rule
+		eipConfig.udnIPTableRule = generateIPTablesSNATForRolePrimaryUDN(link.Attrs().Name, eIPNet.IP.String(), mark)
+	}
+	// end UDN only
 	return eipConfig, nil
 }
 
-func generateRoutesForLink(link netlink.Link, isV6 bool) ([]netlink.Route, error) {
-	routeTable := 254 // main table number
+func generateUDNMgntPortRoutes(nodeLister corelisters.NodeLister, udns []util.NetInfo, isV6 bool, routeTable int) ([]netlink.Route, error) {
+	if len(udns) == 0 {
+		return []netlink.Route{}, nil
+	}
+	nodes, err := nodeLister.List(labels.Everything())
+	if err != nil {
+		return nil, fmt.Errorf("failed to list nodes: %v", err)
+	}
+	var allUDNMgntLinkRoutes []netlink.Route
+	for _, udnNetwork := range udns {
+		networkID, err := util.GetNetworkID(nodes, udnNetwork)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get network ID for network %s: %v", udnNetwork.GetNetworkName(), err)
+		}
+		mgntInfName := util.GetNetworkScopedK8sMgmtHostIntfName(uint(networkID))
+		mgntLink, err := util.GetNetLinkOps().LinkByName(mgntInfName)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get management port link %q: %v", mgntInfName, err)
+		}
+		vrfLink, err := util.GetNetLinkOps().LinkByIndex(mgntLink.Attrs().MasterIndex)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get VRF device for network %s with VRF link index %d: %v", udnNetwork.GetNetworkName(), mgntLink.Attrs().MasterIndex, err)
+		}
+		vrf, ok := vrfLink.(*netlink.Vrf)
+		if !ok {
+			actualType := reflect.TypeOf(vrfLink)
+			return nil, fmt.Errorf("expected link %s to be type VRF, instead received type %s", vrfLink.Attrs().Name, actualType)
+		}
+		mgntRoutes, err := getLinkRoutes(mgntLink, isV6, int(vrf.Table))
+		if err != nil {
+			return nil, fmt.Errorf("failed to get routes for link %s: %v", mgntLink.Attrs().Name, err)
+		}
+		for _, mgntRoute := range mgntRoutes {
+			// we only care about one route towards the mgnt port and theres only one route which contains an MTU and no src IP.
+			if mgntRoute.MTU != 0 && mgntRoute.Src == nil {
+				allUDNMgntLinkRoutes = append(allUDNMgntLinkRoutes, mgntRoute)
+			}
+		}
+	}
+	overwriteRoutesTableID(allUDNMgntLinkRoutes, routeTable)
+	return allUDNMgntLinkRoutes, nil
+}
+
+func generateRoutesForLink(link netlink.Link, isV6 bool, targetRouteTable int) ([]netlink.Route, error) {
+	srcRouteTable := 254 // main table number
 	// check if device is a slave to a VRF device and if so, use VRF devices associated routing table to lookup routes instead of main table
 	if isVRFSlaveDevice(link) {
 		vrfLink, err := util.GetNetLinkOps().LinkByIndex(link.Attrs().MasterIndex)
@@ -636,16 +730,24 @@ func generateRoutesForLink(link netlink.Link, isV6 bool) ([]netlink.Route, error
 			actualType := reflect.TypeOf(vrfLink)
 			return nil, fmt.Errorf("expected link %s to be type VRF, instead received type %s", vrfLink.Attrs().Name, actualType)
 		}
-		routeTable = int(vrf.Table)
+		srcRouteTable = int(vrf.Table)
 	}
-	filterRoute, filterMask := filterRouteByLinkTable(link.Attrs().Index, routeTable)
-	linkRoutes, err := util.GetNetLinkOps().RouteListFiltered(util.GetIPFamily(isV6), filterRoute, filterMask)
+	linkRoutes, err := getLinkRoutes(link, isV6, srcRouteTable)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get routes for link %s: %v", link.Attrs().Name, err)
 	}
 	linkRoutes = ensureAtLeastOneDefaultRoute(linkRoutes, link.Attrs().Index, isV6)
-	overwriteRoutesTableID(linkRoutes, util.CalculateRouteTableID(link.Attrs().Index))
+	overwriteRoutesTableID(linkRoutes, targetRouteTable)
 	clearSrcFromRoutes(linkRoutes)
+	return linkRoutes, nil
+}
+
+func getLinkRoutes(link netlink.Link, isV6 bool, routeTable int) ([]netlink.Route, error) {
+	filterRoute, filterMask := filterRouteByLinkTable(link.Attrs().Index, routeTable)
+	linkRoutes, err := util.GetNetLinkOps().RouteListFiltered(util.GetIPFamily(isV6), filterRoute, filterMask)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list routes: %v", err)
+	}
 	return linkRoutes, nil
 }
 
@@ -659,6 +761,7 @@ func (c *Controller) deleteRefObjects(name string) {
 func (c *Controller) updateEIP(existing *state, update *config) error {
 	// cleanup first
 	// cleanup pod specific configuration - aka ip rules and iptables
+	// CDN clean up
 	if len(existing.namespacesWithPodIPConfigs) > 0 {
 		// track which namespaces should be removed from targetNamespaces
 		var namespacesToDelete []string
@@ -703,6 +806,27 @@ func (c *Controller) updateEIP(existing *state, update *config) error {
 		}
 		for _, nsToDelete := range namespacesToDelete {
 			delete(existing.namespacesWithPodIPConfigs, nsToDelete)
+		}
+	}
+	// UDN IP rule + IPTables cleanup when EgressIP is deleted and there was a previous configuration for one or more pods.
+	if update == nil {
+		if existing.eIPConfig.udnIPRule != nil {
+			if err := c.ruleManager.Delete(*existing.eIPConfig.udnIPRule); err != nil {
+				return fmt.Errorf("failed to delete UDN IP rule (%v): %v", existing.eIPConfig.udnIPRule, err)
+			}
+		}
+		if len(existing.eIPConfig.udnIPTableRule.Args) > 0 {
+			if utilnet.IsIPv6(existing.eIPConfig.addr.IP) {
+				if err := c.iptablesManager.DeleteRule(utiliptables.TableNAT, iptChainName, utiliptables.ProtocolIPv6,
+					existing.eIPConfig.udnIPTableRule); err != nil {
+					return err
+				}
+			} else {
+				if err := c.iptablesManager.DeleteRule(utiliptables.TableNAT, iptChainName, utiliptables.ProtocolIPv4,
+					existing.eIPConfig.udnIPTableRule); err != nil {
+					return err
+				}
+			}
 		}
 	}
 	// clean up pod independent configuration first
@@ -758,6 +882,7 @@ func (c *Controller) updateEIP(existing *state, update *config) error {
 	}
 	// apply new changes
 	if update != nil && update.eIPConfig != nil && update.eIPConfig.addr != nil && len(update.eIPConfig.routes) > 0 {
+		// Update CDN config
 		for updatedTargetNS, updatedTargetPod := range update.namespacesWithPodIPConfigs {
 			existingNs, found := existing.namespacesWithPodIPConfigs[updatedTargetNS]
 			if !found {
@@ -777,6 +902,28 @@ func (c *Controller) updateEIP(existing *state, update *config) error {
 				}
 			}
 		}
+		// Update UDN config
+		if update.eIPConfig.udnIPRule != nil {
+			if err := c.ruleManager.Add(*update.eIPConfig.udnIPRule); err != nil {
+				return fmt.Errorf("failed to add UDN IP rule (%v): %v", update.eIPConfig.udnIPRule, err)
+			}
+			existing.eIPConfig.udnIPRule = update.eIPConfig.udnIPRule
+		}
+		if len(update.eIPConfig.udnIPTableRule.Args) > 0 {
+			if utilnet.IsIPv6(update.eIPConfig.addr.IP) {
+				if err := c.iptablesManager.EnsureRule(utiliptables.TableNAT, iptChainName, utiliptables.ProtocolIPv6,
+					update.eIPConfig.udnIPTableRule); err != nil {
+					return err
+				}
+			} else {
+				if err := c.iptablesManager.EnsureRule(utiliptables.TableNAT, iptChainName, utiliptables.ProtocolIPv4,
+					update.eIPConfig.udnIPTableRule); err != nil {
+					return err
+				}
+			}
+			existing.eIPConfig.udnIPTableRule = update.eIPConfig.udnIPTableRule
+		}
+		// common between CDN and UDN
 		if err := c.addIPToAnnotation(update.eIPConfig.addr.IP.String()); err != nil {
 			return fmt.Errorf("failed to add egress IP address to annotation: %v", err)
 		}
@@ -798,18 +945,20 @@ func (c *Controller) updateEIP(existing *state, update *config) error {
 }
 
 func (c *Controller) deleteIPConfig(podIPConfigToDelete *podIPConfig) error {
-	if err := c.ruleManager.Delete(podIPConfigToDelete.ipRule); err != nil {
-		return err
-	}
-	if podIPConfigToDelete.v6 {
-		if err := c.iptablesManager.DeleteRule(utiliptables.TableNAT, iptChainName, utiliptables.ProtocolIPv6,
-			podIPConfigToDelete.ipTableRule); err != nil {
+	if !podIPConfigToDelete.udn {
+		if err := c.ruleManager.Delete(podIPConfigToDelete.ipRule); err != nil {
 			return err
 		}
-	} else {
-		if err := c.iptablesManager.DeleteRule(utiliptables.TableNAT, iptChainName, utiliptables.ProtocolIPv4,
-			podIPConfigToDelete.ipTableRule); err != nil {
-			return err
+		if podIPConfigToDelete.v6 {
+			if err := c.iptablesManager.DeleteRule(utiliptables.TableNAT, iptChainName, utiliptables.ProtocolIPv6,
+				podIPConfigToDelete.ipTableRule); err != nil {
+				return err
+			}
+		} else {
+			if err := c.iptablesManager.DeleteRule(utiliptables.TableNAT, iptChainName, utiliptables.ProtocolIPv4,
+				podIPConfigToDelete.ipTableRule); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -829,19 +978,23 @@ func (c *Controller) applyPodConfig(existingPodIPsConfig *podIPConfigList, updat
 		}
 	}
 	for _, newPodIPConfig := range newPodIPConfigs.elems {
-		if err := c.ruleManager.Add(newPodIPConfig.ipRule); err != nil {
-			existingPodIPsConfig.insertOverwriteFailed(*newPodIPConfig)
-			return err
-		}
-		if newPodIPConfig.v6 {
-			if err := c.iptablesManager.EnsureRule(utiliptables.TableNAT, iptChainName, utiliptables.ProtocolIPv6, newPodIPConfig.ipTableRule); err != nil {
+		// skip UDN pods because there isn't a per pod configuration required.
+		// For UDN pods, a single IP rule and a single IPTable rule is required matching on a pkt mark instead of pod IP address.
+		if !newPodIPConfig.udn {
+			if err := c.ruleManager.Add(newPodIPConfig.ipRule); err != nil {
 				existingPodIPsConfig.insertOverwriteFailed(*newPodIPConfig)
-				return fmt.Errorf("unable to ensure iptables rules: %v", err)
+				return err
 			}
-		} else {
-			if err := c.iptablesManager.EnsureRule(utiliptables.TableNAT, iptChainName, utiliptables.ProtocolIPv4, newPodIPConfig.ipTableRule); err != nil {
-				existingPodIPsConfig.insertOverwriteFailed(*newPodIPConfig)
-				return fmt.Errorf("failed to ensure rules (%+v) in chain %s: %v", newPodIPConfig.ipTableRule, iptChainName, err)
+			if newPodIPConfig.v6 {
+				if err := c.iptablesManager.EnsureRule(utiliptables.TableNAT, iptChainName, utiliptables.ProtocolIPv6, newPodIPConfig.ipTableRule); err != nil {
+					existingPodIPsConfig.insertOverwriteFailed(*newPodIPConfig)
+					return fmt.Errorf("unable to ensure iptables rules: %v", err)
+				}
+			} else {
+				if err := c.iptablesManager.EnsureRule(utiliptables.TableNAT, iptChainName, utiliptables.ProtocolIPv4, newPodIPConfig.ipTableRule); err != nil {
+					existingPodIPsConfig.insertOverwriteFailed(*newPodIPConfig)
+					return fmt.Errorf("failed to ensure rules (%+v) in chain %s: %v", newPodIPConfig.ipTableRule, iptChainName, err)
+				}
 			}
 		}
 		existingPodIPsConfig.insertOverwrite(*newPodIPConfig)
@@ -913,15 +1066,29 @@ func (c *Controller) repairNode() error {
 			assignedIPRouteStrToRoutes[routeStr] = existingRoute
 		}
 	}
-	filter, mask := filterRuleByPriority(rulePriority)
-	existingRules, err := util.GetNetLinkOps().RuleListFiltered(netlink.FAMILY_ALL, filter, mask)
+	// CDN IP rules
+	filter, mask := filterRuleByPriority(cdnRulePriority)
+	existingRulesCDN, err := util.GetNetLinkOps().RuleListFiltered(netlink.FAMILY_ALL, filter, mask)
 	if err != nil {
-		return fmt.Errorf("failed to list IP rules: %v", err)
+		return fmt.Errorf("failed to list IP rules to support EgressIP for the cluster default network: %v", err)
 	}
-	for _, existingRule := range existingRules {
+	for _, existingRule := range existingRulesCDN {
 		ruleStr := existingRule.String()
 		assignedIPRules.Insert(ruleStr)
 		assignedIPRulesStrToRules[ruleStr] = existingRule
+	}
+	// UDN IP rules
+	if util.IsNetworkSegmentationSupportEnabled() {
+		filter, mask = filterRuleByPriority(udnRulePriority)
+		existingRulesUDN, err := util.GetNetLinkOps().RuleListFiltered(netlink.FAMILY_ALL, filter, mask)
+		if err != nil {
+			return fmt.Errorf("failed to list IP rules to support EgressIP for the user defined network: %v", err)
+		}
+		for _, existingRule := range existingRulesUDN {
+			ruleStr := existingRule.String()
+			assignedIPRules.Insert(ruleStr)
+			assignedIPRulesStrToRules[ruleStr] = existingRule
+		}
 	}
 	// gather IPv4 and IPv6 IPTable rules and ignore what IP family we currently support because we may have converted from
 	// dual to single or vice versa
@@ -963,6 +1130,12 @@ func (c *Controller) repairNode() error {
 		if len(egressIP.Status.Items) == 0 {
 			continue
 		}
+		var mark util.EgressIPMark
+		if util.IsNetworkSegmentationSupportEnabled() && util.IsEgressIPMarkSet(egressIP.Annotations) {
+			if mark, err = util.ParseEgressIPMark(egressIP.Annotations); err != nil {
+				klog.Errorf("Failed to parse mark from EgressIP %s annotations: %v", egressIP.Name, err)
+			}
+		}
 		for _, status := range egressIP.Status.Items {
 			if isValid := isEIPStatusItemValid(status, c.nodeName); !isValid {
 				continue
@@ -986,7 +1159,7 @@ func (c *Controller) repairNode() error {
 			linkIdx := link.Attrs().Index
 			linkName := link.Attrs().Name
 			// copy routes associated with link to new route table
-			linkRoutes, err := generateRoutesForLink(link, isEIPV6)
+			linkRoutes, err := generateRoutesForLink(link, isEIPV6, util.CalculateRouteTableID(link.Attrs().Index))
 			if err != nil {
 				return fmt.Errorf("failed to generate IP routes for link %s for EgressIP %s IP %s: %v", linkName,
 					egressIP.Name, eIPNet.IP.String(), err)
@@ -1011,6 +1184,17 @@ func (c *Controller) repairNode() error {
 			for _, namespace := range namespaces {
 				namespaceLabels := labels.Set(namespace.Labels)
 				if namespaceSelector.Matches(namespaceLabels) {
+					netInfo, err := c.getActiveNetworkForNamespace(namespace.Name)
+					if err != nil {
+						return fmt.Errorf("failed to get active network for namespace %s: %v", namespace.Name, err)
+					}
+					if netInfo.IsSecondary() && (netInfo.TopologyType() == types.Layer2Topology || netInfo.TopologyType() == types.LocalnetTopology) {
+						// EIP for secondary host interfaces is not supported for secondary networks
+						continue
+					}
+					if netInfo.IsSecondary() && !mark.IsAvailable() {
+						return fmt.Errorf("namespace %s network %s requires a valid mark from EgressIP %s", namespace.Name, netInfo.GetNetworkName(), egressIP.Name)
+					}
 					pods, err := c.podLister.Pods(namespace.Name).List(podSelector)
 					if err != nil {
 						return fmt.Errorf("failed to list pods using selector %s to configure egress IP %s: %v",
@@ -1020,7 +1204,7 @@ func (c *Controller) repairNode() error {
 						if util.PodCompleted(pod) || util.PodWantsHostNetwork(pod) || len(pod.Status.PodIPs) == 0 {
 							continue
 						}
-						podIPs, err := util.DefaultNetworkPodIPs(pod)
+						podIPs, err := util.GetPodIPsOfNetwork(pod, netInfo)
 						if err != nil {
 							return err
 						}
@@ -1032,13 +1216,13 @@ func (c *Controller) repairNode() error {
 							if !c.isIPSupported(isPodIPV6) {
 								continue
 							}
-							ipTableRule := strings.Join(generateIPTablesSNATRuleArg(podIP, isPodIPV6, linkName, status.EgressIP).Args, " ")
+							ipTableRule := strings.Join(generateIPTablesSNATRuleArg(podIP, isPodIPV6, netInfo.IsSecondary(), linkName, status.EgressIP, mark).Args, " ")
 							if isPodIPV6 {
 								expectedIPTableV6Rules.Insert(ipTableRule)
 							} else {
 								expectedIPTableV4Rules.Insert(ipTableRule)
 							}
-							expectedIPRules.Insert(generateIPRule(podIP, isPodIPV6, link.Attrs().Index).String())
+							expectedIPRules.Insert(generateIPRule(netInfo, podIP, isPodIPV6, link.Attrs().Index, mark).String())
 						}
 					}
 				}
@@ -1463,11 +1647,18 @@ func getNetlinkAddress(addr *net.IPNet, ifindex int) *netlink.Addr {
 }
 
 // generateIPRules generates IP rules at a predefined priority for each pod IP with a custom routing table based
-// from the links 'ifindex'
-func generateIPRule(srcIP net.IP, isIPv6 bool, ifIndex int) netlink.Rule {
+// from the links 'ifindex'. EIP IPs assigned to the CDN match on src IP and from UDN pkt marks.
+func generateIPRule(ni util.NetInfo, srcIP net.IP, isIPv6 bool, ifIndex int, mark util.EgressIPMark) netlink.Rule {
+	if ni.IsSecondary() {
+		return generateIPRuleForRolePrimaryUDN(ifIndex, mark, isIPv6)
+	}
+	return generateIPRuleForDefaultNetwork(srcIP, isIPv6, ifIndex)
+}
+
+func generateIPRuleForDefaultNetwork(srcIP net.IP, isIPv6 bool, ifIndex int) netlink.Rule {
 	r := *netlink.NewRule()
 	r.Table = util.CalculateRouteTableID(ifIndex)
-	r.Priority = rulePriority
+	r.Priority = cdnRulePriority
 	var ipFullMask string
 	if isIPv6 {
 		ipFullMask = fmt.Sprintf("%s/128", srcIP.String())
@@ -1478,6 +1669,25 @@ func generateIPRule(srcIP net.IP, isIPv6 bool, ifIndex int) netlink.Rule {
 	}
 	_, ipNet, _ := net.ParseCIDR(ipFullMask)
 	r.Src = ipNet
+	return r
+}
+
+func generateIPRuleForRolePrimaryUDN(ifIndex int, mark util.EgressIPMark, isV6 bool) netlink.Rule {
+	r := *netlink.NewRule()
+	r.Table = util.CalculateRouteTableID(ifIndex)
+	r.Priority = udnRulePriority
+	r.Mark = mark.ToInt()
+	var masqCIDRStr string
+	if isV6 {
+		masqCIDRStr = ovnconfig.Gateway.V6MasqueradeSubnet
+	} else {
+		masqCIDRStr = ovnconfig.Gateway.V4MasqueradeSubnet
+	}
+	_, masqIPNet, err := net.ParseCIDR(masqCIDRStr)
+	if err != nil {
+		klog.Errorf("Failed to parse masquerade IP %q: %v", masqCIDRStr, err)
+	}
+	r.Src = masqIPNet
 	return r
 }
 
@@ -1500,7 +1710,14 @@ func getPodNamespacedName(pod *corev1.Pod) ktypes.NamespacedName {
 	return ktypes.NamespacedName{Namespace: pod.Namespace, Name: pod.Name}
 }
 
-func generateIPTablesSNATRuleArg(srcIP net.IP, isIPv6 bool, infName, snatIP string) iptables.RuleArg {
+func generateIPTablesSNATRuleArg(srcIP net.IP, isIPv6, isSecondary bool, infName, snatIP string, mark util.EgressIPMark) iptables.RuleArg {
+	if isSecondary {
+		return generateIPTablesSNATForRolePrimaryUDN(infName, snatIP, mark)
+	}
+	return generateIPTablesSNATForDefaultNetwork(srcIP, isIPv6, infName, snatIP)
+}
+
+func generateIPTablesSNATForDefaultNetwork(srcIP net.IP, isIPv6 bool, infName, snatIP string) iptables.RuleArg {
 	var srcIPFullMask string
 	if isIPv6 {
 		srcIPFullMask = fmt.Sprintf("%s/128", srcIP.String())
@@ -1508,6 +1725,10 @@ func generateIPTablesSNATRuleArg(srcIP net.IP, isIPv6 bool, infName, snatIP stri
 		srcIPFullMask = fmt.Sprintf("%s/32", srcIP.String())
 	}
 	return iptables.RuleArg{Args: []string{"-s", srcIPFullMask, "-o", infName, "-j", "SNAT", "--to-source", snatIP}}
+}
+
+func generateIPTablesSNATForRolePrimaryUDN(infName, snatIP string, mark util.EgressIPMark) iptables.RuleArg {
+	return iptables.RuleArg{Args: []string{"-m", "mark", "--mark", mark.String(), "-o", infName, "-j", "SNAT", "--to-source", snatIP}}
 }
 
 func isEgressIPOnLink(linkIndex, ipFamily int, assignedEIPs sets.Set[string]) (bool, error) {

@@ -104,6 +104,9 @@ const (
 	// standard linux interfaces and not interfaces of type OVS.
 	OVNNodeSecondaryHostEgressIPs = "k8s.ovn.org/secondary-host-egress-ips"
 
+	// OVNNodeBridgeEgressIPs contains the EIP addresses that are assigned to default external bridge linux interface of type OVS.
+	OVNNodeBridgeEgressIPs = "k8s.ovn.org/bridge-egress-ips"
+
 	// egressIPConfigAnnotationKey is used to indicate the cloud subnet and
 	// capacity for each node. It is set by
 	// openshift/cloud-network-config-controller
@@ -1166,6 +1169,27 @@ func ParseNodeSecondaryHostEgressIPsAnnotation(node *kapi.Node) (sets.Set[string
 		return nil, fmt.Errorf("failed to unmarshal %s annotation %s for node %q: %v", OVNNodeSecondaryHostEgressIPs, addrAnnotation, node.Name, err)
 	}
 	return sets.New(cfg...), nil
+}
+
+// IsNodeBridgeEgressIPsAnnotationSet returns true if an annotation that tracks assignment of egress IPs to external bridge (breth0)
+// is set
+func IsNodeBridgeEgressIPsAnnotationSet(node *kapi.Node) bool {
+	_, ok := node.Annotations[OVNNodeBridgeEgressIPs]
+	return ok
+}
+
+// ParseNodeBridgeEgressIPsAnnotation returns egress IPs assigned to the external bridge (breth0)
+func ParseNodeBridgeEgressIPsAnnotation(node *kapi.Node) ([]string, error) {
+	addrAnnotation, ok := node.Annotations[OVNNodeBridgeEgressIPs]
+	if !ok {
+		return nil, newAnnotationNotSetError("%s annotation not found for node %q", OVNNodeBridgeEgressIPs, node.Name)
+	}
+
+	var cfg []string
+	if err := json.Unmarshal([]byte(addrAnnotation), &cfg); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal %s annotation %s for node %q: %v", OVNNodeBridgeEgressIPs, addrAnnotation, node.Name, err)
+	}
+	return cfg, nil
 }
 
 // IsSecondaryHostNetworkContainingIP attempts to find a secondary host network that will host the argument IP. If no network is

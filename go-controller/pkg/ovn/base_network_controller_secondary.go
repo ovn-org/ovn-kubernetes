@@ -805,9 +805,9 @@ func (oc *BaseSecondaryNetworkController) getNetworkID() (int, error) {
 
 // buildUDNEgressSNAT is used to build the conditional SNAT required on L3 and L2 UDNs to
 // steer traffic correctly via mp0 when leaving OVN to the host
-func (bsnc *BaseSecondaryNetworkController) buildUDNEgressSNAT(localPodSubnets []*net.IPNet, outputPort string,
+func (bsnc *BaseSecondaryNetworkController) buildUDNEgressSNAT(podSubnets []*net.IPNet, outputPort string,
 	node *kapi.Node) ([]*nbdb.NAT, error) {
-	if len(localPodSubnets) == 0 {
+	if len(podSubnets) == 0 {
 		return nil, nil // nothing to do
 	}
 	var snats []*nbdb.NAT
@@ -826,7 +826,7 @@ func (bsnc *BaseSecondaryNetworkController) buildUDNEgressSNAT(localPodSubnets [
 		types.NetworkExternalID:  bsnc.GetNetworkName(),
 		types.TopologyExternalID: bsnc.TopologyType(),
 	}
-	for _, localPodSubnet := range localPodSubnets {
+	for _, localPodSubnet := range podSubnets {
 		if utilnet.IsIPv6CIDR(localPodSubnet) {
 			masqIP, err = udn.AllocateV6MasqueradeIPs(networkID)
 		} else {

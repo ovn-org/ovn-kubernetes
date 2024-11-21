@@ -89,7 +89,8 @@ type FakeOVN struct {
 	egressSVCWg   *sync.WaitGroup
 	anpWg         *sync.WaitGroup
 	nadController *nad.NetAttachDefinitionController
-
+	eIPController *EgressIPController
+	portCache     *PortCache
 	// information map of all secondary network controllers
 	secondaryControllers map[string]secondaryControllerInfo
 }
@@ -205,16 +206,28 @@ func (o *FakeOVN) init(nadList []nettypes.NetworkAttachmentDefinition) {
 	o.nbClient, o.sbClient, o.nbsbCleanup, err = libovsdbtest.NewNBSBTestHarness(o.dbSetup)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
+	o.portCache = NewPortCache(o.stopChan)
+	kubeOVN := &kube.KubeOVN{
+		Kube:      kube.Kube{KClient: o.fakeClient.KubeClient},
+		EIPClient: o.fakeClient.EgressIPClient,
+	}
+	o.eIPController = NewEIPController(o.nbClient, kubeOVN, o.watcher,
+		o.fakeRecorder, o.portCache, o.nadController, o.asf, config.IPv4Mode, config.IPv6Mode, "", DefaultNetworkControllerName)
+	if o.asf == nil {
+		o.eIPController.addressSetFactory = addressset.NewOvnAddressSetFactory(o.nbClient, config.IPv4Mode, config.IPv6Mode)
+	}
 	o.stopChan = make(chan struct{})
 	o.wg = &sync.WaitGroup{}
 	o.controller, err = NewOvnController(o.fakeClient, o.watcher,
 		o.stopChan, o.asf,
 		o.nbClient, o.sbClient,
-		o.fakeRecorder, o.wg)
+		o.fakeRecorder, o.wg,
+		o.eIPController, o.portCache)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	o.controller.multicastSupport = config.EnableMulticast
 	o.nadController = o.controller.nadController.(*nad.NetAttachDefinitionController)
-
+	o.eIPController.nadController = o.controller.nadController.(*nad.NetAttachDefinitionController)
+	o.eIPController.zone = o.controller.zone
 	setupCOPP := false
 	setupClusterController(o.controller, setupCOPP)
 	for _, n := range nadList {
@@ -284,7 +297,8 @@ func resetNBClient(ctx context.Context, nbClient libovsdbclient.Client) {
 // infrastructure and policy
 func NewOvnController(ovnClient *util.OVNMasterClientset, wf *factory.WatchFactory, stopChan chan struct{},
 	addressSetFactory addressset.AddressSetFactory, libovsdbOvnNBClient libovsdbclient.Client,
-	libovsdbOvnSBClient libovsdbclient.Client, recorder record.EventRecorder, wg *sync.WaitGroup) (*DefaultNetworkController, error) {
+	libovsdbOvnSBClient libovsdbclient.Client, recorder record.EventRecorder, wg *sync.WaitGroup,
+	eIPController *EgressIPController, portCache *PortCache) (*DefaultNetworkController, error) {
 
 	fakeAddr, ok := addressSetFactory.(*addressset.FakeAddressSetFactory)
 	if addressSetFactory == nil || (ok && fakeAddr == nil) {
@@ -334,7 +348,7 @@ func NewOvnController(ovnClient *util.OVNMasterClientset, wf *factory.WatchFacto
 			return nil, err
 		}
 	}
-	dnc, err := newDefaultNetworkControllerCommon(cnci, stopChan, wg, addressSetFactory, nadController, nil)
+	dnc, err := newDefaultNetworkControllerCommon(cnci, stopChan, wg, addressSetFactory, nadController, nil, portCache, eIPController)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 	if nbZoneFailed {
@@ -448,22 +462,29 @@ func (o *FakeOVN) NewSecondaryNetworkController(netattachdef *nettypes.NetworkAt
 		if err != nil {
 			return err
 		}
+
 		asf := addressset.NewFakeAddressSetFactory(getNetworkControllerName(netName))
 
 		switch topoType {
 		case types.Layer3Topology:
-			l3Controller, err := NewSecondaryLayer3NetworkController(cnci, nInfo, o.nadController)
+			l3Controller, err := NewSecondaryLayer3NetworkController(cnci, nInfo, o.nadController, o.eIPController, o.portCache)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			l3Controller.addressSetFactory = asf
+			if o.asf != nil { // use fake asf only when enabled
+				l3Controller.addressSetFactory = asf
+			}
 			secondaryController = &l3Controller.BaseSecondaryNetworkController
 		case types.Layer2Topology:
 			l2Controller, err := NewSecondaryLayer2NetworkController(cnci, nInfo, o.nadController)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			l2Controller.addressSetFactory = asf
+			if o.asf != nil { // use fake asf only when enabled
+				l2Controller.addressSetFactory = asf
+			}
 			secondaryController = &l2Controller.BaseSecondaryNetworkController
 		case types.LocalnetTopology:
 			localnetController := NewSecondaryLocalnetNetworkController(cnci, nInfo, o.nadController)
-			localnetController.addressSetFactory = asf
+			if o.asf != nil { // use fake asf only when enabled
+				localnetController.addressSetFactory = asf
+			}
 			secondaryController = &localnetController.BaseSecondaryNetworkController
 		default:
 			return fmt.Errorf("topology type %s not supported", topoType)
@@ -496,7 +517,7 @@ func (o *FakeOVN) patchEgressIPObj(nodeName, egressIPName, egressIP, network str
 			EgressIP: egressIP,
 		},
 	}
-	err := o.controller.patchReplaceEgressIPStatus(egressIPName, status)
+	err := o.controller.eIPC.patchReplaceEgressIPStatus(egressIPName, status)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 }
 
