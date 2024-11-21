@@ -6,13 +6,14 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"golang.org/x/sys/unix"
 	"io"
 	"log"
 	"os"
 	"strings"
 	"syscall"
 	"unsafe"
+
+	"golang.org/x/sys/unix"
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
@@ -209,7 +210,7 @@ func (r *SampleReader) parseMsg(msgs []syscall.NetlinkMessage, printlnFunc func(
 						if err != nil {
 							sampleStr = fmt.Sprintf("decoding failed: %v", err)
 						} else {
-							sampleStr = fmt.Sprintf("OVN-K message: %s", decoded)
+							sampleStr = fmt.Sprintf("OVN-K message: %s", decoded.String())
 						}
 					}
 				}
