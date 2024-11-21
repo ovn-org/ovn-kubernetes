@@ -20,6 +20,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/apimachinery/pkg/util/rand"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/kubectl/pkg/util/podutils"
 	"k8s.io/kubernetes/test/e2e/framework"
@@ -63,11 +64,11 @@ var _ = Describe("Network Segmentation", func() {
 	Context("a user defined primary network", func() {
 
 		DescribeTableSubtree("created using",
-			func(createNetworkFn func(c networkAttachmentConfigParams) error) {
+			func(createNetworkFn func(c *networkAttachmentConfigParams) error) {
 
 				DescribeTable(
 					"creates a networkStatus Annotation with UDN interface",
-					func(netConfig networkAttachmentConfigParams) {
+					func(netConfig *networkAttachmentConfigParams) {
 						By("creating the network")
 						netConfig.namespace = f.Namespace.Name
 						Expect(createNetworkFn(netConfig)).To(Succeed())
@@ -103,7 +104,7 @@ var _ = Describe("Network Segmentation", func() {
 						}
 					},
 					Entry("L2 primary UDN",
-						networkAttachmentConfigParams{
+						&networkAttachmentConfigParams{
 							name:     nadName,
 							topology: "layer2",
 							cidr:     correctCIDRFamily(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
@@ -111,7 +112,7 @@ var _ = Describe("Network Segmentation", func() {
 						},
 					),
 					Entry("L3 primary UDN",
-						networkAttachmentConfigParams{
+						&networkAttachmentConfigParams{
 							name:     nadName,
 							topology: "layer3",
 							cidr:     correctCIDRFamily(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
@@ -123,7 +124,7 @@ var _ = Describe("Network Segmentation", func() {
 				DescribeTable(
 					"can perform east/west traffic between nodes",
 					func(
-						netConfig networkAttachmentConfigParams,
+						netConfig *networkAttachmentConfigParams,
 						clientPodConfig podConfiguration,
 						serverPodConfig podConfiguration,
 					) {
@@ -165,7 +166,7 @@ var _ = Describe("Network Segmentation", func() {
 					},
 					Entry(
 						"two pods connected over a L2 primary UDN",
-						networkAttachmentConfigParams{
+						&networkAttachmentConfigParams{
 							name:     nadName,
 							topology: "layer2",
 							cidr:     correctCIDRFamily(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
@@ -185,7 +186,7 @@ var _ = Describe("Network Segmentation", func() {
 					),
 					Entry(
 						"two pods connected over a L3 primary UDN",
-						networkAttachmentConfigParams{
+						&networkAttachmentConfigParams{
 							name:     nadName,
 							topology: "layer3",
 							cidr:     correctCIDRFamily(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
@@ -208,7 +209,7 @@ var _ = Describe("Network Segmentation", func() {
 				DescribeTable(
 					"is isolated from the default network",
 					func(
-						netConfigParams networkAttachmentConfigParams,
+						netConfigParams *networkAttachmentConfigParams,
 						udnPodConfig podConfiguration,
 					) {
 						if !isInterconnectEnabled() {
@@ -397,7 +398,7 @@ var _ = Describe("Network Segmentation", func() {
 					},
 					Entry(
 						"with L2 primary UDN",
-						networkAttachmentConfigParams{
+						&networkAttachmentConfigParams{
 							name:     nadName,
 							topology: "layer2",
 							cidr:     correctCIDRFamily(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
@@ -413,7 +414,7 @@ var _ = Describe("Network Segmentation", func() {
 					),
 					Entry(
 						"with L3 primary UDN",
-						networkAttachmentConfigParams{
+						&networkAttachmentConfigParams{
 							name:     nadName,
 							topology: "layer3",
 							cidr:     correctCIDRFamily(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
@@ -444,8 +445,7 @@ var _ = Describe("Network Segmentation", func() {
 						namespaceRed := f.Namespace.Name + "-" + red
 						namespaceBlue := f.Namespace.Name + "-" + blue
 
-						netConfig := networkAttachmentConfigParams{
-
+						netConfig := &networkAttachmentConfigParams{
 							topology: topology,
 							cidr:     correctCIDRFamily(userDefinedv4Subnet, userDefinedv6Subnet),
 							role:     "primary",
@@ -468,7 +468,13 @@ var _ = Describe("Network Segmentation", func() {
 							netConfig.namespace = namespace
 							netConfig.name = network
 							Expect(createNetworkFn(netConfig)).To(Succeed())
+							// update the name because createNetworkFn may mutate the netConfig.name
+							// for cluster scope objects (i.g.: CUDN cases) to enable parallel testing.
+							networkNamespaceMap[namespace] = netConfig.name
 						}
+						red = networkNamespaceMap[namespaceRed]
+						blue = networkNamespaceMap[namespaceBlue]
+
 						pods := []*v1.Pod{}
 						redIPs := []string{}
 						blueIPs := []string{}
@@ -591,21 +597,22 @@ var _ = Describe("Network Segmentation", func() {
 					),
 				)
 			},
-			Entry("NetworkAttachmentDefinitions", func(c networkAttachmentConfigParams) error {
-				netConfig := newNetworkAttachmentConfig(c)
+			Entry("NetworkAttachmentDefinitions", func(c *networkAttachmentConfigParams) error {
+				netConfig := newNetworkAttachmentConfig(*c)
 				nad := generateNAD(netConfig)
 				_, err := nadClient.NetworkAttachmentDefinitions(c.namespace).Create(context.Background(), nad, metav1.CreateOptions{})
 				return err
 			}),
-			Entry("UserDefinedNetwork", func(c networkAttachmentConfigParams) error {
-				udnManifest := generateUserDefinedNetworkManifest(&c)
+			Entry("UserDefinedNetwork", func(c *networkAttachmentConfigParams) error {
+				udnManifest := generateUserDefinedNetworkManifest(c)
 				cleanup, err := createManifest(c.namespace, udnManifest)
 				DeferCleanup(cleanup)
 				Expect(waitForUserDefinedNetworkReady(c.namespace, c.name, 5*time.Second)).To(Succeed())
 				return err
 			}),
-			Entry("ClusterUserDefinedNetwork", func(c networkAttachmentConfigParams) error {
-				cudnManifest := generateClusterUserDefinedNetworkManifest(&c)
+			Entry("ClusterUserDefinedNetwork", func(c *networkAttachmentConfigParams) error {
+				c.name = randomNetworkMetaName()
+				cudnManifest := generateClusterUserDefinedNetworkManifest(c)
 				cleanup, err := createManifest("", cudnManifest)
 				DeferCleanup(func() {
 					cleanup()
@@ -819,13 +826,10 @@ spec:
 	})
 
 	Context("ClusterUserDefinedNetwork CRD Controller", func() {
-		const (
-			testClusterUdnName                = "test-cluster-net"
-			clusterUserDefinedNetworkResource = "clusteruserdefinednetwork"
-		)
-		var (
-			testTenantNamespaces []string
-		)
+		const clusterUserDefinedNetworkResource = "clusteruserdefinednetwork"
+
+		var testTenantNamespaces []string
+
 		BeforeEach(func() {
 			testTenantNamespaces = []string{
 				f.Namespace.Name + "blue",
@@ -843,7 +847,10 @@ spec:
 			}
 		})
 
+		var testClusterUdnName string
+
 		BeforeEach(func() {
+			testClusterUdnName = randomNetworkMetaName()
 			By("create test CR")
 			cleanup, err := createManifest("", newClusterUDNManifest(testClusterUdnName, testTenantNamespaces...))
 			DeferCleanup(func() error {
@@ -1062,7 +1069,7 @@ spec:
 		Expect(err).NotTo(HaveOccurred())
 
 		By("create primary Cluster UDN CR")
-		const cudnName = "primary-net"
+		cudnName := randomNetworkMetaName()
 		cleanup, err := createManifest(f.Namespace.Name, newPrimaryClusterUDNManifest(cudnName, testTenantNamespaces...))
 		DeferCleanup(func() {
 			cleanup()
@@ -1103,11 +1110,11 @@ spec:
 			})
 		})
 		DescribeTableSubtree("created using",
-			func(createNetworkFn func(c networkAttachmentConfigParams) error) {
+			func(createNetworkFn func(c *networkAttachmentConfigParams) error) {
 
 				DescribeTable(
 					"can be accessed to from the pods running in the Kubernetes cluster",
-					func(netConfigParams networkAttachmentConfigParams, clientPodConfig podConfiguration) {
+					func(netConfigParams *networkAttachmentConfigParams, clientPodConfig podConfiguration) {
 						if netConfigParams.topology == "layer2" && !isInterconnectEnabled() {
 							const upstreamIssue = "https://github.com/ovn-org/ovn-kubernetes/issues/4642"
 							e2eskipper.Skipf(
@@ -1141,16 +1148,16 @@ spec:
 						framework.Logf("Client pod was created on node %s", updatedPod.Spec.NodeName)
 
 						By("asserting UDN pod is connected to UDN network")
-						podAnno, err := unmarshalPodAnnotation(updatedPod.Annotations, f.Namespace.Name+"/"+userDefinedNetworkName)
+						podAnno, err := unmarshalPodAnnotation(updatedPod.Annotations, f.Namespace.Name+"/"+netConfigParams.name)
 						Expect(err).NotTo(HaveOccurred())
-						framework.Logf("Client pod's annotation for network %s is %v", userDefinedNetworkName, podAnno)
+						framework.Logf("Client pod's annotation for network %s is %v", netConfigParams.name, podAnno)
 
-						Expect(podAnno.Routes).To(HaveLen(expectedNumberOfRoutes(netConfigParams)))
+						Expect(podAnno.Routes).To(HaveLen(expectedNumberOfRoutes(*netConfigParams)))
 
 						assertClientExternalConnectivity(clientPodConfig, externalIpv4, externalIpv6, port)
 					},
 					Entry("by one pod over a layer2 network",
-						networkAttachmentConfigParams{
+						&networkAttachmentConfigParams{
 							name:     userDefinedNetworkName,
 							topology: "layer2",
 							cidr:     correctCIDRFamily(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
@@ -1159,7 +1166,7 @@ spec:
 						*podConfig("client-pod"),
 					),
 					Entry("by one pod over a layer3 network",
-						networkAttachmentConfigParams{
+						&networkAttachmentConfigParams{
 							name:     userDefinedNetworkName,
 							topology: "layer3",
 							cidr:     correctCIDRFamily(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
@@ -1169,21 +1176,22 @@ spec:
 					),
 				)
 			},
-			Entry("NetworkAttachmentDefinitions", func(c networkAttachmentConfigParams) error {
-				netConfig := newNetworkAttachmentConfig(c)
+			Entry("NetworkAttachmentDefinitions", func(c *networkAttachmentConfigParams) error {
+				netConfig := newNetworkAttachmentConfig(*c)
 				nad := generateNAD(netConfig)
 				_, err := nadClient.NetworkAttachmentDefinitions(f.Namespace.Name).Create(context.Background(), nad, metav1.CreateOptions{})
 				return err
 			}),
-			Entry("UserDefinedNetwork", func(c networkAttachmentConfigParams) error {
-				udnManifest := generateUserDefinedNetworkManifest(&c)
+			Entry("UserDefinedNetwork", func(c *networkAttachmentConfigParams) error {
+				udnManifest := generateUserDefinedNetworkManifest(c)
 				cleanup, err := createManifest(f.Namespace.Name, udnManifest)
 				DeferCleanup(cleanup)
 				Expect(waitForUserDefinedNetworkReady(f.Namespace.Name, c.name, 5*time.Second)).To(Succeed())
 				return err
 			}),
-			Entry("ClusterUserDefinedNetwork", func(c networkAttachmentConfigParams) error {
-				cudnManifest := generateClusterUserDefinedNetworkManifest(&c)
+			Entry("ClusterUserDefinedNetwork", func(c *networkAttachmentConfigParams) error {
+				c.name = randomNetworkMetaName()
+				cudnManifest := generateClusterUserDefinedNetworkManifest(c)
 				cleanup, err := createManifest("", cudnManifest)
 				DeferCleanup(func() {
 					cleanup()
@@ -1306,6 +1314,13 @@ spec:
 		})
 	})
 })
+
+// randomNetworkMetaName return pseudo random name for network related objects (NAD,UDN,CUDN).
+// CUDN is cluster-scoped object, in case tests running in parallel, having random names avoids
+// conflicting with other tests.
+func randomNetworkMetaName() string {
+	return fmt.Sprintf("test-net-%s", rand.String(5))
+}
 
 var nadToUdnParams = map[string]string{
 	"primary":   "Primary",
