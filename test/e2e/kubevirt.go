@@ -311,7 +311,10 @@ var _ = Describe("Kubevirt Virtual Machines", func() {
 				if len(iperfLogLines) == 0 {
 					return "", nil
 				}
-				return iperfLogLines[len(iperfLogLines)-1], nil
+				lastIperfLogLine := iperfLogLines[len(iperfLogLines)-1]
+				// Fail fast
+				Expect(lastIperfLogLine).ToNot(ContainSubstring("iperf3: error"))
+				return lastIperfLogLine, nil
 			}).
 				WithPolling(time.Second).
 				WithTimeout(3*time.Minute).
