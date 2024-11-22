@@ -289,6 +289,7 @@ func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, netInf
 			key = strings.Join([]string{"UDNAllowedSVC", service.Namespace, service.Name}, "_")
 			if !add {
 				npw.ofm.deleteFlowsByKey(key)
+				return utilerrors.Join(errors...)
 			}
 
 			ipPrefix := "ip"
