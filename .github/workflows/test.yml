@@ -406,13 +406,14 @@ jobs:
         # num-nodes-per-zone : "<integer value>"
         # forwarding : ["", "disable-forwarding"]
         # dns-name-resolver : ["", "enable-dns-name-resolver"]
+        # traffic-flow-tests : "<tests range. i.e. 1-24>"
         include:
           - {"target": "shard-conformance", "ha": "HA",   "gateway-mode": "shared", "ipfamily": "ipv4",      "disable-snat-multiple-gws": "snatGW",   "second-bridge": "1br", "ic": "ic-disabled"}
           - {"target": "shard-conformance", "ha": "noHA", "gateway-mode": "local",  "ipfamily": "dualstack", "disable-snat-multiple-gws": "snatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones"}
           - {"target": "shard-conformance", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv6",      "disable-snat-multiple-gws": "snatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones"}
           - {"target": "shard-conformance", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv4",      "disable-snat-multiple-gws": "snatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones"}
           - {"target": "control-plane",     "ha": "HA",   "gateway-mode": "shared", "ipfamily": "ipv6",      "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "1br", "ic": "ic-disabled",          "dns-name-resolver": "enable-dns-name-resolver"}
-          - {"target": "control-plane",     "ha": "HA",   "gateway-mode": "shared", "ipfamily": "ipv4",      "disable-snat-multiple-gws": "snatGW",   "second-bridge": "1br", "ic": "ic-disabled"}
+          - {"target": "control-plane",     "ha": "HA",   "gateway-mode": "shared", "ipfamily": "ipv4",      "disable-snat-multiple-gws": "snatGW",   "second-bridge": "1br", "ic": "ic-disabled", "traffic-flow-tests": "1,2,3"}
           - {"target": "control-plane-helm","ha": "HA",   "gateway-mode": "shared", "ipfamily": "ipv4",      "disable-snat-multiple-gws": "snatGW",   "second-bridge": "1br", "ic": "ic-disabled", "dns-name-resolver": "enable-dns-name-resolver"}
           - {"target": "control-plane-helm","ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv4",      "disable-snat-multiple-gws": "snatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones", "dns-name-resolver": "enable-dns-name-resolver"}
           - {"target": "control-plane",     "ha": "noHA", "gateway-mode": "local",  "ipfamily": "ipv4",      "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "1br", "ic": "ic-single-node-zones", "dns-name-resolver": "enable-dns-name-resolver"}
@@ -437,6 +438,7 @@ jobs:
           - {"target": "network-segmentation", "ha": "noHA", "gateway-mode": "local", "ipfamily": "dualstack", "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "1br", "ic": "ic-single-node-zones"}
           - {"target": "network-segmentation", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "dualstack", "disable-snat-multiple-gws": "SnatGW", "second-bridge": "1br", "ic": "ic-disabled"}
           - {"target": "network-segmentation", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv4", "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "1br", "ic": "ic-single-node-zones"}
+          - {"target": "traffic-flow-test-only","ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv4", "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "1br", "ic": "ic-single-node-zones", "traffic-flow-tests": "1-24"}
           - {"target": "tools", "ha": "noHA", "gateway-mode": "local", "ipfamily": "dualstack", "disable-snat-multiple-gws": "SnatGW", "second-bridge": "1br", "ic": "ic-single-node-zones"}
     needs: [ build-pr ]
     env:
@@ -451,8 +453,8 @@ jobs:
       OVN_SECOND_BRIDGE: "${{ matrix.second-bridge == '2br' }}"
       KIND_IPV4_SUPPORT: "${{ matrix.ipfamily == 'IPv4' || matrix.ipfamily == 'dualstack' }}"
       KIND_IPV6_SUPPORT: "${{ matrix.ipfamily == 'IPv6' || matrix.ipfamily == 'dualstack' }}"
-      ENABLE_MULTI_NET: "${{ matrix.target == 'multi-homing' || matrix.target == 'kv-live-migration' || matrix.target == 'network-segmentation' || matrix.target == 'tools' || matrix.target == 'multi-homing-helm' }}"
-      ENABLE_NETWORK_SEGMENTATION: "${{ matrix.target == 'network-segmentation' || matrix.target == 'tools' || matrix.target == 'kv-live-migration'}}"
+      ENABLE_MULTI_NET: "${{ matrix.target == 'multi-homing' || matrix.target == 'kv-live-migration' || matrix.target == 'network-segmentation' || matrix.target == 'tools' || matrix.target == 'multi-homing-helm' || matrix.target == 'traffic-flow-test-only' }}"
+      ENABLE_NETWORK_SEGMENTATION: "${{ matrix.target == 'network-segmentation' || matrix.target == 'tools' || matrix.target == 'kv-live-migration' || matrix.target == 'traffic-flow-test-only' }}"
       DISABLE_UDN_HOST_ISOLATION: "true"
       KIND_INSTALL_KUBEVIRT: "${{ matrix.target == 'kv-live-migration' }}"
       OVN_COMPACT_MODE: "${{ matrix.target == 'compact-mode' }}"
@@ -463,6 +465,7 @@ jobs:
       OVN_DISABLE_FORWARDING: "${{ matrix.forwarding == 'disable-forwarding' }}"
       USE_HELM: "${{ matrix.target == 'control-plane-helm' || matrix.target == 'multi-homing-helm' }}"
       OVN_ENABLE_DNSNAMERESOLVER: "${{ matrix.dns-name-resolver == 'enable-dns-name-resolver' }}"
+      TRAFFIC_FLOW_TESTS: "${{ matrix.traffic-flow-tests }}"
     steps:
 
     - name: Install VRF kernel module
@@ -481,6 +484,11 @@ jobs:
           llvm-* microsoft-edge-stable mono-* \
           msbuild mysql-server-core-* php-* php7* \
           powershell temurin-* zulu-*
+
+    - name: Setup /mnt/runner directory
+      run: |
+        sudo mkdir -pv /mnt/runner
+        sudo chown runner:runner /mnt/runner
 
     - name: Check out code into the Go module directory
       uses: actions/checkout@v4
@@ -523,6 +531,11 @@ jobs:
         export OVN_IMAGE="ovn-daemonset-fedora:pr"
         make -C test install-kind
 
+    - name: traffic-flow-tests setup
+      timeout-minutes: 5
+      if: env.TRAFFIC_FLOW_TESTS != ''
+      run: make -C test traffic-flow-tests WHAT="setup"
+
     - name: Runner Diagnostics
       uses: ./.github/actions/diagnostics
 
@@ -554,11 +567,20 @@ jobs:
         elif [ "${{ matrix.target }}" == "tools" ]; then
           make -C go-controller build
           make -C test tools
+        elif [ "${{ matrix.target }}" == "traffic-flow-test-only" ]; then
+          # Traffic Flow Tests can be ran as part of a target, as an additional
+          # set of test, set via TRAFFIC_FLOW_TESTS. See below.
+          :
         else
           make -C test ${{ matrix.target }}
           if [ "${{ matrix.ipfamily }}" != "ipv6" ]; then
             make -C test conformance
           fi
+        fi
+
+        # If target also specified traffic flow tests to run, do so now
+        if [ -n "${TRAFFIC_FLOW_TESTS}" ]; then
+          make -C test traffic-flow-tests WHAT="run"
         fi
 
     - name: Runner Diagnostics
@@ -569,6 +591,9 @@ jobs:
       run: |
         mkdir -p /tmp/kind/logs
         kind export logs --name ${KIND_CLUSTER_NAME} --verbosity 4 /tmp/kind/logs
+        if [ -n "${TRAFFIC_FLOW_TESTS}" ]; then
+            mv -v /tmp/{,kind/logs/}traffic_flow_test_result.json ||:
+        fi
 
     - name: Upload kind logs
       if: always()
