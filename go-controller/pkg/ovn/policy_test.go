@@ -451,8 +451,13 @@ func getNamespaceWithMultiplePoliciesExpectedData(networkPolicies []*knet.Networ
 }
 
 func getHairpinningACLsV4AndPortGroup() []libovsdbtest.TestData {
-	clusterPortGroup := newClusterPortGroup()
-	fakeController := getFakeController(DefaultNetworkControllerName)
+	return getHairpinningACLsV4AndPortGroupForNetwork(&util.DefaultNetInfo{}, nil)
+}
+
+func getHairpinningACLsV4AndPortGroupForNetwork(netInfo util.NetInfo, ports []string) []libovsdbtest.TestData {
+	controllerName := getNetworkControllerName(netInfo.GetNetworkName())
+	clusterPortGroup := newNetworkClusterPortGroup(netInfo)
+	fakeController := getFakeController(controllerName)
 	egressIDs := fakeController.getNetpolDefaultACLDbIDs("Egress")
 	egressACL := libovsdbops.BuildACL(
 		"",
@@ -469,7 +474,7 @@ func getHairpinningACLsV4AndPortGroup() []libovsdbtest.TestData {
 		},
 		types.DefaultACLTier,
 	)
-	egressACL.UUID = "hairpinning-egress-UUID"
+	egressACL.UUID = fmt.Sprintf("hp-egress-%s", controllerName)
 	ingressIDs := fakeController.getNetpolDefaultACLDbIDs("Ingress")
 	ingressACL := libovsdbops.BuildACL(
 		"",
@@ -484,8 +489,9 @@ func getHairpinningACLsV4AndPortGroup() []libovsdbtest.TestData {
 		nil,
 		types.DefaultACLTier,
 	)
-	ingressACL.UUID = "hairpinning-ingress-UUID"
+	ingressACL.UUID = fmt.Sprintf("hp-ingress-%s", controllerName)
 	clusterPortGroup.ACLs = []string{egressACL.UUID, ingressACL.UUID}
+	clusterPortGroup.Ports = ports
 	return []libovsdbtest.TestData{egressACL, ingressACL, clusterPortGroup}
 }
 
