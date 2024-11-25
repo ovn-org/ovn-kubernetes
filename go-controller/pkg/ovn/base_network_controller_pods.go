@@ -957,6 +957,9 @@ func (bnc *BaseNetworkController) allocatePodAnnotationForSecondaryNetwork(pod *
 	)
 
 	if err != nil {
+		if errors.Is(err, ipallocator.ErrFull) {
+			bnc.recordPodErrorEvent(pod, err)
+		}
 		return nil, false, err
 	}
 
