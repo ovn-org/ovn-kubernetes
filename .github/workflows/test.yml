@@ -327,7 +327,7 @@ jobs:
       if: always()
       run: |
         mkdir -p /tmp/kind/logs
-        kind export logs --name ${KIND_CLUSTER_NAME} --loglevel=debug /tmp/kind/logs
+        kind export logs --name ${KIND_CLUSTER_NAME} --verbosity 4 /tmp/kind/logs
         set -x
         docker ps -a
         docker exec ovn-control-plane crictl images
@@ -375,7 +375,7 @@ jobs:
       if: always()
       run: |
         mkdir -p /tmp/kind/logs-kind-pr-branch
-        kind export logs --name ${KIND_CLUSTER_NAME} --loglevel=debug /tmp/kind/logs-kind-pr-branch
+        kind export logs --name ${KIND_CLUSTER_NAME} --verbosity 4 /tmp/kind/logs-kind-pr-branch
 
     - name: Upload kind logs
       if: always()
@@ -568,7 +568,7 @@ jobs:
       if: always()
       run: |
         mkdir -p /tmp/kind/logs
-        kind export logs --name ${KIND_CLUSTER_NAME} --loglevel=debug /tmp/kind/logs
+        kind export logs --name ${KIND_CLUSTER_NAME} --verbosity 4 /tmp/kind/logs
 
     - name: Upload kind logs
       if: always()
@@ -675,7 +675,7 @@ jobs:
       if: always()
       run: |
         mkdir -p /tmp/kind/logs
-        kind export logs --name ${KIND_CLUSTER_NAME} --loglevel=debug /tmp/kind/logs
+        kind export logs --name ${KIND_CLUSTER_NAME} --verbosity 4 /tmp/kind/logs
 
     - name: Upload kind logs
       if: always()
