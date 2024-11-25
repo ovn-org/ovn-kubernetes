@@ -41,3 +41,27 @@ func RetrieveAllGlobalAddressesFromGuest(vmi *v1.VirtualMachineInstance) ([]stri
 	}
 	return addresses, nil
 }
+
+func RetrieveIPv6GatwayPaths(vmi *v1.VirtualMachineInstance) ([]string, error) {
+	routes := []struct {
+		Destination string `json:"ifname"`
+		Nexthops    []struct {
+			Gateway string `json:"gateway"`
+		} `json:"nexthops"`
+	}{}
+
+	output, err := RunCommand(vmi, "ip -6 -j route list default", 2*time.Second)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %v", output, err)
+	}
+	if err := json.Unmarshal([]byte(output), &routes); err != nil {
+		return nil, fmt.Errorf("%s: %v", output, err)
+	}
+	paths := []string{}
+	for _, route := range routes {
+		for _, nexthop := range route.Nexthops {
+			paths = append(paths, nexthop.Gateway)
+		}
+	}
+	return paths, nil
+}

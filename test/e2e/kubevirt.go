@@ -1388,6 +1388,29 @@ chpasswd: { expire: False }`
 				}
 				return filteredOutIPs
 			}
+
+			generateGatwayIPv6RouterLLA = func(nodeName, networkName string) (string, error) {
+				node, err := fr.ClientSet.CoreV1().Nodes().Get(context.Background(), nodeName, metav1.GetOptions{})
+				if err != nil {
+					return "", err
+				}
+				lrpAddress, err := util.ParseNodeGatewayRouterJoinNetwork(node, networkName)
+				if err != nil {
+					return "", err
+				}
+				if lrpAddress.IPv6 == "" {
+					return "", nil
+				}
+
+				//TODO: Support ipv6 single stack (mac is generated with ipv6)
+				// LRP's mac is calcualted from the join subnet IPv4
+				lrpAddressIPv4, _, err := net.ParseCIDR(lrpAddress.IPv4)
+				if err != nil {
+					return "", err
+				}
+
+				return util.HWAddrToIPv6LLA(util.IPAddrToHWAddr(lrpAddressIPv4)).String(), nil
+			}
 		)
 		type testData struct {
 			description string
@@ -1537,6 +1560,22 @@ chpasswd: { expire: False }`
 			if td.role == "primary" {
 				step = by(vmi.Name, fmt.Sprintf("Check north/south traffic after %s %s", td.resource.description, td.test.description))
 				checkNorthSouthIperfTraffic(vmi, externalAddresses, step)
+
+				if td.test.description == liveMigrate.description && isIPv6Supported() {
+					obtainedIPv6GatwayPaths, err := kubevirt.RetrieveIPv6GatwayPaths(vmi)
+					Expect(err).ToNot(HaveOccurred())
+
+					sourceNodeIPv6GatewayPath, err := generateGatwayIPv6RouterLLA(vmi.Status.MigrationState.SourceNode, netConfig.networkName)
+					Expect(err).ToNot(HaveOccurred())
+
+					targetNodeIPv6GatewayPath, err := generateGatwayIPv6RouterLLA(vmi.Status.MigrationState.TargetNode, netConfig.networkName)
+					Expect(err).ToNot(HaveOccurred())
+
+					Expect(obtainedIPv6GatwayPaths).To(SatisfyAll(
+						Not(ContainElement(sourceNodeIPv6GatewayPath)),
+						ContainElement(targetNodeIPv6GatewayPath)),
+						"should reconcile ipv6 gateway nexthop after live migration")
+				}
 			}
 		},
 			func(td testData) string {
