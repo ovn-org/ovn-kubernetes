@@ -181,6 +181,18 @@ func (h *secondaryLayer2NetworkControllerEventHandler) UpdateResource(oldObj, ne
 			_, syncZoneIC := h.oc.syncZoneICFailed.Load(newNode.Name)
 			return h.oc.addUpdateRemoteNodeEvent(newNode, syncZoneIC)
 		}
+	case factory.PodType:
+		if err := h.oc.UpdateSecondaryNetworkResourceCommon(h.objType, oldObj, newObj, inRetryCache); err != nil {
+			return err
+		}
+		newPod, ok := newObj.(*corev1.Pod)
+		if !ok {
+			return fmt.Errorf("could not cast %T object to Pod", newObj)
+		}
+		if h.oc.isPodScheduledinLocalZone(newPod) {
+			return h.oc.updateLocalPodEvent(newPod)
+		}
+		return nil
 	default:
 		return h.oc.UpdateSecondaryNetworkResourceCommon(h.objType, oldObj, newObj, inRetryCache)
 	}
@@ -783,5 +795,9 @@ func (oc *SecondaryLayer2NetworkController) StartServiceController(wg *sync.Wait
 			klog.Errorf("Error running OVN Kubernetes Services controller for network %s: %v", oc.GetNetworkName(), err)
 		}
 	}()
+	return nil
+}
+
+func (oc *SecondaryLayer2NetworkController) updateLocalPodEvent(pod *corev1.Pod) error {
 	return nil
 }
