@@ -14,6 +14,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/generator/udn"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kubevirt"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
@@ -799,5 +800,20 @@ func (oc *SecondaryLayer2NetworkController) StartServiceController(wg *sync.Wait
 }
 
 func (oc *SecondaryLayer2NetworkController) updateLocalPodEvent(pod *corev1.Pod) error {
+	if kubevirt.IsPodAllowedForMigration(pod, oc.NetInfo) {
+		kubevirtLiveMigrationStatus, err := kubevirt.DiscoverLiveMigrationStatus(oc.watchFactory, pod)
+		if err != nil {
+			return nil
+		}
+		if kubevirtLiveMigrationStatus != nil && kubevirtLiveMigrationStatus.TargetPod.Name == pod.Name {
+			if err := oc.reconcileLiveMigrationTargetZone(kubevirtLiveMigrationStatus); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (oc *SecondaryLayer2NetworkController) reconcileLiveMigrationTargetZone(kubevirtLiveMigrationStatus *kubevirt.LiveMigrationStatus) error {
 	return nil
 }
