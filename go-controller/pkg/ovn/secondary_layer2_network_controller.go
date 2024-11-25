@@ -815,5 +815,10 @@ func (oc *SecondaryLayer2NetworkController) updateLocalPodEvent(pod *corev1.Pod)
 }
 
 func (oc *SecondaryLayer2NetworkController) reconcileLiveMigrationTargetZone(kubevirtLiveMigrationStatus *kubevirt.LiveMigrationStatus) error {
-	return nil
+	networkID, err := oc.getNetworkID()
+	if err != nil {
+		return err
+	}
+	mgmtInterfaceName := util.GetNetworkScopedK8sMgmtHostIntfName(uint(networkID))
+	return kubevirt.ReconcileIPv6DefaultGatewayAfterLiveMigration(oc.watchFactory, oc.NetInfo, kubevirtLiveMigrationStatus, mgmtInterfaceName)
 }
