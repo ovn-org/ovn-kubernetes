@@ -5,7 +5,9 @@ import (
 	"net"
 	"sort"
 	"strings"
+	"syscall"
 
+	"golang.org/x/sys/unix"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ktypes "k8s.io/apimachinery/pkg/types"
@@ -13,6 +15,7 @@ import (
 
 	kubevirtv1 "kubevirt.io/api/core/v1"
 
+	"github.com/mdlayher/socket"
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -463,4 +466,50 @@ func DiscoverLiveMigrationStatus(client *factory.WatchFactory, pod *corev1.Pod) 
 		status.State = LiveMigrationTargetDomainReady
 	}
 	return &status, nil
+}
+
+func ReconcileIPv6DefaultGatewayAfterLiveMigration(watchFactory *factory.WatchFactory, netInfo util.NetInfo, liveMigration *LiveMigrationStatus, interfaceName string) error {
+	if liveMigration.State != LiveMigrationTargetDomainReady {
+		return nil
+	}
+	targetPodAnnotation, err := util.UnmarshalPodAnnotation(liveMigration.TargetPod.Annotations, netInfo.GetNADs()[0])
+	if err != nil {
+		return err
+	}
+	targetPodMAC := targetPodAnnotation.MAC
+	targetPodLLA := util.HWAddrToIPv6LLA(targetPodMAC)
+	c, err := socket.Socket(syscall.AF_PACKET, syscall.SOCK_RAW, syscall.ETH_P_ALL, "ra", nil)
+	if err != nil {
+		return err
+	}
+	iface, err := net.InterfaceByName(interfaceName)
+	if err != nil {
+		return err
+	}
+	addr := unix.SockaddrLinklayer{
+		Ifindex: iface.Index,
+	}
+	sourceNode, err := watchFactory.GetNode(liveMigration.SourcePod.Spec.NodeName)
+	if err != nil {
+		return err
+	}
+	sourceNodeForceDeletionRouterAdvertisment, err := generateRouterAdvertismentForNode(sourceNode, netInfo.GetNetworkName(), targetPodMAC, targetPodLLA, 0)
+	if err != nil {
+		return err
+	}
+	if err := c.Sendto(sourceNodeForceDeletionRouterAdvertisment, &addr, 0); err != nil {
+		return err
+	}
+	targetNode, err := watchFactory.GetNode(liveMigration.TargetPod.Spec.NodeName)
+	if err != nil {
+		return err
+	}
+	targetNodeMaxLifetimeRouterAdvertisment, err := generateRouterAdvertismentForNode(targetNode, netInfo.GetNetworkName(), targetPodMAC, targetPodLLA, 65535)
+	if err != nil {
+		return err
+	}
+	if err := c.Sendto(targetNodeMaxLifetimeRouterAdvertisment, &addr, 0); err != nil {
+		return err
+	}
+	return nil
 }
