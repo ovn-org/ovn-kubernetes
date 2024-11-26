@@ -1,6 +1,7 @@
 package ovn
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"reflect"
@@ -680,16 +681,12 @@ func (bnc *BaseNetworkController) syncNodeManagementPort(node *kapi.Node, switch
 		return nil, err
 	}
 
-	// TODO(dceara): The cluster port group must be per network. So for now skip adding management port to the cluster port
-	// group for secondary network's because the cluster port group is not yet created for secondary networks.
-	if bnc.IsDefault() {
-		clusterPortGroupName := bnc.getClusterPortGroupName(types.ClusterPortGroupNameBase)
-		if err = libovsdbops.AddPortsToPortGroup(bnc.nbClient, clusterPortGroupName, logicalSwitchPort.UUID); err != nil {
-			err1 := fmt.Errorf("failed to add port %s to cluster port group %s (%s): %w",
-				logicalSwitchPort.Name, types.ClusterPortGroupNameBase, clusterPortGroupName, err)
-			klog.Error(err1)
-			return nil, err1
-		}
+	clusterPortGroupName := bnc.getClusterPortGroupName(types.ClusterPortGroupNameBase)
+	if err = libovsdbops.AddPortsToPortGroup(bnc.nbClient, clusterPortGroupName, logicalSwitchPort.UUID); err != nil {
+		err1 := fmt.Errorf("failed to add port %s to cluster port group %s (%s): %w",
+			logicalSwitchPort.Name, types.ClusterPortGroupNameBase, clusterPortGroupName, err)
+		klog.Error(err1)
+		return nil, err1
 	}
 
 	if v4Subnet != nil {
@@ -699,6 +696,26 @@ func (bnc *BaseNetworkController) syncNodeManagementPort(node *kapi.Node, switch
 	}
 
 	return mgmtPortIPs, nil
+}
+
+// addLocalPodToNamespaceLocked returns the ops needed to add the pod's IP to the namespace
+// address set and the port UUID (if applicable) to the namespace port group.
+// This function must be called with the nsInfo lock taken.
+func (bnc *BaseNetworkController) addLocalPodToNamespaceLocked(nsInfo *namespaceInfo, ips []*net.IPNet, portUUID string) ([]ovsdb.Operation, error) {
+	var ops []ovsdb.Operation
+	var err error
+
+	if ops, err = nsInfo.addressSet.AddAddressesReturnOps(util.IPNetsIPToStringSlice(ips)); err != nil {
+		return nil, err
+	}
+
+	if portUUID != "" && nsInfo.portGroupName != "" {
+		if ops, err = libovsdbops.AddPortsToPortGroupOps(bnc.nbClient, ops, nsInfo.portGroupName, portUUID); err != nil {
+			return nil, err
+		}
+	}
+
+	return ops, nil
 }
 
 // WatchNodes starts the watching of the nodes resource and calls back the appropriate handler logic
@@ -1023,6 +1040,47 @@ func initLoadBalancerGroups(nbClient libovsdbclient.Client, netInfo util.NetInfo
 	routerLoadBalancerGroupUUID = clusterRouterLBGroup.UUID
 
 	return
+}
+
+func (bnc *BaseNetworkController) setupClusterPortGroups() error {
+	pgIDs := bnc.getClusterPortGroupDbIDs(types.ClusterPortGroupNameBase)
+	pg := &nbdb.PortGroup{
+		Name: libovsdbutil.GetPortGroupName(pgIDs),
+	}
+	pg, err := libovsdbops.GetPortGroup(bnc.nbClient, pg)
+	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
+		return fmt.Errorf("failed to query cluster port group for network %s: %w", bnc.GetNetworkName(), err)
+	}
+	if pg == nil {
+		// we didn't find an existing clusterPG, let's create a new empty PG (fresh cluster install)
+		// Create a cluster-wide port group that all logical switch ports are part of
+		pg := libovsdbutil.BuildPortGroup(pgIDs, nil, nil)
+		err = libovsdbops.CreateOrUpdatePortGroups(bnc.nbClient, pg)
+		if err != nil {
+			return fmt.Errorf("failed to create cluster port group for network %s: %w", bnc.GetNetworkName(), err)
+		}
+	}
+
+	pgIDs = bnc.getClusterPortGroupDbIDs(types.ClusterRtrPortGroupNameBase)
+	pg = &nbdb.PortGroup{
+		Name: libovsdbutil.GetPortGroupName(pgIDs),
+	}
+	pg, err = libovsdbops.GetPortGroup(bnc.nbClient, pg)
+	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
+		return fmt.Errorf("failed to query cluster router port group for network %s: %w", bnc.GetNetworkName(), err)
+	}
+	if pg == nil {
+		// we didn't find an existing clusterRtrPG, let's create a new empty PG (fresh cluster install)
+		// Create a cluster-wide port group with all node-to-cluster router
+		// logical switch ports. Currently the only user is multicast but it might
+		// be used for other features in the future.
+		pg = libovsdbutil.BuildPortGroup(pgIDs, nil, nil)
+		err = libovsdbops.CreateOrUpdatePortGroups(bnc.nbClient, pg)
+		if err != nil {
+			return fmt.Errorf("failed to create cluster router port group for network %s: %w", bnc.GetNetworkName(), err)
+		}
+	}
+	return nil
 }
 
 func (bnc *BaseNetworkController) GetSamplingConfig() *libovsdbops.SamplingConfig {

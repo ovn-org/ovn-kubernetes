@@ -67,8 +67,12 @@ func newNamespace(namespace string) *v1.Namespace {
 	}
 }
 
-func getNsAddrSetHashNames(ns string) (string, string) {
-	return addressset.GetHashNamesForAS(getNamespaceAddrSetDbIDs(ns, DefaultNetworkControllerName))
+func getDefaultNetNsAddrSetHashNames(ns string) (string, string) {
+	return getNsAddrSetHashNames(DefaultNetworkControllerName, ns)
+}
+
+func getNsAddrSetHashNames(netControllerName, ns string) (string, string) {
+	return addressset.GetHashNamesForAS(getNamespaceAddrSetDbIDs(ns, netControllerName))
 }
 
 func buildNamespaceAddressSets(namespace string, ips []string) (*nbdb.AddressSet, *nbdb.AddressSet) {

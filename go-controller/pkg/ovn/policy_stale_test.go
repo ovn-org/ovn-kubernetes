@@ -314,7 +314,7 @@ var _ = ginkgo.Describe("OVN Stale NetworkPolicy Operations", func() {
 			staleAddrSetIDs := getStaleNetpolAddrSetDbIDs(networkPolicy.Namespace, networkPolicy.Name,
 				"egress", "0", DefaultNetworkControllerName)
 			localASName, _ := addressset.GetHashNamesForAS(staleAddrSetIDs)
-			peerASName, _ := getNsAddrSetHashNames(namespace2.Name)
+			peerASName, _ := getDefaultNetNsAddrSetHashNames(namespace2.Name)
 			fakeController := getFakeController(DefaultNetworkControllerName)
 			pgName := fakeController.getNetworkPolicyPGName(networkPolicy.Namespace, networkPolicy.Name)
 			initialData := getPolicyData(newNetpolDataParams(networkPolicy).withPeerNamespaces(namespace2.Name))

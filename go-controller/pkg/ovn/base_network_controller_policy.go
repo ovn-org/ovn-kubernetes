@@ -220,13 +220,6 @@ func (bnc *BaseNetworkController) syncNetworkPolicies(networkPolicies []interfac
 		return err
 	}
 
-	// FIXME: For primary user defined networks, we need the hairpin allow ACL.
-	// The port group is not found error is thrown at line 269. Is that expected ?
-	// (or) should this be fixed https://github.com/ovn-org/ovn-kubernetes/blob/master/go-controller/pkg/ovn/base_network_controller.go#L632 ?
-	if bnc.NetInfo.IsSecondary() {
-		return nil
-	}
-
 	// add default hairpin allow acl
 	err = bnc.addHairpinAllowACL()
 	if err != nil {

@@ -25,7 +25,7 @@ should provide Internet connection continuously when pod running master instance
 should provide Internet connection continuously when all pods are killed on node running master instance of ovnkube-control-plane|\
 should provide Internet connection continuously when all ovnkube-control-plane pods are killed|\
 Should validate flow data of br-int is sent to an external gateway with netflow v5|\
-can retrieve multicast IGMP query|\
+should be able to receive multicast IGMP query|\
 test node readiness according to its defaults interface MTU size|\
 Pod to pod TCP with low MTU|\
 queries to the hostNetworked server pod on another node shall work for TCP|\

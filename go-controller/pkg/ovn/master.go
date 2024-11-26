@@ -18,7 +18,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
-	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -48,66 +47,12 @@ func (oc *DefaultNetworkController) SetupMaster(existingNodeNames []string) erro
 		return err
 	}
 
-	pgIDs := oc.getClusterPortGroupDbIDs(types.ClusterPortGroupNameBase)
-	pg := &nbdb.PortGroup{
-		Name: libovsdbutil.GetPortGroupName(pgIDs),
-	}
-	pg, err = libovsdbops.GetPortGroup(oc.nbClient, pg)
-	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
+	if err := oc.setupClusterPortGroups(); err != nil {
 		return err
 	}
-	if pg == nil {
-		// we didn't find an existing clusterPG, let's create a new empty PG (fresh cluster install)
-		// Create a cluster-wide port group that all logical switch ports are part of
-		pg := libovsdbutil.BuildPortGroup(pgIDs, nil, nil)
-		err = libovsdbops.CreateOrUpdatePortGroups(oc.nbClient, pg)
-		if err != nil {
-			klog.Errorf("Failed to create cluster port group: %v", err)
-			return err
-		}
-	}
 
-	pgIDs = oc.getClusterPortGroupDbIDs(types.ClusterRtrPortGroupNameBase)
-	pg = &nbdb.PortGroup{
-		Name: libovsdbutil.GetPortGroupName(pgIDs),
-	}
-	pg, err = libovsdbops.GetPortGroup(oc.nbClient, pg)
-	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
+	if err := oc.syncDefaultMulticastPolicies(); err != nil {
 		return err
-	}
-	if pg == nil {
-		// we didn't find an existing clusterRtrPG, let's create a new empty PG (fresh cluster install)
-		// Create a cluster-wide port group with all node-to-cluster router
-		// logical switch ports. Currently the only user is multicast but it might
-		// be used for other features in the future.
-		pg = libovsdbutil.BuildPortGroup(pgIDs, nil, nil)
-		err = libovsdbops.CreateOrUpdatePortGroups(oc.nbClient, pg)
-		if err != nil {
-			klog.Errorf("Failed to create cluster port group: %v", err)
-			return err
-		}
-	}
-
-	// If supported, enable IGMP relay on the router to forward multicast
-	// traffic between nodes.
-	if oc.multicastSupport {
-		// Drop IP multicast globally. Multicast is allowed only if explicitly
-		// enabled in a namespace.
-		if err := oc.createDefaultDenyMulticastPolicy(); err != nil {
-			klog.Errorf("Failed to create default deny multicast policy, error: %v", err)
-			return err
-		}
-
-		// Allow IP multicast from node switch to cluster router and from
-		// cluster router to node switch.
-		if err := oc.createDefaultAllowMulticastPolicy(); err != nil {
-			klog.Errorf("Failed to create default deny multicast policy, error: %v", err)
-			return err
-		}
-	} else {
-		if err = oc.disableMulticast(); err != nil {
-			return fmt.Errorf("failed to delete default multicast policy, error: %v", err)
-		}
 	}
 
 	// Create OVNJoinSwitch that will be used to connect gateway routers to the distributed router.

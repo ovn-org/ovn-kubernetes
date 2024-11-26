@@ -1834,20 +1834,30 @@ func newClusterJoinSwitch() *nbdb.LogicalSwitch {
 	}
 }
 
-func newClusterPortGroup() *nbdb.PortGroup {
-	fakeController := getFakeController(DefaultNetworkControllerName)
+func newNetworkClusterPortGroup(netInfo util.NetInfo) *nbdb.PortGroup {
+	netControllerName := getNetworkControllerName(netInfo.GetNetworkName())
+	fakeController := getFakeController(netControllerName)
 	pgIDs := fakeController.getClusterPortGroupDbIDs(types.ClusterPortGroupNameBase)
 	pg := libovsdbutil.BuildPortGroup(pgIDs, nil, nil)
 	pg.UUID = pgIDs.String()
 	return pg
 }
 
-func newRouterPortGroup() *nbdb.PortGroup {
-	fakeController := getFakeController(DefaultNetworkControllerName)
+func newNetworkRouterPortGroup(netInfo util.NetInfo) *nbdb.PortGroup {
+	netControllerName := getNetworkControllerName(netInfo.GetNetworkName())
+	fakeController := getFakeController(netControllerName)
 	pgIDs := fakeController.getClusterPortGroupDbIDs(types.ClusterRtrPortGroupNameBase)
 	pg := libovsdbutil.BuildPortGroup(pgIDs, nil, nil)
 	pg.UUID = pgIDs.String()
 	return pg
+}
+
+func newClusterPortGroup() *nbdb.PortGroup {
+	return newNetworkClusterPortGroup(&util.DefaultNetInfo{})
+}
+
+func newRouterPortGroup() *nbdb.PortGroup {
+	return newNetworkRouterPortGroup(&util.DefaultNetInfo{})
 }
 
 func newOVNClusterRouter() *nbdb.LogicalRouter {

@@ -322,3 +322,28 @@ func (bnc *BaseNetworkController) syncNsMulticast(k8sNamespaces map[string]bool)
 
 	return nil
 }
+
+func (bnc *BaseNetworkController) syncDefaultMulticastPolicies() error {
+	// If supported, enable IGMP relay on the router to forward multicast
+	// traffic between nodes.
+	if bnc.multicastSupport {
+		// Drop IP multicast globally. Multicast is allowed only if explicitly
+		// enabled in a namespace.
+		if err := bnc.createDefaultDenyMulticastPolicy(); err != nil {
+			klog.Errorf("Failed to create default deny multicast policy, error: %v", err)
+			return err
+		}
+
+		// Allow IP multicast from node switch to cluster router and from
+		// cluster router to node switch.
+		if err := bnc.createDefaultAllowMulticastPolicy(); err != nil {
+			klog.Errorf("Failed to create default deny multicast policy, error: %v", err)
+			return err
+		}
+	} else {
+		if err := bnc.disableMulticast(); err != nil {
+			return fmt.Errorf("failed to delete default multicast policy, error: %v", err)
+		}
+	}
+	return nil
+}
