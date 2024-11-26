@@ -12,8 +12,7 @@ export TRAFFIC_FLOW_TESTS_COMMIT="6a3a529012a514887a7032d99aed72f1a782b0dc"
 export TRAFFIC_FLOW_TESTS="${TRAFFIC_FLOW_TESTS:-'1-3'}"
 
 export SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &> /dev/null && pwd)"
-cd "$(git rev-parse --show-toplevel)/.."
-export TOP_DIR="$(pwd)"
+export TOP_DIR="/mnt/runner"
 export TRAFFIC_FLOW_TESTS_FULL_PATH="${TOP_DIR}/${TRAFFIC_FLOW_TESTS_DIRNAME}"
 
 log() {
