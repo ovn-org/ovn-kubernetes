@@ -3,12 +3,14 @@ package util
 import (
 	"fmt"
 	"net"
+	"strings"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 )
 
@@ -34,25 +36,47 @@ func CreateDefaultRouteToExternal(nbClient libovsdbclient.Client, clusterRouter,
 	if err != nil {
 		return fmt.Errorf("attempt at finding node gateway router %s network information failed, err: %w", gwRouterName, err)
 	}
-	clusterSubnets := util.GetAllClusterSubnets()
-	for _, subnet := range clusterSubnets {
-		gatewayIP, err := util.MatchFirstIPNetFamily(utilnet.IsIPv6String(subnet.IP.String()), gatewayIPs)
+	clusterSubnetsV4, clusterSubnetsV6 := util.GetClusterSubnetsWithHostPrefix()
+
+	for _, clusterSubnet := range append(clusterSubnetsV4, clusterSubnetsV6...) {
+		isClusterSubnetIPV6 := utilnet.IsIPv6String(clusterSubnet.CIDR.IP.String())
+		gatewayIP, err := util.MatchFirstIPNetFamily(isClusterSubnetIPV6, gatewayIPs)
 		if err != nil {
 			return fmt.Errorf("could not find gateway IP for gateway router %s with family %v: %v", gwRouterName, false, err)
 		}
 		lrsr := nbdb.LogicalRouterStaticRoute{
-			IPPrefix: subnet.String(),
+			IPPrefix: clusterSubnet.CIDR.String(),
 			Nexthop:  gatewayIP.IP.String(),
 			Policy:   &nbdb.LogicalRouterStaticRoutePolicySrcIP,
 		}
+
+		clusterSubnetPrefixLen, _ := clusterSubnet.CIDR.Mask.Size()
 		p := func(lrsr *nbdb.LogicalRouterStaticRoute) bool {
-			_, itemCIDR, err := net.ParseCIDR(lrsr.IPPrefix)
-			if err != nil {
+			// Replace any existing LRSR for the cluster subnet.
+			// Make sure you don't wipe out the existing LRSR via mp0 for the local node subnet
+			// (e.g. 10.244.1.0/24 10.244.1.2 src-ip) and take into account cluster subnet expansion,
+			// which imposes the IP address part of the subnet to stay the same and only allows
+			// the mask length to be decreased (e.g. from 10.244.0.0/16 to 10.244.0.0/15, as long
+			// as 10.244.0.0 stays the same).
+			if utilnet.IsIPv6String(lrsr.Nexthop) != isClusterSubnetIPV6 {
 				return false
 			}
-			return util.ContainsCIDR(subnet, itemCIDR) &&
-				lrsr.Nexthop == gatewayIP.IP.String() &&
+			if !strings.Contains(lrsr.IPPrefix, "/") {
+				// skip /32 (v4) or /128 (v6) routes, not rendered with prefix length in OVN
+				return false
+			}
+			_, itemCIDR, err := net.ParseCIDR(lrsr.IPPrefix)
+			if err != nil {
+				klog.Errorf("Failed to parse CIDR %s of lrsr %+v: %v", lrsr.IPPrefix, lrsr, err)
+				return false
+			}
+			itemPrefixLen, _ := itemCIDR.Mask.Size()
+
+			return clusterSubnet.CIDR.IP.Equal(itemCIDR.IP) && // even after expansion, cluster network address cannot change
+				clusterSubnetPrefixLen <= itemPrefixLen && // cluster subnet mask len can only be decreased
+				itemPrefixLen < clusterSubnet.HostSubnetLength && // don't match the local node subnet route
 				lrsr.Policy != nil && *lrsr.Policy == nbdb.LogicalRouterStaticRoutePolicySrcIP
+
 		}
 		if err := libovsdbops.CreateOrReplaceLogicalRouterStaticRouteWithPredicate(nbClient, clusterRouter, &lrsr, p); err != nil {
 			return fmt.Errorf("unable to create pod to external catch-all reroute for gateway router %s, err: %v", gwRouterName, err)
