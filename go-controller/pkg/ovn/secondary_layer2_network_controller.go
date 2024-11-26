@@ -14,6 +14,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/generator/udn"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kubevirt"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
@@ -181,6 +182,18 @@ func (h *secondaryLayer2NetworkControllerEventHandler) UpdateResource(oldObj, ne
 			_, syncZoneIC := h.oc.syncZoneICFailed.Load(newNode.Name)
 			return h.oc.addUpdateRemoteNodeEvent(newNode, syncZoneIC)
 		}
+	case factory.PodType:
+		if err := h.oc.UpdateSecondaryNetworkResourceCommon(h.objType, oldObj, newObj, inRetryCache); err != nil {
+			return err
+		}
+		newPod, ok := newObj.(*corev1.Pod)
+		if !ok {
+			return fmt.Errorf("could not cast %T object to Pod", newObj)
+		}
+		if h.oc.isPodScheduledinLocalZone(newPod) {
+			return h.oc.updateLocalPodEvent(newPod)
+		}
+		return nil
 	default:
 		return h.oc.UpdateSecondaryNetworkResourceCommon(h.objType, oldObj, newObj, inRetryCache)
 	}
@@ -784,4 +797,28 @@ func (oc *SecondaryLayer2NetworkController) StartServiceController(wg *sync.Wait
 		}
 	}()
 	return nil
+}
+
+func (oc *SecondaryLayer2NetworkController) updateLocalPodEvent(pod *corev1.Pod) error {
+	if kubevirt.IsPodAllowedForMigration(pod, oc.NetInfo) {
+		kubevirtLiveMigrationStatus, err := kubevirt.DiscoverLiveMigrationStatus(oc.watchFactory, pod)
+		if err != nil {
+			return nil
+		}
+		if kubevirtLiveMigrationStatus != nil && kubevirtLiveMigrationStatus.TargetPod.Name == pod.Name {
+			if err := oc.reconcileLiveMigrationTargetZone(kubevirtLiveMigrationStatus); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (oc *SecondaryLayer2NetworkController) reconcileLiveMigrationTargetZone(kubevirtLiveMigrationStatus *kubevirt.LiveMigrationStatus) error {
+	networkID, err := oc.getNetworkID()
+	if err != nil {
+		return err
+	}
+	mgmtInterfaceName := util.GetNetworkScopedK8sMgmtHostIntfName(uint(networkID))
+	return kubevirt.ReconcileIPv6DefaultGatewayAfterLiveMigration(oc.watchFactory, oc.NetInfo, kubevirtLiveMigrationStatus, mgmtInterfaceName)
 }

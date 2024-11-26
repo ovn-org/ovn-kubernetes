@@ -295,6 +295,23 @@ func (bsnc *BaseSecondaryNetworkController) addLogicalPortToNetworkForNAD(pod *k
 	var ops []ovsdb.Operation
 	var lsp *nbdb.LogicalSwitchPort
 	var newlyCreated bool
+	var lspOpts []nbdb.LSPOption
+	var kubevirtLiveMigrationStatus *kubevirt.LiveMigrationStatus
+
+	if kubevirt.IsPodAllowedForMigration(pod, bsnc.NetInfo) {
+		kubevirtLiveMigrationStatus, err = kubevirt.DiscoverLiveMigrationStatus(bsnc.watchFactory, pod)
+		if err != nil {
+			return fmt.Errorf("failed to discover Live-migration status: %w", err)
+		}
+	}
+
+	// actions on the pods' LSP are only triggerred from the target pod
+	shouldHandleLiveMigration := kubevirtLiveMigrationStatus != nil && pod.Name == kubevirtLiveMigrationStatus.TargetPod.Name
+	if shouldHandleLiveMigration {
+		// LSP should be altered inside addLogicalPortToNetwork() before ops are generated because one cannot append
+		// multiple ops regarding the same object in the same transact, so passing the needed changes to the function.
+		lspOpts = append(lspOpts, nbdb.WithLogicalSwitchPortEnabled(kubevirtLiveMigrationStatus.IsTargetDomainReady()))
+	}
 
 	// we need to create a logical port for all local pods
 	// we also need to create a remote logical port for remote pods on layer2
@@ -303,7 +320,7 @@ func (bsnc *BaseSecondaryNetworkController) addLogicalPortToNetworkForNAD(pod *k
 	requiresLogicalPort := isLocalPod || bsnc.isLayer2Interconnect()
 
 	if requiresLogicalPort {
-		ops, lsp, podAnnotation, newlyCreated, err = bsnc.addLogicalPortToNetwork(pod, nadName, network)
+		ops, lsp, podAnnotation, newlyCreated, err = bsnc.addLogicalPortToNetwork(pod, nadName, network, lspOpts...)
 		if err != nil {
 			return err
 		}
@@ -325,6 +342,13 @@ func (bsnc *BaseSecondaryNetworkController) addLogicalPortToNetworkForNAD(pod *k
 			return err
 		}
 		bsnc.logicalPortCache.remove(pod, nadName)
+	}
+
+	if shouldHandleLiveMigration {
+		ops, err = bsnc.disableLiveMigrationSourceLSPOps(kubevirtLiveMigrationStatus, nadName, ops)
+		if err != nil {
+			return fmt.Errorf("failed to create LSP ops for source pod during Live-migration status: %w", err)
+		}
 	}
 
 	if podAnnotation == nil {
@@ -468,6 +492,11 @@ func (bsnc *BaseSecondaryNetworkController) removePodForSecondaryNetwork(pod *ka
 			return err
 		}
 
+		if kubevirt.IsPodAllowedForMigration(pod, bsnc.NetInfo) {
+			if err = bsnc.enableSourceLSPFailedLiveMigration(pod, nadName); err != nil {
+				return err
+			}
+		}
 		bsnc.logicalPortCache.remove(pod, nadName)
 		pInfo, err := bsnc.deletePodLogicalPort(pod, portInfoMap[nadName], nadName)
 		if err != nil {
@@ -876,4 +905,58 @@ func (bsnc *BaseSecondaryNetworkController) requireDHCP(pod *corev1.Pod) bool {
 		util.IsNetworkSegmentationSupportEnabled() &&
 		bsnc.IsPrimaryNetwork() &&
 		bsnc.TopologyType() == types.Layer2Topology
+}
+
+func (bsnc *BaseSecondaryNetworkController) setPodLogicalSwitchPortEnabledField(
+	pod *corev1.Pod, nadName string, ops []ovsdb.Operation, enabled bool) ([]ovsdb.Operation, *nbdb.LogicalSwitchPort, error) {
+	lsp := &nbdb.LogicalSwitchPort{Name: bsnc.GetLogicalPortName(pod, nadName)}
+	lsp, err := libovsdbops.GetLogicalSwitchPort(bsnc.nbClient, lsp)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to fetch switch port for node %s: %w", lsp.Name, err)
+	}
+
+	lsp.Enabled = ptr.To(enabled)
+	switchName, err := bsnc.getExpectedSwitchName(pod)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to fetch switch name for pod %s: %w", pod.Name, err)
+	}
+	ops, err = libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitchOps(bsnc.nbClient, ops, &nbdb.LogicalSwitch{Name: switchName}, lsp)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed updating logical switch port %+v on switch %s: %w", *lsp, switchName, err)
+	}
+	return ops, lsp, nil
+}
+
+func (bsnc *BaseSecondaryNetworkController) disableLiveMigrationSourceLSPOps(
+	kubevirtLiveMigrationStatus *kubevirt.LiveMigrationStatus,
+	nadName string, ops []ovsdb.Operation) ([]ovsdb.Operation, error) {
+	if !kubevirtLiveMigrationStatus.IsTargetDomainReady() {
+		return ops, nil
+	}
+	// closing the sourcePod lsp to ensure traffic goes to the now ready targetPod.
+	ops, _, err := bsnc.setPodLogicalSwitchPortEnabledField(kubevirtLiveMigrationStatus.SourcePod, nadName, ops, false)
+	return ops, err
+}
+
+func (bsnc *BaseSecondaryNetworkController) enableSourceLSPFailedLiveMigration(pod *corev1.Pod, nadName string) error {
+	kubevirtLiveMigrationStatus, err := kubevirt.DiscoverLiveMigrationStatus(bsnc.watchFactory, pod)
+	if err != nil {
+		return fmt.Errorf("failed to discover Live-migration status after pod termination: %w", err)
+	}
+	if kubevirtLiveMigrationStatus == nil ||
+		pod.Name != kubevirtLiveMigrationStatus.TargetPod.Name ||
+		kubevirtLiveMigrationStatus.State != kubevirt.LiveMigrationFailed {
+		return nil
+	}
+	// make sure sourcePod lsp is enabled if migration failed after DomainReady was set.
+	ops, sourcePodLsp, err := bsnc.setPodLogicalSwitchPortEnabledField(kubevirtLiveMigrationStatus.SourcePod, nadName, nil, true)
+	if err != nil {
+		return fmt.Errorf("failed to set source Pod lsp to enabled after migration failed: %w", err)
+	}
+	_, err = libovsdbops.TransactAndCheckAndSetUUIDs(bsnc.nbClient, sourcePodLsp, ops)
+	if err != nil {
+		return fmt.Errorf("failed transacting operations %+v: %w", ops, err)
+	}
+
+	return nil
 }

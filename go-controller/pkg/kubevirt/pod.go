@@ -3,7 +3,11 @@ package kubevirt
 import (
 	"fmt"
 	"net"
+	"sort"
+	"strings"
+	"syscall"
 
+	"golang.org/x/sys/unix"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ktypes "k8s.io/apimachinery/pkg/types"
@@ -11,7 +15,9 @@ import (
 
 	kubevirtv1 "kubevirt.io/api/core/v1"
 
+	"github.com/mdlayher/socket"
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
@@ -348,4 +354,162 @@ func ZoneContainsPodSubnetOrUntracked(watchFactory *factory.WatchFactory, lsMana
 // kubevirt virtual machine, false otherwise.
 func IsPodOwnedByVirtualMachine(pod *corev1.Pod) bool {
 	return ExtractVMNameFromPod(pod) != nil
+}
+
+func IsPodAllowedForMigration(pod *corev1.Pod, netInfo util.NetInfo) bool {
+	return IsPodOwnedByVirtualMachine(pod) &&
+		netInfo.TopologyType() == ovntypes.Layer2Topology &&
+		(netInfo.IsSecondary() || netInfo.IsPrimaryNetwork())
+}
+
+func isTargetPodReady(targetPod *corev1.Pod) bool {
+	if targetPod == nil {
+		return false
+	}
+
+	// This annotation only appears on live migration scenarios, and it signals
+	// that target VM pod is ready to receive traffic, so we can route
+	// traffic to it.
+	targetReadyTimestamp := targetPod.Annotations[kubevirtv1.MigrationTargetReadyTimestamp]
+
+	// VM is ready to receive traffic
+	return targetReadyTimestamp != ""
+}
+
+func filterNotComplete(vmPods []*corev1.Pod) []*corev1.Pod {
+	var notCompletePods []*corev1.Pod
+	for _, vmPod := range vmPods {
+		if !util.PodCompleted(vmPod) {
+			notCompletePods = append(notCompletePods, vmPod)
+		}
+	}
+
+	return notCompletePods
+}
+
+func tooManyPodsError(livingPods []*corev1.Pod) error {
+	var podNames = make([]string, len(livingPods))
+	for i := range livingPods {
+		podNames[i] = livingPods[i].Namespace + "/" + livingPods[i].Name
+	}
+	return fmt.Errorf("unexpected live migration state at pods: %s", strings.Join(podNames, ","))
+}
+
+type LiveMigrationState string
+
+const (
+	LiveMigrationInProgress        LiveMigrationState = "InProgress"
+	LiveMigrationTargetDomainReady LiveMigrationState = "TargetDomainReady"
+	LiveMigrationFailed            LiveMigrationState = "Failed"
+)
+
+type LiveMigrationStatus struct {
+	SourcePod, TargetPod *corev1.Pod
+	State                LiveMigrationState
+}
+
+func (lm LiveMigrationStatus) IsTargetDomainReady() bool {
+	return lm.State == LiveMigrationTargetDomainReady
+}
+
+func DiscoverLiveMigrationStatus(client *factory.WatchFactory, pod *corev1.Pod) (*LiveMigrationStatus, error) {
+	vmKey := ExtractVMNameFromPod(pod)
+	if vmKey == nil {
+		return nil, nil
+	}
+
+	vmPods, err := client.GetPodsBySelector(pod.Namespace, metav1.LabelSelector{MatchLabels: map[string]string{kubevirtv1.VirtualMachineNameLabel: vmKey.Name}})
+	if err != nil {
+		return nil, err
+	}
+
+	// no migration
+	if len(vmPods) < 2 {
+		return nil, nil
+	}
+
+	// Sort vmPods by creation time
+	sort.Slice(vmPods, func(i, j int) bool {
+		return vmPods[j].CreationTimestamp.After(vmPods[i].CreationTimestamp.Time)
+	})
+
+	targetPod := vmPods[len(vmPods)-1]
+	livingPods := filterNotComplete(vmPods)
+	if util.PodCompleted(targetPod) {
+		// if target pod failed, then there should be only one living source pod.
+		if len(livingPods) != 1 {
+			return nil, fmt.Errorf("unexpected live migration state: should have a single living pod")
+		}
+		return &LiveMigrationStatus{
+			SourcePod: livingPods[0],
+			TargetPod: targetPod,
+			State:     LiveMigrationFailed,
+		}, nil
+	}
+
+	// no active migration
+	if len(livingPods) < 2 {
+		return nil, nil
+	}
+
+	if len(livingPods) > 2 {
+		return nil, tooManyPodsError(livingPods)
+	}
+
+	status := LiveMigrationStatus{
+		SourcePod: livingPods[0],
+		TargetPod: livingPods[1],
+		State:     LiveMigrationInProgress,
+	}
+
+	if isTargetPodReady(status.TargetPod) {
+		status.State = LiveMigrationTargetDomainReady
+	}
+	return &status, nil
+}
+
+func ReconcileIPv6DefaultGatewayAfterLiveMigration(watchFactory *factory.WatchFactory, netInfo util.NetInfo, liveMigration *LiveMigrationStatus, interfaceName string) error {
+	if liveMigration.State != LiveMigrationTargetDomainReady {
+		return nil
+	}
+	targetPodAnnotation, err := util.UnmarshalPodAnnotation(liveMigration.TargetPod.Annotations, netInfo.GetNADs()[0])
+	if err != nil {
+		return err
+	}
+	targetPodMAC := targetPodAnnotation.MAC
+	targetPodLLA := util.HWAddrToIPv6LLA(targetPodMAC)
+	c, err := socket.Socket(syscall.AF_PACKET, syscall.SOCK_RAW, syscall.ETH_P_ALL, "ra", nil)
+	if err != nil {
+		return err
+	}
+	iface, err := net.InterfaceByName(interfaceName)
+	if err != nil {
+		return err
+	}
+	addr := unix.SockaddrLinklayer{
+		Ifindex: iface.Index,
+	}
+	sourceNode, err := watchFactory.GetNode(liveMigration.SourcePod.Spec.NodeName)
+	if err != nil {
+		return err
+	}
+	sourceNodeForceDeletionRouterAdvertisment, err := generateRouterAdvertismentForNode(sourceNode, netInfo.GetNetworkName(), targetPodMAC, targetPodLLA, 0)
+	if err != nil {
+		return err
+	}
+	if err := c.Sendto(sourceNodeForceDeletionRouterAdvertisment, &addr, 0); err != nil {
+		return err
+	}
+	targetNode, err := watchFactory.GetNode(liveMigration.TargetPod.Spec.NodeName)
+	if err != nil {
+		return err
+	}
+	targetNodeMaxLifetimeRouterAdvertisment, err := generateRouterAdvertismentForNode(targetNode, netInfo.GetNetworkName(), targetPodMAC, targetPodLLA, 65535)
+	if err != nil {
+		return err
+	}
+	if err := c.Sendto(targetNodeMaxLifetimeRouterAdvertisment, &addr, 0); err != nil {
+		return err
+	}
+	return nil
 }
