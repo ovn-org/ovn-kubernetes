@@ -484,6 +484,11 @@ jobs:
           msbuild mysql-server-core-* php-* php7* \
           powershell temurin-* zulu-*
 
+    - name: Setup /mnt/runner directory
+      run: |
+        sudo mkdir -pv /mnt/runner
+        sudo chown runner:runner /mnt/runner
+
     - name: Check out code into the Go module directory
       uses: actions/checkout@v4
 
