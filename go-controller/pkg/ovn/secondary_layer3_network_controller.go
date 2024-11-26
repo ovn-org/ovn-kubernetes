@@ -304,10 +304,14 @@ type SecondaryLayer3NetworkController struct {
 
 	// Controller in charge of services
 	svcController *svccontroller.Controller
+
+	// EgressIP controller utilized only to initialize a network with OVN polices to support EgressIP functionality.
+	eIPController *EgressIPController
 }
 
 // NewSecondaryLayer3NetworkController create a new OVN controller for the given secondary layer3 NAD
-func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netInfo util.NetInfo, nadController nad.NADController) (*SecondaryLayer3NetworkController, error) {
+func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netInfo util.NetInfo, nadController nad.NADController,
+	eIPController *EgressIPController, portCache *PortCache) (*SecondaryLayer3NetworkController, error) {
 
 	stopChan := make(chan struct{})
 	ipv4Mode, ipv6Mode := netInfo.IPMode()
@@ -342,7 +346,7 @@ func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netI
 				controllerName:              getNetworkControllerName(netInfo.GetNetworkName()),
 				NetInfo:                     netInfo,
 				lsManager:                   lsm.NewLogicalSwitchManager(),
-				logicalPortCache:            newPortCache(stopChan),
+				logicalPortCache:            portCache,
 				namespaces:                  make(map[string]*namespaceInfo),
 				namespacesMutex:             sync.Mutex{},
 				addressSetFactory:           addressSetFactory,
@@ -365,6 +369,7 @@ func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netI
 		gatewayTopologyFactory:      topology.NewGatewayTopologyFactory(cnci.nbClient),
 		gatewayManagers:             sync.Map{},
 		svcController:               svcController,
+		eIPController:               eIPController,
 	}
 
 	if oc.allocatesPodAnnotation() {
@@ -742,6 +747,15 @@ func (oc *SecondaryLayer3NetworkController) addUpdateLocalNodeEvent(node *kapi.N
 			oc.syncZoneICFailed.Store(node.Name, true)
 		} else {
 			oc.syncZoneICFailed.Delete(node.Name)
+		}
+	}
+
+	if config.OVNKubernetesFeature.EnableEgressIP && util.IsNetworkSegmentationSupportEnabled() && oc.IsPrimaryNetwork() {
+		if err = oc.eIPController.ensureL3ClusterRouterPoliciesForNetwork(oc.NetInfo); err != nil {
+			errs = append(errs, fmt.Errorf("failed to add network %s to EgressIP controller: %v", oc.NetInfo.GetNetworkName(), err))
+		}
+		if err = oc.eIPController.ensureL3SwitchPoliciesForNode(oc.NetInfo, node.Name); err != nil {
+			errs = append(errs, fmt.Errorf("failed to ensure EgressIP switch policies: %v", err))
 		}
 	}
 
