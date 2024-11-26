@@ -156,7 +156,10 @@ func (d *SampleDecoder) DecodeCookieIDs(obsDomainID, obsPointID uint32) (model.N
 	var event model.NetworkEvent
 	switch o := dbObj.(type) {
 	case *nbdb.ACL:
-		event = newACLEvent(o)
+		event, err = newACLEvent(o)
+		if err != nil {
+			return nil, fmt.Errorf("failed to build ACL network event: %w", err)
+		}
 	}
 	if event == nil {
 		return nil, fmt.Errorf("failed to build network event for db object %v", dbObj)
@@ -164,7 +167,7 @@ func (d *SampleDecoder) DecodeCookieIDs(obsDomainID, obsPointID uint32) (model.N
 	return event, nil
 }
 
-func newACLEvent(o *nbdb.ACL) *model.ACLEvent {
+func newACLEvent(o *nbdb.ACL) (*model.ACLEvent, error) {
 	actor := o.ExternalIDs[libovsdbops.OwnerTypeKey.String()]
 	event := model.ACLEvent{
 		Action: o.Action,
@@ -172,13 +175,13 @@ func newACLEvent(o *nbdb.ACL) *model.ACLEvent {
 	}
 	switch actor {
 	case libovsdbops.NetworkPolicyOwnerType:
-		nsname := strings.SplitN(o.ExternalIDs[libovsdbops.ObjectNameKey.String()], ":", 2)
+		objName := o.ExternalIDs[libovsdbops.ObjectNameKey.String()]
+		nsname := strings.SplitN(objName, ":", 2)
 		if len(nsname) == 2 {
 			event.Namespace = nsname[0]
 			event.Name = nsname[1]
 		} else {
-			// do not split (which use cases?)
-			event.Name = o.ExternalIDs[libovsdbops.ObjectNameKey.String()]
+			return nil, fmt.Errorf("expected format namespace:name for Object Name, but found: %s", objName)
 		}
 		event.Direction = o.ExternalIDs[libovsdbops.PolicyDirectionKey.String()]
 	case libovsdbops.AdminNetworkPolicyOwnerType, libovsdbops.BaselineAdminNetworkPolicyOwnerType:
@@ -197,7 +200,7 @@ func newACLEvent(o *nbdb.ACL) *model.ACLEvent {
 	case libovsdbops.NetpolNodeOwnerType:
 		event.Direction = "Ingress"
 	}
-	return &event
+	return &event, nil
 }
 
 func (d *SampleDecoder) DecodeCookieBytes(cookie []byte) (model.NetworkEvent, error) {
