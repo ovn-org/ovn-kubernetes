@@ -73,8 +73,7 @@ func (ncm *NodeControllerManager) CleanupStaleNetworks(validNetworks ...util.Net
 		if !network.IsPrimaryNetwork() {
 			continue
 		}
-		networkID := network.GetNetworkID()
-		validVRFDevices.Insert(util.GetVRFDeviceNameForUDN(networkID))
+		validVRFDevices.Insert(util.GetNetworkVRFName(network))
 	}
 	return ncm.vrfManager.Repair(validVRFDevices)
 }
