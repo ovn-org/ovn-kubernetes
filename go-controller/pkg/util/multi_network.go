@@ -1352,3 +1352,23 @@ func AllowsPersistentIPs(netInfo NetInfo) bool {
 func IsPodNetworkAdvertisedAtNode(netInfo NetInfo, node string) bool {
 	return len(netInfo.GetPodNetworkAdvertisedOnNodeVRFs(node)) > 0
 }
+
+func GetNetworkVRFName(netInfo NetInfo) string {
+	if netInfo.GetNetworkName() == types.DefaultNetworkName {
+		return types.DefaultNetworkName
+	}
+	// use the CUDN network name as the VRF name if possible
+	vrfDeviceName := strings.TrimPrefix(netInfo.GetNetworkName(), "cluster.udn.")
+	switch {
+	case len(vrfDeviceName) > 15:
+		// not possible if longer than the maximum device name length
+		fallthrough
+	case vrfDeviceName == netInfo.GetNetworkName():
+		// this is not a CUDN
+		fallthrough
+	case vrfDeviceName == types.DefaultNetworkName:
+		// can't be the default network name
+		return fmt.Sprintf("%s%d%s", types.UDNVRFDevicePrefix, netInfo.GetNetworkID(), types.UDNVRFDeviceSuffix)
+	}
+	return vrfDeviceName
+}
