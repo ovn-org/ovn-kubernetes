@@ -1,6 +1,7 @@
 package node
 
 import (
+	"context"
 	"fmt"
 	"hash/fnv"
 	"math"
@@ -58,7 +59,122 @@ const (
 	// ovnKubeNodeSNATMark is used to mark packets that need to be SNAT-ed to nodeIP for
 	// traffic originating from egressIP and egressService controlled pods towards other nodes in the cluster.
 	ovnKubeNodeSNATMark = "0x3f0"
+
+	// nftablesUDNServicePreroutingChain is a base chain registered into the prerouting hook,
+	// and it contains one rule that jumps to nftablesUDNServiceMarkChain.
+	// Traffic from the default network's management interface is bypassed
+	// to prevent enabling the default network access to the local node's UDN NodePort.
+	nftablesUDNServicePreroutingChain = "udn-service-prerouting"
+
+	// nftablesUDNServiceOutputChain is a base chain registered into the output hook
+	// it contains one rule that jumps to nftablesUDNServiceMarkChain
+	nftablesUDNServiceOutputChain = "udn-service-output"
+
+	// nftablesUDNServiceMarkChain is a regular chain trying to match the incoming traffic
+	// against the following UDN service verdict maps: nftablesUDNMarkNodePortsMap,
+	// nftablesUDNMarkExternalIPsV4Map, nftablesUDNMarkExternalIPsV6Map
+	nftablesUDNServiceMarkChain = "udn-service-mark"
+
+	// nftablesUDNMarkNodePortsMap is a verdict maps containing
+	// localNodeIP / protocol / port keys indicating traffic that
+	// should be marked with a UDN specific value, which is used to direct the traffic
+	// to the appropriate network.
+	nftablesUDNMarkNodePortsMap = "udn-mark-nodeports"
+
+	// nftablesUDNMarkExternalIPsV4Map and nftablesUDNMarkExternalIPsV6Map are verdict
+	// maps containing loadBalancerIP / protocol / port keys indicating traffic that
+	// should be marked with a UDN specific value, which is used to direct the traffic
+	// to the appropriate network.
+	nftablesUDNMarkExternalIPsV4Map = "udn-mark-external-ips-v4"
+	nftablesUDNMarkExternalIPsV6Map = "udn-mark-external-ips-v6"
 )
+
+// configureUDNServicesNFTables configures the nftables chains, rules, and verdict maps
+// that are used to set packet marks on externally exposed UDN services
+func configureUDNServicesNFTables() error {
+	nft, err := nodenft.GetNFTablesHelper()
+	if err != nil {
+		return err
+	}
+	tx := nft.NewTransaction()
+
+	tx.Add(&knftables.Chain{
+		Name:    nftablesUDNServiceMarkChain,
+		Comment: knftables.PtrTo("UDN services packet mark"),
+	})
+	tx.Flush(&knftables.Chain{Name: nftablesUDNServiceMarkChain})
+
+	tx.Add(&knftables.Chain{
+		Name:    nftablesUDNServicePreroutingChain,
+		Comment: knftables.PtrTo("UDN services packet mark - Prerouting"),
+
+		Type:     knftables.PtrTo(knftables.FilterType),
+		Hook:     knftables.PtrTo(knftables.PreroutingHook),
+		Priority: knftables.PtrTo(knftables.ManglePriority),
+	})
+	tx.Flush(&knftables.Chain{Name: nftablesUDNServicePreroutingChain})
+
+	tx.Add(&knftables.Rule{
+		Chain: nftablesUDNServicePreroutingChain,
+		Rule: knftables.Concat(
+			"iifname", "!=", fmt.Sprintf("%q", types.K8sMgmtIntfName),
+			"jump", nftablesUDNServiceMarkChain,
+		),
+	})
+
+	tx.Add(&knftables.Chain{
+		Name:    nftablesUDNServiceOutputChain,
+		Comment: knftables.PtrTo("UDN services packet mark - Output"),
+
+		Type:     knftables.PtrTo(knftables.FilterType),
+		Hook:     knftables.PtrTo(knftables.OutputHook),
+		Priority: knftables.PtrTo(knftables.ManglePriority),
+	})
+	tx.Flush(&knftables.Chain{Name: nftablesUDNServiceOutputChain})
+	tx.Add(&knftables.Rule{
+		Chain: nftablesUDNServiceOutputChain,
+		Rule: knftables.Concat(
+			"jump", nftablesUDNServiceMarkChain,
+		),
+	})
+
+	tx.Add(&knftables.Map{
+		Name:    nftablesUDNMarkNodePortsMap,
+		Comment: knftables.PtrTo("UDN services NodePorts mark"),
+		Type:    "inet_proto . inet_service : verdict",
+	})
+	tx.Add(&knftables.Map{
+		Name:    nftablesUDNMarkExternalIPsV4Map,
+		Comment: knftables.PtrTo("UDN services External IPs mark (IPv4)"),
+		Type:    "ipv4_addr . inet_proto . inet_service : verdict",
+	})
+	tx.Add(&knftables.Map{
+		Name:    nftablesUDNMarkExternalIPsV6Map,
+		Comment: knftables.PtrTo("UDN services External IPs mark (IPv6)"),
+		Type:    "ipv6_addr . inet_proto . inet_service : verdict",
+	})
+
+	tx.Add(&knftables.Rule{
+		Chain: nftablesUDNServiceMarkChain,
+		Rule: knftables.Concat(
+			"fib daddr type local meta l4proto . th dport vmap", "@", nftablesUDNMarkNodePortsMap,
+		),
+	})
+	tx.Add(&knftables.Rule{
+		Chain: nftablesUDNServiceMarkChain,
+		Rule: knftables.Concat(
+			"ip daddr . meta l4proto . th dport vmap", "@", nftablesUDNMarkExternalIPsV4Map,
+		),
+	})
+	tx.Add(&knftables.Rule{
+		Chain: nftablesUDNServiceMarkChain,
+		Rule: knftables.Concat(
+			"ip6 daddr . meta l4proto . th dport vmap", "@", nftablesUDNMarkExternalIPsV6Map,
+		),
+	})
+
+	return nft.Run(context.TODO(), tx)
+}
 
 // nodePortWatcherIptables manages iptables rules for shared gateway
 // to ensure that services using NodePorts are accessible.
@@ -549,11 +665,16 @@ func addServiceRules(service *kapi.Service, netInfo util.NetInfo, localEndpoints
 	// For dpu or Full mode
 	var err error
 	var errors []error
+	var activeNetwork *bridgeUDNConfiguration
 	if npw != nil {
 		if err = npw.updateServiceFlowCache(service, netInfo, true, svcHasLocalHostNetEndPnt); err != nil {
 			errors = append(errors, err)
 		}
 		npw.ofm.requestFlowSync()
+		activeNetwork = npw.ofm.getActiveNetwork(netInfo)
+		if activeNetwork == nil {
+			return fmt.Errorf("failed to get active network config for network %s", netInfo.GetNetworkName())
+		}
 	}
 
 	if npw == nil || !npw.dpuMode {
@@ -567,6 +688,9 @@ func addServiceRules(service *kapi.Service, netInfo util.NetInfo, localEndpoints
 			}
 		}
 		nftElems := getGatewayNFTRules(service, localEndpoints, svcHasLocalHostNetEndPnt)
+		if netInfo.IsPrimaryNetwork() && activeNetwork != nil {
+			nftElems = append(nftElems, getUDNNFTRules(service, activeNetwork)...)
+		}
 		if len(nftElems) > 0 {
 			if err := nodenft.UpdateNFTElements(nftElems); err != nil {
 				err = fmt.Errorf("failed to update nftables rules for service %s/%s: %v",
@@ -635,6 +759,33 @@ func delServiceRules(service *kapi.Service, localEndpoints []string, npw *nodePo
 				err = fmt.Errorf("failed to delete nftables rules for service %s/%s: %v",
 					service.Namespace, service.Name, err)
 				errors = append(errors, err)
+			}
+		}
+
+		if util.IsNetworkSegmentationSupportEnabled() {
+			// NOTE: The code below is not using nodenft.DeleteNFTElements because it first adds elements
+			// before removing them, which fails for UDN NFT rules. These rules only have map keys,
+			// not key-value pairs, making it impossible to add.
+			// Attempt to delete the elements directly and handle the IsNotFound error.
+			//
+			// TODO: Switch to `nft destroy` when supported.
+			nftElems = getUDNNFTRules(service, nil)
+			if len(nftElems) > 0 {
+				nft, err := nodenft.GetNFTablesHelper()
+				if err != nil {
+					return utilerrors.Join(append(errors, err)...)
+				}
+
+				tx := nft.NewTransaction()
+				for _, elem := range nftElems {
+					tx.Delete(elem)
+				}
+
+				if err := nft.Run(context.TODO(), tx); err != nil && !knftables.IsNotFound(err) {
+					err = fmt.Errorf("failed to delete nftables rules for UDN service %s/%s: %v",
+						service.Namespace, service.Name, err)
+					errors = append(errors, err)
+				}
 			}
 		}
 	}
@@ -830,7 +981,7 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) error {
 	var err error
 	var errors []error
 	var keepIPTRules []nodeipt.Rule
-	var keepNFTElems []*knftables.Element
+	var keepNFTSetElems, keepNFTMapElems []*knftables.Element
 	for _, serviceInterface := range services {
 		name := ktypes.NamespacedName{Namespace: serviceInterface.(*kapi.Service).Namespace, Name: serviceInterface.(*kapi.Service).Name}
 
@@ -876,7 +1027,14 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) error {
 		if !npw.dpuMode {
 			localEndpointsArray := sets.List(localEndpoints)
 			keepIPTRules = append(keepIPTRules, getGatewayIPTRules(service, localEndpointsArray, hasLocalHostNetworkEp)...)
-			keepNFTElems = append(keepNFTElems, getGatewayNFTRules(service, localEndpointsArray, hasLocalHostNetworkEp)...)
+			keepNFTSetElems = append(keepNFTSetElems, getGatewayNFTRules(service, localEndpointsArray, hasLocalHostNetworkEp)...)
+			if util.IsNetworkSegmentationSupportEnabled() && netInfo.IsPrimaryNetwork() {
+				netConfig := npw.ofm.getActiveNetwork(netInfo)
+				if netConfig == nil {
+					return fmt.Errorf("failed to get active network config for network %s", netInfo.GetNetworkName())
+				}
+				keepNFTMapElems = append(keepNFTMapElems, getUDNNFTRules(service, netConfig)...)
+			}
 		}
 	}
 
@@ -895,8 +1053,15 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) error {
 		}
 
 		for _, set := range []string{nftablesMgmtPortNoSNATNodePorts, nftablesMgmtPortNoSNATServicesV4, nftablesMgmtPortNoSNATServicesV6} {
-			if err = recreateNFTSet(set, keepNFTElems); err != nil {
+			if err = recreateNFTSet(set, keepNFTSetElems); err != nil {
 				errors = append(errors, err)
+			}
+		}
+		if util.IsNetworkSegmentationSupportEnabled() {
+			for _, nftMap := range []string{nftablesUDNMarkNodePortsMap, nftablesUDNMarkExternalIPsV4Map, nftablesUDNMarkExternalIPsV6Map} {
+				if err = recreateNFTMap(nftMap, keepNFTMapElems); err != nil {
+					errors = append(errors, err)
+				}
 			}
 		}
 	}
@@ -2127,6 +2292,11 @@ func newNodePortWatcher(gwBridge *bridgeConfiguration, ofm *openflowManager,
 		} else if config.Gateway.Mode == config.GatewayModeShared {
 			if err := initSharedGatewayIPTables(); err != nil {
 				return nil, err
+			}
+		}
+		if util.IsNetworkSegmentationSupportEnabled() {
+			if err := configureUDNServicesNFTables(); err != nil {
+				return nil, fmt.Errorf("unable to configure UDN nftables: %w", err)
 			}
 		}
 	}

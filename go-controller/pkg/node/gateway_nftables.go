@@ -8,11 +8,12 @@ import (
 	"fmt"
 	"strings"
 
-	nodenft "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/nftables"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	kapi "k8s.io/api/core/v1"
 	utilnet "k8s.io/utils/net"
 	"sigs.k8s.io/knftables"
+
+	nodenft "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/nftables"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
 // gateway_nftables.go contains code for dealing with nftables rules; it is used in
@@ -63,6 +64,49 @@ func getNoSNATLoadBalancerIPRules(svcPort kapi.ServicePort, localEndpoints []str
 	return nftRules
 }
 
+// getUDNNodePortMarkNFTRule returns a verdict map element (nftablesUDNMarkNodePortsMap)
+// with a key composed of the svcPort protocol and port.
+// The value is a jump to the UDN chain mark if netInfo is provided, or nil that is useful for map entry removal.
+func getUDNNodePortMarkNFTRule(svcPort kapi.ServicePort, netInfo *bridgeUDNConfiguration) *knftables.Element {
+	var val []string
+	if netInfo != nil {
+		val = []string{fmt.Sprintf("jump %s", GetUDNMarkChain(netInfo.pktMark))}
+	}
+	return &knftables.Element{
+		Map:   nftablesUDNMarkNodePortsMap,
+		Key:   []string{strings.ToLower(string(svcPort.Protocol)), fmt.Sprintf("%v", svcPort.NodePort)},
+		Value: val,
+	}
+
+}
+
+// getUDNExternalIPsMarkNFTRules returns a verdict map elements (nftablesUDNMarkExternalIPsV4Map or nftablesUDNMarkExternalIPsV6Map)
+// with a key composed of the external IP, svcPort protocol and port.
+// The value is a jump to the UDN chain mark if netInfo is provided,  or nil that is useful for map entry removal.
+func getUDNExternalIPsMarkNFTRules(svcPort kapi.ServicePort, externalIPs []string, netInfo *bridgeUDNConfiguration) []*knftables.Element {
+	var nftRules []*knftables.Element
+	var val []string
+
+	if netInfo != nil {
+		val = []string{fmt.Sprintf("jump %s", GetUDNMarkChain(netInfo.pktMark))}
+	}
+	for _, externalIP := range externalIPs {
+		mapName := nftablesUDNMarkExternalIPsV4Map
+		if utilnet.IsIPv6String(externalIP) {
+			mapName = nftablesUDNMarkExternalIPsV6Map
+		}
+		nftRules = append(nftRules,
+			&knftables.Element{
+				Map:   mapName,
+				Key:   []string{externalIP, strings.ToLower(string(svcPort.Protocol)), fmt.Sprintf("%v", svcPort.TargetPort.IntValue())},
+				Value: val,
+			},
+		)
+
+	}
+	return nftRules
+}
+
 func recreateNFTSet(setName string, keepNFTElems []*knftables.Element) error {
 	nft, err := nodenft.GetNFTablesHelper()
 	if err != nil {
@@ -74,6 +118,23 @@ func recreateNFTSet(setName string, keepNFTElems []*knftables.Element) error {
 	})
 	for _, elem := range keepNFTElems {
 		if elem.Set == setName {
+			tx.Add(elem)
+		}
+	}
+	return nft.Run(context.TODO(), tx)
+}
+
+func recreateNFTMap(mapName string, keepNFTElems []*knftables.Element) error {
+	nft, err := nodenft.GetNFTablesHelper()
+	if err != nil {
+		return err
+	}
+	tx := nft.NewTransaction()
+	tx.Flush(&knftables.Map{
+		Name: mapName,
+	})
+	for _, elem := range keepNFTElems {
+		if elem.Map == mapName {
 			tx.Add(elem)
 		}
 	}
@@ -96,6 +157,20 @@ func getGatewayNFTRules(service *kapi.Service, localEndpoints []string, svcHasLo
 				rules = append(rules, getNoSNATLoadBalancerIPRules(svcPort, localEndpoints)...)
 			}
 		}
+	}
+	return rules
+}
+
+// getUDNNFTRules generates nftables rules for a UDN service.
+// If netConfig is nil, the resulting map elements will have empty values,
+// suitable only for entry removal.
+func getUDNNFTRules(service *kapi.Service, netConfig *bridgeUDNConfiguration) []*knftables.Element {
+	rules := make([]*knftables.Element, 0)
+	for _, svcPort := range service.Spec.Ports {
+		if util.ServiceTypeHasNodePort(service) {
+			rules = append(rules, getUDNNodePortMarkNFTRule(svcPort, netConfig))
+		}
+		rules = append(rules, getUDNExternalIPsMarkNFTRules(svcPort, util.GetExternalAndLBIPs(service), netConfig)...)
 	}
 	return rules
 }

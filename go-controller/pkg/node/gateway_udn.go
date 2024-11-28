@@ -1,6 +1,7 @@
 package node
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"strings"
@@ -10,6 +11,8 @@ import (
 	listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
+	"k8s.io/utils/ptr"
+	"sigs.k8s.io/knftables"
 
 	"github.com/vishvananda/netlink"
 
@@ -17,6 +20,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/generator/udn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iprulemanager"
+	nodenft "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/nftables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/vrfmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -232,6 +236,54 @@ func NewUserDefinedNetworkGateway(netInfo util.NetInfo, networkID int, node *v1.
 	}, nil
 }
 
+// GetUDNMarkChain returns the UDN mark chain name
+func GetUDNMarkChain(pktMark string) string {
+	return "udn-mark-" + pktMark
+}
+
+// delMarkChain removes the UDN packet mark nftables chain
+func (udng *UserDefinedNetworkGateway) delMarkChain() error {
+	nft, err := nodenft.GetNFTablesHelper()
+	if err != nil {
+		return err
+	}
+	tx := nft.NewTransaction()
+	chain := &knftables.Chain{
+		Name: GetUDNMarkChain(fmt.Sprintf("0x%x", udng.pktMark)),
+	}
+	tx.Flush(chain)
+	tx.Delete(chain)
+	return nft.Run(context.TODO(), tx)
+}
+
+// addMarkChain adds the UDN nftables chain containing a rule that marks packets
+// with the network specific value
+func (udng *UserDefinedNetworkGateway) addMarkChain() error {
+	counterIfDebug := ""
+	if config.Logging.Level > 4 {
+		counterIfDebug = "counter"
+	}
+
+	nft, err := nodenft.GetNFTablesHelper()
+	if err != nil {
+		return err
+	}
+	tx := nft.NewTransaction()
+	chain := &knftables.Chain{
+		Name:    GetUDNMarkChain(fmt.Sprintf("0x%x", udng.pktMark)),
+		Comment: ptr.To(fmt.Sprintf("%s: UDN packet marking", udng.GetNetworkName())),
+	}
+	tx.Add(chain)
+	tx.Flush(chain)
+
+	tx.Add(&knftables.Rule{
+		Chain: chain.Name,
+		Rule:  knftables.Concat("meta mark set", fmt.Sprintf("0x%x", udng.pktMark), counterIfDebug),
+	})
+
+	return nft.Run(context.TODO(), tx)
+}
+
 // AddNetwork will be responsible to create all plumbings
 // required by this UDN on the gateway side
 func (udng *UserDefinedNetworkGateway) AddNetwork() error {
@@ -304,6 +356,9 @@ func (udng *UserDefinedNetworkGateway) AddNetwork() error {
 		klog.Warningf("Openflow manager has not been invoked for network %s; we will skip programming flows"+
 			"on the bridge for this network.", udng.NetInfo.GetNetworkName())
 	}
+	if err := udng.addMarkChain(); err != nil {
+		return fmt.Errorf("failed to add the service masquerade chain: %w", err)
+	}
 	return nil
 }
 
@@ -329,6 +384,9 @@ func (udng *UserDefinedNetworkGateway) DelNetwork() error {
 		if err := udng.Reconcile(); err != nil {
 			return fmt.Errorf("failed to reconcile default gateway for network %s, err: %v", udng.GetNetworkName(), err)
 		}
+	}
+	if err := udng.delMarkChain(); err != nil {
+		return err
 	}
 	// delete the management port interface for this network
 	return udng.deleteUDNManagementPort()
