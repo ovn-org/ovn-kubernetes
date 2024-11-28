@@ -1349,3 +1349,14 @@ func AllowsPersistentIPs(netInfo NetInfo) bool {
 func IsPodNetworkAdvertisedAtNode(netInfo NetInfo, node string) bool {
 	return len(netInfo.GetPodNetworkAdvertisedOnNodeVRFs(node)) > 0
 }
+
+func GetNetworkVRFName(netInfo NetInfo) string {
+	if netInfo.GetNetworkName() == types.DefaultNetworkName {
+		return types.DefaultNetworkName
+	}
+	vrfDeviceName := strings.TrimPrefix(netInfo.GetNetworkName(), "cluster.udn.")
+	if len(vrfDeviceName) < 16 && vrfDeviceName != netInfo.GetNetworkName() && vrfDeviceName != types.DefaultNetworkName {
+		return vrfDeviceName
+	}
+	return fmt.Sprintf("%s%d%s", types.UDNVRFDevicePrefix, netInfo.GetNetworkID(), types.UDNVRFDeviceSuffix)
+}
