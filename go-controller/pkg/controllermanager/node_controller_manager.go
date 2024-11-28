@@ -78,7 +78,7 @@ func (ncm *NodeControllerManager) CleanupStaleNetworks(validNetworks ...util.Net
 			klog.Errorf("Failed to get network identifier for network %s, error: %s", network.GetNetworkName(), err)
 			continue
 		}
-		validVRFDevices.Insert(util.GetVRFDeviceNameForUDN(networkID))
+		validVRFDevices.Insert(util.GetNetworkVRFNameForDevice(network, networkID))
 	}
 	return ncm.vrfManager.Repair(validVRFDevices)
 }

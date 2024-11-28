@@ -237,12 +237,12 @@ var _ = Describe("Healthcheck tests", func() {
 			err = testNS.Do(func(ns.NetNS) error {
 				defer GinkgoRecover()
 
-				staleVrfDevice := util.GetVRFDeviceNameForUDN(int(staleNetID))
+				staleVrfDevice := util.GetNetworkVRFNameForDevice(NetInfo, int(staleNetID))
 				ovntest.AddVRFLink(staleVrfDevice, uint32(staleNetID))
 				_, err = util.GetNetLinkOps().LinkByName(staleVrfDevice)
 				Expect(err).NotTo(HaveOccurred())
 
-				validVrfDevice := util.GetVRFDeviceNameForUDN(int(netID))
+				validVrfDevice := util.GetNetworkVRFNameForDevice(NetInfo, int(netID))
 				ovntest.AddVRFLink(validVrfDevice, uint32(netID))
 				_, err = util.GetNetLinkOps().LinkByName(validVrfDevice)
 				Expect(err).NotTo(HaveOccurred())
