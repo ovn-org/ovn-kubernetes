@@ -1044,6 +1044,7 @@ func TestGetPodNADToNetworkMappingWithActiveNetwork(t *testing.T) {
 			)
 
 			if err != nil {
+				g.Expect(test.expectedError).NotTo(gomega.BeNil(), err.Error())
 				g.Expect(err).To(gomega.MatchError(test.expectedError))
 			}
 			g.Expect(isAttachmentRequested).To(gomega.Equal(test.expectedIsAttachmentRequested))
