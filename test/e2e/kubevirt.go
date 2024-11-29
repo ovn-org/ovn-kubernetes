@@ -746,7 +746,7 @@ var _ = Describe("Kubevirt Virtual Machines", func() {
 					Domain: kubevirtv1.DomainSpec{
 						Resources: kubevirtv1.ResourceRequirements{
 							Requests: corev1.ResourceList{
-								corev1.ResourceMemory: resource.MustParse("512Mi"),
+								corev1.ResourceMemory: resource.MustParse("1024Mi"),
 							},
 						},
 						Devices: kubevirtv1.Devices{
