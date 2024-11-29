@@ -1155,6 +1155,11 @@ func isInterconnectEnabled() bool {
 	return present && val == "true"
 }
 
+func isUDNHostIsolationDisabled() bool {
+	val, present := os.LookupEnv("DISABLE_UDN_HOST_ISOLATION")
+	return present && val == "true"
+}
+
 func isLocalGWModeEnabled() bool {
 	val, present := os.LookupEnv("OVN_GATEWAY_MODE")
 	return present && val == "local"
