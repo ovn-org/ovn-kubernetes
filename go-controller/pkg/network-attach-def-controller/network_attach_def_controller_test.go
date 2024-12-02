@@ -139,6 +139,12 @@ func TestNetAttachDefinitionController(t *testing.T) {
 		MTU: 1400,
 	}
 
+	aNadForAnotherPlugin := &ovncnitypes.NetConf{
+		NetConf: cnitypes.NetConf{
+			Type: "rando-plugino",
+		},
+	}
+
 	type args struct {
 		nad     string
 		network *ovncnitypes.NetConf
@@ -424,6 +430,15 @@ func TestNetAttachDefinitionController(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "A NAD whose handler is NOT OVN-Kubernetes reconciles successfully (is ignored)",
+			args: []args{
+				{
+					nad:     "doesnotmatter",
+					network: aNadForAnotherPlugin,
+				},
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -460,6 +475,10 @@ func TestNetAttachDefinitionController(t *testing.T) {
 					g.Expect(err).To(gomega.HaveOccurred())
 				} else {
 					g.Expect(err).NotTo(gomega.HaveOccurred())
+				}
+
+				if args.network != nil && args.network.Type != "ovn-k8s-cni-overlay" {
+					g.Expect(nadController.nads).To(gomega.BeEmpty())
 				}
 			}
 

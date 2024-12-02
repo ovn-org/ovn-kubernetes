@@ -779,7 +779,7 @@ func ParseNADInfo(netattachdef *nettypes.NetworkAttachmentDefinition) (NetInfo, 
 func ParseNetConf(netattachdef *nettypes.NetworkAttachmentDefinition) (*ovncnitypes.NetConf, error) {
 	netconf, err := config.ParseNetConf([]byte(netattachdef.Spec.Config))
 	if err != nil {
-		return nil, fmt.Errorf("error parsing Network Attachment Definition %s/%s: %v", netattachdef.Namespace, netattachdef.Name, err)
+		return nil, fmt.Errorf("error parsing Network Attachment Definition %s/%s: %w", netattachdef.Namespace, netattachdef.Name, err)
 	}
 
 	nadName := GetNADName(netattachdef.Namespace, netattachdef.Name)
