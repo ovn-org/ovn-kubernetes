@@ -401,23 +401,25 @@ func enableICFeatureConfig() *config.OVNKubernetesFeatureConfig {
 	return featConfig
 }
 
-func icClusterTestConfiguration() testConfiguration {
-	return testConfiguration{
+type testConfigOpt = func(*testConfiguration)
+
+func icClusterTestConfiguration(opts ...testConfigOpt) testConfiguration {
+	config := testConfiguration{
 		configToOverride:   enableICFeatureConfig(),
 		expectationOptions: []option{withInterconnectCluster()},
 	}
-}
-
-func nonICClusterTestConfiguration() testConfiguration {
-	return testConfiguration{}
-}
-
-func icClusterWithDisableSNATTestConfiguration() testConfiguration {
-	return testConfiguration{
-		configToOverride:   enableICFeatureConfig(),
-		expectationOptions: []option{withInterconnectCluster()},
-		gatewayConfig:      &config.GatewayConfig{DisableSNATMultipleGWs: true},
+	for _, opt := range opts {
+		opt(&config)
 	}
+	return config
+}
+
+func nonICClusterTestConfiguration(opts ...testConfigOpt) testConfiguration {
+	config := testConfiguration{}
+	for _, opt := range opts {
+		opt(&config)
+	}
+	return config
 }
 
 func newMultiHomedPod(testPod testPod, multiHomingConfigs ...secondaryNetInfo) *v1.Pod {
