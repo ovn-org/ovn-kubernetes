@@ -254,7 +254,7 @@ func (oc *DefaultNetworkController) addLogicalPort(pod *kapi.Pod) (err error) {
 	}()
 
 	nadName := ovntypes.DefaultNetworkName
-	ops, lsp, podAnnotation, newlyCreatedPort, err = oc.addLogicalPortToNetwork(pod, nadName, network)
+	ops, lsp, podAnnotation, newlyCreatedPort, err = oc.addLogicalPortToNetwork(pod, nadName, network, nil)
 	if err != nil {
 		return err
 	}
