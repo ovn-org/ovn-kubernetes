@@ -24,6 +24,31 @@ const (
 	NetworkTopologyLayer3 NetworkTopology = "Layer3"
 )
 
+// +kubebuilder:validation:Enum=Geneve;None
+type TransportProtocol string
+
+const (
+	TransportProtocolGenve TransportProtocol = "Geneve"
+	TransportProtocolNone  TransportProtocol = "None"
+)
+
+// +kubebuilder:validation:XValidation:rule="(!has(self.protocol) && !has(self.targetVRF)) || (has(self.protocol) && ((self.protocol == 'Geneve' && !has(self.targetVRF)) || self.protocol == 'None'))", message="TargetVRF is only supported for None protocol"
+type TransportConfig struct {
+	// Protocol indicates the transport protocol for the network.
+	//
+	// Allowed value are "None" or "Geneve".
+	// When omitted, "Geneve" is the default.
+	// "None" can only be used when with BGP enabled.
+	//
+	// +optional
+	Protocol TransportProtocol `json:"protocol,omitempty"`
+
+	// TargetVRF describes the target VRF for the no overlay network. It is only supported for protocol None
+	//
+	// +optional
+	TargetVRF string `json:"targetVRF,omitempty"`
+}
+
 // +kubebuilder:validation:XValidation:rule="has(self.subnets) && size(self.subnets) > 0", message="Subnets is required for Layer3 topology"
 // +kubebuilder:validation:XValidation:rule="!has(self.joinSubnets) || has(self.role) && self.role == 'Primary'", message="JoinSubnets is only supported for Primary network"
 type Layer3Config struct {

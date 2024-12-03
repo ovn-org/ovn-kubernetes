@@ -45,6 +45,8 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &userdefinednetworkv1.Layer3SubnetApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("NetworkSpec"):
 		return &userdefinednetworkv1.NetworkSpecApplyConfiguration{}
+	case v1.SchemeGroupVersion.WithKind("TransportConfig"):
+		return &userdefinednetworkv1.TransportConfigApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("UserDefinedNetwork"):
 		return &userdefinednetworkv1.UserDefinedNetworkApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("UserDefinedNetworkSpec"):

@@ -12,6 +12,10 @@ func (s *UserDefinedNetworkSpec) GetLayer2() *Layer2Config {
 	return s.Layer2
 }
 
+func (s *UserDefinedNetworkSpec) GetTransport() *TransportConfig {
+	return s.Transport
+}
+
 func (s *NetworkSpec) GetTopology() NetworkTopology {
 	return s.Topology
 }
@@ -22,4 +26,8 @@ func (s *NetworkSpec) GetLayer3() *Layer3Config {
 
 func (s *NetworkSpec) GetLayer2() *Layer2Config {
 	return s.Layer2
+}
+
+func (s *NetworkSpec) GetTransport() *TransportConfig {
+	return s.Transport
 }
