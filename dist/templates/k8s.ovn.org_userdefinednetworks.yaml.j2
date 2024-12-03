@@ -193,6 +193,30 @@ spec:
                 - Layer2
                 - Layer3
                 type: string
+              transport:
+                description: Transport is the transport configuration.
+                properties:
+                  protocol:
+                    description: |-
+                      Protocol indicates the transport protocol for the network.
+
+                      Allowed value are "None" or "Geneve".
+                      When omitted, "Geneve" is the default.
+                      "None" can only be used when with BGP enabled.
+                    enum:
+                    - Geneve
+                    - None
+                    type: string
+                  targetVRF:
+                    description: TargetVRF describes the target VRF for the no overlay
+                      network. It is only supported for protocol None
+                    type: string
+                type: object
+                x-kubernetes-validations:
+                - message: TargetVRF is only supported for None protocol
+                  rule: (!has(self.protocol) && !has(self.targetVRF)) || (has(self.protocol)
+                    && ((self.protocol == 'Geneve' && !has(self.targetVRF)) || self.protocol
+                    == 'None'))
             required:
             - topology
             type: object
