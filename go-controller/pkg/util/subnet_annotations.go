@@ -1,12 +1,14 @@
 package util
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net"
 
 	kapi "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/klog/v2"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -137,6 +139,20 @@ func parseSubnetAnnotation(nodeAnnotations map[string]string, annotationName str
 
 func NodeSubnetAnnotationChanged(oldNode, newNode *v1.Node) bool {
 	return oldNode.Annotations[ovnNodeSubnets] != newNode.Annotations[ovnNodeSubnets]
+}
+
+func NodeSubnetAnnotationChangedForNetwork(oldNode, newNode *v1.Node, netName string) bool {
+	var oldSubnets, newSubnets map[string]json.RawMessage
+
+	if err := json.Unmarshal([]byte(oldNode.Annotations[ovnNodeSubnets]), &oldSubnets); err != nil {
+		klog.Errorf("Failed to unmarshal old node %s annotation: %v", oldNode.Name, err)
+		return true
+	}
+	if err := json.Unmarshal([]byte(newNode.Annotations[ovnNodeSubnets]), &newSubnets); err != nil {
+		klog.Errorf("Failed to unmarshal new node %s annotation: %v", newNode.Name, err)
+		return true
+	}
+	return !bytes.Equal(oldSubnets[netName], newSubnets[netName])
 }
 
 // UpdateNodeHostSubnetAnnotation updates a "k8s.ovn.org/node-subnets" annotation for network "netName",
