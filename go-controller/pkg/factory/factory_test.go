@@ -716,6 +716,7 @@ var _ = Describe("Watch Factory Operations", func() {
 					UpdateFunc: func(old, new interface{}) {},
 					DeleteFunc: func(obj interface{}) {},
 				}, nil, wf.GetHandlerPriority(objType))
+			Eventually(h.NumberOfProcessedItems).Should(Equal(2))
 			Expect(int(addCalls)).To(Equal(2))
 			Expect(err).NotTo(HaveOccurred())
 			wf.removeHandler(objType, h)

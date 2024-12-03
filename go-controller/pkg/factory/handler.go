@@ -48,6 +48,19 @@ type Handler struct {
 	// example: a handler with priority 0 will process the received event first
 	// before a handler with priority 1.
 	priority int
+
+	// processedInitialAdd used to determine if this handler has ever processed this object
+	// before attempting to handle any deletes/updates
+	processedInitialAdd *sync.Map
+}
+
+func (h *Handler) NumberOfProcessedItems() int {
+	count := 0
+	h.processedInitialAdd.Range(func(key, value interface{}) bool {
+		count++
+		return true
+	})
+	return count
 }
 
 func (h *Handler) OnAdd(obj interface{}, isInInitialList bool) {
@@ -96,6 +109,7 @@ type queueMapEntry struct {
 }
 
 type informer struct {
+	// informer mutex is used to control the flow of enqueuing events
 	sync.RWMutex
 	oType reflect.Type
 	inf   cache.SharedIndexInformer
@@ -110,16 +124,18 @@ type informer struct {
 	// when a handler is added
 	initialAddFunc initialAddFn
 	shutdownWg     sync.WaitGroup
+	//handlerMutex is used to control the worker threads while adding/removing handlers
+	handlerMutex sync.RWMutex
 
 	// queueMap handles distributing events across a queued handler's queues
 	queueMap *queueMap
 }
 
 func (i *informer) forEachQueuedHandler(f func(h *Handler)) {
-	i.RLock()
-	defer i.RUnlock()
+	i.handlerMutex.RLock()
+	defer i.handlerMutex.RUnlock()
 
-	for priority := 0; priority <= minHandlerPriority; priority++ { // loop over priority higest to lowest
+	for priority := 0; priority <= minHandlerPriority; priority++ { // loop over priority highest to lowest
 		for _, handler := range i.handlers[priority] {
 			f(handler)
 		}
@@ -127,8 +143,8 @@ func (i *informer) forEachQueuedHandler(f func(h *Handler)) {
 }
 
 func (i *informer) forEachQueuedHandlerReversed(f func(h *Handler)) {
-	i.RLock()
-	defer i.RUnlock()
+	i.handlerMutex.RLock()
+	defer i.handlerMutex.RUnlock()
 
 	for priority := minHandlerPriority; priority >= 0; priority-- { // loop over priority lowest to highest
 		for _, handler := range i.handlers[priority] {
@@ -137,40 +153,8 @@ func (i *informer) forEachQueuedHandlerReversed(f func(h *Handler)) {
 	}
 }
 
-func (i *informer) forEachHandler(obj interface{}, f func(h *Handler)) {
-	i.RLock()
-	defer i.RUnlock()
-
-	objType := reflect.TypeOf(obj)
-	if objType != i.oType {
-		klog.Errorf("Object type %v did not match expected %v", objType, i.oType)
-		return
-	}
-
-	for priority := 0; priority <= minHandlerPriority; priority++ { // loop over priority higest to lowest
-		for _, handler := range i.handlers[priority] {
-			f(handler)
-		}
-	}
-}
-
-func (i *informer) forEachHandlerReversed(obj interface{}, f func(h *Handler)) {
-	i.RLock()
-	defer i.RUnlock()
-
-	objType := reflect.TypeOf(obj)
-	if objType != i.oType {
-		klog.Errorf("Object type %v did not match expected %v", objType, i.oType)
-		return
-	}
-
-	for priority := minHandlerPriority; priority >= 0; priority-- { // loop over priority lowest to highest
-		for _, handler := range i.handlers[priority] {
-			f(handler)
-		}
-	}
-}
-
+// addHandler should always be called with informer lock to protect the shared informer from enqueuing events
+// while processing initial adds (enqueuing initial adds)
 func (i *informer) addHandler(id uint64, priority int, filterFunc func(obj interface{}) bool, funcs cache.ResourceEventHandler, existingItems []interface{}) *Handler {
 	handler := &Handler{
 		cache.FilteringResourceEventHandler{
@@ -180,13 +164,18 @@ func (i *informer) addHandler(id uint64, priority int, filterFunc func(obj inter
 		id,
 		handlerAlive,
 		priority,
+		&sync.Map{},
 	}
 
 	// Send existing items to the handler's add function; informers usually
 	// do this but since we share informers, it's long-since happened so
 	// we must emulate that here
+	// workers do not stop processing while we are adding initial objects to the queue
 	i.initialAddFunc(handler, existingItems)
 
+	// lock handlers+workers to update them
+	i.handlerMutex.Lock()
+	defer i.handlerMutex.Unlock()
 	_, ok := i.handlers[priority]
 	if !ok {
 		i.handlers[priority] = make(map[uint64]*Handler)
@@ -205,8 +194,8 @@ func (i *informer) removeHandler(handler *Handler) {
 	klog.V(5).Infof("Sending %v event handler %d for removal", i.oType, handler.id)
 
 	go func() {
-		i.Lock()
-		defer i.Unlock()
+		i.handlerMutex.Lock()
+		defer i.handlerMutex.Unlock()
 		removed := 0
 		for priority := range i.handlers { // loop over priority
 			if _, ok := i.handlers[priority]; !ok {
@@ -233,7 +222,16 @@ func newQueueMap(numEventQueues uint32, wg *sync.WaitGroup, stopChan chan struct
 		stopChan: stopChan,
 	}
 	for j := 0; j < int(numEventQueues); j++ {
-		qm.queues[j] = make(chan *event, 10)
+		// TODO(trozet): tweak this later
+		// we are constrained by how fast the worker threads can pull work off the queue before we can add more items
+		// into the queue. This becomes a sensitive area when we want to enqueue all initial objects. If the capacity is
+		// too low, we are worker thread bound to be able to add more objects for initial add. If the number is too high,
+		// we are consuming too much memory.
+		//
+		// If the overall workers are too slow to keep up with the rate of adds, it will still take just as long to process
+		// all the work. However, the add handler with initial objects will finish faster with a larger queue, and then
+		// other handlers can be added without waiting.
+		qm.queues[j] = make(chan *event, 10000)
 	}
 	return qm
 }
@@ -260,18 +258,14 @@ func (qm *queueMap) start() {
 	}
 }
 
-func (qm *queueMap) shutdown() {
-	// Close all the event channels
-	for _, q := range qm.queues {
-		close(q)
-	}
-}
-
 // getNewQueueNum finds and returns the index of the queue with the lowest
 // number of items
 func (qm *queueMap) getNewQueueNum() uint32 {
 	var j, startIdx, queueIdx uint32
 	numEventQueues := uint32(len(qm.queues))
+	if numEventQueues == 1 {
+		return 0
+	}
 	startIdx = uint32(cryptorand.Intn(int64(numEventQueues - 1)))
 	queueIdx = startIdx
 	lowestNum := len(qm.queues[startIdx])
@@ -357,6 +351,10 @@ func (qm *queueMap) releaseQueueMapEntry(key ktypes.NamespacedName, entry *queue
 // enqueueEvent adds an event to the appropriate queue for the object
 func (qm *queueMap) enqueueEvent(oldObj, obj interface{}, oType reflect.Type, isDel bool, processFunc func(*event)) {
 	key, entry := qm.getQueueMapEntry(oType, obj)
+	if entry == nil {
+		klog.Errorf("Will not enqueue object with no metadata: %#v", obj)
+		return
+	}
 	event := &event{
 		obj:    obj,
 		oldObj: oldObj,
@@ -370,6 +368,13 @@ func (qm *queueMap) enqueueEvent(oldObj, obj interface{}, oType reflect.Type, is
 	case <-qm.stopChan:
 		return
 	}
+}
+
+// enqueueEventWithLock adds an event to the appropriate queue for the object while obtaining read lock on the informer
+func (i *informer) enqueueEventWithLock(oldObj, obj interface{}, oType reflect.Type, isDel bool, processFunc func(*event)) {
+	i.RLock()
+	defer i.RUnlock()
+	i.queueMap.enqueueEvent(oldObj, obj, oType, isDel, processFunc)
 }
 
 func ensureObjectOnDelete(obj interface{}, expectedType reflect.Type) (interface{}, error) {
@@ -388,32 +393,52 @@ func ensureObjectOnDelete(obj interface{}, expectedType reflect.Type) (interface
 	return obj, nil
 }
 
-func (i *informer) newFederatedQueuedHandler(numEventQueues uint32) cache.ResourceEventHandlerFuncs {
+func (i *informer) newFederatedQueuedHandler() cache.ResourceEventHandlerFuncs {
 	name := i.oType.Elem().Name()
 	return cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
-			i.queueMap.enqueueEvent(nil, obj, i.oType, false, func(e *event) {
+			objMeta, err := getObjectMeta(i.oType, obj)
+			if err != nil {
+				panic(err)
+			}
+			namespacedName := ktypes.NamespacedName{Namespace: objMeta.GetNamespace(), Name: objMeta.GetName()}
+			i.enqueueEventWithLock(nil, obj, i.oType, false, func(e *event) {
 				metrics.MetricResourceUpdateCount.WithLabelValues(name, "add").Inc()
 				start := time.Now()
 				i.forEachQueuedHandler(func(h *Handler) {
+					if _, ok := h.processedInitialAdd.Load(namespacedName); ok {
+						// have already processed this item before, ignoring
+						return
+					}
 					h.OnAdd(e.obj, false)
+					h.processedInitialAdd.Store(namespacedName, true)
 				})
 				metrics.MetricResourceAddLatency.Observe(time.Since(start).Seconds())
 			})
 		},
 		UpdateFunc: func(oldObj, newObj interface{}) {
-			i.queueMap.enqueueEvent(oldObj, newObj, i.oType, false, func(e *event) {
+			i.enqueueEventWithLock(oldObj, newObj, i.oType, false, func(e *event) {
 				metrics.MetricResourceUpdateCount.WithLabelValues(name, "update").Inc()
 				start := time.Now()
+				old := oldObj.(metav1.Object)
+				new := newObj.(metav1.Object)
+				objMeta, err := getObjectMeta(i.oType, new)
+				if err != nil {
+					panic(err)
+				}
+				namespacedName := ktypes.NamespacedName{Namespace: objMeta.GetNamespace(), Name: objMeta.GetName()}
 				i.forEachQueuedHandler(func(h *Handler) {
-					old := oldObj.(metav1.Object)
-					new := newObj.(metav1.Object)
 					if old.GetUID() != new.GetUID() {
-						// This occurs not so often, so log this occurance.
+						// This occurs not so often, so log this occurrence.
 						klog.Infof("Object %s/%s is replaced, invoking delete followed by add handler", new.GetNamespace(), new.GetName())
 						h.OnDelete(e.oldObj)
 						h.OnAdd(e.obj, false)
+						h.processedInitialAdd.Store(namespacedName, true)
 					} else {
+						if _, ok := h.processedInitialAdd.Load(namespacedName); !ok {
+							// have not seen this object before on this handler, ignoring
+							return
+						}
 						h.OnUpdate(e.oldObj, e.obj)
 					}
 				})
@@ -426,58 +451,25 @@ func (i *informer) newFederatedQueuedHandler(numEventQueues uint32) cache.Resour
 				klog.Errorf(err.Error())
 				return
 			}
-			i.queueMap.enqueueEvent(nil, realObj, i.oType, true, func(e *event) {
+			i.enqueueEventWithLock(nil, realObj, i.oType, true, func(e *event) {
 				metrics.MetricResourceUpdateCount.WithLabelValues(name, "delete").Inc()
 				start := time.Now()
+				objMeta, err := getObjectMeta(i.oType, realObj)
+				if err != nil {
+					panic(err)
+				}
+				namespacedName := ktypes.NamespacedName{Namespace: objMeta.GetNamespace(), Name: objMeta.GetName()}
 				i.forEachQueuedHandlerReversed(func(h *Handler) {
+					if _, ok := h.processedInitialAdd.Load(namespacedName); !ok {
+						// have not seen this object before on this handler, ignoring
+						return
+					}
 					h.OnDelete(e.obj)
+					// remove from processedInitialAdd
+					h.processedInitialAdd.Delete(namespacedName)
 				})
 				metrics.MetricResourceDeleteLatency.Observe(time.Since(start).Seconds())
 			})
-		},
-	}
-}
-
-func (i *informer) newFederatedHandler() cache.ResourceEventHandlerFuncs {
-	name := i.oType.Elem().Name()
-	return cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
-			metrics.MetricResourceUpdateCount.WithLabelValues(name, "add").Inc()
-			start := time.Now()
-			i.forEachHandler(obj, func(h *Handler) {
-				h.OnAdd(obj, false)
-			})
-			metrics.MetricResourceAddLatency.Observe(time.Since(start).Seconds())
-		},
-		UpdateFunc: func(oldObj, newObj interface{}) {
-			metrics.MetricResourceUpdateCount.WithLabelValues(name, "update").Inc()
-			start := time.Now()
-			i.forEachHandler(newObj, func(h *Handler) {
-				old := oldObj.(metav1.Object)
-				new := newObj.(metav1.Object)
-				if old.GetUID() != new.GetUID() {
-					// This occurs not so often, so log this occurance.
-					klog.Infof("Object %s/%s is replaced, invoking delete followed by add handler", new.GetNamespace(), new.GetName())
-					h.OnDelete(oldObj)
-					h.OnAdd(newObj, false)
-				} else {
-					h.OnUpdate(oldObj, newObj)
-				}
-			})
-			metrics.MetricResourceUpdateLatency.Observe(time.Since(start).Seconds())
-		},
-		DeleteFunc: func(obj interface{}) {
-			realObj, err := ensureObjectOnDelete(obj, i.oType)
-			if err != nil {
-				klog.Errorf(err.Error())
-				return
-			}
-			metrics.MetricResourceUpdateCount.WithLabelValues(name, "delete").Inc()
-			start := time.Now()
-			i.forEachHandlerReversed(realObj, func(h *Handler) {
-				h.OnDelete(realObj)
-			})
-			metrics.MetricResourceDeleteLatency.Observe(time.Since(start).Seconds())
 		},
 	}
 }
@@ -550,29 +542,12 @@ func newBaseInformer(oType reflect.Type, sharedInformer cache.SharedIndexInforme
 	}
 
 	return &informer{
-		oType:    oType,
-		inf:      sharedInformer,
-		lister:   lister,
-		handlers: make(map[int]map[uint64]*Handler),
+		oType:        oType,
+		inf:          sharedInformer,
+		lister:       lister,
+		handlers:     make(map[int]map[uint64]*Handler),
+		handlerMutex: sync.RWMutex{},
 	}, nil
-}
-
-func newInformer(oType reflect.Type, sharedInformer cache.SharedIndexInformer) (*informer, error) {
-	i, err := newBaseInformer(oType, sharedInformer)
-	if err != nil {
-		return nil, err
-	}
-	i.initialAddFunc = func(h *Handler, items []interface{}) {
-		for _, item := range items {
-			h.OnAdd(item, false)
-		}
-	}
-	_, err = i.inf.AddEventHandler(i.newFederatedHandler())
-	if err != nil {
-		return nil, err
-	}
-	return i, nil
-
 }
 
 func newQueuedInformer(oType reflect.Type, sharedInformer cache.SharedIndexInformer,
@@ -585,28 +560,27 @@ func newQueuedInformer(oType reflect.Type, sharedInformer cache.SharedIndexInfor
 	i.queueMap.start()
 
 	i.initialAddFunc = func(h *Handler, items []interface{}) {
-		// Make a handler-specific channel array across which the
-		// initial add events will be distributed. When a new handler
-		// is added, only that handler should receive events for all
-		// existing objects.
-		addsWg := &sync.WaitGroup{}
-		addsMap := newQueueMap(numEventQueues, addsWg, stopChan)
-		addsMap.start()
-
 		// Distribute the existing items into the handler-specific
 		// channel array.
 		for _, obj := range items {
-			addsMap.enqueueEvent(nil, obj, i.oType, false, func(e *event) {
+			objMeta, err := getObjectMeta(i.oType, obj)
+			if err != nil {
+				panic(err)
+			}
+			namespacedName := ktypes.NamespacedName{Namespace: objMeta.GetNamespace(), Name: objMeta.GetName()}
+			// we enqueue events on initial add directly, since on initial add we are holding informer lock
+			i.queueMap.enqueueEvent(nil, obj, i.oType, false, func(e *event) {
+				if _, ok := h.processedInitialAdd.Load(namespacedName); ok {
+					// ignore if we already processed add for this handler
+					return
+				}
 				h.OnAdd(e.obj, false)
+				h.processedInitialAdd.Store(namespacedName, true)
 			})
 		}
-
-		// Wait until all the object additions have been processed
-		addsMap.shutdown()
-		addsWg.Wait()
 	}
 
-	_, err = i.inf.AddEventHandler(i.newFederatedQueuedHandler(numEventQueues))
+	_, err = i.inf.AddEventHandler(i.newFederatedQueuedHandler())
 	if err != nil {
 		return nil, err
 	}
