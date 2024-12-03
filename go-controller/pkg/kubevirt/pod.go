@@ -353,6 +353,11 @@ func IsPodOwnedByVirtualMachine(pod *corev1.Pod) bool {
 	return ExtractVMNameFromPod(pod) != nil
 }
 
+// IsPodAllowedForMigration determines whether a given pod is eligible for live migration
+func IsPodAllowedForMigration(pod *corev1.Pod, netInfo util.NetInfo) bool {
+	return IsPodOwnedByVirtualMachine(pod) && netInfo.TopologyType() == ovntypes.Layer2Topology
+}
+
 func isTargetPodReady(targetPod *corev1.Pod) bool {
 	if targetPod == nil {
 		return false
@@ -406,6 +411,11 @@ type LiveMigrationStatus struct {
 	SourcePod *corev1.Pod        // SourcePod is the original pod.
 	TargetPod *corev1.Pod        // TargetPod is the destination pod.
 	State     LiveMigrationState // State is the current state of the live migration.
+}
+
+// IsTargetDomainReady returns true if the target domain in the live migration process is ready.
+func (lm LiveMigrationStatus) IsTargetDomainReady() bool {
+	return lm.State == LiveMigrationTargetDomainReady
 }
 
 // DiscoverLiveMigrationStatus determines the status of a live migration for a given pod.
