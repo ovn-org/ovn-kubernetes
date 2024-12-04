@@ -298,7 +298,7 @@ func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, netInf
 				masqueradeSubnet = config.Gateway.V6MasqueradeSubnet
 			}
 			// table 2, user-defined network host -> OVN towards default cluster network services
-			defaultNetConfig := npw.ofm.defaultBridge.netConfig[types.DefaultNetworkName]
+			defaultNetConfig := npw.ofm.defaultBridge.getActiveNetworkBridgeConfig(types.DefaultNetworkName)
 
 			npw.ofm.updateFlowCacheEntry(key, []string{fmt.Sprintf("cookie=%s, priority=300, table=2, %s, %s_src=%s, %s_dst=%s, "+
 				"actions=set_field:%s->eth_dst,output:%s",
