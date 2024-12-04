@@ -756,10 +756,17 @@ var _ = Describe("Multi Homing", func() {
 				Context("and networkAttachmentDefinition is modified", func() {
 					const (
 						newMtu                    = 1600
+						newDesiredRange           = "60.128.0.192/28"
+						excludedSubnetLowerRange1 = "60.128.0.0/25"   // Excludes IPs from 60.128.0.0 to 60.128.0.127
+						excludedSubnetLowerRange2 = "60.128.0.128/26" // Excludes IPs from 60.128.0.128 to 60.128.0.191
+						excludedSubnetUpperRange1 = "60.128.0.208/28" // Excludes IPs from 60.128.0.208 to 60.128.0.223
+						excludedSubnetUpperRange2 = "60.128.0.224/27" // Excludes IPs from 60.128.0.224 to 60.128.0.255
 					)
 					BeforeEach(func() {
 						By("setting new MTU")
 						netConfig.mtu = newMtu
+						By("setting new subnets to leave a smaller range")
+						netConfig.excludeCIDRs = []string{excludedSubnetLowerRange1, excludedSubnetLowerRange2, excludedSubnetUpperRange1, excludedSubnetUpperRange2}
 						p := []byte(fmt.Sprintf(`[{"op":"replace","path":"/spec/config","value":%q}]`, generateNADSpec(netConfig)))
 						_, err := nadClient.NetworkAttachmentDefinitions(netConfig.namespace).Patch(
 							context.Background(),
@@ -783,6 +790,19 @@ var _ = Describe("Multi Homing", func() {
 						Eventually(checkMTU(clientPodConfig, newMtu)).Should(Succeed())
 					})
 
+					It("allocates the pod's secondary interface IP in the new range after NetworkAttachmentDefinition reconcile", func() {
+						clientPodConfig := podConfiguration{
+							name:        clientPodName,
+							namespace:   f.Namespace.Name,
+							attachments: []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
+						}
+						kickstartPod(cs, clientPodConfig)
+
+						By("asserting the pod's secondary interface IP is properly configured")
+						clientIP, err := podIPForAttachment(cs, clientPodConfig.namespace, clientPodConfig.name, netConfig.name, 0)
+						Expect(err).NotTo(HaveOccurred())
+						Expect(inRange(newDesiredRange, clientIP)).To(Succeed())
+					})
 				Context("with multi network policy blocking the traffic", func() {
 					var clientPodConfig podConfiguration
 					labels := map[string]string{"name": "access-control"}
