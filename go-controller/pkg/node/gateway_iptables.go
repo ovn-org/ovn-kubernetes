@@ -458,15 +458,18 @@ func getUDNMasqueradeRules(protocol iptables.Protocol) []nodeipt.Rule {
 	// NOTE: Ordering is important here, the RETURN must come before
 	// the MASQUERADE rule. Please don't change the ordering.
 	srcUDNMasqueradePrefix := config.Gateway.V4MasqueradeSubnet
-	// defaultNetworkReservedMasqueradePrefix contains the first 6IPs in the masquerade
-	// range that shouldn't be MASQUERADED. Hence /29 and /125 is intentionally hardcoded here
-	defaultNetworkReservedMasqueradePrefix := config.Gateway.MasqueradeIPs.V4HostMasqueradeIP.String() + "/29"
 	ipFamily := utilnet.IPv4
 	if protocol == iptables.ProtocolIPv6 {
 		srcUDNMasqueradePrefix = config.Gateway.V6MasqueradeSubnet
-		defaultNetworkReservedMasqueradePrefix = config.Gateway.MasqueradeIPs.V6HostMasqueradeIP.String() + "/125"
 		ipFamily = utilnet.IPv6
 	}
+	// defaultNetworkReservedMasqueradePrefix contains the first 6 IPs in the
+	// masquerade range that shouldn't be masqueraded. Hence it's always 3 bits (8
+	// IPs) wide, regardless of IP family.
+	_, ipnet, _ := net.ParseCIDR(srcUDNMasqueradePrefix)
+	_, len := ipnet.Mask.Size()
+	defaultNetworkReservedMasqueradePrefix := fmt.Sprintf("%s/%d", ipnet.IP.String(), len-3)
+
 	rules := []nodeipt.Rule{
 		{
 			Table:    "nat",
