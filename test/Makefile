@@ -45,3 +45,8 @@ conformance:
 .PHONY: tools
 tools:
 	./scripts/test-ovnkube-trace.sh
+
+.PHONY: traffic-flow-tests
+traffic-flow-tests:
+	TRAFFIC_FLOW_TESTS=$(TRAFFIC_FLOW_TESTS) \
+	./scripts/traffic-flow-tests.sh $(WHAT)
