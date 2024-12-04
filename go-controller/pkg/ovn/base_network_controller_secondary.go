@@ -231,7 +231,7 @@ func (bsnc *BaseSecondaryNetworkController) ensurePodForSecondaryNetwork(pod *ka
 		return nil
 	}
 
-	if util.PodWantsHostNetwork(pod) && !addPort {
+	if util.PodWantsHostNetwork(pod) || !addPort {
 		return nil
 	}
 
