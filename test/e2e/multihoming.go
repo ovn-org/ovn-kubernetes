@@ -754,11 +754,18 @@ var _ = Describe("Multi Homing", func() {
 
 				Context("and networkAttachmentDefinition is modified", func() {
 					const (
-						expectedChangedMTU = 1600
+						expectedChangedMTU        = 1600
+						newDesiredRange           = "60.128.0.192/28" // Desired IPs from 60.128.0.192 to 60.128.0.207
+						excludedSubnetLowerRange1 = "60.128.0.0/25"   // Excludes IPs from 60.128.0.0 to 60.128.0.127
+						excludedSubnetLowerRange2 = "60.128.0.128/26" // Excludes IPs from 60.128.0.128 to 60.128.0.191
+						excludedSubnetUpperRange1 = "60.128.0.208/28" // Excludes IPs from 60.128.0.208 to 60.128.0.223
+						excludedSubnetUpperRange2 = "60.128.0.224/27" // Excludes IPs from 60.128.0.224 to 60.128.0.255
 					)
 					BeforeEach(func() {
 						By("setting new MTU")
 						netConfig.mtu = expectedChangedMTU
+						By("setting new subnets to leave a smaller range")
+						netConfig.excludeCIDRs = []string{excludedSubnetLowerRange1, excludedSubnetLowerRange2, excludedSubnetUpperRange1, excludedSubnetUpperRange2}
 						p := []byte(fmt.Sprintf(`[{"op":"replace","path":"/spec/config","value":%q}]`, generateNADSpec(netConfig)))
 						Expect(patchNADSpec(nadClient, netConfig.name, netConfig.namespace, p)).To(Succeed())
 					})
@@ -773,6 +780,22 @@ var _ = Describe("Multi Homing", func() {
 
 						By("asserting the pod's MTU is properly configured")
 						Eventually(getSecondaryInterfaceMTU).WithArguments(clientPodConfig).Should(Equal(expectedChangedMTU), "pod's MTU is properly configured")
+					})
+
+					It("allocates the pod's secondary interface IP in the new range after NetworkAttachmentDefinition reconcile", func() {
+						By("asserting the pod's secondary interface IP is properly configured")
+						Eventually(func() error {
+							clientPodConfig := podConfiguration{
+								name:        clientPodName + "-" + randStr(10),
+								namespace:   f.Namespace.Name,
+								attachments: []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
+							}
+							kickstartPod(cs, clientPodConfig)
+
+							clientIP, err := podIPForAttachment(cs, clientPodConfig.namespace, clientPodConfig.name, netConfig.name, 0)
+							Expect(err).NotTo(HaveOccurred())
+							return inRange(newDesiredRange, clientIP)
+						}).Should(Succeed(), "pod's secondary NIC is not allocated in the desired range")
 					})
 				})
 
