@@ -97,6 +97,8 @@ fi
 # OVN_ENABLE_SVC_TEMPLATE_SUPPORT - enable svc template support
 # OVN_ENABLE_DNSNAMERESOLVER - enable dns name resolver support
 # OVN_OBSERV_ENABLE - enable observability for ovnkube
+# OVN_UDN_ALLOWED_DEFAULT_SERVICES - list of default cluster network services accessible from primary UDN
+# OVS_DB_TRANSACTION_TIMEOUT - timeout for OVSDB transaction, in seconds
 
 # The argument to the command is the operation to be performed
 # ovn-master ovn-controller ovn-node display display_env ovn_debug
@@ -252,7 +254,7 @@ ovn_enable_lflow_cache=${OVN_ENABLE_LFLOW_CACHE:-}
 ovn_lflow_cache_limit=${OVN_LFLOW_CACHE_LIMIT:-}
 ovn_lflow_cache_limit_kb=${OVN_LFLOW_CACHE_LIMIT_KB:-}
 ovn_multicast_enable=${OVN_MULTICAST_ENABLE:-}
-ovn_admin_network_policy_enable=${OVN_ADMIN_NETWORK_POLICY_ENABLE:=false}
+ovn_admin_network_policy_enable=${OVN_ADMIN_NETWORK_POLICY_ENABLE:-false}
 #OVN_EGRESSIP_ENABLE - enable egress IP for ovn-kubernetes
 ovn_egressip_enable=${OVN_EGRESSIP_ENABLE:-false}
 #OVN_EGRESSIP_HEALTHCHECK_PORT - egress IP node check to use grpc on this port
@@ -318,6 +320,10 @@ ovn_nohostsubnet_label=${OVN_NOHOSTSUBNET_LABEL:-""}
 # OVN_DISABLE_REQUESTEDCHASSIS - disable requested-chassis option during pod creation
 # should be set to true when dpu nodes are in the cluster
 ovn_disable_requestedchassis=${OVN_DISABLE_REQUESTEDCHASSIS:-false}
+# OVN_UDN_ALLOWED_DEFAULT_SERVICES - list of default cluster network services accessible from primary UDN
+ovn_udn_allowed_default_services=${OVN_UDN_ALLOWED_DEFAULT_SERVICES:-"default/kubernetes,kube-system/kube-dns"}
+# OVS_DB_TRANSACTION_TIMEOUT - timeout for OVSDB transaction, in seconds
+ovs_db_transaction_timeout=${OVS_DB_TRANSACTION_TIMEOUT:-100}
 
 # Determine the ovn rundir.
 if [[ -f /usr/bin/ovn-appctl ]]; then
@@ -1305,6 +1311,12 @@ ovn-master() {
   fi
   echo "ovn_enable_dnsnameresolver_flag=${ovn_enable_dnsnameresolver_flag}"
 
+  ovn_udn_allowed_default_services_flag="--udn-allowed-default-services=${ovn_udn_allowed_default_services}"
+  echo "ovn_udn_allowed_default_services_flag=${ovn_udn_allowed_default_services_flag}"
+
+  ovs_db_transaction_timeout_flag="--db-txn-timeout=${ovs_db_transaction_timeout}s"
+  echo "ovs_db_transaction_timeout_flag=${ovs_db_transaction_timeout_flag}"
+
   /usr/bin/ovnkube --init-master ${K8S_NODE} \
     ${anp_enabled_flag} \
     ${disable_forwarding_flag} \
@@ -1330,10 +1342,12 @@ ovn-master() {
     ${ovnkube_metrics_tls_opts} \
     ${ovn_master_ssl_opts} \
     ${ovn_stateless_netpol_enable_flag} \
+    ${ovn_udn_allowed_default_services_flag} \
     ${ovn_v4_join_subnet_opt} \
     ${ovn_v4_masquerade_subnet_opt} \
     ${ovn_v6_join_subnet_opt} \
     ${ovn_v6_masquerade_subnet_opt} \
+    ${ovs_db_transaction_timeout_flag} \
     ${persistent_ips_enabled_flag} \
     ${ovn_enable_dnsnameresolver_flag} \
     ${nohostsubnet_label_option} \
@@ -1595,6 +1609,12 @@ ovnkube-controller() {
   fi
   echo "ovn_observ_enable_flag=${ovn_observ_enable_flag}"
 
+  ovn_udn_allowed_default_services_flag="--udn-allowed-default-services=${ovn_udn_allowed_default_services}"
+  echo "ovn_udn_allowed_default_services_flag=${ovn_udn_allowed_default_services_flag}"
+
+  ovs_db_transaction_timeout_flag="--db-txn-timeout=${ovs_db_transaction_timeout}s"
+  echo "ovs_db_transaction_timeout_flag=${ovs_db_transaction_timeout_flag}"
+
   echo "=============== ovnkube-controller ========== MASTER ONLY"
   /usr/bin/ovnkube --init-ovnkube-controller ${K8S_NODE} \
     ${anp_enabled_flag} \
@@ -1622,11 +1642,13 @@ ovnkube-controller() {
     ${ovnkube_metrics_tls_opts} \
     ${ovn_encap_port_flag} \
     ${ovn_master_ssl_opts} \
+    ${ovn_udn_allowed_default_services_flag} \
     ${ovn_v4_join_subnet_opt} \
     ${ovn_v4_masquerade_subnet_opt} \
     ${ovn_v6_join_subnet_opt} \
     ${ovn_v6_masquerade_subnet_opt} \
     ${ovn_enable_dnsnameresolver_flag} \
+    ${ovs_db_transaction_timeout_flag} \
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
     --gateway-mode=${ovn_gateway_mode} \
     --host-network-namespace ${ovn_host_network_namespace} \
@@ -2001,6 +2023,12 @@ ovnkube-controller-with-node() {
   fi
   echo "ovn_observ_enable_flag=${ovn_observ_enable_flag}"
 
+  ovn_udn_allowed_default_services_flag="--udn-allowed-default-services=${ovn_udn_allowed_default_services}"
+  echo "ovn_udn_allowed_default_services_flag=${ovn_udn_allowed_default_services_flag}"
+
+  ovs_db_transaction_timeout_flag="--db-txn-timeout=${ovs_db_transaction_timeout}s"
+  echo "ovs_db_transaction_timeout_flag=${ovs_db_transaction_timeout_flag}"
+
   echo "=============== ovnkube-controller-with-node --init-ovnkube-controller-with-node=========="
   /usr/bin/ovnkube --init-ovnkube-controller ${K8S_NODE} --init-node ${K8S_NODE} \
     ${anp_enabled_flag} \
@@ -2042,11 +2070,13 @@ ovnkube-controller-with-node() {
     ${ovnkube_metrics_tls_opts} \
     ${ovnkube_node_mgmt_port_netdev_flag} \
     ${ovnkube_node_mode_flag} \
+    ${ovn_udn_allowed_default_services_flag} \
     ${ovn_unprivileged_flag} \
     ${ovn_v4_join_subnet_opt} \
     ${ovn_v4_masquerade_subnet_opt} \
     ${ovn_v6_join_subnet_opt} \
     ${ovn_v6_masquerade_subnet_opt} \
+    ${ovs_db_transaction_timeout_flag} \
     ${routable_mtu_flag} \
     ${sflow_targets} \
     ${ssl_opts} \
@@ -2613,6 +2643,12 @@ ovn-node() {
     ovn_v6_masquerade_subnet_opt="--gateway-v6-masquerade-subnet=${ovn_v6_masquerade_subnet}"
   fi
 
+  ovn_udn_allowed_default_services_flag=""
+  if [[ ${ovnkube_node_mode} != "dpu-host" ]]; then
+    ovn_udn_allowed_default_services_flag="--udn-allowed-default-services=${ovn_udn_allowed_default_services}"
+    echo "ovn_udn_allowed_default_services_flag=${ovn_udn_allowed_default_services_flag}"
+  fi
+
   echo "=============== ovn-node   --init-node"
   /usr/bin/ovnkube --init-node ${K8S_NODE} \
         ${anp_enabled_flag} \
@@ -2649,6 +2685,7 @@ ovn-node() {
         ${ovnkube_node_mgmt_port_netdev_flag} \
         ${ovnkube_node_mode_flag} \
         ${ovn_node_ssl_opts} \
+	${ovn_udn_allowed_default_services_flag} \
         ${ovn_unprivileged_flag} \
         ${routable_mtu_flag} \
         ${sflow_targets} \

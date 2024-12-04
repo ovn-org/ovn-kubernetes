@@ -435,6 +435,10 @@ spec:
           value: {{ hasKey .Values.global "enableDNSNameResolver" | ternary .Values.global.enableDNSNameResolver false | quote }}
         - name: OVN_OBSERV_ENABLE
           value: {{ hasKey .Values.global "enableObservability" | ternary .Values.global.enableObservability false | quote }}
+        - name: OVN_UDN_ALLOWED_DEFAULT_SERVICES
+          value: {{ hasKey .Values.global "udnAllowedDefaultServices" | ternary .Values.global.udnAllowedDefaultServices "" | quote }}
+        - name: OVS_DB_TRANSACTION_TIMEOUT
+          value: {{ hasKey .Values.global "ovsdbTxnTimeout" | ternary .Values.global.ovsdbTxnTimeout "10" | quote }}
         readinessProbe:
           exec:
             command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovnkube-node"]
