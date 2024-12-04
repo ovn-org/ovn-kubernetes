@@ -84,11 +84,11 @@ func uniqueNadName(originalNetName string) string {
 	return fmt.Sprintf("%s_%s", rand.String(randomStringLength), originalNetName)
 }
 
-func generateNAD(config networkAttachmentConfig) *nadapi.NetworkAttachmentDefinition {
+func generateNADSpec(config networkAttachmentConfig) string {
 	if config.mtu == 0 {
 		config.mtu = 1300
 	}
-	nadSpec := fmt.Sprintf(
+	return fmt.Sprintf(
 		`
 {
         "cniVersion": "0.3.0",
@@ -116,6 +116,10 @@ func generateNAD(config networkAttachmentConfig) *nadapi.NetworkAttachmentDefini
 		config.physicalNetworkName,
 		config.role,
 	)
+}
+
+func generateNAD(config networkAttachmentConfig) *nadapi.NetworkAttachmentDefinition {
+	nadSpec := generateNADSpec(config)
 	return generateNetAttachDef(config.namespace, config.name, nadSpec)
 }
 
