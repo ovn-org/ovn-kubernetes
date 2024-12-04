@@ -267,11 +267,13 @@ func (udng *UserDefinedNetworkGateway) AddNetwork() error {
 		waiter := newStartupWaiterWithTimeout(waitForPatchPortTimeout)
 		readyFunc := func() (bool, error) {
 			if err := setBridgeNetworkOfPorts(udng.openflowManager.defaultBridge, udng.GetNetworkName()); err != nil {
-				return false, fmt.Errorf("failed to set network %s's openflow ports for default bridge; error: %v", udng.GetNetworkName(), err)
+				klog.V(3).Infof("Failed to set network %s's openflow ports for default bridge; error: %v", udng.GetNetworkName(), err)
+				return false, nil
 			}
 			if udng.openflowManager.externalGatewayBridge != nil {
 				if err := setBridgeNetworkOfPorts(udng.openflowManager.externalGatewayBridge, udng.GetNetworkName()); err != nil {
-					return false, fmt.Errorf("failed to set network %s's openflow ports for secondary bridge; error: %v", udng.GetNetworkName(), err)
+					klog.V(3).Infof("Failed to set network %s's openflow ports for secondary bridge; error: %v", udng.GetNetworkName(), err)
+					return false, nil
 				}
 			}
 			return true, nil
