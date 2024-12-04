@@ -6,6 +6,7 @@ import (
 	"net"
 	"strconv"
 	"sync"
+	"time"
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -1122,6 +1123,8 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 
 				// Close the watch factory and create a new one
 				f.Shutdown()
+				ginkgo.By("Finished shutting down old cluster manager and watch factory")
+
 				kubeFakeClient = fake.NewSimpleClientset(&v1.NodeList{
 					Items: updatedNodes,
 				})
@@ -1132,6 +1135,8 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = f.Start()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				ginkgo.By("Starting new cluster manager")
 
 				// Start a new cluster manager
 				cm2, err := NewClusterManager(fakeClient, f, "cm2", wg, nil)
@@ -1148,16 +1153,19 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 					}
 
 					node3UpdatedGWRPAnnotation := updatedNode.Annotations[util.OVNNodeGRLRPAddrs]
-					gomega.Expect(node3UpdatedGWRPAnnotation).NotTo(gomega.Equal(node3GWRPAnnotation))
+					if node3UpdatedGWRPAnnotation != node3GWRPAnnotation {
+						return fmt.Errorf("annotation: %s is not equal to %s", node3GWRPAnnotation, node3UpdatedGWRPAnnotation)
+					}
 
 					gwLRPAddrs, err := util.ParseNodeGatewayRouterJoinAddrs(updatedNode, types.DefaultNetworkName)
 					if err != nil {
 						return err
 					}
-					gomega.Expect(gwLRPAddrs).NotTo(gomega.BeNil())
-					gomega.Expect(len(gwLRPAddrs)).To(gomega.Equal(2))
+					if len(gwLRPAddrs) != 2 {
+						return fmt.Errorf("expected two gateway router addresses, got %d", len(gwLRPAddrs))
+					}
 					return nil
-				}).ShouldNot(gomega.HaveOccurred())
+				}, 5*time.Second, 100*time.Millisecond).ShouldNot(gomega.HaveOccurred())
 				return nil
 			}
 

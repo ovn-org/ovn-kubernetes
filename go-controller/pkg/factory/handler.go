@@ -477,6 +477,8 @@ func (i *informer) newFederatedQueuedHandler() cache.ResourceEventHandlerFuncs {
 func (i *informer) removeAllHandlers() {
 	i.Lock()
 	defer i.Unlock()
+	i.handlerMutex.Lock()
+	defer i.handlerMutex.Unlock()
 	for _, handlers := range i.handlers {
 		for _, handler := range handlers {
 			i.removeHandler(handler)
