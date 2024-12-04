@@ -74,6 +74,12 @@ type PodAnnotation struct {
 	// Gateways are the pod's gateway IP addresses; note that there may be
 	// fewer Gateways than IPs.
 	Gateways []net.IP
+
+	// IPv6LLAGateway are the pod's IPv6 link local address gateway, this is
+	// the address that will be set as gateway with router advertisements
+	// generated from the node's logical router where the pod is running on.
+	IPv6LLAGateway net.IP
+
 	// Routes are additional routes to add to the pod's network namespace
 	Routes []PodRoute
 
@@ -116,8 +122,9 @@ type podAnnotation struct {
 	Gateways []string   `json:"gateway_ips,omitempty"`
 	Routes   []podRoute `json:"routes,omitempty"`
 
-	IP      string `json:"ip_address,omitempty"`
-	Gateway string `json:"gateway_ip,omitempty"`
+	IP             string `json:"ip_address,omitempty"`
+	Gateway        string `json:"gateway_ip,omitempty"`
+	IPv6LLAGateway string `json:"ipv6_lla_gateway_ip,omitempty"`
 
 	TunnelID int    `json:"tunnel_id,omitempty"`
 	Role     string `json:"role,omitempty"`
@@ -191,6 +198,11 @@ func MarshalPodAnnotation(annotations map[string]string, podInfo *PodAnnotation,
 			NextHop: nh,
 		})
 	}
+
+	if podInfo.IPv6LLAGateway != nil {
+		pa.IPv6LLAGateway = podInfo.IPv6LLAGateway.String()
+	}
+
 	podNetworks[nadName] = pa
 	bytes, err := json.Marshal(podNetworks)
 	if err != nil {
@@ -279,6 +291,13 @@ func UnmarshalPodAnnotation(annotations map[string]string, nadName string) (*Pod
 			}
 		}
 		podAnnotation.Routes = append(podAnnotation.Routes, route)
+	}
+
+	if a.IPv6LLAGateway != "" {
+		podAnnotation.IPv6LLAGateway = net.ParseIP(a.IPv6LLAGateway)
+		if podAnnotation.IPv6LLAGateway == nil {
+			return nil, fmt.Errorf("failed to parse pod ipv6 lla gateway %q", a.IPv6LLAGateway)
+		}
 	}
 
 	return podAnnotation, nil

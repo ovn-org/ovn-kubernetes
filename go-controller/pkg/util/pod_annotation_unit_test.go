@@ -110,6 +110,13 @@ func TestMarshalPodAnnotation(t *testing.T) {
 			},
 			expectedOutput: map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":null,"mac_address":"","routes":[{"dest":"192.168.1.0/24","nextHop":""}]}}`},
 		},
+		{
+			desc: "ipv6 LLA gateway ip is set",
+			inpPodAnnot: PodAnnotation{
+				IPv6LLAGateway: ovntest.MustParseIP("fe80::"),
+			},
+			expectedOutput: map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":null,"mac_address":"","ipv6_lla_gateway_ip":"fe80::"}}`},
+		},
 	}
 
 	for i, tc := range tests {
@@ -210,6 +217,10 @@ func TestUnmarshalPodAnnotation(t *testing.T) {
 		{
 			desc:        "verify successful unmarshal of pod annotation when *only* the MAC address is present",
 			inpAnnotMap: map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"mac_address":"0a:58:fd:98:00:01"}}`},
+		},
+		{
+			desc:        "verify successful unmarshal of pod annotation with ipv6 lla gateway ip",
+			inpAnnotMap: map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"mac_address":"0a:58:fd:98:00:01","ipv6_lla_gateway_ip":"fe80::"}}`},
 		},
 	}
 	for i, tc := range tests {
