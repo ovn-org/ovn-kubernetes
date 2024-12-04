@@ -120,11 +120,11 @@ func (b *bridgeConfiguration) delNetworkBridgeConfig(nInfo util.NetInfo) {
 //
 // NOTE: if the network configuration can't be found or if the network is not patched by OVN
 // yet this returns nil.
-func (b *bridgeConfiguration) getActiveNetworkBridgeConfig(nInfo util.NetInfo) *bridgeUDNConfiguration {
+func (b *bridgeConfiguration) getActiveNetworkBridgeConfig(networkName string) *bridgeUDNConfiguration {
 	b.Lock()
 	defer b.Unlock()
 
-	if netConfig, found := b.netConfig[nInfo.GetNetworkName()]; found && netConfig.ofPortPatch != "" {
+	if netConfig, found := b.netConfig[networkName]; found && netConfig.ofPortPatch != "" {
 		result := *netConfig
 		return &result
 	}

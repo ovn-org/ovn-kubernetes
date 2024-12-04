@@ -55,7 +55,7 @@ func (c *openflowManager) delNetwork(nInfo util.NetInfo) {
 }
 
 func (c *openflowManager) getActiveNetwork(nInfo util.NetInfo) *bridgeUDNConfiguration {
-	return c.defaultBridge.getActiveNetworkBridgeConfig(nInfo)
+	return c.defaultBridge.getActiveNetworkBridgeConfig(nInfo.GetNetworkName())
 }
 
 // END UDN UTILs
