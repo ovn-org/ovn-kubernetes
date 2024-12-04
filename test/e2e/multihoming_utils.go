@@ -226,6 +226,50 @@ func connectToServer(clientPodConfig podConfiguration, serverIP string, port int
 	return err
 }
 
+func getMTUByInterfaceName(output, interfaceName string) (int, error) {
+	var ifaces []struct {
+		Name string `json:"ifname"`
+		Mtu  int    `json:"mtu"`
+	}
+
+	if err := json.Unmarshal([]byte(output), &ifaces); err != nil {
+		return 0, fmt.Errorf("%s: %v", output, err)
+	}
+
+	for _, iface := range ifaces {
+		if iface.Name == interfaceName {
+			return iface.Mtu, nil
+		}
+	}
+	return 0, fmt.Errorf("interface %s not found", interfaceName)
+}
+
+func checkMTU(clientPodConfig podConfiguration, expectedMTU int) error {
+	const secondaryInterfacePodName = "net1"
+	deviceInfoJSON, err := e2ekubectl.RunKubectl(
+		clientPodConfig.namespace,
+		"exec",
+		clientPodConfig.name,
+		"--",
+		"ip",
+		"-j",
+		"link",
+	)
+	if err != nil {
+		return err
+	}
+
+	mtu, err := getMTUByInterfaceName(deviceInfoJSON, secondaryInterfacePodName)
+	if err != nil {
+		return err
+	}
+
+	if mtu != expectedMTU {
+		return fmt.Errorf("expected mtu %d, got %d", expectedMTU, mtu)
+	}
+	return nil
+}
+
 func newAttachmentConfigWithOverriddenName(name, namespace, networkName, topology, cidr string) networkAttachmentConfig {
 	return newNetworkAttachmentConfig(
 		networkAttachmentConfigParams{

@@ -17,6 +17,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/kubernetes/test/e2e/framework"
 
@@ -649,6 +650,7 @@ var _ = Describe("Multi Homing", func() {
 				dockerNetworkName      = "underlay"
 				underlayServiceIP      = "60.128.0.1"
 				secondaryInterfaceName = "eth1"
+				mtu                    = 1200
 			)
 
 			var netConfig networkAttachmentConfig
@@ -667,6 +669,7 @@ var _ = Describe("Multi Homing", func() {
 							topology:     "localnet",
 							cidr:         secondaryLocalnetNetworkCIDR,
 							excludeCIDRs: []string{underlayServiceIP + "/32"},
+							mtu:          mtu,
 						})
 
 					By("setting up the localnet underlay")
@@ -726,6 +729,18 @@ var _ = Describe("Multi Homing", func() {
 					Expect(teardownUnderlay(nodes)).To(Succeed())
 				})
 
+				It("correctly sets the MTU on the pod", func() {
+					clientPodConfig := podConfiguration{
+						name:        clientPodName,
+						namespace:   f.Namespace.Name,
+						attachments: []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
+					}
+					kickstartPod(cs, clientPodConfig)
+
+					By("asserting the pod's MTU is properly configured")
+					Expect(checkMTU(clientPodConfig, mtu)).To(Succeed())
+				})
+
 				It("can communicate over a localnet secondary network from pod to the underlay service", func() {
 					clientPodConfig := podConfiguration{
 						name:        clientPodName,
@@ -737,6 +752,36 @@ var _ = Describe("Multi Homing", func() {
 					By("asserting the *client* pod can contact the underlay service")
 					Expect(connectToServer(clientPodConfig, underlayServiceIP, servicePort)).To(Succeed())
 				})
+
+				Context("and networkAttachmentDefinition is modified", func() {
+					const (
+						newMtu                    = 1600
+					)
+					BeforeEach(func() {
+						By("setting new MTU")
+						netConfig.mtu = newMtu
+						p := []byte(fmt.Sprintf(`[{"op":"replace","path":"/spec/config","value":%q}]`, generateNADSpec(netConfig)))
+						_, err := nadClient.NetworkAttachmentDefinitions(netConfig.namespace).Patch(
+							context.Background(),
+							netConfig.name,
+							types.JSONPatchType,
+							p,
+							metav1.PatchOptions{},
+						)
+						Expect(err).NotTo(HaveOccurred())
+					})
+
+					It("sets the new MTU on the pod after NetworkAttachmentDefinition reconcile", func() {
+						clientPodConfig := podConfiguration{
+							name:        clientPodName,
+							namespace:   f.Namespace.Name,
+							attachments: []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
+						}
+						kickstartPod(cs, clientPodConfig)
+
+						By("asserting the pod's MTU is properly configured")
+						Eventually(checkMTU(clientPodConfig, newMtu)).Should(Succeed())
+					})
 
 				Context("with multi network policy blocking the traffic", func() {
 					var clientPodConfig podConfiguration
