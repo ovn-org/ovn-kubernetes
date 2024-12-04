@@ -63,6 +63,29 @@ add set inet ovn-kubernetes mgmtport-no-snat-services-v4 { type ipv4_addr . inet
 add set inet ovn-kubernetes mgmtport-no-snat-services-v6 { type ipv6_addr . inet_proto . inet_service ; comment "eTP:Local short-circuit not subject to management port SNAT (IPv6)" ; }
 `
 
+// The base expected nftables rules with UDN enabled. You must substitute in the management port interface name.
+const baseUDNNFTRulesFmt = `
+add map inet ovn-kubernetes udn-mark-nodeports { type inet_proto . inet_service : verdict ; comment "UDN services NodePorts mark" ; }
+add map inet ovn-kubernetes udn-mark-external-ips-v4 { type ipv4_addr . inet_proto . inet_service : verdict ; comment "UDN services External IPs mark (IPv4)" ; }
+add map inet ovn-kubernetes udn-mark-external-ips-v6 { type ipv6_addr . inet_proto . inet_service : verdict ; comment "UDN services External IPs mark (IPv6)" ; }
+add chain inet ovn-kubernetes udn-service-mark { comment "UDN services packet mark" ; }
+add rule inet ovn-kubernetes udn-service-mark fib daddr type local meta l4proto . th dport vmap @udn-mark-nodeports
+add rule inet ovn-kubernetes udn-service-mark ip daddr . meta l4proto . th dport vmap @udn-mark-external-ips-v4
+add rule inet ovn-kubernetes udn-service-mark ip6 daddr . meta l4proto . th dport vmap @udn-mark-external-ips-v6
+add chain inet ovn-kubernetes udn-service-prerouting { type filter hook prerouting priority -150 ; comment "UDN services packet mark - Prerouting" ; }
+add rule inet ovn-kubernetes udn-service-prerouting iifname != %q jump udn-service-mark
+add chain inet ovn-kubernetes udn-service-output { type filter hook output priority -150 ; comment "UDN services packet mark - Output" ; }
+add rule inet ovn-kubernetes udn-service-output jump udn-service-mark
+`
+
+func getBaseNFTRules(mgmtPort string) string {
+	ret := fmt.Sprintf(baseNFTRulesFmt, mgmtPort)
+	if util.IsNetworkSegmentationSupportEnabled() {
+		ret += fmt.Sprintf(baseUDNNFTRulesFmt, mgmtPort)
+	}
+	return ret
+}
+
 func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 	eth0Name, eth0MAC, eth0GWIP, eth0CIDR string, gatewayVLANID uint, l netlink.Link, hwOffload, setNodeIP bool) {
 	const mtu string = "1234"
@@ -457,7 +480,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 		err = f6.MatchState(expectedTables, nil)
 		Expect(err).NotTo(HaveOccurred())
 
-		expectedNFT := fmt.Sprintf(baseNFTRulesFmt, fakeMgmtPortConfig.ifName)
+		expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
 		err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 		Expect(err).NotTo(HaveOccurred())
 
@@ -1124,6 +1147,10 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 		}
 		err = setupManagementPortNFTables(&fakeMgmtPortConfig)
 		Expect(err).NotTo(HaveOccurred())
+		if util.IsNetworkSegmentationSupportEnabled() {
+			err = configureUDNServicesNFTables()
+			Expect(err).NotTo(HaveOccurred())
+		}
 
 		kubeFakeClient := fake.NewSimpleClientset(
 			&v1.NodeList{
@@ -1318,7 +1345,7 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 		err = f6.MatchState(expectedTables, nil)
 		Expect(err).NotTo(HaveOccurred())
 
-		expectedNFT := fmt.Sprintf(baseNFTRulesFmt, fakeMgmtPortConfig.ifName)
+		expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
 		err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 		Expect(err).NotTo(HaveOccurred())
 

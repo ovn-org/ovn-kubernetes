@@ -1,6 +1,7 @@
 package node
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"strings"
@@ -10,6 +11,8 @@ import (
 	listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
+	"k8s.io/utils/ptr"
+	"sigs.k8s.io/knftables"
 
 	"github.com/vishvananda/netlink"
 
@@ -17,6 +20,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/generator/udn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iprulemanager"
+	nodenft "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/nftables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/vrfmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -26,6 +30,9 @@ const (
 	// ctMarkUDNBase is the conntrack mark base value for user defined networks to use
 	// Each network gets its own mark == base + network-id
 	ctMarkUDNBase = 3
+	// pktMarkBase is the base value for packet mark assigned to user defined networks
+	// Each network has a packet mark equal to base + network-id
+	pktMarkBase = 4096
 	// waitForPatchPortTimeout is the maximum time we wait for a UDN's patch
 	// port to be created by OVN.
 	waitForPatchPortTimeout = 30 * time.Second
@@ -53,6 +60,9 @@ type UserDefinedNetworkGateway struct {
 	// masqCTMark holds the mark value for this network
 	// which is used for egress traffic in shared gateway mode
 	masqCTMark uint
+	// pktMark hold the packets mark value for this network
+	// which is used for directing traffic towards the UDN
+	pktMark uint
 	// v4MasqIPs holds the IPv4 masquerade IPs for this network
 	v4MasqIPs *udn.MasqueradeIPs
 	// v6MasqIPs holds the IPv6 masquerade IPs for this network
@@ -84,7 +94,7 @@ func (b *bridgeConfiguration) getBridgePortConfigurations() ([]bridgeUDNConfigur
 }
 
 // addNetworkBridgeConfig adds the patchport and ctMark value for the provided netInfo into the bridge configuration cache
-func (b *bridgeConfiguration) addNetworkBridgeConfig(nInfo util.NetInfo, masqCTMark uint, v4MasqIPs, v6MasqIPs *udn.MasqueradeIPs) {
+func (b *bridgeConfiguration) addNetworkBridgeConfig(nInfo util.NetInfo, masqCTMark, pktMark uint, v6MasqIPs, v4MasqIPs *udn.MasqueradeIPs) {
 	b.Lock()
 	defer b.Unlock()
 
@@ -96,6 +106,7 @@ func (b *bridgeConfiguration) addNetworkBridgeConfig(nInfo util.NetInfo, masqCTM
 		netConfig := &bridgeUDNConfiguration{
 			patchPort:  patchPort,
 			masqCTMark: fmt.Sprintf("0x%x", masqCTMark),
+			pktMark:    fmt.Sprintf("0x%x", pktMark),
 			v4MasqIPs:  v4MasqIPs,
 			v6MasqIPs:  v6MasqIPs,
 		}
@@ -150,6 +161,7 @@ type bridgeUDNConfiguration struct {
 	patchPort   string
 	ofPortPatch string
 	masqCTMark  string
+	pktMark     string
 	v4MasqIPs   *udn.MasqueradeIPs
 	v6MasqIPs   *udn.MasqueradeIPs
 }
@@ -189,6 +201,7 @@ func NewUserDefinedNetworkGateway(netInfo util.NetInfo, networkID int, node *v1.
 		err       error
 	)
 	masqCTMark := ctMarkUDNBase + uint(networkID)
+	pktMark := pktMarkBase + uint(networkID)
 	if config.IPv4Mode {
 		v4MasqIPs, err = udn.AllocateV4MasqueradeIPs(networkID)
 		if err != nil {
@@ -215,6 +228,7 @@ func NewUserDefinedNetworkGateway(netInfo util.NetInfo, networkID int, node *v1.
 		kubeInterface: kubeInterface,
 		vrfManager:    vrfManager,
 		masqCTMark:    masqCTMark,
+		pktMark:       pktMark,
 		v4MasqIPs:     v4MasqIPs,
 		v6MasqIPs:     v6MasqIPs,
 		gateway:       gw,
@@ -222,11 +236,60 @@ func NewUserDefinedNetworkGateway(netInfo util.NetInfo, networkID int, node *v1.
 	}, nil
 }
 
+// GetUDNMarkChain returns the UDN mark chain name
+func GetUDNMarkChain(pktMark string) string {
+	return "udn-mark-" + pktMark
+}
+
+// delMarkChain removes the UDN packet mark nftables chain
+func (udng *UserDefinedNetworkGateway) delMarkChain() error {
+	nft, err := nodenft.GetNFTablesHelper()
+	if err != nil {
+		return err
+	}
+	tx := nft.NewTransaction()
+	chain := &knftables.Chain{
+		Name: GetUDNMarkChain(fmt.Sprintf("0x%x", udng.pktMark)),
+	}
+	tx.Flush(chain)
+	tx.Delete(chain)
+	return nft.Run(context.TODO(), tx)
+}
+
+// addMarkChain adds the UDN nftables chain containing a rule that marks packets
+// with the network specific value
+func (udng *UserDefinedNetworkGateway) addMarkChain() error {
+	counterIfDebug := ""
+	if config.Logging.Level > 4 {
+		counterIfDebug = "counter"
+	}
+
+	nft, err := nodenft.GetNFTablesHelper()
+	if err != nil {
+		return err
+	}
+	tx := nft.NewTransaction()
+	chain := &knftables.Chain{
+		Name:    GetUDNMarkChain(fmt.Sprintf("0x%x", udng.pktMark)),
+		Comment: ptr.To(fmt.Sprintf("%s: UDN packet marking", udng.GetNetworkName())),
+	}
+	tx.Add(chain)
+	tx.Flush(chain)
+
+	tx.Add(&knftables.Rule{
+		Chain: chain.Name,
+		Rule:  knftables.Concat("meta mark set", fmt.Sprintf("0x%x", udng.pktMark), counterIfDebug),
+	})
+
+	return nft.Run(context.TODO(), tx)
+}
+
 // AddNetwork will be responsible to create all plumbings
 // required by this UDN on the gateway side
 func (udng *UserDefinedNetworkGateway) AddNetwork() error {
 	// port is created first and its MAC address configured. The IP(s) on that link are added after enslaving to a VRF device (addUDNManagementPortIPs)
 	// because IPv6 addresses are removed by the kernel (if not link local) when enslaved to a VRF device.
+	// Add the routes after setting the IP(s) to ensure that the default subnet route towards the mgmt network exists.
 	mplink, macAddress, err := udng.addUDNManagementPort()
 	if err != nil {
 		return fmt.Errorf("could not create management port netdevice for network %s: %w", udng.GetNetworkName(), err)
@@ -237,11 +300,14 @@ func (udng *UserDefinedNetworkGateway) AddNetwork() error {
 	if err != nil {
 		return fmt.Errorf("failed to compute routes for network %s, err: %v", udng.GetNetworkName(), err)
 	}
-	if err = udng.vrfManager.AddVRF(vrfDeviceName, mplink.Attrs().Name, uint32(vrfTableId), routes); err != nil {
+	if err = udng.vrfManager.AddVRF(vrfDeviceName, mplink.Attrs().Name, uint32(vrfTableId), nil); err != nil {
 		return fmt.Errorf("could not add VRF %d for network %s, err: %v", vrfTableId, udng.GetNetworkName(), err)
 	}
 	if err = udng.addUDNManagementPortIPs(mplink); err != nil {
 		return fmt.Errorf("unable to add management port IP(s) for link %s, for network %s: %w", mplink.Attrs().Name, udng.GetNetworkName(), err)
+	}
+	if err = udng.vrfManager.AddVRFRoutes(vrfDeviceName, routes); err != nil {
+		return fmt.Errorf("could not add VRF %s routes for network %s, err: %v", vrfDeviceName, udng.GetNetworkName(), err)
 	}
 	if err := util.UpdateNodeManagementPortMACAddressesWithRetry(udng.node, udng.nodeLister, udng.kubeInterface, macAddress, udng.GetNetworkName()); err != nil {
 		return fmt.Errorf("unable to update mac address annotation for node %s, for network %s, err: %w", udng.node.Name, udng.GetNetworkName(), err)
@@ -262,7 +328,7 @@ func (udng *UserDefinedNetworkGateway) AddNetwork() error {
 		return fmt.Errorf("could not set loose mode for reverse path filtering on management port %s: %v", mgmtPortName, err)
 	}
 	if udng.openflowManager != nil {
-		udng.openflowManager.addNetwork(udng.NetInfo, udng.masqCTMark, udng.v4MasqIPs, udng.v6MasqIPs)
+		udng.openflowManager.addNetwork(udng.NetInfo, udng.masqCTMark, udng.pktMark, udng.v6MasqIPs, udng.v4MasqIPs)
 
 		waiter := newStartupWaiterWithTimeout(waitForPatchPortTimeout)
 		readyFunc := func() (bool, error) {
@@ -292,6 +358,9 @@ func (udng *UserDefinedNetworkGateway) AddNetwork() error {
 		klog.Warningf("Openflow manager has not been invoked for network %s; we will skip programming flows"+
 			"on the bridge for this network.", udng.NetInfo.GetNetworkName())
 	}
+	if err := udng.addMarkChain(); err != nil {
+		return fmt.Errorf("failed to add the service masquerade chain: %w", err)
+	}
 	return nil
 }
 
@@ -317,6 +386,9 @@ func (udng *UserDefinedNetworkGateway) DelNetwork() error {
 		if err := udng.Reconcile(); err != nil {
 			return fmt.Errorf("failed to reconcile default gateway for network %s, err: %v", udng.GetNetworkName(), err)
 		}
+	}
+	if err := udng.delMarkChain(); err != nil {
+		return err
 	}
 	// delete the management port interface for this network
 	return udng.deleteUDNManagementPort()
@@ -378,14 +450,17 @@ func (udng *UserDefinedNetworkGateway) addUDNManagementPort() (netlink.Link, net
 	return mplink, macAddress, nil
 }
 
-func (udng *UserDefinedNetworkGateway) addUDNManagementPortIPs(mpLink netlink.Link) error {
-	var err error
+// getLocalSubnets returns pod subnets used by the current node.
+// For L3 networks it parses the ovnNodeSubnets annotation, for L2 networks it returns the network subnets.
+func (udng *UserDefinedNetworkGateway) getLocalSubnets() ([]*net.IPNet, error) {
 	var networkLocalSubnets []*net.IPNet
+	var err error
+
 	// fetch subnets which we will use to get management port IP(s)
 	if udng.TopologyType() == types.Layer3Topology {
 		networkLocalSubnets, err = util.ParseNodeHostSubnetAnnotation(udng.node, udng.GetNetworkName())
 		if err != nil {
-			return fmt.Errorf("waiting for node %s to start, no annotation found on node for network %s: %w",
+			return nil, fmt.Errorf("waiting for node %s to start, no annotation found on node for network %s: %w",
 				udng.node.Name, udng.GetNetworkName(), err)
 		}
 	} else if udng.TopologyType() == types.Layer2Topology {
@@ -395,6 +470,15 @@ func (udng *UserDefinedNetworkGateway) addUDNManagementPortIPs(mpLink netlink.Li
 			networkLocalSubnets = append(networkLocalSubnets, globalFlatL2Network.CIDR)
 		}
 	}
+	return networkLocalSubnets, nil
+}
+
+func (udng *UserDefinedNetworkGateway) addUDNManagementPortIPs(mpLink netlink.Link) error {
+	networkLocalSubnets, err := udng.getLocalSubnets()
+	if err != nil {
+		return err
+	}
+
 	// extract management port IP from subnets and add it to link
 	for _, subnet := range networkLocalSubnets {
 		if config.IPv6Mode && utilnet.IsIPv6CIDR(subnet) || config.IPv4Mode && utilnet.IsIPv4CIDR(subnet) {
@@ -516,6 +600,46 @@ func (udng *UserDefinedNetworkGateway) computeRoutesForUDN(vrfTableId int, mpLin
 		})
 	}
 
+	// Add routes for V[4|6]HostETPLocalMasqueradeIP:
+	//   169.254.0.3 via 100.100.1.1 dev ovn-k8s-mp1
+	// For Layer3 networks add the cluster subnet route
+	//   100.100.0.0/16 via 100.100.1.1 dev ovn-k8s-mp1
+	networkLocalSubnets, err := udng.getLocalSubnets()
+	if err != nil {
+		return nil, err
+	}
+	for _, localSubnet := range networkLocalSubnets {
+		gwIP := util.GetNodeGatewayIfAddr(localSubnet)
+		if gwIP == nil {
+			return nil, fmt.Errorf("unable to find gateway IP for network %s, subnet: %s", udng.GetNetworkName(), localSubnet)
+		}
+		etpLocalMasqueradeIP := config.Gateway.MasqueradeIPs.V4HostETPLocalMasqueradeIP
+		if utilnet.IsIPv6CIDR(localSubnet) {
+			etpLocalMasqueradeIP = config.Gateway.MasqueradeIPs.V6HostETPLocalMasqueradeIP
+		}
+		retVal = append(retVal, netlink.Route{
+			LinkIndex: mpLink.Attrs().Index,
+			Dst: &net.IPNet{
+				IP:   etpLocalMasqueradeIP,
+				Mask: util.GetIPFullMask(etpLocalMasqueradeIP),
+			},
+			Gw:    gwIP.IP,
+			Table: vrfTableId,
+		})
+		if udng.NetInfo.TopologyType() == types.Layer3Topology {
+			for _, clusterSubnet := range udng.Subnets() {
+				if clusterSubnet.CIDR.Contains(gwIP.IP) {
+					retVal = append(retVal, netlink.Route{
+						LinkIndex: mpLink.Attrs().Index,
+						Dst:       clusterSubnet.CIDR,
+						Gw:        gwIP.IP,
+						Table:     vrfTableId,
+					})
+				}
+			}
+		}
+	}
+
 	return retVal, nil
 }
 
@@ -543,30 +667,45 @@ func (udng *UserDefinedNetworkGateway) getV6MasqueradeIP() (*net.IPNet, error) {
 	return util.GetIPNetFullMaskFromIP(masqIPs.ManagementPort.IP), nil
 }
 
-// constructUDNVRFIPRules constructs rules that redirect packets towards the per-UDN masquerade IP
+// constructUDNVRFIPRules constructs rules that redirect matching packets
 // into the corresponding UDN VRF routing table.
 // Example:
+// 2000:   from all fwmark 0x1001 lookup 1007
 // 2000:   from all to 169.254.0.12 lookup 1007
+// 2000:   from all fwmark 0x1002 lookup 1009
 // 2000:   from all to 169.254.0.14 lookup 1009
 func (udng *UserDefinedNetworkGateway) constructUDNVRFIPRules(vrfTableId int) ([]netlink.Rule, error) {
-	var masqIPRules []netlink.Rule
+	var ipRules []netlink.Rule
 	masqIPv4, err := udng.getV4MasqueradeIP()
 	if err != nil {
 		return nil, err
 	}
 	if masqIPv4 != nil {
-		masqIPRules = append(masqIPRules, generateIPRuleForMasqIP(masqIPv4.IP, false, uint(vrfTableId)))
+		ipRules = append(ipRules, generateIPRuleForPacketMark(udng.pktMark, false, uint(vrfTableId)))
+		ipRules = append(ipRules, generateIPRuleForMasqIP(masqIPv4.IP, false, uint(vrfTableId)))
 	}
 	masqIPv6, err := udng.getV6MasqueradeIP()
 	if err != nil {
 		return nil, err
 	}
 	if masqIPv6 != nil {
-		masqIPRules = append(masqIPRules, generateIPRuleForMasqIP(masqIPv6.IP, true, uint(vrfTableId)))
+		ipRules = append(ipRules, generateIPRuleForPacketMark(udng.pktMark, true, uint(vrfTableId)))
+		ipRules = append(ipRules, generateIPRuleForMasqIP(masqIPv6.IP, true, uint(vrfTableId)))
 	}
-	return masqIPRules, nil
+	return ipRules, nil
 }
 
+func generateIPRuleForPacketMark(mark uint, isIPv6 bool, vrfTableId uint) netlink.Rule {
+	r := *netlink.NewRule()
+	r.Table = int(vrfTableId)
+	r.Priority = UDNMasqueradeIPRulePriority
+	r.Family = netlink.FAMILY_V4
+	if isIPv6 {
+		r.Family = netlink.FAMILY_V6
+	}
+	r.Mark = int(mark)
+	return r
+}
 func generateIPRuleForMasqIP(masqIP net.IP, isIPv6 bool, vrfTableId uint) netlink.Rule {
 	r := *netlink.NewRule()
 	r.Table = int(vrfTableId)
