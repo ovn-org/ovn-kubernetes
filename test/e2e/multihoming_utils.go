@@ -7,10 +7,13 @@ import (
 	"net"
 	"strings"
 
+	nadclient "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/typed/k8s.cni.cncf.io/v1"
+
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/client"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	kapitypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/rand"
 	clientset "k8s.io/client-go/kubernetes"
@@ -133,6 +136,17 @@ func generateNetAttachDef(namespace, nadName, nadSpec string) *nadapi.NetworkAtt
 	}
 }
 
+func patchNADSpec(nadClient nadclient.K8sCniCncfIoV1Interface, name, namespace string, patch []byte) error {
+	_, err := nadClient.NetworkAttachmentDefinitions(namespace).Patch(
+		context.Background(),
+		name,
+		kapitypes.JSONPatchType,
+		patch,
+		metav1.PatchOptions{},
+	)
+	return err
+}
+
 type podConfiguration struct {
 	attachments            []nadapi.NetworkSelectionElement
 	containerCmd           []string
@@ -224,6 +238,47 @@ func connectToServer(clientPodConfig podConfiguration, serverIP string, port int
 		net.JoinHostPort(serverIP, fmt.Sprintf("%d", port)),
 	)
 	return err
+}
+
+func getMTUByInterfaceName(output, interfaceName string) (int, error) {
+	var ifaces []struct {
+		Name string `json:"ifname"`
+		MTU  int    `json:"mtu"`
+	}
+
+	if err := json.Unmarshal([]byte(output), &ifaces); err != nil {
+		return 0, fmt.Errorf("%s: %v", output, err)
+	}
+
+	for _, iface := range ifaces {
+		if iface.Name == interfaceName {
+			return iface.MTU, nil
+		}
+	}
+	return 0, fmt.Errorf("interface %s not found", interfaceName)
+}
+
+func getSecondaryInterfaceMTU(clientPodConfig podConfiguration) (int, error) {
+	const secondaryInterfacePodName = "net1"
+	deviceInfoJSON, err := e2ekubectl.RunKubectl(
+		clientPodConfig.namespace,
+		"exec",
+		clientPodConfig.name,
+		"--",
+		"ip",
+		"-j",
+		"link",
+	)
+	if err != nil {
+		return 0, err
+	}
+
+	mtu, err := getMTUByInterfaceName(deviceInfoJSON, secondaryInterfacePodName)
+	if err != nil {
+		return 0, err
+	}
+
+	return mtu, nil
 }
 
 func newAttachmentConfigWithOverriddenName(name, namespace, networkName, topology, cidr string) networkAttachmentConfig {
