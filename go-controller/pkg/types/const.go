@@ -153,6 +153,14 @@ const (
 
 	// OVN-K8S annotation & taint constants
 	OvnK8sPrefix = "k8s.ovn.org"
+
+	// OvnNetworkNameAnnotation is the name of the network annotated on the NAD
+	// by cluster manager nad controller
+	OvnNetworkNameAnnotation = OvnK8sPrefix + "/network-name"
+	// OvnNetworkIDAnnotation is a unique network identifier annotated on the
+	// NAD by cluster manager nad controller
+	OvnNetworkIDAnnotation = OvnK8sPrefix + "/network-id"
+	
 	// Deprecated: we used to set topology version as an annotation on the node. We don't do this anymore.
 	OvnK8sTopoAnno            = OvnK8sPrefix + "/" + "topology-version"
 	OvnK8sSmallMTUTaintKey    = OvnK8sPrefix + "/" + "mtu-too-small"
