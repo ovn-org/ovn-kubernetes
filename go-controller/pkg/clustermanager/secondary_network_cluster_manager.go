@@ -69,41 +69,6 @@ func (sncm *secondaryNetworkClusterManager) SetNetworkStatusReporter(errorReport
 	sncm.errorReporter = errorReporter
 }
 
-// Start the secondary network controller, handles all events and creates all
-// needed logical entities
-func (sncm *secondaryNetworkClusterManager) Start() error {
-	klog.Infof("Starting secondary network cluster manager")
-	return sncm.init()
-}
-
-func (sncm *secondaryNetworkClusterManager) init() error {
-	// Reserve the network ids in the id allocator for the existing secondary layer3 networks.
-	nodes, err := sncm.watchFactory.GetNodes()
-	if err != nil {
-		return fmt.Errorf("error getting the nodes from the watch factory : err - %v", err)
-	}
-
-	for _, n := range nodes {
-		networkIdsMap, err := util.GetNodeNetworkIDsAnnotationNetworkIDs(n)
-		if err == nil {
-			for networkName, id := range networkIdsMap {
-				// Reserver the id for the network name. We can safely
-				// ignore any errors if there are duplicate ids or if
-				// two networks have the same id. We will resync the node
-				// annotations correctly when the network controller
-				// is created.
-				_ = sncm.networkIDAllocator.ReserveID(networkName, id)
-			}
-		}
-	}
-
-	return nil
-}
-
-func (sncm *secondaryNetworkClusterManager) Stop() {
-	klog.Infof("Stopping secondary network cluster manager")
-}
-
 func (sncm *secondaryNetworkClusterManager) GetDefaultNetworkController() networkmanager.ReconcilableNetworkController {
 	return nil
 }
@@ -117,9 +82,7 @@ func (sncm *secondaryNetworkClusterManager) NewNetworkController(nInfo util.NetI
 
 	klog.Infof("Creating new network controller for network %s of topology %s", nInfo.GetNetworkName(), nInfo.TopologyType())
 
-	namedIDAllocator := sncm.networkIDAllocator.ForName(nInfo.GetNetworkName())
 	sncc := newNetworkClusterController(
-		namedIDAllocator,
 		nInfo,
 		sncm.ovnClient,
 		sncm.watchFactory,
@@ -206,9 +169,7 @@ func (sncm *secondaryNetworkClusterManager) CleanupStaleNetworks(validNetworks .
 // newDummyNetworkController creates a dummy network controller used to clean up specific network
 func (sncm *secondaryNetworkClusterManager) newDummyLayer3NetworkController(netName string) (networkmanager.NetworkController, error) {
 	netInfo, _ := util.NewNetInfo(&ovncnitypes.NetConf{NetConf: types.NetConf{Name: netName}, Topology: ovntypes.Layer3Topology})
-	namedIDAllocator := sncm.networkIDAllocator.ForName(netInfo.GetNetworkName())
 	nc := newNetworkClusterController(
-		namedIDAllocator,
 		netInfo,
 		sncm.ovnClient,
 		sncm.watchFactory,
