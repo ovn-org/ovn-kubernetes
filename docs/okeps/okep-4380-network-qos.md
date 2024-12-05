@@ -64,8 +64,8 @@ from this API and not just the north south traffic.
 This would be a namespace-scoped CRD:
 
 ```go
-
 import (
+	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -93,12 +93,14 @@ type NetworkQoS struct {
 
 // Spec defines the desired state of NetworkQoS
 type Spec struct {
-	// networkAttachmentName selects the network-attachment-definition for
-	// which the QoS Rules will be applied. The NAD can be of any type Layer-3,
-	// Layer-2 or Localnet. If not specified, the default cluster-wide network
-	// will be used.
+	// netAttachRefs points to a list of NetworkAttachmentDefinition object,
+	// to which the QoS Rules will be applied. The netAttachRefs can be of
+	// type Layer-3, Layer-2 or Localnet. If not specified, the default cluster-wide
+	//  network will be used.
 	// +optional
-	NetworkAttachmentName string `json:"networkAttachmentName,omitempty"`
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf", message="netAttachRefs is immutable"
+	// +kubebuilder:validation:XValidation:rule="self.all(nad, nad.kind == 'NetworkAttachmentDefinition')", message="\"kind\" of netAttachRef must be \"NetworkAttachmentDefinition\""
+	NetworkAttachmentRefs []corev1.ObjectReference `json:"netAttachRefs,omitempty"`
 
 	// podSelector applies the NetworkQoS rule only to the pods in the namespace whose label
 	// matches this definition. This field is optional, and in case it is not set
@@ -117,7 +119,6 @@ type Rule struct {
 	// actually applied to a packet is undefined.
 	// +kubebuilder:validation:Maximum:=32767
 	// +kubebuilder:validation:Minimum:=0
-	// +required
 	Priority int `json:"priority"`
 
 	// dscp marking value for matching pods' traffic.
@@ -140,16 +141,8 @@ type Classifier struct {
 	// +optional
 	To []Destination `json:"to"`
 
-	// protocol (tcp, udp, sctp) that the traffic must match.
-	// +kubebuilder:validation:Pattern=^TCP|UDP|SCTP$
 	// +optional
-	Protocol string `json:"protocol"`
-
-	// port that the traffic must match
-	// +kubebuilder:validation:Minimum:=1
-	// +kubebuilder:validation:Maximum:=65535
-	// +optional
-	Port int32 `json:"port"`
+	Port Port `json:"port"`
 }
 
 // Bandwidth controls the maximum of rate traffic that can be sent
@@ -170,8 +163,24 @@ type Bandwidth struct {
 	Burst uint32 `json:"burst"`
 }
 
+// Port specifies destination protocol and port on which NetworkQoS
+// rule is applied
+type Port struct {
+	// protocol (tcp, udp, sctp) that the traffic must match.
+	// +kubebuilder:validation:Pattern=^TCP|UDP|SCTP$
+	// +optional
+	Protocol string `json:"protocol"`
+
+	// port that the traffic must match
+	// +kubebuilder:validation:Minimum:=1
+	// +kubebuilder:validation:Maximum:=65535
+	// +optional
+	Port int32 `json:"port"`
+}
+
 // Destination describes a peer to apply NetworkQoS configuration for the outgoing traffic.
 // Only certain combinations of fields are allowed.
+// +kubebuilder:validation:XValidation:rule="!(has(self.ipBlock) && (has(self.podSelector) || has(self.namespaceSelector)))",message="Can't specify both podSelector/namespaceSelector and ipBlock"
 type Destination struct {
 	// podSelector is a label selector which selects pods. This field follows standard label
 	// selector semantics; if present but empty, it selects all pods.
@@ -356,7 +365,7 @@ will be executed.
 In addition it'll watch nodes to decide if further updates are needed, for example:
 when another node `node2` joins the cluster, the controller will attach the existing `NetworkQoS` object to its node local switch.
 
-The `NetworkQoS` is supported on pod's secondary networks. Consider the following example:
+The `NetworkQoS` is supported on pod's secondary networks. That may also be a User Defined Network. Consider the following example:
 
 ```yaml
 kind: NetworkQoS
@@ -365,7 +374,10 @@ metadata:
   name: qos-external-bar
   namespace: default
 spec:
-  networkAttachmentName: default/ovn-stream
+  netAttachRefs:
+  - kind: NetworkAttachmentDefinition
+    namespace: default
+    name: ovn-storage
   egress:
   - priority: 100
     dscp: 30
@@ -374,7 +386,7 @@ spec:
       - ipBlock:
           cidr: 0.0.0.0/0
 ```
-This creates a new AddressSet adding default namespace pod(s) IP associated with ovn-stream secondary network.
+This creates a new AddressSet adding default namespace pod(s) IP associated with ovn-stream secondary network, using NAD.
 the equivalent of:
 ```bash
 ovn-nbctl qos-add node1 to-lport 100 "ip4.src == <default_ns_ovn-stream_network address set> && ip4.dst == 0.0.0.0/0" dscp=30
