@@ -88,7 +88,7 @@ func NewClusterManager(ovnClient *util.OVNClusterManagerClientset, wf *factory.W
 			return nil, err
 		}
 
-		cm.networkManager, err = networkmanager.NewForCluster(cm.secondaryNetClusterManager, wf, recorder)
+		cm.networkManager, err = networkmanager.NewForCluster(cm.secondaryNetClusterManager, wf, ovnClient, recorder)
 		if err != nil {
 			return nil, err
 		}
@@ -173,12 +173,6 @@ func (cm *ClusterManager) Start(ctx context.Context) error {
 		return err
 	}
 
-	if cm.secondaryNetClusterManager != nil {
-		if err := cm.secondaryNetClusterManager.Start(); err != nil {
-			return err
-		}
-	}
-
 	if err := cm.defaultNetClusterController.Start(ctx); err != nil {
 		return err
 	}
@@ -227,9 +221,7 @@ func (cm *ClusterManager) Stop() {
 	klog.Info("Stopping the cluster manager")
 	cm.defaultNetClusterController.Stop()
 	cm.zoneClusterController.Stop()
-	if config.OVNKubernetesFeature.EnableMultiNetwork {
-		cm.secondaryNetClusterManager.Stop()
-	}
+
 	if config.OVNKubernetesFeature.EnableEgressIP {
 		cm.eIPC.Stop()
 	}

@@ -876,7 +876,7 @@ var _ = Describe("Management Port Operations", func() {
 
 								isRoutingAdvertised: true,
 							},
-						}, v4lrpMAC)
+						}, v4lrpMAC, true)
 					return nil
 				}
 				err := app.Run([]string{
@@ -927,7 +927,7 @@ var _ = Describe("Management Port Operations", func() {
 
 								isRoutingAdvertised: true,
 							},
-						}, v6lrpMAC)
+						}, v6lrpMAC, true)
 					return nil
 				}
 				err := app.Run([]string{
@@ -1001,7 +1001,7 @@ var _ = Describe("Management Port Operations", func() {
 
 								isRoutingAdvertised: true,
 							},
-						}, v4lrpMAC)
+						}, v4lrpMAC, true)
 					return nil
 				}
 				err := app.Run([]string{
