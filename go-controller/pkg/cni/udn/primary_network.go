@@ -74,7 +74,7 @@ func (p *UserDefinedPrimaryNetwork) WaitForPrimaryAnnotationFn(namespace string,
 			return nil, false
 		}
 		if err := p.ensure(namespace, annotations, nadName, annotation); err != nil {
-			klog.Errorf("Failed ensuring user defined primary network: %v", err)
+			klog.Errorf("Failed ensuring user defined primary network for nad '%s': %v", nadName, err)
 			return nil, false
 		}
 		return annotation, isReady
@@ -111,10 +111,10 @@ func (p *UserDefinedPrimaryNetwork) ensure(namespace string, annotations map[str
 	}
 
 	if err := p.ensureAnnotation(annotations); err != nil {
-		return fmt.Errorf("failed looking for primary network annotation: %w", err)
+		return fmt.Errorf("failed looking for primary network annotation for nad '%s': %w", nadName, err)
 	}
 	if err := p.ensureActiveNetwork(namespace); err != nil {
-		return fmt.Errorf("failed looking for primary network name: %w", err)
+		return fmt.Errorf("failed looking for primary network name for nad '%s': %w", nadName, err)
 	}
 	return nil
 }
@@ -128,7 +128,7 @@ func (p *UserDefinedPrimaryNetwork) ensureActiveNetwork(namespace string) error 
 		return err
 	}
 	if activeNetwork.IsDefault() {
-		return fmt.Errorf("missing primary user defined network NAD")
+		return fmt.Errorf("missing primary user defined network NAD for namespace '%s'", namespace)
 	}
 	p.activeNetwork = activeNetwork
 	return nil
