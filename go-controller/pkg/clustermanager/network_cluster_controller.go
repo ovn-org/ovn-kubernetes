@@ -257,6 +257,7 @@ func (ncc *networkClusterController) init() error {
 			ncc.networkManager,
 			ncc.recorder,
 			ncc.tunnelIDAllocator,
+			ncc.watchFactory.NodeCoreInformer().Lister(),
 		)
 		if err := ncc.podAllocator.Init(); err != nil {
 			return fmt.Errorf("failed to initialize pod ip allocator: %w", err)
