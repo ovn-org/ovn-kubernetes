@@ -884,7 +884,13 @@ func (bnc *BaseNetworkController) allocatePodAnnotation(pod *kapi.Pod, existingL
 		return nil, false, fmt.Errorf("cannot retrieve subnet for assigning gateway routes for pod %s, switch: %s",
 			podDesc, switchName)
 	}
-	err = util.AddRoutesGatewayIP(bnc.NetInfo, pod, podAnnotation, network)
+
+	node, err := bnc.watchFactory.GetNode(pod.Spec.NodeName)
+	if err != nil {
+		return nil, false, err
+	}
+
+	err = util.AddRoutesGatewayIP(bnc.NetInfo, node, pod, podAnnotation, network)
 	if err != nil {
 		return nil, false, err
 	}
