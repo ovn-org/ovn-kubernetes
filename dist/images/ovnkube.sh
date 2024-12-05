@@ -2068,6 +2068,7 @@ ovnkube-controller-with-node() {
     --nodeport \
     --ovn-metrics-bind-address ${ovn_metrics_bind_address} \
     --pidfile ${OVN_RUNDIR}/ovnkube-controller-with-node.pid \
+    --disable-udn-host-isolation \
     --zone ${ovn_zone} &
 
   wait_for_event attempts=3 process_ready ovnkube-controller-with-node
@@ -2669,6 +2670,7 @@ ovn-node() {
         --nodeport \
         --ovn-metrics-bind-address ${ovn_metrics_bind_address} \
         --pidfile ${OVN_RUNDIR}/ovnkube.pid \
+        --disable-udn-host-isolation \
         --zone ${ovn_zone} &
 
   wait_for_event attempts=3 process_ready ovnkube

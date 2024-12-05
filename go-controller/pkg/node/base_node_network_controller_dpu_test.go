@@ -10,6 +10,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	adminpolicybasedrouteclient "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/clientset/versioned/fake"
 	factorymocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory/mocks"
 	kubemocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube/mocks"
@@ -98,6 +99,7 @@ var _ = Describe("Node DPU tests", func() {
 	origNetlinkOps := util.GetNetLinkOps()
 
 	BeforeEach(func() {
+		config.PrepareTestConfig()
 		sriovnetOpsMock = utilMocks.SriovnetOps{}
 		netlinkOpsMock = utilMocks.NetLinkOps{}
 		execMock = ovntest.NewFakeExec()
@@ -115,7 +117,7 @@ var _ = Describe("Node DPU tests", func() {
 		apbExternalRouteClient := adminpolicybasedrouteclient.NewSimpleClientset()
 		factoryMock = factorymocks.NodeWatchFactory{}
 		cnnci := newCommonNodeNetworkControllerInfo(nil, &kubeMock, apbExternalRouteClient, &factoryMock, nil, "", routeManager)
-		dnnc = newDefaultNodeNetworkController(cnnci, nil, nil, routeManager)
+		dnnc = newDefaultNodeNetworkController(cnnci, nil, nil, routeManager, nil)
 
 		podInformer = coreinformermocks.PodInformer{}
 		podNamespaceLister = v1mocks.PodNamespaceLister{}
