@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"sync"
 	"testing"
 
@@ -462,6 +463,17 @@ func TestNADController(t *testing.T) {
 			g.Expect(nadController.networkController.Start()).To(gomega.Succeed())
 			defer nadController.networkController.Stop()
 
+			nextNetworkID := 1
+			networkIDs := map[string]int{"default": 0}
+			getNetworkID := func(network string) int {
+				networkID := networkIDs[network]
+				if networkID == 0 && network != "default" {
+					networkID = nextNetworkID
+					nextNetworkID++
+					networkIDs[network] = networkID
+				}
+				return networkID
+			}
 			for _, args := range tt.args {
 				namespace, name, err := cache.SplitMetaNamespaceKey(args.nad)
 				g.Expect(err).ToNot(gomega.HaveOccurred())
@@ -470,6 +482,7 @@ func TestNADController(t *testing.T) {
 				if args.network != nil {
 					args.network.NADName = args.nad
 					nad, err = buildNAD(name, namespace, args.network)
+					nad.Annotations = map[string]string{types.OvnNetworkIDAnnotation: strconv.Itoa(getNetworkID(args.network.Name))}
 					g.Expect(err).ToNot(gomega.HaveOccurred())
 				}
 
@@ -597,8 +610,8 @@ func TestSyncAll(t *testing.T) {
 			g.Expect(err).ToNot(gomega.HaveOccurred())
 			config.OVNKubernetesFeature.EnableNetworkSegmentation = true
 			config.OVNKubernetesFeature.EnableMultiNetwork = true
-			fakeClient := util.GetOVNClientset().GetOVNKubeControllerClientset()
-			wf, err := factory.NewOVNKubeControllerWatchFactory(fakeClient)
+			fakeClient := util.GetOVNClientset().GetClusterManagerClientset()
+			wf, err := factory.NewClusterManagerWatchFactory(fakeClient)
 			g.Expect(err).ToNot(gomega.HaveOccurred())
 
 			tcm := &testControllerManager{
@@ -611,6 +624,7 @@ func TestSyncAll(t *testing.T) {
 			controller, err := NewForCluster(
 				tcm,
 				wf,
+				fakeClient,
 				nil,
 			)
 			g.Expect(err).ToNot(gomega.HaveOccurred())
