@@ -875,10 +875,15 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 		podList, _ := podClient.List(context.Background(), metav1.ListOptions{})
 		for _, pod := range podList.Items {
 			// deleting the ovs-node pod tears down all the node networking and the restarting pod
-			// does not build it back up, thus breaking that node entirely. We can't delete it for
-			// this test case.
+			// does not rebuild it, effectively breaking that node entirely. Therefore, we cannot delete it
+			// for this test case. The same reasoning applies to ovnkube-identity: webhook calls for pod updates
+			// may fail if the webhook itself is deleted, potentially leaving ovnkube-identity stuck in a
+			// terminated state. This can result in no new pods being scheduled or running. In a real-world
+			// scenario, this limitation is mitigated by deploying multiple API server replicas, which is not
+			// the case for the basic kind cluster deployment.
 			if pod.Spec.NodeName == ovnKubeControlPlaneNode && pod.Name != "connectivity-test-continuous" &&
 				pod.Name != "etcd-ovn-control-plane" &&
+				!strings.HasPrefix(pod.Name, "ovnkube-identity") &&
 				!strings.HasPrefix(pod.Name, "ovs-node") {
 				framework.Logf("%q", pod.Namespace)
 				e2epod.DeletePodWithWaitByName(context.TODO(), f.ClientSet, pod.Name, ovnNamespace)
