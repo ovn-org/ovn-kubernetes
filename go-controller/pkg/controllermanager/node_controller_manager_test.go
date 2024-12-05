@@ -14,8 +14,11 @@ import (
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	nadinformermocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/informers/externalversions/k8s.cni.cncf.io/v1"
 	nadlistermocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
+	coreinformermocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/client-go/informers/core/v1"
+	corelistermocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/client-go/listers/core/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/stretchr/testify/mock"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -211,7 +214,8 @@ var _ = Describe("Healthcheck tests", func() {
 			config.OVNKubernetesFeature.EnableMultiNetwork = true
 
 			factoryMock := factoryMocks.NodeWatchFactory{}
-			NetInfo, err := util.ParseNADInfo(nad)
+			netInfo, err := util.ParseNADInfo(nad)
+			mutableNetInfo := util.NewMutableNetInfo(netInfo)
 			Expect(err).NotTo(HaveOccurred())
 			node := &corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
@@ -232,6 +236,11 @@ var _ = Describe("Healthcheck tests", func() {
 			nadInformerMock.On("Lister").Return(nadListerMock)
 			nadInformerMock.On("Informer").Return(nil)
 			factoryMock.On("NADInformer").Return(nadInformerMock)
+			nodeListerMock := &corelistermocks.NodeLister{}
+			nodeListerMock.On("List", mock.Anything).Return(nodeList, nil)
+			nodeInformerMock := &coreinformermocks.NodeInformer{}
+			nodeInformerMock.On("Lister").Return(nodeListerMock)
+			factoryMock.On("NodeCoreInformer").Return(nodeInformerMock)
 
 			ncm, err := NewNodeControllerManager(fakeClient, &factoryMock, nodeName, &sync.WaitGroup{}, nil, routeManager)
 			Expect(err).NotTo(HaveOccurred())
@@ -249,7 +258,7 @@ var _ = Describe("Healthcheck tests", func() {
 				_, err = util.GetNetLinkOps().LinkByName(validVrfDevice)
 				Expect(err).NotTo(HaveOccurred())
 
-				err = ncm.CleanupStaleNetworks(NetInfo)
+				err = ncm.CleanupStaleNetworks(mutableNetInfo)
 				Expect(err).NotTo(HaveOccurred())
 
 				// Verify CleanupDeletedNetworks cleans up VRF configuration for

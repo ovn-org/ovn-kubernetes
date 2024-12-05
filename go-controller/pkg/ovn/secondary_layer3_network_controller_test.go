@@ -31,7 +31,6 @@ import (
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	testnm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/networkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	networkingv1 "k8s.io/api/networking/v1"
 )
@@ -49,6 +48,7 @@ const (
 	nadName              = "blue-net"
 	ns                   = "namespace1"
 	secondaryNetworkName = "isolatednet"
+	secondaryNetworkID   = "2"
 	denyPolicyName       = "deny-all-policy"
 	denyPG               = "deny-port-group"
 )
@@ -113,6 +113,7 @@ var _ = Describe("OVN Multi-Homed pod operations", func() {
 					*netInfo.netconf(),
 				)
 				Expect(err).NotTo(HaveOccurred())
+				nad.Annotations = map[string]string{types.OvnNetworkIDAnnotation: secondaryNetworkID}
 				Expect(netInfo.setupOVNDependencies(&initialDB)).To(Succeed())
 				if netInfo.isPrimary {
 					networkConfig, err := util.NewNetInfo(netInfo.netconf())
@@ -311,6 +312,7 @@ var _ = Describe("OVN Multi-Homed pod operations", func() {
 					*netConf,
 				)
 				Expect(err).NotTo(HaveOccurred())
+				nad.Annotations = map[string]string{types.OvnNetworkIDAnnotation: secondaryNetworkID}
 
 				mutableNetworkConfig := util.NewMutableNetInfo(networkConfig)
 				mutableNetworkConfig.SetNADs(util.GetNADName(nad.Namespace, nad.Name))
@@ -325,7 +327,7 @@ var _ = Describe("OVN Multi-Homed pod operations", func() {
 				testNode, err := newNodeWithSecondaryNets(nodeName, nodeIPv4CIDR, netInfo)
 				Expect(err).NotTo(HaveOccurred())
 
-				nbZone := &nbdb.NBGlobal{Name: ovntypes.OvnDefaultZone, UUID: ovntypes.OvnDefaultZone}
+				nbZone := &nbdb.NBGlobal{Name: types.OvnDefaultZone, UUID: types.OvnDefaultZone}
 				defaultNetExpectations := emptyDefaultClusterNetworkNodeSwitch(podInfo.nodeName)
 				defaultNetExpectations = append(defaultNetExpectations, nbZone)
 				gwConfig, err := util.ParseNodeL3GatewayAnnotation(testNode)
@@ -636,7 +638,7 @@ func newNodeWithSecondaryNets(nodeName string, nodeIPv4CIDR string, netInfos ...
 				"k8s.ovn.org/zone-name":                                     "global",
 				"k8s.ovn.org/l3-gateway-config":                             fmt.Sprintf("{\"default\":{\"mode\":\"shared\",\"bridge-id\":\"breth0\",\"interface-id\":\"breth0_ovn-worker\",\"mac-address\":%q,\"ip-addresses\":[%[2]q],\"ip-address\":%[2]q,\"next-hops\":[%[3]q],\"next-hop\":%[3]q,\"node-port-enable\":\"true\",\"vlan-id\":\"0\"}}", util.IPAddrToHWAddr(nodeIP), nodeCIDR, nextHopIP),
 				util.OvnNodeChassisID:                                       "abdcef",
-				"k8s.ovn.org/network-ids":                                   "{\"default\":\"0\",\"isolatednet\":\"2\"}",
+				"k8s.ovn.org/network-ids":                                   fmt.Sprintf("{\"default\":\"0\",\"isolatednet\":\"%s\"}", secondaryNetworkID),
 				util.OVNNodeGRLRPAddrs:                                      fmt.Sprintf("{\"isolatednet\":{\"ipv4\":%q}}", gwRouterJoinIPAddress()),
 				"k8s.ovn.org/udn-layer2-node-gateway-router-lrp-tunnel-ids": "{\"isolatednet\":\"25\"}",
 			},
@@ -745,7 +747,7 @@ func expectedGWRouterPlusNATAndStaticRoutes(
 }
 
 func expectedStaticMACBindings(gwRouterName string, ips []net.IP) []libovsdbtest.TestData {
-	lrpName := fmt.Sprintf("%s%s", ovntypes.GWRouterToExtSwitchPrefix, gwRouterName)
+	lrpName := fmt.Sprintf("%s%s", types.GWRouterToExtSwitchPrefix, gwRouterName)
 	var bindings []libovsdbtest.TestData
 	for _, ip := range ips {
 		bindings = append(bindings, &nbdb.StaticMACBinding{

@@ -10,6 +10,14 @@ import (
 
 var ErrNetworkControllerTopologyNotManaged = errors.New("no cluster network controller to manage topology")
 
+const (
+	// DefaultNetworkID is the default network.
+	DefaultNetworkID = 0
+
+	// MaxNetworks is the maximum number of networks allowed.
+	MaxNetworks = 4096
+)
+
 // Interface is the main package entrypoint and provides network related
 // information to the rest of the project.
 type Interface interface {
@@ -38,6 +46,7 @@ func Default() Controller {
 func NewForCluster(
 	cm ControllerManager,
 	wf watchFactory,
+	ovnClient *util.OVNClusterManagerClientset,
 	recorder record.EventRecorder,
 ) (Controller, error) {
 	return new(
@@ -46,6 +55,7 @@ func NewForCluster(
 		"",
 		cm,
 		wf,
+		ovnClient,
 		recorder,
 	)
 }
@@ -63,6 +73,7 @@ func NewForZone(
 		cm,
 		wf,
 		nil,
+		nil,
 	)
 }
 
@@ -79,6 +90,7 @@ func NewForNode(
 		cm,
 		wf,
 		nil,
+		nil,
 	)
 }
 
@@ -91,9 +103,10 @@ func new(
 	node string,
 	cm ControllerManager,
 	wf watchFactory,
+	ovnClient *util.OVNClusterManagerClientset,
 	recorder record.EventRecorder,
 ) (Controller, error) {
-	return newController(name, zone, node, cm, wf, recorder)
+	return newController(name, zone, node, cm, wf, ovnClient, recorder)
 }
 
 // ControllerManager manages controllers. Needs to be provided in order to build

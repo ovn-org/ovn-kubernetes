@@ -35,24 +35,25 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 	)
 
 	const (
-		nadName1          = "nad1"
-		networkName1      = "network1"
-		networkName1_     = networkName1 + "_"
-		node1Name         = "node1"
-		v4Net1            = "20.128.0.0/14"
-		v4Node1Net1       = "20.128.0.0/16"
-		v4Pod1IPNode1Net1 = "20.128.0.5"
-		podName3          = "egress-pod3"
-		v4Pod2IPNode1Net1 = "20.128.0.6"
-		v4Node1Tsp        = "100.88.0.2"
-		node2Name         = "node2"
-		v4Node2Net1       = "20.129.0.0/16"
-		v4Node2Tsp        = "100.88.0.3"
-		podName4          = "egress-pod4"
-		v4Pod1IPNode2Net1 = "20.129.0.2"
-		v4Pod2IPNode2Net1 = "20.129.0.3"
-		eIP1Mark          = 50000
-		eIP2Mark          = 50001
+		nadName1           = "nad1"
+		networkName1       = "network1"
+		networkName1_      = networkName1 + "_"
+		node1Name          = "node1"
+		v4Net1             = "20.128.0.0/14"
+		v4Node1Net1        = "20.128.0.0/16"
+		v4Pod1IPNode1Net1  = "20.128.0.5"
+		podName3           = "egress-pod3"
+		v4Pod2IPNode1Net1  = "20.128.0.6"
+		v4Node1Tsp         = "100.88.0.2"
+		node2Name          = "node2"
+		v4Node2Net1        = "20.129.0.0/16"
+		v4Node2Tsp         = "100.88.0.3"
+		podName4           = "egress-pod4"
+		v4Pod1IPNode2Net1  = "20.129.0.2"
+		v4Pod2IPNode2Net1  = "20.129.0.3"
+		eIP1Mark           = 50000
+		eIP2Mark           = 50001
+		secondaryNetworkID = "2"
 	)
 
 	getEgressIPStatusLen := func(egressIPName string) func() int {
@@ -147,6 +148,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 					netconf,
 				)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				nad.Annotations = map[string]string{ovntypes.OvnNetworkIDAnnotation: secondaryNetworkID}
 				netInfo, err := util.NewNetInfo(&netconf)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -277,6 +279,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 				// watch EgressIP depends on UDN enabled svcs address set being available
 				c := udnenabledsvc.NewController(fakeOvn.nbClient, asf, fakeOvn.controller.watchFactory.ServiceCoreInformer(), []string{})
 				go func() {
+					defer ginkgo.GinkgoRecover()
 					gomega.Expect(c.Run(ctx.Done())).Should(gomega.Succeed())
 				}()
 				// Add pod IPs to CDN cache
@@ -519,6 +522,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 					netconf,
 				)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				nad.Annotations = map[string]string{ovntypes.OvnNetworkIDAnnotation: secondaryNetworkID}
 				netInfo, err := util.NewNetInfo(&netconf)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -645,6 +649,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 				// watch EgressIP depends on UDN enabled svcs address set being available
 				c := udnenabledsvc.NewController(fakeOvn.nbClient, asf, fakeOvn.controller.watchFactory.ServiceCoreInformer(), []string{})
 				go func() {
+					defer ginkgo.GinkgoRecover()
 					gomega.Expect(c.Run(ctx.Done())).Should(gomega.Succeed())
 				}()
 				// Add pod IPs to CDN cache
@@ -1033,6 +1038,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 					netconf,
 				)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				nad.Annotations = map[string]string{ovntypes.OvnNetworkIDAnnotation: secondaryNetworkID}
 				netInfo, err := util.NewNetInfo(&netconf)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -1159,6 +1165,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 				// watch EgressIP depends on UDN enabled svcs address set being available
 				c := udnenabledsvc.NewController(fakeOvn.nbClient, asf, fakeOvn.controller.watchFactory.ServiceCoreInformer(), []string{})
 				go func() {
+					defer ginkgo.GinkgoRecover()
 					gomega.Expect(c.Run(ctx.Done())).Should(gomega.Succeed())
 				}()
 				// Add pod IPs to CDN cache
@@ -1523,6 +1530,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 					netconf,
 				)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				nad.Annotations = map[string]string{ovntypes.OvnNetworkIDAnnotation: secondaryNetworkID}
 				netInfo, err := util.NewNetInfo(&netconf)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -1652,6 +1660,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 				// watch EgressIP depends on UDN enabled svcs address set being available
 				c := udnenabledsvc.NewController(fakeOvn.nbClient, asf, fakeOvn.controller.watchFactory.ServiceCoreInformer(), []string{})
 				go func() {
+					defer ginkgo.GinkgoRecover()
 					gomega.Expect(c.Run(ctx.Done())).Should(gomega.Succeed())
 				}()
 				// Add pod IPs to CDN cache
@@ -1882,6 +1891,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 					netconf,
 				)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				nad.Annotations = map[string]string{ovntypes.OvnNetworkIDAnnotation: secondaryNetworkID}
 				netInfo, err := util.NewNetInfo(&netconf)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -2011,6 +2021,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 				// watch EgressIP depends on UDN enabled svcs address set being available
 				c := udnenabledsvc.NewController(fakeOvn.nbClient, asf, fakeOvn.controller.watchFactory.ServiceCoreInformer(), []string{})
 				go func() {
+					defer ginkgo.GinkgoRecover()
 					gomega.Expect(c.Run(ctx.Done())).Should(gomega.Succeed())
 				}()
 				// Add pod IPs to CDN cache
@@ -2238,6 +2249,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 					netconf,
 				)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				nad.Annotations = map[string]string{ovntypes.OvnNetworkIDAnnotation: secondaryNetworkID}
 				netInfo, err := util.NewNetInfo(&netconf)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -2367,6 +2379,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 				// watch EgressIP depends on UDN enabled svcs address set being available
 				c := udnenabledsvc.NewController(fakeOvn.nbClient, asf, fakeOvn.controller.watchFactory.ServiceCoreInformer(), []string{})
 				go func() {
+					defer ginkgo.GinkgoRecover()
 					gomega.Expect(c.Run(ctx.Done())).Should(gomega.Succeed())
 				}()
 				// Add pod IPs to CDN cache
