@@ -156,10 +156,11 @@ func (f *FakeIPTables) List(tableName, chainName string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	ret := make([]string, len(chain))
 	for i := range chain {
-		chain[i] = fmt.Sprintf("-A %s %s", chainName, chain[i])
+		ret[i] = fmt.Sprintf("-A %s %s", chainName, chain[i])
 	}
-	return chain, nil
+	return ret, nil
 }
 
 // ListChains returns the names of all chains in the table

@@ -613,6 +613,11 @@ func (c *Controller) repairIPTables(v4EpsToServices, v6EpsToServices map[string]
 		errorList := []error{}
 		for _, rule := range rulesToDel {
 			args := strings.Fields(rule)
+			if len(args) < 2 {
+				continue
+			}
+			// strip "-A OVN-KUBE-EGRESS-SVC"
+			args = args[2:]
 			err := ipt.Delete("nat", Chain, args...)
 			if err != nil {
 				errorList = append(errorList, err)
