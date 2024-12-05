@@ -24,14 +24,12 @@ import (
 
 	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	globalconfig "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	networkAttachDefController "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
 	kubetest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/nad"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -85,18 +83,13 @@ func newControllerWithDBSetupForNetwork(dbSetup libovsdbtest.TestSetup, netInfo 
 			return nil, err
 		}
 	}
-	testNCM := &nad.FakeNetworkControllerManager{}
-	nadController, err := networkAttachDefController.NewNetAttachDefinitionController("test", testNCM, factoryMock, nil)
-	if err != nil {
-		return nil, err
-	}
 
 	controller, err := NewController(client.KubeClient,
 		nbClient,
 		factoryMock.ServiceCoreInformer(),
 		factoryMock.EndpointSliceCoreInformer(),
 		factoryMock.NodeCoreInformer(),
-		nadController,
+		networkmanager.Default().Interface(),
 		recorder,
 		netInfo,
 	)
@@ -107,7 +100,7 @@ func newControllerWithDBSetupForNetwork(dbSetup libovsdbtest.TestSetup, netInfo 
 	if nbZoneFailed {
 		// Delete the NBGlobal row as this function created it.  Otherwise many tests would fail while
 		// checking the expectedData in the NBDB.
-		if err = deleteTestNBGlobal(nbClient, "global"); err != nil {
+		if err = deleteTestNBGlobal(nbClient); err != nil {
 			return nil, err
 		}
 	}
@@ -206,21 +199,21 @@ func TestSyncServices(t *testing.T) {
 		initialLrGroups = []string{types.ClusterLBGroupName, types.ClusterRouterLBGroupName}
 	)
 	// setup global config
-	oldGateway := globalconfig.Gateway.Mode
-	oldClusterSubnet := globalconfig.Default.ClusterSubnets
-	globalconfig.Kubernetes.OVNEmptyLbEvents = true
-	globalconfig.IPv4Mode = true
-	globalconfig.IPv6Mode = true
+	oldGateway := config.Gateway.Mode
+	oldClusterSubnet := config.Default.ClusterSubnets
+	config.Kubernetes.OVNEmptyLbEvents = true
+	config.IPv4Mode = true
+	config.IPv6Mode = true
 	defer func() {
-		globalconfig.Kubernetes.OVNEmptyLbEvents = false
-		globalconfig.IPv4Mode = false
-		globalconfig.IPv6Mode = false
-		globalconfig.Gateway.Mode = oldGateway
-		globalconfig.Default.ClusterSubnets = oldClusterSubnet
+		config.Kubernetes.OVNEmptyLbEvents = false
+		config.IPv4Mode = false
+		config.IPv6Mode = false
+		config.Gateway.Mode = oldGateway
+		config.Default.ClusterSubnets = oldClusterSubnet
 	}()
 	_, cidr4, _ := net.ParseCIDR("10.128.0.0/16")
 	_, cidr6, _ := net.ParseCIDR("fe00:0:0:0:5555::0/64")
-	globalconfig.Default.ClusterSubnets = []globalconfig.CIDRNetworkEntry{{cidr4, 26}, {cidr6, 26}}
+	config.Default.ClusterSubnets = []config.CIDRNetworkEntry{{CIDR: cidr4, HostSubnetLength: 26}, {CIDR: cidr6, HostSubnetLength: 26}}
 	l3UDN, err := getSampleUDNNetInfo(ns, "layer3")
 	if err != nil {
 		t.Fatalf("Error creating UDNNetInfo: %v", err)
@@ -1473,14 +1466,14 @@ func TestSyncServices(t *testing.T) {
 				}
 
 				if tt.gatewayMode != "" {
-					globalconfig.Gateway.Mode = globalconfig.GatewayMode(tt.gatewayMode)
+					config.Gateway.Mode = config.GatewayMode(tt.gatewayMode)
 				} else {
-					globalconfig.Gateway.Mode = globalconfig.GatewayModeShared
+					config.Gateway.Mode = config.GatewayModeShared
 				}
 
 				if tt.enableIPv6 {
-					globalconfig.IPv6Mode = true
-					defer func() { globalconfig.IPv6Mode = false }()
+					config.IPv6Mode = true
+					defer func() { config.IPv6Mode = false }()
 				}
 
 				// Create services controller
@@ -1491,10 +1484,6 @@ func TestSyncServices(t *testing.T) {
 				if err != nil {
 					t.Fatalf("Error creating controller: %v", err)
 				}
-				if err := controller.nadController.Start(); err != nil {
-					t.Fatalf("Error starting NAD controller: %v", err)
-				}
-				defer controller.nadController.Stop()
 				defer controller.close()
 
 				// Add k8s objects
@@ -1654,33 +1643,6 @@ func clusterWideTCPServiceLoadBalancerNameForNetwork(ns string, serviceName stri
 	return netInfo.GetNetworkScopedLoadBalancerName(baseName)
 }
 
-func nodeSwitchRouterLoadBalancerNameForNetwork(nodeName string, serviceNamespace string, serviceName string, netInfo util.NetInfo) string {
-	baseName := fmt.Sprintf(
-		"Service_%s/%s_TCP_node_router+switch_%s",
-		serviceNamespace,
-		serviceName,
-		nodeName)
-	return netInfo.GetNetworkScopedLoadBalancerName(baseName)
-}
-
-func nodeSwitchTemplateLoadBalancerNameForNetwork(serviceNamespace string, serviceName string, addressFamily v1.IPFamily, netInfo util.NetInfo) string {
-	baseName := fmt.Sprintf(
-		"Service_%s/%s_TCP_node_switch_template_%s",
-		serviceNamespace,
-		serviceName,
-		addressFamily)
-	return netInfo.GetNetworkScopedLoadBalancerName(baseName)
-}
-
-func nodeRouterTemplateLoadBalancerNameForNetwork(serviceNamespace string, serviceName string, addressFamily v1.IPFamily, netInfo util.NetInfo) string {
-	baseName := fmt.Sprintf(
-		"Service_%s/%s_TCP_node_router_template_%s",
-		serviceNamespace,
-		serviceName,
-		addressFamily)
-	return netInfo.GetNetworkScopedLoadBalancerName(baseName)
-}
-
 func nodeMergedTemplateLoadBalancerName(serviceNamespace string, serviceName string, addressFamily v1.IPFamily) string {
 	return nodeMergedTemplateLoadBalancerNameForNetwork(serviceNamespace, serviceName, addressFamily, &util.DefaultNetInfo{})
 }
@@ -1724,12 +1686,6 @@ func templateServicesOptionsV6() map[string]string {
 	opts["template"] = "true"
 	opts["address-family"] = "ipv6"
 	return opts
-}
-
-func tcpGatewayRouterExternalIDs() map[string]string {
-	return map[string]string{
-		"TCP_lb_gateway_router": "",
-	}
 }
 
 func getExternalIDsForNetwork(network string) map[string]string {
@@ -1857,7 +1813,7 @@ func createTestNBGlobal(nbClient libovsdbclient.Client, zone string) error {
 	return nil
 }
 
-func deleteTestNBGlobal(nbClient libovsdbclient.Client, zone string) error {
+func deleteTestNBGlobal(nbClient libovsdbclient.Client) error {
 	p := func(nbGlobal *nbdb.NBGlobal) bool {
 		return true
 	}
