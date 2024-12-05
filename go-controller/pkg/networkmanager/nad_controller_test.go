@@ -12,10 +12,12 @@ import (
 
 	cnitypes "github.com/containernetworking/cni/pkg/types"
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/tools/cache"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/id"
 	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -452,11 +454,16 @@ func TestNADController(t *testing.T) {
 					ReconcilableNetInfo: &util.DefaultNetInfo{},
 				},
 			}
+			fakeClient := util.GetOVNClientset().GetClusterManagerClientset()
 			nadController := &nadController{
-				nads:              map[string]string{},
-				primaryNADs:       map[string]string{},
-				networkController: newNetworkController("", "", "", tcm, nil),
+				nads:               map[string]string{},
+				primaryNADs:        map[string]string{},
+				networkController:  newNetworkController("", "", "", tcm, nil),
+				networkIDAllocator: id.NewIDAllocator("NetworkIDs", MaxNetworks),
+				nadClient:          fakeClient.NetworkAttchDefClient,
 			}
+			err = nadController.networkIDAllocator.ReserveID(types.DefaultNetworkName, DefaultNetworkID)
+			g.Expect(err).ToNot(gomega.HaveOccurred())
 			netController := nadController.networkController
 
 			g.Expect(nadController.networkController.Start()).To(gomega.Succeed())
@@ -471,6 +478,8 @@ func TestNADController(t *testing.T) {
 					args.network.NADName = args.nad
 					nad, err = buildNAD(name, namespace, args.network)
 					g.Expect(err).ToNot(gomega.HaveOccurred())
+					_, err = fakeClient.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(namespace).Create(context.Background(), nad, v1.CreateOptions{})
+					g.Expect(err).To(gomega.Or(gomega.Not(gomega.HaveOccurred()), gomega.MatchError(errors.IsAlreadyExists, "AlreadyExists")))
 				}
 
 				err = nadController.syncNAD(args.nad, nad)
@@ -506,6 +515,9 @@ func TestNADController(t *testing.T) {
 							fmt.Sprintf("matching network config for network %s", name))
 						g.Expect(netController.networks[name].GetNADs()).To(gomega.ConsistOf(expected.nads),
 							fmt.Sprintf("matching NADs for network %s", name))
+						id, err := nadController.networkIDAllocator.AllocateID(name)
+						g.Expect(err).ToNot(gomega.HaveOccurred())
+						g.Expect(netController.networks[name].GetNetworkID()).To(gomega.Equal(id))
 
 						// test that the actual controllers have the expected config and NADs
 						if !netInfo.IsDefault() {
@@ -514,6 +526,7 @@ func TestNADController(t *testing.T) {
 								fmt.Sprintf("matching network config for network %s", name))
 							g.Expect(tcm.controllers[testNetworkKey].GetNADs()).To(gomega.ConsistOf(expected.nads),
 								fmt.Sprintf("matching NADs for network %s", name))
+							g.Expect(tcm.controllers[testNetworkKey].GetNetworkID()).To(gomega.Equal(id))
 							expectRunning = append(expectRunning, testNetworkKey)
 						}
 					}()
@@ -597,8 +610,8 @@ func TestSyncAll(t *testing.T) {
 			g.Expect(err).ToNot(gomega.HaveOccurred())
 			config.OVNKubernetesFeature.EnableNetworkSegmentation = true
 			config.OVNKubernetesFeature.EnableMultiNetwork = true
-			fakeClient := util.GetOVNClientset().GetOVNKubeControllerClientset()
-			wf, err := factory.NewOVNKubeControllerWatchFactory(fakeClient)
+			fakeClient := util.GetOVNClientset().GetClusterManagerClientset()
+			wf, err := factory.NewClusterManagerWatchFactory(fakeClient)
 			g.Expect(err).ToNot(gomega.HaveOccurred())
 
 			tcm := &testControllerManager{
@@ -611,6 +624,7 @@ func TestSyncAll(t *testing.T) {
 			controller, err := NewForCluster(
 				tcm,
 				wf,
+				fakeClient,
 				nil,
 			)
 			g.Expect(err).ToNot(gomega.HaveOccurred())

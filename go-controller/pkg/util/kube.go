@@ -18,6 +18,7 @@ import (
 	certificatesv1 "k8s.io/api/certificates/v1"
 	kapi "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -910,4 +911,23 @@ func getEndpointsFromEndpointSlices(endpointSlices []*discovery.EndpointSlice) [
 
 func GetConntrackZone() int {
 	return config.Default.ConntrackZone
+}
+
+// IsLastUpdatedByManager checks if an object was updated by the manager last,
+// as indicated by a set of managed fields.
+func IsLastUpdatedByManager(manager string, managedFields []metav1.ManagedFieldsEntry) bool {
+	var lastUpdateTheirs, lastUpdateOurs time.Time
+	for _, managedFieldEntry := range managedFields {
+		switch managedFieldEntry.Manager {
+		case manager:
+			if managedFieldEntry.Time.Time.After(lastUpdateOurs) {
+				lastUpdateOurs = managedFieldEntry.Time.Time
+			}
+		default:
+			if managedFieldEntry.Time.Time.After(lastUpdateTheirs) {
+				lastUpdateTheirs = managedFieldEntry.Time.Time
+			}
+		}
+	}
+	return lastUpdateOurs.After(lastUpdateTheirs)
 }
