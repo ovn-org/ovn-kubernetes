@@ -32,6 +32,7 @@ var (
 type NetInfo interface {
 	// static information, not expected to change.
 	GetNetworkName() string
+	GetNetworkID() int
 	IsDefault() bool
 	IsPrimaryNetwork() bool
 	IsSecondary() bool
@@ -97,6 +98,10 @@ type DefaultNetInfo struct {
 // from multiple sources that can change over time.
 type MutableNetInfo interface {
 	NetInfo
+
+	// SetNetworkID sets the network ID before any controller handles the
+	// network
+	SetNetworkID(id int)
 
 	// NADs referencing a network
 	SetNADs(nadName ...string)
@@ -209,11 +214,11 @@ func reconcilable(netInfo NetInfo) ReconcilableNetInfo {
 type mutableNetInfo struct {
 	sync.RWMutex
 
-	nads sets.Set[string]
+	// id of the network. It's mutable because is set on day-1 but it can't be
+	// changed or reconciled on day-2
+	id int
 
-	// Each network can be selected by multiple routeadvertisements each with a
-	// different target VRF and different selected node. Represent this through
-	// a map of node names to VRFs.
+	nads                     sets.Set[string]
 	podNetworkAdvertisements map[string][]string
 	eipAdvertisements        map[string][]string
 
@@ -247,7 +252,8 @@ func (l *mutableNetInfo) equals(r *mutableNetInfo) bool {
 	defer l.RUnlock()
 	r.RLock()
 	defer r.RUnlock()
-	return reflect.DeepEqual(l.nads, r.nads) &&
+	return reflect.DeepEqual(l.id, r.id) &&
+		reflect.DeepEqual(l.nads, r.nads) &&
 		reflect.DeepEqual(l.podNetworkAdvertisements, r.podNetworkAdvertisements) &&
 		reflect.DeepEqual(l.eipAdvertisements, r.eipAdvertisements)
 }
@@ -255,6 +261,7 @@ func (l *mutableNetInfo) equals(r *mutableNetInfo) bool {
 func (l *mutableNetInfo) copyFrom(r *mutableNetInfo) {
 	aux := mutableNetInfo{}
 	r.RLock()
+	aux.id = r.id
 	aux.nads = r.nads.Clone()
 	aux.setPodNetworkAdvertisedOnVRFs(r.podNetworkAdvertisements)
 	aux.setEgressIPAdvertisedAtNodes(r.eipAdvertisements)
@@ -262,10 +269,21 @@ func (l *mutableNetInfo) copyFrom(r *mutableNetInfo) {
 	r.RUnlock()
 	l.Lock()
 	defer l.Unlock()
+	l.id = aux.id
 	l.nads = aux.nads
 	l.podNetworkAdvertisements = aux.podNetworkAdvertisements
 	l.eipAdvertisements = aux.eipAdvertisements
 	l.namespaces = aux.namespaces
+}
+
+func (nInfo *mutableNetInfo) GetNetworkID() int {
+	return nInfo.id
+}
+
+func (nInfo *mutableNetInfo) SetNetworkID(id int) {
+	nInfo.Lock()
+	defer nInfo.Unlock()
+	nInfo.id = id
 }
 
 func (nInfo *mutableNetInfo) SetPodNetworkAdvertisedVRFs(podAdvertisements map[string][]string) {
@@ -851,6 +869,7 @@ func newLayer3NetConfInfo(netconf *ovncnitypes.NetConf) (MutableNetInfo, error) 
 		joinSubnets:    joinSubnets,
 		mtu:            netconf.MTU,
 		mutableNetInfo: mutableNetInfo{
+			id:   InvalidID,
 			nads: sets.Set[string]{},
 		},
 	}
@@ -877,6 +896,7 @@ func newLayer2NetConfInfo(netconf *ovncnitypes.NetConf) (MutableNetInfo, error) 
 		mtu:                netconf.MTU,
 		allowPersistentIPs: netconf.AllowPersistentIPs,
 		mutableNetInfo: mutableNetInfo{
+			id:   InvalidID,
 			nads: sets.Set[string]{},
 		},
 	}
@@ -900,6 +920,7 @@ func newLocalnetNetConfInfo(netconf *ovncnitypes.NetConf) (MutableNetInfo, error
 		allowPersistentIPs:  netconf.AllowPersistentIPs,
 		physicalNetworkName: netconf.PhysicalNetworkName,
 		mutableNetInfo: mutableNetInfo{
+			id:   InvalidID,
 			nads: sets.Set[string]{},
 		},
 	}
@@ -1053,6 +1074,18 @@ func newNetInfo(netconf *ovncnitypes.NetConf) (MutableNetInfo, error) {
 		}
 	}
 	return ni, nil
+}
+
+// GetAnnotatedNetworkName gets the network name annotated by cluster manager
+// nad controller
+func GetAnnotatedNetworkName(netattachdef *nettypes.NetworkAttachmentDefinition) string {
+	if netattachdef == nil {
+		return ""
+	}
+	if netattachdef.Name == types.DefaultNetworkName && netattachdef.Namespace == config.Kubernetes.OVNConfigNamespace {
+		return types.DefaultNetworkName
+	}
+	return netattachdef.Annotations[types.OvnNetworkNameAnnotation]
 }
 
 // ParseNADInfo parses config in NAD spec and return a NetAttachDefInfo object for secondary networks

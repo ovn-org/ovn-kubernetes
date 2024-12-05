@@ -39,7 +39,7 @@ var _ = ginkgo.Describe("Cluster manager EndpointSlice mirror controller", func(
 		fakeClient = util.GetOVNClientset(objects...).GetClusterManagerClientset()
 		wf, err := factory.NewClusterManagerWatchFactory(fakeClient)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		networkManager, err = networkmanager.NewForCluster(&testnm.FakeControllerManager{}, wf, nil)
+		networkManager, err = networkmanager.NewForCluster(&testnm.FakeControllerManager{}, wf, fakeClient, nil)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		controller, err = NewController(fakeClient, wf, networkManager.Interface())
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
