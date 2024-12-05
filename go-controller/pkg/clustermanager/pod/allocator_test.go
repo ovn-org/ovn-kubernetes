@@ -537,6 +537,8 @@ func TestPodAllocator_reconcileForNAD(t *testing.T) {
 				mock.AnythingOfType(fmt.Sprintf("%T", &ipamclaimsapi.IPAMClaim{})),
 			).Return(nil)
 
+			kubeMock.On("GetNode", mock.AnythingOfType("string")).Return(&corev1.Node{}, nil)
+
 			netConf := &ovncnitypes.NetConf{
 				Topology:           types.Layer2Topology,
 				AllowPersistentIPs: tt.ipam && tt.args.ipamClaim != nil,

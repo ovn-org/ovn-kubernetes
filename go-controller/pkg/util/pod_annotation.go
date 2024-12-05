@@ -539,6 +539,7 @@ func hairpinMasqueradeIPToRoute(isIPv6 bool, gatewayIP net.IP) PodRoute {
 // with the gateways derived from the allocated IPs
 func AddRoutesGatewayIP(
 	netinfo NetInfo,
+	node *v1.Node,
 	pod *v1.Pod,
 	podAnnotation *PodAnnotation,
 	network *nadapi.NetworkSelectionElement) error {
@@ -573,6 +574,13 @@ func AddRoutesGatewayIP(
 				if network != nil && len(network.GatewayRequest) == 0 { // if specific default route for pod was not requested then add gatewayIP
 					podAnnotation.Gateways = append(podAnnotation.Gateways, gatewayIPnet.IP)
 				}
+			}
+			if _, isIPv6Mode := netinfo.IPMode(); isIPv6Mode {
+				joinAddrs, err := ParseNodeGatewayRouterJoinAddrs(node, netinfo.GetNetworkName())
+				if err != nil {
+					return err
+				}
+				podAnnotation.IPv6LLAGateway = HWAddrToIPv6LLA(IPAddrToHWAddr(joinAddrs[0].IP))
 			}
 			return nil
 		case types.Layer3Topology:
