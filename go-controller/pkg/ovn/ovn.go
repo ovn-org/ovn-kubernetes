@@ -434,17 +434,9 @@ func nodeSubnetChanged(oldNode, node *kapi.Node, netName string) bool {
 }
 
 func joinCIDRChanged(oldNode, node *kapi.Node, netName string) bool {
-	var oldCIDRs, newCIDRs map[string]json.RawMessage
-
-	if err := json.Unmarshal([]byte(oldNode.Annotations[util.OVNNodeGRLRPAddrs]), &oldCIDRs); err != nil {
-		klog.Errorf("Failed to unmarshal old node %s annotation: %v", oldNode.Name, err)
-		return true
-	}
-	if err := json.Unmarshal([]byte(node.Annotations[util.OVNNodeGRLRPAddrs]), &newCIDRs); err != nil {
-		klog.Errorf("Failed to unmarshal new node %s annotation: %v", node.Name, err)
-		return true
-	}
-	return !bytes.Equal(oldCIDRs[netName], newCIDRs[netName])
+	oldCIDRs, _ := util.ExtractJSONStringValue(oldNode.Annotations[util.OVNNodeGRLRPAddrs], netName)
+	newCIDRs, _ := util.ExtractJSONStringValue(node.Annotations[util.OVNNodeGRLRPAddrs], netName)
+	return newCIDRs != oldCIDRs
 }
 
 func primaryAddrChanged(oldNode, newNode *kapi.Node) bool {

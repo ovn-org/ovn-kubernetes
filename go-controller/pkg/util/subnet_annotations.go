@@ -1,14 +1,13 @@
 package util
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"net"
+	"regexp"
 
 	kapi "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/klog/v2"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -141,18 +140,47 @@ func NodeSubnetAnnotationChanged(oldNode, newNode *v1.Node) bool {
 	return oldNode.Annotations[ovnNodeSubnets] != newNode.Annotations[ovnNodeSubnets]
 }
 
-func NodeSubnetAnnotationChangedForNetwork(oldNode, newNode *v1.Node, netName string) bool {
-	var oldSubnets, newSubnets map[string]json.RawMessage
+// ExtractJSONStringValue tries to extract a JSON string value for the provided key.
+// It is faster than unmarshalling but should not be used unless strictly necessary.
+// The function only looks for quoted values.
+// TODO: this function assumes valid JSON, it doesn't work for arrays yet
+func ExtractJSONStringValue(rawJSON, key string) (string, error) {
+	re := regexp.MustCompile(`"` + key + `"\s*:\s*"(.*?)"`)
+	matches := re.FindStringSubmatch(rawJSON)
+	if len(matches) != 2 {
+		return "", fmt.Errorf("failed to extract JSON string value %v from %q", matches, key)
+	}
+	return matches[1], nil
+}
 
-	if err := json.Unmarshal([]byte(oldNode.Annotations[ovnNodeSubnets]), &oldSubnets); err != nil {
-		klog.Errorf("Failed to unmarshal old node %s annotation: %v", oldNode.Name, err)
-		return true
+func ExtractJSONArrayValue(rawJSON, key string) (string, error) {
+	re := regexp.MustCompile(`"` + key + `"\s*:\s*\[(.*?)\]`)
+	matches := re.FindStringSubmatch(rawJSON)
+	if len(matches) != 2 {
+		return "", fmt.Errorf("failed to extract JSON string value %v from %q", matches, key)
 	}
-	if err := json.Unmarshal([]byte(newNode.Annotations[ovnNodeSubnets]), &newSubnets); err != nil {
-		klog.Errorf("Failed to unmarshal new node %s annotation: %v", newNode.Name, err)
-		return true
-	}
-	return !bytes.Equal(oldSubnets[netName], newSubnets[netName])
+	return matches[1], nil
+}
+
+// oldSubnet, err := ExtractJSONStringValue(oldNode.Annotations[ovnNodeSubnets], netName)
+//
+//	if err != nil {
+//		klog.Errorf("%s", err)
+//		return true
+//	}
+//
+// newSubnet, err := ExtractJSONStringValue(newNode.Annotations[ovnNodeSubnets], netName)
+//
+//	if err != nil {
+//		klog.Errorf("%s", err)
+//		return true
+//	}
+//
+// return oldSubnet != newSubnet
+func NodeSubnetAnnotationChangedForNetwork(oldNode, newNode *v1.Node, netName string) bool {
+	oldSubnet, _ := ExtractJSONArrayValue(oldNode.Annotations[ovnNodeSubnets], netName)
+	newSubnet, _ := ExtractJSONArrayValue(newNode.Annotations[ovnNodeSubnets], netName)
+	return oldSubnet != newSubnet
 }
 
 // UpdateNodeHostSubnetAnnotation updates a "k8s.ovn.org/node-subnets" annotation for network "netName",

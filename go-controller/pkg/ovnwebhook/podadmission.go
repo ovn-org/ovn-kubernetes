@@ -37,8 +37,9 @@ var interconnectPodAnnotations = map[string]checkPodAnnot{
 
 		podAnnot, err := util.UnmarshalPodAnnotation(map[string]string{util.OvnPodAnnotationName: v.value}, types.DefaultNetworkName)
 		if err != nil {
-			return err
+			return nil
 		}
+
 		node, err := nodeLister.Get(nodeName)
 		if err != nil {
 			return fmt.Errorf("could not get info on node %s from client: %w", nodeName, err)
