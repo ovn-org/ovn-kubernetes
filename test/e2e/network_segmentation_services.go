@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/netip"
 	"time"
 
 	nadclient "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/typed/k8s.cni.cncf.io/v1"
@@ -24,6 +25,7 @@ import (
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
 	e2eservice "k8s.io/kubernetes/test/e2e/framework/service"
 	e2eskipper "k8s.io/kubernetes/test/e2e/framework/skipper"
+	"k8s.io/utils/ptr"
 )
 
 var _ = Describe("Network Segmentation: services", func() {
@@ -92,6 +94,42 @@ var _ = Describe("Network Segmentation: services", func() {
 				nodes, err := e2enode.GetBoundedReadySchedulableNodes(context.TODO(), f.ClientSet, 3)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(len(nodes.Items)).To(BeNumerically(">", 2))
+
+				By("Adding extra address to nodes")
+				readyNodes, err := e2enode.GetReadySchedulableNodes(context.TODO(), f.ClientSet)
+
+				// Find last node address
+				var lastAddr *netip.Addr
+				for _, internalIP := range internalIPsFromNodes(readyNodes.Items) {
+					internalAddr, err := netip.ParseAddr(internalIP)
+					//TODO IPv6
+					if internalAddr.Is6() {
+						continue
+					}
+					Expect(err).ToNot(HaveOccurred())
+					if lastAddr == nil || lastAddr.Less(internalAddr) {
+						lastAddr = &internalAddr
+					}
+				}
+				externalIPsByNode := map[string][]string{}
+				// Configure extra addresses
+				for _, node := range nodes.Items {
+					lastAddr = ptr.To(lastAddr.Next())
+					//TODO IPv6
+					//TODO: Discover the suffix ?
+					externalIP := lastAddr.String() + "/16"
+					output, err := runCommand(containerRuntime, "exec", node.Name, "ip", "a", "add", externalIP, "dev", "breth0")
+					Expect(err).ToNot(HaveOccurred(), output)
+					externalIPsByNode[node.Name] = []string{externalIP}
+				}
+				DeferCleanup(func() {
+					for nodeName, externalIPs := range externalIPsByNode {
+						for _, externalIP := range externalIPs {
+							output, err := runCommand(containerRuntime, "exec", nodeName, "ip", "a", "del", externalIP, "dev", "breth0")
+							Expect(err).ToNot(HaveOccurred(), output)
+						}
+					}
+				})
 
 				By("Selecting nodes for pods and service")
 				serverPodNodeName := nodes.Items[0].Name
@@ -228,10 +266,14 @@ ips=$(ip -o addr show dev $iface| grep global |awk '{print $4}' | cut -d/ -f1 | 
 				}
 
 				By("Verify that isolation from default network client to primary UDN external IPs services is only done at node where client is running")
-				checkNoConnectionToExternalIPs(f, defaultClient, udnExternalIPsService, internalIPsFromLocalNode(nodes.Items, defaultClient))
+				localIPs, err := externalIPsFromLocalNode(externalIPsByNode, defaultClient)
+				Expect(err).ToNot(HaveOccurred())
+				checkNoConnectionToExternalIPs(f, defaultClient, udnExternalIPsService, localIPs)
 				// FIXME(quique): Remove this check when Local Gateway external->service support is implemented.
 				if !IsGatewayModeLocal() {
-					checkConnectionToExternalIPs(f, defaultClient, udnExternalIPsService, internalIPsFromRemoteNode(nodes.Items, defaultClient), udnServerPod.Name)
+					remoteIPs, err := externalIPsFromRemoteNode(externalIPsByNode, defaultClient)
+					Expect(err).ToNot(HaveOccurred())
+					checkConnectionToExternalIPs(f, defaultClient, udnExternalIPsService, remoteIPs, udnServerPod.Name)
 				}
 
 				// UDN -> Default network
@@ -287,8 +329,9 @@ ips=$(ip -o addr show dev $iface| grep global |awk '{print $4}' | cut -d/ -f1 | 
 								Protocol:   v1.ProtocolUDP,
 							},
 						},
-						Selector:       defaultLabels,
-						ExternalIPs:    internalIPsFromNodes(nodes.Items),
+						Selector:    defaultLabels,
+						ExternalIPs: []string{"172.18.0.31", "172.18.0.32", "172.18.0.33"},
+						//ExternalIPs:    internalIPsFromNodes(nodes.Items),
 						IPFamilyPolicy: &policy,
 					},
 				}
@@ -296,8 +339,12 @@ ips=$(ip -o addr show dev $iface| grep global |awk '{print $4}' | cut -d/ -f1 | 
 				Expect(err).NotTo(HaveOccurred())
 
 				By("Verify isolation between UDN client and the default network external IPs service")
-				checkConnectionToExternalIPs(f, udnClientPod2, defaultExternalIPsService, internalIPsFromRemoteNode(nodes.Items, udnClientPod2), defaultServerPod.Name)
-				checkNoConnectionToExternalIPs(f, udnClientPod2, defaultExternalIPsService, internalIPsFromLocalNode(nodes.Items, udnClientPod2))
+				remoteIPs, err := externalIPsFromRemoteNode(externalIPsByNode, udnClientPod2)
+				Expect(err).ToNot(HaveOccurred())
+				checkConnectionToExternalIPs(f, udnClientPod2, defaultExternalIPsService, remoteIPs, defaultServerPod.Name)
+				localIPs, err = externalIPsFromLocalNode(externalIPsByNode, udnClientPod2)
+				Expect(err).ToNot(HaveOccurred())
+				checkNoConnectionToExternalIPs(f, udnClientPod2, defaultExternalIPsService, localIPs)
 
 				// Make sure that restarting OVNK after applying a UDN with an affected service won't result
 				// in OVNK in CLBO state https://issues.redhat.com/browse/OCPBUGS-41499
@@ -620,34 +667,24 @@ func internalIPsFromNodes(nodes []corev1.Node) []string {
 	return internalIPs
 }
 
-func internalIPsFromLocalNode(nodes []corev1.Node, pod *corev1.Pod) []string {
-	internalIPs := []string{}
-	for _, node := range nodes {
-		if pod.Spec.NodeName != node.Name {
-			continue
-		}
-		for _, nodeAddress := range node.Status.Addresses {
-			if nodeAddress.Type != corev1.NodeInternalIP {
-				continue
-			}
-			internalIPs = append(internalIPs, nodeAddress.Address)
-		}
+func externalIPsFromLocalNode(externalIPsByNode map[string][]string, pod *corev1.Pod) ([]string, error) {
+	nodeExternalIPs, ok := externalIPsByNode[pod.Spec.NodeName]
+	if !ok {
+		return nil, fmt.Errorf("missing external ip for local node %s", pod.Spec.NodeName)
 	}
-	return internalIPs
+	return nodeExternalIPs, nil
 }
 
-func internalIPsFromRemoteNode(nodes []corev1.Node, pod *corev1.Pod) []string {
-	internalIPs := []string{}
-	for _, node := range nodes {
-		if pod.Spec.NodeName == node.Name {
+func externalIPsFromRemoteNode(externalIPsByNode map[string][]string, pod *corev1.Pod) ([]string, error) {
+	externalIPs := []string{}
+	for nodeName, nodeExternalIPs := range externalIPsByNode {
+		if nodeName == pod.Spec.NodeName {
 			continue
 		}
-		for _, nodeAddress := range node.Status.Addresses {
-			if nodeAddress.Type != corev1.NodeInternalIP {
-				continue
-			}
-			internalIPs = append(internalIPs, nodeAddress.Address)
-		}
+		externalIPs = append(externalIPs, nodeExternalIPs...)
 	}
-	return internalIPs
+	if len(externalIPs) == 0 {
+		return nil, fmt.Errorf("missing external IPs for remote nodes")
+	}
+	return externalIPs, nil
 }
