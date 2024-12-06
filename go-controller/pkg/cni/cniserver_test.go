@@ -23,7 +23,7 @@ import (
 
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
-	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
@@ -33,7 +33,7 @@ func clientDoCNI(t *testing.T, client *http.Client, req *Request) ([]byte, int) 
 		t.Fatalf("failed to marshal CNI request %v: %v", req, err)
 	}
 
-	url := fmt.Sprintf("http://dummy/")
+	url := "http://dummy/"
 	resp, err := client.Post(url, "application/json", bytes.NewReader(data))
 	if err != nil {
 		t.Fatalf("failed to send CNI request: %v", err)
@@ -49,7 +49,7 @@ func clientDoCNI(t *testing.T, client *http.Client, req *Request) ([]byte, int) 
 
 var expectedResult cnitypes.Result
 
-func serverHandleCNI(request *PodRequest, clientset *ClientSet, kubeAuth *KubeAPIAuth, nadController *nad.NetAttachDefinitionController) ([]byte, error) {
+func serverHandleCNI(request *PodRequest, clientset *ClientSet, kubeAuth *KubeAPIAuth, networkManager networkmanager.Interface) ([]byte, error) {
 	if request.Command == CNIAdd {
 		return json.Marshal(&expectedResult)
 	} else if request.Command == CNIDel || request.Command == CNIUpdate || request.Command == CNICheck {
@@ -91,7 +91,7 @@ func TestCNIServer(t *testing.T) {
 		t.Fatalf("failed to start watch factory: %v", err)
 	}
 
-	s, err := NewCNIServer(wf, fakeClient, nil)
+	s, err := NewCNIServer(wf, fakeClient, networkmanager.Default().Interface())
 	if err != nil {
 		t.Fatalf("error creating CNI server: %v", err)
 	}

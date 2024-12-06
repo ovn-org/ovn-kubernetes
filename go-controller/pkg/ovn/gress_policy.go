@@ -56,7 +56,7 @@ type gressPolicy struct {
 	ipv6Mode bool
 }
 
-func newGressPolicy(policyType knet.PolicyType, idx int, namespace, name, controllerName string, isNetPolStateless bool, netInfo util.BasicNetInfo) *gressPolicy {
+func newGressPolicy(policyType knet.PolicyType, idx int, namespace, name, controllerName string, isNetPolStateless bool, netInfo util.NetInfo) *gressPolicy {
 	ipv4Mode, ipv6Mode := netInfo.IPMode()
 	return &gressPolicy{
 		controllerName:    controllerName,
