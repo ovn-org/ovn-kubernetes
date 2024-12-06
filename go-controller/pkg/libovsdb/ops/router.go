@@ -581,6 +581,30 @@ func FindLogicalRouterStaticRoutesWithPredicate(nbClient libovsdbclient.Client, 
 	return found, err
 }
 
+// GetRouterLogicalRouterStaticRoutesWithPredicate looks up logical router
+// static routes associated to the provided logical router from the cache based
+// on a given predicate
+func GetRouterLogicalRouterStaticRoutesWithPredicate(nbClient libovsdbclient.Client, router *nbdb.LogicalRouter, p logicalRouterStaticRoutePredicate) ([]*nbdb.LogicalRouterStaticRoute, error) {
+	r, err := GetLogicalRouter(nbClient, router)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get router: %s, error: %w", router.Name, err)
+	}
+
+	lrsrs := []*nbdb.LogicalRouterStaticRoute{}
+	for _, uuid := range r.StaticRoutes {
+		lrsr := &nbdb.LogicalRouterStaticRoute{UUID: uuid}
+		err := nbClient.Get(context.Background(), lrsr)
+		if err != nil {
+			return nil, err
+		}
+		if p(lrsr) {
+			lrsrs = append(lrsrs, lrsr)
+		}
+	}
+
+	return lrsrs, nil
+}
+
 // CreateOrUpdateLogicalRouterStaticRoutesWithPredicateOps looks up a logical
 // router static route from the cache based on a given predicate. If it does not
 // exist, it creates the provided logical router static route. If it does, it
@@ -747,9 +771,9 @@ func DeleteLogicalRouterStaticRoutesWithPredicateOps(nbClient libovsdbclient.Cli
 	return m.DeleteOps(ops, opModels...)
 }
 
-// DeleteLogicalRouterStaticRoutes deletes the logical router static routes and
-// removes them from the provided logical router
-func DeleteLogicalRouterStaticRoutes(nbClient libovsdbclient.Client, routerName string, lrsrs ...*nbdb.LogicalRouterStaticRoute) error {
+// DeleteLogicalRouterStaticRoutesOps deletes the logical router static routes and
+// returns the ops to remove them from the provided logical router
+func DeleteLogicalRouterStaticRoutesOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, routerName string, lrsrs ...*nbdb.LogicalRouterStaticRoute) ([]libovsdb.Operation, error) {
 	router := &nbdb.LogicalRouter{
 		Name:         routerName,
 		StaticRoutes: make([]string, 0, len(lrsrs)),
@@ -757,26 +781,32 @@ func DeleteLogicalRouterStaticRoutes(nbClient libovsdbclient.Client, routerName 
 
 	opModels := make([]operationModel, 0, len(lrsrs)+1)
 	for _, lrsr := range lrsrs {
-		lrsr := lrsr
 		router.StaticRoutes = append(router.StaticRoutes, lrsr.UUID)
-		opModel := operationModel{
-			Model:       lrsr,
-			ErrNotFound: false,
-			BulkOp:      false,
-		}
-		opModels = append(opModels, opModel)
 	}
 
 	opModel := operationModel{
 		Model:            router,
 		OnModelMutations: []interface{}{&router.StaticRoutes},
-		ErrNotFound:      true,
+		ErrNotFound:      false,
 		BulkOp:           false,
 	}
 	opModels = append(opModels, opModel)
 
 	m := newModelClient(nbClient)
-	return m.Delete(opModels...)
+	return m.DeleteOps(ops, opModels...)
+}
+
+// DeleteLogicalRouterStaticRoutes deletes the logical router static routes and
+// removes them from the provided logical router
+func DeleteLogicalRouterStaticRoutes(nbClient libovsdbclient.Client, routerName string, lrsrs ...*nbdb.LogicalRouterStaticRoute) error {
+	var ops []libovsdb.Operation
+	var err error
+	ops, err = DeleteLogicalRouterStaticRoutesOps(nbClient, ops, routerName, lrsrs...)
+	if err != nil {
+		return err
+	}
+	_, err = TransactAndCheck(nbClient, ops)
+	return err
 }
 
 // BFD ops

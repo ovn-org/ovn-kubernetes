@@ -18,7 +18,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/persistentips"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/nad"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -37,6 +36,7 @@ import (
 
 	kubemocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube/mocks"
 	v1mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/client-go/listers/core/v1"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/networkmanager"
 )
 
 type testPod struct {
@@ -558,7 +558,9 @@ func TestPodAllocator_reconcileForNAD(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Invalid netConf")
 			}
-			netInfo.AddNADs("namespace/nad")
+			mutableNetInfo := util.NewMutableNetInfo(netInfo)
+			mutableNetInfo.AddNADs("namespace/nad")
+			netInfo = mutableNetInfo
 
 			var ipamClaimsReconciler persistentips.PersistentAllocations
 			if tt.ipam && tt.args.ipamClaim != nil {
@@ -592,7 +594,7 @@ func TestPodAllocator_reconcileForNAD(t *testing.T) {
 				}
 			}
 
-			nadController := &nad.FakeNADController{PrimaryNetworks: nadNetworks}
+			fakeNetworkManager := &networkmanager.FakeNetworkManager{PrimaryNetworks: nadNetworks}
 
 			fakeRecorder := record.NewFakeRecorder(10)
 
@@ -607,8 +609,8 @@ func TestPodAllocator_reconcileForNAD(t *testing.T) {
 				releasedPods:           map[string]sets.Set[string]{},
 				releasedPodsMutex:      sync.Mutex{},
 				ipamClaimsReconciler:   ipamClaimsReconciler,
+				networkManager:         fakeNetworkManager,
 				recorder:               fakeRecorder,
-				nadController:          nadController,
 			}
 
 			var old, new *corev1.Pod

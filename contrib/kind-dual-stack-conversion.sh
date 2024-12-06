@@ -33,7 +33,7 @@ convert_cni() {
   # restart ovnkube-master
   # FIXME: kubectl rollout restart deployment leaves the old pod hanging 
   # as workaround we delete the master directly. When deployed with
-  # OVN_INTERCONNECT_ENABLE=true, the db and ncm pods need that too.
+  # OVN_INTERCONNECT_ENABLE=true, the db and cm pods need that too.
   # Depending on how kind was deployed, the pods have different labels.
   kubectl -n ovn-kubernetes delete pod -l name=ovnkube-db ||:
   kubectl -n ovn-kubernetes delete pod -l name=ovnkube-zone-controller ||:
