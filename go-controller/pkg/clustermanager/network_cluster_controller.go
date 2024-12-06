@@ -17,7 +17,6 @@ import (
 
 	ipamclaimsapi "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/id"
-	idallocator "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/id"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip/subnet"
 	annotationalloc "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/pod"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/node"
@@ -25,7 +24,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	networkAttachDefController "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/persistentips"
 	objretry "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -61,11 +60,10 @@ type networkClusterController struct {
 	tunnelIDAllocator   id.Allocator
 	podAllocator        *pod.PodAllocator
 	nodeAllocator       *node.NodeAllocator
-	networkIDAllocator  idallocator.NamedAllocator
 	ipamClaimReconciler *persistentips.IPAMClaimReconciler
 	subnetAllocator     subnet.Allocator
 
-	nadController *networkAttachDefController.NetAttachDefinitionController
+	networkManager networkmanager.Interface
 
 	// event recorder used to post events to k8s
 	recorder record.EventRecorder
@@ -79,12 +77,17 @@ type networkClusterController struct {
 	// To avoid changing that error report with every update, we store reported error node.
 	reportedErrorNode string
 
-	util.NetInfo
+	util.ReconcilableNetInfo
 }
 
-func newNetworkClusterController(networkIDAllocator idallocator.NamedAllocator, netInfo util.NetInfo,
-	ovnClient *util.OVNClusterManagerClientset, wf *factory.WatchFactory, recorder record.EventRecorder,
-	nadController *networkAttachDefController.NetAttachDefinitionController, errorReporter NetworkStatusReporter) *networkClusterController {
+func newNetworkClusterController(
+	netInfo util.NetInfo,
+	ovnClient *util.OVNClusterManagerClientset,
+	wf *factory.WatchFactory,
+	recorder record.EventRecorder,
+	networkManager networkmanager.Interface,
+	errorReporter NetworkStatusReporter,
+) *networkClusterController {
 	kube := &kube.KubeOVN{
 		Kube: kube.Kube{
 			KClient: ovnClient.KubeClient,
@@ -95,17 +98,16 @@ func newNetworkClusterController(networkIDAllocator idallocator.NamedAllocator, 
 	wg := &sync.WaitGroup{}
 
 	ncc := &networkClusterController{
-		NetInfo:            netInfo,
-		watchFactory:       wf,
-		kube:               kube,
-		stopChan:           make(chan struct{}),
-		wg:                 wg,
-		networkIDAllocator: networkIDAllocator,
-		recorder:           recorder,
-		nadController:      nadController,
-		statusReporter:     errorReporter,
-		nodeErrors:         make(map[string]string),
-		nodeErrorsLock:     sync.Mutex{},
+		ReconcilableNetInfo: util.NewReconcilableNetInfo(netInfo),
+		watchFactory:        wf,
+		kube:                kube,
+		stopChan:            make(chan struct{}),
+		wg:                  wg,
+		recorder:            recorder,
+		networkManager:      networkManager,
+		statusReporter:      errorReporter,
+		nodeErrors:          make(map[string]string),
+		nodeErrorsLock:      sync.Mutex{},
 	}
 
 	return ncc
@@ -114,7 +116,7 @@ func newNetworkClusterController(networkIDAllocator idallocator.NamedAllocator, 
 func newDefaultNetworkClusterController(netInfo util.NetInfo, ovnClient *util.OVNClusterManagerClientset, wf *factory.WatchFactory, recorder record.EventRecorder) *networkClusterController {
 	// use an allocator that can only allocate a single network ID for the
 	// defaiult network
-	networkIDAllocator, err := idallocator.NewIDAllocator(types.DefaultNetworkName, 1)
+	networkIDAllocator, err := id.NewIDAllocator(types.DefaultNetworkName, 1)
 	if err != nil {
 		panic(fmt.Errorf("could not build ID allocator for default network: %w", err))
 	}
@@ -124,8 +126,7 @@ func newDefaultNetworkClusterController(netInfo util.NetInfo, ovnClient *util.OV
 		panic(fmt.Errorf("could not reserve default network ID: %w", err))
 	}
 
-	namedIDAllocator := networkIDAllocator.ForName(types.DefaultNetworkName)
-	return newNetworkClusterController(namedIDAllocator, netInfo, ovnClient, wf, recorder, nil, nil)
+	return newNetworkClusterController(netInfo, ovnClient, wf, recorder, networkmanager.Default().Interface(), nil)
 }
 
 func (ncc *networkClusterController) hasPodAllocation() bool {
@@ -159,8 +160,8 @@ func (ncc *networkClusterController) hasNodeAllocation() bool {
 
 func (ncc *networkClusterController) allowPersistentIPs() bool {
 	return config.OVNKubernetesFeature.EnablePersistentIPs &&
-		util.DoesNetworkRequireIPAM(ncc.NetInfo) &&
-		util.AllowsPersistentIPs(ncc.NetInfo)
+		util.DoesNetworkRequireIPAM(ncc.GetNetInfo()) &&
+		util.AllowsPersistentIPs(ncc.GetNetInfo())
 }
 
 func (ncc *networkClusterController) init() error {
@@ -169,12 +170,10 @@ func (ncc *networkClusterController) init() error {
 		return fmt.Errorf("failed to reset network status: %w", err)
 	}
 
-	networkID, err := ncc.networkIDAllocator.AllocateID()
-	if err != nil {
-		return err
-	}
+	networkID := ncc.GetNetworkID()
 
-	if util.DoesNetworkRequireTunnelIDs(ncc.NetInfo) {
+	var err error
+	if util.DoesNetworkRequireTunnelIDs(ncc.GetNetInfo()) {
 		ncc.tunnelIDAllocator, err = id.NewIDAllocator(ncc.GetNetworkName(), types.MaxLogicalPortTunnelKey)
 		if err != nil {
 			return fmt.Errorf("failed to create new id allocator for network %s: %w", ncc.GetNetworkName(), err)
@@ -213,7 +212,7 @@ func (ncc *networkClusterController) init() error {
 	if ncc.hasNodeAllocation() {
 		ncc.retryNodes = ncc.newRetryFramework(factory.NodeType, true)
 
-		ncc.nodeAllocator = node.NewNodeAllocator(networkID, ncc.NetInfo, ncc.watchFactory.NodeCoreInformer().Lister(), ncc.kube, ncc.tunnelIDAllocator)
+		ncc.nodeAllocator = node.NewNodeAllocator(networkID, ncc.GetNetInfo(), ncc.watchFactory.NodeCoreInformer().Lister(), ncc.kube, ncc.tunnelIDAllocator)
 		err := ncc.nodeAllocator.Init()
 		if err != nil {
 			return fmt.Errorf("failed to initialize host subnet ip allocator: %w", err)
@@ -222,9 +221,9 @@ func (ncc *networkClusterController) init() error {
 
 	if ncc.hasPodAllocation() {
 		ncc.retryPods = ncc.newRetryFramework(factory.PodType, true)
-		ipAllocator, err := newIPAllocatorForNetwork(ncc.NetInfo)
+		ipAllocator, err := newIPAllocatorForNetwork(ncc.GetNetInfo())
 		if err != nil {
-			return fmt.Errorf("could not initialize the IP allocator for network %q: %w", ncc.NetInfo.GetNetworkName(), err)
+			return fmt.Errorf("could not initialize the IP allocator for network %q: %w", ncc.GetNetworkName(), err)
 		}
 		ncc.subnetAllocator = ipAllocator
 
@@ -237,21 +236,28 @@ func (ncc *networkClusterController) init() error {
 			ncc.retryIPAMClaims = ncc.newRetryFramework(factory.IPAMClaimsType, true)
 			ncc.ipamClaimReconciler = persistentips.NewIPAMClaimReconciler(
 				ncc.kube,
-				ncc.NetInfo,
+				ncc.GetNetInfo(),
 				ncc.watchFactory.IPAMClaimsInformer().Lister(),
 			)
 			ipamClaimsReconciler = ncc.ipamClaimReconciler
 		}
 
 		podAllocationAnnotator = annotationalloc.NewPodAnnotationAllocator(
-			ncc.NetInfo,
+			ncc.GetNetInfo(),
 			ncc.watchFactory.PodCoreInformer().Lister(),
 			ncc.kube,
 			ipamClaimsReconciler,
 		)
 
-		ncc.podAllocator = pod.NewPodAllocator(ncc.NetInfo, podAllocationAnnotator, ipAllocator,
-			ipamClaimsReconciler, ncc.nadController, ncc.recorder, ncc.tunnelIDAllocator)
+		ncc.podAllocator = pod.NewPodAllocator(
+			ncc.GetNetInfo(),
+			podAllocationAnnotator,
+			ipAllocator,
+			ipamClaimsReconciler,
+			ncc.networkManager,
+			ncc.recorder,
+			ncc.tunnelIDAllocator,
+		)
 		if err := ncc.podAllocator.Init(); err != nil {
 			return fmt.Errorf("failed to initialize pod ip allocator: %w", err)
 		}
@@ -312,7 +318,7 @@ func (ncc *networkClusterController) updateNetworkStatus(nodeName string, handle
 		})
 	}
 
-	netName := ncc.NetInfo.GetNetworkName()
+	netName := ncc.GetNetworkName()
 	if err := ncc.statusReporter(netName, "NetworkClusterController", condition, events...); err != nil {
 		return fmt.Errorf("failed to report network status: %w", err)
 	}
@@ -327,7 +333,7 @@ func (ncc *networkClusterController) resetStatus() error {
 	if ncc.statusReporter == nil {
 		return nil
 	}
-	netName := ncc.NetInfo.GetNetworkName()
+	netName := ncc.GetNetworkName()
 	return ncc.statusReporter(netName, "NetworkClusterController", getNetworkAllocationUDNCondition(""))
 }
 
@@ -432,9 +438,17 @@ func (ncc *networkClusterController) Cleanup() error {
 		if err != nil {
 			return err
 		}
-		ncc.networkIDAllocator.ReleaseID()
 	}
 
+	return nil
+}
+
+func (ncc *networkClusterController) Reconcile(netInfo util.NetInfo) error {
+	// update network informaiton, point of no return
+	err := util.ReconcileNetwork(ncc.ReconcilableNetInfo, netInfo)
+	if err != nil {
+		klog.Errorf("Failed to reconcile network %s: %v", ncc.GetNetworkName(), err)
+	}
 	return nil
 }
 
@@ -560,7 +574,7 @@ func (h *networkClusterControllerEventHandler) DeleteResource(obj, cachedObj int
 			return fmt.Errorf("could not cast obj of type %T to *ipamclaimsapi.IPAMClaim", obj)
 		}
 
-		ipAllocator := h.ncc.subnetAllocator.ForSubnet(h.ncc.NetInfo.GetNetworkName())
+		ipAllocator := h.ncc.subnetAllocator.ForSubnet(h.ncc.GetNetworkName())
 		err := h.ncc.ipamClaimReconciler.Reconcile(ipamClaim, nil, ipAllocator)
 		if err != nil && !errors.Is(err, persistentips.ErrIgnoredIPAMClaim) {
 			return fmt.Errorf("error deleting IPAMClaim: %w", err)
@@ -588,7 +602,7 @@ func (h *networkClusterControllerEventHandler) SyncFunc(objs []interface{}) erro
 			syncFunc = func(claims []interface{}) error {
 				return h.ncc.ipamClaimReconciler.Sync(
 					claims,
-					h.ncc.subnetAllocator.ForSubnet(h.ncc.NetInfo.GetNetworkName()),
+					h.ncc.subnetAllocator.ForSubnet(h.ncc.GetNetworkName()),
 				)
 			}
 
