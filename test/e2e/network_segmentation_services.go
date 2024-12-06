@@ -31,7 +31,7 @@ var _ = Describe("Network Segmentation: services", func() {
 	Context("on a user defined primary network", func() {
 		const (
 			nadName                      = "tenant-red"
-			servicePort                  = 80
+			servicePort                  = 88
 			serviceTargetPort            = 80
 			userDefinedNetworkIPv4Subnet = "10.128.0.0/16"
 			userDefinedNetworkIPv6Subnet = "2014:100:200::0/60"
@@ -129,8 +129,8 @@ var _ = Describe("Network Segmentation: services", func() {
 						{
 							Name:       "udp",
 							Protocol:   v1.ProtocolUDP,
-							Port:       80,
-							TargetPort: intstr.FromInt(int(serviceTargetPort)),
+							Port:       servicePort,
+							TargetPort: intstr.FromInt(serviceTargetPort),
 						},
 					}
 					s.Spec.Type = v1.ServiceTypeNodePort
@@ -214,9 +214,10 @@ var _ = Describe("Network Segmentation: services", func() {
 					Spec: v1.ServiceSpec{
 						Ports: []v1.ServicePort{
 							{
-								Name:     "udp-port",
-								Port:     int32(servicePort),
-								Protocol: v1.ProtocolUDP,
+								Name:       "udp-port",
+								Port:       int32(servicePort),
+								Protocol:   v1.ProtocolUDP,
+								TargetPort: intstr.FromInt(serviceTargetPort),
 							},
 						},
 						Selector:       defaultLabels,
@@ -367,18 +368,18 @@ func checkNoConnectionToClusterIPs(f *framework.Framework, clientPod *v1.Pod, se
 
 func checkConnectionOrNoConnectionToClusterIPs(f *framework.Framework, clientPod *v1.Pod, service *v1.Service, expectedOutput string, shouldConnect bool) {
 	var err error
-	targetPort := service.Spec.Ports[0].TargetPort.String()
+	servicePort := service.Spec.Ports[0].Port
 	notStr := ""
 	if !shouldConnect {
 		notStr = "not "
 	}
 
 	for _, clusterIP := range service.Spec.ClusterIPs {
-		msg := fmt.Sprintf("Client %s/%s should %sreach service %s/%s on cluster IP %s port %s",
-			clientPod.Namespace, clientPod.Name, notStr, service.Namespace, service.Name, clusterIP, targetPort)
+		msg := fmt.Sprintf("Client %s/%s should %sreach service %s/%s on cluster IP %s port %d",
+			clientPod.Namespace, clientPod.Name, notStr, service.Namespace, service.Name, clusterIP, servicePort)
 		By(msg)
 
-		cmd := fmt.Sprintf(`/bin/sh -c 'echo hostname | nc -u -w 1 %s %s '`, clusterIP, targetPort)
+		cmd := fmt.Sprintf(`/bin/sh -c 'echo hostname | nc -u -w 1 %s %d '`, clusterIP, servicePort)
 
 		if shouldConnect {
 			err = checkConnectionToAgnhostPod(f, clientPod, expectedOutput, cmd)

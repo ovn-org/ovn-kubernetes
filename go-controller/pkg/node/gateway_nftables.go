@@ -98,7 +98,7 @@ func getUDNExternalIPsMarkNFTRules(svcPort kapi.ServicePort, externalIPs []strin
 		nftRules = append(nftRules,
 			&knftables.Element{
 				Map:   mapName,
-				Key:   []string{externalIP, strings.ToLower(string(svcPort.Protocol)), fmt.Sprintf("%v", svcPort.TargetPort.IntValue())},
+				Key:   []string{externalIP, strings.ToLower(string(svcPort.Protocol)), fmt.Sprintf("%v", svcPort.Port)},
 				Value: val,
 			},
 		)
