@@ -25,6 +25,7 @@ import (
 
 	ipamclaimsapi "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1"
 	ipamclaimsapifake "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1/apis/clientset/versioned/fake"
+	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	nadsfake "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/fake"
 
 	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
@@ -284,6 +285,13 @@ func ipamClaimsObjSetup(c *ipamclaimsapifake.Clientset, objType string, listFn f
 	return w
 }
 
+func nadObjSetup(c *nadsfake.Clientset, objType string, listFn func(core.Action) (bool, runtime.Object, error)) *watch.FakeWatcher {
+	w := watch.NewFake()
+	c.AddWatchReactor(objType, core.DefaultWatchReactor(w, nil))
+	c.AddReactor("list", objType, listFn)
+	return w
+}
+
 type handlerCalls struct {
 	added   int32
 	updated int32
@@ -326,23 +334,25 @@ var _ = Describe("Watch Factory Operations", func() {
 		adminNetPolWatch                    *watch.FakeWatcher
 		baselineAdminNetPolWatch            *watch.FakeWatcher
 		ipamClaimsWatch                     *watch.FakeWatcher
-		pods                                []*v1.Pod
-		namespaces                          []*v1.Namespace
-		nodes                               []*v1.Node
-		policies                            []*knet.NetworkPolicy
-		endpointSlices                      []*discovery.EndpointSlice
-		services                            []*v1.Service
-		egressIPs                           []*egressip.EgressIP
-		cloudPrivateIPConfigs               []*ocpcloudnetworkapi.CloudPrivateIPConfig
-		wf                                  *WatchFactory
-		egressFirewalls                     []*egressfirewall.EgressFirewall
-		egressQoSes                         []*egressqos.EgressQoS
-		egressServices                      []*egressservice.EgressService
-		adminNetworkPolicies                []*anpapi.AdminNetworkPolicy
-		baselineAdminNetworkPolicies        []*anpapi.BaselineAdminNetworkPolicy
-		ipamClaims                          []*ipamclaimsapi.IPAMClaim
-		err                                 error
-		shutdown                            bool
+		//nadWatch                            *watch.FakeWatcher
+		pods                         []*v1.Pod
+		namespaces                   []*v1.Namespace
+		nodes                        []*v1.Node
+		policies                     []*knet.NetworkPolicy
+		endpointSlices               []*discovery.EndpointSlice
+		services                     []*v1.Service
+		egressIPs                    []*egressip.EgressIP
+		cloudPrivateIPConfigs        []*ocpcloudnetworkapi.CloudPrivateIPConfig
+		wf                           *WatchFactory
+		egressFirewalls              []*egressfirewall.EgressFirewall
+		egressQoSes                  []*egressqos.EgressQoS
+		egressServices               []*egressservice.EgressService
+		adminNetworkPolicies         []*anpapi.AdminNetworkPolicy
+		baselineAdminNetworkPolicies []*anpapi.BaselineAdminNetworkPolicy
+		ipamClaims                   []*ipamclaimsapi.IPAMClaim
+		nads                         []*nadapi.NetworkAttachmentDefinition
+		err                          error
+		shutdown                     bool
 	)
 
 	const (
@@ -518,6 +528,16 @@ var _ = Describe("Watch Factory Operations", func() {
 			}
 			return true, obj, nil
 		})
+
+		nads = make([]*nadapi.NetworkAttachmentDefinition, 0)
+		nadObjSetup(nadsFakeClient, "network-attachment-definitions", func(core.Action) (bool, runtime.Object, error) {
+			obj := &nadapi.NetworkAttachmentDefinitionList{}
+			for _, p := range nads {
+				obj.Items = append(obj.Items, *p)
+			}
+			return true, obj, nil
+		})
+
 		shutdown = false
 	})
 
@@ -716,6 +736,7 @@ var _ = Describe("Watch Factory Operations", func() {
 					UpdateFunc: func(old, new interface{}) {},
 					DeleteFunc: func(obj interface{}) {},
 				}, nil, wf.GetHandlerPriority(objType))
+			Eventually(h.NumberOfProcessedItems).Should(Equal(2))
 			Expect(int(addCalls)).To(Equal(2))
 			Expect(err).NotTo(HaveOccurred())
 			wf.removeHandler(objType, h)
@@ -1306,7 +1327,8 @@ var _ = Describe("Watch Factory Operations", func() {
 			done <- true
 		}()
 
-		// Adds are done synchronously at handler addition time
+		// Adds are done async at handler addition time
+		Eventually(c.getAdded, 10).Should(Equal(len(testNodes)))
 		for _, ot := range testNodes {
 			ot.mu.Lock()
 			Expect(ot.added).To(Equal(1), "missing add for node %s", ot.node.Name)
@@ -1605,7 +1627,11 @@ var _ = Describe("Watch Factory Operations", func() {
 			done <- true
 		}()
 
-		// Adds are done synchronously at handler addition time
+		Eventually(c1.getAdded, 10).Should(Equal(len(testNamespaces)))
+		Eventually(c2.getAdded, 10).Should(Equal(len(testNamespaces)))
+		Eventually(c3.getAdded, 10).Should(Equal(len(testNamespaces)))
+		Eventually(c4.getAdded, 10).Should(Equal(len(testNamespaces)))
+		// Adds are done asynchronously at handler addition time
 		for _, ot := range testNamespaces {
 			ot.mu.Lock()
 			// ((((0 + 1) * 10) - 2) / 2) = 4
