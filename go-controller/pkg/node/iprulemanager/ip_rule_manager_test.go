@@ -3,7 +3,6 @@ package iprulemanager
 import (
 	"fmt"
 	"net"
-	"os"
 	"runtime"
 	"sync"
 	"time"
@@ -14,6 +13,8 @@ import (
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 	"github.com/vishvananda/netlink"
+
+	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 )
 
 const oneSec = 1 * time.Second
@@ -36,7 +37,7 @@ var _ = ginkgo.XDescribe("IP Rule Manager", func() {
 	ruleWithSrc.Src = testIPNet
 
 	defer ginkgo.GinkgoRecover()
-	if os.Getenv("NOROOT") == "TRUE" {
+	if ovntest.NoRoot() {
 		ginkgo.Skip("Test requires root privileges")
 	}
 
