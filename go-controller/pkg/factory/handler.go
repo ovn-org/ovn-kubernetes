@@ -137,40 +137,6 @@ func (i *informer) forEachQueuedHandlerReversed(f func(h *Handler)) {
 	}
 }
 
-func (i *informer) forEachHandler(obj interface{}, f func(h *Handler)) {
-	i.RLock()
-	defer i.RUnlock()
-
-	objType := reflect.TypeOf(obj)
-	if objType != i.oType {
-		klog.Errorf("Object type %v did not match expected %v", objType, i.oType)
-		return
-	}
-
-	for priority := 0; priority <= minHandlerPriority; priority++ { // loop over priority higest to lowest
-		for _, handler := range i.handlers[priority] {
-			f(handler)
-		}
-	}
-}
-
-func (i *informer) forEachHandlerReversed(obj interface{}, f func(h *Handler)) {
-	i.RLock()
-	defer i.RUnlock()
-
-	objType := reflect.TypeOf(obj)
-	if objType != i.oType {
-		klog.Errorf("Object type %v did not match expected %v", objType, i.oType)
-		return
-	}
-
-	for priority := minHandlerPriority; priority >= 0; priority-- { // loop over priority lowest to highest
-		for _, handler := range i.handlers[priority] {
-			f(handler)
-		}
-	}
-}
-
 func (i *informer) addHandler(id uint64, priority int, filterFunc func(obj interface{}) bool, funcs cache.ResourceEventHandler, existingItems []interface{}) *Handler {
 	handler := &Handler{
 		cache.FilteringResourceEventHandler{
@@ -272,6 +238,9 @@ func (qm *queueMap) shutdown() {
 func (qm *queueMap) getNewQueueNum() uint32 {
 	var j, startIdx, queueIdx uint32
 	numEventQueues := uint32(len(qm.queues))
+	if numEventQueues == 1 {
+		return 0
+	}
 	startIdx = uint32(cryptorand.Intn(int64(numEventQueues - 1)))
 	queueIdx = startIdx
 	lowestNum := len(qm.queues[startIdx])
@@ -388,7 +357,7 @@ func ensureObjectOnDelete(obj interface{}, expectedType reflect.Type) (interface
 	return obj, nil
 }
 
-func (i *informer) newFederatedQueuedHandler(numEventQueues uint32) cache.ResourceEventHandlerFuncs {
+func (i *informer) newFederatedQueuedHandler() cache.ResourceEventHandlerFuncs {
 	name := i.oType.Elem().Name()
 	return cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
@@ -434,50 +403,6 @@ func (i *informer) newFederatedQueuedHandler(numEventQueues uint32) cache.Resour
 				})
 				metrics.MetricResourceDeleteLatency.Observe(time.Since(start).Seconds())
 			})
-		},
-	}
-}
-
-func (i *informer) newFederatedHandler() cache.ResourceEventHandlerFuncs {
-	name := i.oType.Elem().Name()
-	return cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
-			metrics.MetricResourceUpdateCount.WithLabelValues(name, "add").Inc()
-			start := time.Now()
-			i.forEachHandler(obj, func(h *Handler) {
-				h.OnAdd(obj, false)
-			})
-			metrics.MetricResourceAddLatency.Observe(time.Since(start).Seconds())
-		},
-		UpdateFunc: func(oldObj, newObj interface{}) {
-			metrics.MetricResourceUpdateCount.WithLabelValues(name, "update").Inc()
-			start := time.Now()
-			i.forEachHandler(newObj, func(h *Handler) {
-				old := oldObj.(metav1.Object)
-				new := newObj.(metav1.Object)
-				if old.GetUID() != new.GetUID() {
-					// This occurs not so often, so log this occurance.
-					klog.Infof("Object %s/%s is replaced, invoking delete followed by add handler", new.GetNamespace(), new.GetName())
-					h.OnDelete(oldObj)
-					h.OnAdd(newObj, false)
-				} else {
-					h.OnUpdate(oldObj, newObj)
-				}
-			})
-			metrics.MetricResourceUpdateLatency.Observe(time.Since(start).Seconds())
-		},
-		DeleteFunc: func(obj interface{}) {
-			realObj, err := ensureObjectOnDelete(obj, i.oType)
-			if err != nil {
-				klog.Errorf(err.Error())
-				return
-			}
-			metrics.MetricResourceUpdateCount.WithLabelValues(name, "delete").Inc()
-			start := time.Now()
-			i.forEachHandlerReversed(realObj, func(h *Handler) {
-				h.OnDelete(realObj)
-			})
-			metrics.MetricResourceDeleteLatency.Observe(time.Since(start).Seconds())
 		},
 	}
 }
@@ -557,24 +482,6 @@ func newBaseInformer(oType reflect.Type, sharedInformer cache.SharedIndexInforme
 	}, nil
 }
 
-func newInformer(oType reflect.Type, sharedInformer cache.SharedIndexInformer) (*informer, error) {
-	i, err := newBaseInformer(oType, sharedInformer)
-	if err != nil {
-		return nil, err
-	}
-	i.initialAddFunc = func(h *Handler, items []interface{}) {
-		for _, item := range items {
-			h.OnAdd(item, false)
-		}
-	}
-	_, err = i.inf.AddEventHandler(i.newFederatedHandler())
-	if err != nil {
-		return nil, err
-	}
-	return i, nil
-
-}
-
 func newQueuedInformer(oType reflect.Type, sharedInformer cache.SharedIndexInformer,
 	stopChan chan struct{}, numEventQueues uint32) (*informer, error) {
 	i, err := newBaseInformer(oType, sharedInformer)
@@ -606,7 +513,7 @@ func newQueuedInformer(oType reflect.Type, sharedInformer cache.SharedIndexInfor
 		addsWg.Wait()
 	}
 
-	_, err = i.inf.AddEventHandler(i.newFederatedQueuedHandler(numEventQueues))
+	_, err = i.inf.AddEventHandler(i.newFederatedQueuedHandler())
 	if err != nil {
 		return nil, err
 	}
