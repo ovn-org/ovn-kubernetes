@@ -9,6 +9,7 @@ import (
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
+	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/observability"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -99,6 +100,9 @@ type Controller struct {
 	anpNodeQueue  workqueue.TypedRateLimitingInterface[string]
 
 	observManager *observability.Manager
+
+	// nadController used for getting network information for UDNs
+	nadController nad.NADController
 }
 
 // NewController returns a new *Controller.
@@ -115,7 +119,8 @@ func NewController(
 	isPodScheduledinLocalZone func(*v1.Pod) bool,
 	zone string,
 	recorder record.EventRecorder,
-	observManager *observability.Manager) (*Controller, error) {
+	observManager *observability.Manager,
+	nadController nad.NADController) (*Controller, error) {
 
 	c := &Controller{
 		controllerName:            controllerName,
@@ -128,6 +133,7 @@ func NewController(
 		anpPriorityMap:            make(map[int32]string),
 		banpCache:                 &adminNetworkPolicyState{}, // safe to initialise pointer to empty struct than nil
 		observManager:             observManager,
+		nadController:             nadController,
 	}
 
 	klog.V(5).Info("Setting up event handlers for Admin Network Policy")
