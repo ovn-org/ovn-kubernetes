@@ -188,7 +188,7 @@ func testMulticastIGMPQuery(f *framework.Framework, clientNodeInfo, serverNodeIn
 	createGenericPod(f, multicastListenerPod, serverNodeInfo.name, f.Namespace.Name, tcpDumpCommand)
 
 	// Wait for tcpdump on listener pod to be ready
-	err := wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
+	err := wait.PollUntilContextTimeout(context.Background(), retryInterval, retryTimeout, true /*immediate*/, func(context.Context) (bool, error) {
 		kubectlOut, err := e2ekubectl.RunKubectl(f.Namespace.Name, "exec", multicastListenerPod, "--", "/bin/bash", "-c", "ls")
 		if err != nil {
 			framework.Failf("failed to retrieve multicast IGMP query: " + err.Error())
@@ -202,20 +202,19 @@ func testMulticastIGMPQuery(f *framework.Framework, clientNodeInfo, serverNodeIn
 		framework.Failf("failed to retrieve multicast IGMP query: " + err.Error())
 	}
 
-	// The multicast listener pod join multicast group (-B 224.1.1.1), UDP (-u), during (-t 30) seconds, report every (-i 5) seconds
-	ginkgo.By("multicast listener pod join multicast group")
-	e2ekubectl.RunKubectl(f.Namespace.Name, "exec", multicastListenerPod, "--", "/bin/bash", "-c", fmt.Sprintf("iperf -s -B %s -u -t 30 -i 5", mcastGroup))
+	ginkgo.By("multicast listener pod joins multicast group and verifies IGMP query")
 
-	ginkgo.By(fmt.Sprintf("verifying that the IGMP query has been received"))
-	kubectlOut, err := e2ekubectl.RunKubectl(f.Namespace.Name, "exec", multicastListenerPod, "--", "/bin/bash", "-c", fmt.Sprintf("cat %s | grep igmp", tcpdumpFileName))
+	ginkgo.By("Running iperf to join the multicast group")
+	// The multicast listener pod joins the multicast group (-B 224.1.1.1), UDP (-u), for (-t 5) seconds, reporting every (-i 5) seconds
+	_, err = e2ekubectl.RunKubectl(f.Namespace.Name, "exec", multicastListenerPod, "--", "/bin/bash", "-c", fmt.Sprintf("iperf -s -B %s -u -t 5 -i 5", mcastGroup))
 	if err != nil {
-		framework.Failf("failed to retrieve multicast IGMP query: " + err.Error())
+		framework.Failf("failed to join multicast group: %v", err)
 	}
-	framework.Logf("output:")
-	framework.Logf(kubectlOut)
-	if kubectlOut == "" {
-		framework.Failf("failed to retrieve multicast IGMP query: igmp messages on the tcpdump logfile not found")
-	}
+
+	ginkgo.By("verifying that the IGMP query has been received")
+	gomega.Eventually(func() (string, error) {
+		return e2ekubectl.RunKubectl(f.Namespace.Name, "exec", multicastListenerPod, "--", "/bin/bash", "-c", fmt.Sprintf("grep igmp %s", tcpdumpFileName))
+	}, 2*time.Minute, 5*time.Second).Should(gomega.ContainSubstring("igmp"), "Failed to retrieve multicast IGMP query within the expected time")
 }
 
 func enableMulticastForNamespace(fr *framework.Framework) {
