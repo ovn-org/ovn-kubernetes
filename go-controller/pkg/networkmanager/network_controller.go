@@ -297,7 +297,7 @@ func (c *networkController) syncNetwork(network string) error {
 
 	ensureNetwork := !compatible || util.DoesNetworkNeedReconciliation(have, want)
 	if !ensureNetwork {
-		// no network changes
+		klog.Infof("%s: no network changes: %s", c.name, network)
 		return nil
 	}
 
@@ -321,7 +321,7 @@ func (c *networkController) ensureNetwork(network util.MutableNetInfo) error {
 	if network == nil {
 		return nil
 	}
-
+	klog.V(5).Infof("%s: ensureNetwork: %s", c.name, network.GetNetworkName())
 	networkName := network.GetNetworkName()
 	reconcilable, _ := c.getReconcilableNetworkState(networkName)
 

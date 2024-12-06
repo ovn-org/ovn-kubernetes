@@ -2,6 +2,7 @@ package routeimport
 
 import (
 	"errors"
+	"net"
 	"sync"
 	"testing"
 
@@ -13,6 +14,8 @@ import (
 	"golang.org/x/sys/unix"
 	"k8s.io/client-go/util/workqueue"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	udnv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1"
 	controllerutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	ovntesting "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
@@ -25,6 +28,17 @@ import (
 func Test_controller_syncNetwork(t *testing.T) {
 	node := "testnode"
 	defaultNetwork := &util.DefaultNetInfo{}
+	defaultNetworkNoOverlay := &util.DefaultNetInfo{}
+	defaultNetworkNoOverlay.SetTransportProtocol(string(udnv1.TransportProtocolNone))
+	config.Default.ClusterSubnets = []config.CIDRNetworkEntry{
+		{
+			CIDR: &net.IPNet{
+				IP:   net.IPv4(10, 128, 0, 0),
+				Mask: net.CIDRMask(16, 32),
+			},
+			HostSubnetLength: 24,
+		},
+	}
 	type fields struct {
 		networkIDs map[int]string
 		networks   map[string]*netInfo
@@ -99,6 +113,47 @@ func Test_controller_syncNetwork(t *testing.T) {
 				&nbdb.LogicalRouterStaticRoute{UUID: "add-1", IPPrefix: "2.2.2.0/24", Nexthop: "2.2.2.1", ExternalIDs: map[string]string{"controller": "routeimport"}},
 				&nbdb.LogicalRouterStaticRoute{UUID: "add-2", IPPrefix: "3.3.3.0/24", Nexthop: "3.3.3.1", ExternalIDs: map[string]string{"controller": "routeimport"}},
 				&nbdb.LogicalRouterStaticRoute{UUID: "add-3", IPPrefix: "3.3.3.0/24", Nexthop: "3.3.3.2", ExternalIDs: map[string]string{"controller": "routeimport"}},
+			},
+		},
+		{
+			name: "ignores host subnet routes as necessary in overlay mode",
+			args: args{"default"},
+			fields: fields{
+				networkIDs: map[int]string{0: "default"},
+				networks:   map[string]*netInfo{"default": {NetInfo: defaultNetwork, id: 0, table: unix.RT_TABLE_MAIN}},
+			},
+			initial: []libovsdb.TestData{
+				&nbdb.LogicalRouter{Name: defaultNetwork.GetNetworkScopedGWRouterName(node), StaticRoutes: []string{"keep-1"}},
+				&nbdb.LogicalRouterStaticRoute{UUID: "keep-1", IPPrefix: "1.1.1.0/24", Nexthop: "1.1.1.1", ExternalIDs: map[string]string{"controller": "routeimport"}},
+			},
+			routes: []netlink.Route{
+				{Dst: ovntesting.MustParseIPNet("1.1.1.0/24"), Gw: ovntesting.MustParseIP("1.1.1.1")},
+				{Dst: ovntesting.MustParseIPNet("10.128.1.0/24"), Gw: ovntesting.MustParseIP("2.2.2.1")},
+			},
+			expected: []libovsdb.TestData{
+				&nbdb.LogicalRouter{UUID: "router", Name: defaultNetwork.GetNetworkScopedGWRouterName(node), StaticRoutes: []string{"keep-1"}},
+				&nbdb.LogicalRouterStaticRoute{UUID: "keep-1", IPPrefix: "1.1.1.0/24", Nexthop: "1.1.1.1", ExternalIDs: map[string]string{"controller": "routeimport"}},
+			},
+		},
+		{
+			name: "adds host subnet routes as necessary in no-overlay mode",
+			args: args{"default"},
+			fields: fields{
+				networkIDs: map[int]string{0: "default"},
+				networks:   map[string]*netInfo{"default": {NetInfo: defaultNetworkNoOverlay, id: 0, table: unix.RT_TABLE_MAIN}},
+			},
+			initial: []libovsdb.TestData{
+				&nbdb.LogicalRouter{Name: defaultNetwork.GetNetworkScopedGWRouterName(node), StaticRoutes: []string{"keep-1"}},
+				&nbdb.LogicalRouterStaticRoute{UUID: "keep-1", IPPrefix: "1.1.1.0/24", Nexthop: "1.1.1.1", ExternalIDs: map[string]string{"controller": "routeimport"}},
+			},
+			routes: []netlink.Route{
+				{Dst: ovntesting.MustParseIPNet("1.1.1.0/24"), Gw: ovntesting.MustParseIP("1.1.1.1")},
+				{Dst: ovntesting.MustParseIPNet("10.128.1.0/24"), Gw: ovntesting.MustParseIP("2.2.2.1")},
+			},
+			expected: []libovsdb.TestData{
+				&nbdb.LogicalRouter{UUID: "router", Name: defaultNetwork.GetNetworkScopedGWRouterName(node), StaticRoutes: []string{"keep-1", "add-1"}},
+				&nbdb.LogicalRouterStaticRoute{UUID: "keep-1", IPPrefix: "1.1.1.0/24", Nexthop: "1.1.1.1", ExternalIDs: map[string]string{"controller": "routeimport"}},
+				&nbdb.LogicalRouterStaticRoute{UUID: "add-1", IPPrefix: "10.128.1.0/24", Nexthop: "2.2.2.1", ExternalIDs: map[string]string{"controller": "routeimport"}},
 			},
 		},
 	}

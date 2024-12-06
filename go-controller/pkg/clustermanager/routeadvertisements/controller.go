@@ -893,12 +893,10 @@ func (c *Controller) getOrCreateDefaultNetworkNAD() (*nadtypes.NetworkAttachment
 				Namespace: config.Kubernetes.OVNConfigNamespace,
 			},
 			Spec: nadtypes.NetworkAttachmentDefinitionSpec{
-				Config: fmt.Sprintf("{\"cniVersion\": \"0.4.0\", \"name\": \"ovn-kubernetes\", \"type\": \"%s\"}", config.CNI.Plugin),
+				Config: fmt.Sprintf("{\"cniVersion\": \"1.0.0\", \"name\": \"ovn-kubernetes\", \"type\": \"%s\"}", config.CNI.Plugin),
 			},
 		},
-		metav1.CreateOptions{
-			FieldManager: fieldManager,
-		},
+		metav1.CreateOptions{},
 	)
 }
 

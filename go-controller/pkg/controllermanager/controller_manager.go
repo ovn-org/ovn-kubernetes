@@ -463,5 +463,9 @@ func (cm *ControllerManager) Stop() {
 }
 
 func (cm *ControllerManager) Reconcile(name string, old, new util.NetInfo) error {
+	if name == ovntypes.DefaultNetworkName && new != nil {
+		klog.Infof("Reconcile default network in transport protocol: %s", new.GetTransportProtocol())
+		return cm.defaultNetworkController.Reconcile(new)
+	}
 	return nil
 }

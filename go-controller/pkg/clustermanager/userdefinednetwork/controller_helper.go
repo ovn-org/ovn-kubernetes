@@ -15,6 +15,8 @@ import (
 	netv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/userdefinednetwork/template"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	utiludn "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/udn"
 )
 
@@ -22,6 +24,11 @@ func (c *Controller) updateNAD(obj client.Object, namespace string) (*netv1.Netw
 	desiredNAD, err := c.renderNadFn(obj, namespace)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate NetworkAttachmentDefinition: %w", err)
+	}
+
+	if obj.GetName() == types.DefaultNetworkName && namespace == config.Kubernetes.OVNConfigNamespace {
+		// Do not set owner reference for the default NAD. The default NAD is persistant.
+		desiredNAD.SetOwnerReferences(nil)
 	}
 
 	nad, err := c.nadLister.NetworkAttachmentDefinitions(namespace).Get(obj.GetName())
@@ -57,7 +64,7 @@ func (c *Controller) updateNAD(obj client.Object, namespace string) (*netv1.Netw
 		return newNAD, nil
 	}
 
-	if !metav1.IsControlledBy(nadCopy, obj) {
+	if !metav1.IsControlledBy(nadCopy, obj) && !(obj.GetName() == types.DefaultNetworkName && namespace == config.Kubernetes.OVNConfigNamespace) {
 		return nil, fmt.Errorf("foreign NetworkAttachmentDefinition with the desired name already exist [%s/%s]", nadCopy.Namespace, nadCopy.Name)
 	}
 

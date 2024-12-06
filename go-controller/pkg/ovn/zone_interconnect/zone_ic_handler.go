@@ -16,6 +16,7 @@ import (
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 
+	udnv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
@@ -122,7 +123,7 @@ const (
 type ZoneInterconnectHandler struct {
 	watchFactory *factory.WatchFactory
 	// network which is inter-connected
-	util.NetInfo
+	util.MutableNetInfo
 	nbClient libovsdbclient.Client
 	sbClient libovsdbclient.Client
 	// ovn_cluster_router name for the network
@@ -137,11 +138,11 @@ type ZoneInterconnectHandler struct {
 // NewZoneInterconnectHandler returns a new ZoneInterconnectHandler object
 func NewZoneInterconnectHandler(nInfo util.NetInfo, nbClient, sbClient libovsdbclient.Client, watchFactory *factory.WatchFactory) *ZoneInterconnectHandler {
 	zic := &ZoneInterconnectHandler{
-		NetInfo:      nInfo,
-		nbClient:     nbClient,
-		sbClient:     sbClient,
-		watchFactory: watchFactory,
-		networkId:    util.InvalidID,
+		MutableNetInfo: util.NewMutableNetInfo(nInfo),
+		nbClient:       nbClient,
+		sbClient:       sbClient,
+		watchFactory:   watchFactory,
+		networkId:      util.InvalidID,
 	}
 
 	zic.networkClusterRouterName = zic.GetNetworkScopedName(types.OVNClusterRouter)
@@ -442,6 +443,10 @@ func (zic *ZoneInterconnectHandler) createLocalZoneNodeResources(node *corev1.No
 //   - binds the remote port to the node remote chassis in SBDB
 //   - adds static routes for the remote node via the remote port ip in the ovn_cluster_router
 func (zic *ZoneInterconnectHandler) createRemoteZoneNodeResources(node *corev1.Node, nodeID int, chassisId string) error {
+	if zic.GetTransportProtocol() == string(udnv1.TransportProtocolNone) {
+		klog.Infof("No-overlay enabled. Clean up overlay interconnect resources for the node: %s", node.Name)
+		return zic.cleanupNode(node.Name)
+	}
 	nodeTransitSwitchPortIPs, err := util.ParseNodeTransitSwitchPortAddrs(node)
 	if err != nil || len(nodeTransitSwitchPortIPs) == 0 {
 		err = fmt.Errorf("failed to get the node transit switch port IP addresses : %w", err)

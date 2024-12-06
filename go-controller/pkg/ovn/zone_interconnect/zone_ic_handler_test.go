@@ -15,6 +15,7 @@ import (
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
+	udnv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
@@ -88,7 +89,7 @@ func invokeICHandlerAddNodeFunction(zone string, icHandler *ZoneInterconnectHand
 	return nil
 }
 
-func checkInterconnectResources(zone string, netName string, nbClient libovsdbclient.Client, testNodesRouteInfo map[string]map[string]string, nodes ...*corev1.Node) error {
+func checkInterconnectResources(zone string, netName string, noOverlay bool, nbClient libovsdbclient.Client, testNodesRouteInfo map[string]map[string]string, nodes ...*corev1.Node) error {
 	localZoneNodes := []*corev1.Node{}
 	remoteZoneNodes := []*corev1.Node{}
 	localZoneNodeNames := []string{}
@@ -117,9 +118,12 @@ func checkInterconnectResources(zone string, netName string, nbClient libovsdbcl
 	if err != nil {
 		return fmt.Errorf("could not find transit switch %s in the nb db for network %s : err - %v", s.Name, netName, err)
 	}
-
-	noOfTSPorts := len(localZoneNodes) + len(remoteZoneNodes)
-
+	noOfTSPorts := 0
+	if noOverlay {
+		noOfTSPorts = len(localZoneNodes)
+	} else {
+		noOfTSPorts = len(localZoneNodes) + len(remoteZoneNodes)
+	}
 	if len(ts.Ports) != noOfTSPorts {
 		return fmt.Errorf("transit switch %s doesn't have expected logical ports.  Found %d : Expected %d ports",
 			getNetworkScopedName(netName, types.TransitSwitch), len(ts.Ports), noOfTSPorts)
@@ -158,11 +162,13 @@ func checkInterconnectResources(zone string, netName string, nbClient libovsdbcl
 		i++
 	}
 
-	for _, node := range remoteZoneNodes {
-		// The logical port for the local zone nodes should be of type patch.
-		nodeTSPortName := getNetworkScopedName(netName, types.TransitSwitchToRouterPrefix+node.Name)
-		expectedTsPorts[i] = nodeTSPortName + ":remote"
-		i++
+	if !noOverlay {
+		for _, node := range remoteZoneNodes {
+			// The logical port for the local zone nodes should be of type patch.
+			nodeTSPortName := getNetworkScopedName(netName, types.TransitSwitchToRouterPrefix+node.Name)
+			expectedTsPorts[i] = nodeTSPortName + ":remote"
+			i++
+		}
 	}
 
 	sort.Strings(expectedTsPorts)
@@ -208,15 +214,16 @@ func checkInterconnectResources(zone string, netName string, nbClient libovsdbcl
 
 	// Verify the static routes
 	expectedStaticRoutes := []string{}
-
+	if !noOverlay {
 	for _, node := range remoteZoneNodeNames {
-		nodeRouteInfo := testNodesRouteInfo[node]
-		expectedStaticRoutes = append(expectedStaticRoutes, nodeRouteInfo["node-subnets"]+"-"+nodeRouteInfo["ts-ip"])
-		if netName == types.DefaultNetworkName {
-			expectedStaticRoutes = append(expectedStaticRoutes, nodeRouteInfo["host-route"]+"-"+nodeRouteInfo["ts-ip"])
+			nodeRouteInfo := testNodesRouteInfo[node]
+			expectedStaticRoutes = append(expectedStaticRoutes, nodeRouteInfo["node-subnets"]+"-"+nodeRouteInfo["ts-ip"])
+			if netName == types.DefaultNetworkName {
+				expectedStaticRoutes = append(expectedStaticRoutes, nodeRouteInfo["host-route"]+"-"+nodeRouteInfo["ts-ip"])
+			}
 		}
+		sort.Strings(expectedStaticRoutes)
 	}
-	sort.Strings(expectedStaticRoutes)
 
 	clusterRouterStaticRoutes := []string{}
 	for _, srUUID := range clusterRouter.StaticRoutes {
@@ -374,7 +381,7 @@ var _ = ginkgo.Describe("Zone Interconnect Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = invokeICHandlerAddNodeFunction("global", zoneICHandler, &testNode1, &testNode2, &testNode3)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				err = checkInterconnectResources("global", types.DefaultNetworkName, libovsdbOvnNBClient, testNodesRouteInfo, &testNode1, &testNode2, &testNode3)
+				err = checkInterconnectResources("global", types.DefaultNetworkName, false, libovsdbOvnNBClient, testNodesRouteInfo, &testNode1, &testNode2, &testNode3)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				return nil
 			}
@@ -417,7 +424,7 @@ var _ = ginkgo.Describe("Zone Interconnect Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = invokeICHandlerAddNodeFunction("global", zoneICHandler, &testNode1, &testNode2, &testNode3)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				err = checkInterconnectResources("global", types.DefaultNetworkName, libovsdbOvnNBClient, testNodesRouteInfo, &testNode1, &testNode2, &testNode3)
+				err = checkInterconnectResources("global", types.DefaultNetworkName, false, libovsdbOvnNBClient, testNodesRouteInfo, &testNode1, &testNode2, &testNode3)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				// Set annotations to include ipv6 to node3 (remote zone)
@@ -499,20 +506,20 @@ var _ = ginkgo.Describe("Zone Interconnect Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = invokeICHandlerAddNodeFunction("global", zoneICHandler, &testNode1, &testNode2, &testNode3)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				err = checkInterconnectResources("global", types.DefaultNetworkName, libovsdbOvnNBClient, testNodesRouteInfo, &testNode1, &testNode2, &testNode3)
+				err = checkInterconnectResources("global", types.DefaultNetworkName, false, libovsdbOvnNBClient, testNodesRouteInfo, &testNode1, &testNode2, &testNode3)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				// Change the zone of node2 to a remote zone
 				testNode2.Annotations[ovnNodeZoneNameAnnotation] = "bar"
 				err = invokeICHandlerAddNodeFunction("global", zoneICHandler, &testNode1, &testNode2, &testNode3)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				err = checkInterconnectResources("global", types.DefaultNetworkName, libovsdbOvnNBClient, testNodesRouteInfo, &testNode1, &testNode2, &testNode3)
+				err = checkInterconnectResources("global", types.DefaultNetworkName, false, libovsdbOvnNBClient, testNodesRouteInfo, &testNode1, &testNode2, &testNode3)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				// Change the zone of node2 and node3 to global  (no remote zone nodes)
 				err = invokeICHandlerAddNodeFunction("global", zoneICHandler, &testNode1, &testNode2, &testNode3)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				err = checkInterconnectResources("global", types.DefaultNetworkName, libovsdbOvnNBClient, testNodesRouteInfo, &testNode1, &testNode2, &testNode3)
+				err = checkInterconnectResources("global", types.DefaultNetworkName, false, libovsdbOvnNBClient, testNodesRouteInfo, &testNode1, &testNode2, &testNode3)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				return nil
@@ -551,7 +558,7 @@ var _ = ginkgo.Describe("Zone Interconnect Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = invokeICHandlerAddNodeFunction("global", zoneICHandler, &testNode1, &testNode2, &testNode3)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				err = checkInterconnectResources("global", types.DefaultNetworkName, libovsdbOvnNBClient, testNodesRouteInfo, &testNode1, &testNode2, &testNode3)
+				err = checkInterconnectResources("global", types.DefaultNetworkName, false, libovsdbOvnNBClient, testNodesRouteInfo, &testNode1, &testNode2, &testNode3)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				// Call ICHandler SyncNodes function removing the testNode3 from the list of nodes
@@ -560,7 +567,56 @@ var _ = ginkgo.Describe("Zone Interconnect Operations", func() {
 				kNodes = append(kNodes, &testNode2)
 				err = zoneICHandler.SyncNodes(kNodes)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				err = checkInterconnectResources("global", types.DefaultNetworkName, libovsdbOvnNBClient, testNodesRouteInfo, &testNode1, &testNode2)
+				err = checkInterconnectResources("global", types.DefaultNetworkName, false, libovsdbOvnNBClient, testNodesRouteInfo, &testNode1, &testNode2)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				return nil
+			}
+
+			err := app.Run([]string{
+				app.Name,
+				"-cluster-subnets=" + clusterCIDR,
+				"-init-cluster-manager",
+				"-zone-join-switch-subnets=" + joinSubnetCIDR,
+				"-enable-interconnect",
+			})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+
+		ginkgo.It("Sync nodes in no-overlay mode", func() {
+			app.Action = func(ctx *cli.Context) error {
+				dbSetup := libovsdbtest.TestSetup{
+					NBData: initialNBDB,
+					SBData: initialSBDB,
+				}
+
+				_, err := config.InitConfig(ctx, nil, nil)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				config.Kubernetes.HostNetworkNamespace = ""
+
+				var libovsdbOvnNBClient, libovsdbOvnSBClient libovsdbclient.Client
+				libovsdbOvnNBClient, libovsdbOvnSBClient, libovsdbCleanup, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				err = createTransitSwitchPortBindings(libovsdbOvnSBClient, types.DefaultNetworkName, &testNode1, &testNode2, &testNode3)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				defaultNetwork := &util.DefaultNetInfo{}
+				defaultNetwork.SetTransportProtocol(string(udnv1.TransportProtocolNone))
+				zoneICHandler := NewZoneInterconnectHandler(defaultNetwork, libovsdbOvnNBClient, libovsdbOvnSBClient, nil)
+				err = zoneICHandler.createOrUpdateTransitSwitch(0)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = invokeICHandlerAddNodeFunction("global", zoneICHandler, &testNode1, &testNode2, &testNode3)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = checkInterconnectResources("global", types.DefaultNetworkName, true, libovsdbOvnNBClient, testNodesRouteInfo, &testNode1, &testNode2, &testNode3)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				// Call ICHandler SyncNodes function removing the testNode3 from the list of nodes
+				var kNodes []interface{}
+				kNodes = append(kNodes, &testNode1)
+				kNodes = append(kNodes, &testNode2)
+				err = zoneICHandler.SyncNodes(kNodes)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = checkInterconnectResources("global", types.DefaultNetworkName, true, libovsdbOvnNBClient, testNodesRouteInfo, &testNode1, &testNode2)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				return nil
@@ -670,7 +726,7 @@ var _ = ginkgo.Describe("Zone Interconnect Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = invokeICHandlerAddNodeFunction("global", zoneICHandler, &testNode1, &testNode2, &testNode3)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				err = checkInterconnectResources("global", "blue", libovsdbOvnNBClient, testNodesRouteInfo, &testNode1, &testNode2, &testNode3)
+				err = checkInterconnectResources("global", "blue", false, libovsdbOvnNBClient, testNodesRouteInfo, &testNode1, &testNode2, &testNode3)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				return nil
 			}
@@ -710,7 +766,7 @@ var _ = ginkgo.Describe("Zone Interconnect Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = invokeICHandlerAddNodeFunction("global", zoneICHandler, &testNode1, &testNode2, &testNode3)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				err = checkInterconnectResources("global", "blue", libovsdbOvnNBClient, testNodesRouteInfo, &testNode1, &testNode2, &testNode3)
+				err = checkInterconnectResources("global", "blue", false, libovsdbOvnNBClient, testNodesRouteInfo, &testNode1, &testNode2, &testNode3)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				// Call ICHandler SyncNodes function removing the testNode3 from the list of nodes
@@ -719,7 +775,7 @@ var _ = ginkgo.Describe("Zone Interconnect Operations", func() {
 				kNodes = append(kNodes, &testNode2)
 				err = zoneICHandler.SyncNodes(kNodes)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				err = checkInterconnectResources("global", "blue", libovsdbOvnNBClient, testNodesRouteInfo, &testNode1, &testNode2)
+				err = checkInterconnectResources("global", "blue", false, libovsdbOvnNBClient, testNodesRouteInfo, &testNode1, &testNode2)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				return nil
 			}
@@ -809,7 +865,7 @@ var _ = ginkgo.Describe("Zone Interconnect Operations", func() {
 				testNodesRouteInfo = map[string]map[string]string{
 					"node4": {"node-subnets": "10.244.5.0/24", "ts-ip": "100.88.0.5", "host-route": "100.64.0.5/32"},
 				}
-				err = checkInterconnectResources("global", types.DefaultNetworkName, libovsdbOvnNBClient, testNodesRouteInfo, &testNode4)
+				err = checkInterconnectResources("global", types.DefaultNetworkName, false, libovsdbOvnNBClient, testNodesRouteInfo, &testNode4)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				return nil
 			}
@@ -911,7 +967,7 @@ var _ = ginkgo.Describe("Zone Interconnect Operations", func() {
 				testNodesRouteInfo = map[string]map[string]string{
 					"node4": {"node-subnets": "10.244.5.0/24", "ts-ip": "100.88.0.5", "host-route": "100.64.0.5/32"},
 				}
-				err = checkInterconnectResources("global", types.DefaultNetworkName, libovsdbOvnNBClient, testNodesRouteInfo, &testNode4)
+				err = checkInterconnectResources("global", types.DefaultNetworkName, false, libovsdbOvnNBClient, testNodesRouteInfo, &testNode4)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				return nil

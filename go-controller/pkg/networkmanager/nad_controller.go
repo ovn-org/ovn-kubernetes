@@ -224,6 +224,12 @@ func (c *nadController) syncNAD(key string, nad *nettypes.NetworkAttachmentDefin
 	currentNetwork := c.networkController.getNetwork(nadNetworkName)
 
 	switch {
+	case nadNetworkName == types.DefaultNetworkName:
+		if nadNetwork != nil {
+			ensureNetwork = util.NewMutableNetInfo(nadNetwork)
+		} else {
+			ensureNetwork = &util.DefaultNetInfo{}
+		}
 	case currentNetwork == nil:
 		// the NAD refers to a new network, ensure it
 		ensureNetwork = util.NewMutableNetInfo(nadNetwork)

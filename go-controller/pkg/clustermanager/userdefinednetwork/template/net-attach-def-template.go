@@ -15,6 +15,7 @@ import (
 	userdefinednetworkv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1"
 
 	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -28,10 +29,13 @@ const (
 	cniVersion = "1.0.0"
 )
 
+var DefaultNADName = fmt.Sprintf("%s/%s", config.Kubernetes.OVNConfigNamespace, types.DefaultNetworkName)
+
 type SpecGetter interface {
 	GetTopology() userdefinednetworkv1.NetworkTopology
 	GetLayer3() *userdefinednetworkv1.Layer3Config
 	GetLayer2() *userdefinednetworkv1.Layer2Config
+	GetTransport() *userdefinednetworkv1.TransportConfig
 }
 
 func ParseNetworkName(networkName string) (udnNamespace, udnName string) {
@@ -86,13 +90,25 @@ func RenderNetAttachDefManifest(obj client.Object, targetNamespace string) (*net
 }
 
 func RenderNADSpec(networkName, nadName string, spec SpecGetter) (*netv1.NetworkAttachmentDefinitionSpec, error) {
-	if err := validateTopology(spec); err != nil {
+	var err error
+	if err = validateTopology(spec); err != nil {
 		return nil, fmt.Errorf("invalid topology specified: %w", err)
 	}
-
-	cniNetConf, err := renderCNINetworkConfig(networkName, nadName, spec)
-	if err != nil {
-		return nil, fmt.Errorf("failed to render CNI network config: %w", err)
+	var cniNetConf map[string]interface{}
+	if nadName == DefaultNADName {
+		// cluster default network, no need to other fields
+		cniNetConf = map[string]interface{}{
+			"cniVersion":        cniVersion,
+			"type":              OvnK8sCNIOverlay,
+			"name":              networkName,
+			"transportProtocol": string(spec.GetTransport().Protocol),
+		}
+	} else {
+		// user defined network
+		cniNetConf, err = renderCNINetworkConfig(networkName, nadName, spec)
+		if err != nil {
+			return nil, fmt.Errorf("failed to render CNI network config: %w", err)
+		}
 	}
 	cniNetConfRaw, err := json.Marshal(cniNetConf)
 	if err != nil {
@@ -121,6 +137,9 @@ func renderCNINetworkConfig(networkName, nadName string, spec SpecGetter) (map[s
 		},
 		NADName:  nadName,
 		Topology: strings.ToLower(string(spec.GetTopology())),
+	}
+	if spec.GetTransport() != nil {
+		netConfSpec.TransportProtocol = string(spec.GetTransport().Protocol)
 	}
 
 	switch spec.GetTopology() {
@@ -159,6 +178,9 @@ func renderCNINetworkConfig(networkName, nadName string, spec SpecGetter) (map[s
 		"netAttachDefName": nadName,
 		"topology":         netConfSpec.Topology,
 		"role":             netConfSpec.Role,
+	}
+	if netConfSpec.TransportProtocol != "" {
+		cniNetConf["transportProtocol"] = netConfSpec.TransportProtocol
 	}
 	if mtu := netConfSpec.MTU; mtu > 0 {
 		cniNetConf["mtu"] = mtu

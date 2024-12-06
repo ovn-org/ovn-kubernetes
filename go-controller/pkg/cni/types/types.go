@@ -20,6 +20,9 @@ type NetConf struct {
 	// specifies the OVN topology for this network configuration
 	// when not specified, by default it is Layer3AttachDefTopoType
 	Topology string `json:"topology,omitempty"`
+	// specifies the overlay tunnel protocol for this network
+	// when not specified, by default it is Geneve
+	TransportProtocol string `json:"transportProtocol,omitempty"`
 	// captures net-attach-def name in the form of namespace/name
 	NADName string `json:"netAttachDefName,omitempty"`
 	// Network MTU

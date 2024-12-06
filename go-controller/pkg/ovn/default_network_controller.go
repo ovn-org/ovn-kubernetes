@@ -417,7 +417,7 @@ func (oc *DefaultNetworkController) Init(ctx context.Context) error {
 
 	// Add ourselves to the route import manager
 	if oc.routeImportManager != nil {
-		err := oc.routeImportManager.AddNetwork(oc.GetNetInfo(), 0)
+		err := oc.routeImportManager.AddNetwork(util.NewMutableNetInfo(oc.GetNetInfo()), 0)
 		if err != nil {
 			return fmt.Errorf("failed to add default network to the route import manager: %v", err)
 		}
@@ -602,6 +602,7 @@ func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 }
 
 func (oc *DefaultNetworkController) Reconcile(netInfo util.NetInfo) error {
+	klog.Infof("DefaultNetworkController: [no-overlay] Reconcile default network: %s %s", netInfo.GetNetworkName(), netInfo.GetTransportProtocol())
 	// gather some information first
 	var err error
 	var retryNodes []*kapi.Node
@@ -627,7 +628,6 @@ func (oc *DefaultNetworkController) Reconcile(netInfo util.NetInfo) error {
 		return fmt.Errorf("failed to reconcile network %s: %w", oc.GetNetworkName(), err)
 	}
 
-	reconcileRoutes := oc.routeImportManager != nil && oc.routeImportManager.NeedsReconciliation(netInfo)
 	reconcileEgressIP := oc.eIPC.ShouldReconcileNetworkChange(retryNodeNames, oc.ReconcilableNetInfo, netInfo)
 
 	// update network information, point of no return
@@ -636,8 +636,22 @@ func (oc *DefaultNetworkController) Reconcile(netInfo util.NetInfo) error {
 		klog.Errorf("Failed to reconcile network %s: %v", oc.GetNetworkName(), err)
 	}
 
-	if reconcileRoutes {
+	if oc.routeImportManager != nil && oc.routeImportManager.NeedsReconciliation(util.NewMutableNetInfo(netInfo)) {
+		klog.Infof("DefaultNetworkController: [no-overlay] Reconciling imported routes for network %s", oc.GetNetworkName())
+		err = oc.routeImportManager.UpdateNetwork(netInfo, 0)
+		if err != nil {
+			return err
+		}
 		err = oc.routeImportManager.ReconcileNetwork(oc.GetNetworkName())
+		if err != nil {
+			return err
+		}
+	}
+
+	if oc.zoneICHandler.GetTransportProtocol() != netInfo.GetTransportProtocol() {
+		klog.Infof("DefaultNetworkController: [no-overlay] zoneICHandler transport protocol: %s", netInfo.GetTransportProtocol())
+		oc.zoneICHandler.SetTransportProtocol(netInfo.GetTransportProtocol())
+		err = oc.ReconcileRemoteZoneNodes(netInfo)
 		if err != nil {
 			return err
 		}
@@ -663,6 +677,34 @@ func (oc *DefaultNetworkController) Reconcile(netInfo util.NetInfo) error {
 
 func (oc *DefaultNetworkController) isPodNetworkAdvertisedAtNode(node string) bool {
 	return util.IsPodNetworkAdvertisedAtNode(oc, node)
+}
+
+func (oc *DefaultNetworkController) ReconcileRemoteZoneNodes(netInfo util.NetInfo) error {
+	klog.Infof("Default Network uses transport protocol %s", netInfo.GetTransportProtocol())
+	nodes, err := oc.kube.GetNodes()
+	if err != nil {
+		return fmt.Errorf("failed to get nodes: %w", err)
+	}
+	var errs []error
+	for _, node := range nodes {
+		if oc.isLocalZoneNode(node) {
+			continue
+		}
+		oc.gatewaysFailed.Store(node.Name, true)
+		err = oc.retryNodes.AddRetryObjWithAddNoBackoff(node)
+		if err != nil {
+			err := fmt.Errorf("failed to reconcile network for node %s: %w", node.Name, err)
+			errs = append(errs, err)
+		}
+	}
+	if len(nodes) > 0 {
+		oc.retryNodes.RequestRetryObjs()
+	}
+	if len(errs) > 0 {
+		klog.Errorf("Failed to reconcile transport protocol %s: %v", oc.GetNetworkName(), utilerrors.Join(errs...))
+		return utilerrors.Join(errs...)
+	}
+	return nil
 }
 
 func WithSyncDurationMetric(resourceName string, f func() error) error {
