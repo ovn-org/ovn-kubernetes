@@ -201,7 +201,22 @@ func (c *controller[T]) onUpdate(oldObjInterface, newObjInterface interface{}) {
 }
 
 func (c *controller[T]) onDelete(objInterface interface{}) {
-	key, err := cache.MetaNamespaceKeyFunc(objInterface)
+	obj, ok := objInterface.(*T)
+	if !ok {
+		tombstone, ok := objInterface.(cache.DeletedFinalStateUnknown)
+		if !ok {
+			utilruntime.HandleError(fmt.Errorf("controller %s: passed object is neither a %T object nor a "+
+				"DeletedFinalStateUnknown type: %#v", c.name, *new(T), obj))
+			return
+		}
+		obj, ok = tombstone.Obj.(*T)
+		if !ok {
+			utilruntime.HandleError(fmt.Errorf("controller %s: tombstone contained object that is not a %T: %#v",
+				c.name, *new(T), obj))
+			return
+		}
+	}
+	key, err := cache.MetaNamespaceKeyFunc(obj)
 	if err != nil {
 		utilruntime.HandleError(fmt.Errorf("controller %s: couldn't get key for object %+v: %v", c.name, objInterface, err))
 		return
