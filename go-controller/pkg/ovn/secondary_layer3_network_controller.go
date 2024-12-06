@@ -42,6 +42,37 @@ type secondaryLayer3NetworkControllerEventHandler struct {
 	syncFunc     func([]interface{}) error
 }
 
+func (h *secondaryLayer3NetworkControllerEventHandler) FilterResource(obj interface{}) bool {
+	switch h.objType {
+	case factory.NamespaceType:
+		np1, ok := obj.(*kapi.Namespace)
+		if !ok {
+			klog.Errorf("Failed to cast the namespace")
+			return false
+		}
+		namespaceNet, err := h.oc.nadController.GetActiveNetworkForNamespace(np1.Name)
+		if err != nil {
+			klog.Errorf("No active network for %q namespace: %v", np1.Name, err)
+			return false
+		}
+		return namespaceNet.GetNetworkName() == h.oc.GetNetworkName()
+	case factory.PodType:
+		pod, ok := obj.(*kapi.Pod)
+		if !ok {
+			klog.Errorf("Failed to cast the pod")
+			return false
+		}
+		namespaceNet, err := h.oc.nadController.GetActiveNetworkForNamespace(pod.Namespace)
+		if err != nil {
+			klog.Errorf("No active network for %s/%s pod: %v", pod.Namespace, pod.Name, err)
+			return false
+		}
+		return namespaceNet.GetNetworkName() == h.oc.GetNetworkName()
+	default:
+		return true
+	}
+}
+
 // AreResourcesEqual returns true if, given two objects of a known resource type, the update logic for this resource
 // type considers them equal and therefore no update is needed. It returns false when the two objects are not considered
 // equal and an update needs be executed. This is regardless of how the update is carried out (whether with a dedicated update
