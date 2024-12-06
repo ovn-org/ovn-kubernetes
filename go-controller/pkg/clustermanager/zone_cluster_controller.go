@@ -232,6 +232,10 @@ type zoneClusterControllerEventHandler struct {
 	syncFunc func([]interface{}) error
 }
 
+func (h *zoneClusterControllerEventHandler) FilterResource(obj interface{}) bool {
+	return true
+}
+
 // zoneClusterControllerEventHandler functions
 
 // AddResource adds the specified object to the cluster according to its type and

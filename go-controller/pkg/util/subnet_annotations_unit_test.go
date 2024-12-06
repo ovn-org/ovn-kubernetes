@@ -2,17 +2,19 @@ package util
 
 import (
 	"fmt"
+	"math/rand"
 	"net"
 	"reflect"
 	"testing"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/stretchr/testify/assert"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 )
 
 func TestCreateSubnetAnnotation(t *testing.T) {
@@ -357,5 +359,70 @@ func TestParseNodeHostSubnetAnnotation(t *testing.T) {
 				assert.NotNil(t, res)
 			}
 		})
+	}
+}
+
+//func NodeSubnetAnnotationChangedForNetwork(oldNode, newNode *v1.Node, netName string) bool {
+//	var oldSubnets, newSubnets map[string]json.RawMessage
+//
+//	if err := json.Unmarshal([]byte(oldNode.Annotations[ovnNodeSubnets]), &oldSubnets); err != nil {
+//		klog.Errorf("Failed to unmarshal old node %s annotation: %v", oldNode.Name, err)
+//		return true
+//	}
+//	if err := json.Unmarshal([]byte(newNode.Annotations[ovnNodeSubnets]), &newSubnets); err != nil {
+//		klog.Errorf("Failed to unmarshal new node %s annotation: %v", newNode.Name, err)
+//		return true
+//	}
+//	return !bytes.Equal(oldSubnets[netName], newSubnets[netName])
+//}
+
+const networksCount = 4096
+
+func BenchmarkParseNodeHostSubnetAnnotation(b *testing.B) {
+	var oldNode, newNode v1.Node
+	oldNode.Annotations = make(map[string]string)
+	newNode.Annotations = make(map[string]string)
+
+	oldNode.Annotations[ovnNodeSubnets] = "{\"default\":\"10.244.0.0/24\""
+	newNode.Annotations[ovnNodeSubnets] = "{\"default\":\"10.244.0.0/24\""
+	for n := 0; n < networksCount; n++ {
+		net := fmt.Sprintf(", \"net-%d\":[\"10.243.0.0/24\"]", n)
+		oldNode.Annotations[ovnNodeSubnets] += net
+		newNode.Annotations[ovnNodeSubnets] += net
+	}
+	oldNode.Annotations[ovnNodeSubnets] += "}"
+	newNode.Annotations[ovnNodeSubnets] += "}"
+
+	//klog.Errorf("%s", oldNode.Annotations[ovnNodeSubnets])
+	b.ResetTimer()
+	for n := 0; n < b.N; n++ {
+		assert.False(b, NodeSubnetAnnotationChangedForNetwork(&oldNode, &newNode, fmt.Sprintf("net-%d", rand.Int63n(networksCount))))
+	}
+}
+
+func nodeSubnetChanged(oldNode, node *v1.Node, netName string) bool {
+	oldSubnets, _ := ParseNodeHostSubnetAnnotation(oldNode, netName)
+	newSubnets, _ := ParseNodeHostSubnetAnnotation(node, netName)
+	return !reflect.DeepEqual(oldSubnets, newSubnets)
+}
+
+func BenchmarkParseNodeHostSubnetAnnotationOld(b *testing.B) {
+	var oldNode, newNode v1.Node
+	oldNode.Annotations = make(map[string]string)
+	newNode.Annotations = make(map[string]string)
+
+	oldNode.Annotations[ovnNodeSubnets] = "{\"default\":\"10.244.0.0/24\""
+	newNode.Annotations[ovnNodeSubnets] = "{\"default\":\"10.244.0.0/24\""
+	for n := 0; n < networksCount; n++ {
+		net := fmt.Sprintf(", \"net-%d\":\"10.243.0.0/24\"", n)
+		oldNode.Annotations[ovnNodeSubnets] += net
+		newNode.Annotations[ovnNodeSubnets] += net
+	}
+	oldNode.Annotations[ovnNodeSubnets] += "}"
+	newNode.Annotations[ovnNodeSubnets] += "}"
+
+	b.ResetTimer()
+	for n := 0; n < b.N; n++ {
+		assert.False(b, nodeSubnetChanged(&oldNode, &newNode, fmt.Sprintf("net-%d", rand.Int63n(networksCount))))
 	}
 }
