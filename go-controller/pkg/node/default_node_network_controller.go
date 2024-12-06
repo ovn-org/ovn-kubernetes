@@ -33,7 +33,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/egressip"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/egressservice"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/linkmanager"
@@ -65,7 +65,7 @@ type BaseNodeNetworkController struct {
 	CommonNodeNetworkControllerInfo
 
 	// network information
-	util.NetInfo
+	util.ReconcilableNetInfo
 
 	// podNADToDPUCDMap tracks the NAD/DPU_ConnectionDetails mapping for all NADs that each pod requests.
 	// Key is pod.UUID; value is nadToDPUCDMap (of map[string]*util.DPUConnectionDetails). Key of nadToDPUCDMap
@@ -115,7 +115,7 @@ type DefaultNodeNetworkController struct {
 
 	apbExternalRouteNodeController *apbroute.ExternalGatewayNodeController
 
-	nadController *nad.NetAttachDefinitionController
+	networkManager networkmanager.Interface
 
 	cniServer *cni.Server
 
@@ -132,12 +132,12 @@ type preStartSetup struct {
 }
 
 func newDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, stopChan chan struct{},
-	wg *sync.WaitGroup, routeManager *routemanager.Controller, nadController *nad.NetAttachDefinitionController) *DefaultNodeNetworkController {
+	wg *sync.WaitGroup, routeManager *routemanager.Controller) *DefaultNodeNetworkController {
 
 	c := &DefaultNodeNetworkController{
 		BaseNodeNetworkController: BaseNodeNetworkController{
 			CommonNodeNetworkControllerInfo: *cnnci,
-			NetInfo:                         &util.DefaultNetInfo{},
+			ReconcilableNetInfo:             &util.DefaultNetInfo{},
 			stopChan:                        stopChan,
 			wg:                              wg,
 		},
@@ -145,17 +145,17 @@ func newDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, sto
 	}
 	if util.IsNetworkSegmentationSupportEnabled() && !config.OVNKubernetesFeature.DisableUDNHostIsolation {
 		c.udnHostIsolationManager = NewUDNHostIsolationManager(config.IPv4Mode, config.IPv6Mode,
-			cnnci.watchFactory.PodCoreInformer(), nadController)
+			cnnci.watchFactory.PodCoreInformer())
 	}
 	return c
 }
 
 // NewDefaultNodeNetworkController creates a new network controller for node management of the default network
-func NewDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, nadController *nad.NetAttachDefinitionController) (*DefaultNodeNetworkController, error) {
+func NewDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, networkManager networkmanager.Interface) (*DefaultNodeNetworkController, error) {
 	var err error
 	stopChan := make(chan struct{})
 	wg := &sync.WaitGroup{}
-	nc := newDefaultNodeNetworkController(cnnci, stopChan, wg, cnnci.routeManager, nadController)
+	nc := newDefaultNodeNetworkController(cnnci, stopChan, wg, cnnci.routeManager)
 
 	if len(config.Kubernetes.HealthzBindAddress) != 0 {
 		klog.Infof("Enable node proxy healthz server on %s", config.Kubernetes.HealthzBindAddress)
@@ -175,7 +175,7 @@ func NewDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, nad
 		return nil, err
 	}
 
-	nc.nadController = nadController
+	nc.networkManager = networkManager
 
 	nc.initRetryFrameworkForNode()
 
@@ -185,6 +185,41 @@ func NewDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, nad
 func (nc *DefaultNodeNetworkController) initRetryFrameworkForNode() {
 	nc.retryNamespaces = nc.newRetryFrameworkNode(factory.NamespaceExGwType)
 	nc.retryEndpointSlices = nc.newRetryFrameworkNode(factory.EndpointSliceForStaleConntrackRemovalType)
+}
+
+func (oc *DefaultNodeNetworkController) shouldReconcileNetworkChange(old, new util.NetInfo) bool {
+	wasPotNetworkAdvertisedAtNode := util.IsPodNetworkAdvertisedAtNode(old, oc.name)
+	isPodNetworkAdverrtisedAtNode := util.IsPodNetworkAdvertisedAtNode(new, oc.name)
+	return wasPotNetworkAdvertisedAtNode != isPodNetworkAdverrtisedAtNode
+}
+
+func (oc *DefaultNodeNetworkController) Reconcile(netInfo util.NetInfo) error {
+	// inspect changes first
+	reconcilePodNetwork := oc.shouldReconcileNetworkChange(oc.ReconcilableNetInfo, netInfo)
+
+	// then update network information, point of no return
+	err := util.ReconcileNetwork(oc.ReconcilableNetInfo, netInfo)
+	if err != nil {
+		klog.Errorf("Failed to reconcile network %s: %v", oc.GetNetworkName(), err)
+	}
+
+	// then reconcile subcontrollers
+	if reconcilePodNetwork {
+		isPodNetworkAdvertisedAtNode := oc.isPodNetworkAdvertisedAtNode()
+		if oc.Gateway != nil {
+			oc.Gateway.SetPodNetworkAdvertised(isPodNetworkAdvertisedAtNode)
+			err := oc.Gateway.Reconcile()
+			if err != nil {
+				klog.Errorf("Failed to reconcile gateway: %v", err)
+			}
+		}
+	}
+
+	return nil
+}
+
+func (oc *DefaultNodeNetworkController) isPodNetworkAdvertisedAtNode() bool {
+	return util.IsPodNetworkAdvertisedAtNode(oc, oc.name)
 }
 
 func clearOVSFlowTargets() error {
@@ -837,7 +872,7 @@ func (nc *DefaultNodeNetworkController) PreStart(ctx context.Context) error {
 		if !ok {
 			return fmt.Errorf("cannot get kubeclient for starting CNI server")
 		}
-		cniServer, err = cni.NewCNIServer(nc.watchFactory, kclient.KClient, nc.nadController)
+		cniServer, err = cni.NewCNIServer(nc.watchFactory, kclient.KClient, nc.networkManager)
 		if err != nil {
 			return err
 		}

@@ -17,20 +17,19 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
-	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
-	kubetest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
-	fakenad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/nad"
+	testnm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/networkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
 var _ = ginkgo.Describe("Cluster manager EndpointSlice mirror controller", func() {
 	var (
-		app           *cli.App
-		controller    *Controller
-		fakeClient    *util.OVNClusterManagerClientset
-		nadController *nad.NetAttachDefinitionController
+		app            *cli.App
+		controller     *Controller
+		fakeClient     *util.OVNClusterManagerClientset
+		networkManager networkmanager.Controller
 	)
 
 	start := func(objects ...runtime.Object) {
@@ -40,15 +39,15 @@ var _ = ginkgo.Describe("Cluster manager EndpointSlice mirror controller", func(
 		fakeClient = util.GetOVNClientset(objects...).GetClusterManagerClientset()
 		wf, err := factory.NewClusterManagerWatchFactory(fakeClient)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		nadController, err = nad.NewNetAttachDefinitionController("test", &fakenad.FakeNetworkControllerManager{}, wf, nil)
+		networkManager, err = networkmanager.NewForCluster(&testnm.FakeControllerManager{}, wf, nil)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		controller, err = NewController(fakeClient, wf, nadController)
+		controller, err = NewController(fakeClient, wf, networkManager.Interface())
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 		err = wf.Start()
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-		err = nadController.Start()
+		err = networkManager.Start()
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 		err = controller.Start(context.Background(), 1)
@@ -70,8 +69,8 @@ var _ = ginkgo.Describe("Cluster manager EndpointSlice mirror controller", func(
 		if controller != nil {
 			controller.Stop()
 		}
-		if nadController != nil {
-			nadController.Stop()
+		if networkManager != nil {
+			networkManager.Stop()
 		}
 	})
 
@@ -108,7 +107,7 @@ var _ = ginkgo.Describe("Cluster manager EndpointSlice mirror controller", func(
 						},
 					},
 				}
-				staleEndpointSlice := kubetest.MirrorEndpointSlice(&defaultEndpointSlice, "l3-network", false)
+				staleEndpointSlice := testing.MirrorEndpointSlice(&defaultEndpointSlice, "l3-network", false)
 				staleEndpointSlice.Labels[types.LabelSourceEndpointSlice] = "non-existing-endpointslice"
 
 				objs := []runtime.Object{
@@ -314,7 +313,7 @@ var _ = ginkgo.Describe("Cluster manager EndpointSlice mirror controller", func(
 						},
 					},
 				}
-				mirroredEndpointSlice := kubetest.MirrorEndpointSlice(&defaultEndpointSlice, "l3-network", false)
+				mirroredEndpointSlice := testing.MirrorEndpointSlice(&defaultEndpointSlice, "l3-network", false)
 				objs := []runtime.Object{
 					&v1.PodList{
 						Items: []v1.Pod{

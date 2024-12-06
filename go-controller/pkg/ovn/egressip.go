@@ -576,7 +576,7 @@ func (oc *DefaultNetworkController) addPodEgressIPAssignments(name string, statu
 		}
 		podIPs = logicalPort.ips
 	} else { // means this is egress node's local master
-		podIPs, err = util.GetPodCIDRsWithFullMask(pod, oc.NetInfo)
+		podIPs, err = util.GetPodCIDRsWithFullMask(pod, oc.GetNetInfo())
 		if err != nil {
 			return err
 		}
@@ -765,7 +765,7 @@ func (oc *DefaultNetworkController) deletePodEgressIPAssignments(name string, st
 		podStatus.standbyEgressIPNames.Delete(name)
 		return nil
 	}
-	podIPs, err := util.GetPodCIDRsWithFullMask(pod, oc.NetInfo)
+	podIPs, err := util.GetPodCIDRsWithFullMask(pod, oc.GetNetInfo())
 	// FIXME(trozet): this error can be ignored if ErrNoPodIPFound, but unit test:
 	// egressIP pod recreate with same name (stateful-sets) shouldn't use stale logicalPortCache entries AND stale podAssignment cache entries
 	// heavily relies on this error happening.
@@ -1649,6 +1649,12 @@ func (e *egressIPZoneController) addExternalGWPodSNATOps(ops []ovsdb.Operation, 
 		if err != nil {
 			return nil, nil // nothing to do.
 		}
+
+		if util.IsPodNetworkAdvertisedAtNode(e, pod.Spec.NodeName) {
+			// network is advertised so don't setup the SNAT
+			return ops, nil
+		}
+
 		isLocalZonePod, loadedPodNode := e.nodeZoneState.Load(pod.Spec.NodeName)
 		if pod.Spec.NodeName == status.Node && loadedPodNode && isLocalZonePod && util.PodNeedsSNAT(pod) {
 			// if the pod still exists, add snats to->nodeIP (on the node where the pod exists) for these podIPs after deleting the snat to->egressIP
