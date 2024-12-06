@@ -478,7 +478,7 @@ var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
 				dataParams := newNetpolDataParams(networkPolicy).
 					withLocalPortUUIDs(nPodTest.portUUID).
 					withTCPPeerPorts(portNum)
-				gressPolicyExpectedData1 := getPolicyData(dataParams)
+				gressPolicyExpectedData1 := getPolicyData([]*netpolDataParams{dataParams})
 				defaultDenyExpectedData1 := getDefaultDenyData(dataParams)
 				initData := getUpdatedInitialDB([]testPod{nPodTest})
 				expectedData1 := append(initData, gressPolicyExpectedData1...)
@@ -506,7 +506,7 @@ var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
 					withLocalPortUUIDs(portInfo.portUUID).
 					withTCPPeerPorts(portNum).
 					withNetInfo(netInfo)
-				gressPolicyExpectedData2 := getPolicyData(dataParams2)
+				gressPolicyExpectedData2 := getPolicyData([]*netpolDataParams{dataParams2})
 				defaultDenyExpectedData2 := getDefaultDenyData(dataParams2)
 				expectedData2 := append(expectedData1, gressPolicyExpectedData2...)
 				expectedData2 = append(expectedData2, defaultDenyExpectedData2...)
