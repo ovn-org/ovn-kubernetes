@@ -115,7 +115,7 @@ func newANPControllerWithDBSetup(dbSetup libovsdbtest.TestSetup, initANPs anpapi
 	addressSetFactory := addressset.NewOvnAddressSetFactory(nbClient, config.IPv4Mode, config.IPv6Mode)
 	recorder := record.NewFakeRecorder(10)
 	controller, err := NewController(
-		"default-network-controller",
+		defaultNetworkControllerName,
 		nbClient,
 		fakeClient.ANPClient,
 		watcher.ANPInformer(),
