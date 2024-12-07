@@ -509,6 +509,8 @@ var _ = Describe("Management Port Operations", func() {
 		hostSubnets := []*net.IPNet{}
 		linkMock := &mocks.Link{}
 
+		nodenft.SetFakeNFTablesHelper()
+
 		BeforeEach(func() {
 			Expect(config.PrepareTestConfig()).To(Succeed())
 			util.ResetRunner()
