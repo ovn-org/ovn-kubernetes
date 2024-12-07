@@ -39,7 +39,8 @@ type adminNetworkPolicySubject struct {
 	// transact ops calculation. If not, for every pod/namespace update
 	// we would need to do a lookup in the libovsdb cache for the ns_name
 	// LSP index.
-	podPorts sets.Set[string]
+	// {K: networkName; V: {set of podLSPs matching the provided podSelector}}
+	podPorts map[string]sets.Set[string]
 }
 
 type adminNetworkPolicyPeer struct {
@@ -52,7 +53,8 @@ type adminNetworkPolicyPeer struct {
 	// {K: namespace name; V: {set of pods matching the provided podSelector}}
 	namespaces map[string]sets.Set[string]
 	// set of nodes matching the provided nodeSelector
-	nodes sets.Set[string]
+	nodes    sets.Set[string]
+	networks sets.Set[string]
 }
 
 type gressRule struct {
@@ -68,7 +70,9 @@ type gressRule struct {
 	peers  []*adminNetworkPolicyPeer
 	ports  []*libovsdbutil.NetworkPolicyPort
 	// all the peerAddresses of the peer entities (podIPs, nodeIPs, CIDR ranges) selected by this ANP Rule
-	peerAddresses sets.Set[string]
+	// for all networks
+	// {K: networkName; V: {set of IPs}}
+	peerAddresses map[string]sets.Set[string]
 	// saves NamedPort representation;
 	// key is the name of the Port
 	// value is an array of possible representations of this port (relevance wrt to rule, peers)
@@ -94,17 +98,21 @@ type adminNetworkPolicyState struct {
 	// aclLoggingParams stores the log levels for the ACLs created for this ANP
 	// this is based off the "k8s.ovn.org/acl-logging" annotation set on the ANP's
 	aclLoggingParams *libovsdbutil.ACLLoggingLevels
+	// set of networkNames selected either as part of ANP's
+	// subject OR peers in any one of the rules
+	managedNetworks sets.Set[string]
 }
 
 // newAdminNetworkPolicyState takes the provided ANP API object and creates a new corresponding
 // adminNetworkPolicyState cache object for that API object.
 func newAdminNetworkPolicyState(raw *anpapi.AdminNetworkPolicy) (*adminNetworkPolicyState, error) {
 	anp := &adminNetworkPolicyState{
-		name:         raw.Name,
-		anpPriority:  raw.Spec.Priority,
-		ovnPriority:  (ANPFlowStartPriority - raw.Spec.Priority*ANPMaxRulesPerObject),
-		ingressRules: make([]*gressRule, 0),
-		egressRules:  make([]*gressRule, 0),
+		name:            raw.Name,
+		anpPriority:     raw.Spec.Priority,
+		ovnPriority:     (ANPFlowStartPriority - raw.Spec.Priority*ANPMaxRulesPerObject),
+		ingressRules:    make([]*gressRule, 0),
+		egressRules:     make([]*gressRule, 0),
+		managedNetworks: make(sets.Set[string]),
 	}
 	var err error
 	anp.subject, err = newAdminNetworkPolicySubject(raw.Spec.Subject)
@@ -271,6 +279,14 @@ func newAdminNetworkPolicyEgressPeer(raw anpapi.AdminNetworkPolicyEgressPeer) (*
 			namespaceSelector: labels.Nothing(), // doesn't match any namespaces
 			podSelector:       labels.Nothing(), // doesn't match any pods
 			nodeSelector:      labels.Nothing(), // doesn't match any nodes
+			networks:          make(sets.Set[string]),
+		}
+		for _, cidr := range raw.Networks {
+			_, ipNet, err := net.ParseCIDR(string(cidr))
+			if err != nil {
+				return nil, err
+			}
+			anpPeer.networks.Insert(ipNet.String())
 		}
 	}
 	return anpPeer, nil
@@ -280,15 +296,14 @@ func newAdminNetworkPolicyEgressPeer(raw anpapi.AdminNetworkPolicyEgressPeer) (*
 // gressRule cache object for that Rule.
 func newAdminNetworkPolicyIngressRule(raw anpapi.AdminNetworkPolicyIngressRule, index, priority int32) (*gressRule, error) {
 	anpRule := &gressRule{
-		name:          raw.Name,
-		priority:      priority,
-		gressIndex:    index,
-		action:        GetACLActionForANPRule(raw.Action),
-		gressPrefix:   string(libovsdbutil.ACLIngress),
-		peers:         make([]*adminNetworkPolicyPeer, 0),
-		ports:         make([]*libovsdbutil.NetworkPolicyPort, 0),
-		namedPorts:    make(map[string][]libovsdbutil.NamedNetworkPolicyPort, 0),
-		peerAddresses: sets.New[string](),
+		name:        raw.Name,
+		priority:    priority,
+		gressIndex:  index,
+		action:      GetACLActionForANPRule(raw.Action),
+		gressPrefix: string(libovsdbutil.ACLIngress),
+		peers:       make([]*adminNetworkPolicyPeer, 0),
+		ports:       make([]*libovsdbutil.NetworkPolicyPort, 0),
+		namedPorts:  make(map[string][]libovsdbutil.NamedNetworkPolicyPort, 0),
 	}
 	for _, peer := range raw.From {
 		anpPeer, err := newAdminNetworkPolicyIngressPeer(peer)
@@ -315,15 +330,14 @@ func newAdminNetworkPolicyIngressRule(raw anpapi.AdminNetworkPolicyIngressRule, 
 // gressRule cache object for that Rule.
 func newAdminNetworkPolicyEgressRule(raw anpapi.AdminNetworkPolicyEgressRule, index, priority int32) (*gressRule, error) {
 	anpRule := &gressRule{
-		name:          raw.Name,
-		priority:      priority,
-		gressIndex:    index,
-		action:        GetACLActionForANPRule(raw.Action),
-		gressPrefix:   string(libovsdbutil.ACLEgress),
-		peers:         make([]*adminNetworkPolicyPeer, 0),
-		ports:         make([]*libovsdbutil.NetworkPolicyPort, 0),
-		namedPorts:    make(map[string][]libovsdbutil.NamedNetworkPolicyPort, 0),
-		peerAddresses: sets.New[string](),
+		name:        raw.Name,
+		priority:    priority,
+		gressIndex:  index,
+		action:      GetACLActionForANPRule(raw.Action),
+		gressPrefix: string(libovsdbutil.ACLEgress),
+		peers:       make([]*adminNetworkPolicyPeer, 0),
+		ports:       make([]*libovsdbutil.NetworkPolicyPort, 0),
+		namedPorts:  make(map[string][]libovsdbutil.NamedNetworkPolicyPort, 0),
 	}
 	for _, peer := range raw.To {
 		anpPeer, err := newAdminNetworkPolicyEgressPeer(peer)
@@ -331,15 +345,6 @@ func newAdminNetworkPolicyEgressRule(raw anpapi.AdminNetworkPolicyEgressRule, in
 			return nil, err
 		}
 		anpRule.peers = append(anpRule.peers, anpPeer)
-		if len(peer.Networks) > 0 {
-			for _, cidr := range peer.Networks {
-				_, ipNet, err := net.ParseCIDR(string(cidr))
-				if err != nil {
-					return nil, err
-				}
-				anpRule.peerAddresses.Insert(ipNet.String())
-			}
-		}
 	}
 	if raw.Ports != nil {
 		for _, port := range *raw.Ports {
@@ -358,11 +363,12 @@ func newAdminNetworkPolicyEgressRule(raw anpapi.AdminNetworkPolicyEgressRule, in
 // adminNetworkPolicyState cache object for that API object.
 func newBaselineAdminNetworkPolicyState(raw *anpapi.BaselineAdminNetworkPolicy) (*adminNetworkPolicyState, error) {
 	banp := &adminNetworkPolicyState{
-		name:         raw.Name,
-		anpPriority:  0, // since BANP does not have priority, we hardcode to 0
-		ovnPriority:  BANPFlowPriority,
-		ingressRules: make([]*gressRule, 0),
-		egressRules:  make([]*gressRule, 0),
+		name:            raw.Name,
+		anpPriority:     0, // since BANP does not have priority, we hardcode to 0
+		ovnPriority:     BANPFlowPriority,
+		ingressRules:    make([]*gressRule, 0),
+		egressRules:     make([]*gressRule, 0),
+		managedNetworks: make(sets.Set[string]),
 	}
 	var err error
 	banp.subject, err = newAdminNetworkPolicySubject(raw.Spec.Subject)
@@ -402,15 +408,14 @@ func newBaselineAdminNetworkPolicyState(raw *anpapi.BaselineAdminNetworkPolicy) 
 // gressRule cache object for that Rule.
 func newBaselineAdminNetworkPolicyIngressRule(raw anpapi.BaselineAdminNetworkPolicyIngressRule, index, priority int32) (*gressRule, error) {
 	banpRule := &gressRule{
-		name:          raw.Name,
-		priority:      priority,
-		gressIndex:    index,
-		action:        GetACLActionForBANPRule(raw.Action),
-		gressPrefix:   string(libovsdbutil.ACLIngress),
-		peers:         make([]*adminNetworkPolicyPeer, 0),
-		ports:         make([]*libovsdbutil.NetworkPolicyPort, 0),
-		namedPorts:    make(map[string][]libovsdbutil.NamedNetworkPolicyPort, 0),
-		peerAddresses: sets.New[string](),
+		name:        raw.Name,
+		priority:    priority,
+		gressIndex:  index,
+		action:      GetACLActionForBANPRule(raw.Action),
+		gressPrefix: string(libovsdbutil.ACLIngress),
+		peers:       make([]*adminNetworkPolicyPeer, 0),
+		ports:       make([]*libovsdbutil.NetworkPolicyPort, 0),
+		namedPorts:  make(map[string][]libovsdbutil.NamedNetworkPolicyPort, 0),
 	}
 	for _, peer := range raw.From {
 		anpPeer, err := newAdminNetworkPolicyIngressPeer(peer)
@@ -437,15 +442,14 @@ func newBaselineAdminNetworkPolicyIngressRule(raw anpapi.BaselineAdminNetworkPol
 // gressRule cache object for that Rule.
 func newBaselineAdminNetworkPolicyEgressRule(raw anpapi.BaselineAdminNetworkPolicyEgressRule, index, priority int32) (*gressRule, error) {
 	banpRule := &gressRule{
-		name:          raw.Name,
-		priority:      priority,
-		gressIndex:    index,
-		action:        GetACLActionForBANPRule(raw.Action),
-		gressPrefix:   string(libovsdbutil.ACLEgress),
-		peers:         make([]*adminNetworkPolicyPeer, 0),
-		ports:         make([]*libovsdbutil.NetworkPolicyPort, 0),
-		namedPorts:    make(map[string][]libovsdbutil.NamedNetworkPolicyPort, 0),
-		peerAddresses: sets.New[string](),
+		name:        raw.Name,
+		priority:    priority,
+		gressIndex:  index,
+		action:      GetACLActionForBANPRule(raw.Action),
+		gressPrefix: string(libovsdbutil.ACLEgress),
+		peers:       make([]*adminNetworkPolicyPeer, 0),
+		ports:       make([]*libovsdbutil.NetworkPolicyPort, 0),
+		namedPorts:  make(map[string][]libovsdbutil.NamedNetworkPolicyPort, 0),
 	}
 	for _, peer := range raw.To {
 		banpPeer, err := newAdminNetworkPolicyEgressPeer(peer)
@@ -453,15 +457,6 @@ func newBaselineAdminNetworkPolicyEgressRule(raw anpapi.BaselineAdminNetworkPoli
 			return nil, err
 		}
 		banpRule.peers = append(banpRule.peers, banpPeer)
-		if len(peer.Networks) > 0 {
-			for _, cidr := range peer.Networks {
-				_, ipNet, err := net.ParseCIDR(string(cidr))
-				if err != nil {
-					return nil, err
-				}
-				banpRule.peerAddresses.Insert(ipNet.String())
-			}
-		}
 	}
 	if raw.Ports != nil {
 		for _, port := range *raw.Ports {
