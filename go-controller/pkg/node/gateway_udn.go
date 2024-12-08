@@ -295,7 +295,7 @@ func (udng *UserDefinedNetworkGateway) AddNetwork() error {
 		return fmt.Errorf("could not create management port netdevice for network %s: %w", udng.GetNetworkName(), err)
 	}
 	vrfDeviceName := util.GetVRFDeviceNameForUDN(udng.networkID)
-	vrfTableId := util.CalculateRouteTableID(mplink.Attrs().Index)
+	vrfTableId := util.CalculateUDNRouteTableID(udng.networkID)
 	routes, err := udng.computeRoutesForUDN(vrfTableId, mplink)
 	if err != nil {
 		return fmt.Errorf("failed to compute routes for network %s, err: %v", udng.GetNetworkName(), err)

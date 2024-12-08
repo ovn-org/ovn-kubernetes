@@ -341,9 +341,7 @@ var _ = Describe("SecondaryNodeNetworkController: UserDefinedPrimaryNetwork Gate
 			Expect(vrfLink.Type()).To(Equal("vrf"))
 			vrfDev, ok := vrfLink.(*netlink.Vrf)
 			Expect(ok).To(Equal(true))
-			mplink, err := util.GetNetLinkOps().LinkByName(mgtPort)
-			Expect(err).NotTo(HaveOccurred())
-			vrfTableId := util.CalculateRouteTableID(mplink.Attrs().Index)
+			vrfTableId := util.CalculateUDNRouteTableID(netID)
 			Expect(vrfDev.Table).To(Equal(uint32(vrfTableId)))
 
 			By("delete VRF device explicitly and ensure VRF Manager reconciles it")
