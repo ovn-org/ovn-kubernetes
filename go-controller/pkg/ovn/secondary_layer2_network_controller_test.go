@@ -16,6 +16,9 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	knet "k8s.io/utils/net"
+	"k8s.io/utils/ptr"
+
+	kubevirtv1 "kubevirt.io/api/core/v1"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
@@ -26,6 +29,27 @@ import (
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
+
+type lspEnableValue *bool
+
+var (
+	lspEnableNotSpecified    lspEnableValue = nil
+	lspEnableExplicitlyTrue  lspEnableValue = ptr.To(true)
+	lspEnableExplicitlyFalse lspEnableValue = ptr.To(false)
+)
+
+type liveMigrationPodInfo struct {
+	podPhase           v1.PodPhase
+	annotation         map[string]string
+	creationTimestamp  metav1.Time
+	expectedLspEnabled lspEnableValue
+}
+
+type liveMigrationInfo struct {
+	vmName        string
+	sourcePodInfo liveMigrationPodInfo
+	targetPodInfo liveMigrationPodInfo
+}
 
 var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 	var (
@@ -57,90 +81,18 @@ var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 	DescribeTable(
 		"reconciles a new",
 		func(netInfo secondaryNetInfo, testConfig testConfiguration, gatewayMode config.GatewayMode) {
-			podInfo := dummyL2TestPod(ns, netInfo)
-			if testConfig.configToOverride != nil {
-				config.OVNKubernetesFeature = *testConfig.configToOverride
-				if testConfig.gatewayConfig != nil {
-					config.Gateway.DisableSNATMultipleGWs = testConfig.gatewayConfig.DisableSNATMultipleGWs
-				}
-			}
-			config.Gateway.Mode = gatewayMode
-			if knet.IsIPv6CIDRString(netInfo.clustersubnets) {
-				config.IPv6Mode = true
-				// tests dont support dualstack yet
-				config.IPv4Mode = false
-			}
+			const podIdx = 0
+			podInfo := dummyL2TestPod(ns, netInfo, podIdx)
+			setupConfig(netInfo, testConfig, gatewayMode)
 			app.Action = func(ctx *cli.Context) error {
-				By(fmt.Sprintf("creating a network attachment definition for network: %s", netInfo.netName))
-				nad, err := newNetworkAttachmentDefinition(
-					ns,
-					nadName,
-					*netInfo.netconf(),
-				)
-				Expect(err).NotTo(HaveOccurred())
-				By("setting up the OVN DB without any entities in it")
-				Expect(netInfo.setupOVNDependencies(&initialDB)).To(Succeed())
-
-				if netInfo.isPrimary {
-					networkConfig, err := util.NewNetInfo(netInfo.netconf())
-					Expect(err).NotTo(HaveOccurred())
-
-					initialDB.NBData = append(
-						initialDB.NBData,
-						&nbdb.LogicalRouter{
-							Name:        fmt.Sprintf("GR_%s_%s", networkConfig.GetNetworkName(), nodeName),
-							ExternalIDs: standardNonDefaultNetworkExtIDs(networkConfig),
-						},
-						newNetworkClusterPortGroup(networkConfig),
-					)
-				}
+				pod := newMultiHomedPod(podInfo, netInfo)
 
 				const nodeIPv4CIDR = "192.168.126.202/24"
 				By(fmt.Sprintf("Creating a node named %q, with IP: %s", nodeName, nodeIPv4CIDR))
 				testNode, err := newNodeWithSecondaryNets(nodeName, nodeIPv4CIDR, netInfo)
 				Expect(err).NotTo(HaveOccurred())
-				fakeOvn.startWithDBSetup(
-					initialDB,
-					&v1.NamespaceList{
-						Items: []v1.Namespace{
-							*newNamespace(ns),
-						},
-					},
-					&v1.NodeList{Items: []v1.Node{*testNode}},
-					&v1.PodList{
-						Items: []v1.Pod{
-							*newMultiHomedPod(podInfo, netInfo),
-						},
-					},
-					&nadapi.NetworkAttachmentDefinitionList{
-						Items: []nadapi.NetworkAttachmentDefinition{*nad},
-					},
-				)
-				podInfo.populateLogicalSwitchCache(fakeOvn)
 
-				// on IC, the test itself spits out the pod with the
-				// annotations set, since on production it would be the
-				// clustermanager to annotate the pod.
-				if !config.OVNKubernetesFeature.EnableInterconnect {
-					By("asserting the pod originally does *not* feature the OVN pod networks annotation")
-					// pod exists, networks annotations don't
-					pod, err := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(podInfo.namespace).Get(context.Background(), podInfo.podName, metav1.GetOptions{})
-					Expect(err).NotTo(HaveOccurred())
-					_, ok := pod.Annotations[util.OvnPodAnnotationName]
-					Expect(ok).To(BeFalse())
-				}
-				Expect(fakeOvn.controller.nadController.Start()).NotTo(HaveOccurred())
-
-				Expect(fakeOvn.controller.WatchNamespaces()).NotTo(HaveOccurred())
-				Expect(fakeOvn.controller.WatchPods()).NotTo(HaveOccurred())
-				By("asserting the pod (once reconciled) *features* the OVN pod networks annotation")
-				secondaryNetController, ok := fakeOvn.secondaryControllers[secondaryNetworkName]
-				Expect(ok).To(BeTrue())
-
-				secondaryNetController.bnc.ovnClusterLRPToJoinIfAddrs = dummyJoinIPs()
-				podInfo.populateSecondaryNetworkLogicalSwitchCache(fakeOvn, secondaryNetController)
-				Expect(secondaryNetController.bnc.WatchNodes()).To(Succeed())
-				Expect(secondaryNetController.bnc.WatchPods()).To(Succeed())
+				Expect(setupFakeOvnForLayer2Topology(fakeOvn, initialDB, netInfo, testNode, podInfo, pod)).To(Succeed())
 
 				// for layer2 on interconnect, it is the cluster manager that
 				// allocates the OVN annotation; on unit tests, this just
@@ -223,6 +175,154 @@ var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 			config.GatewayModeShared,
 		),
 		*/
+	)
+
+	DescribeTable(
+		"reconciles a new kubevirt-related pod during its live-migration phases",
+		func(netInfo secondaryNetInfo, testConfig testConfiguration, migrationInfo *liveMigrationInfo) {
+			const (
+				sourcePodInfoIdx = 0
+				targetPodInfoIdx = 1
+			)
+			sourcePodInfo := dummyL2TestPod(ns, netInfo, sourcePodInfoIdx)
+			setupConfig(netInfo, testConfig, config.GatewayModeShared)
+			app.Action = func(ctx *cli.Context) error {
+				sourcePod := newMultiHomedKubevirtPod(
+					migrationInfo.vmName,
+					migrationInfo.sourcePodInfo,
+					sourcePodInfo,
+					netInfo)
+
+				const nodeIPv4CIDR = "192.168.126.202/24"
+				By(fmt.Sprintf("Creating a node named %q, with IP: %s", nodeName, nodeIPv4CIDR))
+				testNode, err := newNodeWithSecondaryNets(nodeName, nodeIPv4CIDR, netInfo)
+				Expect(err).NotTo(HaveOccurred())
+
+				Expect(setupFakeOvnForLayer2Topology(fakeOvn, initialDB, netInfo, testNode, sourcePodInfo, sourcePod)).To(Succeed())
+
+				// for layer2 on interconnect, it is the cluster manager that
+				// allocates the OVN annotation; on unit tests, this just
+				// doesn't happen, and we create the pod with these annotations
+				// set. Hence, no point checking they're the expected ones.
+				// TODO: align the mocked annotations with the production code
+				//   - currently missing setting the routes.
+				if !config.OVNKubernetesFeature.EnableInterconnect {
+					By("asserting the pod OVN pod networks annotation are the expected ones")
+					// check that after start networks annotations and nbdb will be updated
+					Eventually(func() string {
+						return getPodAnnotations(fakeOvn.fakeClient.KubeClient, sourcePodInfo.namespace, sourcePodInfo.podName)
+					}).WithTimeout(2 * time.Second).Should(MatchJSON(sourcePodInfo.getAnnotationsJson()))
+				}
+
+				expectationOptions := testConfig.expectationOptions
+				if netInfo.isPrimary {
+					By("configuring the expectation machine with the GW related configuration")
+					gwConfig, err := util.ParseNodeL3GatewayAnnotation(testNode)
+					Expect(err).NotTo(HaveOccurred())
+					Expect(gwConfig.NextHops).NotTo(BeEmpty())
+					expectationOptions = append(expectationOptions, withGatewayConfig(gwConfig))
+					expectationOptions = append(expectationOptions, withClusterPortGroup())
+				}
+				By("asserting the OVN entities provisioned in the NBDB are the expected ones before migration started")
+				Eventually(fakeOvn.nbClient).Should(
+					libovsdbtest.HaveData(
+						newSecondaryNetworkExpectationMachine(
+							fakeOvn,
+							[]testPod{sourcePodInfo},
+							expectationOptions...,
+						).expectedLogicalSwitchesAndPorts(netInfo.isPrimary)...))
+
+				targetPodInfo := dummyL2TestPod(ns, netInfo, targetPodInfoIdx)
+				targetKvPod := newMultiHomedKubevirtPod(
+					migrationInfo.vmName,
+					migrationInfo.targetPodInfo,
+					targetPodInfo,
+					netInfo)
+
+				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(targetKvPod.Namespace).Create(context.Background(), targetKvPod, metav1.CreateOptions{})
+				Expect(err).NotTo(HaveOccurred())
+
+				By("asserting the OVN entities provisioned in the NBDB are the expected ones after migration")
+				expectedPodLspEnabled := map[string]*bool{}
+				expectedPodLspEnabled[sourcePodInfo.podName] = migrationInfo.sourcePodInfo.expectedLspEnabled
+
+				testPods := []testPod{sourcePodInfo}
+				if !util.PodCompleted(targetKvPod) {
+					testPods = append(testPods, targetPodInfo)
+					expectedPodLspEnabled[targetPodInfo.podName] = migrationInfo.targetPodInfo.expectedLspEnabled
+				}
+				Eventually(fakeOvn.nbClient).Should(
+					libovsdbtest.HaveData(
+						newSecondaryNetworkExpectationMachine(
+							fakeOvn,
+							testPods,
+							expectationOptions...,
+						).expectedLogicalSwitchesAndPortsWithLspEnabled(netInfo.isPrimary, expectedPodLspEnabled)...))
+				return nil
+			}
+
+			Expect(app.Run([]string{app.Name})).To(Succeed())
+		},
+
+		Entry("on a layer2 topology with user defined secondary network, when target pod is not yet ready",
+			dummySecondaryLayer2UserDefinedNetwork("100.200.0.0/16"),
+			nonICClusterTestConfiguration(),
+			notReadyMigrationInfo(),
+		),
+
+		Entry("on a layer2 topology with user defined secondary network, when target pod is ready",
+			dummySecondaryLayer2UserDefinedNetwork("100.200.0.0/16"),
+			nonICClusterTestConfiguration(),
+			readyMigrationInfo(),
+		),
+
+		Entry("on a layer2 topology with user defined secondary network and an IC cluster, when target pod is not yet ready",
+			dummySecondaryLayer2UserDefinedNetwork("100.200.0.0/16"),
+			icClusterTestConfiguration(),
+			notReadyMigrationInfo(),
+		),
+
+		Entry("on a layer2 topology with user defined secondary network and an IC cluster, when target pod is ready",
+			dummySecondaryLayer2UserDefinedNetwork("100.200.0.0/16"),
+			icClusterTestConfiguration(),
+			readyMigrationInfo(),
+		),
+
+		Entry("on a layer2 topology with user defined secondary network and an IC cluster, when target pod failed",
+			dummySecondaryLayer2UserDefinedNetwork("100.200.0.0/16"),
+			icClusterTestConfiguration(),
+			failedMigrationInfo(),
+		),
+
+		Entry("on a layer2 topology with user defined primary network, when target pod is not yet ready",
+			dummyPrimaryLayer2UserDefinedNetwork("100.200.0.0/16"),
+			nonICClusterTestConfiguration(),
+			notReadyMigrationInfo(),
+		),
+
+		Entry("on a layer2 topology with user defined primary network, when target pod is ready",
+			dummyPrimaryLayer2UserDefinedNetwork("100.200.0.0/16"),
+			nonICClusterTestConfiguration(),
+			readyMigrationInfo(),
+		),
+
+		Entry("on a layer2 topology with user defined primary network and an IC cluster, when target pod is not yet ready",
+			dummyPrimaryLayer2UserDefinedNetwork("100.200.0.0/16"),
+			icClusterTestConfiguration(),
+			notReadyMigrationInfo(),
+		),
+
+		Entry("on a layer2 topology with user defined primary network and an IC cluster, when target pod is ready",
+			dummyPrimaryLayer2UserDefinedNetwork("100.200.0.0/16"),
+			icClusterTestConfiguration(),
+			readyMigrationInfo(),
+		),
+
+		Entry("on a layer2 topology with user defined primary network and an IC cluster, when target pod failed",
+			dummyPrimaryLayer2UserDefinedNetwork("100.200.0.0/16"),
+			icClusterTestConfiguration(),
+			failedMigrationInfo(),
+		),
 	)
 
 	DescribeTable(
@@ -349,6 +449,15 @@ var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 
 })
 
+func dummyLocalnetWithSecondaryUserDefinedNetwork(subnets string) secondaryNetInfo {
+	return secondaryNetInfo{
+		netName:        secondaryNetworkName,
+		nadName:        namespacedName(ns, nadName),
+		topology:       ovntypes.LocalnetTopology,
+		clustersubnets: subnets,
+	}
+}
+
 func dummySecondaryLayer2UserDefinedNetwork(subnets string) secondaryNetInfo {
 	return secondaryNetInfo{
 		netName:        secondaryNetworkName,
@@ -364,10 +473,11 @@ func dummyPrimaryLayer2UserDefinedNetwork(subnets string) secondaryNetInfo {
 	return secondaryNet
 }
 
-func dummyL2TestPod(nsName string, info secondaryNetInfo) testPod {
+func dummyL2TestPod(nsName string, info secondaryNetInfo, podIdx int) testPod {
 	const nodeSubnet = "10.128.1.0/24"
+
 	if info.isPrimary {
-		pod := newTPod(nodeName, nodeSubnet, "10.128.1.2", "", "myPod", "10.128.1.3", "0a:58:0a:80:01:03", nsName)
+		pod := newTPod(nodeName, nodeSubnet, "10.128.1.2", "", fmt.Sprintf("myPod-%d", podIdx), fmt.Sprintf("10.128.1.%d", podIdx+3), fmt.Sprintf("0a:58:0a:80:01:%0.2d", podIdx+3), nsName)
 		pod.networkRole = "infrastructure-locked"
 		pod.routes = append(
 			pod.routes,
@@ -386,8 +496,8 @@ func dummyL2TestPod(nsName string, info secondaryNetInfo) testPod {
 			info.clustersubnets,
 			"",
 			"100.200.0.1",
-			"100.200.0.3/16",
-			"0a:58:64:c8:00:03",
+			fmt.Sprintf("100.200.0.%d/16", podIdx+3),
+			fmt.Sprintf("0a:58:64:c8:00:%0.2d", podIdx+3),
 			"primary",
 			0,
 			[]util.PodRoute{
@@ -403,15 +513,15 @@ func dummyL2TestPod(nsName string, info secondaryNetInfo) testPod {
 		)
 		return pod
 	}
-	pod := newTPod(nodeName, nodeSubnet, "10.128.1.2", "10.128.1.1", podName, "10.128.1.3", "0a:58:0a:80:01:03", nsName)
+	pod := newTPod(nodeName, nodeSubnet, "10.128.1.2", "10.128.1.1", fmt.Sprintf("%s-%d", podName, podIdx), fmt.Sprintf("10.128.1.%d", podIdx+3), fmt.Sprintf("0a:58:0a:80:01:%0.2d", podIdx+3), nsName)
 	pod.addNetwork(
 		info.netName,
 		info.nadName,
 		info.clustersubnets,
 		"",
 		"",
-		"100.200.0.1/16",
-		"0a:58:64:c8:00:01",
+		fmt.Sprintf("100.200.0.%d/16", podIdx+1),
+		fmt.Sprintf("0a:58:64:c8:00:%0.2d", podIdx+1),
 		"secondary",
 		0,
 		[]util.PodRoute{},
@@ -420,8 +530,9 @@ func dummyL2TestPod(nsName string, info secondaryNetInfo) testPod {
 }
 
 func dummyL2TestPodAdditionalNetworkIP() string {
+	const podIdx = 0
 	secNetInfo := dummyPrimaryLayer2UserDefinedNetwork("100.200.0.0/16")
-	return dummyL2TestPod(ns, secNetInfo).getNetworkPortInfo(secNetInfo.netName, secNetInfo.nadName).podIP
+	return dummyL2TestPod(ns, secNetInfo, podIdx).getNetworkPortInfo(secNetInfo.netName, secNetInfo.nadName).podIP
 }
 
 func expectedLayer2EgressEntities(netInfo util.NetInfo, gwConfig util.L3GatewayConfig, nodeName string) []libovsdbtest.TestData {
@@ -578,5 +689,159 @@ func nodeCIDR() *net.IPNet {
 	return &net.IPNet{
 		IP:   net.ParseIP("192.168.126.0"),
 		Mask: net.CIDRMask(24, 32),
+	}
+}
+
+func setupFakeOvnForLayer2Topology(fakeOvn *FakeOVN, initialDB libovsdbtest.TestSetup, netInfo secondaryNetInfo, testNode *v1.Node, podInfo testPod, pod *v1.Pod) error {
+	By(fmt.Sprintf("creating a network attachment definition for network: %s", netInfo.netName))
+	By(fmt.Sprintf("creating a network attachment definition for network: %s", netInfo.netName))
+	nad, err := newNetworkAttachmentDefinition(
+		ns,
+		nadName,
+		*netInfo.netconf(),
+	)
+	Expect(err).NotTo(HaveOccurred())
+	By("setting up the OVN DB without any entities in it")
+	Expect(netInfo.setupOVNDependencies(&initialDB)).To(Succeed())
+
+	if netInfo.isPrimary {
+		networkConfig, err := util.NewNetInfo(netInfo.netconf())
+		Expect(err).NotTo(HaveOccurred())
+
+		initialDB.NBData = append(
+			initialDB.NBData,
+			&nbdb.LogicalRouter{
+				Name:        fmt.Sprintf("GR_%s_%s", networkConfig.GetNetworkName(), nodeName),
+				ExternalIDs: standardNonDefaultNetworkExtIDs(networkConfig),
+			},
+			newNetworkClusterPortGroup(networkConfig),
+		)
+	}
+
+	fakeOvn.startWithDBSetup(
+		initialDB,
+		&v1.NamespaceList{
+			Items: []v1.Namespace{
+				*newNamespace(ns),
+			},
+		},
+		&v1.NodeList{Items: []v1.Node{*testNode}},
+		&v1.PodList{
+			Items: []v1.Pod{
+				*pod,
+			},
+		},
+		&nadapi.NetworkAttachmentDefinitionList{
+			Items: []nadapi.NetworkAttachmentDefinition{*nad},
+		},
+	)
+	podInfo.populateLogicalSwitchCache(fakeOvn)
+
+	// on IC, the test itself spits out the pod with the
+	// annotations set, since on production it would be the
+	// clustermanager to annotate the pod.
+	if !config.OVNKubernetesFeature.EnableInterconnect {
+		By("asserting the pod originally does *not* feature the OVN pod networks annotation")
+		// pod exists, networks annotations don't
+		pod, err := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(podInfo.namespace).Get(context.Background(), podInfo.podName, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+		_, ok := pod.Annotations[util.OvnPodAnnotationName]
+		if ok {
+			return fmt.Errorf("expected pod annotation %q", util.OvnPodAnnotationName)
+		}
+	}
+	if err = fakeOvn.controller.nadController.Start(); err != nil {
+		return err
+	}
+
+	if err = fakeOvn.controller.WatchNamespaces(); err != nil {
+		return err
+	}
+	if err = fakeOvn.controller.WatchPods(); err != nil {
+		return err
+	}
+	By("asserting the pod (once reconciled) *features* the OVN pod networks annotation")
+	secondaryNetController, doesControllerExist := fakeOvn.secondaryControllers[secondaryNetworkName]
+	if !doesControllerExist {
+		return fmt.Errorf("expected secondary network controller to exist")
+	}
+
+	secondaryNetController.bnc.ovnClusterLRPToJoinIfAddrs = dummyJoinIPs()
+	podInfo.populateSecondaryNetworkLogicalSwitchCache(fakeOvn, secondaryNetController)
+	if err = secondaryNetController.bnc.WatchNodes(); err != nil {
+		return err
+	}
+	if err = secondaryNetController.bnc.WatchPods(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func setupConfig(netInfo secondaryNetInfo, testConfig testConfiguration, gatewayMode config.GatewayMode) {
+	if testConfig.configToOverride != nil {
+		config.OVNKubernetesFeature = *testConfig.configToOverride
+		if testConfig.gatewayConfig != nil {
+			config.Gateway.DisableSNATMultipleGWs = testConfig.gatewayConfig.DisableSNATMultipleGWs
+		}
+	}
+	config.Gateway.Mode = gatewayMode
+	if knet.IsIPv6CIDRString(netInfo.clustersubnets) {
+		config.IPv6Mode = true
+		// tests dont support dualstack yet
+		config.IPv4Mode = false
+	}
+}
+
+func notReadyMigrationInfo() *liveMigrationInfo {
+	const vmName = "my-vm"
+	return &liveMigrationInfo{
+		vmName: vmName,
+		sourcePodInfo: liveMigrationPodInfo{
+			podPhase:           v1.PodRunning,
+			creationTimestamp:  metav1.NewTime(time.Now().Add(-time.Hour)),
+			expectedLspEnabled: lspEnableNotSpecified,
+		},
+		targetPodInfo: liveMigrationPodInfo{
+			podPhase:           v1.PodRunning,
+			creationTimestamp:  metav1.NewTime(time.Now()),
+			expectedLspEnabled: lspEnableExplicitlyFalse,
+		},
+	}
+}
+
+func readyMigrationInfo() *liveMigrationInfo {
+	const vmName = "my-vm"
+	return &liveMigrationInfo{
+		vmName: vmName,
+		sourcePodInfo: liveMigrationPodInfo{
+			podPhase:           v1.PodRunning,
+			creationTimestamp:  metav1.NewTime(time.Now().Add(-time.Hour)),
+			expectedLspEnabled: lspEnableExplicitlyFalse,
+		},
+		targetPodInfo: liveMigrationPodInfo{
+			podPhase:           v1.PodRunning,
+			creationTimestamp:  metav1.NewTime(time.Now()),
+			annotation:         map[string]string{kubevirtv1.MigrationTargetReadyTimestamp: "some-timestamp"},
+			expectedLspEnabled: lspEnableExplicitlyTrue,
+		},
+	}
+}
+
+func failedMigrationInfo() *liveMigrationInfo {
+	const vmName = "my-vm"
+	return &liveMigrationInfo{
+		vmName: vmName,
+		sourcePodInfo: liveMigrationPodInfo{
+			podPhase:           v1.PodRunning,
+			creationTimestamp:  metav1.NewTime(time.Now().Add(-time.Hour)),
+			expectedLspEnabled: lspEnableExplicitlyTrue,
+		},
+		targetPodInfo: liveMigrationPodInfo{
+			podPhase:          v1.PodFailed,
+			creationTimestamp: metav1.NewTime(time.Now()),
+		},
 	}
 }

@@ -3,6 +3,8 @@ package kubevirt
 import (
 	"fmt"
 	"net"
+	"sort"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -12,6 +14,7 @@ import (
 	kubevirtv1 "kubevirt.io/api/core/v1"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
@@ -348,4 +351,131 @@ func ZoneContainsPodSubnetOrUntracked(watchFactory *factory.WatchFactory, lsMana
 // kubevirt virtual machine, false otherwise.
 func IsPodOwnedByVirtualMachine(pod *corev1.Pod) bool {
 	return ExtractVMNameFromPod(pod) != nil
+}
+
+// IsPodAllowedForMigration determines whether a given pod is eligible for live migration
+func IsPodAllowedForMigration(pod *corev1.Pod, netInfo util.NetInfo) bool {
+	return IsPodOwnedByVirtualMachine(pod) && netInfo.TopologyType() == ovntypes.Layer2Topology
+}
+
+func isTargetPodReady(targetPod *corev1.Pod) bool {
+	if targetPod == nil {
+		return false
+	}
+
+	// This annotation only appears on live migration scenarios, and it signals
+	// that target VM pod is ready to receive traffic, so we can route
+	// traffic to it.
+	targetReadyTimestamp := targetPod.Annotations[kubevirtv1.MigrationTargetReadyTimestamp]
+
+	// VM is ready to receive traffic
+	return targetReadyTimestamp != ""
+}
+
+func filterNotComplete(vmPods []*corev1.Pod) []*corev1.Pod {
+	var notCompletePods []*corev1.Pod
+	for _, vmPod := range vmPods {
+		if !util.PodCompleted(vmPod) {
+			notCompletePods = append(notCompletePods, vmPod)
+		}
+	}
+
+	return notCompletePods
+}
+
+func tooManyPodsError(livingPods []*corev1.Pod) error {
+	var podNames = make([]string, len(livingPods))
+	for i := range livingPods {
+		podNames[i] = livingPods[i].Namespace + "/" + livingPods[i].Name
+	}
+	return fmt.Errorf("unexpected live migration state at pods: %s", strings.Join(podNames, ","))
+}
+
+// LiveMigrationState represents the various states of a live migration process.
+type LiveMigrationState string
+
+const (
+	// LiveMigrationInProgress indicates that a live migration is currently ongoing.
+	LiveMigrationInProgress LiveMigrationState = "InProgress"
+
+	// LiveMigrationTargetDomainReady indicates that the target domain is ready to take over.
+	LiveMigrationTargetDomainReady LiveMigrationState = "TargetDomainReady"
+
+	// LiveMigrationFailed indicates that the live migration process has failed.
+	LiveMigrationFailed LiveMigrationState = "Failed"
+)
+
+// LiveMigrationStatus provides details about the current status of a live migration.
+// It includes information about the source and target pods as well as the migration state.
+type LiveMigrationStatus struct {
+	SourcePod *corev1.Pod        // SourcePod is the original pod.
+	TargetPod *corev1.Pod        // TargetPod is the destination pod.
+	State     LiveMigrationState // State is the current state of the live migration.
+}
+
+// IsTargetDomainReady returns true if the target domain in the live migration process is ready.
+func (lm LiveMigrationStatus) IsTargetDomainReady() bool {
+	return lm.State == LiveMigrationTargetDomainReady
+}
+
+// DiscoverLiveMigrationStatus determines the status of a live migration for a given pod.
+// It analyzes the state of pods associated with a VirtualMachine (VM) to identify whether
+// a live migration is in progress, the target domain is ready, or the migration has failed.
+//
+// Note: The function assumes that the pod is part of a VirtualMachine resource managed
+// by KubeVirt.
+func DiscoverLiveMigrationStatus(client *factory.WatchFactory, pod *corev1.Pod) (*LiveMigrationStatus, error) {
+	vmKey := ExtractVMNameFromPod(pod)
+	if vmKey == nil {
+		return nil, nil
+	}
+
+	vmPods, err := client.GetPodsBySelector(pod.Namespace, metav1.LabelSelector{MatchLabels: map[string]string{kubevirtv1.VirtualMachineNameLabel: vmKey.Name}})
+	if err != nil {
+		return nil, err
+	}
+
+	// no migration
+	if len(vmPods) < 2 {
+		return nil, nil
+	}
+
+	// Sort vmPods by creation time
+	sort.Slice(vmPods, func(i, j int) bool {
+		return vmPods[j].CreationTimestamp.After(vmPods[i].CreationTimestamp.Time)
+	})
+
+	targetPod := vmPods[len(vmPods)-1]
+	livingPods := filterNotComplete(vmPods)
+	if util.PodCompleted(targetPod) {
+		// if target pod failed, then there should be only one living source pod.
+		if len(livingPods) != 1 {
+			return nil, fmt.Errorf("unexpected live migration state: should have a single living pod")
+		}
+		return &LiveMigrationStatus{
+			SourcePod: livingPods[0],
+			TargetPod: targetPod,
+			State:     LiveMigrationFailed,
+		}, nil
+	}
+
+	// no active migration
+	if len(livingPods) < 2 {
+		return nil, nil
+	}
+
+	if len(livingPods) > 2 {
+		return nil, tooManyPodsError(livingPods)
+	}
+
+	status := LiveMigrationStatus{
+		SourcePod: livingPods[0],
+		TargetPod: livingPods[1],
+		State:     LiveMigrationInProgress,
+	}
+
+	if isTargetPodReady(status.TargetPod) {
+		status.State = LiveMigrationTargetDomainReady
+	}
+	return &status, nil
 }
