@@ -5,12 +5,13 @@ package metrics
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	ovsops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops/ovs"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
@@ -271,17 +272,28 @@ var metricOvsTcPolicy = prometheus.NewGauge(prometheus.GaugeOpts{
 
 type ovsClient func(args ...string) (string, string, error)
 
-func getOvsVersionInfo() {
-	stdout, _, err := util.RunOvsVswitchdAppCtl("version")
+func convertToFloat64(val *int) float64 {
+	var value float64
+	if val != nil {
+		value = float64(*val)
+	} else {
+		value = 0
+	}
+	return value
+}
+
+func getOvsVersionInfo(ovsDBClient libovsdbclient.Client) {
+	openvSwitch, err := ovsops.GetOpenvSwitch(ovsDBClient)
 	if err != nil {
-		klog.Errorf("Failed to get version information: %s", err.Error())
+		klog.Errorf("Failed to get ovsdb openvswitch entry :(%v)", err)
 		return
 	}
-	if !strings.HasPrefix(stdout, "ovs-vswitchd (Open vSwitch)") {
-		klog.Errorf("Unexpected ovs-appctl version output: %s", stdout)
+	if openvSwitch.OVSVersion != nil {
+		ovsVersion = *openvSwitch.OVSVersion
+	} else {
+		klog.Errorf("Failed to get ovs version information")
 		return
 	}
-	ovsVersion = strings.Fields(stdout)[3]
 }
 
 // ovsDatapathLookupsMetrics obtains the ovs datapath
@@ -414,8 +426,8 @@ func setOvsDatapathMetrics(ovsAppctl ovsClient, datapaths []string) (err error) 
 }
 
 // ovsDatapathMetricsUpdater updates the ovs datapath metrics
-func ovsDatapathMetricsUpdater(ovsAppctl ovsClient, tickPeriod time.Duration, stopChan <-chan struct{}) {
-	ticker := time.NewTicker(tickPeriod)
+func ovsDatapathMetricsUpdater(ovsAppctl ovsClient, metricsScrapeInterval int, stopChan <-chan struct{}) {
+	ticker := time.NewTicker(time.Duration(metricsScrapeInterval) * time.Second)
 	defer ticker.Stop()
 	for {
 		select {
@@ -435,14 +447,14 @@ func ovsDatapathMetricsUpdater(ovsAppctl ovsClient, tickPeriod time.Duration, st
 }
 
 // ovsBridgeMetricsUpdater updates bridge related metrics
-func ovsBridgeMetricsUpdater(ovsVsctl, ovsAppctl ovsClient, tickPeriod time.Duration, stopChan <-chan struct{}) {
-	ticker := time.NewTicker(tickPeriod)
+func ovsBridgeMetricsUpdater(ovsDBClient libovsdbclient.Client, ovsAppctl ovsClient, metricsScrapeInterval int, stopChan <-chan struct{}) {
+	ticker := time.NewTicker(time.Duration(metricsScrapeInterval) * time.Second)
 	defer ticker.Stop()
 	var err error
 	for {
 		select {
 		case <-ticker.C:
-			if err = updateOvsBridgeMetrics(ovsVsctl, ovsAppctl); err != nil {
+			if err = updateOvsBridgeMetrics(ovsDBClient, ovsAppctl); err != nil {
 				klog.Errorf("Getting ovs bridge info failed: %s", err.Error())
 			}
 		case <-stopChan:
@@ -451,42 +463,22 @@ func ovsBridgeMetricsUpdater(ovsVsctl, ovsAppctl ovsClient, tickPeriod time.Dura
 	}
 }
 
-func updateOvsBridgeMetrics(ovsVsctl, ovsOfctl ovsClient) error {
-	stdout, stderr, err := ovsVsctl("--no-headings", "--data=bare",
-		"--format=csv", "--columns=name,port", "list", "Bridge")
+func updateOvsBridgeMetrics(ovsDBClient libovsdbclient.Client, ovsOfctl ovsClient) error {
+	bridgeList, err := ovsops.ListBridges(ovsDBClient)
 	if err != nil {
-		return fmt.Errorf("unable to update OVS bridge metrics due to failure to get output from"+
-			" OVS client stderr(%s) :(%v)", stderr, err)
+		return fmt.Errorf("failed to get ovsdb bridge table :(%v)", err)
 	}
-	if stderr != "" {
-		return fmt.Errorf("unable to update OVS bridge metrics because OVS client returned error: %s", stderr)
-	}
-	if stdout == "" {
-		return fmt.Errorf("unable to update OVS bridge metrics because blank output received from OVS client")
-	}
-
-	//output will be of format :(br-local,12bc8575-8e1f-4583-b693-ea3b5bf09974
-	// 5dc87c46-4d94-4469-9f7a-67ee1c8beb03 620cafe4-bfe5-4a23-8165-4ffc61e7de42)
-	var bridgeCount int
-	for _, kvPair := range strings.Split(stdout, "\n") {
-		if kvPair == "" {
-			continue
+	metricOvsBridgeTotal.Set(float64(len(bridgeList)))
+	for _, bridge := range bridgeList {
+		brName := bridge.Name
+		metricOvsBridge.WithLabelValues(brName).Set(1)
+		flowsCount, err := getOvsBridgeOpenFlowsCount(ovsOfctl, brName)
+		if err != nil {
+			return err
 		}
-		fields := strings.Split(kvPair, ",")
-		bridgeName := fields[0]
-		ports := strings.Fields(fields[1])
-		if bridgeName != "" {
-			bridgeCount++
-			metricOvsBridge.WithLabelValues(bridgeName).Set(1)
-			metricOvsBridgePortsTotal.WithLabelValues(bridgeName).Set(float64(len(ports)))
-			count, err := getOvsBridgeOpenFlowsCount(ovsOfctl, bridgeName)
-			if err != nil {
-				return err
-			}
-			metricOvsBridgeFlowsTotal.WithLabelValues(bridgeName).Set(count)
-		}
+		metricOvsBridgeFlowsTotal.WithLabelValues(brName).Set(flowsCount)
+		metricOvsBridgePortsTotal.WithLabelValues(brName).Set(float64(len(bridge.Ports)))
 	}
-	metricOvsBridgeTotal.Set(float64(bridgeCount))
 
 	return nil
 }
@@ -516,14 +508,14 @@ func getOvsBridgeOpenFlowsCount(ovsOfctl ovsClient, bridgeName string) (float64,
 		"flow_count field", bridgeName)
 }
 
-func ovsInterfaceMetricsUpdater(ovsVsctl ovsClient, tickPeriod time.Duration, stopChan <-chan struct{}) {
-	ticker := time.NewTicker(tickPeriod)
+func ovsInterfaceMetricsUpdater(ovsDBClient libovsdbclient.Client, metricsScrapeInterval int, stopChan <-chan struct{}) {
+	ticker := time.NewTicker(time.Duration(metricsScrapeInterval) * time.Second)
 	defer ticker.Stop()
 	var err error
 	for {
 		select {
 		case <-ticker.C:
-			if err = updateOvsInterfaceMetrics(ovsVsctl); err != nil {
+			if err = updateOvsInterfaceMetrics(ovsDBClient); err != nil {
 				klog.Errorf("Updating OVS interface metrics failed: %s", err.Error())
 			}
 		case <-stopChan:
@@ -532,48 +524,29 @@ func ovsInterfaceMetricsUpdater(ovsVsctl ovsClient, tickPeriod time.Duration, st
 	}
 }
 
-// updateOvsInterfaceMetrics updates the ovs interface metrics obtained from ovs-vsctl --columns=<fields> list interface
-func updateOvsInterfaceMetrics(ovsVsctl ovsClient) error {
-	var stdout, stderr string
-	var err error
-
-	stdout, stderr, err = ovsVsctl("--no-headings", "--data=bare",
-		"--format=csv", "--columns=link_resets,statistics", "list", "Interface")
+// updateOvsInterfaceMetrics updates the ovs interface metrics obtained from ovsdb
+func updateOvsInterfaceMetrics(ovsDBClient libovsdbclient.Client) error {
+	interfaceList, err := ovsops.ListInterfaces(ovsDBClient)
 	if err != nil {
-		return fmt.Errorf("failed to get output for ovs-vsctl list Interface "+
-			"stderr(%s) :(%v)", stderr, err)
+		return fmt.Errorf("failed to get ovsdb interface table :(%v)", err)
 	}
-	if stderr != "" {
-		return fmt.Errorf("failed to get OVS interface metrics due to stderr: %s", stderr)
+	var interfaceStats = []string{
+		"rx_dropped",
+		"rx_errors",
+		"tx_dropped",
+		"tx_errors",
+		"collisions",
 	}
-	if stdout == "" {
-		return fmt.Errorf("unable to update OVS interface metrics because blank output received from OVS client")
-	}
-	var linkReset, rxDropped, txDropped, rxErr, txErr, collisions, statValue, interfaceCount float64
-	for _, kvPair := range strings.Split(stdout, "\n") {
-		if kvPair == "" {
-			continue
-		}
-		interfaceFieldValues := strings.Split(kvPair, ",")
-		if len(interfaceFieldValues) != 2 {
-			return fmt.Errorf("unexpected data format received while trying to get OVS interface metrics: %s", stdout)
-		}
-		statValue, err = strconv.ParseFloat(interfaceFieldValues[0], 64)
-		if err != nil {
-			return fmt.Errorf("expected string to contain an integer. Failed to get OVS interface metrics: %v", err)
-		}
-		linkReset += statValue
-		interfaceCount++
-		// sum statistics
-		for _, field := range strings.Fields(interfaceFieldValues[1]) {
-			statsField := strings.Split(field, "=")
-			statName := strings.TrimSpace(statsField[0])
-			statValue, err = strconv.ParseFloat(statsField[1], 64)
-			if err != nil {
-				return fmt.Errorf("expected string %q to contain an integer. Failed to get OVS interface metrics: %v",
-					interfaceFieldValues[1], err)
-			}
 
+	var linkReset, rxDropped, txDropped, rxErr, txErr, collisions, statValue float64
+	for _, intf := range interfaceList {
+		linkReset += convertToFloat64(intf.LinkResets)
+
+		for _, statName := range interfaceStats {
+			statValue = 0
+			if value, ok := intf.Statistics[statName]; ok {
+				statValue = float64(value)
+			}
 			switch statName {
 			case "rx_dropped":
 				rxDropped += statValue
@@ -588,7 +561,7 @@ func updateOvsInterfaceMetrics(ovsVsctl ovsClient) error {
 			}
 		}
 	}
-	metricOvsInterfaceTotal.Set(interfaceCount)
+	metricOvsInterfaceTotal.Set(float64(len(interfaceList)))
 	metricOvsInterfaceResetsTotal.Set(linkReset)
 	metricOvsInterfaceRxDroppedTotal.Set(rxDropped)
 	metricOvsInterfaceTxDroppedTotal.Set(txDropped)
@@ -630,8 +603,8 @@ func setOvsMemoryMetrics(ovsVswitchdAppctl ovsClient) (err error) {
 	return nil
 }
 
-func ovsMemoryMetricsUpdater(ovsVswitchdAppctl ovsClient, tickPeriod time.Duration, stopChan <-chan struct{}) {
-	ticker := time.NewTicker(tickPeriod)
+func ovsMemoryMetricsUpdater(ovsVswitchdAppctl ovsClient, metricsScrapeInterval int, stopChan <-chan struct{}) {
+	ticker := time.NewTicker(time.Duration(metricsScrapeInterval) * time.Second)
 	defer ticker.Stop()
 	for {
 		select {
@@ -645,25 +618,13 @@ func ovsMemoryMetricsUpdater(ovsVswitchdAppctl ovsClient, tickPeriod time.Durati
 	}
 }
 
-// setOvsHwOffloadMetrics obatains the hw-offlaod, tc-policy
-// ovs-vsctl list Open_vSwitch . and updates the corresponding metrics
-func setOvsHwOffloadMetrics(ovsVsctl ovsClient) (err error) {
-	var stdout, stderr string
-
-	defer func() {
-		if r := recover(); r != nil {
-			err = fmt.Errorf("recovering from panic while parsing the ovs-vsctl "+
-				"list Open_vSwitch . output : %v", r)
-		}
-	}()
-
-	stdout, stderr, err = ovsVsctl("--no-headings", "--data=bare",
-		"--columns=other_config", "list", "Open_vSwitch", ".")
+// setOvsHwOffloadMetrics updates the hw-offload, tc-policy metrics
+// obtained from Open_vSwitch table updates
+func setOvsHwOffloadMetrics(ovsDBClient libovsdbclient.Client) (err error) {
+	openvSwitch, err := ovsops.GetOpenvSwitch(ovsDBClient)
 	if err != nil {
-		return fmt.Errorf("failed to get output from ovs-vsctl list --columns=other_config"+
-			"open_vSwitch . stderr(%s) : %v", stderr, err)
+		return fmt.Errorf("failed to get ovsdb openvswitch entry :(%v)", err)
 	}
-
 	var hwOffloadValue = "false"
 	var tcPolicyValue = "none"
 	var tcPolicyMap = map[string]float64{
@@ -671,30 +632,31 @@ func setOvsHwOffloadMetrics(ovsVsctl ovsClient) (err error) {
 		"skip_sw": 1,
 		"skip_hw": 2,
 	}
-	for _, kvPair := range strings.Fields(stdout) {
-		if strings.HasPrefix(kvPair, "hw-offload=") {
-			hwOffloadValue = strings.Split(kvPair, "=")[1]
-		} else if strings.HasPrefix(kvPair, "tc-policy=") {
-			tcPolicyValue = strings.Split(kvPair, "=")[1]
-		}
-	}
 
+	// set the hw-offload metric
+	if val, ok := openvSwitch.OtherConfig["hw-offload"]; ok {
+		hwOffloadValue = val
+	}
 	if hwOffloadValue == "false" {
 		metricOvsHwOffload.Set(0)
 	} else {
 		metricOvsHwOffload.Set(1)
 	}
+	// set tc-policy metric
+	if val, ok := openvSwitch.OtherConfig["tc-policy"]; ok {
+		tcPolicyValue = val
+	}
 	metricOvsTcPolicy.Set(tcPolicyMap[tcPolicyValue])
 	return nil
 }
 
-func ovsHwOffloadMetricsUpdater(ovsVsctl ovsClient, tickPeriod time.Duration, stopChan <-chan struct{}) {
-	ticker := time.NewTicker(tickPeriod)
+func ovsHwOffloadMetricsUpdater(ovsDBClient libovsdbclient.Client, metricsScrapeInterval int, stopChan <-chan struct{}) {
+	ticker := time.NewTicker(time.Duration(metricsScrapeInterval) * time.Second)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ticker.C:
-			if err := setOvsHwOffloadMetrics(ovsVsctl); err != nil {
+			if err := setOvsHwOffloadMetrics(ovsDBClient); err != nil {
 				klog.Errorf("Setting ovs hardware offload metrics failed: %s", err.Error())
 			}
 		case <-stopChan:
@@ -868,17 +830,17 @@ var ovsVswitchdCoverageShowMetricsMap = map[string]*metricDetails{
 }
 var registerOvsMetricsOnce sync.Once
 
-func RegisterStandaloneOvsMetrics(stopChan <-chan struct{}) {
-	registerOvsMetrics(prometheus.DefaultRegisterer, stopChan)
+func RegisterStandaloneOvsMetrics(ovsDBClient libovsdbclient.Client, metricsScrapeInterval int, stopChan <-chan struct{}) {
+	registerOvsMetrics(ovsDBClient, metricsScrapeInterval, prometheus.DefaultRegisterer, stopChan)
 }
 
-func RegisterOvsMetricsWithOvnMetrics(stopChan <-chan struct{}) {
-	registerOvsMetrics(ovnRegistry, stopChan)
+func RegisterOvsMetricsWithOvnMetrics(ovsDBClient libovsdbclient.Client, metricsScrapeInterval int, stopChan <-chan struct{}) {
+	registerOvsMetrics(ovsDBClient, metricsScrapeInterval, ovnRegistry, stopChan)
 }
 
-func registerOvsMetrics(registry prometheus.Registerer, stopChan <-chan struct{}) {
+func registerOvsMetrics(ovsDBClient libovsdbclient.Client, metricsScrapeInterval int, registry prometheus.Registerer, stopChan <-chan struct{}) {
 	registerOvsMetricsOnce.Do(func() {
-		getOvsVersionInfo()
+		getOvsVersionInfo(ovsDBClient)
 		registry.MustRegister(prometheus.NewGaugeFunc(
 			prometheus.GaugeOpts{
 				Namespace: MetricOvsNamespace,
@@ -941,15 +903,15 @@ func registerOvsMetrics(registry prometheus.Registerer, stopChan <-chan struct{}
 		}
 
 		// OVS datapath metrics updater
-		go ovsDatapathMetricsUpdater(util.RunOVSAppctl, 30*time.Second, stopChan)
+		go ovsDatapathMetricsUpdater(util.RunOVSAppctl, metricsScrapeInterval, stopChan)
 		// OVS bridge metrics updater
-		go ovsBridgeMetricsUpdater(util.RunOVSVsctl, util.RunOVSOfctl, 30*time.Second, stopChan)
+		go ovsBridgeMetricsUpdater(ovsDBClient, util.RunOVSOfctl, metricsScrapeInterval, stopChan)
 		// OVS interface metrics updater
-		go ovsInterfaceMetricsUpdater(util.RunOVSVsctl, 30*time.Second, stopChan)
+		go ovsInterfaceMetricsUpdater(ovsDBClient, metricsScrapeInterval, stopChan)
 		// OVS memory metrics updater
-		go ovsMemoryMetricsUpdater(util.RunOvsVswitchdAppCtl, 30*time.Second, stopChan)
+		go ovsMemoryMetricsUpdater(util.RunOvsVswitchdAppCtl, metricsScrapeInterval, stopChan)
 		// OVS hw Offload metrics updater
-		go ovsHwOffloadMetricsUpdater(util.RunOVSVsctl, 30*time.Second, stopChan)
+		go ovsHwOffloadMetricsUpdater(ovsDBClient, metricsScrapeInterval, stopChan)
 		// OVS coverage/show metrics updater.
 		go coverageShowMetricsUpdater(ovsVswitchd, stopChan)
 	})

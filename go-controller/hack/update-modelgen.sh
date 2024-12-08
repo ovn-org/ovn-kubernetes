@@ -18,3 +18,4 @@ fi
 
 go generate ./pkg/nbdb
 go generate ./pkg/sbdb
+go generate ./pkg/vswitchd
