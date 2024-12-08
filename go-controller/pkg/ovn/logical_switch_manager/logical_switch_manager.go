@@ -97,7 +97,7 @@ func (manager *LogicalSwitchManager) AllocateUntilFull(switchName string) error 
 // AllocateIPs will block off IPs in the ipnets slice as already allocated
 // for a given switch
 func (manager *LogicalSwitchManager) AllocateIPs(switchName string, ipnets []*net.IPNet) error {
-	return manager.allocator.AllocateIPs(switchName, ipnets)
+	return manager.allocator.AllocateIPPerSubnet(switchName, ipnets)
 }
 
 // AllocateNextIPs allocates IP addresses from each of the host subnets
