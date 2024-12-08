@@ -398,11 +398,12 @@ func (pr *PodRequest) buildPrimaryUDNPodRequest(
 			// if not specified at the NAD
 			MTU: primaryUDN.MTU(),
 		},
-		timestamp:  time.Now(),
-		IsVFIO:     pr.IsVFIO,
-		netName:    primaryUDN.NetworkName(),
-		nadName:    primaryUDN.NADName(),
-		deviceInfo: v1.DeviceInfo{},
+		timestamp:    time.Now(),
+		IsVFIO:       pr.IsVFIO,
+		netName:      primaryUDN.NetworkName(),
+		nadName:      primaryUDN.NADName(),
+		deviceInfo:   v1.DeviceInfo{},
+		IsPrimaryUDN: true,
 	}
 	req.ctx, req.cancel = context.WithTimeout(context.Background(), 2*time.Minute)
 	return req
