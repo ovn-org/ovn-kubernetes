@@ -121,6 +121,10 @@ func (mp *managementPort) Create(routeManager *routemanager.Controller, node *v1
 		return nil, err
 	}
 
+	if err := util.UpdateNodeManagementPortIPddressesWithRetry(node, nodeLister, kubeInterface, mp.hostSubnets, types.DefaultNetworkName); err != nil {
+		return nil, err
+	}
+
 	waiter.AddWait(managementPortReady, nil)
 	return cfg, nil
 }
