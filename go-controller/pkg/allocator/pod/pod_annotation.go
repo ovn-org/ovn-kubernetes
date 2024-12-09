@@ -91,13 +91,17 @@ func allocatePodAnnotation(
 
 	// no id allocation
 	var idAllocator id.NamedAllocator
-
+	node, err := kube.GetNode(pod.Spec.NodeName)
+	if err != nil {
+		return nil, nil, err
+	}
 	allocateToPodWithRollback := func(pod *v1.Pod) (*v1.Pod, func(), error) {
 		var rollback func()
 		pod, podAnnotation, rollback, err = allocatePodAnnotationWithRollback(
 			ipAllocator,
 			idAllocator,
 			netInfo,
+			node,
 			pod,
 			network,
 			claimsReconciler,
@@ -170,12 +174,18 @@ func allocatePodAnnotationWithTunnelID(
 	podAnnotation *util.PodAnnotation,
 	err error) {
 
+	node, err := kube.GetNode(pod.Spec.NodeName)
+	if err != nil {
+		return nil, nil, err
+	}
+
 	allocateToPodWithRollback := func(pod *v1.Pod) (*v1.Pod, func(), error) {
 		var rollback func()
 		pod, podAnnotation, rollback, err = allocatePodAnnotationWithRollback(
 			ipAllocator,
 			idAllocator,
 			netInfo,
+			node,
 			pod,
 			network,
 			claimsReconciler,
@@ -220,6 +230,7 @@ func allocatePodAnnotationWithRollback(
 	ipAllocator subnet.NamedAllocator,
 	idAllocator id.NamedAllocator,
 	netInfo util.NetInfo,
+	node *v1.Node,
 	pod *v1.Pod,
 	network *nadapi.NetworkSelectionElement,
 	claimsReconciler persistentips.PersistentAllocations,
@@ -397,7 +408,7 @@ func allocatePodAnnotationWithRollback(
 		}
 
 		// handle routes & gateways
-		err = util.AddRoutesGatewayIP(netInfo, pod, tentative, network)
+		err = util.AddRoutesGatewayIP(netInfo, node, pod, tentative, network)
 		if err != nil {
 			return
 		}
