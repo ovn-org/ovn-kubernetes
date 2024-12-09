@@ -84,11 +84,11 @@ func uniqueNadName(originalNetName string) string {
 	return fmt.Sprintf("%s_%s", rand.String(randomStringLength), originalNetName)
 }
 
-func generateNAD(config networkAttachmentConfig) *nadapi.NetworkAttachmentDefinition {
+func generateNADSpec(config networkAttachmentConfig) string {
 	if config.mtu == 0 {
 		config.mtu = 1300
 	}
-	nadSpec := fmt.Sprintf(
+	return fmt.Sprintf(
 		`
 {
         "cniVersion": "0.3.0",
@@ -116,6 +116,10 @@ func generateNAD(config networkAttachmentConfig) *nadapi.NetworkAttachmentDefini
 		config.physicalNetworkName,
 		config.role,
 	)
+}
+
+func generateNAD(config networkAttachmentConfig) *nadapi.NetworkAttachmentDefinition {
+	nadSpec := generateNADSpec(config)
 	return generateNetAttachDef(config.namespace, config.name, nadSpec)
 }
 
@@ -220,6 +224,50 @@ func connectToServer(clientPodConfig podConfiguration, serverIP string, port int
 		net.JoinHostPort(serverIP, fmt.Sprintf("%d", port)),
 	)
 	return err
+}
+
+func getMTUByInterfaceName(output, interfaceName string) (int, error) {
+	var ifaces []struct {
+		Name string `json:"ifname"`
+		Mtu  int    `json:"mtu"`
+	}
+
+	if err := json.Unmarshal([]byte(output), &ifaces); err != nil {
+		return 0, fmt.Errorf("%s: %v", output, err)
+	}
+
+	for _, iface := range ifaces {
+		if iface.Name == interfaceName {
+			return iface.Mtu, nil
+		}
+	}
+	return 0, fmt.Errorf("interface %s not found", interfaceName)
+}
+
+func checkMTU(clientPodConfig podConfiguration, expectedMTU int) error {
+	const secondaryInterfacePodName = "net1"
+	deviceInfoJSON, err := e2ekubectl.RunKubectl(
+		clientPodConfig.namespace,
+		"exec",
+		clientPodConfig.name,
+		"--",
+		"ip",
+		"-j",
+		"link",
+	)
+	if err != nil {
+		return err
+	}
+
+	mtu, err := getMTUByInterfaceName(deviceInfoJSON, secondaryInterfacePodName)
+	if err != nil {
+		return err
+	}
+
+	if mtu != expectedMTU {
+		return fmt.Errorf("expected mtu %d, got %d", expectedMTU, mtu)
+	}
+	return nil
 }
 
 func newAttachmentConfigWithOverriddenName(name, namespace, networkName, topology, cidr string) networkAttachmentConfig {
