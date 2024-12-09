@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"hash/fnv"
 	"net"
-	"os"
 	"os/exec"
 	"reflect"
 	"runtime"
@@ -22,6 +21,7 @@ import (
 	ovniptables "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/linkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
+	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	corev1 "k8s.io/api/core/v1"
@@ -416,7 +416,7 @@ func runSubControllers(testNS ns.NetNS, c *Controller, wg *sync.WaitGroup, stopC
 var _ = ginkgo.DescribeTable("EgressIP selectors",
 	func(expectedEIPConfigs []eipConfig, pods []corev1.Pod, namespaces []corev1.Namespace, nodeConfig nodeConfig) {
 		defer ginkgo.GinkgoRecover()
-		if os.Getenv("NOROOT") == "TRUE" {
+		if ovntest.NoRoot() {
 			ginkgo.Skip("Test requires root privileges")
 		}
 		if !commandExists("iptables") {
@@ -1036,7 +1036,7 @@ var _ = ginkgo.Describe("label to annotations migration", func() {
 	// Test using root and a test netns because we want to test between netlink lib
 	// and the egress IP components (link manager, route manager)
 	defer ginkgo.GinkgoRecover()
-	if os.Getenv("NOROOT") == "TRUE" {
+	if ovntest.NoRoot() {
 		ginkgo.Skip("Test requires root privileges")
 	}
 	if !commandExists("iptables") {
@@ -1096,7 +1096,7 @@ var _ = ginkgo.Describe("label to annotations migration", func() {
 var _ = ginkgo.Describe("VRF", func() {
 	ginkgo.It("copies routes from the VRF routing table for a link enslaved by VRF device", func() {
 		defer ginkgo.GinkgoRecover()
-		if os.Getenv("NOROOT") == "TRUE" {
+		if ovntest.NoRoot() {
 			ginkgo.Skip("Test requires root privileges")
 		}
 		if !commandExists("iptables") {
@@ -1147,7 +1147,7 @@ var _ = ginkgo.DescribeTable("repair node", func(expectedStateFollowingClean []e
 	// Test using root and a test netns because we want to test between netlink lib
 	// and the egress IP components (link manager, route manager)
 	defer ginkgo.GinkgoRecover()
-	if os.Getenv("NOROOT") == "TRUE" {
+	if ovntest.NoRoot() {
 		ginkgo.Skip("Test requires root privileges")
 	}
 	if !commandExists("iptables") {
