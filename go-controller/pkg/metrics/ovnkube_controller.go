@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"hash/fnv"
 	"math"
+	"os"
 	"runtime"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -28,6 +30,12 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/workqueue"
 	klog "k8s.io/klog/v2"
+)
+
+const (
+	ovsIPsecMonitorPidFile  = "/var/run/openvswitch/ovs-monitor-ipsec.pid"
+	maxAttemptForIPsecQuery = 10
+	ipSecQueryWaitTime      = 500 * time.Millisecond
 )
 
 // metricNbE2eTimestamp is the UNIX timestamp value set to NB DB. Northd will eventually copy this
@@ -253,6 +261,13 @@ var metricIPsecEnabled = prometheus.NewGauge(prometheus.GaugeOpts{
 	Subsystem: MetricOvnkubeSubsystemController,
 	Name:      "ipsec_enabled",
 	Help:      "Specifies whether IPSec is enabled for this cluster(1) or not enabled for this cluster(0)",
+})
+
+var metricIPsecOffloadEnabled = prometheus.NewGauge(prometheus.GaugeOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemController,
+	Name:      "ipsec_offload_enabled",
+	Help:      "Specifies whether IPSec offload is enabled for this node(1) or not enabled for this node(0)",
 })
 
 var metricEgressRoutingViaHost = prometheus.NewGauge(prometheus.GaugeOpts{
@@ -617,34 +632,79 @@ func RecordEgressRoutingViaHost() {
 	}
 }
 
-// MonitorIPSec will register a metric to determine if IPSec is enabled/disabled. It will also add a handler
-// to NB libovsdb cache to update the IPSec metric.
+// MonitorIPSec will register metrics associated with IPsec. It will also add a handler
+// to NB libovsdb cache to update the IPSec metrics. It currently supports two IPsec metrics.
+//  1. ipsec_enabled, to determine if IPsec is enabled or not on the cluster.
+//  2. ipsec_offload_enabled, to determine if ESP offload is in use when NIC provides
+//     support for ESP offload.
+//
 // This function should only be called once.
-func MonitorIPSec(ovnNBClient libovsdbclient.Client) {
+func MonitorIPSec(stopChan <-chan struct{}, ovnNBClient libovsdbclient.Client) {
 	prometheus.MustRegister(metricIPsecEnabled)
+	prometheus.MustRegister(metricIPsecOffloadEnabled)
 	ovnNBClient.Cache().AddEventHandler(&cache.EventHandlerFuncs{
 		AddFunc: func(table string, model model.Model) {
-			ipsecMetricHandler(table, model)
+			ipsecMetricsHandler(stopChan, table, model)
 		},
 		UpdateFunc: func(table string, _, new model.Model) {
-			ipsecMetricHandler(table, new)
+			ipsecMetricsHandler(stopChan, table, new)
 		},
 		DeleteFunc: func(table string, model model.Model) {
-			ipsecMetricHandler(table, model)
+			ipsecMetricsHandler(stopChan, table, model)
 		},
 	})
 }
 
-func ipsecMetricHandler(table string, model model.Model) {
+func ipsecMetricsHandler(stopChan <-chan struct{}, table string, model model.Model) {
 	if table != "NB_Global" {
 		return
 	}
 	entry := model.(*nbdb.NBGlobal)
 	if entry.Ipsec {
 		metricIPsecEnabled.Set(1)
+		handleIPsecOffloadMetric(stopChan)
 	} else {
 		metricIPsecEnabled.Set(0)
+		metricIPsecOffloadEnabled.Set(0)
 	}
+}
+
+func handleIPsecOffloadMetric(stopChan <-chan struct{}) {
+	// When ovn-ipsec pod is starting, then we may need to wait until ovs-monitor-ipsec
+	// and ipsec service are started, ip xfrm states to appear, so wait enough
+	// to retrieve esp offload state.
+	go func() {
+		for i := 0; i < maxAttemptForIPsecQuery; i++ {
+			select {
+			case <-stopChan:
+				return
+			default:
+				_, err := os.Stat(ovsIPsecMonitorPidFile)
+				if os.IsNotExist(err) {
+					klog.Errorf("ovs-monitor-ipsec.pid file is not created yet")
+					time.Sleep(ipSecQueryWaitTime)
+					continue
+				}
+				// TODO: Replace it with netlink.XfrmStateList when XfrmState (https://github.com/vishvananda/netlink/blob/main/xfrm_state_linux.go#L104-L126)
+				// for offload parameter.
+				stdout, stderr, err := util.RunIP("xfrm", "state", "show")
+				if err != nil {
+					klog.Errorf("Error retrieving IPsec offload state, stdout: %s, stderr: %s, %v", stdout, stderr, err)
+					return
+				}
+				if len(stdout) == 0 {
+					time.Sleep(ipSecQueryWaitTime)
+					continue
+				}
+				if !strings.Contains(stdout, "offload") {
+					metricIPsecOffloadEnabled.Set(0)
+				} else {
+					metricIPsecOffloadEnabled.Set(1)
+				}
+				return
+			}
+		}
+	}()
 }
 
 // IncrementEgressFirewallCount increments the number of Egress firewalls
