@@ -23,10 +23,10 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/controllermanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
-	controllerManager "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-controller-manager"
 	ovnnode "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -335,7 +335,7 @@ func startOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 	case runMode.ovnkubeController:
 		metrics.RegisterOVNKubeControllerBase()
 		haConfig = &config.MasterHA
-		name = networkControllerManagerLockName()
+		name = controllerManagerLockName()
 	case runMode.clusterManager:
 		metrics.RegisterClusterManagerBase()
 		haConfig = &config.ClusterMgrHA
@@ -497,7 +497,7 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 				return
 			}
 
-			networkControllerManager, err := controllerManager.NewNetworkControllerManager(
+			controllerManager, err := controllermanager.NewControllerManager(
 				ovnClientset,
 				watchFactory,
 				libovsdbOvnNBClient,
@@ -509,7 +509,7 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 				return
 			}
 
-			err = networkControllerManager.Start(ctx)
+			err = controllerManager.Start(ctx)
 			if err != nil {
 				controllerErr = fmt.Errorf("failed to start network controller: %w", err)
 				return
@@ -519,7 +519,7 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 			metrics.MetricOVNKubeControllerReadyDuration.Set(time.Since(startTime).Seconds())
 
 			<-ctx.Done()
-			networkControllerManager.Stop()
+			controllerManager.Stop()
 		}()
 	}
 
@@ -537,7 +537,7 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 			// register ovnkube node specific prometheus metrics exported by the node
 			metrics.RegisterNodeMetrics(ctx.Done())
 
-			nodeNetworkControllerManager, err := controllerManager.NewNodeNetworkControllerManager(
+			nodeControllerManager, err := controllermanager.NewNodeControllerManager(
 				ovnClientset,
 				watchFactory,
 				runMode.identity,
@@ -549,7 +549,7 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 				return
 			}
 
-			err = nodeNetworkControllerManager.Start(ctx)
+			err = nodeControllerManager.Start(ctx)
 			if err != nil {
 				nodeErr = fmt.Errorf("failed to start node network controller: %w", err)
 				return
@@ -559,7 +559,7 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 			metrics.MetricNodeReadyDuration.Set(time.Since(startTime).Seconds())
 
 			<-ctx.Done()
-			nodeNetworkControllerManager.Stop()
+			nodeControllerManager.Stop()
 		}()
 	}
 
@@ -648,7 +648,7 @@ func (p ovnkubeMetricsProvider) NewLeaderMetric() leaderelection.LeaderMetric {
 	return &leaderMetrics{p.runMode}
 }
 
-func networkControllerManagerLockName() string {
+func controllerManagerLockName() string {
 	// keep the same old lock name unless we are owners of a specific zone
 	name := "ovn-kubernetes-master"
 	if config.Default.Zone != types.OvnDefaultZone {
