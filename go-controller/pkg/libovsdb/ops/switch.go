@@ -286,28 +286,42 @@ func GetLogicalSwitchPort(nbClient libovsdbclient.Client, lsp *nbdb.LogicalSwitc
 	return found[0], nil
 }
 
-func createOrUpdateLogicalSwitchPortsOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, sw *nbdb.LogicalSwitch, createSwitch bool, lsps ...*nbdb.LogicalSwitchPort) ([]libovsdb.Operation, error) {
+func createOrUpdateLogicalSwitchPortOpModelWithCustomFields(sw *nbdb.LogicalSwitch, lsp *nbdb.LogicalSwitchPort, createLSP bool, customFields []ModelUpdateField) operationModel {
+	var fieldInterfaces []interface{}
+	if len(customFields) != 0 {
+		fieldInterfaces = getFieldsToUpdate(lsp, customFields)
+	} else {
+		fieldInterfaces = getAllUpdatableFields(lsp)
+	}
+	return operationModel{
+		Model:          lsp,
+		OnModelUpdates: fieldInterfaces,
+		DoAfter: func() {
+			// lsp.UUID should be set here
+			sw.Ports = append(sw.Ports, lsp.UUID)
+		},
+		ErrNotFound: !createLSP,
+		BulkOp:      false,
+	}
+}
+
+func createOrUpdateLogicalSwitchPortsOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, sw *nbdb.LogicalSwitch, createSwitch, createLSP bool, customFields []ModelUpdateField, lsps ...*nbdb.LogicalSwitchPort) ([]libovsdb.Operation, error) {
 	originalPorts := sw.Ports
 	sw.Ports = make([]string, 0, len(lsps))
 	opModels := make([]operationModel, 0, len(lsps)+1)
-	for i := range lsps {
-		lsp := lsps[i]
-		opModel := operationModel{
-			Model:          lsp,
-			OnModelUpdates: getAllUpdatableFields(lsp),
-			DoAfter:        func() { sw.Ports = append(sw.Ports, lsp.UUID) },
-			ErrNotFound:    false,
-			BulkOp:         false,
-		}
+
+	for _, lsp := range lsps {
+		opModel := createOrUpdateLogicalSwitchPortOpModelWithCustomFields(sw, lsp, createLSP, customFields)
 		opModels = append(opModels, opModel)
 	}
-	opModel := operationModel{
+
+	opModelSwitch := operationModel{
 		Model:            sw,
 		OnModelMutations: []interface{}{&sw.Ports},
 		ErrNotFound:      !createSwitch,
 		BulkOp:           false,
 	}
-	opModels = append(opModels, opModel)
+	opModels = append(opModels, opModelSwitch)
 
 	m := newModelClient(nbClient)
 	ops, err := m.CreateOrUpdateOps(ops, opModels...)
@@ -319,7 +333,7 @@ func createOrUpdateLogicalSwitchPortsOps(nbClient libovsdbclient.Client, ops []l
 }
 
 func createOrUpdateLogicalSwitchPorts(nbClient libovsdbclient.Client, sw *nbdb.LogicalSwitch, createSwitch bool, lsps ...*nbdb.LogicalSwitchPort) error {
-	ops, err := createOrUpdateLogicalSwitchPortsOps(nbClient, nil, sw, createSwitch, lsps...)
+	ops, err := createOrUpdateLogicalSwitchPortsOps(nbClient, nil, sw, createSwitch, true, nil, lsps...)
 	if err != nil {
 		return err
 	}
@@ -328,11 +342,18 @@ func createOrUpdateLogicalSwitchPorts(nbClient libovsdbclient.Client, sw *nbdb.L
 	return err
 }
 
-// CreateOrUpdateLogicalSwitchPortsOnSwitchOps creates or updates the provided
+// CreateOrUpdateLogicalSwitchPortsOnSwitchWithCustomFieldsOps creates or updates the provided
 // logical switch ports, adds them to the provided logical switch and returns
 // the corresponding ops
-func CreateOrUpdateLogicalSwitchPortsOnSwitchOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, sw *nbdb.LogicalSwitch, lsps ...*nbdb.LogicalSwitchPort) ([]libovsdb.Operation, error) {
-	return createOrUpdateLogicalSwitchPortsOps(nbClient, ops, sw, false, lsps...)
+func CreateOrUpdateLogicalSwitchPortsOnSwitchWithCustomFieldsOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, sw *nbdb.LogicalSwitch, customFields []ModelUpdateField, lsps ...*nbdb.LogicalSwitchPort) ([]libovsdb.Operation, error) {
+	return createOrUpdateLogicalSwitchPortsOps(nbClient, ops, sw, false, true, customFields, lsps...)
+}
+
+// UpdateLogicalSwitchPortsOnSwitchWithCustomFieldsOps updates the provided
+// logical switch ports, adds them to the provided logical switch and returns
+// the corresponding ops
+func UpdateLogicalSwitchPortsOnSwitchWithCustomFieldsOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, sw *nbdb.LogicalSwitch, customFields []ModelUpdateField, lsps ...*nbdb.LogicalSwitchPort) ([]libovsdb.Operation, error) {
+	return createOrUpdateLogicalSwitchPortsOps(nbClient, ops, sw, false, false, customFields, lsps...)
 }
 
 // CreateOrUpdateLogicalSwitchPortsOnSwitch creates or updates the provided
