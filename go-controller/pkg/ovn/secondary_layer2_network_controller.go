@@ -298,7 +298,7 @@ func NewSecondaryLayer2NetworkController(cnci *CommonNetworkControllerInfo, netI
 					controllerName:              getNetworkControllerName(netInfo.GetNetworkName()),
 					NetInfo:                     netInfo,
 					lsManager:                   lsManagerFactoryFn(),
-					logicalPortCache:            newPortCache(stopChan),
+					logicalPortCache:            NewPortCache(stopChan),
 					namespaces:                  make(map[string]*namespaceInfo),
 					namespacesMutex:             sync.Mutex{},
 					addressSetFactory:           addressSetFactory,

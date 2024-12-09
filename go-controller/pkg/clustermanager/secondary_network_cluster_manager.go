@@ -41,11 +41,7 @@ type secondaryNetworkClusterManager struct {
 func newSecondaryNetworkClusterManager(ovnClient *util.OVNClusterManagerClientset, wf *factory.WatchFactory,
 	recorder record.EventRecorder) (*secondaryNetworkClusterManager, error) {
 	klog.Infof("Creating secondary network cluster manager")
-	networkIDAllocator, err := id.NewIDAllocator("NetworkIDs", maxSecondaryNetworkIDs)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create an IdAllocator for the secondary network ids, err: %v", err)
-	}
-
+	networkIDAllocator := id.NewIDAllocator("NetworkIDs", maxSecondaryNetworkIDs)
 	// Reserve the id 0 for the default network.
 	if err := networkIDAllocator.ReserveID(ovntypes.DefaultNetworkName, defaultNetworkID); err != nil {
 		return nil, fmt.Errorf("idAllocator failed to reserve defaultNetworkID %d", defaultNetworkID)
@@ -56,7 +52,7 @@ func newSecondaryNetworkClusterManager(ovnClient *util.OVNClusterManagerClientse
 		networkIDAllocator: networkIDAllocator,
 		recorder:           recorder,
 	}
-
+	var err error
 	sncm.nadController, err = nad.NewNetAttachDefinitionController("cluster-manager", sncm, wf, recorder)
 	if err != nil {
 		return nil, err

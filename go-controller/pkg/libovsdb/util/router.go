@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -31,14 +32,12 @@ import (
 // (TODO: FIXME): With this route, we are officially breaking support for IC with zones that have multiple-nodes
 // NOTE: This route is exactly the same as what is added by pod-live-migration feature and we keep the route exactly
 // same across the 3 features so that if the route already exists on the node, this is just a no-op
-func CreateDefaultRouteToExternal(nbClient libovsdbclient.Client, clusterRouter, gwRouterName string) error {
+func CreateDefaultRouteToExternal(nbClient libovsdbclient.Client, clusterRouter, gwRouterName string, clusterSubnets []config.CIDRNetworkEntry) error {
 	gatewayIPs, err := GetLRPAddrs(nbClient, types.GWRouterToJoinSwitchPrefix+gwRouterName)
 	if err != nil {
 		return fmt.Errorf("attempt at finding node gateway router %s network information failed, err: %w", gwRouterName, err)
 	}
-	clusterSubnetsV4, clusterSubnetsV6 := util.GetClusterSubnetsWithHostPrefix()
-
-	for _, clusterSubnet := range append(clusterSubnetsV4, clusterSubnetsV6...) {
+	for _, clusterSubnet := range clusterSubnets {
 		isClusterSubnetIPV6 := utilnet.IsIPv6String(clusterSubnet.CIDR.IP.String())
 		gatewayIP, err := util.MatchFirstIPNetFamily(isClusterSubnetIPV6, gatewayIPs)
 		if err != nil {

@@ -308,7 +308,7 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 				Action:      nbdb.LogicalRouterPolicyActionReroute,
 				Nexthops:    []string{p.nexthop},
 				ExternalIDs: externalIDs(t.namespace, vmName, kubevirt.OvnLocalZone),
-				Priority:    ovntypes.EgressLiveMigrationReroutePiority,
+				Priority:    ovntypes.EgressLiveMigrationReroutePriority,
 			}
 		}
 		composeStaticRoute = func(uuid string, r testStaticRoute, t testData) *nbdb.LogicalRouterStaticRoute {
