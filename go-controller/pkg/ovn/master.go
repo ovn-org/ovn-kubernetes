@@ -306,10 +306,10 @@ func (oc *DefaultNetworkController) syncNodes(kNodes []interface{}) error {
 		return fmt.Errorf("failed to get node logical switches which have other-config set: %v", err)
 	}
 
-	staleNodes := sets.NewString()
+	staleSwitches := sets.NewString()
 	for _, nodeSwitch := range nodeSwitches {
-		if nodeSwitch.Name != types.TransitSwitch && !foundNodes.Has(nodeSwitch.Name) {
-			staleNodes.Insert(nodeSwitch.Name)
+		if !strings.HasSuffix(nodeSwitch.Name, types.TransitSwitch) && !foundNodes.Has(nodeSwitch.Name) {
+			staleSwitches.Insert(nodeSwitch.Name)
 		}
 	}
 
@@ -321,7 +321,7 @@ func (oc *DefaultNetworkController) syncNodes(kNodes []interface{}) error {
 		}
 		nodeName := strings.TrimPrefix(item.Name, types.ExternalSwitchPrefix)
 		if nodeName != item.Name && len(nodeName) > 0 && !foundNodes.Has(nodeName) {
-			staleNodes.Insert(nodeName)
+			staleSwitches.Insert(nodeName)
 			return true
 		}
 		return false
@@ -339,7 +339,7 @@ func (oc *DefaultNetworkController) syncNodes(kNodes []interface{}) error {
 		}
 		nodeName := strings.TrimPrefix(item.Name, types.GWRouterPrefix)
 		if nodeName != item.Name && len(nodeName) > 0 && !foundNodes.Has(nodeName) {
-			staleNodes.Insert(nodeName)
+			staleSwitches.Insert(nodeName)
 			return true
 		}
 		return false
@@ -350,9 +350,9 @@ func (oc *DefaultNetworkController) syncNodes(kNodes []interface{}) error {
 	}
 
 	// Cleanup stale nodes (including gateway routers and external logical switches)
-	for _, staleNode := range staleNodes.UnsortedList() {
-		if err := oc.cleanupNodeResources(staleNode); err != nil {
-			return fmt.Errorf("failed to cleanup node resources:%s, err:%w", staleNode, err)
+	for _, staleSwitch := range staleSwitches.UnsortedList() {
+		if err := oc.cleanupNodeResources(staleSwitch); err != nil {
+			return fmt.Errorf("failed to cleanup node resources:%s, err:%w", staleSwitch, err)
 		}
 	}
 
