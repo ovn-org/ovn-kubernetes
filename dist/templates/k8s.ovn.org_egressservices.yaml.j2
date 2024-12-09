@@ -14,7 +14,11 @@ spec:
     singular: egressservice
   scope: Namespaced
   versions:
-  - name: v1
+  - additionalPrinterColumns:
+    - jsonPath: .status.host
+      name: Assigned Host
+      type: string
+    name: v1
     schema:
       openAPIV3Schema:
         description: |-
