@@ -19,10 +19,10 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	networkAttachDefController "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/nad"
+	testnm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/networkmanager"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -78,6 +78,7 @@ var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 					*netInfo.netconf(),
 				)
 				Expect(err).NotTo(HaveOccurred())
+				nad.Annotations = map[string]string{ovntypes.OvnNetworkIDAnnotation: secondaryNetworkID}
 				By("setting up the OVN DB without any entities in it")
 				Expect(netInfo.setupOVNDependencies(&initialDB)).To(Succeed())
 
@@ -129,7 +130,8 @@ var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 					_, ok := pod.Annotations[util.OvnPodAnnotationName]
 					Expect(ok).To(BeFalse())
 				}
-				Expect(fakeOvn.controller.nadController.Start()).NotTo(HaveOccurred())
+				Expect(fakeOvn.networkManager.Start()).NotTo(HaveOccurred())
+				defer fakeOvn.networkManager.Stop()
 
 				Expect(fakeOvn.controller.WatchNamespaces()).NotTo(HaveOccurred())
 				Expect(fakeOvn.controller.WatchPods()).NotTo(HaveOccurred())
@@ -240,16 +242,17 @@ var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 				networkConfig, err := util.NewNetInfo(netConf)
 				Expect(err).NotTo(HaveOccurred())
 
-				nadController := &nad.FakeNADController{
+				fakeNetworkManager := &testnm.FakeNetworkManager{
 					PrimaryNetworks: map[string]util.NetInfo{},
 				}
-				nadController.PrimaryNetworks[ns] = networkConfig
+				fakeNetworkManager.PrimaryNetworks[ns] = networkConfig
 				nad, err := newNetworkAttachmentDefinition(
 					ns,
 					nadName,
 					*netConf,
 				)
 				Expect(err).NotTo(HaveOccurred())
+				nad.Annotations = map[string]string{ovntypes.OvnNetworkIDAnnotation: secondaryNetworkID}
 
 				const nodeIPv4CIDR = "192.168.126.202/24"
 				testNode, err := newNodeWithSecondaryNets(nodeName, nodeIPv4CIDR, netInfo)
@@ -323,7 +326,7 @@ var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 						&secondaryNetController.bnc.CommonNetworkControllerInfo,
 						networkConfig,
 						nodeName,
-						nadController,
+						fakeNetworkManager,
 					).Cleanup()).To(Succeed())
 				Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData([]libovsdbtest.TestData{nbZone}))
 
@@ -441,7 +444,7 @@ func expectedLayer2EgressEntities(netInfo util.NetInfo, gwConfig util.L3GatewayC
 	staticRouteOutputPort := ovntypes.GWRouterToExtSwitchPrefix + gwRouterName
 	gwRouterToNetworkSwitchPortName := ovntypes.RouterToSwitchPrefix + netInfo.GetNetworkScopedName(ovntypes.OVNLayer2Switch)
 	gwRouterToExtSwitchPortName := fmt.Sprintf("%s%s", ovntypes.GWRouterToExtSwitchPrefix, gwRouterName)
-	masqSNAT := newMasqueradeManagementNATEntry(masqSNATUUID1, "169.254.169.14", layer2Subnet().String(), netInfo)
+	masqSNAT := newMasqueradeManagementNATEntry(masqSNATUUID1, netInfo)
 
 	var nat []string
 	if config.Gateway.DisableSNATMultipleGWs {
@@ -557,9 +560,13 @@ func dummyLayer2PrimaryUserDefinedNetwork(subnets string) secondaryNetInfo {
 	return secondaryNet
 }
 
-func newSecondaryLayer2NetworkController(cnci *CommonNetworkControllerInfo, netInfo util.NetInfo, nodeName string,
-	nadController networkAttachDefController.NADController) *SecondaryLayer2NetworkController {
-	layer2NetworkController, _ := NewSecondaryLayer2NetworkController(cnci, netInfo, nadController)
+func newSecondaryLayer2NetworkController(
+	cnci *CommonNetworkControllerInfo,
+	netInfo util.NetInfo,
+	nodeName string,
+	networkManager networkmanager.Interface,
+) *SecondaryLayer2NetworkController {
+	layer2NetworkController, _ := NewSecondaryLayer2NetworkController(cnci, netInfo, networkManager)
 	layer2NetworkController.gatewayManagers.Store(
 		nodeName,
 		newDummyGatewayManager(cnci.kube, cnci.nbClient, netInfo, cnci.watchFactory, nodeName),

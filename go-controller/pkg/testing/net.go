@@ -1,6 +1,7 @@
 package testing
 
 import (
+	"github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/vishvananda/netlink"
 )
@@ -8,6 +9,7 @@ import (
 // AddLink sets up a dummy link for testing networking implementations
 // on the node side
 func AddLink(name string) netlink.Link {
+	ginkgo.GinkgoHelper()
 	err := netlink.LinkAdd(&netlink.Dummy{
 		LinkAttrs: netlink.LinkAttrs{
 			Name: name,
@@ -22,6 +24,7 @@ func AddLink(name string) netlink.Link {
 }
 
 func DelLink(name string) {
+	ginkgo.GinkgoHelper()
 	origLink, err := netlink.LinkByName(name)
 	Expect(err).NotTo(HaveOccurred())
 	err = netlink.LinkDel(origLink)
@@ -29,6 +32,7 @@ func DelLink(name string) {
 }
 
 func AddVRFLink(name string, tableId uint32) netlink.Link {
+	ginkgo.GinkgoHelper()
 	vrfLink := &netlink.Vrf{
 		LinkAttrs: netlink.LinkAttrs{Name: name},
 		Table:     tableId,
