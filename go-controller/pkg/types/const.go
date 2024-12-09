@@ -153,9 +153,15 @@ const (
 
 	// OVN-K8S annotation & taint constants
 	OvnK8sPrefix = "k8s.ovn.org"
+
+	// DefaultNetworkLabelSelector is the label that needs to be matched on a
+	// selectr to select the default network
+	DefaultNetworkLabelSelector = OvnK8sPrefix + "/default-network"
+
 	// Deprecated: we used to set topology version as an annotation on the node. We don't do this anymore.
-	OvnK8sTopoAnno         = OvnK8sPrefix + "/" + "topology-version"
-	OvnK8sSmallMTUTaintKey = OvnK8sPrefix + "/" + "mtu-too-small"
+	OvnK8sTopoAnno            = OvnK8sPrefix + "/" + "topology-version"
+	OvnK8sSmallMTUTaintKey    = OvnK8sPrefix + "/" + "mtu-too-small"
+	OvnRouteAdvertisementsKey = OvnK8sPrefix + "/route-advertisements"
 
 	// name of the configmap used to synchronize status (e.g. watch for topology changes)
 	OvnK8sStatusCMName         = "control-plane-status"
