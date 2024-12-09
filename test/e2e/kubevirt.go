@@ -1595,7 +1595,7 @@ runcmd:
 				topology: "layer2",
 				role:     "primary",
 			}),
-			XEntry(nil, Label("TODO", "SDN-5490"), testData{
+			Entry(nil, testData{
 				resource: virtualMachine,
 				test:     liveMigrate,
 				topology: "localnet",
@@ -1611,7 +1611,7 @@ runcmd:
 				topology: "layer2",
 				role:     "primary",
 			}),
-			XEntry(nil, Label("TODO", "SDN-5490"), testData{
+			Entry(nil, testData{
 				resource: virtualMachineInstance,
 				test:     liveMigrate,
 				topology: "localnet",
@@ -1632,6 +1632,11 @@ runcmd:
 				test:     liveMigrateFailed,
 				topology: "layer2",
 				role:     "primary",
+			}),
+			Entry(nil, testData{
+				resource: virtualMachineInstance,
+				test:     liveMigrateFailed,
+				topology: "localnet",
 			}),
 		)
 	})
