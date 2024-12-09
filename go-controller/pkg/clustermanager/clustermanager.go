@@ -13,12 +13,14 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/dnsnameresolver"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/egressservice"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/endpointslicemirror"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/routeadvertisements"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/status_manager"
 	udncontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/userdefinednetwork"
 	udntemplate "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/userdefinednetwork/template"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/unidling"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/healthcheck"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -54,6 +56,11 @@ type ClusterManager struct {
 	// used for leader election
 	identity      string
 	statusManager *status_manager.StatusManager
+
+	// networkManager creates and deletes network controllers
+	networkManager networkmanager.Controller
+
+	raController *routeadvertisements.Controller
 }
 
 // NewClusterManager creates a new cluster manager to manage the cluster nodes.
@@ -77,11 +84,19 @@ func NewClusterManager(ovnClient *util.OVNClusterManagerClientset, wf *factory.W
 		statusManager:               status_manager.NewStatusManager(wf, ovnClient),
 	}
 
+	cm.networkManager = networkmanager.Default()
 	if config.OVNKubernetesFeature.EnableMultiNetwork {
-		cm.secondaryNetClusterManager, err = newSecondaryNetworkClusterManager(ovnClient, wf, recorder)
+		cm.secondaryNetClusterManager, err = newSecondaryNetworkClusterManager(ovnClient, wf, cm.networkManager.Interface(), recorder)
 		if err != nil {
 			return nil, err
 		}
+
+		cm.networkManager, err = networkmanager.NewForCluster(cm.secondaryNetClusterManager, wf, ovnClient, recorder)
+		if err != nil {
+			return nil, err
+		}
+		cm.secondaryNetClusterManager.networkManager = cm.networkManager.Interface()
+
 	}
 
 	if config.OVNKubernetesFeature.EnableEgressIP {
@@ -114,7 +129,7 @@ func NewClusterManager(ovnClient *util.OVNClusterManagerClientset, wf *factory.W
 		}
 	}
 	if util.IsNetworkSegmentationSupportEnabled() {
-		cm.endpointSliceMirrorController, err = endpointslicemirror.NewController(ovnClient, wf, cm.secondaryNetClusterManager.nadController)
+		cm.endpointSliceMirrorController, err = endpointslicemirror.NewController(ovnClient, wf, cm.networkManager.Interface())
 		if err != nil {
 			return nil, err
 		}
@@ -144,6 +159,10 @@ func NewClusterManager(ovnClient *util.OVNClusterManagerClientset, wf *factory.W
 		}
 	}
 
+	if util.IsRouteAdvertisementsEnabled() {
+		cm.raController = routeadvertisements.NewController(cm.networkManager.Interface(), wf, ovnClient)
+	}
+
 	return cm, nil
 }
 
@@ -156,11 +175,9 @@ func (cm *ClusterManager) Start(ctx context.Context) error {
 		return err
 	}
 
-	// Start secondary CM first so that NAD controller initializes before other controllers
-	if config.OVNKubernetesFeature.EnableMultiNetwork {
-		if err := cm.secondaryNetClusterManager.Start(); err != nil {
-			return err
-		}
+	// Start networkManager before other controllers
+	if err := cm.networkManager.Start(); err != nil {
+		return err
 	}
 
 	if err := cm.defaultNetClusterController.Start(ctx); err != nil {
@@ -203,6 +220,14 @@ func (cm *ClusterManager) Start(ctx context.Context) error {
 			return err
 		}
 	}
+
+	if cm.raController != nil {
+		err := cm.raController.Start()
+		if err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -211,9 +236,7 @@ func (cm *ClusterManager) Stop() {
 	klog.Info("Stopping the cluster manager")
 	cm.defaultNetClusterController.Stop()
 	cm.zoneClusterController.Stop()
-	if config.OVNKubernetesFeature.EnableMultiNetwork {
-		cm.secondaryNetClusterManager.Stop()
-	}
+
 	if config.OVNKubernetesFeature.EnableEgressIP {
 		cm.eIPC.Stop()
 	}
@@ -229,5 +252,9 @@ func (cm *ClusterManager) Stop() {
 	}
 	if util.IsNetworkSegmentationSupportEnabled() {
 		cm.userDefinedNetworkController.Shutdown()
+	}
+	if cm.raController != nil {
+		cm.raController.Stop()
+		cm.raController = nil
 	}
 }
