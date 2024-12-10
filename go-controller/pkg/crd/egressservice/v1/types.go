@@ -26,6 +26,7 @@ import (
 // +kubebuilder::singular=egressservice
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name="Assigned Host",type=string,JSONPath=".status.host"
 // EgressService is a CRD that allows the user to request that the source
 // IP of egress packets originating from all of the pods that are endpoints
 // of the corresponding LoadBalancer Service would be its ingress IP.
