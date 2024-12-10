@@ -41,7 +41,8 @@ func (c *Controller) repairAdminNetworkPolicies() error {
 	// We grab all the port groups that belong to ANP controller using externalIDs
 	// and compare the value with the name of existing ANPs. If no match is found
 	// we delete that port group along with all the acls in it.
-	predicateIDs := libovsdbops.NewDbObjectIDs(libovsdbops.PortGroupAdminNetworkPolicy, c.controllerName, nil)
+	// This is done for all networks in the cluster
+	predicateIDs := libovsdbops.NewDbObjectIDsAcrossAllContollers(libovsdbops.PortGroupAdminNetworkPolicy, nil)
 	p := libovsdbops.GetPredicate[*nbdb.PortGroup](predicateIDs, func(pg *nbdb.PortGroup) bool {
 		_, ok := existingANPs[pg.ExternalIDs[libovsdbops.ObjectNameKey.String()]]
 		return !ok // return if it doesn't exist in the cache
@@ -60,11 +61,11 @@ func (c *Controller) repairAdminNetworkPolicies() error {
 	}
 	// Deal with Address-Sets Repairs
 	// We grab all the AddressSets that belong to ANP controller using externalIDs
-	// and compare with the existing ANPs. The ones that don't match
+	// across all networks and compare with the existing ANPs. The ones that don't match
 	// will be deleted from the DB.
 	// NOTE: When we call syncAdminNetworkPolicy function after this for every ANP on startup,
 	// the right Address-sets will be recreated.
-	asPredicateIDs := libovsdbops.NewDbObjectIDs(libovsdbops.AddressSetAdminNetworkPolicy, c.controllerName, nil)
+	asPredicateIDs := libovsdbops.NewDbObjectIDsAcrossAllContollers(libovsdbops.AddressSetAdminNetworkPolicy, nil)
 	asPredicateFunc := func(as *nbdb.AddressSet) bool {
 		_, ok := existingANPs[as.ExternalIDs[libovsdbops.ObjectNameKey.String()]]
 		return !ok // if not present in cache then its stale
@@ -105,7 +106,8 @@ func (c *Controller) repairBaselineAdminNetworkPolicy() error {
 	// We grab all the port groups that belong to BANP controller using externalIDs
 	// and compare the value with the name of existing BANPs. If no match is found
 	// we delete that port group along with all the acls in it.
-	predicateIDs := libovsdbops.NewDbObjectIDs(libovsdbops.PortGroupBaselineAdminNetworkPolicy, c.controllerName, nil)
+	// This is done for all networks in the cluster
+	predicateIDs := libovsdbops.NewDbObjectIDsAcrossAllContollers(libovsdbops.PortGroupBaselineAdminNetworkPolicy, nil)
 	p := libovsdbops.GetPredicate[*nbdb.PortGroup](predicateIDs, func(pg *nbdb.PortGroup) bool {
 		_, ok := existingBANPs[pg.ExternalIDs[libovsdbops.ObjectNameKey.String()]]
 		return !ok // return if it doesn't exist in the cache
@@ -124,12 +126,12 @@ func (c *Controller) repairBaselineAdminNetworkPolicy() error {
 	}
 	// Deal with Address-Sets Repairs
 	// We grab all the AddressSets that belong to BANP controller using externalIDs
-	// and compare with the existing ANPs. The ones that don't match
+	// across all networks and compare with the existing ANPs. The ones that don't match
 	// will be deleted from the DB.
 	// NOTE: When we call syncBaselineAdminNetworkPolicy function after this for every BANP on startup,
 	// the right Address-sets will be recreated.
 	// Since we clean ACLs before Address-sets we should not run into any referential ingegrity violation
-	asPredicateIDs := libovsdbops.NewDbObjectIDs(libovsdbops.AddressSetBaselineAdminNetworkPolicy, c.controllerName, nil)
+	asPredicateIDs := libovsdbops.NewDbObjectIDsAcrossAllContollers(libovsdbops.AddressSetBaselineAdminNetworkPolicy, nil)
 	asPredicateFunc := func(as *nbdb.AddressSet) bool {
 		_, ok := existingBANPs[as.ExternalIDs[libovsdbops.ObjectNameKey.String()]]
 		return !ok // if not present in cache then its stale

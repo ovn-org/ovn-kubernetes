@@ -147,6 +147,15 @@ func NewDbObjectIDs(idsType *ObjectIDsType, controller string, objectIds map[Ext
 	if controller == "" {
 		panic("NewDbObjectIDs failed: controller should not be empty")
 	}
+	objectIDs := newDbObjectIDs(idsType, objectIds)
+	objectIDs.ownerControllerName = controller
+	return objectIDs
+}
+
+// newDbObjectIDs is used to construct DbObjectIDs, idsType is always required,
+// objectIds may be empty, or half-filled for predicate search.
+// objectIds keys that are not used by given idsType will cause panic.
+func newDbObjectIDs(idsType *ObjectIDsType, objectIds map[ExternalIDKey]string) *DbObjectIDs {
 	externalIDKeys := idsType.GetExternalIDKeys()
 	if externalIDKeys == nil {
 		// can only happen if ObjectIDsType{} is passed
@@ -162,11 +171,18 @@ func NewDbObjectIDs(idsType *ObjectIDsType, controller string, objectIds map[Ext
 		objectIds = map[ExternalIDKey]string{}
 	}
 	objectIDs := &DbObjectIDs{
-		idsType:             idsType,
-		ownerControllerName: controller,
-		objectIDs:           objectIds,
+		idsType:   idsType,
+		objectIDs: objectIds,
 	}
 	return objectIDs
+}
+
+// NewDbObjectIDsAcrossAllContollers is used to construct DbObjectIDs, without filtering out on specific controller,
+// idsType is always required,
+// objectIds may be empty, or half-filled for predicate search.
+// objectIds keys that are not used by given idsType will cause panic.
+func NewDbObjectIDsAcrossAllContollers(idsType *ObjectIDsType, objectIds map[ExternalIDKey]string) *DbObjectIDs {
+	return newDbObjectIDs(idsType, objectIds)
 }
 
 // AddIDs creates new DbObjectIDs with the additional extraObjectIds.
@@ -219,13 +235,14 @@ func (objectIDs *DbObjectIDs) GetObjectID(key ExternalIDKey) string {
 // - objectIDs.idsType.ownerObjectType
 // - values from DbObjectIDs.objectIDs are added in order set in ObjectIDsType.externalIDKeys
 func (objectIDs *DbObjectIDs) GetExternalIDs() map[string]string {
-	return objectIDs.getExternalIDs(false)
+	externalIDs := objectIDs.getExternalIDs(false)
+	externalIDs[OwnerControllerKey.String()] = objectIDs.ownerControllerName
+	return externalIDs
 }
 
 func (objectIDs *DbObjectIDs) getExternalIDs(allowEmptyKeys bool) map[string]string {
 	externalIDs := map[string]string{
-		OwnerControllerKey.String(): objectIDs.ownerControllerName,
-		OwnerTypeKey.String():       objectIDs.idsType.ownerObjectType,
+		OwnerTypeKey.String(): objectIDs.idsType.ownerObjectType,
 	}
 	for key, value := range objectIDs.objectIDs {
 		externalIDs[key.String()] = value
@@ -308,6 +325,24 @@ func GetNoOwnerPredicate[T hasExternalIDs]() func(item T) bool {
 // to nil.
 func GetPredicate[nbdbT hasExternalIDs](objectIDs *DbObjectIDs, f func(item nbdbT) bool) func(item nbdbT) bool {
 	predicateIDs := objectIDs.getExternalIDs(true)
+	predicateIDs[OwnerControllerKey.String()] = objectIDs.ownerControllerName
+	return getPredicate(predicateIDs, f)
+}
+
+// GetPredicateAcrossAllControllers returns a predicate to search for db obj of type nbdbT across all controllers.
+// Only non-empty ids will be matched (that always includes DbObjectIDs.OwnerTypeKey and DbObjectIDs.ownerControllerName),
+// but the other IDs may be empty and will be ignored in the filtering, additional filter function f may be passed, or set
+// to nil.
+func GetPredicateAcrossAllControllers[nbdbT hasExternalIDs](objectIDs *DbObjectIDs, f func(item nbdbT) bool) func(item nbdbT) bool {
+	predicateIDs := objectIDs.getExternalIDs(true)
+	return getPredicate(predicateIDs, f)
+}
+
+// GetPredicate returns a predicate to search for db obj of type nbdbT.
+// Only non-empty ids will be matched (that always includes DbObjectIDs.OwnerTypeKey and DbObjectIDs.ownerControllerName),
+// but the other IDs may be empty and will be ignored in the filtering, additional filter function f may be passed, or set
+// to nil.
+func getPredicate[nbdbT hasExternalIDs](predicateIDs map[string]string, f func(item nbdbT) bool) func(item nbdbT) bool {
 	if primaryID, ok := predicateIDs[PrimaryIDKey.String()]; ok {
 		// when primary id is set, other ids are not required
 		predicateIDs = map[string]string{PrimaryIDKey.String(): primaryID}
