@@ -687,12 +687,12 @@ func addServiceRules(service *kapi.Service, netInfo util.NetInfo, localEndpoints
 				errors = append(errors, err)
 			}
 		}
-		nftElems := getGatewayNFTRules(service, localEndpoints, svcHasLocalHostNetEndPnt)
+		nftObjs := getGatewayNFTRules(service, localEndpoints, svcHasLocalHostNetEndPnt)
 		if netInfo.IsPrimaryNetwork() && activeNetwork != nil {
-			nftElems = append(nftElems, getUDNNFTRules(service, activeNetwork)...)
+			nftObjs = append(nftObjs, getUDNNFTRules(service, activeNetwork)...)
 		}
-		if len(nftElems) > 0 {
-			if err := nodenft.UpdateNFTElements(nftElems); err != nil {
+		if len(nftObjs) > 0 {
+			if err := nodenft.AddObjects(context.TODO(), nftObjs); err != nil {
 				err = fmt.Errorf("failed to update nftables rules for service %s/%s: %v",
 					service.Namespace, service.Name, err)
 				errors = append(errors, err)
@@ -752,40 +752,16 @@ func delServiceRules(service *kapi.Service, localEndpoints []string, npw *nodePo
 				errors = append(errors, err)
 			}
 		}
-		nftElems := getGatewayNFTRules(service, localEndpoints, true)
-		nftElems = append(nftElems, getGatewayNFTRules(service, localEndpoints, false)...)
-		if len(nftElems) > 0 {
-			if err := nodenft.DeleteNFTElements(nftElems); err != nil {
+		nftObjs := getGatewayNFTRules(service, localEndpoints, true)
+		nftObjs = append(nftObjs, getGatewayNFTRules(service, localEndpoints, false)...)
+		if util.IsNetworkSegmentationSupportEnabled() {
+			nftObjs = append(nftObjs, getUDNNFTRules(service, nil)...)
+		}
+		if len(nftObjs) > 0 {
+			if err := nodenft.DeleteObjects(context.TODO(), nftObjs); err != nil {
 				err = fmt.Errorf("failed to delete nftables rules for service %s/%s: %v",
 					service.Namespace, service.Name, err)
 				errors = append(errors, err)
-			}
-		}
-
-		if util.IsNetworkSegmentationSupportEnabled() {
-			// NOTE: The code below is not using nodenft.DeleteNFTElements because it first adds elements
-			// before removing them, which fails for UDN NFT rules. These rules only have map keys,
-			// not key-value pairs, making it impossible to add.
-			// Attempt to delete the elements directly and handle the IsNotFound error.
-			//
-			// TODO: Switch to `nft destroy` when supported.
-			nftElems = getUDNNFTRules(service, nil)
-			if len(nftElems) > 0 {
-				nft, err := nodenft.GetNFTablesHelper()
-				if err != nil {
-					return utilerrors.Join(append(errors, err)...)
-				}
-
-				tx := nft.NewTransaction()
-				for _, elem := range nftElems {
-					tx.Delete(elem)
-				}
-
-				if err := nft.Run(context.TODO(), tx); err != nil && !knftables.IsNotFound(err) {
-					err = fmt.Errorf("failed to delete nftables rules for UDN service %s/%s: %v",
-						service.Namespace, service.Name, err)
-					errors = append(errors, err)
-				}
 			}
 		}
 	}
@@ -981,7 +957,7 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) error {
 	var err error
 	var errors []error
 	var keepIPTRules []nodeipt.Rule
-	var keepNFTSetElems, keepNFTMapElems []*knftables.Element
+	var keepNFTObjects, nftContainers []knftables.Object
 	for _, serviceInterface := range services {
 		name := ktypes.NamespacedName{Namespace: serviceInterface.(*kapi.Service).Namespace, Name: serviceInterface.(*kapi.Service).Name}
 
@@ -1027,13 +1003,13 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) error {
 		if !npw.dpuMode {
 			localEndpointsArray := sets.List(localEndpoints)
 			keepIPTRules = append(keepIPTRules, getGatewayIPTRules(service, localEndpointsArray, hasLocalHostNetworkEp)...)
-			keepNFTSetElems = append(keepNFTSetElems, getGatewayNFTRules(service, localEndpointsArray, hasLocalHostNetworkEp)...)
+			keepNFTObjects = append(keepNFTObjects, getGatewayNFTRules(service, localEndpointsArray, hasLocalHostNetworkEp)...)
 			if util.IsNetworkSegmentationSupportEnabled() && netInfo.IsPrimaryNetwork() {
 				netConfig := npw.ofm.getActiveNetwork(netInfo)
 				if netConfig == nil {
 					return fmt.Errorf("failed to get active network config for network %s", netInfo.GetNetworkName())
 				}
-				keepNFTMapElems = append(keepNFTMapElems, getUDNNFTRules(service, netConfig)...)
+				keepNFTObjects = append(keepNFTObjects, getUDNNFTRules(service, netConfig)...)
 			}
 		}
 	}
@@ -1052,17 +1028,12 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) error {
 			errors = append(errors, err)
 		}
 
-		for _, set := range []string{nftablesMgmtPortNoSNATNodePorts, nftablesMgmtPortNoSNATServicesV4, nftablesMgmtPortNoSNATServicesV6} {
-			if err = recreateNFTSet(set, keepNFTSetElems); err != nil {
-				errors = append(errors, err)
-			}
-		}
+		nftContainers = append(nftContainers, getGatewayNFTContainerObjects()...)
 		if util.IsNetworkSegmentationSupportEnabled() {
-			for _, nftMap := range []string{nftablesUDNMarkNodePortsMap, nftablesUDNMarkExternalIPsV4Map, nftablesUDNMarkExternalIPsV6Map} {
-				if err = recreateNFTMap(nftMap, keepNFTMapElems); err != nil {
-					errors = append(errors, err)
-				}
-			}
+			nftContainers = append(nftContainers, getUDNNFTContainerObjects()...)
+		}
+		if err = nodenft.SyncObjects(context.TODO(), nftContainers, keepNFTObjects); err != nil {
+			errors = append(errors, err)
 		}
 	}
 	return utilerrors.Join(errors...)
@@ -1356,8 +1327,8 @@ func (npwipt *nodePortWatcherIptables) DeleteService(service *kapi.Service) erro
 func (npwipt *nodePortWatcherIptables) SyncServices(services []interface{}) error {
 	var err error
 	var errors []error
-	keepIPTRules := []nodeipt.Rule{}
-	keepNFTElems := []*knftables.Element{}
+	var keepIPTRules []nodeipt.Rule
+	var keepNFTObjects, nftContainers []knftables.Object
 	for _, serviceInterface := range services {
 		service, ok := serviceInterface.(*kapi.Service)
 		if !ok {
@@ -1372,7 +1343,7 @@ func (npwipt *nodePortWatcherIptables) SyncServices(services []interface{}) erro
 		// Add correct iptables rules.
 		// TODO: ETP and ITP is not implemented for smart NIC mode.
 		keepIPTRules = append(keepIPTRules, getGatewayIPTRules(service, nil, false)...)
-		keepNFTElems = append(keepNFTElems, getGatewayNFTRules(service, nil, false)...)
+		keepNFTObjects = append(keepNFTObjects, getGatewayNFTRules(service, nil, false)...)
 	}
 
 	// sync rules once
@@ -1382,10 +1353,9 @@ func (npwipt *nodePortWatcherIptables) SyncServices(services []interface{}) erro
 		}
 	}
 
-	for _, set := range []string{nftablesMgmtPortNoSNATNodePorts, nftablesMgmtPortNoSNATServicesV4, nftablesMgmtPortNoSNATServicesV6} {
-		if err = recreateNFTSet(set, keepNFTElems); err != nil {
-			errors = append(errors, err)
-		}
+	nftContainers = append(nftContainers, getGatewayNFTContainerObjects()...)
+	if err = nodenft.SyncObjects(context.TODO(), nftContainers, keepNFTObjects); err != nil {
+		errors = append(errors, err)
 	}
 
 	return utilerrors.Join(errors...)
