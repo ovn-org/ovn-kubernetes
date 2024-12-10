@@ -883,9 +883,10 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 
 					// make sure egress firewall acl was not updated as we are still holding a lock
 					getACLs := func() int {
-						acls, err := libovsdbops.FindACLsWithPredicate(fakeOVN.nbClient, func(acl *nbdb.ACL) bool {
-							return true
-						})
+						// find all existing egress firewall ACLs
+						predicateIDs := libovsdbops.NewDbObjectIDs(libovsdbops.ACLEgressFirewall, "default-network-controller", nil)
+						aclP := libovsdbops.GetPredicate[*nbdb.ACL](predicateIDs, nil)
+						acls, err := libovsdbops.FindACLsWithPredicate(fakeOVN.nbClient, aclP)
 						gomega.Expect(err).NotTo(gomega.HaveOccurred())
 						return len(acls)
 					}
