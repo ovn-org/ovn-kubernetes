@@ -138,12 +138,10 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPortsWit
 			}
 			subnets := podInfo.nodeSubnet
 			var (
-				subnet     *net.IPNet
-				hasSubnets bool
+				subnet *net.IPNet
 			)
 			if len(subnets) > 0 {
 				subnet = ovntest.MustParseIPNet(subnets)
-				hasSubnets = true
 			}
 
 			for nad, portInfo := range podInfo.allportInfo {
@@ -235,28 +233,6 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPortsWit
 				nodeslsps[switchName] = append(nodeslsps[switchName], lspUUID)
 			}
 
-			var otherConfig map[string]string
-			if hasSubnets {
-				otherConfig = map[string]string{
-					"subnet": subnet.String(),
-				}
-				if !ocInfo.bnc.IsPrimaryNetwork() {
-					// FIXME: This is weird that for secondary networks that don't have
-					// management ports these tests are expecting managementportIP to be
-					// excluded for no reason.
-					// FIXME2: Why are we setting exclude_ips on OVN switches when we don't
-					// even use OVN IPAMs.
-					otherConfig["exclude_ips"] = managementPortIP(subnet).String()
-				}
-			}
-
-			// TODO: once we start the "full" SecondaryLayer2NetworkController (instead of just Base)
-			// we can drop this, and compare all objects created by the controller (right now we're
-			// missing all the meters, and the COPP)
-			if ocInfo.bnc.TopologyType() == ovntypes.Layer2Topology {
-				otherConfig = nil
-			}
-
 			switchNodeMap[switchName] = &nbdb.LogicalSwitch{
 				UUID:  switchName + "-UUID",
 				Name:  switchName,
@@ -265,8 +241,7 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPortsWit
 					ovntypes.NetworkExternalID:     ocInfo.bnc.GetNetworkName(),
 					ovntypes.NetworkRoleExternalID: util.GetUserDefinedNetworkRole(isPrimary),
 				},
-				OtherConfig: otherConfig,
-				ACLs:        acls[switchName],
+				ACLs: acls[switchName],
 			}
 
 			if _, alreadyAdded := alreadyAddedManagementElements[pod.nodeName]; !alreadyAdded &&
@@ -341,14 +316,6 @@ func newExpectedSwitchToRouterPort(lspUUID string, portName string, pod testPod,
 	lrp.PortSecurity = nil
 	lrp.Type = "router"
 	return lrp
-}
-
-func subnetsAsString(subnetInfo []config.CIDRNetworkEntry) []string {
-	var subnets []string
-	for _, cidr := range subnetInfo {
-		subnets = append(subnets, cidr.String())
-	}
-	return subnets
 }
 
 func managementPortName(switchName string) string {
