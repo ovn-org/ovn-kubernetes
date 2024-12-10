@@ -84,9 +84,9 @@ var _ = Describe("User Defined Network Controller", func() {
 					Expect(err).NotTo(HaveOccurred())
 					return normalizeConditions(udn.Status.Conditions)
 				}).Should(Equal([]metav1.Condition{{
-					Type:    "NetworkReady",
+					Type:    "NetworkCreated",
 					Status:  "True",
-					Reason:  "NetworkAttachmentDefinitionReady",
+					Reason:  "NetworkAttachmentDefinitionCreated",
 					Message: "NetworkAttachmentDefinition has been created",
 				}}))
 
@@ -107,7 +107,7 @@ var _ = Describe("User Defined Network Controller", func() {
 					Expect(err).NotTo(HaveOccurred())
 					return normalizeConditions(udn.Status.Conditions)
 				}).Should(Equal([]metav1.Condition{{
-					Type:    "NetworkReady",
+					Type:    "NetworkCreated",
 					Status:  "False",
 					Reason:  "SyncError",
 					Message: "failed to generate NetworkAttachmentDefinition: " + renderErr.Error(),
@@ -132,7 +132,7 @@ var _ = Describe("User Defined Network Controller", func() {
 					Expect(err).NotTo(HaveOccurred())
 					return normalizeConditions(udn.Status.Conditions)
 				}).Should(Equal([]metav1.Condition{{
-					Type:    "NetworkReady",
+					Type:    "NetworkCreated",
 					Status:  "False",
 					Reason:  "SyncError",
 					Message: "failed to create NetworkAttachmentDefinition: create NAD error",
@@ -154,7 +154,7 @@ var _ = Describe("User Defined Network Controller", func() {
 					Expect(err).NotTo(HaveOccurred())
 					return normalizeConditions(udn.Status.Conditions)
 				}).Should(Equal([]metav1.Condition{{
-					Type:    "NetworkReady",
+					Type:    "NetworkCreated",
 					Status:  "False",
 					Reason:  "SyncError",
 					Message: "foreign NetworkAttachmentDefinition with the desired name already exist [test/test]",
@@ -171,9 +171,9 @@ var _ = Describe("User Defined Network Controller", func() {
 					Expect(err).NotTo(HaveOccurred())
 					return normalizeConditions(udn.Status.Conditions)
 				}).Should(Equal([]metav1.Condition{{
-					Type:    "NetworkReady",
+					Type:    "NetworkCreated",
 					Status:  "True",
-					Reason:  "NetworkAttachmentDefinitionReady",
+					Reason:  "NetworkAttachmentDefinitionCreated",
 					Message: "NetworkAttachmentDefinition has been created",
 				}}))
 
@@ -210,9 +210,9 @@ var _ = Describe("User Defined Network Controller", func() {
 					Expect(err).NotTo(HaveOccurred())
 					return normalizeConditions(udn.Status.Conditions)
 				}).Should(Equal([]metav1.Condition{{
-					Type:    "NetworkReady",
+					Type:    "NetworkCreated",
 					Status:  "True",
-					Reason:  "NetworkAttachmentDefinitionReady",
+					Reason:  "NetworkAttachmentDefinitionCreated",
 					Message: "NetworkAttachmentDefinition has been created",
 				}}))
 				actualNAD, err := cs.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(udn.Namespace).Get(context.Background(), udn.Name, metav1.GetOptions{})
@@ -229,7 +229,7 @@ var _ = Describe("User Defined Network Controller", func() {
 					Expect(err).NotTo(HaveOccurred())
 					return normalizeConditions(udn.Status.Conditions)
 				}).Should(Equal([]metav1.Condition{{
-					Type:    "NetworkReady",
+					Type:    "NetworkCreated",
 					Status:  "False",
 					Reason:  "SyncError",
 					Message: "failed to update NetworkAttachmentDefinition: " + expectedErr.Error(),
@@ -256,7 +256,7 @@ var _ = Describe("User Defined Network Controller", func() {
 					Expect(err).NotTo(HaveOccurred())
 					return normalizeConditions(updatedUDN.Status.Conditions)
 				}).Should(Equal([]metav1.Condition{{
-					Type:    "NetworkReady",
+					Type:    "NetworkCreated",
 					Status:  "False",
 					Reason:  "SyncError",
 					Message: `primary network already exist in namespace "test": "primary-net-1"`,
@@ -278,7 +278,7 @@ var _ = Describe("User Defined Network Controller", func() {
 					Expect(err).NotTo(HaveOccurred())
 					return normalizeConditions(updatedUDN.Status.Conditions)
 				}).Should(Equal([]metav1.Condition{{
-					Type:    "NetworkReady",
+					Type:    "NetworkCreated",
 					Status:  "False",
 					Reason:  "SyncError",
 					Message: `failed to validate no primary network exist: unmarshal failed [test/another-primary-net]: invalid character '!' looking for beginning of value`,
@@ -314,7 +314,7 @@ var _ = Describe("User Defined Network Controller", func() {
 					Expect(err).NotTo(HaveOccurred())
 					return normalizeConditions(updatedUDN.Status.Conditions)
 				}).Should(Equal([]metav1.Condition{{
-					Type:    "NetworkReady",
+					Type:    "NetworkCreated",
 					Status:  "False",
 					Reason:  "SyncError",
 					Message: `failed to add finalizer to UserDefinedNetwork: ` + expectedErr.Error(),
@@ -384,9 +384,9 @@ var _ = Describe("User Defined Network Controller", func() {
 					Expect(err).NotTo(HaveOccurred())
 					return normalizeConditions(cudn.Status.Conditions)
 				}).Should(Equal([]metav1.Condition{{
-					Type:    "NetworkReady",
+					Type:    "NetworkCreated",
 					Status:  "True",
-					Reason:  "NetworkAttachmentDefinitionReady",
+					Reason:  "NetworkAttachmentDefinitionCreated",
 					Message: "NetworkAttachmentDefinition has been created in following namespaces: [blue, red]",
 				}}), "status should reflect NAD exist in test namespaces")
 				for testNamespace, expectedNAD := range expectedNsNADs {
@@ -441,9 +441,9 @@ var _ = Describe("User Defined Network Controller", func() {
 						Expect(err).NotTo(HaveOccurred())
 						return normalizeConditions(cudn.Status.Conditions)
 					}).Should(Equal([]metav1.Condition{{
-						Type:    "NetworkReady",
+						Type:    "NetworkCreated",
 						Status:  "True",
-						Reason:  "NetworkAttachmentDefinitionReady",
+						Reason:  "NetworkAttachmentDefinitionCreated",
 						Message: "NetworkAttachmentDefinition has been created in following namespaces: [green, yellow]",
 					}}), "status should report NAD created in test labeled namespaces")
 					for _, nsName := range connectedNsNames {
@@ -499,9 +499,9 @@ var _ = Describe("User Defined Network Controller", func() {
 						Expect(err).NotTo(HaveOccurred())
 						return normalizeConditions(cudn.Status.Conditions)
 					}).Should(Equal([]metav1.Condition{{
-						Type:    "NetworkReady",
+						Type:    "NetworkCreated",
 						Status:  "True",
-						Reason:  "NetworkAttachmentDefinitionReady",
+						Reason:  "NetworkAttachmentDefinitionCreated",
 						Message: "NetworkAttachmentDefinition has been created in following namespaces: [black, gray, green, yellow]",
 					}}), "status should report NAD exist in existing and new labeled namespaces")
 					for _, nsName := range append(connectedNsNames, newNsNames...) {
@@ -527,9 +527,9 @@ var _ = Describe("User Defined Network Controller", func() {
 						Expect(err).NotTo(HaveOccurred())
 						return normalizeConditions(cudn.Status.Conditions)
 					}).Should(Equal([]metav1.Condition{{
-						Type:    "NetworkReady",
+						Type:    "NetworkCreated",
 						Status:  "True",
-						Reason:  "NetworkAttachmentDefinitionReady",
+						Reason:  "NetworkAttachmentDefinitionCreated",
 						Message: "NetworkAttachmentDefinition has been created in following namespaces: []",
 					}}))
 					for _, nsName := range connectedNsNames {
@@ -619,9 +619,9 @@ var _ = Describe("User Defined Network Controller", func() {
 						Expect(err).NotTo(HaveOccurred())
 						return normalizeConditions(cudn.Status.Conditions)
 					}).Should(Equal([]metav1.Condition{{
-						Type:    "NetworkReady",
+						Type:    "NetworkCreated",
 						Status:  "True",
-						Reason:  "NetworkAttachmentDefinitionReady",
+						Reason:  "NetworkAttachmentDefinitionCreated",
 						Message: "NetworkAttachmentDefinition has been created in following namespaces: [black, gray, green, yellow]",
 					}}), "status should report NAD created in existing and new test namespaces")
 					for _, nsName := range append(connectedNsNames, newNsNames...) {
@@ -645,9 +645,9 @@ var _ = Describe("User Defined Network Controller", func() {
 						Expect(err).NotTo(HaveOccurred())
 						return normalizeConditions(cudn.Status.Conditions)
 					}).Should(Equal([]metav1.Condition{{
-						Type:    "NetworkReady",
+						Type:    "NetworkCreated",
 						Status:  "True",
-						Reason:  "NetworkAttachmentDefinitionReady",
+						Reason:  "NetworkAttachmentDefinitionCreated",
 						Message: "NetworkAttachmentDefinition has been created in following namespaces: [blue, green, red, yellow]",
 					}}), "status should report NAD created in existing and new test namespaces")
 					for _, nsName := range append(connectedNsNames, disconnectedNsNames...) {
@@ -674,9 +674,9 @@ var _ = Describe("User Defined Network Controller", func() {
 						Expect(err).NotTo(HaveOccurred())
 						return normalizeConditions(cudn.Status.Conditions)
 					}).Should(Equal([]metav1.Condition{{
-						Type:    "NetworkReady",
+						Type:    "NetworkCreated",
 						Status:  "True",
-						Reason:  "NetworkAttachmentDefinitionReady",
+						Reason:  "NetworkAttachmentDefinitionCreated",
 						Message: "NetworkAttachmentDefinition has been created in following namespaces: [" + connectedNsName + "]",
 					}}), "status should report NAD created in label namespace only")
 
@@ -726,9 +726,9 @@ var _ = Describe("User Defined Network Controller", func() {
 					Expect(err).NotTo(HaveOccurred())
 					return normalizeConditions(cudn.Status.Conditions)
 				}, 50*time.Millisecond).Should(Equal([]metav1.Condition{{
-					Type:    "NetworkReady",
+					Type:    "NetworkCreated",
 					Status:  "True",
-					Reason:  "NetworkAttachmentDefinitionReady",
+					Reason:  "NetworkAttachmentDefinitionCreated",
 					Message: "NetworkAttachmentDefinition has been created in following namespaces: [green, yellow]",
 				}}), "status should report NAD created in test labeled namespaces")
 
@@ -920,9 +920,9 @@ var _ = Describe("User Defined Network Controller", func() {
 				&udnv1.UserDefinedNetworkStatus{
 					Conditions: []metav1.Condition{
 						{
-							Type:    "NetworkReady",
+							Type:    "NetworkCreated",
 							Status:  "True",
-							Reason:  "NetworkAttachmentDefinitionReady",
+							Reason:  "NetworkAttachmentDefinitionCreated",
 							Message: "NetworkAttachmentDefinition has been created",
 						},
 					},
@@ -934,7 +934,7 @@ var _ = Describe("User Defined Network Controller", func() {
 				&udnv1.UserDefinedNetworkStatus{
 					Conditions: []metav1.Condition{
 						{
-							Type:    "NetworkReady",
+							Type:    "NetworkCreated",
 							Status:  "False",
 							Reason:  "NetworkAttachmentDefinitionDeleted",
 							Message: "NetworkAttachmentDefinition is being deleted",
@@ -948,7 +948,7 @@ var _ = Describe("User Defined Network Controller", func() {
 				&udnv1.UserDefinedNetworkStatus{
 					Conditions: []metav1.Condition{
 						{
-							Type:    "NetworkReady",
+							Type:    "NetworkCreated",
 							Status:  "False",
 							Reason:  "SyncError",
 							Message: "sync error",
@@ -969,7 +969,7 @@ var _ = Describe("User Defined Network Controller", func() {
 			expectedStatus := &udnv1.UserDefinedNetworkStatus{
 				Conditions: []metav1.Condition{
 					{
-						Type:    "NetworkReady",
+						Type:    "NetworkCreated",
 						Status:  "False",
 						Reason:  "SyncError",
 						Message: syncErr.Error(),
@@ -984,7 +984,7 @@ var _ = Describe("User Defined Network Controller", func() {
 			expectedUpdatedStatus := &udnv1.UserDefinedNetworkStatus{
 				Conditions: []metav1.Condition{
 					{
-						Type:    "NetworkReady",
+						Type:    "NetworkCreated",
 						Status:  "False",
 						Reason:  "SyncError",
 						Message: anotherSyncErr.Error(),
@@ -1151,9 +1151,9 @@ var _ = Describe("User Defined Network Controller", func() {
 			Expect(err).ToNot(HaveOccurred())
 			Expect(normalizeConditions(cudn.Status.Conditions)).To(ConsistOf([]metav1.Condition{
 				{
-					Type:    "NetworkReady",
+					Type:    "NetworkCreated",
 					Status:  "True",
-					Reason:  "NetworkAttachmentDefinitionReady",
+					Reason:  "NetworkAttachmentDefinitionCreated",
 					Message: "NetworkAttachmentDefinition has been created in following namespaces: [green, red]",
 				},
 			}))
@@ -1177,7 +1177,7 @@ var _ = Describe("User Defined Network Controller", func() {
 			Expect(err).ToNot(HaveOccurred())
 			Expect(normalizeConditions(cudn.Status.Conditions)).To(ConsistOf([]metav1.Condition{
 				{
-					Type:    "NetworkReady",
+					Type:    "NetworkCreated",
 					Status:  "False",
 					Reason:  "NetworkAttachmentDefinitionDeleted",
 					Message: "NetworkAttachmentDefinition are being deleted: [green/test]",
@@ -1202,7 +1202,7 @@ var _ = Describe("User Defined Network Controller", func() {
 			Expect(err).ToNot(HaveOccurred())
 			Expect(normalizeConditions(cudn.Status.Conditions)).To(ConsistOf([]metav1.Condition{
 				{
-					Type:    "NetworkReady",
+					Type:    "NetworkCreated",
 					Status:  "False",
 					Reason:  "NetworkAttachmentDefinitionSyncError",
 					Message: "test sync NAD error",
@@ -1223,7 +1223,7 @@ func assertConditionReportNetworkInUse(conditions []metav1.Condition, messageNAD
 	}
 
 	c := conditions[0]
-	if c.Type != "NetworkReady" ||
+	if c.Type != "NetworkCreated" ||
 		c.Status != metav1.ConditionFalse ||
 		c.Reason != "NetworkAttachmentDefinitionSyncError" {
 
@@ -1267,7 +1267,7 @@ func assertFinalizersPresent(
 		Expect(err).NotTo(HaveOccurred())
 		return normalizeConditions(updatedUDN.Status.Conditions)
 	}).Should(Equal([]metav1.Condition{{
-		Type:    "NetworkReady",
+		Type:    "NetworkCreated",
 		Status:  "False",
 		Reason:  "SyncError",
 		Message: expectedConditionMsg,
