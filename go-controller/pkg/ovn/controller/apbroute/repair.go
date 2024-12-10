@@ -326,7 +326,7 @@ func (c *ExternalGatewayMasterController) buildExternalIPGatewaysFromAnnotations
 		foundGws, err := getExGwPodIPs(pod, networkName)
 		if err != nil {
 			klog.Errorf("Error getting exgw IPs for pod: %s, error: %v", pod.Name, err)
-			return nil, err
+			continue
 		}
 		if foundGws.Len() == 0 {
 			klog.Errorf("No pod IPs found for pod %s/%s", pod.Namespace, pod.Name)
