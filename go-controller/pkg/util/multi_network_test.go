@@ -465,6 +465,9 @@ func TestParseNetconf(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.desc, func(t *testing.T) {
+			config.IPv4Mode = true
+			config.IPv6Mode = true
+
 			if test.unsupportedReason != "" {
 				t.Skip(test.unsupportedReason)
 			}
