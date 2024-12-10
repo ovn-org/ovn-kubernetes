@@ -3,6 +3,7 @@ package node
 import (
 	"context"
 	"fmt"
+	"net"
 	"sync"
 	"time"
 
@@ -305,16 +306,15 @@ var _ = Describe("SecondaryNodeNetworkController: UserDefinedPrimaryNetwork Gate
 		nodeLister := v1mocks.NodeLister{}
 		nodeInformer.On("Lister").Return(&nodeLister)
 		nodeLister.On("Get", mock.AnythingOfType("string")).Return(node, nil)
-		cnode := node.DeepCopy()
-		cnode.Annotations[util.OvnNodeManagementPortMacAddresses] = `{"bluenet":"00:00:00:55:66:77"}`
-		kubeMock.On("UpdateNodeStatus", cnode).Return(nil)
 
 		By("creating NAD for primary UDN")
 		nad = ovntest.GenerateNAD("bluenet", "rednad", "greenamespace",
 			types.Layer3Topology, "100.128.0.0/16", types.NetworkRolePrimary)
 		NetInfo, err := util.ParseNADInfo(nad)
 		Expect(err).NotTo(HaveOccurred())
-
+		_, ipNet, err := net.ParseCIDR(v4NodeSubnet)
+		Expect(err).NotTo(HaveOccurred())
+		mgtPortMAC = util.IPAddrToHWAddr(util.GetNodeManagementIfAddr(ipNet).IP).String()
 		By("creating secondary network controller for user defined primary network")
 		cnnci := CommonNodeNetworkControllerInfo{name: nodeName, watchFactory: &factoryMock}
 		controller, err := NewSecondaryNodeNetworkController(&cnnci, NetInfo, vrf, ipRulesManager, &gateway{})
@@ -366,7 +366,7 @@ var _ = Describe("SecondaryNodeNetworkController: UserDefinedPrimaryNetwork Gate
 			Expect(udnRules).To(HaveLen(3))
 
 			By("delete the network and ensure its associated VRF device is also deleted")
-			cnode = node.DeepCopy()
+			cnode := node.DeepCopy()
 			kubeMock.On("UpdateNodeStatus", cnode).Return(nil)
 			err = controller.Cleanup()
 			Expect(err).NotTo(HaveOccurred())

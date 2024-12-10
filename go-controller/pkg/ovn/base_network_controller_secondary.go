@@ -818,11 +818,17 @@ func (bsnc *BaseSecondaryNetworkController) buildUDNEgressSNAT(localPodSubnets [
 	if err != nil {
 		return nil, fmt.Errorf("failed to get networkID for network %q: %v", bsnc.GetNetworkName(), err)
 	}
+	// legacy lookup for mac
 	dstMac, err := util.ParseNodeManagementPortMACAddresses(node, bsnc.GetNetworkName())
-	if err != nil {
+	if err != nil && !util.IsAnnotationNotSetError(err) {
 		return nil, fmt.Errorf("failed to parse mac address annotation for network %q on node %q, err: %w",
 			bsnc.GetNetworkName(), node.Name, err)
 	}
+	if len(dstMac) == 0 && len(localPodSubnets) > 0 {
+		// calculate MAC
+		dstMac = util.IPAddrToHWAddr(util.GetNodeManagementIfAddr(localPodSubnets[0]).IP)
+	}
+
 	extIDs := map[string]string{
 		types.NetworkExternalID:  bsnc.GetNetworkName(),
 		types.TopologyExternalID: bsnc.TopologyType(),

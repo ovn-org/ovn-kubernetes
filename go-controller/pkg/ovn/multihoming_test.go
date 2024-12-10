@@ -169,7 +169,7 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPorts(is
 					if em.gatewayConfig != nil {
 						mgmtPortName := managementPortName(switchName)
 						mgmtPortUUID := mgmtPortName + "-UUID"
-						mgmtPort := expectedManagementPort(mgmtPortName, managementIP.String())
+						mgmtPort := expectedManagementPort(mgmtPortName, managementIP)
 						data = append(data, mgmtPort)
 						nodeslsps[switchName] = append(nodeslsps[switchName], mgmtPortUUID)
 						const aclUUID = "acl1-UUID"
@@ -187,7 +187,7 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPorts(is
 						// there are multiple mgmt ports in the cluster, thus the ports must be scoped with the node name
 						mgmtPortName := managementPortName(ocInfo.bnc.GetNetworkScopedName(nodeName))
 						mgmtPortUUID := mgmtPortName + "-UUID"
-						mgmtPort := expectedManagementPort(mgmtPortName, managementIP.String())
+						mgmtPort := expectedManagementPort(mgmtPortName, managementIP)
 						data = append(data, mgmtPort)
 						nodeslsps[switchName] = append(nodeslsps[switchName], mgmtPortUUID)
 
@@ -333,10 +333,10 @@ func managementPortName(switchName string) string {
 	return fmt.Sprintf("k8s-%s", switchName)
 }
 
-func expectedManagementPort(portName string, ip string) *nbdb.LogicalSwitchPort {
+func expectedManagementPort(portName string, ip net.IP) *nbdb.LogicalSwitchPort {
 	return &nbdb.LogicalSwitchPort{
 		UUID:      portName + "-UUID",
-		Addresses: []string{fmt.Sprintf("02:03:04:05:06:07 %s", ip)},
+		Addresses: []string{fmt.Sprintf("%s %s", util.IPAddrToHWAddr(ip).String(), ip.String())},
 		Name:      portName,
 	}
 }
