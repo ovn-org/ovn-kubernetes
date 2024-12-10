@@ -496,7 +496,7 @@ func (bnc *BaseNetworkController) addAllPodsOnNode(nodeName string) []error {
 			if util.PodCompleted(&pod) {
 				continue
 			}
-			klog.V(5).Infof("Adding pod %s/%s to retryPods for network %s", pod.Namespace, pod.Name, bnc.GetNetworkName())
+			//klog.V(5).Infof("Adding pod %s/%s to retryPods for network %s", pod.Namespace, pod.Name, bnc.GetNetworkName())
 			err = bnc.retryPods.AddRetryObjWithAddNoBackoff(&pod)
 			if err != nil {
 				errs = append(errs, err)

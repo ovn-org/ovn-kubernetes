@@ -44,6 +44,10 @@ type secondaryLayer2NetworkControllerEventHandler struct {
 	syncFunc     func([]interface{}) error
 }
 
+func (h *secondaryLayer2NetworkControllerEventHandler) FilterResource(obj interface{}) bool {
+	return true
+}
+
 // AreResourcesEqual returns true if, given two objects of a known resource type, the update logic for this resource
 // type considers them equal and therefore no update is needed. It returns false when the two objects are not considered
 // equal and an update needs be executed. This is regardless of how the update is carried out (whether with a dedicated update

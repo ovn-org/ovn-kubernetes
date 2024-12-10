@@ -20,6 +20,10 @@ type nodePortWatcherEventHandler struct {
 	syncFunc func([]interface{}) error
 }
 
+func (h *nodePortWatcherEventHandler) FilterResource(obj interface{}) bool {
+	return true
+}
+
 // used only in unit tests to narrow the scope to just the nodeport iptables changes and not all the other parts that
 // go along with the gateway type (port claim, openflow, healthchecker)
 func (n *nodePortWatcher) newRetryFrameworkForTests(objectType reflect.Type, stopChan <-chan struct{}, wg *sync.WaitGroup) *retry.RetryFramework {

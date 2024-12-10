@@ -871,18 +871,28 @@ func ParseNodeGatewayRouterLRPAddrs(node *kapi.Node) ([]*net.IPNet, error) {
 }
 
 func ParseNodeGatewayRouterJoinNetwork(node *kapi.Node, netName string) (primaryIfAddrAnnotation, error) {
-	var val primaryIfAddrAnnotation
-	joinSubnetMap, err := parseJoinSubnetAnnotation(node.Annotations, OVNNodeGRLRPAddrs)
-	if err != nil {
-		return val, fmt.Errorf("unable to parse annotation %s on node %s: err %w",
-			OVNNodeGRLRPAddrs, node.Name, err)
+	var joinSubnetMap map[string]json.RawMessage
+	var ret primaryIfAddrAnnotation
+
+	annotation, ok := node.Annotations[OVNNodeGRLRPAddrs]
+	if !ok {
+		return primaryIfAddrAnnotation{}, newAnnotationNotSetError("could not find %q annotation", OVNNodeGRLRPAddrs)
+	}
+
+	if err := json.Unmarshal([]byte(annotation), &joinSubnetMap); err != nil {
+		return primaryIfAddrAnnotation{}, fmt.Errorf("failed to unmarshal %q annotation on node %s: %v", OVNNodeGRLRPAddrs, node.Name, err)
 	}
 	val, ok := joinSubnetMap[netName]
 	if !ok {
-		return val, newAnnotationNotSetError("unable to fetch annotation value on node %s for network %s",
+		return primaryIfAddrAnnotation{}, newAnnotationNotSetError("unable to fetch annotation value on node %s for network %s",
 			node.Name, netName)
 	}
-	return val, nil
+
+	if err := json.Unmarshal(val, &ret); err != nil {
+		return primaryIfAddrAnnotation{}, fmt.Errorf("failed to unmarshal the %q annotation on node %s for %s network err: %w", OVNNodeGRLRPAddrs, node.Name, netName, err)
+	}
+
+	return ret, nil
 }
 
 // ParseNodeGatewayRouterJoinIPv4 returns the IPv4 address for the node's gateway router port

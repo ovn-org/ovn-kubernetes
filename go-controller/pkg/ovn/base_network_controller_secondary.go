@@ -257,8 +257,6 @@ func (bsnc *BaseSecondaryNetworkController) ensurePodForSecondaryNetwork(pod *ka
 
 	if !on {
 		// the pod is not attached to this specific network
-		klog.V(5).Infof("Pod %s/%s is not attached on this network controller %s",
-			pod.Namespace, pod.Name, bsnc.GetNetworkName())
 		return nil
 	}
 
