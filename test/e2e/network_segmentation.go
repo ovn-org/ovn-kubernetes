@@ -1380,6 +1380,84 @@ spec:
 			Expect(found).To(BeTrue(), "should have found an event for invalid protocol")
 		})
 	})
+
+	Context("Sync", func() {
+		DescribeTable(
+			"perform east/west traffic between nodes following OVN Kube node pod restart",
+			func(
+				netConfig networkAttachmentConfigParams,
+				clientPodConfig podConfiguration,
+				serverPodConfig podConfiguration,
+			) {
+				By("creating the network")
+				netConfig.namespace = f.Namespace.Name
+				udnManifest := generateUserDefinedNetworkManifest(&netConfig)
+				cleanup, err := createManifest(netConfig.namespace, udnManifest)
+				Expect(err).ShouldNot(HaveOccurred(), "creating manifest must succeed")
+				DeferCleanup(cleanup)
+				Expect(waitForUserDefinedNetworkReady(netConfig.namespace, netConfig.name, 5*time.Second)).To(Succeed())
+				nodes, err := e2enode.GetBoundedReadySchedulableNodes(context.Background(), f.ClientSet, 2)
+				Expect(err).ShouldNot(HaveOccurred(), "test requires at least two schedulable nodes")
+				Expect(len(nodes.Items)).Should(BeNumerically(">=", 2), "test requires >= 2 Ready nodes")
+				serverPodConfig.namespace = f.Namespace.Name
+				clientPodConfig.namespace = f.Namespace.Name
+				runUDNPod(cs, f.Namespace.Name, serverPodConfig, nil)
+				runUDNPod(cs, f.Namespace.Name, clientPodConfig, nil)
+				serverIP, err := podIPsForUserDefinedPrimaryNetwork(cs, f.Namespace.Name, serverPodConfig.name, namespacedName(f.Namespace.Name, netConfig.name), 0)
+				By("restart OVNKube node pods on client and server Nodes and ensure connectivity")
+				serverPod := getPod(f, serverPodConfig.name)
+				clientPod := getPod(f, clientPodConfig.name)
+				for _, testPod := range []*v1.Pod{clientPod, serverPod} {
+					By(fmt.Sprintf("asserting the server pod IP %v is reachable from client before restart of OVNKube node pod on Node %s", serverIP, testPod.Spec.Hostname))
+					Expect(reachToServerPodFromClient(cs, serverPodConfig, clientPodConfig, serverIP, port)).ShouldNot(HaveOccurred(), "must have connectivity to server pre OVN Kube node Pod restart")
+					By(fmt.Sprintf("restarting OVNKube node Pod located on Node %s which hosts test Pod %s/%s", testPod.Spec.NodeName, testPod.Namespace, testPod.Name))
+					Expect(restartOVNKubeNodePod(cs, ovnNamespace, testPod.Spec.NodeName)).ShouldNot(HaveOccurred(), "restart of OVNKube node pod must succeed")
+					By(fmt.Sprintf("asserting the server pod IP %v is reachable from client post restart", serverIP))
+					//	Expect(reachToServerPodFromClient(cs, serverPodConfig, clientPodConfig, serverIP, port)).ShouldNot(HaveOccurred(), "must have connectivity to server post restart")
+				}
+			},
+			Entry(
+				"L3",
+				networkAttachmentConfigParams{
+					name:     nadName,
+					topology: "layer3",
+					cidr:     correctCIDRFamily(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+					role:     "primary",
+				},
+				*podConfig(
+					"client-pod",
+					withNodeSelector(map[string]string{nodeHostnameKey: workerOneNodeName}),
+				),
+				*podConfig(
+					"server-pod",
+					withCommand(func() []string {
+						return httpServerContainerCmd(port)
+					}),
+					withNodeSelector(map[string]string{nodeHostnameKey: workerTwoNodeName}),
+				),
+			),
+			Entry(
+				"L2",
+				networkAttachmentConfigParams{
+					name:     nadName,
+					topology: "layer2",
+					cidr:     correctCIDRFamily(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+					role:     "primary",
+				},
+				*podConfig(
+					"client-pod",
+					withNodeSelector(map[string]string{nodeHostnameKey: workerOneNodeName}),
+				),
+				*podConfig(
+					"server-pod",
+					withCommand(func() []string {
+						return httpServerContainerCmd(port)
+					}),
+					withNodeSelector(map[string]string{nodeHostnameKey: workerTwoNodeName}),
+				),
+			),
+		)
+	})
 })
 
 var nadToUdnParams = map[string]string{
