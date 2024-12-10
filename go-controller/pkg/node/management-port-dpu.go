@@ -113,10 +113,6 @@ func (mp *managementPortRepresentor) Create(_ *routemanager.Controller, node *v1
 		link:   link,
 	}
 
-	mgmtPortMac := util.IPAddrToHWAddr(util.GetNodeManagementIfAddr(mp.hostSubnets[0]).IP)
-	if err := util.UpdateNodeManagementPortMACAddressesWithRetry(node, nodeLister, kubeInterface, mgmtPortMac, types.DefaultNetworkName); err != nil {
-		return nil, err
-	}
 	waiter.AddWait(managementPortReady, nil)
 	return mpcfg, nil
 }
