@@ -2,6 +2,7 @@ package controller
 
 import (
 	"fmt"
+	"math"
 	"sync"
 	"time"
 
@@ -17,7 +18,10 @@ import (
 	"k8s.io/klog/v2"
 )
 
-const maxRetries = 15
+const (
+	DefaultMaxAttempts = 15
+	InfiniteAttempts   = math.MaxInt
+)
 
 // Reconciler is a basic level-driven controller that is fed externally of items
 // to reconcile through its Reconcile method
@@ -41,6 +45,12 @@ type ReconcilerConfig struct {
 	Reconcile   func(key string) error
 	// How many workers should be started for this reconciler.
 	Threadiness int
+	// MaxAttempts is the number of times a key will be reconciled before giving
+	// up on error. If 0, will use DefaultMaxAttempts. Set to InfiniteAttempts
+	// to retry forever.
+	MaxAttempts int
+	// HandleError when MaxRetries has been reached
+	HandleError func(key string, err error) error
 }
 
 type ControllerConfig[T any] struct {
@@ -48,8 +58,15 @@ type ControllerConfig[T any] struct {
 	Reconcile   func(key string) error
 	// How many workers should be started for this controller.
 	Threadiness int
-	Informer    cache.SharedIndexInformer
-	Lister      func(selector labels.Selector) (ret []*T, err error)
+	// MaxAttempts is the number of times a key will be reconciled before giving
+	// up on error. If 0, will use DefaultMaxAttempts. Set to InfiniteAttempts to
+	// retry forever.
+	MaxAttempts int
+	// HandleError when MaxRetries has been reached
+	HandleError func(key string, err error) error
+
+	Informer cache.SharedIndexInformer
+	Lister   func(selector labels.Selector) (ret []*T, err error)
 	// ObjNeedsUpdate tells if object should be reconciled.
 	// May be called with oldObj = nil on Add, won't be called on Delete.
 	ObjNeedsUpdate func(oldObj, newObj *T) bool
@@ -74,6 +91,8 @@ func NewReconciler(name string, config *ReconcilerConfig) Reconciler {
 		RateLimiter: config.RateLimiter,
 		Reconcile:   config.Reconcile,
 		Threadiness: config.Threadiness,
+		MaxAttempts: config.MaxAttempts,
+		HandleError: config.HandleError,
 	}
 	return NewController(name, controllerConfig)
 }
@@ -81,7 +100,7 @@ func NewReconciler(name string, config *ReconcilerConfig) Reconciler {
 // NewController creates a new level-driven controller. It should be started and
 // stopped using Start/StartWithInitialSync/Stop functions.
 func NewController[T any](name string, config *ControllerConfig[T]) Controller {
-	return &controller[T]{
+	c := &controller[T]{
 		name:   name,
 		config: config,
 		queue: workqueue.NewTypedRateLimitingQueueWithConfig(
@@ -93,6 +112,16 @@ func NewController[T any](name string, config *ControllerConfig[T]) Controller {
 		stopChan: make(chan struct{}),
 		wg:       &sync.WaitGroup{},
 	}
+	if c.config.MaxAttempts == 0 {
+		c.config.MaxAttempts = DefaultMaxAttempts
+	}
+	if c.config.HandleError == nil {
+		c.config.HandleError = func(key string, err error) error {
+			utilruntime.HandleError(err)
+			return nil
+		}
+	}
+	return c
 }
 
 func (c *controller[T]) addHandler() error {
@@ -223,13 +252,17 @@ func (c *controller[T]) processNextQueueItem() bool {
 
 	err := c.config.Reconcile(key)
 	if err != nil {
-		if c.queue.NumRequeues(key) < maxRetries {
+		retry := c.config.MaxAttempts == InfiniteAttempts || c.queue.NumRequeues(key) < c.config.MaxAttempts
+		if retry {
 			klog.Infof("Controller %s: error found while processing %s: %v", c.name, key, err)
 			c.queue.AddRateLimited(key)
 			return true
 		}
 		klog.Warningf("Controller %s: dropping %s out of the queue: %v", c.name, key, err)
-		utilruntime.HandleError(err)
+		err = c.config.HandleError(key, err)
+		if err != nil {
+			utilruntime.HandleError(err)
+		}
 	}
 	c.queue.Forget(key)
 	return true
