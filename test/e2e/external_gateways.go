@@ -25,7 +25,6 @@ import (
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2ekubectl "k8s.io/kubernetes/test/e2e/framework/kubectl"
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
-	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
 	"k8s.io/kubernetes/test/e2e/framework/skipper"
 	utilnet "k8s.io/utils/net"
 )
@@ -1463,7 +1462,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 				ginkgo.Entry("UDP ipv6", "udp", &addressesv6, externalUDPPort, srcUDPPort),
 				ginkgo.Entry("TCP ipv6", "tcp", &addressesv6, externalTCPPort, srcHTTPPort))
 
-			ginkgo.DescribeTable("Should validate TCP/UDP connectivity even after MAC change (gateway migration) for egress",
+			ginkgo.FDescribeTable("Should validate TCP/UDP connectivity even after MAC change (gateway migration) for egress",
 				func(protocol string, addresses *gatewayTestIPs, destPort, destPortOnPod int) {
 					if addresses.srcPodIP == "" || addresses.nodeIP == "" {
 						skipper.Skipf("Skipping as pod ip / node ip are not set pod ip %s node ip %s", addresses.srcPodIP, addresses.nodeIP)
@@ -1492,14 +1491,6 @@ var _ = ginkgo.Describe("External Gateway", func() {
 						gwAddresses[c] = ips
 					}
 					framework.Logf("Expected hostnames are %v", expectedHostNames)
-
-					// We have to remove a gateway so that traffic consistently goes to the same gateway. This
-					// is due to lack of consistent hashing support in github actions:
-					// https://github.com/ovn-org/ovn-kubernetes/pull/4114#issuecomment-1940916326
-					// TODO(trozet) change this back to 2 gateways once github actions kernel is updated
-					ginkgo.By(fmt.Sprintf("Reducing to one gateway. Removing gateway: %s", gatewayPodName2))
-					e2epod.DeletePodWithWaitByName(context.TODO(), f.ClientSet, gatewayPodName2, servingNamespace)
-					time.Sleep(1 * time.Second)
 
 					ginkgo.By("Checking if one of the external gateways are reachable via Egress")
 					target := addresses.targetIPs[0]
