@@ -168,7 +168,7 @@ func (oc *DefaultNetworkController) createASForEgressQoSRule(podSelector metav1.
 	for _, pod := range pods {
 		// we don't handle HostNetworked or completed pods or not-scheduled pods or remote-zone pods
 		if !util.PodWantsHostNetwork(pod) && !util.PodCompleted(pod) && util.PodScheduled(pod) && oc.isPodScheduledinLocalZone(pod) {
-			podIPs, err := util.GetPodIPsOfNetwork(pod, oc.NetInfo)
+			podIPs, err := util.GetPodIPsOfNetwork(pod, oc.GetNetInfo())
 			if err != nil && !errors.Is(err, util.ErrNoPodIPFound) {
 				return nil, nil, err
 			}
@@ -754,7 +754,7 @@ func (oc *DefaultNetworkController) syncEgressQoSPod(key string) error {
 		return nil
 	}
 
-	podIPs, err := util.GetPodIPsOfNetwork(pod, oc.NetInfo)
+	podIPs, err := util.GetPodIPsOfNetwork(pod, oc.GetNetInfo())
 	if errors.Is(err, util.ErrNoPodIPFound) {
 		return nil // reprocess it when it is updated with an IP
 	}
@@ -845,8 +845,8 @@ func (oc *DefaultNetworkController) onEgressQoSPodUpdate(oldObj, newObj interfac
 
 	oldPodLabels := labels.Set(oldPod.Labels)
 	newPodLabels := labels.Set(newPod.Labels)
-	oldPodIPs, _ := util.GetPodIPsOfNetwork(oldPod, oc.NetInfo)
-	newPodIPs, _ := util.GetPodIPsOfNetwork(newPod, oc.NetInfo)
+	oldPodIPs, _ := util.GetPodIPsOfNetwork(oldPod, oc.GetNetInfo())
+	newPodIPs, _ := util.GetPodIPsOfNetwork(newPod, oc.GetNetInfo())
 	isOldPodLocal := oc.isPodScheduledinLocalZone(oldPod)
 	isNewPodLocal := oc.isPodScheduledinLocalZone(newPod)
 	oldPodCompleted := util.PodCompleted(oldPod)

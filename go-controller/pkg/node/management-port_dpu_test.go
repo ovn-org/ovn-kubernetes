@@ -14,6 +14,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	kubeMocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube/mocks"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/nftables"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/vishvananda/netlink"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -64,6 +65,7 @@ var _ = Describe("Mananagement port DPU tests", func() {
 		Expect(err).NotTo(HaveOccurred())
 		waiter = newStartupWaiter()
 		util.SetNetLinkOpMockInst(netlinkOpsMock)
+		nftables.SetFakeNFTablesHelper()
 	})
 
 	AfterEach(func() {
