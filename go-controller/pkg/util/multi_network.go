@@ -1026,3 +1026,27 @@ func AllowsPersistentIPs(netInfo NetInfo) bool {
 		return false
 	}
 }
+
+// GetNetworkVRFNameForBGP returns a valid VFR name for the network to use over
+// BGP. Returns "default" for the default network. In case a valid name is not
+// found, returns an empty string
+func GetNetworkVRFNameForBGP(netInfo BasicNetInfo) string {
+	if netInfo.GetNetworkName() == types.DefaultNetworkName {
+		return types.DefaultNetworkName
+	}
+	// only cluster UDN networks with names under 15 char are valid for BGP
+	vrfDeviceName := strings.TrimPrefix(netInfo.GetNetworkName(), "cluster.udn.")
+	if len(vrfDeviceName) > 15 || vrfDeviceName == netInfo.GetNetworkName() || netInfo.GetNetworkName() == types.DefaultNetworkName {
+		return ""
+	}
+	return vrfDeviceName
+}
+
+func GetNetworkVRFNameForDevice(netInfo BasicNetInfo, networkID int) string {
+	// try a valid BGP VRF name first
+	vrfDeviceName := GetNetworkVRFNameForBGP(netInfo)
+	if vrfDeviceName == "" {
+		vrfDeviceName = fmt.Sprintf("%s%d%s", types.UDNVRFDevicePrefix, networkID, types.UDNVRFDeviceSuffix)
+	}
+	return vrfDeviceName
+}
