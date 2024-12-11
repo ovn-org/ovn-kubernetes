@@ -44,11 +44,11 @@ const (
 )
 
 type InitClusterEgressPoliciesFunc func(client libovsdbclient.Client, addressSetFactory addressset.AddressSetFactory,
-	controllerName, clusterRouter string) error
+	ni util.NetInfo, clusterSubnets []*net.IPNet, controllerName string) error
 type EnsureNoRerouteNodePoliciesFunc func(client libovsdbclient.Client, addressSetFactory addressset.AddressSetFactory,
-	controllerName, clusterRouter string, nodeLister corelisters.NodeLister) error
+	networkName, controllerName, clusterRouter string, nodeLister corelisters.NodeLister, v4, v6 bool) error
 type DeleteLegacyDefaultNoRerouteNodePoliciesFunc func(nbClient libovsdbclient.Client, clusterRouter, nodeName string) error
-type CreateDefaultRouteToExternalFunc func(nbClient libovsdbclient.Client, clusterRouter, gwRouterName string) error
+type CreateDefaultRouteToExternalFunc func(nbClient libovsdbclient.Client, clusterRouter, gwRouterName string, clusterSubnets []config.CIDRNetworkEntry) error
 
 type Controller struct {
 	// network information
@@ -231,8 +231,8 @@ func (c *Controller) Run(wg *sync.WaitGroup, threadiness int) error {
 	if err != nil {
 		klog.Errorf("Failed to repair Egress Services entries: %v", err)
 	}
-
-	err = c.initClusterEgressPolicies(c.nbClient, c.addressSetFactory, c.controllerName, c.GetNetworkScopedClusterRouterName())
+	subnets := util.GetAllClusterSubnetsFromEntries(c.Subnets())
+	err = c.initClusterEgressPolicies(c.nbClient, c.addressSetFactory, &util.DefaultNetInfo{}, subnets, c.controllerName)
 	if err != nil {
 		klog.Errorf("Failed to init Egress Services cluster policies: %v", err)
 	}

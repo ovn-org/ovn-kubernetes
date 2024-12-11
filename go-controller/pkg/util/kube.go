@@ -599,15 +599,15 @@ func ServiceInternalTrafficPolicyLocal(service *kapi.Service) bool {
 
 // GetClusterSubnetsWithHostPrefix returns the v4 and v6 cluster subnets, along with their host prefix,
 // in two separate slices
-func GetClusterSubnetsWithHostPrefix() ([]*config.CIDRNetworkEntry, []*config.CIDRNetworkEntry) {
-	var v4ClusterSubnets = []*config.CIDRNetworkEntry{}
-	var v6ClusterSubnets = []*config.CIDRNetworkEntry{}
+func GetClusterSubnetsWithHostPrefix() ([]config.CIDRNetworkEntry, []config.CIDRNetworkEntry) {
+	var v4ClusterSubnets = []config.CIDRNetworkEntry{}
+	var v6ClusterSubnets = []config.CIDRNetworkEntry{}
 	for _, clusterSubnet := range config.Default.ClusterSubnets {
 		clusterSubnet := clusterSubnet
 		if !utilnet.IsIPv6CIDR(clusterSubnet.CIDR) {
-			v4ClusterSubnets = append(v4ClusterSubnets, &clusterSubnet)
+			v4ClusterSubnets = append(v4ClusterSubnets, clusterSubnet)
 		} else {
-			v6ClusterSubnets = append(v6ClusterSubnets, &clusterSubnet)
+			v6ClusterSubnets = append(v6ClusterSubnets, clusterSubnet)
 		}
 	}
 	return v4ClusterSubnets, v6ClusterSubnets
@@ -629,6 +629,15 @@ func GetClusterSubnets() ([]*net.IPNet, []*net.IPNet) {
 	}
 
 	return v4ClusterSubnets, v6ClusterSubnets
+}
+
+// GetAllClusterSubnetsFromEntries extracts IPNet info from CIDRNetworkEntry(s)
+func GetAllClusterSubnetsFromEntries(cidrNetEntries []config.CIDRNetworkEntry) []*net.IPNet {
+	subnets := make([]*net.IPNet, 0, len(cidrNetEntries))
+	for _, entry := range cidrNetEntries {
+		subnets = append(subnets, entry.CIDR)
+	}
+	return subnets
 }
 
 // GetNodePrimaryIP extracts the primary IP address from the node status in the  API

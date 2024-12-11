@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	libovsdb "github.com/ovn-org/libovsdb/ovsdb"
+	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
@@ -15,6 +15,17 @@ import (
 // LOGICAL_SWITCH OPs
 
 type switchPredicate func(*nbdb.LogicalSwitch) bool
+type switchPortPredicate func(port *nbdb.LogicalSwitchPort) bool
+
+// FindLogicalSwitchPortWithPredicate looks up logical switches ports from the cache
+// based on a given predicate
+func FindLogicalSwitchPortWithPredicate(nbClient libovsdbclient.Client, p switchPortPredicate) ([]*nbdb.LogicalSwitchPort, error) {
+	found := []*nbdb.LogicalSwitchPort{}
+	ctx, cancel := context.WithTimeout(context.Background(), ovntypes.OVSDBTimeout)
+	defer cancel()
+	err := nbClient.WhereCache(p).List(ctx, &found)
+	return found, err
+}
 
 // FindLogicalSwitchesWithPredicate looks up logical switches from the cache
 // based on a given predicate

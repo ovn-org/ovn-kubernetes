@@ -98,10 +98,11 @@ func checkIfNetpol(asName string) (netpolOwned bool, namespace, name, direction,
 	return
 }
 
-func (syncer *AddressSetsSyncer) getEgressIPAddrSetDbIDs(name string) *libovsdbops.DbObjectIDs {
+func (syncer *AddressSetsSyncer) getEgressIPAddrSetDbIDs(name, network string) *libovsdbops.DbObjectIDs {
 	return libovsdbops.NewDbObjectIDs(libovsdbops.AddressSetEgressIP, syncer.controllerName, map[libovsdbops.ExternalIDKey]string{
 		// egress ip creates cluster-wide address sets with egressIpAddrSetName
 		libovsdbops.ObjectNameKey: name,
+		libovsdbops.NetworkKey:    network,
 	})
 }
 
@@ -196,9 +197,9 @@ func (syncer *AddressSetsSyncer) getReferencingObjsAndNewDbIDs(oldHash, oldName 
 	switch {
 	// Filter address sets with pre-defined names
 	case oldName == clusterNodeIP:
-		dbIDs = syncer.getEgressIPAddrSetDbIDs(nodeIPAddrSetName)
+		dbIDs = syncer.getEgressIPAddrSetDbIDs(nodeIPAddrSetName, "default")
 	case oldName == egressIPServedPods:
-		dbIDs = syncer.getEgressIPAddrSetDbIDs(egressIPServedPodsAddrSetName)
+		dbIDs = syncer.getEgressIPAddrSetDbIDs(egressIPServedPodsAddrSetName, "default")
 	case oldName == egressServiceServedPods:
 		dbIDs = syncer.getEgressServiceAddrSetDbIDs()
 	// HybridNodeRoute and EgressQoS address sets have specific prefixes

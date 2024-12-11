@@ -403,6 +403,7 @@ var _ = Describe("OVN Multi-Homed pod operations", func() {
 						networkConfig,
 						nodeName,
 						nadController,
+						nil, NewPortCache(ctx.Done()),
 					).Cleanup()).To(Succeed())
 				Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(defaultNetExpectations))
 
@@ -1022,8 +1023,9 @@ func standardNonDefaultNetworkExtIDsForLogicalSwitch(netInfo util.NetInfo) map[s
 	return externalIDs
 }
 
-func newSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netInfo util.NetInfo, nodeName string, nadController networkAttachDefController.NADController) *SecondaryLayer3NetworkController {
-	layer3NetworkController, err := NewSecondaryLayer3NetworkController(cnci, netInfo, nadController)
+func newSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netInfo util.NetInfo, nodeName string,
+	nadController networkAttachDefController.NADController, eIPController *EgressIPController, portCache *PortCache) *SecondaryLayer3NetworkController {
+	layer3NetworkController, err := NewSecondaryLayer3NetworkController(cnci, netInfo, nadController, eIPController, portCache)
 	Expect(err).NotTo(HaveOccurred())
 	layer3NetworkController.gatewayManagers.Store(
 		nodeName,
