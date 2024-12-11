@@ -47,15 +47,9 @@ func getCreationFakeCommands(fexec *ovntest.FakeExec, mgtPort, mgtPortMAC, netNa
 		"ovs-vsctl --timeout=15" +
 			" -- --may-exist add-port br-int " + mgtPort +
 			" -- set interface " + mgtPort +
+			fmt.Sprintf(" mac=\"%s\"", mgtPortMAC) +
 			" type=internal mtu_request=" + fmt.Sprintf("%d", mtu) +
 			" external-ids:iface-id=" + types.K8sPrefix + netName + "_" + nodeName,
-	})
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface " + mgtPort + " mac_in_use",
-		Output: mgtPortMAC,
-	})
-	fexec.AddFakeCmdsNoOutputNoError([]string{
-		"ovs-vsctl --timeout=15 set interface " + mgtPort + " " + fmt.Sprintf("mac=%s", strings.ReplaceAll(mgtPortMAC, ":", "\\:")),
 	})
 
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -392,15 +386,16 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		udnGateway, err := NewUserDefinedNetworkGateway(netInfo, 3, node, factoryMock.NodeCoreInformer().Lister(),
 			&kubeMock, vrf, nil, &gateway{})
 		Expect(err).NotTo(HaveOccurred())
+		_, ipNet, err := net.ParseCIDR(v4NodeSubnet)
+		Expect(err).NotTo(HaveOccurred())
+		mgtPortMAC = util.IPAddrToHWAddr(util.GetNodeManagementIfAddr(ipNet).IP).String()
 		getCreationFakeCommands(fexec, mgtPort, mgtPortMAC, netName, nodeName, netInfo.MTU())
 		nodeLister.On("Get", mock.AnythingOfType("string")).Return(node, nil)
 		factoryMock.On("GetNode", "worker1").Return(node, nil)
-		cnode := node.DeepCopy()
-		cnode.Annotations[util.OvnNodeManagementPortMacAddresses] = `{"bluenet":"00:00:00:55:66:77"}`
-		kubeMock.On("UpdateNodeStatus", cnode).Return(nil)
+
 		err = testNS.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
-			mpLink, _, err := udnGateway.addUDNManagementPort()
+			mpLink, err := udnGateway.addUDNManagementPort()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(mpLink).NotTo(BeNil())
 			Expect(udnGateway.addUDNManagementPortIPs(mpLink)).Should(Succeed())
@@ -466,15 +461,15 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		udnGateway, err := NewUserDefinedNetworkGateway(netInfo, 3, node, factoryMock.NodeCoreInformer().Lister(),
 			&kubeMock, vrf, nil, &gateway{})
 		Expect(err).NotTo(HaveOccurred())
+		_, ipNet, err := net.ParseCIDR(v4NodeSubnet)
+		Expect(err).NotTo(HaveOccurred())
+		mgtPortMAC = util.IPAddrToHWAddr(util.GetNodeManagementIfAddr(ipNet).IP).String()
 		getCreationFakeCommands(fexec, mgtPort, mgtPortMAC, netName, nodeName, netInfo.MTU())
 		nodeLister.On("Get", mock.AnythingOfType("string")).Return(node, nil)
 		factoryMock.On("GetNode", "worker1").Return(node, nil)
-		cnode := node.DeepCopy()
-		cnode.Annotations[util.OvnNodeManagementPortMacAddresses] = `{"bluenet":"00:00:00:55:66:77"}`
-		kubeMock.On("UpdateNodeStatus", cnode).Return(nil)
 		err = testNS.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
-			mpLink, _, err := udnGateway.addUDNManagementPort()
+			mpLink, err := udnGateway.addUDNManagementPort()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(mpLink).NotTo(BeNil())
 			Expect(udnGateway.addUDNManagementPortIPs(mpLink)).Should(Succeed())
@@ -547,6 +542,9 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		netInfo, err := util.ParseNADInfo(nad)
 		Expect(err).NotTo(HaveOccurred())
 		setUpGatewayFakeOVSCommands(fexec)
+		_, ipNet, err := net.ParseCIDR(v4NodeSubnet)
+		Expect(err).NotTo(HaveOccurred())
+		mgtPortMAC = util.IPAddrToHWAddr(util.GetNodeManagementIfAddr(ipNet).IP).String()
 		getCreationFakeCommands(fexec, mgtPort, mgtPortMAC, netName, nodeName, netInfo.MTU())
 		getVRFCreationFakeOVSCommands(fexec)
 		getRPFilterLooseModeFakeCommands(fexec)
@@ -578,9 +576,6 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		_, _ = util.SetFakeIPTablesHelpers()
 		nft := nodenft.SetFakeNFTablesHelper()
 
-		cnode := node.DeepCopy()
-		cnode.Annotations[util.OvnNodeManagementPortMacAddresses] = `{"bluenet":"00:00:00:55:66:77"}`
-		kubeMock.On("UpdateNodeStatus", cnode).Return(nil)
 		// Make a fake MgmtPortConfig with only the fields we care about
 		fakeMgmtPortV4IPFamilyConfig := managementPortIPFamilyConfig{
 			ifAddr: ovntest.MustParseIPNet(v4NodeSubnet),
@@ -757,6 +752,9 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			types.Layer2Topology, "100.128.0.0/16,ae70::/64", types.NetworkRolePrimary)
 		netInfo, err := util.ParseNADInfo(nad)
 		Expect(err).NotTo(HaveOccurred())
+		_, ipNet, err := net.ParseCIDR(v4NodeSubnet)
+		Expect(err).NotTo(HaveOccurred())
+		mgtPortMAC = util.IPAddrToHWAddr(util.GetNodeManagementIfAddr(ipNet).IP).String()
 		setUpGatewayFakeOVSCommands(fexec)
 		getCreationFakeCommands(fexec, mgtPort, mgtPortMAC, netName, nodeName, netInfo.MTU())
 		getVRFCreationFakeOVSCommands(fexec)
@@ -791,9 +789,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		nft := nodenft.SetFakeNFTablesHelper()
 
 		Expect(err).NotTo(HaveOccurred())
-		cnode := node.DeepCopy()
-		cnode.Annotations[util.OvnNodeManagementPortMacAddresses] = `{"bluenet":"00:00:00:55:66:77"}`
-		kubeMock.On("UpdateNodeStatus", cnode).Return(nil)
+
 		// Make a fake MgmtPortConfig with only the fields we care about
 		fakeMgmtPortV4IPFamilyConfig := managementPortIPFamilyConfig{
 			ifAddr: ovntest.MustParseIPNet(v4NodeSubnet),
