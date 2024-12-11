@@ -376,11 +376,12 @@ func configureKubeOVNContext(nodeName string, useNetlink bool) *testCtx {
 	err = tc.watchFactory.Start()
 	Expect(err).NotTo(HaveOccurred())
 
+	_ = nodenft.SetFakeNFTablesHelper()
+
 	fakeMgmtPortConfig := &managementPortConfig{
 		ifName:    nodeName,
 		link:      nil,
 		routerMAC: nil,
-		nft:       nodenft.SetFakeNFTablesHelper(),
 		ipv4: &managementPortIPFamilyConfig{
 			allSubnets: nil,
 			ifAddr:     tc.mgmtPortIP4,
