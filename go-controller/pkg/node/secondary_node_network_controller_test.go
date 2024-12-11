@@ -69,8 +69,9 @@ var _ = Describe("SecondaryNodeNetworkController", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(controller.watchFactory.Start()).To(Succeed())
 
-		controller.NetInfo, err = util.ParseNADInfo(nad)
+		netInfo, err := util.ParseNADInfo(nad)
 		Expect(err).NotTo(HaveOccurred())
+		controller.ReconcilableNetInfo = util.NewReconcilableNetInfo(netInfo)
 
 		networkID, err := controller.getNetworkID()
 		Expect(err).ToNot(HaveOccurred())
@@ -94,8 +95,9 @@ var _ = Describe("SecondaryNodeNetworkController", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(controller.watchFactory.Start()).To(Succeed())
 
-		controller.NetInfo, err = util.ParseNADInfo(nad)
+		netInfo, err := util.ParseNADInfo(nad)
 		Expect(err).NotTo(HaveOccurred())
+		controller.ReconcilableNetInfo = util.NewReconcilableNetInfo(netInfo)
 
 		networkID, err := controller.getNetworkID()
 		Expect(err).To(HaveOccurred())
@@ -335,7 +337,7 @@ var _ = Describe("SecondaryNodeNetworkController: UserDefinedPrimaryNetwork Gate
 			Expect(err).NotTo(HaveOccurred())
 
 			By("check management interface and VRF device is created for the network")
-			vrfDeviceName := util.GetVRFDeviceNameForUDN(netID)
+			vrfDeviceName := util.GetNetworkVRFName(NetInfo)
 			vrfLink, err := util.GetNetLinkOps().LinkByName(vrfDeviceName)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(vrfLink.Type()).To(Equal("vrf"))

@@ -3,6 +3,7 @@ package testing
 import (
 	"fmt"
 	"net"
+	"strconv"
 )
 
 // MustParseIP is like net.ParseIP but it panics on error; use this for converting
@@ -68,4 +69,12 @@ func MustParseMAC(macStr string) net.HardwareAddr {
 		panic(fmt.Sprintf("Could not parse %q as a MAC: %v", macStr, err))
 	}
 	return mac
+}
+
+func MustAtoi(s string) int {
+	i, err := strconv.Atoi(s)
+	if err != nil {
+		panic(fmt.Sprintf("Could not parse %q as a int: %v", s, err))
+	}
+	return i
 }
