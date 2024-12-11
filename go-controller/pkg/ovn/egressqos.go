@@ -869,12 +869,24 @@ func (oc *DefaultNetworkController) onEgressQoSPodUpdate(oldObj, newObj interfac
 }
 
 func (oc *DefaultNetworkController) onEgressQoSPodDelete(obj interface{}) {
-	key, err := cache.MetaNamespaceKeyFunc(obj)
+	pod, ok := obj.(*kapi.Pod)
+	if !ok {
+		tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
+		if !ok {
+			utilruntime.HandleError(fmt.Errorf("passed object is neither a pod nor a DeletedFinalStateUnknown type: %#v", obj))
+			return
+		}
+		pod, ok = tombstone.Obj.(*kapi.Pod)
+		if !ok {
+			utilruntime.HandleError(fmt.Errorf("tombstone contained object that is not a Pod: %#v", obj))
+			return
+		}
+	}
+	key, err := cache.MetaNamespaceKeyFunc(pod)
 	if err != nil {
-		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", obj, err))
+		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", pod, err))
 		return
 	}
-	pod := obj.(*kapi.Pod)
 	// only process this pod if it is local to this zone
 	if !oc.isPodScheduledinLocalZone(pod) {
 		// NOTE: This means we don't handle the case where pod goes from
