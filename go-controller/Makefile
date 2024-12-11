@@ -63,7 +63,7 @@ check test:
 ifeq ($(CONTAINER_RUNNABLE), 0)
 	$(CONTAINER_RUNTIME) run -it --rm --security-opt label=disable ${C_ARGS} -v $(shell dirname $(PWD)):/go/src/github.com/ovn-org/ovn-kubernetes -w /go/src/github.com/ovn-org/ovn-kubernetes/go-controller -e COVERALLS=${COVERALLS} -e GINKGO_FOCUS="${GINKGO_FOCUS}" $(GO_DOCKER_IMG) sh -c "RACE=1 DOCKER_TEST=1 COVERALLS=${COVERALLS} PKGS="${PKGS}" hack/test-go.sh focus \"${GINKGO_FOCUS}\" "
 else
-	RACE=1 hack/test-go.sh
+	RACE=1 hack/test-go.sh focus "${GINKGO_FOCUS}"
 endif
 
 modelgen: pkg/nbdb/ovn-nb.ovsschema pkg/sbdb/ovn-sb.ovsschema pkg/vswitchd/vswitch.ovsschema
