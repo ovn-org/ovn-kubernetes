@@ -395,6 +395,10 @@ func (cm *NetworkControllerManager) Start(ctx context.Context) error {
 	if config.OVNKubernetesFeature.EnableEgressIP {
 		cm.eIPController = ovn.NewEIPController(cm.nbClient, cm.kube, cm.watchFactory, cm.recorder, cm.portCache, cm.nadController,
 			addressset.NewOvnAddressSetFactory(cm.nbClient, config.IPv4Mode, config.IPv6Mode), config.IPv4Mode, config.IPv6Mode, zone, ovn.DefaultNetworkControllerName)
+		// FIXME(martinkennelly): remove when EIP controller is fully extracted from from DNC and started here. Ensure SyncLocalNodeZonesCache is re-enabled in EIP controller.
+		if err = cm.eIPController.SyncLocalNodeZonesCache(); err != nil {
+			klog.Warningf("Failed to sync EgressIP controllers local node node cache: %v", err)
+		}
 	}
 
 	// nadController is nil if multi-network is disabled

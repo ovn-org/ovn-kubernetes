@@ -1126,9 +1126,10 @@ func (e *EgressIPController) syncEgressIPs(namespaces []interface{}) error {
 	// WatchNodes() is called before WatchEgressIPNamespaces() so the oc.localZones cache
 	// will be updated whereas WatchEgressNodes() is called after WatchEgressIPNamespaces()
 	// and so we must update the cache to ensure we are not stale.
-	if err := e.syncLocalNodeZonesCache(); err != nil {
-		return fmt.Errorf("syncLocalNodeZonesCache unable to update the local zones node cache: %v", err)
-	}
+	// FIXME(martinkennelly): re-enable when EIP controller is fully extracted from DNC
+	//if err := e.SyncLocalNodeZonesCache(); err != nil {
+	//	return fmt.Errorf("SyncLocalNodeZonesCache unable to update the local zones node cache: %v", err)
+	//}
 	egressIPCache, err := e.generateCacheForEgressIP()
 	if err != nil {
 		return fmt.Errorf("syncEgressIPs unable to generate cache for egressip: %v", err)
@@ -1151,7 +1152,8 @@ func (e *EgressIPController) syncEgressIPs(namespaces []interface{}) error {
 	return nil
 }
 
-func (e *EgressIPController) syncLocalNodeZonesCache() error {
+// SyncLocalNodeZonesCache iterates over all known Nodes and stores whether it is a local or remote OVN zone.
+func (e *EgressIPController) SyncLocalNodeZonesCache() error {
 	nodes, err := e.watchFactory.GetNodes()
 	if err != nil {
 		return fmt.Errorf("unable to fetch nodes from watch factory %w", err)
