@@ -1,7 +1,6 @@
 package iptables
 
 import (
-	"os"
 	"os/exec"
 	"runtime"
 	"sync"
@@ -13,6 +12,8 @@ import (
 	"github.com/containernetworking/plugins/pkg/testutils"
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
+
+	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 )
 
 const (
@@ -28,7 +29,7 @@ var _ = ginkgo.Describe("IPTables Manager", func() {
 
 	ginkgo.BeforeEach(func() {
 		defer ginkgo.GinkgoRecover()
-		if os.Getenv("NOROOT") == "TRUE" {
+		if ovntest.NoRoot() {
 			ginkgo.Skip("Test requires root privileges")
 		}
 		if !commandExists("iptables") {

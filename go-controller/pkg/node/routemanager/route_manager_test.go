@@ -2,7 +2,6 @@ package routemanager
 
 import (
 	"net"
-	"os"
 	"runtime"
 	"sync"
 	"time"
@@ -13,6 +12,8 @@ import (
 	"github.com/onsi/gomega"
 	"github.com/vishvananda/netlink"
 	utilsnet "k8s.io/utils/net"
+
+	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 )
 
 var _ = ginkgo.Describe("Route Manager", func() {
@@ -38,7 +39,7 @@ var _ = ginkgo.Describe("Route Manager", func() {
 	loIPDiff := net.IPv4(127, 1, 1, 2)
 	loGWIP := net.IPv4(127, 1, 1, 254)
 	customTableID := 1005
-	if os.Getenv("NOROOT") == "TRUE" {
+	if ovntest.NoRoot() {
 		defer ginkgo.GinkgoRecover()
 		ginkgo.Skip("Test requires root privileges")
 	}
