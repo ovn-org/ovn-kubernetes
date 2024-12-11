@@ -204,7 +204,7 @@ if [[ "${WHAT}" == "${NETWORK_SEGMENTATION_TESTS}"* ]]; then
   for topology in "${topologies[@]}"
   do
     # NetPol with named port is not supported in ovn-kubernetes, so skip those tests.
-    ginkgo --nodes=${NUM_NODES} \
+    ginkgo -v --nodes=${NUM_NODES} \
 	    --focus="Netpol" \
 	    --skip="named port.+\[Feature:NetworkPolicy\]" \
 	    --timeout=3h \
@@ -213,9 +213,10 @@ if [[ "${WHAT}" == "${NETWORK_SEGMENTATION_TESTS}"* ]]; then
 	    -- \
 	    --kubeconfig="${KUBECONFIG}" \
 	    --provider=local \
-	    --dump-logs-on-failure=false \
+	    --dump-logs-on-failure=true \
 	    --report-dir="${E2E_REPORT_DIR}" \
-	    --disable-log-dump=true \
+	    --disable-log-dump=false \
+	    --delete-namespace-on-failure=false \
 	    --num-nodes=${NUM_WORKER_NODES} \
 	    --topology="${topology}"
   done
