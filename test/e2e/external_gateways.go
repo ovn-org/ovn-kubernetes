@@ -1465,6 +1465,13 @@ var _ = ginkgo.Describe("External Gateway", func() {
 
 			ginkgo.DescribeTable("Should validate TCP/UDP connectivity even after MAC change (gateway migration) for egress",
 				func(protocol string, addresses *gatewayTestIPs, destPort, destPortOnPod int) {
+					ncCmd := func(sourcePort int, target string) []string {
+						if protocol == "tcp" {
+							return []string {"exec", srcPingPodName, "--", "bash", "-c", fmt.Sprintf("echo | nc -p %d -s %s -w 1 %s %d", sourcePort, addresses.srcPodIP, target, destPort)}
+						} else {
+							return []string {"exec", srcPingPodName, "--", "bash", "-c", fmt.Sprintf("echo | nc -p %d -s %s -w 1 -u %s %d", sourcePort, addresses.srcPodIP, target, destPort)}
+						}
+					}
 					if addresses.srcPodIP == "" || addresses.nodeIP == "" {
 						skipper.Skipf("Skipping as pod ip / node ip are not set pod ip %s node ip %s", addresses.srcPodIP, addresses.nodeIP)
 					}
@@ -1504,13 +1511,8 @@ var _ = ginkgo.Describe("External Gateway", func() {
 					ginkgo.By("Checking if one of the external gateways are reachable via Egress")
 					target := addresses.targetIPs[0]
 					sourcePort := 50000
-					args := []string{"exec", srcPingPodName, "--"}
-					if protocol == "tcp" {
-						args = append(args, "bash", "-c", fmt.Sprintf("echo | nc -p %d -s %s -w 1 %s %d", sourcePort, addresses.srcPodIP, target, destPort))
-					} else {
-						args = append(args, "bash", "-c", fmt.Sprintf("echo | nc -p %d -s %s -w 1 -u %s %d", sourcePort, addresses.srcPodIP, target, destPort))
-					}
-					res, err := e2ekubectl.RunKubectl(f.Namespace.Name, args...)
+
+					res, err := e2ekubectl.RunKubectl(f.Namespace.Name, ncCmd(sourcePort, target)...)
 					framework.ExpectNoError(err, "failed to reach %s (%s)", target, protocol)
 					hostname := strings.TrimSuffix(res, "\n")
 					var gateway string
@@ -1528,7 +1530,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 					tcpDumpSync := sync.WaitGroup{}
 					tcpDumpSync.Add(1)
 					go checkReceivedPacketsOnContainer(gateway, srcPingPodName, anyLink, []string{protocol, "and", "port", strconv.Itoa(sourcePort)}, &tcpDumpSync)
-					res, err = e2ekubectl.RunKubectl(f.Namespace.Name, args...)
+					res, err = e2ekubectl.RunKubectl(f.Namespace.Name, ncCmd(sourcePort, target)...)
 					framework.ExpectNoError(err, "failed to reach %s (%s)", target, protocol)
 					hostname2 := strings.TrimSuffix(res, "\n")
 					gomega.Expect(hostname).To(gomega.Equal(hostname2))
@@ -1561,6 +1563,10 @@ var _ = ginkgo.Describe("External Gateway", func() {
 					time.Sleep(1 * time.Second)
 
 					ginkgo.By("Post-Migration: Sending Egress traffic and verify it is received")
+					// We don't want traffic to hit the already existing conntrack entry (created for source port 50000)
+					// so we use a fresh source port.
+					sourcePort = 50001
+
 					tcpDumpSync = sync.WaitGroup{}
 					tcpDumpSync.Add(1)
 					go checkReceivedPacketsOnContainer(gateway, srcPingPodName, gwLink, []string{protocol, "and", "ether", "host", newDummyMac, "and", "port", strconv.Itoa(sourcePort)}, &tcpDumpSync)
@@ -1568,7 +1574,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 					// SKB_DROP_REASON_NEIGH_FAILED after changing the MAC address. Something breaks with ARP
 					// on the gateway container. Therefore, ignore the reply from gateway, as we only care about the egress
 					// packet arriving with correct MAC address.
-					_, _ = e2ekubectl.RunKubectl(f.Namespace.Name, args...)
+					_, _ = e2ekubectl.RunKubectl(f.Namespace.Name, ncCmd(sourcePort, target)...)
 					tcpDumpSync.Wait()
 
 					checkAPBExternalRouteStatus(defaultPolicyName)
