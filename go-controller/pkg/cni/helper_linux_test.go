@@ -516,7 +516,7 @@ func TestSetupInterface(t *testing.T) {
 			ovntest.ProcessMockFnList(&mockCNIPlugin.Mock, tc.cniPluginMockHelper)
 			ovntest.ProcessMockFnList(&mockNS.Mock, tc.nsMockHelper)
 
-			hostIface, contIface, err := setupInterface(tc.inpNetNS, tc.inpContID, tc.inpIfaceName, tc.inpPodIfaceInfo)
+			hostIface, contIface, err := setupInterface(tc.inpNetNS, tc.inpContID, tc.inpIfaceName, "", tc.inpPodIfaceInfo)
 			t.Log(hostIface, contIface, err)
 			if tc.errExp {
 				assert.NotNil(t, err)
