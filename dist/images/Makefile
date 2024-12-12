@@ -43,7 +43,7 @@ fedora-dev: bld
 	${OCI_BIN} build \
 		     --build-arg OVS_BRANCH=$(OVS_BRANCH) \
 		     --build-arg OVN_BRANCH=$(OVN_BRANCH) \
-		     -t ovn-kube-fedora-dev -f Dockerfile.fedora.dev .
+		     -t ovn-kube-fedora-dev -f Dockerfile.fedora .
 	# ${OCI_BIN} login -u ovnkube docker.io/ovnkube
 	# ${OCI_BIN} push docker.io/ovnkube/ovn-daemonset-fedora:latest
 	./daemonset.sh --image=docker.io/ovnkube/ovn-daemonset-fedora:latest \

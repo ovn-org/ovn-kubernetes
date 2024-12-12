@@ -322,8 +322,8 @@ var _ = Describe("Kubevirt Virtual Machines", func() {
 				lastIperfLogLine := iperfLogLines[len(iperfLogLines)-1]
 				return lastIperfLogLine, nil
 			}).
-				WithPolling(time.Second).
-				WithTimeout(30*time.Second).
+				WithPolling(50*time.Millisecond).
+				WithTimeout(2*time.Second).
 				Should(
 					SatisfyAll(
 						ContainSubstring(" sec "),
@@ -1506,7 +1506,7 @@ runcmd:
 			testPodsIPs := podsMultusNetworkIPs(iperfServerTestPods, networkStatusPredicate)
 
 			step = by(vmi.Name, "Expose VM iperf server as a service")
-			svc, err := fr.ClientSet.CoreV1().Services(namespace).Create(context.TODO(), composeService("iperf3-vm-server", vm.Name, 5201), metav1.CreateOptions{})
+			svc, err := fr.ClientSet.CoreV1().Services(namespace).Create(context.TODO(), composeService("iperf3-vm-server", vmi.Name, 5201), metav1.CreateOptions{})
 			Expect(svc.Spec.Ports[0].NodePort).ToNot(Equal(0), step)
 
 			// IPv6 is not support for secondaries with IPAM so guest will
