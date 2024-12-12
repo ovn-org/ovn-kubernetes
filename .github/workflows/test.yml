@@ -25,7 +25,7 @@ env:
   # Current Serial tests are not relevant for OVN
   PARALLEL: true
   # Will run tests using GNU parallel
-  RUN_PARALLEL: true
+  PARALLEL_RUN: true
 
   # This must be a directory
   CI_IMAGE_CACHE: tmp/image_cache/
