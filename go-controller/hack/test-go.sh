@@ -14,7 +14,7 @@ function gocmd {
 
 cd "${OVN_KUBE_ROOT}"
 
-PKGS=$(gocmd list -mod vendor -f '{{if len .TestGoFiles}} {{.ImportPath}} {{end}}' ${PKGS:-./cmd/... ./pkg/... ./hybrid-overlay/...} | xargs)
+PKGS=($(gocmd list -mod vendor -f '{{if len .TestGoFiles}} {{.ImportPath}} {{end}}' ${PKGS:-./cmd/... ./pkg/... ./hybrid-overlay/...} | xargs))
 
 if [[ "$1" == "focus" && "$2" != "" ]]; then
     ginkgo_focus="-ginkgo.focus="$(echo ${2} | sed 's/ /\\s/g')""
@@ -77,10 +77,20 @@ root_pkgs=("github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-controll
 # These packages are big and require more than the 10m default to run the unit tests
 big_pkgs=("github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn")
 
-i=0
-for pkg in ${PKGS}; do
-    testrun "${i}" "${pkg}"
-    i=$((i+1))
-done
+if [ ! -z "${PARALLEL_RUN:-}" ]; then
+    apt-get update
+    apt-get install parallel -y
+
+    export -f testrun
+    export -f gocmd
+
+    parallel --jobs 5 --progress --halt soon,fail=1  --line-buffer 'testrun $(( {#} - 1 )) {} ' ::: "${PKGS[@]}"
+else 
+    i=0
+    for pkg in "${PKGS[@]}"; do
+        testrun "${i}" "${pkg}"
+        i=$((i+1))
+    done
+fi
 
 rm -f /tmp/ovn-test.* || true
