@@ -7,7 +7,6 @@ GCFLAGS ?=
 export GCFLAGS
 LDFLAGS ?=
 export LDFLAGS
-PKGS ?=
 GOPATH ?= $(shell go env GOPATH)
 TEST_REPORT_DIR?=$(CURDIR)/_artifacts
 export TEST_REPORT_DIR
@@ -25,11 +24,6 @@ CONTAINER_RUNNABLE ?= $(shell $(CONTAINER_RUNTIME) -v > /dev/null 2>&1; echo $$?
 # FIXME(tssurya): In one week when OVN 24.09 is released change the schema version
 OVN_SCHEMA_VERSION ?= 8efac26f6637fc
 OVS_VERSION ?= v2.17.0
-ifeq ($(NOROOT),TRUE)
-C_ARGS = -e NOROOT=TRUE
-else
-C_ARGS = --cap-add=NET_ADMIN --cap-add=SYS_ADMIN --privileged
-endif
 
 ## Tool Binaries
 TOOLS_OUTPUT_DIR = ${CURDIR}/${OUT_DIR}
@@ -56,15 +50,6 @@ all build:
 
 windows:
 	WINDOWS_BUILD="yes" hack/build-go.sh hybrid-overlay/cmd/hybrid-overlay-node
-
-# Note: `--security-opt label=disable` option is required on systems where SELinux is enabled for `podman` to successfully run the
-# tests in a container. Refer: https://www.projectatomic.io/blog/2016/03/dwalsh_selinux_containers/ for additional context
-check test:
-ifeq ($(CONTAINER_RUNNABLE), 0)
-	$(CONTAINER_RUNTIME) run -it --rm --security-opt label=disable ${C_ARGS} -v $(shell dirname $(PWD)):/go/src/github.com/ovn-org/ovn-kubernetes -w /go/src/github.com/ovn-org/ovn-kubernetes/go-controller -e COVERALLS=${COVERALLS} -e GINKGO_FOCUS="${GINKGO_FOCUS}" $(GO_DOCKER_IMG) sh -c "RACE=1 DOCKER_TEST=1 COVERALLS=${COVERALLS} PKGS="${PKGS}" hack/test-go.sh focus \"${GINKGO_FOCUS}\" "
-else
-	RACE=1 hack/test-go.sh
-endif
 
 modelgen: pkg/nbdb/ovn-nb.ovsschema pkg/sbdb/ovn-sb.ovsschema pkg/vswitchd/vswitch.ovsschema
 	hack/update-modelgen.sh
@@ -136,3 +121,63 @@ GOBIN=${TOOLS_OUTPUT_DIR} go install $${package} ;\
 mv "$$(echo "$(1)" | sed "s/-$(3)$$//")" $(1) ;\
 }
 endef
+
+# ================================================================================
+# Unit tests
+# Note:
+#   Unit tests MAY be run in parallel by specifing -j N flag to make
+
+# Function to retrieve all packages with test files from $1
+go-get-test-pkg = $(shell go list -buildvcs=false -mod vendor -f '{{if len .TestGoFiles}} {{.ImportPath}} {{end}}' $1 | xargs)
+ifndef PKGS
+PKGS = $(call go-get-test-pkg,./cmd/... ./pkg/... ./hybrid-overlay/...)
+else
+PKGS := $(call go-get-test-pkg,$(PKGS))
+endif
+
+# List of all unit test targets
+all-package-check-tagets := $(addsuffix _check,$(PKGS))
+
+check test: $(all-package-check-tagets)
+
+# Arguments that passed to hack/test-go.sh:
+TEST_ARGS ?= 
+ifdef GINKGO_FOCUS
+TEST_ARGS += focus "$(GINKGO_FOCUS)"
+endif
+
+# Define check-package - function that invokes testing of $1 package
+ifeq ($(CONTAINER_RUNNABLE), 0)
+# We don't use parallel execution in container environment because every container
+# builds go-controller and therefore it just create zillions of compilation processes
+# in parallel
+$(warning "WARNING: Container runtime detected and we avoid parallel execution in this case")
+.NOTPARALLEL: check test
+ifeq ($(NOROOT),TRUE)
+C_ARGS = -e NOROOT=TRUE
+else
+C_ARGS = --cap-add=NET_ADMIN --cap-add=SYS_ADMIN --privileged
+endif
+
+# Note: `--security-opt label=disable` option is required on systems where SELinux is enabled for `podman` to successfully run the
+# tests in a container. Refer: https://www.projectatomic.io/blog/2016/03/dwalsh_selinux_containers/ for additional context
+check-package = $(CONTAINER_RUNTIME) run -it --rm --security-opt label=disable $(C_ARGS) \
+                    -v $(shell dirname $(PWD)):/go/src/github.com/ovn-org/ovn-kubernetes \
+                    -w /go/src/github.com/ovn-org/ovn-kubernetes/go-controller \
+                    -e COVERALLS=${COVERALLS} \
+                    -e GINKGO_FOCUS="${GINKGO_FOCUS}" \
+                    $(GO_DOCKER_IMG) \
+                    sh -c 'RACE=1 DOCKER_TEST=1 COVERALLS=${COVERALLS} PKGS="$(1)" hack/test-go.sh $(TEST_ARGS)'
+else
+check-package = RACE=1 PKGS=$(1) hack/test-go.sh $(TEST_ARGS)
+endif
+
+# Define rules for check individual package ($1)
+define define-check-package-rule
+.PHONY: $(1)_check
+$(1)_check:
+	$(call check-package,$1)
+
+endef
+# Instantiate rule for each PKG
+$(foreach pkg,$(PKGS),$(eval $(call define-check-package-rule,$(pkg))))
