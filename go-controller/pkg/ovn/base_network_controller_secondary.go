@@ -353,7 +353,7 @@ func (bsnc *BaseSecondaryNetworkController) addLogicalPortToNetworkForNAD(pod *c
 	}
 
 	if shouldHandleLiveMigration &&
-		kubevirtLiveMigrationStatus.IsTargetDomainReady() {
+		kubevirtLiveMigrationStatus.IsTargetDomainReady() && (bsnc.TopologyType() != types.LocalnetTopology || bsnc.isPodScheduledinLocalZone(kubevirtLiveMigrationStatus.SourcePod)) {
 		ops, err = bsnc.disableLiveMigrationSourceLSPOps(kubevirtLiveMigrationStatus, nadName, ops)
 		if err != nil {
 			return fmt.Errorf("failed to create LSP ops for source pod during Live-migration status: %w", err)
