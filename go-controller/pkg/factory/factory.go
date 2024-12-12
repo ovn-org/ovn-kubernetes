@@ -446,118 +446,75 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 func (wf *WatchFactory) Start() error {
 	klog.Info("Starting watch factory")
 	wf.iFactory.Start(wf.stopChan)
-	for oType, synced := range waitForCacheSyncWithTimeout(wf.iFactory, wf.stopChan) {
-		if !synced {
-			return fmt.Errorf("error in syncing cache for %v informer", oType)
-		}
-	}
+
+	var informers []waitForCacheSyncer
+	informers = append(informers, wf.iFactory)
 	if config.OVNKubernetesFeature.EnableAdminNetworkPolicy && wf.anpFactory != nil {
 		wf.anpFactory.Start(wf.stopChan)
-		for oType, synced := range waitForCacheSyncWithTimeout(wf.anpFactory, wf.stopChan) {
-			if !synced {
-				return fmt.Errorf("error in syncing cache for %v informer", oType)
-			}
-		}
+		informers = append(informers, wf.anpFactory)
 	}
 	if config.OVNKubernetesFeature.EnableEgressIP && wf.eipFactory != nil {
 		wf.eipFactory.Start(wf.stopChan)
-		for oType, synced := range waitForCacheSyncWithTimeout(wf.eipFactory, wf.stopChan) {
-			if !synced {
-				return fmt.Errorf("error in syncing cache for %v informer", oType)
-			}
-		}
+		informers = append(informers, wf.eipFactory)
 	}
 	if config.OVNKubernetesFeature.EnableEgressFirewall && wf.efFactory != nil {
 		wf.efFactory.Start(wf.stopChan)
-		for oType, synced := range waitForCacheSyncWithTimeout(wf.efFactory, wf.stopChan) {
-			if !synced {
-				return fmt.Errorf("error in syncing cache for %v informer", oType)
-			}
-		}
+		informers = append(informers, wf.efFactory)
 
 		if config.OVNKubernetesFeature.EnableDNSNameResolver && wf.dnsFactory != nil {
 			wf.dnsFactory.Start(wf.stopChan)
-			for oType, synced := range waitForCacheSyncWithTimeout(wf.dnsFactory, wf.stopChan) {
-				if !synced {
-					return fmt.Errorf("error in syncing cache for %v informer", oType)
-				}
-			}
+			informers = append(informers, wf.dnsFactory)
 		}
 	}
 	if util.PlatformTypeIsEgressIPCloudProvider() && wf.cpipcFactory != nil {
 		wf.cpipcFactory.Start(wf.stopChan)
-		for oType, synced := range waitForCacheSyncWithTimeout(wf.cpipcFactory, wf.stopChan) {
-			if !synced {
-				return fmt.Errorf("error in syncing cache for %v informer", oType)
-			}
-		}
+		informers = append(informers, wf.cpipcFactory)
 	}
 	if config.OVNKubernetesFeature.EnableEgressQoS && wf.egressQoSFactory != nil {
 		wf.egressQoSFactory.Start(wf.stopChan)
-		for oType, synced := range waitForCacheSyncWithTimeout(wf.egressQoSFactory, wf.stopChan) {
-			if !synced {
-				return fmt.Errorf("error in syncing cache for %v informer", oType)
-			}
-		}
+		informers = append(informers, wf.egressQoSFactory)
 	}
 
 	if util.IsMultiNetworkPoliciesSupportEnabled() && wf.mnpFactory != nil {
 		wf.mnpFactory.Start(wf.stopChan)
-		for oType, synced := range waitForCacheSyncWithTimeout(wf.mnpFactory, wf.stopChan) {
-			if !synced {
-				return fmt.Errorf("error in syncing cache for %v informer", oType)
-			}
-		}
+		informers = append(informers, wf.mnpFactory)
 	}
 
 	if config.OVNKubernetesFeature.EnableEgressService && wf.egressServiceFactory != nil {
 		wf.egressServiceFactory.Start(wf.stopChan)
-		for oType, synced := range waitForCacheSyncWithTimeout(wf.egressServiceFactory, wf.stopChan) {
-			if !synced {
-				return fmt.Errorf("error in syncing cache for %v informer", oType)
-			}
-		}
+		informers = append(informers, wf.egressServiceFactory)
 	}
 
 	if config.OVNKubernetesFeature.EnableMultiExternalGateway && wf.apbRouteFactory != nil {
 		wf.apbRouteFactory.Start(wf.stopChan)
-		for oType, synced := range waitForCacheSyncWithTimeout(wf.apbRouteFactory, wf.stopChan) {
-			if !synced {
-				return fmt.Errorf("error in syncing cache for %v informer", oType)
-			}
-		}
+		informers = append(informers, wf.apbRouteFactory)
 	}
 
 	if wf.ipamClaimsFactory != nil {
 		wf.ipamClaimsFactory.Start(wf.stopChan)
-		for oType, synced := range waitForCacheSyncWithTimeout(wf.ipamClaimsFactory, wf.stopChan) {
-			if !synced {
-				return fmt.Errorf("error in syncing cache for %v informer", oType)
-			}
-		}
+		informers = append(informers, wf.ipamClaimsFactory)
 	}
 
 	if wf.nadFactory != nil {
 		wf.nadFactory.Start(wf.stopChan)
-		for oType, synced := range waitForCacheSyncWithTimeout(wf.nadFactory, wf.stopChan) {
-			if !synced {
-				return fmt.Errorf("error in syncing cache for %v informer", oType)
-			}
-		}
+		informers = append(informers, wf.nadFactory)
 	}
 
 	if util.IsNetworkSegmentationSupportEnabled() && wf.udnFactory != nil {
 		wf.udnFactory.Start(wf.stopChan)
-		for oType, synced := range waitForCacheSyncWithTimeout(wf.udnFactory, wf.stopChan) {
-			if !synced {
-				return fmt.Errorf("error in syncing cache for %v informer", oType)
-			}
-		}
+		informers = append(informers, wf.udnFactory)
 	}
 
 	if wf.raFactory != nil {
 		wf.raFactory.Start(wf.stopChan)
-		for oType, synced := range waitForCacheSyncWithTimeout(wf.raFactory, wf.stopChan) {
+		informers = append(informers, wf.raFactory)
+	}
+
+	// Give some small timeout for sync. It helps avoid 100ms
+	// delay of first wait in unit tests.
+	time.Sleep(5 * time.Millisecond)
+	for _, i := range informers {
+		for oType, synced := range waitForCacheSyncWithTimeout(i, wf.stopChan) {
 			if !synced {
 				return fmt.Errorf("error in syncing cache for %v informer", oType)
 			}
