@@ -2,10 +2,11 @@ package e2e
 
 import (
 	"context"
+	goerrors "errors"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
-	"strconv"
 	"strings"
 	"time"
 
@@ -654,7 +655,7 @@ var _ = Describe("Multi Homing", func() {
 			var netConfig networkAttachmentConfig
 			var nodes []v1.Pod
 			var underlayBridgeName string
-			var cmdWebServer *exec.Cmd
+			var httpSrv *httpServer
 
 			underlayIP := underlayServiceIP + "/24"
 			Context("with a service running on the underlay", func() {
@@ -694,9 +695,8 @@ var _ = Describe("Multi Homing", func() {
 
 				BeforeEach(func() {
 					By("starting a service, connected to the underlay")
-					cmdWebServer = exec.Command("python3", "-m", "http.server", "--bind", underlayServiceIP, strconv.Itoa(servicePort))
-					cmdWebServer.Stderr = os.Stderr
-					Expect(cmdWebServer.Start()).NotTo(HaveOccurred(), "failed to create web server, port might be busy")
+					httpSrv = newHTTPServer(underlayServiceIP, servicePort)
+					Expect(httpSrv.listen()).To(Succeed())
 				})
 
 				BeforeEach(func() {
@@ -710,8 +710,7 @@ var _ = Describe("Multi Homing", func() {
 				})
 
 				AfterEach(func() {
-					err := cmdWebServer.Process.Kill()
-					Expect(err).NotTo(HaveOccurred())
+					Expect(httpSrv.stop()).To(Succeed())
 				})
 
 				AfterEach(func() {
@@ -902,6 +901,7 @@ var _ = Describe("Multi Homing", func() {
 
 			Context("with a trunked configuration", func() {
 				const vlanID = 20
+				var vlanIface *Vlan
 				BeforeEach(func() {
 					nodes = ovsPods(cs)
 					Expect(nodes).NotTo(BeEmpty())
@@ -920,29 +920,34 @@ var _ = Describe("Multi Homing", func() {
 					By("setting up the localnet underlay with a trunked configuration")
 					Expect(setupUnderlay(nodes, secondaryInterfaceName, netConfig)).To(Succeed(), "configuring the OVS bridge")
 
-					By(fmt.Sprintf("creating a VLAN interface on top of the bridge connecting the cluster nodes with IP: %s", underlayIP))
+					By("creating a CRI API client")
 					cli, err := client.NewClientWithOpts(client.FromEnv)
 					Expect(err).NotTo(HaveOccurred())
 
+					By(fmt.Sprintf("extracting the GW IP on the %q logical network", dockerNetworkName))
 					gatewayIP, err := getNetworkGateway(cli, dockerNetworkName)
 					Expect(err).NotTo(HaveOccurred())
 
+					By(fmt.Sprintf("finding which bridge has the GW IP %q configured", gatewayIP))
 					underlayBridgeName, err = findInterfaceByIP(gatewayIP)
 					Expect(err).NotTo(HaveOccurred())
-					Expect(createVLANInterface(underlayBridgeName, strconv.Itoa(vlanID), &underlayIP)).To(
+
+					By(fmt.Sprintf("creating a VLAN on top of bridge %q with ID: %d", underlayBridgeName, vlanID))
+					vlanIface, err = newVLANIface(underlayBridgeName, vlanID, withIP(underlayIP))
+					Expect(err).NotTo(HaveOccurred())
+					Expect(vlanIface.ensureExistence()).To(
 						Succeed(),
 						"create a VLAN interface on the bridge interconnecting the cluster nodes",
 					)
 
 					By("starting a service, connected to the underlay")
-					cmdWebServer = exec.Command("python3", "-m", "http.server", "--bind", underlayServiceIP, strconv.Itoa(port))
-					cmdWebServer.Stderr = os.Stderr
-					Expect(cmdWebServer.Start()).NotTo(HaveOccurred(), "failed to create web server, port might be busy")
+					httpSrv = newHTTPServer(underlayServiceIP, servicePort)
+					Expect(httpSrv.listen()).To(Succeed())
 				})
 
 				AfterEach(func() {
-					Expect(cmdWebServer.Process.Kill()).NotTo(HaveOccurred(), "kill the python webserver")
-					Expect(deleteVLANInterface(underlayBridgeName, strconv.Itoa(vlanID))).NotTo(HaveOccurred(), "remove the underlay physical configuration")
+					Expect(httpSrv.stop()).To(Succeed())
+					Expect(vlanIface.delete()).NotTo(HaveOccurred(), "remove the underlay physical configuration")
 					Expect(teardownUnderlay(nodes)).To(Succeed(), "tear down the localnet underlay")
 				})
 
@@ -1742,4 +1747,38 @@ func createMultiNetworkPolicy(mnpClient mnpclient.K8sCniCncfIoV1beta1Interface, 
 		metav1.CreateOptions{},
 	)
 	return err
+}
+
+type httpServer struct {
+	srv *http.Server
+}
+
+func newHTTPServer(ip string, port int) *httpServer {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	return &httpServer{
+		srv: &http.Server{
+			Addr:    fmt.Sprintf("%s:%d", ip, port),
+			Handler: mux,
+		},
+	}
+}
+
+func (hs *httpServer) listen() error {
+	var err error
+	go func() {
+		err = hs.srv.ListenAndServe()
+		if err != nil && !goerrors.Is(err, http.ErrServerClosed) {
+			_, _ = fmt.Fprintf(os.Stderr, "error shutting down http server: %v\n", err)
+		}
+	}()
+	return err
+}
+
+func (hs *httpServer) stop() error {
+	ctx, cancelFn := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelFn()
+	return hs.srv.Shutdown(ctx)
 }
