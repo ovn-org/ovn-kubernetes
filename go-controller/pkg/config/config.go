@@ -653,7 +653,13 @@ func PrepareTestConfig() error {
 	ClusterManager = savedClusterManager
 	Kubernetes.DisableRequestedChassis = false
 	EnableMulticast = false
-	Default.OVSDBTxnTimeout = 5 * time.Second
+
+	// OVSDBTimeout can be overriden for test, reduce to reduce test exection time
+	// increase to reduce flakiness, if unset or parsing failed, defaults to 5s
+	Default.OVSDBTxnTimeout, _ = time.ParseDuration(os.Getenv("TEST_OVSDB_TXN_TIMEOUT"))
+	if Default.OVSDBTxnTimeout <= 0 {
+		Default.OVSDBTxnTimeout = 5 * time.Second
+	}
 
 	if err := completeConfig(); err != nil {
 		return err

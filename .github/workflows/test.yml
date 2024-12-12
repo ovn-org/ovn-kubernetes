@@ -31,6 +31,8 @@ env:
   CI_IMAGE_PR_TAR: image-pr.tar
   CI_DIST_IMAGES_OUTPUT: dist/images/_output/
 
+  # Sets OVSDBTxnTimeout to reduce tests exection time
+  TEST_OVSDB_TXN_TIMEOUT: 1s
 
 jobs:
   # separate job for parallelism
