@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"regexp"
 
 	kapi "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
@@ -139,6 +140,49 @@ func NodeSubnetAnnotationChanged(oldNode, newNode *v1.Node) bool {
 	return oldNode.Annotations[ovnNodeSubnets] != newNode.Annotations[ovnNodeSubnets]
 }
 
+// ExtractJSONStringValue tries to extract a JSON string value for the provided key.
+// It is faster than unmarshalling but should not be used unless strictly necessary.
+// The function only looks for quoted values.
+// TODO: this function assumes valid JSON, it doesn't work for arrays yet
+func ExtractJSONStringValue(rawJSON, key string) (string, error) {
+	re := regexp.MustCompile(`"` + key + `"\s*:\s*"(.*?)"`)
+	matches := re.FindStringSubmatch(rawJSON)
+	if len(matches) != 2 {
+		return "", fmt.Errorf("failed to extract JSON string value %v from %q", matches, key)
+	}
+	return matches[1], nil
+}
+
+func ExtractJSONArrayValue(rawJSON, key string) (string, error) {
+	re := regexp.MustCompile(`"` + key + `"\s*:\s*\[(.*?)\]`)
+	matches := re.FindStringSubmatch(rawJSON)
+	if len(matches) != 2 {
+		return "", fmt.Errorf("failed to extract JSON string value %v from %q", matches, key)
+	}
+	return matches[1], nil
+}
+
+// oldSubnet, err := ExtractJSONStringValue(oldNode.Annotations[ovnNodeSubnets], netName)
+//
+//	if err != nil {
+//		klog.Errorf("%s", err)
+//		return true
+//	}
+//
+// newSubnet, err := ExtractJSONStringValue(newNode.Annotations[ovnNodeSubnets], netName)
+//
+//	if err != nil {
+//		klog.Errorf("%s", err)
+//		return true
+//	}
+//
+// return oldSubnet != newSubnet
+func NodeSubnetAnnotationChangedForNetwork(oldNode, newNode *v1.Node, netName string) bool {
+	oldSubnet, _ := ExtractJSONArrayValue(oldNode.Annotations[ovnNodeSubnets], netName)
+	newSubnet, _ := ExtractJSONArrayValue(newNode.Annotations[ovnNodeSubnets], netName)
+	return oldSubnet != newSubnet
+}
+
 // UpdateNodeHostSubnetAnnotation updates a "k8s.ovn.org/node-subnets" annotation for network "netName",
 // with the specified network, suitable for passing to kube.SetAnnotationsOnNode. If hostSubnets is empty,
 // it deleted the "k8s.ovn.org/node-subnets" annotation for network "netName"
@@ -168,16 +212,46 @@ func DeleteNodeHostSubnetAnnotation(nodeAnnotator kube.Annotator) {
 // ParseNodeHostSubnetAnnotation parses the "k8s.ovn.org/node-subnets" annotation
 // on a node and returns the host subnet for the given network.
 func ParseNodeHostSubnetAnnotation(node *kapi.Node, netName string) ([]*net.IPNet, error) {
-	subnetsMap, err := parseSubnetAnnotation(node.Annotations, ovnNodeSubnets)
-	if err != nil {
-		return nil, err
+	var nodeSubnetMap map[string]json.RawMessage
+	var ret []*net.IPNet
+	annotation, ok := node.Annotations[ovnNodeSubnets]
+	if !ok {
+		return nil, newAnnotationNotSetError("could not find %q annotation", ovnNodeSubnets)
 	}
-	subnets, ok := subnetsMap[netName]
+	if err := json.Unmarshal([]byte(annotation), &nodeSubnetMap); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal %q annotation on node %s: %v", ovnNodeSubnets, node.Name, err)
+	}
+	val, ok := nodeSubnetMap[netName]
 	if !ok {
 		return nil, newAnnotationNotSetError("node %q has no %q annotation for network %s", node.Name, ovnNodeSubnets, netName)
 	}
 
-	return subnets, nil
+	var subnets, subnetsDual []string
+	// TODO: Is this really what we need to do?
+	if err := json.Unmarshal(val, &subnetsDual); err == nil {
+		subnets = subnetsDual
+	} else {
+		subnetsSingle := ""
+		if err := json.Unmarshal(val, &subnetsSingle); err != nil {
+			return nil, fmt.Errorf("could not parse %q annotation %q as either single-stack or dual-stack: %v",
+				ovnNodeSubnets, val, err)
+		}
+		subnets = append(subnets, subnetsSingle)
+	}
+
+	if len(subnets) == 0 {
+		return nil, fmt.Errorf("unexpected empty %s annotation for %s network", ovnNodeSubnets, netName)
+	}
+
+	for _, subnet := range subnets {
+		_, ipnet, err := net.ParseCIDR(subnet)
+		if err != nil {
+			return nil, fmt.Errorf("error parsing %q value: %v", subnet, err)
+		}
+		ret = append(ret, ipnet)
+	}
+
+	return ret, nil
 }
 
 // GetNodeSubnetAnnotationNetworkNames parses the "k8s.ovn.org/node-subnets" annotation

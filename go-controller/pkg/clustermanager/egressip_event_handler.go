@@ -23,6 +23,10 @@ type egressIPClusterControllerEventHandler struct {
 	syncFunc func([]interface{}) error
 }
 
+func (h *egressIPClusterControllerEventHandler) FilterResource(obj interface{}) bool {
+	return true
+}
+
 // egressIPClusterControllerEventHandler functions
 
 // AddResource adds the specified object to the cluster according to its type and
