@@ -1709,6 +1709,8 @@ type waitForCacheSyncer interface {
 }
 
 func waitForCacheSyncWithTimeout(factory waitForCacheSyncer, stopCh <-chan struct{}) map[reflect.Type]bool {
+	// Give some small time for sync. It helps significantly reduce unit tests time
+	time.Sleep(5 * time.Millisecond)
 	return factory.WaitForCacheSync(util.GetChildStopChanWithTimeout(stopCh, types.InformerSyncTimeout))
 }
 
