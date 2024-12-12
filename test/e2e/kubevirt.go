@@ -1431,10 +1431,12 @@ runcmd:
 				By("setting up the localnet underlay")
 				nodes := ovsPods(clientSet)
 				Expect(nodes).NotTo(BeEmpty())
-				defer func() {
-					By("tearing down the localnet underlay")
-					Expect(teardownUnderlay(nodes)).To(Succeed())
-				}()
+				DeferCleanup(func() {
+					if e2eframework.TestContext.DeleteNamespace && (e2eframework.TestContext.DeleteNamespaceOnFailure || !CurrentSpecReport().Failed()) {
+						By("tearing down the localnet underlay")
+						Expect(teardownUnderlay(nodes)).To(Succeed())
+					}
+				})
 
 				const secondaryInterfaceName = "eth1"
 				Expect(setupUnderlay(nodes, secondaryInterfaceName, netConfig)).To(Succeed())
