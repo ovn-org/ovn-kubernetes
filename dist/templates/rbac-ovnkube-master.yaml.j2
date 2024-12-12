@@ -158,3 +158,35 @@ rules:
     - apiGroups: [""]
       resources: ["configmaps"]
       verbs: ["create", "patch", "update"]
+
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: disable-udn-label-change
+spec:
+  matchConstraints:
+    resourceRules:
+      - apiGroups:   [""]
+        apiVersions: ["v1"]
+        operations:  ["UPDATE"]
+        resources:   ["namespaces"]
+  failurePolicy: Fail
+  validations:
+    - expression: "('k8s.ovn.org/user-defined-network' in oldObject.metadata.labels) == ('k8s.ovn.org/user-defined-network' in object.metadata.labels)"
+      message: "The 'k8s.ovn.org/user-defined-network' label cannot be added/removed after the namespace was created"
+
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: disable-udn-label-change-binding
+spec:
+  policyName: disable-udn-label-change
+  validationActions: [Deny]
+  matchResources:
+    resourceRules:
+      - apiGroups:   [""]
+        apiVersions: ["v1"]
+        operations:  ["UPDATE"]
+        resources:   ["namespaces"]
