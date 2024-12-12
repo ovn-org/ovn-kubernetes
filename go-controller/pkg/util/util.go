@@ -606,21 +606,24 @@ func IsUDNEnabledService(key string) bool {
 }
 
 // ServiceFromEndpointSlice returns the namespaced name of the service that corresponds to the given endpointSlice
-// in the given network
-func ServiceFromEndpointSlice(eps *discovery.EndpointSlice, netInfo NetInfo) (k8stypes.NamespacedName, error) {
+// in the given network. If the service label is missing the returned namespaced name and the error are nil.
+func ServiceFromEndpointSlice(eps *discovery.EndpointSlice, netInfo NetInfo) (*k8stypes.NamespacedName, error) {
 	labelKey := discovery.LabelServiceName
 	if netInfo.IsPrimaryNetwork() {
 		if eps.Labels[types.LabelUserDefinedEndpointSliceNetwork] != netInfo.GetNetworkName() {
-			return k8stypes.NamespacedName{}, fmt.Errorf("endpointslice %s/%s does not belong to %s network", eps.Namespace, eps.Name, netInfo.GetNetworkName())
+			return nil, fmt.Errorf("endpointslice %s/%s does not belong to %s network", eps.Namespace, eps.Name, netInfo.GetNetworkName())
 		}
 		labelKey = types.LabelUserDefinedServiceName
 	}
-	svcName := eps.Labels[labelKey]
+	svcName, found := eps.Labels[labelKey]
+	if !found {
+		return nil, nil
+	}
 
 	if svcName == "" {
-		return k8stypes.NamespacedName{}, fmt.Errorf("endpointslice %s/%s: empty value for label %s in network %s",
+		return nil, fmt.Errorf("endpointslice %s/%s has empty svcName for label %s in network %s",
 			eps.Namespace, eps.Name, labelKey, netInfo.GetNetworkName())
 	}
 
-	return k8stypes.NamespacedName{Namespace: eps.Namespace, Name: svcName}, nil
+	return &k8stypes.NamespacedName{Namespace: eps.Namespace, Name: svcName}, nil
 }
