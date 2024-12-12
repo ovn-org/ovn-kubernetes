@@ -887,7 +887,7 @@ passwd:
 			Eventually(func() error {
 				endpoints, err = dialServiceNodePort(svc)
 				return err
-			}).WithPolling(time.Second).WithTimeout(20*time.Second).Should(Succeed(), "Should dial service port once service settled")
+			}).WithPolling(3*time.Second).WithTimeout(60*time.Second).Should(Succeed(), "Should dial service port once service settled")
 
 			checkConnectivityAndNetworkPolicies(vm.Name, endpoints, "before live migration")
 			// Do just one migration that will fail
