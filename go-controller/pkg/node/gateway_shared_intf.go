@@ -19,6 +19,7 @@ import (
 	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/egressservice"
 	nodeipt "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/linkmanager"
 	nodenft "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/nftables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -1787,6 +1788,21 @@ func commonFlows(subnets []*net.IPNet, bridge *bridgeConfiguration) ([]string, e
 						defaultOpenFlowCookie, netConfig.ofPortPatch, bridgeMacAddress, ovnKubeNodeSNATMark,
 						config.Default.ConntrackZone, physicalIP.IP, netConfig.masqCTMark, ofPortPhys))
 
+				// table 0, packets coming from egressIP pods only from user defined networks. If an egressIP is assigned to
+				// this node, then all networks get a flow even if no pods on that network were selected for by this egressIP.
+				if util.IsNetworkSegmentationSupportEnabled() && config.OVNKubernetesFeature.EnableInterconnect &&
+					config.Gateway.Mode != config.GatewayModeDisabled && bridge.eipMarkIPs != nil {
+					if netConfig.masqCTMark != ctMarkOVN {
+						for mark, eip := range bridge.eipMarkIPs.GetIPv4() {
+							dftFlows = append(dftFlows,
+								fmt.Sprintf("cookie=%s, priority=105, in_port=%s, dl_src=%s, ip, pkt_mark=%d, "+
+									"actions=ct(commit, zone=%d, nat(src=%s), exec(set_field:%s->ct_mark)), output:%s",
+									defaultOpenFlowCookie, netConfig.ofPortPatch, bridgeMacAddress, mark,
+									config.Default.ConntrackZone, eip, netConfig.masqCTMark, ofPortPhys))
+						}
+					}
+				}
+
 				// table 0, packets coming from pods headed externally. Commit connections with ct_mark ctMarkOVN
 				// so that reverse direction goes back to the pods.
 				if netConfig.isDefaultNetwork() {
@@ -1845,6 +1861,7 @@ func commonFlows(subnets []*net.IPNet, bridge *bridgeConfiguration) ([]string, e
 					"actions=ct(zone=%d, nat, table=1)", defaultOpenFlowCookie, ofPortPhys, config.Default.ConntrackZone))
 		}
 	}
+
 	if config.IPv6Mode {
 		physicalIP, err := util.MatchFirstIPNetFamily(true, bridgeIPs)
 		if err != nil {
@@ -1862,6 +1879,21 @@ func commonFlows(subnets []*net.IPNet, bridge *bridgeConfiguration) ([]string, e
 						"actions=ct(commit, zone=%d, nat(src=%s), exec(set_field:%s->ct_mark)),output:%s",
 						defaultOpenFlowCookie, netConfig.ofPortPatch, bridgeMacAddress, ovnKubeNodeSNATMark,
 						config.Default.ConntrackZone, physicalIP.IP, netConfig.masqCTMark, ofPortPhys))
+
+				// table 0, packets coming from egressIP pods only from user defined networks. If an egressIP is assigned to
+				// this node, then all networks get a flow even if no pods on that network were selected for by this egressIP.
+				if util.IsNetworkSegmentationSupportEnabled() && config.OVNKubernetesFeature.EnableInterconnect &&
+					config.Gateway.Mode != config.GatewayModeDisabled && bridge.eipMarkIPs != nil {
+					if netConfig.masqCTMark != ctMarkOVN {
+						for mark, eip := range bridge.eipMarkIPs.GetIPv6() {
+							dftFlows = append(dftFlows,
+								fmt.Sprintf("cookie=%s, priority=105, in_port=%s, dl_src=%s, ipv6, pkt_mark=%d, "+
+									"actions=ct(commit, zone=%d, nat(src=%s), exec(set_field:%s->ct_mark)), output:%s",
+									defaultOpenFlowCookie, netConfig.ofPortPatch, bridgeMacAddress, mark,
+									config.Default.ConntrackZone, eip, netConfig.masqCTMark, ofPortPhys))
+						}
+					}
+				}
 
 				// table 0, packets coming from pods headed externally. Commit connections with ct_mark ctMarkOVN
 				// so that reverse direction goes back to the pods.
@@ -2122,7 +2154,8 @@ func initSvcViaMgmPortRoutingRules(hostSubnets []*net.IPNet) error {
 
 func newGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP, gwIntf, egressGWIntf string,
 	gwIPs []*net.IPNet, nodeAnnotator kube.Annotator, cfg *managementPortConfig, kube kube.Interface,
-	watchFactory factory.NodeWatchFactory, routeManager *routemanager.Controller, nadController *nad.NetAttachDefinitionController, gatewayMode config.GatewayMode) (*gateway, error) {
+	watchFactory factory.NodeWatchFactory, routeManager *routemanager.Controller, linkManager *linkmanager.Controller,
+	nadController *nad.NetAttachDefinitionController, gatewayMode config.GatewayMode) (*gateway, error) {
 	klog.Info("Creating new gateway")
 	gw := &gateway{}
 
@@ -2188,6 +2221,10 @@ func newGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP, gwIn
 			if err != nil {
 				return err
 			}
+		}
+		if util.IsNetworkSegmentationSupportEnabled() && config.OVNKubernetesFeature.EnableInterconnect && config.Gateway.Mode != config.GatewayModeDisabled {
+			gw.bridgeEIPAddrManager = newBridgeEIPAddrManager(nodeName, gwBridge.bridgeName, linkManager, kube, watchFactory.EgressIPInformer(), watchFactory.NodeCoreInformer())
+			gwBridge.eipMarkIPs = gw.bridgeEIPAddrManager.GetCache()
 		}
 		gw.nodeIPManager = newAddressManager(nodeName, kube, cfg, watchFactory, gwBridge)
 		nodeIPs := gw.nodeIPManager.ListAddresses()

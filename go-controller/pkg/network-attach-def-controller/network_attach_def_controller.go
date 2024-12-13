@@ -62,6 +62,10 @@ type NADController interface {
 	Start() error
 	Stop()
 	GetActiveNetworkForNamespace(namespace string) (util.NetInfo, error)
+	GetNetwork(networkName string) (util.NetInfo, error)
+	// DoWithLock takes care of locking and unlocking while iterating over all role primary user defined networks.
+	DoWithLock(f func(network util.NetInfo) error) error
+	GetActiveNetworkNamespaces(networkName string) ([]string, error)
 }
 
 // NetAttachDefinitionController handles namespaced scoped NAD events and
@@ -393,4 +397,75 @@ func (nadController *NetAttachDefinitionController) GetActiveNetworkForNamespace
 	}
 
 	return &util.DefaultNetInfo{}, nil
+}
+
+func (nadController *NetAttachDefinitionController) GetNetwork(networkName string) (util.NetInfo, error) {
+	if !util.IsNetworkSegmentationSupportEnabled() {
+		return &util.DefaultNetInfo{}, nil
+	}
+	nadController.RLock()
+	defer nadController.RUnlock()
+	if networkName == "" {
+		return nil, fmt.Errorf("network must not be empty")
+	}
+	if networkName == "default" {
+		return &util.DefaultNetInfo{}, nil
+	}
+	network := nadController.networkManager.getNetwork(networkName)
+	if network == nil {
+		return nil, fmt.Errorf("failed to find network %q", networkName)
+	}
+	return util.CopyNetInfo(network), nil
+}
+
+func (nadController *NetAttachDefinitionController) GetActiveNetworkNamespaces(networkName string) ([]string, error) {
+	if !util.IsNetworkSegmentationSupportEnabled() {
+		return []string{"default"}, nil
+	}
+	namespaces := make([]string, 0)
+	nadController.RLock()
+	defer nadController.RUnlock()
+	for namespaceName, primaryNAD := range nadController.primaryNADs {
+		nadNetworkName := nadController.nads[primaryNAD]
+		if nadNetworkName != networkName {
+			continue
+		}
+		namespaces = append(namespaces, namespaceName)
+	}
+	return namespaces, nil
+}
+
+// DoWithLock iterates over all role primary user defined networks and executes the given fn with each network as input.
+// An error will not block execution and instead all errors will be aggregated and returned when all networks are processed.
+func (nadController *NetAttachDefinitionController) DoWithLock(f func(network util.NetInfo) error) error {
+	if !util.IsNetworkSegmentationSupportEnabled() {
+		defaultNetwork := &util.DefaultNetInfo{}
+		return f(defaultNetwork)
+	}
+	nadController.RLock()
+	defer nadController.RUnlock()
+
+	var errs []error
+	for _, primaryNAD := range nadController.primaryNADs {
+		if primaryNAD == "" {
+			continue
+		}
+		netName := nadController.nads[primaryNAD]
+		if netName == "" {
+			// this should never happen where we have a nad keyed in the primaryNADs
+			// map, but it doesn't exist in the nads map
+			panic("NAD Controller broken consistency between primary NADs and cached NADs")
+		}
+		network := nadController.networkManager.getNetwork(netName)
+		n := util.CopyNetInfo(network)
+		// update the returned netInfo copy to only have the primary NAD for this namespace
+		n.SetNADs(primaryNAD)
+		if err := f(n); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if len(errs) > 0 {
+		return errors.Join(errs...)
+	}
+	return nil
 }

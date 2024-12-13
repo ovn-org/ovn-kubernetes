@@ -257,6 +257,27 @@ func FindLogicalRouterPoliciesWithPredicate(nbClient libovsdbclient.Client, p lo
 	return found, err
 }
 
+// FindALogicalRouterPoliciesWithPredicate looks up a logical router policies from
+// the cache based on a given predicate
+func FindALogicalRouterPoliciesWithPredicate(nbClient libovsdbclient.Client, routerName string, p logicalRouterPolicyPredicate) ([]*nbdb.LogicalRouterPolicy, error) {
+	lr := &nbdb.LogicalRouter{Name: routerName}
+	router, err := GetLogicalRouter(nbClient, lr)
+	if err != nil {
+		return nil, err
+	}
+
+	newPredicate := func(item *nbdb.LogicalRouterPolicy) bool {
+		for _, policyUUID := range router.Policies {
+			if policyUUID == item.UUID && p(item) {
+				return true
+			}
+		}
+		return false
+	}
+
+	return FindLogicalRouterPoliciesWithPredicate(nbClient, newPredicate)
+}
+
 // GetLogicalRouterPolicy looks up a logical router policy from the cache
 func GetLogicalRouterPolicy(nbClient libovsdbclient.Client, policy *nbdb.LogicalRouterPolicy) (*nbdb.LogicalRouterPolicy, error) {
 	found := []*nbdb.LogicalRouterPolicy{}
@@ -1219,4 +1240,23 @@ func DeleteNATsWithPredicateOps(nbClient libovsdbclient.Client, ops []libovsdb.O
 
 	m := newModelClient(nbClient)
 	return m.DeleteOps(ops, opModels...)
+}
+
+func UpdateNATOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, nats ...*nbdb.NAT) ([]libovsdb.Operation, error) {
+	opModels := make([]operationModel, 0, len(nats))
+	for i := range nats {
+		nat := nats[i]
+		opModel := []operationModel{
+			{
+				Model:          nat,
+				OnModelUpdates: onModelUpdatesAllNonDefault(),
+				ErrNotFound:    true,
+				BulkOp:         false,
+			},
+		}
+		opModels = append(opModels, opModel...)
+	}
+
+	m := newModelClient(nbClient)
+	return m.CreateOrUpdateOps(ops, opModels...)
 }

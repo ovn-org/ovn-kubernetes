@@ -920,7 +920,7 @@ func countNFTablesElements(clientContainer, name string) int {
 	// (Where the "elem" element will be omitted if the set is empty.)
 	// We just parse this optimistically and catch the panic if it fails.
 	count := -1
-	defer func() { 
+	defer func() {
 		if recover() != nil {
 			framework.Logf("JSON parsing error!")
 		}
@@ -1157,6 +1157,11 @@ func isInterconnectEnabled() bool {
 
 func isUDNHostIsolationDisabled() bool {
 	val, present := os.LookupEnv("DISABLE_UDN_HOST_ISOLATION")
+	return present && val == "true"
+}
+
+func isNetworkSegmentationEnabled() bool {
+	val, present := os.LookupEnv("ENABLE_NETWORK_SEGMENTATION")
 	return present && val == "true"
 }
 

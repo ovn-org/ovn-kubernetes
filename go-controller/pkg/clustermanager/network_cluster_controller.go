@@ -114,12 +114,9 @@ func newNetworkClusterController(networkIDAllocator idallocator.NamedAllocator, 
 func newDefaultNetworkClusterController(netInfo util.NetInfo, ovnClient *util.OVNClusterManagerClientset, wf *factory.WatchFactory, recorder record.EventRecorder) *networkClusterController {
 	// use an allocator that can only allocate a single network ID for the
 	// defaiult network
-	networkIDAllocator, err := idallocator.NewIDAllocator(types.DefaultNetworkName, 1)
-	if err != nil {
-		panic(fmt.Errorf("could not build ID allocator for default network: %w", err))
-	}
+	networkIDAllocator := idallocator.NewIDAllocator(types.DefaultNetworkName, 1)
 	// Reserve the id 0 for the default network.
-	err = networkIDAllocator.ReserveID(types.DefaultNetworkName, defaultNetworkID)
+	err := networkIDAllocator.ReserveID(types.DefaultNetworkName, defaultNetworkID)
 	if err != nil {
 		panic(fmt.Errorf("could not reserve default network ID: %w", err))
 	}
@@ -175,7 +172,7 @@ func (ncc *networkClusterController) init() error {
 	}
 
 	if util.DoesNetworkRequireTunnelIDs(ncc.NetInfo) {
-		ncc.tunnelIDAllocator, err = id.NewIDAllocator(ncc.GetNetworkName(), types.MaxLogicalPortTunnelKey)
+		ncc.tunnelIDAllocator = id.NewIDAllocator(ncc.GetNetworkName(), types.MaxLogicalPortTunnelKey)
 		if err != nil {
 			return fmt.Errorf("failed to create new id allocator for network %s: %w", ncc.GetNetworkName(), err)
 		}

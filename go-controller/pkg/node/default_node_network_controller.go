@@ -107,6 +107,7 @@ type DefaultNodeNetworkController struct {
 	// Node healthcheck server for cloud load balancers
 	healthzServer *proxierHealthUpdater
 	routeManager  *routemanager.Controller
+	linkManager   *linkmanager.Controller
 
 	// retry framework for namespaces, used for the removal of stale conntrack entries for external gateways
 	retryNamespaces *retry.RetryFramework
@@ -147,6 +148,7 @@ func newDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, sto
 		c.udnHostIsolationManager = NewUDNHostIsolationManager(config.IPv4Mode, config.IPv6Mode,
 			cnnci.watchFactory.PodCoreInformer(), nadController)
 	}
+	c.linkManager = linkmanager.NewController(cnnci.name, config.IPv4Mode, config.IPv6Mode, c.updateGatewayMAC)
 	return c
 }
 
@@ -1210,13 +1212,10 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		}
 	}
 
-	// create link manager, will work for egress IP as well as monitoring MAC changes to default gw bridge
-	linkManager := linkmanager.NewController(nc.name, config.IPv4Mode, config.IPv6Mode, nc.updateGatewayMAC)
-
 	if config.OVNKubernetesFeature.EnableEgressIP && !util.PlatformTypeIsEgressIPCloudProvider() {
 		c, err := egressip.NewController(nc.Kube, nc.watchFactory.EgressIPInformer(), nc.watchFactory.NodeInformer(),
-			nc.watchFactory.NamespaceInformer(), nc.watchFactory.PodCoreInformer(), nc.routeManager, config.IPv4Mode,
-			config.IPv6Mode, nc.name, linkManager)
+			nc.watchFactory.NamespaceInformer(), nc.watchFactory.PodCoreInformer(), nc.nadController.GetActiveNetworkForNamespace,
+			nc.routeManager, config.IPv4Mode, config.IPv6Mode, nc.name, nc.linkManager)
 		if err != nil {
 			return fmt.Errorf("failed to create egress IP controller: %v", err)
 		}
@@ -1227,7 +1226,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		klog.Infof("Egress IP for secondary host network is disabled")
 	}
 
-	linkManager.Run(nc.stopChan, nc.wg)
+	nc.linkManager.Run(nc.stopChan, nc.wg)
 
 	nc.wg.Add(1)
 	go func() {

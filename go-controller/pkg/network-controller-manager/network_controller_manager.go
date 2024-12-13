@@ -20,6 +20,8 @@ import (
 	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/observability"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
+	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/udnenabledsvc"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -48,13 +50,15 @@ type NetworkControllerManager struct {
 	// Supports OVN Template Load Balancers?
 	svcTemplateSupport bool
 
-	stopChan chan struct{}
-	wg       *sync.WaitGroup
-
+	stopChan                 chan struct{}
+	wg                       *sync.WaitGroup
+	portCache                *ovn.PortCache
 	defaultNetworkController nad.BaseNetworkController
 
 	// net-attach-def controller handle net-attach-def and create/delete network controllers
 	nadController *nad.NetAttachDefinitionController
+	// eIPController programs OVN to support EgressIP
+	eIPController *ovn.EgressIPController
 }
 
 func (cm *NetworkControllerManager) NewNetworkController(nInfo util.NetInfo) (nad.NetworkController, error) {
@@ -65,7 +69,7 @@ func (cm *NetworkControllerManager) NewNetworkController(nInfo util.NetInfo) (na
 	topoType := nInfo.TopologyType()
 	switch topoType {
 	case ovntypes.Layer3Topology:
-		return ovn.NewSecondaryLayer3NetworkController(cnci, nInfo, cm.nadController)
+		return ovn.NewSecondaryLayer3NetworkController(cnci, nInfo, cm.nadController, cm.eIPController, cm.portCache)
 	case ovntypes.Layer2Topology:
 		return ovn.NewSecondaryLayer2NetworkController(cnci, nInfo, cm.nadController)
 	case ovntypes.LocalnetTopology:
@@ -83,7 +87,7 @@ func (cm *NetworkControllerManager) newDummyNetworkController(topoType, netName 
 	netInfo, _ := util.NewNetInfo(&ovncnitypes.NetConf{NetConf: types.NetConf{Name: netName}, Topology: topoType})
 	switch topoType {
 	case ovntypes.Layer3Topology:
-		return ovn.NewSecondaryLayer3NetworkController(cnci, netInfo, cm.nadController)
+		return ovn.NewSecondaryLayer3NetworkController(cnci, netInfo, cm.nadController, cm.eIPController, cm.portCache)
 	case ovntypes.Layer2Topology:
 		return ovn.NewSecondaryLayer2NetworkController(cnci, netInfo, cm.nadController)
 	case ovntypes.LocalnetTopology:
@@ -180,7 +184,7 @@ func NewNetworkControllerManager(ovnClient *util.OVNClientset, wf *factory.Watch
 	libovsdbOvnNBClient libovsdbclient.Client, libovsdbOvnSBClient libovsdbclient.Client,
 	recorder record.EventRecorder, wg *sync.WaitGroup) (*NetworkControllerManager, error) {
 	podRecorder := metrics.NewPodRecorder()
-
+	stopCh := make(chan struct{})
 	cm := &NetworkControllerManager{
 		client: ovnClient.KubeClient,
 		kube: &kube.KubeOVN{
@@ -194,13 +198,13 @@ func NewNetworkControllerManager(ovnClient *util.OVNClientset, wf *factory.Watch
 			EgressQoSClient:      ovnClient.EgressQoSClient,
 			IPAMClaimsClient:     ovnClient.IPAMClaimsClient,
 		},
-		stopChan:     make(chan struct{}),
-		watchFactory: wf,
-		recorder:     recorder,
-		nbClient:     libovsdbOvnNBClient,
-		sbClient:     libovsdbOvnSBClient,
-		podRecorder:  &podRecorder,
-
+		stopChan:         stopCh,
+		watchFactory:     wf,
+		recorder:         recorder,
+		nbClient:         libovsdbOvnNBClient,
+		sbClient:         libovsdbOvnSBClient,
+		podRecorder:      &podRecorder,
+		portCache:        ovn.NewPortCache(stopCh),
 		wg:               wg,
 		multicastSupport: config.EnableMulticast,
 	}
@@ -292,7 +296,7 @@ func (cm *NetworkControllerManager) initDefaultNetworkController(nadController *
 	if err != nil {
 		return fmt.Errorf("failed to create common network controller info: %w", err)
 	}
-	defaultController, err := ovn.NewDefaultNetworkController(cnci, nadController, observManager)
+	defaultController, err := ovn.NewDefaultNetworkController(cnci, nadController, observManager, cm.portCache, cm.eIPController)
 	if err != nil {
 		return err
 	}
@@ -387,6 +391,16 @@ func (cm *NetworkControllerManager) Start(ctx context.Context) error {
 		metrics.GetConfigDurationRecorder().Run(cm.nbClient, cm.kube, 10, time.Second*5, cm.stopChan)
 	}
 	cm.podRecorder.Run(cm.sbClient, cm.stopChan)
+
+	if config.OVNKubernetesFeature.EnableEgressIP {
+		cm.eIPController = ovn.NewEIPController(cm.nbClient, cm.kube, cm.watchFactory, cm.recorder, cm.portCache, cm.nadController,
+			addressset.NewOvnAddressSetFactory(cm.nbClient, config.IPv4Mode, config.IPv6Mode), config.IPv4Mode, config.IPv6Mode, zone, ovn.DefaultNetworkControllerName)
+		// FIXME(martinkennelly): remove when EIP controller is fully extracted from from DNC and started here. Ensure SyncLocalNodeZonesCache is re-enabled in EIP controller.
+		if err = cm.eIPController.SyncLocalNodeZonesCache(); err != nil {
+			klog.Warningf("Failed to sync EgressIP controllers local node node cache: %v", err)
+		}
+	}
+
 	// nadController is nil if multi-network is disabled
 	if cm.nadController != nil {
 		if err = cm.nadController.Start(); err != nil {
@@ -406,6 +420,17 @@ func (cm *NetworkControllerManager) Start(ctx context.Context) error {
 			klog.Warningf("Observability cleanup failed, expected if not all Samples ware deleted yet: %v", err)
 		}
 	}
+
+	if util.IsNetworkSegmentationSupportEnabled() {
+		addressSetFactory := addressset.NewOvnAddressSetFactory(cm.nbClient, config.IPv4Mode, config.IPv6Mode)
+		go func() {
+			if err := udnenabledsvc.NewController(cm.nbClient, addressSetFactory, cm.watchFactory.ServiceCoreInformer(),
+				config.Default.UDNAllowedDefaultServices).Run(cm.stopChan); err != nil {
+				klog.Errorf("UDN enabled service controller failed: %v", err)
+			}
+		}()
+	}
+
 	err = cm.initDefaultNetworkController(cm.nadController, observabilityManager)
 	if err != nil {
 		return fmt.Errorf("failed to init default network controller: %v", err)

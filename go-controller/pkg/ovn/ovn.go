@@ -195,7 +195,8 @@ func (oc *DefaultNetworkController) ensureLocalZonePod(oldPod, pod *kapi.Pod, ad
 	}
 
 	if kubevirt.IsPodLiveMigratable(pod) {
-		return kubevirt.EnsureLocalZonePodAddressesToNodeRoute(oc.watchFactory, oc.nbClient, oc.lsManager, pod, ovntypes.DefaultNetworkName)
+		v4Subnets, v6Subnets := util.GetClusterSubnetsWithHostPrefix()
+		return kubevirt.EnsureLocalZonePodAddressesToNodeRoute(oc.watchFactory, oc.nbClient, oc.lsManager, pod, ovntypes.DefaultNetworkName, append(v4Subnets, v6Subnets...))
 	}
 
 	return nil
@@ -485,13 +486,19 @@ func (oc *DefaultNetworkController) StartServiceController(wg *sync.WaitGroup, r
 func (oc *DefaultNetworkController) InitEgressServiceZoneController() (*egresssvc_zone.Controller, error) {
 	// If the EgressIP controller is enabled it will take care of creating the
 	// "no reroute" policies - we can pass "noop" functions to the egress service controller.
-	initClusterEgressPolicies := func(libovsdbclient.Client, addressset.AddressSetFactory, string, string) error { return nil }
-	ensureNodeNoReroutePolicies := func(libovsdbclient.Client, addressset.AddressSetFactory, string, string, listers.NodeLister) error {
+	initClusterEgressPolicies := func(nbClient libovsdbclient.Client, addressSetFactory addressset.AddressSetFactory, ni util.NetInfo,
+		clusterSubnets []*net.IPNet, controllerName string) error {
+		return nil
+	}
+	ensureNodeNoReroutePolicies := func(nbClient libovsdbclient.Client, addressSetFactory addressset.AddressSetFactory,
+		network, router, controller string, nodeLister listers.NodeLister, v4, v6 bool) error {
 		return nil
 	}
 	deleteLegacyDefaultNoRerouteNodePolicies := func(libovsdbclient.Client, string, string) error { return nil }
 	// used only when IC=true
-	createDefaultNodeRouteToExternal := func(libovsdbclient.Client, string, string) error { return nil }
+	createDefaultNodeRouteToExternal := func(nbClient libovsdbclient.Client, clusterRouter, gwRouterName string, clusterSubnets []config.CIDRNetworkEntry) error {
+		return nil
+	}
 
 	if !config.OVNKubernetesFeature.EnableEgressIP {
 		initClusterEgressPolicies = InitClusterEgressPolicies

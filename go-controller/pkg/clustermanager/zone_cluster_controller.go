@@ -48,11 +48,7 @@ type zoneClusterController struct {
 
 func newZoneClusterController(ovnClient *util.OVNClusterManagerClientset, wf *factory.WatchFactory) (*zoneClusterController, error) {
 	// Since we don't assign 0 to any node, create IDAllocator with one extra element in maxIds.
-	nodeIDAllocator, err := id.NewIDAllocator("NodeIDs", maxNodeIDs+1)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create an IdAllocator for the nodes, err: %w", err)
-	}
-
+	nodeIDAllocator := id.NewIDAllocator("NodeIDs", maxNodeIDs+1)
 	// Reserve the id 0. We don't want to assign this id to any of the nodes.
 	if err := nodeIDAllocator.ReserveID("zero", 0); err != nil {
 		return nil, fmt.Errorf("idAllocator failed to reserve id 0")
@@ -67,7 +63,7 @@ func newZoneClusterController(ovnClient *util.OVNClusterManagerClientset, wf *fa
 	wg := &sync.WaitGroup{}
 
 	var transitSwitchIPv4Generator, transitSwitchIPv6Generator *ipgenerator.IPGenerator
-
+	var err error
 	if config.OVNKubernetesFeature.EnableInterconnect {
 		if config.IPv4Mode {
 			transitSwitchIPv4Generator, err = ipgenerator.NewIPGenerator(config.ClusterManager.V4TransitSwitchSubnet)
