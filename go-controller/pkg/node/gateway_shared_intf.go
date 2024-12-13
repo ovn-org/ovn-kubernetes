@@ -1648,11 +1648,6 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 					"actions=output:%s",
 					defaultOpenFlowCookie, ctMarkHost, ofPortHost))
 		}
-
-		// table 1, we check to see if this dest mac is the shared mac, if so send to host
-		dftFlows = append(dftFlows,
-			fmt.Sprintf("cookie=%s, priority=10, table=1, dl_dst=%s, actions=output:%s",
-				defaultOpenFlowCookie, bridgeMacAddress, ofPortHost))
 	}
 
 	defaultNetConfig := bridge.netConfig[types.DefaultNetworkName]
