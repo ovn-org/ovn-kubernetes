@@ -10,7 +10,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	v1nadmocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/nad"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/networkmanager"
 	types "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -188,20 +188,22 @@ func TestWaitForPrimaryAnnotationFn(t *testing.T) {
 				return tt.annotationFromFn, tt.isReadyFromFn
 			}
 
-			nadController := &nad.FakeNADController{
+			fakeNetworkManager := &networkmanager.FakeNetworkManager{
 				PrimaryNetworks: map[string]util.NetInfo{},
 			}
 			for _, nad := range tt.nads {
 				nadNetwork, _ := util.ParseNADInfo(nad)
-				nadNetwork.SetNADs(util.GetNADName(nad.Namespace, nad.Name))
+				mutableNetInfo := util.NewMutableNetInfo(nadNetwork)
+				mutableNetInfo.SetNADs(util.GetNADName(nad.Namespace, nad.Name))
+				nadNetwork = mutableNetInfo
 				if nadNetwork.IsPrimaryNetwork() {
-					if _, loaded := nadController.PrimaryNetworks[nad.Namespace]; !loaded {
-						nadController.PrimaryNetworks[nad.Namespace] = nadNetwork
+					if _, loaded := fakeNetworkManager.PrimaryNetworks[nad.Namespace]; !loaded {
+						fakeNetworkManager.PrimaryNetworks[nad.Namespace] = nadNetwork
 					}
 				}
 			}
 
-			userDefinedPrimaryNetwork := NewPrimaryNetwork(nadController)
+			userDefinedPrimaryNetwork := NewPrimaryNetwork(fakeNetworkManager)
 			obtainedAnnotation, obtainedIsReady := userDefinedPrimaryNetwork.WaitForPrimaryAnnotationFn(tt.namespace, waitCond)(tt.annotations, tt.nadName)
 			obtainedFound := userDefinedPrimaryNetwork.Found()
 			obtainedNetworkName := userDefinedPrimaryNetwork.NetworkName()

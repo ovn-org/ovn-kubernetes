@@ -31,12 +31,18 @@ type SecondaryNodeNetworkController struct {
 // NewSecondaryNodeNetworkController creates a new OVN controller for creating logical network
 // infrastructure and policy for the given secondary network. It supports layer3, layer2 and
 // localnet topology types.
-func NewSecondaryNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, netInfo util.NetInfo,
-	vrfManager *vrfmanager.Controller, ruleManager *iprulemanager.Controller, defaultNetworkGateway Gateway) (*SecondaryNodeNetworkController, error) {
+func NewSecondaryNodeNetworkController(
+	cnnci *CommonNodeNetworkControllerInfo,
+	netInfo util.NetInfo,
+	vrfManager *vrfmanager.Controller,
+	ruleManager *iprulemanager.Controller,
+	defaultNetworkGateway Gateway,
+) (*SecondaryNodeNetworkController, error) {
+
 	snnc := &SecondaryNodeNetworkController{
 		BaseNodeNetworkController: BaseNodeNetworkController{
 			CommonNodeNetworkControllerInfo: *cnnci,
-			NetInfo:                         netInfo,
+			ReconcilableNetInfo:             util.NewReconcilableNetInfo(netInfo),
 			stopChan:                        make(chan struct{}),
 			wg:                              &sync.WaitGroup{},
 		},
@@ -52,7 +58,7 @@ func NewSecondaryNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, n
 			return nil, fmt.Errorf("error retrieving network id for network %s: %v", netInfo.GetNetworkName(), err)
 		}
 
-		snnc.gateway, err = NewUserDefinedNetworkGateway(snnc.NetInfo, networkID, node,
+		snnc.gateway, err = NewUserDefinedNetworkGateway(snnc.GetNetInfo(), networkID, node,
 			snnc.watchFactory.NodeCoreInformer().Lister(), snnc.Kube, vrfManager, ruleManager, defaultNetworkGateway)
 		if err != nil {
 			return nil, fmt.Errorf("error creating UDN gateway for network %s: %v", netInfo.GetNetworkName(), err)
@@ -108,10 +114,19 @@ func (oc *SecondaryNodeNetworkController) getNetworkID() (int, error) {
 		if err != nil {
 			return util.InvalidID, err
 		}
-		*oc.networkID, err = util.GetNetworkID(nodes, oc.NetInfo)
+		*oc.networkID, err = util.GetNetworkID(nodes, oc.GetNetInfo())
 		if err != nil {
 			return util.InvalidID, err
 		}
 	}
 	return *oc.networkID, nil
+}
+
+func (oc *SecondaryNodeNetworkController) Reconcile(netInfo util.NetInfo) error {
+	// reconcile network information, point of no return
+	err := util.ReconcileNetInfo(oc.ReconcilableNetInfo, netInfo)
+	if err != nil {
+		klog.Errorf("Failed to reconcile network %s: %v", oc.GetNetworkName(), err)
+	}
+	return nil
 }

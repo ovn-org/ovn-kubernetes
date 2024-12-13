@@ -5,7 +5,7 @@ import (
 
 	"k8s.io/klog/v2"
 
-	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -14,14 +14,14 @@ import (
 type podAnnotWaitCond = func(map[string]string, string) (*util.PodAnnotation, bool)
 
 type UserDefinedPrimaryNetwork struct {
-	nadController nad.NADController
-	annotation    *util.PodAnnotation
-	activeNetwork util.NetInfo
+	networkManager networkmanager.Interface
+	annotation     *util.PodAnnotation
+	activeNetwork  util.NetInfo
 }
 
-func NewPrimaryNetwork(nadController nad.NADController) *UserDefinedPrimaryNetwork {
+func NewPrimaryNetwork(networkManager networkmanager.Interface) *UserDefinedPrimaryNetwork {
 	return &UserDefinedPrimaryNetwork{
-		nadController: nadController,
+		networkManager: networkManager,
 	}
 }
 
@@ -123,7 +123,7 @@ func (p *UserDefinedPrimaryNetwork) ensureActiveNetwork(namespace string) error 
 	if p.activeNetwork != nil {
 		return nil
 	}
-	activeNetwork, err := p.nadController.GetActiveNetworkForNamespace(namespace)
+	activeNetwork, err := p.networkManager.GetActiveNetworkForNamespace(namespace)
 	if err != nil {
 		return err
 	}

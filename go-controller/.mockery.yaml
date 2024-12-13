@@ -51,6 +51,9 @@ packages:
   github.com/containernetworking/plugins/pkg/ns:
     interfaces:
       NetNS:
+  github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/informers/externalversions/k8s.cni.cncf.io/v1:
+    interfaces:
+      NetworkAttachmentDefinitionInformer:
   github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1:
     interfaces:
       NetworkAttachmentDefinitionLister:

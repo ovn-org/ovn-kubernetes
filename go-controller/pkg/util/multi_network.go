@@ -4,11 +4,13 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"reflect"
 	"strings"
 	"sync"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
+	"golang.org/x/exp/maps"
 
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -26,9 +28,9 @@ var (
 	ErrorUnsupportedIPAMKey     = errors.New("IPAM key is not supported. Use OVN-K provided IPAM via the `subnets` attribute")
 )
 
-// BasicNetInfo is interface which holds basic network information
-type BasicNetInfo interface {
-	// basic network information
+// NetInfo exposes read-only information about a network.
+type NetInfo interface {
+	// static information, not expected to change.
 	GetNetworkName() string
 	IsDefault() bool
 	IsPrimaryNetwork() bool
@@ -45,8 +47,27 @@ type BasicNetInfo interface {
 	AllowsPersistentIPs() bool
 	PhysicalNetworkName() string
 
-	// utility methods
-	Equals(BasicNetInfo) bool
+	// dynamic information, can change over time
+	GetNADs() []string
+	HasNAD(nadName string) bool
+	// GetPodNetworkAdvertisedVRFs returns the target VRFs where the pod network
+	// is advertised per node, through a map of node names to slice of VRFs.
+	GetPodNetworkAdvertisedVRFs() map[string][]string
+	// GetPodNetworkAdvertisedOnNodeVRFs returns the target VRFs where the pod
+	// network is advertised on the specified node.
+	GetPodNetworkAdvertisedOnNodeVRFs(node string) []string
+	// GetEgressIPAdvertisedVRFs returns the target VRFs where egress IPs are
+	// advertised per node, through a map of node names to slice of VRFs.
+	GetEgressIPAdvertisedVRFs() map[string][]string
+	// GetEgressIPAdvertisedOnNodeVRFs returns the target VRFs where egress IPs
+	// are advertised on the specified node.
+	GetEgressIPAdvertisedOnNodeVRFs(node string) []string
+	// GetEgressIPAdvertisedNodes return the nodes where egress IP are
+	// advertised.
+	GetEgressIPAdvertisedNodes() []string
+
+	// derived information.
+	GetNamespaces() []string
 	GetNetworkScopedName(name string) string
 	RemoveNetworkScopeFromName(name string) string
 	GetNetworkScopedK8sMgmtIntfName(nodeName string) string
@@ -60,20 +81,350 @@ type BasicNetInfo interface {
 	GetNetworkScopedLoadBalancerName(lbName string) string
 	GetNetworkScopedLoadBalancerGroupName(lbGroupName string) string
 	GetNetworkScopedClusterSubnetSNATMatch(nodeName string) string
+
+	// GetNetInfo is an identity method used to get the specific NetInfo
+	// implementation
+	GetNetInfo() NetInfo
 }
 
-// NetInfo correlates which NADs refer to a network in addition to the basic
-// network information
-type NetInfo interface {
-	BasicNetInfo
-	GetNADs() []string
-	HasNAD(nadName string) bool
+// DefaultNetInfo is the default network information
+type DefaultNetInfo struct {
+	mutableNetInfo
+}
+
+// MutableNetInfo is a NetInfo where selected information can be changed.
+// Intended to be used by network managers that aggregate network information
+// from multiple sources that can change over time.
+type MutableNetInfo interface {
+	NetInfo
+
+	// NADs referencing a network
 	SetNADs(nadName ...string)
 	AddNADs(nadName ...string)
 	DeleteNADs(nadName ...string)
+
+	// VRFs a pod network is being advertised on, also per node
+	SetPodNetworkAdvertisedVRFs(podAdvertisements map[string][]string)
+
+	// Nodes advertising Egress IP
+	SetEgressIPAdvertisedVRFs(eipAdvertisements map[string][]string)
 }
 
-type DefaultNetInfo struct{}
+// NewMutableNetInfo builds a copy of netInfo as a MutableNetInfo
+func NewMutableNetInfo(netInfo NetInfo) MutableNetInfo {
+	if netInfo == nil {
+		return nil
+	}
+	return copyNetInfo(netInfo).(MutableNetInfo)
+}
+
+// ReconcilableNetInfo is a NetInfo that can be reconciled
+type ReconcilableNetInfo interface {
+	NetInfo
+
+	// canReconcile checks if both networks are compatible and thus can be
+	// reconciled. Networks are compatible if they are defined by the same
+	// static network configuration.
+	canReconcile(NetInfo) bool
+
+	// needsReconcile checks if both networks hold differences in their dynamic
+	// network configuration that could potentially be reconciled. Note this
+	// method does not check for compatibility.
+	needsReconcile(NetInfo) bool
+
+	// reconcile copies dynamic network configuration information from the
+	// provided network
+	reconcile(NetInfo)
+}
+
+// NewReconcilableNetInfo builds a copy of netInfo as a ReconcilableNetInfo
+func NewReconcilableNetInfo(netInfo NetInfo) ReconcilableNetInfo {
+	if netInfo == nil {
+		return nil
+	}
+	return copyNetInfo(netInfo).(ReconcilableNetInfo)
+}
+
+// AreNetworksCompatible checks if both networks are compatible and thus can be
+// reconciled. Networks are compatible if they are defined by the same
+// static network configuration.
+func AreNetworksCompatible(l, r NetInfo) bool {
+	if l == nil && r == nil {
+		return true
+	}
+	if l == nil || r == nil {
+		return false
+	}
+	return reconcilable(l).canReconcile(r)
+}
+
+// DoesNetworkNeedReconciliation checks if both networks hold differences in their dynamic
+// network configuration that could potentially be reconciled. Note this
+// method does not check for compatibility.
+func DoesNetworkNeedReconciliation(l, r NetInfo) bool {
+	if l == nil && r == nil {
+		return false
+	}
+	if l == nil || r == nil {
+		return true
+	}
+	return reconcilable(l).needsReconcile(r)
+}
+
+// ReconcileNetInfo reconciles the dynamic network configuration
+func ReconcileNetInfo(to ReconcilableNetInfo, from NetInfo) error {
+	if from == nil || to == nil {
+		return fmt.Errorf("can't reconcile a nil network")
+	}
+	if !AreNetworksCompatible(to, from) {
+		return fmt.Errorf("can't reconcile from incompatible network")
+	}
+	reconcilable(to).reconcile(from)
+	return nil
+}
+
+func copyNetInfo(netInfo NetInfo) any {
+	switch t := netInfo.GetNetInfo().(type) {
+	case *DefaultNetInfo:
+		return t.copy()
+	case *secondaryNetInfo:
+		return t.copy()
+	default:
+		panic(fmt.Errorf("unrecognized type %T", t))
+	}
+}
+
+func reconcilable(netInfo NetInfo) ReconcilableNetInfo {
+	switch t := netInfo.GetNetInfo().(type) {
+	case *DefaultNetInfo:
+		return t
+	case *secondaryNetInfo:
+		return t
+	default:
+		panic(fmt.Errorf("unrecognized type %T", t))
+	}
+}
+
+// mutableNetInfo contains network information that can be changed
+type mutableNetInfo struct {
+	sync.RWMutex
+
+	nads sets.Set[string]
+
+	// Each network can be selected by multiple routeadvertisements each with a
+	// different target VRF and different selected node. Represent this through
+	// a map of node names to VRFs.
+	podNetworkAdvertisements map[string][]string
+	eipAdvertisements        map[string][]string
+
+	// information generated from previous fields, not used in comparisons
+
+	// namespaces from nads
+	namespaces sets.Set[string]
+}
+
+func mutable(netInfo NetInfo) *mutableNetInfo {
+	switch t := netInfo.GetNetInfo().(type) {
+	case *DefaultNetInfo:
+		return &t.mutableNetInfo
+	case *secondaryNetInfo:
+		return &t.mutableNetInfo
+	default:
+		panic(fmt.Errorf("unrecognized type %T", t))
+	}
+}
+
+func (l *mutableNetInfo) needsReconcile(r NetInfo) bool {
+	return !mutable(r).equals(l)
+}
+
+func (l *mutableNetInfo) reconcile(r NetInfo) {
+	l.copyFrom(mutable(r))
+}
+
+func (l *mutableNetInfo) equals(r *mutableNetInfo) bool {
+	l.RLock()
+	defer l.RUnlock()
+	r.RLock()
+	defer r.RUnlock()
+	return reflect.DeepEqual(l.nads, r.nads) &&
+		reflect.DeepEqual(l.podNetworkAdvertisements, r.podNetworkAdvertisements) &&
+		reflect.DeepEqual(l.eipAdvertisements, r.eipAdvertisements)
+}
+
+func (l *mutableNetInfo) copyFrom(r *mutableNetInfo) {
+	aux := mutableNetInfo{}
+	r.RLock()
+	aux.nads = r.nads.Clone()
+	aux.setPodNetworkAdvertisedOnVRFs(r.podNetworkAdvertisements)
+	aux.setEgressIPAdvertisedAtNodes(r.eipAdvertisements)
+	aux.namespaces = r.namespaces.Clone()
+	r.RUnlock()
+	l.Lock()
+	defer l.Unlock()
+	l.nads = aux.nads
+	l.podNetworkAdvertisements = aux.podNetworkAdvertisements
+	l.eipAdvertisements = aux.eipAdvertisements
+	l.namespaces = aux.namespaces
+}
+
+func (nInfo *mutableNetInfo) SetPodNetworkAdvertisedVRFs(podAdvertisements map[string][]string) {
+	nInfo.Lock()
+	defer nInfo.Unlock()
+	nInfo.setPodNetworkAdvertisedOnVRFs(podAdvertisements)
+}
+
+func (nInfo *mutableNetInfo) setPodNetworkAdvertisedOnVRFs(podAdvertisements map[string][]string) {
+	nInfo.podNetworkAdvertisements = make(map[string][]string, len(podAdvertisements))
+	for node, vrfs := range podAdvertisements {
+		nInfo.podNetworkAdvertisements[node] = sets.List(sets.New(vrfs...))
+	}
+}
+
+func (nInfo *mutableNetInfo) GetPodNetworkAdvertisedVRFs() map[string][]string {
+	nInfo.RLock()
+	defer nInfo.RUnlock()
+	return nInfo.getPodNetworkAdvertisedOnVRFs()
+}
+
+func (nInfo *mutableNetInfo) GetPodNetworkAdvertisedOnNodeVRFs(node string) []string {
+	nInfo.RLock()
+	defer nInfo.RUnlock()
+	return nInfo.getPodNetworkAdvertisedOnVRFs()[node]
+}
+
+func (nInfo *mutableNetInfo) getPodNetworkAdvertisedOnVRFs() map[string][]string {
+	if nInfo.podNetworkAdvertisements == nil {
+		return map[string][]string{}
+	}
+	return nInfo.podNetworkAdvertisements
+}
+
+func (nInfo *mutableNetInfo) SetEgressIPAdvertisedVRFs(eipAdvertisements map[string][]string) {
+	nInfo.Lock()
+	defer nInfo.Unlock()
+	nInfo.setEgressIPAdvertisedAtNodes(eipAdvertisements)
+}
+
+func (nInfo *mutableNetInfo) setEgressIPAdvertisedAtNodes(eipAdvertisements map[string][]string) {
+	nInfo.eipAdvertisements = make(map[string][]string, len(eipAdvertisements))
+	for node, vrfs := range eipAdvertisements {
+		nInfo.eipAdvertisements[node] = sets.List(sets.New(vrfs...))
+	}
+}
+
+func (nInfo *mutableNetInfo) GetEgressIPAdvertisedVRFs() map[string][]string {
+	nInfo.RLock()
+	defer nInfo.RUnlock()
+	return nInfo.getEgressIPAdvertisedVRFs()
+}
+
+func (nInfo *mutableNetInfo) getEgressIPAdvertisedVRFs() map[string][]string {
+	if nInfo.eipAdvertisements == nil {
+		return map[string][]string{}
+	}
+	return nInfo.eipAdvertisements
+}
+
+func (nInfo *mutableNetInfo) GetEgressIPAdvertisedOnNodeVRFs(node string) []string {
+	nInfo.RLock()
+	defer nInfo.RUnlock()
+	return nInfo.getEgressIPAdvertisedVRFs()[node]
+}
+
+func (nInfo *mutableNetInfo) GetEgressIPAdvertisedNodes() []string {
+	nInfo.RLock()
+	defer nInfo.RUnlock()
+	return maps.Keys(nInfo.eipAdvertisements)
+}
+
+// GetNADs returns all the NADs associated with this network
+func (nInfo *mutableNetInfo) GetNADs() []string {
+	nInfo.RLock()
+	defer nInfo.RUnlock()
+	return nInfo.getNads().UnsortedList()
+}
+
+// HasNAD returns true if the given NAD exists, used
+// to check if the network needs to be plumbed over
+func (nInfo *mutableNetInfo) HasNAD(nadName string) bool {
+	nInfo.RLock()
+	defer nInfo.RUnlock()
+	return nInfo.getNads().Has(nadName)
+}
+
+// SetNADs replaces the NADs associated with the network
+func (nInfo *mutableNetInfo) SetNADs(nadNames ...string) {
+	nInfo.Lock()
+	defer nInfo.Unlock()
+	nInfo.nads = sets.New[string]()
+	nInfo.namespaces = sets.New[string]()
+	nInfo.addNADs(nadNames...)
+}
+
+// AddNADs adds the specified NAD
+func (nInfo *mutableNetInfo) AddNADs(nadNames ...string) {
+	nInfo.Lock()
+	defer nInfo.Unlock()
+	nInfo.addNADs(nadNames...)
+}
+
+func (nInfo *mutableNetInfo) addNADs(nadNames ...string) {
+	for _, name := range nadNames {
+		nInfo.getNads().Insert(name)
+		nInfo.getNamespaces().Insert(strings.Split(name, "/")[0])
+	}
+}
+
+// DeleteNADs deletes the specified NAD
+func (nInfo *mutableNetInfo) DeleteNADs(nadNames ...string) {
+	nInfo.Lock()
+	defer nInfo.Unlock()
+	ns := sets.New[string]()
+	for _, name := range nadNames {
+		if !nInfo.getNads().Has(name) {
+			continue
+		}
+		ns.Insert(strings.Split(name, "/")[0])
+		nInfo.getNads().Delete(name)
+	}
+	if ns.Len() == 0 {
+		return
+	}
+	for existing := range nInfo.getNads() {
+		ns.Delete(strings.Split(existing, "/")[0])
+	}
+	nInfo.getNamespaces().Delete(ns.UnsortedList()...)
+}
+
+func (nInfo *mutableNetInfo) getNads() sets.Set[string] {
+	if nInfo.nads == nil {
+		return sets.New[string]()
+	}
+	return nInfo.nads
+}
+
+func (nInfo *mutableNetInfo) getNamespaces() sets.Set[string] {
+	if nInfo.namespaces == nil {
+		return sets.New[string]()
+	}
+	return nInfo.namespaces
+}
+
+func (nInfo *mutableNetInfo) GetNamespaces() []string {
+	return nInfo.getNamespaces().UnsortedList()
+}
+
+func (nInfo *DefaultNetInfo) GetNetInfo() NetInfo {
+	return nInfo
+}
+
+func (nInfo *DefaultNetInfo) copy() *DefaultNetInfo {
+	c := &DefaultNetInfo{}
+	c.mutableNetInfo.copyFrom(&nInfo.mutableNetInfo)
+
+	return c
+}
 
 // GetNetworkName returns the network name
 func (nInfo *DefaultNetInfo) GetNetworkName() string {
@@ -155,36 +506,8 @@ func (nInfo *DefaultNetInfo) GetNetworkScopedClusterSubnetSNATMatch(nodeName str
 	return ""
 }
 
-// GetNADs returns the NADs associated with the network, no op for default
-// network
-func (nInfo *DefaultNetInfo) GetNADs() []string {
-	panic("unexpected call for default network")
-}
-
-// HasNAD returns true if the given NAD exists, already return true for
-// default network
-func (nInfo *DefaultNetInfo) HasNAD(nadName string) bool {
-	panic("unexpected call for default network")
-}
-
-// SetNADs replaces the NADs associated with the network, no op for default
-// network
-func (nInfo *DefaultNetInfo) SetNADs(nadName ...string) {
-	panic("unexpected call for default network")
-}
-
-// AddNAD adds the specified NAD, no op for default network
-func (nInfo *DefaultNetInfo) AddNADs(nadName ...string) {
-	panic("unexpected call for default network")
-}
-
-// DeleteNAD deletes the specified NAD, no op for default network
-func (nInfo *DefaultNetInfo) DeleteNADs(nadName ...string) {
-	panic("unexpected call for default network")
-}
-
-func (nInfo *DefaultNetInfo) Equals(netBasicInfo BasicNetInfo) bool {
-	_, ok := netBasicInfo.(*DefaultNetInfo)
+func (nInfo *DefaultNetInfo) canReconcile(netInfo NetInfo) bool {
+	_, ok := netInfo.(*DefaultNetInfo)
 	return ok
 }
 
@@ -272,6 +595,8 @@ func (nInfo *DefaultNetInfo) PhysicalNetworkName() string {
 
 // SecondaryNetInfo holds the network name information for secondary network if non-nil
 type secondaryNetInfo struct {
+	mutableNetInfo
+
 	netName string
 	// Should this secondary network be used
 	// as the pod's primary network?
@@ -286,12 +611,11 @@ type secondaryNetInfo struct {
 	excludeSubnets     []*net.IPNet
 	joinSubnets        []*net.IPNet
 
-	// all net-attach-def NAD names for this network, used to determine if a pod needs
-	// to be plumbed for this network
-	sync.Mutex
-	nadNames sets.Set[string]
-
 	physicalNetworkName string
+}
+
+func (nInfo *secondaryNetInfo) GetNetInfo() NetInfo {
+	return nInfo
 }
 
 // GetNetworkName returns the network name
@@ -385,42 +709,6 @@ func (nInfo *secondaryNetInfo) getPrefix() string {
 	return GetSecondaryNetworkPrefix(nInfo.netName)
 }
 
-// GetNADs returns all the NADs associated with this network
-func (nInfo *secondaryNetInfo) GetNADs() []string {
-	nInfo.Lock()
-	defer nInfo.Unlock()
-	return nInfo.nadNames.UnsortedList()
-}
-
-// HasNAD returns true if the given NAD exists, used
-// to check if the network needs to be plumbed over
-func (nInfo *secondaryNetInfo) HasNAD(nadName string) bool {
-	nInfo.Lock()
-	defer nInfo.Unlock()
-	return nInfo.nadNames.Has(nadName)
-}
-
-// SetNADs replaces the NADs associated with the network
-func (nInfo *secondaryNetInfo) SetNADs(nadName ...string) {
-	nInfo.Lock()
-	defer nInfo.Unlock()
-	nInfo.nadNames = sets.New(nadName...)
-}
-
-// AddNAD adds the specified NAD
-func (nInfo *secondaryNetInfo) AddNADs(nadName ...string) {
-	nInfo.Lock()
-	defer nInfo.Unlock()
-	nInfo.nadNames.Insert(nadName...)
-}
-
-// DeleteNAD deletes the specified NAD
-func (nInfo *secondaryNetInfo) DeleteNADs(nadName ...string) {
-	nInfo.Lock()
-	defer nInfo.Unlock()
-	nInfo.nadNames.Delete(nadName...)
-}
-
 // TopologyType returns the topology type
 func (nInfo *secondaryNetInfo) TopologyType() string {
 	return nInfo.topology
@@ -486,8 +774,7 @@ func (nInfo *secondaryNetInfo) JoinSubnets() []*net.IPNet {
 	return nInfo.joinSubnets
 }
 
-// Equals compares for equality this network information with the other
-func (nInfo *secondaryNetInfo) Equals(other BasicNetInfo) bool {
+func (nInfo *secondaryNetInfo) canReconcile(other NetInfo) bool {
 	if (nInfo == nil) != (other == nil) {
 		return false
 	}
@@ -526,10 +813,7 @@ func (nInfo *secondaryNetInfo) Equals(other BasicNetInfo) bool {
 }
 
 func (nInfo *secondaryNetInfo) copy() *secondaryNetInfo {
-	nInfo.Lock()
-	defer nInfo.Unlock()
-
-	// everything is immutable except the NADs
+	// everything here is immutable
 	c := &secondaryNetInfo{
 		netName:             nInfo.netName,
 		primaryNetwork:      nInfo.primaryNetwork,
@@ -542,14 +826,15 @@ func (nInfo *secondaryNetInfo) copy() *secondaryNetInfo {
 		subnets:             nInfo.subnets,
 		excludeSubnets:      nInfo.excludeSubnets,
 		joinSubnets:         nInfo.joinSubnets,
-		nadNames:            nInfo.nadNames.Clone(),
 		physicalNetworkName: nInfo.physicalNetworkName,
 	}
+	// copy mutables
+	c.mutableNetInfo.copyFrom(&nInfo.mutableNetInfo)
 
 	return c
 }
 
-func newLayer3NetConfInfo(netconf *ovncnitypes.NetConf) (NetInfo, error) {
+func newLayer3NetConfInfo(netconf *ovncnitypes.NetConf) (MutableNetInfo, error) {
 	subnets, _, err := parseSubnets(netconf.Subnets, "", types.Layer3Topology)
 	if err != nil {
 		return nil, err
@@ -565,13 +850,15 @@ func newLayer3NetConfInfo(netconf *ovncnitypes.NetConf) (NetInfo, error) {
 		subnets:        subnets,
 		joinSubnets:    joinSubnets,
 		mtu:            netconf.MTU,
-		nadNames:       sets.Set[string]{},
+		mutableNetInfo: mutableNetInfo{
+			nads: sets.Set[string]{},
+		},
 	}
 	ni.ipv4mode, ni.ipv6mode = getIPMode(subnets)
 	return ni, nil
 }
 
-func newLayer2NetConfInfo(netconf *ovncnitypes.NetConf) (NetInfo, error) {
+func newLayer2NetConfInfo(netconf *ovncnitypes.NetConf) (MutableNetInfo, error) {
 	subnets, excludes, err := parseSubnets(netconf.Subnets, netconf.ExcludeSubnets, types.Layer2Topology)
 	if err != nil {
 		return nil, fmt.Errorf("invalid %s netconf %s: %v", netconf.Topology, netconf.Name, err)
@@ -589,13 +876,15 @@ func newLayer2NetConfInfo(netconf *ovncnitypes.NetConf) (NetInfo, error) {
 		excludeSubnets:     excludes,
 		mtu:                netconf.MTU,
 		allowPersistentIPs: netconf.AllowPersistentIPs,
-		nadNames:           sets.Set[string]{},
+		mutableNetInfo: mutableNetInfo{
+			nads: sets.Set[string]{},
+		},
 	}
 	ni.ipv4mode, ni.ipv6mode = getIPMode(subnets)
 	return ni, nil
 }
 
-func newLocalnetNetConfInfo(netconf *ovncnitypes.NetConf) (NetInfo, error) {
+func newLocalnetNetConfInfo(netconf *ovncnitypes.NetConf) (MutableNetInfo, error) {
 	subnets, excludes, err := parseSubnets(netconf.Subnets, netconf.ExcludeSubnets, types.LocalnetTopology)
 	if err != nil {
 		return nil, fmt.Errorf("invalid %s netconf %s: %v", netconf.Topology, netconf.Name, err)
@@ -609,8 +898,10 @@ func newLocalnetNetConfInfo(netconf *ovncnitypes.NetConf) (NetInfo, error) {
 		mtu:                 netconf.MTU,
 		vlan:                uint(netconf.VLANID),
 		allowPersistentIPs:  netconf.AllowPersistentIPs,
-		nadNames:            sets.Set[string]{},
 		physicalNetworkName: netconf.PhysicalNetworkName,
+		mutableNetInfo: mutableNetInfo{
+			nads: sets.Set[string]{},
+		},
 	}
 	ni.ipv4mode, ni.ipv6mode = getIPMode(subnets)
 	return ni, nil
@@ -729,10 +1020,14 @@ func GetSecondaryNetworkPrefix(netName string) string {
 }
 
 func NewNetInfo(netconf *ovncnitypes.NetConf) (NetInfo, error) {
+	return newNetInfo(netconf)
+}
+
+func newNetInfo(netconf *ovncnitypes.NetConf) (MutableNetInfo, error) {
 	if netconf.Name == types.DefaultNetworkName {
 		return &DefaultNetInfo{}, nil
 	}
-	var ni NetInfo
+	var ni MutableNetInfo
 	var err error
 	switch netconf.Topology {
 	case types.Layer3Topology:
@@ -884,18 +1179,6 @@ func subnetOverlapCheck(netconf *ovncnitypes.NetConf) error {
 	return nil
 }
 
-func CopyNetInfo(netInfo NetInfo) NetInfo {
-	switch t := netInfo.(type) {
-	case *DefaultNetInfo:
-		// immutable
-		return netInfo
-	case *secondaryNetInfo:
-		return t.copy()
-	default:
-		panic("program error: unrecognized NetInfo")
-	}
-}
-
 // GetPodNADToNetworkMapping sees if the given pod needs to plumb over this given network specified by netconf,
 // and return the matching NetworkSelectionElement if any exists.
 //
@@ -1031,4 +1314,8 @@ func AllowsPersistentIPs(netInfo NetInfo) bool {
 	default:
 		return false
 	}
+}
+
+func IsPodNetworkAdvertisedAtNode(netInfo NetInfo, node string) bool {
+	return len(netInfo.GetPodNetworkAdvertisedOnNodeVRFs(node)) > 0
 }

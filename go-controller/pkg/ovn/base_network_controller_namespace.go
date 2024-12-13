@@ -402,7 +402,7 @@ func (bnc *BaseNetworkController) getAllNamespacePodAddresses(ns string) []net.I
 		ips = make([]net.IP, 0, len(existingPods))
 		for _, pod := range existingPods {
 			if !util.PodWantsHostNetwork(pod) && !util.PodCompleted(pod) && util.PodScheduled(pod) {
-				podIPs, err := util.GetPodIPsOfNetwork(pod, bnc.NetInfo)
+				podIPs, err := util.GetPodIPsOfNetwork(pod, bnc.GetNetInfo())
 				if err != nil {
 					klog.Warningf(err.Error())
 					continue
@@ -446,7 +446,7 @@ func (bnc *BaseNetworkController) getNamespacePortGroupName(namespace string) st
 // failure indicates it should be retried later.
 func (bsnc *BaseNetworkController) removeRemoteZonePodFromNamespaceAddressSet(pod *kapi.Pod) error {
 	podDesc := fmt.Sprintf("pod %s/%s/%s", bsnc.GetNetworkName(), pod.Namespace, pod.Name)
-	podIfAddrs, err := util.GetPodCIDRsWithFullMask(pod, bsnc.NetInfo)
+	podIfAddrs, err := util.GetPodCIDRsWithFullMask(pod, bsnc.GetNetInfo())
 	if err != nil {
 		// maybe the pod is not scheduled yet or addLSP has not happened yet, so it doesn't have IPs.
 		// let us ignore deletion failures for podIPs not found because

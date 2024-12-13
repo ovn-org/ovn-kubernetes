@@ -1,4 +1,4 @@
-package networkControllerManager
+package controllermanager
 
 import (
 	"fmt"
@@ -12,6 +12,8 @@ import (
 	factoryMocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory/mocks"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	nadinformermocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/informers/externalversions/k8s.cni.cncf.io/v1"
+	nadlistermocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -22,7 +24,7 @@ import (
 )
 
 func genListStalePortsCmd() string {
-	return fmt.Sprintf("ovs-vsctl --timeout=15 --data=bare --no-headings --columns=name find interface ofport=-1")
+	return "ovs-vsctl --timeout=15 --data=bare --no-headings --columns=name find interface ofport=-1"
 }
 
 func genDeleteStalePortCmd(ifaces ...string) string {
@@ -99,7 +101,7 @@ var _ = Describe("Healthcheck tests", func() {
 	})
 
 	Describe("checkForStaleOVSRepresentorInterfaces", func() {
-		var ncm *nodeNetworkControllerManager
+		var ncm *NodeControllerManager
 		nodeName := "localNode"
 		routeManager := routemanager.NewController()
 		podList := []*corev1.Pod{
@@ -130,7 +132,7 @@ var _ = Describe("Healthcheck tests", func() {
 		BeforeEach(func() {
 			// setup kube output
 			factoryMock.On("NADInformer").Return(nil)
-			ncm, err = NewNodeNetworkControllerManager(fakeClient, &factoryMock, nodeName, &sync.WaitGroup{}, nil, routeManager)
+			ncm, err = NewNodeControllerManager(fakeClient, &factoryMock, nodeName, &sync.WaitGroup{}, nil, routeManager)
 			Expect(err).NotTo(HaveOccurred())
 			factoryMock.On("GetPods", "").Return(podList, nil)
 		})
@@ -222,12 +224,16 @@ var _ = Describe("Healthcheck tests", func() {
 			nodeList := []*corev1.Node{node}
 			factoryMock.On("GetNode", nodeName).Return(nodeList[0], nil)
 			factoryMock.On("GetNodes").Return(nodeList, nil)
-			factoryMock.On("NADInformer").Return(nil)
 			factoryMock.On("UserDefinedNetworkInformer").Return(nil)
 			factoryMock.On("ClusterUserDefinedNetworkInformer").Return(nil)
 			factoryMock.On("NamespaceInformer").Return(nil)
+			nadListerMock := &nadlistermocks.NetworkAttachmentDefinitionLister{}
+			nadInformerMock := &nadinformermocks.NetworkAttachmentDefinitionInformer{}
+			nadInformerMock.On("Lister").Return(nadListerMock)
+			nadInformerMock.On("Informer").Return(nil)
+			factoryMock.On("NADInformer").Return(nadInformerMock)
 
-			ncm, err := NewNodeNetworkControllerManager(fakeClient, &factoryMock, nodeName, &sync.WaitGroup{}, nil, routeManager)
+			ncm, err := NewNodeControllerManager(fakeClient, &factoryMock, nodeName, &sync.WaitGroup{}, nil, routeManager)
 			Expect(err).NotTo(HaveOccurred())
 
 			err = testNS.Do(func(ns.NetNS) error {
@@ -243,7 +249,7 @@ var _ = Describe("Healthcheck tests", func() {
 				_, err = util.GetNetLinkOps().LinkByName(validVrfDevice)
 				Expect(err).NotTo(HaveOccurred())
 
-				err = ncm.CleanupDeletedNetworks(NetInfo)
+				err = ncm.CleanupStaleNetworks(NetInfo)
 				Expect(err).NotTo(HaveOccurred())
 
 				// Verify CleanupDeletedNetworks cleans up VRF configuration for

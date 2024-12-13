@@ -11,7 +11,7 @@ import (
 	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
-	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -22,13 +22,13 @@ const (
 )
 
 // secondaryNetworkClusterManager object manages the multi net-attach-def controllers.
-// It implements networkAttachDefController.NetworkControllerManager and can be used
-// by NetAttachDefinitionController to add and delete NADs.
+// It implements networkmanager.ControllerManager interface and can be used
+// by network manager to create and delete network controllers.
 type secondaryNetworkClusterManager struct {
-	// net-attach-def controller handle net-attach-def and create/delete network controllers
-	nadController *nad.NetAttachDefinitionController
-	ovnClient     *util.OVNClusterManagerClientset
-	watchFactory  *factory.WatchFactory
+	// networkManager creates and deletes network controllers
+	networkManager networkmanager.Interface
+	ovnClient      *util.OVNClusterManagerClientset
+	watchFactory   *factory.WatchFactory
 	// networkIDAllocator is used to allocate a unique ID for each secondary layer3 network
 	networkIDAllocator id.Allocator
 
@@ -38,8 +38,12 @@ type secondaryNetworkClusterManager struct {
 	errorReporter NetworkStatusReporter
 }
 
-func newSecondaryNetworkClusterManager(ovnClient *util.OVNClusterManagerClientset, wf *factory.WatchFactory,
-	recorder record.EventRecorder) (*secondaryNetworkClusterManager, error) {
+func newSecondaryNetworkClusterManager(
+	ovnClient *util.OVNClusterManagerClientset,
+	wf *factory.WatchFactory,
+	networkManager networkmanager.Interface,
+	recorder record.EventRecorder,
+) (*secondaryNetworkClusterManager, error) {
 	klog.Infof("Creating secondary network cluster manager")
 	networkIDAllocator := id.NewIDAllocator("NetworkIDs", maxSecondaryNetworkIDs)
 	// Reserve the id 0 for the default network.
@@ -50,12 +54,8 @@ func newSecondaryNetworkClusterManager(ovnClient *util.OVNClusterManagerClientse
 		ovnClient:          ovnClient,
 		watchFactory:       wf,
 		networkIDAllocator: networkIDAllocator,
+		networkManager:     networkManager,
 		recorder:           recorder,
-	}
-	var err error
-	sncm.nadController, err = nad.NewNetAttachDefinitionController("cluster-manager", sncm, wf, recorder)
-	if err != nil {
-		return nil, err
 	}
 	return sncm, nil
 }
@@ -68,13 +68,7 @@ func (sncm *secondaryNetworkClusterManager) SetNetworkStatusReporter(errorReport
 // needed logical entities
 func (sncm *secondaryNetworkClusterManager) Start() error {
 	klog.Infof("Starting secondary network cluster manager")
-
-	err := sncm.init()
-	if err != nil {
-		return err
-	}
-
-	return sncm.nadController.Start()
+	return sncm.init()
 }
 
 func (sncm *secondaryNetworkClusterManager) init() error {
@@ -103,22 +97,31 @@ func (sncm *secondaryNetworkClusterManager) init() error {
 
 func (sncm *secondaryNetworkClusterManager) Stop() {
 	klog.Infof("Stopping secondary network cluster manager")
-	sncm.nadController.Stop()
 }
 
-// NewNetworkController implements the networkAttachDefController.NetworkControllerManager
-// interface function. This function is called by the net-attach-def controller when
-// a secondary network is created.
-func (sncm *secondaryNetworkClusterManager) NewNetworkController(nInfo util.NetInfo) (nad.NetworkController, error) {
+func (sncm *secondaryNetworkClusterManager) GetDefaultNetworkController() networkmanager.ReconcilableNetworkController {
+	return nil
+}
+
+// NewNetworkController implements the networkmanager.ControllerManager
+// interface called by network manager to create or delete a network controller.
+func (sncm *secondaryNetworkClusterManager) NewNetworkController(nInfo util.NetInfo) (networkmanager.NetworkController, error) {
 	if !sncm.isTopologyManaged(nInfo) {
-		return nil, nad.ErrNetworkControllerTopologyNotManaged
+		return nil, networkmanager.ErrNetworkControllerTopologyNotManaged
 	}
 
 	klog.Infof("Creating new network controller for network %s of topology %s", nInfo.GetNetworkName(), nInfo.TopologyType())
 
 	namedIDAllocator := sncm.networkIDAllocator.ForName(nInfo.GetNetworkName())
-	sncc := newNetworkClusterController(namedIDAllocator, nInfo, sncm.ovnClient, sncm.watchFactory, sncm.recorder,
-		sncm.nadController, sncm.errorReporter)
+	sncc := newNetworkClusterController(
+		namedIDAllocator,
+		nInfo,
+		sncm.ovnClient,
+		sncm.watchFactory,
+		sncm.recorder,
+		sncm.networkManager,
+		sncm.errorReporter,
+	)
 	return sncc, nil
 }
 
@@ -139,15 +142,16 @@ func (sncm *secondaryNetworkClusterManager) isTopologyManaged(nInfo util.NetInfo
 	return false
 }
 
-// CleanupDeletedNetworks implements the networkAttachDefController.NetworkControllerManager
-// interface function.
-func (sncm *secondaryNetworkClusterManager) CleanupDeletedNetworks(validNetworks ...util.BasicNetInfo) error {
+// CleanupStaleNetworks cleans of stale data from the OVN database
+// corresponding to networks not included in validNetworks, which are considered
+// stale.
+func (sncm *secondaryNetworkClusterManager) CleanupStaleNetworks(validNetworks ...util.NetInfo) error {
 	existingNetworksMap := map[string]struct{}{}
 	for _, network := range validNetworks {
 		existingNetworksMap[network.GetNetworkName()] = struct{}{}
 	}
 
-	staleNetworkControllers := map[string]nad.NetworkController{}
+	staleNetworkControllers := map[string]networkmanager.NetworkController{}
 	existingNodes, err := sncm.watchFactory.GetNodes()
 	if err != nil {
 		return err
@@ -195,11 +199,18 @@ func (sncm *secondaryNetworkClusterManager) CleanupDeletedNetworks(validNetworks
 }
 
 // newDummyNetworkController creates a dummy network controller used to clean up specific network
-func (sncm *secondaryNetworkClusterManager) newDummyLayer3NetworkController(netName string) (nad.NetworkController, error) {
+func (sncm *secondaryNetworkClusterManager) newDummyLayer3NetworkController(netName string) (networkmanager.NetworkController, error) {
 	netInfo, _ := util.NewNetInfo(&ovncnitypes.NetConf{NetConf: types.NetConf{Name: netName}, Topology: ovntypes.Layer3Topology})
 	namedIDAllocator := sncm.networkIDAllocator.ForName(netInfo.GetNetworkName())
-	nc := newNetworkClusterController(namedIDAllocator, netInfo, sncm.ovnClient, sncm.watchFactory, sncm.recorder,
-		sncm.nadController, nil)
+	nc := newNetworkClusterController(
+		namedIDAllocator,
+		netInfo,
+		sncm.ovnClient,
+		sncm.watchFactory,
+		sncm.recorder,
+		sncm.networkManager,
+		nil,
+	)
 	err := nc.init()
 	return nc, err
 }

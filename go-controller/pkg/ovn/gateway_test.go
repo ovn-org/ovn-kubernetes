@@ -2006,7 +2006,7 @@ func newGatewayManager(ovn *FakeOVN, nodeName string) *GatewayManager {
 		controller.defaultCOPPUUID,
 		controller.kube,
 		controller.nbClient,
-		controller.NetInfo,
+		controller.GetNetInfo(),
 		ovn.watcher,
 		WithLoadBalancerGroups(
 			controller.routerLoadBalancerGroupUUID,
