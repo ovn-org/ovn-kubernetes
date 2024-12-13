@@ -307,6 +307,7 @@ var _ = Describe("SecondaryNodeNetworkController: UserDefinedPrimaryNetwork Gate
 		nodeLister.On("Get", mock.AnythingOfType("string")).Return(node, nil)
 		cnode := node.DeepCopy()
 		cnode.Annotations[util.OvnNodeManagementPortMacAddresses] = `{"bluenet":"00:00:00:55:66:77"}`
+		cnode.Annotations[util.OvnNodeManagementPortInfo] = `{"bluenet":{"ip-addresses":["10.128.0.2/24","ae70::2/112"]}}`
 		kubeMock.On("UpdateNodeStatus", cnode).Return(nil)
 
 		By("creating NAD for primary UDN")
