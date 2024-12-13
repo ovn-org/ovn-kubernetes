@@ -209,6 +209,8 @@ const (
 	LoadBalancerOwnerExternalID = OvnK8sPrefix + "/" + "owner"
 	// key for UDN enabled services routes
 	UDNEnabledServiceExternalID = OvnK8sPrefix + "/" + "udn-enabled-default-service"
+	// RequiredUDNNamespaceLabel is the required namespace label for enabling primary UDNs
+	RequiredUDNNamespaceLabel = "k8s.ovn.org/primary-user-defined-network"
 
 	// different secondary network topology type defined in CNI netconf
 	Layer3Topology   = "layer3"
