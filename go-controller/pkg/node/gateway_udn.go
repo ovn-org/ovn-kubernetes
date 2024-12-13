@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"strings"
 	"time"
 
 	v1 "k8s.io/api/core/v1"
@@ -290,7 +289,7 @@ func (udng *UserDefinedNetworkGateway) AddNetwork() error {
 	// port is created first and its MAC address configured. The IP(s) on that link are added after enslaving to a VRF device (addUDNManagementPortIPs)
 	// because IPv6 addresses are removed by the kernel (if not link local) when enslaved to a VRF device.
 	// Add the routes after setting the IP(s) to ensure that the default subnet route towards the mgmt network exists.
-	mplink, macAddress, err := udng.addUDNManagementPort()
+	mplink, err := udng.addUDNManagementPort()
 	if err != nil {
 		return fmt.Errorf("could not create management port netdevice for network %s: %w", udng.GetNetworkName(), err)
 	}
@@ -308,9 +307,6 @@ func (udng *UserDefinedNetworkGateway) AddNetwork() error {
 	}
 	if err = udng.vrfManager.AddVRFRoutes(vrfDeviceName, routes); err != nil {
 		return fmt.Errorf("could not add VRF %s routes for network %s, err: %v", vrfDeviceName, udng.GetNetworkName(), err)
-	}
-	if err := util.UpdateNodeManagementPortMACAddressesWithRetry(udng.node, udng.nodeLister, udng.kubeInterface, macAddress, udng.GetNetworkName()); err != nil {
-		return fmt.Errorf("unable to update mac address annotation for node %s, for network %s, err: %w", udng.node.Name, udng.GetNetworkName(), err)
 	}
 	// create the iprules for this network
 	udnReplyIPRules, err := udng.constructUDNVRFIPRules(vrfTableId)
@@ -396,58 +392,52 @@ func (udng *UserDefinedNetworkGateway) DelNetwork() error {
 
 // addUDNManagementPort does the following:
 // STEP1: creates the (netdevice) OVS interface on br-int for the UDN's management port
-// STEP2: It saves the MAC address generated on the 1st go as an option on the OVS interface
-// so that it persists on reboots
-// STEP3: sets up the management port link on the host
-// STEP4: enables IPv4 forwarding on the interface if the network has a v4 subnet
+// STEP2: sets up the management port link on the host
+// STEP3: enables IPv4 forwarding on the interface if the network has a v4 subnet
 // Returns a netlink Link which is the UDN management port interface along with its MAC address
-func (udng *UserDefinedNetworkGateway) addUDNManagementPort() (netlink.Link, net.HardwareAddr, error) {
+func (udng *UserDefinedNetworkGateway) addUDNManagementPort() (netlink.Link, error) {
 	var err error
 	interfaceName := util.GetNetworkScopedK8sMgmtHostIntfName(uint(udng.networkID))
+	networkLocalSubnets, err := udng.getLocalSubnets()
+	if err != nil {
+		return nil, err
+	}
+	if len(networkLocalSubnets) == 0 {
+		return nil, fmt.Errorf("cannot determine subnets while configuring management port for network: %s", udng.GetNetworkName())
+	}
+	macAddr := util.IPAddrToHWAddr(util.GetNodeManagementIfAddr(networkLocalSubnets[0]).IP)
+
 	// STEP1
 	stdout, stderr, err := util.RunOVSVsctl(
 		"--", "--may-exist", "add-port", "br-int", interfaceName,
-		"--", "set", "interface", interfaceName,
+		"--", "set", "interface", interfaceName, fmt.Sprintf("mac=\"%s\"", macAddr.String()),
 		"type=internal", "mtu_request="+fmt.Sprintf("%d", udng.NetInfo.MTU()),
 		"external-ids:iface-id="+udng.GetNetworkScopedK8sMgmtIntfName(udng.node.Name),
 	)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to add port to br-int for network %s, stdout: %q, stderr: %q, error: %w",
+		return nil, fmt.Errorf("failed to add port to br-int for network %s, stdout: %q, stderr: %q, error: %w",
 			udng.GetNetworkName(), stdout, stderr, err)
 	}
 	klog.V(3).Infof("Added OVS management port interface %s for network %s", interfaceName, udng.GetNetworkName())
 
 	// STEP2
-	macAddress, err := util.GetOVSPortMACAddress(interfaceName)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to get management port MAC address for network %s: %v", udng.GetNetworkName(), err)
-	}
-	// persist the MAC address so that upon node reboot we get back the same mac address.
-	_, stderr, err = util.RunOVSVsctl("set", "interface", interfaceName,
-		fmt.Sprintf("mac=%s", strings.ReplaceAll(macAddress.String(), ":", "\\:")))
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to persist MAC address %q for %q while plumbing network %s: stderr:%s (%v)",
-			macAddress.String(), interfaceName, udng.GetNetworkName(), stderr, err)
-	}
-
-	// STEP3
 	mplink, err := util.LinkSetUp(interfaceName)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to set the link up for interface %s while plumbing network %s, err: %v",
+		return nil, fmt.Errorf("failed to set the link up for interface %s while plumbing network %s, err: %v",
 			interfaceName, udng.GetNetworkName(), err)
 	}
 	klog.V(3).Infof("Setup management port link %s for network %s succeeded", interfaceName, udng.GetNetworkName())
 
-	// STEP4
+	// STEP3
 	// IPv6 forwarding is enabled globally
 	if ipv4, _ := udng.IPMode(); ipv4 {
 		stdout, stderr, err := util.RunSysctl("-w", fmt.Sprintf("net.ipv4.conf.%s.forwarding=1", interfaceName))
 		if err != nil || stdout != fmt.Sprintf("net.ipv4.conf.%s.forwarding = 1", interfaceName) {
-			return nil, nil, fmt.Errorf("could not set the correct forwarding value for interface %s: stdout: %v, stderr: %v, err: %v",
+			return nil, fmt.Errorf("could not set the correct forwarding value for interface %s: stdout: %v, stderr: %v, err: %v",
 				interfaceName, stdout, stderr, err)
 		}
 	}
-	return mplink, macAddress, nil
+	return mplink, nil
 }
 
 // getLocalSubnets returns pod subnets used by the current node.
@@ -512,11 +502,6 @@ func (udng *UserDefinedNetworkGateway) deleteUDNManagementPort() error {
 			udng.GetNetworkName(), stdout, stderr, err)
 	}
 	klog.V(3).Infof("Removed OVS management port interface %s for network %s", interfaceName, udng.GetNetworkName())
-	// sending nil mac address will delete the network's annotation value
-	if err := util.UpdateNodeManagementPortMACAddressesWithRetry(udng.node, udng.nodeLister, udng.kubeInterface, nil, udng.GetNetworkName()); err != nil {
-		return fmt.Errorf("unable to remove mac address annotation for node %s, for network %s, err: %v", udng.node.Name, udng.GetNetworkName(), err)
-	}
-	klog.V(3).Infof("Removed management port mac address information of %s for network %s", interfaceName, udng.GetNetworkName())
 	return nil
 }
 

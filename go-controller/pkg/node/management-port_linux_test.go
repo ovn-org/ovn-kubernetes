@@ -183,14 +183,18 @@ func checkMgmtTestPortIpsAndRoutes(configs []managementPortTestConfig, mgmtPortN
 }
 
 func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.NetNS,
-	configs []managementPortTestConfig, expectedLRPMAC string) {
+	configs []managementPortTestConfig, expectedLRPMAC string, legacy bool) {
 	const (
 		nodeName      string = "node1"
-		mgtPortMAC    string = "00:00:00:55:66:77"
 		mgtPort       string = types.K8sMgmtIntfName
 		legacyMgtPort string = types.K8sPrefix + nodeName
 		mtu           string = "1400"
 	)
+
+	mgmtPortMAC := util.IPAddrToHWAddr(net.ParseIP(configs[0].expectedManagementPortIP))
+	if legacy {
+		mgmtPortMAC, _ = net.ParseMAC("00:11:22:33:44:55")
+	}
 
 	// generic setup
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -202,14 +206,7 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 		Output: "internal," + mgtPort + "_0",
 	})
 	fexec.AddFakeCmdsNoOutputNoError([]string{
-		"ovs-vsctl --timeout=15 -- --if-exists del-port br-int " + legacyMgtPort + " -- --may-exist add-port br-int " + mgtPort + " -- set interface " + mgtPort + " type=internal mtu_request=" + mtu + " external-ids:iface-id=" + legacyMgtPort,
-	})
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface " + mgtPort + " mac_in_use",
-		Output: mgtPortMAC,
-	})
-	fexec.AddFakeCmdsNoOutputNoError([]string{
-		"ovs-vsctl --timeout=15 set interface " + mgtPort + " " + fmt.Sprintf("mac=%s", strings.ReplaceAll(mgtPortMAC, ":", "\\:")),
+		"ovs-vsctl --timeout=15 -- --if-exists del-port br-int " + legacyMgtPort + " -- --may-exist add-port br-int " + mgtPort + " -- set interface " + mgtPort + " mac=\"" + mgmtPortMAC.String() + "\"" + " type=internal mtu_request=" + mtu + " external-ids:iface-id=" + legacyMgtPort,
 	})
 	for _, cfg := range configs {
 		// We do not enable per-interface forwarding for IPv6
@@ -245,6 +242,11 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 	existingNode := v1.Node{ObjectMeta: metav1.ObjectMeta{
 		Name: nodeName,
 	}}
+
+	if legacy {
+		existingNode.Annotations = map[string]string{
+			util.OvnNodeManagementPortMacAddresses: fmt.Sprintf("{\"default\":%q}", mgmtPortMAC)}
+	}
 
 	fakeClient := fake.NewSimpleClientset(&v1.NodeList{
 		Items: []v1.Node{existingNode},
@@ -297,13 +299,6 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 	Expect(err).NotTo(HaveOccurred())
 
 	checkMgmtPortTestNFTables(configs, mgtPort)
-
-	updatedNode, err := fakeClient.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
-	Expect(err).NotTo(HaveOccurred())
-
-	macFromAnnotation, err := util.ParseNodeManagementPortMACAddresses(updatedNode, types.DefaultNetworkName)
-	Expect(err).NotTo(HaveOccurred())
-	Expect(macFromAnnotation.String()).To(Equal(mgtPortMAC))
 
 	Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 }
@@ -403,14 +398,6 @@ func testManagementPortDPU(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.
 	Expect(err).NotTo(HaveOccurred())
 	err = waiter.Wait()
 	Expect(err).NotTo(HaveOccurred())
-
-	updatedNode, err := fakeClient.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
-	Expect(err).NotTo(HaveOccurred())
-
-	macFromAnnotation, err := util.ParseNodeManagementPortMACAddresses(updatedNode, types.DefaultNetworkName)
-	Expect(err).NotTo(HaveOccurred())
-	Expect(macFromAnnotation.String()).To(Equal(mgtPortMAC))
-
 	Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 }
 
@@ -822,7 +809,30 @@ var _ = Describe("Management Port Operations", func() {
 								expectedManagementPortIP: v4mgtPortIP,
 								expectedGatewayIP:        v4gwIP,
 							},
-						}, v4lrpMAC)
+						}, v4lrpMAC, false)
+					return nil
+				}
+				err := app.Run([]string{
+					app.Name,
+					"--cluster-subnets=" + v4clusterCIDR,
+				})
+				Expect(err).NotTo(HaveOccurred())
+			})
+
+			ovntest.OnSupportedPlatformsIt("sets up the management port for IPv4 clusters with legacy annotation", func() {
+				app.Action = func(ctx *cli.Context) error {
+					testManagementPort(ctx, fexec, testNS,
+						[]managementPortTestConfig{
+							{
+								family: netlink.FAMILY_V4,
+
+								clusterCIDR: v4clusterCIDR,
+								nodeSubnet:  v4nodeSubnet,
+
+								expectedManagementPortIP: v4mgtPortIP,
+								expectedGatewayIP:        v4gwIP,
+							},
+						}, v4lrpMAC, true)
 					return nil
 				}
 				err := app.Run([]string{
@@ -846,7 +856,7 @@ var _ = Describe("Management Port Operations", func() {
 								expectedManagementPortIP: v6mgtPortIP,
 								expectedGatewayIP:        v6gwIP,
 							},
-						}, v6lrpMAC)
+						}, v6lrpMAC, false)
 					return nil
 				}
 				err := app.Run([]string{
@@ -881,7 +891,7 @@ var _ = Describe("Management Port Operations", func() {
 								expectedManagementPortIP: v6mgtPortIP,
 								expectedGatewayIP:        v6gwIP,
 							},
-						}, v4lrpMAC)
+						}, v4lrpMAC, false)
 					return nil
 				}
 				err := app.Run([]string{

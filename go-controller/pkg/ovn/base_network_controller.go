@@ -627,9 +627,23 @@ func (bnc *BaseNetworkController) deleteNamespaceLocked(ns string) (*namespaceIn
 }
 
 func (bnc *BaseNetworkController) syncNodeManagementPort(node *kapi.Node, switchName, routerName string, hostSubnets []*net.IPNet) ([]net.IP, error) {
-	macAddress, err := util.ParseNodeManagementPortMACAddresses(node, bnc.GetNetworkName())
-	if err != nil {
-		return nil, err
+	// get mac address from node only for legacy reasons, if it doesn't exist, then calculate it from subnets
+	var macAddress net.HardwareAddr
+	var err error
+	// find suitable MAC address
+
+	if bnc.IsDefault() {
+		// check node annotation first for default network, to ensure we are not picking a new MAC when one was already configured
+		if macAddress, err = util.ParseNodeManagementPortMACAddresses(node, bnc.GetNetworkName()); err != nil && !util.IsAnnotationNotSetError(err) {
+			return nil, err
+		}
+	}
+	if len(macAddress) == 0 {
+		// calculate mac
+		if len(hostSubnets) == 0 {
+			return nil, fmt.Errorf("unable to generate MAC address, no subnets provided for network: %s", bnc.GetNetworkName())
+		}
+		macAddress = util.IPAddrToHWAddr(util.GetNodeManagementIfAddr(hostSubnets[0]).IP)
 	}
 
 	var v4Subnet *net.IPNet

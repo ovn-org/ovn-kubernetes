@@ -255,28 +255,13 @@ func isRoutingViaHost(coreclient *corev1client.CoreV1Client, restconfig *rest.Co
 }
 
 // getPodMAC returns the pod's MAC address.
-func getPodMAC(client *corev1client.CoreV1Client, pod *kapi.Pod) (podMAC string, err error) {
-	if pod.Spec.HostNetwork {
-		node, err := client.Nodes().Get(context.TODO(), pod.Spec.NodeName, metav1.GetOptions{})
-		if err != nil {
-			return "", err
-		}
-
-		nodeMAC, err := util.ParseNodeManagementPortMACAddresses(node, types.DefaultNetworkName)
-		if err != nil {
-			return "", err
-		}
-		if nodeMAC != nil {
-			podMAC = nodeMAC.String()
-		}
-	} else {
-		podAnnotation, err := util.UnmarshalPodAnnotation(pod.ObjectMeta.Annotations, types.DefaultNetworkName)
-		if err != nil {
-			return "", err
-		}
-		if podAnnotation != nil {
-			podMAC = podAnnotation.MAC.String()
-		}
+func getPodMAC(pod *kapi.Pod) (podMAC string, err error) {
+	podAnnotation, err := util.UnmarshalPodAnnotation(pod.ObjectMeta.Annotations, types.DefaultNetworkName)
+	if err != nil {
+		return "", err
+	}
+	if podAnnotation != nil {
+		podMAC = podAnnotation.MAC.String()
 	}
 
 	return podMAC, nil
@@ -485,16 +470,28 @@ func getPodInfo(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, 
 		return nil, err
 	}
 
-	// Get the pod's MAC address.
-	podInfo.MAC, err = getPodMAC(coreclient, pod)
-	if err != nil {
-		klog.V(1).Infof("Problem obtaining Ethernet address of Pod %s in namespace %s\n", podName, namespace)
-		return nil, err
-	}
-
 	podInfo, err = getDatabaseURIs(coreclient, restconfig, ovnNamespace, podInfo)
 	if err != nil {
 		klog.Exitf("Failed to get database URIs: %v\n", err)
+	}
+
+	// Get the pod's MAC address.
+	// If hostnetwork, use mp0 mac
+	if pod.Spec.HostNetwork {
+		podInfo.OvnK8sMp0PortName = types.K8sMgmtIntfName
+		portCmd := fmt.Sprintf("ovs-vsctl get Interface %s mac_in_use", podInfo.OvnK8sMp0PortName)
+		localOutput, localError, err := execInPod(coreclient, restconfig, ovnNamespace, podInfo.OvnKubePodName, podInfo.OvnKubeContainerName, portCmd, "")
+		if err != nil {
+			return nil, fmt.Errorf("execInPod() failed. err: %s, stderr: %s, stdout: %s, podInfo: %v", err, localError, localOutput, podInfo)
+		}
+		localOutput = strings.ReplaceAll(localOutput, "\n", "")
+		podInfo.MAC = strings.ReplaceAll(localOutput, "\"", "")
+	} else {
+		podInfo.MAC, err = getPodMAC(pod)
+		if err != nil {
+			klog.V(1).Infof("Problem obtaining Ethernet address of Pod %s in namespace %s\n", podName, namespace)
+			return nil, err
+		}
 	}
 
 	// Find rtos MAC (this is the pod's first hop router).

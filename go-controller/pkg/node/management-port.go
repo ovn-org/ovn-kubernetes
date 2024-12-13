@@ -86,38 +86,36 @@ func (mp *managementPort) Create(routeManager *routemanager.Controller, node *v1
 		}
 	}
 
+	var err error
+	var macAddr net.HardwareAddr
+	// find suitable MAC address
+	// check node annotation first, to ensure we are not picking a new MAC when one was already configured
+	if macAddr, err = util.ParseNodeManagementPortMACAddresses(node, types.DefaultNetworkName); err != nil && !util.IsAnnotationNotSetError(err) {
+		return nil, err
+	}
+	if len(macAddr) == 0 {
+		// calculate mac from subnets
+		if len(mp.hostSubnets) == 0 {
+			return nil, fmt.Errorf("cannot determine subnets while configuring management port for network: %s", types.DefaultNetworkName)
+		}
+		macAddr = util.IPAddrToHWAddr(util.GetNodeManagementIfAddr(mp.hostSubnets[0]).IP)
+	}
+
 	// Create a OVS internal interface.
 	legacyMgmtIntfName := util.GetLegacyK8sMgmtIntfName(mp.nodeName)
 	stdout, stderr, err := util.RunOVSVsctl(
 		"--", "--if-exists", "del-port", "br-int", legacyMgmtIntfName,
 		"--", "--may-exist", "add-port", "br-int", types.K8sMgmtIntfName,
-		"--", "set", "interface", types.K8sMgmtIntfName,
+		"--", "set", "interface", types.K8sMgmtIntfName, fmt.Sprintf("mac=\"%s\"", macAddr.String()),
 		"type=internal", "mtu_request="+fmt.Sprintf("%d", config.Default.MTU),
 		"external-ids:iface-id="+types.K8sPrefix+mp.nodeName)
 	if err != nil {
 		klog.Errorf("Failed to add port to br-int, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
 		return nil, err
 	}
-	macAddress, err := util.GetOVSPortMACAddress(types.K8sMgmtIntfName)
-	if err != nil {
-		klog.Errorf("Failed to get management port MAC address: %v", err)
-		return nil, err
-	}
-	// persist the MAC address so that upon node reboot we get back the same mac address.
-	_, stderr, err = util.RunOVSVsctl("set", "interface", types.K8sMgmtIntfName,
-		fmt.Sprintf("mac=%s", strings.ReplaceAll(macAddress.String(), ":", "\\:")))
-	if err != nil {
-		klog.Errorf("Failed to persist MAC address %q for %q: stderr:%s (%v)", macAddress.String(),
-			types.K8sMgmtIntfName, stderr, err)
-		return nil, err
-	}
 
 	cfg, err := createPlatformManagementPort(routeManager, types.K8sMgmtIntfName, mp.hostSubnets)
 	if err != nil {
-		return nil, err
-	}
-
-	if err := util.UpdateNodeManagementPortMACAddressesWithRetry(node, nodeLister, kubeInterface, macAddress, types.DefaultNetworkName); err != nil {
 		return nil, err
 	}
 
