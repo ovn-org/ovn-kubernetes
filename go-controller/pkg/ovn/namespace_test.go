@@ -51,6 +51,16 @@ func newNamespaceMeta(namespace string, additionalLabels map[string]string) meta
 	}
 }
 
+func newUDNNamespaceWithLabels(namespace string, additionalLabels map[string]string) *v1.Namespace {
+	n := &v1.Namespace{
+		ObjectMeta: newNamespaceMeta(namespace, additionalLabels),
+		Spec:       v1.NamespaceSpec{},
+		Status:     v1.NamespaceStatus{},
+	}
+	n.Labels[ovntypes.RequiredUDNNamespaceLabel] = ""
+	return n
+}
+
 func newNamespaceWithLabels(namespace string, additionalLabels map[string]string) *v1.Namespace {
 	return &v1.Namespace{
 		ObjectMeta: newNamespaceMeta(namespace, additionalLabels),
@@ -62,6 +72,14 @@ func newNamespaceWithLabels(namespace string, additionalLabels map[string]string
 func newNamespace(namespace string) *v1.Namespace {
 	return &v1.Namespace{
 		ObjectMeta: newNamespaceMeta(namespace, nil),
+		Spec:       v1.NamespaceSpec{},
+		Status:     v1.NamespaceStatus{},
+	}
+}
+
+func newUDNNamespace(namespace string) *v1.Namespace {
+	return &v1.Namespace{
+		ObjectMeta: newNamespaceMeta(namespace, map[string]string{ovntypes.RequiredUDNNamespaceLabel: ""}),
 		Spec:       v1.NamespaceSpec{},
 		Status:     v1.NamespaceStatus{},
 	}

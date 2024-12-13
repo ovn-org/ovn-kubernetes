@@ -30,6 +30,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/userdefinednetwork/template"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
@@ -74,9 +75,9 @@ var _ = Describe("User Defined Network Controller", func() {
 		})
 		Context("reconcile UDN CR", func() {
 			It("should create NAD successfully", func() {
-				udn := testUDN()
+				udn := testPrimaryUDN()
 				expectedNAD := testNAD()
-				c = newTestController(renderNadStub(expectedNAD), udn)
+				c = newTestController(renderNadStub(expectedNAD), udn, testNamespace("test"))
 				Expect(c.Run()).To(Succeed())
 
 				Eventually(func() []metav1.Condition {
@@ -96,10 +97,53 @@ var _ = Describe("User Defined Network Controller", func() {
 				Expect(nad).To(Equal(expectedNAD))
 			})
 
+			It("should fail when required namespace label is missing for primary network", func() {
+				udn := testPrimaryUDN()
+				expectedNAD := testNAD()
+				c = newTestController(renderNadStub(expectedNAD), udn, invalidTestNamespace("test"))
+				Expect(c.Run()).To(Succeed())
+
+				Eventually(func() []metav1.Condition {
+					udn, err := cs.UserDefinedNetworkClient.K8sV1().UserDefinedNetworks(udn.Namespace).Get(context.Background(), udn.Name, metav1.GetOptions{})
+					Expect(err).NotTo(HaveOccurred())
+					return normalizeConditions(udn.Status.Conditions)
+				}).Should(Equal([]metav1.Condition{{
+					Type:    "NetworkReady",
+					Status:  "False",
+					Reason:  "SyncError",
+					Message: "invalid primary network state for namespace \"test\": a valid primary user defined network or network attachment definition custom resource, and required namespace label \"k8s.ovn.org/primary-user-defined-network\" must both be present",
+				}}))
+
+				_, err := cs.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(udn.Namespace).Get(context.Background(), udn.Name, metav1.GetOptions{})
+				Expect(kerrors.IsNotFound(err)).To(BeTrue())
+			})
+
+			It("should NOT fail when required namespace label is missing for secondary network", func() {
+				udn := testSecondaryUDN()
+				expectedNAD := testNAD()
+				c = newTestController(renderNadStub(expectedNAD), udn, invalidTestNamespace("test"))
+				Expect(c.Run()).To(Succeed())
+
+				Eventually(func() []metav1.Condition {
+					udn, err := cs.UserDefinedNetworkClient.K8sV1().UserDefinedNetworks(udn.Namespace).Get(context.Background(), udn.Name, metav1.GetOptions{})
+					Expect(err).NotTo(HaveOccurred())
+					return normalizeConditions(udn.Status.Conditions)
+				}).Should(Equal([]metav1.Condition{{
+					Type:    "NetworkReady",
+					Status:  "True",
+					Reason:  "NetworkAttachmentDefinitionReady",
+					Message: "NetworkAttachmentDefinition has been created",
+				}}))
+
+				nad, err := cs.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(udn.Namespace).Get(context.Background(), udn.Name, metav1.GetOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(nad).To(Equal(expectedNAD))
+			})
+
 			It("should fail when NAD render fail", func() {
-				udn := testUDN()
+				udn := testPrimaryUDN()
 				renderErr := errors.New("render NAD fails")
-				c = newTestController(failRenderNadStub(renderErr), udn)
+				c = newTestController(failRenderNadStub(renderErr), udn, testNamespace("test"))
 				Expect(c.Run()).To(Succeed())
 
 				Eventually(func() []metav1.Condition {
@@ -117,8 +161,8 @@ var _ = Describe("User Defined Network Controller", func() {
 				Expect(kerrors.IsNotFound(err)).To(BeTrue())
 			})
 			It("should fail when NAD create fail", func() {
-				udn := testUDN()
-				c = newTestController(noopRenderNadStub(), udn)
+				udn := testPrimaryUDN()
+				c = newTestController(noopRenderNadStub(), udn, testNamespace("test"))
 
 				expectedError := errors.New("create NAD error")
 				cs.NetworkAttchDefClient.(*netv1fakeclientset.Clientset).PrependReactor("create", "network-attachment-definitions", func(action testing.Action) (handled bool, ret runtime.Object, err error) {
@@ -143,10 +187,10 @@ var _ = Describe("User Defined Network Controller", func() {
 			})
 
 			It("should fail when foreign NAD exist", func() {
-				udn := testUDN()
+				udn := testPrimaryUDN()
 				foreignNad := testNAD()
 				foreignNad.ObjectMeta.OwnerReferences = nil
-				c = newTestController(noopRenderNadStub(), udn, foreignNad)
+				c = newTestController(noopRenderNadStub(), udn, foreignNad, testNamespace("test"))
 				Expect(c.Run()).To(Succeed())
 
 				Eventually(func() []metav1.Condition {
@@ -161,9 +205,9 @@ var _ = Describe("User Defined Network Controller", func() {
 				}}))
 			})
 			It("should reconcile mutated NAD", func() {
-				udn := testUDN()
+				udn := testPrimaryUDN()
 				expectedNAD := testNAD()
-				c = newTestController(renderNadStub(expectedNAD), udn)
+				c = newTestController(renderNadStub(expectedNAD), udn, testNamespace("test"))
 				Expect(c.Run()).To(Succeed())
 
 				Eventually(func() []metav1.Condition {
@@ -189,9 +233,9 @@ var _ = Describe("User Defined Network Controller", func() {
 				}).Should(Equal(expectedNAD))
 			})
 			It("should fail when update mutated NAD fails", func() {
-				udn := testUDN()
+				udn := testPrimaryUDN()
 				expectedNAD := testNAD()
-				c = newTestController(renderNadStub(expectedNAD), udn)
+				c = newTestController(renderNadStub(expectedNAD), udn, testNamespace("test"))
 
 				expectedErr := errors.New("update error")
 				cs.NetworkAttchDefClient.(*netv1fakeclientset.Clientset).PrependReactor("update", "network-attachment-definitions", func(action testing.Action) (bool, runtime.Object, error) {
@@ -243,12 +287,12 @@ var _ = Describe("User Defined Network Controller", func() {
 			})
 
 			It("given primary UDN, should fail when primary NAD already exist", func() {
-				primaryUDN := testUDN()
+				primaryUDN := testPrimaryUDN()
 				primaryUDN.Spec.Topology = udnv1.NetworkTopologyLayer2
 				primaryUDN.Spec.Layer2 = &udnv1.Layer2Config{Role: udnv1.NetworkRolePrimary}
 
 				primaryNAD := primaryNetNAD()
-				c = newTestController(noopRenderNadStub(), primaryUDN, primaryNAD)
+				c = newTestController(noopRenderNadStub(), primaryUDN, primaryNAD, testNamespace("test"))
 				Expect(c.Run()).To(Succeed())
 
 				Eventually(func() []metav1.Condition {
@@ -263,14 +307,14 @@ var _ = Describe("User Defined Network Controller", func() {
 				}}))
 			})
 			It("given primary UDN, should fail when unmarshal primary NAD fails", func() {
-				primaryUDN := testUDN()
+				primaryUDN := testPrimaryUDN()
 				primaryUDN.Spec.Topology = udnv1.NetworkTopologyLayer3
 				primaryUDN.Spec.Layer3 = &udnv1.Layer3Config{Role: udnv1.NetworkRolePrimary}
 
 				primaryNAD := primaryNetNAD()
 				primaryNAD.Name = "another-primary-net"
 				primaryNAD.Spec.Config = "!@#$"
-				c = newTestController(noopRenderNadStub(), primaryUDN, primaryNAD)
+				c = newTestController(noopRenderNadStub(), primaryUDN, primaryNAD, testNamespace("test"))
 				Expect(c.Run()).To(Succeed())
 
 				Eventually(func() []metav1.Condition {
@@ -286,9 +330,9 @@ var _ = Describe("User Defined Network Controller", func() {
 			})
 
 			It("should add finalizer to UDN", func() {
-				udn := testUDN()
+				udn := testPrimaryUDN()
 				udn.Finalizers = nil
-				c = newTestController(noopRenderNadStub(), udn)
+				c = newTestController(noopRenderNadStub(), udn, testNamespace("test"))
 				Expect(c.Run()).To(Succeed())
 
 				Eventually(func() []string {
@@ -298,9 +342,9 @@ var _ = Describe("User Defined Network Controller", func() {
 				}).Should(Equal([]string{"k8s.ovn.org/user-defined-network-protection"}))
 			})
 			It("should fail when add finalizer to UDN fails", func() {
-				udn := testUDN()
+				udn := testPrimaryUDN()
 				udn.Finalizers = nil
-				c = newTestController(noopRenderNadStub(), udn)
+				c = newTestController(noopRenderNadStub(), udn, testNamespace("test"))
 
 				expectedErr := errors.New("update UDN error")
 				cs.UserDefinedNetworkClient.(*udnfakeclient.Clientset).PrependReactor("update", "userdefinednetworks", func(action testing.Action) (handled bool, obj runtime.Object, err error) {
@@ -324,14 +368,14 @@ var _ = Describe("User Defined Network Controller", func() {
 			It("when UDN is being deleted, NAD exist, 2 pods using UDN, should delete NAD once no pod uses the network", func() {
 				var err error
 				nad := testNAD()
-				udn := testUDN()
+				udn := testPrimaryUDN()
 				udn.SetDeletionTimestamp(&metav1.Time{Time: time.Now()})
 
 				testOVNPodAnnot := map[string]string{util.OvnPodAnnotationName: `{"default": {"role":"primary"}, "test/test": {"role": "secondary"}}`}
 				pod1 := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod-1", Namespace: udn.Namespace, Annotations: testOVNPodAnnot}}
 				pod2 := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod-2", Namespace: udn.Namespace, Annotations: testOVNPodAnnot}}
 
-				c = newTestController(renderNadStub(nad), udn, nad, pod1, pod2)
+				c = newTestController(renderNadStub(nad), udn, nad, pod1, pod2, testNamespace("test"))
 				// user short interval to make the controller re-enqueue requests
 				c.networkInUseRequeueInterval = 50 * time.Millisecond
 				Expect(c.Run()).To(Succeed())
@@ -414,10 +458,9 @@ var _ = Describe("User Defined Network Controller", func() {
 					}
 					By("create test namespaces with tests label")
 					connectedNsNames = []string{"green", "yellow"}
-					testLabelEmea := map[string]string{testLabelKey: testLabelValue}
 					for _, nsName := range connectedNsNames {
 						ns := testNamespace(nsName)
-						ns.Labels = testLabelEmea
+						ns.Labels[testLabelKey] = testLabelValue
 						testObjs = append(testObjs, ns)
 					}
 					By("create CUDN selecting namespaces with test label")
@@ -426,7 +469,13 @@ var _ = Describe("User Defined Network Controller", func() {
 						Key:      testLabelKey,
 						Operator: metav1.LabelSelectorOpIn,
 						Values:   []string{testLabelValue},
-					}}}}
+					}}},
+						Network: udnv1.NetworkSpec{
+							Topology: udnv1.NetworkTopologyLayer3,
+							Layer3: &udnv1.Layer3Config{
+								Role: udnv1.NetworkRolePrimary,
+							},
+						}}
 					testObjs = append(testObjs, cudn)
 
 					By("start test controller")
@@ -474,10 +523,10 @@ var _ = Describe("User Defined Network Controller", func() {
 				It("when CR selector has selection added, should create NAD in matching namespaces", func() {
 					By("create test new namespaces with new selection label")
 					newNsLabelValue := "us"
-					newNsLabel := map[string]string{testLabelKey: newNsLabelValue}
 					newNsNames := []string{"black", "gray"}
 					for _, nsName := range newNsNames {
-						ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: nsName, Labels: newNsLabel}}
+						ns := testNamespace(nsName)
+						ns.Labels[testLabelKey] = newNsLabelValue
 						_, err := cs.KubeClient.CoreV1().Namespaces().Create(context.Background(), ns, metav1.CreateOptions{})
 						Expect(err).NotTo(HaveOccurred())
 					}
@@ -611,7 +660,7 @@ var _ = Describe("User Defined Network Controller", func() {
 					newNsNames := []string{"black", "gray"}
 					for _, nsName := range newNsNames {
 						ns := testNamespace(nsName)
-						ns.Labels = map[string]string{testLabelKey: testLabelValue}
+						ns.Labels[testLabelKey] = testLabelValue
 						_, err := cs.KubeClient.CoreV1().Namespaces().Create(context.Background(), ns, metav1.CreateOptions{})
 						Expect(err).NotTo(HaveOccurred())
 					}
@@ -633,13 +682,47 @@ var _ = Describe("User Defined Network Controller", func() {
 					}
 				})
 
+				It("when new namespace is created without required UDN label, it should not create NAD", func() {
+					By("create new namespaces with test label")
+					newNsNames := []string{"black", "gray"}
+					for _, nsName := range newNsNames {
+						ns := invalidTestNamespace(nsName)
+						ns.Labels[testLabelKey] = testLabelValue
+						_, err := cs.KubeClient.CoreV1().Namespaces().Create(context.Background(), ns, metav1.CreateOptions{})
+						Expect(err).NotTo(HaveOccurred())
+					}
+
+					Eventually(func() []metav1.Condition {
+						cudn, err := cs.UserDefinedNetworkClient.K8sV1().ClusterUserDefinedNetworks().Get(context.Background(), cudnName, metav1.GetOptions{})
+						Expect(err).NotTo(HaveOccurred())
+						return normalizeConditions(cudn.Status.Conditions)
+					}).Should(Equal([]metav1.Condition{{
+						Type:   "NetworkReady",
+						Status: "False",
+						Reason: "NetworkAttachmentDefinitionSyncError",
+						Message: "invalid primary network state for namespace \"black\": a valid primary user defined network or network attachment definition " +
+							"custom resource, and required namespace label \"k8s.ovn.org/primary-user-defined-network\" must both be present\ninvalid primary " +
+							"network state for namespace \"gray\": a valid primary user defined network or network attachment definition custom resource, and " +
+							"required namespace label \"k8s.ovn.org/primary-user-defined-network\" must both be present",
+					}}), "status should report NAD failed in existing and new test namespaces")
+					for _, nsName := range newNsNames {
+						nads, err := cs.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(nsName).List(context.Background(), metav1.ListOptions{})
+						Expect(err).NotTo(HaveOccurred())
+						Expect(len(nads.Items)).To(Equal(0))
+					}
+				})
+
 				It("when existing namespace is labeled with matching label, should create NAD in newly labeled matching namespaces", func() {
 					By("add test label to tests disconnected namespaces")
 					for _, nsName := range disconnectedNsNames {
-						p := fmt.Sprintf(`[{"op": "add", "path": "./metadata/labels", "value": {%q: %q}}]`, testLabelKey, testLabelValue)
+						p := fmt.Sprintf(`[{"op": "add", "path": "./metadata/labels/%s", "value": %q}]`, testLabelKey, testLabelValue)
 						ns, err := cs.KubeClient.CoreV1().Namespaces().Patch(context.Background(), nsName, types.JSONPatchType, []byte(p), metav1.PatchOptions{})
 						Expect(err).NotTo(HaveOccurred())
-						Expect(ns.Labels).To(Equal(map[string]string{testLabelKey: testLabelValue}))
+						Expect(ns.Labels).To(Equal(map[string]string{
+							testLabelKey:                       testLabelValue,
+							"kubernetes.io/metadata.name":      nsName,
+							ovntypes.RequiredUDNNamespaceLabel: "",
+						}))
 					}
 
 					Eventually(func() []metav1.Condition {
@@ -698,17 +781,16 @@ var _ = Describe("User Defined Network Controller", func() {
 			It("when started, CR exist, stale NADs exist, should deleted stale NADs", func() {
 				var testObjs []runtime.Object
 				staleNADsNsNames := []string{"red", "blue"}
-				staleLabel := map[string]string{"test.io": "stale"}
 				for _, nsName := range staleNADsNsNames {
 					ns := testNamespace(nsName)
-					ns.SetLabels(staleLabel)
+					ns.Labels["test.io"] = "stale"
 					testObjs = append(testObjs, ns)
 				}
 				connectedNsNames := []string{"green", "yellow"}
 				connectedLabel := map[string]string{"test.io": "connected"}
 				for _, nsName := range connectedNsNames {
 					ns := testNamespace(nsName)
-					ns.SetLabels(connectedLabel)
+					ns.Labels["test.io"] = "connected"
 					testObjs = append(testObjs, ns)
 				}
 				cudn := testClusterUDN("test")
@@ -745,10 +827,10 @@ var _ = Describe("User Defined Network Controller", func() {
 
 	Context("UserDefinedNetwork object sync", func() {
 		It("should fail when NAD owner-reference is malformed", func() {
-			udn := testUDN()
+			udn := testPrimaryUDN()
 			mutatedNAD := testNAD()
 			mutatedNAD.ObjectMeta.OwnerReferences = []metav1.OwnerReference{{Kind: "DifferentKind"}}
-			c := newTestController(noopRenderNadStub(), udn, mutatedNAD)
+			c := newTestController(noopRenderNadStub(), udn, mutatedNAD, testNamespace("test"))
 
 			_, err := c.syncUserDefinedNetwork(udn)
 			Expect(err).To(Equal(errors.New("foreign NetworkAttachmentDefinition with the desired name already exist [test/test]")))
@@ -758,7 +840,7 @@ var _ = Describe("User Defined Network Controller", func() {
 			udn := testsUDNWithDeletionTimestamp(time.Now())
 			unmanagedNAD := testNAD()
 			unmanagedNAD.OwnerReferences[0].UID = "99"
-			c := newTestController(noopRenderNadStub(), udn, unmanagedNAD)
+			c := newTestController(noopRenderNadStub(), udn, unmanagedNAD, testNamespace("test"))
 
 			_, err := c.syncUserDefinedNetwork(udn)
 			Expect(err).ToNot(HaveOccurred())
@@ -773,7 +855,7 @@ var _ = Describe("User Defined Network Controller", func() {
 		It("when UDN is being deleted, and NAD exist, should delete NAD", func() {
 			udn := testsUDNWithDeletionTimestamp(time.Now())
 			nad := testNAD()
-			c := newTestController(noopRenderNadStub(), udn, nad)
+			c := newTestController(noopRenderNadStub(), udn, nad, testNamespace("test"))
 
 			_, err := c.syncUserDefinedNetwork(udn)
 			Expect(err).ToNot(HaveOccurred())
@@ -785,7 +867,7 @@ var _ = Describe("User Defined Network Controller", func() {
 		It("when UDN is being deleted, and NAD exist, should fail when remove NAD finalizer fails", func() {
 			udn := testsUDNWithDeletionTimestamp(time.Now())
 			nad := testNAD()
-			c := newTestController(noopRenderNadStub(), udn, nad)
+			c := newTestController(noopRenderNadStub(), udn, nad, testNamespace("test"))
 
 			expectedErr := errors.New("update NAD error")
 			cs.NetworkAttchDefClient.(*netv1fakeclientset.Clientset).PrependReactor("update", "network-attachment-definitions", func(action testing.Action) (bool, runtime.Object, error) {
@@ -800,7 +882,7 @@ var _ = Describe("User Defined Network Controller", func() {
 			udn := testsUDNWithDeletionTimestamp(time.Now())
 			nad := testNAD()
 			nad.Finalizers = nil
-			c := newTestController(noopRenderNadStub(), udn, nad)
+			c := newTestController(noopRenderNadStub(), udn, nad, testNamespace("test"))
 
 			_, err := c.syncUserDefinedNetwork(udn)
 			Expect(err).ToNot(HaveOccurred())
@@ -808,7 +890,7 @@ var _ = Describe("User Defined Network Controller", func() {
 		})
 		It("when UDN is being deleted, and NAD not exist, should remove finalizer from UDN", func() {
 			udn := testsUDNWithDeletionTimestamp(time.Now())
-			c := newTestController(noopRenderNadStub(), udn)
+			c := newTestController(noopRenderNadStub(), udn, testNamespace("test"))
 
 			_, err := c.syncUserDefinedNetwork(udn)
 			Expect(err).ToNot(HaveOccurred())
@@ -818,7 +900,7 @@ var _ = Describe("User Defined Network Controller", func() {
 			udn := testsUDNWithDeletionTimestamp(time.Now())
 			nad := testNAD()
 			nad.Finalizers = nil
-			c := newTestController(noopRenderNadStub(), udn, nad)
+			c := newTestController(noopRenderNadStub(), udn, nad, testNamespace("test"))
 
 			expectedErr := errors.New("update UDN error")
 			cs.UserDefinedNetworkClient.(*udnfakeclient.Clientset).PrependReactor("update", "userdefinednetworks", func(action testing.Action) (bool, runtime.Object, error) {
@@ -842,7 +924,7 @@ var _ = Describe("User Defined Network Controller", func() {
 					},
 				},
 			}
-			c := newTestController(renderNadStub(nad), udn, nad, pod)
+			c := newTestController(renderNadStub(nad), udn, nad, pod, testNamespace("test"))
 
 			_, err := c.syncUserDefinedNetwork(udn)
 			Expect(err).ToNot(HaveOccurred())
@@ -909,7 +991,7 @@ var _ = Describe("User Defined Network Controller", func() {
 	Context("UserDefinedNetwork status update", func() {
 		DescribeTable("should update status, when",
 			func(nad *netv1.NetworkAttachmentDefinition, syncErr error, expectedStatus *udnv1.UserDefinedNetworkStatus) {
-				udn := testUDN()
+				udn := testPrimaryUDN()
 				c := newTestController(noopRenderNadStub(), udn)
 
 				Expect(c.updateUserDefinedNetworkStatus(udn, nad, syncErr)).To(Succeed(), "should update status successfully")
@@ -961,7 +1043,7 @@ var _ = Describe("User Defined Network Controller", func() {
 		)
 
 		It("should update status according to sync errors", func() {
-			udn := testUDN()
+			udn := testPrimaryUDN()
 			c := newTestController(noopRenderNadStub(), udn)
 
 			nad := testNAD()
@@ -1004,7 +1086,7 @@ var _ = Describe("User Defined Network Controller", func() {
 				return true, nil, expectedError
 			})
 
-			udn := testUDN()
+			udn := testPrimaryUDN()
 			nad := testNAD()
 			Expect(c.updateUserDefinedNetworkStatus(udn, nad, nil)).To(MatchError(expectedError))
 		})
@@ -1294,7 +1376,7 @@ func normalizeConditions(conditions []metav1.Condition) []metav1.Condition {
 	return conditions
 }
 
-func testUDN() *udnv1.UserDefinedNetwork {
+func testPrimaryUDN() *udnv1.UserDefinedNetwork {
 	return &udnv1.UserDefinedNetwork{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:       "test",
@@ -1302,11 +1384,34 @@ func testUDN() *udnv1.UserDefinedNetwork {
 			UID:        "1",
 			Finalizers: []string{"k8s.ovn.org/user-defined-network-protection"},
 		},
+		Spec: udnv1.UserDefinedNetworkSpec{
+			Topology: udnv1.NetworkTopologyLayer3,
+			Layer3: &udnv1.Layer3Config{
+				Role: udnv1.NetworkRolePrimary,
+			},
+		},
+	}
+}
+
+func testSecondaryUDN() *udnv1.UserDefinedNetwork {
+	return &udnv1.UserDefinedNetwork{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "test",
+			Namespace:  "test",
+			UID:        "1",
+			Finalizers: []string{"k8s.ovn.org/user-defined-network-protection"},
+		},
+		Spec: udnv1.UserDefinedNetworkSpec{
+			Topology: udnv1.NetworkTopologyLayer3,
+			Layer3: &udnv1.Layer3Config{
+				Role: udnv1.NetworkRoleSecondary,
+			},
+		},
 	}
 }
 
 func testsUDNWithDeletionTimestamp(ts time.Time) *udnv1.UserDefinedNetwork {
-	udn := testUDN()
+	udn := testPrimaryUDN()
 	deletionTimestamp := metav1.NewTime(ts)
 	udn.DeletionTimestamp = &deletionTimestamp
 	return udn
@@ -1334,6 +1439,18 @@ func testNAD() *netv1.NetworkAttachmentDefinition {
 	}
 }
 
+func invalidTestNamespace(name string) *corev1.Namespace {
+	return &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: name,
+			Labels: map[string]string{
+				"kubernetes.io/metadata.name": name,
+			},
+		},
+		Spec: corev1.NamespaceSpec{},
+	}
+}
+
 func primaryNetNAD() *netv1.NetworkAttachmentDefinition {
 	return &netv1.NetworkAttachmentDefinition{
 		ObjectMeta: metav1.ObjectMeta{
@@ -1353,14 +1470,9 @@ func testNADWithDeletionTimestamp(ts time.Time) *netv1.NetworkAttachmentDefiniti
 }
 
 func testNamespace(name string) *corev1.Namespace {
-	return &corev1.Namespace{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: name,
-			Labels: map[string]string{
-				"kubernetes.io/metadata.name": name,
-			},
-		},
-	}
+	ns := invalidTestNamespace(name)
+	ns.ObjectMeta.Labels[ovntypes.RequiredUDNNamespaceLabel] = ""
+	return ns
 }
 
 func testClusterUDN(name string, targetNamespaces ...string) *udnv1.ClusterUserDefinedNetwork {

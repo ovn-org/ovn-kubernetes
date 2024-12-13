@@ -124,7 +124,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 				_, node1UDNSubnet, _ := net.ParseCIDR(v4Node1Net1)
 				nadName := util.GetNADName(eipNamespace2, nadName1)
 				egressCDNNamespace := newNamespaceWithLabels(eipNamespace, egressPodLabel)
-				egressUDNNamespace := newNamespaceWithLabels(eipNamespace2, egressPodLabel)
+				egressUDNNamespace := newUDNNamespaceWithLabels(eipNamespace2, egressPodLabel)
 				egressPodCDNLocal := *newPodWithLabels(eipNamespace, podName, node1Name, podV4IP, egressPodLabel)
 				egressPodUDNLocal := *newPodWithLabels(eipNamespace2, podName2, node1Name, v4Pod1IPNode1Net1, egressPodLabel)
 				egressPodCDNRemote := *newPodWithLabels(eipNamespace, podName3, node2Name, podV4IP2, egressPodLabel)
@@ -495,7 +495,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 				_, node1UDNSubnet, _ := net.ParseCIDR(v4Node1Net1)
 				nadName := util.GetNADName(eipNamespace2, nadName1)
 				egressCDNNamespace := newNamespaceWithLabels(eipNamespace, egressPodLabel)
-				egressUDNNamespace := newNamespaceWithLabels(eipNamespace2, egressPodLabel)
+				egressUDNNamespace := newUDNNamespaceWithLabels(eipNamespace2, egressPodLabel)
 				egressPodCDNLocal := *newPodWithLabels(eipNamespace, podName, node1Name, podV4IP, egressPodLabel)
 				egressPodUDNLocal := *newPodWithLabels(eipNamespace2, podName2, node1Name, v4Pod1IPNode1Net1, egressPodLabel)
 				egressPodCDNRemote := *newPodWithLabels(eipNamespace, podName3, node2Name, podV4IP2, egressPodLabel)
@@ -1012,7 +1012,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 				_, node1UDNSubnet, _ := net.ParseCIDR(v4Node1Net1)
 				nadName := util.GetNADName(eipNamespace2, nadName1)
 				egressCDNNamespace := newNamespaceWithLabels(eipNamespace, egressPodLabel)
-				egressUDNNamespace := newNamespaceWithLabels(eipNamespace2, egressPodLabel)
+				egressUDNNamespace := newUDNNamespaceWithLabels(eipNamespace2, egressPodLabel)
 				egressPodCDNLocal := *newPodWithLabels(eipNamespace, podName, node1Name, podV4IP, egressPodLabel)
 				egressPodUDNLocal := *newPodWithLabels(eipNamespace2, podName2, node1Name, v4Pod1IPNode1Net1, egressPodLabel)
 				egressPodCDNRemote := *newPodWithLabels(eipNamespace, podName3, node2Name, podV4IP2, egressPodLabel)
@@ -1504,7 +1504,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 				_, node1CDNSubnet, _ := net.ParseCIDR(v4Node1Subnet)
 				_, node1UDNSubnet, _ := net.ParseCIDR(v4Node1Net1)
 				egressCDNNamespace := newNamespaceWithLabels(eipNamespace, nil)
-				egressUDNNamespace := newNamespaceWithLabels(eipNamespace2, nil)
+				egressUDNNamespace := newUDNNamespaceWithLabels(eipNamespace2, nil)
 				egressPodCDN := *newPodWithLabels(eipNamespace, podName, node1Name, podV4IP, egressPodLabel)
 				egressPodUDN := *newPodWithLabels(eipNamespace2, podName2, node1Name, podV4IP2, egressPodLabel)
 
@@ -1685,10 +1685,14 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 				nUDN.IP = iUDN
 				secConInfo.bnc.logicalPortCache.add(&egressPodUDN, "", util.GetNADName(nad.Namespace, nad.Name), "", nil, []*net.IPNet{nUDN})
 				ginkgo.By("update namespaces with label so its now selected by EgressIP")
-				egressCDNNamespace.Labels = egressPodLabel
+				for k, v := range egressPodLabel {
+					egressCDNNamespace.Labels[k] = v
+				}
 				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Update(context.Background(), egressCDNNamespace, metav1.UpdateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				egressUDNNamespace.Labels = egressPodLabel
+				for k, v := range egressPodLabel {
+					egressUDNNamespace.Labels[k] = v
+				}
 				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Update(context.Background(), egressUDNNamespace, metav1.UpdateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				egressSVCServedPodsASv4, _ := buildEgressServiceAddressSets(nil)
@@ -1865,7 +1869,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 				_, node1CDNSubnet, _ := net.ParseCIDR(v4Node1Subnet)
 				_, node1UDNSubnet, _ := net.ParseCIDR(v4Node1Net1)
 				egressCDNNamespace := newNamespaceWithLabels(eipNamespace, egressPodLabel)
-				egressUDNNamespace := newNamespaceWithLabels(eipNamespace2, egressPodLabel)
+				egressUDNNamespace := newUDNNamespaceWithLabels(eipNamespace2, egressPodLabel)
 				egressPodCDN := *newPodWithLabels(eipNamespace, podName, node1Name, podV4IP, egressPodLabel)
 				egressPodUDN := *newPodWithLabels(eipNamespace2, podName2, node1Name, podV4IP2, egressPodLabel)
 
@@ -2219,7 +2223,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 				_, node1UDNSubnet, _ := net.ParseCIDR(v4Node1Net1)
 				nadName := util.GetNADName(eipNamespace2, nadName1)
 				egressCDNNamespace := newNamespaceWithLabels(eipNamespace, egressPodLabel)
-				egressUDNNamespace := newNamespaceWithLabels(eipNamespace2, egressPodLabel)
+				egressUDNNamespace := newUDNNamespaceWithLabels(eipNamespace2, egressPodLabel)
 				egressPodCDNLocal := *newPodWithLabels(eipNamespace, podName, node1Name, podV4IP, nil)
 				egressPodUDNLocal := *newPodWithLabels(eipNamespace2, podName2, node1Name, v4Pod1IPNode1Net1, nil)
 				egressPodCDNRemote := *newPodWithLabels(eipNamespace, podName3, node2Name, podV4IP2, egressPodLabel)
