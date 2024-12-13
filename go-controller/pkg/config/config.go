@@ -653,7 +653,7 @@ func PrepareTestConfig() error {
 	ClusterManager = savedClusterManager
 	Kubernetes.DisableRequestedChassis = false
 	EnableMulticast = false
-	Default.OVSDBTxnTimeout = 5 * time.Second
+	Default.OVSDBTxnTimeout = 1 * time.Second
 
 	if err := completeConfig(); err != nil {
 		return err
