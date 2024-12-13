@@ -2043,6 +2043,16 @@ func commonFlows(subnets []*net.IPNet, bridge *bridgeConfiguration) ([]string, e
 			dftFlows = append(dftFlows,
 				fmt.Sprintf("cookie=%s, priority=10, table=11, reg0=0x1, "+
 					"actions=output:%s", defaultOpenFlowCookie, ofPortHost))
+
+			// Send UDN destined traffic to right patch port
+			for _, netConfig := range bridge.patchedNetConfigs() {
+				if netConfig.masqCTMark != ctMarkOVN {
+					dftFlows = append(dftFlows,
+						fmt.Sprintf("cookie=%s, priority=5, table=11, ct_mark=%s"+
+							"actions=output:%s", defaultOpenFlowCookie, netConfig.masqCTMark, netConfig.ofPortPatch))
+				}
+			}
+
 			dftFlows = append(dftFlows,
 				fmt.Sprintf("cookie=%s, priority=1, table=11, "+
 					"actions=output:%s", defaultOpenFlowCookie, defaultNetConfig.ofPortPatch))
