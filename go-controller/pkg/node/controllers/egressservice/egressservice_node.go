@@ -1,21 +1,19 @@
 package egressservice
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/coreos/go-iptables/iptables"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressserviceapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1"
 	egressserviceinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/informers/externalversions/egressservice/v1"
 	egressservicelisters "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/listers/egressservice/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
-	nodeipt "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"
+	nodenft "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/nftables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -34,11 +32,20 @@ import (
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
+	"sigs.k8s.io/knftables"
 )
 
 const (
-	Chain          = "OVN-KUBE-EGRESS-SVC" // called from nat-POSTROUTING
-	IPRulePriority = 5000                  // the priority of the ip rules created by the controller. Egress IP priority is 6000.
+	IPRulePriority = 5000 // the priority of the ip rules created by the controller. Egress IP priority is 6000.
+
+	// chain for egress service NAT rules
+	NFTablesChainName = "egress-services"
+
+	// map for IPv4 SNAT mappings
+	NFTablesMapV4 = "egress-service-snat-v4"
+
+	// map for IPv6 SNAT mappings
+	NFTablesMapV6 = "egress-service-snat-v6"
 )
 
 type Controller struct {
@@ -217,7 +224,7 @@ func (c *Controller) Run(wg *sync.WaitGroup, threadiness int) error {
 	return nil
 }
 
-// Removes stale iptables/ip rules, updates the controller cache with the correct existing ones.
+// Removes stale nftables/ip rules, updates the controller cache with the correct existing ones.
 func (c *Controller) repair() error {
 	c.Lock()
 	defer c.Unlock()
@@ -327,7 +334,7 @@ func (c *Controller) repair() error {
 		errorList = append(errorList, err)
 	}
 
-	err = c.repairIPTables(v4EndpointsToSvcKey, v6EndpointsToSvcKey)
+	err = c.repairNFTables(v4EndpointsToSvcKey, v6EndpointsToSvcKey)
 	if err != nil {
 		errorList = append(errorList, err)
 	}
@@ -479,191 +486,123 @@ func (c *Controller) repairIPRules(v4EpsToServices, v6EpsToServices, cipsToServi
 	return utilerrors.Join(errorList...)
 }
 
-// Remove stale iptables rules, update caches with valid existing ones.
-// In addition, verify that the first rule in the Chain matches the "returnMark":
-// packets coming with that mark should not be evaluated for SNATing = we make sure
-// the first rule in the Chain is a RETURN one for this mark.
-// Valid iptables rules in this context are those that belong to an existing EgressService, their
-// source points to an existing ep the service and the SNAT matches the service's LB.
-func (c *Controller) repairIPTables(v4EpsToServices, v6EpsToServices map[string]string) error {
-	type esvcIPTRule struct {
-		svcKey string
-		ep     string
-		lb     string
-		mark   int32
-	}
-
-	parseIPTRule := func(rule string) (*esvcIPTRule, error) {
-		split := strings.Fields(rule)
-		if len(split)%2 != 0 {
-			return nil, fmt.Errorf("expected rule %s to have a key-value format", rule)
-		}
-
-		args := map[string]string{}
-		for i := 0; i < len(split); i += 2 {
-			args[split[i]] = split[i+1]
-		}
-
-		svcKey := args["--comment"]
-		ep := args["-s"]
-		lb := args["--to-source"]
-
-		strMark := args["--mark"]
-		mark := int32(0)
-		if strMark != "" {
-			parsedFWMark, err := strconv.ParseInt(strMark, 0, 32)
-			if err != nil {
-				return nil, fmt.Errorf("could not parse fwmark for rule %s, err: %w", rule, err)
-			}
-			mark = int32(parsedFWMark)
-		}
-
-		return &esvcIPTRule{svcKey: svcKey, ep: ep, lb: lb, mark: mark}, nil
-	}
-
-	snatRepair := func(proto iptables.Protocol, epsToSvcs map[string]string) error {
-		defaultFirstRule := c.defaultReturnRule(proto) // fetch the rule that should be first in the chain
-
-		ipt, err := util.GetIPTablesHelper(proto)
-		if err != nil {
-			return err
-		}
-
-		snatRules, err := ipt.List("nat", Chain)
-		if err != nil {
-			return err
-		}
-
-		// we verify that the first rule is the "do not snat" one
-		if len(snatRules) == 0 {
-			return nodeipt.AddRules([]nodeipt.Rule{defaultFirstRule}, true)
-		}
-
-		parsedFWMark, err := strconv.ParseInt(c.returnMark, 0, 0)
-		if err != nil {
-			return fmt.Errorf("could not parse %s as default return mark for egress services, err: %w", c.returnMark, err)
-		}
-		mark := int32(parsedFWMark)
-
-		firstRule := snatRules[0]
-		parsed, err := parseIPTRule(firstRule)
-		doNotSNATAdded := false
-		if err != nil || parsed.mark != mark {
-			// The first rule is either malformed (err != nil) or it does not match
-			// the correct mark. In either case, we should add the correct rule anyways
-			// to be sure it is the first one.
-			err := nodeipt.AddRules([]nodeipt.Rule{defaultFirstRule}, false)
-			if err != nil {
-				return err
-			}
-			doNotSNATAdded = true
-		}
-		if !doNotSNATAdded {
-			// the do not snat rule was already present at the first position
-			snatRules = snatRules[1:]
-		}
-
-		// now we run over the existing rules to determine which should be deleted
-		// and update the cache accordingly
-		rulesToDel := []string{}
-		for _, rule := range snatRules {
-			if rule == fmt.Sprintf("-N %s", Chain) {
-				// Ignore chain creation rule
+// Remove stale nftables map elements, update caches with valid existing ones. Ensure that
+// the chain exists and checks the correct returnMark before SNATting. Valid nftables
+// elements in this context are those that belong to an existing EgressService; their
+// source points to an existing endpoint of the service and the SNAT matches the service's
+// LB.
+func (c *Controller) repairNFTables(v4EpsToServices, v6EpsToServices map[string]string) error {
+	snatRepair := func(tx *knftables.Transaction, family utilnet.IPFamily, existingElements []*knftables.Element, epsToSvcs map[string]string) {
+		for _, elem := range existingElements {
+			if len(elem.Key) != 1 || len(elem.Value) != 1 || elem.Comment == nil {
+				// the element is malformed
+				tx.Delete(elem)
 				continue
 			}
 
-			parsed, err := parseIPTRule(rule)
-			if err != nil {
-				// the rule is malformed
-				rulesToDel = append(rulesToDel, rule)
-				continue
-			}
+			ep := elem.Key[0]
+			lb := elem.Value[0]
+			svcKey := *elem.Comment
 
-			svcKey := epsToSvcs[parsed.ep]
-			if svcKey != parsed.svcKey {
-				// the rule matches the wrong service
-				rulesToDel = append(rulesToDel, rule)
+			if svcKey != epsToSvcs[ep] {
+				// the element matches the wrong service
+				tx.Delete(elem)
 				continue
 			}
 
 			svcState, found := c.services[svcKey]
 			if !found {
-				// the rule matches a service that is no longer valid
-				rulesToDel = append(rulesToDel, rule)
+				// the element matches a service that is no longer valid
+				tx.Delete(elem)
 				continue
 			}
 
 			lbToCompare := svcState.v4LB
 			epsToAdd := svcState.v4Eps
-			if proto == iptables.ProtocolIPv6 {
+			if family == utilnet.IPv6 {
 				lbToCompare = svcState.v6LB
 				epsToAdd = svcState.v6Eps
 			}
 
-			if lbToCompare != parsed.lb {
-				// the rule SNATs to the wrong IP
-				rulesToDel = append(rulesToDel, rule)
+			if lbToCompare != lb {
+				// the element SNATs to the wrong IP
+				tx.Delete(elem)
 				continue
 			}
 
-			// the rule is valid, we update the service's cache to not reconfigure it later.
-			epsToAdd.Insert(parsed.ep)
+			// the element is valid, we update the service's cache to not reconfigure it later.
+			epsToAdd.Insert(ep)
 		}
-
-		errorList := []error{}
-		for _, rule := range rulesToDel {
-			args := strings.Fields(rule)
-			if len(args) < 2 {
-				continue
-			}
-			// strip "-A OVN-KUBE-EGRESS-SVC"
-			args = args[2:]
-			err := ipt.Delete("nat", Chain, args...)
-			if err != nil {
-				errorList = append(errorList, err)
-			}
-		}
-
-		return utilerrors.Join(errorList...)
 	}
 
-	errorList := []error{}
+	nft, err := nodenft.GetNFTablesHelper()
+	if err != nil {
+		return err
+	}
+
+	tx := nft.NewTransaction()
+	tx.Add(&knftables.Chain{
+		Name: NFTablesChainName,
+
+		Type:     knftables.PtrTo(knftables.NATType),
+		Hook:     knftables.PtrTo(knftables.PostroutingHook),
+		Priority: knftables.PtrTo(knftables.SNATPriority),
+	})
+	tx.Flush(&knftables.Chain{
+		Name: NFTablesChainName,
+	})
+	tx.Add(&knftables.Rule{
+		Chain: NFTablesChainName,
+		Rule: knftables.Concat(
+			"mark", "==", c.returnMark,
+			"return",
+		),
+		Comment: knftables.PtrTo("DoNotSNAT"),
+	})
+
 	if config.IPv4Mode {
-		ipt, err := util.GetIPTablesHelper(iptables.ProtocolIPv4)
-		if err != nil {
-			errorList = append(errorList, err)
-		}
+		tx.Add(&knftables.Map{
+			Name: NFTablesMapV4,
+			Type: "ipv4_addr : ipv4_addr",
+		})
+		tx.Add(&knftables.Rule{
+			Chain: NFTablesChainName,
+			Rule: knftables.Concat(
+				"snat to", "ip saddr map", "@", NFTablesMapV4,
+			),
+		})
 
-		err = ipt.NewChain("nat", Chain)
-		if err != nil {
-			klog.V(5).Infof("Could not create egress service nat chain: %v", err)
+		existing, err := nft.ListElements(context.TODO(), "map", NFTablesMapV4)
+		if err != nil && !knftables.IsNotFound(err) {
+			return fmt.Errorf("could not list existing egress service map elements: %w", err)
 		}
-
-		err = snatRepair(iptables.ProtocolIPv4, v4EpsToServices)
-		if err != nil {
-			errorList = append(errorList, err)
-		}
-
+		snatRepair(tx, utilnet.IPv4, existing, v4EpsToServices)
 	}
 
 	if config.IPv6Mode {
-		ipt, err := util.GetIPTablesHelper(iptables.ProtocolIPv4)
-		if err != nil {
-			errorList = append(errorList, err)
-		}
+		tx.Add(&knftables.Map{
+			Name: NFTablesMapV6,
+			Type: "ipv6_addr : ipv6_addr",
+		})
+		tx.Add(&knftables.Rule{
+			Chain: NFTablesChainName,
+			Rule: knftables.Concat(
+				"snat to", "ip6 saddr map", "@", NFTablesMapV6,
+			),
+		})
 
-		err = ipt.NewChain("nat", Chain)
-		if err != nil {
-			klog.V(5).Infof("Could not create egress service nat chain: %v", err)
+		existing, err := nft.ListElements(context.TODO(), "map", NFTablesMapV6)
+		if err != nil && !knftables.IsNotFound(err) {
+			return fmt.Errorf("could not list existing egress service map elements: %w", err)
 		}
-
-		err = snatRepair(iptables.ProtocolIPv6, v6EpsToServices)
-		if err != nil {
-			errorList = append(errorList, err)
-		}
+		snatRepair(tx, utilnet.IPv6, existing, v6EpsToServices)
 	}
 
-	return utilerrors.Join(errorList...)
+	err = nft.Run(context.TODO(), tx)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (c *Controller) runEgressServiceWorker(wg *sync.WaitGroup) {
@@ -807,43 +746,55 @@ func (c *Controller) syncEgressService(key string) error {
 	v4ToDelete := cachedState.v4Eps.Difference(v4Eps)
 	v6ToDelete := cachedState.v6Eps.Difference(v6Eps)
 
+	nft, err := nodenft.GetNFTablesHelper()
+	if err != nil {
+		return err
+	}
+	tx := nft.NewTransaction()
+
 	if cachedState.v4LB != "" {
 		for ep := range v4ToAdd {
-			err := nodeipt.AddRules([]nodeipt.Rule{snatIPTRuleFor(key, cachedState.v4LB, ep)}, true)
-			if err != nil {
-				return err
-			}
+			tx.Add(&knftables.Element{
+				Map:     NFTablesMapV4,
+				Key:     []string{ep},
+				Value:   []string{cachedState.v4LB},
+				Comment: knftables.PtrTo(key),
+			})
 			cachedState.v4Eps.Insert(ep)
 		}
 
 		for ep := range v4ToDelete {
-			err := nodeipt.DelRules([]nodeipt.Rule{snatIPTRuleFor(key, cachedState.v4LB, ep)})
-			if err != nil {
-				return err
-			}
-
+			tx.Delete(&knftables.Element{
+				Map: NFTablesMapV4,
+				Key: []string{ep},
+			})
 			cachedState.v4Eps.Delete(ep)
 		}
 	}
 
 	if cachedState.v6LB != "" {
 		for ep := range v6ToAdd {
-			err := nodeipt.AddRules([]nodeipt.Rule{snatIPTRuleFor(key, cachedState.v6LB, ep)}, true)
-			if err != nil {
-				return err
-			}
-
+			tx.Add(&knftables.Element{
+				Map:     NFTablesMapV6,
+				Key:     []string{ep},
+				Value:   []string{cachedState.v6LB},
+				Comment: knftables.PtrTo(key),
+			})
 			cachedState.v6Eps.Insert(ep)
 		}
 
 		for ep := range v6ToDelete {
-			err := nodeipt.DelRules([]nodeipt.Rule{snatIPTRuleFor(key, cachedState.v6LB, ep)})
-			if err != nil {
-				return err
-			}
-
+			tx.Delete(&knftables.Element{
+				Map: NFTablesMapV6,
+				Key: []string{ep},
+			})
 			cachedState.v6Eps.Delete(ep)
 		}
+	}
+
+	err = nft.Run(context.TODO(), tx)
+	if err != nil {
+		return err
 	}
 
 	// At this point we finished handling the SNAT rules
@@ -1010,26 +961,34 @@ func (c *Controller) allEndpointsFor(svc *corev1.Service, localOnly bool) (sets.
 
 // Clears all of the SNAT rules of the service.
 func (c *Controller) clearServiceSNATRules(key string, state *svcState) error {
-	for ip := range state.v4Eps {
-		err := nodeipt.DelRules([]nodeipt.Rule{snatIPTRuleFor(key, state.v4LB, ip)})
-		if err != nil {
-			return err
-		}
+	nft, err := nodenft.GetNFTablesHelper()
+	if err != nil {
+		return err
+	}
+	tx := nft.NewTransaction()
 
+	for ip := range state.v4Eps {
+		tx.Delete(&knftables.Element{
+			Map: NFTablesMapV4,
+			Key: []string{ip},
+		})
 		state.v4Eps.Delete(ip)
 	}
 	state.v4LB = ""
 
 	for ip := range state.v6Eps {
-		err := nodeipt.DelRules([]nodeipt.Rule{snatIPTRuleFor(key, state.v6LB, ip)})
-		if err != nil {
-			return err
-		}
-
+		tx.Delete(&knftables.Element{
+			Map: NFTablesMapV6,
+			Key: []string{ip},
+		})
 		state.v6Eps.Delete(ip)
 	}
 	state.v6LB = ""
 
+	err = nft.Run(context.TODO(), tx)
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -1071,7 +1030,7 @@ func (c *Controller) clearServiceIPRules(state *svcState) error {
 	return utilerrors.Join(errorList...)
 }
 
-// Clears all of the iptables rules that relate to the service and removes it from the cache.
+// Clears all of the nftables rules that relate to the service and removes it from the cache.
 func (c *Controller) clearServiceRulesAndRequeue(key string, state *svcState) error {
 	state.stale = true
 
@@ -1142,43 +1101,4 @@ func deleteNodePortIPRule(family string, priority int32, src string, srcPort int
 	}
 
 	return nil
-}
-
-// Returns the SNAT rule that should be created for the given lb/endpoint
-func snatIPTRuleFor(comment string, lb, ip string) nodeipt.Rule {
-	return nodeipt.Rule{
-		Table: "nat",
-		Chain: Chain,
-		Args: []string{
-			"-s", ip,
-			"-m", "comment", "--comment", comment,
-			"-j", "SNAT",
-			"--to-source", lb,
-		},
-		Protocol: getIPTablesProtocol(ip),
-	}
-}
-
-// getIPTablesProtocol returns the IPTables protocol matching the protocol (v4/v6) of provided IP string
-func getIPTablesProtocol(ip string) iptables.Protocol {
-	if utilnet.IsIPv6String(ip) {
-		return iptables.ProtocolIPv6
-	}
-	return iptables.ProtocolIPv4
-}
-
-// Returns the rule that should be first in the Chain.
-// Packets coming with the controller's "returnMark" should not be evaluated for SNATing.
-// The rule here is a "RETURN" for these packets.
-func (c *Controller) defaultReturnRule(proto iptables.Protocol) nodeipt.Rule {
-	return nodeipt.Rule{
-		Table: "nat",
-		Chain: Chain,
-		Args: []string{
-			"-m", "mark", "--mark", string(c.returnMark),
-			"-m", "comment", "--comment", "DoNotSNAT",
-			"-j", "RETURN",
-		},
-		Protocol: proto,
-	}
 }

@@ -413,16 +413,12 @@ var _ = Describe("Node Operations", func() {
 							"-j OVN-KUBE-NODEPORT",
 							"-j OVN-KUBE-ITP",
 						},
-						"POSTROUTING": []string{
-							"-j OVN-KUBE-EGRESS-SVC",
-						},
 						"OVN-KUBE-NODEPORT": []string{},
 						"OVN-KUBE-EXTERNALIP": []string{
 							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, externalIP, service.Spec.Ports[0].Port, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 						},
-						"OVN-KUBE-ETP":        []string{},
-						"OVN-KUBE-ITP":        []string{},
-						"OVN-KUBE-EGRESS-SVC": []string{},
+						"OVN-KUBE-ETP": []string{},
+						"OVN-KUBE-ITP": []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -493,16 +489,12 @@ var _ = Describe("Node Operations", func() {
 							"-j OVN-KUBE-NODEPORT",
 							"-j OVN-KUBE-ITP",
 						},
-						"POSTROUTING": []string{
-							"-j OVN-KUBE-EGRESS-SVC",
-						},
 						"OVN-KUBE-NODEPORT": []string{},
 						"OVN-KUBE-EXTERNALIP": []string{
 							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, externalIP, service.Spec.Ports[0].Port, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 						},
-						"OVN-KUBE-ETP":        []string{},
-						"OVN-KUBE-ITP":        []string{},
-						"OVN-KUBE-EGRESS-SVC": []string{},
+						"OVN-KUBE-ETP": []string{},
+						"OVN-KUBE-ITP": []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -575,16 +567,12 @@ var _ = Describe("Node Operations", func() {
 							"-j OVN-KUBE-NODEPORT",
 							"-j OVN-KUBE-ITP",
 						},
-						"POSTROUTING": []string{
-							"-j OVN-KUBE-EGRESS-SVC",
-						},
 						"OVN-KUBE-NODEPORT": []string{
 							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 						},
 						"OVN-KUBE-EXTERNALIP": []string{},
 						"OVN-KUBE-ETP":        []string{},
 						"OVN-KUBE-ITP":        []string{},
-						"OVN-KUBE-EGRESS-SVC": []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -667,9 +655,6 @@ var _ = Describe("Node Operations", func() {
 							"-j OVN-KUBE-NODEPORT",
 							"-j OVN-KUBE-ITP",
 						},
-						"POSTROUTING": []string{
-							"-j OVN-KUBE-EGRESS-SVC",
-						},
 						"OVN-KUBE-NODEPORT": []string{
 							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 						},
@@ -677,8 +662,7 @@ var _ = Describe("Node Operations", func() {
 						"OVN-KUBE-ETP": []string{
 							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, config.Gateway.MasqueradeIPs.V4HostETPLocalMasqueradeIP.String(), service.Spec.Ports[0].NodePort),
 						},
-						"OVN-KUBE-ITP":        []string{},
-						"OVN-KUBE-EGRESS-SVC": []string{},
+						"OVN-KUBE-ITP": []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -767,9 +751,6 @@ var _ = Describe("Node Operations", func() {
 							"-j OVN-KUBE-NODEPORT",
 							"-j OVN-KUBE-ITP",
 						},
-						"POSTROUTING": []string{
-							"-j OVN-KUBE-EGRESS-SVC",
-						},
 						"OVN-KUBE-NODEPORT": []string{
 							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 						},
@@ -777,9 +758,8 @@ var _ = Describe("Node Operations", func() {
 							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Status.LoadBalancer.Ingress[0].IP, service.Spec.Ports[0].Port, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, externalIP, service.Spec.Ports[0].Port, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 						},
-						"OVN-KUBE-ETP":        []string{},
-						"OVN-KUBE-ITP":        []string{},
-						"OVN-KUBE-EGRESS-SVC": []string{},
+						"OVN-KUBE-ETP": []string{},
+						"OVN-KUBE-ITP": []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -868,9 +848,6 @@ var _ = Describe("Node Operations", func() {
 							"-j OVN-KUBE-NODEPORT",
 							"-j OVN-KUBE-ITP",
 						},
-						"POSTROUTING": []string{
-							"-j OVN-KUBE-EGRESS-SVC",
-						},
 						"OVN-KUBE-NODEPORT": []string{
 							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 						},
@@ -883,8 +860,7 @@ var _ = Describe("Node Operations", func() {
 							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, externalIP, service.Spec.Ports[0].Port, config.Gateway.MasqueradeIPs.V4HostETPLocalMasqueradeIP.String(), service.Spec.Ports[0].NodePort),
 							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, config.Gateway.MasqueradeIPs.V4HostETPLocalMasqueradeIP.String(), service.Spec.Ports[0].NodePort),
 						},
-						"OVN-KUBE-ITP":        []string{},
-						"OVN-KUBE-EGRESS-SVC": []string{},
+						"OVN-KUBE-ITP": []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -1010,9 +986,6 @@ var _ = Describe("Node Operations", func() {
 							"-j OVN-KUBE-NODEPORT",
 							"-j OVN-KUBE-ITP",
 						},
-						"POSTROUTING": []string{
-							"-j OVN-KUBE-EGRESS-SVC",
-						},
 						"OVN-KUBE-NODEPORT": []string{},
 						"OVN-KUBE-EXTERNALIP": []string{
 							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Status.LoadBalancer.Ingress[0].IP, service.Spec.Ports[0].Port, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
@@ -1024,8 +997,7 @@ var _ = Describe("Node Operations", func() {
 							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%d -m statistic --mode random --probability 0.5000000000", service.Spec.Ports[0].Protocol, externalIP, service.Spec.Ports[0].Port, ep1.Addresses[0], int32(service.Spec.Ports[0].TargetPort.IntValue())),
 							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%d -m statistic --mode random --probability 1.0000000000", service.Spec.Ports[0].Protocol, externalIP, service.Spec.Ports[0].Port, ep2.Addresses[0], int32(service.Spec.Ports[0].TargetPort.IntValue())),
 						},
-						"OVN-KUBE-ITP":        []string{},
-						"OVN-KUBE-EGRESS-SVC": []string{},
+						"OVN-KUBE-ITP": []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -1123,9 +1095,6 @@ var _ = Describe("Node Operations", func() {
 							"-j OVN-KUBE-NODEPORT",
 							"-j OVN-KUBE-ITP",
 						},
-						"POSTROUTING": []string{
-							"-j OVN-KUBE-EGRESS-SVC",
-						},
 						"OVN-KUBE-NODEPORT": []string{
 							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 						},
@@ -1133,9 +1102,8 @@ var _ = Describe("Node Operations", func() {
 							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Status.LoadBalancer.Ingress[0].IP, service.Spec.Ports[0].Port, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, externalIP, service.Spec.Ports[0].Port, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 						},
-						"OVN-KUBE-ETP":        []string{},
-						"OVN-KUBE-ITP":        []string{},
-						"OVN-KUBE-EGRESS-SVC": []string{},
+						"OVN-KUBE-ETP": []string{},
+						"OVN-KUBE-ITP": []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -1238,9 +1206,6 @@ var _ = Describe("Node Operations", func() {
 							"-j OVN-KUBE-NODEPORT",
 							"-j OVN-KUBE-ITP",
 						},
-						"POSTROUTING": []string{
-							"-j OVN-KUBE-EGRESS-SVC",
-						},
 						"OVN-KUBE-NODEPORT": []string{
 							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 						},
@@ -1252,8 +1217,7 @@ var _ = Describe("Node Operations", func() {
 							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Status.LoadBalancer.Ingress[0].IP, service.Spec.Ports[0].Port, config.Gateway.MasqueradeIPs.V4HostETPLocalMasqueradeIP.String(), service.Spec.Ports[0].NodePort),
 							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, externalIP, service.Spec.Ports[0].Port, config.Gateway.MasqueradeIPs.V4HostETPLocalMasqueradeIP.String(), service.Spec.Ports[0].NodePort),
 						},
-						"OVN-KUBE-ITP":        []string{},
-						"OVN-KUBE-EGRESS-SVC": []string{},
+						"OVN-KUBE-ITP": []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -1358,16 +1322,12 @@ var _ = Describe("Node Operations", func() {
 							"-j OVN-KUBE-NODEPORT",
 							"-j OVN-KUBE-ITP",
 						},
-						"POSTROUTING": []string{
-							"-j OVN-KUBE-EGRESS-SVC",
-						},
 						"OVN-KUBE-NODEPORT": []string{
 							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, service.Spec.ClusterIPs[0], service.Spec.Ports[0].Port),
 						},
 						"OVN-KUBE-EXTERNALIP": []string{},
 						"OVN-KUBE-ETP":        []string{},
 						"OVN-KUBE-ITP":        []string{},
-						"OVN-KUBE-EGRESS-SVC": []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -1457,16 +1417,12 @@ var _ = Describe("Node Operations", func() {
 							"-j OVN-KUBE-NODEPORT",
 							"-j OVN-KUBE-ITP",
 						},
-						"POSTROUTING": []string{
-							"-j OVN-KUBE-EGRESS-SVC",
-						},
 						"OVN-KUBE-EXTERNALIP": []string{
 							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, externalIPv4, service.Spec.Ports[0].Port, clusterIPv4, service.Spec.Ports[0].Port),
 						},
-						"OVN-KUBE-NODEPORT":   []string{},
-						"OVN-KUBE-ETP":        []string{},
-						"OVN-KUBE-ITP":        []string{},
-						"OVN-KUBE-EGRESS-SVC": []string{},
+						"OVN-KUBE-NODEPORT": []string{},
+						"OVN-KUBE-ETP":      []string{},
+						"OVN-KUBE-ITP":      []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -1555,14 +1511,10 @@ var _ = Describe("Node Operations", func() {
 							"-j OVN-KUBE-NODEPORT",
 							"-j OVN-KUBE-ITP",
 						},
-						"POSTROUTING": []string{
-							"-j OVN-KUBE-EGRESS-SVC",
-						},
 						"OVN-KUBE-NODEPORT":   []string{},
 						"OVN-KUBE-EXTERNALIP": []string{},
 						"OVN-KUBE-ETP":        []string{},
 						"OVN-KUBE-ITP":        []string{},
-						"OVN-KUBE-EGRESS-SVC": []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -1640,14 +1592,10 @@ var _ = Describe("Node Operations", func() {
 							"-j OVN-KUBE-NODEPORT",
 							"-j OVN-KUBE-ITP",
 						},
-						"POSTROUTING": []string{
-							"-j OVN-KUBE-EGRESS-SVC",
-						},
 						"OVN-KUBE-NODEPORT":   []string{},
 						"OVN-KUBE-EXTERNALIP": []string{},
 						"OVN-KUBE-ETP":        []string{},
 						"OVN-KUBE-ITP":        []string{},
-						"OVN-KUBE-EGRESS-SVC": []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -1729,18 +1677,14 @@ var _ = Describe("Node Operations", func() {
 							"-j OVN-KUBE-NODEPORT",
 							"-j OVN-KUBE-ITP",
 						},
-						"POSTROUTING": []string{
-							"-j OVN-KUBE-EGRESS-SVC",
-						},
 						"OVN-KUBE-EXTERNALIP": []string{
 							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v",
 								service.Spec.Ports[0].Protocol, externalIP, service.Spec.Ports[0].Port,
 								service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 						},
-						"OVN-KUBE-NODEPORT":   []string{},
-						"OVN-KUBE-ETP":        []string{},
-						"OVN-KUBE-ITP":        []string{},
-						"OVN-KUBE-EGRESS-SVC": []string{},
+						"OVN-KUBE-NODEPORT": []string{},
+						"OVN-KUBE-ETP":      []string{},
+						"OVN-KUBE-ITP":      []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -1776,12 +1720,8 @@ var _ = Describe("Node Operations", func() {
 							"-j OVN-KUBE-NODEPORT",
 							"-j OVN-KUBE-ITP",
 						},
-						"POSTROUTING": []string{
-							"-j OVN-KUBE-EGRESS-SVC",
-						},
-						"OVN-KUBE-ETP":        []string{},
-						"OVN-KUBE-ITP":        []string{},
-						"OVN-KUBE-EGRESS-SVC": []string{},
+						"OVN-KUBE-ETP": []string{},
+						"OVN-KUBE-ITP": []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -1963,14 +1903,10 @@ var _ = Describe("Node Operations", func() {
 							"-j OVN-KUBE-NODEPORT",
 							"-j OVN-KUBE-ITP",
 						},
-						"POSTROUTING": []string{
-							"-j OVN-KUBE-EGRESS-SVC",
-						},
 						"OVN-KUBE-EXTERNALIP": []string{},
 						"OVN-KUBE-NODEPORT":   []string{},
 						"OVN-KUBE-ETP":        []string{},
 						"OVN-KUBE-ITP":        []string{},
-						"OVN-KUBE-EGRESS-SVC": []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -2065,16 +2001,12 @@ var _ = Describe("Node Operations", func() {
 							"-j OVN-KUBE-NODEPORT",
 							"-j OVN-KUBE-ITP",
 						},
-						"POSTROUTING": []string{
-							"-j OVN-KUBE-EGRESS-SVC",
-						},
 						"OVN-KUBE-NODEPORT": []string{
 							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, nodePort, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 						},
 						"OVN-KUBE-EXTERNALIP": []string{},
 						"OVN-KUBE-ETP":        []string{},
 						"OVN-KUBE-ITP":        []string{},
-						"OVN-KUBE-EGRESS-SVC": []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -2110,12 +2042,8 @@ var _ = Describe("Node Operations", func() {
 							"-j OVN-KUBE-NODEPORT",
 							"-j OVN-KUBE-ITP",
 						},
-						"POSTROUTING": []string{
-							"-j OVN-KUBE-EGRESS-SVC",
-						},
-						"OVN-KUBE-ETP":        []string{},
-						"OVN-KUBE-ITP":        []string{},
-						"OVN-KUBE-EGRESS-SVC": []string{},
+						"OVN-KUBE-ETP": []string{},
+						"OVN-KUBE-ITP": []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -2198,9 +2126,6 @@ var _ = Describe("Node Operations", func() {
 							"-j OVN-KUBE-NODEPORT",
 							"-j OVN-KUBE-ITP",
 						},
-						"POSTROUTING": []string{
-							"-j OVN-KUBE-EGRESS-SVC",
-						},
 						"OVN-KUBE-NODEPORT": []string{
 							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 						},
@@ -2208,8 +2133,7 @@ var _ = Describe("Node Operations", func() {
 						"OVN-KUBE-ETP": []string{
 							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, config.Gateway.MasqueradeIPs.V4HostETPLocalMasqueradeIP.String(), service.Spec.Ports[0].NodePort),
 						},
-						"OVN-KUBE-ITP":        []string{},
-						"OVN-KUBE-EGRESS-SVC": []string{},
+						"OVN-KUBE-ITP": []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -2249,12 +2173,8 @@ var _ = Describe("Node Operations", func() {
 							"-j OVN-KUBE-NODEPORT",
 							"-j OVN-KUBE-ITP",
 						},
-						"POSTROUTING": []string{
-							"-j OVN-KUBE-EGRESS-SVC",
-						},
-						"OVN-KUBE-ETP":        []string{},
-						"OVN-KUBE-ITP":        []string{},
-						"OVN-KUBE-EGRESS-SVC": []string{},
+						"OVN-KUBE-ETP": []string{},
+						"OVN-KUBE-ITP": []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -2341,16 +2261,12 @@ var _ = Describe("Node Operations", func() {
 							"-j OVN-KUBE-NODEPORT",
 							"-j OVN-KUBE-ITP",
 						},
-						"POSTROUTING": []string{
-							"-j OVN-KUBE-EGRESS-SVC",
-						},
 						"OVN-KUBE-NODEPORT": []string{
 							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 						},
 						"OVN-KUBE-EXTERNALIP": []string{},
 						"OVN-KUBE-ETP":        []string{},
 						"OVN-KUBE-ITP":        []string{},
-						"OVN-KUBE-EGRESS-SVC": []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -2397,12 +2313,8 @@ var _ = Describe("Node Operations", func() {
 							"-j OVN-KUBE-NODEPORT",
 							"-j OVN-KUBE-ITP",
 						},
-						"POSTROUTING": []string{
-							"-j OVN-KUBE-EGRESS-SVC",
-						},
-						"OVN-KUBE-ETP":        []string{},
-						"OVN-KUBE-ITP":        []string{},
-						"OVN-KUBE-EGRESS-SVC": []string{},
+						"OVN-KUBE-ETP": []string{},
+						"OVN-KUBE-ITP": []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -2495,16 +2407,12 @@ var _ = Describe("Node Operations", func() {
 							"-j OVN-KUBE-NODEPORT",
 							"-j OVN-KUBE-ITP",
 						},
-						"POSTROUTING": []string{
-							"-j OVN-KUBE-EGRESS-SVC",
-						},
 						"OVN-KUBE-NODEPORT": []string{
 							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 						},
 						"OVN-KUBE-EXTERNALIP": []string{},
 						"OVN-KUBE-ETP":        []string{},
 						"OVN-KUBE-ITP":        []string{},
-						"OVN-KUBE-EGRESS-SVC": []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -2549,12 +2457,8 @@ var _ = Describe("Node Operations", func() {
 							"-j OVN-KUBE-NODEPORT",
 							"-j OVN-KUBE-ITP",
 						},
-						"POSTROUTING": []string{
-							"-j OVN-KUBE-EGRESS-SVC",
-						},
-						"OVN-KUBE-ITP":        []string{},
-						"OVN-KUBE-ETP":        []string{},
-						"OVN-KUBE-EGRESS-SVC": []string{},
+						"OVN-KUBE-ITP": []string{},
+						"OVN-KUBE-ETP": []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -2640,16 +2544,12 @@ var _ = Describe("Node Operations", func() {
 							"-j OVN-KUBE-NODEPORT",
 							"-j OVN-KUBE-ITP",
 						},
-						"POSTROUTING": []string{
-							"-j OVN-KUBE-EGRESS-SVC",
-						},
 						"OVN-KUBE-NODEPORT": []string{
 							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 						},
 						"OVN-KUBE-EXTERNALIP": []string{},
 						"OVN-KUBE-ITP":        []string{},
 						"OVN-KUBE-ETP":        []string{},
-						"OVN-KUBE-EGRESS-SVC": []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -2699,11 +2599,7 @@ var _ = Describe("Node Operations", func() {
 							"-j OVN-KUBE-NODEPORT",
 							"-j OVN-KUBE-ITP",
 						},
-						"POSTROUTING": []string{
-							"-j OVN-KUBE-EGRESS-SVC",
-						},
-						"OVN-KUBE-ETP":        []string{},
-						"OVN-KUBE-EGRESS-SVC": []string{},
+						"OVN-KUBE-ETP": []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -2793,9 +2689,6 @@ var _ = Describe("Node Operations", func() {
 							"-j OVN-KUBE-NODEPORT",
 							"-j OVN-KUBE-ITP",
 						},
-						"POSTROUTING": []string{
-							"-j OVN-KUBE-EGRESS-SVC",
-						},
 						"OVN-KUBE-NODEPORT": []string{
 							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 						},
@@ -2803,8 +2696,7 @@ var _ = Describe("Node Operations", func() {
 						"OVN-KUBE-ITP": []string{
 							fmt.Sprintf("-p %s -d %s --dport %d -j REDIRECT --to-port %d", service.Spec.Ports[0].Protocol, service.Spec.ClusterIP, service.Spec.Ports[0].Port, int32(service.Spec.Ports[0].TargetPort.IntValue())),
 						},
-						"OVN-KUBE-ETP":        []string{},
-						"OVN-KUBE-EGRESS-SVC": []string{},
+						"OVN-KUBE-ETP": []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -2849,12 +2741,8 @@ var _ = Describe("Node Operations", func() {
 							"-j OVN-KUBE-NODEPORT",
 							"-j OVN-KUBE-ITP",
 						},
-						"POSTROUTING": []string{
-							"-j OVN-KUBE-EGRESS-SVC",
-						},
-						"OVN-KUBE-ITP":        []string{},
-						"OVN-KUBE-ETP":        []string{},
-						"OVN-KUBE-EGRESS-SVC": []string{},
+						"OVN-KUBE-ITP": []string{},
+						"OVN-KUBE-ETP": []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -2903,12 +2791,8 @@ var _ = Describe("Node Operations", func() {
 						},
 						"OVN-KUBE-NODEPORT":   []string{},
 						"OVN-KUBE-EXTERNALIP": []string{},
-						"POSTROUTING": []string{
-							"-j OVN-KUBE-EGRESS-SVC",
-						},
 						"OVN-KUBE-ETP":        []string{},
 						"OVN-KUBE-ITP":        []string{},
-						"OVN-KUBE-EGRESS-SVC": []string{},
 					},
 					"filter": {
 						"FORWARD": []string{
@@ -2962,12 +2846,8 @@ var _ = Describe("Node Operations", func() {
 						},
 						"OVN-KUBE-NODEPORT":   []string{},
 						"OVN-KUBE-EXTERNALIP": []string{},
-						"POSTROUTING": []string{
-							"-j OVN-KUBE-EGRESS-SVC",
-						},
 						"OVN-KUBE-ETP":        []string{},
 						"OVN-KUBE-ITP":        []string{},
-						"OVN-KUBE-EGRESS-SVC": []string{},
 					},
 					"filter": {
 						"FORWARD": []string{},

@@ -11,7 +11,7 @@ import (
 	egressserviceapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/egressservice"
-	nodeipt "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"
+	nodenft "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/nftables"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
@@ -19,14 +19,23 @@ import (
 	v1 "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/knftables"
 )
+
+const nftablesRulesEgressServicesBase = `
+add table inet ovn-kubernetes
+add chain inet ovn-kubernetes egress-services { type nat hook postrouting priority 100 ; }
+add map inet ovn-kubernetes egress-service-snat-v4 { type ipv4_addr : ipv4_addr ; }
+add rule inet ovn-kubernetes egress-services mark == 0x3f0 return comment "DoNotSNAT"
+add rule inet ovn-kubernetes egress-services snat to ip saddr map @egress-service-snat-v4
+`
 
 var _ = Describe("Egress Service Operations", func() {
 	var (
 		app         *cli.App
 		fakeOvnNode *FakeOVNNode
 		fExec       *ovntest.FakeExec
-		iptV4       util.IPTablesHelper
+		nft         *knftables.Fake
 		netlinkMock *mocks.NetLinkOps
 	)
 
@@ -51,7 +60,7 @@ var _ = Describe("Egress Service Operations", func() {
 		_, cidr4, _ := net.ParseCIDR("10.128.0.0/16")
 		config.Default.ClusterSubnets = []config.CIDRNetworkEntry{{CIDR: cidr4, HostSubnetLength: 24}}
 
-		iptV4, _ = util.SetFakeIPTablesHelpers()
+		nft = nodenft.SetFakeNFTablesHelper()
 	})
 
 	AfterEach(func() {
@@ -61,13 +70,14 @@ var _ = Describe("Egress Service Operations", func() {
 	})
 
 	Context("on egress service resource changes", func() {
-		It("repairs iptables and ip rules when stale entries are present", func() {
+		It("repairs nftables and ip rules when stale entries are present", func() {
 			app.Action = func(ctx *cli.Context) error {
 				fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd: "ip -4 --json rule show",
 					Output: "[{\"priority\":5000,\"src\":\"10.128.0.3\",\"table\":\"wrongTable\"},{\"priority\":5000,\"src\":\"goneEp\",\"table\":\"mynetwork\"}," +
 						"{\"priority\":5000,\"src\":\"10.128.0.3\",\"table\":\"mynetwork\"},{\"priority\":5000,\"src\":\"10.129.0.2\",\"table\":\"mynetwork\"}," +
 						"{\"priority\":5000,\"src\":\"10.128.0.33\",\"table\":\"mynetwork2\"},{\"priority\":5000,\"src\":\"10.129.0.3\",\"table\":\"mynetwork2\"}," +
+						"{\"priority\":5000,\"src\":\"10.128.0.4\",\"table\":\"mynetwork\"},{\"priority\":5000,\"src\":\"10.129.0.4\",\"table\":\"mynetwork\"}," +
 						fmt.Sprintf("{\"priority\":5000,\"src\":\"%s\",\"sport\":31111,\"table\":\"mynetwork\"},", config.Gateway.MasqueradeIPs.V4HostETPLocalMasqueradeIP) +
 						fmt.Sprintf("{\"priority\":5000,\"src\":\"%s\",\"sport\":30300,\"table\":\"mynetwork2\"}]", config.Gateway.MasqueradeIPs.V4HostETPLocalMasqueradeIP),
 					Err: nil,
@@ -85,73 +95,43 @@ var _ = Describe("Egress Service Operations", func() {
 					Err: nil,
 				})
 
-				fakeRules := []nodeipt.Rule{
-					{
-						Table: "nat",
-						Chain: "OVN-KUBE-EGRESS-SVC",
-						Args: []string{
-							"-m", "mark", "--mark", "0x3f0",
-							"-m", "comment", "--comment", "DoNotSNAT",
-							"-j", "RETURN",
-						},
-					},
-					{
-						Table: "nat",
-						Chain: "OVN-KUBE-EGRESS-SVC",
-						Args: []string{
-							"-s", "10.128.0.3",
-							"-m", "comment", "--comment", "namespace1/service1",
-							"-j", "SNAT",
-							"--to-source", "5.5.5.5",
-						},
-						Protocol: getIPTablesProtocol("5.5.5.5"),
-					},
-					{
-						Table: "nat",
-						Chain: "OVN-KUBE-EGRESS-SVC",
-						Args: []string{
-							"-s", "10.128.0.88", // gone ep
-							"-m", "comment", "--comment", "namespace1/service1",
-							"-j", "SNAT",
-							"--to-source", "5.5.5.5",
-						},
-						Protocol: getIPTablesProtocol("5.5.5.5"),
-					},
-					{
-						Table: "nat",
-						Chain: "OVN-KUBE-EGRESS-SVC",
-						Args: []string{
-							"-s", "10.128.0.3",
-							"-m", "comment", "--comment", "namespace1/service1",
-							"-j", "SNAT",
-							"--to-source", "5.200.5.12", // wrong lb
-						},
-						Protocol: getIPTablesProtocol("5.5.5.5"),
-					},
-					{
-						Table: "nat",
-						Chain: "OVN-KUBE-EGRESS-SVC",
-						Args: []string{
-							"-s", "10.128.0.3",
-							"-m", "comment", "--comment", "namespace13service6", // gone service
-							"-j", "SNAT",
-							"--to-source", "1.2.3.4",
-						},
-						Protocol: getIPTablesProtocol("5.5.5.5"),
-					},
-					{
-						Table: "nat",
-						Chain: "OVN-KUBE-EGRESS-SVC",
-						Args: []string{
-							"-s", "10.128.0.33",
-							"-m", "comment", "--comment", "namespace1/service2", // service with host=ALL
-							"-j", "SNAT",
-							"--to-source", "1.2.3.4",
-						},
-						Protocol: getIPTablesProtocol("5.5.5.5"),
-					},
-				}
-				Expect(appendIptRules(fakeRules)).To(Succeed())
+				tx := nft.NewTransaction()
+				tx.Add(&knftables.Map{
+					Name: egressservice.NFTablesMapV4,
+					Type: "ipv4_addr : ipv4_addr",
+				})
+				tx.Add(&knftables.Element{
+					Map:     egressservice.NFTablesMapV4,
+					Key:     []string{"10.128.0.3"},
+					Value:   []string{"5.5.5.5"},
+					Comment: knftables.PtrTo("namespace1/service1"),
+				})
+				tx.Add(&knftables.Element{
+					Map:     egressservice.NFTablesMapV4,
+					Key:     []string{"10.128.0.88"}, // gone ep
+					Value:   []string{"5.5.5.5"},
+					Comment: knftables.PtrTo("namespace1/service1"),
+				})
+				tx.Add(&knftables.Element{
+					Map:     egressservice.NFTablesMapV4,
+					Key:     []string{"10.128.0.4"},
+					Value:   []string{"5.200.5.12"}, // wrong lb
+					Comment: knftables.PtrTo("namespace1/service3"),
+				})
+				tx.Add(&knftables.Element{
+					Map:     egressservice.NFTablesMapV4,
+					Key:     []string{"10.128.0.5"},
+					Value:   []string{"1.2.3.4"},
+					Comment: knftables.PtrTo("namespace13service6"), // gone service
+				})
+				tx.Add(&knftables.Element{
+					Map:     egressservice.NFTablesMapV4,
+					Key:     []string{"10.128.0.33"},
+					Value:   []string{"1.2.3.4"},
+					Comment: knftables.PtrTo("namespace1/service2"), // service with host=ALL
+				})
+
+				Expect(nft.Run(context.Background(), tx)).To(Succeed())
 				epPortName := "https"
 				epPortValue := int32(443)
 
@@ -250,23 +230,67 @@ var _ = Describe("Egress Service Operations", func() {
 					[]discovery.Endpoint{ep3},
 					[]discovery.EndpointPort{epPort})
 
+				egressService3 := egressserviceapi.EgressService{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "service3",
+						Namespace: "namespace1",
+					},
+					Spec: egressserviceapi.EgressServiceSpec{
+						Network: "mynetwork",
+					},
+					Status: egressserviceapi.EgressServiceStatus{
+						Host: fakeNodeName,
+					},
+				}
+				service3 := *newService("service3", "namespace1", "10.129.0.4",
+					[]v1.ServicePort{
+						{
+							NodePort: int32(32222),
+							Protocol: v1.ProtocolTCP,
+							Port:     int32(8080),
+						},
+					},
+					v1.ServiceTypeLoadBalancer,
+					[]string{},
+					v1.ServiceStatus{
+						LoadBalancer: v1.LoadBalancerStatus{
+							Ingress: []v1.LoadBalancerIngress{{
+								IP: "6.6.6.6",
+							}},
+						},
+					},
+					false, false,
+				)
+
+				ep3_1 := discovery.Endpoint{
+					Addresses: []string{"10.128.0.4"},
+				}
+				endpointSlice3 := *newEndpointSlice(
+					"service3",
+					"namespace1",
+					[]discovery.Endpoint{ep3_1},
+					[]discovery.EndpointPort{epPort})
+
 				fakeOvnNode.start(ctx,
 					&v1.ServiceList{
 						Items: []v1.Service{
 							service,
 							service2,
+							service3,
 						},
 					},
 					&discovery.EndpointSliceList{
 						Items: []discovery.EndpointSlice{
 							endpointSlice,
 							endpointSlice2,
+							endpointSlice3,
 						},
 					},
 					&egressserviceapi.EgressServiceList{
 						Items: []egressserviceapi.EgressService{
 							egressService,
 							egressService2,
+							egressService3,
 						},
 					},
 				)
@@ -278,20 +302,12 @@ var _ = Describe("Egress Service Operations", func() {
 				err = c.Run(fakeOvnNode.wg, 1)
 				Expect(err).ToNot(HaveOccurred())
 
-				expectedTables := map[string]util.FakeTable{
-					"nat": {
-						"OVN-KUBE-EGRESS-SVC": []string{
-							"-m mark --mark 0x3f0 -m comment --comment DoNotSNAT -j RETURN",
-							"-s 10.128.0.3 -m comment --comment namespace1/service1 -j SNAT --to-source 5.5.5.5",
-						},
-					},
-					"filter": {},
-					"mangle": {},
-				}
-
-				f4 := iptV4.(*util.FakeIPTables)
+				expectedNFT := nftablesRulesEgressServicesBase + `
+add element inet ovn-kubernetes egress-service-snat-v4 { 10.128.0.3 comment "namespace1/service1" : 5.5.5.5 }
+add element inet ovn-kubernetes egress-service-snat-v4 { 10.128.0.4 comment "namespace1/service3" : 6.6.6.6 }
+`
 				Eventually(func() error {
-					return f4.MatchState(expectedTables, nil)
+					return nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 				}).ShouldNot(HaveOccurred())
 
 				Expect(fakeOvnNode.fakeExec.CalledMatchesExpected()).To(BeTrue(), fakeOvnNode.fakeExec.ErrorDesc)
@@ -387,35 +403,19 @@ var _ = Describe("Egress Service Operations", func() {
 				err = c.Run(fakeOvnNode.wg, 1)
 				Expect(err).ToNot(HaveOccurred())
 
-				expectedTables := map[string]util.FakeTable{
-					"nat": {
-						"OVN-KUBE-EGRESS-SVC": []string{
-							"-m mark --mark 0x3f0 -m comment --comment DoNotSNAT -j RETURN",
-							"-s 10.128.0.3 -m comment --comment namespace1/service1 -j SNAT --to-source 5.5.5.5",
-						},
-					},
-					"filter": {},
-					"mangle": {},
-				}
-
-				f4 := iptV4.(*util.FakeIPTables)
+				expectedNFT := nftablesRulesEgressServicesBase + `
+add element inet ovn-kubernetes egress-service-snat-v4 { 10.128.0.3 comment "namespace1/service1" : 5.5.5.5 }
+`
 				Eventually(func() error {
-					return f4.MatchState(expectedTables, nil)
+					return nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 				}).ShouldNot(HaveOccurred())
-
-				expectedTables = map[string]util.FakeTable{
-					"nat": {
-						"OVN-KUBE-EGRESS-SVC": []string{"-m mark --mark 0x3f0 -m comment --comment DoNotSNAT -j RETURN"},
-					},
-					"filter": {},
-					"mangle": {},
-				}
 
 				err = fakeOvnNode.fakeClient.EgressServiceClient.K8sV1().EgressServices("namespace1").Delete(context.TODO(), "service1", metav1.DeleteOptions{})
 				Expect(err).ToNot(HaveOccurred())
 
+				expectedNFT = nftablesRulesEgressServicesBase
 				Eventually(func() error {
-					return f4.MatchState(expectedTables, nil)
+					return nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 				}).ShouldNot(HaveOccurred())
 
 				Expect(fakeOvnNode.fakeExec.CalledMatchesExpected()).To(BeTrue(), fakeOvnNode.fakeExec.ErrorDesc)
@@ -603,46 +603,13 @@ var _ = Describe("Egress Service Operations", func() {
 				err = c.Run(fakeOvnNode.wg, 1)
 				Expect(err).ToNot(HaveOccurred())
 
-				expectedTables := map[string]util.FakeTable{
-					"nat": {
-						"OVN-KUBE-EGRESS-SVC": []string{
-							"-m mark --mark 0x3f0 -m comment --comment DoNotSNAT -j RETURN",
-							"-s 10.128.0.3 -m comment --comment namespace1/service1 -j SNAT --to-source 5.5.5.5",
-							"-s 10.128.0.11 -m comment --comment namespace1/service2 -j SNAT --to-source 5.5.5.6",
-						},
-					},
-					"filter": {},
-					"mangle": {},
-				}
-				// The order of the rules is determined by the order the services are processed.
-				// We check if one of the two tables match to not flake on ordering.
-				expectedTables2 := map[string]util.FakeTable{
-					"nat": {
-						"OVN-KUBE-EGRESS-SVC": []string{
-							"-m mark --mark 0x3f0 -m comment --comment DoNotSNAT -j RETURN",
-							"-s 10.128.0.11 -m comment --comment namespace1/service2 -j SNAT --to-source 5.5.5.6",
-							"-s 10.128.0.3 -m comment --comment namespace1/service1 -j SNAT --to-source 5.5.5.5",
-						},
-					},
-					"filter": {},
-					"mangle": {},
-				}
-				f4 := iptV4.(*util.FakeIPTables)
+				expectedNFT := nftablesRulesEgressServicesBase + `
+add element inet ovn-kubernetes egress-service-snat-v4 { 10.128.0.3 comment "namespace1/service1" : 5.5.5.5 }
+add element inet ovn-kubernetes egress-service-snat-v4 { 10.128.0.11 comment "namespace1/service2" : 5.5.5.6 }
+`
 				Eventually(func() error {
-					err := f4.MatchState(expectedTables, nil)
-					if err == nil {
-						return nil
-					}
-					return f4.MatchState(expectedTables2, nil)
+					return nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 				}).ShouldNot(HaveOccurred())
-
-				expectedTables = map[string]util.FakeTable{
-					"nat": {
-						"OVN-KUBE-EGRESS-SVC": []string{"-m mark --mark 0x3f0 -m comment --comment DoNotSNAT -j RETURN"},
-					},
-					"filter": {},
-					"mangle": {},
-				}
 
 				err = fakeOvnNode.fakeClient.EgressServiceClient.K8sV1().EgressServices("namespace1").Delete(context.TODO(), "service1", metav1.DeleteOptions{})
 				Expect(err).ToNot(HaveOccurred())
@@ -650,8 +617,9 @@ var _ = Describe("Egress Service Operations", func() {
 				err = fakeOvnNode.fakeClient.EgressServiceClient.K8sV1().EgressServices("namespace1").Delete(context.TODO(), "service2", metav1.DeleteOptions{})
 				Expect(err).ToNot(HaveOccurred())
 
+				expectedNFT = nftablesRulesEgressServicesBase
 				Eventually(func() error {
-					return f4.MatchState(expectedTables, nil)
+					return nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 				}).ShouldNot(HaveOccurred())
 
 				Expect(fakeOvnNode.fakeExec.CalledMatchesExpected()).To(BeTrue(), fakeOvnNode.fakeExec.ErrorDesc)
@@ -825,18 +793,9 @@ var _ = Describe("Egress Service Operations", func() {
 				err = c.Run(fakeOvnNode.wg, 1)
 				Expect(err).ToNot(HaveOccurred())
 
-				expectedTables := map[string]util.FakeTable{
-					"nat": {
-						"OVN-KUBE-EGRESS-SVC": []string{
-							"-m mark --mark 0x3f0 -m comment --comment DoNotSNAT -j RETURN",
-						},
-					},
-					"filter": {},
-					"mangle": {},
-				}
-				f4 := iptV4.(*util.FakeIPTables)
+				expectedNFT := nftablesRulesEgressServicesBase
 				Eventually(func() error {
-					return f4.MatchState(expectedTables, nil)
+					return nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 				}).ShouldNot(HaveOccurred())
 
 				Eventually(func() bool {
@@ -870,8 +829,9 @@ var _ = Describe("Egress Service Operations", func() {
 				err = fakeOvnNode.fakeClient.EgressServiceClient.K8sV1().EgressServices("namespace1").Delete(context.TODO(), "service2", metav1.DeleteOptions{})
 				Expect(err).ToNot(HaveOccurred())
 
+				expectedNFT = nftablesRulesEgressServicesBase
 				Eventually(func() error {
-					return f4.MatchState(expectedTables, nil)
+					return nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 				}).ShouldNot(HaveOccurred())
 
 				Eventually(func() bool {
@@ -988,18 +948,9 @@ var _ = Describe("Egress Service Operations", func() {
 				err = c.Run(fakeOvnNode.wg, 1)
 				Expect(err).ToNot(HaveOccurred())
 
-				expectedTables := map[string]util.FakeTable{
-					"nat": {
-						"OVN-KUBE-EGRESS-SVC": []string{
-							"-m mark --mark 0x3f0 -m comment --comment DoNotSNAT -j RETURN",
-						},
-					},
-					"filter": {},
-					"mangle": {},
-				}
-				f4 := iptV4.(*util.FakeIPTables)
+				expectedNFT := nftablesRulesEgressServicesBase
 				Eventually(func() error {
-					return f4.MatchState(expectedTables, nil)
+					return nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 				}).ShouldNot(HaveOccurred())
 
 				Eventually(func() bool {
@@ -1016,8 +967,9 @@ var _ = Describe("Egress Service Operations", func() {
 				_, err = fakeOvnNode.fakeClient.KubeClient.CoreV1().Services("namespace1").Update(context.TODO(), &service, metav1.UpdateOptions{})
 				Expect(err).ToNot(HaveOccurred())
 
+				expectedNFT = nftablesRulesEgressServicesBase
 				Eventually(func() error {
-					return f4.MatchState(expectedTables, nil)
+					return nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 				}).ShouldNot(HaveOccurred())
 
 				Eventually(func() bool {
@@ -1034,8 +986,9 @@ var _ = Describe("Egress Service Operations", func() {
 				_, err = fakeOvnNode.fakeClient.KubeClient.CoreV1().Services("namespace1").Update(context.TODO(), &service, metav1.UpdateOptions{})
 				Expect(err).ToNot(HaveOccurred())
 
+				expectedNFT = nftablesRulesEgressServicesBase
 				Eventually(func() error {
-					return f4.MatchState(expectedTables, nil)
+					return nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 				}).ShouldNot(HaveOccurred())
 
 				Eventually(func() bool {
@@ -1055,8 +1008,9 @@ var _ = Describe("Egress Service Operations", func() {
 				err = fakeOvnNode.fakeClient.EgressServiceClient.K8sV1().EgressServices("namespace1").Delete(context.TODO(), "service1", metav1.DeleteOptions{})
 				Expect(err).ToNot(HaveOccurred())
 
+				expectedNFT = nftablesRulesEgressServicesBase
 				Eventually(func() error {
-					return f4.MatchState(expectedTables, nil)
+					return nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 				}).ShouldNot(HaveOccurred())
 
 				Eventually(func() bool {

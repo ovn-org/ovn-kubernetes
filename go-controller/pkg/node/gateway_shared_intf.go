@@ -17,7 +17,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/egressservice"
 	nodeipt "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/linkmanager"
 	nodenft "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/nftables"
@@ -1044,7 +1043,7 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) error {
 	// sync netfilter rules once only for Full mode
 	if !npw.dpuMode {
 		// (NOTE: Order is important, add jump to iptableETPChain before jump to NP/EIP chains)
-		for _, chain := range []string{iptableITPChain, egressservice.Chain, iptableNodePortChain, iptableExternalIPChain, iptableETPChain} {
+		for _, chain := range []string{iptableITPChain, iptableNodePortChain, iptableExternalIPChain, iptableETPChain} {
 			if err = recreateIPTRules("nat", chain, keepIPTRules); err != nil {
 				errors = append(errors, err)
 			}

@@ -450,14 +450,10 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 					"-j OVN-KUBE-NODEPORT",
 					"-j OVN-KUBE-ITP",
 				},
-				"POSTROUTING": []string{
-					"-j OVN-KUBE-EGRESS-SVC",
-				},
 				"OVN-KUBE-NODEPORT":   []string{},
 				"OVN-KUBE-EXTERNALIP": []string{},
 				"OVN-KUBE-ETP":        []string{},
 				"OVN-KUBE-ITP":        []string{},
-				"OVN-KUBE-EGRESS-SVC": []string{},
 			},
 			"filter": {},
 			"mangle": {
@@ -1289,13 +1285,11 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 					fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, externalIP, service.Spec.Ports[0].Port, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 				},
 				"POSTROUTING": []string{
-					"-j OVN-KUBE-EGRESS-SVC",
 					"-s 169.254.169.1 -j MASQUERADE",
 					"-s 10.1.1.0/24 -j MASQUERADE",
 				},
-				"OVN-KUBE-ETP":        []string{},
-				"OVN-KUBE-ITP":        []string{},
-				"OVN-KUBE-EGRESS-SVC": []string{},
+				"OVN-KUBE-ETP": []string{},
+				"OVN-KUBE-ITP": []string{},
 			},
 			"filter": {
 				"FORWARD": []string{

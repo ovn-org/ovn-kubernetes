@@ -14,7 +14,6 @@ import (
 	"github.com/coreos/go-iptables/iptables"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/egressservice"
 	nodeipt "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
@@ -94,16 +93,6 @@ func ensureChain(table, chain string) error {
 
 func getGatewayInitRules(chain string, proto iptables.Protocol) []nodeipt.Rule {
 	iptRules := []nodeipt.Rule{}
-	if chain == egressservice.Chain {
-		return []nodeipt.Rule{
-			{
-				Table:    "nat",
-				Chain:    "POSTROUTING",
-				Args:     []string{"-j", chain},
-				Protocol: proto,
-			},
-		}
-	}
 	if chain == iptableITPChain {
 		iptRules = append(iptRules,
 			nodeipt.Rule{
@@ -537,7 +526,7 @@ func addChaintoTable(ipt util.IPTablesHelper, tableName, chain string) {
 func handleGatewayIPTables(iptCallback func(rules []nodeipt.Rule) error, genGatewayChainRules func(chain string, proto iptables.Protocol) []nodeipt.Rule) error {
 	rules := make([]nodeipt.Rule, 0)
 	// (NOTE: Order is important, add jump to iptableETPChain before jump to NP/EIP chains)
-	for _, chain := range []string{iptableITPChain, egressservice.Chain, iptableNodePortChain, iptableExternalIPChain, iptableETPChain} {
+	for _, chain := range []string{iptableITPChain, iptableNodePortChain, iptableExternalIPChain, iptableETPChain} {
 		for _, proto := range clusterIPTablesProtocols() {
 			ipt, err := util.GetIPTablesHelper(proto)
 			if err != nil {
