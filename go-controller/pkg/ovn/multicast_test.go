@@ -668,6 +668,9 @@ var _ = Describe("OVN Multicast with IP Address Family", func() {
 				netInfo := getNetInfoFromNAD(nad)
 				node := newNodeWithNad(nad, networkName)
 				namespace1 := *newNamespace(namespaceName1)
+				if nad != nil {
+					namespace1 = *newUDNNamespace(namespaceName1)
+				}
 				pods, tPods, tPodIPs := createTestPods(nodeName, namespaceName1, useIPv4, useIPv6)
 
 				objs := []runtime.Object{
@@ -816,6 +819,9 @@ var _ = Describe("OVN Multicast with IP Address Family", func() {
 
 				netInfo := getNetInfoFromNAD(nad)
 				namespace1 := *newNamespace(namespaceName1)
+				if nad != nil {
+					namespace1 = *newUDNNamespace(namespaceName1)
+				}
 				node := newNodeWithNad(nad, networkName)
 				_, tPods, tPodIPs := createTestPods(nodeName, namespaceName1, useIPv4, useIPv6)
 
