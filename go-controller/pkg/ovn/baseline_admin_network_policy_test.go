@@ -122,7 +122,6 @@ var _ = ginkgo.Describe("OVN BANP Operations", func() {
 
 		app = cli.NewApp()
 		app.Name = "test"
-		app.Flags = config.Flags
 
 		fakeOVN = NewFakeOVN(false)
 	})

@@ -93,7 +93,6 @@ var _ = ginkgo.Describe("OVN for APB External Route Operations", func() {
 		config.OVNKubernetesFeature.EnableMultiExternalGateway = true
 		app = cli.NewApp()
 		app.Name = "test"
-		app.Flags = config.Flags
 
 		fakeOvn = NewFakeOVN(true)
 	})

@@ -105,7 +105,6 @@ var _ = Describe("Node Operations", func() {
 
 		app = cli.NewApp()
 		app.Name = "test"
-		app.Flags = config.Flags
 
 	})
 	Context("on add service", func() {
