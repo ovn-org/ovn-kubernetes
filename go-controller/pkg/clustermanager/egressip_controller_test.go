@@ -280,7 +280,6 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 
 		app = cli.NewApp()
 		app.Name = "test"
-		app.Flags = config.Flags
 		fakeClusterManagerOVN = NewFakeClusterManagerOVN()
 	})
 
