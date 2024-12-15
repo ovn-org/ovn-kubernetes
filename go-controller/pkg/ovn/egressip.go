@@ -2526,19 +2526,22 @@ func (e *EgressIPController) getNextHop(ni util.NetInfo, egressNodeName, egressI
 					egressIPName, egressIP, err)
 				return "", nil
 			}
-			mgmtPortAddresses := mgmtPort.GetAddresses()
-			if len(mgmtPortAddresses) == 0 {
+			allMgmtPortAddresses := mgmtPort.GetAddresses()
+			if len(allMgmtPortAddresses) == 0 {
 				return "", fmt.Errorf("failed to get next hop IP for secondary host network and egress IP %s for node %s"+
-					"because management switch port does not contain any addresses", egressIPName, egressNodeName)
+					"because management switch port %s does not have a MAC and IP address entry", egressIPName, egressNodeName, mgmtPort.Name)
 			}
-			for _, mgmtPortAddress := range mgmtPortAddresses {
-				mgmtPortAddressesStr := strings.Fields(mgmtPortAddress)
-				mgmtPortIP := net.ParseIP(mgmtPortAddressesStr[1])
-				if isEgressIPv6 && utilnet.IsIPv6(mgmtPortIP) {
-					nextHopIP = mgmtPortIP.To16().String()
-				} else {
-					nextHopIP = mgmtPortIP.To4().String()
-				}
+			// select first MAC & IP(s) entry
+			mgmtPortAddresses := strings.Fields(allMgmtPortAddresses[0])
+			if len(mgmtPortAddresses) < 2 {
+				return "", fmt.Errorf("failed to get next hop IP for secondary host network and egress IP %s for node %s"+
+					"because management switch port %s does not contain expected MAC address and one or more IP addresses", egressIPName, egressNodeName, mgmtPort.Name)
+			}
+			// filter out the MAC address which is always the first entry within the slice
+			mgmtPortAddresses = mgmtPortAddresses[1:]
+			nextHopIP, err = util.MatchIPStringFamily(isEgressIPv6, mgmtPortAddresses)
+			if err != nil {
+				return "", fmt.Errorf("failed to find a management port %s IP matching the IP family of the EgressIP: %v", mgmtPort.Name, err)
 			}
 		}
 	} else if config.OVNKubernetesFeature.EnableInterconnect {
