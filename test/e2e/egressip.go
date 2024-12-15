@@ -14,15 +14,16 @@ import (
 	"strings"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
+	nadclient "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/typed/k8s.cni.cncf.io/v1"
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/ginkgo/v2/dsl/table"
 	"github.com/onsi/gomega"
-
-	nadclient "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/typed/k8s.cni.cncf.io/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
+	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2ekubectl "k8s.io/kubernetes/test/e2e/framework/kubectl"
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
@@ -295,7 +296,9 @@ func targetExternalContainerAndTest(targetNode node, podName, podNamespace strin
 	}
 }
 
-var _ = ginkgo.DescribeTableSubtree("e2e egress IP validation", func(netConfigParams networkAttachmentConfigParams, isHostNetwork bool) {
+var _ = ginkgo.DescribeTableSubtree("e2e egress IP validation", func(netConfigParams networkAttachmentConfigParams) {
+	//FIXME: tests for CDN are designed for single stack clusters (IPv4 or IPv6) and must choose a single IP family for dual stack clusters.
+	// Remove this restriction and allow the tests to detect if an IP family support is available.
 	const (
 		servicePort             int32  = 9999
 		echoServerPodPortMin           = 9900
@@ -321,6 +324,7 @@ var _ = ginkgo.DescribeTableSubtree("e2e egress IP validation", func(netConfigPa
 		pod1Name                                                                                        = "e2e-egressip-pod-1"
 		pod2Name                                                                                        = "e2e-egressip-pod-2"
 		usedEgressNodeAvailabilityHandler                                                               egressNodeAvailabilityHandler
+		isIPv6TestRun                                                                                   bool
 	)
 
 	targetPodAndTest := func(namespace, fromName, toName, toIP string) wait.ConditionFunc {
@@ -497,19 +501,137 @@ var _ = ginkgo.DescribeTableSubtree("e2e egress IP validation", func(netConfigPa
 		return v4, v6
 	}
 
+	getNodesInternalAddresses := func(nodes *corev1.NodeList, family corev1.IPFamily) []string {
+		ips := make([]string, 0, 3)
+		for _, node := range nodes.Items {
+			ips = append(ips, e2enode.GetAddressesByTypeAndFamily(&node, corev1.NodeInternalIP, family)...)
+		}
+		return ips
+	}
+
+	isNodeInternalAddressesPresentForIPFamily := func(nodes *corev1.NodeList, ipFamily corev1.IPFamily) bool {
+		if len(getNodesInternalAddresses(nodes, ipFamily)) > 0 {
+			return true
+		}
+		return false
+	}
+
+	isNetworkSupported := func(nodes *corev1.NodeList, netConfigParams networkAttachmentConfigParams) (bool, string) {
+		// cluster default network
+		if netConfigParams.networkName == types.DefaultNetworkName {
+			return true, "cluster default network is always supported"
+		}
+		// user defined networks
+		if !isNetworkSegmentationEnabled() {
+			return false, "network segmentation is disabled. Environment variable 'ENABLE_NETWORK_SEGMENTATION' must have value true"
+		}
+		if !isInterconnectEnabled() {
+			return false, "interconnect is disabled. Environment variable 'OVN_ENABLE_INTERCONNECT' must have value true"
+		}
+		if netConfigParams.topology != types.Layer3Topology {
+			return false, "unsupported network topology"
+		}
+		if netConfigParams.cidr == "" {
+			return false, "UDN network must have subnet specified"
+		}
+		if utilnet.IsIPv4CIDRString(netConfigParams.cidr) && !isNodeInternalAddressesPresentForIPFamily(nodes, corev1.IPv4Protocol) {
+			return false, "cluster must have IPv4 Node internal address"
+		}
+		if utilnet.IsIPv6CIDRString(netConfigParams.cidr) && !isNodeInternalAddressesPresentForIPFamily(nodes, corev1.IPv6Protocol) {
+			return false, "cluster must have IPv6 Node internal address"
+		}
+		return true, "network is supported"
+	}
+
+	getNodeIPs := func(nodes *corev1.NodeList, netConfigParams networkAttachmentConfigParams) []string {
+		isIPv4Cluster := isNodeInternalAddressesPresentForIPFamily(nodes, corev1.IPv4Protocol)
+		isIPv6Cluster := isNodeInternalAddressesPresentForIPFamily(nodes, corev1.IPv6Protocol)
+		var ipFamily corev1.IPFamily
+		// cluster default network
+		if netConfigParams.networkName == types.DefaultNetworkName {
+			// we do not create a CDN, we utilize the network within the cluster.
+			// The current e2e tests assume a single stack, therefore if dual stack, default to IPv4
+			// until the tests are refactored to accommodate dual stack.
+			if isIPv6Cluster {
+				ipFamily = corev1.IPv6Protocol
+			}
+			if isIPv4Cluster {
+				ipFamily = corev1.IPv4Protocol
+			}
+		} else {
+			// user defined network
+			if netConfigParams.cidr == "" {
+				framework.Failf("network config must have subnet defined")
+			}
+			if utilnet.IsIPv4CIDRString(netConfigParams.cidr) && isIPv4Cluster {
+				ipFamily = corev1.IPv4Protocol
+			}
+			if utilnet.IsIPv6CIDRString(netConfigParams.cidr) && isIPv6Cluster {
+				ipFamily = corev1.IPv6Protocol
+			}
+		}
+		if ipFamily == corev1.IPFamilyUnknown {
+			framework.Failf("network config is not supported by the cluster")
+		}
+		return getNodesInternalAddresses(nodes, ipFamily)
+	}
+
+	getPodIPWithRetry := func(clientSet clientset.Interface, v6 bool, namespace, name string) (net.IP, error) {
+		var srcPodIP net.IP
+		err := wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
+			pod, err := clientSet.CoreV1().Pods(namespace).Get(context.Background(), name, metav1.GetOptions{})
+			if err != nil {
+				return false, err
+			}
+			ips, err := util.DefaultNetworkPodIPs(pod)
+			if err != nil {
+				return false, err
+			}
+			srcPodIP, err = util.MatchFirstIPFamily(isIPv6TestRun, ips)
+			if err != nil {
+				return false, err
+			}
+			return true, nil
+		})
+		if err != nil || srcPodIP == nil {
+			return srcPodIP, fmt.Errorf("unable to fetch pod %s/%s IP after retrying: %v", namespace, name, err)
+		}
+		return srcPodIP, nil
+	}
+
+	isUserDefinedNetwork := func(netParams networkAttachmentConfigParams) bool {
+		if netParams.networkName == types.DefaultNetworkName {
+			return false
+		}
+		return true
+	}
+
+	isClusterDefaultNetwork := func(netParams networkAttachmentConfigParams) bool {
+		if netParams.networkName == types.DefaultNetworkName {
+			return true
+		}
+		return false
+	}
+
 	f := wrappedTestFramework(egressIPName)
 
 	// Determine what mode the CI is running in and get relevant endpoint information for the tests
 	ginkgo.BeforeEach(func() {
-		if !isNetworkSegmentationEnabled() && netConfigParams.networkName != types.DefaultNetworkName {
-			ginkgo.Skip("Network segmentation is disabled")
-		}
 		nodes, err := e2enode.GetBoundedReadySchedulableNodes(context.TODO(), f.ClientSet, 3)
 		framework.ExpectNoError(err)
 		if len(nodes.Items) < 3 {
 			framework.Failf("Test requires >= 3 Ready nodes, but there are only %v nodes", len(nodes.Items))
 		}
-		ips := e2enode.CollectAddresses(nodes, corev1.NodeInternalIP)
+		if isSupported, reason := isNetworkSupported(nodes, netConfigParams); !isSupported {
+			ginkgo.Skip(reason)
+		}
+		// tests are configured to introspect the Nodes Internal IP address family and then create an EgressIP of
+		// the same IP family. If dual stack, we default to IPv4 because the tests aren't configured to handle dual stack.
+		ips := getNodeIPs(nodes, netConfigParams)
+		if len(ips) == 0 {
+			framework.Failf("expect at least one IP address")
+		}
+		isIPv6TestRun = utilnet.IsIPv6String(ips[0])
 		egress1Node = node{
 			name:   nodes.Items[1].Name,
 			nodeIP: ips[1],
@@ -552,14 +674,14 @@ var _ = ginkgo.DescribeTableSubtree("e2e egress IP validation", func(netConfigPa
 		for _, node := range nodes.Items {
 			setNodeReady(node.Name, true)
 			setNodeReachable("iptables", node.Name, true)
-			if IsIPv6Cluster(f.ClientSet) {
+			if isV6 {
 				setNodeReachable("ip6tables", node.Name, true)
 			}
 			waitForNoTaint(node.Name, "node.kubernetes.io/unreachable")
 			waitForNoTaint(node.Name, "node.kubernetes.io/not-ready")
 		}
 		// no further network creation is required if CDN
-		if netConfigParams.networkName == types.DefaultNetworkName {
+		if isClusterDefaultNetwork(netConfigParams) {
 			return
 		}
 		// configure UDN
@@ -576,8 +698,13 @@ var _ = ginkgo.DescribeTableSubtree("e2e egress IP validation", func(netConfigPa
 	})
 
 	ginkgo.AfterEach(func() {
-		if !isNetworkSegmentationEnabled() && netConfigParams.networkName != types.DefaultNetworkName {
-			ginkgo.Skip("Network segmentation is disabled")
+		nodes, err := e2enode.GetBoundedReadySchedulableNodes(context.TODO(), f.ClientSet, 3)
+		framework.ExpectNoError(err)
+		if len(nodes.Items) < 3 {
+			framework.Failf("Test requires >= 3 Ready nodes, but there are only %v nodes", len(nodes.Items))
+		}
+		if isSupported, reason := isNetworkSupported(nodes, netConfigParams); !isSupported {
+			ginkgo.Skip(reason)
 		}
 		e2ekubectl.RunKubectlOrDie("default", "delete", "eip", egressIPName, "--ignore-not-found=true")
 		e2ekubectl.RunKubectlOrDie("default", "delete", "eip", egressIPName2, "--ignore-not-found=true")
@@ -590,7 +717,7 @@ var _ = ginkgo.DescribeTableSubtree("e2e egress IP validation", func(netConfigPa
 		for _, node := range []string{egress1Node.name, egress2Node.name} {
 			setNodeReady(node, true)
 			setNodeReachable("iptables", node, true)
-			if IsIPv6Cluster(f.ClientSet) {
+			if isIPv6TestRun {
 				setNodeReachable("ip6tables", node, true)
 			}
 			waitForNoTaint(node, "node.kubernetes.io/unreachable")
@@ -708,7 +835,7 @@ spec:
 				})
 				framework.ExpectNoError(err, "Step 3. Create two pods matching the EgressIP: one running on each of the egress nodes, failed, err: %v", err)
 				var pod2IP string
-				if netConfigParams.networkName == types.DefaultNetworkName {
+				if isClusterDefaultNetwork(netConfigParams) {
 					pod2IP = getPodAddress(pod2Name, f.Namespace.Name)
 				} else {
 					pod2IP, err = podIPsForUserDefinedPrimaryNetwork(
@@ -732,8 +859,15 @@ spec:
 				framework.ExpectNoError(err, "Step 5. Check connectivity from one pod to the other and verify that the connection is achieved, failed, err: %v", err)
 
 				ginkgo.By("6. Check connectivity from both pods to the api-server (running hostNetwork:true) and verifying that the connection is achieved")
-				err = wait.PollImmediate(retryInterval, retryTimeout, targetDestinationAndTest(podNamespace.Name, fmt.Sprintf("https://%s/version", net.JoinHostPort(getApiAddress(), "443")), []string{pod1Name, pod2Name}))
-				framework.ExpectNoError(err, "Step 6. Check connectivity from both pods to the api-server (running hostNetwork:true) and verifying that the connection is achieved, failed, err: %v", err)
+				// CDN exposes either IPv4 and/or IPv6 API endpoint depending on cluster configuration. The network which we are testing may not support this IP family. Skip if unsupported.
+				apiAddress := getApiAddress()
+				if utilnet.IsIPv6String(apiAddress) == isIPv6TestRun {
+					err = wait.PollImmediate(retryInterval, retryTimeout, targetDestinationAndTest(podNamespace.Name,
+						fmt.Sprintf("https://%s/version", net.JoinHostPort(apiAddress, "443")), []string{pod1Name, pod2Name}))
+					framework.ExpectNoError(err, "6. Check connectivity from pod to the api-server (running hostNetwork:true) and verifying that the connection is achieved, failed, err: %v", err)
+				} else {
+					framework.Logf("Skipping API server reachability check because IP family does not equal IP family of the EgressIP")
+				}
 
 				ginkgo.By("7. Update one of the pods, unmatching the EgressIP")
 				pod2 := getPod(f, pod2Name)
@@ -904,15 +1038,7 @@ spec:
 
 		ginkgo.By("5. Create one pod matching the EgressIP: running on egress1Node")
 		createGenericPodWithLabel(f, pod1Name, pod2Node.name, f.Namespace.Name, command, podEgressLabel)
-
-		err = wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
-			kubectlOut := getPodAddress(pod1Name, f.Namespace.Name)
-			srcIP := net.ParseIP(kubectlOut)
-			if srcIP == nil {
-				return false, nil
-			}
-			return true, nil
-		})
+		_, err = getPodIPWithRetry(f.ClientSet, isIPv6TestRun, f.Namespace.Name, pod1Name)
 		framework.ExpectNoError(err, "Step 5. Create one pod matching the EgressIP: running on egress1Node, failed, err: %v", err)
 		framework.Logf("Created pod %s on node %s", pod1Name, pod2Node.name)
 
@@ -959,14 +1085,7 @@ spec:
 
 		ginkgo.By("15. Create second pod not matching the EgressIP: running on egress1Node")
 		createGenericPodWithLabel(f, pod2Name, pod2Node.name, f.Namespace.Name, command, map[string]string{})
-		err = wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
-			kubectlOut := getPodAddress(pod2Name, f.Namespace.Name)
-			srcIP := net.ParseIP(kubectlOut)
-			if srcIP == nil {
-				return false, nil
-			}
-			return true, nil
-		})
+		_, err = getPodIPWithRetry(f.ClientSet, isIPv6TestRun, f.Namespace.Name, pod2Name)
 		framework.ExpectNoError(err, "Step 15. Create second pod not matching the EgressIP: running on egress1Node, failed, err: %v", err)
 		framework.Logf("Created pod %s on node %s", pod2Name, pod2Node.name)
 
@@ -1059,15 +1178,7 @@ spec:
 
 		ginkgo.By("3. Create one pod matching the EgressIP: running on egress1Node")
 		createGenericPodWithLabel(f, pod1Name, pod2Node.name, f.Namespace.Name, command, podEgressLabel)
-
-		err := wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
-			kubectlOut := getPodAddress(pod1Name, f.Namespace.Name)
-			srcIP := net.ParseIP(kubectlOut)
-			if srcIP == nil {
-				return false, nil
-			}
-			return true, nil
-		})
+		_, err := getPodIPWithRetry(f.ClientSet, isIPv6TestRun, f.Namespace.Name, pod1Name)
 		framework.ExpectNoError(err, "Step 3. Create one pod matching the EgressIP: running on egress1Node, failed, err: %v", err)
 		framework.Logf("Created pod %s on node %s", pod1Name, pod2Node.name)
 
@@ -1084,14 +1195,7 @@ spec:
 			_, err = e2ekubectl.RunKubectl(f.Namespace.Name, "delete", "pod", pod1Name, "--grace-period=0", "--force")
 			framework.ExpectNoError(err, "5. Run %d: Delete the egressPod and recreate it immediately with the same name, failed: %v", i, err)
 			createGenericPodWithLabel(f, pod1Name, nodeSwapName, f.Namespace.Name, command, podEgressLabel)
-			err = wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
-				kubectlOut := getPodAddress(pod1Name, f.Namespace.Name)
-				srcIP := net.ParseIP(kubectlOut)
-				if srcIP == nil {
-					return false, nil
-				}
-				return true, nil
-			})
+			_, err := getPodIPWithRetry(f.ClientSet, isIPv6TestRun, f.Namespace.Name, pod1Name)
 			framework.ExpectNoError(err, "5. Run %d: Delete the egressPod and recreate it immediately with the same name, failed, err: %v", i, err)
 			framework.Logf("Created pod %s on node %s", pod1Name, nodeSwapName)
 			ginkgo.By("6. Check connectivity from pod to an external container and verify that the srcIP is the expected egressIP")
@@ -1129,7 +1233,7 @@ spec:
 	   20. Check connectivity from pod to an external container and verify that the srcIP is the expected nodeIP
 	*/
 	ginkgo.It("Should validate egress IP logic when one pod is managed by more than one egressIP object", func() {
-		if netConfigParams.networkName != types.DefaultNetworkName {
+		if isUserDefinedNetwork(netConfigParams) {
 			ginkgo.Skip("Unsupported for UDNs")
 		}
 
@@ -1148,16 +1252,7 @@ spec:
 
 		ginkgo.By("1. Create one pod matching the EgressIP: running on node2 (pod2Node, egress1Node)")
 		createGenericPodWithLabel(f, pod1Name, pod2Node.name, f.Namespace.Name, command, podEgressLabel)
-
-		var srcPodIP net.IP
-		err := wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
-			kubectlOut := getPodAddress(pod1Name, f.Namespace.Name)
-			srcPodIP = net.ParseIP(kubectlOut)
-			if srcPodIP == nil {
-				return false, nil
-			}
-			return true, nil
-		})
+		srcPodIP, err := getPodIPWithRetry(f.ClientSet, isIPv6TestRun, podNamespace.Name, pod1Name)
 		framework.ExpectNoError(err, "Step 1. Create one pod matching the EgressIP: running on node2 (pod2Node, egress1Node), failed, err: %v", err)
 		framework.Logf("Created pod %s on node %s", pod1Name, pod2Node.name)
 
@@ -1288,7 +1383,7 @@ spec:
 			framework.Failf("Error: Check the OVN DB to ensure no SNATs are added for the standby egressIP, err: %v", err)
 		}
 		logicalIP := fmt.Sprintf("logical_ip=%s", srcPodIP.String())
-		if IsIPv6Cluster(f.ClientSet) {
+		if isIPv6TestRun {
 			logicalIP = fmt.Sprintf("logical_ip=\"%s\"", srcPodIP.String())
 		}
 		snats, err := e2ekubectl.RunKubectl(ovnNamespace, "exec", dbPod, "-c", dbContainerName, "--", "ovn-nbctl", "--no-leader-only", "--columns=external_ip", "find", "nat", logicalIP)
@@ -1527,7 +1622,7 @@ spec:
 
 		ginkgo.By(fmt.Sprintf("4. Make egress node: %s unreachable", node1))
 		setNodeReachable("iptables", node1, false)
-		if IsIPv6Cluster(f.ClientSet) {
+		if isIPv6TestRun {
 			setNodeReachable("ip6tables", node1, false)
 		}
 
@@ -1547,12 +1642,17 @@ spec:
 		framework.ExpectNoError(err, "6. Check connectivity from pod to an external \"node\" and verify that the IP is the egress IP, failed, err: %v", err)
 
 		ginkgo.By("7. Check connectivity from pod to the api-server (running hostNetwork:true) and verifying that the connection is achieved")
-		err = wait.PollImmediate(retryInterval, retryTimeout, targetDestinationAndTest(podNamespace.Name, fmt.Sprintf("https://%s/version", net.JoinHostPort(getApiAddress(), "443")), []string{pod1Name}))
-		framework.ExpectNoError(err, "7. Check connectivity from pod to the api-server (running hostNetwork:true) and verifying that the connection is achieved, failed, err: %v", err)
-
+		// CDN exposes either IPv4 and/or IPv6 API endpoint depending on cluster configuration. The network which we are testing may not support this IP family. Skip if unsupported.
+		apiAddress := getApiAddress()
+		if utilnet.IsIPv6String(apiAddress) == isIPv6TestRun {
+			err = wait.PollImmediate(retryInterval, retryTimeout, targetDestinationAndTest(podNamespace.Name, fmt.Sprintf("https://%s/version", net.JoinHostPort(apiAddress, "443")), []string{pod1Name}))
+			framework.ExpectNoError(err, "7. Check connectivity from pod to the api-server (running hostNetwork:true) and verifying that the connection is achieved, failed, err: %v", err)
+		} else {
+			framework.Logf("Skipping API server reachability check because IP family does not equal IP family of the EgressIP")
+		}
 		ginkgo.By("8, Make node 2 unreachable")
 		setNodeReachable("iptables", node2, false)
-		if IsIPv6Cluster(f.ClientSet) {
+		if isIPv6TestRun {
 			setNodeReachable("ip6tables", node2, false)
 		}
 
@@ -1565,7 +1665,7 @@ spec:
 
 		ginkgo.By("11. Make node 1 reachable again")
 		setNodeReachable("iptables", node1, true)
-		if IsIPv6Cluster(f.ClientSet) {
+		if isIPv6TestRun {
 			setNodeReachable("ip6tables", node1, true)
 		}
 
@@ -1581,7 +1681,7 @@ spec:
 
 		ginkgo.By("14. Make node 2 reachable again")
 		setNodeReachable("iptables", node2, true)
-		if IsIPv6Cluster(f.ClientSet) {
+		if isIPv6TestRun {
 			setNodeReachable("ip6tables", node2, true)
 		}
 
@@ -1606,7 +1706,7 @@ spec:
 
 		ginkgo.By("20. Make node 1 not reachable")
 		setNodeReachable("iptables", node1, false)
-		if IsIPv6Cluster(f.ClientSet) {
+		if isIPv6TestRun {
 			setNodeReachable("ip6tables", node1, false)
 		}
 
@@ -1624,7 +1724,7 @@ spec:
 
 		ginkgo.By("25. Make node 1 reachable again")
 		setNodeReachable("iptables", node1, true)
-		if IsIPv6Cluster(f.ClientSet) {
+		if isIPv6TestRun {
 			setNodeReachable("ip6tables", node1, true)
 		}
 
@@ -1656,7 +1756,7 @@ spec:
 	   8. Check connectivity to the service IP and verify that it works
 	*/
 	ginkgo.It("Should validate the egress IP functionality against remote hosts with egress firewall applied", func() {
-		if netConfigParams.networkName != types.DefaultNetworkName {
+		if isUserDefinedNetwork(netConfigParams) {
 			ginkgo.Skip("Unsupported for UDNs")
 		}
 		command := []string{"/agnhost", "netexec", fmt.Sprintf("--http-port=%s", podHTTPPort)}
@@ -1748,20 +1848,10 @@ spec:
 		createGenericPodWithLabel(f, pod2Name, pod2Node.name, f.Namespace.Name, command, podEgressLabel)
 		serviceIP, err := createServiceForPodsWithLabel(f, f.Namespace.Name, servicePort, podHTTPPort, "ClusterIP", podEgressLabel)
 		framework.ExpectNoError(err, "Step 3. Create two pods, and matching service, matching both egress firewall and egress IP, failed creating service, err: %v", err)
-
-		err = wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
-			for _, podName := range []string{pod1Name, pod2Name} {
-				kubectlOut := getPodAddress(podName, f.Namespace.Name)
-				srcIP := net.ParseIP(kubectlOut)
-				if srcIP == nil {
-					return false, nil
-				}
-			}
-			return true, nil
-		})
-		framework.ExpectNoError(err, "Step 3. Create two pods matching both egress firewall and egress IP, failed, err: %v", err)
-
-		pod2IP := getPodAddress(pod2Name, f.Namespace.Name)
+		for _, podName := range []string{pod1Name, pod2Name} {
+			_, err = getPodIPWithRetry(f.ClientSet, isIPv6TestRun, f.Namespace.Name, podName)
+			framework.ExpectNoError(err, "Step 3. Create two pods matching both egress firewall and egress IP, failed for pod %s, err: %v", podName, err)
+		}
 
 		ginkgo.By("Checking that the status is of length one")
 		verifyEgressIPStatusLengthEquals(1, nil)
@@ -1783,7 +1873,9 @@ spec:
 		// framework.ExpectNoError(err, "Step 6. Check connectivity to the kubernetes API IP and verify that it works, failed, err %v", err)
 
 		ginkgo.By("7. Check connectivity to the other pod IP and verify that it works")
-		err = wait.PollImmediate(retryInterval, retryTimeout, targetPodAndTest(f.Namespace.Name, pod1Name, pod2Name, pod2IP))
+		pod2IP, err := getPodIPWithRetry(f.ClientSet, isIPv6TestRun, f.Namespace.Name, pod2Name)
+		framework.ExpectNoError(err, "Step 7. Check connectivity to the other pod IP and verify that it works, err retrieving pod %s IP: %v", err, pod2Name)
+		err = wait.PollImmediate(retryInterval, retryTimeout, targetPodAndTest(f.Namespace.Name, pod1Name, pod2Name, pod2IP.String()))
 		framework.ExpectNoError(err, "Step 7. Check connectivity to the other pod IP and verify that it works, err: %v", err)
 
 		ginkgo.By("8. Check connectivity to the service IP and verify that it works")
@@ -1803,6 +1895,14 @@ spec:
 	// verifies it.
 	// This test is specific to IPv4 LGW mode.
 	ginkgo.It("of replies to egress IP packets that require fragmentation [LGW][IPv4]", func() {
+		if isIPv6TestRun {
+			ginkgo.Skip("IPv4 only")
+		}
+		if isUserDefinedNetwork(netConfigParams) {
+			//FIXME: Fragmentation is broken for user defined networks
+			// Remove when https://issues.redhat.com/browse/OCPBUGS-46476 is resolved
+			ginkgo.Skip("Fragmentation is not working for user defined networks")
+		}
 		usedEgressNodeAvailabilityHandler = &egressNodeAvailabilityHandlerViaLabel{f}
 
 		ginkgo.By("Setting a node as available for egress")
@@ -1964,17 +2064,17 @@ spec:
 	   26. Check connectivity from the other pod to an external "node" on the secondary host network and verify the expected src IPs
 	*/
 	table.DescribeTable("[secondary-host-eip] Using different methods to disable a node or pod availability for egress", func(egressIPIP1, egressIPIP2 string) {
-		if netConfigParams.networkName != types.DefaultNetworkName {
+		if isUserDefinedNetwork(netConfigParams) {
 			ginkgo.Skip("Unsupported for UDNs")
 		}
 		// get v4, v6 from eips
 		// check that node has both of them
 		v4, v6 := getIPVersions(egressIPIP1, egressIPIP2)
-		if v4 && utilnet.IsIPv6(net.ParseIP(egress1Node.nodeIP)) {
-			ginkgo.Skip("Node does not have IPv4 address")
+		if v4 && isIPv6TestRun {
+			ginkgo.Skip("environment supports IPv6 only")
 		}
-		if v6 && !utilnet.IsIPv6(net.ParseIP(egress1Node.nodeIP)) {
-			ginkgo.Skip("Node does not have IPv6 address")
+		if v6 && !isIPv6TestRun {
+			ginkgo.Skip("environment supports IPv4 only")
 		}
 		egressNodeAvailabilityHandler := egressNodeAvailabilityHandlerViaLabel{f}
 		ginkgo.By("0. Set two nodes as available for egress")
@@ -2033,24 +2133,17 @@ spec:
 		ginkgo.By("4. Create two pods matching the EgressIP: one running on each of the egress nodes")
 		createGenericPodWithLabel(f, pod1Name, pod1Node.name, f.Namespace.Name, command, podEgressLabel)
 		createGenericPodWithLabel(f, pod2Name, pod2Node.name, f.Namespace.Name, command, podEgressLabel)
-		err := wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
-			for _, podName := range []string{pod1Name, pod2Name} {
-				kubectlOut := getPodAddress(podName, f.Namespace.Name)
-				srcIP := net.ParseIP(kubectlOut)
-				if srcIP == nil {
-					return false, nil
-				}
-			}
-			return true, nil
-		})
-		framework.ExpectNoError(err, "Step 4. Create two pods matching an EgressIP - running pod(s) failed to get "+
-			"their IP(s), failed, err: %v", err)
+		for _, podName := range []string{pod1Name, pod2Name} {
+			_, err := getPodIPWithRetry(f.ClientSet, isIPv6TestRun, f.Namespace.Name, podName)
+			framework.ExpectNoError(err, "Step 4. Create two pods matching an EgressIP - running pod(s) failed to get "+
+				"pod %s IP(s), failed, err: %v", podName, err)
+		}
 		framework.Logf("Created two pods - pod %s on node %s and pod %s on node %s", pod1Name, pod1Node.name, pod2Name,
 			pod2Node.name)
 
 		ginkgo.By("5. Check connectivity from both pods to an external \"node\" hosted on the secondary host network " +
 			"and verify the expected IPs")
-		err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(targetSecondaryNode, pod1Name,
+		err := wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(targetSecondaryNode, pod1Name,
 			podNamespace.Name, true, []string{egressIPIP1, egressIPIP2}))
 		framework.ExpectNoError(err, "Step 5. Check connectivity from pod (%s/%s) to an external container attached to "+
 			"a network that is a secondary host network and verify that the src IP is the expected egressIP, failed: %v",
@@ -2061,17 +2154,24 @@ spec:
 			"a network that is a secondary host network and verify that the src IP is the expected egressIP, failed: %v", podNamespace.Name, pod2Name, err)
 
 		ginkgo.By("6. Check connectivity from one pod to the other and verify that the connection is achieved")
-		pod2IP := getPodAddress(pod2Name, f.Namespace.Name)
-		err = wait.PollImmediate(retryInterval, retryTimeout, targetPodAndTest(f.Namespace.Name, pod1Name, pod2Name, pod2IP))
+		pod2IP, err := getPodIPWithRetry(f.ClientSet, isIPv6TestRun, f.Namespace.Name, pod2Name)
+		framework.ExpectNoError(err, "Step 6. Check connectivity from one pod to the other and verify that the connection "+
+			"is achieved, failed for pod %s, err: %v", pod2Name, err)
+		err = wait.PollImmediate(retryInterval, retryTimeout, targetPodAndTest(f.Namespace.Name, pod1Name, pod2Name, pod2IP.String()))
 		framework.ExpectNoError(err, "Step 6. Check connectivity from one pod to the other and verify that the connection "+
 			"is achieved, failed, err: %v", err)
 
 		ginkgo.By("7. Check connectivity from both pods to the api-server (running hostNetwork:true) and verifying that " +
 			"the connection is achieved")
-		err = wait.PollImmediate(retryInterval, retryTimeout, targetDestinationAndTest(podNamespace.Name,
-			fmt.Sprintf("https://%s/version", net.JoinHostPort(getApiAddress(), "443")), []string{pod1Name, pod2Name}))
-		framework.ExpectNoError(err, "Step 7. Check connectivity from both pods to the api-server (running hostNetwork:true) "+
-			"and verifying that the connection is achieved, failed, err: %v", err)
+		// CDN exposes either IPv4 and/or IPv6 API endpoint depending on cluster configuration. The network which we are testing may not support this IP family. Skip if unsupported.
+		apiAddress := getApiAddress()
+		if utilnet.IsIPv6String(apiAddress) == isIPv6TestRun {
+			err = wait.PollImmediate(retryInterval, retryTimeout, targetDestinationAndTest(podNamespace.Name,
+				fmt.Sprintf("https://%s/version", net.JoinHostPort(apiAddress, "443")), []string{pod1Name, pod2Name}))
+			framework.ExpectNoError(err, "7. Check connectivity from pod to the api-server (running hostNetwork:true) and verifying that the connection is achieved, failed, err: %v", err)
+		} else {
+			framework.Logf("Skipping API server reachability check because IP family does not equal IP family of the EgressIP")
+		}
 
 		ginkgo.By("8. Update one of the pods, unmatching the EgressIP")
 		pod2 := getPod(f, pod2Name)
@@ -2207,7 +2307,7 @@ spec:
 	   28. Check connectivity both pods to an external "node" on the secondary host network and verify the src IP is the expected egressIP
 	*/
 	ginkgo.It("[secondary-host-eip] Using different methods to disable a node or pod availability for egress", func() {
-		if netConfigParams.networkName != types.DefaultNetworkName {
+		if isUserDefinedNetwork(netConfigParams) {
 			ginkgo.Skip("Unsupported for UDNs")
 		}
 		if utilnet.IsIPv6(net.ParseIP(egress1Node.nodeIP)) {
@@ -2273,24 +2373,17 @@ spec:
 		ginkgo.By("4. Create two pods matching the EgressIP: one running on each of the egress nodes")
 		createGenericPodWithLabel(f, pod1Name, pod1Node.name, f.Namespace.Name, command, podEgressLabel)
 		createGenericPodWithLabel(f, pod2Name, pod2Node.name, f.Namespace.Name, command, podEgressLabel)
-		err := wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
-			for _, podName := range []string{pod1Name, pod2Name} {
-				kubectlOut := getPodAddress(podName, f.Namespace.Name)
-				srcIP := net.ParseIP(kubectlOut)
-				if srcIP == nil {
-					return false, nil
-				}
-			}
-			return true, nil
-		})
-		framework.ExpectNoError(err, "Step 4. Create two pods matching an EgressIP - running pod(s) failed to get "+
-			"their IP(s), failed, err: %v", err)
+		for _, podName := range []string{pod1Name, pod2Name} {
+			_, err := getPodIPWithRetry(f.ClientSet, isIPv6TestRun, f.Namespace.Name, podName)
+			framework.ExpectNoError(err, "Step 4. Create two pods matching an EgressIP - running pod(s) failed to get "+
+				"pod %s IP(s), failed, err: %v", podName, err)
+		}
 		framework.Logf("Created two pods - pod %s on node %s and pod %s on node %s", pod1Name, pod1Node.name, pod2Name,
 			pod2Node.name)
 
 		ginkgo.By("5. Check connectivity a pod to an external \"node\" hosted on the OVN network " +
 			"and verify the expected IP")
-		err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(targetNode, pod1Name,
+		err := wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(targetNode, pod1Name,
 			podNamespace.Name, true, []string{egressIPOVN}))
 		framework.ExpectNoError(err, "Step 5. Check connectivity from pod (%s/%s) to an external container attached to "+
 			"a network that is OVN network and verify that the src IP is the expected egressIP, failed: %v",
@@ -2314,17 +2407,24 @@ spec:
 			podNamespace.Name, pod2Name, err)
 
 		ginkgo.By("7. Check connectivity from one pod to the other and verify that the connection is achieved")
-		pod2IP := getPodAddress(pod2Name, f.Namespace.Name)
-		err = wait.PollImmediate(retryInterval, retryTimeout, targetPodAndTest(f.Namespace.Name, pod1Name, pod2Name, pod2IP))
+		pod2IP, err := getPodIPWithRetry(f.ClientSet, isIPv6TestRun, podNamespace.Name, pod2Name)
+		framework.ExpectNoError(err, "Step 7. Check connectivity from one pod to the other and verify that the connection "+
+			"is achieved, failed to get Pod %s IP(s), err: %v", pod2Name, err)
+		err = wait.PollImmediate(retryInterval, retryTimeout, targetPodAndTest(f.Namespace.Name, pod1Name, pod2Name, pod2IP.String()))
 		framework.ExpectNoError(err, "Step 7. Check connectivity from one pod to the other and verify that the connection "+
 			"is achieved, failed, err: %v", err)
 
 		ginkgo.By("8. Check connectivity from both pods to the api-server (running hostNetwork:true) and verifying that " +
 			"the connection is achieved")
-		err = wait.PollImmediate(retryInterval, retryTimeout, targetDestinationAndTest(podNamespace.Name,
-			fmt.Sprintf("https://%s/version", net.JoinHostPort(getApiAddress(), "443")), []string{pod1Name, pod2Name}))
-		framework.ExpectNoError(err, "Step 8. Check connectivity from both pods to the api-server (running hostNetwork:true) "+
-			"and verifying that the connection is achieved, failed, err: %v", err)
+		// CDN exposes either IPv4 and/or IPv6 API endpoint depending on cluster configuration. The network which we are testing may not support this IP family. Skip if unsupported.
+		apiAddress := getApiAddress()
+		if utilnet.IsIPv6String(apiAddress) == isIPv6TestRun {
+			err = wait.PollImmediate(retryInterval, retryTimeout, targetDestinationAndTest(podNamespace.Name,
+				fmt.Sprintf("https://%s/version", net.JoinHostPort(apiAddress, "443")), []string{pod1Name, pod2Name}))
+			framework.ExpectNoError(err, "8. Check connectivity from pod to the api-server (running hostNetwork:true) and verifying that the connection is achieved, failed, err: %v", err)
+		} else {
+			framework.Logf("Skipping API server reachability check because IP family does not equal IP family of the EgressIP")
+		}
 
 		ginkgo.By("9. Update one of the pods, unmatching the EgressIP")
 		pod2 := getPod(f, pod2Name)
@@ -2461,7 +2561,7 @@ spec:
 	// 6. Check connectivity to the host on the secondary host network from the pod selected by the other EgressIP
 	// 7. Check connectivity to the host on the OVN network from the pod not selected by EgressIP
 	ginkgo.It("[secondary-host-eip] Multiple EgressIP objects and their Egress IP hosted on the same interface", func() {
-		if netConfigParams.networkName != types.DefaultNetworkName {
+		if isUserDefinedNetwork(netConfigParams) {
 			ginkgo.Skip("Unsupported for UDNs")
 		}
 		var egressIP1, egressIP2 string
@@ -2538,21 +2638,14 @@ spec:
 			"wants": "egress2",
 		}
 		createGenericPodWithLabel(f, pod2Name, pod2Node.name, f.Namespace.Name, command, podEgressLabel2)
-		err := wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
-			for _, podName := range []string{pod1Name, pod2Name} {
-				kubectlOut := getPodAddress(podName, f.Namespace.Name)
-				srcIP := net.ParseIP(kubectlOut)
-				if srcIP == nil {
-					return false, nil
-				}
-			}
-			return true, nil
-		})
-		framework.ExpectNoError(err, "Step 3. Create two pods - one matching each EgressIP, failed, err: %v", err)
+		for _, podName := range []string{pod1Name, pod2Name} {
+			_, err := getPodIPWithRetry(f.ClientSet, isIPv6TestRun, podNamespace.Name, podName)
+			framework.ExpectNoError(err, "Step 3. Create two pods - one matching each EgressIP, failed for pod %s, err: %v", podName, err)
+		}
 
 		ginkgo.By("4. Check connectivity from both pods to an external \"node\" hosted on a secondary host network " +
 			"and verify the expected IPs")
-		err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(targetSecondaryNode, pod1Name,
+		err := wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(targetSecondaryNode, pod1Name,
 			podNamespace.Name, true, []string{egressIP1}))
 		framework.ExpectNoError(err, "4. Check connectivity from both pods to an external \"node\" hosted on a secondary host network "+
 			"and verify the expected IPs, failed for EgressIP %s: %v", egressIPName, err)
@@ -2587,7 +2680,7 @@ spec:
 		if !isKernelModuleLoaded(egress1Node.name, "vrf") {
 			ginkgo.Skip("Node doesn't have VRF kernel module loaded")
 		}
-		if netConfigParams.networkName != types.DefaultNetworkName {
+		if isUserDefinedNetwork(netConfigParams) {
 			ginkgo.Skip("Unsupported for UDNs")
 		}
 		var egressIP1 string
@@ -2696,14 +2789,7 @@ spec:
 		verifySpecificEgressIPStatusLengthEquals(egressIPName, 1, nil)
 		ginkgo.By("4. Create a pod matching the EgressIP")
 		createGenericPodWithLabel(f, pod1Name, pod1Node.name, f.Namespace.Name, command, podEgressLabel)
-		err = wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
-			kubectlOut := getPodAddress(pod1Name, f.Namespace.Name)
-			srcIP := net.ParseIP(kubectlOut)
-			if srcIP == nil {
-				return false, nil
-			}
-			return true, nil
-		})
+		_, err = getPodIPWithRetry(f.ClientSet, isIPv6TestRun, f.Namespace.Name, pod1Name)
 		framework.ExpectNoError(err, "Step 4. Create a pod matching the EgressIP, failed, err: %v", err)
 		ginkgo.By("5. Check connectivity from a pod to an external \"node\" hosted on a secondary host network " +
 			"and verify the expected IP")
@@ -2716,9 +2802,9 @@ spec:
 	// two pods attached to different namespaces but the same role primary user defined network
 	// One pod is deleted and ensure connectivity for the other pod is ok
 	// The previous pod namespace is deleted and again, ensure connectivity for the other pod is ok
-	ginkgo.It("[OVN network] multiple namespaces sharing a primary networks", func() {
-		if !isNetworkSegmentationEnabled() || netConfigParams.role != "primary" {
-			ginkgo.Skip("Network segmentation is disabled or network isn't a role primary UDN")
+	ginkgo.It("[OVN network] multiple namespaces sharing a role primary network", func() {
+		if !isNetworkSegmentationEnabled() || isClusterDefaultNetwork(netConfigParams) {
+			ginkgo.Skip("network segmentation disabled or unsupported for cluster default network")
 		}
 		ginkgo.By(fmt.Sprintf("Building another namespace api object, basename %s", f.BaseName))
 		otherNetworkNamespace, err := f.CreateNamespace(context.Background(), f.BaseName, map[string]string{
@@ -2830,14 +2916,14 @@ spec:
 
 	ginkgo.DescribeTable("[OVN network] multiple namespaces with different primary networks", func(otherNetworkAttachParms networkAttachmentConfigParams) {
 		if !isNetworkSegmentationEnabled() {
-			ginkgo.Skip("Network segmentation is disabled")
+			ginkgo.Skip("network segmentation is disabled")
 		}
 		ginkgo.By(fmt.Sprintf("Building a namespace api object, basename %s", f.BaseName))
 		otherNetworkNamespace, err := f.CreateNamespace(context.Background(), f.BaseName, map[string]string{
 			"e2e-framework": f.BaseName,
 		})
 		gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
-		if netConfigParams.networkName == types.DefaultNetworkName {
+		if isClusterDefaultNetwork(netConfigParams) {
 			ginkgo.By("namespace is connected to CDN, create a namespace with primary as a layer3 UDN")
 			// create L3 Primary UDN
 			nadClient, err := nadclient.NewForConfig(f.ClientConfig())
@@ -2912,26 +2998,10 @@ spec:
 		framework.ExpectNoError(err, "5. Create one pod matching the EgressIP: running on egress1Node, failed: %v", err)
 		_, err = createGenericPodWithLabel(f, pod2Name, pod2Node.name, otherNetworkNamespace.Name, command, podEgressLabel)
 		framework.ExpectNoError(err, "5. Create one pod matching the EgressIP: running on egress2Node, failed: %v", err)
-
-		err = wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
-			kubectlOut := getPodAddress(pod1Name, f.Namespace.Name)
-			srcIP := net.ParseIP(kubectlOut)
-			if srcIP == nil {
-				return false, nil
-			}
-			return true, nil
-		})
+		_, err = getPodIPWithRetry(f.ClientSet, isIPv6TestRun, f.Namespace.Name, pod1Name)
 		framework.ExpectNoError(err, "Step 5. Create one pod matching the EgressIP: running on egress1Node, failed, err: %v", err)
 		framework.Logf("Created pod %s on node %s", pod1Name, pod1Node.name)
-
-		err = wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
-			kubectlOut := getPodAddress(pod2Name, otherNetworkNamespace.Name)
-			srcIP := net.ParseIP(kubectlOut)
-			if srcIP == nil {
-				return false, nil
-			}
-			return true, nil
-		})
+		_, err = getPodIPWithRetry(f.ClientSet, isIPv6TestRun, otherNetworkNamespace.Name, pod2Name)
 		framework.ExpectNoError(err, "Step 5. Create one pod matching the EgressIP: running on egress2Node, failed, err: %v", err)
 		framework.Logf("Created pod %s on node %s", pod2Name, pod2Node.name)
 
@@ -2942,28 +3012,44 @@ spec:
 		ginkgo.By("7. Check connectivity from pod connected to a different network and verify that the srcIP is the expected egressIP")
 		err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(targetNode, pod2Name, pod2OtherNetworkNamespace, true, []string{egressIP1.String()}))
 		framework.ExpectNoError(err, "Step 7. Check connectivity from pod connected to a different network and verify that the srcIP is the expected nodeIP, failed: %v", err)
-	}, ginkgo.Entry("L3 Primary UDN", networkAttachmentConfigParams{
+	}, ginkgo.Entry("IPv4 L3 Primary UDN", networkAttachmentConfigParams{
 		name:     "l3primary",
 		topology: types.Layer3Topology,
 		cidr:     "10.10.0.0/16",
 		role:     "primary",
-	}))
+	}),
+		ginkgo.Entry("IPv6 L3 Primary UDN", networkAttachmentConfigParams{
+			name:     "l3primary",
+			topology: types.Layer3Topology,
+			cidr:     "2014:100:200::0/60",
+			role:     "primary",
+		}),
+	)
 },
 	ginkgo.Entry(
-		"L3 CDN", // No UDN attachments
+		"Cluster Default Network",
 		networkAttachmentConfigParams{
 			networkName: types.DefaultNetworkName,
+			topology:    types.Layer3Topology,
 		},
-		false,
 	),
+	// FIXME: fix tests for CDN to specify IPv4 and IPv6 entries in-order to enable testing all IP families on dual stack clusters
 	ginkgo.Entry(
-		"L3 UDN role primary",
+		"Network Segmentation: IPv4 L3 role primary",
 		networkAttachmentConfigParams{
-			name:     "l3primary",
+			name:     "l3primaryv4",
 			topology: types.Layer3Topology,
 			cidr:     "10.10.0.0/16",
 			role:     "primary",
 		},
-		false,
+	),
+	ginkgo.Entry(
+		"Network Segmentation: IPv6 L3 role primary",
+		networkAttachmentConfigParams{
+			name:     "l3primaryv6",
+			topology: types.Layer3Topology,
+			cidr:     "2014:100:200::0/60",
+			role:     "primary",
+		},
 	),
 )
