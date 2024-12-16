@@ -103,6 +103,7 @@ IN_UPGRADE=
 # northd-backoff-interval, in ms
 OVN_NORTHD_BACKOFF_INTERVAL=
 OVN_OBSERV_ENABLE="false"
+ENABLE_IPSEC="false"
 
 # Parse parameters given as arguments to this script.
 while [ "$1" != "" ]; do
@@ -352,6 +353,9 @@ while [ "$1" != "" ]; do
   --ovn-northd-backoff-interval)
     OVN_NORTHD_BACKOFF_INTERVAL=$VALUE
     ;;
+  --enable-ipsec)
+    ENABLE_IPSEC=$VALUE
+    ;;
   --enable-persistent-ips)
     OVN_ENABLE_PERSISTENT_IPS=$VALUE
     ;;
@@ -552,6 +556,9 @@ echo "ovn_enable_ovnkube_identity: ${ovn_enable_ovnkube_identity}"
 
 ovn_northd_backoff_interval=${OVN_NORTHD_BACKOFF_INTERVAL}
 echo "ovn_northd_backoff_interval: ${ovn_northd_backoff_interval}"
+
+enable_ipsec=${ENABLE_IPSEC}
+echo "enable_ipsec: ${enable_ipsec}"
 
 ovn_enable_persistent_ips=${OVN_ENABLE_PERSISTENT_IPS}
 echo "ovn_enable_persistent_ips: ${ovn_enable_persistent_ips}"
@@ -903,6 +910,7 @@ ovn_image=${ovnkube_image} \
   ovn_enable_interconnect=${ovn_enable_interconnect} \
   ovn_enable_multi_external_gateway=${ovn_enable_multi_external_gateway} \
   ovn_enable_ovnkube_identity=${ovn_enable_ovnkube_identity} \
+  enable_ipsec=${enable_ipsec} \
   ovn_northd_backoff_interval=${ovn_northd_backoff_interval} \
   ovn_enable_persistent_ips=${ovn_enable_persistent_ips} \
   ovn_enable_svc_template_support=${ovn_enable_svc_template_support} \
@@ -968,6 +976,7 @@ ovn_image=${ovnkube_image} \
   ovn_enable_interconnect=${ovn_enable_interconnect} \
   ovn_enable_multi_external_gateway=${ovn_enable_multi_external_gateway} \
   ovn_enable_ovnkube_identity=${ovn_enable_ovnkube_identity} \
+  enable_ipsec=${enable_ipsec} \
   ovn_northd_backoff_interval=${ovn_enable_backoff_interval} \
   ovn_enable_persistent_ips=${ovn_enable_persistent_ips} \
   ovn_enable_svc_template_support=${ovn_enable_svc_template_support} \

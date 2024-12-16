@@ -97,6 +97,7 @@ fi
 # OVN_ENABLE_SVC_TEMPLATE_SUPPORT - enable svc template support
 # OVN_ENABLE_DNSNAMERESOLVER - enable dns name resolver support
 # OVN_OBSERV_ENABLE - enable observability for ovnkube
+# ENABLE_IPSEC - enable ipsec for ovn networked pod traffic
 
 # The argument to the command is the operation to be performed
 # ovn-master ovn-controller ovn-node display display_env ovn_debug
@@ -320,6 +321,8 @@ ovn_nohostsubnet_label=${OVN_NOHOSTSUBNET_LABEL:-""}
 # OVN_DISABLE_REQUESTEDCHASSIS - disable requested-chassis option during pod creation
 # should be set to true when dpu nodes are in the cluster
 ovn_disable_requestedchassis=${OVN_DISABLE_REQUESTEDCHASSIS:-false}
+# ENABLE_IPSEC - enable ipsec for ovnk networked pod traffic
+enable_ipsec=${ENABLE_IPSEC:-false}
 
 # Determine the ovn rundir.
 if [[ -f /usr/bin/ovn-appctl ]]; then
@@ -980,6 +983,11 @@ local-nb-ovsdb() {
 
   ovn-nbctl set NB_Global . name=${K8S_NODE}
   ovn-nbctl set NB_Global . options:name=${K8S_NODE}
+
+ [[ "true" == "${ENABLE_IPSEC}" ]] && {
+    ovn-nbctl set nb_global . ipsec=true
+    echo "=============== nb-ovsdb ========== reconfigured for ipsec"
+  }
 
   tail --follow=name ${OVN_LOGDIR}/ovsdb-server-nb.log &
   ovn_tail_pid=$!
