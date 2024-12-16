@@ -377,6 +377,10 @@ spec:
           value: "{{ ovn_enable_multi_external_gateway }}"
         - name: OVN_ENABLE_SVC_TEMPLATE_SUPPORT
           value: "{{ ovn_enable_svc_template_support }}"
+        - name: OVN_UDN_ALLOWED_DEFAULT_SERVICES
+          value: "{{ ovn_udn_allowed_default_services }}"
+        - name: OVS_DB_TRANSACTION_TIMEOUT
+          value: "{{ ovs_db_transaction_timeout }}"
         - name: OVN_HOST_NETWORK_NAMESPACE
           valueFrom:
             configMapKeyRef:

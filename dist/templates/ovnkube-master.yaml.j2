@@ -301,6 +301,10 @@ spec:
           value: "{{ ovn_nohostsubnet_label }}"
         - name: OVN_DISABLE_REQUESTEDCHASSIS
           value: "{{ ovn_disable_requestedchassis }}"
+        - name: OVN_UDN_ALLOWED_DEFAULT_SERVICES
+          value: "{{ ovn_udn_allowed_default_services }}"
+        - name: OVS_DB_TRANSACTION_TIMEOUT
+          value: "{{ ovs_db_transaction_timeout }}"
         - name: OVN_HOST_NETWORK_NAMESPACE
           valueFrom:
             configMapKeyRef:

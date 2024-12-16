@@ -283,6 +283,11 @@ spec:
           value: {{ hasKey .Values.global "enableDNSNameResolver" | ternary .Values.global.enableDNSNameResolver false | quote }}
         - name: OVN_DISABLE_REQUESTEDCHASSIS
           value: {{ default "false" .Values.global.disableRequestedchassis | quote }}
+        - name: OVN_UDN_ALLOWED_DEFAULT_SERVICES
+          value: {{ hasKey .Values.global "udnAllowedDefaultServices" | ternary .Values.global.udnAllowedDefaultServices "" | quote }}
+        - name: OVS_DB_TRANSACTION_TIMEOUT
+          value: {{ hasKey .Values.global "ovsdbTxnTimeout" | ternary .Values.global.ovsdbTxnTimeout "10" | quote }}
+
       # end of container
       volumes:
       # TODO: Need to check why we need this?

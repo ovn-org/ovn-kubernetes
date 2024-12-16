@@ -244,6 +244,8 @@ spec:
           value: "{{ ovn_enable_interconnect }}"
         - name: OVN_ENABLE_MULTI_EXTERNAL_GATEWAY
           value: "{{ ovn_enable_multi_external_gateway }}"
+        - name: OVN_UDN_ALLOWED_DEFAULT_SERVICES
+          value: "{{ ovn_udn_allowed_default_services }}"
         {% endif -%}
         {% if ovnkube_app_name=="ovnkube-node-dpu-host" -%}
         - name: OVNKUBE_NODE_MODE

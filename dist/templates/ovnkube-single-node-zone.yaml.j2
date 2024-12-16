@@ -462,6 +462,10 @@ spec:
           value: "{{ ovn_enable_svc_template_support }}"
         - name: OVN_ENABLE_DNSNAMERESOLVER
           value: "{{ ovn_enable_dnsnameresolver }}"
+        - name: OVN_UDN_ALLOWED_DEFAULT_SERVICES
+          value: "{{ ovn_udn_allowed_default_services }}"
+        - name: OVS_DB_TRANSACTION_TIMEOUT
+          value: "{{ ovs_db_transaction_timeout }}"
 
         readinessProbe:
           exec:

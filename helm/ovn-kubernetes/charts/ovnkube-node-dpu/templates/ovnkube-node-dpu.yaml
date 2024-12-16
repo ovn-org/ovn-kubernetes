@@ -231,6 +231,8 @@ spec:
           value: {{ hasKey .Values.global "enableInterconnect" | ternary .Values.global.enableInterconnect false | quote }}
         - name: OVN_ENABLE_MULTI_EXTERNAL_GATEWAY
           value: {{ hasKey .Values.global "enableMultiExternalGateway" | ternary .Values.global.enableMultiExternalGateway false | quote }}
+        - name: OVN_UDN_ALLOWED_DEFAULT_SERVICES
+          value: {{ hasKey .Values.global "udnAllowedDefaultServices" | ternary .Values.global.udnAllowedDefaultServices "" | quote }}
         - name: OVNKUBE_NODE_MODE
           value: "dpu"
         - name: OVN_HOST_NETWORK_NAMESPACE
