@@ -300,7 +300,7 @@ jobs:
           azure-cli aspnetcore-* dotnet-* ghc-* firefox \
           google-chrome-stable \
           llvm-* microsoft-edge-stable mono-* \
-          msbuild mysql-server-core-* php-* php7* \
+          mysql-server-core-* php-* php7* \
           powershell temurin-* zulu-*
 
     - name: Download test-image-master
@@ -482,7 +482,7 @@ jobs:
           azure-cli aspnetcore-* dotnet-* ghc-* firefox \
           google-chrome-stable \
           llvm-* microsoft-edge-stable mono-* \
-          msbuild mysql-server-core-* php-* php7* \
+          mysql-server-core-* php-* php7* \
           powershell temurin-* zulu-*
 
     - name: Setup /mnt/runner directory
@@ -652,7 +652,7 @@ jobs:
           azure-cli aspnetcore-* dotnet-* ghc-* firefox \
           google-chrome-stable \
           llvm-* microsoft-edge-stable mono-* \
-          msbuild mysql-server-core-* php-* php7* \
+          mysql-server-core-* php-* php7* \
           powershell temurin-* zulu-*
 
     - name: Disable ufw
