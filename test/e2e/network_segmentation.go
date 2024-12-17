@@ -32,9 +32,12 @@ import (
 )
 
 const openDefaultPortsAnnotation = "k8s.ovn.org/open-default-ports"
+const RequiredUDNNamespaceLabel = "k8s.ovn.org/primary-user-defined-network"
 
 var _ = Describe("Network Segmentation", func() {
 	f := wrappedTestFramework("network-segmentation")
+	// disable automatic namespace creation, we need to add the required UDN label
+	f.SkipNamespaceCreation = true
 
 	var (
 		cs        clientset.Interface
@@ -58,6 +61,12 @@ var _ = Describe("Network Segmentation", func() {
 
 		var err error
 		nadClient, err = nadclient.NewForConfig(f.ClientConfig())
+		Expect(err).NotTo(HaveOccurred())
+		namespace, err := f.CreateNamespace(context.TODO(), f.BaseName, map[string]string{
+			"e2e-framework":           f.BaseName,
+			RequiredUDNNamespaceLabel: "",
+		})
+		f.Namespace = namespace
 		Expect(err).NotTo(HaveOccurred())
 	})
 
@@ -223,7 +232,8 @@ var _ = Describe("Network Segmentation", func() {
 						defaultNetNamespace := f.Namespace.Name + "-default"
 						_, err := cs.CoreV1().Namespaces().Create(context.Background(), &v1.Namespace{
 							ObjectMeta: metav1.ObjectMeta{
-								Name: defaultNetNamespace,
+								Name:   defaultNetNamespace,
+								Labels: map[string]string{RequiredUDNNamespaceLabel: ""},
 							},
 						}, metav1.CreateOptions{})
 						Expect(err).NotTo(HaveOccurred())
@@ -349,7 +359,6 @@ var _ = Describe("Network Segmentation", func() {
 							return podutils.IsPodReady(udnPod)
 						}, 10*time.Second, 1*time.Second).Should(BeTrue())
 						Expect(udnPod.Status.ContainerStatuses[0].RestartCount).To(Equal(int32(0)))
-
 
 						if !isUDNHostIsolationDisabled() {
 							By("checking default network hostNetwork pod and non-kubelet host process can't reach the UDN pod")
@@ -511,7 +520,8 @@ var _ = Describe("Network Segmentation", func() {
 							By("Creating namespace " + namespace)
 							_, err := cs.CoreV1().Namespaces().Create(context.Background(), &v1.Namespace{
 								ObjectMeta: metav1.ObjectMeta{
-									Name: namespace,
+									Name:   namespace,
+									Labels: map[string]string{RequiredUDNNamespaceLabel: ""},
 								},
 							}, metav1.CreateOptions{})
 							Expect(err).NotTo(HaveOccurred())
@@ -971,7 +981,11 @@ spec:
 
 			By("Creating test tenants namespaces")
 			for _, nsName := range testTenantNamespaces {
-				_, err := cs.CoreV1().Namespaces().Create(context.Background(), &v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: nsName}}, metav1.CreateOptions{})
+				_, err := cs.CoreV1().Namespaces().Create(context.Background(), &v1.Namespace{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:   nsName,
+						Labels: map[string]string{RequiredUDNNamespaceLabel: ""},
+					}}, metav1.CreateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				DeferCleanup(func() error {
 					err := cs.CoreV1().Namespaces().Delete(context.Background(), nsName, metav1.DeleteOptions{})
@@ -1031,7 +1045,11 @@ spec:
 			assertClusterUDNStatusReportsActiveNamespaces(testClusterUdnName, testTenantNamespaces...)
 
 			By("create the new target namespace")
-			_, err = cs.CoreV1().Namespaces().Create(context.Background(), &v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: testNewNs}}, metav1.CreateOptions{})
+			_, err = cs.CoreV1().Namespaces().Create(context.Background(), &v1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:   testNewNs,
+					Labels: map[string]string{RequiredUDNNamespaceLabel: ""},
+				}}, metav1.CreateOptions{})
 			Expect(err).NotTo(HaveOccurred())
 			DeferCleanup(func() error {
 				err := cs.CoreV1().Namespaces().Delete(context.Background(), testNewNs, metav1.DeleteOptions{})
@@ -1042,7 +1060,7 @@ spec:
 			assertClusterUDNStatusReportsActiveNamespaces(testClusterUdnName, expectedActiveNamespaces...)
 
 			udnUidRaw, err := e2ekubectl.RunKubectl("", "get", clusterUserDefinedNetworkResource, testClusterUdnName, "-o", "jsonpath='{.metadata.uid}'")
-			Expect(err).NotTo(HaveOccurred(), "should get the ClsuterUserDefinedNetwork UID")
+			Expect(err).NotTo(HaveOccurred(), "should get the ClusterUserDefinedNetwork UID")
 			testUdnUID := strings.Trim(udnUidRaw, "'")
 
 			By("verify a NAD exist in new namespace according to spec")
@@ -1054,7 +1072,11 @@ spec:
 				testNewNs := f.Namespace.Name + "green"
 
 				By("create new namespace")
-				_, err := cs.CoreV1().Namespaces().Create(context.Background(), &v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: testNewNs}}, metav1.CreateOptions{})
+				_, err := cs.CoreV1().Namespaces().Create(context.Background(), &v1.Namespace{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:   testNewNs,
+						Labels: map[string]string{RequiredUDNNamespaceLabel: ""},
+					}}, metav1.CreateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				DeferCleanup(func() error {
 					err := cs.CoreV1().Namespaces().Delete(context.Background(), testNewNs, metav1.DeleteOptions{})
@@ -1173,7 +1195,11 @@ spec:
 		}
 		By("Creating test tenants namespaces")
 		for _, nsName := range testTenantNamespaces {
-			_, err := cs.CoreV1().Namespaces().Create(context.Background(), &v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: nsName}}, metav1.CreateOptions{})
+			_, err := cs.CoreV1().Namespaces().Create(context.Background(), &v1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:   nsName,
+					Labels: map[string]string{RequiredUDNNamespaceLabel: ""},
+				}}, metav1.CreateOptions{})
 			Expect(err).NotTo(HaveOccurred())
 			DeferCleanup(func() error {
 				err := cs.CoreV1().Namespaces().Delete(context.Background(), nsName, metav1.DeleteOptions{})
@@ -1356,7 +1382,8 @@ spec:
 			defaultNetNamespace := f.Namespace.Name + "-default"
 			_, err := cs.CoreV1().Namespaces().Create(context.Background(), &v1.Namespace{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: defaultNetNamespace,
+					Name:   defaultNetNamespace,
+					Labels: map[string]string{RequiredUDNNamespaceLabel: ""},
 				},
 			}, metav1.CreateOptions{})
 			Expect(err).NotTo(HaveOccurred())
