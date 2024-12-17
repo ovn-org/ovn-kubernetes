@@ -29,6 +29,7 @@ require (
 	github.com/mdlayher/ndp v1.0.1
 	github.com/miekg/dns v1.1.31
 	github.com/mitchellh/copystructure v1.2.0
+	github.com/onsi/ginkgo v1.16.5
 	github.com/onsi/ginkgo/v2 v2.19.0
 	github.com/onsi/gomega v1.33.1
 	github.com/openshift/api v0.0.0-20231120222239-b86761094ee3
