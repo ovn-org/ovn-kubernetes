@@ -28,6 +28,7 @@ import (
 var _ = Describe("Network Segmentation: services", func() {
 
 	f := wrappedTestFramework("udn-services")
+	f.SkipNamespaceCreation = true
 
 	Context("on a user defined primary network", func() {
 		const (
@@ -49,6 +50,12 @@ var _ = Describe("Network Segmentation: services", func() {
 
 			var err error
 			nadClient, err = nadclient.NewForConfig(f.ClientConfig())
+			Expect(err).NotTo(HaveOccurred())
+			namespace, err := f.CreateNamespace(context.TODO(), f.BaseName, map[string]string{
+				"e2e-framework":           f.BaseName,
+				RequiredUDNNamespaceLabel: "",
+			})
+			f.Namespace = namespace
 			Expect(err).NotTo(HaveOccurred())
 		})
 

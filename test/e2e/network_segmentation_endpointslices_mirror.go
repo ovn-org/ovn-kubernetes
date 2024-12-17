@@ -24,6 +24,7 @@ import (
 
 var _ = Describe("Network Segmentation EndpointSlices mirroring", func() {
 	f := wrappedTestFramework("endpointslices-mirror")
+	f.SkipNamespaceCreation = true
 	Context("a user defined primary network", func() {
 		const (
 			userDefinedNetworkIPv4Subnet = "10.128.0.0/16"
@@ -38,8 +39,12 @@ var _ = Describe("Network Segmentation EndpointSlices mirroring", func() {
 
 		BeforeEach(func() {
 			cs = f.ClientSet
-
-			var err error
+			namespace, err := f.CreateNamespace(context.TODO(), f.BaseName, map[string]string{
+				"e2e-framework":           f.BaseName,
+				RequiredUDNNamespaceLabel: "",
+			})
+			f.Namespace = namespace
+			Expect(err).NotTo(HaveOccurred())
 			nadClient, err = nadclient.NewForConfig(f.ClientConfig())
 			Expect(err).NotTo(HaveOccurred())
 		})
@@ -174,17 +179,26 @@ var _ = Describe("Network Segmentation EndpointSlices mirroring", func() {
 					func(
 						netConfig networkAttachmentConfigParams,
 					) {
+						By("creating default net namespace")
+						defaultNetNamespace := &v1.Namespace{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: f.Namespace.Name + "-default",
+							},
+						}
+						f.AddNamespacesToDelete(defaultNetNamespace)
+						_, err := cs.CoreV1().Namespaces().Create(context.Background(), defaultNetNamespace, metav1.CreateOptions{})
+						Expect(err).NotTo(HaveOccurred())
 						By("creating the network")
-						netConfig.namespace = f.Namespace.Name
+						netConfig.namespace = defaultNetNamespace.Name
 						Expect(createNetworkFn(netConfig)).To(Succeed())
 
 						replicas := int32(3)
 						By("creating the deployment")
 						deployment := e2edeployment.NewDeployment("test-deployment", replicas, map[string]string{"app": "test"}, "agnhost", agnhostImage, appsv1.RollingUpdateDeploymentStrategyType)
-						deployment.Namespace = f.Namespace.Name
+						deployment.Namespace = defaultNetNamespace.Name
 						deployment.Spec.Template.Spec.Containers[0].Command = e2epod.GenerateScriptCmd("/agnhost netexec --http-port 80")
 
-						_, err := cs.AppsV1().Deployments(f.Namespace.Name).Create(context.Background(), deployment, metav1.CreateOptions{})
+						_, err = cs.AppsV1().Deployments(defaultNetNamespace.Name).Create(context.Background(), deployment, metav1.CreateOptions{})
 						framework.ExpectNoError(err, "Failed creating the deployment %v", err)
 						err = e2edeployment.WaitForDeploymentComplete(cs, deployment)
 						framework.ExpectNoError(err, "Failed starting the deployment %v", err)
@@ -193,12 +207,12 @@ var _ = Describe("Network Segmentation EndpointSlices mirroring", func() {
 						svc := e2eservice.CreateServiceSpec("test-service", "", false, map[string]string{"app": "test"})
 						familyPolicy := v1.IPFamilyPolicyPreferDualStack
 						svc.Spec.IPFamilyPolicy = &familyPolicy
-						_, err = cs.CoreV1().Services(f.Namespace.Name).Create(context.Background(), svc, metav1.CreateOptions{})
+						_, err = cs.CoreV1().Services(defaultNetNamespace.Name).Create(context.Background(), svc, metav1.CreateOptions{})
 						framework.ExpectNoError(err, "Failed creating service %v", err)
 
 						By("asserting the mirrored EndpointSlice does not exist")
 						Eventually(func() error {
-							esList, err := cs.DiscoveryV1().EndpointSlices(f.Namespace.Name).List(context.TODO(), metav1.ListOptions{LabelSelector: fmt.Sprintf("%s=%s", "k8s.ovn.org/service-name", svc.Name)})
+							esList, err := cs.DiscoveryV1().EndpointSlices(defaultNetNamespace.Name).List(context.TODO(), metav1.ListOptions{LabelSelector: fmt.Sprintf("%s=%s", "k8s.ovn.org/service-name", svc.Name)})
 							if err != nil {
 								return err
 							}
@@ -210,7 +224,7 @@ var _ = Describe("Network Segmentation EndpointSlices mirroring", func() {
 						}, 2*time.Minute, 6*time.Second).ShouldNot(HaveOccurred())
 					},
 					Entry(
-						"L2 dualstack primary UDN",
+						"L2 secondary UDN",
 						networkAttachmentConfigParams{
 							name:     nadName,
 							topology: "layer2",
@@ -219,7 +233,7 @@ var _ = Describe("Network Segmentation EndpointSlices mirroring", func() {
 						},
 					),
 					Entry(
-						"L3 dualstack primary UDN",
+						"L3 secondary UDN",
 						networkAttachmentConfigParams{
 							name:     nadName,
 							topology: "layer3",
@@ -232,14 +246,14 @@ var _ = Describe("Network Segmentation EndpointSlices mirroring", func() {
 			Entry("NetworkAttachmentDefinitions", func(c networkAttachmentConfigParams) error {
 				netConfig := newNetworkAttachmentConfig(c)
 				nad := generateNAD(netConfig)
-				_, err := nadClient.NetworkAttachmentDefinitions(f.Namespace.Name).Create(context.Background(), nad, metav1.CreateOptions{})
+				_, err := nadClient.NetworkAttachmentDefinitions(fmt.Sprintf("%s-default", f.Namespace.Name)).Create(context.Background(), nad, metav1.CreateOptions{})
 				return err
 			}),
 			Entry("UserDefinedNetwork", func(c networkAttachmentConfigParams) error {
 				udnManifest := generateUserDefinedNetworkManifest(&c)
-				cleanup, err := createManifest(f.Namespace.Name, udnManifest)
+				cleanup, err := createManifest(fmt.Sprintf("%s-default", f.Namespace.Name), udnManifest)
 				DeferCleanup(cleanup)
-				Expect(waitForUserDefinedNetworkReady(f.Namespace.Name, c.name, 5*time.Second)).To(Succeed())
+				Expect(waitForUserDefinedNetworkReady(fmt.Sprintf("%s-default", f.Namespace.Name), c.name, 5*time.Second)).To(Succeed())
 				return err
 			}),
 		)

@@ -469,8 +469,15 @@ func deleteClusterExternalContainer(containerName string) {
 	}, 5).Should(gomega.HaveLen(0))
 }
 
-func updateNamespace(f *framework.Framework, namespace *v1.Namespace) {
-	_, err := f.ClientSet.CoreV1().Namespaces().Update(context.Background(), namespace, metav1.UpdateOptions{})
+// updatesNamespace labels while preserving the required UDN label
+func updateNamespaceLabels(f *framework.Framework, namespace *v1.Namespace, labels map[string]string) {
+	// should never be nil
+	n := *namespace
+	n.Labels = labels
+	if _, ok := namespace.Labels[RequiredUDNNamespaceLabel]; ok {
+		n.Labels[RequiredUDNNamespaceLabel] = ""
+	}
+	_, err := f.ClientSet.CoreV1().Namespaces().Update(context.Background(), &n, metav1.UpdateOptions{})
 	framework.ExpectNoError(err, fmt.Sprintf("unable to update namespace: %s, err: %v", namespace.Name, err))
 }
 func getNamespace(f *framework.Framework, name string) *v1.Namespace {
