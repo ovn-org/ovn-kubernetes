@@ -191,34 +191,35 @@ func (nc *DefaultNodeNetworkController) initRetryFrameworkForNode() {
 
 func (oc *DefaultNodeNetworkController) shouldReconcileNetworkChange(old, new util.NetInfo) bool {
 	wasPodNetworkAdvertisedAtNode := util.IsPodNetworkAdvertisedAtNode(old, oc.name)
-	isPodNetworkAdverrtisedAtNode := util.IsPodNetworkAdvertisedAtNode(new, oc.name)
-	return wasPodNetworkAdvertisedAtNode != isPodNetworkAdverrtisedAtNode
+	isPodNetworkAdvertisedAtNode := util.IsPodNetworkAdvertisedAtNode(new, oc.name)
+	return wasPodNetworkAdvertisedAtNode != isPodNetworkAdvertisedAtNode
 }
 
 func (oc *DefaultNodeNetworkController) Reconcile(netInfo util.NetInfo) error {
 	// inspect changes first
 	reconcilePodNetwork := oc.shouldReconcileNetworkChange(oc.ReconcilableNetInfo, netInfo)
 
-	// then update network information, point of no return
-	err := util.ReconcileNetInfo(oc.ReconcilableNetInfo, netInfo)
-	if err != nil {
-		klog.Errorf("Failed to reconcile network %s: %v", oc.GetNetworkName(), err)
-	}
-
-	// then reconcile subcontrollers
+	// reconcile subcontrollers
 	if reconcilePodNetwork {
 		isPodNetworkAdvertisedAtNode := util.IsPodNetworkAdvertisedAtNode(netInfo, oc.name)
 		if oc.Gateway != nil {
 			oc.Gateway.SetPodNetworkAdvertised(isPodNetworkAdvertisedAtNode)
 			err := oc.Gateway.Reconcile()
 			if err != nil {
-				klog.Errorf("Failed to reconcile gateway: %v", err)
+				return fmt.Errorf("failed to reconcile gateway: %v", err)
 			}
 		}
 		for _, mgmtPort := range oc.gatewaySetup.mgmtPorts {
 			mgmtPort.SetPodNetworkAdvertised(isPodNetworkAdvertisedAtNode)
 			mgmtPort.Reconcile()
 		}
+	}
+
+	// Update network information. We can do this now because gateway and
+	// management port reconciliation done above does not rely on NetInfo
+	err := util.ReconcileNetInfo(oc.ReconcilableNetInfo, netInfo)
+	if err != nil {
+		return fmt.Errorf("failed to reconcile network %s: %v", oc.GetNetworkName(), err)
 	}
 
 	return nil
