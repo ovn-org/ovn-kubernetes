@@ -518,6 +518,7 @@ func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 		} else {
 			dpdkArgs := []string{"type=dpdk"}
 			ovsArgs = append(ovsArgs, dpdkArgs...)
+			ovsArgs = append(ovsArgs, fmt.Sprintf("mtu_request=%v", ifInfo.MTU))
 		}
 	}
 
