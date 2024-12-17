@@ -770,10 +770,10 @@ var _ = ginkgo.DescribeTableSubtree("e2e egress IP validation", func(netConfigPa
 				usedEgressNodeAvailabilityHandler.Enable(egress2Node.name)
 
 				podNamespace := f.Namespace
-				podNamespace.Labels = map[string]string{
+				labels := map[string]string{
 					"name": f.Namespace.Name,
 				}
-				updateNamespace(f, podNamespace)
+				updateNamespaceLabels(f, f.Namespace, labels)
 
 				ginkgo.By("1. Create an EgressIP object with two egress IPs defined")
 				// Assign the egress IP without conflicting with any node IP,
@@ -1003,10 +1003,10 @@ spec:
 		framework.Logf("Created pod %s on node %s", hostNetPod.name, egress2Node.name)
 
 		podNamespace := f.Namespace
-		podNamespace.Labels = map[string]string{
+		labels := map[string]string{
 			"name": f.Namespace.Name,
 		}
-		updateNamespace(f, podNamespace)
+		updateNamespaceLabels(f, podNamespace, labels)
 
 		ginkgo.By("3. Create an EgressIP object with one egress IP defined")
 		// Assign the egress IP without conflicting with any node IP,
@@ -1143,10 +1143,10 @@ spec:
 		e2enode.ExpectNodeHasLabel(context.TODO(), f.ClientSet, egress1Node.name, "k8s.ovn.org/egress-assignable", "dummy")
 
 		podNamespace := f.Namespace
-		podNamespace.Labels = map[string]string{
+		labels := map[string]string{
 			"name": f.Namespace.Name,
 		}
-		updateNamespace(f, podNamespace)
+		updateNamespaceLabels(f, podNamespace, labels)
 
 		ginkgo.By("1. Create an EgressIP object with one egress IP defined")
 		// Assign the egress IP without conflicting with any node IP,
@@ -1256,13 +1256,14 @@ spec:
 		e2enode.ExpectNodeHasLabel(context.TODO(), f.ClientSet, egress1Node.name, "k8s.ovn.org/egress-assignable", "dummy")
 
 		podNamespace := f.Namespace
-		podNamespace.Labels = map[string]string{
+		labels := map[string]string{
 			"name": f.Namespace.Name,
 		}
-		updateNamespace(f, podNamespace)
+		updateNamespaceLabels(f, podNamespace, labels)
 
 		ginkgo.By("1. Create one pod matching the EgressIP: running on node2 (pod2Node, egress1Node)")
-		createGenericPodWithLabel(f, pod1Name, pod2Node.name, f.Namespace.Name, command, podEgressLabel)
+		_, err := createGenericPodWithLabel(f, pod1Name, pod2Node.name, f.Namespace.Name, command, podEgressLabel)
+		framework.ExpectNoError(err, "Step 1. Create one pod matching the EgressIP: running on node2 (pod2Node, egress1Node), failed, err: %v", err)
 		srcPodIP, err := getPodIPWithRetry(f.ClientSet, isIPv6TestRun, podNamespace.Name, pod1Name)
 		framework.ExpectNoError(err, "Step 1. Create one pod matching the EgressIP: running on node2 (pod2Node, egress1Node), failed, err: %v", err)
 		framework.Logf("Created pod %s on node %s", pod1Name, pod2Node.name)
@@ -1593,10 +1594,10 @@ spec:
 		egressIP1[len(egressIP1)-2]++
 
 		podNamespace := f.Namespace
-		podNamespace.Labels = map[string]string{
+		labels := map[string]string{
 			"name": f.Namespace.Name,
 		}
-		updateNamespace(f, podNamespace)
+		updateNamespaceLabels(f, podNamespace, labels)
 
 		var egressIPConfig = fmt.Sprintf(`apiVersion: k8s.ovn.org/v1
 kind: EgressIP
@@ -1776,10 +1777,10 @@ spec:
 		e2enode.AddOrUpdateLabelOnNode(f.ClientSet, egress1Node.name, "k8s.ovn.org/egress-assignable", "dummy")
 
 		podNamespace := f.Namespace
-		podNamespace.Labels = map[string]string{
+		labels := map[string]string{
 			"name": f.Namespace.Name,
 		}
-		updateNamespace(f, podNamespace)
+		updateNamespaceLabels(f, podNamespace, labels)
 
 		ginkgo.By("1. Create an EgressIP object with one egress IP defined")
 		// Assign the egress IP without conflicting with any node IP,
@@ -1920,10 +1921,10 @@ spec:
 		usedEgressNodeAvailabilityHandler.Enable(egress1Node.name)
 
 		podNamespace := f.Namespace
-		podNamespace.Labels = map[string]string{
+		labels := map[string]string{
 			"name": f.Namespace.Name,
 		}
-		updateNamespace(f, podNamespace)
+		updateNamespaceLabels(f, podNamespace, labels)
 
 		ginkgo.By("Creating an EgressIP object with one egress IPs defined")
 		// Assign the egress IP without conflicting with any node IP,
@@ -2094,10 +2095,10 @@ spec:
 		defer egressNodeAvailabilityHandler.Restore(egress1Node.name)
 		defer egressNodeAvailabilityHandler.Restore(egress2Node.name)
 		podNamespace := f.Namespace
-		podNamespace.Labels = map[string]string{
+		labels := map[string]string{
 			"name": f.Namespace.Name,
 		}
-		updateNamespace(f, podNamespace)
+		updateNamespaceLabels(f, podNamespace, labels)
 
 		ginkgo.By("1. Create an EgressIP object with two egress IPs - both hosted by the same secondary host network")
 		egressIPConfig := fmt.Sprintf(`apiVersion: k8s.ovn.org/v1
@@ -2331,10 +2332,10 @@ spec:
 		defer egressNodeAvailabilityHandler.Restore(egress1Node.name)
 		defer egressNodeAvailabilityHandler.Restore(egress2Node.name)
 		podNamespace := f.Namespace
-		podNamespace.Labels = map[string]string{
+		labels := map[string]string{
 			"name": f.Namespace.Name,
 		}
-		updateNamespace(f, podNamespace)
+		updateNamespaceLabels(f, podNamespace, labels)
 
 		ginkgo.By("1. Create an EgressIP object with two egress IPs - one hosted by an OVN network and one by a secondary host network")
 		// Assign the egress IP without conflicting with any node IP,
@@ -2589,10 +2590,10 @@ spec:
 		egressNodeAvailabilityHandler.Enable(egress1Node.name)
 		defer egressNodeAvailabilityHandler.Restore(egress1Node.name)
 		podNamespace := f.Namespace
-		podNamespace.Labels = map[string]string{
+		labels := map[string]string{
 			"name": f.Namespace.Name,
 		}
-		updateNamespace(f, podNamespace)
+		updateNamespaceLabels(f, podNamespace, labels)
 
 		ginkgo.By("1. Create two EgressIP objects with one egress IP each - hosted by a secondary host network")
 		egressIPConfig := fmt.Sprintf(`apiVersion: k8s.ovn.org/v1
@@ -2766,10 +2767,10 @@ spec:
 		egressNodeAvailabilityHandler.Enable(egress1Node.name)
 		defer egressNodeAvailabilityHandler.Restore(egress1Node.name)
 		podNamespace := f.Namespace
-		podNamespace.Labels = map[string]string{
+		labels := map[string]string{
 			"name": f.Namespace.Name,
 		}
-		updateNamespace(f, podNamespace)
+		updateNamespaceLabels(f, podNamespace, labels)
 
 		ginkgo.By("2. Create one EgressIP object with one egress IP hosted by a secondary host network")
 		egressIPConfig := fmt.Sprintf(`apiVersion: k8s.ovn.org/v1
@@ -2819,7 +2820,8 @@ spec:
 		}
 		ginkgo.By(fmt.Sprintf("Building another namespace api object, basename %s", f.BaseName))
 		otherNetworkNamespace, err := f.CreateNamespace(context.Background(), f.BaseName, map[string]string{
-			"e2e-framework": f.BaseName,
+			"e2e-framework":           f.BaseName,
+			RequiredUDNNamespaceLabel: "",
 		})
 		gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 
@@ -2843,11 +2845,9 @@ spec:
 			"wants": "egress",
 		}
 		pod1Namespace := f.Namespace
-		pod1Namespace.Labels = selectedByEIPLabels
-		updateNamespace(f, pod1Namespace)
+		updateNamespaceLabels(f, pod1Namespace, selectedByEIPLabels)
 		pod2OtherNetworkNamespace := otherNetworkNamespace.Name
-		otherNetworkNamespace.Labels = selectedByEIPLabels
-		updateNamespace(f, otherNetworkNamespace)
+		updateNamespaceLabels(f, otherNetworkNamespace, selectedByEIPLabels)
 
 		ginkgo.By("3. Create an EgressIP object with one egress IP defined")
 		// Assign the egress IP without conflicting with any node IP,
@@ -2931,7 +2931,8 @@ spec:
 		}
 		ginkgo.By(fmt.Sprintf("Building a namespace api object, basename %s", f.BaseName))
 		otherNetworkNamespace, err := f.CreateNamespace(context.Background(), f.BaseName, map[string]string{
-			"e2e-framework": f.BaseName,
+			"e2e-framework":           f.BaseName,
+			RequiredUDNNamespaceLabel: "",
 		})
 		gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 		if isClusterDefaultNetwork(netConfigParams) {
@@ -2959,11 +2960,9 @@ spec:
 			"wants": "egress",
 		}
 		pod1Namespace := f.Namespace
-		pod1Namespace.Labels = selectedByEIPLabels
-		updateNamespace(f, pod1Namespace)
+		updateNamespaceLabels(f, pod1Namespace, selectedByEIPLabels)
 		pod2OtherNetworkNamespace := otherNetworkNamespace.Name
-		otherNetworkNamespace.Labels = selectedByEIPLabels
-		updateNamespace(f, otherNetworkNamespace)
+		updateNamespaceLabels(f, otherNetworkNamespace, selectedByEIPLabels)
 
 		ginkgo.By("3. Create an EgressIP object with one egress IP defined")
 		// Assign the egress IP without conflicting with any node IP,
