@@ -231,6 +231,16 @@ var metricPodSelectorAddrSetNamespaceEventLatency = prometheus.NewHistogramVec(p
 		"event",
 	})
 
+var metricPodSelectorPortGroupPodEventLatency = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemController,
+	Name:      "pod_selector_shared_portgroup_pod_event_latency_seconds",
+	Help:      "The latency of shared port group local pod event handling (add, delete)",
+	Buckets:   prometheus.ExponentialBuckets(.002, 2, 15)},
+	[]string{
+		"event",
+	})
+
 var metricPodEventLatency = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 	Namespace: MetricOvnkubeNamespace,
 	Subsystem: MetricOvnkubeSubsystemController,
@@ -588,6 +598,10 @@ func RecordPodSelectorAddrSetPodEvent(eventName string, duration time.Duration) 
 
 func RecordPodSelectorAddrSetNamespaceEvent(eventName string, duration time.Duration) {
 	metricPodSelectorAddrSetNamespaceEventLatency.WithLabelValues(eventName).Observe(duration.Seconds())
+}
+
+func RecordPodSelectorPortGroupPodEvent(eventName string, duration time.Duration) {
+	metricPodSelectorPortGroupPodEventLatency.WithLabelValues(eventName).Observe(duration.Seconds())
 }
 
 func RecordPodEvent(eventName string, duration time.Duration) {

@@ -142,6 +142,8 @@ type BaseNetworkController struct {
 	// make sure to keep this order to avoid deadlocks
 	sharedNetpolPortGroups *syncmap.SyncMap[*defaultDenyPortGroups]
 
+	sharedPodSelectorPortGroups *syncmap.SyncMap[*PodSelectorPortGroup]
+
 	podSelectorAddressSets *syncmap.SyncMap[*PodSelectorAddressSet]
 
 	// stopChan per controller
@@ -1100,5 +1102,22 @@ func (bnc *BaseNetworkController) GetSamplingConfig() *libovsdbops.SamplingConfi
 	if bnc.observManager != nil {
 		return bnc.observManager.SamplingConfig()
 	}
+	return nil
+}
+
+func (bnc *BaseNetworkController) syncDBCommon() error {
+	// sync shared resources
+	// pod selector address sets
+	err := bnc.cleanupPodSelectorAddressSets()
+	if err != nil {
+		return fmt.Errorf("cleaning up stale pod selector address sets for network %v failed : %w", bnc.GetNetworkName(), err)
+	}
+
+	// delete stale network policy port groups
+	err = bnc.deleteStaleNetpolPortGroups()
+	if err != nil {
+		return fmt.Errorf("cleaning up stale network policy port groups for network %v failed : %w", bnc.GetNetworkName(), err)
+	}
+
 	return nil
 }

@@ -218,6 +218,7 @@ func newDefaultNetworkControllerCommon(
 			networkPolicies:             syncmap.NewSyncMap[*networkPolicy](),
 			sharedNetpolPortGroups:      syncmap.NewSyncMap[*defaultDenyPortGroups](),
 			podSelectorAddressSets:      syncmap.NewSyncMap[*PodSelectorAddressSet](),
+			sharedPodSelectorPortGroups: syncmap.NewSyncMap[*PodSelectorPortGroup](),
 			stopChan:                    defaultStopChan,
 			wg:                          defaultWg,
 			localZoneNodes:              &sync.Map{},
@@ -320,11 +321,10 @@ func (oc *DefaultNetworkController) syncDb() error {
 	if err = portGroupSyncer.SyncPortGroups(); err != nil {
 		return fmt.Errorf("failed to sync port groups on controller init: %v", err)
 	}
-	// sync shared resources
-	// pod selector address sets
-	err = oc.cleanupPodSelectorAddressSets()
+
+	err = oc.syncDBCommon()
 	if err != nil {
-		return fmt.Errorf("cleaning up stale pod selector address sets for network %v failed : %w", oc.GetNetworkName(), err)
+		return fmt.Errorf("cleaning up stale logical entities for network %v failed : %w", oc.GetNetworkName(), err)
 	}
 	// LRP syncer must only be run once and because default controller always runs, it can perform LRP updates.
 	lrpSyncer := logical_router_policy.NewLRPSyncer(oc.nbClient, oc.controllerName)

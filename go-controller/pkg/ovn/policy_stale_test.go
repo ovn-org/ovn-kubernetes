@@ -107,7 +107,7 @@ func getStaleDefaultDenyData(networkPolicy *knet.NetworkPolicy) []libovsdbtest.T
 func getStalePolicyACLs(gressIdx int, namespace, policyName string, peerNamespaces []string,
 	peers []knet.NetworkPolicyPeer, policyType knet.PolicyType, netInfo util.NetInfo) []*nbdb.ACL {
 	fakeController := getFakeBaseController(netInfo)
-	pgName := fakeController.getNetworkPolicyPGName(namespace, policyName)
+	pgName := fakeController.getStaleNetworkPolicyPGName(namespace, policyName)
 	controllerName := netInfo.GetNetworkName() + "-network-controller"
 	var portDir string
 	var ipDir string
@@ -188,7 +188,7 @@ func getStalePolicyData(networkPolicy *knet.NetworkPolicy, peerNamespaces []stri
 	}
 
 	fakeController := getFakeBaseController(netInfo)
-	pgDbIDs := fakeController.getNetworkPolicyPortGroupDbIDs(networkPolicy.Namespace, networkPolicy.Name)
+	pgDbIDs := fakeController.getStaleNetworkPolicyPortGroupDbIDs(networkPolicy.Namespace, networkPolicy.Name)
 	pg := libovsdbutil.BuildPortGroup(
 		pgDbIDs,
 		nil,
@@ -255,7 +255,7 @@ var _ = ginkgo.Describe("OVN Stale NetworkPolicy Operations", func() {
 			namespace2 := *newNamespace(namespaceName2)
 			networkPolicy := getMatchLabelsNetworkPolicy(netPolicyName1, namespace1.Name,
 				namespace2.Name, "", true, true)
-			// start with stale ACLs
+			// start with stale ACLs and stale network policy port groups
 			gressPolicyInitialData := getStalePolicyData(networkPolicy, []string{namespace2.Name})
 			defaultDenyInitialData := getStaleDefaultDenyData(networkPolicy)
 			initialData := initialDB.NBData
@@ -272,6 +272,12 @@ var _ = ginkgo.Describe("OVN Stale NetworkPolicy Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			// make sure stale ACLs were updated
 			expectedData := getNamespaceWithSinglePolicyExpectedData(
+				newNetpolDataParams(networkPolicy).withPeerNamespaces(namespace2.Name).withStaleNPPG(true),
+				initialDB.NBData)
+			gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedData...))
+			// make sure stale networ policy port gorup were delete during next reboot after syncDB() is called
+			fakeOvn.controller.syncDBCommon()
+			expectedData = getNamespaceWithSinglePolicyExpectedData(
 				newNetpolDataParams(networkPolicy).withPeerNamespaces(namespace2.Name),
 				initialDB.NBData)
 			gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedData...))
@@ -300,9 +306,16 @@ var _ = ginkgo.Describe("OVN Stale NetworkPolicy Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			// make sure stale ACLs were updated
 			expectedData := getNamespaceWithSinglePolicyExpectedData(
+				newNetpolDataParams(networkPolicy).withPeerNamespaces(namespace2.Name).withStaleNPPG(true),
+				initialDB.NBData)
+			gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedData...))
+			// make sure stale networ policy port gorup were delete during next reboot after syncDB() is called
+			fakeOvn.controller.syncDBCommon()
+			expectedData = getNamespaceWithSinglePolicyExpectedData(
 				newNetpolDataParams(networkPolicy).withPeerNamespaces(namespace2.Name),
 				initialDB.NBData)
 			gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedData...))
+
 		})
 
 		ginkgo.It("reconciles an existing networkPolicy updating stale address sets", func() {
@@ -316,8 +329,8 @@ var _ = ginkgo.Describe("OVN Stale NetworkPolicy Operations", func() {
 			localASName, _ := addressset.GetHashNamesForAS(staleAddrSetIDs)
 			peerASName, _ := getDefaultNetNsAddrSetHashNames(namespace2.Name)
 			fakeController := getFakeController(DefaultNetworkControllerName)
-			pgName := fakeController.getNetworkPolicyPGName(networkPolicy.Namespace, networkPolicy.Name)
-			initialData := getPolicyData(newNetpolDataParams(networkPolicy).withPeerNamespaces(namespace2.Name))
+			pgName := fakeController.getStaleNetworkPolicyPGName(networkPolicy.Namespace, networkPolicy.Name)
+			initialData := getPolicyData([]*netpolDataParams{newNetpolDataParams(networkPolicy).withPeerNamespaces(namespace2.Name)})
 			staleACL := initialData[0].(*nbdb.ACL)
 			staleACL.Match = fmt.Sprintf("ip4.dst == {$%s, $%s} && inport == @%s", localASName, peerASName, pgName)
 

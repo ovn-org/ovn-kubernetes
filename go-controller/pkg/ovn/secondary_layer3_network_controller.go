@@ -358,6 +358,7 @@ func NewSecondaryLayer3NetworkController(
 				networkPolicies:             syncmap.NewSyncMap[*networkPolicy](),
 				sharedNetpolPortGroups:      syncmap.NewSyncMap[*defaultDenyPortGroups](),
 				podSelectorAddressSets:      syncmap.NewSyncMap[*PodSelectorAddressSet](),
+				sharedPodSelectorPortGroups: syncmap.NewSyncMap[*PodSelectorPortGroup](),
 				stopChan:                    stopChan,
 				wg:                          &sync.WaitGroup{},
 				localZoneNodes:              &sync.Map{},
@@ -445,6 +446,12 @@ func (oc *SecondaryLayer3NetworkController) Start(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("unable to set networkID on secondary L3 controller for network %s, err: %w", oc.GetNetworkName(), err)
 	}
+
+	err = oc.syncDBCommon()
+	if err != nil {
+		return fmt.Errorf("cleaning up stale logical entities for network %v failed : %w", oc.GetNetworkName(), err)
+	}
+
 	if err = oc.Init(ctx); err != nil {
 		return err
 	}

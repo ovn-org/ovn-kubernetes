@@ -67,7 +67,8 @@ func (h *networkControllerPolicyEventHandler) AreResourcesEqual(obj1, obj2 inter
 	// switch based on type
 	switch h.objType {
 	case factory.AddressSetPodSelectorType, //
-		factory.LocalPodSelectorType: //
+		factory.LocalPodSelectorType,       //
+		factory.SharedLocalPodSelectorType: //
 		// For these types, there was no old vs new obj comparison in the original update code,
 		// so pretend they're always different so that the update code gets executed
 		return false, nil
@@ -102,7 +103,8 @@ func (h *networkControllerPolicyEventHandler) GetResourceFromInformerCache(key s
 
 	switch h.objType {
 	case factory.AddressSetPodSelectorType,
-		factory.LocalPodSelectorType:
+		factory.LocalPodSelectorType,
+		factory.SharedLocalPodSelectorType:
 		obj, err = h.watchFactory.GetPod(namespace, name)
 
 	case factory.AddressSetNamespaceAndPodSelectorType,
@@ -139,6 +141,10 @@ func (h *networkControllerPolicyEventHandler) AddResource(obj interface{}, fromR
 			extraParameters.np,
 			obj)
 
+	case factory.SharedLocalPodSelectorType:
+		sharedPGInfo := h.extraParameters.(*PodSelectorPortGroupHandlerInfo)
+		return h.bnc.handleSharedPGPodSelectorAddFunc(sharedPGInfo, obj)
+
 	default:
 		return fmt.Errorf("no add function for object type %s", h.objType)
 	}
@@ -147,7 +153,8 @@ func (h *networkControllerPolicyEventHandler) AddResource(obj interface{}, fromR
 func hasPolicyResourceAnUpdateFunc(objType reflect.Type) bool {
 	switch objType {
 	case factory.AddressSetPodSelectorType,
-		factory.LocalPodSelectorType:
+		factory.LocalPodSelectorType,
+		factory.SharedLocalPodSelectorType:
 		return true
 	}
 	return false
@@ -168,6 +175,10 @@ func (h *networkControllerPolicyEventHandler) UpdateResource(oldObj, newObj inte
 		return h.bnc.handleLocalPodSelectorAddFunc(
 			extraParameters.np,
 			newObj)
+
+	case factory.SharedLocalPodSelectorType:
+		sharedPGInfo := h.extraParameters.(*PodSelectorPortGroupHandlerInfo)
+		return h.bnc.handleSharedPGPodSelectorAddFunc(sharedPGInfo, newObj)
 	}
 	return fmt.Errorf("no update function for object type %s", h.objType)
 }
@@ -195,6 +206,10 @@ func (h *networkControllerPolicyEventHandler) DeleteResource(obj, cachedObj inte
 			extraParameters.np,
 			obj)
 
+	case factory.SharedLocalPodSelectorType:
+		sharedPGInfo := h.extraParameters.(*PodSelectorPortGroupHandlerInfo)
+		return h.bnc.handleSharedPGPodSelectorDelFunc(sharedPGInfo, obj)
+
 	default:
 		return fmt.Errorf("object type %s not supported", h.objType)
 	}
@@ -209,6 +224,7 @@ func (h *networkControllerPolicyEventHandler) SyncFunc(objs []interface{}) error
 	} else {
 		switch h.objType {
 		case factory.LocalPodSelectorType,
+			factory.SharedLocalPodSelectorType,
 			factory.AddressSetNamespaceAndPodSelectorType,
 			factory.AddressSetPodSelectorType,
 			factory.PeerNamespaceSelectorType:
@@ -229,7 +245,8 @@ func (h *networkControllerPolicyEventHandler) SyncFunc(objs []interface{}) error
 func (h *networkControllerPolicyEventHandler) IsObjectInTerminalState(obj interface{}) bool {
 	switch h.objType {
 	case factory.AddressSetPodSelectorType,
-		factory.LocalPodSelectorType:
+		factory.LocalPodSelectorType,
+		factory.SharedLocalPodSelectorType:
 		pod := obj.(*kapi.Pod)
 		return util.PodCompleted(pod)
 

@@ -282,8 +282,14 @@ var PortGroupNetpolNamespace = newObjectIDsType(portGroup, NetpolNamespaceOwnerT
 	PolicyDirectionKey,
 })
 
+// deprecated, should only be used for sync
 var PortGroupNetworkPolicy = newObjectIDsType(portGroup, NetworkPolicyOwnerType, []ExternalIDKey{
 	// policy namespace+name
+	ObjectNameKey,
+})
+
+var PortGroupPodSelector = newObjectIDsType(portGroup, PodSelectorOwnerType, []ExternalIDKey{
+	// pod selector string representation
 	ObjectNameKey,
 })
 
