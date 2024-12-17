@@ -122,20 +122,18 @@ install_ingress() {
 
 METALLB_DIR="/tmp/metallb"
 install_metallb() {
-  local metallb_version=v0.14.8
+  # TODO: Pin to a version tag bigger than v0.14.8 when released
+  #       so we can have a metallb dev-env that support dual stack
+  #       and use a proper tag instead of a commit id.
+  local metallb_version=55f648102b918699da610f20e8d650e76c7561fc
   mkdir -p /tmp/metallb
   local builddir
   builddir=$(mktemp -d "${METALLB_DIR}/XXXXXX")
 
   pushd "${builddir}"
-  git clone https://github.com/metallb/metallb.git -b $metallb_version
+  git clone https://github.com/metallb/metallb.git
   cd metallb
-  # Use global IP next hops in IPv6
-  if  [ "$KIND_IPV6_SUPPORT" == true ]; then
-    sed -i '/address-family PROTOCOL unicast/a \
-  neighbor NODE0_IP route-map IPV6GLOBAL in\n  neighbor NODE1_IP route-map IPV6GLOBAL in\n  neighbor NODE2_IP route-map IPV6GLOBAL in' dev-env/bgp/frr/bgpd.conf.tmpl
-    printf "route-map IPV6GLOBAL permit 10\n set ipv6 next-hop prefer-global" >> dev-env/bgp/frr/bgpd.conf.tmpl
-  fi
+  git checkout $metallb_version
   pip install -r dev-env/requirements.txt
 
   local ip_family ipv6_network
