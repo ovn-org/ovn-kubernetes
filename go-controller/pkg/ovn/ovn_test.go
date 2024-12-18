@@ -263,6 +263,9 @@ func (o *FakeOVN) init(nadList []nettypes.NetworkAttachmentDefinition) {
 	err = o.watcher.Start()
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
+	err = o.eIPController.SyncLocalNodeZonesCache()
+	gomega.Expect(err).ShouldNot(gomega.HaveOccurred(), "syncing Nodes OVN zones status must succeed to support EgressIP")
+
 	existingNodes, err := o.controller.kube.GetNodes()
 	if err == nil {
 		for _, node := range existingNodes {

@@ -1924,7 +1924,12 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 					}
 
 					egressSVCServedPodsASv4, _ := buildEgressServiceAddressSets(nil)
-					egressIPServedPodsASv4, _ := buildEgressIPServedPodsAddressSets([]string{podV4IP}, types.DefaultNetworkName, fakeOvn.controller.eIPC.controllerName)
+					servedPodIPs := []string{podV4IP}
+					// pod is located on node1, therefore if remote, we dont expect to see its IPs in the served pods address set
+					if node1Zone == "remote" {
+						servedPodIPs = nil
+					}
+					egressIPServedPodsASv4, _ := buildEgressIPServedPodsAddressSets(servedPodIPs, types.DefaultNetworkName, fakeOvn.controller.eIPC.controllerName)
 					expectedDatabaseState := []libovsdbtest.TestData{
 						getReRoutePolicy(egressPod.Status.PodIP, "4", "reroute-UUID", reroutePolicyNextHop,
 							getEgressIPLRPReRouteDbIDs(eIP.Name, egressPod.Namespace, egressPod.Name, IPFamilyValueV4, types.DefaultNetworkName, fakeOvn.controller.eIPC.controllerName).GetExternalIDs()),
@@ -2346,7 +2351,14 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 					}
 					nodeName := "k8s-node1"
 					egressSVCServedPodsASv4, _ := buildEgressServiceAddressSets(nil)
-					egressIPServedPodsASv4, _ := buildEgressIPServedPodsAddressSets([]string{podV4IP, podV4IP2, podV4IP3, podV4IP4}, types.DefaultNetworkName, fakeOvn.controller.eIPC.controllerName)
+					servedPodIPs := []string{}
+					if node1Zone == "global" {
+						servedPodIPs = append(servedPodIPs, podV4IP, podV4IP2)
+					}
+					if node2Zone == "global" {
+						servedPodIPs = append(servedPodIPs, podV4IP3, podV4IP4)
+					}
+					egressIPServedPodsASv4, _ := buildEgressIPServedPodsAddressSets(servedPodIPs, types.DefaultNetworkName, fakeOvn.controller.eIPC.controllerName)
 
 					ipNets, _ := util.ParseIPNets(append(node1IPv4Addresses, node2IPv4Addresses...))
 					egressNodeIPs := []string{}
@@ -2696,7 +2708,12 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 					primarySNAT := getEIPSNAT(podV4IP, egressPod.Namespace, egressPod.Name, egressIP, expectedNatLogicalPort, DefaultNetworkControllerName)
 					primarySNAT.UUID = "egressip-nat1-UUID"
 					egressSVCServedPodsASv4, _ := buildEgressServiceAddressSets(nil)
-					egressIPServedPodsASv4, _ := buildEgressIPServedPodsAddressSets([]string{podV4IP}, types.DefaultNetworkName, fakeOvn.controller.eIPC.controllerName)
+					servedPodIPs := []string{podV4IP}
+					// pod is located on node1, therefore if remote, we don't expect to see its IPs in the served pods address set
+					if node1Zone == "remote" {
+						servedPodIPs = nil
+					}
+					egressIPServedPodsASv4, _ := buildEgressIPServedPodsAddressSets(servedPodIPs, types.DefaultNetworkName, fakeOvn.controller.eIPC.controllerName)
 					ipNets, _ := util.ParseIPNets([]string{node1IPv4, node2IPv4})
 
 					egressNodeIPs := []string{}
@@ -3147,7 +3164,12 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						reroutePolicyNextHop = []string{"100.88.0.3"} // node2's transit switch portIP
 					}
 					egressSVCServedPodsASv4, _ := buildEgressServiceAddressSets(nil)
-					egressIPServedPodsASv4, _ := buildEgressIPServedPodsAddressSets([]string{podV4IP}, types.DefaultNetworkName, fakeOvn.controller.eIPC.controllerName)
+					servedPodIPs := []string{podV4IP}
+					// pod is located on node1, therefore if remote, we dont expect to see its IPs in the served pods address set
+					if node1Zone == "remote" {
+						servedPodIPs = nil
+					}
+					egressIPServedPodsASv4, _ := buildEgressIPServedPodsAddressSets(servedPodIPs, types.DefaultNetworkName, fakeOvn.controller.eIPC.controllerName)
 					ipNets, _ := util.ParseIPNets(append(node1IPv4Addresses, node2IPv4OVN))
 					egressNodeIPs := []string{}
 					for _, ipNet := range ipNets {
@@ -5405,7 +5427,11 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 					}
 
 					egressSVCServedPodsASv4, _ := buildEgressServiceAddressSets(nil)
-					egressIPServedPodsASv4, _ := buildEgressIPServedPodsAddressSets([]string{podV4IP}, types.DefaultNetworkName, fakeOvn.controller.eIPC.controllerName)
+					servedPodsIPs := []string{podV4IP}
+					if node1Zone == "remote" {
+						servedPodsIPs = nil
+					}
+					egressIPServedPodsASv4, _ := buildEgressIPServedPodsAddressSets(servedPodsIPs, types.DefaultNetworkName, fakeOvn.controller.eIPC.controllerName)
 					egressNodeIPsASv4, _ := buildEgressIPNodeAddressSets([]string{node1IPv4, node2IPv4})
 
 					expectedDatabaseState := []libovsdbtest.TestData{
@@ -7273,6 +7299,10 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 					egressIPs2, nodes2 := getEgressIPStatus(egressIP2Name)
 					gomega.Expect(nodes2[0]).To(gomega.Equal(node1.Name))
 					gomega.Expect(egressIPs2[0]).To(gomega.Equal(egressIP3))
+					// egress node is node 1 and pod is located on node 1. If node 2 is local, there is not config
+					if !isNode1Local && isNode2Local {
+						return nil
+					}
 					recordedEvent := <-fakeOvn.fakeRecorder.Events
 					gomega.Expect(recordedEvent).To(gomega.ContainSubstring("EgressIP object egressip-2 will not be configured for pod egressip-namespace_egress-pod since another egressIP object egressip is serving it, this is undefined"))
 
