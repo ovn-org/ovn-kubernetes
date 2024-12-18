@@ -3,6 +3,7 @@ package template
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -78,7 +79,7 @@ func RenderNetAttachDefManifest(obj client.Object, targetNamespace string) (*net
 		ObjectMeta: metav1.ObjectMeta{
 			Name:            obj.GetName(),
 			OwnerReferences: []metav1.OwnerReference{ownerRef},
-			Labels:          map[string]string{LabelUserDefinedNetwork: ""},
+			Labels:          renderNADLabels(obj),
 			Finalizers:      []string{FinalizerUserDefinedNetwork},
 		},
 		Spec: *nadSpec,
@@ -102,6 +103,18 @@ func RenderNADSpec(networkName, nadName string, spec SpecGetter) (*netv1.Network
 	return &netv1.NetworkAttachmentDefinitionSpec{
 		Config: string(cniNetConfRaw),
 	}, nil
+}
+
+// renderNADLabels copies labels from UDN to help RenderNADSpec
+// function add those labels to corresponding NAD
+func renderNADLabels(obj client.Object) map[string]string {
+	labels := make(map[string]string)
+	labels[LabelUserDefinedNetwork] = ""
+	udnLabels := obj.GetLabels()
+	if len(udnLabels) != 0 {
+		maps.Copy(labels, udnLabels)
+	}
+	return labels
 }
 
 func validateTopology(spec SpecGetter) error {
