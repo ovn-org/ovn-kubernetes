@@ -525,6 +525,22 @@ func getLocalGatewayNATRules(cidr *net.IPNet) []nodeipt.Rule {
 	return rules
 }
 
+// getUDNSubnetReturnRule formats an iptables return rule for provided UDN subnet(10.132.0.0/14)
+// -A OVN-KUBE-UDN-MASQUERADE -s 10.132.0.0/14 -c 0 0 -j RETURN
+func getUDNSubnetReturnRule(cidr *net.IPNet, protocol iptables.Protocol) []nodeipt.Rule {
+	return []nodeipt.Rule{
+		{
+			Table: "nat",
+			Chain: iptableUDNMasqueradeChain,
+			Args: []string{
+				"-d", cidr.String(),
+				"-j", "RETURN",
+			},
+			Protocol: protocol,
+		},
+	}
+}
+
 // initLocalGatewayNATRules sets up iptables rules for interfaces
 func initLocalGatewayNATRules(ifname string, cidr *net.IPNet) error {
 	// Insert the filter table rules because they need to be evaluated BEFORE the DROP rules

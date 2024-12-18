@@ -587,6 +587,59 @@ func (oc *SecondaryLayer3NetworkController) Run() error {
 	return nil
 }
 
+func (oc *SecondaryLayer3NetworkController) Reconcile(netInfo util.NetInfo) error {
+	var err error
+	var retryNodes []*kapi.Node
+	var retryNodeNames []string
+	oc.localZoneNodes.Range(func(key, value any) bool {
+		nodeName := key.(string)
+		wasAdvertised := util.IsPodNetworkAdvertisedAtNode(oc, nodeName)
+		isAdvertised := util.IsPodNetworkAdvertisedAtNode(netInfo, nodeName)
+		if wasAdvertised == isAdvertised {
+			// noop
+			return true
+		}
+		var node *kapi.Node
+		node, err = oc.watchFactory.GetNode(nodeName)
+		if err != nil {
+			return false
+		}
+		retryNodes = append(retryNodes, node)
+		retryNodeNames = append(retryNodeNames, node.Name)
+		return true
+	})
+	if err != nil {
+		return fmt.Errorf("failed to reconcile network %s: %w", oc.GetNetworkName(), err)
+	}
+
+	reconcileRoutes := oc.routeImportManager != nil && oc.routeImportManager.NeedsReconciliation(netInfo)
+
+	err = util.ReconcileNetInfo(oc.ReconcilableNetInfo, netInfo)
+	if err != nil {
+		klog.Errorf("Failed to reconcile network %s: %v", oc.GetNetworkName(), err)
+	}
+
+	if reconcileRoutes {
+		err = oc.routeImportManager.ReconcileNetwork(oc.GetNetworkName())
+		if err != nil {
+			return err
+		}
+	}
+
+	for _, node := range retryNodes {
+		oc.addNodeFailed.Store(node.Name, true)
+		err = oc.retryNodes.AddRetryObjWithAddNoBackoff(node)
+		if err != nil {
+			klog.Errorf("Failed to retry node %s for network %s: %v", node.Name, oc.GetNetworkName(), err)
+		}
+	}
+	if len(retryNodes) > 0 {
+		oc.retryNodes.RequestRetryObjs()
+	}
+
+	return nil
+}
+
 // WatchNodes starts the watching of node resource and calls
 // back the appropriate handler logic
 func (oc *SecondaryLayer3NetworkController) WatchNodes() error {
@@ -830,6 +883,28 @@ func (oc *SecondaryLayer3NetworkController) addUDNNodeSubnetEgressSNAT(localPodS
 	return nil
 }
 
+// deleteUDNNodeSubnetEgressSNAT deletes SNAT rule from network specific
+// ovn_cluster_router depending on whether the network is advertised or not
+func (oc *SecondaryLayer3NetworkController) deleteUDNNodeSubnetEgressSNAT(localPodSubnets []*net.IPNet, node *kapi.Node) error {
+	outputPort := types.RouterToSwitchPrefix + oc.GetNetworkScopedName(node.Name)
+	nats, err := oc.buildUDNEgressSNAT(localPodSubnets, outputPort, node)
+	if err != nil {
+		return fmt.Errorf("failed to build UDN masquerade SNATs for network %q on node %q, err: %w",
+			oc.GetNetworkName(), node.Name, err)
+	}
+	if len(nats) == 0 {
+		return nil // nothing to do
+	}
+	router := &nbdb.LogicalRouter{
+		Name: oc.GetNetworkScopedClusterRouterName(),
+	}
+	if err := libovsdbops.DeleteNATs(oc.nbClient, router, nats...); err != nil {
+		return fmt.Errorf("failed to delete SNAT for node subnet on router: %q for network %q, error: %w",
+			oc.GetNetworkScopedClusterRouterName(), oc.GetNetworkName(), err)
+	}
+	return nil
+}
+
 func (oc *SecondaryLayer3NetworkController) addNode(node *kapi.Node) ([]*net.IPNet, error) {
 	// Node subnet for the secondary layer3 network is allocated by cluster manager.
 	// Make sure that the node is allocated with the subnet before proceeding
@@ -845,6 +920,11 @@ func (oc *SecondaryLayer3NetworkController) addNode(node *kapi.Node) ([]*net.IPN
 	}
 	if util.IsNetworkSegmentationSupportEnabled() && oc.IsPrimaryNetwork() {
 		if err := oc.addUDNNodeSubnetEgressSNAT(hostSubnets, node); err != nil {
+			return nil, err
+		}
+	}
+	if util.IsPodNetworkAdvertisedAtNode(oc, node.Name) {
+		if err := oc.deleteUDNNodeSubnetEgressSNAT(hostSubnets, node); err != nil {
 			return nil, err
 		}
 	}

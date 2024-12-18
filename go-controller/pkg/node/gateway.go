@@ -508,7 +508,7 @@ func (g *gateway) doReconcile() error {
 	if err != nil {
 		return fmt.Errorf("failed to get subnets for node: %s for OpenFlow cache update; err: %w", node.Name, err)
 	}
-	if err := g.openflowManager.updateBridgeFlowCache(subnets, g.nodeIPManager.ListAddresses(), g.isPodNetworkAdvertised); err != nil {
+	if err := g.openflowManager.updateBridgeFlowCache(subnets, g.nodeIPManager.ListAddresses(), g.isPodNetworkAdvertised, false); err != nil {
 		return err
 	}
 	err = g.updateSNATRules()
@@ -609,6 +609,7 @@ func (b *bridgeConfiguration) updateInterfaceIPAddresses(node *kapi.Node) ([]*ne
 func bridgeForInterface(intfName, nodeName, physicalNetworkName string, gwIPs []*net.IPNet) (*bridgeConfiguration, error) {
 	defaultNetConfig := &bridgeUDNConfiguration{
 		masqCTMark: ctMarkOVN,
+		subnets:    config.Default.ClusterSubnets,
 	}
 	res := bridgeConfiguration{
 		nodeName: nodeName,

@@ -1738,7 +1738,8 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 	return dftFlows, nil
 }
 
-func commonFlows(subnets []*net.IPNet, bridge *bridgeConfiguration, isPodNetworkAdvertised bool) ([]string, error) {
+func (c *openflowManager) commonFlows(subnets []*net.IPNet, bridge *bridgeConfiguration,
+	isPodNetworkAdvertised, isUDNNetworkAdvertised bool) ([]string, error) {
 	// CAUTION: when adding new flows where the in_port is ofPortPatch and the out_port is ofPortPhys, ensure
 	// that dl_src is included in match criteria!
 	ofPortPhys := bridge.ofPortPhys
@@ -1980,35 +1981,50 @@ func commonFlows(subnets []*net.IPNet, bridge *bridgeConfiguration, isPodNetwork
 	}
 
 	if ofPortPhys != "" {
-		if config.Gateway.DisableSNATMultipleGWs || isPodNetworkAdvertised {
+		if config.Gateway.DisableSNATMultipleGWs || isPodNetworkAdvertised || isUDNNetworkAdvertised {
 			// table 1, traffic to pod subnet go directly to OVN
-			output := defaultNetConfig.ofPortPatch
-			if isPodNetworkAdvertised && config.Gateway.Mode == config.GatewayModeLocal {
-				// except if advertised through BGP, go to kernel
-				// TODO: MEG enabled pods should still go through the patch port
-				// but holding this until
-				// https://issues.redhat.com/browse/FDP-646 is fixed, for now we
-				// are assuming MEG & BGP are not used together
-				output = ovsLocalPort
-			}
-			for _, clusterEntry := range config.Default.ClusterSubnets {
-				cidr := clusterEntry.CIDR
-				ipv := getIPv(cidr)
-				dftFlows = append(dftFlows,
-					fmt.Sprintf("cookie=%s, priority=15, table=1, %s, %s_dst=%s, "+
-						"actions=output:%s",
-						defaultOpenFlowCookie, ipv, ipv, cidr, output))
-			}
-			if output == defaultNetConfig.ofPortPatch {
-				// except node management traffic
-				for _, subnet := range subnets {
-					mgmtIP := util.GetNodeManagementIfAddr(subnet)
-					ipv := getIPv(mgmtIP)
+			for netName, netConfig := range bridge.netConfig {
+				if isPodNetworkAdvertised && netName != types.DefaultNetworkName {
+					continue
+				} else if isUDNNetworkAdvertised && netName == types.DefaultNetworkName {
+					continue
+				}
+				output := netConfig.ofPortPatch
+				if (isPodNetworkAdvertised || isUDNNetworkAdvertised) && config.Gateway.Mode == config.GatewayModeLocal {
+					// except if advertised through BGP, go to kernel
+					// TODO: MEG enabled pods should still go through the patch port
+					// but holding this until
+					// https://issues.redhat.com/browse/FDP-646 is fixed, for now we
+					// are assuming MEG & BGP are not used together
+					output = ovsLocalPort
+				}
+				for _, clusterEntry := range netConfig.subnets {
+					cidr := clusterEntry.CIDR
+					ipv := getIPv(cidr)
 					dftFlows = append(dftFlows,
-						fmt.Sprintf("cookie=%s, priority=16, table=1, %s, %s_dst=%s, "+
+						fmt.Sprintf("cookie=%s, priority=15, table=1, %s, %s_dst=%s, "+
 							"actions=output:%s",
-							defaultOpenFlowCookie, ipv, ipv, mgmtIP.IP, ovsLocalPort),
-					)
+							defaultOpenFlowCookie, ipv, ipv, cidr, output))
+				}
+				if output == netConfig.ofPortPatch {
+					// except node management traffic
+					nodeSubnets := subnets
+					if netName != types.DefaultNetworkName {
+						node, err := c.watchFactory.GetNode(bridge.nodeName)
+						if err != nil {
+							return nil, fmt.Errorf("unable to get node %s: %s", bridge.nodeName, err)
+						}
+						nodeSubnets, err = util.ParseNodeHostSubnetAnnotation(node, netName)
+					}
+					for _, subnet := range nodeSubnets {
+						mgmtIP := util.GetNodeManagementIfAddr(subnet)
+						ipv := getIPv(mgmtIP)
+						dftFlows = append(dftFlows,
+							fmt.Sprintf("cookie=%s, priority=16, table=1, %s, %s_dst=%s, "+
+								"actions=output:%s",
+								defaultOpenFlowCookie, ipv, ipv, mgmtIP.IP, ovsLocalPort),
+						)
+					}
 				}
 			}
 		}
@@ -2272,7 +2288,7 @@ func newGateway(
 			}
 		}
 
-		gw.openflowManager, err = newGatewayOpenFlowManager(gwBridge, exGwBridge, subnets, nodeIPs)
+		gw.openflowManager, err = newGatewayOpenFlowManager(gwBridge, exGwBridge, subnets, nodeIPs, watchFactory)
 		if err != nil {
 			return err
 		}
@@ -2280,7 +2296,8 @@ func newGateway(
 		// resync flows on IP change
 		gw.nodeIPManager.OnChanged = func() {
 			klog.V(5).Info("Node addresses changed, re-syncing bridge flows")
-			if err := gw.openflowManager.updateBridgeFlowCache(subnets, gw.nodeIPManager.ListAddresses(), gw.isPodNetworkAdvertised); err != nil {
+			if err := gw.openflowManager.updateBridgeFlowCache(subnets, gw.nodeIPManager.ListAddresses(),
+				gw.isPodNetworkAdvertised, false); err != nil {
 				// very unlikely - somehow node has lost its IP address
 				klog.Errorf("Failed to re-generate gateway flows after address change: %v", err)
 			}

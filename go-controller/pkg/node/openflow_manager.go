@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/generator/udn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
@@ -27,7 +28,8 @@ type openflowManager struct {
 	exGWFlowCache map[string][]string
 	exGWFlowMutex sync.Mutex
 	// channel to indicate we need to update flows immediately
-	flowChan chan struct{}
+	flowChan     chan struct{}
+	watchFactory factory.NodeWatchFactory
 }
 
 // UTILs Needed for UDN (also leveraged for default netInfo) in openflowmanager
@@ -150,7 +152,8 @@ func (c *openflowManager) syncFlows() {
 //
 // -- to handle host -> service access, via masquerading from the host to OVN GR
 // -- to handle external -> service(ExternalTrafficPolicy: Local) -> host access without SNAT
-func newGatewayOpenFlowManager(gwBridge, exGWBridge *bridgeConfiguration, subnets []*net.IPNet, extraIPs []net.IP) (*openflowManager, error) {
+func newGatewayOpenFlowManager(gwBridge, exGWBridge *bridgeConfiguration, subnets []*net.IPNet,
+	extraIPs []net.IP, watchFactory factory.NodeWatchFactory) (*openflowManager, error) {
 	// add health check function to check default OpenFlow flows are on the shared gateway bridge
 	ofm := &openflowManager{
 		defaultBridge:         gwBridge,
@@ -160,10 +163,11 @@ func newGatewayOpenFlowManager(gwBridge, exGWBridge *bridgeConfiguration, subnet
 		exGWFlowCache:         make(map[string][]string),
 		exGWFlowMutex:         sync.Mutex{},
 		flowChan:              make(chan struct{}, 1),
+		watchFactory:          watchFactory,
 	}
 
 	isRoutingAdvertised := false
-	if err := ofm.updateBridgeFlowCache(subnets, extraIPs, isRoutingAdvertised); err != nil {
+	if err := ofm.updateBridgeFlowCache(subnets, extraIPs, isRoutingAdvertised, false); err != nil {
 		return nil, err
 	}
 
@@ -207,7 +211,8 @@ func (c *openflowManager) Run(stopChan <-chan struct{}, doneWg *sync.WaitGroup) 
 
 // updateBridgeFlowCache generates the "static" per-bridge flows
 // note: this is shared between shared and local gateway modes
-func (c *openflowManager) updateBridgeFlowCache(subnets []*net.IPNet, extraIPs []net.IP, isPodNetworkAdvertised bool) error {
+func (c *openflowManager) updateBridgeFlowCache(subnets []*net.IPNet, extraIPs []net.IP,
+	isPodNetworkAdvertised, isUDNNetworkAdvertised bool) error {
 	// protect defaultBridge config from being updated by gw.nodeIPManager
 	c.defaultBridge.Lock()
 	defer c.defaultBridge.Unlock()
@@ -219,7 +224,7 @@ func (c *openflowManager) updateBridgeFlowCache(subnets []*net.IPNet, extraIPs [
 	if err != nil {
 		return err
 	}
-	dftCommonFlows, err := commonFlows(subnets, c.defaultBridge, isPodNetworkAdvertised)
+	dftCommonFlows, err := c.commonFlows(subnets, c.defaultBridge, isPodNetworkAdvertised, isUDNNetworkAdvertised)
 	if err != nil {
 		return err
 	}
@@ -233,7 +238,7 @@ func (c *openflowManager) updateBridgeFlowCache(subnets []*net.IPNet, extraIPs [
 		c.externalGatewayBridge.Lock()
 		defer c.externalGatewayBridge.Unlock()
 		c.updateExBridgeFlowCacheEntry("NORMAL", []string{fmt.Sprintf("table=0,priority=0,actions=%s\n", util.NormalAction)})
-		exGWBridgeDftFlows, err := commonFlows(subnets, c.externalGatewayBridge, false)
+		exGWBridgeDftFlows, err := c.commonFlows(subnets, c.externalGatewayBridge, false, false)
 		if err != nil {
 			return err
 		}

@@ -298,6 +298,35 @@ func (vrfm *Controller) AddVRFRoutes(name string, routes []netlink.Route) error 
 	return vrfm.sync(vrfDev)
 }
 
+// DeleteVRFRoutes delets routes from the specified VRF
+func (vrfm *Controller) DeleteVRFRoutes(name string, routes []netlink.Route) error {
+	vrfm.mu.Lock()
+	defer vrfm.mu.Unlock()
+
+	vrfLink, err := util.GetNetLinkOps().LinkByName(name)
+	if err != nil {
+		return fmt.Errorf("failed to retrieve VRF device %s, err: %v", name, err)
+	}
+
+	vrfDev, ok := vrfm.vrfs[vrfLink.Attrs().Index]
+	if !ok {
+		return fmt.Errorf("failed to find VRF %s", name)
+	}
+	for _, route := range routes {
+		for i, cachedRoute := range vrfDev.routes {
+			if route.Dst.String() == cachedRoute.Dst.String() && route.Table == cachedRoute.Table {
+				vrfDev.routes = append(vrfDev.routes[:i], vrfDev.routes[i+1:]...)
+			}
+		}
+		if err := vrfm.routeManager.Del(route); err != nil {
+			return fmt.Errorf("failed to delete route for VRF device %s, err: %w", route, err)
+		}
+
+	}
+
+	return vrfm.sync(vrfDev)
+}
+
 // Repair deletes stale VRF device(s) on the host. This helps remove
 // device(s) for which DeleteVRF is never invoked.
 func (vrfm *Controller) Repair(validVRFs sets.Set[string]) error {
