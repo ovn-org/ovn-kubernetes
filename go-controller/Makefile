@@ -89,7 +89,7 @@ clean:
 	rm -f ./pkg/sbdb/ovn-sb.ovsschema
 	rm -f ./pkg/vswitchd/vswitch.ovsschema
 
-.PHONY: lint gofmt
+.PHONY: lint gofmt verify-go-mod-vendor
 
 lint:
 ifeq ($(CONTAINER_RUNNABLE), 0)
@@ -103,6 +103,13 @@ ifeq ($(CONTAINER_RUNNABLE), 0)
 	$(CONTAINER_RUNTIME) run -it --rm --security-opt label=disable -v $(shell dirname $(PWD)):/go/src/github.com/ovn-org/ovn-kubernetes -w /go/src/github.com/ovn-org/ovn-kubernetes/go-controller $(GO_DOCKER_IMG) hack/verify-gofmt.sh
 else
 	@./hack/verify-gofmt.sh
+endif
+
+verify-go-mod-vendor:
+ifeq ($(CONTAINER_RUNNABLE), 0)
+	@GOPATH=${GOPATH} ./hack/verify-go-mod-vendor.sh
+else
+	@./hack/verify-go-mod-vendor.sh
 endif
 
 pkg/nbdb/ovn-nb.ovsschema:
