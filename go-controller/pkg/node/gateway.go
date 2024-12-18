@@ -57,7 +57,8 @@ type gateway struct {
 	stopChan     <-chan struct{}
 	wg           *sync.WaitGroup
 
-	isPodNetworkAdvertised bool
+	isPodNetworkAdvertisedLock sync.Mutex
+	isPodNetworkAdvertised     bool
 }
 
 func (g *gateway) AddService(svc *kapi.Service) error {
@@ -468,6 +469,8 @@ func (g *gateway) SetDefaultGatewayBridgeMAC(macAddr net.HardwareAddr) {
 }
 
 func (g *gateway) SetPodNetworkAdvertised(isPodNetworkAdvertised bool) {
+	g.isPodNetworkAdvertisedLock.Lock()
+	defer g.isPodNetworkAdvertisedLock.Unlock()
 	g.isPodNetworkAdvertised = isPodNetworkAdvertised
 }
 
@@ -520,6 +523,8 @@ func (g *gateway) addAllServices() []error {
 }
 
 func (g *gateway) updateSNATRules() error {
+	g.isPodNetworkAdvertisedLock.Lock()
+	defer g.isPodNetworkAdvertisedLock.Unlock()
 	var ipnets []*net.IPNet
 	if g.nodeIPManager.mgmtPortConfig.ipv4 != nil {
 		ipnets = append(ipnets, g.nodeIPManager.mgmtPortConfig.ipv4.ifAddr)
