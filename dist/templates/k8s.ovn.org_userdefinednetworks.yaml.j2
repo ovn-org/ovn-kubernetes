@@ -62,9 +62,17 @@ spec:
                       When omitted, the platform will choose a reasonable default which is subject to change over time.
                     items:
                       type: string
+                      x-kubernetes-validations:
+                      - message: CIDR is invalid
+                        rule: isCIDR(self)
                     maxItems: 2
                     minItems: 1
                     type: array
+                    x-kubernetes-validations:
+                    - message: When 2 CIDRs are set, they must be from different IP
+                        families
+                      rule: size(self) != 2 || !isCIDR(self[0]) || !isCIDR(self[1])
+                        || cidr(self[0]).ip().family() != cidr(self[1]).ip().family()
                   mtu:
                     description: |-
                       MTU is the maximum transmission unit for a network.
@@ -93,22 +101,33 @@ spec:
                       and users must configure IP addresses for the pods. As a consequence, Port security only prevents MAC spoofing.
                     items:
                       type: string
+                      x-kubernetes-validations:
+                      - message: CIDR is invalid
+                        rule: isCIDR(self)
                     maxItems: 2
                     minItems: 1
                     type: array
+                    x-kubernetes-validations:
+                    - message: When 2 CIDRs are set, they must be from different IP
+                        families
+                      rule: size(self) != 2 || !isCIDR(self[0]) || !isCIDR(self[1])
+                        || cidr(self[0]).ip().family() != cidr(self[1]).ip().family()
                 required:
                 - role
                 type: object
                 x-kubernetes-validations:
                 - message: Subnets is required for Primary Layer2 topology
-                  rule: self.role != 'Primary' || has(self.subnets) && size(self.subnets)
-                    > 0
+                  rule: self.role != 'Primary' || has(self.subnets)
                 - message: JoinSubnets is only supported for Primary network
                   rule: '!has(self.joinSubnets) || has(self.role) && self.role ==
                     ''Primary'''
                 - message: IPAMLifecycle is only supported when subnets are set
                   rule: '!has(self.ipamLifecycle) || has(self.subnets) && size(self.subnets)
                     > 0'
+                - message: MTU should be greater than or equal to 1280 when IPv6 subent
+                    is used
+                  rule: '!has(self.subnets) || !has(self.mtu) || !self.subnets.exists_one(i,
+                    isCIDR(i) && cidr(i).ip().family() == 6) || self.mtu >= 1280'
               layer3:
                 description: Layer3 is the Layer3 topology configuration.
                 properties:
@@ -122,9 +141,17 @@ spec:
                       When omitted, the platform will choose a reasonable default which is subject to change over time.
                     items:
                       type: string
+                      x-kubernetes-validations:
+                      - message: CIDR is invalid
+                        rule: isCIDR(self)
                     maxItems: 2
                     minItems: 1
                     type: array
+                    x-kubernetes-validations:
+                    - message: When 2 CIDRs are set, they must be from different IP
+                        families
+                      rule: size(self) != 2 || !isCIDR(self[0]) || !isCIDR(self[1])
+                        || cidr(self[0]).ip().family() != cidr(self[1]).ip().family()
                   mtu:
                     description: |-
                       MTU is the maximum transmission unit for a network.
@@ -157,6 +184,9 @@ spec:
                           description: CIDR specifies L3Subnet, which is split into
                             smaller subnets for every node.
                           type: string
+                          x-kubernetes-validations:
+                          - message: CIDR is invalid
+                            rule: isCIDR(self)
                         hostSubnet:
                           description: |-
                             HostSubnet specifies the subnet size for every node.
@@ -169,19 +199,33 @@ spec:
                       required:
                       - cidr
                       type: object
+                      x-kubernetes-validations:
+                      - message: HostSubnet must be smaller than CIDR subnet
+                        rule: '!has(self.hostSubnet) || !isCIDR(self.cidr) || self.hostSubnet
+                          > cidr(self.cidr).prefixLength()'
+                      - message: HostSubnet must < 32 for ipv4 CIDR
+                        rule: '!has(self.hostSubnet) || !isCIDR(self.cidr) || (cidr(self.cidr).ip().family()
+                          == 4 && self.hostSubnet < 32)'
                     maxItems: 2
                     minItems: 1
                     type: array
+                    x-kubernetes-validations:
+                    - message: When 2 CIDRs are set, they must be from different IP
+                        families
+                      rule: size(self) != 2 || !isCIDR(self[0].cidr) || !isCIDR(self[1].cidr)
+                        || cidr(self[0].cidr).ip().family() != cidr(self[1].cidr).ip().family()
                 required:
                 - role
                 - subnets
                 type: object
                 x-kubernetes-validations:
-                - message: Subnets is required for Layer3 topology
-                  rule: has(self.subnets) && size(self.subnets) > 0
                 - message: JoinSubnets is only supported for Primary network
                   rule: '!has(self.joinSubnets) || has(self.role) && self.role ==
                     ''Primary'''
+                - message: MTU should be greater than or equal to 1280 when IPv6 subent
+                    is used
+                  rule: '!has(self.subnets) || !has(self.mtu) || !self.subnets.exists_one(i,
+                    cidr(i.cidr).ip().family() == 6) || self.mtu >= 1280'
               topology:
                 description: |-
                   Topology describes network configuration.
