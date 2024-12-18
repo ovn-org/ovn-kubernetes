@@ -76,6 +76,10 @@ type UserDefinedNetworkGateway struct {
 	// iprules manager that creates and manages iprules for
 	// all UDNs. Must be accessed with a lock
 	ruleManager *iprulemanager.Controller
+
+	// isUDNNetworkAdvertised is a place holder to indicate whether the
+	// network is advertised or not
+	isUDNNetworkAdvertised bool
 }
 
 // UTILS Needed for UDN (also leveraged for default netInfo) in bridgeConfiguration
@@ -108,6 +112,7 @@ func (b *bridgeConfiguration) addNetworkBridgeConfig(nInfo util.NetInfo, masqCTM
 			pktMark:    fmt.Sprintf("0x%x", pktMark),
 			v4MasqIPs:  v4MasqIPs,
 			v6MasqIPs:  v6MasqIPs,
+			subnets:    nInfo.Subnets(),
 		}
 
 		b.netConfig[netName] = netConfig
@@ -163,6 +168,7 @@ type bridgeUDNConfiguration struct {
 	pktMark     string
 	v4MasqIPs   *udn.MasqueradeIPs
 	v6MasqIPs   *udn.MasqueradeIPs
+	subnets     []config.CIDRNetworkEntry
 }
 
 func (netConfig *bridgeUDNConfiguration) isDefaultNetwork() bool {
@@ -659,23 +665,36 @@ func (udng *UserDefinedNetworkGateway) getV6MasqueradeIP() (*net.IPNet, error) {
 // 2000:   from all to 169.254.0.12 lookup 1007
 // 2000:   from all fwmark 0x1002 lookup 1009
 // 2000:   from all to 169.254.0.14 lookup 1009
+// If isPodNetworkAdvertised is set to true then we add following IP rules
+// for 10.132.0.0/14 UDN subnet
+// 2000:	from all fwmark 0x1001 lookup 1009
+// 2000:	from all to 10.132.0.0/14 lookup 1009
 func (udng *UserDefinedNetworkGateway) constructUDNVRFIPRules(vrfTableId int) ([]netlink.Rule, error) {
 	var ipRules []netlink.Rule
-	masqIPv4, err := udng.getV4MasqueradeIP()
-	if err != nil {
-		return nil, err
-	}
-	if masqIPv4 != nil {
-		ipRules = append(ipRules, generateIPRuleForPacketMark(udng.pktMark, false, uint(vrfTableId)))
-		ipRules = append(ipRules, generateIPRuleForMasqIP(masqIPv4.IP, false, uint(vrfTableId)))
-	}
-	masqIPv6, err := udng.getV6MasqueradeIP()
-	if err != nil {
-		return nil, err
-	}
-	if masqIPv6 != nil {
-		ipRules = append(ipRules, generateIPRuleForPacketMark(udng.pktMark, true, uint(vrfTableId)))
-		ipRules = append(ipRules, generateIPRuleForMasqIP(masqIPv6.IP, true, uint(vrfTableId)))
+	isPodNetworkAdvertised := util.IsPodNetworkAdvertisedAtNode(udng.NetInfo, udng.node.Name)
+	if isPodNetworkAdvertised {
+		dstIPs := udng.Subnets()
+		for _, dstIP := range dstIPs {
+			ipRules = append(ipRules, generateIPRuleForPacketMark(udng.pktMark, utilnet.IsIPv6CIDR(dstIP.CIDR), uint(vrfTableId)))
+			ipRules = append(ipRules, generateIPRuleForUDNSubnet(dstIP.CIDR, utilnet.IsIPv6CIDR(dstIP.CIDR), uint(vrfTableId)))
+		}
+	} else {
+		masqIPv4, err := udng.getV4MasqueradeIP()
+		if err != nil {
+			return nil, err
+		}
+		if masqIPv4 != nil {
+			ipRules = append(ipRules, generateIPRuleForPacketMark(udng.pktMark, false, uint(vrfTableId)))
+			ipRules = append(ipRules, generateIPRuleForMasqIP(masqIPv4.IP, false, uint(vrfTableId)))
+		}
+		masqIPv6, err := udng.getV6MasqueradeIP()
+		if err != nil {
+			return nil, err
+		}
+		if masqIPv6 != nil {
+			ipRules = append(ipRules, generateIPRuleForPacketMark(udng.pktMark, true, uint(vrfTableId)))
+			ipRules = append(ipRules, generateIPRuleForMasqIP(masqIPv6.IP, true, uint(vrfTableId)))
+		}
 	}
 	return ipRules, nil
 }
@@ -700,6 +719,18 @@ func generateIPRuleForMasqIP(masqIP net.IP, isIPv6 bool, vrfTableId uint) netlin
 		r.Family = netlink.FAMILY_V6
 	}
 	r.Dst = util.GetIPNetFullMaskFromIP(masqIP)
+	return r
+}
+
+func generateIPRuleForUDNSubnet(udnIP *net.IPNet, isIPv6 bool, vrfTableId uint) netlink.Rule {
+	r := *netlink.NewRule()
+	r.Table = int(vrfTableId)
+	r.Priority = UDNMasqueradeIPRulePriority
+	r.Family = netlink.FAMILY_V4
+	if isIPv6 {
+		r.Family = netlink.FAMILY_V6
+	}
+	r.Dst = udnIP
 	return r
 }
 
