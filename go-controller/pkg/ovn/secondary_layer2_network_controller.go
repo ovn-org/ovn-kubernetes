@@ -280,23 +280,6 @@ func NewSecondaryLayer2NetworkController(
 		lsManagerFactoryFn = lsm.NewL2SwitchManagerForUserDefinedPrimaryNetwork
 	}
 
-	var svcController *svccontroller.Controller
-	if util.IsNetworkSegmentationSupportEnabled() {
-		var err error
-		svcController, err = svccontroller.NewController(
-			cnci.client, cnci.nbClient,
-			cnci.watchFactory.ServiceCoreInformer(),
-			cnci.watchFactory.EndpointSliceCoreInformer(),
-			cnci.watchFactory.NodeCoreInformer(),
-			networkManager,
-			cnci.recorder,
-			netInfo,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("unable to create new service controller while creating new layer2 network controller: %w", err)
-		}
-	}
-
 	oc := &SecondaryLayer2NetworkController{
 		BaseSecondaryLayer2NetworkController: BaseSecondaryLayer2NetworkController{
 
@@ -324,12 +307,27 @@ func NewSecondaryLayer2NetworkController(
 		mgmtPortFailed:   sync.Map{},
 		syncZoneICFailed: sync.Map{},
 		gatewayManagers:  sync.Map{},
-		svcController:    svcController,
 		eIPController:    eIPController,
 	}
 
 	if config.OVNKubernetesFeature.EnableInterconnect {
 		oc.zoneICHandler = zoneinterconnect.NewZoneInterconnectHandler(oc.GetNetInfo(), oc.nbClient, oc.sbClient, oc.watchFactory)
+	}
+
+	if util.IsNetworkSegmentationSupportEnabled() {
+		var err error
+		oc.svcController, err = svccontroller.NewController(
+			cnci.client, cnci.nbClient,
+			cnci.watchFactory.ServiceCoreInformer(),
+			cnci.watchFactory.EndpointSliceCoreInformer(),
+			cnci.watchFactory.NodeCoreInformer(),
+			networkManager,
+			cnci.recorder,
+			oc.GetNetInfo(),
+		)
+		if err != nil {
+			return nil, fmt.Errorf("unable to create new service controller while creating new layer2 network controller: %w", err)
+		}
 	}
 
 	if oc.allocatesPodAnnotation() {
@@ -344,7 +342,7 @@ func NewSecondaryLayer2NetworkController(
 			claimsReconciler = ipamClaimsReconciler
 		}
 		oc.podAnnotationAllocator = pod.NewPodAnnotationAllocator(
-			netInfo,
+			oc.GetNetInfo(),
 			cnci.watchFactory.PodCoreInformer().Lister(),
 			cnci.kube,
 			claimsReconciler)
