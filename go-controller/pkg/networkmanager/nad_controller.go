@@ -477,15 +477,15 @@ func (c *nadController) GetNetwork(name string) util.NetInfo {
 	return network
 }
 
-func (nadController *nadController) GetActiveNetworkNamespaces(networkName string) ([]string, error) {
+func (c *nadController) GetActiveNetworkNamespaces(networkName string) ([]string, error) {
 	if !util.IsNetworkSegmentationSupportEnabled() {
 		return []string{"default"}, nil
 	}
 	namespaces := make([]string, 0)
-	nadController.RLock()
-	defer nadController.RUnlock()
-	for namespaceName, primaryNAD := range nadController.primaryNADs {
-		nadNetworkName := nadController.nads[primaryNAD]
+	c.RLock()
+	defer c.RUnlock()
+	for namespaceName, primaryNAD := range c.primaryNADs {
+		nadNetworkName := c.nads[primaryNAD]
 		if nadNetworkName != networkName {
 			continue
 		}
@@ -496,26 +496,26 @@ func (nadController *nadController) GetActiveNetworkNamespaces(networkName strin
 
 // DoWithLock iterates over all role primary user defined networks and executes the given fn with each network as input.
 // An error will not block execution and instead all errors will be aggregated and returned when all networks are processed.
-func (nadController *nadController) DoWithLock(f func(network util.NetInfo) error) error {
+func (c *nadController) DoWithLock(f func(network util.NetInfo) error) error {
 	if !util.IsNetworkSegmentationSupportEnabled() {
 		defaultNetwork := &util.DefaultNetInfo{}
 		return f(defaultNetwork)
 	}
-	nadController.RLock()
-	defer nadController.RUnlock()
+	c.RLock()
+	defer c.RUnlock()
 
 	var errs []error
-	for _, primaryNAD := range nadController.primaryNADs {
+	for _, primaryNAD := range c.primaryNADs {
 		if primaryNAD == "" {
 			continue
 		}
-		netName := nadController.nads[primaryNAD]
+		netName := c.nads[primaryNAD]
 		if netName == "" {
 			// this should never happen where we have a nad keyed in the primaryNADs
 			// map, but it doesn't exist in the nads map
 			panic("NAD Controller broken consistency between primary NADs and cached NADs")
 		}
-		network := nadController.networkController.getNetwork(netName)
+		network := c.networkController.getNetwork(netName)
 		n := util.NewMutableNetInfo(network)
 		// update the returned netInfo copy to only have the primary NAD for this namespace
 		n.SetNADs(primaryNAD)
