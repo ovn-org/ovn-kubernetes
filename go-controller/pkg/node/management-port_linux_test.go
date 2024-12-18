@@ -10,7 +10,6 @@ import (
 	"io/ioutil"
 	"net"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -50,14 +49,6 @@ var _ = AfterSuite(func() {
 	Expect(err).NotTo(HaveOccurred())
 })
 
-func createTempFile(name string) (string, error) {
-	fname := filepath.Join(tmpDir, name)
-	if err := ioutil.WriteFile(fname, []byte{0x20}, 0o644); err != nil {
-		return "", err
-	}
-	return fname, nil
-}
-
 type managementPortTestConfig struct {
 	family int
 
@@ -67,6 +58,8 @@ type managementPortTestConfig struct {
 
 	expectedManagementPortIP string
 	expectedGatewayIP        string
+
+	isRoutingAdvertised bool
 }
 
 func (mptc *managementPortTestConfig) GetNodeSubnetCIDR() *net.IPNet {
@@ -92,6 +85,8 @@ func checkMgmtPortTestNFTables(configs []managementPortTestConfig, mgmtPortName 
 
 	var returnRule, snatV4Rule, snatV6Rule string
 	var wantReturnRule, wantSNATV4Rule, wantSNATV6Rule bool
+	var returnNonLocalV4Rule, returnNonLocalV6Rule, returnMgmtIPV4Rule, returnMgmtIPV6Rule string
+	var wantReturnNonLocalV4Rule, wantReturnNonLocalV6Rule, wantReturnMgmtIPV4Rule, wantReturnMgmtIPV6Rule bool
 
 	returnRule = fmt.Sprintf("oifname != %q return", mgmtPortName)
 	wantReturnRule = true
@@ -100,9 +95,17 @@ func checkMgmtPortTestNFTables(configs []managementPortTestConfig, mgmtPortName 
 		if cfg.family == netlink.FAMILY_V4 {
 			snatV4Rule = "snat ip to " + cfg.expectedManagementPortIP
 			wantSNATV4Rule = true
+			returnNonLocalV4Rule = "meta nfproto ipv4 fib saddr type != local"
+			wantReturnNonLocalV4Rule = cfg.isRoutingAdvertised
+			returnMgmtIPV4Rule = "meta nfproto ipv4 ip saddr " + cfg.expectedManagementPortIP
+			wantReturnMgmtIPV4Rule = true
 		} else {
 			snatV6Rule = "snat ip6 to " + cfg.expectedManagementPortIP
 			wantSNATV6Rule = true
+			returnNonLocalV6Rule = "meta nfproto ipv6 fib saddr type != local"
+			wantReturnNonLocalV6Rule = cfg.isRoutingAdvertised
+			returnMgmtIPV6Rule = "meta nfproto ipv6 ip6 saddr " + cfg.expectedManagementPortIP
+			wantReturnMgmtIPV6Rule = true
 		}
 	}
 
@@ -113,12 +116,24 @@ func checkMgmtPortTestNFTables(configs []managementPortTestConfig, mgmtPortName 
 			wantSNATV4Rule = false
 		} else if wantSNATV6Rule && strings.Contains(rule.Rule, snatV6Rule) {
 			wantSNATV6Rule = false
+		} else if wantReturnNonLocalV4Rule && strings.Contains(rule.Rule, returnNonLocalV4Rule) {
+			wantReturnNonLocalV4Rule = false
+		} else if wantReturnNonLocalV6Rule && strings.Contains(rule.Rule, returnNonLocalV6Rule) {
+			wantReturnNonLocalV6Rule = false
+		} else if wantReturnMgmtIPV4Rule && strings.Contains(rule.Rule, returnMgmtIPV4Rule) {
+			wantReturnMgmtIPV4Rule = false
+		} else if wantReturnMgmtIPV6Rule && strings.Contains(rule.Rule, returnMgmtIPV6Rule) {
+			wantReturnMgmtIPV6Rule = false
 		}
 	}
 
 	Expect(wantReturnRule).To(BeFalse(), "did not find rule with %q", returnRule)
 	Expect(wantSNATV4Rule).To(BeFalse(), "did not find rule with %q", snatV4Rule)
 	Expect(wantSNATV6Rule).To(BeFalse(), "did not find rule with %q", snatV6Rule)
+	Expect(wantReturnNonLocalV4Rule).To(BeFalse(), "did not find rule with %q", returnNonLocalV4Rule)
+	Expect(wantReturnNonLocalV6Rule).To(BeFalse(), "did not find rule with %q", returnNonLocalV6Rule)
+	Expect(wantReturnMgmtIPV4Rule).To(BeFalse(), "did not find rule with %q", returnMgmtIPV4Rule)
+	Expect(wantReturnMgmtIPV6Rule).To(BeFalse(), "did not find rule with %q", returnMgmtIPV6Rule)
 }
 
 // checkMgmtTestPortIpsAndRoutes checks IPs and Routes of the management port
@@ -284,7 +299,14 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 		netdevName, rep := "", ""
 
 		mgmtPorts := NewManagementPorts(nodeName, nodeSubnetCIDRs, netdevName, rep)
-		_, err = mgmtPorts[0].Create(rm, &existingNode, watchFactory.NodeCoreInformer().Lister(), kubeInterface, waiter)
+		_, err = mgmtPorts[0].Create(
+			configs[0].isRoutingAdvertised,
+			rm,
+			&existingNode,
+			watchFactory.NodeCoreInformer().Lister(),
+			kubeInterface,
+			waiter,
+		)
 		Expect(err).NotTo(HaveOccurred())
 		checkMgmtTestPortIpsAndRoutes(configs, mgtPort, mgtPortAddrs, expectedLRPMAC)
 		return nil
@@ -381,7 +403,7 @@ func testManagementPortDPU(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.
 		netdevName, rep := "pf0vf0", "pf0vf0"
 
 		mgmtPorts := NewManagementPorts(nodeName, nodeSubnetCIDRs, netdevName, rep)
-		_, err = mgmtPorts[0].Create(rm, &existingNode, watchFactory.NodeCoreInformer().Lister(), kubeInterface, waiter)
+		_, err = mgmtPorts[0].Create(false, rm, &existingNode, watchFactory.NodeCoreInformer().Lister(), kubeInterface, waiter)
 		Expect(err).NotTo(HaveOccurred())
 		// make sure interface was renamed and mtu was set
 		l, err := netlink.LinkByName(mgtPort)
@@ -456,7 +478,7 @@ func testManagementPortDPUHost(ctx *cli.Context, fexec *ovntest.FakeExec, testNS
 		netdevName, rep := "pf0vf0", ""
 
 		mgmtPorts := NewManagementPorts(nodeName, nodeSubnetCIDRs, netdevName, rep)
-		_, err = mgmtPorts[0].Create(rm, nil, nil, nil, nil)
+		_, err = mgmtPorts[0].Create(configs[0].isRoutingAdvertised, rm, nil, nil, nil, nil)
 		Expect(err).NotTo(HaveOccurred())
 		checkMgmtTestPortIpsAndRoutes(configs, mgtPort, mgtPortAddrs, expectedLRPMAC)
 		// check mgmt port MAC, mtu and link state
@@ -839,6 +861,31 @@ var _ = Describe("Management Port Operations", func() {
 				Expect(err).NotTo(HaveOccurred())
 			})
 
+			ovntest.OnSupportedPlatformsIt("sets up the management port for BGP advertised IPv4 clusters", func() {
+				app.Action = func(ctx *cli.Context) error {
+					testManagementPort(ctx, fexec, testNS,
+						[]managementPortTestConfig{
+							{
+								family: netlink.FAMILY_V4,
+
+								clusterCIDR: v4clusterCIDR,
+								nodeSubnet:  v4nodeSubnet,
+
+								expectedManagementPortIP: v4mgtPortIP,
+								expectedGatewayIP:        v4gwIP,
+
+								isRoutingAdvertised: true,
+							},
+						}, v4lrpMAC, true)
+					return nil
+				}
+				err := app.Run([]string{
+					app.Name,
+					"--cluster-subnets=" + v4clusterCIDR,
+				})
+				Expect(err).NotTo(HaveOccurred())
+			})
+
 			ovntest.OnSupportedPlatformsIt("sets up the management port for IPv6 clusters", func() {
 				app.Action = func(ctx *cli.Context) error {
 					testManagementPort(ctx, fexec, testNS,
@@ -854,6 +901,33 @@ var _ = Describe("Management Port Operations", func() {
 								expectedGatewayIP:        v6gwIP,
 							},
 						}, v6lrpMAC, false)
+					return nil
+				}
+				err := app.Run([]string{
+					app.Name,
+					"--cluster-subnets=" + v6clusterCIDR,
+					"--k8s-service-cidr=" + v6serviceCIDR,
+				})
+				Expect(err).NotTo(HaveOccurred())
+			})
+
+			ovntest.OnSupportedPlatformsIt("sets up the management port for BGP advertised IPv6 clusters", func() {
+				app.Action = func(ctx *cli.Context) error {
+					testManagementPort(ctx, fexec, testNS,
+						[]managementPortTestConfig{
+							{
+								family: netlink.FAMILY_V6,
+
+								clusterCIDR: v6clusterCIDR,
+								serviceCIDR: v6serviceCIDR,
+								nodeSubnet:  v6nodeSubnet,
+
+								expectedManagementPortIP: v6mgtPortIP,
+								expectedGatewayIP:        v6gwIP,
+
+								isRoutingAdvertised: true,
+							},
+						}, v6lrpMAC, true)
 					return nil
 				}
 				err := app.Run([]string{
@@ -898,14 +972,52 @@ var _ = Describe("Management Port Operations", func() {
 				})
 				Expect(err).NotTo(HaveOccurred())
 			})
+
+			ovntest.OnSupportedPlatformsIt("sets up the management port for BGP advertised dual-stack clusters", func() {
+				app.Action = func(ctx *cli.Context) error {
+					testManagementPort(ctx, fexec, testNS,
+						[]managementPortTestConfig{
+							{
+								family: netlink.FAMILY_V4,
+
+								clusterCIDR: v4clusterCIDR,
+								serviceCIDR: v4serviceCIDR,
+								nodeSubnet:  v4nodeSubnet,
+
+								expectedManagementPortIP: v4mgtPortIP,
+								expectedGatewayIP:        v4gwIP,
+
+								isRoutingAdvertised: true,
+							},
+							{
+								family: netlink.FAMILY_V6,
+
+								clusterCIDR: v6clusterCIDR,
+								serviceCIDR: v6serviceCIDR,
+								nodeSubnet:  v6nodeSubnet,
+
+								expectedManagementPortIP: v6mgtPortIP,
+								expectedGatewayIP:        v6gwIP,
+
+								isRoutingAdvertised: true,
+							},
+						}, v4lrpMAC, true)
+					return nil
+				}
+				err := app.Run([]string{
+					app.Name,
+					"--cluster-subnets=" + v4clusterCIDR + "," + v6clusterCIDR,
+					"--k8s-service-cidr=" + v4serviceCIDR + "," + v6serviceCIDR,
+				})
+				Expect(err).NotTo(HaveOccurred())
+			})
 		})
 
 		Context("Management Port, ovnkube node mode dpu", func() {
 
 			BeforeEach(func() {
-				var err error
 				// Set up a fake k8sMgmt interface
-				err = testNS.Do(func(ns.NetNS) error {
+				err := testNS.Do(func(ns.NetNS) error {
 					defer GinkgoRecover()
 					ovntest.AddLink(mgmtPortNetdev)
 					return nil

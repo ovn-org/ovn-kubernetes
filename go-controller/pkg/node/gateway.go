@@ -57,7 +57,8 @@ type gateway struct {
 	stopChan     <-chan struct{}
 	wg           *sync.WaitGroup
 
-	isPodNetworkAdvertised bool
+	isPodNetworkAdvertisedLock sync.Mutex
+	isPodNetworkAdvertised     bool
 }
 
 func (g *gateway) AddService(svc *kapi.Service) error {
@@ -468,6 +469,8 @@ func (g *gateway) SetDefaultGatewayBridgeMAC(macAddr net.HardwareAddr) {
 }
 
 func (g *gateway) SetPodNetworkAdvertised(isPodNetworkAdvertised bool) {
+	g.isPodNetworkAdvertisedLock.Lock()
+	defer g.isPodNetworkAdvertisedLock.Unlock()
 	g.isPodNetworkAdvertised = isPodNetworkAdvertised
 }
 
@@ -483,6 +486,10 @@ func (g *gateway) Reconcile() error {
 		return fmt.Errorf("failed to get subnets for node: %s for OpenFlow cache update; err: %w", node.Name, err)
 	}
 	if err := g.openflowManager.updateBridgeFlowCache(subnets, g.nodeIPManager.ListAddresses(), g.isPodNetworkAdvertised); err != nil {
+		return err
+	}
+	err = g.updateSNATRules()
+	if err != nil {
 		return err
 	}
 	// Services create OpenFlow flows as well, need to update them all
@@ -513,6 +520,25 @@ func (g *gateway) addAllServices() []error {
 	}
 	g.servicesRetryFramework.RequestRetryObjs()
 	return errs
+}
+
+func (g *gateway) updateSNATRules() error {
+	g.isPodNetworkAdvertisedLock.Lock()
+	defer g.isPodNetworkAdvertisedLock.Unlock()
+	var ipnets []*net.IPNet
+	if g.nodeIPManager.mgmtPortConfig.ipv4 != nil {
+		ipnets = append(ipnets, g.nodeIPManager.mgmtPortConfig.ipv4.ifAddr)
+	}
+	if g.nodeIPManager.mgmtPortConfig.ipv6 != nil {
+		ipnets = append(ipnets, g.nodeIPManager.mgmtPortConfig.ipv6.ifAddr)
+	}
+	subnets := util.IPsToNetworkIPs(ipnets...)
+
+	if g.isPodNetworkAdvertised || config.Gateway.Mode != config.GatewayModeLocal {
+		return delLocalGatewayPodSubnetNATRules(subnets...)
+	}
+
+	return addLocalGatewayPodSubnetNATRules(subnets...)
 }
 
 type bridgeConfiguration struct {

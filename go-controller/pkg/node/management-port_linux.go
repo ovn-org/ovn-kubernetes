@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"sync/atomic"
 	"time"
 
 	"github.com/coreos/go-iptables/iptables"
@@ -52,18 +53,17 @@ type managementPortIPFamilyConfig struct {
 }
 
 type managementPortConfig struct {
-	ifName    string
-	link      netlink.Link
-	routerMAC net.HardwareAddr
-	nft       knftables.Interface
+	ifName                 string
+	link                   netlink.Link
+	routerMAC              net.HardwareAddr
+	isPodNetworkAdvertised atomic.Bool
+	reconcilePeriod        time.Duration
 
 	ipv4 *managementPortIPFamilyConfig
 	ipv6 *managementPortIPFamilyConfig
 }
 
 func newManagementPortIPFamilyConfig(hostSubnet *net.IPNet, isIPv6 bool) (*managementPortIPFamilyConfig, error) {
-	var err error
-
 	cfg := &managementPortIPFamilyConfig{
 		ifAddr: util.GetNodeManagementIfAddr(hostSubnet),
 		gwIP:   util.GetNodeGatewayIfAddr(hostSubnet).IP,
@@ -91,23 +91,17 @@ func newManagementPortIPFamilyConfig(hostSubnet *net.IPNet, isIPv6 bool) (*manag
 		cfg.allSubnets = append(cfg.allSubnets, masqueradeSubnet)
 	}
 
-	if err != nil {
-		return nil, err
-	}
-
 	return cfg, nil
 }
 
-func newManagementPortConfig(interfaceName string, hostSubnets []*net.IPNet) (*managementPortConfig, error) {
-	nft, err := nodenft.GetNFTablesHelper()
-	if err != nil {
-		return nil, err
-	}
-
+func newManagementPortConfig(interfaceName string, hostSubnets []*net.IPNet, isPodNetworkAdvertised bool) (*managementPortConfig, error) {
 	mpcfg := &managementPortConfig{
-		ifName: interfaceName,
-		nft:    nft,
+		ifName:          interfaceName,
+		reconcilePeriod: 30 * time.Second,
 	}
+	mpcfg.isPodNetworkAdvertised.Store(isPodNetworkAdvertised)
+
+	var err error
 	if mpcfg.link, err = util.LinkSetUp(mpcfg.ifName); err != nil {
 		return nil, err
 	}
@@ -238,8 +232,13 @@ func setupManagementPortIPFamilyConfig(routeManager *routemanager.Controller, mp
 		return warnings, err
 	}
 
+	protocol := iptables.ProtocolIPv4
+	if mpcfg.ipv6 != nil && cfg == mpcfg.ipv6 {
+		protocol = iptables.ProtocolIPv6
+	}
+
 	// IPv6 forwarding is enabled globally
-	if cfg == mpcfg.ipv4 {
+	if protocol == iptables.ProtocolIPv4 {
 		stdout, stderr, err := util.RunSysctl("-w", fmt.Sprintf("net.ipv4.conf.%s.forwarding=1", types.K8sMgmtIntfName))
 		if err != nil || stdout != fmt.Sprintf("net.ipv4.conf.%s.forwarding = 1", types.K8sMgmtIntfName) {
 			return warnings, fmt.Errorf("could not set the correct forwarding value for interface %s: stdout: %v, stderr: %v, err: %v",
@@ -272,7 +271,12 @@ func setupManagementPortNFTables(cfg *managementPortConfig) error {
 		counterIfDebug = "counter"
 	}
 
-	tx := cfg.nft.NewTransaction()
+	nft, err := nodenft.GetNFTablesHelper()
+	if err != nil {
+		return err
+	}
+
+	tx := nft.NewTransaction()
 	tx.Add(&knftables.Chain{
 		Name:    nftablesMgmtPortChain,
 		Comment: knftables.PtrTo("OVN SNAT to Management Port"),
@@ -316,7 +320,30 @@ func setupManagementPortNFTables(cfg *managementPortConfig) error {
 		),
 	})
 
+	isPodNetworkAdvertised := cfg.isPodNetworkAdvertised.Load()
+
 	if cfg.ipv4 != nil {
+		if isPodNetworkAdvertised {
+			tx.Add(&knftables.Rule{
+				Chain: nftablesMgmtPortChain,
+				Rule: knftables.Concat(
+					"meta nfproto ipv4",
+					"fib saddr type != local",
+					counterIfDebug,
+					"return",
+				),
+			})
+		}
+		// don't SNAT if the source IP is already the Mgmt port IP
+		tx.Add(&knftables.Rule{
+			Chain: nftablesMgmtPortChain,
+			Rule: knftables.Concat(
+				"meta nfproto ipv4",
+				"ip saddr", cfg.ipv4.ifAddr.IP,
+				counterIfDebug,
+				"return",
+			),
+		})
 		tx.Add(&knftables.Rule{
 			Chain: nftablesMgmtPortChain,
 			Rule: knftables.Concat(
@@ -335,6 +362,27 @@ func setupManagementPortNFTables(cfg *managementPortConfig) error {
 	}
 
 	if cfg.ipv6 != nil {
+		if isPodNetworkAdvertised {
+			tx.Add(&knftables.Rule{
+				Chain: nftablesMgmtPortChain,
+				Rule: knftables.Concat(
+					"meta nfproto ipv6",
+					"fib saddr type != local",
+					counterIfDebug,
+					"return",
+				),
+			})
+		}
+		// don't SNAT if the source IP is already the Mgmt port IP
+		tx.Add(&knftables.Rule{
+			Chain: nftablesMgmtPortChain,
+			Rule: knftables.Concat(
+				"meta nfproto ipv6",
+				"ip6 saddr", cfg.ipv6.ifAddr.IP,
+				counterIfDebug,
+				"return",
+			),
+		})
 		tx.Add(&knftables.Rule{
 			Chain: nftablesMgmtPortChain,
 			Rule: knftables.Concat(
@@ -352,7 +400,7 @@ func setupManagementPortNFTables(cfg *managementPortConfig) error {
 		})
 	}
 
-	err := cfg.nft.Run(context.TODO(), tx)
+	err = nft.Run(context.TODO(), tx)
 	if err != nil {
 		return fmt.Errorf("could not update nftables rule for management port: %v", err)
 	}
@@ -362,11 +410,11 @@ func setupManagementPortNFTables(cfg *managementPortConfig) error {
 // createPlatformManagementPort creates a management port attached to the node switch
 // that lets the node access its pods via their private IP address. This is used
 // for health checking and other management tasks.
-func createPlatformManagementPort(routeManager *routemanager.Controller, interfaceName string, localSubnets []*net.IPNet) (*managementPortConfig, error) {
+func createPlatformManagementPort(routeManager *routemanager.Controller, interfaceName string, localSubnets []*net.IPNet, isRoutingAdvertised bool) (*managementPortConfig, error) {
 	var cfg *managementPortConfig
 	var err error
 
-	if cfg, err = newManagementPortConfig(interfaceName, localSubnets); err != nil {
+	if cfg, err = newManagementPortConfig(interfaceName, localSubnets, isRoutingAdvertised); err != nil {
 		return nil, err
 	}
 
@@ -523,15 +571,14 @@ func DelLegacyMgtPortIptRules() {
 // 1. route entries to cluster CIDR and service CIDR through management port
 // 2. ARP entry for the node subnet's gateway ip
 // 3. nftables rules for SNATing packets entering the logical topology
-func checkManagementPortHealth(routeManager *routemanager.Controller, cfg *managementPortConfig) {
+func checkManagementPortHealth(routeManager *routemanager.Controller, cfg *managementPortConfig) error {
 	warnings, err := setupManagementPortConfig(routeManager, cfg)
 	for _, warning := range warnings {
 		klog.Warningf(warning)
 	}
 	if err != nil {
-		klog.Errorf(err.Error())
+		return err
 	}
-	if err = setupManagementPortNFTables(cfg); err != nil {
-		klog.Errorf(err.Error())
-	}
+
+	return setupManagementPortNFTables(cfg)
 }
