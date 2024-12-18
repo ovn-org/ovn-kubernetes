@@ -255,7 +255,6 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 
 		app = cli.NewApp()
 		app.Name = "test"
-		app.Flags = config.Flags
 
 		fakeOVN = NewFakeOVN(false)
 		clusterPortGroup = newClusterPortGroup()
