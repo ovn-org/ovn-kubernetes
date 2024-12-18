@@ -466,7 +466,7 @@ jobs:
       OVN_DISABLE_FORWARDING: "${{ matrix.forwarding == 'disable-forwarding' }}"
       USE_HELM: "${{ matrix.target == 'control-plane-helm' || matrix.target == 'multi-homing-helm' }}"
       OVN_ENABLE_DNSNAMERESOLVER: "${{ matrix.dns-name-resolver == 'enable-dns-name-resolver' }}"
-      OVN_NETWORK_QOS_ENABLE: "${{ matrix.target == 'control-plane' || matrix.target == 'control-plane-helm' }}"
+      OVN_NETWORK_QOS_ENABLE: "${{ matrix.target == 'control-plane' || matrix.target == 'control-plane-helm' || matrix.target == 'multi-homing' || matrix.target == 'multi-homing-helm' }}"
       TRAFFIC_FLOW_TESTS: "${{ matrix.traffic-flow-tests }}"
     steps:
 
@@ -550,7 +550,7 @@ jobs:
         export OVN_IMAGE="ovn-daemonset-fedora:pr"
 
         if [ "${{ matrix.target }}" == "multi-homing" ] || [ "${{ matrix.target }}" == "multi-homing-helm" ]; then
-          make -C test control-plane WHAT="Multi Homing"
+          make -C test control-plane WHAT="Multi Homing\|e2e NetworkQoS"
         elif [ "${{ matrix.target }}" == "node-ip-mac-migration" ]; then
           make -C test control-plane WHAT="Node IP and MAC address migration"
         elif [ "${{ matrix.target }}" == "compact-mode" ]; then
