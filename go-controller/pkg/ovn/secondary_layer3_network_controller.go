@@ -320,29 +320,8 @@ func NewSecondaryLayer3NetworkController(
 
 	stopChan := make(chan struct{})
 	ipv4Mode, ipv6Mode := netInfo.IPMode()
-	var zoneICHandler *zoneic.ZoneInterconnectHandler
-	if config.OVNKubernetesFeature.EnableInterconnect {
-		zoneICHandler = zoneic.NewZoneInterconnectHandler(netInfo, cnci.nbClient, cnci.sbClient, cnci.watchFactory)
-	}
 
 	addressSetFactory := addressset.NewOvnAddressSetFactory(cnci.nbClient, ipv4Mode, ipv6Mode)
-
-	var svcController *svccontroller.Controller
-	if util.IsNetworkSegmentationSupportEnabled() && netInfo.IsPrimaryNetwork() {
-		var err error
-		svcController, err = svccontroller.NewController(
-			cnci.client, cnci.nbClient,
-			cnci.watchFactory.ServiceCoreInformer(),
-			cnci.watchFactory.EndpointSliceCoreInformer(),
-			cnci.watchFactory.NodeCoreInformer(),
-			networkManager,
-			cnci.recorder,
-			netInfo,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("unable to create new service controller for network=%s: %w", netInfo.GetNetworkName(), err)
-		}
-	}
 
 	oc := &SecondaryLayer3NetworkController{
 		BaseSecondaryNetworkController: BaseSecondaryNetworkController{
@@ -361,7 +340,6 @@ func NewSecondaryLayer3NetworkController(
 				stopChan:                    stopChan,
 				wg:                          &sync.WaitGroup{},
 				localZoneNodes:              &sync.Map{},
-				zoneICHandler:               zoneICHandler,
 				cancelableCtx:               util.NewCancelableContext(),
 				networkManager:              networkManager,
 			},
@@ -373,13 +351,32 @@ func NewSecondaryLayer3NetworkController(
 		gatewaysFailed:              sync.Map{},
 		gatewayTopologyFactory:      topology.NewGatewayTopologyFactory(cnci.nbClient),
 		gatewayManagers:             sync.Map{},
-		svcController:               svcController,
 		eIPController:               eIPController,
+	}
+
+	if config.OVNKubernetesFeature.EnableInterconnect {
+		oc.zoneICHandler = zoneic.NewZoneInterconnectHandler(oc.GetNetInfo(), cnci.nbClient, cnci.sbClient, cnci.watchFactory)
+	}
+
+	if util.IsNetworkSegmentationSupportEnabled() && netInfo.IsPrimaryNetwork() {
+		var err error
+		oc.svcController, err = svccontroller.NewController(
+			cnci.client, cnci.nbClient,
+			cnci.watchFactory.ServiceCoreInformer(),
+			cnci.watchFactory.EndpointSliceCoreInformer(),
+			cnci.watchFactory.NodeCoreInformer(),
+			networkManager,
+			cnci.recorder,
+			oc.GetNetInfo(),
+		)
+		if err != nil {
+			return nil, fmt.Errorf("unable to create new service controller for network=%s: %w", netInfo.GetNetworkName(), err)
+		}
 	}
 
 	if oc.allocatesPodAnnotation() {
 		podAnnotationAllocator := pod.NewPodAnnotationAllocator(
-			netInfo,
+			oc.GetNetInfo(),
 			cnci.watchFactory.PodCoreInformer().Lister(),
 			cnci.kube,
 			nil)
