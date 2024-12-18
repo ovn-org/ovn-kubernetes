@@ -424,6 +424,8 @@ var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 						networkConfig,
 						nodeName,
 						fakeNetworkManager,
+						nil,
+						NewPortCache(ctx.Done()),
 					).Cleanup()).To(Succeed())
 				Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData([]libovsdbtest.TestData{nbZone}))
 
@@ -673,8 +675,10 @@ func newSecondaryLayer2NetworkController(
 	netInfo util.NetInfo,
 	nodeName string,
 	networkManager networkmanager.Interface,
+	eIPController *EgressIPController,
+	portCache *PortCache,
 ) *SecondaryLayer2NetworkController {
-	layer2NetworkController, _ := NewSecondaryLayer2NetworkController(cnci, netInfo, networkManager)
+	layer2NetworkController, _ := NewSecondaryLayer2NetworkController(cnci, netInfo, networkManager, eIPController, portCache)
 	layer2NetworkController.gatewayManagers.Store(
 		nodeName,
 		newDummyGatewayManager(cnci.kube, cnci.nbClient, netInfo, cnci.watchFactory, nodeName),

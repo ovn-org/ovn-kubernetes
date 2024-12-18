@@ -764,11 +764,11 @@ func (oc *SecondaryLayer3NetworkController) addUpdateLocalNodeEvent(node *kapi.N
 	}
 
 	if config.OVNKubernetesFeature.EnableEgressIP && util.IsNetworkSegmentationSupportEnabled() && oc.IsPrimaryNetwork() {
-		if err = oc.eIPController.ensureL3ClusterRouterPoliciesForNetwork(oc.GetNetInfo()); err != nil {
-			errs = append(errs, fmt.Errorf("failed to add network %s to EgressIP controller: %v", oc.GetNetworkName(), err))
+		if err = oc.eIPController.ensureRouterPoliciesForNetwork(oc.GetNetInfo()); err != nil {
+			errs = append(errs, fmt.Errorf("failed to ensure EgressIP router polices for network %s: %v", oc.GetNetworkName(), err))
 		}
-		if err = oc.eIPController.ensureL3SwitchPoliciesForNode(oc.GetNetInfo(), node.Name); err != nil {
-			errs = append(errs, fmt.Errorf("failed to ensure EgressIP switch policies: %v", err))
+		if err = oc.eIPController.ensureSwitchPoliciesForNode(oc.GetNetInfo(), node.Name); err != nil {
+			errs = append(errs, fmt.Errorf("failed to ensure EgressIP switch policies for network %s: %v", oc.GetNetworkName(), err))
 		}
 	}
 

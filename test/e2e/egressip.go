@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -528,7 +529,7 @@ var _ = ginkgo.DescribeTableSubtree("e2e egress IP validation", func(netConfigPa
 		if !isInterconnectEnabled() {
 			return false, "interconnect is disabled. Environment variable 'OVN_ENABLE_INTERCONNECT' must have value true"
 		}
-		if netConfigParams.topology != types.Layer3Topology {
+		if netConfigParams.topology == types.LocalnetTopology {
 			return false, "unsupported network topology"
 		}
 		if netConfigParams.cidr == "" {
@@ -948,7 +949,6 @@ spec:
 	   20. Check connectivity from second pod to another node (egress2Node) secondary IP and verify that the srcIP is the expected nodeIP (this verifies SNAT's towards nodeIP are not deleted for pods unless pod is on its own egressNode)
 	*/
 	ginkgo.It("[OVN network] Should validate the egress IP SNAT functionality against host-networked pods", func() {
-
 		command := []string{"/agnhost", "netexec", fmt.Sprintf("--http-port=%s", podHTTPPort)}
 
 		ginkgo.By("0. Add the \"k8s.ovn.org/egress-assignable\" label to egress1Node node")
@@ -980,11 +980,20 @@ spec:
 		}
 
 		ginkgo.By("2. Creating host-networked pod, on non-egress node acting as \"another node\"")
-		_, err = createPod(f, egress2Node.name+"-host-net-pod", egress2Node.name, f.Namespace.Name, []string{}, map[string]string{}, func(p *corev1.Pod) {
+		p, err := createPod(f, egress2Node.name+"-host-net-pod", egress2Node.name, f.Namespace.Name, []string{}, map[string]string{}, func(p *corev1.Pod) {
 			p.Spec.HostNetwork = true
 			p.Spec.Containers[0].Image = "docker.io/httpd"
 		})
 		framework.ExpectNoError(err)
+		// block until host network pod is fully deleted because subsequent tests that require binding to the same port may fail
+		defer func() {
+			ctxWithTimeout, cancelFn := context.WithTimeout(context.Background(), time.Second*60)
+			defer cancelFn()
+			err = pod.DeletePodWithWait(ctxWithTimeout, f.ClientSet, p)
+			gomega.Expect(err).ShouldNot(gomega.HaveOccurred(), "deletion of host network pod must succeed")
+			err = pod.WaitForPodNotFoundInNamespace(ctxWithTimeout, f.ClientSet, egress2Node.name+"-host-net-pod", f.Namespace.Name, time.Second*59)
+			gomega.Expect(err).ShouldNot(gomega.HaveOccurred(), "pod must be fully deleted within 60 seconds")
+		}()
 		hostNetPod := node{
 			name:   egress2Node.name + "-host-net-pod",
 			nodeIP: egress2Node.nodeIP,
@@ -1535,7 +1544,6 @@ spec:
 		ginkgo.By("20. Check connectivity from pod to an external container and verify that the srcIP is the expected nodeIP")
 		err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(targetNode, pod1Name, podNamespace.Name, true, []string{pod2Node.nodeIP}))
 		framework.ExpectNoError(err, "Step 20. Check connectivity from pod to an external container and verify that the srcIP is the expected nodeIP, failed: %v", err)
-
 	})
 
 	/* This test does the following:
@@ -2812,7 +2820,7 @@ spec:
 		})
 		gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 
-		ginkgo.By("namespace is connected to UDN, create a namespace attached to this primary as a layer3 UDN")
+		ginkgo.By(fmt.Sprintf("namespace is connected to UDN, create a namespace attached to this primary as a %s UDN", netConfigParams.topology))
 		nadClient, err := nadclient.NewForConfig(f.ClientConfig())
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		netConfig := newNetworkAttachmentConfig(netConfigParams)
@@ -2924,8 +2932,8 @@ spec:
 		})
 		gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 		if isClusterDefaultNetwork(netConfigParams) {
-			ginkgo.By("namespace is connected to CDN, create a namespace with primary as a layer3 UDN")
-			// create L3 Primary UDN
+			ginkgo.By(fmt.Sprintf("namespace is connected to CDN, create a namespace with %s primary UDN", otherNetworkAttachParms.topology))
+			// create primary UDN
 			nadClient, err := nadclient.NewForConfig(f.ClientConfig())
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			netConfig := newNetworkAttachmentConfig(otherNetworkAttachParms)
@@ -2937,7 +2945,7 @@ spec:
 			)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		} else {
-			// if network is L2,L3 or other, then other network is CDN
+			// if network is L3 or L2 UDN, then other network is CDN
 		}
 		egressNodeAvailabilityHandler := egressNodeAvailabilityHandlerViaLabel{f}
 		ginkgo.By("1. Set one node as available for egress")
@@ -3022,6 +3030,17 @@ spec:
 			name:     "l3primary",
 			topology: types.Layer3Topology,
 			cidr:     "2014:100:200::0/60",
+		}),
+		ginkgo.Entry("IPv4 L2 Primary UDN", networkAttachmentConfigParams{
+			name:     "l2primary",
+			topology: types.Layer2Topology,
+			cidr:     "10.10.0.0/16",
+			role:     "primary",
+		}),
+		ginkgo.Entry("IPv6 L2 Primary UDN", networkAttachmentConfigParams{
+			name:     "l2primary",
+			topology: types.Layer2Topology,
+			cidr:     "2014:100:200::0/60",
 			role:     "primary",
 		}),
 	)
@@ -3049,6 +3068,24 @@ spec:
 			name:     "l3primaryv6",
 			topology: types.Layer3Topology,
 			cidr:     "2014:100:200::0/60",
+			role:     "primary",
+		},
+	),
+	ginkgo.Entry(
+		"Network Segmentation: IPv4 L2 role primary",
+		networkAttachmentConfigParams{
+			name:     "l2primary",
+			topology: types.Layer2Topology,
+			cidr:     "20.10.0.0/16",
+			role:     "primary",
+		},
+	),
+	ginkgo.Entry(
+		"Network Segmentation: IPv6 L2 role primary",
+		networkAttachmentConfigParams{
+			name:     "l2primary",
+			topology: types.Layer2Topology,
+			cidr:     "2015:100:200::0/60",
 			role:     "primary",
 		},
 	),
