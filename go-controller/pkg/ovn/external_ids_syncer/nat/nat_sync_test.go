@@ -11,7 +11,6 @@ import (
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
-	ginkgotable "github.com/onsi/ginkgo/extensions/table"
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 )
@@ -52,9 +51,9 @@ var _ = ginkgo.Describe("NAT Syncer", func() {
 
 	ginkgo.Context("EgressIP", func() {
 
-		ginkgotable.DescribeTable("egress NATs", func(sync natSync) {
+		ginkgo.DescribeTable("egress NATs", func(sync natSync) {
 			performTest(defaultNetworkControllerName, sync.initialNATs, sync.finalNATs, sync.pods)
-		}, ginkgotable.Entry("converts legacy IPv4 NATs", natSync{
+		}, ginkgo.Entry("converts legacy IPv4 NATs", natSync{
 			initialNATs: []*nbdb.NAT{getSNAT(nat1UUID, pod1V4CIDRStr, egressIP, legacyExtIDs)},
 			finalNATs:   []*nbdb.NAT{getSNAT(nat1UUID, pod1V4CIDRStr, egressIP, pod1V4ExtIDs)},
 			pods: podsNetInfo{
@@ -70,7 +69,7 @@ var _ = ginkgo.Describe("NAT Syncer", func() {
 				},
 			},
 		}),
-			ginkgotable.Entry("converts legacy IPv6 NATs", natSync{
+			ginkgo.Entry("converts legacy IPv6 NATs", natSync{
 				initialNATs: []*nbdb.NAT{getSNAT(nat1UUID, pod1V6CIDRStr, egressIP, legacyExtIDs)},
 				finalNATs:   []*nbdb.NAT{getSNAT(nat1UUID, pod1V6CIDRStr, egressIP, pod1V6ExtIDs)},
 				pods: podsNetInfo{
@@ -86,7 +85,7 @@ var _ = ginkgo.Describe("NAT Syncer", func() {
 					},
 				},
 			}),
-			ginkgotable.Entry("converts legacy dual stack NATs", natSync{
+			ginkgo.Entry("converts legacy dual stack NATs", natSync{
 				initialNATs: []*nbdb.NAT{getSNAT(nat1UUID, pod1V4CIDRStr, egressIP, legacyExtIDs), getSNAT(nat2UUID, pod1V6CIDRStr, egressIP, legacyExtIDs)},
 				finalNATs:   []*nbdb.NAT{getSNAT(nat1UUID, pod1V4CIDRStr, egressIP, pod1V4ExtIDs), getSNAT(nat2UUID, pod1V6CIDRStr, egressIP, pod1V6ExtIDs)},
 				pods: podsNetInfo{
@@ -102,7 +101,7 @@ var _ = ginkgo.Describe("NAT Syncer", func() {
 					},
 				},
 			}),
-			ginkgotable.Entry("doesn't alter NAT with correct external IDs", natSync{
+			ginkgo.Entry("doesn't alter NAT with correct external IDs", natSync{
 				initialNATs: []*nbdb.NAT{getSNAT(nat1UUID, pod1V6CIDRStr, egressIP, pod1V6ExtIDs)},
 				finalNATs:   []*nbdb.NAT{getSNAT(nat1UUID, pod1V6CIDRStr, egressIP, pod1V6ExtIDs)},
 				pods: podsNetInfo{

@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -980,11 +981,21 @@ spec:
 		}
 
 		ginkgo.By("2. Creating host-networked pod, on non-egress node acting as \"another node\"")
-		_, err = createPod(f, egress2Node.name+"-host-net-pod", egress2Node.name, f.Namespace.Name, []string{}, map[string]string{}, func(p *corev1.Pod) {
+		hostNetPodName := egress2Node.name + "-host-net-pod"
+		p, err := createPod(f, hostNetPodName, egress2Node.name, f.Namespace.Name, []string{}, map[string]string{}, func(p *corev1.Pod) {
 			p.Spec.HostNetwork = true
 			p.Spec.Containers[0].Image = "docker.io/httpd"
 		})
 		framework.ExpectNoError(err)
+		// block until host network pod is fully deleted because subsequent tests that require binding to the same port may fail
+		defer func() {
+			ctxWithTimeout, cancelFn := context.WithTimeout(context.Background(), time.Second*60)
+			defer cancelFn()
+			err = pod.DeletePodWithWait(ctxWithTimeout, f.ClientSet, p)
+			gomega.Expect(err).ShouldNot(gomega.HaveOccurred(), "deletion of host network pod must succeed")
+			err = pod.WaitForPodNotFoundInNamespace(ctxWithTimeout, f.ClientSet, hostNetPodName, f.Namespace.Name, time.Second*59)
+			gomega.Expect(err).ShouldNot(gomega.HaveOccurred(), "pod must be fully deleted within 60 seconds")
+		}()
 		hostNetPod := node{
 			name:   egress2Node.name + "-host-net-pod",
 			nodeIP: egress2Node.nodeIP,

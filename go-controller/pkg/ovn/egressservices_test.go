@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net"
 
-	ginkgotable "github.com/onsi/ginkgo/extensions/table"
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 
@@ -569,7 +568,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 
 	ginkgo.Context("on egress service changes", func() {
 
-		ginkgotable.DescribeTable("should create/update/delete OVN configuration", func(interconnectEnabled bool) {
+		ginkgo.DescribeTable("should create/update/delete OVN configuration", func(interconnectEnabled bool) {
 			app.Action = func(ctx *cli.Context) error {
 				namespaceT := *newNamespace("testns")
 				config.IPv6Mode = true
@@ -781,11 +780,11 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 			err := app.Run([]string{app.Name})
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 		},
-			ginkgotable.Entry("IC Disabled, all nodes are in a single zone", false),
-			ginkgotable.Entry("IC Enabled, node1 is in the local zone, node2 in remote", true),
+			ginkgo.Entry("IC Disabled, all nodes are in a single zone", false),
+			ginkgo.Entry("IC Enabled, node1 is in the local zone, node2 in remote", true),
 		)
 
-		ginkgotable.DescribeTable("should delete resources when host changes to ALL", func(interconnectEnabled bool) {
+		ginkgo.DescribeTable("should delete resources when host changes to ALL", func(interconnectEnabled bool) {
 			app.Action = func(ctx *cli.Context) error {
 				namespaceT := *newNamespace("testns")
 				config.IPv6Mode = true
@@ -948,12 +947,12 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 			err := app.Run([]string{app.Name})
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 		},
-			ginkgotable.Entry("IC Disabled, all nodes are in a single zone", false),
-			ginkgotable.Entry("IC Enabled, node1 is in the local zone, node2 in remote", true))
+			ginkgo.Entry("IC Disabled, all nodes are in a single zone", false),
+			ginkgo.Entry("IC Enabled, node1 is in the local zone, node2 in remote", true))
 	})
 
 	ginkgo.Context("on endpointslices changes", func() {
-		ginkgotable.DescribeTable("should create/update/delete OVN configuration", func(interconnectEnabled bool) {
+		ginkgo.DescribeTable("should create/update/delete OVN configuration", func(interconnectEnabled bool) {
 			app.Action = func(ctx *cli.Context) error {
 				namespaceT := *newNamespace("testns")
 				config.IPv6Mode = true
@@ -1265,12 +1264,12 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 			err := app.Run([]string{app.Name})
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 		},
-			ginkgotable.Entry("IC Disabled, all nodes are in a single zone", false),
-			ginkgotable.Entry("IC Enabled, node1 is in the local zone, node2 in remote", true))
+			ginkgo.Entry("IC Disabled, all nodes are in a single zone", false),
+			ginkgo.Entry("IC Enabled, node1 is in the local zone, node2 in remote", true))
 	})
 
 	ginkgo.Context("on nodes changes", func() {
-		ginkgotable.DescribeTable("should create/update/delete logical router policies and address sets", func(interconnectEnabled bool) {
+		ginkgo.DescribeTable("should create/update/delete logical router policies and address sets", func(interconnectEnabled bool) {
 			app.Action = func(ctx *cli.Context) error {
 				namespaceT := *newNamespace("testns")
 				config.IPv6Mode = true
@@ -1570,8 +1569,8 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 			err := app.Run([]string{app.Name})
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 		},
-			ginkgotable.Entry("IC Disabled, all nodes are in a single zone", false),
-			ginkgotable.Entry("IC Enabled, node1 is in the local zone, node2 in remote", true))
+			ginkgo.Entry("IC Disabled, all nodes are in a single zone", false),
+			ginkgo.Entry("IC Enabled, node1 is in the local zone, node2 in remote", true))
 	})
 
 })

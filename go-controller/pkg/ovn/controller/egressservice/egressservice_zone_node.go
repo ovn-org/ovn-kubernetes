@@ -131,7 +131,7 @@ func (c *Controller) syncNode(key string) error {
 	// address changes regardless of allocated services.
 	network := util.DefaultNetInfo{}
 	networkName := network.GetNetworkName()
-	err = c.ensureNoRerouteNodePolicies(c.nbClient, c.addressSetFactory, networkName, c.controllerName, c.GetNetworkScopedClusterRouterName(), c.nodeLister, config.IPv4Mode, config.IPv6Mode)
+	err = c.ensureNoRerouteNodePolicies(c.nbClient, c.addressSetFactory, networkName, c.GetNetworkScopedClusterRouterName(), c.controllerName, c.nodeLister, config.IPv4Mode, config.IPv6Mode)
 	if err != nil {
 		return err
 	}
