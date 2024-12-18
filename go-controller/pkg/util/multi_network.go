@@ -248,6 +248,12 @@ func (l *mutableNetInfo) reconcile(r NetInfo) {
 }
 
 func (l *mutableNetInfo) equals(r *mutableNetInfo) bool {
+	if (l == nil) != (r == nil) {
+		return false
+	}
+	if l == r {
+		return true
+	}
 	l.RLock()
 	defer l.RUnlock()
 	r.RLock()
@@ -259,6 +265,9 @@ func (l *mutableNetInfo) equals(r *mutableNetInfo) bool {
 }
 
 func (l *mutableNetInfo) copyFrom(r *mutableNetInfo) {
+	if l == r {
+		return
+	}
 	aux := mutableNetInfo{}
 	r.RLock()
 	aux.id = r.id
