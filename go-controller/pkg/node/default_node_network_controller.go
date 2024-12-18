@@ -116,7 +116,8 @@ type DefaultNodeNetworkController struct {
 
 	apbExternalRouteNodeController *apbroute.ExternalGatewayNodeController
 
-	networkManager networkmanager.Interface
+	networkManager     networkmanager.Interface
+	egressIPController *egressip.Controller
 
 	cniServer *cni.Server
 
@@ -126,7 +127,7 @@ type DefaultNodeNetworkController struct {
 }
 
 type preStartSetup struct {
-	mgmtPorts      []managementPortEntry
+	mgmtPorts      []*managementPortEntry
 	mgmtPortConfig *managementPortConfig
 	nodeAddress    net.IP
 	sbZone         string
@@ -210,10 +211,11 @@ func (oc *DefaultNodeNetworkController) Reconcile(netInfo util.NetInfo) error {
 		isPodNetworkAdvertisedAtNode := oc.isPodNetworkAdvertisedAtNode()
 		if oc.Gateway != nil {
 			oc.Gateway.SetPodNetworkAdvertised(isPodNetworkAdvertisedAtNode)
-			err := oc.Gateway.Reconcile()
-			if err != nil {
-				klog.Errorf("Failed to reconcile gateway: %v", err)
-			}
+			oc.Gateway.Reconcile()
+		}
+		for _, mgmtPort := range oc.gatewaySetup.mgmtPorts {
+			mgmtPort.SetPodNetworkAdvertised(isPodNetworkAdvertisedAtNode)
+			mgmtPort.Reconcile()
 		}
 	}
 
@@ -484,11 +486,6 @@ func isOVNControllerReady() (bool, error) {
 	return true, nil
 }
 
-type managementPortEntry struct {
-	port   ManagementPort
-	config *managementPortConfig
-}
-
 // getEnvNameFromResourceName gets the device plugin env variable from the device plugin resource name.
 func getEnvNameFromResourceName(resource string) string {
 	res1 := strings.ReplaceAll(resource, ".", "_")
@@ -653,7 +650,7 @@ func getMgmtPortAndRepName(node *kapi.Node) (string, string, error) {
 }
 
 func createNodeManagementPorts(node *kapi.Node, nodeLister listers.NodeLister, nodeAnnotator kube.Annotator, kubeInterface kube.Interface, waiter *startupWaiter,
-	subnets []*net.IPNet, routeManager *routemanager.Controller) ([]managementPortEntry, *managementPortConfig, error) {
+	subnets []*net.IPNet, routeManager *routemanager.Controller, isRoutingAdvertised bool) ([]*managementPortEntry, *managementPortConfig, error) {
 	netdevName, rep, err := getMgmtPortAndRepName(node)
 	if err != nil {
 		return nil, nil, err
@@ -668,13 +665,14 @@ func createNodeManagementPorts(node *kapi.Node, nodeLister listers.NodeLister, n
 	ports := NewManagementPorts(node.Name, subnets, netdevName, rep)
 
 	var mgmtPortConfig *managementPortConfig
-	mgmtPorts := make([]managementPortEntry, 0)
+	mgmtPorts := make([]*managementPortEntry, 0)
 	for _, port := range ports {
-		config, err := port.Create(routeManager, node, nodeLister, kubeInterface, waiter)
+		config, err := port.Create(isRoutingAdvertised, routeManager, node, nodeLister, kubeInterface, waiter)
 		if err != nil {
 			return nil, nil, err
 		}
-		mgmtPorts = append(mgmtPorts, managementPortEntry{port: port, config: config})
+		mgmtPorts = append(mgmtPorts, NewManagementPortEntry(port, config, routeManager))
+
 		// Save this management port config for later usage.
 		// Since only one OVS internal port / Representor config may exist it is fine just to overwrite it
 		if _, ok := port.(*managementPortNetdev); !ok {
@@ -885,8 +883,15 @@ func (nc *DefaultNodeNetworkController) PreStart(ctx context.Context) error {
 	waiter := newStartupWaiter()
 
 	// Setup management ports
-	mgmtPorts, mgmtPortConfig, err := createNodeManagementPorts(node, nc.watchFactory.NodeCoreInformer().Lister(), nodeAnnotator,
-		nc.Kube, waiter, subnets, nc.routeManager)
+	mgmtPorts, mgmtPortConfig, err := createNodeManagementPorts(
+		node,
+		nc.watchFactory.NodeCoreInformer().Lister(),
+		nodeAnnotator,
+		nc.Kube,
+		waiter,
+		subnets,
+		nc.routeManager,
+		nc.isPodNetworkAdvertisedAtNode())
 	if err != nil {
 		return err
 	}
@@ -922,6 +927,19 @@ func (nc *DefaultNodeNetworkController) PreStart(ctx context.Context) error {
 	}
 	gatewaySetup.sbZone = sbZone
 	nc.gatewaySetup = gatewaySetup
+
+	if config.OVNKubernetesFeature.EnableEgressIP && !util.PlatformTypeIsEgressIPCloudProvider() {
+		nc.egressIPController = egressip.NewController(
+			nc.Kube,
+			nc.watchFactory,
+			nc.networkManager,
+			nc.routeManager,
+			config.IPv4Mode,
+			config.IPv6Mode,
+			nc.name,
+			nc.linkManager,
+		)
+	}
 
 	return nil
 
@@ -1177,7 +1195,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 
 	// start management ports health check
 	for _, mgmtPort := range nc.gatewaySetup.mgmtPorts {
-		mgmtPort.port.CheckManagementPortHealth(nc.routeManager, mgmtPort.config, nc.stopChan)
+		mgmtPort.Start(nc.stopChan)
 		if config.OVNKubernetesFeature.EnableEgressIP {
 			// Start the health checking server used by egressip, if EgressIPNodeHealthCheckPort is specified
 			if err := nc.startEgressIPHealthCheckingServer(mgmtPort); err != nil {
@@ -1247,20 +1265,13 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		}
 	}
 
-	if config.OVNKubernetesFeature.EnableEgressIP && !util.PlatformTypeIsEgressIPCloudProvider() {
-		c, err := egressip.NewController(nc.Kube, nc.watchFactory.EgressIPInformer(), nc.watchFactory.NodeInformer(),
-			nc.watchFactory.NamespaceInformer(), nc.watchFactory.PodCoreInformer(), nc.networkManager.GetActiveNetworkForNamespace,
-			nc.routeManager, config.IPv4Mode, config.IPv6Mode, nc.name, nc.linkManager)
-		if err != nil {
-			return fmt.Errorf("failed to create egress IP controller: %v", err)
-		}
-		if err = c.Run(nc.stopChan, nc.wg, 1); err != nil {
+	if nc.egressIPController != nil {
+		if err = nc.egressIPController.Run(nc.stopChan, nc.wg, 1); err != nil {
 			return fmt.Errorf("failed to run egress IP controller: %v", err)
 		}
-	} else {
-		klog.Infof("Egress IP for secondary host network is disabled")
 	}
 
+	// run link manager, will work for egress IP as well as monitoring MAC changes to default gw bridge
 	nc.linkManager.Run(nc.stopChan, nc.wg)
 
 	nc.wg.Add(1)
@@ -1280,7 +1291,7 @@ func (nc *DefaultNodeNetworkController) Stop() {
 	nc.wg.Wait()
 }
 
-func (nc *DefaultNodeNetworkController) startEgressIPHealthCheckingServer(mgmtPortEntry managementPortEntry) error {
+func (nc *DefaultNodeNetworkController) startEgressIPHealthCheckingServer(mgmtPortEntry *managementPortEntry) error {
 	healthCheckPort := config.OVNKubernetesFeature.EgressIPNodeHealthCheckPort
 	if healthCheckPort == 0 {
 		klog.Infof("Egress IP health check server skipped: no port specified")

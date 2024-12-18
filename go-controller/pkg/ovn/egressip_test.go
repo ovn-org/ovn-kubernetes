@@ -18,7 +18,6 @@ import (
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
-	ginkgotable "github.com/onsi/ginkgo/extensions/table"
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -631,7 +630,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 			gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 		})
 
-		ginkgotable.DescribeTable("[OVN network] should perform proper OVN transactions when pod is created after node egress label switch",
+		ginkgo.DescribeTable("[OVN network] should perform proper OVN transactions when pod is created after node egress label switch",
 			func(interconnect bool) {
 				app.Action = func(ctx *cli.Context) error {
 					config.OVNKubernetesFeature.EnableInterconnect = interconnect
@@ -924,11 +923,11 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 				err := app.Run([]string{app.Name})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			},
-			ginkgotable.Entry("interconnect disabled", false),
-			ginkgotable.Entry("interconnect enabled", true),
+			ginkgo.Entry("interconnect disabled", false),
+			ginkgo.Entry("interconnect enabled", true),
 		)
 
-		ginkgotable.DescribeTable("[OVN network] using EgressNode retry should perform proper OVN transactions when pod is created after node egress label switch",
+		ginkgo.DescribeTable("[OVN network] using EgressNode retry should perform proper OVN transactions when pod is created after node egress label switch",
 			func(interconnect bool) {
 				config.OVNKubernetesFeature.EnableInterconnect = interconnect
 				app.Action = func(ctx *cli.Context) error {
@@ -1312,11 +1311,11 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 				err := app.Run([]string{app.Name})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			},
-			ginkgotable.Entry("interconnect disabled", false),
-			ginkgotable.Entry("interconnect enabled", true), // all 3 nodes in same zone, so behaves like non-ic
+			ginkgo.Entry("interconnect disabled", false),
+			ginkgo.Entry("interconnect enabled", true), // all 3 nodes in same zone, so behaves like non-ic
 		)
 
-		ginkgotable.DescribeTable("[secondary host network] using EgressNode retry should perform proper OVN transactions when pod is created after node egress label switch",
+		ginkgo.DescribeTable("[secondary host network] using EgressNode retry should perform proper OVN transactions when pod is created after node egress label switch",
 			func(interconnect bool) {
 				config.OVNKubernetesFeature.EnableInterconnect = interconnect
 				app.Action = func(ctx *cli.Context) error {
@@ -1724,11 +1723,11 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 				err := app.Run([]string{app.Name})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			},
-			ginkgotable.Entry("interconnect disabled", false),
-			ginkgotable.Entry("interconnect enabled", true), // all 3 nodes in same zone, so behaves like non-ic
+			ginkgo.Entry("interconnect disabled", false),
+			ginkgo.Entry("interconnect enabled", true), // all 3 nodes in same zone, so behaves like non-ic
 		)
 
-		ginkgotable.DescribeTable("[secondary host network] should perform proper OVN transactions when namespace and pod is created after node egress label switch",
+		ginkgo.DescribeTable("[secondary host network] should perform proper OVN transactions when namespace and pod is created after node egress label switch",
 			func(interconnect bool, node1Zone, node2Zone string) {
 				config.OVNKubernetesFeature.EnableInterconnect = interconnect
 				app.Action = func(ctx *cli.Context) error {
@@ -2061,17 +2060,17 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 				err := app.Run([]string{app.Name})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			},
-			ginkgotable.Entry("interconnect disabled; non-ic - single zone setup", false, "global", "global"),
-			ginkgotable.Entry("interconnect enabled; node1 and node2 in global zones", true, "global", "global"),
+			ginkgo.Entry("interconnect disabled; non-ic - single zone setup", false, "global", "global"),
+			ginkgo.Entry("interconnect enabled; node1 and node2 in global zones", true, "global", "global"),
 			// will showcase localzone setup - master is in pod's zone where pod's reroute policy towards egressNode will be done.
 			// NOTE: SNAT won't be visible because its in remote zone
-			ginkgotable.Entry("interconnect enabled; node1 in global and node2 in remote zones", true, "global", "remote"),
+			ginkgo.Entry("interconnect enabled; node1 in global and node2 in remote zones", true, "global", "remote"),
 			// will showcase localzone setup - master is in egress node's zone where pod's SNAT policy and static route will be done.
 			// NOTE: reroute policy won't be visible because its in remote zone (pod is in remote zone)
-			ginkgotable.Entry("interconnect enabled; node1 in remote and node2 in global zones", true, "remote", "global"),
+			ginkgo.Entry("interconnect enabled; node1 in remote and node2 in global zones", true, "remote", "global"),
 		)
 
-		ginkgotable.DescribeTable("[mixed networks] should perform proper OVN transactions when namespace and pod is created after node egress label switch",
+		ginkgo.DescribeTable("[mixed networks] should perform proper OVN transactions when namespace and pod is created after node egress label switch",
 			func(interconnect bool, node1Zone, node2Zone string) {
 				config.OVNKubernetesFeature.EnableInterconnect = interconnect
 				app.Action = func(ctx *cli.Context) error {
@@ -2497,21 +2496,21 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 				err := app.Run([]string{app.Name})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			},
-			ginkgotable.Entry("interconnect disabled; non-ic - single zone setup", false, "global", "global"),
-			ginkgotable.Entry("interconnect enabled; node1 and node2 in global zones", true, "global", "global"),
+			ginkgo.Entry("interconnect disabled; non-ic - single zone setup", false, "global", "global"),
+			ginkgo.Entry("interconnect enabled; node1 and node2 in global zones", true, "global", "global"),
 			// will showcase localzone setup - master is in pod's zone where pod's reroute policy towards egressNode will be done.
 			// NOTE: SNAT won't be visible because its in remote zone
-			ginkgotable.Entry("interconnect enabled; node1 in global and node2 in remote zones", true, "global", "remote"),
+			ginkgo.Entry("interconnect enabled; node1 in global and node2 in remote zones", true, "global", "remote"),
 			// will showcase localzone setup - master is in egress node's zone where pod's SNAT policy and static route will be done.
 			// NOTE: reroute policy won't be visible because its in remote zone (pod is in remote zone)
-			ginkgotable.Entry("interconnect enabled; node1 in remote and node2 in global zones", true, "remote", "global"),
+			ginkgo.Entry("interconnect enabled; node1 in remote and node2 in global zones", true, "remote", "global"),
 		)
 
 	})
 
 	ginkgo.Context("On node DELETE", func() {
 
-		ginkgotable.DescribeTable("should perform proper OVN transactions when node's gateway objects are already deleted",
+		ginkgo.DescribeTable("should perform proper OVN transactions when node's gateway objects are already deleted",
 			func(interconnect bool, node1Zone, node2Zone string) {
 				config.OVNKubernetesFeature.EnableInterconnect = interconnect
 				app.Action = func(ctx *cli.Context) error {
@@ -2951,18 +2950,18 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 				err := app.Run([]string{app.Name})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			},
-			ginkgotable.Entry("interconnect disabled; non-ic - single zone setup", false, "global", "global"),
-			ginkgotable.Entry("interconnect enabled; node1 and node2 in global zones", true, "global", "global"),
+			ginkgo.Entry("interconnect disabled; non-ic - single zone setup", false, "global", "global"),
+			ginkgo.Entry("interconnect enabled; node1 and node2 in global zones", true, "global", "global"),
 			// will showcase localzone setup - master is in pod's zone where pod's reroute policy towards egressNode will be done.
 			// NOTE: SNAT won't be visible because its in remote zone
-			ginkgotable.Entry("interconnect enabled; node1 in global and node2 in remote zones", true, "global", "remote"),
+			ginkgo.Entry("interconnect enabled; node1 in global and node2 in remote zones", true, "global", "remote"),
 			// will showcase localzone setup - master is in egress node's zone where pod's SNAT policy and static route will* be done.
 			// * the static route won't be visible because the pod's node node1 is getting deleted in this test
 			// NOTE: reroute policy won't be visible because its in remote zone (pod is in remote zone)
-			ginkgotable.Entry("interconnect enabled; node1 in remote and node2 in global zones", true, "remote", "global"),
+			ginkgo.Entry("interconnect enabled; node1 in remote and node2 in global zones", true, "remote", "global"),
 		)
 
-		ginkgotable.DescribeTable("[secondary host network] should perform proper OVN transactions when namespace and pod is created after node egress label switch",
+		ginkgo.DescribeTable("[secondary host network] should perform proper OVN transactions when namespace and pod is created after node egress label switch",
 			func(interconnect bool, node1Zone, node2Zone string) {
 				config.OVNKubernetesFeature.EnableInterconnect = interconnect
 				app.Action = func(ctx *cli.Context) error {
@@ -3280,20 +3279,20 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 				err := app.Run([]string{app.Name})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			},
-			ginkgotable.Entry("interconnect disabled; non-ic - single zone setup", false, "global", "global"),
-			ginkgotable.Entry("interconnect enabled; node1 and node2 in global zones", true, "global", "global"),
+			ginkgo.Entry("interconnect disabled; non-ic - single zone setup", false, "global", "global"),
+			ginkgo.Entry("interconnect enabled; node1 and node2 in global zones", true, "global", "global"),
 			// will showcase localzone setup - master is in pod's zone where pod's reroute policy towards egressNode will be done.
 			// NOTE: SNAT won't be visible because its in remote zone
-			ginkgotable.Entry("interconnect enabled; node1 in global and node2 in remote zones", true, "global", "remote"),
+			ginkgo.Entry("interconnect enabled; node1 in global and node2 in remote zones", true, "global", "remote"),
 			// will showcase localzone setup - master is in egress node's zone where pod's SNAT policy and static route will be done.
 			// NOTE: reroute policy won't be visible because its in remote zone (pod is in remote zone)
-			ginkgotable.Entry("interconnect enabled; node1 in remote and node2 in global zones", true, "remote", "global"),
+			ginkgo.Entry("interconnect enabled; node1 in remote and node2 in global zones", true, "remote", "global"),
 		)
 	})
 
 	ginkgo.Context("IPv6 on pod UPDATE", func() {
 
-		ginkgotable.DescribeTable("should remove OVN pod egress setup when EgressIP stops matching pod label",
+		ginkgo.DescribeTable("should remove OVN pod egress setup when EgressIP stops matching pod label",
 			func(interconnect, isnode1Local, isnode2Local bool) {
 				config.OVNKubernetesFeature.EnableInterconnect = interconnect
 				config.IPv6Mode = true
@@ -3584,13 +3583,13 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 				err := app.Run([]string{app.Name})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			},
-			ginkgotable.Entry("interconnect disabled; non-ic - single zone setup", false, true, true),
-			ginkgotable.Entry("interconnect enabled; pod and egressnode are in local zone", true, true, true),
-			ginkgotable.Entry("interconnect enabled; pod is in local zone and egressnode is in remote zone", true, true, false), // snat won't be visible
-			ginkgotable.Entry("interconnect enabled; pod is in remote zone and egressnode is in local zone", true, false, true),
+			ginkgo.Entry("interconnect disabled; non-ic - single zone setup", false, true, true),
+			ginkgo.Entry("interconnect enabled; pod and egressnode are in local zone", true, true, true),
+			ginkgo.Entry("interconnect enabled; pod is in local zone and egressnode is in remote zone", true, true, false), // snat won't be visible
+			ginkgo.Entry("interconnect enabled; pod is in remote zone and egressnode is in local zone", true, false, true),
 		)
 
-		ginkgotable.DescribeTable("egressIP pod retry should remove OVN pod egress setup when EgressIP stops matching pod label",
+		ginkgo.DescribeTable("egressIP pod retry should remove OVN pod egress setup when EgressIP stops matching pod label",
 			func(interconnect bool, podZone string) {
 				config.OVNKubernetesFeature.EnableInterconnect = interconnect
 				app.Action = func(ctx *cli.Context) error {
@@ -3811,9 +3810,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 				err := app.Run([]string{app.Name})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			},
-			ginkgotable.Entry("interconnect disabled; non-ic - single zone setup", false, "global"),
-			ginkgotable.Entry("interconnect enabled; pod is in global zone", true, "global"),
-			ginkgotable.Entry("interconnect enabled; pod is in remote zone", true, "remote"), // static re-route is visible but reroute policy won't be
+			ginkgo.Entry("interconnect disabled; non-ic - single zone setup", false, "global"),
+			ginkgo.Entry("interconnect enabled; pod is in global zone", true, "global"),
+			ginkgo.Entry("interconnect enabled; pod is in remote zone", true, "remote"), // static re-route is visible but reroute policy won't be
 		)
 
 		ginkgo.It("should not treat pod update if pod already had assigned IP when it got the ADD", func() {
@@ -4173,7 +4172,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 
 	ginkgo.Context("On node DELETE", func() {
 
-		ginkgotable.DescribeTable("should treat pod update if pod did not have an assigned IP when it got the ADD",
+		ginkgo.DescribeTable("should treat pod update if pod did not have an assigned IP when it got the ADD",
 			func(interconnect bool, podZone string) {
 				config.OVNKubernetesFeature.EnableInterconnect = interconnect
 				app.Action = func(ctx *cli.Context) error {
@@ -4348,9 +4347,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 				err := app.Run([]string{app.Name})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			},
-			ginkgotable.Entry("interconnect disabled; non-ic - single zone setup", false, "global"),
-			ginkgotable.Entry("interconnect enabled; pod is in global zone", true, "global"),
-			ginkgotable.Entry("interconnect enabled; pod is in remote zone", true, "remote"), // static re-route is visible but reroute policy won't be
+			ginkgo.Entry("interconnect disabled; non-ic - single zone setup", false, "global"),
+			ginkgo.Entry("interconnect enabled; pod is in global zone", true, "global"),
+			ginkgo.Entry("interconnect enabled; pod is in remote zone", true, "remote"), // static re-route is visible but reroute policy won't be
 		)
 
 		ginkgo.It("should not treat pod DELETE if pod did not have an assigned IP when it got the ADD and we receive a DELETE before the IP UPDATE", func() {
@@ -4418,7 +4417,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 
 	ginkgo.Context("IPv6 on namespace UPDATE", func() {
 
-		ginkgotable.DescribeTable("should remove OVN pod egress setup when EgressIP is deleted",
+		ginkgo.DescribeTable("should remove OVN pod egress setup when EgressIP is deleted",
 			func(interconnect bool, podZone string) {
 				config.OVNKubernetesFeature.EnableInterconnect = interconnect
 				app.Action = func(ctx *cli.Context) error {
@@ -4637,12 +4636,12 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 				err := app.Run([]string{app.Name})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			},
-			ginkgotable.Entry("interconnect disabled; non-ic - single zone setup", false, "global"),
-			ginkgotable.Entry("interconnect enabled; pod is in global zone", true, "global"),
-			ginkgotable.Entry("interconnect enabled; pod is in remote zone", true, "remote"),
+			ginkgo.Entry("interconnect disabled; non-ic - single zone setup", false, "global"),
+			ginkgo.Entry("interconnect enabled; pod is in global zone", true, "global"),
+			ginkgo.Entry("interconnect enabled; pod is in remote zone", true, "remote"),
 		)
 
-		ginkgotable.DescribeTable("egressIP retry should remove OVN pod egress setup when EgressIP is deleted",
+		ginkgo.DescribeTable("egressIP retry should remove OVN pod egress setup when EgressIP is deleted",
 			func(interconnect bool, podZone string) {
 				config.OVNKubernetesFeature.EnableInterconnect = interconnect
 				app.Action = func(ctx *cli.Context) error {
@@ -4880,12 +4879,12 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 				err := app.Run([]string{app.Name})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			},
-			ginkgotable.Entry("interconnect disabled; non-ic - single zone setup", false, "global"),
-			ginkgotable.Entry("interconnect enabled; pod is in global zone", true, "global"),
-			ginkgotable.Entry("interconnect enabled; pod is in remote zone", true, "remote"),
+			ginkgo.Entry("interconnect disabled; non-ic - single zone setup", false, "global"),
+			ginkgo.Entry("interconnect enabled; pod is in global zone", true, "global"),
+			ginkgo.Entry("interconnect enabled; pod is in remote zone", true, "remote"),
 		)
 
-		ginkgotable.DescribeTable("should remove OVN pod egress setup when EgressIP stops matching",
+		ginkgo.DescribeTable("should remove OVN pod egress setup when EgressIP stops matching",
 			func(interconnect bool, podZone string) {
 				config.OVNKubernetesFeature.EnableInterconnect = interconnect
 				app.Action = func(ctx *cli.Context) error {
@@ -5120,9 +5119,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 				err := app.Run([]string{app.Name})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			},
-			ginkgotable.Entry("interconnect disabled; non-ic - single zone setup", false, "global"),
-			ginkgotable.Entry("interconnect enabled; pod is in global zone", true, "global"),
-			ginkgotable.Entry("interconnect enabled; pod is in remote zone", true, "remote"),
+			ginkgo.Entry("interconnect disabled; non-ic - single zone setup", false, "global"),
+			ginkgo.Entry("interconnect enabled; pod is in global zone", true, "global"),
+			ginkgo.Entry("interconnect enabled; pod is in remote zone", true, "remote"),
 		)
 
 		ginkgo.It("should not remove OVN pod egress setup when EgressIP stops matching, but pod never had any IP to begin with", func() {
@@ -5190,7 +5189,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 	})
 	ginkgo.Context("on EgressIP UPDATE", func() {
 
-		ginkgotable.DescribeTable("should update OVN on EgressIP .spec.egressips change",
+		ginkgo.DescribeTable("should update OVN on EgressIP .spec.egressips change",
 			func(interconnect bool, node1Zone, node2Zone string) {
 				config.OVNKubernetesFeature.EnableInterconnect = interconnect
 				app.Action = func(ctx *cli.Context) error {
@@ -5709,14 +5708,14 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 				err := app.Run([]string{app.Name})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			},
-			ginkgotable.Entry("interconnect disabled; non-ic - single zone setup", false, "global", "global"),
-			ginkgotable.Entry("interconnect enabled; node1 and node2 in single zone", true, "global", "global"),
+			ginkgo.Entry("interconnect disabled; non-ic - single zone setup", false, "global", "global"),
+			ginkgo.Entry("interconnect enabled; node1 and node2 in single zone", true, "global", "global"),
 			// will showcase localzone setup - master is in pod's zone where pod's reroute policy towards egressNode will be done.
 			// NOTE: SNAT won't be visible because its in remote zone
-			ginkgotable.Entry("interconnect enabled; node1 in local and node2 in remote zones", true, "local", "remote"),
+			ginkgo.Entry("interconnect enabled; node1 in local and node2 in remote zones", true, "local", "remote"),
 			// will showcase localzone setup - master is in egress node's zone where pod's SNAT policy and static route will be done.
 			// NOTE: reroute policy won't be visible because its in remote zone (pod is in remote zone)
-			ginkgotable.Entry("interconnect enabled; node1 in remote and node2 in local zones", true, "remote", "local"),
+			ginkgo.Entry("interconnect enabled; node1 in remote and node2 in local zones", true, "remote", "local"),
 		)
 
 		ginkgo.It("should delete and re-create and delete", func() {
@@ -7044,7 +7043,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 
-		ginkgotable.DescribeTable("egressIP pod managed by multiple objects, verify standby works wells, verify syncPodAssignmentCache on restarts",
+		ginkgo.DescribeTable("egressIP pod managed by multiple objects, verify standby works wells, verify syncPodAssignmentCache on restarts",
 			func(interconnect bool, node1Zone, node2Zone string) {
 				config.OVNKubernetesFeature.EnableInterconnect = interconnect
 				app.Action = func(ctx *cli.Context) error {
@@ -7688,14 +7687,14 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 				err := app.Run([]string{app.Name})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			},
-			ginkgotable.Entry("interconnect disabled; non-ic - single zone setup", false, "global", "global"),
-			ginkgotable.Entry("interconnect enabled; node1 and node2 in global zones", true, "global", "global"),
+			ginkgo.Entry("interconnect disabled; non-ic - single zone setup", false, "global", "global"),
+			ginkgo.Entry("interconnect enabled; node1 and node2 in global zones", true, "global", "global"),
 			// will showcase localzone setup - master is in pod's zone where pod's reroute policy towards egressNode will be done.
 			// NOTE: SNAT won't be visible because its in remote zone
-			ginkgotable.Entry("interconnect enabled; node1 in global and node2 in remote zones", true, "global", "remote"),
+			ginkgo.Entry("interconnect enabled; node1 in global and node2 in remote zones", true, "global", "remote"),
 			// will showcase localzone setup - master is in egress node's zone where pod's SNAT policy and static route will be done.
 			// NOTE: reroute policy won't be visible because its in remote zone (pod is in remote zone)
-			ginkgotable.Entry("interconnect enabled; node1 in remote and node2 in global zones", true, "remote", "global"),
+			ginkgo.Entry("interconnect enabled; node1 in remote and node2 in global zones", true, "remote", "global"),
 		)
 
 	})

@@ -572,7 +572,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		_, _ = util.SetFakeIPTablesHelpers()
-		nft := nodenft.SetFakeNFTablesHelper()
+		_ = nodenft.SetFakeNFTablesHelper()
 
 		// Make a fake MgmtPortConfig with only the fields we care about
 		fakeMgmtPortV4IPFamilyConfig := managementPortIPFamilyConfig{
@@ -588,7 +588,6 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			ifName:    nodeName,
 			link:      nil,
 			routerMAC: nil,
-			nft:       nft,
 			ipv4:      &fakeMgmtPortV4IPFamilyConfig,
 			ipv6:      &fakeMgmtPortV6IPFamilyConfig,
 		}
@@ -675,6 +674,9 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			Expect(len(udnGateway.openflowManager.defaultBridge.netConfig)).To(Equal(1)) // only default network
 
 			Expect(udnGateway.AddNetwork()).To(Succeed())
+			// since we did not start the shared gw, reconcile manually
+			Expect(localGw.doReconcile()).To(Succeed())
+
 			flowMap = udnGateway.gateway.openflowManager.flowCache
 			Expect(len(flowMap["DEFAULT"])).To(Equal(64))                                // 18 UDN Flows are added by default
 			Expect(len(udnGateway.openflowManager.defaultBridge.netConfig)).To(Equal(2)) // default network + UDN network
@@ -710,7 +712,11 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 
 			cnode := node.DeepCopy()
 			kubeMock.On("UpdateNodeStatus", cnode).Return(nil) // check if network key gets deleted from annotation
+
 			Expect(udnGateway.DelNetwork()).To(Succeed())
+			// since we did not start the shared gw, reconcile manually
+			Expect(localGw.doReconcile()).To(Succeed())
+
 			flowMap = udnGateway.gateway.openflowManager.flowCache
 			Expect(len(flowMap["DEFAULT"])).To(Equal(46))                                // only default network flows are present
 			Expect(len(udnGateway.openflowManager.defaultBridge.netConfig)).To(Equal(1)) // default network only
@@ -793,11 +799,10 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			wg.Wait()
 		}()
 		err = wf.Start()
+		Expect(err).NotTo(HaveOccurred())
 
 		_, _ = util.SetFakeIPTablesHelpers()
-		nft := nodenft.SetFakeNFTablesHelper()
-
-		Expect(err).NotTo(HaveOccurred())
+		_ = nodenft.SetFakeNFTablesHelper()
 
 		// Make a fake MgmtPortConfig with only the fields we care about
 		fakeMgmtPortV4IPFamilyConfig := managementPortIPFamilyConfig{
@@ -813,7 +818,6 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			ifName:    nodeName,
 			link:      nil,
 			routerMAC: nil,
-			nft:       nft,
 			ipv4:      &fakeMgmtPortV4IPFamilyConfig,
 			ipv6:      &fakeMgmtPortV6IPFamilyConfig,
 		}
@@ -897,6 +901,9 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			Expect(len(udnGateway.openflowManager.defaultBridge.netConfig)).To(Equal(1)) // only default network
 
 			Expect(udnGateway.AddNetwork()).To(Succeed())
+			// since we did not start the shared gw, reconcile manually
+			Expect(localGw.doReconcile()).To(Succeed())
+
 			flowMap = udnGateway.gateway.openflowManager.flowCache
 			Expect(len(flowMap["DEFAULT"])).To(Equal(64))                                // 18 UDN Flows are added by default
 			Expect(len(udnGateway.openflowManager.defaultBridge.netConfig)).To(Equal(2)) // default network + UDN network
@@ -932,7 +939,11 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 
 			cnode := node.DeepCopy()
 			kubeMock.On("UpdateNodeStatus", cnode).Return(nil) // check if network key gets deleted from annotation
+
 			Expect(udnGateway.DelNetwork()).To(Succeed())
+			// since we did not start the shared gw, reconcile manually
+			Expect(localGw.doReconcile()).To(Succeed())
+
 			flowMap = udnGateway.gateway.openflowManager.flowCache
 			Expect(len(flowMap["DEFAULT"])).To(Equal(46))                                // only default network flows are present
 			Expect(len(udnGateway.openflowManager.defaultBridge.netConfig)).To(Equal(1)) // default network only
@@ -1208,6 +1219,11 @@ func TestConstructUDNVRFIPRules(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.desc, func(t *testing.T) {
 			g := NewWithT(t)
+			node := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: nodeName,
+				},
+			}
 			config.IPv4Mode = test.v4mode
 			config.IPv6Mode = test.v6mode
 			cidr := ""
@@ -1224,7 +1240,140 @@ func TestConstructUDNVRFIPRules(t *testing.T) {
 				types.Layer3Topology, cidr, types.NetworkRolePrimary)
 			netInfo, err := util.ParseNADInfo(nad)
 			g.Expect(err).NotTo(HaveOccurred())
-			udnGateway, err := NewUserDefinedNetworkGateway(netInfo, 3, nil, nil, nil, nil, nil, &gateway{})
+			udnGateway, err := NewUserDefinedNetworkGateway(netInfo, 3, node, nil, nil, nil, nil, &gateway{})
+			g.Expect(err).NotTo(HaveOccurred())
+			rules, err := udnGateway.constructUDNVRFIPRules(test.vrftableID)
+			g.Expect(err).To(BeNil())
+			for i, rule := range rules {
+				g.Expect(rule.Priority).To(Equal(test.expectedRules[i].priority))
+				g.Expect(rule.Table).To(Equal(test.expectedRules[i].table))
+				g.Expect(rule.Family).To(Equal(test.expectedRules[i].family))
+				if rule.Dst != nil {
+					g.Expect(*rule.Dst).To(Equal(test.expectedRules[i].dst))
+				} else {
+					g.Expect(rule.Mark).To(Equal(test.expectedRules[i].mark))
+				}
+			}
+		})
+	}
+}
+
+func TestConstructUDNVRFIPRulesPodNetworkAdvertised(t *testing.T) {
+	type testRule struct {
+		priority int
+		family   int
+		table    int
+		mark     int
+		dst      net.IPNet
+	}
+	type testConfig struct {
+		desc          string
+		vrftableID    int
+		v4mode        bool
+		v6mode        bool
+		expectedRules []testRule
+	}
+
+	tests := []testConfig{
+		{
+			desc:       "v4 rule test",
+			vrftableID: 1007,
+			expectedRules: []testRule{
+				{
+					priority: UDNMasqueradeIPRulePriority,
+					family:   netlink.FAMILY_V4,
+					table:    1007,
+					mark:     0x1003,
+				},
+				{
+					priority: UDNMasqueradeIPRulePriority,
+					family:   netlink.FAMILY_V4,
+					table:    1007,
+					dst:      *ovntest.MustParseIPNet("100.128.0.0/16"),
+				},
+			},
+			v4mode: true,
+		},
+		{
+			desc:       "v6 rule test",
+			vrftableID: 1009,
+			expectedRules: []testRule{
+				{
+					priority: UDNMasqueradeIPRulePriority,
+					family:   netlink.FAMILY_V6,
+					table:    1009,
+					mark:     0x1003,
+				},
+				{
+					priority: UDNMasqueradeIPRulePriority,
+					family:   netlink.FAMILY_V6,
+					table:    1009,
+					dst:      *ovntest.MustParseIPNet("ae70::/60"),
+				},
+			},
+			v6mode: true,
+		},
+		{
+			desc:       "dualstack rule test",
+			vrftableID: 1010,
+			expectedRules: []testRule{
+				{
+					priority: UDNMasqueradeIPRulePriority,
+					family:   netlink.FAMILY_V4,
+					table:    1010,
+					mark:     0x1003,
+				},
+				{
+					priority: UDNMasqueradeIPRulePriority,
+					family:   netlink.FAMILY_V4,
+					table:    1010,
+					dst:      *ovntest.MustParseIPNet("100.128.0.0/16"),
+				},
+				{
+					priority: UDNMasqueradeIPRulePriority,
+					family:   netlink.FAMILY_V6,
+					table:    1010,
+					mark:     0x1003,
+				},
+				{
+					priority: UDNMasqueradeIPRulePriority,
+					family:   netlink.FAMILY_V6,
+					table:    1010,
+					dst:      *ovntest.MustParseIPNet("ae70::/60"),
+				},
+			},
+			v4mode: true,
+			v6mode: true,
+		},
+	}
+	config.Gateway.V6MasqueradeSubnet = "fd69::/112"
+	config.Gateway.V4MasqueradeSubnet = "169.254.0.0/16"
+	for _, test := range tests {
+		t.Run(test.desc, func(t *testing.T) {
+			g := NewWithT(t)
+			node := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: nodeName,
+				},
+			}
+			config.IPv4Mode = test.v4mode
+			config.IPv6Mode = test.v6mode
+			cidr := ""
+			if config.IPv4Mode {
+				cidr = "100.128.0.0/16/24"
+			}
+			if config.IPv4Mode && config.IPv6Mode {
+				cidr += ",ae70::/60"
+			} else if config.IPv6Mode {
+				cidr = "ae70::/60"
+			}
+			nad := ovntest.GenerateNAD("bluenet", "rednad", "greenamespace",
+				types.Layer3Topology, cidr, types.NetworkRolePrimary)
+			netInfo, err := util.ParseNADInfo(nad)
+			g.Expect(err).NotTo(HaveOccurred())
+			mutableNetInfo := util.NewMutableNetInfo(netInfo)
+			mutableNetInfo.SetPodNetworkAdvertisedVRFs(map[string][]string{nodeName: {"vrf"}})
+			udnGateway, err := NewUserDefinedNetworkGateway(mutableNetInfo, 3, node, nil, nil, nil, nil, &gateway{})
 			g.Expect(err).NotTo(HaveOccurred())
 			rules, err := udnGateway.constructUDNVRFIPRules(test.vrftableID)
 			g.Expect(err).To(BeNil())

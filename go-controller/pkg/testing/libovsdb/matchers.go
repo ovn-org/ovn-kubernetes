@@ -224,9 +224,11 @@ func HaveEmptyData() gomegatypes.GomegaMatcher {
 }
 
 func haveData(ignoreUUIDs, nameUUIDs bool, expected []TestData) gomegatypes.GomegaMatcher {
-	if e, ok := expected[0].([]TestData); len(expected) == 1 && ok {
-		// flatten
-		expected = e
+	if len(expected) == 1 {
+		if e, ok := expected[0].([]TestData); ok {
+			// flatten
+			expected = e
+		}
 	}
 	matchers := []*testDataMatcher{}
 	for _, e := range expected {
