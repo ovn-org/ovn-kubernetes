@@ -860,7 +860,7 @@ func isAddressReachableFromContainer(containerName, targetIP string) (bool, erro
 
 func isOVNEncapIPReady(nodeName, nodeIP, ovnkubePodName string) bool {
 	framework.Logf("Verifying ovn-encap-ip for node %s", nodeName)
-	cmd := []string{"kubectl", "-n", ovnNamespace, "exec", ovnkubePodName, "-c", "ovn-controller",
+	cmd := []string{"kubectl", "--request-timeout=10", "-n", ovnNamespace, "exec", ovnkubePodName, "-c", "ovn-controller",
 		"--", "ovs-vsctl", "get", "open_vswitch", ".", "external-ids:ovn-encap-ip"}
 	output, err := runCommand(cmd...)
 	if err != nil {
@@ -889,19 +889,24 @@ func migrateWorkerNodeIP(nodeName, fromIP, targetIP string, invertOrder bool) (e
 		if err != nil {
 			for _, cmd := range cleanupCommands {
 				framework.Logf("Attempting cleanup with command %q", cmd)
-				runCommand(cmd...)
+				if _, cleanupErr := runCommand(cmd...); cleanupErr != nil {
+					framework.Logf("Error during cleanup: %v", cleanupErr)
+				}
 			}
 		}
 	}()
 
 	framework.Logf("Finding fromIP %s on host %s", fromIP, nodeName)
-	parsedNetIPMask, iface, err := findIPAddressMaskInterfaceOnHost(nodeName, fromIP)
+	var parsedNetIPMask net.IPNet
+	var iface string
+	parsedNetIPMask, iface, err = findIPAddressMaskInterfaceOnHost(nodeName, fromIP)
 	if err != nil {
-		return err
+		return
 	}
 	exploded := strings.Split(parsedNetIPMask.String(), "/")
 	if len(exploded) < 2 {
-		return fmt.Errorf("not a valid CIDR: %v", parsedNetIPMask)
+		err = fmt.Errorf("not a valid CIDR: %v", parsedNetIPMask)
+		return
 	}
 	mask := exploded[1]
 
@@ -914,11 +919,19 @@ func migrateWorkerNodeIP(nodeName, fromIP, targetIP string, invertOrder bool) (e
 		cleanupCmd := []string{"docker", "exec", nodeName, "ip", "address", "del", newIPMask, "dev", iface}
 		cleanupCommands = append(cleanupCommands, cleanupCmd)
 		// Run command.
-		cmd := []string{"docker", "exec", nodeName, "ip", "address", "add", newIPMask, "dev", iface}
-		_, err = runCommand(cmd...)
-		if err != nil {
-			return err
+		cmd := []string{"docker", "exec", nodeName, "ip", "address", "show", "dev", iface}
+		out, _ := runCommand(cmd...)
+		framework.Logf("changeIP before add output: %s", out)
+
+		cmd = []string{"docker", "exec", nodeName, "ip", "address", "add", newIPMask, "dev", iface}
+		out, changeIPErr := runCommand(cmd...)
+		framework.Logf("changeIP %q output: %s", strings.Join(cmd, " "), out)
+		if changeIPErr != nil {
+			return changeIPErr
 		}
+		cmd = []string{"docker", "exec", nodeName, "ip", "address", "show", "dev", iface}
+		out, _ = runCommand(cmd...)
+		framework.Logf("changeIP after add output: %s", out)
 		// Delete current IP address. On rollback, first add the old IP and then delete the new one.
 		framework.Logf("Deleting current IP address %s from node %s", parsedNetIPMask.String(), nodeName)
 		// Add cleanup command.
@@ -926,11 +939,12 @@ func migrateWorkerNodeIP(nodeName, fromIP, targetIP string, invertOrder bool) (e
 		cleanupCommands = append([][]string{cleanupCmd}, cleanupCommands...)
 		// Run command.
 		cmd = []string{"docker", "exec", nodeName, "ip", "address", "del", parsedNetIPMask.String(), "dev", iface}
-		_, err = runCommand(cmd...)
-		if err != nil {
-			return err
-		}
-		return nil
+		out, changeIPErr = runCommand(cmd...)
+		framework.Logf("changeIP %q output: %s", strings.Join(cmd, " "), out)
+		cmd = []string{"docker", "exec", nodeName, "ip", "address", "show", "dev", iface}
+		out, _ = runCommand(cmd...)
+		framework.Logf("changeIP after delete output: %s", out)
+		return changeIPErr
 	}
 	// Define a function to update the IP address in kubelet configuration and to restart kubelet for later use.
 	changeKubeletIP := func() error {
@@ -945,19 +959,18 @@ func migrateWorkerNodeIP(nodeName, fromIP, targetIP string, invertOrder bool) (e
 		// Run command.
 		cmd := []string{"docker", "exec", nodeName, "sed", "-i", fmt.Sprintf("s/node-ip=%s/node-ip=%s/", fromIP, targetIP),
 			"/var/lib/kubelet/kubeadm-flags.env"}
-		_, err = runCommand(cmd...)
-		if err != nil {
-			return err
+		out, changeKubeletIPErr := runCommand(cmd...)
+		framework.Logf("changeKubeletIP %q output: %s", strings.Join(cmd, " "), out)
+		if changeKubeletIPErr != nil {
+			return changeKubeletIPErr
 		}
 
 		// Restart kubelet.
 		framework.Logf("Restarting kubelet on node %s", nodeName)
 		cmd = []string{"docker", "exec", nodeName, "systemctl", "restart", "kubelet"}
-		_, err = runCommand(cmd...)
-		if err != nil {
-			return err
-		}
-		return nil
+		out, changeKubeletIPErr = runCommand(cmd...)
+		framework.Logf("changeKubeletIP %q output: %s", strings.Join(cmd, " "), out)
+		return changeKubeletIPErr
 	}
 
 	fs := []func() error{changeIPAddress, changeKubeletIP}
@@ -967,10 +980,10 @@ func migrateWorkerNodeIP(nodeName, fromIP, targetIP string, invertOrder bool) (e
 	for _, f := range fs {
 		err = f()
 		if err != nil {
-			return err
+			return
 		}
 	}
-	return nil
+	return
 }
 
 // targetExternalContainerConnectToEndpoint targets the external test container from the specified pod and compares
