@@ -133,6 +133,15 @@ func (zch *ZoneChassisHandler) createOrUpdateNodeChassis(node *corev1.Node, isRe
 			node.Name, parsedErr)
 	}
 
+	chassisList, err := libovsdbops.ListChassis(zch.sbClient)
+	if err != nil {
+		return fmt.Errorf("failed to get the list of chassis from OVN Southbound db : %w", err)
+	}
+	for _, ch := range chassisList {
+		if ch.Name == chassisID && ch.Hostname != node.Name {
+			return fmt.Errorf("duplicate chassis id has been detected for node %s and %s, consider recreating newly added node", ch.Hostname, node.Name)
+		}
+	}
 	nodePrimaryIp, err := util.GetNodePrimaryIP(node)
 	if err != nil {
 		return fmt.Errorf("failed to parse node %s primary IP %w", node.Name, err)
