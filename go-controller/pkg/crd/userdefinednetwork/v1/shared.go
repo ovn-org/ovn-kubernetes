@@ -86,9 +86,10 @@ type Layer3Subnet struct {
 	HostSubnet int32 `json:"hostSubnet,omitempty"`
 }
 
-// +kubebuilder:validation:XValidation:rule="self.role != 'Primary' || has(self.subnets)", message="Subnets is required for Primary Layer2 topology"
+// +kubebuilder:validation:XValidation:rule="has(self.ipam) && has(self.ipam.mode) && self.ipam.mode != 'Enabled' || has(self.subnets)", message="Subnets is required with ipam.mode is Enabled or unset"
+// +kubebuilder:validation:XValidation:rule="!has(self.ipam) || !has(self.ipam.mode) || self.ipam.mode != 'Disabled' || !has(self.subnets)", message="Subnets must be unset when ipam.mode is Disabled"
+// +kubebuilder:validation:XValidation:rule="!has(self.ipam) || !has(self.ipam.mode) || self.ipam.mode != 'Disabled' || self.role == 'Secondary'", message="Disabled ipam.mode is only supported for Secondary network"
 // +kubebuilder:validation:XValidation:rule="!has(self.joinSubnets) || has(self.role) && self.role == 'Primary'", message="JoinSubnets is only supported for Primary network"
-// +kubebuilder:validation:XValidation:rule="!has(self.ipamLifecycle) || has(self.subnets) && size(self.subnets) > 0", message="IPAMLifecycle is only supported when subnets are set"
 // +kubebuilder:validation:XValidation:rule="!has(self.subnets) || !has(self.mtu) || !self.subnets.exists_one(i, isCIDR(i) && cidr(i).ip().family() == 6) || self.mtu >= 1280", message="MTU should be greater than or equal to 1280 when IPv6 subent is used"
 type Layer2Config struct {
 	// Role describes the network role in the pod.
@@ -112,8 +113,7 @@ type Layer2Config struct {
 	// Dual-stack clusters may set 2 subnets (one for each IP family), otherwise only 1 subnet is allowed.
 	//
 	// The format should match standard CIDR notation (for example, "10.128.0.0/16").
-	// This field may be omitted. In that case the logical switch implementing the network only provides layer 2 communication,
-	// and users must configure IP addresses for the pods. As a consequence, Port security only prevents MAC spoofing.
+	// This field must be omitted if `ipam.mode` is `Disabled`.
 	//
 	// +optional
 	Subnets DualStackCIDRs `json:"subnets,omitempty"`
@@ -128,15 +128,43 @@ type Layer2Config struct {
 	// +optional
 	JoinSubnets DualStackCIDRs `json:"joinSubnets,omitempty"`
 
-	// IPAMLifecycle controls IP addresses management lifecycle.
+	// IPAM section contains IPAM-related configuration for the network.
+	// +optional
+	IPAM *IPAMConfig `json:"ipam,omitempty"`
+}
+
+// +kubebuilder:validation:XValidation:rule="!has(self.lifecycle) || self.lifecycle != 'Persistent' || !has(self.mode) || self.mode == 'Enabled'", message="lifecycle Persistent is only supported when ipam.mode is Enabled"
+// +kubebuilder:validation:MinProperties=1
+type IPAMConfig struct {
+	// Mode controls how much of the IP configuration will be managed by OVN.
+	// `Enabled` means OVN-Kubernetes will apply IP configuration to the SDN infrastructure and it will also assign IPs
+	// from the selected subnet to the individual pods.
+	// `Disabled` means OVN-Kubernetes will only assign MAC addresses and provide layer 2 communication, letting users
+	// configure IP addresses for the pods.
+	// `Disabled` is only available for Secondary networks.
+	// By disabling IPAM, any Kubernetes features that rely on selecting pods by IP will no longer function
+	// (such as network policy, services, etc). Additionally, IP port security will also be disabled for interfaces attached to this network.
+	// Defaults to `Enabled`.
+	// +optional
+	Mode IPAMMode `json:"mode,omitempty"`
+
+	// Lifecycle controls IP addresses management lifecycle.
 	//
 	// The only allowed value is Persistent. When set, OVN Kubernetes assigned IP addresses will be persisted in an
 	// `ipamclaims.k8s.cni.cncf.io` object. These IP addresses will be reused by other pods if requested.
-	// Only supported when "subnets" are set.
+	// Only supported when mode is `Enabled`.
 	//
 	// +optional
-	IPAMLifecycle NetworkIPAMLifecycle `json:"ipamLifecycle,omitempty"`
+	Lifecycle NetworkIPAMLifecycle `json:"lifecycle,omitempty"`
 }
+
+// +kubebuilder:validation:Enum=Enabled;Disabled
+type IPAMMode string
+
+const (
+	IPAMEnabled  IPAMMode = "Enabled"
+	IPAMDisabled IPAMMode = "Disabled"
+)
 
 // +kubebuilder:validation:Enum=Primary;Secondary
 type NetworkRole string
