@@ -329,6 +329,15 @@ false
 			<td>Configure to use multiple NetworkAttachmentDefinition CRD feature with ovn-kubernetes</td>
 		</tr>
 		<tr>
+			<td>global.enableNetworkQos</td>
+			<td>string</td>
+			<td><pre lang="json">
+""
+</pre>
+</td>
+			<td>Enables network QoS support from/to pods</td>
+		</tr>
+		<tr>
 			<td>global.enableMulticast</td>
 			<td>string</td>
 			<td><pre lang="json">

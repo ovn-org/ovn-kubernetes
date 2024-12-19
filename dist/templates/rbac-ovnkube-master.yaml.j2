@@ -86,6 +86,7 @@ rules:
           - userdefinednetworks
           - clusteruserdefinednetworks
           - routeadvertisements
+          - networkqoses
       verbs: [ "get", "list", "watch" ]
     - apiGroups: ["k8s.cni.cncf.io"]
       resources:
@@ -121,6 +122,8 @@ rules:
           - clusteruserdefinednetworks/status
           - clusteruserdefinednetworks/finalizers
           - routeadvertisements/status
+          - networkqoses
+          - networkqoses/status
       verbs: [ "patch", "update" ]
     - apiGroups: [""]
       resources:
