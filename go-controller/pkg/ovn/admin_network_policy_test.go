@@ -668,7 +668,7 @@ var _ = ginkgo.Describe("OVN ANP Operations", func() {
 				anpPeerPod.Labels = peerAllowLabel // pod is now in namespace {house: slytherin} && pod {house: hufflepuff}
 				_, err = fakeOVN.fakeClient.KubeClient.CoreV1().Pods(anpPeerPod.Namespace).Update(context.TODO(), &anpPeerPod, metav1.UpdateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				// ingressRule AddressSets - podIP should stay in deny rule's address-set since deny rule matcheS only on nsSelector which has not changed
+				// ingressRule AddressSets - podIP should stay in deny rule's address-set since deny rule matches only on nsSelector which has not changed
 				// egressRule AddressSets - podIP should now be present in both deny and allow rule's address-sets
 				expectedDatabaseState[len(expectedDatabaseState)-4].(*nbdb.AddressSet).Addresses = []string{t2.podIP} // podIP should be added to v4 allow address-set
 				expectedDatabaseState[len(expectedDatabaseState)-6].(*nbdb.AddressSet).Addresses = []string{t2.podIP} // podIP should be added to v4 deny address-set
@@ -893,42 +893,80 @@ var _ = ginkgo.Describe("OVN ANP Operations", func() {
 				anpNamespacePeer.ResourceVersion = "3"
 				err = fakeOVN.fakeClient.KubeClient.CoreV1().Namespaces().Delete(context.TODO(), anpNamespacePeer.Name, metav1.DeleteOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				pg = getDefaultPGForANPSubject(anp.Name, nil, newACLs, false) // no ports in PG
-				expectedDatabaseState = []libovsdbtest.TestData{pg}           // namespace address-sets are gone
+				// network representation for the ANP is fully gone - only thing remaining is the pod rep given in UTs deleting namespace doesn't delete pods
+				expectedDatabaseState = []libovsdbtest.TestData{} // port group should be deleted
+				expectedDatabaseState = append(expectedDatabaseState, getDefaultNetExpectedPodsAndSwitches([]testPod{t, t2}, []string{node1Name})...)
+				gomega.Eventually(fakeOVN.nbClient, "25s").Should(libovsdbtest.HaveData(expectedDatabaseState))
+
+				ginkgo.By("17. re-add the namespaces to re-simulate ANP topology for the default network")
+				// NOTE (tssurya): Prior to UDNs support, when all namespaces that are matching the ANP either in the subject
+				// OR peers get deleted, it was treated as a peer/subject deletion and hence only ports from portgroup OR IPs from address/sets
+				// were deleted while retaining the port-group/address-sets themselves
+				// However now with implementing the UDNs, the semantics have changed internally - if all namespaces matching the ANP
+				// are deleted then its taken as that network representation for the ANP got deleted - implementation/cache wise
+				// Hence if all namespaces are gone matching an ANP that belong to a specific network; its counted as the network
+				// got deleted and we remove all port-group/address-sets associated with that network for this ANP
+				// The alternative here is to start watching for network addition/deletion which is just an overhead here not worth the effort
+				// Hence we have this extra step to add back the peer/subject networks so that we can test the next two steps
+				// now delete the namespaces
+				anpNamespaceSubject.ResourceVersion = "4"
+				_, err = fakeOVN.fakeClient.KubeClient.CoreV1().Namespaces().Create(context.TODO(), &anpNamespaceSubject, metav1.CreateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				anpNamespacePeer.ResourceVersion = "4"
+				_, err = fakeOVN.fakeClient.KubeClient.CoreV1().Namespaces().Create(context.TODO(), &anpNamespacePeer, metav1.CreateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				expectedDatabaseState = []libovsdbtest.TestData{pg, subjectNSASIPv4, subjectNSASIPv6, peerNSASIPv4, peerNSASIPv6}
 				for _, acl := range newACLs {
 					acl := acl
 					expectedDatabaseState = append(expectedDatabaseState, acl)
 				}
-				// delete namespace in unit testing doesn't delete pods; we just need to check port groups and address-sets are updated
-				expectedDatabaseState = append(expectedDatabaseState, getDefaultNetExpectedPodsAndSwitches([]testPod{t, t2}, []string{node1Name})...)
 				peerASIngressRule1v4, peerASIngressRule1v6 = buildANPAddressSets(anp,
-					1, []string{}, libovsdbutil.ACLIngress)
+					1, []string{t2.podIP}, libovsdbutil.ACLIngress)
 				peerASEgressRule1v4, peerASEgressRule1v6 = buildANPAddressSets(anp,
-					1, []string{}, libovsdbutil.ACLEgress)
+					1, []string{t2.podIP}, libovsdbutil.ACLEgress)
 				expectedDatabaseState = append(expectedDatabaseState, []libovsdbtest.TestData{peerASIngressRule0v4, peerASIngressRule0v6, peerASIngressRule1v4,
 					peerASIngressRule1v6, peerASEgressRule0v4, peerASEgressRule0v6, peerASEgressRule1v4, peerASEgressRule1v6}...)
-				// NOTE: Address set deletion is deferred for 20 seconds...
-				gomega.Eventually(fakeOVN.nbClient, "25s").Should(libovsdbtest.HaveData(expectedDatabaseState))
+				expectedDatabaseState = append(expectedDatabaseState, getDefaultNetExpectedPodsAndSwitches([]testPod{t, t2}, []string{node1Name})...)
+				gomega.Eventually(fakeOVN.nbClient, "3s").Should(libovsdbtest.HaveData(expectedDatabaseState))
 
-				ginkgo.By("17. update the ANP by deleting all rules; check if all objects are deleted correctly")
+				ginkgo.By("18. delete all the pods matching the ANP and check if port group and address-set's are updated")
+				err = fakeOVN.fakeClient.KubeClient.CoreV1().Pods(anpSubjectNamespaceName).Delete(context.TODO(), anpSubjectPodName, metav1.DeleteOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = fakeOVN.fakeClient.KubeClient.CoreV1().Pods(anpPeerNamespaceName).Delete(context.TODO(), anpPeerPodName, metav1.DeleteOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				expectedDatabaseState[0].(*nbdb.PortGroup).Ports = nil                       // no ports in PG
+				expectedDatabaseState = expectedDatabaseState[:len(expectedDatabaseState)-3] // no LSPs in PG
+				// Let us remove the IPs from the peer label AS as it stops matching
+				expectedDatabaseState[1].(*nbdb.AddressSet).Addresses = []string{}                            // subject podIP should be removed from namespace address-set
+				expectedDatabaseState[2].(*nbdb.AddressSet).Addresses = []string{}                            // subject podIP should be removed from namespace address-set
+				expectedDatabaseState[3].(*nbdb.AddressSet).Addresses = []string{}                            // peer podIP should be removed from namespace address-set
+				expectedDatabaseState[4].(*nbdb.AddressSet).Addresses = []string{}                            // peer podIP should be removed from namespace-addresset
+				expectedDatabaseState[len(expectedDatabaseState)-1].(*nbdb.AddressSet).Addresses = []string{} // peer podIP should be removed from ANP rule address-set
+				expectedDatabaseState[len(expectedDatabaseState)-2].(*nbdb.AddressSet).Addresses = []string{} // peer podIP should be removed from ANP rule address-set
+				expectedDatabaseState[len(expectedDatabaseState)-5].(*nbdb.AddressSet).Addresses = []string{} // peer podIP should be removed from ANP rule address-set
+				expectedDatabaseState[len(expectedDatabaseState)-6].(*nbdb.AddressSet).Addresses = []string{} // peer podIP should be removed from ANP rule address-set
+				expectedDatabaseState = append(expectedDatabaseState, getDefaultNetExpectedPodsAndSwitches([]testPod{}, []string{node1Name})...)
+				gomega.Eventually(fakeOVN.nbClient, "3s").Should(libovsdbtest.HaveData(expectedDatabaseState))
+
+				ginkgo.By("19. update the ANP by deleting all rules; check if all objects are deleted correctly")
 				anp.Spec.Ingress = []anpapi.AdminNetworkPolicyIngressRule{}
 				anp.Spec.Egress = []anpapi.AdminNetworkPolicyEgressRule{}
 				anp.ResourceVersion = "7"
 				anp, err = fakeOVN.fakeClient.ANPClient.PolicyV1alpha1().AdminNetworkPolicies().Update(context.TODO(), anp, metav1.UpdateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				pg = getDefaultPGForANPSubject(anp.Name, nil, nil, false) // no ports and acls in PG
-				expectedDatabaseState = []libovsdbtest.TestData{pg}
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				expectedDatabaseState = append(expectedDatabaseState, getDefaultNetExpectedPodsAndSwitches([]testPod{t, t2}, []string{node1Name})...)
+				subjectNSASIPv4, subjectNSASIPv6 = buildNamespaceAddressSets(anpSubjectNamespaceName, []string{})
+				peerNSASIPv4, peerNSASIPv6 = buildNamespaceAddressSets(anpPeerNamespaceName, []string{})
+				expectedDatabaseState = []libovsdbtest.TestData{pg, subjectNSASIPv4, subjectNSASIPv6, peerNSASIPv4, peerNSASIPv6}
+				expectedDatabaseState = append(expectedDatabaseState, getDefaultNetExpectedPodsAndSwitches([]testPod{}, []string{node1Name})...)
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
-				ginkgo.By("18. delete the ANP; check if all objects are deleted correctly")
+				ginkgo.By("20. delete the ANP; check if all objects are deleted correctly")
 				anp.ResourceVersion = "8"
 				err = fakeOVN.fakeClient.ANPClient.PolicyV1alpha1().AdminNetworkPolicies().Delete(context.TODO(), anp.Name, metav1.DeleteOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				expectedDatabaseState = []libovsdbtest.TestData{} // port group should be deleted
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				expectedDatabaseState = append(expectedDatabaseState, getDefaultNetExpectedPodsAndSwitches([]testPod{t, t2}, []string{node1Name})...)
+				expectedDatabaseState = []libovsdbtest.TestData{subjectNSASIPv4, subjectNSASIPv6, peerNSASIPv4, peerNSASIPv6} // port group should be deleted
+				expectedDatabaseState = append(expectedDatabaseState, getDefaultNetExpectedPodsAndSwitches([]testPod{}, []string{node1Name})...)
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 				return nil
@@ -1045,6 +1083,12 @@ var _ = ginkgo.Describe("OVN ANP Operations", func() {
 				)
 				anp.ResourceVersion = "1"
 				anp, err := fakeOVN.fakeClient.ANPClient.PolicyV1alpha1().AdminNetworkPolicies().Create(context.TODO(), anp, metav1.CreateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveEmptyData())
+
+				ginkgo.By("1.1. Create the matching namespace so that network's representation is honoured")
+				anpSubjectNamespace := *newNamespaceWithLabels(anpSubjectNamespaceName, anpLabel)
+				_, err = fakeOVN.fakeClient.KubeClient.CoreV1().Namespaces().Create(context.TODO(), &anpSubjectNamespace, metav1.CreateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				acls := getACLsForANPRules(anp)
 				pg := getDefaultPGForANPSubject(anp.Name, []string{}, acls, false)
@@ -1510,7 +1554,7 @@ var _ = ginkgo.Describe("OVN ANP Operations", func() {
 					klog.Infof("Got an update spec action for %v", update.GetObject())
 					return false, update.GetObject(), nil
 				})
-				ginkgo.By("1. Create ANP with 1 ingress rule and 2 egress rules with the ACL logging annotation and ensure its honoured")
+				ginkgo.By("1. Create ANP with 1 ingress rule and 2 egress rules with the ACL logging annotation and ensure its honoured when the network representation is present")
 				anpSubject := newANPSubjectObject(
 					&metav1.LabelSelector{
 						MatchLabels: anpLabel,
@@ -1561,6 +1605,12 @@ var _ = ginkgo.Describe("OVN ANP Operations", func() {
 					util.AclLoggingAnnotation: fmt.Sprintf(`{ "deny": "%s", "allow": "%s", "pass": "%s" }`, nbdb.ACLSeverityAlert, nbdb.ACLSeverityInfo, nbdb.ACLSeverityNotice),
 				}
 				anp, err := fakeOVN.fakeClient.ANPClient.PolicyV1alpha1().AdminNetworkPolicies().Create(context.TODO(), anp, metav1.CreateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveEmptyData())
+
+				ginkgo.By("1.1. Create the matching namespace so that network's representation is honoured")
+				anpSubjectNamespace := *newNamespaceWithLabels(anpSubjectNamespaceName, anpLabel)
+				_, err = fakeOVN.fakeClient.KubeClient.CoreV1().Namespaces().Create(context.TODO(), &anpSubjectNamespace, metav1.CreateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				acls := getACLsForANPRules(anp)
 				pg := getDefaultPGForANPSubject(anp.Name, []string{}, acls, false)

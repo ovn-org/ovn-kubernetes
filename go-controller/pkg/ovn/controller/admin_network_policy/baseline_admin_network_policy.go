@@ -7,6 +7,7 @@ import (
 
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/tools/cache"
@@ -93,15 +94,20 @@ func (c *Controller) clearBaselineAdminNetworkPolicy(banpName string) error {
 	}
 
 	// clear NBDB objects for the given BANP (PG, ACLs on that PG, AddrSets used by the ACLs)
-	// remove PG for Subject (ACLs will get cleaned up automatically)
-	portGroupName := c.getANPPortGroupName(banp.name, true)
+	// remove PG for Subject (ACLs will get cleaned up automatically) across all networks
+	predicateIDs := libovsdbops.NewDbObjectIDsAcrossAllContollers(libovsdbops.AddressSetBaselineAdminNetworkPolicy,
+		map[libovsdbops.ExternalIDKey]string{
+			libovsdbops.ObjectNameKey: banp.name,
+		})
+	pgPredicate := libovsdbops.GetPredicateAcrossAllControllers[*nbdb.PortGroup](predicateIDs, nil)
 	// no need to batch this with address-set deletes since this itself will contain a bunch of ACLs that need to be deleted which is heavy enough.
-	err := libovsdbops.DeletePortGroups(c.nbClient, portGroupName)
+	err := libovsdbops.DeletePortGroupsWithPredicate(c.nbClient, pgPredicate)
 	if err != nil {
-		return fmt.Errorf("unable to delete PG %s for BANP %s: %w", portGroupName, banp.name, err)
+		return fmt.Errorf("unable to delete PGs for BANP %s: %w", banpName, err)
 	}
-	// remove address-sets that were created for the peers of each rule fpr the whole ANP
+	// remove address-sets that were created for the peers of each rule fpr the whole BANP
 	// do this after ACLs are gone so that there is no lingering references
+	// do this across all networks for this BANP
 	err = c.clearASForPeers(banp.name, libovsdbops.AddressSetBaselineAdminNetworkPolicy)
 	if err != nil {
 		return fmt.Errorf("failed to delete address-sets for BANP %s: %w", banp.name, err)
@@ -124,10 +130,9 @@ func (c *Controller) ensureBaselineAdminNetworkPolicy(banp *anpapi.BaselineAdmin
 	// fetch the banpState from our cache
 	currentBANPState := c.banpCache
 	// Based on the latest kapi BANP, namespace and pod objects:
-	// 1) Construct Port Group name using ANP name
-	// 2) Construct Address-sets with IPs of the peers in the rules
-	// 3) Construct ACLs using AS-es and PGs
-	portGroupName := c.getANPPortGroupName(desiredBANPState.name, true)
+	// 1) Construct Address-sets with IPs of the peers in the rules
+	// 2) Construct ACLs using AS-es and PGs
+	// acrss all networks in the cluster
 	desiredPorts, err := c.convertANPSubjectToLSPs(desiredBANPState)
 	if err != nil {
 		return fmt.Errorf("unable to fetch ports for banp %s: %v", desiredBANPState.name, err)
@@ -137,7 +142,7 @@ func (c *Controller) ensureBaselineAdminNetworkPolicy(banp *anpapi.BaselineAdmin
 		return fmt.Errorf("unable to convert peers to addresses for banp %s: %v", desiredBANPState.name, err)
 	}
 	atLeastOneRuleUpdated := false
-	desiredACLs := c.convertANPRulesToACLs(desiredBANPState, currentBANPState, portGroupName, &atLeastOneRuleUpdated, true)
+	desiredACLs := c.convertANPRulesToACLs(desiredBANPState, currentBANPState, &atLeastOneRuleUpdated, true)
 
 	// Comparing names for figuring out if cache is populated or not is safe
 	// because the singleton BANP will always be called "default" in any cluster
