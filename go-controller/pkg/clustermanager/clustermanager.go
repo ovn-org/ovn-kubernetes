@@ -86,17 +86,15 @@ func NewClusterManager(ovnClient *util.OVNClusterManagerClientset, wf *factory.W
 
 	cm.networkManager = networkmanager.Default()
 	if config.OVNKubernetesFeature.EnableMultiNetwork {
+		cm.networkManager, err = networkmanager.NewForCluster(cm, wf, ovnClient, recorder)
+		if err != nil {
+			return nil, err
+		}
+
 		cm.secondaryNetClusterManager, err = newSecondaryNetworkClusterManager(ovnClient, wf, cm.networkManager.Interface(), recorder)
 		if err != nil {
 			return nil, err
 		}
-
-		cm.networkManager, err = networkmanager.NewForCluster(cm.secondaryNetClusterManager, wf, ovnClient, recorder)
-		if err != nil {
-			return nil, err
-		}
-		cm.secondaryNetClusterManager.networkManager = cm.networkManager.Interface()
-
 	}
 
 	if config.OVNKubernetesFeature.EnableEgressIP {
@@ -257,4 +255,23 @@ func (cm *ClusterManager) Stop() {
 		cm.raController.Stop()
 		cm.raController = nil
 	}
+}
+
+func (cm *ClusterManager) NewNetworkController(netInfo util.NetInfo) (networkmanager.NetworkController, error) {
+	return cm.secondaryNetClusterManager.NewNetworkController(netInfo)
+}
+
+func (cm *ClusterManager) GetDefaultNetworkController() networkmanager.ReconcilableNetworkController {
+	return cm.defaultNetClusterController
+}
+
+func (cm *ClusterManager) CleanupStaleNetworks(validNetworks ...util.NetInfo) error {
+	return cm.secondaryNetClusterManager.CleanupStaleNetworks(validNetworks...)
+}
+
+func (cm *ClusterManager) Reconcile(name string, old, new util.NetInfo) error {
+	if cm.raController != nil {
+		cm.raController.ReconcileNetwork(name, old, new)
+	}
+	return nil
 }

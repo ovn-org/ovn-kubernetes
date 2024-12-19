@@ -40,6 +40,10 @@ func (fcm *FakeControllerManager) GetDefaultNetworkController() networkmanager.R
 	return nil
 }
 
+func (fcm *FakeControllerManager) Reconcile(name string, old, new util.NetInfo) error {
+	return nil
+}
+
 type FakeNetworkManager struct {
 	// namespace -> netInfo
 	PrimaryNetworks map[string]util.NetInfo
