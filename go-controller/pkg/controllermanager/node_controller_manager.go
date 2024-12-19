@@ -73,26 +73,9 @@ func (ncm *NodeControllerManager) CleanupStaleNetworks(validNetworks ...util.Net
 		if !network.IsPrimaryNetwork() {
 			continue
 		}
-		networkID, err := ncm.getNetworkID(network)
-		if err != nil {
-			klog.Errorf("Failed to get network identifier for network %s, error: %s", network.GetNetworkName(), err)
-			continue
-		}
-		validVRFDevices.Insert(util.GetVRFDeviceNameForUDN(networkID))
+		validVRFDevices.Insert(util.GetNetworkVRFName(network))
 	}
 	return ncm.vrfManager.Repair(validVRFDevices)
-}
-
-func (ncm *NodeControllerManager) getNetworkID(network util.NetInfo) (int, error) {
-	nodes, err := ncm.watchFactory.GetNodes()
-	if err != nil {
-		return util.InvalidID, err
-	}
-	networkID, err := util.GetNetworkID(nodes, network)
-	if err != nil {
-		return util.InvalidID, err
-	}
-	return networkID, nil
 }
 
 // newCommonNetworkControllerInfo creates and returns the base node network controller info
@@ -388,4 +371,8 @@ func checkForStaleOVSInternalPorts() {
 		klog.Errorf("Failed to delete OVS port/interfaces: stderr: %s (%v)",
 			stderr, err)
 	}
+}
+
+func (ncm *NodeControllerManager) Reconcile(name string, old, new util.NetInfo) error {
+	return nil
 }
