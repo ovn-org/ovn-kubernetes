@@ -195,8 +195,9 @@ jobs:
       run: |
         set -x
         pushd go-controller
-           # exit early if there are gofmt issues
+           # exit early if there are gofmt or go mod / vendor issues
            make gofmt
+           make verify-go-mod-vendor
            make
            make windows
            COVERALLS=1 CONTAINER_RUNNABLE=1 make check
