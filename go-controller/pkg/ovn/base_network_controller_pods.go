@@ -360,7 +360,7 @@ func (bnc *BaseNetworkController) waitForNodeLogicalSwitch(switchName string) (*
 	// in libovsdb's cache. The node switch will be created when the node's logical network infrastructure
 	// is created by the node watch
 	ls := &nbdb.LogicalSwitch{Name: switchName}
-	if err := wait.PollUntilContextTimeout(context.Background(), 30*time.Millisecond, 30*time.Second, true, func(ctx context.Context) (bool, error) {
+	if err := wait.PollUntilContextTimeout(context.Background(), 30*time.Millisecond, config.LogicalSwitchSyncWaitTimeout, true, func(ctx context.Context) (bool, error) {
 		if subnets := bnc.lsManager.GetSwitchSubnets(switchName); subnets == nil {
 			return false, fmt.Errorf("error getting logical switch %s: %s", switchName, "switch not in logical switch cache")
 		}
@@ -377,7 +377,7 @@ func (bnc *BaseNetworkController) waitForNodeLogicalSwitchSubnetsInCache(switchN
 	// is created by the node watch.
 	// This function is only invoked when IPAM is required.
 	var subnets []*net.IPNet
-	if err := wait.PollUntilContextTimeout(context.Background(), 30*time.Millisecond, 30*time.Second, true, func(ctx context.Context) (bool, error) {
+	if err := wait.PollUntilContextTimeout(context.Background(), 30*time.Millisecond, config.LogicalSwitchSyncWaitTimeout, true, func(ctx context.Context) (bool, error) {
 		subnets = bnc.lsManager.GetSwitchSubnets(switchName)
 		return subnets != nil, nil
 	}); err != nil {

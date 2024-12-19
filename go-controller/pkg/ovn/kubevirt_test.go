@@ -487,7 +487,6 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 
 		app = cli.NewApp()
 		app.Name = "test"
-		app.Flags = config.Flags
 
 		// To skip port group not found error
 		config.EnableMulticast = false
@@ -724,7 +723,6 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 						return err
 					}).
 						WithTimeout(time.Minute).
-						WithPolling(time.Second).
 						Should(Succeed(), "should fill in the cache with the pod")
 
 					// Change the phase by updating to emulate the logic of transition
@@ -737,7 +735,6 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 							return updatedPod.Status.Phase, err
 						}).
 							WithTimeout(time.Minute).
-							WithPolling(time.Second).
 							Should(Equal(podToCreate.Status.Phase), "should be in the updated phase")
 
 					}
