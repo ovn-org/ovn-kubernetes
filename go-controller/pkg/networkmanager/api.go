@@ -120,6 +120,10 @@ type ControllerManager interface {
 	NewNetworkController(netInfo util.NetInfo) (NetworkController, error)
 	GetDefaultNetworkController() ReconcilableNetworkController
 	CleanupStaleNetworks(validNetworks ...util.NetInfo) error
+
+	// Reconcile informs the manager of network changes that other managed
+	// network aware controllers might be interested in.
+	Reconcile(name string, old, new util.NetInfo) error
 }
 
 // ReconcilableNetworkController is a network controller that can reconcile
