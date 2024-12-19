@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	ipamclaimsapi "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1"
 	ipamclaimssclientset "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1/apis/clientset/versioned"
+	nadclientset "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned"
 	ocpcloudnetworkapi "github.com/openshift/api/cloudnetwork/v1"
 	ocpcloudnetworkclientset "github.com/openshift/client-go/cloudnetwork/clientset/versioned"
 	adminpolicybasedrouteclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/clientset/versioned"
@@ -84,6 +85,7 @@ type KubeOVN struct {
 	APBRouteClient       adminpolicybasedrouteclientset.Interface
 	EgressQoSClient      egressqosclientset.Interface
 	IPAMClaimsClient     ipamclaimssclientset.Interface
+	NADClient            nadclientset.Interface
 }
 
 // SetAnnotationsOnPod takes the pod object and map of key/value string pairs to set as annotations
@@ -461,5 +463,31 @@ func (k *KubeOVN) UpdateEgressServiceStatus(namespace, name, host string) error 
 
 func (k *KubeOVN) UpdateIPAMClaimIPs(updatedIPAMClaim *ipamclaimsapi.IPAMClaim) error {
 	_, err := k.IPAMClaimsClient.K8sV1alpha1().IPAMClaims(updatedIPAMClaim.Namespace).UpdateStatus(context.TODO(), updatedIPAMClaim, metav1.UpdateOptions{})
+	return err
+}
+
+// SetAnnotationsOnNAD takes a NAD namespace and name and a map of key/value string pairs to set as annotations
+func (k *KubeOVN) SetAnnotationsOnNAD(namespace, name string, annotations map[string]string, fieldManager string) error {
+	var err error
+	var patchData []byte
+	patch := struct {
+		Metadata map[string]interface{} `json:"metadata"`
+	}{
+		Metadata: map[string]interface{}{
+			"annotations": annotations,
+		},
+	}
+
+	patchData, err = json.Marshal(&patch)
+	if err != nil {
+		return err
+	}
+
+	patchOptions := metav1.PatchOptions{}
+	if fieldManager != "" {
+		patchOptions.FieldManager = fieldManager
+	}
+
+	_, err = k.NADClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(namespace).Patch(context.Background(), name, types.MergePatchType, patchData, patchOptions)
 	return err
 }
