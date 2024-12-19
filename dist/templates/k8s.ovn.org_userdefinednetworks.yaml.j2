@@ -109,6 +109,10 @@ spec:
                 - message: IPAMLifecycle is only supported when subnets are set
                   rule: '!has(self.ipamLifecycle) || has(self.subnets) && size(self.subnets)
                     > 0'
+                - message: MTU should be greater than or equal to 1280 when IPv6 subent
+                    is used
+                  rule: '!has(self.mtu) || !has(self.subnets) || !self.subnets.exists_one(i,
+                    cidr(i).ip().family() == 6) || self.mtu >= 1280'
               layer3:
                 description: Layer3 is the Layer3 topology configuration.
                 properties:
@@ -182,6 +186,10 @@ spec:
                 - message: JoinSubnets is only supported for Primary network
                   rule: '!has(self.joinSubnets) || has(self.role) && self.role ==
                     ''Primary'''
+                - message: MTU should be greater than or equal to 1280 when IPv6 subent
+                    is used
+                  rule: '!has(self.mtu) || !has(self.subnets) || !self.subnets.exists_one(i,
+                    cidr(i.cidr).ip().family() == 6) || self.mtu >= 1280'
               topology:
                 description: |-
                   Topology describes network configuration.
