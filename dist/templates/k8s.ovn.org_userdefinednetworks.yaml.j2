@@ -42,16 +42,42 @@ spec:
               layer2:
                 description: Layer2 is the Layer2 topology configuration.
                 properties:
-                  ipamLifecycle:
-                    description: |-
-                      IPAMLifecycle controls IP addresses management lifecycle.
+                  ipam:
+                    description: IPAM section contains IPAM-related configuration
+                      for the network.
+                    minProperties: 1
+                    properties:
+                      lifecycle:
+                        description: |-
+                          Lifecycle controls IP addresses management lifecycle.
 
-                      The only allowed value is Persistent. When set, OVN Kubernetes assigned IP addresses will be persisted in an
-                      `ipamclaims.k8s.cni.cncf.io` object. These IP addresses will be reused by other pods if requested.
-                      Only supported when "subnets" are set.
-                    enum:
-                    - Persistent
-                    type: string
+                          The only allowed value is Persistent. When set, OVN Kubernetes assigned IP addresses will be persisted in an
+                          `ipamclaims.k8s.cni.cncf.io` object. These IP addresses will be reused by other pods if requested.
+                          Only supported when mode is `Enabled`.
+                        enum:
+                        - Persistent
+                        type: string
+                      mode:
+                        description: |-
+                          Mode controls how much of the IP configuration will be managed by OVN.
+                          `Enabled` means OVN-Kubernetes will apply IP configuration to the SDN infrastructure and it will also assign IPs
+                          from the selected subnet to the individual pods.
+                          `Disabled` means OVN-Kubernetes will only assign MAC addresses and provide layer 2 communication, letting users
+                          configure IP addresses for the pods.
+                          `Disabled` is only available for Secondary networks.
+                          By disabling IPAM, any Kubernetes features that rely on selecting pods by IP will no longer function
+                          (such as network policy, services, etc). Additionally, IP port security will also be disabled for interfaces attached to this network.
+                          Defaults to `Enabled`.
+                        enum:
+                        - Enabled
+                        - Disabled
+                        type: string
+                    type: object
+                    x-kubernetes-validations:
+                    - message: lifecycle Persistent is only supported when ipam.mode
+                        is Enabled
+                      rule: '!has(self.lifecycle) || self.lifecycle != ''Persistent''
+                        || !has(self.mode) || self.mode == ''Enabled'''
                   joinSubnets:
                     description: |-
                       JoinSubnets are used inside the OVN network topology.
@@ -61,6 +87,7 @@ spec:
                       It is not recommended to set this field without explicit need and understanding of the OVN network topology.
                       When omitted, the platform will choose a reasonable default which is subject to change over time.
                     items:
+                      maxLength: 43
                       type: string
                       x-kubernetes-validations:
                       - message: CIDR is invalid
@@ -97,9 +124,9 @@ spec:
                       Dual-stack clusters may set 2 subnets (one for each IP family), otherwise only 1 subnet is allowed.
 
                       The format should match standard CIDR notation (for example, "10.128.0.0/16").
-                      This field may be omitted. In that case the logical switch implementing the network only provides layer 2 communication,
-                      and users must configure IP addresses for the pods. As a consequence, Port security only prevents MAC spoofing.
+                      This field must be omitted if `ipam.mode` is `Disabled`.
                     items:
+                      maxLength: 43
                       type: string
                       x-kubernetes-validations:
                       - message: CIDR is invalid
@@ -116,14 +143,18 @@ spec:
                 - role
                 type: object
                 x-kubernetes-validations:
-                - message: Subnets is required for Primary Layer2 topology
-                  rule: self.role != 'Primary' || has(self.subnets)
+                - message: Subnets is required with ipam.mode is Enabled or unset
+                  rule: has(self.ipam) && has(self.ipam.mode) && self.ipam.mode !=
+                    'Enabled' || has(self.subnets)
+                - message: Subnets must be unset when ipam.mode is Disabled
+                  rule: '!has(self.ipam) || !has(self.ipam.mode) || self.ipam.mode
+                    != ''Disabled'' || !has(self.subnets)'
+                - message: Disabled ipam.mode is only supported for Secondary network
+                  rule: '!has(self.ipam) || !has(self.ipam.mode) || self.ipam.mode
+                    != ''Disabled'' || self.role == ''Secondary'''
                 - message: JoinSubnets is only supported for Primary network
                   rule: '!has(self.joinSubnets) || has(self.role) && self.role ==
                     ''Primary'''
-                - message: IPAMLifecycle is only supported when subnets are set
-                  rule: '!has(self.ipamLifecycle) || has(self.subnets) && size(self.subnets)
-                    > 0'
                 - message: MTU should be greater than or equal to 1280 when IPv6 subent
                     is used
                   rule: '!has(self.subnets) || !has(self.mtu) || !self.subnets.exists_one(i,
@@ -140,6 +171,7 @@ spec:
                       It is not recommended to set this field without explicit need and understanding of the OVN network topology.
                       When omitted, the platform will choose a reasonable default which is subject to change over time.
                     items:
+                      maxLength: 43
                       type: string
                       x-kubernetes-validations:
                       - message: CIDR is invalid
@@ -183,6 +215,7 @@ spec:
                         cidr:
                           description: CIDR specifies L3Subnet, which is split into
                             smaller subnets for every node.
+                          maxLength: 43
                           type: string
                           x-kubernetes-validations:
                           - message: CIDR is invalid
@@ -225,7 +258,8 @@ spec:
                 - message: MTU should be greater than or equal to 1280 when IPv6 subent
                     is used
                   rule: '!has(self.subnets) || !has(self.mtu) || !self.subnets.exists_one(i,
-                    cidr(i.cidr).ip().family() == 6) || self.mtu >= 1280'
+                    isCIDR(i.cidr) && cidr(i.cidr).ip().family() == 6) || self.mtu
+                    >= 1280'
               topology:
                 description: |-
                   Topology describes network configuration.
