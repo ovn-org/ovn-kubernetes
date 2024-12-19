@@ -41,6 +41,8 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
+const conditionTypeNetworkCreated = "NetworkCreated"
+
 type RenderNetAttachDefManifest func(obj client.Object, targetNamespace string) (*netv1.NetworkAttachmentDefinition, error)
 
 type networkInUseError struct {
@@ -417,9 +419,9 @@ func (c *Controller) updateUserDefinedNetworkStatus(udn *userdefinednetworkv1.Us
 		return nil
 	}
 
-	networkReadyCondition := newNetworkReadyCondition(nad, syncError)
+	networkCreatedCondition := newNetworkCreatedCondition(nad, syncError)
 
-	conditions, updated := updateCondition(udn.Status.Conditions, networkReadyCondition)
+	conditions, updated := updateCondition(udn.Status.Conditions, networkCreatedCondition)
 
 	if updated {
 		var err error
@@ -450,28 +452,28 @@ func (c *Controller) updateUserDefinedNetworkStatus(udn *userdefinednetworkv1.Us
 	return nil
 }
 
-func newNetworkReadyCondition(nad *netv1.NetworkAttachmentDefinition, syncError error) *metav1.Condition {
+func newNetworkCreatedCondition(nad *netv1.NetworkAttachmentDefinition, syncError error) *metav1.Condition {
 	now := metav1.Now()
-	networkReadyCondition := &metav1.Condition{
-		Type:               "NetworkReady",
+	networkCreatedCondition := &metav1.Condition{
+		Type:               conditionTypeNetworkCreated,
 		Status:             metav1.ConditionTrue,
-		Reason:             "NetworkAttachmentDefinitionReady",
+		Reason:             "NetworkAttachmentDefinitionCreated",
 		Message:            "NetworkAttachmentDefinition has been created",
 		LastTransitionTime: now,
 	}
 
 	if nad != nil && !nad.DeletionTimestamp.IsZero() {
-		networkReadyCondition.Status = metav1.ConditionFalse
-		networkReadyCondition.Reason = "NetworkAttachmentDefinitionDeleted"
-		networkReadyCondition.Message = "NetworkAttachmentDefinition is being deleted"
+		networkCreatedCondition.Status = metav1.ConditionFalse
+		networkCreatedCondition.Reason = "NetworkAttachmentDefinitionDeleted"
+		networkCreatedCondition.Message = "NetworkAttachmentDefinition is being deleted"
 	}
 	if syncError != nil {
-		networkReadyCondition.Status = metav1.ConditionFalse
-		networkReadyCondition.Reason = "SyncError"
-		networkReadyCondition.Message = syncError.Error()
+		networkCreatedCondition.Status = metav1.ConditionFalse
+		networkCreatedCondition.Reason = "SyncError"
+		networkCreatedCondition.Message = syncError.Error()
 	}
 
-	return networkReadyCondition
+	return networkCreatedCondition
 }
 
 func updateCondition(conditions []metav1.Condition, cond *metav1.Condition) ([]metav1.Condition, bool) {
@@ -635,9 +637,9 @@ func (c *Controller) updateClusterUDNStatus(cudn *userdefinednetworkv1.ClusterUs
 		return strings.Compare(a.Namespace, b.Namespace)
 	})
 
-	networkReadyCondition := newClusterNetworkReadyCondition(nads, syncError)
+	networkCreatedCondition := newClusterNetworCreatedCondition(nads, syncError)
 
-	conditions, updated := updateCondition(cudn.Status.Conditions, networkReadyCondition)
+	conditions, updated := updateCondition(cudn.Status.Conditions, networkCreatedCondition)
 	if !updated {
 		return nil
 	}
@@ -669,7 +671,7 @@ func (c *Controller) updateClusterUDNStatus(cudn *userdefinednetworkv1.ClusterUs
 	return nil
 }
 
-func newClusterNetworkReadyCondition(nads []netv1.NetworkAttachmentDefinition, syncError error) *metav1.Condition {
+func newClusterNetworCreatedCondition(nads []netv1.NetworkAttachmentDefinition, syncError error) *metav1.Condition {
 	var namespaces []string
 	for _, nad := range nads {
 		namespaces = append(namespaces, nad.Namespace)
@@ -678,9 +680,9 @@ func newClusterNetworkReadyCondition(nads []netv1.NetworkAttachmentDefinition, s
 
 	now := metav1.Now()
 	condition := &metav1.Condition{
-		Type:               "NetworkReady",
+		Type:               conditionTypeNetworkCreated,
 		Status:             metav1.ConditionTrue,
-		Reason:             "NetworkAttachmentDefinitionReady",
+		Reason:             "NetworkAttachmentDefinitionCreated",
 		Message:            fmt.Sprintf("NetworkAttachmentDefinition has been created in following namespaces: [%s]", affectedNamespaces),
 		LastTransitionTime: now,
 	}
