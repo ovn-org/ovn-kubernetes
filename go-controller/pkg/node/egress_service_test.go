@@ -68,6 +68,7 @@ var _ = Describe("Egress Service Operations", func() {
 					Output: "[{\"priority\":5000,\"src\":\"10.128.0.3\",\"table\":\"wrongTable\"},{\"priority\":5000,\"src\":\"goneEp\",\"table\":\"mynetwork\"}," +
 						"{\"priority\":5000,\"src\":\"10.128.0.3\",\"table\":\"mynetwork\"},{\"priority\":5000,\"src\":\"10.129.0.2\",\"table\":\"mynetwork\"}," +
 						"{\"priority\":5000,\"src\":\"10.128.0.33\",\"table\":\"mynetwork2\"},{\"priority\":5000,\"src\":\"10.129.0.3\",\"table\":\"mynetwork2\"}," +
+						"{\"priority\":5000,\"src\":\"10.128.0.4\",\"table\":\"mynetwork\"},{\"priority\":5000,\"src\":\"10.129.0.4\",\"table\":\"mynetwork\"}," +
 						fmt.Sprintf("{\"priority\":5000,\"src\":\"%s\",\"sport\":31111,\"table\":\"mynetwork\"},", config.Gateway.MasqueradeIPs.V4HostETPLocalMasqueradeIP) +
 						fmt.Sprintf("{\"priority\":5000,\"src\":\"%s\",\"sport\":30300,\"table\":\"mynetwork2\"}]", config.Gateway.MasqueradeIPs.V4HostETPLocalMasqueradeIP),
 					Err: nil,
@@ -121,8 +122,8 @@ var _ = Describe("Egress Service Operations", func() {
 						Table: "nat",
 						Chain: "OVN-KUBE-EGRESS-SVC",
 						Args: []string{
-							"-s", "10.128.0.3",
-							"-m", "comment", "--comment", "namespace1/service1",
+							"-s", "10.128.0.4",
+							"-m", "comment", "--comment", "namespace1/service3",
 							"-j", "SNAT",
 							"--to-source", "5.200.5.12", // wrong lb
 						},
@@ -132,7 +133,7 @@ var _ = Describe("Egress Service Operations", func() {
 						Table: "nat",
 						Chain: "OVN-KUBE-EGRESS-SVC",
 						Args: []string{
-							"-s", "10.128.0.3",
+							"-s", "10.128.0.5",
 							"-m", "comment", "--comment", "namespace13service6", // gone service
 							"-j", "SNAT",
 							"--to-source", "1.2.3.4",
@@ -250,23 +251,67 @@ var _ = Describe("Egress Service Operations", func() {
 					[]discovery.Endpoint{ep3},
 					[]discovery.EndpointPort{epPort})
 
+				egressService3 := egressserviceapi.EgressService{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "service3",
+						Namespace: "namespace1",
+					},
+					Spec: egressserviceapi.EgressServiceSpec{
+						Network: "mynetwork",
+					},
+					Status: egressserviceapi.EgressServiceStatus{
+						Host: fakeNodeName,
+					},
+				}
+				service3 := *newService("service3", "namespace1", "10.129.0.4",
+					[]v1.ServicePort{
+						{
+							NodePort: int32(32222),
+							Protocol: v1.ProtocolTCP,
+							Port:     int32(8080),
+						},
+					},
+					v1.ServiceTypeLoadBalancer,
+					[]string{},
+					v1.ServiceStatus{
+						LoadBalancer: v1.LoadBalancerStatus{
+							Ingress: []v1.LoadBalancerIngress{{
+								IP: "6.6.6.6",
+							}},
+						},
+					},
+					false, false,
+				)
+
+				ep3_1 := discovery.Endpoint{
+					Addresses: []string{"10.128.0.4"},
+				}
+				endpointSlice3 := *newEndpointSlice(
+					"service3",
+					"namespace1",
+					[]discovery.Endpoint{ep3_1},
+					[]discovery.EndpointPort{epPort})
+
 				fakeOvnNode.start(ctx,
 					&v1.ServiceList{
 						Items: []v1.Service{
 							service,
 							service2,
+							service3,
 						},
 					},
 					&discovery.EndpointSliceList{
 						Items: []discovery.EndpointSlice{
 							endpointSlice,
 							endpointSlice2,
+							endpointSlice3,
 						},
 					},
 					&egressserviceapi.EgressServiceList{
 						Items: []egressserviceapi.EgressService{
 							egressService,
 							egressService2,
+							egressService3,
 						},
 					},
 				)
@@ -283,6 +328,7 @@ var _ = Describe("Egress Service Operations", func() {
 						"OVN-KUBE-EGRESS-SVC": []string{
 							"-m mark --mark 0x3f0 -m comment --comment DoNotSNAT -j RETURN",
 							"-s 10.128.0.3 -m comment --comment namespace1/service1 -j SNAT --to-source 5.5.5.5",
+							"-s 10.128.0.4 -m comment --comment namespace1/service3 -j SNAT --to-source 6.6.6.6",
 						},
 					},
 					"filter": {},
