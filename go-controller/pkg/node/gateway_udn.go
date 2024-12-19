@@ -293,7 +293,7 @@ func (udng *UserDefinedNetworkGateway) AddNetwork() error {
 	if err != nil {
 		return fmt.Errorf("could not create management port netdevice for network %s: %w", udng.GetNetworkName(), err)
 	}
-	vrfDeviceName := util.GetVRFDeviceNameForUDN(udng.networkID)
+	vrfDeviceName := util.GetNetworkVRFName(udng.NetInfo)
 	vrfTableId := util.CalculateRouteTableID(mplink.Attrs().Index)
 	routes, err := udng.computeRoutesForUDN(vrfTableId, mplink)
 	if err != nil {
@@ -367,7 +367,7 @@ func (udng *UserDefinedNetworkGateway) GetNetworkRuleMetadata() string {
 // DelNetwork will be responsible to remove all plumbings
 // used by this UDN on the gateway side
 func (udng *UserDefinedNetworkGateway) DelNetwork() error {
-	vrfDeviceName := util.GetVRFDeviceNameForUDN(udng.networkID)
+	vrfDeviceName := util.GetNetworkVRFName(udng.NetInfo)
 	// delete the iprules for this network
 	if err := udng.ruleManager.DeleteWithMetadata(udng.GetNetworkRuleMetadata()); err != nil {
 		return fmt.Errorf("unable to delete iprules for network %s, err: %v", udng.GetNetworkName(), err)
