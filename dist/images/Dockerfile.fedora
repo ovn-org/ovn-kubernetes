@@ -9,25 +9,93 @@
 # are built locally and included in the image (instead of the rpm)
 #
 
-FROM fedora:41
+ARG OVN_FROM=koji
+
+FROM fedora:41 AS ovnbuilder
 
 USER root
 
 ENV PYTHONDONTWRITEBYTECODE yes
 
+# Install tools that are required for building ovs/ovn.
+RUN INSTALL_PKGS="git rpm-build dnf-plugins-core" && \
+    dnf install --best --refresh -y --setopt=tsflags=nodocs $INSTALL_PKGS
+
+# Clone OVS Source Code.
+ARG OVS_REPO=https://github.com/openvswitch/ovs.git
+ARG OVS_BRANCH=main
+WORKDIR /root
+RUN git clone $OVS_REPO --single-branch --branch=$OVS_BRANCH
+
+# Build OVS rpms.
+WORKDIR /root/ovs
+RUN sed -e 's/@VERSION@/0.0.1/' rhel/openvswitch-fedora.spec.in > /tmp/ovs.spec
+RUN dnf builddep -y /tmp/ovs.spec
+RUN ./boot.sh
+RUN ./configure
+RUN make rpm-fedora
+RUN rm rpm/rpmbuild/RPMS/x86_64/*debug*
+RUN rm rpm/rpmbuild/RPMS/x86_64/*devel*
+RUN git log -n 1
+
+# Clone OVN Source Code.
+ARG OVN_REPO=https://github.com/ovn-org/ovn.git
+ARG OVN_BRANCH=main
+ARG OVN_COMMIT=HEAD
+WORKDIR /root
+RUN git clone $OVN_REPO --single-branch --branch=$OVN_BRANCH && \ 
+    pushd ovn && \
+    git checkout $OVN_COMMIT && \
+    popd
+
+# Build OVN rpms.
+WORKDIR /root/ovn/
+RUN sed -e 's/@VERSION@/0.0.1/' rhel/ovn-fedora.spec.in > /tmp/ovn.spec
+RUN dnf builddep -y /tmp/ovn.spec
+RUN ./boot.sh
+RUN ./configure --with-ovs-source=/root/ovs/
+RUN make rpm-fedora
+RUN rm rpm/rpmbuild/RPMS/x86_64/*debug*
+RUN rm rpm/rpmbuild/RPMS/x86_64/*docker*
+RUN git log -n 1
+
+FROM fedora:41 AS kojidownloader
 ARG ovnver=ovn-24.09.0-33.fc41
+
+USER root
+
 # Automatically populated when using docker buildx
 ARG TARGETPLATFORM
 ARG BUILDPLATFORM
 
 RUN echo "Running on $BUILDPLATFORM, building for $TARGETPLATFORM"
 
+# Install koji, don't clean dnf cache we will install extra packages at
+# Final stage
+RUN dnf install --best --refresh -y --setopt=tsflags=nodocs koji 
+
+RUN if [ "$TARGETPLATFORM" = "linux/amd64" ] || [ -z "$TARGETPLATFORM"] ; then koji download-build $ovnver --arch=x86_64  ; \
+    else koji download-build $ovnver --arch=aarch64 ; fi
+
+FROM fedora:41 AS source
+COPY --from=ovnbuilder /root/ovn/rpm/rpmbuild/RPMS/x86_64/*.rpm /
+
+FROM fedora:41 AS koji
+
+COPY --from=kojidownloader /*.rpm /
+   
+FROM ${OVN_FROM}
+
+USER root
+
+ENV PYTHONDONTWRITEBYTECODE yes
+
 # install needed rpms - openvswitch must be 2.10.4 or higher
 RUN INSTALL_PKGS=" \
     python3-pip python3-pyyaml bind-utils procps-ng openssl numactl-libs firewalld-filesystem \
     libpcap hostname kubernetes-client util-linux \
     ovn ovn-central ovn-host python3-openvswitch tcpdump openvswitch-test python3-pyOpenSSL \
-    iptables nftables iproute iputils strace socat koji \
+    iptables nftables iproute iputils strace socat \
     libreswan openvswitch-ipsec \
     " && \
     dnf install --best --refresh -y --setopt=tsflags=nodocs $INSTALL_PKGS && \
@@ -36,10 +104,7 @@ RUN ln -s /usr/bin/python3 /usr/libexec/platform-python
 
 RUN mkdir -p /var/run/openvswitch
 
-RUN if [ "$TARGETPLATFORM" = "linux/amd64" ] || [ -z "$TARGETPLATFORM"] ; then koji download-build $ovnver --arch=x86_64  ; \
-    else koji download-build $ovnver --arch=aarch64 ; fi
-
-RUN rpm -Uhv --nodeps --force *.rpm
+RUN rpm -Uhv --nodeps --force /*.rpm
 
 # Built in ../../go_controller, then the binaries are copied here.
 # put things where they are in the pkg

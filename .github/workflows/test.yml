@@ -31,6 +31,12 @@ env:
   CI_IMAGE_PR_TAR: image-pr.tar
   CI_DIST_IMAGES_OUTPUT: dist/images/_output/
 
+  # Select the OVN to build from
+  OVN_FROM: koji
+  # OVN_FROM: source
+  # OVN_REPO: https://github.com/ovn-org/ovn
+  # OVN_BRANCH:main
+  # OVN_COMMIT: HEAD
 
 jobs:
   # separate job for parallelism
@@ -120,7 +126,13 @@ jobs:
           sudo cp -f ../../go-controller/_output/go/bin/ovn* .
           sudo cp -f ../../go-controller/_output/go/bin/hybrid-overlay-node .
           echo "ref: $(git rev-parse  --symbolic-full-name HEAD)  commit: $(git rev-parse  HEAD)" > git_info
-          docker build -t ovn-daemonset-fedora:dev -f Dockerfile.fedora .
+          docker build -t ovn-daemonset-fedora:dev \
+            --build-arg OVN_FROM=${{ env.OVN_FROM }} \
+            --build-arg OVN_REPO=${{ env.OVN_REPO }} \
+            --build-arg OVN_BRANCH=${{ env.OVN_BRANCH }} \
+            --build-arg OVN_COMMIT=${{ env.OVN_COMMIT }} \
+            -f Dockerfile.fedora .
+
         popd
 
     - name: Cache master image
@@ -203,6 +215,12 @@ jobs:
            COVERALLS=1 CONTAINER_RUNNABLE=1 make check
         popd
 
+    - name: Check custom OVN image build works
+      run: |
+        pushd dist/images
+          make fedora-dev
+        popd
+
     - name: Build docker image - from current pr branch
       if: steps.is_pr_image_build_needed.outputs.PR_IMAGE_RESTORED != 'true' && success()
       run: |
@@ -210,7 +228,12 @@ jobs:
           sudo cp -f ../../go-controller/_output/go/bin/ovn* .
           sudo cp -f ../../go-controller/_output/go/bin/hybrid-overlay-node .
           echo "ref: $(git rev-parse  --symbolic-full-name HEAD)  commit: $(git rev-parse  HEAD)" > git_info
-          docker build -t ovn-daemonset-fedora:pr -f Dockerfile.fedora .
+          docker build -t ovn-daemonset-fedora:pr \
+            --build-arg OVN_FROM=${{ env.OVN_FROM }} \
+            --build-arg OVN_REPO=${{ env.OVN_REPO }} \
+            --build-arg OVN_BRANCH=${{ env.OVN_BRANCH }} \
+            --build-arg OVN_COMMIT=${{ env.OVN_COMMIT }} \
+            -f Dockerfile.fedora .
           mkdir _output
           docker save ovn-daemonset-fedora:pr > _output/${CI_IMAGE_PR_TAR}
         popd
