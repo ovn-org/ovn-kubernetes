@@ -358,7 +358,7 @@ install_kubevirt() {
 
     local kubevirt_stable_release_url=$(get_kubevirt_release_url "stable")
     local passt_binding_image="quay.io/kubevirt/network-passt-binding:${kubevirt_stable_release_url##*/}"
-    kubectl -n kubevirt patch kubevirt kubevirt --type=json --patch '[{"op":"add","path":"/spec/configuration/network","value":{}},{"op":"add","path":"/spec/configuration/network/binding","value":{"passt":{"computeResourceOverhead":{"requests":{"memory":"500Mi"}},"migration":{"method":"link-refresh"},"networkAttachmentDefinition":"default/primary-udn-kubevirt-binding","sidecarImage":"'"${passt_binding_image}"'"},"managedTap":{"domainAttachmentType":"managedTap","migration":{}}}}]'
+    kubectl -n kubevirt patch kubevirt kubevirt --type=json --patch '[{"op":"add","path":"/spec/configuration/network","value":{}},{"op":"add","path":"/spec/configuration/network/binding","value":{"passt":{"computeResourceOverhead":{"requests":{"memory":"500Mi"}},"migration":{"method":"link-refresh"},"networkAttachmentDefinition":"default/primary-udn-kubevirt-binding","sidecarImage":"'"${passt_binding_image}"'"},"l2bridge":{"domainAttachmentType":"managedTap","migration":{}}}}]'
     
     if [ ! -d "./bin" ]
     then
