@@ -881,6 +881,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				_, err = fakeClusterManagerOVN.eIPC.WatchEgressIP()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
+				time.Sleep(5 * time.Second)
 				// Ensure first egressIP object is assigned, since only node1 is an egressNode, only 1IP will be assigned, other will be pending
 				gomega.Eventually(getEgressIPStatusLen(egressIPName)).Should(gomega.Equal(1))
 				gomega.Eventually(getEgressIPReassignmentCount).Should(gomega.Equal(1))
@@ -1349,6 +1350,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				_, err = fakeClusterManagerOVN.eIPC.WatchEgressIP()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
+				time.Sleep(5 * time.Second)
 				gomega.Eventually(getEgressIPStatusLen(egressIPName)).Should(gomega.Equal(1))
 				gomega.Eventually(getEgressIPReassignmentCount).Should(gomega.Equal(0))
 				gomega.Expect(fakeClusterManagerOVN.eIPC.nodeAllocator.cache).To(gomega.HaveKey(node2.Name))
@@ -3391,9 +3393,44 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				_, err := fakeClusterManagerOVN.eIPC.WatchEgressIP()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Eventually(getEgressIPStatusLen(egressIPName)).Should(gomega.Equal(2))
+				time.Sleep(1 * time.Second)
+				gomega.Eventually(func() error {
+					egressIPs, nodes := getEgressIPStatus(egressIPName)
+					found1, found2 := false, false
+					for _, node := range nodes {
+						if node == egressNode1.name {
+							found1 = true
+						}
+						if node == egressNode2.name {
+							found2 = true
+						}
+					}
+					if !found1 || !found2 {
+						return fmt.Errorf("did not find both nodes: node1: %t, node2: %t", found1, found2)
+					}
+
+					found1, found2 = false, false
+					for _, eip := range egressIPs {
+
+						if eip == eIP.Status.Items[0].EgressIP {
+							found1 = true
+						}
+
+						if eip == eIP.Status.Items[1].EgressIP {
+							found2 = true
+						}
+					}
+					if !found1 || !found2 {
+						return fmt.Errorf("did not find both eips: %s: %t, %s: %t",
+							eIP.Status.Items[0].EgressIP, found1,
+							eIP.Status.Items[1].EgressIP, found2)
+					}
+					return nil
+				}, 2*time.Second, 100*time.Millisecond)
 				egressIPs, nodes := getEgressIPStatus(egressIPName)
 				gomega.Expect(nodes).To(gomega.ConsistOf(egressNode1.name, egressNode2.name))
 				gomega.Expect(egressIPs).To(gomega.ConsistOf(eIP.Status.Items[0].EgressIP, eIP.Status.Items[1].EgressIP))
+
 				return nil
 			}
 
@@ -3478,6 +3515,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				fakeClusterManagerOVN.eIPC.nodeAllocator.cache[egressNode2.name] = &egressNode2
 
 				_, err := fakeClusterManagerOVN.eIPC.WatchEgressIP()
+				time.Sleep(5 * time.Second)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Eventually(getEgressIPStatusLen(egressIPName)).Should(gomega.Equal(1))
 				egressIPs, nodes := getEgressIPStatus(egressIPName)
