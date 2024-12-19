@@ -538,9 +538,22 @@ func (c *Controller) onANPPodUpdate(oldObj, newObj interface{}) {
 
 // onANPPodDelete queues the pod for processing.
 func (c *Controller) onANPPodDelete(obj interface{}) {
-	key, err := cache.MetaNamespaceKeyFunc(obj)
+	pod, ok := obj.(*v1.Pod)
+	if !ok {
+		tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
+		if !ok {
+			utilruntime.HandleError(fmt.Errorf("passed object is neither a pod nor a DeletedFinalStateUnknown type: %#v", obj))
+			return
+		}
+		pod, ok = tombstone.Obj.(*v1.Pod)
+		if !ok {
+			utilruntime.HandleError(fmt.Errorf("tombstone contained object that is not a Pod: %#v", obj))
+			return
+		}
+	}
+	key, err := cache.MetaNamespaceKeyFunc(pod)
 	if err != nil {
-		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", obj, err))
+		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", pod, err))
 		return
 	}
 	klog.V(5).Infof("Deleting Pod Admin Network Policy %s", key)
