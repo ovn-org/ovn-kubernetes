@@ -60,10 +60,9 @@ type Controller struct {
 	stopCh         <-chan struct{}
 	sync.Mutex
 
-	initClusterEgressPolicies                InitClusterEgressPoliciesFunc
-	ensureNoRerouteNodePolicies              EnsureNoRerouteNodePoliciesFunc
-	deleteLegacyDefaultNoRerouteNodePolicies DeleteLegacyDefaultNoRerouteNodePoliciesFunc
-	createDefaultRouteToExternalForIC        CreateDefaultRouteToExternalFunc
+	initClusterEgressPolicies         InitClusterEgressPoliciesFunc
+	ensureNoRerouteNodePolicies       EnsureNoRerouteNodePoliciesFunc
+	createDefaultRouteToExternalForIC CreateDefaultRouteToExternalFunc
 
 	services       map[string]*svcState  // svc key -> state, for services that have sourceIPBy LBIP
 	nodes          map[string]*nodeState // node name -> state, contains nodes that host an egress service
@@ -121,7 +120,6 @@ func NewController(
 	addressSetFactory addressset.AddressSetFactory,
 	initClusterEgressPolicies InitClusterEgressPoliciesFunc,
 	ensureNoRerouteNodePolicies EnsureNoRerouteNodePoliciesFunc,
-	deleteLegacyDefaultNoRerouteNodePolicies DeleteLegacyDefaultNoRerouteNodePoliciesFunc,
 	createDefaultRouteToExternalForIC CreateDefaultRouteToExternalFunc,
 	stopCh <-chan struct{},
 	esInformer egressserviceinformer.EgressServiceInformer,
@@ -132,20 +130,19 @@ func NewController(
 	klog.Info("Setting up event handlers for Egress Services")
 
 	c := &Controller{
-		NetInfo:                                  netInfo,
-		controllerName:                           controllerName,
-		client:                                   client,
-		nbClient:                                 nbClient,
-		addressSetFactory:                        addressSetFactory,
-		initClusterEgressPolicies:                initClusterEgressPolicies,
-		ensureNoRerouteNodePolicies:              ensureNoRerouteNodePolicies,
-		deleteLegacyDefaultNoRerouteNodePolicies: deleteLegacyDefaultNoRerouteNodePolicies,
-		createDefaultRouteToExternalForIC:        createDefaultRouteToExternalForIC,
-		stopCh:                                   stopCh,
-		services:                                 map[string]*svcState{},
-		nodes:                                    map[string]*nodeState{},
-		nodesZoneState:                           map[string]bool{},
-		zone:                                     zone,
+		NetInfo:                           netInfo,
+		controllerName:                    controllerName,
+		client:                            client,
+		nbClient:                          nbClient,
+		addressSetFactory:                 addressSetFactory,
+		initClusterEgressPolicies:         initClusterEgressPolicies,
+		ensureNoRerouteNodePolicies:       ensureNoRerouteNodePolicies,
+		createDefaultRouteToExternalForIC: createDefaultRouteToExternalForIC,
+		stopCh:                            stopCh,
+		services:                          map[string]*svcState{},
+		nodes:                             map[string]*nodeState{},
+		nodesZoneState:                    map[string]bool{},
+		zone:                              zone,
 	}
 
 	c.egressServiceLister = esInformer.Lister()

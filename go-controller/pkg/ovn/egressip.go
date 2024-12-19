@@ -2027,12 +2027,7 @@ func (e *EgressIPController) initClusterEgressPolicies(nodes []interface{}) erro
 	if err := InitClusterEgressPolicies(e.nbClient, e.addressSetFactory, defaultNetInfo, subnets, e.controllerName, defaultNetInfo.GetNetworkScopedClusterRouterName()); err != nil {
 		return fmt.Errorf("failed to initialize networks cluster logical router egress policies for the default network: %v", err)
 	}
-	for _, node := range nodes {
-		node := node.(*kapi.Node)
-		if err := DeleteLegacyDefaultNoRerouteNodePolicies(e.nbClient, defaultNetInfo.GetNetworkScopedClusterRouterName(), node.Name); err != nil {
-			return fmt.Errorf("failed to delete legacy default no reroute to nodes for node %s: %v", node.Name, err)
-		}
-	}
+
 	return e.networkManager.DoWithLock(func(network util.NetInfo) error {
 		if network.GetNetworkName() == types.DefaultNetworkName {
 			return nil
@@ -2047,12 +2042,6 @@ func (e *EgressIPController) initClusterEgressPolicies(nodes []interface{}) erro
 		}
 		if err = InitClusterEgressPolicies(e.nbClient, e.addressSetFactory, network, subnets, e.controllerName, routerName); err != nil {
 			return fmt.Errorf("failed to initialize networks cluster logical router egress policies for network %s: %v", network.GetNetworkName(), err)
-		}
-		for _, node := range nodes {
-			node := node.(*kapi.Node)
-			if err := DeleteLegacyDefaultNoRerouteNodePolicies(e.nbClient, network.GetNetworkScopedClusterRouterName(), node.Name); err != nil {
-				return fmt.Errorf("failed to delete legacy default no reroute node policies for node %s and network %s: %v", node.Name, network.GetNetworkName(), err)
-			}
 		}
 		return nil
 	})
@@ -3494,23 +3483,6 @@ func createLogicalRouterPolicy(nbClient libovsdbclient.Client, clusterRouter, ma
 		return fmt.Errorf("error creating logical router policy %+v on router %s: %v", lrp, clusterRouter, err)
 	}
 	return nil
-}
-
-// DeleteLegacyDefaultNoRerouteNodePolicies deletes the older EIP node reroute policies
-// called from syncFunction and is a one time operation
-// sample: 101 ip4.src == 10.244.0.0/16 && ip4.dst == 172.18.0.2/32           allow
-func DeleteLegacyDefaultNoRerouteNodePolicies(nbClient libovsdbclient.Client, clusterRouter, node string) error {
-	p := func(item *nbdb.LogicalRouterPolicy) bool {
-		if item.Priority != types.DefaultNoRereoutePriority {
-			return false
-		}
-		nodeName, ok := item.ExternalIDs["node"]
-		if !ok {
-			return false
-		}
-		return nodeName == node
-	}
-	return libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(nbClient, clusterRouter, p)
 }
 
 func (e *EgressIPController) buildSNATFromEgressIPStatus(ni util.NetInfo, podIP net.IP, status egressipv1.EgressIPStatusItem, egressIPName, podNamespace, podName string) (*nbdb.NAT, error) {
