@@ -4,7 +4,6 @@
 package node
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
@@ -12,7 +11,6 @@ import (
 	utilnet "k8s.io/utils/net"
 	"sigs.k8s.io/knftables"
 
-	nodenft "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/nftables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
@@ -28,9 +26,9 @@ import (
 // getNoSNATNodePortRules returns elements to add to the "mgmtport-no-snat-nodeports"
 // set to prevent SNAT of sourceIP when passing through the management port, for an
 // `externalTrafficPolicy: Local` service with NodePorts.
-func getNoSNATNodePortRules(svcPort kapi.ServicePort) []*knftables.Element {
-	return []*knftables.Element{
-		{
+func getNoSNATNodePortRules(svcPort kapi.ServicePort) []knftables.Object {
+	return []knftables.Object{
+		&knftables.Element{
 			Set: nftablesMgmtPortNoSNATNodePorts,
 			Key: []string{
 				strings.ToLower(string(svcPort.Protocol)),
@@ -44,8 +42,8 @@ func getNoSNATNodePortRules(svcPort kapi.ServicePort) []*knftables.Element {
 // "mgmtport-no-snat-services-v4" and "mgmtport-no-snat-services-v6" sets to prevent SNAT
 // of sourceIP when passing through the management port, for an `externalTrafficPolicy:
 // Local` service *without* NodePorts.
-func getNoSNATLoadBalancerIPRules(svcPort kapi.ServicePort, localEndpoints []string) []*knftables.Element {
-	var nftRules []*knftables.Element
+func getNoSNATLoadBalancerIPRules(svcPort kapi.ServicePort, localEndpoints []string) []knftables.Object {
+	var nftRules []knftables.Object
 	protocol := strings.ToLower(string(svcPort.Protocol))
 	port := fmt.Sprintf("%v", svcPort.TargetPort.IntValue())
 	for _, ip := range localEndpoints {
@@ -83,8 +81,8 @@ func getUDNNodePortMarkNFTRule(svcPort kapi.ServicePort, netInfo *bridgeUDNConfi
 // getUDNExternalIPsMarkNFTRules returns a verdict map elements (nftablesUDNMarkExternalIPsV4Map or nftablesUDNMarkExternalIPsV6Map)
 // with a key composed of the external IP, svcPort protocol and port.
 // The value is a jump to the UDN chain mark if netInfo is provided,  or nil that is useful for map entry removal.
-func getUDNExternalIPsMarkNFTRules(svcPort kapi.ServicePort, externalIPs []string, netInfo *bridgeUDNConfiguration) []*knftables.Element {
-	var nftRules []*knftables.Element
+func getUDNExternalIPsMarkNFTRules(svcPort kapi.ServicePort, externalIPs []string, netInfo *bridgeUDNConfiguration) []knftables.Object {
+	var nftRules []knftables.Object
 	var val []string
 
 	if netInfo != nil {
@@ -107,44 +105,10 @@ func getUDNExternalIPsMarkNFTRules(svcPort kapi.ServicePort, externalIPs []strin
 	return nftRules
 }
 
-func recreateNFTSet(setName string, keepNFTElems []*knftables.Element) error {
-	nft, err := nodenft.GetNFTablesHelper()
-	if err != nil {
-		return err
-	}
-	tx := nft.NewTransaction()
-	tx.Flush(&knftables.Set{
-		Name: setName,
-	})
-	for _, elem := range keepNFTElems {
-		if elem.Set == setName {
-			tx.Add(elem)
-		}
-	}
-	return nft.Run(context.TODO(), tx)
-}
-
-func recreateNFTMap(mapName string, keepNFTElems []*knftables.Element) error {
-	nft, err := nodenft.GetNFTablesHelper()
-	if err != nil {
-		return err
-	}
-	tx := nft.NewTransaction()
-	tx.Flush(&knftables.Map{
-		Name: mapName,
-	})
-	for _, elem := range keepNFTElems {
-		if elem.Map == mapName {
-			tx.Add(elem)
-		}
-	}
-	return nft.Run(context.TODO(), tx)
-}
-
 // getGatewayNFTRules returns nftables rules for service. This must be used in conjunction
 // with getGatewayIPTRules.
-func getGatewayNFTRules(service *kapi.Service, localEndpoints []string, svcHasLocalHostNetEndPnt bool) []*knftables.Element {
-	rules := make([]*knftables.Element, 0)
+func getGatewayNFTRules(service *kapi.Service, localEndpoints []string, svcHasLocalHostNetEndPnt bool) []knftables.Object {
+	rules := make([]knftables.Object, 0)
 	svcTypeIsETPLocal := util.ServiceExternalTrafficPolicyLocal(service)
 	for _, svcPort := range service.Spec.Ports {
 		if svcTypeIsETPLocal && !svcHasLocalHostNetEndPnt {
@@ -161,11 +125,29 @@ func getGatewayNFTRules(service *kapi.Service, localEndpoints []string, svcHasLo
 	return rules
 }
 
+// getGatewayNFTContainerObjects returns all of the "container" objects (Sets/Maps/Chains)
+// used by getGatewayNFTRules. This is used (possibly along with
+// getUDNNFTContainerObjects) to determine the sets/maps/chains whose contents will be
+// synchronized by nodePortWatcher.SyncServices().
+func getGatewayNFTContainerObjects() []knftables.Object {
+	return []knftables.Object{
+		&knftables.Set{
+			Name: nftablesMgmtPortNoSNATNodePorts,
+		},
+		&knftables.Set{
+			Name: nftablesMgmtPortNoSNATServicesV4,
+		},
+		&knftables.Set{
+			Name: nftablesMgmtPortNoSNATServicesV6,
+		},
+	}
+}
+
 // getUDNNFTRules generates nftables rules for a UDN service.
 // If netConfig is nil, the resulting map elements will have empty values,
 // suitable only for entry removal.
-func getUDNNFTRules(service *kapi.Service, netConfig *bridgeUDNConfiguration) []*knftables.Element {
-	rules := make([]*knftables.Element, 0)
+func getUDNNFTRules(service *kapi.Service, netConfig *bridgeUDNConfiguration) []knftables.Object {
+	rules := make([]knftables.Object, 0)
 	for _, svcPort := range service.Spec.Ports {
 		if util.ServiceTypeHasNodePort(service) {
 			rules = append(rules, getUDNNodePortMarkNFTRule(svcPort, netConfig))
@@ -173,4 +155,22 @@ func getUDNNFTRules(service *kapi.Service, netConfig *bridgeUDNConfiguration) []
 		rules = append(rules, getUDNExternalIPsMarkNFTRules(svcPort, util.GetExternalAndLBIPs(service), netConfig)...)
 	}
 	return rules
+}
+
+// getUDNNFTContainerObjects returns all of the "container" objects (Sets/Maps/Chains)
+// used by getUDNNFTRules. This is used (possibly along with
+// getGatewayNFTContainerObjects) to determine the sets/maps/chains whose contents will be
+// synchronized by nodePortWatcher.SyncServices().
+func getUDNNFTContainerObjects() []knftables.Object {
+	return []knftables.Object{
+		&knftables.Map{
+			Name: nftablesUDNMarkNodePortsMap,
+		},
+		&knftables.Map{
+			Name: nftablesUDNMarkExternalIPsV4Map,
+		},
+		&knftables.Map{
+			Name: nftablesUDNMarkExternalIPsV6Map,
+		},
+	}
 }
