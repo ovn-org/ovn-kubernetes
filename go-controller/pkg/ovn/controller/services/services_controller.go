@@ -638,12 +638,13 @@ func (c *Controller) onServiceDelete(obj interface{}) {
 		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", obj, err))
 		return
 	}
-	klog.V(4).Infof("Deleting service %s for network=%s", key, c.netInfo.GetNetworkName())
 	service := obj.(*v1.Service)
 
 	if c.skipService(service.Name, service.Namespace) {
 		return
 	}
+
+	klog.V(4).Infof("Deleting service %s for network=%s", key, c.netInfo.GetNetworkName())
 
 	metrics.GetConfigDurationRecorder().Start("service", service.Namespace, service.Name)
 	c.queue.Add(key)
