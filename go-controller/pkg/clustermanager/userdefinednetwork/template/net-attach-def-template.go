@@ -35,7 +35,7 @@ type SpecGetter interface {
 }
 
 func ParseNetworkName(networkName string) (udnNamespace, udnName string) {
-	parts := strings.Split(networkName, ".")
+	parts := strings.Split(networkName, "_")
 	if len(parts) == 2 {
 		return parts[0], parts[1]
 	}
@@ -58,11 +58,11 @@ func RenderNetAttachDefManifest(obj client.Object, targetNamespace string) (*net
 	case *userdefinednetworkv1.UserDefinedNetwork:
 		ownerRef = *metav1.NewControllerRef(obj, userdefinednetworkv1.SchemeGroupVersion.WithKind("UserDefinedNetwork"))
 		spec = &o.Spec
-		networkName = targetNamespace + "." + obj.GetName()
+		networkName = targetNamespace + "_" + obj.GetName()
 	case *userdefinednetworkv1.ClusterUserDefinedNetwork:
 		ownerRef = *metav1.NewControllerRef(obj, userdefinednetworkv1.SchemeGroupVersion.WithKind("ClusterUserDefinedNetwork"))
 		spec = &o.Spec.Network
-		networkName = "cluster.udn." + obj.GetName()
+		networkName = "cluster_udn_" + obj.GetName()
 	default:
 		return nil, fmt.Errorf("unknown type %T", obj)
 	}
