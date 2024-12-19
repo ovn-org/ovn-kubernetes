@@ -37,12 +37,14 @@ import (
 )
 
 type secondaryNetInfo struct {
-	netName        string
-	nadName        string
-	clustersubnets string
-	hostsubnets    string // not used in layer2 tests
-	topology       string
-	isPrimary      bool
+	netName            string
+	nadName            string
+	clustersubnets     string
+	hostsubnets        string // not used in layer2 tests
+	topology           string
+	isPrimary          bool
+	allowPersistentIPs bool
+	ipamClaimReference string
 }
 
 const (
@@ -544,10 +546,11 @@ func (sni *secondaryNetInfo) netconf() *ovncnitypes.NetConf {
 			Name: sni.netName,
 			Type: plugin,
 		},
-		Topology: sni.topology,
-		NADName:  sni.nadName,
-		Subnets:  sni.clustersubnets,
-		Role:     role,
+		Topology:           sni.topology,
+		NADName:            sni.nadName,
+		Subnets:            sni.clustersubnets,
+		Role:               role,
+		AllowPersistentIPs: sni.allowPersistentIPs,
 	}
 }
 

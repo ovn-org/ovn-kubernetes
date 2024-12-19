@@ -561,15 +561,25 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *kapi.Pod, nadName
 		return nil, nil, nil, false, err
 	}
 
-	// set addresses on the port
-	// LSP addresses in OVN are a single space-separated value
+	lsp.Enabled = enable
+	if lsp.Enabled != nil {
+		customFields = append(customFields, libovsdbops.LogicalSwitchPortEnabled)
+	}
+
 	addresses = []string{podAnnotation.MAC.String()}
 	for _, podIfAddr := range podAnnotation.IPs {
 		addresses[0] = addresses[0] + " " + podIfAddr.IP.String()
 	}
 
-	lsp.Addresses = addresses
-	customFields = append(customFields, libovsdbops.LogicalSwitchPortAddresses)
+	// Skip address configuration if LSP is disabled since it will install
+	// l2 look up flows that harms some topologies
+	if lsp.Enabled == nil || *lsp.Enabled {
+		// set addresses on the port
+		// LSP addresses in OVN are a single space-separated value
+
+		lsp.Addresses = addresses
+		customFields = append(customFields, libovsdbops.LogicalSwitchPortAddresses)
+	}
 
 	// add external ids
 	lsp.ExternalIDs = map[string]string{"namespace": pod.Namespace, "pod": "true"}
@@ -596,11 +606,6 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *kapi.Pod, nadName
 	}
 	if len(lsp.Options) != 0 {
 		customFields = append(customFields, libovsdbops.LogicalSwitchPortOptions)
-	}
-
-	lsp.Enabled = enable
-	if lsp.Enabled != nil {
-		customFields = append(customFields, libovsdbops.LogicalSwitchPortEnabled)
 	}
 	ops, err = libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitchWithCustomFieldsOps(bnc.nbClient, nil, ls, customFields, lsp)
 	if err != nil {

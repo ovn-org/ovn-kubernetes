@@ -355,7 +355,9 @@ func IsPodOwnedByVirtualMachine(pod *corev1.Pod) bool {
 
 // IsPodAllowedForMigration determines whether a given pod is eligible for live migration
 func IsPodAllowedForMigration(pod *corev1.Pod, netInfo util.NetInfo) bool {
-	return IsPodOwnedByVirtualMachine(pod) && netInfo.TopologyType() == ovntypes.Layer2Topology
+	return IsPodOwnedByVirtualMachine(pod) &&
+		(netInfo.TopologyType() == ovntypes.Layer2Topology ||
+			netInfo.TopologyType() == ovntypes.LocalnetTopology)
 }
 
 func isTargetPodReady(targetPod *corev1.Pod) bool {
