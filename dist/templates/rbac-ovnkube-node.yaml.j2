@@ -163,6 +163,7 @@ rules:
           - adminpolicybasedexternalroutes/status
           - egressqoses/status
           - routeadvertisements/status
+          - networkqoses/status
       verbs: [ "patch", "update" ]
     - apiGroups: ["policy.networking.k8s.io"]
       resources:
@@ -185,6 +186,7 @@ rules:
           - userdefinednetworks
           - clusteruserdefinednetworks
           - routeadvertisements
+          - networkqoses
       verbs: [ "get", "list", "watch" ]
     {% if ovn_enable_ovnkube_identity == "true" -%}
     - apiGroups: ["certificates.k8s.io"]
