@@ -8,6 +8,7 @@ import (
 
 	"github.com/onsi/ginkgo/v2"
 
+	ipamclaimsapi "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1"
 	fakeipamclaimclient "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1/apis/clientset/versioned/fake"
 	mnpapi "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta1"
 	mnpfake "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/client/clientset/versioned/fake"
@@ -125,6 +126,7 @@ func (o *FakeOVN) start(objects ...runtime.Object) {
 	egressServiceObjects := []runtime.Object{}
 	apbExternalRouteObjects := []runtime.Object{}
 	anpObjects := []runtime.Object{}
+	ipamClaimObjects := []runtime.Object{}
 	v1Objects := []runtime.Object{}
 	nads := []nettypes.NetworkAttachmentDefinition{}
 	nadClient := fakenadclient.NewSimpleClientset()
@@ -156,6 +158,8 @@ func (o *FakeOVN) start(objects ...runtime.Object) {
 			apbExternalRouteObjects = append(apbExternalRouteObjects, object)
 		case *anpapi.AdminNetworkPolicyList:
 			anpObjects = append(anpObjects, object)
+		case *ipamclaimsapi.IPAMClaimList:
+			ipamClaimObjects = append(ipamClaimObjects, object)
 		default:
 			v1Objects = append(v1Objects, object)
 		}
@@ -170,7 +174,7 @@ func (o *FakeOVN) start(objects ...runtime.Object) {
 		MultiNetworkPolicyClient: mnpfake.NewSimpleClientset(multiNetworkPolicyObjects...),
 		EgressServiceClient:      egressservicefake.NewSimpleClientset(egressServiceObjects...),
 		AdminPolicyRouteClient:   adminpolicybasedroutefake.NewSimpleClientset(apbExternalRouteObjects...),
-		IPAMClaimsClient:         fakeipamclaimclient.NewSimpleClientset(),
+		IPAMClaimsClient:         fakeipamclaimclient.NewSimpleClientset(ipamClaimObjects...),
 		NetworkAttchDefClient:    nadClient,
 		UserDefinedNetworkClient: udnclientfake.NewSimpleClientset(),
 	}
@@ -364,6 +368,7 @@ func NewOvnController(
 			EgressServiceClient:  ovnClient.EgressServiceClient,
 			APBRouteClient:       ovnClient.AdminPolicyRouteClient,
 			EgressQoSClient:      ovnClient.EgressQoSClient,
+			IPAMClaimsClient:     ovnClient.IPAMClaimsClient,
 		},
 		wf,
 		recorder,
@@ -479,6 +484,7 @@ func (o *FakeOVN) NewSecondaryNetworkController(netattachdef *nettypes.NetworkAt
 				Kube:                 kube.Kube{KClient: o.fakeClient.KubeClient},
 				EIPClient:            o.fakeClient.EgressIPClient,
 				EgressFirewallClient: o.fakeClient.EgressFirewallClient,
+				IPAMClaimsClient:     o.fakeClient.IPAMClaimsClient,
 			},
 			o.watcher,
 			o.fakeRecorder,
