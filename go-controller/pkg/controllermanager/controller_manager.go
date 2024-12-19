@@ -465,3 +465,7 @@ func (cm *ControllerManager) Stop() {
 		cm.networkManager.Stop()
 	}
 }
+
+func (cm *ControllerManager) Reconcile(name string, old, new util.NetInfo) error {
+	return nil
+}

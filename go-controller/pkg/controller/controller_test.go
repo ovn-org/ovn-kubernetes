@@ -137,19 +137,19 @@ var _ = Describe("Level-driven controller", func() {
 			failureCounter.Add(1)
 			return fmt.Errorf("failure")
 		}
-		config.RateLimiter = workqueue.NewTypedItemFastSlowRateLimiter[string](100*time.Millisecond, 1*time.Second, maxRetries)
+		config.RateLimiter = workqueue.NewTypedItemFastSlowRateLimiter[string](100*time.Millisecond, 1*time.Second, DefaultMaxAttempts)
 		startController(config, nil, namespace, pod)
 
-		Eventually(failureCounter.Load, (maxRetries+1)*100*time.Millisecond).Should(BeEquivalentTo(maxRetries))
+		Eventually(failureCounter.Load, (DefaultMaxAttempts+1)*100*time.Millisecond).Should(BeEquivalentTo(DefaultMaxAttempts))
 		time.Sleep(1 * time.Second)
-		Expect(failureCounter.Load()).To(BeEquivalentTo(maxRetries + 1))
+		Expect(failureCounter.Load()).To(BeEquivalentTo(DefaultMaxAttempts + 1))
 
 		// trigger update, check it is handled
 		pod.Labels = map[string]string{"key": "value"}
 		_, err := fakeClient.KubeClient.CoreV1().Pods(namespace.Name).Update(context.TODO(), pod, metav1.UpdateOptions{})
 		Expect(err).NotTo(HaveOccurred())
 
-		Eventually(func() bool { return failureCounter.Load() > maxRetries+1 }).Should(BeTrue())
+		Eventually(func() bool { return failureCounter.Load() > DefaultMaxAttempts+1 }).Should(BeTrue())
 	})
 	It("ignores events when ObjNeedsUpdate returns false", func() {
 		namespace := util.NewNamespace(namespace1Name)

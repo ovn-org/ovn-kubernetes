@@ -259,11 +259,11 @@ func getNodeData(netInfo util.NetInfo, nodeName string) []libovsdb.TestData {
 	}
 }
 
-func newNodeWithNad(nad *nadapi.NetworkAttachmentDefinition, networkName string) *v1.Node {
+func newNodeWithNad(nad *nadapi.NetworkAttachmentDefinition, networkName, networkID string) *v1.Node {
 	n := newNode(nodeName, "192.168.126.202/24")
 	if nad != nil {
 		n.Annotations["k8s.ovn.org/node-subnets"] = fmt.Sprintf("{\"default\":\"192.168.126.202/24\", \"%s\":\"192.168.127.202/24\"}", networkName)
-		n.Annotations["k8s.ovn.org/network-ids"] = fmt.Sprintf("{\"default\":\"0\",\"%s\":\"50\"}", networkName)
+		n.Annotations["k8s.ovn.org/network-ids"] = fmt.Sprintf("{\"default\":\"0\",\"%s\":\"%s\"}", networkName, networkID)
 		n.Annotations["k8s.ovn.org/node-mgmt-port-mac-addresses"] = fmt.Sprintf("{\"default\":\"96:8f:e8:25:a2:e5\",\"%s\":\"d6:bc:85:32:30:fb\"}", networkName)
 		n.Annotations["k8s.ovn.org/node-chassis-id"] = "abdcef"
 		n.Annotations["k8s.ovn.org/l3-gateway-config"] = "{\"default\":{\"mac-address\":\"52:54:00:e2:ed:d0\",\"ip-addresses\":[\"10.1.1.10/24\"],\"ip-address\":\"10.1.1.10/24\",\"next-hops\":[\"10.1.1.1\"],\"next-hop\":\"10.1.1.1\"}}"
@@ -341,18 +341,22 @@ var _ = Describe("OVN Multicast with IP Address Family", func() {
 		gomegaFormatMaxLength int
 		networkName           = "bluenet"
 		nadName               = "rednad"
+		networkID             = "50"
 
 		nadFromIPMode = func(useIPv4, useIPv6 bool) *nadapi.NetworkAttachmentDefinition {
+			var nad *nadapi.NetworkAttachmentDefinition
 			if useIPv4 && useIPv6 {
-				return ovntest.GenerateNAD(networkName, nadName, namespaceName1,
+				nad = ovntest.GenerateNAD(networkName, nadName, namespaceName1,
 					types.Layer3Topology, "100.128.0.0/16,ae70::66/60", types.NetworkRolePrimary)
 			} else if useIPv4 {
-				return ovntest.GenerateNAD(networkName, nadName, namespaceName1,
+				nad = ovntest.GenerateNAD(networkName, nadName, namespaceName1,
 					types.Layer3Topology, "100.128.0.0/16", types.NetworkRolePrimary)
 			} else {
-				return ovntest.GenerateNAD(networkName, nadName, namespaceName1,
+				nad = ovntest.GenerateNAD(networkName, nadName, namespaceName1,
 					types.Layer3Topology, "ae70::66/60", types.NetworkRolePrimary)
 			}
+			nad.Annotations = map[string]string{types.OvnNetworkIDAnnotation: networkID}
+			return nad
 		}
 	)
 
@@ -666,7 +670,7 @@ var _ = Describe("OVN Multicast with IP Address Family", func() {
 				config.IPv6Mode = useIPv6
 
 				netInfo := getNetInfoFromNAD(nad)
-				node := newNodeWithNad(nad, networkName)
+				node := newNodeWithNad(nad, networkName, networkID)
 				namespace1 := *newNamespace(namespaceName1)
 				pods, tPods, tPodIPs := createTestPods(nodeName, namespaceName1, useIPv4, useIPv6)
 
@@ -741,7 +745,7 @@ var _ = Describe("OVN Multicast with IP Address Family", func() {
 				namespace1 := *newNamespace(longNameSpace1Name)
 				longNameSpace2Name := "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijl" // create with 63 characters
 				namespace2 := *newNamespace(longNameSpace2Name)
-				node := newNodeWithNad(nad, networkName)
+				node := newNodeWithNad(nad, networkName, networkID)
 
 				objs := []runtime.Object{
 					&v1.NamespaceList{
@@ -816,7 +820,7 @@ var _ = Describe("OVN Multicast with IP Address Family", func() {
 
 				netInfo := getNetInfoFromNAD(nad)
 				namespace1 := *newNamespace(namespaceName1)
-				node := newNodeWithNad(nad, networkName)
+				node := newNodeWithNad(nad, networkName, networkID)
 				_, tPods, tPodIPs := createTestPods(nodeName, namespaceName1, useIPv4, useIPv6)
 
 				ports := []string{}
