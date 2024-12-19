@@ -52,7 +52,7 @@ func newDNSNameResolverObject(name, namespace, dnsName string, addresses []strin
 
 func expectDNSNameWithAddresses(extEgDNS *ExternalEgressDNS, dnsName string, expectedAddresses []string) {
 	var resolvedName *dnsResolvedName
-	err := wait.PollUntilContextTimeout(context.Background(), 1*time.Second, 5*time.Minute, true, func(ctx context.Context) (done bool, err error) {
+	err := wait.PollUntilContextTimeout(context.Background(), 10*time.Millisecond, 5*time.Minute, true, func(ctx context.Context) (done bool, err error) {
 		var exists bool
 		resolvedName, exists = extEgDNS.getResolvedName(dnsName)
 		if !exists {
@@ -214,7 +214,7 @@ var _ = ginkgo.Describe("Egress Firewall External DNS Operations", func() {
 				Delete(context.TODO(), dnsNameResolver.Name, metav1.DeleteOptions{})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			err = wait.PollUntilContextTimeout(context.Background(), 1*time.Second, 5*time.Minute, true, func(ctx context.Context) (done bool, err error) {
+			err = wait.PollUntilContextTimeout(context.Background(), 10*time.Millisecond, 5*time.Minute, true, func(ctx context.Context) (done bool, err error) {
 				_, exists := extEgDNS.getResolvedName(dnsName)
 				if exists {
 					return false, nil
@@ -279,7 +279,7 @@ var _ = ginkgo.Describe("Egress Firewall External DNS Operations", func() {
 		err = extEgDNS.Delete(namespace)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-		err = wait.PollUntilContextTimeout(context.Background(), 1*time.Second, 5*time.Minute, true, func(ctx context.Context) (done bool, err error) {
+		err = wait.PollUntilContextTimeout(context.Background(), 10*time.Millisecond, 5*time.Minute, true, func(ctx context.Context) (done bool, err error) {
 			_, exists := extEgDNS.getResolvedName(dnsName)
 			if exists {
 				return false, nil

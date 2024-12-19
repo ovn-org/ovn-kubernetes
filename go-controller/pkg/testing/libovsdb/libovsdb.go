@@ -54,6 +54,17 @@ type serverBuilderFn func(config.OvnAuthConfig, []TestData, bool) (*TestOvsdbSer
 
 var validUUID = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
+var (
+	memoNbdbSchema     ovsdb.DatabaseSchema
+	onceNbdbSchema     sync.Once
+	memoSbdbSchema     ovsdb.DatabaseSchema
+	onceSbdbSchema     sync.Once
+	memoVswitchdSchema ovsdb.DatabaseSchema
+	onceVswitchdSchema sync.Once
+	memoServerdbSchema ovsdb.DatabaseSchema
+	onceServerdbSchema sync.Once
+)
+
 type Context struct {
 	clientStopCh chan struct{}
 	clientWg     *sync.WaitGroup
@@ -236,7 +247,7 @@ func newSBServer(cfg config.OvnAuthConfig, data []TestData, ignoreConstraints bo
 	if err != nil {
 		return nil, err
 	}
-	schema := sbdb.Schema()
+	schema := sbdbSchema()
 	return newOVSDBServer(cfg, dbModel, schema, data, ignoreConstraints)
 }
 
@@ -245,7 +256,7 @@ func newNBServer(cfg config.OvnAuthConfig, data []TestData, ignoreConstraints bo
 	if err != nil {
 		return nil, err
 	}
-	schema := nbdb.Schema()
+	schema := nbdbSchema()
 	return newOVSDBServer(cfg, dbModel, schema, data, ignoreConstraints)
 }
 
@@ -254,7 +265,7 @@ func newOVSServer(cfg config.OvnAuthConfig, data []TestData, ignoreConstraints b
 	if err != nil {
 		return nil, err
 	}
-	schema := vswitchd.Schema()
+	schema := vswitchdSchema()
 	return newOVSDBServer(cfg, dbModel, schema, data, ignoreConstraints)
 }
 
@@ -364,7 +375,7 @@ func newOVSDBServer(cfg config.OvnAuthConfig, dbModel model.ClientDBModel, schem
 	if err != nil {
 		return nil, err
 	}
-	serverSchema := serverdb.Schema()
+	serverSchema := serverdbSchema()
 
 	db := inmemory.NewDatabase(map[string]model.ClientDBModel{
 		schema.Name:       dbModel,
@@ -428,7 +439,7 @@ func newOVSDBServer(cfg config.OvnAuthConfig, dbModel model.ClientDBModel, schem
 		os.RemoveAll(sockPath)
 	}()
 
-	err = wait.PollUntilContextTimeout(context.Background(), 100*time.Millisecond, 500*time.Millisecond, true, func(ctx context.Context) (bool, error) { return s.Ready(), nil })
+	err = wait.PollUntilContextTimeout(context.Background(), 1*time.Millisecond, 500*time.Millisecond, true, func(ctx context.Context) (bool, error) { return s.Ready(), nil })
 	if err != nil {
 		s.Close()
 		return nil, err
@@ -556,4 +567,32 @@ func getUUID(x TestData) (string, int) {
 		}
 	}
 	return "", -1
+}
+
+func nbdbSchema() ovsdb.DatabaseSchema {
+	onceNbdbSchema.Do(func() {
+		memoNbdbSchema = nbdb.Schema()
+	})
+	return memoNbdbSchema
+}
+
+func sbdbSchema() ovsdb.DatabaseSchema {
+	onceSbdbSchema.Do(func() {
+		memoSbdbSchema = sbdb.Schema()
+	})
+	return memoSbdbSchema
+}
+
+func vswitchdSchema() ovsdb.DatabaseSchema {
+	onceVswitchdSchema.Do(func() {
+		memoVswitchdSchema = vswitchd.Schema()
+	})
+	return memoVswitchdSchema
+}
+
+func serverdbSchema() ovsdb.DatabaseSchema {
+	onceServerdbSchema.Do(func() {
+		memoServerdbSchema = serverdb.Schema()
+	})
+	return memoServerdbSchema
 }
