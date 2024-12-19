@@ -108,6 +108,10 @@ func (tcm *testControllerManager) GetDefaultNetworkController() ReconcilableNetw
 	return tcm.defaultNetwork
 }
 
+func (tcm *testControllerManager) Reconcile(name string, old, new util.NetInfo) error {
+	return nil
+}
+
 func TestNADController(t *testing.T) {
 	networkAPrimary := &ovncnitypes.NetConf{
 		Topology: types.Layer2Topology,
