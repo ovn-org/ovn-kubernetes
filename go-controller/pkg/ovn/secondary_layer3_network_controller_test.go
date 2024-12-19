@@ -59,7 +59,7 @@ type testConfiguration struct {
 	expectationOptions []option
 }
 
-var _ = Describe("OVN Multi-Homed pod operations", func() {
+var _ = Describe("OVN Multi-Homed pod operations for layer 3 network", func() {
 	var (
 		app       *cli.App
 		fakeOvn   *FakeOVN
@@ -114,7 +114,9 @@ var _ = Describe("OVN Multi-Homed pod operations", func() {
 				)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(netInfo.setupOVNDependencies(&initialDB)).To(Succeed())
+				n := newNamespace(ns)
 				if netInfo.isPrimary {
+					n = newUDNNamespace(ns)
 					networkConfig, err := util.NewNetInfo(netInfo.netconf())
 					Expect(err).NotTo(HaveOccurred())
 					initialDB.NBData = append(
@@ -143,7 +145,7 @@ var _ = Describe("OVN Multi-Homed pod operations", func() {
 					initialDB,
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
-							*newNamespace(ns),
+							*n,
 						},
 					},
 					&v1.NodeList{
@@ -355,7 +357,7 @@ var _ = Describe("OVN Multi-Homed pod operations", func() {
 					initialDB,
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
-							*newNamespace(ns),
+							*newUDNNamespace(ns),
 						},
 					},
 					&v1.NodeList{
@@ -619,6 +621,11 @@ func newNodeWithSecondaryNets(nodeName string, nodeIPv4CIDR string, netInfos ...
 		nodeSubnetInfo = append(nodeSubnetInfo, info.String())
 	}
 
+	parsedNodeSubnets := fmt.Sprintf("{\"default\":\"%s\"}", v4Node1Subnet)
+	if len(nodeSubnetInfo) > 0 {
+		parsedNodeSubnets = fmt.Sprintf("{\"default\":\"%s\", %s}", v4Node1Subnet, strings.Join(nodeSubnetInfo, ","))
+	}
+
 	nodeIP, nodeCIDR, err := net.ParseCIDR(nodeIPv4CIDR)
 	if err != nil {
 		return nil, err
@@ -631,13 +638,13 @@ func newNodeWithSecondaryNets(nodeName string, nodeIPv4CIDR string, netInfos ...
 			Name: nodeName,
 			Annotations: map[string]string{
 				"k8s.ovn.org/node-primary-ifaddr":                           fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", nodeIPv4CIDR, ""),
-				"k8s.ovn.org/node-subnets":                                  fmt.Sprintf("{\"default\":\"%s\", %s}", v4Node1Subnet, strings.Join(nodeSubnetInfo, ",")),
+				"k8s.ovn.org/node-subnets":                                  parsedNodeSubnets,
 				util.OVNNodeHostCIDRs:                                       fmt.Sprintf("[\"%s\"]", nodeIPv4CIDR),
 				"k8s.ovn.org/zone-name":                                     "global",
 				"k8s.ovn.org/l3-gateway-config":                             fmt.Sprintf("{\"default\":{\"mode\":\"shared\",\"bridge-id\":\"breth0\",\"interface-id\":\"breth0_ovn-worker\",\"mac-address\":%q,\"ip-addresses\":[%[2]q],\"ip-address\":%[2]q,\"next-hops\":[%[3]q],\"next-hop\":%[3]q,\"node-port-enable\":\"true\",\"vlan-id\":\"0\"}}", util.IPAddrToHWAddr(nodeIP), nodeCIDR, nextHopIP),
 				util.OvnNodeChassisID:                                       "abdcef",
 				"k8s.ovn.org/network-ids":                                   "{\"default\":\"0\",\"isolatednet\":\"2\"}",
-				util.OVNNodeGRLRPAddrs:                                      fmt.Sprintf("{\"isolatednet\":{\"ipv4\":%q}}", gwRouterJoinIPAddress()),
+				util.OVNNodeGRLRPAddrs:                                      fmt.Sprintf("{\"default\":{\"ipv4\":\"100.64.0.2/16\"},\"isolatednet\":{\"ipv4\":%q}}", gwRouterJoinIPAddress()),
 				"k8s.ovn.org/udn-layer2-node-gateway-router-lrp-tunnel-ids": "{\"isolatednet\":\"25\"}",
 			},
 			Labels: map[string]string{
