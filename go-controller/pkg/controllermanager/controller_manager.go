@@ -258,7 +258,7 @@ func (cm *ControllerManager) configureMetrics(stopChan <-chan struct{}) {
 	metrics.RegisterOVNKubeControllerPerformance(cm.nbClient)
 	metrics.RegisterOVNKubeControllerFunctional(stopChan)
 	metrics.RunTimestamp(stopChan, cm.sbClient, cm.nbClient)
-	metrics.MonitorIPSec(cm.nbClient)
+	metrics.MonitorIPSec(stopChan, cm.nbClient)
 }
 
 func (cm *ControllerManager) createACLLoggingMeter() error {
