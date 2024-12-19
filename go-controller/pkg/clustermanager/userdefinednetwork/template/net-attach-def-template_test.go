@@ -273,10 +273,12 @@ var _ = Describe("NetAttachDefTemplate", func() {
 			udnv1.UserDefinedNetworkSpec{
 				Topology: udnv1.NetworkTopologyLayer2,
 				Layer2: &udnv1.Layer2Config{
-					Role:          udnv1.NetworkRolePrimary,
-					Subnets:       udnv1.DualStackCIDRs{"192.168.100.0/24", "2001:dbb::/64"},
-					MTU:           1500,
-					IPAMLifecycle: udnv1.IPAMLifecyclePersistent,
+					Role:    udnv1.NetworkRolePrimary,
+					Subnets: udnv1.DualStackCIDRs{"192.168.100.0/24", "2001:dbb::/64"},
+					MTU:     1500,
+					IPAM: &udnv1.IPAMSpec{
+						Lifecycle: udnv1.IPAMLifecyclePersistent,
+					},
 				},
 			},
 			`{
@@ -296,11 +298,13 @@ var _ = Describe("NetAttachDefTemplate", func() {
 			udnv1.UserDefinedNetworkSpec{
 				Topology: udnv1.NetworkTopologyLayer2,
 				Layer2: &udnv1.Layer2Config{
-					Role:          udnv1.NetworkRolePrimary,
-					Subnets:       udnv1.DualStackCIDRs{"192.168.100.0/24", "2001:dbb::/64"},
-					JoinSubnets:   udnv1.DualStackCIDRs{"100.62.0.0/24", "fd92::/64"},
-					MTU:           1500,
-					IPAMLifecycle: udnv1.IPAMLifecyclePersistent,
+					Role:        udnv1.NetworkRolePrimary,
+					Subnets:     udnv1.DualStackCIDRs{"192.168.100.0/24", "2001:dbb::/64"},
+					JoinSubnets: udnv1.DualStackCIDRs{"100.62.0.0/24", "fd92::/64"},
+					MTU:         1500,
+					IPAM: &udnv1.IPAMSpec{
+						Lifecycle: udnv1.IPAMLifecyclePersistent,
+					},
 				},
 			},
 			`{
@@ -320,10 +324,12 @@ var _ = Describe("NetAttachDefTemplate", func() {
 			udnv1.UserDefinedNetworkSpec{
 				Topology: udnv1.NetworkTopologyLayer2,
 				Layer2: &udnv1.Layer2Config{
-					Role:          udnv1.NetworkRoleSecondary,
-					Subnets:       udnv1.DualStackCIDRs{"192.168.100.0/24", "2001:dbb::/64"},
-					MTU:           1500,
-					IPAMLifecycle: udnv1.IPAMLifecyclePersistent,
+					Role:    udnv1.NetworkRoleSecondary,
+					Subnets: udnv1.DualStackCIDRs{"192.168.100.0/24", "2001:dbb::/64"},
+					MTU:     1500,
+					IPAM: &udnv1.IPAMSpec{
+						Lifecycle: udnv1.IPAMLifecyclePersistent,
+					},
 				},
 			},
 			`{
@@ -400,10 +406,12 @@ var _ = Describe("NetAttachDefTemplate", func() {
 			udnv1.NetworkSpec{
 				Topology: udnv1.NetworkTopologyLayer2,
 				Layer2: &udnv1.Layer2Config{
-					Role:          udnv1.NetworkRolePrimary,
-					Subnets:       udnv1.DualStackCIDRs{"192.168.100.0/24", "2001:dbb::/64"},
-					MTU:           1500,
-					IPAMLifecycle: udnv1.IPAMLifecyclePersistent,
+					Role:    udnv1.NetworkRolePrimary,
+					Subnets: udnv1.DualStackCIDRs{"192.168.100.0/24", "2001:dbb::/64"},
+					MTU:     1500,
+					IPAM: &udnv1.IPAMSpec{
+						Lifecycle: udnv1.IPAMLifecyclePersistent,
+					},
 				},
 			},
 			`{
@@ -423,11 +431,13 @@ var _ = Describe("NetAttachDefTemplate", func() {
 			udnv1.NetworkSpec{
 				Topology: udnv1.NetworkTopologyLayer2,
 				Layer2: &udnv1.Layer2Config{
-					Role:          udnv1.NetworkRolePrimary,
-					Subnets:       udnv1.DualStackCIDRs{"192.168.100.0/24", "2001:dbb::/64"},
-					JoinSubnets:   udnv1.DualStackCIDRs{"100.62.0.0/24", "fd92::/64"},
-					MTU:           1500,
-					IPAMLifecycle: udnv1.IPAMLifecyclePersistent,
+					Role:        udnv1.NetworkRolePrimary,
+					Subnets:     udnv1.DualStackCIDRs{"192.168.100.0/24", "2001:dbb::/64"},
+					JoinSubnets: udnv1.DualStackCIDRs{"100.62.0.0/24", "fd92::/64"},
+					MTU:         1500,
+					IPAM: &udnv1.IPAMSpec{
+						Lifecycle: udnv1.IPAMLifecyclePersistent,
+					},
 				},
 			},
 			`{
@@ -447,10 +457,12 @@ var _ = Describe("NetAttachDefTemplate", func() {
 			udnv1.NetworkSpec{
 				Topology: udnv1.NetworkTopologyLayer2,
 				Layer2: &udnv1.Layer2Config{
-					Role:          udnv1.NetworkRoleSecondary,
-					Subnets:       udnv1.DualStackCIDRs{"192.168.100.0/24", "2001:dbb::/64"},
-					MTU:           1500,
-					IPAMLifecycle: udnv1.IPAMLifecyclePersistent,
+					Role:    udnv1.NetworkRoleSecondary,
+					Subnets: udnv1.DualStackCIDRs{"192.168.100.0/24", "2001:dbb::/64"},
+					MTU:     1500,
+					IPAM: &udnv1.IPAMSpec{
+						Lifecycle: udnv1.IPAMLifecyclePersistent,
+					},
 				},
 			},
 			`{
