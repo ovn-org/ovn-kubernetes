@@ -314,6 +314,36 @@ add rule inet ovn-kubernetes udn-isolation ip6 daddr @udn-pod-default-ips-v6 dro
 		}
 	})
 
+	It("correctly handles host-network and not ready pods on initial sync", func() {
+		hostNetPod := &v1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "hostnet",
+				UID:       ktypes.UID("hostnet"),
+				Namespace: defaultNamespace,
+			},
+		}
+		hostNetPod.Spec.HostNetwork = true
+		notReadyPod := &v1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "notready",
+				UID:       ktypes.UID("notready"),
+				Namespace: defaultNamespace,
+			},
+		}
+
+		fakeClient = util.GetOVNClientset(hostNetPod, notReadyPod).GetNodeClientset()
+		var err error
+		wf, err = factory.NewNodeWatchFactory(fakeClient, "node1")
+		Expect(err).NotTo(HaveOccurred())
+		manager = NewUDNHostIsolationManager(true, true, wf.PodCoreInformer())
+		nft = nodenft.SetFakeNFTablesHelper()
+		manager.nft = nft
+
+		Expect(wf.Start()).To(Succeed())
+		Expect(manager.setupUDNIsolationFromHost()).To(Succeed())
+		Expect(manager.podInitialSync()).To(Succeed())
+	})
+
 	It("correctly generates initial rules", func() {
 		start()
 		Expect(nft.Dump()).To(Equal(getExpectedDump(nil, nil)))
