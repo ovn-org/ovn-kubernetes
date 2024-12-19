@@ -2,6 +2,7 @@ package e2e
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -21,6 +22,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/test/e2e/kubevirt"
 
 	corev1 "k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -33,8 +35,10 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/retry"
+	e2eframework "k8s.io/kubernetes/test/e2e/framework"
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
+	e2eskipper "k8s.io/kubernetes/test/e2e/framework/skipper"
 	testutils "k8s.io/kubernetes/test/utils"
 	utilnet "k8s.io/utils/net"
 	"k8s.io/utils/pointer"
@@ -84,23 +88,24 @@ func newControllerRuntimeClient() (crclient.Client, error) {
 
 var _ = Describe("Kubevirt Virtual Machines", func() {
 	var (
-		fr                 = wrappedTestFramework("kv-live-migration")
-		d                  = diagnostics.New(fr)
-		crClient           crclient.Client
-		namespace          string
-		tcpServerPort      = int32(9900)
-		wg                 sync.WaitGroup
-		selectedNodes      = []corev1.Node{}
-		httpServerTestPods = []*corev1.Pod{}
-		clientSet          kubernetes.Interface
+		fr                  = wrappedTestFramework("kv-live-migration")
+		d                   = diagnostics.New(fr)
+		crClient            crclient.Client
+		namespace           string
+		tcpServerPort       = int32(9900)
+		wg                  sync.WaitGroup
+		selectedNodes       = []corev1.Node{}
+		httpServerTestPods  = []*corev1.Pod{}
+		iperfServerTestPods = []*corev1.Pod{}
+		clientSet           kubernetes.Interface
 		// Systemd resolvd prevent resolving kube api service by fqdn, so
 		// we replace it here with NetworkManager
 
 		isDualStack = func() bool {
 			GinkgoHelper()
 			nodeList, err := fr.ClientSet.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{})
-			Expect(err).ToNot(HaveOccurred())
-			Expect(nodeList.Items).ToNot(BeEmpty())
+			Expect(err).NotTo(HaveOccurred())
+			Expect(nodeList.Items).NotTo(BeEmpty())
 			hasIPv4Address, hasIPv6Address := false, false
 			for _, addr := range nodeList.Items[0].Status.Addresses {
 				if addr.Type == corev1.NodeInternalIP {
@@ -265,6 +270,7 @@ var _ = Describe("Kubevirt Virtual Machines", func() {
 
 		checkEastWestTraffic = func(vmi *kubevirtv1.VirtualMachineInstance, podIPsByName map[string][]string, stage string) {
 			GinkgoHelper()
+			Expect(podIPsByName).NotTo(BeEmpty())
 			polling := 15 * time.Second
 			timeout := time.Minute
 			for podName, podIPs := range podIPsByName {
@@ -282,6 +288,89 @@ var _ = Describe("Kubevirt Virtual Machines", func() {
 			}
 		}
 
+		startEastWestIperfTraffic = func(vmi *kubevirtv1.VirtualMachineInstance, serverPodIPsByName map[string][]string, stage string) error {
+			GinkgoHelper()
+			Expect(serverPodIPsByName).NotTo(BeEmpty())
+			polling := 15 * time.Second
+			for podName, serverPodIPs := range serverPodIPsByName {
+				for _, serverPodIP := range serverPodIPs {
+					output, err := kubevirt.RunCommand(vmi, fmt.Sprintf("iperf3 -t 0 -c %[2]s --logfile /tmp/%[1]s_%[2]s_iperf3.log &", podName, serverPodIP), polling)
+					if err != nil {
+						return fmt.Errorf("%s: %w", output, err)
+					}
+				}
+			}
+			return nil
+		}
+
+		checkIperfTraffic = func(iperfLogFile string, execFn func(cmd string) (string, error), stage string) {
+			GinkgoHelper()
+			// Check the last line eventually show traffic flowing
+			Eventually(func() (string, error) {
+				iperfLog, err := execFn("cat " + iperfLogFile)
+				if err != nil {
+					return "", err
+				}
+				// Fail fast
+				Expect(iperfLog).NotTo(ContainSubstring("iperf3: error"), stage+": "+iperfLogFile)
+				//Remove last carriage return to propertly split by new line.
+				iperfLog = strings.TrimSuffix(iperfLog, "\n")
+				iperfLogLines := strings.Split(iperfLog, "\n")
+				if len(iperfLogLines) == 0 {
+					return "", nil
+				}
+				lastIperfLogLine := iperfLogLines[len(iperfLogLines)-1]
+				return lastIperfLogLine, nil
+			}).
+				WithPolling(time.Second).
+				WithTimeout(30*time.Second).
+				Should(
+					SatisfyAll(
+						ContainSubstring(" sec "),
+						Not(ContainSubstring("0.00 Bytes  0.00 bits/sec")),
+					),
+					stage+": failed checking iperf3 traffic at file "+iperfLogFile,
+				)
+		}
+
+		checkEastWestIperfTraffic = func(vmi *kubevirtv1.VirtualMachineInstance, podIPsByName map[string][]string, stage string) {
+			GinkgoHelper()
+			for podName, podIPs := range podIPsByName {
+				for _, podIP := range podIPs {
+					iperfLogFile := fmt.Sprintf("/tmp/%s_%s_iperf3.log", podName, podIP)
+					execFn := func(cmd string) (string, error) {
+						return kubevirt.RunCommand(vmi, cmd, 2*time.Second)
+					}
+					checkIperfTraffic(iperfLogFile, execFn, stage)
+				}
+			}
+		}
+
+		startNorthSouthIperfTraffic = func(containerName string, addresses []string, port int32, stage string) error {
+			GinkgoHelper()
+			Expect(addresses).NotTo(BeEmpty())
+			for _, address := range addresses {
+				iperfLogFile := fmt.Sprintf("/tmp/egress_test_%[1]s_%[2]d_iperf3.log", address, port)
+				output, err := runCommand(containerRuntime, "exec", containerName, "bash", "-c", fmt.Sprintf("rm -f %[3]s && iperf3 -t 0 -c %[1]s -p %[2]d --logfile %[3]s &", address, port, iperfLogFile))
+				if err != nil {
+					return fmt.Errorf("%s: %w", output, err)
+				}
+			}
+			return nil
+		}
+
+		checkNorthSouthIperfTraffic = func(containerName string, addresses []string, port int32, stage string) {
+			GinkgoHelper()
+			Expect(addresses).NotTo(BeEmpty())
+			for _, ip := range addresses {
+				iperfLogFile := fmt.Sprintf("/tmp/egress_test_%s_%d_iperf3.log", ip, port)
+				execFn := func(cmd string) (string, error) {
+					return runCommand(containerRuntime, "exec", containerName, "bash", "-c", cmd)
+				}
+				checkIperfTraffic(iperfLogFile, execFn, stage)
+			}
+		}
+
 		httpServerTestPodsDefaultNetworkIPs = func() map[string][]string {
 			ips := map[string][]string{}
 			for _, pod := range httpServerTestPods {
@@ -292,41 +381,21 @@ var _ = Describe("Kubevirt Virtual Machines", func() {
 			return ips
 		}
 
-		checkPodHasIPsAtNetwork = func(netName string, expectedNumberOfAddresses int) func(Gomega, *corev1.Pod) {
-			return func(g Gomega, pod *corev1.Pod) {
-				GinkgoHelper()
-				netStatus, err := podNetworkStatus(pod, func(status nadapi.NetworkStatus) bool {
-					return status.Name == netName
-				})
-				g.Expect(err).ToNot(HaveOccurred())
-				g.Expect(netStatus).To(HaveLen(1))
-				g.Expect(netStatus[0].IPs).To(HaveLen(expectedNumberOfAddresses))
-			}
-		}
-
-		checkPodRunningReady = func() func(Gomega, *corev1.Pod) {
-			return func(g Gomega, pod *corev1.Pod) {
-				ok, err := testutils.PodRunningReady(pod)
-				g.Expect(err).ToNot(HaveOccurred())
-				g.Expect(ok).To(BeTrue())
-			}
-		}
-
-		httpServerTestPodsMultusNetworkIPs = func(nadName string) map[string][]string {
+		podsMultusNetworkIPs = func(pods []*corev1.Pod, networkStatusPredicate func(nadapi.NetworkStatus) bool) map[string][]string {
 			GinkgoHelper()
 			ips := map[string][]string{}
-			for _, pod := range httpServerTestPods {
-				var ovnPodAnnotation *util.PodAnnotation
-				Eventually(func() (*util.PodAnnotation, error) {
+			for _, pod := range pods {
+				var networkStatuses []nadapi.NetworkStatus
+				Eventually(func() ([]nadapi.NetworkStatus, error) {
 					var err error
-					ovnPodAnnotation, err = util.UnmarshalPodAnnotation(pod.Annotations, nadName)
-					return ovnPodAnnotation, err
+					networkStatuses, err = podNetworkStatus(pod, networkStatusPredicate)
+					return networkStatuses, err
 				}).
 					WithTimeout(5 * time.Second).
 					WithPolling(200 * time.Millisecond).
-					ShouldNot(BeNil())
-				for _, ipnet := range ovnPodAnnotation.IPs {
-					ips[pod.Name] = append(ips[pod.Name], ipnet.IP.String())
+					Should(HaveLen(1))
+				for _, ip := range networkStatuses[0].IPs {
+					ips[pod.Name] = append(ips[pod.Name], ip)
 				}
 			}
 			return ips
@@ -342,7 +411,7 @@ var _ = Describe("Kubevirt Virtual Machines", func() {
 				},
 			}
 			err := crClient.Get(context.TODO(), crclient.ObjectKeyFromObject(vmi), vmi)
-			Expect(err).ToNot(HaveOccurred())
+			Expect(err).NotTo(HaveOccurred())
 			polling := 6 * time.Second
 			timeout := 2 * time.Minute
 			step := by(vmName, stage+": Check tcp connection is not broken")
@@ -379,7 +448,7 @@ var _ = Describe("Kubevirt Virtual Machines", func() {
 			/*
 				step := by(vmName, stage+": Create deny all network policy")
 				policy, err := createDenyAllPolicy(vmName)
-				Expect(err).ToNot(HaveOccurred(), step)
+				Expect(err).NotTo(HaveOccurred(), step)
 
 				step = by(vmName, stage+": Check connectivity block after create deny all network policy")
 				Eventually(func() error { return sendEchos(endpoints) }).
@@ -439,26 +508,26 @@ var _ = Describe("Kubevirt Virtual Machines", func() {
 				},
 			}
 			err := crClient.Get(context.TODO(), crclient.ObjectKeyFromObject(vmi), vmi)
-			Expect(err).ToNot(HaveOccurred(), "should success retrieving vmi")
+			Expect(err).NotTo(HaveOccurred(), "should success retrieving vmi")
 			currentNode := vmi.Status.NodeName
 
 			Eventually(func() *kubevirtv1.VirtualMachineInstanceMigrationState {
 				err := crClient.Get(context.TODO(), crclient.ObjectKeyFromObject(vmi), vmi)
-				Expect(err).ToNot(HaveOccurred())
+				Expect(err).NotTo(HaveOccurred())
 				return vmi.Status.MigrationState
 			}).WithPolling(time.Second).WithTimeout(10*time.Minute).ShouldNot(BeNil(), "should have a MigrationState")
 			Eventually(func() string {
 				err := crClient.Get(context.TODO(), crclient.ObjectKeyFromObject(vmi), vmi)
-				Expect(err).ToNot(HaveOccurred())
+				Expect(err).NotTo(HaveOccurred())
 				return vmi.Status.MigrationState.TargetNode
 			}).WithPolling(time.Second).WithTimeout(10*time.Minute).ShouldNot(Equal(currentNode), "should refresh MigrationState")
 			Eventually(func() bool {
 				err := crClient.Get(context.TODO(), crclient.ObjectKeyFromObject(vmi), vmi)
-				Expect(err).ToNot(HaveOccurred())
+				Expect(err).NotTo(HaveOccurred())
 				return vmi.Status.MigrationState.Completed
 			}).WithPolling(time.Second).WithTimeout(20*time.Minute).Should(BeTrue(), "should complete migration")
 			err = crClient.Get(context.TODO(), crclient.ObjectKeyFromObject(vmi), vmi)
-			Expect(err).ToNot(HaveOccurred(), "should success retrieving vmi after migration")
+			Expect(err).NotTo(HaveOccurred(), "should success retrieving vmi after migration")
 			Expect(vmi.Status.MigrationState.Failed).To(BeFalse(), func() string {
 				vmiJSON, err := json.Marshal(vmi)
 				if err != nil {
@@ -509,7 +578,7 @@ var _ = Describe("Kubevirt Virtual Machines", func() {
 				},
 			}
 			err := crClient.Get(context.TODO(), crclient.ObjectKeyFromObject(vmi), vmi)
-			Expect(err).ToNot(HaveOccurred(), "should success retrieving vmi")
+			Expect(err).NotTo(HaveOccurred(), "should success retrieving vmi")
 
 			Eventually(func() (kubevirtv1.VirtualMachineInstanceMigrationPhase, error) {
 				migrations, err := vmiMigrations(crClient)
@@ -630,10 +699,10 @@ var _ = Describe("Kubevirt Virtual Machines", func() {
 				WithTimeout(5*time.Minute).
 				Should(HaveLen(1), step)
 			addresses, err := addressByFamily(ipv4, vmi)()
-			Expect(err).ToNot(HaveOccurred())
+			Expect(err).NotTo(HaveOccurred())
 			if isDualStack() {
 				output, err := kubevirt.RunCommand(vmi, `echo '{"interfaces":[{"name":"enp1s0","type":"ethernet","state":"up","ipv4":{"enabled":true,"dhcp":true},"ipv6":{"enabled":true,"dhcp":true,"autoconf":false}}],"routes":{"config":[{"destination":"::/0","next-hop-interface":"enp1s0","next-hop-address":"fe80::1"}]}}' |nmstatectl apply`, 5*time.Second)
-				Expect(err).ToNot(HaveOccurred(), output)
+				Expect(err).NotTo(HaveOccurred(), output)
 				step = by(vmi.Name, "Wait for virtual machine to receive IPv6 address from DHCP")
 				Eventually(addressByFamily(ipv6, vmi)).
 					WithPolling(time.Second).
@@ -643,7 +712,7 @@ var _ = Describe("Kubevirt Virtual Machines", func() {
 						return step + " -> journal nmstate: " + output
 					})
 				ipv6Addresses, err := addressByFamily(ipv6, vmi)()
-				Expect(err).ToNot(HaveOccurred())
+				Expect(err).NotTo(HaveOccurred())
 				addresses = append(addresses, ipv6Addresses...)
 			}
 			return addresses
@@ -658,49 +727,24 @@ var _ = Describe("Kubevirt Virtual Machines", func() {
 				Should(HaveLen(expectedNumberOfAddresses), step)
 
 			addresses, err := addressesFromStatus(vmi)()
-			Expect(err).ToNot(HaveOccurred())
+			Expect(err).NotTo(HaveOccurred())
 			return addresses
 		}
 
-		virtualMachineAddressesFromGuest = func(vmi *kubevirtv1.VirtualMachineInstance) []string {
-			GinkgoHelper()
-			addresses := waitVirtualMachineAddresses(vmi)
-			ips := []string{}
-			for _, address := range addresses {
-				if net.ParseIP(address.Ip).IsLinkLocalUnicast() {
-					continue
-				}
-				ips = append(ips, address.Ip)
-			}
-			return ips
-		}
-
-		fcosVMI = func(idx int, labels map[string]string, annotations map[string]string, nodeSelector map[string]string, networkSource kubevirtv1.NetworkSource, butane string) (*kubevirtv1.VirtualMachineInstance, error) {
-			workingDirectory, err := os.Getwd()
-			if err != nil {
-				return nil, err
-			}
-			ignition, _, err := butaneconfig.TranslateBytes([]byte(butane), butanecommon.TranslateBytesOptions{
-				TranslateOptions: butanecommon.TranslateOptions{
-					FilesDir: workingDirectory,
-				},
-			})
-			if err != nil {
-				return nil, fmt.Errorf("failed translating butane: %w", err)
-			}
+		generateVMI = func(labels map[string]string, annotations map[string]string, nodeSelector map[string]string, networkSource kubevirtv1.NetworkSource, cloudInitVolumeSource kubevirtv1.VolumeSource, image string) *kubevirtv1.VirtualMachineInstance {
 			return &kubevirtv1.VirtualMachineInstance{
 				ObjectMeta: metav1.ObjectMeta{
-					Namespace:   namespace,
-					Name:        fmt.Sprintf("worker%d", idx),
-					Annotations: annotations,
-					Labels:      labels,
+					Namespace:    namespace,
+					GenerateName: "worker-",
+					Annotations:  annotations,
+					Labels:       labels,
 				},
 				Spec: kubevirtv1.VirtualMachineInstanceSpec{
 					NodeSelector: nodeSelector,
 					Domain: kubevirtv1.DomainSpec{
 						Resources: kubevirtv1.ResourceRequirements{
 							Requests: corev1.ResourceList{
-								corev1.ResourceMemory: resource.MustParse("512Mi"),
+								corev1.ResourceMemory: resource.MustParse("1024Mi"),
 							},
 						},
 						Devices: kubevirtv1.Devices{
@@ -745,46 +789,79 @@ var _ = Describe("Kubevirt Virtual Machines", func() {
 							Name: "containerdisk",
 							VolumeSource: kubevirtv1.VolumeSource{
 								ContainerDisk: &kubevirtv1.ContainerDiskSource{
-									Image: "quay.io/kubevirtci/fedora-coreos-kubevirt:v20230905-be4fa50",
+									Image: image,
 								},
 							},
 						},
 						{
-							Name: "cloudinitdisk",
-							VolumeSource: kubevirtv1.VolumeSource{
-								CloudInitConfigDrive: &kubevirtv1.CloudInitConfigDriveSource{
-									UserData: string(ignition),
-								},
-							},
+							Name:         "cloudinitdisk",
+							VolumeSource: cloudInitVolumeSource,
 						},
 					},
 				},
-			}, nil
-		}
-		fcosVM = func(idx int, labels map[string]string, annotations map[string]string, nodeSelector map[string]string, networkSource kubevirtv1.NetworkSource, butane string) (*kubevirtv1.VirtualMachine, error) {
-			vmi, err := fcosVMI(idx, labels, annotations, nodeSelector, networkSource, butane)
-			if err != nil {
-				return nil, err
 			}
+		}
+
+		generateVM = func(vmi *kubevirtv1.VirtualMachineInstance) *kubevirtv1.VirtualMachine {
 			return &kubevirtv1.VirtualMachine{
 				ObjectMeta: metav1.ObjectMeta{
-					Namespace: namespace,
-					Name:      fmt.Sprintf("worker%d", idx),
+					Namespace:    namespace,
+					GenerateName: vmi.GenerateName,
 				},
 				Spec: kubevirtv1.VirtualMachineSpec{
 					Running: pointer.Bool(true),
 					Template: &kubevirtv1.VirtualMachineInstanceTemplateSpec{
 						ObjectMeta: metav1.ObjectMeta{
-							Annotations: annotations,
-							Labels:      labels,
+							Annotations: vmi.Annotations,
+							Labels:      vmi.Labels,
 						},
 						Spec: vmi.Spec,
 					},
 				},
-			}, nil
+			}
 		}
 
-		composeDefaultNetworkLiveMigratableVM = func(idx int, labels map[string]string, butane string) (*kubevirtv1.VirtualMachine, error) {
+		fcosVMI = func(labels map[string]string, annotations map[string]string, nodeSelector map[string]string, networkSource kubevirtv1.NetworkSource, butane string) (*kubevirtv1.VirtualMachineInstance, error) {
+			workingDirectory, err := os.Getwd()
+			if err != nil {
+				return nil, err
+			}
+			ignition, _, err := butaneconfig.TranslateBytes([]byte(butane), butanecommon.TranslateBytesOptions{
+				TranslateOptions: butanecommon.TranslateOptions{
+					FilesDir: workingDirectory,
+				},
+			})
+			cloudInitVolumeSource := kubevirtv1.VolumeSource{
+				CloudInitConfigDrive: &kubevirtv1.CloudInitConfigDriveSource{
+					UserData: string(ignition),
+				},
+			}
+			return generateVMI(labels, annotations, nodeSelector, networkSource, cloudInitVolumeSource, kubevirt.FedoraCoreOSContainerDiskImage), nil
+		}
+
+		fcosVM = func(labels map[string]string, annotations map[string]string, nodeSelector map[string]string, networkSource kubevirtv1.NetworkSource, butane string) (*kubevirtv1.VirtualMachine, error) {
+			vmi, err := fcosVMI(labels, annotations, nodeSelector, networkSource, butane)
+			if err != nil {
+				return nil, err
+			}
+			return generateVM(vmi), nil
+		}
+
+		fedoraWithTestToolingVMI = func(labels map[string]string, annotations map[string]string, nodeSelector map[string]string, networkSource kubevirtv1.NetworkSource, userData, networkData string) *kubevirtv1.VirtualMachineInstance {
+			cloudInitVolumeSource := kubevirtv1.VolumeSource{
+				CloudInitNoCloud: &kubevirtv1.CloudInitNoCloudSource{
+					UserData:    userData,
+					NetworkData: networkData,
+				},
+			}
+			return generateVMI(labels, annotations, nodeSelector, networkSource, cloudInitVolumeSource, kubevirt.FedoraContainerDiskImage)
+		}
+
+		fedoraWithTestToolingVM = func(labels map[string]string, annotations map[string]string, nodeSelector map[string]string, networkSource kubevirtv1.NetworkSource, userData, networkData string) *kubevirtv1.VirtualMachine {
+			return generateVM(fedoraWithTestToolingVMI(labels, annotations, nodeSelector, networkSource, userData, networkData))
+		}
+
+		composeDefaultNetworkLiveMigratableVM = func(labels map[string]string, butane string) (*kubevirtv1.VirtualMachine, error) {
 			annotations := map[string]string{
 				"kubevirt.io/allow-pod-bridge-network-live-migration": "",
 			}
@@ -794,7 +871,7 @@ var _ = Describe("Kubevirt Virtual Machines", func() {
 			networkSource := kubevirtv1.NetworkSource{
 				Pod: &kubevirtv1.PodNetwork{},
 			}
-			return fcosVM(idx, labels, annotations, nodeSelector, networkSource, butane)
+			return fcosVM(labels, annotations, nodeSelector, networkSource, butane)
 		}
 
 		composeDefaultNetworkLiveMigratableVMs = func(numberOfVMs int, labels map[string]string) ([]*kubevirtv1.VirtualMachine, error) {
@@ -842,7 +919,7 @@ passwd:
 
 			vms := []*kubevirtv1.VirtualMachine{}
 			for i := 1; i <= numberOfVMs; i++ {
-				vm, err := composeDefaultNetworkLiveMigratableVM(i, labels, butane)
+				vm, err := composeDefaultNetworkLiveMigratableVM(labels, butane)
 				if err != nil {
 					return nil, err
 				}
@@ -868,17 +945,17 @@ passwd:
 				},
 			}
 			err := crClient.Get(context.TODO(), crclient.ObjectKeyFromObject(vmi), vmi)
-			Expect(err).ToNot(HaveOccurred())
+			Expect(err).NotTo(HaveOccurred())
 			Expect(kubevirt.LoginToFedora(vmi, "core", "fedora")).To(Succeed(), step)
 
 			waitVirtualMachineAddresses(vmi)
 
 			step = by(vm.Name, "Expose tcpServer as a service")
 			svc, err := fr.ClientSet.CoreV1().Services(namespace).Create(context.TODO(), composeService("tcpserver", vm.Name, tcpServerPort), metav1.CreateOptions{})
-			Expect(err).ToNot(HaveOccurred(), step)
+			Expect(err).NotTo(HaveOccurred(), step)
 			defer func() {
 				output, err := kubevirt.RunCommand(vmi, "podman logs tcpserver", 10*time.Second)
-				Expect(err).ToNot(HaveOccurred())
+				Expect(err).NotTo(HaveOccurred())
 				fmt.Printf("%s tcpserver logs: %s", vmi.Name, output)
 			}()
 
@@ -922,7 +999,7 @@ passwd:
 		}
 
 		checkPodHasIPAtStatus = func(g Gomega, pod *corev1.Pod) {
-			g.Expect(pod.Status.PodIP).ToNot(BeEmpty(), "pod %s has no valid IP address yet", pod.Name)
+			g.Expect(pod.Status.PodIP).NotTo(BeEmpty(), "pod %s has no valid IP address yet", pod.Name)
 		}
 
 		createHTTPServerPods = func(annotations map[string]string) []*corev1.Pod {
@@ -939,12 +1016,45 @@ passwd:
 			return pods
 		}
 
+		iperfServerScript = `
+dnf install -y psmisc procps
+iface=$(ifconfig  |grep flags |grep -v "eth0\|lo" | sed "s/: .*//")
+ipv4=$(ifconfig $iface | grep "inet "|awk '{print $2}'| sed "s#/.*##")
+ipv6=$(ifconfig $iface | grep inet6 |grep -v fe80 |awk '{print $2}'| sed "s#/.*##")
+if [ "$ipv4" != "" ]; then
+	iperf3 -s -D --bind $ipv4 --logfile /tmp/test_${ipv4}_iperf3.log
+fi
+if [ "$ipv6" != "" ]; then
+	iperf3 -s -D --bind $ipv6 --logfile /tmp/test_${ipv6}_iperf3.log
+fi
+`
+		createIperfServerPods = func(nodes []corev1.Node, netConfig networkAttachmentConfig) ([]*corev1.Pod, error) {
+			annotations := map[string]string{}
+			if netConfig.role != "primary" {
+				annotations["k8s.v1.cni.cncf.io/networks"] = fmt.Sprintf(`[{"name": %q}]`, netConfig.name)
+			}
+			var pods []*corev1.Pod
+			for _, node := range nodes {
+				pod, err := createPod(fr, "testpod-"+node.Name, node.Name, namespace, []string{"bash", "-c"}, map[string]string{}, func(pod *corev1.Pod) {
+					pod.Annotations = annotations
+					pod.Spec.Containers[0].Image = iperf3Image
+					pod.Spec.Containers[0].Args = []string{iperfServerScript + "\n sleep infinity"}
+
+				})
+				if err != nil {
+					return nil, err
+				}
+				pods = append(pods, pod)
+			}
+			return pods, nil
+		}
+
 		waitForPodsCondition = func(pods []*corev1.Pod, conditionFn func(g Gomega, pod *corev1.Pod)) {
 			for _, pod := range pods {
 				Eventually(func(g Gomega) {
 					var err error
 					pod, err = fr.ClientSet.CoreV1().Pods(fr.Namespace.Name).Get(context.TODO(), pod.Name, metav1.GetOptions{})
-					g.Expect(err).ToNot(HaveOccurred())
+					g.Expect(err).NotTo(HaveOccurred())
 					conditionFn(g, pod)
 				}).
 					WithTimeout(time.Minute).
@@ -957,7 +1067,7 @@ passwd:
 			for i, pod := range pods {
 				var err error
 				pod, err = fr.ClientSet.CoreV1().Pods(fr.Namespace.Name).Get(context.TODO(), pod.Name, metav1.GetOptions{})
-				Expect(err).ToNot(HaveOccurred())
+				Expect(err).NotTo(HaveOccurred())
 				pods[i] = pod
 			}
 			return pods
@@ -969,6 +1079,15 @@ passwd:
 			waitForPodsCondition(httpServerTestPods, conditionFn)
 			httpServerTestPods = updatePods(httpServerTestPods)
 		}
+
+		createIperfExternalContainer = func(name string) {
+			createClusterExternalContainer(
+				name,
+				iperf3Image,
+				[]string{"--network", "kind", "--entrypoint", "/bin/bash"},
+				[]string{"-c", "sleep infinity"},
+			)
+		}
 	)
 	BeforeEach(func() {
 		namespace = fr.Namespace.Name
@@ -977,14 +1096,14 @@ passwd:
 
 		var err error
 		crClient, err = newControllerRuntimeClient()
-		Expect(err).ToNot(HaveOccurred())
+		Expect(err).NotTo(HaveOccurred())
 	})
 
 	Context("with default pod network", func() {
 
 		BeforeEach(func() {
 			workerNodeList, err := fr.ClientSet.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{LabelSelector: labels.FormatLabels(map[string]string{"node-role.kubernetes.io/worker": ""})})
-			Expect(err).ToNot(HaveOccurred())
+			Expect(err).NotTo(HaveOccurred())
 			nodesByOVNZone := map[string][]corev1.Node{}
 			for _, workerNode := range workerNodeList.Items {
 				ovnZone, ok := workerNode.Labels["k8s.ovn.org/zone-name"]
@@ -1047,7 +1166,7 @@ passwd:
 				err error
 			)
 
-			Expect(err).ToNot(HaveOccurred())
+			Expect(err).NotTo(HaveOccurred())
 
 			d.ConntrackDumpingDaemonSet()
 			d.OVSFlowsDumpingDaemonSet("breth0")
@@ -1071,7 +1190,7 @@ passwd:
 			}
 			if td.mode == kubevirtv1.MigrationPostCopy {
 				err = crClient.Create(context.TODO(), forcePostCopyMigrationPolicy)
-				Expect(err).ToNot(HaveOccurred())
+				Expect(err).NotTo(HaveOccurred())
 				defer func() {
 					Expect(crClient.Delete(context.TODO(), forcePostCopyMigrationPolicy)).To(Succeed())
 				}()
@@ -1082,7 +1201,7 @@ passwd:
 				vmLabels = forcePostCopyMigrationPolicy.Spec.Selectors.VirtualMachineInstanceSelector
 			}
 			vms, err := composeDefaultNetworkLiveMigratableVMs(td.numberOfVMs, vmLabels)
-			Expect(err).ToNot(HaveOccurred())
+			Expect(err).NotTo(HaveOccurred())
 
 			for _, vm := range vms {
 				By(fmt.Sprintf("Create virtual machine %s", vm.Name))
@@ -1099,26 +1218,29 @@ passwd:
 				}).WithPolling(time.Second).WithTimeout(time.Minute).Should(Succeed())
 			}
 
-			if td.shouldExpectFailure {
-				By("annotating the VMI with `fail fast`")
-				vmKey := types.NamespacedName{Namespace: namespace, Name: "worker1"}
-				var vmi kubevirtv1.VirtualMachineInstance
+			for _, vm := range vms {
+				By(fmt.Sprintf("Create virtual machine %s", vm.Name))
+				if td.shouldExpectFailure {
+					By("annotating the VMI with `fail fast`")
+					vmKey := types.NamespacedName{Namespace: namespace, Name: vm.Name}
+					var vmi kubevirtv1.VirtualMachineInstance
 
-				Eventually(func() error {
-					err = crClient.Get(context.TODO(), vmKey, &vmi)
-					if err == nil {
-						vmi.ObjectMeta.Annotations[kubevirtv1.FuncTestLauncherFailFastAnnotation] = "true"
-						err = crClient.Update(context.TODO(), &vmi)
-					}
-					return err
-				}).WithPolling(time.Second).WithTimeout(time.Minute).Should(Succeed())
+					Eventually(func() error {
+						err = crClient.Get(context.TODO(), vmKey, &vmi)
+						if err == nil {
+							vmi.ObjectMeta.Annotations[kubevirtv1.FuncTestLauncherFailFastAnnotation] = "true"
+							err = crClient.Update(context.TODO(), &vmi)
+						}
+						return err
+					}).WithPolling(time.Second).WithTimeout(time.Minute).Should(Succeed())
+				}
 			}
 
 			for _, vm := range vms {
 				By(fmt.Sprintf("Waiting for readiness at virtual machine %s", vm.Name))
 				Eventually(func() bool {
 					err = crClient.Get(context.Background(), crclient.ObjectKeyFromObject(vm), vm)
-					Expect(err).ToNot(HaveOccurred())
+					Expect(err).NotTo(HaveOccurred())
 					return vm.Status.Ready
 				}).WithPolling(time.Second).WithTimeout(5 * time.Minute).Should(BeTrue())
 			}
@@ -1153,18 +1275,17 @@ passwd:
 			cmd         func() string
 		}
 		var (
-			nad              *nadv1.NetworkAttachmentDefinition
-			vm               *kubevirtv1.VirtualMachine
-			vmi              *kubevirtv1.VirtualMachineInstance
-			cidrIPv4         = "10.128.0.0/24"
-			cidrIPv6         = "2010:100:200::0/60"
-			expectedAddreses []string
-			restart          = testCommand{
+			nad      *nadv1.NetworkAttachmentDefinition
+			vm       *kubevirtv1.VirtualMachine
+			vmi      *kubevirtv1.VirtualMachineInstance
+			cidrIPv4 = "10.128.0.0/24"
+			cidrIPv6 = "2010:100:200::0/60"
+			restart  = testCommand{
 				description: "restart",
 				cmd: func() {
 					By("Restarting vm")
 					output, err := exec.Command("virtctl", "restart", "-n", namespace, vmi.Name).CombinedOutput()
-					Expect(err).ToNot(HaveOccurred(), output)
+					Expect(err).NotTo(HaveOccurred(), output)
 
 					By("Wait some time to vmi conditions to catch up after restart")
 					time.Sleep(3 * time.Second)
@@ -1179,24 +1300,49 @@ passwd:
 					checkLiveMigrationSucceeded(vmi.Name, kubevirtv1.MigrationPreCopy)
 				},
 			}
-			butane = `
-variant: fcos
-version: 1.4.0
-passwd:
-  users:
-  - name: core
-    password_hash: $y$j9T$b7RFf2LW7MUOiF4RyLHKA0$T.Ap/uzmg8zrTcUNXyXvBvT26UgkC6zZUVg3UKXeEp5
-`
+			liveMigrateFailed = testCommand{
+				description: "live migration failed",
+				cmd: func() {
+					forceLiveMigrationFailureAnnotationName := kubevirtv1.FuncTestForceLauncherMigrationFailureAnnotation
+					By(fmt.Sprintf("Forcing live migration failure by annotating VM with %s", forceLiveMigrationFailureAnnotationName))
+					vmiKey := types.NamespacedName{Namespace: namespace, Name: vmi.Name}
+					Eventually(func() error {
+						err := crClient.Get(context.TODO(), vmiKey, vmi)
+						if err == nil {
+							vmi.ObjectMeta.Annotations[forceLiveMigrationFailureAnnotationName] = "true"
+							err = crClient.Update(context.TODO(), vmi)
+						}
+						return err
+					}).WithPolling(time.Second).WithTimeout(time.Minute).Should(Succeed())
+
+					liveMigrateVirtualMachine(vmi.Name)
+					checkLiveMigrationFailed(vmi.Name)
+				},
+			}
+			networkData = `version: 2
+ethernets:
+  eth0:
+    dhcp4: true
+    dhcp6: true
+    ipv6-address-generation: eui64`
+			userData = fmt.Sprintf(`#cloud-config
+password: fedora
+chpasswd: { expire: False }
+write_files:
+  - path: /tmp/iperf-server.sh
+    encoding: b64
+    content: %s
+    permissions: '0755'
+runcmd:
+- /tmp/iperf-server.sh`, base64.StdEncoding.EncodeToString([]byte(iperfServerScript)))
 			virtualMachine = resourceCommand{
 				description: "VirtualMachine",
 				cmd: func() string {
-					var err error
-					vm, err = fcosVM(1, nil /*labels*/, nil /*annotations*/, nil /*nodeSelector*/, kubevirtv1.NetworkSource{
+					vm = fedoraWithTestToolingVM(nil /*labels*/, nil /*annotations*/, nil /*nodeSelector*/, kubevirtv1.NetworkSource{
 						Multus: &kubevirtv1.MultusNetwork{
 							NetworkName: nad.Name,
 						},
-					}, butane)
-					Expect(err).ToNot(HaveOccurred())
+					}, userData, networkData)
 					createVirtualMachine(vm)
 					return vm.Name
 				},
@@ -1205,12 +1351,10 @@ passwd:
 			virtualMachineWithUDN = resourceCommand{
 				description: "VirtualMachine with interface binding for UDN",
 				cmd: func() string {
-					var err error
-					vm, err = fcosVM(1, nil /*labels*/, nil /*annotations*/, nil, /*nodeSelector*/
+					vm = fedoraWithTestToolingVM(nil /*labels*/, nil /*annotations*/, nil, /*nodeSelector*/
 						kubevirtv1.NetworkSource{
 							Pod: &kubevirtv1.PodNetwork{},
-						}, butane)
-					Expect(err).ToNot(HaveOccurred())
+						}, userData, networkData)
 					vm.Spec.Template.Spec.Domain.Devices.Interfaces[0].Bridge = nil
 					vm.Spec.Template.Spec.Domain.Devices.Interfaces[0].Binding = &kubevirtv1.PluginBinding{Name: "managedTap"}
 					createVirtualMachine(vm)
@@ -1221,13 +1365,11 @@ passwd:
 			virtualMachineInstance = resourceCommand{
 				description: "VirtualMachineInstance",
 				cmd: func() string {
-					var err error
-					vmi, err = fcosVMI(1, nil /*labels*/, nil /*annotations*/, nil /*nodeSelector*/, kubevirtv1.NetworkSource{
+					vmi = fedoraWithTestToolingVMI(nil /*labels*/, nil /*annotations*/, nil /*nodeSelector*/, kubevirtv1.NetworkSource{
 						Multus: &kubevirtv1.MultusNetwork{
 							NetworkName: nad.Name,
 						},
-					}, butane)
-					Expect(err).ToNot(HaveOccurred())
+					}, userData, networkData)
 					createVirtualMachineInstance(vmi)
 					return vmi.Name
 				},
@@ -1236,18 +1378,17 @@ passwd:
 			virtualMachineInstanceWithUDN = resourceCommand{
 				description: "VirtualMachineInstance with interface binding for UDN",
 				cmd: func() string {
-					var err error
-					vmi, err = fcosVMI(1, nil /*labels*/, nil /*annotations*/, nil, /*nodeSelector*/
+					vmi = fedoraWithTestToolingVMI(nil /*labels*/, nil /*annotations*/, nil, /*nodeSelector*/
 						kubevirtv1.NetworkSource{
 							Pod: &kubevirtv1.PodNetwork{},
-						}, butane)
-					Expect(err).ToNot(HaveOccurred())
+						}, userData, networkData)
 					vmi.Spec.Domain.Devices.Interfaces[0].Bridge = nil
 					vmi.Spec.Domain.Devices.Interfaces[0].Binding = &kubevirtv1.PluginBinding{Name: "managedTap"}
 					createVirtualMachineInstance(vmi)
 					return vmi.Name
 				},
 			}
+
 			filterOutIPv6 = func(ips map[string][]string) map[string][]string {
 				filteredOutIPs := map[string][]string{}
 				for podName, podIPs := range ips {
@@ -1272,6 +1413,13 @@ passwd:
 			role        string
 		}
 		DescribeTable("should keep ip", func(td testData) {
+			if td.role == "primary" && !isInterconnectEnabled() {
+				const upstreamIssue = "https://github.com/ovn-org/ovn-kubernetes/issues/4528"
+				e2eskipper.Skipf(
+					"The egress check of tests are known to fail on non-IC deployments. Upstream issue: %s", upstreamIssue,
+				)
+			}
+
 			netConfig := newNetworkAttachmentConfig(
 				networkAttachmentConfigParams{
 					namespace:          namespace,
@@ -1299,22 +1447,20 @@ passwd:
 			nad = generateNAD(netConfig)
 			Expect(crClient.Create(context.Background(), nad)).To(Succeed())
 			workerNodeList, err := fr.ClientSet.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{LabelSelector: labels.FormatLabels(map[string]string{"node-role.kubernetes.io/worker": ""})})
-			Expect(err).ToNot(HaveOccurred())
+			Expect(err).NotTo(HaveOccurred())
 			selectedNodes = workerNodeList.Items
-			networkName := fmt.Sprintf("%s/%s", nad.Namespace, nad.Name)
-			httpServerPodsAnnotations := map[string]string{}
-			if td.role != "primary" {
-				httpServerPodsAnnotations["k8s.v1.cni.cncf.io/networks"] = fmt.Sprintf(`[{"name": %q}]`, nad.Name)
-			}
-			var httpServerPodCondition func(Gomega, *corev1.Pod)
-			if td.role != "primary" {
-				expectedNumberOfAddresses := len(strings.Split(netConfig.cidr, ","))
-				httpServerPodCondition = checkPodHasIPsAtNetwork(networkName, expectedNumberOfAddresses)
-			} else {
-				httpServerPodCondition = checkPodRunningReady()
-			}
+			Expect(selectedNodes).NotTo(BeEmpty())
 
-			prepareHTTPServerPods(httpServerPodsAnnotations, httpServerPodCondition)
+			iperfServerTestPods, err = createIperfServerPods(selectedNodes, netConfig)
+			Expect(err).NotTo(HaveOccurred())
+
+			externalContainerName := namespace + "-iperf"
+			createIperfExternalContainer(externalContainerName)
+			DeferCleanup(func() {
+				if e2eframework.TestContext.DeleteNamespace && (e2eframework.TestContext.DeleteNamespaceOnFailure || !CurrentSpecReport().Failed()) {
+					deleteClusterExternalContainer(externalContainerName)
+				}
+			})
 
 			vmiName := td.resource.cmd()
 			vmi = &kubevirtv1.VirtualMachineInstance{
@@ -1328,49 +1474,92 @@ passwd:
 
 			step := by(vmi.Name, "Login to virtual machine for the first time")
 			Eventually(func() error {
-				return kubevirt.LoginToFedora(vmi, "core", "fedora")
+				return kubevirt.LoginToFedora(vmi, "fedora", "fedora")
 			}).
 				WithTimeout(5*time.Second).
 				WithPolling(time.Second).
 				Should(Succeed(), step)
 
+			step = by(vmi.Name, "Wait for cloud init to finish at first boot")
+			output, err := kubevirt.RunCommand(vmi, "cloud-init status --wait", time.Minute)
+			Expect(err).NotTo(HaveOccurred(), step+": "+output)
+
+			// expect 2 addresses on dual-stack deployments; 1 on single-stack
 			step = by(vmi.Name, "Wait for addresses at the virtual machine")
+			expectedNumberOfAddresses := len(strings.Split(netConfig.cidr, ","))
+			expectedAddreses := virtualMachineAddressesFromStatus(vmi, expectedNumberOfAddresses)
+			expectedAddresesAtGuest := expectedAddreses
+			testPodsIPs := podsMultusNetworkIPs(iperfServerTestPods, podNetworkStatusByNetConfigPredicate(netConfig))
+
+			step = by(vmi.Name, "Expose VM iperf server as a service")
+			svc, err := fr.ClientSet.CoreV1().Services(namespace).Create(context.TODO(), composeService("iperf3-vm-server", vm.Name, 5201), metav1.CreateOptions{})
+			Expect(svc.Spec.Ports[0].NodePort).NotTo(Equal(0), step)
+
+			// IPv6 is not support for secondaries with IPAM so guest will
+			// have only ipv4.
 			if td.role != "primary" {
-				// expect 2 addresses on dual-stack deployments; 1 on single-stack
-				expectedNumberOfAddresses := len(strings.Split(netConfig.cidr, ","))
-				expectedAddreses = virtualMachineAddressesFromStatus(vmi, expectedNumberOfAddresses)
-			} else {
-				expectedAddreses = virtualMachineAddressesFromGuest(vmi)
+				expectedAddresesAtGuest, err = util.MatchAllIPStringFamily(false /*ipv4*/, expectedAddreses)
+				Expect(err).NotTo(HaveOccurred())
+				testPodsIPs = filterOutIPv6(testPodsIPs)
 			}
+			Expect(testPodsIPs).NotTo(BeEmpty())
+
+			Eventually(kubevirt.RetrieveAllGlobalAddressesFromGuest).
+				WithArguments(vmi).
+				WithTimeout(5*time.Second).
+				WithPolling(time.Second).
+				Should(ConsistOf(expectedAddresesAtGuest), step)
 
 			step = by(vmi.Name, fmt.Sprintf("Check east/west traffic before %s %s", td.resource.description, td.test.description))
-			testPodsIPs := httpServerTestPodsMultusNetworkIPs(networkName)
+			Expect(startEastWestIperfTraffic(vmi, testPodsIPs, step)).To(Succeed(), step)
+			checkEastWestIperfTraffic(vmi, testPodsIPs, step)
 
-			//TODO: We do support it with primary, since passt do support it
-			// kubevirt secondary IPAM do not support IPv6, so guest is not
-			// going to have an ipv6 address at the interface
-			testPodsIPs = filterOutIPv6(testPodsIPs)
+			nodes, err := e2enode.GetBoundedReadySchedulableNodes(context.TODO(), fr.ClientSet, 1)
+			Expect(err).NotTo(HaveOccurred())
 
-			checkEastWestTraffic(vmi, testPodsIPs, step)
+			nodeIPs := e2enode.CollectAddresses(nodes, v1.NodeInternalIP)
+
+			if td.role == "primary" {
+				step = by(vmi.Name, fmt.Sprintf("Check north/south traffic before %s %s", td.resource.description, td.test.description))
+				startNorthSouthIperfTraffic(externalContainerName, nodeIPs, svc.Spec.Ports[0].NodePort, step)
+				checkNorthSouthIperfTraffic(externalContainerName, nodeIPs, svc.Spec.Ports[0].NodePort, step)
+			}
 
 			by(vmi.Name, fmt.Sprintf("Running %s for %s", td.test.description, td.resource.description))
 			td.test.cmd()
 
-			step = by(vm.Name, fmt.Sprintf("Login to virtual machine after %s %s", td.resource.description, td.test.description))
-			Expect(kubevirt.LoginToFedora(vmi, "core", "fedora")).To(Succeed(), step)
-			var obtainedAddresses []string
+			step = by(vmi.Name, fmt.Sprintf("Login to virtual machine after %s %s", td.resource.description, td.test.description))
+			Expect(kubevirt.LoginToFedora(vmi, "fedora", "fedora")).To(Succeed(), step)
 
-			if td.role != "primary" { // expect 2 addresses on dual-stack deployments; 1 on single-stack
-				expectedNumberOfAddresses := len(strings.Split(netConfig.cidr, ","))
-				obtainedAddresses = virtualMachineAddressesFromStatus(vmi, expectedNumberOfAddresses)
-			} else {
-				obtainedAddresses = virtualMachineAddressesFromGuest(vmi)
+			if td.test.description == restart.description {
+				step := by(vmi.Name, "Wait for cloud init to finish after restart")
+				output, err = kubevirt.RunCommand(vmi, "cloud-init status --wait", time.Minute)
+				Expect(err).NotTo(HaveOccurred(), step+": "+output)
 			}
 
+			obtainedAddresses := virtualMachineAddressesFromStatus(vmi, expectedNumberOfAddresses)
+
 			Expect(obtainedAddresses).To(Equal(expectedAddreses))
+			Eventually(kubevirt.RetrieveAllGlobalAddressesFromGuest).
+				WithArguments(vmi).
+				WithTimeout(5*time.Second).
+				WithPolling(time.Second).
+				Should(ConsistOf(expectedAddresesAtGuest), step)
 
 			step = by(vmi.Name, fmt.Sprintf("Check east/west traffic after %s %s", td.resource.description, td.test.description))
-			checkEastWestTraffic(vmi, testPodsIPs, step)
+			if td.test.description == restart.description {
+
+				// At restart we need re-connect
+				Expect(startEastWestIperfTraffic(vmi, testPodsIPs, step)).To(Succeed(), step)
+				if td.role == "primary" {
+					startNorthSouthIperfTraffic(externalContainerName, nodeIPs, svc.Spec.Ports[0].NodePort, step)
+				}
+			}
+			checkEastWestIperfTraffic(vmi, testPodsIPs, step)
+			if td.role == "primary" {
+				step = by(vmi.Name, fmt.Sprintf("Check north/south traffic after %s %s", td.resource.description, td.test.description))
+				checkNorthSouthIperfTraffic(externalContainerName, nodeIPs, svc.Spec.Ports[0].NodePort, step)
+			}
 		},
 			func(td testData) string {
 				role := "secondary"
@@ -1395,7 +1584,7 @@ passwd:
 				topology: "layer2",
 				role:     "primary",
 			}),
-			Entry(nil, testData{
+			XEntry(nil, Label("TODO", "SDN-5490"), testData{
 				resource: virtualMachine,
 				test:     liveMigrate,
 				topology: "localnet",
@@ -1411,7 +1600,7 @@ passwd:
 				topology: "layer2",
 				role:     "primary",
 			}),
-			Entry(nil, testData{
+			XEntry(nil, Label("TODO", "SDN-5490"), testData{
 				resource: virtualMachineInstance,
 				test:     liveMigrate,
 				topology: "localnet",
@@ -1424,6 +1613,12 @@ passwd:
 			Entry(nil, testData{
 				resource: virtualMachineInstanceWithUDN,
 				test:     liveMigrate,
+				topology: "layer2",
+				role:     "primary",
+			}),
+			Entry(nil, testData{
+				resource: virtualMachineInstanceWithUDN,
+				test:     liveMigrateFailed,
 				topology: "layer2",
 				role:     "primary",
 			}),
@@ -1476,13 +1671,13 @@ passwd:
 			By("Wait for virt-launcher pod to be ready and primary UDN network status to pop up")
 			waitForPodsCondition([]*corev1.Pod{kubevirtPod}, func(g Gomega, pod *corev1.Pod) {
 				ok, err := testutils.PodRunningReady(pod)
-				g.Expect(err).ToNot(HaveOccurred())
+				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(ok).To(BeTrue())
 
 				primaryUDNNetworkStatuses, err := podNetworkStatus(pod, func(networkStatus nadapi.NetworkStatus) bool {
 					return networkStatus.Default
 				})
-				g.Expect(err).ToNot(HaveOccurred())
+				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(primaryUDNNetworkStatuses).To(HaveLen(1))
 				primaryUDNNetworkStatus = primaryUDNNetworkStatuses[0]
 			})
@@ -1498,23 +1693,23 @@ passwd:
 
 			By("Reconfigure primary UDN interface to use dhcp/nd for ipv4 and ipv6")
 			_, err := virtLauncherCommand(kubevirt.GenerateAddressDiscoveryConfigurationCommand("ovn-udn1"))
-			Expect(err).ToNot(HaveOccurred())
+			Expect(err).NotTo(HaveOccurred())
 
 		})
 		It("should configure IPv4 and IPv6 using DHCP and NDP", func() {
 			dnsService, err := fr.ClientSet.CoreV1().Services(config.Kubernetes.DNSServiceNamespace).
 				Get(context.Background(), config.Kubernetes.DNSServiceName, metav1.GetOptions{})
-			Expect(err).ToNot(HaveOccurred())
+			Expect(err).NotTo(HaveOccurred())
 
 			if isIPv4Supported() {
 				expectedIP, err := matchIPv4StringFamily(primaryUDNNetworkStatus.IPs)
-				Expect(err).ToNot(HaveOccurred())
+				Expect(err).NotTo(HaveOccurred())
 
 				expectedDNS, err := matchIPv4StringFamily(dnsService.Spec.ClusterIPs)
-				Expect(err).ToNot(HaveOccurred())
+				Expect(err).NotTo(HaveOccurred())
 
 				_, cidr, err := net.ParseCIDR(cidrIPv4)
-				Expect(err).ToNot(HaveOccurred())
+				Expect(err).NotTo(HaveOccurred())
 				expectedGateway := util.GetNodeGatewayIfAddr(cidr).IP.String()
 
 				Eventually(primaryUDNValueForConnection).
@@ -1536,7 +1731,7 @@ passwd:
 
 			if isIPv6Supported() {
 				expectedIP, err := matchIPv6StringFamily(primaryUDNNetworkStatus.IPs)
-				Expect(err).ToNot(HaveOccurred())
+				Expect(err).NotTo(HaveOccurred())
 				Eventually(primaryUDNValueFor).
 					WithArguments("connection", "DHCP6.OPTION").
 					WithTimeout(10 * time.Second).
