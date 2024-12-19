@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/mock"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/id"
+	ipallocator "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip/subnet"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/pod"
 	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
@@ -79,7 +80,8 @@ func (p testPod) getPod(t *testing.T) *corev1.Pod {
 }
 
 type ipAllocatorStub struct {
-	released bool
+	released   bool
+	fullIPPool bool
 }
 
 func (a *ipAllocatorStub) AddOrUpdateSubnet(name string, subnets []*net.IPNet, excludeSubnets ...*net.IPNet) error {
@@ -95,7 +97,8 @@ func (a *ipAllocatorStub) GetSubnets(name string) ([]*net.IPNet, error) {
 }
 
 func (a *ipAllocatorStub) AllocateUntilFull(name string) error {
-	panic("not implemented") // TODO: Implement
+	a.fullIPPool = true
+	return nil
 }
 
 func (a *ipAllocatorStub) AllocateIPPerSubnet(name string, ips []*net.IPNet) error {
@@ -116,7 +119,9 @@ func (a *ipAllocatorStub) ConditionalIPRelease(name string, ips []*net.IPNet, pr
 }
 
 func (a *ipAllocatorStub) ForSubnet(name string) subnet.NamedAllocator {
-	return &namedAllocatorStub{}
+	return &namedAllocatorStub{
+		fullIPPool: a.fullIPPool,
+	}
 }
 
 func (a *ipAllocatorStub) GetSubnetName([]*net.IPNet) (string, bool) {
@@ -148,9 +153,13 @@ func (a *idAllocatorStub) GetSubnetName([]*net.IPNet) (string, bool) {
 }
 
 type namedAllocatorStub struct {
+	fullIPPool bool
 }
 
 func (nas *namedAllocatorStub) AllocateIPs(ips []*net.IPNet) error {
+	if nas.fullIPPool {
+		return ipallocator.ErrFull
+	}
 	return nil
 }
 
@@ -181,8 +190,10 @@ func TestPodAllocator_reconcileForNAD(t *testing.T) {
 		expectIPRelease bool
 		expectIDRelease bool
 		expectTracked   bool
+		fullIPPool      bool
 		expectEvents    []string
 		expectError     string
+		podAnnotation   *util.PodAnnotation
 	}{
 		{
 			name: "Pod not scheduled",
@@ -512,6 +523,26 @@ func TestPodAllocator_reconcileForNAD(t *testing.T) {
 			expectError:  "failed to get NAD to network mapping: unexpected primary network \"\" specified with a NetworkSelectionElement &{Name:nad Namespace:namespace IPRequest:[] MacRequest: InfinibandGUIDRequest: InterfaceRequest: PortMappingsRequest:[] BandwidthRequest:<nil> CNIArgs:<nil> GatewayRequest:[] IPAMClaimReference:}",
 			expectEvents: []string{"Warning ErrorAllocatingPod unexpected primary network \"\" specified with a NetworkSelectionElement &{Name:nad Namespace:namespace IPRequest:[] MacRequest: InfinibandGUIDRequest: InterfaceRequest: PortMappingsRequest:[] BandwidthRequest:<nil> CNIArgs:<nil> GatewayRequest:[] IPAMClaimReference:}"},
 		},
+		{
+			name: "Pod on network",
+			args: args{
+				new: &testPod{
+					scheduled: true,
+					network: &nadapi.NetworkSelectionElement{
+						Namespace: "namespace",
+						Name:      "nad",
+					},
+				},
+			},
+			podAnnotation: &util.PodAnnotation{
+				IPs: ovntest.MustParseIPNets("10.1.130.0/24"),
+				MAC: util.IPAddrToHWAddr(ovntest.MustParseIPNets("10.1.130.0/24")[0].IP),
+			},
+			ipam:         true,
+			fullIPPool:   true,
+			expectEvents: []string{"Warning ErrorAllocatingPod failed to update pod namespace/pod: failed to ensure requested or annotated IPs [10.1.130.0/24] for namespace/nad/namespace/pod: range is full"},
+			expectError:  "failed to update pod namespace/pod: failed to ensure requested or annotated IPs [10.1.130.0/24] for namespace/nad/namespace/pod: range is full",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -624,6 +655,17 @@ func TestPodAllocator_reconcileForNAD(t *testing.T) {
 
 			if tt.tracked {
 				a.releasedPods["namespace/nad"] = sets.New("pod")
+			}
+
+			if tt.fullIPPool {
+				a.ipAllocator.AllocateUntilFull(netConf.Subnets)
+			}
+
+			if tt.podAnnotation != nil {
+				new.Annotations, err = util.MarshalPodAnnotation(new.Annotations, tt.podAnnotation, "namespace/nad")
+				if err != nil {
+					t.Fatalf("failed to set pod annotations: %v", err)
+				}
 			}
 
 			err = a.reconcile(old, new, tt.args.release)
