@@ -50,6 +50,9 @@ spec:
                 description: advertisements determines what is advertised.
                 items:
                   description: AdvertisementType determines the type of advertisement.
+                  enum:
+                  - PodNetwork
+                  - EgressIP
                   type: string
                 maxItems: 2
                 minItems: 1
