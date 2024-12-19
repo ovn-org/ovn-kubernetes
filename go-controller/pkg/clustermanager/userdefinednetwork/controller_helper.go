@@ -15,10 +15,25 @@ import (
 	netv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/userdefinednetwork/template"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	utiludn "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/udn"
 )
 
 func (c *Controller) updateNAD(obj client.Object, namespace string) (*netv1.NetworkAttachmentDefinition, error) {
+	if utiludn.IsPrimaryNetwork(template.GetSpec(obj)) {
+		// check if required UDN label is on namespace
+		ns, err := c.namespaceInformer.Lister().Get(namespace)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get namespace %q: %w", namespace, err)
+		}
+
+		if _, exists := ns.Labels[types.RequiredUDNNamespaceLabel]; !exists {
+			// No Required label set on namespace while trying to render NAD for primary network on this namespace
+			return nil, util.NewInvalidPrimaryNetworkError(namespace)
+		}
+	}
+
 	desiredNAD, err := c.renderNadFn(obj, namespace)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate NetworkAttachmentDefinition: %w", err)

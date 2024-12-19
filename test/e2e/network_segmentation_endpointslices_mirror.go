@@ -24,6 +24,7 @@ import (
 
 var _ = Describe("Network Segmentation EndpointSlices mirroring", func() {
 	f := wrappedTestFramework("endpointslices-mirror")
+	f.SkipNamespaceCreation = true
 	Context("a user defined primary network", func() {
 		const (
 			userDefinedNetworkIPv4Subnet = "10.128.0.0/16"
@@ -38,8 +39,12 @@ var _ = Describe("Network Segmentation EndpointSlices mirroring", func() {
 
 		BeforeEach(func() {
 			cs = f.ClientSet
-
-			var err error
+			namespace, err := f.CreateNamespace(context.TODO(), f.BaseName, map[string]string{
+				"e2e-framework":           f.BaseName,
+				RequiredUDNNamespaceLabel: "",
+			})
+			f.Namespace = namespace
+			Expect(err).NotTo(HaveOccurred())
 			nadClient, err = nadclient.NewForConfig(f.ClientConfig())
 			Expect(err).NotTo(HaveOccurred())
 		})

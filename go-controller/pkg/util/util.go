@@ -390,6 +390,20 @@ func NewUnprocessedActiveNetworkError(namespace, udnName string) *UnprocessedAct
 	return &UnprocessedActiveNetworkError{namespace: namespace, udnName: udnName}
 }
 
+type InvalidPrimaryNetworkError struct {
+	namespace string
+}
+
+func (m *InvalidPrimaryNetworkError) Error() string {
+	return fmt.Sprintf("invalid primary network state for namespace %q: "+
+		"a valid primary UDN CR and required namespace label %q must both be present",
+		m.namespace, types.RequiredUDNNamespaceLabel)
+}
+
+func NewInvalidPrimaryNetworkError(namespace string) *InvalidPrimaryNetworkError {
+	return &InvalidPrimaryNetworkError{namespace: namespace}
+}
+
 func GetUserDefinedNetworkRole(isPrimary bool) string {
 	networkRole := types.NetworkRoleSecondary
 	if isPrimary {
