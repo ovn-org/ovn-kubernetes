@@ -1,6 +1,7 @@
 package networkmanager
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 	"sync"
@@ -21,13 +22,13 @@ import (
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	nadinformers "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/informers/externalversions/k8s.cni.cncf.io/v1"
 	nadlisters "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/controller"
 	rainformers "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/informers/externalversions/routeadvertisements/v1"
 	userdefinednetworkinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/informers/externalversions/userdefinednetwork/v1"
 	userdefinednetworklister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/listers/userdefinednetwork/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 	utiludn "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/udn"
 )
 
@@ -160,8 +161,12 @@ func (c *nadController) syncAll() (err error) {
 			continue
 		}
 		err = c.syncNAD(key, nad)
-		if err != nil {
-			return fmt.Errorf("%s: failed to sync %s: %v", c.name, key, err)
+		if err != nil && !errors.Is(err, config.ErrorAttachDefNotOvnManaged) {
+			if c.recorder != nil {
+				c.recorder.Eventf(&corev1.ObjectReference{Kind: nad.Kind, Namespace: nad.Namespace, Name: nad.Name}, corev1.EventTypeWarning,
+					"FailedSync", "Failed to sync network %s config: %v", key, err)
+			}
+			klog.Warningf("%s: unable to sync %s: %v", c.name, key, err)
 		}
 	}
 
