@@ -4,17 +4,29 @@ import (
 	"context"
 	"errors"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"k8s.io/client-go/tools/record"
 )
 
 var ErrNetworkControllerTopologyNotManaged = errors.New("no cluster network controller to manage topology")
 
+const (
+	// DefaultNetworkID is the default network.
+	DefaultNetworkID = 0
+
+	// MaxNetworks is the maximum number of networks allowed.
+	MaxNetworks = 4096
+)
+
 // Interface is the main package entrypoint and provides network related
 // information to the rest of the project.
 type Interface interface {
 	GetActiveNetworkForNamespace(namespace string) (util.NetInfo, error)
-	GetNetwork(networkName string) util.NetInfo
+
+	// GetNetwork returns the network of the given name or nil if unknown
+	GetNetwork(name string) util.NetInfo
+
 	// DoWithLock takes care of locking and unlocking while iterating over all role primary user defined networks.
 	DoWithLock(f func(network util.NetInfo) error) error
 	GetActiveNetworkNamespaces(networkName string) ([]string, error)
@@ -38,6 +50,7 @@ func Default() Controller {
 func NewForCluster(
 	cm ControllerManager,
 	wf watchFactory,
+	ovnClient *util.OVNClusterManagerClientset,
 	recorder record.EventRecorder,
 ) (Controller, error) {
 	return new(
@@ -46,6 +59,7 @@ func NewForCluster(
 		"",
 		cm,
 		wf,
+		ovnClient,
 		recorder,
 	)
 }
@@ -63,6 +77,7 @@ func NewForZone(
 		cm,
 		wf,
 		nil,
+		nil,
 	)
 }
 
@@ -79,6 +94,7 @@ func NewForNode(
 		cm,
 		wf,
 		nil,
+		nil,
 	)
 }
 
@@ -91,9 +107,10 @@ func new(
 	node string,
 	cm ControllerManager,
 	wf watchFactory,
+	ovnClient *util.OVNClusterManagerClientset,
 	recorder record.EventRecorder,
 ) (Controller, error) {
-	return newController(name, zone, node, cm, wf, recorder)
+	return newController(name, zone, node, cm, wf, ovnClient, recorder)
 }
 
 // ControllerManager manages controllers. Needs to be provided in order to build
@@ -103,6 +120,10 @@ type ControllerManager interface {
 	NewNetworkController(netInfo util.NetInfo) (NetworkController, error)
 	GetDefaultNetworkController() ReconcilableNetworkController
 	CleanupStaleNetworks(validNetworks ...util.NetInfo) error
+
+	// Reconcile informs the manager of network changes that other managed
+	// network aware controllers might be interested in.
+	Reconcile(name string, old, new util.NetInfo) error
 }
 
 // ReconcilableNetworkController is a network controller that can reconcile
@@ -152,7 +173,10 @@ func (nm defaultNetworkManager) GetActiveNetworkForNamespace(string) (util.NetIn
 	return &util.DefaultNetInfo{}, nil
 }
 
-func (nm defaultNetworkManager) GetNetwork(networkName string) util.NetInfo {
+func (nm defaultNetworkManager) GetNetwork(name string) util.NetInfo {
+	if name != types.DefaultNetworkName {
+		return nil
+	}
 	return &util.DefaultNetInfo{}
 }
 
