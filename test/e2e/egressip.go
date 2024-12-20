@@ -616,6 +616,7 @@ var _ = ginkgo.DescribeTableSubtree("e2e egress IP validation", func(netConfigPa
 	}
 
 	f := wrappedTestFramework(egressIPName)
+	f.SkipNamespaceCreation = true
 
 	// Determine what mode the CI is running in and get relevant endpoint information for the tests
 	ginkgo.BeforeEach(func() {
@@ -633,6 +634,17 @@ var _ = ginkgo.DescribeTableSubtree("e2e egress IP validation", func(netConfigPa
 		if len(ips) == 0 {
 			framework.Failf("expect at least one IP address")
 		}
+
+		labels := map[string]string{
+			"e2e-framework": f.BaseName,
+		}
+		if !isClusterDefaultNetwork(netConfigParams) {
+			labels[RequiredUDNNamespaceLabel] = ""
+		}
+		namespace, err := f.CreateNamespace(context.TODO(), f.BaseName, labels)
+		f.Namespace = namespace
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
 		isIPv6TestRun = utilnet.IsIPv6String(ips[0])
 		egress1Node = node{
 			name:   nodes.Items[1].Name,
@@ -3028,27 +3040,16 @@ spec:
 		err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(targetNode, pod2Name, pod2OtherNetworkNamespace, true, []string{egressIP1.String()}))
 		framework.ExpectNoError(err, "Step 7. Check connectivity from pod connected to a different network and verify that the srcIP is the expected nodeIP, failed: %v", err)
 	},
-		ginkgo.Entry("IPv4 L3 Primary UDN", networkAttachmentConfigParams{
+		ginkgo.Entry("L3 Primary UDN", networkAttachmentConfigParams{
 			name:     "l3primary",
 			topology: types.Layer3Topology,
-			cidr:     "30.10.0.0/16",
+			cidr:     correctCIDRFamily("30.10.0.0/16", "2014:100:200::0/60"),
 			role:     "primary",
 		}),
-		ginkgo.Entry("IPv6 L3 Primary UDN", networkAttachmentConfigParams{
-			name:     "l3primary",
-			topology: types.Layer3Topology,
-			cidr:     "2014:100:200::0/60",
-		}),
-		ginkgo.Entry("IPv4 L2 Primary UDN", networkAttachmentConfigParams{
+		ginkgo.Entry("L2 Primary UDN", networkAttachmentConfigParams{
 			name:     "l2primary",
 			topology: types.Layer2Topology,
-			cidr:     "10.10.0.0/16",
-			role:     "primary",
-		}),
-		ginkgo.Entry("IPv6 L2 Primary UDN", networkAttachmentConfigParams{
-			name:     "l2primary",
-			topology: types.Layer2Topology,
-			cidr:     "2014:100:200::0/60",
+			cidr:     correctCIDRFamily("10.10.0.0/16", "2014:100:200::0/60"),
 			role:     "primary",
 		}),
 	)
