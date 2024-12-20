@@ -3,6 +3,7 @@ package networkmanager
 import (
 	"fmt"
 	"reflect"
+	"strconv"
 	"sync"
 	"time"
 
@@ -12,19 +13,22 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/sets"
 	coreinformers "k8s.io/client-go/informers/core/v1"
-	corev1listers "k8s.io/client-go/listers/core/v1"
+	corelisters "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+	nadclientset "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned"
 	nadinformers "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/informers/externalversions/k8s.cni.cncf.io/v1"
 	nadlisters "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/id"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/controller"
 	rainformers "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/informers/externalversions/routeadvertisements/v1"
 	userdefinednetworkinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/informers/externalversions/userdefinednetwork/v1"
 	userdefinednetworklister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/listers/userdefinednetwork/v1"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
@@ -53,9 +57,11 @@ type nadController struct {
 	nadLister       nadlisters.NetworkAttachmentDefinitionLister
 	udnLister       userdefinednetworklister.UserDefinedNetworkLister
 	cudnLister      userdefinednetworklister.ClusterUserDefinedNetworkLister
-	namespaceLister corev1listers.NamespaceLister
-	controller      controller.Controller
-	recorder        record.EventRecorder
+	namespaceLister corelisters.NamespaceLister
+	nodeLister      corelisters.NodeLister
+
+	controller controller.Controller
+	recorder   record.EventRecorder
 
 	// networkController reconciles network specific controllers
 	networkController *networkController
@@ -65,6 +71,9 @@ type nadController struct {
 
 	// primaryNADs holds a mapping of namespace to primary NAD names
 	primaryNADs map[string]string
+
+	networkIDAllocator id.Allocator
+	nadClient          nadclientset.Interface
 }
 
 func newController(
@@ -73,15 +82,31 @@ func newController(
 	node string,
 	cm ControllerManager,
 	wf watchFactory,
+	ovnClient *util.OVNClusterManagerClientset,
 	recorder record.EventRecorder,
 ) (*nadController, error) {
 	c := &nadController{
 		name:              fmt.Sprintf("[%s NAD controller]", name),
 		recorder:          recorder,
 		nadLister:         wf.NADInformer().Lister(),
+		nodeLister:        wf.NodeCoreInformer().Lister(),
 		networkController: newNetworkController(name, zone, node, cm, wf),
 		nads:              map[string]string{},
 		primaryNADs:       map[string]string{},
+	}
+
+	if ovnClient != nil {
+		c.nadClient = ovnClient.NetworkAttchDefClient
+	}
+
+	// this is cluster network manager, so we allocate network IDs
+	if zone == "" && node == "" {
+		c.networkIDAllocator = id.NewIDAllocator("NetworkIDs", MaxNetworks)
+		// Reserve the ID of the default network
+		err := c.networkIDAllocator.ReserveID(types.DefaultNetworkName, DefaultNetworkID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to allocate default network ID: %w", err)
+		}
 	}
 
 	config := &controller.ControllerConfig[nettypes.NetworkAttachmentDefinition]{
@@ -89,7 +114,7 @@ func newController(
 		Informer:       wf.NADInformer().Informer(),
 		Lister:         c.nadLister.List,
 		Reconcile:      c.sync,
-		ObjNeedsUpdate: nadNeedsUpdate,
+		ObjNeedsUpdate: c.nadNeedsUpdate,
 		Threadiness:    1,
 	}
 
@@ -149,19 +174,65 @@ func (c *nadController) syncAll() (err error) {
 		return fmt.Errorf("%s: failed to list NADs: %w", c.name, err)
 	}
 
-	// create all networks with their updated list of NADs and only then start
-	// the corresponding controllers so as to avoid to the extent possible the
-	// errors and retries that would result if the controller attempted to
-	// process pods attached with NADs we wouldn't otherwise know about yet
-	for _, nad := range existingNADs {
+	syncNAD := func(nad *nettypes.NetworkAttachmentDefinition) error {
 		key, err := cache.MetaNamespaceKeyFunc(nad)
 		if err != nil {
 			klog.Errorf("%s: failed to sync %v: %v", c.name, nad, err)
-			continue
 		}
 		err = c.syncNAD(key, nad)
 		if err != nil {
 			return fmt.Errorf("%s: failed to sync %s: %v", c.name, key, err)
+		}
+		return nil
+	}
+
+	// create all networks with their updated list of NADs and only then start
+	// the corresponding controllers so as to avoid to the extent possible the
+	// errors and retries that would result if the controller attempted to
+	// process pods attached with NADs we wouldn't otherwise know about yet
+	nadsWithoutID := []*nettypes.NetworkAttachmentDefinition{}
+	for _, nad := range existingNADs {
+		// skip NADs that are not annotated with an ID
+		if c.networkIDAllocator != nil && nad.Annotations[types.OvnNetworkIDAnnotation] == "" {
+			nadsWithoutID = append(nadsWithoutID, nad)
+			continue
+		}
+		err := syncNAD(nad)
+		if err != nil {
+			return err
+		}
+	}
+
+	if len(nadsWithoutID) == 0 {
+		return nil
+	}
+
+	// If we are missing IDs, get them from the nodes which is where we
+	// originally had them
+	klog.V(5).Infof("%s: %d NADs are missing the network ID annotation, fetching from nodes", c.name, len(nadsWithoutID))
+	nodes, err := c.nodeLister.List(labels.Everything())
+	if err != nil {
+		return fmt.Errorf("error listing nodes: %w", err)
+	}
+	for _, n := range nodes {
+		networkIdsMap, err := util.GetNodeNetworkIDsAnnotationNetworkIDs(n)
+		if err == nil {
+			for networkName, id := range networkIdsMap {
+				// Reserve the id for the network name. We can safely
+				// ignore any errors if there are duplicate ids or if
+				// two networks have the same id. We will resync the node
+				// annotations correctly when the network controller
+				// is created.
+				_ = c.networkIDAllocator.ReserveID(networkName, id)
+			}
+		}
+	}
+
+	// finally process the pending NADs
+	for _, nad := range existingNADs {
+		err := syncNAD(nad)
+		if err != nil {
+			return err
 		}
 	}
 
@@ -272,6 +343,10 @@ func (c *nadController) syncNAD(key string, nad *nettypes.NetworkAttachmentDefin
 		}
 	}
 
+	if err := c.handleNetworkID(oldNetwork, ensureNetwork, nad); err != nil {
+		return err
+	}
+
 	// this was a nad delete
 	if ensureNetwork == nil {
 		delete(c.nads, key)
@@ -279,6 +354,14 @@ func (c *nadController) syncNAD(key string, nad *nettypes.NetworkAttachmentDefin
 			delete(c.primaryNADs, namespace)
 		}
 		return err
+	}
+
+	// if network ID has not been set and this is not the well known default
+	// network, need to wait until cluster nad controller allocates an ID for
+	// the network
+	if ensureNetwork.GetNetworkID() == util.InvalidID {
+		klog.V(4).Infof("%s: will wait for cluster manager to allocate an ID before ensuring network %s", c.name, nadNetworkName)
+		return nil
 	}
 
 	// ensure the network is associated with the NAD
@@ -299,7 +382,13 @@ func (c *nadController) syncNAD(key string, nad *nettypes.NetworkAttachmentDefin
 	return nil
 }
 
-func nadNeedsUpdate(oldNAD, newNAD *nettypes.NetworkAttachmentDefinition) bool {
+// isOwnUpdate checks if an object was updated by us last, as indicated by its
+// managed fields. Used to avoid reconciling an update that we made ourselves.
+func isOwnUpdate(manager string, managedFields []metav1.ManagedFieldsEntry) bool {
+	return util.IsLastUpdatedByManager(manager, managedFields)
+}
+
+func (c *nadController) nadNeedsUpdate(oldNAD, newNAD *nettypes.NetworkAttachmentDefinition) bool {
 	if oldNAD == nil || newNAD == nil {
 		return true
 	}
@@ -310,31 +399,28 @@ func nadNeedsUpdate(oldNAD, newNAD *nettypes.NetworkAttachmentDefinition) bool {
 		return false
 	}
 
+	if isOwnUpdate(c.name, newNAD.ManagedFields) {
+		return false
+	}
+
 	// also reconcile the network in case its route advertisements changed
 	return !reflect.DeepEqual(oldNAD.Spec, newNAD.Spec) ||
-		oldNAD.Annotations[types.OvnRouteAdvertisementsKey] != newNAD.Annotations[types.OvnRouteAdvertisementsKey]
+		oldNAD.Annotations[types.OvnRouteAdvertisementsKey] != newNAD.Annotations[types.OvnRouteAdvertisementsKey] ||
+		oldNAD.Annotations[types.OvnNetworkIDAnnotation] != newNAD.Annotations[types.OvnNetworkIDAnnotation] ||
+		oldNAD.Annotations[types.OvnNetworkNameAnnotation] != newNAD.Annotations[types.OvnNetworkNameAnnotation]
 }
 
 func (c *nadController) GetActiveNetworkForNamespace(namespace string) (util.NetInfo, error) {
-	if !util.IsNetworkSegmentationSupportEnabled() {
-		return &util.DefaultNetInfo{}, nil
+	nad, network := c.getActiveNetworkForNamespace(namespace)
+	if nad == "" {
+		// default network, just return
+		return network, nil
 	}
-	c.RLock()
-	defer c.RUnlock()
-	primaryNAD := c.primaryNADs[namespace]
-	if primaryNAD != "" {
-		// we have a primary NAD, get the network
-		netName := c.nads[primaryNAD]
-		if netName == "" {
-			// this should never happen where we have a nad keyed in the primaryNADs
-			// map, but it doesn't exist in the nads map
-			panic("NAD Controller broken consistency between primary NADs and cached NADs")
-		}
-		network := c.networkController.getNetwork(netName)
-		n := util.NewMutableNetInfo(network)
-		// update the returned netInfo copy to only have the primary NAD for this namespace
-		n.SetNADs(primaryNAD)
-		return n, nil
+	if network != nil {
+		// primary network
+		copy := util.NewMutableNetInfo(network)
+		copy.SetNADs(nad)
+		return copy, nil
 	}
 
 	// no primary network found, make sure we just haven't processed it yet and no UDN / CUDN exists
@@ -374,6 +460,38 @@ func (c *nadController) GetActiveNetworkForNamespace(namespace string) (util.Net
 	return &util.DefaultNetInfo{}, nil
 }
 
+func (c *nadController) GetActiveNetworkForNamespaceFast(namespace string) util.NetInfo {
+	_, network := c.getActiveNetworkForNamespace(namespace)
+	return network
+}
+
+func (c *nadController) getActiveNetworkForNamespace(namespace string) (string, util.NetInfo) {
+	c.RLock()
+	defer c.RUnlock()
+
+	var network util.NetInfo
+	primaryNAD := c.primaryNADs[namespace]
+	switch primaryNAD {
+	case "":
+		// default network
+		network = c.networkController.getNetwork(types.DefaultNetworkName)
+		if network == nil {
+			network = &util.DefaultNetInfo{}
+		}
+	default:
+		// we have a primary netwrok
+		netName := c.nads[primaryNAD]
+		if netName == "" {
+			// this should never happen where we have a nad keyed in the primaryNADs
+			// map, but it doesn't exist in the nads map
+			panic("NAD Controller broken consistency between primary NADs and cached NADs")
+		}
+		network = c.networkController.getNetwork(netName)
+	}
+
+	return primaryNAD, network
+}
+
 func (c *nadController) GetNetwork(name string) util.NetInfo {
 	network := c.networkController.getNetwork(name)
 	if network == nil && name == types.DefaultNetworkName {
@@ -382,15 +500,15 @@ func (c *nadController) GetNetwork(name string) util.NetInfo {
 	return network
 }
 
-func (nadController *nadController) GetActiveNetworkNamespaces(networkName string) ([]string, error) {
+func (c *nadController) GetActiveNetworkNamespaces(networkName string) ([]string, error) {
 	if !util.IsNetworkSegmentationSupportEnabled() {
 		return []string{"default"}, nil
 	}
 	namespaces := make([]string, 0)
-	nadController.RLock()
-	defer nadController.RUnlock()
-	for namespaceName, primaryNAD := range nadController.primaryNADs {
-		nadNetworkName := nadController.nads[primaryNAD]
+	c.RLock()
+	defer c.RUnlock()
+	for namespaceName, primaryNAD := range c.primaryNADs {
+		nadNetworkName := c.nads[primaryNAD]
 		if nadNetworkName != networkName {
 			continue
 		}
@@ -401,26 +519,26 @@ func (nadController *nadController) GetActiveNetworkNamespaces(networkName strin
 
 // DoWithLock iterates over all role primary user defined networks and executes the given fn with each network as input.
 // An error will not block execution and instead all errors will be aggregated and returned when all networks are processed.
-func (nadController *nadController) DoWithLock(f func(network util.NetInfo) error) error {
+func (c *nadController) DoWithLock(f func(network util.NetInfo) error) error {
 	if !util.IsNetworkSegmentationSupportEnabled() {
 		defaultNetwork := &util.DefaultNetInfo{}
 		return f(defaultNetwork)
 	}
-	nadController.RLock()
-	defer nadController.RUnlock()
+	c.RLock()
+	defer c.RUnlock()
 
 	var errs []error
-	for _, primaryNAD := range nadController.primaryNADs {
+	for _, primaryNAD := range c.primaryNADs {
 		if primaryNAD == "" {
 			continue
 		}
-		netName := nadController.nads[primaryNAD]
+		netName := c.nads[primaryNAD]
 		if netName == "" {
 			// this should never happen where we have a nad keyed in the primaryNADs
 			// map, but it doesn't exist in the nads map
 			panic("NAD Controller broken consistency between primary NADs and cached NADs")
 		}
-		network := nadController.networkController.getNetwork(netName)
+		network := c.networkController.getNetwork(netName)
 		n := util.NewMutableNetInfo(network)
 		// update the returned netInfo copy to only have the primary NAD for this namespace
 		n.SetNADs(primaryNAD)
@@ -429,4 +547,100 @@ func (nadController *nadController) DoWithLock(f func(network util.NetInfo) erro
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// handleNetworkID finds out what the network ID should be for a new network and
+// sets it on 'new'. The network ID is primarily found annotated in the NAD. If
+// not annotated, it means it is still to be allocated. If this is not the NAD
+// controller running in cluster manager, then we don't do anything as we are
+// expected to wait until it happens. If this is the NAD controller running in
+// cluster manager then a new ID is allocated and annotated on the NAD. The NAD
+// controller running in cluster manager also releases here the network ID of a
+// network that is being desleted.
+func (c *nadController) handleNetworkID(old util.NetInfo, new util.MutableNetInfo, nad *nettypes.NetworkAttachmentDefinition) error {
+	if new != nil && new.IsDefault() {
+		return nil
+	}
+
+	var err error
+	id := util.InvalidID
+
+	// check what ID is currently annotated
+	if nad != nil && nad.Annotations[types.OvnNetworkIDAnnotation] != "" {
+		annotated := nad.Annotations[types.OvnNetworkIDAnnotation]
+		id, err = strconv.Atoi(annotated)
+		if err != nil {
+			return fmt.Errorf("failed to parse annotated network ID: %w", err)
+		}
+	}
+
+	// this is not the cluster manager nad controller and we are not allocating
+	// so just return what we got from the annotation
+	if c.networkIDAllocator == nil {
+		if new != nil {
+			new.SetNetworkID(id)
+		}
+		return nil
+	}
+
+	// release old ID if the network is being deleted
+	if old != nil && !old.IsDefault() && len(old.GetNADs()) == 0 {
+		c.networkIDAllocator.ReleaseID(old.GetNetworkName())
+	}
+
+	// nothing to allocate
+	if new == nil {
+		return nil
+	}
+	name := new.GetNetworkName()
+
+	// an ID was annotated, check if it is free to use or stale
+	if id != util.InvalidID {
+		err = c.networkIDAllocator.ReserveID(name, id)
+		if err != nil {
+			// already reserved for a different network, allocate a new id
+			id = util.InvalidID
+		}
+	}
+
+	// we don't have an ID, allocate a new one
+	if id == util.InvalidID {
+		id, err = c.networkIDAllocator.AllocateID(name)
+		if err != nil {
+			return fmt.Errorf("failed to allocate network ID: %w", err)
+		}
+	}
+
+	// set and annotate the network ID
+	annotations := map[string]string{
+		types.OvnNetworkNameAnnotation: name,
+		types.OvnNetworkIDAnnotation:   strconv.Itoa(id),
+	}
+	if nad.Annotations[types.OvnNetworkNameAnnotation] == annotations[types.OvnNetworkNameAnnotation] {
+		delete(annotations, types.OvnNetworkNameAnnotation)
+	}
+	if nad.Annotations[types.OvnNetworkIDAnnotation] == annotations[types.OvnNetworkIDAnnotation] {
+		delete(annotations, types.OvnNetworkIDAnnotation)
+	}
+	if len(annotations) == 0 {
+		return nil
+	}
+
+	k := kube.KubeOVN{
+		NADClient: c.nadClient,
+	}
+
+	err = k.SetAnnotationsOnNAD(
+		nad.Namespace,
+		nad.Name,
+		annotations,
+		c.name,
+	)
+	if err != nil {
+		c.networkIDAllocator.ReleaseID(name)
+		return fmt.Errorf("failed to annotate network ID on NAD: %w", err)
+	}
+	new.SetNetworkID(id)
+
+	return nil
 }

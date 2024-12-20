@@ -60,7 +60,6 @@ type networkClusterController struct {
 	tunnelIDAllocator   id.Allocator
 	podAllocator        *pod.PodAllocator
 	nodeAllocator       *node.NodeAllocator
-	networkIDAllocator  id.NamedAllocator
 	ipamClaimReconciler *persistentips.IPAMClaimReconciler
 	subnetAllocator     subnet.Allocator
 
@@ -82,7 +81,6 @@ type networkClusterController struct {
 }
 
 func newNetworkClusterController(
-	networkIDAllocator id.NamedAllocator,
 	netInfo util.NetInfo,
 	ovnClient *util.OVNClusterManagerClientset,
 	wf *factory.WatchFactory,
@@ -105,7 +103,6 @@ func newNetworkClusterController(
 		kube:                kube,
 		stopChan:            make(chan struct{}),
 		wg:                  wg,
-		networkIDAllocator:  networkIDAllocator,
 		recorder:            recorder,
 		networkManager:      networkManager,
 		statusReporter:      errorReporter,
@@ -126,8 +123,7 @@ func newDefaultNetworkClusterController(netInfo util.NetInfo, ovnClient *util.OV
 		panic(fmt.Errorf("could not reserve default network ID: %w", err))
 	}
 
-	namedIDAllocator := networkIDAllocator.ForName(types.DefaultNetworkName)
-	return newNetworkClusterController(namedIDAllocator, netInfo, ovnClient, wf, recorder, networkmanager.Default().Interface(), nil)
+	return newNetworkClusterController(netInfo, ovnClient, wf, recorder, networkmanager.Default().Interface(), nil)
 }
 
 func (ncc *networkClusterController) hasPodAllocation() bool {
@@ -171,11 +167,9 @@ func (ncc *networkClusterController) init() error {
 		return fmt.Errorf("failed to reset network status: %w", err)
 	}
 
-	networkID, err := ncc.networkIDAllocator.AllocateID()
-	if err != nil {
-		return err
-	}
+	networkID := ncc.GetNetworkID()
 
+	var err error
 	if util.DoesNetworkRequireTunnelIDs(ncc.GetNetInfo()) {
 		ncc.tunnelIDAllocator = id.NewIDAllocator(ncc.GetNetworkName(), types.MaxLogicalPortTunnelKey)
 		// Reserve the id 0. We don't want to assign this id to any of the pods or nodes.
@@ -438,7 +432,6 @@ func (ncc *networkClusterController) Cleanup() error {
 		if err != nil {
 			return err
 		}
-		ncc.networkIDAllocator.ReleaseID()
 	}
 
 	return nil
