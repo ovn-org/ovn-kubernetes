@@ -79,6 +79,10 @@ func buildNamespaceAddressSets(namespace string, ips []string) (*nbdb.AddressSet
 	return addressset.GetTestDbAddrSets(getNamespaceAddrSetDbIDs(namespace, "default-network-controller"), ips)
 }
 
+func buildUDNNamespaceAddressSets(networkName, namespace string, ips []string) (*nbdb.AddressSet, *nbdb.AddressSet) {
+	return addressset.GetTestDbAddrSets(getNamespaceAddrSetDbIDs(namespace, networkName+"-network-controller"), ips)
+}
+
 var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 	const (
 		namespaceName         = "namespace1"

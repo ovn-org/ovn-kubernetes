@@ -50,12 +50,12 @@ func getACLsForBANPRulesWithNamedPorts(banp *anpapi.BaselineAdminNetworkPolicy, 
 	aclResults := []*nbdb.ACL{}
 	for i, ingress := range banp.Spec.Ingress {
 		acls := getANPGressACL(anpovn.GetACLActionForBANPRule(ingress.Action), banp.Name, string(libovsdbutil.ACLIngress),
-			getBANPRulePriority(int32(i)), int32(i), ingress.Ports, namedIPorts, true)
+			getBANPRulePriority(int32(i)), int32(i), ingress.Ports, namedIPorts, true, DefaultNetworkControllerName)
 		aclResults = append(aclResults, acls...)
 	}
 	for i, egress := range banp.Spec.Egress {
 		acls := getANPGressACL(anpovn.GetACLActionForBANPRule(egress.Action), banp.Name, string(libovsdbutil.ACLEgress),
-			getBANPRulePriority(int32(i)), int32(i), egress.Ports, namedEPorts, true)
+			getBANPRulePriority(int32(i)), int32(i), egress.Ports, namedEPorts, true, DefaultNetworkControllerName)
 		aclResults = append(aclResults, acls...)
 	}
 	return aclResults
@@ -65,12 +65,12 @@ func getACLsForBANPRules(banp *anpapi.BaselineAdminNetworkPolicy) []*nbdb.ACL {
 	aclResults := []*nbdb.ACL{}
 	for i, ingress := range banp.Spec.Ingress {
 		acls := getANPGressACL(anpovn.GetACLActionForBANPRule(ingress.Action), banp.Name, string(libovsdbutil.ACLIngress),
-			getBANPRulePriority(int32(i)), int32(i), ingress.Ports, nil, true)
+			getBANPRulePriority(int32(i)), int32(i), ingress.Ports, nil, true, DefaultNetworkControllerName)
 		aclResults = append(aclResults, acls...)
 	}
 	for i, egress := range banp.Spec.Egress {
 		acls := getANPGressACL(anpovn.GetACLActionForBANPRule(egress.Action), banp.Name, string(libovsdbutil.ACLEgress),
-			getBANPRulePriority(int32(i)), int32(i), egress.Ports, nil, true)
+			getBANPRulePriority(int32(i)), int32(i), egress.Ports, nil, true, DefaultNetworkControllerName)
 		aclResults = append(aclResults, acls...)
 	}
 	return aclResults
