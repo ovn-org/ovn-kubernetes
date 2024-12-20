@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	routingTableIDStart = 1000
+	RoutingTableIDStart = 1000
 )
 
 var ErrorNoIP = errors.New("no IP available")
@@ -254,6 +254,18 @@ func MatchAllIPStringFamily(isIPv6 bool, ipStrings []string) ([]string, error) {
 	return nil, ErrorNoIP
 }
 
+// MatchAllCIDRStringFamily loops through the array of string and returns a slice
+// of addresses in the same IP Family, based on input flag isIPv6.
+func MatchAllIPNetsStringFamily(isIPv6 bool, ipnets []string) []string {
+	var out []string
+	for _, ipnet := range ipnets {
+		if utilnet.IsIPv6CIDRString(ipnet) == isIPv6 {
+			out = append(out, ipnet)
+		}
+	}
+	return out
+}
+
 // IsContainedInAnyCIDR returns true if ipnet is contained in any of ipnets
 func IsContainedInAnyCIDR(ipnet *net.IPNet, ipnets ...*net.IPNet) bool {
 	for _, container := range ipnets {
@@ -332,5 +344,5 @@ func IPNetsIPToStringSlice(ips []*net.IPNet) []string {
 // CalculateRouteTableID will calculate route table ID based on the network
 // interface index
 func CalculateRouteTableID(ifIndex int) int {
-	return ifIndex + routingTableIDStart
+	return ifIndex + RoutingTableIDStart
 }
