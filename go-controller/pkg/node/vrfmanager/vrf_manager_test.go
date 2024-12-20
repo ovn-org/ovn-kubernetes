@@ -21,8 +21,9 @@ import (
 
 var (
 	c            *Controller
-	vrfLinkName1 = "mp100-udn-vrf"
+	vrfLinkName1 = "blue"
 	vrfLinkName2 = "mp200-udn-vrf"
+	vrfLinkName3 = "red-not-udn"
 )
 
 var _ = ginkgo.Describe("VRF manager", func() {
@@ -31,10 +32,8 @@ var _ = ginkgo.Describe("VRF manager", func() {
 		enslaveLinkName1 = "dev100"
 		enslaveLinkName2 = "dev101"
 		nlMock           *mocks.NetLinkOps
-		vrfLinkMock1     *netlink_mocks.Link
 		enslaveLinkMock1 *netlink_mocks.Link
 		enslaveLinkMock2 *netlink_mocks.Link
-		vrfLinkMock2     *netlink_mocks.Link
 	)
 
 	linkIndexes := map[string]int{
@@ -42,6 +41,7 @@ var _ = ginkgo.Describe("VRF manager", func() {
 		enslaveLinkName1: 2,
 		enslaveLinkName2: 3,
 		vrfLinkName2:     4,
+		vrfLinkName3:     5,
 	}
 
 	masterIndexes := map[string]int{
@@ -49,6 +49,13 @@ var _ = ginkgo.Describe("VRF manager", func() {
 		enslaveLinkName1: 1,
 		enslaveLinkName2: 1,
 		vrfLinkName2:     0,
+		vrfLinkName3:     0,
+	}
+
+	vrfTables := map[string]uint32{
+		vrfLinkName1: 1000,
+		vrfLinkName2: 2000,
+		vrfLinkName3: 999,
 	}
 
 	getLinkIndex := func(linkName string) int {
@@ -67,29 +74,41 @@ var _ = ginkgo.Describe("VRF manager", func() {
 		return masterIndex
 	}
 
+	getVRFTable := func(linkName string) uint32 {
+		table, ok := vrfTables[linkName]
+		if !ok {
+			panic(fmt.Sprintf("failed to find table for vrf %q", linkName))
+		}
+		return table
+	}
+
+	buildVRF := func(name string) *netlink.Vrf {
+		return &netlink.Vrf{
+			LinkAttrs: netlink.LinkAttrs{Name: name, MasterIndex: getLinkMasterIndex(name), Index: getLinkIndex(name)},
+			Table:     getVRFTable(name),
+		}
+	}
+
 	ginkgo.BeforeEach(func() {
 		c = NewController(routemanager.NewController())
 
 		nlMock = &mocks.NetLinkOps{}
-		vrfLinkMock1 = new(netlink_mocks.Link)
+
 		enslaveLinkMock1 = new(netlink_mocks.Link)
 		enslaveLinkMock2 = new(netlink_mocks.Link)
-		vrfLinkMock2 = new(netlink_mocks.Link)
 		util.SetNetLinkOpMockInst(nlMock)
 
-		nlMock.On("LinkByName", vrfLinkName1).Return(vrfLinkMock1, nil)
+		nlMock.On("LinkByName", vrfLinkName1).Return(buildVRF(vrfLinkName1), nil)
 		nlMock.On("LinkByName", enslaveLinkName1).Return(enslaveLinkMock1, nil)
 		nlMock.On("LinkByName", enslaveLinkName2).Return(enslaveLinkMock2, nil)
 		nlMock.On("IsLinkNotFoundError", mock.Anything).Return(true)
 		nlMock.On("LinkAdd", mock.Anything).Return(nil)
 		nlMock.On("LinkSetUp", mock.Anything).Return(nil)
-		vrfLinkMock1.On("Type").Return("vrf")
-		vrfLinkMock1.On("Attrs").Return(&netlink.LinkAttrs{Name: vrfLinkName1, MasterIndex: getLinkMasterIndex(vrfLinkName1), Index: getLinkIndex(vrfLinkName1)}, nil)
 
-		nlMock.On("LinkByName", vrfLinkName2).Return(vrfLinkMock2, nil)
-		vrfLinkMock2.On("Type").Return("vrf")
-		vrfLinkMock2.On("Attrs").Return(&netlink.LinkAttrs{Name: vrfLinkName2, MasterIndex: getLinkMasterIndex(vrfLinkName2), Index: getLinkIndex(vrfLinkName2), OperState: netlink.OperUp}, nil)
-		nlMock.On("LinkDelete", vrfLinkMock2).Return(nil)
+		nlMock.On("LinkByName", vrfLinkName2).Return(buildVRF(vrfLinkName2), nil)
+		nlMock.On("LinkDelete", buildVRF(vrfLinkName2)).Return(nil)
+
+		nlMock.On("LinkByName", vrfLinkName3).Return(buildVRF(vrfLinkName3), nil)
 	})
 
 	ginkgo.AfterEach(func() {
@@ -98,28 +117,44 @@ var _ = ginkgo.Describe("VRF manager", func() {
 
 	ginkgo.Context("VRFs", func() {
 		ginkgo.It("add VRF with a slave interface", func() {
-			nlMock.On("LinkList").Return([]netlink.Link{vrfLinkMock1, enslaveLinkMock1}, nil)
+			nlMock.On("LinkList").Return([]netlink.Link{buildVRF(vrfLinkName1), enslaveLinkMock1}, nil)
 			enslaveLinkMock1.On("Attrs").Return(&netlink.LinkAttrs{Name: enslaveLinkName1, MasterIndex: 0, Index: getLinkIndex(enslaveLinkName1)}, nil)
-			nlMock.On("LinkSetMaster", enslaveLinkMock1, vrfLinkMock1).Return(nil)
-			err := c.AddVRF(vrfLinkName1, enslaveLinkName1, 10, nil)
+			nlMock.On("LinkSetMaster", enslaveLinkMock1, buildVRF(vrfLinkName1)).Return(nil)
+			err := c.AddVRF(vrfLinkName1, enslaveLinkName1, getVRFTable(vrfLinkName1), nil)
 			gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 		})
 
+		ginkgo.It("fails if we add a VRF with a long name", func() {
+			err := c.AddVRF("this.name.is.too.long", "other", 0, nil)
+			gomega.Expect(err).Should(gomega.HaveOccurred())
+		})
+
+		ginkgo.It("fails if we add a VRF with a non managed routing table", func() {
+			err := c.AddVRF("this.name.is.ok", "other", 999, nil)
+			gomega.Expect(err).Should(gomega.HaveOccurred())
+		})
+
+		ginkgo.It("fails if we add VRF with same name as existing non-managed VRF", func() {
+			nlMock.On("LinkList").Return([]netlink.Link{buildVRF(vrfLinkName3)}, nil)
+			err := c.AddVRF(vrfLinkName3, "other", 3000, nil)
+			gomega.Expect(err).Should(gomega.HaveOccurred())
+		})
+
 		ginkgo.It("delete VRF", func() {
-			err := c.AddVRF(vrfLinkName2, "", 20, nil)
+			err := c.AddVRF(vrfLinkName2, "", getVRFTable(vrfLinkName2), nil)
 			gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 			err = c.DeleteVRF(vrfLinkName2)
 			gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 		})
 
 		ginkgo.It("reconcile VRFs", func() {
-			nlMock.On("LinkList").Return([]netlink.Link{vrfLinkMock1, vrfLinkMock2, enslaveLinkMock1}, nil)
+			nlMock.On("LinkList").Return([]netlink.Link{buildVRF(vrfLinkName1), buildVRF(vrfLinkName2), enslaveLinkMock1}, nil)
 			enslaveLinkMock1.On("Attrs").Return(&netlink.LinkAttrs{Name: enslaveLinkName1, MasterIndex: getLinkMasterIndex(enslaveLinkName1), Index: getLinkIndex(enslaveLinkName1)}, nil)
-			err := c.AddVRF(vrfLinkName1, enslaveLinkName1, 10, nil)
+			err := c.AddVRF(vrfLinkName1, enslaveLinkName1, getVRFTable(vrfLinkName1), nil)
 			gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
-			err = c.AddVRF(vrfLinkName2, "", 20, nil)
+			err = c.AddVRF(vrfLinkName2, "", getVRFTable(vrfLinkName2), nil)
 			gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
-			err = util.GetNetLinkOps().LinkDelete(vrfLinkMock2)
+			err = util.GetNetLinkOps().LinkDelete(buildVRF(vrfLinkName2))
 			gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 			enslaveLinkMock1.On("Type").Return("dummy")
 			err = c.reconcile()
@@ -130,7 +165,7 @@ var _ = ginkgo.Describe("VRF manager", func() {
 		})
 
 		ginkgo.It("repair VRFs", func() {
-			nlMock.On("LinkList").Return([]netlink.Link{vrfLinkMock1, vrfLinkMock2, enslaveLinkMock1}, nil)
+			nlMock.On("LinkList").Return([]netlink.Link{buildVRF(vrfLinkName1), buildVRF(vrfLinkName2), buildVRF(vrfLinkName3), enslaveLinkMock1}, nil)
 			enslaveLinkMock1.On("Attrs").Return(&netlink.LinkAttrs{Name: enslaveLinkName1, MasterIndex: getLinkMasterIndex(enslaveLinkName1), Index: getLinkIndex(enslaveLinkName1)}, nil)
 			enslaveLinkMock1.On("Type").Return("dummy")
 			validVRFs := make(sets.Set[string])
@@ -202,9 +237,9 @@ var _ = ginkgo.Describe("VRF manager tests with a network namespace", func() {
 	ovntest.OnSupportedPlatformsIt("ensure VRF manager is reconciling configured VRF devices correctly", func() {
 		err := testNS.Do(func(ns.NetNS) error {
 			defer ginkgo.GinkgoRecover()
-			err := c.AddVRF(vrfLinkName1, "", 10, nil)
+			err := c.AddVRF(vrfLinkName1, "", 1000, nil)
 			gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
-			err = c.AddVRF(vrfLinkName2, "", 20, nil)
+			err = c.AddVRF(vrfLinkName2, "", 2000, nil)
 			gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 
 			wg3 := &sync.WaitGroup{}

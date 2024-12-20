@@ -14,8 +14,11 @@ import (
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	nadinformermocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/informers/externalversions/k8s.cni.cncf.io/v1"
 	nadlistermocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
+	coreinformermocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/client-go/informers/core/v1"
+	corelistermocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/client-go/listers/core/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/stretchr/testify/mock"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -176,12 +179,12 @@ var _ = Describe("Healthcheck tests", func() {
 
 	Context("verify cleanup of deleted networks", func() {
 		var (
-			staleNetID uint   = 100
+			staleNetID uint   = 1000
 			nodeName   string = "worker1"
 			nad               = ovntest.GenerateNAD("bluenet", "rednad", "greenamespace",
 				types.Layer3Topology, "100.128.0.0/16", types.NetworkRolePrimary)
 			netName      = "bluenet"
-			netID        = 3
+			netID        = 1003
 			v4NodeSubnet = "10.128.0.0/24"
 			v6NodeSubnet = "ae70::66/112"
 			testNS       ns.NetNS
@@ -211,7 +214,8 @@ var _ = Describe("Healthcheck tests", func() {
 			config.OVNKubernetesFeature.EnableMultiNetwork = true
 
 			factoryMock := factoryMocks.NodeWatchFactory{}
-			NetInfo, err := util.ParseNADInfo(nad)
+			netInfo, err := util.ParseNADInfo(nad)
+			mutableNetInfo := util.NewMutableNetInfo(netInfo)
 			Expect(err).NotTo(HaveOccurred())
 			node := &corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
@@ -232,6 +236,11 @@ var _ = Describe("Healthcheck tests", func() {
 			nadInformerMock.On("Lister").Return(nadListerMock)
 			nadInformerMock.On("Informer").Return(nil)
 			factoryMock.On("NADInformer").Return(nadInformerMock)
+			nodeListerMock := &corelistermocks.NodeLister{}
+			nodeListerMock.On("List", mock.Anything).Return(nodeList, nil)
+			nodeInformerMock := &coreinformermocks.NodeInformer{}
+			nodeInformerMock.On("Lister").Return(nodeListerMock)
+			factoryMock.On("NodeCoreInformer").Return(nodeInformerMock)
 
 			ncm, err := NewNodeControllerManager(fakeClient, &factoryMock, nodeName, &sync.WaitGroup{}, nil, routeManager)
 			Expect(err).NotTo(HaveOccurred())
@@ -239,17 +248,19 @@ var _ = Describe("Healthcheck tests", func() {
 			err = testNS.Do(func(ns.NetNS) error {
 				defer GinkgoRecover()
 
-				staleVrfDevice := util.GetVRFDeviceNameForUDN(int(staleNetID))
+				mutableNetInfo.SetNetworkID(int(staleNetID))
+				staleVrfDevice := util.GetNetworkVRFName(mutableNetInfo)
 				ovntest.AddVRFLink(staleVrfDevice, uint32(staleNetID))
 				_, err = util.GetNetLinkOps().LinkByName(staleVrfDevice)
 				Expect(err).NotTo(HaveOccurred())
 
-				validVrfDevice := util.GetVRFDeviceNameForUDN(int(netID))
+				mutableNetInfo.SetNetworkID(int(int(netID)))
+				validVrfDevice := util.GetNetworkVRFName(mutableNetInfo)
 				ovntest.AddVRFLink(validVrfDevice, uint32(netID))
 				_, err = util.GetNetLinkOps().LinkByName(validVrfDevice)
 				Expect(err).NotTo(HaveOccurred())
 
-				err = ncm.CleanupStaleNetworks(NetInfo)
+				err = ncm.CleanupStaleNetworks(mutableNetInfo)
 				Expect(err).NotTo(HaveOccurred())
 
 				// Verify CleanupDeletedNetworks cleans up VRF configuration for

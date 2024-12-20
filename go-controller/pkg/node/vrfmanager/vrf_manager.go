@@ -3,14 +3,12 @@ package vrfmanager
 import (
 	"fmt"
 
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/containernetworking/plugins/pkg/ns"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 
@@ -178,11 +176,14 @@ func (vrfm *Controller) sync(vrf vrf) error {
 	vrfLink, err := util.GetNetLinkOps().LinkByName(vrf.name)
 	var mustRecreate bool
 	if err == nil {
-		if vrfLink.Type() != "vrf" {
+		vrfDev, ok := vrfLink.(*netlink.Vrf)
+		if !ok {
 			return fmt.Errorf("node has another non VRF device with same name %s", vrf.name)
 		}
-		vrfDev, ok := vrfLink.(*netlink.Vrf)
-		if ok && vrfDev.Table != vrf.table {
+		if vrfDev.Table < util.RoutingTableIDStart {
+			return fmt.Errorf("node has another VRF device with same name %s that is not managed by ovn-kubernetes", vrf.name)
+		}
+		if vrfDev.Table != vrf.table {
 			klog.Warningf("Found a conflict with existing VRF device table id for VRF device %s, recreating it", vrf.name)
 			err = vrfm.deleteVRF(vrfLink)
 			if err != nil {
@@ -245,6 +246,9 @@ func (vrfm *Controller) AddVRF(name string, slaveInterface string, table uint32,
 	if len(name) > 15 {
 		return fmt.Errorf("VRF Manager: VRF name %s must be within 15 characters", name)
 	}
+	if table < util.RoutingTableIDStart {
+		return fmt.Errorf("VRF Manager: cannot manage a VRF %s with table %d lower than %d", name, table, util.RoutingTableIDStart)
+	}
 	var (
 		vrfDev vrf
 		ok     bool
@@ -296,9 +300,6 @@ func (vrfm *Controller) AddVRFRoutes(name string, routes []netlink.Route) error 
 
 // Repair deletes stale VRF device(s) on the host. This helps remove
 // device(s) for which DeleteVRF is never invoked.
-// Assumptions: 1) The validVRFs list must contain device for which AddVRF
-// is already invoked. 2) The device name(s) in validVRFs are suffixed
-// with "-vrf" and prefixed with "mp".
 func (vrfm *Controller) Repair(validVRFs sets.Set[string]) error {
 	vrfm.mu.Lock()
 	defer vrfm.mu.Unlock()
@@ -313,20 +314,25 @@ func (vrfm *Controller) repair(validVRFs sets.Set[string]) error {
 	}
 
 	for _, link := range links {
-		name := link.Attrs().Name
-		// Skip if the link is not a vrf type or name is not suffixed with -vrf or is not prefixed with mp.
-		if link.Type() != "vrf" || !strings.HasSuffix(name, types.UDNVRFDeviceSuffix) ||
-			!strings.HasPrefix(name, types.UDNVRFDevicePrefix) {
+		vrf, isVRF := link.(*netlink.Vrf)
+		if !isVRF {
+			// not a vrf device
 			continue
 		}
+		if vrf.Table < util.RoutingTableIDStart {
+			// vrf device not managed by us
+			continue
+		}
+		name := vrf.Name
 		if validVRFs.Has(name) {
+			// vrf not stale
 			continue
 		}
 		err = util.GetNetLinkOps().LinkDelete(link)
 		if err != nil {
 			klog.Errorf("VRF Manager: error deleting stale VRF device %s, err: %v", name, err)
 		}
-		delete(vrfm.vrfs, link.Attrs().Index)
+		delete(vrfm.vrfs, vrf.Index)
 	}
 	return nil
 }

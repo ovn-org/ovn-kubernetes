@@ -18,6 +18,7 @@ import (
 	certificatesv1 "k8s.io/api/certificates/v1"
 	kapi "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -38,6 +39,7 @@ import (
 	ipamclaimssclientset "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1/apis/clientset/versioned"
 	multinetworkpolicyclientset "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/client/clientset/versioned"
 	networkattchmentdefclientset "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned"
+	frrclientset "github.com/metallb/frr-k8s/pkg/client/clientset/versioned"
 	ocpcloudnetworkclientset "github.com/openshift/client-go/cloudnetwork/clientset/versioned"
 	ocpnetworkclientset "github.com/openshift/client-go/network/clientset/versioned"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -67,6 +69,7 @@ type OVNClientset struct {
 	IPAMClaimsClient          ipamclaimssclientset.Interface
 	UserDefinedNetworkClient  userdefinednetworkclientset.Interface
 	RouteAdvertisementsClient routeadvertisementsclientset.Interface
+	FRRClient                 frrclientset.Interface
 }
 
 // OVNMasterClientset
@@ -85,6 +88,7 @@ type OVNMasterClientset struct {
 	NetworkAttchDefClient     networkattchmentdefclientset.Interface
 	UserDefinedNetworkClient  userdefinednetworkclientset.Interface
 	RouteAdvertisementsClient routeadvertisementsclientset.Interface
+	FRRClient                 frrclientset.Interface
 }
 
 // OVNKubeControllerClientset
@@ -128,6 +132,7 @@ type OVNClusterManagerClientset struct {
 	OCPNetworkClient          ocpnetworkclientset.Interface
 	UserDefinedNetworkClient  userdefinednetworkclientset.Interface
 	RouteAdvertisementsClient routeadvertisementsclientset.Interface
+	FRRClient                 frrclientset.Interface
 }
 
 const (
@@ -156,6 +161,7 @@ func (cs *OVNClientset) GetMasterClientset() *OVNMasterClientset {
 		NetworkAttchDefClient:     cs.NetworkAttchDefClient,
 		UserDefinedNetworkClient:  cs.UserDefinedNetworkClient,
 		RouteAdvertisementsClient: cs.RouteAdvertisementsClient,
+		FRRClient:                 cs.FRRClient,
 	}
 }
 
@@ -210,6 +216,7 @@ func (cs *OVNClientset) GetClusterManagerClientset() *OVNClusterManagerClientset
 		OCPNetworkClient:          cs.OCPNetworkClient,
 		UserDefinedNetworkClient:  cs.UserDefinedNetworkClient,
 		RouteAdvertisementsClient: cs.RouteAdvertisementsClient,
+		FRRClient:                 cs.FRRClient,
 	}
 }
 
@@ -509,6 +516,11 @@ func NewOVNClientset(conf *config.KubernetesConfig) (*OVNClientset, error) {
 		return nil, err
 	}
 
+	frrClientset, err := frrclientset.NewForConfig(kconfig)
+	if err != nil {
+		return nil, err
+	}
+
 	return &OVNClientset{
 		KubeClient:                kclientset,
 		ANPClient:                 anpClientset,
@@ -524,6 +536,7 @@ func NewOVNClientset(conf *config.KubernetesConfig) (*OVNClientset, error) {
 		IPAMClaimsClient:          ipamClaimsClientset,
 		UserDefinedNetworkClient:  userDefinedNetworkClientSet,
 		RouteAdvertisementsClient: routeAdvertisementsClientset,
+		FRRClient:                 frrClientset,
 	}, nil
 }
 
@@ -910,4 +923,23 @@ func getEndpointsFromEndpointSlices(endpointSlices []*discovery.EndpointSlice) [
 
 func GetConntrackZone() int {
 	return config.Default.ConntrackZone
+}
+
+// IsLastUpdatedByManager checks if an object was updated by the manager last,
+// as indicated by a set of managed fields.
+func IsLastUpdatedByManager(manager string, managedFields []metav1.ManagedFieldsEntry) bool {
+	var lastUpdateTheirs, lastUpdateOurs time.Time
+	for _, managedFieldEntry := range managedFields {
+		switch managedFieldEntry.Manager {
+		case manager:
+			if managedFieldEntry.Time.Time.After(lastUpdateOurs) {
+				lastUpdateOurs = managedFieldEntry.Time.Time
+			}
+		default:
+			if managedFieldEntry.Time.Time.After(lastUpdateTheirs) {
+				lastUpdateTheirs = managedFieldEntry.Time.Time
+			}
+		}
+	}
+	return lastUpdateOurs.After(lastUpdateTheirs)
 }
