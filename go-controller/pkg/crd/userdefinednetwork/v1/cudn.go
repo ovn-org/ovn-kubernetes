@@ -49,6 +49,10 @@ type NetworkSpec struct {
 	// +unionDiscriminator
 	Topology NetworkTopology `json:"topology"`
 
+	/// Transport is the transport configuration.
+	// +optional
+	Transport *TransportConfig `json:"transport,omitempty"`
+
 	// Layer3 is the Layer3 topology configuration.
 	// +optional
 	Layer3 *Layer3Config `json:"layer3,omitempty"`
