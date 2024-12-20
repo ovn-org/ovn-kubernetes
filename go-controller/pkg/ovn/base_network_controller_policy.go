@@ -156,6 +156,7 @@ type networkPolicy struct {
 	egressPolicies  []*gressPolicy
 	isIngress       bool
 	isEgress        bool
+	isMultiNet      bool
 
 	// network policy owns only 1 local pod handler
 	localPodHandler *factory.Handler
@@ -187,6 +188,7 @@ type networkPolicy struct {
 
 func NewNetworkPolicy(policy *knet.NetworkPolicy) *networkPolicy {
 	policyTypeIngress, policyTypeEgress := getPolicyType(policy)
+	_, isMultiNet := policy.Labels[MultiNetPolicyLabel]
 	np := &networkPolicy{
 		name:            policy.Name,
 		namespace:       policy.Namespace,
@@ -196,6 +198,7 @@ func NewNetworkPolicy(policy *knet.NetworkPolicy) *networkPolicy {
 		isEgress:        policyTypeEgress,
 		nsHandlerList:   make([]*factory.Handler, 0),
 		localPods:       sync.Map{},
+		isMultiNet:      isMultiNet,
 	}
 	return np
 }
@@ -1393,6 +1396,14 @@ func (bnc *BaseNetworkController) handlePeerNamespaceSelectorAdd(np *networkPoli
 	var errors []error
 	for _, obj := range objs {
 		namespace := obj.(*kapi.Namespace)
+		netinfo, err := bnc.getActiveNetworkForNamespace(namespace.Name)
+		if err != nil {
+			return fmt.Errorf("could not get active network for namespace %s: %v", namespace.Name, err)
+		}
+		if !np.isMultiNet && bnc.GetNetworkName() != netinfo.GetNetworkName() {
+			np.RUnlock()
+			return nil
+		}
 		// addNamespaceAddressSet is safe for concurrent use, doesn't require additional synchronization
 		nsUpdated, err := gp.addNamespaceAddressSet(namespace.Name, bnc.addressSetFactory)
 		if err != nil {
@@ -1429,6 +1440,14 @@ func (bnc *BaseNetworkController) handlePeerNamespaceSelectorDel(np *networkPoli
 	updated := false
 	for _, obj := range objs {
 		namespace := obj.(*kapi.Namespace)
+		netinfo, err := bnc.getActiveNetworkForNamespace(namespace.Name)
+		if err != nil {
+			return fmt.Errorf("could not get active network for namespace %s: %v", namespace.Name, err)
+		}
+		if !np.isMultiNet && bnc.GetNetworkName() != netinfo.GetNetworkName() {
+			np.RUnlock()
+			return nil
+		}
 		// delNamespaceAddressSet is safe for concurrent use, doesn't require additional synchronization
 		if gp.delNamespaceAddressSet(namespace.Name) {
 			updated = true
