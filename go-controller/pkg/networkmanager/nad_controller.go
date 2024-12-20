@@ -533,7 +533,7 @@ func (c *nadController) DoWithLock(f func(network util.NetInfo) error) error {
 // expected to wait until it happens. If this is the NAD controller running in
 // cluster manager then a new ID is allocated and annotated on the NAD. The NAD
 // controller running in cluster manager also releases here the network ID of a
-// network that is being desleted.
+// network that is being deleted.
 func (c *nadController) handleNetworkID(old util.NetInfo, new util.MutableNetInfo, nad *nettypes.NetworkAttachmentDefinition) error {
 	if new != nil && new.IsDefault() {
 		return nil
@@ -585,6 +585,14 @@ func (c *nadController) handleNetworkID(old util.NetInfo, new util.MutableNetInf
 		id, err = c.networkIDAllocator.AllocateID(name)
 		if err != nil {
 			return fmt.Errorf("failed to allocate network ID: %w", err)
+		}
+
+		// check if there is still a network running with that ID in the process
+		// of being stopped
+		other := c.networkController.getRunningNetwork(id)
+		if other != "" && c.networkController.getNetwork(other) == nil {
+			c.networkIDAllocator.ReleaseID(name)
+			return fmt.Errorf("found other network %s being stopped with allocated ID %d, will retry", other, id)
 		}
 	}
 
