@@ -574,12 +574,13 @@ func (bnc *BaseNetworkController) deleteNamespaceLocked(ns string) (*namespaceIn
 		// This is to avoid OVN warnings while the address set is still
 		// referenced from NBDB ACLs until the NetworkPolicy handlers remove
 		// them.
+		deleteAddressSetDelay := config.DeleteAddressSetDelay
 		addressSet := nsInfo.addressSet
 		go func() {
 			select {
 			case <-bnc.stopChan:
 				return
-			case <-time.After(20 * time.Second):
+			case <-time.After(deleteAddressSetDelay):
 				maybeDeleteAddressSet := func() bool {
 					bnc.namespacesMutex.Lock()
 					nsInfo := bnc.namespaces[ns]
