@@ -214,7 +214,6 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 
 		app = cli.NewApp()
 		app.Name = "test"
-		app.Flags = config.Flags
 
 		fakeOvn = NewFakeOVN(false)
 	})
@@ -10396,6 +10395,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 			func(
 				egressIP net.IP,
 			) {
+				app.Flags = config.Flags
 				app.Action = func(ctx *cli.Context) error {
 					ctx.Set("enable-egress-ip", "true")
 					ctx.Set("egressip-node-healthcheck-port", "1234")

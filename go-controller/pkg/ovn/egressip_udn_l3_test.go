@@ -99,7 +99,6 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 
 		app = cli.NewApp()
 		app.Name = "test"
-		app.Flags = config.Flags
 
 		fakeOvn = NewFakeOVN(false)
 	})

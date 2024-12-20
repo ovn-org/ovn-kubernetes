@@ -633,7 +633,6 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 
 		app = cli.NewApp()
 		app.Name = "test"
-		app.Flags = config.Flags
 
 		fakeOvn = NewFakeOVN(false)
 

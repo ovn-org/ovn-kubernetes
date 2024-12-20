@@ -63,7 +63,6 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 
 		app = cli.NewApp()
 		app.Name = "test"
-		app.Flags = config.Flags
 
 		fakeOVN = NewFakeOVN(true)
 	})

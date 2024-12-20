@@ -437,7 +437,7 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 			// namespace's address set deletion is delayed by 20 second to let other handlers cleanup
 			gomega.Eventually(func() bool {
 				return fakeOvn.asf.AddressSetExists(namespaceName)
-			}, 21*time.Second).Should(gomega.BeFalse())
+			}, config.DeleteAddressSetDelay+time.Second).Should(gomega.BeFalse())
 		})
 	})
 })
