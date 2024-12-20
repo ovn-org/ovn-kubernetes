@@ -97,6 +97,8 @@ spec:
           value: "{{ ovn_loglevel_nb }}"
         - name: OVN_NORTHD_BACKOFF_INTERVAL
           value: "{{ ovn_northd_backoff_interval }}"
+        - name: ENABLE_IPSEC
+          value: "{{ enable_ipsec }}"
         - name: K8S_APISERVER
           valueFrom:
             configMapKeyRef:
