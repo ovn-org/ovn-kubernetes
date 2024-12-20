@@ -520,6 +520,7 @@ var _ = Describe("Node Operations", func() {
 
 				expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
 				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
+				Expect(err).NotTo(HaveOccurred())
 
 				return nil
 			}
@@ -602,6 +603,7 @@ var _ = Describe("Node Operations", func() {
 
 				expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
 				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
+				Expect(err).NotTo(HaveOccurred())
 
 				return nil
 			}
@@ -797,6 +799,7 @@ var _ = Describe("Node Operations", func() {
 
 				expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
 				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
+				Expect(err).NotTo(HaveOccurred())
 
 				return nil
 			}
@@ -1160,6 +1163,7 @@ var _ = Describe("Node Operations", func() {
 
 				expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
 				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
+				Expect(err).NotTo(HaveOccurred())
 
 				flows := fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
 				Expect(flows).To(BeNil())
@@ -1398,6 +1402,7 @@ var _ = Describe("Node Operations", func() {
 
 				expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
 				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
+				Expect(err).NotTo(HaveOccurred())
 
 				return nil
 			}
@@ -1498,6 +1503,7 @@ var _ = Describe("Node Operations", func() {
 
 				expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
 				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
+				Expect(err).NotTo(HaveOccurred())
 
 				return nil
 			}
@@ -1589,6 +1595,7 @@ var _ = Describe("Node Operations", func() {
 
 				expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
 				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
+				Expect(err).NotTo(HaveOccurred())
 
 				return nil
 			}
@@ -1675,6 +1682,7 @@ var _ = Describe("Node Operations", func() {
 
 				expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
 				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
+				Expect(err).NotTo(HaveOccurred())
 
 				return nil
 			}
@@ -1758,6 +1766,7 @@ var _ = Describe("Node Operations", func() {
 
 				expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
 				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
+				Expect(err).NotTo(HaveOccurred())
 
 				addConntrackMocks(netlinkMock, []ctFilterDesc{{"10.10.10.1", 8034}, {"10.129.0.2", 8034}})
 				err = fNPW.DeleteService(&service)
@@ -1799,6 +1808,7 @@ var _ = Describe("Node Operations", func() {
 
 				expectedNFT = getBaseNFTRules(fakeMgmtPortConfig.ifName)
 				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
+				Expect(err).NotTo(HaveOccurred())
 
 				return nil
 			}
@@ -2092,6 +2102,7 @@ var _ = Describe("Node Operations", func() {
 
 				expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
 				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
+				Expect(err).NotTo(HaveOccurred())
 
 				addConntrackMocks(netlinkMock, []ctFilterDesc{{"10.129.0.2", 8080}, {"192.168.18.15", 38034}})
 				err = fNPW.DeleteService(&service)
@@ -2133,6 +2144,7 @@ var _ = Describe("Node Operations", func() {
 
 				expectedNFT = getBaseNFTRules(fakeMgmtPortConfig.ifName)
 				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
+				Expect(err).NotTo(HaveOccurred())
 
 				return nil
 			}
@@ -2272,6 +2284,7 @@ var _ = Describe("Node Operations", func() {
 
 				expectedNFT = getBaseNFTRules(fakeMgmtPortConfig.ifName)
 				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
+				Expect(err).NotTo(HaveOccurred())
 
 				flows = fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
 				Expect(flows).To(BeNil())
@@ -2420,6 +2433,7 @@ var _ = Describe("Node Operations", func() {
 
 				expectedNFT = getBaseNFTRules(fakeMgmtPortConfig.ifName)
 				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
+				Expect(err).NotTo(HaveOccurred())
 
 				flows = fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
 				Expect(flows).To(BeNil())
@@ -2528,6 +2542,7 @@ var _ = Describe("Node Operations", func() {
 
 				expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
 				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
+				Expect(err).NotTo(HaveOccurred())
 
 				flows := fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
 				Expect(flows).To(Equal(expectedFlows))
@@ -2572,6 +2587,7 @@ var _ = Describe("Node Operations", func() {
 
 				expectedNFT = getBaseNFTRules(fakeMgmtPortConfig.ifName)
 				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
+				Expect(err).NotTo(HaveOccurred())
 
 				flows = fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
 				Expect(flows).To(BeNil())
@@ -2721,6 +2737,7 @@ var _ = Describe("Node Operations", func() {
 
 				expectedNFT = getBaseNFTRules(fakeMgmtPortConfig.ifName)
 				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
+				Expect(err).NotTo(HaveOccurred())
 
 				flows = fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
 				Expect(flows).To(BeNil())
@@ -2828,6 +2845,7 @@ var _ = Describe("Node Operations", func() {
 
 				expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
 				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
+				Expect(err).NotTo(HaveOccurred())
 
 				flows := fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
 				Expect(flows).To(Equal(expectedFlows))
@@ -2872,6 +2890,7 @@ var _ = Describe("Node Operations", func() {
 
 				expectedNFT = getBaseNFTRules(fakeMgmtPortConfig.ifName)
 				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
+				Expect(err).NotTo(HaveOccurred())
 
 				flows = fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
 				Expect(flows).To(BeNil())
