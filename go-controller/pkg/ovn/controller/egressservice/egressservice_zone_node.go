@@ -122,11 +122,6 @@ func (c *Controller) syncNode(key string) error {
 	} else {
 		delete(c.nodesZoneState, nodeName)
 	}
-
-	if err := c.deleteLegacyDefaultNoRerouteNodePolicies(c.nbClient, c.GetNetworkScopedClusterRouterName(), nodeName); err != nil {
-		return err
-	}
-
 	// We ensure node no re-route policies contemplating possible node IP
 	// address changes regardless of allocated services.
 	network := util.DefaultNetInfo{}
