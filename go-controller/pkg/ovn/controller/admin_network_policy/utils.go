@@ -17,6 +17,7 @@ import (
 	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 )
@@ -25,28 +26,40 @@ var ErrorANPPriorityUnsupported = errors.New("OVNK only supports priority ranges
 var ANPWithDuplicatePriorityEvent = "ANPWithDuplicatePriority"
 var ANPWithUnsupportedPriorityEvent = "ANPWithUnsupportedPriority"
 
-func GetANPPortGroupDbIDs(anpName string, isBanp bool, controller string) *libovsdbops.DbObjectIDs {
+func GetANPPortGroupDbIDs(anpName string, isBanp bool, networkName string) *libovsdbops.DbObjectIDs {
+	if networkName == types.DefaultNetworkName {
+		// backwards compatibility to not change any of the dbIndexes for default network
+		networkName = defaultNetworkControllerName
+	}
 	idsType := libovsdbops.PortGroupAdminNetworkPolicy
 	if isBanp {
 		idsType = libovsdbops.PortGroupBaselineAdminNetworkPolicy
 	}
-	return libovsdbops.NewDbObjectIDs(idsType, controller,
+	return libovsdbops.NewDbObjectIDs(idsType, networkName,
 		map[libovsdbops.ExternalIDKey]string{
 			libovsdbops.ObjectNameKey: anpName,
 		})
 }
 
-func (c *Controller) getANPPortGroupName(anpName string, isBanp bool) string {
-	return libovsdbutil.GetPortGroupName(GetANPPortGroupDbIDs(anpName, isBanp, c.controllerName))
+func (c *Controller) getANPPortGroupName(anpName, networkName string, isBanp bool) string {
+	if networkName == types.DefaultNetworkName {
+		// backwards compatibility to not change any of the dbIndexes for default network
+		networkName = c.controllerName
+	}
+	return libovsdbutil.GetPortGroupName(GetANPPortGroupDbIDs(anpName, isBanp, networkName))
 }
 
 // getANPRuleACLDbIDs will return the dbObjectIDs for a given rule's ACLs
-func getANPRuleACLDbIDs(name, gressPrefix, gressIndex, protocol, controller string, isBanp bool) *libovsdbops.DbObjectIDs {
+func getANPRuleACLDbIDs(name, gressPrefix, gressIndex, protocol, networkName string, isBanp bool) *libovsdbops.DbObjectIDs {
+	if networkName == types.DefaultNetworkName {
+		// backwards compatibility to not change any of the dbIndexes for default network
+		networkName = defaultNetworkControllerName
+	}
 	idType := libovsdbops.ACLAdminNetworkPolicy
 	if isBanp {
 		idType = libovsdbops.ACLBaselineAdminNetworkPolicy
 	}
-	return libovsdbops.NewDbObjectIDs(idType, controller, map[libovsdbops.ExternalIDKey]string{
+	return libovsdbops.NewDbObjectIDs(idType, networkName, map[libovsdbops.ExternalIDKey]string{
 		libovsdbops.ObjectNameKey:      name,
 		libovsdbops.PolicyDirectionKey: gressPrefix,
 		// gressidx is the unique id for address set within given objectName and gressPrefix
@@ -87,12 +100,16 @@ func GetACLActionForBANPRule(action anpapi.BaselineAdminNetworkPolicyRuleAction)
 }
 
 // GetANPPeerAddrSetDbIDs will return the dbObjectIDs for a given rule's address-set
-func GetANPPeerAddrSetDbIDs(name, gressPrefix, gressIndex, controller string, isBanp bool) *libovsdbops.DbObjectIDs {
+func GetANPPeerAddrSetDbIDs(name, gressPrefix, gressIndex, networkName string, isBanp bool) *libovsdbops.DbObjectIDs {
+	if networkName == types.DefaultNetworkName {
+		// backwards compatibility to not change any of the dbIndexes for default network
+		networkName = defaultNetworkControllerName
+	}
 	idType := libovsdbops.AddressSetAdminNetworkPolicy
 	if isBanp {
 		idType = libovsdbops.AddressSetBaselineAdminNetworkPolicy
 	}
-	return libovsdbops.NewDbObjectIDs(idType, controller, map[libovsdbops.ExternalIDKey]string{
+	return libovsdbops.NewDbObjectIDs(idType, networkName, map[libovsdbops.ExternalIDKey]string{
 		libovsdbops.ObjectNameKey:      name,
 		libovsdbops.PolicyDirectionKey: gressPrefix,
 		// gressidx is the unique id for address set within given objectName and gressPrefix

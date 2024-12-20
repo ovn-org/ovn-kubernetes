@@ -349,7 +349,7 @@ func TestBaselineAdminNetworkPolicyRepair(t *testing.T) {
 }
 
 func portGroup(name string, ports []*nbdb.LogicalSwitchPort, acls []*nbdb.ACL, banp bool) *nbdb.PortGroup {
-	pgDbIDs := GetANPPortGroupDbIDs(name, banp, "default-network-controller")
+	pgDbIDs := GetANPPortGroupDbIDs(name, banp, defaultNetworkControllerName)
 	pg := libovsdbutil.BuildPortGroup(pgDbIDs, ports, acls)
 	pg.UUID = pgDbIDs.String() + "-UUID"
 	return pg
@@ -363,7 +363,7 @@ func stalePGWithoutExtIDs(name string, ports []*nbdb.LogicalSwitchPort, acls []*
 
 func accessControlList(name string, gressPrefix libovsdbutil.ACLDirection, priority int32, banp bool) *nbdb.ACL {
 	objIDs := getANPRuleACLDbIDs(name, string(gressPrefix), fmt.Sprintf("%d", priority), "None",
-		"default-network-controller", banp)
+		defaultNetworkControllerName, banp)
 	acl := &nbdb.ACL{
 		UUID:        objIDs.String() + "-UUID",
 		Action:      nbdb.ACLActionAllow,
@@ -381,7 +381,7 @@ func accessControlList(name string, gressPrefix libovsdbutil.ACLDirection, prior
 
 func addressSet(name, gressPrefix string, priority int32, banp bool) *nbdb.AddressSet {
 	objIDs := GetANPPeerAddrSetDbIDs(name, gressPrefix, fmt.Sprintf("%d", priority),
-		"default-network-controller", banp)
+		defaultNetworkControllerName, banp)
 	dbIDsWithIPFam := objIDs.AddIDs(map[libovsdbops.ExternalIDKey]string{libovsdbops.IPFamilyKey: "ipv4"})
 	as := &nbdb.AddressSet{
 		UUID:        dbIDsWithIPFam.String() + "-UUID",

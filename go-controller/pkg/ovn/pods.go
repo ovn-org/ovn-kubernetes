@@ -235,7 +235,6 @@ func (oc *DefaultNetworkController) addLogicalPort(pod *kapi.Pod) (err error) {
 	if len(networkMap) > 1 {
 		return fmt.Errorf("more than one NAD requested on default network for pod %s/%s", pod.Namespace, pod.Name)
 	}
-
 	var network *nadapi.NetworkSelectionElement
 	for _, network = range networkMap {
 		break
@@ -267,7 +266,8 @@ func (oc *DefaultNetworkController) addLogicalPort(pod *kapi.Pod) (err error) {
 	if networkRole != ovntypes.NetworkRolePrimary && util.IsNetworkSegmentationSupportEnabled() {
 		pgName := libovsdbutil.GetPortGroupName(oc.getSecondaryPodsPortGroupDbIDs())
 		if ops, err = libovsdbops.AddPortsToPortGroupOps(oc.nbClient, ops, pgName, lsp.UUID); err != nil {
-			return err
+			return fmt.Errorf("unable to add ports to port group %s for %s/%s part of NAD %s: %w",
+				pgName, pod.Namespace, pod.Name, nadName, err)
 		}
 		// set open ports for UDN pods, use function without transact, since lsp is not created yet.
 		var parseErr error

@@ -9,6 +9,7 @@ import (
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/observability"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -34,7 +35,8 @@ const (
 	// sequence of delays between successive queuings of an object.
 	//
 	// 5ms, 10ms, 20ms, 40ms, 80ms, 160ms, 320ms, 640ms, 1.3s, 2.6s, 5.1s, 10.2s, 20.4s, 41s, 82s
-	maxRetries = 15
+	maxRetries                   = 15
+	defaultNetworkControllerName = "default-network-controller"
 )
 
 // Controller holds the fields required for ANP controller
@@ -99,6 +101,9 @@ type Controller struct {
 	anpNodeQueue  workqueue.TypedRateLimitingInterface[string]
 
 	observManager *observability.Manager
+
+	// networkManager used for getting network information of (C)UDNs
+	networkManager networkmanager.Interface
 }
 
 // NewController returns a new *Controller.
@@ -115,7 +120,8 @@ func NewController(
 	isPodScheduledinLocalZone func(*v1.Pod) bool,
 	zone string,
 	recorder record.EventRecorder,
-	observManager *observability.Manager) (*Controller, error) {
+	observManager *observability.Manager,
+	networkManager networkmanager.Interface) (*Controller, error) {
 
 	c := &Controller{
 		controllerName:            controllerName,
@@ -128,6 +134,7 @@ func NewController(
 		anpPriorityMap:            make(map[int32]string),
 		banpCache:                 &adminNetworkPolicyState{}, // safe to initialise pointer to empty struct than nil
 		observManager:             observManager,
+		networkManager:            networkManager,
 	}
 
 	klog.V(5).Info("Setting up event handlers for Admin Network Policy")
