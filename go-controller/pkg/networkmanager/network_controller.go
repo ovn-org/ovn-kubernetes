@@ -528,3 +528,15 @@ func nodeNeedsUpdate(oldNode, newNode *corev1.Node) bool {
 
 	return !reflect.DeepEqual(oldNode.Labels, newNode.Labels) || oldNode.Annotations[util.OvnNodeZoneName] != newNode.Annotations[util.OvnNodeZoneName]
 }
+
+func (c *networkController) getRunningNetwork(id int) string {
+	if id == DefaultNetworkID {
+		return types.DefaultNetworkName
+	}
+	for _, state := range c.getAllNetworkStates() {
+		if state.controller.GetNetworkID() == id {
+			return state.controller.GetNetworkName()
+		}
+	}
+	return ""
+}
