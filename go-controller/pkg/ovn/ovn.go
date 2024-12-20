@@ -469,17 +469,14 @@ func shouldUpdateNode(node, oldNode *kapi.Node) (bool, error) {
 }
 
 func (oc *DefaultNetworkController) StartServiceController(wg *sync.WaitGroup, runRepair bool) error {
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		useLBGroups := oc.clusterLoadBalancerGroupUUID != ""
-		// use 5 workers like most of the kubernetes controllers in the
-		// kubernetes controller-manager
-		err := oc.svcController.Run(5, oc.stopChan, runRepair, useLBGroups, oc.svcTemplateSupport)
-		if err != nil {
-			klog.Errorf("Error running OVN Kubernetes Services controller: %v", err)
-		}
-	}()
+	useLBGroups := oc.clusterLoadBalancerGroupUUID != ""
+	// use 5 workers like most of the kubernetes controllers in the
+	// kubernetes controller-manager
+	err := oc.svcController.Run(5, oc.stopChan, wg, runRepair, useLBGroups, oc.svcTemplateSupport)
+	if err != nil {
+
+		return fmt.Errorf("error running OVN Kubernetes Services controller: %v", err)
+	}
 	return nil
 }
 

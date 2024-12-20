@@ -172,14 +172,21 @@ type Controller struct {
 
 // Run will not return until stopCh is closed. workers determines how many
 // endpoints will be handled in parallel.
-func (c *Controller) Run(workers int, stopCh <-chan struct{}, runRepair, useLBGroups, useTemplates bool) error {
-	defer utilruntime.HandleCrash()
-	defer c.queue.ShutDown()
+func (c *Controller) Run(workers int, stopCh <-chan struct{}, wg *sync.WaitGroup, runRepair, useLBGroups, useTemplates bool) error {
+	wg.Add(1)
+	go func() {
+		defer utilruntime.HandleCrash()
+		defer wg.Done()
+		// wait until we're told to stop
+		<-stopCh
+
+		klog.Infof("Shutting down controller %s for network=%s", controllerName, c.netInfo.GetNetworkName())
+		c.queue.ShutDown()
+	}()
 
 	c.useLBGroups = useLBGroups
 	c.useTemplates = useTemplates
 	klog.Infof("Starting controller %s for network=%s", controllerName, c.netInfo.GetNetworkName())
-	defer klog.Infof("Shutting down controller %s for network=%s", controllerName, c.netInfo.GetNetworkName())
 
 	nodeHandler, err := c.nodeTracker.Start(c.nodeInformer)
 	if err != nil {
@@ -245,7 +252,6 @@ func (c *Controller) Run(workers int, stopCh <-chan struct{}, runRepair, useLBGr
 		go wait.Until(c.worker, c.workerLoopPeriod, stopCh)
 	}
 
-	<-stopCh
 	return nil
 }
 
