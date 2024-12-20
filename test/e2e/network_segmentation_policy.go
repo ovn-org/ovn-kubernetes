@@ -20,6 +20,7 @@ import (
 
 var _ = ginkgo.Describe("Network Segmentation: Network Policies", func() {
 	f := wrappedTestFramework("network-segmentation")
+	f.SkipNamespaceCreation = true
 
 	ginkgo.Context("on a user defined primary network", func() {
 		const (
@@ -45,8 +46,12 @@ var _ = ginkgo.Describe("Network Segmentation: Network Policies", func() {
 
 		ginkgo.BeforeEach(func() {
 			cs = f.ClientSet
-
-			var err error
+			namespace, err := f.CreateNamespace(context.TODO(), f.BaseName, map[string]string{
+				"e2e-framework":           f.BaseName,
+				RequiredUDNNamespaceLabel: "",
+			})
+			f.Namespace = namespace
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			nadClient, err = nadclient.NewForConfig(f.ClientConfig())
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -56,7 +61,8 @@ var _ = ginkgo.Describe("Network Segmentation: Network Policies", func() {
 				ginkgo.By("Creating namespace " + namespace)
 				ns, err := cs.CoreV1().Namespaces().Create(context.Background(), &v1.Namespace{
 					ObjectMeta: metav1.ObjectMeta{
-						Name: namespace,
+						Name:   namespace,
+						Labels: map[string]string{RequiredUDNNamespaceLabel: ""},
 					},
 				}, metav1.CreateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())

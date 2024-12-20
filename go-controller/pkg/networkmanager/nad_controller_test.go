@@ -12,7 +12,9 @@ import (
 
 	cnitypes "github.com/containernetworking/cni/pkg/types"
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+	kapiv1 "k8s.io/api/core/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/tools/cache"
 
@@ -99,6 +101,23 @@ func (tcm *testControllerManager) CleanupStaleNetworks(validNetworks ...util.Net
 
 func (tcm *testControllerManager) GetDefaultNetworkController() ReconcilableNetworkController {
 	return tcm.defaultNetwork
+}
+
+type fakeNamespaceLister struct{}
+
+func (f *fakeNamespaceLister) List(selector labels.Selector) (ret []*kapiv1.Namespace, err error) {
+	return nil, nil
+}
+
+// Get retrieves the Namespace from the index for a given name.
+// Objects returned here must be treated as read-only.
+func (f *fakeNamespaceLister) Get(name string) (*kapiv1.Namespace, error) {
+	return &kapiv1.Namespace{
+		ObjectMeta: v1.ObjectMeta{
+			Name:   name,
+			Labels: map[string]string{types.RequiredUDNNamespaceLabel: ""},
+		},
+	}, nil
 }
 
 func TestNADController(t *testing.T) {
@@ -456,6 +475,7 @@ func TestNADController(t *testing.T) {
 				nads:              map[string]string{},
 				primaryNADs:       map[string]string{},
 				networkController: newNetworkController("", "", "", tcm, nil),
+				namespaceLister:   &fakeNamespaceLister{},
 			}
 			netController := nadController.networkController
 
@@ -617,6 +637,17 @@ func TestSyncAll(t *testing.T) {
 
 			expectedNetworks := map[string]util.NetInfo{}
 			expectedPrimaryNetworks := map[string]util.NetInfo{}
+			for _, namespace := range []string{"test", "test2"} {
+				_, err = fakeClient.KubeClient.CoreV1().Namespaces().Create(context.TODO(),
+					&kapiv1.Namespace{
+						ObjectMeta: v1.ObjectMeta{
+							Name:   namespace,
+							Labels: map[string]string{types.RequiredUDNNamespaceLabel: ""},
+						},
+					}, v1.CreateOptions{},
+				)
+			}
+			g.Expect(err).ToNot(gomega.HaveOccurred())
 			for _, testNAD := range tt.testNADs {
 				namespace, name, err := cache.SplitMetaNamespaceKey(testNAD.name)
 				g.Expect(err).ToNot(gomega.HaveOccurred())

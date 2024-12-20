@@ -78,6 +78,7 @@ var _ = ginkgo.Describe("Cluster manager EndpointSlice mirror controller", func(
 		ginkgo.It("should delete stale mirrored EndpointSlices and create missing ones", func() {
 			app.Action = func(ctx *cli.Context) error {
 				namespaceT := *util.NewNamespace("testns")
+				namespaceT.Labels[types.RequiredUDNNamespaceLabel] = ""
 				pod := v1.Pod{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:        "test-pod",
@@ -282,6 +283,7 @@ var _ = ginkgo.Describe("Cluster manager EndpointSlice mirror controller", func(
 		ginkgo.It("should update/delete mirrored EndpointSlices in namespaces that use user defined networks as primary ", func() {
 			app.Action = func(ctx *cli.Context) error {
 				namespaceT := *util.NewNamespace("testns")
+				namespaceT.Labels[types.RequiredUDNNamespaceLabel] = ""
 
 				pod := v1.Pod{
 					ObjectMeta: metav1.ObjectMeta{
