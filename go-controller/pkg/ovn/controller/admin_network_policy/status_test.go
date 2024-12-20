@@ -128,6 +128,7 @@ func newANPControllerWithDBSetup(dbSetup libovsdbtest.TestSetup, initANPs anpapi
 		"targaryen",
 		recorder,
 		nil,
+		nil,
 	)
 	gomega.Expect(err).ToNot(gomega.HaveOccurred())
 
