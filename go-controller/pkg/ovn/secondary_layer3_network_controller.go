@@ -1075,16 +1075,12 @@ func (oc *SecondaryLayer3NetworkController) gatewayManagerForNode(nodeName strin
 }
 
 func (oc *SecondaryLayer3NetworkController) StartServiceController(wg *sync.WaitGroup, runRepair bool) error {
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		useLBGroups := oc.clusterLoadBalancerGroupUUID != ""
-		// use 5 workers like most of the kubernetes controllers in the kubernetes controller-manager
-		// do not use LB templates for UDNs - OVN bug https://issues.redhat.com/browse/FDP-988
-		err := oc.svcController.Run(5, oc.stopChan, runRepair, useLBGroups, false)
-		if err != nil {
-			klog.Errorf("Error running OVN Kubernetes Services controller for network %s: %v", oc.GetNetworkName(), err)
-		}
-	}()
+	useLBGroups := oc.clusterLoadBalancerGroupUUID != ""
+	// use 5 workers like most of the kubernetes controllers in the kubernetes controller-manager
+	// do not use LB templates for UDNs - OVN bug https://issues.redhat.com/browse/FDP-988
+	err := oc.svcController.Run(5, oc.stopChan, wg, runRepair, useLBGroups, false)
+	if err != nil {
+		return fmt.Errorf("error running OVN Kubernetes Services controller for network %s: %v", oc.GetNetworkName(), err)
+	}
 	return nil
 }
