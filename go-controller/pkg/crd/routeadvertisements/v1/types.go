@@ -51,6 +51,7 @@ type RouteAdvertisementsSpec struct {
 }
 
 // AdvertisementType determines the type of advertisement.
+// +kubebuilder:validation:Enum=PodNetwork;EgressIP
 type AdvertisementType string
 
 const (
