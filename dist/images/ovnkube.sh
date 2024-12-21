@@ -1906,6 +1906,14 @@ ovnkube-controller-with-node() {
     fi
   fi
 
+  if [[ ${ovnkube_node_mode} != "dpu-host" && ! ${ovn_gateway_opts} =~ "gateway-vlanid" ]]; then
+      # get the gateway vlanid
+      gw_vlanid=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-gw-vlanid | tr -d \")
+      if [[ -n ${gw_vlanid} ]]; then
+        ovn_gateway_opts+="--gateway-vlanid=${gw_vlanid}"
+      fi
+  fi
+
   ovnkube_node_mgmt_port_netdev_flag=
   if [[ ${ovnkube_node_mgmt_port_netdev} != "" ]]; then
     ovnkube_node_mgmt_port_netdev_flag="--ovnkube-node-mgmt-port-netdev=${ovnkube_node_mgmt_port_netdev}"
@@ -2568,6 +2576,14 @@ ovn-node() {
       ovn_gateway_router_subnet=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-gw-router-subnet | tr -d \")
     fi
 
+  fi
+
+  if [[ ${ovnkube_node_mode} != "dpu-host" && ! ${ovn_gateway_opts} =~ "gateway-vlanid" ]]; then
+      # get the gateway vlanid
+      gw_vlanid=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-gw-vlanid | tr -d \")
+      if [[ -n ${gw_vlanid} ]]; then
+        ovn_gateway_opts+="--gateway-vlanid=${gw_vlanid}"
+      fi
   fi
 
   local ovn_node_ssl_opts=""
