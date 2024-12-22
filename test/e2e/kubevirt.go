@@ -1212,7 +1212,7 @@ passwd:
 						}, butane)
 					Expect(err).ToNot(HaveOccurred())
 					vm.Spec.Template.Spec.Domain.Devices.Interfaces[0].Bridge = nil
-					vm.Spec.Template.Spec.Domain.Devices.Interfaces[0].Binding = &kubevirtv1.PluginBinding{Name: "managedTap"}
+					vm.Spec.Template.Spec.Domain.Devices.Interfaces[0].Binding = &kubevirtv1.PluginBinding{Name: "l2bridge"}
 					createVirtualMachine(vm)
 					return vm.Name
 				},
@@ -1243,7 +1243,7 @@ passwd:
 						}, butane)
 					Expect(err).ToNot(HaveOccurred())
 					vmi.Spec.Domain.Devices.Interfaces[0].Bridge = nil
-					vmi.Spec.Domain.Devices.Interfaces[0].Binding = &kubevirtv1.PluginBinding{Name: "managedTap"}
+					vmi.Spec.Domain.Devices.Interfaces[0].Binding = &kubevirtv1.PluginBinding{Name: "l2bridge"}
 					createVirtualMachineInstance(vmi)
 					return vmi.Name
 				},
