@@ -88,6 +88,11 @@ type listerInterface interface{}
 
 type initialAddFn func(*Handler, []interface{})
 
+type eventQueueConfig struct {
+	queueSize        uint32 // for new incoming events
+	initialQueueSize uint32 // for processing initial addition of objects
+}
+
 type queueMap struct {
 	sync.Mutex
 	entries  map[ktypes.NamespacedName]*queueMapEntry
@@ -206,7 +211,7 @@ func (i *informer) removeHandler(handler *Handler) {
 	}()
 }
 
-func newQueueMap(numEventQueues uint32, wg *sync.WaitGroup, stopChan chan struct{}) *queueMap {
+func newQueueMap(qSize uint32, numEventQueues uint32, wg *sync.WaitGroup, stopChan chan struct{}) *queueMap {
 	qm := &queueMap{
 		entries:  make(map[ktypes.NamespacedName]*queueMapEntry),
 		queues:   make([]chan *event, numEventQueues),
@@ -214,7 +219,7 @@ func newQueueMap(numEventQueues uint32, wg *sync.WaitGroup, stopChan chan struct
 		stopChan: stopChan,
 	}
 	for j := 0; j < int(numEventQueues); j++ {
-		qm.queues[j] = make(chan *event, 10)
+		qm.queues[j] = make(chan *event, qSize)
 	}
 	return qm
 }
@@ -508,7 +513,7 @@ func newBaseInformer(oType reflect.Type, sharedInformer cache.SharedIndexInforme
 	}, nil
 }
 
-func newQueuedInformer(oType reflect.Type, sharedInformer cache.SharedIndexInformer,
+func newQueuedInformer(qConfig eventQueueConfig, oType reflect.Type, sharedInformer cache.SharedIndexInformer,
 	stopChan chan struct{}, numEventQueues uint32) (*informer, error) {
 	informer, err := newBaseInformer(oType, sharedInformer)
 	if err != nil {
@@ -521,7 +526,8 @@ func newQueuedInformer(oType reflect.Type, sharedInformer cache.SharedIndexInfor
 		// is added, only that handler should receive events for all
 		// existing objects.
 		addsWg := &sync.WaitGroup{}
-		addsMap := newQueueMap(numEventQueues, addsWg, stopChan)
+
+		addsMap := newQueueMap(qConfig.initialQueueSize, numEventQueues, addsWg, stopChan)
 		addsMap.start()
 
 		// Distribute the existing items into the handler-specific
@@ -538,7 +544,7 @@ func newQueuedInformer(oType reflect.Type, sharedInformer cache.SharedIndexInfor
 	}
 
 	for i := 0; i < handlerPoolSize; i++ {
-		informer.internalInformers[i].queueMap = newQueueMap(numEventQueues, &informer.shutdownWg, stopChan)
+		informer.internalInformers[i].queueMap = newQueueMap(qConfig.queueSize, numEventQueues, &informer.shutdownWg, stopChan)
 		informer.internalInformers[i].queueMap.start()
 
 		_, err = informer.inf.AddEventHandler(informer.newFederatedQueuedHandler(i))
