@@ -1573,7 +1573,7 @@ func assertL2SecondaryNetAttachDefManifest(nadClient nadclient.K8sCniCncfIoV1Int
 		BlockOwnerDeletion: pointer.Bool(true),
 		Controller:         pointer.Bool(true),
 	}}))
-	expectedNetworkName := namespace + "." + udnName
+	expectedNetworkName := namespace + "_" + udnName
 	expectedNadName := namespace + "/" + udnName
 	ExpectWithOffset(1, nad.Spec.Config).To(MatchJSON(`{
 		"cniVersion":"1.0.0",
@@ -1635,7 +1635,7 @@ func assertClusterNADManifest(nadClient nadclient.K8sCniCncfIoV1Interface, names
 	ExpectWithOffset(1, nad.Labels).To(Equal(map[string]string{"k8s.ovn.org/user-defined-network": ""}))
 	ExpectWithOffset(1, nad.Finalizers).To(Equal([]string{"k8s.ovn.org/user-defined-network-protection"}))
 
-	expectedNetworkName := "cluster.udn." + udnName
+	expectedNetworkName := "cluster_udn_" + udnName
 	expectedNadName := namespace + "/" + udnName
 	ExpectWithOffset(1, nad.Spec.Config).To(MatchJSON(`{
 		"cniVersion":"1.0.0",
