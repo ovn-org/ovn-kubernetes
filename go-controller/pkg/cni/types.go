@@ -166,6 +166,9 @@ type PodRequest struct {
 
 	// the DeviceInfo struct
 	deviceInfo nadapi.DeviceInfo
+
+	// indicates if interface is primaryUDN
+	IsPrimaryUDN bool
 }
 
 type podRequestFunc func(request *PodRequest, clientset *ClientSet, kubeAuth *KubeAPIAuth, networkManager networkmanager.Interface) ([]byte, error)
