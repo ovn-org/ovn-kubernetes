@@ -944,6 +944,7 @@ func (nc *DefaultNodeNetworkController) PreStart(ctx context.Context) error {
 	}
 	gatewaySetup.mgmtPorts = mgmtPorts
 	gatewaySetup.mgmtPortConfig = mgmtPortConfig
+	gatewaySetup.nodeAddress = nodeAddr
 
 	if err := util.SetNodeZone(nodeAnnotator, sbZone); err != nil {
 		return fmt.Errorf("failed to set node zone annotation for node %s: %w", nc.name, err)
@@ -953,9 +954,11 @@ func (nc *DefaultNodeNetworkController) PreStart(ctx context.Context) error {
 	}
 
 	// Connect ovn-controller to SBDB
-	for _, auth := range []config.OvnAuthConfig{config.OvnNorth, config.OvnSouth} {
-		if err := auth.SetDBAuth(); err != nil {
-			return fmt.Errorf("unable to set the authentication towards OVN local dbs")
+	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
+		for _, auth := range []config.OvnAuthConfig{config.OvnNorth, config.OvnSouth} {
+			if err := auth.SetDBAuth(); err != nil {
+				return fmt.Errorf("unable to set the authentication towards OVN local dbs")
+			}
 		}
 	}
 
