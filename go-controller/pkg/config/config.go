@@ -431,6 +431,7 @@ type OVNKubernetesFeatureConfig struct {
 	EnableDNSNameResolver        bool `gcfg:"enable-dns-name-resolver"`
 	EnableServiceTemplateSupport bool `gcfg:"enable-svc-template-support"`
 	EnableObservability          bool `gcfg:"enable-observability"`
+	EnableNetworkQoS             bool `gcfg:"enable-network-qos"`
 }
 
 // GatewayMode holds the node gateway mode
@@ -1127,6 +1128,12 @@ var OVNK8sFeatureFlags = []cli.Flag{
 		Usage:       "Configure to use OVN sampling with ovn-kubernetes.",
 		Destination: &cliConfig.OVNKubernetesFeature.EnableObservability,
 		Value:       OVNKubernetesFeature.EnableObservability,
+	},
+	&cli.BoolFlag{
+		Name:        "enable-network-qos",
+		Usage:       "Configure to use NetworkQoS CRD feature with ovn-kubernetes.",
+		Destination: &cliConfig.OVNKubernetesFeature.EnableNetworkQoS,
+		Value:       OVNKubernetesFeature.EnableNetworkQoS,
 	},
 }
 
