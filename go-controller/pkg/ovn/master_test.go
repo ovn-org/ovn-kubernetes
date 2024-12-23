@@ -419,7 +419,6 @@ var _ = ginkgo.Describe("Master Operations", func() {
 
 		app = cli.NewApp()
 		app.Name = "test"
-		app.Flags = config.Flags
 		stopChan = make(chan struct{})
 		wg = &sync.WaitGroup{}
 	})

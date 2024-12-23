@@ -33,7 +33,6 @@ var _ = ginkgo.Describe("OVN Pod Operations with network segmentation", func() {
 
 		app = cli.NewApp()
 		app.Name = "test"
-		app.Flags = config.Flags
 
 		config.OVNKubernetesFeature.EnableMultiNetwork = true
 		config.OVNKubernetesFeature.EnableNetworkSegmentation = true

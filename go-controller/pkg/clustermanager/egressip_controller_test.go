@@ -280,7 +280,6 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 
 		app = cli.NewApp()
 		app.Name = "test"
-		app.Flags = config.Flags
 		fakeClusterManagerOVN = NewFakeClusterManagerOVN()
 	})
 
@@ -1248,15 +1247,23 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 
 				_, err := fakeClusterManagerOVN.eIPC.WatchEgressNodes()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				// Trying to assing on:
+				//   1. adding of node1
+				//   2. adding of node2
+				gomega.Eventually(fakeClusterManagerOVN.fakeRecorder.Events).Should(gomega.HaveLen(2))
+
 				_, err = fakeClusterManagerOVN.eIPC.WatchEgressIP()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				// Trying to assing on:
+				//   1. adding egress ip
+				//   2. patch egress ip (adding of annotation k8s.ovn.org/egressip-mark)
+				gomega.Eventually(fakeClusterManagerOVN.fakeRecorder.Events).Should(gomega.HaveLen(4))
 
 				gomega.Eventually(getEgressIPAllocatorSizeSafely).Should(gomega.Equal(2))
 				gomega.Expect(fakeClusterManagerOVN.eIPC.nodeAllocator.cache).To(gomega.HaveKey(node1.Name))
 				gomega.Expect(fakeClusterManagerOVN.eIPC.nodeAllocator.cache).To(gomega.HaveKey(node2.Name))
 
 				gomega.Eventually(getEgressIPStatusLen(egressIPName)).Should(gomega.Equal(0))
-				gomega.Eventually(fakeClusterManagerOVN.fakeRecorder.Events).Should(gomega.HaveLen(3))
 				return nil
 			}
 

@@ -76,6 +76,16 @@ var (
 		RawUDNAllowedDefaultServices: "default/kubernetes,kube-system/kube-dns",
 	}
 
+	// Delete the address set after a short delay. This is to
+	// avoid OVN warnings while the address set is still
+	// referenced from NBDB ACLs until the NetworkPolicy handlers
+	// remove them.
+	DeleteAddressSetDelay = 20 * time.Second
+
+	// Wait for the node logical switch to be created by the
+	// ClusterController and be present in libovsdb's cache.
+	LogicalSwitchSyncWaitTimeout = 30 * time.Second
+
 	// Logging holds logging-related parsed config file parameters and command-line overrides
 	Logging = LoggingConfig{
 		File:                "", // do not log to a file by default
@@ -655,7 +665,9 @@ func PrepareTestConfig() error {
 	ClusterManager = savedClusterManager
 	Kubernetes.DisableRequestedChassis = false
 	EnableMulticast = false
-	Default.OVSDBTxnTimeout = 5 * time.Second
+	Default.OVSDBTxnTimeout = 1 * time.Second
+	DeleteAddressSetDelay = 2 * time.Second
+	LogicalSwitchSyncWaitTimeout = 2 * time.Second
 
 	if err := completeConfig(); err != nil {
 		return err
