@@ -117,7 +117,7 @@ func (sncm *secondaryNetworkClusterManager) NewNetworkController(nInfo util.NetI
 		namedIDAllocator,
 		nInfo,
 		sncm.ovnClient,
-		sncm.watchFactory,
+		sncm.watchFactory.ShallowClone(),
 		sncm.recorder,
 		sncm.networkManager,
 		sncm.errorReporter,

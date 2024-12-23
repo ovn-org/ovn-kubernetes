@@ -64,6 +64,7 @@ type ClusterManager struct {
 func NewClusterManager(ovnClient *util.OVNClusterManagerClientset, wf *factory.WatchFactory,
 	identity string, wg *sync.WaitGroup, recorder record.EventRecorder) (*ClusterManager, error) {
 
+	wf = wf.ShallowClone()
 	defaultNetClusterController := newDefaultNetworkClusterController(&util.DefaultNetInfo{}, ovnClient, wf, recorder)
 
 	zoneClusterController, err := newZoneClusterController(ovnClient, wf)
