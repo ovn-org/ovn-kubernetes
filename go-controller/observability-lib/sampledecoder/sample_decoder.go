@@ -291,3 +291,49 @@ func (d *SampleDecoder) DeleteCollector(collectorID int) error {
 	fmt.Println("res: ", res)
 	return err
 }
+
+// This is a copy of the ParseNetworkName function from go-controller/pkg/clustermanager/userdefinednetwork/template/net-attach-def-template.go
+// We need to copy it to optimize dependencies of observability-lib.
+func ParseNetworkName(networkName string) (udnNamespace, udnName string) {
+	parts := strings.Split(networkName, ".")
+	if len(parts) == 2 {
+		return parts[0], parts[1]
+	}
+	return "", ""
+}
+
+func networkNameToUDNNamespacedName(networkName string) string {
+	namespace, name := ParseNetworkName(networkName)
+	if name == "" {
+		return ""
+	}
+	namespacedName := name
+	if namespace != "" {
+		namespacedName = namespace + "/" + name
+	}
+	return namespacedName
+}
+
+// GetInterfaceUDNs returns a map of all pod interface names to their corresponding (C)UDN namespaced names.
+// default network or NAD that is not created by (C)UDN is represented by an empty string.
+// UDN namespace+name are joined by "/", CUDN will just have a name.
+func (d *SampleDecoder) GetInterfaceUDNs() (map[string]string, error) {
+	res := map[string]string{}
+	ifaces := []*ovsdb.Interface{}
+	err := d.ovsdbClient.List(context.Background(), &ifaces)
+	if err != nil {
+		return nil, fmt.Errorf("failed listing interfaces: %w", err)
+	}
+	for _, iface := range ifaces {
+		if iface.ExternalIDs["iface-id-ver"] == "" {
+			// not a pod interface
+			continue
+		}
+		if iface.ExternalIDs["k8s.ovn.org/network"] == "" {
+			res[iface.Name] = ""
+			continue
+		}
+		res[iface.Name] = networkNameToUDNNamespacedName(iface.ExternalIDs["k8s.ovn.org/network"])
+	}
+	return res, nil
+}

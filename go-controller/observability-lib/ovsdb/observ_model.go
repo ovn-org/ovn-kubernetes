@@ -7,5 +7,6 @@ func ObservDatabaseModel() (model.ClientDBModel, error) {
 	return model.NewClientDBModel("Open_vSwitch", map[string]model.Model{
 		"Bridge":                    &Bridge{},
 		"Flow_Sample_Collector_Set": &FlowSampleCollectorSet{},
+		"Interface":                 &Interface{},
 	})
 }

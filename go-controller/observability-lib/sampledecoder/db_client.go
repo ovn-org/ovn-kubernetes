@@ -65,6 +65,7 @@ func NewOVSDBClientWithConfig(ctx context.Context, cfg dbConfig) (client.Client,
 		c.NewMonitor(
 			client.WithTable(&ovsdb.FlowSampleCollectorSet{}),
 			client.WithTable(&ovsdb.Bridge{}),
+			client.WithTable(&ovsdb.Interface{}),
 		),
 	)
 	if err != nil {

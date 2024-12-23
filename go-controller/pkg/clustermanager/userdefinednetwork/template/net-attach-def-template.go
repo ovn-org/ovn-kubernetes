@@ -34,6 +34,8 @@ type SpecGetter interface {
 	GetLayer2() *userdefinednetworkv1.Layer2Config
 }
 
+// This function has a copy in go-controller/observability-lib/sampledecoder/sample_decoder.go
+// Please update together with this function.
 func ParseNetworkName(networkName string) (udnNamespace, udnName string) {
 	parts := strings.Split(networkName, ".")
 	if len(parts) == 2 {
