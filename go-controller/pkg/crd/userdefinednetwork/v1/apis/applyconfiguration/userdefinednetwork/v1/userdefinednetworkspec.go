@@ -24,9 +24,10 @@ import (
 // UserDefinedNetworkSpecApplyConfiguration represents a declarative configuration of the UserDefinedNetworkSpec type for use
 // with apply.
 type UserDefinedNetworkSpecApplyConfiguration struct {
-	Topology *v1.NetworkTopology             `json:"topology,omitempty"`
-	Layer3   *Layer3ConfigApplyConfiguration `json:"layer3,omitempty"`
-	Layer2   *Layer2ConfigApplyConfiguration `json:"layer2,omitempty"`
+	Topology  *v1.NetworkTopology                `json:"topology,omitempty"`
+	Transport *TransportConfigApplyConfiguration `json:"transport,omitempty"`
+	Layer3    *Layer3ConfigApplyConfiguration    `json:"layer3,omitempty"`
+	Layer2    *Layer2ConfigApplyConfiguration    `json:"layer2,omitempty"`
 }
 
 // UserDefinedNetworkSpecApplyConfiguration constructs a declarative configuration of the UserDefinedNetworkSpec type for use with
@@ -40,6 +41,14 @@ func UserDefinedNetworkSpec() *UserDefinedNetworkSpecApplyConfiguration {
 // If called multiple times, the Topology field is set to the value of the last call.
 func (b *UserDefinedNetworkSpecApplyConfiguration) WithTopology(value v1.NetworkTopology) *UserDefinedNetworkSpecApplyConfiguration {
 	b.Topology = &value
+	return b
+}
+
+// WithTransport sets the Transport field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Transport field is set to the value of the last call.
+func (b *UserDefinedNetworkSpecApplyConfiguration) WithTransport(value *TransportConfigApplyConfiguration) *UserDefinedNetworkSpecApplyConfiguration {
+	b.Transport = value
 	return b
 }
 
