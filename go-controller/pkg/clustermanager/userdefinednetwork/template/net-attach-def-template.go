@@ -132,9 +132,12 @@ func renderCNINetworkConfig(networkName, nadName string, spec SpecGetter) (map[s
 		netConfSpec.JoinSubnet = cidrString(renderJoinSubnets(cfg.Role, cfg.JoinSubnets))
 	case userdefinednetworkv1.NetworkTopologyLayer2:
 		cfg := spec.GetLayer2()
+		if err := validateIPAM(cfg.IPAM); err != nil {
+			return nil, err
+		}
 		netConfSpec.Role = strings.ToLower(string(cfg.Role))
 		netConfSpec.MTU = int(cfg.MTU)
-		netConfSpec.AllowPersistentIPs = cfg.IPAMLifecycle == userdefinednetworkv1.IPAMLifecyclePersistent
+		netConfSpec.AllowPersistentIPs = cfg.IPAM != nil && cfg.IPAM.Lifecycle == userdefinednetworkv1.IPAMLifecyclePersistent
 		netConfSpec.Subnets = cidrString(cfg.Subnets)
 		netConfSpec.JoinSubnet = cidrString(renderJoinSubnets(cfg.Role, cfg.JoinSubnets))
 	}
@@ -174,6 +177,16 @@ func renderCNINetworkConfig(networkName, nadName string, spec SpecGetter) (map[s
 	}
 
 	return cniNetConf, nil
+}
+
+func validateIPAM(ipam *userdefinednetworkv1.IPAMConfig) error {
+	if ipam == nil {
+		return nil
+	}
+	if ipam.Lifecycle == userdefinednetworkv1.IPAMLifecyclePersistent && !(ipam.Mode == "" || ipam.Mode == userdefinednetworkv1.IPAMEnabled) {
+		return fmt.Errorf("lifecycle Persistent is only supported when ipam.mode is Enabled")
+	}
+	return nil
 }
 
 func renderJoinSubnets(role userdefinednetworkv1.NetworkRole, joinSubnetes []userdefinednetworkv1.CIDR) []userdefinednetworkv1.CIDR {

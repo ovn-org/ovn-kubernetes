@@ -37,6 +37,8 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &userdefinednetworkv1.ClusterUserDefinedNetworkSpecApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("ClusterUserDefinedNetworkStatus"):
 		return &userdefinednetworkv1.ClusterUserDefinedNetworkStatusApplyConfiguration{}
+	case v1.SchemeGroupVersion.WithKind("IPAMConfig"):
+		return &userdefinednetworkv1.IPAMConfigApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("Layer2Config"):
 		return &userdefinednetworkv1.Layer2ConfigApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("Layer3Config"):

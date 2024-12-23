@@ -24,11 +24,11 @@ import (
 // Layer2ConfigApplyConfiguration represents a declarative configuration of the Layer2Config type for use
 // with apply.
 type Layer2ConfigApplyConfiguration struct {
-	Role          *v1.NetworkRole          `json:"role,omitempty"`
-	MTU           *int32                   `json:"mtu,omitempty"`
-	Subnets       *v1.DualStackCIDRs       `json:"subnets,omitempty"`
-	JoinSubnets   *v1.DualStackCIDRs       `json:"joinSubnets,omitempty"`
-	IPAMLifecycle *v1.NetworkIPAMLifecycle `json:"ipamLifecycle,omitempty"`
+	Role        *v1.NetworkRole               `json:"role,omitempty"`
+	MTU         *int32                        `json:"mtu,omitempty"`
+	Subnets     *v1.DualStackCIDRs            `json:"subnets,omitempty"`
+	JoinSubnets *v1.DualStackCIDRs            `json:"joinSubnets,omitempty"`
+	IPAM        *IPAMConfigApplyConfiguration `json:"ipam,omitempty"`
 }
 
 // Layer2ConfigApplyConfiguration constructs a declarative configuration of the Layer2Config type for use with
@@ -69,10 +69,10 @@ func (b *Layer2ConfigApplyConfiguration) WithJoinSubnets(value v1.DualStackCIDRs
 	return b
 }
 
-// WithIPAMLifecycle sets the IPAMLifecycle field in the declarative configuration to the given value
+// WithIPAM sets the IPAM field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the IPAMLifecycle field is set to the value of the last call.
-func (b *Layer2ConfigApplyConfiguration) WithIPAMLifecycle(value v1.NetworkIPAMLifecycle) *Layer2ConfigApplyConfiguration {
-	b.IPAMLifecycle = &value
+// If called multiple times, the IPAM field is set to the value of the last call.
+func (b *Layer2ConfigApplyConfiguration) WithIPAM(value *IPAMConfigApplyConfiguration) *Layer2ConfigApplyConfiguration {
+	b.IPAM = value
 	return b
 }
