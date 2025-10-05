@@ -923,11 +923,13 @@ func TestPodAllocator_reconcileForNAD(t *testing.T) {
 			mutableNetInfo.AddNADs("namespace/nad")
 			netInfo = mutableNetInfo
 
+			var opts []pod.AllocatorOption
 			var ipamClaimsReconciler persistentips.PersistentAllocations
 			if tt.ipam && tt.args.ipamClaim != nil {
 				ctx, cancel := context.WithCancel(context.Background())
 				ipamClaimsLister, teardownFn := generateIPAMClaimsListerAndTeardownFunc(ctx.Done(), tt.args.ipamClaim)
 				ipamClaimsReconciler = persistentips.NewIPAMClaimReconciler(kubeMock, netInfo, ipamClaimsLister)
+				opts = append(opts, pod.WithIPAMClaimReconciler(ipamClaimsReconciler))
 
 				t.Cleanup(func() {
 					cancel()
@@ -935,7 +937,6 @@ func TestPodAllocator_reconcileForNAD(t *testing.T) {
 				})
 			}
 
-			var opts []pod.AllocatorOption
 			if tt.macRegistry != nil {
 				opts = append(opts, pod.WithMACRegistry(tt.macRegistry))
 			}
@@ -943,7 +944,6 @@ func TestPodAllocator_reconcileForNAD(t *testing.T) {
 				netInfo,
 				podListerMock,
 				kubeMock,
-				ipamClaimsReconciler,
 				opts...,
 			)
 

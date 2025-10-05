@@ -44,19 +44,23 @@ func NewPodAnnotationAllocator(
 	netInfo util.NetInfo,
 	podLister listers.PodLister,
 	kube kube.InterfaceOVN,
-	claimsReconciler persistentips.PersistentAllocations,
 	opts ...AllocatorOption,
 ) *PodAnnotationAllocator {
 	p := &PodAnnotationAllocator{
-		podLister:            podLister,
-		kube:                 kube,
-		netInfo:              netInfo,
-		ipamClaimsReconciler: claimsReconciler,
+		podLister: podLister,
+		kube:      kube,
+		netInfo:   netInfo,
 	}
 	for _, opt := range opts {
 		opt(p)
 	}
 	return p
+}
+
+func WithIPAMClaimReconciler(ipam persistentips.PersistentAllocations) AllocatorOption {
+	return func(p *PodAnnotationAllocator) {
+		p.ipamClaimsReconciler = ipam
+	}
 }
 
 func WithMACRegistry(m mac.Register) AllocatorOption {
