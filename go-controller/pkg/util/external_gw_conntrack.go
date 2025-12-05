@@ -302,6 +302,15 @@ func SyncConntrackForExternalGateways(gwIPsToKeep sets.Set[string], isPodInLocal
 		return fmt.Errorf("unable to get pods from informer: %v", err)
 	}
 
+	// matchedFlows are the labeled conntrack entries whose MAC labels do not
+	// match any remaining gateway. ConntrackListUnmatchLabelEntries dumps IPv4 and
+	// IPv6 tables once and returns only those matches. Per-pod work below
+	// filters this set by pod IP.
+	matchedFlows, err := ConntrackListUnmatchLabelEntries(validNextHopMACs)
+	if err != nil {
+		return fmt.Errorf("failed to list conntrack entries: %v", err)
+	}
+
 	var errs []error
 	for _, pod := range pods {
 		pod := pod
@@ -319,14 +328,88 @@ func SyncConntrackForExternalGateways(gwIPsToKeep sets.Set[string], isPodInLocal
 			errs = append(errs, fmt.Errorf("unable to fetch IP for pod %s/%s: %v", pod.Namespace, pod.Name, err))
 		}
 		for _, podIP := range podIPs {
-			// for this pod, we check if the conntrack entry has a label that is not in the provided allowlist of MACs
-			// only caveat here is we assume egressGW served pods shouldn't have conntrack entries with other labels set
-			_, err := DeleteConntrack(podIP.String(), 0, "", netlink.ConntrackOrigDstIP, validNextHopMACs)
-			if err != nil {
-				errs = append(errs, fmt.Errorf("failed to delete conntrack entry for pod %s: %v", podIP.String(), err))
-			}
+			// OrigDstIP: pod as server (ingress from next hop). OrigSrcIP: pod as client (egress).
+			errs = append(errs, deletePodConntrackEntriesForGW(podIP.String(), validNextHopMACs, matchedFlows, netlink.ConntrackOrigDstIP)...)
+			errs = append(errs, deletePodConntrackEntriesForGW(podIP.String(), validNextHopMACs, matchedFlows, netlink.ConntrackOrigSrcIP)...)
 		}
 	}
 
 	return utilerrors.Join(errs...)
+}
+
+func deletePodConntrackEntriesForGW(podIP string, validNextHopMACs [][]byte, flows []*netlink.ConntrackFlow, filterType netlink.ConntrackFilterType) []error {
+	var errs []error
+	podIPFilter := map[string]netlink.ConntrackFilterType{podIP: filterType}
+	// For each stale flow that involves this pod in the given orig direction,
+	// ConntrackDeleteFilters (raw dump replay) is used twice: once with
+	// UnmatchLabels to drop labeled unmatched entries, then with no labels so
+	// unlabeled copies of the same orig 5-tuple in other zones are also removed
+	// and traffic can hand off to a remaining gateway.
+	//
+	// Orig src+dst ports are included so a shared destination behind ECMP next
+	// hops (same podIP↔dstIP, different sports / next-hop MACs) does not cause
+	// peers hashed to remaining gateways to be wiped.
+	for _, flow := range flows {
+		match, err := ConntrackFlowMatchesFilter(flow, podIPFilter, 0, "", nil)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("failed to match conntrack entry for pod %s: %v", podIP, err))
+			continue
+		}
+		if !match {
+			continue
+		}
+		// Labeled delete can include reply IPs from the listed flow; UnmatchLabels
+		// is the hop discriminator.
+		labeledIPFilter := map[string]netlink.ConntrackFilterType{
+			flow.Forward.SrcIP.String(): netlink.ConntrackOrigSrcIP,
+			flow.Forward.DstIP.String(): netlink.ConntrackOrigDstIP,
+			flow.Reverse.SrcIP.String(): netlink.ConntrackReplySrcIP,
+			flow.Reverse.DstIP.String(): netlink.ConntrackReplyDstIP,
+		}
+		// Unlabeled zone / host SNAT twins often keep the same orig 5-tuple but a
+		// different reply (e.g. node IP when MEG SNAT is enabled). Matching reply
+		// IPs from the labeled flow would miss those copies whether SNAT is on or
+		// off, so the second delete keys on orig IPs + ports only.
+		unlabeledIPFilter := map[string]netlink.ConntrackFilterType{
+			flow.Forward.SrcIP.String(): netlink.ConntrackOrigSrcIP,
+			flow.Forward.DstIP.String(): netlink.ConntrackOrigDstIP,
+		}
+		// MEG conntrack cleanup only supports TCP/UDP/SCTP (corev1.Protocol).
+		// Other protocols have no mapped L4 type in DeleteConntrackTuple; an
+		// IP-only filter can wipe remaining-gateway peers to the same dest.
+		protocol := protocolFromConntrack(flow.Forward.Protocol)
+		if protocol == "" {
+			continue
+		}
+		// Delete the conntrack entry not matching any of the remaining gateway MACs
+		_, err = DeleteConntrackTuple(labeledIPFilter, flow.Forward.SrcPort, flow.Forward.DstPort, protocol, validNextHopMACs)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("failed to delete conntrack entry for pod %s: %v", podIP, err))
+		}
+		// Unlabeled delete has no MAC labels to distinguish ECMP next hops. Skip
+		// when L4 ports are absent — IP+protocol alone can wipe remaining-gateway
+		// peers to the same destination.
+		if flow.Forward.SrcPort == 0 && flow.Forward.DstPort == 0 {
+			continue
+		}
+		// Delete unlabeled copies of the same orig 5-tuple (any reply / zone).
+		_, err = DeleteConntrackTuple(unlabeledIPFilter, flow.Forward.SrcPort, flow.Forward.DstPort, protocol, nil)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("failed to delete conntrack entry for pod %s: %v", podIP, err))
+		}
+	}
+	return errs
+}
+
+func protocolFromConntrack(proto uint8) corev1.Protocol {
+	switch proto {
+	case 17:
+		return corev1.ProtocolUDP
+	case 132:
+		return corev1.ProtocolSCTP
+	case 6:
+		return corev1.ProtocolTCP
+	default:
+		return ""
+	}
 }

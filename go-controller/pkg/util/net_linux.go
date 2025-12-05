@@ -75,6 +75,7 @@ type NetLinkOps interface {
 	NeighSet(neigh *netlink.Neigh) error
 	NeighDel(neigh *netlink.Neigh) error
 	NeighList(linkIndex, family int) ([]netlink.Neigh, error)
+	ConntrackTableList(table netlink.ConntrackTableType, family netlink.InetFamily) ([]*netlink.ConntrackFlow, error)
 	ConntrackDeleteFilters(table netlink.ConntrackTableType, family netlink.InetFamily, filters ...netlink.CustomConntrackFilter) (uint, error)
 	LinkSetVfHardwareAddr(pfLink netlink.Link, vfIndex int, hwaddr net.HardwareAddr) error
 	RouteSubscribeWithOptions(ch chan<- netlink.RouteUpdate, done <-chan struct{}, options netlink.RouteSubscribeOptions) error
@@ -297,6 +298,10 @@ func (defaultNetLinkOps) NeighDel(neigh *netlink.Neigh) error {
 
 func (defaultNetLinkOps) NeighList(linkIndex, family int) ([]netlink.Neigh, error) {
 	return netlink.NeighList(linkIndex, family)
+}
+
+func (defaultNetLinkOps) ConntrackTableList(table netlink.ConntrackTableType, family netlink.InetFamily) ([]*netlink.ConntrackFlow, error) {
+	return netlink.ConntrackTableList(table, family)
 }
 
 func (defaultNetLinkOps) ConntrackDeleteFilters(table netlink.ConntrackTableType, family netlink.InetFamily, filters ...netlink.CustomConntrackFilter) (uint, error) {
@@ -786,52 +791,149 @@ func LinkNeighIPExists(link netlink.Link, neighIP net.IP) (bool, error) {
 	return false, nil
 }
 
-func DeleteConntrack(ip string, port int32, protocol corev1.Protocol, ipFilterType netlink.ConntrackFilterType, labels [][]byte) (uint, error) {
-	ipAddress := net.ParseIP(ip)
-	if ipAddress == nil {
-		return 0, fmt.Errorf("value %q passed to DeleteConntrack is not an IP address", ip)
+func getConntrackFilter(ipFilter map[string]netlink.ConntrackFilterType, port int32, protocol corev1.Protocol, labels [][]byte) (*netlink.ConntrackFilter, netlink.InetFamily, error) {
+	if len(ipFilter) == 0 {
+		return nil, netlink.FAMILY_V4, fmt.Errorf("empty IP filter passed to DeleteConntrack")
 	}
 
 	filter := &netlink.ConntrackFilter{}
-	if protocol == corev1.ProtocolUDP {
+	family := netlink.InetFamily(netlink.FAMILY_V4)
+	familySet := false
+	for ip, ipFilterType := range ipFilter {
+		ipAddress := net.ParseIP(ip)
+		if ipAddress == nil {
+			return nil, netlink.FAMILY_V4, fmt.Errorf("value %q passed to DeleteConntrack is not an IP address", ip)
+		}
+		thisFamily := netlink.InetFamily(netlink.FAMILY_V4)
+		if ipAddress.To4() == nil {
+			thisFamily = netlink.InetFamily(netlink.FAMILY_V6)
+		}
+		if !familySet {
+			family = thisFamily
+			familySet = true
+		} else if family != thisFamily {
+			return nil, family, fmt.Errorf("mixed IP families in conntrack filter")
+		}
+		if err := filter.AddIP(ipFilterType, ipAddress); err != nil {
+			return nil, family, fmt.Errorf("could not add IP: %s to conntrack filter: %v", ipAddress, err)
+		}
+	}
+	switch protocol {
+	case corev1.ProtocolUDP:
 		// 17 = UDP protocol
 		if err := filter.AddProtocol(17); err != nil {
-			return 0, fmt.Errorf("could not add Protocol UDP to conntrack filter %v", err)
+			return nil, family, fmt.Errorf("could not add Protocol UDP to conntrack filter %v", err)
 		}
-	} else if protocol == corev1.ProtocolSCTP {
+	case corev1.ProtocolSCTP:
 		// 132 = SCTP protocol
 		if err := filter.AddProtocol(132); err != nil {
-			return 0, fmt.Errorf("could not add Protocol SCTP to conntrack filter %v", err)
+			return nil, family, fmt.Errorf("could not add Protocol SCTP to conntrack filter %v", err)
 		}
-	} else if protocol == corev1.ProtocolTCP {
+	case corev1.ProtocolTCP:
 		// 6 = TCP protocol
 		if err := filter.AddProtocol(6); err != nil {
-			return 0, fmt.Errorf("could not add Protocol TCP to conntrack filter %v", err)
+			return nil, family, fmt.Errorf("could not add Protocol TCP to conntrack filter %v", err)
 		}
 	}
 	if port > 0 {
 		if err := filter.AddPort(netlink.ConntrackOrigDstPort, uint16(port)); err != nil {
-			return 0, fmt.Errorf("could not add port %d to conntrack filter: %v", port, err)
+			return nil, family, fmt.Errorf("could not add port %d to conntrack filter: %v", port, err)
 		}
-	}
-	if err := filter.AddIP(ipFilterType, ipAddress); err != nil {
-		return 0, fmt.Errorf("could not add IP: %s to conntrack filter: %v", ipAddress, err)
 	}
 
 	if len(labels) > 0 {
 		// for now we only need unmatch label, we can add match label later if needed
 		if err := filter.AddLabels(netlink.ConntrackUnmatchLabels, labels); err != nil {
-			return 0, fmt.Errorf("could not add label %s to conntrack filter: %v", labels, err)
+			return nil, family, fmt.Errorf("could not add label %s to conntrack filter: %v", labels, err)
 		}
 	}
-	klog.V(5).Infof("Deleting conntrack entry for IP %s, port %d, protocol %s, conntrack filter type %v, labels %x", ip, port, protocol, ipFilterType, labels)
-	var matched uint
-	var err error
-	if ipAddress.To4() != nil {
-		matched, err = netLinkOps.ConntrackDeleteFilters(netlink.ConntrackTable, netlink.FAMILY_V4, filter)
-	} else {
-		matched, err = netLinkOps.ConntrackDeleteFilters(netlink.ConntrackTable, netlink.FAMILY_V6, filter)
+	return filter, family, nil
+}
+
+// ConntrackFlowMatchesFilter reports whether flow matches a conntrack filter
+// built from the same arguments as DeleteConntrack.
+func ConntrackFlowMatchesFilter(flow *netlink.ConntrackFlow, ipFilter map[string]netlink.ConntrackFilterType, port int32, protocol corev1.Protocol, labels [][]byte) (bool, error) {
+	if flow == nil {
+		return false, nil
 	}
+	filter, _, err := getConntrackFilter(ipFilter, port, protocol, labels)
+	if err != nil {
+		return false, err
+	}
+	return filter.MatchConntrackFlow(flow), nil
+}
+
+// ConntrackListUnmatchLabelEntries dumps IPv4 and IPv6 conntrack tables once and
+// returns labeled flows whose MAC labels do not contain any of the provided
+// labels (netlink ConntrackUnmatchLabels). Unlabeled flows are not returned.
+func ConntrackListUnmatchLabelEntries(labels [][]byte) ([]*netlink.ConntrackFlow, error) {
+	filter := &netlink.ConntrackFilter{}
+	if len(labels) > 0 {
+		if err := filter.AddLabels(netlink.ConntrackUnmatchLabels, labels); err != nil {
+			return nil, fmt.Errorf("could not add label %s to conntrack filter: %v", labels, err)
+		}
+	}
+
+	matchingFlows := make([]*netlink.ConntrackFlow, 0)
+	var errs []error
+	for _, family := range []netlink.InetFamily{netlink.FAMILY_V4, netlink.FAMILY_V6} {
+		flows, err := netLinkOps.ConntrackTableList(netlink.ConntrackTable, family)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("failed to list conntrack entries: %v", err))
+			continue
+		}
+		for _, flow := range flows {
+			if filter.MatchConntrackFlow(flow) {
+				matchingFlows = append(matchingFlows, flow)
+			}
+		}
+	}
+	if len(matchingFlows) == 0 && len(errs) > 0 {
+		return nil, errors.Join(errs...)
+	}
+	if len(errs) > 0 {
+		klog.Errorf("Failed to list some conntrack entries: %v", errors.Join(errs...))
+	}
+	return matchingFlows, nil
+}
+
+func DeleteConntrack(ipFilter map[string]netlink.ConntrackFilterType, port int32, protocol corev1.Protocol, labels [][]byte) (uint, error) {
+	var srcPort, dstPort uint16
+	if port > 0 {
+		dstPort = uint16(port)
+	}
+	return DeleteConntrackTuple(ipFilter, srcPort, dstPort, protocol, labels)
+}
+
+// DeleteConntrackTuple deletes conntrack entries matching the IP filter, optional
+// original-direction L4 ports, protocol, and MAC labels. Use both src and dst
+// ports when deleting a specific ECMP flow so other next-hop peers that share
+// the same addresses (shared egress destination) are not removed.
+func DeleteConntrackTuple(ipFilter map[string]netlink.ConntrackFilterType, srcPort, dstPort uint16, protocol corev1.Protocol, labels [][]byte) (uint, error) {
+	port := int32(0)
+	if dstPort > 0 && srcPort == 0 {
+		// Preserve DeleteConntrack semantics: dst-only port filter.
+		port = int32(dstPort)
+	}
+	filter, family, err := getConntrackFilter(ipFilter, port, protocol, labels)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get conntrack filter: %v", err)
+	}
+	if srcPort > 0 {
+		if err := filter.AddPort(netlink.ConntrackOrigSrcPort, srcPort); err != nil {
+			return 0, fmt.Errorf("could not add orig src port %d to conntrack filter: %v", srcPort, err)
+		}
+		// When both ports are set, getConntrackFilter was called with port=0 so
+		// also add orig dst port here.
+		if dstPort > 0 && port == 0 {
+			if err := filter.AddPort(netlink.ConntrackOrigDstPort, dstPort); err != nil {
+				return 0, fmt.Errorf("could not add orig dst port %d to conntrack filter: %v", dstPort, err)
+			}
+		}
+	}
+	klog.V(5).Infof("Deleting conntrack entries matching IP filter %v, srcPort %d, dstPort %d, protocol %s, labels %x",
+		ipFilter, srcPort, dstPort, protocol, labels)
+	matched, err := netLinkOps.ConntrackDeleteFilters(netlink.ConntrackTable, family, filter)
 	return matched, err
 }
 
@@ -845,7 +947,7 @@ func DeleteConntrackServicePort(ip string, port int32, protocol corev1.Protocol,
 			ip, protocol, port, err)
 		return 0, nil
 	}
-	return DeleteConntrack(ip, port, protocol, ipFilterType, labels)
+	return DeleteConntrack(map[string]netlink.ConntrackFilterType{ip: ipFilterType}, port, protocol, labels)
 }
 
 // GetFilteredInterfaceV4V6IPs returns the IP addresses for the network interface 'iface' for ipv4 and ipv6.

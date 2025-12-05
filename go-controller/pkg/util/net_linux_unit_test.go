@@ -1057,7 +1057,7 @@ func TestDeleteConntrack(t *testing.T) {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
 			ovntest.ProcessMockFnList(&mockNetLinkOps.Mock, tc.onRetArgsNetLinkLibOpers)
 
-			_, err := DeleteConntrack(tc.inputIPStr, tc.inputPort, tc.inputProtocol, netlink.ConntrackReplyAnyIP, tc.labels)
+			_, err := DeleteConntrack(map[string]netlink.ConntrackFilterType{tc.inputIPStr: netlink.ConntrackReplyAnyIP}, tc.inputPort, tc.inputProtocol, tc.labels)
 			if tc.errExp {
 				require.Error(t, err)
 			} else {
@@ -1070,7 +1070,7 @@ func TestDeleteConntrack(t *testing.T) {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
 			ovntest.ProcessMockFnList(&mockNetLinkOps.Mock, tc.onRetArgsNetLinkLibOpers)
 
-			_, err := DeleteConntrack(tc.inputIPStr, tc.inputPort, tc.inputProtocol, netlink.ConntrackOrigDstIP, tc.labels)
+			_, err := DeleteConntrack(map[string]netlink.ConntrackFilterType{tc.inputIPStr: netlink.ConntrackOrigDstIP}, tc.inputPort, tc.inputProtocol, tc.labels)
 			if tc.errExp {
 				require.Error(t, err)
 			} else {
@@ -1079,6 +1079,107 @@ func TestDeleteConntrack(t *testing.T) {
 			mockNetLinkOps.AssertExpectations(t)
 		})
 	}
+}
+
+func TestConntrackFlowMatchesFilter(t *testing.T) {
+	podIP := "10.128.0.2"
+	allowedMAC := [][]byte{{0x0a, 0x0b, 0x0c}}
+	flow := &netlink.ConntrackFlow{
+		Forward: netlink.IPTuple{
+			SrcIP: net.ParseIP(podIP),
+			DstIP: net.ParseIP("1.2.3.4"),
+		},
+		Labels: []byte{0xff, 0xee, 0xdd},
+	}
+
+	match, err := ConntrackFlowMatchesFilter(flow, map[string]netlink.ConntrackFilterType{podIP: netlink.ConntrackOrigSrcIP}, 0, "", allowedMAC)
+	require.NoError(t, err)
+	require.True(t, match)
+
+	match, err = ConntrackFlowMatchesFilter(flow, map[string]netlink.ConntrackFilterType{podIP: netlink.ConntrackOrigDstIP}, 0, "", allowedMAC)
+	require.NoError(t, err)
+	require.False(t, match)
+
+	match, err = ConntrackFlowMatchesFilter(nil, map[string]netlink.ConntrackFilterType{podIP: netlink.ConntrackOrigSrcIP}, 0, "", allowedMAC)
+	require.NoError(t, err)
+	require.False(t, match)
+
+	_, err = ConntrackFlowMatchesFilter(flow, map[string]netlink.ConntrackFilterType{"not-an-ip": netlink.ConntrackOrigSrcIP}, 0, "", allowedMAC)
+	require.Error(t, err)
+}
+
+func TestConntrackListUnmatchLabelEntries(t *testing.T) {
+	allowedMAC := [][]byte{{0x0a, 0x0b, 0x0c}}
+	staleLabel := []byte{0xff, 0xee, 0xdd}
+	staleFlow := &netlink.ConntrackFlow{
+		FamilyType: uint8(netlink.FAMILY_V4),
+		Forward: netlink.IPTuple{
+			SrcIP: net.ParseIP("10.128.0.2"),
+			DstIP: net.ParseIP("1.2.3.4"),
+		},
+		Labels: staleLabel,
+	}
+	keepFlow := *staleFlow
+	keepFlow.Labels = allowedMAC[0]
+	v6StaleFlow := &netlink.ConntrackFlow{
+		FamilyType: uint8(netlink.FAMILY_V6),
+		Forward: netlink.IPTuple{
+			SrcIP: net.ParseIP("fd00::2"),
+			DstIP: net.ParseIP("2001:db8::1"),
+		},
+		Labels: staleLabel,
+	}
+
+	mockNetLinkOps := new(mocks.NetLinkOps)
+	origNetLinkOps := netLinkOps
+	netLinkOps = mockNetLinkOps
+	t.Cleanup(func() {
+		netLinkOps = origNetLinkOps
+	})
+
+	t.Run("dumps IPv4 and IPv6 tables once and returns unmatched-label flows", func(t *testing.T) {
+		mockNetLinkOps.ExpectedCalls = nil
+		mockNetLinkOps.Calls = nil
+		ovntest.ProcessMockFnList(&mockNetLinkOps.Mock, []ovntest.TestifyMockHelper{
+			{
+				OnCallMethodName:    "ConntrackTableList",
+				OnCallMethodArgType: []string{"netlink.ConntrackTableType", "netlink.InetFamily"},
+				RetArgList:          []interface{}{[]*netlink.ConntrackFlow{staleFlow, &keepFlow}, nil},
+			},
+			{
+				OnCallMethodName:    "ConntrackTableList",
+				OnCallMethodArgType: []string{"netlink.ConntrackTableType", "netlink.InetFamily"},
+				RetArgList:          []interface{}{[]*netlink.ConntrackFlow{v6StaleFlow}, nil},
+			},
+		})
+
+		flows, err := ConntrackListUnmatchLabelEntries(allowedMAC)
+		require.NoError(t, err)
+		require.Equal(t, []*netlink.ConntrackFlow{staleFlow, v6StaleFlow}, flows)
+		mockNetLinkOps.AssertExpectations(t)
+	})
+
+	t.Run("returns an error when both family dumps fail", func(t *testing.T) {
+		mockNetLinkOps.ExpectedCalls = nil
+		mockNetLinkOps.Calls = nil
+		ovntest.ProcessMockFnList(&mockNetLinkOps.Mock, []ovntest.TestifyMockHelper{
+			{
+				OnCallMethodName:    "ConntrackTableList",
+				OnCallMethodArgType: []string{"netlink.ConntrackTableType", "netlink.InetFamily"},
+				RetArgList:          []interface{}{[]*netlink.ConntrackFlow(nil), fmt.Errorf("dump failed")},
+			},
+			{
+				OnCallMethodName:    "ConntrackTableList",
+				OnCallMethodArgType: []string{"netlink.ConntrackTableType", "netlink.InetFamily"},
+				RetArgList:          []interface{}{[]*netlink.ConntrackFlow(nil), fmt.Errorf("dump failed")},
+			},
+		})
+
+		flows, err := ConntrackListUnmatchLabelEntries(allowedMAC)
+		require.Error(t, err)
+		require.Nil(t, flows)
+		mockNetLinkOps.AssertExpectations(t)
+	})
 }
 
 func TestGetIPv6OnSubnet(t *testing.T) {
