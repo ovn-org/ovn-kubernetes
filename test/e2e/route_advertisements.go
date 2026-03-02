@@ -4425,10 +4425,12 @@ func runBGPNetworkAndServerWithFRRVRF(
 		return fmt.Errorf("failed to generate FRR-k8s configuration: %w", err)
 	}
 	ictx.AddCleanUpFn(func() error { return os.RemoveAll(frrK8sConfig) })
-	_, err = e2ekubectl.RunKubectl(deploymentconfig.Get().FRRK8sNamespace(), "create", "-f", frrK8sConfig)
-	if err != nil {
-		return fmt.Errorf("failed to apply FRRConfiguration: %w", err)
-	}
+	// Retry FRRConfiguration apply: the frr-k8s validation webhook may not be ready
+	// immediately (e.g., after cluster startup), causing "context deadline exceeded".
+	gomega.Eventually(func(g gomega.Gomega) {
+		_, err = e2ekubectl.RunKubectl(deploymentconfig.Get().FRRK8sNamespace(), "apply", "-f", frrK8sConfig)
+		g.Expect(err).NotTo(gomega.HaveOccurred(), "failed to apply FRRConfiguration")
+	}, 60*time.Second, 5*time.Second).Should(gomega.Succeed())
 	ictx.AddCleanUpFn(func() error {
 		_, err = e2ekubectl.RunKubectl(deploymentconfig.Get().FRRK8sNamespace(), "delete", "-f", frrK8sConfig)
 		if err != nil {
@@ -4489,8 +4491,12 @@ func createNamespaceWithPrimaryNetworkOfType(
 	if err != nil {
 		return nil, fmt.Errorf("failed to create namespace: %w", err)
 	}
+	namespaceName := namespace.Name
 	ictx.AddCleanUpFn(func() error {
-		return f.ClientSet.CoreV1().Namespaces().Delete(context.Background(), namespace.Name, metav1.DeleteOptions{})
+		if f == nil || f.ClientSet == nil {
+			return nil
+		}
+		return f.ClientSet.CoreV1().Namespaces().Delete(context.Background(), namespaceName, metav1.DeleteOptions{})
 	})
 
 	// just creating a namespace with default network, return
