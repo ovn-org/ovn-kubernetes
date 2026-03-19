@@ -31,7 +31,7 @@ spec:
       imagePullSecrets:
       - name: {{ .Values.global.imagePullSecretName }}
       {{- end }}
-      priorityClassName: "system-cluster-critical"
+      priorityClassName: "system-node-critical"
       hostNetwork: true
       dnsPolicy: Default
       {{- if eq (hasKey .Values.global "unprivilegedMode" | ternary .Values.global.unprivilegedMode false) false }}
