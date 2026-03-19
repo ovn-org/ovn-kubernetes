@@ -83,7 +83,6 @@ import (
 // =============================================================================
 
 const (
-	// agnhostHTTPPort is the HTTP port for agnhost netexec
 	agnhostHTTPPort = 8080
 	// sharedNodeIPsVTEPName is the name of the shared VTEP CR used across
 	// EVPN tests that reference node IP CIDRs. Created idempotently by the
@@ -106,12 +105,12 @@ const (
 //   - vnifilter: Enable per-VLAN VNI mapping (SVD mode)
 //
 // Cleanup is automatically registered via ictx.AddCleanUpFn().
-func setupEVPNBridgeOnExternalFRR(ictx infraapi.Context, frrVTEPIPAddress, bridgeName, vxlanName string) error {
-	frr := infraapi.ExternalContainer{Name: routerContainerName}
+func setupEVPNBridgeOnExternalFRR(ictx infraapi.Context, frrContainerName, frrVTEPIPAddress, bridgeName, vxlanName string) error {
+	frr := infraapi.ExternalContainer{Name: frrContainerName}
 
 	// Idempotent: if the bridge already exists, skip creation.
 	if _, err := infraprovider.Get().ExecExternalContainerCommand(frr, []string{"ip", "link", "show", bridgeName}); err == nil {
-		framework.Logf("EVPN bridge %s already exists on %s, reusing", bridgeName, routerContainerName)
+		framework.Logf("EVPN bridge %s already exists on %s, reusing", bridgeName, frrContainerName)
 		return nil
 	}
 
@@ -184,7 +183,7 @@ func setupEVPNBridgeOnExternalFRR(ictx infraapi.Context, frrVTEPIPAddress, bridg
 	// Idempotent: checks existence before deleting so multiple cleanups are safe
 	// (e.g. when shared bridge is cleaned up by first test, second finds it gone).
 	ictx.AddCleanUpFn(func() error {
-		frr := infraapi.ExternalContainer{Name: routerContainerName}
+		frr := infraapi.ExternalContainer{Name: frrContainerName}
 
 		if _, err := infraprovider.Get().ExecExternalContainerCommand(frr, []string{"ip", "link", "show", vxlanName}); err == nil {
 			if _, err := infraprovider.Get().ExecExternalContainerCommand(frr, []string{"ip", "link", "del", vxlanName}); err != nil {
@@ -198,18 +197,18 @@ func setupEVPNBridgeOnExternalFRR(ictx infraapi.Context, frrVTEPIPAddress, bridg
 			}
 		}
 
-		framework.Logf("EVPN bridge cleanup complete on %s", routerContainerName)
+		framework.Logf("EVPN bridge cleanup complete on %s", frrContainerName)
 		return nil
 	})
 
-	framework.Logf("EVPN bridge setup complete on %s (%s + %s with local IP %s)", routerContainerName, bridgeName, vxlanName, frrVTEPIPAddress)
+	framework.Logf("EVPN bridge setup complete on %s (%s + %s with local IP %s)", frrContainerName, bridgeName, vxlanName, frrVTEPIPAddress)
 	return nil
 }
 
 // setupVNIVIDMappingsOnExternalFRR sets up VLAN/VNI mappings for the given
 // bridge and vxlan interfaces
-func setupVNIVIDMappingsOnExternalFRR(vni, vid int, bridgeName, vxlanName string) error {
-	frr := infraapi.ExternalContainer{Name: routerContainerName}
+func setupVNIVIDMappingsOnExternalFRR(frrContainerName string, vni, vid int, bridgeName, vxlanName string) error {
+	frr := infraapi.ExternalContainer{Name: frrContainerName}
 	vidStr := fmt.Sprintf("%d", vid)
 	vniStr := fmt.Sprintf("%d", vni)
 	commands := [][]string{
@@ -228,14 +227,14 @@ func setupVNIVIDMappingsOnExternalFRR(vni, vid int, bridgeName, vxlanName string
 		}
 	}
 
-	framework.Logf("VLAN/VNI mappings setup complete on %s (VNI %d, VID %d)", routerContainerName, vni, vid)
+	framework.Logf("VLAN/VNI mappings setup complete on %s (VNI %d, VID %d)", frrContainerName, vni, vid)
 	return nil
 }
 
 // setupSVIOnExternalFRR sets up a SVI on the provided VLAN and VLAN aware
 // bridge and optionally attaches it to a VRF
-func setupSVIOnExternalFRR(ictx infraapi.Context, vid int, bridgeName, vrfName string) error {
-	frr := infraapi.ExternalContainer{Name: routerContainerName}
+func setupSVIOnExternalFRR(ictx infraapi.Context, frrContainerName string, vid int, bridgeName, vrfName string) error {
+	frr := infraapi.ExternalContainer{Name: frrContainerName}
 	vidStr := fmt.Sprintf("%d", vid)
 	sviName := fmt.Sprintf("%s.%d", bridgeName, vid)
 
@@ -253,7 +252,7 @@ func setupSVIOnExternalFRR(ictx infraapi.Context, vid int, bridgeName, vrfName s
 			return fmt.Errorf("failed to delete SVI %s: %v", sviName, err)
 		}
 
-		framework.Logf("SVI %s cleanup complete on %s (VID %d, VRF: %q)", sviName, routerContainerName, vid, vrfName)
+		framework.Logf("SVI %s cleanup complete on %s (VID %d, VRF: %q)", sviName, frrContainerName, vid, vrfName)
 		return nil
 	})
 
@@ -280,7 +279,7 @@ func setupSVIOnExternalFRR(ictx infraapi.Context, vid int, bridgeName, vrfName s
 		return fmt.Errorf("failed to bring up SVI %s: %w", sviName, err)
 	}
 
-	framework.Logf("SVI %s setup complete on %s (VID %d, VRF: %q)", sviName, routerContainerName, vid, vrfName)
+	framework.Logf("SVI %s setup complete on %s (VID %d, VRF: %q)", sviName, frrContainerName, vid, vrfName)
 	return nil
 }
 
@@ -296,18 +295,18 @@ func setupSVIOnExternalFRR(ictx infraapi.Context, vid int, bridgeName, vrfName s
 //   - vid: VLAN ID for local bridging (e.g., 100)
 //   - bridgeName: name of the bridge device (e.g., "brevpn7a3f")
 //   - vxlanName: name of the VXLAN device (e.g., "vxevpn7a3f")
-func setupMACVRFOnExternalFRR(ictx infraapi.Context, vni, vid int, bridgeName, vxlanName string) error {
-	err := setupVNIVIDMappingsOnExternalFRR(vni, vid, bridgeName, vxlanName)
+func setupMACVRFOnExternalFRR(ictx infraapi.Context, frrContainerName string, vni, vid int, bridgeName, vxlanName string) error {
+	err := setupVNIVIDMappingsOnExternalFRR(frrContainerName, vni, vid, bridgeName, vxlanName)
 	if err != nil {
 		return fmt.Errorf("failed to configure VLAN/VNI mapping on bridge %s: %w", bridgeName, err)
 	}
 
-	err = setupSVIOnExternalFRR(ictx, vid, bridgeName, "")
+	err = setupSVIOnExternalFRR(ictx, frrContainerName, vid, bridgeName, "")
 	if err != nil {
 		return fmt.Errorf("failed to configure SVI for VID %d: %w", vid, err)
 	}
 
-	framework.Logf("MAC-VRF setup complete on %s (VNI %d)", routerContainerName, vni)
+	framework.Logf("MAC-VRF setup complete on %s (VNI %d)", frrContainerName, vni)
 	return nil
 }
 
@@ -325,8 +324,8 @@ func setupMACVRFOnExternalFRR(ictx infraapi.Context, vni, vid int, bridgeName, v
 //
 // Cleanup is automatically registered via ictx.AddCleanUpFn().
 // Note: VLAN/VNI mappings are cleaned up when bridgeName/vxlanName are deleted.
-func setupIPVRFOnExternalFRR(ictx infraapi.Context, vrfName string, vni, vid int, bridgeName, vxlanName string) error {
-	frr := infraapi.ExternalContainer{Name: routerContainerName}
+func setupIPVRFOnExternalFRR(ictx infraapi.Context, frrContainerName, vrfName string, vni, vid int, bridgeName, vxlanName string) error {
+	frr := infraapi.ExternalContainer{Name: frrContainerName}
 	vniStr := fmt.Sprintf("%d", vni)
 
 	// Create Linux VRF with routing table = VNI
@@ -360,21 +359,21 @@ func setupIPVRFOnExternalFRR(ictx infraapi.Context, vrfName string, vni, vid int
 			return fmt.Errorf("failed to delete FRR VRF definition %s: %v", vrfName, err)
 		}
 
-		framework.Logf("IP-VRF cleanup complete on %s (VNI %d)", routerContainerName, vni)
+		framework.Logf("IP-VRF cleanup complete on %s (VNI %d)", frrContainerName, vni)
 		return nil
 	})
 
-	err = setupVNIVIDMappingsOnExternalFRR(vni, vid, bridgeName, vxlanName)
+	err = setupVNIVIDMappingsOnExternalFRR(frrContainerName, vni, vid, bridgeName, vxlanName)
 	if err != nil {
 		return fmt.Errorf("failed to configure VLAN/VNI mapping on bridge %s: %w", bridgeName, err)
 	}
 
-	err = setupSVIOnExternalFRR(ictx, vid, bridgeName, vrfName)
+	err = setupSVIOnExternalFRR(ictx, frrContainerName, vid, bridgeName, vrfName)
 	if err != nil {
 		return fmt.Errorf("failed to configure SVI for VID %d: %w", vid, err)
 	}
 
-	framework.Logf("IP-VRF setup complete on %s (VNI %d)", routerContainerName, vni)
+	framework.Logf("IP-VRF setup complete on %s (VNI %d)", frrContainerName, vni)
 	return nil
 }
 
@@ -396,18 +395,22 @@ func vtyshCommand(args ...string) []string {
 // with ENABLE_EVPN.
 //
 // Parameters:
-//   - asn: BGP Autonomous System Number (e.g., 64512)
+//   - frrContainerName: Name of the external FRR container (e.g., "frr" or "frr-ebgp")
+//   - asn: BGP Autonomous System Number of the external FRR (e.g., 64512 for iBGP, 64513 for eBGP)
 //   - neighborIPs: List of cluster node IPs to peer with
+//   - isIBGP: Whether this is an iBGP session (determines if route-reflector-client is configured)
 //
 // No cleanup is registered: these are shared cluster-level settings that must persist
 // across all parallel EVPN tests.
-func setupEVPNBGPOnExternalFRR(ictx infraapi.Context, asn int, neighborIPs []string) error {
-	frr := infraapi.ExternalContainer{Name: routerContainerName}
+func setupEVPNBGPOnExternalFRR(ictx infraapi.Context, frrContainerName string, asn int, neighborIPs []string, isIBGP bool) error {
+	frr := infraapi.ExternalContainer{Name: frrContainerName}
 
 	args := []string{"configure terminal", fmt.Sprintf("router bgp %d", asn), "address-family l2vpn evpn", "advertise-all-vni"}
 	for _, ip := range neighborIPs {
 		args = append(args, fmt.Sprintf("neighbor %s activate", ip))
-		args = append(args, fmt.Sprintf("neighbor %s route-reflector-client", ip))
+		if isIBGP {
+			args = append(args, fmt.Sprintf("neighbor %s route-reflector-client", ip))
+		}
 	}
 	args = append(args, "exit-address-family", "end")
 
@@ -423,11 +426,11 @@ func setupEVPNBGPOnExternalFRR(ictx infraapi.Context, asn int, neighborIPs []str
 	// and must persist for the duration of the test suite.
 	// IP-VRF per-VRF BGP config is cleaned up by setupIPVRFBGPOnExternalFRR.
 	ictx.AddCleanUpFn(func() error {
-		framework.Logf("EVPN BGP cleanup complete on %s (no-op: global BGP settings are shared infrastructure)", routerContainerName)
+		framework.Logf("EVPN BGP cleanup complete on %s (no-op: global BGP settings are shared infrastructure)", frrContainerName)
 		return nil
 	})
 
-	framework.Logf("EVPN BGP setup complete on %s (ASN %d, neighbors: %v)", routerContainerName, asn, neighborIPs)
+	framework.Logf("EVPN BGP setup complete on %s (ASN %d, neighbors: %v, iBGP: %v)", frrContainerName, asn, neighborIPs, isIBGP)
 	return nil
 }
 
@@ -438,16 +441,19 @@ func setupEVPNBGPOnExternalFRR(ictx infraapi.Context, asn int, neighborIPs []str
 //
 // Parameters:
 //   - vrfName: Name of the Linux VRF (must match the VRF created by setupIPVRFOnExternalFRR)
-//   - asn: BGP ASN (e.g., 64512). Must match the cluster's frr-k8s ASN and the global EVPN
-//     BGP instance. Used for both the VRF BGP instance and the Route Distinguisher/Route Target.
+//   - asn: BGP ASN of this external FRR instance (e.g., 64512 for iBGP, 64513 for eBGP).
+//     Used for the VRF BGP instance (`router bgp <asn> vrf <vrfName>`).
+//   - rtASN: ASN component of Route Distinguisher and Route Target (RT = rtASN:VNI).
+//     The cluster-side setup script always uses the cluster's own ASN for RTs,
+//     so rtASN must always be the cluster's ASN to keep both sides in sync.
 //   - vni: VXLAN Network Identifier for route-target (e.g., 20102)
 //   - ipFamilies: IP families to configure (e.g., sets.New(utilnet.IPv4) or sets.New(utilnet.IPv4, utilnet.IPv6))
 //   - subnets: Subnets to advertise via BGP (e.g., []string{"172.27.102.0/24"} or {"172.27.102.0/24", "fd00:102::/64"})
 //
 // Cleanup is automatically registered via ictx.AddCleanUpFn().
-func setupIPVRFBGPOnExternalFRR(ictx infraapi.Context, vrfName string, asn, vni int, ipFamilies sets.Set[utilnet.IPFamily], subnets []string) error {
-	frr := infraapi.ExternalContainer{Name: routerContainerName}
-	rt := fmt.Sprintf("%d:%d", asn, vni)
+func setupIPVRFBGPOnExternalFRR(ictx infraapi.Context, frrContainerName, vrfName string, asn, rtASN, vni int, ipFamilies sets.Set[utilnet.IPFamily], subnets []string) error {
+	frr := infraapi.ExternalContainer{Name: frrContainerName}
+	rt := fmt.Sprintf("%d:%d", rtASN, vni)
 
 	// Build vtysh args
 	args := []string{
@@ -498,20 +504,20 @@ func setupIPVRFBGPOnExternalFRR(ictx infraapi.Context, vrfName string, asn, vni 
 	// the Linux VRF device, which triggers FRR to auto-cleanup the VRF config. In that case,
 	// these commands may fail - that's OK, we just log warnings and won't retry that.
 	ictx.AddCleanUpFn(func() error {
-		frr := infraapi.ExternalContainer{Name: routerContainerName}
+		frr := infraapi.ExternalContainer{Name: frrContainerName}
 
 		_, err := infraprovider.Get().ExecExternalContainerCommand(frr, vtyshCommand(
 			"configure terminal", fmt.Sprintf("vrf %s", vrfName), fmt.Sprintf("no vni %d", vni), "exit-vrf", "end",
 		))
 		if err != nil {
-			return fmt.Errorf("failed to remove VNI binding (may already be cleaned up): %v", err)
+			framework.Logf("Warning: failed to remove VNI binding (may already be cleaned up): %v", err)
 		}
 
 		_, err = infraprovider.Get().ExecExternalContainerCommand(frr, vtyshCommand(
 			"configure terminal", fmt.Sprintf("no router bgp %d vrf %s", asn, vrfName), "end",
 		))
 		if err != nil {
-			return fmt.Errorf("failed to remove BGP VRF (may already be cleaned up): %v", err)
+			framework.Logf("Warning: failed to remove BGP VRF (may already be cleaned up): %v", err)
 		}
 
 		// NOTE: We intentionally do NOT run "no vrf" here.
@@ -520,11 +526,11 @@ func setupIPVRFBGPOnExternalFRR(ictx infraapi.Context, vrfName string, asn, vni 
 		// Trying to delete the FRR VRF while the Linux VRF still has interfaces
 		// attached causes "Only inactive VRFs can be deleted" errors.
 
-		framework.Logf("IP-VRF BGP cleanup complete on %s (VRF %s)", routerContainerName, vrfName)
+		framework.Logf("IP-VRF BGP cleanup complete on %s (VRF %s)", frrContainerName, vrfName)
 		return nil
 	})
 
-	framework.Logf("IP-VRF BGP setup complete on %s (VRF %s, ASN %d, VNI %d, RT %s, families %v)", routerContainerName, vrfName, asn, vni, rt, ipFamilies.UnsortedList())
+	framework.Logf("IP-VRF BGP setup complete on %s (VRF %s, ASN %d, VNI %d, RT %s, families %v)", frrContainerName, vrfName, asn, vni, rt, ipFamilies.UnsortedList())
 	return nil
 }
 
@@ -556,8 +562,9 @@ type evpnContainerInfo struct {
 //   - container: ExternalContainer spec (Name, Image, CmdArgs, and optionally IPv4/IPv6 for static IPs)
 //   - networkName: Name for the Docker network (e.g., "macvrf-net-100", "ipvrf-net-202")
 //   - ipFamilies: Cluster IP family support, used to filter discovered IPs
+//   - frrContainerName: name of the external FRR container to attach to the Docker network
 //   - subnets: Subnets for the Docker network (e.g., "10.100.0.0/16" for IPv4, or both for dual-stack)
-func createEVPNExternalContainer(ictx infraapi.Context, container infraapi.ExternalContainer, networkName string, ipFamilies sets.Set[utilnet.IPFamily], subnets []string) (*evpnContainerInfo, error) {
+func createEVPNExternalContainer(ictx infraapi.Context, frrContainerName string, container infraapi.ExternalContainer, networkName string, ipFamilies sets.Set[utilnet.IPFamily], subnets []string) (*evpnContainerInfo, error) {
 	// Step 1: Create Docker network with specific subnet(s)
 	network, err := ictx.CreateNetwork(networkName, subnets...)
 	if err != nil {
@@ -573,7 +580,7 @@ func createEVPNExternalContainer(ictx infraapi.Context, container infraapi.Exter
 	}
 
 	// Step 3: Connect FRR to the network
-	_, err = ictx.AttachNetwork(network, routerContainerName)
+	_, err = ictx.AttachNetwork(network, frrContainerName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect FRR to network %s: %w", networkName, err)
 	}
@@ -586,7 +593,7 @@ func createEVPNExternalContainer(ictx infraapi.Context, container infraapi.Exter
 	}
 
 	frrNetInf, err := infraprovider.Get().GetExternalContainerNetworkInterface(
-		infraapi.ExternalContainer{Name: routerContainerName}, network)
+		infraapi.ExternalContainer{Name: frrContainerName}, network)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get FRR network interface: %w", err)
 	}
@@ -678,7 +685,7 @@ func getMACVRFAgnhostIPsFromSubnets(subnets []string) ([]string, error) {
 //     afterward to match the CUDN subnets. This is needed when two MAC-VRF agnhosts
 //     share the same CUDN subnet because Docker rejects overlapping subnets. The Docker
 //     bridge still forwards L2 frames regardless of IP addressing.
-func setupMACVRFExternalContainer(ictx infraapi.Context, container infraapi.ExternalContainer, networkName, bridgeName string, vid int, ipFamilies sets.Set[utilnet.IPFamily], subnets []string, useProxyDockerNetwork bool) (*evpnContainerInfo, error) {
+func setupMACVRFExternalContainer(ictx infraapi.Context, frrContainerName string, container infraapi.ExternalContainer, networkName, bridgeName string, vid int, ipFamilies sets.Set[utilnet.IPFamily], subnets []string, useProxyDockerNetwork bool) (*evpnContainerInfo, error) {
 	// Derive container IPs from CUDN subnets
 	containerIPs, err := getMACVRFAgnhostIPsFromSubnets(subnets)
 	if err != nil {
@@ -700,7 +707,7 @@ func setupMACVRFExternalContainer(ictx infraapi.Context, container infraapi.Exte
 	if useProxyDockerNetwork {
 		dockerSubnets = nil
 	}
-	info, err = createEVPNExternalContainer(ictx, container, networkName, ipFamilies, dockerSubnets)
+	info, err = createEVPNExternalContainer(ictx, frrContainerName, container, networkName, ipFamilies, dockerSubnets)
 	if err != nil {
 		return nil, err
 	}
@@ -739,7 +746,7 @@ func setupMACVRFExternalContainer(ictx infraapi.Context, container infraapi.Exte
 	}
 
 	// Move FRR's interface to bridgeName and configure as access port
-	frr := infraapi.ExternalContainer{Name: routerContainerName}
+	frr := infraapi.ExternalContainer{Name: frrContainerName}
 	vidStr := fmt.Sprintf("%d", vid)
 	sviName := fmt.Sprintf("%s.%d", bridgeName, vid)
 	frrCmds := [][]string{
@@ -789,8 +796,8 @@ func setupMACVRFExternalContainer(ictx infraapi.Context, container infraapi.Exte
 //   - vrfName: Name of the VRF to put FRR's interface in (must match setupIPVRFOnExternalFRR)
 //   - ipFamilies: Cluster IP family support (e.g., sets.New(utilnet.IPv4, utilnet.IPv6))
 //   - subnets: Subnets for the Docker network (e.g., "172.27.102.0/24" for IPv4, or both for dual-stack)
-func setupIPVRFExternalContainer(ictx infraapi.Context, container infraapi.ExternalContainer, networkName, vrfName string, vid int, ipFamilies sets.Set[utilnet.IPFamily], subnets ...string) (*evpnContainerInfo, error) {
-	info, err := createEVPNExternalContainer(ictx, container, networkName, ipFamilies, subnets)
+func setupIPVRFExternalContainer(ictx infraapi.Context, frrContainerName string, container infraapi.ExternalContainer, networkName, vrfName string, vid int, ipFamilies sets.Set[utilnet.IPFamily], subnets ...string) (*evpnContainerInfo, error) {
+	info, err := createEVPNExternalContainer(ictx, frrContainerName, container, networkName, ipFamilies, subnets)
 	if err != nil {
 		return nil, err
 	}
@@ -798,7 +805,7 @@ func setupIPVRFExternalContainer(ictx infraapi.Context, container infraapi.Exter
 	// Put FRR's interface in the VRF
 	// NOTE: keep_addr_on_down=1 is set at FRR container startup (in deploy_frr_external_container)
 	// to preserve IPv6 addresses during VRF assignment. See https://github.com/FRRouting/frr/issues/1666
-	frr := infraapi.ExternalContainer{Name: routerContainerName}
+	frr := infraapi.ExternalContainer{Name: frrContainerName}
 
 	frrCmds := [][]string{
 		{"ip", "link", "set", info.frrInterface, "master", vrfName},
@@ -1079,12 +1086,12 @@ func subnetOffsetIP(cidr string, offset int) string {
 // FRRConfiguration Utilities
 // =============================================================================
 
-func getExternalFRRIP(ipFamilySet sets.Set[utilnet.IPFamily]) (string, error) {
+func getExternalFRRIP(frrContainerName string, ipFamilySet sets.Set[utilnet.IPFamily]) (string, error) {
 	kindNetwork, err := infraprovider.Get().PrimaryNetwork()
 	if err != nil {
 		return "", err
 	}
-	frrNetIf, err := infraprovider.Get().GetExternalContainerNetworkInterface(infraapi.ExternalContainer{Name: routerContainerName}, kindNetwork)
+	frrNetIf, err := infraprovider.Get().GetExternalContainerNetworkInterface(infraapi.ExternalContainer{Name: frrContainerName}, kindNetwork)
 	if err != nil {
 		return "", err
 	}
@@ -1112,12 +1119,13 @@ func getExternalFRRIP(ipFamilySet sets.Set[utilnet.IPFamily]) (string, error) {
 //   - ictx: Infrastructure context for cleanup registration
 //   - name: Name of the FRRConfiguration CR
 //   - namespace: Namespace for the FRRConfiguration (typically frr-k8s-system)
-//   - asn: BGP Autonomous System Number (e.g., 64512)
+//   - localASN: BGP ASN for cluster-side routers in this CR
+//   - neighborASN: BGP ASN of the external FRR neighbor
 //   - neighborIP: IP address of the external FRR to peer with
 //   - labels: Labels to apply to the FRRConfiguration (used by RouteAdvertisements selector)
 func createFRRConfiguration(ictx infraapi.Context,
 	name, namespace string,
-	asn int,
+	localASN, neighborASN int,
 	neighborIP string,
 	labels map[string]string) error {
 
@@ -1130,6 +1138,24 @@ func createFRRConfiguration(ictx infraapi.Context,
 	// Generate FRRConfiguration YAML
 	// No toReceive needed - EVPN routes come via l2vpn evpn address-family
 	// and are imported via route-target matching in the VRF
+	isEBGP := localASN != neighborASN
+	rawConfigSection := ""
+	if isEBGP {
+		// For eBGP EVPN, inter-node routes transit through the external FRR peer and
+		// arrive with the local ASN in the AS_PATH, which BGP rejects as a loop.
+		// allowas-in must be configured via rawConfig because the FRRConfiguration CRD
+		// does not expose this field, and direct vtysh injection gets overwritten when
+		// frr-k8s reconciles.
+		rawConfigSection = fmt.Sprintf(`  raw:
+    priority: 10
+    rawConfig: |
+      router bgp %d
+       address-family l2vpn evpn
+        neighbor %s allowas-in
+       exit-address-family
+      !
+`, localASN, neighborIP)
+	}
 	yaml := fmt.Sprintf(`apiVersion: frrk8s.metallb.io/v1beta1
 kind: FRRConfiguration
 metadata:
@@ -1144,7 +1170,7 @@ metadata:
       - address: %s
         asn: %d
         disableMP: true
-`, name, namespace, labelsYAML, asn, neighborIP, asn)
+%s`, name, namespace, labelsYAML, localASN, neighborIP, neighborASN, rawConfigSection)
 
 	// Write to temp file
 	tmpFile, err := os.CreateTemp("", "frrconfig-*.yaml")
@@ -1215,7 +1241,9 @@ func runEVPNNetworkAndServers(
 	ipFamilySet sets.Set[utilnet.IPFamily],
 	networkSpec *udnv1.NetworkSpec,
 	bgpAlloc allocators.BGPAllocation,
-	bgpASN int,
+	externalASN int,
+	clusterASN int,
+	frrContainerName string,
 	bridgeName string,
 	vxlanName string,
 	vtepName string,
@@ -1228,27 +1256,26 @@ func runEVPNNetworkAndServers(
 	// Derive what to setup from networkSpec
 	hasMACVRF := networkSpec.EVPN != nil && networkSpec.EVPN.MACVRF != nil
 	hasIPVRF := networkSpec.EVPN != nil && networkSpec.EVPN.IPVRF != nil
+	isIBGP := externalASN == clusterASN
 
 	ipVRFAgnhostSubnets := matchCIDRStringsByIPFamilySet([]string{bgpAlloc.IPVRFSubnet, bgpAlloc.IPVRFSubnet6}, ipFamilySet)
 	vtepSubnets := matchCIDRStringsByIPFamilySet([]string{bgpAlloc.VTEPSubnet, bgpAlloc.VTEPSubnet6}, ipFamilySet)
 
-	// Extract subnets from networkSpec for MAC-VRF agnhost IP derivation
 	cudnSubnetsFromSpec := getNetworkSubnetsFromSpec(networkSpec)
 
-	externalFRRIP, err := getExternalFRRIP(ipFamilySet)
+	externalFRRIP, err := getExternalFRRIP(frrContainerName, ipFamilySet)
 	if err != nil {
 		return err
 	}
 
-	// attach BGP peer network to all nodes
 	nodeList, err := f.ClientSet.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to list nodes: %w", err)
 	}
 	nodeIPs := e2enode.CollectAddresses(nodeList, corev1.NodeInternalIP)
 
-	framework.Logf("Setting up EVPN bridge on external FRR")
-	err = setupEVPNBridgeOnExternalFRR(ictx, externalFRRIP, bridgeName, vxlanName)
+	framework.Logf("Setting up EVPN bridge on external FRR (%s)", frrContainerName)
+	err = setupEVPNBridgeOnExternalFRR(ictx, frrContainerName, externalFRRIP, bridgeName, vxlanName)
 	if err != nil {
 		return err
 	}
@@ -1258,47 +1285,66 @@ func runEVPNNetworkAndServers(
 		macVRFVID = bgpAlloc.MACVRFVID
 		framework.Logf("Allocated VIDs for external FRR: MAC-VRF VID=%d", macVRFVID)
 		framework.Logf("Setting up MAC-VRF on external FRR")
-		err = setupMACVRFOnExternalFRR(ictx, int(networkSpec.EVPN.MACVRF.VNI), macVRFVID, bridgeName, vxlanName)
+		err = setupMACVRFOnExternalFRR(ictx, frrContainerName, int(networkSpec.EVPN.MACVRF.VNI), macVRFVID, bridgeName, vxlanName)
 		if err != nil {
 			return err
 		}
 
 		framework.Logf("Creating MAC-VRF external container")
-		macVRFInfo, err := setupMACVRFExternalContainer(ictx, *macVRFContainer, macVRFNetworkName, bridgeName, macVRFVID, ipFamilySet, cudnSubnetsFromSpec, macVRFUseProxyDockerNetwork)
+		macVRFInfo, err := setupMACVRFExternalContainer(ictx, frrContainerName, *macVRFContainer, macVRFNetworkName, bridgeName, macVRFVID, ipFamilySet, cudnSubnetsFromSpec, macVRFUseProxyDockerNetwork)
 		if err != nil {
 			return err
 		}
 		populateExternalContainerIPs(macVRFContainer, macVRFInfo)
 	}
 
-	framework.Logf("Setting up EVPN BGP on external FRR")
-	err = setupEVPNBGPOnExternalFRR(ictx, bgpASN, nodeIPs)
+	framework.Logf("Setting up EVPN BGP on external FRR (%s)", frrContainerName)
+	err = setupEVPNBGPOnExternalFRR(ictx, frrContainerName, externalASN, nodeIPs, isIBGP)
 	if err != nil {
 		return err
 	}
 
+	if hasMACVRF && !isIBGP {
+		macVRFVNI := int(networkSpec.EVPN.MACVRF.VNI)
+		rt := fmt.Sprintf("%d:%d", clusterASN, macVRFVNI)
+		framework.Logf("Overriding MAC-VRF VNI %d RT on external FRR to %s (eBGP RT alignment)", macVRFVNI, rt)
+		frr := infraapi.ExternalContainer{Name: frrContainerName}
+		_, err = infraprovider.Get().ExecExternalContainerCommand(frr, vtyshCommand(
+			"configure terminal",
+			fmt.Sprintf("router bgp %d", externalASN),
+			"address-family l2vpn evpn",
+			fmt.Sprintf("vni %d", macVRFVNI),
+			fmt.Sprintf("rd %s", rt),
+			fmt.Sprintf("route-target import %s", rt),
+			fmt.Sprintf("route-target export %s", rt),
+			"exit-vni",
+			"exit-address-family",
+			"end",
+		))
+		if err != nil {
+			return fmt.Errorf("failed to set explicit MAC-VRF RT for eBGP: %w", err)
+		}
+	}
+
 	if hasIPVRF {
-		// Derive VRF name from VNI (unique per IP-VRF)
 		ipVRFName := fmt.Sprintf("vrf%d", networkSpec.EVPN.IPVRF.VNI)
 		ipVRFVID := bgpAlloc.IPVRFVID
 		framework.Logf("Allocated VIDs for external FRR: IP-VRF VID=%d", ipVRFVID)
 		framework.Logf("Setting up IP-VRF on external FRR")
-		err = setupIPVRFOnExternalFRR(ictx, ipVRFName, int(networkSpec.EVPN.IPVRF.VNI), ipVRFVID, bridgeName, vxlanName)
+		err = setupIPVRFOnExternalFRR(ictx, frrContainerName, ipVRFName, int(networkSpec.EVPN.IPVRF.VNI), ipVRFVID, bridgeName, vxlanName)
 		if err != nil {
 			return err
 		}
 
 		framework.Logf("Creating IP-VRF external container")
-		ipVRFInfo, err := setupIPVRFExternalContainer(ictx, *ipVRFContainer, ipVRFNetworkName, ipVRFName, ipVRFVID, ipFamilySet, ipVRFAgnhostSubnets...)
+		ipVRFInfo, err := setupIPVRFExternalContainer(ictx, frrContainerName, *ipVRFContainer, ipVRFNetworkName, ipVRFName, ipVRFVID, ipFamilySet, ipVRFAgnhostSubnets...)
 		if err != nil {
 			return err
 		}
 		populateExternalContainerIPs(ipVRFContainer, ipVRFInfo)
 
-		// Configure BGP AFTER agnhost so FRR's interface is in the VRF
-		// and has a connected route for the subnet we want to advertise
 		framework.Logf("Setting up IP-VRF BGP on external FRR")
-		err = setupIPVRFBGPOnExternalFRR(ictx, ipVRFName, bgpASN, int(networkSpec.EVPN.IPVRF.VNI), ipFamilySet, ipVRFAgnhostSubnets)
+		err = setupIPVRFBGPOnExternalFRR(ictx, frrContainerName, ipVRFName, externalASN, clusterASN, int(networkSpec.EVPN.IPVRF.VNI), ipFamilySet, ipVRFAgnhostSubnets)
 		if err != nil {
 			return err
 		}
@@ -1322,18 +1368,18 @@ func runEVPNNetworkAndServers(
 		return fmt.Errorf("VTEP %s did not become healthy: %w", vtepName, err)
 	}
 
-	// Update VTEP name in network spec
 	networkSpec.EVPN.VTEP = vtepName
 
 	framework.Logf("Creating FRRConfiguration for EVPN")
 	frrConfigLabels := map[string]string{"network": testName}
-	err = createFRRConfiguration(ictx, testName, deploymentconfig.Get().FRRK8sNamespace(), bgpASN, externalFRRIP, frrConfigLabels)
+	err = createFRRConfiguration(ictx, testName, deploymentconfig.Get().FRRK8sNamespace(), clusterASN, externalASN, externalFRRIP, frrConfigLabels)
 	if err != nil {
 		return err
 	}
 
 	return nil
 }
+
 
 // evpnType2MACIPNLRI is the FRR/BGP print form of a Type-2 (MAC/IP) EVPN route NLRI.
 func evpnType2MACIPNLRI(mac, hostIP string, fam utilnet.IPFamily) string {

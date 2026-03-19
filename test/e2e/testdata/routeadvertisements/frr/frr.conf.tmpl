@@ -13,26 +13,30 @@ log stdout debugging
 log syslog debugging
 log file /etc/frr/frr.log debugging
 {{ range .Routers -}}
-router bgp 64512 {{ if .VRF }}vrf {{ .VRF }}{{ end }}
+{{- $router := . -}}
+router bgp {{ .LocalASN }} {{ if .VRF }}vrf {{ .VRF }}{{ end }}
  no bgp default ipv4-unicast
  no bgp default ipv6-unicast
  no bgp network import-check
+ no bgp ebgp-requires-policy
 {{- range .NeighborsIPv4 }}
- neighbor {{ . }} remote-as 64512
+ neighbor {{ . }} remote-as {{ $router.NeighborASN }}
  # zebra has been observed to fail to start for unknown reasons,
  # reduce timers to try to minimize delay impact on tests
  neighbor {{ . }} timers connect 10
  neighbor {{ . }} timers 15 5
 {{- end }}
 {{- range .NeighborsIPv6 }}
- neighbor {{ . }} remote-as 64512
+ neighbor {{ . }} remote-as {{ $router.NeighborASN }}
  neighbor {{ . }} timers connect 10
  neighbor {{ . }} timers 15 5
 {{- end }}
 {{- if .NeighborsIPv4 }}
  address-family ipv4 unicast
 {{- range .NeighborsIPv4 }}
+{{- if eq $router.LocalASN $router.NeighborASN }}
   neighbor {{ . }} route-reflector-client
+{{- end }}
   neighbor {{ . }} activate
   neighbor {{ . }} next-hop-self 
 {{- end }}
@@ -44,7 +48,9 @@ router bgp 64512 {{ if .VRF }}vrf {{ .VRF }}{{ end }}
 {{- if .NeighborsIPv6 }}
  address-family ipv6 unicast
 {{- range .NeighborsIPv6 }}
+{{- if eq $router.LocalASN $router.NeighborASN }}
   neighbor {{ . }} route-reflector-client
+{{- end }}
   neighbor {{ . }} activate
   neighbor {{ . }} next-hop-self
 {{- end }}

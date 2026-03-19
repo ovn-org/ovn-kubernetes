@@ -1851,15 +1851,14 @@ deploy_ebgp_frr_external_container() {
 
   # Discover kind cluster node IPs to configure as BGP neighbors
   local node_ips_v4="" node_ips_v6=""
+  local v4 v6
   KIND_NODES=$(kind_get_nodes)
   for node in $KIND_NODES; do
     if [ "$PLATFORM_IPV4_SUPPORT" == true ]; then
-      local v4
       v4=$($OCI_BIN inspect -f '{{.NetworkSettings.Networks.kind.IPAddress}}' "$node") || return 1
       [ -n "$v4" ] && node_ips_v4="${node_ips_v4} ${v4}"
     fi
     if [ "$PLATFORM_IPV6_SUPPORT" == true ]; then
-      local v6
       v6=$($OCI_BIN inspect -f '{{.NetworkSettings.Networks.kind.GlobalIPv6Address}}' "$node") || return 1
       [ -n "$v6" ] && node_ips_v6="${node_ips_v6} ${v6}"
     fi
