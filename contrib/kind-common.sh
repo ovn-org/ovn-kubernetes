@@ -1943,7 +1943,7 @@ FEOF
   $OCI_BIN rm -f frr-ebgp 2>/dev/null || true
   $OCI_BIN run -d --privileged --network kind --rm --name frr-ebgp \
     --volume "${frr_conf_dir}:/etc/frr" \
-    quay.io/frrouting/frr:10.4.2
+    "${FRR_DEPLOYED_IMAGE}"
 
   if [ "$PLATFORM_IPV6_SUPPORT" == true ]; then
     $OCI_BIN exec frr-ebgp sysctl -w net.ipv6.conf.all.forwarding=1
