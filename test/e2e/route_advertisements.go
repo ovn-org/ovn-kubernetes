@@ -5,8 +5,8 @@ package e2e
 
 import (
 	"context"
-	"encoding/json"
 	"embed"
+	"encoding/json"
 	"fmt"
 	"math/rand"
 	"net"
@@ -1140,29 +1140,29 @@ var _ = ginkgo.Describe("BGP: Pod to external server when CUDN network is advert
 						},
 					},
 				},
-				&rav1.RouteAdvertisements{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "bgp-l3-ra",
-					},
-					Spec: rav1.RouteAdvertisementsSpec{
-						NetworkSelectors: apitypes.NetworkSelectors{
-							apitypes.NetworkSelector{
-								NetworkSelectionType: apitypes.ClusterUserDefinedNetworks,
-								ClusterUserDefinedNetworkSelector: &apitypes.ClusterUserDefinedNetworkSelector{
-									NetworkSelector: metav1.LabelSelector{
-										MatchLabels: map[string]string{"bgp-l3": ""},
-									},
+			&rav1.RouteAdvertisements{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "bgp-l3-ra",
+				},
+				Spec: rav1.RouteAdvertisementsSpec{
+					NetworkSelectors: apitypes.NetworkSelectors{
+						apitypes.NetworkSelector{
+							NetworkSelectionType: apitypes.ClusterUserDefinedNetworks,
+							ClusterUserDefinedNetworkSelector: &apitypes.ClusterUserDefinedNetworkSelector{
+								NetworkSelector: metav1.LabelSelector{
+									MatchLabels: map[string]string{"bgp-l3": ""},
 								},
 							},
 						},
-						NodeSelector:             metav1.LabelSelector{},
-						FRRConfigurationSelector: metav1.LabelSelector{},
-						Advertisements: []rav1.AdvertisementType{
-							rav1.PodNetwork,
-						},
+					},
+					NodeSelector:             metav1.LabelSelector{},
+					FRRConfigurationSelector: metav1.LabelSelector{},
+					Advertisements: []rav1.AdvertisementType{
+						rav1.PodNetwork,
 					},
 				},
-			),
+			},
+		),
 			ginkgo.Entry("layer3 no-overlay SNAT enabled unmanaged routing", feature.NoOverlay,
 				&udnv1.ClusterUserDefinedNetwork{
 					ObjectMeta: metav1.ObjectMeta{
@@ -1281,32 +1281,32 @@ var _ = ginkgo.Describe("BGP: Pod to external server when CUDN network is advert
 						},
 					},
 				},
-				&rav1.RouteAdvertisements{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "bgp-l2-ra",
-					},
-					Spec: rav1.RouteAdvertisementsSpec{
-						NetworkSelectors: apitypes.NetworkSelectors{
-							apitypes.NetworkSelector{
-								NetworkSelectionType: apitypes.ClusterUserDefinedNetworks,
-								ClusterUserDefinedNetworkSelector: &apitypes.ClusterUserDefinedNetworkSelector{
-									NetworkSelector: metav1.LabelSelector{
-										MatchLabels: map[string]string{"bgp-l2": ""},
-									},
+			&rav1.RouteAdvertisements{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "bgp-l2-ra",
+				},
+				Spec: rav1.RouteAdvertisementsSpec{
+					NetworkSelectors: apitypes.NetworkSelectors{
+						apitypes.NetworkSelector{
+							NetworkSelectionType: apitypes.ClusterUserDefinedNetworks,
+							ClusterUserDefinedNetworkSelector: &apitypes.ClusterUserDefinedNetworkSelector{
+								NetworkSelector: metav1.LabelSelector{
+									MatchLabels: map[string]string{"bgp-l2": ""},
 								},
 							},
 						},
-						NodeSelector:             metav1.LabelSelector{},
-						FRRConfigurationSelector: metav1.LabelSelector{},
-						Advertisements: []rav1.AdvertisementType{
-							rav1.PodNetwork,
-						},
+					},
+					NodeSelector:             metav1.LabelSelector{},
+					FRRConfigurationSelector: metav1.LabelSelector{},
+					Advertisements: []rav1.AdvertisementType{
+						rav1.PodNetwork,
 					},
 				},
-			),
-		)
-	},
-	bgpPeeringModes,
+			},
+		),
+	)
+},
+bgpPeeringModes,
 	)
 })
 
@@ -2613,7 +2613,6 @@ var _ = ginkgo.Describe("BGP: isolation", feature.RouteAdvertisements, func() {
 
 var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdvertisements, func() {
 
-
 	// configuration helper to setup infra
 	configureNetworkWithInfra := func(
 		f *framework.Framework,
@@ -2679,7 +2678,6 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 				bridgeName = "br" + testName
 				vxlanName = "vx" + testName
 			}
-
 
 			macVRFContainer := infraapi.ExternalContainer{
 				Name:    networkName + "-" + frrContainerName + "-macvrf-agnhost",
@@ -3439,7 +3437,6 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 
 						if peering.externalASN == peering.clusterASN {
 							ginkgo.Describe("When there is other network", func() {
-
 
 								overlappingSpecGen := func(_ string, _ string, bgpAlloc allocators.BGPAllocation) *udnv1.NetworkSpec {
 									spec := testNetworkSpec.DeepCopy()
