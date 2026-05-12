@@ -1721,9 +1721,17 @@ fi\
     # Neighbors are already configured by demo.sh; extract them from the running config.
     # This is cluster-level infrastructure shared across all EVPN tests; configured once
     # at install time so individual tests don't need to manage it.
-    # Wait for FRR daemons to be ready ("Not all daemons are up, cannot write config").
+    # Ensure vtysh.conf exists: demo.sh volume-mounts the frr config dir as /etc/frr,
+    # hiding the image's built-in vtysh.conf.  Without it vtysh prints a harmless warning
+    # but we create it here to keep output clean, matching deploy_bgp_external_server.
+    $OCI_BIN exec frr sh -c \
+      "[ -f /etc/frr/vtysh.conf ] || echo 'service integrated-vtysh-config' > /etc/frr/vtysh.conf"
+    # Wait for FRR daemons to be ready. vtysh exits 0 even while bgpd is still loading
+    # frr.conf (EAGAIN / "processing failure: 11"), so check the output too.
     local attempts=0 daemon_status
-    while ! daemon_status=$($OCI_BIN exec "${FRR_CONTAINER_NAME}" vtysh -c "show daemons" 2>&1); do
+    while true; do
+      daemon_status=$($OCI_BIN exec "${FRR_CONTAINER_NAME}" vtysh -c "show daemons" 2>&1)
+      [[ $? -eq 0 && ! "$daemon_status" =~ "processing failure" ]] && break
       if (( ++attempts > 30 )); then
         echo "error: FRR daemons did not become ready after 30 attempts"
         echo "last daemon status: $daemon_status"
