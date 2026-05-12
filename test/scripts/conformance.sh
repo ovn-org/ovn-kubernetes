@@ -7,7 +7,7 @@ set -ex
 
 # setting this env prevents ginkgo e2e from trying to run provider setup
 export KUBERNETES_CONFORMANCE_TEST=y
-export KUBECONFIG=${KUBECONFIG:-${HOME}/ovn.conf}
+export KUBECONFIG="${KUBECONFIG:-${HOME}/${KIND_CLUSTER_NAME:-ovn}.conf}"
 
 # setting these is required to make RuntimeClass tests work ... :/
 export KUBE_CONTAINER_RUNTIME=remote

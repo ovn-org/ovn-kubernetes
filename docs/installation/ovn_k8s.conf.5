@@ -55,7 +55,7 @@ api server, by default, listens on 8443. E.g., https://masterhost:8443"
 .TP
 \fBtoken\fR=
 The Kubernetes API authentication token permits the ovn plugin to communicate with the
-api server. On kubernetes, the token can be generated on the cluster master as follows:
+api server. On kubernetes, the token can be generated on the control-plane node as follows:
 
 # kubectl create serviceaccount ovn
 
@@ -63,7 +63,7 @@ api server. On kubernetes, the token can be generated on the cluster master as f
 
 # export TOKEN=$(kubectl describe secret $(kubectl get secrets | grep ovn | cut -f1 -d ' ') | grep -E '^token' | cut -f2 -d':' | tr -d '\t')
 
-On openshift, the token can be generated on the cluster master as follows:
+On openshift, the token can be generated on the control-plane node as follows:
 
 # oc create serviceaccount ovn
 

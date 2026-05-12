@@ -8,7 +8,7 @@ If your goal is to set up an environment quickly or to set up a development envi
 
 ### Overview
 
-The environment consists of 4 libvirt/qemu virtual machines, all deployed with Rocky Linux 8 or CentOS 8. `node1` will serve as the sole master node and nodes `node2` and `node3` as the worker nodes. `gw1` will be the default gateway for the cluster via the `Isolated Network`. It will also host an HTTP registry to store the OVN-Kubernetes images.
+The environment consists of 4 libvirt/qemu virtual machines, all deployed with Rocky Linux 8 or CentOS 8. `node1` will serve as the sole control-plane node and nodes `node2` and `node3` as the worker nodes. `gw1` will be the default gateway for the cluster via the `Isolated Network`. It will also host an HTTP registry to store the OVN-Kubernetes images.
 
 ~~~
        to hypervisor         to hypervisor         to hypervisor
@@ -322,9 +322,9 @@ EOF
 sudo sysctl --system
 ~~~
 
-Then, install cri-o. The kubic OBS repository older docs reference has been retired; modern cri-o ships from `pkgs.k8s.io`. Pin to the latest cri-o stable stream that's actually published (cri-o stable streams typically trail upstream Kubernetes by one or two minor versions, so they can be older than the `kubeadm` you install below):
+Install the stable CRI-O version corresponding to the Kubernetes release (v1.36)
 ~~~
-CRIO_VERSION=v1.32
+CRIO_VERSION=v1.36
 cat <<EOF > /etc/yum.repos.d/cri-o.repo
 [cri-o]
 name=CRI-O
@@ -384,11 +384,11 @@ sudo systemctl enable --now kubelet
 
 ## Deploying a cluster with OVN-Kubernetes
 
-Execute the following instructions **only** on the master node, `node1`.
+Execute the following instructions **only** on the control-plane node, `node1`.
 
 ### Install instructions for kubeadm
 
-Deploy on the master node `node1`. Use CIDRs that match the OVN-Kubernetes Helm chart defaults, and skip the kube-proxy addon (OVN-Kubernetes provides its own service implementation):
+Deploy on the control-plane node `node1`:
 ~~~
 kubeadm init \
     --pod-network-cidr=10.244.0.0/16 \
@@ -418,53 +418,29 @@ Now, deploy OVN-Kubernetes - see below.
 
 ### Deploying OVN-Kubernetes on node1
 
-Several of the next sub-steps — **install build dependencies, install Go, build the OVN-Kubernetes image, and push it to the local registry** — are **optional**: they're only needed if you want to build a custom OVN-Kubernetes image and serve it from `gw1`'s registry. The **clone step in between is required either way**, because `helm install` runs from the chart directory inside the clone. If you're happy using the public `ghcr.io/ovn-kubernetes/ovn-kubernetes/ovn-kube-ubuntu:master` image, run only the clone step below, then jump to the `helm install` step further down and adjust `--set global.image.repository` / `--set global.image.tag` accordingly.
+Several of the next sub-steps — **install build dependencies, build the OVN-Kubernetes image, and push it to the local registry** — are **optional**: they're only needed if you want to build a custom OVN-Kubernetes image and serve it from `gw1`'s registry. The **clone step in between is required either way**, because `helm install` runs from the chart directory inside the clone. If you're happy using the public `ghcr.io/ovn-kubernetes/ovn-kubernetes/ovn-kube-ubuntu:master` image, run only the clone step below, then jump to the `helm install` step further down and adjust `--set global.image.repository` / `--set global.image.tag` accordingly.
 
-Install build dependencies and create a softlink for `pip` to `pip3`:
+Install build dependencies:
 ~~~
-yum install git python3-pip make podman buildah -y
-ln -s $(which pip3) /usr/local/bin/pip
-~~~
-
-Install golang, for further details see [https://golang.org/doc/install](https://golang.org/doc/install):
-~~~
-curl -L -O https://golang.org/dl/go1.17.linux-amd64.tar.gz
-rm -rf /usr/local/go && tar -C /usr/local -xzf go1.17.linux-amd64.tar.gz
-echo "export PATH=$PATH:/usr/local/go/bin" >> ~/.bashrc
-source ~/.bashrc
-go version
+yum install git make podman -y
 ~~~
 
-Now, clone the OVN-Kubernetes repository:
+Clone the OVN-Kubernetes repository:
 ~~~
-yum install -y git
 mkdir -p $HOME/work/src/github.com/ovn-kubernetes
 cd $HOME/work/src/github.com/ovn-kubernetes
 git clone https://github.com/ovn-kubernetes/ovn-kubernetes
+~~~
+
+Build the latest ovn-daemonset image and push it to the registry. The Fedora image is hermetic — Go compilation happens inside the builder stage, so no local Go install is needed:
+~~~
 cd $HOME/work/src/github.com/ovn-kubernetes/ovn-kubernetes/dist/images
-~~~
-
-Build the latest ovn-daemonset image and push it to the registry. Prepare the binaries:
-~~~
-# Build ovn docker image
-pushd ../../go-controller
-make
-popd
-
-# Build ovn kube image
-# Find all built executables, but ignore the 'windows' directory if it exists
-find ../../go-controller/_output/go/bin/ -maxdepth 1 -type f -exec cp -f {} . \;
-echo "ref: $(git rev-parse  --symbolic-full-name HEAD)  commit: $(git rev-parse  HEAD)" > git_info
-~~~
-
-Now, build and push the image with:
-~~~
 OVN_IMAGE=192.168.123.254:5000/ovn-daemonset-fedora:latest
-buildah bud -t $OVN_IMAGE -f Dockerfile.fedora .
+make OCI_BIN=podman IMAGE=$OVN_IMAGE fedora-image
 podman push $OVN_IMAGE
 ~~~
 
-Before starting OVN-Kubernetes, work around an issue where `br-int` is added by OVN but the necessary files in `/var/run/openvswitch` are not created until Open vSwitch is restarted (see [Issues / workarounds](#issues--workarounds)). This only matters on the master, so pre-create `br-int` there:
+Next, pre-create `br-int` to work around an issue where OVN adds it but the necessary files in /var/run/openvswitch are not created until Open vSwitch is restarted - [see here for more details](#issues-workarounds). This only happens on the control-plane node:
 ~~~
 ovs-vsctl add-br br-int
 ~~~
@@ -671,7 +647,7 @@ kubeadm join 192.168.123.10:6443 --token <...> \
 
 ## kubeadm reset instructions
 
-If you must reset your master and worker nodes, the following commands can be used to reset the lab environment. Run this on each node and then ideally reboot the node right after:
+If you must reset your control-plane and worker nodes, the following commands can be used to reset the lab environment. Run this on each node and then ideally reboot the node right after:
 ~~~
 IF2=enp7s0
 echo "y" | kubeadm reset

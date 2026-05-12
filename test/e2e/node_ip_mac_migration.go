@@ -112,9 +112,8 @@ spec:
 			workerNodes, err = e2enode.GetReadySchedulableNodes(context.TODO(), f.ClientSet)
 			g.Expect(err).NotTo(HaveOccurred())
 			e2enode.Filter(workerNodes, func(node v1.Node) bool {
-				_, ok1 := node.Labels["node-role.kubernetes.io/control-plane"]
-				_, ok2 := node.Labels["node-role.kubernetes.io/master"]
-				return !ok1 && !ok2
+				_, ok := node.Labels["node-role.kubernetes.io/control-plane"]
+				return !ok
 			})
 			g.Expect(len(workerNodes.Items)).Should(BeNumerically(">=", 2))
 		}, pollingTimeout, pollingInterval).Should(Succeed())

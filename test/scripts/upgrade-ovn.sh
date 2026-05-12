@@ -4,10 +4,9 @@
 
 set -ex
 
-export KUBECONFIG=${KUBECONFIG:-${HOME}/ovn.conf}
-export OVN_IMAGE_FAMILY=${OVN_IMAGE_FAMILY:-fedora}
-export OVN_IMAGE=${OVN_IMAGE:-ovn-daemonset-${OVN_IMAGE_FAMILY}:pr}
 export KIND_CLUSTER_NAME=${KIND_CLUSTER_NAME:-ovn}
+export KUBECONFIG="${KUBECONFIG:-${HOME}/${KIND_CLUSTER_NAME}.conf}"
+export OVN_IMAGE=${OVN_IMAGE:-ovn-daemonset-fedora:pr}
 
 SCRIPT_DIR="$(cd -- "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 

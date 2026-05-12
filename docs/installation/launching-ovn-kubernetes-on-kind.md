@@ -8,7 +8,7 @@ KIND (Kubernetes in Docker) deployment of OVN kubernetes is a fast and easy mean
 - Docker run time or podman
 - [KIND](https://kubernetes.io/docs/setup/learning-environment/kind/)
    - Installation instructions can be found at https://github.com/kubernetes-sigs/kind#installation-and-usage. 
-   - NOTE: The [ovn-kubernetes/contrib/kind.sh](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/master/contrib/kind.sh) and [ovn-kubernetes/contrib/kind.yaml.j2](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/master/contrib/kind.yaml.j2) files provision port 11337. If firewalld is enabled, this port will need to be unblocked:
+   - NOTE: The OVN-Kubernetes [ovn-kubernetes/contrib/kind.sh](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/master/contrib/kind.sh) and [ovn-kubernetes/contrib/kind.yaml.j2](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/master/contrib/kind.yaml.j2) files provision port 11337. If firewalld is enabled, this port will need to be unblocked:
 
       ```
       sudo firewall-cmd --permanent --add-port=11337/tcp; sudo firewall-cmd --reload
@@ -19,7 +19,7 @@ KIND (Kubernetes in Docker) deployment of OVN kubernetes is a fast and easy mean
 - jq
 - openssl
 - openvswitch
-- Go 1.23.0 or above
+- Go 1.26.0 or above
 - For podman users: skopeo
 
 For OVN kubernetes KIND deployment, use the `kind.sh` script (a symlink to `kind-helm.sh`, which deploys OVN-Kubernetes via Helm).
@@ -44,14 +44,14 @@ $ popd
 Build the image for fedora and launch the KIND Deployment
 
 ```
-$ pushd dist/images
-$ make fedora-image
-$ popd
+pushd dist/images
+make fedora-image
+popd
 
-$ pushd contrib
-$ export KUBECONFIG=${HOME}/ovn.conf
-$ ./kind.sh
-$ popd
+pushd contrib
+export KUBECONFIG=${HOME}/ovn.conf
+./kind.sh
+popd
 ```
 
 ### Run the KIND deployment with podman
@@ -93,10 +93,10 @@ This will launch a KIND deployment. By default, the cluster is named `ovn`.
 
 ```
 $ kubectl get nodes
-NAME                STATUS   ROLES    AGE     VERSION
-ovn-control-plane   Ready    master   5h13m   v1.16.4
-ovn-worker          Ready    <none>   5h12m   v1.16.4
-ovn-worker2         Ready    <none>   5h12m   v1.16.4
+NAME                STATUS   ROLES           AGE     VERSION
+ovn-control-plane   Ready    control-plane   5h13m   v1.36.4
+ovn-worker          Ready    <none>          5h12m   v1.36.4
+ovn-worker2         Ready    <none>          5h12m   v1.36.4
 
 $ kubectl get pods --all-namespaces
 NAMESPACE            NAME                                        READY   STATUS    RESTARTS   AGE
@@ -345,7 +345,7 @@ the cluster:
 ```
 :
 Creating cluster "ovn" ...
- ✓ Ensuring node image (kindest/node:v1.18.2) 🖼
+ ✓ Ensuring node image (kindest/node:v1.36.4) 🖼
  ✓ Preparing nodes 📦 📦 📦
  ✓ Writing configuration 📜
  ✓ Starting control-plane 🕹️
@@ -387,7 +387,7 @@ Once `kind.sh` completes, setup kube config file:
 ```
 $ cp ~/ovn.conf ~/.kube/config
 -- OR --
-$ KUBECONFIG=~/ovn.conf
+export KUBECONFIG=~/ovn.conf
 ```
 
 Once testing is complete, to tear down the KIND deployment:
@@ -413,29 +413,18 @@ Kubernetes release to test against. Kubernetes is being installed below using
 OVN-Kubernetes KIND script, however to test, an equivalent version of `kubectl`
 needs to be installed.
 
-First determine what version of `kubectl` is currently being used and save it:
-
-```
-$ which kubectl
-/usr/bin/kubectl
-$ kubectl version --client
-Client Version: version.Info{Major:"1", Minor:"28", GitVersion:"v1.17.3", GitCommit:"06ad960bfd03b39c8310aaf92d1e7c12ce618213", GitTreeState:"clean", BuildDate:"2020-02-11T18:14:22Z", GoVersion:"go1.13.6", Compiler:"gc", Platform:"linux/amd64"}
-sudo mv /usr/bin/kubectl /usr/bin/kubectl-v1.17.3
-sudo ln -s /usr/bin/kubectl-v1.17.3 /usr/bin/kubectl
-```
-
-Download and install latest version of `kubectl`:
+Download and install the matching version of `kubectl` into `/usr/local/bin`
+(this takes precedence over any distro-packaged version without modifying it):
 
 ```
 $ K8S_VERSION=v1.36.4
-$ curl -LO https://storage.googleapis.com/kubernetes-release/release/$K8S_VERSION/bin/linux/amd64/kubectl
+$ ARCH=$(case $(uname -m) in x86_64) echo amd64;; aarch64) echo arm64;; esac)
+$ curl -LO https://storage.googleapis.com/kubernetes-release/release/$K8S_VERSION/bin/linux/${ARCH}/kubectl
 $ chmod +x kubectl
-$ sudo mv kubectl /usr/bin/kubectl-$K8S_VERSION
-$ sudo rm /usr/bin/kubectl
-$ sudo ln -s /usr/bin/kubectl-$K8S_VERSION /usr/bin/kubectl
+$ sudo mv kubectl /usr/local/bin/kubectl
 $ kubectl version --client
-Client Version: v1.32.3
-Kustomize Version: v5.0.4-0.20230601165947-6ce0bf390ce3
+Client Version: v1.36.4
+Kustomize Version: v5.4.0
 ```
 
 ### Docker Changes For Dual-stack
@@ -548,10 +537,10 @@ completely:
 
 ```
 $ kubectl get nodes
-NAME                STATUS     ROLES    AGE   VERSION
-ovn-control-plane   NotReady   master   94s   v1.18.0
-ovn-worker          NotReady   <none>   61s   v1.18.0
-ovn-worker2         NotReady   <none>   62s   v1.18.0
+NAME                STATUS     ROLES           AGE   VERSION
+ovn-control-plane   NotReady   control-plane   94s   v1.36.4
+ovn-worker          NotReady   <none>          61s   v1.36.4
+ovn-worker2         NotReady   <none>          62s   v1.36.4
 
 $ kubectl get pods -o wide --all-namespaces
 NAMESPACE          NAME                                      READY STATUS   RESTARTS AGE    IP          NODE

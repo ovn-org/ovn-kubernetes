@@ -6,7 +6,7 @@
 set -euo pipefail
 
 # Set default values
-export KUBECONFIG="${KUBECONFIG:-${HOME}/ovn.conf}"
+export KUBECONFIG="${KUBECONFIG:-${HOME}/${KIND_CLUSTER_NAME:-ovn}.conf}"
 export OCI_BIN="${KIND_EXPERIMENTAL_PROVIDER:-docker}"
 export TFT_TEST_IMAGE="ghcr.io/ovn-kubernetes/kubernetes-traffic-flow-tests:latest"
 export TRAFFIC_FLOW_TESTS_DIRNAME="kubernetes-traffic-flow-tests"

@@ -1,35 +1,22 @@
-# Running CI Locally
+# Running Tests Locally
 
-This section describes how to run CI tests on a local machine. This may be
-useful for expanding the CI test coverage or testing a private fix before
-creating a pull request.
+This section describes how to run the project test suite on a local machine.
+This is useful for validating changes, expanding test coverage, or verifying
+a fix before creating a pull request.
 
 ## Download and Build Kubernetes Components
 
 ### Go Version
 
-Older versions of Kubernetes do not build with newer versions of Go,
-specifically Kubernetes v1.16.4 doesn't build with Go version 1.13.x. If this is
-a version of Kubernetes that needs to be tested with, as a workaround, Go
-version 1.12.1 can be downloaded to a local directory and the $PATH variable
-updated only where kubernetes is being built.
+The project requires a Go version matching the one declared in `go.mod`.
+See [go.dev/doc/install](https://go.dev/doc/install) for installation
+instructions.
 
-```
-$ go version
-go version go1.13.8 linux/amd64
-
-$ mkdir -p /home/$USER/src/golang/go1-12-1/; cd /home/$USER/src/golang/go1-12-1/
-$ wget https://dl.google.com/go/go1.12.1.linux-amd64.tar.gz
-$ tar -xzf go1.12.1.linux-amd64.tar.gz
-$ PATH=/home/$USER/src/golang/go1-12-1/go/bin:$GOPATH/src/k8s.io/kubernetes/_output/local/bin/linux/amd64:$PATH
-```
-
-### Download and Build Kubernetes Components (E2E Tests, ginkgo, kubectl):
+### Download Kubernetes Components (E2E Tests, ginkgo, kubectl):
 
 Determine which version of Kubernetes is currently used in CI (See
 [ovn-kubernetes/.github/workflows/test.yml](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/master/.github/workflows/test.yml))
-and set the environmental variable `K8S_VERSION` to the same value. Also make sure to export a GOPATH which points to
-your go directory with `export GOPATH=(...)`.
+and set the environmental variable `K8S_VERSION` to the same value.
 
 ```
 K8S_VERSION=v1.36.4
@@ -38,19 +25,17 @@ pushd $GOPATH/src/k8s.io/kubernetes/
 make WHAT="test/e2e/e2e.test vendor/github.com/onsi/ginkgo/ginkgo cmd/kubectl"
 rm -rf .git
 
-sudo cp _output/local/go/bin/e2e.test /usr/local/bin/.
-sudo cp _output/local/go/bin/kubectl /usr/local/bin/kubectl-$K8S_VERSION
-sudo ln -s /usr/local/bin/kubectl-$K8S_VERSION /usr/local/bin/kubectl
-cp _output/local/go/bin/ginkgo /usr/local/bin/.
-popd
-```
+# Install kubectl
+curl -sL https://dl.k8s.io/${K8S_VERSION}/kubernetes-client-linux-${ARCH}.tar.gz \
+  | sudo tar xvz -C /usr/local/bin kubernetes/client/bin/kubectl --strip-components 3
 
-If you have any failures during the build, verify $PATH has been updated to
-point to correct GO version. Also may need to change settings on some of the
-generated binaries. For example:
-
-```
-chmod +x $GOPATH/src/k8s.io/kubernetes/_output/bin/deepcopy-gen
+# Install e2e test binary and ginkgo
+curl -LO https://dl.k8s.io/${K8S_VERSION}/kubernetes-test-linux-${ARCH}.tar.gz
+tar xvzf kubernetes-test-linux-${ARCH}.tar.gz
+sudo mv kubernetes/test/bin/e2e.test /usr/local/bin/e2e.test
+sudo mv kubernetes/test/bin/ginkgo /usr/local/bin/ginkgo
+rm kubernetes-test-linux-${ARCH}.tar.gz
+rm -rf kubernetes
 ```
 
 ## Export environment variables
@@ -119,7 +104,7 @@ To run the tests locally, run a KIND deployment as described above. The E2E
 tests look for the kube config file in a special location, so make a copy:
 
 ```
-cp ~/ovn.conf ~/.kube/kind-config-kind
+cp "${KUBECONFIG:-${HOME}/${KIND_CLUSTER_NAME:-ovn}.conf}" ~/.kube/kind-config-kind
 ```
 
 To run the desired shard, first make sure that the necessary environment variables are exported (see section above).
@@ -156,15 +141,15 @@ $ make shard-test WHAT="should enforce egress policy allowing traffic to a serve
 $ popd
 ```
 
-As a reminder, shards use the [E2E framework](https://github.com/kubernetes/community/blob/master/contributors/devel/sig-testing/e2e-tests.md). The value of `WHAT=` will be used to modify the `--focus` parameter. Individual tests can be retrieved from [https://github.com/kubernetes/kubernetes/tree/master/test/e2e](https://github.com/kubernetes/kubernetes/tree/master/test/e2e). For network tests, one could run:
+As a reminder, shards use the [E2E framework](https://github.com/kubernetes/community/blob/master/contributors/devel/sig-testing/e2e-tests.md). The value of `WHAT=` will be used to modify the `--focus` parameter. Individual tests can be retrieved from [https://github.com/kubernetes/kubernetes/tree/master/test/e2e](https://github.com/kubernetes/kubernetes/tree/master/test/e2e). You can browse test names on GitHub or, if you have a local clone of the Kubernetes source, run:
 ~~~
-grep ginkgo.It $GOPATH/src/k8s.io/kubernetes/test/e2e/network/ -Ri
+grep -Ri ginkgo.It $GOPATH/src/k8s.io/kubernetes/test/e2e/network/
 ~~~
 
 For example:
 ~~~
-# grep ginkgo.It $GOPATH/src/k8s.io/kubernetes/test/e2e/network/ -Ri | head -1
-/root/go/src/k8s.io/kubernetes/test/e2e/network/conntrack.go:	ginkgo.It("should be able to preserve UDP traffic when server pod cycles for a NodePort service", func() {
+# From https://github.com/kubernetes/kubernetes/blob/master/test/e2e/network/conntrack.go
+# ginkgo.It("should be able to preserve UDP traffic when server pod cycles for a NodePort service", func() {
 # make shard-test WHAT="should enforce policy to allow traffic from pods within server namespace based on PodSelector"
 (...)
 + case "$SHARD" in

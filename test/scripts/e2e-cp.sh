@@ -7,7 +7,7 @@ set -ex
 
 # setting this env prevents ginkgo e2e from trying to run provider setup
 export KUBERNETES_CONFORMANCE_TEST=y
-export KUBECONFIG=${KUBECONFIG:-${HOME}/ovn.conf}
+export KUBECONFIG="${KUBECONFIG:-${HOME}/${KIND_CLUSTER_NAME:-ovn}.conf}"
 
 # Skip tests which are not IPv6 ready yet (see description of https://github.com/ovn-kubernetes/ovn-kubernetes/pull/2276)
 # (Note that netflow v5 is IPv4 only)
@@ -310,7 +310,7 @@ pushd e2e
 
 go mod download
 
-if [ "$ENABLE_EVPN" = true ] && [[ "${WHAT}" != "${KV_LIVE_MIGRATION_TESTS}"* ]]; then
+if [ "$ENABLE_EVPN" = true ]; then
   # EVPN tests are parallel-safe (unique per-test resource names, randomized
   # subnets). Use the ginkgo CLI so that -procs=3 spawns 3 coordinated worker
   # processes — one per DescribeTable entry.  go test cannot drive Ginkgo

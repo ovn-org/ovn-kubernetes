@@ -124,20 +124,14 @@ var _ = ginkgo.Describe("Node Shutdown and Startup", ginkgo.Serial, func() {
 	})
 })
 
-// isControlPlaneNode checks if a node is a control plane (master) node
+// isControlPlaneNode checks if a node is a control plane node
 func isControlPlaneNode(node corev1.Node) bool {
-	// Check for common control plane labels and taints
-	if _, exists := node.Labels["node-role.kubernetes.io/master"]; exists {
-		return true
-	}
 	if _, exists := node.Labels["node-role.kubernetes.io/control-plane"]; exists {
 		return true
 	}
 
-	// Check for control plane taints
 	for _, taint := range node.Spec.Taints {
-		if taint.Key == "node-role.kubernetes.io/master" ||
-			taint.Key == "node-role.kubernetes.io/control-plane" {
+		if taint.Key == "node-role.kubernetes.io/control-plane" {
 			return true
 		}
 	}

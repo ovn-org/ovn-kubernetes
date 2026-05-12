@@ -55,10 +55,10 @@ in a Dual-Stack kind cluster.
 
 ```
 $ kubectl get nodes
-NAME                STATUS   ROLES               
-ovn-control-plane   Ready    control-plane,master
-ovn-worker          Ready    <none>              
-ovn-worker2         Ready    <none>              
+NAME                STATUS   ROLES
+ovn-control-plane   Ready    control-plane
+ovn-worker          Ready    <none>
+ovn-worker2         Ready    <none>
 ```
 
 ```
