@@ -1385,8 +1385,11 @@ func (c *Controller) ReconcileRouteAdvertisements(raName string) error {
 	ra, err := c.raLister.Get(raName)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
-			// RA not found (likely a delete event) - fall back to requeueing all no-overlay/EVPN CUDNs
-			// since we can't determine which CUDNs were selected by the deleted RA
+			// On RA deletion the object is gone, so its selectors are unavailable.
+			// Requeue all no-overlay/EVPN CUDNs because any of them may have depended on
+			// the deleted RA. For unmanaged no-overlay, this also lets a CUDN previously
+			// blocked by an unaccepted RA become accepted when no remaining RA selects it
+			// and advertises PodNetwork.
 			klog.V(4).InfoS("RouteAdvertisements not found, re-queueing all CUDNs with no-overlay or EVPN transport", "ra", raName)
 			for _, cudn := range cudns {
 				transport := cudn.Spec.Network.GetTransport()
@@ -1405,7 +1408,7 @@ func (c *Controller) ReconcileRouteAdvertisements(raName string) error {
 	for _, cudn := range cudns {
 		transport := cudn.Spec.Network.GetTransport()
 
-		// Only consider CUDNs with no-overlay or EVPN transport (both require RouteAdvertisements)
+		// Only consider CUDNs with no-overlay or EVPN transport.
 		if transport != userdefinednetworkv1.TransportOptionNoOverlay && transport != userdefinednetworkv1.TransportOptionEVPN {
 			continue
 		}

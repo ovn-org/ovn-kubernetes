@@ -31,6 +31,7 @@ import (
 	ovncnitypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	ratypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1"
+	rainformer "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/informers/externalversions/routeadvertisements/v1"
 	apitypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/types"
 	udnv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1"
 	udnclient "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/clientset/versioned"
@@ -92,9 +93,15 @@ var _ = Describe("User Defined Network Controller", func() {
 		if util.IsEVPNEnabled() {
 			vtepInformer = f.VTEPInformer()
 		}
+
+		var raInformer rainformer.RouteAdvertisementsInformer
+		if util.IsRouteAdvertisementsEnabled() {
+			raInformer = f.RouteAdvertisementsInformer()
+		}
+
 		return New(cs.NetworkAttchDefClient, f.NADInformer(),
 			cs.UserDefinedNetworkClient, f.UserDefinedNetworkInformer(), f.ClusterUserDefinedNetworkInformer(),
-			renderNADStub, networkManager.Interface(), f.PodCoreInformer(), f.NamespaceInformer(), vtepInformer, f.RouteAdvertisementsInformer(), nil,
+			renderNADStub, networkManager.Interface(), f.PodCoreInformer(), f.NamespaceInformer(), vtepInformer, raInformer, nil,
 		)
 	}
 
@@ -115,9 +122,13 @@ var _ = Describe("User Defined Network Controller", func() {
 		if util.IsEVPNEnabled() {
 			vtepInformer = f.VTEPInformer()
 		}
+		var raInformer rainformer.RouteAdvertisementsInformer
+		if util.IsRouteAdvertisementsEnabled() {
+			raInformer = f.RouteAdvertisementsInformer()
+		}
 		return New(cs.NetworkAttchDefClient, f.NADInformer(),
 			cs.UserDefinedNetworkClient, f.UserDefinedNetworkInformer(), f.ClusterUserDefinedNetworkInformer(),
-			renderNADStub, nm.Interface(), f.PodCoreInformer(), f.NamespaceInformer(), vtepInformer, f.RouteAdvertisementsInformer(), nil,
+			renderNADStub, nm.Interface(), f.PodCoreInformer(), f.NamespaceInformer(), vtepInformer, raInformer, nil,
 		)
 	}
 
@@ -2718,6 +2729,14 @@ var _ = Describe("User Defined Network Controller", func() {
 		return cudn
 	}
 
+	configureUnmanagedNoOverlayCUDN := func(cudn *udnv1.ClusterUserDefinedNetwork, outboundSNAT udnv1.SNATOption) {
+		cudn.Spec.Network.Transport = udnv1.TransportOptionNoOverlay
+		cudn.Spec.Network.NoOverlay = &udnv1.NoOverlayConfig{
+			OutboundSNAT: outboundSNAT,
+			Routing:      udnv1.RoutingUnmanaged,
+		}
+	}
+
 	createAcceptedRA := func(name string, matchLabels map[string]string) {
 		ra := &ratypes.RouteAdvertisements{
 			ObjectMeta: metav1.ObjectMeta{Name: name},
@@ -2814,6 +2833,57 @@ var _ = Describe("User Defined Network Controller", func() {
 			createNotAcceptedRA("test-ra", map[string]string{"app": "test"})
 			Expect(c.Run()).To(Succeed())
 			expectTransportCondition("test-cudn", metav1.ConditionFalse, ReasonNoOverlayRouteAdvertisementsNotAccepted, "RouteAdvertisements CR test-ra advertises the pod subnets, but its status is not accepted.")
+		})
+
+		DescribeTable("should accept unmanaged no-overlay without RouteAdvertisements",
+			func(outboundSNAT udnv1.SNATOption) {
+				cudn := newCUDNWithTransport("test-cudn", map[string]string{"app": "test"}, udnv1.TransportOptionNoOverlay)
+				configureUnmanagedNoOverlayCUDN(cudn, outboundSNAT)
+				c = newTestController(template.RenderNetAttachDefManifest, cudn)
+				Expect(c.Run()).To(Succeed())
+				expectTransportCondition("test-cudn", metav1.ConditionTrue, ReasonNoOverlayRouteAdvertisementsNotRequired, MessageNoOverlayRouteAdvertisementsNotRequired)
+			},
+			Entry("with outboundSNAT enabled", udnv1.SNATEnabled),
+			Entry("with outboundSNAT disabled", udnv1.SNATDisabled),
+		)
+
+		It("should accept unmanaged no-overlay when RouteAdvertisements feature is disabled", func() {
+			config.OVNKubernetesFeature.EnableRouteAdvertisements = false
+			cudn := newCUDNWithTransport("test-cudn", map[string]string{"app": "test"}, udnv1.TransportOptionNoOverlay)
+			configureUnmanagedNoOverlayCUDN(cudn, udnv1.SNATEnabled)
+			c = newTestController(template.RenderNetAttachDefManifest, cudn)
+			Expect(c.Run()).To(Succeed())
+			expectTransportCondition("test-cudn", metav1.ConditionTrue, ReasonNoOverlayRouteAdvertisementsNotRequired, MessageNoOverlayRouteAdvertisementsNotRequired)
+		})
+
+		It("should reject unmanaged no-overlay when RouteAdvertisements exists but is not accepted", func() {
+			cudn := newCUDNWithTransport("test-cudn", map[string]string{"app": "test"}, udnv1.TransportOptionNoOverlay)
+			configureUnmanagedNoOverlayCUDN(cudn, udnv1.SNATEnabled)
+			c = newTestController(template.RenderNetAttachDefManifest, cudn)
+			createNotAcceptedRA("test-ra", map[string]string{"app": "test"})
+			Expect(c.Run()).To(Succeed())
+			expectTransportCondition("test-cudn", metav1.ConditionFalse, "NoOverlayRouteAdvertisementsNotAccepted", "RouteAdvertisements CR test-ra advertises the pod subnets, but its status is not accepted.")
+		})
+
+		It("should accept unmanaged no-overlay when any relevant RouteAdvertisements is accepted", func() {
+			cudn := newCUDNWithTransport("test-cudn", map[string]string{"app": "test"}, udnv1.TransportOptionNoOverlay)
+			configureUnmanagedNoOverlayCUDN(cudn, udnv1.SNATEnabled)
+			c = newTestController(template.RenderNetAttachDefManifest, cudn)
+			createAcceptedRA("test-ra", map[string]string{"app": "test"})
+			createNotAcceptedRA("test-ra-bad", map[string]string{"app": "test"})
+			Expect(c.Run()).To(Succeed())
+			expectTransportCondition("test-cudn", metav1.ConditionTrue, "NoOverlayTransportAccepted", "Transport has been configured as 'no-overlay'.")
+		})
+
+		It("should still require RouteAdvertisements for no-overlay with managed routing and SNAT disabled", func() {
+			cudn := newCUDNWithTransport("test-cudn", map[string]string{"app": "test"}, udnv1.TransportOptionNoOverlay)
+			cudn.Spec.Network.NoOverlay = &udnv1.NoOverlayConfig{
+				OutboundSNAT: udnv1.SNATDisabled,
+				Routing:      udnv1.RoutingManaged,
+			}
+			c = newTestController(template.RenderNetAttachDefManifest, cudn)
+			Expect(c.Run()).To(Succeed())
+			expectTransportCondition("test-cudn", metav1.ConditionFalse, "NoOverlayRouteAdvertisementsIsMissing", "No RouteAdvertisements CR is advertising the pod networks.")
 		})
 
 		It("should update status to True with EVPNTransportAccepted when RA is accepted", func() {
