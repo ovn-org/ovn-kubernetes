@@ -225,9 +225,10 @@ func setOvsDBServerCPUAffinity(set *cpuset.CPUSet) error {
 // Returns:
 //   - error: any error encountered during PID conversion, affinity retrieval, or setting
 //
-// The function skips setting affinity if the target process already has the desired
-// CPU affinity. Individual thread affinity setting failures are logged as warnings
-// but don't stop the overall operation.
+// The function skips setting affinity only if all managed threads already have
+// the desired CPU affinity. PMD threads are excluded when skipPmds is true.
+// Individual thread affinity setting failures are logged as warnings but do not
+// stop the overall operation.
 func setProcessCPUAffinity(targetPIDStr string, set *cpuset.CPUSet, skipPmds bool) error {
 
 	targetPID, err := strconv.Atoi(targetPIDStr)
@@ -251,14 +252,14 @@ func setProcessCPUAffinity(targetPIDStr string, set *cpuset.CPUSet, skipPmds boo
 		return fmt.Errorf("can't get process (PID:%d) CPU affinity: %w", targetPID, err)
 	}
 
-	if desiredProcessCPUs == targetProcessCPUs {
-		klog.V(5).Infof("Process[%d] CPU affinity already matches desired process affinity %s", targetPID, printCPUSet(desiredProcessCPUs))
-		return nil
-	}
-
 	taskIDs, err := getThreadsOfProcess(targetPID)
 	if err != nil {
 		return fmt.Errorf("can't get tasks of PID(%d):%w", targetPID, err)
+	}
+
+	if desiredProcessCPUs == targetProcessCPUs && tasksHaveCPUAffinity(targetPID, taskIDs, desiredProcessCPUs, skipPmds) {
+		klog.V(5).Infof("Process[%d] and its managed tasks already match desired process affinity %s", targetPID, printCPUSet(desiredProcessCPUs))
+		return nil
 	}
 
 	klog.Infof("Setting CPU affinity of PID(%d) (ntasks=%d) to %s, was %s", targetPID, len(taskIDs), printCPUSet(desiredProcessCPUs), printCPUSet(targetProcessCPUs))
@@ -274,6 +275,25 @@ func setProcessCPUAffinity(targetPIDStr string, set *cpuset.CPUSet, skipPmds boo
 	}
 
 	return nil
+}
+
+// tasksHaveCPUAffinity verifies every managed task before taking the no-op path.
+// A failed read cannot establish a match; let reconciliation attempt the update.
+func tasksHaveCPUAffinity(targetPID int, taskIDs []int, desired unix.CPUSet, skipPmds bool) bool {
+	for _, taskID := range taskIDs {
+		if skipPmds && isPmdThread(taskID) {
+			continue
+		}
+		var actual unix.CPUSet
+		if err := unix.SchedGetaffinity(taskID, &actual); err != nil {
+			klog.Warningf("Error while getting CPU affinity of task(%d) PID(%d): %v", taskID, targetPID, err)
+			return false
+		}
+		if actual != desired {
+			return false
+		}
+	}
+	return true
 }
 
 // printCPUSet takes a unix.CPUSet and returns a string representation in canonical linux CPU list format.
