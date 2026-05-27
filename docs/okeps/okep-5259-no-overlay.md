@@ -31,6 +31,10 @@ See [terminology](okep-5193-user-defined-networks.md#terminology) details.
 * Support no-overlay mode for the cluster default network (CDN).
 * Support no-overlay mode for Primary layer-3 ClusterUserDefinedNetworks
   (CUDNs).
+* Support unmanaged no-overlay routing without matching RouteAdvertisements for
+  the cluster default network and primary layer-3 CUDNs, where
+  OVN-Kubernetes does not require or generate BGP resources, and the external
+  fabric is responsible for routing traffic back to node pod subnets.
 * The no-overlay mode is only supported for bare-metal clusters.
 * A cluster can have networks operating in overlay and no-overlay modes
   simultaneously.
@@ -136,6 +140,21 @@ As a cluster admin, I want to use no-overlay mode for intra-cluster traffic
 without advertising pod networks to the external network or depending on
 external BGP routers.
 
+### Story 4: Create a default network in unmanaged no-overlay mode without RouteAdvertisements
+
+As a cluster admin, I want to install the cluster with the default network in
+no-overlay mode and unmanaged routing when my external fabric already routes
+each node pod subnet back to the node that owns it. I do not want to enable
+RouteAdvertisements or create a dummy FRRConfiguration only to satisfy startup
+validation.
+
+### Story 5: Create a CUDN in unmanaged no-overlay mode without RouteAdvertisements
+
+As a cluster admin, I want to create a primary layer-3 CUDN with no-overlay
+transport and unmanaged routing when my external fabric already routes each pod
+subnet back to the node that owns it. I do not want to create a dummy
+FRRConfiguration or RouteAdvertisements object only to satisfy API validation.
+
 ## Proposed Solution
 
 This solution leverages the existing BGP feature to advertise each node's pod
@@ -143,6 +162,28 @@ subnet via the CNCF project [FRR-K8s](https://github.com/metallb/frr-k8s). FRR
 routers managed by FRR-k8s then propagate these routes throughout the provider
 network, enabling direct pod-to-pod traffic without an overlay. A single cluster
 can simultaneously have networks in both overlay and no-overlay modes.
+
+For the cluster default network, no-overlay can also be used without
+RouteAdvertisements at installation time when `[default] transport` is
+`no-overlay` and `[no-overlay] routing` is `unmanaged`, regardless of the
+`[no-overlay] outbound-snat` value. In that deployment, each node
+gateway router keeps routes for the node-local pod host subnet back toward the
+distributed router and sends non-local pod subnet destinations to the external
+default next hop. If one or more RouteAdvertisements objects select the default
+network and advertise `PodNetwork`, the default network follows the existing
+no-overlay `RouteAdvertisements` validation behavior.
+
+For primary layer-3 CUDNs, no-overlay can also be used without
+RouteAdvertisements when `spec.network.noOverlay.routing` is `Unmanaged`,
+regardless of the `spec.network.noOverlay.outboundSNAT` value. In that
+deployment, each node gateway router keeps routes for the node-local CUDN pod
+host subnet back toward the CUDN's distributed router and sends non-local pod
+subnet destinations to the external default next hop. The external fabric is
+responsible for return routing to pod IPs and OVN-Kubernetes does not verify
+that those external routes exist.
+If one or more RouteAdvertisements objects select the same CUDN and advertise
+`PodNetwork`, the CUDN follows the existing no-overlay `RouteAdvertisements`
+validation behavior.
 
 When no-overlay mode is enabled for a network:
 
@@ -168,13 +209,15 @@ When no-overlay mode is enabled for a network:
 For the default network transport, the new flag `transport` will be added to
 the `[default]` section of the configuration file:
 
-* The `transport` flag accepts either `no-overlay` or
-  `geneve`, defaulting to `geneve`. Setting it to `no-overlay` configures the
-  default network to operate in no-overlay mode. More overlay transport
-  methods can be supported in the future. If
-  `transport=no-overlay` is set, but
-  no `RouteAdvertisements` CR is configured for advertising the default network,
-  ovnkube-cluster-manager will emit an event and log an error message.
+* The `transport` flag accepts `no-overlay` or an empty value, defaulting to
+  empty. An empty value keeps the default OVN overlay transport (e.g. Geneve,
+  as configured by `ovn-encap-type`); any other value is rejected. Setting it
+  to `no-overlay` configures the default network to operate in no-overlay
+  mode. More transport methods can be supported in the future. If
+  `transport=no-overlay` is set, but no `RouteAdvertisements` CR is configured
+  for advertising the default network, ovnkube-cluster-manager will emit an
+  event and log an error message unless the default network is configured with
+  unmanaged routing.
 
 For the default network in no-overlay mode, the new flags `outbound-snat` and
 `routing` will be added to the `[no-overlay]` section of the configuration file:
@@ -274,10 +317,11 @@ We introduce new fields to the `spec.network` section of the
 ClusterUserDefinedNetwork (CUDN) CRD to control network transport technology:
 
 * **`transport`**: Specifies the transport technology used for the network.
-  * Supported values: `Geneve` or `NoOverlay`
-  * It's optional, if not specified, it will be treated as `Geneve`.
+  * Supported explicit values: `NoOverlay` or `EVPN`.
+  * It's optional. If not specified, OVN-Kubernetes uses the default OVN overlay
+    transport, such as Geneve.
   * More transport methods can be supported in the future.
-* **`noOverlayOptions`**: Contains configuration for no-overlay mode. This is
+* **`noOverlay`**: Contains configuration for no-overlay mode. This is
   required when `transport` is `NoOverlay`.
   * `outboundSNAT`: Defines the SNAT behavior for outbound traffic from pods.
     * Supported values: `Enabled` or `Disabled`. It is required when `transport`
@@ -302,9 +346,11 @@ ClusterUserDefinedNetwork (CUDN) CRD to control network transport technology:
     * `Unmanaged`: Users are responsible for managing the routing, including
       creating the RouteAdvertisements and FRRConfiguration CRs to advertise the
       pod subnets. It allows users to have more control over the BGP
-      configuration. One day if other routing protocols are integrated with
-      OVN-Kubernetes, users can use this option to manage the routing
-      themselves.
+      configuration. For CUDNs with unmanaged no-overlay routing, users may also
+      omit RouteAdvertisements entirely and rely on external return routing or
+      another external routing mechanism to return traffic to node pod subnets.
+      One day if other routing protocols are integrated with OVN-Kubernetes,
+      users can use this option to manage the routing themselves.
 
 The `spec` field of a ClusterUserDefinedNetwork CR is immutable. Therefore, the
 transport configuration cannot be changed after a ClusterUserDefinedNetwork CR is
@@ -317,7 +363,7 @@ type RoutingOption string
 
 const (
     TransportOptionNoOverlay  TransportOption = "NoOverlay"
-    TransportOptionGeneve     TransportOption = "Geneve"
+    TransportOptionEVPN       TransportOption = "EVPN"
 
     SNATEnabled  SNATOption = "Enabled"
     SNATDisabled SNATOption = "Disabled"
@@ -326,8 +372,8 @@ const (
     RoutingUnmanaged RoutingOption = "Unmanaged"
 )
 
-// NoOverlayOptions contains configuration options for networks operating in no-overlay mode.
-type NoOverlayOptions struct {
+// NoOverlayConfig contains configuration options for networks operating in no-overlay mode.
+type NoOverlayConfig struct {
     // OutboundSNAT defines the SNAT behavior for outbound traffic from pods.
     // +kubebuilder:validation:Enum=Enabled;Disabled
     // +required
@@ -341,17 +387,17 @@ type NoOverlayOptions struct {
 type NetworkSpec struct {
     ...
     // Transport describes the transport technology used for the network.
-    // Allowed values are "NoOverlay" and "Geneve".
+    // Allowed values are "NoOverlay" and "EVPN".
     // - "NoOverlay": The network operates in no-overlay mode.
-    // - "Geneve": The network uses Geneve overlay.
-    // Defaults to "Geneve" if not specified.
-    // +kubebuilder:validation:Enum=NoOverlay;Geneve
+    // - "EVPN": The network uses EVPN transport.
+    // When omitted, the network uses the default OVN overlay transport.
+    // +kubebuilder:validation:Enum=NoOverlay;EVPN
     // +optional
     Transport TransportOption `json:"transport,omitempty"`
-    // NoOverlayOptions contains configuration for no-overlay mode.
+    // NoOverlay contains configuration for no-overlay mode.
     // It is only allowed when Transport is "NoOverlay".
     // +optional
-    NoOverlayOptions *NoOverlayOptions `json:"noOverlayOptions,omitempty"`
+    NoOverlay *NoOverlayConfig `json:"noOverlay,omitempty"`
 }
 ```
 
@@ -364,8 +410,10 @@ accidentally, we will add the following CEL validation rules to the
       x-kubernetes-validations:
       - message: "transport 'NoOverlay' is only supported for Layer3 primary networks"
         rule: "!has(self.transport) || self.transport != 'NoOverlay' || (self.topology == 'Layer3' && has(self.layer3) && self.layer3.role == 'Primary')"
-      - message: "noOverlayOptions is required if and only if transport is 'NoOverlay'"
-        rule: "(has(self.transport) && self.transport == 'NoOverlay') == has(self.noOverlayOptions)"
+      - message: "spec.noOverlay is required when type transport is 'NoOverlay'"
+        rule: "!has(self.transport) || self.transport != 'NoOverlay' || has(self.noOverlay)"
+      - message: "spec.noOverlay is forbidden when transport type is not 'NoOverlay'"
+        rule: "(has(self.transport) && self.transport == 'NoOverlay') || !has(self.noOverlay)"
 ```
 
 A new status condition will be added to the CUDN CR to indicate whether the
@@ -383,23 +431,18 @@ Here is the definition of the new status condition:
   * `False`: The transport is not correctly configured.
   * `Unknown`: The status of the transport configuration is unknown.
   * This condition is only applicable when `spec.network.transport` is not set
-    to `Geneve`.
+    to the default overlay transport.
   * For a no-overlay CUDN, this condition is set to `True` when:
     * A RouteAdvertisements CR is created to advertise the pod subnets of
       the CUDN, and its status is `Accepted`.
+    * Or, for unmanaged no-overlay without RouteAdvertisements, no
+      RouteAdvertisements CR advertises the CUDN pod subnets and the CUDN is
+      configured with `transport: NoOverlay` and
+      `noOverlay.routing: Unmanaged`.
     * Otherwise, it will be set to `False` with an appropriate message.
 
-If the transport is not configured or configured as `Geneve`, the UDN controller
-shall set the `TransportAccepted` condition like this:
-
-```yaml
-status:
-  conditions:
-  - type: TransportAccepted
-    status: "True"
-    reason: "GeneveTransportAccepted"
-    message: "Geneve transport has been configured."
-```
+If the transport is not configured, the UDN controller does not set the
+`TransportAccepted` condition.
 
 If the transport is configured as `NoOverlay` and the RouteAdvertisements CR is
 created and its status is `Accepted`, the UDN controller shall set the
@@ -414,9 +457,23 @@ status:
     message: "Transport has been configured as 'no-overlay'."
 ```
 
-If no RouteAdvertisements CR is advertising the network, it shall update the
-CUDN status condition `TransportAccepted` to `False` with an appropriate
-message.
+If the transport is configured as `NoOverlay` with unmanaged routing, and no
+RouteAdvertisements CR selects the CUDN and advertises
+`PodNetwork`, the UDN controller accepts the CUDN without requiring a
+RouteAdvertisements CR:
+
+```yaml
+status:
+  conditions:
+  - type: TransportAccepted
+    status: "True"
+    reason: "NoOverlayRouteAdvertisementsNotRequired"
+    message: "Transport has been configured as no-overlay with unmanaged routing. RouteAdvertisements are not required; external routing is responsible for returning traffic to node pod subnets."
+```
+
+For other no-overlay CUDNs, if no RouteAdvertisements CR is advertising the
+network, it shall update the CUDN status condition `TransportAccepted` to
+`False` with an appropriate message.
 
 ```yaml
 status:
@@ -462,15 +519,15 @@ spec:
       - cidr: 10.10.0.0/16
         hostSubnet: 24
     transport: "NoOverlay"
-    noOverlayOptions:
-      outboundSNAT: "Disabled"
+    noOverlay:
+      outboundSNAT: "Enabled" # or "Disabled"
       routing: "Unmanaged"
 status:
   conditions:
   - type: TransportAccepted
     status: "True"
-    reason: "NoOverlayTransportAccepted"
-    message: "Transport has been configured as 'no-overlay'."
+    reason: "NoOverlayRouteAdvertisementsNotRequired"
+    message: "Transport has been configured as no-overlay with unmanaged routing. RouteAdvertisements are not required; external routing is responsible for returning traffic to node pod subnets."
 ```
 
 Or: if the routing is managed by OVN-Kubernetes:
@@ -495,7 +552,7 @@ spec:
       - cidr: 10.10.0.0/16
         hostSubnet: 24
     transport: "NoOverlay"
-    noOverlayOptions:
+    noOverlay:
       outboundSNAT: "Enabled"
       routing: "Managed"
 status:
@@ -693,10 +750,13 @@ Changes to BGP behavior are necessary to import node subnet routes into the
 gateway router and the host routing table of each node. A new `transport` key
 will be included in the OVN CNI NetConf (the NAD's spec.config JSON) to indicate
 the east-west transport protocol of the network. If a network operates in
-no-overlay mode, this key is set to `noOverlay`. Additionally, the `outboundSNAT`
-key will be included to indicate the SNAT behavior for outbound traffic from pods.
-This information can then be passed into the NetInfo object and utilized by the
-route import and gateway controller of ovnkube-controller.
+no-overlay mode, this key is set to `no-overlay`. Additionally, the
+`outboundSNAT` key (`enabled` or `disabled`) indicates the SNAT behavior for
+outbound traffic from pods, and the `noOverlayRouting` key (`managed` or
+`unmanaged`) carries the network's routing mode; both are rendered only for
+no-overlay networks. This information can then be passed into the NetInfo
+object and utilized by the route import and gateway controller of
+ovnkube-controller.
 
 Note: Users must not set these fields manually; OVN-Kubernetes manages them.
 
@@ -718,8 +778,9 @@ spec:
             "mtu": 1500,
             "netAttachDefName": "default/l3-network",
             "role": "primary",
-            "transport": "noOverlay",
-            "outboundSNAT": "disabled"
+            "transport": "no-overlay",
+            "outboundSNAT": "disabled",
+            "noOverlayRouting": "unmanaged"
     }
 ```
 
@@ -944,6 +1005,18 @@ external router instead of the node.
 
 #### Enable No-overlay Mode for the Default Network with Unmanaged Routing
 
+Unmanaged routing has two supported paths for the default network:
+
+* BGP-backed unmanaged routing, where the administrator creates
+  FRRConfiguration and RouteAdvertisements resources.
+* Unmanaged routing without RouteAdvertisements, where the external fabric can
+  route pod traffic, and the cluster admin or a third-party component installs
+  remote pod-subnet routes where pod egress leaves the node: in each node
+  Linux routing table with local gateway mode, or in each node OVN gateway
+  router with shared gateway mode.
+
+##### BGP-backed unmanaged routing
+
 1. The frr-k8s pods shall be deployed on each node.
 2. The cluster admin shall create a base FRRConfiguration CR that is used for
    generating the per-node FRRConfiguration instances by OVN-Kubernetes.
@@ -1015,12 +1088,53 @@ external router instead of the node.
 6. The default network controller in ovnkube-cluster-manager shall watch the
    RouteAdvertisements CRs. It shall ensure at least one RouteAdvertisements CR
    is correctly configured to advertise the pod networks and will validate the
-   RouteAdvertisements CR status. If the RouteAdvertisements CR is missing or
-   its status is not accepted, it shall report event and log an error message.
+   RouteAdvertisements CR status. If matching RouteAdvertisements CRs exist but
+   none are accepted, it shall report an event and log an error message. With
+   unmanaged routing, a missing RouteAdvertisements CR is not an error: the
+   default network then follows the without-RouteAdvertisements path described
+   below.
 
 7. The BGP feature is responsible for exchanging BGP routes to remote pod
    subnets between nodes. Ultimately, these routes will be imported into the
    gateway router.
+
+##### Unmanaged routing without RouteAdvertisements
+
+1. The cluster admin ensures the external fabric can route pod traffic, and
+   installs the necessary remote pod-subnet routes, either directly or through
+   a third-party component: in each node Linux routing table with local
+   gateway mode, or in each node OVN gateway router with shared gateway mode.
+   OVN-Kubernetes does not create or validate these external routes.
+
+2. The cluster admin enables no-overlay mode at installation time by running
+   ovn-kubernetes with the config file below. This mode does not require
+   RouteAdvertisements to be enabled, and either `outbound-snat` value is valid.
+
+    ```ini
+    [default]
+    transport = no-overlay
+
+    [no-overlay]
+    routing = unmanaged
+    outbound-snat = enabled
+    ```
+
+3. The default network controller in ovnkube-controller creates the OVN virtual
+   topology for the default network. Neither the transit switch nor static
+   routes to remote pod subnets are created.
+
+4. As on every no-overlay network (this is keyed on the transport, not on this
+   mode), each node gateway router gets routes for the node-local pod host
+   subnet back toward the distributed router, and not the broad cluster-CIDR
+   route, so destinations in non-local pod subnets use the external default
+   next hop.
+
+5. If the RouteAdvertisements feature is enabled and a RouteAdvertisements
+   object selects the default network and advertises `PodNetwork`, the default
+   network follows the existing no-overlay
+   validation behavior: any accepted relevant RouteAdvertisements object is
+   sufficient; if none are accepted, the default network no-overlay controller
+   reports a warning event.
 
 #### Enable No-overlay Mode for the Default Network with Managed Routing
 
@@ -1125,7 +1239,17 @@ external router instead of the node.
 
 #### Create a ClusterUserDefinedNetwork in No-overlay Mode with Unmanaged Routing
 
-Here is a configuration example:
+Unmanaged routing has two supported paths for CUDNs:
+
+* BGP-backed unmanaged routing, where the administrator creates
+  FRRConfiguration and RouteAdvertisements resources.
+* Unmanaged routing without RouteAdvertisements, where the administrator creates
+  only the CUDN, ensures the external fabric can route pod traffic, and installs
+  remote pod-subnet routes where pod egress leaves the node: in each node
+  Linux routing table with local gateway mode, or in each node OVN gateway
+  router with shared gateway mode.
+
+##### BGP-backed unmanaged routing
 
 1. The frr-k8s pods shall be deployed on each node.
 2. A cluster admin wants to enable no-overlay mode for the blue network by
@@ -1154,7 +1278,7 @@ Here is a configuration example:
           - cidr: 10.10.0.0/16
             hostSubnet: 24
         transport: "NoOverlay"
-        noOverlayOptions:
+        noOverlay:
           outboundSNAT: "Disabled"
           routing: "Unmanaged"
     ```
@@ -1240,6 +1364,64 @@ Here is a configuration example:
    subnets between nodes. Ultimately, these routes will be imported into the
    gateway router.
 
+##### Unmanaged routing without RouteAdvertisements
+
+1. The cluster admin ensures the external fabric can route pod traffic, and
+   installs the necessary remote CUDN pod-subnet routes, either directly or
+   through a third-party component: in each node Linux routing table with
+   local gateway mode, or in each node OVN gateway router with shared gateway
+   mode. OVN-Kubernetes does not create or validate these external routes.
+
+2. The cluster admin creates the CUDN with no-overlay transport and unmanaged
+   routing.
+
+    ```yaml
+    apiVersion: k8s.ovn.org/v1
+    kind: ClusterUserDefinedNetwork
+    metadata:
+      name: blue
+      labels:
+        network: blue
+    spec:
+      namespaceSelector:
+        matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: In
+          values: ["ns1", "ns2"]
+      network:
+        topology: Layer3
+        layer3:
+          role: Primary
+          mtu: 1500
+          subnets:
+          - cidr: 10.10.0.0/16
+            hostSubnet: 24
+        transport: "NoOverlay"
+        noOverlay:
+          outboundSNAT: "Enabled" # or "Disabled"
+          routing: "Unmanaged"
+    ```
+
+3. The UDN controller in ovnkube-cluster-manager accepts this CUDN without a
+   RouteAdvertisements object and sets `TransportAccepted=True` with reason
+   `NoOverlayRouteAdvertisementsNotRequired`.
+
+4. If the administrator creates one or more RouteAdvertisements objects that
+   select the CUDN and advertise `PodNetwork`, the CUDN follows the existing
+   no-overlay validation behavior: any accepted
+   relevant RouteAdvertisements object sets `TransportAccepted=True` with reason
+   `NoOverlayTransportAccepted`; if none are accepted,
+   `TransportAccepted=False` is reported with reason
+   `NoOverlayRouteAdvertisementsNotAccepted`.
+
+5. The UDN controller in ovnkube-controller creates the OVN virtual topology for
+   the UDN. Neither the transit switch nor static routes to remote pod subnets
+   are created. On each node gateway router, OVN-Kubernetes installs routes for
+   the node-local CUDN pod host subnet back toward the CUDN's distributed
+   router, but does not install the broad CUDN CIDR route that would capture
+   remote pod destinations. Return traffic depends on the external fabric
+   routes configured in step 1.
+
 #### Create a ClusterUserDefinedNetwork in No-overlay Mode with Managed Routing
 
 1. The frr-k8s pods shall be deployed on each node.
@@ -1284,7 +1466,7 @@ Here is a configuration example:
           - cidr: 10.10.0.0/16
             hostSubnet: 24
         transport: "NoOverlay"
-        noOverlayOptions:
+        noOverlay:
           outboundSNAT: "Enabled"
           routing: "Managed"
     ```
@@ -1524,8 +1706,28 @@ Not supported.
   * BGP VRF-lite with multiple CUDNs
   * test suite: conformance, control-plane
 * API Testing Details
+  * Config validation accepts the default network with `transport=no-overlay`
+    and `routing=unmanaged`, for either `outbound-snat` value, without requiring
+    the RouteAdvertisements feature, and still rejects no-overlay configurations
+    outside unmanaged routing when RouteAdvertisements are disabled.
+  * Gateway-router programming for unmanaged no-overlay without
+    RouteAdvertisements installs node-local host subnet routes back toward OVN
+    and does not install the broad network CIDR route that would capture remote
+    pod destinations.
   * ClusterUserDefinedNetwork CR reports expected status conditions
+  * A primary layer-3 CUDN with `transport: NoOverlay` and
+    `noOverlay.routing: Unmanaged` is accepted without RouteAdvertisements for
+    either `noOverlay.outboundSNAT` value.
+  * No-overlay CUDNs outside unmanaged routing still require an accepted
+    RouteAdvertisements object.
+  * An unmanaged no-overlay CUDN with relevant RouteAdvertisements
+    objects, none of which are accepted, reports `TransportAccepted=False` with
+    `NoOverlayRouteAdvertisementsNotAccepted`.
   * No-overlay mode cannot be enabled for UserDefinedNetworks
+  * Add an end-to-end or integration test that proves traffic works for the
+    unmanaged no-overlay default-network and CUDN paths without
+    RouteAdvertisements when the external return routes are supplied by the test
+    environment.
 * Scale Testing Details
   * The impact of the number of the imported BGP routes
 * Performance Testing Details
@@ -1541,14 +1743,17 @@ Not supported.
 
 ### Risks
 
-In the no-overlay mode, east-west traffic relies on the BGP network. Therefore,
-internal and external BGP speaker outages may impact cluster networking.
+In the no-overlay mode, east-west traffic relies on the external routing fabric.
+For BGP-backed deployments, internal and external BGP speaker outages may impact
+cluster networking. For unmanaged default-network and CUDN deployments without
+RouteAdvertisements, incorrect external return routes may impact cluster
+networking.
 
 The no-overlay mode inherits all limitations from the BGP integration feature.
 Consequently, multicast is not supported in no-overlay mode.
 
-As OVN is no longer delivering pod-to-pod traffic end-to-end, it will
-necessitate BGP knowledge for debugging.
+As OVN is no longer delivering pod-to-pod traffic end-to-end, debugging requires
+underlay routing knowledge, including BGP knowledge for BGP-backed deployments.
 
 ### Known Limitations
 
@@ -1577,6 +1782,11 @@ necessitate BGP knowledge for debugging.
   sessions for N nodes), leading to increased CPU and memory consumption on each
   node. For large-scale deployments, users should consider using the unmanaged
   routing mode with external route reflectors or other scalable BGP topologies.
+
+* In unmanaged default-network and CUDN paths without RouteAdvertisements,
+  OVN-Kubernetes accepts the network without RouteAdvertisements but does not
+  verify that the external fabric has correct return routes to each node pod
+  subnet. Missing or stale external routes will break return traffic.
 
 * Changing the transport type between Geneve and no-overlay for the cluster
   default network is not supported. Users must create a new cluster with the

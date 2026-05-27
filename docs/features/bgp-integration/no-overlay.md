@@ -4,10 +4,10 @@
 
 No-overlay mode lets selected OVN-Kubernetes Layer 3 pod networks use direct
 underlay routing for inter-node pod east/west traffic instead of Geneve
-encapsulation. It uses the [Route Advertisements](route-advertisements.md)
-integration with FRR-k8s to advertise pod network routes through BGP, so the
-provider network or an OVN-Kubernetes managed internal BGP fabric can route
-traffic between pod subnets.
+encapsulation. It can use the [Route Advertisements](route-advertisements.md)
+integration with FRR-k8s to advertise pod network routes through BGP, or, for
+unmanaged routing, rely on external routing that is configured outside
+OVN-Kubernetes when no matching `RouteAdvertisements` object exists.
 
 No-overlay mode can be enabled for:
 
@@ -25,14 +25,18 @@ gateway mode.
 
 * A bare-metal deployment.
 * OVN-Kubernetes single-node zone interconnect mode.
-* The `route-advertisements` feature enabled in the OVN-Kubernetes
-  configuration.
-* [FRR-k8s](https://github.com/metallb/frr-k8s) deployed with FRR speakers
+* For BGP-backed no-overlay modes, the `route-advertisements` feature enabled in
+  the OVN-Kubernetes configuration.
+* For BGP-backed no-overlay modes,
+  [FRR-k8s](https://github.com/metallb/frr-k8s) deployed with FRR speakers
   running on every node.
-* For unmanaged routing, administrator-created `RouteAdvertisements` and
-  `FRRConfiguration` resources that exchange pod subnet routes. In managed
+* For BGP-backed unmanaged routing, administrator-created `RouteAdvertisements`
+  and `FRRConfiguration` resources that exchange pod subnet routes. In managed
   routing mode, OVN-Kubernetes creates these resources for the internal
   full-mesh BGP fabric.
+* For unmanaged routing without RouteAdvertisements, an external fabric that can
+  route pod traffic, and cluster-admin or third-party installed pod-subnet routes
+  in each node Linux routing table and OVN gateway router.
 
 Always check the dependencies on the [Requirements page](../requirements.md).
 
@@ -54,17 +58,25 @@ visible to existing network devices.
 
 ## Routing Modes
 
-No-overlay networks use one of two routing modes.
+No-overlay networks use one of these routing modes.
 
 * `managed`: OVN-Kubernetes creates the BGP resources for an internal full-mesh
   fabric. In this mode, each node advertises pod subnets to the default VRF on
   the other nodes. Use this only when nodes are directly connected at Layer 2.
   It is normally paired with SNAT enabled.
-* `unmanaged`: The cluster administrator creates the `FRRConfiguration` and
-  `RouteAdvertisements` resources. This is the right choice when an external
-  BGP route reflector, eBGP topology, VRF-Lite design, or another site-specific
-  routing design owns pod subnet distribution. This mode is normally used with
-  SNAT disabled.
+* BGP-backed `unmanaged`: The cluster administrator creates the
+  `FRRConfiguration` and `RouteAdvertisements` resources. This is the right
+  choice when an external BGP route reflector, eBGP topology, VRF-Lite design,
+  or another site-specific BGP design owns pod subnet distribution. This mode is
+  normally used with SNAT disabled.
+* `unmanaged` without RouteAdvertisements: For the default network or primary
+  Layer 3 CUDNs with unmanaged no-overlay routing, the cluster administrator can omit
+  `RouteAdvertisements` and configure the external fabric to route pod subnets
+  back to the nodes. This applies with either outbound SNAT setting.
+  OVN-Kubernetes does not create BGP resources or verify those external routes.
+  If one or more `RouteAdvertisements` objects select the network and advertise
+  `PodNetwork`, the network follows the existing no-overlay `RouteAdvertisements`
+  validation behavior.
 
 Managed routing currently supports only the `full-mesh` topology. For large
 clusters, prefer unmanaged routing with route reflectors or another scalable BGP
@@ -148,9 +160,10 @@ global:
   managedBGPFRRNamespace: frr-k8s-system
 ```
 
-### Unmanaged Routing
+### BGP-backed Unmanaged Routing
 
-Use unmanaged routing when the administrator owns the BGP configuration.
+Use BGP-backed unmanaged routing when the administrator owns the BGP
+configuration.
 
 ```ini
 [default]
@@ -161,10 +174,10 @@ outbound-snat = disabled
 routing = unmanaged
 ```
 
-In unmanaged mode, create an `FRRConfiguration` that peers with the routing
-infrastructure and accepts pod subnet routes. The values below are examples;
-adjust the AS numbers, neighbor address, and pod subnet prefixes for your
-deployment.
+In BGP-backed unmanaged mode, create an `FRRConfiguration` that peers with the
+routing infrastructure and accepts pod subnet routes. The values below are
+examples; adjust the AS numbers, neighbor address, and pod subnet prefixes for
+your deployment.
 
 ```yaml
 apiVersion: frrk8s.metallb.io/v1beta1
@@ -213,9 +226,46 @@ spec:
 
 The default network no-overlay controller validates that at least one
 `RouteAdvertisements` object advertises the default network pod routes and has
-`Accepted=True`. If none exists, or if the selected object is not accepted,
-OVN-Kubernetes reports an event on the default network
-`NetworkAttachmentDefinition`.
+`Accepted=True`. If matching objects exist but none are accepted,
+OVN-Kubernetes reports a warning event on the default network
+`NetworkAttachmentDefinition`. With unmanaged routing, a missing
+`RouteAdvertisements` object is not reported as an error: it is
+indistinguishable from intentionally running without RouteAdvertisements (see
+below), so OVN-Kubernetes reports a normal event for that mode instead. The
+reported event flips between the two outcomes as matching objects are created,
+accepted, or deleted.
+
+### Unmanaged Routing Without RouteAdvertisements
+
+Unmanaged no-overlay routing can run without a matching `RouteAdvertisements`
+object when the external fabric is configured outside OVN-Kubernetes to return
+pod subnet traffic to the node that owns each subnet. This example uses outbound
+SNAT enabled; `disabled` is also valid.
+
+```ini
+[default]
+transport = no-overlay
+
+[no-overlay]
+outbound-snat = enabled
+routing = unmanaged
+```
+
+In this mode, no `RouteAdvertisements` or `FRRConfiguration` object is required
+when no `RouteAdvertisements` object selects the default network and advertises
+`PodNetwork`. OVN-Kubernetes does not create BGP resources and does not verify
+external return routes. Each node gateway router installs routes for its local
+pod host subnet back into OVN and sends non-local pod subnet destinations to the
+external default next hop.
+
+If the RouteAdvertisements feature is enabled and relevant
+`RouteAdvertisements` objects exist, the default network follows the existing
+no-overlay validation behavior: any accepted relevant `RouteAdvertisements`
+object is sufficient; if none are accepted, OVN-Kubernetes reports a warning
+event on the default network `NetworkAttachmentDefinition`. When the
+RouteAdvertisements feature is disabled, unmanaged routing is the only valid
+no-overlay configuration; any `RouteAdvertisements` objects are ignored and the
+mode is validated once at startup.
 
 ## Enable no-overlay mode on a ClusterUserDefinedNetwork
 
@@ -259,12 +309,12 @@ after the CUDN is created.
 
 To use managed routing for a CUDN, set `routing: Managed` and configure the
 global `[bgp-managed]` section shown in the default network managed-routing
-example. The CUDN still reports transport acceptance only after a
-`RouteAdvertisements` object advertises its pod routes and reaches
+example. BGP-backed CUDNs report transport acceptance only after a
+`RouteAdvertisements` object advertises their pod routes and reaches
 `Accepted=True`.
 
-Create a `RouteAdvertisements` object that selects the CUDN and advertises
-`PodNetwork` routes:
+For BGP-backed unmanaged routing, create a `RouteAdvertisements` object that
+selects the CUDN and advertises `PodNetwork` routes:
 
 ```yaml
 apiVersion: k8s.ovn.org/v1
@@ -290,7 +340,7 @@ For VRF-Lite designs, set `targetVRF: auto` or a specific VRF as described in
 the [Route Advertisements VRF-Lite workflow](route-advertisements.md#import-and-export-routes-to-a-cudn-over-the-network-vrf-vrf-lite).
 
 When the CUDN is reconciled, OVN-Kubernetes sets the `TransportAccepted` status
-condition:
+condition for the BGP-backed path:
 
 ```yaml
 status:
@@ -301,27 +351,62 @@ status:
     message: "Transport has been configured as 'no-overlay'."
 ```
 
-If no accepted `RouteAdvertisements` object advertises the CUDN pod routes, the
-condition is set to `False` with a reason such as
-`NoOverlayRouteAdvertisementsIsMissing` or
-`NoOverlayRouteAdvertisementsNotAccepted`.
+If matching `RouteAdvertisements` objects exist but none are accepted, the
+condition is set to `False` with reason
+`NoOverlayRouteAdvertisementsNotAccepted`. With managed routing, the absence of
+any matching object is reported as `False` with reason
+`NoOverlayRouteAdvertisementsIsMissing`; with unmanaged routing it means the
+CUDN runs without RouteAdvertisements (see below).
+
+For unmanaged routing without RouteAdvertisements, use unmanaged no-overlay on
+the CUDN and configure the external fabric to route pod subnet traffic to the
+owning nodes. Either outbound SNAT setting is valid:
+
+```yaml
+network:
+  topology: Layer3
+  layer3:
+    role: Primary
+    subnets:
+    - cidr: 10.10.0.0/16
+      hostSubnet: 24
+  transport: NoOverlay
+  noOverlay:
+    outboundSNAT: Enabled # or Disabled
+    routing: Unmanaged
+```
+
+In this mode, no `RouteAdvertisements` object is required. When no
+`RouteAdvertisements` object selects the CUDN and advertises `PodNetwork` - or
+when the RouteAdvertisements feature is disabled - the `TransportAccepted`
+condition is set to `True` with reason
+`NoOverlayRouteAdvertisementsNotRequired`. If the RouteAdvertisements feature
+is enabled and relevant `RouteAdvertisements` objects exist, the CUDN follows
+the existing no-overlay validation behavior: any accepted relevant
+`RouteAdvertisements` object sets `TransportAccepted=True` with reason
+`NoOverlayTransportAccepted`; if none are accepted, `TransportAccepted=False`
+is reported with reason `NoOverlayRouteAdvertisementsNotAccepted`. The
+condition flips between these outcomes as matching objects are created,
+accepted, or deleted.
 
 ## Operational Notes
 
 * The MTU for a no-overlay pod network can match the provider network MTU
   because there is no Geneve overhead. Do not set a pod MTU larger than the
   underlay can carry.
-* `RouteAdvertisements` with `PodNetwork` must select all nodes with
-  `nodeSelector: {}`. A network cannot be partly overlay and partly no-overlay.
+* For BGP-backed no-overlay networks, `RouteAdvertisements` with `PodNetwork`
+  must select all nodes with `nodeSelector: {}`. A network cannot be partly
+  overlay and partly no-overlay.
 * No-overlay CUDNs with overlapping pod subnets cannot be advertised into the
   same VRF. Use a VRF-Lite design when overlapping pod CIDRs are required.
-* East-west traffic depends on the BGP network. BGP speaker outages can impact
-  cluster pod networking.
+* East-west traffic depends on the external routing fabric. In BGP-backed modes,
+  BGP speaker outages can impact cluster pod networking.
 * No-overlay mode inherits the limitations of the Route Advertisements and BGP
   integration.
-* Network debugging includes both OVN-Kubernetes and the BGP routing
-  infrastructure. Check the `RouteAdvertisements` status before debugging data
-  plane paths.
+* Network debugging includes OVN-Kubernetes and the external routing
+  infrastructure. For BGP-backed paths, check the `RouteAdvertisements` status
+  before debugging data plane paths. For unmanaged networks without
+  RouteAdvertisements, check the external fabric return routes.
 
 ## Known Limitations
 
@@ -331,12 +416,15 @@ condition is set to `False` with a reason such as
   no-overlay transport are not supported.
 * Creating a no-overlay network manually with a `NetworkAttachmentDefinition` is
   not supported.
-* No-overlay mode does not rely on routes that administrators might add directly to
-  the underlay. Each no-overlay network must have at least one accepted
-  `RouteAdvertisements` object that advertises `PodNetwork` routes. In unmanaged
-  routing mode, administrators must create the matching `RouteAdvertisements`
-  and `FRRConfiguration` resources. In managed routing mode, OVN-Kubernetes
-  creates those resources for the internal BGP fabric.
+* Except for unmanaged networks with no relevant `RouteAdvertisements` object,
+  each no-overlay network must have at least one
+  accepted `RouteAdvertisements` object that advertises `PodNetwork` routes. In
+  BGP-backed unmanaged routing mode, administrators must create the matching
+  `RouteAdvertisements` and `FRRConfiguration` resources. In managed routing
+  mode, OVN-Kubernetes creates those resources for the internal BGP fabric.
+* OVN-Kubernetes does not validate return routes for unmanaged networks without
+  RouteAdvertisements. If the external fabric does not route a pod subnet back
+  to the owning node, return traffic fails.
 * Features that rely on OVN delivering pod-to-pod traffic through the overlay,
   such as IPsec, multicast, EgressIP, and EgressService, are not supported on
   no-overlay networks.
