@@ -229,9 +229,14 @@ func NewClusterManager(
 				return nil, fmt.Errorf("failed to create managed BGP controller: %w", err)
 			}
 		}
-		if config.Default.Transport == types.NetworkTransportNoOverlay {
-			cm.noOverlayController = nooverlay.NewController(wf, recorder)
-		}
+	}
+
+	// create the no-overlay validation controller even when
+	// RouteAdvertisements are disabled, so that it can validate that routing
+	// is unmanaged, the only no-overlay mode that works without
+	// RouteAdvertisements
+	if config.Default.Transport == types.NetworkTransportNoOverlay {
+		cm.noOverlayController = nooverlay.NewController(wf, recorder)
 	}
 
 	if util.IsEVPNEnabled() {

@@ -28,6 +28,8 @@ import (
 
 	ovncnitypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	ratypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1"
+	apitypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 )
 
@@ -2088,6 +2090,27 @@ func IsRouteAdvertisementsEnabled() bool {
 	// for now, we require multi-network to be enabled because we rely on NADs,
 	// even for the default network
 	return config.OVNKubernetesFeature.EnableMultiNetwork && config.OVNKubernetesFeature.EnableRouteAdvertisements
+}
+
+// RASelectsDefaultNetwork returns true when the RouteAdvertisements selects
+// the default network.
+func RASelectsDefaultNetwork(ra *ratypes.RouteAdvertisements) bool {
+	if ra == nil {
+		return false
+	}
+	for _, networkSelector := range ra.Spec.NetworkSelectors {
+		if networkSelector.NetworkSelectionType == apitypes.DefaultNetwork {
+			return true
+		}
+	}
+	return false
+}
+
+// RAAdvertisesDefaultNetwork returns true when the RouteAdvertisements
+// advertises the default network pod subnets, regardless of its status.
+func RAAdvertisesDefaultNetwork(ra *ratypes.RouteAdvertisements) bool {
+	return ra != nil && slices.Contains(ra.Spec.Advertisements, ratypes.PodNetwork) &&
+		RASelectsDefaultNetwork(ra)
 }
 
 func IsEVPNEnabled() bool {

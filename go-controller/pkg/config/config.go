@@ -2517,6 +2517,13 @@ func buildNoOverlayConfig(file *config) error {
 	return nil
 }
 
+// IsDefaultNetworkUnmanagedNoOverlay returns true when the default network
+// uses no-overlay transport with unmanaged routing.
+func IsDefaultNetworkUnmanagedNoOverlay() bool {
+	return Default.Transport == types.NetworkTransportNoOverlay &&
+		NoOverlay.Routing == NoOverlayRoutingUnmanaged
+}
+
 // validateNoOverlayConfig validates the no-overlay configuration
 func validateNoOverlayConfig() error {
 	// Validate transport option; empty string means default OVN overlay transport
@@ -2526,9 +2533,6 @@ func validateNoOverlayConfig() error {
 
 	// If transport is no-overlay, validate required no-overlay options
 	if Default.Transport == types.NetworkTransportNoOverlay {
-		if !OVNKubernetesFeature.EnableRouteAdvertisements {
-			return fmt.Errorf("enable-route-advertisements must be true when transport=%q", types.NetworkTransportNoOverlay)
-		}
 		if NoOverlay.OutboundSNAT == "" {
 			return fmt.Errorf("outbound-snat is required when transport=no-overlay")
 		}
@@ -2541,6 +2545,11 @@ func validateNoOverlayConfig() error {
 		}
 		if NoOverlay.Routing != NoOverlayRoutingManaged && NoOverlay.Routing != NoOverlayRoutingUnmanaged {
 			return fmt.Errorf("invalid routing %q: must be %q or %q", NoOverlay.Routing, NoOverlayRoutingManaged, NoOverlayRoutingUnmanaged)
+		}
+
+		if !OVNKubernetesFeature.EnableRouteAdvertisements && NoOverlay.Routing != NoOverlayRoutingUnmanaged {
+			return fmt.Errorf("enable-route-advertisements must be true when transport=%q unless routing=%q",
+				types.NetworkTransportNoOverlay, NoOverlayRoutingUnmanaged)
 		}
 
 		// If routing is managed, topology is required
