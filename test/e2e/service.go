@@ -676,8 +676,11 @@ var _ = ginkgo.Describe("Services", feature.Service, func() {
 			extraCIDR = extraIP + "/128"
 		}
 
+		// The default first container (nb-ovsdb) dropped NET_ADMIN. Run "ip addr ..."
+		// inside the ovnkube-node pod's container that has NET_ADMIN.
+		nodeContainer := getNodeContainerName()
 		cmd := fmt.Sprintf(`ip -br addr; ip addr del %s dev lo; ip addr add %s dev lo; ip -br addr`, extraCIDR, extraCIDR)
-		_, err = e2epodoutput.RunHostCmdWithRetries(clientPod.Namespace, clientPod.Name, cmd, framework.Poll, 30*time.Second)
+		_, err = RunHostCmdInContainerWithRetries(clientPod.Namespace, clientPod.Name, nodeContainer, cmd, framework.Poll, 30*time.Second)
 		framework.ExpectNoError(err)
 		cleanupFn = func() {
 			// initial pod used for host command may be deleted at this point, refetch
@@ -689,7 +692,7 @@ var _ = ginkgo.Describe("Services", feature.Service, func() {
 			gomega.Expect(pods.Items).To(gomega.HaveLen(1))
 			clientPod := &pods.Items[0]
 			cmd := fmt.Sprintf(`ip addr del %s dev lo || true`, extraCIDR)
-			_, _ = e2epodoutput.RunHostCmdWithRetries(clientPod.Namespace, clientPod.Name, cmd, framework.Poll, 30*time.Second)
+			_, _ = RunHostCmdInContainerWithRetries(clientPod.Namespace, clientPod.Name, nodeContainer, cmd, framework.Poll, 30*time.Second)
 		}
 
 		ginkgo.By("Starting a UDP server listening on the additional IP")

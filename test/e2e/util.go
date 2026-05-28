@@ -1336,6 +1336,35 @@ func getNodeContainerName() string {
 	return "ovnkube-controller"
 }
 
+// RunHostCmdInContainer runs cmd in a specific pod container via kubectl exec,
+// like the k8s e2e framework's e2epodoutput.RunHostCmd but with --container.
+// The framework helper omits -c, so kubectl uses the pod's first container.
+// Use this when that container lacks what the command needs (e.g. NET_ADMIN
+// after nb-ovsdb dropped it in IC mode).
+func RunHostCmdInContainer(ns, name, container, cmd string) (string, error) {
+	return e2ekubectl.RunKubectl(ns, "exec", name, "--container", container, "--", "/bin/sh", "-x", "-c", cmd)
+}
+
+// RunHostCmdInContainerWithRetries retries RunHostCmdInContainer until success
+// or timeout, like e2epodoutput.RunHostCmdWithRetries.
+func RunHostCmdInContainerWithRetries(ns, name, container, cmd string, interval, timeout time.Duration) (string, error) {
+	var output string
+	var lastErr error
+	pollErr := wait.PollImmediate(interval, timeout, func() (bool, error) {
+		out, err := RunHostCmdInContainer(ns, name, container, cmd)
+		if err != nil {
+			lastErr = err
+			return false, nil
+		}
+		output = out
+		return true, nil
+	})
+	if pollErr != nil {
+		return "", fmt.Errorf("RunHostCmdInContainerWithRetries timed out after %v: %w; last exec error: %w", timeout, pollErr, lastErr)
+	}
+	return output, nil
+}
+
 // adds route to a docker node with a full mask
 func addRouteToNode(nodeName string, ips []string, mtu int) error {
 	return routeToNode(nodeName, ips, mtu, true)

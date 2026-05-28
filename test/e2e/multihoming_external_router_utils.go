@@ -326,9 +326,19 @@ func newPodExecutionContext(cmdBuilder routeCommandBuilder, pod v1.Pod) (*podExe
 		return nil, fmt.Errorf("failed to get target nodes for pod %s: %w", pod.Name, err)
 	}
 
+	// Pick the container that can actually run the command:
+	//   - Host-routing commands ("ip route ...") need NET_ADMIN, getNodeContainerName()
+	//     returns the right ovnkube-controller container name.
+	//   - OVN logical-router commands ("ovn-nbctl ...") must run in the container that
+	//     owns the NB DB unix socket, which is "nb-ovsdb".
+	containerName := "nb-ovsdb"
+	if _, isHostRoutingCommand := cmdBuilder.(hostRoutingTableCommandBuilder); isHostRoutingCommand {
+		containerName = getNodeContainerName()
+	}
+
 	return &podExecutionContext{
 		pod:           pod,
-		containerName: pod.Spec.Containers[0].Name,
+		containerName: containerName,
 		targetNodes:   targetNodes,
 		cmdBuilder:    cmdBuilder,
 	}, nil

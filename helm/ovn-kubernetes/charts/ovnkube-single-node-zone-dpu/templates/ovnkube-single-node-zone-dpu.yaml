@@ -44,10 +44,6 @@ spec:
         image: {{ include "getDPUImage" . }}
         imagePullPolicy: {{ default "IfNotPresent" .Values.global.dpuImage.pullPolicy }}
         command: ["/root/ovnkube.sh", "local-nb-ovsdb"]
-        securityContext:
-          runAsUser: 0
-          capabilities:
-            add: ["NET_ADMIN"]
         terminationMessagePolicy: FallbackToLogsOnError
         volumeMounts:
         # ovn db is stored in the pod in /etc/openvswitch
@@ -109,10 +105,6 @@ spec:
         image: {{ include "getDPUImage" . }}
         imagePullPolicy: {{ default "IfNotPresent" .Values.global.dpuImage.pullPolicy }}
         command: ["/root/ovnkube.sh", "local-sb-ovsdb"]
-        securityContext:
-          runAsUser: 0
-          capabilities:
-            add: ["NET_ADMIN"]
         terminationMessagePolicy: FallbackToLogsOnError
         volumeMounts:
         # ovn db is stored in the pod in /etc/openvswitch
