@@ -8,10 +8,11 @@ import (
 	"testing"
 )
 
-func TestNetConfMarshalJSONIncludesOutboundSNAT(t *testing.T) {
+func TestNetConfMarshalJSONIncludesNoOverlayFields(t *testing.T) {
 	netConf := NetConf{
-		Transport:    "no-overlay",
-		OutboundSNAT: "enabled",
+		Transport:        "no-overlay",
+		OutboundSNAT:     "enabled",
+		NoOverlayRouting: "unmanaged",
 	}
 
 	rawNetConf, err := json.Marshal(netConf)
@@ -20,8 +21,9 @@ func TestNetConfMarshalJSONIncludesOutboundSNAT(t *testing.T) {
 	}
 
 	var parsedNetConf struct {
-		Transport    string `json:"transport"`
-		OutboundSNAT string `json:"outboundSNAT"`
+		Transport        string `json:"transport"`
+		OutboundSNAT     string `json:"outboundSNAT"`
+		NoOverlayRouting string `json:"noOverlayRouting"`
 	}
 	if err := json.Unmarshal(rawNetConf, &parsedNetConf); err != nil {
 		t.Fatalf("failed to unmarshal NetConf: %v", err)
@@ -32,5 +34,8 @@ func TestNetConfMarshalJSONIncludesOutboundSNAT(t *testing.T) {
 	}
 	if parsedNetConf.OutboundSNAT != netConf.OutboundSNAT {
 		t.Fatalf("expected outboundSNAT %q, got %q", netConf.OutboundSNAT, parsedNetConf.OutboundSNAT)
+	}
+	if parsedNetConf.NoOverlayRouting != netConf.NoOverlayRouting {
+		t.Fatalf("expected noOverlayRouting %q, got %q", netConf.NoOverlayRouting, parsedNetConf.NoOverlayRouting)
 	}
 }
