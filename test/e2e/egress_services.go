@@ -16,13 +16,13 @@ import (
 
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/allocators"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/feature"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/images"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
 	infraapi "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/api"
-	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/ipalloc"
 
 	"golang.org/x/sync/errgroup"
 	v1 "k8s.io/api/core/v1"
@@ -421,9 +421,9 @@ spec:
 			ginkgo.By("By setting a secondary IP on non-egress node acting as \"another node\"")
 			var otherDstIP net.IP
 			if protocol == v1.IPv6Protocol {
-				otherDstIP, err = ipalloc.NewPrimaryIPv6()
+				otherDstIP, err = allocators.NewPrimaryIPv6(dstNode.Name)
 			} else {
-				otherDstIP, err = ipalloc.NewPrimaryIPv4()
+				otherDstIP, err = allocators.NewPrimaryIPv4(dstNode.Name)
 			}
 			framework.ExpectNoError(err, "failed to allocate secondary node IP")
 			otherDst := otherDstIP.String()
@@ -762,9 +762,9 @@ spec:
 			// allocate EIP IP
 			var egressIP net.IP
 			if IsIPv6Cluster(f.ClientSet) {
-				egressIP, err = ipalloc.NewPrimaryIPv6()
+				egressIP, err = allocators.NewPrimaryIPv6(eipNode.Name)
 			} else {
-				egressIP, err = ipalloc.NewPrimaryIPv4()
+				egressIP, err = allocators.NewPrimaryIPv4(eipNode.Name)
 			}
 			framework.ExpectNoError(err, "must allocate new primary network IP address")
 			egressIPYaml := "egressip.yaml"

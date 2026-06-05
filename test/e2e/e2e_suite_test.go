@@ -12,16 +12,17 @@ import (
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/allocators"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig/api"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/diagnostics"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
-	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/ipalloc"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/label"
 
 	deploymentkind "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig/configs/kind"
 	infraproviderkind "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/providers/kind"
 	clientset "k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog/v2"
 	"k8s.io/kubernetes/test/e2e/framework"
@@ -55,7 +56,7 @@ var _ = ginkgo.BeforeSuite(func() {
 	client, err := clientset.NewForConfig(config)
 	framework.ExpectNoError(err, "k8 clientset is required to list nodes")
 	if os.Getenv(uplinkDPUGatewayNetworkEnv) == "" {
-		err = ipalloc.InitPrimaryIPAllocator(client.CoreV1().Nodes())
+		err = allocators.InitPrimaryIPAllocator(client.CoreV1().Nodes())
 		framework.ExpectNoError(err, "failed to initialize node primary IP allocator")
 	} else {
 		framework.Logf("Skipping primary IP allocator initialization for DPU Uplink e2e")
@@ -72,7 +73,15 @@ func TestMain(m *testing.M) {
 	// Upstream currently uses KinD as its preferred platform infra
 	// So TestMain is expected to run only there.
 	infraprovider.Set(infraproviderkind.New())
-	deploymentconfig.Set(deploymentkind.New())
+	var restConfig *rest.Config
+	if framework.TestContext.KubeConfig != "" {
+		var err error
+		restConfig, err = clientcmd.BuildConfigFromFlags("", framework.TestContext.KubeConfig)
+		if err != nil {
+			klog.Exitf("Failed to build rest config: %v", err)
+		}
+	}
+	deploymentconfig.Set(deploymentkind.New(restConfig))
 	if os.Getenv("OVN_NETWORK_QOS_ENABLE") == "true" ||
 		os.Getenv("ENABLE_NO_OVERLAY") == "true" ||
 		os.Getenv("KIND_INSTALL_KUBEVIRT") == "true" {
