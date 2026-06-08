@@ -1135,27 +1135,8 @@ func createFRRConfiguration(ictx infraapi.Context,
 		labelsYAML += fmt.Sprintf("    %s: %s\n", k, v)
 	}
 
-	// Generate FRRConfiguration YAML
 	// No toReceive needed - EVPN routes come via l2vpn evpn address-family
-	// and are imported via route-target matching in the VRF
-	isEBGP := localASN != neighborASN
-	rawConfigSection := ""
-	if isEBGP {
-		// For eBGP EVPN, inter-node routes transit through the external FRR peer and
-		// arrive with the local ASN in the AS_PATH, which BGP rejects as a loop.
-		// allowas-in must be configured via rawConfig because the FRRConfiguration CRD
-		// does not expose this field, and direct vtysh injection gets overwritten when
-		// frr-k8s reconciles.
-		rawConfigSection = fmt.Sprintf(`  raw:
-    priority: 10
-    rawConfig: |
-      router bgp %d
-       address-family l2vpn evpn
-        neighbor %s allowas-in
-       exit-address-family
-      !
-`, localASN, neighborIP)
-	}
+	// and are imported via route-target matching in the VRF.
 	yaml := fmt.Sprintf(`apiVersion: frrk8s.metallb.io/v1beta1
 kind: FRRConfiguration
 metadata:
@@ -1169,8 +1150,7 @@ metadata:
       neighbors:
       - address: %s
         asn: %d
-        disableMP: true
-%s`, name, namespace, labelsYAML, localASN, neighborIP, neighborASN, rawConfigSection)
+`, name, namespace, labelsYAML, localASN, neighborIP, neighborASN)
 
 	// Write to temp file
 	tmpFile, err := os.CreateTemp("", "frrconfig-*.yaml")

@@ -21,7 +21,6 @@ spec:
 {{- range .NeighborsIPv4 }}
       - address: {{ . }}
         asn: {{ $v.NeighborASN }}
-        disableMP: true
         toReceive:
           allowed:
             mode: filtered
@@ -33,7 +32,6 @@ spec:
 {{- range .NeighborsIPv6 }}
       - address: {{ . }}
         asn: {{ $v.NeighborASN }}
-        disableMP: true
         toReceive:
           allowed:
             mode: filtered
