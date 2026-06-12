@@ -5,6 +5,7 @@ package e2e
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"hash/fnv"
 	"net"
@@ -16,11 +17,13 @@ import (
 	raclientset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/clientset/versioned"
 	apitypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/feature"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/images"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/kubernetes/test/e2e/framework"
@@ -43,7 +46,7 @@ var _ = ginkgo.Describe("No-Overlay: Default network is enabled with no-overlay"
 	var serverService *corev1.Service
 	var nodes *corev1.NodeList
 
-	ginkgo.BeforeEach(func() {
+	ginkgo.JustBeforeEach(func() {
 		var err error
 		ginkgo.By("Selecting nodes")
 		nodes, err = e2enode.GetReadySchedulableNodes(context.TODO(), f.ClientSet)
@@ -191,6 +194,40 @@ var _ = ginkgo.Describe("No-Overlay: Default network is enabled with no-overlay"
 			checkConnectivityWithoutOverlay(serverPod.Status.PodIPs, serverService.Spec.ClusterIPs, tcpdumpPod, tcpdumpPod)
 
 			framework.Logf("Pod2pod and pod2service connectivity maintained after ovnkube-node pod restart - test passed!")
+		})
+	})
+
+	ginkgo.When("unmanaged routing is enabled without RouteAdvertisements", func() {
+		ginkgo.BeforeEach(func() {
+			enabled, err := isDefaultNetworkNoOverlayUnmanagedWithoutRouteAdvertisements(f)
+			framework.ExpectNoError(err, "Failed to check default network no-overlay unmanaged state")
+			if !enabled {
+				ginkgo.Skip("Test requires unmanaged no-overlay default network without RouteAdvertisements")
+			}
+		})
+
+		ginkgo.It("should maintain pod2pod connectivity without RouteAdvertisements", func() {
+			// the connectivity check alone would not distinguish this spec from
+			// the generic no-overlay one: first prove no BGP-learned routes are
+			// involved, so connectivity relies on the underlay routing alone.
+			// The node may still hold BGP routes for unrelated prefixes (the
+			// RouteAdvertisements feature can be enabled cluster-wide), so only
+			// routes covering the pod IPs count.
+			ginkgo.By("Verifying no BGP-learned route on the client node covers the server pod")
+			var bgpRoutes []kernelRoute
+			for _, ipCmd := range []string{"ip", "ip -6"} {
+				out, err := e2epodoutput.RunHostCmd(tcpdumpPod.Namespace, tcpdumpPod.Name,
+					ipCmd+" --json route show proto bgp")
+				framework.ExpectNoError(err, "Failed to list BGP routes on the client node")
+				var routes []kernelRoute
+				framework.ExpectNoError(json.Unmarshal([]byte(out), &routes),
+					"Failed to parse BGP routes %q", out)
+				bgpRoutes = append(bgpRoutes, routes...)
+			}
+			expectNoRouteCoversPodIPs(bgpRoutes, serverPod.Status.PodIPs)
+
+			ginkgo.By("Testing pod2pod connectivity without default-network RouteAdvertisements")
+			checkConnectivityWithoutOverlay(serverPod.Status.PodIPs, nil, clientPod, tcpdumpPod)
 		})
 	})
 
@@ -374,6 +411,30 @@ func checkConnectivityWithoutOverlay(serverPodIPs []corev1.PodIP, serviceCluster
 	}
 }
 
+// expectNoRouteCoversPodIPs fails the test if any of the routes covers one
+// of the given pod IPs. A default route always counts as covering them.
+func expectNoRouteCoversPodIPs(routes []kernelRoute, podIPs []corev1.PodIP) {
+	ginkgo.GinkgoHelper()
+	for _, route := range routes {
+		if route.Dst == "default" {
+			framework.Failf("found a default route: %+v", route)
+		}
+		_, cidr, err := net.ParseCIDR(route.Dst)
+		if err != nil {
+			// plain host route without a mask
+			ip := net.ParseIP(route.Dst)
+			if ip == nil {
+				continue
+			}
+			cidr = util.GetIPNetFullMaskFromIP(ip)
+		}
+		for _, podIP := range podIPs {
+			gomega.Expect(cidr.Contains(net.ParseIP(podIP.IP))).To(gomega.BeFalse(),
+				"route to %s covers pod IP %s", route.Dst, podIP.IP)
+		}
+	}
+}
+
 func isManagedRoutingEnabled() bool {
 	ovnKubeNamespace := deploymentconfig.Get().OVNKubernetesNamespace()
 	args := []string{"get", "configmap", "ovnkube-config", "-o=jsonpath={.data.ovnkube\\.conf}"}
@@ -384,6 +445,39 @@ func isManagedRoutingEnabled() bool {
 		return true
 	}
 	return false
+}
+
+func isDefaultNetworkNoOverlayUnmanagedWithoutRouteAdvertisements(f *framework.Framework) (bool, error) {
+	if isManagedRoutingEnabled() {
+		return false, nil
+	}
+	hasDefaultNetworkRA, err := isAnyDefaultNetworkPodNetworkRouteAdvertisementsConfigured(f)
+	if err != nil {
+		return false, err
+	}
+	return !hasDefaultNetworkRA, nil
+}
+
+func isAnyDefaultNetworkPodNetworkRouteAdvertisementsConfigured(f *framework.Framework) (bool, error) {
+	raClient, err := raclientset.NewForConfig(f.ClientConfig())
+	if err != nil {
+		return false, err
+	}
+	raList, err := raClient.K8sV1().RouteAdvertisements().List(context.TODO(), metav1.ListOptions{})
+	if err != nil {
+		// The RouteAdvertisements CRD is not installed when the feature is
+		// disabled: no RouteAdvertisements are configured then.
+		if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	for i := range raList.Items {
+		if util.RAAdvertisesDefaultNetwork(&raList.Items[i]) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // managedRouteAdvertisementName matches clustermanager/managedbgp.ManagedRouteAdvertisementName

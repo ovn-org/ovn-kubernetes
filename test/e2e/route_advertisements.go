@@ -47,6 +47,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/dynamic"
+	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/kubectl/pkg/util/podutils"
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2ekubectl "k8s.io/kubernetes/test/e2e/framework/kubectl"
@@ -4032,21 +4033,7 @@ func ndpBroadcastNSFilter(targetIP net.IP) string {
 // routeAdvertisementsReadyFunc returns a function that checks for the
 // Accepted condition in the provided RouteAdvertisements
 func routeAdvertisementsReadyFunc(c raclientset.Clientset, name string) func() error {
-	return func() error {
-		ra, err := c.K8sV1().RouteAdvertisements().Get(context.Background(), name, metav1.GetOptions{})
-		if err != nil {
-			return err
-		}
-		conditionType := "Accepted"
-		condition := meta.FindStatusCondition(ra.Status.Conditions, conditionType)
-		if condition == nil {
-			return fmt.Errorf("no %q condition found in: %v", conditionType, ra)
-		}
-		if condition.Status != metav1.ConditionTrue {
-			return fmt.Errorf("condition %v has unexpected status %v", condition, condition.Status)
-		}
-		return nil
-	}
+	return routeAdvertisementsAcceptedConditionFunc(c, name, metav1.ConditionTrue)
 }
 
 // templateInputRouter data
@@ -4730,4 +4717,489 @@ func routeHasGateway(route kernelRoute, nextHops ...string) bool {
 		}
 	}
 	return false
+}
+
+// Labeled Feature:NoOverlay rather than Feature:RouteAdvertisements so the
+// suite also runs on lanes where the RouteAdvertisements feature is disabled,
+// which is a supported configuration for unmanaged no-overlay networks.
+var _ = ginkgo.Describe("Network Segmentation unmanaged no-overlay CUDN without RouteAdvertisements", feature.NetworkSegmentation, feature.NoOverlay, func() {
+	const unmanagedNoRALabel = "unmanaged-no-ra-no-overlay-e2e"
+
+	f := wrappedTestFramework("unmanaged-no-ra-no-overlay-cudn")
+	f.SkipNamespaceCreation = true
+
+	var (
+		namespace *corev1.Namespace
+		ictx      infraapi.Context
+		udnClient *udnclientset.Clientset
+		raClient  *raclientset.Clientset
+	)
+
+	newUnmanagedNoOverlayCUDN := func(name string) *udnv1.ClusterUserDefinedNetwork {
+		ginkgo.GinkgoHelper()
+		bgpAlloc, err := allocators.AllocateBGP(f, ictx)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		cudnIPv4, cudnIPv6 := bgpAlloc.UDNSubnet, bgpAlloc.UDNSubnet6
+		subnets := filterL3Subnets(f.ClientSet, []udnv1.Layer3Subnet{
+			{CIDR: udnv1.CIDR(cudnIPv4)},
+			{CIDR: udnv1.CIDR(cudnIPv6)},
+		})
+		gomega.Expect(subnets).NotTo(gomega.BeEmpty())
+		for i := range subnets {
+			if utilnet.IsIPv6CIDRString(string(subnets[i].CIDR)) {
+				subnets[i].HostSubnet = 64
+			} else {
+				subnets[i].HostSubnet = 24
+			}
+		}
+
+		return &udnv1.ClusterUserDefinedNetwork{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:   name,
+				Labels: map[string]string{unmanagedNoRALabel: name},
+			},
+			Spec: udnv1.ClusterUserDefinedNetworkSpec{
+				NamespaceSelector: metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{{
+					Key:      "kubernetes.io/metadata.name",
+					Operator: metav1.LabelSelectorOpIn,
+					Values:   []string{namespace.Name},
+				}}},
+				Network: udnv1.NetworkSpec{
+					Topology: udnv1.NetworkTopologyLayer3,
+					Layer3: &udnv1.Layer3Config{
+						Role:    udnv1.NetworkRolePrimary,
+						Subnets: subnets,
+					},
+					Transport: udnv1.TransportOptionNoOverlay,
+					NoOverlay: &udnv1.NoOverlayConfig{
+						OutboundSNAT: udnv1.SNATEnabled,
+						Routing:      udnv1.RoutingUnmanaged,
+					},
+				},
+			},
+		}
+	}
+
+	createUnmanagedNoOverlayCUDN := func(name string) *udnv1.ClusterUserDefinedNetwork {
+		ginkgo.GinkgoHelper()
+		cudn := newUnmanagedNoOverlayCUDN(name)
+		_, err := udnClient.K8sV1().ClusterUserDefinedNetworks().Create(context.Background(), cudn, metav1.CreateOptions{})
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		ginkgo.DeferCleanup(func() {
+			err := udnClient.K8sV1().ClusterUserDefinedNetworks().Delete(context.Background(), name, metav1.DeleteOptions{})
+			if err != nil && !apierrors.IsNotFound(err) {
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			}
+		})
+		return cudn
+	}
+
+	newNotAcceptedRA := func(name, cudnName string) *rav1.RouteAdvertisements {
+		return &rav1.RouteAdvertisements{
+			ObjectMeta: metav1.ObjectMeta{Name: name},
+			Spec: rav1.RouteAdvertisementsSpec{
+				NetworkSelectors: apitypes.NetworkSelectors{{
+					NetworkSelectionType: apitypes.ClusterUserDefinedNetworks,
+					ClusterUserDefinedNetworkSelector: &apitypes.ClusterUserDefinedNetworkSelector{
+						NetworkSelector: metav1.LabelSelector{
+							MatchLabels: map[string]string{unmanagedNoRALabel: cudnName},
+						},
+					},
+				}},
+				NodeSelector: metav1.LabelSelector{},
+				FRRConfigurationSelector: metav1.LabelSelector{
+					MatchLabels: map[string]string{unmanagedNoRALabel: "missing"},
+				},
+				Advertisements: []rav1.AdvertisementType{
+					rav1.PodNetwork,
+				},
+			},
+		}
+	}
+
+	ginkgo.BeforeEach(func() {
+		var err error
+		ictx = infraprovider.Get().NewTestContext()
+		namespace, err = f.CreateNamespace(context.Background(), f.BaseName, map[string]string{
+			"e2e-framework":           f.BaseName,
+			RequiredUDNNamespaceLabel: "",
+		})
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		f.Namespace = namespace
+
+		udnClient, err = udnclientset.NewForConfig(f.ClientConfig())
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		raClient, err = raclientset.NewForConfig(f.ClientConfig())
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	})
+
+	ginkgo.It("accepts an unmanaged no-overlay CUDN without RouteAdvertisements", func() {
+		cudnName := randomNetworkMetaName()
+		createUnmanagedNoOverlayCUDN(cudnName)
+
+		gomega.Eventually(clusterUserDefinedNetworkTransportAcceptedFunc(
+			f.DynamicClient,
+			cudnName,
+			metav1.ConditionTrue,
+			"NoOverlayRouteAdvertisementsNotRequired",
+		), 30*time.Second, time.Second).Should(gomega.Succeed())
+	})
+
+	ginkgo.It("maintains cross-node pod-to-pod connectivity without RouteAdvertisements", func() {
+		if infraprovider.Get().Name() != "kind" {
+			e2eskipper.Skipf("test programs kind-specific static underlay routes")
+		}
+
+		cudnName := randomNetworkMetaName()
+		cudn := createUnmanagedNoOverlayCUDN(cudnName)
+
+		gomega.Eventually(clusterUserDefinedNetworkTransportAcceptedFunc(
+			f.DynamicClient,
+			cudnName,
+			metav1.ConditionTrue,
+			"NoOverlayRouteAdvertisementsNotRequired",
+		), 30*time.Second, time.Second).Should(gomega.Succeed())
+		gomega.Eventually(clusterUserDefinedNetworkReadyFunc(context.TODO(), f.DynamicClient, cudnName), time.Minute, time.Second).Should(gomega.Succeed())
+
+		nodes, err := e2enode.GetBoundedReadySchedulableNodes(context.TODO(), f.ClientSet, 2)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		gomega.Expect(nodes.Items).To(gomega.HaveLen(2), "test requires at least two schedulable nodes")
+		configureCUDNNoOverlayUnderlay(f.ClientSet, cudn, nodes.Items)
+
+		serverPodSpec := e2epod.NewAgnhostPod(namespace.Name, "server-pod", nil, nil, []corev1.ContainerPort{{ContainerPort: netexecPort}}, "netexec")
+		serverPodSpec.Spec.NodeName = nodes.Items[0].Name
+		clientPodSpec := e2epod.NewAgnhostPod(namespace.Name, "client-pod", nil, nil, nil)
+		clientPodSpec.Spec.NodeName = nodes.Items[1].Name
+
+		serverPod := e2epod.PodClientNS(f, namespace.Name).CreateSync(context.Background(), serverPodSpec)
+		clientPod := e2epod.PodClientNS(f, namespace.Name).CreateSync(context.Background(), clientPodSpec)
+
+		attachmentName := namespacedName(namespace.Name, cudnName)
+		serverIPs, err := getPodAnnotationIPsForAttachment(f.ClientSet, namespace.Name, serverPod.Name, attachmentName)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		gomega.Expect(serverIPs).NotTo(gomega.BeEmpty())
+
+		for _, serverIPNet := range serverIPs {
+			serverIP := serverIPNet.IP.String()
+			clientIP, err := getPodAnnotationIPsForAttachmentByIPFamily(
+				f.ClientSet,
+				namespace.Name,
+				clientPod.Name,
+				attachmentName,
+				utilnet.IPFamilyOfString(serverIP),
+			)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			cmd := fmt.Sprintf("curl --max-time 10 -g -q -s http://%s/clientip", net.JoinHostPort(serverIP, strconv.Itoa(netexecPort)))
+			framework.Logf("Testing unmanaged no-overlay CUDN pod-to-pod traffic with command %q", cmd)
+			stdout, err := e2epodoutput.RunHostCmdWithRetries(
+				clientPod.Namespace,
+				clientPod.Name,
+				cmd,
+				framework.Poll,
+				60*time.Second,
+			)
+			framework.ExpectNoError(err, "testing unmanaged no-overlay CUDN pod-to-pod traffic failed")
+
+			sourceIP, _, err := net.SplitHostPort(strings.TrimSpace(stdout))
+			gomega.Expect(err).NotTo(gomega.HaveOccurred(), "failed to parse client address from output %q", stdout)
+			gomega.Expect(sourceIP).To(gomega.Equal(clientIP))
+		}
+	})
+
+	ginkgo.It("requires matching RouteAdvertisements to be accepted when one is configured", func() {
+		if os.Getenv("ENABLE_ROUTE_ADVERTISEMENTS") != "true" {
+			e2eskipper.Skipf("test requires the RouteAdvertisements feature")
+		}
+
+		cudnName := randomNetworkMetaName()
+		createUnmanagedNoOverlayCUDN(cudnName)
+
+		gomega.Eventually(clusterUserDefinedNetworkTransportAcceptedFunc(
+			f.DynamicClient,
+			cudnName,
+			metav1.ConditionTrue,
+			"NoOverlayRouteAdvertisementsNotRequired",
+		), 30*time.Second, time.Second).Should(gomega.Succeed())
+
+		raName := cudnName + "-ra"
+		_, err := raClient.K8sV1().RouteAdvertisements().Create(context.Background(), newNotAcceptedRA(raName, cudnName), metav1.CreateOptions{})
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		ginkgo.DeferCleanup(func() {
+			err := raClient.K8sV1().RouteAdvertisements().Delete(context.Background(), raName, metav1.DeleteOptions{})
+			if err != nil && !apierrors.IsNotFound(err) {
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			}
+		})
+
+		gomega.Eventually(routeAdvertisementsAcceptedConditionFunc(
+			*raClient,
+			raName,
+			metav1.ConditionFalse,
+		), 30*time.Second, time.Second).Should(gomega.Succeed())
+		gomega.Eventually(clusterUserDefinedNetworkTransportAcceptedFunc(
+			f.DynamicClient,
+			cudnName,
+			metav1.ConditionFalse,
+			"NoOverlayRouteAdvertisementsNotAccepted",
+		), 30*time.Second, time.Second).Should(gomega.Succeed())
+
+		gomega.Expect(raClient.K8sV1().RouteAdvertisements().Delete(context.Background(), raName, metav1.DeleteOptions{})).To(gomega.Succeed())
+		gomega.Eventually(clusterUserDefinedNetworkTransportAcceptedFunc(
+			f.DynamicClient,
+			cudnName,
+			metav1.ConditionTrue,
+			"NoOverlayRouteAdvertisementsNotRequired",
+		), time.Minute, time.Second).Should(gomega.Succeed())
+	})
+})
+
+func routeAdvertisementsAcceptedConditionFunc(c raclientset.Clientset, name string, expectedStatus metav1.ConditionStatus) func() error {
+	return func() error {
+		ra, err := c.K8sV1().RouteAdvertisements().Get(context.Background(), name, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+		condition := meta.FindStatusCondition(ra.Status.Conditions, "Accepted")
+		if condition == nil {
+			return fmt.Errorf("no Accepted condition found in RouteAdvertisements %q", name)
+		}
+		if condition.Status != expectedStatus {
+			return fmt.Errorf("expected RouteAdvertisements %q Accepted=%s, got %s: %s", name, expectedStatus, condition.Status, condition.Message)
+		}
+		return nil
+	}
+}
+
+func clusterUserDefinedNetworkTransportAcceptedFunc(client dynamic.Interface, name string, expectedStatus metav1.ConditionStatus, expectedReason string) func() error {
+	return func() error {
+		cudn, err := client.Resource(clusterUDNGVR).Get(context.Background(), name, metav1.GetOptions{}, "status")
+		if err != nil {
+			return err
+		}
+		conditions, err := getConditions(cudn)
+		if err != nil {
+			return err
+		}
+		condition := meta.FindStatusCondition(conditions, "TransportAccepted")
+		if condition == nil {
+			return fmt.Errorf("no TransportAccepted condition found in ClusterUserDefinedNetwork %q", name)
+		}
+		if condition.Status != expectedStatus || condition.Reason != expectedReason {
+			return fmt.Errorf("expected ClusterUserDefinedNetwork %q TransportAccepted=%s/%s, got %s/%s: %s",
+				name, expectedStatus, expectedReason, condition.Status, condition.Reason, condition.Message)
+		}
+		return nil
+	}
+}
+
+func nodeInternalIPForFamily(node corev1.Node, family utilnet.IPFamily) string {
+	ginkgo.GinkgoHelper()
+	protocol := corev1.IPv4Protocol
+	if family == utilnet.IPv6 {
+		protocol = corev1.IPv6Protocol
+	}
+	nodeIPs := e2enode.GetAddressesByTypeAndFamily(&node, corev1.NodeInternalIP, protocol)
+	gomega.Expect(nodeIPs).NotTo(gomega.BeEmpty(), "node %s must have an InternalIP for %s", node.Name, family)
+	return nodeIPs[0]
+}
+
+func nodeInternalIPForSubnet(node corev1.Node, subnet string) string {
+	ginkgo.GinkgoHelper()
+	family := utilnet.IPv4
+	if utilnet.IsIPv6CIDRString(subnet) {
+		family = utilnet.IPv6
+	}
+	return nodeInternalIPForFamily(node, family)
+}
+
+// configureKindNodeVRFRoute installs a route in a kind node's CUDN VRF routing table.
+func configureKindNodeVRFRoute(nodeName, vrfName, subnet, nextHop string) {
+	ginkgo.GinkgoHelper()
+	cmd := kindNodeVRFRouteCommand("replace", vrfName, subnet, nextHop)
+	delCmd := kindNodeVRFRouteCommand("del", vrfName, subnet, nextHop)
+
+	framework.Logf("Adding unmanaged no-overlay CUDN route on kind node %s VRF %s: %v", nodeName, vrfName, cmd)
+	_, err := infraprovider.Get().ExecK8NodeCommand(nodeName, cmd)
+	framework.ExpectNoError(err, "failed to add unmanaged no-overlay CUDN route on kind node %s VRF %s", nodeName, vrfName)
+	ginkgo.DeferCleanup(func() {
+		if _, err := infraprovider.Get().ExecK8NodeCommand(nodeName, delCmd); err != nil {
+			framework.Logf("Failed to delete unmanaged no-overlay CUDN route on kind node %s VRF %s: %v", nodeName, vrfName, err)
+		}
+	})
+}
+
+func kindNodeVRFRouteCommand(action, vrfName, subnet, nextHop string) []string {
+	cmd := []string{"ip"}
+	if utilnet.IsIPv6CIDRString(subnet) {
+		cmd = append(cmd, "-6")
+	}
+	return append(cmd,
+		"route", action,
+		"vrf", vrfName,
+		subnet,
+		"via", nextHop,
+		"dev", deploymentconfig.Get().ExternalBridgeName(),
+	)
+}
+
+func frrRouteCommand(action, subnet, nextHop string) []string {
+	cmd := []string{"ip"}
+	if utilnet.IsIPv6CIDRString(subnet) {
+		cmd = append(cmd, "-6")
+	}
+	return append(cmd, "route", action, subnet, "via", nextHop)
+}
+
+// configureFRRRoute installs a route in the external FRR container.
+func configureFRRRoute(subnet, nextHop string) {
+	ginkgo.GinkgoHelper()
+	cmd := frrRouteCommand("replace", subnet, nextHop)
+	delCmd := frrRouteCommand("del", subnet, nextHop)
+	frr := infraapi.ExternalContainer{Name: routerContainerName}
+	framework.Logf("Adding unmanaged no-overlay CUDN route on external FRR: %v", cmd)
+	_, err := infraprovider.Get().ExecExternalContainerCommand(frr, cmd)
+	framework.ExpectNoError(err, "failed to add unmanaged no-overlay CUDN route on external FRR")
+	ginkgo.DeferCleanup(func() {
+		if _, err := infraprovider.Get().ExecExternalContainerCommand(frr, delCmd); err != nil {
+			framework.Logf("Failed to delete unmanaged no-overlay CUDN route on external FRR: %v", err)
+		}
+	})
+}
+
+// configureGatewayRouterRoute installs a static route on a CUDN gateway router.
+func configureGatewayRouterRoute(cs clientset.Interface, cudnName, nodeName, subnet, nextHop string) {
+	ginkgo.GinkgoHelper()
+	gwRouterName := cudnGatewayRouterName(cudnName, nodeName)
+	outputPort := types.GWRouterToExtSwitchPrefix + gwRouterName
+	framework.Logf("Adding unmanaged no-overlay CUDN route on gateway router %s: %s via %s output %s", gwRouterName, subnet, nextHop, outputPort)
+	// the CUDN Ready condition does not imply every node's gateway router
+	// exists yet, so retry until ovnkube-controller has created it
+	gomega.Eventually(func() error {
+		_, err := runOVNNbctlOnNode(cs, nodeName,
+			"--if-exists", "lr-route-del", gwRouterName, subnet,
+			"--", "lr-route-add", gwRouterName, subnet, nextHop, outputPort)
+		return err
+	}, 2*time.Minute, 2*time.Second).Should(gomega.Succeed(),
+		"failed to add unmanaged no-overlay CUDN route on gateway router %s", gwRouterName)
+	ginkgo.DeferCleanup(func() {
+		if _, err := runOVNNbctlOnNode(cs, nodeName, "--if-exists", "lr-route-del", gwRouterName, subnet); err != nil {
+			framework.Logf("Failed to delete unmanaged no-overlay CUDN route on gateway router %s: %v", gwRouterName, err)
+		}
+	})
+}
+
+// udnVRFRulePriority is the priority of the IP rules the test installs to
+// steer underlay traffic for CUDN prefixes into the network VRF. It must NOT
+// be 2000 (node.UDNMasqueradeIPRulePriority): ovnkube-node owns that priority
+// and its rule manager deletes any rule there that it did not create, since
+// it only programs subnet-steering rules for advertised networks. 2500 sits
+// between the owned UDN priority and the EgressService/EgressIP rules
+// (5000/6000) and ahead of the main table lookup.
+const udnVRFRulePriority = 2500
+
+// configureUDNVRFRule installs a host IP rule for traffic to a CUDN prefix.
+func configureUDNVRFRule(nodeName, vrfName, prefix string) {
+	ginkgo.GinkgoHelper()
+	ipCmd := "ip"
+	if utilnet.IsIPv6CIDRString(prefix) {
+		ipCmd = "ip -6"
+	}
+	cmd := []string{"bash", "-c", fmt.Sprintf(
+		`table=$(ip -d link show dev %q | sed -n 's/.*vrf table \([0-9][0-9]*\).*/\1/p'); test -n "$table"; %s rule del priority %d to %q lookup "$table" 2>/dev/null || true; %s rule add priority %d to %q lookup "$table"`,
+		vrfName, ipCmd, udnVRFRulePriority, prefix, ipCmd, udnVRFRulePriority, prefix,
+	)}
+	delCmd := []string{"bash", "-c", fmt.Sprintf(
+		`table=$(ip -d link show dev %q | sed -n 's/.*vrf table \([0-9][0-9]*\).*/\1/p'); test -z "$table" || %s rule del priority %d to %q lookup "$table" 2>/dev/null || true`,
+		vrfName, ipCmd, udnVRFRulePriority, prefix,
+	)}
+	framework.Logf("Adding unmanaged no-overlay CUDN VRF rule on kind node %s: %v", nodeName, cmd)
+	_, err := infraprovider.Get().ExecK8NodeCommand(nodeName, cmd)
+	framework.ExpectNoError(err, "failed to add unmanaged no-overlay CUDN VRF rule on kind node %s", nodeName)
+	ginkgo.DeferCleanup(func() {
+		if _, err := infraprovider.Get().ExecK8NodeCommand(nodeName, delCmd); err != nil {
+			framework.Logf("Failed to delete unmanaged no-overlay CUDN VRF rule on kind node %s: %v", nodeName, err)
+		}
+	})
+}
+
+// cudnHostSubnetsByNode returns the CUDN host subnets assigned to each node.
+func cudnHostSubnetsByNode(cs clientset.Interface, cudnName string, nodes []corev1.Node) map[string][]*net.IPNet {
+	ginkgo.GinkgoHelper()
+	networkName := ovnutil.GenerateCUDNNetworkName(cudnName)
+	hostSubnetsByNode := map[string][]*net.IPNet{}
+	gomega.Eventually(func() error {
+		hostSubnetsByNode = map[string][]*net.IPNet{}
+		for _, node := range nodes {
+			updatedNode, err := cs.CoreV1().Nodes().Get(context.Background(), node.Name, metav1.GetOptions{})
+			if err != nil {
+				return err
+			}
+			hostSubnets, err := ovnutil.ParseNodeHostSubnetAnnotation(updatedNode, networkName)
+			if err != nil {
+				return err
+			}
+			if len(hostSubnets) == 0 {
+				return fmt.Errorf("node %s has no host subnets for CUDN %s", node.Name, cudnName)
+			}
+			hostSubnetsByNode[node.Name] = hostSubnets
+		}
+		return nil
+	}, time.Minute, time.Second).Should(gomega.Succeed())
+	return hostSubnetsByNode
+}
+
+// configureCommonCUDNUnderlayRoutes installs external routes for all CUDN host subnets.
+func configureCommonCUDNUnderlayRoutes(nodes []corev1.Node, hostSubnetsByNode map[string][]*net.IPNet) {
+	ginkgo.GinkgoHelper()
+	for _, node := range nodes {
+		for _, subnet := range hostSubnetsByNode[node.Name] {
+			configureFRRRoute(subnet.String(), nodeInternalIPForSubnet(node, subnet.String()))
+		}
+	}
+}
+
+// forEachRemoteCUDNHostSubnet invokes configure for every local node and
+// remote host subnet pair, with the remote node's InternalIP as next hop.
+func forEachRemoteCUDNHostSubnet(nodes []corev1.Node, hostSubnetsByNode map[string][]*net.IPNet, configure func(localNodeName, subnet, nextHop string)) {
+	ginkgo.GinkgoHelper()
+	for _, localNode := range nodes {
+		for _, remoteNode := range nodes {
+			if localNode.Name == remoteNode.Name {
+				continue
+			}
+			for _, remoteSubnet := range hostSubnetsByNode[remoteNode.Name] {
+				configure(localNode.Name, remoteSubnet.String(), nodeInternalIPForSubnet(remoteNode, remoteSubnet.String()))
+			}
+		}
+	}
+}
+
+// configureCUDNVRFRules installs host IP rules for all CUDN cluster subnets.
+func configureCUDNVRFRules(cudn *udnv1.ClusterUserDefinedNetwork, nodes []corev1.Node) {
+	ginkgo.GinkgoHelper()
+	for _, subnet := range cudn.Spec.Network.Layer3.Subnets {
+		for _, node := range nodes {
+			configureUDNVRFRule(node.Name, cudn.Name, string(subnet.CIDR))
+		}
+	}
+}
+
+// configureCUDNNoOverlayUnderlay installs routes and rules for CUDN no-overlay connectivity.
+func configureCUDNNoOverlayUnderlay(cs clientset.Interface, cudn *udnv1.ClusterUserDefinedNetwork, nodes []corev1.Node) {
+	ginkgo.GinkgoHelper()
+	hostSubnetsByNode := cudnHostSubnetsByNode(cs, cudn.Name, nodes)
+	configureCommonCUDNUnderlayRoutes(nodes, hostSubnetsByNode)
+	configureCUDNVRFRules(cudn, nodes)
+	if IsGatewayModeLocal(cs) {
+		// local gateway: pod egress uses the node VRF routing table
+		forEachRemoteCUDNHostSubnet(nodes, hostSubnetsByNode, func(localNodeName, subnet, nextHop string) {
+			configureKindNodeVRFRoute(localNodeName, cudn.Name, subnet, nextHop)
+		})
+	} else {
+		// shared gateway: pod egress uses the CUDN gateway router
+		forEachRemoteCUDNHostSubnet(nodes, hostSubnetsByNode, func(localNodeName, subnet, nextHop string) {
+			configureGatewayRouterRoute(cs, cudn.Name, localNodeName, subnet, nextHop)
+		})
+	}
 }
