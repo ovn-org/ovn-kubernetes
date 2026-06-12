@@ -1349,6 +1349,38 @@ kind_get_nodes() {
   kind get nodes --name "${KIND_CLUSTER_NAME}" | grep -v external-load-balancer
 }
 
+configure_pod_subnet_routes_on_runner_host() {
+  # Add routes for pod networks dynamically into the host for return traffic to pass back
+  if [ "$ADVERTISE_DEFAULT_NETWORK" != "true" ]; then
+    return
+  fi
+
+  echo "Adding routes for Kubernetes pod networks to the host..."
+  local nodes
+  nodes=$(kubectl get nodes -o jsonpath='{.items[*].metadata.name}')
+  echo "Found nodes: $nodes"
+  for node in $nodes; do
+    local node_ips node_ipv4 node_ipv6 subnet_json subnets subnet
+    node_ips=$(kubectl get node "$node" -o jsonpath='{.status.addresses[?(@.type=="InternalIP")].address}')
+    node_ipv4=$(echo "$node_ips" | tr ' ' '\n' | grep -v ':' | head -n 1 || true)
+    node_ipv6=$(echo "$node_ips" | tr ' ' '\n' | grep ':' | head -n 1 || true)
+    subnet_json=$(kubectl get node "$node" -o jsonpath='{.metadata.annotations.k8s\.ovn\.org/node-subnets}')
+    subnets=$(echo "$subnet_json" | jq -r '.default[]?')
+
+    for subnet in $subnets; do
+      if [[ "$subnet" == *:* ]]; then
+        if [ -n "$node_ipv6" ]; then
+          echo "Adding IPv6 route for $node ($node_ipv6): $subnet"
+          sudo ip -6 route replace "$subnet" via "$node_ipv6"
+        fi
+      elif [ -n "$node_ipv4" ]; then
+        echo "Adding IPv4 route for $node ($node_ipv4): $subnet"
+        sudo ip route replace "$subnet" via "$node_ipv4"
+      fi
+    done
+  done
+}
+
 set_dnsnameresolver_images() {
   if [ "$KIND_LOCAL_REGISTRY" == true ];then
     COREDNS_WITH_OCP_DNSNAMERESOLVER="localhost:5000/coredns-with-ocp-dnsnameresolver:latest"
@@ -1971,43 +2003,7 @@ EOF
 }
 
 configure_frr_k8s_routes() {
-  # Add routes for pod networks dynamically into the github runner for return traffic to pass back
-  if [ "$ADVERTISE_DEFAULT_NETWORK" = "true" ]; then
-    echo "Adding routes for Kubernetes pod networks..."
-    NODES=$(kubectl get nodes -o jsonpath='{.items[*].metadata.name}')
-    echo "Found nodes: $NODES"
-    for node in $NODES; do
-      # Get the addresses
-      node_ips=$(kubectl get node $node -o jsonpath='{.status.addresses[?(@.type=="InternalIP")].address}')
-      # Get subnet information
-      subnet_json=$(kubectl get node $node -o jsonpath='{.metadata.annotations.k8s\.ovn\.org/node-subnets}')
-      
-      if [ "$PLATFORM_IPV4_SUPPORT" == true ]; then
-        # Extract IPv4 address (first address)
-        node_ipv4=$(echo "$node_ips" | awk '{print $1}')
-        ipv4_subnet=$(echo "$subnet_json" | jq -r '.default[0]')
-        
-        # Add IPv4 route
-        if [ -n "$ipv4_subnet" ] && [ -n "$node_ipv4" ]; then
-          echo "Adding IPv4 route for $node ($node_ipv4): $ipv4_subnet"
-          sudo ip route replace $ipv4_subnet via $node_ipv4
-        fi
-      fi
-
-      # Add IPv6 route if enabled
-      if [ "$PLATFORM_IPV6_SUPPORT" == true ]; then
-        # Extract IPv6 address (second address, if present)
-        node_ipv6=$(echo "$node_ips" | awk '{print $2}')
-        ipv6_subnet=$(echo "$subnet_json" | jq -r '.default[1] // empty')
-        
-        if [ -n "$ipv6_subnet" ] && [ -n "$node_ipv6" ]; then
-          echo "Adding IPv6 route for $node ($node_ipv6): $ipv6_subnet"
-          sudo ip -6 route replace $ipv6_subnet via $node_ipv6
-        fi
-      fi
-    done
-  fi
-
+  configure_pod_subnet_routes_on_runner_host
   rm -rf "${FRR_TMP_DIR}"
 }
 
