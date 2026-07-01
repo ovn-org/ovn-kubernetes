@@ -479,26 +479,17 @@ var _ = ginkgo.Describe("BGP: When default podNetwork is advertised", feature.Ro
 				return nil
 			}, 30*time.Second, 2*time.Second).Should(gomega.Succeed(), "With default network being advertised initially, pod to second node test failed")
 
-			// defer add default network RA back to restore to the original test setup
-			ra := &rav1.RouteAdvertisements{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "default",
-				},
-				Spec: rav1.RouteAdvertisementsSpec{
-					NetworkSelectors: apitypes.NetworkSelectors{
-						apitypes.NetworkSelector{
-							NetworkSelectionType: apitypes.DefaultNetwork,
-						},
-					},
-					NodeSelector:             metav1.LabelSelector{},
-					FRRConfigurationSelector: metav1.LabelSelector{},
-					Advertisements: []rav1.AdvertisementType{
-						rav1.PodNetwork,
-					},
-				},
-			}
 			raClient, err := raclientset.NewForConfig(f.ClientConfig())
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			originalRA, err := raClient.K8sV1().RouteAdvertisements().Get(context.TODO(), "default", metav1.GetOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			// Defer adding the original default-network RA back to restore the original
+			// test setup, including its FRR configuration selector.
+			ra := &rav1.RouteAdvertisements{
+				ObjectMeta: metav1.ObjectMeta{Name: originalRA.Name},
+				Spec:       originalRA.Spec,
+			}
 
 			defer func() {
 				ra, err = raClient.K8sV1().RouteAdvertisements().Create(context.TODO(), ra, metav1.CreateOptions{})
