@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"sync"
 	"sync/atomic"
+	"testing"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -24,6 +25,39 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
+
+func TestOnDeleteQueuesTombstoneAndNotifiesObserver(t *testing.T) {
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "namespace1", Name: "pod1"}}
+	var deletedPod *corev1.Pod
+	reconcileCounter := &atomic.Uint64{}
+	config := getDefaultConfig[corev1.Pod](reconcileCounter)
+	config.OnDelete = func(pod *corev1.Pod) {
+		deletedPod = pod
+	}
+	controller := NewController("tombstone-delete-test", config).(*controller[corev1.Pod])
+	defer controller.stop()
+
+	tombstone := cache.DeletedFinalStateUnknown{
+		Key: "namespace1/pod1",
+		Obj: pod,
+	}
+	controller.onDelete(tombstone)
+
+	if deletedPod != pod {
+		t.Fatalf("expected OnDelete to receive tombstone pod %p, got %p", pod, deletedPod)
+	}
+	if controller.queue.Len() != 1 {
+		t.Fatalf("expected one queued tombstone key, got %d", controller.queue.Len())
+	}
+	key, shutdown := controller.queue.Get()
+	if shutdown {
+		t.Fatal("queue unexpectedly shut down before tombstone key was read")
+	}
+	controller.queue.Done(key)
+	if key != tombstone.Key {
+		t.Fatalf("expected queued tombstone key %q, got %q", tombstone.Key, key)
+	}
+}
 
 func getDefaultConfig[T any](reconcileCounter *atomic.Uint64) *ControllerConfig[T] {
 	return &ControllerConfig[T]{
@@ -225,6 +259,33 @@ var _ = Describe("Level-driven controller", func() {
 			})
 			return keys
 		}).Should(BeEquivalentTo(sets.New(pod1Key, pod2Key)))
+	})
+
+	It("passes deleted objects to OnDelete before enqueueing", func() {
+		namespace := util.NewNamespace(namespace1Name)
+		pod := &corev1.Pod{
+			ObjectMeta: util.NewObjectMeta("pod1", namespace.Name),
+			Status: corev1.PodStatus{
+				Phase: corev1.PodRunning,
+			},
+		}
+		deletedPods := make(chan *corev1.Pod, 1)
+		config := getDefaultConfig()
+		config.OnDelete = func(pod *corev1.Pod) {
+			deletedPods <- pod.DeepCopy()
+		}
+		startController(config, nil, namespace, pod)
+
+		pod.Status.Phase = corev1.PodSucceeded
+		_, err := fakeClient.KubeClient.CoreV1().Pods(namespace.Name).UpdateStatus(context.TODO(), pod, metav1.UpdateOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		err = fakeClient.KubeClient.CoreV1().Pods(namespace.Name).Delete(context.TODO(), pod.Name, metav1.DeleteOptions{})
+		Expect(err).NotTo(HaveOccurred())
+
+		var deletedPod *corev1.Pod
+		Eventually(deletedPods).Should(Receive(&deletedPod))
+		Expect(deletedPod.Name).To(Equal(pod.Name))
+		Expect(deletedPod.Status.Phase).To(Equal(corev1.PodSucceeded))
 	})
 	It("invokes OnDelete with the deleted object", func() {
 		namespace := util.NewNamespace(namespace1Name)
