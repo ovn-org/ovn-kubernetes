@@ -21,6 +21,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 	ref "k8s.io/client-go/tools/reference"
 	"k8s.io/klog/v2"
@@ -32,6 +33,7 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/allocator/pod"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	nodecontroller "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/controllers/node"
+	podcontroller "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/controllers/pod"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kubevirt"
@@ -95,8 +97,6 @@ type BaseNetworkController struct {
 	nadKeysLock sync.Mutex
 	lastNADKeys sets.Set[string]
 
-	// retry framework for pods
-	retryPods *ovnretry.RetryFramework
 	// retry framework for namespaces
 	retryNamespaces *ovnretry.RetryFramework
 	// retry framework for network policies
@@ -109,9 +109,14 @@ type BaseNetworkController struct {
 	nodeReconciler *nodecontroller.NodeController
 	// node annotation cache for shared node controllers (optional)
 	nodeAnnotationCache *nodecontroller.NodeAnnotationCache
+	// podReconciler is the shared pod controller used by controllers that
+	// reconcile pod topology through pkg/controllers/pod.
+	podReconciler *podcontroller.Controller
 
-	// pod events factory handler
-	podHandler *factory.Handler
+	// podHandler is the concrete network-specific pod reconciliation handler.
+	podHandler podcontroller.NetworkHandler
+	// podHandlerRegistered tracks registration with the shared pod controller.
+	podHandlerRegistered bool
 	// namespace events factory Handler
 	namespaceHandler *factory.Handler
 
@@ -259,7 +264,9 @@ func (oc *BaseNetworkController) doReconcile(reconcileRoutes, reconcilePendingPo
 	}
 
 	if reconcilePendingPods {
-		if err := ovnretry.RequeuePendingPods(oc.watchFactory, oc.GetNetInfo(), oc.retryPods); err != nil {
+		if oc.podReconciler == nil {
+			klog.Errorf("Failed to requeue pending pods for network %s: shared pod reconciler is not configured", oc.GetNetworkName())
+		} else if err := oc.podReconciler.ReconcilePendingPods(oc.GetNetworkName()); err != nil {
 			klog.Errorf("Failed to requeue pending pods for network %s: %v", oc.GetNetworkName(), err)
 		}
 	}
@@ -296,10 +303,24 @@ func (oc *BaseNetworkController) DeregisterNodeHandler() {
 	oc.nodeReconciler.DeregisterNetworkController(oc.GetNetworkName())
 }
 
+// DeregisterPodHandler removes this controller from the shared pod controller.
+func (oc *BaseNetworkController) DeregisterPodHandler() {
+	if oc.podReconciler == nil || !oc.podHandlerRegistered {
+		return
+	}
+	oc.podReconciler.DeregisterNetworkController(oc.GetNetworkName())
+	oc.podHandlerRegistered = false
+}
+
 // BaseUserDefinedNetworkController structure holds per-network fields and network specific
 // configuration for UDN controller
 type BaseUserDefinedNetworkController struct {
 	BaseNetworkController
+
+	// Owned port snapshots from unfinished reconciles, keyed by pod identity.
+	// Unlike the expiring logical-port cache, these survive arbitrarily long
+	// retries; they are retired once the desired state has been applied.
+	incompletePodPorts sync.Map
 
 	// network policy events factory handler
 	netPolicyHandler *factory.Handler
@@ -689,7 +710,7 @@ func (bnc *BaseNetworkController) addAllPodsOnNode(nodeName string) []error {
 		klog.Errorf("Unable to list existing pods for synchronizing node: %s, existing pods on this node may not function",
 			nodeName)
 	} else {
-		klog.V(5).Infof("When adding node %s for network %s, found %d pods to add to retryPods", nodeName, bnc.GetNetworkName(), len(pods))
+		klog.V(5).Infof("When adding node %s for network %s, found %d pods to add to pod reconciler", nodeName, bnc.GetNetworkName(), len(pods))
 		for _, pod := range pods {
 			pod := *pod
 			if util.PodCompleted(&pod) {
@@ -698,46 +719,62 @@ func (bnc *BaseNetworkController) addAllPodsOnNode(nodeName string) []error {
 			if pod.Spec.NodeName != nodeName {
 				continue
 			}
-			klog.V(5).Infof("Adding pod %s/%s to retryPods for network %s", pod.Namespace, pod.Name, bnc.GetNetworkName())
-			err = bnc.retryPods.AddRetryObjWithAddNoBackoff(&pod)
+			if bnc.podReconciler == nil {
+				errs = append(errs, fmt.Errorf("shared pod reconciler is not configured for network %s", bnc.GetNetworkName()))
+				continue
+			}
+			klog.V(5).Infof("Invalidating and adding pod %s/%s to pod reconciler for network %s", pod.Namespace, pod.Name, bnc.GetNetworkName())
+			podKey, err := cache.MetaNamespaceKeyFunc(&pod)
 			if err != nil {
 				errs = append(errs, err)
-				klog.Errorf("Failed to add pod %s/%s to retryPods for network %s: %v", pod.Namespace, pod.Name, bnc.GetNetworkName(), err)
+				klog.Errorf("Failed to get key for pod %s/%s for network %s: %v", pod.Namespace, pod.Name, bnc.GetNetworkName(), err)
+				continue
 			}
+			// Node creation and zone transitions can remove an LSP or change its
+			// transit-port configuration without changing the Pod object. Invalidate
+			// the controller-owned observation so the level-driven pod pass repairs
+			// the port instead of trusting the stale cache. Run the invalidation under
+			// the shared per-pod lock so an older in-flight reconcile cannot restore
+			// stale state after it.
+			bnc.podReconciler.ReconcileNetworkWithInvalidation(podKey, bnc.GetNetworkName(), func() {
+				if bnc.logicalPortCache != nil {
+					bnc.logicalPortCache.invalidatePodForNetwork(&pod, bnc.GetNetworkName())
+				}
+			})
 		}
 	}
-	bnc.retryPods.RequestRetryObjs()
 	return errs
 }
 
 // addRemotePodsInNamespace requeues non-terminal remote pods in a namespace once it
-// becomes served by this network. Their Add may have been filtered by shouldFilterNamespace
-// while GetPrimaryNADForNamespace returned InvalidPrimaryNetworkError, and by then they can
-// be past Pending, so RequeuePendingPods misses them. Local pods are skipped: they can't get
-// past Pending without this controller's processing them.
+// becomes served by this network. Their earlier reconcile may have treated the network as
+// not expected while GetPrimaryNADForNamespace returned InvalidPrimaryNetworkError, and by
+// then they can be past Pending. Local pods are skipped: they can't get past Pending without
+// this controller's processing them.
 func (bnc *BaseNetworkController) addRemotePodsInNamespace(namespace string) error {
 	pods, err := bnc.watchFactory.GetPods(namespace)
 	if err != nil {
 		return fmt.Errorf("unable to list pods in namespace %s: %w", namespace, err)
 	}
+	if bnc.podReconciler == nil {
+		return fmt.Errorf("shared pod reconciler is not configured for network %s", bnc.GetNetworkName())
+	}
 
 	var errs []error
-	podsAdded := false
 	for _, pod := range pods {
 		pod := *pod
 		if util.PodCompleted(&pod) || util.PodWantsHostNetwork(&pod) || bnc.isPodScheduledOnLocalNode(&pod) {
 			continue
 		}
-		klog.V(5).Infof("Adding remote running pod %s/%s to retryPods for network %s",
-			pod.Namespace, pod.Name, bnc.GetNetworkName())
-		if err := bnc.retryPods.AddRetryObjWithAddNoBackoff(&pod); err != nil {
-			errs = append(errs, fmt.Errorf("failed to add pod %s/%s to retryPods: %w", pod.Namespace, pod.Name, err))
+		podKey, err := cache.MetaNamespaceKeyFunc(&pod)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("failed to get key for pod %s/%s on network %s: %w",
+				pod.Namespace, pod.Name, bnc.GetNetworkName(), err))
 			continue
 		}
-		podsAdded = true
-	}
-	if podsAdded {
-		bnc.retryPods.RequestRetryObjs()
+		klog.V(5).Infof("Adding remote running pod %s/%s to the shared pod reconciler for network %s",
+			pod.Namespace, pod.Name, bnc.GetNetworkName())
+		bnc.podReconciler.ReconcileNetwork(podKey, bnc.GetNetworkName())
 	}
 	return utilerrors.Join(errs...)
 }
@@ -795,6 +832,9 @@ func (bnc *BaseNetworkController) deleteNamespaceLocked(ns string) (*namespaceIn
 		return nil, nil
 	}
 	if nsInfo.portGroupName != "" {
+		unlockNamespacePortGroup := bnc.lockNamespacePortGroup(ns)
+		defer unlockNamespacePortGroup()
+
 		err := libovsdbops.DeletePortGroups(bnc.nbClient, nsInfo.portGroupName)
 		if err != nil {
 			nsInfo.Unlock()
@@ -911,13 +951,23 @@ func (bnc *BaseNetworkController) recordNodeErrorEvent(node *corev1.Node, nodeEr
 }
 
 func (bnc *BaseNetworkController) recordPodErrorEvent(pod *corev1.Pod, podErr error) {
+	bnc.recordPodErrorEventWithReason(pod, "ErrorReconcilingPod", podErr)
+}
+
+// RecordPodError records a pod reconcile error with the retry-compatible
+// reason emitted by the shared pod controller.
+func (bnc *BaseNetworkController) RecordPodError(pod *corev1.Pod, reason string, podErr error) {
+	bnc.recordPodErrorEventWithReason(pod, reason, podErr)
+}
+
+func (bnc *BaseNetworkController) recordPodErrorEventWithReason(pod *corev1.Pod, reason string, podErr error) {
 	podRef, err := ref.GetReference(scheme.Scheme, pod)
 	if err != nil {
 		klog.Errorf("Couldn't get a reference to pod %s/%s to post an event: '%v'",
 			pod.Namespace, pod.Name, err)
 	} else {
 		klog.V(5).Infof("Posting a %s event for Pod %s/%s", corev1.EventTypeWarning, pod.Namespace, pod.Name)
-		bnc.recorder.Eventf(podRef, corev1.EventTypeWarning, "ErrorReconcilingPod", "%s", podErr.Error())
+		bnc.recorder.Eventf(podRef, corev1.EventTypeWarning, reason, "%s", podErr.Error())
 	}
 }
 

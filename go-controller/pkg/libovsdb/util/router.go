@@ -16,8 +16,11 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/nbdb"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/syncmap"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
+
+var defaultRouteToExternalLocks = syncmap.NewSyncMap[struct{}]()
 
 // CreateDefaultRouteToExternal is called only when IC=true. This function adds a "catch-all" kind of LRSR to ovn-cluster-router
 // 100.64.0.2               100.88.0.2 dst-ip
@@ -49,6 +52,8 @@ func CreateDefaultRouteToExternal(nbClient libovsdbclient.Client, clusterRouter,
 			Nexthop:  gatewayIP.IP.String(),
 			Policy:   &nbdb.LogicalRouterStaticRoutePolicySrcIP,
 		}
+		// The predicate below also matches subnet expansion, so key by network address instead of prefix length.
+		lockKey := fmt.Sprintf("%s|%s|%s", clusterRouter, clusterSubnet.CIDR.IP.String(), *lrsr.Policy)
 
 		clusterSubnetPrefixLen, _ := clusterSubnet.CIDR.Mask.Size()
 		p := func(lrsr *nbdb.LogicalRouterStaticRoute) bool {
@@ -78,7 +83,9 @@ func CreateDefaultRouteToExternal(nbClient libovsdbclient.Client, clusterRouter,
 				lrsr.Policy != nil && *lrsr.Policy == nbdb.LogicalRouterStaticRoutePolicySrcIP
 
 		}
-		if err := libovsdbops.CreateOrReplaceLogicalRouterStaticRouteWithPredicate(nbClient, clusterRouter, &lrsr, p); err != nil {
+		if err := defaultRouteToExternalLocks.DoWithLock(lockKey, func(_ string) error {
+			return libovsdbops.CreateOrReplaceLogicalRouterStaticRouteWithPredicate(nbClient, clusterRouter, &lrsr, p)
+		}); err != nil {
 			return fmt.Errorf("unable to create pod to external catch-all reroute for gateway router %s, err: %v", gwRouterName, err)
 		}
 	}

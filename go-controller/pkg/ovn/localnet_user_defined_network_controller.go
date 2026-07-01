@@ -12,12 +12,12 @@ import (
 
 	mnpapi "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta1"
 
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/allocator/pod"
 	nodecontroller "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/controllers/node"
+	podcontroller "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/controllers/pod"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
 	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/metrics/recorders"
@@ -111,14 +111,7 @@ func (h *LocalnetUserDefinedNetworkControllerEventHandler) IsResourceScheduled(o
 // AddResource adds the specified object to the cluster according to its type and returns the error,
 // if any, yielded during object creation.
 // Given an object to add and a boolean specifying if the function was executed from iterateRetryResources
-func (h *LocalnetUserDefinedNetworkControllerEventHandler) AddResource(obj interface{}, fromRetryLoop bool) error {
-	if h.objType == factory.PodType {
-		pod, ok := obj.(*corev1.Pod)
-		if !ok {
-			return fmt.Errorf("could not cast %T object to *corev1.Pod", obj)
-		}
-		return h.oc.ReconcilePod(nil, pod, nil, fromRetryLoop)
-	}
+func (h *LocalnetUserDefinedNetworkControllerEventHandler) AddResource(obj interface{}, _ bool) error {
 	return h.oc.AddUserDefinedNetworkResourceCommon(h.objType, obj)
 }
 
@@ -145,9 +138,6 @@ func (h *LocalnetUserDefinedNetworkControllerEventHandler) SyncFunc(objs []inter
 		syncFunc = h.syncFunc
 	} else {
 		switch h.objType {
-		case factory.PodType:
-			syncFunc = h.oc.syncPodsForUserDefinedNetwork
-
 		case factory.NamespaceType:
 			syncFunc = h.oc.syncNamespaces
 
@@ -183,6 +173,7 @@ func NewLocalnetUserDefinedNetworkController(
 	networkManager networkmanager.Interface,
 	addressSetManager *addresssetmanager.AddressSetManager,
 	nodeReconciler *nodecontroller.NodeController,
+	podReconciler *podcontroller.Controller,
 ) *LocalnetUserDefinedNetworkController {
 
 	stopChan := make(chan struct{})
@@ -215,10 +206,12 @@ func NewLocalnetUserDefinedNetworkController(
 					addressSetManager:            addressSetManager,
 					nodeReconciler:               nodeReconciler,
 					nodeAnnotationCache:          nodeAnnotationCache,
+					podReconciler:                podReconciler,
 				},
 			},
 		},
 	}
+	oc.podHandler = &oc.BaseUserDefinedNetworkController
 
 	if oc.allocatesPodAnnotation() {
 		oc.podAnnotationAllocator = pod.NewPodAnnotationAllocator(
@@ -249,6 +242,8 @@ func (oc *LocalnetUserDefinedNetworkController) Start(_ context.Context) error {
 		return err
 	}
 	if err := oc.run(); err != nil {
+		oc.DeregisterPodHandler()
+		oc.DeregisterNodeHandler()
 		return err
 	}
 	return nil
@@ -308,8 +303,6 @@ func (oc *LocalnetUserDefinedNetworkController) Reconcile(netInfo util.NetInfo) 
 }
 
 func (oc *LocalnetUserDefinedNetworkController) initRetryFramework() {
-	oc.retryPods = oc.newRetryFramework(factory.PodType)
-
 	// For secondary networks, we don't have to watch namespace events if
 	// multi-network policy support is not enabled. We don't support
 	// multi-network policy for IPAM-less secondary networks either.

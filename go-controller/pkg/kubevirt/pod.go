@@ -17,6 +17,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	ktypes "k8s.io/apimachinery/pkg/types"
 	listersv1 "k8s.io/client-go/listers/core/v1"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/retry"
 
 	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
@@ -26,6 +27,7 @@ import (
 	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/nbdb"
 	logicalswitchmanager "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/syncmap"
 	ovntypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -34,6 +36,7 @@ var (
 	virtLauncherPodLabel = map[string]string{
 		kubevirtv1.AppLabel: "virt-launcher",
 	}
+	liveMigrationVMLocks = syncmap.NewSyncMap[struct{}]()
 )
 
 // IsPodLiveMigratable returns true if the pod should use KubeVirt live migration features.
@@ -56,13 +59,40 @@ func findVMRelatedPods(client *factory.WatchFactory, pod *corev1.Pod) ([]*corev1
 	for _, vmPod := range vmPods {
 		// The purpose of this function is to return the "other" pods related
 		// to a VM.
-		if vmPod.UID == pod.UID {
+		if samePod(vmPod, pod) {
 			continue
 		}
 		filteredOutVMPods = append(filteredOutVMPods, vmPod)
 	}
 
 	return filteredOutVMPods, nil
+}
+
+// RelatedPodKeys returns queue keys for pods owned by the same virtual machine.
+func RelatedPodKeys(podLister listersv1.PodLister, pod *corev1.Pod) ([]string, error) {
+	if !IsPodLiveMigratable(pod) {
+		return nil, nil
+	}
+	vmDescription, err := NewVMDescriptionFromPod(pod)
+	if err != nil {
+		return nil, err
+	}
+	if vmDescription == nil {
+		return nil, nil
+	}
+	vmPods, err := vmDescription.OwnedPods(podLister)
+	if err != nil {
+		return nil, err
+	}
+	keys := make([]string, 0, len(vmPods))
+	for _, vmPod := range vmPods {
+		key, err := cache.MetaNamespaceKeyFunc(vmPod)
+		if err != nil {
+			return nil, err
+		}
+		keys = append(keys, key)
+	}
+	return keys, nil
 }
 
 // findPodAnnotation returns the OVN pod annotation from any other pod annotated with the same VM as pod.
@@ -83,7 +113,35 @@ func findPodAnnotation(client *factory.WatchFactory, pod *corev1.Pod, nadKey str
 			return podAnnotation, nil
 		}
 	}
-	return nil, fmt.Errorf("missing virtual machine pod annotation at stale pods for %s/%s", pod.Namespace, pod.Name)
+
+	// Related VM pods exist but none carries the annotation for this NAD yet.
+	// Only the oldest VM pod may allocate fresh addresses; newer pods (e.g.
+	// live-migration targets) fail so the reconcile is retried until they can
+	// inherit the VM's persistent addresses from an older pod.
+	for _, vmPod := range vmPods {
+		if util.PodCompleted(vmPod) {
+			// A completed pod never becomes annotated for this NAD.
+			continue
+		}
+		if vmPod.CreationTimestamp.Time.Before(pod.CreationTimestamp.Time) {
+			return nil, missingVMAnnotationError(pod)
+		}
+	}
+	return nil, nil
+}
+
+func samePod(a, b *corev1.Pod) bool {
+	if a == nil || b == nil {
+		return false
+	}
+	if a.UID != "" && b.UID != "" {
+		return a.UID == b.UID
+	}
+	return a.Namespace == b.Namespace && a.Name == b.Name
+}
+
+func missingVMAnnotationError(pod *corev1.Pod) error {
+	return fmt.Errorf("missing virtual machine pod annotation at stale pods for %s/%s", pod.Namespace, pod.Name)
 }
 
 // EnsurePodAnnotationForVM extracts OVN pod annotations from the source VM pod
@@ -95,6 +153,16 @@ func EnsurePodAnnotationForVM(watchFactory *factory.WatchFactory, kube *kube.Kub
 		return nil, nil
 	}
 
+	var podAnnotation *util.PodAnnotation
+	err := withLiveMigrationVMLock(pod, func() error {
+		var err error
+		podAnnotation, err = ensurePodAnnotationForVMLocked(watchFactory, kube, pod, nadKey)
+		return err
+	})
+	return podAnnotation, err
+}
+
+func ensurePodAnnotationForVMLocked(watchFactory *factory.WatchFactory, kube *kube.KubeOVN, pod *corev1.Pod, nadKey string) (*util.PodAnnotation, error) {
 	if podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations, nadKey); err == nil {
 		return podAnnotation, nil
 	}
@@ -128,6 +196,21 @@ func EnsurePodAnnotationForVM(watchFactory *factory.WatchFactory, kube *kube.Kub
 		return nil, fmt.Errorf("failed to update labels and annotations on pod %s/%s: %v", pod.Namespace, pod.Name, resultErr)
 	}
 	return podAnnotation, nil
+}
+
+func withLiveMigrationVMLock(pod *corev1.Pod, fn func() error) error {
+	vmDescription, err := NewVMDescriptionFromPod(pod)
+	if err != nil {
+		return err
+	}
+	if vmDescription == nil {
+		return fn()
+	}
+
+	key := vmDescription.Key().String()
+	liveMigrationVMLocks.LockKey(key)
+	defer liveMigrationVMLocks.UnlockKey(key)
+	return fn()
 }
 
 // AllVMPodsAreCompleted returns true if all VM pods are completed.
@@ -316,13 +399,15 @@ func CleanUpLiveMigratablePod(nbClient libovsdbclient.Client, watchFactory *fact
 		return nil
 	}
 
-	if err := DeleteDHCPOptions(nbClient, pod); err != nil {
-		return err
-	}
-	if err := DeleteRoutingForMigratedPod(nbClient, pod); err != nil {
-		return err
-	}
-	return nil
+	return withLiveMigrationVMLock(pod, func() error {
+		if err := DeleteDHCPOptions(nbClient, pod); err != nil {
+			return err
+		}
+		if err := DeleteRoutingForMigratedPod(nbClient, pod); err != nil {
+			return err
+		}
+		return nil
+	})
 }
 
 // SyncVirtualMachines deletes stale OVN resources for missing VMs or VMs in the wrong zone.

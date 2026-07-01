@@ -6,6 +6,7 @@ package ovn
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/onsi/ginkgo/v2"
@@ -18,7 +19,7 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/nbdb"
-	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/retry"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing"
 	libovsdbtest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	ovntypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
@@ -156,7 +157,7 @@ var _ = ginkgo.Describe("OVN Pod Operations with network segmentation", func() {
 			app.Action = func(*cli.Context) error {
 				namespaceT := *testing.NewNamespace("namespace1")
 				t := newTPod(
-					"node1",
+					node1Name,
 					"10.128.1.0/24",
 					"10.128.1.2",
 					"10.128.1.1",
@@ -167,8 +168,6 @@ var _ = ginkgo.Describe("OVN Pod Operations with network segmentation", func() {
 				)
 
 				pod := testing.NewPod(t.namespace, t.podName, t.nodeName, t.podIP)
-				key, err := retry.GetResourceKey(pod)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				// Pod informer will see the pod, but the namespace informer will
 				// not have the namespace yet. GetPrimaryNADForNamespace returns
@@ -191,15 +190,13 @@ var _ = ginkgo.Describe("OVN Pod Operations with network segmentation", func() {
 				)
 				t.populateLogicalSwitchCache(fakeOvn)
 
-				err = fakeOvn.controller.WatchNamespaces()
+				err := fakeOvn.controller.WatchNamespaces()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = fakeOvn.controller.WatchPods()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				// Pod add fails and is queued for retry while namespace is missing.
-				retry.CheckRetryObjectEventually(key, true, fakeOvn.controller.retryPods)
-
-				// Pod annotation must not be written before namespace is in the informer.
+				// The shared reconciler must not write the pod annotation while the
+				// namespace lookup is unresolved; the failed reconcile remains queued.
 				gomega.Consistently(func() bool {
 					p, getErr := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Get(
 						context.TODO(), t.podName, metav1.GetOptions{})
@@ -220,11 +217,8 @@ var _ = ginkgo.Describe("OVN Pod Operations with network segmentation", func() {
 					return getErr
 				}).Should(gomega.Succeed(), "namespace informer should have the namespace")
 
-				// Set retry object with no backoff to immediately retry the pod.
-				retry.SetRetryObjWithNoBackoff(key, fakeOvn.controller.retryPods)
-				fakeOvn.controller.retryPods.RequestRetryObjs()
-
-				// Pod annotation should be written and should have role=primary.
+				// The shared controller retries automatically. Once the namespace is
+				// observable, the pod annotation should be written with role=primary.
 				var podAnnotation *util.PodAnnotation
 				gomega.Eventually(func() bool {
 					annotations := getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName)
@@ -241,8 +235,86 @@ var _ = ginkgo.Describe("OVN Pod Operations with network segmentation", func() {
 					return podAnnotation.Role == ovntypes.NetworkRolePrimary
 				}).Should(gomega.BeTrue(), fmt.Sprintf("pod annotation should be written and should have role=primary: %v", podAnnotation))
 
-				// Pod should not be queued for retry.
-				retry.CheckRetryObjectEventually(key, false, fakeOvn.controller.retryPods)
+				return nil
+			}
+
+			gomega.Expect(app.Run([]string{app.Name})).To(gomega.Succeed())
+		})
+	})
+
+	ginkgo.Context("on update", func() {
+		ginkgo.It("updates UDN open-port ACLs without recreating the pod logical switch port", func() {
+			app.Action = func(*cli.Context) error {
+				namespaceT := *testing.NewNamespace("namespace1")
+				t := newTPod(
+					node1Name,
+					"10.128.1.0/24",
+					"10.128.1.2",
+					"10.128.1.1",
+					"myPod",
+					"10.128.1.3",
+					"0a:58:0a:80:01:03",
+					namespaceT.Name,
+				)
+				t.networkRole = ovntypes.NetworkRoleInfrastructure
+
+				oldPod := testing.NewPod(t.namespace, t.podName, t.nodeName, t.podIP)
+				setPodAnnotations(oldPod, t)
+				oldPod.Annotations[util.UDNOpenPortsAnnotationName] = "- protocol: tcp\n  port: 8080"
+
+				primaryNetwork := dummyLayer2PrimaryUserDefinedNetwork("192.168.0.0/16")
+				netInfo, err := util.NewNetInfo(primaryNetwork.netconf())
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				mutableNetInfo := util.NewMutableNetInfo(netInfo)
+				primaryNADKey := namespaceT.Name + "/primary-network"
+				mutableNetInfo.SetNADs(primaryNADKey)
+				fakeOvn.networkManager = &networkmanager.FakeNetworkManager{
+					PrimaryNetworks: map[string]util.NetInfo{namespaceT.Name: mutableNetInfo},
+					NADNetworks:     map[string]util.NetInfo{primaryNADKey: mutableNetInfo},
+				}
+
+				fakeOvn.startWithDBSetup(initialDB,
+					&corev1.NamespaceList{Items: []corev1.Namespace{namespaceT}},
+					&corev1.NodeList{Items: []corev1.Node{*newNode(node1Name, "192.168.126.202/24")}},
+					&corev1.PodList{Items: []corev1.Pod{*oldPod}},
+				)
+				t.populateLogicalSwitchCache(fakeOvn)
+				gomega.Expect(fakeOvn.controller.WatchNamespaces()).To(gomega.Succeed())
+				gomega.Expect(fakeOvn.controller.setupUDNACLs(nil)).To(gomega.Succeed())
+				gomega.Expect(fakeOvn.controller.addLogicalPort(oldPod)).To(gomega.Succeed())
+
+				appliedState := fakeOvn.controller.GetPodState(oldPod)
+				gomega.Expect(appliedState).NotTo(gomega.BeNil())
+				lspBefore, err := libovsdbops.GetLogicalSwitchPort(fakeOvn.nbClient,
+					&nbdb.LogicalSwitchPort{Name: t.portName})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				getIngressOpenPortACL := func() *nbdb.ACL {
+					acls, err := libovsdbops.FindACLsWithPredicate(fakeOvn.nbClient, func(acl *nbdb.ACL) bool {
+						return acl.Direction == nbdb.ACLDirectionToLport &&
+							strings.Contains(acl.Match, fmt.Sprintf(`outport == "%s"`, t.portName))
+					})
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					gomega.Expect(acls).To(gomega.HaveLen(1))
+					return acls[0]
+				}
+				gomega.Expect(getIngressOpenPortACL().Match).To(gomega.ContainSubstring("tcp.dst == 8080"))
+
+				newPod := oldPod.DeepCopy()
+				newPod.Annotations[util.UDNOpenPortsAnnotationName] = "- protocol: udp\n  port: 5353"
+				gomega.Expect(newPod.UID).To(gomega.Equal(oldPod.UID))
+				gomega.Expect(fakeOvn.controller.shouldEnsurePodLogicalPort(newPod, ovntypes.DefaultNetworkName)).To(gomega.BeFalse())
+				newState, err := fakeOvn.controller.ReconcilePod(oldPod, newPod, appliedState)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Expect(newState).NotTo(gomega.BeNil())
+
+				lspAfter, err := libovsdbops.GetLogicalSwitchPort(fakeOvn.nbClient,
+					&nbdb.LogicalSwitchPort{Name: t.portName})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Expect(lspAfter.UUID).To(gomega.Equal(lspBefore.UUID))
+				updatedACL := getIngressOpenPortACL()
+				gomega.Expect(updatedACL.Match).To(gomega.ContainSubstring("udp.dst == 5353"))
+				gomega.Expect(updatedACL.Match).NotTo(gomega.ContainSubstring("tcp.dst == 8080"))
 
 				return nil
 			}

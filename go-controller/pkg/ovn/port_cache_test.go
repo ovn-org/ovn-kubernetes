@@ -117,3 +117,33 @@ func TestPortCacheSnapshotsAreIndependent(t *testing.T) {
 		t.Fatal("mutating get result changed the cache")
 	}
 }
+
+func TestInvalidatePodForNetworkIsScopedToPodAndOwningNetwork(t *testing.T) {
+	stopChan := make(chan struct{})
+	t.Cleanup(func() { close(stopChan) })
+
+	cache := NewPortCache(stopChan)
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "namespace", Name: "pod"}}
+	otherPod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "namespace", Name: "other-pod"}}
+	const (
+		targetNetwork = "target-network"
+		otherNetwork  = "other-network"
+		targetNAD     = "namespace/target-nad"
+		otherNAD      = "namespace/other-nad"
+	)
+	cache.add(pod, "switch", targetNAD, targetNetwork, "target-uuid", nil, nil)
+	cache.add(pod, "switch", otherNAD, otherNetwork, "other-uuid", nil, nil)
+	cache.add(otherPod, "switch", targetNAD, targetNetwork, "other-pod-uuid", nil, nil)
+
+	cache.invalidatePodForNetwork(pod, targetNetwork)
+
+	if _, err := cache.get(pod, targetNAD); err == nil {
+		t.Fatal("expected the target pod's target-network observation to be invalidated")
+	}
+	if _, err := cache.get(pod, otherNAD); err != nil {
+		t.Fatalf("invalidation removed another network's observation: %v", err)
+	}
+	if _, err := cache.get(otherPod, targetNAD); err != nil {
+		t.Fatalf("invalidation removed another pod's observation: %v", err)
+	}
+}

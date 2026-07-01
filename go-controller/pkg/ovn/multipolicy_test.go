@@ -645,18 +645,29 @@ var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				expectMembership(map[string]string{})
 
-				// A retry invokes ReconcilePod with forceAdd=true. If the latest pod
-				// detached while an earlier add was failing, that forced path must
-				// still converge stale policy/default-deny membership to empty.
-				staleMembership := map[string]string{firstAppliedPort.name: firstAppliedPort.uuid}
+				// Drain and stop background pod reconciliation before injecting stale
+				// membership. Otherwise the detached-pod update can legitimately race
+				// this retry-path setup and remove the injected state itself.
+				udnController.DeregisterPodHandler()
+
+				// A retry that observes the latest detached pod must still converge
+				// stale policy/default-deny membership to empty. The detached UDN
+				// LSPs have already been deleted, so use another live LSP UUID to
+				// keep this deliberately corrupt strong reference in NBDB long enough
+				// for the retry to clean it up.
+				defaultLSP, err := libovsdbops.GetLogicalSwitchPort(fakeOvn.nbClient,
+					&nbdb.LogicalSwitchPort{Name: nPodTest.portName})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				staleMembership := map[string]string{firstAppliedPort.name: defaultLSP.UUID}
 				policyOps, err := libovsdbops.AddPortsToPortGroupOps(fakeOvn.nbClient, nil,
-					np.portGroupName, firstAppliedPort.uuid)
+					np.portGroupName, defaultLSP.UUID)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Expect(udnController.denyPGAddPorts(np, staleMembership, policyOps)).To(gomega.Succeed())
 				np.setLocalPortsForPod(pod, staleMembership)
 				expectMembership(staleMembership)
 
-				gomega.Expect(udnController.ReconcilePod(pod, pod, nil, true)).To(gomega.Succeed())
+				_, err = udnController.ReconcilePod(pod, pod, nil)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				expectMembership(map[string]string{})
 
 				return nil

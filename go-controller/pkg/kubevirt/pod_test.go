@@ -16,6 +16,7 @@ import (
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
+	ovntypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -239,6 +240,30 @@ var _ = Describe("Kubevirt Pod", func() {
 			},
 		),
 	)
+
+	Describe("findPodAnnotation", func() {
+		It("allows the oldest VM pod to allocate when no related pod is annotated", func() {
+			sourcePod := runningKvSourcePod
+			targetPod := duringMigrationKvTargetPod
+			wf, shutdown := initWatchFactory([]corev1.Pod{sourcePod, targetPod})
+			defer shutdown()
+
+			podAnnotation, err := findPodAnnotation(wf, &sourcePod, ovntypes.DefaultNetworkName)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(podAnnotation).To(BeNil())
+		})
+
+		It("returns an error for newer VM pods until an older pod is annotated", func() {
+			sourcePod := runningKvSourcePod
+			targetPod := duringMigrationKvTargetPod
+			wf, shutdown := initWatchFactory([]corev1.Pod{sourcePod, targetPod})
+			defer shutdown()
+
+			podAnnotation, err := findPodAnnotation(wf, &targetPod, ovntypes.DefaultNetworkName)
+			Expect(err).To(MatchError(ContainSubstring("missing virtual machine pod annotation")))
+			Expect(podAnnotation).To(BeNil())
+		})
+	})
 
 	Describe("NewVMDescriptionFromPod", func() {
 		It("returns nil for non-kubevirt pod", func() {

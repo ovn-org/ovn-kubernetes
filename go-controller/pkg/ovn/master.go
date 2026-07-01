@@ -562,11 +562,13 @@ func (oc *DefaultNetworkController) addUpdateLocalNodeEvent(node *corev1.Node, n
 		oc.addNodeFailed.Delete(node.Name)
 	}
 
+	hybridOverlaySyncFailed := false
 	// since the nodeSync objects are created knowing if hybridOverlay is enabled this should work
 	if nSyncs.syncHo && config.HybridOverlay.Enabled {
 		if err = oc.allocateHybridOverlayDRIP(node); err != nil {
 			errs = append(errs, err)
 			oc.hybridOverlayFailed.Store(node.Name, true)
+			hybridOverlaySyncFailed = true
 		}
 	}
 
@@ -609,7 +611,7 @@ func (oc *DefaultNetworkController) addUpdateLocalNodeEvent(node *corev1.Node, n
 			if err := oc.handleHybridOverlayPort(node, annotator); err != nil {
 				errs = append(errs, fmt.Errorf("failed to set up hybrid overlay logical switch port for %s: %v", node.Name, err))
 				oc.hybridOverlayFailed.Store(node.Name, true)
-			} else {
+			} else if !hybridOverlaySyncFailed {
 				oc.hybridOverlayFailed.Delete(node.Name)
 			}
 		} else {

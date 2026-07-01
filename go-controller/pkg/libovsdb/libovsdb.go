@@ -176,7 +176,7 @@ func NewNBClientWithEndpoint(endpoint string, promRegistry prometheus.Registerer
 	enableMetricsOption := client.WithMetricsRegistryNamespaceSubsystem(promRegistry, "ovnkube",
 		"master_libovsdb")
 
-	// define client indexes for objects that are using dbIDs
+	// Define client indexes for lookups not covered by schema indexes.
 	dbModel.SetIndexes(map[string][]model.ClientIndex{
 		nbdb.ACLTable:           {{Columns: []model.ColumnKey{{Column: "external_ids", Key: types.PrimaryIDKey}}}},
 		nbdb.DHCPOptionsTable:   {{Columns: []model.ColumnKey{{Column: "external_ids", Key: types.PrimaryIDKey}}}},
@@ -184,6 +184,10 @@ func NewNBClientWithEndpoint(endpoint string, promRegistry prometheus.Registerer
 		nbdb.LogicalSwitchTable: {{Columns: []model.ColumnKey{{Column: "name"}}}},
 		nbdb.LogicalRouterTable: {{Columns: []model.ColumnKey{{Column: "name"}}}},
 		nbdb.QoSTable:           {{Columns: []model.ColumnKey{{Column: "external_ids", Key: types.PrimaryIDKey}}}},
+		nbdb.LogicalSwitchPortTable: {{Columns: []model.ColumnKey{
+			{Column: "external_ids", Key: "namespace"},
+			{Column: "external_ids", Key: types.NetworkExternalID},
+		}}},
 	})
 
 	c, err := newClient(endpoint, dbModel, enableMetricsOption)

@@ -206,6 +206,57 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 2 network", func() {
 		),
 	)
 
+	It("reapplies L2 interconnect transit-port config when the local node is replayed", func() {
+		netInfo := dummySecondaryLayer2UserDefinedNetwork("100.200.0.0/16")
+		testConfig := icClusterTestConfiguration()
+		setupConfig(netInfo, testConfig, config.GatewayModeShared)
+
+		app.Action = func(*cli.Context) error {
+			podInfo := dummyL2TestPod(ns, netInfo, 0, 0)
+			pod := newMultiHomedPod(podInfo, netInfo)
+			testNode, err := newNodeWithUserDefinedNetworks(nodeName, "192.168.126.202/24")
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(setupFakeOvnForLayer2Topology(fakeOvn, initialDB, netInfo,
+				[]corev1.Node{*testNode}, podInfo, pod)).To(Succeed())
+			defer fakeOvn.networkManager.Stop()
+
+			udnController, ok := fakeOvn.userDefinedNetworkControllers[netInfo.netName]
+			Expect(ok).To(BeTrue())
+			portInfo := podInfo.getNetworkPortInfo(netInfo.netName, netInfo.nadName)
+			Expect(portInfo).NotTo(BeNil())
+			Eventually(func(g Gomega) {
+				lsp, err := libovsdbops.GetLogicalSwitchPort(fakeOvn.nbClient,
+					&nbdb.LogicalSwitchPort{Name: portInfo.portName})
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(lsp.Type).To(BeEmpty())
+				g.Expect(lsp.Options[libovsdbops.RequestedTnlKey]).To(Equal("1"))
+			}).WithTimeout(5 * time.Second).Should(Succeed())
+
+			lsp, err := libovsdbops.GetLogicalSwitchPort(fakeOvn.nbClient,
+				&nbdb.LogicalSwitchPort{Name: portInfo.portName})
+			Expect(err).NotTo(HaveOccurred())
+			delete(lsp.Options, libovsdbops.RequestedTnlKey)
+			Expect(libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitch(fakeOvn.nbClient,
+				&nbdb.LogicalSwitch{Name: udnController.bnc.GetNetworkScopedSwitchName(nodeName)}, lsp)).To(Succeed())
+
+			// The pod object is unchanged. The node handler's replay must
+			// invalidate the applied LSP observation so the pod reconcile re-runs
+			// AddTransitPortConfig and restores the requested tunnel key.
+			Expect(udnController.bnc.addAllPodsOnNode(nodeName)).To(BeEmpty())
+			Eventually(func(g Gomega) {
+				lsp, err := libovsdbops.GetLogicalSwitchPort(fakeOvn.nbClient,
+					&nbdb.LogicalSwitchPort{Name: portInfo.portName})
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(lsp.Type).To(BeEmpty())
+				g.Expect(lsp.Options[libovsdbops.RequestedTnlKey]).To(Equal("1"))
+			}).WithTimeout(5 * time.Second).Should(Succeed())
+			return nil
+		}
+
+		Expect(app.Run([]string{app.Name})).To(Succeed())
+	})
+
 	DescribeTable(
 		"reconciles a new kubevirt-related pod during its live-migration phases",
 		func(netInfo userDefinedNetInfo, testConfig testConfiguration, migrationInfo *liveMigrationInfo) {
@@ -534,6 +585,7 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 2 network", func() {
 				fakeOvn.addressSetManager,
 				nil,
 				nil,
+				nil,
 			)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(dummyController.Cleanup()).To(Succeed())
@@ -643,6 +695,7 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 2 network", func() {
 				NewPortCache(ctx.Done()),
 				nil,
 				fakeOvn.addressSetManager,
+				nil,
 				nil,
 				fakeOvn.controller.ServiceController(),
 			)

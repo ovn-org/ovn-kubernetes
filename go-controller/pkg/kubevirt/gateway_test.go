@@ -212,9 +212,9 @@ func TestLocalMigratablePodRoutingAndGateway(t *testing.T) {
 			if tc.routeFailure || tc.ipv6Only {
 				// Exercise the public coordinator: route failures and IPv6-only
 				// configurations must not attempt to send a GARP.
-				err = EnsureDefaultNetworkForLocalMigratablePod(wf, nbClient, lsManager, pod, clusterSubnets)
+				err = EnsureDefaultNetworkForLocalMigratablePod(wf, nbClient, lsManager, pod, nil, clusterSubnets)
 			} else {
-				require.NoError(t, ensureLocalZonePodAddressesToNodeRoute(wf, nbClient, lsManager, pod, types.DefaultNetworkName, clusterSubnets))
+				require.NoError(t, ensureLocalZonePodAddressesToNodeRoute(wf, nbClient, lsManager, pod, nil, types.DefaultNetworkName, clusterSubnets))
 				if tc.notReady || tc.source {
 					err = reconcileIPv4GatewayForMigratablePod(wf, pod)
 				} else {
@@ -230,7 +230,7 @@ func TestLocalMigratablePodRoutingAndGateway(t *testing.T) {
 				require.Zero(t, calls)
 			case tc.sendFailure:
 				require.ErrorIs(t, err, sendErr)
-				require.NoError(t, ensureLocalZonePodAddressesToNodeRoute(wf, nbClient, lsManager, pod, types.DefaultNetworkName, clusterSubnets))
+				require.NoError(t, ensureLocalZonePodAddressesToNodeRoute(wf, nbClient, lsManager, pod, nil, types.DefaultNetworkName, clusterSubnets))
 				status, discoverErr := DiscoverLiveMigrationStatus(wf.PodCoreInformer().Lister(), pod)
 				require.NoError(t, discoverErr)
 				require.NotNil(t, status)

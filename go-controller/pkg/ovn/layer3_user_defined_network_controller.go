@@ -20,6 +20,7 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/allocator/pod"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	nodecontroller "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/controllers/node"
+	podcontroller "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/controllers/pod"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/generator/udn"
 	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
@@ -114,14 +115,7 @@ func (h *Layer3UserDefinedNetworkControllerEventHandler) IsResourceScheduled(obj
 // AddResource adds the specified object to the cluster according to its type and returns the error,
 // if any, yielded during object creation.
 // Given an object to add and a boolean specifying if the function was executed from iterateRetryResources
-func (h *Layer3UserDefinedNetworkControllerEventHandler) AddResource(obj interface{}, fromRetryLoop bool) error {
-	if h.objType == factory.PodType {
-		pod, ok := obj.(*corev1.Pod)
-		if !ok {
-			return fmt.Errorf("could not cast %T object to *corev1.Pod", obj)
-		}
-		return h.oc.ReconcilePod(nil, pod, nil, fromRetryLoop)
-	}
+func (h *Layer3UserDefinedNetworkControllerEventHandler) AddResource(obj interface{}, _ bool) error {
 	return h.oc.AddUserDefinedNetworkResourceCommon(h.objType, obj)
 }
 
@@ -148,9 +142,6 @@ func (h *Layer3UserDefinedNetworkControllerEventHandler) SyncFunc(objs []interfa
 		syncFunc = h.syncFunc
 	} else {
 		switch h.objType {
-		case factory.PodType:
-			syncFunc = h.oc.syncPodsForUserDefinedNetwork
-
 		case factory.NamespaceType:
 			syncFunc = h.oc.syncNamespaces
 
@@ -224,6 +215,7 @@ func NewLayer3UserDefinedNetworkController(
 	portCache *PortCache,
 	addressSetManager *addresssetmanager.AddressSetManager,
 	nodeReconciler *nodecontroller.NodeController,
+	podReconciler *podcontroller.Controller,
 	serviceController *svccontroller.Controller,
 ) (*Layer3UserDefinedNetworkController, error) {
 
@@ -258,6 +250,7 @@ func NewLayer3UserDefinedNetworkController(
 				addressSetManager:            addressSetManager,
 				nodeReconciler:               nodeReconciler,
 				nodeAnnotationCache:          nodeAnnotationCache,
+				podReconciler:                podReconciler,
 			},
 		},
 		mgmtPortFailed:              sync.Map{},
@@ -269,6 +262,7 @@ func NewLayer3UserDefinedNetworkController(
 		gatewayManagers:             sync.Map{},
 		eIPController:               eIPController,
 	}
+	oc.podHandler = &oc.BaseUserDefinedNetworkController
 
 	if oc.IsPrimaryNetwork() {
 		oc.onLogicalPortCacheAdd = func(pod *corev1.Pod, _ string) {
@@ -305,8 +299,6 @@ func NewLayer3UserDefinedNetworkController(
 }
 
 func (oc *Layer3UserDefinedNetworkController) initRetryFramework() {
-	oc.retryPods = oc.newRetryFramework(factory.PodType)
-
 	// When a user-defined network is enabled as a primary network for namespace,
 	// then watch for namespace and network policy events.
 	if oc.IsPrimaryNetwork() {
@@ -359,6 +351,7 @@ func (oc *Layer3UserDefinedNetworkController) Start(_ context.Context) error {
 	}
 	if err := oc.run(); err != nil {
 		oc.DeregisterServiceNetwork()
+		oc.DeregisterPodHandler()
 		oc.DeregisterNodeHandler()
 		return err
 	}
@@ -374,6 +367,7 @@ func (oc *Layer3UserDefinedNetworkController) Stop() {
 	klog.Infof("Stop %s UDN controller of network %s", oc.TopologyType(), oc.GetNetworkName())
 	oc.unregisterEgressIPNetwork()
 	oc.DeregisterServiceNetwork()
+	oc.DeregisterPodHandler()
 	oc.DeregisterNodeHandler()
 	close(oc.stopChan)
 	oc.stopChan = nil
@@ -385,9 +379,6 @@ func (oc *Layer3UserDefinedNetworkController) Stop() {
 	}
 	if oc.multiNetPolicyHandler != nil {
 		oc.watchFactory.RemoveMultiNetworkPolicyHandler(oc.multiNetPolicyHandler)
-	}
-	if oc.podHandler != nil {
-		oc.watchFactory.RemovePodHandler(oc.podHandler)
 	}
 	if oc.namespaceHandler != nil {
 		oc.watchFactory.RemoveNamespaceHandler(oc.namespaceHandler)
