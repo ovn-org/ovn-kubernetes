@@ -950,6 +950,7 @@ func (e *EgressIPController) addPodEgressIPAssignments(ni util.NetInfo, name str
 		podIPs = append(podIPs, ipNet.IP)
 	}
 	podState, exists := e.podAssignment.Load(podKey)
+	var pendingSNATRestoreErr error
 	if !exists {
 		remainingAssignments = statusAssignments
 		podState = &podAssignmentState{
@@ -960,6 +961,7 @@ func (e *EgressIPController) addPodEgressIPAssignments(ni util.NetInfo, name str
 			network:              ni,
 		}
 	} else if podState.egressIPName == name || podState.egressIPName == "" {
+		pendingSNATRestoreErr = e.restorePendingReprogrammedPodSNATs(ni, pod, podState)
 		podIPsChanged := !util.IsIPsEqual(podState.podIPs, podIPs)
 		// We do the setup only if this egressIP object is the one serving this pod OR
 		// podState.egressIPName can be empty if no re-routes were found in
@@ -967,7 +969,8 @@ func (e *EgressIPController) addPodEgressIPAssignments(ni util.NetInfo, name str
 		for _, status := range statusAssignments {
 			// Add the status if it's not already in the cache, or if it exists but is in pending state
 			// (meaning it was populated during EIP sync and needs to be processed for the pod).
-			if value, exists := podState.egressStatuses.statusMap[status]; !exists || value == egressStatusStatePending {
+			if value, exists := podState.egressStatuses.statusMap[status]; !exists ||
+				value == egressStatusStatePending || value == egressStatusStatePendingReprogramSNATRestore {
 				remainingAssignments = append(remainingAssignments, status)
 			} else if podIPsChanged {
 				// A pod can be re-created with the same name but a different IP.
@@ -1010,17 +1013,25 @@ func (e *EgressIPController) addPodEgressIPAssignments(ni util.NetInfo, name str
 		err = e.deletePodEgressIPAssignments(ni, name, []egressipv1.EgressIPStatusItem{staleStatus}, pod, true)
 		if err != nil {
 			klog.Warningf("Failed to delete stale EgressIP status %s/%v for pod %s: %v", name, staleStatus, podKey, err)
+			if podState.egressStatuses.statusMap[staleStatus] == egressStatusStatePendingReprogramSNATRestore {
+				continue
+			}
 		}
 		delete(podState.egressStatuses.statusMap, staleStatus)
 	}
 	if len(reprogramAssignments) > 0 {
 		klog.V(2).Infof("Pod %s IPs changed, forcing egress IP status reprogram for statuses: %+v", podKey, reprogramAssignments)
-		if err := e.deletePodEgressIPAssignments(ni, name, reprogramAssignments, pod, false); err != nil {
-			return fmt.Errorf("failed to force reprogram of pod %s statuses %v for egress IP %s: %w",
-				podKey, reprogramAssignments, name, err)
-		}
 		for _, status := range reprogramAssignments {
-			delete(podState.egressStatuses.statusMap, status)
+			if err := e.deletePodEgressIPAssignmentsWithOptions(ni, name, []egressipv1.EgressIPStatusItem{status}, pod, false, false); err != nil {
+				reprogramErr := fmt.Errorf("failed to force reprogram of pod %s status %v for egress IP %s: %w",
+					podKey, status, name, err)
+				e.podAssignment.Store(podKey, podState)
+				return utilerrors.Join(reprogramErr, e.restorePendingReprogrammedPodSNATs(ni, pod, podState))
+			}
+			// Keep the deleted assignment represented durably until either its
+			// EgressIP setup is re-added or its default SNAT is restored.
+			podState.egressStatuses.statusMap[status] = egressStatusStatePendingReprogramSNATRestore
+			e.podAssignment.Store(podKey, podState)
 		}
 		remainingAssignments = append(remainingAssignments, reprogramAssignments...)
 	}
@@ -1045,6 +1056,15 @@ func (e *EgressIPController) addPodEgressIPAssignments(ni util.NetInfo, name str
 		e.nodeState.UnlockKey(status.Node)
 	}
 	if !proceed && !e.isPodScheduledOnLocalNode(pod) {
+		// This controller owns neither side of the assignment, so there is no local
+		// EgressIP setup or default SNAT to compensate. Preserve the assignment
+		// as applied after updating the cached pod IPs.
+		for _, status := range podState.pendingReprogramSNATRestores() {
+			podState.egressStatuses.statusMap[status] = ""
+		}
+		for _, status := range reprogramAssignments {
+			podState.egressStatuses.statusMap[status] = ""
+		}
 		return nil // nothing to do if none of the status nodes are local to this controller and the pod is also remote
 	}
 	for _, status := range remainingAssignments {
@@ -1072,8 +1092,15 @@ func (e *EgressIPController) addPodEgressIPAssignments(ni util.NetInfo, name str
 			})
 		})
 		if err != nil {
-			return err
+			return utilerrors.Join(err, e.restorePendingReprogrammedPodSNATs(ni, pod, podState))
 		}
+		podState.egressStatuses.statusMap[status] = ""
+	}
+	if podState.hasPendingReprogramSNATRestores() {
+		if pendingSNATRestoreErr != nil {
+			return pendingSNATRestoreErr
+		}
+		return fmt.Errorf("pod %s still has pending default-SNAT compensation after egress IP reprogram", podKey)
 	}
 	if e.isPodScheduledOnLocalNode(pod) {
 		if err := e.addPodIPsToAddressSet(ni.GetNetworkName(), e.controllerName, podIPs...); err != nil {
@@ -1081,6 +1108,49 @@ func (e *EgressIPController) addPodEgressIPAssignments(ni util.NetInfo, name str
 		}
 	}
 	return nil
+}
+
+// restorePendingReprogrammedPodSNATs retries durable default-SNAT
+// compensation left by a failed forced delete+add. A successful restore moves
+// the status to the ordinary pending-add state; a successful EgressIP add moves
+// it directly to applied state. Thus retries continue until either safe outcome
+// is reached.
+func (e *EgressIPController) restorePendingReprogrammedPodSNATs(ni util.NetInfo, pod *corev1.Pod, podState *podAssignmentState) error {
+	return e.restorePendingReprogrammedPodSNATsWithFn(ni, pod, podState, func(status egressipv1.EgressIPStatusItem) error {
+		return e.addExternalGWPodSNAT(ni, pod.Namespace, pod.Name, status)
+	})
+}
+
+func (e *EgressIPController) restorePendingReprogrammedPodSNATsWithFn(
+	ni util.NetInfo,
+	pod *corev1.Pod,
+	podState *podAssignmentState,
+	restore func(egressipv1.EgressIPStatusItem) error,
+) error {
+	if podState == nil || !podState.hasPendingReprogramSNATRestores() {
+		return nil
+	}
+	if !ni.IsDefault() {
+		podState.clearPendingReprogramSNATRestores()
+		e.podAssignment.Store(getPodKey(pod), podState)
+		return nil
+	}
+
+	// Store before attempting compensation because the preceding delete may
+	// have removed the last ordinary status (and the whole cache entry).
+	e.podAssignment.Store(getPodKey(pod), podState)
+	return e.nodeState.DoWithLock(pod.Spec.NodeName, func(_ string) error {
+		var errs []error
+		for _, status := range podState.pendingReprogramSNATRestores() {
+			if err := restore(status); err != nil {
+				errs = append(errs, fmt.Errorf("failed to restore external GW pod SNAT for pod %s after egress IP status %v reprogram: %w",
+					getPodKey(pod), status, err))
+				continue
+			}
+			podState.egressStatuses.statusMap[status] = egressStatusStatePending
+		}
+		return utilerrors.Join(errs...)
+	})
 }
 
 // deleteEgressIPAssignments performs a full egress IP setup deletion on a per
@@ -1231,6 +1301,12 @@ func (e *EgressIPController) deletePodEgressIPAssignmentsUsingCache(name string,
 // If assignStandby is true, any standby EgressIP for the pod will be promoted to active.
 func (e *EgressIPController) deletePodEgressIPAssignments(ni util.NetInfo, name string, statusesToRemove []egressipv1.EgressIPStatusItem, pod *corev1.Pod,
 	assignStandby bool) error {
+	return e.deletePodEgressIPAssignmentsWithOptions(ni, name, statusesToRemove, pod, assignStandby, true)
+}
+
+// deletePodEgressIPAssignmentsWithOptions *must* be called with podAssignment lock on pod.
+func (e *EgressIPController) deletePodEgressIPAssignmentsWithOptions(ni util.NetInfo, name string, statusesToRemove []egressipv1.EgressIPStatusItem, pod *corev1.Pod,
+	assignStandby, restoreExternalGWPodSNAT bool) error {
 	podKey := getPodKey(pod)
 	podStatus, exists := e.podAssignment.Load(podKey)
 	if !exists {
@@ -1252,14 +1328,14 @@ func (e *EgressIPController) deletePodEgressIPAssignments(ni util.NetInfo, name 
 			err := e.nodeState.DoWithLock(nodesToLock[0], func(_ string) error {
 				if statusToRemove.Node == pod.Spec.NodeName {
 					// we are safe, no need to grab lock again
-					if err := e.deletePodEgressIPAssignment(ni, name, statusToRemove, pod); err != nil {
+					if err := e.deletePodEgressIPAssignment(ni, name, statusToRemove, pod, restoreExternalGWPodSNAT); err != nil {
 						return err
 					}
 					podStatus.egressStatuses.delete(statusToRemove)
 					return nil
 				}
 				return e.nodeState.DoWithLock(nodesToLock[1], func(_ string) error {
-					if err := e.deletePodEgressIPAssignment(ni, name, statusToRemove, pod); err != nil {
+					if err := e.deletePodEgressIPAssignment(ni, name, statusToRemove, pod, restoreExternalGWPodSNAT); err != nil {
 						return err
 					}
 					podStatus.egressStatuses.delete(statusToRemove)
@@ -2682,7 +2758,10 @@ func InitClusterEgressPolicies(nbClient libovsdbclient.Client, addressSetFactory
 
 // egressStatusStatePending marks entries populated during EIP sync and
 // indicates they must be reconciled again for the pod.
-const egressStatusStatePending = "pending"
+const (
+	egressStatusStatePending                     = "pending"
+	egressStatusStatePendingReprogramSNATRestore = "pending-reprogram-snat-restore"
+)
 
 type statusMap map[egressipv1.EgressIPStatusItem]string
 
@@ -2690,9 +2769,43 @@ type egressStatuses struct {
 	// statusMap tracks per EIP status assignment for a pod.
 	// Key: egressipv1.EgressIPStatusItem {EgressIP, Node}
 	// Values:
-	//   ""                      -> applied/reconciled
-	//   egressStatusStatePending -> populated during EIP sync, pending reconcile.
+	//   ""                                             -> applied/reconciled
+	//   egressStatusStatePending                        -> pending assignment reconcile
+	//   egressStatusStatePendingReprogramSNATRestore    -> assignment deleted and default-SNAT compensation pending
 	statusMap
+}
+
+func (e egressStatuses) pendingReprogramSNATRestores() []egressipv1.EgressIPStatusItem {
+	pending := make([]egressipv1.EgressIPStatusItem, 0)
+	for status, state := range e.statusMap {
+		if state == egressStatusStatePendingReprogramSNATRestore {
+			pending = append(pending, status)
+		}
+	}
+	sort.Slice(pending, func(i, j int) bool {
+		if pending[i].Node == pending[j].Node {
+			return pending[i].EgressIP < pending[j].EgressIP
+		}
+		return pending[i].Node < pending[j].Node
+	})
+	return pending
+}
+
+func (e egressStatuses) hasPendingReprogramSNATRestores() bool {
+	for _, state := range e.statusMap {
+		if state == egressStatusStatePendingReprogramSNATRestore {
+			return true
+		}
+	}
+	return false
+}
+
+func (e egressStatuses) clearPendingReprogramSNATRestores() {
+	for status, state := range e.statusMap {
+		if state == egressStatusStatePendingReprogramSNATRestore {
+			e.statusMap[status] = egressStatusStatePending
+		}
+	}
 }
 
 func (e egressStatuses) contains(potentialStatus egressipv1.EgressIPStatusItem) bool {
@@ -2940,7 +3053,7 @@ func (e *EgressIPController) addPodEgressIPAssignment(ni util.NetInfo, egressIPN
 // deletePodEgressIPAssignment deletes the OVN programmed egress IP
 // configuration mentioned for addPodEgressIPAssignment.
 // This function should be called with lock on nodeState cache key status.Node and pod.Spec.NodeName
-func (e *EgressIPController) deletePodEgressIPAssignment(ni util.NetInfo, egressIPName string, status egressipv1.EgressIPStatusItem, pod *corev1.Pod) (err error) {
+func (e *EgressIPController) deletePodEgressIPAssignment(ni util.NetInfo, egressIPName string, status egressipv1.EgressIPStatusItem, pod *corev1.Pod, restoreExternalGWPodSNAT bool) (err error) {
 	if config.Metrics.EnableScaleMetrics {
 		start := time.Now()
 		defer func() {
@@ -2987,7 +3100,7 @@ func (e *EgressIPController) deletePodEgressIPAssignment(ni util.NetInfo, egress
 	}
 	var ops []ovsdb.Operation
 	// For CDN only, add SNATs to support external GW feature
-	if ni.IsDefault() && (!loadedPodNode || isLocalPod) {
+	if restoreExternalGWPodSNAT && ni.IsDefault() && (!loadedPodNode || isLocalPod) {
 		ops, err = e.addExternalGWPodSNATOps(ni, nil, pod.Namespace, pod.Name, status)
 		if err != nil {
 			return err
@@ -3092,6 +3205,10 @@ func (e *EgressIPController) addExternalGWPodSNATOps(ni util.NetInfo, ops []ovsd
 			if err != nil {
 				return nil, err
 			}
+			// A status removes the default SNAT only for its own IP family;
+			// compensation must not reintroduce a default SNAT for another
+			// family whose EgressIP assignment was re-added successfully.
+			podIPs = util.MatchAllIPNetFamily(utilnet.IsIPv6String(status.EgressIP), podIPs)
 
 			isNetworkAdvertised := util.IsPodNetworkAdvertisedAtNode(ni, pod.Spec.NodeName)
 			var clusterNodeIPsAddrSetDbIDs *libovsdbops.DbObjectIDs

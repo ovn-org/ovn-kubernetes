@@ -150,7 +150,19 @@ func (oc *DefaultNetworkController) ReconcilePod(oldPod, newPod *corev1.Pod, las
 		oc.logicalPortCache.remove(newPod, ovntypes.DefaultNetworkName)
 		return nil, nil
 	}
+	if oc.shouldRetryEgressIPPodAfterLogicalPortReconcile(newPod, addPort) {
+		if err := oc.eIPC.addEgressIPPodRetry(newPod, "pod logical port reconcile"); err != nil {
+			klog.Warningf("Failed to enqueue EgressIP retry for pod %s/%s after logical port reconcile: %v",
+				newPod.Namespace, newPod.Name, err)
+		}
+	}
 	return oc.GetPodState(newPod), nil
+}
+
+func (oc *DefaultNetworkController) shouldRetryEgressIPPodAfterLogicalPortReconcile(pod *corev1.Pod, addPort bool) bool {
+	// Only wake EgressIP retry when this reconcile can have changed local LSP/IP
+	// state. Remote pods are handled by EgressIP's own pod/annotation watches.
+	return addPort && oc.eIPC != nil && pod != nil && oc.isPodScheduledOnLocalNode(pod)
 }
 
 func (oc *DefaultNetworkController) recordPodReconcileStart(oldPod, newPod *corev1.Pod) *corev1.Pod {
