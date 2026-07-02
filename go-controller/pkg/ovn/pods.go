@@ -173,18 +173,27 @@ func (oc *DefaultNetworkController) deleteLogicalPort(pod *corev1.Pod, portInfo 
 	if err != nil {
 		return fmt.Errorf("cannot determine if IP resources can be cleaned up for pod %s: %w", podDesc, err)
 	}
-	if !canCleanup {
-		return nil
+	failedMigrationTarget, err := kubevirt.IsFailedLiveMigrationTarget(oc.watchFactory.PodCoreInformer().Lister(), pod)
+	if err != nil {
+		return err
 	}
+	cleanupPodNetworkState := canCleanup || failedMigrationTarget
 
-	if config.Gateway.DisableSNATMultipleGWs {
+	if config.Gateway.DisableSNATMultipleGWs && cleanupPodNetworkState {
 		if err := oc.deletePodSNAT(pInfo.logicalSwitch, []*net.IPNet{}, pInfo.ips); err != nil {
 			return fmt.Errorf("cannot delete GR SNAT for pod %s: %w", podDesc, err)
 		}
 	}
-	podNsName := ktypes.NamespacedName{Namespace: pod.Namespace, Name: pod.Name}
-	if err := oc.deleteGWRoutesForPod(podNsName, pInfo.ips); err != nil {
-		return fmt.Errorf("cannot delete GW Routes for pod %s: %w", podDesc, err)
+
+	if cleanupPodNetworkState {
+		podNsName := ktypes.NamespacedName{Namespace: pod.Namespace, Name: pod.Name}
+		if err := oc.deleteGWRoutesForPod(podNsName, pInfo.ips); err != nil {
+			return fmt.Errorf("cannot delete GW Routes for pod %s: %w", podDesc, err)
+		}
+	}
+
+	if !canCleanup {
+		return nil
 	}
 
 	if kubevirt.IsPodLiveMigratable(pod) {

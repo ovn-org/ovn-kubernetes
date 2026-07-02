@@ -76,10 +76,11 @@ func CreateDefaultRouteToExternal(nbClient libovsdbclient.Client, clusterRouter,
 				return false
 			}
 			itemPrefixLen, _ := itemCIDR.Mask.Size()
+			exactRoute := clusterSubnet.CIDR.String() == itemCIDR.String() && lrsr.Nexthop == gatewayIP.IP.String()
 
 			return clusterSubnet.CIDR.IP.Equal(itemCIDR.IP) && // even after expansion, cluster network address cannot change
 				clusterSubnetPrefixLen <= itemPrefixLen && // cluster subnet mask len can only be decreased
-				itemPrefixLen < clusterSubnet.HostSubnetLength && // don't match the local node subnet route
+				(exactRoute || itemPrefixLen < clusterSubnet.HostSubnetLength) && // don't match the local node subnet route
 				lrsr.Policy != nil && *lrsr.Policy == nbdb.LogicalRouterStaticRoutePolicySrcIP
 
 		}

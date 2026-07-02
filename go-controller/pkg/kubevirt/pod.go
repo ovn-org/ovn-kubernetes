@@ -12,6 +12,7 @@ import (
 	kubevirtv1 "kubevirt.io/api/core/v1"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/validate/content"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -19,6 +20,7 @@ import (
 	listersv1 "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/retry"
+	"k8s.io/utils/ptr"
 
 	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
 
@@ -216,7 +218,13 @@ func withLiveMigrationVMLock(pod *corev1.Pod, fn func() error) error {
 // AllVMPodsAreCompleted returns true if all VM pods are completed.
 func AllVMPodsAreCompleted(podLister listersv1.PodLister, pod *corev1.Pod) (bool, error) {
 	if !util.PodCompleted(pod) {
-		return false, nil
+		currentPod, err := podLister.Pods(pod.Namespace).Get(pod.Name)
+		if err != nil && !apierrors.IsNotFound(err) {
+			return false, err
+		}
+		if err == nil && currentPod.UID == pod.UID && !util.PodCompleted(currentPod) {
+			return false, nil
+		}
 	}
 
 	vmDescription, err := NewVMDescriptionFromPod(pod)
@@ -405,6 +413,100 @@ func CleanUpLiveMigratablePod(nbClient libovsdbclient.Client, watchFactory *fact
 		}
 		if err := DeleteRoutingForMigratedPod(nbClient, pod); err != nil {
 			return err
+		}
+		return nil
+	})
+}
+
+// IsFailedLiveMigrationTarget returns true when pod is a terminal target pod
+// of a failed live migration. A newer migration attempt does not change the
+// identity of an older failed target, so classify the supplied pod relative to
+// its older, still-running VM siblings instead of only considering the newest
+// pod returned by DiscoverLiveMigrationStatus.
+func IsFailedLiveMigrationTarget(podLister listersv1.PodLister, pod *corev1.Pod) (bool, error) {
+	if !IsPodLiveMigratable(pod) || !util.PodCompleted(pod) {
+		return false, nil
+	}
+
+	vmDescription, err := NewVMDescriptionFromPod(pod)
+	if err != nil {
+		return false, err
+	}
+	if vmDescription == nil {
+		return false, nil
+	}
+	vmPods, err := vmDescription.OwnedPods(podLister)
+	if err != nil {
+		return false, err
+	}
+
+	for _, vmPod := range vmPods {
+		if samePod(vmPod, pod) {
+			continue
+		}
+		if !util.PodCompleted(vmPod) && vmPod.CreationTimestamp.Time.Before(pod.CreationTimestamp.Time) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// CleanUpFailedLiveMigrationTargetPod removes local OVN state created for a
+// failed live-migration target pod while the source pod remains active. Only
+// routes pointing at the target pod's node are removed: routes are matched by
+// VM, so the VM's active routes pointing at the source pod's node must be
+// left alone.
+func CleanUpFailedLiveMigrationTargetPod(nbClient libovsdbclient.Client, watchFactory *factory.WatchFactory, pod *corev1.Pod, zone string) error {
+	failedTarget, err := IsFailedLiveMigrationTarget(watchFactory.PodCoreInformer().Lister(), pod)
+	if err != nil {
+		return fmt.Errorf("failed checking failed live migration target pod %s/%s: %w", pod.Namespace, pod.Name, err)
+	}
+	if !failedTarget {
+		return nil
+	}
+
+	vmDescription, err := NewVMDescriptionFromPod(pod)
+	if err != nil {
+		return err
+	}
+	if vmDescription == nil {
+		return nil
+	}
+
+	routeMatchesTargetNode := func(item *nbdb.LogicalRouterStaticRoute) bool {
+		return item.OutputPort != nil && *item.OutputPort == ovntypes.RouterToSwitchPrefix+pod.Spec.NodeName
+	}
+	if zone == OvnRemoteZone {
+		// Remote-zone routes carry no output port; they point at the target
+		// node via its transit switch port address as nexthop.
+		node, err := watchFactory.GetNode(pod.Spec.NodeName)
+		if err != nil {
+			// Node is gone: its routes are cleaned up by node deletion and
+			// virtual machine sync.
+			return nil
+		}
+		transitSwitchPortAddrs, err := util.ParseNodeTransitSwitchPortAddrs(node)
+		if err != nil {
+			return err
+		}
+		targetNexthops := map[string]struct{}{}
+		for _, addr := range transitSwitchPortAddrs {
+			targetNexthops[addr.IP.String()] = struct{}{}
+		}
+		routeMatchesTargetNode = func(item *nbdb.LogicalRouterStaticRoute) bool {
+			_, ok := targetNexthops[item.Nexthop]
+			return ok
+		}
+	}
+
+	return withLiveMigrationVMLock(pod, func() error {
+		routePredicate := func(item *nbdb.LogicalRouterStaticRoute) bool {
+			return item.ExternalIDs[OvnZoneExternalIDKey] == zone &&
+				externalIDsContainsVM(item.ExternalIDs, ptr.To(vmDescription.Key())) &&
+				routeMatchesTargetNode(item)
+		}
+		if err := libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicate(nbClient, ovntypes.OVNClusterRouter, routePredicate); err != nil {
+			return fmt.Errorf("failed deleting failed live migration target pod routes for pod %s/%s: %w", pod.Namespace, pod.Name, err)
 		}
 		return nil
 	})
@@ -610,7 +712,10 @@ func DiscoverLiveMigrationStatus(podLister listersv1.PodLister, pod *corev1.Pod)
 	if err != nil {
 		return nil, err
 	}
+	return discoverLiveMigrationStatus(vmPods)
+}
 
+func discoverLiveMigrationStatus(vmPods []*corev1.Pod) (*LiveMigrationStatus, error) {
 	// no migration
 	if len(vmPods) < 2 {
 		// If the only remaining pod has the migration target ready

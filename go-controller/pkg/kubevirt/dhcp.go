@@ -183,6 +183,12 @@ func composeDHCPOptions(controllerName string, vmKey ktypes.NamespacedName, dhcp
 
 // DeleteDHCPOptions deletes OVN DHCP options owned by the VM associated with pod.
 func DeleteDHCPOptions(nbClient libovsdbclient.Client, pod *corev1.Pod) error {
+	return DeleteDHCPOptionsWithZone(nbClient, pod, "")
+}
+
+// DeleteDHCPOptionsWithZone deletes OVN DHCP options owned by the VM associated
+// with pod for the specified OVN zone. If zone is empty, all zones are deleted.
+func DeleteDHCPOptionsWithZone(nbClient libovsdbclient.Client, pod *corev1.Pod, zone string) error {
 	vmDescription, err := NewVMDescriptionFromPod(pod)
 	if err != nil {
 		return fmt.Errorf("failed discovering vm description at pod %s/%s:%w", pod.Namespace, pod.Name, err)
@@ -191,7 +197,10 @@ func DeleteDHCPOptions(nbClient libovsdbclient.Client, pod *corev1.Pod) error {
 		return nil
 	}
 	if err := libovsdbops.DeleteDHCPOptionsWithPredicate(nbClient, func(item *nbdb.DHCPOptions) bool {
-		return item.ExternalIDs[string(libovsdbops.ObjectNameKey)] == vmDescription.Key().String()
+		if item.ExternalIDs[string(libovsdbops.ObjectNameKey)] != vmDescription.Key().String() {
+			return false
+		}
+		return zone == "" || item.ExternalIDs[OvnZoneExternalIDKey] == zone
 	}); err != nil {
 		return err
 	}
