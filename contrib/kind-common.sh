@@ -1633,7 +1633,7 @@ readonly FRR_DEPLOYED_IMAGE=quay.io/frrouting/frr:10.6.2
 FRR_K8S_FRR_IMAGE=${FRR_K8S_FRR_IMAGE:-${FRR_DEPLOYED_IMAGE}}
 readonly FRR_TMP_DIR=$(mktemp -d -u)
 
-clone_frr() {
+clone_frr_k8s() {
   [ -d "$FRR_TMP_DIR" ] || {
     mkdir -p "$FRR_TMP_DIR" && trap 'rm -rf $FRR_TMP_DIR' EXIT
     pushd "$FRR_TMP_DIR" || exit 1
@@ -1664,7 +1664,7 @@ clone_frr() {
 
 deploy_frr_external_container() {
   echo "Deploying FRR external container ..."
-  clone_frr
+  clone_frr_k8s
  
   pushd "$FRR_TMP_DIR" || exit 1
   run_kubectl apply -f frr-k8s/charts/frr-k8s/charts/crds/templates/
@@ -1850,20 +1850,20 @@ destroy_bgp() {
 
 install_frr_k8s_crds() {
   echo "Installing frr-k8s CRDs ..."
-  clone_frr
+  clone_frr_k8s
   kubectl apply -f "${FRR_TMP_DIR}"/frr-k8s/config/crd/bases/
 }
 
 install_frr_k8s() {
   local bgp_port=${1:-0}
   echo "Installing frr-k8s ..."
-  clone_frr
+  clone_frr_k8s
 
   # apply frr-k8s
 
   # The all-in-one manifest is only consumed here (deploy_frr_external_container
   # uses CRDs and the demo scripts, not this manifest), so the fix lives here
-  # rather than in clone_frr.
+  # rather than in clone_frr_k8s.
   #
   # gcr.io/kubebuilder/kube-rbac-proxy is unavailable after Google's Container
   # Registry shutdown (https://cloud.google.com/container-registry/docs/deprecations/container-registry-deprecation).
