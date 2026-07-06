@@ -1962,12 +1962,12 @@ apply_frr_k8s_receive_config() {
   if ! frr_k8s_remote_enabled; then
     timeout 60s bash -x <<EOF || r=$?
 echo "Attempting to reach frr-k8s webhook"
-kind export kubeconfig --name ovn
+kind export kubeconfig --name ${KIND_CLUSTER_NAME}
 while true; do
 CLUSTER_IP=\$(kubectl get svc -n frr-k8s-system frr-k8s-webhook-service -o jsonpath='{.spec.clusterIP}')
 # Wrap IPv6 addresses in brackets for URL syntax
 [[ \${CLUSTER_IP} =~ : ]] && CLUSTER_IP="[\${CLUSTER_IP}]"
-$OCI_BIN exec ovn-control-plane curl -ksS --connect-timeout 0.1 https://\${CLUSTER_IP}
+$OCI_BIN exec ${KIND_CLUSTER_NAME}-control-plane curl -ksS --connect-timeout 0.1 https://\${CLUSTER_IP}
 [ \$? -eq 0 ] && exit 0
 echo "Couldn't reach frr-k8s webhook, trying in 1s..."
 sleep 1s
