@@ -57,6 +57,7 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 	utilerrors "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util/errors"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/vswitchd"
 )
 
 type CommonNodeNetworkControllerInfo struct {
@@ -276,7 +277,10 @@ func (oc *DefaultNodeNetworkController) Reconcile(netInfo util.NetInfo) error {
 	return nil
 }
 
-func clearOVSFlowTargets() error {
+func clearOVSFlowTargets(ovsClient client.Client) error {
+	if ovsClient != nil {
+		return ovsops.SetBridgeFlowCollectors(ovsClient, "br-int", nil, nil, nil)
+	}
 	_, _, err := util.RunOVSVsctl(
 		"--",
 		"clear", "bridge", "br-int", "netflow",
@@ -294,32 +298,37 @@ func clearOVSFlowTargets() error {
 // collectorsString joins all HostPort entry into a string that is acceptable as
 // target by the ovs-vsctl command. If an entry has an empty host, it uses the Node IP
 func collectorsString(node *corev1.Node, targets []config.HostPort) (string, error) {
-	if len(targets) == 0 {
-		return "", errors.New("collector targets can't be empty")
+	collectors, err := collectorTargets(node, targets)
+	if err != nil {
+		return "", err
 	}
-	var joined strings.Builder
-	for n, v := range targets {
-		if n == 0 {
-			joined.WriteByte('"')
-		} else {
-			joined.WriteString(`","`)
-		}
+	return fmt.Sprintf("\"%s\"", strings.Join(collectors, `","`)), nil
+}
+
+func collectorTargets(node *corev1.Node, targets []config.HostPort) ([]string, error) {
+	if len(targets) == 0 {
+		return nil, errors.New("collector targets can't be empty")
+	}
+	collectors := make([]string, 0, len(targets))
+	for _, v := range targets {
 		var host string
 		if v.Host != nil && len(*v.Host) != 0 {
 			host = v.Host.String()
 		} else {
 			var err error
 			if host, err = util.GetNodePrimaryIP(node); err != nil {
-				return "", fmt.Errorf("composing flow collectors' IPs: %w", err)
+				return nil, fmt.Errorf("composing flow collectors' IPs: %w", err)
 			}
 		}
-		joined.WriteString(util.JoinHostPortInt32(host, v.Port))
+		collectors = append(collectors, util.JoinHostPortInt32(host, v.Port))
 	}
-	joined.WriteByte('"')
-	return joined.String(), nil
+	return collectors, nil
 }
 
-func setOVSFlowTargets(node *corev1.Node) error {
+func setOVSFlowTargets(ovsClient client.Client, node *corev1.Node) error {
+	if ovsClient != nil {
+		return setOVSFlowTargetsWithClient(ovsClient, node)
+	}
 	if len(config.Monitoring.NetFlowTargets) != 0 {
 		collectors, err := collectorsString(node, config.Monitoring.NetFlowTargets)
 		if err != nil {
@@ -389,6 +398,44 @@ func setOVSFlowTargets(node *corev1.Node) error {
 	return nil
 }
 
+func setOVSFlowTargetsWithClient(ovsClient client.Client, node *corev1.Node) error {
+	var netflow *vswitchd.NetFlow
+	if len(config.Monitoring.NetFlowTargets) != 0 {
+		targets, err := collectorTargets(node, config.Monitoring.NetFlowTargets)
+		if err != nil {
+			return fmt.Errorf("error joining NetFlow targets: %w", err)
+		}
+		netflow = &vswitchd.NetFlow{Targets: targets, ActiveTimeout: 60}
+	}
+	var sflow *vswitchd.SFlow
+	if len(config.Monitoring.SFlowTargets) != 0 {
+		targets, err := collectorTargets(node, config.Monitoring.SFlowTargets)
+		if err != nil {
+			return fmt.Errorf("error joining SFlow targets: %w", err)
+		}
+		agent := types.SFlowAgent
+		sflow = &vswitchd.SFlow{Targets: targets, Agent: &agent}
+	}
+	var ipfix *vswitchd.IPFIX
+	if len(config.Monitoring.IPFIXTargets) != 0 {
+		targets, err := collectorTargets(node, config.Monitoring.IPFIXTargets)
+		if err != nil {
+			return fmt.Errorf("error joining IPFIX targets: %w", err)
+		}
+		activeTimeout := int(config.IPFIX.CacheActiveTimeout)
+		ipfix = &vswitchd.IPFIX{Targets: targets, CacheActiveTimeout: &activeTimeout}
+		if config.IPFIX.CacheMaxFlows != 0 {
+			cacheMaxFlows := int(config.IPFIX.CacheMaxFlows)
+			ipfix.CacheMaxFlows = &cacheMaxFlows
+		}
+		if config.IPFIX.Sampling != 0 {
+			sampling := int(config.IPFIX.Sampling)
+			ipfix.Sampling = &sampling
+		}
+	}
+	return ovsops.SetBridgeFlowCollectors(ovsClient, "br-int", netflow, sflow, ipfix)
+}
+
 // validateEncapIP returns false if there is an error or if the given IP is not known local IP address.
 func validateEncapIP(encapIP string) (bool, error) {
 	links, err := netlink.LinkList()
@@ -409,7 +456,7 @@ func validateEncapIP(encapIP string) (bool, error) {
 	return false, nil
 }
 
-func setupOVNNode(node *corev1.Node) error {
+func setupOVNNode(ovsClient client.Client, node *corev1.Node) error {
 	var err error
 
 	nodePrimaryIP, err := util.GetNodePrimaryIP(node)
@@ -495,18 +542,40 @@ func setupOVNNode(node *corev1.Node) error {
 		setExternalIdsCmd = append(setExternalIdsCmd, fmt.Sprintf("external_ids:hostname=\"%s\"", node.Name))
 	}
 
-	_, stderr, err := util.RunOVSVsctl(setExternalIdsCmd...)
-	if err != nil {
-		return fmt.Errorf("error setting OVS external IDs: %v\n  %q", err, stderr)
+	if ovsClient != nil {
+		externalIDs := map[string]string{}
+		otherConfig := map[string]string{}
+		for _, arg := range setExternalIdsCmd {
+			if strings.HasPrefix(arg, "external_ids:") {
+				key, value, found := strings.Cut(strings.TrimPrefix(arg, "external_ids:"), "=")
+				if found {
+					externalIDs[key] = strings.Trim(value, `"`)
+				}
+			}
+			if strings.HasPrefix(arg, "other_config:") {
+				key, value, found := strings.Cut(strings.TrimPrefix(arg, "other_config:"), "=")
+				if found {
+					otherConfig[key] = strings.Trim(value, `"`)
+				}
+			}
+		}
+		if err := ovsops.UpdateOpenvSwitchSettings(ovsClient, externalIDs, otherConfig); err != nil {
+			return fmt.Errorf("error setting OVS external IDs: %w", err)
+		}
+	} else {
+		_, stderr, err := util.RunOVSVsctl(setExternalIdsCmd...)
+		if err != nil {
+			return fmt.Errorf("error setting OVS external IDs: %v\n  %q", err, stderr)
+		}
 	}
 
-	// clear stale ovs flow targets if needed
-	err = clearOVSFlowTargets()
-	if err != nil {
-		return fmt.Errorf("error clearing stale ovs flow targets: %q", err)
+	if ovsClient == nil {
+		if err = clearOVSFlowTargets(nil); err != nil {
+			return fmt.Errorf("error clearing stale ovs flow targets: %q", err)
+		}
 	}
-	// set new ovs flow targets if needed
-	err = setOVSFlowTargets(node)
+	// Replace all flow targets in one transaction when using libovsdb.
+	err = setOVSFlowTargets(ovsClient, node)
 	if err != nil {
 		return fmt.Errorf("error setting ovs flow targets: %q", err)
 	}
@@ -514,8 +583,23 @@ func setupOVNNode(node *corev1.Node) error {
 	return nil
 }
 
-func setEncapPort(ctx context.Context) error {
-	systemID, err := util.GetNodeChassisID()
+func getNodeChassisID(ovsClient client.Client) (string, error) {
+	if ovsClient == nil {
+		return util.GetNodeChassisID()
+	}
+	ovs, err := ovsops.GetOpenvSwitch(ovsClient)
+	if err != nil {
+		return "", fmt.Errorf("failed to get Open_vSwitch row: %w", err)
+	}
+	systemID := ovs.ExternalIDs["system-id"]
+	if systemID == "" {
+		return "", fmt.Errorf("Open_vSwitch system-id is not set")
+	}
+	return systemID, nil
+}
+
+func setEncapPort(ctx context.Context, ovsClient client.Client) error {
+	systemID, err := getNodeChassisID(ovsClient)
 	if err != nil {
 		return err
 	}
@@ -799,7 +883,7 @@ func (nc *DefaultNodeNetworkController) Init(ctx context.Context) error {
 			return err
 		}
 
-		err = setupOVNNode(node)
+		err = setupOVNNode(nc.ovsClient, node)
 		if err != nil {
 			return err
 		}
@@ -946,7 +1030,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) (err error) {
 	// NOTE: ovnkube-node in DPU-host mode has no SBDB to connect to. The encap port will be handled by the
 	// ovnkube-node running in DPU mode on behalf of the host.
 	if (config.IsModeDPU() || config.IsModeFull()) && config.Default.EncapPort != config.DefaultEncapPort {
-		if err := setEncapPort(ctx); err != nil {
+		if err := setEncapPort(ctx, nc.ovsClient); err != nil {
 			return err
 		}
 	}

@@ -75,7 +75,7 @@ func (mp *managementPortRepresentor) create() error {
 	if mp.repDevName != mp.ifName {
 		externalIDs = append(externalIDs, fmt.Sprintf("ovn-orig-mgmt-port-rep-name=%s", mp.repDevName))
 	}
-	err = createManagementPortOVSRepresentor(types.DefaultNetworkName, mp.ifName, types.K8sPrefix+mp.cfg.nodeName, config.Default.MTU, externalIDs)
+	err = createManagementPortOVSRepresentor(mp.ovsClient, types.DefaultNetworkName, mp.ifName, types.K8sPrefix+mp.cfg.nodeName, config.Default.MTU, externalIDs)
 	if err != nil {
 		return err
 	}

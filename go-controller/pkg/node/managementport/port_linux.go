@@ -23,6 +23,7 @@ import (
 	"sigs.k8s.io/knftables"
 
 	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
+	"github.com/ovn-kubernetes/libovsdb/ovsdb"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	ovsops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
@@ -30,6 +31,7 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/vswitchd"
 )
 
 const (
@@ -208,6 +210,39 @@ func (mp *managementPortOVS) create() error {
 
 	// Create a OVS internal interface.
 	legacyMgmtIntfName := util.GetLegacyK8sMgmtIntfName(mp.cfg.nodeName)
+	if mp.ovsClient == nil {
+		return mp.createWithExec(legacyMgmtIntfName)
+	}
+	var ovsdbOps []ovsdb.Operation
+	legacyPort, err := ovsops.GetOVSPort(mp.ovsClient, legacyMgmtIntfName)
+	if err == nil {
+		ovsdbOps, err = ovsops.DeletePortWithInterfacesOps(mp.ovsClient, ovsdbOps, legacyPort, "br-int")
+		if err != nil {
+			return fmt.Errorf("failed to create operations to delete legacy management port %s: %w", legacyMgmtIntfName, err)
+		}
+	} else if !errors.Is(err, libovsdbclient.ErrNotFound) {
+		return fmt.Errorf("failed to look up legacy management port %s: %w", legacyMgmtIntfName, err)
+	}
+	mac := mp.cfg.mpMAC.String()
+	mtu := config.Default.MTU
+	iface := &vswitchd.Interface{
+		Type:        "internal",
+		MAC:         &mac,
+		MTURequest:  &mtu,
+		ExternalIDs: map[string]string{"iface-id": types.K8sPrefix + mp.cfg.nodeName},
+	}
+	ovsdbOps, err = ovsops.CreateOrUpdatePodPortOps(mp.ovsClient, ovsdbOps, "br-int", types.K8sMgmtIntfName, &vswitchd.Port{}, iface)
+	if err != nil {
+		return fmt.Errorf("failed to create operations to add management port to br-int: %w", err)
+	}
+	if err = ovsops.TransactAndCheckAndWaitForVSwitchd(context.Background(), mp.ovsClient, ovsdbOps); err != nil {
+		return fmt.Errorf("failed to add management port to br-int: %w", err)
+	}
+
+	return createPlatformManagementPort(types.K8sMgmtIntfName, mp.cfg, mp.routeManager)
+}
+
+func (mp *managementPortOVS) createWithExec(legacyMgmtIntfName string) error {
 	stdout, stderr, err := util.RunOVSVsctl(
 		"--", "--if-exists", "del-port", "br-int", legacyMgmtIntfName,
 		"--", "--may-exist", "add-port", "br-int", types.K8sMgmtIntfName,
@@ -217,7 +252,6 @@ func (mp *managementPortOVS) create() error {
 	if err != nil {
 		return fmt.Errorf("failed to add port to br-int: stdout %q, stderr %q, error: %w", stdout, stderr, err)
 	}
-
 	return createPlatformManagementPort(types.K8sMgmtIntfName, mp.cfg, mp.routeManager)
 }
 
@@ -728,6 +762,31 @@ func createPlatformManagementPort(interfaceName string, cfg *managementPortConfi
 // interface had been used as management port or Node was running in different mode.
 // If old management port is found, its IP configuration is flushed and interface renamed.
 func syncMgmtPortInterface(ovsClient libovsdbclient.Client, mgmtPortName string, isExpectedToBeInternal bool) error {
+	if ovsClient == nil {
+		return syncMgmtPortInterfaceWithExec(nil, mgmtPortName, isExpectedToBeInternal)
+	}
+	iface, err := ovsops.GetOVSInterface(ovsClient, mgmtPortName)
+	if errors.Is(err, libovsdbclient.ErrNotFound) {
+		return unconfigureMgmtNetdevicePort(ovsClient, mgmtPortName)
+	}
+	if err != nil {
+		return fmt.Errorf("failed to find management port interface %s: %w", mgmtPortName, err)
+	}
+	if iface.Type == "internal" {
+		if isExpectedToBeInternal {
+			return nil
+		}
+		klog.Infof("Found OVS internal port %s. Removing it", mgmtPortName)
+		return DeleteManagementPortInternalOVSInterface(ovsClient, types.DefaultNetworkName, mgmtPortName)
+	}
+	klog.Infof("Found existing representor management port. Removing it")
+	return unconfigureMgmtRepresentorPort(ovsClient, mgmtPortName)
+}
+
+// syncMgmtPortInterfaceWithExec is the explicit legacy path used when no local
+// OVSDB client is available. settingsClient is only used to recover settings
+// stored on the Open_vSwitch row while exercising this path in tests.
+func syncMgmtPortInterfaceWithExec(settingsClient libovsdbclient.Client, mgmtPortName string, isExpectedToBeInternal bool) error {
 	// Query both type and name, because with type only stdout will be empty for both non-existing port and representor netdevice
 	stdout, _, _ := util.RunOVSVsctl("--no-headings",
 		"--data", "bare",
@@ -736,7 +795,7 @@ func syncMgmtPortInterface(ovsClient libovsdbclient.Client, mgmtPortName string,
 		"find", "Interface", "name="+mgmtPortName)
 	if stdout == "" {
 		// Not found on the bridge. But could be that interface with the same name exists
-		return unconfigureMgmtNetdevicePort(ovsClient, mgmtPortName)
+		return unconfigureMgmtNetdevicePort(settingsClient, mgmtPortName)
 	}
 
 	// Found existing port. Check its type
@@ -747,7 +806,7 @@ func syncMgmtPortInterface(ovsClient libovsdbclient.Client, mgmtPortName string,
 		}
 
 		klog.Infof("Found OVS internal port %s. Removing it", mgmtPortName)
-		err := DeleteManagementPortInternalOVSInterface(types.DefaultNetworkName, mgmtPortName)
+		err := DeleteManagementPortInternalOVSInterface(nil, types.DefaultNetworkName, mgmtPortName)
 		if err != nil {
 			return err
 		}
@@ -757,17 +816,28 @@ func syncMgmtPortInterface(ovsClient libovsdbclient.Client, mgmtPortName string,
 	// It is representor which was used as management port.
 	// Remove it from the bridge and rename.
 	klog.Infof("Found existing representor management port. Removing it")
-	return unconfigureMgmtRepresentorPort(mgmtPortName)
+	return unconfigureMgmtRepresentorPort(nil, mgmtPortName)
 }
 
-func unconfigureMgmtRepresentorPort(mgmtPortName string) error {
+func unconfigureMgmtRepresentorPort(ovsClient libovsdbclient.Client, mgmtPortName string) error {
 	// Get saved port name
+	if ovsClient != nil {
+		iface, err := ovsops.GetOVSInterface(ovsClient, mgmtPortName)
+		if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
+			return fmt.Errorf("failed to get management port interface %s: %w", mgmtPortName, err)
+		}
+		savedName := ""
+		if iface != nil {
+			savedName = iface.ExternalIDs["ovn-orig-mgmt-port-rep-name"]
+		}
+		return DeleteManagementPortRepInterface(ovsClient, types.DefaultNetworkName, mgmtPortName, savedName)
+	}
 	savedName, stderr, err := util.RunOVSVsctl("--if-exists", "get", "Interface", mgmtPortName, "external-ids:ovn-orig-mgmt-port-rep-name")
 	if err != nil {
 		klog.Warningf("Failed to get external-ds:ovn-orig-mgmt-port-rep-name: %s", stderr)
 	}
 
-	return DeleteManagementPortRepInterface(types.DefaultNetworkName, mgmtPortName, savedName)
+	return DeleteManagementPortRepInterface(ovsClient, types.DefaultNetworkName, mgmtPortName, savedName)
 }
 
 func unconfigureMgmtNetdevicePort(ovsClient libovsdbclient.Client, mgmtPortName string) error {

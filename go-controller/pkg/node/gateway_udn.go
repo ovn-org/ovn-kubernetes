@@ -657,7 +657,7 @@ func (udng *UserDefinedNetworkGateway) addNetworkWithResolvedUplink(
 	}
 
 	// TBD-merge udng.node.Name, needs lower case?
-	udng.mgmtPortController, err = managementport.NewUDNManagementPortController(udng.nodeInformer, udng.node.Name, nodeSubnets, udng.NetInfo)
+	udng.mgmtPortController, err = managementport.NewUDNManagementPortController(udng.ovsClient, udng.nodeInformer, udng.node.Name, nodeSubnets, udng.NetInfo)
 	if err != nil {
 		return fmt.Errorf("could not create management port for network %s, UDN management port controller init failure: %v",
 			udng.GetNetworkName(), err)

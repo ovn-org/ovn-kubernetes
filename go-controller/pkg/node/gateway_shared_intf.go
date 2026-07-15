@@ -1666,7 +1666,8 @@ func newGateway(
 ) (*gateway, error) {
 	klog.Info("Creating new gateway")
 	gw := &gateway{
-		nextHops: gwNextHops,
+		ovsClient: ovsClient,
+		nextHops:  gwNextHops,
 	}
 
 	if gatewayMode == config.GatewayModeLocal {
@@ -1799,11 +1800,9 @@ func newNodePortWatcher(
 ) (*nodePortWatcher, error) {
 
 	// Get ofport of physical interface
-	ofportPhys, stderr, err := util.GetOVSOfPort("--if-exists", "get",
-		"interface", gwBridge.GetUplinkName(), "ofport")
+	ofportPhys, err := getOVSInterfaceOfPort(ofm.ovsClient, gwBridge.GetUplinkName(), true)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get ofport of %s, stderr: %q, error: %v",
-			gwBridge.GetUplinkName(), stderr, err)
+		return nil, fmt.Errorf("failed to get ofport of %s: %w", gwBridge.GetUplinkName(), err)
 	}
 
 	// In the shared gateway mode, the NodePort service is handled by the OpenFlow flows configured

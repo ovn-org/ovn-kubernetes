@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -873,21 +874,21 @@ func stringListsEqual(a, b []string) bool {
 	return true
 }
 
-// getOfport returns the current ofport of the given OVS interface as a string,
-// or "" if the interface does not exist. It errors if the interface exists but
-// has no valid ofport assigned (unset or -1).
-func getOfport(ovsClient libovsdbclient.Client, name string) (string, error) {
-	iface, err := ovsops.GetOVSInterface(ovsClient, name)
-	if err != nil {
-		if errors.Is(err, libovsdbclient.ErrNotFound) {
+func getOVSInterfaceOfPort(ovsClient libovsdbclient.Client, ifaceName string, ifExists bool) (string, error) {
+	iface, err := ovsops.GetOVSInterface(ovsClient, ifaceName)
+	if errors.Is(err, libovsdbclient.ErrNotFound) {
+		if ifExists {
 			return "", nil
 		}
-		return "", fmt.Errorf("failed to get ofport of %s: %w", name, err)
+		return "", err
+	}
+	if err != nil {
+		return "", err
 	}
 	if iface.Ofport == nil || *iface.Ofport == -1 {
-		return "", fmt.Errorf("interface %s has invalid ofport", name)
+		return "", fmt.Errorf("interface %s has no valid ofport", ifaceName)
 	}
-	return fmt.Sprintf("%d", *iface.Ofport), nil
+	return strconv.Itoa(*iface.Ofport), nil
 }
 
 // checkUplinkBridgePorts runs checkPorts on every uplink bridge and records
@@ -920,9 +921,9 @@ func checkPorts(ovsClient libovsdbclient.Client, netConfigs []*bridgeconfig.Brid
 		if netConfig.OfPortPatch == "" {
 			continue
 		}
-		curOfportPatch, err := getOfport(ovsClient, netConfig.PatchPort)
+		curOfportPatch, err := getOVSInterfaceOfPort(ovsClient, netConfig.PatchPort, true)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to get ofport of %s: %w", netConfig.PatchPort, err)
 		}
 		if netConfig.OfPortPatch != curOfportPatch {
 			if netConfig.IsDefaultNetwork() {
@@ -943,9 +944,9 @@ func checkPorts(ovsClient libovsdbclient.Client, netConfigs []*bridgeconfig.Brid
 
 	// it could be that someone removed the physical interface and added it back on the OVS host
 	// bridge, as a result the ofport number changed for that physical interface
-	curOfportPhys, err := getOfport(ovsClient, physIntf)
+	curOfportPhys, err := getOVSInterfaceOfPort(ovsClient, physIntf, true)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to get ofport of %s: %w", physIntf, err)
 	}
 	if ofPortPhys != curOfportPhys {
 		klog.Errorf("Fatal error: phys port %s ofport changed from %s to %s",
@@ -959,14 +960,16 @@ func checkPorts(ovsClient libovsdbclient.Client, netConfigs []*bridgeconfig.Brid
 // been created/started, and only done when there is just a NORMAL flow programmed and OVN/OVS is already setup
 func bootstrapOVSFlows(ovsClient libovsdbclient.Client, nodeName string) error {
 	// see if patch port exists already
-	var portsOutput string
-	var stderr string
-	var err error
-	if portsOutput, stderr, err = util.RunOVSVsctl("--no-heading", "--data=bare", "--format=csv", "--columns",
-		"name", "list", "interface"); err != nil {
+	interfaces, err := ovsops.ListInterfaces(ovsClient)
+	if err != nil {
 		// bridge exists, but could not list ports
-		return fmt.Errorf("failed to list ports on existing bridge br-int: %s, %w", stderr, err)
+		return fmt.Errorf("failed to list ports on existing bridge br-int: %w", err)
 	}
+	portNames := make([]string, 0, len(interfaces))
+	for _, iface := range interfaces {
+		portNames = append(portNames, iface.Name)
+	}
+	portsOutput := strings.Join(portNames, "\n")
 
 	bridge, patchPort := localnetPortInfo(nodeName, portsOutput)
 
@@ -990,10 +993,10 @@ func bootstrapOVSFlows(ovsClient libovsdbclient.Client, nodeName string) error {
 	klog.Infof("Default NORMAL flow installed on OVS bridge: %s, will bootstrap with required port security flows", bridge)
 
 	// Get ofport of patchPort
-	ofportPatch, stderr, err := util.GetOVSOfPort("get", "Interface", patchPort, "ofport")
+	ofportPatch, err := getOVSInterfaceOfPort(ovsClient, patchPort, false)
 	if err != nil {
 		return fmt.Errorf("failed while waiting on patch port %q to be created by ovn-controller and "+
-			"while getting ofport. stderr: %q, error: %v", patchPort, stderr, err)
+			"while getting ofport: %v", patchPort, err)
 	}
 
 	var bridgeMACAddress net.HardwareAddr
@@ -1003,7 +1006,14 @@ func bootstrapOVSFlows(ovsClient libovsdbclient.Client, nodeName string) error {
 			return err
 		}
 	} else {
-		bridgeMACAddress, err = util.GetOVSPortMACAddress(bridge)
+		iface, getErr := ovsops.GetOVSInterface(ovsClient, bridge)
+		if getErr != nil {
+			return fmt.Errorf("failed to get OVS interface %s: %w", bridge, getErr)
+		}
+		if iface.MACInUse == nil {
+			return fmt.Errorf("OVS interface %s has no MAC in use", bridge)
+		}
+		bridgeMACAddress, err = net.ParseMAC(*iface.MACInUse)
 		if err != nil {
 			return fmt.Errorf("failed to get MAC address for ovs port %s: %w", bridge, err)
 		}
@@ -1020,7 +1030,7 @@ func bootstrapOVSFlows(ovsClient libovsdbclient.Client, nodeName string) error {
 			nodetypes.DefaultOpenFlowCookie, ofportPatch))
 	dftFlows = append(dftFlows, "priority=0, table=0, actions=output:NORMAL")
 
-	_, stderr, err = util.ReplaceOFFlows(bridge, dftFlows)
+	_, stderr, err := util.ReplaceOFFlows(bridge, dftFlows)
 	if err != nil {
 		return fmt.Errorf("failed to add flows, error: %v, stderr, %s, flows: %s", err, stderr, dftFlows)
 	}

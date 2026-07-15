@@ -293,11 +293,12 @@ func (nc *DefaultNodeNetworkController) initGatewayPreStart(
 		var chassisID string
 		klog.Info("Gateway Mode is disabled")
 		gw = &gateway{
+			ovsClient:    nc.ovsClient,
 			initFunc:     func() error { return nil },
 			readyFunc:    func() (bool, error) { return true, nil },
 			watchFactory: nc.watchFactory.(*factory.WatchFactory),
 		}
-		chassisID, err = util.GetNodeChassisID()
+		chassisID, err = getNodeChassisID(nc.ovsClient)
 		if err != nil {
 			return nil, err
 		}

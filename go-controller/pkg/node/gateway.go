@@ -22,6 +22,7 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube"
+	ovsops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/bridgeconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/egressip"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/retry"
@@ -48,6 +49,7 @@ type Gateway interface {
 }
 
 type gateway struct {
+	ovsClient libovsdbclient.Client
 	// loadBalancerHealthChecker is a health check server for load-balancer type services
 	loadBalancerHealthChecker informer.ServiceAndEndpointsEventHandler
 	// portClaimWatcher is for reserving ports for virtual IPs allocated by the cluster on the host
@@ -389,7 +391,7 @@ func gatewayInitInternal(ovsClient libovsdbclient.Client, nodeName, gwIntf, egre
 		}
 	}
 
-	chassisID, err := util.GetNodeChassisID()
+	chassisID, err := getNodeChassisID(ovsClient)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -419,10 +421,11 @@ func gatewayInitInternal(ovsClient libovsdbclient.Client, nodeName, gwIntf, egre
 			 * As of writing these offload support patches for sFlow are in review.
 			 * TODO: This workaround should be removed once the offload support for sFlow patches are merged upstream OvS.
 			 */
-			ovsHardwareOffloadEnabled, err := util.IsOvsHwOffloadEnabled()
+			ovs, err := ovsops.GetOpenvSwitch(ovsClient)
 			if err != nil {
 				return nil, nil, err
 			}
+			ovsHardwareOffloadEnabled := ovs.OtherConfig["hw-offload"] == "true"
 			if ovsHardwareOffloadEnabled {
 				klog.Warningf("OVS hardware offloading is enabled. " +
 					"options:gateway_mtu will be disabled on gateway routers for performance reasons. " +

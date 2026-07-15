@@ -39,12 +39,6 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-func genOVSAddMgmtPortCmd(nodeName, repName string) string {
-	return fmt.Sprintf("ovs-vsctl --timeout=15 -- --may-exist add-port br-int %s -- set interface %s external-ids:iface-id=%s"+
-		" external-ids:%s=%s external-ids:ovn-orig-mgmt-port-rep-name=%s",
-		types.K8sMgmtIntfName+"_0", types.K8sMgmtIntfName+"_0", types.K8sPrefix+nodeName, types.OvnManagementPortNameExternalID, types.K8sMgmtIntfName, repName)
-}
-
 func mockOVSListInterfaceMgmtPortNotExistCmd(execMock *ovntest.FakeExec, mgmtPortName string) {
 	execMock.AddFakeCmdsNoOutputNoError([]string{
 		"ovs-vsctl --timeout=15 --no-headings --data bare --format csv --columns type,name find Interface name=" + mgmtPortName,
@@ -80,7 +74,8 @@ var _ = Describe("Mananagement port DPU tests", func() {
 
 		ovsClient, ovsCleanup, err = libovsdbtest.NewOVSTestHarness(libovsdbtest.TestSetup{
 			OVSData: []libovsdbtest.TestData{
-				&vswitchd.OpenvSwitch{UUID: "root-ovs"},
+				&vswitchd.OpenvSwitch{UUID: "root-ovs", Bridges: []string{"br-int-uuid"}},
+				&vswitchd.Bridge{UUID: "br-int-uuid", Name: "br-int"},
 			},
 		})
 		Expect(err).NotTo(HaveOccurred())
@@ -132,8 +127,6 @@ var _ = Describe("Mananagement port DPU tests", func() {
 			netlinkOpsMock.On("IsLinkNotFoundError", mock.Anything).Return(true)
 			netlinkOpsMock.On("LinkSetDown", linkMock).Return(nil)
 			netlinkOpsMock.On("LinkSetName", linkMock, types.K8sMgmtIntfName+"_0").Return(fmt.Errorf("failed to set name"))
-			mockOVSListInterfaceMgmtPortNotExistCmd(execMock, types.K8sMgmtIntfName+"_0")
-
 			err := mgmtPortDpu.create()
 			Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc)
 			Expect(err).To(HaveOccurred())
@@ -171,13 +164,6 @@ var _ = Describe("Mananagement port DPU tests", func() {
 			netlinkOpsMock.On("LinkSetAlias", linkMock, "enp3s0f0v0").Return(nil)
 			netlinkOpsMock.On("LinkSetMTU", linkMock, config.Default.MTU).Return(nil)
 			netlinkOpsMock.On("LinkSetUp", linkMock).Return(nil)
-			mockOVSListInterfaceMgmtPortNotExistCmd(execMock, types.K8sMgmtIntfName+"_0")
-			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd: genGetOvsEntry("bridge", "br-int", "datapath_type", ""),
-			})
-			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd: genOVSAddMgmtPortCmd(cfg.nodeName, mgmtPortDpu.repDevName),
-			})
 			fakeClient := fake.NewSimpleClientset(&corev1.NodeList{
 				Items: []corev1.Node{*node},
 			})
@@ -219,13 +205,6 @@ var _ = Describe("Mananagement port DPU tests", func() {
 			netlinkOpsMock.On("LinkByName", "enp3s0f0v0").Return(
 				linkMock, nil)
 			netlinkOpsMock.On("LinkSetUp", linkMock).Return(nil)
-			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd: genGetOvsEntry("bridge", "br-int", "datapath_type", ""),
-			})
-			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd: genOVSAddMgmtPortCmd(cfg.nodeName, mgmtPortDpu.repDevName),
-			})
-
 			fakeClient := fake.NewSimpleClientset(&corev1.NodeList{
 				Items: []corev1.Node{*node},
 			})

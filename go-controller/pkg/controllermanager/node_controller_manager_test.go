@@ -42,22 +42,6 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-func genListStalePortsCmd() string {
-	return "ovs-vsctl --timeout=15 --data=bare --no-headings --columns=name find interface ofport=-1"
-}
-
-func genDeleteStalePortCmd(ifaces ...string) string {
-	staleIfacesCmd := ""
-	for _, iface := range ifaces {
-		if len(staleIfacesCmd) > 0 {
-			staleIfacesCmd += fmt.Sprintf(" -- --if-exists --with-iface del-port %s", iface)
-		} else {
-			staleIfacesCmd += fmt.Sprintf("ovs-vsctl --timeout=15 --if-exists --with-iface del-port %s", iface)
-		}
-	}
-	return staleIfacesCmd
-}
-
 func newTestOVSClient(ovsData []libovsdbtest.TestData) (libovsdbclient.Client, *libovsdbtest.Context) {
 	ovsClient, testCtx, err := libovsdbtest.NewOVSTestHarness(libovsdbtest.TestSetup{
 		OVSData: ovsData,
@@ -110,34 +94,75 @@ var _ = Describe("Healthcheck tests", func() {
 	})
 
 	Describe("checkForStaleOVSInternalPorts", func() {
-
-		Context("bridge has stale ports", func() {
-			It("removes stale ports from bridge", func() {
-				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd:    genListStalePortsCmd(),
-					Output: "foo\n\nbar\n\n" + types.K8sMgmtIntfName + "\n\n",
-					Err:    nil,
-				})
-				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd:    genDeleteStalePortCmd("foo", "bar"),
-					Output: "",
-					Err:    nil,
-				})
-				checkForStaleOVSInternalPorts()
-				Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc)
+		It("removes stale ports from their owning bridges while preserving healthy and management ports", func() {
+			minusOne := -1
+			one := 1
+			ovsClient, ovsCleanup := newTestOVSClient([]libovsdbtest.TestData{
+				&vswitchd.OpenvSwitch{UUID: "00000000-0000-0000-0000-000000000001", Bridges: []string{
+					"00000000-0000-0000-0000-000000000002",
+					"00000000-0000-0000-0000-000000000009",
+				}},
+				&vswitchd.Bridge{UUID: "00000000-0000-0000-0000-000000000002", Name: "br-int", Ports: []string{
+					"00000000-0000-0000-0000-000000000003",
+					"00000000-0000-0000-0000-000000000007",
+				}},
+				&vswitchd.Port{UUID: "00000000-0000-0000-0000-000000000003", Name: "foo", Interfaces: []string{"00000000-0000-0000-0000-000000000004"}},
+				&vswitchd.Interface{UUID: "00000000-0000-0000-0000-000000000004", Name: "foo", Ofport: &minusOne},
+				&vswitchd.Port{UUID: "00000000-0000-0000-0000-000000000007", Name: types.K8sMgmtIntfName, Interfaces: []string{"00000000-0000-0000-0000-000000000008"}},
+				&vswitchd.Interface{UUID: "00000000-0000-0000-0000-000000000008", Name: types.K8sMgmtIntfName, Ofport: &minusOne},
+				&vswitchd.Bridge{UUID: "00000000-0000-0000-0000-000000000009", Name: "br-other", Ports: []string{
+					"00000000-0000-0000-0000-000000000005",
+					"00000000-0000-0000-0000-000000000010",
+				}},
+				&vswitchd.Port{UUID: "00000000-0000-0000-0000-000000000005", Name: "bond0", Interfaces: []string{"00000000-0000-0000-0000-000000000006"}},
+				&vswitchd.Interface{UUID: "00000000-0000-0000-0000-000000000006", Name: "bar", Ofport: &minusOne},
+				&vswitchd.Port{UUID: "00000000-0000-0000-0000-000000000010", Name: "healthy", Interfaces: []string{"00000000-0000-0000-0000-000000000011"}},
+				&vswitchd.Interface{UUID: "00000000-0000-0000-0000-000000000011", Name: "healthy", Ofport: &one},
 			})
+			defer ovsCleanup.Cleanup()
+
+			checkForStaleOVSInternalPorts(ovsClient)
+
+			_, err := libovsdbops.GetOVSPort(ovsClient, "foo")
+			Expect(err).To(MatchError(libovsdbclient.ErrNotFound))
+			_, err = libovsdbops.GetOVSPort(ovsClient, "bond0")
+			Expect(err).To(MatchError(libovsdbclient.ErrNotFound))
+			_, err = libovsdbops.GetOVSInterface(ovsClient, "bar")
+			Expect(err).To(MatchError(libovsdbclient.ErrNotFound))
+			_, err = libovsdbops.GetOVSPort(ovsClient, types.K8sMgmtIntfName)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = libovsdbops.GetOVSPort(ovsClient, "healthy")
+			Expect(err).NotTo(HaveOccurred())
 		})
 
-		Context("bridge does not have stale ports", func() {
-			It("Does not remove any ports from bridge", func() {
-				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd:    genListStalePortsCmd(),
-					Output: types.K8sMgmtIntfName + "\n\n",
-					Err:    nil,
-				})
-				checkForStaleOVSInternalPorts()
-				Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc)
+		It("preserves a bridge local port without blocking other stale port cleanup", func() {
+			minusOne := -1
+			ovsClient, ovsCleanup := newTestOVSClient([]libovsdbtest.TestData{
+				&vswitchd.OpenvSwitch{
+					UUID:    "00000000-0000-0000-0000-000000000001",
+					Bridges: []string{"00000000-0000-0000-0000-000000000002"},
+				},
+				&vswitchd.Bridge{
+					UUID: "00000000-0000-0000-0000-000000000002",
+					Name: "br-int",
+					Ports: []string{
+						"00000000-0000-0000-0000-000000000003",
+						"00000000-0000-0000-0000-000000000005",
+					},
+				},
+				&vswitchd.Port{UUID: "00000000-0000-0000-0000-000000000003", Name: "br-int", Interfaces: []string{"00000000-0000-0000-0000-000000000004"}},
+				&vswitchd.Interface{UUID: "00000000-0000-0000-0000-000000000004", Name: "br-int", Ofport: &minusOne},
+				&vswitchd.Port{UUID: "00000000-0000-0000-0000-000000000005", Name: "foo", Interfaces: []string{"00000000-0000-0000-0000-000000000006"}},
+				&vswitchd.Interface{UUID: "00000000-0000-0000-0000-000000000006", Name: "foo", Ofport: &minusOne},
 			})
+			defer ovsCleanup.Cleanup()
+
+			checkForStaleOVSInternalPorts(ovsClient)
+
+			_, err := libovsdbops.GetOVSPort(ovsClient, "br-int")
+			Expect(err).NotTo(HaveOccurred())
+			_, err = libovsdbops.GetOVSPort(ovsClient, "foo")
+			Expect(err).To(MatchError(libovsdbclient.ErrNotFound))
 		})
 	})
 
@@ -322,9 +347,11 @@ var _ = Describe("Healthcheck tests", func() {
 				UplinkClient: uplinkfake.NewSimpleClientset(),
 			}
 			expectUplinkInformers(&factoryMock)
+			ovsClient, ovsCleanup := newTestOVSClient(nil)
+			defer ovsCleanup.Cleanup()
 
 			ncm, err := NewNodeControllerManager(fakeClient, &factoryMock, "worker1",
-				&sync.WaitGroup{}, nil, routemanager.NewController(), nil)
+				&sync.WaitGroup{}, nil, routemanager.NewController(), ovsClient)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(ncm.vrfManager).NotTo(BeNil())
 			Expect(ncm.ruleManager).To(BeNil())
@@ -399,7 +426,9 @@ var _ = Describe("Healthcheck tests", func() {
 			factoryMock.On("NodeCoreInformer").Return(nodeInformerMock)
 			expectUplinkInformers(&factoryMock)
 
-			ncm, err := NewNodeControllerManager(fakeClient, &factoryMock, nodeName, &sync.WaitGroup{}, nil, routeManager, nil)
+			ovsClient, ovsCleanup := newTestOVSClient(nil)
+			defer ovsCleanup.Cleanup()
+			ncm, err := NewNodeControllerManager(fakeClient, &factoryMock, nodeName, &sync.WaitGroup{}, nil, routeManager, ovsClient)
 			Expect(err).NotTo(HaveOccurred())
 
 			err = testNS.Do(func(ns.NetNS) error {
@@ -442,10 +471,6 @@ var _ = Describe("Healthcheck tests", func() {
 			staleMgtPort := fmt.Sprintf("%s%d", types.K8sMgmtIntfNamePrefix, staleNetID)
 			fexec := ovntest.NewFakeExec()
 			Expect(util.SetExec(fexec)).To(Succeed())
-			fexec.AddFakeCmdsNoOutputNoError([]string{
-				"ovs-vsctl --timeout=15" +
-					" --if-exists del-port br-int " + staleMgtPort,
-			})
 			factoryMock := factoryMocks.NodeWatchFactory{}
 			netInfo, err := util.ParseNADInfo(nad)
 			mutableNetInfo := util.NewMutableNetInfo(netInfo)
@@ -477,7 +502,9 @@ var _ = Describe("Healthcheck tests", func() {
 			factoryMock.On("NodeCoreInformer").Return(nodeInformerMock)
 			expectUplinkInformers(&factoryMock)
 			Expect(err).NotTo(HaveOccurred())
-			ncm, err := NewNodeControllerManager(fakeClient, &factoryMock, nodeName, &sync.WaitGroup{}, nil, routeManager, nil)
+			ovsClient, ovsCleanup := newTestOVSClient(nil)
+			defer ovsCleanup.Cleanup()
+			ncm, err := NewNodeControllerManager(fakeClient, &factoryMock, nodeName, &sync.WaitGroup{}, nil, routeManager, ovsClient)
 			Expect(err).NotTo(HaveOccurred())
 
 			err = testNS.Do(func(ns.NetNS) error {
