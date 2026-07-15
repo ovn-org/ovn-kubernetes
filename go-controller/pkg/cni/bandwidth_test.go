@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -181,6 +182,95 @@ func TestClearPodBandwidthWithOVSClient(t *testing.T) {
 	require.True(t, qosExists(otherQOSUUID), "expected unrelated QoS to be preserved")
 }
 
+func TestSetPodBandwidthWithOVSClient(t *testing.T) {
+	tests := []struct {
+		name              string
+		ingressBPS        int64
+		egressBPS         int64
+		expectQOS         bool
+		expectedRateKBPS  int
+		expectedBurstKBPS int
+	}{
+		{
+			name:              "ingress and egress",
+			ingressBPS:        10_000_000,
+			egressBPS:         2_000_000,
+			expectQOS:         true,
+			expectedRateKBPS:  2000,
+			expectedBurstKBPS: 200,
+		},
+		{
+			name:       "ingress only",
+			ingressBPS: 10_000_000,
+			expectQOS:  true,
+		},
+		{
+			name:              "egress only",
+			egressBPS:         2_000_000,
+			expectedRateKBPS:  2000,
+			expectedBurstKBPS: 200,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			const (
+				ovsUUID    = "00000000-0000-0000-0000-000000000001"
+				bridgeUUID = "00000000-0000-0000-0000-000000000002"
+				portUUID   = "00000000-0000-0000-0000-000000000003"
+				ifaceUUID  = "00000000-0000-0000-0000-000000000004"
+			)
+			ovsClient, cleanup, err := libovsdbtest.NewOVSTestHarness(libovsdbtest.TestSetup{
+				OVSData: []libovsdbtest.TestData{
+					&vswitchd.OpenvSwitch{UUID: ovsUUID, Bridges: []string{bridgeUUID}},
+					&vswitchd.Bridge{UUID: bridgeUUID, Name: "br-int", Ports: []string{portUUID}},
+					&vswitchd.Port{UUID: portUUID, Name: "pod-port", Interfaces: []string{ifaceUUID}},
+					&vswitchd.Interface{UUID: ifaceUUID, Name: "pod-port"},
+				},
+			})
+			require.NoError(t, err)
+			t.Cleanup(cleanup.Cleanup)
+
+			require.NoError(t, setPodBandwidth(
+				ovsClient, "sandboxID", "pod-port", test.ingressBPS, test.egressBPS))
+
+			port := &vswitchd.Port{UUID: portUUID}
+			if test.expectQOS {
+				require.Eventually(t, func() bool {
+					return ovsClient.Get(context.Background(), port) == nil && port.QOS != nil
+				}, time.Second, 10*time.Millisecond)
+				require.True(t, ovsdb.IsValidUUID(*port.QOS))
+				results, err := ovsops.TransactAndCheck(ovsClient, []ovsdb.Operation{{
+					Op:    ovsdb.OperationSelect,
+					Table: vswitchd.QoSTable,
+					Where: []ovsdb.Condition{
+						ovsdb.NewCondition("_uuid", ovsdb.ConditionEqual, ovsdb.UUID{GoUUID: *port.QOS}),
+					},
+				}})
+				require.NoError(t, err)
+				require.Len(t, results, 1)
+				require.Len(t, results[0].Rows, 1)
+				qosRow := results[0].Rows[0]
+				require.Equal(t, "linux-htb", qosRow["type"])
+				otherConfig, ok := qosRow["other_config"].(ovsdb.OvsMap)
+				require.True(t, ok)
+				require.Equal(t, fmt.Sprint(test.ingressBPS), otherConfig.GoMap["max-rate"])
+				externalIDs, ok := qosRow["external_ids"].(ovsdb.OvsMap)
+				require.True(t, ok)
+				require.Equal(t, "sandboxID", externalIDs.GoMap["sandbox"])
+			} else {
+				require.NoError(t, ovsClient.Get(context.Background(), port))
+				require.Nil(t, port.QOS)
+			}
+
+			iface := &vswitchd.Interface{UUID: ifaceUUID}
+			require.NoError(t, ovsClient.Get(context.Background(), iface))
+			require.Equal(t, test.expectedRateKBPS, iface.IngressPolicingRate)
+			require.Equal(t, test.expectedBurstKBPS, iface.IngressPolicingBurst)
+		})
+	}
+}
+
 func TestSetPodBandwidth(t *testing.T) {
 	mockKexecIface := new(mock_k8s_io_utils_exec.Interface)
 	mockCmd := new(mock_k8s_io_utils_exec.Cmd)
@@ -294,7 +384,7 @@ func TestSetPodBandwidth(t *testing.T) {
 			// note runner is defined in pkg/cni/ovs.go file
 			runner = tc.runnerInstance
 
-			e := setPodBandwidth("sandboxID", "ifname", 1, tc.egressBPS)
+			e := setPodBandwidth(nil, "sandboxID", "ifname", 1, tc.egressBPS)
 
 			if tc.expectedErr {
 				require.Error(t, e)
