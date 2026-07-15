@@ -15,7 +15,7 @@ import (
 	"k8s.io/utils/ptr"
 
 	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
-	"github.com/ovn-kubernetes/libovsdb/model"
+	libovsdbmodel "github.com/ovn-kubernetes/libovsdb/model"
 	"github.com/ovn-kubernetes/libovsdb/ovsdb"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
@@ -134,6 +134,84 @@ func UpdateOpenvSwitchExternalIDs(ovsClient libovsdbclient.Client, kv map[string
 	}
 	m := newModelClient(ovsClient)
 	_, err := m.CreateOrUpdate(opModel)
+	return err
+}
+
+// UpdateOpenvSwitchSettings merges externalIDs and otherConfig into the
+// singleton Open_vSwitch row in one transaction. Unspecified keys are
+// preserved.
+func UpdateOpenvSwitchSettings(ovsClient libovsdbclient.Client, externalIDs, otherConfig map[string]string) error {
+	ovs := &vswitchd.OpenvSwitch{ExternalIDs: externalIDs, OtherConfig: otherConfig}
+	fields := []interface{}{}
+	if len(externalIDs) > 0 {
+		fields = append(fields, &ovs.ExternalIDs)
+	}
+	if len(otherConfig) > 0 {
+		fields = append(fields, &ovs.OtherConfig)
+	}
+	if len(fields) == 0 {
+		return nil
+	}
+	opModel := operationModel{
+		Model:            ovs,
+		ModelPredicate:   func(*vswitchd.OpenvSwitch) bool { return true },
+		OnModelMutations: fields,
+		ErrNotFound:      true,
+		BulkOp:           false,
+	}
+	m := newModelClient(ovsClient)
+	_, err := m.CreateOrUpdate(opModel)
+	return err
+}
+
+// SetBridgeFlowCollectors atomically replaces a bridge's NetFlow, sFlow and
+// IPFIX collector references. A nil collector clears that reference; old
+// collector rows are garbage-collected by OVSDB once no bridge references
+// them.
+func SetBridgeFlowCollectors(ovsClient libovsdbclient.Client, bridgeName string, netflow *vswitchd.NetFlow, sflow *vswitchd.SFlow, ipfix *vswitchd.IPFIX) error {
+	bridge, err := GetBridge(ovsClient, bridgeName)
+	if err != nil {
+		return err
+	}
+	var operations []ovsdb.Operation
+	collectors := []libovsdbmodel.Model{}
+	if netflow != nil {
+		netflow.UUID = buildNamedUUID()
+		collectors = append(collectors, netflow)
+	}
+	if sflow != nil {
+		sflow.UUID = buildNamedUUID()
+		collectors = append(collectors, sflow)
+	}
+	if ipfix != nil {
+		ipfix.UUID = buildNamedUUID()
+		collectors = append(collectors, ipfix)
+	}
+	for _, collector := range collectors {
+		createOps, err := ovsClient.Create(collector)
+		if err != nil {
+			return fmt.Errorf("failed to create flow collector operations: %w", err)
+		}
+		operations = append(operations, createOps...)
+	}
+	bridge.Netflow = nil
+	bridge.Sflow = nil
+	bridge.IPFIX = nil
+	if netflow != nil {
+		bridge.Netflow = &netflow.UUID
+	}
+	if sflow != nil {
+		bridge.Sflow = &sflow.UUID
+	}
+	if ipfix != nil {
+		bridge.IPFIX = &ipfix.UUID
+	}
+	updateOps, err := ovsClient.Where(&vswitchd.Bridge{UUID: bridge.UUID}).Update(bridge, &bridge.Netflow, &bridge.Sflow, &bridge.IPFIX)
+	if err != nil {
+		return fmt.Errorf("failed to create bridge flow collector update operations: %w", err)
+	}
+	operations = append(operations, updateOps...)
+	_, err = TransactAndCheck(ovsClient, operations)
 	return err
 }
 
@@ -434,6 +512,77 @@ func CreateOrUpdateNicBridge(ovsClient libovsdbclient.Client, bridgeName, uplink
 	return err
 }
 
+// CreateOrUpdateBridge creates a bridge and its same-named internal
+// Port/Interface, and attaches it to the Open_vSwitch root row.
+func CreateOrUpdateBridge(ovsClient libovsdbclient.Client, bridgeName string, failMode vswitchd.BridgeFailMode, mtu int) error {
+	if existing, err := GetPortBridge(ovsClient, bridgeName); err == nil && existing.Name != bridgeName {
+		return fmt.Errorf("port %q is already attached to bridge %q", bridgeName, existing.Name)
+	} else if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
+		return fmt.Errorf("failed to check existing bridge port %q: %w", bridgeName, err)
+	}
+	owner, err := getInterfacePort(ovsClient, bridgeName)
+	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
+		return fmt.Errorf("failed to check existing port for interface %q: %w", bridgeName, err)
+	}
+	if owner != nil && owner.Name != bridgeName {
+		return fmt.Errorf("interface %q is already attached to port %q", bridgeName, owner.Name)
+	}
+	iface := &vswitchd.Interface{Name: bridgeName, Type: "internal", MTURequest: &mtu}
+	port := &vswitchd.Port{Name: bridgeName}
+	bridge := &vswitchd.Bridge{Name: bridgeName, FailMode: &failMode}
+	ovs := &vswitchd.OpenvSwitch{}
+	m := newModelClient(ovsClient)
+	operations, err := m.CreateOrUpdateOps(nil,
+		operationModel{
+			Model:          iface,
+			OnModelUpdates: []interface{}{&iface.Type, &iface.MTURequest},
+			DoAfter:        func() { port.Interfaces = []string{iface.UUID} },
+			ErrNotFound:    false,
+			BulkOp:         false,
+		},
+		operationModel{
+			Model:          port,
+			OnModelUpdates: []interface{}{&port.Interfaces},
+			DoAfter:        func() { bridge.Ports = []string{port.UUID} },
+			ErrNotFound:    false,
+			BulkOp:         false,
+		},
+		operationModel{
+			Model:            bridge,
+			OnModelUpdates:   []interface{}{&bridge.FailMode},
+			OnModelMutations: []interface{}{&bridge.Ports},
+			DoAfter:          func() { ovs.Bridges = []string{bridge.UUID} },
+			ErrNotFound:      false,
+			BulkOp:           false,
+		},
+		operationModel{
+			Model:            ovs,
+			ModelPredicate:   func(*vswitchd.OpenvSwitch) bool { return true },
+			OnModelMutations: []interface{}{&ovs.Bridges},
+			ErrNotFound:      true,
+			BulkOp:           false,
+		},
+	)
+	if err != nil {
+		return err
+	}
+	_, err = TransactAndCheck(ovsClient, operations)
+	return err
+}
+
+// UpdateBridgeOtherConfig merges values into a bridge's other_config map.
+func UpdateBridgeOtherConfig(ovsClient libovsdbclient.Client, bridgeName string, otherConfig map[string]string) error {
+	bridge := &vswitchd.Bridge{Name: bridgeName, OtherConfig: otherConfig}
+	m := newModelClient(ovsClient)
+	_, err := m.CreateOrUpdate(operationModel{
+		Model:            bridge,
+		OnModelMutations: []interface{}{&bridge.OtherConfig},
+		ErrNotFound:      true,
+		BulkOp:           false,
+	})
+	return err
+}
+
 // GetBridge looks up an OVS bridge by name. This is the libovsdb equivalent of
 // `ovs-vsctl br-exists <name>` plus `ovs-vsctl list Bridge <name>`.
 func GetBridge(ovsClient libovsdbclient.Client, name string) (*vswitchd.Bridge, error) {
@@ -486,7 +635,7 @@ func DeleteBridgeOps(ovsClient libovsdbclient.Client, ops []ovsdb.Operation, bri
 	// Bridge. ovs-vsctl del-br removes these rows before deleting the bridge;
 	// otherwise OVSDB rejects the transaction for referential-integrity.
 	collector := &vswitchd.FlowSampleCollectorSet{}
-	collectorOps, err := ovsClient.WhereAll(collector, model.Condition{
+	collectorOps, err := ovsClient.WhereAll(collector, libovsdbmodel.Condition{
 		Field:    &collector.Bridge,
 		Function: ovsdb.ConditionEqual,
 		Value:    bridge.UUID,
@@ -670,7 +819,7 @@ func CreateOrUpdatePortWithInterfaceOps(ovsClient libovsdbclient.Client, ops []o
 // interface on bridgeName in one transaction. The helper updates these
 // columns from the caller-supplied models:
 //   - Port: OtherConfig, ExternalIDs
-//   - Interface: Type, Options, MTURequest, ExternalIDs
+//   - Interface: Type, Options, MTURequest, ExternalIDs, and MAC when provided
 //
 // Both port.Name and iface.Name are forced to portName for consistency.
 // On create, the model is written as-is; on update, only the listed columns
@@ -735,9 +884,13 @@ func CreateOrUpdatePodPortOps(ovsClient libovsdbclient.Client, ops []ovsdb.Opera
 	port.Name = portName
 	bridge := &vswitchd.Bridge{Name: bridgeName}
 
+	ifaceUpdates := []interface{}{&iface.Type, &iface.Options, &iface.MTURequest}
+	if iface.MAC != nil {
+		ifaceUpdates = append(ifaceUpdates, &iface.MAC)
+	}
 	ifaceModel := operationModel{
 		Model:            iface,
-		OnModelUpdates:   []interface{}{&iface.Type, &iface.Options, &iface.MTURequest},
+		OnModelUpdates:   ifaceUpdates,
 		OnModelMutations: []interface{}{&iface.ExternalIDs},
 		DoAfter: func() {
 			port.Interfaces = []string{iface.UUID}
