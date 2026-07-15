@@ -9,7 +9,6 @@ import (
 	"github.com/urfave/cli/v2"
 
 	"k8s.io/klog/v2"
-	kexec "k8s.io/utils/exec"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
@@ -53,10 +52,6 @@ var BridgesToNicCommand = cli.Command{
 		args := ctx.Args()
 		if args.Len() == 0 {
 			return fmt.Errorf("please specify list of bridges")
-		}
-
-		if err := util.SetSpecificExec(kexec.New(), "ovs-vsctl"); err != nil {
-			return err
 		}
 
 		ovsClient, err := libovsdb.NewOVSClient(ctx.Context.Done())

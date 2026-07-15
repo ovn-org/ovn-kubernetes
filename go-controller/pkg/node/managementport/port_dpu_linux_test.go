@@ -45,13 +45,6 @@ func mockOVSListInterfaceMgmtPortNotExistCmd(execMock *ovntest.FakeExec, mgmtPor
 	})
 }
 
-func genGetOvsEntry(table, record, column, key string) string {
-	if key != "" {
-		column = column + ":" + key
-	}
-	return fmt.Sprintf("ovs-vsctl --timeout=15 --if-exists get %s %s %s", table, record, column)
-}
-
 var _ = Describe("Mananagement port DPU tests", func() {
 	origNetlinkOps := util.GetNetLinkOps()
 	var netlinkOpsMock *utilMocks.NetLinkOps

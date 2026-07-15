@@ -6,7 +6,6 @@ package node
 import (
 	"context"
 	"fmt"
-	"net"
 	"strconv"
 	"strings"
 	"sync"
@@ -55,8 +54,7 @@ var _ = Describe("UserDefinedNodeNetworkController", func() {
 		networkID = "3"
 		nad       = ovntest.GenerateNAD("bluenet", "rednad", "greenamespace",
 			types.Layer3Topology, "100.128.0.0/16", types.NetworkRolePrimary)
-		fexec      *ovntest.FakeExec
-		mgtPortMAC string = "00:00:00:55:66:77" // dummy MAC used for fake commands
+		fexec *ovntest.FakeExec
 	)
 	BeforeEach(func() {
 		// Restore global default values before each testcase
@@ -130,7 +128,7 @@ var _ = Describe("UserDefinedNodeNetworkController", func() {
 		factoryMock.On("UplinkStateInformer").Return(uplinkFactory.K8s().V1alpha1().UplinkStates())
 		NetInfo, err := util.ParseNADInfo(nad)
 		Expect(err).NotTo(HaveOccurred())
-		getCreationFakeCommands(fexec, "ovn-k8s-mp3", mgtPortMAC, NetInfo.GetNetworkName(), "worker1", NetInfo.MTU())
+		getCreationFakeCommands(fexec, "ovn-k8s-mp3")
 		ofm := getDummyOpenflowManager()
 		controller, err := NewUserDefinedNodeNetworkController(
 			&cnnci,
@@ -185,7 +183,6 @@ var _ = Describe("UserDefinedNodeNetworkController: UserDefinedPrimaryNetwork Ga
 		netName                 = "bluenet"
 		netID                   = 3
 		nodeName         string = "worker1"
-		mgtPortMAC       string = "00:00:00:55:66:77"
 		fexec            *ovntest.FakeExec
 		testNS           ns.NetNS
 		vrf              *vrfmanager.Controller
@@ -416,9 +413,6 @@ var _ = Describe("UserDefinedNodeNetworkController: UserDefinedPrimaryNetwork Ga
 		ovntest.AnnotateNADWithNetworkID(strconv.Itoa(netID), nad)
 		NetInfo, err := util.ParseNADInfo(nad)
 		Expect(err).NotTo(HaveOccurred())
-		_, ipNet, err := net.ParseCIDR(v4NodeSubnet)
-		Expect(err).NotTo(HaveOccurred())
-		mgtPortMAC = util.IPAddrToHWAddr(util.GetNodeManagementIfAddr(ipNet).IP).String()
 		// Make Management port
 		nodeSubnets := ovntest.MustParseIPNets(v4NodeSubnet, v6NodeSubnet)
 		mp, err := managementport.NewManagementPortController(ovsClient, node, nodeSubnets, "", "", routeManager, NetInfo)
@@ -428,7 +422,7 @@ var _ = Describe("UserDefinedNodeNetworkController: UserDefinedPrimaryNetwork Ga
 			defer GinkgoRecover()
 			setManagementPortFakeCommands(fexec)
 			setUpGatewayFakeOVSCommands(fexec)
-			getCreationFakeCommands(fexec, mgtPort, mgtPortMAC, netName, nodeName, NetInfo.MTU())
+			getCreationFakeCommands(fexec, mgtPort)
 			getRPFilterLooseModeFakeCommands(fexec)
 
 			gatewayNextHops, gatewayIntf, err := getGatewayNextHops(ovsClient)
