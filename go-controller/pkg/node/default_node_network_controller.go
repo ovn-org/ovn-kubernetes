@@ -1000,6 +1000,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) (err error) {
 			nc.watchFactory.PodInformer(),
 			informer.NewDefaultEventHandler,
 			false,
+			nc.ovsClient,
 		)
 		if err != nil {
 			return err

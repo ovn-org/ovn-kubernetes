@@ -10,6 +10,8 @@ import (
 
 	listers "k8s.io/client-go/listers/core/v1"
 
+	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
+
 	hotypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube"
 )
@@ -18,7 +20,8 @@ import (
 // This controller is running in ovnkube-node binary. It's responsible for local
 // node configuration and annotation.
 type NodeController struct {
-	kube kube.Interface
+	kube      kube.Interface
+	ovsClient libovsdbclient.Client
 	sync.RWMutex
 	nodeName  string
 	initState hotypes.HybridInitState
@@ -56,9 +59,10 @@ func newNodeController(
 	nodeLister listers.NodeLister,
 	localPodLister listers.PodLister,
 	isHONode bool,
+	ovsClient libovsdbclient.Client,
 ) (nodeController, error) {
 	if isHONode {
 		return newHONodeController(kube, nodeName)
 	}
-	return newOVNNodeController(kube, nodeName, nodeLister, localPodLister)
+	return newOVNNodeController(kube, nodeName, nodeLister, localPodLister, ovsClient)
 }

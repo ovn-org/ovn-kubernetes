@@ -128,6 +128,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				f.Core().V1().Pods().Informer(),
 				informer.NewTestEventHandler,
 				true,
+				nil,
 			)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -180,6 +181,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				f.Core().V1().Pods().Informer(),
 				informer.NewTestEventHandler,
 				true,
+				nil,
 			)
 			Expect(err).NotTo(HaveOccurred())
 

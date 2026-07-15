@@ -6,6 +6,7 @@ package controller
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -22,18 +23,26 @@ import (
 	listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
 
+	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
+
 	hotypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	houtil "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/hybrid-overlay/pkg/util"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/generator/udn"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube"
+	ovsops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/vswitchd"
 )
 
 const (
 	extBridgeName string = "br-ext"
 	extVXLANName  string = "ext-vxlan"
+	rampInt       string = "int"
+	rampExt       string = "ext"
+
+	ovsBridgeMACWaitTimeout = 30 * time.Second
 )
 
 type flowCacheEntry struct {
@@ -62,6 +71,7 @@ func newOVNNodeController(
 	nodeName string,
 	nodeLister listers.NodeLister,
 	localPodLister listers.PodLister,
+	ovsClient libovsdbclient.Client,
 ) (nodeController, error) {
 	node := &NodeController{
 		kube:                kube,
@@ -74,9 +84,72 @@ func newOVNNodeController(
 		flowCacheSyncPeriod: 30 * time.Second,
 		nodeLister:          nodeLister,
 		localPodLister:      localPodLister,
+		ovsClient:           ovsClient,
 	}
 	atomic.StoreUint32(node.initState, hotypes.InitialStartup)
 	return node, nil
+}
+
+func (n *NodeController) ensureHybridOverlayOVSTopology(portName string) error {
+	if err := ovsops.CreateOrUpdateBridge(n.ovsClient, extBridgeName, vswitchd.BridgeFailModeSecure, config.Default.MTU); err != nil {
+		return fmt.Errorf("failed to create hybrid-overlay bridge %s: %w", extBridgeName, err)
+	}
+
+	// Pin the bridge MAC before adding more ports. ovs-vswitchd populates
+	// mac_in_use asynchronously after the bridge transaction completes.
+	var macAddress string
+	err := wait.PollUntilContextTimeout(context.Background(), 100*time.Millisecond, ovsBridgeMACWaitTimeout, true, func(context.Context) (bool, error) {
+		iface, err := ovsops.GetOVSInterface(n.ovsClient, extBridgeName)
+		if err != nil {
+			if errors.Is(err, libovsdbclient.ErrNotFound) {
+				return false, nil
+			}
+			return false, err
+		}
+		if iface.MACInUse == nil || *iface.MACInUse == "" {
+			return false, nil
+		}
+		macAddress = *iface.MACInUse
+		return true, nil
+	})
+	if err != nil {
+		return fmt.Errorf("failed waiting for MAC address of OVS bridge %s: %w", extBridgeName, err)
+	}
+	if err := ovsops.UpdateBridgeOtherConfig(n.ovsClient, extBridgeName, map[string]string{"hwaddr": macAddress}); err != nil {
+		return fmt.Errorf("failed to pin MAC address on OVS bridge %s: %w", extBridgeName, err)
+	}
+
+	operations, err := ovsops.CreateOrUpdatePodPortOps(n.ovsClient, nil, "br-int", rampInt, &vswitchd.Port{}, &vswitchd.Interface{
+		Type:        "patch",
+		Options:     map[string]string{"peer": rampExt},
+		ExternalIDs: map[string]string{"iface-id": portName},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create operations for hybrid-overlay integration patch port: %w", err)
+	}
+	operations, err = ovsops.CreateOrUpdatePodPortOps(n.ovsClient, operations, extBridgeName, rampExt, &vswitchd.Port{}, &vswitchd.Interface{
+		Type:    "patch",
+		Options: map[string]string{"peer": rampInt},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create operations for hybrid-overlay external patch port: %w", err)
+	}
+	iface := &vswitchd.Interface{
+		Type: "vxlan",
+		Options: map[string]string{
+			"remote_ip": "flow",
+			"key":       "flow",
+			"dst_port":  fmt.Sprintf("%d", n.vxlanPort),
+		},
+	}
+	operations, err = ovsops.CreateOrUpdatePodPortOps(n.ovsClient, operations, extBridgeName, extVXLANName, &vswitchd.Port{}, iface)
+	if err != nil {
+		return fmt.Errorf("failed to create operations for VXLAN port on OVS bridge %s: %w", extBridgeName, err)
+	}
+	if err := ovsops.TransactAndCheckAndWaitForVSwitchd(context.Background(), n.ovsClient, operations); err != nil {
+		return fmt.Errorf("failed to create hybrid-overlay bridge ports: %w", err)
+	}
+	return nil
 }
 
 // AddPod handles the pod add event
@@ -539,50 +612,12 @@ func (n *NodeController) EnsureHybridOverlayBridge(node *corev1.Node) error {
 		return fmt.Errorf("hybrid overlay not initialized on %s, the the annotation %s = %s is not an IP address", node.Name, hotypes.HybridOverlayDRIP, hybridOverlayDRIP)
 	}
 
-	_, stderr, err := util.RunOVSVsctl("--may-exist", "add-br", extBridgeName,
-		"--", "set", "Bridge", extBridgeName, "fail_mode=secure",
-		"--", "set", "Interface", extBridgeName, "mtu_request="+fmt.Sprintf("%d", config.Default.MTU))
-	if err != nil {
-		return fmt.Errorf("failed to create hybrid-overlay bridge %s"+
-			", stderr:%s: %v", extBridgeName, stderr, err)
-	}
-
-	// A OVS bridge's mac address can change when ports are added to it.
-	// We cannot let that happen, so make the bridge mac address permanent.
-	macAddress, err := util.GetOVSPortMACAddress(extBridgeName)
-	if err != nil {
+	if err := n.ensureHybridOverlayOVSTopology(portName); err != nil {
 		return err
-	}
-	stdout, stderr, err := util.RunOVSVsctl("set", "bridge", extBridgeName, "other-config:hwaddr="+macAddress.String())
-	if err != nil {
-		return fmt.Errorf("failed to set bridge, stdout: %q, stderr: %q, "+
-			"error: %v", stdout, stderr, err)
 	}
 
 	if _, err := util.LinkSetUp(extBridgeName); err != nil {
 		return fmt.Errorf("failed to up %s: %v", extBridgeName, err)
-	}
-
-	const (
-		rampInt string = "int"
-		rampExt string = "ext"
-	)
-	// Create the connection between OVN's br-int and our hybrid overlay bridge br-ext
-	_, stderr, err = util.RunOVSVsctl("--may-exist", "add-port", "br-int", rampInt,
-		"--", "--may-exist", "add-port", extBridgeName, rampExt,
-		"--", "set", "Interface", rampInt, "type=patch", "options:peer="+rampExt, "external-ids:iface-id="+portName,
-		"--", "set", "Interface", rampExt, "type=patch", "options:peer="+rampInt)
-	if err != nil {
-		return fmt.Errorf("failed to create hybrid overlay bridge patch ports"+
-			", stderr:%s (%v)", stderr, err)
-	}
-
-	// Add the VXLAN port for sending/receiving traffic from hybrid overlay nodes
-	_, stderr, err = util.RunOVSVsctl("--may-exist", "add-port", extBridgeName, extVXLANName,
-		"--", "set", "interface", extVXLANName, "type=vxlan", `options:remote_ip="flow"`, `options:key="flow"`, fmt.Sprintf("options:dst_port=%d", n.vxlanPort))
-	if err != nil {
-		return fmt.Errorf("failed to add VXLAN port for ovs bridge %s"+
-			", stderr:%s: %v", extBridgeName, stderr, err)
 	}
 
 	flows := make([]string, 0, 10)

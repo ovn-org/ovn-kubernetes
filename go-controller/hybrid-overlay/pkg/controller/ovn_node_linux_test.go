@@ -21,14 +21,19 @@ import (
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes/fake"
 
+	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
+
 	hotypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube"
+	ovsops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	ovntest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing"
+	libovsdbtest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util/mocks"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/vswitchd"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -41,6 +46,31 @@ const (
 	thisNodeDRIP   string = "1.2.3.3"
 	thisNodeDRMAC  string = "22:33:44:55:66:77"
 )
+
+func emulateVSwitchdConfig(ovsClient libovsdbclient.Client, stopChan <-chan struct{}, wg *sync.WaitGroup) {
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		ticker := time.NewTicker(10 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stopChan:
+				return
+			case <-ticker.C:
+				ovs, err := ovsops.GetOpenvSwitch(ovsClient)
+				if err != nil || ovs.CurCfg >= ovs.NextCfg {
+					continue
+				}
+				updated := &vswitchd.OpenvSwitch{UUID: ovs.UUID, CurCfg: ovs.NextCfg}
+				ops, err := ovsClient.Where(&vswitchd.OpenvSwitch{UUID: ovs.UUID}).Update(updated, &updated.CurCfg)
+				if err == nil {
+					_, _ = ovsops.TransactAndCheck(ovsClient, ops)
+				}
+			}
+		}
+	}()
+}
 
 // returns if the two flowCaches are the same
 func compareFlowCache(returnedFlowCache, expectedFlowCache map[string]*flowCacheEntry) error {
@@ -108,24 +138,10 @@ func generateInitialFlowCacheEntry(mgmtInterfaceAddr, drIP, drMAC string) *flowC
 }
 
 // returns a fake node IP and DR MAC
-func addNodeSetupCmds(fexec *ovntest.FakeExec, nodeName string) {
+func addNodeSetupCmds(fexec *ovntest.FakeExec) {
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd:    "ovn-nbctl --timeout=15 get logical_switch mynode other-config:subnet",
 		Output: thisNodeSubnet,
-	})
-	fexec.AddFakeCmdsNoOutputNoError([]string{
-		"ovs-vsctl --timeout=15 --may-exist add-br br-ext -- set Bridge br-ext fail_mode=secure -- set Interface br-ext mtu_request=1400",
-	})
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface br-ext mac_in_use",
-		Output: "10:11:12:13:14:15",
-	})
-	fexec.AddFakeCmdsNoOutputNoError([]string{
-		"ovs-vsctl --timeout=15 set bridge br-ext other-config:hwaddr=10:11:12:13:14:15",
-		"ovs-vsctl --timeout=15 --may-exist add-port br-int int -- --may-exist add-port br-ext ext -- set Interface int type=patch options:peer=ext external-ids:iface-id=int-" + nodeName + " -- set Interface ext type=patch options:peer=int",
-	})
-	fexec.AddFakeCmdsNoOutputNoError([]string{
-		`ovs-vsctl --timeout=15 --may-exist add-port br-ext ext-vxlan -- set interface ext-vxlan type=vxlan options:remote_ip="flow" options:key="flow" options:dst_port=4789`,
 	})
 }
 
@@ -274,6 +290,8 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 		wg         *sync.WaitGroup
 		mgmtIfAddr *net.IPNet
 		nlMock     *mocks.NetLinkOps
+		ovsClient  libovsdbclient.Client
+		ovsCleanup *libovsdbtest.Context
 	)
 	const (
 		thisNode   string = "mynode"
@@ -298,13 +316,43 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 		err := util.SetExec(fexec)
 		Expect(err).NotTo(HaveOccurred())
 
+		bridgeMAC := "10:11:12:13:14:15"
+		ovsClient, ovsCleanup, err = libovsdbtest.NewOVSTestHarness(libovsdbtest.TestSetup{
+			OVSData: []libovsdbtest.TestData{
+				&vswitchd.OpenvSwitch{UUID: "root", Bridges: []string{"br-int", "br-ext"}},
+				&vswitchd.Bridge{UUID: "br-int", Name: "br-int"},
+				&vswitchd.Bridge{UUID: "br-ext", Name: extBridgeName, Ports: []string{"br-ext-port"}},
+				&vswitchd.Port{UUID: "br-ext-port", Name: extBridgeName, Interfaces: []string{"br-ext-iface"}},
+				&vswitchd.Interface{UUID: "br-ext-iface", Name: extBridgeName, Type: "internal", MACInUse: &bridgeMAC},
+			},
+		})
+		Expect(err).NotTo(HaveOccurred())
+		emulateVSwitchdConfig(ovsClient, stopChan, wg)
+
 		mgmtIfAddr = util.GetNodeManagementIfAddr(ovntest.MustParseIPNet(thisNodeSubnet))
 	})
 
 	AfterEach(func() {
 		close(stopChan)
 		wg.Wait()
+		ovsCleanup.Cleanup()
 		util.ResetNetLinkOpMockInst()
+	})
+
+	It("requires an OVS client for an OVN node", func() {
+		fakeClient := fake.NewSimpleClientset()
+		f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
+
+		_, err := NewNode(
+			&kube.Kube{KClient: fakeClient},
+			thisNode,
+			f.Core().V1().Nodes().Informer(),
+			f.Core().V1().Pods().Informer(),
+			informer.NewTestEventHandler,
+			false,
+			nil,
+		)
+		Expect(err).To(MatchError("OVS client is required for an OVN node"))
 	})
 
 	ovntest.OnSupportedPlatformsIt("does not set up tunnels for non-hybrid-overlay nodes without annotations", func() {
@@ -331,6 +379,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				f.Core().V1().Pods().Informer(),
 				informer.NewTestEventHandler,
 				false,
+				ovsClient,
 			)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -375,6 +424,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				f.Core().V1().Pods().Informer(),
 				informer.NewTestEventHandler,
 				false,
+				ovsClient,
 			)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -405,7 +455,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				Items: []corev1.Node{*node},
 			})
 
-			addNodeSetupCmds(fexec, thisNode)
+			addNodeSetupCmds(fexec)
 			_, err := config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
@@ -417,6 +467,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				f.Core().V1().Pods().Informer(),
 				informer.NewTestEventHandler,
 				false,
+				ovsClient,
 			)
 			Expect(err).NotTo(HaveOccurred())
 			linuxNode, okay := n.controller.(*NodeController)
@@ -481,7 +532,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			})
 
 			// Node setup from initial node sync
-			addNodeSetupCmds(fexec, thisNode)
+			addNodeSetupCmds(fexec)
 			_, err := config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -494,6 +545,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				f.Core().V1().Pods().Informer(),
 				informer.NewTestEventHandler,
 				false,
+				ovsClient,
 			)
 			Expect(err).NotTo(HaveOccurred())
 			linuxNode, okay := n.controller.(*NodeController)
@@ -581,7 +633,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			)
 
 			// Node setup from initial node sync
-			addNodeSetupCmds(fexec, thisNode)
+			addNodeSetupCmds(fexec)
 			_, err := config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -594,6 +646,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				f.Core().V1().Pods().Informer(),
 				informer.NewTestEventHandler,
 				false,
+				ovsClient,
 			)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -661,7 +714,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			})
 
 			// Node setup from initial node sync
-			addNodeSetupCmds(fexec, thisNode)
+			addNodeSetupCmds(fexec)
 			_, err := config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -674,6 +727,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				f.Core().V1().Pods().Informer(),
 				informer.NewTestEventHandler,
 				false,
+				ovsClient,
 			)
 			Expect(err).NotTo(HaveOccurred())
 			linuxNode, okay := n.controller.(*NodeController)
@@ -761,7 +815,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			})
 
 			// Node setup from initial node sync
-			addNodeSetupCmds(fexec, thisNode)
+			addNodeSetupCmds(fexec)
 			_, err := config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -774,6 +828,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				f.Core().V1().Pods().Informer(),
 				informer.NewTestEventHandler,
 				false,
+				ovsClient,
 			)
 			Expect(err).NotTo(HaveOccurred())
 			linuxNode, okay := n.controller.(*NodeController)
@@ -901,7 +956,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			})
 
 			// Node setup from initial node sync
-			addNodeSetupCmds(fexec, thisNode)
+			addNodeSetupCmds(fexec)
 			_, err := config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -914,6 +969,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				f.Core().V1().Pods().Informer(),
 				informer.NewTestEventHandler,
 				false,
+				ovsClient,
 			)
 			Expect(err).NotTo(HaveOccurred())
 			linuxNode, okay := n.controller.(*NodeController)
@@ -1030,7 +1086,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			})
 
 			// Node setup from initial node sync
-			addNodeSetupCmds(fexec, thisNode)
+			addNodeSetupCmds(fexec)
 			_, err := config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -1043,6 +1099,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				f.Core().V1().Pods().Informer(),
 				informer.NewTestEventHandler,
 				false,
+				ovsClient,
 			)
 			Expect(err).NotTo(HaveOccurred())
 			linuxNode, okay := n.controller.(*NodeController)

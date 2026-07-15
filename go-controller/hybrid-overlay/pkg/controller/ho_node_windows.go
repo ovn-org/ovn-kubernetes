@@ -17,6 +17,8 @@ import (
 	listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
 
+	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
+
 	hotypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	houtil "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/hybrid-overlay/pkg/util"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
@@ -45,6 +47,7 @@ func newNodeController(kube kube.Interface,
 	nodeLister listers.NodeLister,
 	podLister listers.PodLister,
 	isHONode bool,
+	_ libovsdbclient.Client,
 ) (nodeController, error) {
 	supportedFeatures := hcn.GetSupportedFeatures()
 	if !supportedFeatures.HostRoute {

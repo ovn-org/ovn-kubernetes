@@ -141,6 +141,7 @@ func runHybridOverlay(ctx *cli.Context) error {
 		f.Core().V1().Pods().Informer(),
 		informer.NewDefaultEventHandler,
 		true,
+		nil,
 	)
 	if err != nil {
 		return err
