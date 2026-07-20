@@ -11,6 +11,9 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
+
+	"k8s.io/apimachinery/pkg/util/wait"
 
 	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
 
@@ -30,6 +33,53 @@ func (c *portScanTrackingClient) WhereCache(predicate interface{}) libovsdbclien
 		c.portScans++
 	}
 	return c.Client.WhereCache(predicate)
+}
+
+func TestTransactAndCheckAndWaitForVSwitchd(t *testing.T) {
+	ovsClient, cleanup, err := libovsdbtest.NewOVSTestHarness(libovsdbtest.TestSetup{OVSData: []libovsdbtest.TestData{
+		&vswitchd.OpenvSwitch{UUID: "root-ovs", NextCfg: 7, CurCfg: 7},
+	}})
+	if err != nil {
+		t.Fatalf("harness setup: %v", err)
+	}
+	t.Cleanup(cleanup.Cleanup)
+
+	applied := make(chan error, 1)
+	go func() {
+		applied <- wait.PollUntilContextTimeout(context.Background(), 10*time.Millisecond, time.Second, true,
+			func(context.Context) (bool, error) {
+				ovs, err := GetOpenvSwitch(ovsClient)
+				if err != nil || ovs.NextCfg != 8 {
+					return false, err
+				}
+				updated := &vswitchd.OpenvSwitch{UUID: ovs.UUID, CurCfg: ovs.NextCfg}
+				ops, err := ovsClient.Where(&vswitchd.OpenvSwitch{UUID: ovs.UUID}).Update(updated, &updated.CurCfg)
+				if err == nil {
+					_, err = TransactAndCheck(ovsClient, ops)
+				}
+				return err == nil, err
+			})
+	}()
+
+	ovs, err := GetOpenvSwitch(ovsClient)
+	if err != nil {
+		t.Fatalf("get Open_vSwitch: %v", err)
+	}
+	updated := &vswitchd.OpenvSwitch{UUID: ovs.UUID, ExternalIDs: map[string]string{"updated": "true"}}
+	ops, err := ovsClient.Where(&vswitchd.OpenvSwitch{UUID: updated.UUID}).Update(updated, &updated.ExternalIDs)
+	if err != nil {
+		t.Fatalf("build update operation: %v", err)
+	}
+	if err := TransactAndCheckAndWaitForVSwitchd(ovsClient, ops); err != nil {
+		t.Fatalf("transaction and wait failed: %v", err)
+	}
+	if err := <-applied; err != nil {
+		t.Fatalf("emulating ovs-vswitchd: %v", err)
+	}
+	ovs, err = GetOpenvSwitch(ovsClient)
+	if err != nil || ovs.NextCfg != 8 || ovs.CurCfg != 8 || ovs.ExternalIDs["updated"] != "true" {
+		t.Fatalf("Open_vSwitch after transaction = %+v, err=%v", ovs, err)
+	}
 }
 
 func TestGetPortBridge(t *testing.T) {
