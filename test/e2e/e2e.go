@@ -42,7 +42,6 @@ import (
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
 	testutils "k8s.io/kubernetes/test/utils"
-	kexec "k8s.io/utils/exec"
 	utilnet "k8s.io/utils/net"
 )
 
@@ -360,48 +359,6 @@ func createServiceForPodsWithLabel(f *framework.Framework, namespace string, ser
 		return "", errors.Wrapf(err, "Failed to get service %s %s", service.Name, namespace)
 	}
 	return res.Spec.ClusterIP, nil
-}
-
-// forwardIPWithIPTables inserts an iptables rule to always accept source and destination of arg ip
-func forwardIPWithIPTables(ip string) (func() error, error) {
-	isIPv6 := utilnet.IsIPv6String(ip)
-	ipTablesBin := "iptables"
-	if isIPv6 {
-		ipTablesBin = "ip6tables"
-	}
-	mask := "/32"
-	if isIPv6 {
-		mask = "/128"
-	}
-
-	var cleanUpFns []func() error
-	cleanUp := func() error {
-		var errs []error
-		for _, cleanUpFn := range cleanUpFns {
-			if err := cleanUpFn(); err != nil {
-				errs = append(errs, err)
-			}
-		}
-		return utilerrors.AggregateGoroutines(cleanUpFns...)
-	}
-	exec := kexec.New()
-	_, err := exec.Command("sudo", ipTablesBin, "-I", "FORWARD", "-s", ip+mask, "-j", "ACCEPT").CombinedOutput()
-	if err != nil {
-		return cleanUp, fmt.Errorf("failed to insert rule to forward IP %q: %w", ip+mask, err)
-	}
-	cleanUpFns = append(cleanUpFns, func() error {
-		exec.Command("sudo", ipTablesBin, "-D", "FORWARD", "-s", ip+mask, "-j", "ACCEPT").CombinedOutput()
-		return nil
-	})
-	_, err = exec.Command("sudo", ipTablesBin, "-I", "FORWARD", "-d", ip+mask, "-j", "ACCEPT").CombinedOutput()
-	if err != nil {
-		return cleanUp, fmt.Errorf("failed to insert rule to forward IP %q: %w", ip+mask, err)
-	}
-	cleanUpFns = append(cleanUpFns, func() error {
-		exec.Command("sudo", ipTablesBin, "-D", "FORWARD", "-d", ip+mask, "-j", "ACCEPT").CombinedOutput()
-		return nil
-	})
-	return cleanUp, nil
 }
 
 // updatesNamespace labels while preserving the required UDN label
@@ -781,9 +738,6 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 		framework.Logf("Target node is %q and IP is %q", targetNodeName, targetNodeIP)
 		err = setupHostRedirectPod(f, secondaryExternalContainer, targetNodeName, targetNodeIP, IsIPv6Cluster(f.ClientSet))
 		framework.ExpectNoError(err)
-
-		cleanUp, err := forwardIPWithIPTables(redirectIP)
-		ginkgo.DeferCleanup(cleanUp)
 
 		// start TCP client
 		go func() {
