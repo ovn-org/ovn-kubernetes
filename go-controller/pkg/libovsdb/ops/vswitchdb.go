@@ -7,11 +7,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 
 	"k8s.io/klog/v2"
 	"k8s.io/utils/ptr"
 
 	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
+	"github.com/ovn-kubernetes/libovsdb/model"
 	"github.com/ovn-kubernetes/libovsdb/ovsdb"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
@@ -196,6 +198,33 @@ func FindPortsForPortOrInterface(ovsClient libovsdbclient.Client, name string) (
 	return ports, nil
 }
 
+// getInterfacePort returns the OVS port that owns the named interface.
+// Returns ErrNotFound if the interface does not exist or no port references it.
+func getInterfacePort(ovsClient libovsdbclient.Client, interfaceName string) (*vswitchd.Port, error) {
+	iface, err := GetOVSInterface(ovsClient, interfaceName)
+	if err != nil {
+		return nil, err
+	}
+	ports, err := FindOVSPortsWithPredicate(ovsClient, func(port *vswitchd.Port) bool {
+		for _, uuid := range port.Interfaces {
+			if uuid == iface.UUID {
+				return true
+			}
+		}
+		return false
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(ports) > 1 {
+		return nil, fmt.Errorf("OVSDB corruption: interface %q is referenced by multiple ports: %w", interfaceName, errMultipleResults)
+	}
+	if len(ports) == 1 {
+		return ports[0], nil
+	}
+	return nil, fmt.Errorf("no port contains interface %q: %w", interfaceName, libovsdbclient.ErrNotFound)
+}
+
 // CreateOrUpdateNicBridge creates (or reconfigures) an OVS bridge for an
 // uplink NIC. It sets fail-mode=standalone, the supplied hardware address,
 // and external_ids bridge-id/bridge-uplink on the bridge; attaches the
@@ -231,13 +260,22 @@ func CreateOrUpdateNicBridge(ovsClient libovsdbclient.Client, bridgeName, uplink
 		}
 		existing, err := GetPortBridge(ovsClient, portName)
 		if err != nil {
+			if !errors.Is(err, libovsdbclient.ErrNotFound) {
+				return fmt.Errorf("failed to check existing bridge for port %q: %w", portName, err)
+			}
+		} else if existing.Name != bridgeName {
+			return fmt.Errorf("port %q is already attached to bridge %q", portName, existing.Name)
+		}
+
+		owner, err := getInterfacePort(ovsClient, portName)
+		if err != nil {
 			if errors.Is(err, libovsdbclient.ErrNotFound) {
 				continue
 			}
-			return fmt.Errorf("failed to check existing bridge for port %q: %w", portName, err)
+			return fmt.Errorf("failed to check existing port for interface %q: %w", portName, err)
 		}
-		if existing.Name != bridgeName {
-			return fmt.Errorf("port %q is already attached to bridge %q", portName, existing.Name)
+		if owner.Name != portName {
+			return fmt.Errorf("interface %q is already attached to port %q", portName, owner.Name)
 		}
 	}
 
@@ -376,6 +414,20 @@ func DeleteBridgeOps(ovsClient libovsdbclient.Client, ops []ovsdb.Operation, bri
 		}
 		return nil, err
 	}
+
+	// Flow_Sample_Collector_Set is a root table with a strong reference to
+	// Bridge. ovs-vsctl del-br removes these rows before deleting the bridge;
+	// otherwise OVSDB rejects the transaction for referential-integrity.
+	collector := &vswitchd.FlowSampleCollectorSet{}
+	collectorOps, err := ovsClient.WhereAll(collector, model.Condition{
+		Field:    &collector.Bridge,
+		Function: ovsdb.ConditionEqual,
+		Value:    bridge.UUID,
+	}).Delete()
+	if err != nil {
+		return nil, fmt.Errorf("failed to build flow sample collector delete operations for bridge %q: %w", bridgeName, err)
+	}
+	ops = append(ops, collectorOps...)
 
 	m := newModelClient(ovsClient)
 	ovs := &vswitchd.OpenvSwitch{Bridges: []string{bridge.UUID}}
@@ -589,6 +641,28 @@ func CreateOrUpdatePodPortOps(ovsClient libovsdbclient.Client, ops []ovsdb.Opera
 	if existing != nil && existing.Name != bridgeName {
 		return nil, fmt.Errorf("port %q is already attached to bridge %q", portName, existing.Name)
 	}
+	existingIface, err := GetOVSInterface(ovsClient, portName)
+	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
+		return nil, err
+	}
+	if existingIface != nil {
+		existingPort, err := GetOVSPort(ovsClient, portName)
+		if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
+			return nil, err
+		}
+		// Names are indexed. Avoid scanning every Port on a repeated CNI ADD
+		// when the named port already owns the interface. Resolve the owner
+		// only on a possible conflict, to include its name in the error.
+		if existingPort == nil || !slices.Contains(existingPort.Interfaces, existingIface.UUID) {
+			owner, err := getInterfacePort(ovsClient, portName)
+			if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
+				return nil, err
+			}
+			if owner != nil && owner.Name != portName {
+				return nil, fmt.Errorf("interface %q is already attached to port %q", portName, owner.Name)
+			}
+		}
+	}
 
 	iface.Name = portName
 	port.Name = portName
@@ -625,19 +699,29 @@ func CreateOrUpdatePodPortOps(ovsClient libovsdbclient.Client, ops []ovsdb.Opera
 	return m.CreateOrUpdateOps(ops, ifaceModel, portModel, bridgeModel)
 }
 
-// DeletePortWithInterfaces deletes an OVS port and all its interfaces from a
-// bridge. The deletion is scoped to bridgeName: a port that exists with the
-// given name but is attached to a different bridge is left untouched, matching
-// the semantics of `ovs-vsctl --if-exists --with-iface del-port <bridge>
-// <port>`. The function is idempotent - a missing port, or a missing bridge,
-// are both no-ops.
-func DeletePortWithInterfaces(ovsClient libovsdbclient.Client, bridgeName, portName string) error {
-	port, err := GetOVSPort(ovsClient, portName)
+// DeletePortWithInterfaces deletes a named OVS port, or the port containing a
+// named interface, and all of that port's interfaces from a bridge. Like
+// `ovs-vsctl --if-exists --with-iface del-port`, a missing target is a no-op.
+// The deletion is safely scoped to bridgeName: a target attached to another
+// bridge is logged and left untouched.
+func DeletePortWithInterfaces(ovsClient libovsdbclient.Client, bridgeName, portOrInterfaceName string) error {
+	port, err := GetOVSPort(ovsClient, portOrInterfaceName)
 	if err != nil {
-		if errors.Is(err, libovsdbclient.ErrNotFound) {
-			return nil // Port doesn't exist, nothing to delete
+		if !errors.Is(err, libovsdbclient.ErrNotFound) {
+			return err
 		}
-		return err
+		// Match ovs-vsctl del-port --with-iface: if the target is not a
+		// Port name, resolve it as an Interface name and delete its Port.
+		port, err = getInterfacePort(ovsClient, portOrInterfaceName)
+		if err != nil {
+			if errors.Is(err, libovsdbclient.ErrNotFound) {
+				return nil // Neither port nor interface exists
+			}
+			return err
+		}
+	}
+	if port.Name == bridgeName {
+		return nil // The bridge's local port can only be removed with the bridge
 	}
 	bridge, err := GetBridge(ovsClient, bridgeName)
 	if err != nil {
@@ -654,7 +738,7 @@ func DeletePortWithInterfaces(ovsClient libovsdbclient.Client, bridgeName, portN
 		}
 	}
 	if !onBridge {
-		klog.Warningf("OVS port %q exists but is not attached to bridge %q; leaving it untouched", portName, bridgeName)
+		klog.Warningf("OVS port %q exists but is not attached to bridge %q; leaving it untouched", port.Name, bridgeName)
 		return nil // Port lives on a different bridge; out of scope
 	}
 	ops, err := DeletePortWithInterfacesOps(ovsClient, nil, port, bridgeName)
