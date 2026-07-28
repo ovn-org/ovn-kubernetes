@@ -225,7 +225,11 @@ ips=$(ip -o addr show dev $iface| grep global |awk '{print $4}' | cut -d/ -f1 | 
 
 				By("Verify the connection of the client in the default network to the UDN service")
 				checkNoConnectionToClusterIPs(f, defaultClient, udnService)
-				checkNoConnectionToLoadBalancers(f, defaultClient, udnService)
+				// without a load balancer provider the service has no ingress
+				// IPs and the isolation check would pass vacuously
+				if loadBalancerProviderEnabled {
+					checkNoConnectionToLoadBalancers(f, defaultClient, udnService)
+				}
 				checkNoConnectionToNodePort(f, defaultClient, udnService, &nodes.Items[1], "local node") // TODO change to checkConnectionToNodePort when we have full UDN support in ovnkube-node
 
 				checkConnectionToNodePort(f, defaultClient, udnService, &nodes.Items[0], "server node", udnServerPod.Name)
@@ -268,7 +272,6 @@ ips=$(ip -o addr show dev $iface| grep global |awk '{print $4}' | cut -d/ -f1 | 
 				Expect(err).NotTo(HaveOccurred())
 
 				By("Verify the UDN client connection to the default network service")
-				checkNoConnectionToLoadBalancers(f, udnClientPod2, defaultService)
 				checkConnectionToNodePort(f, udnClientPod2, defaultService, &nodes.Items[0], "server node", defaultServerPod.Name)
 				checkNoConnectionToNodePort(f, udnClientPod2, defaultService, &nodes.Items[1], "local node")
 				checkConnectionToNodePort(f, udnClientPod2, defaultService, &nodes.Items[2], "other node", defaultServerPod.Name)
