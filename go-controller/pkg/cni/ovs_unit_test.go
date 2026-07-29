@@ -29,8 +29,6 @@ func TestSetExec(t *testing.T) {
 			onRetArgs: []*ovntest.TestifyMockHelper{
 				// mock ovs-vsctl path lookup
 				{OnCallMethodName: "LookPath", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{"", nil}},
-				// mock ovs-ofctl path lookup
-				{OnCallMethodName: "LookPath", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{"", nil}},
 			},
 		},
 	}
@@ -314,61 +312,6 @@ func TestOvsClear(t *testing.T) {
 
 			mockCmd.AssertExpectations(t)
 			mockKexecIface.AssertExpectations(t)
-		})
-	}
-}
-
-func TestOfctlExec(t *testing.T) {
-	mockKexecIface := new(mock_k8s_io_utils_exec.Interface)
-	mockCmd := new(mock_k8s_io_utils_exec.Cmd)
-
-	tests := []struct {
-		desc                string
-		expectedErr         error
-		onRetArgsKexecIface *ovntest.TestifyMockHelper
-		onRetArgsCmdList    []ovntest.TestifyMockHelper
-		runnerInstance      kexec.Interface
-	}{
-		{
-			desc:                "Positive test codepath for ofctlExec",
-			expectedErr:         nil,
-			onRetArgsKexecIface: &ovntest.TestifyMockHelper{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
-			onRetArgsCmdList: []ovntest.TestifyMockHelper{
-				{OnCallMethodName: "SetStdout", OnCallMethodArgType: []string{"*bytes.Buffer"}, RetArgList: []interface{}{nil}},
-				{OnCallMethodName: "SetStderr", OnCallMethodArgType: []string{"*bytes.Buffer"}, RetArgList: []interface{}{nil}},
-				{OnCallMethodName: "Run", OnCallMethodArgType: []string{}, RetArgList: []interface{}{nil}},
-			},
-			runnerInstance: mockKexecIface,
-		},
-		{
-			desc:                "Negative test codepath for ofctlExec",
-			expectedErr:         fmt.Errorf("failed to run ovs-ofctl"),
-			onRetArgsKexecIface: &ovntest.TestifyMockHelper{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
-			onRetArgsCmdList: []ovntest.TestifyMockHelper{
-				{OnCallMethodName: "SetStdout", OnCallMethodArgType: []string{"*bytes.Buffer"}, RetArgList: []interface{}{nil}},
-				{OnCallMethodName: "SetStderr", OnCallMethodArgType: []string{"*bytes.Buffer"}, RetArgList: []interface{}{nil}},
-				{OnCallMethodName: "Run", OnCallMethodArgType: []string{}, RetArgList: []interface{}{fmt.Errorf("failed to run 'ovs-ofctl'")}},
-			},
-			runnerInstance: mockKexecIface,
-		},
-	}
-	for i, tc := range tests {
-		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			ovntest.ProcessMockFn(&mockKexecIface.Mock, *tc.onRetArgsKexecIface)
-			ovntest.ProcessMockFnList(&mockCmd.Mock, tc.onRetArgsCmdList)
-
-			runner = tc.runnerInstance
-
-			_, e := ofctlExec()
-
-			if tc.expectedErr != nil {
-				require.Error(t, e)
-			} else {
-				require.NoError(t, e)
-			}
-
-			mockKexecIface.AssertExpectations(t)
-			mockCmd.AssertExpectations(t)
 		})
 	}
 }

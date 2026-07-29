@@ -25,20 +25,6 @@ import (
 
 var ErrorNoIP = errors.New("no IP available")
 
-// GetOVSPortMACAddress returns the MAC address of a given OVS port
-func GetOVSPortMACAddress(portName string) (net.HardwareAddr, error) {
-	macAddress, stderr, err := RunOVSVsctl("--if-exists", "get",
-		"interface", portName, "mac_in_use")
-	if err != nil {
-		return nil, fmt.Errorf("failed to get MAC address for %q, stderr: %q, error: %v",
-			portName, stderr, err)
-	}
-	if macAddress == "[]" {
-		return nil, fmt.Errorf("no mac_address found for %q", portName)
-	}
-	return net.ParseMAC(macAddress)
-}
-
 // GetNodeGatewayIfAddr returns the node logical switch gateway address
 // (the ".1" address), return nil if the subnet is invalid
 func GetNodeGatewayIfAddr(subnet *net.IPNet) *net.IPNet {

@@ -20,13 +20,11 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/klog/v2"
-	kexec "k8s.io/utils/exec"
 
 	"github.com/ovn-kubernetes/libovsdb/client"
 	"github.com/ovn-kubernetes/libovsdb/ovsdb"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/allocator/deviceresource"
-	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube"
@@ -386,13 +384,6 @@ func (ncm *NodeControllerManager) initDefaultNodeNetworkController(ctx context.C
 // Start the node network controller manager
 func (ncm *NodeControllerManager) Start(ctx context.Context, isOVNKubeControllerSyncd *atomic.Bool) (err error) {
 	klog.Infof("Starting the node network controller manager, Mode: %s", config.OvnKubeNode.Mode)
-
-	// Initialize OVS exec runner; find OVS binaries that the CNI code uses.
-	// Must happen before calling any OVS exec from pkg/cni to prevent races.
-	// Not required in DPUHost mode as OVS is not present there.
-	if err = cni.SetExec(kexec.New()); err != nil {
-		return err
-	}
 
 	err = ncm.watchFactory.Start()
 	if err != nil {

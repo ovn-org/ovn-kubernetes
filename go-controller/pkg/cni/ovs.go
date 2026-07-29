@@ -4,7 +4,6 @@
 package cni
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -24,16 +23,11 @@ import (
 
 var runner kexec.Interface
 var vsctlPath string
-var ofctlPath string
 
 func SetExec(r kexec.Interface) error {
 	runner = r
 	var err error
 	vsctlPath, err = r.LookPath("ovs-vsctl")
-	if err != nil {
-		return err
-	}
-	ofctlPath, err = r.LookPath("ovs-ofctl")
 	return err
 }
 
@@ -129,37 +123,6 @@ func ovsClear(table, record string, columns ...string) error {
 	args := append([]string{"--if-exists", "clear", table, record}, columns...)
 	_, err := ovsExec(args...)
 	return err
-}
-
-func ofctlExec(args ...string) (string, error) {
-	if runner == nil {
-		return "", fmt.Errorf("OVS exec runner not initialized")
-	}
-
-	args = append([]string{"--timeout=10", "--no-stats", "--strict"}, args...)
-	var stdout, stderr bytes.Buffer
-	cmd := runner.Command(ofctlPath, args...)
-	cmd.SetStdout(&stdout)
-	cmd.SetStderr(&stderr)
-
-	cmdStr := strings.Join(args, " ")
-	klog.V(5).Infof("Exec: %s %s", ofctlPath, cmdStr)
-
-	err := cmd.Run()
-	if err != nil {
-		stderrStr := stderr.String()
-		klog.Errorf("Exec: %s %s : stderr: %q", ofctlPath, cmdStr, stderrStr)
-		return "", fmt.Errorf("failed to run '%s %s': %v\n  %q", ofctlPath, cmdStr, err, stderrStr)
-	}
-	stdoutStr := stdout.String()
-	klog.V(5).Infof("Exec: %s %s: stdout: %q", ofctlPath, cmdStr, stdoutStr)
-
-	trimmed := strings.TrimSpace(stdoutStr)
-	// If output is a single line, strip the trailing newline
-	if strings.Count(trimmed, "\n") == 0 {
-		stdoutStr = trimmed
-	}
-	return stdoutStr, nil
 }
 
 // checkCancelSandbox checks that this sandbox is still valid for the current

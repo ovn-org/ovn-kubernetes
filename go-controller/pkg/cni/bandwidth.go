@@ -6,7 +6,6 @@ package cni
 import (
 	"fmt"
 	"strconv"
-	"strings"
 
 	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
 	"github.com/ovn-kubernetes/libovsdb/model"
@@ -187,60 +186,4 @@ func setPodBandwidthWithExec(sandboxID, ifname string, ingressBPS, egressBPS int
 	}
 
 	return nil
-}
-
-func getOvsPortBandwidth(ifname string, dir direction) (int64, error) {
-	// note pod ingress == OVS egress and vice versa
-	// so we ingress_policing_rate is egress and max-rate is ingress from the pod's
-	// perspective
-
-	// ingressBPS
-	if dir == Ingress {
-		return getInterfaceIngressBandwith(ifname)
-	}
-	// egreessBPS
-	return getInterfaceEgressBandwith(ifname)
-}
-
-func getInterfaceIngressBandwith(ifname string) (int64, error) {
-	qos_id, err := ovsGet("port", ifname, "qos", "")
-	if err != nil {
-		return 0, fmt.Errorf("failed to get qos for port %s: %w", ifname, err)
-	}
-	if len(qos_id) == 0 {
-		return 0, BandwidthNotFound
-	}
-	maxRate, err := ovsGet("qos", qos_id, "other_config", "max-rate")
-	if err != nil {
-		return 0, fmt.Errorf("failed to get max-rate for qos_id %s: %w", qos_id, err)
-	}
-	if len(maxRate) == 0 {
-		return 0, BandwidthNotFound
-	}
-	maxRate = strings.ReplaceAll(maxRate, "\"", "")
-	ingressBPS, err := strconv.ParseInt(maxRate, 10, 64)
-	if err != nil {
-		return 0, fmt.Errorf("failed to parse qos max rate for %s: %w", ifname, err)
-	}
-	return ingressBPS, nil
-}
-
-func getInterfaceEgressBandwith(ifname string) (int64, error) {
-	// egressBPS
-	out, err := ovsGet("interface", ifname, "ingress_policing_rate", "")
-	if err != nil {
-		return 0, fmt.Errorf("failed to get ingress_policing_rate for interface %s: %w", ifname, err)
-	}
-	if len(out) == 0 {
-		return 0, BandwidthNotFound
-	}
-	egressValue, err := strconv.ParseInt(out, 10, 64)
-	if err != nil {
-		return 0, fmt.Errorf("failed to parse ingress_policing_rate for interface %s from %q: %w", ifname, out, err)
-	}
-	if egressValue == 0 { // 0 is the default value so we return not found
-		return 0, BandwidthNotFound
-	}
-
-	return egressValue * 1000, nil
 }
