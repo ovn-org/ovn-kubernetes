@@ -283,42 +283,35 @@ func newUDNManagementPortRep(cfg *udnManagementPortConfig, repDeviceName string)
 
 // syncUDNManagementPort is to delete stale UDN management port entities created when the node was in different configuration/mode
 func syncUDNManagementPort(cfg *udnManagementPortConfig, mgmtIfName string, mpdev *util.NetworkDeviceDetails) error {
-	useClient := cfg.ovsClient != nil
-	if useClient {
-		var ovsRepIfName, ovsInternalIfName string
-		representors, findErr := ovsops.FindInterfacesWithPredicate(cfg.ovsClient, func(iface *vswitchd.Interface) bool {
-			return iface.ExternalIDs[types.OvnManagementPortNameExternalID] == mgmtIfName
-		})
-		if findErr != nil {
-			return fmt.Errorf("failed to find management port representor for %s: %w", mgmtIfName, findErr)
+	if cfg.ovsClient == nil {
+		if !config.IsModeDPUHost() {
+			return fmt.Errorf("OVS client is required to sync management port %s in node mode %s",
+				mgmtIfName, config.OvnKubeNode.Mode)
 		}
-		if len(representors) > 0 {
-			ovsRepIfName = representors[0].Name
-		}
-		internal, findErr := ovsops.FindInterfacesWithPredicate(cfg.ovsClient, func(iface *vswitchd.Interface) bool {
-			return iface.Name == mgmtIfName && iface.Type == "internal"
-		})
-		if findErr != nil {
-			return fmt.Errorf("failed to find internal management port for %s: %w", mgmtIfName, findErr)
-		}
-		if len(internal) > 0 {
-			ovsInternalIfName = internal[0].Name
-		}
-		return syncUDNManagementPortEntities(cfg, mgmtIfName, mpdev, ovsRepIfName, ovsInternalIfName)
+		// DPU-host has no local OVS. Preserve its stale netdevice cleanup, but
+		// do not issue OVS queries that cannot succeed in this mode.
+		return syncUDNManagementPortEntities(cfg, mgmtIfName, mpdev, "", "")
 	}
-	// representor OVS interface
-	ovsRepIfName, _, _ := util.RunOVSVsctl("--no-headings",
-		"--data", "bare",
-		"--format", "csv",
-		"--columns", "name",
-		"find", "Interface", fmt.Sprintf("external-ids:%s=%s", types.OvnManagementPortNameExternalID, mgmtIfName))
-	// internal OVS interface
-	ovsInternalIfName, _, _ := util.RunOVSVsctl("--no-headings",
-		"--data", "bare",
-		"--format", "csv",
-		"--columns", "name",
-		"find", "Interface", "type=internal", fmt.Sprintf("name=%s", mgmtIfName))
 
+	var ovsRepIfName, ovsInternalIfName string
+	representors, findErr := ovsops.FindInterfacesWithPredicate(cfg.ovsClient, func(iface *vswitchd.Interface) bool {
+		return iface.ExternalIDs[types.OvnManagementPortNameExternalID] == mgmtIfName
+	})
+	if findErr != nil {
+		return fmt.Errorf("failed to find management port representor for %s: %w", mgmtIfName, findErr)
+	}
+	if len(representors) > 0 {
+		ovsRepIfName = representors[0].Name
+	}
+	internal, findErr := ovsops.FindInterfacesWithPredicate(cfg.ovsClient, func(iface *vswitchd.Interface) bool {
+		return iface.Name == mgmtIfName && iface.Type == "internal"
+	})
+	if findErr != nil {
+		return fmt.Errorf("failed to find internal management port for %s: %w", mgmtIfName, findErr)
+	}
+	if len(internal) > 0 {
+		ovsInternalIfName = internal[0].Name
+	}
 	return syncUDNManagementPortEntities(cfg, mgmtIfName, mpdev, ovsRepIfName, ovsInternalIfName)
 }
 
@@ -404,7 +397,7 @@ func syncUDNManagementPortEntities(cfg *udnManagementPortConfig, mgmtIfName stri
 func (mp *udnManagementPortOVS) create() error {
 	// STEP1
 	if mp.ovsClient == nil {
-		return mp.createWithExec()
+		return fmt.Errorf("OVS client is required to create management port for network %s", mp.GetNetworkName())
 	}
 	mac := mp.mpMAC.String()
 	iface := &vswitchd.Interface{
@@ -422,21 +415,6 @@ func (mp *udnManagementPortOVS) create() error {
 	}
 	if err := ovsops.TransactAndCheckAndWaitForVSwitchd(context.Background(), mp.ovsClient, ovsdbOps); err != nil {
 		return fmt.Errorf("failed to add port to br-int for network %s: %w", mp.GetNetworkName(), err)
-	}
-	return mp.configureLink()
-}
-
-func (mp *udnManagementPortOVS) createWithExec() error {
-	stdout, stderr, err := util.RunOVSVsctl(
-		"--", "--may-exist", "add-port", "br-int", mp.ifName,
-		"--", "set", "interface", mp.ifName, fmt.Sprintf("mac=\"%s\"", mp.mpMAC.String()),
-		"type=internal", "mtu_request="+fmt.Sprintf("%d", mp.MTU()),
-		"external-ids:iface-id="+mp.GetNetworkScopedK8sMgmtIntfName(mp.nodeName),
-		"external-ids:"+fmt.Sprintf("%s=%s", types.NetworkExternalID, mp.GetNetworkName()),
-	)
-	if err != nil {
-		return fmt.Errorf("failed to add port to br-int for network %s, stdout: %q, stderr: %q, error: %w",
-			mp.GetNetworkName(), stdout, stderr, err)
 	}
 	return mp.configureLink()
 }

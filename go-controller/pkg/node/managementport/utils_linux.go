@@ -7,6 +7,7 @@
 package managementport
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"strings"
@@ -134,7 +135,7 @@ func TearDownManagementPortLink(netName string, link netlink.Link, originalIfNam
 
 func createManagementPortOVSRepresentor(ovsClient libovsdbclient.Client, netName, ifname, ifaceid string, mtu int, externalIds []string) error {
 	if ovsClient == nil {
-		return createManagementPortOVSRepresentorWithExec(netName, ifname, ifaceid, mtu, externalIds)
+		return fmt.Errorf("OVS client is required to create management port representor %s for network %s", ifname, netName)
 	}
 
 	bridge, err := ops.GetBridge(ovsClient, "br-int")
@@ -163,51 +164,13 @@ func createManagementPortOVSRepresentor(ovsClient libovsdbclient.Client, netName
 	return nil
 }
 
-func createManagementPortOVSRepresentorWithExec(netName, ifname, ifaceid string, mtu int, externalIds []string) error {
-	br_type, err := util.GetDatapathType("br-int")
-	if err != nil {
-		return fmt.Errorf("failed to get datapath type for bridge br-int : %v", err)
-	}
-
-	ovsArgs := []string{
-		"--", "--may-exist", "add-port", "br-int", ifname,
-		"--", "set", "interface", ifname,
-		"external-ids:iface-id=" + ifaceid,
-	}
-	for _, v := range externalIds {
-		ovsArgs = append(ovsArgs, fmt.Sprintf("external-ids:%s", v))
-	}
-
-	if br_type == types.DatapathUserspace {
-		dpdkArgs := []string{"type=dpdk"}
-		ovsArgs = append(ovsArgs, dpdkArgs...)
-		ovsArgs = append(ovsArgs, fmt.Sprintf("mtu_request=%v", mtu))
-	}
-
-	klog.V(5).Infof("Add OVS representor OVS interface %s to bridge br-int for network %s: ifaceID %s mtu %v externalIDs %v",
-		ifname, netName, ifaceid, mtu, externalIds)
-	// Plug management port representor to OVS.
-	stdout, stderr, err := util.RunOVSVsctl(ovsArgs...)
-	if err != nil {
-		klog.Errorf("Failed to add port %q to br-int, stdout: %q, stderr: %q, error: %v",
-			ifname, stdout, stderr, err)
-		return err
-	}
-	return nil
-}
-
 // deleteManagementPortOVSInterface delete the management port OVS interface from the br-int bridge:
 func deleteManagementPortOVSInterface(ovsClient libovsdbclient.Client, network, ovsIfName string) error {
-	if ovsClient != nil {
-		if err := ops.DeletePortWithInterfaces(ovsClient, "br-int", ovsIfName); err != nil {
-			return fmt.Errorf("failed to delete port %s from br-int for network %s: %w", ovsIfName, network, err)
-		}
-		return nil
+	if ovsClient == nil {
+		return fmt.Errorf("OVS client is required to delete port %s from br-int for network %s", ovsIfName, network)
 	}
-	stdout, stderr, err := util.RunOVSVsctl("--if-exists", "del-port", "br-int", ovsIfName)
-	if err != nil {
-		return fmt.Errorf("failed to delete port %s from br-int for network %s, stdout: %q, stderr: %q, error: %v",
-			ovsIfName, network, stdout, stderr, err)
+	if err := ops.DeletePortWithInterfacesAndWaitForVSwitchd(context.Background(), ovsClient, "br-int", ovsIfName); err != nil {
+		return fmt.Errorf("failed to delete port %s from br-int for network %s: %w", ovsIfName, network, err)
 	}
 	return nil
 }

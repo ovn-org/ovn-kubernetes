@@ -25,11 +25,16 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/kubernetes/fake"
 
+	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
+	"github.com/ovn-kubernetes/libovsdb/mapper"
+	"github.com/ovn-kubernetes/libovsdb/ovsdb"
+
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	adminpolicybasedrouteclient "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube/mocks"
+	ovsops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/bridgeconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/managementport"
 	nodenft "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/nftables"
@@ -39,6 +44,7 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	util "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 	utilMocks "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util/mocks"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/vswitchd"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -59,6 +65,28 @@ add chain inet ovn-kubernetes no-pmtud { type filter hook output priority 0 ; co
 add set inet ovn-kubernetes remote-node-ips-v4 { type ipv4_addr ; comment "Block egress ICMP needs frag to remote Kubernetes nodes" ; }
 add set inet ovn-kubernetes remote-node-ips-v6 { type ipv6_addr ; comment "Block egress ICMPv6 packet too big to remote Kubernetes nodes" ; }
 `
+
+func getIPFIXFromOVSDB(ovsClient libovsdbclient.Client) (*vswitchd.IPFIX, error) {
+	results, err := ovsops.TransactAndCheck(ovsClient, []ovsdb.Operation{{
+		Op:    ovsdb.OperationSelect,
+		Table: vswitchd.IPFIXTable,
+	}})
+	if err != nil {
+		return nil, err
+	}
+	if len(results) != 1 || len(results[0].Rows) != 1 {
+		return nil, fmt.Errorf("expected one IPFIX row, got %#v", results)
+	}
+	ipfix := &vswitchd.IPFIX{}
+	info, err := mapper.NewInfo(vswitchd.IPFIXTable, ovsClient.Schema().Table(vswitchd.IPFIXTable), ipfix)
+	if err != nil {
+		return nil, err
+	}
+	if err := mapper.NewMapper(ovsClient.Schema()).GetRowData(&results[0].Rows[0], info); err != nil {
+		return nil, err
+	}
+	return ipfix, nil
+}
 
 var _ = Describe("Node", func() {
 	Describe("removing stale DPU-host address annotations", func() {
@@ -347,419 +375,250 @@ var _ = Describe("Node", func() {
 	})
 
 	Describe("Node Operations", func() {
-		var app *cli.App
-
 		BeforeEach(func() {
 			// Restore global default values before each testcase
 			Expect(config.PrepareTestConfig()).To(Succeed())
+		})
 
-			app = cli.NewApp()
-			app.Name = "test"
-			app.Flags = config.Flags
+		It("sets the OVN remote with libovsdb", func() {
+			node := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{Name: "node-a"},
+				Status: corev1.NodeStatus{
+					Addresses: []corev1.NodeAddress{{
+						Type:    corev1.NodeInternalIP,
+						Address: "1.2.5.6",
+					}},
+				},
+			}
+			ovsClient, ovsCleanup := newTestOVSClient()
+			defer ovsCleanup.Cleanup()
+			Expect(ovsops.CreateOrUpdateBridge(ovsClient, "br-int", vswitchd.BridgeFailModeSecure, 1400)).To(Succeed())
+			Expect(ovsops.UpdateOpenvSwitchExternalIDs(ovsClient, map[string]string{"preserved": "value"})).To(Succeed())
+
+			config.OvnSouth.RunDir = "/custom/ovn/run/"
+			Expect(setupOVNNode(ovsClient, node)).To(Succeed())
+
+			ovs, err := ovsops.GetOpenvSwitch(ovsClient)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(ovs.ExternalIDs).To(HaveKeyWithValue("ovn-remote", "unix:/custom/ovn/run/ovnsb_db.sock"))
+			Expect(ovs.ExternalIDs).To(HaveKeyWithValue("preserved", "value"))
 		})
 
 		It("sets correct OVN external IDs", func() {
-			app.Action = func(ctx *cli.Context) error {
-				const (
-					nodeIP   string = "1.2.5.6"
-					nodeName string = "cannot.be.resolv.ed"
-					interval int    = 100000
-					ofintval int    = 0
-				)
-				node := corev1.Node{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: nodeName,
-					},
-					Status: corev1.NodeStatus{
-						Addresses: []corev1.NodeAddress{
-							{
-								Type:    corev1.NodeExternalIP,
-								Address: nodeIP,
-							},
-						},
-					},
-				}
-
-				fexec := ovntest.NewFakeExec()
-				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 set Open_vSwitch . "+
-						"external_ids:ovn-encap-type=geneve "+
-						"external_ids:ovn-encap-ip=%s "+
-						"external_ids:ovn-remote-probe-interval=%d "+
-						"external_ids:ovn-bridge-remote-probe-interval=%d "+
-						"other_config:bundle-idle-timeout=%d "+
-						"external_ids:ovn-is-interconn=true "+
-						"external_ids:ovn-monitor-all=true "+
-						"external_ids:ovn-ofctrl-wait-before-clear=0 "+
-						"external_ids:ovn-enable-lflow-cache=true "+
-						"external_ids:ovn-set-local-ip=\"true\" "+
-						"external_ids:hostname=\"%s\"",
-						nodeIP, interval, ofintval, ofintval, nodeName),
-				})
-				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd: "ovs-vsctl --timeout=15 -- clear bridge br-int netflow" +
-						" -- " +
-						"clear bridge br-int sflow" +
-						" -- " +
-						"clear bridge br-int ipfix",
-				})
-				err := util.SetExec(fexec)
-				Expect(err).NotTo(HaveOccurred())
-
-				_, err = config.InitConfig(ctx, fexec, nil)
-				Expect(err).NotTo(HaveOccurred())
-
-				config.OvnKubeNode.Mode = types.NodeModeFull
-				err = setupOVNNode(nil, &node)
-				Expect(err).NotTo(HaveOccurred())
-
-				Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
-				return nil
+			const (
+				nodeIP   = "1.2.5.6"
+				nodeName = "cannot.be.resolv.ed"
+			)
+			node := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{Name: nodeName},
+				Status: corev1.NodeStatus{
+					Addresses: []corev1.NodeAddress{{
+						Type:    corev1.NodeExternalIP,
+						Address: nodeIP,
+					}},
+				},
 			}
+			ovsClient, ovsCleanup := newTestOVSClient()
+			defer ovsCleanup.Cleanup()
+			Expect(ovsops.CreateOrUpdateBridge(ovsClient, "br-int", vswitchd.BridgeFailModeSecure, 1400)).To(Succeed())
 
-			err := app.Run([]string{app.Name})
+			agent := "stale-agent"
+			activeTimeout := 1
+			Expect(ovsops.SetBridgeFlowCollectors(
+				ovsClient,
+				"br-int",
+				&vswitchd.NetFlow{Targets: []string{"192.0.2.1:2055"}},
+				&vswitchd.SFlow{Targets: []string{"192.0.2.2:6343"}, Agent: &agent},
+				&vswitchd.IPFIX{Targets: []string{"192.0.2.3:4739"}, CacheActiveTimeout: &activeTimeout},
+			)).To(Succeed())
+
+			config.OvnKubeNode.Mode = types.NodeModeFull
+			err := setupOVNNode(ovsClient, node)
 			Expect(err).NotTo(HaveOccurred())
+
+			ovs, err := ovsops.GetOpenvSwitch(ovsClient)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(ovs.ExternalIDs).To(Equal(map[string]string{
+				"hostname":                         nodeName,
+				"ovn-bridge-remote-probe-interval": "0",
+				"ovn-enable-lflow-cache":           "true",
+				"ovn-encap-ip":                     nodeIP,
+				"ovn-encap-type":                   "geneve",
+				"ovn-is-interconn":                 "true",
+				"ovn-monitor-all":                  "true",
+				"ovn-ofctrl-wait-before-clear":     "0",
+				"ovn-remote":                       config.OvnSouth.GetURL(),
+				"ovn-remote-probe-interval":        "100000",
+				"ovn-set-local-ip":                 "true",
+			}))
+			Expect(ovs.OtherConfig).To(Equal(map[string]string{"bundle-idle-timeout": "0"}))
+
+			bridge, err := ovsops.GetBridge(ovsClient, "br-int")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(bridge.Netflow).To(BeNil())
+			Expect(bridge.Sflow).To(BeNil())
+			Expect(bridge.IPFIX).To(BeNil())
 		})
 		It("sets non-default OVN encap port", func() {
-			app.Action = func(ctx *cli.Context) error {
-				const (
-					nodeIP      string = "1.2.5.6"
-					nodeName    string = "cannot.be.resolv.ed"
-					encapPort   uint   = 666
-					interval    int    = 100000
-					ofintval    int    = 0
-					chassisUUID string = "1a3dfc82-2749-4931-9190-c30e7c0ecea3"
-					encapUUID   string = "e4437094-0094-4223-9f14-995d98d5fff8"
-				)
+			const (
+				encapPort   uint = 666
+				chassisUUID      = "1a3dfc82-2749-4931-9190-c30e7c0ecea3"
+				encapUUID        = "e4437094-0094-4223-9f14-995d98d5fff8"
+			)
+			fexec := ovntest.NewFakeExec()
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd: fmt.Sprintf("ovn-sbctl --timeout=15 --data=bare --no-heading --columns=_uuid find "+
+					"Encap chassis_name=%s", chassisUUID),
+				Output: encapUUID,
+			})
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd: fmt.Sprintf("ovn-sbctl --timeout=15 set encap "+
+					"%s options:dst_port=%d", encapUUID, encapPort),
+			})
+			Expect(util.SetExec(fexec)).To(Succeed())
 
-				fexec := ovntest.NewFakeExec()
-				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 " +
-						"--if-exists get Open_vSwitch . external_ids:system-id"),
-					Output: chassisUUID,
-				})
-				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd: fmt.Sprintf("ovn-sbctl --timeout=15 --data=bare --no-heading --columns=_uuid find "+
-						"Encap chassis_name=%s", chassisUUID),
-					Output: encapUUID,
-				})
-				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd: fmt.Sprintf("ovn-sbctl --timeout=15 set encap "+
-						"%s options:dst_port=%d", encapUUID, encapPort),
-				})
+			ovsClient, ovsCleanup := newTestOVSClient()
+			defer ovsCleanup.Cleanup()
+			Expect(ovsops.UpdateOpenvSwitchExternalIDs(
+				ovsClient,
+				map[string]string{"system-id": chassisUUID},
+			)).To(Succeed())
 
-				err := util.SetExec(fexec)
-				Expect(err).NotTo(HaveOccurred())
-
-				_, err = config.InitConfig(ctx, fexec, nil)
-				Expect(err).NotTo(HaveOccurred())
-				config.Default.EncapPort = encapPort
-				err = setEncapPort(context.Background(), nil)
-				Expect(err).NotTo(HaveOccurred())
-
-				Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
-				return nil
-			}
-
-			err := app.Run([]string{app.Name})
+			config.Default.EncapPort = encapPort
+			err := setEncapPort(context.Background(), ovsClient)
 			Expect(err).NotTo(HaveOccurred())
+			Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 		})
 		It("sets non-default logical flow cache limits", func() {
-			app.Action = func(ctx *cli.Context) error {
-				const (
-					nodeIP   string = "1.2.5.6"
-					nodeName string = "cannot.be.resolv.ed"
-					interval int    = 100000
-					ofintval int    = 0
-				)
-				node := corev1.Node{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: nodeName,
-					},
-					Status: corev1.NodeStatus{
-						Addresses: []corev1.NodeAddress{
-							{
-								Type:    corev1.NodeExternalIP,
-								Address: nodeIP,
-							},
-						},
-					},
-				}
-
-				fexec := ovntest.NewFakeExec()
-				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 set Open_vSwitch . "+
-						"external_ids:ovn-encap-type=geneve "+
-						"external_ids:ovn-encap-ip=%s "+
-						"external_ids:ovn-remote-probe-interval=%d "+
-						"external_ids:ovn-bridge-remote-probe-interval=%d "+
-						"other_config:bundle-idle-timeout=%d "+
-						"external_ids:ovn-is-interconn=true "+
-						"external_ids:ovn-monitor-all=true "+
-						"external_ids:ovn-ofctrl-wait-before-clear=0 "+
-						"external_ids:ovn-enable-lflow-cache=false "+
-						"external_ids:ovn-set-local-ip=\"true\" "+
-						"external_ids:ovn-limit-lflow-cache=1000 "+
-						"external_ids:ovn-memlimit-lflow-cache-kb=100000 "+
-						"external_ids:hostname=\"%s\"",
-						nodeIP, interval, ofintval, ofintval, nodeName),
-				})
-				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd: "ovs-vsctl --timeout=15 -- clear bridge br-int netflow" +
-						" -- " +
-						"clear bridge br-int sflow" +
-						" -- " +
-						"clear bridge br-int ipfix",
-				})
-				err := util.SetExec(fexec)
-				Expect(err).NotTo(HaveOccurred())
-
-				_, err = config.InitConfig(ctx, fexec, nil)
-				Expect(err).NotTo(HaveOccurred())
-
-				config.Default.LFlowCacheEnable = false
-				config.Default.LFlowCacheLimit = 1000
-				config.Default.LFlowCacheLimitKb = 100000
-				config.OvnKubeNode.Mode = types.NodeModeFull
-				err = setupOVNNode(nil, &node)
-				Expect(err).NotTo(HaveOccurred())
-
-				Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
-				return nil
+			node := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{Name: "cannot.be.resolv.ed"},
+				Status: corev1.NodeStatus{
+					Addresses: []corev1.NodeAddress{{
+						Type:    corev1.NodeExternalIP,
+						Address: "1.2.5.6",
+					}},
+				},
 			}
+			ovsClient, ovsCleanup := newTestOVSClient()
+			defer ovsCleanup.Cleanup()
+			Expect(ovsops.CreateOrUpdateBridge(ovsClient, "br-int", vswitchd.BridgeFailModeSecure, 1400)).To(Succeed())
 
-			err := app.Run([]string{app.Name})
+			config.Default.LFlowCacheEnable = false
+			config.Default.LFlowCacheLimit = 1000
+			config.Default.LFlowCacheLimitKb = 100000
+			config.OvnKubeNode.Mode = types.NodeModeFull
+			err := setupOVNNode(ovsClient, node)
 			Expect(err).NotTo(HaveOccurred())
+
+			ovs, err := ovsops.GetOpenvSwitch(ovsClient)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(ovs.ExternalIDs).To(HaveKeyWithValue("ovn-enable-lflow-cache", "false"))
+			Expect(ovs.ExternalIDs).To(HaveKeyWithValue("ovn-limit-lflow-cache", "1000"))
+			Expect(ovs.ExternalIDs).To(HaveKeyWithValue("ovn-memlimit-lflow-cache-kb", "100000"))
 		})
 		It("sets default IPFIX configuration", func() {
-			app.Action = func(ctx *cli.Context) error {
-				const (
-					nodeIP    string = "1.2.5.6"
-					nodeName  string = "cannot.be.resolv.ed"
-					interval  int    = 100000
-					ofintval  int    = 0
-					ipfixPort int32  = 456
-				)
-				ipfixIP := net.IP{1, 2, 3, 4}
-
-				node := corev1.Node{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: nodeName,
-					},
-					Status: corev1.NodeStatus{
-						Addresses: []corev1.NodeAddress{
-							{
-								Type:    corev1.NodeExternalIP,
-								Address: nodeIP,
-							},
-						},
-					},
-				}
-
-				fexec := ovntest.NewFakeExec()
-				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 set Open_vSwitch . "+
-						"external_ids:ovn-encap-type=geneve "+
-						"external_ids:ovn-encap-ip=%s "+
-						"external_ids:ovn-remote-probe-interval=%d "+
-						"external_ids:ovn-bridge-remote-probe-interval=%d "+
-						"other_config:bundle-idle-timeout=%d "+
-						"external_ids:ovn-is-interconn=true "+
-						"external_ids:ovn-monitor-all=true "+
-						"external_ids:ovn-ofctrl-wait-before-clear=0 "+
-						"external_ids:ovn-enable-lflow-cache=true "+
-						"external_ids:ovn-set-local-ip=\"true\" "+
-						"external_ids:hostname=\"%s\"",
-						nodeIP, interval, ofintval, ofintval, nodeName),
-				})
-
-				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd: "ovs-vsctl --timeout=15 -- clear bridge br-int netflow" +
-						" -- " +
-						"clear bridge br-int sflow" +
-						" -- " +
-						"clear bridge br-int ipfix",
-				})
-				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd: fmt.Sprintf("ovs-vsctl --timeout=15"+
-						" -- "+
-						"--id=@ipfix create ipfix "+
-						"targets=[\"%s:%d\"] cache_active_timeout=60 sampling=400"+
-						" -- "+
-						"set bridge br-int ipfix=@ipfix", ipfixIP, ipfixPort),
-				})
-				err := util.SetExec(fexec)
-				Expect(err).NotTo(HaveOccurred())
-
-				_, err = config.InitConfig(ctx, fexec, nil)
-				Expect(err).NotTo(HaveOccurred())
-				config.Monitoring.IPFIXTargets = []config.HostPort{
-					{Host: &ipfixIP, Port: ipfixPort},
-				}
-				err = setupOVNNode(nil, &node)
-				Expect(err).NotTo(HaveOccurred())
-
-				Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
-				return nil
+			const ipfixPort int32 = 456
+			ipfixIP := net.IP{1, 2, 3, 4}
+			node := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{Name: "cannot.be.resolv.ed"},
+				Status: corev1.NodeStatus{
+					Addresses: []corev1.NodeAddress{{
+						Type:    corev1.NodeExternalIP,
+						Address: "1.2.5.6",
+					}},
+				},
 			}
+			ovsClient, ovsCleanup := newTestOVSClient()
+			defer ovsCleanup.Cleanup()
+			Expect(ovsops.CreateOrUpdateBridge(ovsClient, "br-int", vswitchd.BridgeFailModeSecure, 1400)).To(Succeed())
 
-			err := app.Run([]string{app.Name})
+			config.Monitoring.IPFIXTargets = []config.HostPort{{Host: &ipfixIP, Port: ipfixPort}}
+			err := setupOVNNode(ovsClient, node)
 			Expect(err).NotTo(HaveOccurred())
+
+			bridge, err := ovsops.GetBridge(ovsClient, "br-int")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(bridge.IPFIX).NotTo(BeNil())
+			ipfix, err := getIPFIXFromOVSDB(ovsClient)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(ipfix.Targets).To(Equal([]string{"1.2.3.4:456"}))
+			Expect(ipfix.CacheActiveTimeout).NotTo(BeNil())
+			Expect(*ipfix.CacheActiveTimeout).To(Equal(60))
+			Expect(ipfix.CacheMaxFlows).To(BeNil())
+			Expect(ipfix.Sampling).NotTo(BeNil())
+			Expect(*ipfix.Sampling).To(Equal(400))
 		})
 		It("allows overriding IPFIX configuration", func() {
-			app.Action = func(ctx *cli.Context) error {
-				const (
-					nodeIP    string = "1.2.5.6"
-					nodeName  string = "cannot.be.resolv.ed"
-					interval  int    = 100000
-					ofintval  int    = 0
-					ipfixPort int32  = 456
-				)
-				ipfixIP := net.IP{1, 2, 3, 4}
-
-				node := corev1.Node{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: nodeName,
-					},
-					Status: corev1.NodeStatus{
-						Addresses: []corev1.NodeAddress{
-							{
-								Type:    corev1.NodeExternalIP,
-								Address: nodeIP,
-							},
-						},
-					},
-				}
-
-				fexec := ovntest.NewFakeExec()
-				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 set Open_vSwitch . "+
-						"external_ids:ovn-encap-type=geneve "+
-						"external_ids:ovn-encap-ip=%s "+
-						"external_ids:ovn-remote-probe-interval=%d "+
-						"external_ids:ovn-bridge-remote-probe-interval=%d "+
-						"other_config:bundle-idle-timeout=%d "+
-						"external_ids:ovn-is-interconn=true "+
-						"external_ids:ovn-monitor-all=true "+
-						"external_ids:ovn-ofctrl-wait-before-clear=0 "+
-						"external_ids:ovn-enable-lflow-cache=true "+
-						"external_ids:ovn-set-local-ip=\"true\" "+
-						"external_ids:hostname=\"%s\"",
-						nodeIP, interval, ofintval, ofintval, nodeName),
-				})
-
-				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd: "ovs-vsctl --timeout=15 -- clear bridge br-int netflow" +
-						" -- " +
-						"clear bridge br-int sflow" +
-						" -- " +
-						"clear bridge br-int ipfix",
-				})
-				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd: fmt.Sprintf("ovs-vsctl --timeout=15"+
-						" -- "+
-						"--id=@ipfix create ipfix "+
-						"targets=[\"%s:%d\"] cache_active_timeout=123 cache_max_flows=456 sampling=789"+
-						" -- "+
-						"set bridge br-int ipfix=@ipfix", ipfixIP, ipfixPort),
-				})
-				err := util.SetExec(fexec)
-				Expect(err).NotTo(HaveOccurred())
-
-				_, err = config.InitConfig(ctx, fexec, nil)
-				Expect(err).NotTo(HaveOccurred())
-				config.Monitoring.IPFIXTargets = []config.HostPort{
-					{Host: &ipfixIP, Port: ipfixPort},
-				}
-				config.IPFIX.CacheActiveTimeout = 123
-				config.IPFIX.CacheMaxFlows = 456
-				config.IPFIX.Sampling = 789
-				err = setupOVNNode(nil, &node)
-				Expect(err).NotTo(HaveOccurred())
-
-				Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
-				return nil
+			const ipfixPort int32 = 456
+			ipfixIP := net.IP{1, 2, 3, 4}
+			node := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{Name: "cannot.be.resolv.ed"},
+				Status: corev1.NodeStatus{
+					Addresses: []corev1.NodeAddress{{
+						Type:    corev1.NodeExternalIP,
+						Address: "1.2.5.6",
+					}},
+				},
 			}
+			ovsClient, ovsCleanup := newTestOVSClient()
+			defer ovsCleanup.Cleanup()
+			Expect(ovsops.CreateOrUpdateBridge(ovsClient, "br-int", vswitchd.BridgeFailModeSecure, 1400)).To(Succeed())
 
-			err := app.Run([]string{app.Name})
+			config.Monitoring.IPFIXTargets = []config.HostPort{{Host: &ipfixIP, Port: ipfixPort}}
+			config.IPFIX.CacheActiveTimeout = 123
+			config.IPFIX.CacheMaxFlows = 456
+			config.IPFIX.Sampling = 789
+			err := setupOVNNode(ovsClient, node)
 			Expect(err).NotTo(HaveOccurred())
+
+			bridge, err := ovsops.GetBridge(ovsClient, "br-int")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(bridge.IPFIX).NotTo(BeNil())
+			ipfix, err := getIPFIXFromOVSDB(ovsClient)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(ipfix.Targets).To(Equal([]string{"1.2.3.4:456"}))
+			Expect(ipfix.CacheActiveTimeout).NotTo(BeNil())
+			Expect(*ipfix.CacheActiveTimeout).To(Equal(123))
+			Expect(ipfix.CacheMaxFlows).NotTo(BeNil())
+			Expect(*ipfix.CacheMaxFlows).To(Equal(456))
+			Expect(ipfix.Sampling).NotTo(BeNil())
+			Expect(*ipfix.Sampling).To(Equal(789))
 		})
 		It("uses Node IP when the flow tracing targets only specify a port", func() {
-			app.Action = func(ctx *cli.Context) error {
-				const (
-					nodeIP   string = "1.2.5.6"
-					nodeName string = "anyhost.test"
-					interval int    = 100000
-					ofintval int    = 0
-				)
-				node := corev1.Node{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: nodeName,
-					},
-					Status: corev1.NodeStatus{
-						Addresses: []corev1.NodeAddress{
-							{
-								Type:    corev1.NodeExternalIP,
-								Address: nodeIP,
-							},
-						},
-					},
-				}
-
-				fexec := ovntest.NewFakeExec()
-				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 set Open_vSwitch . "+
-						"external_ids:ovn-encap-type=geneve "+
-						"external_ids:ovn-encap-ip=%s "+
-						"external_ids:ovn-remote-probe-interval=%d "+
-						"external_ids:ovn-bridge-remote-probe-interval=%d "+
-						"other_config:bundle-idle-timeout=%d "+
-						"external_ids:ovn-is-interconn=true "+
-						"external_ids:ovn-monitor-all=true "+
-						"external_ids:ovn-ofctrl-wait-before-clear=0 "+
-						"external_ids:ovn-enable-lflow-cache=true "+
-						"external_ids:ovn-set-local-ip=\"true\" "+
-						"external_ids:hostname=\"%s\"",
-						nodeIP, interval, ofintval, ofintval, nodeName),
-				})
-
-				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd: "ovs-vsctl --timeout=15 -- clear bridge br-int netflow" +
-						" -- " +
-						"clear bridge br-int sflow" +
-						" -- " +
-						"clear bridge br-int ipfix",
-				})
-				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd: "ovs-vsctl --timeout=15" +
-						" -- " +
-						"--id=@ipfix create ipfix " +
-						// verify that the 1.2.5.6 IP has been attached to the :8888 target below
-						`targets=["10.0.0.2:3030","1.2.5.6:8888","[2020:1111:f::1:933]:3333"] cache_active_timeout=60` +
-						" -- " +
-						"set bridge br-int ipfix=@ipfix",
-				})
-				err := util.SetExec(fexec)
-				Expect(err).NotTo(HaveOccurred())
-
-				_, err = config.InitConfig(ctx, fexec, nil)
-				Expect(err).NotTo(HaveOccurred())
-
-				config.Monitoring.IPFIXTargets, err =
-					config.ParseFlowCollectors("10.0.0.2:3030,:8888,[2020:1111:f::1:0933]:3333")
-				config.IPFIX.CacheActiveTimeout = 60
-				config.IPFIX.CacheMaxFlows = 0
-				config.IPFIX.Sampling = 0
-				Expect(err).NotTo(HaveOccurred())
-
-				err = setupOVNNode(nil, &node)
-				Expect(err).NotTo(HaveOccurred())
-
-				Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
-				return nil
+			node := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{Name: "anyhost.test"},
+				Status: corev1.NodeStatus{
+					Addresses: []corev1.NodeAddress{{
+						Type:    corev1.NodeExternalIP,
+						Address: "1.2.5.6",
+					}},
+				},
 			}
-			err := app.Run([]string{app.Name})
+			ovsClient, ovsCleanup := newTestOVSClient()
+			defer ovsCleanup.Cleanup()
+			Expect(ovsops.CreateOrUpdateBridge(ovsClient, "br-int", vswitchd.BridgeFailModeSecure, 1400)).To(Succeed())
+
+			var err error
+			config.Monitoring.IPFIXTargets, err =
+				config.ParseFlowCollectors("10.0.0.2:3030,:8888,[2020:1111:f::1:0933]:3333")
 			Expect(err).NotTo(HaveOccurred())
+			config.IPFIX.CacheActiveTimeout = 60
+			config.IPFIX.CacheMaxFlows = 0
+			config.IPFIX.Sampling = 0
+
+			err = setupOVNNode(ovsClient, node)
+			Expect(err).NotTo(HaveOccurred())
+
+			bridge, err := ovsops.GetBridge(ovsClient, "br-int")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(bridge.IPFIX).NotTo(BeNil())
+			ipfix, err := getIPFIXFromOVSDB(ovsClient)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(ipfix.Targets).To(Equal([]string{
+				"10.0.0.2:3030",
+				"1.2.5.6:8888",
+				"[2020:1111:f::1:933]:3333",
+			}))
 		})
 	})
 	Describe("node pmtud management", func() {

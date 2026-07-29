@@ -159,18 +159,17 @@ func TestGetStaticFDBPort(t *testing.T) {
 
 func TestGatewayHostOVSInterfaceResolvesSmartNICRepresentor(t *testing.T) {
 	g := gomega.NewWithT(t)
-	fexec := ovntest.NewFakeExec()
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovs-vsctl --timeout=15 port-to-br pf0vf1",
-		Stderr: "no bridge for pf0vf1",
-		Err:    fmt.Errorf("not an OVS port"),
+	bridgeUUID := "ovsbr1-uuid"
+	repPortUUID := "pf0vf1-rep-port-uuid"
+	ovsClient, ovsCleanup, err := libovsdbtest.NewOVSTestHarness(libovsdbtest.TestSetup{
+		OVSData: []libovsdbtest.TestData{
+			&vswitchd.OpenvSwitch{UUID: "root-ovs", Bridges: []string{bridgeUUID}},
+			&vswitchd.Bridge{UUID: bridgeUUID, Name: "ovsbr1", Ports: []string{repPortUUID}},
+			&vswitchd.Port{UUID: repPortUUID, Name: "pf0vf1_rep"},
+		},
 	})
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovs-vsctl --timeout=15 port-to-br pf0vf1_rep",
-		Output: "ovsbr1",
-	})
-	g.Expect(util.SetExec(fexec)).To(gomega.Succeed())
-	t.Cleanup(util.ResetRunner)
+	g.Expect(err).NotTo(gomega.HaveOccurred())
+	t.Cleanup(ovsCleanup.Cleanup)
 
 	fsOps := utilmocks.NewFileSystemOps(t)
 	origFSOps := util.GetFileSystemOps()
@@ -191,10 +190,75 @@ func TestGatewayHostOVSInterfaceResolvesSmartNICRepresentor(t *testing.T) {
 	sriovOps.On("GetVfIndexByPciAddress", "0000:00:00.1").Return(1, nil)
 	sriovOps.On("GetVfRepresentor", "pf0", 1).Return("pf0vf1_rep", nil)
 
-	rep, err := gatewayHostOVSInterface("ovsbr1", "pf0vf1")
+	rep, err := gatewayHostOVSInterface(ovsClient, "ovsbr1", "pf0vf1")
 	g.Expect(err).NotTo(gomega.HaveOccurred())
 	g.Expect(rep).To(gomega.Equal("pf0vf1_rep"))
-	g.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue(), fexec.ErrorDesc())
+}
+
+func TestGatewayHostOVSInterfaceResolvesOVSPort(t *testing.T) {
+	tests := []struct {
+		name        string
+		bridges     []*vswitchd.Bridge
+		expectedRep string
+		expectedErr string
+	}{
+		{
+			name: "gateway interface belongs to the expected bridge",
+			bridges: []*vswitchd.Bridge{
+				{UUID: "ovsbr1-uuid", Name: "ovsbr1", Ports: []string{"gateway-port-uuid"}},
+			},
+			expectedRep: "eth1",
+		},
+		{
+			name: "gateway interface belongs to another bridge",
+			bridges: []*vswitchd.Bridge{
+				{UUID: "ovsbr2-uuid", Name: "ovsbr2", Ports: []string{"gateway-port-uuid"}},
+			},
+			expectedErr: "gateway interface eth1 belongs to OVS bridge ovsbr2, expected ovsbr1",
+		},
+		{
+			name: "gateway port belongs to multiple bridges",
+			bridges: []*vswitchd.Bridge{
+				{UUID: "ovsbr1-uuid", Name: "ovsbr1", Ports: []string{"gateway-port-uuid"}},
+				{UUID: "ovsbr2-uuid", Name: "ovsbr2", Ports: []string{"gateway-port-uuid"}},
+			},
+			expectedErr: "failed to resolve OVS bridge for gateway interface eth1: OVSDB corruption",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			bridgeUUIDs := make([]string, 0, len(tc.bridges))
+			ovsData := []libovsdbtest.TestData{
+				&vswitchd.Port{UUID: "gateway-port-uuid", Name: "eth1"},
+			}
+			for _, bridge := range tc.bridges {
+				bridgeUUIDs = append(bridgeUUIDs, bridge.UUID)
+				ovsData = append(ovsData, bridge)
+			}
+			ovsData = append(ovsData, &vswitchd.OpenvSwitch{UUID: "root-ovs", Bridges: bridgeUUIDs})
+
+			ovsClient, ovsCleanup, err := libovsdbtest.NewOVSTestHarness(libovsdbtest.TestSetup{OVSData: ovsData})
+			if err != nil {
+				t.Fatalf("failed to create OVS test harness: %v", err)
+			}
+			t.Cleanup(ovsCleanup.Cleanup)
+
+			rep, err := gatewayHostOVSInterface(ovsClient, "ovsbr1", "eth1")
+			if tc.expectedErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.expectedErr) {
+					t.Fatalf("expected error containing %q, got %v", tc.expectedErr, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("gatewayHostOVSInterface failed: %v", err)
+			}
+			if rep != tc.expectedRep {
+				t.Fatalf("expected gateway OVS interface %q, got %q", tc.expectedRep, rep)
+			}
+		})
+	}
 }
 
 // newDPUUnmanagedBridgeHarness prepares the scaffolding shared by the

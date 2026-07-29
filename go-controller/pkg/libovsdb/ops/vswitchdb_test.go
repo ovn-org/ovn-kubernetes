@@ -83,6 +83,32 @@ func TestTransactAndCheckAndWaitForVSwitchd(t *testing.T) {
 	}
 }
 
+func TestDeletePortWithInterfacesAndWaitForVSwitchdCancellation(t *testing.T) {
+	ovsClient, cleanup, err := libovsdbtest.NewOVSTestHarness(libovsdbtest.TestSetup{OVSData: []libovsdbtest.TestData{
+		&vswitchd.OpenvSwitch{UUID: "root-ovs", Bridges: []string{"bridge"}},
+		&vswitchd.Bridge{UUID: "bridge", Name: "br-int", Ports: []string{"port"}},
+		&vswitchd.Port{UUID: "port", Name: "test-port", Interfaces: []string{"iface"}},
+		&vswitchd.Interface{UUID: "iface", Name: "test-port"},
+	}})
+	if err != nil {
+		t.Fatalf("harness setup: %v", err)
+	}
+	t.Cleanup(cleanup.Cleanup)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := DeletePortWithInterfacesAndWaitForVSwitchd(ctx, ovsClient, "br-int", "test-port"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled deletion returned %v, want context.Canceled", err)
+	}
+	if _, err := GetOVSPort(ovsClient, "test-port"); err != nil {
+		t.Fatalf("canceled deletion should retain the port: %v", err)
+	}
+	ovs, err := GetOpenvSwitch(ovsClient)
+	if err != nil || ovs.NextCfg != 0 {
+		t.Fatalf("canceled deletion should not submit a transaction: ovs=%+v, err=%v", ovs, err)
+	}
+}
+
 func TestGetPortBridge(t *testing.T) {
 	bridgeAUUID := buildNamedUUID()
 	bridgeBUUID := buildNamedUUID()

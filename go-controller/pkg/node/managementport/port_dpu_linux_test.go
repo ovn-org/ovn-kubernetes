@@ -39,12 +39,6 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-func mockOVSListInterfaceMgmtPortNotExistCmd(execMock *ovntest.FakeExec, mgmtPortName string) {
-	execMock.AddFakeCmdsNoOutputNoError([]string{
-		"ovs-vsctl --timeout=15 --no-headings --data bare --format csv --columns type,name find Interface name=" + mgmtPortName,
-	})
-}
-
 var _ = Describe("Mananagement port DPU tests", func() {
 	origNetlinkOps := util.GetNetLinkOps()
 	var netlinkOpsMock *utilMocks.NetLinkOps
@@ -337,7 +331,6 @@ var _ = Describe("Mananagement port DPU tests", func() {
 			netlinkOpsMock.On("LinkSetMTU", linkMock, config.Default.MTU).Return(nil)
 			netlinkOpsMock.On("LinkSetUp", linkMock).Return(nil, nil)
 			netlinkOpsMock.On("IsLinkNotFoundError", mock.Anything).Return(true)
-			mockOVSListInterfaceMgmtPortNotExistCmd(execMock, types.K8sMgmtIntfName)
 
 			// mock createPlatformManagementPort, we fail it as it covers what we want to test without the
 			// need to mock the entire flow down to routes and nftables rules.
@@ -499,7 +492,6 @@ var _ = Describe("Mananagement port DPU tests", func() {
 			// then unconfigureMgmtNetdevicePort calls LinkByName("ovn-k8s-mp0") and IsLinkNotFoundError
 			netlinkOpsMock.On("LinkByName", types.K8sMgmtIntfName).Return(nil, fmt.Errorf("not found"))
 			netlinkOpsMock.On("IsLinkNotFoundError", mock.Anything).Return(true)
-			mockOVSListInterfaceMgmtPortNotExistCmd(execMock, types.K8sMgmtIntfName)
 			// bringupManagementPortLink fails with transient error
 			netlinkOpsMock.On("LinkSetDown", linkMock2).Return(fmt.Errorf("transient error"))
 

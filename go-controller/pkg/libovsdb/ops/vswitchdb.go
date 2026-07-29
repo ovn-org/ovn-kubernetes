@@ -925,6 +925,20 @@ func CreateOrUpdatePodPortOps(ovsClient libovsdbclient.Client, ops []ovsdb.Opera
 // The deletion is safely scoped to bridgeName: a target attached to another
 // bridge is logged and left untouched.
 func DeletePortWithInterfaces(ovsClient libovsdbclient.Client, bridgeName, portOrInterfaceName string) error {
+	return deletePortWithInterfaces(context.Background(), ovsClient, bridgeName, portOrInterfaceName, false)
+}
+
+// DeletePortWithInterfacesAndWaitForVSwitchd deletes an OVS port and all its
+// interfaces, then waits until ovs-vswitchd has applied the transaction.
+// Callers must use this variant before immediately manipulating the affected
+// Linux interface.
+// The transaction and wait honor ctx cancellation and its deadline. Cancellation
+// does not roll back a deletion that has already committed.
+func DeletePortWithInterfacesAndWaitForVSwitchd(ctx context.Context, ovsClient libovsdbclient.Client, bridgeName, portOrInterfaceName string) error {
+	return deletePortWithInterfaces(ctx, ovsClient, bridgeName, portOrInterfaceName, true)
+}
+
+func deletePortWithInterfaces(ctx context.Context, ovsClient libovsdbclient.Client, bridgeName, portOrInterfaceName string, waitForVSwitchd bool) error {
 	port, err := GetOVSPort(ovsClient, portOrInterfaceName)
 	if err != nil {
 		if !errors.Is(err, libovsdbclient.ErrNotFound) {
@@ -967,6 +981,9 @@ func DeletePortWithInterfaces(ovsClient libovsdbclient.Client, bridgeName, portO
 	}
 	if len(ops) == 0 {
 		return nil // Port doesn't exist
+	}
+	if waitForVSwitchd {
+		return TransactAndCheckAndWaitForVSwitchd(ctx, ovsClient, ops)
 	}
 	_, err = TransactAndCheck(ovsClient, ops)
 	return err

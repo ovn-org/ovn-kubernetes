@@ -599,16 +599,14 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 			})
 		}
 		// bridgedGatewayNodeSetup
-		// GetOVSPortMACAddress
 		// ovn-bridge-mappings get/set are now handled via libovsdb in
 		// bridgeconfig.bridgedGatewayNodeSetup; no fexec entries needed.
-		// GetNodeChassisID is served by the libovsdb harness.
+		// The chassis ID lookup is served by the libovsdb harness.
 		// DetectCheckPktLengthSupport
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovs-appctl -t /var/run/openvswitch/ovs-vswitchd.1234.ctl dpif/show-dp-features " + brphys,
 			Output: "Check pkt length action: Yes",
 		})
-		// IsOvsHwOffloadEnabled
 		fexec.AddFakeCmdsNoOutputNoError([]string{
 			fmt.Sprintf("ovs-appctl -t /var/run/openvswitch/ovs-vswitchd.1234.ctl fdb/add %s %s %d %s", brphys, hostRep, gatewayVLANID, hostMAC),
 		})

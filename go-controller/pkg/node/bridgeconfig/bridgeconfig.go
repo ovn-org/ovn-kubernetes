@@ -426,7 +426,7 @@ func NewUnmanagedBridgeConfiguration(ovsClient libovsdbclient.Client, bridgeName
 			}
 		}
 	} else {
-		gwIfaceRep, err = gatewayHostOVSInterface(bridgeName, gwIface)
+		gwIfaceRep, err = gatewayHostOVSInterface(ovsClient, bridgeName, gwIface)
 		if err != nil {
 			return nil, err
 		}
@@ -925,20 +925,21 @@ func representorOnBridge(ovsClient libovsdbclient.Client, bridge *vswitchd.Bridg
 	return fmt.Errorf("representor %s is not attached to OVS bridge %s", rep, bridge.Name)
 }
 
-func gatewayHostOVSInterface(bridgeName, gwIface string) (string, error) {
+func gatewayHostOVSInterface(ovsClient libovsdbclient.Client, bridgeName, gwIface string) (string, error) {
 	if gwIface == "" || gwIface == bridgeName {
 		return "", nil
 	}
 
-	if bridgeForInterface, _, err := util.RunOVSVsctl("port-to-br", gwIface); err == nil {
-		bridgeForInterface = strings.TrimSpace(bridgeForInterface)
-		if bridgeForInterface == bridgeName {
+	bridgeForInterface, err := ovsops.GetPortBridge(ovsClient, gwIface)
+	if err == nil {
+		if bridgeForInterface.Name == bridgeName {
 			return gwIface, nil
 		}
-		if bridgeForInterface != "" {
-			return "", fmt.Errorf("gateway interface %s belongs to OVS bridge %s, expected %s",
-				gwIface, bridgeForInterface, bridgeName)
-		}
+		return "", fmt.Errorf("gateway interface %s belongs to OVS bridge %s, expected %s",
+			gwIface, bridgeForInterface.Name, bridgeName)
+	}
+	if !errors.Is(err, libovsdbclient.ErrNotFound) {
+		return "", fmt.Errorf("failed to resolve OVS bridge for gateway interface %s: %w", gwIface, err)
 	}
 
 	gwIfaceRep, err := getRepresentor(gwIface)
@@ -946,15 +947,14 @@ func gatewayHostOVSInterface(bridgeName, gwIface string) (string, error) {
 		return "", fmt.Errorf("gateway interface %s is not the OVS bridge interface, an OVS port on bridge %s, or an accelerated VF/SF netdevice: %w",
 			gwIface, bridgeName, err)
 	}
-	bridgeForRep, stderr, err := util.RunOVSVsctl("port-to-br", gwIfaceRep)
+	bridgeForRep, err := ovsops.GetPortBridge(ovsClient, gwIfaceRep)
 	if err != nil {
-		return "", fmt.Errorf("failed to resolve OVS bridge for representor %s of gateway interface %s, stderr: %q, error: %w",
-			gwIfaceRep, gwIface, stderr, err)
+		return "", fmt.Errorf("failed to resolve OVS bridge for representor %s of gateway interface %s: %w",
+			gwIfaceRep, gwIface, err)
 	}
-	bridgeForRep = strings.TrimSpace(bridgeForRep)
-	if bridgeForRep != bridgeName {
+	if bridgeForRep.Name != bridgeName {
 		return "", fmt.Errorf("representor %s of gateway interface %s belongs to OVS bridge %s, expected %s",
-			gwIfaceRep, gwIface, bridgeForRep, bridgeName)
+			gwIfaceRep, gwIface, bridgeForRep.Name, bridgeName)
 	}
 	return gwIfaceRep, nil
 }
