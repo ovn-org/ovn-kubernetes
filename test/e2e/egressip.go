@@ -2615,6 +2615,8 @@ spec:
 		   4. Create two pods matching the EgressIP: one running on each of the egress nodes
 		   5. Check connectivity from a pod to an external "node" hosted on the OVN network and verify the expected src IP
 		   6. Check connectivity from a pod to an external "node" hosted on the secondary host network and verify the expected src IP
+		   6a. Verify EgressIP SNAT configuration in OVN NB DB
+		   6b. Verify that the secondary host network EgressIP is NOT configured on the OVS bridge
 		   7. Check connectivity from one pod to the other and verify that the connection is achieved
 		   8. Check connectivity from both pods to the api-server (running hostNetwork:true) and verifying that the connection is achieved
 		   9. Update one of the pods, unmatching the EgressIP
@@ -2702,6 +2704,18 @@ spec:
 					"failed: status 1 has node %q and status 2 has node %q", statuses[0].Node, statuses[1].Node)
 			}
 
+			// Determine which node hosts each EgressIP for use in later verification steps.
+			var nodeNameHostingOVNEIP, nodeNameHostingSecondaryHostEIP string
+			for _, status := range statuses {
+				if status.EgressIP == egressIPOVN {
+					nodeNameHostingOVNEIP = status.Node
+				} else if status.EgressIP == egressIPSecondaryHost {
+					nodeNameHostingSecondaryHostEIP = status.Node
+				}
+			}
+			gomega.Expect(nodeNameHostingOVNEIP).ShouldNot(gomega.BeEmpty())
+			gomega.Expect(nodeNameHostingSecondaryHostEIP).ShouldNot(gomega.BeEmpty())
+
 			ginkgo.By("3. Check that correct Egress IPs are assigned")
 			gomega.Expect(verifyEgressIPStatusContainsIPs(statuses, []string{egressIPOVN, egressIPSecondaryHost})).Should(gomega.BeTrue())
 
@@ -2740,6 +2754,55 @@ spec:
 			framework.ExpectNoError(err, "Step 6. Check connectivity from pod (%s/%s) to an external container attached to "+
 				"a network that is secondary host network and verify that the src IP is the expected egressIP, failed: %v",
 				podNamespace.Name, pod2Name, err)
+
+			ginkgo.By("6a. Verify EgressIP SNAT configuration in OVN NB DB")
+			// Query the OVN Northbound database to confirm that SNAT entries exist for the
+			// pod's logical IP with the expected EgressIPs as external IPs. This validates
+			// that the EgressIP system is functioning correctly at the OVN level.
+			pod1IP, err := getPodIPWithRetry(f.ClientSet, isIPv6TestRun, podNamespace.Name, pod1Name)
+			framework.ExpectNoError(err, "step 6a failed to get pod %s IP", pod1Name)
+			ovnKubernetesNamespace := deploymentconfig.Get().OVNKubernetesNamespace()
+			dbPods, err := e2ekubectl.RunKubectl(ovnKubernetesNamespace, "get", "pods", "-l", "name=ovnkube-db",
+				"-o=jsonpath='{.items..metadata.name}'")
+			dbContainerName := "nb-ovsdb"
+			if isInterconnectEnabled() {
+				dbPods, err = e2ekubectl.RunKubectl(ovnKubernetesNamespace, "get", "pods", "-l", "app=ovnkube-node",
+					"--field-selector", fmt.Sprintf("spec.nodeName=%s", nodeNameHostingOVNEIP),
+					"-o=jsonpath='{.items..metadata.name}'")
+			}
+			if err != nil || len(dbPods) == 0 {
+				framework.Failf("step 6a failed to find OVN DB pod, err: %v", err)
+			}
+			dbPod := strings.Split(dbPods, " ")[0]
+			dbPod = strings.TrimPrefix(dbPod, "'")
+			dbPod = strings.TrimSuffix(dbPod, "'")
+			if len(dbPod) == 0 {
+				framework.Failf("step 6a OVN DB pod name is empty after parsing")
+			}
+			logicalIP := fmt.Sprintf("logical_ip=%s", pod1IP.String())
+			if isIPv6TestRun {
+				logicalIP = fmt.Sprintf("logical_ip=\"%s\"", pod1IP.String())
+			}
+			snats, err := e2ekubectl.RunKubectl(ovnKubernetesNamespace, "exec", dbPod, "-c", dbContainerName, "--",
+				"ovn-nbctl", "--no-leader-only", "--columns=external_ip", "find", "nat", logicalIP)
+			framework.ExpectNoError(err, "step 6a failed to query OVN NAT table for pod %s (IP: %s)", pod1Name, pod1IP.String())
+			gomega.Expect(snats).Should(gomega.ContainSubstring(egressIPOVN),
+				"OVN EgressIP %s should have a SNAT entry for pod %s (IP: %s) in OVN NB DB, got: %s",
+				egressIPOVN, pod1Name, pod1IP.String(), snats)
+
+			ginkgo.By("6b. Verify that the secondary host network EgressIP is NOT configured on the OVS bridge")
+			// Directly inspect the bridge interface addresses on the node hosting the secondary EgressIP.
+			// BridgeEIPAddrManager.parseAndValidateEIP() should skip secondary network IPs via isOVNNetworkIP(),
+			// so the secondary EgressIP must not appear on the bridge.
+			bridgeName := deploymentconfig.Get().ExternalBridgeName()
+			brAddrOutput, err := infraprovider.Get().ExecK8NodeCommand(nodeNameHostingSecondaryHostEIP,
+				[]string{"ip", "addr", "show", "dev", bridgeName})
+			framework.ExpectNoError(err, "should be able to list addresses on bridge %s on node %s", bridgeName, nodeNameHostingSecondaryHostEIP)
+			framework.Logf("Bridge %s addresses on node %s (secondary EgressIP %s should be absent):\n%s",
+				bridgeName, nodeNameHostingSecondaryHostEIP, egressIPSecondaryHost, brAddrOutput)
+			gomega.Expect(brAddrOutput).ShouldNot(gomega.ContainSubstring(egressIPSecondaryHost),
+				fmt.Sprintf("secondary EgressIP %s should NOT be configured on bridge %s on node %s",
+					egressIPSecondaryHost, bridgeName, nodeNameHostingSecondaryHostEIP))
 
 			ginkgo.By("7. Check connectivity from one pod to the other and verify that the connection is achieved")
 			pod2IP, err := getPodIPWithRetry(f.ClientSet, isIPv6TestRun, podNamespace.Name, pod2Name)
@@ -2801,16 +2864,6 @@ spec:
 				"a network that isn't OVN network and verify that the src IP is the expected egress IP, failed, err: %v", podNamespace.Name, pod2Name, err)
 
 			ginkgo.By("14. Set the node hosting the OVN egress IP as unavailable")
-			var nodeNameHostingOVNEIP, nodeNameHostingSecondaryHostEIP string
-			for _, status := range statuses {
-				if status.EgressIP == egressIPOVN {
-					nodeNameHostingOVNEIP = status.Node
-				} else if status.EgressIP == egressIPSecondaryHost {
-					nodeNameHostingSecondaryHostEIP = status.Node
-				}
-			}
-			gomega.Expect(nodeNameHostingOVNEIP).ShouldNot(gomega.BeEmpty())
-			gomega.Expect(nodeNameHostingSecondaryHostEIP).ShouldNot(gomega.BeEmpty())
 			egressNodeAvailabilityHandler.Disable(nodeNameHostingOVNEIP)
 
 			ginkgo.By("15. Check that the status is of length one")
