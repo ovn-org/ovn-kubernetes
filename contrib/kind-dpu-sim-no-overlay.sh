@@ -100,7 +100,9 @@ DPU_SIM_UPLINK_ENABLE=${DPU_SIM_UPLINK_ENABLE:-true}
 DPU_SIM_UPLINK_NETWORK=${DPU_SIM_UPLINK_NETWORK:-dpu-sim-uplink}
 DPU_SIM_UPLINK_SUBNET=${DPU_SIM_UPLINK_SUBNET:-172.31.0.0/24}
 DPU_SIM_UPLINK_BRIDGE=${DPU_SIM_UPLINK_BRIDGE:-breth-uplink}
-DPU_SIM_UPLINK_INDEX=${DPU_SIM_UPLINK_INDEX:-16}
+# dpusim.UplinkInterfaceIndex: outside the pairs created by the dpu-simulator
+# (num_pairs), so the device plugin never advertises the uplink VF as a pod VF.
+DPU_SIM_UPLINK_INDEX=200
 DPU_SIM_UPLINK_HOST_INTERFACE="eth0-${DPU_SIM_UPLINK_INDEX}"
 DPU_SIM_UPLINK_DPU_REPRESENTOR="rep0-${DPU_SIM_UPLINK_INDEX}"
 DPU_SIM_CONFIG=${DPU_SIM_CONFIG:-config-kind-ovnk-offload.yaml}
