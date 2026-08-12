@@ -849,6 +849,87 @@ spec:
 				framework.Logf("Deleting EgressFirewall in namespace %s", f.Namespace.Name)
 				e2ekubectl.RunKubectlOrDie(f.Namespace.Name, "delete", "egressfirewall", "default")
 			})
+
+			ginkgo.It("Should recover connectivity after DNS address set is deleted from NBDB", func() {
+				dnsName1 := "www.google.com"
+				dnsName2 := "www.github.com"
+				srcPodName := "e2e-egress-fw-src-pod"
+				createSrcPod(srcPodName, serverNodeInfo.name, retryInterval, retryTimeout, f)
+
+				var egressFirewallConfig = fmt.Sprintf(`kind: EgressFirewall
+apiVersion: k8s.ovn.org/v1
+metadata:
+  name: default
+  namespace: %s
+spec:
+  egress:
+  - type: Allow
+    to:
+      dnsName: %s
+  - type: Allow
+    to:
+      dnsName: %s
+  - type: Deny
+    to:
+      cidrSelector: %s
+`, f.Namespace.Name, dnsName1, dnsName2, denyAllCIDR)
+				applyEF(egressFirewallConfig, f.Namespace.Name)
+
+				ginkgo.By(fmt.Sprintf("Verifying connectivity to DNS names %s and %s is permitted", dnsName1, dnsName2))
+				url1 := fmt.Sprintf("https://%s", dnsName1)
+				url2 := fmt.Sprintf("https://%s", dnsName2)
+				_, err := e2ekubectl.RunKubectl(f.Namespace.Name, "exec", srcPodName, "--", "curl", "-g", "--max-time", "5", url1)
+				framework.ExpectNoError(err, "failed to curl DNS name %s", dnsName1)
+				_, err = e2ekubectl.RunKubectl(f.Namespace.Name, "exec", srcPodName, "--", "curl", "-g", "--max-time", "5", url2)
+				framework.ExpectNoError(err, "failed to curl DNS name %s", dnsName2)
+
+				ginkgo.By("Finding and deleting EgressFirewallDNS address sets for the test DNS names from NBDB")
+				for _, dn := range []string{dnsName1, dnsName2} {
+					uuids, err := runOVNNBCTL(f, f.ClientSet,
+						"--data=bare", "--no-heading", "--columns=_uuid",
+						"find", "Address_Set",
+						`external_ids:"k8s.ovn.org/owner-type"=EgressFirewallDNS`,
+						fmt.Sprintf(`external_ids:"k8s.ovn.org/name"=%s`, dn))
+					framework.ExpectNoError(err, "failed to find DNS address set for %s in NBDB", dn)
+					gomega.Expect(uuids).NotTo(gomega.BeEmpty(), "expected an EgressFirewallDNS address set for %s", dn)
+					for _, uuid := range strings.Split(strings.TrimSpace(uuids), "\n") {
+						uuid = strings.TrimSpace(uuid)
+						if uuid == "" {
+							continue
+						}
+						framework.Logf("Deleting Address_Set %s (DNS name %s) from NBDB", uuid, dn)
+						_, err = runOVNNBCTL(f, f.ClientSet, "destroy", "Address_Set", uuid)
+						framework.ExpectNoError(err, "failed to delete Address_Set %s for DNS name %s", uuid, dn)
+					}
+				}
+
+				ginkgo.By("Getting the minimum TTL for each DNS name")
+				ttl1 := getMinTTLForDNSName(dnsName1, srcPodName)
+				gomega.Expect(ttl1).NotTo(gomega.Equal(-1), "failed to parse nslookup output for DNS name %s", dnsName1)
+				ttl2 := getMinTTLForDNSName(dnsName2, srcPodName)
+				gomega.Expect(ttl2).NotTo(gomega.Equal(-1), "failed to parse nslookup output for DNS name %s", dnsName2)
+				maxTTL := ttl1
+				if ttl2 > maxTTL {
+					maxTTL = ttl2
+				}
+				timeout := time.Duration(maxTTL+30) * time.Second
+				framework.Logf("TTLs: %s=%ds, %s=%ds; polling timeout=%s", dnsName1, ttl1, dnsName2, ttl2, timeout)
+
+				ginkgo.By(fmt.Sprintf("Verifying connectivity to DNS names %s and %s is restored after address set recreation", dnsName1, dnsName2))
+				gomega.Eventually(func() error {
+					if _, err := e2ekubectl.RunKubectl(f.Namespace.Name, "exec", srcPodName, "--", "curl", "-g", "--max-time", "5", url1); err != nil {
+						return fmt.Errorf("connectivity to %s not restored: %v", dnsName1, err)
+					}
+					if _, err := e2ekubectl.RunKubectl(f.Namespace.Name, "exec", srcPodName, "--", "curl", "-g", "--max-time", "5", url2); err != nil {
+						return fmt.Errorf("connectivity to %s not restored: %v", dnsName2, err)
+					}
+					return nil
+				}, timeout, 5*time.Second).Should(gomega.Succeed(),
+					fmt.Sprintf("connectivity to %s and %s was not restored after address set recreation", dnsName1, dnsName2))
+
+				framework.Logf("Deleting EgressFirewall in namespace %s", f.Namespace.Name)
+				e2ekubectl.RunKubectlOrDie(f.Namespace.Name, "delete", "egressfirewall", "default")
+			})
 		})
 	})
 }

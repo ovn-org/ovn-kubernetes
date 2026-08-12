@@ -569,7 +569,7 @@ func (as *ovnAddressSet) setAddresses(addresses []string) error {
 	}
 	err := libovsdbops.UpdateAddressSetsAddresses(as.nbClient, &addrset)
 	if err != nil {
-		return fmt.Errorf("failed to update address set addresses %+v: %v", addrset, err)
+		return fmt.Errorf("failed to update address set addresses %+v: %w", addrset, err)
 	}
 
 	return nil
