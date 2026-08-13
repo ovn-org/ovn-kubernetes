@@ -440,7 +440,14 @@ func (cm *ControllerManager) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to init default network controller: %v", err)
 	}
 
-	if util.IsRouteAdvertisementsEnabled() {
+	// The advertised-network isolation port group is consumed whenever pod
+	// networks are routed over the underlay: for networks advertised through
+	// the RouteAdvertisements feature, but also for no-overlay networks,
+	// which are supported without it (the default network via config,
+	// CUDNs via network segmentation).
+	if util.IsRouteAdvertisementsEnabled() ||
+		config.Default.Transport == ovntypes.NetworkTransportNoOverlay ||
+		util.IsNetworkSegmentationSupportEnabled() {
 		if err := ovn.ConfigureAdvertisedNetworkIsolation(cm.nbClient); err != nil {
 			return fmt.Errorf("failed to initialize advertised network isolation: %w", err)
 		}
