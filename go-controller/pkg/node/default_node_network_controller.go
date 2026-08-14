@@ -215,7 +215,14 @@ func NewDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, net
 			return nil, fmt.Errorf("failed to setup PMTUD nftables chain: %w", err)
 		}
 
-		if util.IsRouteAdvertisementsEnabled() {
+		// The advertised-UDN isolation chain and sets are consumed whenever
+		// pod networks are routed over the underlay: for networks advertised
+		// through the RouteAdvertisements feature, but also for no-overlay
+		// networks, which are supported without it (the default network via
+		// config, CUDNs via network segmentation).
+		if util.IsRouteAdvertisementsEnabled() ||
+			config.Default.Transport == types.NetworkTransportNoOverlay ||
+			util.IsNetworkSegmentationSupportEnabled() {
 			err = configureAdvertisedUDNIsolationNFTables()
 			if err != nil {
 				return nil, fmt.Errorf("failed to setup advertised UDN isolation nftables: %w", err)
