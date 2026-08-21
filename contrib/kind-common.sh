@@ -908,7 +908,16 @@ install_kubevirt_ipam_controller() {
 
 install_multus() {
   local version="v4.1.3"
+  local image="ghcr.io/k8snetworkplumbingwg/multus-cni:${version}"
   echo "Installing multus-cni $version daemonset ..."
+  # Pull the image once on the host and load it into every kind node, instead
+  # of having each node pull ~180MB from ghcr.io independently. The daemonset
+  # pins the image tag and has no imagePullPolicy, so the kubelet default
+  # (IfNotPresent) uses the preloaded image.
+  if [ "$KIND_LOCAL_REGISTRY" != true ]; then
+    "$OCI_BIN" pull "$image"
+    install_image "$image"
+  fi
   wget -qO- "https://raw.githubusercontent.com/k8snetworkplumbingwg/multus-cni/${version}/deployments/multus-daemonset.yml" |\
     sed -e "s|multus-cni:snapshot|multus-cni:${version}|g" |\
     run_kubectl apply -f -
