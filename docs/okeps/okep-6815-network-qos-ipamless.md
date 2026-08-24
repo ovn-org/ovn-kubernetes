@@ -2,13 +2,6 @@
 
 * Issue: [#6815](https://github.com/ovn-kubernetes/ovn-kubernetes/issues/6815)
 
-> **Status of this document.** This revision intentionally scopes the problem
-> space only: motivation, use cases, requirements, goals, future goals, and
-> non-goals. The `Proposed Solution`, `Implementation Details`, `Testing
-> Details`, `Risks`, `Version Skew`, `Backwards Compatibility`, and
-> `Alternatives` sections are placeholders to be filled in a subsequent
-> iteration once the community aligns on the problem framing below.
-
 ## Problem Statement
 
 NetworkQoS ([OKEP-4380](okep-4380-network-qos.md)) delivers DSCP marking and
@@ -344,48 +337,379 @@ is sufficient for the target use cases.
 
 ## Proposed Solution
 
-*To be detailed in a subsequent iteration.*
+The controller gains an **IP-independent source-matching path** that activates
+only on ipamless localnet networks. Instead of resolving source pods to IP
+addresses and matching `ip4.src == {$address_set}`, the controller places each
+selected source pod's **logical switch port (LSP)** into a per-`NetworkQoS`
+**OVN port group** and matches `inport == @<port_group> && (ip4 || ip6)`.
+Everything else about a `NetworkQoS` - destination `ipBlock`, protocol/port
+classifier, DSCP action, bandwidth policing, priority ordering, and the
+`to-lport` QoS row attached to the network's logical switch - is reused
+unchanged from the existing IPAM implementation.
+
+The path is selected at reconcile time by a single predicate,
+`isIPAMlessLocalnet()` = `TopologyType() == LocalnetTopology && !DoesNetworkRequireIPAM(NetInfo)`
+(`go-controller/pkg/ovn/controller/network_qos/utils.go`). When it is false - on
+every IPAM-enabled network and on non-localnet topologies - the controller takes
+the existing address-set path unchanged.
 
 ### API Details
 
-*To be detailed in a subsequent iteration. No NetworkQoS CRD API changes are
-anticipated (R7).*
+**No NetworkQoS CRD API changes.** The feature is entirely controller-internal:
+the same `k8s.ovn.org/v1alpha1` CRD, the same `podSelector` / `networkSelectors`
+/ `priority` / `egress` fields, and the same `classifier` semantics. There is no
+OpenAPI/schema diff and no new field, and existing manifests are interpreted
+identically - the only difference is that a manifest selecting an ipamless
+localnet network, which is silently a no-op today, becomes functional.
+
+The one behavioral caveat is that on ipamless networks the `classifier.to`
+`podSelector` / `namespaceSelector` destination forms are not honored; this is a
+behavioral scoping of an existing field on a topology where it cannot be
+resolved, not an API change.
 
 ### Implementation Details
 
-*To be detailed in a subsequent iteration.*
+The change is contained to the NetworkQoS controller. Conceptually it adds one
+alternative to the single decision where the controller chooses *how to identify
+the source of a packet*: on IPAM networks that identity is an IP address set; on
+ipamless localnet networks it becomes membership in an OVN port group. Every
+other stage of building a `NetworkQoS` - destination matching, protocol/port
+classification, DSCP, bandwidth, priority, and attaching the resulting QoS rule
+to the network's logical switch - is shared with the existing path and left
+untouched.
+
+At a high level, the controller:
+
+1. **Detects the topology.** While reconciling a `NetworkQoS`, it checks whether
+   the target is an ipamless localnet network. If not, it uses the existing
+   IP-based path with no change; everything below applies only when it is.
+2. **Maintains a source port group.** Rather than resolving selected source pods
+   to IP addresses, it keeps a port group - owned by, and named after, the
+   `NetworkQoS` - whose members are the logical switch ports of the currently
+   selected source pods. Ports are added and removed as pods start or stop
+   matching (label, network selection, deletion). A pod attaching through another
+   namespace's NAD is resolved to the correct port and lands in the same group.
+3. **Matches on membership.** The QoS rule's source condition becomes "the packet
+   entered through a port in this group" instead of "the packet's source IP is in
+   this address set". The rest of the match (destination `ipBlock`,
+   protocol/port) and the actions (DSCP, bandwidth) are produced exactly as
+   today.
+4. **Handles pods that appear after the policy.** The common KubeVirt case is a
+   VM created or migrated *after* its `NetworkQoS` already exists, so the pod's
+   port may not be in OVN yet when the controller first tries to add it. The
+   controller treats "pod is attached but its port is not present yet" as a
+   transient condition and lets the existing work queue retry until the port
+   lands - no external event or user action required. (The rejected alternative
+   and the reasoning are in [Alternatives](#alternatives) and
+   [Deferred / Open Questions](#deferred--open-questions).)
+5. **Tears down in order.** On delete, the QoS rules are removed from the switch
+   first and the source port group afterwards, so no live object ever references
+   a deleted one. The port group participates in the same ownership-keyed garbage
+   collection as the existing QoS objects, so orphans are reclaimed across
+   controller restart or rename.
+
+```mermaid
+sequenceDiagram
+    actor Admin
+    participant Ctrl as NetworkQoS controller
+    participant NB as OVN NB (port group / QoS / switch)
+
+    Admin->>Ctrl: create NetworkQoS (podSelector, dscp, bandwidth, ipBlock)
+    Ctrl->>Ctrl: ipamless localnet network?<br/>(no → existing IP-based path)
+    Ctrl->>NB: ensure source port group (owned by this NetworkQoS)
+    loop each selected source pod
+        Ctrl->>NB: look up pod's logical switch port
+        alt port present
+            Ctrl->>NB: add port to source port group
+        else port not yet in NB
+            Ctrl-->>Ctrl: transient error → work queue retries
+        end
+    end
+    Ctrl->>NB: install QoS rule on the switch<br/>(source = entered via a port in the group)
+
+    Note over Admin,NB: VM created / migrated after the policy
+    Admin->>Ctrl: source pod appears (retry fires)
+    Ctrl->>NB: add its port to the group (now present)
+
+    Note over Admin,NB: teardown
+    Admin->>Ctrl: delete NetworkQoS
+    Ctrl->>NB: remove QoS rules from switch
+    Ctrl->>NB: delete source port group
+```
+
+The resulting QoS rules - source fragment, destination, priority ordering, and
+rule selection - are shown concretely in the [Worked example](#worked-example)
+below.
+
+### Worked example
+
+The following mirrors Stories 1 and 2 on a single ipamless localnet UDN. The NAD
+is ipamless (no `subnets`) and carries a label the QoS `networkSelectors` match:
+
+```yaml
+apiVersion: k8s.cni.cncf.io/v1
+kind: NetworkAttachmentDefinition
+metadata:
+  name: tenant-blue
+  namespace: vms
+  labels:
+    nqos-network: tenant-blue          # matched by networkSelectors below
+spec:
+  config: |
+    {
+      "cniVersion": "1.0.0",
+      "name": "tenant-blue",
+      "type": "ovn-k8s-cni-overlay",
+      "topology": "localnet",
+      "physicalNetworkName": "physnet",
+      "vlanID": 100,
+      "netAttachDefName": "vms/tenant-blue"
+    }                                    # no "subnets" => ipamless
+```
+
+**Story 1 - tier differentiation.** Two objects select each tier by label;
+production is marked EF (46), staging AF11 (10), with `priority` resolving any
+overlap in favour of production:
+
+```yaml
+apiVersion: k8s.ovn.org/v1alpha1
+kind: NetworkQoS
+metadata: { name: tier-production, namespace: vms }
+spec:
+  networkSelectors:
+  - networkSelectionType: NetworkAttachmentDefinitions
+    networkAttachmentDefinitionSelector:
+      namespaceSelector: {}
+      networkSelector: { matchLabels: { nqos-network: tenant-blue } }
+  podSelector: { matchLabels: { tier: production } }
+  priority: 60
+  egress:
+  - dscp: 46                            # EF; no classifier => all egress, IPv4 and IPv6
+---
+apiVersion: k8s.ovn.org/v1alpha1
+kind: NetworkQoS
+metadata: { name: tier-staging, namespace: vms }
+spec:
+  networkSelectors:
+  - networkSelectionType: NetworkAttachmentDefinitions
+    networkAttachmentDefinitionSelector:
+      namespaceSelector: {}
+      networkSelector: { matchLabels: { nqos-network: tenant-blue } }
+  podSelector: { matchLabels: { tier: staging } }
+  priority: 40
+  egress:
+  - dscp: 10                            # AF11; no classifier => all egress, IPv4 and IPv6
+```
+
+On an ipamless network these produce `to-lport` QoS rows whose **source fragment
+is `inport == @<port_group>`** rather than `ip4.src == {$address_set}`. Because
+neither rule sets a `classifier`, no destination clause is appended and the
+`(ip4 || ip6)` source fragment matches both IP families:
+
+```text
+# tier-production rule 0  (spec.priority 60, rule 0) -> OVN priority 10600
+match: inport == @<tier-production pg> && (ip4 || ip6)   action: dscp=46
+# tier-staging rule 0     (spec.priority 40, rule 0) -> OVN priority 10400
+match: inport == @<tier-staging pg>    && (ip4 || ip6)   action: dscp=10
+```
+
+**Story 2 - intra-VM backup deprioritization, and QoS rule priority
+resolution.** A single object with two rules: rule 0 marks all traffic EF; rule 1
+(later in the list, hence higher precedence) demotes backup traffic to CS1 (8)
+and caps it. It is set at `priority: 70`, **deliberately above** `tier-production`
+(60) - see below.
+
+```yaml
+apiVersion: k8s.ovn.org/v1alpha1
+kind: NetworkQoS
+metadata: { name: backup-deprioritization, namespace: vms }
+spec:
+  networkSelectors:
+  - networkSelectionType: NetworkAttachmentDefinitions
+    networkAttachmentDefinitionSelector:
+      namespaceSelector: {}
+      networkSelector: { matchLabels: { nqos-network: tenant-blue } }
+  podSelector: { matchLabels: { app: payments } }
+  priority: 70
+  egress:
+  - dscp: 46                            # rule 0: regular app traffic -> EF (no classifier => all egress, v4+v6)
+  - dscp: 8                             # rule 1: backup traffic -> CS1 + cap
+    bandwidth: { rate: 100000, burst: 5000 }
+    classifier:
+      to: [ { ipBlock: { cidr: 10.20.0.0/16 } } ]
+      ports: [ { protocol: TCP, port: 2049 } ]
+```
+
+A payments VM carrying both `app: payments` and `tier: production` lands in the
+source set of **both** objects, so all three rules install:
+
+| Source rule | dscp | bandwidth | dst match | OVN priority |
+|---|---|---|---|---|
+| `tier-production` r0 | 46 | - | all (v4+v6) | 10600 |
+| `backup-deprioritization` r0 | 46 | - | all (v4+v6) | 10700 |
+| `backup-deprioritization` r1 | 8 | 100 Mbps | `10.20.0.0/16` tcp:2049 | 10701 |
+
+In current OVN (26.03.x), marking and metering are applied together in a single QoS stage.
+The highest-priority matching rule determines both actions; actions from
+lower-priority matching rules are not combined with it.
+
+With the priorities shown above, backup packets match rule 1 at OVN priority
+10701, which applies DSCP 8 and the 100 Mbps rate cap. Other matching traffic
+uses rule 0 at priority 10700, which applies DSCP 46 without a rate cap.
+
+If `backup-deprioritization` were assigned a lower priority than
+`tier-production`, the tier catch-all at OVN priority 10600 would win for
+production payments VMs. Backup traffic would then be marked DSCP 46 and would
+not receive the backup rule's rate cap. Giving the backup policy higher priority
+ensures that both its marking and policing take effect.
+
+`NetworkQoS.podSelector` matches the **virt-launcher pod**, so QoS labels belong
+on the `VirtualMachine`'s `spec.template.metadata.labels`; guest addressing (a
+static IP or external DHCP) is configured inside the guest and is never seen by
+OVN-Kubernetes.
 
 ### Testing Details
 
-*To be detailed in a subsequent iteration.*
+Everything NetworkQoS already validates for IPAM'ed networks
+([OKEP-4380](okep-4380-network-qos.md)) - DSCP marking, bandwidth policing,
+protocol/port classification, CIDR destinations, IPv4 and IPv6 - is re-run
+against an ipamless localnet network with label-selected source pods, to the
+extent applicable on this topology (destinations are `ipBlock`/CIDR only). Those
+scenarios are not re-enumerated here.
+
+This proposal must test the typical virtualization lifecycle specific processes, like:
+- VM live migration
+- VM controller restart
 
 ### Documentation Details
 
-*To be detailed in a subsequent iteration. Must include adding this OKEP to
-`mkdocs.yml` under the OKEPs navigation section.*
+- Extend the existing NetworkQoS feature documentation
+  (`docs/features/network-qos/`) to state that it now applies to ipamless
+  localnet networks, calling out only what differs on this topology:
+  - the `ipBlock`-only destination limitation (users coming from IPAM NetworkQoS
+    will expect destination `podSelector` / `namespaceSelector` to work);
+  - worked examples for the KubeVirt/VM use cases (workload-tier differentiation,
+    intra-VM backup deprioritization), including guest addressing (static IP /
+    external DHCP).
 
 ## Risks, Known Limitations and Mitigations
 
-*To be detailed in a subsequent iteration.*
+- **No destination `podSelector` / `namespaceSelector`** on ipamless networks
+  (a permanent scope boundary, not a temporary limitation). *Mitigation:* document
+  prominently; the discovery mechanism is still open (see
+  [Deferred / Open Questions](#deferred--open-questions)).
+- **Stale/orphan port-group GC across controller rename/restart.**
+  *Mitigation:* the implementation must confirm the ownership-keyed GC (the same
+  machinery as address sets) reclaims orphaned port groups; this is called out as
+  an implementation checkpoint.
 
 ## OVN-Kubernetes Version Skew
 
-*To be detailed in a subsequent iteration.*
+This feature is targeted for the next upcoming release, **release-1.5**.
+
+The feature uses only OVN NB constructs that NetworkQoS already depends on - the
+`QoS` table, `Port_Group`, `Logical_Switch.qos_rules`, and the `inport` / `ip4`
+/ `ip6` match primitives. It introduces **no new OVN feature dependency**, so
+there is no `ovn-northd`/OVN version floor beyond what NetworkQoS already
+requires, and no CRD version change. During implementation, confirm that no
+mixed-zone ordering assumption is introduced (moot for single-zone localnet;
+relevant only under OVN Interconnect - see
+[Deferred / Open Questions](#deferred--open-questions)).
 
 ## Backwards Compatibility
 
-*To be detailed in a subsequent iteration. The intended direction is strictly
-additive: NetworkQoS on ipamless networks is non-functional today, so enabling
-it does not change any existing behavior; IPAM-enabled networks are unaffected.*
+Strictly additive. NetworkQoS on ipamless localnet networks is non-functional
+today (source pods are silently skipped for lack of an IP), so enabling it
+changes no existing behavior. IPAM-enabled networks are untouched: the
+`isIPAMlessLocalnet()` predicate isolates every new code path, and the IPAM
+address-set match is emitted exactly as before (R12). There is no migration, no
+data reformat, and no change to any persisted object on existing networks; an
+upgrade simply makes previously-inert manifests take effect on ipamless localnet
+networks.
 
 ## Alternatives
 
-*To be detailed in a subsequent iteration.* The comparison must evaluate the
-candidate IP-independent matching approaches against an IP-in-annotation
-approach, and must call out the **loss of destination `podSelector` /
-`namespaceSelector` matching** as a key drawback of the IP-independent
-approaches (they can express "QoS toward `10.20.0.0/16`" but not "QoS toward
-pods labeled `role: backup-target`" without manual CIDR bookkeeping).
+Source-matching approaches fall into two families: **IP-independent** matching
+(needs no guest IP) and **IP-dependent** matching (obtains the guest IP and
+reuses the existing address-set path). The chosen approach is described in the
+[Proposed Solution](#proposed-solution); the alternatives weighed against it
+are listed below.
+
+**IP-independent approaches (no guest IP required).**
+
+1. **MAC address set / `eth.src`.** Match `eth.src == {$mac_set} && (ip4 || ip6)`.
+   Functionally equivalent for source matching today, but becomes spoofable once
+   the localnet disable-MAC-spoofing capability lands
+   ([OKEP-3926](okep-3926-disable-port-security.md)) - a guest could set its own
+   source MAC to evade or impersonate a QoS class. This spoofing exposure is the
+   reason it is not the preferred option.
+
+**IP-dependent approaches (learn the guest IP, reuse the existing path).** Both
+of the following obtain the guest IP and feed it to the unchanged
+`ip4.src == {$address_set}` machinery. Their shared upside is that they preserve
+the **full** IPAM feature set - including destination `podSelector` /
+`namespaceSelector` - because they produce a real IP. They differ only in *who*
+supplies the IP (the user vs. the controller).
+
+2. **Guest IP recorded in a pod annotation (user/CNI-provided).** Have the
+   user/CNI record the guest IP in an annotation and feed the existing
+   `ip4.src == {$address_set}` machinery. Not preferred: it pushes IPAM
+   responsibility onto the user, is fragile for VMs that change IPs at runtime,
+   and still would not remove the need for a different match on truly static
+   addresses.
+3. **OVN-Kubernetes actively introspects the guest to learn its IP (IP
+   discovery).** Rather than asking the user to supply the IP, the controller
+   *discovers* it and populates the source (and, for VM destinations, the
+   destination) address set, restoring the full IPAM feature set. Candidate
+   discovery mechanisms:
+   - **KubeVirt VMI status watching** - read guest-reported addresses from
+     `VirtualMachineInstance.status.interfaces[].ipAddress` and populate the
+     address set.
+   - **DHCP snooping** - observe DHCP ACKs on the localnet bridge to learn the
+     lease the external server hands the guest.
+   - **ARP/ND learning** - passively learn the source IP from the guest's own
+     ARP/NDP traffic.
+   - **IP-claim CRD** - an `IPAMClaim`-style cluster object recording the guest's
+     address.
+
+   Not preferred, and captured as a [Non-Goal](#non-goals) rather than a live
+   design option, for several reasons:
+   - **It reintroduces the IP-management responsibility this OKEP sets out to
+     avoid.** The target population is precisely VMs whose addresses are managed
+     entirely outside OVN-Kubernetes; making the controller track those addresses
+     re-couples QoS to an IP OVN-K neither owns nor can authoritatively validate.
+   - **Learned IPs are guest-asserted, hence spoofable.** DHCP-snooped and
+     ARP-learned addresses originate from the guest; matching QoS on them reopens
+     the spoofing exposure the `inport` design closes by construction (a guest
+     could source-spoof to change or evade its QoS class), directly conflicting
+     with the localnet disable-MAC-spoofing direction
+     ([OKEP-3926](okep-3926-disable-port-security.md)).
+   - **It is eventually-consistent, so it recreates the silent-skip failure in a
+     new form.** Addresses are learned asynchronously and can change at runtime
+     (renumbering, secondary/floating IPs, failover); between a change and its
+     detection QoS silently under-applies - the very behavior the Problem
+     Statement objects to - and address-set churn adds reconcile load.
+   - **Cost/coupling is disproportionate.** The KubeVirt-status variant adds a
+     hard control-plane dependency on the KubeVirt API for a feature that must
+     also serve non-VM pods and non-KubeVirt deployments; the datapath variants
+     (DHCP snooping, ARP/ND learning) are substantial new datapath features, each
+     larger than the entire rest of this proposal.
+   - **It is not required by the target use cases.** Every source-side use case
+     (Stories 1-4) is satisfied by IP-independent `inport` matching. The only
+     capability introspection would unlock - destination `podSelector` on
+     ipamless networks - is an explicit [Future Goal](#future-goals), and the
+     OKEP prefers to reach it through a clean, authoritative IP path (DHCP IPAM
+     per [OKEP-6224](okep-6224-dhcp-ipam-localnet.md), or static-IP propagation)
+     rather than by inferring IPs the controller does not manage.
+
+**Why none of these was chosen.** The MAC-set match becomes spoofable once
+disable-MAC-spoofing lands; the IP-dependent approaches preserve the full
+destination feature set but reintroduce the IP-management burden, spoofable match
+criteria, and eventual-consistency gaps this proposal sets out to avoid. The
+chosen port-group match (see [Proposed Solution](#proposed-solution)) sidesteps
+all of these, at the cost of `ipBlock`/CIDR-only destinations - the deliberate
+scope trade documented in
+[Scope of destination matching](#scope-of-destination-matching-in-this-proposal).
 
 ## Deferred / Open Questions
 
