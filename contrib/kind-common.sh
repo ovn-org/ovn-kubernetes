@@ -1086,7 +1086,19 @@ install_image() {
       podman save -o /tmp/image.tar "${1}"
       kind load image-archive /tmp/image.tar --name "${KIND_CLUSTER_NAME}"
     else
-      kind load docker-image "${1}" --name "${KIND_CLUSTER_NAME}"
+      # docker: with the containerd image store (default since Docker 27), an
+      # archive of a pulled multi-arch image references every platform but only
+      # contains the host platform's blobs, and the "ctr images import
+      # --all-platforms" that kind runs fails on the missing digests. Save the
+      # host platform only (docker save --platform, Docker 28+) and load the
+      # archive; older docker lacks the flag and its classic image store
+      # produces single-platform archives anyway, so fall back to kind load.
+      rm -f /tmp/image.tar
+      if docker save --platform "linux/$(docker version -f '{{.Server.Arch}}')" -o /tmp/image.tar "${1}" 2>/dev/null; then
+        kind load image-archive /tmp/image.tar --name "${KIND_CLUSTER_NAME}"
+      else
+        kind load docker-image "${1}" --name "${KIND_CLUSTER_NAME}"
+      fi
     fi
   fi
 }
