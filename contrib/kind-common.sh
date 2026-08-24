@@ -1080,26 +1080,33 @@ install_image() {
   if [ "$KIND_LOCAL_REGISTRY" == true ]; then
     echo "${1} should already be avaliable in local registry, not loading"
   else
-    if [ "$OCI_BIN" == "podman" ]; then
-      # podman: cf https://github.com/kubernetes-sigs/kind/issues/2027
-      rm -f /tmp/image.tar
-      podman save -o /tmp/image.tar "${1}"
-      kind load image-archive /tmp/image.tar --name "${KIND_CLUSTER_NAME}"
-    else
-      # docker: with the containerd image store (default since Docker 27), an
-      # archive of a pulled multi-arch image references every platform but only
-      # contains the host platform's blobs, and the "ctr images import
-      # --all-platforms" that kind runs fails on the missing digests. Save the
-      # host platform only (docker save --platform, Docker 28+) and load the
-      # archive; older docker lacks the flag and its classic image store
-      # produces single-platform archives anyway, so fall back to kind load.
-      rm -f /tmp/image.tar
-      if docker save --platform "linux/$(docker version -f '{{.Server.Arch}}')" -o /tmp/image.tar "${1}" 2>/dev/null; then
-        kind load image-archive /tmp/image.tar --name "${KIND_CLUSTER_NAME}"
+    # Write the archive under a unique temporary directory per invocation:
+    # podman save refuses to write to an existing file, and concurrent or
+    # aborted runs must not clash on a shared archive path. The subshell
+    # scopes the cleanup trap to this function call.
+    (
+      archive_dir=$(mktemp -d)
+      trap 'rm -rf "${archive_dir}"' EXIT
+      archive="${archive_dir}/image.tar"
+      if [ "$OCI_BIN" == "podman" ]; then
+        # podman: cf https://github.com/kubernetes-sigs/kind/issues/2027
+        podman save -o "${archive}" "${1}"
+        kind load image-archive "${archive}" --name "${KIND_CLUSTER_NAME}"
       else
-        kind load docker-image "${1}" --name "${KIND_CLUSTER_NAME}"
+        # docker: with the containerd image store (default since Docker 27), an
+        # archive of a pulled multi-arch image references every platform but only
+        # contains the host platform's blobs, and the "ctr images import
+        # --all-platforms" that kind runs fails on the missing digests. Save the
+        # host platform only (docker save --platform, Docker 28+) and load the
+        # archive; older docker lacks the flag and its classic image store
+        # produces single-platform archives anyway, so fall back to kind load.
+        if docker save --platform "linux/$(docker version -f '{{.Server.Arch}}')" -o "${archive}" "${1}" 2>/dev/null; then
+          kind load image-archive "${archive}" --name "${KIND_CLUSTER_NAME}"
+        else
+          kind load docker-image "${1}" --name "${KIND_CLUSTER_NAME}"
+        fi
       fi
-    fi
+    )
   fi
 }
 
