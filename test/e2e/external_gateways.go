@@ -542,7 +542,7 @@ var _ = ginkgo.Describe("External Gateway", feature.ExternalGateway, func() {
 				ginkgo.Entry("IPV6 tcp", &addressesv6, "tcp", gwTCPPort, podTCPPort))
 		})
 
-		var _ = ginkgo.Describe("e2e multiple external gateway stale conntrack entry deletion validation", func() {
+		var _ = ginkgo.Describe("e2e multiple external gateway ingress stale conntrack entry deletion validation", func() {
 			const (
 				svcname              string = "novxlan-externalgw-ecmp"
 				gwContainer1Template string = "gw-test-container1-%d"
@@ -640,7 +640,7 @@ var _ = ginkgo.Describe("External Gateway", feature.ExternalGateway, func() {
 				updateAPBExternalRouteCRWithStaticHop(defaultPolicyName, f.Namespace.Name, false, addresses.gatewayIPs[0])
 
 				podConnEntriesWithMACLabelsSet = 1 // we still have the conntrack entry for the remaining gateway
-				totalPodConnEntries = 3            // 4-1
+				totalPodConnEntries = 2            // remaining hop: 1 labeled + 1 unlabeled zone copy
 
 				gomega.Eventually(func() int {
 					n := pokeConntrackEntries(nodeName, addresses.srcPodIP, protocol, macAddressGW)
@@ -655,7 +655,7 @@ var _ = ginkgo.Describe("External Gateway", feature.ExternalGateway, func() {
 				ginkgo.By("Check if conntrack entries for ECMP routes are removed for the deleted external gateway if traffic is UDP")
 
 				podConnEntriesWithMACLabelsSet = 0 // we don't have any remaining gateways left
-				totalPodConnEntries = 2            // 4-2
+				totalPodConnEntries = 0            // labeled and unlabeled copies of both hops are deleted
 
 				gomega.Eventually(func() int {
 					n := pokeConntrackEntries(nodeName, addresses.srcPodIP, protocol, macAddressGW)
@@ -725,7 +725,7 @@ var _ = ginkgo.Describe("External Gateway", feature.ExternalGateway, func() {
 				ginkgo.By("Check if conntrack entries for ECMP routes are removed for the deleted external gateway if traffic is UDP")
 
 				podConnEntriesWithMACLabelsSet = 1 // we still have the conntrack entry for the remaining gateway
-				totalPodConnEntries = 3            // 4-1
+				totalPodConnEntries = 2            // remaining hop: 1 labeled + 1 unlabeled zone copy
 
 				gomega.Eventually(func() int {
 					n := pokeConntrackEntries(nodeName, addresses.srcPodIP, protocol, macAddressGW)
@@ -742,7 +742,7 @@ var _ = ginkgo.Describe("External Gateway", feature.ExternalGateway, func() {
 				ginkgo.By("Check if conntrack entries for ECMP routes are removed for the deleted external gateway if traffic is UDP")
 
 				podConnEntriesWithMACLabelsSet = 0 //we don't have any remaining gateways left
-				totalPodConnEntries = 2
+				totalPodConnEntries = 0            // labeled and unlabeled copies of both hops are deleted
 				gomega.Eventually(func() int {
 					n := pokeConntrackEntries(nodeName, addresses.srcPodIP, protocol, macAddressGW)
 					klog.Infof("Number of entries with macAddressGW %s:%d", macAddressGW, n)
@@ -755,6 +755,10 @@ var _ = ginkgo.Describe("External Gateway", feature.ExternalGateway, func() {
 				ginkgo.Entry("IPV4 tcp + pod label update", &addressesv4, "tcp", GatewayUpdate),
 				ginkgo.Entry("IPV6 udp + pod label update", &addressesv6, "udp", GatewayUpdate),
 				ginkgo.Entry("IPV6 tcp + pod label update", &addressesv6, "tcp", GatewayUpdate),
+				ginkgo.Entry("IPV4 udp + pod delete", &addressesv4, "udp", GatewayDelete),
+				ginkgo.Entry("IPV4 tcp + pod delete", &addressesv4, "tcp", GatewayDelete),
+				ginkgo.Entry("IPV6 udp + pod delete", &addressesv6, "udp", GatewayDelete),
+				ginkgo.Entry("IPV6 tcp + pod delete", &addressesv6, "tcp", GatewayDelete),
 				ginkgo.Entry("IPV4 udp + pod deletion timestamp", &addressesv4, "udp", GatewayDeletionTimestamp),
 				ginkgo.Entry("IPV4 tcp + pod deletion timestamp", &addressesv4, "tcp", GatewayDeletionTimestamp),
 				ginkgo.Entry("IPV6 udp + pod deletion timestamp", &addressesv6, "udp", GatewayDeletionTimestamp),
