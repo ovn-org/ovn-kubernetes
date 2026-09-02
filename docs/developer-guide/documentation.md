@@ -40,7 +40,7 @@ feel free to write it. If you are unsure where this should be placed; reach out 
 
 * **Blog Posts**: Are you an end-user of OVN-Kubernetes? Is there something you wish to share with
 the community about your awesome use cases and how you used our CNI to solve your problems? We
-welcome blog post contributions from all! See [OVN-Kubernetes blog](https://ovn-kubernetes.io/blog/) for details.
+welcome blog post contributions from all! See [OVN-Kubernetes blog](../blog/index.md) for details.
 Open a commit adding your post to `docs/blog/posts/`. Each post must include
 YAML front matter with a `date` and `authors` list, for example:
 ```yaml
@@ -172,6 +172,14 @@ avoid introducing new unversioned `ovn-kubernetes.io/<page>/` URLs.
 Repo files outside `docs/` that must deep-link into the published site (for
 example `README.md`) should use a versioned absolute URL under `/master/…`,
 not an unversioned path.
+
+These conventions are enforced by `hack/lint-docs-links.py`, which runs in the
+**Test Docs Build** CI workflow on pull requests targeting `master`. Run it locally before
+pushing:
+
+```bash
+python3 hack/lint-docs-links.py
+```
 
 ### Root `404.html` (pre-versioning deep links)
 
