@@ -36,17 +36,22 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
 
-// defaultEgressNodeSelector is the CRD default for egressNodeSelector, used in
-// tests that don't specify a custom selector.
-var defaultEgressNodeSelector = func() labels.Selector {
-	s, _ := metav1.LabelSelectorAsSelector(&metav1.LabelSelector{
-		MatchExpressions: []metav1.LabelSelectorRequirement{
-			{
-				Key:      "k8s.ovn.org/egress-assignable",
-				Operator: metav1.LabelSelectorOpExists,
-			},
+// defaultEgressNodeSelectorSpec mirrors the CRD schema default for
+// egressNodeSelector. Tests must set this explicitly because unit tests
+// bypass the API server which would normally apply the CRD default.
+var defaultEgressNodeSelectorSpec = &metav1.LabelSelector{
+	MatchExpressions: []metav1.LabelSelectorRequirement{
+		{
+			Key:      "k8s.ovn.org/egress-assignable",
+			Operator: metav1.LabelSelectorOpExists,
 		},
-	})
+	},
+}
+
+// defaultEgressNodeSelector is the compiled form of defaultEgressNodeSelectorSpec,
+// used in direct assignEgressIPs calls.
+var defaultEgressNodeSelector = func() labels.Selector {
+	s, _ := metav1.LabelSelectorAsSelector(defaultEgressNodeSelectorSpec)
 	return s
 }()
 
@@ -339,12 +344,29 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 		return reAssignmentCount
 	}
 
-	isEgressAssignableNode := func(nodeName string) func() bool {
+	// nodeHasAllocations returns true when the node's allocation cache is
+	// non-empty — i.e. the node actually received at least one EgressIP
+	// assignment.
+	nodeHasAllocations := func(nodeName string) func() bool {
 		return func() bool {
 			fakeClusterManagerOVN.eIPC.nodeAllocator.Lock()
 			defer fakeClusterManagerOVN.eIPC.nodeAllocator.Unlock()
-			if item, exists := fakeClusterManagerOVN.eIPC.nodeAllocator.cache[nodeName]; exists {
-				return item.isEgressAssignable
+			if eNode, exists := fakeClusterManagerOVN.eIPC.nodeAllocator.cache[nodeName]; exists {
+				return len(eNode.allocations) > 0
+			}
+			return false
+		}
+	}
+
+	// nodeHasCachedLabel reports whether the allocator cache has copied the
+	// given label onto the node. Used by tests that start WatchEgressNodes
+	// but not WatchEgressIP (so there are no allocations to poll).
+	nodeHasCachedLabel := func(nodeName, key string) func() bool {
+		return func() bool {
+			fakeClusterManagerOVN.eIPC.nodeAllocator.Lock()
+			defer fakeClusterManagerOVN.eIPC.nodeAllocator.Unlock()
+			if eNode, exists := fakeClusterManagerOVN.eIPC.nodeAllocator.cache[nodeName]; exists {
+				return eNode.labels.Has(key)
 			}
 			return false
 		}
@@ -485,7 +507,8 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
 					Spec: egressipv1.EgressIPSpec{
-						EgressIPs: []string{egressIP},
+						EgressNodeSelector: defaultEgressNodeSelectorSpec,
+						EgressIPs:          []string{egressIP},
 						PodSelector: metav1.LabelSelector{
 							MatchLabels: egressPodLabel,
 						},
@@ -516,8 +539,8 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				gomega.Eventually(getEgressIPAllocatorSizeSafely).Should(gomega.Equal(2))
 				gomega.Expect(fakeClusterManagerOVN.eIPC.nodeAllocator.cache).To(gomega.HaveKey(node1.Name))
 				gomega.Expect(fakeClusterManagerOVN.eIPC.nodeAllocator.cache).To(gomega.HaveKey(node2.Name))
-				gomega.Eventually(isEgressAssignableNode(node1.Name)).Should(gomega.BeTrue())
-				gomega.Eventually(isEgressAssignableNode(node2.Name)).Should(gomega.BeFalse())
+				gomega.Eventually(nodeHasAllocations(node1.Name)).Should(gomega.BeTrue())
+				gomega.Eventually(nodeHasAllocations(node2.Name)).Should(gomega.BeFalse())
 
 				gomega.Eventually(getEgressIPStatusLen(egressIPName)).Should(gomega.Equal(1))
 				egressIPs, nodes := getEgressIPStatus(egressIPName)
@@ -605,7 +628,8 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
 					Spec: egressipv1.EgressIPSpec{
-						EgressIPs: []string{egressIP},
+						EgressNodeSelector: defaultEgressNodeSelectorSpec,
+						EgressIPs:          []string{egressIP},
 						PodSelector: metav1.LabelSelector{
 							MatchLabels: egressPodLabel,
 						},
@@ -637,8 +661,8 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				gomega.Eventually(getEgressIPAllocatorSizeSafely).Should(gomega.Equal(2))
 				gomega.Expect(fakeClusterManagerOVN.eIPC.nodeAllocator.cache).To(gomega.HaveKey(node1.Name))
 				gomega.Expect(fakeClusterManagerOVN.eIPC.nodeAllocator.cache).To(gomega.HaveKey(node2.Name))
-				gomega.Eventually(isEgressAssignableNode(node1.Name)).Should(gomega.BeTrue())
-				gomega.Eventually(isEgressAssignableNode(node2.Name)).Should(gomega.BeFalse())
+				gomega.Eventually(nodeHasAllocations(node1.Name)).Should(gomega.BeTrue())
+				gomega.Eventually(nodeHasAllocations(node2.Name)).Should(gomega.BeFalse())
 
 				gomega.Eventually(getEgressIPStatusLen(egressIPName)).Should(gomega.Equal(1))
 				egressIPs, nodes := getEgressIPStatus(egressIPName)
@@ -727,7 +751,8 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
 					Spec: egressipv1.EgressIPSpec{
-						EgressIPs: []string{egressIP},
+						EgressNodeSelector: defaultEgressNodeSelectorSpec,
+						EgressIPs:          []string{egressIP},
 						PodSelector: metav1.LabelSelector{
 							MatchLabels: egressPodLabel,
 						},
@@ -756,7 +781,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 
 				gomega.Eventually(getEgressIPAllocatorSizeSafely).Should(gomega.Equal(1))
 				gomega.Expect(fakeClusterManagerOVN.eIPC.nodeAllocator.cache).To(gomega.HaveKey(node1.Name))
-				gomega.Eventually(isEgressAssignableNode(node1.Name)).Should(gomega.BeTrue())
+				gomega.Eventually(nodeHasAllocations(node1.Name)).Should(gomega.BeTrue())
 
 				gomega.Eventually(getEgressIPStatusLen(egressIPName)).Should(gomega.Equal(1))
 				egressIPs, nodes := getEgressIPStatus(egressIPName)
@@ -976,7 +1001,8 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				eIP1 := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
 					Spec: egressipv1.EgressIPSpec{
-						EgressIPs: []string{egressIP1, egressIP2},
+						EgressNodeSelector: defaultEgressNodeSelectorSpec,
+						EgressIPs:          []string{egressIP1, egressIP2},
 						PodSelector: metav1.LabelSelector{
 							MatchLabels: egressPodLabel,
 						},
@@ -994,7 +1020,8 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				eIP2 := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName2),
 					Spec: egressipv1.EgressIPSpec{
-						EgressIPs: []string{egressIP3},
+						EgressNodeSelector: defaultEgressNodeSelectorSpec,
+						EgressIPs:          []string{egressIP3},
 						PodSelector: metav1.LabelSelector{
 							MatchLabels: egressPodLabel,
 						},
@@ -1046,7 +1073,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				// ensure secondIP from first object gets assigned to node2
-				gomega.Eventually(isEgressAssignableNode(node2.Name)).Should(gomega.BeTrue())
+				gomega.Eventually(nodeHasAllocations(node2.Name)).Should(gomega.BeTrue())
 				gomega.Eventually(getEgressIPStatusLen(egressIPName)).Should(gomega.Equal(2))
 				egressIPs1, nodes1 = getEgressIPStatus(egressIPName)
 				gomega.Expect(nodes1[1]).To(gomega.Equal(node2.Name))
@@ -1157,7 +1184,19 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						},
 					},
 				}
-				fakeClusterManagerOVN.start()
+				// A dummy EgressIP is needed so that compileEgressNodeSelectors
+				// returns a non-empty list — without it, nodes won't be probed
+				// or marked reachable (selector-based gating).
+				dummyEIP := egressipv1.EgressIP{
+					ObjectMeta: newEgressIPMeta("dummy-eip"),
+					Spec: egressipv1.EgressIPSpec{
+						EgressNodeSelector: defaultEgressNodeSelectorSpec,
+						EgressIPs:          []string{"192.168.126.200"},
+					},
+				}
+				fakeClusterManagerOVN.start(
+					&egressipv1.EgressIPList{Items: []egressipv1.EgressIP{dummyEIP}},
+				)
 				_, err := fakeClusterManagerOVN.eIPC.WatchEgressNodes()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Eventually(getEgressIPAllocatorSizeSafely).Should(gomega.Equal(0))
@@ -1176,8 +1215,9 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				_, err = fakeClusterManagerOVN.fakeClient.KubeClient.CoreV1().Nodes().Create(context.TODO(), &node2, metav1.CreateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Eventually(getEgressIPAllocatorSizeSafely).Should(gomega.Equal(2))
-				gomega.Eventually(isEgressAssignableNode(node1.Name)).Should(gomega.BeTrue())
-				gomega.Eventually(isEgressAssignableNode(node2.Name)).Should(gomega.BeTrue())
+				// No allocation assertions here: the dummy EgressIP exists only
+				// to activate selector-based probing, not to produce assignments.
+				// The test's purpose is gRPC probing, not assignment.
 				gomega.Expect(doesEgressIPAllocatorContainSafely(node1.Name)).To(gomega.BeTrue())
 				gomega.Expect(doesEgressIPAllocatorContainSafely(node2.Name)).To(gomega.BeTrue())
 
@@ -1300,8 +1340,12 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				_, err = fakeClusterManagerOVN.fakeClient.KubeClient.CoreV1().Nodes().Update(context.TODO(), &node2, metav1.UpdateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				gomega.Eventually(isEgressAssignableNode(node1.Name)).Should(gomega.BeTrue())
-				gomega.Eventually(isEgressAssignableNode(node2.Name)).Should(gomega.BeFalse())
+				// Wait for WatchEgressNodes to copy the updated labels into the
+				// allocator cache. This test never starts WatchEgressIP, so there
+				// are no allocations to poll; cached labels are the signal that
+				// the event handler has processed the update.
+				gomega.Eventually(nodeHasCachedLabel(node1.Name, "k8s.ovn.org/egress-assignable")).Should(gomega.BeTrue())
+				gomega.Eventually(nodeHasCachedLabel(node2.Name, "k8s.ovn.org/egress-assignable")).Should(gomega.BeFalse())
 
 				// Explicitly call check reachibility so we need not to wait for slow periodic timer
 				checkEgressNodesReachabilityIterate(fakeClusterManagerOVN.eIPC)
@@ -1371,7 +1415,8 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
 					Spec: egressipv1.EgressIPSpec{
-						EgressIPs: []string{egressIP},
+						EgressNodeSelector: defaultEgressNodeSelectorSpec,
+						EgressIPs:          []string{egressIP},
 					},
 					Status: egressipv1.EgressIPStatus{
 						Items: []egressipv1.EgressIPStatusItem{},
@@ -1464,7 +1509,8 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
 					Spec: egressipv1.EgressIPSpec{
-						EgressIPs: []string{egressIPv4, egressIPv6},
+						EgressNodeSelector: defaultEgressNodeSelectorSpec,
+						EgressIPs:          []string{egressIPv4, egressIPv6},
 					},
 					Status: egressipv1.EgressIPStatus{
 						Items: []egressipv1.EgressIPStatusItem{},
@@ -1523,7 +1569,8 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 					eIP := egressipv1.EgressIP{
 						ObjectMeta: newEgressIPMeta(egressIPName),
 						Spec: egressipv1.EgressIPSpec{
-							EgressIPs: []string{"192.168.126.101"},
+							EgressNodeSelector: defaultEgressNodeSelectorSpec,
+							EgressIPs:          []string{"192.168.126.101"},
 						},
 						Status: egressipv1.EgressIPStatus{
 							Items: []egressipv1.EgressIPStatusItem{},
@@ -1577,7 +1624,8 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
 					Spec: egressipv1.EgressIPSpec{
-						EgressIPs: []string{"192.168.126.101"},
+						EgressNodeSelector: defaultEgressNodeSelectorSpec,
+						EgressIPs:          []string{"192.168.126.101"},
 					},
 					Status: egressipv1.EgressIPStatus{
 						Items: []egressipv1.EgressIPStatusItem{},
@@ -1698,7 +1746,8 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
 					Spec: egressipv1.EgressIPSpec{
-						EgressIPs: []string{egressIP1},
+						EgressNodeSelector: defaultEgressNodeSelectorSpec,
+						EgressIPs:          []string{egressIP1},
 						PodSelector: metav1.LabelSelector{
 							MatchLabels: egressPodLabel,
 						},
@@ -1791,7 +1840,8 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
 					Spec: egressipv1.EgressIPSpec{
-						EgressIPs: []string{egressIP},
+						EgressNodeSelector: defaultEgressNodeSelectorSpec,
+						EgressIPs:          []string{egressIP},
 					},
 					Status: egressipv1.EgressIPStatus{
 						Items: []egressipv1.EgressIPStatusItem{},
@@ -1821,8 +1871,10 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				gomega.Eventually(getEgressIPAllocatorSizeSafely).Should(gomega.Equal(2))
 				gomega.Expect(fakeClusterManagerOVN.eIPC.nodeAllocator.cache).To(gomega.HaveKey(node1.Name))
 				gomega.Expect(fakeClusterManagerOVN.eIPC.nodeAllocator.cache).To(gomega.HaveKey(node2.Name))
-				gomega.Eventually(isEgressAssignableNode(node1.Name)).Should(gomega.BeFalse())
-				gomega.Eventually(isEgressAssignableNode(node2.Name)).Should(gomega.BeFalse())
+				// Neither node has the egress-assignable label yet, so no
+				// EgressIP should be assigned.
+				gomega.Eventually(nodeHasAllocations(node1.Name)).Should(gomega.BeFalse())
+				gomega.Eventually(nodeHasAllocations(node2.Name)).Should(gomega.BeFalse())
 				gomega.Expect(getEgressIPAllocatorSafely(node1.Name, false).Net).To(gomega.Equal(ip1V4Sub))
 				gomega.Expect(getEgressIPAllocatorSafely(node1.Name, true).Net).To(gomega.Equal(ip1V6Sub))
 				gomega.Expect(getEgressIPAllocatorSafely(node2.Name, false).Net).To(gomega.Equal(ip2V4Sub))
@@ -1835,9 +1887,11 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				_, err = fakeClusterManagerOVN.fakeClient.KubeClient.CoreV1().Nodes().Update(context.TODO(), &node1, metav1.UpdateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
+				// node1 is now assignable but the EgressIP doesn't match its
+				// subnet, so it stays unassigned. The reassignment count
+				// confirms the label change triggered re-evaluation.
 				gomega.Eventually(getEgressIPStatusLen(egressIPName)).Should(gomega.Equal(0))
-				gomega.Eventually(isEgressAssignableNode(node1.Name)).Should(gomega.BeTrue())
-
+				gomega.Eventually(nodeHasAllocations(node1.Name)).Should(gomega.BeFalse())
 				gomega.Eventually(getEgressIPReassignmentCount).Should(gomega.Equal(1))
 
 				node2.Labels = map[string]string{
@@ -1913,7 +1967,8 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
 					Spec: egressipv1.EgressIPSpec{
-						EgressIPs: []string{egressIP},
+						EgressNodeSelector: defaultEgressNodeSelectorSpec,
+						EgressIPs:          []string{egressIP},
 					},
 					Status: egressipv1.EgressIPStatus{
 						Items: []egressipv1.EgressIPStatusItem{},
@@ -2011,7 +2066,8 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				eIP1 := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
 					Spec: egressipv1.EgressIPSpec{
-						EgressIPs: []string{egressIP},
+						EgressNodeSelector: defaultEgressNodeSelectorSpec,
+						EgressIPs:          []string{egressIP},
 					},
 				}
 				fakeClusterManagerOVN.start(
@@ -2098,7 +2154,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				}
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
-					Spec:       egressipv1.EgressIPSpec{EgressIPs: []string{egressIPv6}},
+					Spec:       egressipv1.EgressIPSpec{EgressNodeSelector: defaultEgressNodeSelectorSpec, EgressIPs: []string{egressIPv6}},
 				}
 
 				fakeClusterManagerOVN.start(
@@ -2176,7 +2232,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				}
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
-					Spec:       egressipv1.EgressIPSpec{EgressIPs: []string{egressIPv6}},
+					Spec:       egressipv1.EgressIPSpec{EgressNodeSelector: defaultEgressNodeSelectorSpec, EgressIPs: []string{egressIPv6}},
 				}
 
 				fakeClusterManagerOVN.start(
@@ -2284,7 +2340,8 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
 					Spec: egressipv1.EgressIPSpec{
-						EgressIPs: []string{egressIP},
+						EgressNodeSelector: defaultEgressNodeSelectorSpec,
+						EgressIPs:          []string{egressIP},
 					},
 				}
 				assignedStatuses := fakeClusterManagerOVN.eIPC.assignEgressIPs(eIP.Name, eIP.Spec.EgressIPs, defaultEgressNodeSelector)
@@ -2354,7 +2411,8 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
 					Spec: egressipv1.EgressIPSpec{
-						EgressIPs: []string{egressIP1, egressIP2},
+						EgressNodeSelector: defaultEgressNodeSelectorSpec,
+						EgressIPs:          []string{egressIP1, egressIP2},
 					},
 				}
 
@@ -2439,7 +2497,8 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
 					Spec: egressipv1.EgressIPSpec{
-						EgressIPs: []string{egressIP1, egressIP2, egressIP3},
+						EgressNodeSelector: defaultEgressNodeSelectorSpec,
+						EgressIPs:          []string{egressIP1, egressIP2, egressIP3},
 					},
 				}
 
@@ -2533,7 +2592,8 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
 					Spec: egressipv1.EgressIPSpec{
-						EgressIPs: []string{egressIP1SecondaryHost, egressIP2SecondaryHost, egressIP3SecondaryHost, egressIP4OVN, egressIP5OVN},
+						EgressNodeSelector: defaultEgressNodeSelectorSpec,
+						EgressIPs:          []string{egressIP1SecondaryHost, egressIP2SecondaryHost, egressIP3SecondaryHost, egressIP4OVN, egressIP5OVN},
 					},
 				}
 
@@ -2619,7 +2679,8 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
 					Spec: egressipv1.EgressIPSpec{
-						EgressIPs: []string{egressIP},
+						EgressNodeSelector: defaultEgressNodeSelectorSpec,
+						EgressIPs:          []string{egressIP},
 					},
 				}
 
@@ -2706,7 +2767,8 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
 					Spec: egressipv1.EgressIPSpec{
-						EgressIPs: []string{egressIP},
+						EgressNodeSelector: defaultEgressNodeSelectorSpec,
+						EgressIPs:          []string{egressIP},
 					},
 				}
 
@@ -2787,7 +2849,8 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
 					Spec: egressipv1.EgressIPSpec{
-						EgressIPs: []string{egressIP},
+						EgressNodeSelector: defaultEgressNodeSelectorSpec,
+						EgressIPs:          []string{egressIP},
 					},
 				}
 
@@ -2868,7 +2931,8 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
 					Spec: egressipv1.EgressIPSpec{
-						EgressIPs: []string{egressIP},
+						EgressNodeSelector: defaultEgressNodeSelectorSpec,
+						EgressIPs:          []string{egressIP},
 					},
 				}
 
@@ -2947,7 +3011,8 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
 					Spec: egressipv1.EgressIPSpec{
-						EgressIPs: []string{egressIP},
+						EgressNodeSelector: defaultEgressNodeSelectorSpec,
+						EgressIPs:          []string{egressIP},
 					},
 				}
 
@@ -3026,7 +3091,8 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
 					Spec: egressipv1.EgressIPSpec{
-						EgressIPs: []string{egressIP},
+						EgressNodeSelector: defaultEgressNodeSelectorSpec,
+						EgressIPs:          []string{egressIP},
 					},
 				}
 
@@ -3107,7 +3173,8 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
 					Spec: egressipv1.EgressIPSpec{
-						EgressIPs: []string{egressIP},
+						EgressNodeSelector: defaultEgressNodeSelectorSpec,
+						EgressIPs:          []string{egressIP},
 					},
 				}
 
@@ -3186,7 +3253,8 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
 					Spec: egressipv1.EgressIPSpec{
-						EgressIPs: egressIPs,
+						EgressNodeSelector: defaultEgressNodeSelectorSpec,
+						EgressIPs:          egressIPs,
 					},
 				}
 
@@ -3263,7 +3331,8 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
 					Spec: egressipv1.EgressIPSpec{
-						EgressIPs: []string{egressIP},
+						EgressNodeSelector: defaultEgressNodeSelectorSpec,
+						EgressIPs:          []string{egressIP},
 					},
 				}
 
@@ -3346,7 +3415,8 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
 					Spec: egressipv1.EgressIPSpec{
-						EgressIPs: egressIPs,
+						EgressNodeSelector: defaultEgressNodeSelectorSpec,
+						EgressIPs:          egressIPs,
 					},
 				}
 
@@ -3428,7 +3498,8 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
 					Spec: egressipv1.EgressIPSpec{
-						EgressIPs: []string{egressIP},
+						EgressNodeSelector: defaultEgressNodeSelectorSpec,
+						EgressIPs:          []string{egressIP},
 						NamespaceSelector: metav1.LabelSelector{
 							MatchLabels: map[string]string{
 								"name": "does-not-exist",
@@ -3517,7 +3588,8 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
 					Spec: egressipv1.EgressIPSpec{
-						EgressIPs: []string{egressIP},
+						EgressNodeSelector: defaultEgressNodeSelectorSpec,
+						EgressIPs:          []string{egressIP},
 					},
 				}
 
@@ -3598,7 +3670,8 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
 					Spec: egressipv1.EgressIPSpec{
-						EgressIPs: []string{egressIPv4, egressIPv6},
+						EgressNodeSelector: defaultEgressNodeSelectorSpec,
+						EgressIPs:          []string{egressIPv4, egressIPv6},
 					},
 				}
 
@@ -3678,7 +3751,8 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				eIP := &egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
 					Spec: egressipv1.EgressIPSpec{
-						EgressIPs: []string{egressIP},
+						EgressNodeSelector: defaultEgressNodeSelectorSpec,
+						EgressIPs:          []string{egressIP},
 						NamespaceSelector: metav1.LabelSelector{
 							MatchLabels: map[string]string{
 								"name": "does-not-exist",
@@ -3803,7 +3877,8 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
 					Spec: egressipv1.EgressIPSpec{
-						EgressIPs: []string{egressIPv4, egressIPv6},
+						EgressNodeSelector: defaultEgressNodeSelectorSpec,
+						EgressIPs:          []string{egressIPv4, egressIPv6},
 					},
 					Status: egressipv1.EgressIPStatus{
 						Items: []egressipv1.EgressIPStatusItem{
@@ -3902,7 +3977,8 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
 					Spec: egressipv1.EgressIPSpec{
-						EgressIPs: []string{egressIP1, egressIP2},
+						EgressNodeSelector: defaultEgressNodeSelectorSpec,
+						EgressIPs:          []string{egressIP1, egressIP2},
 					},
 					Status: egressipv1.EgressIPStatus{
 						Items: []egressipv1.EgressIPStatusItem{
@@ -4039,7 +4115,8 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
 					Spec: egressipv1.EgressIPSpec{
-						EgressIPs: []string{egressIP1},
+						EgressNodeSelector: defaultEgressNodeSelectorSpec,
+						EgressIPs:          []string{egressIP1},
 					},
 					Status: egressipv1.EgressIPStatus{
 						Items: []egressipv1.EgressIPStatusItem{
@@ -4128,7 +4205,8 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
 					Spec: egressipv1.EgressIPSpec{
-						EgressIPs: []string{egressIP1},
+						EgressNodeSelector: defaultEgressNodeSelectorSpec,
+						EgressIPs:          []string{egressIP1},
 					},
 					Status: egressipv1.EgressIPStatus{
 						Items: []egressipv1.EgressIPStatusItem{
@@ -4217,7 +4295,8 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
 					Spec: egressipv1.EgressIPSpec{
-						EgressIPs: []string{egressIP1, egressIP2},
+						EgressNodeSelector: defaultEgressNodeSelectorSpec,
+						EgressIPs:          []string{egressIP1, egressIP2},
 					},
 					Status: egressipv1.EgressIPStatus{
 						Items: []egressipv1.EgressIPStatusItem{
@@ -4328,7 +4407,8 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
 					Spec: egressipv1.EgressIPSpec{
-						EgressIPs: []string{egressIP},
+						EgressNodeSelector: defaultEgressNodeSelectorSpec,
+						EgressIPs:          []string{egressIP},
 					},
 					Status: egressipv1.EgressIPStatus{
 						Items: []egressipv1.EgressIPStatusItem{
@@ -4436,7 +4516,8 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
 					Spec: egressipv1.EgressIPSpec{
-						EgressIPs: []string{egressIP1, egressIP2},
+						EgressNodeSelector: defaultEgressNodeSelectorSpec,
+						EgressIPs:          []string{egressIP1, egressIP2},
 					},
 					Status: egressipv1.EgressIPStatus{
 						Items: []egressipv1.EgressIPStatusItem{
@@ -4544,7 +4625,8 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
 					Spec: egressipv1.EgressIPSpec{
-						EgressIPs: []string{egressIP1},
+						EgressNodeSelector: defaultEgressNodeSelectorSpec,
+						EgressIPs:          []string{egressIP1},
 					},
 					Status: egressipv1.EgressIPStatus{
 						Items: []egressipv1.EgressIPStatusItem{
@@ -4680,7 +4762,8 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				eIP1 := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta("egressip-1"),
 					Spec: egressipv1.EgressIPSpec{
-						EgressIPs: []string{duplicateIP},
+						EgressNodeSelector: defaultEgressNodeSelectorSpec,
+						EgressIPs:          []string{duplicateIP},
 					},
 					Status: egressipv1.EgressIPStatus{
 						Items: []egressipv1.EgressIPStatusItem{
@@ -4698,7 +4781,8 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				eIP2 := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta("egressip-2"),
 					Spec: egressipv1.EgressIPSpec{
-						EgressIPs: []string{duplicateIP},
+						EgressNodeSelector: defaultEgressNodeSelectorSpec,
+						EgressIPs:          []string{duplicateIP},
 					},
 					Status: egressipv1.EgressIPStatus{
 						Items: []egressipv1.EgressIPStatusItem{},
@@ -4795,13 +4879,15 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				eIP1 := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta("egressip"),
 					Spec: egressipv1.EgressIPSpec{
-						EgressIPs: []string{egressIP1},
+						EgressNodeSelector: defaultEgressNodeSelectorSpec,
+						EgressIPs:          []string{egressIP1},
 					},
 				}
 				eIP2 := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta("egressip2"),
 					Spec: egressipv1.EgressIPSpec{
-						EgressIPs: []string{egressIP1},
+						EgressNodeSelector: defaultEgressNodeSelectorSpec,
+						EgressIPs:          []string{egressIP1},
 					},
 				}
 
@@ -4892,7 +4978,8 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				eIP1 := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
 					Spec: egressipv1.EgressIPSpec{
-						EgressIPs: []string{egressIP},
+						EgressNodeSelector: defaultEgressNodeSelectorSpec,
+						EgressIPs:          []string{egressIP},
 					},
 				}
 
