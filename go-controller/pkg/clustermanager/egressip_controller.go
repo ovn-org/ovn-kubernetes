@@ -943,6 +943,16 @@ func (eIPC *egressIPClusterController) deleteEgressNode(nodeName string) error {
 	return nil
 }
 
+// initEgressIPAllocator upserts the node into the allocator cache with the
+// latest egress-IP configuration and management IPs derived from the node's
+// annotations.  It is called for every node in the cluster on every Add and
+// Update event — not only for nodes that carry a particular label — so that
+// annotation changes (written asynchronously by ovnkube-node or the
+// cloud-network-config-controller after the object is first observed) are
+// always reflected.  The function only populates structural fields
+// (egressIPConfig, mgmtIPs, labels); the health flags (isReady, isReachable,
+// isEgressAssignable) are left to the caller, which determines them from the
+// live node object.
 func (eIPC *egressIPClusterController) initEgressIPAllocator(node *corev1.Node) (err error) {
 	parsedEgressIPConfig, err := util.GetNodeEIPConfig(node)
 	if err != nil {
