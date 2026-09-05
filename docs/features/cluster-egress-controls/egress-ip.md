@@ -13,7 +13,52 @@ For more info, consider looking at the following links:
 
 Always check the dependencies on the [Requirements page](../requirements.md)
 
-## Node Requirements
+## Example
+
+An example of EgressIP might look like this:
+
+```yaml
+apiVersion: k8s.ovn.org/v1
+kind: EgressIP
+metadata:
+  name: egressip-prod
+spec:
+  egressIPs:
+    - 172.18.0.33
+    - 172.18.0.44
+  namespaceSelector:
+    matchExpressions:
+      - key: environment
+        operator: NotIn
+        values:
+          - development
+  podSelector:
+    matchLabels:
+      app: web
+```
+It specifies to use `172.18.0.33` or `172.18.0.44` egressIP for pods that are labeled with `app: web` that run in a namespace without `environment: development` label.
+Both selectors use the [generic kubernetes label selectors](https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/#label-selectors).
+
+## Egress Nodes
+
+An egress node is a cluster node that a cluster administrator designates for
+OVN-Kubernetes to host EgressIP addresses. When an EgressIP is assigned to an
+egress node, the node adds the IP to its external interface, responds to
+ARP/NDP for it, and SNATs matching pod traffic to that IP before it leaves
+the cluster.
+
+Nodes are made eligible for egress assignment by labeling them with
+`k8s.ovn.org/egress-assignable`:
+
+```shell
+kubectl label nodes <node_name> k8s.ovn.org/egress-assignable=""
+```
+
+This label serves as the cluster-wide default pool. Each EgressIP object controls
+which nodes from that pool (or from any other labeled set) it may use via the
+`egressNodeSelector` field — see below.
+
+### Node Requirements
 
 The `k8s.ovn.org/host-cidrs` annotation is automatically set during node bootstrap and
 contains the node's host network CIDR(s). A node can be missing this annotation if it is
@@ -45,31 +90,118 @@ has the `k8s.ovn.org/host-cidrs` annotation set:
 kubectl get node <node-name> -o jsonpath='{.metadata.annotations.k8s\.ovn\.org/host-cidrs}'
 ```
 
-## Example
+### Egress Node Selection with egressNodeSelector
 
-An example of EgressIP might look like this:
+The `egressNodeSelector` field on an EgressIP object controls exactly which nodes
+are eligible for that object's IPs. It is an optional field with a CRD-level
+default: when omitted, the API server automatically sets it to match nodes with
+`k8s.ovn.org/egress-assignable`, preserving legacy label behavior. When set
+explicitly, the custom selector replaces that default for this object — the
+`egress-assignable` label is not required in addition.
+
+**Use cases**
+- **Multi-tenant clusters**: Different tenants or workloads use separate node
+  pools. Assign tenant A egress IPs only to nodes in pool A.
+- **Compliance**: Route egress traffic from sensitive workloads through specific
+  nodes with enhanced monitoring or security controls.
+- **Cost optimization**: Restrict high-bandwidth workloads to cost-optimized
+  node types.
+
+**Example**
+
+`matchLabels` and `matchExpressions` are ANDed — a node must satisfy all
+conditions to be eligible:
 
 ```yaml
 apiVersion: k8s.ovn.org/v1
 kind: EgressIP
 metadata:
-  name: egressip-prod
+  name: egressip-finance
 spec:
   egressIPs:
-    - 172.18.0.33
-    - 172.18.0.44
+    - 192.0.2.10
   namespaceSelector:
-    matchExpressions:
-      - key: environment
-        operator: NotIn
-        values:
-          - development
-  podSelector:
     matchLabels:
-      app: web
+      team: finance
+  podSelector: {}
+  egressNodeSelector:
+    matchLabels:
+      node-pool: finance
+    matchExpressions:
+      - key: accelerator
+        operator: Exists
 ```
-It specifies to use `172.18.0.33` or `172.18.0.44` egressIP for pods that are labeled with `app: web` that run in a namespace without `environment: development` label.
-Both selectors use the [generic kubernetes label selectors](https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/#label-selectors).
+
+Only nodes with `node-pool: finance` **and** the `accelerator` label present
+regardless of its value present eligible.
+
+**Gotchas & Best Practices**
+
+- **Label changes have a race window**: When `egressNodeSelector` or the node
+  labels it references are changed, there is a brief window where the cached
+  node state may be stale, potentially causing EgressIP reassignment churn.
+  Plan node label schemes upfront and perform any changes during a scheduled
+  maintenance window.
+- **Empty selector `{}` targets every node**: It matches all cluster nodes —
+  **including control-plane/master nodes** — expanding both the eligible
+  assignment pool and the health-check probe set to the entire cluster. Unless
+  that is intentional, avoid it: egress IPs could be placed on control-plane
+  nodes, and large clusters pay the cost of probing every node.
+- **Selector does not reserve nodes**: Matched nodes are not exclusively
+  reserved for this EgressIP object. Other EgressIP objects can still be
+  assigned to the same nodes.
+- **Control-plane only**: Selector matching is purely a control-plane
+  operation. The datapath is identical regardless of which selector is used,
+  and works the same across default cluster network, UDN, and dynamic UDN.
+
+## Egress IP reachability
+
+The EgressIP controller in `ovnkube-cluster-manager` periodically checks if egress-candidate nodes are reachable. EgressIPs assigned to a node that is no longer reachable will get revalidated and moved to another usable node.
+
+The probe target set is dynamically maintained as the union of nodes matching any EgressIP object's `egressNodeSelector`. This is a behavior change from the legacy model, where every node carrying the `k8s.ovn.org/egress-assignable` label was probed: now a node is health-checked only while at least one EgressIP selects it, and if no EgressIP selects a node it is not probed at all. The set is re-evaluated immediately when an EgressIP is created or its `egressNodeSelector` changes, so a newly eligible and reachable node can be activated without waiting for the next periodic tick.
+
+Egress nodes normally have multiple IP addresses. For sake of Egress IP reachability, [the management](https://github.com/ovn-kubernetes/ovn-kubernetes/pull/2495) (aka internal SDN) addresses of the node are the ones used. In deployments of ovn-kubernetes this is known to be the `ovn-k8s-mp0` interface of a node.
+
+Even though the periodic checking of egress nodes is hard coded to trigger [every 5 seconds](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/82f167a3920c8c3cd0687ceb3e7a5ba64372be69/go-controller/pkg/ovn/egressip.go#L2206), there are attributes that the user can set:
+
+- egressIPTotalTimeout
+- gRPC vs. DISCARD port
+
+### egressIPTotalTimeout
+
+This attribute specifies the maximum amount of time, in seconds, that the egressIP operator will wait until it declares the node unreachable. The default value is [1 second](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/82f167a3920c8c3cd0687ceb3e7a5ba64372be69/go-controller/pkg/config/config.go#L866).
+
+This value can be set in the following ways:
+- ovnkube binary flag: `--egressip-reachability-total-timeout=<TIMEOUT>`
+- inside config specified by `--config-file` flag:
+```
+[ovnkubernetesfeature]
+egressip-reachability-total-timeout=123
+```
+
+**Note:** Using value `0` will skip reachability. Use this to assume that egress nodes are available.
+
+### gRPC vs. DISCARD port
+
+Up until recently, the only method available for determining if an egress node was reachable relied on the `TCP port unreachable` icmp response from the probed node. The TCP port 9 (aka DISCARD) is the port used for that.
+
+[Later implementation](https://github.com/ovn-kubernetes/ovn-kubernetes/pull/3100) of ovn-kubernetes is capable of leveraging secure gRPC sessions in order to probe nodes. That requires the `ovnkube node` pods to be listening on a pre-specified TCP port, in addition to configuring the `ovnkube master` pod(s).
+
+This value can be set in the following ways:
+- ovnkube binary flag: `--egressip-node-healthcheck-port=<TCP_PORT>`
+- inside config specified by `--config-file` flag:
+```
+[ovnkubernetesfeature]
+egressip-node-healthcheck-port=9107
+```
+
+**Note:** If not specifying a value, or using `0` as the `egressip-node-healthcheck-port` will make Egress IP reachability probe the egress nodes using the DISCARD port method. Unlike egressip-reachability-total-timeout, it is important that both node and master pods of ovnkube get configured with the same value!
+
+#### Additional details on the implementation of the gRPC probing:
+
+- If configured, the session uses the certificates from the `[egressip-healthcheck-tls]` configuration section. The historical `--nb-client-*` flags and `[ovnnorth]` configuration keys remain accepted for compatibility. An insecure gRPC session is used when no certificates are specified.
+- The [message used for probing](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/82f167a3920c8c3cd0687ceb3e7a5ba64372be69/go-controller/pkg/ovn/healthcheck/health.proto#L6) is the [standard service health](https://github.com/grpc/grpc/blob/master/src/proto/grpc/health/v1/health.proto) specified in gRPC.
+- [Special care was taken into consideration](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/82f167a3920c8c3cd0687ceb3e7a5ba64372be69/go-controller/pkg/ovn/healthcheck/egressip_healthcheck.go#L193-L195) to handle cases when the gRPC session bounced for normal reasons. EgressIP implementation will not declare a node unreachable under these circumstances.
 
 ## Layer 3 network
 Supported network configs:
@@ -299,62 +431,6 @@ If you wish to assign an Egress IP to a standard linux interface (non OVS type),
 * Links and their addresses must not be removed during runtime after an egress IP is assigned to it. If you wish to remove the link, first
 remove the Egress IP and then remove the address / link.
 * IP forwarding must be enabled for the link
-
-## Egress Nodes
-
-In order to select which node(s) may be used as egress, the following label must be added to the `node` resource:
-
-```shell
-kubectl label nodes <node_name> k8s.ovn.org/egress-assignable=""
-```
-
-## Egress IP reachability
-
-Once a node has been labeled with `k8s.ovn.org/egress-assignable`, the EgressIP controller in `ovnkube-cluster-manager` will periodically check if that node is
-usable. EgressIPs assigned to a node that is no longer reachable will get revalidated and moved to another usable node.
-
-Egress nodes normally have multiple IP addresses. For sake of Egress IP reachability, [the management](https://github.com/ovn-kubernetes/ovn-kubernetes/pull/2495) (aka internal SDN) addresses of the node are the ones used. In deployments of ovn-kubernetes this is known to be the `ovn-k8s-mp0` interface of a node.
-
-Even though the periodic checking of egress nodes is hard coded to trigger [every 5 seconds](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/82f167a3920c8c3cd0687ceb3e7a5ba64372be69/go-controller/pkg/ovn/egressip.go#L2206), there are attributes that the user can set:
-
-- egressIPTotalTimeout
-- gRPC vs. DISCARD port
-
-### egressIPTotalTimeout
-
-This attribute specifies the maximum amount of time, in seconds, that the egressIP operator will wait until it declares the node unreachable. The default value is [1 second](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/82f167a3920c8c3cd0687ceb3e7a5ba64372be69/go-controller/pkg/config/config.go#L866).
-
-This value can be set in the following ways:
-- ovnkube binary flag: `--egressip-reachability-total-timeout=<TIMEOUT>`
-- inside config specified by `--config-file` flag:
-```
-[ovnkubernetesfeature]
-egressip-reachability-total-timeout=123
-```
-
-**Note:** Using value `0` will skip reachability. Use this to assume that egress nodes are available.
-
-### gRPC vs. DISCARD port
-
-Up until recently, the only method available for determining if an egress node was reachable relied on the `TCP port unreachable` icmp response from the probed node. The TCP port 9 (aka DISCARD) is the port used for that.
-
-[Later implementation](https://github.com/ovn-kubernetes/ovn-kubernetes/pull/3100) of ovn-kubernetes is capable of leveraging secure gRPC sessions in order to probe nodes. That requires the `ovnkube node` pods to be listening on a pre-specified TCP port, in addition to configuring the `ovnkube master` pod(s).
-
-This value can be set in the following ways:
-- ovnkube binary flag: `--egressip-node-healthcheck-port=<TCP_PORT>`
-- inside config specified by `--config-file` flag:
-```
-[ovnkubernetesfeature]
-egressip-node-healthcheck-port=9107
-```
-
-**Note:** If not specifying a value, or using `0` as the `egressip-node-healthcheck-port` will make Egress IP reachability probe the egress nodes using the DISCARD port method. Unlike egressip-reachability-total-timeout, it is important that both node and master pods of ovnkube get configured with the same value!
-
-#### Additional details on the implementation of the gRPC probing:
-
-- If configured, the session uses the certificates from the `[egressip-healthcheck-tls]` configuration section. The historical `--nb-client-*` flags and `[ovnnorth]` configuration keys remain accepted for compatibility. An insecure gRPC session is used when no certificates are specified.
-- The [message used for probing](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/82f167a3920c8c3cd0687ceb3e7a5ba64372be69/go-controller/pkg/ovn/healthcheck/health.proto#L6) is the [standard service health](https://github.com/grpc/grpc/blob/master/src/proto/grpc/health/v1/health.proto) specified in gRPC.
-- [Special care was taken into consideration](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/82f167a3920c8c3cd0687ceb3e7a5ba64372be69/go-controller/pkg/ovn/healthcheck/egressip_healthcheck.go#L193-L195) to handle cases when the gRPC session bounced for normal reasons. EgressIP implementation will not declare a node unreachable under these circumstances.
 
 ## Known Limitations
 
