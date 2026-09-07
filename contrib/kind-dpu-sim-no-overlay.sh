@@ -100,8 +100,8 @@ DPU_SIM_UPLINK_ENABLE=${DPU_SIM_UPLINK_ENABLE:-true}
 DPU_SIM_UPLINK_NETWORK=${DPU_SIM_UPLINK_NETWORK:-dpu-sim-uplink}
 DPU_SIM_UPLINK_SUBNET=${DPU_SIM_UPLINK_SUBNET:-172.31.0.0/24}
 DPU_SIM_UPLINK_BRIDGE=${DPU_SIM_UPLINK_BRIDGE:-breth-uplink}
-# dpusim.UplinkInterfaceIndex: outside the pairs created by the dpu-simulator
-# (num_pairs), so the device plugin never advertises the uplink VF as a pod VF.
+# Fallback when dpu-sim publishes no reserved uplink interface: outside the
+# pairs it creates (num_pairs), so the device plugin never advertises it.
 DPU_SIM_UPLINK_INDEX=200
 DPU_SIM_UPLINK_HOST_INTERFACE="eth0-${DPU_SIM_UPLINK_INDEX}"
 DPU_SIM_UPLINK_DPU_REPRESENTOR="rep0-${DPU_SIM_UPLINK_INDEX}"
@@ -285,6 +285,22 @@ configure_dpu_sim_uplink_bridge() {
     return
   fi
 
+  # Prefer the interface dpu-sim reserved for the uplink (published in the
+  # FRR env file, uplink_vfs_count in its config): the veth pair already
+  # exists and only needs wiring. Fall back to creating an out-of-range pair.
+  local reserved=""
+  if [ -f "${FRR_ENV}" ]; then
+    reserved=$(unset DPU_SIM_UPLINK_HOST_INTERFACES; . "${FRR_ENV}"; echo "${DPU_SIM_UPLINK_HOST_INTERFACES:-}")
+  fi
+  local uplink_pair_reserved=false
+  if [ -n "${reserved}" ]; then
+    uplink_pair_reserved=true
+    DPU_SIM_UPLINK_HOST_INTERFACE="${reserved%%,*}"
+    DPU_SIM_UPLINK_INDEX="${DPU_SIM_UPLINK_HOST_INTERFACE##*-}"
+    DPU_SIM_UPLINK_DPU_REPRESENTOR="rep0-${DPU_SIM_UPLINK_INDEX}"
+    echo "Using dpu-sim reserved uplink interface ${DPU_SIM_UPLINK_HOST_INTERFACE}"
+  fi
+
   local prefix subnet_ip subnet_base
   prefix=${DPU_SIM_UPLINK_SUBNET#*/}
   subnet_ip=${DPU_SIM_UPLINK_SUBNET%/*}
@@ -326,28 +342,34 @@ configure_dpu_sim_uplink_bridge() {
     tmp_host="uh${ordinal}${DPU_SIM_UPLINK_INDEX}"
     tmp_dpu="ud${ordinal}${DPU_SIM_UPLINK_INDEX}"
 
-    run_root nsenter -t "${host_pid}" -n ip link del \
-      "${DPU_SIM_UPLINK_HOST_INTERFACE}" >/dev/null 2>&1 || true
-    run_root nsenter -t "${dpu_pid}" -n ip link del \
-      "${DPU_SIM_UPLINK_DPU_REPRESENTOR}" >/dev/null 2>&1 || true
-    run_root ip link del "${tmp_host}" >/dev/null 2>&1 || true
-    run_root ip link add "${tmp_host}" type veth peer name "${tmp_dpu}"
-    run_root ip link set "${tmp_host}" netns "${host_pid}"
-    run_root ip link set "${tmp_dpu}" netns "${dpu_pid}"
+    if [ "${uplink_pair_reserved}" != true ]; then
+      # No reservation published (older dpu-sim): create our own pair at the
+      # out-of-range index. A reserved pair already exists with the right
+      # names and MACs, created by dpu-sim, so this whole block is skipped.
+      run_root nsenter -t "${host_pid}" -n ip link del \
+        "${DPU_SIM_UPLINK_HOST_INTERFACE}" >/dev/null 2>&1 || true
+      run_root nsenter -t "${dpu_pid}" -n ip link del \
+        "${DPU_SIM_UPLINK_DPU_REPRESENTOR}" >/dev/null 2>&1 || true
+      run_root ip link del "${tmp_host}" >/dev/null 2>&1 || true
+      run_root ip link add "${tmp_host}" type veth peer name "${tmp_dpu}"
+      run_root ip link set "${tmp_host}" netns "${host_pid}"
+      run_root ip link set "${tmp_dpu}" netns "${dpu_pid}"
 
-    run_root nsenter -t "${host_pid}" -n ip link set "${tmp_host}" \
-      name "${DPU_SIM_UPLINK_HOST_INTERFACE}"
-    run_root nsenter -t "${host_pid}" -n ip link set \
-      "${DPU_SIM_UPLINK_HOST_INTERFACE}" address "${host_mac}"
+      run_root nsenter -t "${host_pid}" -n ip link set "${tmp_host}" \
+        name "${DPU_SIM_UPLINK_HOST_INTERFACE}"
+      run_root nsenter -t "${host_pid}" -n ip link set \
+        "${DPU_SIM_UPLINK_HOST_INTERFACE}" address "${host_mac}"
+      run_root nsenter -t "${dpu_pid}" -n ip link set "${tmp_dpu}" \
+        name "${DPU_SIM_UPLINK_DPU_REPRESENTOR}"
+      run_root nsenter -t "${dpu_pid}" -n ip link set \
+        "${DPU_SIM_UPLINK_DPU_REPRESENTOR}" address "${dpu_mac}"
+    fi
+
+    # Both paths: address the host side, raise the links, then bridge below.
     run_root nsenter -t "${host_pid}" -n ip addr replace \
       "${host_ip}/${prefix}" dev "${DPU_SIM_UPLINK_HOST_INTERFACE}"
     run_root nsenter -t "${host_pid}" -n ip link set \
       "${DPU_SIM_UPLINK_HOST_INTERFACE}" up
-
-    run_root nsenter -t "${dpu_pid}" -n ip link set "${tmp_dpu}" \
-      name "${DPU_SIM_UPLINK_DPU_REPRESENTOR}"
-    run_root nsenter -t "${dpu_pid}" -n ip link set \
-      "${DPU_SIM_UPLINK_DPU_REPRESENTOR}" address "${dpu_mac}"
     run_root nsenter -t "${dpu_pid}" -n ip link set \
       "${DPU_SIM_UPLINK_DPU_REPRESENTOR}" up
 
