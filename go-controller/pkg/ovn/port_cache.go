@@ -35,6 +35,9 @@ type lpInfo struct {
 	logicalSwitch      string
 	ips                []*net.IPNet
 	mac                net.HardwareAddr
+	// needsReconcile keeps a partially programmed port eligible for setup
+	// retries without losing the addresses and UUID needed for teardown.
+	needsReconcile bool
 	// expires, if non-nil, indicates that this object is scheduled to be
 	// removed at the given time
 	expires time.Time
@@ -147,6 +150,18 @@ func (c *PortCache) add(pod *corev1.Pod, logicalSwitch, nadKey, appliedNetworkNa
 		c.cache[podName] = m
 	}
 	return cloneLPInfo(portInfo)
+}
+
+// markPodForReconcile retains partial port state while forcing setup to run
+// again. A subsequent successful add replaces the entry and clears the flag.
+func (c *PortCache) markPodForReconcile(pod *corev1.Pod, networkName string) {
+	c.Lock()
+	defer c.Unlock()
+	for _, info := range c.cache[pod.Namespace+"/"+pod.Name] {
+		if info.appliedNetworkName == networkName {
+			info.needsReconcile = true
+		}
+	}
 }
 
 // invalidatePodForNetwork forgets this controller's applied port observations

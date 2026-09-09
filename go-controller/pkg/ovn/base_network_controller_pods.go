@@ -378,7 +378,7 @@ func (bnc *BaseNetworkController) shouldEnsurePodLogicalPort(pod *corev1.Pod, na
 		return false
 	}
 	portInfo, err := bnc.logicalPortCache.get(pod, nadKey)
-	if err != nil || !portInfo.expires.IsZero() {
+	if err != nil || !portInfo.expires.IsZero() || portInfo.needsReconcile {
 		return true
 	}
 	podIPs, err := util.GetPodCIDRsWithFullMask(pod, bnc.GetNetInfo(), bnc.getNetworkNameForNADKeyFunc())

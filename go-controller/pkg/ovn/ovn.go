@@ -135,10 +135,14 @@ func (oc *DefaultNetworkController) ReconcilePod(oldPod, newPod *corev1.Pod, las
 	// changed from the last applied pod.
 	syncUDNOpenPorts := oldPod == nil ||
 		oldPod.Annotations[util.UDNOpenPortsAnnotationName] != newPod.Annotations[util.UDNOpenPortsAnnotationName]
-	if err := oc.ensurePod(newPod, addPort, syncUDNOpenPorts); err != nil {
-		return nil, err
+	err = oc.ensurePod(newPod, addPort, syncUDNOpenPorts)
+	if err == nil {
+		err = oc.reconcileNetworkPolicyPortGroups(newPod)
 	}
-	if err := oc.reconcileNetworkPolicyPortGroups(newPod); err != nil {
+	if err != nil {
+		if addPort {
+			oc.logicalPortCache.markPodForReconcile(newPod, ovntypes.DefaultNetworkName)
+		}
 		return nil, err
 	}
 	// A pod may remain relevant to this handler without owning an LSP on this

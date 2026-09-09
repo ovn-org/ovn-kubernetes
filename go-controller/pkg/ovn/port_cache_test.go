@@ -118,6 +118,53 @@ func TestPortCacheSnapshotsAreIndependent(t *testing.T) {
 	}
 }
 
+func TestMarkPodForReconcilePreservesScopedPortState(t *testing.T) {
+	stopChan := make(chan struct{})
+	t.Cleanup(func() { close(stopChan) })
+	cache := NewPortCache(stopChan)
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "namespace", Name: "pod"}}
+	otherPod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "namespace", Name: "other-pod"}}
+	entries := []struct {
+		pod     *corev1.Pod
+		nad     string
+		network string
+		pending bool
+	}{
+		{pod, "namespace/target-nad", "target-network", true},
+		{pod, "namespace/second-target-nad", "target-network", true},
+		{pod, "namespace/other-nad", "other-network", false},
+		{otherPod, "namespace/target-nad", "target-network", false},
+	}
+	for _, entry := range entries {
+		cache.add(entry.pod, "switch", entry.nad, entry.network, "port-uuid", nil, nil)
+	}
+	snapshot, err := cache.getAll(pod)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cache.markPodForReconcile(pod, "target-network")
+	for _, entry := range entries {
+		info, err := cache.get(entry.pod, entry.nad)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.needsReconcile != entry.pending || info.uuid != "port-uuid" {
+			t.Fatalf("unexpected retry state for pod %s NAD %s: %+v", entry.pod.Name, entry.nad, info)
+		}
+		if entry.pod == pod && snapshot[entry.nad].needsReconcile {
+			t.Fatal("marking a port changed the previously captured applied-state snapshot")
+		}
+		cache.add(entry.pod, "switch", entry.nad, entry.network, "port-uuid", nil, nil)
+		info, err = cache.get(entry.pod, entry.nad)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.needsReconcile {
+			t.Fatal("successful port setup did not clear pending retry state")
+		}
+	}
+}
+
 func TestInvalidatePodForNetworkIsScopedToPodAndOwningNetwork(t *testing.T) {
 	stopChan := make(chan struct{})
 	t.Cleanup(func() { close(stopChan) })

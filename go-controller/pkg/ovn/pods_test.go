@@ -616,6 +616,58 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 			ginkgo.Entry("preserves an explicit MAC request", "02:00:00:00:00:99"),
 		)
 
+		ginkgo.It("retries DHCP setup after a partially successful port rebuild", func() {
+			app.Action = func(*cli.Context) error {
+				t := newTPod(node1Name, "10.128.1.0/24", "10.128.1.2", "10.128.1.1",
+					"virt-launcher", "10.128.1.3", "0a:58:0a:80:01:03", "namespace1")
+				pod := ovntest.NewPod(t.namespace, t.podName, t.nodeName, t.podIP)
+				setPodAnnotations(pod, t)
+				pod.Labels = map[string]string{kubevirtv1.VirtualMachineNameLabel: "vm1", kubevirtv1.AppLabel: "virt-launcher"}
+				pod.Annotations[kubevirtv1.AllowPodBridgeNetworkLiveMigrationAnnotation] = ""
+				pod.Annotations[kubevirtv1.DomainAnnotation] = "vm1"
+				dns := &corev1.Service{
+					ObjectMeta: metav1.ObjectMeta{Namespace: config.Kubernetes.DNSServiceNamespace, Name: config.Kubernetes.DNSServiceName},
+					Spec:       corev1.ServiceSpec{ClusterIP: "10.96.0.10", ClusterIPs: []string{"10.96.0.10"}},
+				}
+				fakeOvn.startWithDBSetup(initialDB, pod, dns, ovntest.NewNamespace(t.namespace), newNode(node1Name, "192.168.126.202/24"))
+				t.populateLogicalSwitchCache(fakeOvn)
+				state, err := fakeOvn.controller.ReconcilePod(nil, pod, nil)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				lsp, err := libovsdbops.GetLogicalSwitchPort(fakeOvn.nbClient, &nbdb.LogicalSwitchPort{Name: t.portName})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Expect(lsp.Dhcpv4Options).NotTo(gomega.BeNil())
+
+				// A node rebuild invalidates the port, then DHCP fails after its
+				// replacement LSP has already been committed and cached.
+				gomega.Expect(libovsdbops.DeleteLogicalSwitchPorts(fakeOvn.nbClient, &nbdb.LogicalSwitch{Name: node1Name}, lsp)).To(gomega.Succeed())
+				fakeOvn.controller.logicalPortCache.invalidatePodForNetwork(pod, ovntypes.DefaultNetworkName)
+				gomega.Expect(fakeOvn.fakeClient.KubeClient.CoreV1().Services(dns.Namespace).Delete(context.Background(), dns.Name, metav1.DeleteOptions{})).To(gomega.Succeed())
+				gomega.Eventually(func() bool {
+					_, err := fakeOvn.controller.watchFactory.GetService(dns.Namespace, dns.Name)
+					return apierrors.IsNotFound(err)
+				}).Should(gomega.BeTrue())
+				_, err = fakeOvn.controller.ReconcilePod(pod, pod, state)
+				gomega.Expect(err).To(gomega.MatchError(gomega.ContainSubstring("failed configuring DHCP")))
+				cached, err := fakeOvn.controller.logicalPortCache.get(pod, ovntypes.DefaultNetworkName)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Expect(cached.uuid).NotTo(gomega.Equal(lsp.UUID))
+
+				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Services(dns.Namespace).Create(context.Background(), dns, metav1.CreateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Eventually(func() error {
+					_, err := fakeOvn.controller.watchFactory.GetService(dns.Namespace, dns.Name)
+					return err
+				}).Should(gomega.Succeed())
+				_, err = fakeOvn.controller.ReconcilePod(pod, pod, state)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				lsp, err = libovsdbops.GetLogicalSwitchPort(fakeOvn.nbClient, &nbdb.LogicalSwitchPort{Name: t.portName})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Expect(lsp.Dhcpv4Options).NotTo(gomega.BeNil(), "retry must finish DHCP setup on the rebuilt port")
+				return nil
+			}
+			gomega.Expect(app.Run([]string{app.Name})).To(gomega.Succeed())
+		})
+
 		ginkgo.It("reconciles an existing pod", func() {
 			app.Action = func(*cli.Context) error {
 				// this flag will create namespaced port group
