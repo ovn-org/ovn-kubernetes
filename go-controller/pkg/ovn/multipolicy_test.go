@@ -634,10 +634,28 @@ var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
 				pod, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(namespace1.Name).Update(context.TODO(), shrunkPod, metav1.UpdateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				expectMembership(map[string]string{firstAppliedPort.name: firstAppliedPort.uuid})
+				// Wait until the shrink reconcile begins retiring the port, not
+				// just the membership change made above. Pod-key serialization
+				// keeps reattachment behind the in-flight teardown.
+				gomega.Eventually(func() bool {
+					info, err := udnController.logicalPortCache.get(pod, alternateNADKey)
+					return err != nil || !info.expires.IsZero()
+				}).Should(gomega.BeTrue())
 
 				pod.Annotations[nettypes.NetworkAttachmentAnnot] = alternateNADKey
 				pod, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(namespace1.Name).Update(context.TODO(), pod, metav1.UpdateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				// Reattachment creates a new LSP; the deleted port's UUID is no
+				// longer a valid policy membership expectation.
+				oldAlternateUUID := alternateAppliedPort.uuid
+				gomega.Eventually(func() bool {
+					info, err := udnController.logicalPortCache.get(pod, alternateNADKey)
+					if err != nil || !info.expires.IsZero() || info.uuid == oldAlternateUUID {
+						return false
+					}
+					alternateAppliedPort = info
+					return true
+				}).Should(gomega.BeTrue())
 				expectMembership(map[string]string{alternateAppliedPort.name: alternateAppliedPort.uuid})
 
 				delete(pod.Annotations, nettypes.NetworkAttachmentAnnot)
