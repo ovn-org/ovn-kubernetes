@@ -421,6 +421,42 @@ func TestBootstrapDeleteBeforeFirstAttemptUsesLatestDeleteObject(t *testing.T) {
 	}
 }
 
+func TestBootstrapKeepsListedUIDAcrossRapidSameNameDeletes(t *testing.T) {
+	listedPod := newPod("ns", "pod", "listed-with-durable-state")
+	replacementPod := newPod("ns", "pod", "replacement-without-state")
+	c := newPodControllerForTest(t, listedPod)
+	handler := &fakePodHandler{
+		netName:      "net-a",
+		syncStarted:  make(chan struct{}),
+		syncContinue: make(chan struct{}),
+	}
+
+	registerErr := make(chan error, 1)
+	go func() {
+		_, err := c.RegisterNetworkController(handler)
+		registerErr <- err
+	}()
+	<-handler.syncStarted
+	// SyncPods may have retained durable state for listedPod. Preserve that
+	// generation even if a same-name replacement is also deleted before the
+	// initial per-pod reconcile gets to run.
+	c.rememberDeletedPod(listedPod)
+	c.refreshLastSeen(replacementPod)
+	c.rememberDeletedPod(replacementPod)
+	c.podLister = newPodLister(t)
+	close(handler.syncContinue)
+	if err := <-registerErr; err != nil {
+		t.Fatalf("unexpected register error: %v", err)
+	}
+
+	if err := c.reconcilePod("ns/pod|net-a"); err != nil {
+		t.Fatalf("unexpected reconcile error: %v", err)
+	}
+	if got := handler.events; len(got) == 0 || got[0] != "delete:"+string(listedPod.UID) {
+		t.Fatalf("expected the listed UID to be cleaned up, got %#v", got)
+	}
+}
+
 func TestBootstrapReplacementDeletesListedUIDBeforeReconcilingCurrentUID(t *testing.T) {
 	oldPod := newPod("ns", "pod", "old")
 	newPod := newPod("ns", "pod", "new")
