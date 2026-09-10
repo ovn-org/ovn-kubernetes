@@ -100,11 +100,6 @@ DPU_SIM_UPLINK_ENABLE=${DPU_SIM_UPLINK_ENABLE:-true}
 DPU_SIM_UPLINK_NETWORK=${DPU_SIM_UPLINK_NETWORK:-dpu-sim-uplink}
 DPU_SIM_UPLINK_SUBNET=${DPU_SIM_UPLINK_SUBNET:-172.31.0.0/24}
 DPU_SIM_UPLINK_BRIDGE=${DPU_SIM_UPLINK_BRIDGE:-breth-uplink}
-# Fallback when dpu-sim publishes no reserved uplink interface: outside the
-# pairs it creates (num_pairs), so the device plugin never advertises it.
-DPU_SIM_UPLINK_INDEX=200
-DPU_SIM_UPLINK_HOST_INTERFACE="eth0-${DPU_SIM_UPLINK_INDEX}"
-DPU_SIM_UPLINK_DPU_REPRESENTOR="rep0-${DPU_SIM_UPLINK_INDEX}"
 DPU_SIM_CONFIG=${DPU_SIM_CONFIG:-config-kind-ovnk-offload.yaml}
 HOST_CLUSTER=${HOST_CLUSTER:-dpu-sim-host}
 DPU_CLUSTER=${DPU_CLUSTER:-dpu-sim-dpu}
@@ -228,21 +223,6 @@ run_root() {
   sudo "$@"
 }
 
-simulated_dpu_mac() {
-  local node=$1
-  local role=$2
-  local index=$3
-
-  python3 -c '
-import hashlib
-import sys
-
-node, role, index = sys.argv[1], sys.argv[2], int(sys.argv[3])
-h = hashlib.sha256((node + "\0" + role).encode()).digest()
-print(f"52:54:00:{h[0]:02x}:{h[1]:02x}:{index & 0xff:02x}")
-' "${node}" "${role}" "${index}"
-}
-
 docker_network_ip() {
   local container=$1
   local network=$2
@@ -285,21 +265,21 @@ configure_dpu_sim_uplink_bridge() {
     return
   fi
 
-  # Prefer the interface dpu-sim reserved for the uplink (published in the
-  # FRR env file, uplink_vfs_count in its config): the veth pair already
-  # exists and only needs wiring. Fall back to creating an out-of-range pair.
+  # The uplink veth pair is created and reserved by dpu-sim (uplink_vfs_count
+  # in its config) and published in the FRR env file; this script only wires it.
   local reserved=""
   if [ -f "${FRR_ENV}" ]; then
     reserved=$(unset DPU_SIM_UPLINK_HOST_INTERFACES; . "${FRR_ENV}"; echo "${DPU_SIM_UPLINK_HOST_INTERFACES:-}")
   fi
-  local uplink_pair_reserved=false
-  if [ -n "${reserved}" ]; then
-    uplink_pair_reserved=true
-    DPU_SIM_UPLINK_HOST_INTERFACE="${reserved%%,*}"
-    DPU_SIM_UPLINK_INDEX="${DPU_SIM_UPLINK_HOST_INTERFACE##*-}"
-    DPU_SIM_UPLINK_DPU_REPRESENTOR="rep0-${DPU_SIM_UPLINK_INDEX}"
-    echo "Using dpu-sim reserved uplink interface ${DPU_SIM_UPLINK_HOST_INTERFACE}"
+  if [ -z "${reserved}" ]; then
+    echo "error: dpu-sim did not publish DPU_SIM_UPLINK_HOST_INTERFACES" >&2
+    echo "update the dpu-simulator checkout and set uplink_vfs_count >= 1 in its config" >&2
+    exit 1
   fi
+  local DPU_SIM_UPLINK_HOST_INTERFACE DPU_SIM_UPLINK_DPU_REPRESENTOR
+  DPU_SIM_UPLINK_HOST_INTERFACE="${reserved%%,*}"
+  DPU_SIM_UPLINK_DPU_REPRESENTOR="rep0-${DPU_SIM_UPLINK_HOST_INTERFACE##*-}"
+  echo "Using dpu-sim reserved uplink interface ${DPU_SIM_UPLINK_HOST_INTERFACE}"
 
   local prefix subnet_ip subnet_base
   prefix=${DPU_SIM_UPLINK_SUBNET#*/}
@@ -324,8 +304,8 @@ configure_dpu_sim_uplink_bridge() {
   "${KIND_EXPERIMENTAL_PROVIDER}" network connect "${DPU_SIM_UPLINK_NETWORK}" frr
 
   local ordinal=0
-  local host_node dpu_node host_pid dpu_pid host_mac dpu_mac host_ip dpu_ip
-  local dpu_iface tmp_host tmp_dpu
+  local host_node dpu_node host_pid dpu_pid host_ip dpu_ip
+  local dpu_iface
   for host_node in $(kubectl_host get nodes -l k8s.ovn.org/dpu-host \
     -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}'); do
     dpu_node=$(replace_host_with_dpu_node "${host_node}")
@@ -334,38 +314,11 @@ configure_dpu_sim_uplink_bridge() {
 
     host_pid=$("${KIND_EXPERIMENTAL_PROVIDER}" inspect -f '{{.State.Pid}}' "${host_node}")
     dpu_pid=$("${KIND_EXPERIMENTAL_PROVIDER}" inspect -f '{{.State.Pid}}' "${dpu_node}")
-    host_mac=$(simulated_dpu_mac "${host_node}" host "${DPU_SIM_UPLINK_INDEX}")
-    dpu_mac=$(simulated_dpu_mac "${host_node}" dpu "${DPU_SIM_UPLINK_INDEX}")
     host_ip="${subnet_base}.$((254 - ordinal))"
     dpu_ip=$(docker_network_ip "${dpu_node}" "${DPU_SIM_UPLINK_NETWORK}")
     dpu_iface=$(container_iface_for_ip "${dpu_node}" "${dpu_ip}")
-    tmp_host="uh${ordinal}${DPU_SIM_UPLINK_INDEX}"
-    tmp_dpu="ud${ordinal}${DPU_SIM_UPLINK_INDEX}"
-
-    if [ "${uplink_pair_reserved}" != true ]; then
-      # No reservation published (older dpu-sim): create our own pair at the
-      # out-of-range index. A reserved pair already exists with the right
-      # names and MACs, created by dpu-sim, so this whole block is skipped.
-      run_root nsenter -t "${host_pid}" -n ip link del \
-        "${DPU_SIM_UPLINK_HOST_INTERFACE}" >/dev/null 2>&1 || true
-      run_root nsenter -t "${dpu_pid}" -n ip link del \
-        "${DPU_SIM_UPLINK_DPU_REPRESENTOR}" >/dev/null 2>&1 || true
-      run_root ip link del "${tmp_host}" >/dev/null 2>&1 || true
-      run_root ip link add "${tmp_host}" type veth peer name "${tmp_dpu}"
-      run_root ip link set "${tmp_host}" netns "${host_pid}"
-      run_root ip link set "${tmp_dpu}" netns "${dpu_pid}"
-
-      run_root nsenter -t "${host_pid}" -n ip link set "${tmp_host}" \
-        name "${DPU_SIM_UPLINK_HOST_INTERFACE}"
-      run_root nsenter -t "${host_pid}" -n ip link set \
-        "${DPU_SIM_UPLINK_HOST_INTERFACE}" address "${host_mac}"
-      run_root nsenter -t "${dpu_pid}" -n ip link set "${tmp_dpu}" \
-        name "${DPU_SIM_UPLINK_DPU_REPRESENTOR}"
-      run_root nsenter -t "${dpu_pid}" -n ip link set \
-        "${DPU_SIM_UPLINK_DPU_REPRESENTOR}" address "${dpu_mac}"
-    fi
-
-    # Both paths: address the host side, raise the links, then bridge below.
+    # Configure the pair dpu-sim created: host-side IP, both links up,
+    # then the representor onto the uplink bridge below.
     run_root nsenter -t "${host_pid}" -n ip addr replace \
       "${host_ip}/${prefix}" dev "${DPU_SIM_UPLINK_HOST_INTERFACE}"
     run_root nsenter -t "${host_pid}" -n ip link set \
