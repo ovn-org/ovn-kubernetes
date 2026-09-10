@@ -15,6 +15,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 	k8sretry "k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
@@ -324,7 +325,7 @@ func (bnc *BaseNetworkController) releasePodIPs(pod *corev1.Pod, nadKey string, 
 	return nil
 }
 
-func podIPReleaseKey(pod *corev1.Pod) string {
+func podReconcileKey(pod *corev1.Pod) string {
 	return pod.Namespace + "/" + pod.Name + "/" + string(pod.UID)
 }
 func (bnc *BaseNetworkController) waitForNodeLogicalSwitch(switchName string) (*nbdb.LogicalSwitch, error) {

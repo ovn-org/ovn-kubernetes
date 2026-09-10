@@ -11,6 +11,8 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apitypes "k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 
 	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
@@ -87,8 +89,8 @@ func (oc *DefaultNetworkController) getPortInfo(pod *corev1.Pod) *lpInfo {
 	return portInfo
 }
 
-func (oc *DefaultNetworkController) SyncPods(pods []*corev1.Pod) error {
-	return oc.syncPods(podsToInterfaces(pods))
+func (oc *DefaultNetworkController) SyncPods(pods []*corev1.Pod) (sets.Set[apitypes.UID], error) {
+	return nil, oc.syncPods(podsToInterfaces(pods))
 }
 
 func (oc *DefaultNetworkController) GetPodState(pod *corev1.Pod) interface{} {

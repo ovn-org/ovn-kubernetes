@@ -13,6 +13,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/labels"
 	apitypes "k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/sets"
 	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
 
@@ -26,8 +27,10 @@ import (
 type NetworkHandler interface {
 	GetNetworkName() string
 	// SyncPods performs the initial full-network sync before per-pod
-	// reconciliation is queued for the handler.
-	SyncPods(pods []*corev1.Pod) error
+	// reconciliation is queued for the handler. The returned UIDs identify
+	// listed pods confirmed to have no retained state requiring teardown.
+	// Uncertain ownership must be omitted; nil preserves all bootstrap entries.
+	SyncPods(pods []*corev1.Pod) (sets.Set[apitypes.UID], error)
 	// PodExpectedOnNetwork returns whether the pod should exist on the network.
 	PodExpectedOnNetwork(pod *corev1.Pod) (bool, error)
 	// ReconcilePod is the single level-driven entry point. newPod == nil means
@@ -415,7 +418,8 @@ func (c *Controller) RegisterNetworkController(handler NetworkHandler) (<-chan s
 	// entry first so deletion or replacement before the first scoped attempt can
 	// still drive teardown with the bootstrap pod object.
 	c.seedBootstrapEntries(netName, pods, bootstrapSequence)
-	if err := handler.SyncPods(pods); err != nil {
+	emptyPods, err := handler.SyncPods(pods)
+	if err != nil {
 		return abort(fmt.Errorf("%s: failed to bootstrap network %s: %w", c.name, netName, err))
 	}
 
@@ -426,6 +430,7 @@ func (c *Controller) RegisterNetworkController(handler NetworkHandler) (<-chan s
 		c.networksMu.Unlock()
 		return abort(fmt.Errorf("%s: network %s was deregistered during pod bootstrap", c.name, netName))
 	}
+	c.discardEmptyBootstrapEntries(netName, emptyPods, bootstrapSequence)
 	net.initializing = false
 	c.networksMu.Unlock()
 
@@ -735,6 +740,22 @@ func (c *Controller) seedBootstrapEntries(netName string, pods []*corev1.Pod, se
 			continue
 		}
 		c.observeLastSeenLocked(entry, pod, sequence, false)
+	}
+}
+
+func (c *Controller) discardEmptyBootstrapEntries(netName string, emptyPods sets.Set[apitypes.UID], sequence uint64) {
+	if len(emptyPods) == 0 {
+		return
+	}
+	c.stateMu.Lock()
+	defer c.stateMu.Unlock()
+	for key, entry := range c.entries[netName] {
+		// Only discard untouched seeds. Informer updates and tombstones may
+		// describe state not covered by the startup snapshot, including another UID.
+		if entry.bootstrap != nil && emptyPods.Has(entry.bootstrap.UID) &&
+			entry.lastSeenSequence == sequence && !entry.lastSeenDeleted {
+			delete(c.entries[netName], key)
+		}
 	}
 }
 

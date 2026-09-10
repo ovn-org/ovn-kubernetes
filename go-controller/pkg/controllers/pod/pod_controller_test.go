@@ -13,6 +13,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/sets"
 	corelisters "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
@@ -39,6 +40,7 @@ type fakePodHandler struct {
 	syncStarted       chan struct{}
 	syncContinue      chan struct{}
 	syncErr           error
+	emptyPods         sets.Set[types.UID]
 	reconcileStarted  chan struct{}
 	reconcileContinue chan struct{}
 	reconcileOnce     sync.Once
@@ -58,7 +60,7 @@ func (f *fakePodHandler) GetNetworkName() string {
 	return f.netName
 }
 
-func (f *fakePodHandler) SyncPods(_ []*corev1.Pod) error {
+func (f *fakePodHandler) SyncPods(_ []*corev1.Pod) (sets.Set[types.UID], error) {
 	f.syncCalls++
 	if f.syncStarted != nil {
 		close(f.syncStarted)
@@ -66,7 +68,7 @@ func (f *fakePodHandler) SyncPods(_ []*corev1.Pod) error {
 	if f.syncContinue != nil {
 		<-f.syncContinue
 	}
-	return f.syncErr
+	return f.emptyPods, f.syncErr
 }
 
 func (f *fakePodHandler) PodExpectedOnNetwork(pod *corev1.Pod) (bool, error) {
@@ -383,6 +385,83 @@ func TestReconcileNetworkWithInvalidationWaitsForInFlightPodReconcile(t *testing
 	case <-invalidationDone:
 	case <-time.After(time.Second):
 		t.Fatal("serialized invalidation did not finish")
+	}
+}
+
+func TestBootstrapSkipsOnlyConfirmedEmptyPods(t *testing.T) {
+	selected := newPod("ns", "selected", "selected")
+	unrelated := newPod("ns", "unrelated", "unrelated")
+	retained := newPod("ns", "retained", "retained")
+	c := newPodControllerForTest(t, selected, unrelated, retained)
+	handler := &fakePodHandler{
+		netName:   "net-a",
+		expect:    map[string]bool{"ns/selected": true},
+		emptyPods: sets.New(selected.UID, unrelated.UID),
+	}
+	done, err := c.RegisterNetworkController(handler)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, pod := range []*corev1.Pod{selected, unrelated, retained} {
+		if err := c.reconcilePod(pod.Namespace + "/" + pod.Name + "|net-a"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !isClosed(done) || handler.reconcileCalls != 1 || handler.deleteCalls != 1 || handler.lastDeletePod.UID != retained.UID {
+		t.Fatalf("expected selected pod setup, retained pod cleanup, and a completed barrier; events: %v", handler.events)
+	}
+	// The empty-state result is startup-only. Once a pod is reconciled, its
+	// subsequently detached attachment must still be cleaned up.
+	handler.expect["ns/selected"] = false
+	if err := c.reconcilePod("ns/selected|net-a"); err != nil {
+		t.Fatal(err)
+	}
+	if handler.deleteCalls != 2 || handler.lastDeletePod.UID != selected.UID {
+		t.Fatalf("expected cleanup of the newly applied attachment; events: %v", handler.events)
+	}
+}
+
+func TestBootstrapPreservesObservationsDuringSync(t *testing.T) {
+	for _, observation := range []string{"update", "delete", "old-uid-delete"} {
+		t.Run(observation, func(t *testing.T) {
+			pod := newPod("ns", "pod", "listed")
+			c := newPodControllerForTest(t, pod)
+			handler := &fakePodHandler{
+				netName:      "net-a",
+				emptyPods:    sets.New(pod.UID),
+				syncStarted:  make(chan struct{}),
+				syncContinue: make(chan struct{}),
+			}
+			registerErr := make(chan error, 1)
+			go func() {
+				_, err := c.RegisterNetworkController(handler)
+				registerErr <- err
+			}()
+			<-handler.syncStarted
+			observed := pod.DeepCopy()
+			switch observation {
+			case "update":
+				observed.Annotations = map[string]string{"new-attachment": "present"}
+				c.refreshLastSeen(observed)
+				c.podLister = newPodLister(t, observed)
+			case "delete":
+				c.rememberDeletedPod(observed)
+				c.podLister = newPodLister(t)
+			case "old-uid-delete":
+				observed.UID = "old"
+				c.rememberDeletedPod(observed)
+			}
+			close(handler.syncContinue)
+			if err := <-registerErr; err != nil {
+				t.Fatal(err)
+			}
+			if err := c.reconcilePod("ns/pod|net-a"); err != nil {
+				t.Fatal(err)
+			}
+			if len(handler.events) == 0 || handler.events[0] != "delete:"+string(observed.UID) {
+				t.Fatalf("startup must preserve the concurrently observed UID; events: %v", handler.events)
+			}
+		})
 	}
 }
 
