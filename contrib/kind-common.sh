@@ -1609,7 +1609,7 @@ readonly FRR_K8S_VERSION=v0.0.0-20260603082256-b43efcb206be
 readonly FRR_K8S_GIT_REF=b43efcb206be
 readonly FRR_K8S_OVNK_BGP_PATCH="${DIR}/frr-k8s/patches/0001-Improvements-to-the-demo.patch"
 readonly FRR_K8S_UPSTREAM_FRR_IMAGE=quay.io/frrouting/frr:10.4.3
-readonly FRR_DEPLOYED_IMAGE=quay.io/frrouting/frr:10.6.0
+readonly FRR_DEPLOYED_IMAGE=quay.io/frrouting/frr:10.6.2
 # Override to test newer FRR builds in the in-cluster frr-k8s daemonset
 # without changing the pinned frr-k8s release.
 FRR_K8S_FRR_IMAGE=${FRR_K8S_FRR_IMAGE:-${FRR_DEPLOYED_IMAGE}}
