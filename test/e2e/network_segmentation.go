@@ -1785,6 +1785,48 @@ spec:
 		}, 15*time.Second, time.Second).Should(Succeed())
 	}, Entry("UDN", false), Entry("CUDN", true))
 
+	It("when primary UDN already exists, second primary UDN in the same namespace should report not-ready", func(ctx SpecContext) {
+		const (
+			firstPrimaryUdnName  = "primary-net-1"
+			secondPrimaryUdnName = "primary-net-2"
+		)
+
+		By("create first primary UDN and wait until it is ready")
+		cleanupFirst, err := createManifest(f.Namespace.Name, newPrimaryUserDefinedNetworkManifest(cs, firstPrimaryUdnName))
+		DeferCleanup(cleanupFirst)
+		Expect(err).NotTo(HaveOccurred())
+		Eventually(ctx, userDefinedNetworkReadyFunc(ctx, f.DynamicClient, f.Namespace.Name, firstPrimaryUdnName), 30*time.Second, time.Second).Should(Succeed())
+
+		By("create second primary UDN in the same namespace")
+		cleanupSecond, err := createManifest(f.Namespace.Name, newPrimaryUserDefinedNetworkManifest(cs, secondPrimaryUdnName))
+		DeferCleanup(cleanupSecond)
+		Expect(err).NotTo(HaveOccurred())
+
+		expectedMessage := fmt.Sprintf("primary network already exist in namespace %q: %q", f.Namespace.Name, firstPrimaryUdnName)
+		Eventually(func(g Gomega) []metav1.Condition {
+			conditionsJSON, err := e2ekubectl.RunKubectl(f.Namespace.Name, "get", "userdefinednetwork", secondPrimaryUdnName, "-o", "jsonpath={.status.conditions}")
+			g.Expect(err).NotTo(HaveOccurred())
+			var actualConditions []metav1.Condition
+			g.Expect(json.Unmarshal([]byte(conditionsJSON), &actualConditions)).To(Succeed())
+			return normalizeConditions(actualConditions)
+		}, 5*time.Second, 1*time.Second).Should(ConsistOf(metav1.Condition{
+			Type:    "NetworkCreated",
+			Status:  metav1.ConditionFalse,
+			Reason:  "SyncError",
+			Message: expectedMessage,
+		}))
+
+		By("verify the first primary UDN remains ready")
+		Consistently(ctx, userDefinedNetworkReadyFunc(ctx, f.DynamicClient, f.Namespace.Name, firstPrimaryUdnName), 5*time.Second, time.Second).Should(Succeed())
+
+		By("verify the second primary UDN did not create a NetworkAttachmentDefinition")
+		Consistently(func(g Gomega) {
+			_, err := nadClient.NetworkAttachmentDefinitions(f.Namespace.Name).Get(context.Background(), secondPrimaryUdnName, metav1.GetOptions{})
+			g.Expect(err).To(HaveOccurred())
+			g.Expect(kerrors.IsNotFound(err)).To(BeTrue())
+		}, 5*time.Second, time.Second).Should(Succeed())
+	})
+
 	Context("ClusterUserDefinedNetwork CRD Controller", func() {
 		const clusterUserDefinedNetworkResource = "clusteruserdefinednetwork"
 
@@ -2214,6 +2256,66 @@ spec:
 			Reason:  "NetworkAttachmentDefinitionSyncError",
 			Message: expectedMessage,
 		}))
+	})
+
+	It("when primary CUDN already exists, second primary CUDN targeting the same namespace should report not-ready", func() {
+		tenantNamespace := f.Namespace.Name + "tenant"
+		By("creating tenant namespace")
+		_, err := cs.CoreV1().Namespaces().Create(context.Background(), &v1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:   tenantNamespace,
+				Labels: map[string]string{RequiredUDNNamespaceLabel: ""},
+			}}, metav1.CreateOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(func() error {
+			return cs.CoreV1().Namespaces().Delete(context.Background(), tenantNamespace, metav1.DeleteOptions{})
+		})
+
+		firstCudnName := randomNetworkMetaName()
+		secondCudnName := randomNetworkMetaName()
+
+		By("create first primary CUDN and wait until it is ready")
+		cleanupFirst, err := createManifest(f.Namespace.Name, newPrimaryClusterUDNManifest(cs, firstCudnName, tenantNamespace))
+		DeferCleanup(func() {
+			cleanupFirst()
+			_, err := e2ekubectl.RunKubectl("", "delete", "clusteruserdefinednetwork", firstCudnName, "--wait", fmt.Sprintf("--timeout=%ds", 60))
+			Expect(err).NotTo(HaveOccurred())
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Eventually(clusterUserDefinedNetworkReadyFunc(f.DynamicClient, firstCudnName), 30*time.Second, time.Second).Should(Succeed())
+
+		By("create second primary CUDN targeting the same namespace")
+		cleanupSecond, err := createManifest(f.Namespace.Name, newPrimaryClusterUDNManifest(cs, secondCudnName, tenantNamespace))
+		DeferCleanup(func() {
+			cleanupSecond()
+			_, err := e2ekubectl.RunKubectl("", "delete", "clusteruserdefinednetwork", secondCudnName, "--wait", fmt.Sprintf("--timeout=%ds", 60))
+			Expect(err).NotTo(HaveOccurred())
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		expectedMessage := fmt.Sprintf("primary network already exist in namespace %q: %q", tenantNamespace, firstCudnName)
+		Eventually(func(g Gomega) []metav1.Condition {
+			conditionsJSON, err := e2ekubectl.RunKubectl(f.Namespace.Name, "get", "clusteruserdefinednetwork", secondCudnName, "-o", "jsonpath={.status.conditions}")
+			g.Expect(err).NotTo(HaveOccurred())
+			var actualConditions []metav1.Condition
+			g.Expect(json.Unmarshal([]byte(conditionsJSON), &actualConditions)).To(Succeed())
+			return normalizeConditions(actualConditions)
+		}, 5*time.Second, 1*time.Second).Should(ContainElement(metav1.Condition{
+			Type:    "NetworkCreated",
+			Status:  metav1.ConditionFalse,
+			Reason:  "NetworkAttachmentDefinitionSyncError",
+			Message: expectedMessage,
+		}))
+
+		By("verify the first primary CUDN remains ready")
+		Consistently(validateClusterUDNStatusReportsActiveNamespacesFunc(f.DynamicClient, firstCudnName, tenantNamespace), 5*time.Second, time.Second).Should(Succeed())
+
+		By("verify the second primary CUDN did not create a NetworkAttachmentDefinition")
+		Consistently(func(g Gomega) {
+			_, err := nadClient.NetworkAttachmentDefinitions(tenantNamespace).Get(context.Background(), secondCudnName, metav1.GetOptions{})
+			g.Expect(err).To(HaveOccurred())
+			g.Expect(kerrors.IsNotFound(err)).To(BeTrue())
+		}, 5*time.Second, time.Second).Should(Succeed())
 	})
 
 	Context("pod2Egress on a user defined primary network", func() {
