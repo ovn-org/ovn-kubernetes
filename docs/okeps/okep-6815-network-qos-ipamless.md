@@ -64,9 +64,12 @@ proposal is scoped to **localnet**; see [Non-Goals](#non-goals) and
 - **IP discovery or reporting for ipamless networks** (DHCP snooping, KubeVirt
   VMI status watching, ARP/NDP learning, IP-claim CRDs, or similar). This OKEP
   does not add any mechanism for OVN-Kubernetes to learn the guest's IP.
-- **Changes to the NetworkQoS CRD API / schema.** Users create the same
-  `NetworkQoS` resources with the same fields; only controller-internal
-  behavior changes.
+- **Changes to the NetworkQoS CRD spec / schema.** Users create the same
+  `NetworkQoS` resources with the same fields; there is no OpenAPI/schema diff.
+  The only externally-observable API surface added is a **new status condition
+  type** (`UnsupportedConfiguration`) on the already-existing
+  `Status.Conditions` field, to avoid degrading silently on unsupported
+  configurations; see [API Details](#api-details).
 - **Ingress-direction QoS and traffic shaping.** NetworkQoS is egress-only and
   *polices* (drops excess) rather than *shapes* (queues) - an existing product
   constraint, not introduced here.
@@ -355,17 +358,61 @@ the existing address-set path unchanged.
 
 ### API Details
 
-**No NetworkQoS CRD API changes.** The feature is entirely controller-internal:
-the same `k8s.ovn.org/v1alpha1` CRD, the same `podSelector` / `networkSelectors`
-/ `priority` / `egress` fields, and the same `classifier` semantics. There is no
-OpenAPI/schema diff and no new field, and existing manifests are interpreted
+**No NetworkQoS CRD schema changes.** The feature reuses the same
+`k8s.ovn.org/v1alpha1` CRD, the same `podSelector` / `networkSelectors` /
+`priority` / `egress` fields, and the same `classifier` semantics. There is no
+OpenAPI/schema diff and no new spec field, and existing manifests are interpreted
 identically - the only difference is that a manifest selecting an ipamless
 localnet network, which is silently a no-op today, becomes functional.
 
-The one behavioral caveat is that on ipamless networks the `classifier.to`
-`podSelector` / `namespaceSelector` destination forms are not honored; this is a
-behavioral scoping of an existing field on a topology where it cannot be
-resolved, not an API change.
+On ipamless networks the `classifier.to` `podSelector` / `namespaceSelector`
+destination forms cannot be resolved (see
+[Scope of destination matching](#scope-of-destination-matching-in-this-proposal))
+and are not honored. This is a behavioral scoping of an existing field on a
+topology where it cannot be resolved, not a spec change. To keep this from
+degrading **silently**, the controller surfaces it explicitly on the object's
+status.
+
+#### New status condition: unsupported / degraded configuration
+
+`NetworkQoS.Status.Conditions` already exists (`[]metav1.Condition`), so no
+OpenAPI/schema diff is required. This proposal defines a **new condition type**
+on that existing field. Introducing a new condition type with defined semantics
+is an **additive, externally-observable API change** (a status contract users
+and tooling can depend on), and is therefore documented and versioned here even
+though it is not a schema change.
+
+- **Type:** `UnsupportedConfiguration`. Like the existing per-zone
+  `Ready-In-Zone-<node>` condition, the controller writes this condition from
+  each zone it reconciles in; the *value* is derived purely from the CR spec and
+  the target network's topology, so it is identical across zones.
+- **`status: "True"`** - the reconciled `NetworkQoS` contains at least one
+  configuration element that is unsupported on the target ipamless localnet
+  network and is being ignored. Today the only such element is a
+  `classifier.to` entry using `podSelector` and/or `namespaceSelector`. The QoS
+  rules that *can* be honored (source selection, `ipBlock` destinations,
+  protocol/port, DSCP, bandwidth) are still applied; only the unsupported
+  destination form is dropped. The object is applied in a **degraded** state,
+  not rejected.
+- **`status: "False"`** - the resolved configuration is fully supported on this
+  network; nothing is being ignored.
+- **`reason`:** `UnsupportedDestinationSelector` when `status: "True"`;
+  `ConfigurationSupported` when `status: "False"`.
+- **`message`:** human-readable, naming the specific egress rule index(es) and
+  the unsupported selector form so the user can locate and correct the offending
+  rule (for example: *"egress rule 1: destination podSelector/namespaceSelector
+  is not supported on ipamless localnet networks and is ignored; use ipBlock
+  instead"*).
+- **Scope of emission:** the condition is only meaningful on ipamless localnet
+  networks. On IPAM-enabled / non-localnet networks the controller does not add
+  it (all classifier forms are supported there), preserving today's behavior on
+  those networks.
+
+This condition is purely informational about spec/topology compatibility; it is
+independent of the existing `Ready-In-Zone-<node>` condition, which continues to
+report apply success/failure. A `NetworkQoS` can be both `Ready` and carry
+`UnsupportedConfiguration: "True"` (its supported rules applied successfully
+while an unsupported destination form was ignored).
 
 ### Implementation Details
 
@@ -400,8 +447,7 @@ At a high level, the controller:
    controller treats "pod is attached but its port is not present yet" as a
    transient condition and lets the existing work queue retry until the port
    lands - no external event or user action required. (The rejected alternative
-   and the reasoning are in [Alternatives](#alternatives) and
-   [Deferred / Open Questions](#deferred--open-questions).)
+   and the reasoning are in [Alternatives](#alternatives).)
 5. **Tears down in order.** On delete, the QoS rules are removed from the switch
    first and the source port group afterwards, so no live object ever references
    a deleted one. The port group participates in the same ownership-keyed garbage
@@ -581,6 +627,12 @@ This proposal must test the typical virtualization lifecycle specific processes,
 - VM live migration
 - VM controller restart
 
+The new `UnsupportedConfiguration` status condition must also be covered: a
+`NetworkQoS` with a `classifier.to` `podSelector` / `namespaceSelector` on an
+ipamless localnet network sets the condition to `True` (with the supported rules
+still applied), and clearing/correcting that config flips it back to `False`;
+IPAM-enabled networks never receive the condition.
+
 ### Documentation Details
 
 - Extend the existing NetworkQoS feature documentation
@@ -596,8 +648,8 @@ This proposal must test the typical virtualization lifecycle specific processes,
 
 - **No destination `podSelector` / `namespaceSelector`** on ipamless networks
   (a permanent scope boundary, not a temporary limitation). *Mitigation:* document
-  prominently; the discovery mechanism is still open (see
-  [Deferred / Open Questions](#deferred--open-questions)).
+  prominently, and surface an `UnsupportedConfiguration` status condition so such
+  a config never degrades silently (see [API Details](#api-details)).
 - **Stale/orphan port-group GC across controller rename/restart.**
   *Mitigation:* the implementation must confirm the ownership-keyed GC (the same
   machinery as address sets) reclaims orphaned port groups; this is called out as
@@ -613,8 +665,7 @@ The feature uses only OVN NB constructs that NetworkQoS already depends on - the
 there is no `ovn-northd`/OVN version floor beyond what NetworkQoS already
 requires, and no CRD version change. During implementation, confirm that no
 mixed-zone ordering assumption is introduced (moot for single-zone localnet;
-relevant only under OVN Interconnect - see
-[Deferred / Open Questions](#deferred--open-questions)).
+relevant only under OVN Interconnect).
 
 ## Backwards Compatibility
 
@@ -710,26 +761,6 @@ chosen port-group match (see [Proposed Solution](#proposed-solution)) sidesteps
 all of these, at the cost of `ipBlock`/CIDR-only destinations - the deliberate
 scope trade documented in
 [Scope of destination matching](#scope-of-destination-matching-in-this-proposal).
-
-## Deferred / Open Questions
-
-- **Discovery mechanism for unsupported/degraded configs on ipamless networks**
-
-  For better user experience, a `NetworkQoS` config relying on a capability
-  unavailable on an ipamless network (notably destination `podSelector` /
-  `namespaceSelector`) must not degrade silently - but deliberately does not fix
-  *how* the user is told. This is an open design question for the Proposed
-  Solution, with (at least) two options:
-
-  1. **Emit a Kubernetes event per reconcile** - low-effort; events are not part
-     of the `NetworkQoS` API surface, so this is arguably the cleaner option
-     (controller-internal behavior). Downsides: events are ephemeral and
-     noisy on a hot reconcile loop, and easy to miss after the fact.
-  2. **Surface a condition on the `NetworkQoS` object's status** - persistent and
-     queryable. Although the `NetworkQos` CRD struct already exposes
-     `Status.Conditions` (no OpenAPI/schema diff needed), introducing a *new
-     condition type* with defined semantics is an **additive API change** - an
-     externally observable contract that must be documented and maintained.
 
 ## References
 
