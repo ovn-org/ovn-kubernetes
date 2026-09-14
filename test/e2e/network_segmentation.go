@@ -2282,7 +2282,7 @@ spec:
 			Expect(err).NotTo(HaveOccurred())
 		})
 		Expect(err).NotTo(HaveOccurred())
-		Eventually(clusterUserDefinedNetworkReadyFunc(f.DynamicClient, firstCudnName), 30*time.Second, time.Second).Should(Succeed())
+		Eventually(validateClusterUDNStatusReportsActiveNamespacesFunc(f.DynamicClient, firstCudnName, tenantNamespace), 30*time.Second, time.Second).Should(Succeed())
 
 		By("create second primary CUDN targeting the same namespace")
 		cleanupSecond, err := createManifest(f.Namespace.Name, newPrimaryClusterUDNManifest(cs, secondCudnName, tenantNamespace))
