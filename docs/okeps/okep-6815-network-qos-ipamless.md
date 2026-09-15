@@ -416,39 +416,33 @@ while an unsupported destination form was ignored).
 
 ### Implementation Details
 
-The change is contained to the NetworkQoS controller. Conceptually it adds one
-alternative to the single decision where the controller chooses *how to identify
-the source of a packet*: on IPAM networks that identity is an IP address set; on
-ipamless localnet networks it becomes membership in an OVN port group. Every
-other stage of building a `NetworkQoS` - destination matching, protocol/port
-classification, DSCP, bandwidth, priority, and attaching the resulting QoS rule
-to the network's logical switch - is shared with the existing path and left
-untouched.
+The change centers on the NetworkQoS controller. It replaces the single decision
+of *how to identify the source of a packet* - previously an IP address set - with
+**membership in an OVN port group**, unconditionally on every network type.
+Destination matching keeps both existing forms (`ipBlock` literal; address set
+for pod/namespace selectors), with the latter gated on IPAM.
 
 At a high level, the controller:
 
-1. **Detects the topology.** While reconciling a `NetworkQoS`, it checks whether
-   the target is an ipamless localnet network. If not, it uses the existing
-   IP-based path with no change; everything below applies only when it is.
-2. **Maintains a source port group.** Rather than resolving selected source pods
+1. **Maintains a source port group.** Rather than resolving selected source pods
    to IP addresses, it keeps a port group - owned by, and named after, the
    `NetworkQoS` - whose members are the logical switch ports of the currently
    selected source pods. Ports are added and removed as pods start or stop
    matching (label, network selection, deletion). A pod attaching through another
    namespace's NAD is resolved to the correct port and lands in the same group.
-3. **Matches on membership.** The QoS rule's source condition becomes "the packet
+2. **Matches on membership.** The QoS rule's source condition becomes "the packet
    entered through a port in this group" instead of "the packet's source IP is in
    this address set". The rest of the match (destination `ipBlock`,
    protocol/port) and the actions (DSCP, bandwidth) are produced exactly as
    today.
-4. **Handles pods that appear after the policy.** The common KubeVirt case is a
+3. **Handles pods that appear after the policy.** The common KubeVirt case is a
    VM created or migrated *after* its `NetworkQoS` already exists, so the pod's
    port may not be in OVN yet when the controller first tries to add it. The
    controller treats "pod is attached but its port is not present yet" as a
    transient condition and lets the existing work queue retry until the port
    lands - no external event or user action required. (The rejected alternative
    and the reasoning are in [Alternatives](#alternatives).)
-5. **Tears down in order.** On delete, the QoS rules are removed from the switch
+4. **Tears down in order.** On delete, the QoS rules are removed from the switch
    first and the source port group afterwards, so no live object ever references
    a deleted one. The port group participates in the same ownership-keyed garbage
    collection as the existing QoS objects, so orphans are reclaimed across
