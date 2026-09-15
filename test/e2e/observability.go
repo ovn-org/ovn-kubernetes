@@ -12,6 +12,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	v1 "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -271,6 +272,89 @@ spec:
 		})
 	})
 
+	Context("Multicast ACL sampling", func() {
+		It("should attach Sample references to Multicast ACLs when multicast is enabled", func() {
+			By("checking if multicast is enabled on the cluster")
+			// Multicast ACLs are created when multicast is enabled globally.
+			// Check for existing MulticastNS or MulticastCluster ACLs.
+			hasMulticastNS, err := hasACLsWithSamples(fr, fr.ClientSet, "MulticastNS")
+			Expect(err).NotTo(HaveOccurred())
+			hasMulticastCluster, err := hasACLsWithSamples(fr, fr.ClientSet, "MulticastCluster")
+			Expect(err).NotTo(HaveOccurred())
+			if !hasMulticastNS && !hasMulticastCluster {
+				// Enable multicast for this namespace and check again
+				By("enabling multicast for the test namespace")
+				enableMulticastForNamespace(fr)
+
+				By("creating a pod so that multicast ACLs are programmed")
+				cmd := []string{"/bin/bash", "-c", "/agnhost netexec --http-port 8000"}
+				pod := newAgnhostPod(fr.Namespace.Name, "observ-mcast-pod", cmd...)
+				pod = e2epod.NewPodClient(fr).CreateSync(context.TODO(), pod)
+				Expect(waitForACLLoggingPod(fr, fr.Namespace.Name, pod.GetName())).To(Succeed())
+
+				By("verifying MulticastNS ACLs have sample_new set")
+				Eventually(func() (bool, error) {
+					return hasACLsWithSamples(fr, fr.ClientSet, "MulticastNS")
+				}, 30*time.Second, 2*time.Second).Should(BeTrue(),
+					"expected Multicast ACLs to have sample_new references after enabling multicast")
+			} else {
+				framework.Logf("Multicast ACLs with samples already exist")
+			}
+		})
+	})
+
+	Context("UDN isolation ACL sampling", func() {
+		It("should attach Sample references to UDNIsolation ACLs", func() {
+			By("checking if UDN CRD is available")
+			_, err := e2ekubectl.RunKubectl("", "get", "crd", "userdefinednetworks.k8s.ovn.org", "--no-headers")
+			if err != nil {
+				Skip("UserDefinedNetwork CRD not available — network segmentation not enabled")
+			}
+
+			By("creating a namespace with UDN label")
+			ns, err := fr.ClientSet.CoreV1().Namespaces().Create(context.TODO(), &v1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					GenerateName: "observ-udn-",
+					Labels: map[string]string{
+						RequiredUDNNamespaceLabel: "",
+					},
+				},
+			}, metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			defer func() {
+				err := fr.ClientSet.CoreV1().Namespaces().Delete(context.TODO(), ns.Name, metav1.DeleteOptions{})
+				Expect(err).NotTo(HaveOccurred())
+			}()
+
+			By("creating a primary UserDefinedNetwork")
+			udnManifest := generateUserDefinedNetworkManifest(&networkAttachmentConfigParams{
+				name:      "observ-udn",
+				namespace: ns.Name,
+				topology:  "layer2",
+				cidr:      filterCIDRsAndJoin(fr.ClientSet, "172.16.0.0/16,2014:100:200::0/60"),
+				role:      "primary",
+			}, fr.ClientSet)
+			cleanup, err := createManifest(ns.Name, udnManifest)
+			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(cleanup)
+
+			By("waiting for UDN to be ready")
+			Eventually(userDefinedNetworkReadyFunc(fr.DynamicClient, ns.Name, "observ-udn"),
+				10*time.Second, time.Second).Should(Succeed())
+
+			By("creating a pod on the UDN namespace")
+			pc := *podConfig("observ-udn-pod")
+			pc.namespace = ns.Name
+			_ = runUDNPod(fr.ClientSet, ns.Name, pc, nil)
+
+			By("verifying UDNIsolation ACLs have sample_new set")
+			Eventually(func() (bool, error) {
+				return hasACLsWithSamples(fr, fr.ClientSet, "UDNIsolation")
+			}, 30*time.Second, 2*time.Second).Should(BeTrue(),
+				"expected UDNIsolation ACLs to have sample_new references")
+		})
+	})
+
 	Context("psample end-to-end", func() {
 		BeforeEach(func() {
 			has611, err := isKernel611OrNewer(fr, fr.ClientSet)
@@ -371,10 +455,11 @@ spec:
 			}, 30*time.Second, 2*time.Second).Should(BeTrue())
 
 			By("starting ovnkube-observ, generating traffic, and collecting samples")
-			// Collect on dst node since the ingress allow ACL is evaluated there
+			// Collect on dst node since the ingress allow ACL is evaluated there.
+			// Don't Expect inside trafficFn — it's called in an Eventually loop
+			// and early iterations may fail before policy is fully enforced.
 			output := collectObservSamples(fr, fr.ClientSet, dstPod.Spec.NodeName, func() {
-				err = generateTraffic(fr, nsName, srcPod.Name, dstIP, 5)
-				Expect(err).NotTo(HaveOccurred(), "ping should succeed for allow policy")
+				_ = generateTraffic(fr, nsName, srcPod.Name, dstIP, 5)
 			})
 
 			By("verifying samples contain allow action for NetworkPolicy")
@@ -510,9 +595,10 @@ spec:
 			}, 30*time.Second, 2*time.Second).Should(BeTrue())
 
 			By("starting ovnkube-observ, generating traffic, and collecting samples")
+			// Don't Expect inside trafficFn — it's called in an Eventually loop
+			// and early iterations may fail before EgressFirewall is fully enforced.
 			output := collectObservSamples(fr, fr.ClientSet, srcPod.Spec.NodeName, func() {
-				err := generateTraffic(fr, nsName, srcPod.Name, allowIP, 5)
-				Expect(err).NotTo(HaveOccurred(), "ping to allowed IP should succeed")
+				_ = generateTraffic(fr, nsName, srcPod.Name, allowIP, 5)
 			})
 
 			By("verifying samples contain allow action for EgressFirewall")
@@ -582,6 +668,123 @@ spec:
 				"expected pass/delegated sample for AdminNetworkPolicy, got: %s", output)
 		})
 
+		It("should receive samples for multicast traffic", func() {
+			nsName := fr.Namespace.Name
+
+			By("enabling multicast for the namespace")
+			enableMulticastForNamespace(fr)
+
+			By("creating a pod")
+			cmd := []string{"/bin/bash", "-c", "/agnhost netexec --http-port 8000"}
+			srcPod := newAgnhostPod(nsName, "observ-psample-mcast", cmd...)
+			srcPod = e2epod.NewPodClient(fr).CreateSync(context.TODO(), srcPod)
+			Expect(waitForACLLoggingPod(fr, nsName, srcPod.GetName())).To(Succeed())
+
+			By("waiting for Multicast ACLs to be programmed with samples")
+			Eventually(func() (bool, error) {
+				hasNS, err := hasACLsWithSamples(fr, fr.ClientSet, "MulticastNS")
+				if err != nil {
+					return false, err
+				}
+				hasCluster, err := hasACLsWithSamples(fr, fr.ClientSet, "MulticastCluster")
+				if err != nil {
+					return false, err
+				}
+				return hasNS || hasCluster, nil
+			}, 30*time.Second, 2*time.Second).Should(BeTrue(),
+				"expected Multicast ACLs to have sample_new references")
+
+			By("starting ovnkube-observ, generating multicast traffic, and collecting samples")
+			// Send IGMP join + multicast traffic to 239.1.1.1
+			multicastIP := "239.1.1.1"
+			output := collectObservSamples(fr, fr.ClientSet, srcPod.Spec.NodeName, func() {
+				// Use ping to multicast address to trigger multicast ACL evaluation
+				_ = generateTraffic(fr, nsName, srcPod.Name, multicastIP, 3)
+			})
+
+			By("verifying samples contain multicast message")
+			Expect(output).To(ContainSubstring("cluster multicast policy"),
+				"expected multicast sample, got: %s", output)
+		})
+
+		It("should receive samples for UDN isolation traffic", func() {
+			By("checking if UDN CRD is available")
+			_, err := e2ekubectl.RunKubectl("", "get", "crd", "userdefinednetworks.k8s.ovn.org", "--no-headers")
+			if err != nil {
+				Skip("UserDefinedNetwork CRD not available — network segmentation not enabled")
+			}
+
+			By("creating a namespace with UDN label")
+			udnNs, err := fr.ClientSet.CoreV1().Namespaces().Create(context.TODO(), &v1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					GenerateName: "observ-udn-psample-",
+					Labels: map[string]string{
+						RequiredUDNNamespaceLabel: "",
+					},
+				},
+			}, metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			defer func() {
+				err := fr.ClientSet.CoreV1().Namespaces().Delete(context.TODO(), udnNs.Name, metav1.DeleteOptions{})
+				Expect(err).NotTo(HaveOccurred())
+			}()
+
+			By("creating a primary UserDefinedNetwork")
+			udnManifest := generateUserDefinedNetworkManifest(&networkAttachmentConfigParams{
+				name:      "observ-udn-psample",
+				namespace: udnNs.Name,
+				topology:  "layer2",
+				cidr:      filterCIDRsAndJoin(fr.ClientSet, "172.16.0.0/16,2014:100:200::0/60"),
+				role:      "primary",
+			}, fr.ClientSet)
+			cleanup, err := createManifest(udnNs.Name, udnManifest)
+			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(cleanup)
+
+			By("waiting for UDN to be ready")
+			Eventually(userDefinedNetworkReadyFunc(fr.DynamicClient, udnNs.Name, "observ-udn-psample"),
+				10*time.Second, time.Second).Should(Succeed())
+
+			By("creating a UDN pod to trigger isolation ACLs")
+			pc := *podConfig("observ-udn-psample-pod")
+			pc.namespace = udnNs.Name
+			udnPod := runUDNPod(fr.ClientSet, udnNs.Name, pc, nil)
+
+			By("waiting for UDN isolation ACLs to be programmed with samples")
+			Eventually(func() (bool, error) {
+				return hasACLsWithSamples(fr, fr.ClientSet, "UDNIsolation")
+			}, 30*time.Second, 2*time.Second).Should(BeTrue())
+
+			By("getting UDN pod's default cluster network IP via network-status annotation")
+			// With primary UDN, the non-default network-status entry is the cluster network.
+			clusterNetStatus, err := podNetworkStatus(udnPod, func(status nadapi.NetworkStatus) bool {
+				return !status.Default
+			})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(clusterNetStatus).NotTo(BeEmpty(), "expected cluster network status for UDN pod")
+			Expect(clusterNetStatus[0].IPs).NotTo(BeEmpty(), "expected cluster network IP for UDN pod")
+			clusterNetIP := clusterNetStatus[0].IPs[0]
+
+			By("creating a default-network pod to send traffic to the UDN pod's cluster network IP")
+			// Traffic from a default-network pod to the UDN pod's cluster network IP
+			// triggers the UDN isolation ingress deny ACL on the UDN pod's default network port.
+			defaultNs := fr.Namespace.Name
+			cmd := []string{"/bin/bash", "-c", "/agnhost netexec --http-port 8000"}
+			defaultPod := newAgnhostPod(defaultNs, "observ-udn-default-sender", cmd...)
+			defaultPod = e2epod.NewPodClient(fr).CreateSync(context.TODO(), defaultPod)
+			Expect(waitForACLLoggingPod(fr, defaultNs, defaultPod.GetName())).To(Succeed())
+
+			By("starting ovnkube-observ, generating traffic, and collecting samples")
+			// Collect on UDN pod's node since isolation ACL is evaluated there
+			output := collectObservSamples(fr, fr.ClientSet, udnPod.Spec.NodeName, func() {
+				_ = generateTraffic(fr, defaultNs, defaultPod.Name, clusterNetIP, 5)
+			})
+
+			By("verifying samples contain UDN isolation message")
+			Expect(output).To(ContainSubstring("UDN isolation"),
+				"expected UDN isolation sample, got: %s", output)
+		})
+
 	})
 })
 
@@ -640,8 +843,11 @@ func isKernel611OrNewer(f *framework.Framework, cs clientset.Interface) (bool, e
 	pods, err := cs.CoreV1().Pods(ovnNamespace).List(context.TODO(), metav1.ListOptions{
 		LabelSelector: "app=ovnkube-node",
 	})
-	if err != nil || len(pods.Items) == 0 {
-		return false, fmt.Errorf("failed to find ovnkube-node pod: %w", err)
+	if err != nil {
+		return false, fmt.Errorf("failed to list ovnkube-node pods: %w", err)
+	}
+	if len(pods.Items) == 0 {
+		return false, fmt.Errorf("no ovnkube-node pod found in namespace %s", ovnNamespace)
 	}
 
 	nodePod := &pods.Items[0]
