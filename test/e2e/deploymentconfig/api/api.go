@@ -12,6 +12,8 @@ type Config string
 const (
 	// L3UDNMultiSubnetConfig indicates whether L3 User Defined Network multi-subnet support is enabled
 	L3UDNMultiSubnetConfig Config = "L3UDNMultiSubnet"
+	// ObservabilityConfig indicates whether OVN observability (sampling) is enabled
+	ObservabilityConfig Config = "Observability"
 )
 
 type ImageID int
