@@ -179,20 +179,17 @@ var _ = Describe("OVN Observability NBDB state", feature.Observability, func() {
 				return hasACLsWithSamples(fr, fr.ClientSet, "NetpolNamespace")
 			}, 30*time.Second, 2*time.Second).Should(BeTrue())
 
-			By("counting Sample objects before deletion")
-			sampleCountBefore, err := countNBDBSamples(fr, fr.ClientSet)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(sampleCountBefore).To(BeNumerically(">", 0))
-
 			By("deleting the network policy")
 			err = fr.ClientSet.NetworkingV1().NetworkPolicies(nsName).Delete(context.TODO(), policyName, metav1.DeleteOptions{})
 			Expect(err).NotTo(HaveOccurred())
 
-			By("verifying Sample objects are cleaned up")
-			Eventually(func() (int, error) {
-				return countNBDBSamples(fr, fr.ClientSet)
-			}, 30*time.Second, 2*time.Second).Should(BeNumerically("<", sampleCountBefore),
-				"expected Sample count to decrease after NetworkPolicy deletion")
+			By("verifying NetpolNamespace ACLs for this namespace are cleaned up")
+			// Scope to this namespace to avoid interference from parallel tests.
+			// NetpolNamespace ACLs have external_ids with k8s.ovn.org/owner containing the namespace.
+			Eventually(func() (bool, error) {
+				return hasACLsWithSamplesForNamespace(fr, fr.ClientSet, "NetpolNamespace", nsName)
+			}, 30*time.Second, 2*time.Second).Should(BeFalse(),
+				"expected NetpolNamespace ACLs for namespace %s to be cleaned up after policy deletion", nsName)
 		})
 	})
 
@@ -697,6 +694,10 @@ spec:
 			By("starting ovnkube-observ, generating multicast traffic, and collecting samples")
 			// Send IGMP join + multicast traffic to 239.1.1.1
 			multicastIP := "239.1.1.1"
+			if IsIPv6Cluster(fr.ClientSet) {
+				multicastIP = "ff05::1"
+			}
+
 			output := collectObservSamples(fr, fr.ClientSet, srcPod.Spec.NodeName, func() {
 				// Use ping to multicast address to trigger multicast ACL evaluation
 				_ = generateTraffic(fr, nsName, srcPod.Name, multicastIP, 3)
@@ -803,6 +804,28 @@ func hasACLsWithSamples(f *framework.Framework, cs clientset.Interface, ownerTyp
 		return false, nil
 	}
 	// Each line is a sample_new UUID; check that at least one is non-empty
+	for _, line := range strings.Split(output, "\n") {
+		if strings.TrimSpace(line) != "" {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// hasACLsWithSamplesForNamespace checks if ACLs with the given owner type and namespace
+// have sample_new set. This is namespace-scoped to avoid interference from parallel tests.
+func hasACLsWithSamplesForNamespace(f *framework.Framework, cs clientset.Interface, ownerType, namespace string) (bool, error) {
+	output, err := runObservNBCTL(f, cs,
+		"--data=bare", "--no-heading", "--columns=sample_new",
+		"find", "ACL",
+		fmt.Sprintf(`external_ids:"k8s.ovn.org/owner-type"=%s`, ownerType),
+		fmt.Sprintf(`external_ids:"k8s.ovn.org/owner"=%s`, namespace))
+	if err != nil {
+		return false, err
+	}
+	if output == "" {
+		return false, nil
+	}
 	for _, line := range strings.Split(output, "\n") {
 		if strings.TrimSpace(line) != "" {
 			return true, nil
