@@ -330,7 +330,6 @@ spec:
 			if !has611 {
 				Skip("psample requires kernel 6.11+")
 			}
-			DeferCleanup(cleanupObservProcesses, fr, fr.ClientSet)
 		})
 
 		It("should receive samples for NetworkPolicy deny traffic", func() {
@@ -893,26 +892,6 @@ func findOVNKubeNodePod(cs clientset.Interface, ovnNamespace, nodeName string) (
 	return nil, fmt.Errorf("no running ovnkube-node pod found on node %s", nodeName)
 }
 
-// cleanupObservProcesses kills any stale ovnkube-observ processes and removes output
-// files on all ovnkube-node pods. Should be called in AfterEach for psample tests.
-func cleanupObservProcesses(f *framework.Framework, cs clientset.Interface) {
-	ovnNamespace := deploymentconfig.Get().OVNKubernetesNamespace()
-	pods, err := cs.CoreV1().Pods(ovnNamespace).List(context.TODO(), metav1.ListOptions{
-		LabelSelector: "app=ovnkube-node",
-	})
-	if err != nil {
-		framework.Logf("Warning: failed to list ovnkube-node pods for cleanup: %v", err)
-		return
-	}
-	for i := range pods.Items {
-		pod := &pods.Items[i]
-		if pod.Status.Phase != v1.PodRunning {
-			continue
-		}
-		cleanupCmd := []string{"/bin/sh", "-c", "pkill -f /usr/bin/ovnkube-observ 2>/dev/null; rm -f /tmp/observ-samples-*.log"}
-		_, _, _ = ExecCommandInContainerWithFullOutput(f, ovnNamespace, pod.Name, "nb-ovsdb", cleanupCmd...)
-	}
-}
 
 // collectObservSamplesOnNodes runs ovnkube-observ on multiple nodes, starting all
 // instances simultaneously, then polls all output files until any produces enriched
