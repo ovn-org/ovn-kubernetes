@@ -62,6 +62,10 @@ func (oc *BaseLayer2UserDefinedNetworkController) cleanup() error {
 	netName := oc.GetNetworkName()
 	klog.Infof("Delete OVN logical entities for network %s", netName)
 
+	if oc.logicalPortCache != nil {
+		oc.logicalPortCache.removeAllForNetwork(netName)
+	}
+
 	// delete layer 2 logical switches
 	ops, err := libovsdbops.DeleteLogicalSwitchesWithPredicateOps(oc.nbClient, nil,
 		func(item *nbdb.LogicalSwitch) bool {

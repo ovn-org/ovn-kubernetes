@@ -107,9 +107,13 @@ func (h *layer2UserDefinedNetworkControllerEventHandler) RecordSuccessEvent(obj 
 func (h *layer2UserDefinedNetworkControllerEventHandler) RecordErrorEvent(_ interface{}, _ string, _ error) {
 }
 
-// IsResourceScheduled returns true if the given object has been scheduled.
-// Only applied to pods for now. Returns true for all other types.
+// IsResourceScheduled lets the retry framework process unscheduled UDN pods.
+// Their reconcile path performs identity-based policy cleanup without trying
+// to create an LSP; skipping them would silently discard cleanup failures.
 func (h *layer2UserDefinedNetworkControllerEventHandler) IsResourceScheduled(obj interface{}) bool {
+	if h.objType == factory.PodType {
+		return true
+	}
 	return h.baseHandler.isResourceScheduled(h.objType, obj)
 }
 
@@ -117,7 +121,13 @@ func (h *layer2UserDefinedNetworkControllerEventHandler) IsResourceScheduled(obj
 // if any, yielded during object creation.
 // Given an object to add and a boolean specifying if the function was executed from iterateRetryResources
 func (h *layer2UserDefinedNetworkControllerEventHandler) AddResource(obj interface{}, fromRetryLoop bool) error {
-	_ = fromRetryLoop
+	if h.objType == factory.PodType {
+		pod, ok := obj.(*corev1.Pod)
+		if !ok {
+			return fmt.Errorf("could not cast %T object to *corev1.Pod", obj)
+		}
+		return h.oc.ReconcilePod(nil, pod, nil, fromRetryLoop)
+	}
 	return h.oc.AddUserDefinedNetworkResourceCommon(h.objType, obj)
 }
 

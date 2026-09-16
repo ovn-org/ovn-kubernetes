@@ -246,7 +246,7 @@ func TestMigratedVMPodIPOwnershipOnSubnetReuse(t *testing.T) {
 					}
 					g.Expect(libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitch(nbClient,
 						&nbdb.LogicalSwitch{Name: podNode}, lsp)).To(gomega.Succeed())
-					portInfo = oc.logicalPortCache.add(pod, podNode, nad, lsp.UUID, annotation.MAC, ips)
+					portInfo = oc.logicalPortCache.add(pod, podNode, nad, oc.GetNetworkName(), lsp.UUID, annotation.MAC, ips)
 				}
 				g.Expect(oc.removePod(pod, portInfo)).To(gomega.Succeed())
 				if portInfo != nil {

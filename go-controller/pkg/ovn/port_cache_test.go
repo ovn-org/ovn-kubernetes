@@ -30,7 +30,7 @@ func TestPortCacheSnapshotsAreIndependent(t *testing.T) {
 	expectedIP := append(net.IP(nil), ipNet.IP...)
 	expectedMask := append(net.IPMask(nil), ipNet.Mask...)
 	ips := []*net.IPNet{ipNet, nil}
-	addedInfo := cache.addWithNetworkName(pod, "switch", nadKey, networkName, "port-uuid", mac, ips)
+	addedInfo := cache.add(pod, "switch", nadKey, networkName, "port-uuid", mac, ips)
 
 	// add must take ownership of neither its inputs nor its return value. The
 	// cache keeps an independent snapshot of the applied state.

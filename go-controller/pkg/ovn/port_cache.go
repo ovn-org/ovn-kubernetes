@@ -28,8 +28,7 @@ type PortCache struct {
 type lpInfo struct {
 	name string
 	uuid string
-	// appliedNetworkName is the network controller that wrote this cache entry.
-	// It is intentionally applied state, not a live NAD-to-network lookup.
+	// Network controller that wrote this applied cache entry.
 	appliedNetworkName string
 	logicalSwitch      string
 	ips                []*net.IPNet
@@ -111,19 +110,12 @@ func (c *PortCache) getAll(pod *corev1.Pod) (map[string]*lpInfo, error) {
 }
 
 // Add inserts a pod's logical port into the cache.
-func (c *PortCache) Add(pod *corev1.Pod, logicalSwitch, nadKey, uuid string, mac net.HardwareAddr, ips []*net.IPNet) {
-	_ = c.add(pod, logicalSwitch, nadKey, uuid, mac, ips)
+func (c *PortCache) Add(pod *corev1.Pod, logicalSwitch, nadKey, appliedNetworkName, uuid string, mac net.HardwareAddr, ips []*net.IPNet) {
+	_ = c.add(pod, logicalSwitch, nadKey, appliedNetworkName, uuid, mac, ips)
 }
 
-func (c *PortCache) add(pod *corev1.Pod, logicalSwitch, nadKey, uuid string, mac net.HardwareAddr, ips []*net.IPNet) *lpInfo {
-	appliedNetworkName := ""
-	if nadKey == types.DefaultNetworkName {
-		appliedNetworkName = types.DefaultNetworkName
-	}
-	return c.addWithNetworkName(pod, logicalSwitch, nadKey, appliedNetworkName, uuid, mac, ips)
-}
-
-func (c *PortCache) addWithNetworkName(pod *corev1.Pod, logicalSwitch, nadKey, appliedNetworkName, uuid string, mac net.HardwareAddr, ips []*net.IPNet) *lpInfo {
+// add stores applied port state for a pod NAD key.
+func (c *PortCache) add(pod *corev1.Pod, logicalSwitch, nadKey, appliedNetworkName, uuid string, mac net.HardwareAddr, ips []*net.IPNet) *lpInfo {
 	var logicalPort string
 
 	podName := fmt.Sprintf("%s/%s", pod.Namespace, pod.Name)
@@ -152,6 +144,24 @@ func (c *PortCache) addWithNetworkName(pod *corev1.Pod, logicalSwitch, nadKey, a
 		c.cache[podName] = m
 	}
 	return cloneLPInfo(portInfo)
+}
+
+// removeAllForNetwork clears applied port state for a cleaned-up network.
+func (c *PortCache) removeAllForNetwork(networkName string) {
+	c.Lock()
+	defer c.Unlock()
+	for podName, infoMap := range c.cache {
+		for nadKey, info := range infoMap {
+			if info.appliedNetworkName != networkName {
+				continue
+			}
+			klog.V(5).Infof("port-cache(%s): removing port for cleaned up network %s", info.name, networkName)
+			delete(infoMap, nadKey)
+		}
+		if len(infoMap) == 0 {
+			delete(c.cache, podName)
+		}
+	}
 }
 
 func (c *PortCache) remove(pod *corev1.Pod, nadKey string) {
