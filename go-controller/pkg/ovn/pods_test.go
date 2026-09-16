@@ -509,7 +509,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			np := NewNetworkPolicy(getPortNetworkPolicy("cleanup-policy", pod.Namespace, "role", "selected", 80))
 			np.portGroupName = "cleanup-policy"
-			np.localPods.Store(portInfo.name, portInfo.uuid)
+			np.setLocalPortsForPod(pod, map[string]string{portInfo.name: portInfo.uuid})
 			fakeOvn.controller.networkPolicies.Store(np.getKey(), np)
 			fakeOvn.controller.addNetworkPolicyToNamespaceIndex(np)
 			gomega.Expect(libovsdbops.CreateOrUpdatePortGroups(fakeOvn.nbClient,
