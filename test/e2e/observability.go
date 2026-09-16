@@ -26,43 +26,6 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/feature"
 )
 
-// findOVNObservNBDBPod finds a running OVN DB pod with the nb-ovsdb container.
-func findOVNObservNBDBPod(cs clientset.Interface, ovnNamespace string) (*v1.Pod, error) {
-	pods, err := cs.CoreV1().Pods(ovnNamespace).List(context.TODO(), metav1.ListOptions{
-		LabelSelector: "ovn-db-pod=true",
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to list OVN DB pods: %w", err)
-	}
-	for i := range pods.Items {
-		pod := &pods.Items[i]
-		if pod.Status.Phase != v1.PodRunning {
-			continue
-		}
-		for _, container := range pod.Spec.Containers {
-			if container.Name == "nb-ovsdb" {
-				return pod, nil
-			}
-		}
-	}
-	return nil, fmt.Errorf("no running OVN DB pod with nb-ovsdb container found in namespace %s", ovnNamespace)
-}
-
-// runObservNBCTL runs an ovn-nbctl command in the nb-ovsdb container.
-func runObservNBCTL(f *framework.Framework, cs clientset.Interface, args ...string) (string, error) {
-	ovnNamespace := deploymentconfig.Get().OVNKubernetesNamespace()
-	dbPod, err := findOVNObservNBDBPod(cs, ovnNamespace)
-	if err != nil {
-		return "", err
-	}
-	cmd := append([]string{"ovn-nbctl"}, args...)
-	stdout, stderr, err := ExecCommandInContainerWithFullOutput(f, ovnNamespace, dbPod.Name, "nb-ovsdb", cmd...)
-	if err != nil {
-		return stdout, fmt.Errorf("failed running ovn-nbctl %v on %s/%s: %w, stderr: %s", args, ovnNamespace, dbPod.Name, err, stderr)
-	}
-	return strings.TrimSpace(stdout), nil
-}
-
 var _ = Describe("OVN Observability NBDB state", feature.Observability, func() {
 	fr := wrappedTestFramework("observability")
 
@@ -74,7 +37,7 @@ var _ = Describe("OVN Observability NBDB state", feature.Observability, func() {
 
 	Context("Sampling infrastructure", func() {
 		It("should have SamplingApp entries for drop, acl-new and acl-est", func() {
-			output, err := runObservNBCTL(fr, fr.ClientSet,
+			output, err := runOVNNBCTL(fr, fr.ClientSet,
 				"--data=bare", "--no-heading", "--columns=type", "list", "Sampling_App")
 			Expect(err).NotTo(HaveOccurred())
 
@@ -85,7 +48,7 @@ var _ = Describe("OVN Observability NBDB state", feature.Observability, func() {
 		})
 
 		It("should have a SampleCollector with expected probability and set_id", func() {
-			output, err := runObservNBCTL(fr, fr.ClientSet,
+			output, err := runOVNNBCTL(fr, fr.ClientSet,
 				"--data=bare", "--no-heading", "--columns=probability,set_id",
 				"list", "Sample_Collector")
 			Expect(err).NotTo(HaveOccurred())
@@ -98,7 +61,7 @@ var _ = Describe("OVN Observability NBDB state", feature.Observability, func() {
 		})
 
 		It("should have SampleCollector with expected feature external_ids", func() {
-			output, err := runObservNBCTL(fr, fr.ClientSet,
+			output, err := runOVNNBCTL(fr, fr.ClientSet,
 				"--data=bare", "--no-heading", "--columns=external_ids",
 				"list", "Sample_Collector")
 			Expect(err).NotTo(HaveOccurred())
@@ -234,6 +197,10 @@ var _ = Describe("OVN Observability NBDB state", feature.Observability, func() {
 			nsName := fr.Namespace.Name
 
 			By("creating an AdminNetworkPolicy")
+			denyNetwork := "0.0.0.0/0"
+			if IsIPv6Cluster(fr.ClientSet) {
+				denyNetwork = "::/0"
+			}
 			anpYaml := fmt.Sprintf(`apiVersion: policy.networking.k8s.io/v1alpha1
 kind: AdminNetworkPolicy
 metadata:
@@ -249,8 +216,8 @@ spec:
     action: "Deny"
     to:
     - networks:
-      - 0.0.0.0/0
-`, anpName, nsName)
+      - %s
+`, anpName, nsName, denyNetwork)
 
 			_, err := e2ekubectl.RunKubectlInput(nsName, anpYaml, "create", "-f", "-")
 			Expect(err).NotTo(HaveOccurred())
@@ -271,32 +238,36 @@ spec:
 
 	Context("Multicast ACL sampling", func() {
 		It("should attach Sample references to Multicast ACLs when multicast is enabled", func() {
-			By("checking if multicast is enabled on the cluster")
-			// Multicast ACLs are created when multicast is enabled globally.
-			// Check for existing MulticastNS or MulticastCluster ACLs.
-			hasMulticastNS, err := hasACLsWithSamples(fr, fr.ClientSet, "MulticastNS")
-			Expect(err).NotTo(HaveOccurred())
-			hasMulticastCluster, err := hasACLsWithSamples(fr, fr.ClientSet, "MulticastCluster")
-			Expect(err).NotTo(HaveOccurred())
-			if !hasMulticastNS && !hasMulticastCluster {
-				// Enable multicast for this namespace and check again
-				By("enabling multicast for the test namespace")
-				enableMulticastForNamespace(fr)
+			nsName := fr.Namespace.Name
 
-				By("creating a pod so that multicast ACLs are programmed")
-				cmd := []string{"/bin/bash", "-c", "/agnhost netexec --http-port 8000"}
-				pod := newAgnhostPod(fr.Namespace.Name, "observ-mcast-pod", cmd...)
-				pod = e2epod.NewPodClient(fr).CreateSync(context.TODO(), pod)
-				Expect(waitForACLLoggingPod(fr, fr.Namespace.Name, pod.GetName())).To(Succeed())
+			By("enabling multicast for the test namespace")
+			enableMulticastForNamespace(fr)
 
-				By("verifying MulticastNS ACLs have sample_new set")
-				Eventually(func() (bool, error) {
-					return hasACLsWithSamples(fr, fr.ClientSet, "MulticastNS")
-				}, 30*time.Second, 2*time.Second).Should(BeTrue(),
-					"expected Multicast ACLs to have sample_new references after enabling multicast")
-			} else {
-				framework.Logf("Multicast ACLs with samples already exist")
-			}
+			By("creating a pod so that multicast ACLs are programmed")
+			cmd := []string{"/bin/bash", "-c", "/agnhost netexec --http-port 8000"}
+			pod := newAgnhostPod(nsName, "observ-mcast-pod", cmd...)
+			pod = e2epod.NewPodClient(fr).CreateSync(context.TODO(), pod)
+			Expect(waitForACLLoggingPod(fr, nsName, pod.GetName())).To(Succeed())
+
+			By("verifying MulticastNS ACLs for this namespace have sample_new set")
+			// MulticastNS ACLs use k8s.ovn.org/name for the namespace (ObjectNameKey), not k8s.ovn.org/owner.
+			Eventually(func() (bool, error) {
+				output, err := runOVNNBCTL(fr, fr.ClientSet,
+					"--data=bare", "--no-heading", "--columns=sample_new",
+					"find", "ACL",
+					`external_ids:"k8s.ovn.org/owner-type"=MulticastNS`,
+					fmt.Sprintf(`external_ids:"k8s.ovn.org/name"=%s`, nsName))
+				if err != nil {
+					return false, err
+				}
+				for _, line := range strings.Split(output, "\n") {
+					if strings.TrimSpace(line) != "" {
+						return true, nil
+					}
+				}
+				return false, nil
+			}, 30*time.Second, 2*time.Second).Should(BeTrue(),
+				"expected MulticastNS ACLs to have sample_new references for namespace %s", nsName)
 		})
 	})
 
@@ -395,8 +366,13 @@ spec:
 			}, 30*time.Second, 2*time.Second).Should(BeTrue())
 
 			By("starting ovnkube-observ, generating traffic, and collecting samples")
-			// Collect on dst node since ingress deny ACL is evaluated there
-			output := collectObservSamples(fr, fr.ClientSet, dstPod.Spec.NodeName, func() {
+			// Listen on both nodes: psample events may appear on src or dst node depending
+			// on OVN logical flow evaluation location.
+			nodeNames := []string{srcPod.Spec.NodeName}
+			if srcPod.Spec.NodeName != dstPod.Spec.NodeName {
+				nodeNames = append(nodeNames, dstPod.Spec.NodeName)
+			}
+			output := collectObservSamplesOnNodes(fr, fr.ClientSet, nodeNames, srcPod.Status.PodIP, dstIP, func() {
 				_ = generateTraffic(fr, nsName, srcPod.Name, dstIP, 5)
 			})
 
@@ -452,10 +428,13 @@ spec:
 			}, 30*time.Second, 2*time.Second).Should(BeTrue())
 
 			By("starting ovnkube-observ, generating traffic, and collecting samples")
-			// Collect on dst node since the ingress allow ACL is evaluated there.
-			// Don't Expect inside trafficFn — it's called in an Eventually loop
-			// and early iterations may fail before policy is fully enforced.
-			output := collectObservSamples(fr, fr.ClientSet, dstPod.Spec.NodeName, func() {
+			// allow-related ACL samples fire on the dst node (ingress ACL evaluated there).
+			// Listen on both nodes to handle any scheduling outcome.
+			allowNodeNames := []string{dstPod.Spec.NodeName}
+			if srcPod.Spec.NodeName != dstPod.Spec.NodeName {
+				allowNodeNames = append(allowNodeNames, srcPod.Spec.NodeName)
+			}
+			output := collectObservSamplesOnNodes(fr, fr.ClientSet, allowNodeNames, srcPod.Status.PodIP, dstIP, func() {
 				_ = generateTraffic(fr, nsName, srcPod.Name, dstIP, 5)
 			})
 
@@ -494,7 +473,7 @@ spec:
 			}, 30*time.Second, 2*time.Second).Should(BeTrue())
 
 			By("starting ovnkube-observ, generating traffic, and collecting samples")
-			output := collectObservSamples(fr, fr.ClientSet, srcPod.Spec.NodeName, func() {
+			output := collectObservSamplesOnNodes(fr, fr.ClientSet, []string{srcPod.Spec.NodeName}, srcPod.Status.PodIP, "", func() {
 				_ = generateTraffic(fr, nsName, srcPod.Name, dstIP, 5)
 			})
 
@@ -556,7 +535,12 @@ spec:
 			}, 30*time.Second, 2*time.Second).Should(BeTrue())
 
 			By("starting ovnkube-observ, generating traffic, and collecting samples")
-			output := collectObservSamples(fr, fr.ClientSet, srcPod.Spec.NodeName, func() {
+			// ANP egress deny: listen on both nodes as sample node depends on OVN flow placement.
+			anpNodeNames := []string{srcPod.Spec.NodeName}
+			if srcPod.Spec.NodeName != dstPod.Spec.NodeName {
+				anpNodeNames = append(anpNodeNames, dstPod.Spec.NodeName)
+			}
+			output := collectObservSamplesOnNodes(fr, fr.ClientSet, anpNodeNames, srcPod.Status.PodIP, dstIP, func() {
 				_ = generateTraffic(fr, nsName, srcPod.Name, dstIP, 5)
 			})
 
@@ -594,7 +578,7 @@ spec:
 			By("starting ovnkube-observ, generating traffic, and collecting samples")
 			// Don't Expect inside trafficFn — it's called in an Eventually loop
 			// and early iterations may fail before EgressFirewall is fully enforced.
-			output := collectObservSamples(fr, fr.ClientSet, srcPod.Spec.NodeName, func() {
+			output := collectObservSamplesOnNodes(fr, fr.ClientSet, []string{srcPod.Spec.NodeName}, srcPod.Status.PodIP, "", func() {
 				_ = generateTraffic(fr, nsName, srcPod.Name, allowIP, 5)
 			})
 
@@ -656,7 +640,11 @@ spec:
 			}, 30*time.Second, 2*time.Second).Should(BeTrue())
 
 			By("starting ovnkube-observ, generating traffic, and collecting samples")
-			output := collectObservSamples(fr, fr.ClientSet, srcPod.Spec.NodeName, func() {
+			passNodeNames := []string{srcPod.Spec.NodeName}
+			if srcPod.Spec.NodeName != dstPod.Spec.NodeName {
+				passNodeNames = append(passNodeNames, dstPod.Spec.NodeName)
+			}
+			output := collectObservSamplesOnNodes(fr, fr.ClientSet, passNodeNames, srcPod.Status.PodIP, dstIP, func() {
 				_ = generateTraffic(fr, nsName, srcPod.Name, dstIP, 5)
 			})
 
@@ -677,19 +665,13 @@ spec:
 			srcPod = e2epod.NewPodClient(fr).CreateSync(context.TODO(), srcPod)
 			Expect(waitForACLLoggingPod(fr, nsName, srcPod.GetName())).To(Succeed())
 
-			By("waiting for Multicast ACLs to be programmed with samples")
+			By("waiting for MulticastCluster ACLs to be programmed with samples")
+			// Assert MulticastCluster specifically since the later assertion checks for
+			// "cluster multicast policy" which is produced by MulticastCluster ACLs.
 			Eventually(func() (bool, error) {
-				hasNS, err := hasACLsWithSamples(fr, fr.ClientSet, "MulticastNS")
-				if err != nil {
-					return false, err
-				}
-				hasCluster, err := hasACLsWithSamples(fr, fr.ClientSet, "MulticastCluster")
-				if err != nil {
-					return false, err
-				}
-				return hasNS || hasCluster, nil
+				return hasACLsWithSamples(fr, fr.ClientSet, "MulticastCluster")
 			}, 30*time.Second, 2*time.Second).Should(BeTrue(),
-				"expected Multicast ACLs to have sample_new references")
+				"expected MulticastCluster ACLs to have sample_new references")
 
 			By("starting ovnkube-observ, generating multicast traffic, and collecting samples")
 			// Send IGMP join + multicast traffic to 239.1.1.1
@@ -698,7 +680,7 @@ spec:
 				multicastIP = "ff05::1"
 			}
 
-			output := collectObservSamples(fr, fr.ClientSet, srcPod.Spec.NodeName, func() {
+			output := collectObservSamplesOnNodes(fr, fr.ClientSet, []string{srcPod.Spec.NodeName}, srcPod.Status.PodIP, "", func() {
 				// Use ping to multicast address to trigger multicast ACL evaluation
 				_ = generateTraffic(fr, nsName, srcPod.Name, multicastIP, 3)
 			})
@@ -777,7 +759,7 @@ spec:
 
 			By("starting ovnkube-observ, generating traffic, and collecting samples")
 			// Collect on UDN pod's node since isolation ACL is evaluated there
-			output := collectObservSamples(fr, fr.ClientSet, udnPod.Spec.NodeName, func() {
+			output := collectObservSamplesOnNodes(fr, fr.ClientSet, []string{udnPod.Spec.NodeName}, "", clusterNetIP, func() {
 				_ = generateTraffic(fr, defaultNs, defaultPod.Name, clusterNetIP, 5)
 			})
 
@@ -793,7 +775,7 @@ spec:
 // ownerType should match the k8s.ovn.org/owner-type external_id value, e.g. "NetworkPolicy",
 // "NetpolNamespace", "EgressFirewall", "AdminNetworkPolicy".
 func hasACLsWithSamples(f *framework.Framework, cs clientset.Interface, ownerType string) (bool, error) {
-	output, err := runObservNBCTL(f, cs,
+	output, err := runOVNNBCTL(f, cs,
 		"--data=bare", "--no-heading", "--columns=sample_new",
 		"find", "ACL",
 		fmt.Sprintf(`external_ids:"k8s.ovn.org/owner-type"=%s`, ownerType))
@@ -815,7 +797,7 @@ func hasACLsWithSamples(f *framework.Framework, cs clientset.Interface, ownerTyp
 // hasACLsWithSamplesForNamespace checks if ACLs with the given owner type and namespace
 // have sample_new set. This is namespace-scoped to avoid interference from parallel tests.
 func hasACLsWithSamplesForNamespace(f *framework.Framework, cs clientset.Interface, ownerType, namespace string) (bool, error) {
-	output, err := runObservNBCTL(f, cs,
+	output, err := runOVNNBCTL(f, cs,
 		"--data=bare", "--no-heading", "--columns=sample_new",
 		"find", "ACL",
 		fmt.Sprintf(`external_ids:"k8s.ovn.org/owner-type"=%s`, ownerType),
@@ -845,7 +827,7 @@ func hasSampleObjects(f *framework.Framework, cs clientset.Interface) (bool, err
 
 // countNBDBSamples returns the number of Sample objects in NBDB.
 func countNBDBSamples(f *framework.Framework, cs clientset.Interface) (int, error) {
-	output, err := runObservNBCTL(f, cs,
+	output, err := runOVNNBCTL(f, cs,
 		"--data=bare", "--no-heading", "--columns=_uuid",
 		"list", "Sample")
 	if err != nil {
@@ -927,65 +909,84 @@ func cleanupObservProcesses(f *framework.Framework, cs clientset.Interface) {
 		if pod.Status.Phase != v1.PodRunning {
 			continue
 		}
-		cleanupCmd := []string{"/bin/sh", "-c", "pkill -f ovnkube-observ 2>/dev/null; rm -f /tmp/observ-samples.log"}
+		cleanupCmd := []string{"/bin/sh", "-c", "pkill -f /usr/bin/ovnkube-observ 2>/dev/null; rm -f /tmp/observ-samples-*.log"}
 		_, _, _ = ExecCommandInContainerWithFullOutput(f, ovnNamespace, pod.Name, "nb-ovsdb", cleanupCmd...)
 	}
 }
 
-// collectObservSamples starts ovnkube-observ in the background on the given node,
-// runs trafficFn to generate traffic, polls for sample output, then returns it.
-// The listener must be running before traffic is sent.
-func collectObservSamples(f *framework.Framework, cs clientset.Interface, nodeName string, trafficFn func()) string {
+// collectObservSamplesOnNodes runs ovnkube-observ on multiple nodes, starting all
+// instances simultaneously, then polls all output files until any produces enriched
+// output. Use when the node that receives psample events is uncertain.
+func collectObservSamplesOnNodes(f *framework.Framework, cs clientset.Interface, nodeNames []string, srcIP, dstIP string, trafficFn func()) string {
 	ovnNamespace := deploymentconfig.Get().OVNKubernetesNamespace()
-	nodePod, err := findOVNKubeNodePod(cs, ovnNamespace, nodeName)
-	Expect(err).NotTo(HaveOccurred())
 
-	outputFile := "/tmp/observ-samples.log"
-
-	// Start ovnkube-observ fully detached: nohup + redirect all FDs + &
-	// The exec API waits for all file descriptors to close, so we must redirect
-	// stdout/stderr and use nohup to fully detach from the exec session.
-	// --add-ovs-collector creates the Flow_Sample_Collector_Set in OVS, which is
-	// required for OVS to actually send sampled packets via psample.
-	startCmd := []string{
-		"/bin/sh", "-c",
-		fmt.Sprintf("nohup timeout 60 /usr/bin/ovnkube-observ --enable-enrichment=true --add-ovs-collector > %s 2>&1 &", outputFile),
+	type nodeState struct {
+		pod        *v1.Pod
+		outputFile string
+		pid        string
 	}
-	_, _, err = ExecCommandInContainerWithFullOutput(f, ovnNamespace, nodePod.Name, "nb-ovsdb", startCmd...)
-	Expect(err).NotTo(HaveOccurred())
+	states := make([]nodeState, 0, len(nodeNames))
 
-	// Ensure cleanup runs even if traffic generation or polling fails
-	defer func() {
-		cleanupCmd := []string{"/bin/sh", "-c", "pkill -f ovnkube-observ 2>/dev/null; rm -f " + outputFile}
-		_, _, _ = ExecCommandInContainerWithFullOutput(f, ovnNamespace, nodePod.Name, "nb-ovsdb", cleanupCmd...)
-	}()
+	observCmd := "/usr/bin/ovnkube-observ --enable-enrichment=true --add-ovs-collector"
+	if srcIP != "" {
+		observCmd += " --filter-src-ip=" + srcIP
+	}
+	if dstIP != "" {
+		observCmd += " --filter-dst-ip=" + dstIP
+	}
 
-	// Poll until ovnkube-observ process is running before generating traffic
-	Eventually(func() bool {
-		out, _, err := ExecCommandInContainerWithFullOutput(f, ovnNamespace, nodePod.Name, "nb-ovsdb",
-			"/bin/sh", "-c", "pgrep -f ovnkube-observ >/dev/null 2>&1 && echo running")
-		return err == nil && strings.Contains(out, "running")
-	}, 10*time.Second, 1*time.Second).Should(BeTrue(), "ovnkube-observ did not start")
+	// Start ovnkube-observ on all nodes, capturing the PID for precise cleanup.
+	for _, nodeName := range nodeNames {
+		nodePod, err := findOVNKubeNodePod(cs, ovnNamespace, nodeName)
+		Expect(err).NotTo(HaveOccurred())
+		outputFile := fmt.Sprintf("/tmp/observ-samples-%d-%s.log", time.Now().UnixNano(), nodeName)
+		// Start the process and echo its PID to stdout so we can capture it.
+		startCmd := []string{"/bin/sh", "-c",
+			fmt.Sprintf("nohup timeout 60 %s > %s 2>&1 & echo $!", observCmd, outputFile),
+		}
+		pidOut, _, err := ExecCommandInContainerWithFullOutput(f, ovnNamespace, nodePod.Name, "nb-ovsdb", startCmd...)
+		Expect(err).NotTo(HaveOccurred())
+		pid := strings.TrimSpace(pidOut)
+		states = append(states, nodeState{pod: nodePod, outputFile: outputFile, pid: pid})
+		defer func(pod *v1.Pod, file, pid string) {
+			// Kill only this specific process by PID to avoid affecting parallel tests.
+			cleanupCmd := []string{"/bin/sh", "-c",
+				fmt.Sprintf("kill %s 2>/dev/null; rm -f %s", pid, file)}
+			_, _, _ = ExecCommandInContainerWithFullOutput(f, ovnNamespace, pod.Name, "nb-ovsdb", cleanupCmd...)
+		}(nodePod, outputFile, pid)
+	}
 
-	// Poll until output file has "OVN-K message" content (enriched sample output).
-	// Re-send traffic each iteration to handle the race between netlink listener
-	// initialization and traffic generation.
-	var output string
+	// Wait for all instances to start, checking by PID.
+	for _, st := range states {
+		st := st
+		Eventually(func() bool {
+			out, _, err := ExecCommandInContainerWithFullOutput(f, ovnNamespace, st.pod.Name, "nb-ovsdb",
+				"/bin/sh", "-c", fmt.Sprintf("kill -0 %s 2>/dev/null && echo running", st.pid))
+			return err == nil && strings.Contains(out, "running")
+		}, 10*time.Second, 1*time.Second).Should(BeTrue(), "ovnkube-observ did not start on node %s", st.pod.Spec.NodeName)
+	}
+
+	// Poll all output files until any produces enriched output
+	var combinedOutput string
 	Eventually(func() string {
 		trafficFn()
-		readCmd := []string{"cat", outputFile}
-		out, _, err := ExecCommandInContainerWithFullOutput(f, ovnNamespace, nodePod.Name, "nb-ovsdb", readCmd...)
-		if err != nil {
-			return ""
+		var allOutput strings.Builder
+		for _, st := range states {
+			out, _, err := ExecCommandInContainerWithFullOutput(f, ovnNamespace, st.pod.Name, "nb-ovsdb",
+				"cat", st.outputFile)
+			if err == nil {
+				allOutput.WriteString(out)
+			}
 		}
-		output = out
-		return out
-	}, 30*time.Second, 2*time.Second).Should(ContainSubstring("OVN-K message"),
-		"ovnkube-observ did not produce enriched sample output")
+		combinedOutput = allOutput.String()
+		return combinedOutput
+	}, 60*time.Second, 3*time.Second).Should(ContainSubstring("OVN-K message"),
+		"ovnkube-observ did not produce enriched sample output on any node")
 
-	framework.Logf("ovnkube-observ output on node %s:\n%s", nodeName, output)
-	return output
+	framework.Logf("ovnkube-observ combined output:\n%s", combinedOutput)
+	return combinedOutput
 }
+
 
 // generateTraffic sends ping packets from srcPod to dstIP to trigger ACL sampling.
 // Returns error if ping fails unexpectedly (use for allow rules).
