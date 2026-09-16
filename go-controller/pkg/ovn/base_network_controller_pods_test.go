@@ -4,6 +4,8 @@
 package ovn
 
 import (
+	"context"
+	"fmt"
 	"net"
 	"testing"
 	"time"
@@ -18,6 +20,7 @@ import (
 
 	ovncnitypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
+	logicalswitchmanager "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	ovntest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing"
 	ovntypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
@@ -302,6 +305,105 @@ func TestBaseNetworkController_shouldReleaseDeletedPod(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestPodDeleteRetryPreservesReallocatedIPs(t *testing.T) {
+	for _, tc := range []struct{ sameName, annotationVisible bool }{
+		{false, false}, {true, false}, {false, true}, {true, true},
+	} {
+		t.Run(fmt.Sprintf("same-name=%t/annotation-visible=%t", tc.sameName, tc.annotationVisible), func(t *testing.T) {
+			g := gomega.NewWithT(t)
+			pod := ovntest.NewPod("namespace", "old-pod", "node1", "10.128.0.3")
+			pod.UID = "old-uid"
+			pod.Status.Phase = corev1.PodRunning
+			ips := ovntest.MustParseIPNets("10.128.0.3/24", "fd00::3/64")
+			var err error
+			pod.Annotations, err = util.MarshalPodAnnotation(pod.Annotations, &util.PodAnnotation{
+				IPs: ips, MAC: ovntest.MustParseMAC("0a:58:0a:80:00:03"),
+			}, ovntypes.DefaultNetworkName)
+			g.Expect(err).NotTo(gomega.HaveOccurred())
+			clients := util.GetOVNClientset(pod).GetOVNKubeControllerClientset()
+			wf, err := factory.NewOVNKubeControllerWatchFactory(clients, pod.Spec.NodeName)
+			g.Expect(err).NotTo(gomega.HaveOccurred())
+			g.Expect(wf.Start()).To(gomega.Succeed())
+			t.Cleanup(wf.Shutdown)
+			bnc := &BaseNetworkController{
+				CommonNetworkControllerInfo: CommonNetworkControllerInfo{watchFactory: wf},
+				ReconcilableNetInfo:         &util.DefaultNetInfo{},
+				lsManager:                   logicalswitchmanager.NewLogicalSwitchManager(),
+			}
+			g.Expect(bnc.lsManager.AddOrUpdateSwitch("node1", ovntest.MustParseIPNets("10.128.0.0/24", "fd00::/64"), nil)).To(gomega.Succeed())
+			g.Expect(bnc.lsManager.AllocateIPs("node1", ips)).To(gomega.Succeed())
+			// The deleting UID may still be visible during the first cleanup pass.
+			release, err := bnc.shouldReleaseDeletedPod(pod, "node1", ovntypes.DefaultNetworkName, ips)
+			g.Expect(err).NotTo(gomega.HaveOccurred())
+			g.Expect(release).To(gomega.BeTrue())
+			portInfo := &lpInfo{logicalSwitch: "node1", ips: ips}
+			g.Expect(bnc.releasePodIPsOnce(pod, ovntypes.DefaultNetworkName, portInfo)).To(gomega.Succeed())
+
+			// A later cleanup failure retries the running tombstone after another
+			// pod has acquired its addresses, with or without reusing its name.
+			g.Expect(clients.KubeClient.CoreV1().Pods(pod.Namespace).Delete(context.Background(), pod.Name, metav1.DeleteOptions{})).To(gomega.Succeed())
+			owner := pod.DeepCopy()
+			owner.UID = "new-uid"
+			if !tc.sameName {
+				owner.Name = "new-pod"
+			}
+			if !tc.annotationVisible {
+				owner.Annotations = nil
+				owner.Status.PodIP = ""
+				owner.Status.PodIPs = nil
+			}
+			_, err = clients.KubeClient.CoreV1().Pods(owner.Namespace).Create(context.Background(), owner, metav1.CreateOptions{})
+			g.Expect(err).NotTo(gomega.HaveOccurred())
+			g.Eventually(func() bool {
+				current, err := wf.GetPod(owner.Namespace, owner.Name)
+				return err == nil && current.UID == owner.UID
+			}).Should(gomega.BeTrue())
+			g.Expect(bnc.lsManager.AllocateIPs("node1", ips)).To(gomega.Succeed())
+			// The allocation is already reserved even when the informer still has
+			// the pre-allocation pod, with neither an annotation nor status IPs.
+			release, err = bnc.shouldReleaseDeletedPod(pod, "node1", ovntypes.DefaultNetworkName, ips)
+			g.Expect(err).NotTo(gomega.HaveOccurred())
+			g.Expect(release).To(gomega.BeFalse(), "delete retry must preserve the new owner's allocation")
+			// Also guard the release itself if a caller retained an earlier true
+			// decision, before another cleanup pass released these addresses.
+			g.Expect(bnc.releasePodIPsOnce(pod, ovntypes.DefaultNetworkName, portInfo)).To(gomega.Succeed())
+			g.Expect(bnc.lsManager.AllocateIPs("node1", ips)).NotTo(gomega.Succeed(), "the new allocation must remain reserved")
+		})
+	}
+}
+
+func TestPodIPReleaseProgress(t *testing.T) {
+	g := gomega.NewWithT(t)
+	bnc := &BaseNetworkController{
+		ReconcilableNetInfo: &util.DefaultNetInfo{},
+		lsManager:           logicalswitchmanager.NewLogicalSwitchManager(),
+	}
+	pod := ovntest.NewPod("namespace", "pod", "node1", "10.128.0.3")
+	pod.UID = "old-uid"
+	ips := ovntest.MustParseIPNets("10.128.0.3/24", "fd00::3/64")
+	g.Expect(bnc.lsManager.AddOrUpdateSwitch("node1", ovntest.MustParseIPNets("10.128.0.0/24", "fd00::/64"), nil)).To(gomega.Succeed())
+	g.Expect(bnc.lsManager.AllocateIPs("node1", ips)).To(gomega.Succeed())
+	// No watch factory is needed on the ordinary running-pod fast path.
+	release, err := bnc.shouldReleaseDeletedPod(pod, "node1", "nad-a", ips)
+	g.Expect(err).NotTo(gomega.HaveOccurred())
+	g.Expect(release).To(gomega.BeTrue())
+	g.Expect(bnc.releasePodIPsOnce(pod, "nad-a", &lpInfo{logicalSwitch: "node1", ips: ips})).To(gomega.Succeed())
+	g.Expect(bnc.wasPodIPReleased(pod, "nad-a")).To(gomega.BeTrue())
+	g.Expect(bnc.wasPodIPReleased(pod, "nad-b")).To(gomega.BeFalse())
+	replacement := pod.DeepCopy()
+	replacement.UID = "new-uid"
+	g.Expect(bnc.wasPodIPReleased(replacement, "nad-a")).To(gomega.BeFalse())
+
+	bnc.forgetPodIPReleases(pod, "nad-b")
+	g.Expect(bnc.wasPodIPReleased(pod, "nad-a")).To(gomega.BeTrue())
+	bnc.forgetPodIPReleases(pod, "nad-a")
+	g.Expect(bnc.podIPReleases).To(gomega.BeEmpty(), "reattachment starts a fresh release lifecycle")
+	g.Expect(bnc.lsManager.AllocateIPs("node1", ips)).To(gomega.Succeed())
+	g.Expect(bnc.releasePodIPsOnce(pod, "nad-a", &lpInfo{logicalSwitch: "node1", ips: ips})).To(gomega.Succeed())
+	bnc.forgetPodIPReleases(pod)
+	g.Expect(bnc.podIPReleases).To(gomega.BeEmpty(), "successful reconciliation retires retry progress")
 }
 
 // TestBaseNetworkController_allocatesPodAnnotation pins who writes the

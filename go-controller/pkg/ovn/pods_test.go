@@ -15,6 +15,7 @@ import (
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 	"github.com/urfave/cli/v2"
+	kubevirtv1 "kubevirt.io/api/core/v1"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -23,8 +24,12 @@ import (
 	"k8s.io/client-go/kubernetes"
 	utilnet "k8s.io/utils/net"
 
+	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
+	"github.com/ovn-kubernetes/libovsdb/ovsdb"
+
 	ipallocator "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/allocator/ip"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kubevirt"
 	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	libovsdbutil "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/nbdb"
@@ -34,6 +39,21 @@ import (
 	ovntypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
+
+type podCleanupFailureClient struct {
+	libovsdbclient.Client
+	failDeleteTable string
+}
+
+// Transact fails deletes from the selected table without disrupting other cleanup transactions.
+func (c *podCleanupFailureClient) Transact(ctx context.Context, ops ...ovsdb.Operation) ([]ovsdb.OperationResult, error) {
+	for _, op := range ops {
+		if op.Op == ovsdb.OperationDelete && op.Table == c.failDeleteTable {
+			return nil, fmt.Errorf("injected %s cleanup failure", c.failDeleteTable)
+		}
+	}
+	return c.Client.Transact(ctx, ops...)
+}
 
 func getPodAnnotations(fakeClient kubernetes.Interface, namespace, name string) string {
 	pod, err := fakeClient.CoreV1().Pods(namespace).Get(context.TODO(), name, metav1.GetOptions{})
@@ -462,6 +482,61 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 	})
 
 	ginkgo.Context("during execution", func() {
+
+		ginkgo.DescribeTable("updates the MAC when replacing stale logical-port IPs", func(requestedMAC string) {
+			config.IPv4Mode, config.IPv6Mode = true, true
+			const namespace, podName = "namespace1", "pod1"
+			pod := ovntest.NewPod(namespace, podName, node1Name, "")
+			if requestedMAC != "" {
+				pod.Annotations = map[string]string{
+					util.DefNetworkAnnotation: fmt.Sprintf(`[{"name":"default","mac":%q}]`, requestedMAC),
+				}
+			}
+			subnets := ovntest.MustParseIPNets("10.128.1.0/24", "fd00::/64")
+			node := newNode(node1Name, "192.168.126.202/24")
+			var err error
+			node.Annotations, err = util.UpdateNodeHostSubnetAnnotation(node.Annotations, subnets, ovntypes.DefaultNetworkName)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			oldMAC := util.IPAddrToHWAddr(ovntest.MustParseIP("10.129.1.3"))
+			lsp := &nbdb.LogicalSwitchPort{
+				UUID: uuid.NewString(), Name: util.GetLogicalPortName(namespace, podName),
+				Addresses: []string{oldMAC.String() + " 10.129.1.3 fd01::3"},
+				Options:   map[string]string{"iface-id-ver": string(pod.UID)},
+			}
+			initialDB.NBData = []libovsdbtest.TestData{
+				&nbdb.LogicalSwitch{Name: node1Name, Ports: []string{lsp.UUID}}, lsp,
+			}
+			fakeOvn.startWithDBSetup(initialDB, pod, ovntest.NewNamespace(namespace), node)
+			gomega.Expect(fakeOvn.controller.lsManager.AddOrUpdateSwitch(node1Name, subnets, nil)).To(gomega.Succeed())
+			gomega.Expect(fakeOvn.controller.WatchNamespaces()).To(gomega.Succeed())
+
+			ginkgo.By("reallocating IPs because the old logical port belongs to different subnets")
+			gomega.Expect(fakeOvn.controller.addLogicalPort(pod)).To(gomega.Succeed())
+			updatedPod, err := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(namespace).Get(context.Background(), podName, metav1.GetOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			annotation, err := util.UnmarshalPodAnnotation(updatedPod.Annotations, ovntypes.DefaultNetworkName)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(annotation.IPs).To(gomega.HaveLen(2))
+			for i, ip := range annotation.IPs {
+				gomega.Expect(subnets[i].Contains(ip.IP)).To(gomega.BeTrue())
+			}
+			expectedMAC := util.IPAddrToHWAddr(annotation.IPs[0].IP)
+			if requestedMAC != "" {
+				expectedMAC = ovntest.MustParseMAC(requestedMAC)
+			}
+			gomega.Expect(annotation.MAC).To(gomega.Equal(expectedMAC))
+			gomega.Expect(annotation.MAC).NotTo(gomega.Equal(oldMAC))
+			addresses := expectedMAC.String() + " " + util.JoinIPNetIPs(annotation.IPs, " ")
+			gomega.Eventually(func() (*nbdb.LogicalSwitchPort, error) {
+				return libovsdbops.GetLogicalSwitchPort(fakeOvn.nbClient, &nbdb.LogicalSwitchPort{Name: lsp.Name})
+			}).Should(gomega.SatisfyAll(
+				gomega.HaveField("Addresses", gomega.ConsistOf(addresses)),
+				gomega.HaveField("PortSecurity", gomega.ConsistOf(addresses)),
+			))
+		},
+			ginkgo.Entry("derives a new MAC from the newly allocated IP", ""),
+			ginkgo.Entry("preserves an explicit MAC request", "02:00:00:00:00:99"),
+		)
 
 		ginkgo.It("reconciles an existing pod", func() {
 			app.Action = func(*cli.Context) error {
@@ -1153,6 +1228,109 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 			err := app.Run([]string{app.Name})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
+
+		ginkgo.DescribeTable("retains pod IPs until KubeVirt cleanup succeeds", func(local bool, failDeleteTable string) {
+			const namespace, podName, vmName = "namespace1", "vm-pod", "vm1"
+			config.IPv4Mode, config.IPv6Mode = true, true
+			podNode := node1Name
+			if !local {
+				podNode = node2Name
+			}
+			pod := ovntest.NewPod(namespace, podName, podNode, "10.128.1.3 fd00::3")
+			pod.UID = "vm-pod-uid"
+			pod.Status.Phase = corev1.PodSucceeded
+			pod.Labels = map[string]string{
+				kubevirtv1.AppLabel:                "virt-launcher",
+				kubevirtv1.VirtualMachineNameLabel: vmName,
+			}
+			ips := ovntest.MustParseIPNets("10.128.1.3/24", "fd00::3/64")
+			mac := ovntest.MustParseMAC("0a:58:0a:80:01:03")
+			var err error
+			pod.Annotations, err = util.MarshalPodAnnotation(map[string]string{
+				kubevirtv1.AllowPodBridgeNetworkLiveMigrationAnnotation: "",
+				kubevirtv1.DomainAnnotation:                             vmName,
+			}, &util.PodAnnotation{IPs: ips, MAC: mac}, ovntypes.DefaultNetworkName)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			externalIDs := map[string]string{
+				string(libovsdbops.ObjectNameKey): namespace + "/" + vmName,
+				kubevirt.OvnZoneExternalIDKey:     kubevirt.OvnLocalZone,
+			}
+			dhcpv4 := &nbdb.DHCPOptions{UUID: uuid.NewString(), Cidr: "10.128.1.0/24", ExternalIDs: externalIDs}
+			dhcpv6 := &nbdb.DHCPOptions{UUID: uuid.NewString(), Cidr: "fd00::/64", ExternalIDs: externalIDs}
+			route := &nbdb.LogicalRouterStaticRoute{
+				UUID: uuid.NewString(), IPPrefix: "10.128.1.3/32", Nexthop: "100.64.0.2", ExternalIDs: externalIDs,
+			}
+			policy := &nbdb.LogicalRouterPolicy{
+				UUID: uuid.NewString(), Priority: ovntypes.EgressSVCReroutePriority,
+				Match: "ip4.src == 10.128.1.3", Action: nbdb.LogicalRouterPolicyActionReroute,
+				Nexthops: []string{"100.64.0.2"}, ExternalIDs: externalIDs,
+			}
+			router := &nbdb.LogicalRouter{
+				UUID: uuid.NewString(), Name: ovntypes.OVNClusterRouter,
+				StaticRoutes: []string{route.UUID}, Policies: []string{policy.UUID},
+			}
+			logicalSwitch := &nbdb.LogicalSwitch{UUID: uuid.NewString(), Name: node1Name}
+			lsp := &nbdb.LogicalSwitchPort{
+				UUID: uuid.NewString(), Name: util.GetLogicalPortName(namespace, podName),
+				Addresses:     []string{"0a:58:0a:80:01:03 10.128.1.3 fd00::3"},
+				Dhcpv4Options: &dhcpv4.UUID, Dhcpv6Options: &dhcpv6.UUID,
+			}
+			initialDB.NBData = []libovsdbtest.TestData{logicalSwitch, router, route, policy, dhcpv4, dhcpv6}
+			if local {
+				logicalSwitch.Ports = []string{lsp.UUID}
+				initialDB.NBData = append(initialDB.NBData, lsp)
+			}
+			fakeOvn.startWithDBSetup(initialDB, pod)
+			oc := fakeOvn.controller
+			gomega.Expect(oc.lsManager.AddOrUpdateSwitch(node1Name,
+				ovntest.MustParseIPNets("10.128.1.0/24", "fd00::/64"), nil)).To(gomega.Succeed())
+			gomega.Expect(oc.lsManager.AllocateIPs(node1Name, ips)).To(gomega.Succeed())
+			var portInfo *lpInfo
+			if local {
+				portInfo = oc.logicalPortCache.add(pod, node1Name, ovntypes.DefaultNetworkName, lsp.UUID, mac, ips)
+			}
+
+			ginkgo.By("failing VM cleanup without disrupting ordinary pod teardown transactions")
+			oc.nbClient = &podCleanupFailureClient{Client: fakeOvn.nbClient, failDeleteTable: failDeleteTable}
+			err = oc.removePod(pod, portInfo)
+			gomega.Expect(err).To(gomega.MatchError(gomega.ContainSubstring("injected " + failDeleteTable + " cleanup failure")))
+			for _, ip := range ips {
+				gomega.Expect(ipallocator.IsErrAllocated(oc.lsManager.AllocateIPs(node1Name, []*net.IPNet{ip}))).To(
+					gomega.BeTrue(), "VM cleanup failure must leave %s reserved", ip)
+			}
+			gomega.Expect(oc.wasPodIPReleased(pod, ovntypes.DefaultNetworkName)).To(gomega.BeFalse())
+
+			expectedRouter := *router
+			expectedAfterFailure := []libovsdbtest.TestData{logicalSwitch, &expectedRouter, policy}
+			expectedLSP := *lsp
+			if failDeleteTable == nbdb.DHCPOptionsTable {
+				expectedAfterFailure = append(expectedAfterFailure, dhcpv4, dhcpv6, route)
+			} else {
+				// DHCP and static-route cleanup committed before policy deletion failed.
+				expectedRouter.StaticRoutes = nil
+				expectedLSP.Dhcpv4Options, expectedLSP.Dhcpv6Options = nil, nil
+			}
+			if local {
+				expectedAfterFailure = append(expectedAfterFailure, &expectedLSP)
+			}
+			gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedAfterFailure...))
+
+			ginkgo.By("retrying partial VM cleanup before releasing the pod's IPs")
+			oc.nbClient = fakeOvn.nbClient
+			gomega.Expect(oc.removePod(pod, portInfo)).To(gomega.Succeed())
+			gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(
+				&nbdb.LogicalSwitch{UUID: logicalSwitch.UUID, Name: node1Name},
+				&nbdb.LogicalRouter{UUID: router.UUID, Name: ovntypes.OVNClusterRouter},
+			))
+			gomega.Expect(oc.podIPReleases).To(gomega.BeEmpty())
+			gomega.Expect(oc.lsManager.AllocateIPs(node1Name, ips)).To(gomega.Succeed(), "successful cleanup must release both IPs")
+		},
+			ginkgo.Entry("local pod, DHCP cleanup failure", true, nbdb.DHCPOptionsTable),
+			ginkgo.Entry("local pod, routing cleanup failure after DHCP deletion", true, nbdb.LogicalRouterPolicyTable),
+			ginkgo.Entry("remote pod, DHCP cleanup failure", false, nbdb.DHCPOptionsTable),
+			ginkgo.Entry("remote pod, routing cleanup failure after DHCP deletion", false, nbdb.LogicalRouterPolicyTable),
+		)
 
 		ginkgo.It("doesn't stop retrying adding a pod after failing n times", func() {
 			app.Action = func(*cli.Context) error {

@@ -177,6 +177,7 @@ func Test_allocatePodAnnotationReturnsUpdatedPod(t *testing.T) {
 		nil,
 		nil,
 		false,
+		false,
 		types.NetworkRolePrimary,
 	)
 	g.Expect(err).NotTo(gomega.HaveOccurred())
@@ -287,12 +288,13 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 	}
 
 	type args struct {
-		ipAllocator subnet.NamedAllocator
-		idAllocator id.NamedAllocator
-		macRegistry *macRegistryStub
-		network     *nadapi.NetworkSelectionElement
-		ipamClaim   *ipamclaimsapi.IPAMClaim
-		reallocate  bool
+		ipAllocator            subnet.NamedAllocator
+		idAllocator            id.NamedAllocator
+		macRegistry            *macRegistryStub
+		network                *nadapi.NetworkSelectionElement
+		ipamClaim              *ipamclaimsapi.IPAMClaim
+		reallocate             bool
+		requireIPAMReservation bool
 	}
 	tests := []struct {
 		name                            string
@@ -576,6 +578,24 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 				IPs: ovntest.MustParseIPNets("192.168.0.3/24"),
 				MAC: util.IPAddrToHWAddr(ovntest.MustParseIPNets("192.168.0.3/24")[0].IP),
 			},
+		},
+		{
+			// Once the caller has released this attachment's IPs, ErrAllocated
+			// may identify another owner and must no longer be ignored merely
+			// because the stale annotation is still present.
+			name: "expect error reacquiring a released annotated IP that is already allocated",
+			ipam: true,
+			podAnnotation: &util.PodAnnotation{
+				IPs: ovntest.MustParseIPNets("192.168.0.3/24"),
+				MAC: util.IPAddrToHWAddr(ovntest.MustParseIPNets("192.168.0.3/24")[0].IP),
+			},
+			args: args{
+				ipAllocator: &ipAllocatorStub{
+					allocateIPsError: ipam.ErrAllocated,
+				},
+				requireIPAMReservation: true,
+			},
+			wantErr: true,
 		},
 		{
 			// on networks with IPAM, if pod is already annotated, expect error
@@ -1461,6 +1481,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 				claimsReconciler,
 				macRegistry,
 				tt.args.reallocate,
+				tt.args.requireIPAMReservation,
 				tt.role,
 			)
 

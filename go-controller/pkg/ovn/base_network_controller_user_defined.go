@@ -429,7 +429,12 @@ func (bsnc *BaseUserDefinedNetworkController) addLogicalPortToNetworkForNAD(pod 
 
 // removePodForUserDefinedNetwork tried to tear down a pod. It returns nil on success and error on failure;
 // failure indicates the pod tear down should be retried later.
-func (bsnc *BaseUserDefinedNetworkController) removePodForUserDefinedNetwork(pod *corev1.Pod, portInfoMap map[string]*lpInfo) error {
+func (bsnc *BaseUserDefinedNetworkController) removePodForUserDefinedNetwork(pod *corev1.Pod, portInfoMap map[string]*lpInfo) (err error) {
+	defer func() {
+		if err == nil {
+			bsnc.forgetPodIPReleases(pod)
+		}
+	}()
 	if util.PodWantsHostNetwork(pod) || !util.PodScheduled(pod) {
 		return nil
 	}
@@ -490,7 +495,8 @@ func (bsnc *BaseUserDefinedNetworkController) removePodForUserDefinedNetwork(pod
 			}
 		}
 		bsnc.logicalPortCache.remove(pod, nadKey)
-		pInfo, err := bsnc.deletePodLogicalPort(pod, portInfo, nadKey)
+		var pInfo *lpInfo
+		pInfo, err = bsnc.deletePodLogicalPort(pod, portInfo, nadKey)
 		if err != nil {
 			return err
 		}
@@ -512,7 +518,7 @@ func (bsnc *BaseUserDefinedNetworkController) removePodForUserDefinedNetwork(pod
 		// while it is now on another pod
 		klog.Infof("Attempting to release IPs for pod: %s/%s, ips: %s network %s", pod.Namespace, pod.Name,
 			util.JoinIPNetIPs(pInfo.ips, " "), bsnc.GetNetworkName())
-		if err = bsnc.releasePodIPs(pInfo); err != nil {
+		if err = bsnc.releasePodIPsOnce(pod, nadKey, pInfo); err != nil {
 			return err
 		}
 

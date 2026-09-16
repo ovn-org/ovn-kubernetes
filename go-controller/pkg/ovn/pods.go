@@ -231,7 +231,7 @@ func (oc *DefaultNetworkController) deleteLogicalPort(pod *corev1.Pod, portInfo 
 	// which is okay since node may have been deleted.
 	klog.Infof("Attempting to release IPs for pod: %s/%s, ips: %s", pod.Namespace, pod.Name,
 		util.JoinIPNetIPs(pInfo.ips, " "))
-	return oc.releasePodIPs(pInfo)
+	return oc.releasePodIPsOnce(pod, types.DefaultNetworkName, pInfo)
 }
 
 func (oc *DefaultNetworkController) addLogicalPort(pod *corev1.Pod) (err error) {
