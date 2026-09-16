@@ -560,7 +560,14 @@ func (bnc *BaseNetworkController) getNewLocalPolicyPorts(np *networkPolicy,
 			continue
 		}
 
-		nadKeys := bnc.getPodNADKeys(pod)
+		nadKeys, err := bnc.getPodNADKeys(pod)
+		if err != nil {
+			// A pod with a malformed network selection annotation has no ports
+			// on this network; the config error is surfaced by pod reconciliation.
+			klog.Warningf("Failed to get NAD keys for pod %s/%s for networkPolicy %s, err: %v",
+				pod.Namespace, pod.Name, np.name, err)
+			continue
+		}
 		for _, nadKey := range nadKeys {
 			logicalPortName := bnc.GetLogicalPortName(pod, nadKey)
 			if _, ok := np.localPods.Load(logicalPortName); ok {
@@ -609,7 +616,12 @@ func (bnc *BaseNetworkController) getExistingLocalPolicyPorts(np *networkPolicy,
 	for _, obj := range objs {
 		pod := obj.(*corev1.Pod)
 
-		nadKeys := bnc.getPodNADKeys(pod)
+		nadKeys, err := bnc.getPodNADKeys(pod)
+		if err != nil {
+			klog.Warningf("Failed to get NAD keys for pod %s/%s for networkPolicy %s, err: %v",
+				pod.Namespace, pod.Name, np.name, err)
+			continue
+		}
 		for _, nadKey := range nadKeys {
 			logicalPortName := bnc.GetLogicalPortName(pod, nadKey)
 			loadedPortUUID, ok := np.localPods.Load(logicalPortName)

@@ -1041,13 +1041,13 @@ var _ = Describe("BaseUserDefinedNetworkController", func() {
 			NADNetworks:     map[string]util.NetInfo{},
 		}).Interface()
 
-		portInfoMap := map[string]*lpInfo{
-			nadKey: fakeOVN.portCache.add(
-				pod, switchName, nadKey, lsp.UUID, podMAC, podIPs),
-			foreignNADKey: fakeOVN.portCache.add(
-				pod, foreignSwitch, foreignNADKey,
-				foreignLSP.UUID, podMAC, podIPs),
-		}
+		fakeOVN.portCache.addWithNetworkName(
+			pod, switchName, nadKey, netInfo.GetNetworkName(), lsp.UUID, podMAC, podIPs)
+		fakeOVN.portCache.addWithNetworkName(
+			pod, foreignSwitch, foreignNADKey, "orangenet", foreignLSP.UUID, podMAC, podIPs)
+		portInfoMap := controller.bnc.getPortInfoForUserDefinedNetwork(pod)
+		Expect(portInfoMap).To(HaveKey(nadKey))
+		Expect(portInfoMap).NotTo(HaveKey(foreignNADKey))
 		Expect(controller.bnc.removePodForUserDefinedNetwork(
 			pod, portInfoMap)).To(Succeed())
 
@@ -1358,7 +1358,7 @@ func expectAdvertisedSNATUsesDestinationMatch(
 	g.Expect(snats[1].ExemptedExtIPs).To(BeNil())
 }
 
-var _ = Describe("dhcpPodNetworkUpdated", func() {
+var _ = Describe("dhcpPodNetworkOutOfSync", func() {
 	newController := func(ipamType string) *BaseUserDefinedNetworkController {
 		netconf := &ovncnitypes.NetConf{
 			NetConf: cnitypes.NetConf{
@@ -1374,15 +1374,10 @@ var _ = Describe("dhcpPodNetworkUpdated", func() {
 		return &BaseUserDefinedNetworkController{
 			BaseNetworkController: BaseNetworkController{
 				ReconcilableNetInfo: util.NewReconcilableNetInfo(netInfo),
-				networkManager: &networkmanager.FakeNetworkManager{
-					NADNetworks: map[string]util.NetInfo{"foo-ns/localnet-nad": netInfo},
-				},
 			},
 		}
 	}
 
-	// podNetworks maps NAD keys to their pod-networks annotation entries;
-	// a nil map stands for "no pod at all"
 	type podNetworks map[string]*util.PodAnnotation
 
 	podWithNetworks := func(networks podNetworks) *corev1.Pod {
@@ -1416,57 +1411,44 @@ var _ = Describe("dhcpPodNetworkUpdated", func() {
 			Role:     types.NetworkRoleSecondary,
 			IPAMMode: types.IPAMTypeDHCP,
 		}
-		// the default network's entry every multi-homed pod carries alongside
-		defaultNetEntry = &util.PodAnnotation{
-			IPs:  ovntest.MustParseIPNets("10.244.1.5/24"),
-			MAC:  ovntest.MustParseMAC("0a:58:0a:f4:01:05"),
-			Role: types.NetworkRolePrimary,
-		}
 	)
 
-	dhcpPodNetworkUpdated := func(ipamType string, oldNetworks, newNetworks podNetworks) bool {
+	dhcpPodNetworkOutOfSync := func(ipamType string, desiredNetworks podNetworks, applied *util.PodAnnotation) bool {
 		bsnc := newController(ipamType)
-		var oldPod *corev1.Pod
-		if oldNetworks != nil {
-			oldPod = podWithNetworks(oldNetworks)
+		portInfo := &lpInfo{}
+		if applied != nil {
+			portInfo.mac = applied.MAC
+			portInfo.ips = applied.IPs
 		}
-		return bsnc.dhcpPodNetworkUpdated(oldPod, podWithNetworks(newNetworks))
+		return bsnc.dhcpPodNetworkOutOfSync(podWithNetworks(desiredNetworks), nadKey, portInfo)
 	}
 
-	DescribeTable("re-triggers port processing when this network's entry is added or updated",
-		func(ipamType string, oldNetworks, newNetworks podNetworks) {
-			Expect(dhcpPodNetworkUpdated(ipamType, oldNetworks, newNetworks)).To(BeTrue())
+	DescribeTable("re-triggers port processing when desired DHCP state differs from applied state",
+		func(ipamType string, desiredNetworks podNetworks, applied *util.PodAnnotation) {
+			Expect(dhcpPodNetworkOutOfSync(ipamType, desiredNetworks, applied)).To(BeTrue())
 		},
 		Entry("when the annotation gains the DHCP-learned IPs",
-			types.IPAMTypeDHCP, podNetworks{nadKey: dhcpMACOnly}, podNetworks{nadKey: dhcpLeased}),
+			types.IPAMTypeDHCP, podNetworks{nadKey: dhcpLeased}, dhcpMACOnly),
 		// the CNI clears the stale lease at the start of a repeat ADD so the
 		// port security is relaxed to MAC-only for the new DHCP exchange
 		Entry("when the CNI clears the previous lease on a repeat ADD",
-			types.IPAMTypeDHCP, podNetworks{nadKey: dhcpLeased}, podNetworks{nadKey: dhcpMACOnly}),
-		Entry("on the CNI lease patch of this network's entry in a multi-homed annotation",
-			types.IPAMTypeDHCP,
-			podNetworks{nadKey: dhcpMACOnly, "default": defaultNetEntry},
-			podNetworks{nadKey: dhcpLeased, "default": defaultNetEntry}),
+			types.IPAMTypeDHCP, podNetworks{nadKey: dhcpMACOnly}, dhcpLeased),
+		Entry("when the applied cache has no addresses",
+			types.IPAMTypeDHCP, podNetworks{nadKey: dhcpLeased}, nil),
 	)
 
 	DescribeTable("does not re-trigger port processing",
-		func(ipamType string, oldNetworks, newNetworks podNetworks) {
-			Expect(dhcpPodNetworkUpdated(ipamType, oldNetworks, newNetworks)).To(BeFalse())
+		func(ipamType string, desiredNetworks podNetworks, applied *util.PodAnnotation) {
+			Expect(dhcpPodNetworkOutOfSync(ipamType, desiredNetworks, applied)).To(BeFalse())
 		},
-		Entry("when the annotation is unchanged",
-			types.IPAMTypeDHCP, podNetworks{nadKey: dhcpLeased}, podNetworks{nadKey: dhcpLeased}),
+		Entry("when desired and applied state match",
+			types.IPAMTypeDHCP, podNetworks{nadKey: dhcpLeased}, dhcpLeased),
 		Entry("on non-DHCP networks",
-			"", podNetworks{nadKey: dhcpMACOnly}, podNetworks{nadKey: dhcpLeased}),
-		Entry("without an old pod",
-			types.IPAMTypeDHCP, nil, podNetworks{nadKey: dhcpLeased}),
-		Entry("when only another network's entry changes",
-			types.IPAMTypeDHCP,
-			podNetworks{nadKey: dhcpMACOnly},
-			podNetworks{nadKey: dhcpMACOnly, "default": defaultNetEntry}),
+			"", podNetworks{nadKey: dhcpLeased}, dhcpMACOnly),
 		// nothing legitimately removes a DHCP entry from a live pod, and
 		// reprocessing the port without its annotation would only churn
 		Entry("when this network's entry is removed",
-			types.IPAMTypeDHCP, podNetworks{nadKey: dhcpLeased}, podNetworks{}),
+			types.IPAMTypeDHCP, podNetworks{}, dhcpLeased),
 	)
 })
 

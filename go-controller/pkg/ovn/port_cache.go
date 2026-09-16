@@ -26,14 +26,45 @@ type PortCache struct {
 }
 
 type lpInfo struct {
-	name          string
-	uuid          string
-	logicalSwitch string
-	ips           []*net.IPNet
-	mac           net.HardwareAddr
+	name string
+	uuid string
+	// appliedNetworkName is the network controller that wrote this cache entry.
+	// It is intentionally applied state, not a live NAD-to-network lookup.
+	appliedNetworkName string
+	logicalSwitch      string
+	ips                []*net.IPNet
+	mac                net.HardwareAddr
 	// expires, if non-nil, indicates that this object is scheduled to be
 	// removed at the given time
 	expires time.Time
+}
+
+func cloneLPInfo(info *lpInfo) *lpInfo {
+	if info == nil {
+		return nil
+	}
+
+	cloned := *info
+	if info.mac != nil {
+		cloned.mac = append(net.HardwareAddr(nil), info.mac...)
+	}
+	if info.ips != nil {
+		cloned.ips = make([]*net.IPNet, len(info.ips))
+		for i, ipNet := range info.ips {
+			if ipNet == nil {
+				continue
+			}
+			clonedIPNet := *ipNet
+			if ipNet.IP != nil {
+				clonedIPNet.IP = append(net.IP(nil), ipNet.IP...)
+			}
+			if ipNet.Mask != nil {
+				clonedIPNet.Mask = append(net.IPMask(nil), ipNet.Mask...)
+			}
+			cloned.ips[i] = &clonedIPNet
+		}
+	}
+	return &cloned
 }
 
 func NewPortCache(stopChan <-chan struct{}) *PortCache {
@@ -56,8 +87,7 @@ func (c *PortCache) get(pod *corev1.Pod, nadKey string) (*lpInfo, error) {
 	defer c.RUnlock()
 	if infoMap, ok := c.cache[podName]; ok {
 		if info, ok := infoMap[nadKey]; ok {
-			x := *info
-			return &x, nil
+			return cloneLPInfo(info), nil
 		}
 	}
 	return nil, fmt.Errorf("logical port %s (NAD key %s) for pod %s not found in cache",
@@ -69,10 +99,11 @@ func (c *PortCache) getAll(pod *corev1.Pod) (map[string]*lpInfo, error) {
 	c.RLock()
 	defer c.RUnlock()
 	if infoMap, ok := c.cache[podName]; ok {
-		// make a copy of this lpInfo map and return
-		lpInfoMap := map[string]*lpInfo{}
+		// Return an independent applied-state snapshot. In particular, cache
+		// expiration must not mutate state retained by delete retries.
+		lpInfoMap := make(map[string]*lpInfo, len(infoMap))
 		for k, v := range infoMap {
-			lpInfoMap[k] = v
+			lpInfoMap[k] = cloneLPInfo(v)
 		}
 		return lpInfoMap, nil
 	}
@@ -85,6 +116,14 @@ func (c *PortCache) Add(pod *corev1.Pod, logicalSwitch, nadKey, uuid string, mac
 }
 
 func (c *PortCache) add(pod *corev1.Pod, logicalSwitch, nadKey, uuid string, mac net.HardwareAddr, ips []*net.IPNet) *lpInfo {
+	appliedNetworkName := ""
+	if nadKey == types.DefaultNetworkName {
+		appliedNetworkName = types.DefaultNetworkName
+	}
+	return c.addWithNetworkName(pod, logicalSwitch, nadKey, appliedNetworkName, uuid, mac, ips)
+}
+
+func (c *PortCache) addWithNetworkName(pod *corev1.Pod, logicalSwitch, nadKey, appliedNetworkName, uuid string, mac net.HardwareAddr, ips []*net.IPNet) *lpInfo {
 	var logicalPort string
 
 	podName := fmt.Sprintf("%s/%s", pod.Namespace, pod.Name)
@@ -95,13 +134,14 @@ func (c *PortCache) add(pod *corev1.Pod, logicalSwitch, nadKey, uuid string, mac
 	}
 	c.Lock()
 	defer c.Unlock()
-	portInfo := &lpInfo{
-		logicalSwitch: logicalSwitch,
-		name:          logicalPort,
-		uuid:          uuid,
-		ips:           ips,
-		mac:           mac,
-	}
+	portInfo := cloneLPInfo(&lpInfo{
+		logicalSwitch:      logicalSwitch,
+		name:               logicalPort,
+		uuid:               uuid,
+		appliedNetworkName: appliedNetworkName,
+		ips:                ips,
+		mac:                mac,
+	})
 	klog.V(5).Infof("port-cache(%s): added port %+v with IP: %s and MAC: %s",
 		logicalPort, portInfo, portInfo.ips, portInfo.mac)
 	m, ok := c.cache[podName]
@@ -111,7 +151,7 @@ func (c *PortCache) add(pod *corev1.Pod, logicalSwitch, nadKey, uuid string, mac
 		m = map[string]*lpInfo{nadKey: portInfo}
 		c.cache[podName] = m
 	}
-	return portInfo
+	return cloneLPInfo(portInfo)
 }
 
 func (c *PortCache) remove(pod *corev1.Pod, nadKey string) {
