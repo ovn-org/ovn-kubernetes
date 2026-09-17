@@ -4,19 +4,13 @@
 package allocators
 
 import (
-	"context"
 	"fmt"
 	"net"
-	"os"
 	"sync"
-	"time"
 
-	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/tools/clientcmd"
-	"k8s.io/kubernetes/test/e2e/framework"
 )
 
 var (
@@ -26,18 +20,20 @@ var (
 
 func initSubnetSpecs() {
 	udnOnce.Do(func() {
-		v4Exclusions, v6Exclusions := machineNetworkExclusions()
+		v4Exclusions, v6Exclusions := infrastructureNetworkExclusions()
 		udnV4 = newSubnetSpec(udnSubnets, v4Exclusions)
 		udnV6 = newSubnetSpec(udnSubnets6, v6Exclusions)
 	})
 }
 
-func machineNetworkExclusions() (ipv4, ipv6 []string) {
+func infrastructureNetworkExclusions() (ipv4, ipv6 []string) {
 	v4, v6, err := getMachineNetworkSubnets()
 	if err != nil {
-		framework.Logf("Warning: failed to get machine network subnets for exclusion: %v", err)
-		return nil, nil
+		panic(fmt.Errorf("failed to get machine network subnets for exclusion: %v", err))
 	}
+	infraV4, infraV6 := infraprovider.Get().InfrastructureNetworkExclusions()
+	v4 = v4.Union(infraV4)
+	v6 = v6.Union(infraV6)
 	return v4.UnsortedList(), v6.UnsortedList()
 }
 
@@ -72,51 +68,26 @@ func GetNthFirstUDNSubnets(n int) (ipv4, ipv6 []string) {
 	return ipv4, ipv6
 }
 
-// getMachineNetworkSubnets retrieves the machine network subnets from node
-// annotations (k8s.ovn.org/node-primary-ifaddr). It returns the unique IPv4
-// and IPv6 CIDR networks found across all nodes. When KUBECONFIG is not set,
-// the call is a no-op and returns empty sets.
+// getMachineNetworkSubnets retrieves the machine network subnets from the
+// deployment config's GetProviderNodeSubnets. It returns the unique IPv4 and
+// IPv6 CIDR networks found across all nodes.
 func getMachineNetworkSubnets() (sets.Set[string], sets.Set[string], error) {
 	ipv4 := sets.New[string]()
 	ipv6 := sets.New[string]()
-	kubeConfig := os.Getenv("KUBECONFIG")
-	if kubeConfig == "" {
-		return ipv4, ipv6, nil
-	}
-	config, err := clientcmd.BuildConfigFromFlags("", kubeConfig)
+	nodeSubnets, err := deploymentconfig.Get().GetNodeMachineNetworks()
 	if err != nil {
 		return ipv4, ipv6, err
 	}
-	kubeClient, err := kubernetes.NewForConfig(config)
-	if err != nil {
-		return ipv4, ipv6, fmt.Errorf("failed to create kubernetes client: %w", err)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	nodes, err := kubeClient.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
-	if err != nil {
-		return ipv4, ipv6, fmt.Errorf("failed to list nodes: %w", err)
-	}
-	for i := range nodes.Items {
-		ifAddr, err := util.GetNodeIfAddrAnnotation(&nodes.Items[i])
-		if err != nil {
-			return ipv4, ipv6, fmt.Errorf("failed to get interface address annotation for node %q: %w", nodes.Items[i].Name, err)
-		}
-		for _, addr := range []string{ifAddr.IPv4, ifAddr.IPv6} {
-			if addr == "" {
+	for _, subnets := range nodeSubnets {
+		for _, subnet := range subnets {
+			ip, _, err := net.ParseCIDR(subnet)
+			if err != nil {
 				continue
 			}
-			_, cidr, err := net.ParseCIDR(addr)
-			if err != nil {
-				return ipv4, ipv6, fmt.Errorf("failed to parse CIDR %q for node %q: %w", addr, nodes.Items[i].Name, err)
-			}
-			if cidr == nil {
-				return ipv4, ipv6, fmt.Errorf("parsed nil CIDR from %q for node %q", addr, nodes.Items[i].Name)
-			}
-			if cidr.IP.To4() != nil {
-				ipv4.Insert(cidr.String())
+			if ip.To4() != nil {
+				ipv4.Insert(subnet)
 			} else {
-				ipv6.Insert(cidr.String())
+				ipv6.Insert(subnet)
 			}
 		}
 	}
