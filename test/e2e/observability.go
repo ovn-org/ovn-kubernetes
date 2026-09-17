@@ -509,18 +509,21 @@ spec:
 				"expected EgressFirewall ACLs to have sample_new references")
 
 			By("starting ovnkube-observ, generating traffic, and collecting samples")
+			dstMustContain := make([]string, len(denyTargetIPs))
+			for i, ip := range denyTargetIPs {
+				dstMustContain[i] = fmt.Sprintf("dst=%s", ip)
+			}
 			output := collectObservSamplesOnNodes(ctx, fr, fr.ClientSet, []string{srcPod.Spec.NodeName}, srcPod.Status.PodIP, "", func() {
 				for _, ip := range denyTargetIPs {
 					_ = generateTraffic(fr, nsName, srcPod.Name, ip, 5)
 				}
-			})
+			}, dstMustContain...)
 
 			By("verifying samples contain deny action for EgressFirewall for each address family")
-			Expect(output).To(ContainSubstring("Dropped by egress firewall in namespace "+nsName),
-				"expected deny sample for EgressFirewall, got: %s", output)
+			action := "Dropped by egress firewall in namespace " + nsName
 			for _, ip := range denyTargetIPs {
-				Expect(output).To(ContainSubstring(fmt.Sprintf("dst=%s", ip)),
-					"expected deny sample for dst=%s, got: %s", ip, output)
+				Expect(sampleRecordContains(output, action, ip)).To(BeTrue(),
+					"expected sample record with action %q and dst=%s, got: %s", action, ip, output)
 			}
 		})
 
@@ -623,18 +626,21 @@ spec:
 			By("starting ovnkube-observ, generating traffic, and collecting samples")
 			// Don't Expect inside trafficFn — it's called in an Eventually loop
 			// and early iterations may fail before EgressFirewall is fully enforced.
+			allowMustContain := make([]string, len(rules))
+			for i, r := range rules {
+				allowMustContain[i] = fmt.Sprintf("dst=%s", r.allowIP)
+			}
 			output := collectObservSamplesOnNodes(ctx, fr, fr.ClientSet, []string{srcPod.Spec.NodeName}, srcPod.Status.PodIP, "", func() {
 				for _, r := range rules {
 					_ = generateTraffic(fr, nsName, srcPod.Name, r.allowIP, 5)
 				}
-			})
+			}, allowMustContain...)
 
 			By("verifying samples contain allow action for EgressFirewall for each address family")
-			Expect(output).To(ContainSubstring("Allowed by egress firewall in namespace "+nsName),
-				"expected allow sample for EgressFirewall, got: %s", output)
+			allowAction := "Allowed by egress firewall in namespace " + nsName
 			for _, r := range rules {
-				Expect(output).To(ContainSubstring(fmt.Sprintf("dst=%s", r.allowIP)),
-					"expected allow sample for dst=%s, got: %s", r.allowIP, output)
+				Expect(sampleRecordContains(output, allowAction, r.allowIP)).To(BeTrue(),
+					"expected sample record with action %q and dst=%s, got: %s", allowAction, r.allowIP, output)
 			}
 		})
 
@@ -908,7 +914,6 @@ func countNBDBSamples(f *framework.Framework, cs clientset.Interface) (int, erro
 func isKernel611OrNewer(ctx context.Context, f *framework.Framework, cs clientset.Interface) (bool, error) {
 	ovnNamespace := deploymentconfig.Get().OVNKubernetesNamespace()
 
-	// Find any ovnkube-node pod
 	pods, err := cs.CoreV1().Pods(ovnNamespace).List(ctx, metav1.ListOptions{
 		LabelSelector: "app=ovnkube-node",
 	})
@@ -958,9 +963,10 @@ func findOVNKubeNodePod(ctx context.Context, cs clientset.Interface, ovnNamespac
 }
 
 // collectObservSamplesOnNodes runs ovnkube-observ on multiple nodes, starting all
-// instances simultaneously, then polls all output files until any produces enriched
-// output. Use when the node that receives psample events is uncertain.
-func collectObservSamplesOnNodes(ctx context.Context, f *framework.Framework, cs clientset.Interface, nodeNames []string, srcIP, dstIP string, trafficFn func()) string {
+// instances simultaneously, then polls all output files until combined output contains
+// "OVN-K message" and all mustContain strings. Pass dst= strings to wait for all
+// address families on dual-stack clusters.
+func collectObservSamplesOnNodes(ctx context.Context, f *framework.Framework, cs clientset.Interface, nodeNames []string, srcIP, dstIP string, trafficFn func(), mustContain ...string) string {
 	ovnNamespace := deploymentconfig.Get().OVNKubernetesNamespace()
 
 	type nodeState struct {
@@ -1009,9 +1015,11 @@ func collectObservSamplesOnNodes(ctx context.Context, f *framework.Framework, cs
 		}, 10*time.Second, 1*time.Second).Should(BeTrue(), "ovnkube-observ did not start on node %s", st.pod.Spec.NodeName)
 	}
 
-	// Poll all output files until any produces enriched output
+	// Poll all output files until combined output contains "OVN-K message" for
+	// every required destination string. This ensures dual-stack tests wait for
+	// both IPv4 and IPv6 samples rather than stopping after the first family.
 	var combinedOutput string
-	Eventually(func() string {
+	Eventually(func() bool {
 		trafficFn()
 		var allOutput strings.Builder
 		for _, st := range states {
@@ -1022,9 +1030,17 @@ func collectObservSamplesOnNodes(ctx context.Context, f *framework.Framework, cs
 			}
 		}
 		combinedOutput = allOutput.String()
-		return combinedOutput
-	}, 60*time.Second, 3*time.Second).Should(ContainSubstring("OVN-K message"),
-		"ovnkube-observ did not produce enriched sample output on any node")
+		if !strings.Contains(combinedOutput, "OVN-K message") {
+			return false
+		}
+		for _, required := range mustContain {
+			if !strings.Contains(combinedOutput, required) {
+				return false
+			}
+		}
+		return true
+	}, 60*time.Second, 3*time.Second).Should(BeTrue(),
+		"ovnkube-observ did not produce required enriched sample output on any node")
 
 	framework.Logf("ovnkube-observ combined output:\n%s", combinedOutput)
 	return combinedOutput
@@ -1104,6 +1120,23 @@ func egressFirewallRules(cs clientset.Interface) ([]egressFirewallRule, error) {
 	return rules, nil
 }
 
+
+// sampleRecordContains returns true if the combined ovnkube-observ output contains
+// a single sample record where both the action substring and dst=ip appear together.
+// Records are separated by blank lines; action and dst appear on consecutive lines
+// within the same record. This prevents a passing IPv4 action masking a broken IPv6
+// path when assertions are run against concatenated multi-record output.
+func sampleRecordContains(output, action, dstIP string) bool {
+	// Split on blank lines to get individual sample records.
+	records := strings.Split(output, "\n\n")
+	target := fmt.Sprintf("dst=%s", dstIP)
+	for _, record := range records {
+		if strings.Contains(record, action) && strings.Contains(record, target) {
+			return true
+		}
+	}
+	return false
+}
 
 // generateTraffic sends ping packets from srcPod to dstIP to trigger ACL sampling.
 // Returns error if ping fails unexpectedly (use for allow rules).
