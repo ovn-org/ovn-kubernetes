@@ -6,6 +6,7 @@ package ovn
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"sync"
 	"testing"
@@ -20,6 +21,7 @@ import (
 
 	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
 	"github.com/ovn-kubernetes/libovsdb/model"
+	"github.com/ovn-kubernetes/libovsdb/ovsdb"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
@@ -259,6 +261,93 @@ func TestNamespacePortGroupLifecycle(t *testing.T) {
 				g.Eventually(nbClient).Should(libovsdb.HaveData(expected))
 			})
 		}
+	}
+}
+
+func TestNamespacePortGroupConcurrentMembership(t *testing.T) {
+	g := gomega.NewWithT(t)
+	g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+	t.Cleanup(func() { _ = config.PrepareTestConfig() })
+	config.OVNKubernetesFeature.EnableEgressFirewall = true
+	udn, err := util.ParseNADInfo(ovntest.GenerateNAD("blue", "nad", "namespace",
+		ovntypes.Layer3Topology, "100.128.0.0/16", ovntypes.NetworkRolePrimary))
+	g.Expect(err).NotTo(gomega.HaveOccurred())
+
+	for _, netInfo := range []util.NetInfo{&util.DefaultNetInfo{}, udn} {
+		t.Run(netInfo.GetNetworkName(), func(t *testing.T) {
+			g := gomega.NewWithT(t)
+			const podCount = 4
+			sw := &nbdb.LogicalSwitch{Name: "node"}
+			initial := []libovsdb.TestData{sw}
+			for i := range podCount {
+				port := &nbdb.LogicalSwitchPort{Name: fmt.Sprintf("pod-%d", i), UUID: fmt.Sprintf("pod-%d-UUID", i)}
+				sw.Ports = append(sw.Ports, port.UUID)
+				initial = append(initial, port)
+			}
+			nbClient, cleanup, err := libovsdb.NewNBTestHarness(libovsdb.TestSetup{NBData: initial}, nil)
+			g.Expect(err).NotTo(gomega.HaveOccurred())
+			t.Cleanup(cleanup.Cleanup)
+			bnc := &BaseNetworkController{
+				ReconcilableNetInfo: util.NewReconcilableNetInfo(netInfo),
+				controllerName:      getNetworkControllerName(netInfo.GetNetworkName()),
+				namespaces:          map[string]*namespaceInfo{},
+			}
+			bnc.nbClient = nbClient
+			namespace := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "namespace"}}
+			errors := make(chan error, podCount)
+			start := make(chan struct{})
+			// Existing namespace locking must keep concurrent ensure calls from
+			// creating competing groups without an extra port-group mutex.
+			for range podCount {
+				go func() {
+					<-start
+					_, unlock, err := bnc.ensureNamespaceLockedCommon(namespace.Name, false, namespace,
+						func(*namespaceInfo, *corev1.Namespace) error { return nil })
+					if err == nil {
+						unlock()
+					}
+					errors <- err
+				}()
+			}
+			close(start)
+			for range podCount {
+				g.Eventually(errors).Should(gomega.Receive(&err))
+				g.Expect(err).NotTo(gomega.HaveOccurred())
+			}
+
+			// Build every addition against the same empty membership snapshot,
+			// then commit concurrently. Mutations must preserve every pod's port.
+			var transactions [][]ovsdb.Operation
+			var portUUIDs []string
+			for i := range podCount {
+				port, err := libovsdbops.GetLogicalSwitchPort(nbClient, &nbdb.LogicalSwitchPort{Name: fmt.Sprintf("pod-%d", i)})
+				g.Expect(err).NotTo(gomega.HaveOccurred())
+				portUUIDs = append(portUUIDs, port.UUID)
+				ops, err := bnc.addPodToNamespacePortGroupOps(nil, namespace.Name, port.UUID)
+				g.Expect(err).NotTo(gomega.HaveOccurred())
+				transactions = append(transactions, ops)
+			}
+			start = make(chan struct{})
+			for _, ops := range transactions {
+				go func() {
+					<-start
+					_, err := libovsdbops.TransactAndCheck(nbClient, ops)
+					errors <- err
+				}()
+			}
+			close(start)
+			for range podCount {
+				g.Eventually(errors).Should(gomega.Receive(&err))
+				g.Expect(err).NotTo(gomega.HaveOccurred())
+			}
+			g.Eventually(func() ([]string, error) {
+				pg, err := libovsdbops.GetPortGroup(nbClient, &nbdb.PortGroup{Name: bnc.getNamespacePortGroupName(namespace.Name)})
+				if err != nil {
+					return nil, err
+				}
+				return pg.Ports, nil
+			}).Should(gomega.ConsistOf(portUUIDs))
+		})
 	}
 }
 

@@ -18,15 +18,9 @@ import (
 	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	libovsdbutil "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/nbdb"
-	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/syncmap"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 	utilerrors "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util/errors"
 )
-
-// namespacePortGroupLocks serializes create/mutate/delete transactions for one
-// namespace port group. The OVSDB model client lookup+insert path is not atomic
-// across concurrent pod workers that all discover a missing port group.
-var namespacePortGroupLocks = syncmap.NewSyncMap[struct{}]()
 
 // namespaceInfo contains information related to a Namespace. Use oc.getNamespaceLocked()
 // or oc.waitForNamespaceLocked() to get a locked namespaceInfo for a Namespace, and call
@@ -364,9 +358,6 @@ func (bnc *BaseNetworkController) updateNamespaceAclLogging(ns, aclAnnotation st
 // createNamespacePortGroup should only create a port group if it doesn't exist already,
 // all ports and acls will be added by pod/multicast/egressfirewall/etc handlers.
 func (bnc *BaseNetworkController) createNamespacePortGroup(ns string) (string, error) {
-	unlockNamespacePortGroup := bnc.lockNamespacePortGroup(ns)
-	defer unlockNamespacePortGroup()
-
 	pgIDs := getNamespacePortGroupDbIDs(ns, bnc.controllerName)
 	// create empty port group if it doesn't exist
 	pg := libovsdbutil.BuildPortGroup(pgIDs, nil, nil)
@@ -384,15 +375,4 @@ func getNamespacePortGroupDbIDs(ns string, controller string) *libovsdbops.DbObj
 
 func (bnc *BaseNetworkController) getNamespacePortGroupName(namespace string) string {
 	return libovsdbutil.GetPortGroupName(getNamespacePortGroupDbIDs(namespace, bnc.controllerName))
-}
-
-func (bnc *BaseNetworkController) lockNamespacePortGroup(ns string) func() {
-	if !bnc.needNamespacedPortGroup() {
-		return func() {}
-	}
-	key := bnc.controllerName + "/" + ns
-	namespacePortGroupLocks.LockKey(key)
-	return func() {
-		namespacePortGroupLocks.UnlockKey(key)
-	}
 }

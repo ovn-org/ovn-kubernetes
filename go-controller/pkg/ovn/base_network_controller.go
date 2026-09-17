@@ -832,9 +832,6 @@ func (bnc *BaseNetworkController) deleteNamespaceLocked(ns string) (*namespaceIn
 		return nil, nil
 	}
 	if nsInfo.portGroupName != "" {
-		unlockNamespacePortGroup := bnc.lockNamespacePortGroup(ns)
-		defer unlockNamespacePortGroup()
-
 		err := libovsdbops.DeletePortGroups(bnc.nbClient, nsInfo.portGroupName)
 		if err != nil {
 			nsInfo.Unlock()

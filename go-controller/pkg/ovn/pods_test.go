@@ -2017,7 +2017,8 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName)
 				}, 2).Should(gomega.MatchJSON(t.getAnnotationsJson()))
 				key := t.namespace + "/" + t.podName
-				retry.CheckRetryObjectEventually(key, true, fakeOvn.controller.retryPods)
+				gomega.Eventually(fakeOvn.fakeRecorder.Events).Should(
+					gomega.Receive(gomega.ContainSubstring("failed to add pod port")))
 				_, err = libovsdbops.GetPortGroup(fakeOvn.nbClient,
 					&nbdb.PortGroup{Name: fakeOvn.controller.getNamespacePortGroupName(t.namespace)})
 				gomega.Expect(err).To(gomega.HaveOccurred())
@@ -2028,8 +2029,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 						&nbdb.PortGroup{Name: fakeOvn.controller.getNamespacePortGroupName(t.namespace)})
 					return err
 				}).Should(gomega.Succeed())
-				retry.SetRetryObjWithNoBackoff(key, fakeOvn.controller.retryPods)
-				fakeOvn.controller.retryPods.RequestRetryObjs()
+				fakeOvn.controller.podReconciler.ReconcileNetwork(key, ovntypes.DefaultNetworkName)
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(
 					getDefaultNetExpectedDataPodsSwitchesPortGroup([]testPod{t}, []string{"node1"}, namespaceT.Name)))
 
