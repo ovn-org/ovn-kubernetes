@@ -645,6 +645,34 @@ var _ = ginkgo.Describe("VRF manager", func() {
 			gomega.Expect(c.vrfs[getLinkIndex(vrfLinkName1)].routes).To(gomega.ConsistOf(previous))
 		})
 
+		ginkgo.It("does not untrack the unreachable default that shares the key of a deleted ECMP default", func() {
+			vrfTable := int(getVRFTable(vrfLinkName1))
+			enslaveLinkMock1.On("Attrs").Return(&netlink.LinkAttrs{Name: enslaveLinkName1, MasterIndex: getLinkIndex(vrfLinkName1), Index: getLinkIndex(enslaveLinkName1)}, nil)
+			nlMock.On("RouteListFiltered", mock.Anything, mock.Anything, mock.Anything).Return(nil, nil)
+			nlMock.On("RouteReplace", mock.Anything).Return(nil)
+			nlMock.On("RouteDel", mock.Anything).Return(nil)
+			// Both routes have no link index of their own and the same
+			// destination and table.
+			unreachable := netlink.Route{
+				Dst: ovntest.MustParseIPNet("0.0.0.0/0"), Table: vrfTable,
+				Priority: 4278198272, Type: unix.RTN_UNREACHABLE,
+			}
+			ecmp := netlink.Route{
+				Dst: ovntest.MustParseIPNet("0.0.0.0/0"), Table: vrfTable,
+				MultiPath: []*netlink.NexthopInfo{
+					{LinkIndex: getLinkIndex(enslaveLinkName1), Gw: net.ParseIP("192.168.1.1")},
+					{LinkIndex: getLinkIndex(enslaveLinkName1), Gw: net.ParseIP("192.168.1.2")},
+				},
+			}
+			err := c.AddVRF(vrfLinkName1, enslaveLinkName1, getVRFTable(vrfLinkName1), []netlink.Route{unreachable, ecmp})
+			gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+
+			gomega.Expect(c.DeleteVRFRoutes(vrfLinkName1, []netlink.Route{ecmp})).To(gomega.Succeed())
+			tracked := unreachable
+			tracked.Protocol = netlink.RouteProtocol(types.OVNKProtocol)
+			gomega.Expect(c.vrfs[getLinkIndex(vrfLinkName1)].routes).To(gomega.ConsistOf(tracked))
+		})
+
 		ginkgo.It("does not delete a VRF whose slave release failed", func() {
 			slaveLinkIndex := getLinkIndex(enslaveLinkName1)
 			enslaveLinkMock1.On("Attrs").Return(&netlink.LinkAttrs{Name: enslaveLinkName1, MasterIndex: getLinkIndex(vrfLinkName1), Index: slaveLinkIndex}, nil)
