@@ -414,13 +414,38 @@ report apply success/failure. A `NetworkQoS` can be both `Ready` and carry
 `UnsupportedConfiguration: "True"` (its supported rules applied successfully
 while an unsupported destination form was ignored).
 
+### Prerequisite: level-driven source reconciliation
+
+This feature has a hard functional dependency on a **refactor of the existing
+NetworkQoS controller to make source reconciliation level-driven** rather than
+edge-driven. Without it, the "pod appears after the policy" behaviour that the
+KubeVirt use cases require (step 3 in [Implementation Details](#implementation-details))
+does not work on ipamless networks, so this prerequisite is in scope for, and must
+land as part of, this effort.
+
+**What the refactor must do.** Source reconciliation must converge to desired
+state on every requeue instead of depending on an IP-count edge:
+
+- A selected source pod whose LSP is not yet in the NB is treated as a transient
+  error and the object is re-queued until the port lands - no external event or
+  user action required.
+- The relevance filter must key on attachment / port presence rather than an
+  IP-count delta, so the "LSP ready" update is not dropped on ipamless networks.
+
+The rejected alternative - triggering solely off a pod-annotation edge - is
+recorded in [Alternatives](#alternatives): the `k8s.ovn.org/pod-networks`
+annotation is written before the LSP is transacted into the NB, so there is no
+reliable edge on which to key, which is what forces the level-driven approach.
+
 ### Implementation Details
 
 The change centers on the NetworkQoS controller. It replaces the single decision
 of *how to identify the source of a packet* - previously an IP address set - with
 **membership in an OVN port group**, unconditionally on every network type.
 Destination matching keeps both existing forms (`ipBlock` literal; address set
-for pod/namespace selectors), with the latter gated on IPAM.
+for pod/namespace selectors), with the latter gated on IPAM. It also depends on
+the [level-driven source-reconciliation refactor](#prerequisite-level-driven-source-reconciliation)
+described above.
 
 At a high level, the controller:
 
@@ -439,9 +464,11 @@ At a high level, the controller:
    VM created or migrated *after* its `NetworkQoS` already exists, so the pod's
    port may not be in OVN yet when the controller first tries to add it. The
    controller treats "pod is attached but its port is not present yet" as a
-   transient condition and lets the existing work queue retry until the port
-   lands - no external event or user action required. (The rejected alternative
-   and the reasoning are in [Alternatives](#alternatives).)
+   transient condition and re-queues the object until the port lands - no external
+   event or user action required. This depends on the
+   [level-driven source-reconciliation refactor](#prerequisite-level-driven-source-reconciliation),
+   without which the "LSP ready" update is filtered out on ipamless networks. (The
+   rejected alternative and the reasoning are in [Alternatives](#alternatives).)
 4. **Tears down in order.** On delete, the QoS rules are removed from the switch
    first and the source port group afterwards, so no live object ever references
    a deleted one. The port group participates in the same ownership-keyed garbage
@@ -747,7 +774,24 @@ supplies the IP (the user vs. the controller).
      per [OKEP-6224](okep-6224-dhcp-ipam-localnet.md), or static-IP propagation)
      rather than by inferring IPs the controller does not manage.
 
-**Why none of these was chosen.** The MAC-set match becomes spoofable once
+**Reconciling source pods that appear after the policy.** Independently of *how*
+the source is matched, the controller must react when a selected pod's LSP lands
+in the NB after the `NetworkQoS` already exists (see
+[Prerequisite](#prerequisite-level-driven-source-reconciliation)). Two designs
+were weighed:
+
+1. **Edge-driven off the pod annotation (rejected).** Trigger source
+   (re)configuration when `k8s.ovn.org/pod-networks` is written. Rejected because
+   the annotation is written *before* the pod's LSP is transacted into the NB, so
+   the annotation edge does not coincide with LSP readiness - there is no reliable
+   edge to key on, and configuration would still fail with `ErrNotFound`.
+2. **Level-driven transient-error retry (chosen).** Treat "selected but LSP not
+   yet present" as a transient error and re-queue until the port lands, keying the
+   relevance filter on attachment/port presence rather than an IP-count delta.
+   This converges regardless of event ordering and is the approach adopted by the
+   prerequisite refactor.
+
+**Why none of these source-matching approaches was chosen.** The MAC-set match becomes spoofable once
 disable-MAC-spoofing lands; the IP-dependent approaches preserve the full
 destination feature set but reintroduce the IP-management burden, spoofable match
 criteria, and eventual-consistency gaps this proposal sets out to avoid. The
