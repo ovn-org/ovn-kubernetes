@@ -26,7 +26,6 @@ import (
 const (
 	logSeverityAnnotation = "k8s.ovn.org/acl-logging"
 	maxPokeRetries        = 15
-	ovnControllerLogPath  = "/var/log/openvswitch/ovn-controller.log"
 	pokeInterval          = 1 * time.Second
 )
 
