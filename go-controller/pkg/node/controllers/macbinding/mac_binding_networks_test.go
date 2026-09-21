@@ -47,7 +47,7 @@ func primaryUDN(g gomega.Gomega, name, nadKey, uplink string) util.NetInfo {
 // point, reconcileNetwork: the NAD-event dispatch and, via the "" key, the gather
 // + source-resolution + port-validation pipeline that feeds the allocation engine.
 // It asserts the resulting follower/port state and the keys enqueued on the
-// mac-binding and network reconcilers. TestUpdateFollowers covers the
+// mac-binding, network and node-IPs reconcilers. TestUpdateFollowers covers the
 // allocation engine's relocation scenarios in isolation.
 func TestReconcileNetworks(t *testing.T) {
 	g := gomega.NewWithT(t)
@@ -92,6 +92,11 @@ func TestReconcileNetworks(t *testing.T) {
 		// wantNetEnqueued is the set of keys re-enqueued on the network reconciler
 		// (the dispatch early-outs enqueue "" for a full reconcile).
 		wantNetEnqueued []string
+		// wantStaticEnqueued is the set of keys enqueued on the static reconciler: a
+		// follower key for each new follower (to ensure its static bindings) and each
+		// removed port (to clean them up). A newly designated source is not cleaned: it
+		// keeps the bindings it inherited as a follower (maintained update-only).
+		wantStaticEnqueued []string
 		// wantTrackedPorts is the full set of tracked ports (sources + followers)
 		// after the reconcile; nil skips the assertion.
 		wantTrackedPorts []string
@@ -125,18 +130,20 @@ func TestReconcileNetworks(t *testing.T) {
 			name:               "full reconcile mirrors the CDN onto a primary UDN follower",
 			primaryNetworks:    map[string]util.NetInfo{"ns1": udn},
 			sbPorts:            []string{cdnPort, udnPort},
-			reconcileKey:     "",
-			wantMbEnqueued:   []string{udnPort},
-			wantTrackedPorts: []string{cdnPort, udnPort},
-			wantFollowers:    map[string][]string{cdnPort: {udnPort}},
+			reconcileKey:       "",
+			wantMbEnqueued:     []string{udnPort},
+			wantStaticEnqueued: []string{udnPort}, // new follower's static bindings ensured
+			wantTrackedPorts:   []string{cdnPort, udnPort},
+			wantFollowers:      map[string][]string{cdnPort: {udnPort}},
 		},
 		{
 			name:               "full reconcile cleans up a follower whose port left the SB",
 			primaryNetworks:    map[string]util.NetInfo{"ns1": udn},
-			sbPorts:          []string{cdnPort}, // udnPort's PortBinding is gone
-			preFollowers:     map[string][]string{cdnPort: {udnPort}},
-			reconcileKey:     "",
-			wantTrackedPorts: []string{cdnPort},
+			sbPorts:            []string{cdnPort}, // udnPort's PortBinding is gone
+			preFollowers:       map[string][]string{cdnPort: {udnPort}},
+			reconcileKey:       "",
+			wantStaticEnqueued: []string{udnPort}, // removed follower is cleaned up
+			wantTrackedPorts:   []string{cdnPort},
 		},
 		{
 			// The full-reconcile removal-by-difference path: udn was deleted, so
@@ -148,20 +155,22 @@ func TestReconcileNetworks(t *testing.T) {
 			name:               "full reconcile removes a stale unknown-bucket port for a deleted network",
 			primaryNetworks:    map[string]util.NetInfo{}, // udn deleted
 			sbPorts:            []string{cdnPort},         // udnPort's PortBinding is gone
-			preFollowers:     map[string][]string{cdnPort: {}, "unknown": {udnPort}},
-			reconcileKey:     "",
-			wantTrackedPorts: []string{cdnPort}, // unknown bucket cleared
-			wantFollowers:    map[string][]string{cdnPort: nil},
+			preFollowers:       map[string][]string{cdnPort: {}, "unknown": {udnPort}},
+			reconcileKey:       "",
+			wantStaticEnqueued: []string{udnPort}, // stale port cleaned up
+			wantTrackedPorts:   []string{cdnPort}, // unknown bucket cleared
+			wantFollowers:      map[string][]string{cdnPort: nil},
 		},
 		{
 			name:               "full reconcile mirrors the designated uplink source onto the other member",
 			primaryNetworks:    map[string]util.NetInfo{"nsA": cudnA, "nsB": cudnB},
 			uplinkSources:      map[string]string{"uplinkA": portA},
 			sbPorts:            []string{cdnPort, portA, portB},
-			reconcileKey:     "",
-			wantMbEnqueued:   []string{portB},
-			wantTrackedPorts: []string{cdnPort, portA, portB},
-			wantFollowers:    map[string][]string{portA: {portB}},
+			reconcileKey:       "",
+			wantMbEnqueued:     []string{portB},
+			wantStaticEnqueued: []string{portB}, // new follower's static bindings ensured
+			wantTrackedPorts:   []string{cdnPort, portA, portB},
+			wantFollowers:      map[string][]string{portA: {portB}},
 		},
 		{
 			// The trickiest branch driven end to end: the uplink's designated
@@ -175,10 +184,11 @@ func TestReconcileNetworks(t *testing.T) {
 			sbPorts:            []string{cdnPort, portA, portB},
 			preFollowers:       map[string][]string{cdnPort: {}, portA: {portB}},
 			reconcileKey:       "",
-			dirtyUplinkSource: true,
-			wantMbEnqueued:    []string{portA}, // old source becomes a follower under portB
-			wantTrackedPorts:  []string{cdnPort, portA, portB},
-			wantFollowers:     map[string][]string{portB: {portA}},
+			dirtyUplinkSource:  true,
+			wantMbEnqueued:     []string{portA}, // old source becomes a follower under portB
+			wantStaticEnqueued: []string{portA}, // ...and its static bindings are ensured
+			wantTrackedPorts:   []string{cdnPort, portA, portB},
+			wantFollowers:      map[string][]string{portB: {portA}},
 		},
 		{
 			name:             "full reconcile skips a network whose port is absent from the SB",
@@ -214,10 +224,17 @@ func TestReconcileNetworks(t *testing.T) {
 			g.Expect(err).NotTo(gomega.HaveOccurred())
 			defer cleanup.Cleanup()
 
+			// a full reconcile runs the one-shot repair, which needs an NB client.
+			nbClient, nbCleanup, err := libovsdbtest.NewNBTestHarness(libovsdbtest.TestSetup{}, nil)
+			g.Expect(err).NotTo(gomega.HaveOccurred())
+			defer nbCleanup.Cleanup()
+
 			mbRec, mbR := startRecorder(g, "mb")
 			defer controller.Stop(mbR)
 			netRec, netR := startRecorder(g, "network")
 			defer controller.Stop(netR)
+			staticRec, staticR := startRecorder(g, "static")
+			defer controller.Stop(staticR)
 
 			// A non-nil (possibly empty) sources map is required: a nil map makes
 			// the provider skip the default "" -> CDN mapping.
@@ -228,6 +245,7 @@ func TestReconcileNetworks(t *testing.T) {
 
 			c := newTestController()
 			c.sbClient = sbClient
+			c.nbClient = nbClient
 			c.networkManager = &networkmanager.FakeNetworkManager{
 				PrimaryNetworks: tt.primaryNetworks,
 				NADNetworks:     tt.nadNetworks,
@@ -235,6 +253,7 @@ func TestReconcileNetworks(t *testing.T) {
 			c.cdnGatewayPort = cdnPort
 			c.dynamicMacBindingReconciler = mbR
 			c.networkReconciler = netR
+			c.staticMacBindingReconciler = staticR
 			c.uplinkSourceProvider = &fakeUplinkSourceProvider{sources: sources}
 			for source, followers := range tt.preFollowers {
 				c.followers[source] = sets.New(followers...)
@@ -260,6 +279,14 @@ func TestReconcileNetworks(t *testing.T) {
 			} else {
 				g.Eventually(netRec.got).Should(gomega.ConsistOf(tt.wantNetEnqueued))
 			}
+			// Keys enqueued on the static reconciler: new followers to ensure and
+			// removed ports to clean up.
+			if len(tt.wantStaticEnqueued) == 0 {
+				g.Consistently(staticRec.got).Should(gomega.BeEmpty())
+			} else {
+				g.Eventually(staticRec.got).Should(gomega.ConsistOf(tt.wantStaticEnqueued))
+			}
+
 			// Resulting follower/port state.
 			for source, followers := range tt.wantFollowers {
 				g.Expect(c.getFollowers(source)).To(gomega.ConsistOf(followers))

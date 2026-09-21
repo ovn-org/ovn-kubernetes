@@ -20,31 +20,41 @@
 //     CUDNs; the source is designated externally and reported through
 //     ReconcileUplinkSource.
 //
+// Alongside these mirrored (dynamic) bindings, the controller also writes
+// static MAC bindings for node IPs on each uplink segment, rather than
+// mirroring dynamic bindings for them which would not scale on large clusters.
+// Only the default uplink is supported for now.
+//
 // The controller reconciles on events:
 //
 //   - From Network Manager: network additions or deletions
 //   - From uplinkSourceProvider: changes on designated sources for uplinks
 //   - From SBDB: external GR port binding additions or deletions
 //   - From SBDB: mac binding updates
+//   - From the node informer: node IP or gateway MAC changes, or node deletions
 //
 // The controller requires the SBDB MAC binding table to be monitored and
-// a secondary index on logical_port for the table.
+// secondary indexes on logical_port for the SBDB MAC_Binding and NBDB
+// Static_MAC_Binding tables.
 package macbinding
 
 import (
 	"fmt"
+	"maps"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 
 	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/controller"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
@@ -59,9 +69,14 @@ const (
 	keySep = "|"
 )
 
-// MACBindingController mirrors dynamic MAC bindings across a node's networks.
-// See the package doc for the design.
+// repair done once per run
+var repair sync.Once
+
+// MACBindingController mirrors dynamic MAC bindings and writes static node-IP MAC
+// bindings across a node's networks. See the package doc for the design.
 type MACBindingController struct {
+	watchFactory         factory.NodeWatchFactory
+	nbClient             libovsdbclient.Client
 	sbClient             libovsdbclient.Client
 	networkManager       networkmanager.Interface
 	uplinkSourceProvider uplinkSourceProvider
@@ -72,6 +87,10 @@ type MACBindingController struct {
 	dynamicMacBindingReconciler        controller.Reconciler
 	dynamicMacBindingRefreshReconciler controller.Reconciler
 	networkReconciler                  controller.Reconciler
+	nodeIPsReconciler                  controller.Reconciler
+	staticMacBindingReconciler         controller.Reconciler
+
+	nodeEventHandler cache.ResourceEventHandlerRegistration
 
 	// macBindingSourceForUplinks memoizes the uplink->source designation
 	// provided by the uplinkSourceProvider.
@@ -92,6 +111,9 @@ type MACBindingController struct {
 	// an unknown source the controller does full network reconciliations since
 	// it needs the complete picture to re-allocate.
 	followers map[string]sets.Set[string]
+
+	// nodeIPs holds the desired node-IP static bindings as uplink->ip->mac
+	nodeIPs map[string]map[string]string
 }
 
 type uplinkSourceProvider interface {
@@ -100,18 +122,23 @@ type uplinkSourceProvider interface {
 
 // NewMACBindingController creates a new MACBindingController.
 func NewMACBindingController(
+	nbClient libovsdbclient.Client,
 	sbClient libovsdbclient.Client,
+	watchFactory factory.NodeWatchFactory,
 	networkManager networkmanager.Interface,
 	uplinkSourceProvider uplinkSourceProvider,
 	nodeName string,
 ) *MACBindingController {
 	c := &MACBindingController{
+		nbClient:             nbClient,
 		sbClient:             sbClient,
+		watchFactory:         watchFactory,
 		networkManager:       networkManager,
 		uplinkSourceProvider: uplinkSourceProvider,
 		nodeName:             nodeName,
 		cdnGatewayPort:       util.GetNetworkScopedGWRouterExtPortName(types.DefaultNetworkName, nodeName),
 		followers:            map[string]sets.Set[string]{},
+		nodeIPs:              map[string]map[string]string{},
 	}
 
 	c.dynamicMacBindingReconciler = controller.NewReconciler(
@@ -145,6 +172,24 @@ func NewMACBindingController(
 		},
 	)
 
+	c.nodeIPsReconciler = controller.NewReconciler(
+		"mac-binding-node-ips-reconciler",
+		&controller.ReconcilerConfig{
+			Reconcile:   c.reconcileNodeIPs,
+			Threadiness: 1,
+			MaxAttempts: controller.InfiniteAttempts,
+		},
+	)
+
+	c.staticMacBindingReconciler = controller.NewReconciler(
+		"mac-binding-static-reconciler",
+		&controller.ReconcilerConfig{
+			Reconcile:   c.reconcileStaticMacBindings,
+			Threadiness: 1,
+			MaxAttempts: controller.InfiniteAttempts,
+		},
+	)
+
 	return c
 }
 
@@ -165,11 +210,18 @@ func (c *MACBindingController) Run(stopCh <-chan struct{}) error {
 	c.networkManager.RegisterNADReconciler(c.networkReconciler)
 	c.registerSouthBoundEventHandlers()
 
+	if err := c.registerNodeIPsHandlers(); err != nil {
+		return fmt.Errorf("failed to register node nodeIPs handlers: %w", err)
+	}
+	defer c.deRegisterNodeIPsHandlers()
+
 	// start the reconcilers
 	reconcilers := []controller.Reconciler{
 		c.dynamicMacBindingReconciler,
 		c.dynamicMacBindingRefreshReconciler,
 		c.networkReconciler,
+		c.nodeIPsReconciler,
+		c.staticMacBindingReconciler,
 	}
 	if err := controller.Start(reconcilers...); err != nil {
 		return fmt.Errorf("failed to start MAC Binding controller: %w", err)
@@ -179,6 +231,11 @@ func (c *MACBindingController) Run(stopCh <-chan struct{}) error {
 	<-stopCh
 	klog.Info("Stopping MAC Binding controller...")
 	return nil
+}
+
+func (c *MACBindingController) repair(knownPorts sets.Set[string]) {
+	// delete stale static mac bindings
+	c.repairStaticMacBindings(knownPorts)
 }
 
 // ReconcileUplinkSource is called by the uplinkSourceProvider to report that
@@ -257,6 +314,44 @@ func (c *MACBindingController) doReconcileDynamicMacBindings(key string, warnDel
 	}
 }
 
+// --- static mac bindings ----------------------------------------------
+
+// reconcileStaticMacBindings handles the reconciliation of static mac bindings:
+//   - apply or remove a node IP static mac binding where key is "<uplink>|<ip>"
+//   - ensure or remove a follower's static mac bindings where key is "<follower>"
+func (c *MACBindingController) reconcileStaticMacBindings(key string) error {
+	parts := strings.Split(key, keySep)
+	switch len(parts) {
+	case 2:
+		uplink := parts[0]
+		ip := parts[1]
+		return c.syncStaticMacBinding(uplink, ip)
+	default:
+		follower := parts[0]
+		return c.syncFollowerStaticMacBindings(follower)
+	}
+}
+
+func (c *MACBindingController) enqueueStaticMacBinding(uplink, ip string) {
+	c.staticMacBindingReconciler.Reconcile(uplink + keySep + ip)
+}
+
+func (c *MACBindingController) enqueueFollowerStaticMacBindings(follower string) {
+	c.staticMacBindingReconciler.Reconcile(follower)
+}
+
+// --- node IPs recompute ------------------------------------------------
+
+// reconcileNodeIPs recomputes the node-IP ip->mac map for an uplink where the
+// key is "<uplink>".
+func (c *MACBindingController) reconcileNodeIPs(key string) error {
+	return c.syncNodeIPsForUplink(key)
+}
+
+func (c *MACBindingController) enqueueNodeIPs(uplink string) {
+	c.nodeIPsReconciler.Reconcile(uplink)
+}
+
 // --- locked state accessors ---------------------------------------------
 
 // tracksSource reports whether source is a designated source, i.e. it is present
@@ -331,6 +426,16 @@ func (c *MACBindingController) getSourceForPort(port string) string {
 	return ""
 }
 
+// getUplinkForSource returns the uplink that source is designated for.
+func (c *MACBindingController) getUplinkForSource(source string) (string, bool) {
+	for uplink, s := range c.getMacBindingSourceForUplinks() {
+		if s == source {
+			return uplink, true
+		}
+	}
+	return "", false
+}
+
 // hasUnknownSource reports whether a full network reconcile is due to resolve
 // sources: either followers are parked in the unknownSource bucket, or the
 // uplink->source designation cache is invalidated.
@@ -341,6 +446,32 @@ func (c *MACBindingController) hasUnknownSource() bool {
 		return true
 	}
 	return !isValidBindingSourceForUplinks(c.macBindingSourceForUplinks.Load())
+}
+
+// getNodeIPMAC returns the cached MAC for a node ip on uplink. A false ok means
+// the ip is no longer a node IP there and must be deleted from followers.
+func (c *MACBindingController) getNodeIPMAC(uplink, ip string) (string, bool) {
+	c.RLock()
+	defer c.RUnlock()
+	mac, ok := c.nodeIPs[uplink][ip]
+	return mac, ok
+}
+
+// getNodeIPMACs returns a copy of the cached ip->mac map for uplink, for
+// catching a newly allocated follower up on the whole set.
+func (c *MACBindingController) getNodeIPMACs(uplink string) map[string]string {
+	c.RLock()
+	defer c.RUnlock()
+	return maps.Clone(c.nodeIPs[uplink])
+}
+
+// isNodeIP reports whether ip is a node IP on uplink, i.e. it has a static MAC
+// binding there and so must not also be mirrored dynamically.
+func (c *MACBindingController) isNodeIP(uplink, ip string) bool {
+	c.RLock()
+	defer c.RUnlock()
+	_, ok := c.nodeIPs[uplink][ip]
+	return ok
 }
 
 func (c *MACBindingController) invalidateBindingSourceForUplinks() {

@@ -27,6 +27,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/validation"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 	kexec "k8s.io/utils/exec"
@@ -2374,7 +2375,34 @@ func completeGatewayConfig(allSubnets *ConfigSubnets, masqueradeIPs *MasqueradeI
 	allSubnets.Append(ConfigSubnetMasquerade, v4MasqueradeCIDR)
 	allSubnets.Append(ConfigSubnetMasquerade, v6MasqueradeCIDR)
 
+	// Precompute the set consumed by IsGatewayStaticMACBindingIP now that the
+	// masquerade IPs are final; this is the only place they are finalized.
+	gatewayStaticMACBindingIPs = sets.New[string]()
+	for _, ip := range []net.IP{
+		masqueradeIPs.V4DummyNextHopMasqueradeIP,
+		masqueradeIPs.V6DummyNextHopMasqueradeIP,
+		masqueradeIPs.V4HostMasqueradeIP,
+		masqueradeIPs.V6HostMasqueradeIP,
+	} {
+		if ip != nil {
+			gatewayStaticMACBindingIPs.Insert(ip.String())
+		}
+	}
+
 	return nil
+}
+
+// gatewayStaticMACBindingIPs is the precomputed set of masquerade IP strings
+// the gateway programs as static MAC bindings on gateway router external ports,
+// populated by completeGatewayConfig. Read it through
+// IsGatewayStaticMACBindingIP.
+var gatewayStaticMACBindingIPs sets.Set[string]
+
+// IsGatewayStaticMACBindingIP reports whether ip is one of the masquerade IPs
+// the gateway programs as static MAC bindings on gateway router external ports
+// (the dummy next-hop and host masquerade IPs).
+func IsGatewayStaticMACBindingIP(ip string) bool {
+	return gatewayStaticMACBindingIPs.Has(ip)
 }
 
 func buildOVNKubernetesFeatureConfig(cli, file *config) error {

@@ -72,12 +72,13 @@ func (f *fakeUplinkSourceProvider) GetMacBindingSourceForUplinks() map[string]st
 
 // newTestController builds a controller wired only with the fields the
 // method-level tests exercise, bypassing NewMACBindingController (which needs a
-// live networkManager).
+// live networkManager and watchFactory).
 func newTestController() *MACBindingController {
 	return &MACBindingController{
 		uplinkSourceProvider: &fakeUplinkSourceProvider{sources: map[string]string{}},
 		nodeName:             "node1",
 		followers:            map[string]sets.Set[string]{},
+		nodeIPs:              map[string]map[string]string{},
 	}
 }
 

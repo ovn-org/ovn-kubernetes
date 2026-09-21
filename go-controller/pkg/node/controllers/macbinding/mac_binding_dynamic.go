@@ -44,8 +44,12 @@ type macTimestamp struct {
 // is the source staleness beyond which the mirror warns about a backlog.
 func (c *MACBindingController) syncDynamicMacBinding(source, ip string, warnDelayThresholdMs int) error {
 	if !ipFamilyEnabled(ip) {
-		// skip disabled IP families, and node IPs which are covered by static
-		// MAC bindings and must not be mirrored dynamically too
+		return nil
+	}
+	uplink, hasUplink := c.getUplinkForSource(source)
+	if !hasUplink || c.isNodeIP(uplink, ip) {
+		// node IPs are covered by static MAC bindings, don't mirror them
+		// dynamically too
 		return nil
 	}
 	start := time.Now()
@@ -115,10 +119,16 @@ func (c *MACBindingController) syncDynamicMacBindingsFromSourceToFollower(source
 	if len(mbs) == 0 {
 		return nil
 	}
+	uplink, _ := c.getUplinkForSource(source)
 	macBindings := map[string]macTimestamp{}
 	for _, mb := range mbs {
 		if !ipFamilyEnabled(mb.IP) {
 			// don't mirror MAC bindings for a disabled IP family
+			continue
+		}
+		if c.isNodeIP(uplink, mb.IP) {
+			// node IPs are covered by static MAC bindings, don't mirror them
+			// dynamically too
 			continue
 		}
 		macBindings[mb.IP] = macTimestamp{mac: mb.MAC, timestamp: mb.Timestamp}

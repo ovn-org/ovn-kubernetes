@@ -76,7 +76,7 @@ func (c *MACBindingController) syncAllNetworks() error {
 
 // processNetworks reconciles the given networks, or all of them when none are
 // given, reconciling the follower map against the networks' ports currently in
-// SBDB and enqueuing follower syncs for the resulting changes.
+// SBDB and enqueuing follower syncs and cleanups for the resulting changes.
 func (c *MACBindingController) processNetworks(networks ...string) error {
 	knownPorts := sets.New[string]()
 	portToUplink := map[string]string{}
@@ -123,9 +123,23 @@ func (c *MACBindingController) processNetworks(networks ...string) error {
 	uplinkToSource := c.getMacBindingSourceForUplinks()
 	newFollowers := c.updateFollowers(addPorts, removePorts, portToUplink, uplinkToSource)
 
-	// sync mac bindings of new followers
+	// sync the dynamic mirror and static bindings of new followers. The static
+	// side goes to the static reconciler so it serializes with removals.
 	for follower := range newFollowers {
 		c.enqueueFollowerDynamicMacBindings(follower)
+		c.enqueueFollowerStaticMacBindings(follower)
+	}
+
+	// clean up node-IP static mac bindings of removed ports. A promoted source is
+	// not cleaned: it keeps the bindings it inherited as a follower, maintained
+	// update-only (see syncStaticMacBinding).
+	for port := range removePorts {
+		c.enqueueFollowerStaticMacBindings(port)
+	}
+
+	// repair after first full reconcile
+	if fullReconcile {
+		repair.Do(func() { c.repair(validPorts) })
 	}
 
 	return nil
