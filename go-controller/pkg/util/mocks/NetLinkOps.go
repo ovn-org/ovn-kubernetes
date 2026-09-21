@@ -933,6 +933,24 @@ func (_m *NetLinkOps) RouteAdd(route *netlink.Route) error {
 	return r0
 }
 
+// RouteAppend provides a mock function with given fields: route
+func (_m *NetLinkOps) RouteAppend(route *netlink.Route) error {
+	ret := _m.Called(route)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RouteAppend")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(*netlink.Route) error); ok {
+		r0 = rf(route)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
 // RouteDel provides a mock function with given fields: route
 func (_m *NetLinkOps) RouteDel(route *netlink.Route) error {
 	ret := _m.Called(route)

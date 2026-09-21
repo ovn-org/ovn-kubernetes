@@ -160,6 +160,10 @@ var _ = ginkgo.Describe("VRF manager", func() {
 				Flags:     unix.RTNH_F_ONLINK | unix.RTNH_F_LINKDOWN,
 				Table:     unix.RT_TABLE_MAIN,
 			}
+			// A second default route toward another gateway, sharing the
+			// kernel key of the first: both must survive the migration.
+			secondDefaultRoute := dhcpDefaultRoute
+			secondDefaultRoute.Gw = net.ParseIP("192.168.2.2")
 			dhcpGatewayHostRoute := netlink.Route{
 				LinkIndex: slaveLinkIndex,
 				Dst:       ovntest.MustParseIPNet("192.168.2.1/32"),
@@ -213,9 +217,9 @@ var _ = ginkgo.Describe("VRF manager", func() {
 					return filter.Table == unix.RT_TABLE_MAIN
 				}),
 				uint64(netlink.RT_FILTER_TABLE),
-			).Return([]netlink.Route{dhcpDefaultRoute, kernelConnectedRoute, bgpRoute, dhcpGatewayHostRoute, ecmpRoute, mixedInterfacesEcmpRoute}, nil)
+			).Return([]netlink.Route{dhcpDefaultRoute, secondDefaultRoute, kernelConnectedRoute, bgpRoute, dhcpGatewayHostRoute, ecmpRoute, mixedInterfacesEcmpRoute}, nil)
 			nlMock.On("LinkSetMaster", enslaveLinkMock1, buildVRF(vrfLinkName1)).Return(nil)
-			nlMock.On("RouteAdd", mock.Anything).Return(nil)
+			nlMock.On("RouteAppend", mock.Anything).Return(nil)
 
 			err := c.AddVRF(vrfLinkName1, enslaveLinkName1, getVRFTable(vrfLinkName1), nil)
 			gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
@@ -231,27 +235,30 @@ var _ = ginkgo.Describe("VRF manager", func() {
 			expectedDefaultRoute := dhcpDefaultRoute
 			expectedDefaultRoute.Table = int(getVRFTable(vrfLinkName1))
 			expectedDefaultRoute.Flags = unix.RTNH_F_ONLINK
+			expectedSecondDefaultRoute := expectedDefaultRoute
+			expectedSecondDefaultRoute.Gw = net.ParseIP("192.168.2.2")
 			expectedEcmpRoute := ecmpRoute
 			expectedEcmpRoute.Table = int(getVRFTable(vrfLinkName1))
 			expectedEcmpRoute.MultiPath = []*netlink.NexthopInfo{
 				{LinkIndex: slaveLinkIndex, Gw: net.ParseIP("192.168.1.1")},
 				{LinkIndex: slaveLinkIndex, Gw: net.ParseIP("192.168.1.2")},
 			}
-			nlMock.AssertCalled(ginkgo.GinkgoT(), "RouteAdd", &expectedConnectedRoute)
-			nlMock.AssertCalled(ginkgo.GinkgoT(), "RouteAdd", &expectedHostRoute)
-			nlMock.AssertCalled(ginkgo.GinkgoT(), "RouteAdd", &expectedDefaultRoute)
-			nlMock.AssertCalled(ginkgo.GinkgoT(), "RouteAdd", &expectedEcmpRoute)
-			nlMock.AssertNumberOfCalls(ginkgo.GinkgoT(), "RouteAdd", 4)
+			nlMock.AssertCalled(ginkgo.GinkgoT(), "RouteAppend", &expectedConnectedRoute)
+			nlMock.AssertCalled(ginkgo.GinkgoT(), "RouteAppend", &expectedHostRoute)
+			nlMock.AssertCalled(ginkgo.GinkgoT(), "RouteAppend", &expectedDefaultRoute)
+			nlMock.AssertCalled(ginkgo.GinkgoT(), "RouteAppend", &expectedSecondDefaultRoute)
+			nlMock.AssertCalled(ginkgo.GinkgoT(), "RouteAppend", &expectedEcmpRoute)
+			nlMock.AssertNumberOfCalls(ginkgo.GinkgoT(), "RouteAppend", 5)
 
 			// The gateway-less routes must be restored before the gateway
 			// routes that depend on them.
 			var restored []*netlink.Route
 			for _, call := range nlMock.Calls {
-				if call.Method == "RouteAdd" {
+				if call.Method == "RouteAppend" {
 					restored = append(restored, call.Arguments.Get(0).(*netlink.Route))
 				}
 			}
-			gomega.Expect(restored).To(gomega.Equal([]*netlink.Route{&expectedConnectedRoute, &expectedHostRoute, &expectedDefaultRoute, &expectedEcmpRoute}),
+			gomega.Expect(restored).To(gomega.Equal([]*netlink.Route{&expectedConnectedRoute, &expectedHostRoute, &expectedDefaultRoute, &expectedSecondDefaultRoute, &expectedEcmpRoute}),
 				"expected the gateway-less routes to be restored before the gateway routes that depend on them")
 		})
 
@@ -264,11 +271,11 @@ var _ = ginkgo.Describe("VRF manager", func() {
 				Dst:       ovntest.MustParseIPNet("2001:db8:1::/64"),
 				Table:     unix.RT_TABLE_MAIN,
 			}
-			nlMock.On("RouteAdd", mock.Anything).Return(unix.EINVAL).Once()
-			nlMock.On("RouteAdd", mock.Anything).Return(nil).Once()
+			nlMock.On("RouteAppend", mock.Anything).Return(unix.EINVAL).Once()
+			nlMock.On("RouteAppend", mock.Anything).Return(nil).Once()
 
-			gomega.Expect(addRouteWithRetry(&route)).To(gomega.Succeed())
-			nlMock.AssertNumberOfCalls(ginkgo.GinkgoT(), "RouteAdd", 2)
+			gomega.Expect(appendRouteWithRetry(&route)).To(gomega.Succeed())
+			nlMock.AssertNumberOfCalls(ginkgo.GinkgoT(), "RouteAppend", 2)
 		})
 
 		ginkgo.It("undoes the enslavement when the route restore into the VRF fails", func() {
@@ -293,8 +300,8 @@ var _ = ginkgo.Describe("VRF manager", func() {
 			nlMock.On("IsAlreadyExistsError", restoreErr).Return(false)
 			// The restore into the VRF table fails, the one back into the
 			// main table succeeds.
-			nlMock.On("RouteAdd", mock.Anything).Return(restoreErr).Once()
-			nlMock.On("RouteAdd", mock.Anything).Return(nil)
+			nlMock.On("RouteAppend", mock.Anything).Return(restoreErr).Once()
+			nlMock.On("RouteAppend", mock.Anything).Return(nil)
 			nlMock.On("LinkSetNoMaster", enslaveLinkMock1).Return(nil)
 
 			err := c.AddVRF(vrfLinkName1, enslaveLinkName1, getVRFTable(vrfLinkName1), nil)
@@ -303,8 +310,8 @@ var _ = ginkgo.Describe("VRF manager", func() {
 
 			// The captured route went back to the main table.
 			expectedRoute := dhcpDefaultRoute
-			nlMock.AssertCalled(ginkgo.GinkgoT(), "RouteAdd", &expectedRoute)
-			nlMock.AssertNumberOfCalls(ginkgo.GinkgoT(), "RouteAdd", 2)
+			nlMock.AssertCalled(ginkgo.GinkgoT(), "RouteAppend", &expectedRoute)
+			nlMock.AssertNumberOfCalls(ginkgo.GinkgoT(), "RouteAppend", 2)
 		})
 
 		ginkgo.It("adds another slave interface to an existing VRF", func() {
@@ -433,7 +440,7 @@ var _ = ginkgo.Describe("VRF manager", func() {
 				uint64(netlink.RT_FILTER_TABLE),
 			).Return([]netlink.Route{migratedDefaultRoute, migratedDefaultRouteV6, ovnManagedRoute, ovnManagedRouteV6, bgpLearnedRoute, kernelLocalRoute}, nil)
 			nlMock.On("LinkSetNoMaster", enslaveLinkMock1).Return(nil)
-			nlMock.On("RouteAdd", mock.Anything).Return(nil)
+			nlMock.On("RouteAppend", mock.Anything).Return(nil)
 
 			err := c.AddVRF(vrfLinkName1, enslaveLinkName1, getVRFTable(vrfLinkName1), nil)
 			gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
@@ -448,11 +455,11 @@ var _ = ginkgo.Describe("VRF manager", func() {
 			// the kernel, recognized by its type.
 			expectedRoute := migratedDefaultRoute
 			expectedRoute.Table = unix.RT_TABLE_MAIN
-			nlMock.AssertCalled(ginkgo.GinkgoT(), "RouteAdd", &expectedRoute)
+			nlMock.AssertCalled(ginkgo.GinkgoT(), "RouteAppend", &expectedRoute)
 			expectedRouteV6 := migratedDefaultRouteV6
 			expectedRouteV6.Table = unix.RT_TABLE_MAIN
-			nlMock.AssertCalled(ginkgo.GinkgoT(), "RouteAdd", &expectedRouteV6)
-			nlMock.AssertNumberOfCalls(ginkgo.GinkgoT(), "RouteAdd", 2)
+			nlMock.AssertCalled(ginkgo.GinkgoT(), "RouteAppend", &expectedRouteV6)
+			nlMock.AssertNumberOfCalls(ginkgo.GinkgoT(), "RouteAppend", 2)
 		})
 
 		ginkgo.It("treats a same-key route as equivalent only when interface, gateway and source match", func() {
@@ -504,7 +511,7 @@ var _ = ginkgo.Describe("VRF manager", func() {
 				uint64(netlink.RT_FILTER_TABLE),
 			).Return([]netlink.Route{migratedDefaultRoute}, nil)
 			nlMock.On("LinkSetNoMaster", enslaveLinkMock1).Return(nil)
-			nlMock.On("RouteAdd", mock.Anything).Return(nil)
+			nlMock.On("RouteAppend", mock.Anything).Return(nil)
 			nlMock.On("LinkDelete", buildVRF(vrfLinkName1)).Return(nil)
 
 			err := c.AddVRF(vrfLinkName1, enslaveLinkName1, getVRFTable(vrfLinkName1), nil)
@@ -515,7 +522,7 @@ var _ = ginkgo.Describe("VRF manager", func() {
 			nlMock.AssertCalled(ginkgo.GinkgoT(), "LinkSetNoMaster", enslaveLinkMock1)
 			expectedRoute := migratedDefaultRoute
 			expectedRoute.Table = unix.RT_TABLE_MAIN
-			nlMock.AssertCalled(ginkgo.GinkgoT(), "RouteAdd", &expectedRoute)
+			nlMock.AssertCalled(ginkgo.GinkgoT(), "RouteAppend", &expectedRoute)
 			nlMock.AssertCalled(ginkgo.GinkgoT(), "LinkDelete", buildVRF(vrfLinkName1))
 		})
 
@@ -715,7 +722,7 @@ var _ = ginkgo.Describe("VRF manager", func() {
 				uint64(netlink.RT_FILTER_TABLE),
 			).Return([]netlink.Route{migratedDefaultRoute, ovnManagedRoute}, nil)
 			nlMock.On("LinkSetNoMaster", enslaveLinkMock1).Return(nil)
-			nlMock.On("RouteAdd", mock.Anything).Return(nil)
+			nlMock.On("RouteAppend", mock.Anything).Return(nil)
 			nlMock.On("LinkDelete", buildVRF(vrfLinkName1)).Return(nil)
 
 			// The VRF was never added to the cache (e.g. a stale device found
@@ -727,8 +734,8 @@ var _ = ginkgo.Describe("VRF manager", func() {
 			nlMock.AssertCalled(ginkgo.GinkgoT(), "LinkSetNoMaster", enslaveLinkMock1)
 			expectedRoute := migratedDefaultRoute
 			expectedRoute.Table = unix.RT_TABLE_MAIN
-			nlMock.AssertCalled(ginkgo.GinkgoT(), "RouteAdd", &expectedRoute)
-			nlMock.AssertNumberOfCalls(ginkgo.GinkgoT(), "RouteAdd", 1)
+			nlMock.AssertCalled(ginkgo.GinkgoT(), "RouteAppend", &expectedRoute)
+			nlMock.AssertNumberOfCalls(ginkgo.GinkgoT(), "RouteAppend", 1)
 			nlMock.AssertCalled(ginkgo.GinkgoT(), "LinkDelete", buildVRF(vrfLinkName1))
 		})
 

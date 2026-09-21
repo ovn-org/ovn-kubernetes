@@ -65,6 +65,7 @@ type NetLinkOps interface {
 	RouteList(link netlink.Link, family int) ([]netlink.Route, error)
 	RouteDel(route *netlink.Route) error
 	RouteAdd(route *netlink.Route) error
+	RouteAppend(route *netlink.Route) error
 	RouteReplace(route *netlink.Route) error
 	RouteListFiltered(family int, filter *netlink.Route, filterMask uint64) ([]netlink.Route, error)
 	RouteListFilteredIter(family int, filter *netlink.Route, filterMask uint64, f func(netlink.Route) bool) error
@@ -257,6 +258,12 @@ func (defaultNetLinkOps) RouteDel(route *netlink.Route) error {
 
 func (defaultNetLinkOps) RouteAdd(route *netlink.Route) error {
 	return netlink.RouteAdd(route)
+}
+
+// RouteAppend adds the route even when one with the same destination, table
+// and metric exists, where RouteAdd fails and RouteReplace overwrites it.
+func (defaultNetLinkOps) RouteAppend(route *netlink.Route) error {
+	return netlink.RouteAppend(route)
 }
 
 func (defaultNetLinkOps) RouteReplace(route *netlink.Route) error {
