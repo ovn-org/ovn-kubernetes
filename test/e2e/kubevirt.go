@@ -2553,17 +2553,19 @@ runcmd:
 	Context("duplicate addresses validation", func() {
 		const networkName = "net1"
 		var (
-			cudn          *udnv1.ClusterUserDefinedNetwork
-			duplicateIPv4 = "10.128.0.200" // Static IP that will be used by both VMs
-			duplicateIPv6 = "2010:100:200::200"
-			cidrIPv4      = "10.128.0.0/24"
-			cidrIPv6      = "2010:100:200::0/60"
+			cudn                         *udnv1.ClusterUserDefinedNetwork
+			cidrIPv4, cidrIPv6           string
+			duplicateIPv4, duplicateIPv6 string
 		)
 
 		BeforeEach(func(ctx SpecContext) {
 			if !isPreConfiguredUdnAddressesEnabled() {
 				Skip("ENABLE_PRE_CONF_UDN_ADDR not configured")
 			}
+
+			cidrIPv4, cidrIPv6 = allocators.GetFirstUDNSubnets()
+			duplicateIPv4 = subnetOffsetIP(cidrIPv4, 200)
+			duplicateIPv6 = subnetOffsetIP(cidrIPv6, 200)
 
 			l := map[string]string{
 				"e2e-framework":           fr.BaseName,
@@ -2680,10 +2682,13 @@ runcmd:
 	})
 
 	Context("IP family validation for layer2 primary networks", func() {
+		var cidrIPv4, cidrIPv6 string
 		BeforeEach(func() {
 			if !isPreConfiguredUdnAddressesEnabled() {
 				Skip("ENABLE_PRE_CONF_UDN_ADDR not configured")
 			}
+
+			cidrIPv4, cidrIPv6 = allocators.GetFirstUDNSubnets()
 
 			l := map[string]string{
 				"e2e-framework":           fr.BaseName,
@@ -2696,9 +2701,7 @@ runcmd:
 		})
 
 		It("should fail when dual-stack network requests only IPv4", func(ctx SpecContext) {
-			cidrIPv4 := "10.130.0.0/24"
-			cidrIPv6 := "2010:100:201::0/60"
-			staticIPv4 := "10.130.0.101"
+			staticIPv4 := subnetOffsetIP(cidrIPv4, 101)
 
 			dualCIDRs := filterDualStackCIDRs(fr.ClientSet, []udnv1.CIDR{udnv1.CIDR(cidrIPv4), udnv1.CIDR(cidrIPv6)})
 			if len(dualCIDRs) < 2 {
@@ -2714,9 +2717,7 @@ runcmd:
 		})
 
 		It("should fail when dual-stack network requests only IPv6", func(ctx SpecContext) {
-			cidrIPv4 := "10.131.0.0/24"
-			cidrIPv6 := "2010:100:202::0/60"
-			staticIPv6 := "2010:100:202::101"
+			staticIPv6 := subnetOffsetIP(cidrIPv6, 101)
 
 			dualCIDRs := filterDualStackCIDRs(fr.ClientSet, []udnv1.CIDR{udnv1.CIDR(cidrIPv4), udnv1.CIDR(cidrIPv6)})
 			if len(dualCIDRs) < 2 {
@@ -2732,9 +2733,8 @@ runcmd:
 		})
 
 		It("should fail when single-stack IPv4 network requests multiple IPv4 IPs", func(ctx SpecContext) {
-			cidrIPv4 := "10.132.0.0/24"
-			staticIPv4_1 := "10.132.0.101"
-			staticIPv4_2 := "10.132.0.102"
+			staticIPv4_1 := subnetOffsetIP(cidrIPv4, 101)
+			staticIPv4_2 := subnetOffsetIP(cidrIPv4, 102)
 
 			singleStackIPv4CIDRs := filterDualStackCIDRs(fr.ClientSet, []udnv1.CIDR{udnv1.CIDR(cidrIPv4)})
 
@@ -2747,9 +2747,8 @@ runcmd:
 		})
 
 		It("should fail when single-stack IPv6 network requests multiple IPv6 IPs", func(ctx SpecContext) {
-			cidrIPv6 := "2010:100:204::0/60"
-			staticIPv6_1 := "2010:100:204::101"
-			staticIPv6_2 := "2010:100:204::102"
+			staticIPv6_1 := subnetOffsetIP(cidrIPv6, 101)
+			staticIPv6_2 := subnetOffsetIP(cidrIPv6, 102)
 
 			singleStackIPv6CIDRs := filterDualStackCIDRs(fr.ClientSet, []udnv1.CIDR{udnv1.CIDR(cidrIPv6)})
 			if len(singleStackIPv6CIDRs) == 0 {
@@ -2765,10 +2764,8 @@ runcmd:
 		})
 
 		It("should succeed when dual-stack network requests correct IPs (1 IPv4 + 1 IPv6)", func(ctx SpecContext) {
-			cidrIPv4 := "10.134.0.0/24"
-			cidrIPv6 := "2010:100:205::0/60"
-			staticIPv4 := "10.134.0.101"
-			staticIPv6 := "2010:100:205::101"
+			staticIPv4 := subnetOffsetIP(cidrIPv4, 101)
+			staticIPv6 := subnetOffsetIP(cidrIPv6, 101)
 
 			dualCIDRs := filterDualStackCIDRs(fr.ClientSet, []udnv1.CIDR{udnv1.CIDR(cidrIPv4), udnv1.CIDR(cidrIPv6)})
 			if len(dualCIDRs) < 2 {
@@ -2807,6 +2804,7 @@ runcmd:
 		)
 
 		BeforeEach(func(ctx SpecContext) {
+			cidrIPv4 = envOrDefault("OVN_TEST_KV_SUBNET_EXHAUSTION_CIDR_IPV4", cidrIPv4)
 			l := map[string]string{
 				"e2e-framework":           fr.BaseName,
 				RequiredUDNNamespaceLabel: "",
