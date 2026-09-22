@@ -13,6 +13,8 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/allocators"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/feature"
 
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
@@ -212,18 +214,6 @@ var _ = Describe("Network Segmentation: Preconfigured Layer2 UDN", feature.Netwo
 	)
 
 	Context("duplicate IP validation with primary UDN layer 2 pods", func() {
-		const (
-			duplicateIPv4 = "10.128.0.200/16"
-			duplicateIPv6 = "2014:100:200::200/60"
-			networkCIDRv4 = "10.128.0.0/16"
-			networkCIDRv6 = "2014:100:200::0/60"
-		)
-
-		type duplicateIPTestConfig struct {
-			podIP        string
-			networkCIDRs string
-		}
-
 		createPodWithStaticIP := func(podName string, staticIPs []string) *v1.Pod {
 			ips, err := json.Marshal(staticIPs)
 			Expect(err).NotTo(HaveOccurred(), "Should marshal IPs for annotation")
@@ -233,7 +223,7 @@ var _ = Describe("Network Segmentation: Preconfigured Layer2 UDN", feature.Netwo
 					return []string{"pause"}
 				}),
 				withAnnotations(map[string]string{
-					"v1.multus-cni.io/default-network": fmt.Sprintf(`[{"name":"default", "namespace":"ovn-kubernetes", "ips": %s}]`, string(ips)),
+					"v1.multus-cni.io/default-network": fmt.Sprintf(`[{"name":"default", "namespace":%q, "ips": %s}]`, deploymentconfig.Get().OVNKubernetesNamespace(), string(ips)),
 				}),
 			)
 			podConfig.namespace = f.Namespace.Name
@@ -250,7 +240,7 @@ var _ = Describe("Network Segmentation: Preconfigured Layer2 UDN", feature.Netwo
 					return []string{"pause"}
 				}),
 				withAnnotations(map[string]string{
-					"v1.multus-cni.io/default-network": fmt.Sprintf(`[{"name":"default", "namespace":"ovn-kubernetes", "ips": %s}]`, string(ips)),
+					"v1.multus-cni.io/default-network": fmt.Sprintf(`[{"name":"default", "namespace":%q, "ips": %s}]`, deploymentconfig.Get().OVNKubernetesNamespace(), string(ips)),
 				}),
 			)
 			podConfig.namespace = f.Namespace.Name
@@ -295,8 +285,14 @@ var _ = Describe("Network Segmentation: Preconfigured Layer2 UDN", feature.Netwo
 		})
 
 		DescribeTable("should fail when creating second pod with duplicate static IP",
-			func(ctx SpecContext, config duplicateIPTestConfig) {
-				podIPs := filterCIDRs(f.ClientSet, config.podIP)
+			func(ctx SpecContext, ipFamily v1.IPFamily) {
+				networkCIDRv4, networkCIDRv6 := allocators.GetFirstUDNSubnets()
+				networkCIDR := networkCIDRv4
+				if ipFamily == v1.IPv6Protocol {
+					networkCIDR = networkCIDRv6
+				}
+				duplicateIP := subnetOffsetIP(networkCIDR, 200) + "/" + strings.Split(networkCIDR, "/")[1]
+				podIPs := filterCIDRs(f.ClientSet, duplicateIP)
 
 				if len(podIPs) == 0 {
 					Skip("IP family not supported in this environment")
@@ -306,7 +302,7 @@ var _ = Describe("Network Segmentation: Preconfigured Layer2 UDN", feature.Netwo
 				netConfig := &networkAttachmentConfigParams{
 					name:      "duplicate-ip-test-net",
 					topology:  "layer2",
-					cidr:      config.networkCIDRs,
+					cidr:      networkCIDR,
 					role:      "primary",
 					namespace: f.Namespace.Name,
 				}
@@ -351,14 +347,8 @@ var _ = Describe("Network Segmentation: Preconfigured Layer2 UDN", feature.Netwo
 					return updatedPod.Status.Phase
 				}, 30*time.Second, 5*time.Second).Should(Equal(v1.PodRunning))
 			},
-			Entry("IPv4 duplicate", duplicateIPTestConfig{
-				podIP:        duplicateIPv4,
-				networkCIDRs: networkCIDRv4,
-			}),
-			Entry("IPv6 duplicate", duplicateIPTestConfig{
-				podIP:        duplicateIPv6,
-				networkCIDRs: networkCIDRv6,
-			}),
+			Entry("IPv4 duplicate", v1.IPv4Protocol),
+			Entry("IPv6 duplicate", v1.IPv6Protocol),
 		)
 	})
 })
