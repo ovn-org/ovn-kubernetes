@@ -1837,7 +1837,6 @@ install_frr_k8s_crds() {
 }
 
 install_frr_k8s() {
-  local bgp_port=${1:-0}
   echo "Installing frr-k8s ..."
   clone_frr
 
@@ -1874,18 +1873,24 @@ install_frr_k8s() {
     "${FRR_K8S_UPSTREAM_FRR_IMAGE}" \
     "${FRR_K8S_FRR_IMAGE}"
 
-  if [ "${bgp_port}" -ne 0 ]; then
-    local frr_yaml="${FRR_TMP_DIR}/frr-k8s/config/all-in-one/frr-k8s.yaml"
-    grep -q 'bgpd_options=.*-p 0' "$frr_yaml" || {
-      echo "expected bgpd_options with '-p 0' not found in $frr_yaml"
-      exit 1
-    }
-    sed -i "s/bgpd_options=\"\(.*\)-p 0\(.*\)\"/bgpd_options=\"\1-p ${bgp_port}\2\"/g" "$frr_yaml"
-    grep -q "bgpd_options=.*-p ${bgp_port}" "$frr_yaml" || {
-      echo "failed to patch bgpd_options to use port ${bgp_port}"
-      exit 1
-    }
-  fi
+  # The manifest starts bgpd with '-p 0', which disables its listening socket.
+  # Enable the standard BGP port instead: no-overlay networks with managed
+  # routing peer the nodes with each other, so FRR has to accept BGP updates
+  # from the other nodes. Any CUDN can request no-overlay transport with
+  # managed routing regardless of the transport the default network uses, so
+  # this cannot be tied to the default network's mode.
+  local bgp_port=179
+  local frr_yaml="${FRR_TMP_DIR}/frr-k8s/config/all-in-one/frr-k8s.yaml"
+  grep -q 'bgpd_options=.*-p 0' "$frr_yaml" || {
+    echo "expected bgpd_options with '-p 0' not found in $frr_yaml"
+    exit 1
+  }
+  sed -i "s/bgpd_options=\"\(.*\)-p 0\(.*\)\"/bgpd_options=\"\1-p ${bgp_port}\2\"/g" "$frr_yaml"
+  grep -q "bgpd_options=.*-p ${bgp_port}" "$frr_yaml" || {
+    echo "failed to patch bgpd_options to use port ${bgp_port}"
+    exit 1
+  }
+
   install_frr_k8s_host_api_crds
   kubectl apply -f "${FRR_TMP_DIR}"/frr-k8s/config/all-in-one/frr-k8s.yaml
   create_frr_k8s_remote_kubeconfig_secret

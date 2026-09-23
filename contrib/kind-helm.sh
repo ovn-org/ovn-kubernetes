@@ -820,11 +820,7 @@ if [ "$OVN_ENABLE_DNSNAMERESOLVER" == true ]; then
     update_coredns_deployment_image
 fi
 if [ "$ENABLE_ROUTE_ADVERTISEMENTS" == true ]; then
-  frr_port=0
-  if [ "$ENABLE_NO_OVERLAY_MANAGED_ROUTING" == true ]; then
-    # Enable bgp port listening on node, required for managed mode. FRR will listen on port 179 to receive BGP updates from other nodes.
-    frr_port=179
-  elif [ "${DPU_MODE}" != "host" ]; then
+  if [ "$ENABLE_NO_OVERLAY_MANAGED_ROUTING" != true ] && [ "${DPU_MODE}" != "host" ]; then
     # external FRR is required for unmanaged mode where the FRR-K8S speakers run.
     deploy_frr_external_container
     deploy_bgp_external_server
@@ -832,7 +828,7 @@ if [ "$ENABLE_ROUTE_ADVERTISEMENTS" == true ]; then
   if [ "${DPU_MODE}" == "host" ]; then
     install_frr_k8s_crds
   else
-    install_frr_k8s $frr_port
+    install_frr_k8s
   fi
 fi
 if [ "$KIND_REMOVE_TAINT" == true ]; then

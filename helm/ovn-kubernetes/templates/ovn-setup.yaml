@@ -72,14 +72,16 @@ data:
     outbound-snat = disabled
 {{- end }}
     routing = {{ if .Values.global.enableNoOverlayManagedRouting }}managed{{ else }}unmanaged{{ end }}
-{{- if .Values.global.enableNoOverlayManagedRouting }}
+{{- end }}
 
+    # Configures the cluster internal BGP fabric shared by every network in
+    # no-overlay mode with managed routing. A ClusterUserDefinedNetwork requests
+    # managed routing on its own CR, independently of the transport the cluster
+    # default network uses, so this section is not tied to the [no-overlay] one.
     [bgp-managed]
     as-number = {{ .Values.global.managedBGPASNumber | default 64512 }}
     topology = {{ .Values.global.managedBGPTopology | default "full-mesh" }}
     frr-namespace = {{ .Values.global.managedBGPFRRNamespace | default "frr-k8s-system" }}
-{{- end }}
-{{- end }}
 {{- if or (hasKey .Values.global "routingTableIDStart") (hasKey .Values.global "kubeletCgroupPath") }}
 
     [ovnkubenode]
