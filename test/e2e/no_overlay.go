@@ -6,21 +6,23 @@ package e2e
 import (
 	"context"
 	"fmt"
-	"hash/fnv"
 	"net"
 	"strings"
 	"time"
 
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
+	rav1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1"
 	raclientset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/clientset/versioned"
 	apitypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/types"
-	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
+	udnv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1"
+	udnclientset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/clientset/versioned"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/feature"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/images"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/kubernetes/test/e2e/framework"
@@ -29,6 +31,7 @@ import (
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
 	e2epodoutput "k8s.io/kubernetes/test/e2e/framework/pod/output"
 	e2eservice "k8s.io/kubernetes/test/e2e/framework/service"
+	e2eskipper "k8s.io/kubernetes/test/e2e/framework/skipper"
 	utilnet "k8s.io/utils/net"
 )
 
@@ -206,7 +209,7 @@ var _ = ginkgo.Describe("No-Overlay: Default network is enabled with no-overlay"
 			framework.ExpectNoError(err, "Failed to create RouteAdvertisements client")
 
 			ginkgo.By("Verifying auto-created RA exists before deletion")
-			raName := managedRouteAdvertisementName(types.DefaultNetworkName)
+			raName := managedBGPDefaultRAName
 			ra, err := raClient.K8sV1().RouteAdvertisements().Get(context.TODO(), raName, metav1.GetOptions{})
 			framework.ExpectNoError(err, "Failed to get RouteAdvertisement")
 			gomega.Expect(ra).NotTo(gomega.BeNil(), "RouteAdvertisement should exist")
@@ -236,13 +239,8 @@ var _ = ginkgo.Describe("No-Overlay: Default network is enabled with no-overlay"
 				return acceptedCond != nil && acceptedCond.Status == metav1.ConditionTrue
 			}, 30*time.Second, 1*time.Second).Should(gomega.BeTrue(), "RouteAdvertisement should be Accepted within 30 seconds")
 
-			ginkgo.By("Verifying RA has the expected label")
-			expectedLabel := "k8s.ovn.org/managed-network"
-			gomega.Expect(ra.Labels[expectedLabel]).To(gomega.Equal(types.DefaultNetworkName))
-
 			ginkgo.By("Verifying RA selects managed FRRConfigurations")
-			expectedFRRLabel := "k8s.ovn.org/managed-internal-fabric"
-			gomega.Expect(ra.Spec.FRRConfigurationSelector.MatchLabels[expectedFRRLabel]).To(gomega.Equal("bgp"))
+			gomega.Expect(ra.Spec.FRRConfigurationSelector.MatchLabels).To(gomega.HaveKeyWithValue(managedBGPLabel, ""))
 			ginkgo.By("Verifying it selects the default network")
 			gomega.Expect(ra.Spec.NetworkSelectors).To(gomega.ContainElement(apitypes.NetworkSelector{NetworkSelectionType: apitypes.DefaultNetwork}))
 
@@ -253,11 +251,12 @@ var _ = ginkgo.Describe("No-Overlay: Default network is enabled with no-overlay"
 		ginkgo.It("should reconcile FRRConfiguration if manually deleted in managed mode", func() {
 			frrNamespace := deploymentconfig.Get().FRRK8sNamespace()
 
-			ginkgo.By("Getting FRRConfigurations managed by the system")
-			labelSelector := "k8s.ovn.org/managed-internal-fabric=bgp"
-			getFRRCmd := []string{"get", "frrconfigurations", "-n", frrNamespace, "-l", labelSelector, "-o", "jsonpath={.items[0].metadata.name}"}
-			frrName := e2ekubectl.RunKubectlOrDie(frrNamespace, getFRRCmd...)
-			gomega.Expect(frrName).NotTo(gomega.BeEmpty(), "Should find at least one managed FRRConfiguration")
+			ginkgo.By("Getting the base FRRConfiguration managed by the system")
+			frrName := managedBGPBaseFRRConfigName
+			labelSelector := managedBGPLabel
+			getFRRCmd := []string{"get", "frrconfigurations", "-n", frrNamespace, "-l", labelSelector, "-o", "jsonpath={.items[*].metadata.name}"}
+			gomega.Expect(strings.Fields(e2ekubectl.RunKubectlOrDie(frrNamespace, getFRRCmd...))).To(gomega.ContainElement(frrName),
+				"the base FRRConfiguration must carry the %s label", managedBGPLabel)
 			framework.Logf("Found FRRConfiguration %s in namespace %s", frrName, frrNamespace)
 
 			originalUID := strings.TrimSpace(e2ekubectl.RunKubectlOrDie(frrNamespace,
@@ -292,6 +291,259 @@ var _ = ginkgo.Describe("No-Overlay: Default network is enabled with no-overlay"
 			ginkgo.By("Verifying pod2pod connectivity works after FRRConfiguration recreation")
 			checkConnectivityWithoutOverlay(serverPod.Status.PodIPs, nil, clientPod, tcpdumpPod)
 		})
+	})
+})
+
+// The managed BGP controller owns one RouteAdvertisements shared by every CUDN
+// configured with no-overlay transport and managed routing: it is created with
+// the first such CUDN and deleted with the last. The base FRRConfiguration that
+// peers the nodes is shared with the cluster default network, so it outlives the
+// CUDNs whenever the default network is itself managed.
+var _ = ginkgo.Describe("No-Overlay: CUDN with managed routing", feature.NoOverlay, func() {
+	f := wrappedTestFramework("no-overlay-managed-cudn")
+
+	var (
+		udnClient *udnclientset.Clientset
+		raClient  *raclientset.Clientset
+		cudnName  string
+	)
+
+	// deleteCUDN removes the CUDN and waits for it to be gone, so that the
+	// controller has observed the last managed CUDN disappearing.
+	deleteCUDN := func(name string) {
+		err := udnClient.K8sV1().ClusterUserDefinedNetworks().Delete(context.TODO(), name, metav1.DeleteOptions{})
+		if apierrors.IsNotFound(err) {
+			return
+		}
+		framework.ExpectNoError(err, "Failed to delete managed CUDN")
+		gomega.Eventually(func() bool {
+			_, err := udnClient.K8sV1().ClusterUserDefinedNetworks().Get(context.TODO(), name, metav1.GetOptions{})
+			return apierrors.IsNotFound(err)
+		}, 60*time.Second, time.Second).Should(gomega.BeTrue(), "CUDN %s should be deleted", name)
+	}
+
+	// createManagedCUDN creates a namespace and a layer3 primary CUDN with
+	// no-overlay transport and managed routing selecting it, and returns the
+	// CUDN.
+	createManagedCUDN := func() *udnv1.ClusterUserDefinedNetwork {
+		ginkgo.By("Creating a namespace for the managed CUDN")
+		ns, err := f.ClientSet.CoreV1().Namespaces().Create(context.TODO(), &corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: f.BaseName + "-",
+				Labels: map[string]string{
+					"e2e-framework":           f.BaseName,
+					RequiredUDNNamespaceLabel: "",
+				},
+			},
+		}, metav1.CreateOptions{})
+		framework.ExpectNoError(err, "Failed to create namespace for the managed CUDN")
+		ginkgo.DeferCleanup(func() {
+			f.ClientSet.CoreV1().Namespaces().Delete(context.TODO(), ns.Name, metav1.DeleteOptions{})
+		})
+
+		ginkgo.By("Creating a CUDN with no-overlay transport and managed routing")
+		cudn := &udnv1.ClusterUserDefinedNetwork{
+			ObjectMeta: metav1.ObjectMeta{GenerateName: "no-overlay-managed-"},
+			Spec: udnv1.ClusterUserDefinedNetworkSpec{
+				NamespaceSelector: metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{{
+					Key:      "kubernetes.io/metadata.name",
+					Operator: metav1.LabelSelectorOpIn,
+					Values:   []string{ns.Name},
+				}}},
+				Network: udnv1.NetworkSpec{
+					Topology: udnv1.NetworkTopologyLayer3,
+					Layer3: &udnv1.Layer3Config{
+						Role: "Primary",
+						Subnets: filterL3Subnets(f.ClientSet, []udnv1.Layer3Subnet{
+							{CIDR: "111.111.0.0/16", HostSubnet: 24},
+							{CIDR: "2021:100:200::0/60", HostSubnet: 64},
+						}),
+					},
+					Transport: udnv1.TransportOptionNoOverlay,
+					NoOverlay: &udnv1.NoOverlayConfig{
+						OutboundSNAT: udnv1.SNATEnabled,
+						Routing:      udnv1.RoutingManaged,
+					},
+				},
+			},
+		}
+		cudn, err = udnClient.K8sV1().ClusterUserDefinedNetworks().Create(context.TODO(), cudn, metav1.CreateOptions{})
+		framework.ExpectNoError(err, "Failed to create managed CUDN")
+		createdName := cudn.Name
+		ginkgo.DeferCleanup(func() { deleteCUDN(createdName) })
+		gomega.Eventually(clusterUserDefinedNetworkReadyFunc(context.TODO(), f.DynamicClient, cudn.Name), 30*time.Second, time.Second).Should(gomega.Succeed())
+		return cudn
+	}
+
+	getManagedCUDNRA := func() (*rav1.RouteAdvertisements, error) {
+		return raClient.K8sV1().RouteAdvertisements().Get(context.TODO(), managedBGPCUDNRAName, metav1.GetOptions{})
+	}
+
+	managedCUDNExists := func() []string {
+		list, err := udnClient.K8sV1().ClusterUserDefinedNetworks().List(context.TODO(), metav1.ListOptions{})
+		framework.ExpectNoError(err, "Failed to list ClusterUserDefinedNetworks")
+		var names []string
+		for _, cudn := range list.Items {
+			if cudn.Spec.Network.Transport == udnv1.TransportOptionNoOverlay &&
+				cudn.Spec.Network.NoOverlay != nil &&
+				cudn.Spec.Network.NoOverlay.Routing == udnv1.RoutingManaged {
+				names = append(names, cudn.Name)
+			}
+		}
+		return names
+	}
+
+	ginkgo.BeforeEach(func() {
+		var err error
+		udnClient, err = udnclientset.NewForConfig(f.ClientConfig())
+		framework.ExpectNoError(err, "Failed to create UserDefinedNetwork client")
+		raClient, err = raclientset.NewForConfig(f.ClientConfig())
+		framework.ExpectNoError(err, "Failed to create RouteAdvertisements client")
+
+		cudn := createManagedCUDN()
+		cudnName = cudn.Name
+	})
+
+	ginkgo.It("should create the managed RouteAdvertisements and FRRConfiguration for a managed CUDN", func() {
+		ginkgo.By("Verifying the controller labelled the CUDN as managed")
+		gomega.Eventually(func(g gomega.Gomega) {
+			cudn, err := udnClient.K8sV1().ClusterUserDefinedNetworks().Get(context.TODO(), cudnName, metav1.GetOptions{})
+			g.Expect(err).NotTo(gomega.HaveOccurred())
+			g.Expect(cudn.Labels).To(gomega.HaveKeyWithValue(managedBGPLabel, ""))
+		}, 30*time.Second, time.Second).Should(gomega.Succeed())
+
+		ginkgo.By("Verifying the managed CUDN RouteAdvertisements was created and Accepted")
+		gomega.Eventually(func(g gomega.Gomega) {
+			ra, err := getManagedCUDNRA()
+			g.Expect(err).NotTo(gomega.HaveOccurred())
+			acceptedCond := meta.FindStatusCondition(ra.Status.Conditions, "Accepted")
+			g.Expect(acceptedCond).NotTo(gomega.BeNil())
+			g.Expect(acceptedCond.Status).To(gomega.Equal(metav1.ConditionTrue))
+		}, 60*time.Second, time.Second).Should(gomega.Succeed())
+
+		ginkgo.By("Verifying the RouteAdvertisements selects managed CUDNs and managed FRRConfigurations")
+		ra, err := getManagedCUDNRA()
+		framework.ExpectNoError(err, "Failed to get the managed CUDN RouteAdvertisements")
+		gomega.Expect(ra.Spec.Advertisements).To(gomega.ContainElement(rav1.PodNetwork))
+		gomega.Expect(ra.Spec.FRRConfigurationSelector.MatchLabels).To(gomega.HaveKeyWithValue(managedBGPLabel, ""))
+		gomega.Expect(ra.Spec.NetworkSelectors).To(gomega.ContainElement(apitypes.NetworkSelector{
+			NetworkSelectionType: apitypes.ClusterUserDefinedNetworks,
+			ClusterUserDefinedNetworkSelector: &apitypes.ClusterUserDefinedNetworkSelector{
+				NetworkSelector: metav1.LabelSelector{MatchLabels: map[string]string{managedBGPLabel: ""}},
+			},
+		}))
+
+		ginkgo.By("Verifying the base FRRConfiguration exists and is labelled as managed")
+		frrNamespace := deploymentconfig.Get().FRRK8sNamespace()
+		names := e2ekubectl.RunKubectlOrDie(frrNamespace, "get", "frrconfigurations", "-n", frrNamespace,
+			"-l", managedBGPLabel, "-o", "jsonpath={.items[*].metadata.name}")
+		gomega.Expect(strings.Fields(names)).To(gomega.ContainElement(managedBGPBaseFRRConfigName),
+			"the base FRRConfiguration must exist and carry the %s label", managedBGPLabel)
+	})
+
+	ginkgo.It("should reconcile the managed CUDN RouteAdvertisements if manually deleted", func() {
+		ginkgo.By("Waiting for the managed CUDN RouteAdvertisements to exist")
+		var originalUID string
+		gomega.Eventually(func(g gomega.Gomega) {
+			ra, err := getManagedCUDNRA()
+			g.Expect(err).NotTo(gomega.HaveOccurred())
+			originalUID = string(ra.UID)
+		}, 60*time.Second, time.Second).Should(gomega.Succeed())
+
+		ginkgo.By("Deleting the managed CUDN RouteAdvertisements manually")
+		framework.ExpectNoError(raClient.K8sV1().RouteAdvertisements().Delete(context.TODO(), managedBGPCUDNRAName, metav1.DeleteOptions{}),
+			"Failed to delete the managed CUDN RouteAdvertisements")
+
+		ginkgo.By("Verifying it is recreated by the managed BGP controller and Accepted")
+		gomega.Eventually(func(g gomega.Gomega) {
+			ra, err := getManagedCUDNRA()
+			g.Expect(err).NotTo(gomega.HaveOccurred())
+			g.Expect(ra.DeletionTimestamp).To(gomega.BeNil())
+			g.Expect(string(ra.UID)).NotTo(gomega.Equal(originalUID))
+			acceptedCond := meta.FindStatusCondition(ra.Status.Conditions, "Accepted")
+			g.Expect(acceptedCond).NotTo(gomega.BeNil())
+			g.Expect(acceptedCond.Status).To(gomega.Equal(metav1.ConditionTrue))
+		}, 60*time.Second, time.Second).Should(gomega.Succeed())
+	})
+
+	ginkgo.It("should reconcile the base FRRConfiguration if manually deleted while a managed CUDN exists", func() {
+		frrNamespace := deploymentconfig.Get().FRRK8sNamespace()
+
+		ginkgo.By("Reading the base FRRConfiguration UID")
+		originalUID := strings.TrimSpace(e2ekubectl.RunKubectlOrDie(frrNamespace,
+			"get", "frrconfigurations", managedBGPBaseFRRConfigName, "-n", frrNamespace, "-o", "jsonpath={.metadata.uid}"))
+		gomega.Expect(originalUID).NotTo(gomega.BeEmpty(), "the base FRRConfiguration should exist")
+
+		ginkgo.By("Deleting the base FRRConfiguration manually")
+		e2ekubectl.RunKubectlOrDie(frrNamespace, "delete", "frrconfigurations", managedBGPBaseFRRConfigName, "-n", frrNamespace)
+
+		ginkgo.By("Verifying it is recreated with a new UID")
+		gomega.Eventually(func() bool {
+			currentUID, err := e2ekubectl.RunKubectl(frrNamespace,
+				"get", "frrconfigurations", managedBGPBaseFRRConfigName, "-n", frrNamespace, "-o", "jsonpath={.metadata.uid}")
+			if err != nil {
+				return false
+			}
+			currentUID = strings.TrimSpace(currentUID)
+			return currentUID != "" && currentUID != originalUID
+		}, 60*time.Second, time.Second).Should(gomega.BeTrue(),
+			"FRRConfiguration %s should be recreated with a new UID", managedBGPBaseFRRConfigName)
+	})
+
+	ginkgo.It("should remove the managed RouteAdvertisements once no managed CUDN is left", func() {
+		ginkgo.By("Waiting for the managed CUDN RouteAdvertisements to exist")
+		gomega.Eventually(func() error {
+			_, err := getManagedCUDNRA()
+			return err
+		}, 60*time.Second, time.Second).Should(gomega.Succeed())
+
+		ginkgo.By("Deleting the only managed CUDN")
+		deleteCUDN(cudnName)
+
+		// The RouteAdvertisements and the base FRRConfiguration are
+		// cluster-wide singletons shared by every managed network, so they only
+		// go away once the last managed CUDN does. The suite runs in parallel
+		// and other specs create managed CUDNs of their own, so there is
+		// nothing to assert if there are other managed CUDNs.
+		if others := managedCUDNExists(); len(others) > 0 {
+			e2eskipper.Skipf("other managed CUDNs still exist in the cluster (%s), "+
+				"the managed BGP controller correctly keeps %s alive",
+				strings.Join(others, ", "), managedBGPCUDNRAName)
+		}
+
+		ginkgo.By("Verifying the managed CUDN RouteAdvertisements is removed")
+		gomega.Eventually(func() bool {
+			_, err := getManagedCUDNRA()
+			return apierrors.IsNotFound(err)
+		}, 60*time.Second, time.Second).Should(gomega.BeTrue(),
+			"RouteAdvertisements %s should be deleted once the last managed CUDN is gone", managedBGPCUDNRAName)
+
+		// The base FRRConfiguration is shared with the cluster default network: it
+		// outlives the CUDNs when that network is itself managed, and goes away with
+		// the last managed network when it is not.
+		frrNamespace := deploymentconfig.Get().FRRK8sNamespace()
+		if isManagedRoutingEnabled() {
+			ginkgo.By("Verifying the base FRRConfiguration is retained for the managed default network")
+			gomega.Consistently(func() error {
+				_, err := e2ekubectl.RunKubectl(frrNamespace,
+					"get", "frrconfigurations", managedBGPBaseFRRConfigName, "-n", frrNamespace)
+				return err
+			}, 10*time.Second, 2*time.Second).Should(gomega.Succeed(),
+				"the base FRRConfiguration must be retained while the default network is managed")
+
+			ginkgo.By("Verifying the default network RouteAdvertisements is retained")
+			_, err := raClient.K8sV1().RouteAdvertisements().Get(context.TODO(), managedBGPDefaultRAName, metav1.GetOptions{})
+			framework.ExpectNoError(err, "the default network RouteAdvertisements must be retained")
+			return
+		}
+
+		ginkgo.By("Verifying the base FRRConfiguration is removed along with the last managed network")
+		gomega.Eventually(func() error {
+			_, err := e2ekubectl.RunKubectl(frrNamespace,
+				"get", "frrconfigurations", managedBGPBaseFRRConfigName, "-n", frrNamespace)
+			return err
+		}, 60*time.Second, time.Second).ShouldNot(gomega.Succeed(),
+			"FRRConfiguration %s should be deleted once no managed network is left", managedBGPBaseFRRConfigName)
 	})
 })
 
@@ -384,13 +636,4 @@ func isManagedRoutingEnabled() bool {
 		return true
 	}
 	return false
-}
-
-// managedRouteAdvertisementName matches clustermanager/managedbgp.ManagedRouteAdvertisementName
-// ("ovnk-managed-" + hex(fnv64a(networkName)))
-func managedRouteAdvertisementName(networkName string) string {
-	const prefix = "ovnk-managed-"
-	h := fnv.New64a()
-	_, _ = h.Write([]byte(networkName))
-	return fmt.Sprintf("%s%x", prefix, h.Sum64())
 }

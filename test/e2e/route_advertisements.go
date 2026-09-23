@@ -66,6 +66,28 @@ const (
 	defaultNetworkRouteAdvertisementNameEnv = "OVN_TEST_DEFAULT_NETWORK_RA_NAME"
 )
 
+// Names and labels owned by the managed BGP controller
+// (go-controller/pkg/clustermanager/managedbgp). In managed routing mode the
+// controller creates and reconciles these objects itself, so tests wait for
+// them instead of creating their own RouteAdvertisements.
+const (
+	managedBGPNamePrefix = "ovnk-managed-bgp"
+	// managedBGPBaseFRRConfigName is the FRRConfiguration the controller
+	// creates in the frr-k8s namespace to peer the nodes in a full mesh.
+	managedBGPBaseFRRConfigName = managedBGPNamePrefix
+	// managedBGPDefaultRAName is the RouteAdvertisements advertising the
+	// cluster default network.
+	managedBGPDefaultRAName = managedBGPNamePrefix + "-default"
+	// managedBGPCUDNRAName is the single RouteAdvertisements shared by every
+	// managed CUDN. It is created with the first managed CUDN and deleted
+	// with the last one.
+	managedBGPCUDNRAName = managedBGPNamePrefix + "-cudn"
+	// managedBGPLabel is set by the controller on every managed CUDN, and is
+	// what the managed RouteAdvertisements selects on. Its value is always
+	// empty.
+	managedBGPLabel = "k8s.ovn.org/managed-bgp"
+)
+
 // Names of the external BGP scaffolding deployed by contrib/kind.sh or
 // contrib/kind-helm.sh. Overridable so that suites can run against clusters
 // whose scaffolding uses non-default names (e.g. the dpu-sim environment,
@@ -1464,6 +1486,9 @@ var _ = ginkgo.Describe("BGP: isolation", feature.RouteAdvertisements, func() {
 		var cudnA, cudnB *udnv1.ClusterUserDefinedNetwork
 		var ra *rav1.RouteAdvertisements
 		var hostNetworkPort int
+		// both networks are advertised by the managed BGP controller rather
+		// than by a RouteAdvertisements the test creates
+		managedRouting := isNoOverlayManagedRouting(cudnATemplate) && isNoOverlayManagedRouting(cudnBTemplate)
 		ginkgo.Context("", ginkgo.Ordered, ginkgo.ContinueOnFailure, func() {
 			ginkgo.BeforeAll(func(ctx ginkgo.SpecContext) {
 				ginkgo.By("Configuring primary UDN namespaces")
@@ -1660,38 +1685,56 @@ var _ = ginkgo.Describe("BGP: isolation", feature.RouteAdvertisements, func() {
 				framework.ExpectNoError(err)
 
 				ginkgo.By("Expose networks")
-				ra = &rav1.RouteAdvertisements{
-					ObjectMeta: metav1.ObjectMeta{
-						GenerateName: "advertised-networks-isolation-ra",
-					},
-					Spec: rav1.RouteAdvertisementsSpec{
-						NetworkSelectors: apitypes.NetworkSelectors{
-							apitypes.NetworkSelector{
-								NetworkSelectionType: apitypes.ClusterUserDefinedNetworks,
-								ClusterUserDefinedNetworkSelector: &apitypes.ClusterUserDefinedNetworkSelector{
-									NetworkSelector: metav1.LabelSelector{
-										MatchLabels: map[string]string{"advertised-networks-isolation": ""},
-									},
-								},
-							},
-						},
-						NodeSelector:             metav1.LabelSelector{},
-						FRRConfigurationSelector: metav1.LabelSelector{},
-						Advertisements: []rav1.AdvertisementType{
-							rav1.PodNetwork,
-						},
-					},
-				}
-
 				raClient, err := raclientset.NewForConfig(f.ClientConfig())
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				ra, err = raClient.K8sV1().RouteAdvertisements().Create(context.TODO(), ra, metav1.CreateOptions{})
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				// With managed routing the managed BGP controller owns a single
+				// RouteAdvertisements selecting every managed CUDN, so both
+				// networks are already advertised: wait for it instead of
+				// creating one. Leaving `ra` nil also keeps AfterAll from
+				// deleting an object the test does not own.
+				raName := managedBGPCUDNRAName
+				if !managedRouting {
+					ra = &rav1.RouteAdvertisements{
+						ObjectMeta: metav1.ObjectMeta{
+							GenerateName: "advertised-networks-isolation-ra",
+						},
+						Spec: rav1.RouteAdvertisementsSpec{
+							NetworkSelectors: apitypes.NetworkSelectors{
+								apitypes.NetworkSelector{
+									NetworkSelectionType: apitypes.ClusterUserDefinedNetworks,
+									ClusterUserDefinedNetworkSelector: &apitypes.ClusterUserDefinedNetworkSelector{
+										NetworkSelector: metav1.LabelSelector{
+											MatchLabels: map[string]string{"advertised-networks-isolation": ""},
+										},
+									},
+								},
+							},
+							NodeSelector:             metav1.LabelSelector{},
+							FRRConfigurationSelector: metav1.LabelSelector{},
+							Advertisements: []rav1.AdvertisementType{
+								rav1.PodNetwork,
+							},
+						},
+					}
+
+					ra, err = raClient.K8sV1().RouteAdvertisements().Create(context.TODO(), ra, metav1.CreateOptions{})
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					raName = ra.Name
+				} else {
+					ginkgo.By("ensure the managed BGP controller labelled both CUDNs")
+					for _, cudnName := range []string{cudnA.Name, cudnB.Name} {
+						gomega.Eventually(func(g gomega.Gomega) {
+							cudn, err := udnClient.K8sV1().ClusterUserDefinedNetworks().Get(context.TODO(), cudnName, metav1.GetOptions{})
+							g.Expect(err).NotTo(gomega.HaveOccurred())
+							g.Expect(cudn.Labels).To(gomega.HaveKeyWithValue(managedBGPLabel, ""))
+						}, 30*time.Second, time.Second).Should(gomega.Succeed())
+					}
+				}
 
 				ginkgo.By("ensure route advertisement matching both networks was created successfully")
 				gomega.Eventually(func() string {
-					ra, err := raClient.K8sV1().RouteAdvertisements().Get(context.TODO(), ra.Name, metav1.GetOptions{})
+					ra, err := raClient.K8sV1().RouteAdvertisements().Get(context.TODO(), raName, metav1.GetOptions{})
 					if err != nil {
 						return ""
 					}
@@ -1701,6 +1744,20 @@ var _ = ginkgo.Describe("BGP: isolation", feature.RouteAdvertisements, func() {
 					}
 					return condition.Reason
 				}, 30*time.Second, time.Second).Should(gomega.Equal("Accepted"))
+
+				if managedRouting {
+					ginkgo.By("ensure the managed route advertisement selects every managed network and the managed FRRConfiguration")
+					managedRA, err := raClient.K8sV1().RouteAdvertisements().Get(context.TODO(), raName, metav1.GetOptions{})
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					gomega.Expect(managedRA.Spec.Advertisements).To(gomega.ContainElement(rav1.PodNetwork))
+					gomega.Expect(managedRA.Spec.FRRConfigurationSelector.MatchLabels).To(gomega.HaveKeyWithValue(managedBGPLabel, ""))
+					gomega.Expect(managedRA.Spec.NetworkSelectors).To(gomega.ContainElement(apitypes.NetworkSelector{
+						NetworkSelectionType: apitypes.ClusterUserDefinedNetworks,
+						ClusterUserDefinedNetworkSelector: &apitypes.ClusterUserDefinedNetworkSelector{
+							NetworkSelector: metav1.LabelSelector{MatchLabels: map[string]string{managedBGPLabel: ""}},
+						},
+					}))
+				}
 
 				// Check CUDN TransportAccepted condition is True after RA is created
 				expectedTransportMsg := func(t udnv1.TransportOption) string {
@@ -1745,21 +1802,29 @@ var _ = ginkgo.Describe("BGP: isolation", feature.RouteAdvertisements, func() {
 					nodesNetB = []corev1.Node{nodes.Items[1]}
 				}
 
-				ginkgo.By("ensure routes from UDNs are learned by the external FRR router")
-				serverContainerIPs := getBGPServerContainerIPs(f)
-				for _, serverContainerIP := range serverContainerIPs {
-					for _, node := range nodes.Items {
-						if cudnA.Spec.Network.Topology == udnv1.NetworkTopologyLayer3 {
-							checkL3NodePodRoute(node, serverContainerIP, routerContainerName, types.CUDNPrefix+cudnA.Name)
-						} else {
-							checkL2NodePodRoute(node, serverContainerIP, routerContainerName, cudnATemplate.Spec.Network.Layer2.Subnets)
+				// The managed BGP controller only peers the nodes with each
+				// other: the FRRConfiguration it owns lists node IPs as its
+				// only neighbours, so the pod subnets never reach the external
+				// FRR router. Managed routing supports east-west traffic only;
+				// advertising a managed network off-cluster requires the user
+				// to create their own RouteAdvertisements and FRRConfiguration.
+				if !managedRouting {
+					ginkgo.By("ensure routes from UDNs are learned by the external FRR router")
+					serverContainerIPs := getBGPServerContainerIPs(f)
+					for _, serverContainerIP := range serverContainerIPs {
+						for _, node := range nodes.Items {
+							if cudnA.Spec.Network.Topology == udnv1.NetworkTopologyLayer3 {
+								checkL3NodePodRoute(node, serverContainerIP, routerContainerName, types.CUDNPrefix+cudnA.Name)
+							} else {
+								checkL2NodePodRoute(node, serverContainerIP, routerContainerName, cudnATemplate.Spec.Network.Layer2.Subnets)
+							}
 						}
-					}
-					for _, node := range nodesNetB {
-						if cudnB.Spec.Network.Topology == udnv1.NetworkTopologyLayer3 {
-							checkL3NodePodRoute(node, serverContainerIP, routerContainerName, types.CUDNPrefix+cudnB.Name)
-						} else {
-							checkL2NodePodRoute(node, serverContainerIP, routerContainerName, cudnBTemplate.Spec.Network.Layer2.Subnets)
+						for _, node := range nodesNetB {
+							if cudnB.Spec.Network.Topology == udnv1.NetworkTopologyLayer3 {
+								checkL3NodePodRoute(node, serverContainerIP, routerContainerName, types.CUDNPrefix+cudnB.Name)
+							} else {
+								checkL2NodePodRoute(node, serverContainerIP, routerContainerName, cudnBTemplate.Spec.Network.Layer2.Subnets)
+							}
 						}
 					}
 				}
@@ -2528,6 +2593,59 @@ var _ = ginkgo.Describe("BGP: isolation", feature.RouteAdvertisements, func() {
 						NoOverlay: &udnv1.NoOverlayConfig{
 							OutboundSNAT: udnv1.SNATDisabled,
 							Routing:      udnv1.RoutingUnmanaged,
+						},
+					},
+				},
+			},
+		),
+		ginkgo.Entry("Layer3 no-overlay SNAT disabled managed routing", feature.NoOverlay,
+			&udnv1.ClusterUserDefinedNetwork{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:   "bgp-l3-noovl-mgd-net-a",
+					Labels: map[string]string{"bgp-l3-noovl-mgd-net-a": ""},
+				},
+				Spec: udnv1.ClusterUserDefinedNetworkSpec{
+					Network: udnv1.NetworkSpec{
+						Topology: udnv1.NetworkTopologyLayer3,
+						Layer3: &udnv1.Layer3Config{
+							Role: "Primary",
+							Subnets: []udnv1.Layer3Subnet{{
+								CIDR:       "109.109.0.0/16",
+								HostSubnet: 24,
+							}, {
+								CIDR:       "2019:100:200::0/60",
+								HostSubnet: 64,
+							}},
+						},
+						Transport: udnv1.TransportOptionNoOverlay,
+						NoOverlay: &udnv1.NoOverlayConfig{
+							OutboundSNAT: udnv1.SNATDisabled,
+							Routing:      udnv1.RoutingManaged,
+						},
+					},
+				},
+			}, &udnv1.ClusterUserDefinedNetwork{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:   "bgp-l3-noovl-mgd-net-b",
+					Labels: map[string]string{"bgp-l3-noovl-mgd-net-b": ""},
+				},
+				Spec: udnv1.ClusterUserDefinedNetworkSpec{
+					Network: udnv1.NetworkSpec{
+						Topology: udnv1.NetworkTopologyLayer3,
+						Layer3: &udnv1.Layer3Config{
+							Role: "Primary",
+							Subnets: []udnv1.Layer3Subnet{{
+								CIDR:       "110.110.0.0/16",
+								HostSubnet: 24,
+							}, {
+								CIDR:       "2020:100:200::0/60",
+								HostSubnet: 64,
+							}},
+						},
+						Transport: udnv1.TransportOptionNoOverlay,
+						NoOverlay: &udnv1.NoOverlayConfig{
+							OutboundSNAT: udnv1.SNATDisabled,
+							Routing:      udnv1.RoutingManaged,
 						},
 					},
 				},
@@ -4720,6 +4838,16 @@ func isNoOverlayOutboundSNATEnabled(f *framework.Framework) bool {
 	gomega.Expect(ok).To(gomega.BeTrue(), "ovnkube.conf key must be present in ovnkube-config configmap")
 	re := regexp.MustCompile(`(?m)^\s*outbound-snat\s*=\s*enabled\s*$`)
 	return re.MatchString(conf)
+}
+
+// isNoOverlayManagedRouting reports whether the CUDN is advertised by the
+// managed BGP controller, which owns the RouteAdvertisements for every
+// no-overlay CUDN configured with managed routing.
+func isNoOverlayManagedRouting(cudn *udnv1.ClusterUserDefinedNetwork) bool {
+	return cudn != nil &&
+		cudn.Spec.Network.Transport == udnv1.TransportOptionNoOverlay &&
+		cudn.Spec.Network.NoOverlay != nil &&
+		cudn.Spec.Network.NoOverlay.Routing == udnv1.RoutingManaged
 }
 
 // checkL3NodePodRoute checks that the BGP route for the given node's pod subnet is present in the FRR router.

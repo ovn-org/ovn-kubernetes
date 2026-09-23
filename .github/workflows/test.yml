@@ -526,7 +526,8 @@ jobs:
         # Valid options are:
         # target: ["shard-conformance", "no-uplink", "control-plane", "multi-homing", "node-ip-mac-migration",
         #          "external-gateway", "kv-live-migration", "network-segmentation",
-        #          "network-segmentation-dynamic", "bgp", "bgp-no-overlay", "bgp-no-overlay-dynamic", "bgp-loose-isolation",
+        #          "network-segmentation-dynamic", "bgp", "bgp-no-overlay", "bgp-no-overlay-dynamic",
+        #          "bgp-no-overlay-managed", "bgp-loose-isolation",
         #          "evpn", "traffic-flow-test-only", "tools", "serial"]
         #         shard-conformance: hybrid-overlay = multicast-enable = emptylb-enable = false
         #         control-plane: hybrid-overlay = multicast-enable = emptylb-enable = true
@@ -580,6 +581,12 @@ jobs:
           # no-overlay (e.g. BGP route advertisements, network-segmentation) where implementations are not strictly orthogonal.
           - {"target": "bgp-no-overlay-dynamic", "gateway-mode": "shared", "ipfamily": "dualstack", "disable-snat-multiple-gws": "SnatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones", "routeadvertisements": "advertise-default", "network-segmentation": "enable-network-segmentation", "no-overlay": "snat-enabled"}
           - {"target": "bgp-no-overlay", "gateway-mode": "local",  "ipfamily": "dualstack", "disable-snat-multiple-gws": "noSnatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones", "routeadvertisements": "advertise-default", "network-segmentation": "enable-network-segmentation", "no-overlay": "true"}
+          # Managed routing is the one no-overlay mode whose BGP configuration ovn-kubernetes owns: the managed BGP
+          # controller creates the RouteAdvertisements and the FRRConfiguration itself. A CUDN requests it on its own
+          # CR, so the lanes above already cover that; only the cluster default network needs no-overlay=managed, and
+          # the only other lane with it is a shard-conformance one, which runs the upstream k8s e2e binary and so
+          # never enters test/e2e. This lane covers the managed default network.
+          - {"target": "bgp-no-overlay-managed", "gateway-mode": "local",  "ipfamily": "dualstack", "disable-snat-multiple-gws": "noSnatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones", "routeadvertisements": "managed", "network-segmentation": "enable-network-segmentation", "no-overlay": "managed"}
           - {"target": "bgp-loose-isolation", "gateway-mode": "shared", "ipfamily": "dualstack", "disable-snat-multiple-gws": "snatGW", "second-bridge": "1br", "ic": "ic-single-node-zones", "routeadvertisements": "advertise-default", "network-segmentation": "enable-network-segmentation", "advertised-udn-isolation-mode": "loose"}
           - {"target": "evpn", "gateway-mode": "local", "ipfamily": "dualstack", "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "1br", "ic": "ic-single-node-zones", "routeadvertisements": "advertise-default", "network-segmentation": "enable-network-segmentation", "evpn": "enable-evpn"}
           - {"target": "traffic-flow-test-only", "gateway-mode": "shared", "ipfamily": "ipv4", "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "1br", "ic": "ic-single-node-zones", "traffic-flow-tests": "1-24", "network-segmentation": "enable-network-segmentation"}
@@ -794,6 +801,10 @@ jobs:
           make -C test control-plane WHAT="ClusterNetworkConnect"
         elif [ "${{ matrix.target }}" == "evpn" ]; then
           make -C test control-plane WHAT="EVPN"
+        elif [ "${{ matrix.target }}" == "bgp-no-overlay-managed" ]; then
+          # Managed routing peers the nodes with each other only and deploys no external
+          # FRR router, so the north-south route advertisement suites cannot run here.
+          make -C test control-plane WHAT="No-Overlay:"
         elif [ "${{ matrix.target }}" == "bgp" ] || [ "${{ matrix.target }}" == "bgp-no-overlay" ] || [ "${{ matrix.target }}" == "bgp-no-overlay-dynamic" ] || [ "${{ matrix.target }}" == "bgp-loose-isolation" ]; then
           make -C test control-plane
         elif [ "${{ matrix.target }}" == "serial" ]; then
