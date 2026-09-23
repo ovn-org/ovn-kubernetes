@@ -1468,7 +1468,6 @@ config:
 			vmi                     *kubevirtv1.VirtualMachineInstance
 			cidrIPv4, cidrIPv6      string
 			staticIPv4, staticIPv6  string
-			staticMAC               = "02:00:00:00:00:01"
 			externalMACVRFContainer = infraapi.ExternalContainer{
 				CmdArgs: []string{"sleep", "infinity"},
 			}
@@ -1566,6 +1565,10 @@ write_files:
 
 					annotations, err := kubevirt.GenerateAddressesAnnotations("net1", filterIPs(fr.ClientSet, staticIPv4, staticIPv6))
 					Expect(err).NotTo(HaveOccurred())
+					// Keep the requested MAC stable within this VM, but independent
+					// of other static-address cases running concurrently.
+					staticMAC, err := util.GenerateRandMAC()
+					Expect(err).NotTo(HaveOccurred())
 
 					vm = fedoraWithTestToolingVM(nil /*labels*/, annotations, nil, /*nodeSelector*/
 						kubevirtv1.NetworkSource{
@@ -1573,7 +1576,7 @@ write_files:
 						}, userDataWithIperfServer, networkDataDualStack)
 					vm.Spec.Template.Spec.Domain.Devices.Interfaces[0].Bridge = nil
 					vm.Spec.Template.Spec.Domain.Devices.Interfaces[0].Binding = &kubevirtv1.PluginBinding{Name: "l2bridge"}
-					vm.Spec.Template.Spec.Domain.Devices.Interfaces[0].MacAddress = staticMAC
+					vm.Spec.Template.Spec.Domain.Devices.Interfaces[0].MacAddress = staticMAC.String()
 					createVirtualMachine(vm)
 					return vm.Name
 				},
@@ -2654,7 +2657,10 @@ runcmd:
 		}
 
 		It("should fail when creating second VM with duplicate user requested MAC", func() {
-			const testMAC = "02:a1:b2:c3:d4:e5"
+			mac, err := util.GenerateRandMAC()
+			Expect(err).NotTo(HaveOccurred())
+			// Reuse this MAC only for the two VMs whose collision is under test.
+			testMAC := mac.String()
 			vmi1 := newVMIWithPrimaryIfaceMAC(testMAC)
 			vm1 := generateVM(vmi1)
 			createVirtualMachine(vm1)
