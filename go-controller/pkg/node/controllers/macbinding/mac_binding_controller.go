@@ -118,6 +118,7 @@ type MACBindingController struct {
 
 type uplinkSourceProvider interface {
 	GetMacBindingSourceForUplinks() map[string]string
+	RegisterUplinkCallback(func(string))
 }
 
 // NewMACBindingController creates a new MACBindingController.
@@ -214,6 +215,8 @@ func (c *MACBindingController) Run(stopCh <-chan struct{}) error {
 		return fmt.Errorf("failed to register node nodeIPs handlers: %w", err)
 	}
 	defer c.deRegisterNodeIPsHandlers()
+
+	c.uplinkSourceProvider.RegisterUplinkCallback(c.ReconcileUplinkSource)
 
 	// start the reconcilers
 	reconcilers := []controller.Reconciler{

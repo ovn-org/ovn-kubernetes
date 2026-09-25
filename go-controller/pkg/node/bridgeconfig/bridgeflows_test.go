@@ -191,7 +191,7 @@ func TestHostNetworkNormalActionFlowsRequireLocalnetPort(t *testing.T) {
 				},
 			}
 
-			flows, err := bridge.commonFlows(hostSubnets)
+			flows, err := bridge.commonFlows(hostSubnets, types.DefaultNetworkName)
 			if err != nil {
 				t.Fatalf("failed to render bridge flows: %v", err)
 			}
@@ -257,7 +257,7 @@ func TestSharedNoOverlayNodeIPFlowUsesNATInDefaultConntrackZone(t *testing.T) {
 		},
 	}
 
-	flows, err := bridge.commonFlows(nil)
+	flows, err := bridge.commonFlows(nil, types.DefaultNetworkName)
 	if err != nil {
 		t.Fatalf("failed to render bridge flows: %v", err)
 	}
@@ -321,7 +321,7 @@ func TestUplinkBridgeServiceFlowsUseUDNMark(t *testing.T) {
 		},
 	}
 
-	flows, err := bridge.UplinkBridgeFlows(nil)
+	flows, err := bridge.UplinkBridgeFlows(nil, "bluenet")
 	if err != nil {
 		t.Fatalf("failed to render bridge flows: %v", err)
 	}
@@ -511,7 +511,7 @@ func TestArpFanoutFilterFlowsIncludeVLAN(t *testing.T) {
 		},
 	}
 
-	flows, err := bridge.commonFlows(nil)
+	flows, err := bridge.commonFlows(nil, types.DefaultNetworkName)
 	if err != nil {
 		t.Fatalf("failed to render bridge flows: %v", err)
 	}
@@ -544,12 +544,221 @@ func TestArpFanoutFilterFlowsIncludeVLAN(t *testing.T) {
 	}
 	// Exercise priority 10 on a bridge carrying only the default network.
 	delete(bridge.netConfig, "bluenet")
-	flows, err = bridge.commonFlows(nil)
+	flows, err = bridge.commonFlows(nil, types.DefaultNetworkName)
 	if err != nil {
 		t.Fatalf("failed to render bridge flows: %v", err)
 	}
 	expectFlow(t, flows, fmt.Sprintf("cookie=%s, priority=10, table=0, dl_vlan=100, dl_dst=62:41:d0:54:3d:64, actions=output:patch-breth0_ov,NORMAL",
 		nodetypes.DefaultOpenFlowCookie))
+}
+
+// TestARPNDPSteeringFlowsWhenFloodDisabled is the DisableUDNARPNDPFlood twin of
+// TestArpFanoutFilterFlowsIncludeVLAN: the priority 52 steering flows replace
+// every ARP/NDP fan-out flow rather than sitting alongside them.
+func TestARPNDPSteeringFlowsWhenFloodDisabled(t *testing.T) {
+	if err := config.PrepareTestConfig(); err != nil {
+		t.Fatalf("failed to prepare test config: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = config.PrepareTestConfig()
+	})
+	config.IPv4Mode = true
+	config.IPv6Mode = true
+	config.Gateway.Mode = config.GatewayModeShared
+	config.Gateway.VLANID = 100
+	config.Gateway.DisableUDNARPNDPFlood = true
+	config.OVNKubernetesFeature.EnableMultiNetwork = true
+	config.OVNKubernetesFeature.EnableNetworkSegmentation = true
+
+	bridgeMAC := mustParseMAC(t, "62:41:d0:54:3d:64")
+	v4NodeIP := mustParseIPNet(t, "172.18.0.3/24")
+	v6NodeIP := mustParseIPNet(t, "fd00::3/64")
+	v4GatewayMasqIP := mustParseIPNet(t, "169.254.0.11/32")
+	v4ManagementMasqIP := mustParseIPNet(t, "169.254.0.12/32")
+	v6GatewayMasqIP := mustParseIPNet(t, "fd69::11/128")
+	v6ManagementMasqIP := mustParseIPNet(t, "fd69::12/128")
+
+	bridge := &BridgeConfiguration{
+		ovsClient:  newBridgeFlowTestOVSClient(t, "breth0"),
+		bridgeName: "breth0",
+		ofPortPhys: "eth0",
+		ofPortHost: nodetypes.OvsLocalPort,
+		ips:        []*net.IPNet{v4NodeIP, v6NodeIP},
+		macAddress: bridgeMAC,
+		netConfig: map[string]*BridgeUDNConfiguration{
+			types.DefaultNetworkName: {
+				OfPortPatch: "patch-breth0_ov",
+				MasqCTMark:  nodetypes.CtMarkOVN,
+			},
+			"bluenet": {
+				OfPortPatch: "patch-breth0_bluenet",
+				MasqCTMark:  "0x4",
+				V4MasqIPs: &udngenerator.MasqueradeIPs{
+					GatewayRouter:  v4GatewayMasqIP,
+					ManagementPort: v4ManagementMasqIP,
+				},
+				V6MasqIPs: &udngenerator.MasqueradeIPs{
+					GatewayRouter:  v6GatewayMasqIP,
+					ManagementPort: v6ManagementMasqIP,
+				},
+			},
+		},
+	}
+
+	flows, err := bridge.commonFlows(nil, types.DefaultNetworkName)
+	if err != nil {
+		t.Fatalf("failed to render bridge flows: %v", err)
+	}
+
+	expectFlow(t, flows, fmt.Sprintf("cookie=%s, priority=52, table=0, in_port=eth0, dl_vlan=100, dl_dst=%s, arp, "+
+		"actions=output:patch-breth0_ov,NORMAL", nodetypes.DefaultOpenFlowCookie, bridgeMAC))
+	for _, icmpType := range []int{
+		types.NeighborAdvertisementICMPType,
+		types.RouteAdvertisementICMPType,
+		types.NeighborSolicitationICMPType,
+	} {
+		expectFlow(t, flows, fmt.Sprintf("cookie=%s, priority=52, table=0, in_port=eth0, dl_vlan=100, dl_dst=%s, "+
+			"icmp6, icmpv6_type=%d, actions=output:patch-breth0_ov,NORMAL",
+			nodetypes.DefaultOpenFlowCookie, bridgeMAC, icmpType))
+	}
+
+	// Every ARP/NDP fan-out flow must be gone, so there is no hidden path left
+	// that bypasses no-flood and reaches the CUDN patch ports.
+	expectNoFlowContainingAll(t, flows, "priority=10, table=0,", fmt.Sprintf("dl_dst=%s", bridgeMAC))
+	expectNoFlowContainingAll(t, flows, "priority=11, table=0,")
+	expectNoFlowContainingAll(t, flows, "priority=12, table=0,")
+	expectNoFlowContainingAll(t, flows, "priority=14, table=1,")
+	expectNoFlowContainingAll(t, flows, "priority=45, table=0,")
+}
+
+// TestARPNDPSteeringFlowsOnUplinkBridge covers a bridge with no default network,
+// where steering must target the designated source UDN instead.
+func TestARPNDPSteeringFlowsOnUplinkBridge(t *testing.T) {
+	if err := config.PrepareTestConfig(); err != nil {
+		t.Fatalf("failed to prepare test config: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = config.PrepareTestConfig()
+	})
+	config.IPv4Mode = true
+	config.IPv6Mode = false
+	config.Gateway.Mode = config.GatewayModeShared
+	config.Gateway.DisableUDNARPNDPFlood = true
+	config.OVNKubernetesFeature.EnableMultiNetwork = true
+	config.OVNKubernetesFeature.EnableNetworkSegmentation = true
+
+	bridgeMAC := mustParseMAC(t, "62:41:d0:54:3d:64")
+	bridge := &BridgeConfiguration{
+		ovsClient:  newBridgeFlowTestOVSClient(t, "ovsbr1"),
+		bridgeName: "ovsbr1",
+		ofPortPhys: "eth1",
+		ofPortHost: nodetypes.OvsLocalPort,
+		ips:        []*net.IPNet{mustParseIPNet(t, "172.28.0.3/24")},
+		macAddress: bridgeMAC,
+		netConfig: map[string]*BridgeUDNConfiguration{
+			"bluenet": {
+				OfPortPatch: "patch-ovsbr1_bluenet",
+				MasqCTMark:  "0x4",
+				V4MasqIPs: &udngenerator.MasqueradeIPs{
+					GatewayRouter:  mustParseIPNet(t, "169.254.0.11/32"),
+					ManagementPort: mustParseIPNet(t, "169.254.0.12/32"),
+				},
+			},
+			"rednet": {
+				OfPortPatch: "patch-ovsbr1_rednet",
+				MasqCTMark:  "0x5",
+				V4MasqIPs: &udngenerator.MasqueradeIPs{
+					GatewayRouter:  mustParseIPNet(t, "169.254.0.13/32"),
+					ManagementPort: mustParseIPNet(t, "169.254.0.14/32"),
+				},
+			},
+		},
+	}
+
+	flows, err := bridge.UplinkBridgeFlows(nil, "rednet")
+	if err != nil {
+		t.Fatalf("failed to render bridge flows: %v", err)
+	}
+
+	expectFlow(t, flows, fmt.Sprintf("cookie=%s, priority=52, table=0, in_port=eth1,  dl_dst=%s, arp, "+
+		"actions=output:patch-ovsbr1_rednet,NORMAL", nodetypes.DefaultOpenFlowCookie, bridgeMAC))
+}
+
+// TestARPNDPSteeringFlowsCoverLocalnetPorts checks that secondary localnet patch
+// ports are part of the external-ingress set, and that one without an assigned
+// ofport is skipped rather than rendering a broken flow.
+func TestARPNDPSteeringFlowsCoverLocalnetPorts(t *testing.T) {
+	if err := config.PrepareTestConfig(); err != nil {
+		t.Fatalf("failed to prepare test config: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = config.PrepareTestConfig()
+	})
+	config.IPv4Mode = true
+	config.IPv6Mode = false
+	config.Gateway.Mode = config.GatewayModeShared
+	config.Gateway.DisableUDNARPNDPFlood = true
+	config.OVNKubernetesFeature.EnableMultiNetwork = true
+	config.OVNKubernetesFeature.EnableNetworkSegmentation = true
+
+	localnetOfPort := 7
+	ovsClient, ovsCleanup, err := libovsdbtest.NewOVSTestHarness(libovsdbtest.TestSetup{
+		OVSData: []libovsdbtest.TestData{
+			&vswitchd.OpenvSwitch{UUID: "root-ovs", Bridges: []string{"breth0-uuid"}},
+			&vswitchd.Bridge{UUID: "breth0-uuid", Name: "breth0", Ports: []string{"localnet-port-uuid", "pending-port-uuid"}},
+			&vswitchd.Port{
+				UUID:        "localnet-port-uuid",
+				Name:        "patch-blue_ovn_localnet_port-to-br-int",
+				Interfaces:  []string{"localnet-iface-uuid"},
+				ExternalIDs: map[string]string{"ovn-localnet-port": "blue_ovn_localnet_port"},
+			},
+			&vswitchd.Interface{
+				UUID:   "localnet-iface-uuid",
+				Name:   "patch-blue_ovn_localnet_port-to-br-int",
+				Type:   "patch",
+				Ofport: &localnetOfPort,
+			},
+			// no ofport assigned yet: must be skipped, not rendered as in_port=
+			&vswitchd.Port{
+				UUID:        "pending-port-uuid",
+				Name:        "patch-red_ovn_localnet_port-to-br-int",
+				Interfaces:  []string{"pending-iface-uuid"},
+				ExternalIDs: map[string]string{"ovn-localnet-port": "red_ovn_localnet_port"},
+			},
+			&vswitchd.Interface{UUID: "pending-iface-uuid", Name: "patch-red_ovn_localnet_port-to-br-int", Type: "patch"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("failed to create OVS test harness: %v", err)
+	}
+	t.Cleanup(ovsCleanup.Cleanup)
+
+	bridgeMAC := mustParseMAC(t, "62:41:d0:54:3d:64")
+	bridge := &BridgeConfiguration{
+		ovsClient:  ovsClient,
+		bridgeName: "breth0",
+		ofPortPhys: "eth0",
+		ofPortHost: nodetypes.OvsLocalPort,
+		ips:        []*net.IPNet{mustParseIPNet(t, "172.18.0.3/24")},
+		macAddress: bridgeMAC,
+		netConfig: map[string]*BridgeUDNConfiguration{
+			types.DefaultNetworkName: {
+				OfPortPatch: "patch-breth0_ov",
+				MasqCTMark:  nodetypes.CtMarkOVN,
+			},
+		},
+	}
+
+	flows, err := bridge.commonFlows(nil, types.DefaultNetworkName)
+	if err != nil {
+		t.Fatalf("failed to render bridge flows: %v", err)
+	}
+
+	for _, inPort := range []string{"eth0", "7"} {
+		expectFlow(t, flows, fmt.Sprintf("cookie=%s, priority=52, table=0, in_port=%s,  dl_dst=%s, arp, "+
+			"actions=output:patch-breth0_ov,NORMAL", nodetypes.DefaultOpenFlowCookie, inPort, bridgeMAC))
+	}
+	expectNoFlowContainingAll(t, flows, "priority=52", "in_port=,")
 }
 
 func mustParseMAC(t *testing.T, value string) net.HardwareAddr {
@@ -596,6 +805,22 @@ func expectFlowContainingAll(t *testing.T, flows []string, substrings ...string)
 		}
 	}
 	t.Fatalf("no flow contains all substrings %v\n\nall flows:\n%v", substrings, flows)
+}
+
+func expectNoFlowContainingAll(t *testing.T, flows []string, substrings ...string) {
+	t.Helper()
+	for _, flow := range flows {
+		allFound := true
+		for _, s := range substrings {
+			if !strings.Contains(flow, s) {
+				allFound = false
+				break
+			}
+		}
+		if allFound {
+			t.Fatalf("unexpected flow containing all substrings %v:\n%s", substrings, flow)
+		}
+	}
 }
 
 func expectNoFlow(t *testing.T, flows []string, unexpectedSubstring string) {

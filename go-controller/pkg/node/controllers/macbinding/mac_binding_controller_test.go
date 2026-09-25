@@ -70,6 +70,8 @@ func (f *fakeUplinkSourceProvider) GetMacBindingSourceForUplinks() map[string]st
 	return f.sources
 }
 
+func (f *fakeUplinkSourceProvider) RegisterUplinkCallback(func(string)) {}
+
 // newTestController builds a controller wired only with the fields the
 // method-level tests exercise, bypassing NewMACBindingController (which needs a
 // live networkManager and watchFactory).

@@ -40,7 +40,7 @@ func (b *BridgeConfiguration) DefaultBridgeFlows(hostSubnets []*net.IPNet, extra
 	if err != nil {
 		return nil, err
 	}
-	dftCommonFlows, err := b.commonFlows(hostSubnets)
+	dftCommonFlows, err := b.commonFlows(hostSubnets, types.DefaultNetworkName)
 	if err != nil {
 		return nil, err
 	}
@@ -50,14 +50,18 @@ func (b *BridgeConfiguration) DefaultBridgeFlows(hostSubnets []*net.IPNet, extra
 func (b *BridgeConfiguration) ExternalBridgeFlows(hostSubnets []*net.IPNet) ([]string, error) {
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
-	return b.commonFlows(hostSubnets)
+	return b.commonFlows(hostSubnets, types.DefaultNetworkName)
 }
 
-func (b *BridgeConfiguration) UplinkBridgeFlows(hostSubnets []*net.IPNet) ([]string, error) {
+// UplinkBridgeFlows generates the flows for an uplink bridge. sourceNetwork is
+// the network whose gateway router is designated as the source of ARP/NDP
+// neighbour resolution for this bridge; unlike br-ex, an uplink bridge has no
+// default network to fall back on.
+func (b *BridgeConfiguration) UplinkBridgeFlows(hostSubnets []*net.IPNet, sourceNetwork string) ([]string, error) {
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
 	uplinkFlows := b.uplinkHostServiceFlows()
-	commonFlows, err := b.commonFlows(hostSubnets)
+	commonFlows, err := b.commonFlows(hostSubnets, sourceNetwork)
 	if err != nil {
 		return nil, err
 	}
@@ -785,22 +789,28 @@ func generateGratuitousARPAllowFlow(inPort string, ip net.IP, priority int) stri
 }
 
 // must be called with bridge.mutex held
-func (b *BridgeConfiguration) commonFlows(hostSubnets []*net.IPNet) ([]string, error) {
+func (b *BridgeConfiguration) commonFlows(hostSubnets []*net.IPNet, sourceNetwork string) ([]string, error) {
 	// CAUTION: when adding new flows where the in_port is ofPortPatch and the out_port is ofPortPhys, ensure
 	// that dl_src is included in match criteria!
 	ofPortPhys := b.ofPortPhys
 	bridgeMacAddress := b.macAddress.String()
 	ofPortHost := b.ofPortHost
 	bridgeIPs := b.ips
-	hasLocalnetPatchPort := false
-	if _, hasDefaultNetwork := b.netConfig[types.DefaultNetworkName]; hasDefaultNetwork &&
+	// Localnet patch ports feed the host-network NORMAL flows (default network
+	// only) and, when the ARP/NDP fan-out is disabled, the external-ingress set
+	// of the priority 52 steering flows.
+	var localnetPatchPorts []string
+	_, hasDefaultNetwork := b.netConfig[types.DefaultNetworkName]
+	needsSteering := util.IsNetworkSegmentationSupportEnabled() && config.Gateway.DisableUDNARPNDPFlood
+	if (hasDefaultNetwork || needsSteering) &&
 		(config.Gateway.Mode == config.GatewayModeShared || config.Gateway.Mode == config.GatewayModeLocal) {
 		var err error
-		hasLocalnetPatchPort, err = b.hasLocalnetPatchPort()
+		localnetPatchPorts, err = b.localnetPatchPortNames()
 		if err != nil {
 			return nil, err
 		}
 	}
+	hasLocalnetPatchPort := len(localnetPatchPorts) > 0
 
 	var dftFlows []string
 
@@ -818,23 +828,28 @@ func (b *BridgeConfiguration) commonFlows(hostSubnets []*net.IPNet) ([]string, e
 	}
 
 	if ofPortPhys != "" {
-		// table 0, we check to see if this dest mac is the shared mac, if so flood to all ports
-		// Process default delivery before primary UDN fan-out can exhaust OVS's
-		// per-translation resubmit budget. OVS contains errors from a patch's peer
-		// bridge, preserving earlier datapath actions when later UDN branches
-		// exhaust the budget.
-		var actions []string
-		if defaultNetConfig := b.netConfig[types.DefaultNetworkName]; defaultNetConfig != nil && defaultNetConfig.OfPortPatch != "" {
-			actions = append(actions, "output:"+defaultNetConfig.OfPortPatch)
+		// table 0, we check to see if this dest mac is the shared mac, if so flood to all ports.
+		// When DisableUDNARPNDPFlood is set this fan-out is not rendered at all: the ARP/NDP it
+		// used to carry is steered to the source GR by the priority 52 flows below, and the
+		// remaining IP traffic is picked up by the priority 50 conntrack flow.
+		if !config.Gateway.DisableUDNARPNDPFlood {
+			// Process default delivery before primary UDN fan-out can exhaust OVS's
+			// per-translation resubmit budget. OVS contains errors from a patch's peer
+			// bridge, preserving earlier datapath actions when later UDN branches
+			// exhaust the budget.
+			var actions []string
+			if defaultNetConfig := b.netConfig[types.DefaultNetworkName]; defaultNetConfig != nil && defaultNetConfig.OfPortPatch != "" {
+				actions = append(actions, "output:"+defaultNetConfig.OfPortPatch)
+			}
+			actions = append(actions, b.primaryUDNPatchOutputActions()...)
+			actions = append(actions, "NORMAL")
+			dftFlows = append(dftFlows,
+				fmt.Sprintf("cookie=%s, priority=10, table=0, %s dl_dst=%s, actions=%s",
+					nodetypes.DefaultOpenFlowCookie, matchVLAN, bridgeMacAddress, strings.Join(actions, ",")))
 		}
-		actions = append(actions, b.primaryUDNPatchOutputActions()...)
-		actions = append(actions, "NORMAL")
-		dftFlows = append(dftFlows,
-			fmt.Sprintf("cookie=%s, priority=10, table=0, %s dl_dst=%s, actions=%s",
-				nodetypes.DefaultOpenFlowCookie, matchVLAN, bridgeMacAddress, strings.Join(actions, ",")))
 
 		if util.IsNetworkSegmentationSupportEnabled() {
-			dftFlows = append(dftFlows, b.arpFanoutFilterFlows(ofPortPhys, matchVLAN)...)
+			dftFlows = append(dftFlows, b.arpFanoutFilterFlows(ofPortPhys, matchVLAN, sourceNetwork, localnetPatchPorts)...)
 		}
 	}
 
@@ -1170,11 +1185,16 @@ func (b *BridgeConfiguration) commonFlows(hostSubnets []*net.IPNet) ([]string, e
 			// must flood icmpv6 Route Advertisement and Neighbor Advertisement traffic as it fails to create a CT entry.
 			// FLOOD reaches default and host first. UDN patches are no-flood,
 			// so append explicit outputs after the protected delivery.
-			actions := strings.Join(append([]string{"FLOOD"}, b.primaryUDNPatchOutputActions()...), ",")
-			for _, icmpType := range []int{types.RouteAdvertisementICMPType, types.NeighborAdvertisementICMPType} {
-				dftFlows = append(dftFlows,
-					fmt.Sprintf("cookie=%s, priority=14, table=1,icmp6,icmpv6_type=%d actions=%s",
-						nodetypes.DefaultOpenFlowCookie, icmpType, actions))
+			// When DisableUDNARPNDPFlood is set these are not rendered: unicast RAs/NAs never reach
+			// conntrack because the priority 52 flows steer them to the source GR first, and
+			// multicast ones fall to the table 0 catch-all NORMAL.
+			if !config.Gateway.DisableUDNARPNDPFlood {
+				actions := strings.Join(append([]string{"FLOOD"}, b.primaryUDNPatchOutputActions()...), ",")
+				for _, icmpType := range []int{types.RouteAdvertisementICMPType, types.NeighborAdvertisementICMPType} {
+					dftFlows = append(dftFlows,
+						fmt.Sprintf("cookie=%s, priority=14, table=1,icmp6,icmpv6_type=%d actions=%s",
+							nodetypes.DefaultOpenFlowCookie, icmpType, actions))
+				}
 			}
 			if hasDefaultNetConfig {
 				// We send BFD traffic both on the host and in ovn
@@ -1339,7 +1359,11 @@ func (b *BridgeConfiguration) allowNodeIPGARPFlows(nodeIPs []net.IP) []string {
 // Node-IP ARPs are caught at priority-12 first.
 //
 // Must be called with bridge.mutex held.
-func (b *BridgeConfiguration) arpFanoutFilterFlows(ofPortPhys, matchVLAN string) []string {
+func (b *BridgeConfiguration) arpFanoutFilterFlows(ofPortPhys, matchVLAN, sourceNetwork string, localnetPatchPorts []string) []string {
+	if config.Gateway.DisableUDNARPNDPFlood {
+		return b.externalIngressARPNDPSteeringFlows(ofPortPhys, matchVLAN, sourceNetwork, localnetPatchPorts)
+	}
+
 	defaultNetConfig, found := b.netConfig[types.DefaultNetworkName]
 	if !found || defaultNetConfig.OfPortPatch == "" {
 		return nil
@@ -1406,6 +1430,84 @@ func (b *BridgeConfiguration) arpFanoutFilterFlows(ofPortPhys, matchVLAN string)
 		}
 	}
 
+	return flows
+}
+
+// externalIngressARPNDPSteeringFlows returns the priority 52 flows that steer
+// inbound unicast ARP and NDP addressed to the shared bridge MAC to the source
+// GR's patch port instead of fanning it out to every GR on the bridge.
+//
+// These sit above the priority 50 conntrack flow so NDP never takes a conntrack
+// path that cannot create CT entries for it (kernel bug #11797), and above the
+// priority 10 fan-out and table 1 flows, both of which use explicit output
+// actions that bypass no-flood. ARP is unified at the same priority to keep the
+// pipeline simple.
+//
+// Broadcast and multicast ARP/NDP (GARP, node IP ARP requests, solicited-node
+// multicast NS, unsolicited multicast NA, multicast RA) deliberately do not
+// match: they fall to the table 0 catch-all NORMAL, whose flood already reaches
+// the source GR and LOCAL while no-flood keeps CUDN patches out.
+//
+// The trailing NORMAL is load bearing. It performs FDB learning of the external
+// source MAC and delivers to LOCAL via the static bridgeMAC->LOCAL entry; the
+// kernel's neighbour table depends on it. The explicit output to the source
+// patch is equally load bearing, since NORMAL's FDB lookup for a unicast frame
+// addressed to the bridge MAC only ever resolves to LOCAL.
+//
+// The external-ingress set is the physical port plus every secondary localnet
+// patch port on the bridge: traffic from a localnet network enters there rather
+// than on ofPortPhys. A localnet port whose ofport is not assigned yet is
+// skipped; the openflow manager re-renders on localnet port churn and on its
+// periodic resync, so it is picked up then.
+//
+// Must be called with bridge.mutex held.
+func (b *BridgeConfiguration) externalIngressARPNDPSteeringFlows(ofPortPhys, matchVLAN, sourceNetwork string, localnetPatchPorts []string) []string {
+	sourceNetConfig, found := b.netConfig[sourceNetwork]
+	if !found || sourceNetConfig.OfPortPatch == "" {
+		return nil
+	}
+
+	ingressPorts := make([]string, 0, len(localnetPatchPorts)+1)
+	if ofPortPhys != "" {
+		ingressPorts = append(ingressPorts, ofPortPhys)
+	}
+	for _, name := range localnetPatchPorts {
+		ofPort := b.ofPortOf(name)
+		if ofPort == "" {
+			klog.V(5).Infof("Skipping ARP/NDP steering for localnet port %s on bridge %s: no ofport assigned yet",
+				name, b.bridgeName)
+			continue
+		}
+		ingressPorts = append(ingressPorts, ofPort)
+	}
+	if len(ingressPorts) == 0 {
+		return nil
+	}
+
+	bridgeMacAddress := b.macAddress.String()
+	sourcePatch := sourceNetConfig.OfPortPatch
+
+	var flows []string
+	for _, ingressPort := range ingressPorts {
+		if config.IPv4Mode {
+			flows = append(flows,
+				fmt.Sprintf("cookie=%s, priority=52, table=0, in_port=%s, %s dl_dst=%s, arp, "+
+					"actions=output:%s,NORMAL",
+					nodetypes.DefaultOpenFlowCookie, ingressPort, matchVLAN, bridgeMacAddress, sourcePatch))
+		}
+		if config.IPv6Mode {
+			for _, icmpType := range []int{
+				types.NeighborAdvertisementICMPType,
+				types.RouteAdvertisementICMPType,
+				types.NeighborSolicitationICMPType,
+			} {
+				flows = append(flows,
+					fmt.Sprintf("cookie=%s, priority=52, table=0, in_port=%s, %s dl_dst=%s, icmp6, icmpv6_type=%d, "+
+						"actions=output:%s,NORMAL",
+						nodetypes.DefaultOpenFlowCookie, ingressPort, matchVLAN, bridgeMacAddress, icmpType, sourcePatch))
+			}
+		}
+	}
 	return flows
 }
 

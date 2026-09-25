@@ -93,6 +93,7 @@ usage() {
     echo "-ikv | --install-kubevirt                     Install kubevirt"
     echo "-mne | --multi-network-enable                 Enable multi networks. DEFAULT: Disabled"
     echo "-nse | --network-segmentation-enable          Enable network segmentation. DEFAULT: Disabled"
+    echo "-duanf | --disable-udn-arp-ndp-flood          Disable UDN ARP/NDP Flood. DEFAULT: Enabled"
     echo "-nce | --network-connect-enable               Enable network connect (requires network segmentation). DEFAULT: Disabled"
     echo "-ue  | --uplink-enable                        Enable uplink (requires network segmentation). DEFAULT: Disabled"
     echo "-uae | --preconfigured-udn-addresses-enable   Enable connecting workloads with preconfigured network to user-defined networks. DEFAULT: Disabled"
@@ -204,6 +205,8 @@ parse_args() {
             -mne | --multi-network-enable )       ENABLE_MULTI_NET=true
                                                   ;;
             -nse | --network-segmentation-enable) ENABLE_NETWORK_SEGMENTATION=true
+                                                  ;;
+            -duanf | --disable-udn-arp-ndp-flood) DISABLE_UDN_ARP_NDP_FLOOD=true
                                                   ;;
             -nce | --network-connect-enable )     ENABLE_NETWORK_CONNECT=true
                                                   ;;
@@ -514,6 +517,7 @@ print_params() {
      echo "KIND_REMOVE_TAINT = $KIND_REMOVE_TAINT"
      echo "ENABLE_MULTI_NET = $ENABLE_MULTI_NET"
      echo "ENABLE_NETWORK_SEGMENTATION = $ENABLE_NETWORK_SEGMENTATION"
+     echo "DISABLE_UDN_ARP_NDP_FLOOD = $DISABLE_UDN_ARP_NDP_FLOOD"
      echo "ENABLE_NETWORK_CONNECT = $ENABLE_NETWORK_CONNECT"
      echo "ENABLE_UPLINK = $ENABLE_UPLINK"
      echo "ENABLE_PRE_CONF_UDN_ADDR = $ENABLE_PRE_CONF_UDN_ADDR"
@@ -675,6 +679,7 @@ helm upgrade --install ovn-kubernetes . -f "${value_file}" ${extra_values_args} 
           --set global.enableMulticast=$(if [ "${OVN_MULTICAST_ENABLE}" == "true" ]; then echo "true"; else echo "false"; fi) \
           --set global.enableMultiNetwork=$(if [ "${ENABLE_MULTI_NET}" == "true" ]; then echo "true"; else echo "false"; fi) \
           --set global.enableNetworkSegmentation=$(if [ "${ENABLE_NETWORK_SEGMENTATION}" == "true" ]; then echo "true"; else echo "false"; fi) \
+          --set global.disableUDNARPNDPFlood=$(if [ "${DISABLE_UDN_ARP_NDP_FLOOD}" == "true" ]; then echo "true"; else echo "false"; fi) \
           --set global.enableNetworkConnect=$(if [ "${ENABLE_NETWORK_CONNECT}" == "true" ]; then echo "true"; else echo "false"; fi) \
           --set global.enableUplink=$(if [ "${ENABLE_UPLINK}" == "true" ]; then echo "true"; else echo "false"; fi) \
           --set global.enableDynamicUDNAllocation=$(if [ "${DYNAMIC_UDN_ALLOCATION}" == "true" ]; then echo "true"; else echo "false"; fi) \
