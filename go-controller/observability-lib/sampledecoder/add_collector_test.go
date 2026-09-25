@@ -4,6 +4,7 @@
 package sampledecoder
 
 import (
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -70,6 +71,55 @@ func TestValidateCollectorReuse(t *testing.T) {
 				require.NoError(t, err)
 				return
 			}
+			require.ErrorContains(t, err, tt.wantErrSub)
+		})
+	}
+}
+
+// TestAddCollectorRejectsReservedID covers the collector-ID validation, which mirrors the
+// ObservabilityConfig CRD bounds (1..math.MaxUint32): IDs below 1 (0 is the "no collector"
+// sentinel used by Shutdown, negatives are meaningless) and IDs above the uint32 max are
+// rejected before any OVSDB access. A valid ID passes the range check and only then hits the
+// uninitialized-client guard.
+func TestAddCollectorRejectsReservedID(t *testing.T) {
+	tests := []struct {
+		name        string
+		collectorID int
+		wantErrSub  string
+	}{
+		{
+			name:        "zero is reserved",
+			collectorID: 0,
+			wantErrSub:  "collector ID must be between 1 and",
+		},
+		{
+			name:        "negative is rejected",
+			collectorID: -1,
+			wantErrSub:  "collector ID must be between 1 and",
+		},
+		{
+			name:        "above uint32 max is rejected",
+			collectorID: math.MaxUint32 + 1,
+			wantErrSub:  "collector ID must be between 1 and",
+		},
+		{
+			name:        "valid ID passes the range check",
+			collectorID: 1,
+			wantErrSub:  "OVSDB client is not initialized",
+		},
+		{
+			name:        "uint32 max is valid",
+			collectorID: math.MaxUint32,
+			wantErrSub:  "OVSDB client is not initialized",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// ovsdbClient is nil: a valid ID reaches (and trips) the client guard, while an
+			// invalid ID is rejected before the client is ever touched.
+			d := &SampleDecoder{}
+			err := d.AddCollector(tt.collectorID, 10, "ovnk-debug")
 			require.ErrorContains(t, err, tt.wantErrSub)
 		})
 	}

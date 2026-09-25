@@ -6,6 +6,7 @@ package observability
 import (
 	"errors"
 	"fmt"
+	"math"
 	"slices"
 	"strings"
 	"sync"
@@ -163,18 +164,23 @@ func (m *Manager) Init() error {
 
 // StartWatching watches ObservabilityConfig CRs and applies all that apply to this node.
 // In details: configs whose Filter.NodeSelector matches the local node labels apply;
-// configs with no Filter.NodeSelector always apply. If the local node's labels
-// cannot be resolved, only configs without a Filter.NodeSelector apply.
+// configs with no Filter.NodeSelector always apply. nodeWatcher is required (non-nil): a change
+// to the local node's labels re-triggers reconciliation so a NodeSelector that starts or stops
+// matching is honored. If the local node cannot be resolved, reconciliation is requeued.
 // Multiple configs can apply (e.g. one cluster-wide, one namespace-scoped); use SamplingConfigForContext
 // when creating ACLs so the correct config is chosen per (namespace, feature). Call after Init().
 //
 // The k8s watching and reconcile loop live in configReconciler (config_reconciler.go); this
 // Manager provides the apply/clear engine it drives.
-func (m *Manager) StartWatching(informer ObservabilityConfigInformer, nodeGetter NodeGetter, nodeName string, stopChan <-chan struct{}) {
+func (m *Manager) StartWatching(informer ObservabilityConfigInformer, nodeWatcher NodeWatcher, nodeName string, stopChan <-chan struct{}) {
 	if informer == nil {
 		return
 	}
-	r := newConfigReconciler(m, informer, nodeGetter, nodeName)
+	if nodeWatcher == nil || nodeWatcher.NodeInformer() == nil {
+		klog.Errorf("Observability: cannot start ObservabilityConfig reconciler: node watcher/informer is nil")
+		return
+	}
+	r := newConfigReconciler(m, informer, nodeWatcher, nodeName)
 	if err := r.start(); err != nil {
 		klog.Errorf("Observability: failed to start ObservabilityConfig reconciler: %v", err)
 		return
@@ -218,6 +224,8 @@ func collectorConfigFromCR(cr *observabilityconfigv1alpha1.ObservabilityConfig) 
 		sf := observabilityFeatureToSampleFeature(f.Feature)
 		if sf != "" {
 			c.featuresProbability[sf] = int(f.Probability)
+		} else {
+			klog.Warningf("Observability: unknown feature in %s: %s", cr.Name, f.Feature)
 		}
 	}
 	return c
@@ -249,8 +257,8 @@ var namespacedObservabilityFeatures = map[observabilityconfigv1alpha1.Observabil
 // validateObservabilityConfig returns an error if the CR fails validation (e.g. collectorID/set_id out of range or probability not 0..100).
 // API server CRD validation should enforce these too; this is defense in depth.
 func validateObservabilityConfig(cr *observabilityconfigv1alpha1.ObservabilityConfig) error {
-	if cr.Spec.CollectorID < 1 {
-		return fmt.Errorf("ObservabilityConfig %s: collectorID (set_id) must be at least 1, got %d", cr.Name, cr.Spec.CollectorID)
+	if cr.Spec.CollectorID < 1 || cr.Spec.CollectorID > math.MaxUint32 {
+		return fmt.Errorf("ObservabilityConfig %s: collectorID (set_id) must be between 1 and %d, got %d", cr.Name, int64(math.MaxUint32), cr.Spec.CollectorID)
 	}
 	for _, f := range cr.Spec.Features {
 		if f.Probability < 0 || f.Probability > 100 {

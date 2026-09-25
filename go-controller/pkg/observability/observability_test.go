@@ -4,6 +4,8 @@
 package observability
 
 import (
+	"context"
+	"math"
 	"strings"
 	"time"
 
@@ -200,12 +202,79 @@ var _ = Describe("Observability Manager", func() {
 		informerFactory.Start(stopCh)
 		Expect(cache.WaitForCacheSync(stopCh, sharedInformer.HasSynced)).To(BeTrue())
 
-		// nodeGetter is nil: the config has no Filter.NodeSelector so it applies regardless.
-		manager.StartWatching(informer, nil, "node1", stopCh)
+		// The config has no Filter.NodeSelector so it applies regardless of node labels; a minimal
+		// node watcher just satisfies the non-nil contract and resolves node1.
+		manager.StartWatching(informer, newTestNodeWatcher("node1"), "node1", stopCh)
 
 		Eventually(func() *libovsdbops.SamplingConfig {
 			return manager.SamplingConfigForContext("ns", libovsdbops.NetworkPolicySample)
 		}).ShouldNot(BeNil())
+	})
+
+	// Unlike the test above (which pre-seeds the CR and exercises the initial store apply),
+	// this one starts with an empty store and mutates the CR after StartWatching, so it
+	// exercises the informer's Add/Update/Delete event handlers wired in configReconciler.start.
+	It("should react to ObservabilityConfig add/update/delete after StartWatching", func() {
+		var err error
+		nbClient, _, libovsdbCleanup, err = libovsdbtest.NewNBSBTestHarness(libovsdbtest.TestSetup{NBData: samplingApps})
+		Expect(err).NotTo(HaveOccurred())
+		manager = NewManager(nbClient)
+		Expect(manager.Init()).To(Succeed())
+
+		// Start with no CRs so the config only ever arrives through informer events.
+		fakeClient := observabilityconfigfake.NewSimpleClientset()
+		informerFactory := observabilityconfiginformerfactory.NewSharedInformerFactory(fakeClient, 0)
+		informer := informerFactory.K8s().V1alpha1().ObservabilityConfigs()
+		sharedInformer := informer.Informer()
+
+		stopCh := make(chan struct{})
+		defer close(stopCh)
+
+		informerFactory.Start(stopCh)
+		Expect(cache.WaitForCacheSync(stopCh, sharedInformer.HasSynced)).To(BeTrue())
+		// The configs below have no Filter.NodeSelector so they apply regardless of node labels; a
+		// minimal node watcher just satisfies the non-nil contract and resolves node1.
+		manager.StartWatching(informer, newTestNodeWatcher("node1"), "node1", stopCh)
+
+		// Nothing applies before any CR exists.
+		Expect(manager.SamplingConfigForContext("ns", libovsdbops.NetworkPolicySample)).To(BeNil())
+
+		// AddFunc: creating a CR makes NetworkPolicy sampling apply.
+		cr := &observabilityconfigv1alpha1.ObservabilityConfig{
+			ObjectMeta: metav1.ObjectMeta{Name: "default"},
+			Spec: observabilityconfigv1alpha1.ObservabilitySpec{
+				CollectorID: defaultObservabilityCollectorSetID,
+				Features: []observabilityconfigv1alpha1.FeatureConfig{
+					{Feature: observabilityconfigv1alpha1.NetworkPolicy, Probability: 100},
+				},
+			},
+		}
+		cr, err = fakeClient.K8sV1alpha1().ObservabilityConfigs().Create(context.Background(), cr, metav1.CreateOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		Eventually(func() *libovsdbops.SamplingConfig {
+			return manager.SamplingConfigForContext("ns", libovsdbops.NetworkPolicySample)
+		}).ShouldNot(BeNil())
+
+		// UpdateFunc: switching the CR to a different feature drops NetworkPolicy sampling and
+		// enables EgressFirewall sampling instead.
+		cr.Spec.Features = []observabilityconfigv1alpha1.FeatureConfig{
+			{Feature: observabilityconfigv1alpha1.EgressFirewall, Probability: 100},
+		}
+		_, err = fakeClient.K8sV1alpha1().ObservabilityConfigs().Update(context.Background(), cr, metav1.UpdateOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		Eventually(func() *libovsdbops.SamplingConfig {
+			return manager.SamplingConfigForContext("ns", libovsdbops.NetworkPolicySample)
+		}).Should(BeNil())
+		Eventually(func() *libovsdbops.SamplingConfig {
+			return manager.SamplingConfigForContext("ns", libovsdbops.EgressFirewallSample)
+		}).ShouldNot(BeNil())
+
+		// DeleteFunc: removing the CR clears all sampling.
+		err = fakeClient.K8sV1alpha1().ObservabilityConfigs().Delete(context.Background(), "default", metav1.DeleteOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		Eventually(func() *libovsdbops.SamplingConfig {
+			return manager.SamplingConfigForContext("ns", libovsdbops.EgressFirewallSample)
+		}).Should(BeNil())
 	})
 
 	// Invalid configs are non-convergent (only the user editing the CR can fix them), so
@@ -220,8 +289,24 @@ var _ = Describe("Observability Manager", func() {
 		Expect(err).NotTo(HaveOccurred())
 		cr := crFromCollectorConfig("bad", defaultTestConfig, nil)
 		cr.Spec.CollectorID = 0
-		Expect(validateObservabilityConfig(cr)).To(MatchError(ContainSubstring("collectorID (set_id) must be at least 1")))
+		Expect(validateObservabilityConfig(cr)).To(MatchError(ContainSubstring("collectorID (set_id) must be between 1 and")))
 		// applyConfigs skips the invalid config without failing.
+		Expect(manager.applyConfigs([]*observabilityconfigv1alpha1.ObservabilityConfig{cr})).To(Succeed())
+		Expect(manager.SamplingConfigForContext("ns", libovsdbops.NetworkPolicySample)).To(BeNil())
+	})
+
+	// The consumer side (AddCollector) and producer side (this validation) share the same
+	// 1..math.MaxUint32 range, matching the ObservabilityConfig CRD's Maximum (OVS set_id is uint32).
+	It("should skip ObservabilityConfig with collectorID above uint32 max", func() {
+		var err error
+		nbClient, _, libovsdbCleanup, err = libovsdbtest.NewNBSBTestHarness(libovsdbtest.TestSetup{NBData: samplingApps})
+		Expect(err).NotTo(HaveOccurred())
+		manager = NewManager(nbClient)
+		err = manager.Init()
+		Expect(err).NotTo(HaveOccurred())
+		cr := crFromCollectorConfig("bad", defaultTestConfig, nil)
+		cr.Spec.CollectorID = math.MaxUint32 + 1
+		Expect(validateObservabilityConfig(cr)).To(MatchError(ContainSubstring("collectorID (set_id) must be between 1 and")))
 		Expect(manager.applyConfigs([]*observabilityconfigv1alpha1.ObservabilityConfig{cr})).To(Succeed())
 		Expect(manager.SamplingConfigForContext("ns", libovsdbops.NetworkPolicySample)).To(BeNil())
 	})

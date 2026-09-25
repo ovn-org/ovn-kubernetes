@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/ovn-kubernetes/libovsdb/client"
@@ -282,6 +283,13 @@ func getCollectorOnBrInt(ovsdbClient client.Client, collectorID int) (*ovsdb.Flo
 // AddCollector ensures a Flow_Sample_Collector_Set with the given collectorID exists on br-int,
 // creating it if necessary or reusing an existing one owned by the same owner with the same group.
 func (d *SampleDecoder) AddCollector(collectorID, groupID int, ownerName string) error {
+	// Match the ObservabilityConfig CRD bounds (set_id is an OVS uint32) so both sides agree on
+	// the valid range. collectorID 0 is additionally reserved: Shutdown treats a zero collectorID
+	// as "no collector to clean up", so a collector created with ID 0 would leak. int64 comparison
+	// keeps this correct on 32-bit platforms where int cannot hold math.MaxUint32.
+	if collectorID < 1 || int64(collectorID) > math.MaxUint32 {
+		return fmt.Errorf("collector ID must be between 1 and %d, got %d", int64(math.MaxUint32), collectorID)
+	}
 	if d.ovsdbClient == nil {
 		return fmt.Errorf("OVSDB client is not initialized")
 	}
