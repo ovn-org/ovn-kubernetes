@@ -74,10 +74,10 @@ jobs:
     uses: ./.github/workflows/prepare-go-cache.yml
 
   # separate job for parallelism
-  lint:
+  verify-lint-generated-code:
     needs: [ changes, go-cache ]
     if: needs.changes.outputs.run_ci == 'true'
-    name: Lint
+    name: Verify lint and generated code
     runs-on: ubuntu-24.04
     steps:
     - name: Check out code
@@ -87,7 +87,7 @@ jobs:
       uses: ./.github/actions/setup-go
       id: go
 
-    - name: Verify
+    - name: Verify linting rules are enforced
       run: |
         set -x
         # Run natively so golangci-lint uses the Go toolchain from setup-go
@@ -95,38 +95,10 @@ jobs:
         # the golangci-lint container image.
         make -C go-controller/ lint CONTAINER_RUNTIME=run-natively
 
-  verify-codegen:
-    name: Verify codegen
-    runs-on: ubuntu-24.04
-    steps:
-    - name: Check out code
-      uses: actions/checkout@v6
-
-    - name: Set up Go
-      uses: actions/setup-go@v6
-      with:
-        go-version-file: 'go-controller/go.mod'
-        cache: false
-      id: go
-
     - name: Verify generated code is up to date
       run: |
         cd go-controller
         make verify-codegen
-
-  verify-mocksgen:
-    name: Verify mocksgen
-    runs-on: ubuntu-24.04
-    steps:
-    - name: Check out code
-      uses: actions/checkout@v6
-
-    - name: Set up Go
-      uses: actions/setup-go@v6
-      with:
-        go-version-file: 'go-controller/go.mod'
-        cache: false
-      id: go
 
     - name: Verify generated mocks are up to date
       run: |
