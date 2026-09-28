@@ -4,6 +4,7 @@
 package controller
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"sync"
@@ -59,7 +60,7 @@ type Controller interface {
 
 type ReconcilerConfig struct {
 	RateLimiter workqueue.TypedRateLimiter[string]
-	Reconcile   func(key string) error
+	Reconcile   func(context.Context, string) error
 	// How many workers should be started for this reconciler.
 	Threadiness int
 	// MaxAttempts is the number of times a key will be reconciled before giving
@@ -67,12 +68,12 @@ type ReconcilerConfig struct {
 	// to retry forever.
 	MaxAttempts int
 	// HandleError when MaxRetries has been reached
-	HandleError func(key string, err error) error
+	HandleError func(ctx context.Context, key string, err error) error
 }
 
 type ControllerConfig[T any] struct {
 	RateLimiter workqueue.TypedRateLimiter[string]
-	Reconcile   func(key string) error
+	Reconcile   func(context.Context, string) error
 	// How many workers should be started for this controller.
 	Threadiness int
 	// MaxAttempts is the number of times a key will be reconciled before giving
@@ -80,7 +81,7 @@ type ControllerConfig[T any] struct {
 	// retry forever.
 	MaxAttempts int
 	// HandleError when MaxRetries has been reached
-	HandleError func(key string, err error) error
+	HandleError func(ctx context.Context, key string, err error) error
 
 	Informer cache.SharedIndexInformer
 	Lister   func(selector labels.Selector) (ret []*T, err error)
@@ -149,7 +150,7 @@ func NewController[T any](name string, config *ControllerConfig[T]) Controller {
 		c.config.MaxAttempts = DefaultMaxAttempts
 	}
 	if c.config.HandleError == nil {
-		c.config.HandleError = func(_ string, err error) error {
+		c.config.HandleError = func(_ context.Context, _ string, err error) error {
 			utilruntime.HandleError(err)
 			return nil
 		}
@@ -319,7 +320,8 @@ func (c *controller[T]) processNextQueueItem() bool {
 
 	defer c.queue.Done(key)
 
-	err := c.config.Reconcile(key)
+	ctx := context.Background()
+	err := c.config.Reconcile(ctx, key)
 	if err != nil {
 		retry := c.config.MaxAttempts == InfiniteAttempts || c.queue.NumRequeues(key) < c.config.MaxAttempts
 		if retry {
@@ -328,7 +330,7 @@ func (c *controller[T]) processNextQueueItem() bool {
 			return true
 		}
 		klog.Warningf("Controller %s: dropping %s out of the queue: %v", c.name, key, err)
-		err = c.config.HandleError(key, err)
+		err = c.config.HandleError(ctx, key, err)
 		if err != nil {
 			utilruntime.HandleError(err)
 		}

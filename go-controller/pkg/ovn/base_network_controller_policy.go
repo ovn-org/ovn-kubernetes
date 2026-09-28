@@ -4,6 +4,7 @@
 package ovn
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"sync"
@@ -209,7 +210,7 @@ func NewNetworkPolicy(policy *knet.NetworkPolicy) *networkPolicy {
 	return np
 }
 
-func (bnc *BaseNetworkController) syncNetworkPolicies(networkPolicies []interface{}) error {
+func (bnc *BaseNetworkController) syncNetworkPolicies(_ context.Context, networkPolicies []interface{}) error {
 	expectedPolicies := make(map[string]map[string]bool)
 	for _, npInterface := range networkPolicies {
 		policy, ok := npInterface.(*knet.NetworkPolicy)

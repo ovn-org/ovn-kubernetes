@@ -149,7 +149,7 @@ var _ = Describe("EVPN node controller", func() {
 				Expect(cfg.Master).To(Equal(bridgeName))
 			})
 
-			Expect(ctrl.reconcile(vtepName)).To(Succeed())
+			Expect(ctrl.reconcile(context.Background(), vtepName)).To(Succeed())
 			ndm.AssertExpectations(GinkgoT())
 		})
 
@@ -191,7 +191,7 @@ var _ = Describe("EVPN node controller", func() {
 			ndm.On("DeleteLink", GetEVPNVXLANName(vtepName, utilnet.IPv6)).Return(nil)
 			ndm.On("DeleteLink", bridgeName).Return(nil)
 
-			Expect(ctrl.reconcile(vtepName)).To(Succeed())
+			Expect(ctrl.reconcile(context.Background(), vtepName)).To(Succeed())
 			ndm.AssertExpectations(GinkgoT())
 			ndm.AssertNotCalled(GinkgoT(), "EnsureLink", mock.Anything)
 			kubeMock.AssertNotCalled(GinkgoT(), "SetAnnotationsOnNodeWithFieldManager", mock.Anything, mock.Anything, mock.Anything)
@@ -226,7 +226,7 @@ var _ = Describe("EVPN node controller", func() {
 			ndm.On("DeleteLink", GetEVPNVXLANName(vtepName, utilnet.IPv6)).Return(nil)
 			ndm.On("DeleteLink", GetEVPNBridgeName(vtepName)).Return(nil)
 
-			Expect(ctrl.reconcile(vtepName)).To(Succeed())
+			Expect(ctrl.reconcile(context.Background(), vtepName)).To(Succeed())
 			ndm.AssertExpectations(GinkgoT())
 			kubeMock.AssertNotCalled(GinkgoT(), "SetAnnotationsOnNodeWithFieldManager", mock.Anything, mock.Anything, mock.Anything)
 		})
@@ -314,7 +314,7 @@ var _ = Describe("EVPN node controller", func() {
 			ndm.On("EnsureLink", mock.Anything).Return(nil)
 			ndm.On("DeleteLink", mock.Anything).Return(nil)
 
-			Expect(ctrl.reconcile(vtepName)).To(Succeed())
+			Expect(ctrl.reconcile(context.Background(), vtepName)).To(Succeed())
 			ndm.AssertCalled(GinkgoT(), "DeleteLink", staleSVI)
 		})
 
@@ -353,7 +353,7 @@ var _ = Describe("EVPN node controller", func() {
 			ndm.On("DeleteLink", GetEVPNVXLANName(vtepName, utilnet.IPv6)).Return(nil)
 			ndm.On("DeleteLink", bridgeName).Return(nil)
 
-			Expect(ctrl.reconcile(vtepName)).To(Succeed())
+			Expect(ctrl.reconcile(context.Background(), vtepName)).To(Succeed())
 			ndm.AssertCalled(GinkgoT(), "DeleteLink", sviName)
 			ndm.AssertExpectations(GinkgoT())
 			kubeMock.AssertNotCalled(GinkgoT(), "SetAnnotationsOnNodeWithFieldManager", mock.Anything, mock.Anything, mock.Anything)
@@ -394,7 +394,7 @@ var _ = Describe("EVPN node controller", func() {
 			config.HybridOverlay.Enabled = true
 			config.HybridOverlay.VXLANPort = config.DefaultVXLANPort
 
-			err := ctrl.reconcile(vtepName)
+			err := ctrl.reconcile(context.Background(), vtepName)
 			Expect(err).To(HaveOccurred())
 
 			By("using a different VXLAN port for hybrid overlay, reconciliation proceeds")
@@ -406,7 +406,7 @@ var _ = Describe("EVPN node controller", func() {
 			ctrl.ndm = ndm
 			ctrl.networkMgr = &networkmanager.FakeNetworkManager{}
 
-			Expect(ctrl.reconcile(vtepName)).To(Succeed())
+			Expect(ctrl.reconcile(context.Background(), vtepName)).To(Succeed())
 		})
 
 		It("reconfigures VXLAN source IP when host-cidrs change mid-life", func() {
@@ -467,13 +467,13 @@ var _ = Describe("EVPN node controller", func() {
 			})
 			ndm.On("DeleteLink", mock.Anything).Return(nil)
 
-			Expect(ctrl.reconcile(vtepName)).To(Succeed())
+			Expect(ctrl.reconcile(context.Background(), vtepName)).To(Succeed())
 			Expect(firstSrcAddr.Equal(net.ParseIP("100.64.0.1"))).To(BeTrue())
 
 			By("second reconcile with address manager changed to 100.64.0.5")
 			am.SetIPs([]net.IP{net.ParseIP("100.64.0.5")})
 
-			Expect(ctrl.reconcile(vtepName)).To(Succeed())
+			Expect(ctrl.reconcile(context.Background(), vtepName)).To(Succeed())
 			Expect(secondSrcAddr.Equal(net.ParseIP("100.64.0.5"))).To(BeTrue())
 		})
 
@@ -518,7 +518,7 @@ var _ = Describe("EVPN node controller", func() {
 			ndm.On("EnsureLink", mock.Anything).Return(nil)
 			ndm.On("DeleteLink", mock.Anything).Return(nil)
 
-			Expect(ctrl.reconcile(vtepName)).To(Succeed())
+			Expect(ctrl.reconcile(context.Background(), vtepName)).To(Succeed())
 			ndm.AssertCalled(GinkgoT(), "EnsureLink", mock.MatchedBy(func(cfg netlinkdevicemanager.DeviceConfig) bool {
 				return cfg.Link.Attrs().Name == vxlan6Name
 			}))
@@ -526,7 +526,7 @@ var _ = Describe("EVPN node controller", func() {
 			By("second reconcile with only IPv4 addresses — IPv6 VXLAN should be deleted")
 			am.SetIPs([]net.IP{net.ParseIP("100.64.0.1")})
 
-			Expect(ctrl.reconcile(vtepName)).To(Succeed())
+			Expect(ctrl.reconcile(context.Background(), vtepName)).To(Succeed())
 			ndm.AssertCalled(GinkgoT(), "DeleteLink", vxlan6Name)
 		})
 
@@ -581,8 +581,8 @@ var _ = Describe("EVPN node controller", func() {
 				stopChan:       make(chan struct{}),
 			}
 
-			Expect(ctrl.reconcile(vtepNameA)).To(Succeed())
-			Expect(ctrl.reconcile(vtepNameB)).To(Succeed())
+			Expect(ctrl.reconcile(context.Background(), vtepNameA)).To(Succeed())
+			Expect(ctrl.reconcile(context.Background(), vtepNameB)).To(Succeed())
 
 			bridgeA := GetEVPNBridgeName(vtepNameA)
 			bridgeB := GetEVPNBridgeName(vtepNameB)
@@ -611,7 +611,7 @@ var _ = Describe("EVPN node controller", func() {
 			lister.On("Get", vtepNameA).Return(nil, apierrors.NewNotFound(
 				schema.GroupResource{Group: "k8s.ovn.org", Resource: "vteps"}, vtepNameA))
 
-			Expect(ctrl.reconcile(vtepNameA)).To(Succeed())
+			Expect(ctrl.reconcile(context.Background(), vtepNameA)).To(Succeed())
 
 			ndm.AssertCalled(GinkgoT(), "DeleteLink", bridgeA)
 			ndm.AssertCalled(GinkgoT(), "DeleteLink", GetEVPNVXLANName(vtepNameA, utilnet.IPv4))
@@ -663,7 +663,7 @@ var _ = Describe("EVPN node controller", func() {
 				stopChan:       make(chan struct{}),
 			}
 
-			err := ctrl.reconcile(vtepName)
+			err := ctrl.reconcile(context.Background(), vtepName)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("device busy"))
 
@@ -750,7 +750,7 @@ var _ = Describe("EVPN node controller", func() {
 			vxlan4Name := GetEVPNVXLANName(vtepName, utilnet.IPv4)
 			vxlan6Name := GetEVPNVXLANName(vtepName, utilnet.IPv6)
 
-			Expect(ctrl.reconcile(vtepName)).To(Succeed())
+			Expect(ctrl.reconcile(context.Background(), vtepName)).To(Succeed())
 
 			ndm.AssertCalled(GinkgoT(), "EnsureLink", mock.MatchedBy(func(cfg netlinkdevicemanager.DeviceConfig) bool {
 				vxlan, ok := cfg.Link.(*netlink.Vxlan)

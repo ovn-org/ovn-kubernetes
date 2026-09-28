@@ -281,7 +281,9 @@ func NewEIPController(
 	}
 	nadReconcilerConfig := &controller.ReconcilerConfig{
 		RateLimiter: workqueue.DefaultTypedControllerRateLimiter[string](),
-		Reconcile:   e.syncNAD,
+		Reconcile: func(_ context.Context, key string) error {
+			return e.syncNAD(key)
+		},
 		Threadiness: 1,
 		MaxAttempts: controller.InfiniteAttempts,
 	}
@@ -291,7 +293,9 @@ func NewEIPController(
 	)
 	networkReconcilerConfig := &controller.ReconcilerConfig{
 		RateLimiter: workqueue.DefaultTypedControllerRateLimiter[string](),
-		Reconcile:   e.SyncNetworkReady,
+		Reconcile: func(_ context.Context, networkName string) error {
+			return e.SyncNetworkReady(networkName)
+		},
 		Threadiness: 1,
 		MaxAttempts: controller.InfiniteAttempts,
 	}
@@ -2533,7 +2537,7 @@ func (e *EgressIPController) patchReplaceEgressIPStatus(name string, statusItems
 		if err != nil {
 			return fmt.Errorf("error serializing status patch operation: %+v, err: %v", statusItems, err)
 		}
-		return e.kube.PatchEgressIP(name, op)
+		return e.kube.PatchEgressIP(context.TODO(), name, op)
 	})
 }
 

@@ -4,6 +4,7 @@
 package ovn
 
 import (
+	"context"
 	"reflect"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -97,7 +98,7 @@ func (c *uplinkStateController) Stop() {
 	)
 }
 
-func (c *uplinkStateController) syncUplinkState(key string) error {
+func (c *uplinkStateController) syncUplinkState(_ context.Context, key string) error {
 	state, err := c.uplinkStateLister.Get(key)
 	deleted := apierrors.IsNotFound(err)
 	var uplinkName string

@@ -44,7 +44,7 @@ func IsPodAnnotationUpdateRetryable(err error) bool {
 // allocate function. If the pod update fails, it applies the rollback provided by
 // the allocate function.
 // If the informer observes a different UID, the original pod is treated as not found.
-func UpdatePodWithRetryOrRollback(podLister listers.PodLister, kube kube.Interface, pod *corev1.Pod, allocate AllocateToPodWithRollbackFunc) error {
+func UpdatePodWithRetryOrRollback(ctx context.Context, podLister listers.PodLister, kube kube.Interface, pod *corev1.Pod, allocate AllocateToPodWithRollbackFunc) error {
 	start := time.Now()
 	defer func() {
 		klog.V(5).Infof("[%s/%s] pod update took %v", pod.Namespace, pod.Name, time.Since(start))
@@ -89,7 +89,7 @@ func UpdatePodWithRetryOrRollback(podLister listers.PodLister, kube kube.Interfa
 			return nil
 		}
 
-		err = kube.PatchPodStatusAnnotations(oldPod, updatedPod)
+		err = kube.PatchPodStatusAnnotations(ctx, oldPod, updatedPod)
 		if err != nil && rollback != nil {
 			rollback()
 		}

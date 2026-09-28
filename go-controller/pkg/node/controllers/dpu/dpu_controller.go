@@ -4,6 +4,7 @@
 package dpu
 
 import (
+	"context"
 	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
@@ -136,7 +137,7 @@ func (c *Controller) dpuPodNeedsUpdate(oldPod, newPod *corev1.Pod) bool {
 
 // reconcileDPUPod reconciles the DPU state of a single pod. The key is
 // namespace/name from the workqueue, which is also the podStates key.
-func (c *Controller) reconcileDPUPod(key string) error {
+func (c *Controller) reconcileDPUPod(ctx context.Context, key string) error {
 	namespace, name, err := cache.SplitMetaNamespaceKey(key)
 	if err != nil {
 		klog.Errorf("Failed to split meta namespace cache key %s: %v", key, err)
@@ -161,24 +162,24 @@ func (c *Controller) reconcileDPUPod(key string) error {
 	return c.podStates.DoWithLock(key, func(key string) error {
 		if pod == nil {
 			c.nadPods.delete(key)
-			return c.handleDeleteDPUPod(key, nil)
+			return c.handleDeleteDPUPod(ctx, key, nil)
 		}
 
 		// If the UID changed (pod recreated with same name), clean up the old pod's state first
 		if ps, ok := c.podStates.Load(key); ok && ps.uid != pod.UID {
-			if err := c.handleDeleteDPUPod(key, pod); err != nil {
+			if err := c.handleDeleteDPUPod(ctx, key, pod); err != nil {
 				return err
 			}
 		}
 
-		return c.handleAddOrUpdateDPUPod(key, pod, c.clientSet)
+		return c.handleAddOrUpdateDPUPod(ctx, key, pod, c.clientSet)
 	})
 }
 
 // reconcileNAD is called by the NAD reconciler when a NAD is added, updated or
 // deleted. It only requeues the pods that reference the NAD, leaving
 // reconcileDPUPod as the sole writer of representors and annotations.
-func (c *Controller) reconcileNAD(nadName string) error {
+func (c *Controller) reconcileNAD(_ context.Context, nadName string) error {
 	podKeys := c.nadPods.pods(nadName)
 	if len(podKeys) > 0 {
 		klog.Infof("NAD %s changed, requeueing pods %v", nadName, podKeys)

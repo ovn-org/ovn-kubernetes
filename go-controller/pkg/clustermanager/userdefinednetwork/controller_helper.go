@@ -33,7 +33,7 @@ import (
 
 const nadFieldManager = "user-defined-network-controller"
 
-func (c *Controller) updateNAD(obj client.Object, namespace string) (_ *netv1.NetworkAttachmentDefinition, err error) {
+func (c *Controller) updateNAD(ctx context.Context, obj client.Object, namespace string) (_ *netv1.NetworkAttachmentDefinition, err error) {
 	start := time.Now()
 	defer func() {
 		if err != nil || !config.Metrics.EnableScaleMetrics {
@@ -82,7 +82,7 @@ func (c *Controller) updateNAD(obj client.Object, namespace string) (_ *netv1.Ne
 	nadCopy := existingNAD.DeepCopy()
 
 	if nadCopy == nil {
-		nadCopy, err = c.createNAD(obj, namespace, desiredNAD)
+		nadCopy, err = c.createNAD(ctx, obj, namespace, desiredNAD)
 		if err != nil {
 			return nil, err
 		}
@@ -97,16 +97,16 @@ func (c *Controller) updateNAD(obj client.Object, namespace string) (_ *netv1.Ne
 		nadCopy.Spec.Config = desiredNAD.Spec.Config
 		nadCopy.Labels = desiredNAD.Labels
 		nadCopy, err = c.nadClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(namespace).
-			Update(context.Background(), nadCopy, metav1.UpdateOptions{})
+			Update(ctx, nadCopy, metav1.UpdateOptions{})
 		if err != nil {
 			return nil, fmt.Errorf("failed to update NetworkAttachmentDefinition: %w", err)
 		}
 	}
 
-	return c.applyNADAnnotations(nadCopy, desiredNAD.Annotations)
+	return c.applyNADAnnotations(ctx, nadCopy, desiredNAD.Annotations)
 }
 
-func (c *Controller) createNAD(obj client.Object, namespace string, desiredNAD *netv1.NetworkAttachmentDefinition) (*netv1.NetworkAttachmentDefinition, error) {
+func (c *Controller) createNAD(ctx context.Context, obj client.Object, namespace string, desiredNAD *netv1.NetworkAttachmentDefinition) (*netv1.NetworkAttachmentDefinition, error) {
 	// Serialize the primary-network check and creation with other NAD creators.
 	c.createNetworkLock.Lock()
 	defer c.createNetworkLock.Unlock()
@@ -122,7 +122,7 @@ func (c *Controller) createNAD(obj client.Object, namespace string, desiredNAD *
 		}
 	}
 
-	newNAD, err := c.nadClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(namespace).Create(context.Background(), desiredNAD, metav1.CreateOptions{})
+	newNAD, err := c.nadClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(namespace).Create(ctx, desiredNAD, metav1.CreateOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create NetworkAttachmentDefinition: %w", err)
 	}
@@ -130,13 +130,13 @@ func (c *Controller) createNAD(obj client.Object, namespace string, desiredNAD *
 	return newNAD, nil
 }
 
-func (c *Controller) applyNADAnnotations(nad *netv1.NetworkAttachmentDefinition, annotations map[string]string) (*netv1.NetworkAttachmentDefinition, error) {
+func (c *Controller) applyNADAnnotations(ctx context.Context, nad *netv1.NetworkAttachmentDefinition, annotations map[string]string) (*netv1.NetworkAttachmentDefinition, error) {
 	// An empty parent needs an apply only to release previously applied keys.
 	if len(annotations) == 0 && !hasNADAnnotationApplyManager(nad) {
 		return nad, nil
 	}
 
-	nad, err := c.migrateNADAnnotationOwnership(nad, annotations)
+	nad, err := c.migrateNADAnnotationOwnership(ctx, nad, annotations)
 	if err != nil {
 		return nil, err
 	}
@@ -160,7 +160,7 @@ func (c *Controller) applyNADAnnotations(nad *netv1.NetworkAttachmentDefinition,
 	}
 
 	updatedNAD, err := c.nadClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(nad.Namespace).Patch(
-		context.Background(), nad.Name, k8stypes.ApplyPatchType, data,
+		ctx, nad.Name, k8stypes.ApplyPatchType, data,
 		metav1.PatchOptions{FieldManager: nadFieldManager, Force: ptr.To(true)})
 	if err != nil {
 		return nil, fmt.Errorf("failed to update NetworkAttachmentDefinition: %w", err)
@@ -183,7 +183,7 @@ func hasNADAnnotationApplyManager(nad *netv1.NetworkAttachmentDefinition) bool {
 // writes parent annotations with Update ownership. It cannot be removed until
 // creation establishes annotation ownership through SSA and supported upgrades
 // no longer need to migrate legacy NADs.
-func (c *Controller) migrateNADAnnotationOwnership(nad *netv1.NetworkAttachmentDefinition, annotations map[string]string) (*netv1.NetworkAttachmentDefinition, error) {
+func (c *Controller) migrateNADAnnotationOwnership(ctx context.Context, nad *netv1.NetworkAttachmentDefinition, annotations map[string]string) (*netv1.NetworkAttachmentDefinition, error) {
 	if hasNADAnnotationApplyManager(nad) {
 		return nad, nil
 	}
@@ -253,14 +253,14 @@ func (c *Controller) migrateNADAnnotationOwnership(nad *netv1.NetworkAttachmentD
 		return nil, fmt.Errorf("failed to marshal NAD ownership migration: %w", err)
 	}
 	updated, err := c.nadClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(nad.Namespace).
-		Patch(context.Background(), nad.Name, k8stypes.MergePatchType, data, metav1.PatchOptions{})
+		Patch(ctx, nad.Name, k8stypes.MergePatchType, data, metav1.PatchOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to migrate NAD annotation ownership: %w", err)
 	}
 	return updated, nil
 }
 
-func (c *Controller) deleteNAD(obj client.Object, namespace string) error {
+func (c *Controller) deleteNAD(ctx context.Context, obj client.Object, namespace string) error {
 	nad, err := c.nadLister.NetworkAttachmentDefinitions(namespace).Get(obj.GetName())
 	if err != nil {
 		if !apierrors.IsNotFound(err) {
@@ -268,7 +268,7 @@ func (c *Controller) deleteNAD(obj client.Object, namespace string) error {
 		}
 		// Informer caches may lag object creation/deletion. Confirm a cache miss against the API
 		// before treating the NAD as absent and allowing cleanup bookkeeping to proceed.
-		nad, err = c.nadClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(namespace).Get(context.Background(), obj.GetName(), metav1.GetOptions{})
+		nad, err = c.nadClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(namespace).Get(ctx, obj.GetName(), metav1.GetOptions{})
 		if err != nil {
 			if apierrors.IsNotFound(err) {
 				return nil
@@ -295,13 +295,13 @@ func (c *Controller) deleteNAD(obj client.Object, namespace string) error {
 	}
 
 	controllerutil.RemoveFinalizer(nadCopy, template.FinalizerUserDefinedNetwork)
-	updatedNAD, err := c.nadClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(nadCopy.Namespace).Update(context.Background(), nadCopy, metav1.UpdateOptions{})
+	updatedNAD, err := c.nadClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(nadCopy.Namespace).Update(ctx, nadCopy, metav1.UpdateOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to remove NetworkAttachmentDefinition finalizer: %w", err)
 	}
 	klog.Infof("Finalizer removed from NetworkAttachmentDefinition [%s/%s]", updatedNAD.Namespace, updatedNAD.Name)
 
-	err = c.nadClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(updatedNAD.Namespace).Delete(context.Background(), updatedNAD.Name, metav1.DeleteOptions{})
+	err = c.nadClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(updatedNAD.Namespace).Delete(ctx, updatedNAD.Name, metav1.DeleteOptions{})
 	if err != nil && !apierrors.IsNotFound(err) {
 		return err
 	}

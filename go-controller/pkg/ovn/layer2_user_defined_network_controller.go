@@ -51,7 +51,7 @@ type layer2UserDefinedNetworkControllerEventHandler struct {
 	watchFactory *factory.WatchFactory
 	objType      reflect.Type
 	oc           *Layer2UserDefinedNetworkController
-	syncFunc     func([]interface{}) error
+	syncFunc     func(context.Context, []interface{}) error
 }
 
 func (h *layer2UserDefinedNetworkControllerEventHandler) FilterOutResource(obj interface{}) bool {
@@ -116,28 +116,28 @@ func (h *layer2UserDefinedNetworkControllerEventHandler) IsResourceScheduled(obj
 // AddResource adds the specified object to the cluster according to its type and returns the error,
 // if any, yielded during object creation.
 // Given an object to add and a boolean specifying if the function was executed from iterateRetryResources
-func (h *layer2UserDefinedNetworkControllerEventHandler) AddResource(obj interface{}, fromRetryLoop bool) error {
+func (h *layer2UserDefinedNetworkControllerEventHandler) AddResource(ctx context.Context, obj interface{}, fromRetryLoop bool) error {
 	_ = fromRetryLoop
-	return h.oc.AddUserDefinedNetworkResourceCommon(h.objType, obj)
+	return h.oc.AddUserDefinedNetworkResourceCommon(ctx, h.objType, obj)
 }
 
 // DeleteResource deletes the object from the cluster according to the delete logic of its resource type.
 // Given an object and optionally a cachedObj; cachedObj is the internal cache entry for this object,
 // used for now for pods and network policies.
-func (h *layer2UserDefinedNetworkControllerEventHandler) DeleteResource(obj, cachedObj interface{}) error {
-	return h.oc.DeleteUserDefinedNetworkResourceCommon(h.objType, obj, cachedObj)
+func (h *layer2UserDefinedNetworkControllerEventHandler) DeleteResource(ctx context.Context, obj, cachedObj interface{}) error {
+	return h.oc.DeleteUserDefinedNetworkResourceCommon(ctx, h.objType, obj, cachedObj)
 }
 
 // UpdateResource updates the specified object in the cluster to its version in newObj according to its
 // type and returns the error, if any, yielded during the object update.
 // Given an old and a new object; The inRetryCache boolean argument is to indicate if the given resource
 // is in the retryCache or not.
-func (h *layer2UserDefinedNetworkControllerEventHandler) UpdateResource(oldObj, newObj interface{}, inRetryCache bool) error {
-	return h.oc.UpdateUserDefinedNetworkResourceCommon(h.objType, oldObj, newObj, inRetryCache)
+func (h *layer2UserDefinedNetworkControllerEventHandler) UpdateResource(ctx context.Context, oldObj, newObj interface{}, inRetryCache bool) error {
+	return h.oc.UpdateUserDefinedNetworkResourceCommon(ctx, h.objType, oldObj, newObj, inRetryCache)
 }
 
-func (h *layer2UserDefinedNetworkControllerEventHandler) SyncFunc(objs []interface{}) error {
-	var syncFunc func([]interface{}) error
+func (h *layer2UserDefinedNetworkControllerEventHandler) SyncFunc(ctx context.Context, objs []interface{}) error {
+	var syncFunc func(context.Context, []interface{}) error
 
 	if h.syncFunc != nil {
 		// syncFunc was provided explicitly
@@ -163,7 +163,7 @@ func (h *layer2UserDefinedNetworkControllerEventHandler) SyncFunc(objs []interfa
 	if syncFunc == nil {
 		return nil
 	}
-	return syncFunc(objs)
+	return syncFunc(ctx, objs)
 }
 
 // IsObjectInTerminalState returns true if the given object is a in terminal state.
@@ -313,7 +313,7 @@ func NewLayer2UserDefinedNetworkController(
 }
 
 // Start starts the layer2 UDN controller, handles all events and creates all needed logical entities
-func (oc *Layer2UserDefinedNetworkController) Start(_ context.Context) error {
+func (oc *Layer2UserDefinedNetworkController) Start(ctx context.Context) error {
 	klog.Infof("Starting controller for UDN %s", oc.GetNetworkName())
 
 	start := time.Now()
@@ -321,13 +321,13 @@ func (oc *Layer2UserDefinedNetworkController) Start(_ context.Context) error {
 		klog.Infof("Starting controller for UDN %s took %v", oc.GetNetworkName(), time.Since(start))
 	}()
 
-	if err := oc.init(); err != nil {
+	if err := oc.init(ctx); err != nil {
 		return err
 	}
 	if err := oc.RegisterNodeHandler(); err != nil {
 		return err
 	}
-	if err := oc.run(); err != nil {
+	if err := oc.run(ctx); err != nil {
 		oc.DeregisterServiceNetwork()
 		oc.DeregisterNodeHandler()
 		return err
@@ -335,8 +335,8 @@ func (oc *Layer2UserDefinedNetworkController) Start(_ context.Context) error {
 	return nil
 }
 
-func (oc *Layer2UserDefinedNetworkController) run() error {
-	err := oc.BaseLayer2UserDefinedNetworkController.run()
+func (oc *Layer2UserDefinedNetworkController) run(ctx context.Context) error {
+	err := oc.BaseLayer2UserDefinedNetworkController.run(ctx)
 	if err != nil {
 		return err
 	}
@@ -381,7 +381,7 @@ func (oc *Layer2UserDefinedNetworkController) cleanupEgressIPAddressSet() error 
 
 // Cleanup cleans up logical entities for the given network, called from net-attach-def routine
 // could be called from a dummy Controller (only has CommonNetworkControllerInfo set)
-func (oc *Layer2UserDefinedNetworkController) Cleanup() error {
+func (oc *Layer2UserDefinedNetworkController) Cleanup(_ context.Context) error {
 	networkName := oc.GetNetworkName()
 	oc.unregisterEgressIPNetwork()
 
@@ -461,7 +461,7 @@ func (oc *Layer2UserDefinedNetworkController) Cleanup() error {
 	return nil
 }
 
-func (oc *Layer2UserDefinedNetworkController) init() (err error) {
+func (oc *Layer2UserDefinedNetworkController) init(_ context.Context) (err error) {
 	start := time.Now()
 	defer func() {
 		if err == nil && config.Metrics.EnableScaleMetrics {
@@ -528,8 +528,8 @@ func (oc *Layer2UserDefinedNetworkController) Stop() {
 	oc.BaseLayer2UserDefinedNetworkController.stop()
 }
 
-func (oc *Layer2UserDefinedNetworkController) Reconcile(netInfo util.NetInfo) error {
-	if err := oc.BaseNetworkController.reconcile(
+func (oc *Layer2UserDefinedNetworkController) Reconcile(ctx context.Context, netInfo util.NetInfo) error {
+	if err := oc.BaseNetworkController.reconcile(ctx,
 		netInfo,
 		func(node string) { oc.gatewaysFailed.Store(node, true) },
 	); err != nil {
@@ -549,7 +549,7 @@ func (oc *Layer2UserDefinedNetworkController) MarkGatewaySyncNeeded(nodeName str
 }
 
 // ReconcileNode reconciles a node for a layer2 UDN controller.
-func (oc *Layer2UserDefinedNetworkController) ReconcileNode(oldNode, newNode *corev1.Node, oldState, newState *nodecontroller.NodeAnnotationState) error {
+func (oc *Layer2UserDefinedNetworkController) ReconcileNode(ctx context.Context, oldNode, newNode *corev1.Node, oldState, newState *nodecontroller.NodeAnnotationState) error {
 	if newNode == nil {
 		if oldNode == nil {
 			return fmt.Errorf("nil node received for network %s", oc.GetNetworkName())
@@ -599,7 +599,7 @@ func (oc *Layer2UserDefinedNetworkController) ReconcileNode(oldNode, newNode *co
 				syncClusterRouterPort: clusterRouterPortFailed,
 			}
 		}
-		return oc.addUpdateLocalNodeEvent(newNode, nodeParams)
+		return oc.addUpdateLocalNodeEvent(ctx, newNode, nodeParams)
 	}
 
 	if config.OVNKubernetesFeature.EnableDynamicUDNAllocation {
@@ -629,7 +629,8 @@ func (oc *Layer2UserDefinedNetworkController) ReconcileNode(oldNode, newNode *co
 
 // SyncNodes runs the node sync for a layer2 UDN controller.
 func (oc *Layer2UserDefinedNetworkController) SyncNodes(nodes []*corev1.Node) error {
-	return oc.syncNodes(nodesToInterfaces(nodes))
+	ctx := context.Background()
+	return oc.syncNodes(ctx, nodesToInterfaces(nodes))
 }
 
 func (oc *Layer2UserDefinedNetworkController) initRetryFramework() {
@@ -676,7 +677,7 @@ func (oc *Layer2UserDefinedNetworkController) newRetryFramework(
 	)
 }
 
-func (oc *Layer2UserDefinedNetworkController) addUpdateLocalNodeEvent(node *corev1.Node, nSyncs *nodeSyncs) error {
+func (oc *Layer2UserDefinedNetworkController) addUpdateLocalNodeEvent(_ context.Context, node *corev1.Node, nSyncs *nodeSyncs) error {
 	var errs []error
 	var err error
 
@@ -1257,7 +1258,7 @@ func (oc *Layer2UserDefinedNetworkController) syncClusterRouterPorts(node *corev
 
 // syncNodes finds nodes that still have LRP on the transit router, but the node doesn't exist anymore
 // and cleans it up.
-func (oc *Layer2UserDefinedNetworkController) syncNodes(nodes []interface{}) error {
+func (oc *Layer2UserDefinedNetworkController) syncNodes(_ context.Context, nodes []interface{}) error {
 	foundNodeNames := sets.New[string]()
 	dynamicUDN := config.OVNKubernetesFeature.EnableDynamicUDNAllocation
 	for _, obj := range nodes {
@@ -1324,7 +1325,7 @@ func (oc *Layer2UserDefinedNetworkController) nodeHasActiveNetwork(nodeName stri
 }
 
 // HandleNetworkRefChange marks the node for interconnect sync so a queued update does not skip it.
-func (oc *Layer2UserDefinedNetworkController) HandleNetworkRefChange(nodeName string, active bool) {
+func (oc *Layer2UserDefinedNetworkController) HandleNetworkRefChange(_ context.Context, nodeName string, active bool) {
 	if active {
 		oc.syncZoneICFailed.Store(nodeName, true)
 	}

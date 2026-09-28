@@ -645,7 +645,7 @@ func TestNodeUplinkControllerPublishesResolvedState(t *testing.T) {
 		newUplinkState("br-blue.node-a", "br-blue", "node-a"),
 	)
 
-	g.Expect(controller.reconcileUplinkState("br-blue.node-a")).To(gomega.Succeed())
+	g.Expect(controller.reconcileUplinkState(context.Background(), "br-blue.node-a")).To(gomega.Succeed())
 
 	state := getUplinkState(g, client, "br-blue.node-a")
 	g.Expect(state.Status.Type).To(gomega.Equal(uplinkv1alpha1.UplinkTypeOVSBridge))
@@ -698,7 +698,7 @@ func TestNodeUplinkControllerRejectsDefaultGatewayBridge(t *testing.T) {
 				state,
 			)
 
-			g.Expect(controller.reconcileUplinkState("br-blue.node-a")).To(
+			g.Expect(controller.reconcileUplinkState(context.Background(), "br-blue.node-a")).To(
 				gomega.MatchError(gomega.ContainSubstring("default shared gateway bridge br-default")))
 
 			state = getUplinkState(g, client, "br-blue.node-a")
@@ -865,7 +865,7 @@ func TestNodeUplinkControllerPreservesGatewayReadyCondition(t *testing.T) {
 		state,
 	)
 
-	g.Expect(controller.reconcileUplinkState("br-blue.node-a")).To(gomega.Succeed())
+	g.Expect(controller.reconcileUplinkState(context.Background(), "br-blue.node-a")).To(gomega.Succeed())
 
 	state = getUplinkState(g, client, "br-blue.node-a")
 	g.Expect(state.Status.OVSBridge.Name).To(gomega.Equal("br-blue"))
@@ -897,7 +897,7 @@ func TestNodeUplinkControllerReportsHostInterfaceFailure(t *testing.T) {
 		newUplinkState("br-blue.node-a", "br-blue", "node-a"),
 	)
 
-	g.Expect(controller.reconcileUplinkState("br-blue.node-a")).To(
+	g.Expect(controller.reconcileUplinkState(context.Background(), "br-blue.node-a")).To(
 		gomega.MatchError(discoveryErr))
 
 	state := getUplinkState(g, client, "br-blue.node-a")
@@ -929,7 +929,7 @@ func TestNodeUplinkControllerReportsBridgeUplinkFailure(t *testing.T) {
 		newUplinkState("br-blue.node-a", "br-blue", "node-a"),
 	)
 
-	g.Expect(controller.reconcileUplinkState("br-blue.node-a")).To(
+	g.Expect(controller.reconcileUplinkState(context.Background(), "br-blue.node-a")).To(
 		gomega.MatchError(bridgeUplinkErr))
 
 	state := getUplinkState(g, client, "br-blue.node-a")
@@ -954,7 +954,7 @@ func TestNodeUplinkControllerRejectsBridgeUplinkAsHostInterface(t *testing.T) {
 		newUplinkState("br-blue.node-a", "br-blue", "node-a"),
 	)
 
-	g.Expect(controller.reconcileUplinkState("br-blue.node-a")).To(
+	g.Expect(controller.reconcileUplinkState(context.Background(), "br-blue.node-a")).To(
 		gomega.MatchError(gomega.ContainSubstring("physical uplink port for OVS bridge br-blue")))
 
 	state := getUplinkState(g, client, "br-blue.node-a")
@@ -989,7 +989,7 @@ func TestNodeUplinkControllerRepollsWhileDefaultGatewaysMissing(t *testing.T) {
 			newUplinkState("br-blue.node-a", "br-blue", "node-a"),
 		)
 
-		g.Expect(controller.reconcileUplinkState("br-blue.node-a")).To(gomega.Succeed())
+		g.Expect(controller.reconcileUplinkState(context.Background(), "br-blue.node-a")).To(gomega.Succeed())
 		g.Expect(controller.uplinkStateController.(*controllerutil.FakeController).Reconciles).To(
 			gomega.ConsistOf("After:br-blue.node-a"), "expected a delayed rediscovery")
 
@@ -1018,7 +1018,7 @@ func TestNodeUplinkControllerRepollsWhileDefaultGatewaysMissing(t *testing.T) {
 			newUplinkState("br-blue.node-a", "br-blue", "node-a"),
 		)
 
-		g.Expect(controller.reconcileUplinkState("br-blue.node-a")).To(gomega.Succeed())
+		g.Expect(controller.reconcileUplinkState(context.Background(), "br-blue.node-a")).To(gomega.Succeed())
 		g.Expect(controller.uplinkStateController.(*controllerutil.FakeController).Reconciles).To(
 			gomega.ConsistOf("After:br-blue.node-a"), "expected a delayed rediscovery")
 
@@ -1055,7 +1055,7 @@ func TestNodeUplinkControllerRepollsWhileDefaultGatewaysMissing(t *testing.T) {
 			newUplinkState("br-blue.node-a", "br-blue", "node-a"),
 		)
 
-		g.Expect(controller.reconcileUplinkState("br-blue.node-a")).To(gomega.Succeed())
+		g.Expect(controller.reconcileUplinkState(context.Background(), "br-blue.node-a")).To(gomega.Succeed())
 		g.Expect(controller.uplinkStateController.(*controllerutil.FakeController).Reconciles).To(
 			gomega.ConsistOf("After:br-blue.node-a"), "expected a delayed rediscovery")
 
@@ -1086,7 +1086,7 @@ func TestNodeUplinkControllerRepollsWhileDefaultGatewaysMissing(t *testing.T) {
 			state,
 		)
 
-		g.Expect(controller.reconcileUplinkState("br-blue.node-a")).To(gomega.Succeed())
+		g.Expect(controller.reconcileUplinkState(context.Background(), "br-blue.node-a")).To(gomega.Succeed())
 		g.Expect(controller.uplinkStateController.(*controllerutil.FakeController).Reconciles).To(
 			gomega.BeEmpty(), "expected no rediscovery on the DPU")
 
@@ -1342,7 +1342,7 @@ func TestNodeUplinkControllerPublishesHeaviestGatewayWeights(t *testing.T) {
 				newUplink("br-blue", "role", "blue", "breth0"),
 				newUplinkState("br-blue.node-a", "br-blue", "node-a"),
 			)
-			g.Expect(controller.reconcileUplinkState("br-blue.node-a")).To(gomega.Succeed())
+			g.Expect(controller.reconcileUplinkState(context.Background(), "br-blue.node-a")).To(gomega.Succeed())
 			state := getUplinkState(g, client, "br-blue.node-a")
 			g.Expect(state.Status.DefaultGateways).To(gomega.Equal([]uplinkv1alpha1.IPAddress{"192.0.2.1"}))
 			g.Expect(state.Status.Conditions).To(gomega.ContainElement(gomega.And(
@@ -1447,7 +1447,7 @@ func TestNodeUplinkControllerRetriesWhileUnresolved(t *testing.T) {
 			newUplink("br-blue", "role", "blue", "breth0"),
 			newUplinkState("br-blue.node-a", "br-blue", "node-a"),
 		)
-		g.Expect(controller.reconcileUplinkState("br-blue.node-a")).To(
+		g.Expect(controller.reconcileUplinkState(context.Background(), "br-blue.node-a")).To(
 			gomega.MatchError(discoveryErr))
 	})
 
@@ -1463,7 +1463,7 @@ func TestNodeUplinkControllerRetriesWhileUnresolved(t *testing.T) {
 			newUplink("br-blue", "role", "blue", "breth0"),
 			newUplinkState("br-blue.node-a", "br-blue", "node-a"),
 		)
-		g.Expect(controller.reconcileUplinkState("br-blue.node-a")).To(gomega.Succeed())
+		g.Expect(controller.reconcileUplinkState(context.Background(), "br-blue.node-a")).To(gomega.Succeed())
 	})
 }
 func TestNodeUplinkControllerCreatesSelectedNodeState(t *testing.T) {
@@ -1476,7 +1476,7 @@ func TestNodeUplinkControllerCreatesSelectedNodeState(t *testing.T) {
 		newUplink("br-blue", "role", "blue", "breth0"),
 	)
 
-	g.Expect(controller.reconcileUplink("br-blue")).To(gomega.Succeed())
+	g.Expect(controller.reconcileUplink(context.Background(), "br-blue")).To(gomega.Succeed())
 
 	state := getUplinkState(g, client, uplinkutil.StateName("br-blue", "node-a"))
 	g.Expect(state.Labels).To(gomega.BeEmpty())
@@ -1500,7 +1500,7 @@ func TestNodeUplinkControllerCreatesOverlappingNodeStateWithInitialStatus(t *tes
 		uplink,
 	)
 
-	g.Expect(controller.reconcileUplink("br-blue")).To(
+	g.Expect(controller.reconcileUplink(context.Background(), "br-blue")).To(
 		gomega.MatchError(gomega.ContainSubstring("multiple Uplink \"br-blue\" nodeConfigs select node \"node-a\"")))
 
 	state := getUplinkState(g, client, uplinkutil.StateName("br-blue", "node-a"))
@@ -1525,7 +1525,7 @@ func TestNodeUplinkControllerDeletesUnselectedNodeState(t *testing.T) {
 		newUplink("br-blue", "role", "blue", "breth0"),
 		newUplinkState(stateName, "br-blue", "node-a"),
 	)
-	g.Expect(controller.reconcileUplinkState(stateName)).To(gomega.Succeed())
+	g.Expect(controller.reconcileUplinkState(context.Background(), stateName)).To(gomega.Succeed())
 
 	_, err := client.UplinkClient.K8sV1alpha1().UplinkStates().Get(
 		context.Background(), stateName, metav1.GetOptions{})
@@ -1543,7 +1543,7 @@ func TestNodeUplinkControllerDeletesUnselectedUplinkState(t *testing.T) {
 		newUplink("br-blue", "role", "blue", "breth0"),
 		newUplinkState(stateName, "br-blue", "node-a"),
 	)
-	g.Expect(controller.reconcileUplink("br-blue")).To(gomega.Succeed())
+	g.Expect(controller.reconcileUplink(context.Background(), "br-blue")).To(gomega.Succeed())
 
 	_, err := client.UplinkClient.K8sV1alpha1().UplinkStates().Get(
 		context.Background(), stateName, metav1.GetOptions{})
@@ -1561,7 +1561,7 @@ func TestNodeUplinkControllerDeletesRemovedUplinkGatewayState(t *testing.T) {
 		newUplinkState(stateName, "br-blue", "node-a"),
 		// No Uplink: reconciling its key models an Uplink delete event.
 	)
-	g.Expect(controller.reconcileUplink("br-blue")).To(gomega.Succeed())
+	g.Expect(controller.reconcileUplink(context.Background(), "br-blue")).To(gomega.Succeed())
 
 	_, err := client.UplinkClient.K8sV1alpha1().UplinkStates().Get(
 		context.Background(), stateName, metav1.GetOptions{})
@@ -1586,7 +1586,7 @@ func TestNodeUplinkControllerRecreatesDeletedState(t *testing.T) {
 		)
 
 		stateName := uplinkutil.StateName("br-blue", "node-a")
-		g.Expect(controller.reconcileUplinkState(stateName)).To(gomega.Succeed())
+		g.Expect(controller.reconcileUplinkState(context.Background(), stateName)).To(gomega.Succeed())
 		// The fake Uplink controller records the requeue that would recreate
 		// the UplinkState (creation itself is covered by
 		// TestNodeUplinkControllerCreatesSelectedNodeState).
@@ -1609,8 +1609,7 @@ func TestNodeUplinkControllerRecreatesDeletedState(t *testing.T) {
 			newUplink("br-blue", "role", "blue", "breth0"),
 		)
 
-		g.Expect(controller.reconcileUplinkState(
-			uplinkutil.StateName("br-blue", "node-a"))).To(gomega.Succeed())
+		g.Expect(controller.reconcileUplinkState(context.Background(), uplinkutil.StateName("br-blue", "node-a"))).To(gomega.Succeed())
 		g.Expect(controller.uplinkController.(*controllerutil.FakeController).Reconciles).To(
 			gomega.ConsistOf("RateLimited:br-blue"))
 	})
@@ -1630,7 +1629,7 @@ func TestNodeUplinkControllerRecreatesDeletedState(t *testing.T) {
 			newNode("node-a", map[string]string{"role": "blue"}),
 			uplink,
 		)
-		g.Expect(controller.reconcileUplinkState(
+		g.Expect(controller.reconcileUplinkState(context.Background(),
 			uplinkutil.StateName("br-blue", "node-a"))).To(gomega.Succeed())
 		g.Expect(controller.uplinkController.(*controllerutil.FakeController).Reconciles).To(
 			gomega.BeEmpty())
@@ -1648,8 +1647,7 @@ func TestNodeUplinkControllerRecreatesDeletedState(t *testing.T) {
 			newUplink("br-blue", "role", "blue", "breth0"),
 		)
 
-		g.Expect(controller.reconcileUplinkState(
-			uplinkutil.StateName("br-red", "node-a"))).To(gomega.Succeed())
+		g.Expect(controller.reconcileUplinkState(context.Background(), uplinkutil.StateName("br-red", "node-a"))).To(gomega.Succeed())
 		g.Expect(controller.uplinkController.(*controllerutil.FakeController).Reconciles).To(
 			gomega.BeEmpty())
 	})
@@ -1697,7 +1695,7 @@ func TestNodeUplinkControllerIgnoresMismatchedStateIdentity(t *testing.T) {
 	fakeClient := client.UplinkClient.(*uplinkfake.Clientset)
 	fakeClient.ClearActions()
 
-	g.Expect(controller.reconcileUplink(uplink.Name)).To(gomega.Succeed())
+	g.Expect(controller.reconcileUplink(context.Background(), uplink.Name)).To(gomega.Succeed())
 	g.Expect(fakeClient.Actions()).To(gomega.BeEmpty())
 	g.Expect(controller.uplinkStateController.(*controllerutil.FakeController).Reconciles).To(gomega.BeEmpty())
 }
@@ -1761,7 +1759,7 @@ func TestNodeUplinkControllerDPUHostPublishesHostData(t *testing.T) {
 				newUplinkState("br-blue.node-a", "br-blue", "node-a"),
 			)
 
-			g.Expect(controller.reconcileUplinkState("br-blue.node-a")).To(gomega.Succeed())
+			g.Expect(controller.reconcileUplinkState(context.Background(), "br-blue.node-a")).To(gomega.Succeed())
 
 			state := getUplinkState(g, client, "br-blue.node-a")
 			g.Expect(state.Status.OVSBridge).To(gomega.BeNil())
@@ -1811,7 +1809,7 @@ func TestNodeUplinkControllerDPUHostLeavesResolvedToDPU(t *testing.T) {
 	uplink := newUplink("br-blue", "role", "blue", "breth0")
 	controller, client := newTestController(t, hostDiscoverer, failingBridgeResolver{t: t}, node, uplink, state)
 
-	g.Expect(controller.reconcileUplinkState("br-blue.node-a")).To(gomega.Succeed())
+	g.Expect(controller.reconcileUplinkState(context.Background(), "br-blue.node-a")).To(gomega.Succeed())
 
 	state = getUplinkState(g, client, "br-blue.node-a")
 	g.Expect(state.Status.MACAddress).To(gomega.Equal(uplinkv1alpha1.MACAddress("02:42:ac:12:00:03")))
@@ -1828,7 +1826,7 @@ func TestNodeUplinkControllerDPUHostLeavesResolvedToDPU(t *testing.T) {
 
 	// A reconcile of the published status must not write again.
 	controller, client = newTestController(t, hostDiscoverer, failingBridgeResolver{t: t}, node, uplink, state)
-	g.Expect(controller.reconcileUplinkState("br-blue.node-a")).To(gomega.Succeed())
+	g.Expect(controller.reconcileUplinkState(context.Background(), "br-blue.node-a")).To(gomega.Succeed())
 	g.Expect(client.UplinkClient.(*uplinkfake.Clientset).Actions()).To(gomega.BeEmpty())
 }
 
@@ -1851,7 +1849,7 @@ func TestNodeUplinkControllerDPUHostIgnoresStaleDPUBridge(t *testing.T) {
 		state,
 	)
 
-	g.Expect(controller.reconcileUplinkState("br-blue.node-a")).To(gomega.Succeed())
+	g.Expect(controller.reconcileUplinkState(context.Background(), "br-blue.node-a")).To(gomega.Succeed())
 
 	state = getUplinkState(g, client, "br-blue.node-a")
 	g.Expect(state.Status.HostInterfaceName).To(gomega.Equal(uplinkv1alpha1.InterfaceName("breth1")))
@@ -1883,7 +1881,7 @@ func TestNodeUplinkControllerDPUDoesNotAdoptStaleHostState(t *testing.T) {
 
 	controller, client := newTestController(t, hostDiscoverer, bridgeResolver, node, uplink, state)
 
-	g.Expect(controller.reconcileUplinkState("br-blue.node-a")).To(
+	g.Expect(controller.reconcileUplinkState(context.Background(), "br-blue.node-a")).To(
 		gomega.MatchError(gomega.ContainSubstring("waiting for DPU-host state for interface breth1")))
 
 	state = getUplinkState(g, client, "br-blue.node-a")
@@ -1898,7 +1896,7 @@ func TestNodeUplinkControllerDPUDoesNotAdoptStaleHostState(t *testing.T) {
 	// A second reconcile on the published state must be a no-op, not a
 	// resolve of br-old against the stale breth0 MAC.
 	controller, client = newTestController(t, hostDiscoverer, bridgeResolver, node, uplink, state)
-	g.Expect(controller.reconcileUplinkState("br-blue.node-a")).To(
+	g.Expect(controller.reconcileUplinkState(context.Background(), "br-blue.node-a")).To(
 		gomega.MatchError(gomega.ContainSubstring("waiting for DPU-host state for interface breth1")))
 	g.Expect(client.UplinkClient.(*uplinkfake.Clientset).Actions()).To(gomega.BeEmpty())
 }
@@ -1932,7 +1930,7 @@ func TestNodeUplinkControllerDPULeavesHostDataReadyToDPUHost(t *testing.T) {
 		state,
 	)
 
-	g.Expect(controller.reconcileUplinkState("br-blue.node-a")).To(
+	g.Expect(controller.reconcileUplinkState(context.Background(), "br-blue.node-a")).To(
 		gomega.MatchError(gomega.ContainSubstring("waiting for DPU-host MAC address for interface breth0")))
 
 	state = getUplinkState(g, client, "br-blue.node-a")
@@ -1962,7 +1960,7 @@ func TestNodeUplinkControllerDPUUsesHostState(t *testing.T) {
 		newHostResolvedUplinkState("br-blue.node-a", "br-blue", "node-a", "breth0"),
 	)
 
-	g.Expect(controller.reconcileUplinkState("br-blue.node-a")).To(gomega.Succeed())
+	g.Expect(controller.reconcileUplinkState(context.Background(), "br-blue.node-a")).To(gomega.Succeed())
 
 	state := getUplinkState(g, client, "br-blue.node-a")
 	g.Expect(state.Status.HostInterfaceName).To(gomega.Equal(uplinkv1alpha1.InterfaceName("breth0")))
@@ -2040,7 +2038,7 @@ func TestNodeUplinkControllerDPUBridgeResolutionPath(t *testing.T) {
 				state,
 			)
 
-			g.Expect(controller.reconcileUplinkState("br-blue.node-a")).To(gomega.Succeed())
+			g.Expect(controller.reconcileUplinkState(context.Background(), "br-blue.node-a")).To(gomega.Succeed())
 
 			state = getUplinkState(g, client, "br-blue.node-a")
 			g.Expect(state.Status.OVSBridge).NotTo(gomega.BeNil())

@@ -174,7 +174,9 @@ func NewEFController(
 		Informer:    efInformer.Informer(),
 		Lister:      efInformer.Lister().List,
 		MaxAttempts: controller.InfiniteAttempts,
-		Reconcile:   c.sync,
+		Reconcile: func(_ context.Context, key string) error {
+			return c.sync(key)
+		},
 		ObjNeedsUpdate: func(old, new *egressfirewallapi.EgressFirewall) bool {
 			return old == nil || new == nil || !reflect.DeepEqual(old.Spec, new.Spec)
 		},
@@ -191,8 +193,10 @@ func NewEFController(
 		Lister:         nodeInformer.Lister().List,
 		MaxAttempts:    controller.InfiniteAttempts,
 		ObjNeedsUpdate: efNodeNeedsUpdate,
-		Reconcile:      c.updateEgressFirewallForNode,
-		Threadiness:    1,
+		Reconcile: func(_ context.Context, nodeName string) error {
+			return c.updateEgressFirewallForNode(nodeName)
+		},
+		Threadiness: 1,
 	}
 
 	c.nodeController = controller.NewController(
@@ -204,7 +208,9 @@ func NewEFController(
 	// to the queue by NAD Controller
 	nadReconcilerConfig := &controller.ReconcilerConfig{
 		RateLimiter: workqueue.DefaultTypedControllerRateLimiter[string](),
-		Reconcile:   c.syncNAD,
+		Reconcile: func(_ context.Context, key string) error {
+			return c.syncNAD(key)
+		},
 		Threadiness: 1,
 		MaxAttempts: controller.InfiniteAttempts,
 	}

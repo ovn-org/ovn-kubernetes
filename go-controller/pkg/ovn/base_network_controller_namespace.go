@@ -142,7 +142,7 @@ func (bnc *BaseNetworkController) aclLoggingUpdateNsInfo(annotation string, nsIn
 
 // This function implements the main body of work of syncNamespaces.
 // Upon failure, it may be invoked multiple times in order to avoid a pod restart.
-func (bnc *BaseNetworkController) syncNamespaces(namespaces []interface{}) error {
+func (bnc *BaseNetworkController) syncNamespaces(_ context.Context, namespaces []interface{}) error {
 	expectedNs := make(map[string]bool)
 	nsWithMulticast := make(map[string]bool)
 	for _, nsInterface := range namespaces {
@@ -225,7 +225,7 @@ func (bnc *BaseNetworkController) multicastDeleteNamespace(ns *corev1.Namespace,
 // ns is the name of the namespace, while namespace is the optional k8s namespace object
 // if no k8s namespace object is provided, this function will attempt to find it via informer cache
 func (bnc *BaseNetworkController) ensureNamespaceLockedCommon(ns string, readOnly bool, namespace *corev1.Namespace,
-	configureNamespace func(nsInfo *namespaceInfo, ns *corev1.Namespace) error) (*namespaceInfo, func(), error) {
+	configureNamespace func(context.Context, *namespaceInfo, *corev1.Namespace) error) (*namespaceInfo, func(), error) {
 	bnc.namespacesMutex.Lock()
 	nsInfo := bnc.namespaces[ns]
 	nsInfoExisted := false
@@ -287,7 +287,7 @@ func (bnc *BaseNetworkController) ensureNamespaceLockedCommon(ns string, readOnl
 
 	if namespace != nil {
 		// if we have the namespace, attempt to configure nsInfo with it
-		if err := configureNamespace(nsInfo, namespace); err != nil {
+		if err := configureNamespace(context.Background(), nsInfo, namespace); err != nil {
 			unlockFunc()
 			return nil, nil, fmt.Errorf("failed to configure namespace %s: %v", ns, err)
 		}
@@ -301,7 +301,7 @@ func (bnc *BaseNetworkController) needNamespacedPortGroup() bool {
 	return bnc.multicastSupport || config.OVNKubernetesFeature.EnableEgressFirewall
 }
 
-func (bnc *BaseNetworkController) configureNamespaceCommon(nsInfo *namespaceInfo, ns *corev1.Namespace) error {
+func (bnc *BaseNetworkController) configureNamespaceCommon(_ context.Context, nsInfo *namespaceInfo, ns *corev1.Namespace) error {
 	if annotation, ok := ns.Annotations[util.AclLoggingAnnotation]; ok {
 		if err := bnc.aclLoggingUpdateNsInfo(annotation, nsInfo); err == nil {
 			klog.Infof("Namespace %s: ACL logging is set to deny=%s allow=%s", ns.Name, nsInfo.aclLogging.Deny, nsInfo.aclLogging.Allow)

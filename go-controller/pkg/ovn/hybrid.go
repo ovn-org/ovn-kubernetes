@@ -4,6 +4,7 @@
 package ovn
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -380,7 +381,7 @@ func (oc *DefaultNetworkController) allocateHybridOverlayDRIP(node *corev1.Node)
 		sliceHybridOverlayDRIP = append(sliceHybridOverlayDRIP, ip.IP.String())
 	}
 
-	err = oc.kube.SetAnnotationsOnNode(node.Name, map[string]interface{}{hotypes.HybridOverlayDRIP: strings.Join(sliceHybridOverlayDRIP, ",")})
+	err = oc.kube.SetAnnotationsOnNode(context.TODO(), node.Name, map[string]interface{}{hotypes.HybridOverlayDRIP: strings.Join(sliceHybridOverlayDRIP, ",")})
 	if err != nil {
 		return fmt.Errorf("cannot set hybrid annotation on node %s: %v", node.Name, err)
 	}

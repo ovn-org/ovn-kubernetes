@@ -450,7 +450,7 @@ func TestController_reconcileNode(t *testing.T) {
 		RateLimiter: workqueue.DefaultTypedControllerRateLimiter[string](),
 		Informer:    wf.ClusterNetworkConnectInformer().Informer(),
 		Lister:      wf.ClusterNetworkConnectInformer().Lister().List,
-		Reconcile: func(key string) error {
+		Reconcile: func(_ context.Context, key string) error {
 			reconciledMutex.Lock()
 			defer reconciledMutex.Unlock()
 			reconciledCNCs.Insert(key)
@@ -1052,7 +1052,7 @@ func TestController_reconcileService(t *testing.T) {
 		RateLimiter: workqueue.DefaultTypedControllerRateLimiter[string](),
 		Informer:    wf.ClusterNetworkConnectInformer().Informer(),
 		Lister:      wf.ClusterNetworkConnectInformer().Lister().List,
-		Reconcile: func(key string) error {
+		Reconcile: func(_ context.Context, key string) error {
 			reconciledMutex.Lock()
 			defer reconciledMutex.Unlock()
 			reconciledCNCs.Insert(key)

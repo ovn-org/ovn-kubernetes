@@ -112,7 +112,7 @@ func (nc *UserDefinedNodeNetworkController) Stop() {
 }
 
 // Cleanup cleans up node entities for the given user-defined network
-func (nc *UserDefinedNodeNetworkController) Cleanup() error {
+func (nc *UserDefinedNodeNetworkController) Cleanup(_ context.Context) error {
 	var errors []error
 	var err error
 
@@ -134,7 +134,7 @@ func (nc *UserDefinedNodeNetworkController) Cleanup() error {
 
 // HandleNetworkRefChange satisfies the NetworkController interface. UDN node controllers only
 // manage local node state, so NAD reference changes for remote nodes are ignored.
-func (nc *UserDefinedNodeNetworkController) HandleNetworkRefChange(_ string, _ bool) {}
+func (nc *UserDefinedNodeNetworkController) HandleNetworkRefChange(context.Context, string, bool) {}
 
 func (nc *UserDefinedNodeNetworkController) shouldReconcileNetworkChange(old, new util.NetInfo) bool {
 	switch {
@@ -150,7 +150,7 @@ func (nc *UserDefinedNodeNetworkController) shouldReconcileNetworkChange(old, ne
 // and the gateway mode:
 // 1. IP rules
 // 2. OpenFlows on br-ex bridge to forward traffic to correct ofports
-func (nc *UserDefinedNodeNetworkController) Reconcile(netInfo util.NetInfo) error {
+func (nc *UserDefinedNodeNetworkController) Reconcile(_ context.Context, netInfo util.NetInfo) error {
 	reconcilePodNetwork := nc.shouldReconcileNetworkChange(nc.ReconcilableNetInfo, netInfo)
 	err := util.ReconcileNetInfo(nc.ReconcilableNetInfo, netInfo)
 	if err != nil {

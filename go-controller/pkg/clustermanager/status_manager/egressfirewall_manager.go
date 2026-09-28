@@ -88,7 +88,7 @@ func (m *egressFirewallManager) getRelevantZones(egressFirewall *egressfirewalla
 }
 
 //lint:ignore U1000 generic interfaces throw false-positives
-func (m *egressFirewallManager) updateStatus(egressFirewall *egressfirewallapi.EgressFirewall, applyOpts *metav1.ApplyOptions,
+func (m *egressFirewallManager) updateStatus(ctx context.Context, egressFirewall *egressfirewallapi.EgressFirewall, applyOpts *metav1.ApplyOptions,
 	applyEmptyOrFailed bool) error {
 	if egressFirewall == nil {
 		return nil
@@ -117,13 +117,13 @@ func (m *egressFirewallManager) updateStatus(egressFirewall *egressfirewallapi.E
 	applyObj := egressfirewallapply.EgressFirewall(egressFirewall.Name, egressFirewall.Namespace).
 		WithStatus(applyStatus)
 
-	_, err := m.client.K8sV1().EgressFirewalls(egressFirewall.Namespace).ApplyStatus(context.TODO(), applyObj, *applyOpts)
+	_, err := m.client.K8sV1().EgressFirewalls(egressFirewall.Namespace).ApplyStatus(ctx, applyObj, *applyOpts)
 	return err
 }
 
 //lint:ignore U1000 generic interfaces throw false-positives
-func (m *egressFirewallManager) cleanupStatus(egressFirewall *egressfirewallapi.EgressFirewall, applyOpts *metav1.ApplyOptions) error {
+func (m *egressFirewallManager) cleanupStatus(ctx context.Context, egressFirewall *egressfirewallapi.EgressFirewall, applyOpts *metav1.ApplyOptions) error {
 	applyObj := egressfirewallapply.EgressFirewall(egressFirewall.Name, egressFirewall.Namespace)
-	_, err := m.client.K8sV1().EgressFirewalls(egressFirewall.Namespace).ApplyStatus(context.TODO(), applyObj, *applyOpts)
+	_, err := m.client.K8sV1().EgressFirewalls(egressFirewall.Namespace).ApplyStatus(ctx, applyObj, *applyOpts)
 	return err
 }

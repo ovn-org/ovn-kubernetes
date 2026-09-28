@@ -4,6 +4,7 @@
 package ovn
 
 import (
+	"context"
 	"encoding/json"
 	"net"
 	"time"
@@ -109,7 +110,7 @@ var _ = Describe("OVN MAC security mode LSP configuration", func() {
 				case ovntypes.Layer2Topology:
 					l2Controller, ok := fakeOvn.fullL2UDNControllers[netName]
 					Expect(ok).To(BeTrueBecause("should have l2 UDN controller for l2 topology NAD"))
-					Expect(l2Controller.init()).To(Succeed())
+					Expect(l2Controller.init(context.Background())).To(Succeed())
 				case ovntypes.LocalnetTopology:
 					localnetController, ok := fakeOvn.fullLocalnetUDNControllers[netName]
 					Expect(ok).To(BeTrueBecause("should have localnet UDN controller for localnet topology NAD"))

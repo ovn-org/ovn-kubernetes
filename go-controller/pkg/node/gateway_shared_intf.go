@@ -2228,7 +2228,7 @@ func updateMasqueradeAnnotation(nodeName string, kube kube.Interface) error {
 	if err != nil {
 		return fmt.Errorf("unable to generate masquerade subnet annotation update: %w", err)
 	}
-	if err := kube.SetAnnotationsOnNode(nodeName, nodeAnnotation); err != nil {
+	if err := kube.SetAnnotationsOnNode(context.TODO(), nodeName, nodeAnnotation); err != nil {
 		return fmt.Errorf("unable to set node masquerade subnet annotation update: %w", err)
 	}
 	return nil

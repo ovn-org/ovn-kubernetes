@@ -75,7 +75,7 @@ func getPrimaryNADForNamespace(networkMgr networkmanager.Interface, namespaceNam
 	return primaryNADKey, namespacePrimaryNetwork, nil
 }
 
-func (c *Controller) updateStatus(cnc *networkconnectv1.ClusterNetworkConnect, e error) {
+func (c *Controller) updateStatus(ctx context.Context, cnc *networkconnectv1.ClusterNetworkConnect, e error) {
 	condition := metaapply.Condition().
 		WithType("Accepted").
 		WithStatus("True").
@@ -104,7 +104,7 @@ func (c *Controller) updateStatus(cnc *networkconnectv1.ClusterNetworkConnect, e
 	}
 
 	_, err := c.cncClient.K8sV1().ClusterNetworkConnects().ApplyStatus(
-		context.Background(),
+		ctx,
 		cncapply.ClusterNetworkConnect(cnc.Name).WithStatus(
 			cncapply.ClusterNetworkConnectStatus().WithConditions(condition),
 		),
@@ -118,7 +118,7 @@ func (c *Controller) updateStatus(cnc *networkconnectv1.ClusterNetworkConnect, e
 	}
 }
 
-func (c *Controller) reconcileClusterNetworkConnect(key string) error {
+func (c *Controller) reconcileClusterNetworkConnect(ctx context.Context, key string) error {
 	startTime := time.Now()
 	_, cncName, err := cache.SplitMetaNamespaceKey(key)
 	if err != nil {
@@ -134,7 +134,7 @@ func (c *Controller) reconcileClusterNetworkConnect(key string) error {
 	}
 	err = c.syncClusterNetworkConnect(cncName, cnc)
 	if cnc != nil {
-		c.updateStatus(cnc, err)
+		c.updateStatus(ctx, cnc, err)
 	}
 	return err
 }

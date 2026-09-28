@@ -4,6 +4,7 @@
 package routeimport
 
 import (
+	"context"
 	"fmt"
 	"maps"
 	"net"
@@ -323,7 +324,7 @@ func (s stringer) String() string {
 	return fmt.Sprintf("%v", s.v)
 }
 
-func (c *controller) syncNetwork(network string) error {
+func (c *controller) syncNetwork(_ context.Context, network string) error {
 	start := time.Now()
 	c.log.V(5).Info("Reconciling network", "network", network)
 

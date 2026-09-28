@@ -4,6 +4,7 @@
 package ovn
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -327,7 +328,7 @@ var _ = Describe("UDN Isolation", func() {
 		mutableNetInfoAfter.SetPodNetworkAdvertisedVRFs(map[string][]string{nodeName: {"vrf"}})
 
 		reconciledNodes := sets.New[string]()
-		Expect(l3Controller.reconcile(mutableNetInfoAfter, func(node string) {
+		Expect(l3Controller.reconcile(context.Background(), mutableNetInfoAfter, func(node string) {
 			reconciledNodes.Insert(node)
 		})).To(Succeed())
 		Expect(reconciledNodes.Has(nodeName)).To(BeTrue())

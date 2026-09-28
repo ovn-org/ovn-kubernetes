@@ -129,7 +129,7 @@ func (c *Controller) Stop() {
 	controllerutil.Stop(c.vtepController, c.cudnController, c.nodeController)
 }
 
-func (c *Controller) reconcileVTEP(key string) error {
+func (c *Controller) reconcileVTEP(ctx context.Context, key string) error {
 	startTime := time.Now()
 	vtepName := key
 	klog.V(5).Infof("Reconciling VTEP %s", vtepName)
@@ -147,15 +147,15 @@ func (c *Controller) reconcileVTEP(key string) error {
 	}
 
 	if !vtep.DeletionTimestamp.IsZero() {
-		return c.handleVTEPDeletion(vtep)
+		return c.handleVTEPDeletion(ctx, vtep)
 	}
 
-	if err := c.ensureFinalizer(vtep); err != nil {
+	if err := c.ensureFinalizer(ctx, vtep); err != nil {
 		return err
 	}
 
 	if vtep.Spec.Mode == vtepv1.VTEPModeManaged {
-		return c.handleManagedModeNotSupported(vtep)
+		return c.handleManagedModeNotSupported(ctx, vtep)
 	}
 
 	if err := c.validateCIDRsAcrossVTEPs(vtep); err != nil {
@@ -167,7 +167,7 @@ func (c *Controller) reconcileVTEP(key string) error {
 			}
 			c.eventRecorder.Event(vtepRef, corev1.EventTypeWarning, reasonCIDROverlap, err.Error())
 		}
-		return c.updateStatusCondition(vtep, conditionTypeAccepted, metav1.ConditionFalse,
+		return c.updateStatusCondition(ctx, vtep, conditionTypeAccepted, metav1.ConditionFalse,
 			reasonCIDROverlap, err.Error())
 	}
 
@@ -180,7 +180,7 @@ func (c *Controller) reconcileVTEP(key string) error {
 			}
 			c.eventRecorder.Event(vtepRef, corev1.EventTypeWarning, reasonEVPNIPv6NotSupported, err.Error())
 		}
-		return c.updateStatusCondition(vtep, conditionTypeAccepted, metav1.ConditionFalse,
+		return c.updateStatusCondition(ctx, vtep, conditionTypeAccepted, metav1.ConditionFalse,
 			reasonEVPNIPv6NotSupported, err.Error())
 	}
 
@@ -195,11 +195,11 @@ func (c *Controller) reconcileVTEP(key string) error {
 		}
 		// Don't retry: the node controller watches for k8s.ovn.org/vteps
 		// annotation changes and re-queues all VTEPs when annotations appear.
-		return c.updateStatusCondition(vtep, conditionTypeAccepted, metav1.ConditionFalse,
+		return c.updateStatusCondition(ctx, vtep, conditionTypeAccepted, metav1.ConditionFalse,
 			reasonAllocationFailed, err.Error())
 	}
 
-	return c.updateStatusCondition(vtep, conditionTypeAccepted, metav1.ConditionTrue,
+	return c.updateStatusCondition(ctx, vtep, conditionTypeAccepted, metav1.ConditionTrue,
 		reasonAllocated, "VTEP allocation succeeded")
 }
 
@@ -209,10 +209,10 @@ func (c *Controller) reconcileVTEP(key string) error {
 // between the time a consumer starts referencing it and the controller notices.
 // The actual deletion policy (checking CUDN references) is enforced in
 // handleVTEPDeletion when the finalizer gates the delete.
-func (c *Controller) ensureFinalizer(vtep *vtepv1.VTEP) error {
+func (c *Controller) ensureFinalizer(ctx context.Context, vtep *vtepv1.VTEP) error {
 	if !k8scontrollerutil.ContainsFinalizer(vtep, finalizerVTEP) {
 		_, err := c.vtepClient.K8sV1().VTEPs().Apply(
-			context.Background(),
+			ctx,
 			vtepapply.VTEP(vtep.Name).WithFinalizers(finalizerVTEP),
 			metav1.ApplyOptions{FieldManager: fieldManager, Force: true},
 		)
@@ -224,7 +224,7 @@ func (c *Controller) ensureFinalizer(vtep *vtepv1.VTEP) error {
 	return nil
 }
 
-func (c *Controller) handleVTEPDeletion(vtep *vtepv1.VTEP) error {
+func (c *Controller) handleVTEPDeletion(ctx context.Context, vtep *vtepv1.VTEP) error {
 	if !k8scontrollerutil.ContainsFinalizer(vtep, finalizerVTEP) {
 		return nil
 	}
@@ -241,7 +241,7 @@ func (c *Controller) handleVTEPDeletion(vtep *vtepv1.VTEP) error {
 	}
 
 	_, err = c.vtepClient.K8sV1().VTEPs().Apply(
-		context.Background(),
+		ctx,
 		vtepapply.VTEP(vtep.Name),
 		metav1.ApplyOptions{FieldManager: fieldManager, Force: true},
 	)
@@ -442,7 +442,7 @@ func (c *Controller) validateNodeVTEPIPs(vtep *vtepv1.VTEP) error {
 	return errors.Join(errs...)
 }
 
-func (c *Controller) handleManagedModeNotSupported(vtep *vtepv1.VTEP) error {
+func (c *Controller) handleManagedModeNotSupported(ctx context.Context, vtep *vtepv1.VTEP) error {
 	existingCond := meta.FindStatusCondition(vtep.Status.Conditions, conditionTypeAccepted)
 	if existingCond == nil || existingCond.Status != metav1.ConditionFalse || existingCond.Reason != reasonManagedModeNotSupported {
 		vtepRef, err := reference.GetReference(vtepscheme.Scheme, vtep)
@@ -453,7 +453,7 @@ func (c *Controller) handleManagedModeNotSupported(vtep *vtepv1.VTEP) error {
 			"Managed VTEP mode is not yet implemented; only Unmanaged mode is currently supported")
 	}
 
-	return c.updateStatusCondition(vtep, conditionTypeAccepted, metav1.ConditionFalse,
+	return c.updateStatusCondition(ctx, vtep, conditionTypeAccepted, metav1.ConditionFalse,
 		reasonManagedModeNotSupported,
 		"Managed VTEP mode is not yet implemented; only Unmanaged mode is currently supported")
 }
@@ -464,7 +464,7 @@ func (c *Controller) handleManagedModeNotSupported(vtep *vtepv1.VTEP) error {
 // by the time the key is reconciled, so we couldn't tell which VTEP to
 // re-queue); onCUDNDeleted handles them from the informer's delete handler
 // where the deleted object is still available.
-func (c *Controller) reconcileCUDN(key string) error {
+func (c *Controller) reconcileCUDN(_ context.Context, key string) error {
 	cudn, err := c.cudnLister.Get(key)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
@@ -530,7 +530,7 @@ func cudnNeedsUpdate(oldObj, newObj *udnv1.ClusterUserDefinedNetwork) bool {
 // every VTEP (FRR runs on all nodes). If partial VTEP participation is
 // supported in the future, we could compare the node's IPs against each
 // VTEP's CIDRs and only re-queue overlapping VTEPs.
-func (c *Controller) reconcileNode(_ string) error {
+func (c *Controller) reconcileNode(_ context.Context, _ string) error {
 	c.vtepController.ReconcileAll()
 	return nil
 }

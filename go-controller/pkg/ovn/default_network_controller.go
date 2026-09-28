@@ -346,7 +346,7 @@ func (oc *DefaultNetworkController) Start(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if err = oc.init(); err != nil {
+	if err = oc.init(ctx); err != nil {
 		return err
 	}
 
@@ -429,7 +429,8 @@ func (oc *DefaultNetworkController) waitForInitialNodeSync() error {
 }
 
 func (oc *DefaultNetworkController) SyncNodes(nodes []*corev1.Node) error {
-	return oc.syncNodes(nodesToInterfaces(nodes))
+	ctx := context.Background()
+	return oc.syncNodes(ctx, nodesToInterfaces(nodes))
 }
 
 func defaultNodeSubnetChangedWithState(oldNode, newNode *corev1.Node, oldState, newState *nodecontroller.NodeAnnotationState) bool {
@@ -442,7 +443,7 @@ func defaultNodeSubnetChangedWithState(oldNode, newNode *corev1.Node, oldState, 
 	return nodecontroller.NodeSubnetAnnotationChangedForNetworkWithState(oldState, newState, types.DefaultNetworkName)
 }
 
-func (oc *DefaultNetworkController) ReconcileNode(oldNode, newNode *corev1.Node, oldState, newState *nodecontroller.NodeAnnotationState) error {
+func (oc *DefaultNetworkController) ReconcileNode(ctx context.Context, oldNode, newNode *corev1.Node, oldState, newState *nodecontroller.NodeAnnotationState) error {
 	if newNode == nil {
 		if oldNode == nil {
 			return fmt.Errorf("nil node received for network %s", oc.GetNetworkName())
@@ -544,7 +545,7 @@ func (oc *DefaultNetworkController) ReconcileNode(oldNode, newNode *corev1.Node,
 				syncZoneIC:            syncZoneIC,
 			}
 		}
-		if err := oc.addUpdateLocalNodeEvent(newNode, nodeSyncsParam); err != nil {
+		if err := oc.addUpdateLocalNodeEvent(ctx, newNode, nodeSyncsParam); err != nil {
 			aggregatedErrors = append(aggregatedErrors, err)
 		}
 	} else {
@@ -608,7 +609,7 @@ func (oc *DefaultNetworkController) hasLocalNodeSwitchState(node *corev1.Node) b
 // TODO: Verify that the cluster was not already called with a different global subnet
 //
 //	If true, then either quit or perform a complete reconfiguration of the cluster (recreate switches/routers with new subnet values)
-func (oc *DefaultNetworkController) init() error {
+func (oc *DefaultNetworkController) init(_ context.Context) error {
 	existingNodes, err := oc.watchFactory.GetNodes()
 	if err != nil {
 		klog.Errorf("Error in fetching nodes: %v", err)
@@ -653,7 +654,7 @@ func (oc *DefaultNetworkController) init() error {
 }
 
 // run starts the actual watching.
-func (oc *DefaultNetworkController) run(_ context.Context) error {
+func (oc *DefaultNetworkController) run(ctx context.Context) error {
 	oc.syncPeriodic()
 	klog.Info("Starting all the Watchers...")
 	start := time.Now()
@@ -678,7 +679,7 @@ func (oc *DefaultNetworkController) run(_ context.Context) error {
 
 	startSvc := time.Now()
 	// Services should be started after nodes to prevent LB churn
-	err := oc.StartServiceController(oc.wg, true)
+	err := oc.StartServiceController(ctx, oc.wg, true)
 	endSvc := time.Since(startSvc)
 	metrics.MetricOVNKubeControllerSyncDuration.WithLabelValues("service").Set(endSvc.Seconds())
 	if err != nil {
@@ -859,8 +860,8 @@ func (oc *DefaultNetworkController) run(_ context.Context) error {
 	return nil
 }
 
-func (oc *DefaultNetworkController) Reconcile(netInfo util.NetInfo) error {
-	return oc.BaseNetworkController.reconcile(
+func (oc *DefaultNetworkController) Reconcile(ctx context.Context, netInfo util.NetInfo) error {
+	return oc.BaseNetworkController.reconcile(ctx,
 		netInfo,
 		func(node string) { oc.gatewaysFailed.Store(node, true) },
 	)
@@ -894,7 +895,7 @@ type defaultNetworkControllerEventHandler struct {
 	objType         reflect.Type
 	oc              *DefaultNetworkController
 	extraParameters interface{}
-	syncFunc        func([]interface{}) error
+	syncFunc        func(context.Context, []interface{}) error
 }
 
 func (h *defaultNetworkControllerEventHandler) FilterOutResource(_ interface{}) bool {
@@ -1005,14 +1006,14 @@ func (h *defaultNetworkControllerEventHandler) IsResourceScheduled(obj interface
 // AddResource adds the specified object to the cluster according to its type and returns the error,
 // if any, yielded during object creation.
 // Given an object to add and a boolean specifying if the function was executed from iterateRetryResources
-func (h *defaultNetworkControllerEventHandler) AddResource(obj interface{}, fromRetryLoop bool) error {
+func (h *defaultNetworkControllerEventHandler) AddResource(ctx context.Context, obj interface{}, fromRetryLoop bool) error {
 	switch h.objType {
 	case factory.PodType:
 		pod, ok := obj.(*corev1.Pod)
 		if !ok {
 			return fmt.Errorf("could not cast %T object to *corev1.Pod", obj)
 		}
-		return h.oc.ensurePod(nil, pod, true)
+		return h.oc.ensurePod(ctx, nil, pod, true)
 
 	case factory.EgressIPType:
 		eIP := obj.(*egressipv1.EgressIP)
@@ -1089,13 +1090,13 @@ func (h *defaultNetworkControllerEventHandler) AddResource(obj interface{}, from
 // type and returns the error, if any, yielded during the object update.
 // Given an old and a new object; The inRetryCache boolean argument is to indicate if the given resource
 // is in the retryCache or not.
-func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj interface{}, inRetryCache bool) error {
+func (h *defaultNetworkControllerEventHandler) UpdateResource(ctx context.Context, oldObj, newObj interface{}, inRetryCache bool) error {
 	switch h.objType {
 	case factory.PodType:
 		oldPod := oldObj.(*corev1.Pod)
 		newPod := newObj.(*corev1.Pod)
 
-		return h.oc.ensurePod(oldPod, newPod, inRetryCache || util.PodScheduled(oldPod) != util.PodScheduled(newPod))
+		return h.oc.ensurePod(ctx, oldPod, newPod, inRetryCache || util.PodScheduled(oldPod) != util.PodScheduled(newPod))
 
 	case factory.EgressIPType:
 		oldEIP := oldObj.(*egressipv1.EgressIP)
@@ -1165,7 +1166,7 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 // DeleteResource deletes the object from the cluster according to the delete logic of its resource type.
 // Given an object and optionally a cachedObj; cachedObj is the internal cache entry for this object,
 // used for now for pods and network policies.
-func (h *defaultNetworkControllerEventHandler) DeleteResource(obj, cachedObj interface{}) error {
+func (h *defaultNetworkControllerEventHandler) DeleteResource(ctx context.Context, obj, cachedObj interface{}) error {
 	switch h.objType {
 	case factory.PodType:
 		var portInfo *lpInfo
@@ -1174,7 +1175,7 @@ func (h *defaultNetworkControllerEventHandler) DeleteResource(obj, cachedObj int
 		if cachedObj != nil {
 			portInfo = cachedObj.(*lpInfo)
 		}
-		return h.oc.removePod(pod, portInfo)
+		return h.oc.removePod(ctx, pod, portInfo)
 
 	case factory.EgressIPType:
 		eIP := obj.(*egressipv1.EgressIP)
@@ -1213,8 +1214,8 @@ func (h *defaultNetworkControllerEventHandler) DeleteResource(obj, cachedObj int
 	}
 }
 
-func (h *defaultNetworkControllerEventHandler) SyncFunc(objs []interface{}) error {
-	var syncFunc func([]interface{}) error
+func (h *defaultNetworkControllerEventHandler) SyncFunc(ctx context.Context, objs []interface{}) error {
+	var syncFunc func(context.Context, []interface{}) error
 
 	if h.syncFunc != nil {
 		// syncFunc was provided explicitly
@@ -1228,10 +1229,14 @@ func (h *defaultNetworkControllerEventHandler) SyncFunc(objs []interface{}) erro
 			syncFunc = h.oc.syncNetworkPolicies
 
 		case factory.EgressIPPodType:
-			syncFunc = h.oc.eIPC.syncEgressIPs
+			syncFunc = func(_ context.Context, objs []interface{}) error {
+				return h.oc.eIPC.syncEgressIPs(objs)
+			}
 
 		case factory.EgressNodeType:
-			syncFunc = h.oc.eIPC.initClusterEgressPolicies
+			syncFunc = func(_ context.Context, objs []interface{}) error {
+				return h.oc.eIPC.initClusterEgressPolicies(objs)
+			}
 
 		case factory.EgressIPNamespaceType,
 			factory.EgressIPType:
@@ -1247,7 +1252,7 @@ func (h *defaultNetworkControllerEventHandler) SyncFunc(objs []interface{}) erro
 	if syncFunc == nil {
 		return nil
 	}
-	return syncFunc(objs)
+	return syncFunc(ctx, objs)
 }
 
 // IsObjectInTerminalState returns true if the given object is a in terminal state.

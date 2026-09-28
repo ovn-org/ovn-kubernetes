@@ -4,6 +4,7 @@
 package notifier
 
 import (
+	"context"
 	"errors"
 
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -68,7 +69,7 @@ func IsVTEPAccepted(conditions []metav1.Condition) bool {
 }
 
 // reconcile notifies subscribers with the VTEP key following VTEP events.
-func (c *VTEPNotifier) reconcile(key string) error {
+func (c *VTEPNotifier) reconcile(_ context.Context, key string) error {
 	var errs []error
 	for _, subscriber := range c.subscribers {
 		if subscriber != nil {

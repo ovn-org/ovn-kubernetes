@@ -107,7 +107,9 @@ func startNodePortWatcher(n *nodePortWatcher, fakeClient *util.OVNNodeClientset)
 			svc := obj.(*corev1.Service)
 			Expect(n.DeleteService(svc)).To(Succeed())
 		},
-	}, n.SyncServices)
+	}, func(_ context.Context, objs []interface{}) error {
+		return n.SyncServices(objs)
+	})
 
 	return err
 }

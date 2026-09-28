@@ -662,7 +662,7 @@ var _ = ginkgo.Describe("Managed BGP Controller", func() {
 
 			controller, err := NewController(wf, frrFakeClient, raFakeClient, nil)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			err = controller.ensureBaseFRRConfiguration()
+			err = controller.ensureBaseFRRConfiguration(context.Background())
 			gomega.Expect(err).To(gomega.HaveOccurred())
 			gomega.Expect(err.Error()).To(gomega.ContainSubstring("unsupported managed BGP topology"))
 		})
@@ -1441,7 +1441,7 @@ var _ = ginkgo.Describe("Managed BGP Controller", func() {
 			}, 2*time.Second).ShouldNot(gomega.Succeed())
 
 			// ensureManagedConfiguration (triggered on restart) should restore the RA
-			err = c.ensureManagedConfiguration("")
+			err = c.ensureManagedConfiguration(context.Background(), "")
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			gomega.Eventually(func() error {

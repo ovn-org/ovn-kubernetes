@@ -155,7 +155,7 @@ func (c *Controller) syncDNSNames() error {
 }
 
 // reconcileEgressFirewall reconciles an EgressFirewall object.
-func (c *Controller) reconcileEgressFirewall(key string) error {
+func (c *Controller) reconcileEgressFirewall(ctx context.Context, key string) error {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 	// Split the key in namespace and name of the corresponding object.
@@ -171,7 +171,7 @@ func (c *Controller) reconcileEgressFirewall(key string) error {
 			// EgressFirewall object was deleted. Delete all the DNSNameResolver
 			// objects corresponding to the DNS names used in the EgressFirewall
 			// object.
-			return c.resInfo.DeleteDNSNamesForNamespace(namespace)
+			return c.resInfo.DeleteDNSNamesForNamespace(ctx, namespace)
 		}
 		return fmt.Errorf("failed to fetch egress firewall %s in namespace %s", name, namespace)
 	}
@@ -180,13 +180,13 @@ func (c *Controller) reconcileEgressFirewall(key string) error {
 	// newly added and create the corresponding DNSNameResolver objects. Also
 	// check the DNS names which are deleted and delete the corresponding
 	// DNSNameResolver objects.
-	return c.resInfo.ModifyDNSNamesForNamespace(util.GetDNSNames(ef), namespace)
+	return c.resInfo.ModifyDNSNamesForNamespace(ctx, util.GetDNSNames(ef), namespace)
 }
 
 // reconcileDNSNameResolver reconciles a DNSNameResolver object. If an object
 // was deleted, but it was not supposed to, then it is recreated. If an object
 // is created, but it was not supposed to, then it is deleted.
-func (c *Controller) reconcileDNSNameResolver(key string) error {
+func (c *Controller) reconcileDNSNameResolver(ctx context.Context, key string) error {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 	// Split the key in namespace and name of the corresponding object.
@@ -211,7 +211,7 @@ func (c *Controller) reconcileDNSNameResolver(key string) error {
 
 			// Recreate the DNSNameResolver object.
 			klog.Warningf("Recreating deleted dns name resolver object %s for dns name %s", name, dnsName)
-			return createDNSNameResolver(c.ocpNetworkClient, name, dnsName)
+			return createDNSNameResolver(ctx, c.ocpNetworkClient, name, dnsName)
 
 		}
 		return fmt.Errorf("reconcileDNSNameResolver failed to fetch dns name resolver %s in namespace %s", name, namespace)
@@ -225,7 +225,7 @@ func (c *Controller) reconcileDNSNameResolver(key string) error {
 	if !c.resInfo.IsDNSNameMatchingResolverName(dnsName, resolverObj.Name) {
 		// Delete the DNSNameResolver object.
 		klog.Warningf("Deleting additional dns name resolver object %s for dns name %s", resolverObj.Name, dnsName)
-		return deleteDNSNameResolver(c.ocpNetworkClient, resolverObj.Name)
+		return deleteDNSNameResolver(ctx, c.ocpNetworkClient, resolverObj.Name)
 	}
 	return nil
 }
@@ -233,7 +233,7 @@ func (c *Controller) reconcileDNSNameResolver(key string) error {
 // createDNSNameResolver creates a DNSNameResolver object for the DNS name
 // and adds the status, if any, to the object. The error, if any, encountered
 // during the object creation is returned.
-func createDNSNameResolver(ocpNetworkClient ocpnetworkclientset.Interface, objName, dnsName string) error {
+func createDNSNameResolver(ctx context.Context, ocpNetworkClient ocpnetworkclientset.Interface, objName, dnsName string) error {
 	dnsNameResolverObj := &ocpnetworkapiv1alpha1.DNSNameResolver{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      objName,
@@ -244,7 +244,7 @@ func createDNSNameResolver(ocpNetworkClient ocpnetworkclientset.Interface, objNa
 		},
 	}
 	_, err := ocpNetworkClient.NetworkV1alpha1().DNSNameResolvers(config.Kubernetes.OVNConfigNamespace).
-		Create(context.TODO(), dnsNameResolverObj, metav1.CreateOptions{})
+		Create(ctx, dnsNameResolverObj, metav1.CreateOptions{})
 
 	return err
 
@@ -252,9 +252,9 @@ func createDNSNameResolver(ocpNetworkClient ocpnetworkclientset.Interface, objNa
 
 // deleteDNSNameResolver deletes a DNSNameResolver object and if an error
 // is encountered, which is not IsNotFound, then it is returned.
-func deleteDNSNameResolver(ocpNetworkClient ocpnetworkclientset.Interface, objName string) error {
+func deleteDNSNameResolver(ctx context.Context, ocpNetworkClient ocpnetworkclientset.Interface, objName string) error {
 	err := ocpNetworkClient.NetworkV1alpha1().DNSNameResolvers(config.Kubernetes.OVNConfigNamespace).
-		Delete(context.TODO(), objName, metav1.DeleteOptions{})
+		Delete(ctx, objName, metav1.DeleteOptions{})
 	if err != nil && !apierrors.IsNotFound(err) {
 		return err
 	}

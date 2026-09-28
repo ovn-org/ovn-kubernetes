@@ -4,6 +4,7 @@
 package networkmanager
 
 import (
+	"context"
 	"fmt"
 	"sync"
 
@@ -92,7 +93,7 @@ func NewPodTrackerController(
 		fmt.Sprintf("%s-nad-reconciler", name),
 		&controller.ReconcilerConfig{
 			RateLimiter: workqueue.DefaultTypedControllerRateLimiter[string](),
-			Reconcile: func(key string) error {
+			Reconcile: func(_ context.Context, key string) error {
 				return p.requeuePodsForNAD(key)
 			},
 			Threadiness: 1,
@@ -311,7 +312,7 @@ func (c *PodTrackerController) needUpdate(old, new *corev1.Pod) bool {
 }
 
 // reconcile notify subscribers with the request namespace key following namespace events.
-func (c *PodTrackerController) reconcile(key string) error {
+func (c *PodTrackerController) reconcile(_ context.Context, key string) error {
 	klog.V(5).Infof("%s reconcile called for pod %s", c.name, key)
 	namespace, name, err := cache.SplitMetaNamespaceKey(key)
 	if err != nil {

@@ -147,7 +147,7 @@ var _ = ginkgo.Describe("VTEP Controller", func() {
 	// config mirrors the one built in NewController; only Reconcile differs. It
 	// is swapped before controller.Start() so no reconcile is missed; the
 	// sub-controller built in NewController is discarded unstarted.
-	startWithReconcile := func(reconcile func(key string) error, objects ...runtime.Object) {
+	startWithReconcile := func(reconcile func(context.Context, string) error, objects ...runtime.Object) {
 		vtepObjects := []runtime.Object{}
 		otherObjects := []runtime.Object{}
 		for _, obj := range objects {
@@ -428,9 +428,9 @@ var _ = ginkgo.Describe("VTEP Controller", func() {
 
 			vtepA := newVTEP("vtep-a", vtepv1.VTEPModeUnmanaged, "10.0.0.0/16")
 			vtepB := newVTEP("vtep-b", vtepv1.VTEPModeUnmanaged, "10.0.1.0/24")
-			startWithReconcile(func(key string) error {
+			startWithReconcile(func(ctx context.Context, key string) error {
 				reconcileCount.Add(1)
-				return controller.reconcileVTEP(key)
+				return controller.reconcileVTEP(ctx, key)
 			}, vtepA, vtepB)
 
 			gomega.Eventually(func() (*metav1.Condition, error) {

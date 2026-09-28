@@ -4,6 +4,7 @@
 package zone_tracker
 
 import (
+	"context"
 	"fmt"
 	"sync"
 
@@ -47,8 +48,10 @@ func NewZoneTracker(nodeInformer coreinformers.NodeInformer, onZonesUpdate func(
 		Informer:       nodeInformer.Informer(),
 		Lister:         nodeInformer.Lister().List,
 		ObjNeedsUpdate: zt.needsUpdate,
-		Reconcile:      zt.reconcileNode,
-		Threadiness:    1,
+		Reconcile: func(_ context.Context, nodeName string) error {
+			return zt.reconcileNode(nodeName)
+		},
+		Threadiness: 1,
 	}
 	zt.nodeController = controller.NewController[corev1.Node]("zone_tracker", controllerConfig)
 	return zt

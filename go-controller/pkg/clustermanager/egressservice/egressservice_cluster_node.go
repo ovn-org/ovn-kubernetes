@@ -4,6 +4,7 @@
 package egressservice
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"sort"
@@ -131,6 +132,8 @@ func (c *Controller) runNodeWorker(wg *sync.WaitGroup) {
 }
 
 func (c *Controller) processNextNodeWorkItem(wg *sync.WaitGroup) bool {
+	ctx := context.Background()
+
 	wg.Add(1)
 	defer wg.Done()
 
@@ -141,7 +144,7 @@ func (c *Controller) processNextNodeWorkItem(wg *sync.WaitGroup) bool {
 
 	defer c.nodesQueue.Done(key)
 
-	err := c.syncNode(key)
+	err := c.syncNode(ctx, key)
 	if err == nil {
 		c.nodesQueue.Forget(key)
 		return true
@@ -158,7 +161,7 @@ func (c *Controller) processNextNodeWorkItem(wg *sync.WaitGroup) bool {
 	return true
 }
 
-func (c *Controller) syncNode(key string) error {
+func (c *Controller) syncNode(ctx context.Context, key string) error {
 	c.Lock()
 	defer c.Unlock()
 
@@ -188,7 +191,7 @@ func (c *Controller) syncNode(key string) error {
 			// Services can't be assigned to a node while it is in draining status.
 			state.draining = true
 			for svcKey, svcState := range state.allocations {
-				if err := c.clearServiceResourcesAndRequeue(svcKey, svcState, noHost); err != nil {
+				if err := c.clearServiceResourcesAndRequeue(ctx, svcKey, svcState, noHost); err != nil {
 					return err
 				}
 			}
@@ -231,7 +234,7 @@ func (c *Controller) syncNode(key string) error {
 		// because we don't care about its reachability status until it becomes ready.
 		state.draining = true
 		for svcKey, svcState := range state.allocations {
-			if err := c.clearServiceResourcesAndRequeue(svcKey, svcState, noHost); err != nil {
+			if err := c.clearServiceResourcesAndRequeue(ctx, svcKey, svcState, noHost); err != nil {
 				return err
 			}
 		}
@@ -246,7 +249,7 @@ func (c *Controller) syncNode(key string) error {
 		// When it is fully drained and reachable again it will be requeued.
 		state.draining = true
 		for svcKey, svcState := range state.allocations {
-			if err := c.clearServiceResourcesAndRequeue(svcKey, svcState, noHost); err != nil {
+			if err := c.clearServiceResourcesAndRequeue(ctx, svcKey, svcState, noHost); err != nil {
 				return err
 			}
 		}
@@ -259,7 +262,7 @@ func (c *Controller) syncNode(key string) error {
 	// If a service's selector no longer matches this node we attempt to reallocate it.
 	for svcKey, svcState := range state.allocations {
 		if !svcState.selector.Matches(labels.Set(n.Labels)) || svcState.stale {
-			if err := c.clearServiceResourcesAndRequeue(svcKey, svcState, noHost); err != nil {
+			if err := c.clearServiceResourcesAndRequeue(ctx, svcKey, svcState, noHost); err != nil {
 				return err
 			}
 		}

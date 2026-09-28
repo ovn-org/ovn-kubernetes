@@ -859,6 +859,7 @@ func TestPodAllocator_reconcileForNAD(t *testing.T) {
 			var allocated bool
 			kubeMock.On(
 				"PatchPodStatusAnnotations",
+				mock.Anything,
 				mock.AnythingOfType(fmt.Sprintf("%T", &corev1.Pod{})),
 				mock.AnythingOfType(fmt.Sprintf("%T", &corev1.Pod{})),
 			).Run(
@@ -869,6 +870,7 @@ func TestPodAllocator_reconcileForNAD(t *testing.T) {
 
 			kubeMock.On(
 				"UpdateIPAMClaimIPs",
+				mock.Anything,
 				mock.AnythingOfType(fmt.Sprintf("%T", &ipamclaimsapi.IPAMClaim{})),
 			).Return(nil)
 
@@ -1027,7 +1029,7 @@ func TestPodAllocator_reconcileForNAD(t *testing.T) {
 				}
 			}
 
-			err = a.reconcile(old, new, tt.args.release)
+			err = a.reconcile(context.Background(), old, new, tt.args.release)
 			if len(tt.expectError) > 0 {
 				g.Expect(err).To(gomega.MatchError(gomega.ContainSubstring(tt.expectError)))
 			} else if err != nil {
@@ -1098,11 +1100,11 @@ func TestPodAllocatorIPOwnershipLifecycle(t *testing.T) {
 			claims := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc})
 			g.Expect(nodes.Add(&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node"}})).To(gomega.Succeed())
 			kube := &kubemocks.InterfaceOVN{}
-			kube.On("PatchPodStatusAnnotations", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
-				g.Expect(pods.Update(args.Get(1).(*corev1.Pod).DeepCopy())).To(gomega.Succeed())
+			kube.On("PatchPodStatusAnnotations", mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+				g.Expect(pods.Update(args.Get(2).(*corev1.Pod).DeepCopy())).To(gomega.Succeed())
 			}).Return(nil)
-			kube.On("UpdateIPAMClaimIPs", mock.Anything).Run(func(args mock.Arguments) {
-				g.Expect(claims.Update(args.Get(0).(*ipamclaimsapi.IPAMClaim).DeepCopy())).To(gomega.Succeed())
+			kube.On("UpdateIPAMClaimIPs", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+				g.Expect(claims.Update(args.Get(1).(*ipamclaimsapi.IPAMClaim).DeepCopy())).To(gomega.Succeed())
 			}).Return(nil)
 			claimReconciler := persistentips.NewIPAMClaimReconciler(kube, netInfo, ipamclaimslister.NewIPAMClaimLister(claims))
 			network := &nadapi.NetworkSelectionElement{Name: "nad", Namespace: "namespace"}
@@ -1126,7 +1128,7 @@ func TestPodAllocatorIPOwnershipLifecycle(t *testing.T) {
 					g.Expect(err).NotTo(gomega.HaveOccurred())
 				}
 				g.Expect(pods.Add(p)).To(gomega.Succeed())
-				g.Expect(a.Reconcile(nil, p)).To(gomega.Succeed())
+				g.Expect(a.Reconcile(context.Background(), nil, p)).To(gomega.Succeed())
 				p, err = podLister.Pods(p.Namespace).Get(p.Name)
 				g.Expect(err).NotTo(gomega.HaveOccurred())
 				return p
@@ -1139,25 +1141,25 @@ func TestPodAllocatorIPOwnershipLifecycle(t *testing.T) {
 				secondAnnotation, err := util.UnmarshalPodAnnotation(second.Annotations, nadKey)
 				g.Expect(err).NotTo(gomega.HaveOccurred())
 				g.Expect(secondAnnotation.IPs).To(gomega.Equal(annotation.IPs))
-				g.Expect(a.Reconcile(first, nil)).To(gomega.Succeed())
-				g.Expect(a.Reconcile(second, nil)).To(gomega.Succeed())
+				g.Expect(a.Reconcile(context.Background(), first, nil)).To(gomega.Succeed())
+				g.Expect(a.Reconcile(context.Background(), second, nil)).To(gomega.Succeed())
 				g.Expect(ipam.OwnsIPs("network", persistentips.IPAMClaimOwner(claim), annotation.IPs)).To(gomega.BeTrue())
 				claim, err = ipamclaimslister.NewIPAMClaimLister(claims).IPAMClaims(claim.Namespace).Get(claim.Name)
 				g.Expect(err).NotTo(gomega.HaveOccurred())
-				g.Expect(claimReconciler.Reconcile(claim, nil, ipam)).To(gomega.Succeed())
+				g.Expect(claimReconciler.Reconcile(context.Background(), claim, nil, ipam)).To(gomega.Succeed())
 				g.Expect(claims.Delete(claim)).To(gomega.Succeed())
 				g.Expect(ipam.AllocateIPs("network", "new-owner", annotation.IPs)).To(gomega.Succeed())
-				g.Expect(a.Reconcile(first, nil)).To(gomega.Succeed())
-				g.Expect(claimReconciler.Reconcile(claim, nil, ipam)).To(gomega.Succeed())
+				g.Expect(a.Reconcile(context.Background(), first, nil)).To(gomega.Succeed())
+				g.Expect(claimReconciler.Reconcile(context.Background(), claim, nil, ipam)).To(gomega.Succeed())
 				g.Expect(ipam.OwnsIPs("network", "new-owner", annotation.IPs)).To(gomega.BeTrue())
 			} else {
-				g.Expect(a.Reconcile(first, nil)).To(gomega.Succeed())
+				g.Expect(a.Reconcile(context.Background(), first, nil)).To(gomega.Succeed())
 				second := allocate("second", annotation)
-				g.Expect(a.Reconcile(nil, second)).To(gomega.Succeed())
-				g.Expect(a.Reconcile(first, nil)).To(gomega.Succeed())
-				g.Expect(a.Reconcile(nil, first)).To(gomega.MatchError(ipallocator.ErrAllocatedByOther))
+				g.Expect(a.Reconcile(context.Background(), nil, second)).To(gomega.Succeed())
+				g.Expect(a.Reconcile(context.Background(), first, nil)).To(gomega.Succeed())
+				g.Expect(a.Reconcile(context.Background(), nil, first)).To(gomega.MatchError(ipallocator.ErrAllocatedByOther))
 				g.Expect(ipam.OwnsIPs("network", podIdAllocationName(nadKey, string(second.UID)), annotation.IPs)).To(gomega.BeTrue())
-				g.Expect(a.Reconcile(second, nil)).To(gomega.Succeed())
+				g.Expect(a.Reconcile(context.Background(), second, nil)).To(gomega.Succeed())
 				g.Expect(ipam.AllocateIPs("network", "new-owner", annotation.IPs)).To(gomega.Succeed())
 			}
 		})
@@ -1205,7 +1207,7 @@ func TestSyncReservesPlatformTunnelIDs(t *testing.T) {
 				idAllocator: idAlloc,
 			}
 
-			g.Expect(allocator.Sync(nil)).To(gomega.Succeed())
+			g.Expect(allocator.Sync(context.Background(), nil)).To(gomega.Succeed())
 
 			nextID, err := idAlloc.AllocateID("test-pod")
 			g.Expect(err).ToNot(gomega.HaveOccurred())

@@ -77,11 +77,11 @@ var _ = Describe("Persistent IP allocator operations", func() {
 		})
 
 		It("nothing to do when reconciling nil IPAMClaims", func() {
-			Expect(ipamClaimsReconciler.Reconcile(nil, nil, allocator)).To(Succeed())
+			Expect(ipamClaimsReconciler.Reconcile(context.Background(), nil, nil, allocator)).To(Succeed())
 		})
 
 		DescribeTable("reconciling IPAMClaims is successful when provided with", func(oldIPAMClaim, newIPAMClaim *ipamclaimsapi.IPAMClaim) {
-			Expect(ipamClaimsReconciler.Reconcile(oldIPAMClaim, newIPAMClaim, allocator)).To(Succeed())
+			Expect(ipamClaimsReconciler.Reconcile(context.Background(), oldIPAMClaim, newIPAMClaim, allocator)).To(Succeed())
 			updatedIPAMClaim, err := ovnkapiclient.IPAMClaimsClient.K8sV1alpha1().IPAMClaims(namespace).Get(context.Background(), claimName, metav1.GetOptions{})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(updatedIPAMClaim.Status.IPs).To(ConsistOf(newIPAMClaim.Status.IPs))
@@ -151,6 +151,7 @@ var _ = Describe("Persistent IP allocator operations", func() {
 		It("the IPAMClaim is *not* updated", func() {
 			originalNonEmptyClaim := originalClaims[0]
 			Expect(ipamClaimsReconciler.Reconcile(
+				context.Background(),
 				originalNonEmptyClaim,
 				ipamClaimWithIPs(namespace, claimName, networkName, originalIPAMClaimIP, "fd10::2/64"),
 				allocator,
@@ -223,6 +224,7 @@ var _ = Describe("Persistent IP allocator operations", func() {
 
 			Expect(
 				ipamClaimsReconciler.Reconcile(
+					context.Background(),
 					ipamClaimWithIPs(namespace, claimName, networkName, initialIPs...),
 					nil,
 					allocator,
@@ -247,11 +249,11 @@ var _ = Describe("Persistent IP allocator operations", func() {
 			ips := ovntest.MustParseIPNets(original.Status.IPs...)
 			Expect(reconciler.Sync([]interface{}{original}, allocator)).To(Succeed())
 			Expect(reconciler.Sync([]interface{}{replacement}, allocator)).To(MatchError(ip.ErrAllocatedByOther))
-			Expect(reconciler.Reconcile(replacement, nil, allocator)).To(Succeed())
+			Expect(reconciler.Reconcile(context.Background(), replacement, nil, allocator)).To(Succeed())
 			Expect(allocator.OwnsIPs(subnetName, IPAMClaimOwner(original), ips)).To(BeTrue())
-			Expect(reconciler.Reconcile(original, nil, allocator)).To(Succeed())
+			Expect(reconciler.Reconcile(context.Background(), original, nil, allocator)).To(Succeed())
 			Expect(reconciler.Sync([]interface{}{replacement}, allocator)).To(Succeed())
-			Expect(reconciler.Reconcile(original, nil, allocator)).To(Succeed())
+			Expect(reconciler.Reconcile(context.Background(), original, nil, allocator)).To(Succeed())
 			Expect(allocator.OwnsIPs(subnetName, IPAMClaimOwner(replacement), ips)).To(BeTrue())
 		})
 	})

@@ -4,6 +4,7 @@
 package node
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -36,7 +37,7 @@ func (f *fakeNodeHandler) GetNetworkName() string {
 	return f.netName
 }
 
-func (f *fakeNodeHandler) ReconcileNode(oldNode *corev1.Node, newNode *corev1.Node, _, _ *NodeAnnotationState) error {
+func (f *fakeNodeHandler) ReconcileNode(_ context.Context, oldNode *corev1.Node, newNode *corev1.Node, _, _ *NodeAnnotationState) error {
 	if oldNode != nil {
 		f.lastOldNode = oldNode.DeepCopy()
 	} else {
@@ -82,7 +83,7 @@ func newNodeLister(t *testing.T, nodes ...*corev1.Node) corelisters.NodeLister {
 func newNodeControllerForTest(threadiness int, reconcileAllCounter *int) controller.Controller {
 	return controller.NewController("topology-test-node-controller", &controller.ControllerConfig[corev1.Node]{
 		RateLimiter: workqueue.DefaultTypedControllerRateLimiter[string](),
-		Reconcile:   func(string) error { return nil },
+		Reconcile:   func(_ context.Context, _ string) error { return nil },
 		Threadiness: threadiness,
 		Lister: func(labels.Selector) ([]*corev1.Node, error) {
 			if reconcileAllCounter != nil {
@@ -225,7 +226,7 @@ func TestReconcileUpdateScopedNetworkOnly(t *testing.T) {
 	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-a"}}
 	newState := c.annotationCache.UpdateNodeAnnotationState(node, true)
 
-	if err := c.reconcileUpdate(handlerA, nil, node, "net-a", nil, newState); err != nil {
+	if err := c.reconcileUpdate(context.Background(), handlerA, nil, node, "net-a", nil, newState); err != nil {
 		t.Fatalf("reconcileUpdate returned error: %v", err)
 	}
 	if handlerA.reconcileCalls != 1 {
@@ -309,7 +310,7 @@ func TestReconcileUpdateFailureKeepsConfiguredCacheAndStoresLatestInformerNode(t
 	}
 
 	newState := c.annotationCache.UpdateNodeAnnotationState(newNode, true)
-	err := c.reconcileUpdate(handler, oldNode, newNode, handler.netName, nil, newState)
+	err := c.reconcileUpdate(context.Background(), handler, oldNode, newNode, handler.netName, nil, newState)
 	if err == nil {
 		t.Fatal("expected reconcileUpdate to fail")
 	}
@@ -344,7 +345,7 @@ func TestReconcileDeleteFallsBackToLatestInformerNode(t *testing.T) {
 	}
 	c.setLatestInformerNode(handler.netName, newNode)
 
-	if err := c.reconcileDelete(handler, newNode.Name, handler.netName, c.getCachedNode(handler.netName, newNode.Name), nil); err != nil {
+	if err := c.reconcileDelete(context.Background(), handler, newNode.Name, handler.netName, c.getCachedNode(handler.netName, newNode.Name), nil); err != nil {
 		t.Fatalf("reconcileDelete returned error: %v", err)
 	}
 	if handler.deleteCalls != 1 {
@@ -385,7 +386,7 @@ func TestReconcileNodeRemoteNodeBecomesActiveTreatsAsAdd(t *testing.T) {
 	}
 	c.nodeLister = newNodeLister(t, node)
 
-	if err := c.reconcileNode(scopedNodeQueueKey(node.Name, handler.netName)); err != nil {
+	if err := c.reconcileNode(context.Background(), scopedNodeQueueKey(node.Name, handler.netName)); err != nil {
 		t.Fatalf("reconcileNode returned error: %v", err)
 	}
 	if handler.reconcileCalls != 1 {
@@ -438,7 +439,7 @@ func TestReconcileNodeRemoteNodeBecomesInactiveDeletes(t *testing.T) {
 	}
 	c.nodeLister = newNodeLister(t, node)
 
-	if err := c.reconcileNode(scopedNodeQueueKey(node.Name, handler.netName)); err != nil {
+	if err := c.reconcileNode(context.Background(), scopedNodeQueueKey(node.Name, handler.netName)); err != nil {
 		t.Fatalf("reconcileNode returned error: %v", err)
 	}
 	if handler.reconcileCalls != 0 {
@@ -471,7 +472,7 @@ func TestReconcileNodeDeleteCacheMissStillClearsState(t *testing.T) {
 		annotationCache:    NewNodeAnnotationCache(),
 	}
 
-	if err := c.reconcileNode(scopedNodeQueueKey("node-a", handler.netName)); err != nil {
+	if err := c.reconcileNode(context.Background(), scopedNodeQueueKey("node-a", handler.netName)); err != nil {
 		t.Fatalf("reconcileNode returned error: %v", err)
 	}
 	if handler.deleteCalls != 1 {

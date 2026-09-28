@@ -199,7 +199,7 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 3 network", func() {
 
 				fullL3UDNController := fakeOvn.fullL3UDNControllers[userDefinedNetworkName]
 				Expect(fullL3UDNController).ToNot(BeNil())
-				Expect(fullL3UDNController.init()).To(Succeed())
+				Expect(fullL3UDNController.init(context.Background())).To(Succeed())
 
 				Expect(fakeOvn.controller.WatchNamespaces()).NotTo(HaveOccurred())
 				Expect(fakeOvn.controller.WatchPods()).NotTo(HaveOccurred())
@@ -211,7 +211,7 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 3 network", func() {
 				podInfo.populateUserDefinedNetworkLogicalSwitchCache(userDefinedNetController)
 				Expect(fakeOvn.registerUDNNodeHandler(userDefinedNetworkName)).To(Succeed())
 				Expect(userDefinedNetController.bnc.WatchNamespaces()).To(Succeed())
-				Expect(fullL3UDNController.waitForLocalZoneNodeLogicalSwitches()).To(Succeed())
+				Expect(fullL3UDNController.waitForLocalZoneNodeLogicalSwitches(context.Background())).To(Succeed())
 				Expect(userDefinedNetController.bnc.WatchPods()).To(Succeed())
 
 				if netInfo.isPrimary {
@@ -426,7 +426,7 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 3 network", func() {
 
 				fullL3UDNController := fakeOvn.fullL3UDNControllers[userDefinedNetworkName]
 				Expect(fullL3UDNController).ToNot(BeNil())
-				Expect(fullL3UDNController.init()).To(Succeed())
+				Expect(fullL3UDNController.init(context.Background())).To(Succeed())
 
 				Expect(fakeOvn.controller.WatchNamespaces()).To(Succeed())
 				Expect(fakeOvn.controller.WatchPods()).To(Succeed())
@@ -437,7 +437,7 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 3 network", func() {
 				podInfo.populateUserDefinedNetworkLogicalSwitchCache(userDefinedNetController)
 				Expect(fakeOvn.registerUDNNodeHandler(userDefinedNetworkName)).To(Succeed())
 				Expect(userDefinedNetController.bnc.WatchNamespaces()).To(Succeed())
-				Expect(fullL3UDNController.waitForLocalZoneNodeLogicalSwitches()).To(Succeed())
+				Expect(fullL3UDNController.waitForLocalZoneNodeLogicalSwitches(context.Background())).To(Succeed())
 				Expect(userDefinedNetController.bnc.WatchPods()).To(Succeed())
 
 				if netInfo.isPrimary {
@@ -454,7 +454,7 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 3 network", func() {
 				fullL3UDNController.DeregisterNodeHandler()
 				Expect(fakeOvn.fakeClient.KubeClient.CoreV1().Pods(pod.Namespace).Delete(context.Background(), pod.Name, metav1.DeleteOptions{})).To(Succeed())
 				Expect(fakeOvn.fakeClient.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(nad.Namespace).Delete(context.Background(), nad.Name, metav1.DeleteOptions{})).To(Succeed())
-				Expect(fullL3UDNController.Cleanup()).To(Succeed())
+				Expect(fullL3UDNController.Cleanup(context.Background())).To(Succeed())
 				Eventually(fakeOvn.nbClient).WithTimeout(5 * time.Second).Should(libovsdbtest.HaveData(defaultNetExpectations))
 
 				return nil
@@ -529,10 +529,10 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 3 network", func() {
 			// then start watchers so node sync creates per-node entities (node LS, GW router, etc.).
 			l3Controller, ok := fakeOvn.fullL3UDNControllers[userDefinedNetworkName]
 			Expect(ok).To(BeTrue())
-			Expect(l3Controller.init()).To(Succeed())
+			Expect(l3Controller.init(context.Background())).To(Succeed())
 			Expect(l3Controller.RegisterNodeHandler()).To(Succeed())
 			Expect(l3Controller.WatchNamespaces()).To(Succeed())
-			Expect(l3Controller.waitForLocalZoneNodeLogicalSwitches()).To(Succeed())
+			Expect(l3Controller.waitForLocalZoneNodeLogicalSwitches(context.Background())).To(Succeed())
 			Expect(l3Controller.WatchPods()).To(Succeed())
 			Expect(l3Controller.WatchNetworkPolicy()).To(Succeed())
 
@@ -580,7 +580,7 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 3 network", func() {
 				nil,
 			)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(dummyController.Cleanup()).To(Succeed())
+			Expect(dummyController.Cleanup(context.Background())).To(Succeed())
 
 			Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(defaultNetExpectations))
 			return nil
@@ -648,7 +648,7 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 3 network", func() {
 			mutableNetInfo.SetNetworkID(2)
 			err = util.ReconcileNetInfo(l3Controller.ReconcilableNetInfo, mutableNetInfo)
 			Expect(err).NotTo(HaveOccurred())
-			err = l3Controller.init()
+			err = l3Controller.init(context.Background())
 			Expect(err).NotTo(HaveOccurred())
 			Expect(fakeOvn.registerUDNNodeHandler(netInfo.netName)).To(Succeed())
 
@@ -668,7 +668,7 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 3 network", func() {
 				return fakeOvn.networkManager.Interface().NodeHasNetwork(remoteNode.Name, netInfo.netName)
 			}).WithTimeout(3 * time.Second).Should(BeTrue())
 			By("Triggering networkRefChange callback after updating remote node as active on NAD")
-			l3Controller.HandleNetworkRefChange(remoteNode.Name, true)
+			l3Controller.HandleNetworkRefChange(context.Background(), remoteNode.Name, true)
 
 			By("Remote node should have a port created on transit subnet")
 			Eventually(func() bool {
@@ -689,7 +689,7 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 3 network", func() {
 				return fakeOvn.networkManager.Interface().NodeHasNetwork(remoteNode.Name, netInfo.netName)
 			}).WithTimeout(3 * time.Second).Should(BeFalse())
 			By("Triggering networkRefChange callback after updating remote node as inactive on NAD")
-			l3Controller.HandleNetworkRefChange(remoteNode.Name, false)
+			l3Controller.HandleNetworkRefChange(context.Background(), remoteNode.Name, false)
 			By("Remote node should not have a port on transit subnet")
 			Eventually(func() bool {
 				p := func(item *nbdb.LogicalSwitchPort) bool {
@@ -866,7 +866,7 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 3 network", func() {
 			mutableNetInfo.SetNetworkID(2)
 			err = util.ReconcileNetInfo(l3Controller.ReconcilableNetInfo, mutableNetInfo)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(l3Controller.init()).To(Succeed())
+			Expect(l3Controller.init(context.Background())).To(Succeed())
 			Expect(fakeOvn.registerUDNNodeHandler(netName)).To(Succeed())
 
 			By("Remote node should not have a port on transit subnet before activation")
@@ -885,7 +885,7 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 3 network", func() {
 				return fakeOvn.networkManager.Interface().NodeHasNetwork(remoteNode.Name, netName)
 			}).WithTimeout(3 * time.Second).Should(BeTrue())
 			By("Triggering networkRefChange callback after updating remote node as active on NAD")
-			l3Controller.HandleNetworkRefChange(remoteNode.Name, true)
+			l3Controller.HandleNetworkRefChange(context.Background(), remoteNode.Name, true)
 
 			By("Remote node should have a port created on transit subnet")
 			Eventually(func() bool {
@@ -1017,7 +1017,7 @@ var _ = Describe("Layer3 UDN Transport Mode - Interconnect", func() {
 				// By setting only syncZoneIC=true (not syncNode), we skip addNode() and jump
 				// straight to the IC check at line 833. This tests the IC check in isolation.
 				nSyncs := &nodeSyncs{syncZoneIC: true}
-				err = controller.addUpdateLocalNodeEvent(node1, nSyncs)
+				err = controller.addUpdateLocalNodeEvent(context.Background(), node1, nSyncs)
 				Expect(err).NotTo(HaveOccurred(), "addUpdateLocalNodeEvent should succeed when only syncZoneIC is set")
 
 				// Verify no transit switch was created
@@ -1188,7 +1188,7 @@ var _ = Describe("Layer3 UDN Transport Mode - Interconnect", func() {
 
 				// Call addUpdateLocalNodeEvent with syncZoneIC=true
 				nSyncs := &nodeSyncs{syncZoneIC: true}
-				_ = controller.addUpdateLocalNodeEvent(node1, nSyncs)
+				_ = controller.addUpdateLocalNodeEvent(context.Background(), node1, nSyncs)
 				// Error may occur due to incomplete setup, but IC operations should have been attempted
 
 				// Verify transit switch still exists
@@ -1297,7 +1297,7 @@ var _ = Describe("Layer3 CUDN OutboundSNAT for no-overlay mode", func() {
 			})
 			fullL3UDNController := fakeOvn.fullL3UDNControllers[userDefinedNetworkName]
 			Expect(fullL3UDNController).ToNot(BeNil())
-			Expect(fullL3UDNController.init()).To(Succeed())
+			Expect(fullL3UDNController.init(context.Background())).To(Succeed())
 
 			userDefinedNetController, ok := fakeOvn.userDefinedNetworkControllers[userDefinedNetworkName]
 			Expect(ok).To(BeTrue())
@@ -1450,7 +1450,7 @@ var _ = Describe("Layer3 CUDN OutboundSNAT for no-overlay mode", func() {
 			})
 			fullL3UDNController := fakeOvn.fullL3UDNControllers[userDefinedNetworkName]
 			Expect(fullL3UDNController).ToNot(BeNil())
-			Expect(fullL3UDNController.init()).To(Succeed())
+			Expect(fullL3UDNController.init(context.Background())).To(Succeed())
 
 			By("Starting node watch on L3 UDN controller")
 			Expect(fakeOvn.registerUDNNodeHandler(userDefinedNetworkName)).To(Succeed())
@@ -1540,7 +1540,7 @@ var _ = Describe("Layer3 CUDN OutboundSNAT for no-overlay mode", func() {
 			})
 			fullL3UDNController := fakeOvn.fullL3UDNControllers[userDefinedNetworkName]
 			Expect(fullL3UDNController).ToNot(BeNil())
-			Expect(fullL3UDNController.init()).To(Succeed())
+			Expect(fullL3UDNController.init(context.Background())).To(Succeed())
 
 			userDefinedNetController, ok := fakeOvn.userDefinedNetworkControllers[userDefinedNetworkName]
 			Expect(ok).To(BeTrue())

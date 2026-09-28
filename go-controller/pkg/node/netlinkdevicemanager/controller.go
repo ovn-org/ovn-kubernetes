@@ -4,6 +4,7 @@
 package netlinkdevicemanager
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math/rand/v2"
@@ -398,7 +399,7 @@ func (c *Controller) handleAddrUpdate(update netlink.AddrUpdate) {
 
 // reconcileWorkqueue routes workqueue items to appropriate handlers based on key prefix.
 // This is the single entry point for all I/O — called by the workqueue worker goroutine.
-func (c *Controller) reconcileWorkqueue(key string) error {
+func (c *Controller) reconcileWorkqueue(_ context.Context, key string) error {
 	klog.V(5).Infof("NetlinkDeviceManager: reconciling %s", key)
 	switch {
 	case strings.HasPrefix(key, deviceKeyPrefix):

@@ -45,7 +45,7 @@ type Layer3UserDefinedNetworkControllerEventHandler struct {
 	watchFactory *factory.WatchFactory
 	objType      reflect.Type
 	oc           *Layer3UserDefinedNetworkController
-	syncFunc     func([]interface{}) error
+	syncFunc     func(context.Context, []interface{}) error
 }
 
 func (h *Layer3UserDefinedNetworkControllerEventHandler) FilterOutResource(obj interface{}) bool {
@@ -110,28 +110,28 @@ func (h *Layer3UserDefinedNetworkControllerEventHandler) IsResourceScheduled(obj
 // AddResource adds the specified object to the cluster according to its type and returns the error,
 // if any, yielded during object creation.
 // Given an object to add and a boolean specifying if the function was executed from iterateRetryResources
-func (h *Layer3UserDefinedNetworkControllerEventHandler) AddResource(obj interface{}, fromRetryLoop bool) error {
+func (h *Layer3UserDefinedNetworkControllerEventHandler) AddResource(ctx context.Context, obj interface{}, fromRetryLoop bool) error {
 	_ = fromRetryLoop
-	return h.oc.AddUserDefinedNetworkResourceCommon(h.objType, obj)
+	return h.oc.AddUserDefinedNetworkResourceCommon(ctx, h.objType, obj)
 }
 
 // UpdateResource updates the specified object in the cluster to its version in newObj according to its
 // type and returns the error, if any, yielded during the object update.
 // Given an old and a new object; The inRetryCache boolean argument is to indicate if the given resource
 // is in the retryCache or not.
-func (h *Layer3UserDefinedNetworkControllerEventHandler) UpdateResource(oldObj, newObj interface{}, inRetryCache bool) error {
-	return h.oc.UpdateUserDefinedNetworkResourceCommon(h.objType, oldObj, newObj, inRetryCache)
+func (h *Layer3UserDefinedNetworkControllerEventHandler) UpdateResource(ctx context.Context, oldObj, newObj interface{}, inRetryCache bool) error {
+	return h.oc.UpdateUserDefinedNetworkResourceCommon(ctx, h.objType, oldObj, newObj, inRetryCache)
 }
 
 // DeleteResource deletes the object from the cluster according to the delete logic of its resource type.
 // Given an object and optionally a cachedObj; cachedObj is the internal cache entry for this object,
 // used for now for pods and network policies.
-func (h *Layer3UserDefinedNetworkControllerEventHandler) DeleteResource(obj, cachedObj interface{}) error {
-	return h.oc.DeleteUserDefinedNetworkResourceCommon(h.objType, obj, cachedObj)
+func (h *Layer3UserDefinedNetworkControllerEventHandler) DeleteResource(ctx context.Context, obj, cachedObj interface{}) error {
+	return h.oc.DeleteUserDefinedNetworkResourceCommon(ctx, h.objType, obj, cachedObj)
 }
 
-func (h *Layer3UserDefinedNetworkControllerEventHandler) SyncFunc(objs []interface{}) error {
-	var syncFunc func([]interface{}) error
+func (h *Layer3UserDefinedNetworkControllerEventHandler) SyncFunc(ctx context.Context, objs []interface{}) error {
+	var syncFunc func(context.Context, []interface{}) error
 
 	if h.syncFunc != nil {
 		// syncFunc was provided explicitly
@@ -157,7 +157,7 @@ func (h *Layer3UserDefinedNetworkControllerEventHandler) SyncFunc(objs []interfa
 	if syncFunc == nil {
 		return nil
 	}
-	return syncFunc(objs)
+	return syncFunc(ctx, objs)
 }
 
 // IsObjectInTerminalState returns true if the given object is a in terminal state.
@@ -339,15 +339,15 @@ func (oc *Layer3UserDefinedNetworkController) newRetryFramework(
 }
 
 // Start starts the UDN layer3 controller, handles all events and creates all needed logical entities
-func (oc *Layer3UserDefinedNetworkController) Start(_ context.Context) error {
+func (oc *Layer3UserDefinedNetworkController) Start(ctx context.Context) error {
 	klog.Infof("Start %s UDN controller for network %s", oc.TopologyType(), oc.GetNetworkName())
-	if err := oc.init(); err != nil {
+	if err := oc.init(ctx); err != nil {
 		return err
 	}
 	if err := oc.RegisterNodeHandler(); err != nil {
 		return err
 	}
-	if err := oc.run(); err != nil {
+	if err := oc.run(ctx); err != nil {
 		oc.DeregisterServiceNetwork()
 		oc.DeregisterNodeHandler()
 		return err
@@ -389,7 +389,7 @@ func (oc *Layer3UserDefinedNetworkController) Stop() {
 
 // Cleanup cleans up logical entities for the given network, called from the
 // net-attach-def routine or stale network cleanup.
-func (oc *Layer3UserDefinedNetworkController) Cleanup() error {
+func (oc *Layer3UserDefinedNetworkController) Cleanup(_ context.Context) error {
 	// cleans up related OVN logical entities
 	var ops []ovsdb.Operation
 	var err error
@@ -510,7 +510,7 @@ func (oc *Layer3UserDefinedNetworkController) Cleanup() error {
 	return nil
 }
 
-func (oc *Layer3UserDefinedNetworkController) run() error {
+func (oc *Layer3UserDefinedNetworkController) run(ctx context.Context) error {
 	klog.Infof("Starting all the Watchers for network %s ...", oc.GetNetworkName())
 	start := time.Now()
 
@@ -520,7 +520,7 @@ func (oc *Layer3UserDefinedNetworkController) run() error {
 		return err
 	}
 
-	if err := oc.waitForLocalZoneNodeLogicalSwitches(); err != nil {
+	if err := oc.waitForLocalZoneNodeLogicalSwitches(ctx); err != nil {
 		return err
 	}
 
@@ -606,7 +606,7 @@ func (oc *Layer3UserDefinedNetworkController) cleanupEgressIPAddressSet() error 
 	return oc.eIPController.DestroyNetworkServedPodsAddressSet(oc.GetNetworkName())
 }
 
-func (oc *Layer3UserDefinedNetworkController) waitForLocalZoneNodeLogicalSwitches() error {
+func (oc *Layer3UserDefinedNetworkController) waitForLocalZoneNodeLogicalSwitches(ctx context.Context) error {
 	node, err := oc.GetLocalNode()
 	if err != nil {
 		return fmt.Errorf("failed to get local node for network %s: %w", oc.GetNetworkName(), err)
@@ -615,15 +615,15 @@ func (oc *Layer3UserDefinedNetworkController) waitForLocalZoneNodeLogicalSwitche
 		return nil
 	}
 	switchName := oc.GetNetworkScopedSwitchName(node.Name)
-	if _, err := oc.waitForNodeLogicalSwitch(switchName); err != nil {
+	if _, err := oc.waitForNodeLogicalSwitch(ctx, switchName); err != nil {
 		return fmt.Errorf("failed waiting for local node %s logical switch %s for network %s: %w",
 			node.Name, switchName, oc.GetNetworkName(), err)
 	}
 	return nil
 }
 
-func (oc *Layer3UserDefinedNetworkController) Reconcile(netInfo util.NetInfo) error {
-	if err := oc.BaseNetworkController.reconcile(
+func (oc *Layer3UserDefinedNetworkController) Reconcile(ctx context.Context, netInfo util.NetInfo) error {
+	if err := oc.BaseNetworkController.reconcile(ctx,
 		netInfo,
 		func(node string) {
 			oc.addNodeFailed.Store(node, true)
@@ -646,7 +646,7 @@ func (oc *Layer3UserDefinedNetworkController) MarkGatewaySyncNeeded(nodeName str
 }
 
 // ReconcileNode reconciles a node for a layer3 UDN controller.
-func (oc *Layer3UserDefinedNetworkController) ReconcileNode(oldNode, newNode *corev1.Node, oldState, newState *nodecontroller.NodeAnnotationState) error {
+func (oc *Layer3UserDefinedNetworkController) ReconcileNode(ctx context.Context, oldNode, newNode *corev1.Node, oldState, newState *nodecontroller.NodeAnnotationState) error {
 	if newNode == nil {
 		if oldNode == nil {
 			return fmt.Errorf("nil node received for network %s", oc.GetNetworkName())
@@ -712,7 +712,7 @@ func (oc *Layer3UserDefinedNetworkController) ReconcileNode(oldNode, newNode *co
 				syncReroute:           syncReroute,
 			}
 		}
-		return oc.addUpdateLocalNodeEvent(newNode, nodeParams)
+		return oc.addUpdateLocalNodeEvent(ctx, newNode, nodeParams)
 	}
 
 	if config.OVNKubernetesFeature.EnableDynamicUDNAllocation {
@@ -741,10 +741,11 @@ func (oc *Layer3UserDefinedNetworkController) ReconcileNode(oldNode, newNode *co
 
 // SyncNodes runs the node sync for a layer3 UDN controller.
 func (oc *Layer3UserDefinedNetworkController) SyncNodes(nodes []*corev1.Node) error {
-	return oc.syncNodes(nodesToInterfaces(nodes))
+	ctx := context.Background()
+	return oc.syncNodes(ctx, nodesToInterfaces(nodes))
 }
 
-func (oc *Layer3UserDefinedNetworkController) init() (err error) {
+func (oc *Layer3UserDefinedNetworkController) init(_ context.Context) (err error) {
 	start := time.Now()
 	defer func() {
 		if err == nil && config.Metrics.EnableScaleMetrics {
@@ -811,7 +812,7 @@ func (oc *Layer3UserDefinedNetworkController) init() (err error) {
 	return nil
 }
 
-func (oc *Layer3UserDefinedNetworkController) addUpdateLocalNodeEvent(node *corev1.Node, nSyncs *nodeSyncs) error {
+func (oc *Layer3UserDefinedNetworkController) addUpdateLocalNodeEvent(_ context.Context, node *corev1.Node, nSyncs *nodeSyncs) error {
 	var hostSubnets []*net.IPNet
 	var errs []error
 	var err error
@@ -914,8 +915,7 @@ func (oc *Layer3UserDefinedNetworkController) addUpdateLocalNodeEvent(node *core
 				errs = append(errs, fmt.Errorf("failed to generate node GW configuration: %v", err))
 				oc.gatewaysFailed.Store(node.Name, true)
 			} else {
-				if err := gwManager.SyncGateway(
-					node,
+				if err := gwManager.SyncGateway(node,
 					gwConfig,
 				); err != nil {
 					errs = append(errs, fmt.Errorf(
@@ -1103,7 +1103,7 @@ func (oc *Layer3UserDefinedNetworkController) deleteNode(nodeName string) error 
 // watchNodes() will be called for all existing nodes at startup anyway.
 // Note that this list will include the 'join' cluster switch, which we
 // do not want to delete.
-func (oc *Layer3UserDefinedNetworkController) syncNodes(nodes []interface{}) error {
+func (oc *Layer3UserDefinedNetworkController) syncNodes(_ context.Context, nodes []interface{}) error {
 	foundNodes := sets.New[string]()
 	activeNodes := nodes
 	dynamicUDN := config.OVNKubernetesFeature.EnableDynamicUDNAllocation
@@ -1255,14 +1255,12 @@ func (oc *Layer3UserDefinedNetworkController) nodeGatewayConfig(node *corev1.Nod
 
 func (oc *Layer3UserDefinedNetworkController) newClusterRouter() (*nbdb.LogicalRouter, error) {
 	if oc.multicastSupport {
-		return oc.gatewayTopologyFactory.NewClusterRouterWithMulticastSupport(
-			oc.GetNetworkScopedClusterRouterName(),
+		return oc.gatewayTopologyFactory.NewClusterRouterWithMulticastSupport(oc.GetNetworkScopedClusterRouterName(),
 			oc.GetNetInfo(),
 			oc.defaultCOPPUUID,
 		)
 	}
-	return oc.gatewayTopologyFactory.NewClusterRouter(
-		oc.GetNetworkScopedClusterRouterName(),
+	return oc.gatewayTopologyFactory.NewClusterRouter(oc.GetNetworkScopedClusterRouterName(),
 		oc.GetNetInfo(),
 		oc.defaultCOPPUUID,
 	)
@@ -1351,7 +1349,7 @@ func (oc *Layer3UserDefinedNetworkController) DeregisterServiceNetwork() {
 }
 
 // HandleNetworkRefChange marks the node for interconnect sync so a queued update does not skip it.
-func (oc *Layer3UserDefinedNetworkController) HandleNetworkRefChange(nodeName string, active bool) {
+func (oc *Layer3UserDefinedNetworkController) HandleNetworkRefChange(_ context.Context, nodeName string, active bool) {
 	if active {
 		oc.syncZoneICFailed.Store(nodeName, true)
 	}

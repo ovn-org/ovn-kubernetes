@@ -4,6 +4,7 @@
 package dnsnameresolver
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 	"sync"
@@ -91,7 +92,7 @@ func dnsNeedsUpdate(oldObj, newObj *ocpnetworkapiv1alpha1.DNSNameResolver) bool 
 // then egressFirewallExternalDNS.Delete is called for the corresponding DNS name. If an
 // object is added/updated, then egressFirewallExternalDNS.Add is called for the
 // corresponding DNS name along with the associated addresses.
-func (extEgDNS *ExternalEgressDNS) reconcileDNSNameResolver(key string) error {
+func (extEgDNS *ExternalEgressDNS) reconcileDNSNameResolver(_ context.Context, key string) error {
 	extEgDNS.dnsControllerLock.Lock()
 	defer extEgDNS.dnsControllerLock.Unlock()
 

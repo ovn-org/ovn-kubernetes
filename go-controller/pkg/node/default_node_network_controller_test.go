@@ -121,7 +121,7 @@ var _ = Describe("Node", func() {
 		It("returns an error when the annotation cannot be removed", func() {
 			config.OvnKubeNode.Mode = types.NodeModeFull
 			kubeMock := new(mocks.Interface)
-			kubeMock.On("SetAnnotationsOnNode", nodeName, map[string]interface{}{
+			kubeMock.On("SetAnnotationsOnNode", mock.Anything, nodeName, map[string]interface{}{
 				util.OVNNodePrimaryDPUHostAddr: nil,
 			}).Return(fmt.Errorf("patch failed"))
 			nc := newController(kubeMock)

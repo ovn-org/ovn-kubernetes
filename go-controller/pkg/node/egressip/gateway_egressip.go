@@ -4,6 +4,7 @@
 package egressip
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -382,7 +383,7 @@ func (g *BridgeEIPAddrManager) updateAnnotationLocked(updatedIPs sets.Set[string
 			nodeToUpdate.Annotations = map[string]string{}
 		}
 		nodeToUpdate.Annotations[util.OVNNodeBridgeEgressIPs] = string(patch)
-		return g.kube.PatchNodeStatusAnnotations(node, nodeToUpdate)
+		return g.kube.PatchNodeStatusAnnotations(context.TODO(), node, nodeToUpdate)
 	})
 }
 

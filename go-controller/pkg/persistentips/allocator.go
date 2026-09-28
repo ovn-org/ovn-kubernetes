@@ -4,6 +4,7 @@
 package persistentips
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -45,7 +46,7 @@ func IPAMClaimOwner(claim *ipamclaimsapi.IPAMClaim) string {
 type PersistentAllocations interface {
 	FindIPAMClaim(claimName string, namespace string) (*ipamclaimsapi.IPAMClaim, error)
 
-	Reconcile(oldIPAMClaim *ipamclaimsapi.IPAMClaim, newIPAMClaim *ipamclaimsapi.IPAMClaim, ipReleaser IPReleaser) error
+	Reconcile(ctx context.Context, oldIPAMClaim *ipamclaimsapi.IPAMClaim, newIPAMClaim *ipamclaimsapi.IPAMClaim, ipReleaser IPReleaser) error
 
 	UpdateIPAMClaimStatus(ipamClaim *ipamclaimsapi.IPAMClaim, podAnnotation *util.PodAnnotation, podName string, allocationErr error) *ipamclaimsapi.IPAMClaim
 }
@@ -77,6 +78,7 @@ func NewIPAMClaimReconciler(kube kube.InterfaceOVN, netConfig util.NetInfo, list
 // Reconcile updates an IPAMClaim with the IP addresses allocated to the pod's
 // interface
 func (icr *IPAMClaimReconciler) Reconcile(
+	ctx context.Context,
 	oldIPAMClaim *ipamclaimsapi.IPAMClaim,
 	newIPAMClaim *ipamclaimsapi.IPAMClaim,
 	ipReleaser IPReleaser,
@@ -105,7 +107,7 @@ func (icr *IPAMClaimReconciler) Reconcile(
 		newIPAMClaim != nil
 
 	if mustUpdateIPAMClaim {
-		if err := icr.kube.UpdateIPAMClaimIPs(newIPAMClaim); err != nil {
+		if err := icr.kube.UpdateIPAMClaimIPs(ctx, newIPAMClaim); err != nil {
 			return fmt.Errorf(
 				"failed to update the allocation %q with allocations %q: %w",
 				newIPAMClaim.Name,

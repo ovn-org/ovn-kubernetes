@@ -35,7 +35,7 @@ type LocalnetUserDefinedNetworkControllerEventHandler struct {
 	watchFactory *factory.WatchFactory
 	objType      reflect.Type
 	oc           *LocalnetUserDefinedNetworkController
-	syncFunc     func([]interface{}) error
+	syncFunc     func(context.Context, []interface{}) error
 }
 
 func (h *LocalnetUserDefinedNetworkControllerEventHandler) FilterOutResource(obj interface{}) bool {
@@ -105,27 +105,27 @@ func (h *LocalnetUserDefinedNetworkControllerEventHandler) IsResourceScheduled(o
 // AddResource adds the specified object to the cluster according to its type and returns the error,
 // if any, yielded during object creation.
 // Given an object to add and a boolean specifying if the function was executed from iterateRetryResources
-func (h *LocalnetUserDefinedNetworkControllerEventHandler) AddResource(obj interface{}, _ bool) error {
-	return h.oc.AddUserDefinedNetworkResourceCommon(h.objType, obj)
+func (h *LocalnetUserDefinedNetworkControllerEventHandler) AddResource(ctx context.Context, obj interface{}, _ bool) error {
+	return h.oc.AddUserDefinedNetworkResourceCommon(ctx, h.objType, obj)
 }
 
 // UpdateResource updates the specified object in the cluster to its version in newObj according to its
 // type and returns the error, if any, yielded during the object update.
 // Given an old and a new object; The inRetryCache boolean argument is to indicate if the given resource
 // is in the retryCache or not.
-func (h *LocalnetUserDefinedNetworkControllerEventHandler) UpdateResource(oldObj, newObj interface{}, inRetryCache bool) error {
-	return h.oc.UpdateUserDefinedNetworkResourceCommon(h.objType, oldObj, newObj, inRetryCache)
+func (h *LocalnetUserDefinedNetworkControllerEventHandler) UpdateResource(ctx context.Context, oldObj, newObj interface{}, inRetryCache bool) error {
+	return h.oc.UpdateUserDefinedNetworkResourceCommon(ctx, h.objType, oldObj, newObj, inRetryCache)
 }
 
 // DeleteResource deletes the object from the cluster according to the delete logic of its resource type.
 // Given an object and optionally a cachedObj; cachedObj is the internal cache entry for this object,
 // used for now for pods and network policies.
-func (h *LocalnetUserDefinedNetworkControllerEventHandler) DeleteResource(obj, cachedObj interface{}) error {
-	return h.oc.DeleteUserDefinedNetworkResourceCommon(h.objType, obj, cachedObj)
+func (h *LocalnetUserDefinedNetworkControllerEventHandler) DeleteResource(ctx context.Context, obj, cachedObj interface{}) error {
+	return h.oc.DeleteUserDefinedNetworkResourceCommon(ctx, h.objType, obj, cachedObj)
 }
 
-func (h *LocalnetUserDefinedNetworkControllerEventHandler) SyncFunc(objs []interface{}) error {
-	var syncFunc func([]interface{}) error
+func (h *LocalnetUserDefinedNetworkControllerEventHandler) SyncFunc(ctx context.Context, objs []interface{}) error {
+	var syncFunc func(context.Context, []interface{}) error
 
 	if h.syncFunc != nil {
 		// syncFunc was provided explicitly
@@ -148,7 +148,7 @@ func (h *LocalnetUserDefinedNetworkControllerEventHandler) SyncFunc(objs []inter
 	if syncFunc == nil {
 		return nil
 	}
-	return syncFunc(objs)
+	return syncFunc(ctx, objs)
 }
 
 // IsObjectInTerminalState returns true if the given object is a in terminal state.
@@ -223,7 +223,7 @@ func NewLocalnetUserDefinedNetworkController(
 }
 
 // Start starts the localnet UDN controller, handles all events and creates all needed logical entities
-func (oc *LocalnetUserDefinedNetworkController) Start(_ context.Context) error {
+func (oc *LocalnetUserDefinedNetworkController) Start(ctx context.Context) error {
 	klog.Infof("Starting controller for UDN %s", oc.GetNetworkName())
 
 	start := time.Now()
@@ -234,19 +234,19 @@ func (oc *LocalnetUserDefinedNetworkController) Start(_ context.Context) error {
 	if err := oc.init(); err != nil {
 		return err
 	}
-	if err := oc.run(); err != nil {
+	if err := oc.run(ctx); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (oc *LocalnetUserDefinedNetworkController) run() error {
-	return oc.BaseLayer2UserDefinedNetworkController.run()
+func (oc *LocalnetUserDefinedNetworkController) run(ctx context.Context) error {
+	return oc.BaseLayer2UserDefinedNetworkController.run(ctx)
 }
 
 // Cleanup cleans up logical entities for the given network, called from net-attach-def routine
 // could be called from a dummy Controller (only has CommonNetworkControllerInfo set)
-func (oc *LocalnetUserDefinedNetworkController) Cleanup() error {
+func (oc *LocalnetUserDefinedNetworkController) Cleanup(_ context.Context) error {
 	return oc.BaseLayer2UserDefinedNetworkController.cleanup()
 }
 
@@ -286,8 +286,8 @@ func (oc *LocalnetUserDefinedNetworkController) Stop() {
 	oc.BaseLayer2UserDefinedNetworkController.stop()
 }
 
-func (oc *LocalnetUserDefinedNetworkController) Reconcile(netInfo util.NetInfo) error {
-	return oc.BaseNetworkController.reconcile(
+func (oc *LocalnetUserDefinedNetworkController) Reconcile(ctx context.Context, netInfo util.NetInfo) error {
+	return oc.BaseNetworkController.reconcile(ctx,
 		netInfo,
 		func(_ string) {},
 	)

@@ -4,6 +4,7 @@
 package factory
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 	"sync"
@@ -611,7 +612,7 @@ var _ = Describe("Watch Factory Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 			h, err := wf.addHandler(objType, namespace, sel,
 				cache.ResourceEventHandlerFuncs{},
-				func(objs []interface{}) error {
+				func(_ context.Context, objs []interface{}) error {
 					defer GinkgoRecover()
 					Expect(objs).To(HaveLen(1))
 					return nil
@@ -635,7 +636,7 @@ var _ = Describe("Watch Factory Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 			h, err := wf.AddFilteredPodHandler(namespace, sel,
 				cache.ResourceEventHandlerFuncs{},
-				func(objs []interface{}) error {
+				func(_ context.Context, objs []interface{}) error {
 					defer GinkgoRecover()
 					Expect(objs).To(HaveLen(1))
 					return nil

@@ -4,6 +4,7 @@
 package networkmanager
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 	"sync"
@@ -158,7 +159,7 @@ func (t *EgressIPTrackerController) namespaceNeedsUpdate(oldObj, newObj *corev1.
 
 // reconcileNAD determines if a NAD needs to reconcile, then triggers reconciliation
 // via the namespace controller
-func (t *EgressIPTrackerController) reconcileNAD(key string) error {
+func (t *EgressIPTrackerController) reconcileNAD(_ context.Context, key string) error {
 	klog.V(5).Infof("%s - reconciling NAD key: %q", t.name, key)
 	namespace, _, err := cache.SplitMetaNamespaceKey(key)
 	if err != nil {
@@ -172,7 +173,7 @@ func (t *EgressIPTrackerController) reconcileNAD(key string) error {
 
 // reconcileEgressIP determines if an egress IP needs to reconcile, then triggers reconciliation
 // via the namespace controller
-func (t *EgressIPTrackerController) reconcileEgressIP(key string) error {
+func (t *EgressIPTrackerController) reconcileEgressIP(_ context.Context, key string) error {
 	klog.V(5).Infof("%s - reconciling egress IP key: %q", t.name, key)
 
 	eip, err := t.eipLister.Get(key)
@@ -217,7 +218,7 @@ func (t *EgressIPTrackerController) reconcileEgressIP(key string) error {
 	return nil
 }
 
-func (t *EgressIPTrackerController) reconcileNamespace(key string) error {
+func (t *EgressIPTrackerController) reconcileNamespace(_ context.Context, key string) error {
 	var refChanges []refChange
 	klog.V(5).Infof("%s - reconciling namespace key: %q", t.name, key)
 	ns, err := t.nsLister.Get(key)
@@ -332,6 +333,7 @@ func (t *EgressIPTrackerController) reconcileNamespace(key string) error {
 // This is required because workers are started asynchronously and consumers of the tracker
 // rely on the cache to be populated during start up
 func (t *EgressIPTrackerController) syncAll() error {
+	ctx := context.Background()
 	start := time.Now()
 	defer func() {
 		klog.V(5).Infof("%s - syncAll took %v", t.name, time.Since(start))
@@ -345,7 +347,7 @@ func (t *EgressIPTrackerController) syncAll() error {
 
 	for _, ns := range namespaces {
 		nsName := ns.Name
-		if err := t.reconcileNamespace(nsName); err != nil {
+		if err := t.reconcileNamespace(ctx, nsName); err != nil {
 			klog.Errorf("%s - Failed to sync namespace %q: %v", t.name, nsName, err)
 			continue
 		}

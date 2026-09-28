@@ -381,10 +381,10 @@ var _ = Describe("UserDefinedNodeNetworkController: UserDefinedPrimaryNetwork Ga
 			}}).Return(nil)
 		nodeAnnotatorMock.On("Set", mock.Anything, mock.Anything).Return(nil)
 		nodeAnnotatorMock.On("Run").Return(nil)
-		kubeMock.On("SetAnnotationsOnNode", node.Name, map[string]interface{}{
+		kubeMock.On("SetAnnotationsOnNode", mock.Anything, node.Name, map[string]interface{}{
 			"k8s.ovn.org/node-masquerade-subnet": "{\"ipv4\":\"169.254.0.0/17\",\"ipv6\":\"fd69::/112\"}",
 		}).Return(nil)
-		kubeMock.On("SetAnnotationsOnNode", node.Name, map[string]interface{}{
+		kubeMock.On("SetAnnotationsOnNode", mock.Anything, node.Name, map[string]interface{}{
 			"k8s.ovn.org/host-cidrs":          "[\"192.168.1.10/24\",\"fc00:f853:ccd:e793::3/64\"]",
 			"k8s.ovn.org/l3-gateway-config":   "{\"default\":{\"mode\":\"\"}}",
 			"k8s.ovn.org/node-primary-ifaddr": "{\"ipv4\":\"192.168.1.10/24\",\"ipv6\":\"fc00:f853:ccd:e793::3/64\"}",
@@ -545,7 +545,7 @@ var _ = Describe("UserDefinedNodeNetworkController: UserDefinedPrimaryNetwork Ga
 
 			By("delete the network and ensure its associated VRF device is also deleted")
 			controller.Stop()
-			err = controller.Cleanup()
+			err = controller.Cleanup(context.Background())
 			Expect(err).NotTo(HaveOccurred())
 			Eventually(func() error {
 				_, err := util.GetNetLinkOps().LinkByName(vrfDeviceName)

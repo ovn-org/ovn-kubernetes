@@ -4,6 +4,7 @@
 package status_manager
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 	"sync"
@@ -45,9 +46,9 @@ type resourceManager[T any] interface {
 	// success, but can be sure about failure. So if at least 1 message is a failure, we can apply failed status, but if
 	// all messages are successful, empty patch should be sent.
 	// updateStatus should handle nil in case of pointer type.
-	updateStatus(obj *T, applyOpts *metav1.ApplyOptions, applyEmptyOrFailed bool) error
+	updateStatus(ctx context.Context, obj *T, applyOpts *metav1.ApplyOptions, applyEmptyOrFailed bool) error
 	// cleanupStatus should send empty update with given applyOpts.
-	cleanupStatus(obj *T, applyOpts *metav1.ApplyOptions) error
+	cleanupStatus(ctx context.Context, obj *T, applyOpts *metav1.ApplyOptions) error
 }
 
 type relevantZoneProvider[T any] interface {
@@ -93,12 +94,13 @@ func (m *typedStatusManager[T]) needsUpdate(oldObj, newObj *T) bool {
 
 func (m *typedStatusManager[T]) Start() error {
 	// Perform one-time startup cleanup of stale managedFields (upgrade scenario)
+	ctx := context.Background()
 	initialSync := func() error {
 		return m.withZonesRLock(func(zones sets.Set[string]) error {
 			// Run cleanup immediately with whatever zones we have (even if empty).
 			// The cleanup only removes empty-status managedFields from managers
 			// that do not correspond to an existing zone.
-			return m.doStartupCleanup(zones)
+			return m.doStartupCleanup(ctx, zones)
 		})
 	}
 	return controller.StartWithInitialSync(initialSync, m.objController)
@@ -111,7 +113,7 @@ func (m *typedStatusManager[T]) Stop() {
 // doStartupCleanup performs a one-time cleanup of stale managedFields for all objects.
 // This handles the upgrade scenario where previous code left stale managedFields.
 // Returns an error if any cleanup operations failed.
-func (m *typedStatusManager[T]) doStartupCleanup(zones sets.Set[string]) error {
+func (m *typedStatusManager[T]) doStartupCleanup(ctx context.Context, zones sets.Set[string]) error {
 	klog.Infof("StatusManager %s: performing a one-time startup cleanup of stale managedFields", m.name)
 
 	objects, err := m.lister(labels.Everything())
@@ -135,7 +137,7 @@ func (m *typedStatusManager[T]) doStartupCleanup(zones sets.Set[string]) error {
 					Force:        true,
 					FieldManager: mf.Manager,
 				}
-				err := m.resource.cleanupStatus(obj, applyAsZoneController)
+				err := m.resource.cleanupStatus(ctx, obj, applyAsZoneController)
 				if err != nil {
 					cleanupErrors = append(cleanupErrors, fmt.Errorf("failed to cleanup status for stale manager %s: %w", mf.Manager, err))
 				}
@@ -151,7 +153,7 @@ func (m *typedStatusManager[T]) doStartupCleanup(zones sets.Set[string]) error {
 	return nil
 }
 
-func (m *typedStatusManager[T]) updateStatus(key string) error {
+func (m *typedStatusManager[T]) updateStatus(ctx context.Context, key string) error {
 	namespace, name, err := cache.SplitMetaNamespaceKey(key)
 	if err != nil {
 		klog.Errorf("StatusManager %s: failed to split meta namespace cache key %s: %v", m.name, key, err)
@@ -195,7 +197,7 @@ func (m *typedStatusManager[T]) updateStatus(key string) error {
 					FieldManager: zoneID,
 				}
 				klog.Infof("StatusManager %s: delete stale zone %s", m.name, zoneID)
-				err = m.resource.cleanupStatus(obj, applyAsZoneController)
+				err = m.resource.cleanupStatus(ctx, obj, applyAsZoneController)
 				if err != nil {
 					return fmt.Errorf("StatusManager %s: failed to cleanup status for stale zone %s: %w", m.name, zoneID, err)
 				}
@@ -216,7 +218,7 @@ func (m *typedStatusManager[T]) updateStatus(key string) error {
 			FieldManager: clusterManagerName,
 		}
 		applyEmptyOrFailed := relevantZones.Len() == 0 || len(messages) < relevantZones.Len()
-		return m.resource.updateStatus(obj, applyAsStatusManager, applyEmptyOrFailed)
+		return m.resource.updateStatus(ctx, obj, applyAsStatusManager, applyEmptyOrFailed)
 	})
 }
 
@@ -314,7 +316,7 @@ func (sm *StatusManager) Start() error {
 		sm.zonesLock.RUnlock()
 
 		anpManager := newANPManager(sm.ovnClient.ANPClient)
-		if err := anpManager.doStartupCleanup(zones); err != nil {
+		if err := anpManager.doStartupCleanup(context.Background(), zones); err != nil {
 			return fmt.Errorf("failed to run ANP/BANP startup cleanup: %w", err)
 		}
 	}
@@ -347,7 +349,7 @@ func (sm *StatusManager) onZoneUpdate(newZones sets.Set[string]) {
 		// not maintaining local caches for ANP/BANP
 		// we must try to clean up statuses across all ANPs that were managed by that zone
 		anpZoneDeleteCleanupManager := newANPManager(sm.ovnClient.ANPClient)
-		anpZoneDeleteCleanupManager.cleanupDeletedZoneStatuses(deletedZones)
+		anpZoneDeleteCleanupManager.cleanupDeletedZoneStatuses(context.TODO(), deletedZones)
 	}
 }
 

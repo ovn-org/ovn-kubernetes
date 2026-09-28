@@ -32,7 +32,7 @@ const (
 
 // updateStatusCondition applies the status condition to the VTEP resource.
 // The API update is skipped if the condition already matches.
-func (c *Controller) updateStatusCondition(vtep *vtepv1.VTEP, conditionType string, status metav1.ConditionStatus, reason, message string) error {
+func (c *Controller) updateStatusCondition(ctx context.Context, vtep *vtepv1.VTEP, conditionType string, status metav1.ConditionStatus, reason, message string) error {
 	const maxMessageLen = 32768
 	if len(message) >= maxMessageLen {
 		message = message[:maxMessageLen-1]
@@ -68,7 +68,7 @@ func (c *Controller) updateStatusCondition(vtep *vtepv1.VTEP, conditionType stri
 	// under the same field manager, all owned conditions must be included in
 	// every apply call to avoid wiping the others.
 	_, err := c.vtepClient.K8sV1().VTEPs().ApplyStatus(
-		context.Background(),
+		ctx,
 		vtepapply.VTEP(vtep.Name).WithStatus(
 			vtepapply.VTEPStatus().WithConditions(condition),
 		),

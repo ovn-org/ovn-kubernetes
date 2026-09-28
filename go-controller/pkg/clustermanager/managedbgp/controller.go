@@ -347,7 +347,7 @@ func (c *Controller) frrNeedsUpdate(oldFRR, newFRR *frrtypes.FRRConfiguration) b
 
 // reconcileCUDN handles CUDN events by ensuring the label is set and then
 // triggering a reconciliation of the managed configuration.
-func (c *Controller) reconcileCUDN(key string) error {
+func (c *Controller) reconcileCUDN(ctx context.Context, key string) error {
 	cudn, err := c.cudnLister.Get(key)
 	if err != nil && !apierrors.IsNotFound(err) {
 		return fmt.Errorf("failed to get CUDN %s: %w", key, err)
@@ -355,7 +355,7 @@ func (c *Controller) reconcileCUDN(key string) error {
 
 	if cudn != nil && isCUDNManaged(cudn) {
 		// CUDNs are immutable and we won't ever have to make sure that the label does not exist.
-		if err := c.ensureManagedNetworkLabel(cudn); err != nil {
+		if err := c.ensureManagedNetworkLabel(ctx, cudn); err != nil {
 			return err
 		}
 	}
@@ -369,7 +369,7 @@ func (c *Controller) reconcileCUDN(key string) error {
 // - FRRConfiguration if default network or any CUDN transport is set to NoOverlay, deletes it if not
 // - Default network RA if transport is set to NoOverlay, deletes it if not
 // - CUDN RA if any CUDN transport is set to NoOverlay, deletes it if none are NoOverlay
-func (c *Controller) ensureManagedConfiguration(_ string) error {
+func (c *Controller) ensureManagedConfiguration(ctx context.Context, _ string) error {
 	cdnManaged := isCDNManaged()
 	managedCUDNs, err := c.getManagedCUDNs()
 	if err != nil {
@@ -380,33 +380,33 @@ func (c *Controller) ensureManagedConfiguration(_ string) error {
 
 	// Handle FRRConfiguration
 	if hasManaged {
-		if err := c.ensureBaseFRRConfiguration(); err != nil {
+		if err := c.ensureBaseFRRConfiguration(ctx); err != nil {
 			return fmt.Errorf("failed to ensure base FRRConfiguration: %w", err)
 		}
 	} else {
-		if err := c.cleanupBaseFRRConfigurations(); err != nil {
+		if err := c.cleanupBaseFRRConfigurations(ctx); err != nil {
 			return fmt.Errorf("failed to cleanup base FRRConfiguration: %w", err)
 		}
 	}
 
 	// Handle CDN RouteAdvertisement
 	if cdnManaged {
-		if err := c.ensureManagedRouteAdvertisement(true); err != nil {
+		if err := c.ensureManagedRouteAdvertisement(ctx, true); err != nil {
 			return fmt.Errorf("failed to ensure CDN RouteAdvertisement: %w", err)
 		}
 	} else {
-		if err := c.deleteManagedRA(true); err != nil {
+		if err := c.deleteManagedRA(ctx, true); err != nil {
 			return fmt.Errorf("failed to delete CDN RouteAdvertisement: %w", err)
 		}
 	}
 
 	// Handle CUDN RouteAdvertisement
 	if len(managedCUDNs) > 0 {
-		if err := c.ensureManagedRouteAdvertisement(false); err != nil {
+		if err := c.ensureManagedRouteAdvertisement(ctx, false); err != nil {
 			return fmt.Errorf("failed to ensure CUDN RouteAdvertisement: %w", err)
 		}
 	} else {
-		if err := c.deleteManagedRA(false); err != nil {
+		if err := c.deleteManagedRA(ctx, false); err != nil {
 			return fmt.Errorf("failed to delete CUDN RouteAdvertisement: %w", err)
 		}
 	}
@@ -414,7 +414,7 @@ func (c *Controller) ensureManagedConfiguration(_ string) error {
 	return nil
 }
 
-func (c *Controller) ensureBaseFRRConfiguration() error {
+func (c *Controller) ensureBaseFRRConfiguration(ctx context.Context) error {
 	if config.ManagedBGP.Topology != config.ManagedBGPTopologyFullMesh {
 		return fmt.Errorf("unsupported managed BGP topology %q, only %q is supported", config.ManagedBGP.Topology, config.ManagedBGPTopologyFullMesh)
 	}
@@ -474,7 +474,7 @@ func (c *Controller) ensureBaseFRRConfiguration() error {
 			Spec: desiredSpec,
 		}
 		klog.Infof("Creating base FRRConfiguration")
-		_, err = c.frrClient.ApiV1beta1().FRRConfigurations(config.ManagedBGP.FRRNamespace).Create(context.TODO(), frrConfig, metav1.CreateOptions{FieldManager: fieldManager})
+		_, err = c.frrClient.ApiV1beta1().FRRConfigurations(config.ManagedBGP.FRRNamespace).Create(ctx, frrConfig, metav1.CreateOptions{FieldManager: fieldManager})
 		if err != nil {
 			return fmt.Errorf("failed to create base FRRConfiguration: %w", err)
 		}
@@ -489,7 +489,7 @@ func (c *Controller) ensureBaseFRRConfiguration() error {
 			}
 			updated.Labels[managedNetworkLabel] = ""
 			updated.Spec = desiredSpec
-			_, err = c.frrClient.ApiV1beta1().FRRConfigurations(config.ManagedBGP.FRRNamespace).Update(context.TODO(), updated, metav1.UpdateOptions{FieldManager: fieldManager})
+			_, err = c.frrClient.ApiV1beta1().FRRConfigurations(config.ManagedBGP.FRRNamespace).Update(ctx, updated, metav1.UpdateOptions{FieldManager: fieldManager})
 			if err != nil {
 				return err
 			}
@@ -502,13 +502,13 @@ func (c *Controller) ensureBaseFRRConfiguration() error {
 // ensureManagedNetworkLabel sets managedNetworkLabel="" on the CUDN so that
 // the shared managed RA's ClusterUserDefinedNetworkSelector can match all managed CUDNs.
 // All managed CUDNs get the same label with empty value for unified selection.
-func (c *Controller) ensureManagedNetworkLabel(cudn *userdefinednetworkv1.ClusterUserDefinedNetwork) error {
+func (c *Controller) ensureManagedNetworkLabel(ctx context.Context, cudn *userdefinednetworkv1.ClusterUserDefinedNetwork) error {
 	if val, exists := cudn.Labels[managedNetworkLabel]; exists && val == "" {
 		return nil
 	}
 	patch := fmt.Sprintf(`{"metadata":{"labels":{%q:%q}}}`, managedNetworkLabel, "")
 	_, err := c.cudnClient.K8sV1().ClusterUserDefinedNetworks().Patch(
-		context.TODO(), cudn.Name, k8stypes.MergePatchType, []byte(patch), metav1.PatchOptions{FieldManager: fieldManager})
+		ctx, cudn.Name, k8stypes.MergePatchType, []byte(patch), metav1.PatchOptions{FieldManager: fieldManager})
 	if err != nil {
 		return fmt.Errorf("failed to set %s label on CUDN %s: %w", managedNetworkLabel, cudn.Name, err)
 	}
@@ -516,7 +516,7 @@ func (c *Controller) ensureManagedNetworkLabel(cudn *userdefinednetworkv1.Cluste
 	return nil
 }
 
-func (c *Controller) ensureManagedRouteAdvertisement(isCDN bool) error {
+func (c *Controller) ensureManagedRouteAdvertisement(ctx context.Context, isCDN bool) error {
 	var raName string
 	var netSelector apitypes.NetworkSelectors
 	var networkType string
@@ -567,7 +567,7 @@ func (c *Controller) ensureManagedRouteAdvertisement(isCDN bool) error {
 		}
 		klog.Infof("Creating managed RouteAdvertisement %s for %s", raName, networkType)
 		_, err = c.raClient.K8sV1().RouteAdvertisements().Create(
-			context.TODO(), ra, metav1.CreateOptions{FieldManager: fieldManager})
+			ctx, ra, metav1.CreateOptions{FieldManager: fieldManager})
 		if err != nil {
 			return err
 		}
@@ -580,14 +580,14 @@ func (c *Controller) ensureManagedRouteAdvertisement(isCDN bool) error {
 		updated := existing.DeepCopy()
 		updated.Spec = ra.Spec
 		_, err = c.raClient.K8sV1().RouteAdvertisements().Update(
-			context.TODO(), updated, metav1.UpdateOptions{FieldManager: fieldManager})
+			ctx, updated, metav1.UpdateOptions{FieldManager: fieldManager})
 		return err
 	}
 
 	return nil
 }
 
-func (c *Controller) deleteManagedRA(isCDN bool) error {
+func (c *Controller) deleteManagedRA(ctx context.Context, isCDN bool) error {
 	var raName, networkType string
 	if isCDN {
 		raName = managedRAName(types.DefaultNetworkName)
@@ -598,7 +598,7 @@ func (c *Controller) deleteManagedRA(isCDN bool) error {
 	}
 
 	klog.Infof("Deleting managed RouteAdvertisement %s for %s", raName, networkType)
-	err := c.raClient.K8sV1().RouteAdvertisements().Delete(context.TODO(), raName, metav1.DeleteOptions{})
+	err := c.raClient.K8sV1().RouteAdvertisements().Delete(ctx, raName, metav1.DeleteOptions{})
 	if err != nil && !apierrors.IsNotFound(err) {
 		return fmt.Errorf("failed to delete managed RouteAdvertisement %s for %s: %w", raName, networkType, err)
 	}
@@ -606,10 +606,10 @@ func (c *Controller) deleteManagedRA(isCDN bool) error {
 }
 
 // cleanupBaseFRRConfigurations deletes the managed base FRRConfiguration.
-func (c *Controller) cleanupBaseFRRConfigurations() error {
+func (c *Controller) cleanupBaseFRRConfigurations(ctx context.Context) error {
 	klog.Infof("Deleting managed base FRRConfiguration %s", managedNamePrefix)
 	if err := c.frrClient.ApiV1beta1().FRRConfigurations(config.ManagedBGP.FRRNamespace).Delete(
-		context.TODO(), managedNamePrefix, metav1.DeleteOptions{},
+		ctx, managedNamePrefix, metav1.DeleteOptions{},
 	); err != nil && !apierrors.IsNotFound(err) {
 		return fmt.Errorf("failed to delete base FRRConfiguration %s: %w", managedNamePrefix, err)
 	}

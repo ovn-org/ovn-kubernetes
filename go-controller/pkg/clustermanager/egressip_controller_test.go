@@ -1606,7 +1606,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 					objType: factory.EgressNodeType,
 					eIPC:    fakeClusterManagerOVN.eIPC,
 				}
-				err = handler.UpdateResource(brokenNode, brokenNode, true)
+				err = handler.UpdateResource(context.Background(), brokenNode, brokenNode, true)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				gomega.Eventually(func() string {
