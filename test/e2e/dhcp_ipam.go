@@ -136,7 +136,7 @@ ethernets:
 		})
 
 		AfterAll(func() {
-			Expect(removeImagesFromNodes(fr.ClientSet, kubevirt.FedoraWithTestToolingContainerDiskImage)).To(Succeed())
+			Expect(removeImagesFromNodes(fr.ClientSet, images.FedoraKubevirtContainerDisk())).To(Succeed())
 		})
 
 		// startVM boots a fedora VM attached to the DHCP CUDN. The role label
