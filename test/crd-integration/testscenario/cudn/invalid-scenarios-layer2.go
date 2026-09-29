@@ -345,6 +345,7 @@ var Layer2UDNInvalid = []testscenario.ValidateCRScenario{
 apiVersion: k8s.ovn.org/v1
 kind: UserDefinedNetwork
 metadata:
+  namespace: default
   name: default-gateway-secondary-fail
 spec:
   topology: Layer2
@@ -361,6 +362,7 @@ spec:
 apiVersion: k8s.ovn.org/v1
 kind: UserDefinedNetwork
 metadata:
+  namespace: default
   name: default-gateway-outside-subnet-fail
 spec:
   topology: Layer2
@@ -377,6 +379,7 @@ spec:
 apiVersion: k8s.ovn.org/v1
 kind: UserDefinedNetwork
 metadata:
+  namespace: default
   name: default-gateway-outside-infra-fail
 spec:
   topology: Layer2
@@ -394,6 +397,7 @@ spec:
 apiVersion: k8s.ovn.org/v1
 kind: UserDefinedNetwork
 metadata:
+  namespace: default
   name: reserved-subnets-no-subnets-fail
 spec:
   topology: Layer2
@@ -411,6 +415,7 @@ spec:
 apiVersion: k8s.ovn.org/v1
 kind: UserDefinedNetwork
 metadata:
+  namespace: default
   name: infra-subnets-no-subnets-fail
 spec:
   topology: Layer2
@@ -428,6 +433,7 @@ spec:
 apiVersion: k8s.ovn.org/v1
 kind: UserDefinedNetwork
 metadata:
+  namespace: default
   name: mac-security-disabled-layer2-primary-fail
 spec:
   topology: Layer2
@@ -444,6 +450,7 @@ spec:
 apiVersion: k8s.ovn.org/v1
 kind: UserDefinedNetwork
 metadata:
+  namespace: default
   name: mac-security-layer2-ipam-enabled-fail
 spec:
   topology: Layer2
@@ -465,6 +472,7 @@ var Layer2UDNUpdatesRejected = []testscenario.UpdateCRScenario{
 apiVersion: k8s.ovn.org/v1
 kind: UserDefinedNetwork
 metadata:
+  namespace: default
   name: mac-security-layer2-update-immutable-disable-to-enable
 spec:
   topology: Layer2
@@ -478,6 +486,7 @@ spec:
 apiVersion: k8s.ovn.org/v1
 kind: UserDefinedNetwork
 metadata:
+  namespace: default
   name: mac-security-layer2-update-immutable-disable-to-enable
 spec:
   topology: Layer2
@@ -495,6 +504,7 @@ spec:
 apiVersion: k8s.ovn.org/v1
 kind: UserDefinedNetwork
 metadata:
+  namespace: default
   name: mac-security-layer2-update-immutable-enable-to-disable
 spec:
   topology: Layer2
@@ -507,6 +517,7 @@ spec:
 apiVersion: k8s.ovn.org/v1
 kind: UserDefinedNetwork
 metadata:
+  namespace: default
   name: mac-security-layer2-update-immutable-enable-to-disable
 spec:
   topology: Layer2

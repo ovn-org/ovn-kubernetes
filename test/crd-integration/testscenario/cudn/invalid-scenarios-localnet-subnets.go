@@ -63,7 +63,7 @@ spec:
 	},
 	{
 		Description: "subnets is empty",
-		ExpectedErr: `The ClusterUserDefinedNetwork "localnet-empty-subnets-fail" is invalid: spec.network.localnet.subnets: Invalid value: 0: spec.network.localnet.subnets in body should have at least 1 items`,
+		ExpectedErr: `ClusterUserDefinedNetwork.k8s.ovn.org "localnet-empty-subnets-fail" is invalid: spec.network.localnet.subnets: Invalid value: 0: spec.network.localnet.subnets in body should have at least 1 items`,
 		Manifest: `
 apiVersion: k8s.ovn.org/v1
 kind: ClusterUserDefinedNetwork
@@ -138,7 +138,7 @@ spec:
 	},
 	{
 		Description: "invalid subnets - invalid IPv4 CIDR",
-		ExpectedErr: `The ClusterUserDefinedNetwork "localnet-subnets-invalid-ipv4-cidr-fail" is invalid: spec.network.localnet.subnets[0]: Invalid value: "300.0.0.0/24": CIDR is invalid`,
+		ExpectedErr: `ClusterUserDefinedNetwork.k8s.ovn.org "localnet-subnets-invalid-ipv4-cidr-fail" is invalid: spec.network.localnet.subnets[0]: Invalid value: "300.0.0.0/24": CIDR is invalid`,
 		Manifest: `
 apiVersion: k8s.ovn.org/v1
 kind: ClusterUserDefinedNetwork
@@ -155,7 +155,7 @@ spec:
 	},
 	{
 		Description: "invalid subnets - invalid IPv6 CIDR",
-		ExpectedErr: `The ClusterUserDefinedNetwork "localnet-subnets-invalid-ipv6-cidr-fail" is invalid: spec.network.localnet.subnets[0]: Invalid value: "2014:100:200::0/300": CIDR is invalid`,
+		ExpectedErr: `ClusterUserDefinedNetwork.k8s.ovn.org "localnet-subnets-invalid-ipv6-cidr-fail" is invalid: spec.network.localnet.subnets[0]: Invalid value: "2014:100:200::0/300": CIDR is invalid`,
 		Manifest: `
 apiVersion: k8s.ovn.org/v1
 kind: ClusterUserDefinedNetwork
@@ -172,7 +172,7 @@ spec:
 	},
 	{
 		Description: "invalid subnets - two IPv4 CIDRs",
-		ExpectedErr: `The ClusterUserDefinedNetwork "localnet-subnets-multiple-ipv4-cidrs-fail" is invalid: spec.network.localnet.subnets: Invalid value: When 2 CIDRs are set, they must be from different IP families`,
+		ExpectedErr: `ClusterUserDefinedNetwork.k8s.ovn.org "localnet-subnets-multiple-ipv4-cidrs-fail" is invalid: spec.network.localnet.subnets: Invalid value: When 2 CIDRs are set, they must be from different IP families`,
 		Manifest: `
 apiVersion: k8s.ovn.org/v1
 kind: ClusterUserDefinedNetwork
@@ -190,7 +190,7 @@ spec:
 	},
 	{
 		Description: "invalid subnets - two IPv6 CIDRs",
-		ExpectedErr: `The ClusterUserDefinedNetwork "localnet-subnets-multiple-ipv6-cidrs-fail" is invalid: spec.network.localnet.subnets: Invalid value: When 2 CIDRs are set, they must be from different IP families`,
+		ExpectedErr: `ClusterUserDefinedNetwork.k8s.ovn.org "localnet-subnets-multiple-ipv6-cidrs-fail" is invalid: spec.network.localnet.subnets: Invalid value: When 2 CIDRs are set, they must be from different IP families`,
 		Manifest: `
 apiVersion: k8s.ovn.org/v1
 kind: ClusterUserDefinedNetwork
@@ -208,7 +208,7 @@ spec:
 	},
 	{
 		Description: "invalid excludeSubnets - empty slice",
-		ExpectedErr: `The ClusterUserDefinedNetwork "localnet-excludesubnet-empty-slice-fail" is invalid: spec.network.localnet.excludeSubnets: Invalid value: 0: spec.network.localnet.excludeSubnets in body should have at least 1 items`,
+		ExpectedErr: `ClusterUserDefinedNetwork.k8s.ovn.org "localnet-excludesubnet-empty-slice-fail" is invalid: spec.network.localnet.excludeSubnets: Invalid value: 0: spec.network.localnet.excludeSubnets in body should have at least 1 items`,
 		Manifest: `
 apiVersion: k8s.ovn.org/v1
 kind: ClusterUserDefinedNetwork
@@ -226,7 +226,7 @@ spec:
 	},
 	{
 		Description: "invalid excludeSubnets - invalid IPv4 CIDR",
-		ExpectedErr: `The ClusterUserDefinedNetwork "localnet-excludesubnet-invalid-ipv4-cidr-fail" is invalid: spec.network.localnet.excludeSubnets[0]: Invalid value: "10.0.0.0/300": CIDR is invalid`,
+		ExpectedErr: `ClusterUserDefinedNetwork.k8s.ovn.org "localnet-excludesubnet-invalid-ipv4-cidr-fail" is invalid: spec.network.localnet.excludeSubnets[0]: Invalid value: "10.0.0.0/300": CIDR is invalid`,
 		Manifest: `
 apiVersion: k8s.ovn.org/v1
 kind: ClusterUserDefinedNetwork
@@ -245,7 +245,7 @@ spec:
 	},
 	{
 		Description: "invalid excludeSubnets - invalid IPv6 CIDR",
-		ExpectedErr: `The ClusterUserDefinedNetwork "localnet-excludesubnet-invalid-ipv6-cidr-fail" is invalid: spec.network.localnet.excludeSubnets[0]: Invalid value: "2014:100:200::0/300": CIDR is invalid`,
+		ExpectedErr: `ClusterUserDefinedNetwork.k8s.ovn.org "localnet-excludesubnet-invalid-ipv6-cidr-fail" is invalid: spec.network.localnet.excludeSubnets[0]: Invalid value: "2014:100:200::0/300": CIDR is invalid`,
 		Manifest: `
 apiVersion: k8s.ovn.org/v1
 kind: ClusterUserDefinedNetwork

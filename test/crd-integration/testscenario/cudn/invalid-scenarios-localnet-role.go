@@ -26,7 +26,6 @@ spec:
 		Description: "role is primary",
 		ExpectedErr: `spec.network.localnet.role: Unsupported value: "Primary": supported values: "Secondary"`,
 		Manifest: `
----
 apiVersion: k8s.ovn.org/v1
 kind: ClusterUserDefinedNetwork
 metadata:
