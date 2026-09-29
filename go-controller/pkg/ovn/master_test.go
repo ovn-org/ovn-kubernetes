@@ -1381,6 +1381,59 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	})
 
+	ginkgo.It("reconciles options:gateway_mtu on the cluster router port when gateway MTU support changes", func() {
+		app.Action = func(ctx *cli.Context) error {
+			_, err := config.InitConfig(ctx, nil, nil)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			startFakeController(oc, wg)
+
+			clusterRouterPortOptions := func() (map[string]string, error) {
+				lrp, err := libovsdbops.GetLogicalRouterPort(nbClient,
+					&nbdb.LogicalRouterPort{Name: types.RouterToSwitchPrefix + node1.Name})
+				if err != nil {
+					return nil, err
+				}
+				return lrp.Options, nil
+			}
+
+			ginkgo.By("setting options:gateway_mtu while the node reports gateway MTU support")
+			gomega.Eventually(clusterRouterPortOptions, 10).
+				Should(gomega.HaveKeyWithValue(libovsdbops.GatewayMTU, strconv.Itoa(config.Default.MTU)))
+
+			ginkgo.By("annotating the node as not supporting gateway MTU")
+			localNode, err := kubeFakeClient.CoreV1().Nodes().Get(context.TODO(), node1.Name, metav1.GetOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			localNode.Annotations[util.OvnNodeGatewayMtuSupport] = "false"
+			_, err = kubeFakeClient.CoreV1().Nodes().Update(context.TODO(), localNode, metav1.UpdateOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			ginkgo.By("removing options:gateway_mtu from the cluster router port")
+			gomega.Eventually(clusterRouterPortOptions, 10).ShouldNot(gomega.HaveKey(libovsdbops.GatewayMTU))
+
+			ginkgo.By("annotating the node as supporting gateway MTU again")
+			localNode, err = kubeFakeClient.CoreV1().Nodes().Get(context.TODO(), node1.Name, metav1.GetOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			localNode.Annotations[util.OvnNodeGatewayMtuSupport] = "true"
+			_, err = kubeFakeClient.CoreV1().Nodes().Update(context.TODO(), localNode, metav1.UpdateOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			ginkgo.By("restoring options:gateway_mtu on the cluster router port")
+			gomega.Eventually(clusterRouterPortOptions, 10).
+				Should(gomega.HaveKeyWithValue(libovsdbops.GatewayMTU, strconv.Itoa(config.Default.MTU)))
+
+			return nil
+		}
+
+		err := app.Run([]string{
+			app.Name,
+			"-cluster-subnets=" + clusterCIDR,
+			"--init-gateways",
+			"--nodeport",
+		})
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	})
+
 	ginkgo.It("reconciles node host subnets after single-stack to dual-stack upgrade", func() {
 		app.Action = func(ctx *cli.Context) error {
 			_, err := config.InitConfig(ctx, nil, nil)

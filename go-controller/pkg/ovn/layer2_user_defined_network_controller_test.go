@@ -543,6 +543,72 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 2 network", func() {
 		Expect(app.Run([]string{app.Name})).To(Succeed())
 	})
 
+	It("primary layer 2 UDN: reconciles options:gateway_mtu on the transit router port when gateway MTU support changes", func() {
+		config.OVNKubernetesFeature.EnableMultiNetwork = true
+		setupConfig(dummyLayer2PrimaryUserDefinedNetwork("192.168.0.0/16"), testConfiguration{}, config.GatewayModeShared)
+		app.Action = func(*cli.Context) error {
+			netInfo := dummyLayer2PrimaryUserDefinedNetwork("192.168.0.0/16")
+			netConf := netInfo.netconf()
+
+			nad, err := newNetworkAttachmentDefinition(ns, nadName, *netConf)
+			Expect(err).NotTo(HaveOccurred())
+
+			const nodeIPv4CIDR = "192.168.126.202/24"
+			testNode, err := newNodeWithUserDefinedNetworks(nodeName, nodeIPv4CIDR, netInfo)
+			Expect(err).NotTo(HaveOccurred())
+			initialDB.NBData = append(initialDB.NBData, &nbdb.NBGlobal{Name: nodeName, UUID: nodeName})
+
+			fakeOvn.startWithDBSetup(
+				initialDB,
+				&corev1.NamespaceList{Items: []corev1.Namespace{*newUDNNamespace(ns)}},
+				&corev1.NodeList{Items: []corev1.Node{*testNode}},
+				&corev1.PodList{Items: []corev1.Pod{}},
+				&nadapi.NetworkAttachmentDefinitionList{Items: []nadapi.NetworkAttachmentDefinition{*nad}},
+			)
+
+			Expect(fakeOvn.networkManager.Start()).To(Succeed())
+			defer fakeOvn.networkManager.Stop()
+
+			l2Controller, ok := fakeOvn.fullL2UDNControllers[userDefinedNetworkName]
+			Expect(ok).To(BeTrue())
+			Expect(l2Controller.init()).To(Succeed())
+			udnNetController, ok := fakeOvn.userDefinedNetworkControllers[userDefinedNetworkName]
+			Expect(ok).To(BeTrue())
+			udnNetController.bnc.ovnClusterLRPToJoinIfAddrs = dummyJoinIPs()
+			Expect(l2Controller.RegisterNodeHandler()).To(Succeed())
+			Expect(l2Controller.WatchNamespaces()).To(Succeed())
+			Expect(l2Controller.WatchPods()).To(Succeed())
+
+			lrpName := l2Controller.GetNetworkScopedRouterToSwitchPortName(nodeName)
+			transitRouterPortOptions := func() (map[string]string, error) {
+				lrp, err := libovsdbops.GetLogicalRouterPort(fakeOvn.nbClient,
+					&nbdb.LogicalRouterPort{Name: lrpName})
+				if err != nil {
+					return nil, err
+				}
+				return lrp.Options, nil
+			}
+
+			By("setting options:gateway_mtu while the node reports gateway MTU support")
+			Eventually(transitRouterPortOptions).WithTimeout(10 * time.Second).
+				Should(HaveKeyWithValue(libovsdbops.GatewayMTU, fmt.Sprintf("%d", config.Default.MTU)))
+
+			By("annotating the node as not supporting gateway MTU")
+			testNode, err = fakeOvn.fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			testNode.Annotations[util.OvnNodeGatewayMtuSupport] = "false"
+			_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Nodes().Update(context.TODO(), testNode, metav1.UpdateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+
+			By("removing options:gateway_mtu from the transit router port")
+			Eventually(transitRouterPortOptions).WithTimeout(10 * time.Second).
+				ShouldNot(HaveKey(libovsdbops.GatewayMTU))
+
+			return nil
+		}
+		Expect(app.Run([]string{app.Name})).To(Succeed())
+	})
+
 	It("primary layer 2 UDN: address sets are recreated after controller network recreation", func() {
 		config.OVNKubernetesFeature.EnableMultiNetwork = true
 		setupConfig(dummyLayer2PrimaryUserDefinedNetwork("192.168.0.0/16"), testConfiguration{}, config.GatewayModeShared)
