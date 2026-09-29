@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-package e2e
+package crdintegration
 
 import (
 	. "github.com/onsi/ginkgo/v2"
@@ -9,12 +9,11 @@ import (
 
 	e2ekubectl "k8s.io/kubernetes/test/e2e/framework/kubectl"
 
-	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/feature"
-	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/testscenario"
-	testscenariocudn "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/testscenario/cudn"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/crd-integration/testscenario"
+	testscenariocudn "github.com/ovn-kubernetes/ovn-kubernetes/test/crd-integration/testscenario/cudn"
 )
 
-var _ = Describe("Network Segmentation: API validations", feature.NetworkSegmentation, func() {
+var _ = Describe("Network Segmentation: API validations", func() {
 	DescribeTable("api-server should reject invalid CRs",
 		func(scenarios []testscenario.ValidateCRScenario) {
 			DeferCleanup(func() {
