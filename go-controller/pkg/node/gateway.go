@@ -69,6 +69,54 @@ type gateway struct {
 	wg           *sync.WaitGroup
 
 	nextHops []net.IP
+
+	// udnAddrReconcilers holds per-network callbacks invoked when the node's
+	// addresses change, so each UDN gateway can refresh its address-derived VRF
+	// routes. The addressManager has no per-handler removal, so a single fan-out
+	// handler is registered once (udnAddrHandlerOnce) and entries are added on UDN
+	// gateway start and removed on stop to avoid leaking handlers across UDN churn.
+	udnAddrReconcilersMu sync.Mutex
+	udnAddrReconcilers   map[string]func()
+	udnAddrHandlerOnce   sync.Once
+}
+
+// registerUDNAddressChangeReconciler arranges for reconcile to be invoked
+// whenever the node's addresses change, keyed by networkName so it can later be
+// removed. It is a no-op when no address manager is available (e.g. DPU mode).
+func (g *gateway) registerUDNAddressChangeReconciler(networkName string, reconcile func()) {
+	if g.nodeIPManager == nil {
+		return
+	}
+	g.udnAddrHandlerOnce.Do(func() {
+		g.nodeIPManager.AddOnAddressesChangedHandler(g.notifyUDNAddressChange)
+	})
+	g.udnAddrReconcilersMu.Lock()
+	defer g.udnAddrReconcilersMu.Unlock()
+	if g.udnAddrReconcilers == nil {
+		g.udnAddrReconcilers = make(map[string]func())
+	}
+	g.udnAddrReconcilers[networkName] = reconcile
+}
+
+// unregisterUDNAddressChangeReconciler stops invoking the callback registered
+// for networkName on address changes. It is safe to call for a network that was
+// never registered.
+func (g *gateway) unregisterUDNAddressChangeReconciler(networkName string) {
+	g.udnAddrReconcilersMu.Lock()
+	defer g.udnAddrReconcilersMu.Unlock()
+	delete(g.udnAddrReconcilers, networkName)
+}
+
+func (g *gateway) notifyUDNAddressChange() {
+	g.udnAddrReconcilersMu.Lock()
+	reconcilers := make([]func(), 0, len(g.udnAddrReconcilers))
+	for _, reconcile := range g.udnAddrReconcilers {
+		reconcilers = append(reconcilers, reconcile)
+	}
+	g.udnAddrReconcilersMu.Unlock()
+	for _, reconcile := range reconcilers {
+		reconcile()
+	}
 }
 
 func (g *gateway) AddService(svc *corev1.Service) error {

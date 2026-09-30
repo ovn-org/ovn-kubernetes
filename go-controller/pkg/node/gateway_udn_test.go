@@ -1062,8 +1062,13 @@ func openflowManagerCheckPorts(ofMgr *openflowManager) {
 	Expect(checkPorts(ofMgr.ovsClient, netConfigs, uplink, ofPortPhys)).To(Succeed())
 }
 
-func getDummyOpenflowManager() *openflowManager {
+// getDummyOpenflowManager creates a test openflow manager. Optional bridgeIPs
+// can be passed to configure gateway bridge IPs for node network route tests.
+func getDummyOpenflowManager(bridgeIPs ...*net.IPNet) *openflowManager {
 	gwBridge := bridgeconfig.TestBridgeConfig("breth0")
+	if len(bridgeIPs) > 0 {
+		gwBridge.SetIPs(bridgeIPs)
+	}
 	ofm := &openflowManager{
 		defaultBridge: newOpenflowBridge(gwBridge),
 		uplinkBridges: map[string]*openflowBridge{},
@@ -3011,6 +3016,311 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(*routes[1].Dst).To(Not(Equal(*ovntest.MustParseIPNet("0.0.0.0/0"))))
 			Expect(routes[1].Gw.Equal(ovntest.MustParseIP(config.Gateway.NextHop))).To(BeFalse())
+			return nil
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
+	})
+
+	// Verifies that node network connected subnet routes (e.g. 192.168.1.0/24 dev br-ex scope link src 192.168.1.10)
+	// are programmed in the VRF table when gateway bridge IPs are configured. These routes enable direct L2 forwarding
+	// to other nodes on the same subnet without routing through the default gateway.
+	ovntest.OnSupportedPlatformsIt("should add node network connected subnet routes to VRF table", func() {
+		config.Gateway.Interface = "eth0"
+		config.IPv4Mode = true
+		config.IPv6Mode = true
+		node := &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: nodeName,
+				Annotations: map[string]string{
+					"k8s.ovn.org/node-subnets": fmt.Sprintf("{\"%s\":[\"%s\", \"%s\"]}", netName, v4NodeSubnet, v6NodeSubnet),
+				},
+			},
+		}
+		nad := ovntest.GenerateNAD(netName, "rednad", "greenamespace",
+			types.Layer3Topology, "100.128.0.0/16/24,ae70::/60/64", types.NetworkRolePrimary)
+		ovntest.AnnotateNADWithNetworkID(netID, nad)
+		netInfo, err := util.ParseNADInfo(nad)
+		Expect(err).NotTo(HaveOccurred())
+		err = testNS.Do(func(ns.NetNS) error {
+			defer GinkgoRecover()
+			ofm := getDummyOpenflowManager(ovntest.MustParseIPNets(v4NodeIP, v6NodeIP)...)
+			udnGateway, err := NewUserDefinedNetworkGateway(netInfo, node, emptyNodeInformer(), nil, vrf, nil, &gateway{openflowManager: ofm}, nil, nil, nil)
+			Expect(err).NotTo(HaveOccurred())
+			mplink, err := netlink.LinkByName(mgtPort)
+			Expect(err).NotTo(HaveOccurred())
+			bridgelink, err := netlink.LinkByName("breth0")
+			Expect(err).NotTo(HaveOccurred())
+			vrfTableId := util.CalculateRouteTableID(mplink.Attrs().Index)
+			udnGateway.vrfTableId = vrfTableId
+			// For non-uplink networks the node subnet routes are derived from the
+			// shared gateway bridge; addNetworkWithResolvedUplink wires this up at
+			// runtime, so set it explicitly here.
+			udnGateway.nodeSubnetBridge = ofm.defaultBridge.BridgeConfiguration
+
+			routes := udnGateway.computeNodeSubnetRoutes()
+
+			// Verify node network connected subnet routes are present for both IPv4 and IPv6.
+			// Match by scope and destination to stay resilient to route ordering changes.
+			var v4Found, v6Found bool
+			for _, route := range routes {
+				if route.Scope == netlink.SCOPE_LINK && route.Dst != nil {
+					if route.Dst.String() == "192.168.1.0/24" {
+						Expect(route.LinkIndex).To(Equal(bridgelink.Attrs().Index))
+						Expect(route.Src.Equal(ovntest.MustParseIP("192.168.1.10"))).To(BeTrue())
+						Expect(route.Table).To(Equal(vrfTableId))
+						v4Found = true
+					}
+					if route.Dst.String() == "fc00:f853:ccd:e793::/64" {
+						Expect(route.LinkIndex).To(Equal(bridgelink.Attrs().Index))
+						Expect(route.Src.Equal(ovntest.MustParseIP("fc00:f853:ccd:e793::3"))).To(BeTrue())
+						Expect(route.Table).To(Equal(vrfTableId))
+						v6Found = true
+					}
+				}
+			}
+			Expect(v4Found).To(BeTrue(), "IPv4 node network connected subnet route not found")
+			Expect(v6Found).To(BeTrue(), "IPv6 node network connected subnet route not found")
+			return nil
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
+	})
+
+	ovntest.OnSupportedPlatformsIt("should filter node subnet routes by IP family and tolerate nil bridge IPs", func() {
+		config.Gateway.Interface = "eth0"
+		node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName, Annotations: map[string]string{
+			"k8s.ovn.org/node-subnets": fmt.Sprintf("{\"%s\":[\"%s\", \"%s\"]}", netName, v4NodeSubnet, v6NodeSubnet),
+		}}}
+		for _, tc := range []struct {
+			ipv4, ipv6     bool
+			cidr           string
+			wantV4, wantV6 bool
+			injectNil      bool
+			desc           string
+		}{
+			{true, false, "100.128.0.0/16/24", true, false, false, "IPv4-only"},
+			{false, true, "ae70::/60/64", false, true, false, "IPv6-only"},
+			{true, true, "100.128.0.0/16/24,ae70::/60/64", true, true, true, "nil bridge IP tolerance"},
+		} {
+			config.IPv4Mode = tc.ipv4
+			config.IPv6Mode = tc.ipv6
+			nad := ovntest.GenerateNAD(netName, "rednad", "greenamespace",
+				types.Layer3Topology, tc.cidr, types.NetworkRolePrimary)
+			ovntest.AnnotateNADWithNetworkID(netID, nad)
+			netInfo, err := util.ParseNADInfo(nad)
+			Expect(err).NotTo(HaveOccurred())
+			err = testNS.Do(func(ns.NetNS) error {
+				defer GinkgoRecover()
+				ips := ovntest.MustParseIPNets(v4NodeIP, v6NodeIP)
+				if tc.injectNil {
+					ips = append(ips, nil)
+				}
+				ofm := getDummyOpenflowManager(ips...)
+				gw, err := NewUserDefinedNetworkGateway(netInfo, node, emptyNodeInformer(), nil, vrf, nil, &gateway{openflowManager: ofm}, nil, nil, nil)
+				Expect(err).NotTo(HaveOccurred())
+				mp, err := netlink.LinkByName(mgtPort)
+				Expect(err).NotTo(HaveOccurred())
+				gw.vrfTableId = util.CalculateRouteTableID(mp.Attrs().Index)
+				gw.nodeSubnetBridge = ofm.defaultBridge.BridgeConfiguration
+				routes := gw.computeNodeSubnetRoutes()
+				var v4, v6 bool
+				for _, r := range routes {
+					if r.Scope == netlink.SCOPE_LINK && r.Dst != nil {
+						switch r.Dst.String() {
+						case "192.168.1.0/24":
+							v4 = true
+						case "fc00:f853:ccd:e793::/64":
+							v6 = true
+						}
+					}
+				}
+				Expect(v4).To(Equal(tc.wantV4), tc.desc+": IPv4 scope-link route")
+				Expect(v6).To(Equal(tc.wantV6), tc.desc+": IPv6 scope-link route")
+				return nil
+			})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
+		}
+	})
+
+	// Verifies node subnet routes are recomputed from the gateway bridge's
+	// current IPs rather than a construction-time snapshot, so a runtime
+	// address change on the bridge is reflected in the routes.
+	ovntest.OnSupportedPlatformsIt("should recompute node subnet routes when gateway bridge IPs change", func() {
+		config.Gateway.Interface = "eth0"
+		config.IPv4Mode = true
+		config.IPv6Mode = false
+		node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName, Annotations: map[string]string{
+			"k8s.ovn.org/node-subnets": fmt.Sprintf("{\"%s\":[\"%s\"]}", netName, v4NodeSubnet),
+		}}}
+		nad := ovntest.GenerateNAD(netName, "rednad", "greenamespace",
+			types.Layer3Topology, "100.128.0.0/16/24", types.NetworkRolePrimary)
+		ovntest.AnnotateNADWithNetworkID(netID, nad)
+		netInfo, err := util.ParseNADInfo(nad)
+		Expect(err).NotTo(HaveOccurred())
+		err = testNS.Do(func(ns.NetNS) error {
+			defer GinkgoRecover()
+			ofm := getDummyOpenflowManager(ovntest.MustParseIPNets(v4NodeIP)...)
+			udnGateway, err := NewUserDefinedNetworkGateway(netInfo, node, emptyNodeInformer(), nil, vrf, nil, &gateway{openflowManager: ofm}, nil, nil, nil)
+			Expect(err).NotTo(HaveOccurred())
+			mplink, err := netlink.LinkByName(mgtPort)
+			Expect(err).NotTo(HaveOccurred())
+			udnGateway.vrfTableId = util.CalculateRouteTableID(mplink.Attrs().Index)
+			udnGateway.nodeSubnetBridge = ofm.defaultBridge.BridgeConfiguration
+
+			routes := udnGateway.computeNodeSubnetRoutes()
+			Expect(routes).To(HaveLen(1))
+			Expect(routes[0].Dst.String()).To(Equal("192.168.1.0/24"))
+			Expect(routes[0].Src.Equal(ovntest.MustParseIP("192.168.1.10"))).To(BeTrue())
+
+			// Simulate a runtime address change on the gateway bridge, as the
+			// addressManager would apply via UpdateInterfaceIPAddresses.
+			ofm.defaultBridge.SetIPs(ovntest.MustParseIPNets("192.168.5.20/24"))
+
+			routes = udnGateway.computeNodeSubnetRoutes()
+			Expect(routes).To(HaveLen(1))
+			Expect(routes[0].Dst.String()).To(Equal("192.168.5.0/24"))
+			Expect(routes[0].Src.Equal(ovntest.MustParseIP("192.168.5.20"))).To(BeTrue())
+			return nil
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
+	})
+
+	// Verifies runtime route replacement end to end through
+	// reconcileNodeSubnetRoutes: the initial route is programmed into the VRF
+	// table, and after a gateway bridge address change the stale route is
+	// removed from the table and the new one is installed.
+	ovntest.OnSupportedPlatformsIt("should replace stale node subnet routes in the VRF when gateway bridge IPs change", func() {
+		config.Gateway.Interface = "eth0"
+		config.IPv4Mode = true
+		config.IPv6Mode = false
+		node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName, Annotations: map[string]string{
+			"k8s.ovn.org/node-subnets": fmt.Sprintf("{\"%s\":[\"%s\"]}", netName, v4NodeSubnet),
+		}}}
+		nad := ovntest.GenerateNAD(netName, "rednad", "greenamespace",
+			types.Layer3Topology, "100.128.0.0/16/24", types.NetworkRolePrimary)
+		ovntest.AnnotateNADWithNetworkID(netID, nad)
+		netInfo, err := util.ParseNADInfo(nad)
+		Expect(err).NotTo(HaveOccurred())
+		err = testNS.Do(func(ns.NetNS) error {
+			defer GinkgoRecover()
+			ofm := getDummyOpenflowManager(ovntest.MustParseIPNets(v4NodeIP)...)
+			udnGateway, err := NewUserDefinedNetworkGateway(netInfo, node, emptyNodeInformer(), nil, vrf, nil, &gateway{openflowManager: ofm}, nil, nil, nil)
+			Expect(err).NotTo(HaveOccurred())
+			mplink, err := netlink.LinkByName(mgtPort)
+			Expect(err).NotTo(HaveOccurred())
+			bridgelink, err := netlink.LinkByName("breth0")
+			Expect(err).NotTo(HaveOccurred())
+			vrfTableId := util.CalculateRouteTableID(mplink.Attrs().Index)
+			udnGateway.vrfTableId = vrfTableId
+			udnGateway.gwInterfaceIndex = bridgelink.Attrs().Index
+			udnGateway.nodeSubnetBridge = ofm.defaultBridge.BridgeConfiguration
+
+			vrfDeviceName := util.GetNetworkVRFName(udnGateway.NetInfo)
+			Expect(vrf.AddVRF(vrfDeviceName, mplink.Attrs().Name, uint32(vrfTableId), nil)).To(Succeed())
+
+			// vrfRouteDsts returns the destinations currently programmed in the VRF table.
+			vrfRouteDsts := func() []string {
+				kernelRoutes, lerr := netlink.RouteListFiltered(netlink.FAMILY_ALL,
+					&netlink.Route{Table: vrfTableId}, netlink.RT_FILTER_TABLE)
+				Expect(lerr).NotTo(HaveOccurred())
+				var dsts []string
+				for _, r := range kernelRoutes {
+					if r.Dst != nil {
+						dsts = append(dsts, r.Dst.String())
+					}
+				}
+				return dsts
+			}
+
+			// Program the initial route and confirm it lands in the VRF table.
+			Expect(udnGateway.reconcileNodeSubnetRoutes()).To(Succeed())
+			Expect(vrfRouteDsts()).To(ContainElement("192.168.1.0/24"))
+
+			// Simulate a runtime address change: assign the new address to the
+			// bridge link so the route's preferred source is valid, and update
+			// the cached bridge IPs as the addressManager would.
+			newAddr, err := netlink.ParseAddr("192.168.5.20/24")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(netlink.AddrAdd(bridgelink, newAddr)).To(Succeed())
+			ofm.defaultBridge.SetIPs(ovntest.MustParseIPNets("192.168.5.20/24"))
+
+			// Reconcile again: the stale route must be removed and the new one added.
+			Expect(udnGateway.reconcileNodeSubnetRoutes()).To(Succeed())
+			dsts := vrfRouteDsts()
+			Expect(dsts).To(ContainElement("192.168.5.0/24"))
+			Expect(dsts).NotTo(ContainElement("192.168.1.0/24"))
+
+			// Tracking must reflect only the new route.
+			Expect(udnGateway.nodeSubnetRoutes).To(HaveLen(1))
+			Expect(udnGateway.nodeSubnetRoutes[0].Dst.String()).To(Equal("192.168.5.0/24"))
+			return nil
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
+	})
+
+	// Verifies that a network bound to an Uplink does NOT get node subnet routes:
+	// its VRF already has the Uplink's connected prefix route enslaved by the
+	// kernel, so addNetworkWithResolvedUplink leaves nodeSubnetBridge nil. This
+	// asserts reconcileNodeSubnetRoutes is then a no-op that does not touch a
+	// pre-existing (kernel-owned) route already present in the VRF table.
+	ovntest.OnSupportedPlatformsIt("should not program node subnet routes for uplink-backed networks", func() {
+		config.Gateway.Interface = "eth0"
+		config.IPv4Mode = true
+		config.IPv6Mode = false
+		node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName, Annotations: map[string]string{
+			"k8s.ovn.org/node-subnets": fmt.Sprintf("{\"%s\":[\"%s\"]}", netName, v4NodeSubnet),
+		}}}
+		nad := ovntest.GenerateNAD(netName, "rednad", "greenamespace",
+			types.Layer3Topology, "100.128.0.0/16/24", types.NetworkRolePrimary)
+		ovntest.AnnotateNADWithNetworkID(netID, nad)
+		netInfo, err := util.ParseNADInfo(nad)
+		Expect(err).NotTo(HaveOccurred())
+		err = testNS.Do(func(ns.NetNS) error {
+			defer GinkgoRecover()
+			ofm := getDummyOpenflowManager(ovntest.MustParseIPNets(v4NodeIP)...)
+			udnGateway, err := NewUserDefinedNetworkGateway(netInfo, node, emptyNodeInformer(), nil, vrf, nil, &gateway{openflowManager: ofm}, nil, nil, nil)
+			Expect(err).NotTo(HaveOccurred())
+			mplink, err := netlink.LinkByName(mgtPort)
+			Expect(err).NotTo(HaveOccurred())
+			vrfTableId := util.CalculateRouteTableID(mplink.Attrs().Index)
+			udnGateway.vrfTableId = vrfTableId
+			// Uplink-backed networks leave nodeSubnetBridge nil (set by
+			// addNetworkWithResolvedUplink); computeNodeSubnetRoutes yields nothing.
+			udnGateway.nodeSubnetBridge = nil
+			Expect(udnGateway.computeNodeSubnetRoutes()).To(BeEmpty())
+
+			vrfDeviceName := util.GetNetworkVRFName(udnGateway.NetInfo)
+			Expect(vrf.AddVRF(vrfDeviceName, mplink.Attrs().Name, uint32(vrfTableId), nil)).To(Succeed())
+
+			// Seed a kernel-owned connected route in the VRF, as the Uplink feature
+			// does via bridge enslavement; reconcile must leave it untouched.
+			preExisting := &netlink.Route{
+				LinkIndex: mplink.Attrs().Index,
+				Dst:       ovntest.MustParseIPNet("10.10.0.0/24"),
+				Table:     vrfTableId,
+				Scope:     netlink.SCOPE_LINK,
+				Protocol:  unix.RTPROT_KERNEL,
+			}
+			Expect(netlink.RouteAdd(preExisting)).To(Succeed())
+
+			Expect(udnGateway.reconcileNodeSubnetRoutes()).To(Succeed())
+			Expect(udnGateway.nodeSubnetRoutes).To(BeEmpty())
+
+			kernelRoutes, lerr := netlink.RouteListFiltered(netlink.FAMILY_ALL,
+				&netlink.Route{Table: vrfTableId}, netlink.RT_FILTER_TABLE)
+			Expect(lerr).NotTo(HaveOccurred())
+			var found bool
+			for _, r := range kernelRoutes {
+				if r.Dst != nil && r.Dst.String() == "10.10.0.0/24" {
+					found = true
+					Expect(r.Protocol).To(Equal(netlink.RouteProtocol(unix.RTPROT_KERNEL)))
+				}
+			}
+			Expect(found).To(BeTrue(), "pre-existing kernel route must survive reconcile")
 			return nil
 		})
 		Expect(err).NotTo(HaveOccurred())
