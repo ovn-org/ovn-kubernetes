@@ -619,17 +619,19 @@ func (bnc *BaseNetworkController) getNewLocalPolicyPorts(np *networkPolicy,
 			// 2. the gotten LSP is scheduled for removal (stateful-sets).
 			portInfo, err := bnc.logicalPortCache.get(pod, nadKey)
 			if err != nil {
-				klog.Warningf("Failed to get get LSP for pod %s/%s NAD key %s for networkPolicy %s, err: %v",
+				// Expected while the pod handler has not created the LSP yet; the
+				// logical port cache hook requests an immediate retry once it does.
+				klog.V(5).Infof("LSP for pod %s/%s (NAD key %s) not yet in cache for networkPolicy %s: %v",
 					pod.Namespace, pod.Name, nadKey, np.name, err)
-				errs = append(errs, fmt.Errorf("unable to get port info for pod %s/%s NAD key %s", pod.Namespace, pod.Name, nadKey))
+				errs = append(errs, types.NewSuppressedError(fmt.Errorf("unable to get port info for pod %s/%s NAD key %s", pod.Namespace, pod.Name, nadKey)))
 				continue
 			}
 
 			// Add pod to errObjs if LSP is scheduled for deletion
 			if !portInfo.expires.IsZero() {
-				klog.Warningf("Stale LSP %s for network policy %s found in cache",
+				klog.V(5).Infof("Stale LSP %s for network policy %s found in cache",
 					portInfo.name, np.name)
-				errs = append(errs, fmt.Errorf("unable to get port info for pod %s/%s NAD key %s", pod.Namespace, pod.Name, nadKey))
+				errs = append(errs, types.NewSuppressedError(fmt.Errorf("unable to get port info for pod %s/%s NAD key %s", pod.Namespace, pod.Name, nadKey)))
 				continue
 			}
 

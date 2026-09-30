@@ -124,6 +124,46 @@ var _ = ginkgo.Describe("EgressIP node locality", func() {
 		gomega.Expect(isLocal).To(gomega.BeFalse())
 		gomega.Expect(loaded).To(gomega.BeFalse())
 	})
+
+	ginkgo.It("requests immediate retry only when an entry already exists in the retry cache", func() {
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-pod",
+				Namespace: "test-ns",
+			},
+			Spec: corev1.PodSpec{
+				NodeName: "node1",
+			},
+		}
+		key, err := retry.GetResourceKey(pod)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred(), "failed to get resource key for pod")
+
+		retryFramework := retry.NewRetryFramework(
+			"test/egressip",
+			make(chan struct{}),
+			&sync.WaitGroup{},
+			nil,
+			&retry.ResourceHandler{
+				ObjType: factory.EgressIPPodType,
+			},
+		)
+
+		controller := &EgressIPController{
+			retryEgressIPPods: retryFramework,
+		}
+
+		// When pod is not yet in the retry cache, requestEgressIPPodRetry should not inject an unconditional retry
+		controller.requestEgressIPPodRetry(pod, "logical port cache update")
+		_, loaded := retry.GetRetryObj(key, retryFramework)
+		gomega.Expect(loaded).To(gomega.BeFalse(), "expected pod not to be loaded in retry cache")
+
+		// When pod is in the retry cache (e.g. initial reconcile failed due to cache miss), backoff should be reset to zero
+		retry.InitRetryObjWithAdd(pod, key, retryFramework)
+		gomega.Expect(retry.GetBackoffFromRetryObj(key, retryFramework)).To(gomega.Equal(time.Second), "expected initial retry backoff to be 1 second")
+
+		controller.requestEgressIPPodRetry(pod, "logical port cache update")
+		gomega.Expect(retry.GetBackoffFromRetryObj(key, retryFramework)).To(gomega.BeZero(), "expected retry backoff to be reset to zero")
+	})
 })
 
 var _ = ginkgo.Describe("EgressIP network registration", func() {

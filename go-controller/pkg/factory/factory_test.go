@@ -670,7 +670,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		It("is called for each existing policy: LocalPodSelectorType", func() {
 			policies = append(policies, newPolicy("denyall", "default"))
 			pods = append(pods, newPod("pod1", "default"))
-			testExistingFilteredHandler(PodType, LocalPodSelectorType, "default", nil, 3)
+			testExistingFilteredHandler(PodType, LocalPodSelectorType, "default", nil, defaultHandlerPriority)
 		})
 
 		It("is called for each existing endpointSlice", func() {
@@ -697,13 +697,13 @@ var _ = Describe("Watch Factory Operations", func() {
 		It("is called for each existing egressIP: EgressIPPodType", func() {
 			egressIPs = append(egressIPs, newEgressIP("myEgressIP", "default"))
 			pods = append(pods, newPod("pod1", "default"))
-			testExistingFilteredHandler(PodType, EgressIPPodType, "default", nil, 1)
+			testExistingFilteredHandler(PodType, EgressIPPodType, "default", nil, defaultHandlerPriority)
 		})
 
 		It("is called for each existing egressIP: EgressIPNamespaceType", func() {
 			egressIPs = append(egressIPs, newEgressIP("myEgressIP", "default"))
 			pods = append(pods, newPod("pod1", "default"))
-			testExistingFilteredHandler(NamespaceType, EgressIPNamespaceType, "default", nil, 1)
+			testExistingFilteredHandler(NamespaceType, EgressIPNamespaceType, "default", nil, defaultHandlerPriority)
 		})
 
 		It("is called for each existing cloudPrivateIPConfig", func() {
@@ -1495,21 +1495,20 @@ var _ = Describe("Watch Factory Operations", func() {
 		wf.RemoveNamespaceHandler(h)
 	})
 
-	It("correctly orders add events across prioritized handlers sharing the same object type", func() {
-		type opTest struct {
-			mu        sync.Mutex
-			namespace *corev1.Namespace
-			added     int
-			updated   int
-			deleted   int
-		}
-		testNamespaces := make(map[string]*opTest)
+	It("delivers add/update/delete events to every handler sharing the same object type, independent of registration order", func() {
+		// NamespaceType and EgressIPNamespaceType no longer get distinct
+		// priorities (see GetHandlerPriority): EgressIPNamespaceType never
+		// reads state cached by the NamespaceType handler, so there is
+		// nothing to order between them. This test only verifies that both
+		// handlers still see every event exactly once, not their relative
+		// order.
+		testNamespaces := make(map[string]*corev1.Namespace)
 
 		for i := 0; i < 998; i++ {
 			name := fmt.Sprintf("mynamespace-%d", i)
 			namespace := newNamespace(name)
 			namespace.Status.Phase = ""
-			testNamespaces[name] = &opTest{namespace: namespace}
+			testNamespaces[name] = namespace
 			// Add all namespaces to the initial list
 			namespaces = append(namespaces, namespace)
 		}
@@ -1519,87 +1518,33 @@ var _ = Describe("Watch Factory Operations", func() {
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
 
-		nsh, c1 := addPriorityHandler(wf, NamespaceType, NamespaceType, cache.ResourceEventHandlerFuncs{
+		checkNamespaceFuncs := cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				defer GinkgoRecover()
 				namespace := obj.(*corev1.Namespace)
-				ot, ok := testNamespaces[namespace.Name]
+				_, ok := testNamespaces[namespace.Name]
 				Expect(ok).To(BeTrue())
-				ot.mu.Lock()
-				defer ot.mu.Unlock()
-				Expect(ot.added).To(Equal(0))
-				ot.added++
 				Expect(namespace.Status.Phase).To(BeEmpty())
 			},
 			UpdateFunc: func(_, new interface{}) {
 				defer GinkgoRecover()
 				newNamespace := new.(*corev1.Namespace)
-				ot, ok := testNamespaces[newNamespace.Name]
+				_, ok := testNamespaces[newNamespace.Name]
 				Expect(ok).To(BeTrue())
-				// Expect updates to be processed after Add
-				ot.mu.Lock()
-				defer ot.mu.Unlock()
-				Expect(ot.added).To(Equal(10), "update for EIP namespace %s processed before add was processed in all handlers!", newNamespace.Name)
-				Expect(ot.updated).To(Equal(0))
-				ot.updated++
 				Expect(newNamespace.Status.Phase).To(Equal(corev1.NamespaceActive))
 			},
 			DeleteFunc: func(obj interface{}) {
 				defer GinkgoRecover()
 				newNamespace := obj.(*corev1.Namespace)
-				ot, ok := testNamespaces[newNamespace.Name]
+				_, ok := testNamespaces[newNamespace.Name]
 				Expect(ok).To(BeTrue())
-				// Verify that deletes were processed after the updates and adds
-				ot.mu.Lock()
-				defer ot.mu.Unlock()
-				Expect(ot.added).To(Equal(10), "delete for EIP namespace %s processed before add was processed in all handlers!", newNamespace.Name)
-				Expect(ot.updated).To(Equal(10), "delete for EIP namespace %s processed before update was processed in all handlers!", newNamespace.Name)
-				Expect(ot.deleted).To(Equal(1))
-				ot.deleted = ot.deleted * 10
 				Expect(newNamespace.Status.Phase).To(Equal(corev1.NamespaceTerminating))
 			},
-		})
+		}
 
-		eipnsh, c2 := addPriorityHandler(wf, NamespaceType, EgressIPNamespaceType, cache.ResourceEventHandlerFuncs{
-			AddFunc: func(obj interface{}) {
-				defer GinkgoRecover()
-				namespace := obj.(*corev1.Namespace)
-				ot, ok := testNamespaces[namespace.Name]
-				Expect(ok).To(BeTrue())
-				ot.mu.Lock()
-				defer ot.mu.Unlock()
-				Expect(ot.added).To(Equal(1), "add for EIP namespace %s processed before initial namespace add!", namespace.Name)
-				ot.added = ot.added * 10
-				Expect(namespace.Status.Phase).To(BeEmpty())
-			},
-			UpdateFunc: func(_, new interface{}) {
-				defer GinkgoRecover()
-				newNamespace := new.(*corev1.Namespace)
-				ot, ok := testNamespaces[newNamespace.Name]
-				Expect(ok).To(BeTrue())
-				// Expect updates to be processed after Add
-				ot.mu.Lock()
-				defer ot.mu.Unlock()
-				Expect(ot.added).To(Equal(10), "update for EIP namespace %s processed before add was processed in all handlers!", newNamespace.Name)
-				Expect(ot.updated).To(Equal(1), "update for EIP namespace %s processed before initial namespace update!", newNamespace.Name)
-				ot.updated = ot.updated * 10
-				Expect(newNamespace.Status.Phase).To(Equal(corev1.NamespaceActive))
-			},
-			DeleteFunc: func(obj interface{}) {
-				defer GinkgoRecover()
-				newNamespace := obj.(*corev1.Namespace)
-				ot, ok := testNamespaces[newNamespace.Name]
-				Expect(ok).To(BeTrue())
-				// Verify that deletes were processed after the updates and adds
-				ot.mu.Lock()
-				defer ot.mu.Unlock()
-				Expect(ot.added).To(Equal(10), "delete for EIP namespace %s processed before add was processed in all handlers!", newNamespace.Name)
-				Expect(ot.updated).To(Equal(10), "delete for EIP namespace %s processed before update was processed in all handlers!", newNamespace.Name)
-				Expect(ot.deleted).To(Equal(0))
-				ot.deleted++
-				Expect(newNamespace.Status.Phase).To(Equal(corev1.NamespaceTerminating))
-			},
-		})
+		nsh, c1 := addPriorityHandler(wf, NamespaceType, NamespaceType, checkNamespaceFuncs)
+		eipnsh, c2 := addPriorityHandler(wf, NamespaceType, EgressIPNamespaceType, checkNamespaceFuncs)
+
 		done := make(chan bool)
 		go func() {
 			// Send an update event for each namespace
@@ -1611,25 +1556,12 @@ var _ = Describe("Watch Factory Operations", func() {
 		}()
 
 		// Adds are done synchronously at handler addition time
-		for _, ot := range testNamespaces {
-			ot.mu.Lock()
-			// ((0 + 1) * 10) = 10
-			Expect(ot.added).To(Equal(10), "missing add for namespace %s", ot.namespace.Name)
-			ot.mu.Unlock()
-		}
 		Expect(c1.getAdded()).To(Equal(len(testNamespaces)))
 		Expect(c2.getAdded()).To(Equal(len(testNamespaces)))
 		<-done
 		// Updates are async and may take a bit longer to finish
 		Eventually(c1.getUpdated, 10).Should(Equal(len(testNamespaces)))
 		Eventually(c2.getUpdated, 10).Should(Equal(len(testNamespaces)))
-
-		for _, ot := range testNamespaces {
-			ot.mu.Lock()
-			// ((0 + 1) * 10) = 10
-			Expect(ot.updated).To(Equal(10), "missing update for namespace %s", ot.namespace.Name)
-			ot.mu.Unlock()
-		}
 
 		go func() {
 			// Send a delete event for each namespace
@@ -1643,13 +1575,6 @@ var _ = Describe("Watch Factory Operations", func() {
 		// Deletes are async and may take a bit longer to finish
 		Eventually(c1.getDeleted, 10).Should(Equal(len(testNamespaces)))
 		Eventually(c2.getDeleted, 10).Should(Equal(len(testNamespaces)))
-
-		for _, ot := range testNamespaces {
-			ot.mu.Lock()
-			// ((0 + 1) * 10) = 10
-			Expect(ot.deleted).To(Equal(10), "missing delete for namespace %s", ot.namespace.Name)
-			ot.mu.Unlock()
-		}
 
 		wf.RemoveNamespaceHandler(nsh)
 		wf.RemoveNamespaceHandler(eipnsh)

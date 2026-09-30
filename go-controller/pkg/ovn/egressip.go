@@ -943,7 +943,9 @@ func (e *EgressIPController) addPodEgressIPAssignments(ni util.NetInfo, name str
 		return fmt.Errorf("failed to get pod %s/%s IPs: %v", pod.Namespace, pod.Name, err)
 	}
 	if len(podIPNets) == 0 {
-		return fmt.Errorf("failed to get pod ips for pod %s on network %s with NAD key %s", podKey, ni.GetNetworkName(), nadKey)
+		// Expected while the pod handler has not populated the logical port cache yet;
+		// the cache hook requests an immediate retry once it does.
+		return types.NewSuppressedError(fmt.Errorf("failed to get pod ips for pod %s on network %s with NAD key %s", podKey, ni.GetNetworkName(), nadKey))
 	}
 	podIPs := make([]net.IP, 0, len(podIPNets))
 	for _, ipNet := range podIPNets {
@@ -1665,6 +1667,31 @@ func (e *EgressIPController) addEgressIPPodRetriesForNamespace(namespace, reason
 	return utilerrors.Join(errs...)
 }
 
+// requestEgressIPPodRetry asks for an immediate, backoff-free retry of an egressIP pod
+// that is *already* in the retry cache, and does nothing otherwise. Use this when a prior
+// reconcile may have failed and we have just made the state it was missing available: a
+// local pod whose logical switch port is absent from the cache fails
+// addPodEgressIPAssignments (see the len(podIPNets) == 0 check), which records a retry
+// entry, so requesting is enough. Unlike addEgressIPPodRetry it does not enqueue pods that
+// never failed, which would reset their failed-attempts counter and trigger a redundant
+// reconcile for every pod created in the cluster.
+func (e *EgressIPController) requestEgressIPPodRetry(pod *corev1.Pod, reason string) {
+	if e.retryEgressIPPods == nil || pod == nil || util.PodCompleted(pod) || !util.PodNeedsSNAT(pod) {
+		return
+	}
+	requested, err := e.retryEgressIPPods.RequestRetryObjWithNoBackoff(pod)
+	if err != nil {
+		klog.Warningf("Failed to request immediate egressIP retry for pod %s/%s: %v", pod.Namespace, pod.Name, err)
+		return
+	}
+	if requested {
+		klog.V(5).Infof("Requested immediate egressIP retry for pod %s/%s due to %s", pod.Namespace, pod.Name, reason)
+	}
+}
+
+// addEgressIPPodRetry unconditionally enqueues a pod for egressIP reconciliation. Use this
+// when the pod may need reconciling even though nothing failed yet, e.g. after a NAD change
+// changes the pod's primary network.
 func (e *EgressIPController) addEgressIPPodRetry(pod *corev1.Pod, reason string) error {
 	if e.retryEgressIPPods == nil || pod == nil || util.PodCompleted(pod) || !util.PodNeedsSNAT(pod) {
 		return nil
