@@ -99,6 +99,10 @@ const (
 	nftablesUDNMarkExternalIPsV6Map = "udn-mark-external-ips-v6"
 )
 
+// udnServiceMarkLock serializes updates to the UDN verdict maps with removal
+// of the per-network chains referenced by those maps.
+var udnServiceMarkLock sync.Mutex
+
 // configureUDNServicesNFTables configures the nftables chains, rules, and verdict maps
 // that are used to set packet marks on externally exposed UDN services
 func configureUDNServicesNFTables() error {
@@ -223,6 +227,13 @@ type serviceConfig struct {
 	hasLocalHostNetworkEp bool
 	// localEndpoints stores all the local non-host-networked endpoints for this service
 	localEndpoints util.PortToLBEndpoints
+	// pendingLocalEndpoints stores endpoints whose rules could not be deleted. They are
+	// only used for cleanup and must not be passed to addServiceRules.
+	pendingLocalEndpoints util.PortToLBEndpoints
+}
+
+func (config *serviceConfig) endpointsForCleanup() util.PortToLBEndpoints {
+	return mergePortToLBEndpoints(config.localEndpoints, config.pendingLocalEndpoints)
 }
 
 type cidrAndFlags struct {
@@ -736,20 +747,15 @@ func (npw *nodePortWatcher) generateARPBypassFlow(ofPorts []string, ofPortPatch,
 	return arpFlow
 }
 
-// getAndDeleteServiceInfo returns the serviceConfig for a service and if it exists and then deletes the entry
-func (npw *nodePortWatcher) getAndDeleteServiceInfo(index ktypes.NamespacedName) (out *serviceConfig, exists bool) {
-	npw.serviceInfoLock.Lock()
-	defer npw.serviceInfoLock.Unlock()
-	out, exists = npw.serviceInfo[index]
-	delete(npw.serviceInfo, index)
-	return out, exists
-}
-
-// getServiceInfo returns the serviceConfig for a service and if it exists
+// getServiceInfo returns a snapshot of the serviceConfig for a service and if it exists.
 func (npw *nodePortWatcher) getServiceInfo(index ktypes.NamespacedName) (out *serviceConfig, exists bool) {
 	npw.serviceInfoLock.Lock()
 	defer npw.serviceInfoLock.Unlock()
 	out, exists = npw.serviceInfo[index]
+	if exists {
+		configSnapshot := *out
+		out = &configSnapshot
+	}
 	return out, exists
 }
 
@@ -759,53 +765,16 @@ func (npw *nodePortWatcher) getAndSetServiceInfo(index ktypes.NamespacedName, se
 	defer npw.serviceInfoLock.Unlock()
 
 	old, exists = npw.serviceInfo[index]
-	var ptrCopy serviceConfig
+	newConfig := &serviceConfig{service: service, hasLocalHostNetworkEp: hasLocalHostNetworkEp, localEndpoints: localEndpoints}
 	if exists {
-		ptrCopy = *old
+		newConfig.pendingLocalEndpoints = old.endpointsForCleanup()
 	}
-	npw.serviceInfo[index] = &serviceConfig{service: service, hasLocalHostNetworkEp: hasLocalHostNetworkEp, localEndpoints: localEndpoints}
-	return &ptrCopy, exists
-}
-
-// addOrSetServiceInfo creates and sets the serviceConfig if it doesn't exist
-func (npw *nodePortWatcher) addOrSetServiceInfo(index ktypes.NamespacedName, service *corev1.Service, hasLocalHostNetworkEp bool, localEndpoints util.PortToLBEndpoints) (exists bool) {
-	npw.serviceInfoLock.Lock()
-	defer npw.serviceInfoLock.Unlock()
-
-	if _, exists := npw.serviceInfo[index]; !exists {
-		// Only set this if it doesn't exist
-		npw.serviceInfo[index] = &serviceConfig{service: service, hasLocalHostNetworkEp: hasLocalHostNetworkEp, localEndpoints: localEndpoints}
-		return false
+	npw.serviceInfo[index] = newConfig
+	if exists {
+		ptrCopy := *old
+		return &ptrCopy, true
 	}
-	return true
-
-}
-
-// updateServiceInfo sets the serviceConfig for a service and returns the existing serviceConfig, if inputs are nil
-// do not update those fields, if it does not exist return nil.
-func (npw *nodePortWatcher) updateServiceInfo(index ktypes.NamespacedName, service *corev1.Service, hasLocalHostNetworkEp *bool, localEndpoints util.PortToLBEndpoints) (old *serviceConfig, exists bool) {
-
-	npw.serviceInfoLock.Lock()
-	defer npw.serviceInfoLock.Unlock()
-
-	if old, exists = npw.serviceInfo[index]; !exists {
-		klog.V(5).Infof("No serviceConfig found for service %s in namespace %s", index.Name, index.Namespace)
-		return nil, exists
-	}
-	ptrCopy := *old
-	if service != nil {
-		npw.serviceInfo[index].service = service
-	}
-
-	if hasLocalHostNetworkEp != nil {
-		npw.serviceInfo[index].hasLocalHostNetworkEp = *hasLocalHostNetworkEp
-	}
-
-	if localEndpoints != nil {
-		npw.serviceInfo[index].localEndpoints = localEndpoints
-	}
-
-	return &ptrCopy, exists
+	return &serviceConfig{}, false
 }
 
 // addServiceRules ensures the correct nftables rules and OpenFlow physical
@@ -820,6 +789,17 @@ func addServiceRules(service *corev1.Service, netInfo util.NetInfo, localEndpoin
 			errors = append(errors, err)
 		}
 		npw.ofm.requestFlowSync()
+	}
+
+	serializeUDNMarkUpdates := npw != nil && !npw.dpuMode && util.IsNetworkSegmentationSupportEnabled()
+	if serializeUDNMarkUpdates {
+		// Read the active network config and build its verdict-map entries under
+		// the same lock used when deleting the referenced mark chain.
+		udnServiceMarkLock.Lock()
+		defer udnServiceMarkLock.Unlock()
+	}
+
+	if npw != nil {
 		activeNetwork = npw.ofm.getActiveNetwork(netInfo)
 		if activeNetwork == nil {
 			return fmt.Errorf("failed to get active network config for network %s", netInfo.GetNetworkName())
@@ -834,9 +814,10 @@ func addServiceRules(service *corev1.Service, netInfo util.NetInfo, localEndpoin
 			nftObjs = append(nftObjs, getUDNNFTRules(service, activeNetwork)...)
 		}
 		if len(nftObjs) > 0 {
-			if err := nodenft.AddObjects(nftObjs); err != nil {
+			addErr := nodenft.AddObjects(nftObjs)
+			if addErr != nil {
 				err = fmt.Errorf("failed to update nftables rules for service %s/%s: %w",
-					service.Namespace, service.Name, err)
+					service.Namespace, service.Name, addErr)
 				errors = append(errors, err)
 			}
 		}
@@ -891,9 +872,17 @@ func delServiceRules(service *corev1.Service, localEndpoints util.PortToLBEndpoi
 			nftObjs = append(nftObjs, getUDNNFTRules(service, nil)...)
 		}
 		if len(nftObjs) > 0 {
-			if err := nodenft.DeleteObjects(nftObjs); err != nil {
+			serializeUDNMarkUpdates := util.IsNetworkSegmentationSupportEnabled()
+			if serializeUDNMarkUpdates {
+				udnServiceMarkLock.Lock()
+			}
+			deleteErr := nodenft.DeleteObjects(nftObjs)
+			if serializeUDNMarkUpdates {
+				udnServiceMarkLock.Unlock()
+			}
+			if deleteErr != nil {
 				err = fmt.Errorf("failed to delete nftables rules for service %s/%s: %w",
-					service.Namespace, service.Name, err)
+					service.Namespace, service.Name, deleteErr)
 				errors = append(errors, err)
 			}
 		}
@@ -914,13 +903,18 @@ func serviceUpdateNotNeeded(old, new *corev1.Service) bool {
 		reflect.DeepEqual(new.Spec.AllocateLoadBalancerNodePorts, old.Spec.AllocateLoadBalancerNodePorts)
 }
 
-// AddService handles configuring shared gateway bridge flows to steer External IP, Node Port, Ingress LB traffic into OVN
+// AddService configures shared gateway bridge flows and nftables rules to steer External IP, Node Port, and ingress LB traffic into OVN.
 func (npw *nodePortWatcher) AddService(service *corev1.Service) error {
 	var localEndpoints util.PortToLBEndpoints
 	var hasLocalHostNetworkEp bool
 	if !util.ServiceTypeHasClusterIP(service) || !util.IsClusterIPSet(service) {
 		return nil
 	}
+
+	// Keep Service rule programming and cache updates serialized with endpoint-slice
+	// reconciliation and Service deletion.
+	npw.serviceInfoLock.Lock()
+	defer npw.serviceInfoLock.Unlock()
 
 	klog.V(5).Infof("Adding service %s in namespace %s", service.Name, service.Namespace)
 	netInfo, err := npw.networkManager.GetActiveNetworkForNamespace(service.Namespace)
@@ -950,20 +944,35 @@ func (npw *nodePortWatcher) AddService(service *corev1.Service) error {
 		hasLocalHostNetworkEp = util.HasLocalHostNetworkEndpoints(localEndpoints, nodeIPs)
 	}
 	// If something didn't already do it add correct Service rules
-	if exists := npw.addOrSetServiceInfo(name, service, hasLocalHostNetworkEp, localEndpoints); !exists {
+	_, exists := npw.serviceInfo[name]
+	if !exists {
+		npw.serviceInfo[name] = &serviceConfig{service: service, hasLocalHostNetworkEp: hasLocalHostNetworkEp, localEndpoints: localEndpoints}
 		klog.V(5).Infof("Service Add %s event in namespace %s came before endpoint event setting svcConfig",
 			service.Name, service.Namespace)
 		if err := addServiceRules(service, netInfo, localEndpoints, hasLocalHostNetworkEp, npw); err != nil {
-			npw.getAndDeleteServiceInfo(name)
+			delete(npw.serviceInfo, name)
 			return fmt.Errorf("AddService failed for nodePortWatcher: %w, trying delete: %v", err, delServiceRules(service, localEndpoints, npw))
 		}
 	} else {
 		// Need to update flows here in case an attribute of the gateway has changed, such as MAC address
 		klog.V(5).Infof("Updating already programmed rules for %s in namespace %s", service.Name, service.Namespace)
-		if err = npw.updateServiceFlowCache(service, netInfo, true, hasLocalHostNetworkEp, localEndpoints); err != nil {
-			return fmt.Errorf("failed to update flows for service %s/%s: %w", service.Namespace, service.Name, err)
+		if config := npw.serviceInfo[name]; len(config.pendingLocalEndpoints) > 0 {
+			cleanupEndpoints := config.endpointsForCleanup()
+			delErr := delServiceRules(config.service, cleanupEndpoints, npw)
+			addErr := addServiceRules(service, netInfo, localEndpoints, hasLocalHostNetworkEp, npw)
+			config.service = service
+			config.localEndpoints = localEndpoints
+			config.hasLocalHostNetworkEp = hasLocalHostNetworkEp
+			if delErr != nil {
+				config.pendingLocalEndpoints = cleanupEndpoints
+			} else {
+				config.pendingLocalEndpoints = nil
+			}
+			return utilerrors.Join(delErr, addErr)
 		}
-		npw.ofm.requestFlowSync()
+		if err = addServiceRules(service, netInfo, localEndpoints, hasLocalHostNetworkEp, npw); err != nil {
+			return fmt.Errorf("failed to update rules for service %s/%s: %w", service.Namespace, service.Name, err)
+		}
 	}
 	return nil
 }
@@ -979,21 +988,34 @@ func (npw *nodePortWatcher) UpdateService(old, new *corev1.Service) error {
 			".Spec.ExternalTrafficPolicy, .Spec.InternalTrafficPolicy", new.Name)
 		return nil
 	}
+
+	// Keep the old-rule deletion and new-rule installation in one critical section.
+	// Otherwise an EndpointSlice event can install new endpoint rules between them,
+	// after which this update would re-add rules from its stale endpoint snapshot.
+	npw.serviceInfoLock.Lock()
+	defer npw.serviceInfoLock.Unlock()
+
 	// Update the service in svcConfig if we need to so that other handler
 	// threads do the correct thing, leave hasLocalHostNetworkEp and localEndpoints alone in the cache
-	svcConfig, exists := npw.updateServiceInfo(name, new, nil, nil)
+	svcConfig, exists := npw.serviceInfo[name]
 	if !exists {
 		klog.V(5).Infof("Service %s in namespace %s was deleted during service Update", old.Name, old.Namespace)
 		return nil
 	}
+	oldSvcConfig := *svcConfig
+	svcConfig.service = new
 
 	if util.ServiceTypeHasClusterIP(old) && util.IsClusterIPSet(old) {
 		// Delete old rules if needed, but don't delete svcConfig
 		// so that we don't miss any endpoint update events here
 		klog.V(5).Infof("Deleting old service rules for: %v", old)
 
-		if err = delServiceRules(old, svcConfig.localEndpoints, npw); err != nil {
+		cleanupEndpoints := oldSvcConfig.endpointsForCleanup()
+		if err = delServiceRules(old, cleanupEndpoints, npw); err != nil {
+			svcConfig.pendingLocalEndpoints = cleanupEndpoints
 			errors = append(errors, err)
+		} else {
+			svcConfig.pendingLocalEndpoints = nil
 		}
 
 		// Delete conntrack entries for UDP ports of the service if they have changed.
@@ -1019,7 +1041,7 @@ func (npw *nodePortWatcher) UpdateService(old, new *corev1.Service) error {
 			return utilerrors.Join(errors...)
 		}
 
-		if err = addServiceRules(new, netInfo, svcConfig.localEndpoints, svcConfig.hasLocalHostNetworkEp, npw); err != nil {
+		if err = addServiceRules(new, netInfo, oldSvcConfig.localEndpoints, oldSvcConfig.hasLocalHostNetworkEp, npw); err != nil {
 			errors = append(errors, err)
 		}
 	}
@@ -1205,6 +1227,7 @@ func (npw *nodePortWatcher) deleteConntrackForService(service *corev1.Service) e
 	return nil
 }
 
+// DeleteService removes a Service's gateway rules and conntrack entries.
 func (npw *nodePortWatcher) DeleteService(service *corev1.Service) error {
 	var err error
 	var errors []error
@@ -1214,9 +1237,18 @@ func (npw *nodePortWatcher) DeleteService(service *corev1.Service) error {
 
 	klog.V(5).Infof("Deleting service %s in namespace %s", service.Name, service.Namespace)
 	name := ktypes.NamespacedName{Namespace: service.Namespace, Name: service.Name}
-	if svcConfig, exists := npw.getAndDeleteServiceInfo(name); exists {
-		if err = delServiceRules(svcConfig.service, svcConfig.localEndpoints, npw); err != nil {
+	npw.serviceInfoLock.Lock()
+	defer npw.serviceInfoLock.Unlock()
+	svcConfig, exists := npw.serviceInfo[name]
+	if exists {
+		cleanupEndpoints := svcConfig.endpointsForCleanup()
+		if err = delServiceRules(svcConfig.service, cleanupEndpoints, npw); err != nil {
+			svcConfig.pendingLocalEndpoints = cleanupEndpoints
 			errors = append(errors, err)
+		} else {
+			// Keep the cached configuration when rule deletion fails so a retried
+			// Service deletion can retry cleaning up those rules.
+			delete(npw.serviceInfo, name)
 		}
 	} else {
 		klog.Warningf("Delete service: no service found in cache for endpoint %s in namespace %s", service.Name, service.Namespace)
@@ -1224,6 +1256,8 @@ func (npw *nodePortWatcher) DeleteService(service *corev1.Service) error {
 	// Remove all conntrack entries for the serviceVIPs of this service irrespective of protocol stack
 	// since service deletion is considered as unplugging the network cable and hence graceful termination
 	// is not guaranteed. See https://github.com/kubernetes/kubernetes/issues/108523#issuecomment-1074044415.
+	// Keep endpoint updates serialized until this cleanup finishes so a replacement Service
+	// cannot create conntrack entries that this deletion would then remove.
 	if err = npw.deleteConntrackForService(service); err != nil {
 		errors = append(errors, fmt.Errorf("failed to delete conntrack entry for service %v: %v", name, err))
 	}
@@ -1235,10 +1269,12 @@ func (npw *nodePortWatcher) DeleteService(service *corev1.Service) error {
 
 }
 
+// SyncServices reconciles gateway rules with the current Service list.
 func (npw *nodePortWatcher) SyncServices(services []interface{}) error {
 	var err error
 	var errors []error
 	var keepNFTObjects, nftContainers []knftables.Object
+	var servicesWithUDNMarkRules []*corev1.Service
 	for _, serviceInterface := range services {
 		name := ktypes.NamespacedName{Namespace: serviceInterface.(*corev1.Service).Namespace, Name: serviceInterface.(*corev1.Service).Name}
 
@@ -1293,13 +1329,8 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) error {
 		// Add correct netfilter rules only for Full mode
 		if !npw.dpuMode {
 			keepNFTObjects = append(keepNFTObjects, getGatewayNFTRules(service, localEndpoints, hasLocalHostNetworkEp)...)
-			if util.IsNetworkSegmentationSupportEnabled() &&
-				shouldAddUDNServiceMarkRules(netInfo, npw.nodeIPManager.nodeName) {
-				netConfig := npw.ofm.getActiveNetwork(netInfo)
-				if netConfig == nil {
-					return fmt.Errorf("failed to get active network config for network %s", netInfo.GetNetworkName())
-				}
-				keepNFTObjects = append(keepNFTObjects, getUDNNFTRules(service, netConfig)...)
+			if util.IsNetworkSegmentationSupportEnabled() {
+				servicesWithUDNMarkRules = append(servicesWithUDNMarkRules, service)
 			}
 		}
 	}
@@ -1312,13 +1343,47 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) error {
 		if util.IsNetworkSegmentationSupportEnabled() {
 			nftContainers = append(nftContainers, getUDNNFTContainerObjects()...)
 		}
-		if err = nodenft.SyncObjects(nftContainers, keepNFTObjects); err != nil {
+		syncNFTables := func() error {
+			if util.IsNetworkSegmentationSupportEnabled() {
+				udnServiceMarkLock.Lock()
+				defer udnServiceMarkLock.Unlock()
+			}
+			for _, service := range servicesWithUDNMarkRules {
+				netInfo, err := npw.networkManager.GetActiveNetworkForNamespace(service.Namespace)
+				if err != nil {
+					// The namespace's primary network may have been removed since the
+					// initial service sync. In that case there are no UDN mark rules to add.
+					if util.IsInvalidPrimaryNetworkError(err) || apierrors.IsNotFound(err) {
+						continue
+					}
+					return fmt.Errorf("failed to get active network for service %s/%s: %w", service.Namespace, service.Name, err)
+				}
+				if netInfo == nil || !shouldAddUDNServiceMarkRules(netInfo, npw.nodeIPManager.nodeName) {
+					continue
+				}
+				netConfig := npw.ofm.getActiveNetwork(netInfo)
+				if netConfig == nil {
+					return fmt.Errorf("failed to get active network config for network %s", netInfo.GetNetworkName())
+				}
+				keepNFTObjects = append(keepNFTObjects, getUDNNFTRules(service, netConfig)...)
+			}
+			return nodenft.SyncObjects(nftContainers, keepNFTObjects)
+		}
+		if err = syncNFTables(); err != nil {
 			errors = append(errors, fmt.Errorf("failed to sync nftables rules for services: %w", err))
 		}
+	}
+	if len(errors) == 0 {
+		npw.serviceInfoLock.Lock()
+		for _, svcConfig := range npw.serviceInfo {
+			svcConfig.pendingLocalEndpoints = nil
+		}
+		npw.serviceInfoLock.Unlock()
 	}
 	return utilerrors.Join(errors...)
 }
 
+// AddEndpointSlice updates gateway rules for a Service when its endpoints change.
 func (npw *nodePortWatcher) AddEndpointSlice(epSlice *discovery.EndpointSlice) error {
 	var err error
 	var errors []error
@@ -1341,6 +1406,11 @@ func (npw *nodePortWatcher) AddEndpointSlice(epSlice *discovery.EndpointSlice) e
 	if err != nil || svcNamespacedName == nil {
 		return err
 	}
+
+	// Keep service deletion from removing the service cache entry while this
+	// event looks up the Service and programs its rules.
+	npw.serviceInfoLock.Lock()
+	defer npw.serviceInfoLock.Unlock()
 
 	svc, err = npw.watchFactory.GetService(svcNamespacedName.Namespace, svcNamespacedName.Name)
 	if err != nil {
@@ -1372,34 +1442,87 @@ func (npw *nodePortWatcher) AddEndpointSlice(epSlice *discovery.EndpointSlice) e
 	// Here we make sure the correct rules are programmed whenever an AddEndpointSlice event is
 	// received, only alter flows if we need to, i.e if cache wasn't set or if it was and
 	// hasLocalHostNetworkEp or localEndpoints state (for LB svc where NPs=0) changed, to prevent flow churn
-	out, exists := npw.getServiceInfo(*svcNamespacedName)
+	out, exists := npw.serviceInfo[*svcNamespacedName]
 	if !exists {
 		klog.V(5).Infof("Endpointslice %s ADD event in namespace %s is creating rules", epSlice.Name, epSlice.Namespace)
 		if err = addServiceRules(svc, netInfo, localEndpoints, hasLocalHostNetworkEp, npw); err != nil {
 			return err
 		}
-		npw.addOrSetServiceInfo(*svcNamespacedName, svc, hasLocalHostNetworkEp, localEndpoints)
+		npw.serviceInfo[*svcNamespacedName] = &serviceConfig{service: svc, hasLocalHostNetworkEp: hasLocalHostNetworkEp, localEndpoints: localEndpoints}
 		return nil
 	}
 
-	if out.hasLocalHostNetworkEp != hasLocalHostNetworkEp ||
+	if out.hasLocalHostNetworkEp != hasLocalHostNetworkEp || len(out.pendingLocalEndpoints) > 0 ||
 		(hasLocalHostNetworkEp && !reflect.DeepEqual(out.localEndpoints, localEndpoints)) ||
 		(!util.LoadBalancerServiceHasNodePortAllocation(svc) && !reflect.DeepEqual(out.localEndpoints, localEndpoints)) {
 		klog.V(5).Infof("Endpointslice %s ADD event in namespace %s is updating rules", epSlice.Name, epSlice.Namespace)
-		if err = delServiceRules(svc, out.localEndpoints, npw); err != nil {
-			errors = append(errors, err)
+		cleanupEndpoints := out.endpointsForCleanup()
+		delErr := delServiceRules(svc, cleanupEndpoints, npw)
+		if delErr != nil {
+			errors = append(errors, delErr)
 		}
 		if err = addServiceRules(svc, netInfo, localEndpoints, hasLocalHostNetworkEp, npw); err != nil {
 			errors = append(errors, err)
-		} else {
-			npw.updateServiceInfo(*svcNamespacedName, svc, &hasLocalHostNetworkEp, localEndpoints)
 		}
+		newConfig := &serviceConfig{service: svc, hasLocalHostNetworkEp: hasLocalHostNetworkEp, localEndpoints: localEndpoints}
+		if delErr != nil {
+			newConfig.pendingLocalEndpoints = cleanupEndpoints
+		}
+		npw.serviceInfo[*svcNamespacedName] = newConfig
 		return utilerrors.Join(errors...)
 	}
 	return nil
 
 }
 
+// mergePortToLBEndpoints returns the union of endpoint IPs grouped by service port key and target port.
+func mergePortToLBEndpoints(endpointSets ...util.PortToLBEndpoints) util.PortToLBEndpoints {
+	merged := make(util.PortToLBEndpoints)
+	for _, endpointSet := range endpointSets {
+		for portKey, endpoints := range endpointSet {
+			for _, endpoint := range endpoints {
+				entries := merged[portKey]
+				index := -1
+				for i := range entries {
+					if entries[i].Port == endpoint.Port {
+						index = i
+						break
+					}
+				}
+				if index == -1 {
+					merged[portKey] = append(entries, util.LBEndpointEntry{
+						Port:  endpoint.Port,
+						V4IPs: append([]string(nil), endpoint.V4IPs...),
+						V6IPs: append([]string(nil), endpoint.V6IPs...),
+					})
+					continue
+				}
+				entries[index].V4IPs = mergeEndpointIPs(entries[index].V4IPs, endpoint.V4IPs)
+				entries[index].V6IPs = mergeEndpointIPs(entries[index].V6IPs, endpoint.V6IPs)
+				merged[portKey] = entries
+			}
+		}
+	}
+	return merged
+}
+
+func mergeEndpointIPs(existing, additional []string) []string {
+	merged := append([]string(nil), existing...)
+	seen := make(map[string]struct{}, len(merged)+len(additional))
+	for _, ip := range merged {
+		seen[ip] = struct{}{}
+	}
+	for _, ip := range additional {
+		if _, ok := seen[ip]; ok {
+			continue
+		}
+		merged = append(merged, ip)
+		seen[ip] = struct{}{}
+	}
+	return merged
+}
+
+// DeleteEndpointSlice updates gateway rules after a Service endpoint slice is removed.
 func (npw *nodePortWatcher) DeleteEndpointSlice(epSlice *discovery.EndpointSlice) error {
 	var err error
 	var errors []error
@@ -1418,6 +1541,13 @@ func (npw *nodePortWatcher) DeleteEndpointSlice(epSlice *discovery.EndpointSlice
 	if err != nil || namespacedName == nil {
 		return err
 	}
+	// Serialize the entire endpoint deletion with Service deletion. In
+	// particular, do not update serviceInfo and then reacquire this lock: a
+	// Service deletion could remove the cache entry in between and this handler
+	// could restore rules for a Service that has already been deleted.
+	npw.serviceInfoLock.Lock()
+	defer npw.serviceInfoLock.Unlock()
+
 	epSlices, err := npw.watchFactory.GetServiceEndpointSlices(namespacedName.Namespace, namespacedName.Name, networkName)
 	if err != nil {
 		if !apierrors.IsNotFound(err) {
@@ -1431,19 +1561,37 @@ func (npw *nodePortWatcher) DeleteEndpointSlice(epSlice *discovery.EndpointSlice
 	}
 
 	svc, err := npw.watchFactory.GetService(namespacedName.Namespace, namespacedName.Name)
-	if err != nil && !apierrors.IsNotFound(err) {
+	serviceNotFound := apierrors.IsNotFound(err)
+	if err != nil && !serviceNotFound {
 		return fmt.Errorf("error retrieving service %s/%s for endpointslice %s during endpointslice delete: %v",
 			namespacedName.Namespace, namespacedName.Name, epSlice.Name, err)
 	}
-	localEndpoints := npw.GetLocalEligibleEndpointAddresses(epSlices, svc)
-	if svcConfig, exists := npw.updateServiceInfo(*namespacedName, nil, &hasLocalHostNetworkEp, localEndpoints); exists {
-		// Lock the cache mutex here so we don't miss a service delete during an endpoint delete
-		// we have to do this because deleting and adding nftables rules is slow.
-		npw.serviceInfoLock.Lock()
-		defer npw.serviceInfoLock.Unlock()
+	if svcConfig, exists := npw.serviceInfo[*namespacedName]; exists {
+		oldSvcConfig := *svcConfig
+		cleanupEndpoints := oldSvcConfig.endpointsForCleanup()
 
-		if err = delServiceRules(svcConfig.service, svcConfig.localEndpoints, npw); err != nil {
-			errors = append(errors, err)
+		delErr := delServiceRules(oldSvcConfig.service, cleanupEndpoints, npw)
+		if delErr != nil {
+			errors = append(errors, delErr)
+		}
+		if serviceNotFound {
+			// A missing Service must only trigger cleanup. Keep the old config if
+			// cleanup failed so a retry can still remove the remaining rules.
+			if delErr == nil {
+				delete(npw.serviceInfo, *namespacedName)
+			} else {
+				svcConfig.localEndpoints = nil
+				svcConfig.pendingLocalEndpoints = cleanupEndpoints
+			}
+			return utilerrors.Join(errors...)
+		}
+		localEndpoints := npw.GetLocalEligibleEndpointAddresses(epSlices, svc)
+		svcConfig.localEndpoints = localEndpoints
+		svcConfig.hasLocalHostNetworkEp = hasLocalHostNetworkEp
+		if delErr != nil {
+			svcConfig.pendingLocalEndpoints = cleanupEndpoints
+		} else {
+			svcConfig.pendingLocalEndpoints = nil
 		}
 
 		// Get network info after deleting old rules, before adding new ones.
@@ -1466,8 +1614,9 @@ func (npw *nodePortWatcher) DeleteEndpointSlice(epSlice *discovery.EndpointSlice
 			return utilerrors.Join(errors...)
 		}
 
-		if err = addServiceRules(svcConfig.service, netInfo, localEndpoints, hasLocalHostNetworkEp, npw); err != nil {
-			errors = append(errors, err)
+		addErr := addServiceRules(oldSvcConfig.service, netInfo, localEndpoints, hasLocalHostNetworkEp, npw)
+		if addErr != nil {
+			errors = append(errors, addErr)
 		}
 		return utilerrors.Join(errors...)
 	}
@@ -1570,7 +1719,7 @@ func (npw *nodePortWatcher) UpdateEndpointSlice(oldEpSlice, newEpSlice *discover
 	hasLocalHostNetworkEpOld := util.HasLocalHostNetworkEndpoints(oldLocalEndpoints, nodeIPs)
 	hasLocalHostNetworkEpNew := util.HasLocalHostNetworkEndpoints(newLocalEndpoints, nodeIPs)
 
-	localEndpointsHaveChanged := serviceInfo != nil && !reflect.DeepEqual(serviceInfo.localEndpoints, newLocalEndpoints)
+	localEndpointsHaveChanged := serviceInfo != nil && (!reflect.DeepEqual(serviceInfo.localEndpoints, newLocalEndpoints) || len(serviceInfo.pendingLocalEndpoints) > 0)
 	localHostNetworkEndpointsPresenceHasChanged := hasLocalHostNetworkEpOld != hasLocalHostNetworkEpNew ||
 		serviceInfo != nil && serviceInfo.hasLocalHostNetworkEp != hasLocalHostNetworkEpNew
 

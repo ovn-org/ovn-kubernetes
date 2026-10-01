@@ -759,22 +759,26 @@ func shouldAddUDNServiceMarkRules(netInfo util.NetInfo, nodeName string) bool {
 	return slices.Contains(advertisedVRFs, types.DefaultNetworkName)
 }
 
+// getUDNServiceMarkMapNames returns the service mark map names.
+func getUDNServiceMarkMapNames() []string {
+	return []string{
+		nftablesUDNMarkNodePortsMap,
+		nftablesUDNMarkExternalIPsV4Map,
+		nftablesUDNMarkExternalIPsV6Map,
+	}
+}
+
 // getUDNNFTContainerObjects returns all of the "container" objects (Sets/Maps/Chains)
 // used by getUDNNFTRules. This is used (possibly along with
 // getGatewayNFTContainerObjects) to determine the sets/maps/chains whose contents will be
 // synchronized by nodePortWatcher.SyncServices().
 func getUDNNFTContainerObjects() []knftables.Object {
-	return []knftables.Object{
-		&knftables.Map{
-			Name: nftablesUDNMarkNodePortsMap,
-		},
-		&knftables.Map{
-			Name: nftablesUDNMarkExternalIPsV4Map,
-		},
-		&knftables.Map{
-			Name: nftablesUDNMarkExternalIPsV6Map,
-		},
+	mapNames := getUDNServiceMarkMapNames()
+	objects := make([]knftables.Object, 0, len(mapNames))
+	for _, mapName := range mapNames {
+		objects = append(objects, &knftables.Map{Name: mapName})
 	}
+	return objects
 }
 
 // getLocalGatewayPodSubnetMasqueradeNFTRule creates rules for masquerading traffic from the pod subnet CIDR
