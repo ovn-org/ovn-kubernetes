@@ -168,9 +168,13 @@ jobs:
       - name: Install VRF kernel module
         run: |
           set -x
-          sudo apt update
-          sudo apt-get install linux-modules-extra-$(uname -r) -y
-          sudo modprobe vrf
+          # Newer Ubuntu kernels ship vrf in linux-modules and have no
+          # linux-modules-extra package, so only install it when needed.
+          if ! sudo modprobe vrf; then
+            sudo apt update
+            sudo apt-get install linux-modules-extra-$(uname -r) -y
+            sudo modprobe vrf
+          fi
 
       - name: Install Helm
         uses: azure/setup-helm@v4
