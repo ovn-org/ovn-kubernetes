@@ -53,10 +53,6 @@ type Handler struct {
 	// tombstone should only be set using atomic operations since it is
 	// used from multiple goroutines.
 	tombstone uint32
-	// priority is used to track the handler's priority of being invoked.
-	// example: a handler with priority 0 will process the received event first
-	// before a handler with priority 1.
-	priority int
 
 	// indicates which informer.internalInformers index to use
 	// clients are distributed between internal informers
@@ -120,12 +116,10 @@ const queueEntryDeleted uint32 = 1 << 31
 type internalInformer struct {
 	sync.RWMutex
 	oType reflect.Type
-	// keyed by priority - used to track the handler's priority of being invoked.
-	// example: a handler with priority 0 will process the received event first
-	// before a handler with priority 1, 0 being the highest priority.
-	// NOTE: we can have multiple handlers with the same priority hence the value
-	// is a map of handlers keyed by its unique id.
-	handlers map[int]map[uint64]*Handler
+	// handlers attached to this internal informer, keyed by their unique id.
+	// Handlers are invoked in unspecified order: each handler is responsible
+	// for retrying on its own if it depends on work done by another one.
+	handlers map[uint64]*Handler
 	// queueMap handles distributing events across a queued handler's queues
 	queueMap *queueMap
 	// hasHandlers is an atomic used to determine if this internal informer actually has handlers attached to it or not
@@ -147,25 +141,12 @@ type informer struct {
 func (inf *internalInformer) forEachQueuedHandler(f func(h *Handler)) {
 	inf.RLock()
 	defer inf.RUnlock()
-	for priority := 0; priority <= minHandlerPriority; priority++ { // loop over priority highest to lowest
-		for _, handler := range inf.handlers[priority] {
-			f(handler)
-		}
+	for _, handler := range inf.handlers {
+		f(handler)
 	}
 }
 
-func (inf *internalInformer) forEachQueuedHandlerReversed(f func(h *Handler)) {
-	inf.RLock()
-	defer inf.RUnlock()
-
-	for priority := minHandlerPriority; priority >= 0; priority-- { // loop over priority lowest to highest
-		for _, handler := range inf.handlers[priority] {
-			f(handler)
-		}
-	}
-}
-
-func (i *informer) addHandler(internalInformerIndex int, id uint64, priority int, filterFunc func(obj interface{}) bool, funcs cache.ResourceEventHandler, existingItems []interface{}) *Handler {
+func (i *informer) addHandler(internalInformerIndex int, id uint64, filterFunc func(obj interface{}) bool, funcs cache.ResourceEventHandler, existingItems []interface{}) *Handler {
 	handler := &Handler{
 		cache.FilteringResourceEventHandler{
 			FilterFunc: filterFunc,
@@ -173,7 +154,6 @@ func (i *informer) addHandler(internalInformerIndex int, id uint64, priority int
 		},
 		id,
 		handlerAlive,
-		priority,
 		internalInformerIndex,
 	}
 
@@ -183,12 +163,7 @@ func (i *informer) addHandler(internalInformerIndex int, id uint64, priority int
 	i.initialAddFunc(handler, existingItems)
 
 	intInf := i.internalInformers[internalInformerIndex]
-
-	_, ok := intInf.handlers[priority]
-	if !ok {
-		intInf.handlers[priority] = make(map[uint64]*Handler)
-	}
-	intInf.handlers[priority][id] = handler
+	intInf.handlers[id] = handler
 
 	return handler
 }
@@ -206,24 +181,14 @@ func (i *informer) removeHandler(handler *Handler) {
 
 		intInf.Lock()
 		defer intInf.Unlock()
-		removed := false
-		// track overall how many handlers this internal informer has
-		numHandlers := 0
-		for priority := range intInf.handlers { // loop over priority
-			if _, ok := intInf.handlers[priority]; !ok {
-				continue // protection against nil map as value
-			}
-			if _, ok := intInf.handlers[priority][handler.id]; ok {
-				// Remove the handler
-				delete(intInf.handlers[priority], handler.id)
-				removed = true
-				klog.V(5).Infof("Removed %v event handler %d", i.oType, handler.id)
-			}
-			numHandlers += len(intInf.handlers[priority])
+		_, removed := intInf.handlers[handler.id]
+		if removed {
+			delete(intInf.handlers, handler.id)
+			klog.V(5).Infof("Removed %v event handler %d", i.oType, handler.id)
 		}
 
 		// if this internal informer has no handlers, update the atomic
-		if numHandlers == 0 {
+		if len(intInf.handlers) == 0 {
 			atomic.StoreUint32(&intInf.hasHandlers, hasNoHandler)
 		}
 
@@ -474,7 +439,7 @@ func (i *informer) newFederatedQueuedHandler(internalInformerIndex int) cache.Re
 			intInf.queueMap.enqueueEvent(nil, realObj, i.oType, true, func(e *event) {
 				metrics.MetricResourceUpdateCount.WithLabelValues(name, "delete").Inc()
 				start := time.Now()
-				intInf.forEachQueuedHandlerReversed(func(h *Handler) {
+				intInf.forEachQueuedHandler(func(h *Handler) {
 					h.OnDelete(e.obj)
 				})
 				metrics.MetricResourceDeleteLatency.Observe(time.Since(start).Seconds())
@@ -486,10 +451,8 @@ func (i *informer) newFederatedQueuedHandler(internalInformerIndex int) cache.Re
 func (inf *informer) removeAllHandlers() {
 	for _, intInf := range inf.internalInformers {
 		intInf.Lock()
-		for _, handlers := range intInf.handlers {
-			for _, handler := range handlers {
-				inf.removeHandler(handler)
-			}
+		for _, handler := range intInf.handlers {
+			inf.removeHandler(handler)
 		}
 		intInf.Unlock()
 	}
@@ -563,7 +526,7 @@ func newBaseInformer(oType reflect.Type, sharedInformer cache.SharedIndexInforme
 	for i := 0; i < internalInformerPoolSize; i++ {
 		internalInformers = append(internalInformers, &internalInformer{
 			oType:    oType,
-			handlers: make(map[int]map[uint64]*Handler),
+			handlers: make(map[uint64]*Handler),
 		})
 	}
 
