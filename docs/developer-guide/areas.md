@@ -59,8 +59,8 @@ at the start of each run. No long-lived access tokens are used during workflow e
 
 | Category | Paths |
 |---|---|
-| E2E tests | `/test/e2e/kubevirt.go`, `/test/e2e/kubevirt/`, `/test/e2e/multihoming.go`, `/test/e2e/multihoming_utils.go`, `/test/e2e/multihoming_external_router_utils.go`, `/test/e2e/network_segmentation_localnet.go`, `/test/e2e/localnet-underlay.go`, `/test/e2e/network_segmentation_preconfigured_layer2.go`, `/test/e2e/testscenario/cudn/valid-scenarios-localnet.go`, `/test/e2e/testscenario/cudn/invalid-scenarios-localnet-*.go` |
-| Unit tests | `/go-controller/pkg/ovn/kubevirt_test.go`, `/go-controller/pkg/ovn/multihoming_test.go`, `/go-controller/pkg/ovn/multipolicy_test.go`, `/go-controller/pkg/ovn/layer2_user_defined_network_controller_test.go`, `/go-controller/pkg/util/multi_network_test.go` |
+| E2E tests | `/test/e2e/kubevirt.go`, `/test/e2e/kubevirt/`, `/test/e2e/multihoming.go`, `/test/e2e/multihoming_utils.go`, `/test/e2e/multihoming_external_router_utils.go`, `/test/e2e/network_segmentation_localnet.go`, `/test/e2e/localnet-underlay.go`, `/test/e2e/network_segmentation_preconfigured_layer2.go` |
+| Unit tests | `/go-controller/pkg/ovn/kubevirt_test.go`, `/go-controller/pkg/ovn/multihoming_test.go`, `/go-controller/pkg/ovn/multipolicy_test.go`, `/go-controller/pkg/ovn/layer2_user_defined_network_controller_test.go`, `/go-controller/pkg/util/multi_network_test.go`, `/test/crd-integration/testscenario/cudn/valid-scenarios-localnet.go`, `/test/crd-integration/testscenario/cudn/invalid-scenarios-localnet-*.go` |
 | Production code | `/go-controller/pkg/kubevirt/`, `/go-controller/pkg/util/arp.go`, `/go-controller/pkg/util/ndp/` |
 | Docs | `/docs/features/live-migration.md`, `/docs/features/multiple-networks/multi-homing.md`, `/docs/features/multiple-networks/multi-network-policies.md` |
 
