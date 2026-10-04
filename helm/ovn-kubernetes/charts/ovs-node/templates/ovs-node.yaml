@@ -54,9 +54,9 @@ spec:
         readinessProbe:
           exec:
             command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovs-daemons"]
-          initialDelaySeconds: 30
+          initialDelaySeconds: 5
           timeoutSeconds: 30
-          periodSeconds: 60
+          periodSeconds: 10
         securityContext:
           runAsUser: 0
           # Permission could be reduced by selecting an appropriate SELinux policy

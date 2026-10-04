@@ -115,9 +115,9 @@ spec:
         readinessProbe:
           exec:
             command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovnnb-db"]
-          initialDelaySeconds: 30
+          initialDelaySeconds: 5
           timeoutSeconds: 30
-          periodSeconds: 60
+          periodSeconds: 10
       # end of container
       # sb-ovsdb - v3
       - name: sb-ovsdb
@@ -187,9 +187,9 @@ spec:
         readinessProbe:
           exec:
             command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovnsb-db"]
-          initialDelaySeconds: 30
+          initialDelaySeconds: 5
           timeoutSeconds: 30
-          periodSeconds: 60
+          periodSeconds: 10
       # end of container
       # ovn-northd - v3
       - name: ovn-northd
@@ -241,9 +241,9 @@ spec:
         readinessProbe:
           exec:
             command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovn-northd"]
-          initialDelaySeconds: 30
+          initialDelaySeconds: 5
           timeoutSeconds: 30
-          periodSeconds: 60
+          periodSeconds: 10
       # end of container
       - name: ovnkube-controller
         image: {{ include "getImage" . }}
@@ -524,9 +524,9 @@ spec:
         readinessProbe:
           exec:
             command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovnkube-node"]
-          initialDelaySeconds: 30
+          initialDelaySeconds: 5
           timeoutSeconds: 30
-          periodSeconds: 60
+          periodSeconds: 10
       - name: ovn-controller
         image: {{ include "getImage" . }}
         imagePullPolicy: {{ default "IfNotPresent" .Values.global.image.pullPolicy }}
@@ -575,9 +575,9 @@ spec:
         readinessProbe:
           exec:
             command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovn-controller"]
-          initialDelaySeconds: 30
+          initialDelaySeconds: 5
           timeoutSeconds: 30
-          periodSeconds: 60
+          periodSeconds: 10
         # ovs-metrics-exporter - v3
       - name: ovs-metrics-exporter
         image: {{ include "getImage" . }}
