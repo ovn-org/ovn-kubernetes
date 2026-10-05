@@ -91,6 +91,9 @@ fi
 # OVN_ENABLE_DNSNAMERESOLVER - enable dns name resolver support
 # OVN_ALLOW_ICMP_NETPOL - allow ICMP and ICMPv6 regardless of network policy
 # OVN_OBSERV_ENABLE - enable observability for ovnkube
+# OVN_ENABLE_JEMALLOC - enable jemalloc for OVN and OVS daemons via LD_PRELOAD (default true)
+# OVN_JEMALLOC_MALLOC_CONF - jemalloc configuration string (default: background_thread:false,dirty_decay_ms:10000,muzzy_decay_ms:0)
+# OVN_JEMALLOC_LIB - path to libjemalloc.so.2 (optional override, auto-detected by default)
 
 # The argument to the command is the operation to be performed
 # ovn-controller ovn-node display display_env ovn_debug
@@ -115,6 +118,36 @@ ovnkube_logfile_maxage=${OVNKUBE_LOGFILE_MAXAGE:-"5"}
 # logfile for libovsdb client. When not specified, the ovsdb client logs
 # are not separated from the "main" --logfile used by ovnkube
 ovnkube_libovsdb_client_logfile=${OVNKUBE_LIBOVSDB_CLIENT_LOGFILE:-}
+
+# jemalloc configuration for OVN and OVS daemons
+# Documentation: https://jemalloc.net/jemalloc.3.html
+#
+# background_thread:false - Explicitly disable internal background worker threads.
+#   1. Jemalloc docs warn that enabling background_thread via MALLOC_CONF can cause
+#      crashes or deadlocks during initialization due to circular dependencies:
+#      https://jemalloc.net/jemalloc.3.html#opt.background_thread
+#   2. Per jemalloc documentation, background threads are automatically disabled
+#      in child processes after fork(2):
+#      https://jemalloc.net/jemalloc.3.html#background_thread
+#      Because OVN and OVS daemons (and wrapper scripts like ovs-ctl) daemonize by
+#      calling fork(), background threads are disabled in the running daemons anyway.
+#   Memory decay occurs naturally during daemon event loops and allocation/free cycles.
+#
+# dirty_decay_ms:10000 - Time (in ms) for unused dirty pages to decay and be purged
+#   back to the OS via madvise(MADV_DONTNEED). 10000ms (10s) is jemalloc's default
+#   decay time and balances timely memory return with avoiding excessive madvise
+#   syscall overhead under high allocation churn.
+#   See: https://jemalloc.net/jemalloc.3.html#opt.dirty_decay_ms
+#
+# muzzy_decay_ms:0 - Setting muzzy decay to 0 (jemalloc default) disables the
+#   intermediate MADV_FREE state and directly frees pages via MADV_DONTNEED.
+#   With MADV_FREE, the Linux kernel retains pages in process RSS until system
+#   memory pressure occurs, preventing cgroup/Prometheus metrics from reflecting
+#   memory release.
+#   See: https://jemalloc.net/jemalloc.3.html#opt.muzzy_decay_ms
+ovn_enable_jemalloc=${OVN_ENABLE_JEMALLOC:-"true"}
+ovn_jemalloc_malloc_conf=${OVN_JEMALLOC_MALLOC_CONF:-"background_thread:false,dirty_decay_ms:10000,muzzy_decay_ms:0"}
+ovn_jemalloc_lib=${OVN_JEMALLOC_LIB:-}
 
 # ovnkube.sh version (Update during each release)
 ovnkube_version="1.4.0"
@@ -356,6 +389,36 @@ setup_ovs_permissions() {
     chown -R ${ovs_user_id} ${OVN_RUNDIR}
     chown -R ${ovs_user_id} ${OVN_LOGDIR}
   fi
+}
+
+# Validates that jemalloc can be preloaded by ld.so.
+# Returns 0 and echoes the library name/path, or logs ld.so's error and returns 1.
+get_jemalloc_lib() {
+  local lib="${ovn_jemalloc_lib:-libjemalloc.so.2}"
+  local probe_err
+
+  probe_err=$(LD_PRELOAD="${LD_PRELOAD:+${LD_PRELOAD}:}${lib}" /bin/true 2>&1)
+  if [[ -n "${probe_err}" ]]; then
+    echo "ERROR: jemalloc is enabled (OVN_ENABLE_JEMALLOC=true) but '${lib}' failed to preload: ${probe_err}" >&2
+    return 1
+  fi
+
+  echo "${lib}"
+}
+
+# Runs the given command with jemalloc preloaded if enabled.
+# Additive to any existing LD_PRELOAD set in debug environments.
+run_with_jemalloc_if_enabled() {
+  if [[ "${ovn_enable_jemalloc}" == "true" ]]; then
+    local jemalloc_lib
+    if ! jemalloc_lib=$(get_jemalloc_lib); then
+      exit 1
+    fi
+    LD_PRELOAD="${LD_PRELOAD:+${LD_PRELOAD}:}${jemalloc_lib}" \
+      MALLOC_CONF="${ovn_jemalloc_malloc_conf}" "$@"
+    return $?
+  fi
+  "$@"
 }
 
 run_as_ovs_user_if_needed() {
@@ -728,6 +791,9 @@ display_env() {
   echo OVN_KUBERNETES_CONNTRACK_ZONE ${ovn_conntrack_zone}
   echo ovnkube.sh version ${ovnkube_version}
   echo OVN_HOST_NETWORK_NAMESPACE ${ovn_host_network_namespace}
+  echo OVN_ENABLE_JEMALLOC ${ovn_enable_jemalloc}
+  echo OVN_JEMALLOC_MALLOC_CONF ${ovn_jemalloc_malloc_conf}
+  echo OVN_JEMALLOC_LIB ${ovn_jemalloc_lib}
 }
 
 ovn_debug() {
@@ -817,16 +883,18 @@ ovs-server() {
   # bridge, and move IP configuration as necessary.
   ovs_options="${ovs_options} --delete-transient-ports"
 
-  /usr/share/openvswitch/scripts/ovs-ctl start --no-ovs-vswitchd \
-    --system-id=random ${ovs_options} ${USER_ARGS} "$@"
+  run_with_jemalloc_if_enabled \
+    /usr/share/openvswitch/scripts/ovs-ctl start --no-ovs-vswitchd \
+      --system-id=random ${ovs_options} ${USER_ARGS} "$@"
 
   # Reduce stack size to 2M from default 8M as per below commit on Openvswitch
   # https://github.com/openvswitch/ovs/commit/b82a90e266e1246fe2973db97c95df22558174ea
   # added while troubleshooting on https://bugzilla.redhat.com/show_bug.cgi?id=1572797
   ulimit -s 2048
 
-  /usr/share/openvswitch/scripts/ovs-ctl start --no-ovsdb-server \
-    --system-id=random ${ovs_options} ${USER_ARGS} "$@"
+  run_with_jemalloc_if_enabled \
+    /usr/share/openvswitch/scripts/ovs-ctl start --no-ovsdb-server \
+      --system-id=random ${ovs_options} ${USER_ARGS} "$@"
 
   if [[ $(nproc) -gt 32 ]]; then
     echo "Warning: Higher memory allocation by ovs-vswitchd is expected due to high number of n-handler-threads and n-revalidator-threads"
@@ -881,9 +949,10 @@ local-nb-ovsdb() {
   rm -f ${OVN_RUNDIR}/ovnnb_db.pid
 
   echo "=============== run nb-ovsdb (unix sockets only) =========="
-  run_as_ovs_user_if_needed \
-    ${OVNCTL_PATH} run_nb_ovsdb --no-monitor \
-    --ovn-nb-log="${ovn_loglevel_nb}" &
+  run_with_jemalloc_if_enabled \
+    run_as_ovs_user_if_needed \
+      ${OVNCTL_PATH} run_nb_ovsdb --no-monitor \
+      --ovn-nb-log="${ovn_loglevel_nb}" &
 
   wait_for_event attempts=3 process_ready ovnnb_db
   echo "=============== nb-ovsdb (unix sockets only) ========== RUNNING"
@@ -920,9 +989,10 @@ local-sb-ovsdb() {
   rm -f ${OVN_RUNDIR}/ovnsb_db.pid
 
   echo "=============== run sb-ovsdb (unix sockets only) ========== "
-  run_as_ovs_user_if_needed \
-    ${OVNCTL_PATH} run_sb_ovsdb --no-monitor \
-    --ovn-sb-log="${ovn_loglevel_sb}" &
+  run_with_jemalloc_if_enabled \
+    run_as_ovs_user_if_needed \
+      ${OVNCTL_PATH} run_sb_ovsdb --no-monitor \
+      --ovn-sb-log="${ovn_loglevel_sb}" &
 
   wait_for_event attempts=3 process_ready ovnsb_db
   echo "=============== sb-ovsdb (unix sockets only) ========== RUNNING"
@@ -950,11 +1020,12 @@ run-ovn-northd() {
 
   # no monitor (and no detach), start northd which connects to the
   # local NB/SB OVSDB unix sockets
-  run_as_ovs_user_if_needed \
-    ${OVNCTL_PATH} start_northd \
-    --no-monitor --ovn-manage-ovsdb=no \
-    --ovn-northd-log="${ovn_loglevel_northd}" \
-    ${ovn_northd_opts}
+  run_with_jemalloc_if_enabled \
+    run_as_ovs_user_if_needed \
+      ${OVNCTL_PATH} start_northd \
+      --no-monitor --ovn-manage-ovsdb=no \
+      --ovn-northd-log="${ovn_loglevel_northd}" \
+      ${ovn_northd_opts}
 
   wait_for_event attempts=3 process_ready ovn-northd
   echo "=============== run_ovn_northd ========== RUNNING"
@@ -2163,10 +2234,11 @@ ovn-controller() {
   rm -f /var/run/ovn-kubernetes/cni/*
   rm -f ${OVN_RUNDIR}/ovn-controller.*.ctl
 
-  run_as_ovs_user_if_needed \
-    ${OVNCTL_PATH} --no-monitor start_controller \
-    --ovn-controller-log="${ovn_loglevel_controller}" \
-    ${ovn_controller_opts}
+  run_with_jemalloc_if_enabled \
+    run_as_ovs_user_if_needed \
+      ${OVNCTL_PATH} --no-monitor start_controller \
+      --ovn-controller-log="${ovn_loglevel_controller}" \
+      ${ovn_controller_opts}
 
   wait_for_event attempts=3 process_ready ovn-controller
   echo "=============== ovn-controller ========== running"

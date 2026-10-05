@@ -172,7 +172,7 @@ RUN INSTALL_PKGS=" \
     libpcap hostname kubernetes-client util-linux \
     ovn ovn-central ovn-host python3-openvswitch tcpdump openvswitch-test python3-pyOpenSSL \
     iptables nftables iproute iputils ndisc6 libndp \
-    libreswan openvswitch-ipsec \
+    libreswan openvswitch-ipsec jemalloc \
     " && \
     dnf install --best --refresh -y --setopt=tsflags=nodocs $INSTALL_PKGS && \
     dnf clean all && rm -rf /var/cache/dnf/*
