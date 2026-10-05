@@ -164,6 +164,47 @@ func TestSyncNAD_NotifiesReconcilers(t *testing.T) {
 	g.Eventually(keyCh, time.Second).Should(gomega.Receive(gomega.Equal(nadKey)))
 }
 
+// TestGetActiveNetworkForNamespaceReturnsLiveDefaultNetwork ensures that for a
+// default-network (non-UDN) namespace, GetActiveNetworkForNamespace returns a netInfo
+// carrying the live default network's managed state (e.g. pod-network advertisement),
+// rather than a blank DefaultNetInfo. Before the fix it returned &util.DefaultNetInfo{},
+// so advertisement state was lost and callers (e.g. the EgressIP teardown path) wrongly
+// treated the advertised default network as not advertised.
+func TestGetActiveNetworkForNamespaceReturnsLiveDefaultNetwork(t *testing.T) {
+	g := gomega.NewWithT(t)
+
+	g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+	t.Cleanup(func() {
+		g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+	})
+	config.OVNKubernetesFeature.EnableMultiNetwork = true
+	config.OVNKubernetesFeature.EnableNetworkSegmentation = true
+
+	const nodeName = "node1"
+
+	// The live/managed default network is advertised at nodeName.
+	defaultNet := util.NewMutableNetInfo(&util.DefaultNetInfo{})
+	defaultNet.SetPodNetworkAdvertisedVRFs(map[string][]string{nodeName: {types.DefaultNetworkName}})
+
+	nc := &networkController{
+		networks:           map[string]util.MutableNetInfo{types.DefaultNetworkName: defaultNet},
+		networkControllers: map[string]*networkControllerState{},
+	}
+	c := &nadController{
+		name:              "test-nad-controller",
+		networkController: nc,
+		nads:              map[string]string{},
+		primaryNADs:       map[string]string{},
+		namespaceLister:   &fakeNamespaceLister{noUDNLabel: true},
+	}
+
+	netInfo, err := c.GetActiveNetworkForNamespace("default-namespace")
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+	g.Expect(netInfo.GetNetworkName()).To(gomega.Equal(types.DefaultNetworkName))
+	g.Expect(util.IsPodNetworkAdvertisedAtNode(netInfo, nodeName)).To(gomega.BeTrue(),
+		"GetActiveNetworkForNamespace must return the live default network's advertisement state, not a blank DefaultNetInfo")
+}
+
 type testNetworkController struct {
 	util.ReconcilableNetInfo
 	tcm             *testControllerManager
@@ -404,7 +445,11 @@ func (tcm *testControllerManager) Filter(*nettypes.NetworkAttachmentDefinition) 
 	return false, nil
 }
 
-type fakeNamespaceLister struct{}
+type fakeNamespaceLister struct {
+	// noUDNLabel, when true, returns namespaces WITHOUT the required UDN label,
+	// i.e. default-network namespaces. The zero value returns UDN namespaces.
+	noUDNLabel bool
+}
 
 func (f *fakeNamespaceLister) List(labels.Selector) (ret []*corev1.Namespace, err error) {
 	return nil, nil
@@ -413,10 +458,14 @@ func (f *fakeNamespaceLister) List(labels.Selector) (ret []*corev1.Namespace, er
 // Get retrieves the Namespace from the index for a given name.
 // Objects returned here must be treated as read-only.
 func (f *fakeNamespaceLister) Get(name string) (*corev1.Namespace, error) {
+	nsLabels := map[string]string{types.RequiredUDNNamespaceLabel: ""}
+	if f.noUDNLabel {
+		nsLabels = nil
+	}
 	return &corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:   name,
-			Labels: map[string]string{types.RequiredUDNNamespaceLabel: ""},
+			Labels: nsLabels,
 		},
 	}, nil
 }

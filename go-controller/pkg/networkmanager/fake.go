@@ -72,6 +72,11 @@ type FakeNetworkManager struct {
 	UDNNamespaces sets.Set[string]
 	// NotFoundNamespaces are namespaces absent from the informer cache for GetActiveNetworkForNamespace.
 	NotFoundNamespaces sets.Set[string]
+	// DefaultNetwork, when set, is returned (as a copy) for non-UDN namespaces by
+	// GetActiveNetworkForNamespace[Fast], mirroring the real nadController which returns
+	// a copy of the live default network (carrying managed state such as pod-network
+	// advertisement) rather than a blank DefaultNetInfo.
+	DefaultNetwork util.NetInfo
 	// ActiveNodes tracks node activity per network for Dynamic UDN tests.
 	ActiveNodes map[string]map[string]bool
 }
@@ -192,6 +197,9 @@ func (fnm *FakeNetworkManager) GetActiveNetworkForNamespaceFast(namespace string
 	}
 	if fnm.UDNNamespaces != nil && fnm.UDNNamespaces.Has(namespace) {
 		return nil
+	}
+	if fnm.DefaultNetwork != nil {
+		return util.NewMutableNetInfo(fnm.DefaultNetwork)
 	}
 	return &util.DefaultNetInfo{}
 }

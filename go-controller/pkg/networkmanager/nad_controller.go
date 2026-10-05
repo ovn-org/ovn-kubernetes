@@ -1350,8 +1350,17 @@ func (c *nadController) GetActiveNetworkForNamespace(namespace string) (util.Net
 		return nil, fmt.Errorf("failed to get namespace %q: %w", namespace, err)
 	}
 	if _, exists := ns.Labels[types.RequiredUDNNamespaceLabel]; !exists {
-		// UDN required label not set on namespace, assume default network
-		return &util.DefaultNetInfo{}, nil
+		// UDN required label not set on namespace, assume default network.
+		// Return a copy of the live default network so callers see its managed
+		// state (e.g. pod-network advertisement) instead of a static, blank
+		// DefaultNetInfo. A copy keeps the shared managed object safe from caller
+		// mutation. Fall back to a blank DefaultNetInfo if the default network is
+		// not managed yet.
+		network := c.networkController.getNetwork(types.DefaultNetworkName)
+		if network == nil {
+			return &util.DefaultNetInfo{}, nil
+		}
+		return util.NewMutableNetInfo(network), nil
 	}
 
 	// primary UDN territory, check if our NAD controller to see if it has processed the network and if the
