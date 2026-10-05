@@ -59,6 +59,7 @@ type config struct {
 	podAdmissionConditions     []ovnwebhook.PodAdmissionConditionOption
 	minTLSVersion              string
 	tlsCipherSuites            cli.StringSlice
+	tlsCurvePreferences        cli.IntSlice
 }
 
 var cliCfg config
@@ -274,6 +275,16 @@ func main() {
 			Usage:       "Comma-separated list of cipher suites for the webhook server",
 			Destination: &cliCfg.tlsCipherSuites,
 		},
+		&cli.IntSliceFlag{
+			Name: "tls-curve-preferences",
+			Usage: "Comma-separated list of numeric Go crypto/tls CurveID values, as the allowed key exchange mechanisms " +
+				"for the server. The supported values depend on the Go version used. " +
+				"See https://pkg.go.dev/crypto/tls#CurveID for values supported for each Go version. " +
+				"The order of the list is ignored, and key exchange mechanisms are chosen " +
+				"by Go from this list using an internal preference order. " +
+				"If omitted, the default Go key-exchange mechanisms will be used.",
+			Destination: &cliCfg.tlsCurvePreferences,
+		},
 	}
 	ctx := context.Background()
 
@@ -309,7 +320,8 @@ func main() {
 }
 
 func runWebhook(ctx context.Context, restCfg *rest.Config) error {
-	applyTLSOptions, err := tls.NewApplyConfigOptions(cliCfg.minTLSVersion, cliCfg.tlsCipherSuites.Value())
+	applyTLSOptions, err := tls.NewApplyConfigOptions(cliCfg.minTLSVersion, cliCfg.tlsCipherSuites.Value(),
+		cliCfg.tlsCurvePreferences.Value())
 	if err != nil {
 		return err
 	}

@@ -509,8 +509,9 @@ type MetricsConfig struct {
 
 // TLSConfig holds TLS-related configuration parameters.
 type TLSConfig struct {
-	MinVersion   string `gcfg:"tls-min-version"`
-	CipherSuites string `gcfg:"tls-cipher-suites"`
+	MinVersion       string `gcfg:"tls-min-version"`
+	CipherSuites     string `gcfg:"tls-cipher-suites"`
+	CurvePreferences string `gcfg:"tls-curve-preferences"`
 
 	// ApplyOptions is the parsed and validated TLS configuration function
 	// that can be applied to tls.Config. This is populated during config
@@ -529,6 +530,24 @@ func (c *TLSConfig) ParseCipherSuites() []string {
 		}
 	}
 	return result
+}
+
+// ParseCurvePreferences parses the comma-separated CurvePreferences string into a slice of integers.
+// Returns an error if any value is not a valid integer.
+func (c *TLSConfig) ParseCurvePreferences() ([]int, error) {
+	curves := strings.Split(c.CurvePreferences, ",")
+	result := make([]int, 0, len(curves))
+	for _, curve := range curves {
+		if trimmed := strings.TrimSpace(curve); trimmed != "" {
+			val, err := strconv.Atoi(trimmed)
+			if err != nil {
+				return nil, fmt.Errorf("invalid curve preference %q: %w", trimmed, err)
+			}
+			result = append(result, val)
+		}
+	}
+
+	return result, nil
 }
 
 // OVNKubernetesFeatureConfig holds OVN-Kubernetes feature enhancement config file parameters and command-line overrides
@@ -1611,6 +1630,16 @@ var TLSFlags = []cli.Flag{
 		Usage:       "Comma-separated list of cipher suites (TLS 1.0-1.2 only; ignored for TLS 1.3)",
 		Destination: &cliConfig.TLS.CipherSuites,
 	},
+	&cli.StringFlag{
+		Name: "tls-curve-preferences",
+		Usage: "Comma-separated list of numeric Go crypto/tls CurveID values, as the allowed key exchange mechanisms " +
+			"for the server. The supported values depend on the Go version used. " +
+			"See https://pkg.go.dev/crypto/tls#CurveID for values supported for each Go version. " +
+			"The order of the list is ignored, and key exchange mechanisms are chosen " +
+			"by Go from this list using an internal preference order. " +
+			"If omitted, the default Go key-exchange mechanisms will be used.",
+		Destination: &cliConfig.TLS.CurvePreferences,
+	},
 }
 
 // EgressIPHealthCheckTLSFlags capture Egress IP gRPC health-check TLS options.
@@ -2249,7 +2278,11 @@ func buildTLSConfig(cli, file *config) error {
 
 	// Parse and validate the TLS config, storing the result
 	var err error
-	TLS.ApplyOptions, err = tls.NewApplyConfigOptions(TLS.MinVersion, TLS.ParseCipherSuites())
+	curvePreferences, err := TLS.ParseCurvePreferences()
+	if err != nil {
+		return fmt.Errorf("invalid TLS curve preferences: %v", err)
+	}
+	TLS.ApplyOptions, err = tls.NewApplyConfigOptions(TLS.MinVersion, TLS.ParseCipherSuites(), curvePreferences)
 	if err != nil {
 		return fmt.Errorf("invalid TLS configuration: %v", err)
 	}

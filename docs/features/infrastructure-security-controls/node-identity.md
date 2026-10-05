@@ -79,3 +79,38 @@ ovnkube-identity-57f9778d99-llfqz   1/1     Running   0          30m   172.18.0.
 ```
 This approach allows us to collocate the webhook with the API server for better response times
 and avoid relying on cluster networking.
+
+## TLS Configuration
+
+The ovnkube-identity webhook server supports TLS configuration options to control the security parameters of the HTTPS endpoint.
+
+### --tls-min-version
+
+Sets the minimum TLS version supported by the webhook server. Example values: `VersionTLS12`, `VersionTLS13`.
+If omitted, the Go default minimum TLS version is used.
+
+### --tls-cipher-suites
+
+Comma-separated list of cipher suite names for TLS 1.0-1.2 connections. This option is ignored for TLS 1.3, which uses a fixed set of cipher suites.
+Example: `TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384`.
+If omitted, the Go default cipher suites are used.
+
+### --tls-curve-preferences
+
+Comma-separated list of numeric Go `crypto/tls` CurveID values, specifying the allowed key-exchange mechanisms.
+The supported values depend on the Go version in use.
+See [crypto/tls.CurveID](https://pkg.go.dev/crypto/tls#CurveID) for values supported by each Go version.
+
+Common curve values:
+- `23` - P-256 (CurveP256)
+- `24` - P-384 (CurveP384)
+- `25` - P-521 (CurveP521)
+- `29` - X25519
+
+Example: `--tls-curve-preferences=23,24,29` restricts the server to the P-256, P-384, and X25519 key-exchange mechanisms.
+
+**Note:** The order of curves in the list is ignored. Go selects key exchange mechanisms from this list using its own internal preference order.
+
+**Behavior:**
+- **Omitted flag:** Uses the Go default key-exchange mechanisms (recommended for most deployments).
+- **Explicit empty value** (e.g., `--tls-curve-preferences=""`): Also uses the Go default key-exchange mechanisms, equivalent to omitting the flag.
