@@ -30,11 +30,16 @@ var (
 )
 
 type IPReleaser interface {
-	ReleaseIPs(ips []*net.IPNet) error
+	ReleaseIPs(name, owner string, ips []*net.IPNet) error
 }
 
 type IPAllocator interface {
-	AllocateIPs(ips []*net.IPNet) error
+	AllocateIPs(name, owner string, ips []*net.IPNet) error
+}
+
+// IPAMClaimOwner identifies a reservation that survives the pod using it.
+func IPAMClaimOwner(claim *ipamclaimsapi.IPAMClaim) string {
+	return "ipamclaim/" + string(claim.UID)
 }
 
 type PersistentAllocations interface {
@@ -155,8 +160,8 @@ func (icr *IPAMClaimReconciler) FindIPAMClaim(claimName string, namespace string
 }
 
 // Sync initializes the IPs allocator with the IPAMClaims already existing on
-// the cluster. For live pods, therse are already allocated, so no error will
-// be thrown (e.g. we ignore the `ipam.IsErrAllocated` error
+// the cluster. Replaying a claim's own reservations succeeds; conflicts with
+// another owner are returned to the caller.
 func (icr *IPAMClaimReconciler) Sync(objs []interface{}, ipAllocator IPAllocator) error {
 	for _, obj := range objs {
 		ipamClaim, ok := obj.(*ipamclaimsapi.IPAMClaim)
@@ -178,7 +183,8 @@ func (icr *IPAMClaimReconciler) Sync(objs []interface{}, ipAllocator IPAllocator
 		}
 
 		if len(ipnets) != 0 {
-			if err := ipAllocator.AllocateIPs(ipnets); err != nil && !ipam.IsErrAllocated(err) {
+			if err := ipAllocator.AllocateIPs(icr.netInfo.GetNetworkName(), IPAMClaimOwner(ipamClaim), ipnets); err != nil &&
+				(!ipam.IsErrAllocated(err) || errors.Is(err, ipam.ErrAllocatedByOther)) {
 				return fmt.Errorf("failed syncing persistent ips: %w", err)
 			}
 		}
@@ -199,7 +205,7 @@ func (icr *IPAMClaimReconciler) releaseIPs(ipamClaim *ipamclaimsapi.IPAMClaim, i
 		)
 		return nil
 	}
-	if err := ipReleaser.ReleaseIPs(ips); err != nil {
+	if err := ipReleaser.ReleaseIPs(icr.netInfo.GetNetworkName(), IPAMClaimOwner(ipamClaim), ips); err != nil {
 		return fmt.Errorf("failed releasing persistent IPs: %v", err)
 	}
 	klog.V(5).Infof("Released IPs: %+v", ips)

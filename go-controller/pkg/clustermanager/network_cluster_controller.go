@@ -974,8 +974,7 @@ func (h *networkClusterControllerEventHandler) DeleteResource(obj, _ interface{}
 			return fmt.Errorf("could not cast obj of type %T to *ipamclaimsapi.IPAMClaim", obj)
 		}
 
-		ipAllocator := h.ncc.subnetAllocator.ForSubnet(h.ncc.GetNetworkName())
-		err := h.ncc.ipamClaimReconciler.Reconcile(ipamClaim, nil, ipAllocator)
+		err := h.ncc.ipamClaimReconciler.Reconcile(ipamClaim, nil, h.ncc.subnetAllocator)
 		if err != nil && !errors.Is(err, persistentips.ErrIgnoredIPAMClaim) {
 			return fmt.Errorf("error deleting IPAMClaim: %w", err)
 		} else if errors.Is(err, persistentips.ErrIgnoredIPAMClaim) {
@@ -1000,7 +999,7 @@ func (h *networkClusterControllerEventHandler) SyncFunc(objs []interface{}) erro
 			syncFunc = func(claims []interface{}) error {
 				return h.ncc.ipamClaimReconciler.Sync(
 					claims,
-					h.ncc.subnetAllocator.ForSubnet(h.ncc.GetNetworkName()),
+					h.ncc.subnetAllocator,
 				)
 			}
 

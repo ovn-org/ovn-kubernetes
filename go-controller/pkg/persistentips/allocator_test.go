@@ -16,6 +16,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	ktypes "k8s.io/apimachinery/pkg/types"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/allocator/ip"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/allocator/ip/subnet"
@@ -39,7 +40,7 @@ var _ = Describe("Persistent IP allocator operations", func() {
 		claimName   = "claim1"
 		namespace   = "ns1"
 		networkName = "justanetwork"
-		subnetName  = "dummy-net"
+		subnetName  = networkName
 	)
 
 	var (
@@ -49,8 +50,8 @@ var _ = Describe("Persistent IP allocator operations", func() {
 
 	Context("an existing, but empty IPAMClaim", func() {
 		var (
-			namedAllocator subnet.NamedAllocator
-			netInfo        util.NetInfo
+			allocator subnet.IPAllocator
+			netInfo   util.NetInfo
 		)
 
 		BeforeEach(func() {
@@ -71,17 +72,16 @@ var _ = Describe("Persistent IP allocator operations", func() {
 
 			ipAllocator := subnet.NewAllocator()
 			Expect(ipAllocator.AddOrUpdateSubnet(subnet.SubnetConfig{Name: subnetName, Subnets: ovntest.MustParseIPNets("192.168.200.0/24", "fd10::/64")})).To(Succeed())
-			namedAllocator = ipAllocator.ForSubnet(subnetName)
+			allocator = ipAllocator
 			ipamClaimsReconciler = NewIPAMClaimReconciler(ovnkapiclient, netInfo, nil)
-			Expect(ipAllocator.AddOrUpdateSubnet(subnet.SubnetConfig{Name: subnetName, Subnets: ovntest.MustParseIPNets("192.168.200.0/24", "fd10::/64")})).To(Succeed())
 		})
 
 		It("nothing to do when reconciling nil IPAMClaims", func() {
-			Expect(ipamClaimsReconciler.Reconcile(nil, nil, namedAllocator)).To(Succeed())
+			Expect(ipamClaimsReconciler.Reconcile(nil, nil, allocator)).To(Succeed())
 		})
 
 		DescribeTable("reconciling IPAMClaims is successful when provided with", func(oldIPAMClaim, newIPAMClaim *ipamclaimsapi.IPAMClaim) {
-			Expect(ipamClaimsReconciler.Reconcile(oldIPAMClaim, newIPAMClaim, namedAllocator)).To(Succeed())
+			Expect(ipamClaimsReconciler.Reconcile(oldIPAMClaim, newIPAMClaim, allocator)).To(Succeed())
 			updatedIPAMClaim, err := ovnkapiclient.IPAMClaimsClient.K8sV1alpha1().IPAMClaims(namespace).Get(context.Background(), claimName, metav1.GetOptions{})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(updatedIPAMClaim.Status.IPs).To(ConsistOf(newIPAMClaim.Status.IPs))
@@ -109,7 +109,7 @@ var _ = Describe("Persistent IP allocator operations", func() {
 		)
 
 		DescribeTable("syncing the IP allocator from the IPAMClaims is successful when provided with", func(ipamClaims ...interface{}) {
-			Expect(ipamClaimsReconciler.Sync(ipamClaims, namedAllocator)).To(Succeed())
+			Expect(ipamClaimsReconciler.Sync(ipamClaims, allocator)).To(Succeed())
 		},
 			Entry("no objects to sync with"),
 			Entry("an IPAMClaim without persisted IPs", emptyDummyIPAMClaim(namespace, claimName, networkName)),
@@ -123,7 +123,7 @@ var _ = Describe("Persistent IP allocator operations", func() {
 		const originalIPAMClaimIP = "192.168.200.2/24"
 
 		var (
-			namedAllocator subnet.NamedAllocator
+			allocator      subnet.IPAllocator
 			netInfo        util.NetInfo
 			originalClaims []*ipamclaimsapi.IPAMClaim
 		)
@@ -144,7 +144,7 @@ var _ = Describe("Persistent IP allocator operations", func() {
 				),
 			}
 			Expect(ipAllocator.AddOrUpdateSubnet(subnet.SubnetConfig{Name: subnetName, Subnets: ovntest.MustParseIPNets("192.168.200.0/24", "fd10::/64")})).To(Succeed())
-			namedAllocator = ipAllocator.ForSubnet(subnetName)
+			allocator = ipAllocator
 			ipamClaimsReconciler = NewIPAMClaimReconciler(ovnkapiclient, netInfo, nil)
 		})
 
@@ -153,7 +153,7 @@ var _ = Describe("Persistent IP allocator operations", func() {
 			Expect(ipamClaimsReconciler.Reconcile(
 				originalNonEmptyClaim,
 				ipamClaimWithIPs(namespace, claimName, networkName, originalIPAMClaimIP, "fd10::2/64"),
-				namedAllocator,
+				allocator,
 			)).To(
 				MatchError(
 					"failed to update IPAMClaim \"ns1/claim1\" - overwriting existing IPs [\"192.168.200.2/24\"] with newer IPs [\"192.168.200.2/24\" \"fd10::2/64\"]"))
@@ -162,16 +162,16 @@ var _ = Describe("Persistent IP allocator operations", func() {
 
 	Context("an IPAllocator having already allocated some addresses", func() {
 		var (
-			namedAllocator subnet.NamedAllocator
-			initialIPs     []string
+			allocator  subnet.IPAllocator
+			initialIPs []string
 		)
 
 		BeforeEach(func() {
 			initialIPs = []string{"192.168.200.2/24", "fd10::1/64"}
 			ipAllocator := subnet.NewAllocator()
 			Expect(ipAllocator.AddOrUpdateSubnet(subnet.SubnetConfig{Name: subnetName, Subnets: ovntest.MustParseIPNets("192.168.200.0/24", "fd10::/64")})).To(Succeed())
-			Expect(ipAllocator.AllocateIPPerSubnet(subnetName, ovntest.MustParseIPNets(initialIPs...))).To(Succeed())
-			namedAllocator = ipAllocator.ForSubnet(subnetName)
+			Expect(ipAllocator.AllocateIPs(subnetName, IPAMClaimOwner(emptyDummyIPAMClaim(namespace, claimName, networkName)), ovntest.MustParseIPNets(initialIPs...))).To(Succeed())
+			allocator = ipAllocator
 
 			netInfo, err := util.NewNetInfo(dummyNetconf(networkName))
 			Expect(err).NotTo(HaveOccurred())
@@ -185,7 +185,7 @@ var _ = Describe("Persistent IP allocator operations", func() {
 					[]interface{}{
 						ipamClaimWithIPs(namespace, claimName, networkName, initialIPs...),
 					},
-					namedAllocator,
+					allocator,
 				),
 			).To(Succeed())
 		})
@@ -196,42 +196,64 @@ var _ = Describe("Persistent IP allocator operations", func() {
 					[]interface{}{
 						ipamClaimWithIPs(namespace, claimName, "some-other-network", initialIPs...),
 					},
-					namedAllocator,
+					allocator,
 				),
 			).To(Succeed())
 			ips, err := util.ParseIPNets(initialIPs)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(namedAllocator.AllocateIPs(ips)).To(MatchError(ip.ErrAllocated))
+			Expect(allocator.AllocateIPs(subnetName, "test-owner", ips)).To(MatchError(ip.ErrAllocatedByOther))
 		})
 
 		It("successfully de-allocates an IP address from the pool", func() {
 			Expect(
 				ipamClaimsReconciler.releaseIPs(
 					ipamClaimWithIPs(namespace, claimName, networkName, initialIPs...),
-					namedAllocator,
+					allocator,
 				)).To(Succeed())
 
 			// we allocate the same IPs again, to ensure they were release with the call above
 			Expect(
-				namedAllocator.AllocateIPs(ovntest.MustParseIPNets(initialIPs...)),
+				allocator.AllocateIPs(subnetName, "test-owner", ovntest.MustParseIPNets(initialIPs...)),
 			).To(Succeed())
 		})
 
 		It("the reconcile function releases IP allocations when the IPAMClaim is removed", func() {
 			// we allocate the same IPs again, to ensure they are currently allocated
-			Expect(namedAllocator.AllocateIPs(ovntest.MustParseIPNets(initialIPs...))).To(MatchError(ip.ErrAllocated))
+			Expect(allocator.AllocateIPs(subnetName, "test-owner", ovntest.MustParseIPNets(initialIPs...))).To(MatchError(ip.ErrAllocatedByOther))
 
 			Expect(
 				ipamClaimsReconciler.Reconcile(
 					ipamClaimWithIPs(namespace, claimName, networkName, initialIPs...),
 					nil,
-					namedAllocator,
+					allocator,
 				)).To(Succeed())
 
 			// we allocate the same IPs again, to ensure they were released with the call above
-			Expect(namedAllocator.AllocateIPs(ovntest.MustParseIPNets(initialIPs...))).To(Succeed())
+			Expect(allocator.AllocateIPs(subnetName, "test-owner", ovntest.MustParseIPNets(initialIPs...))).To(Succeed())
 		})
 
+	})
+
+	Context("replacement IPAMClaims", func() {
+		It("rejects a conflicting claim and preserves reservations through stale deletion", func() {
+			allocator := subnet.NewAllocator()
+			Expect(allocator.AddOrUpdateSubnet(subnet.SubnetConfig{Name: subnetName, Subnets: ovntest.MustParseIPNets("192.168.200.0/24", "fd10::/64")})).To(Succeed())
+			netInfo, err := util.NewNetInfo(dummyNetconf(networkName))
+			Expect(err).NotTo(HaveOccurred())
+			reconciler := NewIPAMClaimReconciler(ovnkapiclient, netInfo, nil)
+			original := ipamClaimWithIPs(namespace, claimName, networkName, "192.168.200.2/24", "fd10::1/64")
+			replacement := original.DeepCopy()
+			replacement.UID = "replacement"
+			ips := ovntest.MustParseIPNets(original.Status.IPs...)
+			Expect(reconciler.Sync([]interface{}{original}, allocator)).To(Succeed())
+			Expect(reconciler.Sync([]interface{}{replacement}, allocator)).To(MatchError(ip.ErrAllocatedByOther))
+			Expect(reconciler.Reconcile(replacement, nil, allocator)).To(Succeed())
+			Expect(allocator.OwnsIPs(subnetName, IPAMClaimOwner(original), ips)).To(BeTrue())
+			Expect(reconciler.Reconcile(original, nil, allocator)).To(Succeed())
+			Expect(reconciler.Sync([]interface{}{replacement}, allocator)).To(Succeed())
+			Expect(reconciler.Reconcile(original, nil, allocator)).To(Succeed())
+			Expect(allocator.OwnsIPs(subnetName, IPAMClaimOwner(replacement), ips)).To(BeTrue())
+		})
 	})
 
 	Context("retrieving IPAMClaims", func() {
@@ -370,6 +392,7 @@ func emptyDummyIPAMClaim(namespace string, claimName string, networkName string)
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      claimName,
 			Namespace: namespace,
+			UID:       ktypes.UID(namespace + "/" + claimName),
 		},
 		Spec: ipamclaimsapi.IPAMClaimSpec{
 			Network: networkName,
@@ -378,18 +401,9 @@ func emptyDummyIPAMClaim(namespace string, claimName string, networkName string)
 }
 
 func ipamClaimWithIPs(namespace string, claimName string, networkName string, ips ...string) *ipamclaimsapi.IPAMClaim {
-	return &ipamclaimsapi.IPAMClaim{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      claimName,
-			Namespace: namespace,
-		},
-		Spec: ipamclaimsapi.IPAMClaimSpec{
-			Network: networkName,
-		},
-		Status: ipamclaimsapi.IPAMClaimStatus{
-			IPs: ips,
-		},
-	}
+	claim := emptyDummyIPAMClaim(namespace, claimName, networkName)
+	claim.Status.IPs = ips
+	return claim
 }
 
 func toRuntimeObj(ipamClaims []*ipamclaimsapi.IPAMClaim) []runtime.Object {

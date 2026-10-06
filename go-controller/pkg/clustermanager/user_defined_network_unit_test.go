@@ -205,12 +205,10 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 					gomega.Expect(nc.init()).To(gomega.Succeed())
 					gomega.Expect(nc.Start(ctx.Context)).To(gomega.Succeed())
 
-					namedSubnetAllocator := nc.subnetAllocator.ForSubnet(netInfo.GetNetworkName())
-
 					firstAllocatableIPs := []string{"192.168.200.1/24", "fd12:1234::1/64"}
 					allocatableIPs, err := util.ParseIPNets(firstAllocatableIPs)
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
-					gomega.Expect(namedSubnetAllocator.AllocateIPs(allocatableIPs)).To(gomega.Succeed())
+					gomega.Expect(nc.subnetAllocator.AllocateIPs(netInfo.GetNetworkName(), "test-owner", allocatableIPs)).To(gomega.Succeed())
 					return nil
 				}
 
@@ -575,13 +573,13 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 
 						ips, err := util.ParseIPNets([]string{subnetIP})
 						gomega.Expect(err).NotTo(gomega.HaveOccurred())
-						gomega.Expect(nc.subnetAllocator.AllocateIPPerSubnet(netInfo.GetNetworkName(), ips)).To(
-							gomega.Equal(ip.ErrAllocated))
+						gomega.Expect(nc.subnetAllocator.AllocateIPs(netInfo.GetNetworkName(), "test-owner", ips)).To(
+							gomega.MatchError(ip.ErrAllocatedByOther))
 
 						ips2, err := util.ParseIPNets([]string{subnetIP2})
 						gomega.Expect(err).NotTo(gomega.HaveOccurred())
-						gomega.Expect(nc.subnetAllocator.AllocateIPPerSubnet(netInfo.GetNetworkName(), ips2)).To(
-							gomega.Equal(ip.ErrAllocated))
+						gomega.Expect(nc.subnetAllocator.AllocateIPs(netInfo.GetNetworkName(), "test-owner", ips2)).To(
+							gomega.MatchError(ip.ErrAllocatedByOther))
 
 						return nil
 					}
@@ -632,7 +630,7 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 						ips, err := util.ParseIPNets([]string{subnetIP})
 						gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-						gomega.Expect(nc.subnetAllocator.AllocateIPPerSubnet(netInfo.GetNetworkName(), ips)).To(gomega.Succeed())
+						gomega.Expect(nc.subnetAllocator.AllocateIPs(netInfo.GetNetworkName(), "test-owner", ips)).To(gomega.Succeed())
 
 						return nil
 					}
@@ -684,9 +682,8 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 						ips, err := util.ParseIPNets([]string{subnetIP})
 						gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-						namedSubnetAllocator := nc.subnetAllocator.ForSubnet(netInfo.GetNetworkName())
 						// the IP address is already allocated in t = x
-						gomega.Expect(namedSubnetAllocator.AllocateIPs(ips)).To(gomega.Equal(ip.ErrAllocated))
+						gomega.Expect(nc.subnetAllocator.AllocateIPs(netInfo.GetNetworkName(), "test-owner", ips)).To(gomega.MatchError(ip.ErrAllocatedByOther))
 
 						gomega.Expect(
 							ipamClaimsClient.K8sV1alpha1().IPAMClaims(namespace).Delete(
@@ -697,7 +694,7 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 
 						// the IP address is available in t = x + T
 						gomega.Eventually(func() error {
-							return namedSubnetAllocator.AllocateIPs(ips)
+							return nc.subnetAllocator.AllocateIPs(netInfo.GetNetworkName(), "test-owner", ips)
 						}).Should(gomega.Succeed())
 
 						return nil
@@ -756,9 +753,8 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 						ips, err := util.ParseIPNets([]string{subnetIP})
 						gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-						namedSubnetAllocator := nc.subnetAllocator.ForSubnet(netInfo.GetNetworkName())
 						// the IP address is already allocated in t = x
-						gomega.Expect(namedSubnetAllocator.AllocateIPs(ips)).To(gomega.Equal(ip.ErrAllocated))
+						gomega.Expect(nc.subnetAllocator.AllocateIPs(netInfo.GetNetworkName(), "test-owner", ips)).To(gomega.MatchError(ip.ErrAllocatedByOther))
 
 						// deleting an allocation for a different network
 						gomega.Expect(
@@ -770,8 +766,8 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 
 						// does not impact the network for which we have the controller
 						gomega.Consistently(func() error {
-							return namedSubnetAllocator.AllocateIPs(ips)
-						}).Should(gomega.Equal(ip.ErrAllocated))
+							return nc.subnetAllocator.AllocateIPs(netInfo.GetNetworkName(), "test-owner", ips)
+						}).Should(gomega.MatchError(ip.ErrAllocatedByOther))
 
 						return nil
 					}
@@ -831,8 +827,7 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 						ips, err := util.ParseIPNets([]string{subnetIP})
 						gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-						namedSubnetAllocator := nc.subnetAllocator.ForSubnet(netInfo.GetNetworkName())
-						gomega.Expect(namedSubnetAllocator.AllocateIPs(ips)).To(gomega.Succeed())
+						gomega.Expect(nc.subnetAllocator.AllocateIPs(netInfo.GetNetworkName(), "test-owner", ips)).To(gomega.Succeed())
 
 						return nil
 					}
@@ -897,7 +892,6 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 					gomega.Expect(nc.init()).To(gomega.Succeed())
 					gomega.Expect(nc.Start(ctx.Context)).To(gomega.Succeed())
 
-					namedSubnetAllocator := nc.subnetAllocator.ForSubnet(netInfo.GetNetworkName())
 					for _, alreadyAllocatedIP := range []string{
 						"192.168.200.1/24",
 						"192.168.200.2/24",
@@ -906,8 +900,8 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 					} {
 						autoExcludedIP, err := util.ParseIPNets([]string{alreadyAllocatedIP})
 						gomega.Expect(err).NotTo(gomega.HaveOccurred())
-						gomega.Expect(namedSubnetAllocator.AllocateIPs(autoExcludedIP)).To(
-							gomega.MatchError(ip.ErrAllocated),
+						gomega.Expect(nc.subnetAllocator.AllocateIPs(netInfo.GetNetworkName(), "test-owner", autoExcludedIP)).To(
+							gomega.MatchError(ip.ErrAllocatedByOther),
 							fmt.Sprintf("expected to fail allocating IP: %q", alreadyAllocatedIP),
 						)
 					}
@@ -915,7 +909,7 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 					firstAllocatableIPs := []string{"192.168.200.3/24", "fd12:1234::3/64"}
 					allocatableIPs, err := util.ParseIPNets(firstAllocatableIPs)
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
-					gomega.Expect(namedSubnetAllocator.AllocateIPs(allocatableIPs)).To(gomega.Succeed())
+					gomega.Expect(nc.subnetAllocator.AllocateIPs(netInfo.GetNetworkName(), "test-owner", allocatableIPs)).To(gomega.Succeed())
 					return nil
 				}
 

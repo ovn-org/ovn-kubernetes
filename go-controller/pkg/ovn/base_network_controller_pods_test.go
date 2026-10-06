@@ -5,23 +5,30 @@ package ovn
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"net"
 	"testing"
 	"time"
 
 	cnitypes "github.com/containernetworking/cni/pkg/types"
 	"github.com/onsi/gomega"
+	kubevirtv1 "kubevirt.io/api/core/v1"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/sets"
+	ktypes "k8s.io/apimachinery/pkg/types"
 
+	ipallocator "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/allocator/ip"
 	ovncnitypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni/types"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
+	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/nbdb"
+	apbroutecontroller "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/controller/apbroute"
 	logicalswitchmanager "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	ovntest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing"
+	libovsdbtest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	ovntypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -49,361 +56,248 @@ func TestBaseNetworkController_GetLocalNode(t *testing.T) {
 	g.Expect(apierrors.IsNotFound(err)).To(gomega.BeTrue())
 }
 
-func TestBaseNetworkController_trackPodsReleasedBeforeStartup(t *testing.T) {
-	tests := []struct {
-		name           string
-		podAnnotations map[*corev1.Pod]map[string]*util.PodAnnotation
-		expected       map[string]sets.Set[string]
-	}{
-		{
-			name: "a scheduled/running annotated pod should not be considered released",
-			podAnnotations: map[*corev1.Pod]map[string]*util.PodAnnotation{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						UID: "running",
-					},
-				}: {
-					"default": {
-						IPs: []*net.IPNet{ovntest.MustParseIPNet("192.168.0.1/24")},
-					},
-				},
-			},
-			expected: map[string]sets.Set[string]{},
-		},
-		{
-			name: "a completed annotated pod should not be considered released",
-			podAnnotations: map[*corev1.Pod]map[string]*util.PodAnnotation{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						UID: "running",
-					},
-					Status: corev1.PodStatus{
-						Phase: corev1.PodSucceeded,
-					},
-				}: {
-					"default": {
-						IPs: []*net.IPNet{ovntest.MustParseIPNet("192.168.0.1/24")},
-					},
-				},
-			},
-			expected: map[string]sets.Set[string]{},
-		},
-		{
-			// consider dual-stack IPs individually but only track at the pod level based
-			// on a couple of assumptions:
-			// - while the same pair of IPs released for a pod will most likely be
-			//   assigned to a different pod, assume that one of those IPs might be
-			//   assigned to a pod and the other IP to a different pod. This is easy to
-			//   handle so better take a safe approach
-			// - assume that there is no error path leading to one of the IPs of the
-			//   pair to be released while the other is not. This is based on the fact
-			//   that both IPs are released in block.
-			name: "a completed pod sharing at least one IP with a running Pod should be considered released",
-			podAnnotations: map[*corev1.Pod]map[string]*util.PodAnnotation{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						UID: "completed",
-					},
-					Status: corev1.PodStatus{
-						Phase: corev1.PodSucceeded,
-					},
-				}: {
-					"default": {
-						IPs: []*net.IPNet{
-							ovntest.MustParseIPNet("192.168.0.1/24"),
-							ovntest.MustParseIPNet("fd11::1/64"),
-						},
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						UID: "running",
-					},
-				}: {
-					"default": {
-						IPs: []*net.IPNet{
-							ovntest.MustParseIPNet("192.168.0.2/24"),
-							ovntest.MustParseIPNet("fd11::1/64"),
-						},
-					},
-				},
-			},
-			expected: map[string]sets.Set[string]{
-				"default": sets.New("completed"),
-			},
-		},
-		{
-			name: "only the last completed pod of multiple completed pods sharing at least one IP should not be considered released",
-			podAnnotations: map[*corev1.Pod]map[string]*util.PodAnnotation{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						UID: "completed-third",
-					},
-					Status: corev1.PodStatus{
-						Phase: corev1.PodSucceeded,
-						Conditions: []corev1.PodCondition{
-							{
-								Type: corev1.PodInitialized,
-								LastTransitionTime: metav1.Time{
-									Time: time.Time{}.Add(time.Second * 2),
-								},
-							},
-						},
-					},
-				}: {
-					"default": {
-						IPs: []*net.IPNet{
-							ovntest.MustParseIPNet("192.168.0.1/24"),
-							ovntest.MustParseIPNet("fd11::1/64"),
-						},
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						UID: "completed-first",
-					},
-					Status: corev1.PodStatus{
-						Phase: corev1.PodSucceeded,
-						Conditions: []corev1.PodCondition{
-							{
-								Type: corev1.PodInitialized,
-								LastTransitionTime: metav1.Time{
-									Time: time.Time{},
-								},
-							},
-						},
-					},
-				}: {
-					"default": {
-						IPs: []*net.IPNet{
-							ovntest.MustParseIPNet("192.168.0.1/24"),
-							ovntest.MustParseIPNet("fd11::2/64"),
-						},
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						UID: "completed-second",
-					},
-					Status: corev1.PodStatus{
-						Phase: corev1.PodSucceeded,
-						Conditions: []corev1.PodCondition{
-							{
-								Type: corev1.PodInitialized,
-								LastTransitionTime: metav1.Time{
-									Time: time.Time{}.Add(time.Second),
-								},
-							},
-						},
-					},
-				}: {
-					"default": {
-						IPs: []*net.IPNet{
-							ovntest.MustParseIPNet("192.168.0.2/24"),
-							ovntest.MustParseIPNet("fd11::1/64"),
-						},
-					},
-				},
-			},
-			expected: map[string]sets.Set[string]{
-				"default": sets.New("completed-first", "completed-second"),
-			},
-		},
-		{
-			name: "a completed pod sharing at least one IP from nad1 with a running Pod on nad2 should be considered released on nad1",
-			podAnnotations: map[*corev1.Pod]map[string]*util.PodAnnotation{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						UID: "completed",
-					},
-					Status: corev1.PodStatus{
-						Phase: corev1.PodSucceeded,
-					},
-				}: {
-					"nad1": {
-						IPs: []*net.IPNet{
-							ovntest.MustParseIPNet("192.168.0.1/24"),
-							ovntest.MustParseIPNet("fd11::1/64"),
-						},
-					},
-					"nad2": {
-						IPs: []*net.IPNet{
-							ovntest.MustParseIPNet("192.168.0.2/24"),
-							ovntest.MustParseIPNet("fd11::2/64"),
-						},
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						UID: "running",
-					},
-				}: {
-					"nad1": {
-						IPs: []*net.IPNet{
-							ovntest.MustParseIPNet("192.168.0.3/24"),
-							ovntest.MustParseIPNet("fd11::3/64"),
-						},
-					},
-					"nad2": {
-						IPs: []*net.IPNet{
-							ovntest.MustParseIPNet("192.168.0.4/24"),
-							ovntest.MustParseIPNet("fd11::1/64"),
-						},
-					},
-				},
-			},
-			expected: map[string]sets.Set[string]{
-				"nad1": sets.New("completed"),
-			},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			g := gomega.NewWithT(t)
-			bnc := &BaseNetworkController{}
-
-			bnc.trackPodsReleasedBeforeStartup(tt.podAnnotations)
-
-			g.Expect(bnc.releasedPodsBeforeStartup).To(gomega.Equal(tt.expected))
-		})
-	}
-}
-
-func TestBaseNetworkController_shouldReleaseDeletedPod(t *testing.T) {
-	tests := []struct {
-		name string // description of this test case
-		// Named input parameters for target function.
-		pod        *corev1.Pod
-		switchName string
-		nad        string
-		podIfAddrs []*net.IPNet
-		want       bool
-		wantErr    bool
-	}{
-		{
-			name: "should release a running pod",
-			pod:  &corev1.Pod{Status: corev1.PodStatus{Phase: corev1.PodRunning}},
-			want: true,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var bnc BaseNetworkController
-			bnc.ReconcilableNetInfo = &util.DefaultNetInfo{}
-			got, gotErr := bnc.shouldReleaseDeletedPod(tt.pod, tt.switchName, tt.nad, tt.podIfAddrs)
-			if gotErr != nil {
-				if !tt.wantErr {
-					t.Errorf("shouldReleaseDeletedPod() failed: %v", gotErr)
-				}
-				return
-			}
-			if tt.wantErr {
-				t.Fatal("shouldReleaseDeletedPod() succeeded unexpectedly")
-			}
-			if got != tt.want {
-				t.Errorf("shouldReleaseDeletedPod() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestPodDeleteRetryPreservesReallocatedIPs(t *testing.T) {
-	for _, tc := range []struct{ sameName, annotationVisible bool }{
-		{false, false}, {true, false}, {false, true}, {true, true},
-	} {
-		t.Run(fmt.Sprintf("same-name=%t/annotation-visible=%t", tc.sameName, tc.annotationVisible), func(t *testing.T) {
-			g := gomega.NewWithT(t)
-			pod := ovntest.NewPod("namespace", "old-pod", "node1", "10.128.0.3")
-			pod.UID = "old-uid"
-			pod.Status.Phase = corev1.PodRunning
-			ips := ovntest.MustParseIPNets("10.128.0.3/24", "fd00::3/64")
-			var err error
-			pod.Annotations, err = util.MarshalPodAnnotation(pod.Annotations, &util.PodAnnotation{
-				IPs: ips, MAC: ovntest.MustParseMAC("0a:58:0a:80:00:03"),
-			}, ovntypes.DefaultNetworkName)
-			g.Expect(err).NotTo(gomega.HaveOccurred())
-			clients := util.GetOVNClientset(pod).GetOVNKubeControllerClientset()
-			wf, err := factory.NewOVNKubeControllerWatchFactory(clients, pod.Spec.NodeName)
-			g.Expect(err).NotTo(gomega.HaveOccurred())
-			g.Expect(wf.Start()).To(gomega.Succeed())
-			t.Cleanup(wf.Shutdown)
-			bnc := &BaseNetworkController{
-				CommonNetworkControllerInfo: CommonNetworkControllerInfo{watchFactory: wf},
-				ReconcilableNetInfo:         &util.DefaultNetInfo{},
-				lsManager:                   logicalswitchmanager.NewLogicalSwitchManager(),
-			}
-			g.Expect(bnc.lsManager.AddOrUpdateSwitch("node1", ovntest.MustParseIPNets("10.128.0.0/24", "fd00::/64"), nil)).To(gomega.Succeed())
-			g.Expect(bnc.lsManager.AllocateIPs("node1", ips)).To(gomega.Succeed())
-			// The deleting UID may still be visible during the first cleanup pass.
-			release, err := bnc.shouldReleaseDeletedPod(pod, "node1", ovntypes.DefaultNetworkName, ips)
-			g.Expect(err).NotTo(gomega.HaveOccurred())
-			g.Expect(release).To(gomega.BeTrue())
-			portInfo := &lpInfo{logicalSwitch: "node1", ips: ips}
-			g.Expect(bnc.releasePodIPsOnce(pod, ovntypes.DefaultNetworkName, portInfo)).To(gomega.Succeed())
-
-			// A later cleanup failure retries the running tombstone after another
-			// pod has acquired its addresses, with or without reusing its name.
-			g.Expect(clients.KubeClient.CoreV1().Pods(pod.Namespace).Delete(context.Background(), pod.Name, metav1.DeleteOptions{})).To(gomega.Succeed())
-			owner := pod.DeepCopy()
-			owner.UID = "new-uid"
-			if !tc.sameName {
-				owner.Name = "new-pod"
-			}
-			if !tc.annotationVisible {
-				owner.Annotations = nil
-				owner.Status.PodIP = ""
-				owner.Status.PodIPs = nil
-			}
-			_, err = clients.KubeClient.CoreV1().Pods(owner.Namespace).Create(context.Background(), owner, metav1.CreateOptions{})
-			g.Expect(err).NotTo(gomega.HaveOccurred())
-			g.Eventually(func() bool {
-				current, err := wf.GetPod(owner.Namespace, owner.Name)
-				return err == nil && current.UID == owner.UID
-			}).Should(gomega.BeTrue())
-			g.Expect(bnc.lsManager.AllocateIPs("node1", ips)).To(gomega.Succeed())
-			// The allocation is already reserved even when the informer still has
-			// the pre-allocation pod, with neither an annotation nor status IPs.
-			release, err = bnc.shouldReleaseDeletedPod(pod, "node1", ovntypes.DefaultNetworkName, ips)
-			g.Expect(err).NotTo(gomega.HaveOccurred())
-			g.Expect(release).To(gomega.BeFalse(), "delete retry must preserve the new owner's allocation")
-			// Also guard the release itself if a caller retained an earlier true
-			// decision, before another cleanup pass released these addresses.
-			g.Expect(bnc.releasePodIPsOnce(pod, ovntypes.DefaultNetworkName, portInfo)).To(gomega.Succeed())
-			g.Expect(bnc.lsManager.AllocateIPs("node1", ips)).NotTo(gomega.Succeed(), "the new allocation must remain reserved")
-		})
-	}
-}
-
-func TestPodIPReleaseProgress(t *testing.T) {
+func TestPodIPOwner(t *testing.T) {
 	g := gomega.NewWithT(t)
-	bnc := &BaseNetworkController{
+	bnc := &BaseNetworkController{ReconcilableNetInfo: &util.DefaultNetInfo{}}
+	nad := ovntypes.DefaultNetworkName
+	pod := ovntest.NewPod("namespace", "pod", "node", "")
+	replacement := pod.DeepCopy()
+	replacement.UID = "replacement"
+	g.Expect(bnc.podIPOwner(pod, nad)).NotTo(gomega.Equal(bnc.podIPOwner(replacement, nad)))
+	g.Expect(bnc.podIPOwner(pod, nad)).NotTo(gomega.Equal(bnc.podIPOwner(pod, "other-nad")))
+
+	pod.Labels = map[string]string{kubevirtv1.AppLabel: "virt-launcher"}
+	pod.Annotations = map[string]string{
+		kubevirtv1.DomainAnnotation:                             "vm",
+		kubevirtv1.AllowPodBridgeNetworkLiveMigrationAnnotation: "",
+	}
+	target := pod.DeepCopy()
+	target.UID, target.Name, target.Spec.NodeName = "target", "target", "other-node"
+	g.Expect(bnc.podIPOwner(pod, nad)).To(gomega.Equal(bnc.podIPOwner(target, nad)))
+	g.Expect(bnc.podIPOwner(pod, nad)).NotTo(gomega.Equal(bnc.podIPOwner(pod, "other-nad")))
+	target.Namespace = "other-namespace"
+	g.Expect(bnc.podIPOwner(pod, nad)).NotTo(gomega.Equal(bnc.podIPOwner(target, nad)))
+	target.Namespace = pod.Namespace
+	target.Annotations[kubevirtv1.DomainAnnotation] = "other-vm"
+	g.Expect(bnc.podIPOwner(pod, nad)).NotTo(gomega.Equal(bnc.podIPOwner(target, nad)))
+}
+
+func TestVMPodIPOwnershipOnStartup(t *testing.T) {
+	g := gomega.NewWithT(t)
+	g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+	nad := ovntypes.DefaultNetworkName
+	ips := ovntest.MustParseIPNets("10.0.0.3/24", "fd00::3/64")
+	source := ovntest.NewPod("namespace", "source", "node", "")
+	source.Labels = map[string]string{kubevirtv1.AppLabel: "virt-launcher"}
+	source.Annotations = map[string]string{
+		kubevirtv1.DomainAnnotation:                             "vm",
+		kubevirtv1.AllowPodBridgeNetworkLiveMigrationAnnotation: "",
+	}
+	var err error
+	source.Annotations, err = util.MarshalPodAnnotation(source.Annotations, &util.PodAnnotation{
+		IPs: ips, MAC: util.IPAddrToHWAddr(ips[0].IP),
+	}, nad)
+	g.Expect(err).NotTo(gomega.HaveOccurred())
+	source.Status.Phase = corev1.PodSucceeded
+	source.CreationTimestamp = metav1.NewTime(time.Unix(100, 0))
+	target := source.DeepCopy()
+	target.Name, target.UID = "target", "target"
+	target.Spec.NodeName = "other-node"
+	target.Status.Phase = corev1.PodRunning
+	target.CreationTimestamp = metav1.NewTime(time.Unix(200, 0))
+	stale := source.DeepCopy()
+	stale.Name, stale.UID = "stale", "stale"
+	stale.Annotations[kubevirtv1.DomainAnnotation] = "old-vm"
+	clients := util.GetOVNClientset(source, target, stale, &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: "node"},
+	}).GetOVNKubeControllerClientset()
+	wf, err := factory.NewOVNKubeControllerWatchFactory(clients, "node")
+	g.Expect(err).NotTo(gomega.HaveOccurred())
+	g.Expect(wf.Start()).To(gomega.Succeed())
+	t.Cleanup(wf.Shutdown)
+	nbClient, dbContext, err := libovsdbtest.NewNBTestHarness(libovsdbtest.TestSetup{}, nil)
+	g.Expect(err).NotTo(gomega.HaveOccurred())
+	t.Cleanup(dbContext.Cleanup)
+	oc := &DefaultNetworkController{BaseNetworkController: BaseNetworkController{
+		CommonNetworkControllerInfo: CommonNetworkControllerInfo{watchFactory: wf, nodeName: "node", nbClient: nbClient},
+		ReconcilableNetInfo:         &util.DefaultNetInfo{},
+		lsManager:                   logicalswitchmanager.NewLogicalSwitchManager(),
+	}}
+	g.Expect(oc.createNodeLogicalSwitch("node", ovntest.MustParseIPNets("10.0.0.0/24", "fd00::/64"), "", "")).To(gomega.Succeed())
+	g.Expect(oc.lsManager.OwnsIPs("node", oc.podIPOwner(target, nad), ips)).To(gomega.BeTrue())
+
+	// Restore the remote target's reservation on its original source switch.
+	vms := map[ktypes.NamespacedName]bool{}
+	for _, pod := range []*corev1.Pod{stale, source, target} {
+		vms, _, _, err = oc.allocateSyncMigratablePodIPsOnZone(vms, pod)
+		g.Expect(err).NotTo(gomega.HaveOccurred())
+	}
+	g.Expect(oc.lsManager.OwnsIPs("node", oc.podIPOwner(target, nad), ips)).To(gomega.BeTrue())
+	g.Expect(oc.canCleanupPodIPResources(source, "node", ips)).To(gomega.BeFalse(), "the migrated VM is still running")
+	g.Expect(oc.canCleanupPodIPResources(stale, "node", ips)).To(gomega.BeFalse(), "another VM owns these IPs")
+	g.Expect(oc.removeRemoteZonePod(target)).To(gomega.Succeed())
+	g.Expect(oc.lsManager.OwnsIPs("node", oc.podIPOwner(target, nad), ips)).To(gomega.BeTrue())
+
+	target.Status.Phase = corev1.PodSucceeded
+	target, err = clients.KubeClient.CoreV1().Pods(target.Namespace).UpdateStatus(context.Background(), target, metav1.UpdateOptions{})
+	g.Expect(err).NotTo(gomega.HaveOccurred())
+	g.Eventually(func() bool {
+		pod, err := wf.GetPod(target.Namespace, target.Name)
+		return err == nil && util.PodCompleted(pod)
+	}).Should(gomega.BeTrue())
+	g.Expect(oc.canCleanupPodIPResources(source, "node", ips)).To(gomega.BeTrue())
+	g.Expect(oc.removeRemoteZonePod(target)).To(gomega.Succeed())
+	g.Expect(oc.lsManager.OwnsIPs("node", oc.podIPOwner(target, nad), ips)).To(gomega.BeFalse())
+
+	ordinary := ovntest.NewPod("namespace", "ordinary", "node", "")
+	g.Expect(oc.lsManager.AllocateIPs("node", oc.podIPOwner(ordinary, nad), ips)).To(gomega.Succeed())
+	g.Expect(oc.canCleanupPodIPResources(source, "node", ips)).To(gomega.BeFalse())
+	g.Expect(oc.removeRemoteZonePod(target)).To(gomega.Succeed())
+	g.Expect(oc.lsManager.OwnsIPs("node", oc.podIPOwner(ordinary, nad), ips)).To(gomega.BeTrue())
+}
+
+func TestMigratedVMPodIPOwnershipOnSubnetReuse(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		subnets  []string
+		localIPs []string
+	}{
+		{"both subnets reused", []string{"10.0.0.0/24", "fd00::/64"}, []string{"10.0.0.3/24", "fd00::3/64"}},
+		{"IPv4 subnet reused", []string{"10.0.0.0/24", "fd01::/64"}, []string{"10.0.0.3/24"}},
+		{"IPv6 subnet reused", []string{"10.1.0.0/24", "fd00::/64"}, []string{"fd00::3/64"}},
+		{"neither subnet reused", []string{"10.1.0.0/24", "fd01::/64"}, nil},
+	} {
+		for _, podNode := range []string{"target-node", "replacement-node"} {
+			t.Run(tc.name+"/"+podNode, func(t *testing.T) {
+				g := gomega.NewWithT(t)
+				g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+				nad := ovntypes.DefaultNetworkName
+				ips := ovntest.MustParseIPNets("10.0.0.3/24", "fd00::3/64")
+				localIPs := ovntest.MustParseIPNets(tc.localIPs...)
+				pod := ovntest.NewPod("namespace", "migrated-vm", podNode, "10.0.0.3 fd00::3")
+				pod.Status.Phase = corev1.PodRunning
+				pod.Labels = map[string]string{kubevirtv1.AppLabel: "virt-launcher"}
+				pod.Annotations = map[string]string{
+					kubevirtv1.DomainAnnotation:                             "vm",
+					kubevirtv1.AllowPodBridgeNetworkLiveMigrationAnnotation: "",
+				}
+				var err error
+				pod.Annotations, err = util.MarshalPodAnnotation(pod.Annotations,
+					&util.PodAnnotation{IPs: ips, MAC: util.IPAddrToHWAddr(ips[0].IP)}, nad)
+				g.Expect(err).NotTo(gomega.HaveOccurred())
+				clients := util.GetOVNClientset(pod,
+					&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "replacement-node"}},
+					&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "target-node"}},
+				).GetOVNKubeControllerClientset()
+				wf, err := factory.NewOVNKubeControllerWatchFactory(clients, "replacement-node")
+				g.Expect(err).NotTo(gomega.HaveOccurred())
+				g.Expect(wf.Start()).To(gomega.Succeed())
+				t.Cleanup(wf.Shutdown)
+				nbClient, dbContext, err := libovsdbtest.NewNBTestHarness(libovsdbtest.TestSetup{}, nil)
+				g.Expect(err).NotTo(gomega.HaveOccurred())
+				t.Cleanup(dbContext.Cleanup)
+				stopChan := make(chan struct{})
+				t.Cleanup(func() { close(stopChan) })
+				oc := &DefaultNetworkController{
+					BaseNetworkController: BaseNetworkController{
+						CommonNetworkControllerInfo: CommonNetworkControllerInfo{watchFactory: wf, nodeName: "replacement-node", nbClient: nbClient},
+						ReconcilableNetInfo:         &util.DefaultNetInfo{},
+						lsManager:                   logicalswitchmanager.NewLogicalSwitchManager(),
+						logicalPortCache:            NewPortCache(stopChan),
+					},
+					externalGatewayRouteInfo: apbroutecontroller.NewExternalGatewayRouteInfoCache(),
+				}
+				// The source node is gone; this node may inherit either or both of its subnets.
+				g.Expect(oc.createNodeLogicalSwitch("replacement-node", ovntest.MustParseIPNets(tc.subnets...), "", "")).To(gomega.Succeed())
+				for range 2 {
+					g.Expect(oc.syncPods([]interface{}{pod})).To(gomega.Succeed())
+				}
+				_, _, annotation, err := oc.allocateSyncMigratablePodIPsOnZone(map[ktypes.NamespacedName]bool{}, pod)
+				g.Expect(err).NotTo(gomega.HaveOccurred())
+				g.Expect(annotation.IPs).To(gomega.Equal(ips), "filtering reservations must not change the VM's annotation")
+				annotation, release, err := oc.allocatePodAnnotation(pod, nil, "namespace/migrated-vm", nad, nil, ovntypes.NetworkRolePrimary)
+				g.Expect(err).NotTo(gomega.HaveOccurred())
+				g.Expect(annotation.IPs).To(gomega.Equal(ips))
+				g.Expect(release).To(gomega.BeFalse())
+				if oc.isPodScheduledOnLocalNode(pod) && len(localIPs) != 0 {
+					other := pod.DeepCopy()
+					other.UID, other.Name = "other", "other"
+					other.Annotations[kubevirtv1.DomainAnnotation] = "other-vm"
+					_, _, err = oc.allocatePodAnnotation(other, nil, "namespace/other", nad, nil, ovntypes.NetworkRolePrimary)
+					g.Expect(errors.Is(err, ipallocator.ErrAllocatedByOther)).To(gomega.BeTrue())
+				}
+				owner := oc.podIPOwner(pod, nad)
+				ownedIPs := []*net.IPNet{}
+				for _, ip := range ips {
+					if oc.lsManager.OwnsIPs("replacement-node", owner, []*net.IPNet{ip}) {
+						ownedIPs = append(ownedIPs, ip)
+					}
+				}
+				g.Expect(ownedIPs).To(gomega.Equal(localIPs))
+				var portInfo *lpInfo
+				if oc.isPodScheduledOnLocalNode(pod) {
+					lsp := &nbdb.LogicalSwitchPort{
+						Name:      oc.GetLogicalPortName(pod, nad),
+						Addresses: []string{annotation.MAC.String() + " " + util.JoinIPNetIPs(ips, " ")},
+					}
+					g.Expect(libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitch(nbClient,
+						&nbdb.LogicalSwitch{Name: podNode}, lsp)).To(gomega.Succeed())
+					portInfo = oc.logicalPortCache.add(pod, podNode, nad, lsp.UUID, annotation.MAC, ips)
+				}
+				g.Expect(oc.removePod(pod, portInfo)).To(gomega.Succeed())
+				if portInfo != nil {
+					g.Eventually(func() ([]*nbdb.LogicalSwitchPort, error) {
+						return libovsdbops.FindLogicalSwitchPortWithPredicate(nbClient, func(lsp *nbdb.LogicalSwitchPort) bool {
+							return lsp.Name == portInfo.name
+						})
+					}).Should(gomega.BeEmpty())
+				}
+				for _, ip := range localIPs {
+					g.Expect(ipallocator.IsErrAllocated(oc.lsManager.AllocateIPs("replacement-node", "next-owner", []*net.IPNet{ip}))).To(gomega.BeTrue())
+				}
+
+				pod.Status.Phase = corev1.PodSucceeded
+				pod, err = clients.KubeClient.CoreV1().Pods(pod.Namespace).UpdateStatus(context.Background(), pod, metav1.UpdateOptions{})
+				g.Expect(err).NotTo(gomega.HaveOccurred())
+				g.Eventually(func() bool {
+					current, err := wf.GetPod(pod.Namespace, pod.Name)
+					return err == nil && util.PodCompleted(current)
+				}).Should(gomega.BeTrue())
+				g.Expect(oc.removePod(pod, portInfo)).To(gomega.Succeed())
+				if len(localIPs) != 0 {
+					g.Expect(oc.lsManager.AllocateIPs("replacement-node", "next-owner", localIPs)).To(gomega.Succeed())
+					g.Expect(oc.removePod(pod, portInfo)).To(gomega.Succeed())
+					g.Expect(oc.lsManager.OwnsIPs("replacement-node", "next-owner", localIPs)).To(gomega.BeTrue())
+				}
+			})
+		}
+	}
+}
+
+func TestPodIPCleanupOwnership(t *testing.T) {
+	g := gomega.NewWithT(t)
+	// No informer is needed: the allocator, not a pod annotation, proves ownership.
+	oc := &DefaultNetworkController{BaseNetworkController: BaseNetworkController{
 		ReconcilableNetInfo: &util.DefaultNetInfo{},
 		lsManager:           logicalswitchmanager.NewLogicalSwitchManager(),
-	}
-	pod := ovntest.NewPod("namespace", "pod", "node1", "10.128.0.3")
-	pod.UID = "old-uid"
-	ips := ovntest.MustParseIPNets("10.128.0.3/24", "fd00::3/64")
-	g.Expect(bnc.lsManager.AddOrUpdateSwitch("node1", ovntest.MustParseIPNets("10.128.0.0/24", "fd00::/64"), nil)).To(gomega.Succeed())
-	g.Expect(bnc.lsManager.AllocateIPs("node1", ips)).To(gomega.Succeed())
-	// No watch factory is needed on the ordinary running-pod fast path.
-	release, err := bnc.shouldReleaseDeletedPod(pod, "node1", "nad-a", ips)
-	g.Expect(err).NotTo(gomega.HaveOccurred())
-	g.Expect(release).To(gomega.BeTrue())
-	g.Expect(bnc.releasePodIPsOnce(pod, "nad-a", &lpInfo{logicalSwitch: "node1", ips: ips})).To(gomega.Succeed())
-	g.Expect(bnc.wasPodIPReleased(pod, "nad-a")).To(gomega.BeTrue())
-	g.Expect(bnc.wasPodIPReleased(pod, "nad-b")).To(gomega.BeFalse())
+	}}
+	pod := ovntest.NewPod("namespace", "pod", "node1", "")
 	replacement := pod.DeepCopy()
-	replacement.UID = "new-uid"
-	g.Expect(bnc.wasPodIPReleased(replacement, "nad-a")).To(gomega.BeFalse())
+	replacement.UID = "replacement"
+	nad := ovntypes.DefaultNetworkName
+	ips := ovntest.MustParseIPNets("10.128.0.3/24", "fd00::3/64")
+	portInfo := &lpInfo{logicalSwitch: "node1", ips: ips}
+	g.Expect(oc.lsManager.AddOrUpdateSwitch("node1", ovntest.MustParseIPNets("10.128.0.0/24", "fd00::/64"), nil, nil)).To(gomega.Succeed())
+	g.Expect(oc.canCleanupPodIPResources(pod, "node1", nil)).To(gomega.BeTrue())
+	g.Expect(oc.lsManager.AllocateIPs("node1", oc.podIPOwner(pod, nad), ips)).To(gomega.Succeed())
+	g.Expect(oc.canCleanupPodIPResources(pod, "node1", ips)).To(gomega.BeTrue())
+	g.Expect(oc.releasePodIPs(pod, nad, portInfo)).To(gomega.Succeed())
+	g.Expect(oc.canCleanupPodIPResources(pod, "node1", ips)).To(gomega.BeFalse())
 
-	bnc.forgetPodIPReleases(pod, "nad-b")
-	g.Expect(bnc.wasPodIPReleased(pod, "nad-a")).To(gomega.BeTrue())
-	bnc.forgetPodIPReleases(pod, "nad-a")
-	g.Expect(bnc.podIPReleases).To(gomega.BeEmpty(), "reattachment starts a fresh release lifecycle")
-	g.Expect(bnc.lsManager.AllocateIPs("node1", ips)).To(gomega.Succeed())
-	g.Expect(bnc.releasePodIPsOnce(pod, "nad-a", &lpInfo{logicalSwitch: "node1", ips: ips})).To(gomega.Succeed())
-	bnc.forgetPodIPReleases(pod)
-	g.Expect(bnc.podIPReleases).To(gomega.BeEmpty(), "successful reconciliation retires retry progress")
+	g.Expect(oc.lsManager.AllocateIPs("node1", oc.podIPOwner(replacement, nad), ips)).To(gomega.Succeed())
+	g.Expect(oc.canCleanupPodIPResources(pod, "node1", ips)).To(gomega.BeFalse())
+	g.Expect(oc.releasePodIPs(pod, nad, portInfo)).To(gomega.Succeed())
+	g.Expect(oc.lsManager.OwnsIPs("node1", oc.podIPOwner(replacement, nad), ips)).To(gomega.BeTrue())
 }
 
 // TestBaseNetworkController_allocatesPodAnnotation pins who writes the

@@ -259,7 +259,7 @@ func (oc *BaseLayer2UserDefinedNetworkController) initializeLogicalSwitch(switch
 		return nil, fmt.Errorf("failed to transact logical switch operations: %w", err)
 	}
 
-	if err = oc.lsManager.AddOrUpdateSwitch(switchName, hostSubnets, reservedSubnets, excludeSubnets...); err != nil {
+	if err = oc.lsManager.AddOrUpdateSwitch(switchName, hostSubnets, reservedSubnets, nil, excludeSubnets...); err != nil {
 		return nil, err
 	}
 

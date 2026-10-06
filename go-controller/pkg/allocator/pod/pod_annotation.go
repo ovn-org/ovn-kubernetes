@@ -73,16 +73,15 @@ func WithMACRegistry(m mac.Register) AllocatorOption {
 // The allocation can be requested through the network selection element or
 // derived from the allocator provided IPs. If the requested IPs cannot be
 // honored, a new set of IPs will be allocated unless reallocateIP is set to
-// false. When requireIPAMReservation is true, an ErrAllocated response is not
-// treated as proof that an existing annotation still owns its IPs.
+// false.
 func (allocator *PodAnnotationAllocator) AllocatePodAnnotation(
-	ipAllocator subnet.NamedAllocator,
+	ipAllocator subnet.IPAllocator,
+	subnetName, owner string,
 	node *corev1.Node,
 	pod *corev1.Pod,
 	nadKey string,
 	network *nadapi.NetworkSelectionElement,
 	reallocateIP bool,
-	requireIPAMReservation bool,
 	networkRole string) (
 	*corev1.Pod,
 	*util.PodAnnotation,
@@ -92,6 +91,7 @@ func (allocator *PodAnnotationAllocator) AllocatePodAnnotation(
 		allocator.podLister,
 		allocator.kube,
 		ipAllocator,
+		subnetName, owner,
 		allocator.netInfo,
 		node,
 		pod,
@@ -100,7 +100,6 @@ func (allocator *PodAnnotationAllocator) AllocatePodAnnotation(
 		allocator.ipamClaimsReconciler,
 		allocator.macRegistry,
 		reallocateIP,
-		requireIPAMReservation,
 		networkRole,
 	)
 }
@@ -108,7 +107,8 @@ func (allocator *PodAnnotationAllocator) AllocatePodAnnotation(
 func allocatePodAnnotation(
 	podLister listers.PodLister,
 	kube kube.Interface,
-	ipAllocator subnet.NamedAllocator,
+	ipAllocator subnet.IPAllocator,
+	subnetName, owner string,
 	netInfo util.NetInfo,
 	node *corev1.Node,
 	pod *corev1.Pod,
@@ -117,7 +117,6 @@ func allocatePodAnnotation(
 	claimsReconciler persistentips.PersistentAllocations,
 	macRegistry mac.Register,
 	reallocateIP bool,
-	requireIPAMReservation bool,
 	networkRole string) (
 	updatedPod *corev1.Pod,
 	podAnnotation *util.PodAnnotation,
@@ -130,6 +129,7 @@ func allocatePodAnnotation(
 		var rollback func()
 		updatedPod, podAnnotation, rollback, err = allocatePodAnnotationWithRollback(
 			ipAllocator,
+			subnetName, owner,
 			idAllocator,
 			netInfo,
 			node,
@@ -139,7 +139,6 @@ func allocatePodAnnotation(
 			claimsReconciler,
 			macRegistry,
 			reallocateIP,
-			requireIPAMReservation,
 			networkRole,
 		)
 		return updatedPod, rollback, err
@@ -169,7 +168,8 @@ func allocatePodAnnotation(
 // honored, a new set of IPs will be allocated unless reallocateIP is set to
 // false.
 func (allocator *PodAnnotationAllocator) AllocatePodAnnotationWithTunnelID(
-	ipAllocator subnet.NamedAllocator,
+	ipAllocator subnet.IPAllocator,
+	subnetName, owner string,
 	idAllocator id.NamedAllocator,
 	node *corev1.Node,
 	pod *corev1.Pod,
@@ -185,6 +185,7 @@ func (allocator *PodAnnotationAllocator) AllocatePodAnnotationWithTunnelID(
 		allocator.podLister,
 		allocator.kube,
 		ipAllocator,
+		subnetName, owner,
 		idAllocator,
 		allocator.netInfo,
 		node,
@@ -201,7 +202,8 @@ func (allocator *PodAnnotationAllocator) AllocatePodAnnotationWithTunnelID(
 func allocatePodAnnotationWithTunnelID(
 	podLister listers.PodLister,
 	kube kube.Interface,
-	ipAllocator subnet.NamedAllocator,
+	ipAllocator subnet.IPAllocator,
+	subnetName, owner string,
 	idAllocator id.NamedAllocator,
 	netInfo util.NetInfo,
 	node *corev1.Node,
@@ -220,6 +222,7 @@ func allocatePodAnnotationWithTunnelID(
 		var rollback func()
 		updatedPod, podAnnotation, rollback, err = allocatePodAnnotationWithRollback(
 			ipAllocator,
+			subnetName, owner,
 			idAllocator,
 			netInfo,
 			node,
@@ -229,7 +232,6 @@ func allocatePodAnnotationWithTunnelID(
 			claimsReconciler,
 			macRegistry,
 			reallocateIP,
-			false,
 			networkRole,
 		)
 		return updatedPod, rollback, err
@@ -262,10 +264,6 @@ func validateStaticIPRequest(netInfo util.NetInfo, network *nadapi.NetworkSelect
 		return fmt.Errorf("cannot allocate a static IP request with IPAM for pod %s: only supported on primary networks", podDesc)
 	}
 	if netInfo.TopologyType() != types.Layer2Topology {
-		// Static IP requests with IPAM are only supported on layer2 topology networks.
-		// On other topologies, we cannot distinguish between already allocated IPs and
-		// IPs excluded from allocation, making it impossible to safely honor static IP
-		// requests when IPAM is enabled.
 		return fmt.Errorf("cannot allocate a static IP request with IPAM for pod %s: layer2 topology is required, but network has topology %q", podDesc, netInfo.TopologyType())
 	}
 	if ipamClaim != nil && len(ipamClaim.Status.IPs) > 0 {
@@ -341,7 +339,8 @@ func validateIPFamilyMatchesNetwork(netInfo util.NetInfo, ipRequests []string) e
 // implementations. Use an inlined implementation if you want to extract
 // information from it as a side-effect.
 func allocatePodAnnotationWithRollback(
-	ipAllocator subnet.NamedAllocator,
+	ipAllocator subnet.IPAllocator,
+	subnetName, owner string,
 	idAllocator id.NamedAllocator,
 	netInfo util.NetInfo,
 	node *corev1.Node,
@@ -351,7 +350,6 @@ func allocatePodAnnotationWithRollback(
 	claimsReconciler persistentips.PersistentAllocations,
 	macRegistry mac.Register,
 	reallocateIP bool,
-	requireIPAMReservation bool,
 	networkRole string) (
 	updatedPod *corev1.Pod,
 	podAnnotation *util.PodAnnotation,
@@ -391,7 +389,7 @@ func allocatePodAnnotationWithRollback(
 		if len(releaseIPs) == 0 {
 			return
 		}
-		err := ipAllocator.ReleaseIPs(releaseIPs)
+		err := ipAllocator.ReleaseIPs(subnetName, owner, releaseIPs)
 		if err != nil {
 			klog.Errorf("Error when releasing IPs %v: %v", util.StringSlice(releaseIPs), err)
 			releaseIPs = nil
@@ -461,7 +459,8 @@ func allocatePodAnnotationWithRollback(
 			err = fmt.Errorf("error retrieving IPAMClaim for pod %s/%s: %w", pod.GetNamespace(), pod.GetName(), err)
 			return
 		}
-		hasIPAMClaim = ipamClaim != nil && len(ipamClaim.Status.IPs) > 0
+		hasIPAMClaim = len(ipamClaim.Status.IPs) > 0
+		owner = persistentips.IPAMClaimOwner(ipamClaim)
 	}
 
 	defer func() {
@@ -502,8 +501,8 @@ func allocatePodAnnotationWithRollback(
 
 	if hasIPAM {
 		if len(tentative.IPs) > 0 {
-			if err = ipAllocator.AllocateIPs(tentative.IPs); err != nil &&
-				!shouldSkipAllocateIPsError(err, isNetworkAllocated, ipamClaim, requireIPAMReservation) {
+			if err = ipAllocator.AllocateIPs(subnetName, owner, tentative.IPs); err != nil &&
+				(!ip.IsErrAllocated(err) || errors.Is(err, ip.ErrAllocatedByOther)) {
 				err = fmt.Errorf("failed to ensure requested or annotated IPs %v for %s: %w",
 					util.StringSlice(tentative.IPs), podDesc, err)
 				if !reallocateOnNonStaticIPRequest {
@@ -524,7 +523,7 @@ func allocatePodAnnotationWithRollback(
 		}
 
 		if len(tentative.IPs) == 0 {
-			tentative.IPs, err = ipAllocator.AllocateNextIPs()
+			tentative.IPs, err = ipAllocator.AllocateNextIPs(subnetName, owner)
 			if err != nil {
 				err = fmt.Errorf("failed to assign pod addresses for %s: %w", podDesc, err)
 				return
@@ -777,31 +776,4 @@ func AddRoutesGatewayIP(
 	}
 
 	return nil
-}
-
-// shouldSkipAllocateIPsError determines whether to skip/ignore IP allocation errors
-// in scenarios where IPs may already be legitimately allocated.
-// Returns false if the error is not ErrAllocated or if none of the skip conditions are met. True otherwise.
-func shouldSkipAllocateIPsError(err error, networkAllocated bool, ipamClaim *ipamclaimsapi.IPAMClaim, requireIPAMReservation bool) bool {
-	// Only skip if it's an "already allocated" error
-	if !ip.IsErrAllocated(err) || requireIPAMReservation {
-		return false
-	}
-
-	// If PreconfiguredUDNAddressesEnabled is disabled, always skip ErrAllocated
-	if !util.IsPreconfiguredUDNAddressesEnabled() {
-		return true
-	}
-
-	// Always skip ErrAllocated if network annotation already persisted on pod
-	if networkAllocated {
-		return true
-	}
-
-	// For persistent IP VM/Pods, if IPAMClaim already has IPs allocated, then ip already allocated, skip ErrAllocated
-	if ipamClaim != nil && len(ipamClaim.Status.IPs) > 0 {
-		return true
-	}
-
-	return false
 }

@@ -33,6 +33,7 @@ import (
 	addressset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/addresssetmanager"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/controller/udnenabledsvc"
+	logicalswitchmanager "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 	utilerrors "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util/errors"
@@ -429,12 +430,7 @@ func (bsnc *BaseUserDefinedNetworkController) addLogicalPortToNetworkForNAD(pod 
 
 // removePodForUserDefinedNetwork tried to tear down a pod. It returns nil on success and error on failure;
 // failure indicates the pod tear down should be retried later.
-func (bsnc *BaseUserDefinedNetworkController) removePodForUserDefinedNetwork(pod *corev1.Pod, portInfoMap map[string]*lpInfo) (err error) {
-	defer func() {
-		if err == nil {
-			bsnc.forgetPodIPReleases(pod)
-		}
-	}()
+func (bsnc *BaseUserDefinedNetworkController) removePodForUserDefinedNetwork(pod *corev1.Pod, portInfoMap map[string]*lpInfo) error {
 	if util.PodWantsHostNetwork(pod) || !util.PodScheduled(pod) {
 		return nil
 	}
@@ -506,39 +502,30 @@ func (bsnc *BaseUserDefinedNetworkController) removePodForUserDefinedNetwork(pod
 			continue
 		}
 
-		// do not release IP address unless we have validated no other pod is using it
 		if pInfo == nil || len(pInfo.ips) == 0 {
-			bsnc.forgetPodReleasedBeforeStartup(string(pod.UID), nadKey)
 			continue
 		}
 
-		// Releasing IPs needs to happen last so that we can deterministically know that if delete failed that
-		// the IP of the pod needs to be released. Otherwise we could have a completed pod failed to be removed
-		// and we dont know if the IP was released or not, and subsequently could accidentally release the IP
-		// while it is now on another pod
+		// Release only after this attachment's port is gone. LSM preserves
+		// any addresses that have since been allocated to a different owner.
 		klog.Infof("Attempting to release IPs for pod: %s/%s, ips: %s network %s", pod.Namespace, pod.Name,
 			util.JoinIPNetIPs(pInfo.ips, " "), bsnc.GetNetworkName())
-		if err = bsnc.releasePodIPsOnce(pod, nadKey, pInfo); err != nil {
+		if err = bsnc.releasePodIPs(pod, nadKey, pInfo); err != nil {
 			return err
 		}
-
-		bsnc.forgetPodReleasedBeforeStartup(string(pod.UID), nadKey)
-
 	}
 	return nil
 }
 
 func (bsnc *BaseUserDefinedNetworkController) syncPodsForUserDefinedNetwork(pods []interface{}) error {
-	annotatedLocalPods := map[*corev1.Pod]map[string]*util.PodAnnotation{}
+	orderedPods, err := logicalswitchmanager.SortPodsForIPAM(pods)
+	if err != nil {
+		return err
+	}
 	// get the list of logical switch ports (equivalent to pods). Reserve all existing Pod IPs to
 	// avoid subsequent new Pods getting the same duplicate Pod IP.
 	expectedLogicalPorts := make(map[string]bool)
-	for _, podInterface := range pods {
-		pod, ok := podInterface.(*corev1.Pod)
-		if !ok {
-			return fmt.Errorf("spurious object in syncPods: %v", podInterface)
-		}
-
+	for _, pod := range orderedPods {
 		var activeNetwork util.NetInfo
 		var err error
 		if bsnc.IsPrimaryNetwork() {
@@ -609,11 +596,6 @@ func (bsnc *BaseUserDefinedNetworkController) syncPodsForUserDefinedNetwork(pods
 				if expectedLogicalPortName != "" {
 					expectedLogicalPorts[expectedLogicalPortName] = true
 				}
-
-				if annotatedLocalPods[pod] == nil {
-					annotatedLocalPods[pod] = map[string]*util.PodAnnotation{}
-				}
-				annotatedLocalPods[pod][nadKey] = annotations
 			} else if hasRemotePort {
 				// keep also track of remote ports created for layer2 on
 				// interconnect
@@ -621,9 +603,6 @@ func (bsnc *BaseUserDefinedNetworkController) syncPodsForUserDefinedNetwork(pods
 			}
 		}
 	}
-
-	// keep track of which pods might have already been released
-	bsnc.trackPodsReleasedBeforeStartup(annotatedLocalPods)
 
 	return bsnc.deleteStaleLogicalSwitchPorts(expectedLogicalPorts)
 }

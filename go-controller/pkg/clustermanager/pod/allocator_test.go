@@ -27,6 +27,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	apitypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
+	corelisters "k8s.io/client-go/listers/core/v1"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/allocator/id"
@@ -112,31 +114,28 @@ func (a *ipAllocatorStub) AllocateUntilFull(string) error {
 	return nil
 }
 
-func (a *ipAllocatorStub) AllocateIPPerSubnet(string, []*net.IPNet) error {
-	panic("not implemented") // TODO: Implement
+func (a *ipAllocatorStub) AllocateIPs(string, string, []*net.IPNet) error {
+	if a.fullIPPool {
+		return ipallocator.ErrFull
+	}
+	return nil
 }
 
-func (a *ipAllocatorStub) AllocateNextIPs(string) ([]*net.IPNet, error) {
-	panic("not implemented") // TODO: Implement
+func (a *ipAllocatorStub) AllocateNextIPs(string, string) ([]*net.IPNet, error) {
+	return nil, nil
 }
 
-func (a *ipAllocatorStub) ReleaseIPs(string, []*net.IPNet) error {
+func (a *ipAllocatorStub) ReleaseIPs(string, string, []*net.IPNet) error {
 	a.released = true
 	return nil
 }
 
-func (a *ipAllocatorStub) ConditionalIPRelease(string, []*net.IPNet, func() (bool, error)) (bool, error) {
-	panic("not implemented") // TODO: Implement
-}
-
-func (a *ipAllocatorStub) ForSubnet(string) subnet.NamedAllocator {
-	return &namedAllocatorStub{
-		fullIPPool: a.fullIPPool,
-	}
-}
-
 func (a *ipAllocatorStub) GetSubnetName([]*net.IPNet) (string, bool) {
 	panic("not implemented") // TODO: Implement
+}
+
+func (a *ipAllocatorStub) OwnsIPs(string, string, []*net.IPNet) bool {
+	panic("not implemented")
 }
 
 type idAllocatorStub struct {
@@ -180,25 +179,6 @@ func (nas *namedIDAllocatorStub) ReserveID(int) error {
 
 func (nas *namedIDAllocatorStub) ReleaseID() int {
 	return 100
-}
-
-type namedAllocatorStub struct {
-	fullIPPool bool
-}
-
-func (nas *namedAllocatorStub) AllocateIPs([]*net.IPNet) error {
-	if nas.fullIPPool {
-		return ipallocator.ErrFull
-	}
-	return nil
-}
-
-func (nas *namedAllocatorStub) AllocateNextIPs() ([]*net.IPNet, error) {
-	return nil, nil
-}
-
-func (nas *namedAllocatorStub) ReleaseIPs([]*net.IPNet) error {
-	return nil
 }
 
 type macRegistryStub struct {
@@ -1087,6 +1067,99 @@ func TestPodAllocator_reconcileForNAD(t *testing.T) {
 				obtainedEvents = append(obtainedEvents, <-fakeRecorder.Events)
 			}
 			g.Expect(tt.expectEvents).To(gomega.Equal(obtainedEvents))
+		})
+	}
+}
+
+func TestPodAllocatorIPOwnershipLifecycle(t *testing.T) {
+	for _, persistent := range []bool{false, true} {
+		t.Run(fmt.Sprintf("persistent=%t", persistent), func(t *testing.T) {
+			g := gomega.NewWithT(t)
+			g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+			config.OVNKubernetesFeature.EnableMultiNetwork = true
+			config.OVNKubernetesFeature.EnablePersistentIPs = persistent
+			netInfo, err := util.NewNetInfo(&ovncnitypes.NetConf{
+				NetConf:            cnitypes.NetConf{Name: "network"},
+				Topology:           types.LocalnetTopology,
+				Subnets:            "10.0.0.0/24,fd00::/64",
+				AllowPersistentIPs: persistent,
+			})
+			g.Expect(err).NotTo(gomega.HaveOccurred())
+			const nadKey = "namespace/nad"
+			mutableNetInfo := util.NewMutableNetInfo(netInfo)
+			mutableNetInfo.AddNADs(nadKey)
+			netInfo = mutableNetInfo
+			ipam := subnet.NewAllocator()
+			g.Expect(ipam.AddOrUpdateSubnet(subnet.SubnetConfig{
+				Name: "network", Subnets: ovntest.MustParseIPNets("10.0.0.0/24", "fd00::/64"),
+			})).To(gomega.Succeed())
+			pods := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc})
+			nodes := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})
+			claims := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc})
+			g.Expect(nodes.Add(&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node"}})).To(gomega.Succeed())
+			kube := &kubemocks.InterfaceOVN{}
+			kube.On("PatchPodStatusAnnotations", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+				g.Expect(pods.Update(args.Get(1).(*corev1.Pod).DeepCopy())).To(gomega.Succeed())
+			}).Return(nil)
+			kube.On("UpdateIPAMClaimIPs", mock.Anything).Run(func(args mock.Arguments) {
+				g.Expect(claims.Update(args.Get(0).(*ipamclaimsapi.IPAMClaim).DeepCopy())).To(gomega.Succeed())
+			}).Return(nil)
+			claimReconciler := persistentips.NewIPAMClaimReconciler(kube, netInfo, ipamclaimslister.NewIPAMClaimLister(claims))
+			network := &nadapi.NetworkSelectionElement{Name: "nad", Namespace: "namespace"}
+			claim := &ipamclaimsapi.IPAMClaim{
+				ObjectMeta: metav1.ObjectMeta{Name: "claim", Namespace: "namespace", UID: "claim-uid"},
+				Spec:       ipamclaimsapi.IPAMClaimSpec{Network: "network"},
+			}
+			if persistent {
+				network.IPAMClaimReference = claim.Name
+				g.Expect(claims.Add(claim)).To(gomega.Succeed())
+			}
+			podLister := corelisters.NewPodLister(pods)
+			a := NewPodAllocator(netInfo, pod.NewPodAnnotationAllocator(netInfo, podLister, kube, claimReconciler),
+				ipam, claimReconciler, &networkmanager.FakeNetworkManager{NADNetworks: map[string]util.NetInfo{nadKey: netInfo}},
+				record.NewFakeRecorder(10), nil, corelisters.NewNodeLister(nodes))
+			allocate := func(uid string, annotation *util.PodAnnotation) *corev1.Pod {
+				p := testPod{scheduled: true, network: network}.getPod(t)
+				p.Name, p.UID = "pod-"+uid, apitypes.UID(uid)
+				if annotation != nil {
+					p.Annotations, err = util.MarshalPodAnnotation(p.Annotations, annotation, nadKey)
+					g.Expect(err).NotTo(gomega.HaveOccurred())
+				}
+				g.Expect(pods.Add(p)).To(gomega.Succeed())
+				g.Expect(a.Reconcile(nil, p)).To(gomega.Succeed())
+				p, err = podLister.Pods(p.Namespace).Get(p.Name)
+				g.Expect(err).NotTo(gomega.HaveOccurred())
+				return p
+			}
+			first := allocate("first", nil)
+			annotation, err := util.UnmarshalPodAnnotation(first.Annotations, nadKey)
+			g.Expect(err).NotTo(gomega.HaveOccurred())
+			if persistent {
+				second := allocate("second", nil)
+				secondAnnotation, err := util.UnmarshalPodAnnotation(second.Annotations, nadKey)
+				g.Expect(err).NotTo(gomega.HaveOccurred())
+				g.Expect(secondAnnotation.IPs).To(gomega.Equal(annotation.IPs))
+				g.Expect(a.Reconcile(first, nil)).To(gomega.Succeed())
+				g.Expect(a.Reconcile(second, nil)).To(gomega.Succeed())
+				g.Expect(ipam.OwnsIPs("network", persistentips.IPAMClaimOwner(claim), annotation.IPs)).To(gomega.BeTrue())
+				claim, err = ipamclaimslister.NewIPAMClaimLister(claims).IPAMClaims(claim.Namespace).Get(claim.Name)
+				g.Expect(err).NotTo(gomega.HaveOccurred())
+				g.Expect(claimReconciler.Reconcile(claim, nil, ipam)).To(gomega.Succeed())
+				g.Expect(claims.Delete(claim)).To(gomega.Succeed())
+				g.Expect(ipam.AllocateIPs("network", "new-owner", annotation.IPs)).To(gomega.Succeed())
+				g.Expect(a.Reconcile(first, nil)).To(gomega.Succeed())
+				g.Expect(claimReconciler.Reconcile(claim, nil, ipam)).To(gomega.Succeed())
+				g.Expect(ipam.OwnsIPs("network", "new-owner", annotation.IPs)).To(gomega.BeTrue())
+			} else {
+				g.Expect(a.Reconcile(first, nil)).To(gomega.Succeed())
+				second := allocate("second", annotation)
+				g.Expect(a.Reconcile(nil, second)).To(gomega.Succeed())
+				g.Expect(a.Reconcile(first, nil)).To(gomega.Succeed())
+				g.Expect(a.Reconcile(nil, first)).To(gomega.MatchError(ipallocator.ErrAllocatedByOther))
+				g.Expect(ipam.OwnsIPs("network", podIdAllocationName(nadKey, string(second.UID)), annotation.IPs)).To(gomega.BeTrue())
+				g.Expect(a.Reconcile(second, nil)).To(gomega.Succeed())
+				g.Expect(ipam.AllocateIPs("network", "new-owner", annotation.IPs)).To(gomega.Succeed())
+			}
 		})
 	}
 }

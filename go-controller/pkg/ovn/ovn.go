@@ -175,28 +175,15 @@ func (oc *DefaultNetworkController) ensureRemoteZonePod(_, pod *corev1.Pod) erro
 
 // removePod tries to tear down a pod. It returns nil on success and error on failure;
 // failure indicates the pod tear down should be retried later.
-func (oc *DefaultNetworkController) removePod(pod *corev1.Pod, portInfo *lpInfo) (err error) {
-	defer func() {
-		if err == nil {
-			oc.forgetPodIPReleases(pod)
-		}
-	}()
-	if err = kubevirt.CleanUpLiveMigratablePod(oc.nbClient, oc.watchFactory, pod); err != nil {
+func (oc *DefaultNetworkController) removePod(pod *corev1.Pod, portInfo *lpInfo) error {
+	if err := kubevirt.CleanUpLiveMigratablePod(oc.nbClient, oc.watchFactory, pod); err != nil {
 		return err
 	}
 
 	if oc.isPodScheduledOnLocalNode(pod) {
-		if err = oc.removeLocalZonePod(pod, portInfo); err != nil {
-			return err
-		}
-	} else {
-		if err = oc.removeRemoteZonePod(pod); err != nil {
-			return err
-		}
+		return oc.removeLocalZonePod(pod, portInfo)
 	}
-
-	oc.forgetPodReleasedBeforeStartup(string(pod.UID), ovntypes.DefaultNetworkName)
-	return nil
+	return oc.removeRemoteZonePod(pod)
 }
 
 // removeLocalZonePod tries to tear down a local zone pod. It returns nil on success and error on failure;
@@ -226,16 +213,6 @@ func (oc *DefaultNetworkController) removeLocalZonePod(pod *corev1.Pod, portInfo
 // failure indicates the pod tear down should be retried later.
 // It removes the remote pod ips from the namespace address set.
 func (oc *DefaultNetworkController) removeRemoteZonePod(pod *corev1.Pod) error {
-	// while this check is only intended for local pods, we also need it for
-	// remote live migrated pods that might have been allocated from this zone
-	if oc.wasPodReleasedBeforeStartup(string(pod.UID), ovntypes.DefaultNetworkName) {
-		klog.Infof("Completed pod %s/%s was already released before startup",
-			pod.Namespace,
-			pod.Name,
-		)
-		return nil
-	}
-
 	// FIXME: there are other things we are probably leaving behind and should
 	// be removed for completed VMs, like per-pod SNAT. Also
 	// removeRemoteZonePodFromNamespaceAddressSet above should probably not be
@@ -254,7 +231,7 @@ func (oc *DefaultNetworkController) removeRemoteZonePod(pod *corev1.Pod) error {
 			}
 			switchName, zoneContainsPodSubnet := kubevirt.ZoneContainsPodSubnet(oc.lsManager, ips)
 			if zoneContainsPodSubnet {
-				if err := oc.releasePodIPsOnce(pod, ovntypes.DefaultNetworkName, &lpInfo{logicalSwitch: switchName, ips: ips}); err != nil {
+				if err := oc.releasePodIPs(pod, ovntypes.DefaultNetworkName, &lpInfo{logicalSwitch: switchName, ips: ips}); err != nil {
 					return err
 				}
 			}
