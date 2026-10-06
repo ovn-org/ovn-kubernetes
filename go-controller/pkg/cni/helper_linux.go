@@ -1188,10 +1188,8 @@ func (pr *PodRequest) deletePodConntrack(podLister corev1listers.PodLister, pod 
 //
 // Note: podLister requires cluster-wide pod visibility, since the surviving
 // pod of a live migration always runs on a different node. The cniserver's
-// podLister is backed by factory.LocalPodInformer(), which today watches pods
-// on all nodes; if that informer is ever scoped down to node-local pods, this
-// function will return an empty set (see the TODO on the pod informer
-// registration in pkg/factory/factory.go NewNodeWatchFactory).
+// podLister is backed by factory.PodInformer(), which watches pods
+// on all nodes.
 func (pr *PodRequest) migrationPreservedIPs(podLister corev1listers.PodLister, pod *corev1.Pod) sets.Set[string] {
 	preservedIPs := sets.New[string]()
 	if podLister == nil || pod == nil {

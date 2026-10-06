@@ -98,7 +98,7 @@ func NewCNIServer(
 		},
 		clientSet: &ClientSet{
 			nadLister: nadLister,
-			podLister: corev1listers.NewPodLister(factory.LocalPodInformer().GetIndexer()),
+			podLister: corev1listers.NewPodLister(factory.PodInformer().GetIndexer()),
 			kclient:   kclient,
 		},
 		kubeAuth: &KubeAPIAuth{

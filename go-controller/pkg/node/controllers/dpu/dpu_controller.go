@@ -67,7 +67,7 @@ func NewController(
 	ovsClient libovsdbclient.Client,
 	nodeName string,
 ) *Controller {
-	podLister := corelisters.NewPodLister(wf.LocalPodInformer().GetIndexer())
+	podLister := corelisters.NewPodLister(wf.PodInformer().GetIndexer())
 
 	c := &Controller{
 		kube:       kube,
@@ -88,7 +88,7 @@ func NewController(
 			// Giving up on a pod would leak its representor until the pod is
 			// deleted or ovnkube restarts.
 			MaxAttempts: controller.InfiniteAttempts,
-			Informer:    wf.LocalPodInformer(),
+			Informer:    wf.PodInformer(),
 			Lister:      podLister.List,
 		})
 

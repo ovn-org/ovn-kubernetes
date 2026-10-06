@@ -618,26 +618,6 @@ func (_m *NodeWatchFactory) ListNodes(selector labels.Selector) ([]*corev1.Node,
 	return r0, r1
 }
 
-// LocalPodInformer provides a mock function with no fields
-func (_m *NodeWatchFactory) LocalPodInformer() cache.SharedIndexInformer {
-	ret := _m.Called()
-
-	if len(ret) == 0 {
-		panic("no return value specified for LocalPodInformer")
-	}
-
-	var r0 cache.SharedIndexInformer
-	if rf, ok := ret.Get(0).(func() cache.SharedIndexInformer); ok {
-		r0 = rf()
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(cache.SharedIndexInformer)
-		}
-	}
-
-	return r0
-}
-
 // NADInformer provides a mock function with no fields
 func (_m *NodeWatchFactory) NADInformer() k8s_cni_cncf_iov1.NetworkAttachmentDefinitionInformer {
 	ret := _m.Called()
@@ -732,6 +712,26 @@ func (_m *NodeWatchFactory) PodCoreInformer() informerscorev1.PodInformer {
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(informerscorev1.PodInformer)
+		}
+	}
+
+	return r0
+}
+
+// PodInformer provides a mock function with no fields
+func (_m *NodeWatchFactory) PodInformer() cache.SharedIndexInformer {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for PodInformer")
+	}
+
+	var r0 cache.SharedIndexInformer
+	if rf, ok := ret.Get(0).(func() cache.SharedIndexInformer); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(cache.SharedIndexInformer)
 		}
 	}
 
