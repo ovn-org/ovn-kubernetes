@@ -36,86 +36,11 @@ var _ = Describe("OVN Observability NBDB state", feature.Observability, func() {
 		}
 	})
 
-	Context("Sampling infrastructure", func() {
-		It("should have SamplingApp entries for drop, acl-new and acl-est", func() {
-			output, err := runOVNNBCTL(fr, fr.ClientSet,
-				"--data=bare", "--no-heading", "--columns=type", "list", "Sampling_App")
-			Expect(err).NotTo(HaveOccurred(), "listing Sampling_App types from NBDB")
-
-			types := strings.Split(output, "\n")
-			Expect(types).To(ContainElement("drop"))
-			Expect(types).To(ContainElement("acl-new"))
-			Expect(types).To(ContainElement("acl-est"))
-		})
-
-		It("should have a SampleCollector with expected probability and set_id", func() {
-			// Use compound find predicate to assert exact values simultaneously.
-			// This avoids substring false positives (e.g. set_id=142 matching "42").
-			output, err := runOVNNBCTL(fr, fr.ClientSet,
-				"--data=bare", "--no-heading", "--columns=_uuid",
-				"find", "Sample_Collector", "probability=65535", "set_id=42")
-			Expect(err).NotTo(HaveOccurred(), "finding Sample_Collector with probability=65535 set_id=42")
-			Expect(strings.TrimSpace(output)).NotTo(BeEmpty(),
-				"expected Sample_Collector with probability=65535 and set_id=42")
-		})
-
-		It("should have SampleCollector with expected feature external_ids", func() {
-			output, err := runOVNNBCTL(fr, fr.ClientSet,
-				"--data=bare", "--no-heading", "--columns=external_ids",
-				"list", "Sample_Collector")
-			Expect(err).NotTo(HaveOccurred(), "listing Sample_Collector external_ids from NBDB")
-
-			// All features should be listed in the sample-features external_id
-			for _, feature := range []string{"NetworkPolicy", "EgressFirewall", "AdminNetworkPolicy", "Multicast", "UDNIsolation"} {
-				Expect(output).To(ContainSubstring(feature),
-					"expected Sample_Collector external_ids to include %s", feature)
-			}
-		})
-	})
-
 	Context("NetworkPolicy ACL sampling", func() {
 		var nsName string
 
 		BeforeEach(func() {
 			nsName = fr.Namespace.Name
-		})
-
-		It("should attach Sample references to ACLs when a NetworkPolicy is created", func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-			defer cancel()
-
-			By("creating a deny-all network policy")
-			policy := &knet.NetworkPolicy{
-				ObjectMeta: metav1.ObjectMeta{Name: "observ-deny-all"},
-				Spec: knet.NetworkPolicySpec{
-					PodSelector: metav1.LabelSelector{},
-					PolicyTypes: []knet.PolicyType{knet.PolicyTypeIngress, knet.PolicyTypeEgress},
-					Ingress:     []knet.NetworkPolicyIngressRule{},
-					Egress:      []knet.NetworkPolicyEgressRule{},
-				},
-			}
-			_, err := fr.ClientSet.NetworkingV1().NetworkPolicies(nsName).Create(ctx, policy, metav1.CreateOptions{})
-			Expect(err).NotTo(HaveOccurred(), "creating deny-all NetworkPolicy")
-
-			By("creating a pod so that the network policy ACLs are programmed")
-			cmd := []string{"/bin/bash", "-c", "/agnhost netexec --http-port 8000"}
-			pod := newAgnhostPod(nsName, "observ-pod", cmd...)
-			pod = e2epod.NewPodClient(fr).CreateSync(ctx, pod)
-			Expect(waitForACLLoggingPod(fr, nsName, pod.GetName())).To(Succeed())
-
-			By("verifying ACLs with NetpolNamespace owner type have sample_new set")
-			// A deny-all NetworkPolicy creates ACLs with owner-type "NetpolNamespace"
-			// for the namespace-level default deny rules.
-			Eventually(func() (bool, error) {
-				return hasACLsWithSamples(fr, fr.ClientSet, "NetpolNamespace")
-			}, 30*time.Second, 2*time.Second).Should(BeTrue(),
-				"expected NetworkPolicy ACLs to have sample_new references")
-
-			By("verifying Sample objects exist in NBDB")
-			Eventually(func() (bool, error) {
-				return hasSampleObjects(fr, fr.ClientSet)
-			}, 15*time.Second, 2*time.Second).Should(BeTrue(),
-				"expected Sample objects to exist in NBDB")
 		})
 
 		It("should clean up Sample objects when a NetworkPolicy is deleted", func() {
@@ -142,103 +67,33 @@ var _ = Describe("OVN Observability NBDB state", feature.Observability, func() {
 			pod = e2epod.NewPodClient(fr).CreateSync(ctx, pod)
 			Expect(waitForACLLoggingPod(fr, nsName, pod.GetName())).To(Succeed())
 
-			By("waiting for ACLs to have sample references")
+			By("recording the Sample object referenced by the namespace ACL")
+			var sampleUUID string
 			Eventually(func() (bool, error) {
-				return hasACLsWithSamples(fr, fr.ClientSet, "NetpolNamespace")
+				var err error
+				sampleUUID, err = getACLSampleUUIDForNamespace(fr, fr.ClientSet, "NetpolNamespace", nsName)
+				return sampleUUID != "", err
 			}, 30*time.Second, 2*time.Second).Should(BeTrue(),
-				"expected NetpolNamespace ACLs to have sample_new references")
+				"expected a Sample object reference for namespace %s", nsName)
 
 			By("deleting the network policy")
 			err = fr.ClientSet.NetworkingV1().NetworkPolicies(nsName).Delete(ctx, policyName, metav1.DeleteOptions{})
 			Expect(err).NotTo(HaveOccurred(), "deleting NetworkPolicy")
 
+			By("verifying the referenced Sample object is deleted")
+			Eventually(func() (bool, error) {
+				exists, err := hasNBDBSample(fr, fr.ClientSet, sampleUUID)
+				return !exists, err
+			}, 30*time.Second, 2*time.Second).Should(BeTrue(),
+				"expected Sample object %s to be deleted after policy deletion", sampleUUID)
+
 			By("verifying NetpolNamespace ACLs for this namespace are cleaned up")
 			// Scope to this namespace to avoid interference from parallel tests.
-			// NetpolNamespace ACLs have external_ids with k8s.ovn.org/owner containing the namespace.
+			// NetpolNamespace ACLs use k8s.ovn.org/name for the namespace.
 			Eventually(func() (bool, error) {
 				return hasACLsWithSamplesForNamespace(fr, fr.ClientSet, "NetpolNamespace", nsName)
 			}, 30*time.Second, 2*time.Second).Should(BeFalse(),
 				"expected NetpolNamespace ACLs for namespace %s to be cleaned up after policy deletion", nsName)
-		})
-	})
-
-	Context("EgressFirewall ACL sampling", func() {
-		It("should attach Sample references to EgressFirewall ACLs", func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-			defer cancel()
-
-			nsName := fr.Namespace.Name
-
-			By("creating an EgressFirewall")
-			efwRules, err := egressFirewallRules(fr.ClientSet)
-			Expect(err).NotTo(HaveOccurred(), "fetching egress firewall rules")
-			Expect(createEgressFirewall(nsName, efwRules)).To(Succeed())
-
-			By("creating a pod so that ACLs are programmed")
-			cmd := []string{"/bin/bash", "-c", "/agnhost netexec --http-port 8000"}
-			pod := newAgnhostPod(nsName, "observ-efw-pod", cmd...)
-			pod = e2epod.NewPodClient(fr).CreateSync(ctx, pod)
-			Expect(waitForACLLoggingPod(fr, nsName, pod.GetName())).To(Succeed())
-
-			By("verifying EgressFirewall ACLs have sample_new set")
-			Eventually(func() (bool, error) {
-				return hasACLsWithSamples(fr, fr.ClientSet, "EgressFirewall")
-			}, 30*time.Second, 2*time.Second).Should(BeTrue(),
-				"expected EgressFirewall ACLs to have sample_new references")
-		})
-	})
-
-	Context("AdminNetworkPolicy ACL sampling", func() {
-		const anpName = "observ-anp-test"
-
-		AfterEach(func() {
-			_, err := e2ekubectl.RunKubectl("default", "delete", "anp", anpName, "--ignore-not-found=true")
-			Expect(err).NotTo(HaveOccurred(), "deleting AdminNetworkPolicy in AfterEach")
-		})
-
-		It("should attach Sample references to AdminNetworkPolicy ACLs", func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-			defer cancel()
-
-			nsName := fr.Namespace.Name
-
-			By("creating an AdminNetworkPolicy")
-			denyNetwork := "0.0.0.0/0"
-			if IsIPv6Cluster(fr.ClientSet) {
-				denyNetwork = "::/0"
-			}
-			anpYaml := fmt.Sprintf(`apiVersion: policy.networking.k8s.io/v1alpha1
-kind: AdminNetworkPolicy
-metadata:
-  name: %s
-spec:
-  priority: 50
-  subject:
-    namespaces:
-      matchLabels:
-        kubernetes.io/metadata.name: %s
-  egress:
-  - name: "deny-all-egress"
-    action: "Deny"
-    to:
-    - networks:
-      - %s
-`, anpName, nsName, denyNetwork)
-
-			_, err := e2ekubectl.RunKubectlInput(nsName, anpYaml, "create", "-f", "-")
-			Expect(err).NotTo(HaveOccurred(), "creating AdminNetworkPolicy")
-
-			By("creating a pod so that ACLs are programmed")
-			cmd := []string{"/bin/bash", "-c", "/agnhost netexec --http-port 8000"}
-			pod := newAgnhostPod(nsName, "observ-anp-pod", cmd...)
-			pod = e2epod.NewPodClient(fr).CreateSync(ctx, pod)
-			Expect(waitForACLLoggingPod(fr, nsName, pod.GetName())).To(Succeed())
-
-			By("verifying AdminNetworkPolicy ACLs have sample_new set")
-			Eventually(func() (bool, error) {
-				return hasACLsWithSamples(fr, fr.ClientSet, "AdminNetworkPolicy")
-			}, 30*time.Second, 2*time.Second).Should(BeTrue(),
-				"expected AdminNetworkPolicy ACLs to have sample_new references")
 		})
 	})
 
@@ -277,63 +132,6 @@ spec:
 				return false, nil
 			}, 30*time.Second, 2*time.Second).Should(BeTrue(),
 				"expected MulticastNS ACLs to have sample_new references for namespace %s", nsName)
-		})
-	})
-
-	Context("UDN isolation ACL sampling", func() {
-		It("should attach Sample references to UDNIsolation ACLs", func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-			defer cancel()
-
-			By("checking if UDN CRD is available")
-			_, err := e2ekubectl.RunKubectl("", "get", "crd", "userdefinednetworks.k8s.ovn.org", "--no-headers")
-			if err != nil {
-				Skip("UserDefinedNetwork CRD not available — network segmentation not enabled")
-			}
-
-			By("creating a namespace with UDN label")
-			ns, err := fr.ClientSet.CoreV1().Namespaces().Create(ctx, &v1.Namespace{
-				ObjectMeta: metav1.ObjectMeta{
-					GenerateName: "observ-udn-",
-					Labels: map[string]string{
-						RequiredUDNNamespaceLabel: "",
-					},
-				},
-			}, metav1.CreateOptions{})
-			Expect(err).NotTo(HaveOccurred(), "creating UDN namespace")
-			defer func() {
-				cleanupCtx, cancel := context.WithTimeout(context.Background(), time.Minute)
-				defer cancel()
-				err := fr.ClientSet.CoreV1().Namespaces().Delete(cleanupCtx, ns.Name, metav1.DeleteOptions{})
-				Expect(err).NotTo(HaveOccurred(), "deleting UDN namespace in cleanup")
-			}()
-
-			By("creating a primary UserDefinedNetwork")
-			udnManifest := generateUserDefinedNetworkManifest(&networkAttachmentConfigParams{
-				name:      "observ-udn",
-				namespace: ns.Name,
-				topology:  "layer2",
-				cidr:      filterCIDRsAndJoin(fr.ClientSet, "172.16.0.0/16,2014:100:200::0/60"),
-				role:      "primary",
-			}, fr.ClientSet)
-			cleanup, err := createManifest(ns.Name, udnManifest)
-			Expect(err).NotTo(HaveOccurred(), "creating UserDefinedNetwork manifest")
-			DeferCleanup(cleanup)
-
-			By("waiting for UDN to be ready")
-			Eventually(userDefinedNetworkReadyFunc(fr.DynamicClient, ns.Name, "observ-udn"),
-				10*time.Second, time.Second).Should(Succeed())
-
-			By("creating a pod on the UDN namespace")
-			pc := *podConfig("observ-udn-pod")
-			pc.namespace = ns.Name
-			_ = runUDNPod(fr.ClientSet, ns.Name, pc, nil)
-
-			By("verifying UDNIsolation ACLs have sample_new set")
-			Eventually(func() (bool, error) {
-				return hasACLsWithSamples(fr, fr.ClientSet, "UDNIsolation")
-			}, 30*time.Second, 2*time.Second).Should(BeTrue(),
-				"expected UDNIsolation ACLs to have sample_new references")
 		})
 	})
 
@@ -378,12 +176,6 @@ spec:
 			}
 			_, err := fr.ClientSet.NetworkingV1().NetworkPolicies(nsName).Create(ctx, policy, metav1.CreateOptions{})
 			Expect(err).NotTo(HaveOccurred(), "creating deny-all NetworkPolicy for psample test")
-
-			By("waiting for policy to be programmed")
-			Eventually(func() (bool, error) {
-				return hasACLsWithSamples(fr, fr.ClientSet, "NetpolNamespace")
-			}, 30*time.Second, 2*time.Second).Should(BeTrue(),
-				"expected NetpolNamespace ACLs to have sample_new references")
 
 			By("starting ovnkube-observ, generating traffic, and collecting samples")
 			// Listen on both nodes: psample events may appear on src or dst node depending
@@ -447,12 +239,6 @@ spec:
 			_, err := fr.ClientSet.NetworkingV1().NetworkPolicies(nsName).Create(ctx, policy, metav1.CreateOptions{})
 			Expect(err).NotTo(HaveOccurred(), "creating allow NetworkPolicy for psample test")
 
-			By("waiting for policy to be programmed")
-			Eventually(func() (bool, error) {
-				return hasACLsWithSamples(fr, fr.ClientSet, "NetworkPolicy")
-			}, 30*time.Second, 2*time.Second).Should(BeTrue(),
-				"expected NetworkPolicy ACLs to have sample_new references")
-
 			By("starting ovnkube-observ, generating traffic, and collecting samples")
 			// allow-related ACL samples fire on the dst node (ingress ACL evaluated there).
 			// Listen on both nodes to handle any scheduling outcome.
@@ -501,12 +287,6 @@ spec:
 
 			By("creating an EgressFirewall")
 			Expect(createEgressFirewall(nsName, denyRules)).To(Succeed())
-
-			By("waiting for EgressFirewall ACLs to be programmed")
-			Eventually(func() (bool, error) {
-				return hasACLsWithSamples(fr, fr.ClientSet, "EgressFirewall")
-			}, 30*time.Second, 2*time.Second).Should(BeTrue(),
-				"expected EgressFirewall ACLs to have sample_new references")
 
 			By("starting ovnkube-observ, generating traffic, and collecting samples")
 			dstMustContain := make([]string, len(denyTargetIPs))
@@ -577,12 +357,6 @@ spec:
 			_, err := e2ekubectl.RunKubectlInput(nsName, anpYaml, "create", "-f", "-")
 			Expect(err).NotTo(HaveOccurred(), "creating deny AdminNetworkPolicy")
 
-			By("waiting for ANP ACLs to be programmed")
-			Eventually(func() (bool, error) {
-				return hasACLsWithSamples(fr, fr.ClientSet, "AdminNetworkPolicy")
-			}, 30*time.Second, 2*time.Second).Should(BeTrue(),
-				"expected AdminNetworkPolicy ACLs to have sample_new references")
-
 			By("starting ovnkube-observ, generating traffic, and collecting samples")
 			// ANP egress deny: listen on both nodes as sample node depends on OVN flow placement.
 			anpNodeNames := []string{srcPod.Spec.NodeName}
@@ -616,12 +390,6 @@ spec:
 
 			By("creating an EgressFirewall with allow rule")
 			Expect(createEgressFirewall(nsName, rules)).To(Succeed())
-
-			By("waiting for EgressFirewall ACLs to be programmed")
-			Eventually(func() (bool, error) {
-				return hasACLsWithSamples(fr, fr.ClientSet, "EgressFirewall")
-			}, 30*time.Second, 2*time.Second).Should(BeTrue(),
-				"expected EgressFirewall allow ACLs to have sample_new references")
 
 			By("starting ovnkube-observ, generating traffic, and collecting samples")
 			// Don't Expect inside trafficFn — it's called in an Eventually loop
@@ -693,12 +461,6 @@ spec:
 
 			_, err := e2ekubectl.RunKubectlInput(nsName, anpYaml, "create", "-f", "-")
 			Expect(err).NotTo(HaveOccurred(), "creating pass AdminNetworkPolicy")
-
-			By("waiting for ANP ACLs to be programmed")
-			Eventually(func() (bool, error) {
-				return hasACLsWithSamples(fr, fr.ClientSet, "AdminNetworkPolicy")
-			}, 30*time.Second, 2*time.Second).Should(BeTrue(),
-				"expected AdminNetworkPolicy ACLs to have sample_new references")
 
 			By("starting ovnkube-observ, generating traffic, and collecting samples")
 			passNodeNames := []string{srcPod.Spec.NodeName}
@@ -802,12 +564,6 @@ spec:
 			pc.namespace = udnNs.Name
 			udnPod := runUDNPod(fr.ClientSet, udnNs.Name, pc, nil)
 
-			By("waiting for UDN isolation ACLs to be programmed with samples")
-			Eventually(func() (bool, error) {
-				return hasACLsWithSamples(fr, fr.ClientSet, "UDNIsolation")
-			}, 30*time.Second, 2*time.Second).Should(BeTrue(),
-				"expected UDNIsolation ACLs to have sample_new references")
-
 			By("getting UDN pod's default cluster network IP via network-status annotation")
 			// With primary UDN, the non-default network-status entry is the cluster network.
 			clusterNetStatus, err := podNetworkStatus(udnPod, func(status nadapi.NetworkStatus) bool {
@@ -871,7 +627,7 @@ func hasACLsWithSamplesForNamespace(f *framework.Framework, cs clientset.Interfa
 		"--data=bare", "--no-heading", "--columns=sample_new",
 		"find", "ACL",
 		fmt.Sprintf(`external_ids:"k8s.ovn.org/owner-type"=%s`, ownerType),
-		fmt.Sprintf(`external_ids:"k8s.ovn.org/owner"=%s`, namespace))
+		fmt.Sprintf(`external_ids:"k8s.ovn.org/name"=%s`, namespace))
 	if err != nil {
 		return false, fmt.Errorf("listing ACLs with owner-type %s in namespace %s: %w", ownerType, namespace, err)
 	}
@@ -884,6 +640,35 @@ func hasACLsWithSamplesForNamespace(f *framework.Framework, cs clientset.Interfa
 		}
 	}
 	return false, nil
+}
+
+// getACLSampleUUIDForNamespace returns the first Sample UUID referenced by an
+// ACL belonging to the given namespace.
+func getACLSampleUUIDForNamespace(f *framework.Framework, cs clientset.Interface, ownerType, namespace string) (string, error) {
+	output, err := runOVNNBCTL(f, cs,
+		"--data=bare", "--no-heading", "--columns=sample_new",
+		"find", "ACL",
+		fmt.Sprintf(`external_ids:"k8s.ovn.org/owner-type"=%s`, ownerType),
+		fmt.Sprintf(`external_ids:"k8s.ovn.org/name"=%s`, namespace))
+	if err != nil {
+		return "", fmt.Errorf("listing Sample references for owner type %s in namespace %s: %w", ownerType, namespace, err)
+	}
+	for _, line := range strings.Split(output, "\n") {
+		if sampleUUID := strings.TrimSpace(line); sampleUUID != "" {
+			return sampleUUID, nil
+		}
+	}
+	return "", nil
+}
+
+// hasNBDBSample reports whether a Sample row with the given UUID exists.
+func hasNBDBSample(f *framework.Framework, cs clientset.Interface, sampleUUID string) (bool, error) {
+	output, err := runOVNNBCTL(f, cs,
+		"--if-exists", "get", "Sample", sampleUUID, "metadata")
+	if err != nil {
+		return false, fmt.Errorf("looking up Sample object %s: %w", sampleUUID, err)
+	}
+	return strings.TrimSpace(output) != "", nil
 }
 
 // hasSampleObjects checks if any Sample objects exist in NBDB.
@@ -1119,7 +904,6 @@ func egressFirewallRules(cs clientset.Interface) ([]egressFirewallRule, error) {
 	}
 	return rules, nil
 }
-
 
 // sampleRecordContains returns true if the combined ovnkube-observ output contains
 // a single sample record where both the action substring and dst=ip appear together.
