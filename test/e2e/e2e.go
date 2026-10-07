@@ -2008,7 +2008,7 @@ var _ = ginkgo.Describe("e2e br-int flow monitoring export validation", func() {
 							CaptureStdout: true,
 							CaptureStderr: true,
 						}
-						rawUUID, stderr, execErr := e2epod.ExecWithOptions(f, getSFlowExecOptions)
+						rawUUID, stderr, execErr := e2epod.Exec(f.TContext(context.TODO()), getSFlowExecOptions)
 						if execErr != nil {
 							framework.Logf("waiting for sflow row on %s: query failed: %v, stderr: %s",
 								ovnKubeNodePod.Name, execErr, stderr)
@@ -2032,7 +2032,7 @@ var _ = ginkgo.Describe("e2e br-int flow monitoring export validation", func() {
 						CaptureStdout: true,
 						CaptureStderr: true,
 					}
-					_, setStderr, setErr := e2epod.ExecWithOptions(f, setSFlowExecOptions)
+					_, setStderr, setErr := e2epod.Exec(f.TContext(context.TODO()), setSFlowExecOptions)
 					if setErr != nil {
 						framework.Logf("skipping sflow sampling tuning on %s: failed to set sampling/polling for row %s: %v, stderr: %s",
 							ovnKubeNodePod.Name, sFlowUUID, setErr, setStderr)
@@ -2088,7 +2088,7 @@ var _ = ginkgo.Describe("e2e br-int flow monitoring export validation", func() {
 					CaptureStderr: true,
 				}
 
-				targets, stderr, execErr := e2epod.ExecWithOptions(f, execOptions)
+				targets, stderr, execErr := e2epod.Exec(f.TContext(context.TODO()), execOptions)
 				framework.Logf("execOptions are %v", execOptions)
 				if execErr != nil {
 					framework.Failf("could not lookup ovs %s targets: %v", protocolStr, stderr)

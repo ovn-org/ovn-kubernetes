@@ -836,7 +836,7 @@ func ExecCommandInContainerWithFullOutput(f *framework.Framework, namespace, pod
 		CaptureStderr:      true,
 		PreserveWhitespace: false,
 	}
-	return e2epod.ExecWithOptions(f, options)
+	return e2epod.Exec(f.TContext(context.TODO()), options)
 }
 
 func assertACLLogs(targetNodeName string, policyNameRegex string, expectedACLVerdict string, expectedACLSeverity string) (bool, error) {
