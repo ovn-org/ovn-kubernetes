@@ -975,22 +975,26 @@ var _ = Describe("Watch Factory Operations", func() {
 		})
 	})
 
+	// Counters are incremented only after the wrapped callback has returned or
+	// failed, so that a count of N means N callbacks have finished, not just
+	// started. A failed callback is counted so that waiters exit promptly with
+	// the callback's own failure instead of timing out.
 	addFilteredHandler := func(wf *WatchFactory, objType reflect.Type, realObjType reflect.Type, namespace string, sel labels.Selector, funcs cache.ResourceEventHandlerFuncs) (*Handler, *handlerCalls) {
 		calls := handlerCalls{}
 		h, err := wf.addHandler(objType, namespace, sel, cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				defer GinkgoRecover()
-				atomic.AddInt32(&calls.added, 1)
+				defer atomic.AddInt32(&calls.added, 1)
 				funcs.AddFunc(obj)
 			},
 			UpdateFunc: func(old, new interface{}) {
 				defer GinkgoRecover()
-				atomic.AddInt32(&calls.updated, 1)
+				defer atomic.AddInt32(&calls.updated, 1)
 				funcs.UpdateFunc(old, new)
 			},
 			DeleteFunc: func(obj interface{}) {
 				defer GinkgoRecover()
-				atomic.AddInt32(&calls.deleted, 1)
+				defer atomic.AddInt32(&calls.deleted, 1)
 				funcs.DeleteFunc(obj)
 			},
 		}, nil, wf.GetHandlerPriority(realObjType))
