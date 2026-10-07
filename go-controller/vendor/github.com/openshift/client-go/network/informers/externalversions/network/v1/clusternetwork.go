@@ -12,16 +12,45 @@ import (
 	networkv1 "github.com/openshift/client-go/network/listers/network/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
+	schema "k8s.io/apimachinery/pkg/runtime/schema"
 	watch "k8s.io/apimachinery/pkg/watch"
 	cache "k8s.io/client-go/tools/cache"
 )
 
 // ClusterNetworkInformer provides access to a shared informer and lister for
-// ClusterNetworks.
+// ClusterNetworks. Prefer using the type-safe variant (see [TypedClusterNetworkInformer]).
 type ClusterNetworkInformer interface {
 	Informer() cache.SharedIndexInformer
 	Lister() networkv1.ClusterNetworkLister
 }
+
+// TypedClusterNetworkInformer provides access to a shared informer and lister for
+// ClusterNetworks, including the type-safe TypedInformer variant.
+// It is a superset of ClusterNetworkInformer.
+type TypedClusterNetworkInformer interface {
+	Informer() cache.SharedIndexInformer
+	TypedInformer() ClusterNetworkIndexInformer
+	Lister() networkv1.ClusterNetworkLister
+}
+
+// ClusterNetworkIndexInformer is a wrapper around the underlying [cache.SharedIndexInformer]
+// with type-safe variants of several methods.
+type ClusterNetworkIndexInformer cache.TypedSharedIndexInformer[*apinetworkv1.ClusterNetwork]
+
+// ClusterNetworkHandlerFuncs is a specialization of [cache.TypedResourceEventHandlerFuncs] for ClusterNetwork.
+type ClusterNetworkHandlerFuncs = cache.TypedResourceEventHandlerFuncs[*apinetworkv1.ClusterNetwork]
+
+// ClusterNetworkDetailedHandlerFuncs is a specialization of [cache.TypedResourceEventHandlerDetailedFuncs] for ClusterNetwork.
+type ClusterNetworkDetailedHandlerFuncs = cache.TypedResourceEventHandlerDetailedFuncs[*apinetworkv1.ClusterNetwork]
+
+// ClusterNetworkFilteringHandler is a specialization of [cache.TypedFilteringResourceEventHandler] for ClusterNetwork.
+type ClusterNetworkFilteringHandler = cache.TypedFilteringResourceEventHandler[*apinetworkv1.ClusterNetwork]
+
+// ClusterNetworkIndexers is a specialization of [cache.TypedIndexers] for ClusterNetwork.
+type ClusterNetworkIndexers = cache.TypedIndexers[*apinetworkv1.ClusterNetwork]
+
+// DeletedClusterNetwork is a specialization of [cache.DeletedObject] for ClusterNetwork.
+type DeletedClusterNetwork = cache.DeletedObject[*apinetworkv1.ClusterNetwork]
 
 type clusterNetworkInformer struct {
 	factory          internalinterfaces.SharedInformerFactory
@@ -31,55 +60,132 @@ type clusterNetworkInformer struct {
 // NewClusterNetworkInformer constructs a new informer for ClusterNetwork type.
 // Always prefer using an informer factory to get a shared informer instead of getting an independent
 // one. This reduces memory footprint and number of connections to the server.
+// If you really need an independent one, prefer using the type-safe variant (see [NewTypedClusterNetworkInformer]).
 func NewClusterNetworkInformer(client versioned.Interface, resyncPeriod time.Duration, indexers cache.Indexers) cache.SharedIndexInformer {
-	return NewFilteredClusterNetworkInformer(client, resyncPeriod, indexers, nil)
+	return NewClusterNetworkInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: indexers})
+}
+
+// NewTypedClusterNetworkInformer constructs a new informer for ClusterNetwork type.
+// Always prefer using an informer factory to get a shared informer instead of getting an independent
+// one. This reduces memory footprint and number of connections to the server.
+func NewTypedClusterNetworkInformer(client versioned.Interface, resyncPeriod time.Duration, indexers ClusterNetworkIndexers) ClusterNetworkIndexInformer {
+	return NewTypedClusterNetworkInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: cache.TypedIndexersToIndexers(indexers)})
 }
 
 // NewFilteredClusterNetworkInformer constructs a new informer for ClusterNetwork type.
 // Always prefer using an informer factory to get a shared informer instead of getting an independent
 // one. This reduces memory footprint and number of connections to the server.
+// If you really need an independent one, prefer using the type-safe variant (see [NewTypedFilteredClusterNetworkInformer]).
 func NewFilteredClusterNetworkInformer(client versioned.Interface, resyncPeriod time.Duration, indexers cache.Indexers, tweakListOptions internalinterfaces.TweakListOptionsFunc) cache.SharedIndexInformer {
-	return cache.NewSharedIndexInformer(
+	return NewTypedClusterNetworkInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: indexers, TweakListOptions: tweakListOptions})
+}
+
+// NewTypedFilteredClusterNetworkInformer constructs a new informer for ClusterNetwork type.
+// Always prefer using an informer factory to get a shared informer instead of getting an independent
+// one. This reduces memory footprint and number of connections to the server.
+func NewTypedFilteredClusterNetworkInformer(client versioned.Interface, resyncPeriod time.Duration, indexers ClusterNetworkIndexers, tweakListOptions internalinterfaces.TweakListOptionsFunc) ClusterNetworkIndexInformer {
+	return NewTypedClusterNetworkInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: cache.TypedIndexersToIndexers(indexers), TweakListOptions: tweakListOptions})
+}
+
+// NewClusterNetworkInformerWithOptions constructs a new informer for ClusterNetwork type with additional options.
+// Always prefer using an informer factory to get a shared informer instead of getting an independent
+// one. This reduces memory footprint and number of connections to the server.
+// If you really need an independent one, prefer using the type-safe variant (see [NewTypedClusterNetworkInformerWithOptions]).
+func NewClusterNetworkInformerWithOptions(client versioned.Interface, options internalinterfaces.InformerOptions) cache.SharedIndexInformer {
+	return NewTypedClusterNetworkInformerWithOptions(client, options)
+}
+
+// NewTypedClusterNetworkInformerWithOptions constructs a new informer for ClusterNetwork type with additional options.
+// Always prefer using an informer factory to get a shared informer instead of getting an independent
+// one. This reduces memory footprint and number of connections to the server.
+func NewTypedClusterNetworkInformerWithOptions(client versioned.Interface, options internalinterfaces.InformerOptions) ClusterNetworkIndexInformer {
+	gvr := schema.GroupVersionResource{Group: "network.openshift.io", Version: "v1", Resource: "clusternetworks"}
+	identifier := options.InformerName.WithResource(gvr)
+	tweakListOptions := options.TweakListOptions
+	return cache.NewTypedSharedIndexInformer[*apinetworkv1.ClusterNetwork](cache.NewSharedIndexInformerWithOptions(
 		cache.ToListWatcherWithWatchListSemantics(&cache.ListWatch{
-			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
+			ListFunc: func(opts metav1.ListOptions) (runtime.Object, error) {
 				if tweakListOptions != nil {
-					tweakListOptions(&options)
+					tweakListOptions(&opts)
 				}
-				return client.NetworkV1().ClusterNetworks().List(context.Background(), options)
+				return client.NetworkV1().ClusterNetworks().List(context.Background(), opts)
 			},
-			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
+			WatchFunc: func(opts metav1.ListOptions) (watch.Interface, error) {
 				if tweakListOptions != nil {
-					tweakListOptions(&options)
+					tweakListOptions(&opts)
 				}
-				return client.NetworkV1().ClusterNetworks().Watch(context.Background(), options)
+				return client.NetworkV1().ClusterNetworks().Watch(context.Background(), opts)
 			},
-			ListWithContextFunc: func(ctx context.Context, options metav1.ListOptions) (runtime.Object, error) {
+			ListWithContextFunc: func(ctx context.Context, opts metav1.ListOptions) (runtime.Object, error) {
 				if tweakListOptions != nil {
-					tweakListOptions(&options)
+					tweakListOptions(&opts)
 				}
-				return client.NetworkV1().ClusterNetworks().List(ctx, options)
+				return client.NetworkV1().ClusterNetworks().List(ctx, opts)
 			},
-			WatchFuncWithContext: func(ctx context.Context, options metav1.ListOptions) (watch.Interface, error) {
+			WatchFuncWithContext: func(ctx context.Context, opts metav1.ListOptions) (watch.Interface, error) {
 				if tweakListOptions != nil {
-					tweakListOptions(&options)
+					tweakListOptions(&opts)
 				}
-				return client.NetworkV1().ClusterNetworks().Watch(ctx, options)
+				return client.NetworkV1().ClusterNetworks().Watch(ctx, opts)
 			},
 		}, client),
 		&apinetworkv1.ClusterNetwork{},
-		resyncPeriod,
-		indexers,
-	)
+		cache.SharedIndexInformerOptions{
+			ResyncPeriod: options.ResyncPeriod,
+			Indexers:     options.Indexers,
+			Identifier:   identifier,
+		},
+	))
 }
 
 func (f *clusterNetworkInformer) defaultInformer(client versioned.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
-	return NewFilteredClusterNetworkInformer(client, resyncPeriod, cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}, f.tweakListOptions)
+	return NewTypedClusterNetworkInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}, InformerName: f.factory.InformerName(), TweakListOptions: f.tweakListOptions})
 }
 
 func (f *clusterNetworkInformer) Informer() cache.SharedIndexInformer {
-	return f.factory.InformerFor(&apinetworkv1.ClusterNetwork{}, f.defaultInformer)
+	return f.TypedInformer()
+}
+
+func (f *clusterNetworkInformer) TypedInformer() ClusterNetworkIndexInformer {
+	return cache.NewTypedSharedIndexInformer[*apinetworkv1.ClusterNetwork](f.factory.InformerFor(&apinetworkv1.ClusterNetwork{}, f.defaultInformer))
 }
 
 func (f *clusterNetworkInformer) Lister() networkv1.ClusterNetworkLister {
 	return networkv1.NewClusterNetworkLister(f.Informer().GetIndexer())
+}
+
+// ToTypedClusterNetworkInformer converts an untyped informer into a TypedClusterNetworkInformer.
+//
+// WARNING: this conversion is only safe if the informer handles objects of type
+// *ClusterNetwork. If that is not the case, calling type-safe methods of the returned
+// TypedClusterNetworkInformer leads to runtime panics. A safer alternative is to pass
+// around a TypedClusterNetworkInformer instances that was obtained from a
+// SharedInformerFactory.
+func ToTypedClusterNetworkInformer(informer ClusterNetworkInformer) TypedClusterNetworkInformer {
+	if informer, ok := informer.(TypedClusterNetworkInformer); ok {
+		return informer
+	}
+	return &clusterNetworkTypedInformerAdapter{informer}
+}
+
+type clusterNetworkTypedInformerAdapter struct {
+	ClusterNetworkInformer
+}
+
+func (a *clusterNetworkTypedInformerAdapter) TypedInformer() ClusterNetworkIndexInformer {
+	return cache.NewTypedSharedIndexInformer[*apinetworkv1.ClusterNetwork](a.Informer())
+}
+
+// ToClusterNetworkIndexInformer converts an untyped informer into a ClusterNetworkIndexInformer.
+//
+// WARNING: this conversion is only safe if the informer handles objects of type
+// *ClusterNetwork. If that is not the case, calling type-safe methods of the returned
+// ClusterNetworkIndexInformer leads to runtime panics. A safer alternative is to pass
+// around a ClusterNetworkIndexInformer instances that was obtained from a
+// SharedInformerFactory.
+func ToClusterNetworkIndexInformer(informer cache.SharedIndexInformer) ClusterNetworkIndexInformer {
+	if informer, ok := informer.(ClusterNetworkIndexInformer); ok {
+		return informer
+	}
+	return cache.NewTypedSharedIndexInformer[*apinetworkv1.ClusterNetwork](informer)
 }

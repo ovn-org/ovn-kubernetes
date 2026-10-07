@@ -9,13 +9,13 @@ import (
 // Interface provides access to all the informers in this group version.
 type Interface interface {
 	// ClusterNetworks returns a ClusterNetworkInformer.
-	ClusterNetworks() ClusterNetworkInformer
+	ClusterNetworks() TypedClusterNetworkInformer
 	// EgressNetworkPolicies returns a EgressNetworkPolicyInformer.
-	EgressNetworkPolicies() EgressNetworkPolicyInformer
+	EgressNetworkPolicies() TypedEgressNetworkPolicyInformer
 	// HostSubnets returns a HostSubnetInformer.
-	HostSubnets() HostSubnetInformer
+	HostSubnets() TypedHostSubnetInformer
 	// NetNamespaces returns a NetNamespaceInformer.
-	NetNamespaces() NetNamespaceInformer
+	NetNamespaces() TypedNetNamespaceInformer
 }
 
 type version struct {
@@ -29,22 +29,22 @@ func New(f internalinterfaces.SharedInformerFactory, namespace string, tweakList
 	return &version{factory: f, namespace: namespace, tweakListOptions: tweakListOptions}
 }
 
-// ClusterNetworks returns a ClusterNetworkInformer.
-func (v *version) ClusterNetworks() ClusterNetworkInformer {
+// ClusterNetworks returns a TypedClusterNetworkInformer.
+func (v *version) ClusterNetworks() TypedClusterNetworkInformer {
 	return &clusterNetworkInformer{factory: v.factory, tweakListOptions: v.tweakListOptions}
 }
 
-// EgressNetworkPolicies returns a EgressNetworkPolicyInformer.
-func (v *version) EgressNetworkPolicies() EgressNetworkPolicyInformer {
+// EgressNetworkPolicies returns a TypedEgressNetworkPolicyInformer.
+func (v *version) EgressNetworkPolicies() TypedEgressNetworkPolicyInformer {
 	return &egressNetworkPolicyInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
 }
 
-// HostSubnets returns a HostSubnetInformer.
-func (v *version) HostSubnets() HostSubnetInformer {
+// HostSubnets returns a TypedHostSubnetInformer.
+func (v *version) HostSubnets() TypedHostSubnetInformer {
 	return &hostSubnetInformer{factory: v.factory, tweakListOptions: v.tweakListOptions}
 }
 
-// NetNamespaces returns a NetNamespaceInformer.
-func (v *version) NetNamespaces() NetNamespaceInformer {
+// NetNamespaces returns a TypedNetNamespaceInformer.
+func (v *version) NetNamespaces() TypedNetNamespaceInformer {
 	return &netNamespaceInformer{factory: v.factory, tweakListOptions: v.tweakListOptions}
 }

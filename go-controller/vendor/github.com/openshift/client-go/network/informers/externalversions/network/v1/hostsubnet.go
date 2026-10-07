@@ -12,16 +12,45 @@ import (
 	networkv1 "github.com/openshift/client-go/network/listers/network/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
+	schema "k8s.io/apimachinery/pkg/runtime/schema"
 	watch "k8s.io/apimachinery/pkg/watch"
 	cache "k8s.io/client-go/tools/cache"
 )
 
 // HostSubnetInformer provides access to a shared informer and lister for
-// HostSubnets.
+// HostSubnets. Prefer using the type-safe variant (see [TypedHostSubnetInformer]).
 type HostSubnetInformer interface {
 	Informer() cache.SharedIndexInformer
 	Lister() networkv1.HostSubnetLister
 }
+
+// TypedHostSubnetInformer provides access to a shared informer and lister for
+// HostSubnets, including the type-safe TypedInformer variant.
+// It is a superset of HostSubnetInformer.
+type TypedHostSubnetInformer interface {
+	Informer() cache.SharedIndexInformer
+	TypedInformer() HostSubnetIndexInformer
+	Lister() networkv1.HostSubnetLister
+}
+
+// HostSubnetIndexInformer is a wrapper around the underlying [cache.SharedIndexInformer]
+// with type-safe variants of several methods.
+type HostSubnetIndexInformer cache.TypedSharedIndexInformer[*apinetworkv1.HostSubnet]
+
+// HostSubnetHandlerFuncs is a specialization of [cache.TypedResourceEventHandlerFuncs] for HostSubnet.
+type HostSubnetHandlerFuncs = cache.TypedResourceEventHandlerFuncs[*apinetworkv1.HostSubnet]
+
+// HostSubnetDetailedHandlerFuncs is a specialization of [cache.TypedResourceEventHandlerDetailedFuncs] for HostSubnet.
+type HostSubnetDetailedHandlerFuncs = cache.TypedResourceEventHandlerDetailedFuncs[*apinetworkv1.HostSubnet]
+
+// HostSubnetFilteringHandler is a specialization of [cache.TypedFilteringResourceEventHandler] for HostSubnet.
+type HostSubnetFilteringHandler = cache.TypedFilteringResourceEventHandler[*apinetworkv1.HostSubnet]
+
+// HostSubnetIndexers is a specialization of [cache.TypedIndexers] for HostSubnet.
+type HostSubnetIndexers = cache.TypedIndexers[*apinetworkv1.HostSubnet]
+
+// DeletedHostSubnet is a specialization of [cache.DeletedObject] for HostSubnet.
+type DeletedHostSubnet = cache.DeletedObject[*apinetworkv1.HostSubnet]
 
 type hostSubnetInformer struct {
 	factory          internalinterfaces.SharedInformerFactory
@@ -31,55 +60,132 @@ type hostSubnetInformer struct {
 // NewHostSubnetInformer constructs a new informer for HostSubnet type.
 // Always prefer using an informer factory to get a shared informer instead of getting an independent
 // one. This reduces memory footprint and number of connections to the server.
+// If you really need an independent one, prefer using the type-safe variant (see [NewTypedHostSubnetInformer]).
 func NewHostSubnetInformer(client versioned.Interface, resyncPeriod time.Duration, indexers cache.Indexers) cache.SharedIndexInformer {
-	return NewFilteredHostSubnetInformer(client, resyncPeriod, indexers, nil)
+	return NewHostSubnetInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: indexers})
+}
+
+// NewTypedHostSubnetInformer constructs a new informer for HostSubnet type.
+// Always prefer using an informer factory to get a shared informer instead of getting an independent
+// one. This reduces memory footprint and number of connections to the server.
+func NewTypedHostSubnetInformer(client versioned.Interface, resyncPeriod time.Duration, indexers HostSubnetIndexers) HostSubnetIndexInformer {
+	return NewTypedHostSubnetInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: cache.TypedIndexersToIndexers(indexers)})
 }
 
 // NewFilteredHostSubnetInformer constructs a new informer for HostSubnet type.
 // Always prefer using an informer factory to get a shared informer instead of getting an independent
 // one. This reduces memory footprint and number of connections to the server.
+// If you really need an independent one, prefer using the type-safe variant (see [NewTypedFilteredHostSubnetInformer]).
 func NewFilteredHostSubnetInformer(client versioned.Interface, resyncPeriod time.Duration, indexers cache.Indexers, tweakListOptions internalinterfaces.TweakListOptionsFunc) cache.SharedIndexInformer {
-	return cache.NewSharedIndexInformer(
+	return NewTypedHostSubnetInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: indexers, TweakListOptions: tweakListOptions})
+}
+
+// NewTypedFilteredHostSubnetInformer constructs a new informer for HostSubnet type.
+// Always prefer using an informer factory to get a shared informer instead of getting an independent
+// one. This reduces memory footprint and number of connections to the server.
+func NewTypedFilteredHostSubnetInformer(client versioned.Interface, resyncPeriod time.Duration, indexers HostSubnetIndexers, tweakListOptions internalinterfaces.TweakListOptionsFunc) HostSubnetIndexInformer {
+	return NewTypedHostSubnetInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: cache.TypedIndexersToIndexers(indexers), TweakListOptions: tweakListOptions})
+}
+
+// NewHostSubnetInformerWithOptions constructs a new informer for HostSubnet type with additional options.
+// Always prefer using an informer factory to get a shared informer instead of getting an independent
+// one. This reduces memory footprint and number of connections to the server.
+// If you really need an independent one, prefer using the type-safe variant (see [NewTypedHostSubnetInformerWithOptions]).
+func NewHostSubnetInformerWithOptions(client versioned.Interface, options internalinterfaces.InformerOptions) cache.SharedIndexInformer {
+	return NewTypedHostSubnetInformerWithOptions(client, options)
+}
+
+// NewTypedHostSubnetInformerWithOptions constructs a new informer for HostSubnet type with additional options.
+// Always prefer using an informer factory to get a shared informer instead of getting an independent
+// one. This reduces memory footprint and number of connections to the server.
+func NewTypedHostSubnetInformerWithOptions(client versioned.Interface, options internalinterfaces.InformerOptions) HostSubnetIndexInformer {
+	gvr := schema.GroupVersionResource{Group: "network.openshift.io", Version: "v1", Resource: "hostsubnets"}
+	identifier := options.InformerName.WithResource(gvr)
+	tweakListOptions := options.TweakListOptions
+	return cache.NewTypedSharedIndexInformer[*apinetworkv1.HostSubnet](cache.NewSharedIndexInformerWithOptions(
 		cache.ToListWatcherWithWatchListSemantics(&cache.ListWatch{
-			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
+			ListFunc: func(opts metav1.ListOptions) (runtime.Object, error) {
 				if tweakListOptions != nil {
-					tweakListOptions(&options)
+					tweakListOptions(&opts)
 				}
-				return client.NetworkV1().HostSubnets().List(context.Background(), options)
+				return client.NetworkV1().HostSubnets().List(context.Background(), opts)
 			},
-			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
+			WatchFunc: func(opts metav1.ListOptions) (watch.Interface, error) {
 				if tweakListOptions != nil {
-					tweakListOptions(&options)
+					tweakListOptions(&opts)
 				}
-				return client.NetworkV1().HostSubnets().Watch(context.Background(), options)
+				return client.NetworkV1().HostSubnets().Watch(context.Background(), opts)
 			},
-			ListWithContextFunc: func(ctx context.Context, options metav1.ListOptions) (runtime.Object, error) {
+			ListWithContextFunc: func(ctx context.Context, opts metav1.ListOptions) (runtime.Object, error) {
 				if tweakListOptions != nil {
-					tweakListOptions(&options)
+					tweakListOptions(&opts)
 				}
-				return client.NetworkV1().HostSubnets().List(ctx, options)
+				return client.NetworkV1().HostSubnets().List(ctx, opts)
 			},
-			WatchFuncWithContext: func(ctx context.Context, options metav1.ListOptions) (watch.Interface, error) {
+			WatchFuncWithContext: func(ctx context.Context, opts metav1.ListOptions) (watch.Interface, error) {
 				if tweakListOptions != nil {
-					tweakListOptions(&options)
+					tweakListOptions(&opts)
 				}
-				return client.NetworkV1().HostSubnets().Watch(ctx, options)
+				return client.NetworkV1().HostSubnets().Watch(ctx, opts)
 			},
 		}, client),
 		&apinetworkv1.HostSubnet{},
-		resyncPeriod,
-		indexers,
-	)
+		cache.SharedIndexInformerOptions{
+			ResyncPeriod: options.ResyncPeriod,
+			Indexers:     options.Indexers,
+			Identifier:   identifier,
+		},
+	))
 }
 
 func (f *hostSubnetInformer) defaultInformer(client versioned.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
-	return NewFilteredHostSubnetInformer(client, resyncPeriod, cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}, f.tweakListOptions)
+	return NewTypedHostSubnetInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}, InformerName: f.factory.InformerName(), TweakListOptions: f.tweakListOptions})
 }
 
 func (f *hostSubnetInformer) Informer() cache.SharedIndexInformer {
-	return f.factory.InformerFor(&apinetworkv1.HostSubnet{}, f.defaultInformer)
+	return f.TypedInformer()
+}
+
+func (f *hostSubnetInformer) TypedInformer() HostSubnetIndexInformer {
+	return cache.NewTypedSharedIndexInformer[*apinetworkv1.HostSubnet](f.factory.InformerFor(&apinetworkv1.HostSubnet{}, f.defaultInformer))
 }
 
 func (f *hostSubnetInformer) Lister() networkv1.HostSubnetLister {
 	return networkv1.NewHostSubnetLister(f.Informer().GetIndexer())
+}
+
+// ToTypedHostSubnetInformer converts an untyped informer into a TypedHostSubnetInformer.
+//
+// WARNING: this conversion is only safe if the informer handles objects of type
+// *HostSubnet. If that is not the case, calling type-safe methods of the returned
+// TypedHostSubnetInformer leads to runtime panics. A safer alternative is to pass
+// around a TypedHostSubnetInformer instances that was obtained from a
+// SharedInformerFactory.
+func ToTypedHostSubnetInformer(informer HostSubnetInformer) TypedHostSubnetInformer {
+	if informer, ok := informer.(TypedHostSubnetInformer); ok {
+		return informer
+	}
+	return &hostSubnetTypedInformerAdapter{informer}
+}
+
+type hostSubnetTypedInformerAdapter struct {
+	HostSubnetInformer
+}
+
+func (a *hostSubnetTypedInformerAdapter) TypedInformer() HostSubnetIndexInformer {
+	return cache.NewTypedSharedIndexInformer[*apinetworkv1.HostSubnet](a.Informer())
+}
+
+// ToHostSubnetIndexInformer converts an untyped informer into a HostSubnetIndexInformer.
+//
+// WARNING: this conversion is only safe if the informer handles objects of type
+// *HostSubnet. If that is not the case, calling type-safe methods of the returned
+// HostSubnetIndexInformer leads to runtime panics. A safer alternative is to pass
+// around a HostSubnetIndexInformer instances that was obtained from a
+// SharedInformerFactory.
+func ToHostSubnetIndexInformer(informer cache.SharedIndexInformer) HostSubnetIndexInformer {
+	if informer, ok := informer.(HostSubnetIndexInformer); ok {
+		return informer
+	}
+	return cache.NewTypedSharedIndexInformer[*apinetworkv1.HostSubnet](informer)
 }

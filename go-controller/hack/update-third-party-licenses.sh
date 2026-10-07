@@ -53,6 +53,12 @@ missing_license_files_allowed() {
         github.com/chzyer/logex@v1.1.10)
             return 0
             ;;
+        # github.com/lightstep/lightstep-tracer-common/golang/gogo at this commit
+        # has no LICENSE file. README.md shows MIT license badge but contains no
+        # license text. Declared as MIT-licensed in repository metadata.
+        github.com/lightstep/lightstep-tracer-common/golang/gogo@v0.0.0-20190605223551-bc2310a04743)
+            return 0
+            ;;
     esac
 
     return 1
@@ -71,6 +77,18 @@ source_copy_override_paths() {
             ;;
         github.com/kr/logfmt@v0.0.0-20140226030751-b84e30acd515)
             printf '%s\n' "Readme"
+            ;;
+        github.com/JohnCGriffin/overflow@v0.0.0-20211019200055-46fa312c352c)
+            printf '%s\n' "README.md"
+            ;;
+        github.com/hudl/fargo@v1.3.0)
+            printf '%s\n' "README.md"
+            ;;
+        github.com/streadway/handy@v0.0.0-20190108123426-d5acb3125c2a)
+            printf '%s\n' "README.md"
+            ;;
+        github.com/mattn/goveralls@v0.0.5)
+            printf '%s\n' "README.md"
             ;;
     esac
 }

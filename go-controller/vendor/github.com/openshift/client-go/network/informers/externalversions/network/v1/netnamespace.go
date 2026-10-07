@@ -12,16 +12,45 @@ import (
 	networkv1 "github.com/openshift/client-go/network/listers/network/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
+	schema "k8s.io/apimachinery/pkg/runtime/schema"
 	watch "k8s.io/apimachinery/pkg/watch"
 	cache "k8s.io/client-go/tools/cache"
 )
 
 // NetNamespaceInformer provides access to a shared informer and lister for
-// NetNamespaces.
+// NetNamespaces. Prefer using the type-safe variant (see [TypedNetNamespaceInformer]).
 type NetNamespaceInformer interface {
 	Informer() cache.SharedIndexInformer
 	Lister() networkv1.NetNamespaceLister
 }
+
+// TypedNetNamespaceInformer provides access to a shared informer and lister for
+// NetNamespaces, including the type-safe TypedInformer variant.
+// It is a superset of NetNamespaceInformer.
+type TypedNetNamespaceInformer interface {
+	Informer() cache.SharedIndexInformer
+	TypedInformer() NetNamespaceIndexInformer
+	Lister() networkv1.NetNamespaceLister
+}
+
+// NetNamespaceIndexInformer is a wrapper around the underlying [cache.SharedIndexInformer]
+// with type-safe variants of several methods.
+type NetNamespaceIndexInformer cache.TypedSharedIndexInformer[*apinetworkv1.NetNamespace]
+
+// NetNamespaceHandlerFuncs is a specialization of [cache.TypedResourceEventHandlerFuncs] for NetNamespace.
+type NetNamespaceHandlerFuncs = cache.TypedResourceEventHandlerFuncs[*apinetworkv1.NetNamespace]
+
+// NetNamespaceDetailedHandlerFuncs is a specialization of [cache.TypedResourceEventHandlerDetailedFuncs] for NetNamespace.
+type NetNamespaceDetailedHandlerFuncs = cache.TypedResourceEventHandlerDetailedFuncs[*apinetworkv1.NetNamespace]
+
+// NetNamespaceFilteringHandler is a specialization of [cache.TypedFilteringResourceEventHandler] for NetNamespace.
+type NetNamespaceFilteringHandler = cache.TypedFilteringResourceEventHandler[*apinetworkv1.NetNamespace]
+
+// NetNamespaceIndexers is a specialization of [cache.TypedIndexers] for NetNamespace.
+type NetNamespaceIndexers = cache.TypedIndexers[*apinetworkv1.NetNamespace]
+
+// DeletedNetNamespace is a specialization of [cache.DeletedObject] for NetNamespace.
+type DeletedNetNamespace = cache.DeletedObject[*apinetworkv1.NetNamespace]
 
 type netNamespaceInformer struct {
 	factory          internalinterfaces.SharedInformerFactory
@@ -31,55 +60,132 @@ type netNamespaceInformer struct {
 // NewNetNamespaceInformer constructs a new informer for NetNamespace type.
 // Always prefer using an informer factory to get a shared informer instead of getting an independent
 // one. This reduces memory footprint and number of connections to the server.
+// If you really need an independent one, prefer using the type-safe variant (see [NewTypedNetNamespaceInformer]).
 func NewNetNamespaceInformer(client versioned.Interface, resyncPeriod time.Duration, indexers cache.Indexers) cache.SharedIndexInformer {
-	return NewFilteredNetNamespaceInformer(client, resyncPeriod, indexers, nil)
+	return NewNetNamespaceInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: indexers})
+}
+
+// NewTypedNetNamespaceInformer constructs a new informer for NetNamespace type.
+// Always prefer using an informer factory to get a shared informer instead of getting an independent
+// one. This reduces memory footprint and number of connections to the server.
+func NewTypedNetNamespaceInformer(client versioned.Interface, resyncPeriod time.Duration, indexers NetNamespaceIndexers) NetNamespaceIndexInformer {
+	return NewTypedNetNamespaceInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: cache.TypedIndexersToIndexers(indexers)})
 }
 
 // NewFilteredNetNamespaceInformer constructs a new informer for NetNamespace type.
 // Always prefer using an informer factory to get a shared informer instead of getting an independent
 // one. This reduces memory footprint and number of connections to the server.
+// If you really need an independent one, prefer using the type-safe variant (see [NewTypedFilteredNetNamespaceInformer]).
 func NewFilteredNetNamespaceInformer(client versioned.Interface, resyncPeriod time.Duration, indexers cache.Indexers, tweakListOptions internalinterfaces.TweakListOptionsFunc) cache.SharedIndexInformer {
-	return cache.NewSharedIndexInformer(
+	return NewTypedNetNamespaceInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: indexers, TweakListOptions: tweakListOptions})
+}
+
+// NewTypedFilteredNetNamespaceInformer constructs a new informer for NetNamespace type.
+// Always prefer using an informer factory to get a shared informer instead of getting an independent
+// one. This reduces memory footprint and number of connections to the server.
+func NewTypedFilteredNetNamespaceInformer(client versioned.Interface, resyncPeriod time.Duration, indexers NetNamespaceIndexers, tweakListOptions internalinterfaces.TweakListOptionsFunc) NetNamespaceIndexInformer {
+	return NewTypedNetNamespaceInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: cache.TypedIndexersToIndexers(indexers), TweakListOptions: tweakListOptions})
+}
+
+// NewNetNamespaceInformerWithOptions constructs a new informer for NetNamespace type with additional options.
+// Always prefer using an informer factory to get a shared informer instead of getting an independent
+// one. This reduces memory footprint and number of connections to the server.
+// If you really need an independent one, prefer using the type-safe variant (see [NewTypedNetNamespaceInformerWithOptions]).
+func NewNetNamespaceInformerWithOptions(client versioned.Interface, options internalinterfaces.InformerOptions) cache.SharedIndexInformer {
+	return NewTypedNetNamespaceInformerWithOptions(client, options)
+}
+
+// NewTypedNetNamespaceInformerWithOptions constructs a new informer for NetNamespace type with additional options.
+// Always prefer using an informer factory to get a shared informer instead of getting an independent
+// one. This reduces memory footprint and number of connections to the server.
+func NewTypedNetNamespaceInformerWithOptions(client versioned.Interface, options internalinterfaces.InformerOptions) NetNamespaceIndexInformer {
+	gvr := schema.GroupVersionResource{Group: "network.openshift.io", Version: "v1", Resource: "netnamespaces"}
+	identifier := options.InformerName.WithResource(gvr)
+	tweakListOptions := options.TweakListOptions
+	return cache.NewTypedSharedIndexInformer[*apinetworkv1.NetNamespace](cache.NewSharedIndexInformerWithOptions(
 		cache.ToListWatcherWithWatchListSemantics(&cache.ListWatch{
-			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
+			ListFunc: func(opts metav1.ListOptions) (runtime.Object, error) {
 				if tweakListOptions != nil {
-					tweakListOptions(&options)
+					tweakListOptions(&opts)
 				}
-				return client.NetworkV1().NetNamespaces().List(context.Background(), options)
+				return client.NetworkV1().NetNamespaces().List(context.Background(), opts)
 			},
-			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
+			WatchFunc: func(opts metav1.ListOptions) (watch.Interface, error) {
 				if tweakListOptions != nil {
-					tweakListOptions(&options)
+					tweakListOptions(&opts)
 				}
-				return client.NetworkV1().NetNamespaces().Watch(context.Background(), options)
+				return client.NetworkV1().NetNamespaces().Watch(context.Background(), opts)
 			},
-			ListWithContextFunc: func(ctx context.Context, options metav1.ListOptions) (runtime.Object, error) {
+			ListWithContextFunc: func(ctx context.Context, opts metav1.ListOptions) (runtime.Object, error) {
 				if tweakListOptions != nil {
-					tweakListOptions(&options)
+					tweakListOptions(&opts)
 				}
-				return client.NetworkV1().NetNamespaces().List(ctx, options)
+				return client.NetworkV1().NetNamespaces().List(ctx, opts)
 			},
-			WatchFuncWithContext: func(ctx context.Context, options metav1.ListOptions) (watch.Interface, error) {
+			WatchFuncWithContext: func(ctx context.Context, opts metav1.ListOptions) (watch.Interface, error) {
 				if tweakListOptions != nil {
-					tweakListOptions(&options)
+					tweakListOptions(&opts)
 				}
-				return client.NetworkV1().NetNamespaces().Watch(ctx, options)
+				return client.NetworkV1().NetNamespaces().Watch(ctx, opts)
 			},
 		}, client),
 		&apinetworkv1.NetNamespace{},
-		resyncPeriod,
-		indexers,
-	)
+		cache.SharedIndexInformerOptions{
+			ResyncPeriod: options.ResyncPeriod,
+			Indexers:     options.Indexers,
+			Identifier:   identifier,
+		},
+	))
 }
 
 func (f *netNamespaceInformer) defaultInformer(client versioned.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
-	return NewFilteredNetNamespaceInformer(client, resyncPeriod, cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}, f.tweakListOptions)
+	return NewTypedNetNamespaceInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}, InformerName: f.factory.InformerName(), TweakListOptions: f.tweakListOptions})
 }
 
 func (f *netNamespaceInformer) Informer() cache.SharedIndexInformer {
-	return f.factory.InformerFor(&apinetworkv1.NetNamespace{}, f.defaultInformer)
+	return f.TypedInformer()
+}
+
+func (f *netNamespaceInformer) TypedInformer() NetNamespaceIndexInformer {
+	return cache.NewTypedSharedIndexInformer[*apinetworkv1.NetNamespace](f.factory.InformerFor(&apinetworkv1.NetNamespace{}, f.defaultInformer))
 }
 
 func (f *netNamespaceInformer) Lister() networkv1.NetNamespaceLister {
 	return networkv1.NewNetNamespaceLister(f.Informer().GetIndexer())
+}
+
+// ToTypedNetNamespaceInformer converts an untyped informer into a TypedNetNamespaceInformer.
+//
+// WARNING: this conversion is only safe if the informer handles objects of type
+// *NetNamespace. If that is not the case, calling type-safe methods of the returned
+// TypedNetNamespaceInformer leads to runtime panics. A safer alternative is to pass
+// around a TypedNetNamespaceInformer instances that was obtained from a
+// SharedInformerFactory.
+func ToTypedNetNamespaceInformer(informer NetNamespaceInformer) TypedNetNamespaceInformer {
+	if informer, ok := informer.(TypedNetNamespaceInformer); ok {
+		return informer
+	}
+	return &netNamespaceTypedInformerAdapter{informer}
+}
+
+type netNamespaceTypedInformerAdapter struct {
+	NetNamespaceInformer
+}
+
+func (a *netNamespaceTypedInformerAdapter) TypedInformer() NetNamespaceIndexInformer {
+	return cache.NewTypedSharedIndexInformer[*apinetworkv1.NetNamespace](a.Informer())
+}
+
+// ToNetNamespaceIndexInformer converts an untyped informer into a NetNamespaceIndexInformer.
+//
+// WARNING: this conversion is only safe if the informer handles objects of type
+// *NetNamespace. If that is not the case, calling type-safe methods of the returned
+// NetNamespaceIndexInformer leads to runtime panics. A safer alternative is to pass
+// around a NetNamespaceIndexInformer instances that was obtained from a
+// SharedInformerFactory.
+func ToNetNamespaceIndexInformer(informer cache.SharedIndexInformer) NetNamespaceIndexInformer {
+	if informer, ok := informer.(NetNamespaceIndexInformer); ok {
+		return informer
+	}
+	return cache.NewTypedSharedIndexInformer[*apinetworkv1.NetNamespace](informer)
 }

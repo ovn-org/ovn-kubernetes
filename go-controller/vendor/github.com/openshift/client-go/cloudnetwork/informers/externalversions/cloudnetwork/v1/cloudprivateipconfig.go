@@ -12,16 +12,45 @@ import (
 	cloudnetworkv1 "github.com/openshift/client-go/cloudnetwork/listers/cloudnetwork/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
+	schema "k8s.io/apimachinery/pkg/runtime/schema"
 	watch "k8s.io/apimachinery/pkg/watch"
 	cache "k8s.io/client-go/tools/cache"
 )
 
 // CloudPrivateIPConfigInformer provides access to a shared informer and lister for
-// CloudPrivateIPConfigs.
+// CloudPrivateIPConfigs. Prefer using the type-safe variant (see [TypedCloudPrivateIPConfigInformer]).
 type CloudPrivateIPConfigInformer interface {
 	Informer() cache.SharedIndexInformer
 	Lister() cloudnetworkv1.CloudPrivateIPConfigLister
 }
+
+// TypedCloudPrivateIPConfigInformer provides access to a shared informer and lister for
+// CloudPrivateIPConfigs, including the type-safe TypedInformer variant.
+// It is a superset of CloudPrivateIPConfigInformer.
+type TypedCloudPrivateIPConfigInformer interface {
+	Informer() cache.SharedIndexInformer
+	TypedInformer() CloudPrivateIPConfigIndexInformer
+	Lister() cloudnetworkv1.CloudPrivateIPConfigLister
+}
+
+// CloudPrivateIPConfigIndexInformer is a wrapper around the underlying [cache.SharedIndexInformer]
+// with type-safe variants of several methods.
+type CloudPrivateIPConfigIndexInformer cache.TypedSharedIndexInformer[*apicloudnetworkv1.CloudPrivateIPConfig]
+
+// CloudPrivateIPConfigHandlerFuncs is a specialization of [cache.TypedResourceEventHandlerFuncs] for CloudPrivateIPConfig.
+type CloudPrivateIPConfigHandlerFuncs = cache.TypedResourceEventHandlerFuncs[*apicloudnetworkv1.CloudPrivateIPConfig]
+
+// CloudPrivateIPConfigDetailedHandlerFuncs is a specialization of [cache.TypedResourceEventHandlerDetailedFuncs] for CloudPrivateIPConfig.
+type CloudPrivateIPConfigDetailedHandlerFuncs = cache.TypedResourceEventHandlerDetailedFuncs[*apicloudnetworkv1.CloudPrivateIPConfig]
+
+// CloudPrivateIPConfigFilteringHandler is a specialization of [cache.TypedFilteringResourceEventHandler] for CloudPrivateIPConfig.
+type CloudPrivateIPConfigFilteringHandler = cache.TypedFilteringResourceEventHandler[*apicloudnetworkv1.CloudPrivateIPConfig]
+
+// CloudPrivateIPConfigIndexers is a specialization of [cache.TypedIndexers] for CloudPrivateIPConfig.
+type CloudPrivateIPConfigIndexers = cache.TypedIndexers[*apicloudnetworkv1.CloudPrivateIPConfig]
+
+// DeletedCloudPrivateIPConfig is a specialization of [cache.DeletedObject] for CloudPrivateIPConfig.
+type DeletedCloudPrivateIPConfig = cache.DeletedObject[*apicloudnetworkv1.CloudPrivateIPConfig]
 
 type cloudPrivateIPConfigInformer struct {
 	factory          internalinterfaces.SharedInformerFactory
@@ -31,55 +60,132 @@ type cloudPrivateIPConfigInformer struct {
 // NewCloudPrivateIPConfigInformer constructs a new informer for CloudPrivateIPConfig type.
 // Always prefer using an informer factory to get a shared informer instead of getting an independent
 // one. This reduces memory footprint and number of connections to the server.
+// If you really need an independent one, prefer using the type-safe variant (see [NewTypedCloudPrivateIPConfigInformer]).
 func NewCloudPrivateIPConfigInformer(client versioned.Interface, resyncPeriod time.Duration, indexers cache.Indexers) cache.SharedIndexInformer {
-	return NewFilteredCloudPrivateIPConfigInformer(client, resyncPeriod, indexers, nil)
+	return NewCloudPrivateIPConfigInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: indexers})
+}
+
+// NewTypedCloudPrivateIPConfigInformer constructs a new informer for CloudPrivateIPConfig type.
+// Always prefer using an informer factory to get a shared informer instead of getting an independent
+// one. This reduces memory footprint and number of connections to the server.
+func NewTypedCloudPrivateIPConfigInformer(client versioned.Interface, resyncPeriod time.Duration, indexers CloudPrivateIPConfigIndexers) CloudPrivateIPConfigIndexInformer {
+	return NewTypedCloudPrivateIPConfigInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: cache.TypedIndexersToIndexers(indexers)})
 }
 
 // NewFilteredCloudPrivateIPConfigInformer constructs a new informer for CloudPrivateIPConfig type.
 // Always prefer using an informer factory to get a shared informer instead of getting an independent
 // one. This reduces memory footprint and number of connections to the server.
+// If you really need an independent one, prefer using the type-safe variant (see [NewTypedFilteredCloudPrivateIPConfigInformer]).
 func NewFilteredCloudPrivateIPConfigInformer(client versioned.Interface, resyncPeriod time.Duration, indexers cache.Indexers, tweakListOptions internalinterfaces.TweakListOptionsFunc) cache.SharedIndexInformer {
-	return cache.NewSharedIndexInformer(
+	return NewTypedCloudPrivateIPConfigInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: indexers, TweakListOptions: tweakListOptions})
+}
+
+// NewTypedFilteredCloudPrivateIPConfigInformer constructs a new informer for CloudPrivateIPConfig type.
+// Always prefer using an informer factory to get a shared informer instead of getting an independent
+// one. This reduces memory footprint and number of connections to the server.
+func NewTypedFilteredCloudPrivateIPConfigInformer(client versioned.Interface, resyncPeriod time.Duration, indexers CloudPrivateIPConfigIndexers, tweakListOptions internalinterfaces.TweakListOptionsFunc) CloudPrivateIPConfigIndexInformer {
+	return NewTypedCloudPrivateIPConfigInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: cache.TypedIndexersToIndexers(indexers), TweakListOptions: tweakListOptions})
+}
+
+// NewCloudPrivateIPConfigInformerWithOptions constructs a new informer for CloudPrivateIPConfig type with additional options.
+// Always prefer using an informer factory to get a shared informer instead of getting an independent
+// one. This reduces memory footprint and number of connections to the server.
+// If you really need an independent one, prefer using the type-safe variant (see [NewTypedCloudPrivateIPConfigInformerWithOptions]).
+func NewCloudPrivateIPConfigInformerWithOptions(client versioned.Interface, options internalinterfaces.InformerOptions) cache.SharedIndexInformer {
+	return NewTypedCloudPrivateIPConfigInformerWithOptions(client, options)
+}
+
+// NewTypedCloudPrivateIPConfigInformerWithOptions constructs a new informer for CloudPrivateIPConfig type with additional options.
+// Always prefer using an informer factory to get a shared informer instead of getting an independent
+// one. This reduces memory footprint and number of connections to the server.
+func NewTypedCloudPrivateIPConfigInformerWithOptions(client versioned.Interface, options internalinterfaces.InformerOptions) CloudPrivateIPConfigIndexInformer {
+	gvr := schema.GroupVersionResource{Group: "cloud.network.openshift.io", Version: "v1", Resource: "cloudprivateipconfigs"}
+	identifier := options.InformerName.WithResource(gvr)
+	tweakListOptions := options.TweakListOptions
+	return cache.NewTypedSharedIndexInformer[*apicloudnetworkv1.CloudPrivateIPConfig](cache.NewSharedIndexInformerWithOptions(
 		cache.ToListWatcherWithWatchListSemantics(&cache.ListWatch{
-			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
+			ListFunc: func(opts metav1.ListOptions) (runtime.Object, error) {
 				if tweakListOptions != nil {
-					tweakListOptions(&options)
+					tweakListOptions(&opts)
 				}
-				return client.CloudV1().CloudPrivateIPConfigs().List(context.Background(), options)
+				return client.CloudV1().CloudPrivateIPConfigs().List(context.Background(), opts)
 			},
-			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
+			WatchFunc: func(opts metav1.ListOptions) (watch.Interface, error) {
 				if tweakListOptions != nil {
-					tweakListOptions(&options)
+					tweakListOptions(&opts)
 				}
-				return client.CloudV1().CloudPrivateIPConfigs().Watch(context.Background(), options)
+				return client.CloudV1().CloudPrivateIPConfigs().Watch(context.Background(), opts)
 			},
-			ListWithContextFunc: func(ctx context.Context, options metav1.ListOptions) (runtime.Object, error) {
+			ListWithContextFunc: func(ctx context.Context, opts metav1.ListOptions) (runtime.Object, error) {
 				if tweakListOptions != nil {
-					tweakListOptions(&options)
+					tweakListOptions(&opts)
 				}
-				return client.CloudV1().CloudPrivateIPConfigs().List(ctx, options)
+				return client.CloudV1().CloudPrivateIPConfigs().List(ctx, opts)
 			},
-			WatchFuncWithContext: func(ctx context.Context, options metav1.ListOptions) (watch.Interface, error) {
+			WatchFuncWithContext: func(ctx context.Context, opts metav1.ListOptions) (watch.Interface, error) {
 				if tweakListOptions != nil {
-					tweakListOptions(&options)
+					tweakListOptions(&opts)
 				}
-				return client.CloudV1().CloudPrivateIPConfigs().Watch(ctx, options)
+				return client.CloudV1().CloudPrivateIPConfigs().Watch(ctx, opts)
 			},
 		}, client),
 		&apicloudnetworkv1.CloudPrivateIPConfig{},
-		resyncPeriod,
-		indexers,
-	)
+		cache.SharedIndexInformerOptions{
+			ResyncPeriod: options.ResyncPeriod,
+			Indexers:     options.Indexers,
+			Identifier:   identifier,
+		},
+	))
 }
 
 func (f *cloudPrivateIPConfigInformer) defaultInformer(client versioned.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
-	return NewFilteredCloudPrivateIPConfigInformer(client, resyncPeriod, cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}, f.tweakListOptions)
+	return NewTypedCloudPrivateIPConfigInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}, InformerName: f.factory.InformerName(), TweakListOptions: f.tweakListOptions})
 }
 
 func (f *cloudPrivateIPConfigInformer) Informer() cache.SharedIndexInformer {
-	return f.factory.InformerFor(&apicloudnetworkv1.CloudPrivateIPConfig{}, f.defaultInformer)
+	return f.TypedInformer()
+}
+
+func (f *cloudPrivateIPConfigInformer) TypedInformer() CloudPrivateIPConfigIndexInformer {
+	return cache.NewTypedSharedIndexInformer[*apicloudnetworkv1.CloudPrivateIPConfig](f.factory.InformerFor(&apicloudnetworkv1.CloudPrivateIPConfig{}, f.defaultInformer))
 }
 
 func (f *cloudPrivateIPConfigInformer) Lister() cloudnetworkv1.CloudPrivateIPConfigLister {
 	return cloudnetworkv1.NewCloudPrivateIPConfigLister(f.Informer().GetIndexer())
+}
+
+// ToTypedCloudPrivateIPConfigInformer converts an untyped informer into a TypedCloudPrivateIPConfigInformer.
+//
+// WARNING: this conversion is only safe if the informer handles objects of type
+// *CloudPrivateIPConfig. If that is not the case, calling type-safe methods of the returned
+// TypedCloudPrivateIPConfigInformer leads to runtime panics. A safer alternative is to pass
+// around a TypedCloudPrivateIPConfigInformer instances that was obtained from a
+// SharedInformerFactory.
+func ToTypedCloudPrivateIPConfigInformer(informer CloudPrivateIPConfigInformer) TypedCloudPrivateIPConfigInformer {
+	if informer, ok := informer.(TypedCloudPrivateIPConfigInformer); ok {
+		return informer
+	}
+	return &cloudPrivateIPConfigTypedInformerAdapter{informer}
+}
+
+type cloudPrivateIPConfigTypedInformerAdapter struct {
+	CloudPrivateIPConfigInformer
+}
+
+func (a *cloudPrivateIPConfigTypedInformerAdapter) TypedInformer() CloudPrivateIPConfigIndexInformer {
+	return cache.NewTypedSharedIndexInformer[*apicloudnetworkv1.CloudPrivateIPConfig](a.Informer())
+}
+
+// ToCloudPrivateIPConfigIndexInformer converts an untyped informer into a CloudPrivateIPConfigIndexInformer.
+//
+// WARNING: this conversion is only safe if the informer handles objects of type
+// *CloudPrivateIPConfig. If that is not the case, calling type-safe methods of the returned
+// CloudPrivateIPConfigIndexInformer leads to runtime panics. A safer alternative is to pass
+// around a CloudPrivateIPConfigIndexInformer instances that was obtained from a
+// SharedInformerFactory.
+func ToCloudPrivateIPConfigIndexInformer(informer cache.SharedIndexInformer) CloudPrivateIPConfigIndexInformer {
+	if informer, ok := informer.(CloudPrivateIPConfigIndexInformer); ok {
+		return informer
+	}
+	return cache.NewTypedSharedIndexInformer[*apicloudnetworkv1.CloudPrivateIPConfig](informer)
 }
