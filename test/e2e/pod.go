@@ -16,7 +16,6 @@ import (
 	"github.com/onsi/gomega"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
-	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/images"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
 	infraapi "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/api"
@@ -33,6 +32,22 @@ import (
 	e2eservice "k8s.io/kubernetes/test/e2e/framework/service"
 	e2eutilsnet "k8s.io/utils/net"
 )
+
+func flushRouteCacheOnAllNodes(cs clientset.Interface) {
+	nodes, err := cs.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{})
+	framework.ExpectNoError(err, "could not list nodes")
+	cmds := [][]string{{"ip", "route", "flush", "cache"}}
+	if isIPv6Supported(cs) {
+		cmds = append(cmds, []string{"ip", "-6", "route", "flush", "cache"})
+	}
+	for _, node := range nodes.Items {
+		framework.Logf("Flushing the ip route cache on %s", node.Name)
+		for _, cmd := range cmds {
+			_, err := infraprovider.Get().ExecK8NodeCommand(node.Name, cmd)
+			framework.ExpectNoError(err, "Flushing the ip route cache failed: %v", cmd)
+		}
+	}
+}
 
 var _ = ginkgo.Describe("Pod to external server PMTUD", func() {
 	const (
@@ -220,20 +235,9 @@ var _ = ginkgo.Describe("Pod to external server PMTUD", func() {
 						// flush this on all 3 nodes else we will run into the
 						// bug: https://issues.redhat.com/browse/OCPBUGS-7609.
 						// TODO: Revisit this once https://bugzilla.redhat.com/show_bug.cgi?id=2169839 is fixed.
-						ovnKubeNodePods, err := f.ClientSet.CoreV1().Pods(deploymentconfig.Get().OVNKubernetesNamespace()).List(context.TODO(), metav1.ListOptions{
-							LabelSelector: "app=ovnkube-node",
-						})
-						if err != nil {
-							framework.Failf("could not get ovnkube-node pods: %v", err)
-						}
-						for _, ovnKubeNodePod := range ovnKubeNodePods.Items {
-							framework.Logf("Flushing the ip route cache on %s", ovnKubeNodePod.Name)
-							_, err := e2ekubectl.RunKubectl(deploymentconfig.Get().OVNKubernetesNamespace(), "exec", ovnKubeNodePod.Name, "--container", getNodeContainerName(), "--",
-								"ip", "route", "flush", "cache")
-							framework.ExpectNoError(err, "Flushing the ip route cache failed")
-						}
+						flushRouteCacheOnAllNodes(f.ClientSet)
 						framework.Logf("Flushing the ip route cache on %s", externalContainer.GetName())
-						_, err = infraprovider.Get().ExecExternalContainerCommand(externalContainer, []string{"ip", "route", "flush", "cache"})
+						_, err := infraprovider.Get().ExecExternalContainerCommand(externalContainer, []string{"ip", "route", "flush", "cache"})
 						framework.ExpectNoError(err, "Flushing the ip route cache failed")
 					}
 				}
@@ -390,18 +394,7 @@ var _ = ginkgo.Describe("blocking ICMP needs frag", func() {
 	var echoMtuRegex = regexp.MustCompile(`expires.*mtu.*1400`)
 	f := wrappedTestFramework("icmp-needs-frag")
 	cleanupFn := func() {
-		ovnKubeNodePods, err := f.ClientSet.CoreV1().Pods(deploymentconfig.Get().OVNKubernetesNamespace()).List(context.TODO(), metav1.ListOptions{
-			LabelSelector: "app=ovnkube-node",
-		})
-		if err != nil {
-			framework.Failf("could not get ovnkube-node pods: %v", err)
-		}
-		for _, ovnKubeNodePod := range ovnKubeNodePods.Items {
-			framework.Logf("Flushing the ip route cache on %s", ovnKubeNodePod.Name)
-			_, err := e2ekubectl.RunKubectl(deploymentconfig.Get().OVNKubernetesNamespace(), "exec", ovnKubeNodePod.Name, "--container", getNodeContainerName(), "--",
-				"ip", "route", "flush", "cache")
-			framework.ExpectNoError(err, "Flushing the ip route cache failed")
-		}
+		flushRouteCacheOnAllNodes(f.ClientSet)
 	}
 
 	ginkgo.BeforeEach(func() {
