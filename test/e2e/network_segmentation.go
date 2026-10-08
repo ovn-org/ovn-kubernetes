@@ -269,6 +269,10 @@ var _ = Describe("Network Segmentation", feature.NetworkSegmentation, func() {
 						netConfigParams *networkAttachmentConfigParams,
 						udnPodConfig podConfiguration,
 					) {
+						if infraprovider.Get().Name() == "kube" {
+							e2eskipper.Skipf("Kube node shell depends on kubelet, which this spec restarts")
+						}
+
 						By("ensure enough schedable nodes exist")
 						nodes, err := e2enode.GetBoundedReadySchedulableNodes(context.Background(), cs, 1)
 						Expect(err).NotTo(HaveOccurred())

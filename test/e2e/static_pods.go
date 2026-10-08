@@ -15,6 +15,7 @@ import (
 	"github.com/onsi/gomega"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/images"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
 
 	v1 "k8s.io/api/core/v1"
 	clientset "k8s.io/client-go/kubernetes"
@@ -92,6 +93,10 @@ var _ = ginkgo.Describe("Creating a static pod on a node", func() {
 	f := wrappedTestFramework("staticpods")
 
 	ginkgo.It("Should successfully create then remove a static pod", func() {
+		if infraprovider.Get().Name() == "kube" {
+			ginkgo.Skip("static Pod setup uses local Docker to modify Kind Nodes")
+		}
+
 		nodes, err := e2enode.GetBoundedReadySchedulableNodes(context.TODO(), f.ClientSet, 3)
 		framework.ExpectNoError(err)
 		if len(nodes.Items) < 1 {
