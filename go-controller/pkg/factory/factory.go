@@ -213,12 +213,14 @@ const (
 )
 
 var (
-	// Use a larger queue for incoming events to avoid bottlenecks
-	// due to handlers being slow.
+	// Retained for compatibility with the queued informer constructor. The
+	// queueMap uses key-deduplicated work queues rather than a fixed-size event
+	// channel, so this value no longer bounds or blocks event delivery.
 	eventQueueSize uint32 = 100
 )
 
-// Override default event queue configuration.  Used only for tests.
+// SetEventQueueSize is retained for compatibility with tests and callers that used
+// the former buffered queue. The keyed work queues do not have a fixed buffer size.
 func SetEventQueueSize(newEventQueueSize uint32) {
 	eventQueueSize = newEventQueueSize
 }
@@ -1489,6 +1491,16 @@ func (wf *WatchFactory) addHandler(objType reflect.Type, namespace string, sel l
 
 	intInf.Lock()
 	defer intInf.Unlock()
+	handlerID := atomic.AddUint64(&wf.handlerCounter.counter, 1)
+	// Register the filter before listing the informer store or running
+	// processExisting. Updates queued during handler initialization must still
+	// preserve transitions that the new handler may observe in its snapshot.
+	// Holding intInf's write lock through initial adds and handler publication
+	// prevents queued callbacks from overtaking the initial snapshot.
+	filtered := namespace != "" || (sel != nil && !sel.Empty())
+	if filtered {
+		intInf.addCoalescingFilter(handlerID, filterFunc)
+	}
 
 	// we are going to add a handler, we need to update the atomic signal that handlers exist now
 	// so that we do not miss events after we list current items.
@@ -1515,6 +1527,7 @@ func (wf *WatchFactory) addHandler(objType reflect.Type, namespace string, sel l
 		})
 		if err != nil {
 			// handler is not going to be added, restore previous value if needed
+			intInf.removeCoalescingFilter(handlerID)
 			if hadZeroHandlers {
 				atomic.StoreUint32(&intInf.hasHandlers, hasNoHandler)
 			}
@@ -1522,7 +1535,6 @@ func (wf *WatchFactory) addHandler(objType reflect.Type, namespace string, sel l
 		}
 	}
 
-	handlerID := atomic.AddUint64(&wf.handlerCounter.counter, 1)
 	handler := inf.addHandler(wf.internalInformerIndex, handlerID, priority, filterFunc, funcs, items)
 	klog.V(5).Infof("Added %v event handler %d", objType, handler.id)
 	return handler, nil

@@ -6,9 +6,11 @@ package factory
 import (
 	"fmt"
 	"reflect"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	ipamclaimsapi "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1"
 	ipamclaimsapifake "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1/apis/clientset/versioned/fake"
@@ -29,6 +31,7 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	core "k8s.io/client-go/testing"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/util/workqueue"
 	"k8s.io/utils/ptr"
 	anpapi "sigs.k8s.io/network-policy-api/apis/v1alpha1"
 	anpapifake "sigs.k8s.io/network-policy-api/pkg/client/clientset/versioned/fake"
@@ -54,6 +57,1111 @@ import (
 func TestFactory(t *testing.T) {
 	RegisterFailHandler(Fail)
 	RunSpecs(t, "Watch Factory Suite")
+}
+
+// shutdownQueueMap stops queue workers and fails if they do not exit promptly.
+func shutdownQueueMap(t *testing.T, queueMap *queueMap) {
+	t.Helper()
+	queueMap.shutdown()
+	done := make(chan struct{})
+	go func() {
+		queueMap.wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("queue worker did not shut down")
+	}
+}
+
+// blockingQueueMapQueue pauses queue acceptance so tests can control shutdown ordering.
+type blockingQueueMapQueue struct {
+	workqueue.TypedInterface[types.NamespacedName]
+	addStarted     chan struct{}
+	allowAdd       chan struct{}
+	shutdownCalled chan struct{}
+	shutdownOnce   sync.Once
+}
+
+// Add pauses queue acceptance so the test can race an enqueue with shutdown.
+func (q *blockingQueueMapQueue) Add(item types.NamespacedName) {
+	close(q.addStarted)
+	<-q.allowAdd
+	q.TypedInterface.Add(item)
+}
+
+// ShutDown signals the blocked Add and shuts down the wrapped queue.
+func (q *blockingQueueMapQueue) ShutDown() {
+	q.shutdownOnce.Do(func() {
+		close(q.shutdownCalled)
+	})
+	q.TypedInterface.ShutDown()
+}
+
+// shutdownRaceQueueMapQueue pauses shutdown and ShuttingDown so tests can expose their ordering.
+type shutdownRaceQueueMapQueue struct {
+	workqueue.TypedInterface[types.NamespacedName]
+	shutdownStarted       chan struct{}
+	allowShutdown         chan struct{}
+	shuttingDownChecked   chan struct{}
+	allowShuttingDownRead chan struct{}
+	shutdownOnce          sync.Once
+	shuttingDownOnce      sync.Once
+}
+
+// ShutDown pauses queue shutdown until the test releases it.
+func (q *shutdownRaceQueueMapQueue) ShutDown() {
+	q.shutdownOnce.Do(func() { close(q.shutdownStarted) })
+	<-q.allowShutdown
+	q.TypedInterface.ShutDown()
+}
+
+// ShuttingDown pauses the state check to expose shutdown ordering races.
+func (q *shutdownRaceQueueMapQueue) ShuttingDown() bool {
+	shuttingDown := q.TypedInterface.ShuttingDown()
+	q.shuttingDownOnce.Do(func() { close(q.shuttingDownChecked) })
+	<-q.allowShuttingDownRead
+	return shuttingDown
+}
+
+// queueMapGetGate pauses the first Get so tests can queue events before delivery starts.
+type queueMapGetGate struct {
+	workqueue.TypedInterface[types.NamespacedName]
+	firstGet   chan struct{}
+	releaseGet chan struct{}
+	getOnce    sync.Once
+}
+
+// Get blocks the first read until the test releases queued events.
+func (q *queueMapGetGate) Get() (types.NamespacedName, bool) {
+	q.getOnce.Do(func() {
+		close(q.firstGet)
+		<-q.releaseGet
+	})
+	return q.TypedInterface.Get()
+}
+
+// TestQueueMapCoalescesRapidUpdates checks that a burst keeps the first old object and latest new object.
+func TestQueueMapCoalescesRapidUpdates(t *testing.T) {
+	const unrelatedAnnotation = "argocd.argoproj.io/managed-by"
+	queueMap := newQueueMap(1, 1, &sync.WaitGroup{}, make(chan struct{}))
+	oldNamespace := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test",
+			UID:  types.UID("uid"),
+			Annotations: map[string]string{
+				util.AclLoggingAnnotation: "{\"deny\":\"alert\"}",
+			},
+		},
+	}
+	queueMap.enqueueEvent(nil, oldNamespace, NamespaceType, false, func(*event) {})
+	firstNewNamespace := oldNamespace.DeepCopy()
+	firstNewNamespace.ResourceVersion = "1"
+	firstNewNamespace.Annotations[unrelatedAnnotation] = "revision-1"
+	queueMap.enqueueEvent(oldNamespace, firstNewNamespace, NamespaceType, false, func(*event) {})
+
+	for resourceVersion := 2; resourceVersion <= 1001; resourceVersion++ {
+		newNamespace := firstNewNamespace.DeepCopy()
+		newNamespace.ResourceVersion = strconv.Itoa(resourceVersion)
+		newNamespace.Annotations[unrelatedAnnotation] = fmt.Sprintf("revision-%d", resourceVersion)
+		queueMap.enqueueEvent(firstNewNamespace, newNamespace, NamespaceType, false, func(*event) {})
+		firstNewNamespace = newNamespace
+	}
+	finalNamespace := firstNewNamespace.DeepCopy()
+	finalNamespace.ResourceVersion = "1002"
+	finalNamespace.Annotations[util.AclLoggingAnnotation] = "{\"deny\":\"warning\"}"
+	queueMap.enqueueEvent(firstNewNamespace, finalNamespace, NamespaceType, false, func(*event) {})
+
+	if got := queueMap.queue.Len(); got != 1 {
+		t.Fatalf("queue length = %d, want 1", got)
+	}
+
+	key := types.NamespacedName{Name: "test"}
+	entry := queueMap.entries[key]
+	if entry == nil {
+		t.Fatal("queue map entry was not created")
+	}
+	if got := len(entry.pending); got != 2 {
+		t.Fatalf("pending event count = %d, want add plus one coalesced update", got)
+	}
+	if got := entry.pending[0].eventType; got != eventTypeAdd {
+		t.Fatalf("first pending event type = %v, want add", got)
+	}
+	if got := entry.pending[1].oldObj.(*corev1.Namespace).ResourceVersion; got != "" {
+		t.Errorf("coalesced event old ResourceVersion = %q, want empty", got)
+	}
+	if got := entry.pending[1].obj.(*corev1.Namespace).ResourceVersion; got != "1002" {
+		t.Errorf("coalesced event ResourceVersion = %q, want 1002", got)
+	}
+	if got := entry.pending[1].oldObj.(*corev1.Namespace).Annotations[util.AclLoggingAnnotation]; got != "{\"deny\":\"alert\"}" {
+		t.Errorf("coalesced event old ACL logging annotation = %q, want alert", got)
+	}
+	if got := entry.pending[1].obj.(*corev1.Namespace).Annotations[util.AclLoggingAnnotation]; got != "{\"deny\":\"warning\"}" {
+		t.Errorf("coalesced event new ACL logging annotation = %q, want warning", got)
+	}
+	if got := entry.pending[1].obj.(*corev1.Namespace).Annotations[unrelatedAnnotation]; got != "revision-1001" {
+		t.Errorf("coalesced event unrelated annotation = %q, want latest revision", got)
+	}
+}
+
+// TestQueueMapDefersFilterChecksUntilUpdatesCanCoalesce avoids filter work when an update cannot coalesce.
+func TestQueueMapDefersFilterChecksUntilUpdatesCanCoalesce(t *testing.T) {
+	queueMap := newQueueMap(1, 1, &sync.WaitGroup{}, make(chan struct{}))
+	transitionChecks := 0
+	filterTransition := func(_, _ interface{}) bool {
+		transitionChecks++
+		return false
+	}
+	newNamespace := func(name, resourceVersion string) *corev1.Namespace {
+		return &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
+			Name:            name,
+			UID:             types.UID("uid"),
+			ResourceVersion: resourceVersion,
+		}}
+	}
+	first := newNamespace("coalesce", "1")
+	second := newNamespace("coalesce", "2")
+	third := newNamespace("coalesce", "3")
+
+	if coalesced := queueMap.enqueueEventWithFilterTransition(first, second, NamespaceType, false, filterTransition, func(*event) {}); coalesced {
+		t.Fatal("first update coalesced without a pending update")
+	}
+	if transitionChecks != 0 {
+		t.Fatalf("filter transitions checked %d times with an empty queue, want 0", transitionChecks)
+	}
+	if coalesced := queueMap.enqueueEventWithFilterTransition(second, third, NamespaceType, false, filterTransition, func(*event) {}); !coalesced {
+		t.Fatal("second consecutive update did not coalesce")
+	}
+	if transitionChecks != 2 {
+		t.Fatalf("filter transitions checked %d times for a coalescible pair, want 2", transitionChecks)
+	}
+	entry := queueMap.entries[types.NamespacedName{Name: "coalesce"}]
+	if entry == nil {
+		t.Fatal("queue map entry was not created")
+	}
+	if got := len(entry.pending); got != 1 {
+		t.Fatalf("pending update count = %d, want 1", got)
+	}
+	if got := entry.pending[0].obj.(*corev1.Namespace).ResourceVersion; got != "3" {
+		t.Errorf("coalesced update ResourceVersion = %q, want 3", got)
+	}
+
+	added := newNamespace("add-tail", "1")
+	queueMap.enqueueEvent(nil, added, NamespaceType, false, func(*event) {})
+	updated := newNamespace("add-tail", "2")
+	queueMap.enqueueEventWithFilterTransition(added, updated, NamespaceType, false, filterTransition, func(*event) {})
+	if transitionChecks != 2 {
+		t.Fatalf("filter transitions checked %d times after an add tail, want 2", transitionChecks)
+	}
+	deleted := newNamespace("delete-tail", "1")
+	queueMap.enqueueEvent(nil, deleted, NamespaceType, true, func(*event) {})
+	updatedAfterDelete := newNamespace("delete-tail", "2")
+	queueMap.enqueueEventWithFilterTransition(deleted, updatedAfterDelete, NamespaceType, false, filterTransition, func(*event) {})
+	if transitionChecks != 2 {
+		t.Fatalf("filter transitions checked %d times after a delete tail, want 2", transitionChecks)
+	}
+}
+
+// TestQueueMapPreservesFilteredExitCallbacks covers filter exits adjacent to adds and deletes.
+func TestQueueMapPreservesFilteredExitCallbacks(t *testing.T) {
+	type callback struct {
+		kind            string
+		resourceVersion string
+	}
+	testCases := []struct {
+		name    string
+		enqueue func(*queueMap, *corev1.Namespace, *corev1.Namespace, func(*event))
+		want    []callback
+	}{
+		{
+			name: "add followed by filter-exit update",
+			enqueue: func(qm *queueMap, matching, notMatching *corev1.Namespace, process func(*event)) {
+				qm.enqueueEvent(nil, matching, NamespaceType, false, process)
+				qm.enqueueEvent(matching, notMatching, NamespaceType, false, process)
+			},
+			want: []callback{{kind: "add", resourceVersion: "1"}, {kind: "delete", resourceVersion: "1"}},
+		},
+		{
+			name: "filter-exit update followed by delete",
+			enqueue: func(qm *queueMap, matching, notMatching *corev1.Namespace, process func(*event)) {
+				qm.enqueueEvent(matching, notMatching, NamespaceType, false, process)
+				qm.enqueueEvent(nil, notMatching, NamespaceType, true, process)
+			},
+			want: []callback{{kind: "delete", resourceVersion: "1"}},
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			queueMap := newQueueMap(1, 1, &sync.WaitGroup{}, make(chan struct{}))
+			stop := stopQueueMapOnCleanup(t, queueMap, nil)
+			callbacks := make(chan callback, 2)
+			processed := make(chan struct{}, 2)
+			filtered := cache.FilteringResourceEventHandler{
+				FilterFunc: func(obj interface{}) bool {
+					return obj.(*corev1.Namespace).Labels["selected"] == "yes"
+				},
+				Handler: cache.ResourceEventHandlerFuncs{
+					AddFunc: func(obj interface{}) {
+						callbacks <- callback{kind: "add", resourceVersion: obj.(*corev1.Namespace).ResourceVersion}
+					},
+					UpdateFunc: func(_, obj interface{}) {
+						callbacks <- callback{kind: "update", resourceVersion: obj.(*corev1.Namespace).ResourceVersion}
+					},
+					DeleteFunc: func(obj interface{}) {
+						callbacks <- callback{kind: "delete", resourceVersion: obj.(*corev1.Namespace).ResourceVersion}
+					},
+				},
+			}
+			process := func(e *event) {
+				switch e.eventType {
+				case eventTypeAdd:
+					filtered.OnAdd(e.obj, false)
+				case eventTypeUpdate:
+					filtered.OnUpdate(e.oldObj, e.obj)
+				case eventTypeDelete:
+					filtered.OnDelete(e.obj)
+				}
+				processed <- struct{}{}
+			}
+
+			matching := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
+				Name: "test", UID: types.UID("uid"), ResourceVersion: "1",
+				Labels: map[string]string{"selected": "yes"},
+			}}
+			notMatching := matching.DeepCopy()
+			notMatching.ResourceVersion = "2"
+			notMatching.Labels["selected"] = "no"
+			testCase.enqueue(queueMap, matching, notMatching, process)
+			queueMap.start()
+
+			for i := 0; i < 2; i++ {
+				select {
+				case <-processed:
+				case <-time.After(time.Second):
+					t.Fatalf("timed out waiting for queued event %d", i+1)
+				}
+			}
+			stop()
+
+			if got := len(callbacks); got != len(testCase.want) {
+				t.Fatalf("filtered callback count = %d, want %d", got, len(testCase.want))
+			}
+			for i, want := range testCase.want {
+				if got := <-callbacks; got != want {
+					t.Errorf("filtered callback %d = %+v, want %+v", i, got, want)
+				}
+			}
+		})
+	}
+}
+
+// TestFederatedHandlerPreservesFilterExitAndReentry keeps matching-to-nonmatching-to-matching events distinct.
+func TestFederatedHandlerPreservesFilterExitAndReentry(t *testing.T) {
+	type callback struct {
+		kind            string
+		resourceVersion string
+	}
+
+	var wg sync.WaitGroup
+	queueMap := newQueueMap(1, 1, &wg, make(chan struct{}))
+	queueGate := &queueMapGetGate{
+		TypedInterface: queueMap.queue,
+		firstGet:       make(chan struct{}),
+		releaseGet:     make(chan struct{}),
+	}
+	queueMap.queue = queueGate
+	intInf := &internalInformer{queueMap: queueMap}
+	callbacks := make(chan callback, 2)
+	handler := &Handler{
+		base: cache.FilteringResourceEventHandler{
+			FilterFunc: func(obj interface{}) bool {
+				return obj.(*corev1.Namespace).Labels["selected"] == "yes"
+			},
+			Handler: cache.ResourceEventHandlerFuncs{
+				AddFunc: func(obj interface{}) {
+					callbacks <- callback{kind: "add", resourceVersion: obj.(*corev1.Namespace).ResourceVersion}
+				},
+				UpdateFunc: func(_, obj interface{}) {
+					callbacks <- callback{kind: "update", resourceVersion: obj.(*corev1.Namespace).ResourceVersion}
+				},
+				DeleteFunc: func(obj interface{}) {
+					callbacks <- callback{kind: "delete", resourceVersion: obj.(*corev1.Namespace).ResourceVersion}
+				},
+			},
+		},
+		tombstone: handlerAlive,
+	}
+	intInf.Lock()
+	intInf.handlers = map[int]map[uint64]*Handler{0: {1: handler}}
+	intInf.Unlock()
+	intInf.addCoalescingFilter(handler.id, handler.FilterFunc)
+	atomic.StoreUint32(&intInf.hasHandlers, hasHandler)
+	informer := &informer{oType: NamespaceType, internalInformers: []*internalInformer{intInf}}
+
+	var releaseOnce sync.Once
+	releaseQueueGet := func() {
+		releaseOnce.Do(func() { close(queueGate.releaseGet) })
+	}
+	queueMap.start()
+	stop := stopQueueMapOnCleanup(t, queueMap, releaseQueueGet)
+	select {
+	case <-queueGate.firstGet:
+	case <-time.After(time.Second):
+		t.Fatal("queue worker did not reach the blocked get")
+	}
+
+	matching := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
+		Name: "test", UID: types.UID("uid"), ResourceVersion: "1",
+		Labels: map[string]string{"selected": "yes"},
+	}}
+	notMatching := matching.DeepCopy()
+	notMatching.ResourceVersion = "2"
+	notMatching.Labels["selected"] = "no"
+	matchingAgain := notMatching.DeepCopy()
+	matchingAgain.ResourceVersion = "3"
+	matchingAgain.Labels["selected"] = "yes"
+	queuedHandler := informer.newFederatedQueuedHandler(0)
+	queuedHandler.OnUpdate(matching, notMatching)
+	queuedHandler.OnUpdate(notMatching, matchingAgain)
+	releaseQueueGet()
+
+	for i, want := range []callback{{kind: "delete", resourceVersion: "1"}, {kind: "add", resourceVersion: "3"}} {
+		select {
+		case got := <-callbacks:
+			if got != want {
+				t.Errorf("filtered callback %d = %+v, want %+v", i, got, want)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("timed out waiting for filtered callback %d (%s)", i, want.kind)
+		}
+	}
+	stop()
+}
+
+// TestHandlerRegistrationDoesNotCoalesceSnapshotFilterExit verifies that queued
+// filter transitions run after the initial snapshot and leave no stale state.
+func TestHandlerRegistrationDoesNotCoalesceSnapshotFilterExit(t *testing.T) {
+	var wg sync.WaitGroup
+	queueMap := newQueueMap(1, 1, &wg, make(chan struct{}))
+	queueGate := &queueMapGetGate{
+		TypedInterface: queueMap.queue,
+		firstGet:       make(chan struct{}),
+		releaseGet:     make(chan struct{}),
+	}
+	queueMap.queue = queueGate
+	intInf := &internalInformer{handlers: make(map[int]map[uint64]*Handler), queueMap: queueMap}
+	notMatching := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
+		Name: "test", UID: types.UID("uid"), ResourceVersion: "1",
+		Labels: map[string]string{"selected": "no"},
+	}}
+	sharedInformer := cache.NewSharedIndexInformer(nil, &corev1.Namespace{}, 0, cache.Indexers{})
+	if err := sharedInformer.GetStore().Add(notMatching); err != nil {
+		t.Fatalf("failed to seed informer store: %v", err)
+	}
+	testInformer := &informer{
+		oType: NamespaceType,
+		inf:   sharedInformer,
+		initialAddFunc: func(handler *Handler, items []interface{}) {
+			for _, item := range items {
+				handler.OnAdd(item, false)
+			}
+		},
+		internalInformers: []*internalInformer{intInf},
+	}
+	wf := &WatchFactory{
+		handlerCounter:        &handlerCounter{},
+		informers:             map[reflect.Type]*informer{NamespaceType: testInformer},
+		internalInformerIndex: 0,
+	}
+	callbacks := make(chan string, 4)
+	var stateMu sync.Mutex
+	ownedState := make(map[string]*corev1.Namespace)
+	handlerFuncs := cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			namespace := obj.(*corev1.Namespace)
+			stateMu.Lock()
+			ownedState[namespace.Name] = namespace.DeepCopy()
+			stateMu.Unlock()
+			callbacks <- "add:" + namespace.ResourceVersion
+		},
+		UpdateFunc: func(_, obj interface{}) {
+			namespace := obj.(*corev1.Namespace)
+			stateMu.Lock()
+			ownedState[namespace.Name] = namespace.DeepCopy()
+			stateMu.Unlock()
+			callbacks <- "update:" + namespace.ResourceVersion
+		},
+		DeleteFunc: func(obj interface{}) {
+			namespace := obj.(*corev1.Namespace)
+			stateMu.Lock()
+			delete(ownedState, namespace.Name)
+			stateMu.Unlock()
+			callbacks <- "delete:" + namespace.ResourceVersion
+		},
+	}
+	queueMap.start()
+	var releaseQueueOnce sync.Once
+	releaseQueue := func() { releaseQueueOnce.Do(func() { close(queueGate.releaseGet) }) }
+	stop := stopQueueMapOnCleanup(t, queueMap, releaseQueue)
+	select {
+	case <-queueGate.firstGet:
+	case <-time.After(time.Second):
+		t.Fatal("queue worker did not reach the blocked get")
+	}
+
+	snapshotStarted := make(chan []interface{}, 1)
+	releaseSnapshot := make(chan struct{})
+	var releaseSnapshotOnce sync.Once
+	finishSnapshot := func() { releaseSnapshotOnce.Do(func() { close(releaseSnapshot) }) }
+	t.Cleanup(finishSnapshot)
+	registrationDone := make(chan error, 1)
+	go func() {
+		_, err := wf.addHandler(NamespaceType, "", labels.Set{"selected": "yes"}.AsSelector(), handlerFuncs,
+			func(items []interface{}) error {
+				snapshotStarted <- items
+				<-releaseSnapshot
+				return nil
+			}, defaultHandlerPriority)
+		registrationDone <- err
+	}()
+	var snapshot []interface{}
+	select {
+	case snapshot = <-snapshotStarted:
+	case <-time.After(time.Second):
+		t.Fatal("handler registration did not reach the blocked initial snapshot")
+	}
+	if len(snapshot) != 0 {
+		t.Fatalf("initial matching snapshot contains %d objects, want none", len(snapshot))
+	}
+	queuedHandler := testInformer.newFederatedQueuedHandler(0)
+	matching := notMatching.DeepCopy()
+	matching.ResourceVersion = "2"
+	matching.Labels["selected"] = "yes"
+	notMatchingAgain := matching.DeepCopy()
+	notMatchingAgain.ResourceVersion = "3"
+	notMatchingAgain.Labels["selected"] = "no"
+	notMatchingAgain2 := notMatchingAgain.DeepCopy()
+	notMatchingAgain2.ResourceVersion = "4"
+	notMatchingAgain3 := notMatchingAgain.DeepCopy()
+	notMatchingAgain3.ResourceVersion = "5"
+
+	// addHandler holds intInf's write lock while this callback is blocked. Its
+	// filter has already been registered, so these membership transitions must
+	// stay distinct even though later same-membership updates can be coalesced.
+	for _, update := range [][2]*corev1.Namespace{
+		{notMatching, matching},
+		{matching, notMatchingAgain},
+		{notMatchingAgain, notMatchingAgain2},
+		{notMatchingAgain2, notMatchingAgain3},
+	} {
+		if err := sharedInformer.GetStore().Update(update[1]); err != nil {
+			t.Fatalf("failed to update informer store to rv=%s: %v", update[1].ResourceVersion, err)
+		}
+		queuedHandler.OnUpdate(update[0], update[1])
+	}
+
+	key := types.NamespacedName{Name: notMatching.Name}
+	queueMap.Lock()
+	entry := queueMap.entries[key]
+	if entry == nil {
+		queueMap.Unlock()
+		t.Fatal("registration updates were not queued")
+	}
+	pending := append([]*event(nil), entry.pending...)
+	queueMap.Unlock()
+	if len(pending) != 3 {
+		t.Fatalf("pending event count = %d, want two filter transitions and one coalesced update", len(pending))
+	}
+	if !pending[0].filterTransition || !pending[1].filterTransition {
+		t.Fatal("filter membership transitions were not marked for coalescing protection")
+	}
+	if got := pending[2].obj.(*corev1.Namespace).ResourceVersion; got != "5" {
+		t.Errorf("coalesced non-matching update resourceVersion = %q, want latest rv=5", got)
+	}
+
+	finishSnapshot()
+	select {
+	case err := <-registrationDone:
+		if err != nil {
+			t.Fatalf("handler registration failed: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("handler registration did not complete after releasing the snapshot")
+	}
+	releaseQueue()
+	for i, want := range []string{"add:2", "delete:2"} {
+		select {
+		case got := <-callbacks:
+			if got != want {
+				t.Errorf("callback %d = %q, want %q", i+1, got, want)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("timed out waiting for callback %d (%s)", i+1, want)
+		}
+	}
+	stop()
+
+	stateMu.Lock()
+	defer stateMu.Unlock()
+	if len(ownedState) != 0 {
+		t.Fatalf("handler retained stale state for %d namespaces after filter exit: %+v", len(ownedState), ownedState)
+	}
+}
+
+// TestQueueMapDoesNotCoalesceAddsForDifferentUIDs retains separate adds for reused names.
+func TestQueueMapDoesNotCoalesceAddsForDifferentUIDs(t *testing.T) {
+	queueMap := newQueueMap(1, 1, &sync.WaitGroup{}, make(chan struct{}))
+	oldNamespace := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test",
+			UID:  types.UID("old-uid"),
+		},
+	}
+	newNamespace := oldNamespace.DeepCopy()
+	newNamespace.UID = types.UID("new-uid")
+
+	queueMap.enqueueEvent(nil, oldNamespace, NamespaceType, false, func(*event) {})
+	queueMap.enqueueEvent(nil, newNamespace, NamespaceType, false, func(*event) {})
+
+	entry := queueMap.entries[types.NamespacedName{Name: "test"}]
+	if entry == nil {
+		t.Fatal("queue map entry was not created")
+	}
+	if got := len(entry.pending); got != 2 {
+		t.Fatalf("pending event count = %d, want 2", got)
+	}
+	if got := entry.pending[0].obj.(*corev1.Namespace).UID; got != types.UID("old-uid") {
+		t.Errorf("first pending UID = %q, want old-uid", got)
+	}
+	if got := entry.pending[1].obj.(*corev1.Namespace).UID; got != types.UID("new-uid") {
+		t.Errorf("second pending UID = %q, want new-uid", got)
+	}
+}
+
+// TestQueueMapUpdateDoesNotSuppressOtherKeyLifecycleEvents checks that
+// coalescing one key leaves another key's lifecycle events intact.
+func TestQueueMapUpdateDoesNotSuppressOtherKeyLifecycleEvents(t *testing.T) {
+	var wg sync.WaitGroup
+	queueMap := newQueueMap(1, 2, &wg, make(chan struct{}))
+	first := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "a", UID: types.UID("uid-a")}}
+	callbacks := make(chan string, 4)
+	process := func(e *event) {
+		name := e.obj.(*corev1.Namespace).Name
+		switch e.eventType {
+		case eventTypeAdd:
+			callbacks <- "add:" + name
+		case eventTypeUpdate:
+			callbacks <- "update:" + name + ":" + e.obj.(*corev1.Namespace).ResourceVersion
+		case eventTypeDelete:
+			callbacks <- "delete:" + name
+		}
+	}
+
+	for rv := 1; rv <= 100; rv++ {
+		updated := first.DeepCopy()
+		updated.ResourceVersion = strconv.Itoa(rv)
+		queueMap.enqueueEvent(first, updated, NamespaceType, false, process)
+		first = updated
+	}
+	other := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "b", UID: types.UID("uid-b")}}
+	queueMap.enqueueEvent(nil, other, NamespaceType, false, process)
+	queueMap.enqueueEvent(nil, other, NamespaceType, true, process)
+
+	queueMap.start()
+	stop := stopQueueMapOnCleanup(t, queueMap, nil)
+	stop()
+
+	want := map[string]int{
+		"update:a:100": 1,
+		"add:b":        1,
+		"delete:b":     1,
+	}
+	gotOrder := make([]string, 0, len(want))
+	for len(callbacks) > 0 {
+		got := <-callbacks
+		gotOrder = append(gotOrder, got)
+		if _, ok := want[got]; !ok {
+			t.Errorf("unexpected callback %q", got)
+			continue
+		}
+		want[got]--
+	}
+	for callback, count := range want {
+		if count != 0 {
+			t.Errorf("callback %q delivered %d times, want once", callback, 1-count)
+		}
+	}
+	addIndex, deleteIndex := -1, -1
+	for i, callback := range gotOrder {
+		switch callback {
+		case "add:b":
+			addIndex = i
+		case "delete:b":
+			deleteIndex = i
+		}
+	}
+	if addIndex < 0 || deleteIndex < 0 || addIndex > deleteIndex {
+		t.Errorf("key b lifecycle callbacks out of order: %v", gotOrder)
+	}
+}
+
+// TestQueueMapPreservesUIDReplacementUpdates delivers each replacement in delete/add order.
+func TestQueueMapPreservesUIDReplacementUpdates(t *testing.T) {
+	var wg sync.WaitGroup
+	queueMap := newQueueMap(1, 1, &wg, make(chan struct{}))
+	oldNamespace := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test",
+			UID:  types.UID("old-uid"),
+		},
+	}
+	firstReplacement := oldNamespace.DeepCopy()
+	firstReplacement.UID = types.UID("first-replacement-uid")
+	secondReplacement := firstReplacement.DeepCopy()
+	secondReplacement.UID = types.UID("second-replacement-uid")
+
+	callbacks := make(chan string, 4)
+	process := func(e *event) {
+		oldUID := e.oldObj.(metav1.Object).GetUID()
+		newUID := e.obj.(metav1.Object).GetUID()
+		if oldUID != newUID {
+			callbacks <- "delete:" + string(oldUID)
+			callbacks <- "add:" + string(newUID)
+		}
+	}
+	queueMap.enqueueEvent(oldNamespace, firstReplacement, NamespaceType, false, process)
+	queueMap.enqueueEvent(firstReplacement, secondReplacement, NamespaceType, false, process)
+
+	entry := queueMap.entries[types.NamespacedName{Name: "test"}]
+	if entry == nil {
+		t.Fatal("queue map entry was not created")
+	}
+	if got := len(entry.pending); got != 2 {
+		t.Fatalf("pending event count = %d, want 2", got)
+	}
+	if got := entry.pending[0].oldObj.(*corev1.Namespace).UID; got != types.UID("old-uid") {
+		t.Errorf("first replacement old UID = %q, want old-uid", got)
+	}
+	if got := entry.pending[0].obj.(*corev1.Namespace).UID; got != types.UID("first-replacement-uid") {
+		t.Errorf("first replacement new UID = %q, want first-replacement-uid", got)
+	}
+	if got := entry.pending[1].oldObj.(*corev1.Namespace).UID; got != types.UID("first-replacement-uid") {
+		t.Errorf("second replacement old UID = %q, want first-replacement-uid", got)
+	}
+	if got := entry.pending[1].obj.(*corev1.Namespace).UID; got != types.UID("second-replacement-uid") {
+		t.Errorf("second replacement new UID = %q, want second-replacement-uid", got)
+	}
+	queueMap.start()
+	stop := stopQueueMapOnCleanup(t, queueMap, nil)
+	for _, want := range []string{
+		"delete:old-uid",
+		"add:first-replacement-uid",
+		"delete:first-replacement-uid",
+		"add:second-replacement-uid",
+	} {
+		select {
+		case got := <-callbacks:
+			if got != want {
+				t.Errorf("replacement callback = %q, want %q", got, want)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("timed out waiting for replacement callback %q", want)
+		}
+	}
+	stop()
+}
+
+// TestQueueMapPreservesAddDeleteAndReplacementOrdering covers lifecycle barriers around object recreation.
+func TestQueueMapPreservesAddDeleteAndReplacementOrdering(t *testing.T) {
+	testCases := []struct {
+		name     string
+		enqueue  func(*queueMap, *corev1.Namespace, *corev1.Namespace, func(*event))
+		expected []string
+	}{
+		{
+			name: "add-delete-add",
+			enqueue: func(qm *queueMap, oldObject, newObject *corev1.Namespace, process func(*event)) {
+				qm.enqueueEvent(nil, oldObject, NamespaceType, false, process)
+				qm.enqueueEvent(nil, oldObject, NamespaceType, true, process)
+				qm.enqueueEvent(nil, newObject, NamespaceType, false, process)
+			},
+			expected: []string{"add:old", "delete:old", "add:new"},
+		},
+		{
+			name: "add-updates-delete-add",
+			enqueue: func(qm *queueMap, oldObject, newObject *corev1.Namespace, process func(*event)) {
+				firstUpdate := oldObject.DeepCopy()
+				firstUpdate.ResourceVersion = "2"
+				lastUpdate := firstUpdate.DeepCopy()
+				lastUpdate.ResourceVersion = "3"
+				qm.enqueueEvent(nil, oldObject, NamespaceType, false, process)
+				qm.enqueueEvent(oldObject, firstUpdate, NamespaceType, false, process)
+				qm.enqueueEvent(firstUpdate, lastUpdate, NamespaceType, false, process)
+				qm.enqueueEvent(nil, lastUpdate, NamespaceType, true, process)
+				qm.enqueueEvent(nil, newObject, NamespaceType, false, process)
+			},
+			expected: []string{"add:old", "update:old:3", "delete:old", "add:new"},
+		},
+	}
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			var wg sync.WaitGroup
+			queueMap := newQueueMap(1, 1, &wg, make(chan struct{}))
+			oldObject := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "test", UID: types.UID("old"), ResourceVersion: "1"}}
+			newObject := oldObject.DeepCopy()
+			newObject.UID = types.UID("new")
+			callbacks := make(chan string, 4)
+			process := func(e *event) {
+				switch e.eventType {
+				case eventTypeAdd:
+					callbacks <- "add:" + string(e.obj.(metav1.Object).GetUID())
+				case eventTypeUpdate:
+					callbacks <- "update:" + string(e.obj.(metav1.Object).GetUID()) + ":" + e.obj.(*corev1.Namespace).ResourceVersion
+				case eventTypeDelete:
+					callbacks <- "delete:" + string(e.obj.(metav1.Object).GetUID())
+				}
+			}
+			testCase.enqueue(queueMap, oldObject, newObject, process)
+			queueMap.start()
+			stop := stopQueueMapOnCleanup(t, queueMap, nil)
+			for i, want := range testCase.expected {
+				select {
+				case got := <-callbacks:
+					if got != want {
+						t.Errorf("callback %d = %q, want %q", i+1, got, want)
+					}
+				case <-time.After(time.Second):
+					t.Fatalf("timed out waiting for callback %d (%s)", i+1, want)
+				}
+			}
+			stop()
+		})
+	}
+}
+
+// TestQueueMapPreservesUIDReplacementBeforeDelete ensures shutdown drains the update before its following delete.
+func TestQueueMapPreservesUIDReplacementBeforeDelete(t *testing.T) {
+	var wg sync.WaitGroup
+	queueMap := newQueueMap(1, 1, &wg, make(chan struct{}))
+	oldNamespace := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test",
+			UID:  types.UID("old-uid"),
+		},
+	}
+	newNamespace := oldNamespace.DeepCopy()
+	newNamespace.UID = types.UID("new-uid")
+	processed := make(chan eventType, 2)
+	shutdownStarted := make(chan struct{})
+	process := func(e *event) {
+		if e.eventType == eventTypeUpdate {
+			// Shut down while the first event is being processed so the second
+			// event cannot depend on queue.Add after queue.Done.
+			queueMap.shutdown()
+			close(shutdownStarted)
+		}
+		processed <- e.eventType
+	}
+
+	queueMap.enqueueEvent(oldNamespace, newNamespace, NamespaceType, false, process)
+	queueMap.enqueueEvent(nil, newNamespace, NamespaceType, true, process)
+
+	entry := queueMap.entries[types.NamespacedName{Name: "test"}]
+	if entry == nil {
+		t.Fatal("queue map entry was not created")
+	}
+	if got := len(entry.pending); got != 2 {
+		t.Fatalf("pending event count = %d, want 2", got)
+	}
+	if got := entry.pending[0].oldObj.(*corev1.Namespace).UID; got != types.UID("old-uid") {
+		t.Errorf("replacement old UID = %q, want old-uid", got)
+	}
+	if got := entry.pending[0].obj.(*corev1.Namespace).UID; got != types.UID("new-uid") {
+		t.Errorf("replacement new UID = %q, want new-uid", got)
+	}
+	if got := entry.pending[1].eventType; got != eventTypeDelete {
+		t.Errorf("second event type = %v, want delete", got)
+	}
+
+	queueMap.start()
+	stop := stopQueueMapOnCleanup(t, queueMap, nil)
+	select {
+	case <-shutdownStarted:
+	case <-time.After(time.Second):
+		t.Fatal("replacement update was not processed")
+	}
+	stop()
+	for i, want := range []eventType{eventTypeUpdate, eventTypeDelete} {
+		select {
+		case got := <-processed:
+			if got != want {
+				t.Errorf("processed event %d = %v, want %v", i, got, want)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("timed out waiting for processed event %d (%v)", i, want)
+		}
+	}
+}
+
+// TestQueueMapSerializesEnqueueAndShutdown blocks Add to verify shutdown preserves accepted work.
+func TestQueueMapSerializesEnqueueAndShutdown(t *testing.T) {
+	var wg sync.WaitGroup
+	stopChan := make(chan struct{})
+	queueMap := newQueueMap(1, 1, &wg, stopChan)
+	queue := &blockingQueueMapQueue{
+		TypedInterface: queueMap.queue,
+		addStarted:     make(chan struct{}),
+		allowAdd:       make(chan struct{}),
+		shutdownCalled: make(chan struct{}),
+	}
+	queueMap.queue = queue
+	queueMap.start()
+
+	var releaseAddOnce sync.Once
+	releaseAdd := func() {
+		releaseAddOnce.Do(func() { close(queue.allowAdd) })
+	}
+	defer func() {
+		releaseAdd()
+		shutdownQueueMap(t, queueMap)
+	}()
+
+	processed := make(chan struct{})
+	namespace := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "test", UID: types.UID("uid")}}
+	enqueueDone := make(chan struct{})
+	go func() {
+		queueMap.enqueueEvent(nil, namespace, NamespaceType, false, func(*event) {
+			close(processed)
+		})
+		close(enqueueDone)
+	}()
+
+	select {
+	case <-queue.addStarted:
+	case <-time.After(time.Second):
+		t.Fatal("enqueue did not reach queue.Add")
+	}
+	close(stopChan)
+
+	shutdownDone := make(chan struct{})
+	go func() {
+		queueMap.shutdown()
+		close(shutdownDone)
+	}()
+
+	select {
+	case <-queue.shutdownCalled:
+		t.Fatal("shutdown closed the queue before the pending event was accepted")
+	case <-time.After(time.Second):
+	}
+
+	releaseAdd()
+	select {
+	case <-processed:
+	case <-time.After(time.Second):
+		t.Fatal("accepted event was not processed after concurrent shutdown")
+	}
+	select {
+	case <-enqueueDone:
+	case <-time.After(time.Second):
+		t.Fatal("enqueue did not finish after queue acceptance")
+	}
+	select {
+	case <-shutdownDone:
+	case <-time.After(time.Second):
+		t.Fatal("shutdown did not finish after queue acceptance")
+	}
+}
+
+// TestQueueMapDrainsPendingEventsWhenShutdownRacesRequeue protects the gap
+// between marking the queue map stopped and shutting down its workqueue.
+func TestQueueMapDrainsPendingEventsWhenShutdownRacesRequeue(t *testing.T) {
+	var wg sync.WaitGroup
+	queueMap := newQueueMap(1, 1, &wg, make(chan struct{}))
+	queue := &shutdownRaceQueueMapQueue{
+		TypedInterface:        queueMap.queue,
+		shutdownStarted:       make(chan struct{}),
+		allowShutdown:         make(chan struct{}),
+		shuttingDownChecked:   make(chan struct{}),
+		allowShuttingDownRead: make(chan struct{}),
+	}
+	queueMap.queue = queue
+	updateStarted := make(chan struct{})
+	releaseUpdate := make(chan struct{})
+	deleteProcessed := make(chan struct{})
+	var releaseUpdateOnce sync.Once
+	releaseUpdateCallback := func() {
+		releaseUpdateOnce.Do(func() { close(releaseUpdate) })
+	}
+	var releaseShutdownOnce sync.Once
+	releaseQueueShutdown := func() {
+		releaseShutdownOnce.Do(func() { close(queue.allowShutdown) })
+	}
+	var releaseShuttingDownReadOnce sync.Once
+	releaseShuttingDownRead := func() {
+		releaseShuttingDownReadOnce.Do(func() { close(queue.allowShuttingDownRead) })
+	}
+	queueMap.start()
+	stop := stopQueueMapOnCleanup(t, queueMap, func() {
+		releaseUpdateCallback()
+		releaseQueueShutdown()
+		releaseShuttingDownRead()
+	})
+
+	oldNamespace := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "test", UID: types.UID("uid"), ResourceVersion: "1"}}
+	newNamespace := oldNamespace.DeepCopy()
+	newNamespace.ResourceVersion = "2"
+	process := func(e *event) {
+		switch e.eventType {
+		case eventTypeUpdate:
+			close(updateStarted)
+			<-releaseUpdate
+		case eventTypeDelete:
+			close(deleteProcessed)
+		}
+	}
+	queueMap.enqueueEvent(oldNamespace, newNamespace, NamespaceType, false, process)
+	select {
+	case <-updateStarted:
+	case <-time.After(time.Second):
+		t.Fatal("update callback did not start")
+	}
+	queueMap.enqueueEvent(nil, newNamespace, NamespaceType, true, process)
+
+	shutdownDone := make(chan struct{})
+	go func() {
+		queueMap.shutdown()
+		close(shutdownDone)
+	}()
+	select {
+	case <-queue.shutdownStarted:
+	case <-time.After(time.Second):
+		t.Fatal("queue map did not begin workqueue shutdown")
+	}
+	releaseUpdateCallback()
+
+	select {
+	case <-deleteProcessed:
+		// The worker observed queueMap.stopped and drained the pending delete.
+	case <-queue.shuttingDownChecked:
+		// Force the old check-then-Add race: shut down the workqueue after the
+		// worker observed false but before its Add can requeue the key.
+		releaseQueueShutdown()
+		select {
+		case <-shutdownDone:
+		case <-time.After(time.Second):
+			t.Fatal("workqueue shutdown did not complete")
+		}
+		releaseShuttingDownRead()
+		select {
+		case <-deleteProcessed:
+		case <-time.After(time.Second):
+			t.Fatal("pending delete was lost while shutdown raced with requeue")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("pending delete was not processed during shutdown")
+	}
+	releaseQueueShutdown()
+	select {
+	case <-shutdownDone:
+	case <-time.After(time.Second):
+		t.Fatal("workqueue shutdown did not complete")
+	}
+	stop()
+}
+
+// TestQueueMapProcessesAndShutsDown checks that a callback accepted before stop is drained.
+func TestQueueMapProcessesAndShutsDown(t *testing.T) {
+	var wg sync.WaitGroup
+	queueMap := newQueueMap(1, 1, &wg, make(chan struct{}))
+	queueMap.start()
+	stop := stopQueueMapOnCleanup(t, queueMap, nil)
+
+	processed := make(chan struct{})
+	namespace := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "test", UID: types.UID("uid")}}
+	queueMap.enqueueEvent(nil, namespace, NamespaceType, false, func(*event) {
+		close(processed)
+	})
+
+	select {
+	case <-processed:
+	case <-time.After(time.Second):
+		t.Fatal("queued event was not processed")
+	}
+
+	stop()
+}
+
+// TestQueueMapCoalescesWhileEventIsProcessing ensures a busy key yields so others are not starved.
+func TestQueueMapCoalescesWhileEventIsProcessing(t *testing.T) {
+	var wg sync.WaitGroup
+	queueMap := newQueueMap(1, 1, &wg, make(chan struct{}))
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	queueMap.start()
+	stop := stopQueueMapOnCleanup(t, queueMap, func() {
+		releaseOnce.Do(func() { close(release) })
+	})
+	processed := make(chan string, 4)
+	var process func(*event)
+	process = func(e *event) {
+		switch e.eventType {
+		case eventTypeAdd:
+			close(entered)
+			<-release
+			processed <- "hot add"
+		case eventTypeUpdate:
+			namespace := e.obj.(*corev1.Namespace)
+			if namespace.ResourceVersion == "1000" {
+				nextNamespace := namespace.DeepCopy()
+				nextNamespace.ResourceVersion = "1001"
+				queueMap.enqueueEvent(namespace, nextNamespace, NamespaceType, false, process)
+			}
+			processed <- "hot update " + namespace.ResourceVersion
+		}
+	}
+
+	namespace := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "test", UID: types.UID("uid")}}
+	queueMap.enqueueEvent(nil, namespace, NamespaceType, false, process)
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("queued event was not picked up by the worker")
+	}
+
+	for resourceVersion := 1; resourceVersion <= 1000; resourceVersion++ {
+		newNamespace := namespace.DeepCopy()
+		newNamespace.ResourceVersion = strconv.Itoa(resourceVersion)
+		queueMap.enqueueEvent(namespace, newNamespace, NamespaceType, false, process)
+		namespace = newNamespace
+	}
+
+	queueMap.Lock()
+	pendingEvents := len(queueMap.entries[types.NamespacedName{Name: "test"}].pending)
+	queueMap.Unlock()
+	if pendingEvents != 1 {
+		t.Fatalf("pending events while handler is blocked = %d, want 1", pendingEvents)
+	}
+	other := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "other", UID: types.UID("other-uid")}}
+	queueMap.enqueueEvent(nil, other, NamespaceType, false, func(*event) { processed <- "other add" })
+
+	releaseOnce.Do(func() { close(release) })
+	want := []string{"hot add", "other add", "hot update 1000", "hot update 1001"}
+	for i, expected := range want {
+		select {
+		case got := <-processed:
+			if got != expected {
+				t.Errorf("callback %d = %q, want %q", i+1, got, expected)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("timed out waiting for callback %d: expected %q", i+1, expected)
+		}
+	}
+
+	stop()
 }
 
 func newObjectMeta(name, namespace string) metav1.ObjectMeta {
@@ -1107,6 +2215,13 @@ var _ = Describe("Watch Factory Operations", func() {
 			pod := newPod(name, fmt.Sprintf("namespace-%d", i))
 			testPods[name] = &opTest{pod: pod}
 		}
+		waitFor := func(ot *opTest, operation string, expected int, count func(*opTest) int) {
+			Eventually(func() int {
+				ot.mu.Lock()
+				defer ot.mu.Unlock()
+				return count(ot)
+			}, 2).Should(Equal(expected), "pod %q %s callback count did not reach %d", ot.pod.Name, operation, expected)
+		}
 
 		h, c := addHandler(wf, PodType, cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
@@ -1144,12 +2259,15 @@ var _ = Describe("Watch Factory Operations", func() {
 			for _, ot := range testPods {
 				pods = append(pods, ot.pod)
 				podWatch.Add(ot.pod)
+				waitFor(ot, "add", i+1, func(ot *opTest) int { return ot.added })
 				ot.mu.Lock()
 				ot.pod.Spec.NodeName = nodeName
 				ot.mu.Unlock()
 				podWatch.Modify(ot.pod)
+				waitFor(ot, "update", i+1, func(ot *opTest) int { return ot.updated })
 				pods = pods[:0]
 				podWatch.Delete(ot.pod)
+				waitFor(ot, "delete", i+1, func(ot *opTest) int { return ot.deleted })
 			}
 		}
 
@@ -1261,6 +2379,13 @@ var _ = Describe("Watch Factory Operations", func() {
 			node := newNode(name)
 			testNodes[name] = &opTest{node: node}
 		}
+		waitFor := func(ot *opTest, operation string, expected int, count func(*opTest) int) {
+			Eventually(func() int {
+				ot.mu.Lock()
+				defer ot.mu.Unlock()
+				return count(ot)
+			}, 2).Should(Equal(expected), "node %q %s callback count did not reach %d", ot.node.Name, operation, expected)
+		}
 
 		h, c := addHandler(wf, NodeType, cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
@@ -1298,12 +2423,15 @@ var _ = Describe("Watch Factory Operations", func() {
 			for _, ot := range testNodes {
 				nodes = append(nodes, ot.node)
 				nodeWatch.Add(ot.node)
+				waitFor(ot, "add", i+1, func(ot *opTest) int { return ot.added })
 				ot.mu.Lock()
 				ot.node.Status.Phase = corev1.NodeTerminated
 				ot.mu.Unlock()
 				nodeWatch.Modify(ot.node)
+				waitFor(ot, "update", i+1, func(ot *opTest) int { return ot.updated })
 				nodes = nodes[:0]
 				nodeWatch.Delete(ot.node)
+				waitFor(ot, "delete", i+1, func(ot *opTest) int { return ot.deleted })
 			}
 		}
 
