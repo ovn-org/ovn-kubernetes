@@ -9,8 +9,8 @@ package managementport
 import (
 	"context"
 	"fmt"
+	"maps"
 	"net"
-	"strings"
 	"time"
 
 	"github.com/vishvananda/netlink"
@@ -133,7 +133,7 @@ func TearDownManagementPortLink(netName string, link netlink.Link, originalIfNam
 	return nil
 }
 
-func createManagementPortOVSRepresentor(ovsClient libovsdbclient.Client, netName, ifname, ifaceid string, mtu int, externalIds []string) error {
+func createManagementPortOVSRepresentor(ovsClient libovsdbclient.Client, netName, ifname, ifaceid string, mtu int, externalIDs map[string]string) error {
 	if ovsClient == nil {
 		return fmt.Errorf("OVS client is required to create management port representor %s for network %s", ifname, netName)
 	}
@@ -143,13 +143,7 @@ func createManagementPortOVSRepresentor(ovsClient libovsdbclient.Client, netName
 		return fmt.Errorf("failed to get datapath type for bridge br-int: %w", err)
 	}
 	ifaceExternalIDs := map[string]string{"iface-id": ifaceid}
-	for _, value := range externalIds {
-		keyValue := strings.SplitN(value, "=", 2)
-		if len(keyValue) != 2 {
-			return fmt.Errorf("invalid OVS external ID %q", value)
-		}
-		ifaceExternalIDs[keyValue[0]] = keyValue[1]
-	}
+	maps.Copy(ifaceExternalIDs, externalIDs)
 	iface := &vswitchd.Interface{ExternalIDs: ifaceExternalIDs}
 	if bridge.DatapathType == types.DatapathUserspace {
 		iface.Type = "dpdk"
@@ -157,7 +151,7 @@ func createManagementPortOVSRepresentor(ovsClient libovsdbclient.Client, netName
 	}
 
 	klog.V(5).Infof("Add OVS representor OVS interface %s to bridge br-int for network %s: ifaceID %s mtu %v externalIDs %v",
-		ifname, netName, ifaceid, mtu, externalIds)
+		ifname, netName, ifaceid, mtu, externalIDs)
 	if err := ops.CreateOrUpdatePodPort(ovsClient, "br-int", ifname, &vswitchd.Port{}, iface); err != nil {
 		return fmt.Errorf("failed to add port %q to br-int: %w", ifname, err)
 	}

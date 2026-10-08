@@ -11,125 +11,24 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	kexec "k8s.io/utils/exec"
-
+	"github.com/ovn-kubernetes/libovsdb/client"
 	"github.com/ovn-kubernetes/libovsdb/ovsdb"
 
 	ovsops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
-	ovntest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing"
 	libovsdbtest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
-	mock_k8s_io_utils_exec "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/utils/exec"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/vswitchd"
 )
 
-func TestClearPodBandwidth(t *testing.T) {
-	mockKexecIface := new(mock_k8s_io_utils_exec.Interface)
-	mockCmd := new(mock_k8s_io_utils_exec.Cmd)
-
-	tests := []struct {
-		desc                string
-		expectedErr         bool
-		onRetArgsKexecIface []ovntest.TestifyMockHelper
-		onRetArgsCmdList    []ovntest.TestifyMockHelper
-		runnerInstance      kexec.Interface
-	}{
-		{
-			desc:        "Test error code path when ovsFind attempts to retrieve interfaces",
-			expectedErr: true,
-			onRetArgsKexecIface: []ovntest.TestifyMockHelper{
-				{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string", "string", "string", "string", "string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
-			},
-			onRetArgsCmdList: []ovntest.TestifyMockHelper{
-				{OnCallMethodName: "CombinedOutput", OnCallMethodArgType: []string{}, RetArgList: []interface{}{nil, fmt.Errorf("mock: failed to run ovsFind")}},
-			},
-			runnerInstance: mockKexecIface,
-		},
-		{
-			desc:        "Test code path when ovsClear returns an error",
-			expectedErr: true,
-			onRetArgsKexecIface: []ovntest.TestifyMockHelper{
-				{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string", "string", "string", "string", "string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
-				{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string", "string", "string", "string", "string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
-			},
-			onRetArgsCmdList: []ovntest.TestifyMockHelper{
-				{OnCallMethodName: "CombinedOutput", OnCallMethodArgType: []string{}, RetArgList: []interface{}{[]byte{1}, nil}},
-				{OnCallMethodName: "CombinedOutput", OnCallMethodArgType: []string{}, RetArgList: []interface{}{nil, fmt.Errorf("mock: failed to run ovsClear")}},
-			},
-			runnerInstance: mockKexecIface,
-		},
-		{
-			desc:        "Test error code path when ovsFind attempts to retrieve qos instances",
-			expectedErr: true,
-			onRetArgsKexecIface: []ovntest.TestifyMockHelper{
-				{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string", "string", "string", "string", "string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
-				{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string", "string", "string", "string", "string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
-			},
-			onRetArgsCmdList: []ovntest.TestifyMockHelper{
-				{OnCallMethodName: "CombinedOutput", OnCallMethodArgType: []string{}, RetArgList: []interface{}{nil, nil}},
-				{OnCallMethodName: "CombinedOutput", OnCallMethodArgType: []string{}, RetArgList: []interface{}{nil, fmt.Errorf("mock: failed to run ovsFind")}},
-			},
-			runnerInstance: mockKexecIface,
-		},
-		{
-			desc:        "Test code path when ovsDestroy returns an error",
-			expectedErr: true,
-			onRetArgsKexecIface: []ovntest.TestifyMockHelper{
-				{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string", "string", "string", "string", "string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
-				{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string", "string", "string", "string", "string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
-				{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string", "string", "string", "string", "string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
-				{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string", "string", "string", "string", "string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
-			},
-			onRetArgsCmdList: []ovntest.TestifyMockHelper{
-				{OnCallMethodName: "CombinedOutput", OnCallMethodArgType: []string{}, RetArgList: []interface{}{[]byte{1}, nil}},
-				{OnCallMethodName: "CombinedOutput", OnCallMethodArgType: []string{}, RetArgList: []interface{}{nil, nil}},
-				{OnCallMethodName: "CombinedOutput", OnCallMethodArgType: []string{}, RetArgList: []interface{}{[]byte{1}, nil}},
-				{OnCallMethodName: "CombinedOutput", OnCallMethodArgType: []string{}, RetArgList: []interface{}{nil, fmt.Errorf("mock: failed to run ovsDestroy")}},
-			},
-			runnerInstance: mockKexecIface,
-		},
-		{
-			desc: "Positive test code path",
-			onRetArgsKexecIface: []ovntest.TestifyMockHelper{
-				{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string", "string", "string", "string", "string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
-				{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string", "string", "string", "string", "string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
-				{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string", "string", "string", "string", "string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
-				{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string", "string", "string", "string", "string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
-			},
-			onRetArgsCmdList: []ovntest.TestifyMockHelper{
-				{OnCallMethodName: "CombinedOutput", OnCallMethodArgType: []string{}, RetArgList: []interface{}{[]byte{1}, nil}},
-				{OnCallMethodName: "CombinedOutput", OnCallMethodArgType: []string{}, RetArgList: []interface{}{nil, nil}},
-				{OnCallMethodName: "CombinedOutput", OnCallMethodArgType: []string{}, RetArgList: []interface{}{[]byte{1}, nil}},
-				{OnCallMethodName: "CombinedOutput", OnCallMethodArgType: []string{}, RetArgList: []interface{}{nil, nil}},
-			},
-			runnerInstance: mockKexecIface,
-		},
+func setPodBandwidthForTest(ovsClient client.Client, sandboxID, ifname string, ingressBPS, egressBPS int64) error {
+	ops, err := setPodBandwidthOps(ovsClient, nil, sandboxID, ifname, ingressBPS, egressBPS)
+	if err != nil {
+		return err
 	}
-	for i, tc := range tests {
-		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			if tc.onRetArgsKexecIface != nil {
-				ovntest.ProcessMockFnList(&mockKexecIface.Mock, tc.onRetArgsKexecIface)
-			}
-			if tc.onRetArgsCmdList != nil {
-				ovntest.ProcessMockFnList(&mockCmd.Mock, tc.onRetArgsCmdList)
-			}
-			// note runner is defined in pkg/cni/ovs.go file
-			runner = tc.runnerInstance
-
-			e := clearPodBandwidth(nil, "sandboxID")
-
-			if tc.expectedErr {
-				require.Error(t, e)
-			} else {
-				require.NoError(t, e)
-			}
-
-			mockCmd.AssertExpectations(t)
-			mockKexecIface.AssertExpectations(t)
-		})
-	}
+	_, err = ovsops.TransactAndCheck(ovsClient, ops)
+	return err
 }
 
-func TestClearPodBandwidthWithOVSClient(t *testing.T) {
+func TestClearPodBandwidth(t *testing.T) {
 	ovsUUID := "00000000-0000-0000-0000-000000000001"
 	bridgeUUID := "00000000-0000-0000-0000-000000000002"
 	sandboxPortUUID := "00000000-0000-0000-0000-000000000003"
@@ -143,10 +42,10 @@ func TestClearPodBandwidthWithOVSClient(t *testing.T) {
 			&vswitchd.OpenvSwitch{UUID: ovsUUID, Bridges: []string{bridgeUUID}},
 			&vswitchd.Bridge{UUID: bridgeUUID, Name: "br-int", Ports: []string{sandboxPortUUID, otherPortUUID}},
 			&vswitchd.Port{UUID: sandboxPortUUID, Name: "sandbox-port", Interfaces: []string{sandboxIfaceUUID}, QOS: &qosUUID},
-			&vswitchd.Interface{UUID: sandboxIfaceUUID, Name: "sandbox-port", ExternalIDs: map[string]string{"sandbox": "sandboxID"}},
+			&vswitchd.Interface{UUID: sandboxIfaceUUID, Name: "sandbox-port", ExternalIDs: map[string]string{"sandbox": "sandboxID"}, IngressPolicingRate: 2000, IngressPolicingBurst: 200},
 			&vswitchd.QoS{UUID: qosUUID, Type: "linux-htb", ExternalIDs: map[string]string{"sandbox": "sandboxID"}},
 			&vswitchd.Port{UUID: otherPortUUID, Name: "other-port", Interfaces: []string{otherIfaceUUID}, QOS: &otherQOSUUID},
-			&vswitchd.Interface{UUID: otherIfaceUUID, Name: "other-port", ExternalIDs: map[string]string{"sandbox": "other-sandbox"}},
+			&vswitchd.Interface{UUID: otherIfaceUUID, Name: "other-port", ExternalIDs: map[string]string{"sandbox": "other-sandbox"}, IngressPolicingRate: 3000, IngressPolicingBurst: 300},
 			&vswitchd.QoS{UUID: otherQOSUUID, Type: "linux-htb", ExternalIDs: map[string]string{"sandbox": "other-sandbox"}},
 		},
 	})
@@ -172,15 +71,101 @@ func TestClearPodBandwidthWithOVSClient(t *testing.T) {
 	require.Nil(t, sandboxPort.QOS)
 
 	require.False(t, qosExists(qosUUID), "expected sandbox QoS to be deleted")
+	sandboxIface, err := ovsops.GetOVSInterface(ovsClient, "sandbox-port")
+	require.NoError(t, err)
+	require.Equal(t, 2000, sandboxIface.IngressPolicingRate)
+	require.Equal(t, 200, sandboxIface.IngressPolicingBurst)
 
 	otherPort := &vswitchd.Port{UUID: otherPortUUID}
 	require.NoError(t, ovsClient.Get(context.Background(), otherPort))
 	require.NotNil(t, otherPort.QOS)
 	require.Equal(t, otherQOSUUID, *otherPort.QOS)
 	require.True(t, qosExists(otherQOSUUID), "expected unrelated QoS to be preserved")
+	otherIface, err := ovsops.GetOVSInterface(ovsClient, "other-port")
+	require.NoError(t, err)
+	require.Equal(t, 3000, otherIface.IngressPolicingRate)
+	require.Equal(t, 300, otherIface.IngressPolicingBurst)
 }
 
-func TestSetPodBandwidthWithOVSClient(t *testing.T) {
+func TestClearPodBandwidthWithoutMatchingPort(t *testing.T) {
+	for _, hasInterface := range []bool{false, true} {
+		t.Run(fmt.Sprintf("interface=%t", hasInterface), func(t *testing.T) {
+			bridge := &vswitchd.Bridge{UUID: "bridge", Name: "br-int"}
+			data := []libovsdbtest.TestData{
+				&vswitchd.OpenvSwitch{UUID: "ovs", Bridges: []string{bridge.UUID}},
+				bridge,
+				&vswitchd.QoS{UUID: "old_qos", Type: "linux-htb", ExternalIDs: map[string]string{"sandbox": "sandbox"}},
+			}
+			if hasInterface {
+				// An interface may belong to a differently named port. Cleanup
+				// must still remove orphaned QoS when its name has no Port row.
+				bridge.Ports = []string{"bond"}
+				data = append(data,
+					&vswitchd.Port{UUID: "bond", Name: "bond", Interfaces: []string{"member"}},
+					&vswitchd.Interface{UUID: "member", Name: "member", ExternalIDs: map[string]string{"sandbox": "sandbox"}},
+				)
+			}
+			ovsClient, _ := newShimOVSTestServer(t, data)
+			require.NoError(t, clearPodBandwidth(ovsClient, "sandbox"))
+			results, err := ovsops.TransactAndCheck(ovsClient, []ovsdb.Operation{{Op: ovsdb.OperationSelect, Table: vswitchd.QoSTable}})
+			require.NoError(t, err)
+			require.Empty(t, results[0].Rows)
+			if hasInterface {
+				_, err = ovsops.GetOVSInterface(ovsClient, "member")
+				require.NoError(t, err)
+				_, err = ovsops.GetOVSPort(ovsClient, "bond")
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestReconfigurePodBandwidth(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		ingressBPS int64
+		egressBPS  int64
+	}{
+		{name: "remove egress limit", ingressBPS: 10_000_000},
+		{name: "remove ingress limit", egressBPS: 3_000_000},
+		{name: "remove both limits"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ovsClient, cleanup, err := libovsdbtest.NewOVSTestHarness(libovsdbtest.TestSetup{
+				OVSData: []libovsdbtest.TestData{
+					&vswitchd.OpenvSwitch{UUID: "root", Bridges: []string{"bridge"}},
+					&vswitchd.Bridge{UUID: "bridge", Name: "br-int", Ports: []string{"port"}},
+					&vswitchd.Port{UUID: "port", Name: "pod-port", Interfaces: []string{"iface"}},
+					&vswitchd.Interface{UUID: "iface", Name: "pod-port", ExternalIDs: map[string]string{"sandbox": "sandboxID"}},
+				},
+			})
+			require.NoError(t, err)
+			t.Cleanup(cleanup.Cleanup)
+			require.NoError(t, setPodBandwidthForTest(ovsClient, "sandboxID", "pod-port", 5_000_000, 2_000_000))
+
+			// ConfigureOVS applies the new limits even when both annotations are absent.
+			require.NoError(t, clearPodBandwidth(ovsClient, "sandboxID"))
+			require.NoError(t, setPodBandwidthForTest(ovsClient, "sandboxID", "pod-port", test.ingressBPS, test.egressBPS))
+
+			port, err := ovsops.GetOVSPort(ovsClient, "pod-port")
+			require.NoError(t, err)
+			require.Equal(t, test.ingressBPS > 0, port.QOS != nil)
+			iface, err := ovsops.GetOVSInterface(ovsClient, "pod-port")
+			require.NoError(t, err)
+			require.Equal(t, int(test.egressBPS/1000), iface.IngressPolicingRate)
+			require.Equal(t, int(test.egressBPS/10000), iface.IngressPolicingBurst)
+			results, err := ovsops.TransactAndCheck(ovsClient, []ovsdb.Operation{{Op: ovsdb.OperationSelect, Table: vswitchd.QoSTable}})
+			require.NoError(t, err)
+			if test.ingressBPS > 0 {
+				require.Len(t, results[0].Rows, 1, "only the replacement QoS should remain")
+			} else {
+				require.Empty(t, results[0].Rows)
+			}
+		})
+	}
+}
+
+func TestSetPodBandwidth(t *testing.T) {
 	tests := []struct {
 		name              string
 		ingressBPS        int64
@@ -229,7 +214,7 @@ func TestSetPodBandwidthWithOVSClient(t *testing.T) {
 			require.NoError(t, err)
 			t.Cleanup(cleanup.Cleanup)
 
-			require.NoError(t, setPodBandwidth(
+			require.NoError(t, setPodBandwidthForTest(
 				ovsClient, "sandboxID", "pod-port", test.ingressBPS, test.egressBPS))
 
 			port := &vswitchd.Port{UUID: portUUID}
@@ -265,133 +250,6 @@ func TestSetPodBandwidthWithOVSClient(t *testing.T) {
 			require.NoError(t, ovsClient.Get(context.Background(), iface))
 			require.Equal(t, test.expectedRateKBPS, iface.IngressPolicingRate)
 			require.Equal(t, test.expectedBurstKBPS, iface.IngressPolicingBurst)
-		})
-	}
-}
-
-func TestSetPodBandwidth(t *testing.T) {
-	mockKexecIface := new(mock_k8s_io_utils_exec.Interface)
-	mockCmd := new(mock_k8s_io_utils_exec.Cmd)
-
-	tests := []struct {
-		desc                string
-		expectedErr         bool
-		onRetArgsKexecIface []ovntest.TestifyMockHelper
-		onRetArgsCmdList    []ovntest.TestifyMockHelper
-		runnerInstance      kexec.Interface
-		egressBPS           int64
-	}{
-		{
-			desc:        "Test code path when both ingressBPS is greater than zero and ovsCreate returns an error",
-			expectedErr: true,
-			onRetArgsKexecIface: []ovntest.TestifyMockHelper{
-				{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string", "string", "string", "string", "string", "string", "string"}, RetArgList: []interface{}{mockCmd}}},
-			onRetArgsCmdList: []ovntest.TestifyMockHelper{
-				{OnCallMethodName: "CombinedOutput", OnCallMethodArgType: []string{}, RetArgList: []interface{}{nil, fmt.Errorf("mock: failed to run ovsCreate")}}},
-			runnerInstance: mockKexecIface,
-			egressBPS:      0,
-		},
-		{
-			desc:        "Test code path when inressBPS is greater than zero and ovsSet returns an error",
-			expectedErr: true,
-			onRetArgsKexecIface: []ovntest.TestifyMockHelper{
-				{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string", "string", "string", "string", "string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
-				{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string", "string", "string", "string", "string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
-			},
-			onRetArgsCmdList: []ovntest.TestifyMockHelper{
-				{OnCallMethodName: "CombinedOutput", OnCallMethodArgType: []string{}, RetArgList: []interface{}{nil, nil}},
-				{OnCallMethodName: "CombinedOutput", OnCallMethodArgType: []string{}, RetArgList: []interface{}{nil, fmt.Errorf("mock: failed to run ovsSet")}},
-			},
-			runnerInstance: mockKexecIface,
-			egressBPS:      0,
-		},
-		{
-			desc: "Positive test code path when ingressBPS is greater than zero",
-			onRetArgsKexecIface: []ovntest.TestifyMockHelper{
-				{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string", "string", "string", "string", "string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
-				{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string", "string", "string", "string", "string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
-			},
-			onRetArgsCmdList: []ovntest.TestifyMockHelper{
-				{OnCallMethodName: "CombinedOutput", OnCallMethodArgType: []string{}, RetArgList: []interface{}{nil, nil}},
-				{OnCallMethodName: "CombinedOutput", OnCallMethodArgType: []string{}, RetArgList: []interface{}{nil, nil}},
-			},
-			runnerInstance: mockKexecIface,
-			egressBPS:      0,
-		},
-		{
-			desc:        "Negative test code path when setting ingress_policing_rate",
-			expectedErr: true,
-			onRetArgsKexecIface: []ovntest.TestifyMockHelper{
-				{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string", "string", "string", "string", "string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
-				{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string", "string", "string", "string", "string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
-				{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string", "string", "string", "string", "string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
-			},
-			onRetArgsCmdList: []ovntest.TestifyMockHelper{
-				{OnCallMethodName: "CombinedOutput", OnCallMethodArgType: []string{}, RetArgList: []interface{}{nil, nil}},
-				{OnCallMethodName: "CombinedOutput", OnCallMethodArgType: []string{}, RetArgList: []interface{}{nil, nil}},
-				{OnCallMethodName: "CombinedOutput", OnCallMethodArgType: []string{}, RetArgList: []interface{}{nil, fmt.Errorf("mock: failed to run ovsSet")}},
-			},
-			runnerInstance: mockKexecIface,
-			egressBPS:      3,
-		},
-		{
-			desc:        "Negative test code path when setting ingress_policing_burst",
-			expectedErr: true,
-			onRetArgsKexecIface: []ovntest.TestifyMockHelper{
-				{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string", "string", "string", "string", "string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
-				{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string", "string", "string", "string", "string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
-				{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string", "string", "string", "string", "string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
-				{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string", "string", "string", "string", "string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
-			},
-			onRetArgsCmdList: []ovntest.TestifyMockHelper{
-				{OnCallMethodName: "CombinedOutput", OnCallMethodArgType: []string{}, RetArgList: []interface{}{nil, nil}},
-				{OnCallMethodName: "CombinedOutput", OnCallMethodArgType: []string{}, RetArgList: []interface{}{nil, nil}},
-				{OnCallMethodName: "CombinedOutput", OnCallMethodArgType: []string{}, RetArgList: []interface{}{nil, nil}},
-				{OnCallMethodName: "CombinedOutput", OnCallMethodArgType: []string{}, RetArgList: []interface{}{nil, fmt.Errorf("mock: failed to run ovsSet")}},
-			},
-			runnerInstance: mockKexecIface,
-			egressBPS:      3,
-		},
-		{
-			desc: "Positive test code path when both ingressBPS and egressBPS are greater than zero",
-			onRetArgsKexecIface: []ovntest.TestifyMockHelper{
-				{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string", "string", "string", "string", "string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
-				{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string", "string", "string", "string", "string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
-				{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string", "string", "string", "string", "string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
-				{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string", "string", "string", "string", "string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
-			},
-			onRetArgsCmdList: []ovntest.TestifyMockHelper{
-				{OnCallMethodName: "CombinedOutput", OnCallMethodArgType: []string{}, RetArgList: []interface{}{nil, nil}},
-				{OnCallMethodName: "CombinedOutput", OnCallMethodArgType: []string{}, RetArgList: []interface{}{nil, nil}},
-				{OnCallMethodName: "CombinedOutput", OnCallMethodArgType: []string{}, RetArgList: []interface{}{nil, nil}},
-				{OnCallMethodName: "CombinedOutput", OnCallMethodArgType: []string{}, RetArgList: []interface{}{nil, nil}},
-			},
-			runnerInstance: mockKexecIface,
-			egressBPS:      3,
-		},
-	}
-	for i, tc := range tests {
-		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			if tc.onRetArgsKexecIface != nil {
-				ovntest.ProcessMockFnList(&mockKexecIface.Mock, tc.onRetArgsKexecIface)
-			}
-
-			if tc.onRetArgsCmdList != nil {
-				ovntest.ProcessMockFnList(&mockCmd.Mock, tc.onRetArgsCmdList)
-			}
-			// note runner is defined in pkg/cni/ovs.go file
-			runner = tc.runnerInstance
-
-			e := setPodBandwidth(nil, "sandboxID", "ifname", 1, tc.egressBPS)
-
-			if tc.expectedErr {
-				require.Error(t, e)
-			} else {
-				require.NoError(t, e)
-			}
-
-			mockCmd.AssertExpectations(t)
-			mockKexecIface.AssertExpectations(t)
 		})
 	}
 }

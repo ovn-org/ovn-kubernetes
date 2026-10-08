@@ -251,6 +251,27 @@ func TestFindPortsForPortOrInterface(t *testing.T) {
 			}},
 		},
 		{
+			desc:            "finds a named port without an interface of the same name",
+			name:            "bond0",
+			expectPortNames: []string{"bond0"},
+			initialOvs: libovsdbtest.TestSetup{OVSData: []libovsdbtest.TestData{
+				ovs.DeepCopy(),
+				&vswitchd.Bridge{UUID: bridgeUUID, Name: "br-x", Ports: []string{bondPortUUID}},
+				bondPort.DeepCopy(), bondMemberInterface.DeepCopy(), otherInterface.DeepCopy(),
+			}},
+		},
+		{
+			desc:            "finds both a named port and the port owning the named interface",
+			name:            "pf0vf0",
+			expectPortNames: []string{"bond0", "pf0vf0"},
+			initialOvs: libovsdbtest.TestSetup{OVSData: []libovsdbtest.TestData{
+				ovs.DeepCopy(),
+				&vswitchd.Bridge{UUID: bridgeUUID, Name: "br-x", Ports: []string{ownPortUUID, bondPortUUID}},
+				ownPort.DeepCopy(), &vswitchd.Interface{UUID: ownInterfaceUUID, Name: "another-name"},
+				bondPort.DeepCopy(), bondMemberInterface.DeepCopy(), otherInterface.DeepCopy(),
+			}},
+		},
+		{
 			desc:            "returns no ports for an unknown name",
 			name:            "no-such-netdev",
 			expectPortNames: []string{},
@@ -339,6 +360,45 @@ func TestGetOVSInterface(t *testing.T) {
 				t.Fatalf("expected interface %q, got %q", tt.ifaceName, got.Name)
 			}
 		})
+	}
+}
+
+func TestGetOVSInterfaceOfPort(t *testing.T) {
+	valid, invalid := 42, -1
+	ovsClient, cleanup, err := libovsdbtest.NewOVSTestHarness(libovsdbtest.TestSetup{OVSData: []libovsdbtest.TestData{
+		&vswitchd.OpenvSwitch{UUID: "root-ovs", Bridges: []string{"bridge"}},
+		&vswitchd.Bridge{UUID: "bridge", Name: "br-int", Ports: []string{"port"}},
+		&vswitchd.Port{UUID: "port", Name: "test-port", Interfaces: []string{"valid", "invalid", "unset"}},
+		&vswitchd.Interface{UUID: "valid", Name: "valid", Ofport: &valid},
+		&vswitchd.Interface{UUID: "invalid", Name: "invalid", Ofport: &invalid},
+		&vswitchd.Interface{UUID: "unset", Name: "unset"},
+	}})
+	if err != nil {
+		t.Fatalf("harness setup: %v", err)
+	}
+	t.Cleanup(cleanup.Cleanup)
+
+	for _, tc := range []struct {
+		name string
+		want string
+	}{
+		{name: "valid", want: "42"},
+		{name: "invalid"},
+		{name: "unset"},
+		{name: "missing"},
+	} {
+		for _, ifExists := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/ifExists=%t", tc.name, ifExists), func(t *testing.T) {
+				got, err := GetOVSInterfaceOfPort(ovsClient, tc.name, ifExists)
+				wantErr := tc.name != "valid" && !(tc.name == "missing" && ifExists)
+				if (err != nil) != wantErr || got != tc.want {
+					t.Fatalf("GetOVSInterfaceOfPort() = %q, %v; want %q, error=%t", got, err, tc.want, wantErr)
+				}
+				if tc.name == "missing" && !ifExists && !errors.Is(err, libovsdbclient.ErrNotFound) {
+					t.Fatalf("missing interface error = %v, want ErrNotFound", err)
+				}
+			})
+		}
 	}
 }
 

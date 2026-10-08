@@ -26,22 +26,21 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ktypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/client-go/kubernetes/fake"
 	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
-	kexec "k8s.io/utils/exec"
 	"sigs.k8s.io/knftables"
 
 	ovncnitypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni/types"
+	ovsops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	ovntest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing"
+	libovsdbtest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	cni_type_mocks "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/containernetworking/cni/pkg/types"
 	cni_ns_mocks "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/containernetworking/plugins/pkg/ns"
 	netlink_mocks "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/vishvananda/netlink"
-	v1mocks "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/client-go/listers/core/v1"
-	mock_k8s_io_utils_exec "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/utils/exec"
 	ovntypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 	util_mocks "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util/mocks"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/vswitchd"
 )
 
 func TestRenameLink(t *testing.T) {
@@ -539,8 +538,6 @@ func TestSetupSriovInterface(t *testing.T) {
 	mockSriovnetOps := new(util_mocks.SriovnetOps)
 	mockNS := new(cni_ns_mocks.NetNS)
 	mockLink := new(netlink_mocks.Link)
-	mockKexecIface := new(mock_k8s_io_utils_exec.Interface)
-	mockCmd := new(mock_k8s_io_utils_exec.Cmd)
 	// below sets the `netLinkOps` in util/net_linux.go to a mock instance for purpose of unit tests execution
 	origNetLinkOps := util.GetNetLinkOps()
 	origSriovnetOps := util.GetSriovnetOps()
@@ -582,9 +579,6 @@ func TestSetupSriovInterface(t *testing.T) {
 		netLinkOpsMockHelper []ovntest.TestifyMockHelper
 		sriovOpsMockHelper   []ovntest.TestifyMockHelper
 		linkMockHelper       []ovntest.TestifyMockHelper
-		onRetArgsKexecIface  []ovntest.TestifyMockHelper
-		onRetArgsCmdList     []ovntest.TestifyMockHelper
-		runnerInstance       kexec.Interface
 	}{
 		{
 			desc:         "test code path when LinkSetAlias() returns error",
@@ -603,7 +597,6 @@ func TestSetupSriovInterface(t *testing.T) {
 				{OnCallMethodName: "LinkByName", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{mockLink, nil}},
 				{OnCallMethodName: "LinkSetAlias", OnCallMethodArgType: []string{"*mocks.Link", "string"}, RetArgList: []interface{}{fmt.Errorf("mock error")}},
 			},
-			runnerInstance: mockKexecIface,
 		},
 		{
 			desc:         "test code path when moveIfToNetns() returns error",
@@ -623,7 +616,6 @@ func TestSetupSriovInterface(t *testing.T) {
 				{OnCallMethodName: "LinkSetAlias", OnCallMethodArgType: []string{"*mocks.Link", "string"}, RetArgList: []interface{}{nil}},
 				{OnCallMethodName: "LinkByName", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{nil, fmt.Errorf("mock error")}},
 			},
-			runnerInstance: mockKexecIface,
 		},
 		{
 			desc:         "test code path when Do() returns error",
@@ -650,7 +642,6 @@ func TestSetupSriovInterface(t *testing.T) {
 				// The below mock call is for the netns.Do() invocation
 				{OnCallMethodName: "Do", OnCallMethodArgType: []string{"func(ns.NetNS) error"}, RetArgList: []interface{}{fmt.Errorf("mock error")}},
 			},
-			runnerInstance: mockKexecIface,
 		},
 		{
 			desc:         "test code path when GetUplinkRepresentor() returns error",
@@ -662,9 +653,8 @@ func TestSetupSriovInterface(t *testing.T) {
 				MTU:           1500,
 				NetdevName:    "en01",
 			},
-			inpPCIAddrs:    "0000:03:00.1",
-			errExp:         true,
-			runnerInstance: mockKexecIface,
+			inpPCIAddrs: "0000:03:00.1",
+			errExp:      true,
 			sriovOpsMockHelper: []ovntest.TestifyMockHelper{
 				{OnCallMethodName: "GetUplinkRepresentor", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{"", fmt.Errorf("mock error")}},
 			},
@@ -691,9 +681,8 @@ func TestSetupSriovInterface(t *testing.T) {
 				MTU:           1500,
 				NetdevName:    "en01",
 			},
-			inpPCIAddrs:    "0000:03:00.1",
-			errExp:         true,
-			runnerInstance: mockKexecIface,
+			inpPCIAddrs: "0000:03:00.1",
+			errExp:      true,
 			sriovOpsMockHelper: []ovntest.TestifyMockHelper{
 				{OnCallMethodName: "GetUplinkRepresentor", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{"testlinkrepresentor", nil}},
 				{OnCallMethodName: "GetVfIndexByPciAddress", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{-1, fmt.Errorf("mock error")}},
@@ -721,9 +710,8 @@ func TestSetupSriovInterface(t *testing.T) {
 				MTU:           1500,
 				NetdevName:    "en01",
 			},
-			inpPCIAddrs:    "0000:03:00.1",
-			errExp:         true,
-			runnerInstance: mockKexecIface,
+			inpPCIAddrs: "0000:03:00.1",
+			errExp:      true,
 			sriovOpsMockHelper: []ovntest.TestifyMockHelper{
 				{OnCallMethodName: "GetUplinkRepresentor", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{"testlinkrepresentor", nil}},
 				{OnCallMethodName: "GetVfIndexByPciAddress", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{0, nil}},
@@ -835,7 +823,6 @@ func TestSetupSriovInterface(t *testing.T) {
 			inpPCIAddrs:        "0000:03:00.1",
 			errExp:             false,
 			sriovOpsMockHelper: []ovntest.TestifyMockHelper{},
-			runnerInstance:     mockKexecIface,
 			netLinkOpsMockHelper: []ovntest.TestifyMockHelper{
 				{OnCallMethodName: "LinkByName", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{mockLink, nil}},
 				{OnCallMethodName: "LinkSetAlias", OnCallMethodArgType: []string{"*mocks.Link", "string"}, RetArgList: []interface{}{nil}},
@@ -1209,10 +1196,6 @@ func TestSetupSriovInterface(t *testing.T) {
 			ovntest.ProcessMockFnList(&mockNS.Mock, tc.nsMockHelper)
 			ovntest.ProcessMockFnList(&mockSriovnetOps.Mock, tc.sriovOpsMockHelper)
 			ovntest.ProcessMockFnList(&mockLink.Mock, tc.linkMockHelper)
-			ovntest.ProcessMockFnList(&mockKexecIface.Mock, tc.onRetArgsKexecIface)
-			ovntest.ProcessMockFnList(&mockCmd.Mock, tc.onRetArgsCmdList)
-
-			runner = tc.runnerInstance
 
 			netNsDoError = nil
 			hostIface, contIface, err := setupSriovInterface(tc.inpNetNS, tc.inpContID, tc.inpIfaceName, tc.inpPodIfaceInfo, tc.inpPCIAddrs, false)
@@ -1231,8 +1214,6 @@ func TestSetupSriovInterface(t *testing.T) {
 			mockNS.AssertExpectations(t)
 			mockSriovnetOps.AssertExpectations(t)
 			mockLink.AssertExpectations(t)
-			mockCmd.AssertExpectations(t)
-			mockKexecIface.AssertExpectations(t)
 		})
 	}
 }
@@ -1722,7 +1703,6 @@ func TestConfigureOVS(t *testing.T) {
 		ovnPfEncapIpMapping   string
 		errMatch              error
 		pfEncapIp             string
-		execMock              *ovntest.FakeExec
 		sriovnetOpsMockHelper []ovntest.TestifyMockHelper
 		netLinkOpsMockHelper  []ovntest.TestifyMockHelper
 	}{
@@ -1743,7 +1723,6 @@ func TestConfigureOVS(t *testing.T) {
 			ovnPfEncapIpMapping: ovnPfEncapIpMapping,
 			errMatch:            nil,
 			pfEncapIp:           "10.0.0.1",
-			execMock:            ovntest.NewFakeExec(),
 			sriovnetOpsMockHelper: []ovntest.TestifyMockHelper{
 				{OnCallMethodName: "GetUplinkRepresentor", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{"enp1s0f0", nil}},
 			},
@@ -1770,7 +1749,6 @@ func TestConfigureOVS(t *testing.T) {
 			ovnPfEncapIpMapping: ovnPfEncapIpMapping,
 			errMatch:            nil,
 			pfEncapIp:           "",
-			execMock:            ovntest.NewFakeExec(),
 			sriovnetOpsMockHelper: []ovntest.TestifyMockHelper{
 				{OnCallMethodName: "GetUplinkRepresentor", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{"enp999s0f0", nil}},
 			},
@@ -1797,7 +1775,6 @@ func TestConfigureOVS(t *testing.T) {
 			ovnPfEncapIpMapping:   "", // no external_ids:ovn-pf-encap-ip-mapping config
 			errMatch:              nil,
 			pfEncapIp:             "", // ovs port added without encap-ip
-			execMock:              ovntest.NewFakeExec(),
 			sriovnetOpsMockHelper: []ovntest.TestifyMockHelper{},
 			netLinkOpsMockHelper: []ovntest.TestifyMockHelper{
 				{OnCallMethodName: "LinkByName", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{mockLink, nil}},
@@ -1822,7 +1799,6 @@ func TestConfigureOVS(t *testing.T) {
 			ovnPfEncapIpMapping: ovnPfEncapIpMapping,
 			errMatch:            nil,
 			pfEncapIp:           "", // ovs port added without encap-ip
-			execMock:            ovntest.NewFakeExec(),
 			sriovnetOpsMockHelper: []ovntest.TestifyMockHelper{
 				{
 					OnCallMethodName:    "GetUplinkRepresentor",
@@ -1853,7 +1829,6 @@ func TestConfigureOVS(t *testing.T) {
 			ovnPfEncapIpMapping: ovnPfEncapIpMapping,
 			errMatch:            fmt.Errorf("failed to find interface"),
 			pfEncapIp:           "10.0.0.1",
-			execMock:            ovntest.NewFakeExec(),
 			sriovnetOpsMockHelper: []ovntest.TestifyMockHelper{
 				{OnCallMethodName: "GetUplinkRepresentor", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{"enp1s0f0", nil}},
 			},
@@ -1878,7 +1853,6 @@ func TestConfigureOVS(t *testing.T) {
 			ovnPfEncapIpMapping: ovnPfEncapIpMapping,
 			errMatch:            fmt.Errorf("failed to set MTU on"),
 			pfEncapIp:           "10.0.0.1",
-			execMock:            ovntest.NewFakeExec(),
 			sriovnetOpsMockHelper: []ovntest.TestifyMockHelper{
 				{OnCallMethodName: "GetUplinkRepresentor", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{"enp1s0f0", nil}},
 			},
@@ -1904,7 +1878,6 @@ func TestConfigureOVS(t *testing.T) {
 			ovnPfEncapIpMapping: ovnPfEncapIpMapping,
 			errMatch:            fmt.Errorf("failed to set link UP on"),
 			pfEncapIp:           "10.0.0.1",
-			execMock:            ovntest.NewFakeExec(),
 			sriovnetOpsMockHelper: []ovntest.TestifyMockHelper{
 				{OnCallMethodName: "GetUplinkRepresentor", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{"enp1s0f0", nil}},
 			},
@@ -1922,99 +1895,44 @@ func TestConfigureOVS(t *testing.T) {
 			ovntest.ProcessMockFnList(&mockNetLinkOps.Mock, tc.netLinkOpsMockHelper)
 			ovntest.ProcessMockFnList(&mockSriovnetOps.Mock, tc.sriovnetOpsMockHelper)
 
-			err := util.SetExec(tc.execMock)
-			require.NoError(t, err)
-			err = SetExec(tc.execMock)
-			require.NoError(t, err)
-
-			tc.execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd: genOVSGetCmd("bridge", "br-int", "datapath_type", ""),
+			qosUUID := "old_qos"
+			ovsClient, _ := newShimOVSTestServer(t, []libovsdbtest.TestData{
+				&vswitchd.OpenvSwitch{UUID: "ovs", Bridges: []string{"br_int"},
+					ExternalIDs: map[string]string{"ovn-pf-encap-ip-mapping": tc.ovnPfEncapIpMapping}},
+				&vswitchd.Bridge{UUID: "br_int", Name: "br-int", Ports: []string{"sibling_port"}},
+				&vswitchd.Port{UUID: "sibling_port", Name: "sibling", Interfaces: []string{"sibling_iface"}, QOS: &qosUUID},
+				&vswitchd.Interface{UUID: "sibling_iface", Name: "sibling", ExternalIDs: map[string]string{"sandbox": sandboxID},
+					IngressPolicingRate: 2000, IngressPolicingBurst: 200},
+				&vswitchd.QoS{UUID: qosUUID, Type: "linux-htb", ExternalIDs: map[string]string{"sandbox": sandboxID}},
 			})
-			tc.execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd: genOVSFindCmd("30", "Interface", "name",
-					"external-ids:iface-id=ns-foo_pod-bar"),
-			})
-
-			tc.execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    genOVSFindCmd("30", "Interface", "external_ids", "name="+tc.vfRep),
-				Output: "",
-			})
-
-			// getPfEncapIP()
-			tc.execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    genOVSGetCmd("Open_vSwitch", ".", "external_ids", "ovn-pf-encap-ip-mapping"),
-				Output: tc.ovnPfEncapIpMapping,
-			})
-
-			// ovs-vsctl add port to br-int
-			ovsAddPortCmd := fmt.Sprintf(
-				"ovs-vsctl --timeout=30 --may-exist "+
-					"add-port br-int %s other_config:transient=true "+
-					"-- set interface %s external_ids:attached_mac=%s "+
-					"external_ids:iface-id=%s external_ids:iface-id-ver=%s "+
-					"external_ids:sandbox=%s ",
-				tc.vfRep, tc.vfRep, "", genIfaceID(tc.podNs, tc.podName), tc.ifInfo.PodUID, sandboxID)
-			if tc.pfEncapIp != "" {
-				ovsAddPortCmd += fmt.Sprintf("external_ids:encap-ip=%s ", tc.pfEncapIp)
-			}
-			ovsAddPortCmd += fmt.Sprintf("external_ids:ip_addresses=%s external_ids:vf-netdev-name=%s "+
-				"-- --if-exists remove interface %s external_ids %s -- --if-exists remove interface %s external_ids %s",
-				fakeIP, tc.ifInfo.NetdevName, tc.vfRep, ovntypes.NetworkExternalID, tc.vfRep, ovntypes.NADExternalID)
-			tc.execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd: ovsAddPortCmd,
-				Err: nil,
-			})
-
-			// clearPodBandwidth()
-			tc.execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd: genOVSFindCmd("30", "interface", "name",
-					fmt.Sprintf("external-ids:sandbox=%s", sandboxID)),
-			})
-			tc.execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd: genOVSFindCmd("30", "qos", "_uuid",
-					fmt.Sprintf("external-ids:sandbox=%s", sandboxID)),
-			})
-
-			// waitForPodInterface()
-			tc.execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    genOVSGetCmd("Interface", tc.vfRep, "external-ids", "iface-id") + " " + "external-ids:ovn-installed",
-				Output: genIfaceID(tc.podNs, tc.podName) + "\n" + "true",
-			})
-			tc.execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    genOVSGetCmd("Interface", tc.vfRep, "external-ids", "iface-id"),
-				Output: genIfaceID(tc.podNs, tc.podName),
-			})
-			tc.execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    genOfctlDumpFlowsCmd("table=8,dl_src="),
-				Output: "non-empty-output",
-			})
-			tc.execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    genOfctlDumpFlowsCmd("table=0,in_port=1"),
-				Output: "non-empty-output",
-			})
-			tc.execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    genOfctlDumpFlowsCmd("table=48,ip,ip_dst=" + strings.Split(fakeIP, "/")[0]),
-				Output: "non-empty-output",
-			})
+			emulateShimOVSReadiness(t, ovsClient)
 
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
 
-			var pod corev1.Pod
-			pod.UID = "xyz"
-			podNamespaceLister := v1mocks.PodNamespaceLister{}
-			podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(&pod, nil)
-			var podLister v1mocks.PodLister
-			podLister.On("Pods", mock.AnythingOfType("string")).Return(&podNamespaceLister)
-			fakeClient := fake.NewSimpleClientset(&corev1.PodList{Items: []corev1.Pod{pod}})
-			clientset := NewClientSet(fakeClient, &podLister)
-			err = ConfigureOVS(ctx, nil, tc.podNs, tc.podName, "", tc.vfRep,
-				tc.ifInfo, sandboxID, vfPciAddress, false, clientset)
+			err := ConfigureOVS(ctx, ovsClient, tc.podNs, tc.podName, "", tc.vfRep,
+				tc.ifInfo, sandboxID, vfPciAddress, false, nil)
+			iface, lookupErr := ovsops.GetOVSInterface(ovsClient, tc.vfRep)
+			require.NoError(t, lookupErr)
+			require.Equal(t, tc.pfEncapIp, iface.ExternalIDs["encap-ip"])
+			require.Equal(t, tc.ifInfo.NetdevName, iface.ExternalIDs["vf-netdev-name"])
+			require.Equal(t, fakeIP, iface.ExternalIDs["ip_addresses"])
+			require.Equal(t, tc.ifInfo.PodUID, iface.ExternalIDs["iface-id-ver"])
 			if tc.errMatch != nil {
 				assert.Contains(t, err.Error(), tc.errMatch.Error())
 			} else {
 				require.NoError(t, err)
 			}
+
+			// Sandbox QoS cleanup precedes netlink work, even when finding or
+			// configuring the representor fails. Sibling policing stays intact.
+			siblingPort, err := ovsops.GetOVSPort(ovsClient, "sibling")
+			require.NoError(t, err)
+			require.Nil(t, siblingPort.QOS)
+			siblingIface, err := ovsops.GetOVSInterface(ovsClient, "sibling")
+			require.NoError(t, err)
+			require.Equal(t, 2000, siblingIface.IngressPolicingRate)
+			require.Equal(t, 200, siblingIface.IngressPolicingBurst)
 
 			mockNetLinkOps.AssertExpectations(t)
 			mockLink.AssertExpectations(t)
@@ -2022,143 +1940,23 @@ func TestConfigureOVS(t *testing.T) {
 	}
 }
 
-func TestConfigureOVS_getPfEncapIpWithError(t *testing.T) {
-	mockLink := new(netlink_mocks.Link)
-	mockNetLinkOps := new(util_mocks.NetLinkOps)
-	mockSriovnetOps := new(util_mocks.SriovnetOps)
-
-	origNetLinkOps := util.GetNetLinkOps()
-	origSriovnetOps := util.GetSriovnetOps()
-	util.SetNetLinkOpMockInst(mockNetLinkOps)
-	util.SetSriovnetOpsInst(mockSriovnetOps)
-	t.Cleanup(func() {
-		util.SetNetLinkOpMockInst(origNetLinkOps)
-		util.SetSriovnetOpsInst(origSriovnetOps)
-	})
-
-	vfPciAddress := "0000:c5:03.1"
-	fakeIP := "192.168.1.1/24"
-	ip, ipnet, _ := net.ParseCIDR(fakeIP)
-	ipnet.IP = ip
-	sandboxID := "deadbeef"
-	vfRep := "enp1s0f0_1"
-
-	tests := []struct {
-		desc                  string
-		podNs                 string
-		podName               string
-		vfRep                 string
-		ifInfo                *PodInterfaceInfo
-		ovnPfEncapIpMapping   string
-		errMatch              error
-		pfEncapIp             string
-		execMock              *ovntest.FakeExec
-		execMockCommands      []*ovntest.ExpectedCmd
-		sriovnetOpsMockHelper []ovntest.TestifyMockHelper
-		netLinkOpsMockHelper  []ovntest.TestifyMockHelper
+func TestGetPfEncapIPWithError(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		data []libovsdbtest.TestData
+		err  string
 	}{
-		{
-			desc:    "ovs get external_ids:ovn-pf-encap-ip-mapping failed",
-			podNs:   "ns-foo",
-			podName: "pod-bar",
-			vfRep:   vfRep,
-			ifInfo: &PodInterfaceInfo{
-				PodAnnotation: util.PodAnnotation{
-					IPs: []*net.IPNet{ipnet},
-				},
-				NetName:    ovntypes.DefaultNetworkName,
-				NetdevName: "enp1s0f0v1",
-				PodUID:     "xyz",
-			},
-			errMatch:  fmt.Errorf("failed to get ovn-pf-encap-ip-mapping"),
-			pfEncapIp: "",
-			execMockCommands: []*ovntest.ExpectedCmd{
-				{
-					Cmd: genOVSGetCmd("bridge", "br-int", "datapath_type", ""),
-				},
-				{
-					Cmd: genOVSFindCmd("30", "Interface", "name",
-						"external-ids:iface-id=ns-foo_pod-bar"),
-				},
-				{
-					Cmd: genOVSFindCmd("30", "Interface", "external_ids", "name="+vfRep),
-				},
-				{
-					Cmd: genOVSGetCmd("Open_vSwitch", ".", "external_ids", "ovn-pf-encap-ip-mapping"),
-					Err: fmt.Errorf("ovs-vsctl: any error ..."),
-				},
-			},
-			sriovnetOpsMockHelper: []ovntest.TestifyMockHelper{},
-			netLinkOpsMockHelper:  []ovntest.TestifyMockHelper{},
-		},
-		{
-			desc:    "bad external_ids:ovn-pf-encap-ip-mapping config",
-			podNs:   "ns-foo",
-			podName: "pod-bar",
-			vfRep:   vfRep,
-			ifInfo: &PodInterfaceInfo{
-				PodAnnotation: util.PodAnnotation{
-					IPs: []*net.IPNet{ipnet},
-				},
-				NetName:    ovntypes.DefaultNetworkName,
-				NetdevName: "enp1s0f0v1",
-				PodUID:     "xyz",
-			},
-			errMatch:  fmt.Errorf("bad ovn-pf-encap-ip-mapping config"),
-			pfEncapIp: "",
-			execMockCommands: []*ovntest.ExpectedCmd{
-				{
-					Cmd: genOVSGetCmd("bridge", "br-int", "datapath_type", ""),
-				},
-				{
-					Cmd: genOVSFindCmd("30", "Interface", "name",
-						"external-ids:iface-id=ns-foo_pod-bar"),
-				},
-				{
-					Cmd: genOVSFindCmd("30", "Interface", "external_ids", "name="+vfRep),
-				},
-				{
-					Cmd:    genOVSGetCmd("Open_vSwitch", ".", "external_ids", "ovn-pf-encap-ip-mapping"),
-					Output: "10.0.0.1,10.0.0.193,10.0.0.197",
-				},
-			},
-			sriovnetOpsMockHelper: []ovntest.TestifyMockHelper{},
-			netLinkOpsMockHelper:  []ovntest.TestifyMockHelper{},
-		},
-	}
-
-	for i, tc := range tests {
-		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			execMock := ovntest.NewFakeExec()
-			ovntest.ProcessMockFnList(&mockNetLinkOps.Mock, tc.netLinkOpsMockHelper)
-			ovntest.ProcessMockFnList(&mockSriovnetOps.Mock, tc.sriovnetOpsMockHelper)
-
-			err := util.SetExec(execMock)
-			require.NoError(t, err)
-			err = SetExec(execMock)
-			require.NoError(t, err)
-
-			execMock.AddFakeCmds(tc.execMockCommands)
-
-			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-			defer cancel()
-
-			var pod corev1.Pod
-			podNamespaceLister := v1mocks.PodNamespaceLister{}
-			podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(pod, nil)
-
-			var podLister v1mocks.PodLister
-			podLister.On("Pods", mock.AnythingOfType("string")).Return(&podNamespaceLister)
-			err = ConfigureOVS(ctx, nil, tc.podNs, tc.podName, "", tc.vfRep,
-				tc.ifInfo, sandboxID, vfPciAddress, false, nil)
-			if tc.errMatch != nil {
-				assert.Contains(t, err.Error(), tc.errMatch.Error())
-			} else {
-				require.NoError(t, err)
-			}
-
-			mockNetLinkOps.AssertExpectations(t)
-			mockLink.AssertExpectations(t)
+		{name: "missing Open_vSwitch row", err: "failed to get Open_vSwitch row"},
+		{name: "invalid mapping", data: []libovsdbtest.TestData{
+			&vswitchd.OpenvSwitch{UUID: "ovs", ExternalIDs: map[string]string{
+				"ovn-pf-encap-ip-mapping": "10.0.0.1,10.0.0.193,10.0.0.197",
+			}},
+		}, err: "bad ovn-pf-encap-ip-mapping config"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, _ := newShimOVSTestServer(t, tc.data)
+			_, err := getPfEncapIP(c, "0000:c5:03.1")
+			require.ErrorContains(t, err, tc.err)
 		})
 	}
 }
@@ -2176,32 +1974,6 @@ add chain netdev ingress_filter input { type filter hook ingress device "test-if
 add rule netdev ingress_filter input icmpv6 type nd-router-advert ip6 saddr != fe80::1 mark != 0 drop`
 
 	assert.Equal(t, expectedDump, strings.TrimRight(output, "\n"), "The nftables dump output does not match the expected output")
-}
-
-// TODO(leih): Below functions are copied from pkg/node/base_node_network_controller_dpu_test.go.
-// Move them to a common place to elimate duplications.
-func genOVSFindCmd(timeout, table, column, condition string) string {
-	return fmt.Sprintf("ovs-vsctl --timeout=%s --no-heading --format=csv --data=bare --columns=%s find %s %s",
-		timeout, column, table, condition)
-}
-
-func genOVSGetCmd(table, record, column, key string, timeout ...int) string {
-	_timeout := 30
-	if len(timeout) > 0 {
-		_timeout = timeout[0]
-	}
-	if key != "" {
-		column = column + ":" + key
-	}
-	return fmt.Sprintf("ovs-vsctl --timeout=%d --if-exists get %s %s %s", _timeout, table, record, column)
-}
-
-func genIfaceID(podNamespace, podName string) string {
-	return fmt.Sprintf("%s_%s", podNamespace, podName)
-}
-
-func genOfctlDumpFlowsCmd(queryStr string) string {
-	return fmt.Sprintf("ovs-ofctl --timeout=10 --no-stats --strict dump-flows br-int %s", queryStr)
 }
 
 func TestReturnSimulatedNetdevsToHost(t *testing.T) {

@@ -90,15 +90,12 @@ func newOVNNodeController(
 	return node, nil
 }
 
-func (n *NodeController) ensureHybridOverlayOVSTopology(portName string) error {
-	if err := ovsops.CreateOrUpdateBridge(n.ovsClient, extBridgeName, vswitchd.BridgeFailModeSecure, config.Default.MTU); err != nil {
-		return fmt.Errorf("failed to create hybrid-overlay bridge %s: %w", extBridgeName, err)
-	}
-
-	// Pin the bridge MAC before adding more ports. ovs-vswitchd populates
-	// mac_in_use asynchronously after the bridge transaction completes.
+func (n *NodeController) waitForHybridOverlayBridgeMAC(ctx context.Context) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, ovsBridgeMACWaitTimeout)
+	defer cancel()
+	poll := wait.Backoff{Duration: 2 * time.Millisecond, Factor: 2, Steps: 8, Cap: 100 * time.Millisecond}
 	var macAddress string
-	err := wait.PollUntilContextTimeout(context.Background(), 100*time.Millisecond, ovsBridgeMACWaitTimeout, true, func(context.Context) (bool, error) {
+	err := poll.DelayFunc().Until(ctx, true, true, func(context.Context) (bool, error) {
 		iface, err := ovsops.GetOVSInterface(n.ovsClient, extBridgeName)
 		if err != nil {
 			if errors.Is(err, libovsdbclient.ErrNotFound) {
@@ -112,6 +109,17 @@ func (n *NodeController) ensureHybridOverlayOVSTopology(portName string) error {
 		macAddress = *iface.MACInUse
 		return true, nil
 	})
+	return macAddress, err
+}
+
+func (n *NodeController) ensureHybridOverlayOVSTopology(portName string) error {
+	if err := ovsops.CreateOrUpdateBridge(n.ovsClient, extBridgeName, vswitchd.BridgeFailModeSecure, config.Default.MTU); err != nil {
+		return fmt.Errorf("failed to create hybrid-overlay bridge %s: %w", extBridgeName, err)
+	}
+
+	// Pin the bridge MAC before adding more ports. ovs-vswitchd populates
+	// mac_in_use asynchronously after the bridge transaction completes.
+	macAddress, err := n.waitForHybridOverlayBridgeMAC(context.Background())
 	if err != nil {
 		return fmt.Errorf("failed waiting for MAC address of OVS bridge %s: %w", extBridgeName, err)
 	}

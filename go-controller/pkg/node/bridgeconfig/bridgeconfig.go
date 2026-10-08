@@ -75,27 +75,6 @@ func (netConfig *BridgeUDNConfiguration) IsDefaultNetwork() bool {
 	return netConfig.MasqCTMark == nodetypes.CtMarkOVN
 }
 
-func getInterfaceOfPort(ovsClient libovsdbclient.Client, ifaceName string) (string, error) {
-	return getInterfaceOfPortIfExists(ovsClient, ifaceName, false)
-}
-
-func getInterfaceOfPortIfExists(ovsClient libovsdbclient.Client, ifaceName string, ifExists bool) (string, error) {
-	iface, err := ovsops.GetOVSInterface(ovsClient, ifaceName)
-	if errors.Is(err, libovsdbclient.ErrNotFound) {
-		if ifExists {
-			return "", nil
-		}
-		return "", err
-	}
-	if err != nil {
-		return "", err
-	}
-	if iface.Ofport == nil || *iface.Ofport == -1 {
-		return "", fmt.Errorf("interface %s has no valid ofport", ifaceName)
-	}
-	return strconv.Itoa(*iface.Ofport), nil
-}
-
 func getInterfaceMACAddress(ovsClient libovsdbclient.Client, ifaceName string) (net.HardwareAddr, error) {
 	iface, err := ovsops.GetOVSInterface(ovsClient, ifaceName)
 	if err != nil {
@@ -120,7 +99,7 @@ func getInterfaceMACAddress(ovsClient libovsdbclient.Client, ifaceName string) (
 }
 
 func (netConfig *BridgeUDNConfiguration) setOfPatchPort(ovsClient libovsdbclient.Client) error {
-	ofportPatch, err := getInterfaceOfPort(ovsClient, netConfig.PatchPort)
+	ofportPatch, err := ovsops.GetOVSInterfaceOfPort(ovsClient, netConfig.PatchPort, false)
 	if err != nil {
 		return fmt.Errorf("failed while waiting on patch port %q to be created by ovn-controller and while getting ofport: %v",
 			netConfig.PatchPort, err)
@@ -613,7 +592,7 @@ func (b *BridgeConfiguration) ConfigureBridgePorts() error {
 
 	if b.uplinkName != "" {
 		// Get ofport of physical interface
-		ofportPhys, err := getInterfaceOfPort(b.ovsClient, b.uplinkName)
+		ofportPhys, err := ovsops.GetOVSInterfaceOfPort(b.ovsClient, b.uplinkName, false)
 		if err != nil {
 			return fmt.Errorf("failed to get ofport of %s: %v", b.uplinkName, err)
 		}
@@ -624,7 +603,7 @@ func (b *BridgeConfiguration) ConfigureBridgePorts() error {
 	b.ofPortHost = nodetypes.OvsLocalPort
 	hostOVSInterfaceName := b.bridgeName
 	if b.gwIfaceRep != "" {
-		ofPortHost, err := getInterfaceOfPort(b.ovsClient, b.gwIfaceRep)
+		ofPortHost, err := ovsops.GetOVSInterfaceOfPort(b.ovsClient, b.gwIfaceRep, false)
 		if err != nil {
 			return fmt.Errorf("failed to get ofport of gateway representor %s: %v", b.gwIfaceRep, err)
 		}
@@ -718,6 +697,35 @@ func (b *BridgeConfiguration) SetNetworkOfPatchPort(netName string) error {
 	return nil
 }
 
+// RefreshUDNPatchPorts follows patch interfaces recreated asynchronously by
+// ovn-controller. Missing or unassigned ports must not remain in generated flows
+// because their old ofport can be reused by another interface.
+func (b *BridgeConfiguration) RefreshUDNPatchPorts() (bool, error) {
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
+
+	changed := false
+	for netName, netConfig := range b.netConfig {
+		if netName == types.DefaultNetworkName {
+			continue
+		}
+		iface, err := ovsops.GetOVSInterface(b.ovsClient, netConfig.PatchPort)
+		if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
+			return changed, fmt.Errorf("failed to refresh patch port %s on bridge %s: %w", netConfig.PatchPort, b.bridgeName, err)
+		}
+		ofport := ""
+		if err == nil && iface.Ofport != nil && *iface.Ofport != -1 {
+			ofport = strconv.Itoa(*iface.Ofport)
+		}
+		if netConfig.OfPortPatch != ofport {
+			klog.Infof("Updating patch port %s on bridge %s from ofport %q to %q", netConfig.PatchPort, b.bridgeName, netConfig.OfPortPatch, ofport)
+			netConfig.OfPortPatch = ofport
+			changed = true
+		}
+	}
+	return changed, nil
+}
+
 // SyncNoFlood ensures OFPPC_NO_FLOOD is set on every non-default patch port
 // that shares the bridge with the default network. The flag is OpenFlow
 // port config (not OVSDB-persisted), so it must be reapplied after
@@ -787,7 +795,7 @@ func (b *BridgeConfiguration) SetDropGARP(drop bool) {
 
 func gatewayReady(ovsClient libovsdbclient.Client, patchPort string) bool {
 	// Get ofport of patchPort
-	ofport, err := getInterfaceOfPortIfExists(ovsClient, patchPort, true)
+	ofport, err := ovsops.GetOVSInterfaceOfPort(ovsClient, patchPort, true)
 	if err != nil || len(ofport) == 0 {
 		return false
 	}
@@ -808,7 +816,7 @@ func getIntfName(ovsClient libovsdbclient.Client, gatewayIntf string) (string, e
 	if err != nil {
 		return "", err
 	}
-	_, err = getInterfaceOfPort(ovsClient, intfName)
+	_, err = ovsops.GetOVSInterfaceOfPort(ovsClient, intfName, false)
 	if err != nil {
 		return "", fmt.Errorf("failed to get ofport of %s: %v", intfName, err)
 	}

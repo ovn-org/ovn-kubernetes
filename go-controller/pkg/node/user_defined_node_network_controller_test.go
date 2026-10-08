@@ -231,7 +231,7 @@ var _ = Describe("UserDefinedNodeNetworkController: UserDefinedPrimaryNetwork Ga
 			},
 		})
 		Expect(ovsErr).NotTo(HaveOccurred())
-		stopVSwitchd = emulateVSwitchdConfig(ovsClient)
+		stopVSwitchd = libovsdbtest.EmulateVSwitchdConfig(ovsClient)
 		// Use a larger masq subnet to allow OF manager to allocate IPs for UDNs.
 		config.Gateway.V6MasqueradeSubnet = "fd69::/112"
 		config.Gateway.V4MasqueradeSubnet = "169.254.0.0/17"
@@ -424,6 +424,7 @@ var _ = Describe("UserDefinedNodeNetworkController: UserDefinedPrimaryNetwork Ga
 			setUpGatewayFakeOVSCommands(fexec)
 			getCreationFakeCommands(fexec, mgtPort)
 			getRPFilterLooseModeFakeCommands(fexec)
+			fexec.AddFakeCmdsNoOutputNoError([]string{"ovs-ofctl mod-port breth0 15 no-flood"})
 
 			gatewayNextHops, gatewayIntf, err := getGatewayNextHops(ovsClient)
 			Expect(err).NotTo(HaveOccurred())
@@ -494,7 +495,7 @@ var _ = Describe("UserDefinedNodeNetworkController: UserDefinedPrimaryNetwork Ga
 			controller.gateway.kubeInterface = &kubeMock
 
 			By("starting UDN controller for user-defined primary network")
-			addOVSPatchPortInterface(ovsClient, "breth0", "patch-breth0_bluenet_worker1-to-br-int", 15)
+
 			err = controller.Start(context.Background())
 			Expect(err).NotTo(HaveOccurred())
 

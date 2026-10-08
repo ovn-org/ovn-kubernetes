@@ -74,37 +74,6 @@ type managementPortTestConfig struct {
 	isNoOverlay         bool
 }
 
-func emulateManagementPortVSwitchd(ovsClient libovsdbclient.Client) func() {
-	stop := make(chan struct{})
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		ticker := time.NewTicker(10 * time.Millisecond)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-stop:
-				return
-			case <-ticker.C:
-				ovs, err := ovsops.GetOpenvSwitch(ovsClient)
-				if err != nil || ovs.CurCfg >= ovs.NextCfg {
-					continue
-				}
-				updated := &vswitchd.OpenvSwitch{UUID: ovs.UUID, CurCfg: ovs.NextCfg}
-				ops, err := ovsClient.Where(&vswitchd.OpenvSwitch{UUID: ovs.UUID}).Update(updated, &updated.CurCfg)
-				if err == nil {
-					_, _ = ovsops.TransactAndCheck(ovsClient, ops)
-				}
-			}
-		}
-	}()
-	return func() {
-		close(stop)
-		wg.Wait()
-	}
-}
-
 func (mptc *managementPortTestConfig) GetNodeSubnetCIDR() *net.IPNet {
 	return ovntest.MustParseIPNet(mptc.nodeSubnet)
 }
@@ -359,7 +328,7 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 	})
 	Expect(err).NotTo(HaveOccurred())
 	defer ovsCleanup.Cleanup()
-	stopVSwitchd := emulateManagementPortVSwitchd(ovsClient)
+	stopVSwitchd := libovsdbtest.EmulateVSwitchdConfig(ovsClient)
 	defer stopVSwitchd()
 	if isNoOverlay {
 		config.Default.Transport = types.NetworkTransportNoOverlay
@@ -711,7 +680,7 @@ var _ = Describe("Management Port tests", func() {
 			})
 			Expect(err).NotTo(HaveOccurred())
 			DeferCleanup(func() { ovsCleanup.Cleanup() })
-			stopVSwitchd := emulateManagementPortVSwitchd(ovsClient)
+			stopVSwitchd := libovsdbtest.EmulateVSwitchdConfig(ovsClient)
 			DeferCleanup(stopVSwitchd)
 		})
 

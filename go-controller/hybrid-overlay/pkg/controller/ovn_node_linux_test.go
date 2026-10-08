@@ -27,7 +27,6 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube"
-	ovsops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	ovntest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing"
 	libovsdbtest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
@@ -46,31 +45,6 @@ const (
 	thisNodeDRIP   string = "1.2.3.3"
 	thisNodeDRMAC  string = "22:33:44:55:66:77"
 )
-
-func emulateVSwitchdConfig(ovsClient libovsdbclient.Client, stopChan <-chan struct{}, wg *sync.WaitGroup) {
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		ticker := time.NewTicker(10 * time.Millisecond)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-stopChan:
-				return
-			case <-ticker.C:
-				ovs, err := ovsops.GetOpenvSwitch(ovsClient)
-				if err != nil || ovs.CurCfg >= ovs.NextCfg {
-					continue
-				}
-				updated := &vswitchd.OpenvSwitch{UUID: ovs.UUID, CurCfg: ovs.NextCfg}
-				ops, err := ovsClient.Where(&vswitchd.OpenvSwitch{UUID: ovs.UUID}).Update(updated, &updated.CurCfg)
-				if err == nil {
-					_, _ = ovsops.TransactAndCheck(ovsClient, ops)
-				}
-			}
-		}
-	}()
-}
 
 // returns if the two flowCaches are the same
 func compareFlowCache(returnedFlowCache, expectedFlowCache map[string]*flowCacheEntry) error {
@@ -284,14 +258,15 @@ func addEnsureHybridOverlayBridgeMocks(nlMock *mocks.NetLinkOps, drIP, oldDRIP s
 
 var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 	var (
-		app        *cli.App
-		fexec      *ovntest.FakeExec
-		stopChan   chan struct{}
-		wg         *sync.WaitGroup
-		mgmtIfAddr *net.IPNet
-		nlMock     *mocks.NetLinkOps
-		ovsClient  libovsdbclient.Client
-		ovsCleanup *libovsdbtest.Context
+		app          *cli.App
+		fexec        *ovntest.FakeExec
+		stopChan     chan struct{}
+		wg           *sync.WaitGroup
+		mgmtIfAddr   *net.IPNet
+		nlMock       *mocks.NetLinkOps
+		ovsClient    libovsdbclient.Client
+		ovsCleanup   *libovsdbtest.Context
+		stopVSwitchd func()
 	)
 	const (
 		thisNode   string = "mynode"
@@ -327,7 +302,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			},
 		})
 		Expect(err).NotTo(HaveOccurred())
-		emulateVSwitchdConfig(ovsClient, stopChan, wg)
+		stopVSwitchd = libovsdbtest.EmulateVSwitchdConfig(ovsClient)
 
 		mgmtIfAddr = util.GetNodeManagementIfAddr(ovntest.MustParseIPNet(thisNodeSubnet))
 	})
@@ -335,6 +310,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 	AfterEach(func() {
 		close(stopChan)
 		wg.Wait()
+		stopVSwitchd()
 		ovsCleanup.Cleanup()
 		util.ResetNetLinkOpMockInst()
 	})

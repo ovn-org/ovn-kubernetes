@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"sync/atomic"
-	"time"
 
 	"github.com/stretchr/testify/mock"
 
@@ -57,34 +56,19 @@ func (f *failOnceClient) Transact(ctx context.Context, ops ...ovsdb.Operation) (
 	return f.Client.Transact(ctx, ops...)
 }
 
-func emulateVSwitchdConfig(ovsClient libovsdbclient.Client) func() {
-	stop := make(chan struct{})
-	go func() {
-		ticker := time.NewTicker(10 * time.Millisecond)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-stop:
-				return
-			case <-ticker.C:
-				ovs, err := libovsdbops.GetOpenvSwitch(ovsClient)
-				if err != nil || ovs.CurCfg >= ovs.NextCfg {
-					continue
-				}
-				updated := &vswitchd.OpenvSwitch{UUID: ovs.UUID, CurCfg: ovs.NextCfg}
-				ops, err := ovsClient.Where(&vswitchd.OpenvSwitch{UUID: ovs.UUID}).Update(updated, &updated.CurCfg)
-				if err == nil {
-					_, _ = libovsdbops.TransactAndCheck(ovsClient, ops)
-				}
-			}
-		}
-	}()
-	return func() { close(stop) }
-}
-
 type ovnInstalledClient struct {
 	libovsdbclient.Client
 	ifaceName string
+}
+
+func (c *ovnInstalledClient) Get(ctx context.Context, row model.Model) error {
+	if err := c.Client.Get(ctx, row); err != nil {
+		return err
+	}
+	if iface, ok := row.(*vswitchd.Interface); ok {
+		markInterfaceOVNInstalled(iface, c.ifaceName)
+	}
+	return nil
 }
 
 func (c *ovnInstalledClient) Where(models ...model.Model) libovsdbclient.ConditionalAPI {
@@ -163,8 +147,6 @@ var _ = Describe("Node DPU tests", func() {
 		util.SetNetLinkOpMockInst(&netlinkOpsMock)
 		err := util.SetExec(execMock)
 		Expect(err).NotTo(HaveOccurred())
-		err = cni.SetExec(execMock)
-		Expect(err).NotTo(HaveOccurred())
 
 		kubeMock = kubemocks.Interface{}
 
@@ -189,7 +171,6 @@ var _ = Describe("Node DPU tests", func() {
 	AfterEach(func() {
 		util.SetSriovnetOpsInst(origSriovnetOps)
 		util.SetNetLinkOpMockInst(origNetlinkOps)
-		cni.ResetRunner()
 		util.ResetRunner()
 	})
 
@@ -337,7 +318,7 @@ var _ = Describe("Node DPU tests", func() {
 				})
 				Expect(err).NotTo(HaveOccurred())
 				ovsCleanup = ctx
-				DeferCleanup(emulateVSwitchdConfig(ovsClient))
+				DeferCleanup(libovsdbtest.EmulateVSwitchdConfig(ovsClient))
 				ctrl.ovsClient = &ovnInstalledClient{
 					Client:    ovsClient,
 					ifaceName: vfRep,
@@ -424,8 +405,8 @@ var _ = Describe("Node DPU tests", func() {
 				OVSData: []libovsdbtest.TestData{
 					&vswitchd.OpenvSwitch{UUID: "root-ovs", Bridges: []string{"br-int-uuid"}},
 					&vswitchd.Bridge{UUID: "br-int-uuid", Name: "br-int", Ports: []string{"vfrep-port-uuid"}},
-					&vswitchd.Port{UUID: "vfrep-port-uuid", Name: "pf0vf9", Interfaces: []string{"vfrep-iface-uuid"}},
-					&vswitchd.Interface{UUID: "vfrep-iface-uuid", Name: "pf0vf9", ExternalIDs: map[string]string{"sandbox": state.sandboxId}},
+					&vswitchd.Port{UUID: "vfrep-port-uuid", Name: vfRep, Interfaces: []string{"vfrep-iface-uuid"}},
+					&vswitchd.Interface{UUID: "vfrep-iface-uuid", Name: vfRep, ExternalIDs: map[string]string{"sandbox": state.sandboxId}},
 				},
 			})
 			Expect(err).ToNot(HaveOccurred())
@@ -444,8 +425,8 @@ var _ = Describe("Node DPU tests", func() {
 				OVSData: []libovsdbtest.TestData{
 					&vswitchd.OpenvSwitch{UUID: "root-ovs", Bridges: []string{"br-int-uuid"}},
 					&vswitchd.Bridge{UUID: "br-int-uuid", Name: "br-int", Ports: []string{"vfrep-port-uuid"}},
-					&vswitchd.Port{UUID: "vfrep-port-uuid", Name: "pf0vf9", Interfaces: []string{"vfrep-iface-uuid"}},
-					&vswitchd.Interface{UUID: "vfrep-iface-uuid", Name: "pf0vf9", ExternalIDs: map[string]string{"sandbox": state.sandboxId}},
+					&vswitchd.Port{UUID: "vfrep-port-uuid", Name: vfRep, Interfaces: []string{"vfrep-iface-uuid"}},
+					&vswitchd.Interface{UUID: "vfrep-iface-uuid", Name: vfRep, ExternalIDs: map[string]string{"sandbox": state.sandboxId}},
 				},
 			})
 			Expect(err).ToNot(HaveOccurred())

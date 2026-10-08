@@ -24,7 +24,6 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube"
 	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
-	ovsops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops/ovs"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/syncmap"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
@@ -198,7 +197,7 @@ func (c *Controller) bootstrapDPUPodMapFromOVS() error {
 		return item.ExternalIDs["sandbox"] != "" && item.ExternalIDs["vf-netdev-name"] != ""
 	}
 
-	ovsIfaces, err := ovsops.FindInterfacesWithPredicate(c.ovsClient, p)
+	ovsIfaces, err := libovsdbops.FindInterfacesWithPredicate(c.ovsClient, p)
 	if err != nil {
 		return fmt.Errorf("failed to find representor interfaces during DPU bootstrap: %w", err)
 	}

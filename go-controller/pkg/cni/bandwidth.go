@@ -4,6 +4,7 @@
 package cni
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 
@@ -16,25 +17,20 @@ import (
 )
 
 func clearPodBandwidth(ovsClient libovsdbclient.Client, sandboxID string) error {
-	if ovsClient != nil {
-		return clearPodBandwidthWithOVSClient(ovsClient, sandboxID)
-	}
-
-	// interfaces will have the same name as ports
-	portList, err := ovsFind("interface", "name", "external-ids:sandbox="+sandboxID)
+	ops, err := clearPodBandwidthOps(ovsClient, sandboxID)
 	if err != nil {
 		return err
 	}
-
-	return clearPodBandwidthForPorts(portList, sandboxID)
+	_, err = ovsops.TransactAndCheck(ovsClient, ops)
+	return err
 }
 
-func clearPodBandwidthWithOVSClient(ovsClient libovsdbclient.Client, sandboxID string) error {
+func clearPodBandwidthOps(ovsClient libovsdbclient.Client, sandboxID string) ([]ovsdb.Operation, error) {
 	ifaces, err := ovsops.FindInterfacesWithPredicate(ovsClient, func(iface *vswitchd.Interface) bool {
 		return iface.ExternalIDs["sandbox"] == sandboxID
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
 	portNames := make(map[string]struct{}, len(ifaces))
 	for _, iface := range ifaces {
@@ -42,18 +38,18 @@ func clearPodBandwidthWithOVSClient(ovsClient libovsdbclient.Client, sandboxID s
 	}
 
 	var ops []ovsdb.Operation
-	ports, err := ovsops.FindOVSPortsWithPredicate(ovsClient, func(port *vswitchd.Port) bool {
-		_, ok := portNames[port.Name]
-		return ok
-	})
-	if err != nil {
-		return err
-	}
-	for _, port := range ports {
+	for name := range portNames {
+		port, err := ovsops.GetOVSPort(ovsClient, name)
+		if errors.Is(err, libovsdbclient.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
 		update := &vswitchd.Port{UUID: port.UUID}
 		portOps, err := ovsClient.Where(update).Update(update, &update.QOS)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		ops = append(ops, portOps...)
 	}
@@ -65,52 +61,20 @@ func clearPodBandwidthWithOVSClient(ovsClient libovsdbclient.Client, sandboxID s
 		Value:    map[string]string{"sandbox": sandboxID},
 	}).Delete()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	ops = append(ops, qosOps...)
 
-	_, err = ovsops.TransactAndCheck(ovsClient, ops)
-	return err
+	return ops, nil
 }
 
-func clearPodBandwidthForPorts(portList []string, sandboxID string) error {
-	// Clear the QoS for any ports of this sandbox
-	for _, port := range portList {
-		if err := ovsClear("port", port, "qos"); err != nil {
-			return err
-		}
-	}
-
-	// Now that the QoS is unused remove it
-	qosList, err := ovsFind("qos", "_uuid", "external-ids:sandbox="+sandboxID)
-	if err != nil {
-		return err
-	}
-	for _, qos := range qosList {
-		if err := ovsDestroy("qos", qos); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func setPodBandwidth(ovsClient libovsdbclient.Client, sandboxID, ifname string, ingressBPS, egressBPS int64) error {
+func setPodBandwidthOps(ovsClient libovsdbclient.Client, ops []ovsdb.Operation, sandboxID, ifname string, ingressBPS, egressBPS int64) ([]ovsdb.Operation, error) {
 	// Pod ingress is OVS egress, and pod egress is OVS ingress.
-	if ovsClient != nil {
-		return setPodBandwidthWithOVSClient(ovsClient, sandboxID, ifname, ingressBPS, egressBPS)
-	}
-
-	return setPodBandwidthWithExec(sandboxID, ifname, ingressBPS, egressBPS)
-}
-
-func setPodBandwidthWithOVSClient(ovsClient libovsdbclient.Client, sandboxID, ifname string, ingressBPS, egressBPS int64) error {
-	var ops []ovsdb.Operation
 
 	if ingressBPS > 0 {
 		port, err := ovsops.GetOVSPort(ovsClient, ifname)
 		if err != nil {
-			return fmt.Errorf("failed to get OVS port %s: %w", ifname, err)
+			return nil, fmt.Errorf("failed to get OVS port %s: %w", ifname, err)
 		}
 		qos := &vswitchd.QoS{
 			// The named UUID lets the port update reference this row in the
@@ -122,68 +86,35 @@ func setPodBandwidthWithOVSClient(ovsClient libovsdbclient.Client, sandboxID, if
 		}
 		qosOps, err := ovsClient.Create(qos)
 		if err != nil {
-			return fmt.Errorf("failed to build QoS creation operation for port %s: %w", ifname, err)
+			return nil, fmt.Errorf("failed to build QoS creation operation for port %s: %w", ifname, err)
 		}
 		ops = append(ops, qosOps...)
 
 		portUpdate := &vswitchd.Port{UUID: port.UUID, QOS: &qos.UUID}
 		portOps, err := ovsClient.Where(&vswitchd.Port{UUID: port.UUID}).Update(portUpdate, &portUpdate.QOS)
 		if err != nil {
-			return fmt.Errorf("failed to build QoS update operation for port %s: %w", ifname, err)
+			return nil, fmt.Errorf("failed to build QoS update operation for port %s: %w", ifname, err)
 		}
 		ops = append(ops, portOps...)
 	}
 
-	if egressBPS > 0 {
-		iface, err := ovsops.GetOVSInterface(ovsClient, ifname)
-		if err != nil {
-			return fmt.Errorf("failed to get OVS interface %s: %w", ifname, err)
-		}
-		egressKBPS := int(egressBPS / 1000)
-		ifaceUpdate := &vswitchd.Interface{
-			UUID:                 iface.UUID,
-			IngressPolicingRate:  egressKBPS,
-			IngressPolicingBurst: egressKBPS / 10,
-		}
-		ifaceOps, err := ovsClient.Where(&vswitchd.Interface{UUID: iface.UUID}).Update(ifaceUpdate,
-			&ifaceUpdate.IngressPolicingRate, &ifaceUpdate.IngressPolicingBurst)
-		if err != nil {
-			return fmt.Errorf("failed to build policing update operation for interface %s: %w", ifname, err)
-		}
-		ops = append(ops, ifaceOps...)
+	// Zero removes this interface's limit without changing other attachments.
+	iface, err := ovsops.GetOVSInterface(ovsClient, ifname)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get OVS interface %s: %w", ifname, err)
 	}
-
-	_, err := ovsops.TransactAndCheck(ovsClient, ops)
-	return err
-}
-
-func setPodBandwidthWithExec(sandboxID, ifname string, ingressBPS, egressBPS int64) error {
-	// note pod ingress == OVS egress and vice versa
-
-	if ingressBPS > 0 {
-		qos, err := ovsCreate("qos", "type=linux-htb", fmt.Sprintf("other-config:max-rate=%d", ingressBPS), "external-ids=sandbox="+sandboxID)
-		if err != nil {
-			return err
-		}
-		err = ovsSet("port", ifname, fmt.Sprintf("qos=%s", qos))
-		if err != nil {
-			return err
-		}
+	egressKBPS := int(egressBPS / 1000)
+	ifaceUpdate := &vswitchd.Interface{
+		UUID:                 iface.UUID,
+		IngressPolicingRate:  egressKBPS,
+		IngressPolicingBurst: egressKBPS / 10,
 	}
-	if egressBPS > 0 {
-		// ingress_policing_rate is in Kbps
-		egressKBPS := egressBPS / 1000
-		err := ovsSet("interface", ifname, fmt.Sprintf("ingress_policing_rate=%d", egressKBPS))
-		if err != nil {
-			return err
-		}
-		// Set the ingress_policing_burst too per recommendation in ovsdb schema, i.e
-		// 10% of the rate
-		err = ovsSet("interface", ifname, fmt.Sprintf("ingress_policing_burst=%d", (egressKBPS/10)))
-		if err != nil {
-			return err
-		}
+	ifaceOps, err := ovsClient.Where(&vswitchd.Interface{UUID: iface.UUID}).Update(ifaceUpdate,
+		&ifaceUpdate.IngressPolicingRate, &ifaceUpdate.IngressPolicingBurst)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build policing update operation for interface %s: %w", ifname, err)
 	}
+	ops = append(ops, ifaceOps...)
 
-	return nil
+	return ops, nil
 }

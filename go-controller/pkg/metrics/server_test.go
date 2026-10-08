@@ -327,7 +327,9 @@ var _ = Describe("scrape decoupled from extraction", func() {
 			}
 			mockKexecIface.Mock.On("Command", anys...).Maybe().Return(mockCmd)
 		}
-		_ = util.SetSpecificExec(mockKexecIface)
+		mockKexecIface.Mock.On("LookPath", "ip").Return("ip", nil).Once()
+		mockKexecIface.Mock.On("LookPath", "sysctl").Return("sysctl", nil).Once()
+		Expect(util.SetExecWithoutOVS(mockKexecIface)).To(Succeed())
 		DeferCleanup(util.ResetRunner)
 
 		// The collection path (coverage/show) blocks until released; everything

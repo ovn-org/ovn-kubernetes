@@ -943,31 +943,6 @@ func openflowManagerCheckPorts(ofMgr *openflowManager) {
 	Expect(checkPorts(ofMgr.ovsClient, netConfigs, uplink, ofPortPhys)).To(Succeed())
 }
 
-func emulateVSwitchdConfig(ovsClient libovsdbclient.Client) func() {
-	stop := make(chan struct{})
-	go func() {
-		ticker := time.NewTicker(10 * time.Millisecond)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-stop:
-				return
-			case <-ticker.C:
-				ovs, err := ovsops.GetOpenvSwitch(ovsClient)
-				if err != nil || ovs.CurCfg >= ovs.NextCfg {
-					continue
-				}
-				updated := &vswitchd.OpenvSwitch{UUID: ovs.UUID, CurCfg: ovs.NextCfg}
-				ops, err := ovsClient.Where(&vswitchd.OpenvSwitch{UUID: ovs.UUID}).Update(updated, &updated.CurCfg)
-				if err == nil {
-					_, _ = ovsops.TransactAndCheck(ovsClient, ops)
-				}
-			}
-		}
-	}()
-	return func() { close(stop) }
-}
-
 func getDummyOpenflowManager(ovsClients ...libovsdbclient.Client) *openflowManager {
 	gwBridge := bridgeconfig.TestBridgeConfig("breth0")
 	var ovsClient libovsdbclient.Client
@@ -1201,7 +1176,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			},
 		})
 		Expect(ovsErr).NotTo(HaveOccurred())
-		stopVSwitchd = emulateVSwitchdConfig(ovsClient)
+		stopVSwitchd = libovsdbtest.EmulateVSwitchdConfig(ovsClient)
 		// Ensure gateway tests never rely on host iptables binaries.
 		util.SetFakeIPTablesHelpers()
 
@@ -1476,6 +1451,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		setUpGatewayFakeOVSCommands(fexec)
 		getCreationFakeCommands(fexec, mgtPort)
 		getRPFilterLooseModeFakeCommands(fexec)
+		fexec.AddFakeCmdsNoOutputNoError([]string{"ovs-ofctl mod-port breth0 15 no-flood"})
 		nodeLister.On("Get", mock.AnythingOfType("string")).Return(node, nil)
 		kubeFakeClient := fake.NewSimpleClientset(
 			&corev1.NodeList{
@@ -1902,6 +1878,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		setUpGatewayFakeOVSCommands(fexec)
 		getCreationFakeCommands(fexec, mgtPort)
 		getRPFilterLooseModeFakeCommands(fexec)
+		fexec.AddFakeCmdsNoOutputNoError([]string{"ovs-ofctl mod-port breth0 15 no-flood"})
 		nodeLister.On("Get", mock.AnythingOfType("string")).Return(node, nil)
 		kubeFakeClient := fake.NewSimpleClientset(
 			&corev1.NodeList{
@@ -2132,6 +2109,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		setUpGatewayFakeOVSCommands(fexec)
 		getCreationFakeCommands(fexec, mgtPort)
 		getRPFilterLooseModeFakeCommands(fexec)
+		fexec.AddFakeCmdsNoOutputNoError([]string{"ovs-ofctl mod-port breth0 15 no-flood"})
 		nodeLister.On("Get", mock.AnythingOfType("string")).Return(node, nil)
 		kubeFakeClient := fake.NewSimpleClientset(
 			&corev1.NodeList{

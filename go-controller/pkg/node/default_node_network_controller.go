@@ -1294,7 +1294,7 @@ func (nc *DefaultNodeNetworkController) deleteNode(node *corev1.Node) {
 	}
 
 	gw := nc.Gateway.(*gateway)
-	gw.openflowManager.deleteFlowsByKey(getPMTUDKey(node.Name))
+	gw.openflowManager.deleteBridgePMTUDFlowCache(getPMTUDKey(node.Name))
 
 	// Use GetNodeAddresses to get node IPs
 	ipsv4, ipsv6, err := util.GetNodeAddresses(config.IPv4Mode, config.IPv6Mode, node)

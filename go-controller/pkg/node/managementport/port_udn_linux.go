@@ -463,11 +463,11 @@ func (mp *udnManagementPortRep) create() error {
 		return fmt.Errorf("bring up management port %s for network %s failed: %v", mp.repDevice, mp.GetNetworkName(), err)
 	}
 
-	externalIds := []string{
-		fmt.Sprintf("%s=%s", types.NetworkExternalID, mp.GetNetworkName()),
-		fmt.Sprintf("%s=%s", types.OvnManagementPortNameExternalID, util.GetNetworkScopedK8sMgmtHostIntfName(uint(mp.GetNetworkID()))),
+	externalIDs := map[string]string{
+		types.NetworkExternalID:               mp.GetNetworkName(),
+		types.OvnManagementPortNameExternalID: util.GetNetworkScopedK8sMgmtHostIntfName(uint(mp.GetNetworkID())),
 	}
-	return createManagementPortOVSRepresentor(mp.ovsClient, mp.GetNetworkName(), mp.repDevice, mp.GetNetworkScopedK8sMgmtIntfName(mp.nodeName), mp.MTU(), externalIds)
+	return createManagementPortOVSRepresentor(mp.ovsClient, mp.GetNetworkName(), mp.repDevice, mp.GetNetworkScopedK8sMgmtIntfName(mp.nodeName), mp.MTU(), externalIDs)
 }
 
 func (mp *udnManagementPortRep) delete() error {

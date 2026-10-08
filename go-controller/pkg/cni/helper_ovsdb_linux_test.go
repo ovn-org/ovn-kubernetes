@@ -10,12 +10,61 @@ import (
 	"github.com/stretchr/testify/require"
 
 	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
+	"github.com/ovn-kubernetes/libovsdb/ovsdb"
 
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb"
 	ovsops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	libovsdbtest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/vswitchd"
 )
+
+type trackingOVSClient struct {
+	libovsdbclient.Client
+	transactions  int
+	afterTransact func()
+}
+
+func (c *trackingOVSClient) WatchOVSInterface(name string) (<-chan struct{}, func()) {
+	return c.Client.(libovsdb.OVSInterfaceWatcher).WatchOVSInterface(name)
+}
+
+func (c *trackingOVSClient) Transact(ctx context.Context, ops ...ovsdb.Operation) ([]ovsdb.OperationResult, error) {
+	c.transactions++
+	results, err := c.Client.Transact(ctx, ops...)
+	if c.afterTransact != nil {
+		c.afterTransact()
+	}
+	return results, err
+}
+
+func TestConfigureOVSCanceledBeforeBandwidth(t *testing.T) {
+	ovsClient, _ := newShimOVSTestServer(t, []libovsdbtest.TestData{
+		&vswitchd.OpenvSwitch{UUID: "ovs", Bridges: []string{"bridge"}},
+		&vswitchd.Bridge{UUID: "bridge", Name: "br-int", Ports: []string{"port"}},
+		&vswitchd.Port{UUID: "port", Name: "pod-port", Interfaces: []string{"iface"}},
+		&vswitchd.Interface{UUID: "iface", Name: "pod-port", ExternalIDs: map[string]string{
+			"sandbox": "sandbox", "iface-id": "ns_pod",
+		}},
+	})
+	require.NoError(t, setPodBandwidthForTest(ovsClient, "sandbox", "pod-port", 10_000_000, 2_000_000))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	// Cancel after the port update commits, before bandwidth is submitted.
+	c := &trackingOVSClient{Client: ovsClient, afterTransact: cancel}
+	err := ConfigureOVS(ctx, c, "ns", "pod", "eth0", "pod-port", &PodInterfaceInfo{
+		NetName: types.DefaultNetworkName, NADKey: types.DefaultNetworkName,
+	}, "sandbox", "", false, nil)
+	require.ErrorIs(t, err, context.Canceled)
+	require.Equal(t, 1, c.transactions)
+	port, err := ovsops.GetOVSPort(ovsClient, "pod-port")
+	require.NoError(t, err)
+	require.NotNil(t, port.QOS)
+	iface, err := ovsops.GetOVSInterface(ovsClient, "pod-port")
+	require.NoError(t, err)
+	require.Equal(t, 2000, iface.IngressPolicingRate)
+	require.Equal(t, 200, iface.IngressPolicingBurst)
+}
 
 func TestAddOrUpdatePodPortCanceled(t *testing.T) {
 	ovsClient, cleanup, err := libovsdbtest.NewOVSTestHarness(libovsdbtest.TestSetup{
@@ -112,4 +161,22 @@ func TestOVSClientInterfaceLookups(t *testing.T) {
 	value, err := getInterfaceExternalID(ovsClient, "veth-blue", "test-key")
 	require.NoError(t, err)
 	require.Equal(t, "secondary-value", value)
+
+	// An ambiguous pod interface name must still fall back to the network.
+	iface, err := ovsops.GetOVSInterface(ovsClient, "veth-blue")
+	require.NoError(t, err)
+	iface.ExternalIDs["pod-if-name"] = "eth0"
+	ops, err := ovsClient.Where(iface).Update(iface, &iface.ExternalIDs)
+	require.NoError(t, err)
+	_, err = ovsops.TransactAndCheck(ovsClient, ops)
+	require.NoError(t, err)
+	names, err = findPodInterfaces(ovsClient, "sandbox-id", "eth0", "blue", "ns/blue")
+	require.NoError(t, err)
+	require.Equal(t, []string{"veth-blue"}, names)
+	names, err = findPodInterfaces(ovsClient, "sandbox-id", "eth0", types.DefaultNetworkName, types.DefaultNetworkName)
+	require.NoError(t, err)
+	require.Equal(t, []string{"veth-default"}, names)
+	names, err = findPodInterfaces(ovsClient, "missing-sandbox", "eth0", types.DefaultNetworkName, types.DefaultNetworkName)
+	require.NoError(t, err)
+	require.Empty(t, names)
 }

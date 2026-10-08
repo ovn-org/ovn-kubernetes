@@ -9,8 +9,6 @@ import (
 	"net"
 	"os"
 	"regexp"
-	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -38,6 +36,10 @@ type openflowManager struct {
 	staticFlowsSet        bool
 	staticFlowHostIPs     []net.IP
 	staticFlowHostSubnets []*net.IPNet
+	pmtudFlowIPs          map[string][]string // protected by staticFlowsMu
+	// Only the Run loop refreshes patch ports and retries service resyncs.
+	uplinkServicesNeedResync bool
+	resyncServices           func() error
 	// localnetPortChan coalesces OVSDB events that may change whether a managed
 	// bridge has a localnet topology patch port.
 	localnetPortChan chan struct{}
@@ -382,15 +384,33 @@ func (b *openflowBridge) getGroupsByKey(key string) []string {
 }
 
 func (b *openflowBridge) resetFlowCacheToNormal() {
-	b.flowMutex.Lock()
-	b.flowCache = map[string][]string{
+	b.replaceFlowCache(map[string][]string{
 		"NORMAL": {fmt.Sprintf("table=0,priority=0,actions=%s\n", util.NormalAction)},
-	}
-	b.flowMutex.Unlock()
+	})
+}
 
+// Publish flows and discard stale service groups together, excluding any sync.
+func (b *openflowBridge) replaceFlowCache(flows map[string][]string) {
+	b.syncMutex.Lock()
+	defer b.syncMutex.Unlock()
+	b.flowMutex.Lock()
+	defer b.flowMutex.Unlock()
 	b.groupMutex.Lock()
+	defer b.groupMutex.Unlock()
+	b.flowCache = flows
 	b.groupCache = map[string][]string{}
-	b.groupMutex.Unlock()
+}
+
+func (b *openflowBridge) updateStaticFlowCache(flows []string) bool {
+	b.flowMutex.Lock()
+	defer b.flowMutex.Unlock()
+	changed := !stringListsEqual(b.flowCache["DEFAULT"], flows)
+	if b.flowCache == nil {
+		b.flowCache = make(map[string][]string)
+	}
+	b.flowCache["NORMAL"] = []string{fmt.Sprintf("table=0,priority=0,actions=%s\n", util.NormalAction)}
+	b.flowCache["DEFAULT"] = flows
+	return changed
 }
 
 func (b *openflowBridge) flows() []string {
@@ -730,14 +750,14 @@ func (c *openflowManager) Run(stopChan <-chan struct{}, doneWg *sync.WaitGroup) 
 						continue
 					}
 				}
-				c.checkUplinkBridgePorts()
-				// Localnet topology patch ports are created and removed asynchronously by
-				// ovn-controller. Re-render static flows before each periodic sync so
-				// priority-102 NORMAL flows follow the current bridge membership.
+				// Refresh UDN patch ports before checking uplink bridges: an
+				// unassigned or recreated patch port is recoverable, while a
+				// changed physical port still requires the existing restart.
 				if _, err := c.refreshBridgeFlowCache(); err != nil {
 					klog.Errorf("Failed to refresh gateway bridge flows: %v", err)
 					continue
 				}
+				c.checkUplinkBridgePorts()
 				c.syncFlows()
 			case <-c.localnetPortChan:
 				// Port events identify localnet ports but not their bridge membership,
@@ -777,6 +797,12 @@ func (c *openflowManager) Run(stopChan <-chan struct{}, doneWg *sync.WaitGroup) 
 }
 
 func (c *openflowManager) updateBridgePMTUDFlowCache(key string, ipAddrs []string) {
+	c.staticFlowsMu.Lock()
+	defer c.staticFlowsMu.Unlock()
+	if c.pmtudFlowIPs == nil {
+		c.pmtudFlowIPs = make(map[string][]string)
+	}
+	c.pmtudFlowIPs[key] = append([]string(nil), ipAddrs...)
 	dftFlows := c.defaultBridge.PMTUDDropFlows(ipAddrs)
 	c.updateFlowCacheEntry(key, dftFlows)
 	if c.externalGatewayBridge != nil {
@@ -785,6 +811,20 @@ func (c *openflowManager) updateBridgePMTUDFlowCache(key string, ipAddrs []strin
 	}
 	_ = c.forEachUplinkBridge(func(_ string, bridge *openflowBridge) error {
 		bridge.updateFlowCacheEntry(key, bridge.PMTUDDropFlows(ipAddrs))
+		return nil
+	})
+}
+
+func (c *openflowManager) deleteBridgePMTUDFlowCache(key string) {
+	c.staticFlowsMu.Lock()
+	defer c.staticFlowsMu.Unlock()
+	delete(c.pmtudFlowIPs, key)
+	c.deleteFlowsByKey(key)
+	if c.externalGatewayBridge != nil {
+		c.externalGatewayBridge.deleteFlowsByKey(key)
+	}
+	_ = c.forEachUplinkBridge(func(_ string, bridge *openflowBridge) error {
+		bridge.deleteFlowsByKey(key)
 		return nil
 	})
 }
@@ -808,14 +848,61 @@ func (c *openflowManager) updateBridgeFlowCache(hostIPs []net.IP, hostSubnets []
 }
 
 // refreshBridgeFlowCache re-renders static flows with the most recently
-// supplied node addresses. It is serialized with address-driven updates so a
-// periodic refresh cannot overwrite newer address information. The return
-// value reports whether the static flow cache changed.
+// supplied node addresses and current Uplink patch ports. It also follows
+// localnet port membership changes. It is serialized with address-driven
+// updates so a periodic refresh cannot overwrite newer address information.
+// The return value reports whether flows need to be synced.
 func (c *openflowManager) refreshBridgeFlowCache() (bool, error) {
 	c.staticFlowsMu.Lock()
-	defer c.staticFlowsMu.Unlock()
+	changed, err := c.refreshBridgeFlowCacheLocked()
+	c.staticFlowsMu.Unlock()
+	if err != nil {
+		return changed, err
+	}
+	// Service retry processing can update flow caches. Enqueue it without
+	// holding the static-flow or bridge locks, and retry on the next refresh
+	// if enqueueing fails after the new port numbers have already been stored.
+	if c.uplinkServicesNeedResync {
+		changed = true
+		if c.resyncServices != nil {
+			if err := c.resyncServices(); err != nil {
+				return changed, fmt.Errorf("failed to resync services after uplink patch port change: %w", err)
+			}
+		}
+		c.uplinkServicesNeedResync = false
+	}
+	return changed, nil
+}
+
+// The caller must hold staticFlowsMu.
+func (c *openflowManager) refreshBridgeFlowCacheLocked() (bool, error) {
 	if !c.staticFlowsSet {
 		return false, nil
+	}
+	if err := c.forEachUplinkBridge(func(_ string, bridge *openflowBridge) error {
+		changed, err := bridge.RefreshUDNPatchPorts()
+		if changed {
+			c.uplinkServicesNeedResync = true
+			// Build the full replacement before publishing it. Another bridge's
+			// refresh can fail, and flow requests can still sync this bridge.
+			flows, flowErr := bridge.UplinkBridgeFlows(c.staticFlowHostSubnets)
+			// Neither NORMAL alone nor flows using recycled ofports are safe.
+			replacement := map[string][]string{
+				"DEFAULT": {"table=0,priority=0,actions=drop"},
+			}
+			if flowErr == nil {
+				replacement["NORMAL"] = []string{fmt.Sprintf("table=0,priority=0,actions=%s\n", util.NormalAction)}
+				replacement["DEFAULT"] = flows
+			}
+			for key, ips := range c.pmtudFlowIPs {
+				replacement[key] = bridge.PMTUDDropFlows(ips)
+			}
+			bridge.replaceFlowCache(replacement)
+			return errors.Join(err, flowErr)
+		}
+		return err
+	}); err != nil {
+		return false, err
 	}
 	return c.updateBridgeFlowCacheLocked(c.staticFlowHostIPs, c.staticFlowHostSubnets)
 }
@@ -828,10 +915,7 @@ func (c *openflowManager) updateBridgeFlowCacheLocked(hostIPs []net.IP, hostSubn
 	if err != nil {
 		return false, err
 	}
-	changed := !stringListsEqual(c.getFlowsByKey("DEFAULT"), dftFlows)
-
-	c.updateFlowCacheEntry("NORMAL", []string{fmt.Sprintf("table=0,priority=0,actions=%s\n", util.NormalAction)})
-	c.updateFlowCacheEntry("DEFAULT", dftFlows)
+	changed := c.defaultBridge.updateStaticFlowCache(dftFlows)
 
 	// we consume ex gw bridge flows only if that is enabled
 	if c.externalGatewayBridge != nil {
@@ -839,19 +923,14 @@ func (c *openflowManager) updateBridgeFlowCacheLocked(hostIPs []net.IP, hostSubn
 		if err != nil {
 			return false, err
 		}
-		changed = changed || !stringListsEqual(c.externalGatewayBridge.getFlowsByKey("DEFAULT"), exGWBridgeDftFlows)
-
-		c.updateExBridgeFlowCacheEntry("NORMAL", []string{fmt.Sprintf("table=0,priority=0,actions=%s\n", util.NormalAction)})
-		c.updateExBridgeFlowCacheEntry("DEFAULT", exGWBridgeDftFlows)
+		changed = c.externalGatewayBridge.updateStaticFlowCache(exGWBridgeDftFlows) || changed
 	}
 	err = c.forEachUplinkBridge(func(_ string, bridge *openflowBridge) error {
 		uplinkBridgeDftFlows, err := bridge.UplinkBridgeFlows(hostSubnets)
 		if err != nil {
 			return err
 		}
-		changed = changed || !stringListsEqual(bridge.getFlowsByKey("DEFAULT"), uplinkBridgeDftFlows)
-		bridge.updateFlowCacheEntry("NORMAL", []string{fmt.Sprintf("table=0,priority=0,actions=%s\n", util.NormalAction)})
-		bridge.updateFlowCacheEntry("DEFAULT", uplinkBridgeDftFlows)
+		changed = bridge.updateStaticFlowCache(uplinkBridgeDftFlows) || changed
 		return nil
 	})
 	return changed, err
@@ -872,23 +951,6 @@ func stringListsEqual(a, b []string) bool {
 		counts[item]--
 	}
 	return true
-}
-
-func getOVSInterfaceOfPort(ovsClient libovsdbclient.Client, ifaceName string, ifExists bool) (string, error) {
-	iface, err := ovsops.GetOVSInterface(ovsClient, ifaceName)
-	if errors.Is(err, libovsdbclient.ErrNotFound) {
-		if ifExists {
-			return "", nil
-		}
-		return "", err
-	}
-	if err != nil {
-		return "", err
-	}
-	if iface.Ofport == nil || *iface.Ofport == -1 {
-		return "", fmt.Errorf("interface %s has no valid ofport", ifaceName)
-	}
-	return strconv.Itoa(*iface.Ofport), nil
 }
 
 // checkUplinkBridgePorts runs checkPorts on every uplink bridge and records
@@ -921,7 +983,7 @@ func checkPorts(ovsClient libovsdbclient.Client, netConfigs []*bridgeconfig.Brid
 		if netConfig.OfPortPatch == "" {
 			continue
 		}
-		curOfportPatch, err := getOVSInterfaceOfPort(ovsClient, netConfig.PatchPort, true)
+		curOfportPatch, err := ovsops.GetOVSInterfaceOfPort(ovsClient, netConfig.PatchPort, true)
 		if err != nil {
 			return fmt.Errorf("failed to get ofport of %s: %w", netConfig.PatchPort, err)
 		}
@@ -944,7 +1006,7 @@ func checkPorts(ovsClient libovsdbclient.Client, netConfigs []*bridgeconfig.Brid
 
 	// it could be that someone removed the physical interface and added it back on the OVS host
 	// bridge, as a result the ofport number changed for that physical interface
-	curOfportPhys, err := getOVSInterfaceOfPort(ovsClient, physIntf, true)
+	curOfportPhys, err := ovsops.GetOVSInterfaceOfPort(ovsClient, physIntf, true)
 	if err != nil {
 		return fmt.Errorf("failed to get ofport of %s: %w", physIntf, err)
 	}
@@ -969,9 +1031,7 @@ func bootstrapOVSFlows(ovsClient libovsdbclient.Client, nodeName string) error {
 	for _, iface := range interfaces {
 		portNames = append(portNames, iface.Name)
 	}
-	portsOutput := strings.Join(portNames, "\n")
-
-	bridge, patchPort := localnetPortInfo(nodeName, portsOutput)
+	bridge, patchPort := localnetPortInfo(nodeName, portNames)
 
 	if len(bridge) == 0 {
 		// bridge exists but no patch port was found
@@ -993,7 +1053,7 @@ func bootstrapOVSFlows(ovsClient libovsdbclient.Client, nodeName string) error {
 	klog.Infof("Default NORMAL flow installed on OVS bridge: %s, will bootstrap with required port security flows", bridge)
 
 	// Get ofport of patchPort
-	ofportPatch, err := getOVSInterfaceOfPort(ovsClient, patchPort, false)
+	ofportPatch, err := ovsops.GetOVSInterfaceOfPort(ovsClient, patchPort, false)
 	if err != nil {
 		return fmt.Errorf("failed while waiting on patch port %q to be created by ovn-controller and "+
 			"while getting ofport: %v", patchPort, err)
@@ -1039,7 +1099,7 @@ func bootstrapOVSFlows(ovsClient libovsdbclient.Client, nodeName string) error {
 }
 
 // localnetPortInfo returns the name of the bridge and the patch port name for the default cluster network
-func localnetPortInfo(nodeName string, portsOutput string) (string, string) {
+func localnetPortInfo(nodeName string, portNames []string) (string, string) {
 	// This needs to work with:
 	// - default network: patch-<bridge name>_<node>-to-br-int
 	// but not with:
@@ -1047,8 +1107,8 @@ func localnetPortInfo(nodeName string, portsOutput string) (string, string) {
 	// - user defined secondary localnet network: patch-<bridge name>_<network-name>_ovn_localnet_port-to-br-int
 	// TODO: going forward, maybe it would preferable to just read the bridge name from the config.
 	r := regexp.MustCompile(fmt.Sprintf("^patch-([^_]*)_%s-to-br-int$", nodeName))
-	for _, line := range strings.Split(portsOutput, "\n") {
-		matches := r.FindStringSubmatch(line)
+	for _, name := range portNames {
+		matches := r.FindStringSubmatch(name)
 		if len(matches) == 2 {
 			return matches[1], matches[0]
 		}

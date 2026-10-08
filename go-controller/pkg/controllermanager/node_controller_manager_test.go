@@ -4,6 +4,7 @@
 package controllermanager
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sync"
@@ -55,6 +56,30 @@ func ovsPortAndInterface(portUUID, ifaceUUID, name string, extIDs map[string]str
 		&vswitchd.Interface{UUID: ifaceUUID, Name: name, ExternalIDs: extIDs}
 }
 
+type stalePortFailureClient struct {
+	libovsdbclient.Client
+	interfaceLists int
+	failedIface    string
+}
+
+func (c *stalePortFailureClient) WhereCacheByUUIDs(predicate any, uuids ...string) libovsdbclient.ConditionalAPI {
+	conditional := c.Client.WhereCacheByUUIDs(predicate, uuids...)
+	c.interfaceLists++
+	if c.interfaceLists == 2 {
+		c.failedIface = uuids[0]
+		return &failedInterfaceList{ConditionalAPI: conditional}
+	}
+	return conditional
+}
+
+type failedInterfaceList struct {
+	libovsdbclient.ConditionalAPI
+}
+
+func (*failedInterfaceList) List(context.Context, any) error {
+	return errors.New("injected interface lookup failure")
+}
+
 func expectUplinkInformers(factoryMock *factoryMocks.NodeWatchFactory) {
 	uplinkClient := uplinkfake.NewSimpleClientset()
 	uplinkFactory := uplinkinformerfactory.NewSharedInformerFactory(uplinkClient, time.Second)
@@ -94,6 +119,41 @@ var _ = Describe("Healthcheck tests", func() {
 	})
 
 	Describe("checkForStaleOVSInternalPorts", func() {
+		It("continues stale port cleanup after an individual operation-building error", func() {
+			minusOne := -1
+			bridge := &vswitchd.Bridge{UUID: "bridge", Name: "br-int"}
+			data := []libovsdbtest.TestData{
+				&vswitchd.OpenvSwitch{UUID: "root", Bridges: []string{bridge.UUID}},
+				bridge,
+			}
+			for i := 0; i < 3; i++ {
+				name := fmt.Sprintf("stale-%d", i)
+				port, iface := ovsPortAndInterface(name+"-port", name+"-iface", name, nil)
+				iface.Ofport = &minusOne
+				bridge.Ports = append(bridge.Ports, port.UUID)
+				data = append(data, port, iface)
+			}
+			ovsClient, cleanup := newTestOVSClient(data)
+			defer cleanup.Cleanup()
+			failingClient := &stalePortFailureClient{Client: ovsClient}
+
+			checkForStaleOVSInternalPorts(failingClient)
+
+			Expect(failingClient.interfaceLists).To(Equal(3))
+			ports, err := libovsdbops.FindOVSPortsWithPredicate(ovsClient, func(*vswitchd.Port) bool { return true })
+			Expect(err).NotTo(HaveOccurred())
+			Expect(ports).To(HaveLen(1))
+			Expect(ports[0].Interfaces).To(Equal([]string{failingClient.failedIface}))
+			ifaces, err := libovsdbops.FindInterfacesWithPredicate(ovsClient, func(*vswitchd.Interface) bool { return true })
+			Expect(err).NotTo(HaveOccurred())
+			Expect(ifaces).To(HaveLen(1))
+			Expect(ifaces[0].UUID).To(Equal(failingClient.failedIface))
+			bridges, err := libovsdbops.ListBridges(ovsClient)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(bridges).To(HaveLen(1))
+			Expect(bridges[0].Ports).To(Equal([]string{ports[0].UUID}))
+		})
+
 		It("removes stale ports from their owning bridges while preserving healthy and management ports", func() {
 			minusOne := -1
 			one := 1

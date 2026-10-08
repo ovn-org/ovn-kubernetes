@@ -254,7 +254,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 
 		ovsClient, ovsCleanup := newTestOVSClient()
 		defer ovsCleanup.Cleanup()
-		stopVSwitchd := emulateVSwitchdConfig(ovsClient)
+		stopVSwitchd := libovsdbtest.EmulateVSwitchdConfig(ovsClient)
 		defer stopVSwitchd()
 		Expect(ovsops.CreateOrUpdateBridge(ovsClient, "br-int", vswitchd.BridgeFailModeSecure, 1400)).To(Succeed())
 		Expect(ovsops.CreateOrUpdatePodPort(ovsClient, "br-int", types.K8sMgmtIntfName,
@@ -1097,7 +1097,7 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 
 		ovsClient, ovsCleanup := newTestOVSClient()
 		defer ovsCleanup.Cleanup()
-		stopVSwitchd := emulateVSwitchdConfig(ovsClient)
+		stopVSwitchd := libovsdbtest.EmulateVSwitchdConfig(ovsClient)
 		defer stopVSwitchd()
 		Expect(ovsops.CreateOrUpdateBridge(ovsClient, "br-int", vswitchd.BridgeFailModeSecure, 1400)).To(Succeed())
 		Expect(ovsops.CreateOrUpdatePodPort(ovsClient, "br-int", types.K8sMgmtIntfName,

@@ -764,11 +764,12 @@ func checkForStaleOVSInternalPorts(ovsClient client.Client) {
 			// Match ovs-vsctl --if-exists: a bridge's local port is a no-op.
 			continue
 		}
-		ops, err = ovsops.DeletePortWithInterfacesOps(ovsClient, ops, port, bridgeName)
+		portOps, err := ovsops.DeletePortWithInterfacesOps(ovsClient, nil, port, bridgeName)
 		if err != nil {
 			klog.Errorf("Failed to build deletion operations for stale OVS port %s: %v", port.Name, err)
-			return
+			continue
 		}
+		ops = append(ops, portOps...)
 	}
 	if _, err := ovsops.TransactAndCheck(ovsClient, ops); err != nil {
 		klog.Errorf("Failed to delete stale OVS ports/interfaces: %v", err)

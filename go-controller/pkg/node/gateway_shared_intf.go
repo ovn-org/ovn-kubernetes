@@ -1748,6 +1748,12 @@ func newGateway(
 		if err != nil {
 			return fmt.Errorf("failed to create gateway OpenFlow manager: %w", err)
 		}
+		gw.openflowManager.resyncServices = func() error {
+			if gw.servicesRetryFramework == nil {
+				return nil
+			}
+			return utilerrors.Join(gw.resyncAllServices()...)
+		}
 
 		// resync flows on IP change
 		gw.nodeIPManager.AddOnAddressesChangedHandler(func() {
@@ -1799,10 +1805,14 @@ func newNodePortWatcher(
 	networkManager networkmanager.Interface,
 ) (*nodePortWatcher, error) {
 
-	// Get ofport of physical interface
-	ofportPhys, err := getOVSInterfaceOfPort(ofm.ovsClient, gwBridge.GetUplinkName(), true)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get ofport of %s: %w", gwBridge.GetUplinkName(), err)
+	// A local gateway with --allow-no-uplink has no physical interface to look up.
+	var ofportPhys string
+	if uplinkName := gwBridge.GetUplinkName(); uplinkName != "" {
+		var err error
+		ofportPhys, err = ovsops.GetOVSInterfaceOfPort(ofm.ovsClient, uplinkName, true)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get ofport of %s: %w", uplinkName, err)
+		}
 	}
 
 	// In the shared gateway mode, the NodePort service is handled by the OpenFlow flows configured

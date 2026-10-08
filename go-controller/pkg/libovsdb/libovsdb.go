@@ -208,15 +208,17 @@ func NewNBClientWithEndpoint(endpoint string, promRegistry prometheus.Registerer
 	return c, nil
 }
 
-// NewOVSClient creates a new openvswitch Database client
-func NewOVSClient(stopCh <-chan struct{}) (client.Client, error) {
+// NewOVSClient creates a new Open_vSwitch database client. Without monitorOpts,
+// it monitors all columns of Open_vSwitch, Bridge, Port, and Interface.
+func NewOVSClient(stopCh <-chan struct{}, monitorOpts ...client.MonitorOption) (client.Client, error) {
 	endpoint := fmt.Sprintf("unix:%s", filepath.Join(config.OvsPaths.RunDir, "db.sock"))
-	return NewOVSClientWithEndpoint(endpoint, stopCh)
+	return NewOVSClientWithEndpoint(endpoint, stopCh, monitorOpts...)
 }
 
 // NewOVSClientWithEndpoint connects to the OVS DB at the given unix-socket
-// endpoint (e.g. "unix:/var/run/openvswitch/db.sock").
-func NewOVSClientWithEndpoint(endpoint string, stopCh <-chan struct{}) (client.Client, error) {
+// endpoint (e.g. "unix:/var/run/openvswitch/db.sock"). Its default monitor is
+// the same as NewOVSClient's; monitorOpts replaces that default when supplied.
+func NewOVSClientWithEndpoint(endpoint string, stopCh <-chan struct{}, monitorOpts ...client.MonitorOption) (client.Client, error) {
 	dbModel, err := vswitchd.FullDatabaseModel()
 	if err != nil {
 		return nil, err
@@ -225,6 +227,7 @@ func NewOVSClientWithEndpoint(endpoint string, stopCh <-chan struct{}) (client.C
 	if err != nil {
 		return nil, err
 	}
+	c = newOVSClient(c)
 	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
 	go func() {
 		<-stopCh
@@ -232,14 +235,15 @@ func NewOVSClientWithEndpoint(endpoint string, stopCh <-chan struct{}) (client.C
 		c.Close()
 	}()
 
-	_, err = c.Monitor(ctx,
-		c.NewMonitor(
+	if len(monitorOpts) == 0 {
+		monitorOpts = []client.MonitorOption{
 			client.WithTable(&vswitchd.OpenvSwitch{}),
 			client.WithTable(&vswitchd.Bridge{}),
 			client.WithTable(&vswitchd.Port{}),
 			client.WithTable(&vswitchd.Interface{}),
-		),
-	)
+		}
+	}
+	_, err = c.Monitor(ctx, c.NewMonitor(monitorOpts...))
 	if err != nil {
 		cancel()
 		c.Close()

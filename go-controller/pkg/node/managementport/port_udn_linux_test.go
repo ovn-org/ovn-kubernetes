@@ -17,13 +17,18 @@ import (
 	listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
 
+	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
+
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	ops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	ovntest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing"
+	libovsdbtest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	mocks "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/vishvananda/netlink"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 	utilMocks "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util/mocks"
 	multinetworkmocks "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util/mocks/multinetwork"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/vswitchd"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -77,27 +82,19 @@ var _ = Describe("UDN management port controller", func() {
 	// expectRepDeleted stubs the teardown of a representor that is no longer
 	// on the host, which is the path a re-plumb takes.
 	expectRepDeleted := func(repName string) {
-		execMock.AddFakeCmdsNoOutputNoError([]string{
-			"ovs-vsctl --timeout=15 --if-exists del-port br-int " + repName,
-		})
 		notFound := fmt.Errorf("link %s not found", repName)
 		netlinkOpsMock.On("LinkByName", repName).Return(nil, notFound)
 		netlinkOpsMock.On("IsLinkNotFoundError", notFound).Return(true)
 	}
 
-	// expectRepCreated stubs plumbing repName onto br-int.
-	expectRepCreated := func(repName string) {
-		execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "ovs-vsctl --timeout=15 --if-exists get bridge br-int datapath_type",
-			Output: "",
-		})
-		execMock.AddFakeCmdsNoOutputNoError([]string{
-			fmt.Sprintf("ovs-vsctl --timeout=15 -- --may-exist add-port br-int %s -- set interface %s "+
-				"external-ids:iface-id=%s external-ids:%s=%s external-ids:%s=%s",
-				repName, repName, udnMgmtIntf,
-				types.NetworkExternalID, udnNetworkName,
-				types.OvnManagementPortNameExternalID, util.GetNetworkScopedK8sMgmtHostIntfName(udnNetworkID)),
-		})
+	checkRepCreated := func(repName string) {
+		GinkgoHelper()
+		iface, err := ops.GetOVSInterface(controller.cfg.ovsClient, repName)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(iface.ExternalIDs).To(HaveKeyWithValue("iface-id", udnMgmtIntf))
+		Expect(iface.ExternalIDs).To(HaveKeyWithValue(types.NetworkExternalID, udnNetworkName))
+		Expect(iface.ExternalIDs).To(HaveKeyWithValue(types.OvnManagementPortNameExternalID,
+			util.GetNetworkScopedK8sMgmtHostIntfName(udnNetworkID)))
 	}
 
 	BeforeEach(func() {
@@ -133,6 +130,16 @@ var _ = Describe("UDN management port controller", func() {
 
 		cfg, err := newUDNManagementPortConfig(udnNodeName, subnets, netInfo)
 		Expect(err).NotTo(HaveOccurred())
+		ovsClient, cleanup, err := libovsdbtest.NewOVSTestHarness(libovsdbtest.TestSetup{OVSData: []libovsdbtest.TestData{
+			&vswitchd.OpenvSwitch{UUID: "root-ovs", Bridges: []string{"br-int-uuid"}},
+			&vswitchd.Bridge{UUID: "br-int-uuid", Name: "br-int", Ports: []string{"stale-port-uuid"}},
+			&vswitchd.Port{UUID: "stale-port-uuid", Name: stalePortRep, Interfaces: []string{"stale-iface-uuid"}},
+			&vswitchd.Interface{UUID: "stale-iface-uuid", Name: stalePortRep},
+		}})
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(cleanup.Cleanup)
+		DeferCleanup(libovsdbtest.EmulateVSwitchdConfig(ovsClient))
+		cfg.ovsClient = ovsClient
 
 		indexer := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})
 		Expect(indexer.Add(&corev1.Node{
@@ -155,10 +162,10 @@ var _ = Describe("UDN management port controller", func() {
 		It("re-plumbs the representor when the published device changes", func() {
 			expectRepResolves(0, 3, freshPortRep)
 			expectRepDeleted(stalePortRep)
-			expectRepCreated(freshPortRep)
 			netlinkOpsMock.On("LinkSetUp", freshLink).Return(nil)
 
 			Expect(controller.Reconcile()).To(Succeed())
+			checkRepCreated(freshPortRep)
 
 			rep, ok := controller.ports[representorPort].(*udnManagementPortRep)
 			Expect(ok).To(BeTrue())
@@ -169,10 +176,10 @@ var _ = Describe("UDN management port controller", func() {
 		It("leaves the representor alone when the published device is unchanged", func() {
 			controller.ports[representorPort] = newUDNManagementPortRep(controller.cfg, freshPortRep)
 			expectRepResolves(0, 3, freshPortRep)
-			expectRepCreated(freshPortRep)
 			netlinkOpsMock.On("LinkSetUp", freshLink).Return(nil)
 
 			Expect(controller.Reconcile()).To(Succeed())
+			checkRepCreated(freshPortRep)
 
 			// No delete: the representor is re-asserted, not replaced.
 			netlinkOpsMock.AssertNotCalled(GinkgoT(), "LinkByName", stalePortRep)
@@ -182,7 +189,7 @@ var _ = Describe("UDN management port controller", func() {
 			expectRepResolves(0, 3, freshPortRep)
 			expectRepDeleted(stalePortRep)
 			// Bringing the link up fails before the port reaches br-int, so
-			// this attempt runs no OVS command of its own.
+			// this attempt creates no OVS port.
 			netlinkOpsMock.On("LinkSetUp", freshLink).Return(fmt.Errorf("link set up failed")).Once()
 
 			Expect(controller.Reconcile()).NotTo(Succeed())
@@ -195,10 +202,10 @@ var _ = Describe("UDN management port controller", func() {
 			Expect(rep.repDevice).To(Equal(freshPortRep))
 
 			// The retry completes the create it did not get through.
-			expectRepCreated(freshPortRep)
 			netlinkOpsMock.On("LinkSetUp", freshLink).Return(nil)
 
 			Expect(controller.Reconcile()).To(Succeed())
+			checkRepCreated(freshPortRep)
 			Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc)
 		})
 
@@ -212,15 +219,15 @@ var _ = Describe("UDN management port controller", func() {
 			// The replacement is on the host even though the reconcile did not
 			// get to plumb it, so the teardown takes it down rather than
 			// leaving it behind. The representor it replaced is already gone,
-			// and deleting it a second time would run an OVS command the fake
-			// exec does not expect.
-			execMock.AddFakeCmdsNoOutputNoError([]string{
-				"ovs-vsctl --timeout=15 --if-exists del-port br-int " + freshPortRep,
-			})
+			// and must not be touched during teardown of the replacement.
 			netlinkOpsMock.On("AddrList", freshLink, netlink.FAMILY_ALL).Return([]netlink.Addr{}, nil)
 			netlinkOpsMock.On("LinkSetDown", freshLink).Return(nil)
 
 			Expect(controller.Delete()).To(Succeed())
+			_, err := ops.GetOVSPort(controller.cfg.ovsClient, stalePortRep)
+			Expect(err).To(MatchError(libovsdbclient.ErrNotFound))
+			_, err = ops.GetOVSPort(controller.cfg.ovsClient, freshPortRep)
+			Expect(err).To(MatchError(libovsdbclient.ErrNotFound))
 			Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc)
 			netlinkOpsMock.AssertCalled(GinkgoT(), "LinkSetDown", freshLink)
 		})
