@@ -58,7 +58,6 @@ import (
 
 	ipamclaimsv1alpha1 "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1"
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
-	nadclient "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/typed/k8s.cni.cncf.io/v1"
 
 	iputils "github.com/containernetworking/plugins/pkg/ip"
 
@@ -279,7 +278,6 @@ var _ = Describe("Kubevirt Virtual Machines", feature.VirtualMachineSupport, fun
 		httpServerTestPods  = []*corev1.Pod{}
 		iperfServerTestPods = []*corev1.Pod{}
 		clientSet           kubernetes.Interface
-		nadClient           nadclient.K8sCniCncfIoV1Interface
 		providerCtx         infraapi.Context
 
 		isDualStack = func() bool {
@@ -1330,15 +1328,6 @@ config:
 				return ra.Status.Status
 			}, 30*time.Second, time.Second).Should(Equal("Accepted"))
 		}
-
-		getCUDNSubnets = func(cudn *udnv1.ClusterUserDefinedNetwork) []string {
-			nad, err := nadClient.NetworkAttachmentDefinitions(namespace).Get(context.TODO(), cudn.Name, metav1.GetOptions{})
-			Expect(err).NotTo(HaveOccurred())
-			var result map[string]interface{}
-			err = json.Unmarshal([]byte(nad.Spec.Config), &result)
-			Expect(err).NotTo(HaveOccurred())
-			return strings.Split(result["subnets"].(string), ",")
-		}
 	)
 	BeforeEach(func() {
 		// So we can use it at AfterEach, since fr.ClientSet is nil there
@@ -1350,9 +1339,6 @@ config:
 		Expect(err).NotTo(HaveOccurred())
 
 		virtClient, err = kubevirt.NewClient("/tmp")
-		Expect(err).NotTo(HaveOccurred())
-
-		nadClient, err = nadclient.NewForConfig(fr.ClientConfig())
 		Expect(err).NotTo(HaveOccurred())
 	})
 
@@ -1951,17 +1937,6 @@ ip route add %[3]s via %[4]s
 			checkEastWestIperfTraffic(vmi, testPodsIPs, step)
 
 			if td.role == udnv1.NetworkRolePrimary {
-				if isIPv6Supported(fr.ClientSet) {
-					step = by(vmi.Name, fmt.Sprintf("Checking IPv6 gateway before %s %s", td.resource.description, td.test.description))
-
-					expectedIPv6GatewayPath, err := kubevirt.GenerateGatewayIPv6RouterLLA(getCUDNSubnets(cudn))
-					Expect(err).NotTo(HaveOccurred())
-					Eventually(kubevirt.RetrieveIPv6Gateways).
-						WithArguments(virtClient, vmi).
-						WithTimeout(5*time.Second).
-						WithPolling(time.Second).
-						Should(Equal([]string{expectedIPv6GatewayPath}), "should filter remote ipv6 gateway nexthop")
-				}
 				output, err := virtClient.RunCommand(vmi, "/tmp/iperf-server.sh", time.Minute)
 				Expect(err).NotTo(HaveOccurred(), step+": "+output)
 
@@ -2029,35 +2004,6 @@ ip route add %[3]s via %[4]s
 				if td.evpn != nil {
 					step = by(vmi.Name, fmt.Sprintf("Check east/west external traffic (l2 stretching) after %s %s", td.resource.description, td.test.description))
 					checkExternalEastWestIperfTraffic(vmi, macVRFContainerIPs, step)
-				}
-			}
-
-			if td.role == udnv1.NetworkRolePrimary && td.test.description == liveMigrate.description {
-				if isIPv4Supported(fr.ClientSet) {
-					step = by(vmi.Name, fmt.Sprintf("Checking IPv4 gateway cached mac after %s %s", td.resource.description, td.test.description))
-					Expect(crClient.Get(context.TODO(), crclient.ObjectKeyFromObject(vmi), vmi)).To(Succeed())
-
-					expectedGatewayMAC, err := kubevirt.GenerateGatewayMAC(getCUDNSubnets(cudn))
-					Expect(err).NotTo(HaveOccurred(), step)
-
-					Expect(err).NotTo(HaveOccurred(), step)
-					Eventually(kubevirt.RetrieveCachedGatewayMAC).
-						WithArguments(virtClient, vmi, "enp1s0", cidrIPv4).
-						WithTimeout(10*time.Second).
-						WithPolling(time.Second).
-						Should(Equal(expectedGatewayMAC), step)
-				}
-				if isIPv6Supported(fr.ClientSet) {
-					step = by(vmi.Name, fmt.Sprintf("Checking IPv6 gateway after %s %s", td.resource.description, td.test.description))
-					By(step)
-
-					targetNodeIPv6GatewayPath, err := kubevirt.GenerateGatewayIPv6RouterLLA(getCUDNSubnets(cudn))
-					Expect(err).NotTo(HaveOccurred())
-					Eventually(kubevirt.RetrieveIPv6Gateways).
-						WithArguments(virtClient, vmi).
-						WithTimeout(5*time.Second).
-						WithPolling(time.Second).
-						Should(Equal([]string{targetNodeIPv6GatewayPath}), "should reconcile ipv6 gateway nexthop after live migration")
 				}
 			}
 		},

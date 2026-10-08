@@ -112,6 +112,26 @@ reconciliation. Setting it manually does not migrate an existing network.
 This prerequisite concerns legacy primary Layer2 deployments. Secondary Layer2
 networks and the current EVPN topology retain their existing behavior.
 
+### Gateway identity during live migration
+
+Current primary Layer2 networks use a network-wide gateway MAC and IPv6
+link-local address, independent of the node hosting a VM. OVN-Kubernetes no
+longer sends synthetic gateway GARPs or Router Advertisements after Layer2 VM
+live migration. Native OVN Router Advertisements continue to provide IPv6
+default-router discovery and refresh; the CNI RA filter continues to allow the
+stable gateway identity. VM addressing and source/target logical-port handoff
+continue to be managed by the live-migration controllers.
+
+Before upgrading, surviving VMs must have completed legacy gateway-state repair,
+including removal of old node-specific IPv6 default routers and legacy join-subnet
+on-link prefix state. This release no longer sends the lifetime-zero RAs used
+to withdraw that state. Existing pod annotations and namespace filters are not
+rewritten by this cleanup.
+
+The cluster default network still refreshes IPv4 gateway neighbors after live
+migration because its gateway MAC can change between the subnet owner and
+foreign nodes. See [Live Migration](../live-migration.md) for that behavior.
+
 ## Performance/Scale Optimizations for UDN
 
 UDN scale is currently constrained to a couple of hundred UDNs when every UDN is

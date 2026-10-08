@@ -79,7 +79,7 @@ type PodAnnotation struct {
 
 	// GatewayIPv6LLA is the IPv6 Link Local Address for the pod's gateway, that is the address
 	// that will be set as gateway with router advertisements
-	// generated from the gateway router from the node where the pod is running.
+	// generated from the network cluster wide gateway IPv6 LLA.
 	GatewayIPv6LLA net.IP
 
 	// Routes are additional routes to add to the pod's network namespace

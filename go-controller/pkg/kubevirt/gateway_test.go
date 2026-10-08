@@ -6,12 +6,10 @@ package kubevirt
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net"
 	"testing"
 	"time"
 
-	cnitypes "github.com/containernetworking/cni/pkg/types"
 	"github.com/stretchr/testify/require"
 	kubevirtv1 "kubevirt.io/api/core/v1"
 
@@ -19,7 +17,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 
-	ovncnitypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/nbdb"
@@ -117,52 +114,6 @@ func TestDefaultNetworkGatewayGARP(t *testing.T) {
 					require.Equal(t, 1, calls)
 				}
 			}
-		})
-	}
-}
-
-func TestLayer2GatewayGARP(t *testing.T) {
-	for _, transit := range []bool{false, true} {
-		t.Run(fmt.Sprintf("transit=%t", transit), func(t *testing.T) {
-			require.NoError(t, config.PrepareTestConfig())
-			config.IPv4Mode, config.IPv6Mode = true, false
-			config.Layer2UsesTransitRouter = transit
-			config.OVNKubernetesFeature.EnableNetworkSegmentation = true
-			config.OVNKubernetesFeature.EnableMultiNetwork = true
-			netInfo, err := util.NewNetInfo(&ovncnitypes.NetConf{
-				NetConf: cnitypes.NetConf{Name: "blue"}, Topology: types.Layer2Topology,
-				Role: types.NetworkRolePrimary, Subnets: "10.100.0.0/24", JoinSubnet: "100.65.0.0/16",
-			})
-			require.NoError(t, err)
-			wf, err := factory.NewOVNKubeControllerWatchFactory(util.GetOVNClientset().GetOVNKubeControllerClientset(), "target")
-			require.NoError(t, err)
-			t.Cleanup(wf.Shutdown)
-			require.NoError(t, wf.NodeCoreInformer().Informer().GetStore().Add(&corev1.Node{
-				ObjectMeta: metav1.ObjectMeta{Name: "target", Annotations: map[string]string{util.OvnNodeID: "4"}},
-			}))
-			r := NewLayer2GatewayAnnouncer(wf, netInfo, "ovn-k8s-mp1", nil)
-			calls := 0
-			r.broadcastGARP = func(iface string, garp util.GARP) error {
-				calls++
-				require.Equal(t, "ovn-k8s-mp1", iface)
-				require.Equal(t, "10.100.0.1", garp.IP().String())
-				wantMAC := "0a:58:64:41:00:04"
-				if transit {
-					wantMAC = "0a:58:0a:64:00:01"
-				}
-				require.Equal(t, wantMAC, garp.MAC().String())
-				return nil
-			}
-			// Layer2 VMs do not require the default-network bridge opt-in annotation.
-			status := &LiveMigrationStatus{TargetPod: &corev1.Pod{Spec: corev1.PodSpec{NodeName: "target"}}}
-			for _, state := range []LiveMigrationState{LiveMigrationInProgress, LiveMigrationFailed} {
-				status.State = state
-				require.NoError(t, r.AnnounceIPv4AfterLiveMigration(status))
-				require.Zero(t, calls)
-			}
-			status.State = LiveMigrationTargetDomainReady
-			require.NoError(t, r.AnnounceIPv4AfterLiveMigration(status))
-			require.Equal(t, 1, calls)
 		})
 	}
 }

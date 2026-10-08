@@ -899,12 +899,7 @@ func (bnc *BaseNetworkController) allocatePodAnnotation(pod *corev1.Pod, existin
 			podDesc, switchName)
 	}
 
-	node, err := bnc.watchFactory.GetNode(pod.Spec.NodeName)
-	if err != nil {
-		return nil, false, err
-	}
-
-	err = podallocator.AddRoutesGatewayIP(bnc.GetNetInfo(), node, pod, podAnnotation, network)
+	err = podallocator.AddRoutesGatewayIP(bnc.GetNetInfo(), pod, podAnnotation, network)
 	if err != nil {
 		return nil, false, err
 	}
@@ -972,15 +967,9 @@ func (bnc *BaseNetworkController) allocatePodAnnotationForUserDefinedNetwork(pod
 	if bnc.doesNetworkRequireIPAM() {
 		ipAllocator = bnc.lsManager
 	}
-	node, err := bnc.watchFactory.GetNode(pod.Spec.NodeName)
-	if err != nil {
-		return nil, false, fmt.Errorf("failed to get pod %s/%s/%s node %q: %w",
-			nadKey, pod.Namespace, pod.Name, pod.Spec.NodeName, err)
-	}
 	updatedPod, podAnnotation, err := bnc.podAnnotationAllocator.AllocatePodAnnotation(
 		ipAllocator,
 		switchName, bnc.podIPOwner(pod, nadKey),
-		node,
 		pod,
 		nadKey,
 		network,
