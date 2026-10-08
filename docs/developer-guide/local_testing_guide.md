@@ -4,6 +4,9 @@ This section describes how to run CI tests on a local machine. This may be
 useful for expanding the CI test coverage or testing a private fix before
 creating a pull request.
 
+This guide uses Kind. For an existing cluster, see
+[Running e2e tests against an existing cluster](kube-provider.md).
+
 ## Download and Build Kubernetes Components
 
 ### Go Version

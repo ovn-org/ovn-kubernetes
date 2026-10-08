@@ -138,6 +138,7 @@ nav:
       - OVN-Kubernetes Container Images: developer-guide/image-build.md
       - Documentation Guide: developer-guide/documentation.md
       - Local Testing Guide: developer-guide/local_testing_guide.md
+      - Existing Cluster E2E Guide: developer-guide/kube-provider.md
       - CI Testing Guide: ci/ci.md
       - Debugging: developer-guide/debugging.md
       - Release Guide: developer-guide/release.md
