@@ -15,27 +15,25 @@ import (
 
 // Provider represents the infrastructure provider
 type Provider interface {
+	NodeAccess
 	ExternalContainerProvider
 	ClusterProvider
-	// NewTestContext providers a per test sandbox. Dependent infra test constructs are created within each test and automatically cleaned
-	// after each test.
 	NewTestContext() Context
+}
+
+type NodeAccess interface {
+	GetK8NodeNetworkInterface(instance string, network Network) (NetworkInterface, error)
+	// ExecK8NodeCommand runs in the node host network namespace and filesystem.
+	ExecK8NodeCommand(nodeName string, cmd []string) (string, error)
 }
 
 type ClusterProvider interface {
 	// PrimaryNetwork returns OVN-Kubernetes primary infrastructure network information
 	PrimaryNetwork() (Network, error)
-	GetK8NodeNetworkInterface(instance string, network Network) (NetworkInterface, error)
-	// ExecK8NodeCommand executes a command on a K8 Node host network namespace and filesystem
-	ExecK8NodeCommand(nodeName string, cmd []string) (string, error)
 	// GetK8HostPort returns a Node port. Requesting a port that maybe exposed in tests to avoid multiple parallel
 	// tests utilizing conflicting ports. It also allows infra provider implementations to set Nodes
 	// allowed port range and therefore comply with cloud provider firewall rules.
 	GetK8HostPort() uint16 // supported K8 host ports
-	// ShutdownNode shuts down the specified node
-	ShutdownNode(nodeName string) error
-	// StartNode starts the specified node
-	StartNode(nodeName string) error
 	// PreloadImages pulls the given images and loads them into the cluster
 	// so that they are available to pods without a runtime pull. Providers
 	// that do not support preloading may implement this as a no-op.
@@ -44,6 +42,12 @@ type ClusterProvider interface {
 	Name() string
 	// Get platform specific timeout values
 	GetDefaultTimeoutContext() *framework.TimeoutContext
+}
+
+// NodeInfrastructure is optional; providers that do not own node lifecycle leave it unimplemented.
+type NodeInfrastructure interface {
+	ShutdownNode(nodeName string) error
+	StartNode(nodeName string) error
 }
 
 type ExternalContainerProvider interface {
@@ -84,7 +88,6 @@ type ContextCleanUp interface {
 type Context interface {
 	ContextCleanUp
 	ExternalContainerContextProvider
-	ClusterContextProvider
 }
 
 type ExternalContainerContextProvider interface {
@@ -96,8 +99,9 @@ type ExternalContainerContextProvider interface {
 	DetachNetwork(network Network, instance string) error
 }
 
+// ClusterContextProvider is optional; providers that cannot configure host networking leave it unimplemented.
 type ClusterContextProvider interface {
-	// anything done on the cluster that could be cleaned up after test
+	// SetupUnderlay configures host networking for a test.
 	SetupUnderlay(f *framework.Framework, underlay Underlay) error
 }
 

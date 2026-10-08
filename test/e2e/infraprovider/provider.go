@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/onsi/ginkgo/v2"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/api"
 	"k8s.io/kubernetes/test/e2e/framework"
 )
@@ -24,6 +25,15 @@ func Get() api.Provider {
 		panic("infra provider not set")
 	}
 	return infraProvider
+}
+
+// SetupUnderlay skips the spec when its provider has no underlay implementation.
+func SetupUnderlay(context api.Context, f *framework.Framework, underlay api.Underlay) error {
+	provider, ok := context.(api.ClusterContextProvider)
+	if !ok {
+		ginkgo.Skip(Get().Name()+" provider does not support underlay setup", 2)
+	}
+	return provider.SetupUnderlay(f, underlay)
 }
 
 // IsKind returns true if cluster provider is KinD
