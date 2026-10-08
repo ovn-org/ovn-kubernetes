@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -88,31 +89,33 @@ func getCreationFakeCommands(fexec *ovntest.FakeExec, mgtPort, mgtPortMAC, netNa
 			" external-ids:iface-id=" + types.K8sPrefix + netName + "_" + nodeName +
 			fmt.Sprintf(" external-ids:%s=%s", types.NetworkExternalID, netName),
 	})
-
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "sysctl -w net.ipv4.conf." + mgtPort + ".forwarding = 1",
-		Output: "net.ipv4.conf." + mgtPort + ".forwarding = 1",
-	})
 }
 
-func getRPFilterLooseModeFakeCommand(fexec *ovntest.FakeExec, ifName string) {
-	setVal := fmt.Sprintf("net.ipv4.conf.%s.rp_filter = 2", strings.ReplaceAll(ifName, ".", "/"))
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    fmt.Sprintf("sysctl -w %s", setVal),
-		Output: setVal,
-	})
+// expectSysctl asserts the sysctl at path (relative to net/) holds value. g is
+// Default inside a spec, or NewWithT(t) in a plain Go test.
+func expectSysctl(g Gomega, path, value string) {
+	GinkgoHelper()
+	g.Expect(os.ReadFile(util.SysctlNetPath(path))).To(BeEquivalentTo(value))
 }
 
-func getIPv6KeepAddrOnDownFakeCommand(fexec *ovntest.FakeExec, ifName string) {
-	setVal := fmt.Sprintf("net.ipv6.conf.%s.keep_addr_on_down = 1", strings.ReplaceAll(ifName, ".", "/"))
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    fmt.Sprintf("sysctl -w %s", setVal),
-		Output: setVal,
-	})
+// expectForwardingSysctls asserts the per-interface forwarding sysctls that
+// util.SetForwardingModeForInterface sets for ifName.
+func expectForwardingSysctls(g Gomega, ifName string) {
+	GinkgoHelper()
+	if config.IPv4Mode {
+		expectSysctl(g, "ipv4/conf/"+ifName+"/forwarding", "1")
+	}
+	if config.IPv6Mode && util.SupportsIPv6InterfaceForwarding() {
+		expectSysctl(g, "ipv6/conf/"+ifName+"/force_forwarding", "1")
+	}
 }
 
-func getRPFilterLooseModeFakeCommands(fexec *ovntest.FakeExec) {
-	getRPFilterLooseModeFakeCommand(fexec, "ovn-k8s-mp3")
+// expectMgmtPortSysctls asserts the sysctls set when the management port
+// mgtPort is created: forwarding on, reverse path filtering loose.
+func expectMgmtPortSysctls(g Gomega, mgtPort string) {
+	GinkgoHelper()
+	expectForwardingSysctls(g, mgtPort)
+	expectSysctl(g, "ipv4/conf/"+mgtPort+"/rp_filter", "2")
 }
 
 func TestConfigureUplinkGatewayRPFilter(t *testing.T) {
@@ -166,18 +169,19 @@ func TestConfigureUplinkGatewayRPFilter(t *testing.T) {
 			config.OvnKubeNode.Mode = test.mode
 
 			fexec := ovntest.NewFakeExec()
-			if test.wantSysctl != "" {
-				getRPFilterLooseModeFakeCommand(fexec, test.wantSysctl)
-			}
 			if err := util.SetExec(fexec); err != nil {
 				t.Fatalf("failed to set fake exec: %v", err)
 			}
+			sysctlDir := t.TempDir()
+			t.Cleanup(util.SetProcSysNetForTesting(sysctlDir))
 
 			if err := configureUplinkGatewayRPFilter(test.resolved, test.networkIPv4Mode); err != nil {
 				t.Fatalf("failed to configure Uplink rp_filter: %v", err)
 			}
-			if !fexec.CalledMatchesExpected() {
-				t.Fatalf("%s", fexec.ErrorDesc())
+			if test.wantSysctl != "" {
+				expectSysctl(NewWithT(t), "ipv4/conf/"+test.wantSysctl+"/rp_filter", "2")
+			} else if entries, _ := os.ReadDir(sysctlDir); len(entries) != 0 {
+				t.Fatalf("expected no sysctl to be written, found %v", entries)
 			}
 		})
 	}
@@ -902,10 +906,6 @@ func setManagementPortFakeCommands(fexec *ovntest.FakeExec, nodeName string) {
 		"ovs-vsctl --timeout=15 -- --if-exists del-port br-int " + mpPortLegacyName + " -- --may-exist add-port br-int " + mpPortName + " -- set interface " + mpPortName + " mac=\"0a:58:64:80:00:02\" type=internal mtu_request=1400 external-ids:iface-id=" + mpPortLegacyName,
 	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "sysctl -w net.ipv4.conf.ovn-k8s-mp0.forwarding = 1",
-		Output: "net.ipv4.conf.ovn-k8s-mp0.forwarding = 1",
-	})
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd:    "ip route replace table 7 172.16.1.0/24 via 100.128.0.1 dev ovn-k8s-mp0",
 		Output: "0",
 	})
@@ -931,10 +931,6 @@ func setManagementPortFakeCommands(fexec *ovntest.FakeExec, nodeName string) {
 		Cmd:    "ip -6 rule add fwmark 0x1745ec lookup 7 prio 30",
 		Output: "0",
 	})
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "sysctl -w net.ipv4.conf.ovn-k8s-mp0.rp_filter = 2",
-		Output: "net.ipv4.conf.ovn-k8s-mp0.rp_filter = 2",
-	})
 }
 
 func setUpGatewayFakeOVSCommands(fexec *ovntest.FakeExec) {
@@ -951,12 +947,6 @@ func setUpGatewayFakeOVSCommands(fexec *ovntest.FakeExec) {
 		Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface breth0 mac_in_use",
 		Output: "00:00:00:55:66:99",
 	})
-	if config.IPv4Mode {
-		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "sysctl -w net.ipv4.conf.breth0.forwarding = 1",
-			Output: "net.ipv4.conf.breth0.forwarding = 1",
-		})
-	}
 	// ovn-bridge-mappings get/set are now handled via libovsdb in
 	// bridgeconfig.bridgedGatewayNodeSetup; no fexec entries needed.
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -1380,7 +1370,6 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		Expect(err).NotTo(HaveOccurred())
 		mgtPortMAC = util.IPAddrToHWAddr(util.GetNodeManagementIfAddr(ipNet).IP).String()
 		getCreationFakeCommands(fexec, mgtPort, mgtPortMAC, netName, nodeName, netInfo.MTU())
-		getRPFilterLooseModeFakeCommands(fexec)
 		nodeLister.On("Get", mock.AnythingOfType("string")).Return(node, nil)
 		factoryMock.On("GetNodeForWindows", "worker1").Return(node, nil)
 
@@ -1409,6 +1398,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			return nil
 		})
 		Expect(err).NotTo(HaveOccurred())
+		expectMgmtPortSysctls(Default, mgtPort)
 		Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 	})
 	ovntest.OnSupportedPlatformsIt("should delete management port for a L3 user defined network", func() {
@@ -1470,7 +1460,6 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		Expect(err).NotTo(HaveOccurred())
 		mgtPortMAC = util.IPAddrToHWAddr(util.GetNodeManagementIfAddr(ipNet).IP).String()
 		getCreationFakeCommands(fexec, mgtPort, mgtPortMAC, netName, nodeName, netInfo.MTU())
-		getRPFilterLooseModeFakeCommands(fexec)
 		nodeLister.On("Get", mock.AnythingOfType("string")).Return(node, nil)
 		factoryMock.On("GetNodeForWindows", "worker1").Return(node, nil)
 		err = testNS.Do(func(ns.NetNS) error {
@@ -1498,6 +1487,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			return nil
 		})
 		Expect(err).NotTo(HaveOccurred())
+		expectMgmtPortSysctls(Default, mgtPort)
 		Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 	})
 	ovntest.OnSupportedPlatformsIt("should delete management port for a L2 user defined network", func() {
@@ -1573,7 +1563,6 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		Expect(err).NotTo(HaveOccurred())
 		mgtPortMAC = util.IPAddrToHWAddr(util.GetNodeManagementIfAddr(ipNet).IP).String()
 		getCreationFakeCommands(fexec, mgtPort, mgtPortMAC, netName, nodeName, netInfo.MTU())
-		getRPFilterLooseModeFakeCommands(fexec)
 		setUpUDNOpenflowManagerFakeOVSCommands(fexec)
 		getDeletionFakeOVSCommands(fexec, mgtPort)
 		nodeLister.On("Get", mock.AnythingOfType("string")).Return(node, nil)
@@ -1773,6 +1762,9 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			return nil
 		})
 		Expect(err).NotTo(HaveOccurred())
+		expectMgmtPortSysctls(Default, types.K8sMgmtIntfName)
+		expectForwardingSysctls(Default, "breth0")
+		expectMgmtPortSysctls(Default, mgtPort)
 		Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 	})
 	ovntest.OnSupportedPlatformsIt("should handle gateway delete idempotently for a L3 user defined network", func() {
@@ -1970,6 +1962,8 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			return nil
 		})
 		Expect(err).NotTo(HaveOccurred())
+		expectMgmtPortSysctls(Default, types.K8sMgmtIntfName)
+		expectForwardingSysctls(Default, "breth0")
 		Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 	})
 	ovntest.OnSupportedPlatformsIt("should create and delete correct openflows on breth0 for a L2 user defined network", func() {
@@ -2005,7 +1999,6 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		setUpGatewayFakeOVSCommands(fexec)
 		deleteStaleManagementPortFakeCommands(fexec, mgtPort)
 		getCreationFakeCommands(fexec, mgtPort, mgtPortMAC, netName, nodeName, netInfo.MTU())
-		getRPFilterLooseModeFakeCommands(fexec)
 		setUpUDNOpenflowManagerFakeOVSCommands(fexec)
 		getDeletionFakeOVSCommands(fexec, mgtPort)
 		nodeLister.On("Get", mock.AnythingOfType("string")).Return(node, nil)
@@ -2200,6 +2193,9 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			return nil
 		})
 		Expect(err).NotTo(HaveOccurred())
+		expectMgmtPortSysctls(Default, types.K8sMgmtIntfName)
+		expectForwardingSysctls(Default, "breth0")
+		expectMgmtPortSysctls(Default, mgtPort)
 		Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 	})
 	// TODO: There is opportunity to fold some of these tests into describetables to cut down code duplication and test plumbing
@@ -2241,7 +2237,6 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		Expect(err).NotTo(HaveOccurred())
 		mgtPortMAC = util.IPAddrToHWAddr(util.GetNodeManagementIfAddr(ipNet).IP).String()
 		getCreationFakeCommands(fexec, mgtPort, mgtPortMAC, netName, nodeName, mutableNetInfo.MTU())
-		getRPFilterLooseModeFakeCommands(fexec)
 		setUpUDNOpenflowManagerFakeOVSCommands(fexec)
 		getDeletionFakeOVSCommands(fexec, mgtPort)
 		nodeLister.On("Get", mock.AnythingOfType("string")).Return(node, nil)
@@ -2446,6 +2441,9 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			return nil
 		})
 		Expect(err).NotTo(HaveOccurred())
+		expectMgmtPortSysctls(Default, types.K8sMgmtIntfName)
+		expectForwardingSysctls(Default, "breth0")
+		expectMgmtPortSysctls(Default, mgtPort)
 		Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 	})
 	ovntest.OnSupportedPlatformsIt("should compute correct masquerade reply traffic routes for a user defined network", func() {
@@ -2906,7 +2904,6 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		config.Gateway.Mode = config.GatewayModeShared
 		config.IPv4Mode = true
 		config.IPv6Mode = true
-		getIPv6KeepAddrOnDownFakeCommand(fexec, "ovsbr1")
 		node := &corev1.Node{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: nodeName,
@@ -2972,6 +2969,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			return nil
 		})
 		Expect(err).NotTo(HaveOccurred())
+		expectSysctl(Default, "ipv6/conf/ovsbr1/keep_addr_on_down", "1")
 		Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 	})
 
@@ -3018,7 +3016,6 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 	})
 
 	ovntest.OnSupportedPlatformsIt("should set rp filter to loose mode for management port interface", func() {
-		getRPFilterLooseModeFakeCommands(fexec)
 		err := testNS.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
 			err := util.SetRPFilterLooseModeForInterface(mgtPort)
@@ -3026,6 +3023,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			return nil
 		})
 		Expect(err).NotTo(HaveOccurred())
+		expectSysctl(Default, "ipv4/conf/"+mgtPort+"/rp_filter", "2")
 		Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 	})
 

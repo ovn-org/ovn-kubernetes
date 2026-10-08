@@ -732,11 +732,13 @@ EOF
 }
 
 # install_ovs_tools_on_nodes installs ovs-vsctl and ovs-ofctl on every kind node.
-# In unprivileged mode the CNI plugin running on the node plugs the pod
-# interface into OVS itself, so it needs the OVS client tools on the node's
-# PATH. They talk to the ovs-node pod through the sockets in
-# /var/run/openvswitch; the node must not run OVS daemons of its own, so the
-# package's units are masked before installing it.
+# Strictly, only unprivileged mode needs them: there the CNI plugin running
+# on the node plugs the pod interface into OVS itself, so the OVS client
+# tools have to be on the node's PATH. They are installed for every
+# deployment anyway because they make debugging from the node easier.
+# They talk to the ovs-node pod through the sockets in /var/run/openvswitch;
+# the node must not run OVS daemons of its own, so the package's units are
+# masked before installing it.
 install_ovs_tools_on_nodes() {
   local node
   for node in $(kind_get_nodes); do
@@ -861,7 +863,7 @@ fi
 if [ "$KIND_REMOVE_TAINT" == true ]; then
   remove_no_schedule_taint
 fi
-if [ "$OVN_UNPRIVILEGED_MODE" == true ] && [ "${DPU_MODE}" != "host" ]; then
+if [ "${DPU_MODE}" != "host" ]; then
   install_ovs_tools_on_nodes
 fi
 create_ovn_kubernetes

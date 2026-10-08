@@ -89,6 +89,12 @@ func (mptc *managementPortTestConfig) GetMgtPortAddr() *netlink.Addr {
 }
 
 // checkMgmtPortTestNFTables validates nftables rules for management port
+// expectSysctl asserts the sysctl at path (relative to net/) holds value.
+func expectSysctl(path, value string) {
+	GinkgoHelper()
+	Expect(os.ReadFile(util.SysctlNetPath(path))).To(BeEquivalentTo(value))
+}
+
 func checkMgmtPortTestNFTables(configs []managementPortTestConfig, mgmtPortName string) {
 	nft, err := nodenft.GetNFTablesHelper()
 	Expect(err).NotTo(HaveOccurred())
@@ -257,13 +263,6 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 	})
 	var isRoutingAdvertised, isNoOverlay bool
 	for _, cfg := range configs {
-		// We do not enable per-interface forwarding for IPv6 for this test suite
-		if cfg.family == netlink.FAMILY_V4 {
-			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    "sysctl -w net.ipv4.conf.ovn-k8s-mp0.forwarding = 1",
-				Output: "net.ipv4.conf.ovn-k8s-mp0.forwarding = 1",
-			})
-		}
 		isRoutingAdvertised = isRoutingAdvertised || cfg.isRoutingAdvertised
 		isNoOverlay = isNoOverlay || cfg.isNoOverlay
 	}
@@ -365,6 +364,12 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 
 	checkMgmtPortTestNFTables(configs, mgtPort)
 
+	for _, cfg := range configs {
+		// per-interface forwarding is only enabled for IPv4 in this test suite
+		if cfg.family == netlink.FAMILY_V4 {
+			expectSysctl("ipv4/conf/"+mgtPort+"/forwarding", "1")
+		}
+	}
 	Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 }
 
@@ -550,16 +555,6 @@ func testManagementPortDPUHost(ctx *cli.Context, fexec *ovntest.FakeExec, testNS
 		"ovs-vsctl --timeout=15 --no-headings --data bare --format csv --columns type,name find Interface name=" + mgtPort,
 	})
 
-	for _, cfg := range configs {
-		// We do not enable per-interface forwarding for IPv6
-		if cfg.family == netlink.FAMILY_V4 {
-			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    "sysctl -w net.ipv4.conf.ovn-k8s-mp0.forwarding = 1",
-				Output: "net.ipv4.conf.ovn-k8s-mp0.forwarding = 1",
-			})
-		}
-	}
-
 	err := util.SetExec(fexec)
 	Expect(err).NotTo(HaveOccurred())
 
@@ -620,6 +615,12 @@ func testManagementPortDPUHost(ctx *cli.Context, fexec *ovntest.FakeExec, testNS
 
 	checkMgmtPortTestNFTables(configs, mgtPort)
 
+	for _, cfg := range configs {
+		// per-interface forwarding is only enabled for IPv4 in this test suite
+		if cfg.family == netlink.FAMILY_V4 {
+			expectSysctl("ipv4/conf/"+mgtPort+"/forwarding", "1")
+		}
+	}
 	Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 }
 

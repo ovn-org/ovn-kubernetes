@@ -43,7 +43,6 @@ const (
 	powershellCommand  = "powershell"
 	netshCommand       = "netsh"
 	routeCommand       = "route"
-	sysctlCommand      = "sysctl"
 	osRelease          = "/etc/os-release"
 	rhel               = "RHEL"
 	ubuntu             = "Ubuntu"
@@ -137,7 +136,6 @@ type execHelper struct {
 	powershellPath  string
 	netshPath       string
 	routePath       string
-	sysctlPath      string
 }
 
 var runner *execHelper
@@ -259,10 +257,6 @@ func SetExecWithoutOVS(exec kexec.Interface) error {
 		}
 	} else {
 		runner.ipPath, err = exec.LookPath(ipCommand)
-		if err != nil {
-			return err
-		}
-		runner.sysctlPath, err = exec.LookPath(sysctlCommand)
 		if err != nil {
 			return err
 		}
@@ -668,12 +662,6 @@ func GetOvsDBServerPID() (string, error) {
 // RunIP runs a command via the iproute2 "ip" utility
 func RunIP(args ...string) (string, string, error) {
 	stdout, stderr, err := run(runner.ipPath, args...)
-	return strings.TrimSpace(stdout.String()), stderr.String(), err
-}
-
-// RunSysctl runs a command via the procps "sysctl" utility
-func RunSysctl(args ...string) (string, string, error) {
-	stdout, stderr, err := run(runner.sysctlPath, args...)
 	return strings.TrimSpace(stdout.String()), stderr.String(), err
 }
 

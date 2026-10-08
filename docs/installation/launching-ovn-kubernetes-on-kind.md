@@ -271,11 +271,13 @@ ovnkube-node writes its per-interface sysctls (forwarding, `rp_filter`,
 `keep_addr_on_down`) there. The pod runs in the host network namespace, so
 these are the same entries, and `NET_ADMIN` is all the kernel requires.
 
-The kind node image does not ship these tools, so with `-upm` the script
-installs the `openvswitch-switch` package on every node before
-deploying OVN-Kubernetes. The package's systemd units are masked first, so the
-node never starts OVS daemons of its own; only the client binaries are used.
-Nodes that already have both binaries are left untouched.
+The kind node image does not ship these tools, so the script installs the
+`openvswitch-switch` package on every node before deploying OVN-Kubernetes.
+Only `-upm` strictly needs it, but the tools are installed for every
+deployment because they make debugging OVS from the node easier. The
+package's systemd units are masked first, so the node never starts OVS
+daemons of its own; only the client binaries are used. Nodes that already
+have both binaries are left untouched.
 
 On a non-kind cluster OVS usually runs on the host.
 
