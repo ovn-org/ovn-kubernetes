@@ -126,7 +126,7 @@ ethernets:
 			nadKey = namespace + "/" + cudn.Name
 
 			By("setting up the localnet underlay")
-			Expect(providerCtx.SetupUnderlay(fr, infraapi.Underlay{LogicalNetworkName: networkName})).To(Succeed())
+			Expect(infraprovider.SetupUnderlay(providerCtx, fr, infraapi.Underlay{LogicalNetworkName: networkName})).To(Succeed())
 
 			By("starting a dnsmasq DHCP server on the underlay")
 			underlayNetwork, err := infraprovider.Get().GetNetwork("underlay")

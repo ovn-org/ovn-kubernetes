@@ -37,9 +37,6 @@ var _ = ginkgo.Describe("Network Segmentation: Network Policies", feature.Networ
 			customL2IPv6ReservedCIDR     = "2014:100:200::100/120"
 			customL2IPv4InfraCIDR        = "172.16.0.0/30"
 			customL2IPv6InfraCIDR        = "2014:100:200::/122"
-			nodeHostnameKey              = "kubernetes.io/hostname"
-			workerOneNodeName            = "ovn-worker"
-			workerTwoNodeName            = "ovn-worker2"
 			port                         = 9000
 			randomStringLength           = 5
 			nameSpaceYellowSuffix        = "yellow"
@@ -105,13 +102,9 @@ var _ = ginkgo.Describe("Network Segmentation: Network Policies", feature.Networ
 				ginkgo.By("creating client/server pods")
 				serverPodConfig.namespace = f.Namespace.Name
 				clientPodConfig.namespace = f.Namespace.Name
-				nodes, err := e2enode.GetBoundedReadySchedulableNodes(context.TODO(), cs, 2)
-				framework.ExpectNoError(err, "")
-				if len(nodes.Items) < 2 {
-					ginkgo.Skip("requires at least 2 Nodes")
-				}
-				serverPodConfig.nodeSelector = map[string]string{nodeHostnameKey: nodes.Items[0].GetName()}
-				clientPodConfig.nodeSelector = map[string]string{nodeHostnameKey: nodes.Items[1].GetName()}
+				serverHostname, clientHostname := twoReadyNodeHostnamesOrSkip(cs)
+				serverPodConfig.nodeSelector = map[string]string{v1.LabelHostname: serverHostname}
+				clientPodConfig.nodeSelector = map[string]string{v1.LabelHostname: clientHostname}
 
 				runUDNPod(cs, f.Namespace.Name, serverPodConfig, nil)
 				runUDNPod(cs, f.Namespace.Name, clientPodConfig, nil)
@@ -229,13 +222,9 @@ var _ = ginkgo.Describe("Network Segmentation: Network Policies", feature.Networ
 				ginkgo.By("creating client/server pods")
 				serverPodConfig.namespace = f.Namespace.Name
 				clientPodConfig.namespace = f.Namespace.Name
-				nodes, err := e2enode.GetBoundedReadySchedulableNodes(context.TODO(), cs, 2)
-				framework.ExpectNoError(err, "")
-				if len(nodes.Items) < 2 {
-					ginkgo.Skip("requires at least 2 Nodes")
-				}
-				serverPodConfig.nodeSelector = map[string]string{nodeHostnameKey: nodes.Items[0].GetName()}
-				clientPodConfig.nodeSelector = map[string]string{nodeHostnameKey: nodes.Items[1].GetName()}
+				serverHostname, clientHostname := twoReadyNodeHostnamesOrSkip(cs)
+				serverPodConfig.nodeSelector = map[string]string{v1.LabelHostname: serverHostname}
+				clientPodConfig.nodeSelector = map[string]string{v1.LabelHostname: clientHostname}
 				runUDNPod(cs, f.Namespace.Name, serverPodConfig, nil)
 				runUDNPod(cs, f.Namespace.Name, clientPodConfig, nil)
 
@@ -321,6 +310,10 @@ var _ = ginkgo.Describe("Network Segmentation: Network Policies", feature.Networ
 				allowServerPodConfig podConfiguration,
 				denyServerPodConfig podConfiguration,
 			) {
+				clientHostname, serverHostname := twoReadyNodeHostnamesOrSkip(cs)
+				clientPodConfig.nodeSelector = map[string]string{v1.LabelHostname: clientHostname}
+				allowServerPodConfig.nodeSelector = map[string]string{v1.LabelHostname: serverHostname}
+				denyServerPodConfig.nodeSelector = map[string]string{v1.LabelHostname: serverHostname}
 
 				namespaceYellow := getNamespaceName(f, nameSpaceYellowSuffix)
 				namespaceBlue := getNamespaceName(f, namespaceBlueSuffix)
@@ -486,16 +479,12 @@ var _ = ginkgo.Describe("Network Segmentation: Network Policies", feature.Networ
 			ginkgo.Entry(
 				"in L2 primary UDN",
 				"layer2",
-				*podConfig(
-					"client-pod",
-					withNodeSelector(map[string]string{nodeHostnameKey: workerOneNodeName}),
-				),
+				*podConfig("client-pod"),
 				*podConfig(
 					"allow-server-pod",
 					withCommand(func() []string {
 						return httpServerContainerCmd(port)
 					}),
-					withNodeSelector(map[string]string{nodeHostnameKey: workerTwoNodeName}),
 					withLabels(allowServerPodLabel),
 				),
 				*podConfig(
@@ -503,23 +492,18 @@ var _ = ginkgo.Describe("Network Segmentation: Network Policies", feature.Networ
 					withCommand(func() []string {
 						return httpServerContainerCmd(port)
 					}),
-					withNodeSelector(map[string]string{nodeHostnameKey: workerTwoNodeName}),
 					withLabels(denyServerPodLabel),
 				),
 			),
 			ginkgo.Entry(
 				"in L3 primary UDN",
 				"layer3",
-				*podConfig(
-					"client-pod",
-					withNodeSelector(map[string]string{nodeHostnameKey: workerOneNodeName}),
-				),
+				*podConfig("client-pod"),
 				*podConfig(
 					"allow-server-pod",
 					withCommand(func() []string {
 						return httpServerContainerCmd(port)
 					}),
-					withNodeSelector(map[string]string{nodeHostnameKey: workerTwoNodeName}),
 					withLabels(allowServerPodLabel),
 				),
 				*podConfig(
@@ -527,12 +511,28 @@ var _ = ginkgo.Describe("Network Segmentation: Network Policies", feature.Networ
 					withCommand(func() []string {
 						return httpServerContainerCmd(port)
 					}),
-					withNodeSelector(map[string]string{nodeHostnameKey: workerTwoNodeName}),
 					withLabels(denyServerPodLabel),
 				),
 			))
 	})
 })
+
+func twoReadyNodeHostnamesOrSkip(client clientset.Interface) (string, string) {
+	nodes, err := e2enode.GetBoundedReadySchedulableNodes(context.TODO(), client, 2)
+	framework.ExpectNoError(err, "failed to discover two ready schedulable Nodes")
+	if len(nodes.Items) < 2 {
+		ginkgo.Skip("requires at least 2 Nodes")
+	}
+	hostnames := [2]string{}
+	for i := range hostnames {
+		node := nodes.Items[i]
+		hostnames[i] = node.Labels[v1.LabelHostname]
+		if hostnames[i] == "" {
+			ginkgo.Skip(fmt.Sprintf("node %s has no %s label", node.Name, v1.LabelHostname))
+		}
+	}
+	return hostnames[0], hostnames[1]
+}
 
 func getNamespaceName(f *framework.Framework, nsSuffix string) string {
 	return fmt.Sprintf("%s-%s", f.Namespace.Name, nsSuffix)

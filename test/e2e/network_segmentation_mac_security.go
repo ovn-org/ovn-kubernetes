@@ -174,7 +174,7 @@ func provisionCUDN(ctx context.Context, f *framework.Framework, netConf networkA
 	if netConf.topology == "localnet" {
 		netConf.physicalNetworkName = uniqueMetaName("mac-sec")
 		By("setup underlay")
-		Expect(infraprovider.Get().NewTestContext().SetupUnderlay(f, infraapi.Underlay{
+		Expect(infraprovider.SetupUnderlay(infraprovider.Get().NewTestContext(), f, infraapi.Underlay{
 			LogicalNetworkName: netConf.physicalNetworkName,
 			VlanID:             netConf.vlanID,
 		})).To(Succeed())
