@@ -85,6 +85,7 @@ usage() {
     echo "-me  | --multicast-enabled                    Enable multicast. DEFAULT: Disabled"
     echo "-ho  | --hybrid-enabled                       Enable hybrid overlay. DEFAULT: Disabled"
     echo "-obs | --observability                        Enable observability. DEFAULT: Disabled"
+    echo "-upm | --unprivileged-mode                    Run ovnkube-node without privileged: true."
     echo "-el  | --ovn-empty-lb-events                  Enable empty-lb-events generation for LB without backends. DEFAULT: Disabled"
     echo "-ii  | --install-ingress                      Flag to install Ingress Components."
     echo "                                              DEFAULT: Don't install ingress components."
@@ -190,6 +191,8 @@ parse_args() {
             -ho | --hybrid-enabled )              OVN_HYBRID_OVERLAY_ENABLE=true
                                                   ;;
             -obs | --observability )              OVN_OBSERV_ENABLE=true
+                                                  ;;
+            -upm | --unprivileged-mode )          OVN_UNPRIVILEGED_MODE=true
                                                   ;;
             -el | --ovn-empty-lb-events )         OVN_EMPTY_LB_EVENTS=true
                                                   ;;
@@ -701,7 +704,7 @@ helm upgrade --install ovn-kubernetes . -f "${value_file}" ${extra_values_args} 
           --set global.extGatewayNetworkInterface=$(if [ "${OVN_SECOND_BRIDGE}" == "true" ]; then echo "eth1"; else echo ""; fi) \
           --set global.disableSnatMultipleGws=$(if [ "${OVN_DISABLE_SNAT_MULTIPLE_GWS}" == "true" ]; then echo "true"; else echo "false"; fi) \
           --set global.disableForwarding=$(if [ "${OVN_DISABLE_FORWARDING}" == "true" ]; then echo "true"; else echo "false"; fi) \
-          --set global.unprivilegedMode=false \
+          --set global.unprivilegedMode=$(if [ "${OVN_UNPRIVILEGED_MODE}" == "true" ]; then echo "true"; else echo "false"; fi) \
           --set global.metricsIp="${METRICS_IP:-}" \
           --set ovs-node.updateStrategy="${OVS_NODE_UPDATE_STRATEGY:-RollingUpdate}" \
           --set global.dummyGatewayBridge=$(if [ "${OVN_DUMMY_GATEWAY_BRIDGE}" == "true" ]; then echo "true"; else echo "false"; fi) \
@@ -726,6 +729,26 @@ EOF
        )
     echo "${cmd}"
     eval "${cmd}"
+}
+
+# install_ovs_tools_on_nodes installs ovs-vsctl and ovs-ofctl on every kind node.
+# In unprivileged mode the CNI plugin running on the node plugs the pod
+# interface into OVS itself, so it needs the OVS client tools on the node's
+# PATH. They talk to the ovs-node pod through the sockets in
+# /var/run/openvswitch; the node must not run OVS daemons of its own, so the
+# package's units are masked before installing it.
+install_ovs_tools_on_nodes() {
+  local node
+  for node in $(kind_get_nodes); do
+    if $OCI_BIN exec "${node}" sh -c 'command -v ovs-vsctl >/dev/null && command -v ovs-ofctl >/dev/null'; then
+      continue
+    fi
+    echo "Installing OVS client tools on ${node}"
+    $OCI_BIN exec "${node}" sh -c '
+      systemctl mask openvswitch-switch.service ovsdb-server.service ovs-vswitchd.service ovs-record-hostname.service >/dev/null 2>&1
+      apt-get update -qq >/dev/null
+      apt-get install -y -qq --no-install-recommends openvswitch-switch >/dev/null'
+  done
 }
 
 install_online_ovn_kubernetes_crds() {
@@ -837,6 +860,9 @@ if [ "$ENABLE_ROUTE_ADVERTISEMENTS" == true ]; then
 fi
 if [ "$KIND_REMOVE_TAINT" == true ]; then
   remove_no_schedule_taint
+fi
+if [ "$OVN_UNPRIVILEGED_MODE" == true ] && [ "${DPU_MODE}" != "host" ]; then
+  install_ovs_tools_on_nodes
 fi
 create_ovn_kubernetes
 
