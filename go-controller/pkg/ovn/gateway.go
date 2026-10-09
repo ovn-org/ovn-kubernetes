@@ -684,6 +684,12 @@ func (gw *GatewayManager) updateGWRouterStaticRoutes(gwConfig *GatewayConfig, ex
 	}
 
 	nextHops := gwConfig.annoConfig.NextHops
+	if gw.netInfo.Uplink() != "" {
+		// The loop below ignores the next hop when matching routes,
+		// collapsing ECMP to one gateway per IP family; other networks
+		// rely on that to update a changed gateway IP in place.
+		return gw.syncUplinkDefaultRoutes(nextHops, externalRouterPort)
+	}
 	// Add default gateway routes in GR
 	for _, nextHop := range nextHops {
 		var allIPs string
