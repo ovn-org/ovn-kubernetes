@@ -196,9 +196,14 @@ gateways and, for advertised networks, imported FRR-learned routes. Programming
 the discovered defaults still depends on host route discovery; the packets
 themselves do not traverse host routing. An `UplinkState` with an empty
 `status.defaultGateways` reports that no default gateway route was discovered
-on the host interface; discovery keeps re-polling the host routes (in the
-interface's VRF routing table when it is enslaved to a VRF) while an addressed
-IP family lacks a gateway, and publishes newly discovered default gateways.
+on the host interface (in the interface's VRF routing table when it is
+enslaved to a VRF). Discovery follows the kernel's route events through the
+node's route manager: a default route that appears, changes or is withdrawn
+in any routing table rediscovers the node's Uplinks once the change has
+settled, so `status.defaultGateways` follows the host within seconds, and the
+gateway routers drop the withdrawn next hops. While an addressed IP family
+lacks a gateway, discovery also re-polls the host routes periodically as a
+fallback.
 Discovery selects the lowest-metric defaults per IP family through the selected
 host interface, including embedded multipath next hops. When those next hops
 carry unequal weights, only the heaviest ones are kept: neither `UplinkState`
@@ -217,8 +222,9 @@ An uplink without a default gateway is valid, so no condition degrades when
 one is missing. Platform monitoring can alert on an empty
 `status.defaultGateways` where a default gateway is expected.
 
-Polling stops once every addressed family has a gateway; later changes need
-another reconciliation trigger ([#6784](https://github.com/ovn-kubernetes/ovn-kubernetes/issues/6784)).
+A change limited to the default gateways updates the routes of an active
+network; the Uplink gateway itself, its VRF enslavement included, is only
+rebuilt when the interface, bridge, MAC or addresses change.
 The API limit of 256 gateways accommodates 128 per family, twice
 [Cumulus Linux's default of 64 BGP multipaths](https://docs.nvidia.com/networking-ethernet-software/cumulus-linux-518/Layer-3/Border-Gateway-Protocol-BGP/Optional-BGP-Configuration/),
 and discovery reports `GatewayInfoUnavailable` if the limit is exceeded.
@@ -236,10 +242,11 @@ Default gateway discovery for a VRF-Lite Uplink:
 
 ```mermaid
 flowchart LR
-    poll["discovery reads the interface's<br/>routes in the CUDN VRF"] -->|no default route| empty["status.defaultGateways: []<br/>no condition degrades"]
+    ev["kernel route event<br/>(default route added,<br/>changed or withdrawn)"] -->|settle| poll["discovery reads the interface's<br/>routes in the CUDN VRF"]
+    poll -->|no default route| empty["status.defaultGateways: []<br/>no condition degrades"]
     empty -->|re-poll| poll
     poll -->|default route present| pub["status.defaultGateways<br/>published"]
-    pub --> gr["default routes on the<br/>OVN gateway router"]
+    pub --> gr["default routes on the<br/>OVN gateway router<br/>(withdrawn next hops removed)"]
 ```
 
 ## UplinkState and Conditions
