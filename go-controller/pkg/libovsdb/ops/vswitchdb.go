@@ -36,7 +36,11 @@ type ovsInterfacePredicate func(*vswitchd.Interface) bool
 // callers can detect that case via errors.Is. This is the libovsdb equivalent
 // of `ovs-vsctl list Open_vSwitch`.
 func GetOpenvSwitch(ovsClient libovsdbclient.Client) (*vswitchd.OpenvSwitch, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	return getOpenvSwitch(context.Background(), ovsClient)
+}
+
+func getOpenvSwitch(ctx context.Context, ovsClient libovsdbclient.Client) (*vswitchd.OpenvSwitch, error) {
+	ctx, cancel := context.WithTimeout(ctx, types.OVSDBTimeout)
 	defer cancel()
 	openvSwitchList := []*vswitchd.OpenvSwitch{}
 	err := ovsClient.List(ctx, &openvSwitchList)
@@ -54,16 +58,21 @@ func GetOpenvSwitch(ovsClient libovsdbclient.Client) (*vswitchd.OpenvSwitch, err
 // to apply them, matching ovs-vsctl's default next_cfg/cur_cfg synchronization.
 // After the transaction completes, this can block for up to types.OVSDBTimeout
 // waiting for ovs-vswitchd, in addition to the transaction's own timeout.
-// It does not accept caller cancellation. Use it only when subsequent work
-// requires the configuration to be applied; otherwise use TransactAndCheck,
-// especially in latency-sensitive paths or while holding locks.
-func TransactAndCheckAndWaitForVSwitchd(ovsClient libovsdbclient.Client, ops []ovsdb.Operation) error {
+// The lookup, transaction, and wait honor ctx cancellation and its deadline.
+// Cancellation does not roll back a transaction that has already committed.
+// Use it only when subsequent work requires the configuration to be applied;
+// otherwise use TransactAndCheck, especially in latency-sensitive paths or
+// while holding locks.
+func TransactAndCheckAndWaitForVSwitchd(ctx context.Context, ovsClient libovsdbclient.Client, ops []ovsdb.Operation) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if len(ops) == 0 {
 		return nil
 	}
-	ovs, err := GetOpenvSwitch(ovsClient)
+	ovs, err := getOpenvSwitch(ctx, ovsClient)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to get Open_vSwitch before transaction: %w", err)
 	}
 	where := []ovsdb.Condition{ovsdb.NewCondition("_uuid", ovsdb.ConditionEqual, ovsdb.UUID{GoUUID: ovs.UUID})}
 	ops = append(ops,
@@ -71,7 +80,7 @@ func TransactAndCheckAndWaitForVSwitchd(ovsClient libovsdbclient.Client, ops []o
 			Mutations: []ovsdb.Mutation{*ovsdb.NewMutation("next_cfg", ovsdb.MutateOperationAdd, 1)}},
 		ovsdb.Operation{Op: ovsdb.OperationSelect, Table: vswitchd.OpenvSwitchTable, Where: where, Columns: []string{"next_cfg"}},
 	)
-	results, err := TransactAndCheck(ovsClient, ops)
+	results, err := TransactAndCheckWithContext(ctx, ovsClient, ops)
 	if err != nil {
 		return err
 	}
@@ -89,7 +98,10 @@ func TransactAndCheckAndWaitForVSwitchd(ovsClient libovsdbclient.Client, ops []o
 	default:
 		return fmt.Errorf("unexpected next_cfg value %T(%v)", value, value)
 	}
-	err = wait.PollUntilContextTimeout(context.Background(), 100*time.Millisecond, types.OVSDBTimeout, true,
+	waitCtx, cancel := context.WithTimeout(ctx, types.OVSDBTimeout)
+	defer cancel()
+	poll := wait.Backoff{Duration: 2 * time.Millisecond, Factor: 2, Steps: 8, Cap: 100 * time.Millisecond}
+	err = poll.DelayFunc().Until(waitCtx, true, true,
 		func(ctx context.Context) (bool, error) {
 			ovs := &vswitchd.OpenvSwitch{UUID: ovs.UUID}
 			if err := ovsClient.Get(ctx, ovs); err != nil {

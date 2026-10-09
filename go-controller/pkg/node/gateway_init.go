@@ -4,6 +4,7 @@
 package node
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -528,7 +529,7 @@ func (nc *DefaultNodeNetworkController) initGatewayDPUHost() error {
 // (no OVS to clean) or when the OVSDB client cannot be created; iptables
 // and nftables cleanup runs only on DPU-host or full nodes (the DPU has
 // no host-side rules to clean).
-func CleanupClusterNode(name string) error {
+func CleanupClusterNode(ctx context.Context, name string) error {
 	klog.V(5).Infof("Cleaning up gateway resources on node: %q", name)
 
 	var ovsClient libovsdbclient.Client
@@ -557,7 +558,7 @@ func CleanupClusterNode(name string) error {
 		}
 		// cleanupSharedGateway handles both the OVS-side (no-op when ovsClient
 		// is nil) and the host-side nftables chains.
-		if sharedErr := cleanupSharedGateway(ovsClient); sharedErr != nil {
+		if sharedErr := cleanupSharedGateway(ctx, ovsClient); sharedErr != nil {
 			klog.Errorf("Failed to cleanup Gateway, error: %v", sharedErr)
 			err = sharedErr
 		}

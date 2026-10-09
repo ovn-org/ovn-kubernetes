@@ -46,7 +46,7 @@ func TestTransactAndCheckAndWaitForVSwitchd(t *testing.T) {
 
 	applied := make(chan error, 1)
 	go func() {
-		applied <- wait.PollUntilContextTimeout(context.Background(), 10*time.Millisecond, time.Second, true,
+		applied <- wait.PollUntilContextTimeout(context.Background(), 10*time.Millisecond, types.OVSDBTimeout, true,
 			func(context.Context) (bool, error) {
 				ovs, err := GetOpenvSwitch(ovsClient)
 				if err != nil || ovs.NextCfg != 8 {
@@ -70,7 +70,7 @@ func TestTransactAndCheckAndWaitForVSwitchd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build update operation: %v", err)
 	}
-	if err := TransactAndCheckAndWaitForVSwitchd(ovsClient, ops); err != nil {
+	if err := TransactAndCheckAndWaitForVSwitchd(context.Background(), ovsClient, ops); err != nil {
 		t.Fatalf("transaction and wait failed: %v", err)
 	}
 	if err := <-applied; err != nil {
