@@ -48,6 +48,10 @@ func (k *kind) Name() string {
 	return "kind"
 }
 
+func (k *kind) SupportsNodeRecovery() bool {
+	return true
+}
+
 func (k *kind) PrimaryNetwork() (api.Network, error) {
 	return k.GetNetwork("kind")
 }

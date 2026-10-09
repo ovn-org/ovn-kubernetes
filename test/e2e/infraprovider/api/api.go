@@ -46,6 +46,12 @@ type ClusterProvider interface {
 	GetDefaultTimeoutContext() *framework.TimeoutContext
 }
 
+// NodeRecoveryCapable reports whether an infraprovider can restore a worker after
+// its Node object is deleted in e2e tests (via ShutdownNode/StartNode).
+type NodeRecoveryCapable interface {
+	SupportsNodeRecovery() bool
+}
+
 type ExternalContainerProvider interface {
 	// ListNetworks returns the names of all networks
 	ListNetworks() ([]string, error)

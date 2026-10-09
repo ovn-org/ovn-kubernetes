@@ -26,6 +26,13 @@ func Get() api.Provider {
 	return infraProvider
 }
 
+// SupportsNodeRecovery returns true when the infraprovider implements
+// api.NodeRecoveryCapable and reports that worker recovery is supported.
+func SupportsNodeRecovery() bool {
+	capable, ok := Get().(api.NodeRecoveryCapable)
+	return ok && capable.SupportsNodeRecovery()
+}
+
 // IsKind returns true if cluster provider is KinD
 func IsKind() bool {
 	_, err := exec.LookPath("kubectl")
