@@ -4170,6 +4170,114 @@ spec:
 				"Both EgressIPs should have been assigned despite orphan node %s", orphanNodeName)
 		})
 
+		ginkgo.It("should keep egress IP connectivity disruption-free when ovnkube-node on the egress node is restarted", func() {
+			egressNodeAvailabilityHandler := egressNodeAvailabilityHandlerViaLabel{f}
+			ginkgo.By("0. Set one node as available for egress")
+			egressNodeAvailabilityHandler.Enable(egress1Node.name)
+			defer egressNodeAvailabilityHandler.Restore(egress1Node.name)
+
+			podNamespace := f.Namespace
+			updateNamespaceLabels(f, podNamespace, map[string]string{
+				"name": f.Namespace.Name,
+			})
+
+			ginkgo.By("1. Create an EgressIP object with one egress IP defined")
+			var egressIP1 net.IP
+			var err error
+			if utilnet.IsIPv6String(egress1Node.nodeIP) {
+				egressIP1, err = ipalloc.NewPrimaryIPv6()
+			} else {
+				egressIP1, err = ipalloc.NewPrimaryIPv4()
+			}
+			gomega.Expect(err).ShouldNot(gomega.HaveOccurred(), "must allocate new Node IP")
+
+			egressIPConfig := createEIPManifest(egressIPName, podEgressLabel, map[string]string{"name": f.Namespace.Name}, egressIP1.String())
+			if err := os.WriteFile(egressIPYaml, []byte(egressIPConfig), 0644); err != nil {
+				framework.Failf("Unable to write CRD config to disk: %v", err)
+			}
+			defer func() {
+				if err := os.Remove(egressIPYaml); err != nil {
+					framework.Logf("Unable to remove the CRD config from disk: %v", err)
+				}
+			}()
+			e2ekubectl.RunKubectlOrDie("default", "create", "-f", egressIPYaml)
+
+			ginkgo.By("2. Check that the status is of length one and assigned to egress1Node")
+			statuses := verifyEgressIPStatusLengthEquals(1, func(statuses []egressIPStatus) bool {
+				return statuses[0].Node == egress1Node.name
+			})
+			gomega.Expect(statuses[0].EgressIP).To(gomega.Equal(egressIP1.String()))
+
+			ginkgo.By("3. Create one pod matching the EgressIP on a non-egress node")
+			_, err = createGenericPodWithLabel(f, pod1Name, pod1Node.name, f.Namespace.Name, getAgnHostHTTPPortBindFullCMD(clusterNetworkHTTPPort), podEgressLabel)
+			framework.ExpectNoError(err, "failed to create egress IP matching pod")
+			_, err = getPodIPWithRetry(f.ClientSet, isIPv6TestRun, f.Namespace.Name, pod1Name)
+			framework.ExpectNoError(err, "failed to get pod IP")
+
+			ginkgo.By("4. Verify egress connectivity uses the EgressIP")
+			err = wait.PollUntilContextTimeout(context.Background(), retryInterval, retryTimeout, true, func(context.Context) (bool, error) {
+				return targetExternalContainerAndTest(primaryTargetExternalContainer,
+					f.Namespace.Name, pod1Name, true, []string{egressIP1.String()})()
+			})
+			framework.ExpectNoError(err, "egress connectivity via EgressIP failed before ovnkube-node restart")
+
+			ginkgo.By("5. Continuously verify egress via the EgressIP while restarting ovnkube-node on the egress node")
+			const continuousInterval = 2 * time.Second
+			// Probe through delete/recreate and for a short window after the new
+			// ovnkube-node is Running/Ready so StartEgressIP sync is covered.
+			stopProbes := make(chan struct{})
+			errChan := make(chan error, 1)
+			go func() {
+				defer ginkgo.GinkgoRecover()
+				attempt := 0
+				ticker := time.NewTicker(continuousInterval)
+				defer ticker.Stop()
+				for {
+					attempt++
+					ok, probeErr := targetExternalContainerAndTest(primaryTargetExternalContainer,
+						f.Namespace.Name, pod1Name, true, []string{egressIP1.String()})()
+					if probeErr != nil || !ok {
+						errChan <- fmt.Errorf("egress IP connectivity disrupted on attempt %d: ok=%v err=%v",
+							attempt, ok, probeErr)
+						return
+					}
+					select {
+					case <-stopProbes:
+						errChan <- nil
+						return
+					case <-ticker.C:
+					}
+				}
+			}()
+
+			// Allow a couple of successful probes before restarting.
+			time.Sleep(2 * continuousInterval)
+
+			ginkgo.By(fmt.Sprintf("6. Restart ovnkube-node on egress node %s and wait for the replacement pod to be Running/Ready", egress1Node.name))
+			// restartOVNKubeNodePod deletes the pod, then polls until a new
+			// ovnkube-node on that node reports PodRunningReady.
+			err = restartOVNKubeNodePod(f.ClientSet, deploymentconfig.Get().OVNKubernetesNamespace(), egress1Node.name)
+			framework.ExpectNoError(err, "failed to restart ovnkube-node on egress node")
+
+			// Keep probing after the new pod is ready so post-sync connectivity is covered.
+			time.Sleep(5 * continuousInterval)
+			close(stopProbes)
+
+			ginkgo.By("7. Ensuring egress via the EgressIP stayed disruption-free through the restart")
+			framework.ExpectNoError(<-errChan)
+
+			ginkgo.By("8. Wait for OVN-Kubernetes to be healthy after restart")
+			framework.ExpectNoError(waitOVNKubernetesHealthy(f),
+				"OVN-Kubernetes cluster should be healthy after ovnkube-node restart")
+
+			ginkgo.By("9. Verify egress connectivity still uses the EgressIP after sync")
+			err = wait.PollUntilContextTimeout(context.Background(), retryInterval, retryTimeout, true, func(context.Context) (bool, error) {
+				return targetExternalContainerAndTest(primaryTargetExternalContainer,
+					f.Namespace.Name, pod1Name, true, []string{egressIP1.String()})()
+			})
+			framework.ExpectNoError(err, "egress connectivity via EgressIP failed after ovnkube-node restart sync")
+		})
+
 		ginkgo.It("should prevent duplicate MAC responses when egress node is rebooted", func() {
 			if !isNetworkSegmentationEnabled() {
 				ginkgo.Skip("network segmentation is disabled")
