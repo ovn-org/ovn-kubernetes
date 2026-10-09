@@ -28,7 +28,9 @@ type key struct {
 
 type Controller struct {
 	*sync.Mutex
-	store map[key]*netlink.Route
+	store                 map[key]*netlink.Route
+	onRouteUpdateHandlers []func(netlink.RouteUpdate)
+	onRouteEventsLost     []func()
 }
 
 // NewController manages routes which include adding and deletion of routes. It
@@ -43,12 +45,49 @@ func NewController() *Controller {
 	}
 }
 
+// AddOnRouteUpdateHandler registers a callback invoked with every kernel
+// route event the route manager receives, from any routing table. Callbacks
+// run on the event loop and must not block. Register before Run to see every
+// event; no remove is provided, callers are lifecycle-bound to the process.
+func (c *Controller) AddOnRouteUpdateHandler(handler func(netlink.RouteUpdate)) {
+	c.Lock()
+	defer c.Unlock()
+	c.onRouteUpdateHandlers = append(c.onRouteUpdateHandlers, handler)
+}
+
+// AddOnRouteEventsLostHandler registers a callback invoked once a lost route
+// event subscription has been renewed: events were missed meanwhile.
+func (c *Controller) AddOnRouteEventsLostHandler(handler func()) {
+	c.Lock()
+	defer c.Unlock()
+	c.onRouteEventsLost = append(c.onRouteEventsLost, handler)
+}
+
+func (c *Controller) notifyRouteUpdate(routeUpdate netlink.RouteUpdate) {
+	c.Lock()
+	handlers := slices.Clone(c.onRouteUpdateHandlers)
+	c.Unlock()
+	for _, handler := range handlers {
+		handler(routeUpdate)
+	}
+}
+
+func (c *Controller) notifyRouteEventsLost() {
+	c.Lock()
+	handlers := slices.Clone(c.onRouteEventsLost)
+	c.Unlock()
+	for _, handler := range handlers {
+		handler()
+	}
+}
+
 // Run starts route manager and syncs at least every syncPeriod
 func (c *Controller) Run(stopCh <-chan struct{}, syncPeriod time.Duration) {
 	var err error
 	var subscribed bool
 	var routeEventCh chan netlink.RouteUpdate
-	// netlink provides subscribing only to route events from the default table. Periodic sync will restore non-main table routes
+	// The subscription delivers route events from every routing table.
+	// Periodic sync restores managed routes if events were missed.
 	subscribed, routeEventCh = subscribeNetlinkRouteEvents(stopCh)
 	ticker := time.NewTicker(syncPeriod)
 	defer ticker.Stop()
@@ -62,6 +101,9 @@ func (c *Controller) Run(stopCh <-chan struct{}, syncPeriod time.Duration) {
 			if !ok {
 				klog.Warning("Route Manager: netlink route events subscription lost, resubscribing...")
 				subscribed, routeEventCh = subscribeNetlinkRouteEvents(stopCh)
+				if subscribed {
+					c.notifyRouteEventsLost()
+				}
 				continue
 			}
 			if err = c.processNetlinkEvent(newRouteEvent); err != nil {
@@ -69,10 +111,14 @@ func (c *Controller) Run(stopCh <-chan struct{}, syncPeriod time.Duration) {
 				// and use it here to log errors that are not IsLinkNotFoundError
 				klog.Errorf("Route Manager: failed to process route update event %v: %v", newRouteEvent, err)
 			}
+			c.notifyRouteUpdate(newRouteEvent)
 		case <-ticker.C:
 			if !subscribed {
 				klog.Warning("Route Manager: netlink route events subscription lost, resubscribing...")
 				subscribed, routeEventCh = subscribeNetlinkRouteEvents(stopCh)
+				if subscribed {
+					c.notifyRouteEventsLost()
+				}
 			}
 			c.sync()
 			ticker.Reset(syncPeriod)

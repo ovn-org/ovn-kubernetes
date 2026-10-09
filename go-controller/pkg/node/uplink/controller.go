@@ -9,8 +9,10 @@ import (
 	"fmt"
 	"net"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -24,6 +26,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	kerrors "k8s.io/apimachinery/pkg/util/errors"
+	"k8s.io/apimachinery/pkg/util/sets"
 	corelisters "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
@@ -43,6 +46,7 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
 	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	ovsops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops/ovs"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	nodeutil "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/util"
 	ovntypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	uplinkutil "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/uplink"
@@ -66,6 +70,17 @@ const (
 	// publishing an arbitrary subset. See the Uplink feature documentation.
 	maxDefaultGateways = 256
 )
+
+// routeSettleDelay is how long rediscovery waits after a default route event:
+// moving an interface across VRF tables purges and restores its routes in a
+// burst, and a dump inside that burst would publish a transient gateway list.
+var routeSettleDelay = 2 * time.Second
+
+// withdrawalConfirmDelay is how long a family's published gateways survive
+// dumps without them. It exceeds the VRF manager's route restore budget (4s
+// with retries, an IPv6 default waits for DAD), so a restore in progress is
+// not published as a withdrawal.
+var withdrawalConfirmDelay = 5 * time.Second
 
 type hostInterfaceState struct {
 	macAddress      net.HardwareAddr
@@ -130,6 +145,15 @@ type Controller struct {
 	uplinkController      controllerutil.Controller
 	uplinkStateController controllerutil.Controller
 	nodeController        controllerutil.Controller
+
+	// routeManager delivers the kernel route events that drive rediscovery;
+	// nil where host routes are not discovered (DPU mode, tests).
+	routeManager *routemanager.Controller
+
+	// withdrawalsMutex guards pendingWithdrawals: per UplinkState and IP
+	// family whose dumps lost every gateway, when the first such dump ran.
+	withdrawalsMutex   sync.Mutex
+	pendingWithdrawals map[string]map[utilnet.IPFamily]time.Time
 }
 
 // discoveryRateLimiter is the default controller rate limiter with its
@@ -144,9 +168,11 @@ func discoveryRateLimiter() workqueue.TypedRateLimiter[string] {
 }
 
 // NewController creates the ovnkube-node Uplink discovery controller.
-func NewController(nodeName string, wf factory.NodeWatchFactory, ovnClient *util.OVNNodeClientset, ovsClient libovsdbclient.Client) *Controller {
+func NewController(nodeName string, wf factory.NodeWatchFactory, ovnClient *util.OVNNodeClientset, ovsClient libovsdbclient.Client,
+	routeManager *routemanager.Controller) *Controller {
 	c := &Controller{
 		nodeName:          nodeName,
+		routeManager:      routeManager,
 		uplinkClient:      ovnClient.UplinkClient,
 		uplinkLister:      wf.UplinkInformer().Lister(),
 		uplinkStateLister: wf.UplinkStateInformer().Lister(),
@@ -202,6 +228,13 @@ func NewController(nodeName string, wf factory.NodeWatchFactory, ovnClient *util
 }
 
 func (c *Controller) Start() error {
+	// Only the side that reads host routes needs to hear about them. Register
+	// before the first discovery runs, so a route change racing it is not
+	// missed.
+	if c.routeManager != nil && (config.IsModeFull() || config.IsModeDPUHost()) {
+		c.routeManager.AddOnRouteUpdateHandler(c.onRouteUpdate)
+		c.routeManager.AddOnRouteEventsLostHandler(c.uplinkStateController.ReconcileAll)
+	}
 	err := controllerutil.Start(
 		c.uplinkController,
 		c.uplinkStateController,
@@ -254,6 +287,37 @@ func (c *Controller) Stop() {
 		c.uplinkStateController,
 		c.nodeController,
 	)
+}
+
+// onRouteUpdate rediscovers this node's UplinkStates once a default route
+// changed in any routing table, so a gateway that appears, changes or is
+// withdrawn after discovery converged is published within seconds. Default
+// route changes are rare, so every one of them rediscovers all of the node's
+// UplinkStates rather than mapping the route to one; the workqueue coalesces
+// a burst into one delayed rediscovery per UplinkState.
+func (c *Controller) onRouteUpdate(event netlink.RouteUpdate) {
+	if !isDefaultRouteChange(event) {
+		return
+	}
+	klog.V(5).Infof("Default route change %v, rediscovering Uplinks once routes settle", event.Route)
+	states, err := c.uplinkStateLister.List(labels.Everything())
+	if err != nil {
+		klog.Errorf("Failed to list UplinkStates on a default route change: %v", err)
+		return
+	}
+	for _, state := range states {
+		if _, nodeName := uplinkutil.StateIdentity(state); nodeName == c.nodeName {
+			c.uplinkStateController.ReconcileAfter(state.Name, routeSettleDelay)
+		}
+	}
+}
+
+// isDefaultRouteChange reports whether a route event can change a discovered
+// default gateway: any default route not installed by ovnkube itself (its
+// managed defaults derive from the published gateways). A unicast default
+// replaced in place by an unreachable one arrives as one non-unicast event.
+func isDefaultRouteChange(event netlink.RouteUpdate) bool {
+	return isDefaultRoute(event.Route) && int(event.Route.Protocol) != ovntypes.OVNKProtocol
 }
 
 func (c *Controller) reconcileUplink(key string) error {
@@ -364,6 +428,7 @@ func (c *Controller) reconcileUplinkState(key string) error {
 	} else {
 		hostState, err = c.hostDiscoverer.Discover(hostInterfaceName)
 		if err != nil {
+			c.forgetPendingWithdrawal(state.Name)
 			return errors.Join(err, c.updateUplinkStateStatus(
 				state,
 				hostInterfaceName,
@@ -373,6 +438,11 @@ func (c *Controller) reconcileUplinkState(key string) error {
 				discoveryReason(err),
 				err.Error(),
 			))
+		}
+		if string(state.Status.HostInterfaceName) == hostInterfaceName {
+			hostState.defaultGateways = c.confirmWithdrawnDefaultGateways(state, hostState.defaultGateways)
+		} else {
+			c.forgetPendingWithdrawal(state.Name)
 		}
 	}
 
@@ -498,10 +568,78 @@ func (c *Controller) reconcileUplinkState(key string) error {
 	)
 }
 
+// confirmWithdrawnDefaultGateways keeps the published gateways of a family
+// whose gateways the dumps no longer have until withdrawalConfirmDelay has
+// passed since the first such dump: moving the interface across VRF tables
+// purges and restores its routes, and a dump inside that window is empty
+// although no gateway went away.
+func (c *Controller) confirmWithdrawnDefaultGateways(state *uplinkv1alpha1.UplinkState, discovered []net.IP) []net.IP {
+	c.withdrawalsMutex.Lock()
+	defer c.withdrawalsMutex.Unlock()
+	discoveredFamilies := sets.New[utilnet.IPFamily]()
+	for _, gateway := range discovered {
+		discoveredFamilies.Insert(utilnet.IPFamilyOf(gateway))
+	}
+	publishedByFamily := map[utilnet.IPFamily][]net.IP{}
+	for _, published := range state.Status.DefaultGateways {
+		if gateway := net.ParseIP(string(published)); gateway != nil && !discoveredFamilies.Has(utilnet.IPFamilyOf(gateway)) {
+			publishedByFamily[utilnet.IPFamilyOf(gateway)] = append(publishedByFamily[utilnet.IPFamilyOf(gateway)], gateway)
+		}
+	}
+	now := time.Now()
+	pending := c.pendingWithdrawals[state.Name]
+	gateways := slices.Clone(discovered)
+	var wait time.Duration
+	for family, kept := range publishedByFamily {
+		firstMiss, ok := pending[family]
+		if ok && now.Sub(firstMiss) >= withdrawalConfirmDelay {
+			delete(pending, family)
+			continue
+		}
+		if !ok {
+			firstMiss = now
+			if pending == nil {
+				pending = map[utilnet.IPFamily]time.Time{}
+			}
+			pending[family] = firstMiss
+			klog.V(4).Infof("UplinkState %s: IPv%s default gateways %v missing from the host routes, confirming before withdrawing them",
+				state.Name, family, kept)
+		}
+		gateways = append(gateways, kept...)
+		if remaining := withdrawalConfirmDelay - now.Sub(firstMiss); wait == 0 || remaining < wait {
+			wait = remaining
+		}
+	}
+	// Families that reappeared or have nothing left to keep are no longer
+	// pending.
+	for family := range pending {
+		if _, kept := publishedByFamily[family]; !kept {
+			delete(pending, family)
+		}
+	}
+	if len(pending) == 0 {
+		delete(c.pendingWithdrawals, state.Name)
+		return discovered
+	}
+	if c.pendingWithdrawals == nil {
+		c.pendingWithdrawals = map[string]map[utilnet.IPFamily]time.Time{}
+	}
+	c.pendingWithdrawals[state.Name] = pending
+	c.uplinkStateController.ReconcileAfter(state.Name, wait)
+	sort.Slice(gateways, func(i, j int) bool { return gateways[i].String() < gateways[j].String() })
+	return gateways
+}
+
+func (c *Controller) forgetPendingWithdrawal(stateName string) {
+	c.withdrawalsMutex.Lock()
+	defer c.withdrawalsMutex.Unlock()
+	delete(c.pendingWithdrawals, stateName)
+}
+
 // repollMissingDefaultGateways schedules a delayed rediscovery while an IP
 // family the host interface has an address for is missing its default
-// gateway: netlink route events do not currently enqueue Uplink discovery.
-// Quiet by design —
+// gateway, as a fallback for a discovery that ran inside a route transition
+// and for default routes discovery cannot resolve. Quiet by design —
 // an uplink without a default gateway is valid, so this is not an error and
 // no condition degrades; the empty status.defaultGateways field is the
 // signal. Only the netlink-discovering side re-polls: the DPU reads host
@@ -553,6 +691,7 @@ func missingDefaultGatewayFamilies(hostState *hostInterfaceState) string {
 // generates no event on the Uplink that owns it, so reconcile that Uplink
 // here to recreate the UplinkState.
 func (c *Controller) reconcileOwnerOfDeletedUplinkState(key string) error {
+	c.forgetPendingWithdrawal(key)
 	uplinks, err := c.uplinkLister.List(labels.Everything())
 	if err != nil {
 		return fmt.Errorf("failed to list Uplinks: %w", err)
@@ -678,8 +817,9 @@ func (c *Controller) updateResolvedUplinkStateStatus(
 // netlink and OVSDB, which generate no Kubernetes events, so the
 // controller's rate-limited retries are what re-polls them.
 //
-// TODO: subscribe to netlink and OVSDB events and reconcile on relevant
-// changes instead of polling through retries.
+// TODO: subscribe to netlink link and address events and to OVSDB changes
+// and reconcile on them instead of polling through retries; route events
+// are already followed.
 func (c *Controller) updateUplinkStateStatus(
 	state *uplinkv1alpha1.UplinkState,
 	hostInterfaceName string,
@@ -955,6 +1095,7 @@ func desiredUplinkState(
 }
 
 func (c *Controller) deleteUplinkState(name string) error {
+	c.forgetPendingWithdrawal(name)
 	err := c.uplinkClient.K8sV1alpha1().UplinkStates().Delete(
 		context.Background(),
 		name,
