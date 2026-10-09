@@ -4710,6 +4710,10 @@ type kernelRouteNexthop struct {
 }
 
 func hasBGPRoute(routes []kernelRoute, cidr string, nextHops ...string) bool {
+	// iproute2 prints the default route's destination as "default".
+	if cidr == "0.0.0.0/0" || cidr == "::/0" {
+		cidr = "default"
+	}
 	for _, route := range routes {
 		if route.Dst == cidr && route.Protocol == "bgp" && routeHasGateway(route, nextHops...) {
 			return true

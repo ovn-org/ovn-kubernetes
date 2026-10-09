@@ -23,6 +23,11 @@ import (
 //
 // where the sanitization (dashes/slashes -> dots, trailing underscore)
 // matches what the production code uses in go-controller/pkg/util/multi_network.go
+// cudnNetworkName returns the OVN network name of a ClusterUserDefinedNetwork.
+func cudnNetworkName(cudnName string) string {
+	return types.CUDNPrefix + cudnName
+}
+
 func cudnGatewayRouterName(cudnName, nodeName string) string {
 	return types.GWRouterPrefix + util.GetUserDefinedNetworkPrefix(types.CUDNPrefix+cudnName) + nodeName
 }
@@ -53,6 +58,25 @@ func cudnGRRoutesForNode(k8sClient kubernetes.Interface, cudnName, nodeName stri
 		"exec", nbPod.Name, "-c", nbContainerName, "--",
 		"ovn-nbctl", "lr-route-list",
 		cudnGatewayRouterName(cudnName, nodeName))
+}
+
+// nbctlOnNode runs ovn-nbctl with the given arguments in the ovnkube-node pod
+// of the node, against the node's own northbound database.
+func nbctlOnNode(k8sClient kubernetes.Interface, nodeName string, args ...string) (string, error) {
+	ns := deploymentconfig.Get().OVNKubernetesNamespace()
+	nbPods, err := k8sClient.CoreV1().Pods(ns).List(context.TODO(), metav1.ListOptions{
+		LabelSelector: "app=ovnkube-node",
+		FieldSelector: "spec.nodeName=" + nodeName,
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to locate ovnkube-node pod on %s: %w", nodeName, err)
+	}
+	if len(nbPods.Items) == 0 || len(nbPods.Items[0].Spec.Containers) == 0 {
+		return "", fmt.Errorf("no ovnkube-node pod with containers found on node %s", nodeName)
+	}
+	nbPod := nbPods.Items[0]
+	return e2ekubectl.RunKubectl(ns, append([]string{
+		"exec", nbPod.Name, "-c", nbPod.Spec.Containers[0].Name, "--", "ovn-nbctl"}, args...)...)
 }
 
 // podIPsForUserDefinedPrimaryNetwork returns the v4 or v6 IPs for a pod on the UDN
