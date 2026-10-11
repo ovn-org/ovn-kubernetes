@@ -15,6 +15,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 
+	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
+
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	libovsdbutil "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/util"
@@ -911,5 +913,291 @@ var _ = Describe("OVN Multicast with IP Address Family", func() {
 			Entry("[Network Segmentation] IPv4", true, false, nadFromIPMode(namespaceName1, true, false)),
 			Entry("[Network Segmentation] IPv6", false, true, nadFromIPMode(namespaceName1, false, true)),
 		)
+	})
+
+	Context("IGMP/MLD querier gating", func() {
+		newMcastACLForController := func(ns, controller string) *nbdb.ACL {
+			aclIDs := libovsdbops.NewDbObjectIDs(libovsdbops.ACLMulticastNamespace, controller, map[libovsdbops.ExternalIDKey]string{
+				libovsdbops.ObjectNameKey:      ns,
+				libovsdbops.PolicyDirectionKey: string(libovsdbutil.ACLEgress),
+			})
+			return libovsdbutil.BuildACLWithDefaultTier(aclIDs, types.DefaultMcastAllowPriority, "ip4.mcast", nbdb.ACLActionAllow, nil, libovsdbutil.LportEgress)
+		}
+
+		newMcastACL := func(ns string) *nbdb.ACL {
+			return newMcastACLForController(ns, types.DefaultNetworkControllerName)
+		}
+
+		// createMcastACLs inserts ACLs and attaches them to a port group so they
+		// persist in OVSDB (ACL is a non-root table; unreferenced rows are garbage-collected).
+		createMcastACLs := func(client libovsdbclient.Client, pgName string, acls ...*nbdb.ACL) {
+			ops, err := libovsdbops.CreateOrUpdateACLsOps(client, nil, nil, acls...)
+			ExpectWithOffset(1, err).NotTo(HaveOccurred(), "failed to build ACL create ops")
+			ops, err = libovsdbops.AddACLsToPortGroupOps(client, ops, pgName, acls...)
+			ExpectWithOffset(1, err).NotTo(HaveOccurred(), "failed to build port group attachment ops")
+			_, err = libovsdbops.TransactAndCheckAndSetUUIDs(client, acls, ops)
+			ExpectWithOffset(1, err).NotTo(HaveOccurred(), "failed to transact ACL creation")
+		}
+
+		findSwitch := func(client libovsdbclient.Client) *nbdb.LogicalSwitch {
+			switches, err := libovsdbops.FindLogicalSwitchesWithPredicate(client, func(item *nbdb.LogicalSwitch) bool {
+				return item.Name == nodeName
+			})
+			ExpectWithOffset(1, err).NotTo(HaveOccurred(), "failed to find logical switches")
+			ExpectWithOffset(1, switches).To(HaveLen(1), "expected one logical switch for node %s", nodeName)
+			return switches[0]
+		}
+
+		testNode := func(useIPv4, useIPv6 bool) *corev1.Node {
+			n := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        nodeName,
+					Annotations: map[string]string{util.OvnNodeChassisID: chassisIDForNode(nodeName)},
+					Labels:      map[string]string{"k8s.ovn.org/egress-assignable": ""},
+				},
+				Status: corev1.NodeStatus{
+					Conditions: []corev1.NodeCondition{{Type: corev1.NodeReady, Status: corev1.ConditionTrue}},
+				},
+			}
+			switch {
+			case useIPv4 && useIPv6:
+				n.Annotations["k8s.ovn.org/node-primary-ifaddr"] = `{"ipv4":"192.168.126.202/24","ipv6":"ae70::66/64"}`
+				n.Annotations["k8s.ovn.org/node-subnets"] = fmt.Sprintf(`{"default":["%s","%s"]}`, v4Node1Subnet, v6Node1Subnet)
+				n.Annotations[util.OVNNodeHostCIDRs] = `["192.168.126.202/24","ae70::66/64"]`
+			case useIPv6:
+				n.Annotations["k8s.ovn.org/node-primary-ifaddr"] = `{"ipv4":"","ipv6":"ae70::66/64"}`
+				n.Annotations["k8s.ovn.org/node-subnets"] = fmt.Sprintf(`{"default":"%s"}`, v6Node1Subnet)
+				n.Annotations[util.OVNNodeHostCIDRs] = `["ae70::66/64"]`
+			default:
+				n.Annotations["k8s.ovn.org/node-primary-ifaddr"] = `{"ipv4":"192.168.126.202/24","ipv6":""}`
+				n.Annotations["k8s.ovn.org/node-subnets"] = fmt.Sprintf(`{"default":"%s"}`, v4Node1Subnet)
+				n.Annotations[util.OVNNodeHostCIDRs] = `["192.168.126.202/24"]`
+			}
+			return n
+		}
+
+		DescribeTable("sets mcast_querier during node switch creation",
+			func(useIPv4, useIPv6 bool, hasACL bool) {
+				app.Action = func(*cli.Context) error {
+					config.IPv4Mode = useIPv4
+					config.IPv6Mode = useIPv6
+
+					node := testNode(useIPv4, useIPv6)
+					hostSubnets, err := util.ParseNodeHostSubnetAnnotation(node, types.DefaultNetworkName)
+					Expect(err).NotTo(HaveOccurred(), "failed to parse host subnet annotation")
+
+					nbData := []libovsdb.TestData{
+						&nbdb.LogicalSwitch{Name: nodeName},
+						newNetworkRouterPortGroup(getNetInfoFromNAD(nil)),
+					}
+
+					fakeOvn.startWithDBSetup(libovsdb.TestSetup{NBData: nbData},
+						&corev1.NodeList{Items: []corev1.Node{*node}})
+					bnc := startBaseNetworkController(fakeOvn, nil)
+
+					if hasACL {
+						mcastACL := newMcastACL("namespace1")
+						pgName := bnc.getClusterPortGroupName(types.ClusterRtrPortGroupNameBase)
+						createMcastACLs(fakeOvn.nbClient, pgName, mcastACL)
+						Eventually(fakeOvn.nbClient, 5).Should(
+							libovsdb.HaveDataSubset(mcastACL),
+							"multicast ACL did not appear in cache")
+					}
+
+					Expect(bnc.isAnyNamespaceMulticastEnabled()).To(Equal(hasACL),
+						"multicast enabled state mismatch")
+
+					err = bnc.createNodeLogicalSwitch(nodeName, hostSubnets, "", "")
+					Expect(err).NotTo(HaveOccurred(), "failed to create node logical switch")
+
+					sw := findSwitch(fakeOvn.nbClient)
+					expected := "false"
+					if hasACL {
+						expected = "true"
+					}
+					Expect(sw.OtherConfig["mcast_querier"]).To(Equal(expected),
+						"mcast_querier mismatch on node %s", nodeName)
+					Expect(sw.OtherConfig["mcast_snoop"]).To(Equal("true"),
+						"mcast_snoop should always be true")
+
+					if useIPv4 {
+						Expect(sw.OtherConfig["mcast_ip4_src"]).NotTo(BeEmpty(),
+							"mcast_ip4_src should be set for IPv4")
+					}
+					if useIPv6 {
+						Expect(sw.OtherConfig["mcast_ip6_src"]).NotTo(BeEmpty(),
+							"mcast_ip6_src should be set for IPv6")
+					}
+
+					return nil
+				}
+				Expect(app.Run([]string{app.Name})).NotTo(HaveOccurred(),
+					"failed to run querier gating test for node switch creation")
+			},
+			Entry("IPv4 without ACL", true, false, false),
+			Entry("IPv4 with ACL", true, false, true),
+			Entry("IPv6 without ACL", false, true, false),
+			Entry("IPv6 with ACL", false, true, true),
+			Entry("dual-stack without ACL", true, true, false),
+			Entry("dual-stack with ACL", true, true, true),
+		)
+
+		It("ignores multicast ACLs owned by a different controller", func() {
+			app.Action = func(*cli.Context) error {
+				config.IPv4Mode = true
+				node := testNode(true, false)
+				hostSubnets, err := util.ParseNodeHostSubnetAnnotation(node, types.DefaultNetworkName)
+				Expect(err).NotTo(HaveOccurred(), "failed to parse host subnet annotation for foreign-controller ACL test")
+
+				nbData := []libovsdb.TestData{
+					&nbdb.LogicalSwitch{Name: nodeName},
+					newNetworkRouterPortGroup(getNetInfoFromNAD(nil)),
+				}
+				fakeOvn.startWithDBSetup(libovsdb.TestSetup{NBData: nbData},
+					&corev1.NodeList{Items: []corev1.Node{*node}})
+				bnc := startBaseNetworkController(fakeOvn, nil)
+
+				foreignACL := newMcastACLForController("ns-other", "other-network-controller")
+				pgName := bnc.getClusterPortGroupName(types.ClusterRtrPortGroupNameBase)
+				createMcastACLs(fakeOvn.nbClient, pgName, foreignACL)
+				Eventually(fakeOvn.nbClient, 5).Should(
+					libovsdb.HaveDataSubset(foreignACL),
+					"foreign-controller ACL did not appear in cache")
+
+				Expect(bnc.isAnyNamespaceMulticastEnabled()).To(BeFalse(),
+					"should not detect ACLs owned by a different controller")
+
+				err = bnc.createNodeLogicalSwitch(nodeName, hostSubnets, "", "")
+				Expect(err).NotTo(HaveOccurred(), "failed to create node logical switch with foreign-controller ACL")
+
+				sw := findSwitch(fakeOvn.nbClient)
+				Expect(sw.OtherConfig["mcast_querier"]).To(Equal("false"),
+					"querier must stay off when only foreign-controller ACLs exist")
+
+				return nil
+			}
+			Expect(app.Run([]string{app.Name})).NotTo(HaveOccurred(),
+				"failed to run foreign-controller ACL isolation test")
+		})
+
+		It("toggles mcast_querier on and off via sync", func() {
+			app.Action = func(*cli.Context) error {
+				config.IPv4Mode = true
+				node := newNode(nodeName, "192.168.126.202/24")
+
+				sw := &nbdb.LogicalSwitch{
+					Name: nodeName,
+					OtherConfig: map[string]string{
+						"mcast_snoop":   "true",
+						"mcast_querier": "false",
+						"mcast_eth_src": "0a:58:0a:80:00:01",
+						"mcast_ip4_src": "10.128.0.1",
+					},
+				}
+				rtrPG := newNetworkRouterPortGroup(getNetInfoFromNAD(nil))
+				fakeOvn.startWithDBSetup(libovsdb.TestSetup{NBData: []libovsdb.TestData{sw, rtrPG}},
+					&corev1.NodeList{Items: []corev1.Node{*node}})
+				bnc := startBaseNetworkController(fakeOvn, nil)
+
+				// Enable: add ACLs for two namespaces, wait for cache, then sync
+				mcastACL1 := newMcastACL("ns1")
+				mcastACL2 := newMcastACL("ns2")
+				pgName := bnc.getClusterPortGroupName(types.ClusterRtrPortGroupNameBase)
+				createMcastACLs(fakeOvn.nbClient, pgName, mcastACL1, mcastACL2)
+				Eventually(fakeOvn.nbClient, 5).Should(
+					libovsdb.HaveDataSubset(mcastACL1, mcastACL2),
+					"multicast ACLs did not appear in cache")
+
+				Expect(bnc.isAnyNamespaceMulticastEnabled()).To(BeTrue(),
+					"multicast should be enabled after ACLs are added")
+				Expect(bnc.syncNodeLogicalSwitchQueriers()).To(Succeed(), "failed to sync queriers on")
+				Expect(findSwitch(fakeOvn.nbClient).OtherConfig["mcast_querier"]).To(Equal("true"),
+					"querier should be on after ACL is added")
+
+				// Partial removal: delete only ns1 ACL, querier must stay on
+				Expect(libovsdbops.DeleteACLsFromPortGroups(fakeOvn.nbClient, []string{pgName}, mcastACL1)).
+					To(Succeed(), "failed to delete ns1 ACL from port group")
+				Eventually(fakeOvn.nbClient, 5).ShouldNot(
+					libovsdb.HaveDataSubset(mcastACL1),
+					"ns1 ACL should be removed from cache")
+
+				Expect(bnc.isAnyNamespaceMulticastEnabled()).To(BeTrue(),
+					"multicast should still be enabled with ns2 ACL remaining")
+				Expect(bnc.syncNodeLogicalSwitchQueriers()).To(Succeed(), "failed to sync queriers after partial removal")
+				Expect(findSwitch(fakeOvn.nbClient).OtherConfig["mcast_querier"]).To(Equal("true"),
+					"querier should stay on when at least one namespace ACL remains")
+
+				// Full removal: delete ns2 ACL, querier must turn off
+				Expect(libovsdbops.DeleteACLsFromPortGroups(fakeOvn.nbClient, []string{pgName}, mcastACL2)).
+					To(Succeed(), "failed to delete ns2 ACL from port group")
+				Eventually(fakeOvn.nbClient, 5).ShouldNot(
+					libovsdb.HaveDataSubset(mcastACL2),
+					"ns2 ACL should be removed from cache")
+
+				Expect(bnc.isAnyNamespaceMulticastEnabled()).To(BeFalse(),
+					"multicast should be disabled after all ACLs are removed")
+				Expect(bnc.syncNodeLogicalSwitchQueriers()).To(Succeed(), "failed to sync queriers off")
+				Expect(findSwitch(fakeOvn.nbClient).OtherConfig["mcast_querier"]).To(Equal("false"),
+					"querier should be off after all ACLs are removed")
+
+				return nil
+			}
+			Expect(app.Run([]string{app.Name})).NotTo(HaveOccurred(),
+				"failed to run querier sync toggle test")
+		})
+
+		It("does not modify switches owned by a different network during sync", func() {
+			app.Action = func(*cli.Context) error {
+				config.IPv4Mode = true
+				node := newNode(nodeName, "192.168.126.202/24")
+
+				sw := &nbdb.LogicalSwitch{
+					Name: nodeName,
+					OtherConfig: map[string]string{
+						"mcast_snoop":   "true",
+						"mcast_querier": "false",
+						"mcast_eth_src": "0a:58:0a:80:00:01",
+						"mcast_ip4_src": "10.128.0.1",
+					},
+				}
+				foreignSw := &nbdb.LogicalSwitch{
+					Name: "foreign-net-node",
+					OtherConfig: map[string]string{
+						"mcast_snoop":   "true",
+						"mcast_querier": "false",
+						"mcast_eth_src": "0a:58:0a:81:00:01",
+						"mcast_ip4_src": "10.129.0.1",
+					},
+					ExternalIDs: map[string]string{
+						types.NetworkExternalID: "other-network",
+					},
+				}
+				rtrPG := newNetworkRouterPortGroup(getNetInfoFromNAD(nil))
+				fakeOvn.startWithDBSetup(libovsdb.TestSetup{NBData: []libovsdb.TestData{sw, foreignSw, rtrPG}},
+					&corev1.NodeList{Items: []corev1.Node{*node}})
+				bnc := startBaseNetworkController(fakeOvn, nil)
+
+				mcastACL := newMcastACL("ns1")
+				pgName := bnc.getClusterPortGroupName(types.ClusterRtrPortGroupNameBase)
+				createMcastACLs(fakeOvn.nbClient, pgName, mcastACL)
+				Eventually(fakeOvn.nbClient, 5).Should(
+					libovsdb.HaveDataSubset(mcastACL),
+					"multicast ACL did not appear in cache")
+
+				Expect(bnc.syncNodeLogicalSwitchQueriers()).To(Succeed(), "failed to sync queriers")
+
+				foreignSwitches, err := libovsdbops.FindLogicalSwitchesWithPredicate(fakeOvn.nbClient, func(item *nbdb.LogicalSwitch) bool {
+					return item.Name == "foreign-net-node"
+				})
+				Expect(err).NotTo(HaveOccurred(), "failed to find foreign-network switch")
+				Expect(foreignSwitches).To(HaveLen(1), "expected exactly one foreign-network switch")
+				Expect(foreignSwitches[0].OtherConfig["mcast_querier"]).To(Equal("false"),
+					"foreign-network switch querier must remain unchanged after sync")
+
+				return nil
+			}
+			Expect(app.Run([]string{app.Name})).NotTo(HaveOccurred(),
+				"failed to run foreign-network isolation test")
+		})
 	})
 })
