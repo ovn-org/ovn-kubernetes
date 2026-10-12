@@ -91,7 +91,8 @@ func (o *FakeOVNNode) init(ctx context.Context) {
 	Expect(err).NotTo(HaveOccurred())
 
 	cnnci := NewCommonNodeNetworkControllerInfo(o.fakeClient.KubeClient, o.fakeClient.AdminPolicyRouteClient, o.watcher, o.recorder, fakeNodeName, routemanager.NewController())
-	o.nc = newDefaultNodeNetworkController(cnnci, o.stopChan, o.wg, routemanager.NewController(), nil, nil)
+	o.nc, err = newDefaultNodeNetworkController(cnnci, o.stopChan, o.wg, routemanager.NewController(), nil, nil)
+	Expect(err).NotTo(HaveOccurred())
 	// watcher is started by nodeControllerManager, not by nodeNetworkController, so start it here.
 	Expect(o.watcher.Start()).To(Succeed())
 	Expect(o.nc.Init(ctx)).To(Succeed())

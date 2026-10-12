@@ -75,6 +75,8 @@ type NodeWatchFactory interface {
 	UplinkStateInformer() uplinkinformer.UplinkStateInformer
 	RouteAdvertisementsInformer() routeadvertisementsinformer.RouteAdvertisementsInformer
 	VTEPInformer() vtepinformer.VTEPInformer
+	ServiceInformer() cache.SharedIndexInformer
+	EndpointSliceInformer() cache.SharedIndexInformer
 
 	GetPods(namespace string) ([]*corev1.Pod, error)
 	GetPod(namespace, name string) (*corev1.Pod, error)
