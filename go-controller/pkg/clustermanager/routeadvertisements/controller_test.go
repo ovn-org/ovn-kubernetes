@@ -1652,6 +1652,25 @@ func TestController_reconcile(t *testing.T) {
 			expectAcceptedMessageContains: "invalid VRF name",
 		},
 		{
+			name: "rejects RouteAdvertisements with a newline in the target VRF",
+			ra:   &testRA{Name: "ra", TargetVRF: "red\nx", AdvertisePods: true, SelectsDefault: true},
+			frrConfigs: []*testFRRConfig{
+				{
+					Name:      "frrConfig",
+					Namespace: frrNamespace,
+					Routers: []*testRouter{
+						{ASN: 1, VRF: "red\nx", Prefixes: []string{"1.1.1.0/24"}, Neighbors: []*testNeighbor{
+							{ASN: 1, Address: "1.0.0.100"},
+						}},
+					},
+				},
+			},
+			nodes:                         []*testNode{{Name: "node", SubnetsAnnotation: "{\"default\":\"1.1.0.0/24\"}"}},
+			reconcile:                     "ra",
+			expectAcceptedStatus:          metav1.ConditionFalse,
+			expectAcceptedMessageContains: "invalid TargetVRF",
+		},
+		{
 			name: "rejects FRRConfiguration neighbor with a newline in the interface name",
 			ra:   &testRA{Name: "ra", AdvertisePods: true, SelectsDefault: true},
 			frrConfigs: []*testFRRConfig{

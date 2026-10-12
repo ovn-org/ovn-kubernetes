@@ -500,6 +500,11 @@ func (c *Controller) generateFRRConfigurations(ra *ratypes.RouteAdvertisements) 
 	if advertisements.Has(ratypes.EgressIP) && ra.Spec.TargetVRF == "auto" {
 		return nil, nil, fmt.Errorf("%w: advertising EgressIP not supported with TargetVRF set to 'auto'", errConfig)
 	}
+	if ra.Spec.TargetVRF != "" && ra.Spec.TargetVRF != "auto" {
+		if err := validateInterfaceName(ra.Spec.TargetVRF); err != nil {
+			return nil, nil, fmt.Errorf("%w: invalid TargetVRF %s: %w", errUnsafeFRRInput, quoteForError(ra.Spec.TargetVRF), err)
+		}
+	}
 
 	// if we are matching on the well known default network label, create an
 	// internal nad for it if it doesn't exist
@@ -999,7 +1004,13 @@ func (c *Controller) generateFRRConfiguration(
 		case targetVRF == "auto":
 			// match router.VRF to network.VRF, advertise node prefixes
 			matchedVRF = router.VRF
-			matchedNetwork = selectedNetworks.networkVRFs[matchedVRF]
+			var ok bool
+			matchedNetwork, ok = selectedNetworks.networkVRFs[matchedVRF]
+			if !ok {
+				// router.VRF is written to the FRR config as the VRF name, so
+				// only the validated VRF name of a selected network may be used
+				continue
+			}
 			advertisePrefixes = selectedNetworks.hostNetworkSubnets[matchedNetwork]
 		case targetVRF == "":
 			// match on default network/VRF, advertise node prefixes
@@ -1012,6 +1023,9 @@ func (c *Controller) generateFRRConfiguration(
 			matchedNetwork = selectedNetworks.networkVRFs[matchedVRF]
 			advertisePrefixes = selectedNetworks.hostSubnets
 		}
+		// a router is only used when router.VRF equals matchedVRF: the empty
+		// default VRF, the validated target VRF, or the validated VRF name of
+		// a selected network
 		if matchedVRF != router.VRF || len(advertisePrefixes) == 0 {
 			// either this router VRF does not match the target VRF or we don't
 			// have prefixes for it (which might be due to this RA not selecting
