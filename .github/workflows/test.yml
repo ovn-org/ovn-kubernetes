@@ -4,10 +4,6 @@ on:
   merge_group:
   pull_request:
     branches: [ master,release-* ]
-    # Only run jobs if at least one non-doc file is changed
-    paths-ignore:
-      - '**/*.md'
-      - 'mkdocs.yml'
   schedule:
     - cron: '0 */12 * * *'
   workflow_dispatch:
@@ -40,8 +36,42 @@ env:
   # OVN_GITREF: main
 
 jobs:
+  changes:
+    name: Check changed files
+    runs-on: ubuntu-24.04
+    permissions:
+      pull-requests: read
+    outputs:
+      run_ci: ${{ steps.filter.outputs.run_ci }}
+    steps:
+    - name: Check whether CI is needed
+      id: filter
+      uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+      with:
+        script: |
+          // Scheduled, manual, and merge-group runs always run the full CI suite.
+          if (context.eventName !== 'pull_request') {
+            core.setOutput('run_ci', 'true');
+            return;
+          }
+          const files = await github.paginate(github.rest.pulls.listFiles, {
+            ...context.repo,
+            pull_number: context.issue.number,
+            per_page: 100,
+          });
+          const isDoc = path => path.startsWith('docs/') || path.endsWith('.md') ||
+            path === 'mkdocs.yml' || path.startsWith('.github/ISSUE_TEMPLATE/');
+          // The API caps results at 3000 files. Never skip CI on an incomplete list.
+          // Check both paths of a rename so moving code into docs still runs CI.
+          const runCI = files.length === 0 || files.length >= 3000 ||
+            files.some(file => !isDoc(file.filename) ||
+              (file.previous_filename && !isDoc(file.previous_filename)));
+          core.setOutput('run_ci', String(runCI));
+
   # separate job for parallelism
   lint:
+    needs: changes
+    if: needs.changes.outputs.run_ci == 'true'
     name: Lint
     runs-on: ubuntu-24.04
     steps:
@@ -63,6 +93,8 @@ jobs:
         args: --modules-download-mode=vendor --timeout=15m0s --verbose
 
   build-base:
+    needs: changes
+    if: needs.changes.outputs.run_ci == 'true'
     name: Build-base
     runs-on: ubuntu-24.04
     steps:
@@ -152,9 +184,18 @@ jobs:
         path: ${{ env.CI_IMAGE_BASE_TAR }}
 
   build-pr:
+    needs: changes
+    # A failed file check must fail this required check, rather than skip it.
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.run_ci != 'false') }}
     name: Build-PR
     runs-on: ubuntu-24.04
     steps:
+    - name: Verify changed-file check succeeded
+      env:
+        CHANGES_RESULT: ${{ needs.changes.result }}
+        RUN_CI: ${{ needs.changes.outputs.run_ci }}
+      run: test "$CHANGES_RESULT" = success && test "$RUN_CI" = true
+
     # Create a cache for the build PR image
     - name: Restore PR image cache
       id: image_cache_pr
@@ -237,6 +278,8 @@ jobs:
         path: ${{ env.CI_DIST_IMAGES_OUTPUT }}/${{ env.CI_IMAGE_PR_TAR }}
 
   test-pr:
+    needs: changes
+    if: needs.changes.outputs.run_ci == 'true'
     name: Test-PR
     runs-on: ubuntu-24.04
     steps:
@@ -504,7 +547,8 @@ jobs:
           - {"target": "traffic-flow-test-only", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv4", "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "1br", "ic": "ic-single-node-zones", "traffic-flow-tests": "1-24", "network-segmentation": "enable-network-segmentation"}
           - {"target": "tools", "ha": "noHA", "gateway-mode": "local", "ipfamily": "dualstack", "disable-snat-multiple-gws": "SnatGW", "second-bridge": "1br", "ic": "ic-single-node-zones", "network-segmentation": "enable-network-segmentation"}
           - {"target": "serial", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv4", "disable-snat-multiple-gws": "snatGW", "second-bridge": "1br", "ic": "ic-single-node-zones"}
-    needs: [ build-pr ]
+    needs: [ changes, build-pr ]
+    if: needs.changes.outputs.run_ci == 'true'
     env:
       JOB_NAME: "${{ matrix.target }}-${{ matrix.ha }}-${{ matrix.gateway-mode }}-${{ matrix.ipfamily }}-${{ matrix.disable-snat-multiple-gws }}-${{ matrix.second-bridge }}-${{ matrix.ic }}"
       OVN_HYBRID_OVERLAY_ENABLE: ${{ matrix.target == 'control-plane' && (matrix.ipfamily == 'ipv4' || matrix.ipfamily == 'dualstack' ) }}
