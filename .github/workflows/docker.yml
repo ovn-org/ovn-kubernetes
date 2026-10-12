@@ -25,7 +25,7 @@ jobs:
       matrix:
         include:
         - platform: linux/amd64
-          runner: ubuntu-latest
+          runner: ubuntu-26.04
         - platform: linux/arm64
           runner: ubuntu-24.04-arm
     steps:
@@ -87,7 +87,7 @@ jobs:
   # Merge Fedora multi-platform images
   merge-fedora:
     name: Merge Fedora
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     needs: build-fedora
     steps:
     - name: Download digests
@@ -132,7 +132,7 @@ jobs:
       matrix:
         include:
         - platform: linux/amd64
-          runner: ubuntu-latest
+          runner: ubuntu-26.04
         - platform: linux/arm64
           runner: ubuntu-24.04-arm
     steps:
@@ -198,7 +198,7 @@ jobs:
   # Merge Ubuntu multi-platform images
   merge-ubuntu:
     name: Merge Ubuntu
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     needs: build-ubuntu
     steps:
     - name: Download digests

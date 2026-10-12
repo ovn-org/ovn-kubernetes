@@ -15,7 +15,7 @@ jobs:
         contains(github.event.comment.body, '/cancel') || 
         contains(github.event.comment.body, '/help')
       ) 
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - name: Check out code
         uses: actions/checkout@v6
