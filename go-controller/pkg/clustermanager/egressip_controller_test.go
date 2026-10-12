@@ -3701,7 +3701,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				gomega.Expect(err).ShouldNot(gomega.HaveOccurred(), "Deletion of EIP must succeed")
 				// if reserve ID succeeds, then the previous entry was removed.
 				gomega.Eventually(func() error {
-					return fakeClusterManagerOVN.eIPC.markAllocator.ReserveID(eIP.Name, 9999)
+					return fakeClusterManagerOVN.eIPC.markAllocator.ReserveID(eIP.Name, assignedMark-util.EgressIPMarkBase)
 				}).Should(gomega.Succeed())
 				return nil
 			}
