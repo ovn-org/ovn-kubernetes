@@ -128,6 +128,7 @@ nav:
       - developer-guide/index.md
       - Contributing Guide: governance/CONTRIBUTING.md
       - Governance: governance/GOVERNANCE.md
+      - Project Scope: governance/SCOPE.md
       - Reviewing Guide: governance/REVIEWING.md
       - Meetings: governance/MEETINGS.md
       - Maintainers: governance/MAINTAINERS.md

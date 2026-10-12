@@ -22,6 +22,19 @@ hard)
 
 (Bullet list of What is explicitly out of scope for this proposal.)
 
+## Why OVN-Kubernetes?
+
+(Required. Explain why this feature belongs in OVN-Kubernetes rather than in an
+upstream project (OVN, OVS, FRR), the Kubernetes API, or a companion project.
+See [Project Scope](../governance/SCOPE.md) for the full rubric.)
+
+Answer the following:
+
+* How does this proposal affect the pod/VM data path?
+* Does it require OVN-specific capabilities, or could any CNI implement it?
+* If it overlaps with an upstream project (OVN, OVS, FRR, K8s API), what is the
+  upstream contribution plan and the shim removal timeline?
+
 ## Introduction
 
 (Can link to external doc -- but we should bias towards copying
@@ -67,13 +80,13 @@ details)
 
 * add details if ovnkube API is changing
 
-### Implementation Details
+### Implementation Plan
 
-(... details on what changes will be made to ovnkube to achieve the
-proposal; go as deep as possible; use diagrams wherever it makes sense)
-
-* add details for differences between lgw and sgw modes if any
-* add config knob details if any
+(... rough sketch of how the feature will be implemented. for example
+which controllers in ovnkube will be touched. are we changing any of
+the contracts between controllers or introducing new ones. basically,
+if there's a chance we make a decision here that is not easily reversible
+call it out here).
 
 ### Testing Details
 
@@ -93,6 +106,26 @@ to include the path to your new OKEP (i.e Feature Title: okeps/<filename.md>)
 
 ## Risks, Known Limitations and Mitigations
 
+
+## Feature Matrix Coverage
+
+(Required. For each dimension below, state whether this proposal supports it,
+explicitly defers it (with a tracking issue), or is not applicable. Silent gaps
+are grounds for rejection.)
+
+| Dimension | Status | Notes |
+|-----------|--------|-------|
+| Local gateway (lgw) | | |
+| Shared gateway (sgw) | | |
+| IPv4 | | |
+| IPv6 | | |
+| Dual-stack | | |
+| OVN Interconnect (multi-zone) | | |
+| Default cluster network | | |
+| User-Defined Networks (UDN/CUDN) | | |
+| DPU / SmartNIC offload | | |
+| KubeVirt VMs | | |
+
 ## OVN-Kubernetes Version Skew
 
 which version is this feature planned to be introduced in?
@@ -109,6 +142,12 @@ This should include:)
   modifying existing ones. Existing E2E tests should continue to validate that the current
   API remains functional. If you must modify existing E2E tests, ensure the changes do not
   break validation of the current API behavior.
+
+## Graduation Criteria
+
+(When is this feature considered stable/GA? What signals indicate it is ready
+to be enabled by default? Include: test coverage, known-limitation resolution,
+community adoption signals.)
 
 ## Alternatives
 
