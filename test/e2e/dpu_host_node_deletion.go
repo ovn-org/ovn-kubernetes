@@ -38,6 +38,9 @@ const (
 	// dpuOvnkubeControllerContainer is the container of the DPU-side ovnkube-node
 	// pod that runs ovnkube on behalf of the host node.
 	dpuOvnkubeControllerContainer = "ovnkube-controller"
+	// dpuHostOvnkubeNodeContainer is the container of the DPU-host ovnkube-node
+	// pod that runs on the host node itself.
+	dpuHostOvnkubeNodeContainer = "ovnkube-node"
 	// dpuOwnNodeDeletedLogMarker is logged by ovnkube-node when it exits because
 	// the Node object it runs on behalf of was deleted.
 	dpuOwnNodeDeletedLogMarker = "runs on behalf of was deleted"
@@ -222,11 +225,11 @@ func isSchedulableDPUHostNode(node *corev1.Node) bool {
 }
 
 // dpuRunningContainerID returns the ID of the running container named name on
-// the DPU Kind node, or an empty string if there is none.
+// the Kind node, or an empty string if there is none.
 func dpuRunningContainerID(dpuNodeName, name string) (string, error) {
 	out, err := ForContainer(dpuNodeName).Exec("crictl", "ps", "-q", "--name", "^"+name+"$")
 	if err != nil {
-		return "", fmt.Errorf("failed to list the %s containers on DPU %s: %w, output: %s", name, dpuNodeName, err, out)
+		return "", fmt.Errorf("failed to list the %s containers on node %s: %w, output: %s", name, dpuNodeName, err, out)
 	}
 	ids := strings.Fields(out)
 	switch len(ids) {
@@ -235,7 +238,7 @@ func dpuRunningContainerID(dpuNodeName, name string) (string, error) {
 	case 1:
 		return ids[0], nil
 	default:
-		return "", fmt.Errorf("%d %s containers running on DPU %s, expected one", len(ids), name, dpuNodeName)
+		return "", fmt.Errorf("%d %s containers running on node %s, expected one", len(ids), name, dpuNodeName)
 	}
 }
 
@@ -339,6 +342,15 @@ func restoreDPUHostNode(ctx context.Context, cs kubernetes.Interface, hostNode *
 			return len(pods.Items), nil
 		}).WithTimeout(2*time.Minute).WithPolling(dpuHostNodeDeletionPoll).Should(gomega.BeZero(),
 			"pods bound to the deleted node %s were not garbage collected", nodeName)
+		// The pod garbage collector removes the pod object before the kubelet
+		// has killed the container, and the kubelet restart below cancels an
+		// in-flight container stop. A still running DPU-host ovnkube-node
+		// recreates the management port from the VF as soon as it is renamed
+		// back, so wait for the process to be gone before releasing the VF.
+		gomega.Eventually(func() (string, error) {
+			return dpuRunningContainerID(nodeName, dpuHostOvnkubeNodeContainer)
+		}).WithTimeout(2*time.Minute).WithPolling(dpuHostNodeDeletionPoll).Should(gomega.BeEmpty(),
+			"the %s container kept running on node %s after its pod was deleted", dpuHostOvnkubeNodeContainer, nodeName)
 		releaseDPUSimManagementVF(hostNode)
 		// Register with the DPU host label already set: a re-registered node
 		// without it matches the full-mode ovnkube-node DaemonSet until the label
