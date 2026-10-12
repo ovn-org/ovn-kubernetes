@@ -122,14 +122,22 @@ func (c *Controller) reconcilePod(key string) error {
 	}
 
 	// If we already have cached entries for this exact pod (same UID), ensure the
-	// neighbors are present without re-parsing the annotation. On rapid pod
-	// delete/recreate with the same name, the UID changes and we fall through to
-	// re-parse the annotation and replace the stale cache entry.
+	// neighbors are present without re-parsing the annotation.
 	c.podNeighLock.Lock()
 	existing, hasExisting := c.podNeighbors[key]
 	c.podNeighLock.Unlock()
 	if hasExisting && existing.uid == pod.UID && c.shouldEnsureNeighbors(migrationStatus) {
 		return c.ensurePodNeighbors(existing)
+	}
+	// On rapid pod delete/recreate with the same name (e.g. force-deleted
+	// StatefulSet pod), the workqueue may coalesce the delete and create events
+	// into a single reconcile for the new pod. Clean up the old kernel
+	// FDB/neighbor entries before programming new ones, otherwise stale entries
+	// for the previous pod's MAC/IPs would persist until the next periodic sync.
+	if hasExisting {
+		if err := c.deletePodNeighbors(key); err != nil {
+			return fmt.Errorf("failed to delete stale neighbors for recreated pod %s: %v", key, err)
+		}
 	}
 
 	nadKey, err := c.networkMgr.GetPrimaryNADForNamespace(pod.Namespace)

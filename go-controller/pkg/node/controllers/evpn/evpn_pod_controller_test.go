@@ -118,6 +118,86 @@ var _ = Describe("EVPN pod controller", func() {
 			Expect(entry.uid).To(Equal(k8stypes.UID("pod-uid-1")))
 		})
 
+		It("cleans up stale entries when pod is recreated with a different UID", func() {
+			oldMAC, _ := net.ParseMAC("0a:58:0a:00:00:05")
+			key := "test-ns/test-pod"
+
+			ctrl.podNeighbors[key] = &neighEntries{
+				uid:         "pod-uid-old",
+				sviName:     "svl2-test",
+				ovsPortName: "evovs-test",
+				macvrfVID:   100,
+				ips:         []net.IP{net.ParseIP("10.0.0.5")},
+				mac:         oldMAC,
+			}
+
+			netInfo := &multinetworkmocks.NetInfo{}
+			netInfo.On("EVPNVTEPName").Return("vtep1")
+			netInfo.On("EVPNMACVRFVID").Return(100)
+			netInfo.On("EVPNMACVRFVNI").Return(int32(10100))
+			netInfo.On("GetNetworkName").Return("mynet")
+			netInfo.On("GetNetworkID").Return(5)
+			netInfo.On("IsPrimaryNetwork").Return(true)
+			const nadKey = "test-ns/test-nad"
+			fakeNM.NADNetworks = map[string]util.NetInfo{nadKey: netInfo}
+			fakeNM.PrimaryNetworks = map[string]util.NetInfo{"test-ns": netInfo}
+
+			sviName := GetEVPNL2SVIName(netInfo)
+			ovsPortName := GetEVPNOVSPortName(netInfo)
+			sviLink := &netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Name: sviName, Index: 10}}
+			ovsPortLink := &netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Name: ovsPortName, Index: 20}}
+
+			oldSVILink := &netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Name: "svl2-test", Index: 10}}
+			oldOVSLink := &netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Name: "evovs-test", Index: 20}}
+			nlMock.On("LinkByName", "svl2-test").Return(oldSVILink, nil)
+			nlMock.On("LinkByName", "evovs-test").Return(oldOVSLink, nil)
+			nlMock.On("LinkByName", sviName).Return(sviLink, nil)
+			nlMock.On("LinkByName", ovsPortName).Return(ovsPortLink, nil)
+			nlMock.On("NeighDel", mock.Anything).Return(nil)
+			nlMock.On("NeighAdd", mock.Anything).Return(nil)
+
+			newMAC, _ := net.ParseMAC("0a:58:0a:00:00:06")
+			podAnnotation := `{"test-ns/test-nad":{"ip_addresses":["10.0.0.6/24"],"mac_address":"0a:58:0a:00:00:06","ip_address":"10.0.0.6/24"}}`
+			newPod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-pod", Namespace: "test-ns",
+					UID:         "pod-uid-new",
+					Annotations: map[string]string{util.OvnPodAnnotationName: podAnnotation},
+				},
+				Spec: corev1.PodSpec{NodeName: nodeName},
+			}
+			ctrl.podLister = newFakePodLister(newPod)
+
+			Expect(ctrl.reconcilePod(key)).To(Succeed())
+
+			By("verifying old FDB entry was deleted")
+			nlMock.AssertCalled(GinkgoT(), "NeighDel", mock.MatchedBy(func(n *netlink.Neigh) bool {
+				return n.LinkIndex == 20 && n.HardwareAddr.String() == oldMAC.String()
+			}))
+
+			By("verifying old neighbor entry was deleted")
+			nlMock.AssertCalled(GinkgoT(), "NeighDel", mock.MatchedBy(func(n *netlink.Neigh) bool {
+				return n.LinkIndex == 10 && n.IP.Equal(net.ParseIP("10.0.0.5"))
+			}))
+
+			By("verifying new FDB entry was added")
+			nlMock.AssertCalled(GinkgoT(), "NeighAdd", mock.MatchedBy(func(n *netlink.Neigh) bool {
+				return n.LinkIndex == 20 && n.HardwareAddr.String() == newMAC.String()
+			}))
+
+			By("verifying new neighbor entry was added")
+			nlMock.AssertCalled(GinkgoT(), "NeighAdd", mock.MatchedBy(func(n *netlink.Neigh) bool {
+				return n.LinkIndex == 10 && n.IP.Equal(net.ParseIP("10.0.0.6"))
+			}))
+
+			By("verifying cache has the new UID")
+			ctrl.podNeighLock.Lock()
+			entry, exists := ctrl.podNeighbors[key]
+			ctrl.podNeighLock.Unlock()
+			Expect(exists).To(BeTrue())
+			Expect(entry.uid).To(Equal(k8stypes.UID("pod-uid-new")))
+		})
+
 		It("cleans up entries when pod is deleted", func() {
 			mac, _ := net.ParseMAC("0a:58:0a:00:00:05")
 			key := "test-ns/test-pod"
@@ -221,7 +301,7 @@ var _ = Describe("EVPN pod controller", func() {
 			Expect(exists).To(BeFalse())
 		})
 
-		It("skips pods whose EVPN network annotation is not yet set", func() {
+		It("skips pods whose CUDN network annotation is not yet set", func() {
 			netInfo := &multinetworkmocks.NetInfo{}
 			netInfo.On("EVPNMACVRFVNI").Return(int32(10100))
 			netInfo.On("IsPrimaryNetwork").Return(true)
