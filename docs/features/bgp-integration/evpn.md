@@ -91,6 +91,23 @@ as a primary address on a dedicated device (e.g. a dummy interface) on each
 node. As a special case of unmanaged mode, node subnet CIDRs can be used, in
 which case the node IPs themselves serve as VTEP IPs.
 
+For each address family, unmanaged VTEPs select a local address within their
+configured CIDRs. When multiple addresses match, known keepalived VIPs and
+secondary addresses are filtered out. The node's primary interface address
+(`k8s.ovn.org/node-primary-ifaddr`) is preferred if it remains an eligible
+candidate, preventing lower-sorting unlabelled VIPs from being selected instead.
+If the primary address is unavailable or outside the VTEP CIDRs, a valid
+previously selected address is retained; otherwise, the lowest remaining address
+is selected. This preserves selection on dedicated secondary networks.
+
+Retention takes precedence over filtering: a previously selected address that is
+still configured locally and within the VTEP CIDRs is kept even if a fresh
+selection would now filter it out as a keepalived VIP or secondary address. It
+is only replaced when the node's primary address is eligible, in which case
+reconciliation moves the VTEP to the primary address even though the old one is
+still present. This can change the VXLAN source address when upgrading an
+affected node.
+
 ```yaml
 apiVersion: k8s.ovn.org/v1
 kind: VTEP
