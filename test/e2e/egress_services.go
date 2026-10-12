@@ -16,6 +16,7 @@ import (
 
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/feature"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
@@ -427,14 +428,15 @@ spec:
 			}
 			framework.ExpectNoError(err, "failed to allocate secondary node IP")
 			otherDst := otherDstIP.String()
+			otherDstCIDR := otherDst + util.GetIPFullMaskString(otherDst)
 			ginkgo.By(fmt.Sprintf("adding secondary IP %q to node %s", otherDst, dstNode.Name))
 			extBridgeName := deploymentconfig.Get().ExternalBridgeName()
-			_, err = infraprovider.Get().ExecK8NodeCommand(dstNode.Name, []string{"ip", "addr", "add", otherDst, "dev", extBridgeName})
+			_, err = infraprovider.Get().ExecK8NodeCommand(dstNode.Name, []string{"ip", "addr", "add", otherDstCIDR, "dev", extBridgeName})
 			if err != nil {
 				framework.Failf("failed to add address to node %s: %v", dstNode.Name, err)
 			}
 			providerCtx.AddCleanUpFn(func() error {
-				_, err = infraprovider.Get().ExecK8NodeCommand(dstNode.Name, []string{"ip", "addr", "delete", otherDst, "dev", extBridgeName})
+				_, err = infraprovider.Get().ExecK8NodeCommand(dstNode.Name, []string{"ip", "addr", "delete", otherDstCIDR, "dev", extBridgeName})
 				return err
 			})
 			ginkgo.By(fmt.Sprintf("Creating host-networked pod on non-egress node %s acting as \"another node\"", dstNode.Name))

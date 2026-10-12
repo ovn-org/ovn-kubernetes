@@ -1700,23 +1700,26 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 			}
 			ginkgo.By("Adding ip addresses to each node")
 			// add new secondary IP from node subnet to all nodes, if the cluster is v6 add an ipv6 address
-			var newIP string
-			newNodeAddresses = make([]string, 0)
+			newNodeAddresses = make([]string, 0, len(nodes.Items))
 			for i, node := range nodes.Items {
+				nodeName := node.Name
+				var newIP string
 				if utilnet.IsIPv6String(e2enode.GetAddresses(&node, v1.NodeInternalIP)[0]) {
 					newIP = "fc00:f853:ccd:e794::" + strconv.Itoa(i)
 				} else {
 					newIP = "172.18.1." + strconv.Itoa(i+1)
 				}
+				newCIDR := newIP + util.GetIPFullMaskString(newIP)
 				// manually add the a secondary IP to each node
-				_, err := infraprovider.Get().ExecK8NodeCommand(node.Name, []string{"ip", "addr", "add", newIP, "dev", deploymentconfig.Get().ExternalBridgeName()})
+				_, err := infraprovider.Get().ExecK8NodeCommand(nodeName, []string{"ip", "addr", "add", newCIDR, "dev", deploymentconfig.Get().ExternalBridgeName()})
 				if err != nil {
-					framework.Failf("failed to add new Addresses to node %s: %v", node.Name, err)
+					framework.Failf("failed to add new Addresses to node %s: %v", nodeName, err)
 				}
+				cidrToCleanup := newCIDR
 				providerCtx.AddCleanUpFn(func() error {
-					_, err := infraprovider.Get().ExecK8NodeCommand(node.Name, []string{"ip", "addr", "del", newIP, "dev", deploymentconfig.Get().ExternalBridgeName()})
+					_, err := infraprovider.Get().ExecK8NodeCommand(nodeName, []string{"ip", "addr", "del", cidrToCleanup, "dev", deploymentconfig.Get().ExternalBridgeName()})
 					if err != nil {
-						framework.Logf("failed to add new Addresses to node %s: %v", node.Name, err)
+						framework.Logf("failed to delete address %s from node %s: %v", cidrToCleanup, nodeName, err)
 					}
 					return nil
 				})

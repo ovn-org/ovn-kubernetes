@@ -1271,13 +1271,14 @@ spec:
 				otherDstIP, err = ipalloc.NewPrimaryIPv4()
 			}
 			otherDst := otherDstIP.String()
+			otherDstCIDR := otherDst + util.GetIPFullMaskString(otherDst)
 			framework.Logf("Adding secondary IP %s to external bridge %s on Node %s", otherDst, deploymentconfig.Get().ExternalBridgeName(), egress2Node.name)
-			_, err = infraprovider.Get().ExecK8NodeCommand(egress2Node.name, []string{"ip", "addr", "add", otherDst, "dev", deploymentconfig.Get().ExternalBridgeName()})
+			_, err = infraprovider.Get().ExecK8NodeCommand(egress2Node.name, []string{"ip", "addr", "add", otherDstCIDR, "dev", deploymentconfig.Get().ExternalBridgeName()})
 			if err != nil {
 				framework.Failf("failed to add address to node %s: %v", egress2Node.name, err)
 			}
 			providerCtx.AddCleanUpFn(func() error {
-				_, err := infraprovider.Get().ExecK8NodeCommand(egress2Node.name, []string{"ip", "addr", "del", otherDst, "dev", deploymentconfig.Get().ExternalBridgeName()})
+				_, err := infraprovider.Get().ExecK8NodeCommand(egress2Node.name, []string{"ip", "addr", "del", otherDstCIDR, "dev", deploymentconfig.Get().ExternalBridgeName()})
 				return err
 			})
 

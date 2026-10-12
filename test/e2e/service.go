@@ -809,10 +809,11 @@ var _ = ginkgo.Describe("Services", feature.Service, func() {
 					if utilnet.IsIPv6String(ip) {
 						subnetMask = "/128"
 					}
+					cidr := ip + subnetMask
 					_, err := infraprovider.Get().ExecK8NodeCommand(nodeName, []string{"ip", "addr", "delete",
-						fmt.Sprintf("%s/%s", ip, subnetMask), "dev", deploymentconfig.Get().ExternalBridgeName()})
+						cidr, "dev", deploymentconfig.Get().ExternalBridgeName()})
 					if err != nil && !(strings.Contains(err.Error(),
-						"RTNETLINK answers: Cannot assign requested address") || !strings.Contains(err.Error(), "Address not found")) {
+						"RTNETLINK answers: Cannot assign requested address") || strings.Contains(err.Error(), "Address not found")) {
 						framework.Failf("failed to remove ip address %s from node %s, err: %q", ip, nodeName, err)
 					}
 				}
@@ -1070,20 +1071,13 @@ var _ = ginkgo.Describe("Services", feature.Service, func() {
 			ginkgo.By("Adding additional IP addresses to each node")
 			for nodeName, ipFamilies := range nodeIPs {
 				for _, ip := range ipFamilies {
+					cidr := ip + util.GetIPFullMaskString(ip)
 					// manually add the a secondary IP to each node
 					framework.Logf("adding IP %q to Node %s", ip, nodeName)
-					_, err = infraprovider.Get().ExecK8NodeCommand(nodeName, []string{"ip", iproute2Proto, "addr", "add", ip, "dev", deploymentconfig.Get().ExternalBridgeName()})
+					_, err = infraprovider.Get().ExecK8NodeCommand(nodeName, []string{"ip", iproute2Proto, "addr", "add", cidr, "dev", deploymentconfig.Get().ExternalBridgeName()})
 					if err != nil {
 						framework.Failf("failed to add new IP address %s to node %s: %v", ip, nodeName, err)
 					}
-					providerCtx.AddCleanUpFn(func() error {
-						// manually add the a secondary IP to each node
-						_, err = infraprovider.Get().ExecK8NodeCommand(nodeName, []string{"ip", iproute2Proto, "addr", "del", ip, "dev", deploymentconfig.Get().ExternalBridgeName()})
-						if err != nil {
-							return fmt.Errorf("failed to add new IP address %s to node %s: %v", ip, nodeName, err)
-						}
-						return nil
-					})
 					toCurlAddresses.Insert(ip)
 				}
 			}
@@ -1339,13 +1333,14 @@ spec:
 				framework.ExpectNoError(err, "must get Node %s network interface %s", nodeName, secondaryProviderNetwork)
 				gomega.Expect(secondaryNetworkInterface.InfName).NotTo(gomega.BeEmpty(), "failed to fetch interface name from a k8 node attached to a secondary network")
 				for _, ip := range ipFamilies {
+					cidr := ip + util.GetIPFullMaskString(ip)
 					// manually add the a secondary IP to each node
-					_, err = infraprovider.Get().ExecK8NodeCommand(nodeName, []string{"ip", "addr", "add", ip, "dev", secondaryNetworkInterface.InfName})
+					_, err = infraprovider.Get().ExecK8NodeCommand(nodeName, []string{"ip", "addr", "add", cidr, "dev", secondaryNetworkInterface.InfName})
 					if err != nil {
 						framework.Failf("failed to add new IP address %s to node %s: %v", ip, nodeName, err)
 					}
 					providerCtx.AddCleanUpFn(func() error {
-						_, err = infraprovider.Get().ExecK8NodeCommand(nodeName, []string{"ip", "addr", "del", ip, "dev", secondaryNetworkInterface.InfName})
+						_, err = infraprovider.Get().ExecK8NodeCommand(nodeName, []string{"ip", "addr", "del", cidr, "dev", secondaryNetworkInterface.InfName})
 						if err != nil {
 							return fmt.Errorf("failed to del newly assigned node IP address %s to node %s: %v", ip, nodeName, err)
 						}
