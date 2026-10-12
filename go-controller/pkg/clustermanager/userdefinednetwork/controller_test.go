@@ -1944,6 +1944,19 @@ var _ = Describe("User Defined Network Controller", func() {
 						testPods = append(testPods, *pod)
 					}
 
+					// deleteNAD checks pods through the informer cache; make sure
+					// the pods are visible there before triggering the deletion.
+					// This doesn't fix the potential race where pod is created right after the CUDN is deleted
+					// or when pod informer cache lags, but that is also not the point of this test.
+					// Since we can only do best-effort check for the pods, we need to make sure informer cache
+					// is synced before we delete the CUDN.
+					Eventually(func(g Gomega) {
+						for _, pod := range testPods {
+							_, err := c.podInformer.Lister().Pods(pod.Namespace).Get(pod.Name)
+							g.Expect(err).NotTo(HaveOccurred())
+						}
+					}, 2*time.Second).Should(Succeed())
+
 					By("mark CR for deletion")
 					p := fmt.Sprintf(`[{"op": "replace", "path": "./metadata/deletionTimestamp", "value": %q }]`, "2024-01-01T00:00:00Z")
 					cudn, err := cs.UserDefinedNetworkClient.K8sV1().ClusterUserDefinedNetworks().Patch(context.Background(), cudnName, types.JSONPatchType, []byte(p), metav1.PatchOptions{})
