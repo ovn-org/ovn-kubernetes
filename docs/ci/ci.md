@@ -8,6 +8,12 @@ are used to run a subset of the Kubernetes E2E tests on each pull request. The
 local workflow that controls the test run is located in
 [ovn-kubernetes/.github/workflows/test.yml](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/master/.github/workflows/test.yml).
 
+For pull requests that only change documentation (`docs/**`, Markdown files,
+`mkdocs.yml`, or `.github/ISSUE_TEMPLATE/**`), a lightweight file check runs and
+skips the build, lint, and test jobs. This lets the required `Build-PR` check report
+as skipped instead of remaining pending because the entire workflow was skipped.
+Scheduled, manual, and merge-group runs still run the full suite.
+
 The following tasks are performed:
 
 - Build OVN-Kubernetes

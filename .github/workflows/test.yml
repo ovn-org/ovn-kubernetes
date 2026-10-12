@@ -4,13 +4,6 @@ on:
   merge_group:
   pull_request:
     branches: [ master,release-* ]
-    # Only run jobs if at least one non-doc file is changed
-    paths-ignore:
-      - 'docs/**'
-      - '**/*.md'
-      - 'mkdocs.yml'
-      - '.github/ISSUE_TEMPLATE/**'
-      - '.github/PULL_REQUEST_TEMPLATE.md'
   schedule:
     - cron: '0 */12 * * *'
   workflow_dispatch:
@@ -43,8 +36,42 @@ env:
   # OVN_GITREF: main
 
 jobs:
+  changes:
+    name: Check changed files
+    runs-on: ubuntu-24.04
+    permissions:
+      pull-requests: read
+    outputs:
+      run_ci: ${{ steps.filter.outputs.run_ci }}
+    steps:
+    - name: Check whether CI is needed
+      id: filter
+      uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+      with:
+        script: |
+          // Scheduled, manual, and merge-group runs always run the full CI suite.
+          if (context.eventName !== 'pull_request') {
+            core.setOutput('run_ci', 'true');
+            return;
+          }
+          const files = await github.paginate(github.rest.pulls.listFiles, {
+            ...context.repo,
+            pull_number: context.issue.number,
+            per_page: 100,
+          });
+          const isDoc = path => path.startsWith('docs/') || path.endsWith('.md') ||
+            path === 'mkdocs.yml' || path.startsWith('.github/ISSUE_TEMPLATE/');
+          // The API caps results at 3000 files. Never skip CI on an incomplete list.
+          // Check both paths of a rename so moving code into docs still runs CI.
+          const runCI = files.length === 0 || files.length >= 3000 ||
+            files.some(file => !isDoc(file.filename) ||
+              (file.previous_filename && !isDoc(file.previous_filename)));
+          core.setOutput('run_ci', String(runCI));
+
   # separate job for parallelism
   verify-lint-generated-code:
+    needs: changes
+    if: needs.changes.outputs.run_ci == 'true'
     name: Verify lint and generated code
     runs-on: ubuntu-24.04
     steps:
@@ -81,6 +108,8 @@ jobs:
         make verify-mocksgen
 
   build-base:
+    needs: changes
+    if: needs.changes.outputs.run_ci == 'true'
     name: Build-base
     runs-on: ubuntu-24.04
     steps:
@@ -174,6 +203,9 @@ jobs:
         path: ${{ env.CI_IMAGE_BASE_TAR }}
 
   build-pr:
+    needs: changes
+    # A failed file check must fail this required check, rather than skip it.
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.run_ci != 'false') }}
     name: Build-PR
     runs-on: ubuntu-24.04
     env:
@@ -182,6 +214,11 @@ jobs:
       PR_IMAGE_TARGET: fedora-image
       PR_IMAGE_ARTIFACT: test-image-pr
     steps:
+    - name: Verify changed-file check succeeded
+      env:
+        CHANGES_RESULT: ${{ needs.changes.result }}
+        RUN_CI: ${{ needs.changes.outputs.run_ci }}
+      run: test "$CHANGES_RESULT" = success && test "$RUN_CI" = true
     # These anchored steps are shared with build-pr-ubuntu below.
     - &restore_pr_image_cache
       name: Restore PR image cache
@@ -269,6 +306,8 @@ jobs:
         path: ${{ env.CI_DIST_IMAGES_OUTPUT }}/${{ env.CI_IMAGE_PR_TAR }}
 
   build-pr-ubuntu:
+    needs: changes
+    if: needs.changes.outputs.run_ci == 'true'
     name: Build-PR (Ubuntu)
     runs-on: ubuntu-24.04
     env:
@@ -287,6 +326,8 @@ jobs:
     - *upload_pr_image
 
   test-pr:
+    needs: changes
+    if: needs.changes.outputs.run_ci == 'true'
     name: Test-PR
     runs-on: ubuntu-24.04
     steps:
@@ -564,8 +605,8 @@ jobs:
           - {"target": "traffic-flow-test-only", "gateway-mode": "shared", "ipfamily": "ipv4", "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "1br", "ic": "ic-single-node-zones", "traffic-flow-tests": "1-24", "network-segmentation": "enable-network-segmentation"}
           - {"target": "tools", "gateway-mode": "local", "ipfamily": "dualstack", "disable-snat-multiple-gws": "SnatGW", "second-bridge": "1br", "ic": "ic-single-node-zones", "network-segmentation": "enable-network-segmentation"}
           - {"target": "serial", "gateway-mode": "shared", "ipfamily": "ipv4", "disable-snat-multiple-gws": "snatGW", "second-bridge": "1br", "ic": "ic-single-node-zones"}
-    needs: [ build-pr, build-pr-ubuntu ]
-    if: ${{ !cancelled() }}
+    needs: [ changes, build-pr, build-pr-ubuntu ]
+    if: ${{ !cancelled() && needs.changes.outputs.run_ci == 'true' }}
     env:
       JOB_NAME: "${{ matrix.target }}-${{ matrix.gateway-mode }}-${{ matrix.ipfamily }}-${{ matrix.disable-snat-multiple-gws }}-${{ matrix.second-bridge }}-${{ matrix.ic }}-${{ matrix.image_family || 'fedora' }}"
       OVN_HYBRID_OVERLAY_ENABLE: ${{ matrix.target == 'control-plane' && (matrix.ipfamily == 'ipv4' || matrix.ipfamily == 'dualstack' ) }}
