@@ -20,6 +20,8 @@ limitations under the License.
 package bitmap
 
 import (
+	"fmt"
+	"math"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -340,5 +342,28 @@ func TestRoundRobinSnapshotAndRestore(t *testing.T) {
 	}
 	if !m2.Has(offset) {
 		t.Fatalf("expect offset %d allocated", offset)
+	}
+}
+
+func TestOutOfRangeOffsets(t *testing.T) {
+	for _, offset := range []int{math.MinInt, -2, -1, 10, math.MaxInt} {
+		t.Run(fmt.Sprint(offset), func(t *testing.T) {
+			m := NewAllocationMap(10, "test")
+			for _, valid := range []int{0, 9} {
+				if ok, err := m.Allocate(valid); !ok || err != nil {
+					t.Fatalf("Allocate(%d) = %v, %v", valid, ok, err)
+				}
+			}
+			if ok, err := m.Allocate(offset); ok || err == nil {
+				t.Fatalf("Allocate(%d) = %v, %v; want false, error", offset, ok, err)
+			}
+			if m.Has(offset) {
+				t.Fatalf("Has(%d) = true", offset)
+			}
+			m.Release(offset)
+			if m.Free() != 8 || !m.Has(0) || !m.Has(9) {
+				t.Fatal("out-of-range operations changed allocations")
+			}
+		})
 	}
 }

@@ -4,7 +4,10 @@
 package id
 
 import (
+	"fmt"
+	"math"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -209,5 +212,55 @@ func TestTunnelKeysAllocator(t *testing.T) {
 	_, err = allocator.AllocateKeys("net6", 10000, totalKeys-7)
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestReserveIDOutOfRange(t *testing.T) {
+	for _, invalid := range []int{math.MinInt, -2, -1, 10, math.MaxInt} {
+		t.Run(fmt.Sprint(invalid), func(t *testing.T) {
+			allocator := NewIDAllocator("test", 10)
+			if err := allocator.ReserveID("node", invalid); err == nil {
+				t.Fatal("expected an out-of-range error")
+			}
+			if got := allocator.GetID("node"); got != invalidID {
+				t.Fatalf("invalid reservation stored: %d", got)
+			}
+			for valid := 0; valid < 10; valid++ {
+				if err := allocator.ReserveID(fmt.Sprint(valid), valid); err != nil {
+					t.Fatalf("valid reservation failed: %v", err)
+				}
+			}
+			if _, err := allocator.AllocateID("extra"); err == nil {
+				t.Fatal("expected full allocator")
+			}
+		})
+	}
+}
+
+func TestReserveIDsOutOfRange(t *testing.T) {
+	for _, invalid := range []int{-2, 2, 9, math.MaxInt} {
+		t.Run(fmt.Sprint(invalid), func(t *testing.T) {
+			allocator := newIDsAllocator("test", 6, 3)
+			if err := allocator.ReserveIDs("existing", []int{3}); err != nil {
+				t.Fatal(err)
+			}
+			err := allocator.ReserveIDs("invalid", []int{4, invalid})
+			if err == nil || !strings.Contains(err.Error(), "outside allocation range") {
+				t.Fatalf("expected bounds error, got %v", err)
+			}
+			if _, found := allocator.nameIdsMap.Load("invalid"); found {
+				t.Fatal("failed reservation stored")
+			}
+			if err := allocator.ReserveIDs("other", []int{3}); err == nil {
+				t.Fatal("existing allocation was released")
+			}
+			// Every remaining ID must be available, including the partial reservation.
+			if err := allocator.ReserveIDs("replacement", []int{4, 5, 6, 7, 8}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := allocator.AllocateIDs("overflow", 1); err == nil {
+				t.Fatal("expected exhaustion")
+			}
+		})
 	}
 }

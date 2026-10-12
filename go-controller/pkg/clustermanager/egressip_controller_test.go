@@ -31,6 +31,7 @@ import (
 	egressipv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/healthcheck"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
 
@@ -3699,10 +3700,11 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				ginkgo.By("deleted EgressIP removes cache entry")
 				err = fakeClusterManagerOVN.fakeClient.EgressIPClient.K8sV1().EgressIPs().Delete(context.TODO(), eIP.Name, metav1.DeleteOptions{})
 				gomega.Expect(err).ShouldNot(gomega.HaveOccurred(), "Deletion of EIP must succeed")
-				// if reserve ID succeeds, then the previous entry was removed.
-				gomega.Eventually(func() error {
-					return fakeClusterManagerOVN.eIPC.markAllocator.ReserveID(eIP.Name, 9999)
-				}).Should(gomega.Succeed())
+				gomega.Eventually(func() int {
+					return fakeClusterManagerOVN.eIPC.markAllocator.GetID(eIP.Name)
+				}).Should(gomega.Equal(types.InvalidID))
+				// The released mark must also be available to another EgressIP.
+				gomega.Expect(fakeClusterManagerOVN.eIPC.reserveMark("another-egressip", assignedMark)).To(gomega.Succeed())
 				return nil
 			}
 			err := app.Run([]string{app.Name})
