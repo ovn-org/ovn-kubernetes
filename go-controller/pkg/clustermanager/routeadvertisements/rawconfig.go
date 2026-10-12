@@ -17,6 +17,9 @@ import (
 // IP-VRFs and MAC-VRFs. Also adds allowas-in origin to all neighbors, which is
 // needed for eBGP peers sharing our ASN and is a no-op for iBGP.
 //
+// Inputs are built through the constructors in validation.go, so every value
+// they carry is a single FRR token.
+//
 // Generated config structure:
 //
 //	router bgp <asn>                    <- genDefaultVRFSection
@@ -67,7 +70,7 @@ func generateRawConfig(selected *selectedNetworks, vrfNeighbors map[string][]str
 	// handle VRF<->VNI mappings
 	ipVRFConfigMap := make(map[string]*ipVRFConfig, len(selected.ipVRFConfigs))
 	for _, cfg := range selected.ipVRFConfigs {
-		ipVRFConfigMap[cfg.VRFName] = cfg
+		ipVRFConfigMap[cfg.vrfName] = cfg
 		buf.WriteString(genVRFVNISection(cfg))
 	}
 
@@ -95,7 +98,7 @@ func genVRFVNISection(cfg *ipVRFConfig) string {
  vni %d
 exit-vrf
 !
-`, cfg.VRFName, cfg.VNI)
+`, cfg.vrfName, cfg.vni)
 }
 
 // genDefaultVRFSection generates the default VRF router's unicast and EVPN address-families.
@@ -229,12 +232,12 @@ func genDefaultVRFEVPNSection(neighbors []string, selected *selectedNetworks) st
 	buf.WriteString("  advertise-all-vni\n")
 
 	for _, cfg := range selected.macVRFConfigs {
-		if cfg.RouteTarget == "" {
+		if cfg.routeTarget == "" {
 			continue
 		}
-		fmt.Fprintf(&buf, "  vni %d\n", cfg.VNI)
-		fmt.Fprintf(&buf, "   route-target import %s\n", cfg.RouteTarget)
-		fmt.Fprintf(&buf, "   route-target export %s\n", cfg.RouteTarget)
+		fmt.Fprintf(&buf, "  vni %d\n", cfg.vni)
+		fmt.Fprintf(&buf, "   route-target import %s\n", cfg.routeTarget)
+		fmt.Fprintf(&buf, "   route-target export %s\n", cfg.routeTarget)
 		buf.WriteString("  exit-vni\n")
 	}
 
@@ -259,15 +262,15 @@ func genNonDefaultVRFEVPNSection(cfg *ipVRFConfig) string {
 	var buf strings.Builder
 	buf.WriteString(" address-family l2vpn evpn\n")
 
-	if cfg.HasIPv4 {
+	if cfg.hasIPv4 {
 		buf.WriteString("  advertise ipv4 unicast\n")
 	}
-	if cfg.HasIPv6 {
+	if cfg.hasIPv6 {
 		buf.WriteString("  advertise ipv6 unicast\n")
 	}
-	if cfg.RouteTarget != "" {
-		fmt.Fprintf(&buf, "  route-target import %s\n", cfg.RouteTarget)
-		fmt.Fprintf(&buf, "  route-target export %s\n", cfg.RouteTarget)
+	if cfg.routeTarget != "" {
+		fmt.Fprintf(&buf, "  route-target import %s\n", cfg.routeTarget)
+		fmt.Fprintf(&buf, "  route-target export %s\n", cfg.routeTarget)
 	}
 
 	buf.WriteString(" exit-address-family\n")

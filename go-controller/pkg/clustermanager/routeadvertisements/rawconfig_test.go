@@ -68,7 +68,7 @@ exit
 			name: "MAC-VRF without route target",
 			selected: &selectedNetworks{
 				macVRFConfigs: []*vrfConfig{
-					{VNI: 1000},
+					{vni: 1000},
 				},
 			},
 			vrfNeighbors: map[string][]string{"": {"192.168.1.1"}},
@@ -90,7 +90,7 @@ exit
 			name: "MAC-VRF with route target",
 			selected: &selectedNetworks{
 				macVRFConfigs: []*vrfConfig{
-					{VNI: 1000, RouteTarget: "65000:1000"},
+					{vni: 1000, routeTarget: "65000:1000"},
 				},
 			},
 			vrfNeighbors: map[string][]string{"": {"192.168.1.1"}},
@@ -117,9 +117,9 @@ exit
 			selected: &selectedNetworks{
 				ipVRFConfigs: []*ipVRFConfig{
 					{
-						vrfConfig: vrfConfig{VNI: 2000, RouteTarget: "65000:2000"},
-						VRFName:   "blue",
-						HasIPv6:   true,
+						vrfConfig: vrfConfig{vni: 2000, routeTarget: "65000:2000"},
+						vrfName:   "blue",
+						hasIPv6:   true,
 					},
 				},
 			},
@@ -155,10 +155,10 @@ exit
 			selected: &selectedNetworks{
 				ipVRFConfigs: []*ipVRFConfig{
 					{
-						vrfConfig: vrfConfig{VNI: 2000, RouteTarget: "65000:2000"},
-						VRFName:   "blue",
-						HasIPv4:   true,
-						HasIPv6:   true,
+						vrfConfig: vrfConfig{vni: 2000, routeTarget: "65000:2000"},
+						vrfName:   "blue",
+						hasIPv4:   true,
+						hasIPv6:   true,
 					},
 				},
 			},
@@ -194,13 +194,13 @@ exit
 			name: "MAC-VRF and IP-VRF combined",
 			selected: &selectedNetworks{
 				macVRFConfigs: []*vrfConfig{
-					{VNI: 1000, RouteTarget: "65000:1000"},
+					{vni: 1000, routeTarget: "65000:1000"},
 				},
 				ipVRFConfigs: []*ipVRFConfig{
 					{
-						vrfConfig: vrfConfig{VNI: 2000, RouteTarget: "65000:2000"},
-						VRFName:   "blue",
-						HasIPv4:   true,
+						vrfConfig: vrfConfig{vni: 2000, routeTarget: "65000:2000"},
+						vrfName:   "blue",
+						hasIPv4:   true,
 					},
 				},
 			},
@@ -243,9 +243,9 @@ exit
 			selected: &selectedNetworks{
 				ipVRFConfigs: []*ipVRFConfig{
 					{
-						vrfConfig: vrfConfig{VNI: 3000, RouteTarget: "65000:3000"},
-						VRFName:   "green",
-						HasIPv4:   true,
+						vrfConfig: vrfConfig{vni: 3000, routeTarget: "65000:3000"},
+						vrfName:   "green",
+						hasIPv4:   true,
 					},
 				},
 			},

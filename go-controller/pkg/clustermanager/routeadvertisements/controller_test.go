@@ -500,12 +500,12 @@ func (tn testNAD) NAD() *nadtypes.NetworkAttachmentDefinition {
 	}
 
 	// Add EVPN configuration if present
-	if tn.EVPNMACVRFVNI > 0 || tn.EVPNIPVRFVNI > 0 {
+	if tn.EVPNMACVRFVNI != 0 || tn.EVPNIPVRFVNI != 0 {
 		evpnConfig := map[string]interface{}{}
 		if tn.EVPNVTEPName != "" {
 			evpnConfig["vtep"] = tn.EVPNVTEPName
 		}
-		if tn.EVPNMACVRFVNI > 0 {
+		if tn.EVPNMACVRFVNI != 0 {
 			macvrf := map[string]interface{}{
 				"vni": tn.EVPNMACVRFVNI,
 			}
@@ -514,7 +514,7 @@ func (tn testNAD) NAD() *nadtypes.NetworkAttachmentDefinition {
 			}
 			evpnConfig["macVRF"] = macvrf
 		}
-		if tn.EVPNIPVRFVNI > 0 {
+		if tn.EVPNIPVRFVNI != 0 {
 			ipvrf := map[string]interface{}{
 				"vni": tn.EVPNIPVRFVNI,
 			}
@@ -607,8 +607,11 @@ func TestController_reconcile(t *testing.T) {
 		ipv6                 bool
 		wantErr              bool
 		expectAcceptedStatus metav1.ConditionStatus
-		expectFRRConfigs     []*testFRRConfig
-		expectNADAnnotations map[string]map[string]string
+		// expectAcceptedMessageContains, when set, is a substring the Accepted
+		// condition message must contain
+		expectAcceptedMessageContains string
+		expectFRRConfigs              []*testFRRConfig
+		expectNADAnnotations          map[string]map[string]string
 	}{
 		{
 			name: "reconciles pod+eip RouteAdvertisement for a single FRR config, node and default network and target VRF",
@@ -1513,6 +1516,102 @@ func TestController_reconcile(t *testing.T) {
 			nodes:                []*testNode{{Name: "node", SubnetsAnnotation: "{\"default\":\"1.1.0.0/24\"}"}},
 			reconcile:            "ra",
 			expectAcceptedStatus: metav1.ConditionFalse,
+		},
+		{
+			name: "rejects EVPN MAC-VRF network with a newline in the route target",
+			ra:   &testRA{Name: "ra", TargetVRF: "auto", AdvertisePods: true, NetworkSelector: map[string]string{"selected": "true"}},
+			frrConfigs: []*testFRRConfig{
+				{
+					Name:      "frrConfig",
+					Namespace: frrNamespace,
+					Routers: []*testRouter{
+						{ASN: 65000, Neighbors: []*testNeighbor{
+							{ASN: 65000, Address: "192.168.1.1"},
+						}},
+					},
+				},
+			},
+			nads: []*testNAD{
+				{Name: "red", Namespace: "red", Network: util.GenerateCUDNNetworkName("red"),
+					Topology: "layer2", Subnet: "10.1.0.0/16", Labels: map[string]string{"selected": "true"},
+					EVPNMACVRFVNI: 1000, EVPNMACVRFRouteTarget: "65000:1\n"},
+			},
+			nodes:                         []*testNode{{Name: "node", SubnetsAnnotation: "{\"default\":\"1.1.0.0/24\"}"}},
+			reconcile:                     "ra",
+			expectAcceptedStatus:          metav1.ConditionFalse,
+			expectAcceptedMessageContains: "invalid MAC-VRF route target",
+		},
+		{
+			name: "rejects EVPN IP-VRF network with a VNI above the maximum",
+			ra:   &testRA{Name: "ra", TargetVRF: "auto", AdvertisePods: true, NetworkSelector: map[string]string{"selected": "true"}},
+			frrConfigs: []*testFRRConfig{
+				{
+					Name:      "frrConfig",
+					Namespace: frrNamespace,
+					Routers: []*testRouter{
+						{ASN: 65000, Neighbors: []*testNeighbor{
+							{ASN: 65000, Address: "192.168.1.1"},
+						}},
+					},
+				},
+			},
+			nads: []*testNAD{
+				{Name: "red", Namespace: "red", Network: util.GenerateCUDNNetworkName("red"),
+					Topology: "layer3", Subnet: "10.1.0.0/16/24", Labels: map[string]string{"selected": "true"},
+					EVPNIPVRFVNI: maxVNI + 1},
+			},
+			nodes:                         []*testNode{{Name: "node", SubnetsAnnotation: "{\"default\":\"1.1.0.0/24\", \"cluster_udn_red\":\"10.1.0.0/24\"}"}},
+			reconcile:                     "ra",
+			expectAcceptedStatus:          metav1.ConditionFalse,
+			expectAcceptedMessageContains: "invalid IP-VRF VNI",
+		},
+		{
+			name: "rejects EVPN MAC-VRF network with a negative VNI",
+			ra:   &testRA{Name: "ra", TargetVRF: "auto", AdvertisePods: true, NetworkSelector: map[string]string{"selected": "true"}},
+			frrConfigs: []*testFRRConfig{
+				{
+					Name:      "frrConfig",
+					Namespace: frrNamespace,
+					Routers: []*testRouter{
+						{ASN: 65000, Neighbors: []*testNeighbor{
+							{ASN: 65000, Address: "192.168.1.1"},
+						}},
+					},
+				},
+			},
+			nads: []*testNAD{
+				{Name: "red", Namespace: "red", Network: util.GenerateCUDNNetworkName("red"),
+					Topology: "layer2", Subnet: "10.1.0.0/16", Labels: map[string]string{"selected": "true"},
+					EVPNMACVRFVNI: -1000, EVPNMACVRFRouteTarget: "65000:1000"},
+			},
+			nodes:                         []*testNode{{Name: "node", SubnetsAnnotation: "{\"default\":\"1.1.0.0/24\"}"}},
+			reconcile:                     "ra",
+			expectAcceptedStatus:          metav1.ConditionFalse,
+			expectAcceptedMessageContains: "invalid MAC-VRF VNI",
+		},
+		{
+			name: "rejects EVPN network whose VRF name is not a valid interface name",
+			ra:   &testRA{Name: "ra", TargetVRF: "auto", AdvertisePods: true, NetworkSelector: map[string]string{"selected": "true"}},
+			frrConfigs: []*testFRRConfig{
+				{
+					Name:      "frrConfig",
+					Namespace: frrNamespace,
+					Routers: []*testRouter{
+						{ASN: 65000, Neighbors: []*testNeighbor{
+							{ASN: 65000, Address: "192.168.1.1"},
+						}},
+					},
+				},
+			},
+			nads: []*testNAD{
+				{Name: "red", Namespace: "red", Network: util.GenerateCUDNNetworkName("red\nx"),
+					Topology: "layer2", Subnet: "10.1.0.0/16", Labels: map[string]string{"selected": "true"},
+					EVPNMACVRFVNI: 1000, EVPNMACVRFRouteTarget: "65000:1000"},
+			},
+			nodes:                         []*testNode{{Name: "node", SubnetsAnnotation: "{\"default\":\"1.1.0.0/24\"}"}},
+			reconcile:                     "ra",
+			expectAcceptedStatus:          metav1.ConditionFalse,
+			expectAcceptedMessageContains: "invalid VRF name",
 		},
 		{
 			name: "reconciles EVPN MAC-VRF l2 network with a specific target VRF without a VRF router",
@@ -3065,6 +3164,9 @@ exit
 				accepted := meta.FindStatusCondition(ra.Status.Conditions, "Accepted")
 				g.Expect(accepted).NotTo(gomega.BeNil())
 				g.Expect(accepted.Status).To(gomega.Equal(tt.expectAcceptedStatus), accepted.Message)
+				if tt.expectAcceptedMessageContains != "" {
+					g.Expect(accepted.Message).To(gomega.ContainSubstring(tt.expectAcceptedMessageContains))
+				}
 				// verify condition metric is set as expected
 				expectedTrue := 0.0
 				expectedFalse := 1.0

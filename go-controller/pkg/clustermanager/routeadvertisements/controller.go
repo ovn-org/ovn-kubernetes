@@ -462,25 +462,27 @@ type selectedNetworks struct {
 	networkUplinks map[string]string
 }
 
-// vrfConfig holds base VRF EVPN configuration for a network
+// vrfConfig holds base VRF EVPN configuration for a network. It is only
+// built through newVRFConfig, which validates every field.
 type vrfConfig struct {
-	// NetworkName is the name of the network this config belongs to
-	NetworkName string
-	// VNI is the VXLAN Network Identifier
-	VNI int32
-	// RouteTarget is the BGP route target, empty means use FRR defaults
-	RouteTarget string
+	// networkName is the name of the network this config belongs to
+	networkName string
+	// vni is the VXLAN Network Identifier
+	vni int32
+	// routeTarget is the BGP route target, empty means use FRR defaults
+	routeTarget string
 }
 
-// ipVRFConfig holds IP-VRF EVPN configuration for a network
+// ipVRFConfig holds IP-VRF EVPN configuration for a network. It is only
+// built through newIPVRFConfig, which validates every field.
 type ipVRFConfig struct {
 	vrfConfig
-	// VRFName is the Linux VRF name
-	VRFName string
-	// HasIPv4 indicates if the network has IPv4 subnets
-	HasIPv4 bool
-	// HasIPv6 indicates if the network has IPv6 subnets
-	HasIPv6 bool
+	// vrfName is the Linux VRF name
+	vrfName string
+	// hasIPv4 indicates if the network has IPv4 subnets
+	hasIPv4 bool
+	// hasIPv6 indicates if the network has IPv6 subnets
+	hasIPv6 bool
 }
 
 // generateFRRConfigurations generates FRRConfigurations for the route
@@ -546,6 +548,9 @@ func (c *Controller) generateFRRConfigurations(ra *ratypes.RouteAdvertisements) 
 		}
 
 		vrf := util.GetNetworkVRFName(network)
+		if err := validateNetworkVRFName(networkName, vrf); err != nil {
+			return nil, nil, fmt.Errorf("%w: %w", errUnsafeFRRInput, err)
+		}
 		if vfrNet, hasVFR := selectedNetworks.networkVRFs[vrf]; hasVFR && vfrNet != networkName {
 			return nil, nil, fmt.Errorf("%w: vrf %q found to be mapped to multiple networks %v", errConfig, vrf, []string{vfrNet, networkName})
 		}
@@ -556,17 +561,18 @@ func (c *Controller) generateFRRConfigurations(ra *ratypes.RouteAdvertisements) 
 		selectedNetworks.networkTransport[networkName] = network.Transport()
 		selectedNetworks.networkUplinks[networkName] = network.Uplink()
 
-		// MAC-VRF configuration
-		if macVNI := network.EVPNMACVRFVNI(); macVNI > 0 {
-			selectedNetworks.macVRFConfigs = append(selectedNetworks.macVRFConfigs, &vrfConfig{
-				NetworkName: networkName,
-				VNI:         macVNI,
-				RouteTarget: network.EVPNMACVRFRouteTarget(),
-			})
+		// MAC-VRF configuration. Zero means no MAC-VRF; any other value,
+		// negative included, is range-checked by newVRFConfig.
+		if macVNI := network.EVPNMACVRFVNI(); macVNI != 0 {
+			cfg, err := newVRFConfig("MAC-VRF", networkName, macVNI, network.EVPNMACVRFRouteTarget())
+			if err != nil {
+				return nil, nil, fmt.Errorf("%w: %w", errUnsafeFRRInput, err)
+			}
+			selectedNetworks.macVRFConfigs = append(selectedNetworks.macVRFConfigs, cfg)
 		}
 
-		// IP-VRF configuration
-		if ipVNI := network.EVPNIPVRFVNI(); ipVNI > 0 {
+		// IP-VRF configuration, same zero convention as the MAC-VRF above.
+		if ipVNI := network.EVPNIPVRFVNI(); ipVNI != 0 {
 			// Compute IP families from network subnets
 			hasIPv4, hasIPv6 := false, false
 			for _, subnet := range network.Subnets() {
@@ -576,16 +582,11 @@ func (c *Controller) generateFRRConfigurations(ra *ratypes.RouteAdvertisements) 
 					hasIPv4 = true
 				}
 			}
-			selectedNetworks.ipVRFConfigs = append(selectedNetworks.ipVRFConfigs, &ipVRFConfig{
-				vrfConfig: vrfConfig{
-					NetworkName: networkName,
-					VNI:         ipVNI,
-					RouteTarget: network.EVPNIPVRFRouteTarget(),
-				},
-				VRFName: vrf,
-				HasIPv4: hasIPv4,
-				HasIPv6: hasIPv6,
-			})
+			cfg, err := newIPVRFConfig(networkName, vrf, ipVNI, network.EVPNIPVRFRouteTarget(), hasIPv4, hasIPv6)
+			if err != nil {
+				return nil, nil, fmt.Errorf("%w: %w", errUnsafeFRRInput, err)
+			}
+			selectedNetworks.ipVRFConfigs = append(selectedNetworks.ipVRFConfigs, cfg)
 		}
 		hasEVPNConfig := network.EVPNMACVRFVNI() > 0 || network.EVPNIPVRFVNI() > 0
 		if vtepName := network.EVPNVTEPName(); hasEVPNConfig && vtepName != "" {
@@ -609,8 +610,8 @@ func (c *Controller) generateFRRConfigurations(ra *ratypes.RouteAdvertisements) 
 	// ordered
 	slices.Sort(selectedNetworks.vrfs)
 	slices.Sort(selectedNetworks.subnets)
-	slices.SortFunc(selectedNetworks.macVRFConfigs, func(a, b *vrfConfig) int { return int(a.VNI - b.VNI) })
-	slices.SortFunc(selectedNetworks.ipVRFConfigs, func(a, b *ipVRFConfig) int { return int(a.VNI - b.VNI) })
+	slices.SortFunc(selectedNetworks.macVRFConfigs, func(a, b *vrfConfig) int { return int(a.vni - b.vni) })
+	slices.SortFunc(selectedNetworks.ipVRFConfigs, func(a, b *ipVRFConfig) int { return int(a.vni - b.vni) })
 	selectedNetworks.networks = sets.List(networkSet)
 	// cache the selected networks so that network activity changes only
 	// reconcile the RouteAdvertisements selecting them. Returning early above
@@ -705,8 +706,8 @@ func (c *Controller) generateFRRConfigurations(ra *ratypes.RouteAdvertisements) 
 	// Validate IP-VRF networks: each needs either an existing VRF router or
 	// the default VRF router to create one from.
 	for _, cfg := range selectedNetworks.ipVRFConfigs {
-		if !frrRouterVRFs.Has(cfg.VRFName) && !frrRouterVRFs.Has("") {
-			return nil, nil, fmt.Errorf("%w: IP-VRF EVPN network %q requires a router with VRF %q or a router with default VRF, but none were found in selected FRRConfigurations", errConfig, cfg.NetworkName, cfg.VRFName)
+		if !frrRouterVRFs.Has(cfg.vrfName) && !frrRouterVRFs.Has("") {
+			return nil, nil, fmt.Errorf("%w: IP-VRF EVPN network %q requires a router with VRF %q or a router with default VRF, but none were found in selected FRRConfigurations", errConfig, cfg.networkName, cfg.vrfName)
 		}
 	}
 
@@ -1229,17 +1230,17 @@ func (c *Controller) generateFRRConfiguration(
 	// IP-VRF routers don't need neighbors for EVPN (they use the global router's neighbors).
 	ipVRFNetworks := sets.New[string]()
 	for _, cfg := range selectedNetworks.ipVRFConfigs {
-		ipVRFNetworks.Insert(cfg.NetworkName)
-		if frrRouterVRFs.Has(cfg.VRFName) {
+		ipVRFNetworks.Insert(cfg.networkName)
+		if frrRouterVRFs.Has(cfg.vrfName) {
 			// VRF router exists somewhere - check if it's in the current source
 			for _, router := range source.Spec.BGP.Routers {
-				if router.VRF == cfg.VRFName {
-					vrfASNs[cfg.VRFName] = router.ASN
-					if !slices.ContainsFunc(routers, func(r frrtypes.Router) bool { return r.VRF == cfg.VRFName }) {
+				if router.VRF == cfg.vrfName {
+					vrfASNs[cfg.vrfName] = router.ASN
+					if !slices.ContainsFunc(routers, func(r frrtypes.Router) bool { return r.VRF == cfg.vrfName }) {
 						routers = append(routers, frrtypes.Router{
 							ASN:      router.ASN,
-							VRF:      cfg.VRFName,
-							Prefixes: selectedNetworks.hostNetworkSubnets[cfg.NetworkName],
+							VRF:      cfg.vrfName,
+							Prefixes: selectedNetworks.hostNetworkSubnets[cfg.networkName],
 						})
 					}
 					break
@@ -1249,13 +1250,13 @@ func (c *Controller) generateFRRConfiguration(
 		} else if vrfASNs[""] > 0 {
 			// VRF router doesn't exist anywhere - create with global ASN
 			klog.Infof("Creating router for EVPN network %q VRF %q with ASN=%d, prefixes=%v",
-				cfg.NetworkName, cfg.VRFName, vrfASNs[""], selectedNetworks.hostNetworkSubnets[cfg.NetworkName])
-			matchedNetworks.Insert(cfg.NetworkName)
-			vrfASNs[cfg.VRFName] = vrfASNs[""]
+				cfg.networkName, cfg.vrfName, vrfASNs[""], selectedNetworks.hostNetworkSubnets[cfg.networkName])
+			matchedNetworks.Insert(cfg.networkName)
+			vrfASNs[cfg.vrfName] = vrfASNs[""]
 			routers = append(routers, frrtypes.Router{
 				ASN:      vrfASNs[""],
-				VRF:      cfg.VRFName,
-				Prefixes: selectedNetworks.hostNetworkSubnets[cfg.NetworkName],
+				VRF:      cfg.vrfName,
+				Prefixes: selectedNetworks.hostNetworkSubnets[cfg.networkName],
 			})
 		}
 	}
@@ -1266,8 +1267,8 @@ func (c *Controller) generateFRRConfiguration(
 	// router with neighbors is present.
 	if ra.Spec.TargetVRF == "auto" && vrfASNs[""] > 0 && len(vrfNeighbors[""]) > 0 {
 		for _, cfg := range selectedNetworks.macVRFConfigs {
-			if !ipVRFNetworks.Has(cfg.NetworkName) {
-				matchedNetworks.Insert(cfg.NetworkName)
+			if !ipVRFNetworks.Has(cfg.networkName) {
+				matchedNetworks.Insert(cfg.networkName)
 			}
 		}
 	}
