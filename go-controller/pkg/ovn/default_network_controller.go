@@ -338,7 +338,8 @@ func (oc *DefaultNetworkController) syncDb() error {
 	return nil
 }
 
-// Start starts the default controller; handles all events and creates all needed logical entities
+// Start starts the default controller; handles all events and creates all needed logical entities.
+// EgressIP watchers are not started here; call StartEgressIP after networkManager.Start().
 func (oc *DefaultNetworkController) Start(ctx context.Context) error {
 	klog.Infof("Starting the default network controller")
 
@@ -351,6 +352,50 @@ func (oc *DefaultNetworkController) Start(ctx context.Context) error {
 	}
 
 	return oc.run(ctx)
+}
+
+// StartEgressIP starts EgressIP handlers. It must run after networkManager.Start()
+// so primary-UDN pods have been programmed into the shared logical-port cache;
+// otherwise syncEgressIPs can treat missing cache entries as stale and delete
+// live UDN EgressIP OVN config on restart.
+func (oc *DefaultNetworkController) StartEgressIP() error {
+	if !config.OVNKubernetesFeature.EnableEgressIP {
+		return nil
+	}
+	klog.Info("Starting EgressIP handlers")
+	start := time.Now()
+	if err := oc.eIPC.StartNADReconciler(); err != nil {
+		return err
+	}
+	// This is probably the best starting order for all egress IP handlers.
+	// WatchEgressIPPods and WatchEgressIPNamespaces only use the informer
+	// cache to retrieve the egress IPs when determining if namespace/pods
+	// match. It is thus better if we initialize them first and allow
+	// WatchEgressNodes / WatchEgressIP to initialize after. Those handlers
+	// might change the assignments of the existing objects. If we do the
+	// inverse and start WatchEgressIPNamespaces / WatchEgressIPPod last, we
+	// risk performing a bunch of modifications on the EgressIP objects when
+	// we restart and then have these handlers act on stale data when they
+	// sync.
+	// Initialize WatchEgressIPPods before WatchEgressIPNamespaces to ensure
+	// that no pod events are missed by the EgressIPController. It's acceptable
+	// to miss a namespace event, as it will be handled indirectly through
+	// the pod delete event within that namespace.
+	if err := WithSyncDurationMetric("egress ip pod", oc.WatchEgressIPPods); err != nil {
+		return err
+	}
+	if err := WithSyncDurationMetric("egress ip namespace", oc.WatchEgressIPNamespaces); err != nil {
+		return err
+	}
+	if err := WithSyncDurationMetric("egress node", oc.WatchEgressNodes); err != nil {
+		return err
+	}
+	if err := WithSyncDurationMetric("egress ip", oc.WatchEgressIP); err != nil {
+		return err
+	}
+	end := time.Since(start)
+	klog.Infof("Completing all the EgressIP handlers took %v", end)
+	return nil
 }
 
 // Stop gracefully stops the controller
@@ -705,38 +750,6 @@ func (oc *DefaultNetworkController) run(_ context.Context) error {
 	// WatchNetworkPolicy depends on WatchPods and WatchNamespaces
 	if err := WithSyncDurationMetric("network policy", oc.WatchNetworkPolicy); err != nil {
 		return err
-	}
-
-	if config.OVNKubernetesFeature.EnableEgressIP {
-		if err := oc.eIPC.StartNADReconciler(); err != nil {
-			return err
-		}
-		// This is probably the best starting order for all egress IP handlers.
-		// WatchEgressIPPods and WatchEgressIPNamespaces only use the informer
-		// cache to retrieve the egress IPs when determining if namespace/pods
-		// match. It is thus better if we initialize them first and allow
-		// WatchEgressNodes / WatchEgressIP to initialize after. Those handlers
-		// might change the assignments of the existing objects. If we do the
-		// inverse and start WatchEgressIPNamespaces / WatchEgressIPPod last, we
-		// risk performing a bunch of modifications on the EgressIP objects when
-		// we restart and then have these handlers act on stale data when they
-		// sync.
-		// Initialize WatchEgressIPPods before WatchEgressIPNamespaces to ensure
-		// that no pod events are missed by the EgressIPController. It's acceptable
-		// to miss a namespace event, as it will be handled indirectly through
-		// the pod delete event within that namespace.
-		if err := WithSyncDurationMetric("egress ip pod", oc.WatchEgressIPPods); err != nil {
-			return err
-		}
-		if err := WithSyncDurationMetric("egress ip namespace", oc.WatchEgressIPNamespaces); err != nil {
-			return err
-		}
-		if err := WithSyncDurationMetric("egress node", oc.WatchEgressNodes); err != nil {
-			return err
-		}
-		if err := WithSyncDurationMetric("egress ip", oc.WatchEgressIP); err != nil {
-			return err
-		}
 	}
 
 	if config.OVNKubernetesFeature.EnableEgressFirewall {

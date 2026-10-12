@@ -39,6 +39,12 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
 
+// startDefaultNetworkController starts the default network controller.
+// Unit tests override this to inject Start failures after init succeeds.
+var startDefaultNetworkController = func(ctx context.Context, c networkmanager.BaseNetworkController) error {
+	return c.Start(ctx)
+}
+
 // ControllerManager structure is the object manages all controllers
 type ControllerManager struct {
 	nodeName     string
@@ -446,6 +452,26 @@ func (cm *ControllerManager) Start(ctx context.Context) error {
 		}
 	}
 
+	// Start route import before the default network controller; DNC init registers with it.
+	if cm.routeImportManager != nil {
+		err = cm.routeImportManager.Start()
+		if err != nil {
+			return fmt.Errorf("failed to start route import: %v", err)
+		}
+	}
+
+	// Start the default network controller before NAD/UDN sync so CDN gateway
+	// topology is programmed promptly. networkManager.Start() serially starts
+	// every secondary network controller and can exceed ovnkube-node's readiness
+	// window when many UDNs exist. UDN-required namespaces return
+	// InvalidPrimaryNetworkError until NAD sync completes; retry paths handle that.
+	// EgressIP is started after networkManager so UDN pods are in the shared
+	// logical-port cache before syncEgressIPs (see DefaultNetworkController.StartEgressIP).
+	err = startDefaultNetworkController(ctx, cm.defaultNetworkController)
+	if err != nil {
+		return fmt.Errorf("failed to start default network controller: %v", err)
+	}
+
 	if cm.networkManager != nil {
 		if cm.nodeController != nil {
 			if err = cm.nodeController.Start(); err != nil {
@@ -457,16 +483,12 @@ func (cm *ControllerManager) Start(ctx context.Context) error {
 		}
 	}
 
-	if cm.routeImportManager != nil {
-		err = cm.routeImportManager.Start()
-		if err != nil {
-			return fmt.Errorf("failed to start route import: %v", err)
-		}
+	dnc, ok := cm.defaultNetworkController.(*ovn.DefaultNetworkController)
+	if !ok {
+		return fmt.Errorf("default network controller is not *ovn.DefaultNetworkController")
 	}
-
-	err = cm.defaultNetworkController.Start(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to start default network controller: %v", err)
+	if err = dnc.StartEgressIP(); err != nil {
+		return fmt.Errorf("failed to start EgressIP: %v", err)
 	}
 
 	return nil
