@@ -128,7 +128,7 @@ show the IP assigned in the cluster default network.
 In OVN-Kubernetes secondary networks are defined using Network Attachment Definitions (NADs). For more information on
 how these are configured, refer to:
 
-[https://github.com/ovn-kubernetes/ovn-kubernetes/blob/master/docs/features/multi-homing.md](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/master/docs/features/multi-homing.md)
+[multi-homing guide](../features/multiple-networks/multi-homing.md)
 
 The proposal here is to leverage this existing mechanism to create the network. A new field, “role” is
 introduced to the NAD spec which indicates that this network should be used for the pod's primary network. Additionally,
@@ -293,7 +293,7 @@ CNI ADD call.
 
 Multiple namespaces may also be configured to use the same network. In this case the underlying OVN network will be the
 same, following a similar pattern to what is
-[already supported today for secondary networks](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/master/docs/features/multiple-networks/multi-homing.md).
+[already supported today for secondary networks](../features/multiple-networks/multi-homing.md).
 
 ### IP Addressing
 
@@ -394,7 +394,7 @@ endpoints are those IP addresses which reside on the user-defined primary networ
 OVN-Kubernetes may create its own endpoint slices or may choose to do dynamic lookups at runtime to map endpoints to
 their primary IP address. Leveraging a second set of endpoint slices will be the preferred method, as it creates less
 indirection and gives explicit Kube API access to what IP addresses are being used by OVN-Kubernetes. Read more about
-the [endpoint slice mirroring implementation](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/master/docs/features/multiple-networks/mirrored-endpointslices.md).
+the [endpoint slice mirroring implementation](../features/user-defined-networks/user-defined-networks.md#endpointslices-mirror-controller-for-user-defined-networks).
 
 Kubelet health checks to pods are queried via the cluster default network. When endpoints are considered unhealthy they
 will be removed from the endpoint slice, and thus their primary IP will be removed from the OVN load balancer. However,
@@ -1217,7 +1217,7 @@ networks, which is undesirable. Therefore, each ovn-k8s-mp0-&lt;network> interfa
 
 The VRFs will clone the default routing table, excluding routes that are created by OVN-Kubernetes for its networks.
 This is similar to the methodology in place today for supporting
-[Egress IP with multiple NICs](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/master/docs/features/cluster-egress-controls/egress-ip.md#egressip-ip-is-assigned-to-a-secondary-host-interface).
+[Egress IP with multiple NICs](../features/cluster-egress-controls/egress-ip.md#egressip-ip-is-assigned-to-a-secondary-host-interface).
 
 ##### Pod Egress
 

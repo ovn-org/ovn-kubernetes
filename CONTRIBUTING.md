@@ -191,7 +191,7 @@ make lint
 ```
 
 * If you are introducing new CRDs verify that Yaml files have been formatted (see
-  [codegen generator](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/master/docs/developer.md#generating-crd-yamls-using-codegen))
+  [codegen generator](https://ovn-kubernetes.io/master/developer-guide/developer/#generating-crd-yamls-using-codegen))
 * Verify that unit tests are passing locally
 
 ```console

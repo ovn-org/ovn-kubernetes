@@ -96,7 +96,7 @@ See [terminology](okep-5193-user-defined-networks.md#terminology) details.
 ## Introduction
 
 In the [OVN-Kubernetes BGP Integration
-enhancement](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/master/docs/okeps/okep-5296-bgp.md#future-goals),
+enhancement](okep-5296-bgp.md#future-goals),
 no-overlay mode was briefly discussed. In this enhancement, we aim to describe
 the feature in detail, define the API changes we want to introduce for it, and
 address a number of concerns with respect to the existing BGP Integration and
@@ -1592,5 +1592,5 @@ N/A
 
 ## References
 
-1. [OKEP-5296: OVN-Kubernetes BGP Integration](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/master/docs/okeps/okep-5296-bgp.md)
-2. [OKEP-5193: User Defined Network Segmentation](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/master/docs/okeps/okep-5193-user-defined-networks.md)
+1. [OKEP-5296: OVN-Kubernetes BGP Integration](okep-5296-bgp.md)
+2. [OKEP-5193: User Defined Network Segmentation](okep-5193-user-defined-networks.md)
