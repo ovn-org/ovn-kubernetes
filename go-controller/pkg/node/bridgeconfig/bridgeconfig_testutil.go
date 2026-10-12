@@ -51,6 +51,7 @@ func TestBridgeConfig(brName string) *BridgeConfiguration {
 	return &BridgeConfiguration{
 		bridgeName: brName,
 		gwIface:    brName,
+		netConfig:  map[string]*BridgeUDNConfiguration{},
 	}
 }
 

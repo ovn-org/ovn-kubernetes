@@ -1802,6 +1802,9 @@ func newGateway(
 
 		// resync flows on IP change
 		gw.nodeIPManager.AddOnAddressesChangedHandler(func() {
+			// Refresh each UDN gateway's address-derived VRF routes (e.g. the
+			// node-connected subnet routes) on node address changes.
+			gw.notifyUDNAddressChange()
 			klog.V(5).Info("Node addresses changed, re-syncing bridge flows")
 			if err := gw.openflowManager.updateBridgeFlowCache(gw.nodeIPManager.ListAddresses()); err != nil {
 				// very unlikely - somehow node has lost its IP address

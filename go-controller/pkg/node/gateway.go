@@ -72,12 +72,11 @@ type gateway struct {
 
 	// udnAddrReconcilers holds per-network callbacks invoked when the node's
 	// addresses change, so each UDN gateway can refresh its address-derived VRF
-	// routes. The addressManager has no per-handler removal, so a single fan-out
-	// handler is registered once (udnAddrHandlerOnce) and entries are added on UDN
-	// gateway start and removed on stop to avoid leaking handlers across UDN churn.
+	// routes. The gateway's existing address-change handler (registered in
+	// newGateway) fans out to these callbacks; entries are added on UDN gateway
+	// start and removed on stop to avoid invoking stale callbacks across UDN churn.
 	udnAddrReconcilersMu sync.Mutex
 	udnAddrReconcilers   map[string]func()
-	udnAddrHandlerOnce   sync.Once
 }
 
 // registerUDNAddressChangeReconciler arranges for reconcile to be invoked
@@ -87,9 +86,6 @@ func (g *gateway) registerUDNAddressChangeReconciler(networkName string, reconci
 	if g.nodeIPManager == nil {
 		return
 	}
-	g.udnAddrHandlerOnce.Do(func() {
-		g.nodeIPManager.AddOnAddressesChangedHandler(g.notifyUDNAddressChange)
-	})
 	g.udnAddrReconcilersMu.Lock()
 	defer g.udnAddrReconcilersMu.Unlock()
 	if g.udnAddrReconcilers == nil {

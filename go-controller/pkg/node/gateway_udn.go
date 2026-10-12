@@ -152,18 +152,6 @@ type UserDefinedNetworkGateway struct {
 	// reconcile rebuilds the gateway instead of matching the fingerprint.
 	uplinkGatewayPartial bool
 
-	// nodeSubnetBridge is the shared gateway bridge (br-ex) whose subnet(s) the
-	// node-connected subnet routes are derived from. Its IPs are read fresh on
-	// every (re)configuration so that runtime gateway address changes are
-	// reflected in the VRF routes. It is nil for Uplink-backed networks, which
-	// do not get these routes: the Uplink's own connected prefix route is
-	// already enslaved into their VRF by the kernel (see addNetworkWithResolvedUplink).
-	nodeSubnetBridge *bridgeconfig.BridgeConfiguration
-	// nodeSubnetRoutes tracks the node-connected subnet routes last programmed
-	// into this network's VRF, so that a subsequent address change can replace
-	// stale routes rather than leaking them.
-	nodeSubnetRoutes []netlink.Route
-
 	// save BGP state at the start of reconciliation loop run to handle it consistently throughout the run
 	isNetworkAdvertisedToDefaultVRF bool
 	isNetworkAdvertised             bool
@@ -629,11 +617,16 @@ func (udng *UserDefinedNetworkGateway) Start() error {
 		if err != nil {
 			return err
 		}
+		if err := controllerutil.Start(udng.gatewayReconciler); err != nil {
+			return err
+		}
 		// React to runtime gateway bridge address changes to refresh the node
-		// connected subnet routes. Uplink-backed networks instead react to their
-		// UplinkState, which rebuilds this programming when its addresses change.
+		// connected subnet routes. Register only after the reconciler has started,
+		// so a failed Start cannot leave a dangling callback behind. Uplink-backed
+		// networks instead react to their UplinkState, which rebuilds this
+		// programming when its addresses change.
 		udng.registerUDNAddressChangeReconciler(udng.GetNetworkName(), udng.Reconcile)
-		return controllerutil.Start(udng.gatewayReconciler)
+		return nil
 	}
 
 	err := controllerutil.StartWithInitialSync(
@@ -693,22 +686,6 @@ func (udng *UserDefinedNetworkGateway) addNetworkWithResolvedUplink(
 			return fmt.Errorf("failed to configure Uplink gateway for network %s: %w",
 				udng.GetNetworkName(), err)
 		}
-	}
-
-	// Select the shared gateway bridge whose subnet the node-connected subnet
-	// routes are derived from; it is read fresh whenever the routes are
-	// (re)programmed. Only ordinary (non-Uplink) networks get these routes: the
-	// egress-to-same-subnet-node fix they implement is specific to local gateway
-	// mode, whereas Uplink-backed networks are shared gateway only and already
-	// have the Uplink's connected prefix route enslaved into their VRF by the
-	// kernel. Programming our own SCOPE_LINK route for the same subnet would
-	// collide with that kernel-owned route, so leave nodeSubnetBridge nil for
-	// them (reconcileNodeSubnetRoutes then cleans up any previously programmed
-	// routes and is otherwise a no-op).
-	if uplinkBridge == nil && udng.openflowManager != nil {
-		udng.nodeSubnetBridge = udng.openflowManager.defaultBridge.BridgeConfiguration
-	} else {
-		udng.nodeSubnetBridge = nil
 	}
 
 	if config.IsModeDPU() {
@@ -831,6 +808,12 @@ func (udng *UserDefinedNetworkGateway) addNetworkWithResolvedUplink(
 	}
 
 	if config.IsModeDPUHost() || config.IsModeFull() {
+		// Program here, after addNetwork has registered the selected bridge, so
+		// computeNodeSubnetRoutes can read the (possibly Uplink) bridge directly
+		// from the openflowManager rather than caching it.
+		if err := udng.reconcileNodeSubnetRoutes(); err != nil {
+			return err
+		}
 		if err := udng.addMarkChain(); err != nil {
 			return fmt.Errorf("failed to add the service masquerade chain: %w", err)
 		}
@@ -1054,9 +1037,6 @@ func (udng *UserDefinedNetworkGateway) delNetwork() error {
 	if err := udng.vrfManager.DeleteVRF(vrfDeviceName); err != nil {
 		errs = append(errs, fmt.Errorf("unable to delete VRF device %s for network %s, err: %v", vrfDeviceName, udng.GetNetworkName(), err))
 	}
-	// The VRF and all its routes are gone; drop the tracked node subnet routes so
-	// that a reused (Uplink) gateway object reprograms them from scratch.
-	udng.nodeSubnetRoutes = nil
 	if config.IsModeDPU() || config.IsModeFull() {
 		// delete the openflows for this network
 		if udng.openflowManager != nil {
@@ -1434,19 +1414,25 @@ func (udng *UserDefinedNetworkGateway) computeRoutesForUDN(mpLink netlink.Link) 
 
 // computeNodeSubnetRoutes returns the node-connected subnet routes for this
 // network's VRF, e.g. 192.168.x.0/24 dev br-ex scope link src 192.168.x.5.
-// These let UDN egress reach nodes on the shared gateway bridge's L2 subnet
-// directly (via ARP/ND) instead of falling through to the VRF default route. The
-// IPs are read fresh from the gateway bridge so that runtime address changes are
-// reflected. It returns nil for Uplink-backed networks (nodeSubnetBridge is nil
-// for them) since their connected route is managed by the kernel via VRF
-// enslavement.
+// These let UDN egress reach nodes on the gateway bridge's L2 subnet directly
+// (via ARP/ND) instead of falling through to the VRF default route. The bridge
+// is read directly from the openflowManager - the Uplink bridge for an Uplink
+// network, otherwise the shared gateway bridge - so that runtime address changes
+// are reflected without caching it. It returns nil when the connected route is
+// instead owned by the kernel: an Uplink enslaved into its own VRF already has
+// that interface's connected prefix route migrated into the VRF table.
 func (udng *UserDefinedNetworkGateway) computeNodeSubnetRoutes() []netlink.Route {
-	if udng.nodeSubnetBridge == nil {
+	if udng.openflowManager == nil || udng.shouldEnslaveUplinkGatewayToVRF() {
 		return nil
 	}
 	var routes []netlink.Route
-	for _, nodeNetAddr := range udng.nodeSubnetBridge.GetIPs() {
+	for _, nodeNetAddr := range udng.openflowManager.getBridgeForNetwork(udng.NetInfo).GetIPs() {
 		if nodeNetAddr == nil || nodeNetAddr.IP == nil || nodeNetAddr.Mask == nil {
+			continue
+		}
+		// A /32 or /128 describes the node itself, not an on-link subnet of
+		// peers; there is no connected subnet to reach via ARP/ND.
+		if ones, bits := nodeNetAddr.Mask.Size(); bits == 0 || ones == bits {
 			continue
 		}
 		// only add routes for configured IP families
@@ -1455,83 +1441,77 @@ func (udng *UserDefinedNetworkGateway) computeNodeSubnetRoutes() []netlink.Route
 			continue
 		}
 		nodeSubnet := nodeNetAddr.IP.Mask(nodeNetAddr.Mask)
+		scope := netlink.SCOPE_LINK
+		if isV6 {
+			// The kernel stores IPv6 connected routes with universe scope even
+			// without a gateway; match that so isNodeSubnetRoute recognizes them.
+			scope = netlink.SCOPE_UNIVERSE
+		}
 		routes = append(routes, netlink.Route{
 			LinkIndex: udng.gwInterfaceIndex,
 			Dst:       &net.IPNet{IP: nodeSubnet, Mask: nodeNetAddr.Mask},
 			Src:       nodeNetAddr.IP,
 			Table:     udng.vrfTableId,
-			Scope:     netlink.SCOPE_LINK,
+			Scope:     scope,
 		})
 	}
 	return routes
 }
 
+// isNodeSubnetRoute identifies a node-connected subnet route this controller
+// owns, so reconcileNodeSubnetRoutes can find stale ones in the kernel (e.g.
+// after a restart) without a local cache. Our routes carry the OVNK protocol,
+// a connected scope, a preferred source within the destination and no gateway;
+// managed default routes have a gateway and are handled separately.
+func isNodeSubnetRoute(route netlink.Route) bool {
+	connectedScope := route.Scope == netlink.SCOPE_LINK ||
+		(utilnet.IsIPv6CIDR(route.Dst) && route.Scope == netlink.SCOPE_UNIVERSE)
+	return int(route.Protocol) == types.OVNKProtocol && connectedScope &&
+		(route.Type == 0 || route.Type == unix.RTN_UNICAST) &&
+		len(route.Gw) == 0 && len(route.MultiPath) == 0 &&
+		route.Dst != nil && len(route.Src) != 0 && route.Dst.Contains(route.Src)
+}
+
 // reconcileNodeSubnetRoutes programs the node-connected subnet routes into this
-// network's VRF and removes any previously programmed ones that no longer apply,
-// e.g. after a gateway bridge address change. It is a no-op when the desired set
-// already matches what was last programmed, so ordinary reconciliations do not
-// churn the routes. Callers must hold operationMutex.
+// network's VRF and removes any that no longer apply. It uses the kernel as the
+// source of truth for existing routes - like removeManagedDefaultRoutesFromVRF -
+// rather than a local cache, so a restart mid-recompute cannot leak routes.
+// Callers must hold operationMutex.
 func (udng *UserDefinedNetworkGateway) reconcileNodeSubnetRoutes() error {
-	desired := udng.computeNodeSubnetRoutes()
-	if nodeSubnetRoutesEqual(udng.nodeSubnetRoutes, desired) {
-		return nil
-	}
 	vrfName := util.GetNetworkVRFName(udng.NetInfo)
-	if len(udng.nodeSubnetRoutes) > 0 {
-		if err := udng.vrfManager.DeleteVRFRoutes(vrfName, udng.nodeSubnetRoutes); err != nil {
+	desired := udng.computeNodeSubnetRoutes()
+	wanted := make(map[string]struct{}, len(desired))
+	for _, r := range desired {
+		wanted[r.Dst.String()] = struct{}{}
+	}
+	existing, err := util.GetNetLinkOps().RouteListFiltered(netlink.FAMILY_ALL,
+		&netlink.Route{Table: udng.vrfTableId}, netlink.RT_FILTER_TABLE)
+	if err != nil {
+		return fmt.Errorf("failed to list routes of VRF table %d for network %s: %w",
+			udng.vrfTableId, udng.GetNetworkName(), err)
+	}
+	var stale []netlink.Route
+	for _, route := range existing {
+		if !isNodeSubnetRoute(route) {
+			continue
+		}
+		if _, keep := wanted[route.Dst.String()]; !keep {
+			stale = append(stale, route)
+		}
+	}
+	if len(stale) > 0 {
+		if err := udng.vrfManager.DeleteVRFRoutes(vrfName, stale); err != nil {
 			return fmt.Errorf("failed to delete stale node subnet routes from VRF %s for network %s: %w",
 				vrfName, udng.GetNetworkName(), err)
 		}
-		// The stale routes are gone; forget them so a failure adding the desired
-		// set below leaves the tracking consistent with the kernel state and the
-		// next reconcile does not attempt to re-delete them.
-		udng.nodeSubnetRoutes = nil
 	}
 	if len(desired) > 0 {
 		if err := udng.vrfManager.AddVRFRoutes(vrfName, desired); err != nil {
-			// AddVRFRoutes can install some routes before a later one fails,
-			// leaving partial state in the VRF. Roll back only the routes this
-			// reconcile attempted so a subsequent address removal (which would
-			// compute an empty set and skip cleanup) cannot leak a stale route.
-			// If the rollback itself fails, keep tracking the desired set so a
-			// later address change retries the cleanup.
-			if cleanupErr := udng.vrfManager.DeleteVRFRoutes(vrfName, desired); cleanupErr != nil {
-				udng.nodeSubnetRoutes = desired
-				return fmt.Errorf("failed to add node subnet routes to VRF %s for network %s: %w; "+
-					"failed to clean up partially added routes: %v", vrfName, udng.GetNetworkName(), err, cleanupErr)
-			}
 			return fmt.Errorf("failed to add node subnet routes to VRF %s for network %s: %w",
 				vrfName, udng.GetNetworkName(), err)
 		}
 	}
-	udng.nodeSubnetRoutes = desired
 	return nil
-}
-
-// nodeSubnetRoutesEqual reports whether two node-connected subnet route sets are
-// equivalent, ignoring order.
-func nodeSubnetRoutesEqual(a, b []netlink.Route) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	keys := make(map[string]struct{}, len(a))
-	for i := range a {
-		keys[nodeSubnetRouteKey(a[i])] = struct{}{}
-	}
-	for i := range b {
-		if _, ok := keys[nodeSubnetRouteKey(b[i])]; !ok {
-			return false
-		}
-	}
-	return true
-}
-
-func nodeSubnetRouteKey(r netlink.Route) string {
-	dst := ""
-	if r.Dst != nil {
-		dst = r.Dst.String()
-	}
-	return fmt.Sprintf("%d|%s|%s|%d|%d", r.LinkIndex, dst, r.Src.String(), r.Table, r.Scope)
 }
 
 func (udng *UserDefinedNetworkGateway) getDefaultRoute() ([]netlink.Route, error) {
@@ -1784,6 +1764,11 @@ func (udng *UserDefinedNetworkGateway) reconcileAdvertisedState() error {
 		if err := udng.applyAdvertisedRoutingState(); err != nil {
 			return err
 		}
+		// Reprogram here, after the bridge is registered, so computeNodeSubnetRoutes
+		// reads the selected bridge from the openflowManager (see Start-time call).
+		if err := udng.reconcileNodeSubnetRoutes(); err != nil {
+			return err
+		}
 	}
 
 	if config.IsModeDPU() || config.IsModeFull() {
@@ -1820,9 +1805,6 @@ func (udng *UserDefinedNetworkGateway) applyAdvertisedRoutingState() error {
 	}
 	if err := udng.updateUDNVRFIPRoute(); err != nil {
 		return fmt.Errorf("failed to update IP routes for network %s: %w", udng.GetNetworkName(), err)
-	}
-	if err := udng.reconcileNodeSubnetRoutes(); err != nil {
-		return fmt.Errorf("failed to update node subnet routes for network %s: %w", udng.GetNetworkName(), err)
 	}
 	return nil
 }
@@ -1874,6 +1856,18 @@ func (udng *UserDefinedNetworkGateway) reconcileUplinkGatewayVRFSlave(vrfDeviceN
 		// removed right after. Managed default routes only exist on the
 		// host side, so this does not apply to DPU mode.
 		if config.IsModeDPUHost() || config.IsModeFull() {
+			// Withdraw our connected subnet routes before the interface's own
+			// prefix routes migrate into this table on enslavement, for the same
+			// reason as the managed default routes below: computeNodeSubnetRoutes
+			// now returns nil, so this removes any route we previously programmed
+			// before it could collide with the kernel-owned one.
+			if err := udng.reconcileNodeSubnetRoutes(); err != nil {
+				return newUplinkGatewayError(
+					uplinkv1alpha1.UplinkStateReasonVRFAttachmentFailed,
+					fmt.Errorf("could not remove node subnet routes from VRF %s for network %s: %w",
+						vrfDeviceName, udng.GetNetworkName(), err),
+				)
+			}
 			if err := udng.removeManagedDefaultRoutesFromVRF(); err != nil {
 				return newUplinkGatewayError(
 					uplinkv1alpha1.UplinkStateReasonVRFAttachmentFailed,

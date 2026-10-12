@@ -3053,30 +3053,32 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			Expect(err).NotTo(HaveOccurred())
 			vrfTableId := util.CalculateRouteTableID(mplink.Attrs().Index)
 			udnGateway.vrfTableId = vrfTableId
-			// For non-uplink networks the node subnet routes are derived from the
-			// shared gateway bridge; addNetworkWithResolvedUplink wires this up at
-			// runtime, so set it explicitly here.
-			udnGateway.nodeSubnetBridge = ofm.defaultBridge.BridgeConfiguration
+			// For non-uplink networks computeNodeSubnetRoutes reads the shared
+			// gateway bridge directly from the openflowManager; no caching needed.
 
 			routes := udnGateway.computeNodeSubnetRoutes()
 
 			// Verify node network connected subnet routes are present for both IPv4 and IPv6.
-			// Match by scope and destination to stay resilient to route ordering changes.
+			// Match by destination to stay resilient to route ordering changes.
 			var v4Found, v6Found bool
 			for _, route := range routes {
-				if route.Scope == netlink.SCOPE_LINK && route.Dst != nil {
-					if route.Dst.String() == "192.168.1.0/24" {
-						Expect(route.LinkIndex).To(Equal(bridgelink.Attrs().Index))
-						Expect(route.Src.Equal(ovntest.MustParseIP("192.168.1.10"))).To(BeTrue())
-						Expect(route.Table).To(Equal(vrfTableId))
-						v4Found = true
-					}
-					if route.Dst.String() == "fc00:f853:ccd:e793::/64" {
-						Expect(route.LinkIndex).To(Equal(bridgelink.Attrs().Index))
-						Expect(route.Src.Equal(ovntest.MustParseIP("fc00:f853:ccd:e793::3"))).To(BeTrue())
-						Expect(route.Table).To(Equal(vrfTableId))
-						v6Found = true
-					}
+				if route.Dst == nil {
+					continue
+				}
+				if route.Dst.String() == "192.168.1.0/24" {
+					Expect(route.Scope).To(Equal(netlink.SCOPE_LINK))
+					Expect(route.LinkIndex).To(Equal(bridgelink.Attrs().Index))
+					Expect(route.Src.Equal(ovntest.MustParseIP("192.168.1.10"))).To(BeTrue())
+					Expect(route.Table).To(Equal(vrfTableId))
+					v4Found = true
+				}
+				if route.Dst.String() == "fc00:f853:ccd:e793::/64" {
+					// The kernel represents IPv6 connected routes with universe scope.
+					Expect(route.Scope).To(Equal(netlink.SCOPE_UNIVERSE))
+					Expect(route.LinkIndex).To(Equal(bridgelink.Attrs().Index))
+					Expect(route.Src.Equal(ovntest.MustParseIP("fc00:f853:ccd:e793::3"))).To(BeTrue())
+					Expect(route.Table).To(Equal(vrfTableId))
+					v6Found = true
 				}
 			}
 			Expect(v4Found).To(BeTrue(), "IPv4 node network connected subnet route not found")
@@ -3122,17 +3124,17 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 				mp, err := netlink.LinkByName(mgtPort)
 				Expect(err).NotTo(HaveOccurred())
 				gw.vrfTableId = util.CalculateRouteTableID(mp.Attrs().Index)
-				gw.nodeSubnetBridge = ofm.defaultBridge.BridgeConfiguration
 				routes := gw.computeNodeSubnetRoutes()
 				var v4, v6 bool
 				for _, r := range routes {
-					if r.Scope == netlink.SCOPE_LINK && r.Dst != nil {
-						switch r.Dst.String() {
-						case "192.168.1.0/24":
-							v4 = true
-						case "fc00:f853:ccd:e793::/64":
-							v6 = true
-						}
+					if r.Dst == nil {
+						continue
+					}
+					switch r.Dst.String() {
+					case "192.168.1.0/24":
+						v4 = true
+					case "fc00:f853:ccd:e793::/64":
+						v6 = true
 					}
 				}
 				Expect(v4).To(Equal(tc.wantV4), tc.desc+": IPv4 scope-link route")
@@ -3167,7 +3169,6 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			mplink, err := netlink.LinkByName(mgtPort)
 			Expect(err).NotTo(HaveOccurred())
 			udnGateway.vrfTableId = util.CalculateRouteTableID(mplink.Attrs().Index)
-			udnGateway.nodeSubnetBridge = ofm.defaultBridge.BridgeConfiguration
 
 			routes := udnGateway.computeNodeSubnetRoutes()
 			Expect(routes).To(HaveLen(1))
@@ -3216,7 +3217,6 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			vrfTableId := util.CalculateRouteTableID(mplink.Attrs().Index)
 			udnGateway.vrfTableId = vrfTableId
 			udnGateway.gwInterfaceIndex = bridgelink.Attrs().Index
-			udnGateway.nodeSubnetBridge = ofm.defaultBridge.BridgeConfiguration
 
 			vrfDeviceName := util.GetNetworkVRFName(udnGateway.NetInfo)
 			Expect(vrf.AddVRF(vrfDeviceName, mplink.Attrs().Name, uint32(vrfTableId), nil)).To(Succeed())
@@ -3251,23 +3251,20 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			Expect(udnGateway.reconcileNodeSubnetRoutes()).To(Succeed())
 			dsts := vrfRouteDsts()
 			Expect(dsts).To(ContainElement("192.168.5.0/24"))
+			// The stale route is removed using the kernel as the source of truth,
+			// without any local cache of what was previously programmed.
 			Expect(dsts).NotTo(ContainElement("192.168.1.0/24"))
-
-			// Tracking must reflect only the new route.
-			Expect(udnGateway.nodeSubnetRoutes).To(HaveLen(1))
-			Expect(udnGateway.nodeSubnetRoutes[0].Dst.String()).To(Equal("192.168.5.0/24"))
 			return nil
 		})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 	})
 
-	// Verifies that a network bound to an Uplink does NOT get node subnet routes:
-	// its VRF already has the Uplink's connected prefix route enslaved by the
-	// kernel, so addNetworkWithResolvedUplink leaves nodeSubnetBridge nil. This
-	// asserts reconcileNodeSubnetRoutes is then a no-op that does not touch a
-	// pre-existing (kernel-owned) route already present in the VRF table.
-	ovntest.OnSupportedPlatformsIt("should not program node subnet routes for uplink-backed networks", func() {
+	// Verifies reconcileNodeSubnetRoutes only touches the routes it owns: it
+	// programs our connected subnet route while leaving a kernel-owned connected
+	// route (as the Uplink feature installs via bridge enslavement) untouched,
+	// because isNodeSubnetRoute filters the kernel dump by the OVNK protocol.
+	ovntest.OnSupportedPlatformsIt("should preserve kernel-owned routes while reconciling node subnet routes", func() {
 		config.Gateway.Interface = "eth0"
 		config.IPv4Mode = true
 		config.IPv6Mode = false
@@ -3286,12 +3283,11 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			Expect(err).NotTo(HaveOccurred())
 			mplink, err := netlink.LinkByName(mgtPort)
 			Expect(err).NotTo(HaveOccurred())
+			bridgelink, err := netlink.LinkByName("breth0")
+			Expect(err).NotTo(HaveOccurred())
 			vrfTableId := util.CalculateRouteTableID(mplink.Attrs().Index)
 			udnGateway.vrfTableId = vrfTableId
-			// Uplink-backed networks leave nodeSubnetBridge nil (set by
-			// addNetworkWithResolvedUplink); computeNodeSubnetRoutes yields nothing.
-			udnGateway.nodeSubnetBridge = nil
-			Expect(udnGateway.computeNodeSubnetRoutes()).To(BeEmpty())
+			udnGateway.gwInterfaceIndex = bridgelink.Attrs().Index
 
 			vrfDeviceName := util.GetNetworkVRFName(udnGateway.NetInfo)
 			Expect(vrf.AddVRF(vrfDeviceName, mplink.Attrs().Name, uint32(vrfTableId), nil)).To(Succeed())
@@ -3308,18 +3304,24 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			Expect(netlink.RouteAdd(preExisting)).To(Succeed())
 
 			Expect(udnGateway.reconcileNodeSubnetRoutes()).To(Succeed())
-			Expect(udnGateway.nodeSubnetRoutes).To(BeEmpty())
 
 			kernelRoutes, lerr := netlink.RouteListFiltered(netlink.FAMILY_ALL,
 				&netlink.Route{Table: vrfTableId}, netlink.RT_FILTER_TABLE)
 			Expect(lerr).NotTo(HaveOccurred())
-			var found bool
+			var found, ourRoute bool
 			for _, r := range kernelRoutes {
-				if r.Dst != nil && r.Dst.String() == "10.10.0.0/24" {
+				if r.Dst == nil {
+					continue
+				}
+				if r.Dst.String() == "10.10.0.0/24" {
 					found = true
 					Expect(r.Protocol).To(Equal(netlink.RouteProtocol(unix.RTPROT_KERNEL)))
 				}
+				if r.Dst.String() == "192.168.1.0/24" {
+					ourRoute = true
+				}
 			}
+			Expect(ourRoute).To(BeTrue(), "our node subnet route must be programmed")
 			Expect(found).To(BeTrue(), "pre-existing kernel route must survive reconcile")
 			return nil
 		})
