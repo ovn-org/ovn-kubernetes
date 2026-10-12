@@ -1566,6 +1566,16 @@ var _ = Describe("Network Segmentation", feature.NetworkSegmentation, func() {
 					Expect(err).To(HaveOccurred(),
 						"should fail to delete UserDefinedNetwork when used")
 
+					By("verify UserDefinedNetwork deletion has started")
+					Eventually(func() (bool, error) {
+						udn, err := f.DynamicClient.Resource(udnGVR).Namespace(defaultNetNamespace.Name).Get(context.Background(), testUdnName, metav1.GetOptions{})
+						if err != nil {
+							return false, err
+						}
+						return udn.GetDeletionTimestamp() != nil, nil
+					}, deleteNetworkTimeout, deleteNetworkInterval).Should(BeTrue(),
+						"UserDefinedNetwork should have a deletion timestamp while still in use")
+
 					By("verify UserDefinedNetwork associated NetworkAttachmentDefinition cannot be deleted")
 					Eventually(func() error {
 						ctx, cancel := context.WithTimeout(context.Background(), deleteNetworkTimeout)
@@ -1577,8 +1587,10 @@ var _ = Describe("Network Segmentation", feature.NetworkSegmentation, func() {
 						"should fail to delete UserDefinedNetwork associated NetworkAttachmentDefinition when used")
 
 					By("verify UserDefinedNetwork status reports consuming pod")
-					err = validateUDNStatusReportsConsumers(f.DynamicClient, defaultNetNamespace.Name, testUdnName, testPodName)
-					Expect(err).ToNot(HaveOccurred())
+					Eventually(func() error {
+						return validateUDNStatusReportsConsumers(f.DynamicClient, defaultNetNamespace.Name, testUdnName, testPodName)
+					}, udnInUseDeleteTimeout, deleteNetworkInterval).Should(Succeed(),
+						"UserDefinedNetwork status should report the consuming pod")
 
 					By("delete test pod")
 					err = cs.CoreV1().Pods(defaultNetNamespace.Name).Delete(context.Background(), testPodName, metav1.DeleteOptions{})
