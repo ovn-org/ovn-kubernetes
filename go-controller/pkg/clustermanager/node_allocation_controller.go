@@ -210,8 +210,8 @@ func (nac *nodeAllocationController) syncNodeIDs(nodes []interface{}) error {
 		if nodeID != util.InvalidNodeID {
 			klog.Infof("Node %s has the id %d set", node.Name, nodeID)
 			if err := nac.nodeIDAllocator.ReserveID(node.Name, nodeID); err != nil {
-				// The id set on this node is duplicate.
-				klog.Infof("Node %s has a duplicate id %d set", node.Name, nodeID)
+				// The id set on this node is a duplicate or out of range; allocate a new one.
+				klog.Infof("Node %s has an unusable id %d set: %v", node.Name, nodeID, err)
 				duplicateIdNodes = append(duplicateIdNodes, node.Name)
 			}
 		}

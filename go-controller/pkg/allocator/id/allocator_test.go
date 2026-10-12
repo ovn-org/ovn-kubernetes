@@ -4,6 +4,7 @@
 package id
 
 import (
+	"math"
 	"slices"
 	"testing"
 )
@@ -43,6 +44,21 @@ func TestIDAllocator_ReleaseID(t *testing.T) {
 			t.Errorf("ReleaseID() = %d, want -1", got)
 		}
 	})
+}
+
+func TestIDAllocator_ReserveIDOutOfRange(t *testing.T) {
+	allocator := NewIDAllocator("test", 10)
+	for _, id := range []int{-1, 10, math.MaxInt} {
+		if err := allocator.ReserveID("resource1", id); err == nil {
+			t.Errorf("ReserveID(%d) expected error", id)
+		}
+		if allocator.GetID("resource1") != -1 {
+			t.Errorf("GetID() should return -1 after rejected ReserveID(%d)", id)
+		}
+	}
+	if _, err := allocator.AllocateID("resource1"); err != nil {
+		t.Fatalf("AllocateID() unexpected error after rejected reservations: %v", err)
+	}
 }
 
 func TestIDsAllocator(t *testing.T) {

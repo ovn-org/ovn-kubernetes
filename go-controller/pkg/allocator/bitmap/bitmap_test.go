@@ -20,6 +20,7 @@ limitations under the License.
 package bitmap
 
 import (
+	"math"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -64,6 +65,26 @@ func TestAllocateError(t *testing.T) {
 	}
 	if ok, _ := m.Allocate(3); ok {
 		t.Errorf("unexpected success")
+	}
+}
+
+func TestAllocateOutOfRange(t *testing.T) {
+	max := 10
+	m := NewAllocationMap(max, "test")
+	for _, offset := range []int{-1, max, math.MaxInt} {
+		if ok, err := m.Allocate(offset); ok || err == nil {
+			t.Errorf("expected offset %d to be rejected, got ok=%v err=%v", offset, ok, err)
+		}
+		if m.Has(offset) {
+			t.Errorf("expected Has(%d) to be false", offset)
+		}
+		m.Release(offset)
+	}
+	if m.count != 0 {
+		t.Errorf("expect to get %d, but got %d", 0, m.count)
+	}
+	if f := m.Free(); f != max {
+		t.Errorf("expect to get %d, but got %d", max, f)
 	}
 }
 

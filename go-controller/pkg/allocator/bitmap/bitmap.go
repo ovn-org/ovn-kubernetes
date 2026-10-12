@@ -21,6 +21,7 @@ package bitmap
 
 import (
 	"errors"
+	"fmt"
 	"math/big"
 	"sync"
 
@@ -104,6 +105,10 @@ func (r *AllocationBitmap) Allocate(offset int) (bool, error) {
 	r.lock.Lock()
 	defer r.lock.Unlock()
 
+	// Offsets come from untrusted sources such as node annotations. Check the boundaries.
+	if !r.inRange(offset) {
+		return false, fmt.Errorf("offset %d is out of range [0, %d)", offset, r.max)
+	}
 	if r.allocated.Bit(offset) == 1 {
 		return false, nil
 	}
@@ -134,7 +139,7 @@ func (r *AllocationBitmap) Release(offset int) {
 	r.lock.Lock()
 	defer r.lock.Unlock()
 
-	if r.allocated.Bit(offset) == 0 {
+	if !r.inRange(offset) || r.allocated.Bit(offset) == 0 {
 		return
 	}
 
@@ -175,7 +180,11 @@ func (r *AllocationBitmap) Has(offset int) bool {
 	r.lock.Lock()
 	defer r.lock.Unlock()
 
-	return r.allocated.Bit(offset) == 1
+	return r.inRange(offset) && r.allocated.Bit(offset) == 1
+}
+
+func (r *AllocationBitmap) inRange(offset int) bool {
+	return offset >= 0 && offset < r.max
 }
 
 // Free returns the count of items left in the range.
