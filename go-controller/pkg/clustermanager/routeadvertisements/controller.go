@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
 	"reflect"
 	"slices"
 	"strings"
@@ -975,7 +976,7 @@ func (c *Controller) generateFRRConfiguration(
 	var routers []frrtypes.Router
 
 	// track neighbors and ASNs to generate raw config later on
-	vrfNeighbors := map[string][]string{}
+	vrfNeighbors := map[string][]frrNeighbor{}
 	vrfASNs := map[string]uint32{}
 
 	// go over the source routers
@@ -1048,9 +1049,18 @@ func (c *Controller) generateFRRConfiguration(
 		if err != nil {
 			return nil, fmt.Errorf("failed to get node %s primary interface address annotation: %w", nodeName, err)
 		}
-		// Strip CIDR mask to get bare IP strings for neighbor comparison.
-		nodeV4, _, _ := strings.Cut(nodeIfAddr.IPv4, "/")
-		nodeV6, _, _ := strings.Cut(nodeIfAddr.IPv6, "/")
+		// a neighbor at one of the node's own addresses is the node itself
+		var nodeAddrs []netip.Addr
+		for _, cidr := range []string{nodeIfAddr.IPv4, nodeIfAddr.IPv6} {
+			if cidr == "" {
+				continue
+			}
+			prefix, err := netip.ParsePrefix(cidr)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse node %s primary interface address %q: %w", nodeName, cidr, err)
+			}
+			nodeAddrs = append(nodeAddrs, prefix.Addr().Unmap())
+		}
 
 		dpuHostGatewayNextHops, err := c.getDPUHostGatewayNextHops(node, selectedNetworks, matchedNetwork)
 		if err != nil {
@@ -1070,9 +1080,18 @@ func (c *Controller) generateFRRConfiguration(
 					source.Name,
 				)
 			}
+			peer, err := newFRRNeighbor(neighbor)
+			if err != nil {
+				return nil, fmt.Errorf("%w: invalid neighbor on FRRConfiguration %s/%s: %w",
+					errUnsafeFRRInput,
+					source.Namespace,
+					source.Name,
+					err,
+				)
+			}
 
 			// Skip neighbors that are the node itself
-			if (nodeV4 != "" && neighbor.Address == nodeV4) || (nodeV6 != "" && neighbor.Address == nodeV6) {
+			if slices.ContainsFunc(nodeAddrs, peer.is) {
 				continue
 			}
 
@@ -1150,7 +1169,7 @@ func (c *Controller) generateFRRConfiguration(
 				}
 			}
 
-			vrfNeighbors[matchedVRF] = append(vrfNeighbors[matchedVRF], key)
+			vrfNeighbors[matchedVRF] = append(vrfNeighbors[matchedVRF], peer)
 			targetRouter.Neighbors = append(targetRouter.Neighbors, neighbor)
 		}
 		if len(targetRouter.Neighbors) == 0 {
@@ -1209,7 +1228,7 @@ func (c *Controller) generateFRRConfiguration(
 		for _, router := range source.Spec.BGP.Routers {
 			if router.VRF == "" { // default VRF
 				vrfASNs[""] = router.ASN
-				vrfNeighbors[""] = make([]string, 0, len(router.Neighbors))
+				vrfNeighbors[""] = make([]frrNeighbor, 0, len(router.Neighbors))
 				for _, neighbor := range router.Neighbors {
 					key := neighborKey(neighbor)
 					if key == "" {
@@ -1219,7 +1238,16 @@ func (c *Controller) generateFRRConfiguration(
 							source.Name,
 						)
 					}
-					vrfNeighbors[""] = append(vrfNeighbors[""], key)
+					peer, err := newFRRNeighbor(neighbor)
+					if err != nil {
+						return nil, fmt.Errorf("%w: invalid neighbor on FRRConfiguration %s/%s: %w",
+							errUnsafeFRRInput,
+							source.Namespace,
+							source.Name,
+							err,
+						)
+					}
+					vrfNeighbors[""] = append(vrfNeighbors[""], peer)
 				}
 				break
 			}

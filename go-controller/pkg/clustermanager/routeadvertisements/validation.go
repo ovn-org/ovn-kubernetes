@@ -11,6 +11,8 @@ import (
 	"strings"
 	"unicode"
 
+	frrtypes "github.com/metallb/frr-k8s/api/v1beta1"
+
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 )
 
@@ -97,6 +99,53 @@ func validateToken(value string) error {
 		}
 	}
 	return nil
+}
+
+// frrNeighbor is a neighbor identifier written to the raw FRR config: the
+// session address or, for an unnumbered neighbor, the interface name. It is
+// only built through newFRRNeighbor, which validates it.
+type frrNeighbor struct {
+	text string
+	// addr is the parsed address, zero for an interface name
+	addr netip.Addr
+}
+
+// newFRRNeighbor returns the validated identifier of an FRRConfiguration
+// neighbor, with the same precedence as neighborKey: the address when set,
+// which must be an IP address without zone, otherwise the interface, which
+// must be a Linux interface name.
+func newFRRNeighbor(neighbor frrtypes.Neighbor) (frrNeighbor, error) {
+	if neighbor.Address != "" {
+		addr, err := netip.ParseAddr(neighbor.Address)
+		if err != nil {
+			return frrNeighbor{}, fmt.Errorf("address %s is not an IP address", quoteForError(neighbor.Address))
+		}
+		if addr.Zone() != "" {
+			return frrNeighbor{}, fmt.Errorf("address %s must not have a zone", quoteForError(neighbor.Address))
+		}
+		// An IPv4-mapped IPv6 address classifies as IPv4, as it does in the
+		// prefix filtering based on net.IP.To4.
+		return frrNeighbor{text: neighbor.Address, addr: addr.Unmap()}, nil
+	}
+	if err := validateInterfaceName(neighbor.Interface); err != nil {
+		return frrNeighbor{}, fmt.Errorf("interface %s is not an interface name: %w", quoteForError(neighbor.Interface), err)
+	}
+	return frrNeighbor{text: neighbor.Interface}, nil
+}
+
+// is returns whether the neighbor is identified by the given address.
+func (n frrNeighbor) is(addr netip.Addr) bool {
+	return n.addr.IsValid() && n.addr == addr
+}
+
+// isIPv4 returns whether the neighbor is identified by an IPv4 address.
+func (n frrNeighbor) isIPv4() bool {
+	return n.addr.Is4()
+}
+
+// isIPv6 returns whether the neighbor is identified by an IPv6 address.
+func (n frrNeighbor) isIPv6() bool {
+	return n.addr.Is6()
 }
 
 // validateInterfaceName checks that the value is a valid Linux network

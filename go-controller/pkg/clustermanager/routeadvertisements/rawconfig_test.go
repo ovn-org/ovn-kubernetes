@@ -4,7 +4,10 @@
 package routeadvertisements
 
 import (
+	"net/netip"
 	"testing"
+
+	frrtypes "github.com/metallb/frr-k8s/api/v1beta1"
 )
 
 func TestGenerateRawConfig(t *testing.T) {
@@ -283,7 +286,22 @@ exit
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := generateRawConfig(tt.selected, tt.vrfNeighbors, tt.vrfASNs)
+			vrfNeighbors := map[string][]frrNeighbor{}
+			for vrf, neighbors := range tt.vrfNeighbors {
+				for _, raw := range neighbors {
+					// the table identifies unnumbered neighbors by interface name
+					in := frrtypes.Neighbor{Address: raw}
+					if _, err := netip.ParseAddr(raw); err != nil {
+						in = frrtypes.Neighbor{Interface: raw}
+					}
+					neighbor, err := newFRRNeighbor(in)
+					if err != nil {
+						t.Fatalf("newFRRNeighbor(%q) unexpected error: %v", raw, err)
+					}
+					vrfNeighbors[vrf] = append(vrfNeighbors[vrf], neighbor)
+				}
+			}
+			got := generateRawConfig(tt.selected, vrfNeighbors, tt.vrfASNs)
 			if got != tt.want {
 				t.Errorf("generateRawConfig() mismatch\nGot:\n%s\nWant:\n%s", got, tt.want)
 			}

@@ -1495,6 +1495,44 @@ func TestController_reconcile(t *testing.T) {
 			expectNADAnnotations: map[string]map[string]string{"default": {types.OvnRouteAdvertisementsKey: "[\"ra\"]"}},
 		},
 		{
+			name: "excludes self-neighbor with a non-canonical IPv6 address from per-node FRRConfiguration",
+			ra:   &testRA{Name: "ra", AdvertisePods: true, SelectsDefault: true},
+			frrConfigs: []*testFRRConfig{
+				{
+					Name:      "frrConfig-base",
+					Namespace: frrNamespace,
+					Routers: []*testRouter{
+						{ASN: 1, Neighbors: []*testNeighbor{
+							{ASN: 1, Address: "FD00:0:0:0:0:0:0:1"}, // self for node
+							{ASN: 1, Address: "fd00::2"},            // other node
+						}},
+					},
+				},
+			},
+			nodes: []*testNode{
+				{
+					Name:                     "node",
+					SubnetsAnnotation:        "{\"default\":[\"1.1.0.0/24\",\"fd01::/64\"]}",
+					PrimaryAddressAnnotation: "{\"ipv4\":\"10.0.0.1/24\",\"ipv6\":\"fd00::1/64\"}",
+				},
+			},
+			ipv6:                 true,
+			reconcile:            "ra",
+			expectAcceptedStatus: metav1.ConditionTrue,
+			expectFRRConfigs: []*testFRRConfig{
+				{
+					Labels:       map[string]string{types.OvnRouteAdvertisementsKey: "ra"},
+					Annotations:  map[string]string{types.OvnRouteAdvertisementsKey: "ra/frrConfig-base/node"},
+					NodeSelector: map[string]string{"kubernetes.io/hostname": "node"},
+					Routers: []*testRouter{
+						{ASN: 1, Prefixes: []string{"1.1.0.0/24", "fd01::/64"}, Neighbors: []*testNeighbor{
+							{ASN: 1, Address: "fd00::2", Advertise: []string{"fd01::/64"}},
+						}},
+					}},
+			},
+			expectNADAnnotations: map[string]map[string]string{"default": {types.OvnRouteAdvertisementsKey: "[\"ra\"]"}},
+		},
+		{
 			name: "fails to reconcile EVPN-enabled network to default VRF",
 			ra:   &testRA{Name: "ra", AdvertisePods: true, NetworkSelector: map[string]string{"selected": "true"}},
 			frrConfigs: []*testFRRConfig{
@@ -1612,6 +1650,25 @@ func TestController_reconcile(t *testing.T) {
 			reconcile:                     "ra",
 			expectAcceptedStatus:          metav1.ConditionFalse,
 			expectAcceptedMessageContains: "invalid VRF name",
+		},
+		{
+			name: "rejects FRRConfiguration neighbor with a newline in the interface name",
+			ra:   &testRA{Name: "ra", AdvertisePods: true, SelectsDefault: true},
+			frrConfigs: []*testFRRConfig{
+				{
+					Name:      "frrConfig",
+					Namespace: frrNamespace,
+					Routers: []*testRouter{
+						{ASN: 1, Prefixes: []string{"1.1.1.0/24"}, Neighbors: []*testNeighbor{
+							{ASN: 1, Interface: "eth0\nx"},
+						}},
+					},
+				},
+			},
+			nodes:                         []*testNode{{Name: "node", SubnetsAnnotation: "{\"default\":\"1.1.0.0/24\"}"}},
+			reconcile:                     "ra",
+			expectAcceptedStatus:          metav1.ConditionFalse,
+			expectAcceptedMessageContains: "invalid neighbor",
 		},
 		{
 			name: "reconciles EVPN MAC-VRF l2 network with a specific target VRF without a VRF router",

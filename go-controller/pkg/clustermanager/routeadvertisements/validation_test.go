@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	frrtypes "github.com/metallb/frr-k8s/api/v1beta1"
 )
 
 func TestValidateVNI(t *testing.T) {
@@ -96,6 +98,52 @@ func TestNewVRFConfigTruncatesQuotedValue(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), fmt.Sprintf("%q...", longRT[:maxQuotedValueLength])) {
 		t.Errorf("newVRFConfig() error does not quote the truncated value: %v", err)
+	}
+}
+
+func TestNewFRRNeighbor(t *testing.T) {
+	valid := []struct {
+		neighbor       frrtypes.Neighbor
+		text           string
+		isIPv4, isIPv6 bool
+	}{
+		{neighbor: frrtypes.Neighbor{Address: "192.168.1.1"}, text: "192.168.1.1", isIPv4: true},
+		{neighbor: frrtypes.Neighbor{Address: "fd00::1"}, text: "fd00::1", isIPv6: true},
+		{neighbor: frrtypes.Neighbor{Address: "fe80::1"}, text: "fe80::1", isIPv6: true},
+		{neighbor: frrtypes.Neighbor{Address: "::ffff:192.0.2.1"}, text: "::ffff:192.0.2.1", isIPv4: true},
+		{neighbor: frrtypes.Neighbor{Address: "10.0.0.1", Interface: "eth0"}, text: "10.0.0.1", isIPv4: true},
+		{neighbor: frrtypes.Neighbor{Interface: "eth0"}, text: "eth0"},
+		{neighbor: frrtypes.Neighbor{Interface: "enp4s0f0np0"}, text: "enp4s0f0np0"},
+		{neighbor: frrtypes.Neighbor{Interface: "eth0.100"}, text: "eth0.100"},
+		{neighbor: frrtypes.Neighbor{Interface: "010.0.0.1"}, text: "010.0.0.1"},
+	}
+	for _, tt := range valid {
+		neighbor, err := newFRRNeighbor(tt.neighbor)
+		if err != nil {
+			t.Errorf("newFRRNeighbor(%+v) unexpected error: %v", tt.neighbor, err)
+			continue
+		}
+		if neighbor.text != tt.text || neighbor.isIPv4() != tt.isIPv4 || neighbor.isIPv6() != tt.isIPv6 {
+			t.Errorf("newFRRNeighbor(%+v) = %+v, isIPv4 %v, isIPv6 %v", tt.neighbor, neighbor, neighbor.isIPv4(), neighbor.isIPv6())
+		}
+	}
+
+	invalid := []frrtypes.Neighbor{
+		{},
+		{Address: "fe80::1%eth0"},
+		{Address: "010.0.0.1"},
+		{Address: "eth0"},
+		{Address: "192.168.1.1 remote-as 1"},
+		{Address: "192.168.1.1\nrouter bgp 1"},
+		{Interface: "eth0\nrouter bgp 1"},
+		{Interface: "eth0 activate"},
+		{Interface: "eth0/1"},
+		{Interface: "a234567890123456"},
+	}
+	for _, in := range invalid {
+		if neighbor, err := newFRRNeighbor(in); err == nil {
+			t.Errorf("newFRRNeighbor(%+v) expected error, got %+v", in, neighbor)
+		}
 	}
 }
 
