@@ -28,7 +28,7 @@ env:
 
 jobs:
   kind-dpu-offload:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 180
     steps:
       - name: Checkout OVN-Kubernetes (PR/push)
@@ -135,7 +135,7 @@ jobs:
         run: ./bin/dpu-sim --config config-kind-ovnk-offload.yaml --ovn-kubernetes-path "$OVN_KUBERNETES_PATH" --cleanup || true
 
   kind-dpu-no-overlay:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 180
     env:
       DPU_SIM_PATH: ${{ github.workspace }}/dpu-simulator

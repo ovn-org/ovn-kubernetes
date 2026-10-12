@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   check-license-header:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v6
       - name: License Eye Header

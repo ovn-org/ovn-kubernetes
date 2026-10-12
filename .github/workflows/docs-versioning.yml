@@ -36,7 +36,7 @@ jobs:
     if: >
       github.event_name != 'create' ||
       startsWith(github.ref, 'refs/heads/release-')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
