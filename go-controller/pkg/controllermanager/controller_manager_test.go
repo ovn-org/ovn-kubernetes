@@ -5,10 +5,14 @@ package controllermanager
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net"
 	"sync"
 	"time"
 
+	cnitypes "github.com/containernetworking/cni/pkg/types"
+	nadv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	"github.com/prometheus/client_golang/prometheus"
 
 	corev1 "k8s.io/api/core/v1"
@@ -17,7 +21,9 @@ import (
 
 	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
 
+	ovncnitypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	egressipv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
 	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/nbdb"
@@ -46,6 +52,326 @@ func (r ignoreAlreadyRegisteredRegisterer) MustRegister(cs ...prometheus.Collect
 				panic(err)
 			}
 		}
+	}
+}
+
+// udnEgressIPNBTestConfig holds caller-supplied topology and EgressIP object
+// identity for prepareUDNEgressIPNBControllerManagerTest. Leave StalePodIP /
+// StalePodName empty to omit a stale reroute LRP from NB.
+type udnEgressIPNBTestConfig struct {
+	NodeName                string
+	Namespace               string
+	NADName                 string
+	NetworkName             string
+	NetworkSubnets          string
+	UDNNodeSubnet           string
+	EgressIPName            string
+	EgressIP                string
+	EgressIPMark            int
+	LivePodName             string
+	LivePodIP               string
+	StalePodName            string
+	StalePodIP              string
+	UDNJoinIP               string
+	EgressIPHealthCheckPort int
+}
+
+type udnEgressIPNBFixture struct {
+	cm                        *ControllerManager
+	nbClient                  libovsdbclient.Client
+	sbClient                  libovsdbclient.Client
+	nbsbCleanup               *libovsdbtest.Context
+	mutableNetInfo            util.NetInfo
+	pod                       *corev1.Pod
+	podIPNet                  *net.IPNet
+	hwAddr                    net.HardwareAddr
+	namespace                 string
+	nadKey                    string
+	nodeName                  string
+	findUDNEgressIPRerouteLRP func(podIP, podName string) ([]*nbdb.LogicalRouterPolicy, error)
+	livePodIP                 string
+	livePodName               string
+	stalePodIP                string
+	stalePodName              string
+	liveLRPUUID               string
+	staleLRPUUID              string
+}
+
+func udnEgressIPRerouteLRP(
+	uuid, networkName, egressIPName, namespace, podName, podIP, joinIP string,
+	eipMark int,
+) *nbdb.LogicalRouterPolicy {
+	return &nbdb.LogicalRouterPolicy{
+		UUID:     uuid,
+		Priority: types.EgressIPReroutePriority,
+		Match:    fmt.Sprintf("ip4.src == %s", podIP),
+		Action:   nbdb.LogicalRouterPolicyActionReroute,
+		Nexthops: []string{joinIP},
+		ExternalIDs: libovsdbops.NewDbObjectIDs(
+			libovsdbops.LogicalRouterPolicyEgressIP,
+			types.DefaultNetworkControllerName,
+			map[libovsdbops.ExternalIDKey]string{
+				libovsdbops.ObjectNameKey: fmt.Sprintf("%s_%s/%s", egressIPName, namespace, podName),
+				libovsdbops.PriorityKey:   fmt.Sprintf("%d", types.EgressIPReroutePriority),
+				libovsdbops.IPFamilyKey:   "ip4",
+				libovsdbops.NetworkKey:    networkName,
+			},
+		).GetExternalIDs(),
+		Options: map[string]string{"pkt_mark": fmt.Sprintf("%d", eipMark)},
+	}
+}
+
+// prepareUDNEgressIPNBControllerManagerTest builds a controller-manager fixture with
+// pre-existing UDN EgressIP reroute policy state in NB from cfg. When cfg.StalePodIP
+// is non-empty, an additional stale reroute LRP is seeded.
+func prepareUDNEgressIPNBControllerManagerTest(
+	wg *sync.WaitGroup,
+	wf **factory.WatchFactory,
+	nbsbCleanup **libovsdbtest.Context,
+	cfg udnEgressIPNBTestConfig,
+) *udnEgressIPNBFixture {
+	Expect(cfg.NodeName).NotTo(BeEmpty())
+	Expect(cfg.Namespace).NotTo(BeEmpty())
+	Expect(cfg.NADName).NotTo(BeEmpty())
+	Expect(cfg.NetworkName).NotTo(BeEmpty())
+	Expect(cfg.LivePodName).NotTo(BeEmpty())
+	Expect(cfg.LivePodIP).NotTo(BeEmpty())
+	if cfg.StalePodIP != "" {
+		Expect(cfg.StalePodName).NotTo(BeEmpty(), "StalePodName is required when StalePodIP is set")
+	}
+
+	config.OVNKubernetesFeature.EnableEgressIP = true
+	config.OVNKubernetesFeature.EnableNetworkSegmentation = true
+	config.Gateway.Mode = config.GatewayModeShared
+	config.OVNKubernetesFeature.EgressIPNodeHealthCheckPort = cfg.EgressIPHealthCheckPort
+
+	nadKey := util.GetNADName(cfg.Namespace, cfg.NADName)
+	egressLabel := map[string]string{"egress": "needed"}
+
+	netconf := ovncnitypes.NetConf{
+		NetConf: cnitypes.NetConf{
+			Name: cfg.NetworkName,
+			Type: "ovn-k8s-cni-overlay",
+		},
+		Role:     types.NetworkRolePrimary,
+		Topology: types.Layer3Topology,
+		NADName:  nadKey,
+		Subnets:  cfg.NetworkSubnets,
+	}
+	netconfBytes, err := json.Marshal(netconf)
+	Expect(err).NotTo(HaveOccurred())
+	nad := &nadv1.NetworkAttachmentDefinition{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      cfg.NADName,
+			Namespace: cfg.Namespace,
+			Annotations: map[string]string{
+				types.OvnNetworkIDAnnotation: "2",
+			},
+		},
+		Spec: nadv1.NetworkAttachmentDefinitionSpec{Config: string(netconfBytes)},
+	}
+	netInfo, err := util.ParseNADInfo(nad)
+	Expect(err).NotTo(HaveOccurred())
+	mutableNetInfo := util.NewMutableNetInfo(netInfo)
+	mutableNetInfo.AddNADs(nadKey)
+
+	node := testNode(cfg.NodeName)
+	node.Labels = map[string]string{"k8s.ovn.org/egress-assignable": ""}
+	node.Annotations["k8s.ovn.org/node-subnets"] = fmt.Sprintf(
+		`{"default":["10.128.0.0/23"],"%s":"%s"}`, cfg.NetworkName, cfg.UDNNodeSubnet)
+	node.Annotations["k8s.ovn.org/network-ids"] = fmt.Sprintf(
+		`{"default":"0","%s":"2"}`, cfg.NetworkName)
+	node.Annotations["k8s.ovn.org/node-primary-ifaddr"] = `{"ipv4":"10.1.1.2/24","ipv6":""}`
+
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: cfg.Namespace,
+			Labels: map[string]string{
+				types.RequiredUDNNamespaceLabel: "",
+				"egress":                        "needed",
+			},
+		},
+	}
+	pod := ovntest.NewPodWithLabels(cfg.Namespace, cfg.LivePodName, cfg.NodeName, cfg.LivePodIP, egressLabel)
+	podIPNet := ovntest.MustParseIPNet(cfg.LivePodIP + util.GetIPFullMaskString(cfg.LivePodIP))
+	hwAddr, err := net.ParseMAC("00:00:5e:00:53:01")
+	Expect(err).NotTo(HaveOccurred())
+	pod.Annotations, err = util.MarshalPodAnnotation(pod.Annotations, &util.PodAnnotation{
+		IPs:  []*net.IPNet{podIPNet},
+		MAC:  hwAddr,
+		Role: types.NetworkRolePrimary,
+	}, nadKey)
+	Expect(err).NotTo(HaveOccurred())
+
+	eip := &egressipv1.EgressIP{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: cfg.EgressIPName,
+			Annotations: map[string]string{
+				util.EgressIPMarkAnnotation: fmt.Sprintf("%d", cfg.EgressIPMark),
+			},
+		},
+		Spec: egressipv1.EgressIPSpec{
+			EgressIPs: []string{cfg.EgressIP},
+			PodSelector: metav1.LabelSelector{
+				MatchLabels: egressLabel,
+			},
+			NamespaceSelector: metav1.LabelSelector{
+				MatchLabels: egressLabel,
+			},
+		},
+		Status: egressipv1.EgressIPStatus{
+			Items: []egressipv1.EgressIPStatusItem{{
+				Node:     cfg.NodeName,
+				EgressIP: cfg.EgressIP,
+			}},
+		},
+	}
+
+	if *wf != nil {
+		(*wf).Shutdown()
+		*wf = nil
+	}
+	(*nbsbCleanup).Cleanup()
+	udnRouterName := mutableNetInfo.GetNetworkScopedClusterRouterName()
+	udnJoinLRPUUID := types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + cfg.NetworkName + "_" + cfg.NodeName + "-UUID"
+	udnJoinLRPName := types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + cfg.NetworkName + "_" + cfg.NodeName
+	_, udnNodeSubnet, err := net.ParseCIDR(cfg.UDNNodeSubnet)
+	Expect(err).NotTo(HaveOccurred())
+	mgmtIP := util.GetNodeManagementIfAddr(udnNodeSubnet).IP.String()
+	liveLRPUUID := fmt.Sprintf("udn-eip-reroute-%s-UUID", cfg.LivePodName)
+	liveLRP := udnEgressIPRerouteLRP(
+		liveLRPUUID, cfg.NetworkName, cfg.EgressIPName, cfg.Namespace, cfg.LivePodName,
+		cfg.LivePodIP, cfg.UDNJoinIP, cfg.EgressIPMark,
+	)
+	udnRouterPolicies := []string{liveLRPUUID}
+	nbData := []libovsdbtest.TestData{
+		&nbdb.NBGlobal{UUID: "nbglobal-UUID", Options: map[string]string{}},
+		&nbdb.LogicalRouter{Name: types.OVNClusterRouter},
+		&nbdb.LogicalSwitch{Name: types.OVNJoinSwitch},
+		&nbdb.LoadBalancerGroup{Name: types.ClusterLBGroupName},
+		&nbdb.LoadBalancerGroup{Name: types.ClusterSwitchLBGroupName},
+		&nbdb.LoadBalancerGroup{Name: types.ClusterRouterLBGroupName},
+		liveLRP,
+	}
+	staleLRPUUID := ""
+	if cfg.StalePodIP != "" {
+		staleLRPUUID = fmt.Sprintf("udn-eip-reroute-%s-UUID", cfg.StalePodName)
+		nbData = append(nbData, udnEgressIPRerouteLRP(
+			staleLRPUUID, cfg.NetworkName, cfg.EgressIPName, cfg.Namespace, cfg.StalePodName,
+			cfg.StalePodIP, cfg.UDNJoinIP, cfg.EgressIPMark,
+		))
+		udnRouterPolicies = append(udnRouterPolicies, staleLRPUUID)
+	}
+	nbData = append(nbData,
+		&nbdb.LogicalRouter{
+			UUID:        udnRouterName + "-UUID",
+			Name:        udnRouterName,
+			Policies:    udnRouterPolicies,
+			ExternalIDs: map[string]string{types.NetworkExternalID: cfg.NetworkName, types.TopologyExternalID: types.Layer3Topology},
+		},
+		&nbdb.LogicalRouterPort{
+			UUID:     udnJoinLRPUUID,
+			Name:     udnJoinLRPName,
+			Networks: []string{cfg.UDNJoinIP + "/16"},
+		},
+		&nbdb.LogicalRouter{
+			UUID:        mutableNetInfo.GetNetworkScopedGWRouterName(cfg.NodeName) + "-UUID",
+			Name:        mutableNetInfo.GetNetworkScopedGWRouterName(cfg.NodeName),
+			Ports:       []string{udnJoinLRPUUID},
+			ExternalIDs: map[string]string{types.NetworkExternalID: cfg.NetworkName, types.TopologyExternalID: types.Layer3Topology},
+		},
+		&nbdb.LogicalSwitchPort{
+			UUID:      "k8s-" + cfg.NetworkName + "_" + cfg.NodeName + "-UUID",
+			Name:      "k8s-" + cfg.NetworkName + "_" + cfg.NodeName,
+			Addresses: []string{"fe:1a:b2:3f:0e:fb " + mgmtIP},
+		},
+		&nbdb.LogicalSwitch{
+			UUID:        mutableNetInfo.GetNetworkScopedSwitchName(cfg.NodeName) + "-UUID",
+			Name:        mutableNetInfo.GetNetworkScopedSwitchName(cfg.NodeName),
+			Ports:       []string{"k8s-" + cfg.NetworkName + "_" + cfg.NodeName + "-UUID"},
+			ExternalIDs: util.GenerateExternalIDsForSwitchOrRouter(mutableNetInfo),
+		},
+	)
+	dbSetup := libovsdbtest.TestSetup{
+		NBData: nbData,
+		SBData: []libovsdbtest.TestData{
+			&sbdb.SBGlobal{UUID: "sbglobal-UUID", Options: map[string]string{}},
+		},
+	}
+	nbClient, sbClient, newCleanup, err := libovsdbtest.NewNBSBTestHarness(dbSetup)
+	Expect(err).NotTo(HaveOccurred())
+	*nbsbCleanup = newCleanup
+
+	findUDNEgressIPRerouteLRP := func(podIP, egressPodName string) ([]*nbdb.LogicalRouterPolicy, error) {
+		return libovsdbops.FindLogicalRouterPoliciesWithPredicate(nbClient, func(item *nbdb.LogicalRouterPolicy) bool {
+			return item.Priority == types.EgressIPReroutePriority &&
+				item.Match == fmt.Sprintf("ip4.src == %s", podIP) &&
+				item.ExternalIDs[libovsdbops.NetworkKey.String()] == cfg.NetworkName &&
+				item.ExternalIDs[libovsdbops.ObjectNameKey.String()] == fmt.Sprintf("%s_%s/%s", cfg.EgressIPName, cfg.Namespace, egressPodName)
+		})
+	}
+
+	ovnClient := util.GetOVNClientset(node, ns, pod, nad, eip)
+	var newWF *factory.WatchFactory
+	newWF, err = factory.NewOVNKubeControllerWatchFactory(ovnClient.GetOVNKubeControllerClientset(), cfg.NodeName)
+	Expect(err).NotTo(HaveOccurred())
+	*wf = newWF
+
+	cm, err := NewControllerManager(cfg.NodeName, ovnClient, newWF, nbClient, sbClient, record.NewFakeRecorder(10), wg)
+	Expect(err).NotTo(HaveOccurred())
+
+	// libovsdbtest may rewrite named UUIDs from TestData; capture the actual
+	// UUIDs present in NB after harness creation for later comparisons.
+	liveLRPs, err := findUDNEgressIPRerouteLRP(cfg.LivePodIP, cfg.LivePodName)
+	Expect(err).NotTo(HaveOccurred())
+	Expect(liveLRPs).To(HaveLen(1))
+	actualLiveLRPUUID := liveLRPs[0].UUID
+	actualStaleLRPUUID := ""
+	if cfg.StalePodIP != "" {
+		staleLRPs, findErr := findUDNEgressIPRerouteLRP(cfg.StalePodIP, cfg.StalePodName)
+		Expect(findErr).NotTo(HaveOccurred())
+		Expect(staleLRPs).To(HaveLen(1))
+		actualStaleLRPUUID = staleLRPs[0].UUID
+	}
+
+	return &udnEgressIPNBFixture{
+		cm:                        cm,
+		nbClient:                  nbClient,
+		sbClient:                  sbClient,
+		nbsbCleanup:               newCleanup,
+		mutableNetInfo:            mutableNetInfo,
+		pod:                       pod,
+		podIPNet:                  podIPNet,
+		hwAddr:                    hwAddr,
+		namespace:                 cfg.Namespace,
+		nadKey:                    nadKey,
+		nodeName:                  cfg.NodeName,
+		findUDNEgressIPRerouteLRP: findUDNEgressIPRerouteLRP,
+		livePodIP:                 cfg.LivePodIP,
+		livePodName:               cfg.LivePodName,
+		stalePodIP:                cfg.StalePodIP,
+		stalePodName:              cfg.StalePodName,
+		liveLRPUUID:               actualLiveLRPUUID,
+		staleLRPUUID:              actualStaleLRPUUID,
+	}
+}
+
+func udnEgressIPFakeNetworkManager(f *udnEgressIPNBFixture, dncFinishedWithoutRemovingLRP *bool) *networkmanager.FakeNetworkManager {
+	return &networkmanager.FakeNetworkManager{
+		PrimaryNetworks: map[string]util.NetInfo{
+			f.namespace: f.mutableNetInfo,
+		},
+		NADNetworks: map[string]util.NetInfo{
+			f.nadKey: f.mutableNetInfo,
+		},
+		StartFunc: func() error {
+			if dncFinishedWithoutRemovingLRP != nil {
+				Expect(*dncFinishedWithoutRemovingLRP).To(BeTrue(),
+					"network manager must start only after DNC.Start")
+			}
+			f.cm.portCache.Add(f.pod, f.mutableNetInfo.GetNetworkScopedSwitchName(f.nodeName), f.nadKey, "lsp-uuid", f.hwAddr, []*net.IPNet{f.podIPNet})
+			return nil
+		},
 	}
 }
 
@@ -230,5 +556,109 @@ var _ = Describe("ControllerManager Start order", func() {
 		Expect(err.Error()).To(Equal("failed to start default network controller: injected start failure"))
 		Expect(nmStarted).To(BeFalse())
 		Expect(nm.Started()).To(BeFalse())
+	})
+
+	baseUDNEgressIPNBConfig := func() udnEgressIPNBTestConfig {
+		return udnEgressIPNBTestConfig{
+			NodeName:                nodeName,
+			Namespace:               "udn-ns",
+			NADName:                 "nad1",
+			NetworkName:             "network1",
+			NetworkSubnets:          "20.128.0.0/14",
+			UDNNodeSubnet:           "20.128.0.0/16",
+			EgressIPName:            "egressip",
+			EgressIP:                "192.168.126.101",
+			EgressIPMark:            50000,
+			LivePodName:             "egress-pod",
+			LivePodIP:               "20.128.0.5",
+			UDNJoinIP:               "100.65.0.2",
+			EgressIPHealthCheckPort: 1234,
+		}
+	}
+
+	It("does not remove UDN EgressIP NBDB entries when DNC starts", func() {
+		// Pre-existing UDN EgressIP OVN config must survive DefaultNetworkController.Start.
+		// NAD reconcile and pods on those NADs have not run yet at that point, so DNC
+		// must not treat the LRPs as stale. Only StartEgressIP (after networkManager.Start)
+		// performs EgressIP stale cleanup via syncEgressIPs.
+		fixture := prepareUDNEgressIPNBControllerManagerTest(wg, &wf, &nbsbCleanup, baseUDNEgressIPNBConfig())
+		nbClient = fixture.nbClient
+		sbClient = fixture.sbClient
+
+		existingLRPs, err := fixture.findUDNEgressIPRerouteLRP(fixture.livePodIP, fixture.livePodName)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(existingLRPs).NotTo(BeEmpty())
+		existingLRPUUIDs := []string{fixture.liveLRPUUID}
+
+		dncFinishedWithoutRemovingLRP := false
+		origStart := startDefaultNetworkController
+		DeferCleanup(func() { startDefaultNetworkController = origStart })
+		startDefaultNetworkController = func(ctx context.Context, c networkmanager.BaseNetworkController) error {
+			if err := origStart(ctx, c); err != nil {
+				return err
+			}
+			lrps, getErr := fixture.findUDNEgressIPRerouteLRP(fixture.livePodIP, fixture.livePodName)
+			Expect(getErr).NotTo(HaveOccurred())
+			lrpUUIDs := make([]string, 0, len(lrps))
+			for _, lrp := range lrps {
+				lrpUUIDs = append(lrpUUIDs, lrp.UUID)
+			}
+			Expect(lrpUUIDs).To(ConsistOf(existingLRPUUIDs),
+				"DNC.Start must not remove or replace UDN EgressIP NBDB entries before StartEgressIP")
+			dncFinishedWithoutRemovingLRP = true
+			return nil
+		}
+
+		nm := udnEgressIPFakeNetworkManager(fixture, &dncFinishedWithoutRemovingLRP)
+		fixture.cm.networkManager = nm
+		DeferCleanup(fixture.cm.Stop)
+
+		Expect(fixture.cm.Start(context.Background())).To(Succeed())
+		Expect(dncFinishedWithoutRemovingLRP).To(BeTrue())
+		Expect(nm.Started()).To(BeTrue())
+
+		lrps, err := fixture.findUDNEgressIPRerouteLRP(fixture.livePodIP, fixture.livePodName)
+		Expect(err).NotTo(HaveOccurred())
+		lrpUUIDs := make([]string, 0, len(lrps))
+		for _, lrp := range lrps {
+			lrpUUIDs = append(lrpUUIDs, lrp.UUID)
+		}
+		Expect(lrpUUIDs).To(ConsistOf(existingLRPUUIDs),
+			"StartEgressIP must not remove live UDN EgressIP NBDB entries once NAD pods are reconciled")
+	})
+
+	It("removes stale UDN EgressIP NBDB entries during StartEgressIP", func() {
+		cfg := baseUDNEgressIPNBConfig()
+		cfg.StalePodName = "stale-egress-pod"
+		cfg.StalePodIP = "20.128.0.99"
+		fixture := prepareUDNEgressIPNBControllerManagerTest(wg, &wf, &nbsbCleanup, cfg)
+		nbClient = fixture.nbClient
+		sbClient = fixture.sbClient
+
+		liveLRPs, err := fixture.findUDNEgressIPRerouteLRP(fixture.livePodIP, fixture.livePodName)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(liveLRPs).To(HaveLen(1))
+		Expect(liveLRPs[0].UUID).To(Equal(fixture.liveLRPUUID))
+
+		staleLRPs, err := fixture.findUDNEgressIPRerouteLRP(fixture.stalePodIP, fixture.stalePodName)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(staleLRPs).To(HaveLen(1))
+		Expect(staleLRPs[0].UUID).To(Equal(fixture.staleLRPUUID))
+
+		nm := udnEgressIPFakeNetworkManager(fixture, nil)
+		fixture.cm.networkManager = nm
+		DeferCleanup(fixture.cm.Stop)
+
+		Expect(fixture.cm.Start(context.Background())).To(Succeed())
+		Expect(nm.Started()).To(BeTrue())
+
+		liveLRPs, err = fixture.findUDNEgressIPRerouteLRP(fixture.livePodIP, fixture.livePodName)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(liveLRPs).To(HaveLen(1))
+		Expect(liveLRPs[0].UUID).To(Equal(fixture.liveLRPUUID))
+
+		staleLRPs, err = fixture.findUDNEgressIPRerouteLRP(fixture.stalePodIP, fixture.stalePodName)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(staleLRPs).To(BeEmpty(), "syncEgressIPs must delete stale UDN EgressIP reroute policies")
 	})
 })

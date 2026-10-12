@@ -79,6 +79,13 @@ func (c *PortCache) getAll(pod *corev1.Pod) (map[string]*lpInfo, error) {
 	return nil, fmt.Errorf("logical port cache for pod %s not found", podName)
 }
 
+// Add inserts a pod's logical port into the cache. Network controllers call the
+// unexported add helper; tests outside package ovn use Add to simulate UDN port
+// programming before EgressIP sync.
+func (c *PortCache) Add(pod *corev1.Pod, logicalSwitch, nadKey, uuid string, mac net.HardwareAddr, ips []*net.IPNet) {
+	_ = c.add(pod, logicalSwitch, nadKey, uuid, mac, ips)
+}
+
 func (c *PortCache) add(pod *corev1.Pod, logicalSwitch, nadKey, uuid string, mac net.HardwareAddr, ips []*net.IPNet) *lpInfo {
 	var logicalPort string
 
