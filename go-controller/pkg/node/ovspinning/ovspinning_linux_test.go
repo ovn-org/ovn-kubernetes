@@ -110,17 +110,35 @@ func TestAlignCPUAffinity(t *testing.T) {
 				wg.Wait()
 			}()
 
+			featureStates := make(chan bool, 1)
+			waitForFeatureState := func(enabled bool) {
+				t.Helper()
+				select {
+				case actual := <-featureStates:
+					require.Equal(t, enabled, actual)
+				case <-time.After(5 * time.Second):
+					t.Fatalf("timed out waiting for pinning enabled=%v", enabled)
+				}
+			}
+			mockClient := mocks.NewPodResourcesListerClient(t)
+			mockClient.On("GetAllocatableResources", mock.Anything, mock.Anything).Return(
+				&kubeletpodresourcesv1.AllocatableResourcesResponse{CpuIds: tc.allocatableCPUs}, nil)
+			mockClient.On("List", mock.Anything, mock.Anything).Return(
+				buildListPodResourcesResponse(tc.usedCPUs), nil)
 			wg.Add(1)
 			go func() {
 				// Be sure the system under test goroutine is finished before cleaning
 				defer wg.Done()
-				mockClient := mocks.NewPodResourcesListerClient(t)
-				mockClient.On("GetAllocatableResources", mock.Anything, mock.Anything).Return(
-					&kubeletpodresourcesv1.AllocatableResourcesResponse{CpuIds: tc.allocatableCPUs}, nil)
-				mockClient.On("List", mock.Anything, mock.Anything).Return(
-					buildListPodResourcesResponse(tc.usedCPUs), nil)
-				Run(context.Background(), stopCh, mockClient, ovsClient)
+				run(context.Background(), stopCh, mockClient, ovsClient, func(enabled bool) {
+					select {
+					case featureStates <- enabled:
+					case <-stopCh:
+					}
+				})
 			}()
+
+			// Affinity may already match before Run starts; wait for its watcher to be ready.
+			waitForFeatureState(true)
 
 			expectedUnixCPUSet := convertCPUSet(&expectedCPUs)
 			if expectedCPUs.IsEmpty() {
@@ -143,8 +161,8 @@ func TestAlignCPUAffinity(t *testing.T) {
 			err = os.WriteFile(featureEnablerFile, []byte(""), 0)
 			require.NoError(t, err)
 
-			// wait for the ovspinning loop to stabilize and stop running
-			time.Sleep(1 * time.Second)
+			// Wait until the loop has processed disabling and finished any prior update.
+			waitForFeatureState(false)
 
 			var tmpCPUset unix.CPUSet
 			tmpCPUset.Set(0)
@@ -158,6 +176,7 @@ func TestAlignCPUAffinity(t *testing.T) {
 			// Enable the feature back by putting contents in the enabler file
 			err = os.WriteFile(featureEnablerFile, []byte("1"), 0)
 			require.NoError(t, err)
+			waitForFeatureState(true)
 
 			assertPIDHasSchedAffinity(t, ovsVSwitchdPid, expectedUnixCPUSet)
 			assertPIDHasSchedAffinity(t, ovsDBPid, expectedUnixCPUSet)
@@ -167,8 +186,8 @@ func TestAlignCPUAffinity(t *testing.T) {
 			err = os.Remove(featureEnablerFile)
 			require.NoError(t, err)
 
-			// wait for the ovspinning loop to stabilize and stop running
-			time.Sleep(1 * time.Second)
+			// Wait until the loop has processed disabling and finished any prior update.
+			waitForFeatureState(false)
 
 			tmpCPUset.Set(1)
 			assert.NoError(t, unix.SchedSetaffinity(ovsVSwitchdPid, &tmpCPUset))
@@ -182,6 +201,7 @@ func TestAlignCPUAffinity(t *testing.T) {
 			klog.Infof("Re-enable the feature")
 			err = os.WriteFile(featureEnablerFile, []byte("1"), 0)
 			require.NoError(t, err)
+			waitForFeatureState(true)
 
 			assertPIDHasSchedAffinity(t, ovsVSwitchdPid, expectedUnixCPUSet)
 			assertPIDHasSchedAffinity(t, ovsDBPid, expectedUnixCPUSet)
@@ -335,7 +355,7 @@ func mockOvsdbProcess(t *testing.T) (int, func()) {
 	t.Helper()
 	ctx, stopCmd := context.WithCancel(context.Background())
 
-	cmd := exec.CommandContext(ctx, "sleep", "10")
+	cmd := exec.CommandContext(ctx, "sleep", "60")
 
 	err := cmd.Start()
 	assert.NoError(t, err)
@@ -347,32 +367,19 @@ func mockOvsdbProcess(t *testing.T) (int, func()) {
 
 	return cmd.Process.Pid, func() {
 		stopCmd()
+		_ = cmd.Wait()
 		getOvsDBServerPIDFn = previousGetter
 	}
 }
 
 func mockOvsVSwitchdProcess(t *testing.T) (int, func()) {
 	t.Helper()
-	ctx, stopCmd := context.WithCancel(context.Background())
-
-	cmd := exec.CommandContext(ctx, "go", "run", "testdata/fake_thread_process.go")
-	err := cmd.Start()
-	require.NoError(t, err)
-
+	pid, _, _ := startAffinityTestProcess(t)
 	previousGetter := getOvsVSwitchdPIDFn
 	getOvsVSwitchdPIDFn = func() (string, error) {
-		return fmt.Sprintf("%d", cmd.Process.Pid), nil
+		return fmt.Sprintf("%d", pid), nil
 	}
-
-	// Ensure the fake process has some thread
-	assert.Eventually(t, func() bool {
-		tasks, err := getThreadsOfProcess(cmd.Process.Pid)
-		assert.NoError(t, err)
-		return len(tasks) > 1
-	}, time.Second, 100*time.Millisecond, "ovs-vswitchd fake process does not have enough threads")
-
-	return cmd.Process.Pid, func() {
-		stopCmd()
+	return pid, func() {
 		getOvsVSwitchdPIDFn = previousGetter
 	}
 }

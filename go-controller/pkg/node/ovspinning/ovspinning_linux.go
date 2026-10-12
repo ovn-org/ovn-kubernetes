@@ -47,6 +47,12 @@ var kubeletConfigFilePath = "/host/etc/kubernetes/kubelet.conf"
 // This feature is enabled by the presence of a non-empty file in the path `/etc/openvswitch/enable_dynamic_cpu_affinity`
 // we're passing the podResCli from the caller, so we could support unit-tests
 func Run(ctx context.Context, stopCh <-chan struct{}, podResCli podresourcesapi.PodResourcesListerClient, ovsClient libovsdbclient.Client) {
+	run(ctx, stopCh, podResCli, ovsClient, nil)
+}
+
+// run reports initial readiness and subsequent enablement changes synchronously
+// from the pinning loop, allowing tests to wait for in-flight reconciliation to finish.
+func run(ctx context.Context, stopCh <-chan struct{}, podResCli podresourcesapi.PodResourcesListerClient, ovsClient libovsdbclient.Client, featureStateChanged func(bool)) {
 
 	// The file must be present at startup to enable the feature
 	isFeatureEnabled, err := isFileNotEmpty(featureEnablerFile)
@@ -95,6 +101,10 @@ func Run(ctx context.Context, stopCh <-chan struct{}, podResCli podresourcesapi.
 	ticker := time.NewTicker(tickDuration)
 	defer ticker.Stop()
 
+	if featureStateChanged != nil {
+		featureStateChanged(isFeatureEnabled)
+	}
+
 	for {
 		select {
 		case event, ok := <-fsnotifyEvents:
@@ -107,6 +117,7 @@ func Run(ctx context.Context, stopCh <-chan struct{}, podResCli podresourcesapi.
 				continue
 			}
 
+			wasFeatureEnabled := isFeatureEnabled
 			isFeatureEnabled, err = isFileNotEmpty(featureEnablerFile)
 			if err != nil {
 				klog.Warningf("Error while reading [%s]: %v", featureEnablerFile, err)
@@ -117,6 +128,10 @@ func Run(ctx context.Context, stopCh <-chan struct{}, podResCli podresourcesapi.
 				klog.Infof("OVS daemon CPU pinning feature enabled")
 			} else {
 				klog.Infof("OVS daemon CPU pinning feature NOT enabled")
+			}
+
+			if featureStateChanged != nil && wasFeatureEnabled != isFeatureEnabled {
+				featureStateChanged(isFeatureEnabled)
 			}
 
 		case err, ok := <-fsnotifyErrors:
