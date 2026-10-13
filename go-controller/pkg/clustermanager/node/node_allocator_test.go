@@ -149,6 +149,17 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 			wantErr:       false,
 		},
 		{
+			name:          "existing annotated node with unexpected IPv4 prefix length",
+			networkRanges: []string{"172.16.0.0/16"},
+			networkLens:   []int{24},
+			configIPv4:    true,
+			configIPv6:    false,
+			existingNets:  ovntest.MustParseIPNets("172.16.8.0/25"),
+			wantStr:       []string{"172.16.0.0/24"},
+			allocated:     1,
+			wantErr:       false,
+		},
+		{
 			name:          "existing annotated node, IPv6 only cluster",
 			networkRanges: []string{"2001:db2::/32"},
 			networkLens:   []int{64},
