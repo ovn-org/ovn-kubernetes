@@ -266,50 +266,6 @@ func composeAgnhostPod(name, namespace, nodeName string, args ...string) *corev1
 	return agnHostPod
 }
 
-func removeImagesInNode(node, imageURL string) error {
-	By("Removing unused images in node " + node)
-	output, err := infraprovider.Get().ExecK8NodeCommand(node, []string{
-		"crictl", "images", "-o", "json",
-	})
-	if err != nil {
-		return err
-	}
-
-	// Remove tag if exists.
-	taglessImageURL := strings.Split(imageURL, ":")[0]
-	imageID, err := images.ImageIDByImageURL(taglessImageURL, output)
-	if err != nil {
-		return err
-	}
-	if imageID != "" {
-		_, err = infraprovider.Get().ExecK8NodeCommand(node, []string{
-			"crictl", "rmi", imageID,
-		})
-		if err != nil {
-			return err
-		}
-		_, err = infraprovider.Get().ExecK8NodeCommand(node, []string{
-			"crictl", "rmi", "--prune",
-		})
-		if err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func removeImagesFromNodes(cs kubernetes.Interface, imageURL string) error {
-	nodesList, err := cs.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{})
-	Expect(err).NotTo(HaveOccurred())
-	for nodeIdx := range nodesList.Items {
-		err = removeImagesInNode(nodesList.Items[nodeIdx].Name, imageURL)
-		if err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 var _ = Describe("Kubevirt Virtual Machines", feature.VirtualMachineSupport, func() {
 	var (
 		fr                  = wrappedTestFramework("kv-live-migration")
@@ -1350,10 +1306,6 @@ config:
 			httpServerTestPods = updatePods(httpServerTestPods)
 		}
 
-		removeImagesInNodes = func(imageURL string) error {
-			return removeImagesFromNodes(fr.ClientSet, imageURL)
-		}
-
 		createCUDN = func(ctx context.Context, cudn *udnv1.ClusterUserDefinedNetwork) {
 			GinkgoHelper()
 			createCUDNWithClients(ctx, crClient, fr.DynamicClient, cudn)
@@ -1401,7 +1353,7 @@ config:
 		Expect(err).NotTo(HaveOccurred())
 	})
 
-	Context("with default pod network", Ordered, func() {
+	Context("with default pod network", func() {
 		BeforeEach(func() {
 			ns, err := fr.CreateNamespace(context.TODO(), fr.BaseName, map[string]string{
 				"e2e-framework": fr.BaseName,
@@ -1428,10 +1380,6 @@ config:
 			for _, node := range selectedNodes {
 				e2enode.RemoveLabelOffNode(fr.ClientSet, node.Name, namespace)
 			}
-		})
-
-		AfterAll(func() {
-			Expect(removeImagesInNodes(images.FedoraKubevirtContainerDisk())).To(Succeed())
 		})
 
 		DescribeTable("when live migration", func(td liveMigrationTestData) {
@@ -1535,10 +1483,7 @@ config:
 			}),
 		)
 	})
-	Context("with user defined networks and persistent ips configured", Ordered, func() {
-		AfterAll(func() {
-			Expect(removeImagesInNodes(images.FedoraKubevirtContainerDisk())).To(Succeed())
-		})
+	Context("with user defined networks and persistent ips configured", func() {
 		type testCommand struct {
 			description string
 			cmd         func()
@@ -2243,7 +2188,7 @@ ip route add %[3]s via %[4]s
 			}),
 		)
 	})
-	Context("with kubevirt VM using layer2 UDPN", Ordered, func() {
+	Context("with kubevirt VM using layer2 UDPN", func() {
 		var (
 			cidrIPv4   = "172.31.0.0/24"
 			cidrIPv6   = "2010:100:200::/60"
@@ -2260,9 +2205,6 @@ ip route add %[3]s via %[4]s
 				return strings.Split(output, " | "), nil
 			}
 		)
-		AfterAll(func() {
-			Expect(removeImagesInNodes(images.FedoraKubevirtContainerDisk())).To(Succeed())
-		})
 		BeforeEach(func(ctx SpecContext) {
 			ns, err := fr.CreateNamespace(context.TODO(), fr.BaseName, map[string]string{
 				"e2e-framework":           fr.BaseName,
@@ -2354,7 +2296,7 @@ ethernets:
 			}
 		})
 	})
-	Context("with user defined networks with ipamless localnet topology", Ordered, func() {
+	Context("with user defined networks with ipamless localnet topology", func() {
 		BeforeEach(func() {
 			ns, err := fr.CreateNamespace(context.TODO(), fr.BaseName, map[string]string{
 				"e2e-framework": fr.BaseName,
@@ -2362,9 +2304,6 @@ ethernets:
 			Expect(err).ToNot(HaveOccurred())
 			fr.Namespace = ns
 			namespace = fr.Namespace.Name
-		})
-		AfterAll(func() {
-			Expect(removeImagesInNodes(images.FedoraKubevirtContainerDisk())).To(Succeed())
 		})
 		var (
 			ipv4CIDR             = "172.31.0.0/24"

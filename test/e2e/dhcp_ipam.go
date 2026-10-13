@@ -66,7 +66,7 @@ var _ = Describe("Localnet DHCP IPAM", feature.DHCPIPAM, func() {
 		Expect(err).NotTo(HaveOccurred())
 	})
 
-	Context("with user defined networks with DHCP IPAM localnet topology", Ordered, func() {
+	Context("with user defined networks with DHCP IPAM localnet topology", func() {
 		const (
 			dhcpServerIP = "172.31.100.1"
 			dhcpRange    = "172.31.100.10,172.31.100.100,255.255.255.0,12h"
@@ -133,10 +133,6 @@ ethernets:
 			Expect(err).NotTo(HaveOccurred(), "must get underlay network")
 			Expect(runDHCPServer(fr.Namespace.Name, underlayNetwork)).To(Succeed(),
 				"must create the dnsmasq container")
-		})
-
-		AfterAll(func() {
-			Expect(removeImagesFromNodes(fr.ClientSet, images.FedoraKubevirtContainerDisk())).To(Succeed())
 		})
 
 		// startVM boots a fedora VM attached to the DHCP CUDN. The role label
