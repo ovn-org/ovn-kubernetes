@@ -179,10 +179,20 @@ func (m *UDNHostIsolationManager) kubeletCgroupPathToUse(cgroupRoot string) (str
 }
 
 // setKubeletCgroupPath stores the cgroup kubelet runs under in m.kubeletCgroupPath.
-// When it cannot be resolved, kubelet probes to primary UDN pods are reported as
-// unsupported and the path is left empty, which leaves the kubelet rule out of the
-// isolation chain. Host isolation itself is unaffected.
+// When it cannot be resolved, or the match cannot be loaded from this container,
+// kubelet probes to primary UDN pods are reported as unsupported and the path is left
+// empty, which leaves the kubelet rule out of the isolation chain. Host isolation
+// itself is unaffected.
 func (m *UDNHostIsolationManager) setKubeletCgroupPath(cgroupRoot string) {
+	if config.UnprivilegedMode {
+		// The kernel reads the level of the socket cgroupv2 match relative to the
+		// cgroup namespace of the process that loads the rule. An unprivileged
+		// container runs in its own cgroup namespace, so a rule it loads can never
+		// match kubelet's cgroup, whatever is mounted at the cgroup root.
+		m.reportKubeletProbesUnsupported("ovnkube-node runs in unprivileged mode, in its own cgroup namespace, " +
+			"and the nftables socket cgroupv2 match can only be loaded from the host cgroup namespace")
+		return
+	}
 	if !hostUsesCgroupv2() {
 		m.reportKubeletProbesUnsupported("the node uses cgroup v1")
 		return

@@ -662,6 +662,12 @@ left out, so ovnkube-node keeps running. The node reports a
 * the kubelet cgroup is not found, and no usable path is configured
 * the kernel is built without `CONFIG_NFT_SOCKET`, so it has no `socket`
   expression and the rule cannot load
+* ovnkube-node runs in unprivileged mode (`global.unprivilegedMode`). An
+  unprivileged container has its own cgroup namespace, and since kernel
+  6.12 the kernel reads the match's `level` relative to the cgroup
+  namespace of the process that loads the rule, so a rule loaded from the
+  container can never match kubelet's cgroup. Only a privileged container
+  shares the host cgroup namespace
 
 `httpGet`, `tcpSocket` and `grpc` probes to primary UDN pods are dropped
 in that case. The rules drop rather than reject, so a probe times out

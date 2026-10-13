@@ -271,6 +271,14 @@ ovnkube-node writes its per-interface sysctls (forwarding, `rp_filter`,
 `keep_addr_on_down`) there. The pod runs in the host network namespace, so
 these are the same entries, and `NET_ADMIN` is all the kernel requires.
 
+Kubelet probes to primary user defined network pods are not supported in
+this mode: the nftables rule that lets kubelet through the host isolation
+can only be loaded from the host cgroup namespace. The node reports
+`UDNKubeletProbesNotSupported`, and the e2e tests skip their kubelet probe
+assertions. See the
+[UDN documentation](../features/user-defined-networks/user-defined-networks.md#when-kubelet-probes-are-not-supported)
+for the workarounds.
+
 The kind node image does not ship these tools, so the script installs the
 `openvswitch-switch` package on every node before deploying OVN-Kubernetes.
 Only `-upm` strictly needs it, but the tools are installed for every

@@ -298,7 +298,13 @@ var _ = Describe("Network Segmentation", feature.NetworkSegmentation, func() {
 						udnPodConfig.namespace = f.Namespace.Name
 						udnPodConfig.nodeSelector = map[string]string{nodeHostnameKey: nodes.Items[0].Name}
 
+						// An unprivileged ovnkube-node cannot let kubelet through the host
+						// isolation, so the probes would never succeed there.
+						kubeletProbesSupported := !isUnprivilegedMode()
 						udnPod := runUDNPod(cs, f.Namespace.Name, udnPodConfig, func(pod *v1.Pod) {
+							if !kubeletProbesSupported {
+								return
+							}
 							pod.Spec.Containers[0].ReadinessProbe = &v1.Probe{
 								ProbeHandler: v1.ProbeHandler{
 									HTTPGet: &v1.HTTPGetAction{
@@ -393,22 +399,26 @@ var _ = Describe("Network Segmentation", feature.NetworkSegmentation, func() {
 						udnPod, err = cs.CoreV1().Pods(udnPod.Namespace).Get(context.Background(), udnPod.Name, metav1.GetOptions{})
 						Expect(err).NotTo(HaveOccurred())
 
-						By("asserting healthcheck works (kubelet can access the UDN pod)")
-						// The pod should be ready
-						Expect(podutils.IsPodReady(udnPod)).To(BeTrue(), fmt.Sprintf("UDN pod is not ready: %v", udnPod))
+						if kubeletProbesSupported {
+							By("asserting healthcheck works (kubelet can access the UDN pod)")
+							// The pod should be ready
+							Expect(podutils.IsPodReady(udnPod)).To(BeTrue(), fmt.Sprintf("UDN pod is not ready: %v", udnPod))
 
-						Expect(udnPod.Status.ContainerStatuses[0].RestartCount).To(Equal(int32(0)))
+							Expect(udnPod.Status.ContainerStatuses[0].RestartCount).To(Equal(int32(0)))
 
-						By("restarting kubelet, pod should stay ready")
-						_, err = infraprovider.Get().ExecK8NodeCommand(nodeName, []string{"systemctl", "restart", "kubelet"})
-						Expect(err).NotTo(HaveOccurred())
+							By("restarting kubelet, pod should stay ready")
+							_, err = infraprovider.Get().ExecK8NodeCommand(nodeName, []string{"systemctl", "restart", "kubelet"})
+							Expect(err).NotTo(HaveOccurred())
 
-						By("asserting healthcheck still works (kubelet can access the UDN pod)")
-						// The pod should stay ready
-						Consistently(func() bool {
-							return podutils.IsPodReady(udnPod)
-						}, 10*time.Second, 1*time.Second).Should(BeTrue())
-						Expect(udnPod.Status.ContainerStatuses[0].RestartCount).To(Equal(int32(0)))
+							By("asserting healthcheck still works (kubelet can access the UDN pod)")
+							// The pod should stay ready
+							Consistently(func() bool {
+								return podutils.IsPodReady(udnPod)
+							}, 10*time.Second, 1*time.Second).Should(BeTrue())
+							Expect(udnPod.Status.ContainerStatuses[0].RestartCount).To(Equal(int32(0)))
+						} else {
+							By("skipping the kubelet healthcheck assertions: ovnkube-node runs in unprivileged mode")
+						}
 
 						By("checking default network hostNetwork pod and non-kubelet host process can't reach the UDN pod")
 						hostNetPod, err := createPod(f, "host-net-pod", nodeName,

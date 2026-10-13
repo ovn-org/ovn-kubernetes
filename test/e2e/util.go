@@ -1321,6 +1321,15 @@ func isICMPNetworkPolicyBypassEnabled() bool {
 	return val == "true"
 }
 
+// isUnprivilegedMode reports whether ovnkube-node runs without privileged: true.
+// Kubelet probes to primary UDN pods are not supported in that mode, see
+// UDNKubeletProbesNotSupported.
+func isUnprivilegedMode() bool {
+	ovnKubeNamespace := deploymentconfig.Get().OVNKubernetesNamespace()
+	val := getTemplateContainerEnv(ovnKubeNamespace, "daemonset/ovnkube-node", getNodeContainerName(), "OVN_UNPRIVILEGED_MODE")
+	return val == "yes"
+}
+
 func isLocalGWModeEnabled() bool {
 	val, present := os.LookupEnv("OVN_GATEWAY_MODE")
 	return present && val == "local"
