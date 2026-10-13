@@ -1868,13 +1868,8 @@ spec:
 			return nil
 		}, 30*time.Second, 1*time.Second).Should(Succeed(), "wait for UDN to become ready")
 
-		getCtx, getCancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer getCancel()
-		nad, err := nadClient.NetworkAttachmentDefinitions(ns).Get(getCtx, nadName, metav1.GetOptions{})
-		Expect(err).NotTo(HaveOccurred(), "get NAD created for UDN")
-		Expect(nad.OwnerReferences).To(HaveLen(1), "NAD should have a single owner reference")
-		Expect(nad.OwnerReferences[0].Kind).To(Equal("UserDefinedNetwork"), "NAD should be owned by UserDefinedNetwork")
-		Expect(nad.OwnerReferences[0].Name).To(Equal(nadName), "NAD owner reference should match UDN name")
+		By("verify NAD is created and owned by the UDN")
+		assertNADOwnedByUserDefinedNetwork(f.DynamicClient, nadClient, ns, nadName)
 	})
 
 	Context("RBAC for UserDefinedNetwork", func() {
@@ -1996,13 +1991,7 @@ spec:
 			}, 30*time.Second, 1*time.Second).Should(Succeed(), "wait for UDN to become ready")
 
 			By("verify NAD is created")
-			getCtx, getCancel := context.WithTimeout(context.Background(), 30*time.Second)
-			defer getCancel()
-			nad, err := nadClient.NetworkAttachmentDefinitions(ns).Get(getCtx, udnName, metav1.GetOptions{})
-			Expect(err).NotTo(HaveOccurred(), "get NAD created for UDN")
-			Expect(nad.OwnerReferences).To(HaveLen(1), "NAD should have a single owner reference")
-			Expect(nad.OwnerReferences[0].Kind).To(Equal("UserDefinedNetwork"), "NAD should be owned by UserDefinedNetwork")
-			Expect(nad.OwnerReferences[0].Name).To(Equal(udnName), "NAD owner reference should match UDN name")
+			assertNADOwnedByUserDefinedNetwork(f.DynamicClient, nadClient, ns, udnName)
 
 			By("verify update is denied without update permission")
 			getUDNCtx, getUDNCancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -3328,8 +3317,24 @@ func generateLayer3Subnets(cidrs string) []string {
 	return subnets
 }
 
+// assertNADOwnedByUserDefinedNetwork verifies the NAD is owned by the named UDN, including
+// matching owner reference UID so the test does not accept a stale owner ref with the same name.
+func assertNADOwnedByUserDefinedNetwork(dynamicClient dynamic.Interface, nads nadclient.K8sCniCncfIoV1Interface, namespace, udnName string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	udn, err := dynamicClient.Resource(udnGVR).Namespace(namespace).Get(ctx, udnName, metav1.GetOptions{})
+	Expect(err).NotTo(HaveOccurred(), "get UDN for NAD owner reference verification")
+	nad, err := nads.NetworkAttachmentDefinitions(namespace).Get(ctx, udnName, metav1.GetOptions{})
+	Expect(err).NotTo(HaveOccurred(), "get NAD created for UDN")
+	Expect(nad.OwnerReferences).To(HaveLen(1), "NAD should have a single owner reference")
+	Expect(nad.OwnerReferences[0].Kind).To(Equal("UserDefinedNetwork"), "NAD should be owned by UserDefinedNetwork")
+	Expect(nad.OwnerReferences[0].Name).To(Equal(udnName), "NAD owner reference should match UDN name")
+	Expect(nad.OwnerReferences[0].UID).To(Equal(udn.GetUID()), "NAD owner reference UID should match UDN UID")
+}
+
+// waitForUDNObjectDeleted polls until the namespace-scoped UserDefinedNetwork is no longer present.
 func waitForUDNObjectDeleted(client dynamic.Interface, namespace, name string) error {
-	return wait.PollImmediate(1*time.Second, 30*time.Second, func() (bool, error) {
+	if err := wait.PollImmediate(1*time.Second, 30*time.Second, func() (bool, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_, err := client.Resource(udnGVR).Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
@@ -3340,7 +3345,10 @@ func waitForUDNObjectDeleted(client dynamic.Interface, namespace, name string) e
 			return false, fmt.Errorf("get UDN %s/%s while waiting for deletion: %w", namespace, name, err)
 		}
 		return false, nil
-	})
+	}); err != nil {
+		return fmt.Errorf("wait for UDN %s/%s deletion: %w", namespace, name, err)
+	}
+	return nil
 }
 
 // userDefinedNetworkReadyFunc returns a function that checks for the NetworkCreated condition in the provided udn
@@ -3353,6 +3361,7 @@ func clusterUserDefinedNetworkReadyFunc(ctx context.Context, client dynamic.Inte
 	return networkReadyFunc(ctx, client.Resource(clusterUDNGVR), name)
 }
 
+// networkReadyFunc returns a poller that succeeds when the network reports NetworkCreated=True.
 func networkReadyFunc(ctx context.Context, client dynamic.ResourceInterface, name string) func() error {
 	return func() error {
 		cUDN, err := client.Get(ctx, name, metav1.GetOptions{}, "status")
