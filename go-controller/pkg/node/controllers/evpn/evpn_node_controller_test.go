@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"sync"
+	"time"
 
 	nadfake "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/fake"
 	"github.com/stretchr/testify/mock"
@@ -1172,6 +1173,37 @@ var _ = Describe("EVPN node controller", func() {
 				return vteps[vtepName].IPs, nil
 			}).Should(ConsistOf("100.64.0.1"))
 		})
+
+		DescribeTable("repairs forged VTEP annotations even with the controller's field manager", func(ips string) {
+			ndm.On("DeleteLink", mock.Anything).Return(nil)
+			ndm.On("EnsureLink", mock.Anything).Return(nil)
+			am.SetIPs([]net.IP{net.ParseIP("100.64.0.1")})
+			_, err := vtepClient.K8sV1().VTEPs().Create(context.Background(), &vtepv1.VTEP{
+				ObjectMeta: metav1.ObjectMeta{Name: vtepName},
+				Spec:       vtepv1.VTEPSpec{CIDRs: []vtepv1.CIDR{"100.64.0.0/24"}, Mode: vtepv1.VTEPModeUnmanaged},
+			}, metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred(), "creating unmanaged VTEP")
+			readIPs := func() ([]string, error) {
+				node, readErr := kubeClient.CoreV1().Nodes().Get(context.Background(), nodeName, metav1.GetOptions{})
+				if readErr != nil {
+					return nil, readErr
+				}
+				vteps, parseErr := util.ParseNodeVTEPs(node)
+				return vteps[vtepName].IPs, parseErr
+			}
+			Eventually(readIPs, 5*time.Second, 100*time.Millisecond).Should(ConsistOf("100.64.0.1"), "the initial annotation must contain the discovered node address")
+			node, err := kubeClient.CoreV1().Nodes().Get(context.Background(), nodeName, metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred(), "reading node before forging its VTEP annotation")
+			node.Annotations[util.OVNNodeVTEPs] = `{"vtep1":{"ips":` + ips + `}}`
+			node.ManagedFields = []metav1.ManagedFieldsEntry{{Manager: vtepAnnotationFieldManager, Time: &metav1.Time{Time: metav1.Now().Time}}}
+			_, err = kubeClient.CoreV1().Nodes().Update(context.Background(), node, metav1.UpdateOptions{})
+			Expect(err).NotTo(HaveOccurred(), "updating forged VTEP annotation")
+			Eventually(readIPs, 5*time.Second, 100*time.Millisecond).Should(ConsistOf("100.64.0.1"), "repair must replace the forged entry with the discovered node address")
+		},
+			Entry("replaced address", `["100.64.0.2"]`),
+			Entry("appended address", `["100.64.0.1","100.64.0.99"]`),
+			Entry("unsupported family", `["100.64.0.1","fd00::99"]`),
+		)
 
 		It("reconciles VTEP with VID/VNI mappings when a network is added or removed", func() {
 			const nadKey = "test-ns/test-nad"

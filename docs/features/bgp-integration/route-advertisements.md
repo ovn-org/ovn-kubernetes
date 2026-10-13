@@ -869,6 +869,37 @@ and they stop being advertised. These checks apply to hand-written
 `NetworkAttachmentDefinition` objects too, which are not covered by the
 `ClusterUserDefinedNetwork` CRD validation.
 
+For EVPN networks, the controller also validates selected entries in each
+selected node's `k8s.ovn.org/vteps` annotation. Addresses must be global unicast,
+have no zone identifier, and belong to the referenced VTEP's configured CIDRs.
+IPv4-mapped IPv6 addresses are evaluated as IPv4 after unmapping, including for
+the limit of one address per family. Private IPv4 and IPv6 unique-local
+addresses are allowed. See [VTEP IP Management](evpn.md#vtep-ip-management).
+
+If a selected entry is invalid, or the entire annotation is malformed JSON, the
+controller reports `Accepted=False` on the `RouteAdvertisements` and identifies
+the node in the condition message. It excludes that node and deletes its
+generated `FRRConfiguration` objects for this `RouteAdvertisements`. This can
+withdraw all advertisements provided by those objects, not just the VTEP host
+route. Other valid selected nodes continue to be reconciled. Wrong-shaped or
+invalid unselected entries do not cause rejection when the overall JSON is
+valid.
+
+VTEP collision checks span RouteAdvertisements sharing the default-VRF
+underlay. They include nodes selected by other EVPN RAs with a configured
+underlay router, even if the current RA selects different nodes or VTEPs.
+Annotations that no such RA selects do not reserve an address. Generated
+configurations across RAs provide evidence of an established advertiser; a
+unique current advertiser is preserved, otherwise conflicting nodes are
+excluded. Each RA withdraws only its own configurations and reports conflicts
+involving its VTEP prefixes. Node, RA selection, and generated configuration
+changes trigger reevaluation across RAs.
+
+The controller does not remove or repair the node annotation. After the
+annotation is corrected, reconciliation can generate the node's configuration
+again and restore its advertisements, provided the remaining validation checks
+pass.
+
 Check that `FRRConfiguration` have been generated as expected:
 
 ```shell

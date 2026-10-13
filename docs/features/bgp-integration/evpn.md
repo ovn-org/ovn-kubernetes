@@ -446,6 +446,15 @@ allocated sequentially across CIDRs in order.
 In **unmanaged mode**, the annotation is written by ovnkube-node (see
 [VTEP IP](#vtep-ip) under Node Configuration).
 
+When the annotation changes, ovnkube-node reconciles every unmanaged VTEP
+regardless of the field manager that made the change. If the annotation can be
+decoded and suitable local addresses are available within the VTEP CIDRs, it
+repairs the complete entry using the selected addresses, removing invalid or
+appended addresses. Malformed JSON or an incompatible annotation structure must
+be corrected before this repair can proceed. The RouteAdvertisements controller
+reads and validates the annotation but does not repair it. This automatic repair
+applies to unmanaged VTEPs; managed mode is currently unsupported.
+
 In both modes, the annotation has the following format:
 
 ```json
@@ -456,6 +465,48 @@ ovnkube-cluster-manager reads this annotation to validate all nodes have VTEP
 IPs and sets the VTEP status accordingly. The annotation is also used by the
 RouteAdvertisements controller to advertise the VTEP IP via the underlay BGP
 session (see [FRR Configuration](#frr-configuration) below).
+
+Before advertising VTEP IPs, the RouteAdvertisements controller validates the
+annotation entries for VTEPs referenced by its selected networks. Addresses must
+be global unicast and must not contain a zone identifier such as `%eth0`.
+IPv4-mapped IPv6 addresses are unmapped before checking global unicast scope,
+address family, and membership in the VTEP's configured CIDRs. For example,
+`::ffff:100.64.0.1` is evaluated as `100.64.0.1`. Private IPv4 addresses and
+IPv6 unique-local addresses are allowed; global unicast does not require public
+Internet routability. Each entry may contain at most one address per family,
+and each address must fall within that VTEP's configured CIDRs.
+
+VTEP host routes share the default-VRF underlay even when tenant routes use
+separate VRFs. Conflict detection therefore compares claims across
+RouteAdvertisements, including different VTEPs and different node selections.
+Multiple RAs may advertise the same VTEP IP from the same node. Different nodes
+claiming that IP are a conflict. A unique established advertiser is preserved;
+without one, conflicting claimants are excluded. Existing advertisements provide
+continuity, not proof that a node owns an address.
+
+The following flow applies to claims selected by EVPN RouteAdvertisements
+with a configured default-VRF underlay router:
+
+```mermaid
+flowchart TD
+    A[Selected node VTEP annotations] --> B{Valid annotation entries,<br/>addresses, families and VTEP CIDRs?}
+    B -->|No| C[Exclude invalid node from the affected RA]
+    B -->|Yes| D[Compare valid claims across RAs<br/>in the shared default-VRF underlay]
+    D --> E{Same IP claimed<br/>by different nodes?}
+    E -->|No| F[Continue generating advertisements]
+    E -->|Yes| G{Generated configurations identify<br/>one established current advertiser?}
+    G -->|Yes| H[Preserve established advertiser<br/>and exclude other claimants]
+    G -->|No| I[Exclude all conflicting claimants]
+    C --> J[Each affected RA withdraws its own<br/>excluded-node configurations<br/>and reports the error in status]
+    H --> J
+    I --> J
+```
+
+An invalid selected entry, or malformed JSON for the annotation as a whole, can
+cause the controller to delete that node's generated `FRRConfiguration` objects
+for the affected `RouteAdvertisements`, withdrawing the advertisements they
+provide. See [RouteAdvertisements troubleshooting](route-advertisements.md#troubleshooting-routeadvertisements)
+for status and recovery details.
 
 #### FRR Configuration
 
