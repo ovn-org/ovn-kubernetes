@@ -390,6 +390,28 @@ type egressIPClusterController struct {
 	egressIPTotalTimeout int
 	// reachability check interval
 	reachabilityCheckInterval time.Duration
+	// reachabilityNudge requests an out-of-band reachability check, so a newly
+	// created or re-selected EgressIP can activate matching nodes immediately
+	// instead of waiting up to reachabilityCheckInterval for the next tick. It
+	// is buffered with size 1: a pending nudge coalesces further requests, and
+	// senders never block (see nudgeReachabilityCheck).
+	//
+	// It is intentionally never closed. Shutdown is driven solely by stopChan:
+	// checkEgressNodesReachability (the only consumer) returns when stopChan is
+	// closed, after which this channel is unreferenced and reclaimed by GC - a
+	// channel only needs an explicit close when a receiver relies on close to
+	// unblock, which is not the case here.
+	//
+	// It cannot be closed safely anyway: the senders are the EgressIP event
+	// handlers (AddResource/UpdateResource -> nudgeReachabilityCheck), which run
+	// on the informer/retry-framework worker goroutines - separate from the
+	// goroutine calling Stop(), and still live after Stop() closes stopChan (the
+	// handlers are only removed later, after wg.Wait()). So a worker could be
+	// mid-nudge when a close happened and send on a closed channel, which panics.
+	// Only the sender side can close a channel safely, and here sends come from
+	// concurrent handlers with no ordering guarantee against shutdown - so there
+	// is no safe point to close.
+	reachabilityNudge chan struct{}
 	// EgressIP Node reachability gRPC port (0 means it should use dial instead)
 	egressIPNodeHealthCheckPort int
 	// retry framework for Egress nodes
@@ -429,6 +451,7 @@ func newEgressIPController(ovnClient *util.OVNClusterManagerClientset, wf *facto
 		reachabilityCheckInterval:         egressIPReachabilityCheckInterval,
 		egressIPNodeHealthCheckPort:       config.OVNKubernetesFeature.EgressIPNodeHealthCheckPort,
 		stopChan:                          make(chan struct{}),
+		reachabilityNudge:                 make(chan struct{}, 1),
 	}
 	eIPC.initRetryFramework()
 	return eIPC
@@ -689,10 +712,26 @@ func (eIPC *egressIPClusterController) checkEgressNodesReachability() {
 		select {
 		case <-timer.C:
 			checkEgressNodesReachabilityIterate(eIPC)
+		case <-eIPC.reachabilityNudge:
+			// An EgressIP was created or its node selector changed; run the
+			// check now so matching nodes are probed and activated without
+			// waiting for the next tick.
+			checkEgressNodesReachabilityIterate(eIPC)
 		case <-eIPC.stopChan:
 			klog.V(5).Infof("Stop channel got triggered: will stop checkEgressNodesReachability")
 			return
 		}
+	}
+}
+
+// nudgeReachabilityCheck requests an immediate reachability iteration without
+// blocking the caller. The reachabilityNudge channel is buffered with size 1,
+// so a request already queued (not yet consumed by checkEgressNodesReachability)
+// is enough to guarantee one more iteration runs; additional nudges are dropped.
+func (eIPC *egressIPClusterController) nudgeReachabilityCheck() {
+	select {
+	case eIPC.reachabilityNudge <- struct{}{}:
+	default:
 	}
 }
 

@@ -110,7 +110,15 @@ func (h *egressIPClusterControllerEventHandler) AddResource(obj interface{}, _ b
 		}
 	case factory.EgressIPType:
 		eIP := obj.(*egressipv1.EgressIP)
-		return h.eIPC.reconcileEgressIP(nil, eIP)
+		if err := h.eIPC.reconcileEgressIP(nil, eIP); err != nil {
+			return err
+		}
+		// A freshly created EgressIP may select nodes that are assignable and
+		// ready but whose reachability has not been confirmed yet (only selected
+		// nodes are probed). Nudge the reachability loop so those nodes are probed
+		// and activated now instead of after the next periodic tick.
+		h.eIPC.nudgeReachabilityCheck()
+		return nil
 	case factory.CloudPrivateIPConfigType:
 		cloudPrivateIPConfig := obj.(*ocpcloudnetworkapi.CloudPrivateIPConfig)
 		return h.eIPC.reconcileCloudPrivateIPConfig(nil, cloudPrivateIPConfig)
@@ -128,7 +136,17 @@ func (h *egressIPClusterControllerEventHandler) UpdateResource(oldObj, newObj in
 	case factory.EgressIPType:
 		oldEIP := oldObj.(*egressipv1.EgressIP)
 		newEIP := newObj.(*egressipv1.EgressIP)
-		return h.eIPC.reconcileEgressIP(oldEIP, newEIP)
+		if err := h.eIPC.reconcileEgressIP(oldEIP, newEIP); err != nil {
+			return err
+		}
+		// If the node selector changed, nodes that now match may be assignable
+		// and ready but not yet probed; nudge the reachability loop to pick them
+		// up without waiting for the next periodic tick.
+		if !reflect.DeepEqual(oldEIP.Spec.EgressNodeSelector, newEIP.Spec.EgressNodeSelector) {
+			klog.V(4).Infof("EgressIP %s node selector changed, triggering a reachability check for nodes that started matching", newEIP.Name)
+			h.eIPC.nudgeReachabilityCheck()
+		}
+		return nil
 	case factory.EgressNodeType:
 		oldNode := oldObj.(*corev1.Node)
 		newNode := newObj.(*corev1.Node)
