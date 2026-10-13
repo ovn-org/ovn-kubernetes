@@ -375,6 +375,54 @@ func TestMarkAllocatedNetwork(t *testing.T) {
 	}
 }
 
+func TestMarkAllocatedNetworkRejectsUnexpectedPrefixLength(t *testing.T) {
+	tests := []struct {
+		name          string
+		clusterCIDR   string
+		hostSubnetLen int
+		subnet        string
+	}{
+		{
+			name:          "IPv4 subnet is larger than an allocation",
+			clusterCIDR:   "10.1.0.0/16",
+			hostSubnetLen: 24,
+			subnet:        "10.1.0.0/23",
+		},
+		{
+			name:          "IPv4 subnet is smaller than an allocation",
+			clusterCIDR:   "10.1.0.0/16",
+			hostSubnetLen: 24,
+			subnet:        "10.1.0.0/25",
+		},
+		{
+			name:          "IPv6 subnet is larger than an allocation",
+			clusterCIDR:   "2001:db8::/48",
+			hostSubnetLen: 64,
+			subnet:        "2001:db8::/63",
+		},
+		{
+			name:          "IPv6 subnet is smaller than an allocation",
+			clusterCIDR:   "2001:db8::/48",
+			hostSubnetLen: 64,
+			subnet:        "2001:db8::/65",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sna, err := newSubnetAllocator(tt.clusterCIDR, tt.hostSubnetLen)
+			if err != nil {
+				t.Fatal("Failed to initialize subnet allocator: ", err)
+			}
+
+			subnet := ovntest.MustParseIPNet(tt.subnet)
+			if err := sna.MarkAllocatedNetworks(testNodeName, subnet); err == nil {
+				t.Fatalf("Unexpectedly marked subnet %s with a prefix length different from the configured allocation size", subnet)
+			}
+		})
+	}
+}
+
 func TestMarkAllocatedNetworkDifferentOwner(t *testing.T) {
 	sna, err := newSubnetAllocator("10.1.0.0/16", 18)
 	if err != nil {
