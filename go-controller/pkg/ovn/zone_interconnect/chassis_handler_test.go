@@ -133,7 +133,9 @@ var _ = ginkgo.Describe("Zone Interconnect Chassis Operations", func() {
 			_, libovsdbOvnSBClient, libovsdbCleanup, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			zoneChassisHandler := NewZoneChassisHandler(libovsdbOvnSBClient)
+			zoneChassisHandler := NewZoneChassisHandler(libovsdbOvnSBClient, "node1", func() ([]*corev1.Node, error) {
+				return []*corev1.Node{&testNode1, &testNode2, &testNode3, &testNode4, &testNode5}, nil
+			})
 			err = zoneChassisHandler.AddLocalZoneNode(&testNode1)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -179,7 +181,9 @@ var _ = ginkgo.Describe("Zone Interconnect Chassis Operations", func() {
 			_, libovsdbOvnSBClient, libovsdbCleanup, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			zoneChassisHandler := NewZoneChassisHandler(libovsdbOvnSBClient)
+			zoneChassisHandler := NewZoneChassisHandler(libovsdbOvnSBClient, "node1", func() ([]*corev1.Node, error) {
+				return []*corev1.Node{&testNode1, &testNode2, &testNode3, &testNode4, &testNode5}, nil
+			})
 			err = zoneChassisHandler.AddRemoteZoneNode(&testNode3)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -218,7 +222,9 @@ var _ = ginkgo.Describe("Zone Interconnect Chassis Operations", func() {
 			_, libovsdbOvnSBClient, libovsdbCleanup, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			zoneChassisHandler := NewZoneChassisHandler(libovsdbOvnSBClient)
+			zoneChassisHandler := NewZoneChassisHandler(libovsdbOvnSBClient, "node1", func() ([]*corev1.Node, error) {
+				return []*corev1.Node{&testNode1, &testNode2, &testNode3, &testNode4, &testNode5}, nil
+			})
 			err = zoneChassisHandler.AddRemoteZoneNode(&testNode4)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -269,7 +275,9 @@ var _ = ginkgo.Describe("Zone Interconnect Chassis Operations", func() {
 			_, libovsdbOvnSBClient, libovsdbCleanup, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			zoneChassisHandler := NewZoneChassisHandler(libovsdbOvnSBClient)
+			zoneChassisHandler := NewZoneChassisHandler(libovsdbOvnSBClient, "node1", func() ([]*corev1.Node, error) {
+				return []*corev1.Node{&testNode1, &testNode2, &testNode3, &testNode4, &testNode5}, nil
+			})
 			err = zoneChassisHandler.AddRemoteZoneNode(&testNode5)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -316,7 +324,9 @@ var _ = ginkgo.Describe("Zone Interconnect Chassis Operations", func() {
 			_, libovsdbOvnSBClient, libovsdbCleanup, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			zoneChassisHandler := NewZoneChassisHandler(libovsdbOvnSBClient)
+			zoneChassisHandler := NewZoneChassisHandler(libovsdbOvnSBClient, "node1", func() ([]*corev1.Node, error) {
+				return []*corev1.Node{&testNode1, &testNode2, &testNode3, &testNode4, &testNode5}, nil
+			})
 			err = zoneChassisHandler.AddLocalZoneNode(&testNode1)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -368,7 +378,9 @@ var _ = ginkgo.Describe("Zone Interconnect Chassis Operations", func() {
 			_, libovsdbOvnSBClient, libovsdbCleanup, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			zoneChassisHandler := NewZoneChassisHandler(libovsdbOvnSBClient)
+			zoneChassisHandler := NewZoneChassisHandler(libovsdbOvnSBClient, "node1", func() ([]*corev1.Node, error) {
+				return []*corev1.Node{&testNode1, &testNode2, &testNode3, &testNode4, &testNode5}, nil
+			})
 			err = zoneChassisHandler.AddLocalZoneNode(&testNode1)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -428,7 +440,9 @@ var _ = ginkgo.Describe("Zone Interconnect Chassis Operations", func() {
 			_, libovsdbOvnSBClient, libovsdbCleanup, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			zoneChassisHandler := NewZoneChassisHandler(libovsdbOvnSBClient)
+			zoneChassisHandler := NewZoneChassisHandler(libovsdbOvnSBClient, "node1", func() ([]*corev1.Node, error) {
+				return []*corev1.Node{&testNode1, &testNode2, &testNode3, &testNode4, &testNode5}, nil
+			})
 
 			// Add testNode1 as a remote node
 			err = zoneChassisHandler.AddRemoteZoneNode(&testNode1)
@@ -474,7 +488,9 @@ var _ = ginkgo.Describe("Zone Interconnect Chassis Operations", func() {
 			_, libovsdbOvnSBClient, libovsdbCleanup, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			zoneChassisHandler := NewZoneChassisHandler(libovsdbOvnSBClient)
+			zoneChassisHandler := NewZoneChassisHandler(libovsdbOvnSBClient, "node1", func() ([]*corev1.Node, error) {
+				return []*corev1.Node{&testNode1, &testNode2, &testNode3, &testNode4, &testNode5}, nil
+			})
 			err = zoneChassisHandler.AddLocalZoneNode(&testNode1)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 

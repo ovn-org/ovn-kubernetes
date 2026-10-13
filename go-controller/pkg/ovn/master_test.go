@@ -1878,6 +1878,25 @@ func TestController_deleteStaleNodeChassis(t *testing.T) {
 			},
 		},
 	}
+	// Ownership takes precedence over a DPU hostname, including one that
+	// happens to match a different Kubernetes node.
+	tests = append(tests, struct {
+		name         string
+		node         corev1.Node
+		initialSBDB  []libovsdbtest.TestData
+		expectedSBDB []libovsdbtest.TestData
+	}{
+		name: "uses explicit ownership when cleaning stale DPU chassis",
+		node: tests[0].node,
+		initialSBDB: []libovsdbtest.TestData{
+			&sbdb.Chassis{Name: "old-dpu", Hostname: "dpu-hostname", ExternalIDs: map[string]string{libovsdbops.ChassisNodeName: "node1"}},
+			&sbdb.ChassisPrivate{Name: "old-dpu"},
+			&sbdb.Chassis{Name: "other-node", Hostname: "node1", ExternalIDs: map[string]string{libovsdbops.ChassisNodeName: "node2"}},
+		},
+		expectedSBDB: []libovsdbtest.TestData{
+			&sbdb.Chassis{Name: "other-node", Hostname: "node1", ExternalIDs: map[string]string{libovsdbops.ChassisNodeName: "node2"}},
+		},
+	})
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			stopChan := make(chan struct{})
