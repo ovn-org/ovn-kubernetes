@@ -41,3 +41,7 @@ func UDPServerSrcIPPrinter() string {
 func FRR() string {
 	return deploymentconfig.Get().GetImage(api.FRR).PullSpec
 }
+
+func FedoraKubevirtContainerDisk() string {
+	return deploymentconfig.Get().GetImage(api.FedoraKubevirtContainerDisk).PullSpec
+}
