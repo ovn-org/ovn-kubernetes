@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/allocators"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/images"
@@ -889,7 +890,10 @@ spec:
 						"--data=bare", "--no-heading", "--columns=_uuid",
 						"find", "Address_Set",
 						`external_ids:"k8s.ovn.org/owner-type"=EgressFirewallDNS`,
-						fmt.Sprintf(`external_ids:"k8s.ovn.org/name"=%s`, dn))
+						// The address set external_id stores the DNS name in its canonical
+						// lower-case FQDN form (trailing dot), matching how the egress firewall
+						// controller records it when DNS name resolver is enabled.
+						fmt.Sprintf(`external_ids:"k8s.ovn.org/name"=%s`, util.LowerCaseFQDN(dn)))
 					framework.ExpectNoError(err, "failed to find DNS address set for %s in NBDB", dn)
 					gomega.Expect(uuids).NotTo(gomega.BeEmpty(), "expected an EgressFirewallDNS address set for %s", dn)
 					for _, uuid := range strings.Split(strings.TrimSpace(uuids), "\n") {
