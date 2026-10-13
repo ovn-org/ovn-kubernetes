@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"sync"
+	"time"
 
 	"github.com/urfave/cli/v2"
 
@@ -99,6 +100,9 @@ var _ = Describe("Egress Service Operations", func() {
 					Cmd: fmt.Sprintf("ip -4 rule del prio 5000 from %s sport 31111 table mynetwork", config.Gateway.MasqueradeIPs.V4HostETPLocalMasqueradeIP),
 					Err: nil,
 				})
+
+				fExec.AddFakeCmd(&ovntest.ExpectedCmd{Cmd: "ip -4 rule del prio 5000 from 10.128.0.3 table mynetwork"})
+				fExec.AddFakeCmd(&ovntest.ExpectedCmd{Cmd: "ip -4 rule add prio 5000 from 10.128.0.3 table mynetwork"})
 
 				tx := nft.NewTransaction()
 				tx.Add(&knftables.Map{
@@ -277,6 +281,15 @@ var _ = Describe("Egress Service Operations", func() {
 					[]discovery.EndpointPort{epPort},
 				)
 
+				endpointSlice.Endpoints = append(endpointSlice.Endpoints, discovery.Endpoint{
+					Addresses: []string{"10.128.0.99"}, NodeName: &fakeNodeName,
+					TargetRef: &corev1.ObjectReference{Kind: "Pod", Namespace: "namespace1", Name: "pod-0"},
+				})
+
+				wrongNode := "other-node"
+				endpointSlice.Endpoints = append(endpointSlice.Endpoints, discovery.Endpoint{
+					Addresses: []string{"10.128.0.33"}, NodeName: &wrongNode,
+				})
 				objects := []runtime.Object{
 					&service,
 					&service2,
@@ -290,6 +303,7 @@ var _ = Describe("Egress Service Operations", func() {
 				}
 				stopChan := make(chan struct{})
 				wg := &sync.WaitGroup{}
+				objects = append(objects, egressServiceNodeTestPods()...)
 				fakeClient := util.GetOVNClientset(objects...).GetNodeClientset()
 				wf, err := factory.NewNodeWatchFactory(fakeClient, "node")
 				Expect(err).ToNot(HaveOccurred())
@@ -307,6 +321,7 @@ var _ = Describe("Egress Service Operations", func() {
 					wf.EgressServiceInformer(),
 					wf.ServiceInformer(),
 					wf.EndpointSliceInformer(),
+					wf.PodInformer(),
 				)
 				Expect(err).ToNot(HaveOccurred())
 				err = c.Run(wg, 1)
@@ -320,7 +335,24 @@ add element inet ovn-kubernetes egress-service-snat-v4 { 10.128.0.4 comment "nam
 					return nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 				}).ShouldNot(HaveOccurred())
 
-				Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
+				By("removing SNAT when the pod disappears without an EndpointSlice update")
+				pod, err := fakeClient.KubeClient.CoreV1().Pods("namespace1").Get(context.TODO(), "pod-0", metav1.GetOptions{})
+				Expect(err).NotTo(HaveOccurred(), "failed to get namespace1/pod-0 before deletion")
+				Expect(fakeClient.KubeClient.CoreV1().Pods("namespace1").Delete(context.TODO(), pod.Name, metav1.DeleteOptions{})).To(Succeed(), "failed to delete pod %s/%s", pod.Namespace, pod.Name)
+				Eventually(func() error {
+					return nodenft.MatchNFTRules(nftablesRulesEgressServicesBase+`
+add element inet ovn-kubernetes egress-service-snat-v4 { 10.128.0.4 comment "namespace1/service3" : 6.6.6.6 }
+`, nft.Dump())
+				}, 5*time.Second, 10*time.Millisecond).ShouldNot(HaveOccurred(), "SNAT rules must exclude the deleted pod")
+
+				By("reconciling when the pod arrives after its EndpointSlice")
+				_, err = fakeClient.KubeClient.CoreV1().Pods("namespace1").Create(context.TODO(), pod, metav1.CreateOptions{})
+				Expect(err).NotTo(HaveOccurred(), "failed to recreate pod %s/%s", pod.Namespace, pod.Name)
+				Eventually(func() error {
+					return nodenft.MatchNFTRules(expectedNFT, nft.Dump())
+				}, 5*time.Second, 10*time.Millisecond).ShouldNot(HaveOccurred(), "SNAT rules must include the recreated pod")
+
+				Eventually(fExec.CalledMatchesExpected, 5*time.Second, 10*time.Millisecond).Should(BeTrue(), fExec.ErrorDesc)
 
 				return nil
 			}
@@ -396,6 +428,7 @@ add element inet ovn-kubernetes egress-service-snat-v4 { 10.128.0.4 comment "nam
 				}
 				stopChan := make(chan struct{})
 				wg := &sync.WaitGroup{}
+				objects = append(objects, egressServiceNodeTestPods()...)
 				fakeClient := util.GetOVNClientset(objects...).GetNodeClientset()
 				wf, err := factory.NewNodeWatchFactory(fakeClient, "node")
 				Expect(err).ToNot(HaveOccurred())
@@ -413,6 +446,7 @@ add element inet ovn-kubernetes egress-service-snat-v4 { 10.128.0.4 comment "nam
 					wf.EgressServiceInformer(),
 					wf.ServiceInformer(),
 					wf.EndpointSliceInformer(),
+					wf.PodInformer(),
 				)
 				Expect(err).ToNot(HaveOccurred())
 				err = c.Run(wg, 1)
@@ -601,6 +635,7 @@ add element inet ovn-kubernetes egress-service-snat-v4 { 10.128.0.3 comment "nam
 				}
 				stopChan := make(chan struct{})
 				wg := &sync.WaitGroup{}
+				objects = append(objects, egressServiceNodeTestPods()...)
 				fakeClient := util.GetOVNClientset(objects...).GetNodeClientset()
 				wf, err := factory.NewNodeWatchFactory(fakeClient, "node")
 				Expect(err).ToNot(HaveOccurred())
@@ -618,6 +653,7 @@ add element inet ovn-kubernetes egress-service-snat-v4 { 10.128.0.3 comment "nam
 					wf.EgressServiceInformer(),
 					wf.ServiceInformer(),
 					wf.EndpointSliceInformer(),
+					wf.PodInformer(),
 				)
 				Expect(err).ToNot(HaveOccurred())
 				err = c.Run(wg, 1)
@@ -796,6 +832,7 @@ add element inet ovn-kubernetes egress-service-snat-v4 { 10.128.0.11 comment "na
 				}
 				stopChan := make(chan struct{})
 				wg := &sync.WaitGroup{}
+				objects = append(objects, egressServiceNodeTestPods()...)
 				fakeClient := util.GetOVNClientset(objects...).GetNodeClientset()
 				wf, err := factory.NewNodeWatchFactory(fakeClient, "node")
 				Expect(err).ToNot(HaveOccurred())
@@ -813,6 +850,7 @@ add element inet ovn-kubernetes egress-service-snat-v4 { 10.128.0.11 comment "na
 					wf.EgressServiceInformer(),
 					wf.ServiceInformer(),
 					wf.EndpointSliceInformer(),
+					wf.PodInformer(),
 				)
 				Expect(err).ToNot(HaveOccurred())
 				err = c.Run(wg, 1)
@@ -955,6 +993,7 @@ add element inet ovn-kubernetes egress-service-snat-v4 { 10.128.0.11 comment "na
 				}
 				stopChan := make(chan struct{})
 				wg := &sync.WaitGroup{}
+				objects = append(objects, egressServiceNodeTestPods()...)
 				fakeClient := util.GetOVNClientset(objects...).GetNodeClientset()
 				wf, err := factory.NewNodeWatchFactory(fakeClient, "node")
 				Expect(err).ToNot(HaveOccurred())
@@ -972,6 +1011,7 @@ add element inet ovn-kubernetes egress-service-snat-v4 { 10.128.0.11 comment "na
 					wf.EgressServiceInformer(),
 					wf.ServiceInformer(),
 					wf.EndpointSliceInformer(),
+					wf.PodInformer(),
 				)
 				Expect(err).ToNot(HaveOccurred())
 				err = c.Run(wg, 1)
@@ -1052,3 +1092,25 @@ add element inet ovn-kubernetes egress-service-snat-v4 { 10.128.0.11 comment "na
 		})
 	})
 })
+
+// egressServiceNodeTestPods supplies independently owned pod IPs for endpoint
+// validation, including a victim in a separate namespace.
+func egressServiceNodeTestPods() []runtime.Object {
+	pods := []runtime.Object{&corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "victim", Name: "victim"},
+		Spec:       corev1.PodSpec{NodeName: fakeNodeName},
+		Status:     corev1.PodStatus{PodIPs: []corev1.PodIP{{IP: "10.128.0.99"}}},
+	}}
+	for i, ip := range []string{"10.128.0.3", "10.128.0.33", "10.128.0.4", "10.128.0.11", "10.128.1.5"} {
+		node := fakeNodeName
+		if ip == "10.128.1.5" {
+			node = "someOtherNode"
+		}
+		pods = append(pods, &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Namespace: "namespace1", Name: fmt.Sprintf("pod-%d", i)},
+			Spec:       corev1.PodSpec{NodeName: node},
+			Status:     corev1.PodStatus{PodIPs: []corev1.PodIP{{IP: ip}}},
+		})
+	}
+	return pods
+}

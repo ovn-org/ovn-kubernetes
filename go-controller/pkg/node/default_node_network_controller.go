@@ -1083,7 +1083,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) (err error) {
 	if config.OVNKubernetesFeature.EnableEgressService && (config.IsModeDPUHost() || config.IsModeFull()) {
 		wf := nc.watchFactory.(*factory.WatchFactory)
 		c, err := egressservice.NewController(nc.stopChan, nodetypes.OvnKubeNodeSNATMark, nc.name,
-			wf.EgressServiceInformer(), wf.ServiceInformer(), wf.EndpointSliceInformer())
+			wf.EgressServiceInformer(), wf.ServiceInformer(), wf.EndpointSliceInformer(), wf.PodInformer())
 		if err != nil {
 			return err
 		}

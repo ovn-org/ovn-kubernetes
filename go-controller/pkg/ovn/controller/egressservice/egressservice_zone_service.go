@@ -147,6 +147,11 @@ func (c *Controller) allEndpointsFor(svc *corev1.Service) (
 		return
 	}
 
+	podIPs, err := util.EgressServicePodIPs(svc, c.podLister)
+	if err != nil {
+		return nil, nil, nil, nil, fmt.Errorf("failed to validate endpoints for EgressService %s/%s: %w", svc.Namespace, svc.Name, err)
+	}
+
 	v4LocalEndpoints = sets.Set[string]{}
 	v6LocalEndpoints = sets.Set[string]{}
 	v4RemoteEndpoints = sets.Set[string]{}
@@ -176,7 +181,7 @@ func (c *Controller) allEndpointsFor(svc *corev1.Service) (
 			}
 			for _, ip := range ep.Addresses {
 				ipStr := utilnet.ParseIPSloppy(ip).String()
-				if !services.IsHostEndpoint(ipStr, &util.DefaultNetInfo{}) {
+				if podIPs[ipStr] == *ep.NodeName && !services.IsHostEndpoint(ipStr, &util.DefaultNetInfo{}) {
 					if isEpLocal {
 						localEndpoints.Insert(ipStr)
 					} else {
