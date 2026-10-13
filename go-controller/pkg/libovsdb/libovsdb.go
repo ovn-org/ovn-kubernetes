@@ -22,6 +22,7 @@ import (
 
 	"github.com/ovn-kubernetes/libovsdb/client"
 	"github.com/ovn-kubernetes/libovsdb/model"
+	"github.com/ovn-kubernetes/libovsdb/ovsdb"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/nbdb"
@@ -64,6 +65,48 @@ func newClientLogger(dbModelName string) (logger logr.Logger, err error) {
 	_ = stdr.SetVerbosity(config.Logging.Level)
 	logger = stdr.New(clientLog)
 	return logger, nil
+}
+
+// stoppableClient aborts transactions as soon as the client is stopped.
+//
+// libovsdb's Transact blocks in a reconnect-wait loop whenever the client is
+// not connected, and that loop only exits on ctx.Done(). After Close() the
+// client can never reconnect, so without this every in-flight and subsequent
+// transaction burns its full OVSDBTxnTimeout before failing, which is what
+// turns any init failure into a multi-minute zombie process.
+//
+// The client's own shutdown flag is not usable for this: it is reset to false
+// on the disconnect notification that Close() triggers, and Close() skips
+// setting it entirely when the client is already disconnected.
+type stoppableClient struct {
+	client.Client
+	stopCtx context.Context
+}
+
+func (c *stoppableClient) Transact(ctx context.Context, ops ...ovsdb.Operation) ([]ovsdb.OperationResult, error) {
+	txnCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	// Fires immediately if stopCtx is already done, so this covers both
+	// transactions already blocked in the wait loop and ones started after the
+	// client was stopped. The resulting error is not client.ErrNotConnected, so
+	// TransactWithRetry gives up instead of polling until the deadline.
+	stopWatch := context.AfterFunc(c.stopCtx, cancel)
+	defer stopWatch()
+	return c.Client.Transact(txnCtx, ops...)
+}
+
+// closeOnStop closes c when stopCh closes, cancelling the monitor-setup context
+// first. The returned context is cancelled at the same moment; stoppableClient
+// uses it to abort transactions.
+func closeOnStop(c client.Client, stopCh <-chan struct{}, monitorCancel context.CancelFunc) context.Context {
+	stopCtx, stopCancel := context.WithCancel(context.Background())
+	go func() {
+		<-stopCh
+		stopCancel()
+		monitorCancel()
+		c.Close()
+	}()
+	return stopCtx
 }
 
 // newClient creates a new client object connecting to the given unix-socket
@@ -123,11 +166,7 @@ func NewSBClientWithEndpoint(endpoint string, promRegistry prometheus.Registerer
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), config.Default.OVSDBTxnTimeout*2)
-	go func() {
-		<-stopCh
-		cancel()
-		c.Close()
-	}()
+	stopCtx := closeOnStop(c, stopCh, cancel)
 
 	// Only Monitor Required SBDB tables to reduce memory overhead
 	chassisPrivate := sbdb.ChassisPrivate{}
@@ -156,7 +195,7 @@ func NewSBClientWithEndpoint(endpoint string, promRegistry prometheus.Registerer
 		return nil, err
 	}
 
-	return c, nil
+	return &stoppableClient{Client: c, stopCtx: stopCtx}, nil
 }
 
 // NewNBClient creates a new OVN Northbound Database client connected to the
@@ -192,11 +231,7 @@ func NewNBClientWithEndpoint(endpoint string, promRegistry prometheus.Registerer
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), config.Default.OVSDBTxnTimeout*2)
-	go func() {
-		<-stopCh
-		cancel()
-		c.Close()
-	}()
+	stopCtx := closeOnStop(c, stopCh, cancel)
 
 	_, err = c.MonitorAll(ctx)
 	if err != nil {
@@ -205,7 +240,7 @@ func NewNBClientWithEndpoint(endpoint string, promRegistry prometheus.Registerer
 		return nil, err
 	}
 
-	return c, nil
+	return &stoppableClient{Client: c, stopCtx: stopCtx}, nil
 }
 
 // NewOVSClient creates a new openvswitch Database client
@@ -226,11 +261,7 @@ func NewOVSClientWithEndpoint(endpoint string, stopCh <-chan struct{}) (client.C
 		return nil, err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
-	go func() {
-		<-stopCh
-		cancel()
-		c.Close()
-	}()
+	stopCtx := closeOnStop(c, stopCh, cancel)
 
 	_, err = c.Monitor(ctx,
 		c.NewMonitor(
@@ -246,5 +277,5 @@ func NewOVSClientWithEndpoint(endpoint string, stopCh <-chan struct{}) (client.C
 		return nil, err
 	}
 
-	return c, nil
+	return &stoppableClient{Client: c, stopCtx: stopCtx}, nil
 }

@@ -276,14 +276,18 @@ func (oc *DefaultNodeNetworkController) Reconcile(netInfo util.NetInfo) error {
 	return nil
 }
 
+// clearOVSFlowTargets clears any stale flow targets left on br-int by a
+// previous run. --if-exists is required because br-int is created
+// asynchronously by ovn-controller and may not exist yet on a cold boot; there
+// is nothing to clear in that case.
 func clearOVSFlowTargets() error {
 	_, _, err := util.RunOVSVsctl(
 		"--",
-		"clear", "bridge", "br-int", "netflow",
+		"--if-exists", "clear", "bridge", "br-int", "netflow",
 		"--",
-		"clear", "bridge", "br-int", "sflow",
+		"--if-exists", "clear", "bridge", "br-int", "sflow",
 		"--",
-		"clear", "bridge", "br-int", "ipfix",
+		"--if-exists", "clear", "bridge", "br-int", "ipfix",
 	)
 	if err != nil {
 		return err
@@ -319,7 +323,24 @@ func collectorsString(node *corev1.Node, targets []config.HostPort) (string, err
 	return joined.String(), nil
 }
 
-func setOVSFlowTargets(node *corev1.Node) error {
+func setOVSFlowTargets(ctx context.Context, node *corev1.Node) error {
+	if len(config.Monitoring.NetFlowTargets) == 0 &&
+		len(config.Monitoring.SFlowTargets) == 0 &&
+		len(config.Monitoring.IPFIXTargets) == 0 {
+		return nil
+	}
+
+	// Unlike clearOVSFlowTargets, these targets cannot be skipped when br-int
+	// is missing -- dropping the monitoring config silently would be worse than
+	// failing. br-int is created asynchronously by ovn-controller once it picks
+	// up the external_ids that setupOVNNode sets, so wait for it to show up.
+	if err := wait.PollUntilContextTimeout(ctx, 500*time.Millisecond, 300*time.Second, true,
+		func(context.Context) (bool, error) {
+			return util.BridgeExists("br-int")
+		}); err != nil {
+		return fmt.Errorf("timed out waiting for br-int before setting ovs flow targets: %w", err)
+	}
+
 	if len(config.Monitoring.NetFlowTargets) != 0 {
 		collectors, err := collectorsString(node, config.Monitoring.NetFlowTargets)
 		if err != nil {
@@ -409,7 +430,7 @@ func validateEncapIP(encapIP string) (bool, error) {
 	return false, nil
 }
 
-func setupOVNNode(node *corev1.Node) error {
+func setupOVNNode(ctx context.Context, node *corev1.Node) error {
 	var err error
 
 	nodePrimaryIP, err := util.GetNodePrimaryIP(node)
@@ -506,7 +527,7 @@ func setupOVNNode(node *corev1.Node) error {
 		return fmt.Errorf("error clearing stale ovs flow targets: %q", err)
 	}
 	// set new ovs flow targets if needed
-	err = setOVSFlowTargets(node)
+	err = setOVSFlowTargets(ctx, node)
 	if err != nil {
 		return fmt.Errorf("error setting ovs flow targets: %q", err)
 	}
@@ -799,7 +820,7 @@ func (nc *DefaultNodeNetworkController) Init(ctx context.Context) error {
 			return err
 		}
 
-		err = setupOVNNode(node)
+		err = setupOVNNode(ctx, node)
 		if err != nil {
 			return err
 		}

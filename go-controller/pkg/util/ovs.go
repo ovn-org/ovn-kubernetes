@@ -405,6 +405,12 @@ func GetDatapathType(bridge string) (string, error) {
 	return br_type, nil
 }
 
+// BridgeExists reports whether the named OVS bridge is present in the OVS DB.
+func BridgeExists(bridge string) (bool, error) {
+	name, err := getOvsEntry("bridge", bridge, "name", "")
+	return name != "", err
+}
+
 // getOvsEntry queries the OVS-DB using ovs-vsctl and returns
 // the requested entries.
 func getOvsEntry(table, record, column, key string) (string, error) {

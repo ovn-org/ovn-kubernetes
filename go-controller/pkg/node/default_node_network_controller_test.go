@@ -397,11 +397,11 @@ var _ = Describe("Node", func() {
 						nodeIP, interval, ofintval, ofintval, nodeName),
 				})
 				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd: "ovs-vsctl --timeout=15 -- clear bridge br-int netflow" +
+					Cmd: "ovs-vsctl --timeout=15 -- --if-exists clear bridge br-int netflow" +
 						" -- " +
-						"clear bridge br-int sflow" +
+						"--if-exists clear bridge br-int sflow" +
 						" -- " +
-						"clear bridge br-int ipfix",
+						"--if-exists clear bridge br-int ipfix",
 				})
 				err := util.SetExec(fexec)
 				Expect(err).NotTo(HaveOccurred())
@@ -410,7 +410,7 @@ var _ = Describe("Node", func() {
 				Expect(err).NotTo(HaveOccurred())
 
 				config.OvnKubeNode.Mode = types.NodeModeFull
-				err = setupOVNNode(&node)
+				err = setupOVNNode(context.Background(), &node)
 				Expect(err).NotTo(HaveOccurred())
 
 				Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
@@ -505,11 +505,11 @@ var _ = Describe("Node", func() {
 						nodeIP, interval, ofintval, ofintval, nodeName),
 				})
 				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd: "ovs-vsctl --timeout=15 -- clear bridge br-int netflow" +
+					Cmd: "ovs-vsctl --timeout=15 -- --if-exists clear bridge br-int netflow" +
 						" -- " +
-						"clear bridge br-int sflow" +
+						"--if-exists clear bridge br-int sflow" +
 						" -- " +
-						"clear bridge br-int ipfix",
+						"--if-exists clear bridge br-int ipfix",
 				})
 				err := util.SetExec(fexec)
 				Expect(err).NotTo(HaveOccurred())
@@ -521,7 +521,91 @@ var _ = Describe("Node", func() {
 				config.Default.LFlowCacheLimit = 1000
 				config.Default.LFlowCacheLimitKb = 100000
 				config.OvnKubeNode.Mode = types.NodeModeFull
-				err = setupOVNNode(&node)
+				err = setupOVNNode(context.Background(), &node)
+				Expect(err).NotTo(HaveOccurred())
+
+				Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			Expect(err).NotTo(HaveOccurred())
+		})
+		It("waits for br-int before setting flow targets", func() {
+			app.Action = func(ctx *cli.Context) error {
+				const (
+					nodeIP    string = "1.2.5.6"
+					nodeName  string = "cannot.be.resolv.ed"
+					interval  int    = 100000
+					ofintval  int    = 0
+					ipfixPort int32  = 456
+				)
+				ipfixIP := net.IP{1, 2, 3, 4}
+
+				node := corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: nodeName,
+					},
+					Status: corev1.NodeStatus{
+						Addresses: []corev1.NodeAddress{
+							{
+								Type:    corev1.NodeExternalIP,
+								Address: nodeIP,
+							},
+						},
+					},
+				}
+
+				fexec := ovntest.NewFakeExec()
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 set Open_vSwitch . "+
+						"external_ids:ovn-encap-type=geneve "+
+						"external_ids:ovn-encap-ip=%s "+
+						"external_ids:ovn-remote-probe-interval=%d "+
+						"external_ids:ovn-bridge-remote-probe-interval=%d "+
+						"other_config:bundle-idle-timeout=%d "+
+						"external_ids:ovn-is-interconn=true "+
+						"external_ids:ovn-monitor-all=true "+
+						"external_ids:ovn-ofctrl-wait-before-clear=0 "+
+						"external_ids:ovn-enable-lflow-cache=true "+
+						"external_ids:ovn-set-local-ip=\"true\" "+
+						"external_ids:hostname=\"%s\"",
+						nodeIP, interval, ofintval, ofintval, nodeName),
+				})
+				// br-int does not exist yet: clearing is a no-op thanks to
+				// --if-exists, and setting must poll until it shows up.
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: "ovs-vsctl --timeout=15 -- --if-exists clear bridge br-int netflow" +
+						" -- " +
+						"--if-exists clear bridge br-int sflow" +
+						" -- " +
+						"--if-exists clear bridge br-int ipfix",
+				})
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    "ovs-vsctl --timeout=15 --if-exists get bridge br-int name",
+					Output: "",
+				})
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    "ovs-vsctl --timeout=15 --if-exists get bridge br-int name",
+					Output: "br-int",
+				})
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: fmt.Sprintf("ovs-vsctl --timeout=15"+
+						" -- "+
+						"--id=@ipfix create ipfix "+
+						"targets=[\"%s:%d\"] cache_active_timeout=60 sampling=400"+
+						" -- "+
+						"set bridge br-int ipfix=@ipfix", ipfixIP, ipfixPort),
+				})
+				err := util.SetExec(fexec)
+				Expect(err).NotTo(HaveOccurred())
+
+				_, err = config.InitConfig(ctx, fexec, nil)
+				Expect(err).NotTo(HaveOccurred())
+				config.Monitoring.IPFIXTargets = []config.HostPort{
+					{Host: &ipfixIP, Port: ipfixPort},
+				}
+				err = setupOVNNode(context.Background(), &node)
 				Expect(err).NotTo(HaveOccurred())
 
 				Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
@@ -574,11 +658,15 @@ var _ = Describe("Node", func() {
 				})
 
 				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd: "ovs-vsctl --timeout=15 -- clear bridge br-int netflow" +
+					Cmd: "ovs-vsctl --timeout=15 -- --if-exists clear bridge br-int netflow" +
 						" -- " +
-						"clear bridge br-int sflow" +
+						"--if-exists clear bridge br-int sflow" +
 						" -- " +
-						"clear bridge br-int ipfix",
+						"--if-exists clear bridge br-int ipfix",
+				})
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    "ovs-vsctl --timeout=15 --if-exists get bridge br-int name",
+					Output: "br-int",
 				})
 				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd: fmt.Sprintf("ovs-vsctl --timeout=15"+
@@ -596,7 +684,7 @@ var _ = Describe("Node", func() {
 				config.Monitoring.IPFIXTargets = []config.HostPort{
 					{Host: &ipfixIP, Port: ipfixPort},
 				}
-				err = setupOVNNode(&node)
+				err = setupOVNNode(context.Background(), &node)
 				Expect(err).NotTo(HaveOccurred())
 
 				Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
@@ -649,11 +737,15 @@ var _ = Describe("Node", func() {
 				})
 
 				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd: "ovs-vsctl --timeout=15 -- clear bridge br-int netflow" +
+					Cmd: "ovs-vsctl --timeout=15 -- --if-exists clear bridge br-int netflow" +
 						" -- " +
-						"clear bridge br-int sflow" +
+						"--if-exists clear bridge br-int sflow" +
 						" -- " +
-						"clear bridge br-int ipfix",
+						"--if-exists clear bridge br-int ipfix",
+				})
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    "ovs-vsctl --timeout=15 --if-exists get bridge br-int name",
+					Output: "br-int",
 				})
 				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd: fmt.Sprintf("ovs-vsctl --timeout=15"+
@@ -674,7 +766,7 @@ var _ = Describe("Node", func() {
 				config.IPFIX.CacheActiveTimeout = 123
 				config.IPFIX.CacheMaxFlows = 456
 				config.IPFIX.Sampling = 789
-				err = setupOVNNode(&node)
+				err = setupOVNNode(context.Background(), &node)
 				Expect(err).NotTo(HaveOccurred())
 
 				Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
@@ -724,11 +816,15 @@ var _ = Describe("Node", func() {
 				})
 
 				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd: "ovs-vsctl --timeout=15 -- clear bridge br-int netflow" +
+					Cmd: "ovs-vsctl --timeout=15 -- --if-exists clear bridge br-int netflow" +
 						" -- " +
-						"clear bridge br-int sflow" +
+						"--if-exists clear bridge br-int sflow" +
 						" -- " +
-						"clear bridge br-int ipfix",
+						"--if-exists clear bridge br-int ipfix",
+				})
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    "ovs-vsctl --timeout=15 --if-exists get bridge br-int name",
+					Output: "br-int",
 				})
 				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd: "ovs-vsctl --timeout=15" +
@@ -752,7 +848,7 @@ var _ = Describe("Node", func() {
 				config.IPFIX.Sampling = 0
 				Expect(err).NotTo(HaveOccurred())
 
-				err = setupOVNNode(&node)
+				err = setupOVNNode(context.Background(), &node)
 				Expect(err).NotTo(HaveOccurred())
 
 				Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
