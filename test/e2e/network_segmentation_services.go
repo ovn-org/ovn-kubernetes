@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net"
 	"slices"
+	"strings"
 	"time"
 
 	nadclient "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/typed/k8s.cni.cncf.io/v1"
@@ -309,6 +310,399 @@ ips=$(ip -o addr show dev $iface| grep global |awk '{print $4}' | cut -d/ -f1 | 
 
 	})
 
+	Context("Services with static IP and MAC assignments", func() {
+		const (
+			cudnName       = "l2-network-svc"
+			staticSvcPort  = 80
+			staticTgtPort  = 8080
+			cudnLabel      = "cudn-group"
+			cudnLabelValue = "l2-net-svc"
+
+			// IPv4 configuration
+			l2SubnetV4       = "192.168.40.0/24"
+			defaultGatewayV4 = "192.168.40.3"
+			reservedIP1V4    = "192.168.40.4/32"
+			reservedIP2V4    = "192.168.40.5/32"
+			backendIPv4      = "192.168.40.6"
+			backendIPv4Rsvd  = backendIPv4 + "/32"
+			clientSameIPv4   = "192.168.40.7"
+			clientSameRsvdV4 = clientSameIPv4 + "/32"
+			clientDiffIPv4   = "192.168.40.8"
+			clientDiffRsvdV4 = clientDiffIPv4 + "/32"
+
+			// IPv6 configuration
+			l2SubnetV6       = "2001:db8:abcd:0012::/64"
+			defaultGatewayV6 = "2001:db8:abcd:0012::3"
+			reservedIP1V6    = "2001:db8:abcd:0012::4/128"
+			reservedIP2V6    = "2001:db8:abcd:0012::5/128"
+			backendIPv6      = "2001:db8:abcd:0012::6"
+			backendIPv6Rsvd  = backendIPv6 + "/128"
+			clientSameIPv6   = "2001:db8:abcd:0012::7"
+			clientSameRsvdV6 = clientSameIPv6 + "/128"
+			clientDiffIPv6   = "2001:db8:abcd:0012::8"
+			clientDiffRsvdV6 = clientDiffIPv6 + "/128"
+		)
+
+		type serviceTestCase struct {
+			name                     string
+			serviceType              v1.ServiceType
+			externalTrafficPolicy    v1.ServiceExternalTrafficPolicy
+			expectAccessFromSameNode bool
+			expectAccessFromDiffNode bool
+		}
+
+		It("should be reachable through ClusterIP, NodePort and LoadBalancer services with static IPs", func() {
+			cs := f.ClientSet
+
+			By("Checking cluster IP family support")
+			nodes, err := e2enode.GetBoundedReadySchedulableNodes(context.TODO(), cs, 2)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(len(nodes.Items)).To(BeNumerically(">=", 2))
+
+			isIPv6Primary := IsIPv6Cluster(cs)
+			isDualStack := isDualStackCluster(nodes)
+
+			nadClient, err := nadclient.NewForConfig(f.ClientConfig())
+			Expect(err).NotTo(HaveOccurred())
+
+			namespace, err := f.CreateNamespace(context.TODO(), f.BaseName, map[string]string{
+				"e2e-framework":           f.BaseName,
+				RequiredUDNNamespaceLabel: "",
+			})
+			f.Namespace = namespace
+			Expect(err).NotTo(HaveOccurred())
+
+			namespaceA1 := fmt.Sprintf("%s-a1", f.Namespace.Name)
+			namespaceA2 := fmt.Sprintf("%s-a2", f.Namespace.Name)
+
+			nodeA := nodes.Items[0].Name
+			nodeB := nodes.Items[1].Name
+
+			// Build CUDN configuration based on cluster IP family
+			var subnets, reservedSubnets, defaultGatewayIPs string
+			var backendIPs, clientSameIPs, clientDiffIPs []string
+
+			if isDualStack {
+				By("1. Configuring dual-stack CUDN with IPv4 and IPv6 subnets")
+				subnets = fmt.Sprintf(`"%s", "%s"`, l2SubnetV4, l2SubnetV6)
+				reservedSubnets = fmt.Sprintf(`"%s", "%s", "%s", "%s", "%s", "%s", "%s", "%s", "%s", "%s"`,
+					reservedIP1V4, reservedIP2V4, backendIPv4Rsvd, clientSameRsvdV4, clientDiffRsvdV4,
+					reservedIP1V6, reservedIP2V6, backendIPv6Rsvd, clientSameRsvdV6, clientDiffRsvdV6)
+				defaultGatewayIPs = fmt.Sprintf(`"%s", "%s"`, defaultGatewayV4, defaultGatewayV6)
+				backendIPs = []string{backendIPv4, backendIPv6}
+				clientSameIPs = []string{clientSameIPv4, clientSameIPv6}
+				clientDiffIPs = []string{clientDiffIPv4, clientDiffIPv6}
+			} else if isIPv6Primary && !isDualStack {
+				By("1. Configuring IPv6-only CUDN")
+				subnets = fmt.Sprintf(`"%s"`, l2SubnetV6)
+				reservedSubnets = fmt.Sprintf(`"%s", "%s", "%s", "%s", "%s"`,
+					reservedIP1V6, reservedIP2V6, backendIPv6Rsvd, clientSameRsvdV6, clientDiffRsvdV6)
+				defaultGatewayIPs = fmt.Sprintf(`"%s"`, defaultGatewayV6)
+				backendIPs = []string{backendIPv6}
+				clientSameIPs = []string{clientSameIPv6}
+				clientDiffIPs = []string{clientDiffIPv6}
+			} else {
+				By("1. Configuring IPv4-only CUDN")
+				subnets = fmt.Sprintf(`"%s"`, l2SubnetV4)
+				reservedSubnets = fmt.Sprintf(`"%s", "%s", "%s", "%s", "%s"`,
+					reservedIP1V4, reservedIP2V4, backendIPv4Rsvd, clientSameRsvdV4, clientDiffRsvdV4)
+				defaultGatewayIPs = fmt.Sprintf(`"%s"`, defaultGatewayV4)
+				backendIPs = []string{backendIPv4}
+				clientSameIPs = []string{clientSameIPv4}
+				clientDiffIPs = []string{clientDiffIPv4}
+			}
+
+			By("2. Creating ClusterUserDefinedNetwork with Layer2 topology")
+			cudnManifest := fmt.Sprintf(`apiVersion: k8s.ovn.org/v1
+kind: ClusterUserDefinedNetwork
+metadata:
+  name: %s
+spec:
+  namespaceSelector:
+    matchLabels:
+      %s: %s
+  network:
+    topology: Layer2
+    layer2:
+      role: Primary
+      subnets: [%s]
+      reservedSubnets: [%s]
+      defaultGatewayIPs: [%s]`, cudnName, cudnLabel, cudnLabelValue, subnets, reservedSubnets, defaultGatewayIPs)
+
+			cudnCleanup, err := createManifest("", cudnManifest)
+			Expect(err).NotTo(HaveOccurred())
+			defer cudnCleanup()
+
+			By("3. Creating namespaces a1 and a2 with UDN labels")
+			ns1, err := cs.CoreV1().Namespaces().Create(context.Background(), &v1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: namespaceA1,
+					Labels: map[string]string{
+						RequiredUDNNamespaceLabel: "",
+						cudnLabel:                 cudnLabelValue,
+					},
+				},
+			}, metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			f.AddNamespacesToDelete(ns1)
+
+			ns2, err := cs.CoreV1().Namespaces().Create(context.Background(), &v1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: namespaceA2,
+					Labels: map[string]string{
+						RequiredUDNNamespaceLabel: "",
+						cudnLabel:                 cudnLabelValue,
+					},
+				},
+			}, metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			f.AddNamespacesToDelete(ns2)
+
+			By("4. Waiting for NAD to be created in namespaces")
+			for _, ns := range []string{namespaceA1, namespaceA2} {
+				ns := ns
+				Eventually(func() error {
+					_, err := nadClient.NetworkAttachmentDefinitions(ns).Get(
+						context.Background(), cudnName, metav1.GetOptions{})
+					return err
+				}, 2*time.Minute, 5*time.Second).Should(Succeed())
+			}
+
+			By("5. Creating backend pod with static IP(s) in namespace a1 on nodeA")
+			backendPodConfig := *podConfig(
+				"backend-pod",
+				withLabels(map[string]string{"app": "hello-svc"}),
+				withStaticIPsMAC(backendIPs, "02:03:04:05:06:01"),
+				withCommand(func() []string {
+					return httpServerContainerCmd(staticTgtPort)
+				}),
+				withNodeSelector(map[string]string{"kubernetes.io/hostname": nodeA}),
+			)
+			backendPodConfig.namespace = namespaceA1
+			runUDNPod(cs, namespaceA1, backendPodConfig, nil)
+
+			By("6. Creating client pod on same node (nodeA) in namespace a2")
+			clientPodConfigSameNode := *podConfig(
+				"client-same-node",
+				withStaticIPsMAC(clientSameIPs, "02:03:04:05:06:02"),
+				withNodeSelector(map[string]string{"kubernetes.io/hostname": nodeA}),
+			)
+			clientPodConfigSameNode.namespace = namespaceA2
+			runUDNPod(cs, namespaceA2, clientPodConfigSameNode, nil)
+
+			By("7. Creating client pod on different node (nodeB) in namespace a2")
+			clientPodConfigDiffNode := *podConfig(
+				"client-diff-node",
+				withStaticIPsMAC(clientDiffIPs, "02:03:04:05:06:03"),
+				withNodeSelector(map[string]string{"kubernetes.io/hostname": nodeB}),
+			)
+			clientPodConfigDiffNode.namespace = namespaceA2
+			runUDNPod(cs, namespaceA2, clientPodConfigDiffNode, nil)
+
+			// Define test cases for each service type
+			testCases := []serviceTestCase{
+				{
+					name:                     "ClusterIP",
+					serviceType:              v1.ServiceTypeClusterIP,
+					externalTrafficPolicy:    v1.ServiceExternalTrafficPolicy(""),
+					expectAccessFromSameNode: true,
+					expectAccessFromDiffNode: true,
+				},
+				{
+					name:                     "NodePort with ETP=Cluster",
+					serviceType:              v1.ServiceTypeNodePort,
+					externalTrafficPolicy:    v1.ServiceExternalTrafficPolicyCluster,
+					expectAccessFromSameNode: true,
+					expectAccessFromDiffNode: true,
+				},
+				{
+					// ETP=Local: NodePort on a node with no local backend should
+					// drop the traffic. The test sends from client on nodeA to
+					// nodeB's IP (cross-node path); nodeB has no local endpoint
+					// so the request is dropped. This confirms ETP=Local is
+					// enforced on L2 UDN.
+					name:                     "NodePort with ETP=Local",
+					serviceType:              v1.ServiceTypeNodePort,
+					externalTrafficPolicy:    v1.ServiceExternalTrafficPolicyLocal,
+					expectAccessFromSameNode: true,
+					expectAccessFromDiffNode: false,
+				},
+				{
+					name:                     "LoadBalancer",
+					serviceType:              v1.ServiceTypeLoadBalancer,
+					externalTrafficPolicy:    v1.ServiceExternalTrafficPolicyCluster,
+					expectAccessFromSameNode: true,
+					expectAccessFromDiffNode: true,
+				},
+			}
+
+			for i, tc := range testCases {
+				By(fmt.Sprintf("8.%d Testing %s service", i+1, tc.name))
+
+				svcName := fmt.Sprintf("test-service-%d", i)
+				svc := &v1.Service{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      svcName,
+						Namespace: namespaceA1,
+					},
+					Spec: v1.ServiceSpec{
+						Selector: map[string]string{"app": "hello-svc"},
+						Ports: []v1.ServicePort{{
+							Port:       int32(staticSvcPort),
+							TargetPort: intstr.FromInt(staticTgtPort),
+							Protocol:   v1.ProtocolTCP,
+						}},
+						Type: tc.serviceType,
+					},
+				}
+				if isDualStack {
+					policy := v1.IPFamilyPolicyPreferDualStack
+					svc.Spec.IPFamilyPolicy = &policy
+				}
+				if tc.serviceType == v1.ServiceTypeNodePort || tc.serviceType == v1.ServiceTypeLoadBalancer {
+					svc.Spec.ExternalTrafficPolicy = tc.externalTrafficPolicy
+				}
+
+				svc, err = cs.CoreV1().Services(namespaceA1).Create(context.TODO(), svc, metav1.CreateOptions{})
+				Expect(err).NotTo(HaveOccurred())
+
+				switch tc.serviceType {
+				case v1.ServiceTypeClusterIP:
+					// Test all ClusterIPs (IPv4 and/or IPv6 based on cluster config)
+					for _, clusterIP := range svc.Spec.ClusterIPs {
+						By(fmt.Sprintf("Testing %s connectivity to ClusterIP %s:%d", tc.name, clusterIP, staticSvcPort))
+
+						if tc.expectAccessFromSameNode {
+							By(fmt.Sprintf("Verifying %s service is accessible from client on same node via %s", tc.name, clusterIP))
+							Eventually(func() error {
+								return connectToServer(clientPodConfigSameNode, clusterIP, uint16(staticSvcPort))
+							}, 2*time.Minute, 5*time.Second).Should(Succeed())
+						}
+
+						if tc.expectAccessFromDiffNode {
+							By(fmt.Sprintf("Verifying %s service is accessible from client on different node via %s", tc.name, clusterIP))
+							Eventually(func() error {
+								return connectToServer(clientPodConfigDiffNode, clusterIP, uint16(staticSvcPort))
+							}, 2*time.Minute, 5*time.Second).Should(Succeed())
+						}
+					}
+
+				case v1.ServiceTypeNodePort:
+					nodePort := int(svc.Spec.Ports[0].NodePort)
+
+					const ipv6NodePortL2UDNIssue = "https://github.com/ovn-kubernetes/ovn-kubernetes/issues/6285"
+
+					// On IPv6-only clusters, all node IPs are IPv6 and IPv6 NodePort
+					// is not supported for L2 UDN (see issue above). Skip the entire
+					// NodePort case to make the coverage gap explicit.
+					if isIPv6Primary && !isDualStack {
+						By(fmt.Sprintf("Skipping %s NodePort test entirely — IPv6-only cluster, not supported for L2 UDN (see: %s)", tc.name, ipv6NodePortL2UDNIssue))
+						break
+					}
+
+					// Both loops use clientPodConfigSameNode (on nodeA) so that
+					// the second loop exercises the true cross-node datapath:
+					// client on nodeA → nodeB IP. This is the path that
+					// distinguishes ETP=Local from ETP=Cluster.
+
+					// Test client on nodeA → nodeA IP (local NodePort)
+					nodeAIPs, err := ParseNodeHostIPDropNetMask(&nodes.Items[0])
+					Expect(err).NotTo(HaveOccurred())
+					for nodeAIP := range nodeAIPs {
+						if utilnet.IsIPv6String(nodeAIP) {
+							By(fmt.Sprintf("Skipping IPv6 NodePort test for %s (not supported for L2 UDN, see: %s)", nodeAIP, ipv6NodePortL2UDNIssue))
+							continue
+						}
+						By(fmt.Sprintf("Testing %s connectivity to NodePort %s:%d (nodeA)", tc.name, nodeAIP, nodePort))
+
+						if tc.expectAccessFromSameNode {
+							By(fmt.Sprintf("Verifying %s service is accessible from client on nodeA via nodeA IP %s", tc.name, nodeAIP))
+							Eventually(func() error {
+								return connectToServer(clientPodConfigSameNode, nodeAIP, uint16(nodePort))
+							}, 2*time.Minute, 5*time.Second).Should(Succeed())
+						}
+					}
+
+					// Test client on nodeA → nodeB IP (cross-node NodePort).
+					// For ETP=Local, nodeB has no local backend so the request
+					// must be dropped; for ETP=Cluster it must succeed. This
+					// exercises the path that distinguishes Local from Cluster.
+					nodeBIPs, err := ParseNodeHostIPDropNetMask(&nodes.Items[1])
+					Expect(err).NotTo(HaveOccurred())
+					for nodeBIP := range nodeBIPs {
+						if utilnet.IsIPv6String(nodeBIP) {
+							By(fmt.Sprintf("Skipping IPv6 NodePort test for %s (not supported for L2 UDN, see: %s)", nodeBIP, ipv6NodePortL2UDNIssue))
+							continue
+						}
+						By(fmt.Sprintf("Testing %s connectivity to NodePort %s:%d (nodeB)", tc.name, nodeBIP, nodePort))
+
+						if tc.expectAccessFromDiffNode {
+							By(fmt.Sprintf("Verifying %s service is accessible from client on nodeA via nodeB IP %s", tc.name, nodeBIP))
+							Eventually(func() error {
+								return connectToServer(clientPodConfigSameNode, nodeBIP, uint16(nodePort))
+							}, 2*time.Minute, 5*time.Second).Should(Succeed())
+						} else {
+							By(fmt.Sprintf("Verifying %s service is NOT accessible via nodeB IP %s", tc.name, nodeBIP))
+							Consistently(func() error {
+								return connectToServer(clientPodConfigSameNode, nodeBIP, uint16(nodePort))
+							}, 10*time.Second, 2*time.Second).ShouldNot(Succeed())
+						}
+					}
+
+				case v1.ServiceTypeLoadBalancer:
+					By(fmt.Sprintf("Waiting for %s LoadBalancer IP to be assigned", tc.name))
+					// Check if LoadBalancer is supported by waiting for an IP to be assigned
+					// Use a shorter timeout to detect unsupported clusters quickly
+					lbAssigned := false
+					deadline := time.Now().Add(30 * time.Second)
+					for time.Now().Before(deadline) {
+						svc, err = cs.CoreV1().Services(namespaceA1).Get(context.TODO(), svc.Name, metav1.GetOptions{})
+						if err == nil && len(svc.Status.LoadBalancer.Ingress) > 0 {
+							lbAssigned = true
+							break
+						}
+						time.Sleep(5 * time.Second)
+					}
+
+					if !lbAssigned {
+						By("Skipping LoadBalancer test - cluster does not have LoadBalancer support (no IP assigned within 30s)")
+						break // break out of switch to reach the per-iteration service delete below
+					}
+
+					// Test all LoadBalancer ingress IPs (pods have addresses for all configured IP families).
+					// Use the shared filter to drop MetalLB-assigned ingress IPs of an unintended IP family
+					// on single-stack clusters (see filterLoadBalancerIngressByIPFamily).
+					for _, lbIngress := range filterLoadBalancerIngressByIPFamily(f, svc) {
+						lbIP := lbIngress.IP
+						if lbIP == "" {
+							continue
+						}
+
+						By(fmt.Sprintf("Testing %s connectivity to LoadBalancer IP %s:%d", tc.name, lbIP, staticSvcPort))
+
+						if tc.expectAccessFromSameNode {
+							By(fmt.Sprintf("Verifying %s service is accessible from client on same node via %s", tc.name, lbIP))
+							Eventually(func() error {
+								return connectToServer(clientPodConfigSameNode, lbIP, uint16(staticSvcPort))
+							}, 2*time.Minute, 5*time.Second).Should(Succeed())
+						}
+
+						if tc.expectAccessFromDiffNode {
+							By(fmt.Sprintf("Verifying %s service is accessible from client on different node via %s", tc.name, lbIP))
+							Eventually(func() error {
+								return connectToServer(clientPodConfigDiffNode, lbIP, uint16(staticSvcPort))
+							}, 2*time.Minute, 5*time.Second).Should(Succeed())
+						}
+					}
+				}
+
+				// Cleanup service before next iteration
+				err = cs.CoreV1().Services(namespaceA1).Delete(context.TODO(), svcName, metav1.DeleteOptions{})
+				Expect(err).NotTo(HaveOccurred())
+			}
+		})
+	})
+
 })
 
 // TODO Once https://github.com/ovn-kubernetes/ovn-kubernetes/pull/4567 merges, use the vendored *TestJig.Run(), which tests
@@ -561,4 +955,26 @@ func filterLoadBalancerIngressByIPFamily(f *framework.Framework, service *v1.Ser
 		})
 	}
 	return lbIngressIPs
+}
+
+// withStaticIPsMAC sets static IPs (IPv4 and/or IPv6) and MAC via annotations.
+// The ips parameter should be IP addresses without CIDR suffix.
+// CIDR suffix "/24" is added for IPv4, "/64" for IPv6.
+func withStaticIPsMAC(ips []string, mac string) podOption {
+	var ipsWithCIDR []string
+	for _, ip := range ips {
+		if utilnet.IsIPv6String(ip) {
+			ipsWithCIDR = append(ipsWithCIDR, ip+"/64")
+		} else {
+			ipsWithCIDR = append(ipsWithCIDR, ip+"/24")
+		}
+	}
+	ipsJSON := `"` + strings.Join(ipsWithCIDR, `","`) + `"`
+	annotation := fmt.Sprintf(`[{"name":"default","namespace":"%s","ips":[%s],"mac":"%s"}]`, deploymentconfig.Get().OVNKubernetesNamespace(), ipsJSON, mac)
+	return func(pod *podConfiguration) {
+		if pod.annotations == nil {
+			pod.annotations = make(map[string]string)
+		}
+		pod.annotations["v1.multus-cni.io/default-network"] = annotation
+	}
 }

@@ -456,6 +456,7 @@ func connectToServer(clientPodConfig podConfiguration, serverIP string, port uin
 		clientPodConfig.name,
 		"--",
 		"curl",
+		"-g", // Disable URL globbing to support IPv6 addresses with brackets
 		"--connect-timeout",
 		"2",
 	}
