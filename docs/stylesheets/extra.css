@@ -173,6 +173,18 @@
   outline-offset: 1px;
   transform: none;
 }
+[data-md-toggle="search"]:checked ~ .md-header .md-search {
+  z-index: 20;
+}
+[data-md-toggle="search"]:checked ~ .md-header .md-search__overlay {
+  opacity: 1;
+}
+[data-md-toggle="search"]:checked ~ .md-header {
+  z-index: 20;
+}
+.md-search__output {
+  z-index: 20;
+}
 
 /* MAIN CONTENT GRID: A fluid grid that allows the content to be displayed in a responsive manner. */
 .md-grid {
@@ -647,6 +659,91 @@ img[alt="ovn-kubernetes-logo"] {
   width: clamp(240px, 20vw, 300px);
   display: block;
   margin-inline: auto;
+}
+
+/* ── Landing page card grid ──── */
+.md-main__inner.md-grid:has(> .md-sidebar--primary[hidden]):has(> .md-sidebar--secondary[hidden]) {
+  max-width: calc(56rem + clamp(10rem, 15vw, 30rem));
+}
+.md-sidebar--primary[hidden] ~ .md-sidebar--secondary[hidden] ~ .md-content > .md-content__inner {
+  margin-left: auto !important;
+  margin-right: auto !important;
+  max-width: none;
+  text-align: left;
+}
+
+.landing-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 1rem;
+  margin: 1.5rem 0;
+  text-align: left;
+}
+@media screen and (max-width: 59.9em) {
+  .landing-grid { grid-template-columns: 1fr; }
+}
+.landing-card {
+  background: var(--ok-surface-2);
+  border: 2px solid var(--ok-border);
+  border-radius: var(--ok-radius);
+  padding: 1.25rem 1.5rem 1rem;
+  display: flex;
+  flex-direction: column;
+  transition: transform var(--ok-fast), box-shadow var(--ok-fast), border-color var(--ok-fast);
+}
+.landing-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--ok-shadow-sm);
+}
+.landing-card:has(.landing-btn:hover) {
+  border-color: var(--md-primary-fg-color);
+}
+.landing-card h2:first-child {
+  margin-top: 0 !important;
+  margin-bottom: 0.35rem;
+  font-size: 1.15rem;
+  font-weight: 700;
+  line-height: 1.3;
+}
+.landing-card .headerlink {
+  display: none;
+}
+.landing-card > p {
+  color: var(--md-default-fg-color--light);
+  font-size: 0.875rem;
+  line-height: 1.55;
+  margin-bottom: 0.4rem;
+}
+.landing-card ul {
+  list-style: none;
+  padding-left: 0 !important;
+  margin: 0.15rem 0 auto;
+}
+.landing-card ul li {
+  padding: 0.12rem 0;
+  font-size: 0.875rem;
+}
+.landing-card > p:last-of-type {
+  margin-bottom: 0;
+}
+.landing-card > p:has(.landing-btn) {
+  margin-top: auto;
+  margin-bottom: 0;
+}
+.landing-card .landing-btn {
+  color: var(--md-primary-fg-color) !important;
+  text-decoration: none !important;
+  font-weight: 600;
+  font-size: 0.85rem;
+  white-space: nowrap;
+  transition: color var(--ok-fast);
+}
+.landing-card .landing-btn::after {
+  content: " \203A";
+}
+.landing-card .landing-btn:hover {
+  text-decoration: underline !important;
+  color: var(--md-accent-fg-color) !important;
 }
 
 /* Responsive Breakpoint for Mobile, Tablet, and Small Screens */

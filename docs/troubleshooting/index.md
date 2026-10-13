@@ -1,6 +1,7 @@
 ---
 title: Troubleshooting
 hide:
+  - navigation
   - toc
 ---
 
@@ -8,14 +9,36 @@ hide:
 
 Tools and techniques for diagnosing OVN-Kubernetes networking issues.
 
-**[Introduction](debugging.md)**
+<div class="landing-grid" markdown>
+
+<div class="landing-card" markdown>
+
+## Introduction
 
 General debugging strategies and common issues in OVN-Kubernetes clusters.
 
-**[OVNKube Trace](ovnkube-trace.md)**
+[Read more](debugging.md){ .landing-btn }
+
+</div>
+
+<div class="landing-card" markdown>
+
+## OVNKube Trace
 
 Trace packet paths through OVN logical flows to diagnose connectivity problems.
 
-**[User Defined Networks](udn.md)**
+[Read more](ovnkube-trace.md){ .landing-btn }
 
-Diagnose connectivity and configuration issues on User Defined Networks.
+</div>
+
+<div class="landing-card" markdown>
+
+## User Defined Networks
+
+Debug UDN topology, VRF table IDs, and network-specific elements.
+
+[Read more](udn.md){ .landing-btn }
+
+</div>
+
+</div>

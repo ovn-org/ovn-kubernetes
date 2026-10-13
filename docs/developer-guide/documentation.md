@@ -65,6 +65,25 @@ make -C docs/ generate-api-reference
 ```
 See [here](../api-reference/introduction.md) for more details.
 
+### Adding pages to the website navigation
+
+When you add a new documentation page, update **two places**:
+
+1. **`mkdocs.yml`** `nav:` — add your page to the sidebar and tab navigation.
+2. **Section `index.md`** — add your page to the card grid on the section's
+   landing page so visitors see it when they arrive at that section. The landing
+   pages use a card grid layout styled after the Kubernetes docs; each card has
+   a title, description, and links. Use the existing cards as a template.
+
+**Exceptions:**
+
+- **Blog posts** are managed entirely by the
+  [Material blog plugin](https://squidfunk.github.io/mkdocs-material/plugins/blog/) —
+  do **not** add them to `mkdocs.yml` `nav:` or to a section card grid.
+- **API reference** pages are generated (`make -C docs/ generate-api-reference`).
+  New or updated API reference entries still need to be listed in `mkdocs.yml`
+  `nav:` and in `docs/api-reference/index.md`.
+
 ## Website Guide
 
 We are utilizing [GitHub Pages](https://docs.github.com/en/pages/quickstart) to host the ovn-kubernetes.io website. The website's

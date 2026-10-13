@@ -25,6 +25,8 @@ jobs:
           pip install mkdocs-awesome-pages-plugin
           pip install $(mkdocs-get-deps)
       - run: mkdocs build --strict
+      - name: Verify docs nav and card-grid sync
+        run: ./hack/verify-docs-nav-sync.sh
       - name: Test root 404 install helper
         run: ./hack/test-install-gh-pages-404.sh
       - name: Upload Artifact (Test)

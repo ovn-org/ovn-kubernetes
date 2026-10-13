@@ -1,81 +1,205 @@
 ---
 title: Enhancement Proposals
 hide:
+  - navigation
   - toc
 ---
 
 # Enhancement Proposals
 
-OVN-Kubernetes Enhancement Proposals (OKEPs) describe design and implementation plans for new features.
+OVN-Kubernetes Enhancement Proposals (OKEPs) describe design and implementation
+plans for new features.
 
-**[Localnet API](okep-5085-localnet-api.md)**
+<div class="landing-grid" markdown>
 
-Native API for connecting pods directly to external physical networks.
+<div class="landing-card" markdown>
 
-**[Network QoS](okep-4380-network-qos.md)**
+## User Defined Networks
 
-DSCP marking and traffic shaping at the pod level.
+Bring primary network flexibility with tenant isolation and custom topologies.
 
-**[User Defined Networks](okep-5193-user-defined-networks.md)**
+[Read more](okep-5193-user-defined-networks.md){ .landing-btn }
 
-Tenant network isolation and custom network topologies.
+</div>
 
-**[Preconfigured UDN Addresses](okep-5233-preconfigured-udn-addresses.md)**
+<div class="landing-card" markdown>
 
-Static IP address assignment for User Defined Networks.
+## Connecting UDNs
 
-**[BGP](okep-5296-bgp.md)**
+Connect isolated User Defined Networks together for controlled inter-UDN communication.
 
-Advertising pod and service routes to external BGP routers.
+[Read more](okep-5224-connecting-udns/okep-5224-connecting-udns.md){ .landing-btn }
 
-**[Layer2 Transit Router](okep-5094-layer2-transit-router.md)**
+</div>
 
-Layer 2 transit switch architecture for cross-node connectivity.
+<div class="landing-card" markdown>
 
-**[MCP for Troubleshooting](okep-5494-ovn-kubernetes-mcp-server.md)**
+## Preconfigured UDN Addresses
 
-Model Context Protocol server for AI-assisted cluster debugging.
+Predefined static IP, MAC, and gateway for migrating legacy workloads to UDNs.
 
-**[Dynamic UDN Node Allocation](okep-5552-dynamic-udn-node-allocation.md)**
+[Read more](okep-5233-preconfigured-udn-addresses.md){ .landing-btn }
 
-On-demand subnet allocation for UDN nodes as pods are scheduled.
+</div>
 
-**[Connecting User Defined Networks](okep-5224-connecting-udns/okep-5224-connecting-udns.md)**
+<div class="landing-card" markdown>
 
-Controlled inter-UDN connectivity via ClusterNetworkConnect.
+## Dynamic UDN Node Allocation
 
-**[Connecting UDNs: Discarded Alternatives](okep-5224-connecting-udns/discarded-alternatives.md)**
+Render UDN topologies only on nodes where they are needed for better scalability.
 
-Discarded network topology proposals for connecting Layer3-type Cluster User Defined Networks (CUDNs).
+[Read more](okep-5552-dynamic-udn-node-allocation.md){ .landing-btn }
 
-**[No-Overlay Mode](okep-5259-no-overlay.md)**
+</div>
 
-Direct pod routing using BGP-learned routes without encapsulation.
+<div class="landing-card" markdown>
 
-**[EVPN](okep-5088-evpn.md)**
+## Multiple Cluster Subnets
 
-Ethernet VPN integration for scalable multi-tenant networking.
+Extend Layer 3 UDNs to support multiple cluster subnets per IP family.
 
-**[DPU Healthcheck](okep-5674-dpu-healthcheck.md)**
+[Read more](okep-5377-extend-udn-to-support-multiple-cluster-subnets-in-layer3-topology.md){ .landing-btn }
 
-Health monitoring for DPU-offloaded networking components.
+</div>
 
-**[Extend UDN to Support Multiple Cluster Subnets](okep-5377-extend-udn-to-support-multiple-cluster-subnets-in-layer3-topology.md)**
+<div class="landing-card" markdown>
 
-Multiple cluster subnets in Layer3 topology for primary UDN/CUDN.
+## Localnet API
 
-**[VRF-Lite Shared Gateway Mode](okep-6019-vrf-lite-shared-gateway-external-bridges.md)**
+Create localnet topology networks via the managed CUDN CRD with early validation.
 
-VRF-Lite shared gateway mode with external bridge uplinks.
+[Read more](okep-5085-localnet-api.md){ .landing-btn }
 
-**[Disable MAC Spoof Protection on Secondary Networks](okep-3926-disable-port-security.md)**
+</div>
 
-Allow disabling port security on secondary network interfaces.
+<div class="landing-card" markdown>
 
-**[OVN Observability API](okep-5212-ovnobserv-api.md)**
+## Layer 2 Transit Router
 
-API for OVN observability sampling and tracing.
+Improve primary UDN Layer 2 topology with a transit router for robust live migration.
 
-**[DHCP IPAM for Localnet](okep-6224-dhcp-ipam-localnet.md)**
+[Read more](okep-5094-layer2-transit-router.md){ .landing-btn }
+
+</div>
+
+<div class="landing-card" markdown>
+
+## BGP Integration
+
+Native BGP routing protocol integration for route advertisements and peering.
+
+[Read more](okep-5296-bgp.md){ .landing-btn }
+
+</div>
+
+<div class="landing-card" markdown>
+
+## No-Overlay Mode
+
+Direct routing between nodes via BGP, eliminating Geneve encapsulation overhead.
+
+[Read more](okep-5259-no-overlay.md){ .landing-btn }
+
+</div>
+
+<div class="landing-card" markdown>
+
+## EVPN
+
+Expose UDNs externally via BGP+EVPN for standardized Layer 2/3 VPN integration.
+
+[Read more](okep-5088-evpn.md){ .landing-btn }
+
+</div>
+
+<div class="landing-card" markdown>
+
+## VRF-Lite Shared Gateway Mode
+
+VRF separation in shared gateway mode using managed Uplink resources.
+
+[Read more](okep-6019-vrf-lite-shared-gateway-external-bridges.md){ .landing-btn }
+
+</div>
+
+<div class="landing-card" markdown>
+
+## Network QoS
+
+DSCP marking and bandwidth shaping for differentiated traffic handling.
+
+[Read more](okep-4380-network-qos.md){ .landing-btn }
+
+</div>
+
+<div class="landing-card" markdown>
+
+## Disable Port Security
+
+Disable MAC spoof protection on secondary networks for nested virtualization and NFV.
+
+[Read more](okep-3926-disable-port-security.md){ .landing-btn }
+
+</div>
+
+<div class="landing-card" markdown>
+
+## EgressIP Node Selector
+
+Per-object node selector to control which nodes host a specific EgressIP.
+
+[Read more](okep-6800-egressip-node-selector.md){ .landing-btn }
+
+</div>
+
+<div class="landing-card" markdown>
+
+## MCP for Troubleshooting
+
+Model Context Protocol server to accelerate multi-layer network debugging.
+
+[Read more](okep-5494-ovn-kubernetes-mcp-server.md){ .landing-btn }
+
+</div>
+
+<div class="landing-card" markdown>
+
+## OVN Observability API
+
+Fine-grained CRD for configuring OVN sampling and network visibility.
+
+[Read more](okep-5212-ovnobserv-api.md){ .landing-btn }
+
+</div>
+
+<div class="landing-card" markdown>
+
+## DPU Healthcheck
+
+Detect unhealthy DPUs and mark nodes as not-ready for pod scheduling.
+
+[Read more](okep-5674-dpu-healthcheck.md){ .landing-btn }
+
+</div>
+
+<div class="landing-card" markdown>
+
+## DHCP IPAM for Localnet
 
 DHCP-based IPAM for localnet secondary networks.
+
+[Read more](okep-6224-dhcp-ipam-localnet.md){ .landing-btn }
+
+</div>
+
+<div class="landing-card" markdown>
+
+## NetworkQoS for IPAM-less Localnet
+
+Add NetworkQoS support for IPAM-less localnet networks.
+
+[Read more](okep-6815-network-qos-ipamless.md){ .landing-btn }
+
+</div>
+
+</div>

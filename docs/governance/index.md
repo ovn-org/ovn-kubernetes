@@ -1,6 +1,7 @@
 ---
 title: Governance
 hide:
+  - navigation
   - toc
 ---
 
@@ -8,30 +9,76 @@ hide:
 
 Community governance, contribution guidelines, and project policies.
 
-**[Contributing Guide](CONTRIBUTING.md)**
+<div class="landing-grid" markdown>
+
+<div class="landing-card" markdown>
+
+## Contributing Guide
 
 How to contribute code, docs, and reviews to the project.
 
-**[Governance](GOVERNANCE.md)**
+[Read more](CONTRIBUTING.md){ .landing-btn }
+
+</div>
+
+<div class="landing-card" markdown>
+
+## Governance
 
 Project governance structure, roles, and decision-making process.
 
-**[Reviewing Guide](REVIEWING.md)**
+[Read more](GOVERNANCE.md){ .landing-btn }
+
+</div>
+
+<div class="landing-card" markdown>
+
+## Reviewing Guide
 
 Guidelines and expectations for reviewing pull requests.
 
-**[Meetings](MEETINGS.md)**
+[Read more](REVIEWING.md){ .landing-btn }
+
+</div>
+
+<div class="landing-card" markdown>
+
+## Meetings
 
 Community meeting schedule and how to join.
 
-**[Maintainers](MAINTAINERS.md)**
+[Read more](MEETINGS.md){ .landing-btn }
+
+</div>
+
+<div class="landing-card" markdown>
+
+## Maintainers
 
 Current and emeritus project maintainers.
 
-**[Security](SECURITY.md)**
+[Read more](MAINTAINERS.md){ .landing-btn }
 
-How to report vulnerabilities.
+</div>
 
-**[Code of Conduct](CODE_OF_CONDUCT.md)**
+<div class="landing-card" markdown>
 
-Community behavior standards.
+## Security Policy
+
+How to report vulnerabilities and the project's security process.
+
+[Read more](SECURITY.md){ .landing-btn }
+
+</div>
+
+<div class="landing-card" markdown>
+
+## Code of Conduct
+
+Community behavior standards and pledge.
+
+[Read more](CODE_OF_CONDUCT.md){ .landing-btn }
+
+</div>
+
+</div>

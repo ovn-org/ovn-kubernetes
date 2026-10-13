@@ -1,6 +1,7 @@
 ---
 title: CI
 hide:
+  - navigation
   - toc
 ---
 
@@ -8,6 +9,16 @@ hide:
 
 Continuous integration testing for OVN-Kubernetes.
 
-**[CI Testing Guide](ci.md)**
+<div class="landing-grid" markdown>
+
+<div class="landing-card" markdown>
+
+## CI Testing Guide
 
 How the CI pipeline works, which tests run, and how to interpret results.
+
+[Read more](ci.md){ .landing-btn }
+
+</div>
+
+</div>

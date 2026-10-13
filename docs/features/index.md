@@ -1,6 +1,7 @@
 ---
 title: Features
 hide:
+  - navigation
   - toc
 ---
 
@@ -8,50 +9,136 @@ hide:
 
 Networking capabilities provided by OVN-Kubernetes.
 
-**[Universal Connectivity](user-defined-networks/index.md)**
+<div class="landing-grid" markdown>
+
+<div class="landing-card" markdown>
+
+## Universal Connectivity
 
 User-defined networks, network segmentation, and cross-network connectivity.
 
-**[Network Security Controls](network-security-controls/index.md)**
+[Read more](user-defined-networks/index.md){ .landing-btn }
+
+</div>
+
+<div class="landing-card" markdown>
+
+## Network Security Controls
 
 NetworkPolicy, AdminNetworkPolicy, and EgressFirewall enforcement via OVN ACLs.
 
-**[Cluster Egress Controls](cluster-egress-controls/index.md)**
+[Read more](network-security-controls/index.md){ .landing-btn }
+
+</div>
+
+<div class="landing-card" markdown>
+
+## Cluster Egress Controls
 
 Control how traffic leaves the cluster with EgressIP, EgressService, and EgressQoS.
 
-**[Infrastructure Security Controls](infrastructure-security-controls/index.md)**
+[Read more](cluster-egress-controls/index.md){ .landing-btn }
+
+</div>
+
+<div class="landing-card" markdown>
+
+## Infrastructure Security Controls
 
 Node-level identity and security mechanisms.
 
-**[Multi-Networking](multiple-networks/index.md)**
+[Read more](infrastructure-security-controls/index.md){ .landing-btn }
+
+</div>
+
+<div class="landing-card" markdown>
+
+## Multi-Networking
 
 Attach pods to multiple networks with multi-homing and multi-network policies.
 
-**[Multicast](multicast.md)**
+[Read more](multiple-networks/index.md){ .landing-btn }
+
+</div>
+
+<div class="landing-card" markdown>
+
+## Multicast
 
 IGMP snooping and multicast relay support via OVN.
 
-**[NetworkQoS](network-qos/index.md)**
+[Read more](multicast.md){ .landing-btn }
+
+</div>
+
+<div class="landing-card" markdown>
+
+## NetworkQoS
 
 DSCP marking and traffic shaping for pod network traffic.
 
-**[Live Migration](live-migration.md)**
+[Read more](network-qos/index.md){ .landing-btn }
+
+</div>
+
+<div class="landing-card" markdown>
+
+## Live Migration
 
 Persistent IPs and seamless networking for KubeVirt VM live migrations.
 
-**[Hybrid Overlay](hybrid-overlay.md)**
+[Read more](live-migration.md){ .landing-btn }
+
+</div>
+
+<div class="landing-card" markdown>
+
+## Hybrid Overlay
 
 Mixed Windows/Linux cluster networking using VXLAN tunnels.
 
-**[OVS Dynamic CPU Affinity](ovs-dynamic-cpu-affinity.md)**
+[Read more](hybrid-overlay.md){ .landing-btn }
+
+</div>
+
+<div class="landing-card" markdown>
+
+## OVS Dynamic CPU Affinity
 
 Automatically adjust OVS datapath thread CPU pinning based on load.
 
-**[Hardware Acceleration](hardware-offload/index.md)**
+[Read more](ovs-dynamic-cpu-affinity.md){ .landing-btn }
+
+</div>
+
+<div class="landing-card" markdown>
+
+## Hardware Acceleration
 
 Offload OVS datapath processing to SmartNICs and DPUs.
 
-**[BGP Integration](bgp-integration/index.md)**
+[Read more](hardware-offload/index.md){ .landing-btn }
+
+</div>
+
+<div class="landing-card" markdown>
+
+## BGP Integration
 
 Route advertisements, no-overlay routing, and EVPN support via BGP.
+
+[Read more](bgp-integration/index.md){ .landing-btn }
+
+</div>
+
+<div class="landing-card" markdown>
+
+## Requirements
+
+Minimum system and software requirements for running OVN-Kubernetes.
+
+[Read more](requirements.md){ .landing-btn }
+
+</div>
+
+</div>
