@@ -1,0 +1,6 @@
+# Output of a local kube-burner run
+bgp-state-*.json
+kube-burner-*.log
+metrics/
+pprof-data/
+perf-meta.yml

@@ -1,0 +1,89 @@
+---
+# BGP RouteAdvertisements density.
+#
+# Measures the control-plane cost of advertising many networks. Each
+# RouteAdvertisements makes the cluster manager generate one FRRConfiguration
+# per node per matching source configuration, so the object count grows as
+# RAs x nodes and the reconcile cost grows with it.
+#
+# No pods: the pod path is already covered by the udn-density lanes, and
+# leaving them out keeps this lane focused on the controller and short enough
+# to run nightly.
+#
+# The job that carries podLatency must be named after this file, because
+# generate_perf_report.py loads podLatencyMeasurement-<perf-test>.json keyed on
+# the matrix value. There is no podLatency here, so the report falls back to
+# the CPU and memory sections.
+global:
+  measurements:
+    - name: pprof
+      # Must match the 30s profile duration below. At 1m the collector sampled
+      # half the time and the first run's 42s of RA work landed entirely in a
+      # gap between two profiles, so both captures showed an idle process.
+      pprofInterval: 30s
+      pprofDirectory: pprof-data
+      pprofTargets:
+      - name: ovnkube-control-plane
+        namespace: "ovn-kubernetes"
+        labelSelector: {name: ovnkube-control-plane}
+        url: http://localhost:9411/debug/pprof/profile?seconds=30
+      - name: ovnkube-control-plane-heap
+        namespace: "ovn-kubernetes"
+        labelSelector: {name: ovnkube-control-plane}
+        url: http://localhost:9411/debug/pprof/heap
+      - name: ovnkube-controller
+        namespace: "ovn-kubernetes"
+        labelSelector: {app: ovnkube-node}
+        url: http://localhost:9410/debug/pprof/profile?seconds=30
+      - name: ovnkube-controller-heap
+        namespace: "ovn-kubernetes"
+        labelSelector: {app: ovnkube-node}
+        url: http://localhost:9410/debug/pprof/heap
+
+jobs:
+# Networks first, so their NADs exist before any RouteAdvertisements selects
+# them. Creating them in one job keeps the RA reconciles from racing a growing
+# set of NADs.
+- name: bgp-ra-density-networks
+  jobIterations: 1
+  qps: 10
+  burst: 10
+  namespacedIterations: false
+  waitWhenFinished: true
+  cleanup: true
+  objects:
+    - objectTemplate: workloads/templates/bgp/ns.yml
+      replicas: 20
+
+    - objectTemplate: workloads/templates/bgp/cudn_l3.yml
+      replicas: 20
+      waitOptions:
+        customStatusPaths:
+        - key: '(.conditions.[] | select(.type == "NetworkCreated")).status'
+          value: "True"
+
+# One RouteAdvertisements per network. This is the job whose cost the lane
+# exists to measure, so it is separated from network creation.
+- name: bgp-ra-density
+  jobIterations: 1
+  qps: 10
+  burst: 10
+  namespacedIterations: false
+  waitWhenFinished: true
+  cleanup: true
+  # The RouteAdvertisements are accepted in seconds, which is shorter than the
+  # 30s scrape interval, so without a pause every rate() and histogram_quantile()
+  # in metrics-ovnk.yml covers a window with fewer than two samples and indexes
+  # nothing. metricsClosing defaults to afterJobPause, so this pause is inside
+  # the measured range. It also gives the 1m pprof measurement time to fire.
+  jobPause: 3m
+  # Snapshot the quantities that cannot be Prometheus series: generated object
+  # counts, FRRNodeState sizes and the peer's view.
+  beforeCleanup: "./collect-bgp-state.sh bgp-ra-density"
+  objects:
+    - objectTemplate: workloads/templates/bgp/ra.yml
+      replicas: 20
+      waitOptions:
+        customStatusPaths:
+        - key: '(.conditions.[] | select(.type == "Accepted")).status'
+          value: "True"

@@ -1,0 +1,27 @@
+---
+# Layer3 CUDN advertised over BGP.
+#
+# The name is kept short deliberately: an advertised CUDN's VRF is named after
+# it and Linux caps interface names at 15 characters.
+#
+# Subnets are carved out of 10.128.0.0/10, a /20 per network, so 1024 networks
+# fit without overlapping the default cluster subnet. hostSubnet 26 gives 64
+# addresses per node, which is ample for a density run that creates no pods.
+apiVersion: k8s.ovn.org/v1
+kind: ClusterUserDefinedNetwork
+metadata:
+  name: c{{ sub .Replica 1 }}
+  labels:
+    perf.ovn.org/advertised: "true"
+    perf.ovn.org/cudn-idx: "{{ sub .Replica 1 }}"
+spec:
+  namespaceSelector:
+    matchLabels:
+      kube-burner.io/cudn-idx: "{{ sub .Replica 1 }}"
+  network:
+    topology: Layer3
+    layer3:
+      role: Primary
+      subnets:
+      - cidr: 10.{{ add 128 (div (sub .Replica 1) 16) }}.{{ mul (mod (sub .Replica 1) 16) 16 }}.0/20
+        hostSubnet: 26

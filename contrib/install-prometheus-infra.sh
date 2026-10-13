@@ -53,6 +53,21 @@ echo "Adding prometheus-community helm repository..."
 helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
 helm repo update
 
+# Scrape ovn-kubernetes itself. Out of the box the stack only collects platform
+# metrics, so without this every ovnkube_, ovn_ and ovs_ query returns nothing.
+# The secret has to exist before Prometheus starts, hence before helm.
+echo "Creating ovn-kubernetes scrape config secret..."
+kubectl create secret generic ovnk-scrape-config \
+    --namespace "${PROMETHEUS_NAMESPACE}" \
+    --from-file=ovnk-scrape.yaml="${DIR}/prometheus-ovnk-scrape.yaml" \
+    --dry-run=client -o yaml | kubectl apply -f -
+
+OVNK_SCRAPE_ARGS=(
+    --set prometheus.prometheusSpec.additionalScrapeConfigsSecret.enabled=true
+    --set prometheus.prometheusSpec.additionalScrapeConfigsSecret.name=ovnk-scrape-config
+    --set prometheus.prometheusSpec.additionalScrapeConfigsSecret.key=ovnk-scrape.yaml
+)
+
 # Check if there are nodes with prometheus-node=true label
 PROMETHEUS_NODES=$(kubectl get nodes -l prometheus-node=true --no-headers 2>/dev/null | wc -l)
 
@@ -62,6 +77,7 @@ if [ "${PROMETHEUS_NODES}" -gt 0 ]; then
     helm upgrade --install "${PROMETHEUS_RELEASE_NAME}" prometheus-community/kube-prometheus-stack \
         --namespace "${PROMETHEUS_NAMESPACE}" \
         --values "${DIR}/prometheus-values.yaml" \
+        "${OVNK_SCRAPE_ARGS[@]}" \
         --wait --timeout=10m
 else
     echo "No nodes with prometheus-node=true label found, installing Prometheus on any available nodes..."
@@ -71,11 +87,13 @@ else
         --set prometheusOperator.tls.enabled=false \
         --set prometheusOperator.admissionWebhooks.enabled=false \
         --set prometheusOperator.admissionWebhooks.patch.enabled=false \
+        "${OVNK_SCRAPE_ARGS[@]}" \
         --wait --timeout=10m
 fi
 
 echo "Waiting for Prometheus pods to be ready..."
 kubectl wait --for=condition=ready pod -l "release=${PROMETHEUS_RELEASE_NAME}" -n "${PROMETHEUS_NAMESPACE}" --timeout=300s
+
 
 # Mark nodes running prometheus pods as unschedulable
 echo "Marking nodes running Prometheus as unschedulable..."

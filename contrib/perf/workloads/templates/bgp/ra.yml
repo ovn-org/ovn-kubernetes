@@ -1,0 +1,28 @@
+---
+# One RouteAdvertisements per CUDN: the fan-out worst case, since the number of
+# generated FRRConfigurations is RAs x nodes x matching source configurations.
+#
+# targetVRF is left unset so the networks are advertised from the default VRF
+# router of the base FRRConfiguration that contrib/kind.sh already installs.
+# targetVRF 'auto' would need a per-VRF router in that base configuration and a
+# per-VRF path to the fabric, neither of which the kind harness provides.
+#
+# nodeSelector must stay empty: the CRD rejects a populated one when PodNetwork
+# is advertised, because the pod network has to be advertised from every node.
+apiVersion: k8s.ovn.org/v1
+kind: RouteAdvertisements
+metadata:
+  name: ra-{{ sub .Replica 1 }}
+spec:
+  advertisements:
+  - PodNetwork
+  nodeSelector: {}
+  frrConfigurationSelector:
+    matchLabels:
+      name: receive-all
+  networkSelectors:
+  - networkSelectionType: ClusterUserDefinedNetworks
+    clusterUserDefinedNetworkSelector:
+      networkSelector:
+        matchLabels:
+          perf.ovn.org/cudn-idx: "{{ sub .Replica 1 }}"

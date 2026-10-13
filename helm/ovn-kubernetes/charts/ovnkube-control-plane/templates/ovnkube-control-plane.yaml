@@ -90,6 +90,8 @@ spec:
           value: {{ default 5 .Values.logFileMaxAgent | quote }}
         - name: OVNKUBE_CONFIG_DURATION_ENABLE
           value: {{ default "" .Values.global.enableConfigDuration | quote }}
+        - name: OVNKUBE_METRICS_SCALE_ENABLE
+          value: {{ default "" .Values.global.enableMetricsScale | quote }}
         - name: OVN_NET_CIDR
           valueFrom:
             configMapKeyRef:

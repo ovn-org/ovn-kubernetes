@@ -71,6 +71,15 @@ jobs:
           - {"target": "control-plane", perf-test: "cudn-density-l2-pods-netpol", "gateway-mode": "local", "ipfamily": "ipv4", "disable-snat-multiple-gws": "noSnatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones", "num-workers": "3", "network-segmentation": ""}
           - {"target": "control-plane", perf-test: "udn-density-l2-pods-netpol", "gateway-mode": "local", "ipfamily": "ipv4", "disable-snat-multiple-gws": "noSnatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones", "num-workers": "3", "network-segmentation": ""}
           - {"target": "control-plane", perf-test: "udn-density-l3-pods-netpol", "gateway-mode": "local", "ipfamily": "ipv4", "disable-snat-multiple-gws": "noSnatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones", "num-workers": "3", "network-segmentation": ""}
+          # BGP RouteAdvertisements density. routeadvertisements is deliberately
+          # not "advertise-default": the workload advertises its own CUDNs, and
+          # advertising the default pod network as well would change the
+          # generated-object count the lane exists to measure.
+          #
+          # The generated-object count scales with the node total, which is
+          # num-workers + KIND_NUM_INFRA + 1 for the control plane, not
+          # num-workers. At 3 that is 6 nodes.
+          - {"target": "bgp", perf-test: "bgp-ra-density", "routeadvertisements": "advertise-cudn", "gateway-mode": "local", "ipfamily": "ipv4", "disable-snat-multiple-gws": "noSnatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones", "num-workers": "3", "network-segmentation": "enable-network-segmentation"}
     env:
       ES_SERVER: "${{ secrets.PERF_DATASTORE }}"
       JOB_NAME: "${{ matrix.target }}-${{ matrix.gateway-mode }}-${{ matrix.ipfamily }}-${{ matrix.disable-snat-multiple-gws }}-${{ matrix.second-bridge }}-${{ matrix.ic }}"
@@ -101,10 +110,21 @@ jobs:
       OVN_UNPRIVILEGED_MODE: "${{ matrix.cni-mode == 'unprivileged' }}"
       MULTI_POD_SUBNET: true
       # Performance test specific settings
+      # Becomes --metrics-enable-scale on ovnkube via kind-common.sh ->
+      # kind-helm.sh -> helm global.enableMetricsScale -> ovnkube.sh. Without it
+      # the workqueue and libovsdb metric families are never registered.
+      # --metrics-enable-pprof is already unconditional in the image.
+      OVN_METRICS_SCALE_ENABLE: "true"
       KIND_NUM_INFRA: "2"
       KIND_INSTALL_PROMETHEUS: "true"
       KIND_PROMETHEUS_INFRA_ONLY: "true"
-      METRICS_IP: "127.0.0.1"
+      # 0.0.0.0 rather than 127.0.0.1 so the metrics endpoints are reachable
+      # both from inside the pod, which is how the pprof measurement collects,
+      # and on the pod IP, which is how Prometheus scrapes them via the
+      # PodMonitors in contrib/prometheus-ovnk-podmonitors.yaml. Binding to
+      # loopback only makes every ovnkube_*, ovn_* and ovs_* query return
+      # nothing.
+      METRICS_IP: "0.0.0.0"
       GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
     steps:
     - uses: actions/checkout@v6
@@ -346,7 +366,7 @@ jobs:
         cp -r * /tmp/${{ matrix.perf-test }}/perf
 
     - name: Generate performance report
-      if: ${{ matrix.perf-test == 'kubelet-density-cni' || matrix.perf-test == 'udn-density-l2-noPods' || matrix.perf-test == 'cudn-density-l2-noPods' || matrix.perf-test == 'udn-density-l2-pods' || matrix.perf-test == 'cudn-density-l2-pods-netpol' || matrix.perf-test == 'udn-density-l2-pods-netpol' || matrix.perf-test == 'udn-density-l3-pods-netpol' }}
+      if: ${{ matrix.perf-test == 'kubelet-density-cni' || matrix.perf-test == 'udn-density-l2-noPods' || matrix.perf-test == 'cudn-density-l2-noPods' || matrix.perf-test == 'udn-density-l2-pods' || matrix.perf-test == 'cudn-density-l2-pods-netpol' || matrix.perf-test == 'udn-density-l2-pods-netpol' || matrix.perf-test == 'udn-density-l3-pods-netpol' || matrix.perf-test == 'bgp-ra-density' }}
       run: |
         cd contrib/perf
         # Generate the performance report
@@ -360,21 +380,21 @@ jobs:
         cat /tmp/${{ matrix.perf-test }}/performance_report.md
 
     - name: Upload performance report
-      if: ${{ matrix.perf-test == 'kubelet-density-cni' || matrix.perf-test == 'udn-density-l2-noPods' || matrix.perf-test == 'cudn-density-l2-noPods' || matrix.perf-test == 'udn-density-l2-pods' || matrix.perf-test == 'cudn-density-l2-pods-netpol' || matrix.perf-test == 'udn-density-l2-pods-netpol' || matrix.perf-test == 'udn-density-l3-pods-netpol' }}
+      if: ${{ matrix.perf-test == 'kubelet-density-cni' || matrix.perf-test == 'udn-density-l2-noPods' || matrix.perf-test == 'cudn-density-l2-noPods' || matrix.perf-test == 'udn-density-l2-pods' || matrix.perf-test == 'cudn-density-l2-pods-netpol' || matrix.perf-test == 'udn-density-l2-pods-netpol' || matrix.perf-test == 'udn-density-l3-pods-netpol' || matrix.perf-test == 'bgp-ra-density' }}
       uses: actions/upload-artifact@v7
       with:
         name: ${{ matrix.perf-test }}-performance-report-${{ github.run_id }}
         path: /tmp/${{ matrix.perf-test }}/performance_report.md
 
     - name: Upload pprof data
-      if: ${{ matrix.perf-test == 'kubelet-density-cni' || matrix.perf-test == 'udn-density-l2-noPods' || matrix.perf-test == 'cudn-density-l2-noPods' || matrix.perf-test == 'udn-density-l2-pods' || matrix.perf-test == 'cudn-density-l2-pods-netpol' || matrix.perf-test == 'udn-density-l2-pods-netpol' || matrix.perf-test == 'udn-density-l3-pods-netpol' }}
+      if: ${{ matrix.perf-test == 'kubelet-density-cni' || matrix.perf-test == 'udn-density-l2-noPods' || matrix.perf-test == 'cudn-density-l2-noPods' || matrix.perf-test == 'udn-density-l2-pods' || matrix.perf-test == 'cudn-density-l2-pods-netpol' || matrix.perf-test == 'udn-density-l2-pods-netpol' || matrix.perf-test == 'udn-density-l3-pods-netpol' || matrix.perf-test == 'bgp-ra-density' }}
       uses: actions/upload-artifact@v7
       with:
         name: ${{ matrix.perf-test }}-pprof-${{ github.run_id }}
         path: /tmp/${{ matrix.perf-test }}/pprof-data
 
     - name: Upload performance test data
-      if: ${{ matrix.perf-test == 'kubelet-density-cni' || matrix.perf-test == 'udn-density-l2-noPods' || matrix.perf-test == 'cudn-density-l2-noPods' || matrix.perf-test == 'udn-density-l2-pods' || matrix.perf-test == 'cudn-density-l2-pods-netpol' || matrix.perf-test == 'udn-density-l2-pods-netpol' || matrix.perf-test == 'udn-density-l3-pods-netpol' }}
+      if: ${{ matrix.perf-test == 'kubelet-density-cni' || matrix.perf-test == 'udn-density-l2-noPods' || matrix.perf-test == 'cudn-density-l2-noPods' || matrix.perf-test == 'udn-density-l2-pods' || matrix.perf-test == 'cudn-density-l2-pods-netpol' || matrix.perf-test == 'udn-density-l2-pods-netpol' || matrix.perf-test == 'udn-density-l3-pods-netpol' || matrix.perf-test == 'bgp-ra-density' }}
       uses: actions/upload-artifact@v7
       with:
         name: ${{ matrix.perf-test }}-performance-test-data-${{ github.run_id }}

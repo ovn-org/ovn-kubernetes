@@ -51,16 +51,21 @@ var (
 		Help: "Total number of adds handled by workqueue",
 	}, []string{"name"})
 
+	// 1ms to ~32s. The previous base-10 bucketing had six buckets spanning 10ms
+	// to 1000s, which put a 200ms and a 900ms reconcile in the same bucket and
+	// made p99 estimates unusable.
+	queueBuckets = prometheus.ExponentialBuckets(.001, 2, 16)
+
 	latency = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    QueueLatencyKey,
 		Help:    "How long in seconds an item stays in workqueue before being requested.",
-		Buckets: prometheus.ExponentialBuckets(10e-3, 10, 6),
+		Buckets: queueBuckets,
 	}, []string{"name"})
 
 	workDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    WorkDurationKey,
 		Help:    "How long in seconds processing an item from workqueue takes.",
-		Buckets: prometheus.ExponentialBuckets(10e-3, 10, 6),
+		Buckets: queueBuckets,
 	}, []string{"name"})
 
 	unfinished = prometheus.NewGaugeVec(prometheus.GaugeOpts{

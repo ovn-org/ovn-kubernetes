@@ -42,7 +42,7 @@ MOCKERY_VERSION ?= v2.53.4
 
 export NOROOT
 
-.PHONY: all build check test
+.PHONY: all build check test bench
 
 # Example:
 #   make
@@ -58,6 +58,17 @@ all build:
 
 windows:
 	WINDOWS_BUILD="yes" hack/build-go.sh hybrid-overlay/cmd/hybrid-overlay-node
+
+# Run the Go benchmarks. Packages are discovered rather than listed so a new
+# benchmark is picked up without touching this file.
+#
+# BENCHTIME=10x keeps a CI smoke run fast; leave it unset locally to get
+# meaningful numbers.
+BENCH_PKGS = $(shell grep -rl '^func Benchmark' --include='*_test.go' pkg/ hybrid-overlay/ 2>/dev/null | xargs -r -n1 dirname | sort -u | sed 's|^|./|')
+BENCHTIME ?=
+bench:
+	@test -n "$(BENCH_PKGS)" || { echo "no benchmarks found"; exit 1; }
+	go test -run='^$$' -bench=. -benchmem $(if $(BENCHTIME),-benchtime=$(BENCHTIME),) $(BENCH_PKGS)
 
 # Note: `--security-opt label=disable` option is required on systems where SELinux is enabled for `podman` to successfully run the
 # tests in a container. Refer: https://www.projectatomic.io/blog/2016/03/dwalsh_selinux_containers/ for additional context

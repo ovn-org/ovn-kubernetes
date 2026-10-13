@@ -1,6 +1,7 @@
 - endpoint: http://localhost:9090
   metrics:
   - metrics.yml
+  - metrics-ovnk.yml
   indexer:
     type: local
     metricsDirectory: metrics

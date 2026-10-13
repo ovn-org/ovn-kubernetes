@@ -376,6 +376,7 @@ func RegisterOVNKubeControllerPerformance(nbClient libovsdbclient.Client) {
 	prometheus.MustRegister(MetricSyncServiceLatency)
 	if config.Metrics.EnableScaleMetrics {
 		registerWorkqueueMetrics(types.MetricOvnkubeNamespace, types.MetricOvnkubeSubsystemController)
+		libovsdbops.RegisterTransactMetrics()
 	}
 	prometheus.MustRegister(prometheus.NewGaugeFunc(
 		prometheus.GaugeOpts{

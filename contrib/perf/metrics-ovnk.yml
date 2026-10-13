@@ -1,0 +1,156 @@
+# ovn-kubernetes, OVN and OVS metrics for the BGP perf lane.
+#
+# Companion to metrics.yml, which covers apiserver, etcd, cAdvisor, kubelet and
+# CRI-O only. Referenced as a second entry from metric-endpoint*.yml so the
+# existing platform baselines stay comparable.
+#
+# Requires contrib/prometheus-ovnk-podmonitors.yaml to be installed, and
+# OVN_METRICS_SCALE_ENABLE=true for the workqueue and libovsdb families.
+#
+# The controller name labels contain spaces, e.g.
+# "clustermanager routeadvertisements controller", hence the regex matchers.
+
+# ---------------------------------------------------------------------------
+# Controller workqueues.
+#
+# adds_total against an otherwise idle cluster is the signal for reconcile
+# amplification: RouteAdvertisements re-enqueues every resource on unrelated
+# Node, NAD and FRRConfiguration events.
+# ---------------------------------------------------------------------------
+
+- query: sum(rate(ovnkube_clustermanager_workqueue_adds_total[2m])) by (name) > 0
+  metricName: ovnkubeWorkqueueAddRate
+
+- query: sum(ovnkube_clustermanager_workqueue_depth) by (name) > 0
+  metricName: ovnkubeWorkqueueDepth
+
+# queue duration high while work duration is moderate means the single worker
+# is starved rather than the reconcile being expensive
+- query: histogram_quantile(0.99, sum(rate(ovnkube_clustermanager_workqueue_queue_duration_seconds_bucket[2m])) by (name, le)) > 0
+  metricName: ovnkubeWorkqueueQueueDuration99th
+
+- query: histogram_quantile(0.99, sum(rate(ovnkube_clustermanager_workqueue_work_duration_seconds_bucket[2m])) by (name, le)) > 0
+  metricName: ovnkubeWorkqueueWorkDuration99th
+
+- query: sum(rate(ovnkube_clustermanager_workqueue_retries_total[2m])) by (name) > 0
+  metricName: ovnkubeWorkqueueRetryRate
+
+# ---------------------------------------------------------------------------
+# RouteAdvertisements controller
+# ---------------------------------------------------------------------------
+
+# No rate(). A density workload finishes its transition in about ten seconds,
+# faster than the 30s scrape interval, so every counter it touches is already
+# flat by the first sample inside the job window and rate() is zero throughout.
+# Two CI runs returned nothing for the rate() form; the one run that did return
+# anything only caught the ramp by scrape-phase luck. Cumulative buckets give
+# the workload's p99 directly, because the cluster is new.
+- query: histogram_quantile(0.99, sum(ovnkube_clustermanager_route_advertisements_reconcile_duration_seconds_bucket) by (result, le)) > 0
+  metricName: raReconcileDuration99th
+
+- query: sum(ovnkube_clustermanager_route_advertisements_reconcile_duration_seconds_count) by (result)
+  metricName: raReconcileCount
+
+- query: sum(ovnkube_clustermanager_route_advertisements_frr_configurations) by (name)
+  metricName: raGeneratedFRRConfigurations
+
+# the ratio of unchanged to create/update/delete is what separates useful
+# reconcile work from state being re-derived and thrown away
+- query: sum(ovnkube_clustermanager_route_advertisements_frr_configuration_writes_total) by (op)
+  metricName: raFRRConfigurationWrites
+
+- query: sum(ovnkube_clustermanager_route_advertisements_advertised_prefixes) by (name, family)
+  metricName: raAdvertisedPrefixes
+
+# every reconcile walks every NAD in the cluster regardless of which resource
+# triggered it
+- query: ovnkube_clustermanager_route_advertisements_nads_listed
+  metricName: raNADsListed
+
+- query: sum(ovnkube_clustermanager_route_advertisements_nad_writes_total)
+  metricName: raNADWrites
+
+# ---------------------------------------------------------------------------
+# OVSDB transactions: the cost centre shared by every feature that writes OVN
+# ---------------------------------------------------------------------------
+
+- query: histogram_quantile(0.99, sum(rate(ovnkube_libovsdb_txn_duration_seconds_bucket[2m])) by (db, result, le)) > 0
+  metricName: libovsdbTxnDuration99th
+
+- query: sum(rate(ovnkube_libovsdb_txn_duration_seconds_count[2m])) by (db, result) > 0
+  metricName: libovsdbTxnRate
+
+- query: histogram_quantile(0.99, sum(rate(ovnkube_libovsdb_txn_ops_bucket[2m])) by (db, le)) > 0
+  metricName: libovsdbTxnOps99th
+
+# ---------------------------------------------------------------------------
+# Route import, node side
+# ---------------------------------------------------------------------------
+
+- query: histogram_quantile(0.99, sum(rate(ovnkube_node_route_import_sync_duration_seconds_bucket[2m])) by (network, result, le)) > 0
+  metricName: routeImportSyncDuration99th
+
+# bgp and ovn converge after a successful sync and diverge while one is
+# pending or failing
+- query: sum(ovnkube_node_route_import_routes) by (network, source)
+  metricName: routeImportRoutes
+
+- query: sum(ovnkube_node_route_import_ops_total) by (op)
+  metricName: routeImportOps
+
+# ---------------------------------------------------------------------------
+# OVN and OVS
+# ---------------------------------------------------------------------------
+
+- query: ovn_db_db_size_bytes
+  metricName: ovnDBSizeBytes
+
+- query: sum(rate(ovn_db_txn_try_again[2m])) by (instance) > 0
+  metricName: ovnDBTxnTryAgainRate
+
+- query: ovn_northd_ovn_northd_loop_95th_percentile
+  metricName: northdLoop95th
+
+- query: ovn_controller_flow_installation_95th_percentile
+  metricName: ovnControllerFlowInstallation95th
+
+- query: ovn_controller_integration_bridge_openflow_total
+  metricName: integrationBridgeOpenflowTotal
+
+# ---------------------------------------------------------------------------
+# Object pressure from the generated CRs, and a sanity check that the workload
+# created what it intended
+# ---------------------------------------------------------------------------
+
+- query: apiserver_storage_objects{resource=~"frrconfigurations.*|frrnodestates.*|bgpsessionstates.*|routeadvertisements.*|clusteruserdefinednetworks.*"}
+  metricName: bgpCRObjectCount
+
+- query: sum(ovnkube_clustermanager_cluster_user_defined_networks) by (role, topology, transport)
+  metricName: clusterUserDefinedNetworks
+
+- query: sum(ovnkube_clustermanager_route_advertisement_condition{status="true"}) by (condition)
+  metricName: routeAdvertisementAccepted
+
+# ---------------------------------------------------------------------------
+# apiserver cost of a reconcile
+#
+# The RouteAdvertisements controller spends about a second of workqueue work
+# duration per reconcile while the whole cluster manager uses under 1% of a
+# core, so almost all of that second is spent waiting on the apiserver rather
+# than computing. These attribute it. rate() is fine here: unlike the
+# RouteAdvertisements counters these series are continuously active.
+# ---------------------------------------------------------------------------
+
+- query: histogram_quantile(0.99, sum(rate(ovnkube_rest_client_request_duration_seconds_bucket[2m])) by (verb, resource, le)) > 0
+  metricName: restClientRequestDuration99th
+
+# Not labelled by resource: client-go calls its result hook without a URL, so a
+# status code cannot be attributed to a resource client-side. APIRequestRate in
+# metrics.yml carries code, verb and resource from the apiserver's own counter
+# and is authoritative for that.
+- query: sum(rate(ovnkube_rest_client_requests_total[2m])) by (code, method) > 0
+  metricName: restClientRequestRate
+
+# non-trivial values mean client QPS/burst is the limit, not the apiserver
+- query: histogram_quantile(0.99, sum(rate(ovnkube_rest_client_rate_limiter_duration_seconds_bucket[2m])) by (verb, le)) > 0
+  metricName: restClientRateLimiterDuration99th

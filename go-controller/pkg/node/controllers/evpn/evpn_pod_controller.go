@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"syscall"
+	"time"
 
 	"github.com/vishvananda/netlink"
 
@@ -20,6 +21,7 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kubevirt"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -32,6 +34,10 @@ type neighEntries struct {
 	macvrfVID   int
 	ips         []net.IP
 	mac         net.HardwareAddr
+	// programmed reports whether these entries are present in the kernel FDB
+	// and neighbour tables. Entries are cached before being programmed when a
+	// live migration has not yet made this node the ready target.
+	programmed bool
 }
 
 // podNeedsUpdate returns true for local pods when the annotation changed, the pod completed, or was deleted.
@@ -128,8 +134,29 @@ func (c *Controller) reconcilePod(key string) error {
 	c.podNeighLock.Lock()
 	existing, hasExisting := c.podNeighbors[key]
 	c.podNeighLock.Unlock()
-	if hasExisting && existing.uid == pod.UID && c.shouldEnsureNeighbors(migrationStatus) {
-		return c.ensurePodNeighbors(existing)
+	if hasExisting && existing.uid == pod.UID {
+		if c.shouldEnsureNeighbors(migrationStatus) {
+			if err := c.ensurePodNeighbors(existing); err != nil {
+				return err
+			}
+			// entries cached earlier in a migration are only programmed once
+			// this node becomes the ready target, so the counts change here too
+			c.podNeighLock.Lock()
+			existing.programmed = true
+			c.podNeighLock.Unlock()
+			c.recordPodEntries()
+			return nil
+		}
+		if existing.programmed {
+			// This node is the migration source and the target domain is not
+			// ready yet, so the FDB and neighbour entries are still installed
+			// and still originate Type-2 routes. Keep the cached entry as it
+			// is: rebuilding it from the annotation would clear the programmed
+			// flag, dropping these entries from the counts, and would hand
+			// deletePodNeighbors an IP list that does not match what was
+			// actually installed.
+			return nil
+		}
 	}
 
 	nadKey, err := c.networkMgr.GetPrimaryNADForNamespace(pod.Namespace)
@@ -169,11 +196,14 @@ func (c *Controller) reconcilePod(key string) error {
 		if err := c.ensurePodNeighbors(entries); err != nil {
 			return err
 		}
+		// safe without the lock: entries is not published until the insert below
+		entries.programmed = true
 	}
 
 	c.podNeighLock.Lock()
 	c.podNeighbors[key] = entries
 	c.podNeighLock.Unlock()
+	c.recordPodEntries()
 
 	return nil
 }
@@ -181,7 +211,16 @@ func (c *Controller) reconcilePod(key string) error {
 // ensurePodNeighbors programs static FDB and neighbor entries for a pod's MAC/IPs.
 // The static FDB entry on the OVS port prevents the bridge from aging out the MAC,
 // which would cause FRR to withdraw the Type-2 route.
-func (c *Controller) ensurePodNeighbors(entries *neighEntries) error {
+func (c *Controller) ensurePodNeighbors(entries *neighEntries) (err error) {
+	start := time.Now()
+	defer func() {
+		result := "success"
+		if err != nil {
+			result = "error"
+		}
+		metrics.RecordEVPNPodProgram(result, time.Since(start))
+	}()
+
 	svi, err := util.GetNetLinkOps().LinkByName(entries.sviName)
 	if err != nil {
 		return fmt.Errorf("failed to get L2 SVI %s: %w", entries.sviName, err)
@@ -203,6 +242,31 @@ func (c *Controller) ensurePodNeighbors(entries *neighEntries) error {
 	return nil
 }
 
+// recordPodEntries reports how many pods and neighbor entries this node has
+// programmed. EVPN Type-2 route count scales with these, not with node count.
+//
+// Only programmed entries are counted. During a live migration this node can
+// hold cached entries for a pod it has not programmed, and those originate no
+// Type-2 route, so counting them would overstate what the fabric carries.
+func (c *Controller) recordPodEntries() {
+	c.podNeighLock.Lock()
+	defer c.podNeighLock.Unlock()
+	metrics.RecordEVPNPodEntries(countProgrammedEntries(c.podNeighbors))
+}
+
+// countProgrammedEntries returns the number of pods, and of neighbour entries
+// across them, that have been programmed. Callers must hold podNeighLock.
+func countProgrammedEntries(podNeighbors map[string]*neighEntries) (pods, neighbors int) {
+	for _, entries := range podNeighbors {
+		if !entries.programmed {
+			continue
+		}
+		pods++
+		neighbors += len(entries.ips)
+	}
+	return pods, neighbors
+}
+
 func (c *Controller) deletePodNeighbors(key string) error {
 	c.podNeighLock.Lock()
 	entries, ok := c.podNeighbors[key]
@@ -210,6 +274,7 @@ func (c *Controller) deletePodNeighbors(key string) error {
 	if !ok {
 		return nil
 	}
+	defer c.recordPodEntries()
 
 	ovsPort, err := util.GetNetLinkOps().LinkByName(entries.ovsPortName)
 	if err != nil {

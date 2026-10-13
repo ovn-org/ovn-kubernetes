@@ -1,0 +1,108 @@
+# Prometheus scrape configs for ovn-kubernetes, loaded through
+# prometheusSpec.additionalScrapeConfigsSecret by install-prometheus-infra.sh.
+#
+# Why not a PodMonitor or a ServiceMonitor:
+#
+#   - The ovnkube pods are host-network and have no Service, which rules out
+#     ServiceMonitor.
+#   - They declare no containerPort. A PodMonitor's targetPort compiles to
+#     "keep __meta_kubernetes_pod_container_port_number = <n>", a label that
+#     only exists for declared ports, so every target is dropped. Omitting the
+#     port instead makes prometheus-operator emit no scrape job at all.
+#
+# A plain scrape config sets __address__ from the pod IP directly, which works
+# regardless of what the pod declares and does not depend on operator
+# behaviour that has been deprecated once already.
+#
+# role: pod yields one target per container, so each job keeps a single
+# container to avoid scraping the same endpoint once per container.
+#
+# Each job builds __address__ with two mutually exclusive rules, because the
+# pod IP is IPv6 on an IPv6 or dual-stack cluster and "<ip>:<port>" is not a
+# valid address for one. Prometheus anchors relabel regexes and treats a
+# non-matching replace rule as a no-op, so exactly one of the pair fires. This
+# is the same split ovnkube.sh:100 makes with bracketify().
+
+- job_name: ovnkube-node
+  # ovnkube_node_*, ovnkube_controller_*, the workqueue family and route import
+  kubernetes_sd_configs:
+  - role: pod
+    namespaces:
+      names: [ovn-kubernetes]
+  relabel_configs:
+  - source_labels: [__meta_kubernetes_pod_label_app]
+    regex: ovnkube-node
+    action: keep
+  - source_labels: [__meta_kubernetes_pod_container_name]
+    regex: ovnkube-controller
+    action: keep
+  - source_labels: [__meta_kubernetes_pod_ip]
+    regex: '([^:]+)'
+    target_label: __address__
+    replacement: '$1:9410'
+  - source_labels: [__meta_kubernetes_pod_ip]
+    regex: '(.*:.*)'
+    target_label: __address__
+    replacement: '[$1]:9410'
+  - source_labels: [__meta_kubernetes_pod_node_name]
+    target_label: node
+  - source_labels: [__meta_kubernetes_pod_name]
+    target_label: pod
+  - target_label: namespace
+    replacement: ovn-kubernetes
+
+- job_name: ovnkube-node-ovn
+  # ovn_db_*, ovn_northd_*, ovn_controller_* and ovs_vswitchd_*
+  kubernetes_sd_configs:
+  - role: pod
+    namespaces:
+      names: [ovn-kubernetes]
+  relabel_configs:
+  - source_labels: [__meta_kubernetes_pod_label_app]
+    regex: ovnkube-node
+    action: keep
+  - source_labels: [__meta_kubernetes_pod_container_name]
+    regex: ovs-metrics-exporter
+    action: keep
+  - source_labels: [__meta_kubernetes_pod_ip]
+    regex: '([^:]+)'
+    target_label: __address__
+    replacement: '$1:9476'
+  - source_labels: [__meta_kubernetes_pod_ip]
+    regex: '(.*:.*)'
+    target_label: __address__
+    replacement: '[$1]:9476'
+  - source_labels: [__meta_kubernetes_pod_node_name]
+    target_label: node
+  - source_labels: [__meta_kubernetes_pod_name]
+    target_label: pod
+  - target_label: namespace
+    replacement: ovn-kubernetes
+
+- job_name: ovnkube-control-plane
+  # ovnkube_clustermanager_*, including the RouteAdvertisements metrics
+  kubernetes_sd_configs:
+  - role: pod
+    namespaces:
+      names: [ovn-kubernetes]
+  relabel_configs:
+  - source_labels: [__meta_kubernetes_pod_label_name]
+    regex: ovnkube-control-plane
+    action: keep
+  - source_labels: [__meta_kubernetes_pod_container_name]
+    regex: ovnkube-cluster-manager
+    action: keep
+  - source_labels: [__meta_kubernetes_pod_ip]
+    regex: '([^:]+)'
+    target_label: __address__
+    replacement: '$1:9411'
+  - source_labels: [__meta_kubernetes_pod_ip]
+    regex: '(.*:.*)'
+    target_label: __address__
+    replacement: '[$1]:9411'
+  - source_labels: [__meta_kubernetes_pod_node_name]
+    target_label: node
+  - source_labels: [__meta_kubernetes_pod_name]
+    target_label: pod
+  - target_label: namespace
+    replacement: ovn-kubernetes

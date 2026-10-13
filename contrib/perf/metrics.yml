@@ -1,8 +1,12 @@
+# Note: the apiserver queries below deliberately do not filter on
+# apiserver="kube-apiserver". That label does not exist on a kind cluster, so
+# the filter silently matched nothing and both queries indexed zero documents
+# on every run of every lane.
 # API server
-- query: histogram_quantile(0.99, sum(rate(apiserver_request_duration_seconds_bucket{apiserver="kube-apiserver", verb!~"WATCH", subresource!="log"}[2m])) by (verb,resource,subresource,instance,le)) > 0
+- query: histogram_quantile(0.99, sum(rate(apiserver_request_duration_seconds_bucket{verb!~"WATCH", subresource!="log"}[2m])) by (verb,resource,subresource,instance,le)) > 0
   metricName: API99thLatency
 
-- query: sum(irate(apiserver_request_total{apiserver="kube-apiserver",verb!="WATCH",subresource!="log"}[2m])) by (verb,instance,resource,code) > 0
+- query: sum(irate(apiserver_request_total{verb!="WATCH",subresource!="log"}[2m])) by (verb,instance,resource,code) > 0
   metricName: APIRequestRate
 
 - query: sum(apiserver_current_inflight_requests{}) by (request_kind) > 0

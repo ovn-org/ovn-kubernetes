@@ -1,0 +1,12 @@
+---
+# One namespace per advertised network. The cudn-idx label is what the matching
+# ClusterUserDefinedNetwork's namespaceSelector keys on. The label that opts the
+# namespace into a primary UDN must be present at creation time; a
+# ValidatingAdmissionPolicy rejects adding it later.
+kind: Namespace
+apiVersion: v1
+metadata:
+  name: {{ .JobName }}-{{ sub .Replica 1 }}
+  labels:
+    k8s.ovn.org/primary-user-defined-network: ""
+    kube-burner.io/cudn-idx: "{{ sub .Replica 1 }}"
