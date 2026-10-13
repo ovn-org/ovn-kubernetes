@@ -236,6 +236,18 @@ func keyFromNetlink(r *netlink.Route) key {
 	}
 }
 
+// SameKey reports whether the route manager tracks both routes under the same
+// key, so that adding one replaces the other: destination, table and metric,
+// after the normalization applied to added routes.
+func SameKey(a, b netlink.Route) bool {
+	na, errA := validateAndNormalizeRoute(&a)
+	nb, errB := validateAndNormalizeRoute(&b)
+	if errA != nil || errB != nil {
+		return false
+	}
+	return keyFromNetlink(na) == keyFromNetlink(nb)
+}
+
 // sync will iterate through all routes seen on a node and ensure any route
 // manager managed routes are applied. Any conflicting additional routes are
 // removed. Other routes are preserved.

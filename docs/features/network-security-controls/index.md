@@ -19,3 +19,7 @@ Standard Kubernetes NetworkPolicy enforcement via OVN ACLs.
 **[EgressFirewall](egress-firewall.md)**
 
 Restrict which external destinations pods in a namespace can reach.
+
+**[DNS Name Resolution](dns-name-resolution.md)**
+
+DNS-based matching for EgressFirewall rules.

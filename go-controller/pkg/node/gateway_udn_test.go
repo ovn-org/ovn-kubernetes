@@ -581,11 +581,133 @@ func TestUserDefinedNetworkGatewayReconcilesUplinkConfiguration(t *testing.T) {
 				uplinkv1alpha1.UplinkStateReasonGatewayProgrammingFailed {
 			t.Fatalf("unexpected unconfiguration failure: %v", err)
 		}
-		if !udnGateway.uplinkGatewayCleanupRequired || udnGateway.uplinkFingerprint != current {
+		if !udnGateway.uplinkGatewayCleanupRequired {
 			t.Fatal("failed withdrawal released ownership of old programming")
+		}
+		// The handled identity is kept for status reporting; the partial
+		// marker keeps the next reconcile from matching it.
+		if !udnGateway.uplinkGatewayPartial {
+			t.Fatal("failed withdrawal did not mark the programming partial")
+		}
+		if udnGateway.uplinkFingerprint != current {
+			t.Fatalf("failed withdrawal changed the handled fingerprint to %#v", udnGateway.uplinkFingerprint)
 		}
 		if udnGateway.uplinkStateUID != "old-uid" {
 			t.Fatal("failed withdrawal released the old UplinkState identity")
+		}
+	})
+
+	t.Run("partial programming is rebuilt even when its fingerprint matches", func(t *testing.T) {
+		state := resolvedGatewayUplinkState("uplink1", "node-a")
+		udnGateway, netlinkOps, nodeLister := newUplinkGatewayReconcileHarness(t, state)
+		udnGateway.uplinkGatewayCleanupRequired = true
+		udnGateway.uplinkGatewayPartial = true
+		udnGateway.uplinkStateUID = state.UID
+		udnGateway.uplinkFingerprint = uplinkGatewayFingerprintFromState(state)
+		expectMissingGatewayVRF(netlinkOps, udnGateway)
+		addErr := errors.New("management port lookup failed")
+		nodeLister.On("Get", "node-a").Return(nil, addErr).Once()
+
+		_, _, err := udnGateway.reconcileUplinkConfiguration()
+		if err == nil || !strings.Contains(err.Error(), addErr.Error()) {
+			t.Fatalf("partial programming was not rebuilt: %v", err)
+		}
+	})
+
+	t.Run("cleanup failure is reported against the handled UplinkState", func(t *testing.T) {
+		state := resolvedGatewayUplinkState("uplink1", "node-a")
+		state.UID = "handled-uid"
+		udnGateway, netlinkOps, _ := newUplinkGatewayReconcileHarness(t, state)
+		udnGateway.uplinkGatewayCleanupRequired = true
+		udnGateway.uplinkStateUID = state.UID
+		udnGateway.uplinkFingerprint = uplinkGatewayFingerprintFromState(state)
+		cleanupErr := errors.New("failed to remove old programming")
+		netlinkOps.On("LinkByName", util.GetNetworkVRFName(udnGateway.NetInfo)).
+			Return(nil, cleanupErr).Once()
+		netlinkOps.On("IsLinkNotFoundError", cleanupErr).Return(false).Once()
+
+		if err := udnGateway.Cleanup(); err == nil || !strings.Contains(err.Error(), cleanupErr.Error()) {
+			t.Fatalf("unexpected cleanup result: %v", err)
+		}
+
+		statusController := udnGateway.uplinkStateGatewayStatusController
+		statusController.mutex.Lock()
+		defer statusController.mutex.Unlock()
+		uplinkState := statusController.uplinks["uplink1"]
+		if uplinkState == nil || uplinkState.networks[udnGateway.GetNetworkName()] == nil {
+			t.Fatal("cleanup failure was not reported")
+		}
+		if phase := uplinkState.networks[udnGateway.GetNetworkName()].phase; phase != uplinkGatewayNetworkFailed {
+			t.Fatalf("cleanup failure reported phase %q", phase)
+		}
+	})
+
+	t.Run("changed default gateways update routes without replacing the gateway", func(t *testing.T) {
+		state := resolvedGatewayUplinkState("uplink1", "node-a")
+		state.UID = "new-uid"
+		udnGateway, _, _ := newUplinkGatewayReconcileHarness(t, state)
+		current := uplinkGatewayFingerprintFromState(state)
+		current.defaultGateways = "192.0.2.254"
+		udnGateway.uplinkGatewayCleanupRequired = true
+		udnGateway.uplinkStateUID = "old-uid"
+		udnGateway.uplinkFingerprint = current
+
+		// No netlink expectation is set: any teardown or setup call fails.
+		if _, _, err := udnGateway.reconcileUplinkConfiguration(); err != nil {
+			t.Fatalf("changed default gateways failed: %v", err)
+		}
+		if !udnGateway.uplinkGatewayCleanupRequired {
+			t.Fatal("changed default gateways released gateway programming")
+		}
+		if udnGateway.uplinkFingerprint != uplinkGatewayFingerprintFromState(state) {
+			t.Fatalf("changed default gateways left fingerprint %#v", udnGateway.uplinkFingerprint)
+		}
+		if udnGateway.uplinkStateUID != state.UID {
+			t.Fatal("changed default gateways did not adopt the handled UplinkState identity")
+		}
+		var nextHops []string
+		for _, nextHop := range udnGateway.nextHops {
+			nextHops = append(nextHops, nextHop.String())
+		}
+		var published []string
+		for _, gateway := range state.Status.DefaultGateways {
+			published = append(published, string(gateway))
+		}
+		if strings.Join(nextHops, ",") != strings.Join(published, ",") {
+			t.Fatalf("next hops %v do not follow the published gateways %v", nextHops, published)
+		}
+	})
+
+	t.Run("failed in-place default gateway update marks the programming partial", func(t *testing.T) {
+		// Only the host modes manage the default routes of the network VRF.
+		config.OvnKubeNode.Mode = types.NodeModeFull
+		t.Cleanup(func() { config.OvnKubeNode.Mode = types.NodeModeDPU })
+		state := resolvedGatewayUplinkState("uplink1", "node-a")
+		state.UID = "new-uid"
+		udnGateway, netlinkOps, _ := newUplinkGatewayReconcileHarness(t, state)
+		current := uplinkGatewayFingerprintFromState(state)
+		current.defaultGateways = "192.0.2.254"
+		udnGateway.uplinkGatewayCleanupRequired = true
+		udnGateway.uplinkStateUID = "old-uid"
+		udnGateway.uplinkFingerprint = current
+		// The IPv4 default is replaced through the VRF manager; the network
+		// has no IPv6 subnet, so no family is left without a gateway.
+		updateErr := errors.New("vrf lookup failed")
+		netlinkOps.On("LinkByName", util.GetNetworkVRFName(udnGateway.NetInfo)).
+			Return(nil, updateErr).Once()
+
+		_, _, err := udnGateway.reconcileUplinkConfiguration()
+		if err == nil || !strings.Contains(err.Error(), updateErr.Error()) ||
+			uplinkGatewayFailureReason(err) !=
+				uplinkv1alpha1.UplinkStateReasonGatewayProgrammingFailed {
+			t.Fatalf("unexpected in-place update failure: %v", err)
+		}
+		if !udnGateway.uplinkGatewayPartial {
+			t.Fatal("failed in-place update did not mark the programming partial")
+		}
+		if udnGateway.uplinkFingerprint != current || udnGateway.uplinkStateUID != "old-uid" {
+			t.Fatalf("failed in-place update changed the handled identity to %s %#v",
+				udnGateway.uplinkStateUID, udnGateway.uplinkFingerprint)
 		}
 	})
 

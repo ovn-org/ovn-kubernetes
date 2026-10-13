@@ -16,6 +16,6 @@ General debugging strategies and common issues in OVN-Kubernetes clusters.
 
 Trace packet paths through OVN logical flows to diagnose connectivity problems.
 
-**[Logging](logging.md)**
+**[User Defined Networks](udn.md)**
 
-Configure and interpret OVN-Kubernetes component logs.
+Diagnose connectivity and configuration issues on User Defined Networks.

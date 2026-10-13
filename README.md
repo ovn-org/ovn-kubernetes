@@ -39,6 +39,7 @@ Here are some links to help in your ovn-kubernetes journey:
 - [Deploying OVN-Kubernetes CNI using Helm](https://ovn-kubernetes.io/master/installation/launching-ovn-kubernetes-with-helm/)
 - [Contributing to OVN-Kubernetes](https://ovn-kubernetes.io/master/governance/CONTRIBUTING/) for how to get involved
   in our project
+- [Code of Conduct](CODE_OF_CONDUCT.md) for the standards we expect from everyone in our community
 - [Meet the Community](https://ovn-kubernetes.io/master/governance/MEETINGS/) for details on community
   meeting details.
 

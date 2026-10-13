@@ -44,6 +44,10 @@ On-demand subnet allocation for UDN nodes as pods are scheduled.
 
 Controlled inter-UDN connectivity via ClusterNetworkConnect.
 
+**[Connecting UDNs: Discarded Alternatives](okep-5224-connecting-udns/discarded-alternatives.md)**
+
+Discarded network topology proposals for connecting Layer3-type Cluster User Defined Networks (CUDNs).
+
 **[No-Overlay Mode](okep-5259-no-overlay.md)**
 
 Direct pod routing using BGP-learned routes without encapsulation.
@@ -67,3 +71,11 @@ VRF-Lite shared gateway mode with external bridge uplinks.
 **[Disable MAC Spoof Protection on Secondary Networks](okep-3926-disable-port-security.md)**
 
 Allow disabling port security on secondary network interfaces.
+
+**[OVN Observability API](okep-5212-ovnobserv-api.md)**
+
+API for OVN observability sampling and tracing.
+
+**[DHCP IPAM for Localnet](okep-6224-dhcp-ipam-localnet.md)**
+
+DHCP-based IPAM for localnet secondary networks.

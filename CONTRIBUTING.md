@@ -12,6 +12,8 @@
 
 Welcome! We are glad that you want to contribute to our project! 💖
 
+All contributors are expected to follow our [Code of Conduct](./CODE_OF_CONDUCT.md).
+
 As you get started, you are in the best position to give us feedback on areas of
 our project that we need help with including:
 
@@ -189,7 +191,7 @@ make lint
 ```
 
 * If you are introducing new CRDs verify that Yaml files have been formatted (see
-  [codegen generator](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/master/docs/developer.md#generating-crd-yamls-using-codegen))
+  [codegen generator](https://ovn-kubernetes.io/master/developer-guide/developer/#generating-crd-yamls-using-codegen))
 * Verify that unit tests are passing locally
 
 ```console

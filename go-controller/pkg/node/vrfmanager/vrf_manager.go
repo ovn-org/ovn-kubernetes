@@ -421,7 +421,17 @@ func (vrfm *Controller) AddVRFRoutes(name string, routes []netlink.Route) error 
 		return fmt.Errorf("failed to find VRF %s", name)
 	}
 
-	vrfDev.routes = append(vrfDev.routes, markOVNKRoutes(routes)...)
+	// Route manager replaces the kernel route tracked under the same key as
+	// a new route, so the cache follows, also within one batch. The clone
+	// keeps the stored entry intact if the sync fails.
+	tracked := slices.Clone(vrfDev.routes)
+	for _, route := range markOVNKRoutes(routes) {
+		tracked = slices.DeleteFunc(tracked, func(t netlink.Route) bool {
+			return routemanager.SameKey(t, route)
+		})
+		tracked = append(tracked, route)
+	}
+	vrfDev.routes = tracked
 
 	return vrfm.sync(vrfDev)
 }

@@ -17,4 +17,4 @@ The resources will be watched by ovn-k, which in turn will configure OVN's [QoS 
 The `NetworkQoS` also has `status` field which is populated by ovn-k which helps users to identify whether NetworkQoS rules are configured correctly in OVN or not.
 
 ## Sources
-- [OKEP-4380: Network QoS Support](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/master/docs/okeps/okep-4380-network-qos.md)
+- [OKEP-4380: Network QoS Support](../../okeps/okep-4380-network-qos.md)

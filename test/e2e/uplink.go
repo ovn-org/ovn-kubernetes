@@ -1521,6 +1521,13 @@ var _ = ginkgo.Describe("Network Segmentation Uplink route advertisements", feat
 		}
 
 		waitForUplinkStatesNoDefaultGateways(ctx, f, uplinkName, schedulableNodes.Items)
+		// A change of the published default gateways must not rebuild the
+		// gateway: the CUDN VRF keeps its interface index and the Uplink
+		// bridge stays enslaved to it.
+		vrfLinkIndexes := map[string]string{}
+		for _, node := range schedulableNodes.Items {
+			vrfLinkIndexes[node.Name] = uplinkLinkIndex(node.Name, networkName)
+		}
 		ginkgo.By("adding default routes explicitly to the CUDN VRF routing table")
 		frr := infraapi.ExternalContainer{Name: networkName + "-frr"}
 		frrIface, err := infraprovider.Get().GetExternalContainerNetworkInterface(frr, peerNetwork)
@@ -1568,6 +1575,17 @@ var _ = ginkgo.Describe("Network Segmentation Uplink route advertisements", feat
 				metav1.ConditionTrue,
 				uplinkv1alpha1.UplinkStateReasonGatewayConfigured,
 			)
+		}
+		ginkgo.By("checking that the gateway change did not rebuild the CUDN VRF")
+		for _, node := range schedulableNodes.Items {
+			gomega.Expect(uplinkLinkIndex(node.Name, networkName)).To(gomega.Equal(vrfLinkIndexes[node.Name]),
+				"expected CUDN VRF %s on node %s to keep its interface index across the default gateway change",
+				networkName, node.Name)
+			_, err := execNodeCommand(node.Name,
+				"ip -o link show dev %s | grep -q 'master %s'", bridgeName, networkName)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred(),
+				"expected Uplink bridge %s to stay enslaved to VRF %s on node %s across the default gateway change",
+				bridgeName, networkName, node.Name)
 		}
 	})
 })
@@ -3689,6 +3707,14 @@ func runOVSCommand(pod corev1.Pod, format string, args ...any) error {
 
 // execNodeCommand runs a shell command on the node through the
 // provider-agnostic node exec API, returning the command output.
+// uplinkLinkIndex returns the interface index of a link on the node.
+func uplinkLinkIndex(nodeName, linkName string) string {
+	ginkgo.GinkgoHelper()
+	out, err := execNodeCommand(nodeName, "cat /sys/class/net/%s/ifindex", linkName)
+	gomega.Expect(err).NotTo(gomega.HaveOccurred(), "expected link %s on node %s", linkName, nodeName)
+	return strings.TrimSpace(out)
+}
+
 func execNodeCommand(nodeName, format string, args ...any) (string, error) {
 	ginkgo.GinkgoHelper()
 	return infraprovider.Get().ExecK8NodeCommand(nodeName, []string{"sh", "-c", fmt.Sprintf(format, args...)})

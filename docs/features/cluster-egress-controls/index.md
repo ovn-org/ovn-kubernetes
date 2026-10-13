@@ -19,7 +19,3 @@ Route egress traffic from pods through a Service's load balancer IP.
 **[EgressQoS](egress-qos.md)**
 
 Apply DSCP marking rules to egress traffic on a per-namespace basis.
-
-**[EgressGateway](egress-gateway.md)**
-
-Direct egress traffic through designated gateway nodes using policy-based routing.

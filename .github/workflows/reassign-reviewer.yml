@@ -27,7 +27,7 @@ jobs:
       github.event.issue.pull_request &&
       github.event.comment.user.type != 'Bot' &&
       contains(github.event.comment.body, '/assign-reviewer')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       # Use the same app token the repo uses for privileged PR automation:
       # requesting an org team as a reviewer needs more than the default

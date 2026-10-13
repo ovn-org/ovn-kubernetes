@@ -552,12 +552,12 @@ docker_create_uplink_interface() {
 disable_bridge_netfilter() {
   echo "disabling bridge netfilter for KIND container bridge networks"
 
-  sudo modprobe br_netfilter || true
-  for sysctl_name in \
-    net.bridge.bridge-nf-call-iptables \
-    net.bridge.bridge-nf-call-ip6tables; do
-    if sysctl -n "${sysctl_name}" >/dev/null 2>&1; then
-      sudo sysctl -w "${sysctl_name}=0"
+  local key current
+  [ -e /proc/sys/net/bridge/bridge-nf-call-iptables ] || sudo modprobe br_netfilter || true
+  for key in bridge-nf-call-iptables bridge-nf-call-ip6tables; do
+    current=$(cat "/proc/sys/net/bridge/${key}" 2>/dev/null) || continue
+    if [ "${current}" != 0 ]; then
+      sudo sysctl -w "net.bridge.${key}=0"
     fi
   done
 }

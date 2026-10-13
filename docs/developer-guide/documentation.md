@@ -8,7 +8,7 @@ become hard to maintain such code.
 All OVN-Kubernetes docs are kept under the `docs/` folder in the main path.
 There are specific folders such as `features` and `developer-guide` where
 you can add your commit against. These simple `.md` files are referred from
-the navigation tile in `mkdocs.yaml` file which is what is used to
+the navigation tile in `mkdocs.yml` file which is what is used to
 build our [website](https://ovn-kubernetes.io/).
 
 As a developer and contributor to this project; it is recommended that you
@@ -26,7 +26,7 @@ so that they remain relevant. Open a commit adding it to our `docs/design` folde
 
 * **Feature Docs**: If your enhancement proposal has merged; next step is to
 implement that feature. As part of the main implementation PR we mandate adding a
-feature documentation commit. See [here](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/master/docs/features/template.md)
+feature documentation commit. See [feature documentation template](../features/template.md)
 for how a feature documentation should be done. Open a commit adding it to our
 `docs/features` folder.
 
@@ -40,7 +40,7 @@ feel free to write it. If you are unsure where this should be placed; reach out 
 
 * **Blog Posts**: Are you an end-user of OVN-Kubernetes? Is there something you wish to share with
 the community about your awesome use cases and how you used our CNI to solve your problems? We
-welcome blog post contributions from all! See [here](https://ovn-kubernetes.io/blog/) for details.
+welcome blog post contributions from all! See [OVN-Kubernetes blog](https://ovn-kubernetes.io/blog/) for details.
 Open a commit adding your post to `docs/blog/posts/`. Each post must include
 YAML front matter with a `date` and `authors` list, for example:
 ```yaml

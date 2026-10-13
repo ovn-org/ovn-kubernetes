@@ -6,17 +6,17 @@ OVN K8s CNI in a DPU-Accelerated environment is deployed using two Kubernetes cl
 
 DPUs in the DPU cluster will watch DPU Host cluster for K8s resources such as Pods, Namespaces, NetworkAttachmentDefinitions, Services, and Endpoints and act on updates to those resources. Hence they require credentials to access DPU host cluster. Each DPU will have a setting denoting the DPU host to which it is associated.
 
-Refer [DPU support](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/master/docs/features/hardware-offload/dpu-support.md) for more details on the setup.
+Refer [DPU support](../features/hardware-offload/dpu-support.md) for more details on the setup.
 
 ## DPU simulation
 
 The SR-IOV, OVS offload, and bridge examples below assume **hardware** DPUs and DPU hosts with switchdev-capable DPU NICs. For **simulated** DPU topologies (for example Kind/VM cluster used in development and CI), the same two-cluster layout and Helm charts apply, but you should enable **`global.simulateDpu: true`** on the DPU and DPU-host ovnkube workloads so the containers pass **`--simulate-dpu`**. That selects the simulated DPU operations backend (representor naming, device IDs, and discovery) instead of real SR-IOV/switchdev metadata.
 
-For a full description of the flag and when it applies, see the **Simulated DPU (`simulate-dpu`)** subsection in [DPU support](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/master/docs/features/hardware-offload/dpu-support.md). On the DPU host, if the host-gateway representor is not auto-discovered, set **`global.dpuHostGatewayRepresentorInterface`** as documented under [DPU host gateway representor interface](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/master/docs/features/hardware-offload/dpu-gateway-interface.md#dpu-host-gateway-representor-interface).
+For a full description of the flag and when it applies, see the **Simulated DPU (`simulate-dpu`)** subsection in [DPU support](../features/hardware-offload/dpu-support.md). On the DPU host, if the host-gateway representor is not auto-discovered, set **`global.dpuHostGatewayRepresentorInterface`** as documented under [DPU host gateway representor interface](../features/hardware-offload/dpu-gateway-interface.md#dpu-host-gateway-representor-interface).
 
 ## SR-IOV settings on DPU Host
 
-Follow [OVS Acceleration with Kernel datapath](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/master/docs/features/hardware-offload/ovs-kernel.md) or [OVS Acceleration with DOCA datapath](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/master/docs/features/hardware-offload/ovs-doca.md) to enable Open vSwitch hardware offloading feature on DPU hosts.
+Follow [OVS Acceleration with Kernel datapath](../features/hardware-offload/ovs-kernel.md) or [OVS Acceleration with DOCA datapath](../features/hardware-offload/ovs-doca.md) to enable Open vSwitch hardware offloading feature on DPU hosts.
 
 A single VF net-device or a group of VF net-devices (configured as SR-IOV device plugin resource pool) need to be setup separately to create management port(s).
 
@@ -29,7 +29,7 @@ k8s.ovn.org/dpu-host=
 ```
 
 ## Launching OVN K8s DPU Host cluster using helm
-OVN K8s CNI can be deployed using helm charts provided under [OVN K8s Helm Charts](https://github.com/ovn-kubernetes/ovn-kubernetes/tree/master/helm/ovn-kubernetes). Refer [Launching OVN-Kubernetes using Helm Charts](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/master/docs/installation/launching-ovn-kubernetes-with-helm.md) for general instructions on using helm charts and explanation of common values used in various subcharts.
+OVN-Kubernetes CNI can be deployed using helm charts provided under [OVN-Kubernetes Helm Charts](https://github.com/ovn-kubernetes/ovn-kubernetes/tree/master/helm/ovn-kubernetes). Refer [Launching OVN-Kubernetes using Helm Charts](launching-ovn-kubernetes-with-helm.md) for general instructions on using helm charts and explanation of common values used in various subcharts.
 
 For DPU Hosts cluster use values-single-node-zone.yaml by setting the following fields as specified. The other fields in the file can be set as needed.
 

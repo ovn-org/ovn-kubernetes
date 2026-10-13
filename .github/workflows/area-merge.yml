@@ -20,7 +20,7 @@ jobs:
        github.event.comment.user.type != 'Bot' &&
        startsWith(github.event.comment.body, '/area-maintainer-approved')) ||
       github.event_name == 'check_suite'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - name: Generate merge app token
         id: merge-app-token-generator
