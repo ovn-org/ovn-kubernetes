@@ -817,6 +817,89 @@ func provisionUplinkWithActiveCUDN(
 	}
 }
 
+// twoDynamicUplinkNodes returns the two nodes a Dynamic UDN Uplink spec runs
+// on, skipping the spec when fewer are available. In the split DPU setup
+// only DPU host nodes qualify.
+func twoDynamicUplinkNodes(ctx context.Context, f *framework.Framework) []corev1.Node {
+	ginkgo.GinkgoHelper()
+
+	schedulableNodes, err := e2enode.GetReadySchedulableNodes(ctx, f.ClientSet)
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	nodes := schedulableNodes.Items
+	if isDPUUplinkE2E() {
+		nodes = filterNodesByLabel(nodes, uplinkDPUHostNodeLabel)
+	}
+	if len(nodes) < 2 {
+		e2eskipper.Skipf("test requires at least two ready schedulable nodes")
+	}
+	return nodes[:2]
+}
+
+// provisionDynamicUplink creates an Uplink named name on the nodes and
+// returns its name, its bridge and the FRR neighbor addresses per node. On
+// regular KIND it also creates the Uplink network and bridge, which the DPU
+// simulator provides.
+func provisionDynamicUplink(
+	ctx context.Context,
+	f *framework.Framework,
+	ictx infraapi.Context,
+	ipFamilySet sets.Set[utilnet.IPFamily],
+	name string,
+	nodes []corev1.Node,
+) (string, string, map[string][]string) {
+	ginkgo.GinkgoHelper()
+
+	var nodeIfaces map[string]infraapi.NetworkInterface
+	frrNeighborIPsByNode := map[string][]string{}
+	var bridgeName, hostInterfaceName string
+	if isDPUUplinkE2E() {
+		nodeIfaces = collectDPUHostUplinkInterfaces(nodes)
+		bridgeName = os.Getenv(uplinkDPUExpectedBridgeEnv)
+		gomega.Expect(bridgeName).NotTo(gomega.BeEmpty(), "expected the DPU Uplink bridge name")
+
+		dpuGatewayNetwork, err := infraprovider.Get().GetNetwork(os.Getenv(uplinkDPUGatewayNetworkEnv))
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		frrIface, err := infraprovider.Get().GetExternalContainerNetworkInterface(
+			infraapi.ExternalContainer{Name: routerContainerName},
+			dpuGatewayNetwork,
+		)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		frrNeighborIPs := matchIPStringsByIPFamilySet([]string{frrIface.IPv4, frrIface.IPv6}, ipFamilySet)
+		gomega.Expect(frrNeighborIPs).NotTo(gomega.BeEmpty(), "expected an external FRR address on the DPU Uplink network")
+		for _, node := range nodes {
+			frrNeighborIPsByNode[node.Name] = frrNeighborIPs
+		}
+	} else {
+		uplinkAlloc, err := allocators.AllocateBGP(f, ictx)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		_, nodeIfaces = setupUplinkNetwork(
+			ictx,
+			nodes,
+			ipFamilySet,
+			name,
+			[]string{uplinkAlloc.BGPPeerSubnet, uplinkAlloc.BGPPeerSubnet6},
+		)
+		bridgeName = uplinkBridgeName(name)
+		hostInterfaceName = bridgeName
+		gomega.Expect(configureUplinkBridge(ctx, f, ictx, bridgeName, nodeIfaces)).To(gomega.Succeed())
+		for _, node := range nodes {
+			iface := nodeIfaces[node.Name]
+			ipv4Gateway, err := interfaceGateway(iface.IPv4Gateway, iface.IPv4, iface.IPv4Prefix)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			ipv6Gateway, err := interfaceGateway(iface.IPv6Gateway, iface.IPv6, iface.IPv6Prefix)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			frrNeighborIPsByNode[node.Name] = matchIPStringsByIPFamilySet(
+				[]string{ipv4Gateway, ipv6Gateway},
+				ipFamilySet,
+			)
+		}
+	}
+
+	createUplink(ctx, f, ictx, name, nodes, nodeIfaces, hostInterfaceName)
+	waitForUplinkStatesResolved(ctx, f, name, bridgeName, nodes)
+	return name, bridgeName, frrNeighborIPsByNode
+}
+
 var _ = ginkgo.Describe("Network Segmentation Uplink DPU VF lifecycle", feature.NetworkSegmentation, feature.Uplink, func() {
 	f := wrappedTestFramework("uplink-dpu-vf")
 	f.SkipNamespaceCreation = true
@@ -1612,66 +1695,8 @@ var _ = ginkgo.Describe("Uplink route advertisements with Dynamic UDN allocation
 			e2eskipper.Skipf("test requires Dynamic UDN allocation")
 		}
 
-		schedulableNodes, err := e2enode.GetReadySchedulableNodes(ctx, f.ClientSet)
-		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		availableNodes := schedulableNodes.Items
-		if isDPUUplinkE2E() {
-			availableNodes = filterNodesByLabel(availableNodes, uplinkDPUHostNodeLabel)
-		}
-		if len(availableNodes) < 2 {
-			e2eskipper.Skipf("test requires at least two ready schedulable nodes")
-		}
-		nodes := availableNodes[:2]
-
-		var nodeIfaces map[string]infraapi.NetworkInterface
-		frrNeighborIPsByNode := map[string][]string{}
-		var bridgeName, hostInterfaceName string
-		if isDPUUplinkE2E() {
-			nodeIfaces = collectDPUHostUplinkInterfaces(nodes)
-			bridgeName = os.Getenv(uplinkDPUExpectedBridgeEnv)
-			gomega.Expect(bridgeName).NotTo(gomega.BeEmpty(), "expected the DPU Uplink bridge name")
-
-			dpuGatewayNetwork, err := infraprovider.Get().GetNetwork(os.Getenv(uplinkDPUGatewayNetworkEnv))
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			frrIface, err := infraprovider.Get().GetExternalContainerNetworkInterface(
-				infraapi.ExternalContainer{Name: routerContainerName},
-				dpuGatewayNetwork,
-			)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			frrNeighborIPs := matchIPStringsByIPFamilySet([]string{frrIface.IPv4, frrIface.IPv6}, ipFamilySet)
-			gomega.Expect(frrNeighborIPs).NotTo(gomega.BeEmpty(), "expected an external FRR address on the DPU Uplink network")
-			for _, node := range nodes {
-				frrNeighborIPsByNode[node.Name] = frrNeighborIPs
-			}
-		} else {
-			uplinkAlloc, err := allocators.AllocateBGP(f, ictx)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			_, nodeIfaces = setupUplinkNetwork(
-				ictx,
-				nodes,
-				ipFamilySet,
-				"updyn"+testSuffix,
-				[]string{uplinkAlloc.BGPPeerSubnet, uplinkAlloc.BGPPeerSubnet6},
-			)
-			bridgeName = uplinkBridgeName("updyn" + testSuffix)
-			hostInterfaceName = bridgeName
-			gomega.Expect(configureUplinkBridge(ctx, f, ictx, bridgeName, nodeIfaces)).To(gomega.Succeed())
-			for _, node := range nodes {
-				iface := nodeIfaces[node.Name]
-				ipv4Gateway, err := interfaceGateway(iface.IPv4Gateway, iface.IPv4, iface.IPv4Prefix)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				ipv6Gateway, err := interfaceGateway(iface.IPv6Gateway, iface.IPv6, iface.IPv6Prefix)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				frrNeighborIPsByNode[node.Name] = matchIPStringsByIPFamilySet(
-					[]string{ipv4Gateway, ipv6Gateway},
-					ipFamilySet,
-				)
-			}
-		}
-
-		uplinkName := "updyn" + testSuffix
-		createUplink(ctx, f, ictx, uplinkName, nodes, nodeIfaces, hostInterfaceName)
-		waitForUplinkStatesResolved(ctx, f, uplinkName, bridgeName, nodes)
+		nodes := twoDynamicUplinkNodes(ctx, f)
+		uplinkName, bridgeName, frrNeighborIPsByNode := provisionDynamicUplink(ctx, f, ictx, ipFamilySet, "updyn"+testSuffix, nodes)
 
 		type networkOnNode struct {
 			name      string
@@ -4367,6 +4392,23 @@ func createUplinkCUDN(
 	networkLabels map[string]string,
 	uplinkName string,
 ) error {
+	return createUplinkCUDNForNamespaces(ctx, f, ictx, []*corev1.Namespace{namespace}, name, networkSpec, networkLabels, uplinkName)
+}
+
+func createUplinkCUDNForNamespaces(
+	ctx context.Context,
+	f *framework.Framework,
+	ictx infraapi.Context,
+	namespaces []*corev1.Namespace,
+	name string,
+	networkSpec *udnv1.NetworkSpec,
+	networkLabels map[string]string,
+	uplinkName string,
+) error {
+	namespaceNames := make([]interface{}, 0, len(namespaces))
+	for _, namespace := range namespaces {
+		namespaceNames = append(namespaceNames, namespace.Name)
+	}
 	networkSpecMap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(networkSpec)
 	if err != nil {
 		return fmt.Errorf("failed to convert network spec to unstructured: %w", err)
@@ -4389,7 +4431,7 @@ func createUplinkCUDN(
 				"matchExpressions": []interface{}{map[string]interface{}{
 					"key":      "kubernetes.io/metadata.name",
 					"operator": "In",
-					"values":   []interface{}{namespace.Name},
+					"values":   namespaceNames,
 				}},
 			},
 			"network": networkSpecMap,
