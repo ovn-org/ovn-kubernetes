@@ -725,7 +725,11 @@ evpn-blue   True       Accepted
 
 If `Accepted` is `False`, check that the `frrConfigurationSelector` matches an
 existing `FRRConfiguration` and that it contains at least a default VRF router
-with neighbors.
+with neighbors. Also check the condition message: the controller rejects a
+selected network whose EVPN VNI is outside 1-16777215 or whose route target is
+not of the form `ASN:NN`, `A.B.C.D:NN` or `*:NN`, and deletes the
+`FRRConfiguration` objects generated for that `RouteAdvertisements` before
+input validation existed.
 
 ### Check CUDN status
 
