@@ -520,10 +520,10 @@ spec:
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 			defer cancel()
 
-			By("checking if UDN CRD is available")
-			_, err := e2ekubectl.RunKubectl("", "get", "crd", "userdefinednetworks.k8s.ovn.org", "--no-headers")
-			if err != nil {
-				Skip("UserDefinedNetwork CRD not available — network segmentation not enabled")
+			// The UDN CRDs are installed on every cluster, so only the deployment
+			// configuration tells whether ovnkube actually reconciles them.
+			if !deploymentconfig.Get().IsConfigurationEnabled(deploymentconfigapi.NetworkSegmentationConfig) {
+				Skip("network segmentation is not enabled")
 			}
 
 			By("creating a namespace with UDN label")
@@ -556,7 +556,7 @@ spec:
 			DeferCleanup(cleanup)
 
 			By("waiting for UDN to be ready")
-			Eventually(userDefinedNetworkReadyFunc(fr.DynamicClient, udnNs.Name, "observ-udn-psample"),
+			Eventually(userDefinedNetworkReadyFunc(ctx, fr.DynamicClient, udnNs.Name, "observ-udn-psample"),
 				10*time.Second, time.Second).Should(Succeed())
 
 			By("creating a UDN pod to trigger isolation ACLs")

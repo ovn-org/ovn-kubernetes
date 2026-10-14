@@ -14,6 +14,9 @@ const (
 	L3UDNMultiSubnetConfig Config = "L3UDNMultiSubnet"
 	// ObservabilityConfig indicates whether OVN observability (sampling) is enabled
 	ObservabilityConfig Config = "Observability"
+	// NetworkSegmentationConfig indicates whether user defined network segmentation is enabled.
+	// The UDN CRDs are always installed, so their presence cannot be used to detect it.
+	NetworkSegmentationConfig Config = "NetworkSegmentation"
 )
 
 type ImageID int

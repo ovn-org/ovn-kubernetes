@@ -112,6 +112,8 @@ func (k *kind) IsConfigurationEnabled(config api.Config) bool {
 		return true
 	case api.ObservabilityConfig:
 		return os.Getenv("OVN_OBSERV_ENABLE") == "true"
+	case api.NetworkSegmentationConfig:
+		return os.Getenv("ENABLE_NETWORK_SEGMENTATION") == "true"
 	default:
 		return false
 	}
