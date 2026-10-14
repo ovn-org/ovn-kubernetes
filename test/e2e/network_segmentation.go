@@ -32,6 +32,7 @@ import (
 
 	admissionv1 "k8s.io/api/admissionregistration/v1"
 	v1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -40,8 +41,11 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/rand"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/client-go/dynamic"
 	clientset "k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/kubectl/pkg/util/podutils"
 	"k8s.io/kubernetes/test/e2e/framework"
@@ -1785,6 +1789,230 @@ spec:
 		}, 15*time.Second, time.Second).Should(Succeed())
 	}, Entry("UDN", false), Entry("CUDN", true))
 
+	It("when foreign NAD exists, UserDefinedNetwork status should report not-ready", func() {
+		const nadName = "udn-network"
+		ns := f.Namespace.Name
+
+		By("create primary NAD without UDN owner reference")
+		foreignNAD := generateNAD(newNetworkAttachmentConfig(networkAttachmentConfigParams{
+			role:        "primary",
+			topology:    "layer3",
+			name:        nadName,
+			networkName: nadName,
+			cidr:        primaryLayer3MultiCIDRs(),
+		}), f.ClientSet)
+		createCtx, createCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer createCancel()
+		_, err := nadClient.NetworkAttachmentDefinitions(ns).Create(createCtx, foreignNAD, metav1.CreateOptions{})
+		Expect(err).NotTo(HaveOccurred(), "create foreign NAD")
+		DeferCleanup(func() error {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			err := nadClient.NetworkAttachmentDefinitions(ns).Delete(ctx, nadName, metav1.DeleteOptions{})
+			if err != nil && !kerrors.IsNotFound(err) {
+				return fmt.Errorf("delete foreign NAD %s/%s: %w", ns, nadName, err)
+			}
+			return nil
+		})
+
+		By("create primary UDN CR with the same name as the foreign NAD")
+		cleanup, err := createManifest(ns, newPrimaryUserDefinedNetworkManifest(cs, nadName))
+		DeferCleanup(cleanup)
+		Expect(err).NotTo(HaveOccurred(), "create primary UDN manifest")
+		DeferCleanup(func() error {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			err := f.DynamicClient.Resource(udnGVR).Namespace(ns).Delete(ctx, nadName, metav1.DeleteOptions{})
+			if err != nil && !kerrors.IsNotFound(err) {
+				return fmt.Errorf("delete UDN %s/%s: %w", ns, nadName, err)
+			}
+			if err := waitForUDNObjectDeleted(f.DynamicClient, ns, nadName); err != nil {
+				return fmt.Errorf("wait for UDN %s/%s deletion: %w", ns, nadName, err)
+			}
+			return nil
+		})
+
+		By("verify UDN status reports foreign NAD conflict")
+		expectedMessage := fmt.Sprintf("foreign NetworkAttachmentDefinition with the desired name already exist [%s/%s]", ns, nadName)
+		Eventually(func(g Gomega) []metav1.Condition {
+			conditionsJSON, err := e2ekubectl.RunKubectl(ns, "get", "userdefinednetwork", nadName, "-o", "jsonpath={.status.conditions}")
+			g.Expect(err).NotTo(HaveOccurred(), "get UDN status conditions")
+			var actualConditions []metav1.Condition
+			g.Expect(json.Unmarshal([]byte(conditionsJSON), &actualConditions)).To(Succeed(), "unmarshal UDN status conditions")
+			return normalizeConditions(actualConditions)
+		}, 5*time.Second, 1*time.Second).Should(ConsistOf(metav1.Condition{
+			Type:    "NetworkCreated",
+			Status:  metav1.ConditionFalse,
+			Reason:  "SyncError",
+			Message: expectedMessage,
+		}), "UDN should report foreign NAD conflict")
+
+		By("delete foreign NAD")
+		Eventually(func() error {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			err := nadClient.NetworkAttachmentDefinitions(ns).Delete(ctx, nadName, metav1.DeleteOptions{})
+			if err != nil && !kerrors.IsNotFound(err) {
+				return fmt.Errorf("delete foreign NAD %s/%s: %w", ns, nadName, err)
+			}
+			return nil
+		}, 30*time.Second, 1*time.Second).Should(Succeed(), "delete foreign NAD")
+
+		By("verify UDN reconciles and creates NAD owned by the UDN")
+		Eventually(func() error {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if err := userDefinedNetworkReadyFunc(ctx, f.DynamicClient, ns, nadName)(); err != nil {
+				return fmt.Errorf("wait for UDN %s/%s to become ready: %w", ns, nadName, err)
+			}
+			return nil
+		}, 30*time.Second, 1*time.Second).Should(Succeed(), "wait for UDN to become ready")
+
+		By("verify NAD is created and owned by the UDN")
+		assertNADOwnedByUserDefinedNetwork(f.DynamicClient, nadClient, ns, nadName)
+	})
+
+	Context("RBAC for UserDefinedNetwork", func() {
+		It("should allow users with namespace UDN permissions to create primary UDN", func() {
+			const (
+				saName   = "udn-manager"
+				roleName = "udn-manager"
+				udnName  = "l3-network"
+			)
+			ns := f.Namespace.Name
+
+			By("create service account, Role, and RoleBinding")
+			createCtx, createCancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer createCancel()
+			_, err := cs.CoreV1().ServiceAccounts(ns).Create(createCtx, &v1.ServiceAccount{
+				ObjectMeta: metav1.ObjectMeta{Name: saName, Namespace: ns},
+			}, metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred(), "create service account")
+			DeferCleanup(func() error {
+				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cancel()
+				err := cs.CoreV1().ServiceAccounts(ns).Delete(ctx, saName, metav1.DeleteOptions{})
+				if err != nil && !kerrors.IsNotFound(err) {
+					return fmt.Errorf("delete service account %s/%s: %w", ns, saName, err)
+				}
+				return nil
+			})
+
+			_, err = cs.RbacV1().Roles(ns).Create(createCtx, &rbacv1.Role{
+				ObjectMeta: metav1.ObjectMeta{Name: roleName, Namespace: ns},
+				Rules: []rbacv1.PolicyRule{{
+					APIGroups: []string{"k8s.ovn.org"},
+					Resources: []string{"userdefinednetworks"},
+					Verbs:     []string{"get", "list", "watch", "create"},
+				}},
+			}, metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred(), "create Role")
+			DeferCleanup(func() error {
+				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cancel()
+				err := cs.RbacV1().Roles(ns).Delete(ctx, roleName, metav1.DeleteOptions{})
+				if err != nil && !kerrors.IsNotFound(err) {
+					return fmt.Errorf("delete Role %s/%s: %w", ns, roleName, err)
+				}
+				return nil
+			})
+
+			_, err = cs.RbacV1().RoleBindings(ns).Create(createCtx, &rbacv1.RoleBinding{
+				ObjectMeta: metav1.ObjectMeta{Name: roleName, Namespace: ns},
+				Subjects: []rbacv1.Subject{{
+					Kind:      rbacv1.ServiceAccountKind,
+					Name:      saName,
+					Namespace: ns,
+				}},
+				RoleRef: rbacv1.RoleRef{
+					APIGroup: rbacv1.GroupName,
+					Kind:     "Role",
+					Name:     roleName,
+				},
+			}, metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred(), "create RoleBinding")
+			DeferCleanup(func() error {
+				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cancel()
+				err := cs.RbacV1().RoleBindings(ns).Delete(ctx, roleName, metav1.DeleteOptions{})
+				if err != nil && !kerrors.IsNotFound(err) {
+					return fmt.Errorf("delete RoleBinding %s/%s: %w", ns, roleName, err)
+				}
+				return nil
+			})
+
+			impersonatedConfig := rest.CopyConfig(f.ClientConfig())
+			impersonatedConfig.Impersonate = rest.ImpersonationConfig{
+				UserName: fmt.Sprintf("system:serviceaccount:%s:%s", ns, saName),
+			}
+			impersonatedClient, err := dynamic.NewForConfig(impersonatedConfig)
+			Expect(err).NotTo(HaveOccurred(), "create impersonated dynamic client")
+
+			By("create primary UDN as service account user")
+			udnManifest := newPrimaryUserDefinedNetworkManifest(cs, udnName)
+			jsonManifest, err := yaml.ToJSON([]byte(udnManifest))
+			Expect(err).NotTo(HaveOccurred(), "convert UDN manifest to JSON")
+			udnObj := &unstructured.Unstructured{}
+			Expect(json.Unmarshal(jsonManifest, &udnObj.Object)).To(Succeed(), "parse UDN manifest JSON")
+
+			Eventually(func() error {
+				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cancel()
+				_, err := impersonatedClient.Resource(udnGVR).Namespace(ns).Create(ctx, udnObj, metav1.CreateOptions{})
+				if err != nil && kerrors.IsAlreadyExists(err) {
+					return nil
+				}
+				if err != nil {
+					return fmt.Errorf("create UDN %s/%s as service account: %w", ns, udnName, err)
+				}
+				return nil
+			}, 30*time.Second, 2*time.Second).Should(Succeed(), "create primary UDN as service account user")
+			DeferCleanup(func() error {
+				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cancel()
+				err := f.DynamicClient.Resource(udnGVR).Namespace(ns).Delete(ctx, udnName, metav1.DeleteOptions{})
+				if err != nil && !kerrors.IsNotFound(err) {
+					return fmt.Errorf("delete UDN %s/%s: %w", ns, udnName, err)
+				}
+				if err := waitForUDNObjectDeleted(f.DynamicClient, ns, udnName); err != nil {
+					return fmt.Errorf("wait for UDN %s/%s deletion: %w", ns, udnName, err)
+				}
+				return nil
+			})
+
+			By("verify UDN is ready")
+			Eventually(func() error {
+				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cancel()
+				if err := userDefinedNetworkReadyFunc(ctx, f.DynamicClient, ns, udnName)(); err != nil {
+					return fmt.Errorf("wait for UDN %s/%s to become ready: %w", ns, udnName, err)
+				}
+				return nil
+			}, 30*time.Second, 1*time.Second).Should(Succeed(), "wait for UDN to become ready")
+
+			By("verify NAD is created")
+			assertNADOwnedByUserDefinedNetwork(f.DynamicClient, nadClient, ns, udnName)
+
+			By("verify update is denied without update permission")
+			getUDNCtx, getUDNCancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer getUDNCancel()
+			currentUDN, err := impersonatedClient.Resource(udnGVR).Namespace(ns).Get(getUDNCtx, udnName, metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred(), "get UDN as service account user")
+			updateCtx, updateCancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer updateCancel()
+			_, err = impersonatedClient.Resource(udnGVR).Namespace(ns).Update(updateCtx, currentUDN, metav1.UpdateOptions{})
+			Expect(err).To(HaveOccurred(), "update UDN without update permission should fail")
+			Expect(kerrors.IsForbidden(err)).To(BeTrue(), "update UDN without update permission should be forbidden")
+
+			By("verify delete is denied without delete permission")
+			deleteCtx, deleteCancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer deleteCancel()
+			err = impersonatedClient.Resource(udnGVR).Namespace(ns).Delete(deleteCtx, udnName, metav1.DeleteOptions{})
+			Expect(err).To(HaveOccurred(), "delete UDN without delete permission should fail")
+			Expect(kerrors.IsForbidden(err)).To(BeTrue(), "delete UDN without delete permission should be forbidden")
+		})
+	})
+
 	Context("ClusterUserDefinedNetwork CRD Controller", func() {
 		const clusterUserDefinedNetworkResource = "clusteruserdefinednetwork"
 
@@ -3089,6 +3317,40 @@ func generateLayer3Subnets(cidrs string) []string {
 	return subnets
 }
 
+// assertNADOwnedByUserDefinedNetwork verifies the NAD is owned by the named UDN, including
+// matching owner reference UID so the test does not accept a stale owner ref with the same name.
+func assertNADOwnedByUserDefinedNetwork(dynamicClient dynamic.Interface, nads nadclient.K8sCniCncfIoV1Interface, namespace, udnName string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	udn, err := dynamicClient.Resource(udnGVR).Namespace(namespace).Get(ctx, udnName, metav1.GetOptions{})
+	Expect(err).NotTo(HaveOccurred(), "get UDN for NAD owner reference verification")
+	nad, err := nads.NetworkAttachmentDefinitions(namespace).Get(ctx, udnName, metav1.GetOptions{})
+	Expect(err).NotTo(HaveOccurred(), "get NAD created for UDN")
+	Expect(nad.OwnerReferences).To(HaveLen(1), "NAD should have a single owner reference")
+	Expect(nad.OwnerReferences[0].Kind).To(Equal("UserDefinedNetwork"), "NAD should be owned by UserDefinedNetwork")
+	Expect(nad.OwnerReferences[0].Name).To(Equal(udnName), "NAD owner reference should match UDN name")
+	Expect(nad.OwnerReferences[0].UID).To(Equal(udn.GetUID()), "NAD owner reference UID should match UDN UID")
+}
+
+// waitForUDNObjectDeleted polls until the namespace-scoped UserDefinedNetwork is no longer present.
+func waitForUDNObjectDeleted(client dynamic.Interface, namespace, name string) error {
+	if err := wait.PollImmediate(1*time.Second, 30*time.Second, func() (bool, error) {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_, err := client.Resource(udnGVR).Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
+		if kerrors.IsNotFound(err) {
+			return true, nil
+		}
+		if err != nil {
+			return false, fmt.Errorf("get UDN %s/%s while waiting for deletion: %w", namespace, name, err)
+		}
+		return false, nil
+	}); err != nil {
+		return fmt.Errorf("wait for UDN %s/%s deletion: %w", namespace, name, err)
+	}
+	return nil
+}
+
 // userDefinedNetworkReadyFunc returns a function that checks for the NetworkCreated condition in the provided udn
 func userDefinedNetworkReadyFunc(ctx context.Context, client dynamic.Interface, namespace, name string) func() error {
 	return networkReadyFunc(ctx, client.Resource(udnGVR).Namespace(namespace), name)
@@ -3099,6 +3361,7 @@ func clusterUserDefinedNetworkReadyFunc(ctx context.Context, client dynamic.Inte
 	return networkReadyFunc(ctx, client.Resource(clusterUDNGVR), name)
 }
 
+// networkReadyFunc returns a poller that succeeds when the network reports NetworkCreated=True.
 func networkReadyFunc(ctx context.Context, client dynamic.ResourceInterface, name string) func() error {
 	return func() error {
 		cUDN, err := client.Get(ctx, name, metav1.GetOptions{}, "status")
