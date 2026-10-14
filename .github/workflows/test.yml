@@ -539,7 +539,7 @@ jobs:
     name: e2e
     runs-on: ubuntu-24.04
     # 30 mins for kind, 180 mins for control-plane tests, 10 minutes for all other steps
-    timeout-minutes: 220
+    timeout-minutes: ${{ matrix.target == 'kv-live-migration' && 260 || 220 }}
     strategy:
       fail-fast: false
       matrix:
@@ -798,7 +798,7 @@ jobs:
       # set 3 hours for control-plane tests as these might take a while
       # give 10m extra to give ginkgo chance to timeout before github so that we
       # get its output
-      timeout-minutes: ${{ startsWith(matrix.target, 'bgp') && 190 || matrix.target == 'evpn' && 190 || matrix.target == 'control-plane' && 190 || matrix.target == 'external-gateway' && 190 || startsWith(matrix.target, 'network-segmentation') && 190 || 130 }}
+      timeout-minutes: ${{ matrix.target == 'kv-live-migration' && 190 || startsWith(matrix.target, 'bgp') && 190 || matrix.target == 'evpn' && 190 || matrix.target == 'control-plane' && 190 || matrix.target == 'external-gateway' && 190 || startsWith(matrix.target, 'network-segmentation') && 190 || 130 }}
       run: |
         if [ "${{ matrix.target }}" == "multi-homing" ]; then
           make -C test control-plane WHAT="Multi Homing"
@@ -809,10 +809,10 @@ jobs:
         elif [ "${{ matrix.target }}" == "external-gateway" ]; then
           make -C test control-plane WHAT="External Gateway"
         elif [ "${{ matrix.target }}" == "kv-live-migration" ]; then
-          # the DHCP IPAM suite (dhcp_ipam.go) rides this lane: it is the one
-          # provisioned with the dhcp CNI plugin (KIND_INSTALL_PLUGINS),
-          # kubevirt and NetworkQoS
-          make -C test control-plane WHAT="Kubevirt Virtual Machines|Localnet DHCP IPAM"
+          # Temporary debug PR: fresh VM/namespace for each repetition; stop
+          # on the first failure instead of hiding it behind a retry.
+          KUBEVIRT_MIGRATION_DEBUG=true FLAKE_ATTEMPTS=1 E2E_REPEAT=19 TEST_TIMEOUT=180 \
+            make -C test control-plane WHAT="Kubevirt Virtual Machines with default pod network when live migration with pre-copy succeeds, should keep connectivity"
         elif [[ "${{ matrix.target }}" == network-segmentation* ]]; then
           make -C test control-plane WHAT="Network Segmentation"
           make -C test control-plane WHAT="ClusterNetworkConnect"
@@ -846,6 +846,14 @@ jobs:
       if: always()
       run: |
         ./contrib/export-kind-logs.sh
+        if [ "${{ matrix.target }}" == "kv-live-migration" ]; then
+          mkdir -p /tmp/kind/logs/migration-debug
+          cp -a test/_artifacts/. /tmp/kind/logs/migration-debug/ || true
+          for node in $(kind get nodes --name "${KIND_CLUSTER_NAME}"); do
+            mkdir -p "/tmp/kind/logs/migration-debug/$node"
+            docker cp "$node:/tmp/kubevirt-migration-debug/." "/tmp/kind/logs/migration-debug/$node/" || true
+          done
+        fi
         if [ -n "${TRAFFIC_FLOW_TESTS}" ]; then
             mv -v /tmp/{,kind/logs/}traffic_flow_test_result.json ||:
         fi

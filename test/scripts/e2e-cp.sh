@@ -310,14 +310,23 @@ pushd e2e
 
 go mod download
 
-if [ "$ENABLE_EVPN" = true ] && [[ "${WHAT}" != "${KV_LIVE_MIGRATION_TESTS}"* ]]; then
+if [ "${E2E_REPEAT:-0}" -gt 0 ] || { [ "$ENABLE_EVPN" = true ] && [[ "${WHAT}" != "${KV_LIVE_MIGRATION_TESTS}"* ]]; }; then
   # EVPN tests are parallel-safe (unique per-test resource names, randomized
   # subnets). Use the ginkgo CLI so that -procs=3 spawns 3 coordinated worker
   # processes — one per DescribeTable entry.  go test cannot drive Ginkgo
   # parallelism directly; only the ginkgo binary can start the sync server and
   # fan out the worker processes.
-  ginkgo run \
-        -procs=3 \
+  runner=(ginkgo)
+  procs=3
+  if [ "${E2E_REPEAT:-0}" -gt 0 ]; then
+    # Repetition is a CLI option, not a go test/Ginkgo suite flag. Use
+    # this module's CLI version and run migration attempts serially.
+    runner=(go run -mod=mod github.com/onsi/ginkgo/v2/ginkgo)
+    procs=1
+  fi
+  "${runner[@]}" run \
+        -procs="$procs" \
+        --repeat="${E2E_REPEAT:-0}" \
         -v \
         --focus="${FOCUS:-.}" \
         --fail-on-empty \

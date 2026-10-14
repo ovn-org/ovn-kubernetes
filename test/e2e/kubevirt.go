@@ -444,6 +444,10 @@ var _ = Describe("Kubevirt Virtual Machines", feature.VirtualMachineSupport, fun
 
 		checkIperfTraffic = func(iperfLogFile string, execFn func(cmd string) (string, error), timeout time.Duration, stage string) {
 			GinkgoHelper()
+			// In debug runs, reject stale output and isolated recovery bursts on
+			// IPv6 ingress: require three fresh nonzero reporting intervals.
+			debugRecovery := os.Getenv("KUBEVIRT_MIGRATION_DEBUG") == "true" && strings.Contains(iperfLogFile, "ingress_test_") && strings.Contains(iperfLogFile, ":")
+			lastSeen, initialized, goodIntervals := "", false, 0
 			// Check the last line eventually show traffic flowing
 			Eventually(func() (string, error) {
 				iperfLog, err := execFn("cat " + iperfLogFile)
@@ -459,6 +463,21 @@ var _ = Describe("Kubevirt Virtual Machines", feature.VirtualMachineSupport, fun
 					return "", nil
 				}
 				lastIperfLogLine := iperfLogLines[len(iperfLogLines)-1]
+				if debugRecovery {
+					if !initialized {
+						lastSeen, initialized = lastIperfLogLine, true
+					} else if lastSeen != lastIperfLogLine {
+						lastSeen = lastIperfLogLine
+						if strings.Contains(lastSeen, " sec ") && !strings.Contains(lastSeen, "0.00 Bytes  0.00 bits/sec") {
+							goodIntervals++
+						} else {
+							goodIntervals = 0
+						}
+					}
+					if goodIntervals < 3 {
+						return "waiting for three fresh nonzero IPv6 intervals; last: " + lastIperfLogLine, fmt.Errorf("only %d fresh intervals", goodIntervals)
+					}
+				}
 				return lastIperfLogLine, nil
 			}).
 				WithPolling(50*time.Millisecond).
@@ -506,7 +525,11 @@ var _ = Describe("Kubevirt Virtual Machines", feature.VirtualMachineSupport, fun
 				// Redirect stdio so execFn implementations that capture output
 				// do not block waiting for the background iperf3 process to
 				// exit.
-				output, err = execFn(fmt.Sprintf("nohup iperf3 -t 0 -c %[1]s -p %[2]d --pidfile %[3]s --logfile %[4]s >/dev/null 2>&1 &", address, port, iperfPidFile, iperfLogFile))
+				debugFlags := ""
+				if os.Getenv("KUBEVIRT_MIGRATION_DEBUG") == "true" {
+					debugFlags = "--forceflush --timestamps='%s '"
+				}
+				output, err = execFn(fmt.Sprintf("nohup iperf3 -t 0 -c %[1]s -p %[2]d --pidfile %[3]s --logfile %[4]s %[5]s >/dev/null 2>&1 &", address, port, iperfPidFile, iperfLogFile, debugFlags))
 				if err != nil {
 					return fmt.Errorf("failed at starting iperf3 in background %s: %w", output, err)
 				}
@@ -1058,6 +1081,10 @@ ethernets:
 		}
 
 		composeDefaultNetworkLiveMigratableVMs = func(numberOfVMs int, labels map[string]string) []*kubevirtv1.VirtualMachine {
+			serverScript := iperfServerScript
+			if os.Getenv("KUBEVIRT_MIGRATION_DEBUG") == "true" {
+				serverScript = strings.ReplaceAll(serverScript, "iperf3 -s", "iperf3 --forceflush --timestamps='%s ' -s")
+			}
 			userData := fmt.Sprintf(`#cloud-config
 password: fedora
 chpasswd: { expire: False }
@@ -1070,7 +1097,7 @@ runcmd:
   - systemctl mask --now systemd-resolved.service
   - rm -f /etc/resolv.conf
   - systemctl restart NetworkManager.service
-`, base64.StdEncoding.EncodeToString([]byte(iperfServerScript)))
+`, base64.StdEncoding.EncodeToString([]byte(serverScript)))
 			// We need v1 to be able to propertly configure ipv6.method=dhcp
 			// autoconf should be disable for cluster default network
 			// migrating mechanism to work, we cannot do this with v2
@@ -1096,8 +1123,10 @@ config:
 			return vms
 		}
 		liveMigrateAndCheck = func(vmName string, migrationMode kubevirtv1.MigrationMode, externalContainer infraapi.ExternalContainer, serverAddresses []string, serverPort int32, step string) {
+			dumpMigrationGuestState(virtClient, namespace, vmName, "before "+step)
 			liveMigrateVirtualMachine(vmName)
 			checkLiveMigrationSucceeded(vmName, migrationMode)
+			dumpMigrationGuestState(virtClient, namespace, vmName, "after "+step)
 			checkConnectivityAndNetworkPolicies(vmName, externalContainer, serverAddresses, serverPort, step)
 		}
 
@@ -1145,7 +1174,17 @@ config:
 			}()
 
 			serverAddresses, serverPort := serviceNodePortAddresses(clientSet, svc)
+			e2eframework.Logf("Migration debug: VM %s/%s, original node %s, NodePort addresses %v, port %d", namespace, vm.Name, vmi.Status.NodeName, serverAddresses, serverPort)
 			defer stopIngressIperfClients(externalContainer, serverAddresses, serverPort)
+			stopCapture := d.MigrationCapture(serverPort)
+			stopAPIState := d.MigrationAPIState()
+			completed := false
+			defer func() {
+				dumpMigrationClientState(externalContainer, namespace, vm.Name)
+				dumpMigrationGuestState(virtClient, namespace, vm.Name, "test exit")
+				stopAPIState()
+				stopCapture(completed)
+			}()
 
 			By("Wait some time for service to settle")
 			Eventually(func() error {
@@ -1209,6 +1248,7 @@ config:
 				}
 				liveMigrateAndCheck(vm.Name, td.mode, externalContainer, serverAddresses, serverPort, "after leaving the subnet owner again")
 			}
+			completed = true
 		}
 
 		checkPodHasIPAtStatus = func(g Gomega, pod *corev1.Pod) {
