@@ -74,7 +74,10 @@ spec:
                           protocol:
                             description: protocol (tcp, udp, sctp) that the traffic
                               must match.
-                            pattern: ^TCP|UDP|SCTP$
+                            enum:
+                            - TCP
+                            - UDP
+                            - SCTP
                             type: string
                         required:
                         - port
@@ -152,7 +155,9 @@ spec:
                       type: object
                     type:
                       description: type marks this as an "Allow" or "Deny" rule
-                      pattern: ^Allow|Deny$
+                      enum:
+                      - Allow
+                      - Deny
                       type: string
                   required:
                   - to

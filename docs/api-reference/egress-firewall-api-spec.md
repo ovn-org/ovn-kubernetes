@@ -45,7 +45,7 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `protocol` _string_ | protocol (tcp, udp, sctp) that the traffic must match. |  | Pattern: `^TCP\|UDP\|SCTP$` <br /> |
+| `protocol` _string_ | protocol (tcp, udp, sctp) that the traffic must match. |  | Enum: [TCP UDP SCTP] <br /> |
 | `port` _integer_ | port that the traffic must match |  | Maximum: 65535 <br />Minimum: 1 <br /> |
 
 
@@ -62,7 +62,7 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `type` _[EgressFirewallRuleType](#egressfirewallruletype)_ | type marks this as an "Allow" or "Deny" rule |  | Pattern: `^Allow\|Deny$` <br /> |
+| `type` _[EgressFirewallRuleType](#egressfirewallruletype)_ | type marks this as an "Allow" or "Deny" rule |  | Enum: [Allow Deny] <br /> |
 | `ports` _[EgressFirewallPort](#egressfirewallport) array_ | ports specify what ports and protocols the rule applies to |  | Optional: \{\} <br /> |
 | `to` _[EgressFirewallDestination](#egressfirewalldestination)_ | to is the target that traffic is allowed/denied to |  | MaxProperties: 1 <br />MinProperties: 1 <br /> |
 
@@ -74,7 +74,7 @@ _Underlying type:_ _string_
 EgressNetworkFirewallRuleType indicates whether an EgressNetworkFirewallRule allows or denies traffic
 
 _Validation:_
-- Pattern: `^Allow|Deny$`
+- Enum: [Allow Deny]
 
 _Appears in:_
 - [EgressFirewallRule](#egressfirewallrule)

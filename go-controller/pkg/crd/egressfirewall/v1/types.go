@@ -8,7 +8,7 @@ import (
 )
 
 // EgressNetworkFirewallRuleType indicates whether an EgressNetworkFirewallRule allows or denies traffic
-// +kubebuilder:validation:Pattern=^Allow|Deny$
+// +kubebuilder:validation:Enum=Allow;Deny
 type EgressFirewallRuleType string
 
 const (
@@ -67,7 +67,7 @@ type EgressFirewallRule struct {
 // EgressFirewallPort specifies the port to allow or deny traffic to
 type EgressFirewallPort struct {
 	// protocol (tcp, udp, sctp) that the traffic must match.
-	// +kubebuilder:validation:Pattern=^TCP|UDP|SCTP$
+	// +kubebuilder:validation:Enum=TCP;UDP;SCTP
 	Protocol string `json:"protocol"`
 	// port that the traffic must match
 	// +kubebuilder:validation:Minimum:=1
