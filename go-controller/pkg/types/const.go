@@ -359,6 +359,9 @@ const (
 	// Logical Switch or Router Port
 	MaxLogicalPortTunnelKey = 32767
 
+	// MaxNetworks is the maximum number of networks, including the default network.
+	MaxNetworks = 4096
+
 	// MinNodeID is 2 because ID 1 maps to the cluster router's join-switch IP.
 	MinNodeID = 2
 

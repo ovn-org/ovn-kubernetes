@@ -35,3 +35,32 @@ func TestReserveTunnelKeysOutOfRange(t *testing.T) {
 		})
 	}
 }
+
+func TestReserveTunnelKeysWithRollback(t *testing.T) {
+	for _, existing := range []bool{false, true} {
+		t.Run(fmt.Sprintf("existing=%t", existing), func(t *testing.T) {
+			allocator := NewTunnelKeyAllocator("test")
+			keys := []int{allocator.idsOffset + 1, allocator.idsOffset + allocator.preservedRange}
+			if existing {
+				if err := allocator.ReserveKeys("network", keys); err != nil {
+					t.Fatal(err)
+				}
+			}
+			rollback, err := allocator.ReserveKeysWithRollback("network", keys)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := allocator.ReserveKeys("other", keys); err == nil {
+				t.Fatal("reservation was not held before rollback")
+			}
+			rollback()
+			err = allocator.ReserveKeys("other", keys)
+			if existing && err == nil {
+				t.Fatal("rollback released an existing reservation")
+			}
+			if !existing && err != nil {
+				t.Fatalf("rollback leaked a new reservation: %v", err)
+			}
+		})
+	}
+}

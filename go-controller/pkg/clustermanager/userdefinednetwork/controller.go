@@ -1257,7 +1257,7 @@ func networkIDFromNADs(nads []netv1.NetworkAttachmentDefinition) int {
 		if annotation == "" {
 			continue
 		}
-		if id, err := strconv.Atoi(annotation); err == nil && id > ovntypes.DefaultNetworkID && id < networkmanager.MaxNetworks {
+		if id, err := strconv.Atoi(annotation); err == nil && id > ovntypes.DefaultNetworkID && id < ovntypes.MaxNetworks {
 			return id
 		}
 		klog.Warningf("Ignoring invalid network-id annotation %q on NetworkAttachmentDefinition %s/%s",

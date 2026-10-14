@@ -194,7 +194,7 @@ func newController(
 		c.nadClient = ovnClient.NetworkAttchDefClient
 	}
 
-	c.networkIDAllocator = id.NewIDAllocator("NetworkIDs", MaxNetworks)
+	c.networkIDAllocator = id.NewIDAllocator("NetworkIDs", types.MaxNetworks)
 	// Reserve the ID of the default network
 	err := c.networkIDAllocator.ReserveID(types.DefaultNetworkName, types.DefaultNetworkID)
 	if err != nil {
