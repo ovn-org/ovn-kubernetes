@@ -15,6 +15,7 @@ import (
 // ExternalNextHops contains slices of StaticHops and DynamicHops structures. Minimum is one StaticHop or one DynamicHop.
 type ExternalNextHopsApplyConfiguration struct {
 	// StaticHops defines a slice of StaticHop. This field is optional.
+	// The limit is an API bound, not a guarantee of dataplane capacity.
 	StaticHops []*adminpolicybasedroutev1.StaticHop `json:"static,omitempty"`
 	// DynamicHops defines a slice of DynamicHop. This field is optional.
 	DynamicHops []*adminpolicybasedroutev1.DynamicHop `json:"dynamic,omitempty"`

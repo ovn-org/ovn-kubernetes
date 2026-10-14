@@ -10,7 +10,7 @@ package v1
 //
 // StaticHop defines the configuration of a static IP that acts as an external Gateway Interface. IP field is mandatory.
 type StaticHopApplyConfiguration struct {
-	// IP defines the static IP to be used for egress traffic. The IP can be either IPv4 or IPv6.
+	// IP defines the static IP to be used for egress traffic. It must be a valid IPv4 or IPv6 address; malformed values are rejected during admission.
 	IP *string `json:"ip,omitempty"`
 	// BFDEnabled determines if the interface implements the Bidirectional Forward Detection protocol. Defaults to false.
 	BFDEnabled *bool `json:"bfdEnabled,omitempty"`

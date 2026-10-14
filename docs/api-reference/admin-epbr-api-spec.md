@@ -120,7 +120,7 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `static` _[StaticHop](#statichop) array_ | StaticHops defines a slice of StaticHop. This field is optional. |  |  |
+| `static` _[StaticHop](#statichop) array_ | StaticHops defines a slice of StaticHop. This field is optional.<br />The limit is an API bound, not a guarantee of dataplane capacity. |  | MaxItems: 1000 <br /> |
 | `dynamic` _[DynamicHop](#dynamichop) array_ | DynamicHops defines a slice of DynamicHop. This field is optional. |  |  |
 
 
@@ -137,7 +137,7 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `ip` _string_ | IP defines the static IP to be used for egress traffic. The IP can be either IPv4 or IPv6. |  | Pattern: `^(([0-9]\|[1-9][0-9]\|1[0-9]\{2\}\|2[0-4][0-9]\|25[0-5])\.)\{3\}([0-9]\|[1-9][0-9]\|1[0-9]\{2\}\|2[0-4][0-9]\|25[0-5])$\|^s*((([0-9A-Fa-f]\{1,4\}:)\{7\}([0-9A-Fa-f]\{1,4\}\|:))\|(([0-9A-Fa-f]\{1,4\}:)\{6\}(:[0-9A-Fa-f]\{1,4\}\|((25[0-5]\|2[0-4]d\|1dd\|[1-9]?d)(.(25[0-5]\|2[0-4]d\|1dd\|[1-9]?d))\{3\})\|:))\|(([0-9A-Fa-f]\{1,4\}:)\{5\}(((:[0-9A-Fa-f]\{1,4\})\{1,2\})\|:((25[0-5]\|2[0-4]d\|1dd\|[1-9]?d)(.(25[0-5]\|2[0-4]d\|1dd\|[1-9]?d))\{3\})\|:))\|(([0-9A-Fa-f]\{1,4\}:)\{4\}(((:[0-9A-Fa-f]\{1,4\})\{1,3\})\|((:[0-9A-Fa-f]\{1,4\})?:((25[0-5]\|2[0-4]d\|1dd\|[1-9]?d)(.(25[0-5]\|2[0-4]d\|1dd\|[1-9]?d))\{3\}))\|:))\|(([0-9A-Fa-f]\{1,4\}:)\{3\}(((:[0-9A-Fa-f]\{1,4\})\{1,4\})\|((:[0-9A-Fa-f]\{1,4\})\{0,2\}:((25[0-5]\|2[0-4]d\|1dd\|[1-9]?d)(.(25[0-5]\|2[0-4]d\|1dd\|[1-9]?d))\{3\}))\|:))\|(([0-9A-Fa-f]\{1,4\}:)\{2\}(((:[0-9A-Fa-f]\{1,4\})\{1,5\})\|((:[0-9A-Fa-f]\{1,4\})\{0,3\}:((25[0-5]\|2[0-4]d\|1dd\|[1-9]?d)(.(25[0-5]\|2[0-4]d\|1dd\|[1-9]?d))\{3\}))\|:))\|(([0-9A-Fa-f]\{1,4\}:)\{1\}(((:[0-9A-Fa-f]\{1,4\})\{1,6\})\|((:[0-9A-Fa-f]\{1,4\})\{0,4\}:((25[0-5]\|2[0-4]d\|1dd\|[1-9]?d)(.(25[0-5]\|2[0-4]d\|1dd\|[1-9]?d))\{3\}))\|:))\|(:(((:[0-9A-Fa-f]\{1,4\})\{1,7\})\|((:[0-9A-Fa-f]\{1,4\})\{0,5\}:((25[0-5]\|2[0-4]d\|1dd\|[1-9]?d)(.(25[0-5]\|2[0-4]d\|1dd\|[1-9]?d))\{3\}))\|:)))(%.+)?s*` <br />Required: \{\} <br />Required: \{\} <br /> |
+| `ip` _string_ | IP defines the static IP to be used for egress traffic. It must be a valid IPv4 or IPv6 address; malformed values are rejected during admission. |  | MaxLength: 45 <br />Required: \{\} <br />Required: \{\} <br /> |
 | `bfdEnabled` _boolean_ | BFDEnabled determines if the interface implements the Bidirectional Forward Detection protocol. Defaults to false. | false | Optional: \{\} <br /> |
 
 

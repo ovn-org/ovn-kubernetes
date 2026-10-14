@@ -384,7 +384,7 @@ func schema_pkg_crd_adminpolicybasedroute_v1_ExternalNextHops(ref common.Referen
 							},
 						},
 						SchemaProps: spec.SchemaProps{
-							Description: "StaticHops defines a slice of StaticHop. This field is optional.",
+							Description: "StaticHops defines a slice of StaticHop. This field is optional. The limit is an API bound, not a guarantee of dataplane capacity.",
 							Type:        []string{"array"},
 							Items: &spec.SchemaOrArray{
 								Schema: &spec.Schema{
@@ -430,7 +430,7 @@ func schema_pkg_crd_adminpolicybasedroute_v1_StaticHop(ref common.ReferenceCallb
 				Properties: map[string]spec.Schema{
 					"ip": {
 						SchemaProps: spec.SchemaProps{
-							Description: "IP defines the static IP to be used for egress traffic. The IP can be either IPv4 or IPv6.",
+							Description: "IP defines the static IP to be used for egress traffic. It must be a valid IPv4 or IPv6 address; malformed values are rejected during admission.",
 							Default:     "",
 							Type:        []string{"string"},
 							Format:      "",
