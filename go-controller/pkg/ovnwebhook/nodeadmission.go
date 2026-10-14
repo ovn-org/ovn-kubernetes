@@ -96,13 +96,20 @@ func NewNodeAdmissionWebhook(enableHybridOverlay bool, extraAllowedUsers ...stri
 
 var _ admission.Validator[*corev1.Node] = &NodeAdmission{}
 
-func (p NodeAdmission) ValidateCreate(_ context.Context, _ *corev1.Node) (warnings admission.Warnings, err error) {
-	// Ignore creation, the webhook is configured to only handle nodes/status updates
-	return nil, nil
+func (p NodeAdmission) ValidateCreate(ctx context.Context, node *corev1.Node) (warnings admission.Warnings, err error) {
+	req, err := admission.RequestFromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if _, isOVNKubeNode := ovnkubeNodeIdentity(req.UserInfo); isOVNKubeNode {
+		// Node credentials only have update permissions on nodes/status.
+		return nil, fmt.Errorf("user %q is not allowed to create nodes", req.UserInfo.Username)
+	}
+	return nil, p.validateProtectedAnnotations(req.UserInfo.Username, node.Name, slices.Collect(maps.Keys(node.Annotations)))
 }
 
 func (p NodeAdmission) ValidateDelete(_ context.Context, _ *corev1.Node) (warnings admission.Warnings, err error) {
-	// Ignore deletion, the webhook is configured to only handle nodes/status updates
+	// Node deletion is outside the webhook rules.
 	return nil, nil
 }
 

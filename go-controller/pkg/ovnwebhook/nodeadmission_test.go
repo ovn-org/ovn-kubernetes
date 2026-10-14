@@ -581,3 +581,94 @@ func TestNodeAdmission_UnchangedAllocations(t *testing.T) {
 		})
 	}
 }
+
+func TestNodeAdmission_ValidateCreate(t *testing.T) {
+	const trustedUser = "system:serviceaccount:ovn-kubernetes:ovnkube-cluster-manager"
+	adm := NewNodeAdmissionWebhook(false, trustedUser, userName)
+	for _, key := range []string{util.OvnNodeID, types.UDNLayer2NodeGRLRPTunnelIDAnnotation, util.OVNNodeHostCIDRs} {
+		for _, tc := range []struct {
+			username   string
+			wantDenied bool
+		}{
+			{username: trustedUser},
+			{username: "system:node:" + nodeName, wantDenied: true},
+			{username: "alice", wantDenied: true},
+			{username: userName, wantDenied: true},
+		} {
+			t.Run(key+"/"+tc.username, func(t *testing.T) {
+				ctx := admission.NewContextWithRequest(context.Background(), admission.Request{
+					AdmissionRequest: v1.AdmissionRequest{
+						Operation: v1.Create,
+						UserInfo:  authenticationv1.UserInfo{Username: tc.username},
+					},
+				})
+				_, err := adm.ValidateCreate(ctx, &corev1.Node{ObjectMeta: metav1.ObjectMeta{
+					Name: nodeName, Annotations: map[string]string{key: "value"},
+				}})
+				wantDenied := tc.wantDenied
+				if key != util.OVNNodeHostCIDRs {
+					// The admission policy checks ownership of allocation annotations.
+					wantDenied = tc.username == userName
+				}
+				if (err != nil) != wantDenied {
+					t.Fatalf("admission error = %v, want denied = %t", err, wantDenied)
+				}
+			})
+		}
+	}
+	for _, tc := range []struct {
+		username   string
+		wantDenied bool
+	}{
+		{username: "system:node:" + nodeName},
+		{username: "alice"},
+		{username: userName, wantDenied: true},
+	} {
+		t.Run("unrelated annotations/"+tc.username, func(t *testing.T) {
+			ctx := admission.NewContextWithRequest(context.Background(), admission.Request{
+				AdmissionRequest: v1.AdmissionRequest{
+					Operation: v1.Create,
+					UserInfo:  authenticationv1.UserInfo{Username: tc.username},
+				},
+			})
+			_, err := adm.ValidateCreate(ctx, &corev1.Node{ObjectMeta: metav1.ObjectMeta{
+				Name: nodeName, Annotations: map[string]string{"example.com/unrelated": "value"},
+			}})
+			if (err != nil) != tc.wantDenied {
+				t.Fatalf("admission error = %v, want denied = %t", err, tc.wantDenied)
+			}
+		})
+	}
+	if _, err := adm.ValidateCreate(context.Background(), &corev1.Node{}); err == nil {
+		t.Fatal("create without admission context was accepted")
+	}
+}
+
+func TestNodeAdmissionRejectsUnrelatedNodeCredentialWrites(t *testing.T) {
+	adm := NewNodeAdmissionWebhook(false)
+	changes := map[string]func(*corev1.Node){
+		"labels": func(node *corev1.Node) { node.Labels = map[string]string{"example.com/label": "value"} },
+		"status": func(node *corev1.Node) {
+			node.Status.Conditions = []corev1.NodeCondition{{Type: corev1.NodeReady, Status: corev1.ConditionTrue}}
+		},
+		"unrelated annotation": func(node *corev1.Node) { node.Annotations["example.com/unrelated"] = "value" },
+	}
+	for name, change := range changes {
+		t.Run(name, func(t *testing.T) {
+			oldNode := &corev1.Node{ObjectMeta: metav1.ObjectMeta{
+				Name: nodeName, Annotations: map[string]string{util.OvnNodeID: "1"},
+			}}
+			newNode := oldNode.DeepCopy()
+			change(newNode)
+			ctx := admission.NewContextWithRequest(context.Background(), admission.Request{
+				AdmissionRequest: v1.AdmissionRequest{
+					Operation: v1.Update, SubResource: "status",
+					UserInfo: authenticationv1.UserInfo{Username: userName},
+				},
+			})
+			if _, err := adm.ValidateUpdate(ctx, oldNode, newNode); err == nil {
+				t.Fatalf("node credentials were allowed to modify %s without changing OVN annotations", name)
+			}
+		})
+	}
+}
