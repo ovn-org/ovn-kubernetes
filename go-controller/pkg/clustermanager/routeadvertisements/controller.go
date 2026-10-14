@@ -401,6 +401,26 @@ func (c *Controller) reconcile(name string) error {
 func (c *Controller) reconcileRouteAdvertisements(name string, ra *ratypes.RouteAdvertisements) (bool, error) {
 	// generate FRRConfigurations
 	frrConfigs, nads, cfgErr := c.generateFRRConfigurations(ra)
+	if cfgErr != nil && errors.Is(cfgErr, errUnsafeFRRInput) {
+		// FRRConfigurations generated before the input was validated may
+		// carry the rejected value: delete them
+		deleted, remaining, err := c.deleteUnvalidatedFRRConfigurations(name)
+		if err != nil {
+			// not a configuration error, so that the reconcile is retried
+			return deleted, fmt.Errorf("failed deleting FRRConfigurations for RouteAdvertisements %q rejected with %v: %w", name, cfgErr, err)
+		}
+		if remaining > 0 {
+			return deleted, cfgErr
+		}
+		// a network stays advertised while its NAD references this
+		// RouteAdvertisements: drop the references once no generated
+		// FRRConfiguration is left for it
+		hadNADUpdates, err := c.updateNADs(name, nil)
+		if err != nil {
+			return deleted || hadNADUpdates, fmt.Errorf("failed annotating NADs for RouteAdvertisements %q rejected with %v: %w", name, cfgErr, err)
+		}
+		return deleted || hadNADUpdates, cfgErr
+	}
 	if cfgErr != nil && !errors.Is(cfgErr, errPending) {
 		return false, cfgErr
 	}
@@ -1437,6 +1457,8 @@ func (c *Controller) generateFRRConfiguration(
 	// existing FRRConfiguration should be deleted or not.
 	new.Annotations = map[string]string{
 		types.OvnRouteAdvertisementsKey: fmt.Sprintf("%s/%s/%s", ra.Name, source.Name, nodeName),
+		// every value written below was validated when read
+		types.OvnRouteAdvertisementsValidatedKey: "true",
 	}
 	new.Spec = source.Spec
 	new.Spec.BGP.Routers = routers
@@ -1557,6 +1579,41 @@ func vtepCIDRPrefixSelectors(cidrs []string) []frrtypes.PrefixSelector {
 	return selectors
 }
 
+// deleteUnvalidatedFRRConfigurations deletes the FRRConfigurations generated
+// for a RouteAdvertisements that don't carry the
+// OvnRouteAdvertisementsValidatedKey annotation. Returns whether any was
+// deleted and how many generated FRRConfigurations remain; a failed deletion
+// doesn't stop the others and is reported in the joined error.
+func (c *Controller) deleteUnvalidatedFRRConfigurations(ra string) (deleted bool, remaining int, err error) {
+	selector, err := metav1.LabelSelectorAsSelector(&metav1.LabelSelector{
+		MatchLabels: map[string]string{types.OvnRouteAdvertisementsKey: ra},
+	})
+	if err != nil {
+		return false, 0, err
+	}
+	frrConfigs, err := c.frrLister.List(selector)
+	if err != nil {
+		return false, 0, err
+	}
+	var errs []error
+	for _, frrConfig := range frrConfigs {
+		if frrConfig.Annotations[types.OvnRouteAdvertisementsKey] == "" {
+			continue
+		}
+		if frrConfig.Annotations[types.OvnRouteAdvertisementsValidatedKey] == "true" {
+			remaining++
+			continue
+		}
+		err := c.frrClient.ApiV1beta1().FRRConfigurations(frrConfig.Namespace).Delete(context.Background(), frrConfig.Name, metav1.DeleteOptions{})
+		if err != nil && !apierrors.IsNotFound(err) {
+			errs = append(errs, fmt.Errorf("failed deleting FRRConfiguration %s/%s: %w", frrConfig.Namespace, frrConfig.Name, err))
+			continue
+		}
+		deleted = true
+	}
+	return deleted, remaining, errors.Join(errs...)
+}
+
 // updateFRRConfigurations updates the FRRConfigurations that apply for a
 // RouteAdvertisements. It fetches existing FRRConfigurations by label and
 // indexes them by the annotated key. Then compares this state with desired
@@ -1615,7 +1672,8 @@ func (c *Controller) updateFRRConfigurations(ra string, frrConfigurations []*frr
 		existing[key] = oldFRRConfigs[:len(oldFRRConfigs)-1]
 
 		// no changes needed so skip
-		if reflect.DeepEqual(newFRRConfig.Spec, oldFRRConfig.Spec) {
+		if reflect.DeepEqual(newFRRConfig.Spec, oldFRRConfig.Spec) &&
+			oldFRRConfig.Annotations[types.OvnRouteAdvertisementsValidatedKey] == newFRRConfig.Annotations[types.OvnRouteAdvertisementsValidatedKey] {
 			continue
 		}
 
