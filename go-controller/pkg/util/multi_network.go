@@ -1606,6 +1606,7 @@ func ParseNADInfo(nad *nettypes.NetworkAttachmentDefinition) (NetInfo, error) {
 	}
 	if nad.Annotations[types.OvnNetworkIDAnnotation] != "" {
 		annotated := nad.Annotations[types.OvnNetworkIDAnnotation]
+		// Only ovn-k8s cluster-manager writes network IDs, so malformed values are unexpected.
 		id, err = strconv.Atoi(annotated)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse annotated network ID: %w", err)
@@ -1613,8 +1614,9 @@ func ParseNADInfo(nad *nettypes.NetworkAttachmentDefinition) (NetInfo, error) {
 	}
 	n.SetNetworkID(id)
 
-	if nad.Annotations[types.OvnNetworkTunnelKeysAnnotation] != "" {
-		tunnelKeys, err := ParseTunnelKeysAnnotation(nad.Annotations[types.OvnNetworkTunnelKeysAnnotation])
+	if annotated := nad.Annotations[types.OvnNetworkTunnelKeysAnnotation]; annotated != "" {
+		// Only ovn-k8s cluster-manager writes tunnel keys, so malformed values are unexpected.
+		tunnelKeys, err := ParseTunnelKeysAnnotation(annotated)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse annotated tunnel keys: %w", err)
 		}

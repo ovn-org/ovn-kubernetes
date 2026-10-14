@@ -132,6 +132,16 @@ The cluster default network still refreshes IPv4 gateway neighbors after live
 migration because its gateway MAC can change between the subnet owner and
 foreign nodes. See [Live Migration](../live-migration.md) for that behavior.
 
+## Allocation annotations
+
+Cluster manager owns the network ID and tunnel key annotations on
+NetworkAttachmentDefinitions. Configure networks through the UDN/CUDN API or
+NAD network configuration; do not assign these allocation annotations manually.
+
+Cluster manager preserves allocated tunnel keys across restarts and NAD
+configuration changes. A failed annotation update does not release the
+network's existing tunnel keys.
+
 ## Performance/Scale Optimizations for UDN
 
 UDN scale is currently constrained to a couple of hundred UDNs when every UDN is

@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 
 	networkconnectv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/clusternetworkconnect/v1"
 	networkconnectfake "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/clusternetworkconnect/v1/apis/clientset/versioned/fake"
@@ -321,6 +322,39 @@ func TestUpdateNetworkConnectSubnetAnnotation_PreservesExistingAnnotations(t *te
 
 	// Verify the new subnet annotation was added
 	assert.Contains(t, updatedCNC.Annotations, ovnNetworkConnectSubnetAnnotation)
+}
+
+func TestParseNetworkConnectTunnelKeyAnnotation(t *testing.T) {
+	tests := []struct {
+		name        string
+		annotation  *string
+		expectedKey int
+		wantError   bool
+	}{
+		{name: "no annotation", expectedKey: 0},
+		{name: "empty annotation", annotation: ptr.To(""), expectedKey: 0},
+		{name: "allocated key", annotation: ptr.To("16715779"), expectedKey: 16715779},
+		{name: "unparseable key", annotation: ptr.To("notanumber"), wantError: true},
+		{name: "integer overflow", annotation: ptr.To("18446744073709551616"), wantError: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cnc := &networkconnectv1.ClusterNetworkConnect{
+				ObjectMeta: metav1.ObjectMeta{Name: "cnc1"},
+			}
+			if tt.annotation != nil {
+				cnc.Annotations = map[string]string{OvnConnectRouterTunnelKeyAnnotation: *tt.annotation}
+			}
+
+			key, err := ParseNetworkConnectTunnelKeyAnnotation(cnc)
+			if tt.wantError {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.expectedKey, key)
+		})
+	}
 }
 
 func TestParseNetworkOwner(t *testing.T) {

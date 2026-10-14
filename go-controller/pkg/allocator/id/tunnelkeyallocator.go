@@ -5,6 +5,16 @@ package id
 
 import "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 
+// NetworkTunnelKeyOwner returns the allocator owner for a NAD network.
+func NetworkTunnelKeyOwner(name string) string {
+	return "network/" + name
+}
+
+// NetworkConnectTunnelKeyOwner returns the allocator owner for a CNC router.
+func NetworkConnectTunnelKeyOwner(name string) string {
+	return "cnc/" + name
+}
+
 // TunnelKeysAllocator is used to allocate tunnel Keys for distributed OVN datapaths.
 // It preserves the first types.MaxNetworks keys for the already-used transit switch IDs based on the networkID.
 type TunnelKeysAllocator struct {

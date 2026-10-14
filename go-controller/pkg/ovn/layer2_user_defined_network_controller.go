@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -479,7 +480,7 @@ func (oc *Layer2UserDefinedNetworkController) init() (err error) {
 	oc.defaultCOPPUUID = defaultCOPPUUID
 
 	if config.Layer2UsesTransitRouter && oc.IsPrimaryNetwork() {
-		if _, err = oc.newClusterRouter(); err != nil {
+		if _, err = oc.newClusterRouter(oc.GetTunnelKeys()); err != nil {
 			return fmt.Errorf("failed to create OVN cluster router for network %q: %v", oc.GetNetworkName(), err)
 		}
 	}
@@ -529,6 +530,14 @@ func (oc *Layer2UserDefinedNetworkController) Stop() {
 }
 
 func (oc *Layer2UserDefinedNetworkController) Reconcile(netInfo util.NetInfo) error {
+	// Upgrades may replace a network tunnel key that collided with a same-named CNC under the legacy shared owner.
+	if config.Layer2UsesTransitRouter && oc.IsPrimaryNetwork() && oc.hasInterconnectTransport() &&
+		!slices.Equal(oc.GetTunnelKeys(), netInfo.GetTunnelKeys()) {
+		// Update OVN before caching the keys so a failed write remains retryable.
+		if _, err := oc.newClusterRouter(netInfo.GetTunnelKeys()); err != nil {
+			return fmt.Errorf("failed to update transit router tunnel key for network %s: %w", oc.GetNetworkName(), err)
+		}
+	}
 	if err := oc.BaseNetworkController.reconcile(
 		netInfo,
 		func(node string) { oc.gatewaysFailed.Store(node, true) },
@@ -1123,9 +1132,9 @@ func (oc *Layer2UserDefinedNetworkController) nodeGatewayConfig(node *corev1.Nod
 	}, nil
 }
 
-// newClusterRouter creates the cluster router for the network. This router is a
+// newClusterRouter creates or updates the cluster router for the network. This router is a
 // transit router if the interconnect overlay is in use.
-func (oc *Layer2UserDefinedNetworkController) newClusterRouter() (*nbdb.LogicalRouter, error) {
+func (oc *Layer2UserDefinedNetworkController) newClusterRouter(tunnelKeys []int) (*nbdb.LogicalRouter, error) {
 	if !oc.hasInterconnectTransport() {
 		return oc.gatewayTopologyFactory.NewClusterRouter(
 			oc.GetNetworkScopedClusterRouterName(),
@@ -1134,7 +1143,6 @@ func (oc *Layer2UserDefinedNetworkController) newClusterRouter() (*nbdb.LogicalR
 		)
 	}
 
-	tunnelKeys := oc.GetTunnelKeys()
 	if len(tunnelKeys) != 2 {
 		return nil, fmt.Errorf("layer2 network %s with transit router enabled requires exactly 2 tunnel keys, got: %v", oc.GetNetworkName(), tunnelKeys)
 	}

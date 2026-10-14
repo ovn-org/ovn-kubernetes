@@ -409,38 +409,12 @@ func (cm *ClusterManager) Reconcile(name string, old, new util.NetInfo) error {
 }
 
 // initTunnelKeysAllocator reserves any existing tunnel keys to avoid re-allocation.
-// It will be shared across multiple controllers and should account for different object types.
-// Good news is that we don't care about missing events, because we only need to reserve ids that are already
-// annotated, and no one else can annotate them except ClusterManager.
+// Only cluster-manager writes allocation annotations; config renames may still cause reservation conflicts.
 func initTunnelKeysAllocator(nadClient networkattchmentdefclientset.Interface, cncClient networkconnectclientset.Interface) (*id.TunnelKeysAllocator, error) {
 	tunnelKeysAllocator := id.NewTunnelKeyAllocator("TunnelKeys")
 
-	existingNADs, err := nadClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions("").List(context.TODO(), metav1.ListOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("failed to list existing NADs: %w", err)
-	}
-	for _, nad := range existingNADs.Items {
-		// reserve tunnel keys that are already allocated to make sure they are
-		if nad.Annotations[types.OvnNetworkTunnelKeysAnnotation] != "" {
-			netconf, err := util.ParseNetConf(&nad)
-			if err != nil {
-				// ignore non-OVN NADs; otherwise log and continue
-				if err.Error() == util.ErrorAttachDefNotOvnManaged.Error() {
-					continue
-				}
-				klog.Warningf("Failed to parse NAD config %s: %v", nad.Name, err)
-				continue
-			}
-			networkName := netconf.Name
-			tunnelKeys, err := util.ParseTunnelKeysAnnotation(nad.Annotations[types.OvnNetworkTunnelKeysAnnotation])
-			if err != nil {
-				return nil, fmt.Errorf("failed to parse annotated tunnel keys: %w", err)
-			}
-			if err = tunnelKeysAllocator.ReserveKeys(networkName, tunnelKeys); err != nil {
-				return nil, fmt.Errorf("failed to reserve tunnel keys %v for network %s: %w", tunnelKeys, networkName, err)
-			}
-		}
-	}
+	// CNC keys are immutable; reserve them first so legacy shared-owner
+	// collisions are resolved by replacing the NAD's keys instead.
 	if util.IsNetworkConnectEnabled() {
 		existingCNCs, err := cncClient.K8sV1().ClusterNetworkConnects().List(context.TODO(), metav1.ListOptions{})
 		if err != nil {
@@ -452,11 +426,47 @@ func initTunnelKeysAllocator(nadClient networkattchmentdefclientset.Interface, c
 				return nil, fmt.Errorf("failed to parse annotated tunnel ID: %w", err)
 			}
 			if tunnelID != 0 {
-				if err = tunnelKeysAllocator.ReserveKeys(cnc.Name, []int{tunnelID}); err != nil {
+				if err = tunnelKeysAllocator.ReserveKeys(id.NetworkConnectTunnelKeyOwner(cnc.Name), []int{tunnelID}); err != nil {
 					return nil, fmt.Errorf("failed to reserve tunnel ID %d for CNC %s: %w", tunnelID, cnc.Name, err)
 				}
 			}
 		}
 	}
+
+	existingNADs, err := nadClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions("").List(context.TODO(), metav1.ListOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list existing NADs: %w", err)
+	}
+	for _, nad := range existingNADs.Items {
+		annotatedKeys := nad.Annotations[types.OvnNetworkTunnelKeysAnnotation]
+		if annotatedKeys == "" {
+			continue
+		}
+		netconf, err := util.ParseNetConf(&nad)
+		if err != nil {
+			// ignore non-OVN NADs; otherwise log and continue
+			if err.Error() == util.ErrorAttachDefNotOvnManaged.Error() {
+				continue
+			}
+			klog.Warningf("Failed to parse NAD config %s: %v", nad.Name, err)
+			continue
+		}
+		// Invalid configs are not tracked, so their reservations cannot be released on deletion.
+		if _, err = util.NewNetInfo(netconf); err != nil {
+			klog.Warningf("Ignoring tunnel keys annotated on NAD %s/%s with unusable network config: %v", nad.Namespace, nad.Name, err)
+			continue
+		}
+		networkName := netconf.Name
+		// Malformed tunnel keys are unexpected because only cluster-manager writes them.
+		tunnelKeys, err := util.ParseTunnelKeysAnnotation(annotatedKeys)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse annotated tunnel keys: %w", err)
+		}
+		if err = tunnelKeysAllocator.ReserveKeys(id.NetworkTunnelKeyOwner(networkName), tunnelKeys); err != nil {
+			klog.Warningf("Ignoring tunnel keys %v annotated on NAD %s/%s for network %s: %v",
+				tunnelKeys, nad.Namespace, nad.Name, networkName, err)
+		}
+	}
+
 	return tunnelKeysAllocator, nil
 }

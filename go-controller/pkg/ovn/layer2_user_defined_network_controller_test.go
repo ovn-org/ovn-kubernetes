@@ -543,6 +543,58 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 2 network", func() {
 		Expect(app.Run([]string{app.Name})).To(Succeed())
 	})
 
+	It("retries a repaired transit router tunnel key after a database failure", func() {
+		config.OVNKubernetesFeature.EnableMultiNetwork = true
+		config.Layer2UsesTransitRouter = true
+		setupConfig(dummyLayer2PrimaryUserDefinedNetwork("192.168.0.0/16"), testConfiguration{}, config.GatewayModeShared)
+		app.Action = func(_ *cli.Context) error {
+			netInfo := dummyLayer2PrimaryUserDefinedNetwork("192.168.0.0/16")
+			nad, err := newNetworkAttachmentDefinition(ns, nadName, *netInfo.netconf())
+			Expect(err).NotTo(HaveOccurred())
+			node, err := newNodeWithUserDefinedNetworks(nodeName, "192.168.126.202/24", netInfo)
+			Expect(err).NotTo(HaveOccurred())
+			initialDB.NBData = append(initialDB.NBData, &nbdb.NBGlobal{Name: nodeName, UUID: nodeName})
+			fakeOvn.startWithDBSetup(initialDB,
+				&corev1.NamespaceList{Items: []corev1.Namespace{*newUDNNamespace(ns)}},
+				&corev1.NodeList{Items: []corev1.Node{*node}},
+				&nadapi.NetworkAttachmentDefinitionList{Items: []nadapi.NetworkAttachmentDefinition{*nad}},
+			)
+			Expect(fakeOvn.networkManager.Start()).To(Succeed())
+			defer fakeOvn.networkManager.Stop()
+			oc := fakeOvn.fullL2UDNControllers[userDefinedNetworkName]
+			Expect(oc).NotTo(BeNil())
+			Expect(oc.init()).To(Succeed())
+			oldKeys := append([]int(nil), oc.GetTunnelKeys()...)
+			Expect(oldKeys).To(HaveLen(2))
+			readKey := func() (string, error) {
+				router, err := libovsdbops.GetLogicalRouter(fakeOvn.nbClient, &nbdb.LogicalRouter{Name: oc.GetNetworkScopedClusterRouterName()})
+				if err != nil {
+					return "", err
+				}
+				return router.Options["requested-tnl-key"], nil
+			}
+			Eventually(readKey).Should(Equal(fmt.Sprint(oldKeys[1])))
+			updated := util.NewMutableNetInfo(oc.GetNetInfo())
+			updated.SetTunnelKeys([]int{oldKeys[0], oldKeys[1] + 1})
+			// A failed OVN write must leave the old keys cached so reconciliation retries it.
+			fakeOvn.nbClient.Close()
+			Eventually(fakeOvn.nbClient.Connected).Should(BeFalse())
+			Expect(oc.Reconcile(updated)).To(HaveOccurred())
+			Expect(oc.GetTunnelKeys()).To(Equal(oldKeys))
+
+			connCtx, cancel := context.WithTimeout(context.Background(), config.Default.OVSDBTxnTimeout)
+			defer cancel()
+			resetNBClient(connCtx, fakeOvn.nbClient)
+			Eventually(readKey).Should(Equal(fmt.Sprint(oldKeys[1])))
+			Expect(oc.Reconcile(updated)).To(Succeed())
+			Expect(oc.GetTunnelKeys()[1]).To(Equal(oldKeys[1] + 1))
+			Eventually(readKey).Should(Equal(fmt.Sprint(oldKeys[1] + 1)))
+			Expect(oc.Reconcile(updated)).To(Succeed())
+			return nil
+		}
+		Expect(app.Run([]string{app.Name})).To(Succeed())
+	})
+
 	It("primary layer 2 UDN: address sets are recreated after controller network recreation", func() {
 		config.OVNKubernetesFeature.EnableMultiNetwork = true
 		setupConfig(dummyLayer2PrimaryUserDefinedNetwork("192.168.0.0/16"), testConfiguration{}, config.GatewayModeShared)

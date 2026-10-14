@@ -22,6 +22,7 @@ import (
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/allocator/id"
 	networkconnectv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/clusternetworkconnect/v1"
 	cncapply "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/clusternetworkconnect/v1/apis/applyconfiguration/clusternetworkconnect/v1"
 	apitypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/types"
@@ -151,7 +152,7 @@ func (c *Controller) syncClusterNetworkConnect(cncName string, cnc *networkconne
 		// Annotations also don't need to be removed since object is already deleted.
 		if cncExists {
 			// Release tunnel key
-			c.tunnelKeysAllocator.ReleaseKeys(cncName)
+			c.tunnelKeysAllocator.ReleaseKeys(id.NetworkConnectTunnelKeyOwner(cncName))
 			klog.V(4).Infof("Released tunnel key for deleted CNC %s", cncName)
 		}
 
@@ -200,21 +201,18 @@ func (c *Controller) syncClusterNetworkConnect(cncName string, cnc *networkconne
 	}
 
 	// STEP3: Generate a tunnelID for the connect router corresponding to this CNC
-	// passing a value greater than 4096 as networkID - actually we don't need this value,
-	// but it's required by the allocator to ensure that the prederministic tunnel keys
-	// that are derived from the networkID are not reused for backwards compatibility reasons.
-	// So we want to skip that range and use the next available tunnel key.
-	// do this only if the CNC is being created - its a one time allocation.
-	if cncState.tunnelID == 0 { // cncState will exist as its created above
-		tunnelID, err := c.tunnelKeysAllocator.AllocateKeys(cnc.Name, 4096+1, 1)
+	// Passing ovntypes.MaxNetworks skips the derived transit-switch key range,
+	// so the CNC receives only a dynamically allocated key.
+	if cncState.tunnelID == 0 {
+		tunnelKeys, err := c.tunnelKeysAllocator.AllocateKeys(id.NetworkConnectTunnelKeyOwner(cnc.Name), ovntypes.MaxNetworks, 1)
 		if err != nil {
 			return fmt.Errorf("failed to allocate tunnel key for CNC %s: %w", cncName, err)
 		}
-		err = util.UpdateNetworkConnectRouterTunnelKeyAnnotation(cnc.Name, c.cncClient, tunnelID[0])
+		err = util.UpdateNetworkConnectRouterTunnelKeyAnnotation(cnc.Name, c.cncClient, tunnelKeys[0])
 		if err != nil {
 			return fmt.Errorf("failed to update network connect router tunnel key annotation for CNC %s: %w", cncName, err)
 		}
-		cncState.tunnelID = tunnelID[0]
+		cncState.tunnelID = tunnelKeys[0]
 	}
 
 	// STEP4: Generate or release subnets of size CNC.Spec.ConnectSubnets.NetworkPrefix for each layer3 network
