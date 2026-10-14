@@ -5653,8 +5653,8 @@ When explicitly specified, the local administrator can be any value within the t
   - EF:OPQR   = 2-byte AS (1-65535) : local administrator (4 bytes, 0-4294967295)
   - GHJK:MN   = 4-byte AS (65536-4294967295) : local administrator (2 bytes, 0-65535)
   - A.B.C.D:MN = IPv4 address (4 bytes) : local administrator (2 bytes, 0-65535)
-  - <em>:OPQR    = wildcard AS : local administrator (4 bytes, 0-4294967295) - for import matching
-  - </em>:MN      = wildcard AS : local administrator (2 bytes, 0-65535) - for import matching</p>
+  - *:OPQR    = wildcard AS : local administrator (4 bytes, 0-4294967295) - for import matching
+  - *:MN      = wildcard AS : local administrator (2 bytes, 0-65535) - for import matching</p>
 <p>The 6-byte constraint means: if AS is 4 bytes, local admin can only be 2 bytes, and vice versa.
 Wildcard (*) matches any AS and is useful for import rules in Downstream VNI scenarios.
 Note: VNI is 24-bit (max 16777215), so auto-generation with 4-byte AS or IPv4 only works if VNI &lt;= 65535.
@@ -5939,7 +5939,7 @@ See: https://docs.frrouting.org/en/stable-8.5/bgp.html#evpn-l3-route-targets</p>
 </tr>
 <tr>
 <td><code>routeTarget</code> <em><a href="#routetargetstring">RouteTargetString</a></em></td>
-<td>RouteTarget is the import/export route target for this VRF.<br>If not specified, it will be auto-generated as "<as (autonomous="" system)="">:<vni (virtual="" network="" identifier)="">".<br>Auto-generation will use 2-byte AS if VNI &gt; 65535, since 4-byte AS/IPv4 only allows 2-byte local admin.<br>Follows FRR EVPN L3 Route-Target format (A.B.C.D:MN|EF:OPQR|GHJK:MN|<em>:OPQR|</em>:MN):<br>  - EF:OPQR   = 2-byte AS (1-65535) : local admin (4 bytes, 1-4294967295)<br>  - GHJK:MN   = 4-byte AS (65536-4294967295) : local admin (2 bytes, 1-65535)<br>  - A.B.C.D:MN = IPv4 address : local admin (2 bytes, 1-65535)<br>  - <em>:OPQR    = wildcard AS : local admin (4 bytes, 1-4294967295) - for import matching<br>  - </em>:MN      = wildcard AS : local admin (2 bytes, 1-65535) - for import matching<br>The 6-byte value constraint (RFC 4360) means AS size + local admin size = 6 bytes.</vni></as></td>
+<td>RouteTarget is the import/export route target for this VRF.<br>If not specified, it will be auto-generated as "<as (autonomous="" system)="">:<vni (virtual="" network="" identifier)="">".<br>Auto-generation will use 2-byte AS if VNI &gt; 65535, since 4-byte AS/IPv4 only allows 2-byte local admin.<br>Follows FRR EVPN L3 Route-Target format (A.B.C.D:MN|EF:OPQR|GHJK:MN|<em>:OPQR|</em>:MN):<br>  - EF:OPQR   = 2-byte AS (1-65535) : local admin (4 bytes, 1-4294967295)<br>  - GHJK:MN   = 4-byte AS (65536-4294967295) : local admin (2 bytes, 1-65535)<br>  - A.B.C.D:MN = IPv4 address : local admin (2 bytes, 1-65535)<br>  - *:OPQR    = wildcard AS : local admin (4 bytes, 1-4294967295) - for import matching<br>  - *:MN      = wildcard AS : local admin (2 bytes, 1-65535) - for import matching<br>The 6-byte value constraint (RFC 4360) means AS size + local admin size = 6 bytes.</vni></as></td>
 <td></td>
 <td>MaxLength: 21 <br></td>
 </tr>
