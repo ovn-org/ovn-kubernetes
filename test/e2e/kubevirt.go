@@ -400,7 +400,9 @@ var _ = Describe("Kubevirt Virtual Machines", feature.VirtualMachineSupport, fun
 					output := ""
 					Eventually(func() error {
 						var err error
-						output, err = virtClient.RunCommand(vmi, fmt.Sprintf("curl http://%s", net.JoinHostPort(podIP, "8000")), polling)
+						// A console timeout does not stop curl in the guest. Finish
+						// before that timeout so retries can obtain a shell prompt.
+						output, err = virtClient.RunCommand(vmi, fmt.Sprintf("curl --connect-timeout 3 --max-time 5 http://%s", net.JoinHostPort(podIP, "8000")), polling)
 						return err
 					}).
 						WithPolling(polling).
@@ -696,7 +698,8 @@ fi
 			step = by(vmName, stage+": Check n/s tcp traffic")
 			output := ""
 			Eventually(func() error {
-				output, err = virtClient.RunCommand(vmi, "curl -kL https://kubernetes.default.svc.cluster.local", polling)
+				// Leave time to read the prompt and exit status after curl ends.
+				output, err = virtClient.RunCommand(vmi, "curl --connect-timeout 3 --max-time 5 -kL https://kubernetes.default.svc.cluster.local", 15*time.Second)
 				return err
 			}).
 				WithPolling(polling).
