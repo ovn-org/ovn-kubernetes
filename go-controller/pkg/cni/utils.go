@@ -105,7 +105,8 @@ func getPodWithAnnotations(ctx context.Context, getter PodInfoGetter,
 		return pod, annotation, ready, err
 	}
 
-	err := wait.PollUntilContextCancel(ctx, podAnnotationPollInterval, true,
+	poll := wait.Backoff{Duration: 2 * time.Millisecond, Factor: 2, Steps: 8, Cap: podAnnotationPollInterval}
+	err := poll.DelayFunc().Until(ctx, true, true,
 		func(context.Context) (bool, error) {
 			var ready bool
 			var err error

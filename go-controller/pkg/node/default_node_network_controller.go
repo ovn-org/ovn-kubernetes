@@ -734,6 +734,28 @@ func (nc *DefaultNodeNetworkController) removeStaleDPUHostAddressAnnotation() er
 	return nil
 }
 
+func (nc *DefaultNodeNetworkController) waitForNodeSubnets(ctx context.Context) (*corev1.Node, []*net.IPNet, error) {
+	ctx, cancel := context.WithTimeout(ctx, 300*time.Second)
+	defer cancel()
+	poll := wait.Backoff{Duration: 2 * time.Millisecond, Factor: 2, Steps: 8, Cap: 500 * time.Millisecond}
+	var node *corev1.Node
+	var subnets []*net.IPNet
+	err := poll.DelayFunc().Until(ctx, true, true, func(context.Context) (bool, error) {
+		var err error
+		if node, err = nc.watchFactory.GetNode(nc.name); err != nil {
+			klog.Infof("Waiting to retrieve node %s: %v", nc.name, err)
+			return false, nil
+		}
+		subnets, err = util.ParseNodeHostSubnetAnnotation(node, types.DefaultNetworkName)
+		if err != nil {
+			klog.Infof("Waiting for node %s to start, no annotation found on node for subnet: %v", nc.name, err)
+			return false, nil
+		}
+		return true, nil
+	})
+	return node, subnets, err
+}
+
 // Init executes the first steps to start the DefaultNodeNetworkController.
 // It is split from Start() and executed before UserDefinedNodeNetworkController (UDNNC)
 // to allow UDNNC to reference the openflow manager created in Init.
@@ -818,18 +840,7 @@ func (nc *DefaultNodeNetworkController) Init(ctx context.Context) error {
 	}
 
 	// First wait for the node logical switch to be created by ovnkube-controller, timeout is 300s.
-	err = wait.PollUntilContextTimeout(ctx, 500*time.Millisecond, 300*time.Second, true, func(_ context.Context) (bool, error) {
-		if node, err = nc.watchFactory.GetNode(nc.name); err != nil {
-			klog.Infof("Waiting to retrieve node %s: %v", nc.name, err)
-			return false, nil
-		}
-		subnets, err = util.ParseNodeHostSubnetAnnotation(node, types.DefaultNetworkName)
-		if err != nil {
-			klog.Infof("Waiting for node %s to start, no annotation found on node for subnet: %v", nc.name, err)
-			return false, nil
-		}
-		return true, nil
-	})
+	node, subnets, err = nc.waitForNodeSubnets(ctx)
 	if err != nil {
 		return fmt.Errorf("timed out waiting for node's: %q logical switch: %v", nc.name, err)
 	}
