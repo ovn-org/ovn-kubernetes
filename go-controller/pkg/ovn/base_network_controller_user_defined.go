@@ -575,7 +575,12 @@ func (bsnc *BaseUserDefinedNetworkController) syncPodsForUserDefinedNetwork(pods
 		}
 
 		isLocalPod := bsnc.isPodScheduledOnLocalNode(pod)
-		hasRemotePort := !isLocalPod || bsnc.isLayer2WithInterconnectTransport()
+		// Keep the ports whose annotation another component writes: remote
+		// ports, layer2 interconnect ports, and localnet ports of pods that
+		// are not completed, which the cluster manager (subnets) or the CNI
+		// (DHCP) annotates.
+		keepPort := !isLocalPod || bsnc.isLayer2WithInterconnectTransport() ||
+			(bsnc.TopologyType() == types.LocalnetTopology && !util.PodCompleted(pod))
 
 		for nadKey := range networkMap {
 			annotations, err := util.UnmarshalPodAnnotation(pod.Annotations, nadKey)
@@ -596,9 +601,7 @@ func (bsnc *BaseUserDefinedNetworkController) syncPodsForUserDefinedNetwork(pods
 				if expectedLogicalPortName != "" {
 					expectedLogicalPorts[expectedLogicalPortName] = true
 				}
-			} else if hasRemotePort {
-				// keep also track of remote ports created for layer2 on
-				// interconnect
+			} else if keepPort {
 				expectedLogicalPorts[bsnc.GetLogicalPortName(pod, nadKey)] = true
 			}
 		}

@@ -147,14 +147,14 @@ var _ = Describe("Network Segmentation: Localnet", feature.NetworkSegmentation, 
 		}
 	})
 
-	It("should preserve LSPs for IPAM-less localnet pods after ovnkube-node restart", func(ctx SpecContext) {
-		const (
-			vlan = 201
-		)
+	// The startup pod sync deletes the logical switch ports it does not expect,
+	// so a restart must keep the port of every running localnet pod: with no
+	// IPAM, ovnkube-node writes the pod annotation; with subnets, the cluster
+	// manager does.
+	DescribeTable("should preserve the LSP of a localnet pod after ovnkube-node restart", func(ctx SpecContext, vlan int, ovsBrName, cidr string) {
 		var (
-			ovsBrName           = "ovsbr-ipamless"
-			cudnName            = uniqueMetaName("ipamless-localnet")
-			physicalNetworkName = uniqueMetaName("physnet-ipamless")
+			cudnName            = uniqueMetaName("restart-localnet")
+			physicalNetworkName = uniqueMetaName("physnet-restart")
 		)
 
 		By("setup the localnet underlay")
@@ -172,16 +172,19 @@ var _ = Describe("Network Segmentation: Localnet", feature.NetworkSegmentation, 
 		f.Namespace = namespace
 		Expect(err).NotTo(HaveOccurred())
 
-		By("create IPAM-less localnet CUDN CR (no subnets)")
+		By("create the localnet CUDN CR")
 		netConf := networkAttachmentConfigParams{
 			name:                cudnName,
 			physicalNetworkName: physicalNetworkName,
 			vlanID:              vlan,
-			cidr:                "", // Empty CIDR = IPAM-less
+			cidr:                cidr, // empty: IPAM-less
 			excludeCIDRs:        []string{},
 		}
 
 		cudnYAML := newLocalnetIPAMLessCUDNYaml(netConf, f.Namespace.Name)
+		if cidr != "" {
+			cudnYAML = newLocalnetCUDNYaml(netConf, f.Namespace.Name)
+		}
 		cleanup, err := createManifest("", cudnYAML)
 		Expect(err).NotTo(HaveOccurred())
 		DeferCleanup(func() {
@@ -195,13 +198,13 @@ var _ = Describe("Network Segmentation: Localnet", feature.NetworkSegmentation, 
 		Eventually(ctx, clusterUserDefinedNetworkReadyFunc(ctx, f.DynamicClient, cudnName)).WithTimeout(5*time.Second).WithPolling(time.Second).
 			Should(Succeed(), "CUDN CR is not ready")
 
-		By("create test pod with IPAM-less localnet network")
+		By("create test pod with the localnet network")
 		podCfg := podConfiguration{
-			name:        "test-ipamless-pod",
+			name:        "test-restart-pod",
 			namespace:   f.Namespace.Name,
 			attachments: []nadapi.NetworkSelectionElement{{Name: cudnName}},
 			labels: map[string]string{
-				"app": "test-ipamless",
+				"app": "test-restart",
 			},
 		}
 		testPod, err := f.ClientSet.CoreV1().Pods(podCfg.namespace).Create(context.Background(), generatePodSpec(podCfg), metav1.CreateOptions{})
@@ -277,7 +280,7 @@ var _ = Describe("Network Segmentation: Localnet", feature.NetworkSegmentation, 
 		ovnkubeNodePod = ovnkubeNodePods.Items[0]
 		framework.Logf("Found new ovnkube-node pod after restart: %s on node %s", ovnkubeNodePod.Name, nodeName)
 
-		By("verify LSP still exists after ovnkube-node restart (this will fail due to bug)")
+		By("verify the LSP was neither deleted nor re-created by the restart")
 		Consistently(findLSP).WithTimeout(10*time.Second).WithPolling(2*time.Second).
 			Should(Equal(expectedLSP), "LSP should not have being recreated after ovnkube-node restart")
 
@@ -286,12 +289,20 @@ var _ = Describe("Network Segmentation: Localnet", feature.NetworkSegmentation, 
 		Expect(err).NotTo(HaveOccurred())
 		_, hasAnnotation := pod.Annotations["k8s.ovn.org/pod-networks"]
 		Expect(hasAnnotation).To(BeTrue(), "pod should still have network annotation")
-	})
+	},
+		Entry("with no IPAM", 201, "ovsbr-ipamless", ""),
+		Entry("with subnets", 202, "ovsbr-subnets", joinStrings("192.168.102.0/24", "2001:dbc::/64")),
+	)
 })
 
 func newLocalnetCUDNYaml(params networkAttachmentConfigParams, selectedNamespaces ...string) string {
 	selectedNs := strings.Join(selectedNamespaces, ",")
-	excludeSubnets := strings.Join(params.excludeCIDRs, ",")
+	// The CRD rejects an empty excludeSubnets list, so leave the field out
+	// when nothing is excluded.
+	excludeSubnets := ""
+	if len(params.excludeCIDRs) > 0 {
+		excludeSubnets = "\n      excludeSubnets: [" + strings.Join(params.excludeCIDRs, ",") + "]"
+	}
 	return `
 apiVersion: k8s.ovn.org/v1
 kind: ClusterUserDefinedNetwork
@@ -308,8 +319,7 @@ spec:
     localnet:
       role: Secondary
       physicalNetworkName: ` + params.physicalNetworkName + `
-      subnets: [` + params.cidr + `]
-      excludeSubnets: [` + excludeSubnets + `]
+      subnets: [` + params.cidr + `]` + excludeSubnets + `
       vlan:
         mode: Access
         access: {id: ` + strconv.Itoa(params.vlanID) + `}
