@@ -171,7 +171,7 @@ RUN INSTALL_PKGS=" \
     python3-pyyaml bind-utils procps-ng openssl numactl-libs \
     libpcap hostname kubernetes-client util-linux \
     ovn ovn-central ovn-host python3-openvswitch tcpdump openvswitch-test python3-pyOpenSSL \
-    iptables nftables iproute iputils ndisc6 libndp \
+    iptables nftables iproute iputils ndisc6 libndp conntrack-tools \
     libreswan openvswitch-ipsec \
     " && \
     dnf install --best --refresh -y --setopt=tsflags=nodocs $INSTALL_PKGS && \

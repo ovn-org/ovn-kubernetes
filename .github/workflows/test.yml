@@ -851,7 +851,7 @@ jobs:
           cp -a test/_artifacts/. /tmp/kind/logs/migration-debug/ || true
           for node in $(kind get nodes --name "${KIND_CLUSTER_NAME}"); do
             mkdir -p "/tmp/kind/logs/migration-debug/$node"
-            docker cp "$node:/tmp/kubevirt-migration-debug/." "/tmp/kind/logs/migration-debug/$node/" || true
+            docker cp "$node:/var/log/kubevirt-migration-debug/." "/tmp/kind/logs/migration-debug/$node/" || true
           done
         fi
         if [ -n "${TRAFFIC_FLOW_TESTS}" ]; then
