@@ -20,12 +20,8 @@ import (
 	ipgenerator "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/generator/ip"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube"
 	objretry "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/retry"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
-)
-
-const (
-	// Maximum node IDs that can be generated. Limited to maximum nodes supported by k8s.
-	maxNodeIDs = 5000
 )
 
 // nodeAllocationController allocates node IDs and transit switch port addresses.
@@ -51,7 +47,7 @@ type nodeAllocationController struct {
 
 func newNodeAllocationController(ovnClient *util.OVNClusterManagerClientset, wf *factory.WatchFactory) (*nodeAllocationController, error) {
 	// Since we don't assign 0 to any node, create IDAllocator with one extra element in maxIds.
-	nodeIDAllocator := id.NewIDAllocator("NodeIDs", maxNodeIDs+1)
+	nodeIDAllocator := id.NewIDAllocator("NodeIDs", types.MaxNodeIDs+1)
 	// Reserve the id 0. We don't want to assign this id to any of the nodes.
 	if err := nodeIDAllocator.ReserveID("zero", 0); err != nil {
 		return nil, fmt.Errorf("idAllocator failed to reserve id 0")
@@ -138,7 +134,7 @@ func needsNodeAllocation(node *corev1.Node) bool {
 		return false
 	}
 
-	if _, ok := node.Annotations[util.OvnNodeID]; !ok {
+	if nodeID, err := util.GetNodeID(node); err != nil || nodeID < types.MinNodeID {
 		return true
 	}
 	if _, ok := node.Annotations[util.OvnTransitSwitchPortAddr]; !ok {

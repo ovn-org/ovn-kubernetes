@@ -1039,16 +1039,39 @@ func TestSyncNodeNetworkAnnotations_TunnelID(t *testing.T) {
 	invalidIDTests := []struct {
 		name            string
 		invalidTunnelID string
+		recover         bool
 	}{
-		{name: "reject negative tunnel ID", invalidTunnelID: "-2"},
+		{name: "recover negative tunnel ID", invalidTunnelID: "-2", recover: true},
+		{name: "recover reserved zero tunnel ID", invalidTunnelID: "0", recover: true},
 		{name: "reject tunnel ID at allocator limit", invalidTunnelID: "1024"},
 	}
 	for _, tt := range invalidIDTests {
 		t.Run(tt.name, func(t *testing.T) {
-			na, node1, _ := setup(t)
+			na, node1, fakeClient := setup(t)
 			networkName := na.netInfo.GetNetworkName()
 			node1.Annotations[types.UDNLayer2NodeGRLRPTunnelIDAnnotation] = fmt.Sprintf(`{"%s":"%s"}`, networkName, tt.invalidTunnelID)
-			if err := na.syncNodeNetworkAnnotations(node1); err == nil {
+			if _, err := fakeClient.CoreV1().Nodes().Update(context.Background(), node1, metav1.UpdateOptions{}); err != nil {
+				t.Fatal(err)
+			}
+			err := na.syncNodeNetworkAnnotations(node1)
+			if tt.recover {
+				if err != nil {
+					t.Fatalf("expected unusable tunnel ID to be replaced: %v", err)
+				}
+				updated, err := fakeClient.CoreV1().Nodes().Get(context.Background(), node1.Name, metav1.GetOptions{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				tunnelID, err := util.ParseUDNLayer2NodeGRLRPTunnelIDs(updated, networkName)
+				if err != nil || tunnelID <= types.NoTunnelID || tunnelID >= 1024 {
+					t.Fatalf("invalid replacement tunnel ID %d: %v", tunnelID, err)
+				}
+				if got := na.idAllocator.GetID(networkName + "_" + node1.Name); got != tunnelID {
+					t.Fatalf("replacement annotation %d differs from reservation %d", tunnelID, got)
+				}
+				return
+			}
+			if err == nil {
 				t.Fatal("expected invalid tunnel ID to be rejected")
 			}
 			if got := na.idAllocator.GetID(networkName + "_" + node1.Name); got != types.InvalidID {

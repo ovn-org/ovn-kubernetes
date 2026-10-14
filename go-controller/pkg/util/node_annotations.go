@@ -17,6 +17,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/retry"
+	"k8s.io/klog/v2"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube"
@@ -514,23 +515,19 @@ func ParseNodeManagementPortMACAddresses(node *corev1.Node, netName string) (net
 }
 
 func HasUDNLayer2NodeGRLRPTunnelID(node *corev1.Node, netName string) bool {
-	var nodeTunMap map[string]json.RawMessage
-	annotation, ok := node.Annotations[types.UDNLayer2NodeGRLRPTunnelIDAnnotation]
-	if !ok {
-		return false
-	}
-	if err := json.Unmarshal([]byte(annotation), &nodeTunMap); err != nil {
-		return false
-	}
-	if _, ok := nodeTunMap[netName]; ok {
-		return true
-	}
-
-	return false
+	// an ID that ParseUDNLayer2NodeGRLRPTunnelIDs reports as unset is not an
+	// allocation, so answering from the bare annotation would disagree with
+	// every caller that goes on to read it
+	_, err := ParseUDNLayer2NodeGRLRPTunnelIDs(node, netName)
+	return err == nil
 }
 
 // ParseUDNLayer2NodeGRLRPTunnelIDs parses the UDN L2 node GR LRP tunnel ID annotation
-// for the specified network in 'netName' and returns the tunnelID.
+// for the specified network in 'netName' and returns the tunnelID. An ID outside
+// [1, types.MaxLogicalPortTunnelKey) is reported as unset so that a usable one is
+// allocated in its place. Zero is excluded because it is the reserved NoTunnelID:
+// the allocator hands it to no one, so reserving an annotated zero for a node
+// fails and aborts network setup.
 func ParseUDNLayer2NodeGRLRPTunnelIDs(node *corev1.Node, netName string) (int, error) {
 	tunnelIDsMap, err := parseNetworkMapAnnotation(node.Annotations, types.UDNLayer2NodeGRLRPTunnelIDAnnotation)
 	if err != nil {
@@ -542,7 +539,23 @@ func ParseUDNLayer2NodeGRLRPTunnelIDs(node *corev1.Node, netName string) (int, e
 		return types.InvalidID, newAnnotationNotSetError("node %q has no %q annotation for network %s", node.Name, types.UDNLayer2NodeGRLRPTunnelIDAnnotation, netName)
 	}
 
-	return strconv.Atoi(tunnelID)
+	id, err := strconv.Atoi(tunnelID)
+	if err != nil {
+		return types.InvalidID, err
+	}
+	// Existing annotations may contain invalid IDs, and callers only screen
+	// the result against InvalidID. Report an out of range ID as unset rather
+	// than as an error: callers replace an unset ID with a freshly allocated
+	// one, whereas an error here aborts network setup for every node. Zero is
+	// out of range too: it is the reserved NoTunnelID, so reserving it for a
+	// node clashes with that reservation and fails.
+	if id <= 0 || id >= types.MaxLogicalPortTunnelKey {
+		klog.Warningf("Ignoring out of range %q tunnel ID %q for network %s on node %q, expected [1, %d)",
+			types.UDNLayer2NodeGRLRPTunnelIDAnnotation, tunnelID, netName, node.Name, types.MaxLogicalPortTunnelKey)
+		return types.InvalidID, newAnnotationNotSetError("node %q has no usable %q annotation for network %s",
+			node.Name, types.UDNLayer2NodeGRLRPTunnelIDAnnotation, netName)
+	}
+	return id, nil
 }
 
 // UpdateUDNLayer2NodeGRLRPTunnelIDs updates the UDN L2 node GR LRP tunnel ID annotation for the network name 'netName' with the tunnel id 'tunnelID'.
@@ -1133,8 +1146,8 @@ func UpdateNodeIDAnnotation(annotations map[string]interface{}, nodeID int) map[
 }
 
 // GetNodeID returns the id of the node set in the 'OvnNodeID' node annotation.
-// Returns InvalidNodeID (-1) if the 'OvnNodeID' node annotation is not set or if the value is
-// not an integer value. On error also returns:
+// Returns InvalidNodeID (-1) if the 'OvnNodeID' node annotation is not set, if the value is
+// not an integer value, or if it falls outside [0, types.MaxNodeIDs]. On error also returns:
 // - NewAnnotationNotSetError if the annotation is missing
 // - strconv.Atoi error if the annotation value is not a valid integer
 func GetNodeID(node *corev1.Node) (int, error) {
@@ -1146,6 +1159,13 @@ func GetNodeID(node *corev1.Node) (int, error) {
 	id, err := strconv.Atoi(nodeID)
 	if err != nil {
 		return InvalidNodeID, err
+	}
+	// Existing annotations must be checked too, so the value has to be
+	// kept inside the range the ID allocator and the OVN resources derived from
+	// it can represent.
+	if id < 0 || id > types.MaxNodeIDs {
+		return InvalidNodeID, fmt.Errorf("%s annotation %q on node %s is out of range [0, %d]",
+			OvnNodeID, nodeID, node.Name, types.MaxNodeIDs)
 	}
 	return id, nil
 }

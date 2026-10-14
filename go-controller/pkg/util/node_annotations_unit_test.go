@@ -594,13 +594,87 @@ func TestParseNodeGatewayMTUSupport(t *testing.T) {
 	}
 }
 
-func TestParseUDNLayer2NodeGRLRPTunnelIDs(t *testing.T) {
+func TestGetNodeID(t *testing.T) {
+	nodeWithID := func(id string) *corev1.Node {
+		return &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:        "node1",
+				Annotations: map[string]string{"k8s.ovn.org/node-id": id},
+			},
+		}
+	}
+
 	tests := []struct {
 		desc        string
 		inpNode     *corev1.Node
-		inpNetName  string
 		res         int
 		errExpected bool
+	}{
+		{
+			desc:        "annotation not set",
+			inpNode:     &corev1.Node{},
+			res:         InvalidNodeID,
+			errExpected: true,
+		},
+		{
+			desc:    "valid id",
+			inpNode: nodeWithID("5"),
+			res:     5,
+		},
+		{
+			desc:    "highest valid id",
+			inpNode: nodeWithID(fmt.Sprintf("%d", types.MaxNodeIDs)),
+			res:     types.MaxNodeIDs,
+		},
+		{
+			desc:        "not an integer",
+			inpNode:     nodeWithID("blah"),
+			res:         InvalidNodeID,
+			errExpected: true,
+		},
+		{
+			desc:        "negative id",
+			inpNode:     nodeWithID("-2"),
+			res:         InvalidNodeID,
+			errExpected: true,
+		},
+		{
+			desc:        "id above the maximum",
+			inpNode:     nodeWithID(fmt.Sprintf("%d", types.MaxNodeIDs+1)),
+			res:         InvalidNodeID,
+			errExpected: true,
+		},
+		{
+			desc:        "id large enough to exhaust the allocator bitmap",
+			inpNode:     nodeWithID("1099511627776"),
+			res:         InvalidNodeID,
+			errExpected: true,
+		},
+	}
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			res, err := GetNodeID(tc.inpNode)
+			if tc.errExpected {
+				t.Log(err)
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
+			assert.Equal(t, tc.res, res)
+		})
+	}
+}
+
+func TestParseUDNLayer2NodeGRLRPTunnelIDs(t *testing.T) {
+	tests := []struct {
+		desc string
+		// notSetExpected additionally requires the error to report the
+		// annotation as unset, so that callers allocate a replacement.
+		notSetExpected bool
+		inpNode        *corev1.Node
+		inpNetName     string
+		res            int
+		errExpected    bool
 	}{
 		{
 			desc:       "annotation not found for node and invalidID",
@@ -647,6 +721,62 @@ func TestParseUDNLayer2NodeGRLRPTunnelIDs(t *testing.T) {
 			errExpected: false,
 			res:         8,
 		},
+		{
+			desc:           "negative ID that is not InvalidID",
+			notSetExpected: true,
+			inpNode: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						"k8s.ovn.org/udn-layer2-node-gateway-router-lrp-tunnel-ids": `{"rednet":"-2"}`,
+					},
+				},
+			},
+			inpNetName:  "rednet",
+			errExpected: true,
+			res:         -1,
+		},
+		{
+			desc:           "zero is the reserved NoTunnelID and read as unset",
+			notSetExpected: true,
+			inpNode: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						"k8s.ovn.org/udn-layer2-node-gateway-router-lrp-tunnel-ids": `{"rednet":"0"}`,
+					},
+				},
+			},
+			inpNetName:  "rednet",
+			errExpected: true,
+			res:         -1,
+		},
+		{
+			desc:           "ID at the top of the allocator range",
+			notSetExpected: true,
+			inpNode: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						"k8s.ovn.org/udn-layer2-node-gateway-router-lrp-tunnel-ids": fmt.Sprintf(`{"rednet":"%d"}`, types.MaxLogicalPortTunnelKey),
+					},
+				},
+			},
+			inpNetName:  "rednet",
+			errExpected: true,
+			res:         -1,
+		},
+		{
+			desc:           "ID large enough to exhaust the allocator bitmap",
+			notSetExpected: true,
+			inpNode: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						"k8s.ovn.org/udn-layer2-node-gateway-router-lrp-tunnel-ids": `{"rednet":"1099511627776"}`,
+					},
+				},
+			},
+			inpNetName:  "rednet",
+			errExpected: true,
+			res:         -1,
+		},
 	}
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
@@ -655,7 +785,13 @@ func TestParseUDNLayer2NodeGRLRPTunnelIDs(t *testing.T) {
 				t.Log(err)
 				require.Error(t, err)
 			}
+			if tc.notSetExpected {
+				require.True(t, IsAnnotationNotSetError(err))
+			}
 			assert.Equal(t, tc.res, res)
+			// callers choose between reading the ID and allocating one based on
+			// HasUDNLayer2NodeGRLRPTunnelID, so it has to agree with the parse
+			assert.Equal(t, err == nil, HasUDNLayer2NodeGRLRPTunnelID(tc.inpNode, tc.inpNetName))
 		})
 	}
 }
