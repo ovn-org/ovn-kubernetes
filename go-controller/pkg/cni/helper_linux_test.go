@@ -1590,6 +1590,63 @@ func TestPodRequest_deletePodConntrackLiveMigration(t *testing.T) {
 	srcNetworks := `{"default":{"ip_addresses":["10.244.1.4/24"]},"` + udnNAD + `":{"ip_addresses":["10.100.200.5/24","fd10:0:2b:f000::5/64"]}}`
 	tgtNetworks := `{"default":{"ip_addresses":["10.244.2.20/24"]},"` + udnNAD + `":{"ip_addresses":["10.100.200.5/24","fd10:0:2b:f000::5/64"]}}`
 
+	t.Run("default network migration preserves dual-stack conntrack across nodes", func(t *testing.T) {
+		for _, tc := range []struct {
+			name         string
+			deleteTarget bool
+			sourcePhase  corev1.PodPhase
+			targetPhase  corev1.PodPhase
+			flush        bool
+		}{
+			{name: "source cleanup during migration"},
+			{name: "completed source cleanup", sourcePhase: corev1.PodSucceeded},
+			{name: "failed target cleanup", deleteTarget: true, targetPhase: corev1.PodFailed},
+			{name: "VM deletion flushes released addresses", sourcePhase: corev1.PodSucceeded, targetPhase: corev1.PodFailed, flush: true},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				const networks = `{"default":{"ip_addresses":["10.244.1.4/24","fd00:10:244:1::4/64"]}}`
+				source := virtPod(srcName, networks)
+				target := virtPod(tgtName, networks)
+				source.Spec.NodeName = "source-node"
+				target.Spec.NodeName = "target-node"
+				source.Status.Phase = tc.sourcePhase
+				target.Status.Phase = tc.targetPhase
+				target.Annotations[kubevirtv1.MigrationTargetReadyTimestamp] = time.Now().Format(time.RFC3339Nano)
+				deletedPod := source
+				if tc.deleteTarget {
+					deletedPod = target
+				}
+
+				pr := newPodRequest(t)
+				pr.PodName = deletedPod.Name
+				pr.CNIConf.PrevResult = &current.Result{
+					CNIVersion: "1.1.0",
+					Interfaces: []*current.Interface{{Name: "eth0", Sandbox: "sandbox"}},
+					IPs: []*current.IPConfig{
+						{Interface: &[]int{0}[0], Address: *ovntest.MustParseIPNet("10.244.1.4/24")},
+						{Interface: &[]int{0}[0], Address: *ovntest.MustParseIPNet("fd00:10:244:1::4/64")},
+					},
+				}
+				mockNetLinkOps := new(util_mocks.NetLinkOps)
+				util.SetNetLinkOpMockInst(mockNetLinkOps)
+				t.Cleanup(util.ResetNetLinkOpMockInst)
+				expectedFlushes := 0
+				if tc.flush {
+					expectedFlushes = 2
+					mockNetLinkOps.On("ConntrackDeleteFilters", netlink.ConntrackTableType(netlink.ConntrackTable), netlink.InetFamily(netlink.FAMILY_V4), mock.Anything).
+						Return(uint(1), nil).Once()
+					mockNetLinkOps.On("ConntrackDeleteFilters", netlink.ConntrackTableType(netlink.ConntrackTable), netlink.InetFamily(netlink.FAMILY_V6), mock.Anything).
+						Return(uint(1), nil).Once()
+				}
+
+				pr.deletePodConntrack(newLister(source, target), deletedPod)
+
+				mockNetLinkOps.AssertExpectations(t)
+				mockNetLinkOps.AssertNumberOfCalls(t, "ConntrackDeleteFilters", expectedFlushes)
+			})
+		}
+	})
+
 	for _, tc := range []struct {
 		name                 string
 		withBridgeAnnotation bool
