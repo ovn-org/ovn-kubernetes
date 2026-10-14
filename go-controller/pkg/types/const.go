@@ -231,6 +231,9 @@ const (
 	OvnK8sTopoAnno            = OvnK8sPrefix + "/" + "topology-version"
 	OvnK8sSmallMTUTaintKey    = OvnK8sPrefix + "/" + "mtu-too-small"
 	OvnRouteAdvertisementsKey = OvnK8sPrefix + "/route-advertisements"
+	// OvnRouteAdvertisementsValidatedKey annotates a FRRConfiguration
+	// generated from input validated by the RouteAdvertisements controller
+	OvnRouteAdvertisementsValidatedKey = OvnK8sPrefix + "/route-advertisements-validated"
 
 	// name of the configmap used to synchronize status (e.g. watch for topology changes)
 	OvnK8sStatusCMName         = "control-plane-status"

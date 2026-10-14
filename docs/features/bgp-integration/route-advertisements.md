@@ -848,6 +848,27 @@ default    Accepted
 extranet   Not Accepted: configuration pending: no networks selected
 ```
 
+The controller validates every value it interpolates into the generated raw
+FRR configuration before generating it. A `RouteAdvertisements` is reported as
+`Not Accepted` and no `FRRConfiguration` is generated for it when:
+
+- `spec.targetVRF` is set to something other than `auto` that is not a valid
+  Linux interface name (at most 15 bytes, no whitespace, `/` or `:`)
+- a selected network has an EVPN VNI outside 1-16777215, a route target that is
+  not of the form `ASN:NN`, `A.B.C.D:NN` or `*:NN`, or a VRF name that is not
+  a valid interface name
+- a neighbor of a selected `FRRConfiguration` has an address that is not an IP
+  address, or an interface that is not a valid interface name
+
+The condition message names the offending field, value and object.
+`FRRConfiguration` objects generated for that `RouteAdvertisements` before
+input validation existed are deleted, so a value rejected after an upgrade
+does not stay in the configuration the nodes run; once none remain, the
+`RouteAdvertisements` is removed from the annotations of the selected networks
+and they stop being advertised. These checks apply to hand-written
+`NetworkAttachmentDefinition` objects too, which are not covered by the
+`ClusterUserDefinedNetwork` CRD validation.
+
 Check that `FRRConfiguration` have been generated as expected:
 
 ```shell
