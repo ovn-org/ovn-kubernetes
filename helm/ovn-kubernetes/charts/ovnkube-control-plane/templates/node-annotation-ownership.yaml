@@ -2,7 +2,9 @@
 SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
 SPDX-License-Identifier: Apache-2.0
 */ -}}
+{{- $hybridOverlayEnabled := eq (toString (default false .Values.global.enableHybridOverlay)) "true" }}
 {{- $clusterManager := "system:serviceaccount:ovn-kubernetes:ovnkube-cluster-manager" }}
+{{- $hybridOverlayWriters := concat (list $clusterManager) (default (list) .Values.global.hybridOverlaySubnetWriters) | uniq }}
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
 metadata:
@@ -19,7 +21,9 @@ spec:
     - name: annotationOwners
       expression: >-
         {
-          "k8s.ovn.org/node-subnets": {{ list $clusterManager | toJson }}
+          "k8s.ovn.org/node-subnets": {{ list $clusterManager | toJson }}{{- if $hybridOverlayEnabled }},
+          "k8s.ovn.org/hybrid-overlay-node-subnet": {{ $hybridOverlayWriters | toJson }}
+          {{- end }}
         }
     # Normalize CREATE requests and objects without annotations to empty maps.
     - name: previousAnnotations
