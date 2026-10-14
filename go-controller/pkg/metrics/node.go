@@ -10,6 +10,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 )
 
@@ -55,6 +56,10 @@ var registerNodeMetricsOnce sync.Once
 func RegisterNodeMetrics(stopChan <-chan struct{}) {
 	registerNodeMetricsOnce.Do(func() {
 		// ovnkube-node metrics
+		if config.Metrics.EnableScaleMetrics {
+			libovsdbops.RegisterTransactMetrics()
+		}
+		registerNodeBGPMetrics()
 		prometheus.MustRegister(MetricCNIRequestDuration)
 		prometheus.MustRegister(MetricNodeReadyDuration)
 		prometheus.MustRegister(metricOvnNodePortEnabled)

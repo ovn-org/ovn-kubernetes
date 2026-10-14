@@ -517,6 +517,53 @@ var _ = Describe("EVPN pod controller", func() {
 				_, exists := ctrl.podNeighbors[sourceKey]
 				Expect(exists).To(BeFalse())
 			})
+
+			It("keeps the programmed source entry intact before the target domain is ready", func() {
+				mac, _ := net.ParseMAC("0a:58:0a:00:00:05")
+				sourceKey := "test-ns/virt-launcher-source"
+
+				// Controller runs on the source node, which still holds the
+				// programmed entries until the target domain becomes ready.
+				ctrl.nodeName = sourceNode
+
+				// Seed the cache with an IP that differs from the one in the
+				// pod annotation, so a rebuild from the annotation is visible.
+				programmedIP := net.ParseIP("10.0.0.99")
+				ctrl.podNeighbors[sourceKey] = &neighEntries{
+					uid:         "virt-launcher-source-uid",
+					sviName:     GetEVPNL2SVIName(netInfo),
+					ovsPortName: GetEVPNOVSPortName(netInfo),
+					macvrfVID:   100,
+					ips:         []net.IP{programmedIP},
+					mac:         mac,
+					programmed:  true,
+				}
+
+				sourcePod := newVirtLauncherPod("virt-launcher-source", sourceNode, -time.Minute, false)
+				targetPod := newVirtLauncherPod("virt-launcher-target", nodeName, 0, false)
+				ctrl.podLister = newFakePodLister(sourcePod, targetPod)
+
+				Expect(ctrl.reconcilePod(sourceKey)).To(Succeed())
+
+				By("verifying nothing was programmed or removed")
+				nlMock.AssertNotCalled(GinkgoT(), "NeighSet", mock.Anything)
+				nlMock.AssertNotCalled(GinkgoT(), "NeighDel", mock.Anything)
+
+				By("verifying the cached entry was not rebuilt from the annotation")
+				ctrl.podNeighLock.Lock()
+				entry, exists := ctrl.podNeighbors[sourceKey]
+				ctrl.podNeighLock.Unlock()
+				Expect(exists).To(BeTrue())
+				Expect(entry.programmed).To(BeTrue(), "entries are still installed in the kernel")
+				Expect(entry.ips).To(HaveLen(1))
+				Expect(entry.ips[0].String()).To(Equal(programmedIP.String()),
+					"the cached IP list must keep describing what was installed")
+
+				By("verifying the entry is still counted")
+				pods, neighbors := countProgrammedEntries(ctrl.podNeighbors)
+				Expect(pods).To(Equal(1))
+				Expect(neighbors).To(Equal(1))
+			})
 		})
 	})
 })
