@@ -608,6 +608,32 @@ var _ = Describe("OVN External Gateway pod", func() {
 			Entry("Gateway pod in not ready state", false),
 		)
 	})
+
+	var _ = Context("When a gateway pod's requested network attachment disappears", func() {
+		It("cleans up stale routes instead of leaving the last known good config in place", func() {
+			initController([]runtime.Object{namespaceGW, namespaceTarget2, targetPod2, pod1}, []runtime.Object{dynamicPolicy})
+
+			expectedPolicy, expectedRefs := expectedPolicyStateAndRefs(
+				[]*namespaceWithPods{namespaceTarget2WithPod},
+				nil,
+				[]*namespaceWithPods{namespaceGWWithPod}, false)
+
+			eventuallyExpectNumberOfPolicies(1)
+			eventuallyExpectConfig(dynamicPolicy.Name, expectedPolicy, expectedRefs)
+			eventuallyCheckAPBRouteStatus(dynamicPolicy.Name, false)
+
+			By("removing the network attachment the dynamic hop relies on, simulating the referenced resource being deleted")
+			updatePodAnnotations(pod1, map[string]string{}, fakeClient)
+
+			expectedPolicy, expectedRefs = expectedPolicyStateAndRefs(
+				[]*namespaceWithPods{namespaceTarget2WithPod},
+				nil,
+				[]*namespaceWithPods{namespaceGWWithoutPod}, false)
+
+			eventuallyExpectNumberOfPolicies(1)
+			eventuallyExpectConfig(dynamicPolicy.Name, expectedPolicy, expectedRefs)
+		})
+	})
 })
 
 func deletePod(pod *corev1.Pod, fakeClient *fake.Clientset) {
@@ -625,6 +651,15 @@ func updatePodLabels(pod *corev1.Pod, newLabels map[string]string, fakeClient *f
 	Expect(err).NotTo(HaveOccurred())
 	incrementResourceVersion(p)
 	p.Labels = newLabels
+	_, err = fakeClient.CoreV1().Pods(pod.Namespace).Update(context.Background(), p, metav1.UpdateOptions{})
+	Expect(err).NotTo(HaveOccurred())
+}
+
+func updatePodAnnotations(pod *corev1.Pod, newAnnotations map[string]string, fakeClient *fake.Clientset) {
+	p, err := fakeClient.CoreV1().Pods(pod.Namespace).Get(context.TODO(), pod.Name, metav1.GetOptions{})
+	Expect(err).NotTo(HaveOccurred())
+	incrementResourceVersion(p)
+	p.Annotations = newAnnotations
 	_, err = fakeClient.CoreV1().Pods(pod.Namespace).Update(context.Background(), p, metav1.UpdateOptions{})
 	Expect(err).NotTo(HaveOccurred())
 }

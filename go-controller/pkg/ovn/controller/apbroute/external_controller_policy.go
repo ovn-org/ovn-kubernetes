@@ -287,7 +287,13 @@ func (m *externalPolicyManager) processDynamicHopsGatewayInformation(hops []*adm
 			for _, pod := range gwPods {
 				foundGws, err := getExGwPodIPs(pod, h.NetworkAttachmentName)
 				if err != nil {
-					return podsInfo, selectedNamespaces, selectedPods, fmt.Errorf("failed to get external GW pod ips: %w", err)
+					// The pod currently can't provide usable gateway IPs (e.g. its referenced network
+					// attachment was removed along with the external resource that owned it). Treat it
+					// like "no gateways found" instead of aborting the whole policy sync, otherwise
+					// updateRoutePolicy() is never reached and routes already applied for this gateway
+					// are never cleaned up.
+					klog.Warningf("Failed to get external GW pod ips for pod %s/%s: %v", pod.Namespace, pod.Name, err)
+					continue
 				}
 				// If we found any gateways then we need to update current pods routing in the relevant namespace
 				if len(foundGws) == 0 {
