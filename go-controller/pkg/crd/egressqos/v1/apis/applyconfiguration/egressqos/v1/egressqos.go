@@ -23,7 +23,7 @@ import (
 // the namespace's EgressQoS, and if there is a match the traffic is marked
 // with the relevant DSCP value.
 type EgressQoSApplyConfiguration struct {
-	metav1.TypeMetaApplyConfiguration    `json:",inline"`
+	metav1.TypeMetaApplyConfiguration    `json:""`
 	*metav1.ObjectMetaApplyConfiguration `json:"metadata,omitempty"`
 	Spec                                 *EgressQoSSpecApplyConfiguration   `json:"spec,omitempty"`
 	Status                               *EgressQoSStatusApplyConfiguration `json:"status,omitempty"`

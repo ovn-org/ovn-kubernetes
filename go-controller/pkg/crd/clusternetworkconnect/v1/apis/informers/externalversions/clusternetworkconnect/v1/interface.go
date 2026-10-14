@@ -12,7 +12,7 @@ import (
 // Interface provides access to all the informers in this group version.
 type Interface interface {
 	// ClusterNetworkConnects returns a ClusterNetworkConnectInformer.
-	ClusterNetworkConnects() ClusterNetworkConnectInformer
+	ClusterNetworkConnects() TypedClusterNetworkConnectInformer
 }
 
 type version struct {
@@ -26,7 +26,7 @@ func New(f internalinterfaces.SharedInformerFactory, namespace string, tweakList
 	return &version{factory: f, namespace: namespace, tweakListOptions: tweakListOptions}
 }
 
-// ClusterNetworkConnects returns a ClusterNetworkConnectInformer.
-func (v *version) ClusterNetworkConnects() ClusterNetworkConnectInformer {
+// ClusterNetworkConnects returns a TypedClusterNetworkConnectInformer.
+func (v *version) ClusterNetworkConnects() TypedClusterNetworkConnectInformer {
 	return &clusterNetworkConnectInformer{factory: v.factory, tweakListOptions: v.tweakListOptions}
 }

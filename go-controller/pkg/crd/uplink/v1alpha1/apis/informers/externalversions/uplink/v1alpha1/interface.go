@@ -12,9 +12,9 @@ import (
 // Interface provides access to all the informers in this group version.
 type Interface interface {
 	// Uplinks returns a UplinkInformer.
-	Uplinks() UplinkInformer
+	Uplinks() TypedUplinkInformer
 	// UplinkStates returns a UplinkStateInformer.
-	UplinkStates() UplinkStateInformer
+	UplinkStates() TypedUplinkStateInformer
 }
 
 type version struct {
@@ -28,12 +28,12 @@ func New(f internalinterfaces.SharedInformerFactory, namespace string, tweakList
 	return &version{factory: f, namespace: namespace, tweakListOptions: tweakListOptions}
 }
 
-// Uplinks returns a UplinkInformer.
-func (v *version) Uplinks() UplinkInformer {
+// Uplinks returns a TypedUplinkInformer.
+func (v *version) Uplinks() TypedUplinkInformer {
 	return &uplinkInformer{factory: v.factory, tweakListOptions: v.tweakListOptions}
 }
 
-// UplinkStates returns a UplinkStateInformer.
-func (v *version) UplinkStates() UplinkStateInformer {
+// UplinkStates returns a TypedUplinkStateInformer.
+func (v *version) UplinkStates() TypedUplinkStateInformer {
 	return &uplinkStateInformer{factory: v.factory, tweakListOptions: v.tweakListOptions}
 }

@@ -12,7 +12,7 @@ import (
 // Interface provides access to all the informers in this group version.
 type Interface interface {
 	// EgressFirewalls returns a EgressFirewallInformer.
-	EgressFirewalls() EgressFirewallInformer
+	EgressFirewalls() TypedEgressFirewallInformer
 }
 
 type version struct {
@@ -26,7 +26,7 @@ func New(f internalinterfaces.SharedInformerFactory, namespace string, tweakList
 	return &version{factory: f, namespace: namespace, tweakListOptions: tweakListOptions}
 }
 
-// EgressFirewalls returns a EgressFirewallInformer.
-func (v *version) EgressFirewalls() EgressFirewallInformer {
+// EgressFirewalls returns a TypedEgressFirewallInformer.
+func (v *version) EgressFirewalls() TypedEgressFirewallInformer {
 	return &egressFirewallInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
 }

@@ -20,7 +20,7 @@ import (
 // ClusterNetworkConnect enables connecting multiple User Defined Networks
 // and/or Cluster User Defined Networks together.
 type ClusterNetworkConnectApplyConfiguration struct {
-	metav1.TypeMetaApplyConfiguration    `json:",inline"`
+	metav1.TypeMetaApplyConfiguration    `json:""`
 	*metav1.ObjectMetaApplyConfiguration `json:"metadata,omitempty"`
 	Spec                                 *ClusterNetworkConnectSpecApplyConfiguration   `json:"spec,omitempty"`
 	Status                               *ClusterNetworkConnectStatusApplyConfiguration `json:"status,omitempty"`

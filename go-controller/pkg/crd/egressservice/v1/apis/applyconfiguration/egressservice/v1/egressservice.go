@@ -24,7 +24,7 @@ import (
 // all of the pods that are endpoints of the LoadBalancer service would use a different
 // network than the main one.
 type EgressServiceApplyConfiguration struct {
-	metav1.TypeMetaApplyConfiguration    `json:",inline"`
+	metav1.TypeMetaApplyConfiguration    `json:""`
 	*metav1.ObjectMetaApplyConfiguration `json:"metadata,omitempty"`
 	Spec                                 *EgressServiceSpecApplyConfiguration   `json:"spec,omitempty"`
 	Status                               *EgressServiceStatusApplyConfiguration `json:"status,omitempty"`

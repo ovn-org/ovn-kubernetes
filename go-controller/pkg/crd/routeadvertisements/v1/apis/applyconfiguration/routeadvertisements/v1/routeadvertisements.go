@@ -19,7 +19,7 @@ import (
 //
 // RouteAdvertisements is the Schema for the routeadvertisements API
 type RouteAdvertisementsApplyConfiguration struct {
-	metav1.TypeMetaApplyConfiguration    `json:",inline"`
+	metav1.TypeMetaApplyConfiguration    `json:""`
 	*metav1.ObjectMetaApplyConfiguration `json:"metadata,omitempty"`
 	Spec                                 *RouteAdvertisementsSpecApplyConfiguration   `json:"spec,omitempty"`
 	Status                               *RouteAdvertisementsStatusApplyConfiguration `json:"status,omitempty"`

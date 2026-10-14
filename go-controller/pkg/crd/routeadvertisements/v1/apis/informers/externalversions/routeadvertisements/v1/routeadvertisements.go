@@ -21,11 +21,39 @@ import (
 )
 
 // RouteAdvertisementsInformer provides access to a shared informer and lister for
-// RouteAdvertisements.
+// RouteAdvertisements. Prefer using the type-safe variant (see [TypedRouteAdvertisementsInformer]).
 type RouteAdvertisementsInformer interface {
 	Informer() cache.SharedIndexInformer
 	Lister() routeadvertisementsv1.RouteAdvertisementsLister
 }
+
+// TypedRouteAdvertisementsInformer provides access to a shared informer and lister for
+// RouteAdvertisements, including the type-safe TypedInformer variant.
+// It is a superset of RouteAdvertisementsInformer.
+type TypedRouteAdvertisementsInformer interface {
+	Informer() cache.SharedIndexInformer
+	TypedInformer() RouteAdvertisementsIndexInformer
+	Lister() routeadvertisementsv1.RouteAdvertisementsLister
+}
+
+// RouteAdvertisementsIndexInformer is a wrapper around the underlying [cache.SharedIndexInformer]
+// with type-safe variants of several methods.
+type RouteAdvertisementsIndexInformer cache.TypedSharedIndexInformer[*crdrouteadvertisementsv1.RouteAdvertisements]
+
+// RouteAdvertisementsHandlerFuncs is a specialization of [cache.TypedResourceEventHandlerFuncs] for RouteAdvertisements.
+type RouteAdvertisementsHandlerFuncs = cache.TypedResourceEventHandlerFuncs[*crdrouteadvertisementsv1.RouteAdvertisements]
+
+// RouteAdvertisementsDetailedHandlerFuncs is a specialization of [cache.TypedResourceEventHandlerDetailedFuncs] for RouteAdvertisements.
+type RouteAdvertisementsDetailedHandlerFuncs = cache.TypedResourceEventHandlerDetailedFuncs[*crdrouteadvertisementsv1.RouteAdvertisements]
+
+// RouteAdvertisementsFilteringHandler is a specialization of [cache.TypedFilteringResourceEventHandler] for RouteAdvertisements.
+type RouteAdvertisementsFilteringHandler = cache.TypedFilteringResourceEventHandler[*crdrouteadvertisementsv1.RouteAdvertisements]
+
+// RouteAdvertisementsIndexers is a specialization of [cache.TypedIndexers] for RouteAdvertisements.
+type RouteAdvertisementsIndexers = cache.TypedIndexers[*crdrouteadvertisementsv1.RouteAdvertisements]
+
+// DeletedRouteAdvertisements is a specialization of [cache.DeletedObject] for RouteAdvertisements.
+type DeletedRouteAdvertisements = cache.DeletedObject[*crdrouteadvertisementsv1.RouteAdvertisements]
 
 type routeAdvertisementsInformer struct {
 	factory          internalinterfaces.SharedInformerFactory
@@ -35,25 +63,49 @@ type routeAdvertisementsInformer struct {
 // NewRouteAdvertisementsInformer constructs a new informer for RouteAdvertisements type.
 // Always prefer using an informer factory to get a shared informer instead of getting an independent
 // one. This reduces memory footprint and number of connections to the server.
+// If you really need an independent one, prefer using the type-safe variant (see [NewTypedRouteAdvertisementsInformer]).
 func NewRouteAdvertisementsInformer(client versioned.Interface, resyncPeriod time.Duration, indexers cache.Indexers) cache.SharedIndexInformer {
 	return NewRouteAdvertisementsInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: indexers})
+}
+
+// NewTypedRouteAdvertisementsInformer constructs a new informer for RouteAdvertisements type.
+// Always prefer using an informer factory to get a shared informer instead of getting an independent
+// one. This reduces memory footprint and number of connections to the server.
+func NewTypedRouteAdvertisementsInformer(client versioned.Interface, resyncPeriod time.Duration, indexers RouteAdvertisementsIndexers) RouteAdvertisementsIndexInformer {
+	return NewTypedRouteAdvertisementsInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: cache.TypedIndexersToIndexers(indexers)})
 }
 
 // NewFilteredRouteAdvertisementsInformer constructs a new informer for RouteAdvertisements type.
 // Always prefer using an informer factory to get a shared informer instead of getting an independent
 // one. This reduces memory footprint and number of connections to the server.
+// If you really need an independent one, prefer using the type-safe variant (see [NewTypedFilteredRouteAdvertisementsInformer]).
 func NewFilteredRouteAdvertisementsInformer(client versioned.Interface, resyncPeriod time.Duration, indexers cache.Indexers, tweakListOptions internalinterfaces.TweakListOptionsFunc) cache.SharedIndexInformer {
-	return NewRouteAdvertisementsInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: indexers, TweakListOptions: tweakListOptions})
+	return NewTypedRouteAdvertisementsInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: indexers, TweakListOptions: tweakListOptions})
+}
+
+// NewTypedFilteredRouteAdvertisementsInformer constructs a new informer for RouteAdvertisements type.
+// Always prefer using an informer factory to get a shared informer instead of getting an independent
+// one. This reduces memory footprint and number of connections to the server.
+func NewTypedFilteredRouteAdvertisementsInformer(client versioned.Interface, resyncPeriod time.Duration, indexers RouteAdvertisementsIndexers, tweakListOptions internalinterfaces.TweakListOptionsFunc) RouteAdvertisementsIndexInformer {
+	return NewTypedRouteAdvertisementsInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: cache.TypedIndexersToIndexers(indexers), TweakListOptions: tweakListOptions})
 }
 
 // NewRouteAdvertisementsInformerWithOptions constructs a new informer for RouteAdvertisements type with additional options.
 // Always prefer using an informer factory to get a shared informer instead of getting an independent
 // one. This reduces memory footprint and number of connections to the server.
+// If you really need an independent one, prefer using the type-safe variant (see [NewTypedRouteAdvertisementsInformerWithOptions]).
 func NewRouteAdvertisementsInformerWithOptions(client versioned.Interface, options internalinterfaces.InformerOptions) cache.SharedIndexInformer {
+	return NewTypedRouteAdvertisementsInformerWithOptions(client, options)
+}
+
+// NewTypedRouteAdvertisementsInformerWithOptions constructs a new informer for RouteAdvertisements type with additional options.
+// Always prefer using an informer factory to get a shared informer instead of getting an independent
+// one. This reduces memory footprint and number of connections to the server.
+func NewTypedRouteAdvertisementsInformerWithOptions(client versioned.Interface, options internalinterfaces.InformerOptions) RouteAdvertisementsIndexInformer {
 	gvr := schema.GroupVersionResource{Group: "k8s.ovn.org", Version: "v1", Resource: "routeadvertisementss"}
 	identifier := options.InformerName.WithResource(gvr)
 	tweakListOptions := options.TweakListOptions
-	return cache.NewSharedIndexInformerWithOptions(
+	return cache.NewTypedSharedIndexInformer[*crdrouteadvertisementsv1.RouteAdvertisements](cache.NewSharedIndexInformerWithOptions(
 		cache.ToListWatcherWithWatchListSemantics(&cache.ListWatch{
 			ListFunc: func(opts metav1.ListOptions) (runtime.Object, error) {
 				if tweakListOptions != nil {
@@ -86,17 +138,57 @@ func NewRouteAdvertisementsInformerWithOptions(client versioned.Interface, optio
 			Indexers:     options.Indexers,
 			Identifier:   identifier,
 		},
-	)
+	))
 }
 
 func (f *routeAdvertisementsInformer) defaultInformer(client versioned.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
-	return NewRouteAdvertisementsInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}, InformerName: f.factory.InformerName(), TweakListOptions: f.tweakListOptions})
+	return NewTypedRouteAdvertisementsInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}, InformerName: f.factory.InformerName(), TweakListOptions: f.tweakListOptions})
 }
 
 func (f *routeAdvertisementsInformer) Informer() cache.SharedIndexInformer {
-	return f.factory.InformerFor(&crdrouteadvertisementsv1.RouteAdvertisements{}, f.defaultInformer)
+	return f.TypedInformer()
+}
+
+func (f *routeAdvertisementsInformer) TypedInformer() RouteAdvertisementsIndexInformer {
+	return cache.NewTypedSharedIndexInformer[*crdrouteadvertisementsv1.RouteAdvertisements](f.factory.InformerFor(&crdrouteadvertisementsv1.RouteAdvertisements{}, f.defaultInformer))
 }
 
 func (f *routeAdvertisementsInformer) Lister() routeadvertisementsv1.RouteAdvertisementsLister {
 	return routeadvertisementsv1.NewRouteAdvertisementsLister(f.Informer().GetIndexer())
+}
+
+// ToTypedRouteAdvertisementsInformer converts an untyped informer into a TypedRouteAdvertisementsInformer.
+//
+// WARNING: this conversion is only safe if the informer handles objects of type
+// *RouteAdvertisements. If that is not the case, calling type-safe methods of the returned
+// TypedRouteAdvertisementsInformer leads to runtime panics. A safer alternative is to pass
+// around a TypedRouteAdvertisementsInformer instances that was obtained from a
+// SharedInformerFactory.
+func ToTypedRouteAdvertisementsInformer(informer RouteAdvertisementsInformer) TypedRouteAdvertisementsInformer {
+	if informer, ok := informer.(TypedRouteAdvertisementsInformer); ok {
+		return informer
+	}
+	return &routeAdvertisementsTypedInformerAdapter{informer}
+}
+
+type routeAdvertisementsTypedInformerAdapter struct {
+	RouteAdvertisementsInformer
+}
+
+func (a *routeAdvertisementsTypedInformerAdapter) TypedInformer() RouteAdvertisementsIndexInformer {
+	return cache.NewTypedSharedIndexInformer[*crdrouteadvertisementsv1.RouteAdvertisements](a.Informer())
+}
+
+// ToRouteAdvertisementsIndexInformer converts an untyped informer into a RouteAdvertisementsIndexInformer.
+//
+// WARNING: this conversion is only safe if the informer handles objects of type
+// *RouteAdvertisements. If that is not the case, calling type-safe methods of the returned
+// RouteAdvertisementsIndexInformer leads to runtime panics. A safer alternative is to pass
+// around a RouteAdvertisementsIndexInformer instances that was obtained from a
+// SharedInformerFactory.
+func ToRouteAdvertisementsIndexInformer(informer cache.SharedIndexInformer) RouteAdvertisementsIndexInformer {
+	if informer, ok := informer.(RouteAdvertisementsIndexInformer); ok {
+		return informer
+	}
+	return cache.NewTypedSharedIndexInformer[*crdrouteadvertisementsv1.RouteAdvertisements](informer)
 }

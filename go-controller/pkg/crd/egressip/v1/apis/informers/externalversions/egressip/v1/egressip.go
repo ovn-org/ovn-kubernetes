@@ -21,11 +21,39 @@ import (
 )
 
 // EgressIPInformer provides access to a shared informer and lister for
-// EgressIPs.
+// EgressIPs. Prefer using the type-safe variant (see [TypedEgressIPInformer]).
 type EgressIPInformer interface {
 	Informer() cache.SharedIndexInformer
 	Lister() egressipv1.EgressIPLister
 }
+
+// TypedEgressIPInformer provides access to a shared informer and lister for
+// EgressIPs, including the type-safe TypedInformer variant.
+// It is a superset of EgressIPInformer.
+type TypedEgressIPInformer interface {
+	Informer() cache.SharedIndexInformer
+	TypedInformer() EgressIPIndexInformer
+	Lister() egressipv1.EgressIPLister
+}
+
+// EgressIPIndexInformer is a wrapper around the underlying [cache.SharedIndexInformer]
+// with type-safe variants of several methods.
+type EgressIPIndexInformer cache.TypedSharedIndexInformer[*crdegressipv1.EgressIP]
+
+// EgressIPHandlerFuncs is a specialization of [cache.TypedResourceEventHandlerFuncs] for EgressIP.
+type EgressIPHandlerFuncs = cache.TypedResourceEventHandlerFuncs[*crdegressipv1.EgressIP]
+
+// EgressIPDetailedHandlerFuncs is a specialization of [cache.TypedResourceEventHandlerDetailedFuncs] for EgressIP.
+type EgressIPDetailedHandlerFuncs = cache.TypedResourceEventHandlerDetailedFuncs[*crdegressipv1.EgressIP]
+
+// EgressIPFilteringHandler is a specialization of [cache.TypedFilteringResourceEventHandler] for EgressIP.
+type EgressIPFilteringHandler = cache.TypedFilteringResourceEventHandler[*crdegressipv1.EgressIP]
+
+// EgressIPIndexers is a specialization of [cache.TypedIndexers] for EgressIP.
+type EgressIPIndexers = cache.TypedIndexers[*crdegressipv1.EgressIP]
+
+// DeletedEgressIP is a specialization of [cache.DeletedObject] for EgressIP.
+type DeletedEgressIP = cache.DeletedObject[*crdegressipv1.EgressIP]
 
 type egressIPInformer struct {
 	factory          internalinterfaces.SharedInformerFactory
@@ -35,25 +63,49 @@ type egressIPInformer struct {
 // NewEgressIPInformer constructs a new informer for EgressIP type.
 // Always prefer using an informer factory to get a shared informer instead of getting an independent
 // one. This reduces memory footprint and number of connections to the server.
+// If you really need an independent one, prefer using the type-safe variant (see [NewTypedEgressIPInformer]).
 func NewEgressIPInformer(client versioned.Interface, resyncPeriod time.Duration, indexers cache.Indexers) cache.SharedIndexInformer {
 	return NewEgressIPInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: indexers})
+}
+
+// NewTypedEgressIPInformer constructs a new informer for EgressIP type.
+// Always prefer using an informer factory to get a shared informer instead of getting an independent
+// one. This reduces memory footprint and number of connections to the server.
+func NewTypedEgressIPInformer(client versioned.Interface, resyncPeriod time.Duration, indexers EgressIPIndexers) EgressIPIndexInformer {
+	return NewTypedEgressIPInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: cache.TypedIndexersToIndexers(indexers)})
 }
 
 // NewFilteredEgressIPInformer constructs a new informer for EgressIP type.
 // Always prefer using an informer factory to get a shared informer instead of getting an independent
 // one. This reduces memory footprint and number of connections to the server.
+// If you really need an independent one, prefer using the type-safe variant (see [NewTypedFilteredEgressIPInformer]).
 func NewFilteredEgressIPInformer(client versioned.Interface, resyncPeriod time.Duration, indexers cache.Indexers, tweakListOptions internalinterfaces.TweakListOptionsFunc) cache.SharedIndexInformer {
-	return NewEgressIPInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: indexers, TweakListOptions: tweakListOptions})
+	return NewTypedEgressIPInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: indexers, TweakListOptions: tweakListOptions})
+}
+
+// NewTypedFilteredEgressIPInformer constructs a new informer for EgressIP type.
+// Always prefer using an informer factory to get a shared informer instead of getting an independent
+// one. This reduces memory footprint and number of connections to the server.
+func NewTypedFilteredEgressIPInformer(client versioned.Interface, resyncPeriod time.Duration, indexers EgressIPIndexers, tweakListOptions internalinterfaces.TweakListOptionsFunc) EgressIPIndexInformer {
+	return NewTypedEgressIPInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: cache.TypedIndexersToIndexers(indexers), TweakListOptions: tweakListOptions})
 }
 
 // NewEgressIPInformerWithOptions constructs a new informer for EgressIP type with additional options.
 // Always prefer using an informer factory to get a shared informer instead of getting an independent
 // one. This reduces memory footprint and number of connections to the server.
+// If you really need an independent one, prefer using the type-safe variant (see [NewTypedEgressIPInformerWithOptions]).
 func NewEgressIPInformerWithOptions(client versioned.Interface, options internalinterfaces.InformerOptions) cache.SharedIndexInformer {
+	return NewTypedEgressIPInformerWithOptions(client, options)
+}
+
+// NewTypedEgressIPInformerWithOptions constructs a new informer for EgressIP type with additional options.
+// Always prefer using an informer factory to get a shared informer instead of getting an independent
+// one. This reduces memory footprint and number of connections to the server.
+func NewTypedEgressIPInformerWithOptions(client versioned.Interface, options internalinterfaces.InformerOptions) EgressIPIndexInformer {
 	gvr := schema.GroupVersionResource{Group: "k8s.ovn.org", Version: "v1", Resource: "egressips"}
 	identifier := options.InformerName.WithResource(gvr)
 	tweakListOptions := options.TweakListOptions
-	return cache.NewSharedIndexInformerWithOptions(
+	return cache.NewTypedSharedIndexInformer[*crdegressipv1.EgressIP](cache.NewSharedIndexInformerWithOptions(
 		cache.ToListWatcherWithWatchListSemantics(&cache.ListWatch{
 			ListFunc: func(opts metav1.ListOptions) (runtime.Object, error) {
 				if tweakListOptions != nil {
@@ -86,17 +138,57 @@ func NewEgressIPInformerWithOptions(client versioned.Interface, options internal
 			Indexers:     options.Indexers,
 			Identifier:   identifier,
 		},
-	)
+	))
 }
 
 func (f *egressIPInformer) defaultInformer(client versioned.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
-	return NewEgressIPInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}, InformerName: f.factory.InformerName(), TweakListOptions: f.tweakListOptions})
+	return NewTypedEgressIPInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}, InformerName: f.factory.InformerName(), TweakListOptions: f.tweakListOptions})
 }
 
 func (f *egressIPInformer) Informer() cache.SharedIndexInformer {
-	return f.factory.InformerFor(&crdegressipv1.EgressIP{}, f.defaultInformer)
+	return f.TypedInformer()
+}
+
+func (f *egressIPInformer) TypedInformer() EgressIPIndexInformer {
+	return cache.NewTypedSharedIndexInformer[*crdegressipv1.EgressIP](f.factory.InformerFor(&crdegressipv1.EgressIP{}, f.defaultInformer))
 }
 
 func (f *egressIPInformer) Lister() egressipv1.EgressIPLister {
 	return egressipv1.NewEgressIPLister(f.Informer().GetIndexer())
+}
+
+// ToTypedEgressIPInformer converts an untyped informer into a TypedEgressIPInformer.
+//
+// WARNING: this conversion is only safe if the informer handles objects of type
+// *EgressIP. If that is not the case, calling type-safe methods of the returned
+// TypedEgressIPInformer leads to runtime panics. A safer alternative is to pass
+// around a TypedEgressIPInformer instances that was obtained from a
+// SharedInformerFactory.
+func ToTypedEgressIPInformer(informer EgressIPInformer) TypedEgressIPInformer {
+	if informer, ok := informer.(TypedEgressIPInformer); ok {
+		return informer
+	}
+	return &egressIPTypedInformerAdapter{informer}
+}
+
+type egressIPTypedInformerAdapter struct {
+	EgressIPInformer
+}
+
+func (a *egressIPTypedInformerAdapter) TypedInformer() EgressIPIndexInformer {
+	return cache.NewTypedSharedIndexInformer[*crdegressipv1.EgressIP](a.Informer())
+}
+
+// ToEgressIPIndexInformer converts an untyped informer into a EgressIPIndexInformer.
+//
+// WARNING: this conversion is only safe if the informer handles objects of type
+// *EgressIP. If that is not the case, calling type-safe methods of the returned
+// EgressIPIndexInformer leads to runtime panics. A safer alternative is to pass
+// around a EgressIPIndexInformer instances that was obtained from a
+// SharedInformerFactory.
+func ToEgressIPIndexInformer(informer cache.SharedIndexInformer) EgressIPIndexInformer {
+	if informer, ok := informer.(EgressIPIndexInformer); ok {
+		return informer
+	}
+	return cache.NewTypedSharedIndexInformer[*crdegressipv1.EgressIP](informer)
 }

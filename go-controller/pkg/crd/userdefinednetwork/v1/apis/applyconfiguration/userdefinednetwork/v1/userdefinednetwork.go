@@ -19,7 +19,7 @@ import (
 //
 // UserDefinedNetwork describe network request for a Namespace.
 type UserDefinedNetworkApplyConfiguration struct {
-	metav1.TypeMetaApplyConfiguration    `json:",inline"`
+	metav1.TypeMetaApplyConfiguration    `json:""`
 	*metav1.ObjectMetaApplyConfiguration `json:"metadata,omitempty"`
 	Spec                                 *UserDefinedNetworkSpecApplyConfiguration   `json:"spec,omitempty"`
 	Status                               *UserDefinedNetworkStatusApplyConfiguration `json:"status,omitempty"`

@@ -12,7 +12,7 @@ import (
 // Interface provides access to all the informers in this group version.
 type Interface interface {
 	// AdminPolicyBasedExternalRoutes returns a AdminPolicyBasedExternalRouteInformer.
-	AdminPolicyBasedExternalRoutes() AdminPolicyBasedExternalRouteInformer
+	AdminPolicyBasedExternalRoutes() TypedAdminPolicyBasedExternalRouteInformer
 }
 
 type version struct {
@@ -26,7 +26,7 @@ func New(f internalinterfaces.SharedInformerFactory, namespace string, tweakList
 	return &version{factory: f, namespace: namespace, tweakListOptions: tweakListOptions}
 }
 
-// AdminPolicyBasedExternalRoutes returns a AdminPolicyBasedExternalRouteInformer.
-func (v *version) AdminPolicyBasedExternalRoutes() AdminPolicyBasedExternalRouteInformer {
+// AdminPolicyBasedExternalRoutes returns a TypedAdminPolicyBasedExternalRouteInformer.
+func (v *version) AdminPolicyBasedExternalRoutes() TypedAdminPolicyBasedExternalRouteInformer {
 	return &adminPolicyBasedExternalRouteInformer{factory: v.factory, tweakListOptions: v.tweakListOptions}
 }
