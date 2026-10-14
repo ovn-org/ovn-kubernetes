@@ -2778,16 +2778,22 @@ func InitConfigSa(ctx *cli.Context, exec kexec.Interface, saPath string, default
 	return initConfigWithPath(ctx, exec, saPath, defaults)
 }
 
-// stripTokenFromK8sConfig removes k8s SA token & CAData values
-// from the KubernetesConfig struct used for logging.
-func stripTokenFromK8sConfig() KubernetesConfig {
-	k8sConf := Kubernetes
-	// Token and CAData are sensitive fields so stripping
-	// them while logging.
+// redactKubernetesConfig returns a copy of k8sConf with the bearer token and
+// CA material cleared. Every log line that prints a KubernetesConfig must go
+// through it, and any new field carrying inline credentials must be cleared here.
+func redactKubernetesConfig(k8sConf KubernetesConfig) KubernetesConfig {
 	k8sConf.Token = ""
 	k8sConf.CACertData = ""
 	k8sConf.CAData = []byte{}
 	return k8sConf
+}
+
+// redactConfig returns a copy of cfg safe to log. The Kubernetes section is
+// the only one that carries inline credentials; every other section holds
+// file paths or non-secret settings.
+func redactConfig(cfg config) config {
+	cfg.Kubernetes = redactKubernetesConfig(cfg.Kubernetes)
+	return cfg
 }
 
 // initConfigWithPath reads the given config file (or if empty, reads the config file
@@ -2847,7 +2853,7 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 			klog.Warningf("Warning on parsing config file: %s", err)
 		}
 		klog.Infof("Parsed config file %s", f.Name())
-		klog.Infof("Parsed config: %+v", cfg)
+		klog.Infof("Parsed config: %+v", redactConfig(cfg))
 	}
 
 	if defaults == nil {
@@ -2991,7 +2997,7 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 	klog.V(5).Infof("Monitoring config: %+v", Monitoring)
 	klog.V(5).Infof("IPFIX config: %+v", IPFIX)
 	klog.V(5).Infof("CNI config: %+v", CNI)
-	klog.V(5).Infof("Kubernetes config: %+v", stripTokenFromK8sConfig())
+	klog.V(5).Infof("Kubernetes config: %+v", redactKubernetesConfig(Kubernetes))
 	klog.V(5).Infof("Gateway config: %+v", Gateway)
 	klog.V(5).Infof("OVN North config: %+v", OvnNorth)
 	klog.V(5).Infof("OVN South config: %+v", OvnSouth)
