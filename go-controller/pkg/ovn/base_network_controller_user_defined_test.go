@@ -1707,10 +1707,18 @@ var _ = Describe("localnet pod sync at startup", func() {
 		Entry("with subnets", subnets, nadKey),
 		// the CNI writes the annotation of a DHCP network
 		Entry("with DHCP", dhcp, nadKey),
+		// the selection stops listing the network after the pod was
+		// wired; the running controller keeps the port
+		Entry("without IPAM whose selection was emptied", noIPAM, ""),
+		Entry("with DHCP whose selection was emptied", dhcp, ""),
 	)
 
 	completed := newPod(nadKey)
 	completed.Status.Phase = corev1.PodSucceeded
+	withoutPodNetworks := newPod("")
+	delete(withoutPodNetworks.Annotations, types.OvnPodAnnotationName)
+	completedWithoutSelection := newPod("")
+	completedWithoutSelection.Status.Phase = corev1.PodSucceeded
 
 	DescribeTable("deletes the port",
 		func(ipam string, pod *corev1.Pod) {
@@ -1718,6 +1726,9 @@ var _ = Describe("localnet pod sync at startup", func() {
 		},
 		Entry("of a completed pod with subnets", subnets, completed),
 		Entry("of a completed pod with DHCP", dhcp, completed),
+		Entry("of a deleted pod", noIPAM, (*corev1.Pod)(nil)),
+		Entry("of a pod whose selection was emptied without a pod-networks entry", noIPAM, withoutPodNetworks),
+		Entry("of a completed pod whose selection was emptied", noIPAM, completedWithoutSelection),
 	)
 })
 

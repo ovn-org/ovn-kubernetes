@@ -565,12 +565,20 @@ func (bsnc *BaseUserDefinedNetworkController) syncPodsForUserDefinedNetwork(pods
 			bsnc.networkManager.GetNetworkNameForNADKey,
 			bsnc.networkManager.GetPrimaryNADForNamespace,
 		)
-		if err != nil || !on {
-			if err != nil {
-				bsnc.recordPodErrorEvent(pod, err)
-				klog.Errorf("Failed to determine if pod %s/%s needs to be plumb interface on network %s: %v",
-					pod.Namespace, pod.Name, bsnc.GetNetworkName(), err)
-			}
+		if err != nil {
+			bsnc.recordPodErrorEvent(pod, err)
+			klog.Errorf("Failed to determine if pod %s/%s needs to be plumb interface on network %s: %v",
+				pod.Namespace, pod.Name, bsnc.GetNetworkName(), err)
+			continue
+		}
+		// The running controller leaves the port of a pod alone when its
+		// selection stops listing a NAD of the network, so keep the localnet
+		// ports that pod-networks still records instead of cutting their
+		// datapath on restart.
+		if bsnc.TopologyType() == types.LocalnetTopology && !util.PodCompleted(pod) {
+			bsnc.expectAnnotatedLogicalPorts(pod, expectedLogicalPorts)
+		}
+		if !on {
 			continue
 		}
 
@@ -608,6 +616,21 @@ func (bsnc *BaseUserDefinedNetworkController) syncPodsForUserDefinedNetwork(pods
 	}
 
 	return bsnc.deleteStaleLogicalSwitchPorts(expectedLogicalPorts)
+}
+
+// expectAnnotatedLogicalPorts marks the logical ports of pod for each NAD key
+// of this network that the pod-networks annotation records.
+func (bsnc *BaseUserDefinedNetworkController) expectAnnotatedLogicalPorts(pod *corev1.Pod, expectedLogicalPorts map[string]bool) {
+	podNetworks, err := util.UnmarshalPodAnnotationAllNetworks(pod.Annotations)
+	if err != nil {
+		klog.Errorf("Failed to get pod-networks of pod %s/%s: %v", pod.Namespace, pod.Name, err)
+		return
+	}
+	for nadKey := range podNetworks {
+		if bsnc.networkManager.GetNetworkNameForNADKey(nadKey) == bsnc.GetNetworkName() {
+			expectedLogicalPorts[bsnc.GetLogicalPortName(pod, nadKey)] = true
+		}
+	}
 }
 
 // AddNamespaceForUserDefinedNetwork creates corresponding addressset in ovn db for User Defined Network
