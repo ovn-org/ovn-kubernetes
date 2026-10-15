@@ -12,6 +12,10 @@ This is in token=value format.
 .SH SECTIONS
 .SH [Default]
 .TP
+\fBexternally-managed-floating-ips\fR=
+Comma-separated IPv4 and IPv6 floating IPs not owned or managed by OVN-Kubernetes,
+such as those provided by keepalived or kube-vip.
+.TP
 \fBmtu\fR=1400
 MTU value used for the overlay network.
 .TP

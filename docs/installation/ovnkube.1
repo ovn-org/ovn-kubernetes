@@ -133,6 +133,11 @@ The Common Name of the certificate used for TLS server certificate verification 
 \fB\--ovnkube-node-mode\fR string
 ovnkube-node operating mode full(default), dpu, dpu-host (default: "full")
 .TP
+\fB\--externally-managed-floating-ips\fR string
+Comma-separated IPv4 and IPv6 floating IPs not owned or managed by OVN-Kubernetes,
+such as those provided by keepalived or kube-vip. The equivalent config-file
+option is externally-managed-floating-ips in [Default].
+.TP
 \fB\--help\fR, \fB\-h\fR
 Show help.
 .TP

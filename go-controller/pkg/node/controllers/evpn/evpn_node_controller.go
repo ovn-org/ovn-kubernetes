@@ -798,13 +798,15 @@ func (c *Controller) discoverUnmanagedVTEPIPs(vtep *vtepv1.VTEP) (net.IP, net.IP
 // resolveVTEPIP returns the IP to use for a given family. If the VTEP IP
 // is still present among the node IPs and within the VTEP's CIDRs, it is
 // returned. Otherwise, a new IP is selected from matching node IPs.
+// Explicitly configured externally managed floating IPs are excluded.
 func (c *Controller) resolveVTEPIP(family int, vtepCIDRs []*net.IPNet, nodeIPs []net.IP, vtepIP net.IP) (net.IP, error) {
 	if len(vtepCIDRs) == 0 {
 		return nil, nil
 	}
 
 	equalsVTEPIP := func(ip net.IP) bool { return ip.Equal(vtepIP) }
-	if vtepIP != nil && slices.ContainsFunc(nodeIPs, equalsVTEPIP) && util.IsIPContainedInAnyCIDR(vtepIP, vtepCIDRs...) {
+	if vtepIP != nil && slices.ContainsFunc(nodeIPs, equalsVTEPIP) && util.IsIPContainedInAnyCIDR(vtepIP, vtepCIDRs...) &&
+		!util.IsExternallyManagedFloatingIP(vtepIP.String()) {
 		return vtepIP, nil
 	}
 
@@ -891,12 +893,13 @@ func (c *Controller) setVTEPAnnotation(vtepName string, ipv4, ipv6 net.IP) (err 
 }
 
 // pickVTEPIP selects a single VTEP IP from the candidates for the given address family.
-// If there's exactly one match, it's used directly. Multiple matches trigger a netlink
-// lookup to filter out keepalived VIPs and secondary addresses (which can float between
-// nodes). If ambiguity remains, the lexicographically lowest IP is chosen for determinism.
+// If there's exactly one match, it's used unless explicitly configured as an externally managed floating IP.
+// Multiple matches trigger a netlink lookup to filter out externally managed floating IPs and secondary
+// addresses (which can float between nodes). If ambiguity remains, the lexicographically
+// lowest IP is chosen for determinism.
 func (c *Controller) pickVTEPIP(matches []net.IP, family int) (net.IP, error) {
 	if len(matches) <= 1 {
-		if len(matches) == 1 {
+		if len(matches) == 1 && !util.IsExternallyManagedFloatingIP(matches[0].String()) {
 			return matches[0], nil
 		}
 		return nil, nil
@@ -909,7 +912,7 @@ func (c *Controller) pickVTEPIP(matches []net.IP, family int) (net.IP, error) {
 	}
 	skipIPs := map[string]bool{}
 	for _, addr := range addrs {
-		if util.IsAddressAddedByKeepAlived(addr) || (addr.Flags&unix.IFA_F_SECONDARY) != 0 {
+		if util.IsAddressAddedByKeepAlived(addr) || util.IsExternallyManagedFloatingIP(addr.IP.String()) || (addr.Flags&unix.IFA_F_SECONDARY) != 0 {
 			skipIPs[addr.IP.String()] = true
 		}
 	}

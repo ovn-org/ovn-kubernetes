@@ -112,6 +112,14 @@ spec:
 > address up when a physical link goes down, enabling EVPN multihoming and
 > mass withdrawal failover.
 
+> [!NOTE]
+> Ingress or API VIPs may share a subnet with the node IP. When that subnet is
+> included in the VTEP CIDRs, these VIPs also match and may be selected as the
+> VTEP IP. Configure `--externally-managed-floating-ips` on each node that might host
+> them to exclude them from VTEP selection. See
+> [Externally Managed Floating IPs](../../getting-started/configuration.md#externally-managed-floating-ips)
+> for a configuration example.
+
 ### Step 3: Create RouteAdvertisements
 
 Create a `RouteAdvertisements` CR that selects the EVPN CUDNs and references

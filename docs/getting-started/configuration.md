@@ -4,6 +4,16 @@ Let us look at the supported configuration variables by OVN-Kubernetes
 
 ## Default Config
 
+### Externally Managed Floating IPs
+
+Use `--externally-managed-floating-ips` for floating IPs owned by another component,
+such as keepalived or kube-vip. Listed addresses are excluded from filtered
+interface/gateway address discovery and unmanaged EVPN VTEP selection:
+
+```text
+--externally-managed-floating-ips=192.0.2.100,2001:db8::100
+```
+
 ## Gateway Config
 
 ### Disable Forwarding Config
