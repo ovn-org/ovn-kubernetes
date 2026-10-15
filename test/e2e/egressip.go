@@ -1836,13 +1836,17 @@ spec:
 			}
 
 			ginkgo.By("15. Check the OVN DB to ensure SNATs are added for either egressIP1 or egressIP3")
-			snats, err = e2ekubectl.RunKubectl(ovnKubernetesNamespace, "exec", dbPod, "-c", dbContainerName, "--", "ovn-nbctl", "--columns=external_ip", "find", "nat", logicalIP)
-			if err != nil {
-				framework.Failf("Error: Check the OVN DB to ensure SNATs are added for either egressIP1 or egressIP3, err: %v", err)
-			}
-			if !(strings.Contains(snats, "\""+egressIP3.String()+"\"") || strings.Contains(snats, "\""+toKeepEIP+"\"")) {
-				framework.Failf("Step 15. Check the OVN DB to ensure SNATs are added for either egressIP1 or egressIP3, failed")
-			}
+			// Status assignment precedes OVN programming on the destination node.
+			// Wait for its database, keeping the successful result for the next steps.
+			gomega.Eventually(func(g gomega.Gomega) {
+				snats, err = e2ekubectl.RunKubectl(ovnKubernetesNamespace, "exec", dbPod, "-c", dbContainerName, "--", "ovn-nbctl", "--columns=external_ip", "find", "nat", logicalIP)
+				g.Expect(err).NotTo(gomega.HaveOccurred())
+				g.Expect(snats).To(gomega.Or(
+					gomega.ContainSubstring("\""+egressIP3.String()+"\""),
+					gomega.ContainSubstring("\""+toKeepEIP+"\""),
+				))
+			}).WithTimeout(retryTimeout).WithPolling(retryInterval).Should(gomega.Succeed(),
+				"Step 15. Check the OVN DB to ensure SNATs are added for either egressIP1 or egressIP3")
 			var toDelete, unassignedEIP string
 			if strings.Contains(snats, "\""+egressIP3.String()+"\"") {
 				assignedEIP = egressIP3.String()
