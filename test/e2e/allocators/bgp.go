@@ -54,13 +54,13 @@ type BGPAllocation struct {
 // function.
 func AllocateBGP(f *framework.Framework, cleanup infraapi.ContextCleanUp) (BGPAllocation, error) {
 	bgpOnce.Do(func() {
-		bgpPeer4 = newSubnetSpec(bgpPeerSubnets, nil)
-		bgpPeer6 = newSubnetSpec(bgpPeerSubnets6, nil)
-		bgpIPVRF4 = newSubnetSpec(ipvrfSubnets, nil)
-		bgpIPVRF6 = newSubnetSpec(ipvrfSubnets6, nil)
-		bgpVTEP4 = newSubnetSpec(vtepSubnets, nil)
-		bgpVTEP6 = newSubnetSpec(vtepSubnets6, nil)
-		v4Exclusions, v6Exclusions := machineNetworkExclusions()
+		v4Exclusions, v6Exclusions := infrastructureNetworkExclusions()
+		bgpPeer4 = newSubnetSpec(bgpPeerSubnets, v4Exclusions)
+		bgpPeer6 = newSubnetSpec(bgpPeerSubnets6, v6Exclusions)
+		bgpIPVRF4 = newSubnetSpec(ipvrfSubnets, v4Exclusions)
+		bgpIPVRF6 = newSubnetSpec(ipvrfSubnets6, v6Exclusions)
+		bgpVTEP4 = newSubnetSpec(vtepSubnets, v4Exclusions)
+		bgpVTEP6 = newSubnetSpec(vtepSubnets6, v6Exclusions)
 		bgpUDN4 = newSubnetSpec(udnSubnets, v4Exclusions)
 		bgpUDN6 = newSubnetSpec(udnSubnets6, v6Exclusions)
 	})

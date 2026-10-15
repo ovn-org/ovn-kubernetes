@@ -23,6 +23,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/kubernetes/test/e2e/framework"
 )
@@ -149,6 +150,10 @@ func kindClusterName() string {
 		return strings.TrimPrefix(ctx, "kind-")
 	}
 	return ""
+}
+
+func (k *kind) InfrastructureNetworkExclusions() (ipv4, ipv6 sets.Set[string]) {
+	return nil, nil
 }
 
 func (k *kind) ShutdownNode(nodeName string) error {
