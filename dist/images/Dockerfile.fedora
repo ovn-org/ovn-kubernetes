@@ -96,7 +96,10 @@ RUN echo "Running on $BUILDPLATFORM, building for $TARGETPLATFORM"
 # Final stage
 RUN dnf install --best --refresh -y --setopt=tsflags=nodocs koji
 
-RUN if [ "$TARGETPLATFORM" = "linux/amd64" ] || [ -z "$TARGETPLATFORM" ] ; then koji download-build $ovnver --arch=x86_64  ; \
+# Prefer IPv4. Docker/buildkit IPv6 is often a documentation prefix (2001:db8::)
+# that cannot complete SYN to Fedora koji AAAA records, so download-build hangs.
+RUN echo "precedence ::ffff:0:0/96  100" >> /etc/gai.conf && \
+    if [ "$TARGETPLATFORM" = "linux/amd64" ] || [ -z "$TARGETPLATFORM" ] ; then koji download-build $ovnver --arch=x86_64  ; \
     else koji download-build $ovnver --arch=aarch64 ; fi
 
 ######################################
