@@ -30,7 +30,8 @@ var (
 	// dnsmasq 2.83; pinned by digest for CI reproducibility.
 	// TODO: mirror to a project-controlled registry (ghcr/quay) — docker.io
 	// pulls are rate-limited in CI and this is a personal repository.
-	dnsmasq = "docker.io/andyshinn/dnsmasq:2.83@sha256:e937327fede666e55ba4c2ab8e715a2ce561945363016d42f9d698d1b18ff1be"
+	dnsmasq                     = "docker.io/andyshinn/dnsmasq:2.83@sha256:e937327fede666e55ba4c2ab8e715a2ce561945363016d42f9d698d1b18ff1be"
+	fedoraKubevirtContainerDisk = "quay.io/kubevirtci/fedora-with-test-tooling:v20250416-e37573e"
 
 	imageConfigs map[api.ImageID]string
 )
@@ -57,16 +58,20 @@ func init() {
 	if frrOverride := os.Getenv("FRR_IMAGE"); frrOverride != "" {
 		frr = frrOverride
 	}
+	if fedoraKubevirtContainerDiskOverride := os.Getenv("FEDORA_KUBEVIRT_CONTAINER_DISK_IMAGE"); fedoraKubevirtContainerDiskOverride != "" {
+		fedoraKubevirtContainerDisk = fedoraKubevirtContainerDiskOverride
+	}
 
 	imageConfigs = map[api.ImageID]string{
-		api.Agnhost:               agnHost,
-		api.IPerf3:                iperf3,
-		api.Netshoot:              netshoot,
-		api.Nginx:                 nginx,
-		api.MetalLBLBService:      metallbLBService,
-		api.UDPServerSrcIPPrinter: udpServerSrcIPPrinter,
-		api.FRR:                   frr,
-		api.DNSMasq:               dnsmasq,
+		api.Agnhost:                     agnHost,
+		api.IPerf3:                      iperf3,
+		api.Netshoot:                    netshoot,
+		api.Nginx:                       nginx,
+		api.MetalLBLBService:            metallbLBService,
+		api.UDPServerSrcIPPrinter:       udpServerSrcIPPrinter,
+		api.FRR:                         frr,
+		api.DNSMasq:                     dnsmasq,
+		api.FedoraKubevirtContainerDisk: fedoraKubevirtContainerDisk,
 	}
 }
 

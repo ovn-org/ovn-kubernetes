@@ -975,22 +975,26 @@ var _ = Describe("Watch Factory Operations", func() {
 		})
 	})
 
+	// Counters are incremented only after the wrapped callback has returned or
+	// failed, so that a count of N means N callbacks have finished, not just
+	// started. A failed callback is counted so that waiters exit promptly with
+	// the callback's own failure instead of timing out.
 	addFilteredHandler := func(wf *WatchFactory, objType reflect.Type, realObjType reflect.Type, namespace string, sel labels.Selector, funcs cache.ResourceEventHandlerFuncs) (*Handler, *handlerCalls) {
 		calls := handlerCalls{}
 		h, err := wf.addHandler(objType, namespace, sel, cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				defer GinkgoRecover()
-				atomic.AddInt32(&calls.added, 1)
+				defer atomic.AddInt32(&calls.added, 1)
 				funcs.AddFunc(obj)
 			},
 			UpdateFunc: func(old, new interface{}) {
 				defer GinkgoRecover()
-				atomic.AddInt32(&calls.updated, 1)
+				defer atomic.AddInt32(&calls.updated, 1)
 				funcs.UpdateFunc(old, new)
 			},
 			DeleteFunc: func(obj interface{}) {
 				defer GinkgoRecover()
-				atomic.AddInt32(&calls.deleted, 1)
+				defer atomic.AddInt32(&calls.deleted, 1)
 				funcs.DeleteFunc(obj)
 			},
 		}, nil, wf.GetHandlerPriority(realObjType))
@@ -1424,24 +1428,29 @@ var _ = Describe("Watch Factory Operations", func() {
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
 
-		startWg := sync.WaitGroup{}
-		startWg.Add(1)
+		// Updates processed by the shared informer before addHandler flips
+		// hasHandlers are dropped, so they must only be sent once the handler
+		// receives its first initial add. They are then queued while the
+		// remaining initial adds are in flight and delivered after them.
+		firstAdd := make(chan struct{})
+		firstAddOnce := sync.Once{}
 		doneWg := sync.WaitGroup{}
 		doneWg.Add(1)
 		go func() {
-			startWg.Done()
+			defer GinkgoRecover()
+			defer doneWg.Done()
+			Eventually(firstAdd, 10).Should(BeClosed(), "no initial add event delivered")
 			// Send an update event for each namespace
 			for _, n := range namespaces {
 				n.Status.Phase = corev1.NamespaceTerminating
 				namespaceWatch.Modify(n)
 			}
-			doneWg.Done()
 		}()
-		startWg.Wait()
 
 		h, c := addHandler(wf, NamespaceType, cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				defer GinkgoRecover()
+				firstAddOnce.Do(func() { close(firstAdd) })
 				namespace := obj.(*corev1.Namespace)
 				ot, ok := testNamespaces[namespace.Name]
 				Expect(ok).To(BeTrue())
