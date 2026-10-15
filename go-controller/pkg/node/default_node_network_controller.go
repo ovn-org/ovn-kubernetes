@@ -997,7 +997,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) (err error) {
 			nc.Kube,
 			nc.name,
 			nc.watchFactory.NodeInformer(),
-			nc.watchFactory.LocalPodInformer(),
+			nc.watchFactory.PodInformer(),
 			informer.NewDefaultEventHandler,
 			false,
 		)

@@ -92,18 +92,17 @@ func podChanged(old, new interface{}) bool {
 // When used by the HO binary, it prepares the windows or SDN (SDN <-> OVN
 // migration) nodes for the HO tunnel. This is flagged by setting isHONode to true.
 
-// TODO(jtanenba) the localPodInformer no longer selects only local pods
 func NewNode(
 	kube kube.Interface,
 	nodeName string,
 	nodeInformer cache.SharedIndexInformer,
-	localPodInformer cache.SharedIndexInformer,
+	podInformer cache.SharedIndexInformer,
 	eventHandlerCreateFunction informer.EventHandlerCreateFunction,
 	isHONode bool,
 ) (*Node, error) {
 
 	nodeLister := listers.NewNodeLister(nodeInformer.GetIndexer())
-	localPodLister := listers.NewPodLister(localPodInformer.GetIndexer())
+	localPodLister := listers.NewPodLister(podInformer.GetIndexer())
 
 	controller, err := newNodeController(kube, nodeName, nodeLister, localPodLister, isHONode)
 	if err != nil {
@@ -130,7 +129,7 @@ func NewNode(
 	if err != nil {
 		return nil, err
 	}
-	n.podEventHandler, err = eventHandlerCreateFunction("pod", localPodInformer,
+	n.podEventHandler, err = eventHandlerCreateFunction("pod", podInformer,
 		func(obj interface{}) error {
 			pod, ok := obj.(*corev1.Pod)
 			if !ok {

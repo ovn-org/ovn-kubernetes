@@ -820,9 +820,9 @@ func (wf *WatchFactory) Stop() {
 // NewNodeWatchFactory initializes a watch factory with significantly fewer
 // informers to save memory + bandwidth. It is to be used by the node-only process.
 //
-// TODO(jtanenba) originally the pod selector was only supposed to select pods local to the node
-// commit 91046e889... changed that and pod selector selects all pods in the cluster fix the naming
-// of the localPodSelector or figure out how to deal with selecting all pods everywhere.
+// The pod informer is cluster-wide on purpose: multiple features need to look up remote pods
+// (e.g. APBRoute, UDN host isolation, EgressIP, EVPN, CNI live-migration IP preservation).
+// Node-local consumers can filter on pod.Spec.NodeName.
 func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeName string) (*WatchFactory, error) {
 	wf := &WatchFactory{
 		handlerCounter:       &handlerCounter{},
@@ -853,13 +853,6 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeName string) (
 		return nil, err
 	}
 
-	var err error
-	wf.informers[PodType], err = newQueuedInformer(eventQueueSize, PodType, wf.iFactory.Core().V1().Pods().Informer(), wf.stopChan,
-		defaultNumEventQueues)
-	if err != nil {
-		return nil, err
-	}
-
 	// For Services and Endpoints, pre-populate the shared Informer with one that
 	// has a label selector excluding headless services.
 	wf.iFactory.InformerFor(&corev1.Service{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
@@ -871,26 +864,6 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeName string) (
 			noAlternateProxySelector())
 	})
 
-	// For Pods, only select pods scheduled to this node
-	wf.iFactory.InformerFor(&corev1.Pod{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
-		return v1coreinformers.NewFilteredPodInformer(
-			c,
-			corev1.NamespaceAll,
-			resyncPeriod,
-			cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
-			func(opts *metav1.ListOptions) {
-				opts.FieldSelector = fields.OneTermEqualSelector("spec.nodeName", nodeName).String()
-			})
-	})
-
-	// For namespaces
-	wf.iFactory.InformerFor(&corev1.Namespace{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
-		return v1coreinformers.NewNamespaceInformer(
-			c,
-			resyncPeriod,
-			cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc})
-	})
-
 	wf.iFactory.InformerFor(&discovery.EndpointSlice{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
 		return discoveryinformers.NewFilteredEndpointSliceInformer(
 			c,
@@ -900,6 +873,7 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeName string) (
 			getEndpointSliceSelector())
 	})
 
+	var err error
 	wf.informers[NamespaceType], err = newQueuedInformer(eventQueueSize, NamespaceType, wf.iFactory.Core().V1().Namespaces().Informer(),
 		wf.stopChan, defaultNumEventQueues)
 	if err != nil {
@@ -1890,12 +1864,6 @@ func (wf *WatchFactory) NodeInformer() cache.SharedIndexInformer {
 
 func (wf *WatchFactory) NodeCoreInformer() v1coreinformers.NodeInformer {
 	return wf.iFactory.Core().V1().Nodes()
-}
-
-// LocalPodInformer returns a shared Informer that may or may not only
-// return pods running on the local node.
-func (wf *WatchFactory) LocalPodInformer() cache.SharedIndexInformer {
-	return wf.informers[PodType].inf
 }
 
 func (wf *WatchFactory) PodInformer() cache.SharedIndexInformer {
