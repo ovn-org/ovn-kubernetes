@@ -2,578 +2,578 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/api-reference/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/api-reference/admin-epbr-api-spec/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/api-reference/clusternetworkconnect-api-spec/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/api-reference/egress-firewall-api-spec/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/api-reference/egress-ip-api-spec/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/api-reference/egress-qos-api-spec/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/api-reference/egress-service-api-spec/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/api-reference/introduction/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/api-reference/routeadvertisements-api-spec/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/api-reference/uplink-api-spec/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/api-reference/userdefinednetwork-api-spec/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/api-reference/vtep-api-spec/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/blog/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/blog/2026/02/12/accelerating-and-offloading-kubernetes-networking-leveraging-dpus-with-ovn-kubernetes/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/blog/2026/09/01/why-iij-chose-ovn-kubernetes-for-its-vm-workload-migration-platform-and-how-we-use-it-today/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/blog/2026/03/12/debugging-networkpolicies-with-netobserv/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/blog/2026/09/03/saic-motors-kubernetes-based-multi-tenant-networking-practice-building-a-unified-network-foundation-with-ovn-kubernetes/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/blog/2026/09/01/scaling-user-defined-networks/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/ci/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/ci/ci/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/design/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/design/acls/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/design/architecture/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/design/bridge-flows/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/design/egressip/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/design/external-ip-and-loadbalancer-ingress/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/design/gateway-accelerated-interface-configuration/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/design/gateway-modes/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/design/host-to-node-port-hairpin-trafficflow/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/design/masquerade-ips/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/design/pod-creation-workflow/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/design/service-creation-workflow/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/design/service-traffic-policy/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/design/topology/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/design/traffic-flows/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/developer-guide/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/developer-guide/areas/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/developer-guide/debugging/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/developer-guide/developer/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/developer-guide/documentation/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/developer-guide/image-build/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/developer-guide/local_testing_guide/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/developer-guide/maintenance/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/developer-guide/release/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/developer-guide/testing/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/features/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/features/hybrid-overlay/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/features/live-migration/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/features/multicast/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/features/ovs-dynamic-cpu-affinity/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/features/requirements/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/features/template/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/features/bgp-integration/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/features/bgp-integration/evpn/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/features/bgp-integration/no-overlay/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/features/bgp-integration/route-advertisements/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/features/cluster-egress-controls/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/features/cluster-egress-controls/egress-ip/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/features/cluster-egress-controls/egress-qos/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/features/cluster-egress-controls/egress-service/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/features/hardware-offload/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/features/hardware-offload/derive-from-mgmt-port/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/features/hardware-offload/dpu-gateway-interface/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/features/hardware-offload/dpu-support/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/features/hardware-offload/ovs-doca/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/features/hardware-offload/ovs-kernel/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/features/infrastructure-security-controls/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/features/infrastructure-security-controls/node-identity/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/features/multiple-networks/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/features/multiple-networks/multi-homing/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/features/multiple-networks/multi-network-policies/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/features/multiple-networks/multi-vtep/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/features/network-qos/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/features/network-qos/overview/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/features/network-qos/usage-guide/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/features/network-security-controls/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/features/network-security-controls/admin-network-policy/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/features/network-security-controls/dns-name-resolution/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/features/network-security-controls/egress-firewall/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/features/network-security-controls/network-policy/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/features/user-defined-networks/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/features/user-defined-networks/cluster-network-connect/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/features/user-defined-networks/dhcp-ipam-localnet/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/features/user-defined-networks/dynamic-udn/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/features/user-defined-networks/uplinks/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/features/user-defined-networks/user-defined-networks/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/getting-started/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/getting-started/building-ovn-kubernetes/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/getting-started/configuration/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/getting-started/example-pod-creation/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/getting-started/example-service-creation/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/getting-started/launching-ovn-kubernetes/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/getting-started/overview/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/getting-started/running-release/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/getting-started/running-rpm/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/governance/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/governance/CODE_OF_CONDUCT/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/governance/CONTRIBUTING/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/governance/GOVERNANCE/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/governance/MAINTAINERS/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/governance/MEETINGS/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/governance/REVIEWING/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/governance/SECURITY/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/installation/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/installation/INSTALL.KUBEADM/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/installation/INSTALL.UBUNTU/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/installation/launching-ovn-kubernetes-on-kind/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/installation/launching-ovn-kubernetes-with-dpu/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/installation/launching-ovn-kubernetes-with-helm/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/observability/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/observability/metrics/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/observability/ovn-observability/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/observability/sdn-dashboard/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/observability/metrics/ovn/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/observability/metrics/ovnkube-control-plane/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/observability/metrics/ovnkube-node/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/observability/metrics/ovs/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/okeps/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/okeps/okep-3926-disable-port-security/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/okeps/okep-4368-template/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/okeps/okep-4380-network-qos/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/okeps/okep-5085-localnet-api/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/okeps/okep-5088-evpn/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/okeps/okep-5094-layer2-transit-router/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/okeps/okep-5193-user-defined-networks/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/okeps/okep-5212-ovnobserv-api/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/okeps/okep-5233-preconfigured-udn-addresses/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/okeps/okep-5259-no-overlay/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/okeps/okep-5296-bgp/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/okeps/okep-5377-extend-udn-to-support-multiple-cluster-subnets-in-layer3-topology/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/okeps/okep-5494-ovn-kubernetes-mcp-server/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/okeps/okep-5552-dynamic-udn-node-allocation/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/okeps/okep-5674-dpu-healthcheck/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/okeps/okep-6019-vrf-lite-shared-gateway-external-bridges/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/okeps/okep-6224-dhcp-ipam-localnet/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/okeps/okep-6800-egressip-node-selector/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/okeps/okep-5224-connecting-udns/discarded-alternatives/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/okeps/okep-5224-connecting-udns/okep-5224-connecting-udns/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/troubleshooting/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/troubleshooting/debugging/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/troubleshooting/ovnkube-trace/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/troubleshooting/udn/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
     <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/blog/archive/2026/</loc>
-         <lastmod>2026-10-14</lastmod>
+         <lastmod>2026-10-15</lastmod>
     </url>
 </urlset>
