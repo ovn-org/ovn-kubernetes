@@ -10,10 +10,12 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	cnitypes "github.com/containernetworking/cni/pkg/types"
 	nadfake "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/fake"
 	"github.com/stretchr/testify/mock"
 	"github.com/vishvananda/netlink"
@@ -24,8 +26,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/kubernetes/fake"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/knftables"
 
+	ovncnitypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	adminpolicybasedrouteclient "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/clientset/versioned/fake"
 	udnfakeclient "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/clientset/versioned/fake"
@@ -405,6 +409,186 @@ var _ = Describe("DeleteEndpointSlice", func() {
 	AfterEach(func() {
 		watcher.Shutdown()
 	})
+
+	DescribeTable("preserves Service steering across endpoint changes", func(mode config.GatewayMode, serviceType corev1.ServiceType, nodePort bool, etpLocal, itpLocal, udn bool) {
+		config.Gateway.Mode = mode
+		config.IPv6Mode = true
+		Expect(nft.(*knftables.Fake).ParseDump(nftablesRulesBase + nftablesRulesGatewayServices)).To(Succeed())
+		npw.ofm.flowChan = make(chan struct{}, 20)
+		networkName := types.DefaultNetworkName
+		if udn {
+			config.OVNKubernetesFeature.EnableNetworkSegmentation = true
+			netInfo, err := util.NewNetInfo(&ovncnitypes.NetConf{NetConf: cnitypes.NetConf{Name: "blue"},
+				Topology: types.Layer2Topology, Role: types.NetworkRolePrimary, Subnets: "10.244.0.0/16,fd00:10:244::/48"})
+			Expect(err).NotTo(HaveOccurred())
+			npw.networkManager = &mockNetworkManagerWithActiveUDN{netInfo: netInfo}
+			Expect(npw.ofm.defaultBridge.AddNetworkConfig(netInfo, nil, nil, 1, 1, nil, nil)).To(Succeed())
+			npw.ofm.defaultBridge.GetNetworkConfig("blue").OfPortPatch = "udn-patch"
+			networkName = "blue"
+			npw.dpuMode = true
+		}
+		fexec := ovntest.NewFakeExec()
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{Cmd: "ovs-ofctl show breth0"})
+		Expect(util.SetExec(fexec)).To(Succeed())
+		svc := newService(testService, testNamespace, "10.96.0.2",
+			[]corev1.ServicePort{{Name: "iperf", Protocol: corev1.ProtocolTCP, Port: 5201, NodePort: 32001}},
+			serviceType, []string{"192.0.2.10", "2001:db8::10"}, corev1.ServiceStatus{}, etpLocal, itpLocal)
+		if !nodePort {
+			svc.Spec.Ports[0].NodePort = 0
+			svc.Spec.AllocateLoadBalancerNodePorts = ptr.To(false)
+		}
+		if serviceType == corev1.ServiceTypeLoadBalancer {
+			svc.Status.LoadBalancer.Ingress = []corev1.LoadBalancerIngress{{IP: "192.0.2.20"}, {IP: "2001:db8::20"}}
+		}
+		svc.Spec.ClusterIPs = []string{"10.96.0.2", "fd00:10:96::2"}
+		_, err := fakeClient.KubeClient.CoreV1().Services(testNamespace).Create(context.Background(), svc, metav1.CreateOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		Eventually(func() error {
+			_, err := watcher.GetService(testNamespace, testService)
+			return err
+		}).Should(Succeed())
+		Expect(npw.AddService(svc)).To(Succeed())
+		originalFlows := npw.ofm.defaultBridge.flows()
+		originalNFT := nft.(*knftables.Fake).Dump()
+		Expect(originalFlows).NotTo(BeEmpty())
+		for len(npw.ofm.flowChan) > 0 {
+			<-npw.ofm.flowChan
+		}
+
+		// Readiness, locality, and port changes must not affect the rules
+		// steering non-host backends into OVN, even with no eligible endpoints.
+		for _, address := range []string{"10.244.0.2", "fd00:10:244::2"} {
+			ep := newEndpointSlice(testService, testNamespace,
+				[]discovery.Endpoint{{Addresses: []string{address}, NodeName: ptr.To(nodeName),
+					Conditions: discovery.EndpointConditions{Ready: ptr.To(true)}}},
+				[]discovery.EndpointPort{{Name: ptr.To("iperf"), Protocol: ptr.To(corev1.ProtocolTCP), Port: ptr.To(int32(5201))}})
+			if net.ParseIP(address).To4() == nil {
+				ep.AddressType = discovery.AddressTypeIPv6
+				ep.Name += "-v6"
+			}
+			if udn {
+				ep.Labels = map[string]string{types.LabelUserDefinedServiceName: testService}
+				ep.Annotations = map[string]string{types.UserDefinedNetworkEndpointSliceAnnotation: networkName}
+			}
+			_, err = fakeClient.KubeClient.DiscoveryV1().EndpointSlices(testNamespace).Create(context.Background(), ep, metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			waitForSlice := func(expected *discovery.EndpointSlice) {
+				Eventually(func() bool {
+					slices, err := watcher.GetServiceEndpointSlices(testNamespace, testService, networkName)
+					if err != nil {
+						return false
+					}
+					for _, slice := range slices {
+						if slice.Name == expected.Name {
+							return reflect.DeepEqual(slice.Endpoints, expected.Endpoints) && reflect.DeepEqual(slice.Ports, expected.Ports)
+						}
+					}
+					return false
+				}).Should(BeTrue())
+			}
+			waitForSlice(ep)
+			Expect(npw.AddEndpointSlice(ep)).To(Succeed())
+			// Named target ports can change while addresses stay the same.
+			changedPort := ep.DeepCopy()
+			changedPort.Ports[0].Port = ptr.To(int32(5202))
+			_, err = fakeClient.KubeClient.DiscoveryV1().EndpointSlices(testNamespace).Update(context.Background(), changedPort, metav1.UpdateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			waitForSlice(changedPort)
+			Expect(npw.UpdateEndpointSlice(ep, changedPort)).To(Succeed())
+			ep = changedPort
+			for _, ready := range []bool{false, true} {
+				next := ep.DeepCopy()
+				next.Endpoints[0].Conditions.Ready = ptr.To(ready)
+				if ready {
+					next.Endpoints[0].NodeName = ptr.To("other-node")
+				}
+				_, err = fakeClient.KubeClient.DiscoveryV1().EndpointSlices(testNamespace).Update(context.Background(), next, metav1.UpdateOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				waitForSlice(next)
+				Expect(npw.UpdateEndpointSlice(ep, next)).To(Succeed())
+				ep = next
+			}
+			Expect(fakeClient.KubeClient.DiscoveryV1().EndpointSlices(testNamespace).Delete(context.Background(), ep.Name, metav1.DeleteOptions{})).To(Succeed())
+			Eventually(func() bool {
+				slices, err := watcher.GetServiceEndpointSlices(testNamespace, testService, networkName)
+				return err == nil && len(slices) == 0
+			}).Should(BeTrue())
+			Expect(npw.DeleteEndpointSlice(ep)).To(Succeed())
+			Expect(npw.ofm.flowChan).To(BeEmpty(), "endpoint changes must not schedule removal/reinstallation of unchanged steering")
+			Expect(npw.ofm.defaultBridge.flows()).To(ConsistOf(originalFlows))
+			Expect(nft.(*knftables.Fake).Dump()).To(Equal(originalNFT))
+		}
+
+		// Actual Service deletion must still remove steering and host rules.
+		Expect(delServiceRules(svc, nil, npw)).To(Succeed())
+		Expect(npw.ofm.flowChan).NotTo(BeEmpty())
+		Expect(npw.ofm.defaultBridge.flows()).To(BeEmpty())
+		verifyNFTablesRule(nft, "10.96.0.2", 5201, 32001, false, "deleted Service must not retain host rules")
+	},
+		Entry("shared NodePort", config.GatewayModeShared, corev1.ServiceTypeNodePort, true, false, false, false),
+		Entry("shared NodePort ETP Local", config.GatewayModeShared, corev1.ServiceTypeNodePort, true, true, false, false),
+		Entry("shared NodePort ITP Local", config.GatewayModeShared, corev1.ServiceTypeNodePort, true, false, true, false),
+		Entry("shared LoadBalancer", config.GatewayModeShared, corev1.ServiceTypeLoadBalancer, true, false, false, false),
+		Entry("shared LoadBalancer without NodePorts", config.GatewayModeShared, corev1.ServiceTypeLoadBalancer, false, true, false, false),
+		Entry("shared ClusterIP with ExternalIPs", config.GatewayModeShared, corev1.ServiceTypeClusterIP, false, false, false, false),
+		Entry("local NodePort", config.GatewayModeLocal, corev1.ServiceTypeNodePort, true, true, false, false),
+		Entry("local LoadBalancer without NodePorts", config.GatewayModeLocal, corev1.ServiceTypeLoadBalancer, false, true, false, false),
+		Entry("shared primary UDN", config.GatewayModeShared, corev1.ServiceTypeNodePort, true, false, false, true),
+	)
+
+	DescribeTable("replaces local host-network forwarding without removing Service steering", func(mode config.GatewayMode, withNodePort bool) {
+		config.Gateway.Mode = mode
+		config.IPv6Mode = true
+		Expect(nft.(*knftables.Fake).ParseDump(nftablesRulesBase + nftablesRulesGatewayServices)).To(Succeed())
+		npw.nodeIPManager.cidrs.Insert("192.168.18.15/32", "fd00::15/128")
+		svc := newService(testService, testNamespace, "10.96.0.2",
+			[]corev1.ServicePort{{Name: "iperf", Protocol: corev1.ProtocolTCP, Port: 5201, NodePort: 32001}},
+			corev1.ServiceTypeLoadBalancer, []string{"192.0.2.10", "2001:db8::10"},
+			corev1.ServiceStatus{LoadBalancer: corev1.LoadBalancerStatus{Ingress: []corev1.LoadBalancerIngress{{IP: "192.0.2.20"}}}}, true, false)
+		svc.Spec.ClusterIPs = []string{"10.96.0.2", "fd00:10:96::2"}
+		if !withNodePort {
+			svc.Spec.Ports[0].NodePort = 0
+			svc.Spec.AllocateLoadBalancerNodePorts = ptr.To(false)
+		}
+		updating := false
+		fexec := ovntest.NewFakeExec()
+		fexec.AddRepeatedFakeCmd(&ovntest.ExpectedCmd{Cmd: "ovs-ofctl show breth0", Action: func() error {
+			if updating {
+				// This command runs while the replacement is being built. A
+				// delete/add implementation would already have removed these.
+				Expect(npw.ofm.getFlowsByKey("External_test-namespace_test-service_192.0.2.10_5201")).NotTo(BeEmpty())
+				Expect(npw.ofm.getFlowsByKey("Ingress_test-namespace_test-service_192.0.2.20_5201")).NotTo(BeEmpty())
+			}
+			return nil
+		}}, 4)
+		Expect(util.SetExec(fexec)).To(Succeed())
+		Expect(addServiceRules(svc, &util.DefaultNetInfo{}, nil, false, npw)).To(Succeed())
+		originalFlows := npw.ofm.defaultBridge.flows()
+		originalNFT := nft.(*knftables.Fake).Dump()
+		updating = true
+		old := &serviceConfig{service: svc}
+		for _, endpoints := range []util.PortToLBEndpoints{
+			{"TCP/iperf": {{Port: 8080, V4IPs: []string{"192.168.18.15"}}, {Port: 8081, V4IPs: []string{"192.168.18.15"}}}},
+			{"TCP/iperf": {{Port: 9090, V4IPs: []string{"192.168.18.15"}, V6IPs: []string{"fd00::15"}}}},
+			nil,
+		} {
+			hasHost := endpoints != nil
+			Expect(npw.updateEndpointRules(svc, &util.DefaultNetInfo{}, old, endpoints, hasHost)).To(Succeed())
+			if hasHost {
+				Expect(npw.ofm.defaultBridge.flows()).NotTo(ConsistOf(originalFlows))
+			}
+			old = &serviceConfig{service: svc, localEndpoints: endpoints, hasLocalHostNetworkEp: hasHost}
+		}
+		Expect(npw.ofm.defaultBridge.flows()).To(ConsistOf(originalFlows))
+		Expect(npw.ofm.defaultBridge.groupCache).To(BeEmpty(), "old direct-host groups must be removed")
+		Expect(nft.(*knftables.Fake).Dump()).To(Equal(originalNFT))
+		Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
+	},
+		Entry("shared LoadBalancer with NodePorts", config.GatewayModeShared, true),
+		Entry("shared LoadBalancer without NodePorts", config.GatewayModeShared, false),
+		Entry("local LoadBalancer with NodePorts", config.GatewayModeLocal, true),
+		Entry("local LoadBalancer without NodePorts", config.GatewayModeLocal, false),
+	)
 
 	Context("when UDN is deleted before processing endpoint slice", func() {
 		It("should execute delServiceRules and gracefully skip addServiceRules", func() {
