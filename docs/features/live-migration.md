@@ -27,6 +27,20 @@ This feature is always enabled, it get triggered when a VM is annotated with
 
 ## Workflow Description
 
+### Service endpoints during launcher handoff
+
+For cluster-default-network Services with cluster traffic policies, OVN-Kubernetes
+keeps an unready VM endpoint eligible during a verified launcher handoff. Both
+launcher pods must be running, belong to the same VirtualMachineInstance, carry
+the bridge-migration annotation, and retain the endpoint's default-network IP.
+This handles the brief period when neither launcher is reported ready.
+
+The exception ends when either launcher completes or is deleted or terminating,
+or when the migration fails. Kubernetes-managed EndpointSlices are not modified.
+Services with `externalTrafficPolicy: Local` or `internalTrafficPolicy: Local`
+continue to use Kubernetes readiness because endpoint locality matters for them.
+This behavior applies to both local and shared gateway modes.
+
 ### Requirements
 
 - KubeVirt >= v1.0.0

@@ -17,6 +17,7 @@ import (
 	nadfake "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/fake"
 	"github.com/stretchr/testify/mock"
 	"github.com/vishvananda/netlink"
+	kubevirtv1 "kubevirt.io/api/core/v1"
 
 	corev1 "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
@@ -24,6 +25,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/kubernetes/fake"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/knftables"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
@@ -404,6 +406,63 @@ var _ = Describe("DeleteEndpointSlice", func() {
 
 	AfterEach(func() {
 		watcher.Shutdown()
+	})
+
+	It("keeps migrating default-network endpoints eligible without rewriting their slices", func() {
+		config.Gateway.Mode = config.GatewayModeShared
+		config.IPv6Mode = true
+		npw.ofm.flowChan = make(chan struct{}, 20)
+		svc := newService(testService, testNamespace, "10.96.0.2",
+			[]corev1.ServicePort{{Name: "iperf", Protocol: corev1.ProtocolTCP, Port: 5201, NodePort: 32001}},
+			corev1.ServiceTypeNodePort, nil, corev1.ServiceStatus{}, false, false)
+		svc.Spec.ClusterIPs = []string{"10.96.0.2", "fd00:10:96::2"}
+		_, err := fakeClient.KubeClient.CoreV1().Services(testNamespace).Create(context.Background(), svc, metav1.CreateOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		Eventually(func() error {
+			_, err := watcher.GetService(testNamespace, testService)
+			return err
+		}).Should(Succeed())
+		source := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "source", Namespace: testNamespace, UID: "source",
+			CreationTimestamp: metav1.NewTime(time.Now().Add(-time.Minute)),
+			Labels:            map[string]string{kubevirtv1.AppLabel: "virt-launcher", kubevirtv1.VirtualMachineNameLabel: "vm"},
+			Annotations: map[string]string{kubevirtv1.DomainAnnotation: "vm", kubevirtv1.AllowPodBridgeNetworkLiveMigrationAnnotation: "",
+				types.OvnPodAnnotationName: `{"default":{"ip_addresses":["10.244.1.4/24","fd00:10:244:1::4/64"],"mac_address":"0a:58:0a:f4:01:04"}}`},
+			OwnerReferences: []metav1.OwnerReference{{APIVersion: "kubevirt.io/v1", Kind: "VirtualMachineInstance", Name: "vm", UID: "vmi", Controller: ptr.To(true)}},
+		}, Status: corev1.PodStatus{Phase: corev1.PodRunning}}
+		target := source.DeepCopy()
+		target.Name, target.UID, target.CreationTimestamp = "target", "target", metav1.Now()
+		Expect(watcher.PodCoreInformer().Informer().GetStore().Add(source)).To(Succeed())
+		Expect(watcher.PodCoreInformer().Informer().GetStore().Add(target)).To(Succeed())
+		Expect(npw.AddService(svc)).To(Succeed())
+		originalFlows := npw.ofm.defaultBridge.flows()
+		for len(npw.ofm.flowChan) > 0 {
+			<-npw.ofm.flowChan
+		}
+		for _, family := range []discovery.AddressType{discovery.AddressTypeIPv4, discovery.AddressTypeIPv6} {
+			ip := "10.244.1.4"
+			if family == discovery.AddressTypeIPv6 {
+				ip = "fd00:10:244:1::4"
+			}
+			old := newEndpointSlice(testService, testNamespace,
+				[]discovery.Endpoint{{Addresses: []string{ip}, NodeName: ptr.To(nodeName),
+					TargetRef:  &corev1.ObjectReference{Kind: "Pod", Namespace: testNamespace, Name: source.Name, UID: source.UID},
+					Conditions: discovery.EndpointConditions{Ready: ptr.To(true)}}},
+				[]discovery.EndpointPort{{Name: ptr.To("iperf"), Protocol: ptr.To(corev1.ProtocolTCP), Port: ptr.To(int32(5201))}})
+			old.AddressType = family
+			next := old.DeepCopy()
+			next.Endpoints[0].Conditions.Ready = ptr.To(false)
+			Expect(npw.UpdateEndpointSlice(old, next)).To(Succeed())
+			Expect(*next.Endpoints[0].Conditions.Ready).To(BeFalse())
+			Expect(npw.ofm.flowChan).To(BeEmpty())
+			Expect(npw.ofm.defaultBridge.flows()).To(ConsistOf(originalFlows))
+			Expect(npw.GetLocalEligibleEndpointAddresses([]*discovery.EndpointSlice{next}, svc)).NotTo(BeEmpty())
+			// A failed target must immediately restore normal eligibility.
+			failed := target.DeepCopy()
+			failed.Status.Phase = corev1.PodFailed
+			Expect(watcher.PodCoreInformer().Informer().GetStore().Update(failed)).To(Succeed())
+			Expect(npw.GetLocalEligibleEndpointAddresses([]*discovery.EndpointSlice{next}, svc)).To(BeEmpty())
+			Expect(watcher.PodCoreInformer().Informer().GetStore().Update(target)).To(Succeed())
+		}
 	})
 
 	Context("when UDN is deleted before processing endpoint slice", func() {

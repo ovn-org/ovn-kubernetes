@@ -32,6 +32,7 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kubevirt"
 	ovsops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/bridgeconfig"
@@ -1479,6 +1480,13 @@ func (npw *nodePortWatcher) DeleteEndpointSlice(epSlice *discovery.EndpointSlice
 // meaning that the nodePortWatcher and the services Controller now use common logic to build their service endpoints.
 func (npw *nodePortWatcher) GetLocalEligibleEndpointAddresses(endpointSlices []*discovery.EndpointSlice,
 	service *corev1.Service) util.PortToLBEndpoints {
+	// The load-balancer controller uses the same private view of migrating
+	// default-network endpoints. Never modify the shared informer objects.
+	if adjusted, err := kubevirt.DefaultNetworkMigrationEndpoints(endpointSlices, service, npw.watchFactory.PodCoreInformer().Lister()); err == nil {
+		endpointSlices = adjusted
+	} else {
+		klog.Warningf("Failed to resolve migrating Service endpoints: %v", err)
+	}
 	s := sets.Set[string]{}
 	s.Insert(npw.nodeIPManager.nodeName)
 	_, portToNodeToLBEndpoints, err := util.GetEndpointsForService(endpointSlices, service, s, false, true)
@@ -1524,6 +1532,13 @@ func (npw *nodePortWatcher) UpdateEndpointSlice(oldEpSlice, newEpSlice *discover
 			namespacedName.Namespace, namespacedName.Name, newEpSlice.Name, err)
 	}
 
+	if netInfo.IsDefault() {
+		adjusted, err := kubevirt.DefaultNetworkMigrationEndpoints([]*discovery.EndpointSlice{oldEpSlice, newEpSlice}, svc, npw.watchFactory.PodCoreInformer().Lister())
+		if err != nil {
+			return err
+		}
+		oldEpSlice, newEpSlice = adjusted[0], adjusted[1]
+	}
 	oldEndpointAddresses := util.GetEligibleEndpointAddressesFromSlices([]*discovery.EndpointSlice{oldEpSlice}, svc)
 	newEndpointAddresses := util.GetEligibleEndpointAddressesFromSlices([]*discovery.EndpointSlice{newEpSlice}, svc)
 	if reflect.DeepEqual(oldEndpointAddresses, newEndpointAddresses) {

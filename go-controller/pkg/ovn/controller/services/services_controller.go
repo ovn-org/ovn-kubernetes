@@ -38,6 +38,7 @@ import (
 
 	globalconfig "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kubevirt"
 	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/metrics/recorders"
@@ -140,6 +141,7 @@ func NewController(client clientset.Interface,
 	serviceInformer coreinformers.ServiceInformer,
 	endpointSliceInformer discoveryinformers.EndpointSliceInformer,
 	nodeInformer coreinformers.NodeInformer,
+	podInformer coreinformers.PodInformer,
 	networkManager networkmanager.Interface,
 	recorder record.EventRecorder,
 	netInfo util.NetInfo,
@@ -160,6 +162,7 @@ func NewController(client clientset.Interface,
 		endpointSliceInformer: endpointSliceInformer,
 		endpointSliceLister:   endpointSliceInformer.Lister(),
 		networkManager:        networkManager,
+		podInformer:           podInformer,
 
 		eventRecorder: recorder,
 		nodeInformer:  nodeInformer,
@@ -186,6 +189,7 @@ type Controller struct {
 
 	endpointSliceInformer discoveryinformers.EndpointSliceInformer
 	endpointSliceLister   discoverylisters.EndpointSliceLister
+	podInformer           coreinformers.PodInformer
 
 	networkManager networkmanager.Interface
 
@@ -220,6 +224,7 @@ type Controller struct {
 	nodeHandler     cache.ResourceEventHandlerRegistration
 	svcHandler      cache.ResourceEventHandlerRegistration
 	endpointHandler cache.ResourceEventHandlerRegistration
+	podHandler      cache.ResourceEventHandlerRegistration
 }
 
 // Run will not return until stopCh is closed. workers determines how many
@@ -278,7 +283,18 @@ func (c *Controller) Run(workers int, stopCh <-chan struct{}, wg *sync.WaitGroup
 	}
 
 	klog.Infof("Waiting for service and endpoint handlers to sync for network=%s", c.state.netInfo.GetNetworkName())
-	if !util.WaitForHandlerSyncWithTimeout(controllerName, stopCh, types.HandlerSyncTimeout, c.svcHandler.HasSynced, c.endpointHandler.HasSynced) {
+	c.podHandler, err = c.podInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
+		AddFunc: c.onMigrationPodChange,
+		UpdateFunc: func(old, new interface{}) {
+			c.onMigrationPodChange(old)
+			c.onMigrationPodChange(new)
+		},
+		DeleteFunc: c.onMigrationPodChange,
+	}))
+	if err != nil {
+		return err
+	}
+	if !util.WaitForHandlerSyncWithTimeout(controllerName, stopCh, types.HandlerSyncTimeout, c.svcHandler.HasSynced, c.endpointHandler.HasSynced, c.podHandler.HasSynced) {
 		return fmt.Errorf("error syncing service and endpoint handlers")
 	}
 
@@ -315,6 +331,11 @@ func (c *Controller) Run(workers int, stopCh <-chan struct{}, wg *sync.WaitGroup
 func (c *Controller) Cleanup() {
 	klog.Infof("Shutting down controller %s for network=%s", controllerName, c.state.netInfo.GetNetworkName())
 	c.queue.ShutDown()
+	if c.podHandler != nil {
+		if err := c.podInformer.Informer().RemoveEventHandler(c.podHandler); err != nil {
+			klog.Errorf("Failed to remove migration pod handler: %v", err)
+		}
+	}
 
 	if c.nodeHandler != nil {
 		if err := c.nodeInformer.Informer().RemoveEventHandler(c.nodeHandler); err != nil {
@@ -793,6 +814,12 @@ func (c *Controller) syncServiceForNetwork(state *networkState, key string) erro
 	if err != nil {
 		return fmt.Errorf("service %s/%s for network=%s, %w", service.Namespace, service.Name, state.netInfo.GetNetworkName(), err)
 	}
+	if state.netInfo.IsDefault() {
+		endpointSlices, err = kubevirt.DefaultNetworkMigrationEndpoints(endpointSlices, service, c.podInformer.Lister())
+		if err != nil {
+			return err
+		}
+	}
 
 	var nodeInfos []nodeInfo
 	if state.nodeInfo != nil {
@@ -1148,6 +1175,30 @@ func (c *Controller) onServiceDelete(obj interface{}) {
 		return
 	}
 	c.enqueueServiceKeyForNetworks(key, true)
+}
+
+// onMigrationPodChange invalidates the private endpoint view even if Kubernetes
+// has not changed its EndpointSlice (for example, when an unready target fails).
+func (c *Controller) onMigrationPodChange(obj interface{}) {
+	if tombstone, ok := obj.(cache.DeletedFinalStateUnknown); ok {
+		obj = tombstone.Obj
+	}
+	pod, ok := obj.(*corev1.Pod)
+	if !ok || !kubevirt.IsPodLiveMigratable(pod) || !kubevirt.IsPodOwnedByVirtualMachine(pod) {
+		return
+	}
+	// Include slices referencing the other launcher: the changed pod may have
+	// disappeared from the slice already while the other endpoint is unready.
+	slices, err := c.endpointSliceLister.EndpointSlices(pod.Namespace).List(labels.Everything())
+	if err != nil {
+		utilruntime.HandleError(err)
+		return
+	}
+	for _, slice := range slices {
+		if util.IsDefaultEndpointSlice(slice) {
+			c.enqueueServiceForEndpointSlice(slice)
+		}
+	}
 }
 
 // onEndpointSliceAdd queues a sync for the relevant Service for a sync

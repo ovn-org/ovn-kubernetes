@@ -78,6 +78,7 @@ func newControllerWithDBSetupForNetwork(dbSetup libovsdbtest.TestSetup, netInfo 
 		factoryMock.ServiceCoreInformer(),
 		factoryMock.EndpointSliceCoreInformer(),
 		factoryMock.NodeCoreInformer(),
+		factoryMock.PodCoreInformer(),
 		networkmanager.Default().Interface(),
 		recorder,
 		netInfo,

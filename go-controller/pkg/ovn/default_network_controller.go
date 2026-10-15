@@ -191,6 +191,7 @@ func newDefaultNetworkControllerCommon(
 		cnci.watchFactory.ServiceCoreInformer(),
 		cnci.watchFactory.EndpointSliceCoreInformer(),
 		cnci.watchFactory.NodeCoreInformer(),
+		cnci.watchFactory.PodCoreInformer(),
 		networkManager,
 		cnci.recorder,
 		defaultNetInfo,
