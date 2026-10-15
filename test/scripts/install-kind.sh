@@ -54,7 +54,7 @@ install_kind() {
 }
 
 pushd $TMP_DIR
-K8S_VERSION="v1.36.4"
+K8S_VERSION="v1.37.0"
 
 # Install kubectl for K8S_VERSION in use
 K8S_CLIENT_URL=https://dl.k8s.io/${K8S_VERSION}/kubernetes-client-linux-${ARCH}.tar.gz
