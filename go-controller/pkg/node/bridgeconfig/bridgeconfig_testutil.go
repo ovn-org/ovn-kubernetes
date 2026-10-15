@@ -54,6 +54,16 @@ func TestBridgeConfig(brName string) *BridgeConfiguration {
 	}
 }
 
+// TestUplinkBridgeConfig returns a bridge configuration for an Uplink bridge
+// with the given physical port and the ofport its flows were generated with.
+func TestUplinkBridgeConfig(brName, uplinkName, ofPortPhys string) *BridgeConfiguration {
+	bridge := TestBridgeConfig(brName)
+	bridge.uplinkName = uplinkName
+	bridge.ofPortPhys = ofPortPhys
+	bridge.netConfig = map[string]*BridgeUDNConfiguration{}
+	return bridge
+}
+
 func TestBridgeConfigWithGatewayRepresentor(brName, gwIfaceRep string) *BridgeConfiguration {
 	bridge := TestBridgeConfig(brName)
 	bridge.gwIfaceRep = gwIfaceRep

@@ -2132,6 +2132,27 @@ func newUplink(name string, selectorKey string, selectorValue string, hostInterf
 	}
 }
 
+func TestOVSBridgeEventsRediscoverUplinkStates(t *testing.T) {
+	g := gomega.NewWithT(t)
+	controller, _ := newTestController(t, nil, nil, newUplinkState("blue.node-a", "blue", "node-a"))
+	reconciler := controller.uplinkStateController.(*controllerutil.FakeController)
+	controller.ovsEventsActive.Store(true)
+
+	// Bridge additions and deletions rediscover this node's UplinkStates.
+	controller.handleOVSBridgeEvent(vswitchd.BridgeTable, &vswitchd.Bridge{Name: "brblue"})
+	controller.handleOVSBridgeEvent(vswitchd.BridgeTable, &vswitchd.Bridge{Name: "brred"})
+	g.Expect(reconciler.Reconciles).To(gomega.Equal([]string{"ReconcileAll", "ReconcileAll"}))
+
+	// Other tables are ignored.
+	controller.handleOVSBridgeEvent(vswitchd.PortTable, &vswitchd.Port{Name: "brblue"})
+	g.Expect(reconciler.Reconciles).To(gomega.HaveLen(2))
+
+	// Events after Stop are ignored.
+	controller.ovsEventsActive.Store(false)
+	controller.handleOVSBridgeEvent(vswitchd.BridgeTable, &vswitchd.Bridge{Name: "brblue"})
+	g.Expect(reconciler.Reconciles).To(gomega.HaveLen(2))
+}
+
 func newUplinkState(name, uplinkName, nodeName string) *uplinkv1alpha1.UplinkState {
 	return &uplinkv1alpha1.UplinkState{
 		ObjectMeta: metav1.ObjectMeta{

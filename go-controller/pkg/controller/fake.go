@@ -36,4 +36,8 @@ func (f *FakeController) addHandler() error   { return nil }
 func (f *FakeController) startWorkers() error { return nil }
 func (f *FakeController) stop()               {}
 
-func (f *FakeController) ReconcileAll() {}
+func (f *FakeController) ReconcileAll() {
+	f.Lock()
+	defer f.Unlock()
+	f.Reconciles = append(f.Reconciles, "ReconcileAll")
+}

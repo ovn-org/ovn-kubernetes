@@ -4097,7 +4097,6 @@ func TestDelUDNMasqIPNeighbors(t *testing.T) {
 			name: "deletes both entries",
 			setup: func(m *utilmocks.NetLinkOps) {
 				m.On("LinkByName", bridgeName).Return(link, nil)
-				m.On("LinkSetUp", link).Return(nil)
 				m.On("NeighDel", mock.MatchedBy(func(n *netlink.Neigh) bool {
 					return n.IP.Equal(v4IP) && n.LinkIndex == linkIndex
 				})).Return(nil).Once()
@@ -4109,15 +4108,24 @@ func TestDelUDNMasqIPNeighbors(t *testing.T) {
 		{
 			name: "returns error on link lookup failure",
 			setup: func(m *utilmocks.NetLinkOps) {
-				m.On("LinkByName", bridgeName).Return(nil, fmt.Errorf("no such device"))
+				lookupErr := fmt.Errorf("netlink receive failed")
+				m.On("LinkByName", bridgeName).Return(nil, lookupErr)
+				m.On("IsLinkNotFoundError", lookupErr).Return(false)
 			},
 			wantErr: "unable to get link for breth0",
+		},
+		{
+			name: "succeeds when the link is gone",
+			setup: func(m *utilmocks.NetLinkOps) {
+				notFoundErr := netlink.LinkNotFoundError{}
+				m.On("LinkByName", bridgeName).Return(nil, notFoundErr)
+				m.On("IsLinkNotFoundError", notFoundErr).Return(true)
+			},
 		},
 		{
 			name: "ignores ENOENT (already deleted)",
 			setup: func(m *utilmocks.NetLinkOps) {
 				m.On("LinkByName", bridgeName).Return(link, nil)
-				m.On("LinkSetUp", link).Return(nil)
 				m.On("NeighDel", mock.MatchedBy(func(n *netlink.Neigh) bool {
 					return n.IP.Equal(v4IP)
 				})).Return(fmt.Errorf("failed: %w", syscall.ENOENT)).Once()
@@ -4130,7 +4138,6 @@ func TestDelUDNMasqIPNeighbors(t *testing.T) {
 			name: "returns error on non-ENOENT NeighDel failure",
 			setup: func(m *utilmocks.NetLinkOps) {
 				m.On("LinkByName", bridgeName).Return(link, nil)
-				m.On("LinkSetUp", link).Return(nil)
 				m.On("NeighDel", mock.MatchedBy(func(n *netlink.Neigh) bool {
 					return n.IP.Equal(v4IP)
 				})).Return(fmt.Errorf("permission denied")).Once()

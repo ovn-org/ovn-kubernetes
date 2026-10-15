@@ -11,6 +11,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/vishvananda/netlink"
@@ -29,7 +30,9 @@ import (
 	utilnet "k8s.io/utils/net"
 	"k8s.io/utils/ptr"
 
+	libovsdbcache "github.com/ovn-kubernetes/libovsdb/cache"
 	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
+	libovsdbmodel "github.com/ovn-kubernetes/libovsdb/model"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	controllerutil "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/controller"
@@ -118,6 +121,11 @@ type Controller struct {
 
 	hostDiscoverer hostInterfaceDiscoverer
 	bridgeResolver ovsBridgeResolver
+	// ovsClient is nil where the node has no OVS (DPU host).
+	ovsClient libovsdbclient.Client
+	// ovsEventsActive gates the OVSDB callback, which cannot be unregistered:
+	// events arriving after Stop must not touch the stopped controllers.
+	ovsEventsActive atomic.Bool
 
 	uplinkController      controllerutil.Controller
 	uplinkStateController controllerutil.Controller
@@ -145,6 +153,7 @@ func NewController(nodeName string, wf factory.NodeWatchFactory, ovnClient *util
 		nodeLister:        wf.NodeCoreInformer().Lister(),
 		hostDiscoverer:    netlinkHostInterfaceDiscoverer{},
 		bridgeResolver:    defaultOVSBridgeResolver{ovsClient: ovsClient},
+		ovsClient:         ovsClient,
 	}
 
 	uplinkCfg := &controllerutil.ControllerConfig[uplinkv1alpha1.Uplink]{
@@ -201,11 +210,45 @@ func (c *Controller) Start() error {
 	if err != nil {
 		return err
 	}
+	if c.ovsClient != nil {
+		c.ovsEventsActive.Store(true)
+		c.registerOVSBridgeEventHandler()
+	}
 	klog.Infof("OVN-Kubernetes node Uplink controller started")
 	return nil
 }
 
+// registerOVSBridgeEventHandler re-runs discovery when an OVS bridge is added
+// or deleted: discovery has no other notification of OVSDB changes, and an
+// admin may delete or recreate an Uplink bridge at any time.
+func (c *Controller) registerOVSBridgeEventHandler() {
+	c.ovsClient.Cache().AddEventHandler(&libovsdbcache.EventHandlerFuncs{
+		AddFunc: func(table string, row libovsdbmodel.Model) {
+			c.handleOVSBridgeEvent(table, row)
+		},
+		DeleteFunc: func(table string, row libovsdbmodel.Model) {
+			c.handleOVSBridgeEvent(table, row)
+		},
+	})
+}
+
+// handleOVSBridgeEvent re-runs discovery for every UplinkState of this node
+// (the informer is filtered on spec.nodeName). Bridge additions and deletions
+// are rare admin actions, and a reconnecting OVSDB client that repopulates
+// its cache reports surviving bridges as additions only, so a bridge deleted
+// meanwhile is found by rediscovering everything rather than by matching names.
+func (c *Controller) handleOVSBridgeEvent(table string, row libovsdbmodel.Model) {
+	if table != vswitchd.BridgeTable || !c.ovsEventsActive.Load() {
+		return
+	}
+	if _, ok := row.(*vswitchd.Bridge); !ok {
+		return
+	}
+	c.uplinkStateController.ReconcileAll()
+}
+
 func (c *Controller) Stop() {
+	c.ovsEventsActive.Store(false)
 	controllerutil.Stop(
 		c.uplinkController,
 		c.uplinkStateController,
