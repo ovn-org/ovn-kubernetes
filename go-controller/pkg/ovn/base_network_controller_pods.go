@@ -8,16 +8,13 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"sort"
 	"strings"
 	"time"
 
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
-	"golang.org/x/exp/maps"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 	k8sretry "k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
@@ -34,7 +31,6 @@ import (
 	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	libovsdbutil "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/nbdb"
-	logicalswitchmanager "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	ovntypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -45,23 +41,18 @@ func (bnc *BaseNetworkController) allocatePodIPs(pod *corev1.Pod,
 	if err != nil {
 		return "", err
 	}
-	return bnc.allocatePodIPsOnSwitch(pod, annotations, nadKey, switchName)
+	return bnc.allocatePodIPsOnSwitch(pod, annotations.IPs, nadKey, switchName)
 }
 
 var errNodeNotFound = errors.New("node not found")
 
-// allocatePodIPsForSwitch will allocate the the ip from pod annotation at
-// a specified switch, this switch can be different than the one the pod is
-// attachted to, for example hypershift kubevirt provider live migration.
+// allocatePodIPsOnSwitch reserves the IPs on a switch, which can differ from
+// the pod's node switch after live migration.
 func (bnc *BaseNetworkController) allocatePodIPsOnSwitch(pod *corev1.Pod,
-	annotations *util.PodAnnotation, nadKey string, switchName string) (expectedLogicalPortName string, err error) {
+	ips []*net.IPNet, nadKey string, switchName string) (expectedLogicalPortName string, err error) {
 
-	// Completed pods will be allocated as well to avoid having their IPs
-	// allocated to other pods before we make sure that we have released them
-	// first.
-	// See trackReleasedPodsBeforeStartup for additional tracking that
-	// happens to avoid relasing IPs for completed pods that were already
-	// released before startup.
+	// Startup processes live pods before completed pods so stale annotations
+	// cannot take ownership of addresses that have already been reused.
 	if !util.PodScheduled(pod) || util.PodWantsHostNetwork(pod) {
 		return "", nil
 	}
@@ -98,15 +89,15 @@ func (bnc *BaseNetworkController) allocatePodIPsOnSwitch(pod *corev1.Pod,
 	if err := bnc.waitForNodeLogicalSwitchSubnetsInCache(switchName); err != nil {
 		return expectedLogicalPortName, err
 	}
-	if err = bnc.lsManager.AllocateIPs(switchName, annotations.IPs); err != nil {
-		if err == ipallocator.ErrAllocated {
-			// already allocated: log a warning but not stop syncPod from continuing
+	if err = bnc.lsManager.AllocateIPs(switchName, bnc.podIPOwner(pod, nadKey), ips); err != nil {
+		if ipallocator.IsErrAllocated(err) {
+			// Earlier bootstrap reservations keep their owner.
 			klog.Warningf("Already allocated IPs: %s for pod: %s in phase: %v on switch: %s",
-				util.JoinIPNetIPs(annotations.IPs, " "), expectedLogicalPortName,
+				util.JoinIPNetIPs(ips, " "), expectedLogicalPortName,
 				&pod.Status.Phase, switchName)
 		} else {
 			return expectedLogicalPortName, fmt.Errorf("couldn't allocate IPs: %s for pod: %s on switch: %s"+
-				" error: %v", util.JoinIPNetIPs(annotations.IPs, " "), expectedLogicalPortName,
+				" error: %v", util.JoinIPNetIPs(ips, " "), expectedLogicalPortName,
 				switchName, err)
 		}
 	}
@@ -239,16 +230,6 @@ func (bnc *BaseNetworkController) deletePodLogicalPort(pod *corev1.Pod, portInfo
 			podDesc, expectedSwitchName, switchName, portUUID)
 	}
 
-	// IP collision check only needed when this controller owns IPAM.
-	// For L2/localnet, cluster-manager allocates IPs centrally.
-	shouldRelease := false
-	if bnc.allocatesPodAnnotation() {
-		shouldRelease, err = bnc.shouldReleaseDeletedPod(pod, switchName, nadKey, podIfAddrs)
-		if err != nil {
-			return nil, fmt.Errorf("unable to determine if ip should be released: %v", err)
-		}
-	}
-
 	var allOps, ops []ovsdb.Operation
 
 	if ops, err = bnc.deletePodFromNamespace(pod.Namespace,
@@ -275,11 +256,6 @@ func (bnc *BaseNetworkController) deletePodLogicalPort(pod *corev1.Pod, portInfo
 		return nil, fmt.Errorf("cannot delete logical switch port %s, %v", logicalPort, err)
 	}
 	txOkCallBack()
-
-	// do not remove SNATs/GW routes/IPAM for an IP address unless we have validated no other pod is using it
-	if !shouldRelease {
-		return nil, nil
-	}
 
 	pInfo := lpInfo{
 		name:          logicalPort,
@@ -332,34 +308,18 @@ func findPodWithIPAddresses(watchFactory *factory.WatchFactory, netInfo util.Net
 	return nil, nil
 }
 
-// canReleasePodIPs checks if the podIPs can be released or not.
-func (bnc *BaseNetworkController) canReleasePodIPs(podIfAddrs []*net.IPNet, nodeName string) (bool, error) {
-	var needleIPs []net.IP
-	for _, podIPNet := range podIfAddrs {
-		needleIPs = append(needleIPs, podIPNet.IP)
+func (bnc *BaseNetworkController) podIPOwner(pod *corev1.Pod, nadKey string) string {
+	if kubevirt.IsPodLiveMigratable(pod) || kubevirt.IsPodAllowedForMigration(pod, bnc.GetNetInfo()) {
+		if vm, err := kubevirt.NewVMDescriptionFromPod(pod); err == nil && vm != nil {
+			return "vm/" + vm.Key().String() + "/" + nadKey
+		}
 	}
-
-	collidingPod, err := findPodWithIPAddresses(bnc.watchFactory, bnc.GetNetInfo(), needleIPs, nodeName, bnc.getNetworkNameForNADKeyFunc())
-	if err != nil {
-		return false, fmt.Errorf("unable to determine if pod IPs: %#v are in use by another pod :%w", podIfAddrs, err)
-
-	}
-
-	if collidingPod != nil {
-		klog.Infof("Should not release IP address: %s. Detected another pod"+
-			" using this IP: %s/%s", util.JoinIPNetIPs(podIfAddrs, " "), collidingPod.Namespace, collidingPod.Name)
-		return false, nil
-	}
-
-	return true, nil
+	return "pod/" + string(pod.UID) + "/" + nadKey
 }
 
-func (bnc *BaseNetworkController) releasePodIPs(pInfo *lpInfo) error {
-	if err := bnc.lsManager.ReleaseIPs(pInfo.logicalSwitch, pInfo.ips); err != nil {
-		if !errors.Is(err, logicalswitchmanager.SwitchNotFound) {
-			return fmt.Errorf("cannot release IPs of port %s on switch %s: %w", pInfo.name, pInfo.logicalSwitch, err)
-		}
-		klog.Warningf("Ignoring release IPs failure of port %s on switch %s: %v", pInfo.name, pInfo.logicalSwitch, err)
+func (bnc *BaseNetworkController) releasePodIPs(pod *corev1.Pod, nadKey string, pInfo *lpInfo) error {
+	if err := bnc.lsManager.ReleaseIPs(pInfo.logicalSwitch, bnc.podIPOwner(pod, nadKey), pInfo.ips); err != nil {
+		return fmt.Errorf("cannot release IPs of port %s on switch %s: %w", pInfo.name, pInfo.logicalSwitch, err)
 	}
 	return nil
 }
@@ -428,29 +388,16 @@ func (bnc *BaseNetworkController) getExpectedSwitchName(pod *corev1.Pod) (string
 	return switchName, nil
 }
 
-// ensurePodAnnotation will copy pod annotations at migratable pods related
-// to the same virtual machine, for normal pods it will unmarshal and return
-// it, also there returned boolean will be true if the pod subnet belong to
-// controller's zone.
-func (bnc *BaseNetworkController) ensurePodAnnotation(pod *corev1.Pod, nadKey string) (*util.PodAnnotation, bool, error) {
+// ensurePodAnnotation reads the pod annotation, inheriting it from a related VM pod when needed.
+func (bnc *BaseNetworkController) ensurePodAnnotation(pod *corev1.Pod, nadKey string) (*util.PodAnnotation, error) {
 	if kubevirt.IsPodLiveMigratable(pod) {
-		podAnnotation, err := kubevirt.EnsurePodAnnotationForVM(bnc.watchFactory, bnc.kube, pod, nadKey)
-		if err != nil {
-			return nil, false, err
-		}
-		if podAnnotation == nil {
-			return nil, true, nil
-		}
-		// The live migrated pods will have the pod annotation but the switch manager running
-		// at the node will not contain the switch as expected
-		_, zoneContainsPodSubnet := kubevirt.ZoneContainsPodSubnet(bnc.lsManager, podAnnotation.IPs)
-		return podAnnotation, zoneContainsPodSubnet, nil
+		return kubevirt.EnsurePodAnnotationForVM(bnc.watchFactory, bnc.kube, pod, nadKey)
 	}
 	podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations, nadKey)
 	if err != nil {
-		return nil, true, nil
+		return nil, nil
 	}
-	return podAnnotation, true, nil
+	return podAnnotation, nil
 }
 
 func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *corev1.Pod, nadKey string,
@@ -579,9 +526,11 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *corev1.Pod, nadKe
 	// functionally equivalent going forward.
 	var annotationUpdated bool
 	if bnc.IsUserDefinedNetwork() {
-		podAnnotation, annotationUpdated, err = bnc.allocatePodAnnotationForUserDefinedNetwork(pod, existingLSP, nadKey, network, networkRole)
+		podAnnotation, annotationUpdated, err = bnc.allocatePodAnnotationForUserDefinedNetwork(
+			pod, existingLSP, nadKey, network, networkRole)
 	} else {
-		podAnnotation, annotationUpdated, err = bnc.allocatePodAnnotation(pod, existingLSP, podDesc, nadKey, network, networkRole)
+		podAnnotation, annotationUpdated, err = bnc.allocatePodAnnotation(
+			pod, existingLSP, podDesc, nadKey, network, networkRole)
 	}
 
 	if err != nil {
@@ -665,7 +614,7 @@ func (bnc *BaseNetworkController) updatePodAnnotationWithRetry(origPod *corev1.P
 
 // Given a switch, gets the next set of addresses (from the IPAM) for each of the node's
 // subnets to assign to the new pod
-func (bnc *BaseNetworkController) assignPodAddresses(switchName string) (net.HardwareAddr, []*net.IPNet, error) {
+func (bnc *BaseNetworkController) assignPodAddresses(switchName, owner string) (net.HardwareAddr, []*net.IPNet, error) {
 	var (
 		podMAC   net.HardwareAddr
 		podCIDRs []*net.IPNet
@@ -680,7 +629,7 @@ func (bnc *BaseNetworkController) assignPodAddresses(switchName string) (net.Har
 		}
 		return mac, nil, nil
 	}
-	podCIDRs, err = bnc.lsManager.AllocateNextIPs(switchName)
+	podCIDRs, err = bnc.lsManager.AllocateNextIPs(switchName, owner)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -829,22 +778,18 @@ func (bnc *BaseNetworkController) allocatePodAnnotation(pod *corev1.Pod, existin
 	var podIfAddrs []*net.IPNet
 
 	switchName := pod.Spec.NodeName
+	owner := bnc.podIPOwner(pod, nadKey)
 
-	podAnnotation, zoneContainsPodSubnet, err := bnc.ensurePodAnnotation(pod, nadKey)
+	podAnnotation, err := bnc.ensurePodAnnotation(pod, nadKey)
 	if err != nil {
 		return nil, false, fmt.Errorf("unable to ensure pod annotation: %v", err)
 	}
 
-	// the IPs we allocate in this function need to be released back to the
-	// IPAM pool if there is some error in any step of addLogicalPort past
-	// the point the IPs were assigned via the IPAM manager.
-	// this needs to be done only when releaseIPs is set to true (the case where
-	// we truly have assigned podIPs in this call) AND when there is no error in
-	// the rest of the functionality of addLogicalPort. It is important to use a
-	// named return variable for defer to work correctly.
+	// Only roll back reservations acquired by this attempt; existing reservations
+	// must survive a failed annotation update.
 	defer func() {
 		if releaseIPs && err != nil {
-			if relErr := bnc.lsManager.ReleaseIPs(switchName, podIfAddrs); relErr != nil {
+			if relErr := bnc.lsManager.ReleaseIPs(switchName, owner, podIfAddrs); relErr != nil {
 				klog.Errorf("Error when releasing IPs %s for switch: %s, err: %q",
 					util.JoinIPNetIPs(podIfAddrs, " "), switchName, relErr)
 			} else {
@@ -858,22 +803,20 @@ func (bnc *BaseNetworkController) allocatePodAnnotation(pod *corev1.Pod, existin
 		podIfAddrs = podAnnotation.IPs
 
 		if bnc.doesNetworkRequireIPAM() {
-			if zoneContainsPodSubnet {
-				// ensure we have reserved the IPs in the annotation.
-				// For live migratable pods, the IPs may belong to a different
-				// node's subnet (the source node) during migration. In that case
-				// skip allocation here.
-				if kubevirt.IsPodLiveMigratable(pod) {
-					if sn, ok := bnc.lsManager.GetSubnetName(podIfAddrs); !ok || sn != switchName {
-						klog.V(5).Infof("Skipping IP allocation for live migratable pod %s: IPs %s belong to switch %s, not %s",
-							podDesc, util.JoinIPNetIPs(podIfAddrs, " "), sn, switchName)
-						return podAnnotation, false, nil
-					}
+			ipsToReserve := podIfAddrs
+			if kubevirt.IsPodLiveMigratable(pod) {
+				// Migration and subnet reuse can leave some or all addresses on another node.
+				ipsToReserve = bnc.lsManager.FilterIPsForSwitch(switchName, podIfAddrs)
+				if len(ipsToReserve) == 0 {
+					klog.V(5).Infof("Skipping IP allocation for live migratable pod %s: IPs %s are not managed by switch %s",
+						podDesc, util.JoinIPNetIPs(podIfAddrs, " "), switchName)
+					return podAnnotation, false, nil
 				}
-				if err = bnc.lsManager.AllocateIPs(switchName, podIfAddrs); err != nil && !ipallocator.IsErrAllocated(err) {
-					return nil, false, fmt.Errorf("unable to ensure IPs allocated for already annotated pod: %s, IPs: %s, error: %v",
-						podDesc, util.JoinIPNetIPs(podIfAddrs, " "), err)
-				}
+			}
+			if err = bnc.lsManager.AllocateIPs(switchName, owner, ipsToReserve); err != nil &&
+				(!ipallocator.IsErrAllocated(err) || errors.Is(err, ipallocator.ErrAllocatedByOther)) {
+				return nil, false, fmt.Errorf("unable to ensure IPs allocated for already annotated pod: %s, IPs: %s, error: %w",
+					podDesc, util.JoinIPNetIPs(podIfAddrs, " "), err)
 			}
 			return podAnnotation, false, nil
 
@@ -901,7 +844,10 @@ func (bnc *BaseNetworkController) allocatePodAnnotation(pod *corev1.Pod, existin
 	if len(podIfAddrs) == 0 {
 		needsNewMacOrIPAllocation = true
 	} else if bnc.doesNetworkRequireIPAM() {
-		if err = bnc.lsManager.AllocateIPs(switchName, podIfAddrs); err != nil && !ipallocator.IsErrAllocated(err) {
+		err = bnc.lsManager.AllocateIPs(switchName, owner, podIfAddrs)
+		releaseIPs = err == nil
+		if err != nil &&
+			(!ipallocator.IsErrAllocated(err) || errors.Is(err, ipallocator.ErrAllocatedByOther)) {
 			klog.Warningf("Unable to allocate IPs %s found on existing OVN port: %s, for pod %s on switch: %s"+
 				" error: %v", util.JoinIPNetIPs(podIfAddrs, " "), bnc.GetLogicalPortName(pod, nadKey), podDesc, switchName, err)
 
@@ -918,7 +864,7 @@ func (bnc *BaseNetworkController) allocatePodAnnotation(pod *corev1.Pod, existin
 			podMac = util.IPAddrToHWAddr(podIfAddrs[0].IP)
 		} else {
 			// Previous attempts to use already configured IPs failed, need to assign new
-			generatedPodMac, generatedPodIfAddrs, err := bnc.assignPodAddresses(switchName)
+			generatedPodMac, generatedPodIfAddrs, err := bnc.assignPodAddresses(switchName, owner)
 			if err != nil {
 				return nil, false, fmt.Errorf("failed to assign pod addresses for pod %s on switch: %s, err: %v",
 					podDesc, switchName, err)
@@ -928,11 +874,12 @@ func (bnc *BaseNetworkController) allocatePodAnnotation(pod *corev1.Pod, existin
 			}
 			if len(generatedPodIfAddrs) > 0 {
 				podIfAddrs = generatedPodIfAddrs
+				podMac = generatedPodMac
+				releaseIPs = true
 			}
 		}
 	}
 
-	releaseIPs = true
 	// handle error cases separately first to ensure binding to err, otherwise the
 	// defer will fail
 	if network != nil && network.MacRequest != "" {
@@ -1021,9 +968,9 @@ func (bnc *BaseNetworkController) allocatePodAnnotationForUserDefinedNetwork(pod
 			network.IPRequest, network.MacRequest, nadKey, pod.Namespace, pod.Name)
 	}
 
-	var ipAllocator subnetipallocator.NamedAllocator
+	var ipAllocator subnetipallocator.IPAllocator
 	if bnc.doesNetworkRequireIPAM() {
-		ipAllocator = bnc.lsManager.ForSwitch(switchName)
+		ipAllocator = bnc.lsManager
 	}
 	node, err := bnc.watchFactory.GetNode(pod.Spec.NodeName)
 	if err != nil {
@@ -1032,6 +979,7 @@ func (bnc *BaseNetworkController) allocatePodAnnotationForUserDefinedNetwork(pod
 	}
 	updatedPod, podAnnotation, err := bnc.podAnnotationAllocator.AllocatePodAnnotation(
 		ipAllocator,
+		switchName, bnc.podIPOwner(pod, nadKey),
 		node,
 		pod,
 		nadKey,
@@ -1075,182 +1023,6 @@ func (bnc *BaseNetworkController) allocatesPodAnnotation() bool {
 		return !bnc.doesNetworkRequireIPAM() && bnc.IPAMType() != ovntypes.IPAMTypeDHCP
 	}
 	return true
-}
-
-func (bnc *BaseNetworkController) shouldReleaseDeletedPod(pod *corev1.Pod, switchName, nadKey string, podIfAddrs []*net.IPNet) (bool, error) {
-	var err error
-	if !bnc.IsUserDefinedNetwork() && kubevirt.IsPodLiveMigratable(pod) {
-		allVMPodsAreCompleted, err := kubevirt.AllVMPodsAreCompleted(bnc.watchFactory.PodCoreInformer().Lister(), pod)
-		if err != nil {
-			return false, err
-		}
-
-		// Removing the the kubevirt stale pods should not de allocate the IPs
-		// to ensure that new pods do not take them
-		if !allVMPodsAreCompleted {
-			return false, nil
-		}
-	}
-
-	// this pod is being deleted before completion so there is no risk (and no
-	// need to check) that its IPs are being used by other pod
-	if !util.PodCompleted(pod) {
-		return true, nil
-	}
-
-	if bnc.wasPodReleasedBeforeStartup(string(pod.UID), nadKey) {
-		klog.Infof("Completed pod %s/%s was already released for NAD key %s before startup",
-			pod.Namespace,
-			pod.Name,
-			nadKey,
-		)
-		return false, nil
-	}
-
-	// If this pod applies to live migration it could have migrated within the
-	// zone so get the correct node name corresponding with the subnet. If the
-	// subnet is not tracked within the zone, nodeName will be empty which
-	// will force a lookup for all nodes.
-	zoneOwnsSubnet := true
-	nodeName := pod.Spec.NodeName
-	if !bnc.IsUserDefinedNetwork() && kubevirt.IsPodLiveMigratable(pod) {
-		switchName, zoneOwnsSubnet = bnc.lsManager.GetSubnetName(podIfAddrs)
-	}
-	if !zoneOwnsSubnet {
-		// force shouldReleasePodIPs to search all nodes
-		nodeName = ""
-	}
-
-	shouldReleasePodIPs := func() (bool, error) {
-		shouldRelease, err := bnc.canReleasePodIPs(podIfAddrs, nodeName)
-		if err != nil {
-			return false, err
-		}
-
-		return shouldRelease, nil
-	}
-
-	var shouldRelease bool
-	if !zoneOwnsSubnet {
-		shouldRelease, err = shouldReleasePodIPs()
-	} else {
-		shouldRelease, err = bnc.lsManager.ConditionalIPRelease(switchName, podIfAddrs, shouldReleasePodIPs)
-	}
-
-	if err != nil {
-		return false, fmt.Errorf("cannot determine if IPs are safe to release for completed pod %s/%s on NAD key %s: %w",
-			pod.Namespace,
-			pod.Name,
-			nadKey,
-			err)
-	}
-
-	return shouldRelease, nil
-}
-
-// trackPodsReleasedBeforeStartup tracks from all of the annotated pods on startup,
-// which ones might have had their IPs previously released. This information is
-// used to prevent those IPs to be released while they might be still used by
-// other running pods and is tracked per NAD, as it is possible for a pod to
-// have been released for one of its NADs but not all in an unexpected error
-// condition. It uses the following rules:
-//   - One or more completed pods sharing an IP with a running pod are
-//     considered released.
-//   - One or more completed pods sharing an IP are considered released except
-//     the last one to be initialized.
-func (bnc *BaseNetworkController) trackPodsReleasedBeforeStartup(podAnnotations map[*corev1.Pod]map[string]*util.PodAnnotation) {
-	bnc.releasedPodsOnStartupMutex.Lock()
-	defer bnc.releasedPodsOnStartupMutex.Unlock()
-
-	// we will order the pods by order of initialization, by that time pods
-	// should have been already allocated exclusive IPs
-	getInitializedConditionTime := func(pod *corev1.Pod) time.Time {
-		for _, condition := range pod.Status.Conditions {
-			if condition.Type == corev1.PodInitialized {
-				return condition.LastTransitionTime.Time
-			}
-		}
-		return time.Time{}
-	}
-
-	// order the pods, running pods first, then completed pods ordered by
-	// initialization time
-	pods := maps.Keys(podAnnotations)
-	sort.Slice(pods, func(i, j int) bool {
-		if !util.PodCompleted(pods[i]) {
-			return true
-		}
-		return getInitializedConditionTime(pods[i]).After(getInitializedConditionTime(pods[j]))
-	})
-
-	// consider dual-stack IPs individually but only track at the pod level based
-	// on a couple of assumptions:
-	// - while the same pair of IPs released for a pod will most likely be
-	//   assigned to a different pod, assume that one of those IPs might be
-	//   assigned to a pod and the other IP to a different pod. This is easy to
-	//   handle so better take a safe approach
-	// - assume that there is no error path leading to one of the IPs of the
-	//   pair to be released while the other is not. This is based on the fact
-	//   that both IPs are released in block.
-	visitedIPs := sets.Set[string]{}
-	bnc.releasedPodsBeforeStartup = map[string]sets.Set[string]{}
-
-	for _, pod := range pods {
-		uid := string(pod.UID)
-		for nadKey, annotation := range podAnnotations[pod] {
-			ips := []string{}
-			for _, ipnet := range annotation.IPs {
-				// normalize ips to their 16 octect string representation
-				ips = append(ips, string(ipnet.IP.To16()))
-			}
-			// if we haven't seen these IPs before, consider this pod the rightful
-			// owner with which these IPs will be released
-			if !visitedIPs.HasAny(ips...) {
-				visitedIPs.Insert(ips...)
-				continue
-			}
-			if !util.PodCompleted(pod) {
-				// this should not happen, but let's log it just in case
-				klog.Errorf("Non completed pod %s/%s shares ips %s from NAD key %s with some other non completed pod",
-					pod.Namespace,
-					pod.Name,
-					util.StringSlice(annotation.IPs),
-					nadKey,
-				)
-				continue
-			}
-			// otherwise consider the IPs of this NAD already released for the pod
-			if bnc.releasedPodsBeforeStartup[nadKey] == nil {
-				bnc.releasedPodsBeforeStartup[nadKey] = sets.New(uid)
-			} else {
-				bnc.releasedPodsBeforeStartup[nadKey].Insert(uid)
-			}
-		}
-	}
-}
-
-// forgetPodReleasedBeforeStartup stops tracking a released pod on the specified NAD
-func (bnc *BaseNetworkController) forgetPodReleasedBeforeStartup(uid, nadKey string) {
-	bnc.releasedPodsOnStartupMutex.Lock()
-	defer bnc.releasedPodsOnStartupMutex.Unlock()
-	if bnc.releasedPodsBeforeStartup[nadKey] == nil {
-		return
-	}
-	bnc.releasedPodsBeforeStartup[nadKey].Delete(uid)
-	if bnc.releasedPodsBeforeStartup[nadKey].Len() == 0 {
-		delete(bnc.releasedPodsBeforeStartup, nadKey)
-	}
-}
-
-// wasPodReleasedBeforeStartup returns whether a pod has been considered released on
-// startup for the specific NAD
-func (bnc *BaseNetworkController) wasPodReleasedBeforeStartup(uid, nadKey string) bool {
-	bnc.releasedPodsOnStartupMutex.Lock()
-	defer bnc.releasedPodsOnStartupMutex.Unlock()
-	if bnc.releasedPodsBeforeStartup[nadKey] == nil {
-		return false
-	}
-	return bnc.releasedPodsBeforeStartup[nadKey].Has(uid)
 }
 
 func (bnc *BaseNetworkController) isNonHostSubnetSwitch(switchName string) bool {

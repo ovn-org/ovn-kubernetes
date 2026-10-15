@@ -22,7 +22,9 @@ import (
 	"k8s.io/utils/ptr"
 
 	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
+	"github.com/ovn-kubernetes/libovsdb/ovsdb"
 
+	ipallocator "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/allocator/ip"
 	ovncnitypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
@@ -32,6 +34,7 @@ import (
 	addressset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/addresssetmanager"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/controller/udnenabledsvc"
+	logicalswitchmanager "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/retry"
 	ovntest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing"
 	libovsdbtest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
@@ -42,6 +45,29 @@ import (
 	. "github.com/onsi/gomega"
 )
 
+type failSecondPodPortDeleteClient struct {
+	libovsdbclient.Client
+	portDeletes int
+}
+
+// Transact fails the second port deletion, regardless of NAD iteration order.
+func (c *failSecondPodPortDeleteClient) Transact(ctx context.Context, ops ...ovsdb.Operation) ([]ovsdb.OperationResult, error) {
+	deletesPort := false
+	for _, op := range ops {
+		if op.Op == ovsdb.OperationDelete && op.Table == nbdb.LogicalSwitchPortTable {
+			deletesPort = true
+			if c.portDeletes > 0 {
+				return nil, fmt.Errorf("injected second NAD cleanup failure")
+			}
+		}
+	}
+	results, err := c.Client.Transact(ctx, ops...)
+	if err == nil && deletesPort {
+		c.portDeletes++
+	}
+	return results, err
+}
+
 var _ = Describe("BaseUserDefinedNetworkController", func() {
 	var (
 		nad = ovntest.GenerateNAD("bluenet", "rednad", "greenamespace",
@@ -51,6 +77,245 @@ var _ = Describe("BaseUserDefinedNetworkController", func() {
 		// Restore global default values before each testcase
 		Expect(config.PrepareTestConfig()).To(Succeed())
 	})
+
+	DescribeTable("preserves reused IPs after partial multi-NAD pod cleanup", func(reattach bool) {
+		config.OVNKubernetesFeature.EnableMultiNetwork = true
+		config.IPv4Mode, config.IPv6Mode = true, true
+		const networkName, namespace, nodeName = "bluenet", "greenamespace", "node-a"
+		nadKeys := []string{namespace + "/rednad", namespace + "/orangenad"}
+		nads := &nettypes.NetworkAttachmentDefinitionList{}
+		for _, name := range []string{"rednad", "orangenad"} {
+			nad := ovntest.GenerateNAD(networkName, name, namespace,
+				types.Layer3Topology, "100.128.0.0/16,fd00::/48", types.NetworkRoleSecondary)
+			ovntest.AnnotateNADWithNetworkID("3", nad)
+			nads.Items = append(nads.Items, *nad)
+		}
+		podA := ovntest.NewPod(namespace, "pod-a", nodeName, "10.128.0.3")
+		podA.UID = "pod-a-uid"
+		podA.Status.Phase = corev1.PodRunning
+		podA.Annotations = map[string]string{nettypes.NetworkAttachmentAnnot: nadKeys[0] + "," + nadKeys[1]}
+		var err error
+		for i, nadKey := range nadKeys {
+			ips := ovntest.MustParseIPNets(fmt.Sprintf("100.128.0.%d/24", i+3), fmt.Sprintf("fd00::%d/64", i+3))
+			podA.Annotations, err = util.MarshalPodAnnotation(podA.Annotations, &util.PodAnnotation{
+				MAC: util.IPAddrToHWAddr(ips[0].IP), IPs: ips, Role: types.NetworkRoleSecondary,
+			}, nadKey)
+			Expect(err).NotTo(HaveOccurred())
+		}
+
+		switchName := util.GetUserDefinedNetworkPrefix(networkName) + nodeName
+		fakeOVN := NewFakeOVN(false, nodeName)
+		fakeOVN.startWithDBSetup(
+			libovsdbtest.TestSetup{NBData: []libovsdbtest.TestData{&nbdb.LogicalSwitch{Name: switchName}}},
+			podA, ovntest.NewNamespace(namespace), newNode(nodeName, "192.0.2.10/24"), nads,
+		)
+		DeferCleanup(fakeOVN.shutdown)
+		bnc := fakeOVN.userDefinedNetworkControllers[networkName].bnc
+		for _, nadKey := range nadKeys {
+			Eventually(func() string {
+				return bnc.networkManager.GetNetworkNameForNADKey(nadKey)
+			}).Should(Equal(networkName))
+		}
+		Expect(bnc.lsManager.AddOrUpdateSwitch(switchName,
+			ovntest.MustParseIPNets("100.128.0.0/24", "fd00::/64"), nil, nil)).To(Succeed())
+		podPorts := func(pod *corev1.Pod) ([]*nbdb.LogicalSwitchPort, error) {
+			return libovsdbops.FindLogicalSwitchPortWithPredicate(fakeOVN.nbClient, func(lsp *nbdb.LogicalSwitchPort) bool {
+				return lsp.Options["iface-id-ver"] == string(pod.UID)
+			})
+		}
+
+		By("programming both of pod A's attachments through the controller")
+		Expect(bnc.ensurePodForUserDefinedNetwork(podA, true)).To(Succeed())
+		podA, err = fakeOVN.fakeClient.KubeClient.CoreV1().Pods(namespace).Get(context.Background(), podA.Name, metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		portInfoMap, err := bnc.logicalPortCache.getAll(podA)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(portInfoMap).To(HaveLen(2))
+		Eventually(func() ([]*nbdb.LogicalSwitchPort, error) { return podPorts(podA) }).Should(HaveLen(2))
+
+		By("releasing one attachment before cleanup of the second attachment fails")
+		bnc.nbClient = &failSecondPodPortDeleteClient{Client: fakeOVN.nbClient}
+		err = bnc.removePodForUserDefinedNetwork(podA, portInfoMap)
+		Expect(err).To(MatchError(ContainSubstring("injected second NAD cleanup failure")))
+		bnc.nbClient = fakeOVN.nbClient
+		Eventually(func() ([]*nbdb.LogicalSwitchPort, error) { return podPorts(podA) }).Should(HaveLen(1))
+		remainingPorts, err := podPorts(podA)
+		Expect(err).NotTo(HaveOccurred())
+		var releasedNAD string
+		for nadKey, info := range portInfoMap {
+			if info.uuid != remainingPorts[0].UUID {
+				releasedNAD = nadKey
+			}
+		}
+		Expect(releasedNAD).NotTo(BeEmpty())
+		annotationA, err := util.UnmarshalPodAnnotation(podA.Annotations, releasedNAD)
+		Expect(err).NotTo(HaveOccurred())
+
+		By("allocating the freed IPs and programming a logical port for pod B")
+		podB := ovntest.NewPod(namespace, "pod-b", nodeName, "10.128.0.4")
+		podB.UID = "pod-b-uid"
+		podB.Status.Phase = corev1.PodRunning
+		podB.Annotations = map[string]string{nettypes.NetworkAttachmentAnnot: releasedNAD}
+		podB, err = fakeOVN.fakeClient.KubeClient.CoreV1().Pods(namespace).Create(context.Background(), podB, metav1.CreateOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		Eventually(func() (*corev1.Pod, error) { return fakeOVN.watcher.GetPod(namespace, podB.Name) }).ShouldNot(BeNil())
+		Expect(bnc.ensurePodForUserDefinedNetwork(podB, true)).To(Succeed())
+		podB, err = fakeOVN.fakeClient.KubeClient.CoreV1().Pods(namespace).Get(context.Background(), podB.Name, metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		annotationB, err := util.UnmarshalPodAnnotation(podB.Annotations, releasedNAD)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(annotationB.IPs).To(Equal(annotationA.IPs))
+		Eventually(func() ([]*nbdb.LogicalSwitchPort, error) { return podPorts(podB) }).Should(HaveLen(1))
+		ownerPorts, err := podPorts(podB)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ownerPorts[0].Addresses).To(ConsistOf(annotationB.MAC.String() + " " + util.JoinIPNetIPs(annotationB.IPs, " ")))
+
+		By("rejecting pod A's stale reattachment without creating a duplicate-IP logical port")
+		err = bnc.ensurePodForUserDefinedNetwork(podA, true)
+		Expect(err).To(HaveOccurred())
+		Expect(ipallocator.IsErrAllocated(err)).To(BeTrue())
+		Expect(podPorts(podA)).To(HaveLen(1))
+
+		if reattach {
+			By("keeping pod B's reservation until its cleanup completes")
+			Expect(bnc.removePodForUserDefinedNetwork(podB, nil)).To(Succeed())
+			By("reattaching pod A only after it can reacquire the IPs")
+			Expect(bnc.ensurePodForUserDefinedNetwork(podA, true)).To(Succeed())
+			Eventually(func() ([]*nbdb.LogicalSwitchPort, error) { return podPorts(podA) }).Should(HaveLen(2))
+			portInfoMap, err = bnc.logicalPortCache.getAll(podA)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(bnc.removePodForUserDefinedNetwork(podA, portInfoMap)).To(Succeed())
+		} else {
+			By("retrying pod A's cleanup without releasing pod B's reservation")
+			Expect(bnc.removePodForUserDefinedNetwork(podA, portInfoMap)).To(Succeed())
+			for _, ip := range annotationB.IPs {
+				Expect(ipallocator.IsErrAllocated(bnc.lsManager.AllocateIPs(switchName, "test-owner", []*net.IPNet{ip}))).To(
+					BeTrue(), "pod A's cleanup retry must preserve pod B's reservation for %s", ip)
+			}
+			Expect(podPorts(podB)).To(Equal(ownerPorts))
+			Expect(bnc.removePodForUserDefinedNetwork(podB, nil)).To(Succeed())
+		}
+
+		Eventually(func() ([]*nbdb.LogicalSwitchPort, error) { return podPorts(podA) }).Should(BeEmpty())
+		Eventually(func() ([]*nbdb.LogicalSwitchPort, error) { return podPorts(podB) }).Should(BeEmpty())
+		for _, info := range portInfoMap {
+			Expect(bnc.lsManager.AllocateIPs(switchName, "test-owner", info.ips)).To(Succeed(), "final cleanup must release every attachment's IPs")
+		}
+	},
+		Entry("cleanup retries preserve the new owner's IPs", false),
+		Entry("reattachment requires successful IP reacquisition", true),
+	)
+
+	DescribeTable("restores ownership after a completed pod's IPs are reused", func(defaultNetwork, completedOwner, ownerFirst bool) {
+		config.OVNKubernetesFeature.EnableMultiNetwork = true
+		config.IPv4Mode, config.IPv6Mode = true, true
+		const namespace, nodeName, networkName = "greenamespace", "node-a", "bluenet"
+		nadKey, switchName := namespace+"/rednad", util.GetUserDefinedNetworkPrefix(networkName)+nodeName
+		role := types.NetworkRoleSecondary
+		ips := ovntest.MustParseIPNets("100.128.0.3/24", "fd00::3/64")
+		subnets := ovntest.MustParseIPNets("100.128.0.0/24", "fd00::/64")
+		if defaultNetwork {
+			nadKey, switchName, role = types.DefaultNetworkName, nodeName, types.NetworkRolePrimary
+			ips = ovntest.MustParseIPNets("10.128.1.3/24", "fd00::3/64")
+			subnets = ovntest.MustParseIPNets("10.128.1.0/24", "fd00::/64")
+		}
+		annotation := &util.PodAnnotation{IPs: ips, MAC: util.IPAddrToHWAddr(ips[0].IP), Role: role}
+		stale := ovntest.NewPod(namespace, "old-pod", nodeName, ips[0].IP.String())
+		stale.Status.Phase = corev1.PodRunning
+		stale.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodInitialized, Status: corev1.ConditionTrue, LastTransitionTime: metav1.NewTime(time.Unix(100, 0))}}
+		stale.Annotations = map[string]string{}
+		if !defaultNetwork {
+			stale.Annotations[nettypes.NetworkAttachmentAnnot] = nadKey
+		}
+		var err error
+		stale.Annotations, err = util.MarshalPodAnnotation(stale.Annotations, annotation, nadKey)
+		Expect(err).NotTo(HaveOccurred())
+		nad := ovntest.GenerateNAD(networkName, "rednad", namespace, types.Layer3Topology,
+			"100.128.0.0/16,fd00::/48", types.NetworkRoleSecondary)
+		ovntest.AnnotateNADWithNetworkID("3", nad)
+		fakeOVN := NewFakeOVN(true, nodeName)
+		fakeOVN.startWithDBSetup(libovsdbtest.TestSetup{NBData: []libovsdbtest.TestData{
+			&nbdb.LogicalSwitch{Name: switchName},
+		}}, stale, ovntest.NewNamespace(namespace), newNode(nodeName, "192.0.2.10/24"),
+			&nettypes.NetworkAttachmentDefinitionList{Items: []nettypes.NetworkAttachmentDefinition{*nad}})
+		DeferCleanup(fakeOVN.shutdown)
+		var bnc *BaseNetworkController
+		var syncPods func([]interface{}) error
+		var removePod func(*corev1.Pod) error
+		var addPod func(*corev1.Pod) error
+		if defaultNetwork {
+			bnc = &fakeOVN.controller.BaseNetworkController
+			syncPods = fakeOVN.controller.syncPods
+			removePod = func(p *corev1.Pod) error { return fakeOVN.controller.removePod(p, nil) }
+			addPod = fakeOVN.controller.addLogicalPort
+			Expect(fakeOVN.controller.WatchNamespaces()).To(Succeed())
+		} else {
+			controller := fakeOVN.userDefinedNetworkControllers[networkName].bnc
+			bnc = &controller.BaseNetworkController
+			syncPods = controller.syncPodsForUserDefinedNetwork
+			removePod = func(p *corev1.Pod) error { return controller.removePodForUserDefinedNetwork(p, nil) }
+			addPod = func(p *corev1.Pod) error { return controller.ensurePodForUserDefinedNetwork(p, true) }
+			Eventually(func() string { return bnc.networkManager.GetNetworkNameForNADKey(nadKey) }).Should(Equal(networkName))
+		}
+		Expect(bnc.lsManager.AddOrUpdateSwitch(switchName, subnets, nil, nil)).To(Succeed())
+		By("completing the first pod and releasing its allocation without removing its annotation")
+		Expect(addPod(stale)).To(Succeed())
+		stale.Status.Phase = corev1.PodSucceeded
+		stale, err = fakeOVN.fakeClient.KubeClient.CoreV1().Pods(namespace).UpdateStatus(context.Background(), stale, metav1.UpdateOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(removePod(stale)).To(Succeed())
+		By("allocating the freed addresses to a different pod")
+		owner := ovntest.NewPod(namespace, "owner", nodeName, "")
+		owner.Status.Phase = corev1.PodRunning
+		owner.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodInitialized, Status: corev1.ConditionTrue, LastTransitionTime: metav1.NewTime(time.Unix(200, 0))}}
+		if !defaultNetwork {
+			owner.Annotations = map[string]string{nettypes.NetworkAttachmentAnnot: nadKey}
+		}
+		owner, err = fakeOVN.fakeClient.KubeClient.CoreV1().Pods(namespace).Create(context.Background(), owner, metav1.CreateOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		Eventually(func() (*corev1.Pod, error) { return bnc.watchFactory.GetPod(namespace, owner.Name) }).ShouldNot(BeNil())
+		Expect(addPod(owner)).To(Succeed())
+		owner, err = fakeOVN.fakeClient.KubeClient.CoreV1().Pods(namespace).Get(context.Background(), owner.Name, metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		ownerAnnotation, err := util.UnmarshalPodAnnotation(owner.Annotations, nadKey)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ownerAnnotation.IPs).To(Equal(ips))
+		if completedOwner {
+			owner.Status.Phase = corev1.PodSucceeded
+			owner, err = fakeOVN.fakeClient.KubeClient.CoreV1().Pods(namespace).UpdateStatus(context.Background(), owner, metav1.UpdateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+		}
+		By("restarting IPAM before the second pod is cleaned up")
+		// No pod handlers are running in this test. Keep the API and OVN
+		// state from the lifecycle above, but rebuild the in-memory allocator.
+		bnc.lsManager = logicalswitchmanager.NewLogicalSwitchManager()
+		Expect(bnc.lsManager.AddOrUpdateSwitch(switchName, subnets, nil, nil)).To(Succeed())
+		Expect(syncPods([]interface{}{stale, owner})).To(Succeed())
+		Expect(syncPods([]interface{}{owner, stale})).To(Succeed(), "startup retries must preserve the selected owner")
+		Expect(bnc.lsManager.OwnsIPs(switchName, bnc.podIPOwner(owner, nadKey), ips)).To(BeTrue())
+		Expect(bnc.lsManager.OwnsIPs(switchName, bnc.podIPOwner(stale, nadKey), ips)).To(BeFalse())
+		first, last := stale, owner
+		if ownerFirst {
+			first, last = owner, stale
+		}
+		By("cleaning up both pods without releasing the current owner early or leaking its allocation")
+		Expect(fakeOVN.fakeClient.KubeClient.CoreV1().Pods(namespace).Delete(context.Background(), owner.Name, metav1.DeleteOptions{})).To(Succeed())
+		Expect(removePod(first)).To(Succeed())
+		if !ownerFirst {
+			Expect(ipallocator.IsErrAllocated(bnc.lsManager.AllocateIPs(switchName, "test-owner", ips))).To(BeTrue())
+		}
+		Expect(removePod(last)).To(Succeed())
+		Expect(bnc.lsManager.AllocateIPs(switchName, "test-owner", ips)).To(Succeed(), "final cleanup must not leak the reservation")
+	},
+		Entry("default, running owner, stale first", true, false, false),
+		Entry("default, running owner, owner first", true, false, true),
+		Entry("default, completed owner, stale first", true, true, false),
+		Entry("default, completed owner, owner first", true, true, true),
+		Entry("UDN, running owner, stale first", false, false, false),
+		Entry("UDN, running owner, owner first", false, false, true),
+		Entry("UDN, completed owner, stale first", false, true, false),
+		Entry("UDN, completed owner, owner first", false, true, true),
+	)
 
 	type dhcpTest struct {
 		vmName                string
@@ -577,7 +842,7 @@ var _ = Describe("BaseUserDefinedNetworkController", func() {
 			nadKey := util.GetNADName(nad.Namespace, nad.Name)
 			nodeSubnet := ovntest.MustParseIPNet("100.128.0.0/24")
 			switchName := bnc.GetNetworkScopedSwitchName(localNode)
-			Expect(bnc.lsManager.AddOrUpdateSwitch(switchName, []*net.IPNet{nodeSubnet}, nil)).To(Succeed())
+			Expect(bnc.lsManager.AddOrUpdateSwitch(switchName, []*net.IPNet{nodeSubnet}, nil, nil)).To(Succeed())
 			Expect(libovsdbops.CreateOrUpdateLogicalSwitch(fakeOVN.nbClient, &nbdb.LogicalSwitch{Name: switchName})).To(Succeed())
 
 			Eventually(func() (string, error) {
@@ -1281,7 +1546,7 @@ var _ = Describe("localnet DHCP IPAM pod lifecycle", func() {
 		Expect(ok).To(BeTrue())
 		bnc := controller.bnc
 
-		Expect(bnc.lsManager.AddOrUpdateSwitch(switchName, nil, nil)).To(Succeed())
+		Expect(bnc.lsManager.AddOrUpdateSwitch(switchName, nil, nil, nil)).To(Succeed())
 
 		Expect(bnc.WatchPods()).To(Succeed())
 

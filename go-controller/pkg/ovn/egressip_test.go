@@ -6938,7 +6938,7 @@ var _ = ginkgo.Describe("OVN EgressIP Operations cluster default network", func(
 						Items: []corev1.Pod{egressPod1},
 					},
 				)
-				err := fakeOvn.controller.lsManager.AddOrUpdateSwitch(node1.Name, []*net.IPNet{ovntest.MustParseIPNet(v4Node1Subnet)}, nil)
+				err := fakeOvn.controller.lsManager.AddOrUpdateSwitch(node1.Name, []*net.IPNet{ovntest.MustParseIPNet(v4Node1Subnet)}, nil, nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = fakeOvn.controller.WatchPods()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -7286,7 +7286,7 @@ var _ = ginkgo.Describe("OVN EgressIP Operations cluster default network", func(
 						Items: []corev1.Pod{*egressPod1},
 					},
 				)
-				err := fakeOvn.controller.lsManager.AddOrUpdateSwitch(node1.Name, []*net.IPNet{ovntest.MustParseIPNet(v4Node1Subnet)}, nil)
+				err := fakeOvn.controller.lsManager.AddOrUpdateSwitch(node1.Name, []*net.IPNet{ovntest.MustParseIPNet(v4Node1Subnet)}, nil, nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Expect(fakeOvn.controller.WatchPods()).To(gomega.Succeed())
 				gomega.Expect(fakeOvn.controller.WatchEgressIPPods()).To(gomega.Succeed())
@@ -7648,9 +7648,9 @@ var _ = ginkgo.Describe("OVN EgressIP Operations cluster default network", func(
 							Items: []corev1.Pod{egressPod1},
 						},
 					)
-					err := fakeOvn.controller.lsManager.AddOrUpdateSwitch(node1.Name, []*net.IPNet{ovntest.MustParseIPNet(v4Node1Subnet)}, nil)
+					err := fakeOvn.controller.lsManager.AddOrUpdateSwitch(node1.Name, []*net.IPNet{ovntest.MustParseIPNet(v4Node1Subnet)}, nil, nil)
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
-					err = fakeOvn.controller.lsManager.AddOrUpdateSwitch(node2.Name, []*net.IPNet{ovntest.MustParseIPNet(v4Node2Subnet)}, nil)
+					err = fakeOvn.controller.lsManager.AddOrUpdateSwitch(node2.Name, []*net.IPNet{ovntest.MustParseIPNet(v4Node2Subnet)}, nil, nil)
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					err = fakeOvn.controller.WatchPods()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())

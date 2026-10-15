@@ -171,11 +171,6 @@ type BaseNetworkController struct {
 	// networkManager used for getting network information
 	networkManager networkmanager.Interface
 
-	// releasedPodsBeforeStartup tracks pods per NAD (map of NADs to pods UIDs)
-	// might have been already be released on startup
-	releasedPodsBeforeStartup  map[string]sets.Set[string]
-	releasedPodsOnStartupMutex sync.Mutex
-
 	// IP addresses of OVN Cluster logical router port ("GwRouterToJoinSwitchPrefix + OVNClusterRouter")
 	// connecting to the join switch
 	ovnClusterLRPToJoinIfAddrs []*net.IPNet
@@ -653,12 +648,12 @@ func (bnc *BaseNetworkController) createNodeLogicalSwitch(nodeName string, hostS
 		}
 	}
 	// Add the switch to the logical switch cache
-	migratableIPsByPod, err := bnc.findMigratablePodIPsForSubnets(hostSubnets)
+	migratableIPsByOwner, err := bnc.findMigratablePodIPsForSubnets(hostSubnets)
 	if err != nil {
 		return fmt.Errorf("failed finding migratable pod IPs belonging to %s: %v", nodeName, err)
 	}
 
-	return bnc.lsManager.AddOrUpdateSwitch(logicalSwitch.Name, hostSubnets, nil, migratableIPsByPod...)
+	return bnc.lsManager.AddOrUpdateSwitch(logicalSwitch.Name, hostSubnets, nil, migratableIPsByOwner)
 }
 
 // deleteNodeLogicalNetwork removes the logical switch and logical router port associated with the node
@@ -1023,23 +1018,19 @@ func (bnc *BaseNetworkController) nodeZoneClusterChanged(oldNode, newNode *corev
 	return false
 }
 
-func (bnc *BaseNetworkController) findMigratablePodIPsForSubnets(subnets []*net.IPNet) ([]*net.IPNet, error) {
+func (bnc *BaseNetworkController) findMigratablePodIPsForSubnets(subnets []*net.IPNet) (map[string][]*net.IPNet, error) {
 	// live migration is not supported in combination with UDNs
 	if bnc.IsUserDefinedNetwork() {
 		return nil, nil
 	}
 
-	ipSet := sets.New[string]()
-	ipList := []*net.IPNet{}
+	ipsByOwner := map[string][]*net.IPNet{}
 	liveMigratablePods, err := kubevirt.FindLiveMigratablePods(bnc.watchFactory)
 	if err != nil {
 		return nil, err
 	}
 
 	for _, liveMigratablePod := range liveMigratablePods {
-		if util.PodCompleted(liveMigratablePod) {
-			continue
-		}
 		isMigratedSourcePodStale, err := kubevirt.IsMigratedSourcePodStale(bnc.watchFactory, liveMigratablePod)
 		if err != nil {
 			return nil, err
@@ -1060,21 +1051,14 @@ func (bnc *BaseNetworkController) findMigratablePodIPsForSubnets(subnets []*net.
 				err)
 			continue
 		}
+		owner := bnc.podIPOwner(liveMigratablePod, bnc.GetNetworkName())
 		for _, podIP := range podAnnotation.IPs {
 			if util.IsContainedInAnyCIDR(podIP, subnets...) {
-				podIPString := podIP.String()
-				// Skip duplicate IPs
-				if !ipSet.Has(podIPString) {
-					ipSet = ipSet.Insert(podIPString)
-					ipList = append(ipList, &net.IPNet{
-						IP:   podIP.IP,
-						Mask: util.GetIPFullMask(podIP.IP),
-					})
-				}
+				ipsByOwner[owner] = append(ipsByOwner[owner], podIP)
 			}
 		}
 	}
-	return ipList, nil
+	return ipsByOwner, nil
 }
 
 func (bnc *BaseNetworkController) AddResourceCommon(objType reflect.Type, obj interface{}) error {

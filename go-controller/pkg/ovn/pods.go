@@ -25,14 +25,17 @@ import (
 	libovsdbutil "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/nbdb"
+	logicalswitchmanager "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 	utilerrors "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util/errors"
 )
 
 func (oc *DefaultNetworkController) syncPods(pods []interface{}) error {
-	annotatedLocalPods := map[*corev1.Pod]map[string]*util.PodAnnotation{}
-	var allHostSubnets []*net.IPNet
+	orderedPods, err := logicalswitchmanager.SortPodsForIPAM(pods)
+	if err != nil {
+		return err
+	}
 
 	// get the list of logical switch ports (equivalent to pods). Reserve all existing Pod IPs to
 	// avoid subsequent new Pods getting the same duplicate Pod IP.
@@ -40,14 +43,8 @@ func (oc *DefaultNetworkController) syncPods(pods []interface{}) error {
 	// TBD: Before this succeeds, add Pod handler should not continue to allocate IPs for the new Pods.
 	expectedLogicalPorts := make(map[string]bool)
 	vms := make(map[ktypes.NamespacedName]bool)
-	var err error
 	switchesNotFound := make(map[string]bool)
-	for _, podInterface := range pods {
-		pod, ok := podInterface.(*corev1.Pod)
-		if !ok {
-			return fmt.Errorf("spurious object in syncPods: %v", podInterface)
-		}
-
+	for _, pod := range orderedPods {
 		expectedLogicalPortName := ""
 		var annotations *util.PodAnnotation
 		if kubevirt.IsPodLiveMigratable(pod) {
@@ -77,27 +74,6 @@ func (oc *DefaultNetworkController) syncPods(pods []interface{}) error {
 		if annotations == nil {
 			continue
 		}
-
-		// We track which pods are allocated on startup to check which might
-		// have already been released. We track local non-migratable pods and
-		// live migratable pods that have an IP allocation from a local subnet
-		// (assigned to a node belonging to this zone) or from an unassigned
-		// subnet (previously assigned to a node that has been since removed)
-		var zoneContainsPodSubnetOrUntracked bool
-		if kubevirt.IsPodLiveMigratable(pod) {
-			allHostSubnets, zoneContainsPodSubnetOrUntracked, err = kubevirt.ZoneContainsPodSubnetOrUntracked(
-				oc.watchFactory,
-				oc.lsManager,
-				allHostSubnets,
-				annotations)
-			if err != nil {
-				return err
-			}
-		}
-		if kubevirt.IsPodLiveMigratable(pod) && !zoneContainsPodSubnetOrUntracked {
-			continue
-		}
-		annotatedLocalPods[pod] = map[string]*util.PodAnnotation{types.DefaultNetworkName: annotations}
 
 		if expectedLogicalPortName != "" {
 			expectedLogicalPorts[expectedLogicalPortName] = true
@@ -164,9 +140,6 @@ func (oc *DefaultNetworkController) syncPods(pods []interface{}) error {
 		return fmt.Errorf("failed syncing running virtual machines: %v", err)
 	}
 
-	// keep track of which pods might have already been released
-	oc.trackPodsReleasedBeforeStartup(annotatedLocalPods)
-
 	return oc.deleteStaleLogicalSwitchPorts(expectedLogicalPorts)
 }
 
@@ -192,8 +165,15 @@ func (oc *DefaultNetworkController) deleteLogicalPort(pod *corev1.Pod, portInfo 
 		}
 	}
 
-	// do not remove SNATs/GW routes/IPAM for an IP address unless we have validated no other pod is using it
 	if pInfo == nil {
+		return nil
+	}
+
+	canCleanup, err := oc.canCleanupPodIPResources(pod, pInfo.logicalSwitch, pInfo.ips)
+	if err != nil {
+		return fmt.Errorf("cannot determine if IP resources can be cleaned up for pod %s: %w", podDesc, err)
+	}
+	if !canCleanup {
 		return nil
 	}
 
@@ -224,14 +204,40 @@ func (oc *DefaultNetworkController) deleteLogicalPort(pod *corev1.Pod, portInfo 
 		pInfo.logicalSwitch = switchName
 	}
 
-	// Releasing IPs needs to happen last so that we can deterministically know that if delete failed that
-	// the IP of the pod needs to be released. Otherwise we could have a completed pod failed to be removed
-	// and we dont know if the IP was released or not, and subsequently could accidentally release the IP
-	// while it is now on another pod. Releasing IPs may fail at this point if cache knows nothing about it,
-	// which is okay since node may have been deleted.
+	// Keep IPs reserved until their networking is removed, so a new owner
+	// cannot reuse them during teardown.
 	klog.Infof("Attempting to release IPs for pod: %s/%s, ips: %s", pod.Namespace, pod.Name,
 		util.JoinIPNetIPs(pInfo.ips, " "))
-	return oc.releasePodIPs(pInfo)
+	return oc.releasePodIPs(pod, types.DefaultNetworkName, pInfo)
+}
+
+// canCleanupPodIPResources protects IP-keyed SNAT and route teardown. Owner-aware
+// IP release alone cannot prevent deletion of another pod's networking.
+func (oc *DefaultNetworkController) canCleanupPodIPResources(pod *corev1.Pod, switchName string, ips []*net.IPNet) (bool, error) {
+	if len(ips) == 0 {
+		return true, nil
+	}
+	if kubevirt.IsPodLiveMigratable(pod) {
+		completed, err := kubevirt.AllVMPodsAreCompleted(oc.watchFactory.PodCoreInformer().Lister(), pod)
+		if err != nil || !completed {
+			return false, err
+		}
+		var local bool
+		switchName, local = oc.lsManager.GetSubnetName(ips)
+		if !local {
+			// A migrated VM can still need route cleanup after its source
+			// subnet left this zone. There is no local allocator to consult.
+			var addresses []net.IP
+			for _, ip := range ips {
+				addresses = append(addresses, ip.IP)
+			}
+			other, err := findPodWithIPAddresses(oc.watchFactory, oc.GetNetInfo(), addresses, "",
+				oc.getNetworkNameForNADKeyFunc())
+			return other == nil, err
+		}
+		ips = oc.lsManager.FilterIPsForSwitch(switchName, ips)
+	}
+	return oc.lsManager.OwnsIPs(switchName, oc.podIPOwner(pod, types.DefaultNetworkName), ips), nil
 }
 
 func (oc *DefaultNetworkController) addLogicalPort(pod *corev1.Pod) (err error) {
@@ -354,7 +360,7 @@ func (oc *DefaultNetworkController) allocateSyncPodsIPs(pod *corev1.Pod) (string
 	if err != nil {
 		return "", nil, nil
 	}
-	expectedLogicalPortName, err := oc.allocatePodIPsOnSwitch(pod, annotations, oc.GetNetworkName(), oc.GetNetworkScopedSwitchName(pod.Spec.NodeName))
+	expectedLogicalPortName, err := oc.allocatePodIPsOnSwitch(pod, annotations.IPs, oc.GetNetworkName(), oc.GetNetworkScopedSwitchName(pod.Spec.NodeName))
 	if err != nil {
 		return "", nil, err
 	}
@@ -362,10 +368,7 @@ func (oc *DefaultNetworkController) allocateSyncPodsIPs(pod *corev1.Pod) (string
 }
 
 func (oc *DefaultNetworkController) allocateSyncMigratablePodIPsOnZone(vms map[ktypes.NamespacedName]bool, pod *corev1.Pod) (map[ktypes.NamespacedName]bool, string, *util.PodAnnotation, error) {
-	allocatePodIPsOnSwitchWrapFn := func(liveMigratablePod *corev1.Pod, liveMigratablePodAnnotation *util.PodAnnotation, switchName, nadKey string) (string, error) {
-		return oc.allocatePodIPsOnSwitch(liveMigratablePod, liveMigratablePodAnnotation, switchName, nadKey)
-	}
-	vmKey, expectedLogicalPortName, podAnnotation, err := kubevirt.AllocateSyncMigratablePodIPsOnZone(oc.watchFactory, oc.lsManager, oc.GetNetworkName(), pod, allocatePodIPsOnSwitchWrapFn)
+	vmKey, expectedLogicalPortName, podAnnotation, err := kubevirt.AllocateSyncMigratablePodIPsOnZone(oc.watchFactory, oc.lsManager, oc.GetNetworkName(), pod, oc.allocatePodIPsOnSwitch)
 	if err != nil {
 		return nil, "", nil, err
 	}

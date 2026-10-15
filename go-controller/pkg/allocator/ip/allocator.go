@@ -49,13 +49,14 @@ type ContinuousAllocator interface {
 }
 
 var (
-	ErrFull      = errors.New("subnet address pool exhausted")
-	ErrAllocated = errors.New("provided IP is already allocated")
+	ErrFull             = errors.New("subnet address pool exhausted")
+	ErrAllocated        = errors.New("provided IP is already allocated by the same owner")
+	ErrAllocatedByOther = errors.New("provided IP is already allocated by another owner")
 )
 
-// IsErrAllocated returns true if err is of type ErrAllocated
+// IsErrAllocated reports whether the IP is already allocated to any owner.
 func IsErrAllocated(err error) bool {
-	return errors.Is(err, ErrAllocated)
+	return errors.Is(err, ErrAllocated) || errors.Is(err, ErrAllocatedByOther)
 }
 
 // IsErrFull returns true if err is of type ErrFull

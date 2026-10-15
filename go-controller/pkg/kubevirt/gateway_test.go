@@ -230,7 +230,7 @@ func TestLocalMigratablePodRoutingAndGateway(t *testing.T) {
 			t.Cleanup(dbCtx.Cleanup)
 			lsManager := logicalswitchmanager.NewLogicalSwitchManager()
 			if tc.home {
-				require.NoError(t, lsManager.AddOrUpdateSwitch("target", ovntest.MustParseIPNets("10.244.1.0/24"), nil))
+				require.NoError(t, lsManager.AddOrUpdateSwitch("target", ovntest.MustParseIPNets("10.244.1.0/24"), nil, nil))
 			}
 			r := NewClusterDefaultNetworkGatewayAnnouncer(types.K8sMgmtIntfName)
 			calls := 0

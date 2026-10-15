@@ -3186,6 +3186,75 @@ var _ = ginkgo.Describe("cleanupStalePodSNATs", func() {
 		gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDB))
 	})
 
+	ginkgo.DescribeTable("cleans up completed pod SNATs without local IPAM ownership", func(layer2 bool, replacementNode string) {
+		config.Gateway.DisableSNATMultipleGWs = true
+		config.OVNKubernetesFeature.EnableMultiNetwork = true
+		config.OVNKubernetesFeature.EnableNetworkSegmentation = true
+		var netInfo util.NetInfo = &util.DefaultNetInfo{}
+		nadKey := types.DefaultNetworkName
+		podCIDR := "10.128.0.5/24"
+		if layer2 {
+			var err error
+			netInfo, err = util.ParseNADInfo(ovntest.GenerateNAD("bluenet", "rednad", "default",
+				types.Layer2Topology, "100.128.0.0/16", types.NetworkRolePrimary))
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			nadKey = "default/rednad"
+			podCIDR = "100.128.0.5/24"
+		}
+		ips := ovntest.MustParseIPNets(podCIDR)
+		completed := ovntest.NewPod("default", "completed", testNode, ips[0].IP.String())
+		completed.UID = "completed"
+		completed.Status.Phase = corev1.PodSucceeded
+		var err error
+		completed.Annotations, err = util.MarshalPodAnnotation(nil, &util.PodAnnotation{
+			IPs: ips, MAC: util.IPAddrToHWAddr(ips[0].IP), Role: types.NetworkRolePrimary,
+		}, nadKey)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		pods := &corev1.PodList{Items: []corev1.Pod{*completed}}
+		if replacementNode != "" {
+			replacement := completed.DeepCopy()
+			replacement.Name, replacement.UID = "replacement", "replacement"
+			replacement.Spec.NodeName = replacementNode
+			replacement.Status.Phase = corev1.PodRunning
+			pods.Items = append(pods.Items, *replacement)
+		}
+		nat := &nbdb.NAT{
+			UUID: "pod-nat-UUID", Type: nbdb.NATTypeSNAT,
+			ExternalIP: "169.255.33.2", LogicalIP: ips[0].IP.String(),
+		}
+		router := &nbdb.LogicalRouter{
+			UUID: "gateway-UUID", Name: netInfo.GetNetworkScopedGWRouterName(testNode), Nat: []string{nat.UUID},
+		}
+		fakeOvn.startWithDBSetup(libovsdbtest.TestSetup{
+			NBData: []libovsdbtest.TestData{router, nat},
+		}, pods)
+		gomega.Expect(fakeOvn.controller.lsManager.GetSwitchSubnets(testNode)).To(gomega.BeEmpty())
+		gw := newGatewayManager(fakeOvn, testNode)
+		gw.netInfo, gw.gwRouterName = netInfo, router.Name
+		gw.getNetworkNameForNADKey = func(key string) string {
+			if key == nadKey {
+				return netInfo.GetNetworkName()
+			}
+			return ""
+		}
+		gomega.Expect(gw.cleanupStalePodSNATs(testNode, ovntest.MustParseIPNets("169.255.33.2/24"), nil)).To(gomega.Succeed())
+		expectedRouter := *router
+		expected := []libovsdbtest.TestData{&expectedRouter}
+		if replacementNode != "" && replacementNode != testNode {
+			expectedRouter.Nat = []string{}
+		} else {
+			expected = append(expected, nat)
+		}
+		gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expected))
+	},
+		ginkgo.Entry("default network before pod sync", false, ""),
+		ginkgo.Entry("default network with local IP reuse", false, testNode),
+		ginkgo.Entry("default network with remote IP reuse", false, "other-node"),
+		ginkgo.Entry("Layer2 network", true, ""),
+		ginkgo.Entry("Layer2 network with local IP reuse", true, testNode),
+		ginkgo.Entry("Layer2 network with remote IP reuse", true, "other-node"),
+	)
+
 	ginkgo.It("deletes pod SNAT when DisableSNATMultipleGWs is false", func() {
 		gwRouterName := "GR_" + testNode
 		podNAT := &nbdb.NAT{

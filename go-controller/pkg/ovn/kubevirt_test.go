@@ -931,7 +931,7 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 					_, err = fakeOvn.controller.addNode(newNode)
 					Expect(err).ToNot(HaveOccurred())
 
-					Expect(fakeOvn.controller.lsManager.AllocateIPs(newNode.Name, podAnnotation.IPs)).ToNot(Succeed(), "should allocate the pod IPs when node is replaced")
+					Expect(fakeOvn.controller.lsManager.AllocateIPs(newNode.Name, "test-owner", podAnnotation.IPs)).ToNot(Succeed(), "should allocate the pod IPs when node is replaced")
 
 					// Make ovn expectations after pod deletion happy
 					Expect(libovsdbops.DeleteLogicalSwitchPorts(fakeOvn.nbClient, &nbdb.LogicalSwitch{Name: newNode.Name}, &nbdb.LogicalSwitchPort{Name: "stor-newNode1"})).To(Succeed())
@@ -979,7 +979,7 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 				if !hasMigration {
 					if checkRelease {
 						Eventually(fakeOvn.controller.lsManager.AllocateIPs).
-							WithArguments(subnet, vmIPNets).
+							WithArguments(subnet, "test-owner", vmIPNets).
 							Should(Succeed(), "should have de-allocated VM IP after termination")
 					}
 					Eventually(fakeOvn.nbClient).Should(
@@ -990,7 +990,7 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 				}
 				if checkRelease {
 					Consistently(fakeOvn.controller.lsManager.AllocateIPs).
-						WithArguments(subnet, vmIPNets).
+						WithArguments(subnet, "test-owner", vmIPNets).
 						ShouldNot(Succeed(), "should have not de-allocated VM IP after migration")
 				}
 
@@ -1002,7 +1002,7 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 				completeAndDeletePod(t.namespace, deleteSecond.podName)
 				if checkRelease {
 					Eventually(fakeOvn.controller.lsManager.AllocateIPs).
-						WithArguments(subnet, vmIPNets).
+						WithArguments(subnet, "test-owner", vmIPNets).
 						Should(Succeed(), "should have de-allocated target VM IP after termination")
 				}
 

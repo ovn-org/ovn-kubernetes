@@ -348,7 +348,7 @@ func (a *PodAllocator) releasePodOnNAD(pod *corev1.Pod, nadKey string, network *
 	}
 
 	if doReleaseIPs {
-		err := a.ipAllocator.ReleaseIPs(a.netInfo.GetNetworkName(), podAnnotation.IPs)
+		err := a.ipAllocator.ReleaseIPs(a.netInfo.GetNetworkName(), podIdAllocationName(nadKey, string(pod.UID)), podAnnotation.IPs)
 		if err != nil {
 			return fmt.Errorf("failed to release ips %v for pod %s/%s and NAD key %s: %w",
 				util.StringSlice(podAnnotation.IPs),
@@ -378,9 +378,9 @@ func (a *PodAllocator) releasePodOnNAD(pod *corev1.Pod, nadKey string, network *
 }
 
 func (a *PodAllocator) allocatePodOnNAD(pod *corev1.Pod, nadKey string, network *nettypes.NetworkSelectionElement) error {
-	var ipAllocator subnet.NamedAllocator
+	var ipAllocator subnet.IPAllocator
 	if util.DoesNetworkRequireIPAM(a.netInfo) {
-		ipAllocator = a.ipAllocator.ForSubnet(a.netInfo.GetNetworkName())
+		ipAllocator = a.ipAllocator
 	}
 
 	var idAllocator id.NamedAllocator
@@ -408,6 +408,7 @@ func (a *PodAllocator) allocatePodOnNAD(pod *corev1.Pod, nadKey string, network 
 
 	updatedPod, podAnnotation, err := a.podAnnotationAllocator.AllocatePodAnnotationWithTunnelID(
 		ipAllocator,
+		a.netInfo.GetNetworkName(), podIdAllocationName(nadKey, string(pod.UID)),
 		idAllocator,
 		node,
 		pod,
@@ -419,7 +420,7 @@ func (a *PodAllocator) allocatePodOnNAD(pod *corev1.Pod, nadKey string, network 
 
 	if err != nil {
 		if errors.Is(err, ipallocator.ErrFull) ||
-			errors.Is(err, ipallocator.ErrAllocated) ||
+			ipallocator.IsErrAllocated(err) ||
 			errors.Is(err, mac.ErrReserveMACConflict) ||
 			errors.Is(err, podallocator.ErrIPFamilyMismatch) {
 			a.recordPodErrorEvent(pod, err)

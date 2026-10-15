@@ -4,17 +4,19 @@
 package logicalswitchmanager
 
 import (
+	"errors"
 	"fmt"
 	"net"
+	"sort"
+	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	knet "k8s.io/utils/net"
 
 	ipam "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/allocator/ip"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/allocator/ip/subnet"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
-
-var SwitchNotFound = subnet.ErrSubnetNotFound
 
 // LogicalSwitchManager provides switch info management APIs including IPAM for the host subnets
 type LogicalSwitchManager struct {
@@ -59,8 +61,10 @@ func NewL2SwitchManagerForUserDefinedPrimaryNetwork(gatewayIPs, mgmtIPs []*net.I
 }
 
 // AddOrUpdateSwitch adds/updates a switch to the logical switch manager for subnet
-// and IPAM management.
-func (manager *LogicalSwitchManager) AddOrUpdateSwitch(switchName string, hostSubnets []*net.IPNet, reservedSubnets []*net.IPNet, excludeSubnets ...*net.IPNet) error {
+// and IPAM management, restoring initial allocations with their owners atomically.
+func (manager *LogicalSwitchManager) AddOrUpdateSwitch(switchName string, hostSubnets []*net.IPNet, reservedSubnets []*net.IPNet,
+	initialAllocations map[string][]*net.IPNet, excludeSubnets ...*net.IPNet,
+) error {
 	if manager.reserveIPs {
 		for _, hostSubnet := range hostSubnets {
 			gwIP, _ := util.MatchFirstIPNetFamily(knet.IsIPv6CIDR(hostSubnet), manager.gatewayIPs)
@@ -82,10 +86,11 @@ func (manager *LogicalSwitchManager) AddOrUpdateSwitch(switchName string, hostSu
 		}
 	}
 	return manager.allocator.AddOrUpdateSubnet(subnet.SubnetConfig{
-		Name:            switchName,
-		Subnets:         hostSubnets,
-		ReservedSubnets: reservedSubnets,
-		ExcludeSubnets:  excludeSubnets,
+		Name:               switchName,
+		Subnets:            hostSubnets,
+		ReservedSubnets:    reservedSubnets,
+		ExcludeSubnets:     excludeSubnets,
+		InitialAllocations: initialAllocations,
 	})
 }
 
@@ -115,21 +120,36 @@ func (manager *LogicalSwitchManager) GetSwitchSubnets(switchName string) []*net.
 	return subnets
 }
 
+// FilterIPsForSwitch returns the supplied addresses contained in the switch's subnets.
+func (manager *LogicalSwitchManager) FilterIPsForSwitch(switchName string, ips []*net.IPNet) []*net.IPNet {
+	var localIPs []*net.IPNet
+	subnets := manager.GetSwitchSubnets(switchName)
+	for _, ip := range ips {
+		if util.IsContainedInAnyCIDR(ip, subnets...) {
+			localIPs = append(localIPs, ip)
+		}
+	}
+	return localIPs
+}
+
 // AllocateUntilFull used for unit testing only, allocates the rest of the switch subnet
 func (manager *LogicalSwitchManager) AllocateUntilFull(switchName string) error {
 	return manager.allocator.AllocateUntilFull(switchName)
 }
 
-// AllocateIPs will block off IPs in the ipnets slice as already allocated
-// for a given switch
-func (manager *LogicalSwitchManager) AllocateIPs(switchName string, ipnets []*net.IPNet) error {
-	return manager.allocator.AllocateIPPerSubnet(switchName, ipnets)
+// AllocateIPs reserves addresses for owner on a switch.
+func (manager *LogicalSwitchManager) AllocateIPs(switchName, owner string, ipnets []*net.IPNet) error {
+	return manager.allocator.AllocateIPs(switchName, owner, ipnets)
 }
 
-// AllocateNextIPs allocates IP addresses from each of the host subnets
-// for a given switch
-func (manager *LogicalSwitchManager) AllocateNextIPs(switchName string) ([]*net.IPNet, error) {
-	return manager.allocator.AllocateNextIPs(switchName)
+// AllocateNextIPs allocates addresses and records their owner atomically.
+func (manager *LogicalSwitchManager) AllocateNextIPs(switchName, owner string) ([]*net.IPNet, error) {
+	return manager.allocator.AllocateNextIPs(switchName, owner)
+}
+
+// OwnsIPs reports whether owner holds every requested address.
+func (manager *LogicalSwitchManager) OwnsIPs(switchName, owner string, ips []*net.IPNet) bool {
+	return manager.allocator.OwnsIPs(switchName, owner, ips)
 }
 
 func (manager *LogicalSwitchManager) AllocateHybridOverlay(switchName string, hybridOverlayAnnotation []string) ([]*net.IPNet, error) {
@@ -142,8 +162,8 @@ func (manager *LogicalSwitchManager) AllocateHybridOverlay(switchName string, hy
 		}
 		// attempt to allocate the IP address that is annotated on the node. The only way there would be a collision is if the annotations of podIP or hybridOverlayDRIP
 		// where manually edited and we do not support that
-		err = manager.AllocateIPs(switchName, allocatedAddresses)
-		if err != nil && err != ipam.ErrAllocated {
+		err = manager.AllocateIPs(switchName, "hybrid-overlay", allocatedAddresses)
+		if err != nil && (!ipam.IsErrAllocated(err) || errors.Is(err, ipam.ErrAllocatedByOther)) {
 			return nil, err
 		}
 		return allocatedAddresses, nil
@@ -154,8 +174,8 @@ func (manager *LogicalSwitchManager) AllocateHybridOverlay(switchName string, hy
 	for _, hostSubnet := range hostSubnets {
 		allocatedAddresses = append(allocatedAddresses, util.GetNodeHybridOverlayIfAddr(hostSubnet))
 	}
-	err = manager.AllocateIPs(switchName, allocatedAddresses)
-	if err != nil && err != ipam.ErrAllocated {
+	err = manager.AllocateIPs(switchName, "hybrid-overlay", allocatedAddresses)
+	if err != nil && !ipam.IsErrAllocated(err) {
 		return nil, fmt.Errorf("cannot allocate hybrid overlay interface addresses %s for switch %s: %w",
 			util.StringSlice(allocatedAddresses),
 			switchName,
@@ -163,8 +183,8 @@ func (manager *LogicalSwitchManager) AllocateHybridOverlay(switchName string, hy
 	}
 
 	// otherwise try to allocate any IP
-	if err == ipam.ErrAllocated {
-		allocatedAddresses, err = manager.AllocateNextIPs(switchName)
+	if ipam.IsErrAllocated(err) {
+		allocatedAddresses, err = manager.AllocateNextIPs(switchName, "hybrid-overlay")
 	}
 
 	if err != nil {
@@ -174,27 +194,42 @@ func (manager *LogicalSwitchManager) AllocateHybridOverlay(switchName string, hy
 	return allocatedAddresses, nil
 }
 
-// Mark the IPs in ipnets slice as available for allocation
-// by releasing them from the IPAM pool of allocated IPs.
-// If there aren't IPs to release the method does not return an error.
-func (manager *LogicalSwitchManager) ReleaseIPs(switchName string, ipnets []*net.IPNet) error {
-	return manager.allocator.ReleaseIPs(switchName, ipnets)
-}
-
-// ConditionalIPRelease determines if any IP is available to be released from an IPAM conditionally if func is true.
-// It guarantees state of the allocator will not change while executing the predicate function
-// TODO(trozet): add unit testing for this function
-func (manager *LogicalSwitchManager) ConditionalIPRelease(switchName string, ipnets []*net.IPNet, predicate func() (bool, error)) (bool, error) {
-	return manager.allocator.ConditionalIPRelease(switchName, ipnets, predicate)
-}
-
-// ForSubnet return an IP allocator for the specified switch
-func (manager *LogicalSwitchManager) ForSwitch(switchName string) subnet.NamedAllocator {
-	return manager.allocator.ForSubnet(switchName)
+// ReleaseIPs releases only addresses still held by owner.
+func (manager *LogicalSwitchManager) ReleaseIPs(switchName, owner string, ipnets []*net.IPNet) error {
+	return manager.allocator.ReleaseIPs(switchName, owner, ipnets)
 }
 
 // GetSubnetName will find the switch that contains one of the subnets
 // from "subnets" if not it will return "", false
 func (manager *LogicalSwitchManager) GetSubnetName(subnets []*net.IPNet) (string, bool) {
 	return manager.allocator.GetSubnetName(subnets)
+}
+
+// SortPodsForIPAM orders bootstrap reservations so live pods claim their IPs
+// before completed pods whose annotations may refer to released addresses.
+// Among completed pods, the most recently initialized pod claims first.
+func SortPodsForIPAM(objects []interface{}) ([]*corev1.Pod, error) {
+	pods := make([]*corev1.Pod, 0, len(objects))
+	for _, object := range objects {
+		pod, ok := object.(*corev1.Pod)
+		if !ok {
+			return nil, fmt.Errorf("spurious object in pod IPAM initialization: %v", object)
+		}
+		pods = append(pods, pod)
+	}
+	initialized := func(pod *corev1.Pod) time.Time {
+		for _, condition := range pod.Status.Conditions {
+			if condition.Type == corev1.PodInitialized {
+				return condition.LastTransitionTime.Time
+			}
+		}
+		return time.Time{}
+	}
+	sort.SliceStable(pods, func(i, j int) bool {
+		if util.PodCompleted(pods[i]) != util.PodCompleted(pods[j]) {
+			return !util.PodCompleted(pods[i])
+		}
+		return initialized(pods[i]).After(initialized(pods[j]))
+	})
+	return pods, nil
 }

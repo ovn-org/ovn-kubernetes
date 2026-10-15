@@ -26,28 +26,30 @@ type SubnetConfig struct {
 	Subnets         []*net.IPNet
 	ReservedSubnets []*net.IPNet
 	ExcludeSubnets  []*net.IPNet
+	// InitialAllocations contains existing IP allocations keyed by owner.
+	InitialAllocations map[string][]*net.IPNet
 }
 
 // Allocator manages the allocation of IP within specific set of subnets
 // identified by a name. Allocator should be threadsafe.
 type Allocator interface {
+	IPAllocator
 	AddOrUpdateSubnet(config SubnetConfig) error
 	DeleteSubnet(name string)
 	GetSubnets(name string) ([]*net.IPNet, error)
 	AllocateUntilFull(name string) error
-	AllocateIPPerSubnet(name string, ips []*net.IPNet) error
-	AllocateNextIPs(name string) ([]*net.IPNet, error)
-	ReleaseIPs(name string, ips []*net.IPNet) error
-	ConditionalIPRelease(name string, ips []*net.IPNet, predicate func() (bool, error)) (bool, error)
-	ForSubnet(name string) NamedAllocator
+	OwnsIPs(name, owner string, ips []*net.IPNet) bool
 	GetSubnetName(subnets []*net.IPNet) (string, bool)
 }
 
-// NamedAllocator manages the allocation of IPs within a specific subnet
-type NamedAllocator interface {
-	AllocateIPs(ips []*net.IPNet) error
-	AllocateNextIPs() ([]*net.IPNet, error)
-	ReleaseIPs(ips []*net.IPNet) error
+// IPAllocator manages reservations by owner within a named set of subnets.
+// AllocateIPs returns ErrAllocated for the owner's existing reservation and
+// ErrAllocatedByOther for conflicts. A successful call reserves all supplied IPs.
+// Releasing an address held by another owner is a no-op.
+type IPAllocator interface {
+	AllocateIPs(name, owner string, ips []*net.IPNet) error
+	AllocateNextIPs(name, owner string) ([]*net.IPNet, error)
+	ReleaseIPs(name, owner string, ips []*net.IPNet) error
 }
 
 // ErrSubnetNotFound is used to inform the subnet is not being managed
@@ -58,6 +60,7 @@ var ErrSubnetNotFound = errors.New("subnet not found")
 // of the managed subnets
 type subnetInfo struct {
 	subnets []*net.IPNet
+	owners  map[string]string
 	// ipams holds continuous IP allocators for dynamic IP allocation within the managed subnets.
 	ipams []ipallocator.ContinuousAllocator
 	// staticIPAMs holds static IP allocators for reserved subnets that support static IP allocation (currently only supported for Layer2 primary networks)
@@ -163,11 +166,22 @@ func (allocator *allocator) AddOrUpdateSubnet(config SubnetConfig) error {
 			}
 		}
 	}
-	allocator.cache[config.Name] = subnetInfo{
+	info := subnetInfo{
 		subnets:     config.Subnets,
+		owners:      make(map[string]string),
 		ipams:       ipams,
 		staticIPAMs: staticIPAMs,
 	}
+	// Restore allocations before publishing the replacement subnet state.
+	for owner, ips := range config.InitialAllocations {
+		for _, ip := range ips {
+			if err := info.allocateIPs(config.Name, owner, []*net.IPNet{ip}); err != nil &&
+				(!ipallocator.IsErrAllocated(err) || errors.Is(err, ipallocator.ErrAllocatedByOther)) {
+				return err
+			}
+		}
+	}
+	allocator.cache[config.Name] = info
 	return nil
 }
 
@@ -198,8 +212,8 @@ func (allocator *allocator) GetSubnets(name string) ([]*net.IPNet, error) {
 
 // AllocateUntilFull used for unit testing only, allocates the rest of the subnet
 func (allocator *allocator) AllocateUntilFull(name string) error {
-	allocator.RLock()
-	defer allocator.RUnlock()
+	allocator.Lock()
+	defer allocator.Unlock()
 	subnetInfo, ok := allocator.cache[name]
 	if !ok {
 		return fmt.Errorf("failed to allocate IPs for subnet %s: %w", name, ErrSubnetNotFound)
@@ -215,20 +229,44 @@ func (allocator *allocator) AllocateUntilFull(name string) error {
 	return nil
 }
 
-// AllocateIPPerSubnet will block off IPs in the ipnets slice as already
+// AllocateIPs will block off IPs in the ipnets slice as already
 // allocated in each of the subnets it manages. ips *must* feature a single IP
 // on each of the subnets managed by the allocator.
-func (allocator *allocator) AllocateIPPerSubnet(name string, ips []*net.IPNet) error {
+func (allocator *allocator) AllocateIPs(name, owner string, ips []*net.IPNet) error {
+	allocator.Lock()
+	defer allocator.Unlock()
+	info, ok := allocator.cache[name]
+	if !ok {
+		return fmt.Errorf("failed to allocate IPs %v for %s: %w", util.StringSlice(ips), name, ErrSubnetNotFound)
+	}
+	return info.allocateIPs(name, owner, ips)
+}
+
+func (subnetInfo *subnetInfo) allocateIPs(name, owner string, ips []*net.IPNet) error {
 	if len(ips) == 0 {
 		return fmt.Errorf("failed to allocate IPs for %s: no IPs provided", name)
 	}
-	allocator.RLock()
-	defer allocator.RUnlock()
-	subnetInfo, ok := allocator.cache[name]
-	if !ok {
-		return fmt.Errorf("failed to allocate IPs %v for %s: %w", util.StringSlice(ips), name, ErrSubnetNotFound)
-	} else if len(subnetInfo.ipams) == 0 && len(subnetInfo.staticIPAMs) == 0 {
+	if len(subnetInfo.ipams) == 0 && len(subnetInfo.staticIPAMs) == 0 {
 		return fmt.Errorf("failed to allocate IPs %v for subnet %s: has no IPAM", util.StringSlice(ips), name)
+	}
+	owned := 0
+	for _, ip := range ips {
+		current, allocated := subnetInfo.owners[ip.IP.String()]
+		if allocated && current != owner {
+			return fmt.Errorf("IP %s on subnet %s: %w", ip.IP, name, ipallocator.ErrAllocatedByOther)
+		}
+		if allocated {
+			owned++
+		}
+	}
+	if owned != 0 {
+		if owned == len(ips) {
+			// Distinguish existing reservations from new ones so callers do not
+			// release this owner's existing IPs when rolling back a failed operation.
+			return fmt.Errorf("%w %q", ipallocator.ErrAllocated, owner)
+		}
+		// Mixing old and new reservations would make rollback release both.
+		return fmt.Errorf("owner %s already owns only part of requested IPs on subnet %s", owner, name)
 	}
 
 	var err error
@@ -260,12 +298,15 @@ func (allocator *allocator) AllocateIPPerSubnet(name string, ips []*net.IPNet) e
 		for idx, staticIPAM := range subnetInfo.staticIPAMs {
 			cidr := staticIPAM.CIDR()
 			if cidr.Contains(ipnet.IP) {
-				if _, ok = allocatedStatic[idx]; ok {
+				if _, ok := allocatedStatic[idx]; ok {
 					err = fmt.Errorf("failed to allocate IP %s for %s: attempted to reserve multiple IPs in the same static IPAM instance", ipnet.IP, name)
 					return err
 				}
 
 				if err = staticIPAM.Allocate(ipnet.IP); err != nil {
+					if ipallocator.IsErrAllocated(err) {
+						err = fmt.Errorf("reserved IP %s on subnet %s: %w", ipnet.IP, name, ipallocator.ErrAllocatedByOther)
+					}
 					return err
 				}
 				allocatedStatic[idx] = ipnet
@@ -279,11 +320,14 @@ func (allocator *allocator) AllocateIPPerSubnet(name string, ips []*net.IPNet) e
 			for idx, ipam := range subnetInfo.ipams {
 				cidr := ipam.CIDR()
 				if cidr.Contains(ipnet.IP) {
-					if _, ok = allocatedContinuous[idx]; ok {
+					if _, ok := allocatedContinuous[idx]; ok {
 						err = fmt.Errorf("failed to allocate IP %s for %s: attempted to reserve multiple IPs in the same continuous IPAM instance", ipnet.IP, name)
 						return err
 					}
 					if err = ipam.Allocate(ipnet.IP); err != nil {
+						if ipallocator.IsErrAllocated(err) {
+							err = fmt.Errorf("reserved IP %s on subnet %s: %w", ipnet.IP, name, ipallocator.ErrAllocatedByOther)
+						}
 						return err
 					}
 					allocatedContinuous[idx] = ipnet
@@ -297,6 +341,9 @@ func (allocator *allocator) AllocateIPPerSubnet(name string, ips []*net.IPNet) e
 			err = fmt.Errorf("failed to allocate IP %s for %s: not contained in any known subnet", ipnet.IP, name)
 			return err
 		}
+	}
+	for _, ip := range ips {
+		subnetInfo.owners[ip.IP.String()] = owner
 	}
 	return nil
 }
@@ -317,9 +364,9 @@ func reserveSubnets(subnet *net.IPNet, ipam ipallocator.ContinuousAllocator) err
 }
 
 // AllocateNextIPs allocates IP addresses from the given subnet set
-func (allocator *allocator) AllocateNextIPs(name string) ([]*net.IPNet, error) {
-	allocator.RLock()
-	defer allocator.RUnlock()
+func (allocator *allocator) AllocateNextIPs(name, owner string) ([]*net.IPNet, error) {
+	allocator.Lock()
+	defer allocator.Unlock()
 	var ipnets []*net.IPNet
 	var ip net.IP
 	var err error
@@ -365,24 +412,27 @@ func (allocator *allocator) AllocateNextIPs(name string) ([]*net.IPNet, error) {
 		}
 		ipnets = append(ipnets, ipnet)
 	}
+	for _, ip := range ipnets {
+		subnetInfo.owners[ip.IP.String()] = owner
+	}
 	return ipnets, nil
 }
 
-// ReleaseIPs marks the IPs in ipnets slice as available for allocation by
-// releasing them from the IPAM pool of allocated IPs of the given subnet set.
-// If there aren't IPs to release the method does not return an error.
-func (allocator *allocator) ReleaseIPs(name string, ips []*net.IPNet) error {
-	allocator.RLock()
-	defer allocator.RUnlock()
-	if ips == nil || name == "" {
-		return nil
-	}
+// ReleaseIPs releases only addresses still held by owner.
+func (allocator *allocator) ReleaseIPs(name, owner string, ips []*net.IPNet) error {
+	allocator.Lock()
+	defer allocator.Unlock()
 	subnetInfo, ok := allocator.cache[name]
 	if !ok {
-		return fmt.Errorf("failed to release ips for %s: %w", name, ErrSubnetNotFound)
+		return nil
 	}
 
 	for _, ipnet := range ips {
+		key := ipnet.IP.String()
+		if current, allocated := subnetInfo.owners[key]; !allocated || current != owner {
+			continue
+		}
+		delete(subnetInfo.owners, key)
 		released := false
 		for _, ipam := range subnetInfo.staticIPAMs {
 			cidr := ipam.CIDR()
@@ -408,55 +458,17 @@ func (allocator *allocator) ReleaseIPs(name string, ips []*net.IPNet) error {
 	return nil
 }
 
-// ConditionalIPRelease determines if any IP is available to be released from an IPAM conditionally if func is true.
-// It guarantees state of the allocator will not change while executing the predicate function
-// TODO(trozet): add unit testing for this function
-func (allocator *allocator) ConditionalIPRelease(name string, ips []*net.IPNet, predicate func() (bool, error)) (bool, error) {
+// OwnsIPs reports whether owner holds every requested address.
+func (allocator *allocator) OwnsIPs(name, owner string, ips []*net.IPNet) bool {
 	allocator.RLock()
 	defer allocator.RUnlock()
-	if ips == nil || name == "" {
-		return false, nil
-	}
-	subnetInfo, ok := allocator.cache[name]
-	if !ok {
-		return false, nil
-	}
-	if len(subnetInfo.ipams) == 0 && len(subnetInfo.staticIPAMs) == 0 {
-		return false, nil
-	}
-
-	// check if ipam has one of the ip addresses, and then execute the predicate function to determine
-	// if this IP should be released or not
-	for _, ipnet := range ips {
-		// Check static IPAMs first
-		for _, ipam := range subnetInfo.staticIPAMs {
-			cidr := ipam.CIDR()
-			if cidr.Contains(ipnet.IP) {
-				if ipam.Has(ipnet.IP) {
-					return predicate()
-				}
-			}
-		}
-		// Check continuous IPAMs
-		for _, ipam := range subnetInfo.ipams {
-			cidr := ipam.CIDR()
-			if cidr.Contains(ipnet.IP) {
-				if ipam.Has(ipnet.IP) {
-					return predicate()
-				}
-			}
+	info := allocator.cache[name]
+	for _, ip := range ips {
+		if current, allocated := info.owners[ip.IP.String()]; !allocated || current != owner {
+			return false
 		}
 	}
-
-	return false, nil
-}
-
-// ForSubnet returns an IP allocator for the specified subnet
-func (allocator *allocator) ForSubnet(name string) NamedAllocator {
-	return &IPAllocator{
-		name:      name,
-		allocator: allocator,
-	}
+	return len(ips) != 0
 }
 
 // GetSubnetName will find the switch that contains one of the subnets
@@ -482,24 +494,4 @@ func (allocator *allocator) GetSubnetName(subnets []*net.IPNet) (string, bool) {
 		}
 	}
 	return "", false
-}
-
-type IPAllocator struct {
-	allocator *allocator
-	name      string
-}
-
-// AllocateIPs allocates the requested IPs
-func (ipAllocator *IPAllocator) AllocateIPs(ips []*net.IPNet) error {
-	return ipAllocator.allocator.AllocateIPPerSubnet(ipAllocator.name, ips)
-}
-
-// AllocateNextIPs allocates the next available IPs
-func (ipAllocator *IPAllocator) AllocateNextIPs() ([]*net.IPNet, error) {
-	return ipAllocator.allocator.AllocateNextIPs(ipAllocator.name)
-}
-
-// ReleaseIPs release the provided IPs
-func (ipAllocator *IPAllocator) ReleaseIPs(ips []*net.IPNet) error {
-	return ipAllocator.allocator.ReleaseIPs(ipAllocator.name, ips)
 }
