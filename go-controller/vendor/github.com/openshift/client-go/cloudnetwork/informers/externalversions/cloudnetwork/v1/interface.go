@@ -9,7 +9,7 @@ import (
 // Interface provides access to all the informers in this group version.
 type Interface interface {
 	// CloudPrivateIPConfigs returns a CloudPrivateIPConfigInformer.
-	CloudPrivateIPConfigs() CloudPrivateIPConfigInformer
+	CloudPrivateIPConfigs() TypedCloudPrivateIPConfigInformer
 }
 
 type version struct {
@@ -23,7 +23,7 @@ func New(f internalinterfaces.SharedInformerFactory, namespace string, tweakList
 	return &version{factory: f, namespace: namespace, tweakListOptions: tweakListOptions}
 }
 
-// CloudPrivateIPConfigs returns a CloudPrivateIPConfigInformer.
-func (v *version) CloudPrivateIPConfigs() CloudPrivateIPConfigInformer {
+// CloudPrivateIPConfigs returns a TypedCloudPrivateIPConfigInformer.
+func (v *version) CloudPrivateIPConfigs() TypedCloudPrivateIPConfigInformer {
 	return &cloudPrivateIPConfigInformer{factory: v.factory, tweakListOptions: v.tweakListOptions}
 }

@@ -21,11 +21,39 @@ import (
 )
 
 // ClusterUserDefinedNetworkInformer provides access to a shared informer and lister for
-// ClusterUserDefinedNetworks.
+// ClusterUserDefinedNetworks. Prefer using the type-safe variant (see [TypedClusterUserDefinedNetworkInformer]).
 type ClusterUserDefinedNetworkInformer interface {
 	Informer() cache.SharedIndexInformer
 	Lister() userdefinednetworkv1.ClusterUserDefinedNetworkLister
 }
+
+// TypedClusterUserDefinedNetworkInformer provides access to a shared informer and lister for
+// ClusterUserDefinedNetworks, including the type-safe TypedInformer variant.
+// It is a superset of ClusterUserDefinedNetworkInformer.
+type TypedClusterUserDefinedNetworkInformer interface {
+	Informer() cache.SharedIndexInformer
+	TypedInformer() ClusterUserDefinedNetworkIndexInformer
+	Lister() userdefinednetworkv1.ClusterUserDefinedNetworkLister
+}
+
+// ClusterUserDefinedNetworkIndexInformer is a wrapper around the underlying [cache.SharedIndexInformer]
+// with type-safe variants of several methods.
+type ClusterUserDefinedNetworkIndexInformer cache.TypedSharedIndexInformer[*crduserdefinednetworkv1.ClusterUserDefinedNetwork]
+
+// ClusterUserDefinedNetworkHandlerFuncs is a specialization of [cache.TypedResourceEventHandlerFuncs] for ClusterUserDefinedNetwork.
+type ClusterUserDefinedNetworkHandlerFuncs = cache.TypedResourceEventHandlerFuncs[*crduserdefinednetworkv1.ClusterUserDefinedNetwork]
+
+// ClusterUserDefinedNetworkDetailedHandlerFuncs is a specialization of [cache.TypedResourceEventHandlerDetailedFuncs] for ClusterUserDefinedNetwork.
+type ClusterUserDefinedNetworkDetailedHandlerFuncs = cache.TypedResourceEventHandlerDetailedFuncs[*crduserdefinednetworkv1.ClusterUserDefinedNetwork]
+
+// ClusterUserDefinedNetworkFilteringHandler is a specialization of [cache.TypedFilteringResourceEventHandler] for ClusterUserDefinedNetwork.
+type ClusterUserDefinedNetworkFilteringHandler = cache.TypedFilteringResourceEventHandler[*crduserdefinednetworkv1.ClusterUserDefinedNetwork]
+
+// ClusterUserDefinedNetworkIndexers is a specialization of [cache.TypedIndexers] for ClusterUserDefinedNetwork.
+type ClusterUserDefinedNetworkIndexers = cache.TypedIndexers[*crduserdefinednetworkv1.ClusterUserDefinedNetwork]
+
+// DeletedClusterUserDefinedNetwork is a specialization of [cache.DeletedObject] for ClusterUserDefinedNetwork.
+type DeletedClusterUserDefinedNetwork = cache.DeletedObject[*crduserdefinednetworkv1.ClusterUserDefinedNetwork]
 
 type clusterUserDefinedNetworkInformer struct {
 	factory          internalinterfaces.SharedInformerFactory
@@ -35,25 +63,49 @@ type clusterUserDefinedNetworkInformer struct {
 // NewClusterUserDefinedNetworkInformer constructs a new informer for ClusterUserDefinedNetwork type.
 // Always prefer using an informer factory to get a shared informer instead of getting an independent
 // one. This reduces memory footprint and number of connections to the server.
+// If you really need an independent one, prefer using the type-safe variant (see [NewTypedClusterUserDefinedNetworkInformer]).
 func NewClusterUserDefinedNetworkInformer(client versioned.Interface, resyncPeriod time.Duration, indexers cache.Indexers) cache.SharedIndexInformer {
 	return NewClusterUserDefinedNetworkInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: indexers})
+}
+
+// NewTypedClusterUserDefinedNetworkInformer constructs a new informer for ClusterUserDefinedNetwork type.
+// Always prefer using an informer factory to get a shared informer instead of getting an independent
+// one. This reduces memory footprint and number of connections to the server.
+func NewTypedClusterUserDefinedNetworkInformer(client versioned.Interface, resyncPeriod time.Duration, indexers ClusterUserDefinedNetworkIndexers) ClusterUserDefinedNetworkIndexInformer {
+	return NewTypedClusterUserDefinedNetworkInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: cache.TypedIndexersToIndexers(indexers)})
 }
 
 // NewFilteredClusterUserDefinedNetworkInformer constructs a new informer for ClusterUserDefinedNetwork type.
 // Always prefer using an informer factory to get a shared informer instead of getting an independent
 // one. This reduces memory footprint and number of connections to the server.
+// If you really need an independent one, prefer using the type-safe variant (see [NewTypedFilteredClusterUserDefinedNetworkInformer]).
 func NewFilteredClusterUserDefinedNetworkInformer(client versioned.Interface, resyncPeriod time.Duration, indexers cache.Indexers, tweakListOptions internalinterfaces.TweakListOptionsFunc) cache.SharedIndexInformer {
-	return NewClusterUserDefinedNetworkInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: indexers, TweakListOptions: tweakListOptions})
+	return NewTypedClusterUserDefinedNetworkInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: indexers, TweakListOptions: tweakListOptions})
+}
+
+// NewTypedFilteredClusterUserDefinedNetworkInformer constructs a new informer for ClusterUserDefinedNetwork type.
+// Always prefer using an informer factory to get a shared informer instead of getting an independent
+// one. This reduces memory footprint and number of connections to the server.
+func NewTypedFilteredClusterUserDefinedNetworkInformer(client versioned.Interface, resyncPeriod time.Duration, indexers ClusterUserDefinedNetworkIndexers, tweakListOptions internalinterfaces.TweakListOptionsFunc) ClusterUserDefinedNetworkIndexInformer {
+	return NewTypedClusterUserDefinedNetworkInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: cache.TypedIndexersToIndexers(indexers), TweakListOptions: tweakListOptions})
 }
 
 // NewClusterUserDefinedNetworkInformerWithOptions constructs a new informer for ClusterUserDefinedNetwork type with additional options.
 // Always prefer using an informer factory to get a shared informer instead of getting an independent
 // one. This reduces memory footprint and number of connections to the server.
+// If you really need an independent one, prefer using the type-safe variant (see [NewTypedClusterUserDefinedNetworkInformerWithOptions]).
 func NewClusterUserDefinedNetworkInformerWithOptions(client versioned.Interface, options internalinterfaces.InformerOptions) cache.SharedIndexInformer {
+	return NewTypedClusterUserDefinedNetworkInformerWithOptions(client, options)
+}
+
+// NewTypedClusterUserDefinedNetworkInformerWithOptions constructs a new informer for ClusterUserDefinedNetwork type with additional options.
+// Always prefer using an informer factory to get a shared informer instead of getting an independent
+// one. This reduces memory footprint and number of connections to the server.
+func NewTypedClusterUserDefinedNetworkInformerWithOptions(client versioned.Interface, options internalinterfaces.InformerOptions) ClusterUserDefinedNetworkIndexInformer {
 	gvr := schema.GroupVersionResource{Group: "k8s.ovn.org", Version: "v1", Resource: "clusteruserdefinednetworks"}
 	identifier := options.InformerName.WithResource(gvr)
 	tweakListOptions := options.TweakListOptions
-	return cache.NewSharedIndexInformerWithOptions(
+	return cache.NewTypedSharedIndexInformer[*crduserdefinednetworkv1.ClusterUserDefinedNetwork](cache.NewSharedIndexInformerWithOptions(
 		cache.ToListWatcherWithWatchListSemantics(&cache.ListWatch{
 			ListFunc: func(opts metav1.ListOptions) (runtime.Object, error) {
 				if tweakListOptions != nil {
@@ -86,17 +138,57 @@ func NewClusterUserDefinedNetworkInformerWithOptions(client versioned.Interface,
 			Indexers:     options.Indexers,
 			Identifier:   identifier,
 		},
-	)
+	))
 }
 
 func (f *clusterUserDefinedNetworkInformer) defaultInformer(client versioned.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
-	return NewClusterUserDefinedNetworkInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}, InformerName: f.factory.InformerName(), TweakListOptions: f.tweakListOptions})
+	return NewTypedClusterUserDefinedNetworkInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}, InformerName: f.factory.InformerName(), TweakListOptions: f.tweakListOptions})
 }
 
 func (f *clusterUserDefinedNetworkInformer) Informer() cache.SharedIndexInformer {
-	return f.factory.InformerFor(&crduserdefinednetworkv1.ClusterUserDefinedNetwork{}, f.defaultInformer)
+	return f.TypedInformer()
+}
+
+func (f *clusterUserDefinedNetworkInformer) TypedInformer() ClusterUserDefinedNetworkIndexInformer {
+	return cache.NewTypedSharedIndexInformer[*crduserdefinednetworkv1.ClusterUserDefinedNetwork](f.factory.InformerFor(&crduserdefinednetworkv1.ClusterUserDefinedNetwork{}, f.defaultInformer))
 }
 
 func (f *clusterUserDefinedNetworkInformer) Lister() userdefinednetworkv1.ClusterUserDefinedNetworkLister {
 	return userdefinednetworkv1.NewClusterUserDefinedNetworkLister(f.Informer().GetIndexer())
+}
+
+// ToTypedClusterUserDefinedNetworkInformer converts an untyped informer into a TypedClusterUserDefinedNetworkInformer.
+//
+// WARNING: this conversion is only safe if the informer handles objects of type
+// *ClusterUserDefinedNetwork. If that is not the case, calling type-safe methods of the returned
+// TypedClusterUserDefinedNetworkInformer leads to runtime panics. A safer alternative is to pass
+// around a TypedClusterUserDefinedNetworkInformer instances that was obtained from a
+// SharedInformerFactory.
+func ToTypedClusterUserDefinedNetworkInformer(informer ClusterUserDefinedNetworkInformer) TypedClusterUserDefinedNetworkInformer {
+	if informer, ok := informer.(TypedClusterUserDefinedNetworkInformer); ok {
+		return informer
+	}
+	return &clusterUserDefinedNetworkTypedInformerAdapter{informer}
+}
+
+type clusterUserDefinedNetworkTypedInformerAdapter struct {
+	ClusterUserDefinedNetworkInformer
+}
+
+func (a *clusterUserDefinedNetworkTypedInformerAdapter) TypedInformer() ClusterUserDefinedNetworkIndexInformer {
+	return cache.NewTypedSharedIndexInformer[*crduserdefinednetworkv1.ClusterUserDefinedNetwork](a.Informer())
+}
+
+// ToClusterUserDefinedNetworkIndexInformer converts an untyped informer into a ClusterUserDefinedNetworkIndexInformer.
+//
+// WARNING: this conversion is only safe if the informer handles objects of type
+// *ClusterUserDefinedNetwork. If that is not the case, calling type-safe methods of the returned
+// ClusterUserDefinedNetworkIndexInformer leads to runtime panics. A safer alternative is to pass
+// around a ClusterUserDefinedNetworkIndexInformer instances that was obtained from a
+// SharedInformerFactory.
+func ToClusterUserDefinedNetworkIndexInformer(informer cache.SharedIndexInformer) ClusterUserDefinedNetworkIndexInformer {
+	if informer, ok := informer.(ClusterUserDefinedNetworkIndexInformer); ok {
+		return informer
+	}
+	return cache.NewTypedSharedIndexInformer[*crduserdefinednetworkv1.ClusterUserDefinedNetwork](informer)
 }

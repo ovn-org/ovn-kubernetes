@@ -19,7 +19,7 @@ import (
 //
 // UplinkState contains node-local discovery and gateway state for an Uplink.
 type UplinkStateApplyConfiguration struct {
-	v1.TypeMetaApplyConfiguration    `json:",inline"`
+	v1.TypeMetaApplyConfiguration    `json:""`
 	*v1.ObjectMetaApplyConfiguration `json:"metadata,omitempty"`
 	Spec                             *UplinkStateSpecApplyConfiguration   `json:"spec,omitempty"`
 	Status                           *UplinkStateStatusApplyConfiguration `json:"status,omitempty"`

@@ -21,11 +21,39 @@ import (
 )
 
 // EgressServiceInformer provides access to a shared informer and lister for
-// EgressServices.
+// EgressServices. Prefer using the type-safe variant (see [TypedEgressServiceInformer]).
 type EgressServiceInformer interface {
 	Informer() cache.SharedIndexInformer
 	Lister() egressservicev1.EgressServiceLister
 }
+
+// TypedEgressServiceInformer provides access to a shared informer and lister for
+// EgressServices, including the type-safe TypedInformer variant.
+// It is a superset of EgressServiceInformer.
+type TypedEgressServiceInformer interface {
+	Informer() cache.SharedIndexInformer
+	TypedInformer() EgressServiceIndexInformer
+	Lister() egressservicev1.EgressServiceLister
+}
+
+// EgressServiceIndexInformer is a wrapper around the underlying [cache.SharedIndexInformer]
+// with type-safe variants of several methods.
+type EgressServiceIndexInformer cache.TypedSharedIndexInformer[*crdegressservicev1.EgressService]
+
+// EgressServiceHandlerFuncs is a specialization of [cache.TypedResourceEventHandlerFuncs] for EgressService.
+type EgressServiceHandlerFuncs = cache.TypedResourceEventHandlerFuncs[*crdegressservicev1.EgressService]
+
+// EgressServiceDetailedHandlerFuncs is a specialization of [cache.TypedResourceEventHandlerDetailedFuncs] for EgressService.
+type EgressServiceDetailedHandlerFuncs = cache.TypedResourceEventHandlerDetailedFuncs[*crdegressservicev1.EgressService]
+
+// EgressServiceFilteringHandler is a specialization of [cache.TypedFilteringResourceEventHandler] for EgressService.
+type EgressServiceFilteringHandler = cache.TypedFilteringResourceEventHandler[*crdegressservicev1.EgressService]
+
+// EgressServiceIndexers is a specialization of [cache.TypedIndexers] for EgressService.
+type EgressServiceIndexers = cache.TypedIndexers[*crdegressservicev1.EgressService]
+
+// DeletedEgressService is a specialization of [cache.DeletedObject] for EgressService.
+type DeletedEgressService = cache.DeletedObject[*crdegressservicev1.EgressService]
 
 type egressServiceInformer struct {
 	factory          internalinterfaces.SharedInformerFactory
@@ -36,25 +64,49 @@ type egressServiceInformer struct {
 // NewEgressServiceInformer constructs a new informer for EgressService type.
 // Always prefer using an informer factory to get a shared informer instead of getting an independent
 // one. This reduces memory footprint and number of connections to the server.
+// If you really need an independent one, prefer using the type-safe variant (see [NewTypedEgressServiceInformer]).
 func NewEgressServiceInformer(client versioned.Interface, namespace string, resyncPeriod time.Duration, indexers cache.Indexers) cache.SharedIndexInformer {
 	return NewEgressServiceInformerWithOptions(client, namespace, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: indexers})
+}
+
+// NewTypedEgressServiceInformer constructs a new informer for EgressService type.
+// Always prefer using an informer factory to get a shared informer instead of getting an independent
+// one. This reduces memory footprint and number of connections to the server.
+func NewTypedEgressServiceInformer(client versioned.Interface, namespace string, resyncPeriod time.Duration, indexers EgressServiceIndexers) EgressServiceIndexInformer {
+	return NewTypedEgressServiceInformerWithOptions(client, namespace, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: cache.TypedIndexersToIndexers(indexers)})
 }
 
 // NewFilteredEgressServiceInformer constructs a new informer for EgressService type.
 // Always prefer using an informer factory to get a shared informer instead of getting an independent
 // one. This reduces memory footprint and number of connections to the server.
+// If you really need an independent one, prefer using the type-safe variant (see [NewTypedFilteredEgressServiceInformer]).
 func NewFilteredEgressServiceInformer(client versioned.Interface, namespace string, resyncPeriod time.Duration, indexers cache.Indexers, tweakListOptions internalinterfaces.TweakListOptionsFunc) cache.SharedIndexInformer {
-	return NewEgressServiceInformerWithOptions(client, namespace, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: indexers, TweakListOptions: tweakListOptions})
+	return NewTypedEgressServiceInformerWithOptions(client, namespace, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: indexers, TweakListOptions: tweakListOptions})
+}
+
+// NewTypedFilteredEgressServiceInformer constructs a new informer for EgressService type.
+// Always prefer using an informer factory to get a shared informer instead of getting an independent
+// one. This reduces memory footprint and number of connections to the server.
+func NewTypedFilteredEgressServiceInformer(client versioned.Interface, namespace string, resyncPeriod time.Duration, indexers EgressServiceIndexers, tweakListOptions internalinterfaces.TweakListOptionsFunc) EgressServiceIndexInformer {
+	return NewTypedEgressServiceInformerWithOptions(client, namespace, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: cache.TypedIndexersToIndexers(indexers), TweakListOptions: tweakListOptions})
 }
 
 // NewEgressServiceInformerWithOptions constructs a new informer for EgressService type with additional options.
 // Always prefer using an informer factory to get a shared informer instead of getting an independent
 // one. This reduces memory footprint and number of connections to the server.
+// If you really need an independent one, prefer using the type-safe variant (see [NewTypedEgressServiceInformerWithOptions]).
 func NewEgressServiceInformerWithOptions(client versioned.Interface, namespace string, options internalinterfaces.InformerOptions) cache.SharedIndexInformer {
+	return NewTypedEgressServiceInformerWithOptions(client, namespace, options)
+}
+
+// NewTypedEgressServiceInformerWithOptions constructs a new informer for EgressService type with additional options.
+// Always prefer using an informer factory to get a shared informer instead of getting an independent
+// one. This reduces memory footprint and number of connections to the server.
+func NewTypedEgressServiceInformerWithOptions(client versioned.Interface, namespace string, options internalinterfaces.InformerOptions) EgressServiceIndexInformer {
 	gvr := schema.GroupVersionResource{Group: "k8s.ovn.org", Version: "v1", Resource: "egressservices"}
 	identifier := options.InformerName.WithResource(gvr)
 	tweakListOptions := options.TweakListOptions
-	return cache.NewSharedIndexInformerWithOptions(
+	return cache.NewTypedSharedIndexInformer[*crdegressservicev1.EgressService](cache.NewSharedIndexInformerWithOptions(
 		cache.ToListWatcherWithWatchListSemantics(&cache.ListWatch{
 			ListFunc: func(opts metav1.ListOptions) (runtime.Object, error) {
 				if tweakListOptions != nil {
@@ -87,17 +139,57 @@ func NewEgressServiceInformerWithOptions(client versioned.Interface, namespace s
 			Indexers:     options.Indexers,
 			Identifier:   identifier,
 		},
-	)
+	))
 }
 
 func (f *egressServiceInformer) defaultInformer(client versioned.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
-	return NewEgressServiceInformerWithOptions(client, f.namespace, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}, InformerName: f.factory.InformerName(), TweakListOptions: f.tweakListOptions})
+	return NewTypedEgressServiceInformerWithOptions(client, f.namespace, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}, InformerName: f.factory.InformerName(), TweakListOptions: f.tweakListOptions})
 }
 
 func (f *egressServiceInformer) Informer() cache.SharedIndexInformer {
-	return f.factory.InformerFor(&crdegressservicev1.EgressService{}, f.defaultInformer)
+	return f.TypedInformer()
+}
+
+func (f *egressServiceInformer) TypedInformer() EgressServiceIndexInformer {
+	return cache.NewTypedSharedIndexInformer[*crdegressservicev1.EgressService](f.factory.InformerFor(&crdegressservicev1.EgressService{}, f.defaultInformer))
 }
 
 func (f *egressServiceInformer) Lister() egressservicev1.EgressServiceLister {
 	return egressservicev1.NewEgressServiceLister(f.Informer().GetIndexer())
+}
+
+// ToTypedEgressServiceInformer converts an untyped informer into a TypedEgressServiceInformer.
+//
+// WARNING: this conversion is only safe if the informer handles objects of type
+// *EgressService. If that is not the case, calling type-safe methods of the returned
+// TypedEgressServiceInformer leads to runtime panics. A safer alternative is to pass
+// around a TypedEgressServiceInformer instances that was obtained from a
+// SharedInformerFactory.
+func ToTypedEgressServiceInformer(informer EgressServiceInformer) TypedEgressServiceInformer {
+	if informer, ok := informer.(TypedEgressServiceInformer); ok {
+		return informer
+	}
+	return &egressServiceTypedInformerAdapter{informer}
+}
+
+type egressServiceTypedInformerAdapter struct {
+	EgressServiceInformer
+}
+
+func (a *egressServiceTypedInformerAdapter) TypedInformer() EgressServiceIndexInformer {
+	return cache.NewTypedSharedIndexInformer[*crdegressservicev1.EgressService](a.Informer())
+}
+
+// ToEgressServiceIndexInformer converts an untyped informer into a EgressServiceIndexInformer.
+//
+// WARNING: this conversion is only safe if the informer handles objects of type
+// *EgressService. If that is not the case, calling type-safe methods of the returned
+// EgressServiceIndexInformer leads to runtime panics. A safer alternative is to pass
+// around a EgressServiceIndexInformer instances that was obtained from a
+// SharedInformerFactory.
+func ToEgressServiceIndexInformer(informer cache.SharedIndexInformer) EgressServiceIndexInformer {
+	if informer, ok := informer.(EgressServiceIndexInformer); ok {
+		return informer
+	}
+	return cache.NewTypedSharedIndexInformer[*crdegressservicev1.EgressService](informer)
 }

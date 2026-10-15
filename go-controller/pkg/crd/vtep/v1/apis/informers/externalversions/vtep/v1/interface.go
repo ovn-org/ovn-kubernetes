@@ -12,7 +12,7 @@ import (
 // Interface provides access to all the informers in this group version.
 type Interface interface {
 	// VTEPs returns a VTEPInformer.
-	VTEPs() VTEPInformer
+	VTEPs() TypedVTEPInformer
 }
 
 type version struct {
@@ -26,7 +26,7 @@ func New(f internalinterfaces.SharedInformerFactory, namespace string, tweakList
 	return &version{factory: f, namespace: namespace, tweakListOptions: tweakListOptions}
 }
 
-// VTEPs returns a VTEPInformer.
-func (v *version) VTEPs() VTEPInformer {
+// VTEPs returns a TypedVTEPInformer.
+func (v *version) VTEPs() TypedVTEPInformer {
 	return &vTEPInformer{factory: v.factory, tweakListOptions: v.tweakListOptions}
 }

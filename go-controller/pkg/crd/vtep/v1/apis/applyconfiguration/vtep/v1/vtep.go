@@ -19,7 +19,7 @@ import (
 //
 // VTEP defines VTEP (VXLAN Tunnel Endpoint) IP configuration for EVPN.
 type VTEPApplyConfiguration struct {
-	metav1.TypeMetaApplyConfiguration    `json:",inline"`
+	metav1.TypeMetaApplyConfiguration    `json:""`
 	*metav1.ObjectMetaApplyConfiguration `json:"metadata,omitempty"`
 	// Spec defines the desired VTEP configuration.
 	Spec *VTEPSpecApplyConfiguration `json:"spec,omitempty"`

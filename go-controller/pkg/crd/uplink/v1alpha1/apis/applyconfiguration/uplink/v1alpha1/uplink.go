@@ -20,7 +20,7 @@ import (
 // Uplink represents a physical network path out of a node that OVN-Kubernetes
 // can connect its logical topology to. Supported node config type: OVSBridge.
 type UplinkApplyConfiguration struct {
-	v1.TypeMetaApplyConfiguration    `json:",inline"`
+	v1.TypeMetaApplyConfiguration    `json:""`
 	*v1.ObjectMetaApplyConfiguration `json:"metadata,omitempty"`
 	Spec                             *UplinkSpecApplyConfiguration   `json:"spec,omitempty"`
 	Status                           *UplinkStatusApplyConfiguration `json:"status,omitempty"`

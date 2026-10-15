@@ -21,11 +21,39 @@ import (
 )
 
 // UplinkStateInformer provides access to a shared informer and lister for
-// UplinkStates.
+// UplinkStates. Prefer using the type-safe variant (see [TypedUplinkStateInformer]).
 type UplinkStateInformer interface {
 	Informer() cache.SharedIndexInformer
 	Lister() uplinkv1alpha1.UplinkStateLister
 }
+
+// TypedUplinkStateInformer provides access to a shared informer and lister for
+// UplinkStates, including the type-safe TypedInformer variant.
+// It is a superset of UplinkStateInformer.
+type TypedUplinkStateInformer interface {
+	Informer() cache.SharedIndexInformer
+	TypedInformer() UplinkStateIndexInformer
+	Lister() uplinkv1alpha1.UplinkStateLister
+}
+
+// UplinkStateIndexInformer is a wrapper around the underlying [cache.SharedIndexInformer]
+// with type-safe variants of several methods.
+type UplinkStateIndexInformer cache.TypedSharedIndexInformer[*crduplinkv1alpha1.UplinkState]
+
+// UplinkStateHandlerFuncs is a specialization of [cache.TypedResourceEventHandlerFuncs] for UplinkState.
+type UplinkStateHandlerFuncs = cache.TypedResourceEventHandlerFuncs[*crduplinkv1alpha1.UplinkState]
+
+// UplinkStateDetailedHandlerFuncs is a specialization of [cache.TypedResourceEventHandlerDetailedFuncs] for UplinkState.
+type UplinkStateDetailedHandlerFuncs = cache.TypedResourceEventHandlerDetailedFuncs[*crduplinkv1alpha1.UplinkState]
+
+// UplinkStateFilteringHandler is a specialization of [cache.TypedFilteringResourceEventHandler] for UplinkState.
+type UplinkStateFilteringHandler = cache.TypedFilteringResourceEventHandler[*crduplinkv1alpha1.UplinkState]
+
+// UplinkStateIndexers is a specialization of [cache.TypedIndexers] for UplinkState.
+type UplinkStateIndexers = cache.TypedIndexers[*crduplinkv1alpha1.UplinkState]
+
+// DeletedUplinkState is a specialization of [cache.DeletedObject] for UplinkState.
+type DeletedUplinkState = cache.DeletedObject[*crduplinkv1alpha1.UplinkState]
 
 type uplinkStateInformer struct {
 	factory          internalinterfaces.SharedInformerFactory
@@ -35,25 +63,49 @@ type uplinkStateInformer struct {
 // NewUplinkStateInformer constructs a new informer for UplinkState type.
 // Always prefer using an informer factory to get a shared informer instead of getting an independent
 // one. This reduces memory footprint and number of connections to the server.
+// If you really need an independent one, prefer using the type-safe variant (see [NewTypedUplinkStateInformer]).
 func NewUplinkStateInformer(client versioned.Interface, resyncPeriod time.Duration, indexers cache.Indexers) cache.SharedIndexInformer {
 	return NewUplinkStateInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: indexers})
+}
+
+// NewTypedUplinkStateInformer constructs a new informer for UplinkState type.
+// Always prefer using an informer factory to get a shared informer instead of getting an independent
+// one. This reduces memory footprint and number of connections to the server.
+func NewTypedUplinkStateInformer(client versioned.Interface, resyncPeriod time.Duration, indexers UplinkStateIndexers) UplinkStateIndexInformer {
+	return NewTypedUplinkStateInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: cache.TypedIndexersToIndexers(indexers)})
 }
 
 // NewFilteredUplinkStateInformer constructs a new informer for UplinkState type.
 // Always prefer using an informer factory to get a shared informer instead of getting an independent
 // one. This reduces memory footprint and number of connections to the server.
+// If you really need an independent one, prefer using the type-safe variant (see [NewTypedFilteredUplinkStateInformer]).
 func NewFilteredUplinkStateInformer(client versioned.Interface, resyncPeriod time.Duration, indexers cache.Indexers, tweakListOptions internalinterfaces.TweakListOptionsFunc) cache.SharedIndexInformer {
-	return NewUplinkStateInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: indexers, TweakListOptions: tweakListOptions})
+	return NewTypedUplinkStateInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: indexers, TweakListOptions: tweakListOptions})
+}
+
+// NewTypedFilteredUplinkStateInformer constructs a new informer for UplinkState type.
+// Always prefer using an informer factory to get a shared informer instead of getting an independent
+// one. This reduces memory footprint and number of connections to the server.
+func NewTypedFilteredUplinkStateInformer(client versioned.Interface, resyncPeriod time.Duration, indexers UplinkStateIndexers, tweakListOptions internalinterfaces.TweakListOptionsFunc) UplinkStateIndexInformer {
+	return NewTypedUplinkStateInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: cache.TypedIndexersToIndexers(indexers), TweakListOptions: tweakListOptions})
 }
 
 // NewUplinkStateInformerWithOptions constructs a new informer for UplinkState type with additional options.
 // Always prefer using an informer factory to get a shared informer instead of getting an independent
 // one. This reduces memory footprint and number of connections to the server.
+// If you really need an independent one, prefer using the type-safe variant (see [NewTypedUplinkStateInformerWithOptions]).
 func NewUplinkStateInformerWithOptions(client versioned.Interface, options internalinterfaces.InformerOptions) cache.SharedIndexInformer {
+	return NewTypedUplinkStateInformerWithOptions(client, options)
+}
+
+// NewTypedUplinkStateInformerWithOptions constructs a new informer for UplinkState type with additional options.
+// Always prefer using an informer factory to get a shared informer instead of getting an independent
+// one. This reduces memory footprint and number of connections to the server.
+func NewTypedUplinkStateInformerWithOptions(client versioned.Interface, options internalinterfaces.InformerOptions) UplinkStateIndexInformer {
 	gvr := schema.GroupVersionResource{Group: "k8s.ovn.org", Version: "v1alpha1", Resource: "uplinkstates"}
 	identifier := options.InformerName.WithResource(gvr)
 	tweakListOptions := options.TweakListOptions
-	return cache.NewSharedIndexInformerWithOptions(
+	return cache.NewTypedSharedIndexInformer[*crduplinkv1alpha1.UplinkState](cache.NewSharedIndexInformerWithOptions(
 		cache.ToListWatcherWithWatchListSemantics(&cache.ListWatch{
 			ListFunc: func(opts v1.ListOptions) (runtime.Object, error) {
 				if tweakListOptions != nil {
@@ -86,17 +138,57 @@ func NewUplinkStateInformerWithOptions(client versioned.Interface, options inter
 			Indexers:     options.Indexers,
 			Identifier:   identifier,
 		},
-	)
+	))
 }
 
 func (f *uplinkStateInformer) defaultInformer(client versioned.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
-	return NewUplinkStateInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}, InformerName: f.factory.InformerName(), TweakListOptions: f.tweakListOptions})
+	return NewTypedUplinkStateInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}, InformerName: f.factory.InformerName(), TweakListOptions: f.tweakListOptions})
 }
 
 func (f *uplinkStateInformer) Informer() cache.SharedIndexInformer {
-	return f.factory.InformerFor(&crduplinkv1alpha1.UplinkState{}, f.defaultInformer)
+	return f.TypedInformer()
+}
+
+func (f *uplinkStateInformer) TypedInformer() UplinkStateIndexInformer {
+	return cache.NewTypedSharedIndexInformer[*crduplinkv1alpha1.UplinkState](f.factory.InformerFor(&crduplinkv1alpha1.UplinkState{}, f.defaultInformer))
 }
 
 func (f *uplinkStateInformer) Lister() uplinkv1alpha1.UplinkStateLister {
 	return uplinkv1alpha1.NewUplinkStateLister(f.Informer().GetIndexer())
+}
+
+// ToTypedUplinkStateInformer converts an untyped informer into a TypedUplinkStateInformer.
+//
+// WARNING: this conversion is only safe if the informer handles objects of type
+// *UplinkState. If that is not the case, calling type-safe methods of the returned
+// TypedUplinkStateInformer leads to runtime panics. A safer alternative is to pass
+// around a TypedUplinkStateInformer instances that was obtained from a
+// SharedInformerFactory.
+func ToTypedUplinkStateInformer(informer UplinkStateInformer) TypedUplinkStateInformer {
+	if informer, ok := informer.(TypedUplinkStateInformer); ok {
+		return informer
+	}
+	return &uplinkStateTypedInformerAdapter{informer}
+}
+
+type uplinkStateTypedInformerAdapter struct {
+	UplinkStateInformer
+}
+
+func (a *uplinkStateTypedInformerAdapter) TypedInformer() UplinkStateIndexInformer {
+	return cache.NewTypedSharedIndexInformer[*crduplinkv1alpha1.UplinkState](a.Informer())
+}
+
+// ToUplinkStateIndexInformer converts an untyped informer into a UplinkStateIndexInformer.
+//
+// WARNING: this conversion is only safe if the informer handles objects of type
+// *UplinkState. If that is not the case, calling type-safe methods of the returned
+// UplinkStateIndexInformer leads to runtime panics. A safer alternative is to pass
+// around a UplinkStateIndexInformer instances that was obtained from a
+// SharedInformerFactory.
+func ToUplinkStateIndexInformer(informer cache.SharedIndexInformer) UplinkStateIndexInformer {
+	if informer, ok := informer.(UplinkStateIndexInformer); ok {
+		return informer
+	}
+	return cache.NewTypedSharedIndexInformer[*crduplinkv1alpha1.UplinkState](informer)
 }

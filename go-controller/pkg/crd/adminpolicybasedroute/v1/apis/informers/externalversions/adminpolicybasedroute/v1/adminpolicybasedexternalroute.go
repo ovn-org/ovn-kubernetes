@@ -21,11 +21,39 @@ import (
 )
 
 // AdminPolicyBasedExternalRouteInformer provides access to a shared informer and lister for
-// AdminPolicyBasedExternalRoutes.
+// AdminPolicyBasedExternalRoutes. Prefer using the type-safe variant (see [TypedAdminPolicyBasedExternalRouteInformer]).
 type AdminPolicyBasedExternalRouteInformer interface {
 	Informer() cache.SharedIndexInformer
 	Lister() adminpolicybasedroutev1.AdminPolicyBasedExternalRouteLister
 }
+
+// TypedAdminPolicyBasedExternalRouteInformer provides access to a shared informer and lister for
+// AdminPolicyBasedExternalRoutes, including the type-safe TypedInformer variant.
+// It is a superset of AdminPolicyBasedExternalRouteInformer.
+type TypedAdminPolicyBasedExternalRouteInformer interface {
+	Informer() cache.SharedIndexInformer
+	TypedInformer() AdminPolicyBasedExternalRouteIndexInformer
+	Lister() adminpolicybasedroutev1.AdminPolicyBasedExternalRouteLister
+}
+
+// AdminPolicyBasedExternalRouteIndexInformer is a wrapper around the underlying [cache.SharedIndexInformer]
+// with type-safe variants of several methods.
+type AdminPolicyBasedExternalRouteIndexInformer cache.TypedSharedIndexInformer[*crdadminpolicybasedroutev1.AdminPolicyBasedExternalRoute]
+
+// AdminPolicyBasedExternalRouteHandlerFuncs is a specialization of [cache.TypedResourceEventHandlerFuncs] for AdminPolicyBasedExternalRoute.
+type AdminPolicyBasedExternalRouteHandlerFuncs = cache.TypedResourceEventHandlerFuncs[*crdadminpolicybasedroutev1.AdminPolicyBasedExternalRoute]
+
+// AdminPolicyBasedExternalRouteDetailedHandlerFuncs is a specialization of [cache.TypedResourceEventHandlerDetailedFuncs] for AdminPolicyBasedExternalRoute.
+type AdminPolicyBasedExternalRouteDetailedHandlerFuncs = cache.TypedResourceEventHandlerDetailedFuncs[*crdadminpolicybasedroutev1.AdminPolicyBasedExternalRoute]
+
+// AdminPolicyBasedExternalRouteFilteringHandler is a specialization of [cache.TypedFilteringResourceEventHandler] for AdminPolicyBasedExternalRoute.
+type AdminPolicyBasedExternalRouteFilteringHandler = cache.TypedFilteringResourceEventHandler[*crdadminpolicybasedroutev1.AdminPolicyBasedExternalRoute]
+
+// AdminPolicyBasedExternalRouteIndexers is a specialization of [cache.TypedIndexers] for AdminPolicyBasedExternalRoute.
+type AdminPolicyBasedExternalRouteIndexers = cache.TypedIndexers[*crdadminpolicybasedroutev1.AdminPolicyBasedExternalRoute]
+
+// DeletedAdminPolicyBasedExternalRoute is a specialization of [cache.DeletedObject] for AdminPolicyBasedExternalRoute.
+type DeletedAdminPolicyBasedExternalRoute = cache.DeletedObject[*crdadminpolicybasedroutev1.AdminPolicyBasedExternalRoute]
 
 type adminPolicyBasedExternalRouteInformer struct {
 	factory          internalinterfaces.SharedInformerFactory
@@ -35,25 +63,49 @@ type adminPolicyBasedExternalRouteInformer struct {
 // NewAdminPolicyBasedExternalRouteInformer constructs a new informer for AdminPolicyBasedExternalRoute type.
 // Always prefer using an informer factory to get a shared informer instead of getting an independent
 // one. This reduces memory footprint and number of connections to the server.
+// If you really need an independent one, prefer using the type-safe variant (see [NewTypedAdminPolicyBasedExternalRouteInformer]).
 func NewAdminPolicyBasedExternalRouteInformer(client versioned.Interface, resyncPeriod time.Duration, indexers cache.Indexers) cache.SharedIndexInformer {
 	return NewAdminPolicyBasedExternalRouteInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: indexers})
+}
+
+// NewTypedAdminPolicyBasedExternalRouteInformer constructs a new informer for AdminPolicyBasedExternalRoute type.
+// Always prefer using an informer factory to get a shared informer instead of getting an independent
+// one. This reduces memory footprint and number of connections to the server.
+func NewTypedAdminPolicyBasedExternalRouteInformer(client versioned.Interface, resyncPeriod time.Duration, indexers AdminPolicyBasedExternalRouteIndexers) AdminPolicyBasedExternalRouteIndexInformer {
+	return NewTypedAdminPolicyBasedExternalRouteInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: cache.TypedIndexersToIndexers(indexers)})
 }
 
 // NewFilteredAdminPolicyBasedExternalRouteInformer constructs a new informer for AdminPolicyBasedExternalRoute type.
 // Always prefer using an informer factory to get a shared informer instead of getting an independent
 // one. This reduces memory footprint and number of connections to the server.
+// If you really need an independent one, prefer using the type-safe variant (see [NewTypedFilteredAdminPolicyBasedExternalRouteInformer]).
 func NewFilteredAdminPolicyBasedExternalRouteInformer(client versioned.Interface, resyncPeriod time.Duration, indexers cache.Indexers, tweakListOptions internalinterfaces.TweakListOptionsFunc) cache.SharedIndexInformer {
-	return NewAdminPolicyBasedExternalRouteInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: indexers, TweakListOptions: tweakListOptions})
+	return NewTypedAdminPolicyBasedExternalRouteInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: indexers, TweakListOptions: tweakListOptions})
+}
+
+// NewTypedFilteredAdminPolicyBasedExternalRouteInformer constructs a new informer for AdminPolicyBasedExternalRoute type.
+// Always prefer using an informer factory to get a shared informer instead of getting an independent
+// one. This reduces memory footprint and number of connections to the server.
+func NewTypedFilteredAdminPolicyBasedExternalRouteInformer(client versioned.Interface, resyncPeriod time.Duration, indexers AdminPolicyBasedExternalRouteIndexers, tweakListOptions internalinterfaces.TweakListOptionsFunc) AdminPolicyBasedExternalRouteIndexInformer {
+	return NewTypedAdminPolicyBasedExternalRouteInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: cache.TypedIndexersToIndexers(indexers), TweakListOptions: tweakListOptions})
 }
 
 // NewAdminPolicyBasedExternalRouteInformerWithOptions constructs a new informer for AdminPolicyBasedExternalRoute type with additional options.
 // Always prefer using an informer factory to get a shared informer instead of getting an independent
 // one. This reduces memory footprint and number of connections to the server.
+// If you really need an independent one, prefer using the type-safe variant (see [NewTypedAdminPolicyBasedExternalRouteInformerWithOptions]).
 func NewAdminPolicyBasedExternalRouteInformerWithOptions(client versioned.Interface, options internalinterfaces.InformerOptions) cache.SharedIndexInformer {
+	return NewTypedAdminPolicyBasedExternalRouteInformerWithOptions(client, options)
+}
+
+// NewTypedAdminPolicyBasedExternalRouteInformerWithOptions constructs a new informer for AdminPolicyBasedExternalRoute type with additional options.
+// Always prefer using an informer factory to get a shared informer instead of getting an independent
+// one. This reduces memory footprint and number of connections to the server.
+func NewTypedAdminPolicyBasedExternalRouteInformerWithOptions(client versioned.Interface, options internalinterfaces.InformerOptions) AdminPolicyBasedExternalRouteIndexInformer {
 	gvr := schema.GroupVersionResource{Group: "k8s.ovn.org", Version: "v1", Resource: "adminpolicybasedexternalroutes"}
 	identifier := options.InformerName.WithResource(gvr)
 	tweakListOptions := options.TweakListOptions
-	return cache.NewSharedIndexInformerWithOptions(
+	return cache.NewTypedSharedIndexInformer[*crdadminpolicybasedroutev1.AdminPolicyBasedExternalRoute](cache.NewSharedIndexInformerWithOptions(
 		cache.ToListWatcherWithWatchListSemantics(&cache.ListWatch{
 			ListFunc: func(opts metav1.ListOptions) (runtime.Object, error) {
 				if tweakListOptions != nil {
@@ -86,17 +138,57 @@ func NewAdminPolicyBasedExternalRouteInformerWithOptions(client versioned.Interf
 			Indexers:     options.Indexers,
 			Identifier:   identifier,
 		},
-	)
+	))
 }
 
 func (f *adminPolicyBasedExternalRouteInformer) defaultInformer(client versioned.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
-	return NewAdminPolicyBasedExternalRouteInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}, InformerName: f.factory.InformerName(), TweakListOptions: f.tweakListOptions})
+	return NewTypedAdminPolicyBasedExternalRouteInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}, InformerName: f.factory.InformerName(), TweakListOptions: f.tweakListOptions})
 }
 
 func (f *adminPolicyBasedExternalRouteInformer) Informer() cache.SharedIndexInformer {
-	return f.factory.InformerFor(&crdadminpolicybasedroutev1.AdminPolicyBasedExternalRoute{}, f.defaultInformer)
+	return f.TypedInformer()
+}
+
+func (f *adminPolicyBasedExternalRouteInformer) TypedInformer() AdminPolicyBasedExternalRouteIndexInformer {
+	return cache.NewTypedSharedIndexInformer[*crdadminpolicybasedroutev1.AdminPolicyBasedExternalRoute](f.factory.InformerFor(&crdadminpolicybasedroutev1.AdminPolicyBasedExternalRoute{}, f.defaultInformer))
 }
 
 func (f *adminPolicyBasedExternalRouteInformer) Lister() adminpolicybasedroutev1.AdminPolicyBasedExternalRouteLister {
 	return adminpolicybasedroutev1.NewAdminPolicyBasedExternalRouteLister(f.Informer().GetIndexer())
+}
+
+// ToTypedAdminPolicyBasedExternalRouteInformer converts an untyped informer into a TypedAdminPolicyBasedExternalRouteInformer.
+//
+// WARNING: this conversion is only safe if the informer handles objects of type
+// *AdminPolicyBasedExternalRoute. If that is not the case, calling type-safe methods of the returned
+// TypedAdminPolicyBasedExternalRouteInformer leads to runtime panics. A safer alternative is to pass
+// around a TypedAdminPolicyBasedExternalRouteInformer instances that was obtained from a
+// SharedInformerFactory.
+func ToTypedAdminPolicyBasedExternalRouteInformer(informer AdminPolicyBasedExternalRouteInformer) TypedAdminPolicyBasedExternalRouteInformer {
+	if informer, ok := informer.(TypedAdminPolicyBasedExternalRouteInformer); ok {
+		return informer
+	}
+	return &adminPolicyBasedExternalRouteTypedInformerAdapter{informer}
+}
+
+type adminPolicyBasedExternalRouteTypedInformerAdapter struct {
+	AdminPolicyBasedExternalRouteInformer
+}
+
+func (a *adminPolicyBasedExternalRouteTypedInformerAdapter) TypedInformer() AdminPolicyBasedExternalRouteIndexInformer {
+	return cache.NewTypedSharedIndexInformer[*crdadminpolicybasedroutev1.AdminPolicyBasedExternalRoute](a.Informer())
+}
+
+// ToAdminPolicyBasedExternalRouteIndexInformer converts an untyped informer into a AdminPolicyBasedExternalRouteIndexInformer.
+//
+// WARNING: this conversion is only safe if the informer handles objects of type
+// *AdminPolicyBasedExternalRoute. If that is not the case, calling type-safe methods of the returned
+// AdminPolicyBasedExternalRouteIndexInformer leads to runtime panics. A safer alternative is to pass
+// around a AdminPolicyBasedExternalRouteIndexInformer instances that was obtained from a
+// SharedInformerFactory.
+func ToAdminPolicyBasedExternalRouteIndexInformer(informer cache.SharedIndexInformer) AdminPolicyBasedExternalRouteIndexInformer {
+	if informer, ok := informer.(AdminPolicyBasedExternalRouteIndexInformer); ok {
+		return informer
+	}
+	return cache.NewTypedSharedIndexInformer[*crdadminpolicybasedroutev1.AdminPolicyBasedExternalRoute](informer)
 }

@@ -21,11 +21,39 @@ import (
 )
 
 // EgressQoSInformer provides access to a shared informer and lister for
-// EgressQoSes.
+// EgressQoSes. Prefer using the type-safe variant (see [TypedEgressQoSInformer]).
 type EgressQoSInformer interface {
 	Informer() cache.SharedIndexInformer
 	Lister() egressqosv1.EgressQoSLister
 }
+
+// TypedEgressQoSInformer provides access to a shared informer and lister for
+// EgressQoSes, including the type-safe TypedInformer variant.
+// It is a superset of EgressQoSInformer.
+type TypedEgressQoSInformer interface {
+	Informer() cache.SharedIndexInformer
+	TypedInformer() EgressQoSIndexInformer
+	Lister() egressqosv1.EgressQoSLister
+}
+
+// EgressQoSIndexInformer is a wrapper around the underlying [cache.SharedIndexInformer]
+// with type-safe variants of several methods.
+type EgressQoSIndexInformer cache.TypedSharedIndexInformer[*crdegressqosv1.EgressQoS]
+
+// EgressQoSHandlerFuncs is a specialization of [cache.TypedResourceEventHandlerFuncs] for EgressQoS.
+type EgressQoSHandlerFuncs = cache.TypedResourceEventHandlerFuncs[*crdegressqosv1.EgressQoS]
+
+// EgressQoSDetailedHandlerFuncs is a specialization of [cache.TypedResourceEventHandlerDetailedFuncs] for EgressQoS.
+type EgressQoSDetailedHandlerFuncs = cache.TypedResourceEventHandlerDetailedFuncs[*crdegressqosv1.EgressQoS]
+
+// EgressQoSFilteringHandler is a specialization of [cache.TypedFilteringResourceEventHandler] for EgressQoS.
+type EgressQoSFilteringHandler = cache.TypedFilteringResourceEventHandler[*crdegressqosv1.EgressQoS]
+
+// EgressQoSIndexers is a specialization of [cache.TypedIndexers] for EgressQoS.
+type EgressQoSIndexers = cache.TypedIndexers[*crdegressqosv1.EgressQoS]
+
+// DeletedEgressQoS is a specialization of [cache.DeletedObject] for EgressQoS.
+type DeletedEgressQoS = cache.DeletedObject[*crdegressqosv1.EgressQoS]
 
 type egressQoSInformer struct {
 	factory          internalinterfaces.SharedInformerFactory
@@ -36,25 +64,49 @@ type egressQoSInformer struct {
 // NewEgressQoSInformer constructs a new informer for EgressQoS type.
 // Always prefer using an informer factory to get a shared informer instead of getting an independent
 // one. This reduces memory footprint and number of connections to the server.
+// If you really need an independent one, prefer using the type-safe variant (see [NewTypedEgressQoSInformer]).
 func NewEgressQoSInformer(client versioned.Interface, namespace string, resyncPeriod time.Duration, indexers cache.Indexers) cache.SharedIndexInformer {
 	return NewEgressQoSInformerWithOptions(client, namespace, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: indexers})
+}
+
+// NewTypedEgressQoSInformer constructs a new informer for EgressQoS type.
+// Always prefer using an informer factory to get a shared informer instead of getting an independent
+// one. This reduces memory footprint and number of connections to the server.
+func NewTypedEgressQoSInformer(client versioned.Interface, namespace string, resyncPeriod time.Duration, indexers EgressQoSIndexers) EgressQoSIndexInformer {
+	return NewTypedEgressQoSInformerWithOptions(client, namespace, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: cache.TypedIndexersToIndexers(indexers)})
 }
 
 // NewFilteredEgressQoSInformer constructs a new informer for EgressQoS type.
 // Always prefer using an informer factory to get a shared informer instead of getting an independent
 // one. This reduces memory footprint and number of connections to the server.
+// If you really need an independent one, prefer using the type-safe variant (see [NewTypedFilteredEgressQoSInformer]).
 func NewFilteredEgressQoSInformer(client versioned.Interface, namespace string, resyncPeriod time.Duration, indexers cache.Indexers, tweakListOptions internalinterfaces.TweakListOptionsFunc) cache.SharedIndexInformer {
-	return NewEgressQoSInformerWithOptions(client, namespace, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: indexers, TweakListOptions: tweakListOptions})
+	return NewTypedEgressQoSInformerWithOptions(client, namespace, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: indexers, TweakListOptions: tweakListOptions})
+}
+
+// NewTypedFilteredEgressQoSInformer constructs a new informer for EgressQoS type.
+// Always prefer using an informer factory to get a shared informer instead of getting an independent
+// one. This reduces memory footprint and number of connections to the server.
+func NewTypedFilteredEgressQoSInformer(client versioned.Interface, namespace string, resyncPeriod time.Duration, indexers EgressQoSIndexers, tweakListOptions internalinterfaces.TweakListOptionsFunc) EgressQoSIndexInformer {
+	return NewTypedEgressQoSInformerWithOptions(client, namespace, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: cache.TypedIndexersToIndexers(indexers), TweakListOptions: tweakListOptions})
 }
 
 // NewEgressQoSInformerWithOptions constructs a new informer for EgressQoS type with additional options.
 // Always prefer using an informer factory to get a shared informer instead of getting an independent
 // one. This reduces memory footprint and number of connections to the server.
+// If you really need an independent one, prefer using the type-safe variant (see [NewTypedEgressQoSInformerWithOptions]).
 func NewEgressQoSInformerWithOptions(client versioned.Interface, namespace string, options internalinterfaces.InformerOptions) cache.SharedIndexInformer {
+	return NewTypedEgressQoSInformerWithOptions(client, namespace, options)
+}
+
+// NewTypedEgressQoSInformerWithOptions constructs a new informer for EgressQoS type with additional options.
+// Always prefer using an informer factory to get a shared informer instead of getting an independent
+// one. This reduces memory footprint and number of connections to the server.
+func NewTypedEgressQoSInformerWithOptions(client versioned.Interface, namespace string, options internalinterfaces.InformerOptions) EgressQoSIndexInformer {
 	gvr := schema.GroupVersionResource{Group: "k8s.ovn.org", Version: "v1", Resource: "egressqoss"}
 	identifier := options.InformerName.WithResource(gvr)
 	tweakListOptions := options.TweakListOptions
-	return cache.NewSharedIndexInformerWithOptions(
+	return cache.NewTypedSharedIndexInformer[*crdegressqosv1.EgressQoS](cache.NewSharedIndexInformerWithOptions(
 		cache.ToListWatcherWithWatchListSemantics(&cache.ListWatch{
 			ListFunc: func(opts metav1.ListOptions) (runtime.Object, error) {
 				if tweakListOptions != nil {
@@ -87,17 +139,57 @@ func NewEgressQoSInformerWithOptions(client versioned.Interface, namespace strin
 			Indexers:     options.Indexers,
 			Identifier:   identifier,
 		},
-	)
+	))
 }
 
 func (f *egressQoSInformer) defaultInformer(client versioned.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
-	return NewEgressQoSInformerWithOptions(client, f.namespace, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}, InformerName: f.factory.InformerName(), TweakListOptions: f.tweakListOptions})
+	return NewTypedEgressQoSInformerWithOptions(client, f.namespace, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}, InformerName: f.factory.InformerName(), TweakListOptions: f.tweakListOptions})
 }
 
 func (f *egressQoSInformer) Informer() cache.SharedIndexInformer {
-	return f.factory.InformerFor(&crdegressqosv1.EgressQoS{}, f.defaultInformer)
+	return f.TypedInformer()
+}
+
+func (f *egressQoSInformer) TypedInformer() EgressQoSIndexInformer {
+	return cache.NewTypedSharedIndexInformer[*crdegressqosv1.EgressQoS](f.factory.InformerFor(&crdegressqosv1.EgressQoS{}, f.defaultInformer))
 }
 
 func (f *egressQoSInformer) Lister() egressqosv1.EgressQoSLister {
 	return egressqosv1.NewEgressQoSLister(f.Informer().GetIndexer())
+}
+
+// ToTypedEgressQoSInformer converts an untyped informer into a TypedEgressQoSInformer.
+//
+// WARNING: this conversion is only safe if the informer handles objects of type
+// *EgressQoS. If that is not the case, calling type-safe methods of the returned
+// TypedEgressQoSInformer leads to runtime panics. A safer alternative is to pass
+// around a TypedEgressQoSInformer instances that was obtained from a
+// SharedInformerFactory.
+func ToTypedEgressQoSInformer(informer EgressQoSInformer) TypedEgressQoSInformer {
+	if informer, ok := informer.(TypedEgressQoSInformer); ok {
+		return informer
+	}
+	return &egressQoSTypedInformerAdapter{informer}
+}
+
+type egressQoSTypedInformerAdapter struct {
+	EgressQoSInformer
+}
+
+func (a *egressQoSTypedInformerAdapter) TypedInformer() EgressQoSIndexInformer {
+	return cache.NewTypedSharedIndexInformer[*crdegressqosv1.EgressQoS](a.Informer())
+}
+
+// ToEgressQoSIndexInformer converts an untyped informer into a EgressQoSIndexInformer.
+//
+// WARNING: this conversion is only safe if the informer handles objects of type
+// *EgressQoS. If that is not the case, calling type-safe methods of the returned
+// EgressQoSIndexInformer leads to runtime panics. A safer alternative is to pass
+// around a EgressQoSIndexInformer instances that was obtained from a
+// SharedInformerFactory.
+func ToEgressQoSIndexInformer(informer cache.SharedIndexInformer) EgressQoSIndexInformer {
+	if informer, ok := informer.(EgressQoSIndexInformer); ok {
+		return informer
+	}
+	return cache.NewTypedSharedIndexInformer[*crdegressqosv1.EgressQoS](informer)
 }

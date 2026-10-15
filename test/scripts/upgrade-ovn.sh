@@ -95,7 +95,7 @@ case $(uname -m) in
   x86_64)  ARCH="amd64" ;;
   aarch64) ARCH="arm64" ;;
 esac
-K8S_VERSION="v1.36.4"
+K8S_VERSION="v1.37.0"
 E2E_VERSION=$(/usr/local/bin/e2e.test --version)
 if [[ "$E2E_VERSION" != "$K8S_VERSION" ]]; then
   echo "found version $E2E_VERSION of e2e binary, need version $K8S_VERSION; downloading"

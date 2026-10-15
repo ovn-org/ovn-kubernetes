@@ -23,7 +23,7 @@ import (
 // order. If no rule matches (or no EgressFirewall is present) then the traffic
 // will be allowed by default.
 type EgressFirewallApplyConfiguration struct {
-	metav1.TypeMetaApplyConfiguration    `json:",inline"`
+	metav1.TypeMetaApplyConfiguration    `json:""`
 	*metav1.ObjectMetaApplyConfiguration `json:"metadata,omitempty"`
 	// Specification of the desired behavior of EgressFirewall.
 	Spec *EgressFirewallSpecApplyConfiguration `json:"spec,omitempty"`

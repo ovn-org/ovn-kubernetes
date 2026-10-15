@@ -19,7 +19,7 @@ import (
 //
 // ClusterUserDefinedNetwork describe network request for a shared network across namespaces.
 type ClusterUserDefinedNetworkApplyConfiguration struct {
-	metav1.TypeMetaApplyConfiguration    `json:",inline"`
+	metav1.TypeMetaApplyConfiguration    `json:""`
 	*metav1.ObjectMetaApplyConfiguration `json:"metadata,omitempty"`
 	Spec                                 *ClusterUserDefinedNetworkSpecApplyConfiguration   `json:"spec,omitempty"`
 	Status                               *ClusterUserDefinedNetworkStatusApplyConfiguration `json:"status,omitempty"`

@@ -23,7 +23,7 @@ import (
 // source IP for all egress traffic originating from any pods which
 // match the EgressIP resource according to its spec definition.
 type EgressIPApplyConfiguration struct {
-	metav1.TypeMetaApplyConfiguration    `json:",inline"`
+	metav1.TypeMetaApplyConfiguration    `json:""`
 	*metav1.ObjectMetaApplyConfiguration `json:"metadata,omitempty"`
 	// Specification of the desired behavior of EgressIP.
 	Spec *EgressIPSpecApplyConfiguration `json:"spec,omitempty"`

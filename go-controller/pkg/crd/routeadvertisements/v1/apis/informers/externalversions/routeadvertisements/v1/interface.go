@@ -12,7 +12,7 @@ import (
 // Interface provides access to all the informers in this group version.
 type Interface interface {
 	// RouteAdvertisements returns a RouteAdvertisementsInformer.
-	RouteAdvertisements() RouteAdvertisementsInformer
+	RouteAdvertisements() TypedRouteAdvertisementsInformer
 }
 
 type version struct {
@@ -26,7 +26,7 @@ func New(f internalinterfaces.SharedInformerFactory, namespace string, tweakList
 	return &version{factory: f, namespace: namespace, tweakListOptions: tweakListOptions}
 }
 
-// RouteAdvertisements returns a RouteAdvertisementsInformer.
-func (v *version) RouteAdvertisements() RouteAdvertisementsInformer {
+// RouteAdvertisements returns a TypedRouteAdvertisementsInformer.
+func (v *version) RouteAdvertisements() TypedRouteAdvertisementsInformer {
 	return &routeAdvertisementsInformer{factory: v.factory, tweakListOptions: v.tweakListOptions}
 }

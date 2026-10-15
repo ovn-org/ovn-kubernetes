@@ -32,7 +32,7 @@ and set the environmental variable `K8S_VERSION` to the same value. Also make su
 your go directory with `export GOPATH=(...)`.
 
 ```
-K8S_VERSION=v1.36.4
+K8S_VERSION=v1.37.0
 git clone --single-branch --branch $K8S_VERSION https://github.com/kubernetes/kubernetes.git $GOPATH/src/k8s.io/kubernetes/
 pushd $GOPATH/src/k8s.io/kubernetes/
 make WHAT="test/e2e/e2e.test vendor/github.com/onsi/ginkgo/ginkgo cmd/kubectl"
@@ -252,7 +252,7 @@ filter by description:
 ```bash
 cd $REPO/test/crd-integration
 KUBEBUILDER_ASSETS="$(go tool setup-envtest \
-    use 1.36.2 --bin-dir /tmp/envtest-bin -p path)" \
+    use 1.37.0 --bin-dir /tmp/envtest-bin -p path)" \
   go test -v ./... -- --focus "fills in the egress-assignable default"
 ```
 

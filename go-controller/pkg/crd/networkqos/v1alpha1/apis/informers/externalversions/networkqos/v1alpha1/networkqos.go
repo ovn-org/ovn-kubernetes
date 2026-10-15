@@ -21,11 +21,39 @@ import (
 )
 
 // NetworkQoSInformer provides access to a shared informer and lister for
-// NetworkQoSes.
+// NetworkQoSes. Prefer using the type-safe variant (see [TypedNetworkQoSInformer]).
 type NetworkQoSInformer interface {
 	Informer() cache.SharedIndexInformer
 	Lister() networkqosv1alpha1.NetworkQoSLister
 }
+
+// TypedNetworkQoSInformer provides access to a shared informer and lister for
+// NetworkQoSes, including the type-safe TypedInformer variant.
+// It is a superset of NetworkQoSInformer.
+type TypedNetworkQoSInformer interface {
+	Informer() cache.SharedIndexInformer
+	TypedInformer() NetworkQoSIndexInformer
+	Lister() networkqosv1alpha1.NetworkQoSLister
+}
+
+// NetworkQoSIndexInformer is a wrapper around the underlying [cache.SharedIndexInformer]
+// with type-safe variants of several methods.
+type NetworkQoSIndexInformer cache.TypedSharedIndexInformer[*crdnetworkqosv1alpha1.NetworkQoS]
+
+// NetworkQoSHandlerFuncs is a specialization of [cache.TypedResourceEventHandlerFuncs] for NetworkQoS.
+type NetworkQoSHandlerFuncs = cache.TypedResourceEventHandlerFuncs[*crdnetworkqosv1alpha1.NetworkQoS]
+
+// NetworkQoSDetailedHandlerFuncs is a specialization of [cache.TypedResourceEventHandlerDetailedFuncs] for NetworkQoS.
+type NetworkQoSDetailedHandlerFuncs = cache.TypedResourceEventHandlerDetailedFuncs[*crdnetworkqosv1alpha1.NetworkQoS]
+
+// NetworkQoSFilteringHandler is a specialization of [cache.TypedFilteringResourceEventHandler] for NetworkQoS.
+type NetworkQoSFilteringHandler = cache.TypedFilteringResourceEventHandler[*crdnetworkqosv1alpha1.NetworkQoS]
+
+// NetworkQoSIndexers is a specialization of [cache.TypedIndexers] for NetworkQoS.
+type NetworkQoSIndexers = cache.TypedIndexers[*crdnetworkqosv1alpha1.NetworkQoS]
+
+// DeletedNetworkQoS is a specialization of [cache.DeletedObject] for NetworkQoS.
+type DeletedNetworkQoS = cache.DeletedObject[*crdnetworkqosv1alpha1.NetworkQoS]
 
 type networkQoSInformer struct {
 	factory          internalinterfaces.SharedInformerFactory
@@ -36,25 +64,49 @@ type networkQoSInformer struct {
 // NewNetworkQoSInformer constructs a new informer for NetworkQoS type.
 // Always prefer using an informer factory to get a shared informer instead of getting an independent
 // one. This reduces memory footprint and number of connections to the server.
+// If you really need an independent one, prefer using the type-safe variant (see [NewTypedNetworkQoSInformer]).
 func NewNetworkQoSInformer(client versioned.Interface, namespace string, resyncPeriod time.Duration, indexers cache.Indexers) cache.SharedIndexInformer {
 	return NewNetworkQoSInformerWithOptions(client, namespace, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: indexers})
+}
+
+// NewTypedNetworkQoSInformer constructs a new informer for NetworkQoS type.
+// Always prefer using an informer factory to get a shared informer instead of getting an independent
+// one. This reduces memory footprint and number of connections to the server.
+func NewTypedNetworkQoSInformer(client versioned.Interface, namespace string, resyncPeriod time.Duration, indexers NetworkQoSIndexers) NetworkQoSIndexInformer {
+	return NewTypedNetworkQoSInformerWithOptions(client, namespace, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: cache.TypedIndexersToIndexers(indexers)})
 }
 
 // NewFilteredNetworkQoSInformer constructs a new informer for NetworkQoS type.
 // Always prefer using an informer factory to get a shared informer instead of getting an independent
 // one. This reduces memory footprint and number of connections to the server.
+// If you really need an independent one, prefer using the type-safe variant (see [NewTypedFilteredNetworkQoSInformer]).
 func NewFilteredNetworkQoSInformer(client versioned.Interface, namespace string, resyncPeriod time.Duration, indexers cache.Indexers, tweakListOptions internalinterfaces.TweakListOptionsFunc) cache.SharedIndexInformer {
-	return NewNetworkQoSInformerWithOptions(client, namespace, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: indexers, TweakListOptions: tweakListOptions})
+	return NewTypedNetworkQoSInformerWithOptions(client, namespace, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: indexers, TweakListOptions: tweakListOptions})
+}
+
+// NewTypedFilteredNetworkQoSInformer constructs a new informer for NetworkQoS type.
+// Always prefer using an informer factory to get a shared informer instead of getting an independent
+// one. This reduces memory footprint and number of connections to the server.
+func NewTypedFilteredNetworkQoSInformer(client versioned.Interface, namespace string, resyncPeriod time.Duration, indexers NetworkQoSIndexers, tweakListOptions internalinterfaces.TweakListOptionsFunc) NetworkQoSIndexInformer {
+	return NewTypedNetworkQoSInformerWithOptions(client, namespace, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: cache.TypedIndexersToIndexers(indexers), TweakListOptions: tweakListOptions})
 }
 
 // NewNetworkQoSInformerWithOptions constructs a new informer for NetworkQoS type with additional options.
 // Always prefer using an informer factory to get a shared informer instead of getting an independent
 // one. This reduces memory footprint and number of connections to the server.
+// If you really need an independent one, prefer using the type-safe variant (see [NewTypedNetworkQoSInformerWithOptions]).
 func NewNetworkQoSInformerWithOptions(client versioned.Interface, namespace string, options internalinterfaces.InformerOptions) cache.SharedIndexInformer {
+	return NewTypedNetworkQoSInformerWithOptions(client, namespace, options)
+}
+
+// NewTypedNetworkQoSInformerWithOptions constructs a new informer for NetworkQoS type with additional options.
+// Always prefer using an informer factory to get a shared informer instead of getting an independent
+// one. This reduces memory footprint and number of connections to the server.
+func NewTypedNetworkQoSInformerWithOptions(client versioned.Interface, namespace string, options internalinterfaces.InformerOptions) NetworkQoSIndexInformer {
 	gvr := schema.GroupVersionResource{Group: "k8s.ovn.org", Version: "v1alpha1", Resource: "networkqoss"}
 	identifier := options.InformerName.WithResource(gvr)
 	tweakListOptions := options.TweakListOptions
-	return cache.NewSharedIndexInformerWithOptions(
+	return cache.NewTypedSharedIndexInformer[*crdnetworkqosv1alpha1.NetworkQoS](cache.NewSharedIndexInformerWithOptions(
 		cache.ToListWatcherWithWatchListSemantics(&cache.ListWatch{
 			ListFunc: func(opts v1.ListOptions) (runtime.Object, error) {
 				if tweakListOptions != nil {
@@ -87,17 +139,57 @@ func NewNetworkQoSInformerWithOptions(client versioned.Interface, namespace stri
 			Indexers:     options.Indexers,
 			Identifier:   identifier,
 		},
-	)
+	))
 }
 
 func (f *networkQoSInformer) defaultInformer(client versioned.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
-	return NewNetworkQoSInformerWithOptions(client, f.namespace, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}, InformerName: f.factory.InformerName(), TweakListOptions: f.tweakListOptions})
+	return NewTypedNetworkQoSInformerWithOptions(client, f.namespace, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}, InformerName: f.factory.InformerName(), TweakListOptions: f.tweakListOptions})
 }
 
 func (f *networkQoSInformer) Informer() cache.SharedIndexInformer {
-	return f.factory.InformerFor(&crdnetworkqosv1alpha1.NetworkQoS{}, f.defaultInformer)
+	return f.TypedInformer()
+}
+
+func (f *networkQoSInformer) TypedInformer() NetworkQoSIndexInformer {
+	return cache.NewTypedSharedIndexInformer[*crdnetworkqosv1alpha1.NetworkQoS](f.factory.InformerFor(&crdnetworkqosv1alpha1.NetworkQoS{}, f.defaultInformer))
 }
 
 func (f *networkQoSInformer) Lister() networkqosv1alpha1.NetworkQoSLister {
 	return networkqosv1alpha1.NewNetworkQoSLister(f.Informer().GetIndexer())
+}
+
+// ToTypedNetworkQoSInformer converts an untyped informer into a TypedNetworkQoSInformer.
+//
+// WARNING: this conversion is only safe if the informer handles objects of type
+// *NetworkQoS. If that is not the case, calling type-safe methods of the returned
+// TypedNetworkQoSInformer leads to runtime panics. A safer alternative is to pass
+// around a TypedNetworkQoSInformer instances that was obtained from a
+// SharedInformerFactory.
+func ToTypedNetworkQoSInformer(informer NetworkQoSInformer) TypedNetworkQoSInformer {
+	if informer, ok := informer.(TypedNetworkQoSInformer); ok {
+		return informer
+	}
+	return &networkQoSTypedInformerAdapter{informer}
+}
+
+type networkQoSTypedInformerAdapter struct {
+	NetworkQoSInformer
+}
+
+func (a *networkQoSTypedInformerAdapter) TypedInformer() NetworkQoSIndexInformer {
+	return cache.NewTypedSharedIndexInformer[*crdnetworkqosv1alpha1.NetworkQoS](a.Informer())
+}
+
+// ToNetworkQoSIndexInformer converts an untyped informer into a NetworkQoSIndexInformer.
+//
+// WARNING: this conversion is only safe if the informer handles objects of type
+// *NetworkQoS. If that is not the case, calling type-safe methods of the returned
+// NetworkQoSIndexInformer leads to runtime panics. A safer alternative is to pass
+// around a NetworkQoSIndexInformer instances that was obtained from a
+// SharedInformerFactory.
+func ToNetworkQoSIndexInformer(informer cache.SharedIndexInformer) NetworkQoSIndexInformer {
+	if informer, ok := informer.(NetworkQoSIndexInformer); ok {
+		return informer
+	}
+	return cache.NewTypedSharedIndexInformer[*crdnetworkqosv1alpha1.NetworkQoS](informer)
 }

@@ -21,11 +21,39 @@ import (
 )
 
 // EgressFirewallInformer provides access to a shared informer and lister for
-// EgressFirewalls.
+// EgressFirewalls. Prefer using the type-safe variant (see [TypedEgressFirewallInformer]).
 type EgressFirewallInformer interface {
 	Informer() cache.SharedIndexInformer
 	Lister() egressfirewallv1.EgressFirewallLister
 }
+
+// TypedEgressFirewallInformer provides access to a shared informer and lister for
+// EgressFirewalls, including the type-safe TypedInformer variant.
+// It is a superset of EgressFirewallInformer.
+type TypedEgressFirewallInformer interface {
+	Informer() cache.SharedIndexInformer
+	TypedInformer() EgressFirewallIndexInformer
+	Lister() egressfirewallv1.EgressFirewallLister
+}
+
+// EgressFirewallIndexInformer is a wrapper around the underlying [cache.SharedIndexInformer]
+// with type-safe variants of several methods.
+type EgressFirewallIndexInformer cache.TypedSharedIndexInformer[*crdegressfirewallv1.EgressFirewall]
+
+// EgressFirewallHandlerFuncs is a specialization of [cache.TypedResourceEventHandlerFuncs] for EgressFirewall.
+type EgressFirewallHandlerFuncs = cache.TypedResourceEventHandlerFuncs[*crdegressfirewallv1.EgressFirewall]
+
+// EgressFirewallDetailedHandlerFuncs is a specialization of [cache.TypedResourceEventHandlerDetailedFuncs] for EgressFirewall.
+type EgressFirewallDetailedHandlerFuncs = cache.TypedResourceEventHandlerDetailedFuncs[*crdegressfirewallv1.EgressFirewall]
+
+// EgressFirewallFilteringHandler is a specialization of [cache.TypedFilteringResourceEventHandler] for EgressFirewall.
+type EgressFirewallFilteringHandler = cache.TypedFilteringResourceEventHandler[*crdegressfirewallv1.EgressFirewall]
+
+// EgressFirewallIndexers is a specialization of [cache.TypedIndexers] for EgressFirewall.
+type EgressFirewallIndexers = cache.TypedIndexers[*crdegressfirewallv1.EgressFirewall]
+
+// DeletedEgressFirewall is a specialization of [cache.DeletedObject] for EgressFirewall.
+type DeletedEgressFirewall = cache.DeletedObject[*crdegressfirewallv1.EgressFirewall]
 
 type egressFirewallInformer struct {
 	factory          internalinterfaces.SharedInformerFactory
@@ -36,25 +64,49 @@ type egressFirewallInformer struct {
 // NewEgressFirewallInformer constructs a new informer for EgressFirewall type.
 // Always prefer using an informer factory to get a shared informer instead of getting an independent
 // one. This reduces memory footprint and number of connections to the server.
+// If you really need an independent one, prefer using the type-safe variant (see [NewTypedEgressFirewallInformer]).
 func NewEgressFirewallInformer(client versioned.Interface, namespace string, resyncPeriod time.Duration, indexers cache.Indexers) cache.SharedIndexInformer {
 	return NewEgressFirewallInformerWithOptions(client, namespace, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: indexers})
+}
+
+// NewTypedEgressFirewallInformer constructs a new informer for EgressFirewall type.
+// Always prefer using an informer factory to get a shared informer instead of getting an independent
+// one. This reduces memory footprint and number of connections to the server.
+func NewTypedEgressFirewallInformer(client versioned.Interface, namespace string, resyncPeriod time.Duration, indexers EgressFirewallIndexers) EgressFirewallIndexInformer {
+	return NewTypedEgressFirewallInformerWithOptions(client, namespace, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: cache.TypedIndexersToIndexers(indexers)})
 }
 
 // NewFilteredEgressFirewallInformer constructs a new informer for EgressFirewall type.
 // Always prefer using an informer factory to get a shared informer instead of getting an independent
 // one. This reduces memory footprint and number of connections to the server.
+// If you really need an independent one, prefer using the type-safe variant (see [NewTypedFilteredEgressFirewallInformer]).
 func NewFilteredEgressFirewallInformer(client versioned.Interface, namespace string, resyncPeriod time.Duration, indexers cache.Indexers, tweakListOptions internalinterfaces.TweakListOptionsFunc) cache.SharedIndexInformer {
-	return NewEgressFirewallInformerWithOptions(client, namespace, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: indexers, TweakListOptions: tweakListOptions})
+	return NewTypedEgressFirewallInformerWithOptions(client, namespace, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: indexers, TweakListOptions: tweakListOptions})
+}
+
+// NewTypedFilteredEgressFirewallInformer constructs a new informer for EgressFirewall type.
+// Always prefer using an informer factory to get a shared informer instead of getting an independent
+// one. This reduces memory footprint and number of connections to the server.
+func NewTypedFilteredEgressFirewallInformer(client versioned.Interface, namespace string, resyncPeriod time.Duration, indexers EgressFirewallIndexers, tweakListOptions internalinterfaces.TweakListOptionsFunc) EgressFirewallIndexInformer {
+	return NewTypedEgressFirewallInformerWithOptions(client, namespace, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: cache.TypedIndexersToIndexers(indexers), TweakListOptions: tweakListOptions})
 }
 
 // NewEgressFirewallInformerWithOptions constructs a new informer for EgressFirewall type with additional options.
 // Always prefer using an informer factory to get a shared informer instead of getting an independent
 // one. This reduces memory footprint and number of connections to the server.
+// If you really need an independent one, prefer using the type-safe variant (see [NewTypedEgressFirewallInformerWithOptions]).
 func NewEgressFirewallInformerWithOptions(client versioned.Interface, namespace string, options internalinterfaces.InformerOptions) cache.SharedIndexInformer {
+	return NewTypedEgressFirewallInformerWithOptions(client, namespace, options)
+}
+
+// NewTypedEgressFirewallInformerWithOptions constructs a new informer for EgressFirewall type with additional options.
+// Always prefer using an informer factory to get a shared informer instead of getting an independent
+// one. This reduces memory footprint and number of connections to the server.
+func NewTypedEgressFirewallInformerWithOptions(client versioned.Interface, namespace string, options internalinterfaces.InformerOptions) EgressFirewallIndexInformer {
 	gvr := schema.GroupVersionResource{Group: "k8s.ovn.org", Version: "v1", Resource: "egressfirewalls"}
 	identifier := options.InformerName.WithResource(gvr)
 	tweakListOptions := options.TweakListOptions
-	return cache.NewSharedIndexInformerWithOptions(
+	return cache.NewTypedSharedIndexInformer[*crdegressfirewallv1.EgressFirewall](cache.NewSharedIndexInformerWithOptions(
 		cache.ToListWatcherWithWatchListSemantics(&cache.ListWatch{
 			ListFunc: func(opts metav1.ListOptions) (runtime.Object, error) {
 				if tweakListOptions != nil {
@@ -87,17 +139,57 @@ func NewEgressFirewallInformerWithOptions(client versioned.Interface, namespace 
 			Indexers:     options.Indexers,
 			Identifier:   identifier,
 		},
-	)
+	))
 }
 
 func (f *egressFirewallInformer) defaultInformer(client versioned.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
-	return NewEgressFirewallInformerWithOptions(client, f.namespace, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}, InformerName: f.factory.InformerName(), TweakListOptions: f.tweakListOptions})
+	return NewTypedEgressFirewallInformerWithOptions(client, f.namespace, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}, InformerName: f.factory.InformerName(), TweakListOptions: f.tweakListOptions})
 }
 
 func (f *egressFirewallInformer) Informer() cache.SharedIndexInformer {
-	return f.factory.InformerFor(&crdegressfirewallv1.EgressFirewall{}, f.defaultInformer)
+	return f.TypedInformer()
+}
+
+func (f *egressFirewallInformer) TypedInformer() EgressFirewallIndexInformer {
+	return cache.NewTypedSharedIndexInformer[*crdegressfirewallv1.EgressFirewall](f.factory.InformerFor(&crdegressfirewallv1.EgressFirewall{}, f.defaultInformer))
 }
 
 func (f *egressFirewallInformer) Lister() egressfirewallv1.EgressFirewallLister {
 	return egressfirewallv1.NewEgressFirewallLister(f.Informer().GetIndexer())
+}
+
+// ToTypedEgressFirewallInformer converts an untyped informer into a TypedEgressFirewallInformer.
+//
+// WARNING: this conversion is only safe if the informer handles objects of type
+// *EgressFirewall. If that is not the case, calling type-safe methods of the returned
+// TypedEgressFirewallInformer leads to runtime panics. A safer alternative is to pass
+// around a TypedEgressFirewallInformer instances that was obtained from a
+// SharedInformerFactory.
+func ToTypedEgressFirewallInformer(informer EgressFirewallInformer) TypedEgressFirewallInformer {
+	if informer, ok := informer.(TypedEgressFirewallInformer); ok {
+		return informer
+	}
+	return &egressFirewallTypedInformerAdapter{informer}
+}
+
+type egressFirewallTypedInformerAdapter struct {
+	EgressFirewallInformer
+}
+
+func (a *egressFirewallTypedInformerAdapter) TypedInformer() EgressFirewallIndexInformer {
+	return cache.NewTypedSharedIndexInformer[*crdegressfirewallv1.EgressFirewall](a.Informer())
+}
+
+// ToEgressFirewallIndexInformer converts an untyped informer into a EgressFirewallIndexInformer.
+//
+// WARNING: this conversion is only safe if the informer handles objects of type
+// *EgressFirewall. If that is not the case, calling type-safe methods of the returned
+// EgressFirewallIndexInformer leads to runtime panics. A safer alternative is to pass
+// around a EgressFirewallIndexInformer instances that was obtained from a
+// SharedInformerFactory.
+func ToEgressFirewallIndexInformer(informer cache.SharedIndexInformer) EgressFirewallIndexInformer {
+	if informer, ok := informer.(EgressFirewallIndexInformer); ok {
+		return informer
+	}
+	return cache.NewTypedSharedIndexInformer[*crdegressfirewallv1.EgressFirewall](informer)
 }

@@ -427,7 +427,7 @@ sudo ln -s /usr/bin/kubectl-v1.17.3 /usr/bin/kubectl
 Download and install latest version of `kubectl`:
 
 ```
-$ K8S_VERSION=v1.36.4
+$ K8S_VERSION=v1.37.0
 $ curl -LO https://storage.googleapis.com/kubernetes-release/release/$K8S_VERSION/bin/linux/amd64/kubectl
 $ chmod +x kubectl
 $ sudo mv kubectl /usr/bin/kubectl-$K8S_VERSION
@@ -483,7 +483,7 @@ $ cd ../dist/images/
 $ make fedora-image
 
 $ cd ../../contrib/
-$ PLATFORM_IPV4_SUPPORT=true PLATFORM_IPV6_SUPPORT=true K8S_VERSION=v1.36.4 ./kind.sh
+$ PLATFORM_IPV4_SUPPORT=true PLATFORM_IPV6_SUPPORT=true K8S_VERSION=v1.37.0 ./kind.sh
 ```
 
 Once `kind.sh` completes, setup kube config file:
@@ -509,7 +509,7 @@ one (or both of) the following variables:
 
 ```
 $ cd ../../contrib/
-$ KIND_IMAGE=example.com/kindest/node K8S_VERSION=v1.36.4 ./kind.sh
+$ KIND_IMAGE=example.com/kindest/node K8S_VERSION=v1.37.0 ./kind.sh
 ```
 
 ### Using kind local registry to deploy non ovn-k containers

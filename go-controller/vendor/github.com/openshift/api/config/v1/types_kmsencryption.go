@@ -2,25 +2,29 @@ package v1
 
 // KMSPluginConfig defines the configuration for the KMS instance
 // that will be used with KMS encryption
-// +kubebuilder:validation:XValidation:rule="self.type == 'Vault' ? has(self.vault) : !has(self.vault)",message="vault config is required when kms provider type is Vault, and forbidden otherwise"
-// +union
 type KMSPluginConfig struct {
-	// type defines the kind of platform for the KMS provider.
-	// Allowed values are Vault.
-	// When set to Vault, the plugin connects to a HashiCorp Vault server for key management.
+	// --- TOMBSTONE ---
+	// type was the kind of platform for the KMS provider.
+	// The field has been replaced by the provider-specific pluginConfig resource.
+	// The field name is reserved to prevent reuse.
 	//
-	// +unionDiscriminator
 	// +required
-	Type KMSProviderType `json:"type"`
+	// Type KMSProviderType `json:"type"`
 
-	// vault defines the configuration for the Vault KMS plugin.
-	// The plugin connects to a Vault Enterprise server that is managed
-	// by the user outside the purview of the control plane.
-	// This field must be set when type is Vault, and must be unset otherwise.
+	// pluginConfig is a required reference to a cluster-scoped resource with a status subresource
+	// that satisfies the OpenShift KMS plugin configuration status interface.
+	//
+	// +required
+	PluginConfig KMSPluginConfigReference `json:"pluginConfig,omitzero"`
+
+	// --- TOMBSTONE ---
+	// vault defined inline Vault-specific KMS plugin configuration.
+	// It has been replaced by pluginConfig which references a provider-managed custom resource.
+	// The field name is reserved to prevent reuse.
 	//
 	// +unionMember
 	// +optional
-	Vault VaultKMSPluginConfig `json:"vault,omitempty,omitzero"`
+	// Vault VaultKMSPluginConfig `json:"vault,omitempty,omitzero"`
 
 	// --- TOMBSTONE ---
 	// aws was a field that allowed configuring AWS KMS.
@@ -29,6 +33,43 @@ type KMSPluginConfig struct {
 	//
 	// +optional
 	// AWS *AWSKMSConfig `json:"aws,omitempty"`
+}
+
+// KMSPluginConfigReference identifies a cluster-scoped KMS plugin configuration custom resource.
+type KMSPluginConfigReference struct {
+	// apiVersion is required and identifies the API version of the referenced KMS plugin configuration resource.
+	// The value must be in the format <group>/<version>, where group is a DNS subdomain
+	// and version is a Kubernetes API version (for example, v1 or v1alpha1).
+	// It must contain between 1 and 64 characters.
+	//
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=64
+	// +kubebuilder:validation:XValidation:rule="self.matches('^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)+/v[0-9]+([a-z0-9]+)*$')",message="apiVersion must be in the format <group>/<version>"
+	// +required
+	APIVersion string `json:"apiVersion,omitempty"`
+
+	// resource is required and is the resource name of the referenced KMS plugin configuration custom resource.
+	// This is the plural name used in the Kubernetes API (for example, vaultkmsconfigs),
+	// not the Kind (for example, VaultKMSConfig).
+	// The value must be between 1 and 63 characters, contain only lowercase alphanumeric
+	// characters or '-', and start and end with an alphanumeric character.
+	//
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=63
+	// +kubebuilder:validation:XValidation:rule="self.matches('^[a-z0-9]([a-z0-9\\\\-]*[a-z0-9])?$')",message="resource must be a valid Kubernetes resource name: contain no more than 63 characters, contain only lowercase alphanumeric characters or '-', and start and end with an alphanumeric character"
+	// +required
+	Resource string `json:"resource,omitempty"`
+
+	// name is required and is the metadata.name of the referenced KMS plugin configuration resource.
+	// The referenced resource must be cluster-scoped.
+	// The name must be a valid DNS subdomain name: it must contain between 1 and 253 characters,
+	// contain only lowercase alphanumeric characters, '-' or '.', and start and end with an alphanumeric character.
+	//
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:XValidation:rule="self.matches('^[a-z0-9]([a-z0-9\\\\-]*[a-z0-9])?(\\\\.[a-z0-9]([a-z0-9\\\\-]*[a-z0-9])?)*$')",message="name must be a valid DNS subdomain name: contain no more than 253 characters, contain only lowercase alphanumeric characters, '-' or '.', and start and end with an alphanumeric character"
+	// +required
+	Name string `json:"name,omitempty"`
 }
 
 // --- TOMBSTONE ---
@@ -63,7 +104,7 @@ type VaultSecretReference struct {
 	//
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=253
-	// +kubebuilder:validation:XValidation:rule="!format.dns1123Subdomain().validate(self).hasValue()",message="name must be a valid DNS subdomain name: contain no more than 253 characters, contain only lowercase alphanumeric characters, '-' or '.', and start and end with an alphanumeric character"
+	// +kubebuilder:validation:XValidation:rule="self.matches('^[a-z0-9]([a-z0-9\\\\-]*[a-z0-9])?(\\\\.[a-z0-9]([a-z0-9\\\\-]*[a-z0-9])?)*$')",message="name must be a valid DNS subdomain name: contain no more than 253 characters, contain only lowercase alphanumeric characters, '-' or '.', and start and end with an alphanumeric character"
 	// +required
 	Name string `json:"name,omitempty"`
 }
@@ -76,7 +117,7 @@ type VaultConfigMapReference struct {
 	//
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=253
-	// +kubebuilder:validation:XValidation:rule="!format.dns1123Subdomain().validate(self).hasValue()",message="name must be a valid DNS subdomain name: contain no more than 253 characters, contain only lowercase alphanumeric characters, '-' or '.', and start and end with an alphanumeric character"
+	// +kubebuilder:validation:XValidation:rule="self.matches('^[a-z0-9]([a-z0-9\\\\-]*[a-z0-9])?(\\\\.[a-z0-9]([a-z0-9\\\\-]*[a-z0-9])?)*$')",message="name must be a valid DNS subdomain name: contain no more than 253 characters, contain only lowercase alphanumeric characters, '-' or '.', and start and end with an alphanumeric character"
 	// +required
 	Name string `json:"name,omitempty"`
 }
@@ -114,7 +155,7 @@ const (
 type VaultAppRoleAuthentication struct {
 	// secret references a secret in the openshift-config namespace containing
 	// the AppRole credentials used to authenticate with Vault.
-	// The secret must contain two keys: "role-id" for the AppRole Role ID and "secret-id" for the AppRole Secret ID.
+	// The referenced Secret must contain two keys: "role-id" for the AppRole Role ID and "secret-id" for the AppRole Secret ID.
 	//
 	// +required
 	Secret VaultSecretReference `json:"secret,omitzero"`
@@ -181,6 +222,23 @@ type VaultKMSPluginConfig struct {
 	// +optional
 	VaultNamespace string `json:"vaultNamespace,omitempty"`
 
+	// vaultAuthNamespace specifies the Vault namespace to use for authentication.
+	// This is only applicable for Vault Enterprise installations where authentication
+	// and Transit operations may be in different namespaces.
+	// When this field is not set, the value of vaultNamespace is used for both
+	// authentication and Transit key operations.
+	//
+	// The value must be between 1 and 4096 characters.
+	// The namespace cannot end with a forward slash, cannot contain spaces, and cannot be one of the reserved strings: root, sys, audit, auth, cubbyhole, or identity.
+	//
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=4096
+	// +kubebuilder:validation:XValidation:rule="!self.endsWith('/')",message="vaultAuthNamespace cannot end with a forward slash"
+	// +kubebuilder:validation:XValidation:rule="!self.contains(' ')",message="vaultAuthNamespace cannot contain spaces"
+	// +kubebuilder:validation:XValidation:rule="!(self in ['root', 'sys', 'audit', 'auth', 'cubbyhole', 'identity'])",message="vaultAuthNamespace cannot be a reserved string (root, sys, audit, auth, cubbyhole, identity)"
+	// +optional
+	VaultAuthNamespace string `json:"vaultAuthNamespace,omitempty"`
+
 	// tls contains the TLS configuration for connecting to the Vault server.
 	// When this field is not set, system default TLS settings are used.
 	// +optional
@@ -191,16 +249,37 @@ type VaultKMSPluginConfig struct {
 	// +required
 	Authentication VaultAuthentication `json:"authentication,omitzero"`
 
+	// vaultKeyPath specifies the full path to the encryption key in Vault's Transit secrets engine,
+	// combining the Transit engine mount path and the key name separated by "/keys/".
+	// Format: <mount>/keys/<key-name> (e.g., transit/keys/my-key, myteam/transit/keys/production-key).
+	//
+	// The total path length must be between 8 and 1542 characters.
+	// The path cannot start or end with a forward slash, cannot contain consecutive forward slashes,
+	// must only contain RFC 3986 unreserved characters (alphanumeric, hyphen, period, underscore, tilde)
+	// and forward slashes as path separators, and must not contain "." or ".." path segments.
+	// The key name must start and end with an alphanumeric character or underscore, and may contain
+	// alphanumeric characters, underscores, hyphens, and periods in the middle.
+	//
+	// +kubebuilder:validation:MinLength=8
+	// +kubebuilder:validation:MaxLength=1542
+	// +kubebuilder:validation:XValidation:rule="!self.startsWith('/')",message="vaultKeyPath cannot start with a forward slash"
+	// +kubebuilder:validation:XValidation:rule="!self.endsWith('/')",message="vaultKeyPath cannot end with a forward slash"
+	// +kubebuilder:validation:XValidation:rule="!self.contains('//')",message="vaultKeyPath cannot contain consecutive forward slashes"
+	// +kubebuilder:validation:XValidation:rule="self.matches('^[a-zA-Z0-9._~/-]+$')",message="vaultKeyPath must only contain RFC 3986 unreserved characters (alphanumeric, hyphen, period, underscore, tilde) and forward slashes"
+	// +kubebuilder:validation:XValidation:rule="self.split('/').filter(s, s == '.' || s == '..').size() == 0",message="vaultKeyPath must not contain '.' or '..' path segments"
+	// +kubebuilder:validation:XValidation:rule=`self.matches('^[a-zA-Z0-9._~-]+(/[a-zA-Z0-9._~-]+)*/keys/[a-zA-Z0-9_]([a-zA-Z0-9_.-]*[a-zA-Z0-9_])?$')`,message="vaultKeyPath must follow the format <mount>/keys/<key-name> where the key name starts and ends with an alphanumeric character or underscore and may contain alphanumeric characters, underscores, hyphens, and periods"
+	// +required
+	VaultKeyPath string `json:"vaultKeyPath,omitempty"`
+
+	// --- TOMBSTONE ---
 	// transitMount specifies the mount path of the Vault Transit engine.
+	// It has been replaced by vaultKeyPath which combines the mount and key into a single path.
+	// The field name is reserved to prevent reuse.
 	//
-	// When omitted, this means the user has no opinion and the platform is left
-	// to choose a reasonable default. These defaults are subject to change over time.
-	// The current default is "transit".
-	//
-	// The transit mount must be between 1 and 1024 characters when specified, cannot start or
-	// end with a forward slash, cannot contain consecutive forward slashes, and must only contain
-	// RFC 3986 unreserved characters (alphanumeric, hyphen, period, underscore, tilde) and forward
-	// slashes as path separators.
+	// The transit mount must be between 1 and 1024 characters, cannot start or
+	// end with a forward slash, cannot contain consecutive forward slashes, and
+	// must only contain RFC 3986 unreserved characters (alphanumeric, hyphen,
+	// period, underscore, tilde) and forward slashes as path separators.
 	//
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=1024
@@ -208,11 +287,14 @@ type VaultKMSPluginConfig struct {
 	// +kubebuilder:validation:XValidation:rule="!self.endsWith('/')",message="transitMount cannot end with a forward slash"
 	// +kubebuilder:validation:XValidation:rule="!self.contains('//')",message="transitMount cannot contain consecutive forward slashes"
 	// +kubebuilder:validation:XValidation:rule="self.matches('^[a-zA-Z0-9._~/-]+$')",message="transitMount must only contain RFC 3986 unreserved characters (alphanumeric, hyphen, period, underscore, tilde) and forward slashes"
-	// +optional
-	TransitMount string `json:"transitMount,omitempty"`
+	// +required
+	// TransitMount string `json:"transitMount,omitempty"`
 
+	// --- TOMBSTONE ---
 	// transitKey specifies the name of the encryption key in Vault's Transit engine.
 	// This key is used to encrypt and decrypt data.
+	// It has been replaced by vaultKeyPath which combines the mount and key into a single path.
+	// The field name is reserved to prevent reuse.
 	//
 	// The transit key must be between 1 and 512 characters, cannot contain forward slashes,
 	// and must only contain alphanumeric characters, hyphens, periods, and underscores.
@@ -222,7 +304,7 @@ type VaultKMSPluginConfig struct {
 	// +kubebuilder:validation:XValidation:rule="!self.contains('/')",message="transitKey cannot contain forward slashes"
 	// +kubebuilder:validation:XValidation:rule="self.matches('^[a-zA-Z0-9._-]+$')",message="transitKey must only contain alphanumeric characters, hyphens, periods, and underscores"
 	// +required
-	TransitKey string `json:"transitKey,omitempty"`
+	// TransitKey string `json:"transitKey,omitempty"`
 }
 
 // VaultTLSConfig contains TLS configuration for connecting to Vault.
@@ -230,7 +312,7 @@ type VaultKMSPluginConfig struct {
 type VaultTLSConfig struct {
 	// caBundle references a ConfigMap in the openshift-config namespace containing
 	// the CA certificate bundle used to verify the TLS connection to the Vault server.
-	// The ConfigMap must contain the CA bundle in the key "ca-bundle.crt".
+	// The referenced ConfigMap must contain the CA bundle in the key "ca-bundle.crt".
 	// When this field is not set, the system's trusted CA certificates are used.
 	//
 	// The namespace for the ConfigMap is openshift-config.
@@ -259,7 +341,7 @@ type VaultTLSConfig struct {
 	//
 	// +kubebuilder:validation:MaxLength=253
 	// +kubebuilder:validation:MinLength=1
-	// +kubebuilder:validation:XValidation:rule="!format.dns1123Subdomain().validate(self).hasValue()",message="serverName must be a valid DNS hostname: contain no more than 253 characters, contain only lowercase alphanumeric characters, '-' or '.', and start and end with an alphanumeric character"
+	// +kubebuilder:validation:XValidation:rule="self.matches('^[a-z0-9]([a-z0-9\\\\-]*[a-z0-9])?(\\\\.[a-z0-9]([a-z0-9\\\\-]*[a-z0-9])?)*$')",message="serverName must be a valid DNS hostname: contain no more than 253 characters, contain only lowercase alphanumeric characters, '-' or '.', and start and end with an alphanumeric character"
 	// +optional
 	ServerName string `json:"serverName,omitempty"`
 }

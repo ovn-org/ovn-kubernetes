@@ -9,7 +9,7 @@ import (
 // Interface provides access to all the informers in this group version.
 type Interface interface {
 	// DNSNameResolvers returns a DNSNameResolverInformer.
-	DNSNameResolvers() DNSNameResolverInformer
+	DNSNameResolvers() TypedDNSNameResolverInformer
 }
 
 type version struct {
@@ -23,7 +23,7 @@ func New(f internalinterfaces.SharedInformerFactory, namespace string, tweakList
 	return &version{factory: f, namespace: namespace, tweakListOptions: tweakListOptions}
 }
 
-// DNSNameResolvers returns a DNSNameResolverInformer.
-func (v *version) DNSNameResolvers() DNSNameResolverInformer {
+// DNSNameResolvers returns a TypedDNSNameResolverInformer.
+func (v *version) DNSNameResolvers() TypedDNSNameResolverInformer {
 	return &dNSNameResolverInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
 }

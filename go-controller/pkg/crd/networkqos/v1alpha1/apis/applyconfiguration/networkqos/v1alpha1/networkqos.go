@@ -24,7 +24,7 @@ import (
 // is marked with relevant DSCP value and enforcing specified policing
 // parameters.
 type NetworkQoSApplyConfiguration struct {
-	v1.TypeMetaApplyConfiguration    `json:",inline"`
+	v1.TypeMetaApplyConfiguration    `json:""`
 	*v1.ObjectMetaApplyConfiguration `json:"metadata,omitempty"`
 	Spec                             *SpecApplyConfiguration   `json:"spec,omitempty"`
 	Status                           *StatusApplyConfiguration `json:"status,omitempty"`

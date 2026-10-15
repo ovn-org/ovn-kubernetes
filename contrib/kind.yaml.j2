@@ -28,13 +28,6 @@ kubeadmConfigPatches:
     extraArgs:
       - name: "v"
         value: "{{ cluster_log_level }}"
-      # Disable service-lb-controller for now
-      # https://github.com/kubernetes/kubernetes/issues/128121
-      # Once the upstream issue is fixed we can remove this controller
-      # customization fully. Tracked with
-      # https://github.com/ovn-kubernetes/ovn-kubernetes/issues/4785
-      - name: "controllers"
-        value: "*,bootstrap-signer-controller,token-cleaner-controller,-service-lb-controller"
   scheduler:
     extraArgs:
       - name: "v"

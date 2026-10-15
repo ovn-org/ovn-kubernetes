@@ -12,9 +12,9 @@ import (
 // Interface provides access to all the informers in this group version.
 type Interface interface {
 	// ClusterUserDefinedNetworks returns a ClusterUserDefinedNetworkInformer.
-	ClusterUserDefinedNetworks() ClusterUserDefinedNetworkInformer
+	ClusterUserDefinedNetworks() TypedClusterUserDefinedNetworkInformer
 	// UserDefinedNetworks returns a UserDefinedNetworkInformer.
-	UserDefinedNetworks() UserDefinedNetworkInformer
+	UserDefinedNetworks() TypedUserDefinedNetworkInformer
 }
 
 type version struct {
@@ -28,12 +28,12 @@ func New(f internalinterfaces.SharedInformerFactory, namespace string, tweakList
 	return &version{factory: f, namespace: namespace, tweakListOptions: tweakListOptions}
 }
 
-// ClusterUserDefinedNetworks returns a ClusterUserDefinedNetworkInformer.
-func (v *version) ClusterUserDefinedNetworks() ClusterUserDefinedNetworkInformer {
+// ClusterUserDefinedNetworks returns a TypedClusterUserDefinedNetworkInformer.
+func (v *version) ClusterUserDefinedNetworks() TypedClusterUserDefinedNetworkInformer {
 	return &clusterUserDefinedNetworkInformer{factory: v.factory, tweakListOptions: v.tweakListOptions}
 }
 
-// UserDefinedNetworks returns a UserDefinedNetworkInformer.
-func (v *version) UserDefinedNetworks() UserDefinedNetworkInformer {
+// UserDefinedNetworks returns a TypedUserDefinedNetworkInformer.
+func (v *version) UserDefinedNetworks() TypedUserDefinedNetworkInformer {
 	return &userDefinedNetworkInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
 }

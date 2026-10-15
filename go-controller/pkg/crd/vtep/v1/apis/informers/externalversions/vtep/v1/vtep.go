@@ -21,11 +21,39 @@ import (
 )
 
 // VTEPInformer provides access to a shared informer and lister for
-// VTEPs.
+// VTEPs. Prefer using the type-safe variant (see [TypedVTEPInformer]).
 type VTEPInformer interface {
 	Informer() cache.SharedIndexInformer
 	Lister() vtepv1.VTEPLister
 }
+
+// TypedVTEPInformer provides access to a shared informer and lister for
+// VTEPs, including the type-safe TypedInformer variant.
+// It is a superset of VTEPInformer.
+type TypedVTEPInformer interface {
+	Informer() cache.SharedIndexInformer
+	TypedInformer() VTEPIndexInformer
+	Lister() vtepv1.VTEPLister
+}
+
+// VTEPIndexInformer is a wrapper around the underlying [cache.SharedIndexInformer]
+// with type-safe variants of several methods.
+type VTEPIndexInformer cache.TypedSharedIndexInformer[*crdvtepv1.VTEP]
+
+// VTEPHandlerFuncs is a specialization of [cache.TypedResourceEventHandlerFuncs] for VTEP.
+type VTEPHandlerFuncs = cache.TypedResourceEventHandlerFuncs[*crdvtepv1.VTEP]
+
+// VTEPDetailedHandlerFuncs is a specialization of [cache.TypedResourceEventHandlerDetailedFuncs] for VTEP.
+type VTEPDetailedHandlerFuncs = cache.TypedResourceEventHandlerDetailedFuncs[*crdvtepv1.VTEP]
+
+// VTEPFilteringHandler is a specialization of [cache.TypedFilteringResourceEventHandler] for VTEP.
+type VTEPFilteringHandler = cache.TypedFilteringResourceEventHandler[*crdvtepv1.VTEP]
+
+// VTEPIndexers is a specialization of [cache.TypedIndexers] for VTEP.
+type VTEPIndexers = cache.TypedIndexers[*crdvtepv1.VTEP]
+
+// DeletedVTEP is a specialization of [cache.DeletedObject] for VTEP.
+type DeletedVTEP = cache.DeletedObject[*crdvtepv1.VTEP]
 
 type vTEPInformer struct {
 	factory          internalinterfaces.SharedInformerFactory
@@ -35,25 +63,49 @@ type vTEPInformer struct {
 // NewVTEPInformer constructs a new informer for VTEP type.
 // Always prefer using an informer factory to get a shared informer instead of getting an independent
 // one. This reduces memory footprint and number of connections to the server.
+// If you really need an independent one, prefer using the type-safe variant (see [NewTypedVTEPInformer]).
 func NewVTEPInformer(client versioned.Interface, resyncPeriod time.Duration, indexers cache.Indexers) cache.SharedIndexInformer {
 	return NewVTEPInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: indexers})
+}
+
+// NewTypedVTEPInformer constructs a new informer for VTEP type.
+// Always prefer using an informer factory to get a shared informer instead of getting an independent
+// one. This reduces memory footprint and number of connections to the server.
+func NewTypedVTEPInformer(client versioned.Interface, resyncPeriod time.Duration, indexers VTEPIndexers) VTEPIndexInformer {
+	return NewTypedVTEPInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: cache.TypedIndexersToIndexers(indexers)})
 }
 
 // NewFilteredVTEPInformer constructs a new informer for VTEP type.
 // Always prefer using an informer factory to get a shared informer instead of getting an independent
 // one. This reduces memory footprint and number of connections to the server.
+// If you really need an independent one, prefer using the type-safe variant (see [NewTypedFilteredVTEPInformer]).
 func NewFilteredVTEPInformer(client versioned.Interface, resyncPeriod time.Duration, indexers cache.Indexers, tweakListOptions internalinterfaces.TweakListOptionsFunc) cache.SharedIndexInformer {
-	return NewVTEPInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: indexers, TweakListOptions: tweakListOptions})
+	return NewTypedVTEPInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: indexers, TweakListOptions: tweakListOptions})
+}
+
+// NewTypedFilteredVTEPInformer constructs a new informer for VTEP type.
+// Always prefer using an informer factory to get a shared informer instead of getting an independent
+// one. This reduces memory footprint and number of connections to the server.
+func NewTypedFilteredVTEPInformer(client versioned.Interface, resyncPeriod time.Duration, indexers VTEPIndexers, tweakListOptions internalinterfaces.TweakListOptionsFunc) VTEPIndexInformer {
+	return NewTypedVTEPInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: cache.TypedIndexersToIndexers(indexers), TweakListOptions: tweakListOptions})
 }
 
 // NewVTEPInformerWithOptions constructs a new informer for VTEP type with additional options.
 // Always prefer using an informer factory to get a shared informer instead of getting an independent
 // one. This reduces memory footprint and number of connections to the server.
+// If you really need an independent one, prefer using the type-safe variant (see [NewTypedVTEPInformerWithOptions]).
 func NewVTEPInformerWithOptions(client versioned.Interface, options internalinterfaces.InformerOptions) cache.SharedIndexInformer {
+	return NewTypedVTEPInformerWithOptions(client, options)
+}
+
+// NewTypedVTEPInformerWithOptions constructs a new informer for VTEP type with additional options.
+// Always prefer using an informer factory to get a shared informer instead of getting an independent
+// one. This reduces memory footprint and number of connections to the server.
+func NewTypedVTEPInformerWithOptions(client versioned.Interface, options internalinterfaces.InformerOptions) VTEPIndexInformer {
 	gvr := schema.GroupVersionResource{Group: "k8s.ovn.org", Version: "v1", Resource: "vteps"}
 	identifier := options.InformerName.WithResource(gvr)
 	tweakListOptions := options.TweakListOptions
-	return cache.NewSharedIndexInformerWithOptions(
+	return cache.NewTypedSharedIndexInformer[*crdvtepv1.VTEP](cache.NewSharedIndexInformerWithOptions(
 		cache.ToListWatcherWithWatchListSemantics(&cache.ListWatch{
 			ListFunc: func(opts metav1.ListOptions) (runtime.Object, error) {
 				if tweakListOptions != nil {
@@ -86,17 +138,57 @@ func NewVTEPInformerWithOptions(client versioned.Interface, options internalinte
 			Indexers:     options.Indexers,
 			Identifier:   identifier,
 		},
-	)
+	))
 }
 
 func (f *vTEPInformer) defaultInformer(client versioned.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
-	return NewVTEPInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}, InformerName: f.factory.InformerName(), TweakListOptions: f.tweakListOptions})
+	return NewTypedVTEPInformerWithOptions(client, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}, InformerName: f.factory.InformerName(), TweakListOptions: f.tweakListOptions})
 }
 
 func (f *vTEPInformer) Informer() cache.SharedIndexInformer {
-	return f.factory.InformerFor(&crdvtepv1.VTEP{}, f.defaultInformer)
+	return f.TypedInformer()
+}
+
+func (f *vTEPInformer) TypedInformer() VTEPIndexInformer {
+	return cache.NewTypedSharedIndexInformer[*crdvtepv1.VTEP](f.factory.InformerFor(&crdvtepv1.VTEP{}, f.defaultInformer))
 }
 
 func (f *vTEPInformer) Lister() vtepv1.VTEPLister {
 	return vtepv1.NewVTEPLister(f.Informer().GetIndexer())
+}
+
+// ToTypedVTEPInformer converts an untyped informer into a TypedVTEPInformer.
+//
+// WARNING: this conversion is only safe if the informer handles objects of type
+// *VTEP. If that is not the case, calling type-safe methods of the returned
+// TypedVTEPInformer leads to runtime panics. A safer alternative is to pass
+// around a TypedVTEPInformer instances that was obtained from a
+// SharedInformerFactory.
+func ToTypedVTEPInformer(informer VTEPInformer) TypedVTEPInformer {
+	if informer, ok := informer.(TypedVTEPInformer); ok {
+		return informer
+	}
+	return &vTEPTypedInformerAdapter{informer}
+}
+
+type vTEPTypedInformerAdapter struct {
+	VTEPInformer
+}
+
+func (a *vTEPTypedInformerAdapter) TypedInformer() VTEPIndexInformer {
+	return cache.NewTypedSharedIndexInformer[*crdvtepv1.VTEP](a.Informer())
+}
+
+// ToVTEPIndexInformer converts an untyped informer into a VTEPIndexInformer.
+//
+// WARNING: this conversion is only safe if the informer handles objects of type
+// *VTEP. If that is not the case, calling type-safe methods of the returned
+// VTEPIndexInformer leads to runtime panics. A safer alternative is to pass
+// around a VTEPIndexInformer instances that was obtained from a
+// SharedInformerFactory.
+func ToVTEPIndexInformer(informer cache.SharedIndexInformer) VTEPIndexInformer {
+	if informer, ok := informer.(VTEPIndexInformer); ok {
+		return informer
+	}
+	return cache.NewTypedSharedIndexInformer[*crdvtepv1.VTEP](informer)
 }

@@ -12,7 +12,7 @@ import (
 // Interface provides access to all the informers in this group version.
 type Interface interface {
 	// NetworkQoSes returns a NetworkQoSInformer.
-	NetworkQoSes() NetworkQoSInformer
+	NetworkQoSes() TypedNetworkQoSInformer
 }
 
 type version struct {
@@ -26,7 +26,7 @@ func New(f internalinterfaces.SharedInformerFactory, namespace string, tweakList
 	return &version{factory: f, namespace: namespace, tweakListOptions: tweakListOptions}
 }
 
-// NetworkQoSes returns a NetworkQoSInformer.
-func (v *version) NetworkQoSes() NetworkQoSInformer {
+// NetworkQoSes returns a TypedNetworkQoSInformer.
+func (v *version) NetworkQoSes() TypedNetworkQoSInformer {
 	return &networkQoSInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
 }

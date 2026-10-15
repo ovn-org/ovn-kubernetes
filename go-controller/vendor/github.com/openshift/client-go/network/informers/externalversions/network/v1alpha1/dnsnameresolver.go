@@ -12,16 +12,45 @@ import (
 	networkv1alpha1 "github.com/openshift/client-go/network/listers/network/v1alpha1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
+	schema "k8s.io/apimachinery/pkg/runtime/schema"
 	watch "k8s.io/apimachinery/pkg/watch"
 	cache "k8s.io/client-go/tools/cache"
 )
 
 // DNSNameResolverInformer provides access to a shared informer and lister for
-// DNSNameResolvers.
+// DNSNameResolvers. Prefer using the type-safe variant (see [TypedDNSNameResolverInformer]).
 type DNSNameResolverInformer interface {
 	Informer() cache.SharedIndexInformer
 	Lister() networkv1alpha1.DNSNameResolverLister
 }
+
+// TypedDNSNameResolverInformer provides access to a shared informer and lister for
+// DNSNameResolvers, including the type-safe TypedInformer variant.
+// It is a superset of DNSNameResolverInformer.
+type TypedDNSNameResolverInformer interface {
+	Informer() cache.SharedIndexInformer
+	TypedInformer() DNSNameResolverIndexInformer
+	Lister() networkv1alpha1.DNSNameResolverLister
+}
+
+// DNSNameResolverIndexInformer is a wrapper around the underlying [cache.SharedIndexInformer]
+// with type-safe variants of several methods.
+type DNSNameResolverIndexInformer cache.TypedSharedIndexInformer[*apinetworkv1alpha1.DNSNameResolver]
+
+// DNSNameResolverHandlerFuncs is a specialization of [cache.TypedResourceEventHandlerFuncs] for DNSNameResolver.
+type DNSNameResolverHandlerFuncs = cache.TypedResourceEventHandlerFuncs[*apinetworkv1alpha1.DNSNameResolver]
+
+// DNSNameResolverDetailedHandlerFuncs is a specialization of [cache.TypedResourceEventHandlerDetailedFuncs] for DNSNameResolver.
+type DNSNameResolverDetailedHandlerFuncs = cache.TypedResourceEventHandlerDetailedFuncs[*apinetworkv1alpha1.DNSNameResolver]
+
+// DNSNameResolverFilteringHandler is a specialization of [cache.TypedFilteringResourceEventHandler] for DNSNameResolver.
+type DNSNameResolverFilteringHandler = cache.TypedFilteringResourceEventHandler[*apinetworkv1alpha1.DNSNameResolver]
+
+// DNSNameResolverIndexers is a specialization of [cache.TypedIndexers] for DNSNameResolver.
+type DNSNameResolverIndexers = cache.TypedIndexers[*apinetworkv1alpha1.DNSNameResolver]
+
+// DeletedDNSNameResolver is a specialization of [cache.DeletedObject] for DNSNameResolver.
+type DeletedDNSNameResolver = cache.DeletedObject[*apinetworkv1alpha1.DNSNameResolver]
 
 type dNSNameResolverInformer struct {
 	factory          internalinterfaces.SharedInformerFactory
@@ -32,55 +61,132 @@ type dNSNameResolverInformer struct {
 // NewDNSNameResolverInformer constructs a new informer for DNSNameResolver type.
 // Always prefer using an informer factory to get a shared informer instead of getting an independent
 // one. This reduces memory footprint and number of connections to the server.
+// If you really need an independent one, prefer using the type-safe variant (see [NewTypedDNSNameResolverInformer]).
 func NewDNSNameResolverInformer(client versioned.Interface, namespace string, resyncPeriod time.Duration, indexers cache.Indexers) cache.SharedIndexInformer {
-	return NewFilteredDNSNameResolverInformer(client, namespace, resyncPeriod, indexers, nil)
+	return NewDNSNameResolverInformerWithOptions(client, namespace, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: indexers})
+}
+
+// NewTypedDNSNameResolverInformer constructs a new informer for DNSNameResolver type.
+// Always prefer using an informer factory to get a shared informer instead of getting an independent
+// one. This reduces memory footprint and number of connections to the server.
+func NewTypedDNSNameResolverInformer(client versioned.Interface, namespace string, resyncPeriod time.Duration, indexers DNSNameResolverIndexers) DNSNameResolverIndexInformer {
+	return NewTypedDNSNameResolverInformerWithOptions(client, namespace, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: cache.TypedIndexersToIndexers(indexers)})
 }
 
 // NewFilteredDNSNameResolverInformer constructs a new informer for DNSNameResolver type.
 // Always prefer using an informer factory to get a shared informer instead of getting an independent
 // one. This reduces memory footprint and number of connections to the server.
+// If you really need an independent one, prefer using the type-safe variant (see [NewTypedFilteredDNSNameResolverInformer]).
 func NewFilteredDNSNameResolverInformer(client versioned.Interface, namespace string, resyncPeriod time.Duration, indexers cache.Indexers, tweakListOptions internalinterfaces.TweakListOptionsFunc) cache.SharedIndexInformer {
-	return cache.NewSharedIndexInformer(
+	return NewTypedDNSNameResolverInformerWithOptions(client, namespace, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: indexers, TweakListOptions: tweakListOptions})
+}
+
+// NewTypedFilteredDNSNameResolverInformer constructs a new informer for DNSNameResolver type.
+// Always prefer using an informer factory to get a shared informer instead of getting an independent
+// one. This reduces memory footprint and number of connections to the server.
+func NewTypedFilteredDNSNameResolverInformer(client versioned.Interface, namespace string, resyncPeriod time.Duration, indexers DNSNameResolverIndexers, tweakListOptions internalinterfaces.TweakListOptionsFunc) DNSNameResolverIndexInformer {
+	return NewTypedDNSNameResolverInformerWithOptions(client, namespace, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: cache.TypedIndexersToIndexers(indexers), TweakListOptions: tweakListOptions})
+}
+
+// NewDNSNameResolverInformerWithOptions constructs a new informer for DNSNameResolver type with additional options.
+// Always prefer using an informer factory to get a shared informer instead of getting an independent
+// one. This reduces memory footprint and number of connections to the server.
+// If you really need an independent one, prefer using the type-safe variant (see [NewTypedDNSNameResolverInformerWithOptions]).
+func NewDNSNameResolverInformerWithOptions(client versioned.Interface, namespace string, options internalinterfaces.InformerOptions) cache.SharedIndexInformer {
+	return NewTypedDNSNameResolverInformerWithOptions(client, namespace, options)
+}
+
+// NewTypedDNSNameResolverInformerWithOptions constructs a new informer for DNSNameResolver type with additional options.
+// Always prefer using an informer factory to get a shared informer instead of getting an independent
+// one. This reduces memory footprint and number of connections to the server.
+func NewTypedDNSNameResolverInformerWithOptions(client versioned.Interface, namespace string, options internalinterfaces.InformerOptions) DNSNameResolverIndexInformer {
+	gvr := schema.GroupVersionResource{Group: "network.openshift.io", Version: "v1alpha1", Resource: "dnsnameresolvers"}
+	identifier := options.InformerName.WithResource(gvr)
+	tweakListOptions := options.TweakListOptions
+	return cache.NewTypedSharedIndexInformer[*apinetworkv1alpha1.DNSNameResolver](cache.NewSharedIndexInformerWithOptions(
 		cache.ToListWatcherWithWatchListSemantics(&cache.ListWatch{
-			ListFunc: func(options v1.ListOptions) (runtime.Object, error) {
+			ListFunc: func(opts v1.ListOptions) (runtime.Object, error) {
 				if tweakListOptions != nil {
-					tweakListOptions(&options)
+					tweakListOptions(&opts)
 				}
-				return client.NetworkV1alpha1().DNSNameResolvers(namespace).List(context.Background(), options)
+				return client.NetworkV1alpha1().DNSNameResolvers(namespace).List(context.Background(), opts)
 			},
-			WatchFunc: func(options v1.ListOptions) (watch.Interface, error) {
+			WatchFunc: func(opts v1.ListOptions) (watch.Interface, error) {
 				if tweakListOptions != nil {
-					tweakListOptions(&options)
+					tweakListOptions(&opts)
 				}
-				return client.NetworkV1alpha1().DNSNameResolvers(namespace).Watch(context.Background(), options)
+				return client.NetworkV1alpha1().DNSNameResolvers(namespace).Watch(context.Background(), opts)
 			},
-			ListWithContextFunc: func(ctx context.Context, options v1.ListOptions) (runtime.Object, error) {
+			ListWithContextFunc: func(ctx context.Context, opts v1.ListOptions) (runtime.Object, error) {
 				if tweakListOptions != nil {
-					tweakListOptions(&options)
+					tweakListOptions(&opts)
 				}
-				return client.NetworkV1alpha1().DNSNameResolvers(namespace).List(ctx, options)
+				return client.NetworkV1alpha1().DNSNameResolvers(namespace).List(ctx, opts)
 			},
-			WatchFuncWithContext: func(ctx context.Context, options v1.ListOptions) (watch.Interface, error) {
+			WatchFuncWithContext: func(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
 				if tweakListOptions != nil {
-					tweakListOptions(&options)
+					tweakListOptions(&opts)
 				}
-				return client.NetworkV1alpha1().DNSNameResolvers(namespace).Watch(ctx, options)
+				return client.NetworkV1alpha1().DNSNameResolvers(namespace).Watch(ctx, opts)
 			},
 		}, client),
 		&apinetworkv1alpha1.DNSNameResolver{},
-		resyncPeriod,
-		indexers,
-	)
+		cache.SharedIndexInformerOptions{
+			ResyncPeriod: options.ResyncPeriod,
+			Indexers:     options.Indexers,
+			Identifier:   identifier,
+		},
+	))
 }
 
 func (f *dNSNameResolverInformer) defaultInformer(client versioned.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
-	return NewFilteredDNSNameResolverInformer(client, f.namespace, resyncPeriod, cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}, f.tweakListOptions)
+	return NewTypedDNSNameResolverInformerWithOptions(client, f.namespace, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}, InformerName: f.factory.InformerName(), TweakListOptions: f.tweakListOptions})
 }
 
 func (f *dNSNameResolverInformer) Informer() cache.SharedIndexInformer {
-	return f.factory.InformerFor(&apinetworkv1alpha1.DNSNameResolver{}, f.defaultInformer)
+	return f.TypedInformer()
+}
+
+func (f *dNSNameResolverInformer) TypedInformer() DNSNameResolverIndexInformer {
+	return cache.NewTypedSharedIndexInformer[*apinetworkv1alpha1.DNSNameResolver](f.factory.InformerFor(&apinetworkv1alpha1.DNSNameResolver{}, f.defaultInformer))
 }
 
 func (f *dNSNameResolverInformer) Lister() networkv1alpha1.DNSNameResolverLister {
 	return networkv1alpha1.NewDNSNameResolverLister(f.Informer().GetIndexer())
+}
+
+// ToTypedDNSNameResolverInformer converts an untyped informer into a TypedDNSNameResolverInformer.
+//
+// WARNING: this conversion is only safe if the informer handles objects of type
+// *DNSNameResolver. If that is not the case, calling type-safe methods of the returned
+// TypedDNSNameResolverInformer leads to runtime panics. A safer alternative is to pass
+// around a TypedDNSNameResolverInformer instances that was obtained from a
+// SharedInformerFactory.
+func ToTypedDNSNameResolverInformer(informer DNSNameResolverInformer) TypedDNSNameResolverInformer {
+	if informer, ok := informer.(TypedDNSNameResolverInformer); ok {
+		return informer
+	}
+	return &dNSNameResolverTypedInformerAdapter{informer}
+}
+
+type dNSNameResolverTypedInformerAdapter struct {
+	DNSNameResolverInformer
+}
+
+func (a *dNSNameResolverTypedInformerAdapter) TypedInformer() DNSNameResolverIndexInformer {
+	return cache.NewTypedSharedIndexInformer[*apinetworkv1alpha1.DNSNameResolver](a.Informer())
+}
+
+// ToDNSNameResolverIndexInformer converts an untyped informer into a DNSNameResolverIndexInformer.
+//
+// WARNING: this conversion is only safe if the informer handles objects of type
+// *DNSNameResolver. If that is not the case, calling type-safe methods of the returned
+// DNSNameResolverIndexInformer leads to runtime panics. A safer alternative is to pass
+// around a DNSNameResolverIndexInformer instances that was obtained from a
+// SharedInformerFactory.
+func ToDNSNameResolverIndexInformer(informer cache.SharedIndexInformer) DNSNameResolverIndexInformer {
+	if informer, ok := informer.(DNSNameResolverIndexInformer); ok {
+		return informer
+	}
+	return cache.NewTypedSharedIndexInformer[*apinetworkv1alpha1.DNSNameResolver](informer)
 }
