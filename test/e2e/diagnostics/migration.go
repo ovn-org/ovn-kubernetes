@@ -77,7 +77,12 @@ while [ ! -e stop ]; do
       conntrack -L -f "$family" -p tcp --dport "$port" -o extended || true
     done
   done
-  timeout 2 ovs-appctl dpctl/dump-conntrack | grep -E 'sport=(5201|%[2]d)(,|\))|dport=(5201|%[2]d)(,|\))' || true
+  # Use the socket directly: ovs-appctl's default PID lookup can remove
+  # the host PID file because that PID is not visible in this container.
+  for ovs_socket in /run/openvswitch/ovs-vswitchd.*.ctl; do
+    [ -S "$ovs_socket" ] || continue
+    timeout 2 ovs-appctl -t "$ovs_socket" dpctl/dump-conntrack
+  done | grep -E 'sport=(5201|%[2]d)(,|\))|dport=(5201|%[2]d)(,|\))' || true
   ip -6 route show table all
   ip -6 neigh show
   if [ "$((iteration %% 5))" = 0 ]; then
