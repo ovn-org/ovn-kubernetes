@@ -1,0 +1,529 @@
+openapi: 3.1.0
+info:
+  title: OVN-Kubernetes External IPAM Plugin API
+  version: "1.0.0"
+  description: |
+    Normative HTTP contract between OVN-Kubernetes and an external IPAM
+    plugin for `ipam.mode: External` primary Layer2 UDNs/CUDNs
+    (OKEP-6831). OVN-Kubernetes is the client; the plugin is the server.
+    Any backend that satisfies this schema is a conforming plugin — the
+    first-party Atlas IPAM, or an enterprise DDI adapter (Infoblox,
+    BlueCat, Kea, NetBox).
+
+    The contract is owned by OVN-Kubernetes as the definer of the API.
+    This document is the single source of truth for paths, methods,
+    status codes, and payload schemas; the OKEP prose describes behaviour
+    and rationale and defers wire details here.
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+
+servers:
+  - url: "{baseUrl}/v1"
+    description: |
+      Versioned base URL. The major version is carried in the path
+      prefix; a new major version is minted only for a breaking change.
+      Backward-compatible additions (new optional fields) are made in
+      place within the same major version.
+    variables:
+      baseUrl:
+        default: https://external-ipam.example.net:9500
+
+security:
+  - mutualTLS: []
+  - bearerAuth: []
+
+tags:
+  - name: networks
+    description: Network pool lifecycle (register / deregister).
+  - name: allocations
+    description: IP allocation lifecycle (allocate / read / list / release).
+  - name: health
+    description: Readiness, version, and pool statistics.
+
+paths:
+  /networks/{network}:
+    parameters:
+      - $ref: '#/components/parameters/NetworkPath'
+    put:
+      tags: [networks]
+      operationId: registerNetwork
+      summary: Register (or confirm) a network pool
+      description: |
+        Idempotent. Registering an already-registered network with the
+        same subnets returns `204`. Registering with different subnets
+        returns `409` — subnet changes require deregister + re-register.
+        Called by cluster-manager when a network with `ipam.mode:
+        External` is created.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '204':
+          description: Registered, or already registered with identical subnets.
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+    delete:
+      tags: [networks]
+      operationId: deregisterNetwork
+      summary: Deregister a network pool for a cluster
+      description: |
+        Drops the network pool for the given cluster. Idempotent —
+        deregistering an already-deregistered or never-registered network
+        returns `204`. Rejects with `409` if allocations still exist for
+        `(network, cluster)`; the caller retries teardown until its own
+        per-allocation releases have drained the pool.
+      parameters:
+        - $ref: '#/components/parameters/ClusterQuery'
+      responses:
+        '204':
+          description: Deregistered (or nothing to do).
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+
+  /networks/{network}/allocations:
+    parameters:
+      - $ref: '#/components/parameters/NetworkPath'
+    post:
+      tags: [allocations]
+      operationId: allocate
+      summary: Allocate an IP (or re-acquire an existing one)
+      description: |
+        Creates an allocation for a workload. Idempotent on
+        `(network, cluster, workload_id)`: a repeat request for the same
+        workload returns the existing allocation with `200` instead of
+        allocating a second IP. When `requested_ips` is set the plugin
+        allocates exactly those IPs; otherwise it allocates the
+        next-available IP(s) per configured address family.
+
+        Owner-based concurrent references support cross-cluster live VM
+        migration: when a request carries an `owner` that already holds
+        the IP, the plugin adds a reference for the requesting cluster
+        rather than rejecting it (both clusters co-hold the allocation
+        during the migration window). An allocation is capped at two
+        references; a third is rejected with `409`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AllocateRequest'
+      responses:
+        '201':
+          description: A new allocation was created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Allocation' }
+        '200':
+          description: |
+            An allocation already existed for this
+            `(network, cluster, workload_id)` or `owner`; the existing
+            allocation is returned (idempotent / co-held).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Allocation' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: |
+            Terminal conflict the caller cannot resolve: the requested IP is
+            held by a different owner, a `requested_ips` value is excluded
+            (`exclude_ips`/`exclude_subnets`) or outside the pool's
+            `subnets`, or the two-reference cap would be exceeded. (Pool
+            exhaustion is a retriable `503`, not a `409`.)
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503':
+          description: |
+            Retriable. Either the plugin is not ready (DB syncing, no
+            quorum) or the pool is currently **exhausted** — no free IP,
+            which may change as other workloads release. Carries
+            `Retry-After`.
+          headers:
+            Retry-After:
+              description: Seconds to wait, or an HTTP-date, before retrying.
+              schema: { type: string }
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+    get:
+      tags: [allocations]
+      operationId: listAllocations
+      summary: List a cluster's allocations for a network (paginated)
+      description: |
+        Read-only, paginated listing scoped to the calling cluster. Used
+        by cluster-manager's restart reconcile to find allocations
+        orphaned by pods deleted while it was down. The response MUST NOT
+        include references held by any other cluster, so a reconcile
+        driven off this listing can never release another cluster's
+        allocation.
+      parameters:
+        - $ref: '#/components/parameters/ClusterQuery'
+        - $ref: '#/components/parameters/LimitQuery'
+        - $ref: '#/components/parameters/ContinueQuery'
+      responses:
+        '200':
+          description: A (possibly empty) page of allocations.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AllocationList' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+    delete:
+      tags: [allocations]
+      operationId: releaseAllocation
+      summary: Release a workload's reference (by natural key)
+      description: |
+        Reference-scoped: removes the `(cluster, workload_id)` reference and
+        frees the IP(s) it held once their last reference is gone. Addressed
+        by natural key (query parameters) rather than a server-assigned id,
+        so the caller — which already knows `network`, `cluster`, and
+        `workload_id` — needs to persist nothing extra to release. Idempotent:
+        releasing an already-removed (or never-created) reference is a
+        successful no-op (`204`). Release MUST NOT be best-effort; the caller
+        retries transient failures until success.
+      parameters:
+        - $ref: '#/components/parameters/ClusterQuery'
+        - $ref: '#/components/parameters/WorkloadIdQuery'
+      responses:
+        '204':
+          description: Reference removed (or already absent — no-op).
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+
+  /status:
+    get:
+      tags: [health]
+      operationId: getStatus
+      summary: Readiness, version, capabilities, and per-pool statistics
+      description: |
+        Health/metrics endpoint. Returns `200` even when `ready` is
+        `false` (readiness is conveyed by the field). Reports only
+        server-wide state and per-pool aggregates; it does not enumerate
+        individual allocations — that is the job of
+        `GET /networks/{network}/allocations`.
+      responses:
+        '200':
+          description: Server status.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Status' }
+
+components:
+  securitySchemes:
+    mutualTLS:
+      type: mutualTLS
+      description: |
+        End-to-end mutual TLS. The plugin verifies each calling cluster's
+        client certificate (CUDN `externalIPAM.clientCertSecretRef`); the
+        client verifies the plugin via `externalIPAM.caBundle`.
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: |
+        Bearer token presented by the calling cluster
+        (CUDN `externalIPAM.tokenSecretRef`), as an alternative to mTLS.
+        Survives TLS termination at a fronting gateway.
+
+  parameters:
+    NetworkPath:
+      name: network
+      in: path
+      required: true
+      description: Network name from the UDN/CUDN `.spec.network` (RFC 1123).
+      schema:
+        type: string
+        pattern: '^[a-z0-9]([-a-z0-9]*[a-z0-9])?$'
+    ClusterQuery:
+      name: cluster
+      in: query
+      required: true
+      description: Identity of the calling cluster.
+      schema: { type: string }
+    WorkloadIdQuery:
+      name: workload_id
+      in: query
+      required: true
+      description: |
+        Opaque workload identifier (e.g. `namespace/pod`). With `cluster`
+        and the path `network`, forms the natural key of the reference to
+        release — no server-assigned id is needed.
+      schema: { type: string }
+    LimitQuery:
+      name: limit
+      in: query
+      required: false
+      description: Maximum number of allocations to return in one page.
+      schema: { type: integer, minimum: 1 }
+    ContinueQuery:
+      name: continue
+      in: query
+      required: false
+      description: |
+        Opaque pagination token from a previous page's response.
+        Omitted (or empty) requests the first page.
+      schema: { type: string }
+
+  schemas:
+    Cidr:
+      type: string
+      description: IP address with prefix length, e.g. "10.50.0.5/16" or "fd50::5/64".
+      examples: ["10.50.0.5/16", "fd50::5/64"]
+    IP:
+      type: string
+      description: Bare IP address, e.g. "10.50.0.1" or "fd50::1".
+      examples: ["10.50.0.1", "fd50::1"]
+
+    RegisterRequest:
+      type: object
+      required: [subnets, cluster]
+      properties:
+        subnets:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/Cidr' }
+          description: CIDR ranges for the pool, one per address family.
+        cluster:
+          type: string
+          description: Identity of the calling cluster.
+        exclude_ips:
+          type: array
+          items: { $ref: '#/components/schemas/IP' }
+          description: |
+            Individual IPs that must **never** be allocated — not
+            dynamically, and not via a static `requested_ips` (hard
+            exclusion). OVN-Kubernetes populates this from the CUDN
+            Layer2 `defaultGatewayIPs`. Must fall within `subnets`.
+        exclude_subnets:
+          type: array
+          items: { $ref: '#/components/schemas/Cidr' }
+          description: |
+            Sub-ranges within the pool that must **never** be allocated —
+            hard exclusion, same semantics as `exclude_ips`. OVN-Kubernetes
+            populates this from the CUDN Layer2 `infrastructureSubnets`
+            ("cannot be assigned to workloads"). Must be subsets of
+            `subnets`. Declared once here, not per allocate.
+
+    AllocateRequest:
+      type: object
+      required: [cluster, workload_id]
+      properties:
+        cluster:
+          type: string
+          description: |
+            Identity of the calling cluster. With `workload_id`, forms the
+            idempotency key `(network, cluster, workload_id)`.
+        workload_id:
+          type: string
+          description: |
+            Opaque identifier unique within the cluster. The plugin does
+            not parse it. Kubernetes uses `namespace/pod`; other platforms
+            construct it from their native identifiers.
+          examples: ["tenant-a/my-pod-abc123"]
+        owner:
+          type: string
+          description: |
+            Stable identity of the logical entity that owns IPs across
+            workload lifecycles and cluster boundaries (from the pod's
+            `ipam-claim-reference`). Enables owner-based concurrent
+            references for cross-cluster live VM migration. An owner may
+            hold multiple allocations (dual-stack, multiple attachments).
+          examples: ["vm/tenant-a/my-vm"]
+        requested_ips:
+          type: array
+          items: { $ref: '#/components/schemas/Cidr' }
+          description: |
+            When present, the plugin allocates exactly these IPs (static
+            request). When absent, it allocates the next-available IP(s).
+        metadata:
+          type: object
+          additionalProperties: { type: string }
+          description: |
+            Opaque caller context (node, zone, rack). The plugin MAY log
+            or store it but MUST NOT use it for allocation decisions.
+
+    Reference:
+      type: object
+      required: [workload_id, cluster]
+      properties:
+        workload_id: { type: string }
+        cluster: { type: string }
+        allocated_at:
+          type: string
+          format: date-time
+      description: One holder of an allocation. At most two per allocation.
+
+    Allocation:
+      type: object
+      required: [workload_id, ips]
+      properties:
+        workload_id:
+          type: string
+          description: |
+            The calling cluster's workload that holds this allocation; the
+            natural key (with `network`, `cluster`) used to release it.
+        network: { type: string }
+        ips:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/Cidr' }
+          description: |
+            The allocated address(es). A dual-stack network yields one
+            IPv4 and one IPv6 address.
+        owner:
+          type: string
+          description: Empty for a plain pod allocation.
+        references:
+          type: array
+          items: { $ref: '#/components/schemas/Reference' }
+          maxItems: 2
+
+    AllocationList:
+      type: object
+      required: [references, continue]
+      properties:
+        references:
+          type: array
+          items: { $ref: '#/components/schemas/Allocation' }
+          description: The calling cluster's allocations for the network.
+        continue:
+          type: string
+          description: |
+            Opaque token for the next page; empty once the last page has
+            been returned.
+
+    PoolUsageByFamily:
+      type: object
+      properties:
+        allocated:
+          type: integer
+          description: Allocated address count (always reported).
+        available:
+          type: integer
+          description: |
+            Free address count. Omitted for a family whose free count
+            exceeds what an integer usefully represents (e.g. a /64).
+
+    Pool:
+      type: object
+      properties:
+        subnets:
+          type: array
+          items: { $ref: '#/components/schemas/Cidr' }
+          description: One CIDR per address family.
+        usage:
+          type: object
+          description: Per-address-family usage counts.
+          properties:
+            IPv4: { $ref: '#/components/schemas/PoolUsageByFamily' }
+            IPv6: { $ref: '#/components/schemas/PoolUsageByFamily' }
+
+    Status:
+      type: object
+      required: [ready, api_version, supported_api_versions]
+      properties:
+        ready:
+          type: boolean
+          description: Whether the plugin is ready to serve allocations.
+        api_version:
+          type: string
+          description: Major version currently served.
+          examples: ["v1"]
+        supported_api_versions:
+          type: array
+          items: { type: string }
+          description: |
+            All major versions the server can serve concurrently (for a
+            v1→v2 transition window).
+          examples: [["v1"]]
+        capabilities:
+          type: array
+          items: { type: string }
+          description: |
+            Optional features the server implements. Clients gate optional
+            behaviour on these.
+          examples: [["owner-references", "requested-ips"]]
+        pools:
+          type: object
+          additionalProperties: { $ref: '#/components/schemas/Pool' }
+          description: Per-network pool aggregates, keyed by network name.
+
+    Problem:
+      type: object
+      description: RFC 9457 Problem Details for HTTP APIs.
+      required: [type, title, status]
+      properties:
+        type:
+          type: string
+          format: uri-reference
+          default: about:blank
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance:
+          type: string
+          format: uri-reference
+
+  responses:
+    BadRequest:
+      description: |
+        Malformed or invalid request (bad CIDR, missing required field).
+        Terminal — do not retry.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    NotFound:
+      description: Unknown endpoint, network, or allocation. Terminal.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    Conflict:
+      description: |
+        State conflict; endpoint-specific (e.g. subnet mismatch on
+        register, non-empty pool on deregister). Terminal.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    TooManyRequests:
+      description: Server-side rate limiting. Retriable per `Retry-After`.
+      headers:
+        Retry-After:
+          description: Seconds to wait, or an HTTP-date, before retrying.
+          schema: { type: string }
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    InternalError:
+      description: Unexpected plugin failure. Retriable with bounded backoff.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    Unavailable:
+      description: |
+        Plugin reachable but not ready (DB syncing, no quorum). Retriable
+        per `Retry-After`.
+      headers:
+        Retry-After:
+          description: Seconds to wait, or an HTTP-date, before retrying.
+          schema: { type: string }
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
