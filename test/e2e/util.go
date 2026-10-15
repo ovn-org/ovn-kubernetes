@@ -1121,6 +1121,35 @@ func wrappedTestFramework(basename string) *framework.Framework {
 	return f
 }
 
+// createLongLivedTestingNamespace creates a namespace through the framework's
+// namespace hook instead of the API directly, so that deployment specific setup
+// is applied to it. On OpenShift, for instance, that hook is what binds the
+// privileged SCCs that host networked and privileged pods need; a namespace
+// created straight through the API gets none of them and such pods are rejected.
+//
+// Unlike Framework.CreateNamespace it does not register the namespace for the
+// framework's per spec cleanup, so the caller stays responsible for deleting it.
+// Use it for namespaces set up in BeforeAll that have to outlive a single spec.
+func createLongLivedTestingNamespace(ctx context.Context, f *framework.Framework, baseName string, labels map[string]string) (*corev1.Namespace, error) {
+	createTestingNS := framework.TestContext.CreateTestingNS
+	if createTestingNS == nil {
+		createTestingNS = framework.CreateTestingNS
+	}
+	level := f.NamespacePodSecurityLevel
+	if level == "" {
+		level = admissionapi.LevelRestricted
+	}
+	nsLabels := map[string]string{
+		admissionapi.EnforceLevelLabel: string(level),
+		admissionapi.WarnLevelLabel:    string(level),
+		admissionapi.AuditLevelLabel:   string(level),
+	}
+	for k, v := range labels {
+		nsLabels[k] = v
+	}
+	return createTestingNS(ctx, baseName, f.ClientSet, nsLabels)
+}
+
 func newPrivelegedTestFramework(basename string) *framework.Framework {
 	f := framework.NewDefaultFramework(basename)
 	f.NamespacePodSecurityLevel = admissionapi.LevelPrivileged
@@ -1373,13 +1402,51 @@ func routeToNode(nodeName string, ips []string, mtu int, add bool) error {
 	return nil
 }
 
-// GetNodeIPv6LinkLocalAddressForEth0 returns the IPv6 link-local address for eth0 interface
-func GetNodeIPv6LinkLocalAddressForEth0(nodeName string) (string, error) {
-	// Command to get IPv6 link-local address for eth0
-	ipCmd := []string{"ip", "-6", "addr", "show", "dev", "eth0", "scope", "link"}
+// defaultIPv6LinkLocalInterface is used when the interface carrying the
+// instance's IPv6 default route cannot be determined. It is correct for kind
+// nodes and for the external containers, whose primary interface is eth0.
+const defaultIPv6LinkLocalInterface = "eth0"
+
+// getIPv6DefaultRouteInterface returns the interface the instance routes IPv6
+// traffic out of. That is the interface BGP peers over, which is eth0 on kind
+// nodes but can be anything elsewhere, for instance an external bridge.
+func getIPv6DefaultRouteInterface(instanceName string) (string, error) {
+	output, err := infraprovider.Get().ExecK8NodeCommand(instanceName, []string{"ip", "-6", "route", "show", "default"})
+	if err != nil {
+		return "", fmt.Errorf("failed to get the IPv6 default route: %v", err)
+	}
+	// "default via fe80::1 dev br-ex proto ra metric 100 pref medium"
+	for _, line := range strings.Split(output, "\n") {
+		fields := strings.Fields(line)
+		for i, field := range fields {
+			if field == "dev" && i+1 < len(fields) {
+				return fields[i+1], nil
+			}
+		}
+	}
+	return "", fmt.Errorf("no IPv6 default route found on %s", instanceName)
+}
+
+// GetIPv6LinkLocalAddress returns the IPv6 link-local address of the interface
+// the given node or external container routes IPv6 traffic out of. BGP uses it
+// as the nexthop for the IPv6 routes that instance advertises.
+func GetIPv6LinkLocalAddress(instanceName string) (string, error) {
+	iface, err := getIPv6DefaultRouteInterface(instanceName)
+	if err != nil {
+		framework.Logf("Failed to determine the IPv6 default route interface of %s, falling back to %s: %v",
+			instanceName, defaultIPv6LinkLocalInterface, err)
+		iface = defaultIPv6LinkLocalInterface
+	}
+	return getIPv6LinkLocalAddressForInterface(instanceName, iface)
+}
+
+// getIPv6LinkLocalAddressForInterface returns the IPv6 link-local address
+// configured on iface of the given node or external container.
+func getIPv6LinkLocalAddressForInterface(nodeName, iface string) (string, error) {
+	ipCmd := []string{"ip", "-6", "addr", "show", "dev", iface, "scope", "link"}
 	output, err := infraprovider.Get().ExecK8NodeCommand(nodeName, ipCmd)
 	if err != nil {
-		return "", fmt.Errorf("failed to get link-local address for eth0: %v", err)
+		return "", fmt.Errorf("failed to get link-local address for %s: %v", iface, err)
 	}
 
 	// Parse the output to extract the fe80:: address
@@ -1408,7 +1475,7 @@ func GetNodeIPv6LinkLocalAddressForEth0(nodeName string) (string, error) {
 		}
 	}
 
-	return "", fmt.Errorf("no IPv6 link-local address found for eth0 on node %s", nodeName)
+	return "", fmt.Errorf("no IPv6 link-local address found for %s on node %s", iface, nodeName)
 }
 
 // CaptureContainerOutput captures output of a container according to the

@@ -157,7 +157,7 @@ var _ = ginkgo.Describe("BGP: When default podNetwork is advertised", feature.Ro
 				}
 				if isIPv6Supported(f.ClientSet) {
 					ipVer := " -6"
-					nodeIPv6LLA, err := GetNodeIPv6LinkLocalAddressForEth0(routerContainerName)
+					nodeIPv6LLA, err := GetIPv6LinkLocalAddress(routerContainerName)
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					bgpRouteCommand := strings.Split(fmt.Sprintf("ip%s route show %s", ipVer, externalServerV6CIDR), " ")
 					framework.Logf("Checking for server's route in node %s", node.Name)
@@ -276,7 +276,7 @@ var _ = ginkgo.Describe("BGP: When default podNetwork is advertised", feature.Ro
 				}
 				if isIPv6Supported(f.ClientSet) {
 					ipVer := " -6"
-					nodeIPv6LLA, err := GetNodeIPv6LinkLocalAddressForEth0(routerContainerName)
+					nodeIPv6LLA, err := GetIPv6LinkLocalAddress(routerContainerName)
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					bgpRouteCommand := strings.Split(fmt.Sprintf("ip%s route show %s", ipVer, externalServerV6CIDR), " ")
 					framework.Logf("Checking for server's route in node %s", node.Name)
@@ -739,7 +739,7 @@ func expectNodesNotAdvertisedInFRR(nodes []corev1.Node, activeNodeName, v4CIDR, 
 			routeCmd: []string{"ip", "-6", "route", "show", "root", v6CIDR},
 			nextHop: func(node corev1.Node) string {
 				// BGP uses the link-local address as the IPv6 nexthop
-				lla, err := GetNodeIPv6LinkLocalAddressForEth0(node.Name)
+				lla, err := GetIPv6LinkLocalAddress(node.Name)
 				if err != nil {
 					return ""
 				}
@@ -920,7 +920,7 @@ var _ = ginkgo.Describe("BGP: Pod to external server when CUDN network is advert
 			var frrIPv6LLA string
 			if isIPv6Supported(f.ClientSet) {
 				var err error
-				frrIPv6LLA, err = GetNodeIPv6LinkLocalAddressForEth0(routerContainerName)
+				frrIPv6LLA, err = GetIPv6LinkLocalAddress(routerContainerName)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			}
 			for _, node := range nodes.Items {
@@ -1467,28 +1467,20 @@ var _ = ginkgo.Describe("BGP: isolation", feature.RouteAdvertisements, func() {
 			ginkgo.BeforeAll(func(ctx ginkgo.SpecContext) {
 				ginkgo.By("Configuring primary UDN namespaces")
 				var err error
-				// Create namespaces directly via the API instead of f.CreateNamespace()
-				// to avoid framework cleaning them up in AfterEach
-				udnNamespaceA, err = f.ClientSet.CoreV1().Namespaces().Create(context.TODO(), &corev1.Namespace{
-					ObjectMeta: metav1.ObjectMeta{
-						GenerateName: f.BaseName + "-",
-						Labels: map[string]string{
-							"e2e-framework":           f.BaseName,
-							RequiredUDNNamespaceLabel: "",
-						},
-					},
-				}, metav1.CreateOptions{})
+				// Create the namespaces outside of f.CreateNamespace() so that the
+				// framework does not clean them up in AfterEach; they have to
+				// survive every spec in this ordered container and are deleted in
+				// AfterAll instead. They still go through the framework's namespace
+				// hook so that deployment specific setup is applied, which the host
+				// networked pods created below depend on.
+				nsLabels := map[string]string{
+					"e2e-framework":           f.BaseName,
+					RequiredUDNNamespaceLabel: "",
+				}
+				udnNamespaceA, err = createLongLivedTestingNamespace(ctx, f, f.BaseName, nsLabels)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				f.Namespace = udnNamespaceA
-				udnNamespaceB, err = f.ClientSet.CoreV1().Namespaces().Create(context.TODO(), &corev1.Namespace{
-					ObjectMeta: metav1.ObjectMeta{
-						GenerateName: f.BaseName + "-",
-						Labels: map[string]string{
-							"e2e-framework":           f.BaseName,
-							RequiredUDNNamespaceLabel: "",
-						},
-					},
-				}, metav1.CreateOptions{})
+				udnNamespaceB, err = createLongLivedTestingNamespace(ctx, f, f.BaseName, nsLabels)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				ginkgo.By("Configuring networks")
@@ -4655,7 +4647,7 @@ func checkRouteInFRR(node corev1.Node, podCIDR, routerContainerName string, isIP
 		ipVer = " -6"
 		// BGP uses the link-local address as the nexthop for IPv6 routes by default.
 		var nodeIPv6LLA string
-		nodeIPv6LLA, err = GetNodeIPv6LinkLocalAddressForEth0(node.Name)
+		nodeIPv6LLA, err = GetIPv6LinkLocalAddress(node.Name)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		nodeIP = []string{nodeIPv6LLA}
 	} else {
