@@ -39,6 +39,12 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
 
+// startDefaultNetworkController starts the default network controller.
+// Unit tests may override this.
+var startDefaultNetworkController = func(ctx context.Context, c networkmanager.BaseNetworkController) error {
+	return c.Start(ctx)
+}
+
 // ControllerManager structure is the object manages all controllers
 type ControllerManager struct {
 	nodeName     string
@@ -276,7 +282,7 @@ func NewControllerManager(nodeName string, ovnClient *util.OVNClientset, wf *fac
 
 	cm.networkManager = networkmanager.Default()
 	if config.OVNKubernetesFeature.EnableMultiNetwork {
-		cm.networkManager, err = networkmanager.NewForNode(cm.nodeName, cm, wf)
+		cm.networkManager, err = networkmanager.NewForController(cm.nodeName, cm, wf)
 		if err != nil {
 			return nil, err
 		}
@@ -446,6 +452,9 @@ func (cm *ControllerManager) Start(ctx context.Context) error {
 		}
 	}
 
+	// Start NAD/network manager before the default network controller so NAD
+	// state is available. Existing UDNs start asynchronously with bounded
+	// concurrency so default network controller startup is not blocked.
 	if cm.networkManager != nil {
 		if cm.nodeController != nil {
 			if err = cm.nodeController.Start(); err != nil {
@@ -464,7 +473,7 @@ func (cm *ControllerManager) Start(ctx context.Context) error {
 		}
 	}
 
-	err = cm.defaultNetworkController.Start(ctx)
+	err = startDefaultNetworkController(ctx, cm.defaultNetworkController)
 	if err != nil {
 		return fmt.Errorf("failed to start default network controller: %v", err)
 	}

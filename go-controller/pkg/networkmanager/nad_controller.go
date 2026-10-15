@@ -136,8 +136,9 @@ func newController(
 	recorder record.EventRecorder,
 	tunnelKeysAllocator *id.TunnelKeysAllocator,
 	filterNADsOnNode string,
+	asyncNetworkStart bool,
 ) (*nadController, error) {
-	networkController := newNetworkController(name, node, cm, wf)
+	networkController := newNetworkController(name, node, cm, wf, asyncNetworkStart)
 	c := &nadController{
 		name:                   fmt.Sprintf("[%s NAD controller]", name),
 		stopChan:               make(chan struct{}),

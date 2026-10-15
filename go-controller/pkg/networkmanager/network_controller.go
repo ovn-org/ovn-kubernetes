@@ -39,11 +39,12 @@ const (
 	defaultNetworkReconcilerThreadiness = 5
 )
 
-func newNetworkController(name, node string, cm ControllerManager, wf watchFactory) *networkController {
+func newNetworkController(name, node string, cm ControllerManager, wf watchFactory, asyncNetworkStart bool) *networkController {
 	nc := &networkController{
 		name:                   fmt.Sprintf("[%s network controller]", name),
 		node:                   node,
 		cm:                     cm,
+		asyncNetworkStart:      asyncNetworkStart,
 		networks:               map[string]util.MutableNetInfo{},
 		networksByID:           map[int]string{},
 		networkControllers:     map[string]*networkControllerState{},
@@ -116,6 +117,11 @@ type networkController struct {
 
 	name string
 	node string
+	// asyncNetworkStart, when true, skips inline network start during initial
+	// sync so reconciler workers start networks with bounded concurrency.
+	// Used by ovnkube-controller; ovnkube-node starts networks inline so they
+	// are ready before node setup continues.
+	asyncNetworkStart bool
 
 	nadLister  nadlisters.NetworkAttachmentDefinitionLister
 	raLister   ralisters.RouteAdvertisementsLister
@@ -379,6 +385,13 @@ func (c *networkController) syncAll() error {
 	validNetworks := c.getAllNetworks()
 	if err := c.cm.CleanupStaleNetworks(validNetworks...); err != nil {
 		return err
+	}
+
+	// For async start, skip inline sync and let reconciler workers handle networks
+	// asynchronously.
+	if c.asyncNetworkStart {
+		klog.Infof("%s: skipping inline sync for async start", c.name)
+		return nil
 	}
 
 	// sync all known networks. There is no informer for networks. Keys are added by NAD controller.
