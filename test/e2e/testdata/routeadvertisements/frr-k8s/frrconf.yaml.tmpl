@@ -13,15 +13,14 @@ spec:
   bgp:
     routers:
 {{- range $v := .Routers }}
-    - asn: 64512
+    - asn: {{ .LocalASN }}
 {{- if .VRF }}
       vrf: {{ .VRF }}
 {{- end }}
       neighbors:
 {{- range .NeighborsIPv4 }}
       - address: {{ . }}
-        asn: 64512
-        disableMP: true
+        asn: {{ $v.NeighborASN }}
         toReceive:
           allowed:
             mode: filtered
@@ -32,8 +31,7 @@ spec:
 {{- end }}
 {{- range .NeighborsIPv6 }}
       - address: {{ . }}
-        asn: 64512
-        disableMP: true
+        asn: {{ $v.NeighborASN }}
         toReceive:
           allowed:
             mode: filtered

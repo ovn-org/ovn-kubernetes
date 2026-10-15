@@ -828,6 +828,8 @@ if [ "$ENABLE_ROUTE_ADVERTISEMENTS" == true ]; then
     # external FRR is required for unmanaged mode where the FRR-K8S speakers run.
     deploy_frr_external_container
     deploy_bgp_external_server
+    deploy_ebgp_frr_external_container
+    deploy_ebgp_external_server
   fi
   if [ "${DPU_MODE}" == "host" ]; then
     install_frr_k8s_crds

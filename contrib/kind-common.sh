@@ -159,6 +159,10 @@ set_common_default_params() {
   BGP_NET_NAME=${BGP_NET_NAME:-bgpnet}
   BGP_SERVER_NAME=${BGP_SERVER_NAME:-bgpserver}
   FRR_CONTAINER_NAME=${FRR_CONTAINER_NAME:-frr}
+  BGP_EBGP_SERVER_NET_SUBNET_IPV4=${BGP_EBGP_SERVER_NET_SUBNET_IPV4:-172.28.0.0/16}
+  BGP_EBGP_SERVER_NET_SUBNET_IPV6=${BGP_EBGP_SERVER_NET_SUBNET_IPV6:-fc00:f853:ccd:e798::/64}
+  BGP_CLUSTER_ASN=${BGP_CLUSTER_ASN:-64512}
+  BGP_EBGP_ASN=${BGP_EBGP_ASN:-64513}
   OVN_OBSERV_ENABLE=${OVN_OBSERV_ENABLE:-false}
   OVN_EMPTY_LB_EVENTS=${OVN_EMPTY_LB_EVENTS:-false}
   OVN_NETWORK_QOS_ENABLE=${OVN_NETWORK_QOS_ENABLE:-false}
@@ -1717,9 +1721,17 @@ fi\
     # Neighbors are already configured by demo.sh; extract them from the running config.
     # This is cluster-level infrastructure shared across all EVPN tests; configured once
     # at install time so individual tests don't need to manage it.
-    # Wait for FRR daemons to be ready ("Not all daemons are up, cannot write config").
+    # Ensure vtysh.conf exists: demo.sh volume-mounts the frr config dir as /etc/frr,
+    # hiding the image's built-in vtysh.conf.  Without it vtysh prints a harmless warning
+    # but we create it here to keep output clean, matching deploy_bgp_external_server.
+    $OCI_BIN exec frr sh -c \
+      "[ -f /etc/frr/vtysh.conf ] || echo 'service integrated-vtysh-config' > /etc/frr/vtysh.conf"
+    # Wait for FRR daemons to be ready. vtysh exits 0 even while bgpd is still loading
+    # frr.conf (EAGAIN / "processing failure: 11"), so check the output too.
     local attempts=0 daemon_status
-    while ! daemon_status=$($OCI_BIN exec "${FRR_CONTAINER_NAME}" vtysh -c "show daemons" 2>&1); do
+    while true; do
+      daemon_status=$($OCI_BIN exec "${FRR_CONTAINER_NAME}" vtysh -c "show daemons" 2>&1)
+      [[ $? -eq 0 && ! "$daemon_status" =~ "processing failure" ]] && break
       if (( ++attempts > 30 )); then
         echo "error: FRR daemons did not become ready after 30 attempts"
         echo "last daemon status: $daemon_status"
@@ -1740,9 +1752,78 @@ fi\
   fi
 }
 
+# _deploy_bgp_server_for creates an external agnhost server container connected to a given FRR
+# router container via a dedicated bridge network, and configures routing so the server can
+# reach pods inside the cluster via FRR.
+#
+# Parameters:
+#   $1  frr_container  - name of the FRR router container to connect to (e.g. "frr" or "frr-ebgp")
+#   $2  server_name    - name for the agnhost server container (e.g. "bgpserver" or "bgpserver-ebgp")
+#   $3  network_name   - name for the bridge network (e.g. "bgpnet" or "bgpnet-ebgp")
+#   $4  subnet_v4      - IPv4 subnet for the bridge network (e.g. "172.26.0.0/16")
+#   $5  subnet_v6      - IPv6 subnet for the bridge network (e.g. "fc00:f853:ccd:e797::/64")
+#   $6+ extra_run_args - optional extra arguments passed to "docker run" (e.g. "-p 8080:8080")
+_deploy_bgp_server_for() {
+  local frr_container="$1"
+  local server_name="$2"
+  local network_name="$3"
+  local subnet_v4="$4"
+  local subnet_v6="$5"
+  shift 5
+  local extra_run_args=("$@")
+
+  local ipv6_network=""
+  if [ "$PLATFORM_IPV6_SUPPORT" == true ]; then
+    ipv6_network="--ipv6 --subnet=${subnet_v6}"
+  fi
+
+  $OCI_BIN rm -f "$server_name" 2>/dev/null || true
+  $OCI_BIN network rm -f "$network_name" 2>/dev/null || true
+  $OCI_BIN network create --subnet="${subnet_v4}" ${ipv6_network} --driver bridge "$network_name"
+  $OCI_BIN network connect "$network_name" "$frr_container"
+  $OCI_BIN run --cap-add NET_ADMIN --user 0 -d --network "$network_name" --rm \
+    --name "$server_name" "${extra_run_args[@]}" \
+    registry.k8s.io/e2e-test-images/agnhost:2.45 netexec
+
+  # Point the server's default route at FRR so return traffic to cluster pods works without
+  # having to add per-test routes.
+  local bgp_network_frr_v4 bgp_network_frr_v6 kind_network_frr_v4 kind_network_frr_v6
+  bgp_network_frr_v4=$($OCI_BIN inspect \
+    -f "{{(index .NetworkSettings.Networks \"${network_name}\").IPAddress}}" "$frr_container")
+  echo "${frr_container} bgp network IPv4: ${bgp_network_frr_v4}"
+  $OCI_BIN exec "$server_name" ip route replace default via "$bgp_network_frr_v4"
+  if [ "$PLATFORM_IPV6_SUPPORT" == true ]; then
+    bgp_network_frr_v6=$($OCI_BIN inspect \
+      -f "{{(index .NetworkSettings.Networks \"${network_name}\").GlobalIPv6Address}}" "$frr_container")
+    echo "${frr_container} bgp network IPv6: ${bgp_network_frr_v6}"
+    $OCI_BIN exec "$server_name" ip -6 route replace default via "$bgp_network_frr_v6"
+  fi
+
+  if [ "$ADVERTISED_UDN_ISOLATION_MODE" == "loose" ]; then
+    # In loose isolation mode the cluster nodes need a default gateway pointing at FRR so
+    # that cross-UDN traffic can be routed back to pods.
+    kind_network_frr_v4=$($OCI_BIN inspect -f '{{.NetworkSettings.Networks.kind.IPAddress}}' "$frr_container")
+    echo "${frr_container} kind network IPv4: ${kind_network_frr_v4}"
+    echo "Setting default gateway for nodes in the cluster to FRR router IPv4: ${kind_network_frr_v4}"
+    set_nodes_default_gw "$kind_network_frr_v4"
+    if [ "$PLATFORM_IPV6_SUPPORT" == true ]; then
+      kind_network_frr_v6=$($OCI_BIN inspect -f '{{.NetworkSettings.Networks.kind.GlobalIPv6Address}}' "$frr_container")
+      echo "${frr_container} kind network IPv6: ${kind_network_frr_v6}"
+      set_nodes_default_gw "$kind_network_frr_v6"
+    fi
+  else
+    # Disable the default route so FRR only forwards via directly connected or learnt networks.
+    # Done last because docker alters the routing table when a new network is connected.
+    $OCI_BIN exec "$frr_container" ip route delete default 2>/dev/null || true
+    $OCI_BIN exec "$frr_container" ip route
+    $OCI_BIN exec "$frr_container" ip -6 route delete default 2>/dev/null || true
+    $OCI_BIN exec "$frr_container" ip -6 route
+  fi
+}
+
 deploy_bgp_external_server() {
   # We create an external docker container that acts as the server (or client) outside the cluster
-  # in the e2e tests that levergae router advertisements.
+  # in the e2e tests that leverage router advertisements.
   # This container will be connected to the frr container deployed above to simulate a realistic
   # network topology
   # -----------------               ------------------                         ---------------------
@@ -1752,54 +1833,9 @@ deploy_bgp_external_server() {
   # -----------------               ------------------                         ---------------------    using RouteAdvertisements
   #                                                                            |    ovn-worker2    |    from default pod network)
   #                                                                            ---------------------
-  local ip_family ipv6_network
-  if [ "$PLATFORM_IPV4_SUPPORT" == true ] && [ "$PLATFORM_IPV6_SUPPORT" == true ]; then
-    ip_family="dual"
-    ipv6_network="--ipv6 --subnet=${BGP_SERVER_NET_SUBNET_IPV6}"
-  elif  [ "$PLATFORM_IPV6_SUPPORT" == true ]; then
-    ip_family="ipv6"
-    ipv6_network="--ipv6 --subnet=${BGP_SERVER_NET_SUBNET_IPV6}"
-  else
-    ip_family="ipv4"
-    ipv6_network=""
-  fi
-  $OCI_BIN rm -f "${BGP_SERVER_NAME}"
-  $OCI_BIN network rm -f "${BGP_NET_NAME}"
-  $OCI_BIN network create --subnet="${BGP_SERVER_NET_SUBNET_IPV4}" ${ipv6_network} --driver bridge "${BGP_NET_NAME}"
-  $OCI_BIN network connect "${BGP_NET_NAME}" "${FRR_CONTAINER_NAME}"
-  $OCI_BIN run  --cap-add NET_ADMIN --user 0  -d --network "${BGP_NET_NAME}"  --rm  --name "${BGP_SERVER_NAME}" -p "${BGP_SERVER_HOST_PORT}:8080"  registry.k8s.io/e2e-test-images/agnhost:2.45 netexec
-  # let's make the bgp external server have its default route towards FRR router so that we don't need to add routes during tests back to the pods in the
-  # cluster for return traffic
-  local bgp_network_frr_v4 bgp_network_frr_v6 kind_network_frr_v4 kind_network_frr_v6
-  bgp_network_frr_v4=$($OCI_BIN inspect -f "{{(index .NetworkSettings.Networks \"${BGP_NET_NAME}\").IPAddress}}" "${FRR_CONTAINER_NAME}")
-  echo "FRR bgp network IPv4: ${bgp_network_frr_v4}"
-  $OCI_BIN exec "${BGP_SERVER_NAME}" ip route replace default via "$bgp_network_frr_v4"
-  if  [ "$PLATFORM_IPV6_SUPPORT" == true ] ; then
-    bgp_network_frr_v6=$($OCI_BIN inspect -f "{{(index .NetworkSettings.Networks \"${BGP_NET_NAME}\").GlobalIPv6Address}}" "${FRR_CONTAINER_NAME}")
-    echo "FRR bgp network IPv6: ${bgp_network_frr_v6}"
-    $OCI_BIN exec "${BGP_SERVER_NAME}" ip -6 route replace default via "$bgp_network_frr_v6"
-  fi
-  if [ "$ADVERTISED_UDN_ISOLATION_MODE" == "loose" ]; then
-    kind_network_frr_v4=$($OCI_BIN inspect -f '{{with index .NetworkSettings.Networks "kind"}}{{.IPAddress}}{{end}}' "${FRR_CONTAINER_NAME}")
-    echo "FRR kind network IPv4: ${kind_network_frr_v4}"
-    # If UDN isolation is in loose disabled, we need to set the default gateway for the nodes in the cluster
-    # to the FRR router so that cross-UDN traffic can be routed back to the pods in the cluster in the loose mode.
-    echo "Setting default gateway for nodes in the cluster to FRR router IPv4: ${kind_network_frr_v4}"
-    set_nodes_default_gw "$kind_network_frr_v4"
-    if  [ "$PLATFORM_IPV6_SUPPORT" == true ] ; then
-      kind_network_frr_v6=$($OCI_BIN inspect -f '{{with index .NetworkSettings.Networks "kind"}}{{.GlobalIPv6Address}}{{end}}' "${FRR_CONTAINER_NAME}")
-      echo "FRR kind network IPv6: ${kind_network_frr_v6}"
-      set_nodes_default_gw "$kind_network_frr_v6"
-    fi
-  else
-    # disable the default route to make sure the container only routes accross
-    # directly connected or learnt networks (doing this at the very end since
-    # docker changes the routing table when a new network is connected)
-    $OCI_BIN exec "${FRR_CONTAINER_NAME}" ip route delete default
-    $OCI_BIN exec "${FRR_CONTAINER_NAME}" ip route
-    $OCI_BIN exec "${FRR_CONTAINER_NAME}" ip -6 route delete default
-    $OCI_BIN exec "${FRR_CONTAINER_NAME}" ip -6 route
-  fi
+  _deploy_bgp_server_for "${FRR_CONTAINER_NAME}" "${BGP_SERVER_NAME}" "${BGP_NET_NAME}" \
+    "${BGP_SERVER_NET_SUBNET_IPV4}" "${BGP_SERVER_NET_SUBNET_IPV6}" \
+    -p "${BGP_SERVER_HOST_PORT}:8080"
 }
 
 set_nodes_default_gw() {
@@ -1818,6 +1854,152 @@ set_nodes_default_gw() {
   done
 }
 
+deploy_ebgp_frr_external_container() {
+  echo "Deploying eBGP FRR external container (ASN ${BGP_EBGP_ASN})..."
+
+  # Discover kind cluster node IPs to configure as BGP neighbors
+  local node_ips_v4="" node_ips_v6=""
+  local v4 v6
+  KIND_NODES=$(kind_get_nodes)
+  for node in $KIND_NODES; do
+    if [ "$PLATFORM_IPV4_SUPPORT" == true ]; then
+      v4=$($OCI_BIN inspect -f '{{.NetworkSettings.Networks.kind.IPAddress}}' "$node") || return 1
+      [ -n "$v4" ] && node_ips_v4="${node_ips_v4} ${v4}"
+    fi
+    if [ "$PLATFORM_IPV6_SUPPORT" == true ]; then
+      v6=$($OCI_BIN inspect -f '{{.NetworkSettings.Networks.kind.GlobalIPv6Address}}' "$node") || return 1
+      [ -n "$v6" ] && node_ips_v6="${node_ips_v6} ${v6}"
+    fi
+  done
+
+  # Generate eBGP FRR config (ASN differs from cluster ASN, no route-reflector-client)
+  local frr_conf_dir
+  frr_conf_dir=$(mktemp -d)
+
+  # Write daemons file
+  cat > "${frr_conf_dir}/daemons" <<'DEOF'
+bgpd=yes
+zebra=yes
+DEOF
+
+  # vtysh.conf is required because the entire frr_conf_dir is volume-mounted
+  # as /etc/frr, hiding the image's built-in copy.
+  cat > "${frr_conf_dir}/vtysh.conf" <<'VEOF'
+service integrated-vtysh-config
+VEOF
+
+  # Write FRR config
+  cat > "${frr_conf_dir}/frr.conf" <<FEOF
+router bgp ${BGP_EBGP_ASN}
+ no bgp default ipv4-unicast
+ no bgp default ipv6-unicast
+ no bgp network import-check
+ no bgp ebgp-requires-policy
+FEOF
+
+  for ip in $node_ips_v4; do
+    cat >> "${frr_conf_dir}/frr.conf" <<FEOF
+ neighbor ${ip} remote-as ${BGP_CLUSTER_ASN}
+ neighbor ${ip} timers connect 10
+ neighbor ${ip} timers 3 15
+FEOF
+  done
+  for ip in $node_ips_v6; do
+    cat >> "${frr_conf_dir}/frr.conf" <<FEOF
+ neighbor ${ip} remote-as ${BGP_CLUSTER_ASN}
+ neighbor ${ip} timers connect 10
+ neighbor ${ip} timers 3 15
+FEOF
+  done
+
+  if [ -n "$node_ips_v4" ]; then
+    cat >> "${frr_conf_dir}/frr.conf" <<FEOF
+ address-family ipv4 unicast
+FEOF
+    for ip in $node_ips_v4; do
+      cat >> "${frr_conf_dir}/frr.conf" <<FEOF
+  neighbor ${ip} activate
+  neighbor ${ip} next-hop-self
+FEOF
+    done
+    cat >> "${frr_conf_dir}/frr.conf" <<FEOF
+  network ${BGP_EBGP_SERVER_NET_SUBNET_IPV4}
+ exit-address-family
+FEOF
+  fi
+
+  if [ -n "$node_ips_v6" ]; then
+    cat >> "${frr_conf_dir}/frr.conf" <<FEOF
+ address-family ipv6 unicast
+FEOF
+    for ip in $node_ips_v6; do
+      cat >> "${frr_conf_dir}/frr.conf" <<FEOF
+  neighbor ${ip} activate
+  neighbor ${ip} next-hop-self
+FEOF
+    done
+    cat >> "${frr_conf_dir}/frr.conf" <<FEOF
+  network ${BGP_EBGP_SERVER_NET_SUBNET_IPV6}
+ exit-address-family
+FEOF
+  fi
+
+  echo "eBGP FRR config:"
+  cat "${frr_conf_dir}/frr.conf"
+
+  # Start the eBGP FRR container
+  $OCI_BIN rm -f frr-ebgp 2>/dev/null || true
+  $OCI_BIN run -d --privileged --network kind --rm --name frr-ebgp \
+    --volume "${frr_conf_dir}:/etc/frr" \
+    "${FRR_DEPLOYED_IMAGE}"
+
+  if [ "$PLATFORM_IPV6_SUPPORT" == true ]; then
+    $OCI_BIN exec frr-ebgp sysctl -w net.ipv6.conf.all.forwarding=1
+    $OCI_BIN exec frr-ebgp sysctl -w net.ipv6.conf.all.keep_addr_on_down=1
+  fi
+
+  if [ "$ENABLE_EVPN" == true ]; then
+    echo "Configuring global EVPN BGP on eBGP external FRR..."
+    # Wait for bgpd to finish loading the neighbor configuration
+    local retries=0 bgp_neighbors
+    while true; do
+      bgp_neighbors=$($OCI_BIN exec frr-ebgp vtysh -c "show running-config" 2>/dev/null | grep "^ neighbor.*remote-as" | awk '{print $2}' || true)
+      [ -n "$bgp_neighbors" ] && break
+      retries=$((retries + 1))
+      if [ "$retries" -ge 30 ]; then
+        echo "ERROR: frr-ebgp BGP neighbors not found in running-config after 30 seconds"
+        return 1
+      fi
+      sleep 1
+    done
+    local vtysh_cmds
+    vtysh_cmds=(-c "configure terminal" -c "router bgp ${BGP_EBGP_ASN}" -c "address-family l2vpn evpn")
+    for neighbor in $bgp_neighbors; do
+      vtysh_cmds+=(-c "neighbor $neighbor activate")
+    done
+    vtysh_cmds+=(-c "advertise-all-vni" -c "exit-address-family" -c "end")
+    $OCI_BIN exec frr-ebgp vtysh "${vtysh_cmds[@]}"
+    # write memory requires all daemons (zebra) to be fully up; retry separately
+    retries=0
+    while ! $OCI_BIN exec frr-ebgp vtysh -c "write memory" 2>/dev/null; do
+      retries=$((retries + 1))
+      if [ "$retries" -ge 30 ]; then
+        echo "WARNING: frr-ebgp write memory failed after 30 seconds, continuing anyway"
+        break
+      fi
+      sleep 1
+    done
+    echo "Global EVPN BGP config complete on eBGP external FRR"
+  fi
+
+  echo "eBGP FRR external container deployed"
+}
+
+deploy_ebgp_external_server() {
+  _deploy_bgp_server_for frr-ebgp bgpserver-ebgp bgpnet-ebgp \
+    "${BGP_EBGP_SERVER_NET_SUBNET_IPV4}" "${BGP_EBGP_SERVER_NET_SUBNET_IPV6}"
+}
+
 destroy_bgp() {
   if $OCI_BIN ps --format '{{.Names}}' | grep -Fxq -- "${BGP_SERVER_NAME}"; then
       $OCI_BIN stop "${BGP_SERVER_NAME}"
@@ -1827,6 +2009,15 @@ destroy_bgp() {
   fi
   if $OCI_BIN network ls --format '{{.Name}}' | grep -Fxq -- "${BGP_NET_NAME}"; then
       $OCI_BIN network rm "${BGP_NET_NAME}"
+  fi
+  if $OCI_BIN ps --format '{{.Names}}' | grep -Eq '^bgpserver-ebgp$'; then
+      $OCI_BIN stop bgpserver-ebgp
+  fi
+  if $OCI_BIN ps --format '{{.Names}}' | grep -Eq '^frr-ebgp$'; then
+      $OCI_BIN stop frr-ebgp
+  fi
+  if $OCI_BIN network ls --format '{{.Name}}' | grep -q '^bgpnet-ebgp$'; then
+      $OCI_BIN network rm bgpnet-ebgp
   fi
 }
 
@@ -1967,6 +2158,52 @@ EOF
     kubectl_cmd=(kubectl --kubeconfig "$(frr_k8s_host_kubeconfig)")
   fi
   "${kubectl_cmd[@]}" apply -n frr-k8s-system -f receive_filtered.yaml
+
+  # If eBGP FRR container is running, create an FRRConfiguration for the eBGP peer
+  if $OCI_BIN ps --format '{{.Names}}' | grep -Eq '^frr-ebgp$'; then
+    echo "Creating FRRConfiguration for eBGP peer..."
+    local ebgp_frr_v4 ebgp_frr_v6
+    ebgp_frr_v4=$($OCI_BIN inspect -f '{{.NetworkSettings.Networks.kind.IPAddress}}' frr-ebgp)
+
+    cat > receive_ebgp_filtered.yaml <<EOFEBGP
+apiVersion: frrk8s.metallb.io/v1beta1
+kind: FRRConfiguration
+metadata:
+  name: receive-ebgp-filtered
+  namespace: frr-k8s-system
+  labels:
+    name: receive-all
+spec:
+  bgp:
+    routers:
+    - asn: ${BGP_CLUSTER_ASN}
+      neighbors:
+      - address: ${ebgp_frr_v4}
+        asn: ${BGP_EBGP_ASN}
+        disableMP: true
+        toReceive:
+          allowed:
+            mode: filtered
+            prefixes:
+            - prefix: ${BGP_EBGP_SERVER_NET_SUBNET_IPV4}
+EOFEBGP
+    if [ "$PLATFORM_IPV6_SUPPORT" == true ]; then
+      ebgp_frr_v6=$($OCI_BIN inspect -f '{{.NetworkSettings.Networks.kind.GlobalIPv6Address}}' frr-ebgp)
+      # Add IPv6 neighbor and prefix
+      cat >> receive_ebgp_filtered.yaml <<EOFEBGP6
+      - address: ${ebgp_frr_v6}
+        asn: ${BGP_EBGP_ASN}
+        disableMP: true
+        toReceive:
+          allowed:
+            mode: filtered
+            prefixes:
+            - prefix: ${BGP_EBGP_SERVER_NET_SUBNET_IPV6}
+EOFEBGP6
+    fi
+    "${kubectl_cmd[@]}" apply -n frr-k8s-system -f receive_ebgp_filtered.yaml
+  fi
+
   popd || exit 1
 }
 
