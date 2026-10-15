@@ -807,6 +807,11 @@ func (c *openflowManager) refreshBridgeFlowCache() (bool, error) {
 }
 
 func (c *openflowManager) updateBridgeFlowCacheLocked(hostIPs []net.IP, hostSubnets []*net.IPNet) (bool, error) {
+	// Refresh UDN patch ofports before using them to generate flows.
+	if err := c.reconcileUDNPatchPorts(); err != nil {
+		return false, err
+	}
+
 	// CAUTION: when adding new flows where the in_port is ofPortPatch and the out_port is ofPortPhys, ensure
 	// that dl_src is included in match criteria!
 
@@ -841,6 +846,25 @@ func (c *openflowManager) updateBridgeFlowCacheLocked(hostIPs []net.IP, hostSubn
 		return nil
 	})
 	return changed, err
+}
+
+func (c *openflowManager) reconcileUDNPatchPorts() error {
+	if err := c.defaultBridge.ReconcileUDNPatchPorts(); err != nil {
+		return fmt.Errorf("failed to reconcile UDN patch ports on bridge %s: %w",
+			c.defaultBridge.GetBridgeName(), err)
+	}
+	if c.externalGatewayBridge != nil {
+		if err := c.externalGatewayBridge.ReconcileUDNPatchPorts(); err != nil {
+			return fmt.Errorf("failed to reconcile UDN patch ports on bridge %s: %w",
+				c.externalGatewayBridge.GetBridgeName(), err)
+		}
+	}
+	return c.forEachUplinkBridge(func(bridgeName string, bridge *openflowBridge) error {
+		if err := bridge.ReconcileUDNPatchPorts(); err != nil {
+			return fmt.Errorf("failed to reconcile UDN patch ports on bridge %s: %w", bridgeName, err)
+		}
+		return nil
+	})
 }
 
 func stringListsEqual(a, b []string) bool {

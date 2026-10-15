@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -16,6 +17,7 @@ import (
 	"github.com/ovn-kubernetes/libovsdb/ovsdb"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/generator/udn"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/bridgeconfig"
 	ovntest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing"
@@ -231,6 +233,145 @@ func TestOpenFlowManagerLocalnetPortFlowLifecycle(t *testing.T) {
 	stopped = true
 	if !fexec.CalledMatchesExpected() {
 		t.Fatal(fexec.ErrorDesc())
+	}
+}
+
+// TestOpenFlowManagerRefreshesStaleUplinkPatchPort covers a replacement-named
+// patch briefly appearing on the old bridge, where its ofport is cached, then
+// moving to the replacement bridge with a new ofport while the old one remains
+// cached. A later flow refresh must use the patch's current ofport.
+func TestOpenFlowManagerRefreshesStaleUplinkPatchPort(t *testing.T) {
+	if err := config.PrepareTestConfig(); err != nil {
+		t.Fatalf("failed to prepare test config: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = config.PrepareTestConfig()
+	})
+	config.IPv4Mode = true
+	config.IPv6Mode = false
+	config.Gateway.Mode = config.GatewayModeShared
+
+	const (
+		defaultBridgeName     = "breth0"
+		defaultBridgeUUID     = "breth0-uuid"
+		replacementBridgeName = "uplink-new"
+		replacementBridgeUUID = "uplink-new-uuid"
+		networkName           = "blue"
+		patchPortName         = "patch-uplink-new_blue_node-to-br-int"
+		patchPortUUID         = "patch-port-uuid"
+		patchInterfaceUUID    = "patch-interface-uuid"
+	)
+	// Model the state after ovn-controller moved the patch: OVS reports its
+	// current ofport while the OpenFlow manager still has the old one cached.
+	currentPatchOfport := 2
+	staleCachedPatchOfport := 3
+	ovsClient, ovsCleanup, err := libovsdbtest.NewOVSTestHarness(libovsdbtest.TestSetup{
+		OVSData: []libovsdbtest.TestData{
+			&vswitchd.OpenvSwitch{
+				UUID:    "root-ovs",
+				Bridges: []string{defaultBridgeUUID, replacementBridgeUUID},
+			},
+			&vswitchd.Bridge{UUID: defaultBridgeUUID, Name: defaultBridgeName},
+			&vswitchd.Bridge{
+				UUID:  replacementBridgeUUID,
+				Name:  replacementBridgeName,
+				Ports: []string{patchPortUUID},
+			},
+			&vswitchd.Port{
+				UUID:        patchPortUUID,
+				Name:        patchPortName,
+				Interfaces:  []string{patchInterfaceUUID},
+				ExternalIDs: map[string]string{"ovn-localnet-port": "blue_node"},
+			},
+			&vswitchd.Interface{
+				UUID:   patchInterfaceUUID,
+				Name:   patchPortName,
+				Type:   "patch",
+				Ofport: &currentPatchOfport,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("failed to create OVS test harness: %v", err)
+	}
+	t.Cleanup(ovsCleanup.Cleanup)
+
+	mustIPNet := func(cidr string) *net.IPNet {
+		t.Helper()
+		ip, ipNet, err := net.ParseCIDR(cidr)
+		if err != nil {
+			t.Fatalf("failed to parse CIDR %s: %v", cidr, err)
+		}
+		ipNet.IP = ip
+		return ipNet
+	}
+	bridgeIP := mustIPNet("192.0.2.2/24")
+	bridgeMAC, err := net.ParseMAC("0a:58:c0:00:02:02")
+	if err != nil {
+		t.Fatalf("failed to parse bridge MAC: %v", err)
+	}
+
+	// Seed the bridge configuration with the ofport cached before the patch
+	// moved to the replacement bridge.
+	netConfig := &bridgeconfig.BridgeUDNConfiguration{
+		PatchPort:   patchPortName,
+		OfPortPatch: strconv.Itoa(staleCachedPatchOfport),
+		MasqCTMark:  "0x4",
+		PktMark:     "0x1001",
+		V4MasqIPs: &udn.MasqueradeIPs{
+			GatewayRouter:  mustIPNet("169.254.0.11/32"),
+			ManagementPort: mustIPNet("169.254.0.12/32"),
+		},
+	}
+	replacementBridge := bridgeconfig.TestUplinkBridgeConfigWithNetwork(
+		ovsClient,
+		replacementBridgeName,
+		"eth1",
+		networkName,
+		[]*net.IPNet{bridgeIP},
+		bridgeMAC,
+		netConfig,
+	)
+	uplinkBridge := newOpenflowBridge(replacementBridge)
+	ofManager := &openflowManager{
+		defaultBridge: newOpenflowBridge(bridgeconfig.TestDefaultBridgeConfigWithOVSClient(
+			ovsClient, []*net.IPNet{bridgeIP}, bridgeMAC)),
+		uplinkBridges: map[string]*openflowBridge{
+			replacementBridgeName: uplinkBridge,
+		},
+		staticFlowsSet: true,
+		ovsClient:      ovsClient,
+	}
+
+	// Rebuild the flow cache from the bridge configuration after the move.
+	if _, err := ofManager.refreshBridgeFlowCache(); err != nil {
+		t.Fatalf("failed to refresh flows with the current patch port: %v", err)
+	}
+	flowReferencesOfport := func(flow string, ofport int) bool {
+		ofportValue := strconv.Itoa(ofport)
+		return strings.Contains(flow, "in_port="+ofportValue+",") ||
+			strings.Contains(flow, "output:"+ofportValue+",") ||
+			strings.HasSuffix(flow, "output:"+ofportValue)
+	}
+
+	// The rebuilt flows must follow OVS's current ofport and contain no
+	// references to the stale cached value.
+	flows := uplinkBridge.getFlowsByKey("DEFAULT")
+	currentOfportReferences := 0
+	var staleFlows []string
+	for _, flow := range flows {
+		if flowReferencesOfport(flow, currentPatchOfport) {
+			currentOfportReferences++
+		}
+		if flowReferencesOfport(flow, staleCachedPatchOfport) {
+			staleFlows = append(staleFlows, flow)
+		}
+	}
+	if len(staleFlows) != 0 {
+		t.Fatalf("replacement Uplink flows still use the patch's stale ofport %d: %v", staleCachedPatchOfport, staleFlows)
+	}
+	if currentOfportReferences == 0 {
+		t.Fatalf("expected replacement Uplink flows to use the patch's current ofport %d", currentPatchOfport)
 	}
 }
 

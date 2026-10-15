@@ -54,6 +54,30 @@ func TestBridgeConfig(brName string) *BridgeConfiguration {
 	}
 }
 
+// TestUplinkBridgeConfigWithNetwork builds an Uplink bridge with one cached
+// network for OpenFlow manager tests.
+func TestUplinkBridgeConfigWithNetwork(
+	ovsClient libovsdbclient.Client,
+	bridgeName, uplinkName, networkName string,
+	ips []*net.IPNet,
+	mac net.HardwareAddr,
+	netConfig *BridgeUDNConfiguration,
+) *BridgeConfiguration {
+	return &BridgeConfiguration{
+		ovsClient:  ovsClient,
+		bridgeName: bridgeName,
+		gwIface:    bridgeName,
+		uplinkName: uplinkName,
+		ofPortHost: nodetypes.OvsLocalPort,
+		ofPortPhys: "1",
+		ips:        ips,
+		macAddress: mac,
+		netConfig: map[string]*BridgeUDNConfiguration{
+			networkName: netConfig,
+		},
+	}
+}
+
 func TestBridgeConfigWithGatewayRepresentor(brName, gwIfaceRep string) *BridgeConfiguration {
 	bridge := TestBridgeConfig(brName)
 	bridge.gwIfaceRep = gwIfaceRep

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -674,6 +675,87 @@ func (b *BridgeConfiguration) SetNetworkOfPatchPort(netName string) error {
 		}
 	}
 	return nil
+}
+
+// ReconcileUDNPatchPorts refreshes the cached ofport for every UDN patch that
+// currently belongs to this bridge. A missing or misplaced patch is inactive
+// until ovn-controller attaches it to the expected bridge.
+func (b *BridgeConfiguration) ReconcileUDNPatchPorts() error {
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
+
+	ofports, err := b.currentUDNPatchOfports()
+	if err != nil {
+		return err
+	}
+
+	for netName, ofport := range ofports {
+		b.netConfig[netName].OfPortPatch = ofport
+	}
+	return nil
+}
+
+// currentUDNPatchOfports reads all UDN patch state before the caller updates
+// the bridge configuration cache. The bridge mutex must be held by the caller.
+func (b *BridgeConfiguration) currentUDNPatchOfports() (map[string]string, error) {
+	ofports := make(map[string]string, len(b.netConfig))
+	networksByPortUUID := make(map[string]string, len(b.netConfig))
+	for netName, netConfig := range b.netConfig {
+		if netName == types.DefaultNetworkName {
+			continue
+		}
+
+		ofports[netName] = ""
+		port, err := ovsops.GetOVSPort(b.ovsClient, netConfig.PatchPort)
+		if err != nil {
+			if errors.Is(err, libovsdbclient.ErrNotFound) {
+				continue
+			}
+			return nil, fmt.Errorf("failed to get patch port for network %s: %w", netName, err)
+		}
+		networksByPortUUID[port.UUID] = netName
+	}
+
+	// Intersect the configured patches with this bridge's ports once instead of
+	// searching all bridges separately for every network.
+	if len(networksByPortUUID) > 0 {
+		bridge, err := ovsops.GetBridge(b.ovsClient, b.bridgeName)
+		if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
+			return nil, fmt.Errorf("failed to get bridge %s: %w", b.bridgeName, err)
+		}
+		if bridge != nil {
+			for _, portUUID := range bridge.Ports {
+				netName, found := networksByPortUUID[portUUID]
+				if !found {
+					continue
+				}
+
+				ofport, err := b.currentPatchOfport(b.netConfig[netName].PatchPort)
+				if err != nil {
+					return nil, fmt.Errorf("failed to reconcile patch port for network %s: %w", netName, err)
+				}
+				ofports[netName] = ofport
+			}
+		}
+	}
+
+	return ofports, nil
+}
+
+// currentPatchOfport returns the usable ofport of an attached patch. A missing
+// or unready interface is inactive until ovn-controller finishes configuring it.
+func (b *BridgeConfiguration) currentPatchOfport(patchPort string) (string, error) {
+	iface, err := ovsops.GetOVSInterface(b.ovsClient, patchPort)
+	if err != nil {
+		if errors.Is(err, libovsdbclient.ErrNotFound) {
+			return "", nil
+		}
+		return "", fmt.Errorf("failed to get interface for patch port %s: %w", patchPort, err)
+	}
+	if iface.Ofport == nil || *iface.Ofport == -1 {
+		return "", nil
+	}
+	return strconv.Itoa(*iface.Ofport), nil
 }
 
 // SyncNoFlood ensures OFPPC_NO_FLOOD is set on every non-default patch port

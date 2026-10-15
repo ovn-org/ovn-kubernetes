@@ -651,15 +651,7 @@ var _ = ginkgo.Describe("Network Segmentation Uplink default-VRF egress", featur
 			"expected to create the initial Uplink egress test server")
 		initialNodeIface, ok := env.nodeIfaces[node.Name]
 		gomega.Expect(ok).To(gomega.BeTrue(), "expected initial Uplink interface for node %s", node.Name)
-		for _, family := range ipFamilySet.UnsortedList() {
-			serverIP := getFirstIPStringOfFamily(family, []string{initialServer.IPv4, initialServer.IPv6})
-			gomega.Expect(serverIP).NotTo(gomega.BeEmpty(),
-				"expected initial Uplink server address for IP family %s", family)
-			expectedSourceIP := getFirstIPStringOfFamily(family, []string{initialNodeIface.IPv4, initialNodeIface.IPv6})
-			gomega.Expect(expectedSourceIP).NotTo(gomega.BeEmpty(),
-				"expected initial Uplink source address for IP family %s", family)
-			uplinkPodToClientIPAndExpect(env.pod, serverIP, expectedSourceIP)
-		}
+		expectUplinkEgress(env.pod, initialServer, initialNodeIface, ipFamilySet)
 
 		ginkgo.By("provisioning a replacement Uplink bridge and underlay")
 		replacementAlloc, err := allocators.AllocateBGP(f, ictx)
@@ -698,15 +690,7 @@ var _ = ginkgo.Describe("Network Segmentation Uplink default-VRF egress", featur
 		ginkgo.By("verifying egress uses the replacement Uplink interface")
 		replacementNodeIface, ok := replacementIfaces[node.Name]
 		gomega.Expect(ok).To(gomega.BeTrue(), "expected replacement Uplink interface for node %s", node.Name)
-		for _, family := range ipFamilySet.UnsortedList() {
-			serverIP := getFirstIPStringOfFamily(family, []string{replacementServer.IPv4, replacementServer.IPv6})
-			gomega.Expect(serverIP).NotTo(gomega.BeEmpty(),
-				"expected replacement Uplink server address for IP family %s", family)
-			expectedSourceIP := getFirstIPStringOfFamily(family, []string{replacementNodeIface.IPv4, replacementNodeIface.IPv6})
-			gomega.Expect(expectedSourceIP).NotTo(gomega.BeEmpty(),
-				"expected replacement Uplink source address for IP family %s", family)
-			uplinkPodToClientIPAndExpect(env.pod, serverIP, expectedSourceIP)
-		}
+		expectUplinkEgress(env.pod, replacementServer, replacementNodeIface, ipFamilySet)
 
 		ginkgo.By("verifying gateway readiness remains published after reprogramming")
 		gomega.Eventually(ctx, func() error {
@@ -4547,6 +4531,25 @@ func uplinkPodToClientIPAndExpect(src *corev1.Pod, dstIP, expect string) {
 	ip, _, err = net.SplitHostPort(ip)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	gomega.Expect(ip).To(gomega.Equal(expect))
+}
+
+func expectUplinkEgress(
+	pod *corev1.Pod,
+	server infraapi.ExternalContainer,
+	nodeIface infraapi.NetworkInterface,
+	ipFamilySet sets.Set[utilnet.IPFamily],
+) {
+	ginkgo.GinkgoHelper()
+
+	for _, family := range ipFamilySet.UnsortedList() {
+		serverIP := getFirstIPStringOfFamily(family, []string{server.IPv4, server.IPv6})
+		gomega.Expect(serverIP).NotTo(gomega.BeEmpty(),
+			"expected Uplink server address for IP family %s", family)
+		expectedSourceIP := getFirstIPStringOfFamily(family, []string{nodeIface.IPv4, nodeIface.IPv6})
+		gomega.Expect(expectedSourceIP).NotTo(gomega.BeEmpty(),
+			"expected Uplink source address for IP family %s", family)
+		uplinkPodToClientIPAndExpect(pod, serverIP, expectedSourceIP)
+	}
 }
 
 func uplinkExternalToNodePortAndExpect(
