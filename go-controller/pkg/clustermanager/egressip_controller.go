@@ -1109,6 +1109,15 @@ func (eIPC *egressIPClusterController) reconcileEgressIP(old, new *egressipv1.Eg
 		}
 		selector, err = metav1.LabelSelectorAsSelector(newEIP.Spec.EgressNodeSelector)
 		if err != nil {
+			// Surface the misconfiguration on the EgressIP object so a user can see
+			// it via `kubectl describe egressip`. This is emitted from the EgressIP
+			// reconcile path (add/update/resync) rather than the per-node/per-tick
+			// compileEgressNodeSelectors hot path, and identical events are
+			// aggregated by the EventRecorder, so a single bad selector surfaces as
+			// one event (with a count) instead of a flood.
+			eIPRef := corev1.ObjectReference{Kind: "EgressIP", Name: name}
+			eIPC.recorder.Eventf(&eIPRef, corev1.EventTypeWarning, "InvalidEgressNodeSelector",
+				"egressNodeSelector on EgressIP %s is invalid: %v", name, err)
 			return fmt.Errorf("invalid egressNodeSelector for EgressIP %s: %w", name, err)
 		}
 	} else {

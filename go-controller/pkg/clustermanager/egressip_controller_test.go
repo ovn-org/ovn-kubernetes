@@ -5783,6 +5783,34 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				gomega.Expect(app.Run([]string{app.Name})).NotTo(gomega.HaveOccurred())
 			})
 
+			ginkgo.It("should emit a warning event when egressNodeSelector is invalid", func() {
+				app.Action = func(*cli.Context) error {
+					// "In" with no values is a selector that fails to compile.
+					invalidSelector := &metav1.LabelSelector{
+						MatchExpressions: []metav1.LabelSelectorRequirement{{
+							Key:      "pool",
+							Operator: metav1.LabelSelectorOpIn,
+							Values:   nil,
+						}},
+					}
+					eIP := newSelectorEgressIP(egressIPName, selectorEIP1, invalidSelector)
+					node1 := newSelectorNode(node1Name, selectorNode1IPv4, "", map[string]string{"pool": "egress"})
+					fakeClusterManagerOVN.start(
+						&egressipv1.EgressIPList{Items: []egressipv1.EgressIP{eIP}},
+						&corev1.NodeList{Items: []corev1.Node{node1}},
+					)
+					startWatchers()
+
+					// The invalid selector can never assign, and the controller must surface
+					// it on the EgressIP object so an operator sees it via kubectl describe.
+					gomega.Consistently(getEgressIPStatusLen(egressIPName)).WithTimeout(time.Second).WithPolling(100 * time.Millisecond).Should(gomega.Equal(0))
+					gomega.Eventually(fakeClusterManagerOVN.fakeRecorder.Events).Should(
+						gomega.Receive(gomega.ContainSubstring("InvalidEgressNodeSelector")))
+					return nil
+				}
+				gomega.Expect(app.Run([]string{app.Name})).NotTo(gomega.HaveOccurred())
+			})
+
 			ginkgo.It("should leave EgressIP pending when no nodes match the selector", func() {
 				app.Action = func(*cli.Context) error {
 					eIP := newSelectorEgressIP(egressIPName, selectorEIP1, selectorMatchLabels("pool", "nonexistent"))
