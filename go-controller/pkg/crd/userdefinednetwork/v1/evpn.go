@@ -40,6 +40,10 @@ type EVPNConfig struct {
 	IPVRF *VRFConfig `json:"ipVRF,omitempty"`
 }
 
+// validateRouteTarget in go-controller/pkg/clustermanager/routeadvertisements/validation.go
+// rejects everything the MaxLength and XValidation markers on RouteTargetString
+// reject, and more; a change to these markers must be made there too.
+
 // RouteTargetString represents the 6-byte value of a BGP extended community route target (RFC 4360).
 // BGP Extended Communities are 8 bytes total: 2-byte type field + 6-byte value field.
 // This string encodes the 6-byte value, split between a global administrator (Autonomous System or IPv4) and a local administrator.

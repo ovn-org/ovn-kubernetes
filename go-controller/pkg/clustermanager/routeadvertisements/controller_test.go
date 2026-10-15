@@ -500,12 +500,12 @@ func (tn testNAD) NAD() *nadtypes.NetworkAttachmentDefinition {
 	}
 
 	// Add EVPN configuration if present
-	if tn.EVPNMACVRFVNI > 0 || tn.EVPNIPVRFVNI > 0 {
+	if tn.EVPNMACVRFVNI != 0 || tn.EVPNIPVRFVNI != 0 {
 		evpnConfig := map[string]interface{}{}
 		if tn.EVPNVTEPName != "" {
 			evpnConfig["vtep"] = tn.EVPNVTEPName
 		}
-		if tn.EVPNMACVRFVNI > 0 {
+		if tn.EVPNMACVRFVNI != 0 {
 			macvrf := map[string]interface{}{
 				"vni": tn.EVPNMACVRFVNI,
 			}
@@ -514,7 +514,7 @@ func (tn testNAD) NAD() *nadtypes.NetworkAttachmentDefinition {
 			}
 			evpnConfig["macVRF"] = macvrf
 		}
-		if tn.EVPNIPVRFVNI > 0 {
+		if tn.EVPNIPVRFVNI != 0 {
 			ipvrf := map[string]interface{}{
 				"vni": tn.EVPNIPVRFVNI,
 			}
@@ -607,9 +607,53 @@ func TestController_reconcile(t *testing.T) {
 		ipv6                 bool
 		wantErr              bool
 		expectAcceptedStatus metav1.ConditionStatus
-		expectFRRConfigs     []*testFRRConfig
-		expectNADAnnotations map[string]map[string]string
+		// expectAcceptedMessageContains, when set, is a substring the Accepted
+		// condition message must contain
+		expectAcceptedMessageContains string
+		expectFRRConfigs              []*testFRRConfig
+		expectNADAnnotations          map[string]map[string]string
 	}{
+		{
+			name: "adds the validated marker to a generated FRRConfiguration that predates input validation",
+			ra:   &testRA{Name: "ra", AdvertisePods: true, SelectsDefault: true},
+			frrConfigs: []*testFRRConfig{
+				{
+					Name:      "frrConfig",
+					Namespace: frrNamespace,
+					Routers: []*testRouter{
+						{ASN: 1, Prefixes: []string{"1.1.1.0/24"}, Neighbors: []*testNeighbor{
+							{ASN: 1, Address: "1.0.0.100"},
+						}},
+					},
+				},
+				{
+					Name:         "frrConfig-generated",
+					Namespace:    frrNamespace,
+					Labels:       map[string]string{types.OvnRouteAdvertisementsKey: "ra"},
+					Annotations:  map[string]string{types.OvnRouteAdvertisementsKey: "ra/frrConfig/node"},
+					NodeSelector: map[string]string{"kubernetes.io/hostname": "node"},
+					Routers: []*testRouter{
+						{ASN: 1, Prefixes: []string{"1.1.0.0/24"}, Neighbors: []*testNeighbor{
+							{ASN: 1, Address: "1.0.0.100", Advertise: []string{"1.1.0.0/24"}},
+						}},
+					},
+				},
+			},
+			nodes:                []*testNode{{Name: "node", SubnetsAnnotation: "{\"default\":\"1.1.0.0/24\"}"}},
+			reconcile:            "ra",
+			expectAcceptedStatus: metav1.ConditionTrue,
+			expectFRRConfigs: []*testFRRConfig{
+				{
+					Labels:       map[string]string{types.OvnRouteAdvertisementsKey: "ra"},
+					Annotations:  map[string]string{types.OvnRouteAdvertisementsKey: "ra/frrConfig/node"},
+					NodeSelector: map[string]string{"kubernetes.io/hostname": "node"},
+					Routers: []*testRouter{
+						{ASN: 1, Prefixes: []string{"1.1.0.0/24"}, Neighbors: []*testNeighbor{
+							{ASN: 1, Address: "1.0.0.100", Advertise: []string{"1.1.0.0/24"}},
+						}},
+					}},
+			},
+		},
 		{
 			name: "reconciles pod+eip RouteAdvertisement for a single FRR config, node and default network and target VRF",
 			ra:   &testRA{Name: "ra", AdvertisePods: true, AdvertiseEgressIPs: true, SelectsDefault: true},
@@ -1125,6 +1169,8 @@ func TestController_reconcile(t *testing.T) {
 					},
 				},
 				{
+					Name:         "frrConfig-generated",
+					Namespace:    frrNamespace,
 					Labels:       map[string]string{types.OvnRouteAdvertisementsKey: "ra"},
 					Annotations:  map[string]string{types.OvnRouteAdvertisementsKey: "ra/frrConfig/node"},
 					NodeSelector: map[string]string{"kubernetes.io/hostname": "node"},
@@ -1142,6 +1188,17 @@ func TestController_reconcile(t *testing.T) {
 			eips:                 []*testEIP{{Name: "eip", EIPs: map[string]string{"node": "1.0.1.1"}}},
 			reconcile:            "ra",
 			expectAcceptedStatus: metav1.ConditionTrue,
+			expectFRRConfigs: []*testFRRConfig{
+				{
+					Labels:       map[string]string{types.OvnRouteAdvertisementsKey: "ra"},
+					Annotations:  map[string]string{types.OvnRouteAdvertisementsKey: "ra/frrConfig/node"},
+					NodeSelector: map[string]string{"kubernetes.io/hostname": "node"},
+					Routers: []*testRouter{
+						{ASN: 1, Prefixes: []string{"1.0.1.1/32", "1.1.0.0/24"}, Neighbors: []*testNeighbor{
+							{ASN: 1, Address: "1.0.0.100", Advertise: []string{"1.0.1.1/32", "1.1.0.0/24"}},
+						}},
+					}},
+			},
 		},
 		{
 			name:      "reconciles pod RouteAdvertisement for default network in no-overlay mode with ToReceive routes",
@@ -1492,6 +1549,44 @@ func TestController_reconcile(t *testing.T) {
 			expectNADAnnotations: map[string]map[string]string{"default": {types.OvnRouteAdvertisementsKey: "[\"ra\"]"}},
 		},
 		{
+			name: "excludes self-neighbor with a non-canonical IPv6 address from per-node FRRConfiguration",
+			ra:   &testRA{Name: "ra", AdvertisePods: true, SelectsDefault: true},
+			frrConfigs: []*testFRRConfig{
+				{
+					Name:      "frrConfig-base",
+					Namespace: frrNamespace,
+					Routers: []*testRouter{
+						{ASN: 1, Neighbors: []*testNeighbor{
+							{ASN: 1, Address: "FD00:0:0:0:0:0:0:1"}, // self for node
+							{ASN: 1, Address: "fd00::2"},            // other node
+						}},
+					},
+				},
+			},
+			nodes: []*testNode{
+				{
+					Name:                     "node",
+					SubnetsAnnotation:        "{\"default\":[\"1.1.0.0/24\",\"fd01::/64\"]}",
+					PrimaryAddressAnnotation: "{\"ipv4\":\"10.0.0.1/24\",\"ipv6\":\"fd00::1/64\"}",
+				},
+			},
+			ipv6:                 true,
+			reconcile:            "ra",
+			expectAcceptedStatus: metav1.ConditionTrue,
+			expectFRRConfigs: []*testFRRConfig{
+				{
+					Labels:       map[string]string{types.OvnRouteAdvertisementsKey: "ra"},
+					Annotations:  map[string]string{types.OvnRouteAdvertisementsKey: "ra/frrConfig-base/node"},
+					NodeSelector: map[string]string{"kubernetes.io/hostname": "node"},
+					Routers: []*testRouter{
+						{ASN: 1, Prefixes: []string{"1.1.0.0/24", "fd01::/64"}, Neighbors: []*testNeighbor{
+							{ASN: 1, Address: "fd00::2", Advertise: []string{"fd01::/64"}},
+						}},
+					}},
+			},
+			expectNADAnnotations: map[string]map[string]string{"default": {types.OvnRouteAdvertisementsKey: "[\"ra\"]"}},
+		},
+		{
 			name: "fails to reconcile EVPN-enabled network to default VRF",
 			ra:   &testRA{Name: "ra", AdvertisePods: true, NetworkSelector: map[string]string{"selected": "true"}},
 			frrConfigs: []*testFRRConfig{
@@ -1513,6 +1608,140 @@ func TestController_reconcile(t *testing.T) {
 			nodes:                []*testNode{{Name: "node", SubnetsAnnotation: "{\"default\":\"1.1.0.0/24\"}"}},
 			reconcile:            "ra",
 			expectAcceptedStatus: metav1.ConditionFalse,
+		},
+		{
+			name: "rejects EVPN MAC-VRF network with a newline in the route target",
+			ra:   &testRA{Name: "ra", TargetVRF: "auto", AdvertisePods: true, NetworkSelector: map[string]string{"selected": "true"}},
+			frrConfigs: []*testFRRConfig{
+				{
+					Name:      "frrConfig",
+					Namespace: frrNamespace,
+					Routers: []*testRouter{
+						{ASN: 65000, Neighbors: []*testNeighbor{
+							{ASN: 65000, Address: "192.168.1.1"},
+						}},
+					},
+				},
+			},
+			nads: []*testNAD{
+				{Name: "red", Namespace: "red", Network: util.GenerateCUDNNetworkName("red"),
+					Topology: "layer2", Subnet: "10.1.0.0/16", Labels: map[string]string{"selected": "true"},
+					EVPNMACVRFVNI: 1000, EVPNMACVRFRouteTarget: "65000:1\n"},
+			},
+			nodes:                         []*testNode{{Name: "node", SubnetsAnnotation: "{\"default\":\"1.1.0.0/24\"}"}},
+			reconcile:                     "ra",
+			expectAcceptedStatus:          metav1.ConditionFalse,
+			expectAcceptedMessageContains: "invalid MAC-VRF route target",
+		},
+		{
+			name: "rejects EVPN IP-VRF network with a VNI above the maximum",
+			ra:   &testRA{Name: "ra", TargetVRF: "auto", AdvertisePods: true, NetworkSelector: map[string]string{"selected": "true"}},
+			frrConfigs: []*testFRRConfig{
+				{
+					Name:      "frrConfig",
+					Namespace: frrNamespace,
+					Routers: []*testRouter{
+						{ASN: 65000, Neighbors: []*testNeighbor{
+							{ASN: 65000, Address: "192.168.1.1"},
+						}},
+					},
+				},
+			},
+			nads: []*testNAD{
+				{Name: "red", Namespace: "red", Network: util.GenerateCUDNNetworkName("red"),
+					Topology: "layer3", Subnet: "10.1.0.0/16/24", Labels: map[string]string{"selected": "true"},
+					EVPNIPVRFVNI: maxVNI + 1},
+			},
+			nodes:                         []*testNode{{Name: "node", SubnetsAnnotation: "{\"default\":\"1.1.0.0/24\", \"cluster_udn_red\":\"10.1.0.0/24\"}"}},
+			reconcile:                     "ra",
+			expectAcceptedStatus:          metav1.ConditionFalse,
+			expectAcceptedMessageContains: "invalid IP-VRF VNI",
+		},
+		{
+			name: "rejects EVPN MAC-VRF network with a negative VNI",
+			ra:   &testRA{Name: "ra", TargetVRF: "auto", AdvertisePods: true, NetworkSelector: map[string]string{"selected": "true"}},
+			frrConfigs: []*testFRRConfig{
+				{
+					Name:      "frrConfig",
+					Namespace: frrNamespace,
+					Routers: []*testRouter{
+						{ASN: 65000, Neighbors: []*testNeighbor{
+							{ASN: 65000, Address: "192.168.1.1"},
+						}},
+					},
+				},
+			},
+			nads: []*testNAD{
+				{Name: "red", Namespace: "red", Network: util.GenerateCUDNNetworkName("red"),
+					Topology: "layer2", Subnet: "10.1.0.0/16", Labels: map[string]string{"selected": "true"},
+					EVPNMACVRFVNI: -1000, EVPNMACVRFRouteTarget: "65000:1000"},
+			},
+			nodes:                         []*testNode{{Name: "node", SubnetsAnnotation: "{\"default\":\"1.1.0.0/24\"}"}},
+			reconcile:                     "ra",
+			expectAcceptedStatus:          metav1.ConditionFalse,
+			expectAcceptedMessageContains: "invalid MAC-VRF VNI",
+		},
+		{
+			name: "rejects EVPN network whose VRF name is not a valid interface name",
+			ra:   &testRA{Name: "ra", TargetVRF: "auto", AdvertisePods: true, NetworkSelector: map[string]string{"selected": "true"}},
+			frrConfigs: []*testFRRConfig{
+				{
+					Name:      "frrConfig",
+					Namespace: frrNamespace,
+					Routers: []*testRouter{
+						{ASN: 65000, Neighbors: []*testNeighbor{
+							{ASN: 65000, Address: "192.168.1.1"},
+						}},
+					},
+				},
+			},
+			nads: []*testNAD{
+				{Name: "red", Namespace: "red", Network: util.GenerateCUDNNetworkName("red\nx"),
+					Topology: "layer2", Subnet: "10.1.0.0/16", Labels: map[string]string{"selected": "true"},
+					EVPNMACVRFVNI: 1000, EVPNMACVRFRouteTarget: "65000:1000"},
+			},
+			nodes:                         []*testNode{{Name: "node", SubnetsAnnotation: "{\"default\":\"1.1.0.0/24\"}"}},
+			reconcile:                     "ra",
+			expectAcceptedStatus:          metav1.ConditionFalse,
+			expectAcceptedMessageContains: "invalid VRF name",
+		},
+		{
+			name: "rejects RouteAdvertisements with a newline in the target VRF",
+			ra:   &testRA{Name: "ra", TargetVRF: "red\nx", AdvertisePods: true, SelectsDefault: true},
+			frrConfigs: []*testFRRConfig{
+				{
+					Name:      "frrConfig",
+					Namespace: frrNamespace,
+					Routers: []*testRouter{
+						{ASN: 1, VRF: "red\nx", Prefixes: []string{"1.1.1.0/24"}, Neighbors: []*testNeighbor{
+							{ASN: 1, Address: "1.0.0.100"},
+						}},
+					},
+				},
+			},
+			nodes:                         []*testNode{{Name: "node", SubnetsAnnotation: "{\"default\":\"1.1.0.0/24\"}"}},
+			reconcile:                     "ra",
+			expectAcceptedStatus:          metav1.ConditionFalse,
+			expectAcceptedMessageContains: "invalid TargetVRF",
+		},
+		{
+			name: "rejects FRRConfiguration neighbor with a newline in the interface name",
+			ra:   &testRA{Name: "ra", AdvertisePods: true, SelectsDefault: true},
+			frrConfigs: []*testFRRConfig{
+				{
+					Name:      "frrConfig",
+					Namespace: frrNamespace,
+					Routers: []*testRouter{
+						{ASN: 1, Prefixes: []string{"1.1.1.0/24"}, Neighbors: []*testNeighbor{
+							{ASN: 1, Interface: "eth0\nx"},
+						}},
+					},
+				},
+			},
+			nodes:                         []*testNode{{Name: "node", SubnetsAnnotation: "{\"default\":\"1.1.0.0/24\"}"}},
+			reconcile:                     "ra",
+			expectAcceptedStatus:          metav1.ConditionFalse,
+			expectAcceptedMessageContains: "invalid neighbor",
 		},
 		{
 			name: "reconciles EVPN MAC-VRF l2 network with a specific target VRF without a VRF router",
@@ -3065,6 +3294,9 @@ exit
 				accepted := meta.FindStatusCondition(ra.Status.Conditions, "Accepted")
 				g.Expect(accepted).NotTo(gomega.BeNil())
 				g.Expect(accepted.Status).To(gomega.Equal(tt.expectAcceptedStatus), accepted.Message)
+				if tt.expectAcceptedMessageContains != "" {
+					g.Expect(accepted.Message).To(gomega.ContainSubstring(tt.expectAcceptedMessageContains))
+				}
 				// verify condition metric is set as expected
 				expectedTrue := 0.0
 				expectedFalse := 1.0
@@ -3093,6 +3325,8 @@ exit
 			actualFRRConfigSpecs := map[string]*frrapi.FRRConfigurationSpec{}
 			for _, frrConfig := range actualFRRConfigs.Items {
 				if _, generated := frrConfig.Annotations[types.OvnRouteAdvertisementsKey]; generated {
+					g.Expect(frrConfig.Annotations).To(gomega.HaveKeyWithValue(types.OvnRouteAdvertisementsValidatedKey, "true"),
+						"generated FRRConfiguration %s must carry the validated marker", frrConfig.Name)
 					actualFRRConfigKeys = append(actualFRRConfigKeys, frrConfig.Annotations[types.OvnRouteAdvertisementsKey])
 					actualFRRConfigLabels[frrConfig.Annotations[types.OvnRouteAdvertisementsKey]] = frrConfig.Labels
 					actualFRRConfigSpecs[frrConfig.Annotations[types.OvnRouteAdvertisementsKey]] = &frrConfig.Spec
@@ -3129,6 +3363,241 @@ exit
 			}
 		})
 	}
+}
+
+// unsafeInputTest is a reconcile test fixture: a RouteAdvertisements
+// selecting the default network whose source FRRConfiguration carries the
+// unsafe neighbor interface name unsafeInputValue, plus the given
+// FRRConfigurations generated earlier for it.
+type unsafeInputTest struct {
+	fakeClientset *util.OVNClusterManagerClientset
+	c             *Controller
+	// failDelete makes deleting the FRRConfiguration "frrConfig-unvalidated"
+	// fail, failNADPatch makes patching NADs fail
+	failDelete, failNADPatch atomic.Bool
+	// frrConfigNames returns the names of all FRRConfigurations
+	frrConfigNames func() []string
+	// defaultNADAnnotation returns the default NAD RouteAdvertisements
+	// annotation, seeded with ["ra","other"]
+	defaultNADAnnotation func() string
+}
+
+const unsafeInputValue = "eth0\nx"
+
+func newUnsafeInputTest(t *testing.T, g *gomega.WithT, generated ...*testFRRConfig) *unsafeInputTest {
+	t.Helper()
+	previousDefault, previousFeatures, previousGateway := config.Default, config.OVNKubernetesFeature, config.Gateway
+	t.Cleanup(func() {
+		config.Default, config.OVNKubernetesFeature, config.Gateway = previousDefault, previousFeatures, previousGateway
+	})
+	frrNamespace := "frrNamespace"
+	config.Default.ClusterSubnets = []config.CIDRNetworkEntry{
+		{
+			CIDR:             ovntest.MustParseIPNet("1.1.0.0/16"),
+			HostSubnetLength: 24,
+		},
+	}
+	config.OVNKubernetesFeature.EnableMultiNetwork = true
+	config.OVNKubernetesFeature.EnableRouteAdvertisements = true
+	config.OVNKubernetesFeature.EnableEVPN = true
+	config.OVNKubernetesFeature.EnableNetworkSegmentation = true
+	config.Gateway.Mode = config.GatewayModeLocal
+
+	tt := &unsafeInputTest{fakeClientset: util.GetOVNClientset().GetClusterManagerClientset()}
+	fakeClientset := tt.fakeClientset
+	addGenerateNameReactor[*frrfake.Clientset](fakeClientset.FRRClient)
+	fakeClientset.FRRClient.(Fake).PrependReactor("delete", "frrconfigurations",
+		func(action ctesting.Action) (bool, runtime.Object, error) {
+			if tt.failDelete.Load() && action.(ctesting.DeleteAction).GetName() == "frrConfig-unvalidated" {
+				return true, nil, errors.New("injected delete failure")
+			}
+			return false, nil, nil
+		})
+	fakeClientset.NetworkAttchDefClient.(Fake).PrependReactor("patch", "network-attachment-definitions",
+		func(_ ctesting.Action) (bool, runtime.Object, error) {
+			if tt.failNADPatch.Load() {
+				return true, nil, errors.New("injected NAD patch failure")
+			}
+			return false, nil, nil
+		})
+
+	ra := &testRA{Name: "ra", AdvertisePods: true, SelectsDefault: true}
+	_, err := fakeClientset.RouteAdvertisementsClient.K8sV1().RouteAdvertisements().Create(context.Background(), ra.RouteAdvertisements(), metav1.CreateOptions{})
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+
+	source := &testFRRConfig{
+		Name:      "frrConfig",
+		Namespace: frrNamespace,
+		Routers: []*testRouter{
+			{ASN: 1, Prefixes: []string{"1.1.1.0/24"}, Neighbors: []*testNeighbor{
+				{ASN: 1, Interface: unsafeInputValue},
+			}},
+		},
+	}
+	_, err = fakeClientset.FRRClient.ApiV1beta1().FRRConfigurations(frrNamespace).Create(context.Background(), source.FRRConfiguration(), metav1.CreateOptions{})
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+	for _, frrConfig := range generated {
+		_, err = fakeClientset.FRRClient.ApiV1beta1().FRRConfigurations(frrNamespace).Create(context.Background(), frrConfig.FRRConfiguration(), metav1.CreateOptions{})
+		g.Expect(err).ToNot(gomega.HaveOccurred())
+	}
+
+	node := &testNode{Name: "node", SubnetsAnnotation: "{\"default\":\"1.1.0.0/24\"}"}
+	_, err = fakeClientset.KubeClient.CoreV1().Nodes().Create(context.Background(), node.Node(), metav1.CreateOptions{})
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+
+	_, err = fakeClientset.KubeClient.CoreV1().Namespaces().Create(context.Background(),
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: config.Default.ClusterDefaultNetworkNAD.Namespace}}, metav1.CreateOptions{})
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+
+	wf, err := factory.NewClusterManagerWatchFactory(fakeClientset)
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+
+	nm, err := networkmanager.NewForCluster(&networkmanager.FakeControllerManager{}, wf, fakeClientset, nil, id.NewTunnelKeyAllocator("TunnelKeys"))
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+
+	tt.c = NewController(nm.Interface(), wf, fakeClientset)
+
+	// prime the default network NAD, annotated as advertised by this
+	// RouteAdvertisements and by another one
+	defaultNAD, err := util.EnsureDefaultNetworkNAD(tt.c.nadLister, tt.c.nadClient)
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+	defaultNAD.Annotations = map[string]string{
+		types.OvnNetworkNameAnnotation:  types.DefaultNetworkName,
+		types.OvnRouteAdvertisementsKey: "[\"ra\",\"other\"]",
+	}
+	_, err = fakeClientset.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(defaultNAD.Namespace).Update(context.Background(), defaultNAD, metav1.UpdateOptions{})
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+
+	err = wf.Start()
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+	t.Cleanup(wf.Shutdown)
+
+	cache.WaitForCacheSync(
+		context.Background().Done(),
+		wf.RouteAdvertisementsInformer().Informer().HasSynced,
+		wf.FRRConfigurationsInformer().Informer().HasSynced,
+		wf.NADInformer().Informer().HasSynced,
+		wf.NodeCoreInformer().Informer().HasSynced,
+	)
+
+	t.Cleanup(func() { metrics.DeleteRouteAdvertisementCondition("ra") })
+
+	tt.frrConfigNames = func() []string {
+		frrConfigs, err := fakeClientset.FRRClient.ApiV1beta1().FRRConfigurations(frrNamespace).List(context.Background(), metav1.ListOptions{})
+		g.Expect(err).ToNot(gomega.HaveOccurred())
+		var names []string
+		for _, frrConfig := range frrConfigs.Items {
+			names = append(names, frrConfig.Name)
+		}
+		return names
+	}
+	tt.defaultNADAnnotation = func() string {
+		nad, err := fakeClientset.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(defaultNAD.Namespace).Get(context.Background(), defaultNAD.Name, metav1.GetOptions{})
+		g.Expect(err).ToNot(gomega.HaveOccurred())
+		return nad.Annotations[types.OvnRouteAdvertisementsKey]
+	}
+	return tt
+}
+
+// generatedFRRConfig returns an FRRConfiguration generated for the test
+// RouteAdvertisements on the given node, carrying the validated marker
+// annotation or not.
+func generatedFRRConfig(name, node string, validated bool) *testFRRConfig {
+	annotations := map[string]string{types.OvnRouteAdvertisementsKey: "ra/frrConfig/" + node}
+	if validated {
+		annotations[types.OvnRouteAdvertisementsValidatedKey] = "true"
+	}
+	return &testFRRConfig{
+		Name:         name,
+		Namespace:    "frrNamespace",
+		Labels:       map[string]string{types.OvnRouteAdvertisementsKey: "ra"},
+		Annotations:  annotations,
+		NodeSelector: map[string]string{"kubernetes.io/hostname": node},
+		Routers: []*testRouter{
+			{ASN: 1, Prefixes: []string{"1.1.0.0/24"}, Neighbors: []*testNeighbor{
+				{ASN: 1, Interface: "eth0", Advertise: []string{"1.1.0.0/24"}},
+			}},
+		},
+		RawConfig: "router bgp 1\n address-family ipv4 unicast\n  neighbor eth0 allowas-in origin\n exit-address-family\nexit\n!\n",
+	}
+}
+
+func expectRANotAccepted(g *gomega.WithT, tt *unsafeInputTest) {
+	ra, err := tt.fakeClientset.RouteAdvertisementsClient.K8sV1().RouteAdvertisements().Get(context.Background(), "ra", metav1.GetOptions{})
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+	accepted := meta.FindStatusCondition(ra.Status.Conditions, "Accepted")
+	g.Expect(accepted).NotTo(gomega.BeNil())
+	g.Expect(accepted.Status).To(gomega.Equal(metav1.ConditionFalse), accepted.Message)
+	g.Expect(accepted.Reason).To(gomega.Equal("ConfigurationError"))
+	g.Expect(accepted.Message).To(gomega.ContainSubstring("invalid neighbor"))
+}
+
+// TestController_reconcileDeletesFRRConfigurationsOnUnsafeInput verifies that
+// a RouteAdvertisements rejected for an unsafe FRR input value gets the
+// FRRConfigurations generated for it before input validation existed deleted
+// and, once none is left, its reference removed from the NAD annotations,
+// that both are retried when they fail, and that the source FRRConfiguration
+// and the references to other RouteAdvertisements are kept.
+func TestController_reconcileDeletesFRRConfigurationsOnUnsafeInput(t *testing.T) {
+	g := gomega.NewWithT(t)
+	tt := newUnsafeInputTest(t, g,
+		generatedFRRConfig("frrConfig-unvalidated", "node", false),
+		generatedFRRConfig("frrConfig-unvalidated2", "node2", false),
+	)
+
+	// deleting one FRRConfiguration fails: the other one is still deleted,
+	// the error is returned for a retry and names the validation reason, the
+	// NAD reference is kept
+	tt.failDelete.Store(true)
+	err := tt.c.reconcile("ra")
+	g.Expect(err).To(gomega.HaveOccurred())
+	g.Expect(err.Error()).To(gomega.ContainSubstring("injected delete failure"))
+	g.Expect(err.Error()).To(gomega.ContainSubstring("frrConfig-unvalidated"))
+	g.Expect(err.Error()).To(gomega.ContainSubstring("invalid neighbor"))
+	g.Expect(errors.Is(err, errConfig)).To(gomega.BeFalse(), "a failed deletion must be retried")
+	g.Expect(tt.frrConfigNames()).To(gomega.ConsistOf("frrConfig", "frrConfig-unvalidated"))
+	g.Expect(tt.defaultNADAnnotation()).To(gomega.Equal("[\"ra\",\"other\"]"))
+
+	// deletion succeeds on retry but removing the reference from the NAD
+	// fails: the error is returned for a retry and names the validation
+	// reason, the generated FRRConfigurations are gone
+	tt.failDelete.Store(false)
+	tt.failNADPatch.Store(true)
+	err = tt.c.reconcile("ra")
+	g.Expect(err).To(gomega.HaveOccurred())
+	g.Expect(err.Error()).To(gomega.ContainSubstring("injected NAD patch failure"))
+	g.Expect(err.Error()).To(gomega.ContainSubstring("invalid neighbor"))
+	g.Expect(errors.Is(err, errConfig)).To(gomega.BeFalse(), "a failed NAD update must be retried")
+	g.Expect(tt.frrConfigNames()).To(gomega.ConsistOf("frrConfig"))
+	g.Expect(tt.defaultNADAnnotation()).To(gomega.Equal("[\"ra\",\"other\"]"))
+
+	// everything succeeds on retry: the source FRRConfiguration is kept, the
+	// NAD only references the other RouteAdvertisements and this one is not
+	// accepted
+	tt.failNADPatch.Store(false)
+	err = tt.c.reconcile("ra")
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+	g.Expect(tt.frrConfigNames()).To(gomega.ConsistOf("frrConfig"))
+	g.Expect(tt.defaultNADAnnotation()).To(gomega.Equal("[\"other\"]"))
+	expectRANotAccepted(g, tt)
+}
+
+// TestController_reconcileKeepsValidatedFRRConfigurationsOnUnsafeInput
+// verifies that a RouteAdvertisements rejected for an unsafe FRR input value
+// keeps the FRRConfigurations generated for it from validated input, and with
+// them its reference in the NAD annotations.
+func TestController_reconcileKeepsValidatedFRRConfigurationsOnUnsafeInput(t *testing.T) {
+	g := gomega.NewWithT(t)
+	tt := newUnsafeInputTest(t, g,
+		generatedFRRConfig("frrConfig-unvalidated", "node", false),
+		generatedFRRConfig("frrConfig-validated", "node2", true),
+	)
+
+	err := tt.c.reconcile("ra")
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+	g.Expect(tt.frrConfigNames()).To(gomega.ConsistOf("frrConfig", "frrConfig-validated"))
+	g.Expect(tt.defaultNADAnnotation()).To(gomega.Equal("[\"ra\",\"other\"]"))
+	expectRANotAccepted(g, tt)
 }
 
 // TestController_reconcileOnNetworkActivity verifies that the controller
