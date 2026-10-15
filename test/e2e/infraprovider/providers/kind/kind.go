@@ -17,7 +17,6 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/api"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/engine/container"
-	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/engine/portalloc"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/engine/runner"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/engine/testcontext"
 
@@ -27,9 +26,21 @@ import (
 	"k8s.io/kubernetes/test/e2e/framework"
 )
 
+const ProviderName = "kind"
+
 type kind struct {
-	engine   *container.Engine
-	HostPort *portalloc.PortAllocator
+	*infraprovider.ComposedProvider
+	api.NodeInfrastructure
+	engine  *container.Engine
+	runtime containerRuntime
+}
+
+type kindNodeAccess struct {
+	engine *container.Engine
+}
+
+type kindNodeInfrastructure struct {
+	engine *container.Engine
 }
 
 func New() api.Provider {
@@ -38,62 +49,23 @@ func New() api.Provider {
 	}
 	ce := getContainerRuntime()
 	cmdRunner := runner.NewDirectRunner()
+	engine := container.NewEngine(ce.String(), cmdRunner)
+	nodeAccess := &kindNodeAccess{engine: engine}
 	kind := &kind{
-		engine:   container.NewEngine(ce.String(), cmdRunner),
-		HostPort: portalloc.New(1024, 65535)}
+		ComposedProvider:   infraprovider.NewComposedProvider(ProviderName, "kind", nodeAccess, engine),
+		NodeInfrastructure: &kindNodeInfrastructure{engine: engine},
+		engine:             engine,
+		runtime:            ce,
+	}
 	return kind
 }
 
-func (k *kind) Name() string {
-	return "kind"
+func (k *kindNodeAccess) GetK8NodeNetworkInterface(nodeName string, network api.Network) (api.NetworkInterface, error) {
+	return k.engine.GetNetworkInterface(nodeName, network.Name())
 }
 
-func (k *kind) PrimaryNetwork() (api.Network, error) {
-	return k.GetNetwork("kind")
-}
-
-func (k *kind) GetNetwork(name string) (api.Network, error) {
-	return k.engine.GetNetwork(name)
-}
-
-func (k *kind) GetDefaultTimeoutContext() *framework.TimeoutContext {
-	return framework.NewTimeoutContext()
-}
-
-func (k *kind) GetK8HostPort() uint16 {
-	return k.HostPort.Allocate()
-}
-
-func (k *kind) GetK8NodeNetworkInterface(container string, network api.Network) (api.NetworkInterface, error) {
-	return k.engine.GetNetworkInterface(container, network.Name())
-}
-
-func (k *kind) ExecK8NodeCommand(nodeName string, cmd []string) (string, error) {
+func (k *kindNodeAccess) ExecK8NodeCommand(nodeName string, cmd []string) (string, error) {
 	return k.engine.ExecContainerCommand(nodeName, cmd)
-}
-
-func (k *kind) ExecExternalContainerCommand(container api.ExternalContainer, cmd []string) (string, error) {
-	return k.engine.ExecExternalContainerCommand(container, cmd)
-}
-
-func (k *kind) ExternalContainerPrimaryInterfaceName() string {
-	return k.engine.ExternalContainerPrimaryInterfaceName()
-}
-
-func (k *kind) GetExternalContainerLogs(container api.ExternalContainer) (string, error) {
-	return k.engine.GetExternalContainerLogs(container)
-}
-
-func (k *kind) GetExternalContainerNetworkInterface(container api.ExternalContainer, network api.Network) (api.NetworkInterface, error) {
-	return k.engine.GetExternalContainerNetworkInterface(container, network)
-}
-
-func (k *kind) GetExternalContainerPort() uint16 {
-	return k.engine.GetExternalContainerPort()
-}
-
-func (k *kind) ListNetworks() ([]string, error) {
-	return k.engine.ListNetworks()
 }
 
 func (k *kind) PreloadImages(imgs []deploymentconfigapi.ImageConfig) {
@@ -108,7 +80,7 @@ func (k *kind) PreloadImages(imgs []deploymentconfigapi.ImageConfig) {
 		var out []byte
 		err := wait.ExponentialBackoff(pullBackoff, func() (bool, error) {
 			var pullErr error
-			out, pullErr = exec.Command(engine.String(), "pull", img.PullSpec).CombinedOutput()
+			out, pullErr = exec.Command(k.runtime.String(), "pull", img.PullSpec).CombinedOutput()
 			if pullErr != nil {
 				framework.Logf("Retrying pull for image %s: %v (%s)", img.PullSpec, pullErr, out)
 				return false, nil
@@ -119,9 +91,9 @@ func (k *kind) PreloadImages(imgs []deploymentconfigapi.ImageConfig) {
 			framework.Logf("Warning: failed to pull image %s after retries: %v (%s)", img.PullSpec, err, out)
 			continue
 		}
-		if engine == podman {
+		if k.runtime == podman {
 			os.Remove("/tmp/image.tar")
-			out, err = exec.Command(engine.String(), "save", "-o", "/tmp/image.tar", img.PullSpec).CombinedOutput()
+			out, err = exec.Command(k.runtime.String(), "save", "-o", "/tmp/image.tar", img.PullSpec).CombinedOutput()
 			if err != nil {
 				framework.Logf("Warning: failed to save image %s: %v (%s)", img.PullSpec, err, out)
 				continue
@@ -151,51 +123,30 @@ func kindClusterName() string {
 	return ""
 }
 
-func (k *kind) ShutdownNode(nodeName string) error {
+func (k *kindNodeInfrastructure) ShutdownNode(nodeName string) error {
 	return k.engine.StopContainer(nodeName)
 }
 
-func (k *kind) StartNode(nodeName string) error {
+func (k *kindNodeInfrastructure) StartNode(nodeName string) error {
 	return k.engine.StartContainer(nodeName)
 }
 
 func (k *kind) NewTestContext() api.Context {
 	context := &testcontext.TestContext{}
 	ginkgo.DeferCleanup(context.CleanUp)
+	engine := k.engine.WithTestContext(context)
 	ck := &contextKind{
-		TestContext: context,
-		engine:      k.engine.WithTestContext(context),
+		TestContext:                      context,
+		ExternalContainerContextProvider: engine,
+		engine:                           engine,
 	}
 	return ck
 }
 
 type contextKind struct {
 	*testcontext.TestContext
+	api.ExternalContainerContextProvider
 	engine *container.Engine
-}
-
-func (c *contextKind) CreateExternalContainer(container api.ExternalContainer) (api.ExternalContainer, error) {
-	return c.engine.CreateExternalContainer(container)
-}
-
-func (c *contextKind) DeleteExternalContainer(container api.ExternalContainer) error {
-	return c.engine.DeleteExternalContainer(container)
-}
-
-func (c *contextKind) CreateNetwork(name string, subnets ...string) (api.Network, error) {
-	return c.engine.CreateNetwork(name, subnets...)
-}
-
-func (c *contextKind) AttachNetwork(network api.Network, container string) (api.NetworkInterface, error) {
-	return c.engine.AttachNetwork(network, container)
-}
-
-func (c *contextKind) DetachNetwork(network api.Network, container string) error {
-	return c.engine.DetachNetwork(network, container)
-}
-
-func (c *contextKind) DeleteNetwork(network api.Network) error {
-	return c.engine.DeleteNetwork(network)
 }
 
 func (c *contextKind) SetupUnderlay(f *framework.Framework, underlay api.Underlay) error {

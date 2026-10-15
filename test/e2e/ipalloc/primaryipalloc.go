@@ -5,13 +5,16 @@ package ipalloc
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net"
+	"sync"
+
+	"github.com/onsi/ginkgo/v2"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	v1 "k8s.io/client-go/kubernetes/typed/core/v1"
-	"net"
-	"sync"
 )
 
 // primaryIPAllocator attempts to allocate an IP in the same subnet as a nodes primary network
@@ -24,25 +27,41 @@ type primaryIPAllocator struct {
 
 var pia *primaryIPAllocator
 
+var errNoRange = errors.New("no shared primary IP range")
+
+func IsNoRangeError(err error) bool {
+	return errors.Is(err, errNoRange)
+}
+
 // InitPrimaryIPAllocator must be called to init IP allocator(s). Callers must be synchronise.
 func InitPrimaryIPAllocator(nodeClient v1.NodeInterface) error {
-	var err error
-	pia, err = newPrimaryIPAllocator(nodeClient)
+	allocator, err := newPrimaryIPAllocator(nodeClient)
+	if err != nil && !IsNoRangeError(err) {
+		pia = nil
+		return err
+	}
+	pia = allocator
 	return err
 }
 
 func NewPrimaryIPv4() (net.IP, error) {
+	if pia == nil || pia.v4 == nil {
+		ginkgo.Skip("primary IPv4 allocation is unavailable on this cluster", 2)
+	}
 	return pia.AllocateNextV4()
 }
 
 func NewPrimaryIPv6() (net.IP, error) {
+	if pia == nil || pia.v6 == nil {
+		ginkgo.Skip("primary IPv6 allocation is unavailable on this cluster", 2)
+	}
 	return pia.AllocateNextV6()
 }
 
-// newPrimaryIPAllocator gets a Nodes primary interfaces network info, increments the 2 octet and checks if the IP is still
-// within the subnet of all the K8 nodes.
+// newPrimaryIPAllocator gets a Node's primary interface information and checks that the first candidate is in every Node subnet.
 func newPrimaryIPAllocator(nodeClient v1.NodeInterface) (*primaryIPAllocator, error) {
 	ipa := &primaryIPAllocator{mu: &sync.Mutex{}, nodeClient: nodeClient}
+	var noRangeErr error
 	nodes, err := nodeClient.List(context.TODO(), metav1.ListOptions{})
 	if err != nil {
 		return ipa, fmt.Errorf("failed to get a list of node(s): %v", err)
@@ -50,19 +69,16 @@ func newPrimaryIPAllocator(nodeClient v1.NodeInterface) (*primaryIPAllocator, er
 	if len(nodes.Items) == 0 {
 		return ipa, fmt.Errorf("expected at least one node but found zero")
 	}
-	// FIXME: the approach taken here to find the first node IP+mask and then to increment the second last octet wont work in
-	// all scenarios (node with /24). We should generate an EgressIP compatible with a Node providers primary network and then take care its unique globally.
-
-	// The approach here is to grab initial starting IP from first node found, increment the second last octet.
-	// Approach taken here won't work for Nodes handed /24 subnets.
 	nodePrimaryIPs, err := util.ParseNodePrimaryIfAddr(&nodes.Items[0])
 	if err != nil {
 		return ipa, fmt.Errorf("failed to parse node primary interface address from Node object: %v", err)
 	}
 	if nodePrimaryIPs.V4.IP != nil {
-		// should be ok with /16 and /64 node primary provider subnets
-		// TODO; fixme; what about /24 subnet Nodes like GCP
-		nodePrimaryIPs.V4.IP[len(nodePrimaryIPs.V4.IP)-2]++
+		prefix, _ := nodePrimaryIPs.V4.Net.Mask.Size()
+		// Incrementing the penultimate octet would move a /24 candidate outside its subnet.
+		if prefix != 24 {
+			nodePrimaryIPs.V4.IP[len(nodePrimaryIPs.V4.IP)-2]++
+		}
 		ipa.v4 = newIPAllocator(&net.IPNet{IP: nodePrimaryIPs.V4.IP, Mask: nodePrimaryIPs.V4.Net.Mask})
 	}
 	if nodePrimaryIPs.V6.IP != nil {
@@ -80,7 +96,8 @@ func newPrimaryIPAllocator(nodeClient v1.NodeInterface) (*primaryIPAllocator, er
 			return ipa, err
 		}
 		if !isIPWithinAllSubnets(ipNets, nextIP) {
-			return ipa, fmt.Errorf("IP %s is not within all Node subnets", nextIP)
+			ipa.v4 = nil
+			noRangeErr = fmt.Errorf("%w: IP %s is not within all Node subnets", errNoRange, nextIP)
 		}
 	}
 	if nodePrimaryIPs.V6.IP != nil {
@@ -93,11 +110,14 @@ func newPrimaryIPAllocator(nodeClient v1.NodeInterface) (*primaryIPAllocator, er
 			return ipa, err
 		}
 		if !isIPWithinAllSubnets(ipNets, nextIP) {
-			return ipa, fmt.Errorf("IP %s is not within all Node subnets", nextIP)
+			ipa.v6 = nil
+			if noRangeErr == nil {
+				noRangeErr = fmt.Errorf("%w: IP %s is not within all Node subnets", errNoRange, nextIP)
+			}
 		}
 	}
 
-	return ipa, nil
+	return ipa, noRangeErr
 }
 
 func getNodePrimaryProviderIPs(nodes []corev1.Node, isIPv6 bool) ([]*net.IPNet, error) {

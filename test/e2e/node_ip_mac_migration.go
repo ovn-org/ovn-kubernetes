@@ -85,7 +85,6 @@ spec:
 		assignedNodePort       int32
 		ovnkPod                v1.Pod
 		f                      = wrappedTestFramework(namespacePrefix)
-		providerCtx            infraapi.Context
 		externalContainer      infraapi.ExternalContainer
 		podLabels              = map[string]string{
 			"app": "ip-migration-test",
@@ -98,15 +97,10 @@ spec:
 	)
 
 	BeforeEach(func() {
-		providerCtx = infraprovider.Get().NewTestContext()
-		By("Creating the temp directory")
-		var err error
-		tmpDirIPMigration, err = os.MkdirTemp("", "e2e")
-		Expect(err).NotTo(HaveOccurred())
-
 		By("Selecting 2 random worker nodes from the list for IP address migration tests")
 		// Get the primary worker node for IP address migration.
 		// Get the secondary worker node to spawn another pod on for pod to pod reachability tests.
+		var err error
 		var workerNodes *v1.NodeList
 		Eventually(func(g Gomega) {
 			workerNodes, err = e2enode.GetReadySchedulableNodes(context.TODO(), f.ClientSet)
@@ -128,28 +122,16 @@ spec:
 		secondaryWorkerNodeIPs[4], secondaryWorkerNodeIPs[6] = getNodeInternalAddresses(&secondaryWorkerNode)
 		framework.Logf("Found node IPs for worker node: %v. Found node IPs for secondary worker node: %v",
 			workerNodeIPs, secondaryWorkerNodeIPs)
-
-		By("Creating a cluster external container")
-		externalContainerIPs = make(map[int]string)
-		primaryProviderNetwork, err := infraprovider.Get().PrimaryNetwork()
-		framework.ExpectNoError(err, "failed to get primary network")
-		externalContainerPort := infraprovider.Get().GetExternalContainerPort()
-		externalContainer = infraapi.ExternalContainer{Name: externalContainerName, Image: images.AgnHost(), Network: primaryProviderNetwork,
-			CmdArgs: getAgnHostHTTPPortBindCMDArgs(externalContainerPort), ExtPort: externalContainerPort}
-		externalContainer, err = providerCtx.CreateExternalContainer(externalContainer)
-		framework.ExpectNoError(err, "failed to create external container")
-		externalContainerIPs[4], externalContainerIPs[6] = externalContainer.GetIPv4(), externalContainer.GetIPv6()
-	})
-
-	AfterEach(func() {
-		By("Removing the temp directory")
-		Expect(os.RemoveAll(tmpDirIPMigration)).To(Succeed())
 	})
 
 	for _, ipAddrFamily := range []int{4, 6} {
 		ipAddrFamily := ipAddrFamily // Required to avoid race conditions due to pointer assignment.
 		When(fmt.Sprintf("the node IPv%d address is updated", ipAddrFamily), func() {
 			BeforeEach(func() {
+				if infraprovider.Get().Name() == "kube" {
+					Skip("node IP migration uses local Docker and restarts kubelet")
+				}
+
 				By("Setting rollbackNeeded to false")
 				rollbackNeeded = false
 
@@ -158,6 +140,26 @@ spec:
 					framework.Logf("IP address family %d not found in worker IPs: %v", ipAddrFamily, workerNodeIPs)
 					Skip(fmt.Sprintf("IP address family %d is not supported on this cluster", ipAddrFamily))
 				}
+				providerCtx := infraprovider.Get().NewTestContext()
+				By("Creating the temp directory")
+				var err error
+				tmpDirIPMigration, err = os.MkdirTemp("", "e2e")
+				Expect(err).NotTo(HaveOccurred())
+				DeferCleanup(func() {
+					By("Removing the temp directory")
+					Expect(os.RemoveAll(tmpDirIPMigration)).To(Succeed())
+				})
+
+				By("Creating a cluster external container")
+				externalContainerIPs = make(map[int]string)
+				primaryProviderNetwork, err := infraprovider.Get().PrimaryNetwork()
+				framework.ExpectNoError(err, "failed to get primary network")
+				externalContainerPort := infraprovider.Get().GetExternalContainerPort()
+				externalContainer = infraapi.ExternalContainer{Name: externalContainerName, Image: images.AgnHost(), Network: primaryProviderNetwork,
+					CmdArgs: getAgnHostHTTPPortBindCMDArgs(externalContainerPort), ExtPort: externalContainerPort}
+				externalContainer, err = providerCtx.CreateExternalContainer(externalContainer)
+				framework.ExpectNoError(err, "failed to create external container")
+				externalContainerIPs[4], externalContainerIPs[6] = externalContainer.GetIPv4(), externalContainer.GetIPv6()
 
 				By("Creating a test pod on both selected worker nodes")
 				podWorkerNode = newAgnhostPodOnNode(
@@ -209,7 +211,6 @@ spec:
 				By(fmt.Sprintf("Finding worker node %s's IPv%d migration IP address", workerNode.Name, ipAddrFamily))
 				// Pick something at the end of the range to avoid conflicts with existing allocated IPs.
 				// Also exclude the current node IPs and the egressIP (if already selected).
-				var err error
 				migrationWorkerNodeIP, err = findLastFreeSubnetIP(
 					externalContainerName,
 					externalContainerIPs[ipAddrFamily],

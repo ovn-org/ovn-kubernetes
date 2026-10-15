@@ -88,7 +88,7 @@ var _ = Describe("Multi Homing", feature.MultiHoming, func() {
 
 			if netConfig.topology == "localnet" {
 				By("applying ovs bridge mapping")
-				Expect(providerCtx.SetupUnderlay(f, infraapi.Underlay{
+				Expect(infraprovider.SetupUnderlay(providerCtx, f, infraapi.Underlay{
 					LogicalNetworkName: netConfig.networkName,
 					VlanID:             netConfig.vlanID,
 				})).To(Succeed())
@@ -314,7 +314,7 @@ var _ = Describe("Multi Homing", feature.MultiHoming, func() {
 				}
 
 				By("setting up the localnet underlay")
-				Expect(providerCtx.SetupUnderlay(f, infraapi.Underlay{
+				Expect(infraprovider.SetupUnderlay(providerCtx, f, infraapi.Underlay{
 					BridgeName:         deploymentconfig.Get().ExternalBridgeName(),
 					LogicalNetworkName: netConfig.networkName,
 				})).To(Succeed())
@@ -827,7 +827,7 @@ var _ = Describe("Multi Homing", feature.MultiHoming, func() {
 				serverPodConfig.namespace = f.Namespace.Name
 
 				if netConfig.topology == "localnet" {
-					Expect(providerCtx.SetupUnderlay(f, infraapi.Underlay{
+					Expect(infraprovider.SetupUnderlay(providerCtx, f, infraapi.Underlay{
 						LogicalNetworkName: netConfig.networkName,
 						VlanID:             netConfig.vlanID,
 					})).To(Succeed())
@@ -1203,7 +1203,7 @@ var _ = Describe("Multi Homing", feature.MultiHoming, func() {
 						})
 
 					By("setting up the localnet underlay")
-					Expect(providerCtx.SetupUnderlay(f, infraapi.Underlay{
+					Expect(infraprovider.SetupUnderlay(providerCtx, f, infraapi.Underlay{
 						LogicalNetworkName: netConfig.networkName,
 						VlanID:             netConfig.vlanID,
 					})).To(Succeed())
@@ -1366,7 +1366,7 @@ var _ = Describe("Multi Homing", feature.MultiHoming, func() {
 
 					Context("and the service connected to the underlay is reconfigured to connect to the new VLAN-ID", func() {
 						BeforeEach(func() {
-							Expect(providerCtx.SetupUnderlay(f, infraapi.Underlay{
+							Expect(infraprovider.SetupUnderlay(providerCtx, f, infraapi.Underlay{
 								LogicalNetworkName: netConfig.networkName,
 								VlanID:             newLocalnetVLANID,
 							})).To(Succeed(), "configuring the OVS bridge with new localnet vlan id")
@@ -1580,7 +1580,7 @@ var _ = Describe("Multi Homing", feature.MultiHoming, func() {
 						})
 
 					By("setting up the localnet underlay with a trunked configuration")
-					Expect(providerCtx.SetupUnderlay(f, infraapi.Underlay{
+					Expect(infraprovider.SetupUnderlay(providerCtx, f, infraapi.Underlay{
 						LogicalNetworkName: netConfig.networkName,
 						VlanID:             netConfig.vlanID,
 					})).To(Succeed(), "configuring the OVS bridge")
@@ -1689,7 +1689,7 @@ ip a add %[4]s/24 dev %[2]s
 
 					if netConfig.topology == "localnet" {
 						By("setting up the localnet underlay")
-						Expect(providerCtx.SetupUnderlay(f, infraapi.Underlay{
+						Expect(infraprovider.SetupUnderlay(providerCtx, f, infraapi.Underlay{
 							LogicalNetworkName: netConfig.networkName,
 							VlanID:             netConfig.vlanID,
 						})).To(Succeed())
@@ -2113,7 +2113,7 @@ ip a add %[4]s/24 dev %[2]s
 					netConfig := newNetworkAttachmentConfig(netConfigParams)
 
 					By("setting up the localnet underlay")
-					Expect(providerCtx.SetupUnderlay(f, infraapi.Underlay{
+					Expect(infraprovider.SetupUnderlay(providerCtx, f, infraapi.Underlay{
 						LogicalNetworkName: netConfig.networkName,
 						VlanID:             netConfig.vlanID,
 					})).To(Succeed())
@@ -2240,7 +2240,7 @@ ip a add %[4]s/24 dev %[2]s
 					netConfig := newNetworkAttachmentConfig(netConfigParams)
 
 					By("setting up the localnet underlay")
-					Expect(providerCtx.SetupUnderlay(f, infraapi.Underlay{
+					Expect(infraprovider.SetupUnderlay(providerCtx, f, infraapi.Underlay{
 						LogicalNetworkName: netConfig.networkName,
 						VlanID:             netConfig.vlanID,
 					})).To(Succeed())
@@ -2412,7 +2412,7 @@ ip a add %[4]s/24 dev %[2]s
 
 				if netConfig.topology == "localnet" {
 					By("setting up the localnet underlay")
-					Expect(providerCtx.SetupUnderlay(f, infraapi.Underlay{
+					Expect(infraprovider.SetupUnderlay(providerCtx, f, infraapi.Underlay{
 						LogicalNetworkName: netConfig.networkName,
 						VlanID:             netConfig.vlanID,
 					})).To(Succeed())
