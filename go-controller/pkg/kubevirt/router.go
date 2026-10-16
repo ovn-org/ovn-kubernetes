@@ -6,8 +6,6 @@ package kubevirt
 import (
 	"fmt"
 
-	kubevirtv1 "kubevirt.io/api/core/v1"
-
 	corev1 "k8s.io/api/core/v1"
 	utilnet "k8s.io/utils/net"
 	"k8s.io/utils/ptr"
@@ -61,16 +59,33 @@ func DeleteRoutingForMigratedPod(nbClient libovsdbclient.Client, pod *corev1.Pod
 	return DeleteRoutingForMigratedPodWithZone(nbClient, pod, "")
 }
 
-// EnsureDefaultNetworkForLocalMigratablePod reconciles default-network routing
-// for a local live-migratable pod and refreshes its IPv4 gateway neighbor entry
-// when the migration target is ready.
-func EnsureDefaultNetworkForLocalMigratablePod(watchFactory *factory.WatchFactory, nbClient libovsdbclient.Client,
-	lsManager *logicalswitchmanager.LogicalSwitchManager, pod *corev1.Pod, clusterSubnets []config.CIDRNetworkEntry) error {
+// EnsureDefaultNetworkForMigratablePod reconciles local or remote default-network
+// routing for the active VM pod without waiting for guest readiness. For a ready
+// local migration target, it refreshes the IPv4 gateway neighbor entry after
+// routing has converged.
+func EnsureDefaultNetworkForMigratablePod(watchFactory *factory.WatchFactory, nbClient libovsdbclient.Client,
+	lsManager *logicalswitchmanager.LogicalSwitchManager, localNodeName string, pod *corev1.Pod, clusterSubnets []config.CIDRNetworkEntry) error {
+	if !util.PodScheduled(pod) || util.PodWantsHostNetwork(pod) || !IsPodLiveMigratable(pod) || util.PodCompleted(pod) {
+		return nil
+	}
+	status, err := DiscoverLiveMigrationStatus(watchFactory.PodCoreInformer().Lister(), pod)
+	if err != nil {
+		return fmt.Errorf("failed discovering live migration status for pod %s/%s: %w", pod.Namespace, pod.Name, err)
+	}
+	if status != nil && status.ActivePod.UID != pod.UID {
+		return nil
+	}
+	if pod.Spec.NodeName != localNodeName {
+		return ensureRemoteZonePodAddressesToNodeRoute(watchFactory, nbClient, pod)
+	}
 	if err := ensureLocalZonePodAddressesToNodeRoute(watchFactory, nbClient, lsManager, pod, types.DefaultNetworkName, clusterSubnets); err != nil {
 		return fmt.Errorf("failed ensuring local-zone migration routes for pod %s/%s: %w", pod.Namespace, pod.Name, err)
 	}
-	if config.IPv4Mode {
-		return reconcileIPv4GatewayForMigratablePod(watchFactory, pod)
+	if config.IPv4Mode && status != nil && status.IsTarget(pod) {
+		r := NewClusterDefaultNetworkGatewayAnnouncer(types.K8sMgmtIntfName)
+		if err := r.AnnounceIPv4AfterLiveMigration(status); err != nil {
+			return fmt.Errorf("failed reconciling IPv4 gateway after live migration for pod %s/%s: %w", pod.Namespace, pod.Name, err)
+		}
 	}
 	return nil
 }
@@ -85,13 +100,6 @@ func EnsureDefaultNetworkForLocalMigratablePod(watchFactory *factory.WatchFactor
 //   - static route with VM ip as dst-ip prefix and output port the LRP pointing to the VM's node switch
 func ensureLocalZonePodAddressesToNodeRoute(watchFactory *factory.WatchFactory, nbClient libovsdbclient.Client,
 	lsManager *logicalswitchmanager.LogicalSwitchManager, pod *corev1.Pod, nadKey string, clusterSubnets []config.CIDRNetworkEntry) error {
-	vmReady, err := virtualMachineReady(watchFactory, pod)
-	if err != nil {
-		return err
-	}
-	if !vmReady {
-		return nil
-	}
 	podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations, nadKey)
 	if err != nil {
 		return fmt.Errorf("failed reading local pod annotation: %v", err)
@@ -158,34 +166,12 @@ func ensureLocalZonePodAddressesToNodeRoute(watchFactory *factory.WatchFactory, 
 	return nil
 }
 
-func reconcileIPv4GatewayForMigratablePod(watchFactory *factory.WatchFactory, pod *corev1.Pod) error {
-	status, err := DiscoverLiveMigrationStatus(watchFactory.PodCoreInformer().Lister(), pod)
-	if err != nil {
-		return fmt.Errorf("failed discovering live migration status for pod %s/%s: %w", pod.Namespace, pod.Name, err)
-	}
-	if status == nil || !status.IsTarget(pod) {
-		return nil
-	}
-	r := NewClusterDefaultNetworkGatewayAnnouncer(types.K8sMgmtIntfName)
-	if err := r.AnnounceIPv4AfterLiveMigration(status); err != nil {
-		return fmt.Errorf("failed reconciling IPv4 gateway after live migration for pod %s/%s: %w", pod.Namespace, pod.Name, err)
-	}
-	return nil
-}
-
-// EnsureRemoteZonePodAddressesToNodeRoute adds static routes when a live
+// ensureRemoteZonePodAddressesToNodeRoute adds static routes when a live
 // migrated pod belongs to a remote zone, sending traffic over the transit switch
 // port of the node where the pod is running:
 //   - A dst-ip with live migrated pod ip as prefix and nexthop the pod's
 //     current node transit switch port.
-func EnsureRemoteZonePodAddressesToNodeRoute(watchFactory *factory.WatchFactory, nbClient libovsdbclient.Client, pod *corev1.Pod) error {
-	vmReady, err := virtualMachineReady(watchFactory, pod)
-	if err != nil {
-		return err
-	}
-	if !vmReady {
-		return nil
-	}
+func ensureRemoteZonePodAddressesToNodeRoute(watchFactory *factory.WatchFactory, nbClient libovsdbclient.Client, pod *corev1.Pod) error {
 	// DHCPOptions are only needed at the node is running the VM
 	// at that's the local zone node not the remote zone
 	if err := DeleteDHCPOptions(nbClient, pod); err != nil {
@@ -255,27 +241,4 @@ func EnsureRemoteZonePodAddressesToNodeRoute(watchFactory *factory.WatchFactory,
 		}
 	}
 	return nil
-}
-
-func virtualMachineReady(watchFactory *factory.WatchFactory, pod *corev1.Pod) (bool, error) {
-	isMigratedSourcePodStale, err := IsMigratedSourcePodStale(watchFactory, pod)
-	if err != nil {
-		return false, err
-	}
-	if util.PodWantsHostNetwork(pod) || !IsPodLiveMigratable(pod) || isMigratedSourcePodStale {
-		return false, nil
-	}
-
-	// When a virtual machine starts up, this
-	// label signals from KubeVirt that the VM is
-	// ready to receive traffic.
-	targetNode := pod.Labels[kubevirtv1.NodeNameLabel]
-
-	// This annotation only appears on live migration scenarios and it signals
-	// that target VM pod is ready to receive traffic so we can route
-	// traffic to it.
-	targetReadyTimestamp := pod.Annotations[kubevirtv1.MigrationTargetReadyTimestamp]
-
-	// VM is ready to receive traffic
-	return targetNode == pod.Spec.NodeName || targetReadyTimestamp != "", nil
 }

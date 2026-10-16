@@ -154,31 +154,6 @@ func AllVMPodsAreCompleted(podLister listersv1.PodLister, pod *corev1.Pod) (bool
 	return true, nil
 }
 
-// IsMigratedSourcePodStale returns true if the live-migratable pod is completed
-// or has a newer sibling pod for the same VM.
-func IsMigratedSourcePodStale(client *factory.WatchFactory, pod *corev1.Pod) (bool, error) {
-	if !IsPodLiveMigratable(pod) {
-		return false, nil
-	}
-
-	if util.PodCompleted(pod) {
-		return true, nil
-	}
-
-	vmPods, err := findVMRelatedPods(client, pod)
-	if err != nil {
-		return false, fmt.Errorf("failed finding related pods for pod %s/%s when checking live migration left overs: %v", pod.Namespace, pod.Name, err)
-	}
-
-	for _, vmPod := range vmPods {
-		if vmPod.CreationTimestamp.After(pod.CreationTimestamp.Time) {
-			return true, nil
-		}
-	}
-
-	return false, nil
-}
-
 // ZoneContainsPodSubnet returns the switch name and true if the logical switch
 // contains the pod subnet, meaning this zone owns that subnet.
 func ZoneContainsPodSubnet(lsManager *logicalswitchmanager.LogicalSwitchManager, ips []*net.IPNet) (string, bool) {
@@ -367,17 +342,10 @@ func FindLiveMigratablePods(watchFactory *factory.WatchFactory) ([]*corev1.Pod, 
 
 // allocateSyncMigratablePodIPs refills the IP pool when the node has taken over
 // the VM subnet for live-migrated VMs.
-func allocateSyncMigratablePodIPs(watchFactory *factory.WatchFactory, lsManager *logicalswitchmanager.LogicalSwitchManager, nodeName, nadKey string, pod *corev1.Pod, allocatePodIPsOnSwitch func(*corev1.Pod, []*net.IPNet, string, string) (string, error)) (*ktypes.NamespacedName, string, *util.PodAnnotation, error) {
-	isStale, err := IsMigratedSourcePodStale(watchFactory, pod)
-	if err != nil {
-		return nil, "", nil, err
-	}
-
-	// We care only for Running virt-launcher pods
-	if isStale {
+func allocateSyncMigratablePodIPs(lsManager *logicalswitchmanager.LogicalSwitchManager, nodeName, nadKey string, pod *corev1.Pod, allocatePodIPsOnSwitch func(*corev1.Pod, []*net.IPNet, string, string) (string, error)) (*ktypes.NamespacedName, string, *util.PodAnnotation, error) {
+	if util.PodCompleted(pod) {
 		return nil, "", nil, nil
 	}
-
 	vmDescription, err := NewVMDescriptionFromPod(pod)
 	if err != nil {
 		return nil, "", nil, err
@@ -406,9 +374,9 @@ func allocateSyncMigratablePodIPs(watchFactory *factory.WatchFactory, lsManager 
 
 // AllocateSyncMigratablePodIPsOnZone refills the IP pool with the pod's IPs if
 // those IPs belong to the zone.
-func AllocateSyncMigratablePodIPsOnZone(watchFactory *factory.WatchFactory, lsManager *logicalswitchmanager.LogicalSwitchManager, nadKey string, pod *corev1.Pod, allocatePodIPsOnSwitch func(*corev1.Pod, []*net.IPNet, string, string) (string, error)) (*ktypes.NamespacedName, string, *util.PodAnnotation, error) {
+func AllocateSyncMigratablePodIPsOnZone(lsManager *logicalswitchmanager.LogicalSwitchManager, nadKey string, pod *corev1.Pod, allocatePodIPsOnSwitch func(*corev1.Pod, []*net.IPNet, string, string) (string, error)) (*ktypes.NamespacedName, string, *util.PodAnnotation, error) {
 	// We care about the whole zone so we pass the nodeName empty
-	return allocateSyncMigratablePodIPs(watchFactory, lsManager, "", nadKey, pod, allocatePodIPsOnSwitch)
+	return allocateSyncMigratablePodIPs(lsManager, "", nadKey, pod, allocatePodIPsOnSwitch)
 }
 
 // IsPodOwnedByVirtualMachine returns true if the pod is owned by a

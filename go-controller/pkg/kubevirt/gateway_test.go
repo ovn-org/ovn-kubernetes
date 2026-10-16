@@ -171,10 +171,14 @@ func TestLocalMigratablePodRoutingAndGateway(t *testing.T) {
 	for _, tc := range []struct {
 		name                                                        string
 		home, notReady, source, ipv6Only, routeFailure, sendFailure bool
+		sourceGone, sourceCompleted, preCopy                        bool
 	}{
 		{name: "foreign target"},
 		{name: "return home", home: true},
 		{name: "in progress", notReady: true},
+		{name: "prepare target after source deletion", notReady: true, sourceGone: true},
+		{name: "prepare target after source completion", notReady: true, sourceCompleted: true},
+		{name: "pre-copy takeover before ready timestamp", notReady: true, preCopy: true},
 		{name: "source pod", source: true},
 		{name: "IPv6 only", ipv6Only: true},
 		{name: "routing failure", routeFailure: true},
@@ -209,9 +213,16 @@ func TestLocalMigratablePodRoutingAndGateway(t *testing.T) {
 			source.CreationTimestamp = metav1.NewTime(pod.CreationTimestamp.Add(-time.Minute))
 			delete(source.Annotations, kubevirtv1.MigrationTargetReadyTimestamp)
 			source.Labels[kubevirtv1.NodeNameLabel] = "source"
-			for _, p := range []*corev1.Pod{source, pod} {
-				require.NoError(t, wf.PodCoreInformer().Informer().GetStore().Add(p))
+			if tc.sourceCompleted {
+				source.Status.Phase = corev1.PodSucceeded
 			}
+			if !tc.sourceGone {
+				require.NoError(t, wf.PodCoreInformer().Informer().GetStore().Add(source))
+			}
+			if tc.preCopy {
+				pod.Labels[kubevirtv1.NodeNameLabel] = pod.Spec.NodeName
+			}
+			require.NoError(t, wf.PodCoreInformer().Informer().GetStore().Add(pod))
 			if !tc.routeFailure {
 				require.NoError(t, wf.NodeCoreInformer().Informer().GetStore().Add(&corev1.Node{
 					ObjectMeta: metav1.ObjectMeta{Name: "target", Annotations: map[string]string{util.OvnNodeID: "4"}},
@@ -258,20 +269,24 @@ func TestLocalMigratablePodRoutingAndGateway(t *testing.T) {
 				pod = source
 			}
 			clusterSubnets := []config.CIDRNetworkEntry{{CIDR: ovntest.MustParseIPNet(clusterCIDR), HostSubnetLength: 24}}
-			if tc.routeFailure || tc.ipv6Only {
-				// Exercise the public coordinator: route failures and IPv6-only
-				// configurations must not attempt to send a GARP.
-				err = EnsureDefaultNetworkForLocalMigratablePod(wf, nbClient, lsManager, pod, clusterSubnets)
+			if tc.routeFailure || tc.ipv6Only || tc.notReady || tc.source {
+				// Exercise the public coordinator's routing and announcement gates.
+				err = EnsureDefaultNetworkForMigratablePod(wf, nbClient, lsManager, "target", pod, clusterSubnets)
+				if tc.sourceGone || tc.sourceCompleted || tc.preCopy {
+					// Routes are prepared before the ready timestamp. The public
+					// coordinator must succeed without attempting a gateway GARP.
+					require.NoError(t, err)
+					require.Eventually(t, func() bool {
+						var routes []nbdb.LogicalRouterStaticRoute
+						return nbClient.List(context.Background(), &routes) == nil && len(routes) == 2
+					}, time.Second, 10*time.Millisecond)
+				}
 			} else {
 				require.NoError(t, ensureLocalZonePodAddressesToNodeRoute(wf, nbClient, lsManager, pod, types.DefaultNetworkName, clusterSubnets))
-				if tc.notReady || tc.source {
-					err = reconcileIPv4GatewayForMigratablePod(wf, pod)
-				} else {
-					status, discoverErr := DiscoverLiveMigrationStatus(wf.PodCoreInformer().Lister(), pod)
-					require.NoError(t, discoverErr)
-					require.NotNil(t, status)
-					err = r.AnnounceIPv4AfterLiveMigration(status)
-				}
+				status, discoverErr := DiscoverLiveMigrationStatus(wf.PodCoreInformer().Lister(), pod)
+				require.NoError(t, discoverErr)
+				require.NotNil(t, status)
+				err = r.AnnounceIPv4AfterLiveMigration(status)
 			}
 			switch {
 			case tc.routeFailure:
