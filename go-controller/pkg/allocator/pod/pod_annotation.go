@@ -21,7 +21,6 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/allocator/ip/subnet"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/allocator/mac"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/generator/udn"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/persistentips"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
@@ -77,7 +76,6 @@ func WithMACRegistry(m mac.Register) AllocatorOption {
 func (allocator *PodAnnotationAllocator) AllocatePodAnnotation(
 	ipAllocator subnet.IPAllocator,
 	subnetName, owner string,
-	node *corev1.Node,
 	pod *corev1.Pod,
 	nadKey string,
 	network *nadapi.NetworkSelectionElement,
@@ -93,7 +91,6 @@ func (allocator *PodAnnotationAllocator) AllocatePodAnnotation(
 		ipAllocator,
 		subnetName, owner,
 		allocator.netInfo,
-		node,
 		pod,
 		nadKey,
 		network,
@@ -110,7 +107,6 @@ func allocatePodAnnotation(
 	ipAllocator subnet.IPAllocator,
 	subnetName, owner string,
 	netInfo util.NetInfo,
-	node *corev1.Node,
 	pod *corev1.Pod,
 	nadKey string,
 	network *nadapi.NetworkSelectionElement,
@@ -132,7 +128,6 @@ func allocatePodAnnotation(
 			subnetName, owner,
 			idAllocator,
 			netInfo,
-			node,
 			currentPod,
 			nadKey,
 			network,
@@ -171,7 +166,6 @@ func (allocator *PodAnnotationAllocator) AllocatePodAnnotationWithTunnelID(
 	ipAllocator subnet.IPAllocator,
 	subnetName, owner string,
 	idAllocator id.NamedAllocator,
-	node *corev1.Node,
 	pod *corev1.Pod,
 	nadKey string,
 	network *nadapi.NetworkSelectionElement,
@@ -188,7 +182,6 @@ func (allocator *PodAnnotationAllocator) AllocatePodAnnotationWithTunnelID(
 		subnetName, owner,
 		idAllocator,
 		allocator.netInfo,
-		node,
 		pod,
 		nadKey,
 		network,
@@ -206,7 +199,6 @@ func allocatePodAnnotationWithTunnelID(
 	subnetName, owner string,
 	idAllocator id.NamedAllocator,
 	netInfo util.NetInfo,
-	node *corev1.Node,
 	pod *corev1.Pod,
 	nadKey string,
 	network *nadapi.NetworkSelectionElement,
@@ -225,7 +217,6 @@ func allocatePodAnnotationWithTunnelID(
 			subnetName, owner,
 			idAllocator,
 			netInfo,
-			node,
 			currentPod,
 			nadKey,
 			network,
@@ -343,7 +334,6 @@ func allocatePodAnnotationWithRollback(
 	subnetName, owner string,
 	idAllocator id.NamedAllocator,
 	netInfo util.NetInfo,
-	node *corev1.Node,
 	pod *corev1.Pod,
 	nadKey string,
 	network *nadapi.NetworkSelectionElement,
@@ -563,7 +553,7 @@ func allocatePodAnnotationWithRollback(
 		}
 
 		// handle routes & gateways
-		err = AddRoutesGatewayIP(netInfo, node, pod, tentative, network)
+		err = AddRoutesGatewayIP(netInfo, pod, tentative, network)
 		if err != nil {
 			return
 		}
@@ -622,7 +612,6 @@ func hairpinMasqueradeIPToRoute(isIPv6 bool, gatewayIP net.IP) util.PodRoute {
 // with the gateways derived from the allocated IPs
 func AddRoutesGatewayIP(
 	netinfo util.NetInfo,
-	node *corev1.Node,
 	pod *corev1.Pod,
 	podAnnotation *util.PodAnnotation,
 	network *nadapi.NetworkSelectionElement) error {
@@ -670,20 +659,7 @@ func AddRoutesGatewayIP(
 				}
 			}
 			if _, isIPv6Mode := netinfo.IPMode(); isIPv6Mode {
-				var routerPortMac net.HardwareAddr
-				if !util.UDNLayer2NodeUsesTransitRouter(node) {
-					joinAddrs, err := udn.GetGWRouterIPs(node, netinfo.GetNetInfo())
-					if err != nil {
-						if util.IsAnnotationNotSetError(err) {
-							return types.NewSuppressedError(err)
-						}
-						return fmt.Errorf("failed parsing node gateway router join addresses, network %q, %w", netinfo.GetNetworkName(), err)
-					}
-					routerPortMac = util.IPAddrToHWAddr(joinAddrs[0].IP)
-				} else {
-					routerPortMac = nodeLRPMAC
-				}
-				podAnnotation.GatewayIPv6LLA = util.HWAddrToIPv6LLA(routerPortMac)
+				podAnnotation.GatewayIPv6LLA = util.HWAddrToIPv6LLA(nodeLRPMAC)
 			}
 			return nil
 		case types.Layer3Topology:

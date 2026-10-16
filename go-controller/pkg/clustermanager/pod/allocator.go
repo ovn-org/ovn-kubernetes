@@ -401,16 +401,10 @@ func (a *PodAllocator) allocatePodOnNAD(pod *corev1.Pod, nadKey string, network 
 		return nil
 	}
 
-	node, err := a.nodeLister.Get(pod.Spec.NodeName)
-	if err != nil {
-		return fmt.Errorf("failed to get node %q: %w", pod.Spec.NodeName, err)
-	}
-
 	updatedPod, podAnnotation, err := a.podAnnotationAllocator.AllocatePodAnnotationWithTunnelID(
 		ipAllocator,
 		a.netInfo.GetNetworkName(), podIdAllocationName(nadKey, string(pod.UID)),
 		idAllocator,
-		node,
 		pod,
 		nadKey,
 		network,

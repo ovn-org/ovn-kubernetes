@@ -26,7 +26,6 @@ import (
 	nodecontroller "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/controllers/node"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/generator/udn"
-	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kubevirt"
 	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/nbdb"
@@ -134,21 +133,7 @@ func (h *layer2UserDefinedNetworkControllerEventHandler) DeleteResource(obj, cac
 // Given an old and a new object; The inRetryCache boolean argument is to indicate if the given resource
 // is in the retryCache or not.
 func (h *layer2UserDefinedNetworkControllerEventHandler) UpdateResource(oldObj, newObj interface{}, inRetryCache bool) error {
-	switch h.objType {
-	case factory.PodType:
-		newPod := newObj.(*corev1.Pod)
-		oldPod := oldObj.(*corev1.Pod)
-		if err := h.oc.ensurePodForUserDefinedNetwork(newPod, shouldAddPort(oldPod, newPod, inRetryCache)); err != nil {
-			return err
-		}
-
-		if h.oc.isPodScheduledOnLocalNode(newPod) {
-			return h.oc.updateLocalPodEvent(newPod)
-		}
-		return nil
-	default:
-		return h.oc.UpdateUserDefinedNetworkResourceCommon(h.objType, oldObj, newObj, inRetryCache)
-	}
+	return h.oc.UpdateUserDefinedNetworkResourceCommon(h.objType, oldObj, newObj, inRetryCache)
 }
 
 func (h *layer2UserDefinedNetworkControllerEventHandler) SyncFunc(objs []interface{}) error {
@@ -222,9 +207,6 @@ type Layer2UserDefinedNetworkController struct {
 
 	// EgressIP controller utilized only to initialize a network with OVN polices to support EgressIP functionality.
 	eIPController *EgressIPController
-
-	// reconcile the virtual machine default gateway sending GARPs and RAs
-	gatewayAnnouncer *kubevirt.Layer2GatewayAnnouncer
 }
 
 // NewLayer2UserDefinedNetworkController create a new OVN controller for the given layer2 NAD
@@ -309,12 +291,6 @@ func NewLayer2UserDefinedNetworkController(
 
 	if util.IsNetworkSegmentationSupportEnabled() && netInfo.IsPrimaryNetwork() {
 		oc.svcController = serviceController
-		oc.gatewayAnnouncer = kubevirt.NewLayer2GatewayAnnouncer(
-			oc.watchFactory,
-			oc.GetNetInfo(),
-			util.GetNetworkScopedK8sMgmtHostIntfName(uint(oc.GetNetworkID())),
-			oc.networkManager.GetNetworkNameForNADKey,
-		)
 	}
 
 	if oc.allocatesPodAnnotation() {
@@ -1215,41 +1191,6 @@ func (oc *Layer2UserDefinedNetworkController) DeregisterServiceNetwork() {
 			klog.Errorf("Error deregistering OVN-Kubernetes Services controller for network %s: %v", oc.GetNetworkName(), err)
 		}
 	}
-}
-
-func (oc *Layer2UserDefinedNetworkController) updateLocalPodEvent(pod *corev1.Pod) error {
-	if kubevirt.IsPodAllowedForMigration(pod, oc.GetNetInfo()) {
-		kubevirtLiveMigrationStatus, err := kubevirt.DiscoverLiveMigrationStatus(oc.watchFactory.PodCoreInformer().Lister(), pod)
-		if err != nil {
-			return err
-		}
-		if kubevirtLiveMigrationStatus != nil && kubevirtLiveMigrationStatus.TargetPod.Name == pod.Name {
-			if err := oc.reconcileLiveMigrationTargetZone(kubevirtLiveMigrationStatus); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-func (oc *Layer2UserDefinedNetworkController) reconcileLiveMigrationTargetZone(kubevirtLiveMigrationStatus *kubevirt.LiveMigrationStatus) error {
-	if oc.gatewayAnnouncer == nil {
-		return nil
-	}
-	hasIPv4Subnet, hasIPv6Subnet := oc.IPMode()
-	if hasIPv4Subnet {
-		if err := oc.gatewayAnnouncer.AnnounceIPv4AfterLiveMigration(kubevirtLiveMigrationStatus); err != nil {
-			return fmt.Errorf("failed reconciling IPv4 default gw after live migration at target pod '%s/%s': %w",
-				kubevirtLiveMigrationStatus.TargetPod.Namespace, kubevirtLiveMigrationStatus.TargetPod.Name, err)
-		}
-	}
-	if hasIPv6Subnet {
-		if err := oc.gatewayAnnouncer.AnnounceIPv6AfterLiveMigration(kubevirtLiveMigrationStatus); err != nil {
-			return fmt.Errorf("failed reconciling IPv6 default gw after live migration at target pod '%s/%s': %w",
-				kubevirtLiveMigrationStatus.TargetPod.Namespace, kubevirtLiveMigrationStatus.TargetPod.Name, err)
-		}
-	}
-	return nil
 }
 
 // syncClusterRouterPorts connects the network switch to the transit router

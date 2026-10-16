@@ -169,9 +169,8 @@ func TestAllocatePodAnnotationIPOwnership(t *testing.T) {
 					&util.PodAnnotation{IPs: ips, MAC: util.IPAddrToHWAddr(ips[0].IP)}, nadKey)
 				g.Expect(err).NotTo(gomega.HaveOccurred())
 			}
-			node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{"k8s.ovn.org/node-id": "4"}}}
 			_, annotation, rollback, err := allocatePodAnnotationWithRollback(allocator, "network", "pod",
-				&idAllocatorStub{nextID: 100}, netInfo, node, p, nadKey,
+				&idAllocatorStub{nextID: 100}, netInfo, p, nadKey,
 				&nadapi.NetworkSelectionElement{IPRequest: util.StringSlice(ips)}, nil, nil, false, types.NetworkRolePrimary)
 			if tc.owner == "pod" {
 				g.Expect(err).NotTo(gomega.HaveOccurred())
@@ -217,21 +216,12 @@ func Test_allocatePodAnnotationReturnsUpdatedPod(t *testing.T) {
 	podIndexer := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc})
 	g.Expect(podIndexer.Add(pod)).To(gomega.Succeed())
 
-	node := &corev1.Node{
-		ObjectMeta: metav1.ObjectMeta{
-			Annotations: map[string]string{
-				"k8s.ovn.org/node-subnets": `{"default":["10.128.0.0/24"]}`,
-			},
-		},
-	}
-
 	updatedPod, podAnnotation, err := allocatePodAnnotation(
 		corelisters.NewPodLister(podIndexer),
 		&kube.Kube{KClient: fake.NewSimpleClientset(pod.DeepCopy())},
 		&ipAllocatorStub{nextIPs: ovntest.MustParseIPNets("10.128.0.3/24")},
 		"node", "test-owner",
 		&util.DefaultNetInfo{},
-		node,
 		pod,
 		types.DefaultNetworkName,
 		nil,
@@ -302,7 +292,6 @@ func Test_allocatePodAnnotationWithTunnelIDReturnsUpdatedPod(t *testing.T) {
 		netInfo.GetNetworkName(), "test-owner",
 		&idAllocatorStub{nextID: 100},
 		netInfo,
-		&corev1.Node{},
 		pod,
 		nadKey,
 		network,
@@ -513,7 +502,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 				IPs:            ovntest.MustParseIPNets("192.168.0.3/24", "2010:100:200::3/60"),
 				MAC:            util.IPAddrToHWAddr(ovntest.MustParseIPNets("192.168.0.3/24")[0].IP),
 				Gateways:       []net.IP{ovntest.MustParseIP("192.168.0.1").To4(), ovntest.MustParseIP("2010:100:200::1")},
-				GatewayIPv6LLA: util.HWAddrToIPv6LLA(util.IPAddrToHWAddr(ovntest.MustParseIP("100.65.0.4"))),
+				GatewayIPv6LLA: util.HWAddrToIPv6LLA(util.IPAddrToHWAddr(ovntest.MustParseIP("192.168.0.1"))),
 				Routes: []util.PodRoute{
 					{
 						Dest: &net.IPNet{
@@ -553,7 +542,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 				IPs:            ovntest.MustParseIPNets("2010:100:200::3/60"),
 				MAC:            util.IPAddrToHWAddr(ovntest.MustParseIPNets("2010:100:200::3/60")[0].IP),
 				Gateways:       []net.IP{ovntest.MustParseIP("2010:100:200::1")},
-				GatewayIPv6LLA: util.HWAddrToIPv6LLA(util.IPAddrToHWAddr(ovntest.MustParseIP("fd99::4"))),
+				GatewayIPv6LLA: util.HWAddrToIPv6LLA(util.IPAddrToHWAddr(ovntest.MustParseIP("2010:100:200::1"))),
 				Routes: []util.PodRoute{
 					{
 						Dest:    ovntest.MustParseIPNet("fd99::/64"),
@@ -988,7 +977,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 				IPs:            ovntest.MustParseIPNets("192.168.0.101/24", "2001:db8::101/64"),
 				MAC:            util.IPAddrToHWAddr(ovntest.MustParseIPNets("192.168.0.101/24")[0].IP),
 				Gateways:       []net.IP{ovntest.MustParseIP("192.168.0.1").To4(), ovntest.MustParseIP("2001:db8::1")},
-				GatewayIPv6LLA: util.HWAddrToIPv6LLA(util.IPAddrToHWAddr(ovntest.MustParseIP("100.65.0.4"))),
+				GatewayIPv6LLA: util.HWAddrToIPv6LLA(util.IPAddrToHWAddr(ovntest.MustParseIP("192.168.0.1"))),
 				Routes: []util.PodRoute{
 					{
 						Dest:    ovntest.MustParseIPNet("100.65.0.0/16"),
@@ -1353,14 +1342,6 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 				}
 			}
 
-			node := &corev1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Annotations: map[string]string{
-						"k8s.ovn.org/node-id": "4",
-					},
-				},
-			}
-
 			pod := &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "pod",
@@ -1397,7 +1378,6 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 				"test-subnet", "test-owner",
 				tt.args.idAllocator,
 				tt.netInfo,
-				node,
 				pod,
 				fmt.Sprintf("%s/%s", network.Namespace, network.Name),
 				network,
