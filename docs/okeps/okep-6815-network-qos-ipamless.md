@@ -95,13 +95,17 @@ proposal is scoped to **localnet**; see [Non-Goals](#non-goals) and
   requirement needs to select destination pods by label rather than by address
   range. Because destination matching is built from IP address sets (not port
   identity), delivering it comes down to getting the pod IP into the
-  `k8s.ovn.org/pod-networks` annotation so the existing IP-based path applies -
+  `k8s.ovn.org/pod-networks` annotation so the discoverable-IP destination
+  path applies -
   e.g. KubeVirt static-IP propagation, or the DHCP IPAM path of
   [OKEP-6224](okep-6224-dhcp-ipam-localnet.md).
 - **Convergence with DHCP IPAM ([OKEP-6224](okep-6224-dhcp-ipam-localnet.md)).**
-  DHCP-mode networks have subnets configured (for the DHCP pool), so
-  `DoesNetworkRequireIPAM()` returns true and they already follow the standard
-  IP-based path. A future optimization could unify the ipamless and DHCP paths.
+  DHCP-mode localnet networks can be subnet-less, so
+  `DoesNetworkRequireIPAM()` is not the right discriminator. Destination
+  matching is gated by `DoesNetworkHaveDiscoverablePodIPs()`, which returns
+  true for both OVN-K IPAM and DHCP-learned pod IPs. DHCP IPAM networks
+  therefore retain labeled-destination matching through address sets; only
+  networks without discoverable pod IPs are limited to `ipBlock`.
 
 ## Introduction
 
@@ -133,11 +137,13 @@ OS or an external DHCP server manages addressing, not OVN-Kubernetes.
 
 A natural question is why these workloads do not simply adopt DHCP IPAM
 ([OKEP-6224](okep-6224-dhcp-ipam-localnet.md)), which would place them on the
-standard IP-based path (where destination `podSelector` also works). The target
+discoverable-IP destination path (where destination `podSelector` also works).
+The target
 population is precisely the set that cannot: VMs with truly static, externally
 managed addresses - for these, no OVN-managed IP ever exists, so an
 IP-independent matching path is the only option. Workloads that *can* use
-DHCP IPAM should prefer it (see [Future Goals](#future-goals) on convergence).
+DHCP IPAM should prefer it because their destination addresses can be
+discovered.
 
 This proposal targets localnet; ipamless layer2 networks share the same
 limitation and may benefit from the same fix, but layer2 is not a committed
@@ -346,13 +352,15 @@ the controller places each selected source pod's **logical switch port (LSP)**
 into a per-`NetworkQoS` **OVN port group** and matches all IP traffic
 originating from that port group. This single source-matching form works on
 every network type, because an LSP exists regardless of whether the network
-assigns IP addresses.
+assigns or discovers IP addresses.
 
 Only **destination** matching remains IP-based, and only where an IP is
-available: on IPAM-enabled networks a `podSelector` / `namespaceSelector`
-destination continues to resolve to an address set (`ip4.dst == {$address_set}`),
-while an `ipBlock` destination is emitted as an IP literal on every network type.
-On ipamless networks destination matching is therefore limited to `ipBlock`
+available: on networks where `DoesNetworkHaveDiscoverablePodIPs()` returns
+true, including both OVN-K IPAM and subnet-less DHCP IPAM localnet, a
+`podSelector` / `namespaceSelector` destination continues to resolve to an
+address set (`ip4.dst == {$address_set}`), while an `ipBlock` destination is
+emitted as an IP literal on every network type. On networks without
+discoverable pod IPs, destination matching is therefore limited to `ipBlock`
 (labeled-destination selection is deferred - see [Non-Goals](#non-goals) and
 [Future Goals](#future-goals)).
 
@@ -361,11 +369,11 @@ bandwidth policing, priority ordering, and the `to-lport` QoS row attached to th
 network's logical switch - is reused unchanged from the existing NetworkQoS
 implementation.
 
-Because source matching is now uniform, the only IPAM-conditional decision at
-reconcile time is whether a labeled destination can be resolved to an address
-set. The `isIPAMlessLocalnet()` predicate is used to gate that destination
-behavior and to surface unsupported ipamless destination configurations, not to
-switch the source-matching path.
+Because source matching is now uniform, the only discoverability-conditional
+decision at reconcile time is whether a labeled destination can be resolved to
+an address set. `DoesNetworkHaveDiscoverablePodIPs()` gates that destination
+behavior and surfaces unsupported configurations on networks without
+discoverable pod IPs, but it does not switch the source-matching path.
 
 ### API Details
 
@@ -414,10 +422,10 @@ though it is not a schema change.
   rule (for example: *"egress rule 1: destination podSelector/namespaceSelector
   is not supported on ipamless localnet networks and is ignored; use ipBlock
   instead"*).
-- **Scope of emission:** the condition is only meaningful on ipamless localnet
-  networks. On IPAM-enabled / non-localnet networks the controller does not add
-  it (all classifier forms are supported there), preserving today's behavior on
-  those networks.
+- **Scope of emission:** the condition is only meaningful on networks without
+  discoverable pod IPs. On networks where `DoesNetworkHaveDiscoverablePodIPs()`
+  returns true, including subnet-less DHCP IPAM localnet, the controller does
+  not add it because all classifier forms are supported there.
 
 This condition is purely informational about spec/topology compatibility; it is
 independent of the existing `Ready-In-Zone-<node>` condition, which continues to
@@ -454,8 +462,9 @@ The change centers on the NetworkQoS controller. It replaces the single decision
 of *how to identify the source of a packet* - previously an IP address set - with
 **membership in an OVN port group**, unconditionally on every network type.
 Destination matching keeps both existing forms (`ipBlock` literal; address set
-for pod/namespace selectors), with the latter gated on IPAM. It also depends on
-the [level-driven source-reconciliation refactor](#prerequisite-level-driven-source-reconciliation)
+for pod/namespace selectors), with the latter gated on discoverable pod IPs.
+It also depends on the
+[level-driven source-reconciliation refactor](#prerequisite-level-driven-source-reconciliation)
 described above.
 
 At a high level, the controller:
@@ -653,7 +662,7 @@ OVN-Kubernetes.
 
 ### Testing Details
 
-Everything NetworkQoS already validates for IPAM'ed networks
+Everything NetworkQoS already validates for OVN-K IPAM networks
 ([OKEP-4380](okep-4380-network-qos.md)) - DSCP marking, bandwidth policing,
 protocol/port classification, CIDR destinations, IPv4 and IPv6 - is re-run
 against an ipamless localnet network with label-selected source pods, to the
@@ -669,11 +678,17 @@ by a source address set and verify that controller startup installs the source
 port group, rewrites the source match, and removes the legacy source address set
 without changing the rule's destination or QoS actions.
 
+A subnet-less localnet with DHCP IPAM must also allow destination
+`podSelector` / `namespaceSelector` matching. This verifies that the controller
+uses `DoesNetworkHaveDiscoverablePodIPs()` rather than
+`DoesNetworkRequireIPAM()`, so DHCP-learned pod IPs can populate the
+destination address set.
+
 The new `UnsupportedConfiguration` status condition must also be covered: a
 `NetworkQoS` with a `classifier.to` `podSelector` / `namespaceSelector` on an
 ipamless localnet network sets the condition to `True` (with the supported rules
 still applied), and clearing/correcting that config flips it back to `False`;
-IPAM-enabled networks never receive the condition.
+networks with discoverable pod IPs never receive the condition.
 
 ### Documentation Details
 
