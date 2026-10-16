@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"sync"
@@ -1447,6 +1448,24 @@ func TestSyncAll(t *testing.T) {
 			syncAllInjectedError: ErrNetworkControllerTopologyNotManaged,
 		},
 		{
+			name:              "nad with negative network ID gets a replacement",
+			testNADs:          []TestNAD{{name: "test/nad1", netconf: network_A, networkID: "-2"}},
+			mode:              modeClusterManager,
+			expectGeneratedID: true,
+		},
+		{
+			name:              "nad with upper boundary network ID gets a replacement",
+			testNADs:          []TestNAD{{name: "test/nad1", netconf: network_A, networkID: strconv.Itoa(MaxNetworks)}},
+			mode:              modeClusterManager,
+			expectGeneratedID: true,
+		},
+		{
+			name:              "nad with huge network ID gets a replacement",
+			testNADs:          []TestNAD{{name: "test/nad1", netconf: network_A, networkID: strconv.Itoa(math.MaxInt)}},
+			mode:              modeClusterManager,
+			expectGeneratedID: true,
+		},
+		{
 			name: "nad already annotated with network ID",
 			testNADs: []TestNAD{
 				{
@@ -1705,10 +1724,23 @@ func TestSyncAll(t *testing.T) {
 			g.Expect(err).ToNot(gomega.HaveOccurred())
 			defer wf.Shutdown()
 
-			err = controller.Start()
-			g.Expect(err).ToNot(gomega.HaveOccurred())
-			// sync has already happened, stop
-			controller.Stop()
+			// Exercise initial synchronization without starting workers: annotation
+			// updates can otherwise reconcile NADs while the network controller
+			// takes the cleanup snapshot asserted below.
+			nadController := controller.(*nadController)
+			defer controller.Stop()
+			g.Expect(nadController.syncAll()).To(gomega.Succeed())
+			g.Expect(nadController.networkController.syncAll()).To(gomega.Succeed())
+
+			if tt.expectGeneratedID {
+				for _, testNAD := range tt.testNADs {
+					namespace, name, _ := strings.Cut(testNAD.name, "/")
+					nad, err := fakeClient.NetworkAttchDefClient.K8sCniCncfIoV1().
+						NetworkAttachmentDefinitions(namespace).Get(context.Background(), name, metav1.GetOptions{})
+					g.Expect(err).ToNot(gomega.HaveOccurred())
+					g.Expect(nad.Annotations[types.OvnNetworkIDAnnotation]).To(gomega.Equal("1"))
+				}
+			}
 
 			actualNetworks := map[string]util.NetInfo{}
 			for _, network := range tcm.valid {

@@ -21,6 +21,7 @@ package bitmap
 
 import (
 	"errors"
+	"fmt"
 	"math/big"
 	"sync"
 
@@ -99,10 +100,15 @@ func NewRoundRobinAllocationMap(max int, rangeSpec string) *AllocationBitmap {
 }
 
 // Allocate attempts to reserve the provided item.
-// Returns true if it was allocated, false if it was already in use
+// Returns true if it was allocated, false if it was already in use,
+// and an error if the offset is outside the range.
 func (r *AllocationBitmap) Allocate(offset int) (bool, error) {
 	r.lock.Lock()
 	defer r.lock.Unlock()
+
+	if offset < 0 || offset >= r.max {
+		return false, fmt.Errorf("offset %d is outside allocation range [0, %d)", offset, r.max)
+	}
 
 	if r.allocated.Bit(offset) == 1 {
 		return false, nil
@@ -134,7 +140,7 @@ func (r *AllocationBitmap) Release(offset int) {
 	r.lock.Lock()
 	defer r.lock.Unlock()
 
-	if r.allocated.Bit(offset) == 0 {
+	if offset < 0 || offset >= r.max || r.allocated.Bit(offset) == 0 {
 		return
 	}
 
@@ -175,7 +181,7 @@ func (r *AllocationBitmap) Has(offset int) bool {
 	r.lock.Lock()
 	defer r.lock.Unlock()
 
-	return r.allocated.Bit(offset) == 1
+	return offset >= 0 && offset < r.max && r.allocated.Bit(offset) == 1
 }
 
 // Free returns the count of items left in the range.

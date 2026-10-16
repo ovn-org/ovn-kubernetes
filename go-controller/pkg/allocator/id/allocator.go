@@ -84,7 +84,10 @@ func (idAllocator *idAllocator) ReserveID(name string, id int) error {
 		return fmt.Errorf("can't reserve id %d for the resource %s. It is already allocated with a different id %d", id, name, v)
 	}
 
-	reserved, _ := idAllocator.idBitmap.Allocate(id)
+	reserved, err := idAllocator.idBitmap.Allocate(id)
+	if err != nil {
+		return fmt.Errorf("failed to reserve id %d for the resource %s: %w", id, name, err)
+	}
 	if !reserved {
 		return fmt.Errorf("id %d is already reserved by another resource", id)
 	}
@@ -217,11 +220,14 @@ func (idsAllocator *idsAllocator) ReserveIDs(name string, ids []int) error {
 	allocatedIDs := make([]int, 0, len(ids))
 	for _, id := range ids {
 		// don't forget to adjust the id with the offset
-		reserved, _ := idsAllocator.idBitmap.Allocate(id - idsAllocator.offset)
-		if !reserved {
+		reserved, err := idsAllocator.idBitmap.Allocate(id - idsAllocator.offset)
+		if err != nil || !reserved {
 			// cleanup previously allocated ids
 			for _, allocatedID := range allocatedIDs {
 				idsAllocator.idBitmap.Release(allocatedID - idsAllocator.offset)
+			}
+			if err != nil {
+				return fmt.Errorf("failed to reserve id %d for resource %s: %w", id, name, err)
 			}
 			return fmt.Errorf("id %d is already reserved by another resource", id)
 		}

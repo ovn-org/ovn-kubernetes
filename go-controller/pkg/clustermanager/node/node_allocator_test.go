@@ -894,6 +894,61 @@ func TestCleanupNode_TransitRouterMigration(t *testing.T) {
 // TestSyncNodeNetworkAnnotations_TunnelID verifies that tunnel ID allocation
 // is correctly skipped or performed based on the Layer2UsesTransitRouter configuration.
 func TestSyncNodeNetworkAnnotations_TunnelID(t *testing.T) {
+	setup := func(t *testing.T) (*NodeAllocator, *corev1.Node, *fake.Clientset) {
+		t.Helper()
+		origLayerUsesTransitRouter := config.Layer2UsesTransitRouter
+		t.Cleanup(func() {
+			config.Layer2UsesTransitRouter = origLayerUsesTransitRouter
+		})
+
+		if err := config.PrepareTestConfig(); err != nil {
+			t.Fatal(err)
+		}
+		config.OVNKubernetesFeature.EnableNetworkSegmentation = true
+		config.OVNKubernetesFeature.EnableMultiNetwork = true
+		config.Layer2UsesTransitRouter = false
+
+		netConf := &ovncnitypes.NetConf{
+			NetConf: cnitypes.NetConf{
+				Name: "udn-l2",
+				Type: "ovn-k8s-cni-overlay",
+			},
+			Topology: types.Layer2Topology,
+			Role:     types.NetworkRolePrimary,
+			Subnets:  "10.1.0.0/16",
+		}
+		netInfo, err := util.NewNetInfo(netConf)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		node1 := &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:        "node1",
+				Annotations: map[string]string{},
+			},
+		}
+
+		fakeClient := fake.NewClientset(node1)
+		kube := &kube.Kube{KClient: fakeClient}
+
+		idAlloc := id.NewIDAllocator("tunnel-ids", 1024)
+		// Reserve ID 0 as it's not usable (types.NoTunnelID)
+		if err := idAlloc.ReserveID("zero", types.NoTunnelID); err != nil {
+			t.Fatal(err)
+		}
+
+		na := &NodeAllocator{
+			nodeLister:             newFakeNodeLister([]*corev1.Node{node1}),
+			kube:                   kube,
+			netInfo:                netInfo,
+			networkID:              1,
+			clusterSubnetAllocator: NewSubnetAllocator(),
+			idAllocator:            idAlloc,
+		}
+		return na, node1, fakeClient
+	}
+
 	tests := []struct {
 		name            string
 		transitRouter   bool
@@ -916,57 +971,8 @@ func TestSyncNodeNetworkAnnotations_TunnelID(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			origLayerUsesTransitRouter := config.Layer2UsesTransitRouter
-			t.Cleanup(func() {
-				config.Layer2UsesTransitRouter = origLayerUsesTransitRouter
-			})
-
-			if err := config.PrepareTestConfig(); err != nil {
-				t.Fatal(err)
-			}
-			config.OVNKubernetesFeature.EnableNetworkSegmentation = true
-			config.OVNKubernetesFeature.EnableMultiNetwork = true
-			config.Layer2UsesTransitRouter = false
-
-			netConf := &ovncnitypes.NetConf{
-				NetConf: cnitypes.NetConf{
-					Name: "udn-l2",
-					Type: "ovn-k8s-cni-overlay",
-				},
-				Topology: types.Layer2Topology,
-				Role:     types.NetworkRolePrimary,
-				Subnets:  "10.1.0.0/16",
-			}
-			netInfo, err := util.NewNetInfo(netConf)
-			if err != nil {
-				t.Fatal(err)
-			}
-			networkName := netInfo.GetNetworkName()
-
-			node1 := &corev1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:        "node1",
-					Annotations: map[string]string{},
-				},
-			}
-
-			fakeClient := fake.NewClientset(node1)
-			kube := &kube.Kube{KClient: fakeClient}
-
-			idAlloc := id.NewIDAllocator("tunnel-ids", 1024)
-			// Reserve ID 0 as it's not usable (types.NoTunnelID)
-			if err := idAlloc.ReserveID("zero", types.NoTunnelID); err != nil {
-				t.Fatal(err)
-			}
-
-			na := &NodeAllocator{
-				nodeLister:             newFakeNodeLister([]*corev1.Node{node1}),
-				kube:                   kube,
-				netInfo:                netInfo,
-				networkID:              1,
-				clusterSubnetAllocator: NewSubnetAllocator(),
-				idAllocator:            idAlloc,
-			}
+			na, node1, fakeClient := setup(t)
+			networkName := na.netInfo.GetNetworkName()
 
 			// Set the topology mode directly (setTopologyType is now in ClusterManager)
 			config.Layer2UsesTransitRouter = tt.transitRouter
@@ -1015,6 +1021,30 @@ func TestSyncNodeNetworkAnnotations_TunnelID(t *testing.T) {
 				if allocatorID != types.InvalidID {
 					t.Fatalf("tunnel ID should not be allocated in the allocator, got %d", allocatorID)
 				}
+			}
+		})
+	}
+
+	invalidIDTests := []struct {
+		name            string
+		invalidTunnelID string
+	}{
+		{name: "reject negative tunnel ID", invalidTunnelID: "-2"},
+		{name: "reject tunnel ID at allocator limit", invalidTunnelID: "1024"},
+	}
+	for _, tt := range invalidIDTests {
+		t.Run(tt.name, func(t *testing.T) {
+			na, node1, _ := setup(t)
+			networkName := na.netInfo.GetNetworkName()
+			node1.Annotations[types.UDNLayer2NodeGRLRPTunnelIDAnnotation] = fmt.Sprintf(`{"%s":"%s"}`, networkName, tt.invalidTunnelID)
+			if err := na.syncNodeNetworkAnnotations(node1); err == nil {
+				t.Fatal("expected invalid tunnel ID to be rejected")
+			}
+			if got := na.idAllocator.GetID(networkName + "_" + node1.Name); got != types.InvalidID {
+				t.Fatalf("invalid tunnel ID was reserved: %d", got)
+			}
+			if got, err := na.idAllocator.AllocateID("healthy-node"); err != nil || got != 1 {
+				t.Fatalf("allocator did not remain usable: id=%d, err=%v", got, err)
 			}
 		})
 	}
