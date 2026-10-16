@@ -647,11 +647,14 @@ func (g *gateway) updateSNATRules() error {
 		klog.V(5).Info("Skipping SNAT rule update because node IP manager is not initialized yet")
 		return nil
 	}
-	if g.nodeIPManager.mgmtPort == nil {
+
+	// Safely retrieve management port under lock to prevent race conditions with cleanup
+	mgmtPort := g.nodeIPManager.GetManagementPort()
+	if mgmtPort == nil {
 		klog.V(5).Info("Skipping SNAT rule update because management port is not initialized yet")
 		return nil
 	}
-	subnets := util.IPsToNetworkIPs(g.nodeIPManager.mgmtPort.GetAddresses()...)
 
+	subnets := util.IPsToNetworkIPs(mgmtPort.GetAddresses()...)
 	return addOrUpdateLocalGatewayPodSubnetNFTRules(g.GetDefaultPodNetworkAdvertised(), subnets...)
 }
