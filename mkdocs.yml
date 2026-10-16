@@ -240,5 +240,6 @@ nav:
     - OVN Observability API: okeps/okep-5212-ovnobserv-api.md
     - DHCP IPAM for Localnet: okeps/okep-6224-dhcp-ipam-localnet.md
     - EgressIP Node Selector: okeps/okep-6800-egressip-node-selector.md
+    - Multiple OVN-Kubernetes Instances on a Node: okeps/okep-5861-two-ovnks.md
   - Blog:
     - OVN-Kubernetes Blog: blog/index.md
