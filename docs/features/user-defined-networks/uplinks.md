@@ -394,6 +394,12 @@ resolved state. By contrast, recreating an `UplinkState` with an unchanged
 resolved configuration restores its readiness condition without disrupting
 working gateway programming.
 
+When a node is deleted, its ovnkube-node is no longer there to remove the
+node's `UplinkState` objects, and they are not garbage collected with the node
+because their owner is the `Uplink`. OVN-Kubernetes deletes them across all
+`Uplink` objects as soon as it observes the node deletion, so `UplinkState`
+listings only show nodes that exist.
+
 ## Dynamic UDN
 
 With Dynamic UDN enabled, OVN-Kubernetes delays Uplink gateway programming on a
