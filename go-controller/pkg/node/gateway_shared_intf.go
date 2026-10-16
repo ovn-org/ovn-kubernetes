@@ -909,6 +909,16 @@ func serviceUpdateNotNeeded(old, new *corev1.Service) bool {
 		reflect.DeepEqual(new.Spec.AllocateLoadBalancerNodePorts, old.Spec.AllocateLoadBalancerNodePorts)
 }
 
+// serviceHasUDPPort returns true if any of the service's ports use UDP.
+func serviceHasUDPPort(service *corev1.Service) bool {
+	for _, p := range service.Spec.Ports {
+		if p.Protocol == corev1.ProtocolUDP {
+			return true
+		}
+	}
+	return false
+}
+
 // AddService handles configuring shared gateway bridge flows to steer External IP, Node Port, Ingress LB traffic into OVN
 func (npw *nodePortWatcher) AddService(service *corev1.Service) error {
 	var localEndpoints util.PortToLBEndpoints
@@ -918,6 +928,21 @@ func (npw *nodePortWatcher) AddService(service *corev1.Service) error {
 	}
 
 	klog.V(5).Infof("Adding service %s in namespace %s", service.Name, service.Namespace)
+
+	// Flush stale UDP conntrack that may have been committed against this VIP
+	// between a prior service delete and this re-create while client traffic
+	// was in-flight. The OVN control plane teardown for a Delete is asynchronous;
+	// packets that transit the pipeline before the LB flow is removed can commit
+	// conntrack entries without any DNAT, and OpenFlow ct(commit,nat) does not
+	// re-run on already-CONFIRMED tuples - leaving the recreated service
+	// blackholed.
+	if serviceHasUDPPort(service) {
+		if err := npw.deleteConntrackForService(service); err != nil {
+			klog.Warningf("Failed to flush stale conntrack for service %s/%s on Add: %v",
+				service.Namespace, service.Name, err)
+		}
+	}
+
 	netInfo, err := npw.networkManager.GetActiveNetworkForNamespace(service.Namespace)
 	if err != nil {
 		return fmt.Errorf("error getting active network for service %s in namespace %s: %w", service.Name, service.Namespace, err)
