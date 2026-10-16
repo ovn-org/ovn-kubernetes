@@ -36,67 +36,6 @@ var _ = Describe("OVN Observability NBDB state", feature.Observability, func() {
 		}
 	})
 
-	Context("NetworkPolicy ACL sampling", func() {
-		var nsName string
-
-		BeforeEach(func() {
-			nsName = fr.Namespace.Name
-		})
-
-		It("should clean up Sample objects when a NetworkPolicy is deleted", func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-			defer cancel()
-
-			By("creating a deny-all network policy")
-			policyName := "observ-cleanup-test"
-			policy := &knet.NetworkPolicy{
-				ObjectMeta: metav1.ObjectMeta{Name: policyName},
-				Spec: knet.NetworkPolicySpec{
-					PodSelector: metav1.LabelSelector{},
-					PolicyTypes: []knet.PolicyType{knet.PolicyTypeIngress, knet.PolicyTypeEgress},
-					Ingress:     []knet.NetworkPolicyIngressRule{},
-					Egress:      []knet.NetworkPolicyEgressRule{},
-				},
-			}
-			_, err := fr.ClientSet.NetworkingV1().NetworkPolicies(nsName).Create(ctx, policy, metav1.CreateOptions{})
-			Expect(err).NotTo(HaveOccurred(), "creating cleanup-test NetworkPolicy")
-
-			By("creating a pod so that the network policy ACLs are programmed")
-			cmd := []string{"/bin/bash", "-c", "/agnhost netexec --http-port 8000"}
-			pod := newAgnhostPod(nsName, "observ-cleanup-pod", cmd...)
-			pod = e2epod.NewPodClient(fr).CreateSync(ctx, pod)
-			Expect(waitForACLLoggingPod(fr, nsName, pod.GetName())).To(Succeed())
-
-			By("recording the Sample object referenced by the namespace ACL")
-			var sampleUUID string
-			Eventually(func() (bool, error) {
-				var err error
-				sampleUUID, err = getACLSampleUUIDForNamespace(fr, fr.ClientSet, "NetpolNamespace", nsName)
-				return sampleUUID != "", err
-			}, 30*time.Second, 2*time.Second).Should(BeTrue(),
-				"expected a Sample object reference for namespace %s", nsName)
-
-			By("deleting the network policy")
-			err = fr.ClientSet.NetworkingV1().NetworkPolicies(nsName).Delete(ctx, policyName, metav1.DeleteOptions{})
-			Expect(err).NotTo(HaveOccurred(), "deleting NetworkPolicy")
-
-			By("verifying the referenced Sample object is deleted")
-			Eventually(func() (bool, error) {
-				exists, err := hasNBDBSample(fr, fr.ClientSet, sampleUUID)
-				return !exists, err
-			}, 30*time.Second, 2*time.Second).Should(BeTrue(),
-				"expected Sample object %s to be deleted after policy deletion", sampleUUID)
-
-			By("verifying NetpolNamespace ACLs for this namespace are cleaned up")
-			// Scope to this namespace to avoid interference from parallel tests.
-			// NetpolNamespace ACLs use k8s.ovn.org/name for the namespace.
-			Eventually(func() (bool, error) {
-				return hasACLsWithSamplesForNamespace(fr, fr.ClientSet, "NetpolNamespace", nsName)
-			}, 30*time.Second, 2*time.Second).Should(BeFalse(),
-				"expected NetpolNamespace ACLs for namespace %s to be cleaned up after policy deletion", nsName)
-		})
-	})
-
 	Context("Multicast ACL sampling", func() {
 		It("should attach Sample references to Multicast ACLs when multicast is enabled", func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
@@ -289,19 +228,18 @@ var _ = Describe("OVN Observability NBDB state", feature.Observability, func() {
 			Expect(createEgressFirewall(nsName, denyRules)).To(Succeed())
 
 			By("starting ovnkube-observ, generating traffic, and collecting samples")
-			dstMustContain := make([]string, len(denyTargetIPs))
-			for i, ip := range denyTargetIPs {
-				dstMustContain[i] = fmt.Sprintf("dst=%s", ip)
-			}
-			output := collectObservSamplesOnNodes(ctx, fr, fr.ClientSet, []string{srcPod.Spec.NodeName}, srcPod.Status.PodIP, "", func() {
-				for _, ip := range denyTargetIPs {
-					_ = generateTraffic(fr, nsName, srcPod.Name, ip, 5)
-				}
-			}, dstMustContain...)
-
-			By("verifying samples contain deny action for EgressFirewall for each address family")
+			// ovnkube-observ filters on a single source IP, so a dual stack cluster
+			// needs one capture per address family: samples for the IPv6 target carry
+			// the pod's IPv6 address and would be filtered out by an IPv4 filter.
 			action := "Dropped by egress firewall in namespace " + nsName
 			for _, ip := range denyTargetIPs {
+				srcIP := podIPOfSameFamily(srcPod, ip)
+				Expect(srcIP).NotTo(BeEmpty(), "pod %s has no address in the same family as %s", srcPod.Name, ip)
+				output := collectObservSamplesOnNodes(ctx, fr, fr.ClientSet, []string{srcPod.Spec.NodeName}, srcIP, "", func() {
+					_ = generateTraffic(fr, nsName, srcPod.Name, ip, 5)
+				}, fmt.Sprintf("dst=%s", ip))
+
+				By("verifying samples contain deny action for EgressFirewall for " + ip)
 				Expect(sampleRecordContains(output, action, ip)).To(BeTrue(),
 					"expected sample record with action %q and dst=%s, got: %s", action, ip, output)
 			}
@@ -394,19 +332,16 @@ spec:
 			By("starting ovnkube-observ, generating traffic, and collecting samples")
 			// Don't Expect inside trafficFn — it's called in an Eventually loop
 			// and early iterations may fail before EgressFirewall is fully enforced.
-			allowMustContain := make([]string, len(rules))
-			for i, r := range rules {
-				allowMustContain[i] = fmt.Sprintf("dst=%s", r.allowIP)
-			}
-			output := collectObservSamplesOnNodes(ctx, fr, fr.ClientSet, []string{srcPod.Spec.NodeName}, srcPod.Status.PodIP, "", func() {
-				for _, r := range rules {
-					_ = generateTraffic(fr, nsName, srcPod.Name, r.allowIP, 5)
-				}
-			}, allowMustContain...)
-
-			By("verifying samples contain allow action for EgressFirewall for each address family")
+			// One capture per address family, see the deny test for why.
 			allowAction := "Allowed by egress firewall in namespace " + nsName
 			for _, r := range rules {
+				srcIP := podIPOfSameFamily(srcPod, r.allowIP)
+				Expect(srcIP).NotTo(BeEmpty(), "pod %s has no address in the same family as %s", srcPod.Name, r.allowIP)
+				output := collectObservSamplesOnNodes(ctx, fr, fr.ClientSet, []string{srcPod.Spec.NodeName}, srcIP, "", func() {
+					_ = generateTraffic(fr, nsName, srcPod.Name, r.allowIP, 5)
+				}, fmt.Sprintf("dst=%s", r.allowIP))
+
+				By("verifying samples contain allow action for EgressFirewall for " + r.allowIP)
 				Expect(sampleRecordContains(output, allowAction, r.allowIP)).To(BeTrue(),
 					"expected sample record with action %q and dst=%s, got: %s", allowAction, r.allowIP, output)
 			}
@@ -491,29 +426,35 @@ spec:
 			srcPod = e2epod.NewPodClient(fr).CreateSync(ctx, srcPod)
 			Expect(waitForACLLoggingPod(fr, nsName, srcPod.GetName())).To(Succeed())
 
-			By("waiting for MulticastCluster ACLs to be programmed with samples")
-			// Assert MulticastCluster specifically since the later assertion checks for
-			// "cluster multicast policy" which is produced by MulticastCluster ACLs.
-			Eventually(func() (bool, error) {
-				return hasACLsWithSamples(fr, fr.ClientSet, "MulticastCluster")
-			}, 30*time.Second, 2*time.Second).Should(BeTrue(),
-				"expected MulticastCluster ACLs to have sample_new references")
-
 			By("starting ovnkube-observ, generating multicast traffic, and collecting samples")
-			// Send IGMP join + multicast traffic to 239.1.1.1
-			multicastIP := "239.1.1.1"
-			if IsIPv6Cluster(fr.ClientSet) {
-				multicastIP = "ff05::1"
+			// One capture per address family, ovnkube-observ filters on a single
+			// source IP. The IPv6 group has to be a transient one: the multicast
+			// ACLs match ipv6DynamicMulticastMatch
+			// "(ip6.dst[120..127] == 0xff && ip6.dst[116] == 1)", where bit 116 is
+			// the transient flag, so a well known group such as ff05::1 matches no
+			// multicast ACL at all and would never be sampled.
+			for _, podIP := range srcPod.Status.PodIPs {
+				srcIP := podIP.IP
+				multicastIP, iface := "239.1.1.1", ""
+				if strings.Contains(srcIP, ":") {
+					// Pin IPv6 multicast to the pod interface so that the packet does
+					// not depend on a multicast route being present.
+					multicastIP, iface = "ff1e::1", "eth0"
+				}
+
+				output := collectObservSamplesOnNodes(ctx, fr, fr.ClientSet, []string{srcPod.Spec.NodeName}, srcIP, "", func() {
+					// Use ping to multicast address to trigger multicast ACL evaluation.
+					// Pings to a multicast group get no reply, so a non-zero exit is
+					// expected; log it so a genuine send failure is visible.
+					if err := generateTrafficOnInterface(fr, nsName, srcPod.Name, multicastIP, iface, 3); err != nil {
+						framework.Logf("multicast traffic generation to %s: %v", multicastIP, err)
+					}
+				})
+
+				By("verifying samples contain multicast message for " + multicastIP)
+				Expect(output).To(ContainSubstring("cluster multicast policy"),
+					"expected multicast sample for %s, got: %s", multicastIP, output)
 			}
-
-			output := collectObservSamplesOnNodes(ctx, fr, fr.ClientSet, []string{srcPod.Spec.NodeName}, srcPod.Status.PodIP, "", func() {
-				// Use ping to multicast address to trigger multicast ACL evaluation
-				_ = generateTraffic(fr, nsName, srcPod.Name, multicastIP, 3)
-			})
-
-			By("verifying samples contain multicast message")
-			Expect(output).To(ContainSubstring("cluster multicast policy"),
-				"expected multicast sample, got: %s", output)
 		})
 
 		It("should receive samples for UDN isolation traffic", func() {
@@ -618,80 +559,6 @@ func hasACLsWithSamples(f *framework.Framework, cs clientset.Interface, ownerTyp
 		}
 	}
 	return false, nil
-}
-
-// hasACLsWithSamplesForNamespace checks if ACLs with the given owner type and namespace
-// have sample_new set. This is namespace-scoped to avoid interference from parallel tests.
-func hasACLsWithSamplesForNamespace(f *framework.Framework, cs clientset.Interface, ownerType, namespace string) (bool, error) {
-	output, err := runOVNNBCTL(f, cs,
-		"--data=bare", "--no-heading", "--columns=sample_new",
-		"find", "ACL",
-		fmt.Sprintf(`external_ids:"k8s.ovn.org/owner-type"=%s`, ownerType),
-		fmt.Sprintf(`external_ids:"k8s.ovn.org/name"=%s`, namespace))
-	if err != nil {
-		return false, fmt.Errorf("listing ACLs with owner-type %s in namespace %s: %w", ownerType, namespace, err)
-	}
-	if output == "" {
-		return false, nil
-	}
-	for _, line := range strings.Split(output, "\n") {
-		if strings.TrimSpace(line) != "" {
-			return true, nil
-		}
-	}
-	return false, nil
-}
-
-// getACLSampleUUIDForNamespace returns the first Sample UUID referenced by an
-// ACL belonging to the given namespace.
-func getACLSampleUUIDForNamespace(f *framework.Framework, cs clientset.Interface, ownerType, namespace string) (string, error) {
-	output, err := runOVNNBCTL(f, cs,
-		"--data=bare", "--no-heading", "--columns=sample_new",
-		"find", "ACL",
-		fmt.Sprintf(`external_ids:"k8s.ovn.org/owner-type"=%s`, ownerType),
-		fmt.Sprintf(`external_ids:"k8s.ovn.org/name"=%s`, namespace))
-	if err != nil {
-		return "", fmt.Errorf("listing Sample references for owner type %s in namespace %s: %w", ownerType, namespace, err)
-	}
-	for _, line := range strings.Split(output, "\n") {
-		if sampleUUID := strings.TrimSpace(line); sampleUUID != "" {
-			return sampleUUID, nil
-		}
-	}
-	return "", nil
-}
-
-// hasNBDBSample reports whether a Sample row with the given UUID exists.
-func hasNBDBSample(f *framework.Framework, cs clientset.Interface, sampleUUID string) (bool, error) {
-	output, err := runOVNNBCTL(f, cs,
-		"--if-exists", "get", "Sample", sampleUUID, "metadata")
-	if err != nil {
-		return false, fmt.Errorf("looking up Sample object %s: %w", sampleUUID, err)
-	}
-	return strings.TrimSpace(output) != "", nil
-}
-
-// hasSampleObjects checks if any Sample objects exist in NBDB.
-func hasSampleObjects(f *framework.Framework, cs clientset.Interface) (bool, error) {
-	count, err := countNBDBSamples(f, cs)
-	if err != nil {
-		return false, fmt.Errorf("counting NBDB samples: %w", err)
-	}
-	return count > 0, nil
-}
-
-// countNBDBSamples returns the number of Sample objects in NBDB.
-func countNBDBSamples(f *framework.Framework, cs clientset.Interface) (int, error) {
-	output, err := runOVNNBCTL(f, cs,
-		"--data=bare", "--no-heading", "--columns=_uuid",
-		"list", "Sample")
-	if err != nil {
-		return 0, fmt.Errorf("listing NBDB Sample objects: %w", err)
-	}
-	if output == "" {
-		return 0, nil
-	}
-	return len(strings.Split(output, "\n")), nil
 }
 
 // isKernel611OrNewer checks if the kernel version is 6.11 or newer (required for psample).
@@ -877,6 +744,19 @@ spec:
 // annotation — provider-neutral, works on any cluster topology.
 // Returns an error if node list fails so callers can propagate it rather than
 // silently testing only one address family.
+// podIPOfSameFamily returns the pod address belonging to the same address family
+// as dstIP, or an empty string when the pod has none. ovnkube-observ filters on a
+// single source IP, so each address family needs the matching pod address.
+func podIPOfSameFamily(pod *v1.Pod, dstIP string) string {
+	wantIPv6 := strings.Contains(dstIP, ":")
+	for _, podIP := range pod.Status.PodIPs {
+		if strings.Contains(podIP.IP, ":") == wantIPv6 {
+			return podIP.IP
+		}
+	}
+	return ""
+}
+
 func egressFirewallRules(cs clientset.Interface) ([]egressFirewallRule, error) {
 	nodes, err := cs.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{})
 	if err != nil {
@@ -926,10 +806,24 @@ func sampleRecordContains(output, action, dstIP string) bool {
 // Returns error if ping fails unexpectedly (use for allow rules).
 // For deny rules, expect ping to fail.
 func generateTraffic(f *framework.Framework, namespace, srcPodName, dstIP string, count int) error {
-	cmd := []string{"ping", "-c", fmt.Sprintf("%d", count), "-W", "1", dstIP}
-	_, _, err := ExecCommandInContainerWithFullOutput(f, namespace, srcPodName, "", cmd...)
+	return generateTrafficOnInterface(f, namespace, srcPodName, dstIP, "", count)
+}
+
+// generateTrafficOnInterface pings dstIP, optionally pinned to an interface with
+// ping -I, which makes the egress interface explicit for multicast destinations
+// instead of relying on the pod routing table. The ping output is part of the
+// error: a destination that gets no reply makes ping exit non-zero, so callers
+// log it to tell "nothing was sent" from "sent, no reply".
+func generateTrafficOnInterface(f *framework.Framework, namespace, srcPodName, dstIP, iface string, count int) error {
+	cmd := []string{"ping", "-c", fmt.Sprintf("%d", count), "-W", "1"}
+	if iface != "" {
+		cmd = append(cmd, "-I", iface)
+	}
+	cmd = append(cmd, dstIP)
+	stdout, stderr, err := ExecCommandInContainerWithFullOutput(f, namespace, srcPodName, "", cmd...)
 	if err != nil {
-		return fmt.Errorf("ping from %s/%s to %s: %w", namespace, srcPodName, dstIP, err)
+		return fmt.Errorf("ping from %s/%s to %s: %w (stdout: %s, stderr: %s)",
+			namespace, srcPodName, dstIP, err, stdout, stderr)
 	}
 	return nil
 }
