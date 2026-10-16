@@ -37,6 +37,36 @@ func (_m *Interface) Events() v1.EventInterface {
 	return r0
 }
 
+// GetNode provides a mock function with given fields: name
+func (_m *Interface) GetNode(name string) (*corev1.Node, error) {
+	ret := _m.Called(name)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetNode")
+	}
+
+	var r0 *corev1.Node
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string) (*corev1.Node, error)); ok {
+		return rf(name)
+	}
+	if rf, ok := ret.Get(0).(func(string) *corev1.Node); ok {
+		r0 = rf(name)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*corev1.Node)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(name)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // GetNodeForWindows provides a mock function with given fields: name
 func (_m *Interface) GetNodeForWindows(name string) (*corev1.Node, error) {
 	ret := _m.Called(name)

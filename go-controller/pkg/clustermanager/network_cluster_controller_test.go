@@ -18,16 +18,30 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	node "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/clustermanager/node"
 	ovncnitypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/controller"
 	nodecontroller "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/controllers/node"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/networkmanager"
 	ovntest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
+
+func createTestBatcher(t *testing.T, fakeClient *util.OVNClusterManagerClientset) *node.NodeAnnotationBatcher {
+	t.Helper()
+	kubeInterface := &kube.Kube{KClient: fakeClient.KubeClient}
+	batcher := node.NewNodeAnnotationBatcher(kubeInterface)
+	if err := controller.Start(batcher.Reconciler()); err != nil {
+		t.Fatalf("Failed to start batcher: %v", err)
+	}
+	t.Cleanup(func() { controller.Stop(batcher.Reconciler()) })
+	return batcher
+}
 
 func TestHandleNetworkRefChangeUpdatesStatusAndMetrics(t *testing.T) {
 	g := gomega.NewWithT(t)
@@ -159,6 +173,8 @@ func TestHandleNetworkRefChangeCleanupWithZeroGraceOnStart(t *testing.T) {
 	g.Expect(nodeController.Start()).To(gomega.Succeed())
 	defer nodeController.Stop()
 
+	batcher := createTestBatcher(t, fakeClient)
+
 	ncc := newNetworkClusterController(
 		netInfo,
 		fakeClient,
@@ -167,6 +183,7 @@ func TestHandleNetworkRefChangeCleanupWithZeroGraceOnStart(t *testing.T) {
 		nm,
 		nil,
 		nodeController,
+		batcher,
 	)
 	g.Expect(ncc.init()).To(gomega.Succeed())
 	g.Expect(ncc.Start(context.Background())).To(gomega.Succeed())
@@ -234,6 +251,8 @@ func TestHandleNetworkRefChangeCleanupWithZeroGraceAfterStart(t *testing.T) {
 	g.Expect(nodeController.Start()).To(gomega.Succeed())
 	defer nodeController.Stop()
 
+	batcher := createTestBatcher(t, fakeClient)
+
 	ncc := newNetworkClusterController(
 		netInfo,
 		fakeClient,
@@ -242,6 +261,7 @@ func TestHandleNetworkRefChangeCleanupWithZeroGraceAfterStart(t *testing.T) {
 		nm,
 		nil,
 		nodeController,
+		batcher,
 	)
 	g.Expect(ncc.init()).To(gomega.Succeed())
 	g.Expect(ncc.Start(context.Background())).To(gomega.Succeed())
@@ -308,6 +328,8 @@ func TestHandleNetworkRefChangeAllocatesOnActivation(t *testing.T) {
 	g.Expect(nodeController.Start()).To(gomega.Succeed())
 	defer nodeController.Stop()
 
+	batcher := createTestBatcher(t, fakeClient)
+
 	ncc := newNetworkClusterController(
 		netInfo,
 		fakeClient,
@@ -316,6 +338,7 @@ func TestHandleNetworkRefChangeAllocatesOnActivation(t *testing.T) {
 		nm,
 		nil,
 		nodeController,
+		batcher,
 	)
 	g.Expect(ncc.init()).To(gomega.Succeed())
 	g.Expect(ncc.Start(context.Background())).To(gomega.Succeed())
@@ -401,6 +424,8 @@ func TestReconcileNodeCleansUpOnNoHostSubnetTransition(t *testing.T) {
 	g.Expect(nodeController.Start()).To(gomega.Succeed())
 	defer nodeController.Stop()
 
+	batcher := createTestBatcher(t, fakeClient)
+
 	ncc := newNetworkClusterController(
 		netInfo,
 		fakeClient,
@@ -409,16 +434,19 @@ func TestReconcileNodeCleansUpOnNoHostSubnetTransition(t *testing.T) {
 		nm,
 		nil,
 		nodeController,
+		batcher,
 	)
 	g.Expect(ncc.init()).To(gomega.Succeed())
 
 	g.Expect(ncc.ReconcileNode(oldNode, newNode, nil, nil)).To(gomega.Succeed())
 
-	updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), newNode.Name, metav1.GetOptions{})
-	g.Expect(err).ToNot(gomega.HaveOccurred())
-	g.Expect(util.HasNodeHostSubnetAnnotation(updatedNode, networkName)).To(gomega.BeFalse())
-	_, err = util.ParseNetworkIDAnnotation(updatedNode, networkName)
-	g.Expect(util.IsAnnotationNotSetError(err)).To(gomega.BeTrue())
+	g.Eventually(func(innerG gomega.Gomega) {
+		updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), newNode.Name, metav1.GetOptions{})
+		innerG.Expect(err).ToNot(gomega.HaveOccurred())
+		innerG.Expect(util.HasNodeHostSubnetAnnotation(updatedNode, networkName)).To(gomega.BeFalse())
+		_, err = util.ParseNetworkIDAnnotation(updatedNode, networkName)
+		innerG.Expect(util.IsAnnotationNotSetError(err)).To(gomega.BeTrue())
+	}, 5*time.Second, 100*time.Millisecond).Should(gomega.Succeed())
 }
 
 func TestReconcileNodeMarksNodeSyncFailedOnCleanupError(t *testing.T) {
@@ -472,6 +500,7 @@ func TestReconcileNodeMarksNodeSyncFailedOnCleanupError(t *testing.T) {
 		nm,
 		nil,
 		nodeController,
+		nil,
 	)
 	g.Expect(ncc.init()).To(gomega.Succeed())
 

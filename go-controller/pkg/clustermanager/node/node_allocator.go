@@ -15,7 +15,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/kubernetes"
 	listers "k8s.io/client-go/listers/core/v1"
-	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
@@ -56,9 +55,12 @@ type NodeAllocator struct {
 
 	// nodeSubnets is a list of node subnets that are managed by the cluster subnet allocator
 	nodeSubnets []*net.IPNet
+
+	// batcher batches annotation updates across all networks for better API server efficiency
+	batcher *NodeAnnotationBatcher
 }
 
-func NewNodeAllocator(networkID int, netInfo util.NetInfo, nodeLister listers.NodeLister, kube kube.Interface, nodeClient kubernetes.Interface, tunnelIDAllocator id.Allocator) *NodeAllocator {
+func NewNodeAllocator(networkID int, netInfo util.NetInfo, nodeLister listers.NodeLister, kube kube.Interface, nodeClient kubernetes.Interface, tunnelIDAllocator id.Allocator, batcher *NodeAnnotationBatcher) *NodeAllocator {
 	na := &NodeAllocator{
 		kube:                         kube,
 		nodeClient:                   nodeClient,
@@ -68,6 +70,7 @@ func NewNodeAllocator(networkID int, netInfo util.NetInfo, nodeLister listers.No
 		clusterSubnetAllocator:       NewSubnetAllocator(),
 		hybridOverlaySubnetAllocator: NewSubnetAllocator(),
 		idAllocator:                  tunnelIDAllocator,
+		batcher:                      batcher,
 	}
 
 	if na.hasNodeSubnetAllocation() {
@@ -430,7 +433,11 @@ func (na *NodeAllocator) syncNodeNetworkAnnotations(node *corev1.Node) error {
 			// any subnets already recorded in its host-subnet annotation.
 			// Lagging informer cache may not have latest annotations (e.g. from the previous run of the same handler)
 			releaseSubnets := allocatedSubnets
-			if latestNode, getErr := na.nodeClient.CoreV1().Nodes().Get(context.TODO(), node.Name, metav1.GetOptions{}); getErr == nil {
+			// Bound the live read so an unresponsive apiserver cannot block cleanup indefinitely.
+			getCtx, getCancel := context.WithTimeout(context.Background(), getNodeAPITimeout)
+			latestNode, getErr := na.nodeClient.CoreV1().Nodes().Get(getCtx, node.Name, metav1.GetOptions{})
+			getCancel()
+			if getErr == nil {
 				if persisted, parseErr := util.ParseNodeHostSubnetAnnotation(latestNode, networkName); parseErr == nil {
 					releaseSubnets = subnetsNotPersisted(allocatedSubnets, persisted)
 				}
@@ -555,6 +562,10 @@ func (na *NodeAllocator) Sync(nodes []interface{}) error {
 	return nil
 }
 
+// getNodeAPITimeout bounds the live apiserver read used before releasing
+// subnets on an annotation-update failure.
+const getNodeAPITimeout = 30 * time.Second
+
 // subnetsNotPersisted returns the subnets in allocated that are not present in
 // persisted (compared by CIDR string). Used to avoid releasing a subnet that a
 // prior reconcile already wrote to the node's host-subnet annotation.
@@ -574,48 +585,15 @@ func subnetsNotPersisted(allocated, persisted []*net.IPNet) []*net.IPNet {
 
 // updateNodeNetworkAnnotationsWithRetry will update the node's subnet annotation and network id annotation
 func (na *NodeAllocator) updateNodeNetworkAnnotationsWithRetry(nodeName string, hostSubnetsMap map[string][]*net.IPNet, networkId, tunnelID int) error {
-	// Retry if it fails because of potential conflict which is transient. Return error in the
-	// case of other errors (say temporary API server down), and it will be taken care of by the
-	// retry mechanism.
-	resultErr := retry.OnError(retry.DefaultBackoff, util.IsNodeAnnotationPatchRetryable, func() error {
-		// Informer cache should not be mutated, so get a copy of the object
-		node, err := na.nodeLister.Get(nodeName)
-		if err != nil {
-			return err
-		}
+	if na.batcher == nil {
+		return fmt.Errorf("node annotation batcher is required but was not configured")
+	}
 
-		cnode := node.DeepCopy()
-		for netName, hostSubnets := range hostSubnetsMap {
-			cnode.Annotations, err = util.UpdateNodeHostSubnetAnnotation(cnode.Annotations, hostSubnets, netName)
-			if err != nil {
-				return fmt.Errorf("failed to update node %q annotation subnet %s: %w",
-					node.Name, util.JoinIPNets(hostSubnets, ","), err)
-			}
-		}
-
-		networkName := na.netInfo.GetNetworkName()
-
-		if networkId != types.NoNetworkID {
-			cnode.Annotations, err = util.UpdateNetworkIDAnnotation(cnode.Annotations, networkName, networkId)
-			if err != nil {
-				return fmt.Errorf("failed to update node %q network id annotation %d for network %s: %w",
-					node.Name, networkId, networkName, err)
-			}
-		}
-		if tunnelID != types.NoTunnelID {
-			cnode.Annotations, err = util.UpdateUDNLayer2NodeGRLRPTunnelIDs(cnode.Annotations, networkName, tunnelID)
-			if err != nil {
-				return fmt.Errorf("failed to update node %q tunnel id annotation %d for network %s: %w",
-					node.Name, tunnelID, networkName, err)
-			}
-		}
-		// Patch only the changed annotations via the status subresource instead
-		// of a full status update, which would overwrite fields trimmed by the
-		// informer transform (e.g. Images, VolumesAttached).
-		return na.kube.PatchNodeStatusAnnotations(node, cnode)
-	})
-	if resultErr != nil {
-		return fmt.Errorf("failed to update node %s annotation: %w", nodeName, resultErr)
+	networkName := na.netInfo.GetNetworkName()
+	hostSubnets, hasSubnetUpdate := hostSubnetsMap[networkName]
+	if hasSubnetUpdate || networkId != types.NoNetworkID || tunnelID != types.NoTunnelID {
+		na.batcher.EnqueueUpdate(nodeName, networkName, hostSubnets, hasSubnetUpdate, networkId, tunnelID)
+		klog.V(5).Infof("Enqueued annotation update for node %s network %s to batcher", nodeName, networkName)
 	}
 	return nil
 }
@@ -638,7 +616,7 @@ func (na *NodeAllocator) Cleanup() error {
 			continue
 		}
 
-		hostSubnetsMap := map[string][]*net.IPNet{networkName: nil}
+		hostSubnetsMap := map[string][]*net.IPNet{networkName: {}}
 		// passing util.InvalidID deletes the network/tunnel id annotation for the network.
 		err = na.updateNodeNetworkAnnotationsWithRetry(node.Name, hostSubnetsMap, types.InvalidID, types.InvalidID)
 		if err != nil {

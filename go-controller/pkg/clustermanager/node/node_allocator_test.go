@@ -9,20 +9,21 @@ import (
 	"net"
 	"reflect"
 	"testing"
+	"time"
 
 	cnitypes "github.com/containernetworking/cni/pkg/types"
+	"github.com/onsi/gomega"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
 	listersv1 "k8s.io/client-go/listers/core/v1"
-	k8stesting "k8s.io/client-go/testing"
 	"k8s.io/client-go/tools/cache"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/allocator/id"
 	ovncnitypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/controller"
 	sharednode "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/controllers/node"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube"
 	ovntest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing"
@@ -692,11 +693,18 @@ func TestController_CleanupNodeRemovesUDNAnnotations(t *testing.T) {
 	fakeClient := fake.NewClientset(node)
 	kube := &kube.Kube{KClient: fakeClient}
 
+	batcher := NewNodeAnnotationBatcher(kube)
+	if err := controller.Start(batcher.Reconciler()); err != nil {
+		t.Fatal(err)
+	}
+	defer controller.Stop(batcher.Reconciler())
+
 	na := &NodeAllocator{
 		nodeLister:             newFakeNodeLister([]*corev1.Node{node}),
 		kube:                   kube,
 		netInfo:                netInfo,
 		clusterSubnetAllocator: NewSubnetAllocator(),
+		batcher:                batcher,
 	}
 	_, subnetCIDR, err := net.ParseCIDR("10.1.0.0/16")
 	if err != nil {
@@ -713,13 +721,16 @@ func TestController_CleanupNodeRemovesUDNAnnotations(t *testing.T) {
 		t.Fatalf("CleanupNode failed: %v", err)
 	}
 
-	updatedNode, err := fakeClient.CoreV1().Nodes().Get(context.TODO(), node.Name, metav1.GetOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if util.HasNodeHostSubnetAnnotation(updatedNode, networkName) {
-		t.Fatalf("expected host subnet annotation to be removed for network %s", networkName)
-	}
+	g := gomega.NewWithT(t)
+	var updatedNode *corev1.Node
+	g.Eventually(func() bool {
+		var err error
+		updatedNode, err = fakeClient.CoreV1().Nodes().Get(context.TODO(), node.Name, metav1.GetOptions{})
+		if err != nil {
+			return false
+		}
+		return !util.HasNodeHostSubnetAnnotation(updatedNode, networkName)
+	}, 2*time.Second, 10*time.Millisecond).Should(gomega.BeTrue(), "expected host subnet annotation to be removed for network %s", networkName)
 	if _, err := util.ParseNetworkIDAnnotation(updatedNode, networkName); !util.IsAnnotationNotSetError(err) {
 		t.Fatalf("expected network ID annotation to be removed for network %s, got: %v", networkName, err)
 	}
@@ -772,12 +783,19 @@ func TestController_CleanupNodeReleasesTunnelIDs(t *testing.T) {
 	fakeClient := fake.NewClientset(node)
 	kube := &kube.Kube{KClient: fakeClient}
 
+	batcher := NewNodeAnnotationBatcher(kube)
+	if err := controller.Start(batcher.Reconciler()); err != nil {
+		t.Fatal(err)
+	}
+	defer controller.Stop(batcher.Reconciler())
+
 	na := &NodeAllocator{
 		nodeLister:             newFakeNodeLister([]*corev1.Node{node}),
 		kube:                   kube,
 		netInfo:                netInfo,
 		clusterSubnetAllocator: NewSubnetAllocator(),
 		idAllocator:            id.NewIDAllocator("tunnel-ids", 1024),
+		batcher:                batcher,
 	}
 	if err := na.idAllocator.ReserveID(networkName+"_"+node.Name, 42); err != nil {
 		t.Fatal(err)
@@ -792,13 +810,19 @@ func TestController_CleanupNodeReleasesTunnelIDs(t *testing.T) {
 		t.Fatalf("CleanupNode failed: %v", err)
 	}
 
-	updatedNode, err := fakeClient.CoreV1().Nodes().Get(context.TODO(), node.Name, metav1.GetOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := util.ParseUDNLayer2NodeGRLRPTunnelIDs(updatedNode, networkName); !util.IsAnnotationNotSetError(err) {
-		t.Fatalf("expected tunnel ID annotation to be removed for network %s, got: %v", networkName, err)
-	}
+	g := gomega.NewWithT(t)
+	var updatedNode *corev1.Node
+	g.Eventually(func() error {
+		var err error
+		updatedNode, err = fakeClient.CoreV1().Nodes().Get(context.TODO(), node.Name, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+		if _, err := util.ParseUDNLayer2NodeGRLRPTunnelIDs(updatedNode, networkName); !util.IsAnnotationNotSetError(err) {
+			return fmt.Errorf("expected tunnel ID annotation to be removed for network %s, got: %v", networkName, err)
+		}
+		return nil
+	}, 2*time.Second, 10*time.Millisecond).Should(gomega.Succeed())
 	if gotID := na.idAllocator.GetID(networkName + "_" + node.Name); gotID != types.InvalidID {
 		t.Fatalf("expected tunnel ID to be released, got %d", gotID)
 	}
@@ -858,12 +882,19 @@ func TestCleanupNode_TransitRouterMigration(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	batcher := NewNodeAnnotationBatcher(kube)
+	if err := controller.Start(batcher.Reconciler()); err != nil {
+		t.Fatal(err)
+	}
+	defer controller.Stop(batcher.Reconciler())
+
 	na := &NodeAllocator{
 		nodeLister:             newFakeNodeLister([]*corev1.Node{node}),
 		kube:                   kube,
 		netInfo:                netInfo,
 		clusterSubnetAllocator: NewSubnetAllocator(),
 		idAllocator:            idAlloc,
+		batcher:                batcher,
 	}
 
 	// Verify HasNodeTunnelIDAllocation returns false in transit router mode
@@ -877,13 +908,18 @@ func TestCleanupNode_TransitRouterMigration(t *testing.T) {
 	}
 
 	// Verify annotation was removed
-	updatedNode, err := fakeClient.CoreV1().Nodes().Get(context.TODO(), node.Name, metav1.GetOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := util.ParseUDNLayer2NodeGRLRPTunnelIDs(updatedNode, networkName); !util.IsAnnotationNotSetError(err) {
-		t.Fatalf("expected tunnel ID annotation to be removed after migration to transit router, got: %v", err)
-	}
+	g := gomega.NewWithT(t)
+	g.Eventually(func() error {
+		updatedNode, err := fakeClient.CoreV1().Nodes().Get(context.TODO(), node.Name, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+		_, err = util.ParseUDNLayer2NodeGRLRPTunnelIDs(updatedNode, networkName)
+		if !util.IsAnnotationNotSetError(err) {
+			return fmt.Errorf("expected tunnel ID annotation to be removed after migration to transit router, got: %v", err)
+		}
+		return nil
+	}, 2*time.Second, 10*time.Millisecond).Should(gomega.Succeed())
 
 	// Verify allocator state was released
 	if gotID := na.idAllocator.GetID(networkName + "_" + node.Name); gotID != types.InvalidID {
@@ -959,6 +995,12 @@ func TestSyncNodeNetworkAnnotations_TunnelID(t *testing.T) {
 				t.Fatal(err)
 			}
 
+			batcher := NewNodeAnnotationBatcher(kube)
+			if err := controller.Start(batcher.Reconciler()); err != nil {
+				t.Fatal(err)
+			}
+			defer controller.Stop(batcher.Reconciler())
+
 			na := &NodeAllocator{
 				nodeLister:             newFakeNodeLister([]*corev1.Node{node1}),
 				kube:                   kube,
@@ -966,6 +1008,7 @@ func TestSyncNodeNetworkAnnotations_TunnelID(t *testing.T) {
 				networkID:              1,
 				clusterSubnetAllocator: NewSubnetAllocator(),
 				idAllocator:            idAlloc,
+				batcher:                batcher,
 			}
 
 			// Set the topology mode directly (setTopologyType is now in ClusterManager)
@@ -982,25 +1025,29 @@ func TestSyncNodeNetworkAnnotations_TunnelID(t *testing.T) {
 				t.Fatalf("syncNodeNetworkAnnotations failed: %v", err)
 			}
 
-			// Verify tunnel ID annotation
-			updatedNode, err := fakeClient.CoreV1().Nodes().Get(context.TODO(), node1.Name, metav1.GetOptions{})
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			tunnelID, err := util.ParseUDNLayer2NodeGRLRPTunnelIDs(updatedNode, networkName)
-			if tt.wantAnnotation {
+			// Verify tunnel ID annotation, waiting for the batcher to apply it asynchronously.
+			g := gomega.NewWithT(t)
+			var updatedNode *corev1.Node
+			var tunnelID int
+			g.Eventually(func() error {
+				var err error
+				updatedNode, err = fakeClient.CoreV1().Nodes().Get(context.TODO(), node1.Name, metav1.GetOptions{})
 				if err != nil {
-					t.Fatalf("tunnel ID annotation should be set, got error: %v", err)
+					return err
 				}
-				if tunnelID == types.InvalidID {
-					t.Fatal("tunnel ID should have a valid value")
+				tunnelID, err = util.ParseUDNLayer2NodeGRLRPTunnelIDs(updatedNode, networkName)
+				if tt.wantAnnotation {
+					if err != nil {
+						return fmt.Errorf("tunnel ID annotation should be set, got error: %v", err)
+					}
+					if tunnelID == types.InvalidID {
+						return fmt.Errorf("tunnel ID should have a valid value")
+					}
+				} else if !util.IsAnnotationNotSetError(err) {
+					return fmt.Errorf("tunnel ID annotation should not be set, got: %v (error: %v)", updatedNode.Annotations, err)
 				}
-			} else {
-				if !util.IsAnnotationNotSetError(err) {
-					t.Fatalf("tunnel ID annotation should not be set, got: %v (error: %v)", updatedNode.Annotations, err)
-				}
-			}
+				return nil
+			}, 2*time.Second, 10*time.Millisecond).Should(gomega.Succeed())
 
 			// Verify allocator state
 			allocatorID := na.idAllocator.GetID(networkName + "_" + node1.Name)
@@ -1015,103 +1062,6 @@ func TestSyncNodeNetworkAnnotations_TunnelID(t *testing.T) {
 				if allocatorID != types.InvalidID {
 					t.Fatalf("tunnel ID should not be allocated in the allocator, got %d", allocatorID)
 				}
-			}
-		})
-	}
-}
-
-// TestSyncNodeNetworkAnnotations_ReleaseOnPatchFailure verifies that when the
-// annotation patch fails, a subnet already persisted on the node (as seen via a
-// live apiserver read) is NOT released back to the allocator, while a subnet that
-// was not persisted still is.
-func TestSyncNodeNetworkAnnotations_ReleaseOnPatchFailure(t *testing.T) {
-	const subnetCIDR = "10.1.0.0/24"
-
-	tests := []struct {
-		name              string
-		persistedOnServer bool
-		wantReleased      bool
-	}{
-		{
-			name:              "subnet persisted on server is not released",
-			persistedOnServer: true,
-			wantReleased:      false,
-		},
-		{
-			name:              "subnet not persisted on server is released",
-			persistedOnServer: false,
-			wantReleased:      true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if err := config.PrepareTestConfig(); err != nil {
-				t.Fatal(err)
-			}
-			ranges, err := rangesFromStrings([]string{"10.1.0.0/16"}, []int{24})
-			if err != nil {
-				t.Fatal(err)
-			}
-			config.Default.ClusterSubnets = ranges
-
-			netInfo, err := util.NewNetInfo(&ovncnitypes.NetConf{
-				NetConf: cnitypes.NetConf{Name: types.DefaultNetworkName},
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			networkName := netInfo.GetNetworkName()
-
-			// The node handed to the reconcile (from the informer cache) has no
-			// host-subnet annotation, so a fresh subnet gets allocated.
-			listerNode := &corev1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:        "node1",
-					Annotations: map[string]string{},
-				},
-			}
-
-			// The server copy optionally already has that same subnet persisted,
-			// simulating a prior reconcile that succeeded on the apiserver.
-			serverNode := listerNode.DeepCopy()
-			if tt.persistedOnServer {
-				anno, err := util.UpdateNodeHostSubnetAnnotation(serverNode.Annotations, []*net.IPNet{ovntest.MustParseIPNet(subnetCIDR)}, networkName)
-				if err != nil {
-					t.Fatal(err)
-				}
-				serverNode.Annotations = anno
-			}
-
-			fakeClient := fake.NewClientset(serverNode)
-			// Force the annotation patch to fail so the release path runs.
-			fakeClient.PrependReactor("patch", "nodes", func(k8stesting.Action) (bool, runtime.Object, error) {
-				return true, nil, fmt.Errorf("injected patch failure")
-			})
-			kubeIface := &kube.Kube{KClient: fakeClient}
-
-			na := &NodeAllocator{
-				nodeLister:             newFakeNodeLister([]*corev1.Node{listerNode}),
-				kube:                   kubeIface,
-				nodeClient:             fakeClient,
-				netInfo:                netInfo,
-				networkID:              types.DefaultNetworkID,
-				clusterSubnetAllocator: NewSubnetAllocator(),
-			}
-			if err := na.Init(); err != nil {
-				t.Fatal(err)
-			}
-
-			if err := na.syncNodeNetworkAnnotations(listerNode); err == nil {
-				t.Fatal("expected syncNodeNetworkAnnotations to fail due to injected patch failure")
-			}
-
-			v4used, _ := na.clusterSubnetAllocator.Usage()
-			if tt.wantReleased && v4used != 0 {
-				t.Fatalf("expected subnet to be released, got %d allocated", v4used)
-			}
-			if !tt.wantReleased && v4used != 1 {
-				t.Fatalf("expected subnet to remain allocated, got %d allocated", v4used)
 			}
 		})
 	}

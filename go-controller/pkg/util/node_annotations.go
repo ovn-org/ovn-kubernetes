@@ -572,6 +572,35 @@ func GetNodeUDNLayer2TunnelIDAnnotationNetworkNames(node *corev1.Node) ([]string
 	return networks, nil
 }
 
+// UpdateUDNLayer2NodeGRLRPTunnelIDsMap updates the UDN L2 node GR LRP tunnel ID annotation
+// with a complete map of all tunnel IDs. This is more efficient than updating networks individually.
+func UpdateUDNLayer2NodeGRLRPTunnelIDsMap(annotations map[string]string, tunnelIDsMap map[string]int) (map[string]string, error) {
+	if annotations == nil {
+		annotations = map[string]string{}
+	}
+
+	// Filter out invalid IDs (represents deletion)
+	filteredMap := make(map[string]string)
+	for netName, tunnelID := range tunnelIDsMap {
+		if tunnelID != types.InvalidID {
+			filteredMap[netName] = strconv.Itoa(tunnelID)
+		}
+	}
+
+	if len(filteredMap) == 0 {
+		delete(annotations, types.UDNLayer2NodeGRLRPTunnelIDAnnotation)
+		return annotations, nil
+	}
+
+	// Marshal the complete map
+	bytes, err := json.Marshal(filteredMap)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal tunnel-ids map: %v", err)
+	}
+	annotations[types.UDNLayer2NodeGRLRPTunnelIDAnnotation] = string(bytes)
+	return annotations, nil
+}
+
 func UDNLayer2NodeUsesTransitRouter(node *corev1.Node) bool {
 	return node.Annotations[Layer2TopologyVersion] == TransitRouterTopoVersion
 }
@@ -1254,6 +1283,35 @@ func UpdateNetworkIDAnnotation(annotations map[string]string, netName string, ne
 	if err != nil {
 		return nil, err
 	}
+	return annotations, nil
+}
+
+// UpdateNetworkIDAnnotationMap updates the OvnNetworkIDs annotation with a complete map
+// of all network IDs. This is more efficient than updating networks individually.
+func UpdateNetworkIDAnnotationMap(annotations map[string]string, networkIDsMap map[string]int) (map[string]string, error) {
+	if annotations == nil {
+		annotations = map[string]string{}
+	}
+
+	// Filter out invalid IDs (represents deletion)
+	filteredMap := make(map[string]string)
+	for netName, networkID := range networkIDsMap {
+		if networkID != types.InvalidID {
+			filteredMap[netName] = strconv.Itoa(networkID)
+		}
+	}
+
+	if len(filteredMap) == 0 {
+		delete(annotations, OvnNetworkIDs)
+		return annotations, nil
+	}
+
+	// Marshal the complete map
+	bytes, err := json.Marshal(filteredMap)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal network-ids map: %v", err)
+	}
+	annotations[OvnNetworkIDs] = string(bytes)
 	return annotations, nil
 }
 

@@ -32,6 +32,9 @@ type userDefinedNetworkClusterManager struct {
 
 	errorReporter  NetworkStatusReporter
 	nodeReconciler *nodecontroller.NodeController
+
+	// nodeAnnotationBatcher batches node annotation updates across networks
+	nodeAnnotationBatcher *node.NodeAnnotationBatcher
 }
 
 func newUserDefinedNetworkClusterManager(
@@ -40,14 +43,16 @@ func newUserDefinedNetworkClusterManager(
 	networkManager networkmanager.Interface,
 	recorder record.EventRecorder,
 	nodeReconciler *nodecontroller.NodeController,
+	batcher *node.NodeAnnotationBatcher,
 ) (*userDefinedNetworkClusterManager, error) {
 	klog.Infof("Creating user-defined network cluster manager")
 	sncm := &userDefinedNetworkClusterManager{
-		ovnClient:      ovnClient,
-		watchFactory:   wf,
-		networkManager: networkManager,
-		recorder:       recorder,
-		nodeReconciler: nodeReconciler,
+		ovnClient:             ovnClient,
+		watchFactory:          wf,
+		networkManager:        networkManager,
+		recorder:              recorder,
+		nodeReconciler:        nodeReconciler,
+		nodeAnnotationBatcher: batcher,
 	}
 	return sncm, nil
 }
@@ -77,6 +82,7 @@ func (sncm *userDefinedNetworkClusterManager) NewNetworkController(nInfo util.Ne
 		sncm.networkManager,
 		sncm.errorReporter,
 		sncm.nodeReconciler,
+		sncm.nodeAnnotationBatcher,
 	)
 	return sncc, nil
 }
@@ -137,6 +143,29 @@ func (sncm *userDefinedNetworkClusterManager) CleanupStaleNetworks(validNetworks
 			staleNetworkControllers[netName] = oc
 		}
 
+		// network-ids covers L2 secondary UDNs (and others)
+		networkIDsMap, err := util.GetNodeNetworkIDsAnnotationNetworkIDs(node)
+		if err != nil {
+			networkIDsMap = nil
+		}
+		for netName := range networkIDsMap {
+			if netName == ovntypes.DefaultNetworkName {
+				continue
+			}
+			if _, ok := existingNetworksMap[netName]; ok {
+				continue
+			}
+			if _, ok := staleNetworkControllers[netName]; ok {
+				continue
+			}
+			oc, err := sncm.newDummyNetworkController(ovntypes.Layer2Topology, netName)
+			if err != nil {
+				klog.Errorf("Failed to create dummy controller for stale network %s: %v", netName, err)
+				continue
+			}
+			staleNetworkControllers[netName] = oc
+		}
+
 		// tunnel IDs cover L2 primary UDNs with IC
 		tunnelNetworks, err := util.GetNodeUDNLayer2TunnelIDAnnotationNetworkNames(node)
 		if err != nil {
@@ -184,9 +213,10 @@ func (sncm *userDefinedNetworkClusterManager) newDummyNetworkController(topoType
 		sncm.networkManager,
 		nil,
 		sncm.nodeReconciler,
+		sncm.nodeAnnotationBatcher,
 	)
 	if nc.hasNodeAllocation() {
-		nc.nodeAllocator = node.NewNodeAllocator(ovntypes.InvalidID, nc.GetNetInfo(), nc.watchFactory.NodeCoreInformer().Lister(), nc.kube, nc.nodeClient, nil)
+		nc.nodeAllocator = node.NewNodeAllocator(ovntypes.InvalidID, nc.GetNetInfo(), nc.watchFactory.NodeCoreInformer().Lister(), nc.kube, nc.nodeClient, nil, sncm.nodeAnnotationBatcher)
 	}
 	return nc, nil
 }
