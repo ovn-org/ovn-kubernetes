@@ -79,3 +79,7 @@ API for OVN observability sampling and tracing.
 **[DHCP IPAM for Localnet](okep-6224-dhcp-ipam-localnet.md)**
 
 DHCP-based IPAM for localnet secondary networks.
+
+**[Scalable ARP/NDP Broadcast Handling for UDN](okep-6691-scalable-arp-ndp-broadcast-udn.md)**
+
+Scalable ARP/NDP broadcast handling to keep UDN external connectivity working at high UDN density.
