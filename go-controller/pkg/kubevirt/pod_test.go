@@ -41,6 +41,11 @@ var _ = Describe("Kubevirt Pod", func() {
 	duringMigrationKvTargetPod := runningKubevirtPod(t4)
 	yetAnotherDuringMigrationKvTargetPod := runningKubevirtPod(t4)
 	readyMigrationKvTargetPod := domainReadyKubevirtPod(t4)
+	preCopyMigrationKvTargetPod := runningKubevirtPod(t4)
+	preCopyMigrationKvTargetPod.Spec.NodeName = "target-node"
+	preCopyMigrationKvTargetPod.Labels[kubevirtv1.NodeNameLabel] = "target-node"
+	completedReadyMigrationKvTargetPod := domainReadyKubevirtPod(t4)
+	completedReadyMigrationKvTargetPod.Status.Phase = corev1.PodSucceeded
 
 	// Pods for hostname mismatch scenario (vm.kubevirt.io/name label != kubevirt.io/domain annotation)
 	hostnameVMName := "real-vm-name"
@@ -95,8 +100,12 @@ var _ = Describe("Kubevirt Pod", func() {
 		if params.expectedMigrationStatus == nil {
 			Expect(migrationStatus).To(BeNil())
 		} else {
+			Expect(migrationStatus).NotTo(BeNil())
 			Expect(migrationStatus.State).To(Equal(params.expectedMigrationStatus.State))
 			Expect(migrationStatus.TargetPod.Name).To(Equal(params.expectedMigrationStatus.TargetPod.Name))
+			Expect(migrationStatus.ActivePod).NotTo(BeNil())
+			Expect(migrationStatus.ActivePod.Name).To(Equal(params.expectedMigrationStatus.ActivePod.Name))
+			Expect(util.PodCompleted(migrationStatus.ActivePod)).To(BeFalse())
 			if params.expectedMigrationStatus.SourcePod == nil {
 				Expect(migrationStatus.SourcePod).To(BeNil())
 			} else {
@@ -135,6 +144,7 @@ var _ = Describe("Kubevirt Pod", func() {
 				expectedMigrationStatus: &LiveMigrationStatus{
 					SourcePod: &runningKvSourcePod,
 					TargetPod: &duringMigrationKvTargetPod,
+					ActivePod: &runningKvSourcePod,
 					State:     LiveMigrationInProgress,
 				},
 			},
@@ -145,6 +155,7 @@ var _ = Describe("Kubevirt Pod", func() {
 				expectedMigrationStatus: &LiveMigrationStatus{
 					SourcePod: &runningKvSourcePod,
 					TargetPod: &failedMigrationKvTargetPod,
+					ActivePod: &runningKvSourcePod,
 					State:     LiveMigrationFailed,
 				},
 			},
@@ -155,6 +166,7 @@ var _ = Describe("Kubevirt Pod", func() {
 				expectedMigrationStatus: &LiveMigrationStatus{
 					SourcePod: &runningKvSourcePod,
 					TargetPod: &anotherFailedMigrationKvTargetPod,
+					ActivePod: &runningKvSourcePod,
 					State:     LiveMigrationFailed,
 				},
 			},
@@ -165,6 +177,7 @@ var _ = Describe("Kubevirt Pod", func() {
 				expectedMigrationStatus: &LiveMigrationStatus{
 					SourcePod: &runningKvSourcePod,
 					TargetPod: &readyMigrationKvTargetPod,
+					ActivePod: &readyMigrationKvTargetPod,
 					State:     LiveMigrationTargetDomainReady,
 				},
 			},
@@ -175,6 +188,7 @@ var _ = Describe("Kubevirt Pod", func() {
 				expectedMigrationStatus: &LiveMigrationStatus{
 					SourcePod: &runningKvSourcePod,
 					TargetPod: &readyMigrationKvTargetPod,
+					ActivePod: &readyMigrationKvTargetPod,
 					State:     LiveMigrationTargetDomainReady,
 				},
 			},
@@ -185,6 +199,7 @@ var _ = Describe("Kubevirt Pod", func() {
 				expectedMigrationStatus: &LiveMigrationStatus{
 					TargetPod: &readyMigrationKvTargetPod,
 					State:     LiveMigrationTargetDomainReady,
+					ActivePod: &readyMigrationKvTargetPod,
 				},
 			},
 		),
@@ -194,12 +209,38 @@ var _ = Describe("Kubevirt Pod", func() {
 				expectedMigrationStatus: &LiveMigrationStatus{
 					TargetPod: &readyMigrationKvTargetPod,
 					State:     LiveMigrationTargetDomainReady,
+					ActivePod: &readyMigrationKvTargetPod,
 				},
 			},
 		),
 		Entry("returns nil when source pod is gone and target has no ready annotation",
 			testParams{
 				pods: []corev1.Pod{duringMigrationKvTargetPod},
+			},
+		),
+		Entry("selects the pre-copy target without changing the timestamp-based migration state",
+			testParams{
+				pods: []corev1.Pod{runningKvSourcePod, preCopyMigrationKvTargetPod},
+				expectedMigrationStatus: &LiveMigrationStatus{
+					SourcePod: &runningKvSourcePod,
+					TargetPod: &preCopyMigrationKvTargetPod,
+					ActivePod: &preCopyMigrationKvTargetPod,
+					State:     LiveMigrationInProgress,
+				},
+			},
+		),
+		Entry("returns nil when only a completed target with a ready annotation remains",
+			testParams{pods: []corev1.Pod{completedReadyMigrationKvTargetPod}},
+		),
+		Entry("selects the surviving source when a previously ready target completes",
+			testParams{
+				pods: []corev1.Pod{runningKvSourcePod, completedReadyMigrationKvTargetPod},
+				expectedMigrationStatus: &LiveMigrationStatus{
+					SourcePod: &runningKvSourcePod,
+					TargetPod: &completedReadyMigrationKvTargetPod,
+					ActivePod: &runningKvSourcePod,
+					State:     LiveMigrationFailed,
+				},
 			},
 		),
 		Entry("returns err when kubevirt VM has several living pods",
@@ -214,6 +255,7 @@ var _ = Describe("Kubevirt Pod", func() {
 				expectedMigrationStatus: &LiveMigrationStatus{
 					SourcePod: &runningKvSourcePodWithHostname,
 					TargetPod: &duringMigrationKvTargetPodWithHostname,
+					ActivePod: &runningKvSourcePodWithHostname,
 					State:     LiveMigrationInProgress,
 				},
 			},
@@ -224,6 +266,7 @@ var _ = Describe("Kubevirt Pod", func() {
 				expectedMigrationStatus: &LiveMigrationStatus{
 					SourcePod: &runningKvSourcePodWithLongName,
 					TargetPod: &duringMigrationKvTargetPodWithLongName,
+					ActivePod: &runningKvSourcePodWithLongName,
 					State:     LiveMigrationInProgress,
 				},
 			},
@@ -234,6 +277,7 @@ var _ = Describe("Kubevirt Pod", func() {
 				expectedMigrationStatus: &LiveMigrationStatus{
 					SourcePod: &runningKvSourcePodWithLongName,
 					TargetPod: &duringMigrationKvTargetPodWithLongName,
+					ActivePod: &runningKvSourcePodWithLongName,
 					State:     LiveMigrationInProgress,
 				},
 			},

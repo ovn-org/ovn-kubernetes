@@ -488,10 +488,15 @@ const (
 )
 
 // LiveMigrationStatus provides details about the current status of a live migration.
-// It includes information about the source and target pods as well as the migration state.
+// It includes the source, target, and active pods as well as the migration state.
 type LiveMigrationStatus struct {
-	SourcePod *corev1.Pod        // SourcePod is the original pod.
-	TargetPod *corev1.Pod        // TargetPod is the destination pod.
+	SourcePod *corev1.Pod // SourcePod is the original pod.
+	TargetPod *corev1.Pod // TargetPod is the destination pod.
+	// ActivePod hosts the active VM: the source until target takeover, the
+	// target after takeover, or the surviving source after failure. Discovery
+	// always sets it to a non-completed pod. The KubeVirt node label can signal
+	// takeover before the target-ready timestamp changes State.
+	ActivePod *corev1.Pod
 	State     LiveMigrationState // State is the current state of the live migration.
 }
 
@@ -530,9 +535,10 @@ func DiscoverLiveMigrationStatus(podLister listersv1.PodLister, pod *corev1.Pod)
 	if len(vmPods) < 2 {
 		// If the only remaining pod has the migration target ready
 		// annotation, the migration completed and the source pod is gone.
-		if len(vmPods) == 1 && isTargetPodReady(vmPods[0]) {
+		if len(vmPods) == 1 && !util.PodCompleted(vmPods[0]) && isTargetPodReady(vmPods[0]) {
 			return &LiveMigrationStatus{
 				TargetPod: vmPods[0],
+				ActivePod: vmPods[0],
 				State:     LiveMigrationTargetDomainReady,
 			}, nil
 		}
@@ -558,6 +564,7 @@ func DiscoverLiveMigrationStatus(podLister listersv1.PodLister, pod *corev1.Pod)
 		return &LiveMigrationStatus{
 			SourcePod: livingPods[0],
 			TargetPod: targetPod,
+			ActivePod: livingPods[0],
 			State:     LiveMigrationFailed,
 		}, nil
 	}
@@ -568,6 +575,7 @@ func DiscoverLiveMigrationStatus(podLister listersv1.PodLister, pod *corev1.Pod)
 		if isTargetPodReady(targetPod) {
 			return &LiveMigrationStatus{
 				TargetPod: targetPod,
+				ActivePod: targetPod,
 				State:     LiveMigrationTargetDomainReady,
 			}, nil
 		}
@@ -581,11 +589,16 @@ func DiscoverLiveMigrationStatus(podLister listersv1.PodLister, pod *corev1.Pod)
 	status := LiveMigrationStatus{
 		SourcePod: livingPods[0],
 		TargetPod: livingPods[1],
+		ActivePod: livingPods[0],
 		State:     LiveMigrationInProgress,
 	}
 
 	if isTargetPodReady(status.TargetPod) {
 		status.State = LiveMigrationTargetDomainReady
+		status.ActivePod = status.TargetPod
+	} else if status.TargetPod.Spec.NodeName != "" &&
+		status.TargetPod.Labels[kubevirtv1.NodeNameLabel] == status.TargetPod.Spec.NodeName {
+		status.ActivePod = status.TargetPod
 	}
 	return &status, nil
 }
