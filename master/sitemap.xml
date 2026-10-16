@@ -549,6 +549,10 @@
          <lastmod>2026-10-16</lastmod>
     </url>
     <url>
+         <loc>https://www.ovn.org/ovn-kubernetes/master/okeps/okep-6815-network-qos-ipamless/</loc>
+         <lastmod>2026-10-16</lastmod>
+    </url>
+    <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/okeps/okep-5224-connecting-udns/discarded-alternatives/</loc>
          <lastmod>2026-10-16</lastmod>
     </url>
