@@ -447,6 +447,11 @@ var _ = Describe("Kubevirt Virtual Machines", feature.VirtualMachineSupport, fun
 			// In debug runs, reject stale output and isolated recovery bursts on
 			// IPv6 ingress: require three fresh nonzero reporting intervals.
 			debugRecovery := os.Getenv("KUBEVIRT_MIGRATION_DEBUG") == "true" && strings.Contains(iperfLogFile, "ingress_test_") && strings.Contains(iperfLogFile, ":")
+			// Three fresh one-second reports need more time than the UDN
+			// callers' two-second timeout, plus room for polling delays.
+			if debugRecovery && timeout < 5*time.Second {
+				timeout = 5 * time.Second
+			}
 			lastSeen, initialized, goodIntervals := "", false, 0
 			// Check the last line eventually show traffic flowing
 			Eventually(func() (string, error) {
