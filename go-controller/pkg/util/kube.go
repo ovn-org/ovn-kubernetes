@@ -902,6 +902,9 @@ func GetConntrackZone() int {
 func IsLastUpdatedByManager(manager string, managedFields []metav1.ManagedFieldsEntry) bool {
 	var lastUpdateTheirs, lastUpdateOurs time.Time
 	for _, managedFieldEntry := range managedFields {
+		if managedFieldEntry.Time == nil {
+			continue
+		}
 		switch managedFieldEntry.Manager {
 		case manager:
 			if managedFieldEntry.Time.Time.After(lastUpdateOurs) {

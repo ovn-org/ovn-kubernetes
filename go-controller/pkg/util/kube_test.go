@@ -9,6 +9,7 @@ import (
 	"net"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 
@@ -855,6 +856,63 @@ func TestDoesEndpointSliceContainEligibleEndpoint(t *testing.T) {
 			if !reflect.DeepEqual(answer, tt.want) {
 				t.Errorf("got %v, want %v", answer, tt.want)
 			}
+		})
+	}
+}
+
+func TestIsLastUpdatedByManagerNilTime(t *testing.T) {
+	managedFields := []metav1.ManagedFieldsEntry{
+		{
+			Manager: "other-manager",
+			Time:    nil,
+		},
+	}
+
+	assert.NotPanics(t, func() {
+		IsLastUpdatedByManager("our-manager", managedFields)
+	})
+}
+
+func TestIsLastUpdatedByManagerWithNilTime(t *testing.T) {
+	older := metav1.NewTime(time.Unix(1000, 0))
+	newer := metav1.NewTime(time.Unix(2000, 0))
+
+	tests := []struct {
+		name     string
+		fields   []metav1.ManagedFieldsEntry
+		expected bool
+	}{
+		{
+			name: "our manager has nil time",
+			fields: []metav1.ManagedFieldsEntry{
+				{Manager: "ours"},
+			},
+			expected: false,
+		},
+		{
+			name: "nil entry does not override our latest update",
+			fields: []metav1.ManagedFieldsEntry{
+				{Manager: "ours", Time: &newer},
+				{Manager: "other", Time: nil},
+				{Manager: "other", Time: &older},
+			},
+			expected: true,
+		},
+		{
+			name: "nil entry does not override another manager",
+			fields: []metav1.ManagedFieldsEntry{
+				{Manager: "ours", Time: nil},
+				{Manager: "ours", Time: &older},
+				{Manager: "other", Time: &newer},
+			},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected,
+				IsLastUpdatedByManager("ours", tt.fields))
 		})
 	}
 }
