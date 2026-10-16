@@ -833,15 +833,6 @@ For host-networked pods, the controller retains the same IP addresses as the
 default controller. Custom EndpointSlices not created by the default controller
 are not processed.
 
-The mirror controller makes one exception for KubeVirt live migration. During
-a non-failed migration, the source and target `virt-launcher` pods can both be
-reported as not ready even though the virtual machine remains available on its
-persistent IP address. The controller keeps these VM-owned endpoints ready and
-serving, and reports them as not terminating, so the service load balancer does
-not remove the VM backend during the handoff. This override does not apply after
-a failed migration or to pods that are not owned by a virtual machine; those
-endpoints retain the conditions reported by the default EndpointSlice.
-
 The default EndpointSlices controller creates objects that contain the following labels:
 
 - `endpointslice.kubernetes.io/managed-by:endpointslice-controller.k8s.io` - Indicates

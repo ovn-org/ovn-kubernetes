@@ -10,7 +10,6 @@ import (
 	"sync"
 	"time"
 
-	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/api/discovery/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/validation"
@@ -24,11 +23,9 @@ import (
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
-	"k8s.io/utils/ptr"
 
 	controllerutil "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/controller"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
-	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kubevirt"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
@@ -371,11 +368,16 @@ func isManagedByDefault(endpointSlice *v1.EndpointSlice) bool {
 	return types.EndpointSliceDefaultControllerName == endpointSlice.Labels[v1.LabelManagedBy]
 }
 
-// getPodIP retrieves the IP address of the given Pod on the given network.
+// getPodIP retrieves the IP address of a specified Pod within a given namespace and network.
 // If the pod is host networked it returns default pod IP from the status ignoring the network.
 // Otherwise, it unmarshals the Pod's network annotation, and matches the IP from the provided network.
-func getPodIP(pod *corev1.Pod, nadKey string, isIPv6 bool) (string, error) {
+func (c *Controller) getPodIP(name, namespace, nadKey string, isIPv6 bool) (string, error) {
 	var podIP string
+	pod, err := c.podLister.Pods(namespace).Get(name)
+	if err != nil {
+		return "", err
+	}
+
 	if pod.Spec.HostNetwork {
 		podIPs, err := util.DefaultNetworkPodIPs(pod)
 		if err != nil {
@@ -404,36 +406,6 @@ func getPodIP(pod *corev1.Pod, nadKey string, isIPv6 bool) (string, error) {
 	}
 
 	return podIP, nil
-}
-
-// keepEndpointEligibleDuringLiveMigration keeps a mirrored endpoint eligible
-// while the KubeVirt virtual machine backing it is being live migrated.
-// During the handoff between the source and the target virt-launcher pods
-// both of their endpoints are briefly reported as not ready; mirroring that
-// would leave the service load balancers with no backends, and since the
-// load balancers are configured with reject=true, OVN would answer the
-// in-flight packets of established connections with TCP RST, permanently
-// breaking connections that the migration is supposed to preserve. The VM
-// keeps serving on its (persistent) network IP throughout a non-failed live
-// migration, so its endpoint is kept ready for the duration.
-func (c *Controller) keepEndpointEligibleDuringLiveMigration(pod *corev1.Pod, endpoint *v1.Endpoint) {
-	if util.IsEndpointReady(*endpoint) || !kubevirt.IsPodOwnedByVirtualMachine(pod) {
-		return
-	}
-	migrationStatus, err := kubevirt.DiscoverLiveMigrationStatus(c.podLister, pod)
-	if err != nil {
-		klog.Warningf("Failed to discover live migration status of pod %s/%s while mirroring EndpointSlices: %v",
-			pod.Namespace, pod.Name, err)
-		return
-	}
-	if migrationStatus == nil || migrationStatus.State == kubevirt.LiveMigrationFailed {
-		return
-	}
-	// The conditions describe the VM, which is serving and not going away
-	// even when the virt-launcher pod holding this endpoint is terminating.
-	endpoint.Conditions.Ready = ptr.To(true)
-	endpoint.Conditions.Serving = ptr.To(true)
-	endpoint.Conditions.Terminating = ptr.To(false)
 }
 
 // mirrorEndpointSlice creates or updates a mirrored EndpointSlice based on the provided defaultEndpointSlice.
@@ -480,17 +452,12 @@ func (c *Controller) mirrorEndpointSlice(mirroredEndpointSlice, defaultEndpointS
 	isIPv6 := defaultEndpointSlice.AddressType == v1.AddressTypeIPv6
 	for i, endpoint := range defaultEndpointSlice.Endpoints {
 		if endpoint.TargetRef != nil && endpoint.TargetRef.Kind == "Pod" {
-			pod, err := c.podLister.Pods(endpoint.TargetRef.Namespace).Get(endpoint.TargetRef.Name)
-			if err != nil {
-				return nil, fmt.Errorf("failed to get Pod %s/%s: %w", endpoint.TargetRef.Namespace, endpoint.TargetRef.Name, err)
-			}
-			podIP, err := getPodIP(pod, nadKey, isIPv6)
+			podIP, err := c.getPodIP(endpoint.TargetRef.Name, endpoint.TargetRef.Namespace, nadKey, isIPv6)
 			if err != nil {
 				return nil, fmt.Errorf("failed to determine the Pod IP of: %s/%s: %v", endpoint.TargetRef.Namespace, endpoint.TargetRef.Name, err)
 			}
 			newEp := endpoint.DeepCopy()
 			newEp.Addresses = []string{podIP}
-			c.keepEndpointEligibleDuringLiveMigration(pod, newEp)
 			currentMirror.Endpoints[i] = *newEp
 		}
 	}
