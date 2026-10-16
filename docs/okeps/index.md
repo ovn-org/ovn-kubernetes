@@ -79,3 +79,7 @@ API for OVN observability sampling and tracing.
 **[DHCP IPAM for Localnet](okep-6224-dhcp-ipam-localnet.md)**
 
 DHCP-based IPAM for localnet secondary networks.
+
+**[OVN-Kubernetes Operator](okep-7136-ovn-kubernetes-operator.md)**
+
+Operator that installs and upgrades OVN-Kubernetes from a single custom resource.

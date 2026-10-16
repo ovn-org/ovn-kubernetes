@@ -241,5 +241,6 @@ nav:
     - DHCP IPAM for Localnet: okeps/okep-6224-dhcp-ipam-localnet.md
     - EgressIP Node Selector: okeps/okep-6800-egressip-node-selector.md
     - NetworkQoS for Ipamless Localnet Networks: okeps/okep-6815-network-qos-ipamless.md
+    - OVN-Kubernetes Operator: okeps/okep-7136-ovn-kubernetes-operator.md
   - Blog:
     - OVN-Kubernetes Blog: blog/index.md
