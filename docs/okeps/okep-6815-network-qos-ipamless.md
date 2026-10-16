@@ -67,9 +67,9 @@ proposal is scoped to **localnet**; see [Non-Goals](#non-goals) and
 - **Changes to the NetworkQoS CRD spec / schema.** Users create the same
   `NetworkQoS` resources with the same fields; there is no OpenAPI/schema diff.
   The only externally-observable API surface added is a **new status condition
-  type** (`UnsupportedConfiguration`) on the already-existing
-  `Status.Conditions` field, to avoid degrading silently on unsupported
-  configurations; see [API Details](#api-details).
+  type** (`Accepted`) on the already-existing `Status.Conditions` field, so an
+  unsupported configuration is rejected explicitly instead of being applied
+  partially; see [API Details](#api-details).
 - **Ingress-direction QoS and traffic shaping.** NetworkQoS is egress-only and
   *polices* (drops excess) rather than *shapes* (queues) - an existing product
   constraint, not introduced here.
@@ -380,19 +380,19 @@ discoverable pod IPs, but it does not switch the source-matching path.
 **No NetworkQoS CRD schema changes.** The feature reuses the same
 `k8s.ovn.org/v1alpha1` CRD, the same `podSelector` / `networkSelectors` /
 `priority` / `egress` fields, and the same `classifier` semantics. There is no
-OpenAPI/schema diff and no new spec field, and existing manifests are interpreted
-identically - the only difference is that a manifest selecting an ipamless
-localnet network, which is silently a no-op today, becomes functional.
+OpenAPI/schema diff and no new spec field. A valid manifest selecting an
+ipamless localnet network, which is silently a no-op today, becomes functional;
+a manifest with an unsupported destination selector is rejected through its
+status instead of being silently ignored.
 
-On ipamless networks the `classifier.to` `podSelector` / `namespaceSelector`
-destination forms cannot be resolved (see
+On networks without discoverable pod IPs, the `classifier.to` `podSelector` /
+`namespaceSelector` destination forms cannot be resolved (see
 [Scope of destination matching](#scope-of-destination-matching-in-this-proposal))
-and are not honored. This is a behavioral scoping of an existing field on a
-topology where it cannot be resolved, not a spec change. To keep this from
-degrading **silently**, the controller surfaces it explicitly on the object's
-status.
+and the controller rejects the entire `NetworkQoS`. This is a behavioral
+scoping of an existing field on a topology where it cannot be resolved, not a
+spec change. The rejection is surfaced explicitly on the object's status.
 
-#### New status condition: unsupported / degraded configuration
+#### New status condition: configuration acceptance
 
 `NetworkQoS.Status.Conditions` already exists (`[]metav1.Condition`), so no
 OpenAPI/schema diff is required. This proposal defines a **new condition type**
@@ -401,37 +401,58 @@ is an **additive, externally-observable API change** (a status contract users
 and tooling can depend on), and is therefore documented and versioned here even
 though it is not a schema change.
 
-- **Type:** `UnsupportedConfiguration`. Like the existing per-zone
+- **Type:** `Accepted`. Like the existing per-zone
   `Ready-In-Zone-<node>` condition, the controller writes this condition from
   each zone it reconciles in; the *value* is derived purely from the CR spec and
   the target network's topology, so it is identical across zones.
-- **`status: "True"`** - the reconciled `NetworkQoS` contains at least one
-  configuration element that is unsupported on the target ipamless localnet
-  network and is being ignored. Today the only such element is a
-  `classifier.to` entry using `podSelector` and/or `namespaceSelector`. The QoS
-  rules that *can* be honored (source selection, `ipBlock` destinations,
-  protocol/port, DSCP, bandwidth) are still applied; only the unsupported
-  destination form is dropped. The object is applied in a **degraded** state,
-  not rejected.
-- **`status: "False"`** - the resolved configuration is fully supported on this
-  network; nothing is being ignored.
-- **`reason`:** `UnsupportedDestinationSelector` when `status: "True"`;
-  `ConfigurationSupported` when `status: "False"`.
+- **`status: "True"`** - the resolved configuration is supported on every
+  selected network and the `NetworkQoS` is accepted for reconciliation.
+- **`status: "False"`** - the `NetworkQoS` contains at least one configuration
+  element that is unsupported on a selected network and is rejected in full.
+  Today the only such element is a `classifier.to` entry using `podSelector`
+  and/or `namespaceSelector` on a network without discoverable pod IPs. The
+  controller does not install a source port group, QoS rows, or destination
+  address sets for the rejected object, and removes any OVN objects left from a
+  previously accepted revision. Supported parts of the specification are not
+  applied partially.
+- **`reason`:** `ConfigurationAccepted` when `status: "True"`;
+  `UnsupportedDestinationSelector` when `status: "False"`.
 - **`message`:** human-readable, naming the specific egress rule index(es) and
   the unsupported selector form so the user can locate and correct the offending
-  rule (for example: *"egress rule 1: destination podSelector/namespaceSelector
-  is not supported on ipamless localnet networks and is ignored; use ipBlock
-  instead"*).
-- **Scope of emission:** the condition is only meaningful on networks without
-  discoverable pod IPs. On networks where `DoesNetworkHaveDiscoverablePodIPs()`
-  returns true, including subnet-less DHCP IPAM localnet, the controller does
-  not add it because all classifier forms are supported there.
+  rule (for example: *"egress rule 1: destination
+  podSelector/namespaceSelector is not supported on networks without
+  discoverable pod IPs; the NetworkQoS is rejected; use ipBlock instead"*).
+- **Scope of emission:** the controller emits `Accepted` for every
+  `NetworkQoS`. `Accepted=False` is possible only when a selected network lacks
+  discoverable pod IPs and the specification uses a labeled destination
+  selector. On networks where `DoesNetworkHaveDiscoverablePodIPs()` returns
+  true, including subnet-less DHCP IPAM localnet, all classifier forms are
+  supported and the condition is `Accepted=True`.
 
-This condition is purely informational about spec/topology compatibility; it is
-independent of the existing `Ready-In-Zone-<node>` condition, which continues to
-report apply success/failure. A `NetworkQoS` can be both `Ready` and carry
-`UnsupportedConfiguration: "True"` (its supported rules applied successfully
-while an unsupported destination form was ignored).
+Acceptance is all-or-nothing across the selected networks. If
+`networkSelectors` resolves to multiple networks and even one lacks discoverable
+pod IPs while the `NetworkQoS` uses a labeled destination selector, the entire
+object is rejected: `Accepted=False`, no rules are installed on the discoverable
+networks, and any OVN objects from a previously accepted revision are removed.
+This avoids topology-dependent behavior where the same manifest is enforced on
+some selected networks and rejected on others.
+
+For example:
+
+```yaml
+status:
+  conditions:
+  - type: Accepted
+    status: "False"
+    reason: UnsupportedDestinationSelector
+    message: "egress rule 1: destination podSelector/namespaceSelector is not supported on networks without discoverable pod IPs; the NetworkQoS is rejected; use ipBlock instead"
+```
+
+`Accepted` is a validation gate, independent of the existing per-zone
+`Ready-In-Zone-<node>` condition, which continues to report apply success or
+failure. A `NetworkQoS` with `Accepted=False` must not be reported as ready in
+any zone; after the specification is corrected, `Accepted` becomes `True` and
+the per-zone conditions report the result of reconciliation.
 
 ### Prerequisite: level-driven source reconciliation
 
@@ -684,11 +705,18 @@ uses `DoesNetworkHaveDiscoverablePodIPs()` rather than
 `DoesNetworkRequireIPAM()`, so DHCP-learned pod IPs can populate the
 destination address set.
 
-The new `UnsupportedConfiguration` status condition must also be covered: a
-`NetworkQoS` with a `classifier.to` `podSelector` / `namespaceSelector` on an
-ipamless localnet network sets the condition to `True` (with the supported rules
-still applied), and clearing/correcting that config flips it back to `False`;
-networks with discoverable pod IPs never receive the condition.
+The new `Accepted` status condition must also be covered: a `NetworkQoS` with a
+`classifier.to` `podSelector` / `namespaceSelector` on an ipamless localnet
+network sets `Accepted=False` with reason `UnsupportedDestinationSelector`,
+installs no OVN objects, and removes any objects from a previously accepted
+revision. Clearing or correcting that configuration flips the condition to
+`Accepted=True` and reconciles the rules. Networks with discoverable pod IPs
+receive `Accepted=True` and support labeled destination selectors.
+
+Mixed `networkSelectors` must also be covered: selecting both a network with
+discoverable pod IPs and one without must set `Accepted=False`, install no rules
+on either network, and identify the non-discoverable network in the condition
+message.
 
 ### Documentation Details
 
@@ -705,8 +733,9 @@ networks with discoverable pod IPs never receive the condition.
 
 - **No destination `podSelector` / `namespaceSelector`** on ipamless networks
   (a permanent scope boundary, not a temporary limitation). *Mitigation:* document
-  prominently, and surface an `UnsupportedConfiguration` status condition so such
-  a config never degrades silently (see [API Details](#api-details)).
+  prominently, and set `Accepted=False` with reason
+  `UnsupportedDestinationSelector` so such a config is rejected in full rather
+  than applied partially (see [API Details](#api-details)).
 - **Stale/orphan port-group GC across controller rename/restart.**
   *Mitigation:* the implementation must confirm the ownership-keyed GC (the same
   machinery as address sets) reclaims orphaned port groups; this is called out as
