@@ -1083,7 +1083,7 @@ wait_for_ovn_daemonset() {
   timeout=$(calculate_timeout ${endtime})
   echo "Waiting for k8s to launch all ${ds} pods (timeout ${timeout})..."
   # `kubectl rollout status` errors on DaemonSets with updateStrategy=OnDelete
-  # (upgrade-ovn.sh sets ovs-node to OnDelete so helm upgrade doesn't roll
+  # (staged-upgrade-ovn.sh sets ovs-node to OnDelete so helm upgrade doesn't roll
   # OVS out from under still-running ovnkube-node pods). For OnDelete DSes
   # we can't observe rollout progress; just wait for pods to be Ready.
   local strategy

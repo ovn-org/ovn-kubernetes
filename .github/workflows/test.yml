@@ -391,26 +391,40 @@ jobs:
         GO111MODULE=off goveralls -coverprofile=gover.coverprofile -service=github
 
   ovn-upgrade-e2e:
-    name: Upgrade OVN from Base to PR branch based image
+    name: Upgrade OVN from Base to PR branch based image (${{ matrix.gateway-mode }})
     if: github.event_name != 'schedule'
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    timeout-minutes: 240
     needs:
       - build-base
       - build-pr
     strategy:
       fail-fast: false
       matrix:
+        # The supported order is nodes first, then the control plane (see
+        # docs/design/upgrades.md). Stage 1 rolls every node but one and keeps
+        # the control plane paused; stage 2 rolls the last node and resumes the
+        # control plane. e2e runs after each stage.
         gateway-mode: [local, shared]
     env:
-      JOB_NAME: "Upgrade-Tests-${{ matrix.gateway-mode }}"
+      JOB_NAME: "Upgrade-Tests-${{ matrix.gateway-mode }}-dualstack"
       PLATFORM_IPV4_SUPPORT: "true"
-      PLATFORM_IPV6_SUPPORT: "false"
-      KIND_IPV4_SUPPORT: "true"
-      KIND_IPV6_SUPPORT: "false"
+      PLATFORM_IPV6_SUPPORT: "true"
       OVN_HYBRID_OVERLAY_ENABLE: "false"
       OVN_GATEWAY_MODE: "${{ matrix.gateway-mode }}"
-      OVN_MULTICAST_ENABLE:  "false"
+      # Network Segmentation includes UDN multicast tests that are not gated
+      # on the feature flag.
+      OVN_MULTICAST_ENABLE:  "true"
+      # UDN features carry the most cross-version state (network IDs, tunnel
+      # keys, masquerade IPs, cluster-manager written pod annotations), so the
+      # upgrade cluster runs with them enabled and the Network Segmentation
+      # suite is part of the post-stage checks. Match the network-segmentation
+      # e2e target flags so the same skip lists apply.
+      ENABLE_MULTI_NET: "true"
+      ENABLE_NETWORK_SEGMENTATION: "true"
+      ENABLE_NETWORK_CONNECT: "true"
+      ENABLE_UPLINK: "true"
+      KIND_INSTALL_METALLB: "true"
       # TODO(koolzz): deprecate once infra is switched completely to kind-helm.sh
       USE_HELM: "true"
     steps:
@@ -436,6 +450,17 @@ jobs:
         export GOPATH=$(go env GOPATH)
         echo "GOPATH=$GOPATH" >> $GITHUB_ENV
         echo "$GOPATH/bin" >> $GITHUB_PATH
+
+    # UDN gateways create a VRF device per network; the runner kernel needs the
+    # vrf module loaded before the kind nodes start.
+    - name: Install VRF kernel module
+      run: |
+        set -x
+        if ! sudo modprobe vrf; then
+          sudo apt update
+          sudo apt-get install linux-modules-extra-$(uname -r) -y
+          sudo modprobe vrf
+        fi
 
     - name: Free up disk space
       uses: ./.github/actions/free-disk-space
@@ -504,14 +529,77 @@ jobs:
       run: |
         docker load --input ${CI_IMAGE_PR_TAR} && rm -rf ${CI_IMAGE_PR_TAR}
 
-    - name: ovn upgrade
+    # install-kind ran from the base branch, so the e2e binary matches the base
+    # Kubernetes version. Refresh it if the PR branch pins a different one.
+    - name: Refresh e2e binary to PR branch Kubernetes version
+      run: |
+        K8S_VERSION=$(sed -n 's/^K8S_VERSION="\(.*\)"/\1/p' test/scripts/install-kind.sh)
+        if [[ "$(/usr/local/bin/e2e.test --version)" != "${K8S_VERSION}" ]]; then
+          curl -LO https://dl.k8s.io/${K8S_VERSION}/kubernetes-test-linux-amd64.tar.gz
+          tar xvzf kubernetes-test-linux-amd64.tar.gz
+          sudo mv kubernetes/test/bin/e2e.test kubernetes/test/bin/ginkgo /usr/local/bin/
+          rm -rf kubernetes kubernetes-test-linux-amd64.tar.gz
+        fi
+
+    # Stage 1 rolls every ovnkube-node but one to the PR image while the
+    # cluster-manager stays on the base image, so e2e covers both skews the
+    # supported order produces: new nodes with an old control plane, and new
+    # nodes with an old node. Stage 2 rolls the last node, resumes the control
+    # plane, and e2e runs again on the fully upgraded cluster.
+    - name: ovn upgrade stage 1 (nodes-first)
       run: |
         export OVN_IMAGE="ovn-daemonset-fedora:pr"
-        make -C test upgrade-ovn
+        UPGRADE_STAGE=nodes-first make -C test staged-upgrade-ovn
 
-    - name: Run E2E shard-conformance
+    - name: Run E2E shard-conformance after nodes-first
       run: |
-        make -C test shard-conformance
+        JOB_NAME="${JOB_NAME}-nodes-first" make -C test shard-conformance
+
+    # Primary UDN east/west, isolation, overlapping CIDRs, services, node
+    # annotations and the UDN/CUDN controllers: the state that crosses the
+    # cluster-manager/node boundary. Table names are used instead of the
+    # "a user defined primary network" context because that string also
+    # matches the pod2Egress and services contexts. Isolation runs for one
+    # creation method only (CUDN), since the method does not change the
+    # node-side behaviour, and overlapping CIDRs runs only its L2 entry: the
+    # L3 entry probes 20x20 pod pairs with 2s connect timeouts and takes 4 to
+    # 8 minutes for the same isolation check.
+    - name: Run E2E Network Segmentation after nodes-first
+      run: |
+        JOB_NAME="${JOB_NAME}-nodes-first-udn" make -C test control-plane \
+          WHAT="Network Segmentation can perform east/west traffic between nodes|created using ClusterUserDefinedNetwork is isolated from the default network|isolates overlapping CIDRs with L2 primary UDN|Network Segmentation: services|Network Segmentation: Node Annotations|UserDefinedNetwork CRD Controller|ClusterUserDefinedNetwork CRD Controller"
+
+    # Default-network features whose protocol spans cluster-manager and node:
+    # EgressIP assignment vs. node programming, egress firewall ACLs, ingress
+    # and NodePort service paths, and the control plane disruption tests.
+    # Narrowed to named tests to keep each stage around 40 minutes.
+    - name: Run E2E control-plane skew suites after nodes-first
+      run: |
+        JOB_NAME="${JOB_NAME}-nodes-first-cp" make -C test control-plane \
+          WHAT="Should validate the egress IP functionality against remote hosts|Should re-assign egress IPs when node readiness / reachability goes down/up|Should validate the egress firewall policy functionality for allowed IP|Should validate the egress firewall policy functionality for allowed CIDR and port|should provide Internet connection continuously when|Validating ingress traffic|queries to the nodePort service shall work|Creates a host-network service|session-affinity|Maintains service connectivity during rolling update|e2e network policy hairpinning validation|Network Policy: ICMP bypass"
+
+    - name: ovn upgrade stage 2 (control-plane-last)
+      run: |
+        export OVN_IMAGE="ovn-daemonset-fedora:pr"
+        UPGRADE_STAGE=control-plane-last make -C test staged-upgrade-ovn
+
+    - name: Run E2E shard-conformance after control-plane-last
+      run: |
+        JOB_NAME="${JOB_NAME}-control-plane-last" make -C test shard-conformance
+
+    - name: Run E2E Network Segmentation after control-plane-last
+      run: |
+        JOB_NAME="${JOB_NAME}-control-plane-last-udn" make -C test control-plane \
+          WHAT="Network Segmentation can perform east/west traffic between nodes|created using ClusterUserDefinedNetwork is isolated from the default network|isolates overlapping CIDRs with L2 primary UDN|Network Segmentation: services|Network Segmentation: Node Annotations|UserDefinedNetwork CRD Controller|ClusterUserDefinedNetwork CRD Controller"
+
+    # Default-network features whose protocol spans cluster-manager and node:
+    # EgressIP assignment vs. node programming, egress firewall ACLs, ingress
+    # and NodePort service paths, and the control plane disruption tests.
+    # Narrowed to named tests to keep each stage around 40 minutes.
+    - name: Run E2E control-plane skew suites after control-plane-last
+      run: |
+        JOB_NAME="${JOB_NAME}-control-plane-last-cp" make -C test control-plane \
+          WHAT="Should validate the egress IP functionality against remote hosts|Should re-assign egress IPs when node readiness / reachability goes down/up|Should validate the egress firewall policy functionality for allowed IP|Should validate the egress firewall policy functionality for allowed CIDR and port|should provide Internet connection continuously when|Validating ingress traffic|queries to the nodePort service shall work|Creates a host-network service|session-affinity|Maintains service connectivity during rolling update|e2e network policy hairpinning validation|Network Policy: ICMP bypass"
 
     - name: Export kind logs
       if: always()

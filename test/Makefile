@@ -63,9 +63,9 @@ install-kind:
 	PLATFORM_IPV6_SUPPORT=$(PLATFORM_IPV6_SUPPORT) \
 	./scripts/install-kind.sh
 
-.PHONY : upgrade-ovn
-upgrade-ovn:
-	./scripts/upgrade-ovn.sh
+.PHONY: staged-upgrade-ovn
+staged-upgrade-ovn:
+	./scripts/staged-upgrade-ovn.sh
 
 .PHONY: shard-%
 shard-%:
