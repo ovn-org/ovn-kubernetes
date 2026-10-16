@@ -63,23 +63,23 @@ jobs:
         # ipfamily: ["ipv4", "ipv6", "dualstack"]
         # disable-snat-multiple-gws: ["noSnatGW", "snatGW"]
         # second-bridge: ["2br", "1br"]
-        # ic: ["ic-single-node-zones"]
+        # cni-mode: ["privileged", "unprivileged"]
         # num-workers : "<integer value>"
         # forwarding : ["", "disable-forwarding"]
         # dns-name-resolver : ["", "enable-dns-name-resolver"]
         # network-segmentation : ["", "enable-network-segmentation"]
         # traffic-flow-tests : "<tests range. i.e. 1-24>"
         include:
-          - {"target": "control-plane", perf-test: "kubelet-density-cni", "gateway-mode": "local", "ipfamily": "ipv4", "disable-snat-multiple-gws": "noSnatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones", "num-workers": "3", "network-segmentation": ""}
-          - {"target": "control-plane", perf-test: "udn-density-l2-noPods", "gateway-mode": "local", "ipfamily": "ipv4", "disable-snat-multiple-gws": "noSnatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones", "num-workers": "3", "network-segmentation": ""}
-          - {"target": "control-plane", perf-test: "cudn-density-l2-noPods", "gateway-mode": "local", "ipfamily": "ipv4", "disable-snat-multiple-gws": "noSnatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones", "num-workers": "3", "network-segmentation": ""}
-          - {"target": "control-plane", perf-test: "udn-density-l2-pods", "gateway-mode": "local", "ipfamily": "ipv4", "disable-snat-multiple-gws": "noSnatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones", "num-workers": "3", "network-segmentation": ""}
-          - {"target": "control-plane", perf-test: "cudn-density-l2-pods-netpol", "gateway-mode": "local", "ipfamily": "ipv4", "disable-snat-multiple-gws": "noSnatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones", "num-workers": "3", "network-segmentation": ""}
-          - {"target": "control-plane", perf-test: "udn-density-l2-pods-netpol", "gateway-mode": "local", "ipfamily": "ipv4", "disable-snat-multiple-gws": "noSnatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones", "num-workers": "3", "network-segmentation": ""}
-          - {"target": "control-plane", perf-test: "udn-density-l3-pods-netpol", "gateway-mode": "local", "ipfamily": "ipv4", "disable-snat-multiple-gws": "noSnatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones", "num-workers": "3", "network-segmentation": ""}
+          - {"target": "control-plane", perf-test: "kubelet-density-cni", "gateway-mode": "local", "ipfamily": "ipv4", "disable-snat-multiple-gws": "noSnatGW",   "second-bridge": "1br", "cni-mode": "privileged", "num-workers": "3", "network-segmentation": ""}
+          - {"target": "control-plane", perf-test: "udn-density-l2-noPods", "gateway-mode": "local", "ipfamily": "ipv4", "disable-snat-multiple-gws": "noSnatGW",   "second-bridge": "1br", "cni-mode": "privileged", "num-workers": "3", "network-segmentation": ""}
+          - {"target": "control-plane", perf-test: "cudn-density-l2-noPods", "gateway-mode": "local", "ipfamily": "ipv4", "disable-snat-multiple-gws": "noSnatGW",   "second-bridge": "1br", "cni-mode": "privileged", "num-workers": "3", "network-segmentation": ""}
+          - {"target": "control-plane", perf-test: "udn-density-l2-pods", "gateway-mode": "local", "ipfamily": "ipv4", "disable-snat-multiple-gws": "noSnatGW",   "second-bridge": "1br", "cni-mode": "privileged", "num-workers": "3", "network-segmentation": ""}
+          - {"target": "control-plane", perf-test: "cudn-density-l2-pods-netpol", "gateway-mode": "local", "ipfamily": "ipv4", "disable-snat-multiple-gws": "noSnatGW",   "second-bridge": "1br", "cni-mode": "privileged", "num-workers": "3", "network-segmentation": ""}
+          - {"target": "control-plane", perf-test: "udn-density-l2-pods-netpol", "gateway-mode": "local", "ipfamily": "ipv4", "disable-snat-multiple-gws": "noSnatGW",   "second-bridge": "1br", "cni-mode": "privileged", "num-workers": "3", "network-segmentation": ""}
+          - {"target": "control-plane", perf-test: "udn-density-l3-pods-netpol", "gateway-mode": "local", "ipfamily": "ipv4", "disable-snat-multiple-gws": "noSnatGW",   "second-bridge": "1br", "cni-mode": "privileged", "num-workers": "3", "network-segmentation": ""}
     env:
       ES_SERVER: "${{ secrets.PERF_DATASTORE }}"
-      JOB_NAME: "${{ matrix.target }}-${{ matrix.gateway-mode }}-${{ matrix.ipfamily }}-${{ matrix.disable-snat-multiple-gws }}-${{ matrix.second-bridge }}-${{ matrix.ic }}"
+      JOB_NAME: "${{ matrix.target }}-${{ matrix.gateway-mode }}-${{ matrix.ipfamily }}-${{ matrix.disable-snat-multiple-gws }}-${{ matrix.second-bridge }}-${{ matrix.cni-mode }}"
       OVN_HYBRID_OVERLAY_ENABLE: "false"
       OVN_MULTICAST_ENABLE:  "${{ matrix.target == 'control-plane' || matrix.target == 'control-plane-helm' || matrix.target == 'network-segmentation' || matrix.target == 'bgp' || matrix.target == 'bgp-loose-isolation' }}"
       OVN_EMPTY_LB_EVENTS: "${{ matrix.target == 'control-plane' || matrix.target == 'control-plane-helm' || matrix.target == 'bgp' || matrix.target == 'bgp-loose-isolation' }}"
@@ -99,7 +99,7 @@ jobs:
       TRAFFIC_FLOW_TESTS: "${{ matrix.traffic-flow-tests }}"
       ENABLE_ROUTE_ADVERTISEMENTS: "${{ matrix.routeadvertisements != '' }}"
       ADVERTISE_DEFAULT_NETWORK:  "${{ matrix.routeadvertisements == 'advertise-default' }}"
-      ENABLE_PRE_CONF_UDN_ADDR: "${{ matrix.ic == 'ic-single-node-zones' && (matrix.target == 'network-segmentation' || matrix.network-segmentation == 'enable-network-segmentation') }}"
+      ENABLE_PRE_CONF_UDN_ADDR: "${{ matrix.target == 'network-segmentation' || matrix.network-segmentation == 'enable-network-segmentation' }}"
       ENABLE_NETWORK_CONNECT: "${{ matrix.target == 'network-segmentation' }}"
       ADVERTISED_UDN_ISOLATION_MODE: "${{ matrix.advertised-udn-isolation-mode }}"
       # Override PARALLEL=true for Serial tests target to run Serial tests
