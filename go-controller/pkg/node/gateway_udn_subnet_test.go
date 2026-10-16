@@ -23,6 +23,10 @@ import (
 )
 
 func TestUDNManagementPortSubnetChange(t *testing.T) {
+	if ovntest.NoRoot() {
+		t.Skip("Test requires root privileges")
+	}
+
 	for _, tc := range []struct {
 		name          string
 		before        []string
