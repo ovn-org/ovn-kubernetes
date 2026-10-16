@@ -340,21 +340,32 @@ is sufficient for the target use cases.
 
 ## Proposed Solution
 
-The controller gains an **IP-independent source-matching path** that activates
-only on ipamless localnet networks. Instead of resolving source pods to IP
-addresses and matching `ip4.src == {$address_set}`, the controller places each
-selected source pod's **logical switch port (LSP)** into a per-`NetworkQoS`
-**OVN port group** and matches `inport == @<port_group> && (ip4 || ip6)`.
-Everything else about a `NetworkQoS` - destination `ipBlock`, protocol/port
-classifier, DSCP action, bandwidth policing, priority ordering, and the
-`to-lport` QoS row attached to the network's logical switch - is reused
-unchanged from the existing IPAM implementation.
+The controller moves to **IP-independent source matching on every network type**.
+Instead of resolving source pods to IP addresses and matching using address sets,
+the controller places each selected source pod's **logical switch port (LSP)**
+into a per-`NetworkQoS` **OVN port group** and matches all IP traffic
+originating from that port group. This single source-matching form works on
+every network type, because an LSP exists regardless of whether the network
+assigns IP addresses.
 
-The path is selected at reconcile time by a single predicate,
-`isIPAMlessLocalnet()` = `TopologyType() == LocalnetTopology && !DoesNetworkRequireIPAM(NetInfo)`
-(`go-controller/pkg/ovn/controller/network_qos/utils.go`). When it is false - on
-every IPAM-enabled network and on non-localnet topologies - the controller takes
-the existing address-set path unchanged.
+Only **destination** matching remains IP-based, and only where an IP is
+available: on IPAM-enabled networks a `podSelector` / `namespaceSelector`
+destination continues to resolve to an address set (`ip4.dst == {$address_set}`),
+while an `ipBlock` destination is emitted as an IP literal on every network type.
+On ipamless networks destination matching is therefore limited to `ipBlock`
+(labeled-destination selection is deferred - see [Non-Goals](#non-goals) and
+[Future Goals](#future-goals)).
+
+Everything else about a `NetworkQoS` - protocol/port classifier, DSCP action,
+bandwidth policing, priority ordering, and the `to-lport` QoS row attached to the
+network's logical switch - is reused unchanged from the existing NetworkQoS
+implementation.
+
+Because source matching is now uniform, the only IPAM-conditional decision at
+reconcile time is whether a labeled destination can be resolved to an address
+set. The `isIPAMlessLocalnet()` predicate is used to gate that destination
+behavior and to surface unsupported ipamless destination configurations, not to
+switch the source-matching path.
 
 ### API Details
 
@@ -474,6 +485,11 @@ At a high level, the controller:
    a deleted one. The port group participates in the same ownership-keyed garbage
    collection as the existing QoS objects, so orphans are reclaimed across
    controller restart or rename.
+5. **Migrates existing rules on startup.** For every existing `NetworkQoS`, the
+   controller creates and populates its source port group, replaces the QoS
+   rule's source address-set match with the port-group match, and removes the
+   legacy source address set only after the replacement rule is installed. The
+   migration is idempotent and applies to all network types.
 
 ```mermaid
 sequenceDiagram
@@ -482,7 +498,7 @@ sequenceDiagram
     participant NB as OVN NB (port group / QoS / switch)
 
     Admin->>Ctrl: create NetworkQoS (podSelector, dscp, bandwidth, ipBlock)
-    Ctrl->>Ctrl: ipamless localnet network?<br/>(no → existing IP-based path)
+    Ctrl->>Ctrl: select source pods<br/>(all network types)
     Ctrl->>NB: ensure source port group (owned by this NetworkQoS)
     loop each selected source pod
         Ctrl->>NB: look up pod's logical switch port
@@ -648,6 +664,11 @@ This proposal must test the typical virtualization lifecycle specific processes,
 - VM live migration
 - VM controller restart
 
+Upgrade coverage must start with an existing IPAM-enabled `NetworkQoS` backed
+by a source address set and verify that controller startup installs the source
+port group, rewrites the source match, and removes the legacy source address set
+without changing the rule's destination or QoS actions.
+
 The new `UnsupportedConfiguration` status condition must also be covered: a
 `NetworkQoS` with a `classifier.to` `podSelector` / `namespaceSelector` on an
 ipamless localnet network sets the condition to `True` (with the supported rules
@@ -690,14 +711,14 @@ relevant only under OVN Interconnect).
 
 ## Backwards Compatibility
 
-Strictly additive. NetworkQoS on ipamless localnet networks is non-functional
-today (source pods are silently skipped for lack of an IP), so enabling it
-changes no existing behavior. IPAM-enabled networks are untouched: the
-`isIPAMlessLocalnet()` predicate isolates every new code path, and the IPAM
-address-set match is emitted exactly as before (R12). There is no migration, no
-data reformat, and no change to any persisted object on existing networks; an
-upgrade simply makes previously-inert manifests take effect on ipamless localnet
-networks.
+NetworkQoS source matching changes on every network type: existing IP-address-set
+source matches are converted to port-group source matches during controller
+startup. No persisted Kubernetes object is reformatted; the controller migrates
+the OVN rules idempotently and removes each legacy source address set only after
+its replacement QoS rule is installed. Enabling ipamless localnet support remains
+strictly additive: those policies are silently non-functional today, so an
+upgrade makes previously-inert manifests take effect without changing their
+meaning.
 
 ## Alternatives
 
