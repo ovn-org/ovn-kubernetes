@@ -870,7 +870,7 @@ func TestIsLastUpdatedByManagerNilTime(t *testing.T) {
 
 	assert.NotPanics(t, func() {
 		IsLastUpdatedByManager("our-manager", managedFields)
-	})
+	}, "nil timestamp should not cause a panic")
 }
 
 func TestIsLastUpdatedByManagerWithNilTime(t *testing.T) {
@@ -912,7 +912,8 @@ func TestIsLastUpdatedByManagerWithNilTime(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.Equal(t, tt.expected,
-				IsLastUpdatedByManager("ours", tt.fields))
+				IsLastUpdatedByManager("ours", tt.fields),
+				"unexpected result for %s", tt.name)
 		})
 	}
 }
