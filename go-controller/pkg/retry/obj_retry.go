@@ -392,11 +392,15 @@ func (r *RetryFramework) resourceRetry(objKey string, now time.Time) {
 				klog.Errorf("%s: %v retry: cannot update object that is not scheduled: %s", r.name, r.ResourceHandler.ObjType, objKey)
 			} else if err := r.ResourceHandler.UpdateResource(entry.config, entry.newObj, true); err != nil {
 				entry.timeStamp = time.Now()
-				r.increaseFailedAttemptsCounter(entry)
-				if entry.failedAttempts >= MaxFailedAttempts && !entry.infiniteRetry {
-					klog.Errorf("%s: retry update failed final attempt for %s %s: error: %v", r.name, r.ResourceHandler.ObjType, objKey, err)
+				if !ovntypes.IsSuppressedError(err) {
+					r.increaseFailedAttemptsCounter(entry)
+					if entry.failedAttempts >= MaxFailedAttempts && !entry.infiniteRetry {
+						klog.Errorf("%s: retry update failed final attempt for %s %s: error: %v", r.name, r.ResourceHandler.ObjType, objKey, err)
+					} else {
+						klog.Infof("%s: %v retry update failed for %s, will try again later: %v", r.name, r.ResourceHandler.ObjType, objKey, err)
+					}
 				} else {
-					klog.Infof("%s: %v retry update failed for %s, will try again later: %v", r.name, r.ResourceHandler.ObjType, objKey, err)
+					klog.V(5).Infof("%s: %v retry update suppressed for %s: %v", r.name, r.ResourceHandler.ObjType, objKey, err)
 				}
 				return
 			}
@@ -436,11 +440,15 @@ func (r *RetryFramework) resourceRetry(objKey string, now time.Time) {
 					klog.Errorf("%s: %v retry: cannot create object that is not scheduled %s", r.name, r.ResourceHandler.ObjType, objKey)
 				} else if err := r.ResourceHandler.AddResource(entry.newObj, true); err != nil {
 					entry.timeStamp = time.Now()
-					r.increaseFailedAttemptsCounter(entry)
-					if entry.failedAttempts >= MaxFailedAttempts && !entry.infiniteRetry {
-						klog.Errorf("%s: retry add failed final attempt for %s %s: error: %v", r.name, r.ResourceHandler.ObjType, objKey, err)
+					if !ovntypes.IsSuppressedError(err) {
+						r.increaseFailedAttemptsCounter(entry)
+						if entry.failedAttempts >= MaxFailedAttempts && !entry.infiniteRetry {
+							klog.Errorf("%s: retry add failed final attempt for %s %s: error: %v", r.name, r.ResourceHandler.ObjType, objKey, err)
+						} else {
+							klog.Infof("%s: retry add failed for %s %s, will try again later: %v", r.name, r.ResourceHandler.ObjType, objKey, err)
+						}
 					} else {
-						klog.Infof("%s: retry add failed for %s %s, will try again later: %v", r.name, r.ResourceHandler.ObjType, objKey, err)
+						klog.V(5).Infof("%s: %v retry add suppressed for %s: %v", r.name, r.ResourceHandler.ObjType, objKey, err)
 					}
 					return
 				}
@@ -610,10 +618,10 @@ func (r *RetryFramework) WatchResourceFiltered(namespaceForFilteredHandler strin
 						if !ovntypes.IsSuppressedError(err) {
 							klog.Errorf("%s: failed to create %s %s, error: %v", r.name, r.ResourceHandler.ObjType, key, err)
 							r.ResourceHandler.RecordErrorEvent(obj, "ErrorAddingResource", err)
+							r.increaseFailedAttemptsCounter(retryObj)
 						} else {
 							klog.Infof("%s: failed to create %s %s, error: %v", r.name, r.ResourceHandler.ObjType, key, err)
 						}
-						r.increaseFailedAttemptsCounter(retryObj)
 						return
 					}
 					klog.V(5).Infof("%s: creating %s %s took: %v", r.name, r.ResourceHandler.ObjType, key, time.Since(start))
@@ -759,14 +767,16 @@ func (r *RetryFramework) WatchResourceFiltered(namespaceForFilteredHandler strin
 							} else {
 								retryEntry = r.initRetryObjWithAdd(latest, key)
 							}
-							r.increaseFailedAttemptsCounter(retryEntry)
+							if !ovntypes.IsSuppressedError(err) {
+								r.increaseFailedAttemptsCounter(retryEntry)
+							}
 							return
 						}
 					} else { // we previously deleted old object, now let's add the new one
 						if err := r.ResourceHandler.AddResource(latest, false); err != nil {
 							retryEntry := r.initRetryObjWithAdd(latest, key)
-							r.increaseFailedAttemptsCounter(retryEntry)
 							if !ovntypes.IsSuppressedError(err) {
+								r.increaseFailedAttemptsCounter(retryEntry)
 								klog.Errorf("%s: failed to add %s %s, during update: %v",
 									r.name, r.ResourceHandler.ObjType, newKey, err)
 								r.ResourceHandler.RecordErrorEvent(latest, "ErrorAddingResource", err)

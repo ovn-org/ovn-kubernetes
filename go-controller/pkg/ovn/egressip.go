@@ -228,6 +228,15 @@ type EgressIPController struct {
 	controllerName string
 }
 
+func isNodeReady(node *corev1.Node) bool {
+	for _, condition := range node.Status.Conditions {
+		if condition.Type == corev1.NodeReady {
+			return condition.Status == corev1.ConditionTrue
+		}
+	}
+	return false
+}
+
 func NewEIPController(
 	nbClient libovsdbclient.Client,
 	kube *kube.KubeOVN,
@@ -394,6 +403,7 @@ func (e *EgressIPController) reconcileEgressIP(old, new *egressipv1.EgressIP) (e
 					return err
 				}
 			}
+
 		}
 
 		oldNamespaceSelector, err := metav1.LabelSelectorAsSelector(&oldEIP.Spec.NamespaceSelector)
@@ -2645,6 +2655,12 @@ func (e *EgressIPController) addPodEgressIPAssignment(ni util.NetInfo, egressIPN
 	if err != nil {
 		return fmt.Errorf("failed to add pod %s/%s because failed to lookup node %s: %v", pod.Namespace, pod.Name,
 			pod.Spec.NodeName, err)
+	}
+	if !isNodeReady(eNode) {
+		klog.V(5).Infof("Skipping egress IP assignment: egress node %s is NotReady (pod: %s/%s, egressIP: %s)",
+			status.Node, pod.Namespace, pod.Name, status.EgressIP)
+		return types.NewSuppressedError(fmt.Errorf("egress node %s is not ready, skipping egress IP assignment for pod %s/%s",
+			status.Node, pod.Namespace, pod.Name))
 	}
 	parsedNodeEIPConfig, err := util.GetNodeEIPConfig(eNode)
 	if err != nil {
