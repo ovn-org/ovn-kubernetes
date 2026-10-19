@@ -30,7 +30,6 @@ import (
 	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
 	kexec "k8s.io/utils/exec"
-	"sigs.k8s.io/knftables"
 
 	ovncnitypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni/types"
 	ovntest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing"
@@ -2161,21 +2160,6 @@ func TestConfigureOVS_getPfEncapIpWithError(t *testing.T) {
 			mockLink.AssertExpectations(t)
 		})
 	}
-}
-
-func TestSetupIngressFilter(t *testing.T) {
-	nft := knftables.NewFake(knftables.NetDevFamily, "ingress_filter")
-
-	gwLLA := "fe80::1"
-	err := setupIngressFilterWithTableAndLifetimeMatcher(nft, "test-iface-1", gwLLA, "mark")
-	require.NoError(t, err)
-	output := nft.Dump()
-
-	expectedDump := `add table netdev ingress_filter
-add chain netdev ingress_filter input { type filter hook ingress device "test-iface-1" priority 0 ; }
-add rule netdev ingress_filter input icmpv6 type nd-router-advert ip6 saddr != fe80::1 mark != 0 drop`
-
-	assert.Equal(t, expectedDump, strings.TrimRight(output, "\n"), "The nftables dump output does not match the expected output")
 }
 
 // TODO(leih): Below functions are copied from pkg/node/base_node_network_controller_dpu_test.go.

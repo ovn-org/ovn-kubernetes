@@ -77,9 +77,9 @@ type PodAnnotation struct {
 	// fewer Gateways than IPs.
 	Gateways []net.IP
 
-	// GatewayIPv6LLA is the IPv6 Link Local Address for the pod's gateway, that is the address
-	// that will be set as gateway with router advertisements
-	// generated from the network cluster wide gateway IPv6 LLA.
+	// GatewayIPv6LLA is the IPv6 link-local address of the pod's gateway.
+	// DEPRECATED: retained only to preserve values on already annotated pods.
+	// New allocations omit it, and current CNI versions do not use it for filtering.
 	GatewayIPv6LLA net.IP
 
 	// Routes are additional routes to add to the pod's network namespace

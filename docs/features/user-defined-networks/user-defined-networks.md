@@ -118,9 +118,21 @@ Current primary Layer2 networks use a network-wide gateway MAC and IPv6
 link-local address, independent of the node hosting a VM. OVN-Kubernetes no
 longer sends synthetic gateway GARPs or Router Advertisements after Layer2 VM
 live migration. Native OVN Router Advertisements continue to provide IPv6
-default-router discovery and refresh; the CNI RA filter continues to allow the
-stable gateway identity. VM addressing and source/target logical-port handoff
+default-router discovery and refresh. VM addressing and source/target logical-port handoff
 continue to be managed by the live-migration controllers.
+
+OVN blocks Router Advertisements sent from IPv6-capable primary Layer2 pod
+ports, including VM ports. Native gateway and external EVPN attachment ports
+are not members of those pod port groups. Their RAs can reach workloads subject
+to the rest of the network datapath and guest configuration.
+
+New pod interfaces have no CNI-installed RA source filter, and newly allocated
+annotations omit `ipv6_lla_gateway_ip`. The deprecated field is preserved when
+updating existing annotations. Older CNI versions skip filtering when the field
+is absent; current CNI versions ignore it. Existing namespace filters remain
+until namespace recreation and still restrict which router sources are accepted.
+Changing an annotation does not update an installed filter. Correctly migrated
+filters permit the stable gateway's native RAs.
 
 Before upgrading, surviving VMs must have completed legacy gateway-state repair,
 including removal of old node-specific IPv6 default routers and legacy join-subnet

@@ -6,6 +6,7 @@ package ovn
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -14,10 +15,13 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 
+	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
+
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	libovsdbutil "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/nbdb"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 	utilerrors "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util/errors"
 )
@@ -355,15 +359,49 @@ func (bnc *BaseNetworkController) updateNamespaceAclLogging(ns, aclAnnotation st
 	return nil
 }
 
-// createNamespacePortGroup should only create a port group if it doesn't exist already,
-// all ports and acls will be added by pod/multicast/egressfirewall/etc handlers.
+// createNamespacePortGroup preserves existing membership and installs the
+// primary Layer2 RA guard before pod ports can join the group.
 func (bnc *BaseNetworkController) createNamespacePortGroup(ns string) (string, error) {
 	pgIDs := getNamespacePortGroupDbIDs(ns, bnc.controllerName)
 	// create empty port group if it doesn't exist
 	pg := libovsdbutil.BuildPortGroup(pgIDs, nil, nil)
-	err := libovsdbops.CreatePortGroup(bnc.nbClient, pg)
+	_, ipv6 := bnc.IPMode()
+	if bnc.IsPrimaryNetwork() && bnc.TopologyType() == types.Layer2Topology && ipv6 {
+		acl := bnc.buildNamespaceRADropACL(ns)
+		ops, err := libovsdbops.CreateOrUpdateACLsOps(bnc.nbClient, nil, bnc.GetSamplingConfig(), acl)
+		if err != nil {
+			return pg.Name, fmt.Errorf("failed to create RA guard for namespace %s: %w", ns, err)
+		}
+		_, lookupErr := libovsdbops.GetPortGroup(bnc.nbClient, pg)
+		switch {
+		case errors.Is(lookupErr, libovsdbclient.ErrNotFound):
+			pg.ACLs = []string{acl.UUID}
+			ops, err = libovsdbops.CreatePortGroupOps(bnc.nbClient, ops, pg)
+		case lookupErr != nil:
+			return pg.Name, lookupErr
+		default:
+			ops, err = libovsdbops.AddACLsToPortGroupOps(bnc.nbClient, ops, pg.Name, acl)
+		}
+		if err != nil {
+			return pg.Name, fmt.Errorf("failed to attach RA guard to namespace %s: %w", ns, err)
+		}
+		_, err = libovsdbops.TransactAndCheck(bnc.nbClient, ops)
+		return pg.Name, err
+	}
+	return pg.Name, libovsdbops.CreatePortGroup(bnc.nbClient, pg)
+}
 
-	return pg.Name, err
+// buildNamespaceRADropACL excludes router and EVPN attachment ports by matching
+// only the namespace's pod ports, independently of tenant policy allows.
+func (bnc *BaseNetworkController) buildNamespaceRADropACL(ns string) *nbdb.ACL {
+	ids := libovsdbops.NewDbObjectIDs(libovsdbops.ACLUDN, bnc.controllerName,
+		map[libovsdbops.ExternalIDKey]string{
+			libovsdbops.ObjectNameKey:      ns + "_drop-ra",
+			libovsdbops.PolicyDirectionKey: string(libovsdbutil.ACLEgress),
+		})
+	match := libovsdbutil.GetACLMatch(bnc.getNamespacePortGroupName(ns), "nd_ra", libovsdbutil.ACLEgress)
+	return libovsdbutil.BuildACL(ids, types.PrimaryUDNDropRAPriority, match,
+		nbdb.ACLActionDrop, nil, libovsdbutil.LportEgress, types.PrimaryACLTier)
 }
 
 func getNamespacePortGroupDbIDs(ns string, controller string) *libovsdbops.DbObjectIDs {

@@ -105,6 +105,8 @@ const (
 	AdvertisedNetworkDenyPriority = 1050
 
 	// PrimaryACLTier Priorities
+	// PrimaryUDNDropRAPriority blocks workload-originated RAs before other policy allows.
+	PrimaryUDNDropRAPriority = 1200
 
 	PrimaryUDNAllowPriority = 1001
 	// Default deny acl rule priority
