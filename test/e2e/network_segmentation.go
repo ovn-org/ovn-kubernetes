@@ -3860,6 +3860,17 @@ func filterDualStackCIDRs(cs clientset.Interface, cidrs udnv1.DualStackCIDRs) ud
 	return filteredCIDRs
 }
 
+func filterDualStackIPs(cs clientset.Interface, ips udnv1.DualStackIPs) udnv1.DualStackIPs {
+	filteredIPs := make(udnv1.DualStackIPs, 0, len(ips))
+	for _, ip := range ips {
+		isIPv6 := utilnet.IsIPv6String(string(ip))
+		if (!isIPv6 && isIPv4Supported(cs)) || (isIPv6 && isIPv6Supported(cs)) {
+			filteredIPs = append(filteredIPs, ip)
+		}
+	}
+	return filteredIPs
+}
+
 func filterL3Subnets(cs clientset.Interface, l3Subnets []udnv1.Layer3Subnet) []udnv1.Layer3Subnet {
 	filteredL3Subnets := make([]udnv1.Layer3Subnet, 0, len(l3Subnets))
 	for _, l3Subnet := range l3Subnets {
