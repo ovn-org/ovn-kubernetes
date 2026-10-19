@@ -831,6 +831,10 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 				map[string]string{"rule1": "1"},
 			)
 
+			if !podLocal {
+				podT.Spec.NodeName = node2Name
+			}
+
 			eq := newEgressQoSObject("default", namespaceT.Name, []egressqosapi.EgressQoSRule{
 				{
 					DstCIDR: ptr.To("1.2.3.4/32"),
@@ -895,10 +899,6 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 			gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
 			// Ensure default EgressQoS object is updated with zone success status.
 			expectEgressQoSStatusMessageEventually(fakeOVN, namespaceT.Name, false)
-
-			if podLocal {
-				fakeOVN.controller.nodeName = podT.Spec.NodeName
-			}
 
 			ginkgo.By("Create pod and validate its ip address in the address set")
 			_, err := fakeOVN.fakeClient.KubeClient.CoreV1().Pods(podT.Namespace).Create(context.TODO(), podT, metav1.CreateOptions{})
