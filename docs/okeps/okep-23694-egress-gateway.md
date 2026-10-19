@@ -14,7 +14,9 @@ not enforce these required paths and source addresses.
 
 - Enable administrators to route all pod egress traffic (north-south) through
   designated gateway nodes cluster-wide.
-- SNAT each flow to the IP of the forwarding gateway node's outgoing interface.
+- Source NAT (SNAT) each flow to the IP of the forwarding gateway node's
+  outgoing interface. This proposal uses SNAT as the general term, including
+  masquerading.
 - Distribute pod egress flows across healthy gateway nodes using ECMP.
 - Add or remove gateway nodes from ECMP forwarding based on health checks.
 - Preserve EgressService and EgressIP priority and behavior.
@@ -55,9 +57,9 @@ nodes marked by the cluster administrator with the fixed
 `k8s.ovn.org/egress-gateway` node label.
 
 The default network and primary UDNs share this gateway-node selection. Each
-network has its own forwarding, SNAT, and connection-tracking state. Secondary
-pod network attachments are outside this proposal's scope. The intended IP
-family support is IPv4, IPv6, and dual-stack; datapath validation is pending.
+network maintains separate forwarding, SNAT, and connection-tracking state.
+Secondary pod network attachments are outside this proposal's scope.
+IPv4, IPv6, and dual-stack support require datapath validation.
 
 ### API Details
 
@@ -82,8 +84,8 @@ Administrators configure the feature in this order:
    ```
 
 The chart will pass `--enable-egress-gateway` to components running cluster
-manager, OVN network controllers, and node gateway logic. Initial enablement
-without any labeled gateway candidates is invalid. 
+manager, OVN network controllers, and node gateway logic. If no gateway is
+ready for a network, it uses its ordinary egress routing and SNAT.
 
 Cluster manager owns the `k8s.ovn.org/egress-gateway-ready` node annotation.
 It writes `"true"` for healthy gateway nodes and `"false"` for unhealthy ones.
@@ -93,16 +95,17 @@ the annotation is `"true"`.
 ### Implementation Details
 
 - Cluster manager maintains the healthy gateway set using the existing
-  EgressIP readiness and reachability checks. It publishes gateway eligibility
+  EgressIP readiness and reachability checks. It publishes node health
   through the node annotation. The probe server must also run when Egress
   Gateway is enabled.
-- OVN controllers health checks gateway nodes and update ECMP route policies
-  with lower priority from EgressService and EgressIP policies.
-- Node components configure host SNAT (all pod network) for Egress Gateway
-  traffic in local gateway mode. OVN controllers configure gateway-router SNAT
-  in shared gateway mode. Both use the outgoing-interface IP that is the default
-  behavior.
-
+- OVN controllers consume gateway health results and update ECMP route policies
+  with lower priority than EgressService and EgressIP policies.
+- Node components configure Linux masquerade for Egress Gateway traffic from
+  all pod networks in local gateway mode. OVN controllers configure
+  gateway-router SNAT with an explicit external IP in shared gateway mode.
+  Both use the outgoing-interface IP. Linux masquerade follows interface IP
+  changes automatically; OVN SNAT requires the controller to update the
+  external IP when the interface IP changes.
 
 #### Packet Path in LocalGateway
 
@@ -115,10 +118,10 @@ the annotation is `"true"`.
 # Pod sends a TCP SYN.
 pod/eth0 Out IP 10.128.1.10.40000 > 203.0.113.80.443: Flags [S]
 
-  [OVN egress policy selection: pod, service, machine, and link-local networks destinations excluded first]
+  [OVN cluster-router policy selection: pod, service, machine, and link-local destinations excluded first]
   Priority 101: EgressService LoadBalancerIP -> reroute to the service's selected node.
   Priority 100: EgressIP -> reroute to a node holding an assigned EgressIP.
-  Priority 90: Egress Gateways -> ECMP reroute to healthy gateway 192.0.2.20.
+  Priority 90: Egress Gateway -> ECMP reroute to healthy node B's management-port IP.
 source-node/br-int Out IP 10.128.1.10.40000 > 203.0.113.80.443: Flags [S]
 
   [Geneve tunnel: 192.0.2.10 -> 192.0.2.20]
@@ -137,7 +140,7 @@ gateway-node/ovn-k8s-mp0 In IP 10.128.1.10.40000 > 203.0.113.80.443: Flags [S]
   SOURCE CHANGES:
     10.128.1.10:40000 -> 198.51.100.20:40000
 
-# Packet leaves the gateway, SNATed, contrack records the translation.
+# Packet leaves the gateway, SNATed; conntrack records the translation.
 gateway-node/eth1 Out IP 198.51.100.20.40000 > 203.0.113.80.443: Flags [S]
 
 # External server replies.
@@ -149,7 +152,8 @@ gateway-node/eth1 In IP 203.0.113.80.443 > 198.51.100.20.40000: Flags [S.]
   No separate reply SNAT rule is needed.
 
   [Linux routing]
-  Route the restored pod destination through its management port.
+  Route the restored pod destination using the existing global podCIDR
+  route (10.128.0.0/14) through its management port.
 
 gateway-node/ovn-k8s-mp0 Out IP 203.0.113.80.443 > 10.128.1.10.40000: Flags [S.] mark: 0x0
 
@@ -160,16 +164,16 @@ pod/eth0 In IP 203.0.113.80.443 > 10.128.1.10.40000: Flags [S.] mark: 0x0
 
 ### Testing Details
 
-E2E tests cover both local and shared gateway modes on the default network,
-with IPv4, IPv6, and dual-stack:
+E2E tests cover both local and shared gateway modes on the default network
+and primary UDNs, with IPv4, IPv6, and dual-stack:
 
 - Verify egress uses multiple healthy gateways and each outgoing interface's
   IP for SNAT, including secondary NICs. Established flows must keep their
   gateway while ECMP membership is unchanged.
 - Add and remove gateway labels, then fail and restore health checks. Verify
   new flows use the updated healthy gateway set after convergence.
-- Verify eligible egress is dropped when all gateways are unavailable and
-  resumes when a gateway recovers.
+- Verify ordinary egress routing and SNAT when no gateways are available, and
+  gateway routing resumes when a gateway recovers.
 - Verify pod-to-pod, ClusterIP, and node-IP traffic is unchanged, and
   NetworkPolicy and EgressFirewall restrictions still apply.
 - Verify EgressIP and Egress Gateway on the same node use EgressIP SNAT for
@@ -177,7 +181,7 @@ with IPv4, IPv6, and dual-stack:
   `LoadBalancerIP` SNAT takes precedence over EgressIP, and EgressService
   `Network` routing and SNAT are unchanged.
 - Restart controllers with healthy gateways and with none available; verify
-  forwarding and drop behavior is preserved.
+  forwarding and fallback behavior is preserved.
 - Disable the feature; verify ordinary egress resumes and feature rules are
   removed. Keep existing E2E coverage with the feature disabled.
 
@@ -236,7 +240,141 @@ disrupted by the transition.
 
 ## Alternatives
 
-- Gateway appliances: add devices in between OCP and PE.
+- Gateway appliances: add devices between the Kubernetes bare-metal cluster
+  and the Provider Edge routers.
+
+### API alternatives
+
+This OKEP proposes a cluster-wide feature flag instead of a new CR. A separate
+CR could confuse users about when to use Egress Gateway versus EgressIP.
+Cluster-wide configuration also simplifies implementation.
+
+An alternative is a cluster-scoped `EgressGateway` CR. It
+combines namespace and gateway-node selection.
+
+```yaml
+apiVersion: k8s.ovn.org/v1
+kind: EgressGateway
+metadata:
+  name: cluster-egress
+spec:
+  from:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: <test-namespace>
+  gatewayNodeSelector:
+    matchLabels:
+      node-role.kubernetes.io/egress-gateway: ""
+```
+
+### Implement the feature using EgressIP
+
+If pod selection is required, another approach would extend EgressIP to route
+traffic through an egress node without specifying an EgressIP address. The
+node would masquerade traffic to its outgoing-interface IP, following
+`ip route get <destination>` in local gateway mode.
+```
+apiVersion: k8s.ovn.org/v1
+  kind: EgressIP
+  metadata:
+    name: cluster-egress
+  spec:
+    egressIPs:
+      - auto (or missing the egressIP)
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: <test-namespace>
+    podSelector:
+      matchLabels:
+        app: example
+```
+
+This alternative was rejected to keep EgressIP and Egress Gateway separate
+from the user's perspective, although they might share implementation.
+
+### Implement the feature using MEG (Multiple External Gateways)
+
+The egress-gateway feature could be implemented by extending MEG.
+
+This approach uses the following MEG CR and host-networked gateway pods:
+
+```
+apiVersion: k8s.ovn.org/v1
+  kind: AdminPolicyBasedExternalRoute
+  metadata:
+    name: via-gateway-pod
+  spec:
+    from:
+      namespaceSelector:
+        matchLabels:
+          egress-gateway: "true"
+          kubernetes.io/metadata.name: meg-client
+    nextHops:
+      dynamic:
+      - bfdEnabled: false
+        namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: egress-gateways
+        networkAttachmentName: ""
+        podSelector:
+          matchLabels:
+            app: egress-gateway
+  status:
+    status: Success
+
+  apiVersion: apps/v1
+  kind: DaemonSet
+  metadata:
+    name: egress-gateway
+    namespace: egress-gateways
+  spec:
+    selector:
+      matchLabels:
+        app: egress-gateway
+    template:
+      metadata:
+        labels:
+          app: egress-gateway
+     # Deploy host-networked gateway pods to add MASQUERADE rules for all podCIDRs.
+     # Install custom return routes.
+```
+
+Earlier experiment: intended path with a custom return route on the gateway.
+This is not the current MASQUERADE-only DaemonSet configuration.
+
+```text
+MEG with host-networked gateway pods
+  # Client podIP:         10.131.1.6       (meg-client on mno-worker-0)
+  # Client nodeIP:        10.10.30.233     (mno-worker-0)
+  # Selected nodeIP:      10.10.30.230     (mno-master-0)
+  # External gatewayIP:   10.10.30.1       (ToR)
+  # Destination serverIP: 200.200.200.200 
+
+meg-client/eth0 Out IP 10.131.1.6.43102 > 200.200.200.200.443: Flags [S] (podIP.43102 > serverIP.443)
+    ECMP: GR_mno-worker-0 selects 10.10.30.230 (master-0 nodeIP).
+mno-worker-0/br-ex Out IP 10.131.1.6.43102 > 200.200.200.200.443: Flags [S] (podIP.43102 > serverIP.443)
+    Underlay
+mno-master-0/br-ex In IP 10.131.1.6.43102 > 200.200.200.200.443: Flags [S] (podIP.43102 > serverIP.443)
+    MASQUERADE: source 10.131.1.6 (podIP) → 10.10.30.230 (nodeIP).  # MASQUERADE rule added by gateway pod
+mno-master-0/br-ex Out IP 10.10.30.230.43102 > 200.200.200.200.443: Flags [S] (nodeIP.43102 > serverIP.443)
+ToR In IP 10.10.30.230.43102 > 200.200.200.200.443: Flags [S] (nodeIP.43102 > serverIP.443)
+    Outside → server → reply.
+ToR Out IP 200.200.200.200.443 > 10.10.30.230.43102: Flags [S.] (serverIP.443 > nodeIP.43102)
+mno-master-0/br-ex In IP 200.200.200.200.443 > 10.10.30.230.43102: Flags [S.] (serverIP.443 > nodeIP.43102)
+    Reverse NAT: destination 10.10.30.230 (nodeIP) → 10.131.1.6 (podIP).
+    Custom return route required: via 10.10.30.233 (worker nodeIP), through br-ex; bypasses master mp0.
+mno-master-0/br-ex Out IP 200.200.200.200.443 > 10.131.1.6.43102: Flags [S.] (serverIP.443 > podIP.43102)
+    Underlay
+mno-worker-0/br-ex In IP 200.200.200.200.443 > 10.131.1.6.43102: Flags [S.] (serverIP.443 > podIP.43102)
+OVN → meg-client/eth0 In IP 200.200.200.200.443 > 10.131.1.6.43102: Flags [S.] (serverIP.443 > podIP.43102)
+```
+
+MEG gateway pods support custom health checks, resource requests, and reuse
+of the existing selection mechanism. This OKEP rejects this approach because
+it sends podIPs over the underlay and requires custom return routes to bypass
+the existing pod-network route through the management port.
+
+References: [MEG implementation](https://github.com/ovn-kubernetes/ovn-kubernetes/pull/3462)
 
 ## EgressIP and EgressService Interaction
 
@@ -261,7 +399,3 @@ combinations.
 - [Dynamic UDN Node Allocation](okep-5552-dynamic-udn-node-allocation.md)
 - [EgressIP Node Selector](okep-6800-egressip-node-selector.md)
 - [Per-destination EgressIP proposal](https://github.com/ovn-kubernetes/ovn-kubernetes/pull/6228)
-
-## Items to Be Investigated
-
-- Investigate Egress Gateway compatibility with UDNs.
