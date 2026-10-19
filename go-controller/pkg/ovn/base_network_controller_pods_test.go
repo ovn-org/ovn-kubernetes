@@ -156,6 +156,176 @@ func TestVMPodIPOwnershipOnStartup(t *testing.T) {
 	g.Expect(oc.lsManager.OwnsIPs("node", oc.podIPOwner(ordinary, nad), ips)).To(gomega.BeTrue())
 }
 
+func TestVMPodIPOwnershipAfterFailedMigration(t *testing.T) {
+	for _, phase := range []corev1.PodPhase{corev1.PodFailed, corev1.PodSucceeded} {
+		t.Run(string(phase), func(t *testing.T) {
+			g := gomega.NewWithT(t)
+			g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+			nad := ovntypes.DefaultNetworkName
+			ips := ovntest.MustParseIPNets("10.0.0.3/24", "fd00::3/64")
+			source := ovntest.NewPod("namespace", "source", "remote-node", "")
+			source.Status.Phase = corev1.PodRunning
+			source.CreationTimestamp = metav1.NewTime(time.Unix(100, 0))
+			source.Labels = map[string]string{kubevirtv1.AppLabel: "virt-launcher"}
+			source.Annotations = map[string]string{
+				kubevirtv1.DomainAnnotation:                             "vm",
+				kubevirtv1.AllowPodBridgeNetworkLiveMigrationAnnotation: "",
+			}
+			var err error
+			source.Annotations, err = util.MarshalPodAnnotation(source.Annotations, &util.PodAnnotation{
+				IPs: ips, MAC: util.IPAddrToHWAddr(ips[0].IP),
+			}, nad)
+			g.Expect(err).NotTo(gomega.HaveOccurred())
+			target := source.DeepCopy()
+			target.Name, target.UID, target.Spec.NodeName = "target", "target", "target-node"
+			target.CreationTimestamp = metav1.NewTime(time.Unix(200, 0))
+			target.Status.Phase = phase
+			// The target failed before receiving its network annotation. Only the
+			// surviving source can restore the reservation on controller restart.
+			delete(target.Annotations, ovntypes.OvnPodAnnotationName)
+			clients := util.GetOVNClientset(source, target, &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{Name: "node"},
+			}).GetOVNKubeControllerClientset()
+			wf, err := factory.NewOVNKubeControllerWatchFactory(clients, "node")
+			g.Expect(err).NotTo(gomega.HaveOccurred())
+			g.Expect(wf.Start()).To(gomega.Succeed())
+			t.Cleanup(wf.Shutdown)
+			nbClient, dbContext, err := libovsdbtest.NewNBTestHarness(libovsdbtest.TestSetup{}, nil)
+			g.Expect(err).NotTo(gomega.HaveOccurred())
+			t.Cleanup(dbContext.Cleanup)
+			oc := &DefaultNetworkController{BaseNetworkController: BaseNetworkController{
+				CommonNetworkControllerInfo: CommonNetworkControllerInfo{watchFactory: wf, nodeName: "node", nbClient: nbClient},
+				ReconcilableNetInfo:         &util.DefaultNetInfo{},
+				lsManager:                   logicalswitchmanager.NewLogicalSwitchManager(),
+			}}
+			g.Expect(oc.createNodeLogicalSwitch("node", ovntest.MustParseIPNets("10.0.0.0/24", "fd00::/64"), "", "")).To(gomega.Succeed())
+			owner := oc.podIPOwner(source, nad)
+			g.Expect(oc.lsManager.OwnsIPs("node", owner, ips)).To(gomega.BeTrue())
+
+			// Exercise pod sync independently of the reservations restored by node sync.
+			g.Expect(oc.lsManager.ReleaseIPs("node", owner, ips)).To(gomega.Succeed())
+			vms := map[ktypes.NamespacedName]bool{}
+			for _, pod := range []*corev1.Pod{target, source} {
+				vms, _, _, err = oc.allocateSyncMigratablePodIPsOnZone(vms, pod)
+				g.Expect(err).NotTo(gomega.HaveOccurred())
+			}
+			g.Expect(oc.lsManager.OwnsIPs("node", owner, ips)).To(gomega.BeTrue())
+			g.Expect(vms).To(gomega.HaveKey(ktypes.NamespacedName{Namespace: source.Namespace, Name: "vm"}))
+			g.Expect(oc.canCleanupPodIPResources(target, "node", ips)).To(gomega.BeFalse())
+		})
+	}
+}
+
+func TestVMPodIPOwnershipDuringMigration(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		unannotated      bool
+		preCopy          bool
+		ready            bool
+		failed           bool
+		sourceCompleted  bool
+		sourceDeleted    bool
+		wantActiveTarget bool
+	}{
+		{name: "target awaiting annotation", unannotated: true},
+		{name: "target preparing"},
+		{name: "pre-copy takeover", preCopy: true, wantActiveTarget: true},
+		{name: "post-copy takeover", ready: true, wantActiveTarget: true},
+		{name: "failed target", ready: true, failed: true},
+		{name: "source completed", ready: true, sourceCompleted: true, wantActiveTarget: true},
+		{name: "source deleted", ready: true, sourceDeleted: true, wantActiveTarget: true},
+	} {
+		for _, reverse := range []bool{false, true} {
+			name := tc.name + "/source-first"
+			if reverse {
+				name = tc.name + "/target-first"
+			}
+			t.Run(name, func(t *testing.T) {
+				g := gomega.NewWithT(t)
+				g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+				nad := ovntypes.DefaultNetworkName
+				ips := ovntest.MustParseIPNets("10.0.0.3/24", "fd00::3/64")
+				source := ovntest.NewPod("namespace", "source", "node", "")
+				source.Status.Phase = corev1.PodRunning
+				source.CreationTimestamp = metav1.NewTime(time.Unix(100, 0))
+				source.Labels = map[string]string{kubevirtv1.AppLabel: "virt-launcher", kubevirtv1.NodeNameLabel: "node"}
+				source.Annotations = map[string]string{
+					kubevirtv1.DomainAnnotation:                             "vm",
+					kubevirtv1.AllowPodBridgeNetworkLiveMigrationAnnotation: "",
+				}
+				var err error
+				source.Annotations, err = util.MarshalPodAnnotation(source.Annotations, &util.PodAnnotation{
+					IPs: ips, MAC: util.IPAddrToHWAddr(ips[0].IP),
+				}, nad)
+				g.Expect(err).NotTo(gomega.HaveOccurred())
+				target := source.DeepCopy()
+				target.Name, target.UID, target.Spec.NodeName = "target", "target", "remote-node"
+				target.CreationTimestamp = metav1.NewTime(time.Unix(200, 0))
+				if tc.unannotated {
+					delete(target.Annotations, ovntypes.OvnPodAnnotationName)
+				}
+				if tc.preCopy {
+					target.Labels[kubevirtv1.NodeNameLabel] = target.Spec.NodeName
+				}
+				if tc.ready {
+					target.Annotations[kubevirtv1.MigrationTargetReadyTimestamp] = "ready"
+				}
+				if tc.failed {
+					target.Status.Phase = corev1.PodFailed
+				}
+				if tc.sourceCompleted {
+					source.Status.Phase = corev1.PodSucceeded
+				}
+				pods := []*corev1.Pod{source, target}
+				if reverse {
+					pods = []*corev1.Pod{target, source}
+				}
+				if tc.sourceDeleted {
+					pods = []*corev1.Pod{target}
+				}
+				wf, err := factory.NewOVNKubeControllerWatchFactory(util.GetOVNClientset().GetOVNKubeControllerClientset(), "node")
+				g.Expect(err).NotTo(gomega.HaveOccurred())
+				t.Cleanup(wf.Shutdown)
+				for _, pod := range pods {
+					g.Expect(wf.PodCoreInformer().Informer().GetStore().Add(pod)).To(gomega.Succeed())
+				}
+				g.Expect(wf.NodeCoreInformer().Informer().GetStore().Add(&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node"}})).To(gomega.Succeed())
+				nbClient, dbContext, err := libovsdbtest.NewNBTestHarness(libovsdbtest.TestSetup{}, nil)
+				g.Expect(err).NotTo(gomega.HaveOccurred())
+				t.Cleanup(dbContext.Cleanup)
+				oc := &DefaultNetworkController{BaseNetworkController: BaseNetworkController{
+					CommonNetworkControllerInfo: CommonNetworkControllerInfo{watchFactory: wf, nodeName: "node", nbClient: nbClient},
+					ReconcilableNetInfo:         &util.DefaultNetInfo{},
+					lsManager:                   logicalswitchmanager.NewLogicalSwitchManager(),
+				}}
+				g.Expect(oc.createNodeLogicalSwitch("node", ovntest.MustParseIPNets("10.0.0.0/24", "fd00::/64"), "", "")).To(gomega.Succeed())
+				owner := oc.podIPOwner(source, nad)
+				g.Expect(oc.lsManager.OwnsIPs("node", owner, ips)).To(gomega.BeTrue())
+				g.Expect(oc.lsManager.ReleaseIPs("node", owner, ips)).To(gomega.Succeed())
+				vms := map[ktypes.NamespacedName]bool{}
+				expectedPorts := map[string]bool{}
+				for _, pod := range pods {
+					var port string
+					vms, port, _, err = oc.allocateSyncMigratablePodIPsOnZone(vms, pod)
+					g.Expect(err).NotTo(gomega.HaveOccurred())
+					if port != "" {
+						expectedPorts[port] = true
+					}
+				}
+				g.Expect(oc.lsManager.OwnsIPs("node", owner, ips)).To(gomega.BeTrue())
+				g.Expect(vms).To(gomega.Equal(map[ktypes.NamespacedName]bool{
+					{Namespace: source.Namespace, Name: "vm"}: !tc.wantActiveTarget,
+				}))
+				if tc.sourceCompleted || tc.sourceDeleted {
+					g.Expect(expectedPorts).To(gomega.BeEmpty())
+				} else {
+					g.Expect(expectedPorts).To(gomega.Equal(map[string]bool{oc.GetLogicalPortName(source, nad): true}))
+				}
+			})
+		}
+	}
+}
+
 func TestMigratedVMPodIPOwnershipOnSubnetReuse(t *testing.T) {
 	for _, tc := range []struct {
 		name     string

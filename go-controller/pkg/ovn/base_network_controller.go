@@ -1031,11 +1031,7 @@ func (bnc *BaseNetworkController) findMigratablePodIPsForSubnets(subnets []*net.
 	}
 
 	for _, liveMigratablePod := range liveMigratablePods {
-		isMigratedSourcePodStale, err := kubevirt.IsMigratedSourcePodStale(bnc.watchFactory, liveMigratablePod)
-		if err != nil {
-			return nil, err
-		}
-		if isMigratedSourcePodStale {
+		if util.PodCompleted(liveMigratablePod) {
 			continue
 		}
 		podAnnotation, err := util.UnmarshalPodAnnotation(liveMigratablePod.Annotations, bnc.GetNetworkName())
@@ -1051,6 +1047,8 @@ func (bnc *BaseNetworkController) findMigratablePodIPsForSubnets(subnets []*net.
 				err)
 			continue
 		}
+		// Both living migration pods can reference these IPs. Their shared VM
+		// owner makes restoring the reservation independent of which is active.
 		owner := bnc.podIPOwner(liveMigratablePod, bnc.GetNetworkName())
 		for _, podIP := range podAnnotation.IPs {
 			if util.IsContainedInAnyCIDR(podIP, subnets...) {

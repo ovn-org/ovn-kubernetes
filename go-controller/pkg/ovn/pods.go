@@ -368,15 +368,24 @@ func (oc *DefaultNetworkController) allocateSyncPodsIPs(pod *corev1.Pod) (string
 }
 
 func (oc *DefaultNetworkController) allocateSyncMigratablePodIPsOnZone(vms map[ktypes.NamespacedName]bool, pod *corev1.Pod) (map[ktypes.NamespacedName]bool, string, *util.PodAnnotation, error) {
-	vmKey, expectedLogicalPortName, podAnnotation, err := kubevirt.AllocateSyncMigratablePodIPsOnZone(oc.watchFactory, oc.lsManager, oc.GetNetworkName(), pod, oc.allocatePodIPsOnSwitch)
+	vmKey, expectedLogicalPortName, podAnnotation, err := kubevirt.AllocateSyncMigratablePodIPsOnZone(oc.lsManager, oc.GetNetworkName(), pod, oc.allocatePodIPsOnSwitch)
 	if err != nil {
 		return nil, "", nil, err
 	}
 
-	// If there is a vmKey this VM is not stale so it should be in sync
 	isLocalPod := oc.isPodScheduledOnLocalNode(pod)
 	if vmKey != nil {
-		vms[*vmKey] = isLocalPod
+		status, err := kubevirt.DiscoverLiveMigrationStatus(oc.watchFactory.PodCoreInformer().Lister(), pod)
+		if err != nil {
+			return nil, "", nil, err
+		}
+		activePod := pod
+		if status != nil {
+			activePod = status.ActivePod
+		}
+		// Both pods retain their IPs and ports, but VM resource ownership
+		// follows the active pod regardless of pod processing order.
+		vms[*vmKey] = oc.isPodScheduledOnLocalNode(activePod)
 	}
 
 	// For remote pods we the logical switch port is not present so
