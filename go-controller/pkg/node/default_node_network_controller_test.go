@@ -2029,9 +2029,14 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2002:db8:1::4 }
 				}
 
 				if tc.initialNonZeroState && tc.newEndpointSlice != nil && tc.service != nil {
-					stateKey := fmt.Sprintf("%s/%s/%s", tc.newEndpointSlice.Namespace,
-						tc.service.Name, tc.newEndpointSlice.AddressType)
-					nc.udpServiceZeroState.Store(stateKey, struct{}{})
+					for _, p := range tc.service.Spec.Ports {
+						if p.Protocol != corev1.ProtocolUDP {
+							continue
+						}
+						stateKey := fmt.Sprintf("%s/%s/%s/%d", tc.newEndpointSlice.Namespace,
+							tc.service.Name, tc.newEndpointSlice.AddressType, p.Port)
+						nc.udpServiceZeroState.Store(stateKey, struct{}{})
+					}
 				}
 
 				err = nc.reconcileConntrackUponEndpointSliceEvents(tc.oldEndpointSlice, tc.newEndpointSlice)
@@ -2339,7 +2344,7 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2002:db8:1::4 }
 		var udpProtocol = corev1.ProtocolUDP
 
 		makeSlice := func(uid, name string, addresses []string, addressType discovery.AddressType) *discovery.EndpointSlice {
-			port := int32(8080)
+			port := int32(80)
 			return &discovery.EndpointSlice{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      name,
@@ -2451,7 +2456,7 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2002:db8:1::4 }
 			err = nc.syncEndpointSlices([]interface{}{slice})
 			Expect(err).NotTo(HaveOccurred())
 
-			stateKey := fmt.Sprintf("%s/%s/%s", testNamespace, testServiceName, discovery.AddressTypeIPv4)
+			stateKey := fmt.Sprintf("%s/%s/%s/%d", testNamespace, testServiceName, discovery.AddressTypeIPv4, 80)
 			nc.udpServiceZeroState.Delete(stateKey)
 
 			mockNetLinkOps := new(utilMocks.NetLinkOps)
@@ -2514,7 +2519,7 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2002:db8:1::4 }
 			Expect(tracked1).To(BeTrue(), "empty slice UID should be tracked")
 			Expect(tracked2).To(BeTrue(), "non-empty slice UID should be tracked")
 
-			stateKey := fmt.Sprintf("%s/%s/%s", testNamespace, testServiceName, discovery.AddressTypeIPv4)
+			stateKey := fmt.Sprintf("%s/%s/%s/%d", testNamespace, testServiceName, discovery.AddressTypeIPv4, 80)
 			_, exists := nc.udpServiceZeroState.Load(stateKey)
 			Expect(exists).To(BeTrue(), "state should be non-zero because nonEmptySlice has endpoints")
 		})
@@ -2546,7 +2551,7 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2002:db8:1::4 }
 			err = nc.syncEndpointSlices([]interface{}{emptySlice})
 			Expect(err).NotTo(HaveOccurred())
 
-			stateKey := fmt.Sprintf("%s/%s/%s", testNamespace, testServiceName, discovery.AddressTypeIPv4)
+			stateKey := fmt.Sprintf("%s/%s/%s/%d", testNamespace, testServiceName, discovery.AddressTypeIPv4, 80)
 			_, exists := nc.udpServiceZeroState.Load(stateKey)
 			Expect(exists).To(BeFalse(), "state should be zero (absent) when all slices are empty")
 		})
@@ -2586,8 +2591,8 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2002:db8:1::4 }
 				mock.AnythingOfType("*netlink.ConntrackFilter")).
 				Return(uint(1), nil)
 
-			ipv4Key := fmt.Sprintf("%s/%s/%s", testNamespace, testServiceName, discovery.AddressTypeIPv4)
-			ipv6Key := fmt.Sprintf("%s/%s/%s", testNamespace, testServiceName, discovery.AddressTypeIPv6)
+			ipv4Key := fmt.Sprintf("%s/%s/%s/%d", testNamespace, testServiceName, discovery.AddressTypeIPv4, 80)
+			ipv6Key := fmt.Sprintf("%s/%s/%s/%d", testNamespace, testServiceName, discovery.AddressTypeIPv6, 80)
 
 			nc.udpServiceZeroState.Store(ipv4Key, struct{}{})
 
@@ -2633,7 +2638,7 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2002:db8:1::4 }
 			util.SetNetLinkOpMockInst(mockNetLinkOps)
 			defer util.ResetNetLinkOpMockInst()
 
-			stateKey := fmt.Sprintf("%s/%s/%s", testNamespace, testServiceName, discovery.AddressTypeIPv4)
+			stateKey := fmt.Sprintf("%s/%s/%s/%d", testNamespace, testServiceName, discovery.AddressTypeIPv4, 80)
 
 			mockNetLinkOps.On("ConntrackDeleteFilters",
 				mock.AnythingOfType("netlink.ConntrackTableType"),
@@ -2664,6 +2669,242 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2002:db8:1::4 }
 
 			_, existsAfterRetry := nc.udpServiceZeroState.Load(stateKey)
 			Expect(existsAfterRetry).To(BeTrue(), "state should be updated to non-zero after successful flush")
+		})
+
+		It("should track per-port for services with multiple UDP ports", func() {
+			port53 := int32(53)
+			port5353 := int32(5353)
+			svc := &corev1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      testServiceName,
+					Namespace: testNamespace,
+				},
+				Spec: corev1.ServiceSpec{
+					Type:      corev1.ServiceTypeClusterIP,
+					ClusterIP: "10.96.0.1",
+					Ports: []corev1.ServicePort{
+						{Port: port53, Protocol: udpProtocol},
+						{Port: port5353, Protocol: udpProtocol},
+					},
+				},
+			}
+
+			slicePort53 := &discovery.EndpointSlice{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "slice-port-53",
+					Namespace: testNamespace,
+					UID:       "uid-53",
+					Labels: map[string]string{
+						discovery.LabelServiceName: testServiceName,
+					},
+				},
+				AddressType: discovery.AddressTypeIPv4,
+				Ports: []discovery.EndpointPort{
+					{Port: &port53, Protocol: &udpProtocol},
+				},
+				Endpoints: []discovery.Endpoint{
+					{
+						Addresses: []string{"10.0.0.1"},
+						Conditions: discovery.EndpointConditions{
+							Ready: boolPtr(true),
+						},
+					},
+				},
+			}
+
+			slicePort5353 := &discovery.EndpointSlice{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "slice-port-5353",
+					Namespace: testNamespace,
+					UID:       "uid-5353",
+					Labels: map[string]string{
+						discovery.LabelServiceName: testServiceName,
+					},
+				},
+				AddressType: discovery.AddressTypeIPv4,
+				Ports: []discovery.EndpointPort{
+					{Port: &port5353, Protocol: &udpProtocol},
+				},
+				Endpoints: []discovery.Endpoint{
+					{
+						Addresses: []string{"10.0.0.2"},
+						Conditions: discovery.EndpointConditions{
+							Ready: boolPtr(true),
+						},
+					},
+				},
+			}
+
+			fakeClient := fake.NewSimpleClientset(svc, slicePort53)
+			wf, err := factory.NewNodeWatchFactory(&util.OVNNodeClientset{
+				KubeClient: fakeClient,
+			}, testNodeName)
+			Expect(err).NotTo(HaveOccurred())
+			defer wf.Shutdown()
+
+			nc := &DefaultNodeNetworkController{
+				BaseNodeNetworkController: BaseNodeNetworkController{
+					CommonNodeNetworkControllerInfo: CommonNodeNetworkControllerInfo{
+						name:         testNodeName,
+						watchFactory: wf,
+					},
+					ReconcilableNetInfo: &util.DefaultNetInfo{},
+				},
+			}
+
+			err = wf.Start()
+			Expect(err).NotTo(HaveOccurred())
+
+			err = nc.syncEndpointSlices([]interface{}{slicePort53})
+			Expect(err).NotTo(HaveOccurred())
+
+			stateKeyPort53 := fmt.Sprintf("%s/%s/%s/53", testNamespace, testServiceName, discovery.AddressTypeIPv4)
+			stateKeyPort5353 := fmt.Sprintf("%s/%s/%s/5353", testNamespace, testServiceName, discovery.AddressTypeIPv4)
+
+			_, existsPort53 := nc.udpServiceZeroState.Load(stateKeyPort53)
+			Expect(existsPort53).To(BeTrue(), "port 53 should have non-zero state")
+
+			_, existsPort5353 := nc.udpServiceZeroState.Load(stateKeyPort5353)
+			Expect(existsPort5353).To(BeFalse(), "port 5353 should have zero state (no endpoints yet)")
+
+			_, err = fakeClient.DiscoveryV1().EndpointSlices(testNamespace).Create(
+				context.Background(), slicePort5353, metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+
+			mockNetLinkOps := new(utilMocks.NetLinkOps)
+			util.SetNetLinkOpMockInst(mockNetLinkOps)
+			defer util.ResetNetLinkOpMockInst()
+
+			mockNetLinkOps.On("ConntrackDeleteFilters",
+				mock.AnythingOfType("netlink.ConntrackTableType"),
+				mock.AnythingOfType("netlink.InetFamily"),
+				mock.AnythingOfType("*netlink.ConntrackFilter")).
+				Return(uint(1), nil)
+
+			nc.initialSyncEndpointSliceUIDs.Store(slicePort5353.UID, struct{}{})
+
+			err = nc.reconcileConntrackUponEndpointSliceEvents(nil, slicePort5353)
+			Expect(err).NotTo(HaveOccurred())
+			mockNetLinkOps.AssertNumberOfCalls(GinkgoT(), "ConntrackDeleteFilters", 0)
+
+			err = nc.reconcileConntrackUponEndpointSliceEvents(nil, slicePort5353)
+			Expect(err).NotTo(HaveOccurred())
+			mockNetLinkOps.AssertNumberOfCalls(GinkgoT(), "ConntrackDeleteFilters", 1)
+
+			_, existsPort5353After := nc.udpServiceZeroState.Load(stateKeyPort5353)
+			Expect(existsPort5353After).To(BeTrue(), "port 5353 should have non-zero state after transition")
+		})
+
+		It("should detect 0→N transition in 1→0→1 endpoint sequence", func() {
+			svc := makeService()
+			servicePort := int32(80)
+			endpoint1IP := "10.0.0.1"
+			endpoint2IP := "10.0.0.2"
+
+			slice1 := &discovery.EndpointSlice{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "slice-1",
+					Namespace: testNamespace,
+					UID:       "uid-1",
+					Labels: map[string]string{
+						discovery.LabelServiceName: testServiceName,
+					},
+				},
+				AddressType: discovery.AddressTypeIPv4,
+				Ports: []discovery.EndpointPort{
+					{Port: &servicePort, Protocol: &udpProtocol},
+				},
+				Endpoints: []discovery.Endpoint{
+					{
+						Addresses: []string{endpoint1IP},
+						Conditions: discovery.EndpointConditions{
+							Ready: boolPtr(true),
+						},
+					},
+				},
+			}
+
+			slice2 := &discovery.EndpointSlice{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "slice-2",
+					Namespace: testNamespace,
+					UID:       "uid-2",
+					Labels: map[string]string{
+						discovery.LabelServiceName: testServiceName,
+					},
+				},
+				AddressType: discovery.AddressTypeIPv4,
+				Ports: []discovery.EndpointPort{
+					{Port: &servicePort, Protocol: &udpProtocol},
+				},
+				Endpoints: []discovery.Endpoint{
+					{
+						Addresses: []string{endpoint2IP},
+						Conditions: discovery.EndpointConditions{
+							Ready: boolPtr(true),
+						},
+					},
+				},
+			}
+
+			fakeClient := fake.NewSimpleClientset(svc, slice1)
+			wf, err := factory.NewNodeWatchFactory(&util.OVNNodeClientset{
+				KubeClient: fakeClient,
+			}, testNodeName)
+			Expect(err).NotTo(HaveOccurred())
+			defer wf.Shutdown()
+
+			nc := &DefaultNodeNetworkController{
+				BaseNodeNetworkController: BaseNodeNetworkController{
+					CommonNodeNetworkControllerInfo: CommonNodeNetworkControllerInfo{
+						name:         testNodeName,
+						watchFactory: wf,
+					},
+					ReconcilableNetInfo: &util.DefaultNetInfo{},
+				},
+			}
+
+			err = wf.Start()
+			Expect(err).NotTo(HaveOccurred())
+
+			err = nc.syncEndpointSlices([]interface{}{slice1})
+			Expect(err).NotTo(HaveOccurred())
+
+			stateKey := fmt.Sprintf("%s/%s/%s/%d", testNamespace, testServiceName, discovery.AddressTypeIPv4, 80)
+			_, exists := nc.udpServiceZeroState.Load(stateKey)
+			Expect(exists).To(BeTrue(), "initial state should be non-zero with 1 endpoint")
+
+			mockNetLinkOps := new(utilMocks.NetLinkOps)
+			util.SetNetLinkOpMockInst(mockNetLinkOps)
+			defer util.ResetNetLinkOpMockInst()
+
+			mockNetLinkOps.On("ConntrackDeleteFilters",
+				mock.AnythingOfType("netlink.ConntrackTableType"),
+				mock.AnythingOfType("netlink.InetFamily"),
+				mock.AnythingOfType("*netlink.ConntrackFilter")).
+				Return(uint(1), nil)
+
+			err = fakeClient.DiscoveryV1().EndpointSlices(testNamespace).Delete(
+				context.Background(), slice1.Name, metav1.DeleteOptions{})
+			Expect(err).NotTo(HaveOccurred())
+
+			err = nc.reconcileConntrackUponEndpointSliceEvents(slice1, nil)
+			Expect(err).NotTo(HaveOccurred())
+
+			_, exists = nc.udpServiceZeroState.Load(stateKey)
+			Expect(exists).To(BeFalse(), "state should be zero after deleting last endpoint")
+
+			_, err = fakeClient.DiscoveryV1().EndpointSlices(testNamespace).Create(
+				context.Background(), slice2, metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+
+			err = nc.reconcileConntrackUponEndpointSliceEvents(nil, slice2)
+			Expect(err).NotTo(HaveOccurred())
+
+			mockNetLinkOps.AssertNumberOfCalls(GinkgoT(), "ConntrackDeleteFilters", 1)
+
+			_, exists = nc.udpServiceZeroState.Load(stateKey)
+			Expect(exists).To(BeTrue(), "state should be non-zero after adding new endpoint")
 		})
 
 	})
@@ -2800,8 +3041,15 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2002:db8:1::4 }
 				mockNetLinkOps, nc, cleanup := setupConntrackTest(tc.service, tc.node)
 				defer cleanup()
 
-				err := nc.flushConntrackForServiceVIPs(tc.service, tc.addressType)
-				Expect(err).NotTo(HaveOccurred(), "flushConntrackForServiceVIPs failed for: "+tc.desc)
+				var portsToFlush []int32
+				for _, port := range tc.service.Spec.Ports {
+					if port.Protocol == corev1.ProtocolUDP {
+						portsToFlush = append(portsToFlush, port.Port)
+					}
+				}
+
+				err := nc.flushConntrackForServicePorts(tc.service, tc.addressType, portsToFlush)
+				Expect(err).NotTo(HaveOccurred(), "flushConntrackForServicePorts failed for: "+tc.desc)
 
 				mockNetLinkOps.AssertNumberOfCalls(GinkgoT(), "ConntrackDeleteFilters", tc.expectedConntrackCalls)
 			},
@@ -2905,8 +3153,15 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2002:db8:1::4 }
 					mockNetLinkOps, nc, cleanup := setupConntrackTest(tc.service, tc.node)
 					defer cleanup()
 
-					err := nc.flushConntrackForServiceVIPs(tc.service, tc.addressType)
-					Expect(err).NotTo(HaveOccurred(), "flushConntrackForServiceVIPs failed for: "+tc.desc)
+					var portsToFlush []int32
+					for _, port := range tc.service.Spec.Ports {
+						if port.Protocol == corev1.ProtocolUDP {
+							portsToFlush = append(portsToFlush, port.Port)
+						}
+					}
+
+					err := nc.flushConntrackForServicePorts(tc.service, tc.addressType, portsToFlush)
+					Expect(err).NotTo(HaveOccurred(), "flushConntrackForServicePorts failed for: "+tc.desc)
 
 					mockNetLinkOps.AssertNumberOfCalls(GinkgoT(), "ConntrackDeleteFilters", tc.expectedConntrackCalls)
 				},
@@ -2958,8 +3213,15 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2002:db8:1::4 }
 					mockNetLinkOps, nc, cleanup := setupConntrackTest(tc.service, tc.node)
 					defer cleanup()
 
-					err := nc.flushConntrackForServiceVIPs(tc.service, tc.addressType)
-					Expect(err).NotTo(HaveOccurred(), "flushConntrackForServiceVIPs failed for: "+tc.desc)
+					var portsToFlush []int32
+					for _, port := range tc.service.Spec.Ports {
+						if port.Protocol == corev1.ProtocolUDP {
+							portsToFlush = append(portsToFlush, port.Port)
+						}
+					}
+
+					err := nc.flushConntrackForServicePorts(tc.service, tc.addressType, portsToFlush)
+					Expect(err).NotTo(HaveOccurred(), "flushConntrackForServicePorts failed for: "+tc.desc)
 
 					mockNetLinkOps.AssertNumberOfCalls(GinkgoT(), "ConntrackDeleteFilters", tc.expectedConntrackCalls)
 				},
