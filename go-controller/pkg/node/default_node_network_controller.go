@@ -139,9 +139,14 @@ type DefaultNodeNetworkController struct {
 
 	nodeAddress net.IP
 
-	udpServiceZeroStateMu sync.Mutex
-	// udpServiceZeroState tracks service+family combinations that have non-zero eligible
-	// UDP endpoints. Key format: "namespace/name/IPv4" or "namespace/name/IPv6".
+	// udpServiceZeroStateLocks provides per-Service mutexes to serialize zero-state
+	// transitions for the same Service. The retry path can have overlapping goroutines
+	// for different EndpointSlices of the same Service, so we need per-Service locking
+	// to prevent duplicate flushes or state corruption.
+	udpServiceZeroStateLocks sync.Map // map[string]*sync.Mutex
+
+	// udpServiceZeroState tracks service+family+port combinations that have non-zero eligible
+	// UDP endpoints. Key format: "namespace/name/IPv4/port" or "namespace/name/IPv6/port".
 	// Absent key means zero endpoints. Updated on every EndpointSlice add/update/delete.
 	// Used to detect 0→N transitions for conntrack flushing without race conditions from
 	// reading the informer cache.
@@ -1199,6 +1204,15 @@ var ownNodeDeletedExit = func(nodeName string) {
 	klog.FlushAndExit(klog.ExitFlushTimeout, 1)
 }
 
+// lockServiceZeroState acquires a per-Service mutex to serialize zero-state
+// transitions for the same Service across retry goroutines.
+func (nc *DefaultNodeNetworkController) lockServiceZeroState(serviceKey string) *sync.Mutex {
+	actual, _ := nc.udpServiceZeroStateLocks.LoadOrStore(serviceKey, &sync.Mutex{})
+	mu := actual.(*sync.Mutex)
+	mu.Lock()
+	return mu
+}
+
 // reconcileConntrackUponEndpointSliceEvents detects 0→N endpoint transitions by comparing
 // tracked per-service state against current cache state, avoiding race conditions from reading
 // the informer cache at processing time. The decision is based on stored state (updated on
@@ -1234,8 +1248,10 @@ func (nc *DefaultNodeNetworkController) reconcileConntrackUponEndpointSliceEvent
 	svc, err := nc.watchFactory.GetService(namespacedName.Namespace, namespacedName.Name)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
-			nc.udpServiceZeroStateMu.Lock()
-			defer nc.udpServiceZeroStateMu.Unlock()
+			// Serialize state cleanup for this Service
+			serviceKey := fmt.Sprintf("%s/%s", namespacedName.Namespace, namespacedName.Name)
+			serviceMu := nc.lockServiceZeroState(serviceKey)
+			defer serviceMu.Unlock()
 			// Delete all per-port state for this service (all address families and ports)
 			prefix := fmt.Sprintf("%s/%s/", namespacedName.Namespace, namespacedName.Name)
 			deletedCount := 0
@@ -1275,8 +1291,16 @@ func (nc *DefaultNodeNetworkController) reconcileConntrackUponEndpointSliceEvent
 	}
 
 	if hasUDPPort {
+		// Serialize the cache read, endpoint count, flush, and state update for this Service.
+		// The lock must be held before reading the cache to prevent handlers from applying
+		// stale snapshots. Without this, two overlapping handlers can read the cache at
+		// different times, then serialize on the lock but apply outdated state transitions.
+		serviceKey := fmt.Sprintf("%s/%s", namespacedName.Namespace, namespacedName.Name)
+		serviceMu := nc.lockServiceZeroState(serviceKey)
+
 		allSlices, err := nc.watchFactory.GetServiceEndpointSlices(namespacedName.Namespace, namespacedName.Name, nc.GetNetworkName())
 		if err != nil && !apierrors.IsNotFound(err) {
+			serviceMu.Unlock()
 			return fmt.Errorf("failed to get endpoint slices for service %s/%s: %w",
 				namespacedName.Namespace, namespacedName.Name, err)
 		}
@@ -1327,7 +1351,6 @@ func (nc *DefaultNodeNetworkController) reconcileConntrackUponEndpointSliceEvent
 
 			stateKey := fmt.Sprintf("%s/%s/%s/%d", namespacedName.Namespace, namespacedName.Name, addressType, svcPort.Port)
 
-			nc.udpServiceZeroStateMu.Lock()
 			_, exists := nc.udpServiceZeroState.Load(stateKey)
 			wasZero := !exists
 
@@ -1340,7 +1363,6 @@ func (nc *DefaultNodeNetworkController) reconcileConntrackUponEndpointSliceEvent
 				klog.V(5).Infof("Detected 0→N transition for service %s port %d (wasZero=%v, currentCount=%d), will flush conntrack",
 					stateKey, svcPort.Port, wasZero, currentEligibleCount)
 			}
-			nc.udpServiceZeroStateMu.Unlock()
 
 			portStates = append(portStates, portState{
 				port:          svcPort.Port,
@@ -1370,7 +1392,6 @@ func (nc *DefaultNodeNetworkController) reconcileConntrackUponEndpointSliceEvent
 
 		// Update state only after successful flush or for non-flush transitions
 		for _, ps := range portStates {
-			nc.udpServiceZeroStateMu.Lock()
 			if ps.shouldFlush && flushErr != nil {
 				klog.V(5).Infof("Preserving zero-state for %s due to flush failure", ps.stateKey)
 			} else {
@@ -1382,8 +1403,8 @@ func (nc *DefaultNodeNetworkController) reconcileConntrackUponEndpointSliceEvent
 				klog.V(5).Infof("Updated zero-state for %s: %v (eligible endpoints: %d)",
 					ps.stateKey, ps.isNowZero, ps.eligibleCount)
 			}
-			nc.udpServiceZeroStateMu.Unlock()
 		}
+		serviceMu.Unlock()
 	}
 
 	if oldEndpointSlice == nil {
