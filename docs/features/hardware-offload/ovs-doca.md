@@ -88,9 +88,9 @@ ovs-vsctl --no-wait add-br br-ex -- set bridge br-ex datapath_type=netdev
 
 ```
 # PF
-ovs-vsctl add-port br0-ovs enp4s0f0 -- set Interface enp4s0f0 type=dpdk
+ovs-vsctl add-port br-ex enp4s0f0 -- set Interface enp4s0f0 type=dpdk
 # Representor
-ovs-vsctl add-port br0-ovs enp4s0f0_0 -- set Interface enp4s0f0_0 type=dpdk
+ovs-vsctl add-port br-ex enp4s0f0_0 -- set Interface enp4s0f0_0 type=dpdk
 ```
 
 ### OVN Integration Bridge

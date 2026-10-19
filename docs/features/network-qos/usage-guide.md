@@ -201,32 +201,44 @@ pod2 has ip 10.245.2.3
 
 `qos-external` limits **only** traffic on pods that carry `nqos-app=bw-limited`. That means:
 
-* **pod1 → pod0**: *unlimited* (no matching label)
-* **pod1 → pod2**: *rate-limited* to ≈ 20 Mbit/s
+* **pod0 → pod1**: *unlimited* (no matching label)
+* **pod2 → pod1**: *rate-limited* to ≈ 20 Mbit/s
 
-Follow these steps to verify it with `iperf3`.
+Follow these steps to verify it with `iperf3`. This example is IPv4-only:
+the NAD subnet and policy `ipBlock` are IPv4. On a dual-stack network, include
+an IPv6 `ipBlock` in the classifier to apply the policy to IPv6 traffic too.
 
 ```bash
 # 1) Start an iperf server inside pod0 and pod2 (runs forever in background)
 kubectl -n default exec pod0 -- iperf3 -s -p 5201 &
 kubectl -n default exec pod2 -- iperf3 -s -p 5201 &
 
-# 2) From pod1 → pod0  (EXPECTED ≈ line rate)
+# 2) From pod0 → pod1  (EXPECTED ≈ line rate; -R reverses the direction)
 kubectl -n default exec pod1 -- iperf3 -c "$DST_IP_POD0"   -p 5201 -R -t 10
 
-# 3) From pod1 → pod2  (EXPECTED ≈ 20 Mbit/s)
+# 3) From pod2 → pod1  (EXPECTED ≈ 20 Mbit/s; -R reverses the direction)
 kubectl -n default exec pod1 -- iperf3 -c "$DST_IP_POD2"   -p 5201 -R -t 10
+```
+
+To check both flows over IPv6 on a dual-stack network, use the IPv6 addresses
+from the pods' `network-status` annotations and connect with `iperf3 -6`:
+
+```bash
+DST_IPV6_POD0=$(kubectl -n default get pod pod0 -o json | jq -r '.metadata.annotations["k8s.v1.cni.cncf.io/network-status"] | fromjson | .[] | select(.interface == "eth1") | .ips[] | select(contains(":"))')
+DST_IPV6_POD2=$(kubectl -n default get pod pod2 -o json | jq -r '.metadata.annotations["k8s.v1.cni.cncf.io/network-status"] | fromjson | .[] | select(.interface == "eth1") | .ips[] | select(contains(":"))')
+kubectl -n default exec pod1 -- iperf3 -6 -c "$DST_IPV6_POD0" -p 5201 -R -t 10
+kubectl -n default exec pod1 -- iperf3 -6 -c "$DST_IPV6_POD2" -p 5201 -R -t 10
 ```
 
 Sample output:
 
 ```
-# to pod0 (unlimited)
+# from pod0 to pod1 (unlimited)
 [ ID] Interval           Transfer     Bitrate         Retr
 [  5]   0.00-10.00  sec  37.2 GBytes  31.9 Gbits/sec  607             sender
 [  5]   0.00-10.00  sec  37.2 GBytes  31.9 Gbits/sec                  receiver
 
-# to pod1 (rate-limited)
+# from pod2 to pod1 (rate-limited)
 [ ID] Interval           Transfer     Bitrate         Retr
 [  5]   0.00-10.00  sec  20.8 MBytes  17.4 Mbits/sec  4056             sender
 [  5]   0.00-10.00  sec  20.8 MBytes  17.4 Mbits/sec                  receiver
@@ -295,7 +307,7 @@ Below is an *abbreviated* map of the CRD schema returned by `kubectl explain net
 | Field | Type | Required | Purpose |
 | ----- | ----- | ----- | ----- |
 | **podSelector** | `LabelSelector` | No | Selects pods whose traffic will be evaluated by the QoS rules. If empty, all pods in the namespace are selected. |
-| **networkSelectors[]** | list `NetworkSelector` | No | Restricts the rule to traffic on specific networks. If absent, the rule matches any interface. *(See §5.2)* |
+| **networkSelectors[]** | list `NetworkSelector` | No | Restricts the rule to traffic on specific networks. If absent, the rule matches only the default network. *(See §5.2)* |
 | **priority** | `int` | **Yes** | Higher number → chosen first when multiple `NetworkQoS` objects match the same packet. |
 | **egress[]** | list `EgressRule` | **Yes** | One or more marking / policing rules. Evaluated in the order listed. *(See §5.3)* |
 

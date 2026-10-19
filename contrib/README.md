@@ -1,3 +1,3 @@
 # OVN-Kubernetes KinD Setup
 
-See [launching-ovn-kubernetes-on-kind.md](/docs/installation/launching-ovn-kubernetes-on-kind.md).
+See the [KinD setup guide](../docs/installation/launching-ovn-kubernetes-on-kind.md).

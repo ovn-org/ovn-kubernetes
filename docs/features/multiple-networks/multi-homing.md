@@ -259,7 +259,7 @@ The user must specify the secondary-network attachments via the
 
 The following example provisions a pod with two secondary attachments, one for
 each of the attachment configurations presented in
-[Configuring secondary networks](#configuring-secondary-networks).
+[OVN-Kubernetes Implementation Details](#ovn-kubernetes-implementation-details).
 
 ```yaml
 apiVersion: v1
@@ -283,8 +283,19 @@ The user can specify attachment parameters via
 [network-selection-elements](https://github.com/k8snetworkplumbingwg/network-attachment-definition-client/blob/63033d5c63d1cf56f924a5454c8f2ac444b6736d/pkg/apis/k8s.cni.cncf.io/v1/types.go#L137),
 namely IP, MAC, and interface name.
 
-Refer to the following YAML for an example on how to request a static IP for a
-pod, a MAC address, and specify the pod interface name.
+The attachment must have no `subnets`. For example, create this Layer 2 attachment
+before requesting a static IP, MAC address, and pod interface name:
+
+```yaml
+apiVersion: k8s.cni.cncf.io/v1
+kind: NetworkAttachmentDefinition
+metadata:
+  name: l2-static-network
+  namespace: ns1
+spec:
+  config: |
+    {"cniVersion":"1.0.0","name":"tenantstatic","type":"ovn-k8s-cni-overlay","topology":"layer2","netAttachDefName":"ns1/l2-static-network"}
+```
 
 ```yaml
 apiVersion: v1
@@ -293,7 +304,7 @@ metadata:
   annotations:
     k8s.v1.cni.cncf.io/networks: '[
       {
-        "name": "l2-network",
+        "name": "l2-static-network",
         "mac": "02:03:04:05:06:07",
         "interface": "myiface1",
         "ips": [

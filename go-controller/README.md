@@ -1,10 +1,10 @@
 # ovn-kubernetes go-controller
 
-The golang based ovn controller is a reliable way to deploy the OVN SDN using kubernetes clients and watchers based on golang. 
+The Go code in this directory builds OVN-Kubernetes components and the CNI plugin.
 
 ### Build
 
-Ensure go version >= 1.16
+Use Go 1.26 or later (see `go.mod` for the current toolchain version).
 
 ```
 cd go-controller
@@ -18,14 +18,14 @@ Then find the executables here : go-controller/_output/go/bin/
 
 'ovn-k8s-cni-overlay' is the cni executable to be placed in /opt/cni/bin (or another directory in which kubernetes will look for the plugin) so that it can be invoked for each pod event by kubernetes
 
-To get the Windows version of 'ovnkube' and 'ovn-k8s-cni-overlay' run the following:
+To build the Windows hybrid overlay node, run the following:
 ```
 cd go-controller
 make clean
 make windows
 ```
 
-Then find the executables here : go-controller/_output/go/windows/
+Then find `hybrid-overlay-node.exe` in `go-controller/_output/go/bin/windows/`.
 
 ### Usage
 
@@ -37,7 +37,7 @@ Usage:
   -config-file string
      configuration file path (default: /etc/openvswitch/ovn_k8s.conf)
   -cluster-subnets string
-     cluster-wide IP subnet to use (default: 11.11.0.0/16)
+     cluster-wide IP subnet to use (default: 10.128.0.0/14/23)
   -init-cluster-manager string
      initialize cluster manager that watches nodes (allocates subnet for each node from the cluster-subnets), requires the hostname as argument and doesn't connect to the OVN dbs.
   -init-ovnkube-controller string
@@ -46,15 +46,12 @@ Usage:
      initialize node, requires the name under which the node is registered in the Kubernetes cluster
   -cleanup-node string
      clean up OVS resources on the k8s node (after ovnkube-node daemonset deletion), requires the name under which the node is registered in the Kubernetes cluster
-  -remove-node string
-     remove a node from the OVN cluster. Requires the name that node is
-     registered with in kubernetes cluster
   -mtu int
      MTU value used for the overlay networks (default: 1400)
   -conntrack-zone int
      for gateway nodes, the conntrack zone used for conntrack flow rules (default: 64000)
   -loglevel int
-     log verbosity and level: 5=debug, 4=info, 3=warn, 2=error, 1=fatal (default: 4)
+     log verbosity: info, warning, error, and fatal are always printed; use 5 for debug (default: 4)
   -logfile string
      path of a file to direct log output to
   -cni-conf-dir string
@@ -154,7 +151,7 @@ set.
 ovnkube --init-cluster-manager <host-name> \
 	--k8s-cacert <path to the cacert file> \
 	--k8s-token <token string for authentication with kube apiserver> \
-	--k8s-apiserver <url to the kube apiserver e.g. https://10.11.12.13.8443> \
+	--k8s-apiserver <url to the kube apiserver e.g. https://10.11.12.13:8443> \
 	--cluster-subnets <cidr representing the global pod network e.g. 192.168.0.0/16>
 ```
 
@@ -165,7 +162,7 @@ The aforementioned ovnkube cluster manager will establish the watcher loops for 
 ovnkube --init-ovnkube-controller <kubernetes-node-name> \
 	--k8s-cacert <path to the cacert file> \
 	--k8s-token <token string for authentication with kube apiserver> \
-	--k8s-apiserver <url to the kube apiserver e.g. https://10.11.12.13.8443> \
+	--k8s-apiserver <url to the kube apiserver e.g. https://10.11.12.13:8443> \
 	--cluster-subnets <cidr representing the global pod network e.g. 192.168.0.0/16>
 ```
 
@@ -189,7 +186,7 @@ Then, run the ovnkube executable to initialize the node:
 ovnkube --init-node <name of the node as identified in kubernetes> \
 	--k8s-cacert <path to the cacert file> \
 	--k8s-token <token string for authentication with kube apiserver> \
-	--k8s-apiserver <url to the kube apiserver e.g. https://10.11.12.13.8443>
+	--k8s-apiserver <url to the kube apiserver e.g. https://10.11.12.13:8443>
 ```
 
 With the above command, the node will get initialized for all OVN communication and a logical switch will be created for it.

@@ -113,9 +113,9 @@ dropdown stay consistent.
   - second-highest → `<ver> (Stable)`
   - older releases → `<ver> (Legacy)`
   - `master` → `Master (Dev)`
-  Example today: `1.3 (Latest)`, `1.2 (Stable)`, `1.1 (Legacy)`, `1.0 (Legacy)`.
-  After `release-1.4` appears: `1.4 (Latest)`, `1.3 (Stable)`, and older stay
-  `(Legacy)`. No workflow edits are required.
+  For example, with `release-1.4` and `release-1.3` active, the dropdown shows
+  `1.4 (Latest)` and `1.3 (Stable)`; older releases are labeled `(Legacy)`.
+  No workflow edits are required when a new release branch appears.
 - Every branch that is deployed must have a root `mkdocs.yml`. The build injects
   `extra.version.provider: mike` if missing, but the file itself must exist.
 - Do not manually push to or develop on `gh-pages`. The versioning workflow owns it.
@@ -158,11 +158,12 @@ non-docs destinations should keep using absolute URLs as usual.
 
 **Exception: root files symlinked into `docs/governance/`.** Files such as
 `CONTRIBUTING.md`, `GOVERNANCE.md`, and `MEETINGS.md` live at the repository
-root and are symlinked under `docs/governance/` for the website. A relative
-path that is correct from `docs/governance/` (for example
+root and are symlinked under `docs/governance/` for the website. Relative
+links between these root files work in both locations. A relative path to a
+different docs directory that is correct from `docs/governance/` (for example
 `../installation/launching-ovn-kubernetes-on-kind.md`) breaks when the same
 file is viewed on GitHub at the repo root. For those shared files, use a
-versioned absolute docs URL instead, for example
+versioned absolute docs URL for cross-directory docs links, for example
 `https://ovn-kubernetes.io/master/installation/launching-ovn-kubernetes-on-kind/`,
 so the link works both on GitHub and on the published site.
 

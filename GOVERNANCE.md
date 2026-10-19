@@ -46,7 +46,9 @@ The ovn-kubernetes and its leadership embrace the following values:
 ## Maintainers
 
 ovn-kubernetes Maintainers have write access to the [project GitHub repository](https://github.com/ovn-kubernetes/ovn-kubernetes).
-They can merge their own patches or patches from others. The current maintainers
+They can merge patches from others, and their own patches after independent review.
+For pressing security or critical panic fixes, the [Reviewing Guide](./REVIEWING.md#process)
+allows them to merge without review if they explain why in a PR comment. The current maintainers
 can be found in [MAINTAINERS.md](./MAINTAINERS.md).  Maintainers collectively manage the project's
 resources and contributors.
 

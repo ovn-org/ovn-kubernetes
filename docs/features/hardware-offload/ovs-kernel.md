@@ -135,7 +135,6 @@ Deploy multus CNI as daemonset see https://github.com/intel/multus-cni
 Create NetworkAttachmentDefinition CRD with OVN CNI config
 
 ```yaml
-Kubernetes Network CRD Spec:
 apiVersion: "k8s.cni.cncf.io/v1"
 kind: NetworkAttachmentDefinition
 metadata:
@@ -143,7 +142,7 @@ metadata:
   annotations:
     k8s.v1.cni.cncf.io/resourceName: mellanox.com/cx5_sriov_switchdev
 spec:
-  Config: '{"cniVersion":"0.3.1","name":"ovn-kubernetes","type":"ovn-k8s-cni-overlay","ipam":{},"dns":{}}'
+  config: '{"cniVersion":"0.3.1","name":"ovn-kubernetes","type":"ovn-k8s-cni-overlay","ipam":{},"dns":{}}'
 ```
 
 ## Deploy POD with OVS hardware-offload

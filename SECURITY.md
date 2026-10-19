@@ -5,6 +5,8 @@ OVN-Kubernetes repo uses the [dependabot](https://docs.github.com/en/code-securi
 ## Reporting a Vulnerability
 
 To report a vulnerability, please use the [Private Vulnerability Reporting Feature](https://docs.github.com/en/code-security/security-advisories/guidance-on-reporting-and-writing/privately-reporting-a-security-vulnerability)
-on GitHub. We will endeavour to respond within 48 hours of reporting.
-If a vulnerability is reported but considered low priority, it may be converted into an issue and handled on the public issue tracker.
-Should a vulnerability be considered severe, we will endeavour to patch it within 48 hours of acceptance and may ask you to collaborate with us on a temporary private fork of the repository.
+on GitHub. We aim to acknowledge reports within 48 hours.
+The maintainers will coordinate public disclosure with the reporter.
+Low-priority reports may be moved to the public issue tracker only when the details are safe to publish.
+When the maintainers confirm a vulnerability is severe, we aim to provide a patch within 48 hours of that confirmation and will update the reporter if that target cannot be met.
+We may ask the reporter to collaborate on a temporary private fork of the repository.

@@ -4,92 +4,75 @@ KinD (Kubernetes in Docker) deployment of OVN kubernetes is a fast and easy mean
 
 ### Prerequisites
 
-- 20 GB of free space in root file system
-- Docker runtime or Podman
+- A Linux host or Linux virtual machine. The script reads Linux sysctls and
+  `/proc`, and OVN-Kubernetes requires a kernel with `CONFIG_NFT_FIB_INET`
+  enabled. Running the script directly on macOS is not supported.
+- 20 GB of free space on the filesystem used by the container runtime
+- Docker or Podman
 - [KinD](https://kubernetes.io/docs/setup/learning-environment/kind/)
-   - Installation instructions can be found at https://github.com/kubernetes-sigs/kind#installation-and-usage. 
-   - NOTE: The [ovn-kubernetes/contrib/kind.sh](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/master/contrib/kind.sh) and [ovn-kubernetes/contrib/kind.yaml.j2](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/master/contrib/kind.yaml.j2) files provision port 11337. If firewalld is enabled, this port will need to be unblocked:
-
-      ```
-      sudo firewall-cmd --permanent --add-port=11337/tcp; sudo firewall-cmd --reload
-      ```
+  version 0.27.0 or later
 - [kubectl](https://kubernetes.io/docs/tasks/tools/install-kubectl/)
-- [Helm](https://helm.sh/docs/intro/install/) v3
-- Python 3 and [pipx](https://pipx.pypa.io/stable/installation/)
+- [Helm](https://helm.sh/docs/intro/install/) v3 or later
+- Python 3, `pipx`, and `jinjanate`. If `jinjanate` is missing, the script installs it
+  with [pipx](https://pipx.pypa.io/stable/installation/).
+- git
+- curl
+- awk
 - jq
-- openssl
-- openvswitch
-- Go 1.23.0 or above
-- For podman users: skopeo
+- make
+- GNU coreutils, including `timeout`
+- skopeo when Podman is installed
+- OpenSSL 3 when enabling IPsec
 
 For OVN kubernetes KinD deployment, use the `kind.sh` script (a symlink to `kind-helm.sh`, which deploys OVN-Kubernetes via Helm).
 
-First download and build the OVN-Kubernetes repo:
+First download the OVN-Kubernetes repository:
 
 ```shell
 git clone https://github.com/ovn-kubernetes/ovn-kubernetes.git
 cd ovn-kubernetes
 ```
-The `kind.sh` script builds OVN-Kubernetes into a container image. To verify
-local changes before building in KIND, run the following:
+The `kind.sh` script builds OVN-Kubernetes into a container image. On Linux,
+you can optionally build the Go binaries first to verify local changes. This
+requires Go 1.26.3 or later, as specified by `go-controller/go.mod`:
 
 ```
-$ pushd go-controller
-$ make
-$ popd
+pushd go-controller
+make
+popd
 ```
 
-### Run the KIND deployment with docker
+### Run the KinD deployment with Docker
 
-Build the image for fedora and launch the KIND Deployment
+Run the script from the repository root. It builds the Fedora image as part of
+the deployment:
 
-```
-$ pushd dist/images
-$ make fedora-image
-$ popd
-
-$ pushd contrib
-$ export KUBECONFIG=${HOME}/ovn.conf
-$ ./kind.sh
-$ popd
+```shell
+export KUBECONFIG="${HOME}/ovn.conf"
+pushd contrib
+./kind.sh
+popd
 ```
 
-### Run the KIND deployment with podman
+### Optional: Run the KinD deployment with Podman
 
-To verify local changes, the steps are mostly the same as with docker, except the `fedora` make target:
+Podman is not required when you use Docker. If you prefer Podman, run the script
+as root with Podman, then copy root's kubeconfig for use by your regular user.
+The script passes Podman to the image build; do not edit the Makefile:
 
-```
-$ pushd dist/images
-```
-
-Then Edit the makefile, changing 
-
-```
-$ OCI_BIN=podman
-```
-
-Then build,
-
-```
-$ make fedora-image
-$ popd
+```shell
+pushd contrib
+sudo ./kind.sh -ep podman
+mkdir -p ~/.kube
+sudo cp /root/ovn.conf ~/.kube/kind-config
+sudo chown "$(id -u):$(id -g)" ~/.kube/kind-config
+export KUBECONFIG=~/.kube/kind-config
+popd
 ```
 
-To deploy KIND however, you need to start it as root and then copy root's kube config to use it as non-root:
+This will launch a KinD deployment. By default, the cluster is named `ovn`.
 
-```
-$ pushd contrib
-$ sudo ./kind.sh -ep podman
-$ mkdir -p ~/.kube
-$ sudo cp /root/ovn.conf ~/.kube/kind-config
-$ sudo chown $(id -u):$(id -g) ~/.kube/kind-config
-$ export KUBECONFIG=~/.kube/kind-config
-$ popd
-```
-
-**NOTE:** If you installed go via the official path on Linux and have encountered the "go: command not found" issue, you can preserve your environment when doing sudo: `sudo --preserve-env=PATH ./kind.sh -ep podman`
-
-This will launch a KIND deployment. By default, the cluster is named `ovn`.
+Example output from an older Kubernetes release:
 
 ```
 $ kubectl get nodes
@@ -116,11 +99,11 @@ ovn-kubernetes       ovs-node-jl7lh                              1/1     Running
 ovn-kubernetes       ovs-node-s9gxp                              1/1     Running   0          5h11m
 ```
 
-The `kind.sh` script defaults the cluster to HA disabled. There are numerous
-configuration options when deploying. Use `./kind.sh -h` to see the latest options.
+The `kind.sh` script defaults to one control-plane node, two worker nodes, and
+HA disabled. Run the following command for the current options and defaults:
 
 ```text
-[root@ovnkubernetes contrib]# ./kind.sh --help
+$ contrib/kind.sh --help
 usage: kind-helm.sh [--delete]
        [ -cf  | --config-file <file> ]
        [ -kt  | --keep-taint ]
@@ -134,6 +117,7 @@ usage: kind-helm.sh [--delete]
        [ -mne | --multi-network-enable ]
        [ -nse | --network-segmentation-enable ]
        [ -nce | --network-connect-enable ]
+       [ -ue | --uplink-enable ]
        [ -uae | --preconfigured-udn-addresses-enable ]
        [ -rae | --route-advertisements-enable ]
        [ -evpn | --evpn-enable ]
@@ -152,7 +136,19 @@ usage: kind-helm.sh [--delete]
        [ -cn  | --cluster-name ]
        [ -mip | --metrics-ip <ip> ]
        [ -mtu <mtu> ]
+       [ --dpu-mode <none|host|dpu> ]
+       [ -f | --extra-values <file> ]
+       [ --frr-k8s-remote-kubeconfig <file> ]
+       [ --frr-k8s-host-kubeconfig <file> ]
+       [ --frr-k8s-remote-node-map <host=dpu[,host=dpu...]> ]
+       [ --bgp-net-name <name> ]
+       [ --bgp-server-name <name> ]
+       [ --frr-container-name <name> ]
+       [ --bgp-server-net-subnet-ipv4 <subnet> ]
+       [ --bgp-server-net-subnet-ipv6 <subnet> ]
+       [ --bgp-server-host-port <port> ]
        [ --enable-coredumps ]
+       [ -ub | --uplink-bridge ]
        [ -h ]
 
 --delete                                      Delete current cluster
@@ -171,6 +167,7 @@ usage: kind-helm.sh [--delete]
 -mne | --multi-network-enable                 Enable multi networks. DEFAULT: Disabled
 -nse | --network-segmentation-enable          Enable network segmentation. DEFAULT: Disabled
 -nce | --network-connect-enable               Enable network connect (requires network segmentation). DEFAULT: Disabled
+-ue  | --uplink-enable                        Enable uplink (requires network segmentation). DEFAULT: Disabled
 -uae | --preconfigured-udn-addresses-enable   Enable connecting workloads with preconfigured network to user-defined networks. DEFAULT: Disabled
 -rae | --route-advertisements-enable          Enable route advertisements
 -evpn | --evpn-enable                         Enable EVPN
@@ -211,12 +208,13 @@ usage: kind-helm.sh [--delete]
 -ifa | --ipfix-cache-active-timeout           Maximum period in seconds for which an IPFIX flow record is cached. DEFAULT: 60
 -lcl | --libovsdb-client-logfile              Separate logs for libovsdb client into provided file. DEFAULT: do not separate.
 -eb  | --egress-gw-separate-bridge            The external gateway traffic uses a separate bridge (sets up xgw bridge and eth1).
+-ub  | --uplink-bridge                        Create an unmanaged OVS bridge for Uplink testing on each KIND node.
 -lr  | --local-kind-registry                  Configure kind to use a local container registry for images.
 -ep  | --experimental-provider                Use an experimental OCI provider such as podman instead of docker.
 --deploy                                      Deploy ovn-kubernetes without restarting kind
 --add-nodes                                   Adds nodes to an existing cluster. Number of nodes set by --num-workers.
 --isolated                                    After cluster creation, remove default route from nodes and publish kind node IPs as /etc/hosts entries for DNS-less isolation.
--ml  | --master-loglevel                      Log level for ovnkube-control-plane/cluster-manager pods (0..5). DEFAULT: 4
+-ml  | --master-loglevel                      Log level for ovnkube-control-plane pods (0..5). DEFAULT: 4
 -nl  | --node-loglevel                        Log level for ovnkube-node pods (0..5). DEFAULT: 4
 -nbl | --ovn-loglevel-nb                      Log level for ovn-nbdb. DEFAULT: '-vconsole:info -vfile:info'
 -sbl | --ovn-loglevel-sb                      Log level for ovn-sbdb. DEFAULT: '-vconsole:info -vfile:info'
@@ -229,10 +227,20 @@ usage: kind-helm.sh [--delete]
 -sw  | --allow-system-writes                  Allow the script to write to /etc/hosts and other system files when needed.
 -ric | --run-in-container                     Run the script from inside a docker container (adapts kubeconfig API URL).
 -kc  | --kubeconfig                           Output kubeconfig path. DEFAULT: $HOME/$KIND_CLUSTER_NAME.conf
+--dpu-mode                                    Deploy OVN-Kubernetes for DPU simulator mode: none, host, or dpu. DEFAULT: none
+-f | --extra-values                           Extra Helm values file appended after the base values file. May be repeated.
+--frr-k8s-remote-kubeconfig                   Kubeconfig used by DPU-cluster FRR-K8S pods to watch the host cluster API.
+--frr-k8s-host-kubeconfig                     Kubeconfig used by this script to write FRR-K8S resources to the host cluster API.
+--frr-k8s-remote-node-map                     Comma-separated host-node=dpu-node pairs for remote FRR-K8S node-name mapping.
+--bgp-net-name                                Name of the docker network hosting the external BGP server. DEFAULT: bgpnet
+--bgp-server-name                             Name of the external BGP server container. DEFAULT: bgpserver
+--frr-container-name                          Name of the external FRR router container. DEFAULT: frr
+--bgp-server-net-subnet-ipv4                  IPv4 subnet of the external BGP server network. DEFAULT: 172.26.0.0/16
+--bgp-server-net-subnet-ipv6                  IPv6 subnet of the external BGP server network. DEFAULT: fc00:f853:ccd:e796::/64
+--bgp-server-host-port                        Host port published by the external BGP server container. DEFAULT: 18080
 -nokvipam | --opt-out-kv-ipam                 Skip installing the KubeVirt IPAM controller (requires --install-kubevirt).
-```
 
-As seen above, if you do not specify any options the script will assume the default values.
+```
 
 **Notes / troubleshooting:**
 
@@ -245,260 +253,146 @@ sudo chcon system\_u:object\_r:device\_t:s0 /dev/dma\_heap/
 sudo setenforce 1
 ```
 
-- If you see errors related to go, you may not have go `$PATH` configured as root. Make sure it is configured, or define it while running `kind.sh`:
+### Usage Notes
 
-```bash
-sudo PATH=$PATH:/usr/local/go/bin ./kind.sh -ep podman
-```
-
-### Usage Notes 
-
-- You can create your own KIND J2 configuration file if the default one is not sufficient
+- You can create your own KinD J2 configuration file if the default one is not sufficient
 
 - You can also specify these values as environment variables. Command line parameters will override the environment variables.
 
-- To tear down the KinD cluster when finished, simply run:
+- To tear down a Docker KinD cluster from the repository root, run:
 
    ```shell
-   $ ./kind.sh --delete
+   contrib/kind.sh --delete
+   ```
+
+- For a cluster created with Podman and `sudo`, use the same provider and privileges:
+
+   ```shell
+   sudo contrib/kind.sh -ep podman --delete
    ```
 
 ## Running OVN-Kubernetes with IPv6 or Dual-stack in KinD
 
 This section describes the configuration needed for IPv6 and dual-stack environments.
+KinD supports both IP families; `contrib/kind-common.sh` sets the KinD `ipFamily`
+and OVN-Kubernetes network ranges from the two `PLATFORM_IPV*_SUPPORT` variables.
+These settings apply to either provider. For Podman, pass them through `sudo env`
+when running `./kind.sh -ep podman`, then follow the
+[Podman kubeconfig steps](#optional-run-the-kind-deployment-with-podman).
+For IPv6 on Linux, verify that the kernel exposes IPv6 support, IPv6 is enabled,
+and forwarding is enabled before creating the cluster:
 
-## KIND with IPv6
-
-### Docker Changes For IPv6
-
-For KIND clusters using KIND v0.7.0 or older (CI currently is using v0.8.1), to
-use IPv6, IPv6 needs to be enable in Docker on the host:
-
-```
-$ sudo vi /etc/docker/daemon.json
-{
-  "ipv6": true
-}
-
-$ sudo systemctl reload docker
+```shell
+test -f /proc/net/if_inet6
+sysctl net.ipv6.conf.all.disable_ipv6
+sysctl net.ipv6.conf.all.forwarding
 ```
 
-On a CentOS host running Docker version 19.03.6, the above configuration worked.
-After the host was rebooted, Docker failed to start. To fix, change
-`daemon.json` as follows:
+`net.ipv6.conf.all.disable_ipv6` must be `0`, and
+`net.ipv6.conf.all.forwarding` must be `1`. Set these values before running the
+script, or pass `--allow-system-writes` to allow the script to set them. See the
+[KinD networking configuration](https://kind.sigs.k8s.io/docs/user/configuration/#ip-family)
+for additional host requirements.
 
+## KinD with IPv6
+
+From the repository root, run:
+
+```shell
+export KUBECONFIG="${HOME}/ovn.conf"
+pushd contrib
+PLATFORM_IPV4_SUPPORT=false PLATFORM_IPV6_SUPPORT=true ./kind.sh
+popd
 ```
-$ sudo vi /etc/docker/daemon.json
+
+After creation, check the nodes and OVN-Kubernetes pods:
+
+```shell
+kubectl get nodes
+kubectl get pods -n ovn-kubernetes -o wide
+```
+
+### IPv6 host networking troubleshooting with Docker
+
+If worker nodes fail to join an IPv6 cluster backed by Docker, inspect the
+KinD network and export the cluster logs before changing host settings:
+
+```shell
+docker network inspect kind
+kind export logs --name ovn ./kind-logs
+```
+
+The KinD network should show `"EnableIPv6": true`. On older Docker and KinD setups,
+the Docker **default bridge** also needed IPv6 enabled. This is a separate
+network from KinD's own bridge, so the following is a legacy workaround, not
+a general prerequisite for current KinD. On those hosts, `/etc/docker/daemon.json`
+used settings like:
+
+```json
 {
   "ipv6": true,
-  "fixed-cidr-v6": "2001:db8:1::/64"
+  "fixed-cidr-v6": "fd00:1234:5678:1::/64"
 }
-
-$ sudo systemctl reload docker
 ```
 
-[IPv6](https://github.com/docker/docker.github.io/blob/c0eb65aabe4de94d56bbc20249179f626df5e8c3/engine/userguide/networking/default_network/ipv6.md)
-from Docker repo provided the fix. Newer documentation does not include this
-change, so change may be dependent on Docker version.
+Choose a subnet that does not overlap existing networks, then restart Docker
+after editing its configuration. The `fixed-cidr-v6` setting allocates addresses
+on Docker's default bridge; on a host where this workaround applies, verify it
+with `docker run --rm busybox ip -6 addr show eth0`. The output should include
+a global or unique-local IPv6 address as well as a link-local `fe80::` address.
+See [Docker's IPv6 documentation](https://docs.docker.com/engine/daemon/ipv6/)
+for the current daemon settings. The original guide recorded a Docker 19.03.6
+host that failed to restart after enabling IPv6 without `fixed-cidr-v6`.
 
-To verify IPv6 is enabled in Docker, run:
+An older KinD issue also showed `Joining worker nodes` failing when `firewalld`
+blocked traffic between IPv6 node containers. The kubeadm log contained
+`dial tcp [<node IPv6 address>]:6443: connect: permission denied`.
+This points to host networking during the worker join, before
+OVN-Kubernetes pods start.
+If you see that symptom, check the host firewall and the
+[KinD firewalld guidance](https://kind.sigs.k8s.io/docs/user/known-issues/#firewalld)
+before changing firewall rules. The old workaround stopped `firewalld` with
+`sudo systemctl stop firewalld`; restore it with `sudo systemctl start firewalld`
+after troubleshooting. See [KinD issue 1257](https://github.com/kubernetes-sigs/kind/issues/1257#issuecomment-575984987)
+for the original report.
 
-```
-$ docker run --rm busybox ip a
-1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue qlen 1000
-    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
-    inet 127.0.0.1/8 scope host lo
-       valid_lft forever preferred_lft forever
-    inet6 ::1/128 scope host
-       valid_lft forever preferred_lft forever
-341: eth0@if342: <BROADCAST,MULTICAST,UP,LOWER_UP,M-DOWN> mtu 1500 qdisc noqueue
-    link/ether 02:42:ac:11:00:02 brd ff:ff:ff:ff:ff:ff
-    inet 172.17.0.2/16 brd 172.17.255.255 scope global eth0
-       valid_lft forever preferred_lft forever
-    inet6 2001:db8:1::242:ac11:2/64 scope global flags 02
-       valid_lft forever preferred_lft forever
-    inet6 fe80::42:acff:fe11:2/64 scope link tentative
-       valid_lft forever preferred_lft forever
-```
+## KinD with Dual-stack
 
-For the eth0 vEth-pair, there should be the two IPv6 entries (global and link
-addresses).
+From the repository root, run:
 
-### Disable firewalld
-
-Currently, to run OVN-Kubernetes with IPv6 only in a KIND deployment, firewalld
-needs to be disabled. To disable:
-
-```
-sudo systemctl stop firewalld
+```shell
+export KUBECONFIG="${HOME}/ovn.conf"
+pushd contrib
+PLATFORM_IPV4_SUPPORT=true PLATFORM_IPV6_SUPPORT=true ./kind.sh
+popd
 ```
 
-NOTE: To run with IPv4, firewalld needs to be enabled, so to reenable:
+Check the result with `kubectl get nodes` and `kubectl get pods -A -o wide`.
+For a service being tested, `kubectl get service SERVICE_NAME -o yaml` shows
+its `ipFamilies` and `clusterIPs`. Check the client with `kubectl version --client`.
+If it is outside the supported minor-version skew for the cluster, use a
+compatible client built in the
+[local testing guide](../developer-guide/local_testing_guide.md) rather than
+replacing a system-wide `kubectl` binary. KinD supports dual-stack clusters
+with KinD 0.11+ and Kubernetes 1.20+; the former experimental patch to KinD
+is no longer needed.
 
-```
-sudo systemctl start firewalld
-```
+If nodes remain `NotReady` or pods remain `Pending`, inspect pod events and
+the OVN-Kubernetes pods before assuming dual-stack support is missing:
 
-If firewalld is enabled during a IPv6 deployment, additional nodes fail to join
-the cluster:
-
-```
-:
-Creating cluster "ovn" ...
- ✓ Ensuring node image (kindest/node:v1.18.2) 🖼
- ✓ Preparing nodes 📦 📦 📦
- ✓ Writing configuration 📜
- ✓ Starting control-plane 🕹️
- ✓ Installing StorageClass 💾
- ✗ Joining worker nodes 🚜
-ERROR: failed to create cluster: failed to join node with kubeadm: command "docker exec --privileged ovn-worker kubeadm join --config /kind/kubeadm.conf --ignore-preflight-errors=all --v=6" failed with error: exit status 1
+```shell
+kubectl describe nodes
+kubectl get pods -A -o wide
+kubectl describe pod -n ovn-kubernetes POD_NAME
 ```
 
-And logs show:
+Replace `POD_NAME` with the name of a pod that is not ready.
 
-```
-I0430 16:40:44.590181     579 token.go:215] [discovery] Failed to request cluster-info, will try again: Get https://[2001:db8:1::242:ac11:3]:6443/api/v1/namespaces/kube-public/configmaps/cluster-info?timeout=10s: dial tcp [2001:db8:1::242:ac11:3]:6443: connect: permission denied
-Get https://[2001:db8:1::242:ac11:3]:6443/api/v1/namespaces/kube-public/configmaps/cluster-info?timeout=10s: dial tcp [2001:db8:1::242:ac11:3]:6443: connect: permission denied
-```
+The `NotReady` output from the former Kubernetes v1.18 example described an
+incomplete historical setup, not the expected state of current clusters.
+When finished, run `contrib/kind.sh --delete` from the repository root.
 
-This issue was reported upstream in KIND
-[1257](https://github.com/kubernetes-sigs/kind/issues/1257#issuecomment-575984987)
-and blamed on firewalld.
-
-### OVN-Kubernetes With IPv6
-
-To run OVN-Kubernetes with IPv6 in a KIND deployment, run:
-
-```
-$ go get github.com/ovn-kubernetes/ovn-kubernetes; cd $GOPATH/src/github.com/ovn-kubernetes/ovn-kubernetes
-
-$ cd go-controller/
-$ make
-
-$ cd ../dist/images/
-$ make fedora-image
-
-$ cd ../../contrib/
-$ PLATFORM_IPV4_SUPPORT=false PLATFORM_IPV6_SUPPORT=true ./kind.sh
-```
-
-Once `kind.sh` completes, setup kube config file:
-
-```
-$ cp ~/ovn.conf ~/.kube/config
--- OR --
-$ KUBECONFIG=~/ovn.conf
-```
-
-Once testing is complete, to tear down the KIND deployment:
-
-```
-$ kind delete cluster --name ovn
-```
-
-## KIND with Dual-stack
-
-Currently, IP dual-stack is not fully supported in:
-* Kubernetes
-* KIND
-* OVN-Kubernetes
-
-### Kubernetes And Docker With IP Dual-stack
-
-#### Update kubectl
-
-Kubernetes has some IP dual-stack support but the feature is not complete.
-Additional changes are constantly being added. This setup is using the latest
-Kubernetes release to test against. Kubernetes is being installed below using
-OVN-Kubernetes KIND script, however to test, an equivalent version of `kubectl`
-needs to be installed.
-
-First determine what version of `kubectl` is currently being used and save it:
-
-```
-$ which kubectl
-/usr/bin/kubectl
-$ kubectl version --client
-Client Version: version.Info{Major:"1", Minor:"28", GitVersion:"v1.17.3", GitCommit:"06ad960bfd03b39c8310aaf92d1e7c12ce618213", GitTreeState:"clean", BuildDate:"2020-02-11T18:14:22Z", GoVersion:"go1.13.6", Compiler:"gc", Platform:"linux/amd64"}
-sudo mv /usr/bin/kubectl /usr/bin/kubectl-v1.17.3
-sudo ln -s /usr/bin/kubectl-v1.17.3 /usr/bin/kubectl
-```
-
-Download and install latest version of `kubectl`:
-
-```
-$ K8S_VERSION=v1.36.4
-$ curl -LO https://storage.googleapis.com/kubernetes-release/release/$K8S_VERSION/bin/linux/amd64/kubectl
-$ chmod +x kubectl
-$ sudo mv kubectl /usr/bin/kubectl-$K8S_VERSION
-$ sudo rm /usr/bin/kubectl
-$ sudo ln -s /usr/bin/kubectl-$K8S_VERSION /usr/bin/kubectl
-$ kubectl version --client
-Client Version: v1.32.3
-Kustomize Version: v5.0.4-0.20230601165947-6ce0bf390ce3
-```
-
-### Docker Changes For Dual-stack
-
-For dual-stack, IPv6 needs to be enable in Docker on the host same as
-for IPv6 only. See above: [Docker Changes For IPv6](#docker-changes-for-ipv6)
-
-### KinD With IP Dual-stack
-
-IP dual-stack is not currently supported in KIND. There is a PR
-([692](https://github.com/kubernetes-sigs/kind/pull/692))
-with IP dual-stack changes. Currently using this to test with.
-
-Optionally, save previous version of KIND (if it exists):
-
-```
-cp $GOPATH/bin/kind $GOPATH/bin/kind.orig
-```
-
-#### Build KIND With Dual-stack Locally
-
-To build locally (if additional needed):
-
-```
-go get github.com/kubernetes-sigs/kind; cd $GOPATH/src/github.com/kubernetes-sigs/kind
-git pull --no-edit --strategy=ours origin pull/692/head
-make clean
-make install INSTALL_DIR=$GOPATH/bin
-```
-
-### OVN-Kubernetes With IP Dual-stack
-
-For status of IP dual-stack in OVN-Kubernetes, see
-[1142](https://github.com/ovn-kubernetes/ovn-kubernetes/issues/1142).
-
-To run OVN-Kubernetes with IP dual-stack in a KIND deployment, run:
-
-```
-$ go get github.com/ovn-kubernetes/ovn-kubernetes; cd $GOPATH/src/github.com/ovn-kubernetes/ovn-kubernetes
-
-$ cd go-controller/
-$ make
-
-$ cd ../dist/images/
-$ make fedora-image
-
-$ cd ../../contrib/
-$ PLATFORM_IPV4_SUPPORT=true PLATFORM_IPV6_SUPPORT=true K8S_VERSION=v1.36.4 ./kind.sh
-```
-
-Once `kind.sh` completes, setup kube config file:
-
-```
-$ cp ~/ovn.conf ~/.kube/config
--- OR --
-$ KUBECONFIG=~/ovn.conf
-```
-
-Once testing is complete, to tear down the KIND deployment:
-
-```
-$ kind delete cluster --name ovn
-```
+## Advanced KinD options
 
 ### Using specific KinD container image and tag
 
@@ -508,7 +402,7 @@ In order to use an image/tag other than the default hardcoded in `kind.sh`, spec
 one (or both of) the following variables:
 
 ```
-$ cd ../../contrib/
+$ cd contrib
 $ KIND_IMAGE=example.com/kindest/node K8S_VERSION=v1.36.4 ./kind.sh
 ```
 
@@ -535,40 +429,6 @@ This can be achieve with the "--deploy" flag:
 # Using a local registry is an alternative to deploy ovn-kubernetes updates 
 # while also being useful to deploy other local images
 ./kind.sh --deploy --local-kind-registry
-```
-
-### Current Status
-
-This is subject to change because code is being updated constantly. But this is
-more a cautionary note that this feature is not completely working at the
-moment.
-
-The nodes do not go to ready because the OVN-Kubernetes hasn't setup the network
-completely:
-
-```
-$ kubectl get nodes
-NAME                STATUS     ROLES    AGE   VERSION
-ovn-control-plane   NotReady   master   94s   v1.18.0
-ovn-worker          NotReady   <none>   61s   v1.18.0
-ovn-worker2         NotReady   <none>   62s   v1.18.0
-
-$ kubectl get pods -o wide --all-namespaces
-NAMESPACE          NAME                                      READY STATUS   RESTARTS AGE    IP          NODE
-kube-system        coredns-66bff467f8-hh4c9                  0/1   Pending  0        2m45s  <none>      <none>
-kube-system        coredns-66bff467f8-vwbcj                  0/1   Pending  0        2m45s  <none>      <none>
-kube-system        etcd-ovn-control-plane                    1/1   Running  0        2m56s  172.17.0.2  ovn-control-plane
-kube-system        kube-apiserver-ovn-control-plane          1/1   Running  0        2m56s  172.17.0.2  ovn-control-plane
-kube-system        kube-controller-manager-ovn-control-plane 1/1   Running  0        2m56s  172.17.0.2  ovn-control-plane
-kube-system        kube-scheduler-ovn-control-plane          1/1   Running  0        2m56s  172.17.0.2  ovn-control-plane
-local-path-storage local-path-provisioner-774f7f8fdb-msmd2   0/1   Pending  0        2m45s  <none>      <none>
-ovn-kubernetes     ovnkube-control-plane-87fb56d6d-7qmnb     1/1   Running  0        107s   172.17.0.2  ovn-control-plane
-ovn-kubernetes     ovnkube-node-278l9                        2/3   Running  0        107s   172.17.0.3  ovn-worker2
-ovn-kubernetes     ovnkube-node-bm7v6                        2/3   Running  0        107s   172.17.0.2  ovn-control-plane
-ovn-kubernetes     ovnkube-node-p4k4t                        2/3   Running  0        107s   172.17.0.4  ovn-worker
-ovn-kubernetes     ovs-node-8r77t                            1/1   Running  0        107s   172.17.0.3  ovn-worker2
-ovn-kubernetes     ovs-node-jl7lh                            1/1   Running  0        107s   172.17.0.2  ovn-control-plane
-ovn-kubernetes     ovs-node-s9gxp                            1/1   Running  0        107s   172.17.0.4  ovn-worker
 ```
 
 ### Known issues

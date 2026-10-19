@@ -12,7 +12,7 @@ In DPU deployments, the host typically has access to Virtual Functions (VFs) for
 
 When configured with `--gateway-interface=derive-from-mgmt-port`, OVN-Kubernetes performs the following steps:
 
-1. **Management Port Resolution**: Gets the management port network device name (specified by `--ovnkube-node-mgmt-port-netdev`)
+1. **Management Port Resolution**: Gets the management port network device name from `--ovnkube-node-mgmt-port-netdev` or `--ovnkube-node-mgmt-port-dp-resource-name`
 2. **VF PCI Address Retrieval**: Retrieves the PCI address of the management port device (VF)
 3. **PF PCI Address Resolution**: Gets the Physical Function (PF) PCI address from the Virtual Function (VF) PCI address
 4. **Network Device Discovery**: Retrieves all network devices associated with the PF PCI address
@@ -44,12 +44,9 @@ interface=derive-from-mgmt-port
 ### Helm Configuration
 
 ```yaml
-ovnkube-node:
-  mode: dpu-host
-  mgmtPortNetdev: pf0vf0
-
-gateway:
-  interface: derive-from-mgmt-port
+ovnkube-node-dpu-host:
+  nodeMgmtPortNetdev: pf0vf0
+  gatewayOpts: "--gateway-interface=derive-from-mgmt-port"
 ```
 
 ## DPU host gateway representor interface
@@ -121,7 +118,7 @@ With `--gateway-interface=derive-from-mgmt-port`, OVN-Kubernetes will:
 ### Configuration Requirements
 
 - Must be used in DPU host mode (`--ovnkube-node-mode=dpu-host`)
-- Management port netdev must be specified (`--ovnkube-node-mgmt-port-netdev`)
+- A management port netdev (`--ovnkube-node-mgmt-port-netdev`) or device-plugin resource name (`--ovnkube-node-mgmt-port-dp-resource-name`) must be specified
 - Gateway interface must be set to `derive-from-mgmt-port`
 
 ## Error Handling
@@ -197,10 +194,10 @@ ethtool -i pf0vf0 | grep bus-info
 
 ```bash
 # Get VF PCI address
-cat /sys/class/net/pf0vf0/device/address
+basename "$(readlink -f /sys/class/net/pf0vf0/device)"
 
 # Get PF PCI address (if available)
-cat /sys/class/net/pf0vf0/device/physfn/address
+basename "$(readlink -f /sys/class/net/pf0vf0/device/physfn)"
 ```
 
 ## Integration with Existing Features
@@ -209,7 +206,8 @@ cat /sys/class/net/pf0vf0/device/physfn/address
 
 The "derive-from-mgmt-port" feature is used in conjunction with management interface to select the appropriate gateway accelerated interface.
 
-The management port can be specified through one of the following options:
+The management port can be specified through either option. These argument-mapping snippets show the corresponding environment variables:
+
 ```
   --ovnkube-node-mgmt-port-netdev)
     OVNKUBE_NODE_MGMT_PORT_NETDEV=$VALUE
@@ -220,7 +218,7 @@ The management port can be specified through one of the following options:
     OVNKUBE_NODE_MGMT_PORT_DP_RESOURCE_NAME=$VALUE
 ```
 
-OVNKUBE_NODE_MGMT_PORT_DP_RESOURCE_NAME has priority over OVNKUBE_NODE_MGMT_PORT_NETDEV and it is easier to use since it points to a SRIOV Device Plugin pool name.
+`OVNKUBE_NODE_MGMT_PORT_DP_RESOURCE_NAME` takes priority when both are set and is required when network segmentation is enabled in DPU-host mode.
 
 ### Multiple Network Support
 
