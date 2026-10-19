@@ -104,7 +104,7 @@ can be enabled by using the `--enable-multi-network` flag on OVN-Kubernetes clus
 ### Enable Network Segmentation
 
 Users can enable the network-segmentation feature using `--enable-network-segmentation`
-flag on a KIND cluster. This allows users to be able to design native isolation between
+flag on a KinD cluster. This allows users to be able to design native isolation between
 their tenant namespaces by coupling all namespaces that belong to the same
 tenant under the same secondary network and then making this network the primary network
 for the pod. Each network is isolated and cannot talk to other user

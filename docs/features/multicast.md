@@ -13,8 +13,8 @@ The multicast group membership is implemented with IGMP. For details, check RFCs
 and [2236](https://datatracker.ietf.org/doc/html/rfc2236).
 
 ## Configuring multicast on the cluster
-The feature is gated by config flag. In order to create a KIND cluster with
-multicast feature enabled, use the `--multicast-enabled` option with KIND.
+The feature is gated by config flag. In order to create a KinD cluster with
+multicast feature enabled, use the `--multicast-enabled` option with KinD.
 
 Always check the dependencies on the [Requirements page](requirements.md)
 
@@ -125,13 +125,13 @@ As you can see, this is the OVN logical switch port assigned to the pod running
 on the namespace we have annotated.
 
 ### Multicast group membership
-As indicated in the [introduction secion](#introduction), multicast filtering is
+As indicated in the [introduction section](#introduction), multicast filtering is
 achieved by dynamic group control management. The manager of these filtering
 lists is the switch that is configured to act as an IGMP querier - on OVN-K's
 case, the node's logical switches.
 
 For these membership requests to be allowed in the network, each node's logical
-switch's must declare themselves "multicast queriers", by using the
+switches must declare themselves "multicast queriers", by using the
 `other_config:mcast_querier=true` option.
 
 The `other_config:mcast_snoop=true` is also used so the logical switches can
@@ -141,7 +141,7 @@ multicast hosts and switches to compute group membership.
 Without these two options, multicast traffic would be treated as broadcast
 traffic, which forwards packets to all ports on the network.
 
-Please refer to the following snippet featuring the node's logical swithes
+Please refer to the following snippet featuring the node's logical switches
 of a cluster with one control plane node, and two workers, to see these
 options in use:
 ```

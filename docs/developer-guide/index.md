@@ -54,7 +54,7 @@ Writing and previewing documentation for the OVN-Kubernetes website.
 
 **[Local Testing Guide](local_testing_guide.md)**
 
-Run unit and end-to-end tests locally using Kind clusters.
+Run unit and end-to-end tests locally using KinD clusters.
 
 **[CI Testing Guide](../ci/ci.md)**
 

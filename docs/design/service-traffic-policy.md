@@ -596,7 +596,7 @@ hello-world-2-5c87676b7-h6rm5   1/1     Running   0          111m   10.244.0.6  
 hello-world-2-5c87676b7-l82w8   1/1     Running   0          111m   10.244.1.3   ovn-worker2   <none>           <none>
 ```
 
-Traffic from pod hits the load balancer on the switch where the non-local endpoints for clusterIPs are filtered out. So traffic will be DNAT-ed to local endpoints if any. Here is how the load balancers will look like on the three KIND worker nodes for the above service.
+Traffic from pod hits the load balancer on the switch where the non-local endpoints for clusterIPs are filtered out. So traffic will be DNAT-ed to local endpoints if any. Here is how the load balancers will look like on the three KinD worker nodes for the above service.
 
 ```
 a7865d9f-43d2-4cf9-a316-fc35e8c357a8    Service_surya/he    tcp        10.96.61.132:80        

@@ -100,7 +100,7 @@ that is decoded by `go-controller/observability-lib`.
 ### OVN-Kubernetes Implementation Details
 
 `Sample_collector` and `Sampling_app` are created or cleaned up when the observability is enabled/disabled on startup.
-When one of the supported objects (for example, network policy) is created, ovn-kuberentes generates an nbdb `Sample` for it.
+When one of the supported objects (for example, network policy) is created, OVN-Kubernetes generates an nbdb `Sample` for it.
 
 To decode the samples into human-readable information, `go-controller/observability-lib` is used. It finds `Sample`
 by the attached `Sample.Metadata` and then gets corresponding db object (e.g. ACL) based on `Sampling_app.ID` and `Sample.UUID`.
@@ -120,7 +120,7 @@ should be created for a given `Sample_collector.SetID` value at a time. But if s
 
 ## Best Practices
 
-TDB
+<!-- TBD -->
 
 ## Future Items
 

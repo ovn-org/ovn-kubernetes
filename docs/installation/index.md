@@ -8,9 +8,9 @@ hide:
 
 Guides for deploying OVN-Kubernetes on different platforms.
 
-**[Launching OVN-Kubernetes on Kind](launching-ovn-kubernetes-on-kind.md)**
+**[Launching OVN-Kubernetes on KinD](launching-ovn-kubernetes-on-kind.md)**
 
-Spin up a local OVN-Kubernetes cluster using Kind for development and testing.
+Spin up a local OVN-Kubernetes cluster using KinD for development and testing.
 
 **[Launching OVN-Kubernetes Using Helm](launching-ovn-kubernetes-with-helm.md)**
 

@@ -45,7 +45,7 @@ For our use-case we make some modifications to the base config shipped with kube
 ```
 
 We enable churn, which will delete and recreate the objects we created in the namespace. We also lower the QPS to 10/10 since
-we are testing on a kind cluster.
+we are testing on a KinD cluster.
 
 ### udn-density-l2-noPods / cudn-density-l2-noPods
 These workloads create UDN (UserDefinedNetwork) or CUDN (ClusterUserDefinedNetwork) L2 network objects without any pods.

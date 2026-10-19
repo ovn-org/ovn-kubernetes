@@ -8,9 +8,9 @@ hide:
 
 Install, configure, and deploy your first workloads on an OVN-Kubernetes cluster.
 
-**[Launching OVN-Kubernetes on Kind](../installation/launching-ovn-kubernetes-on-kind.md)**
+**[Launching OVN-Kubernetes on KinD](../installation/launching-ovn-kubernetes-on-kind.md)**
 
-Spin up a local OVN-Kubernetes cluster using Kind for development and testing.
+Spin up a local OVN-Kubernetes cluster using KinD for development and testing.
 
 **[Launching OVN-Kubernetes Using Helm](../installation/launching-ovn-kubernetes-with-helm.md)**
 

@@ -7,7 +7,7 @@ Resource Definitions.
 ## Core Kubernetes features API Reference
 
 This section contains the API Reference guide for core
-Kubernetes APIs that is watched by OVN-Kubernetes
+Kubernetes APIs that OVN-Kubernetes watches
 
 * [Nodes](https://kubernetes.io/docs/reference/kubernetes-api/cluster-resources/node-v1/)
 * [Namespaces](https://kubernetes.io/docs/reference/kubernetes-api/cluster-resources/namespace-v1/)
@@ -20,7 +20,7 @@ Kubernetes APIs that is watched by OVN-Kubernetes
 ## Extended Kubernetes features API Reference
 
 This section contains the API Reference guide for extended
-Kubernetes ecosystem APIs that is watched and implemented by OVN-Kubernetes
+Kubernetes ecosystem APIs that OVN-Kubernetes watches and implements
 
 * [AdminNetworkPolicies](https://network-policy-api.sigs.k8s.io/reference/spec/#policy.networking.k8s.io%2fv1alpha1.AdminNetworkPolicy) - shipped by SIG-Network-Policy-API
 * [BaselineAdminNetworkPolicies](https://network-policy-api.sigs.k8s.io/reference/spec/#policy.networking.k8s.io%2fv1alpha1.BaselineAdminNetworkPolicy) - shipped by SIG-Network-Policy-API

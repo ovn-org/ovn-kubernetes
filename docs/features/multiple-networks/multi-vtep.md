@@ -68,7 +68,7 @@ below criteria:
 
 #### OVN Constructs created in the databases
 
-OVN Sourthbound Database:
+OVN Southbound Database:
 * Port_Binding:encap - Populated by ovn-controller according to VIF
   interface’s external_ids:ovn-encap-ip.
 * Encap:IP - The IP in the corresponding Encap record will be used

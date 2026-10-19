@@ -360,9 +360,3 @@ Rules defined in `spec.Egress` can match on two main sections, 1.`spec.Egress.to
   severity            : []
 
   ```
-
-TODO: Add more examples(good for first PRs), specifically replicate above scenario by matching on the pod's network(`ip_block`) rather than the pod itself 
-
-
-
-

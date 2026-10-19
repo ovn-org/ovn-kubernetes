@@ -54,7 +54,7 @@ global:
   gatewayMode: "shared"
 ```
 
-KIND:
+KinD:
 
 ```bash
 ./kind.sh --gateway-mode shared

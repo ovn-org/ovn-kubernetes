@@ -44,7 +44,7 @@ false
 
 
 
-Before, installing this helm chart, prometheus and grafana must be pre-installed.
+Before installing this Helm chart, Prometheus and Grafana must be installed.
 
 ## Installing prometheus-grafana helm chart
 

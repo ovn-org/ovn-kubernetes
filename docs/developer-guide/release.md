@@ -35,7 +35,7 @@ Each new release of OVN-Kubernetes is defined with a "version" that represents t
   (So when 1.2.0 is released we will stop maintaining and backporting fixes into 1.0.0)
 * For a supported major release we will continue to do backports for backfixes and offer
   support. A minor patch release will be done at a cadence of 4 weeks for every major release.
-  Ex. Once 1.0.0 is release, we will do 1.0.1, 1.0.2, 1.0.3 etc. This also depends on a case-by-case
+  Ex. Once 1.0.0 is released, we will do 1.0.1, 1.0.2, 1.0.3 etc. This also depends on a case-by-case
   basis based on demands from end-users and backport statuses.
 
 ## Release Process

@@ -59,7 +59,7 @@ modprobe vport-geneve  # or vport-stt for "stt".
 
 ### Sanity check cross host ping.
 
-Since on each host, a OVS internal device named "k8s-$NODENAME" is created
+Since on each host, an OVS internal device named "k8s-$NODENAME" is created
 with the second IP address in the subnet assigned for that node, you should be
 able to check cross host connectivity by pinging these internal devices across
 hosts.

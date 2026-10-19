@@ -56,7 +56,7 @@ gateway:
 
 This setting is the `DPUHostGatewayRepresentorInterface` field in code and in the Gateway config section (`dpu-host-gateway-representor-interface`).
 
-On real switchdev DPUs, the DPU-side representor for the host uplink (the PF’s representor toward the embedded CPU) is often discovered automatically from switchdev metadata (for example via `phys_port_name`). Simulation environments do not expose that metadata: dpu-sim Kind clusters, dpu-sim virtio-based VMs, or other “simulated DPU” setups. There, OVN-Kubernetes cannot infer which netdev is the host-gateway representor, and you must set it explicitly.
+On real switchdev DPUs, the DPU-side representor for the host uplink (the PF’s representor toward the embedded CPU) is often discovered automatically from switchdev metadata (for example via `phys_port_name`). Simulation environments do not expose that metadata: dpu-sim KinD clusters, dpu-sim virtio-based VMs, or other “simulated DPU” setups. There, OVN-Kubernetes cannot infer which netdev is the host-gateway representor, and you must set it explicitly.
 
 The optional gateway value (`--dpu-host-gateway-representor-interface`) names that DPU-side representor explicitly. When the node builds an OVS gateway bridge from a plain NIC (not an existing OVS bridge), and this value is non-empty, ovnkube adds that interface as a port on the gateway bridge and marks it `other-config:transient=true` so the host’s uplink path is wired through OVS correctly.
 

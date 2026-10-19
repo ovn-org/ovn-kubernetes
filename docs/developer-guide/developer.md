@@ -27,7 +27,7 @@ client. While the client doesn't change too often it can also become outdated ca
 generations. So keep in mind to re-install modelgen with latest commits and change the hash
 value in the `hack/update-modelgen.sh` file if you find it outdated.
 
-NOTE2: From time to time we always bump our fedora version of OVN used by KIND. But we oftentimes
+NOTE2: From time to time we always bump our fedora version of OVN used by KinD. But we oftentimes
 forget to update the `OVN_SCHEMA_VERSION` in our `Makefile` which is used to download the ovsdb schema.
 If that version seems to be outdated, probably best to update that as well and re-generate the schema
 bindings.
@@ -38,7 +38,7 @@ In order to generate the latest yaml files for a given CRD or to add a new CRD, 
 the `types.go` has been created according to sig-apimachinery docs, the developer can run
 `make codegen` to be able to generate all the clientgen, listers and informers for the new
 CRD along with the deep-copy methods and actual yaml files which get created in `_output/crd`
-folder and are copied over to `helm/ovn-kubernetes/crds` to then be used when creating a KIND cluster.
+folder and are copied over to `helm/ovn-kubernetes/crds` to then be used when creating a KinD cluster.
 
 ## Generating and Updating Mocks
 

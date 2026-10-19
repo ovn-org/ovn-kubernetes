@@ -38,11 +38,11 @@ Open vSwitch (OVS) at its core.
 ```text
 go-controller/        # Main Go codebase — feature implementations, component code, ovnkube binaries, CRDs, libovsdb models, observability library, hybrid-overlay
 test/e2e/             # End-to-end Ginkgo tests covering all features (network policy, egress, UDN, KubeVirt, BGP, etc.)
-test/crd-integration/ # CRD integration tests (defaulting, validation, CEL) — run via envtest, no Kind cluster needed
+test/crd-integration/ # CRD integration tests (defaulting, validation, CEL) — run via envtest, no KinD cluster needed
 dist/                 # Container images (Dockerfiles) and deployment YAML manifests
 helm/                 # Helm charts for deploying ovn-kubernetes
 docs/                 # mkdocs source for ovn-kubernetes.io — OKEPs, feature docs, design docs, developer, installation guides
-contrib/              # Kind cluster scripts, local deployment helpers (kind.sh), and development tooling
+contrib/              # KinD cluster scripts, local deployment helpers (kind.sh), and development tooling
 LICENSES/             # License and third-party package licensing information
 ```
 
@@ -55,8 +55,8 @@ make lint           # Format and lint Go code (required before PR)
 make test           # Run unit tests
 ```
 
-E2E tests run via CI on Kind clusters. See `test/e2e/` for Ginkgo test suites.
-To run E2E locally, first set up a Kind cluster using `contrib/kind.sh`, then run the tests.
+E2E tests run via CI on KinD clusters. See `test/e2e/` for Ginkgo test suites.
+To run E2E locally, first set up a KinD cluster using `contrib/kind.sh`, then run the tests.
 See `docs/developer-guide/local_testing_guide.md` for more details.
 
 CRD admission tests (defaulting, validation, CEL rules) belong in `test/crd-integration/`,

@@ -78,6 +78,6 @@ Below are a set of common questions that apply to all pull requests:
 
 Reviewers are encouraged to read the following articles for help with common reviewer tasks:
 
-* [The Art of Closing: How to closing an unfinished or rejected pull request](https://blog.jessfraz.com/post/the-art-of-closing/)
+* [The Art of Closing](https://blog.jessfraz.com/post/the-art-of-closing/)
 * [Kindness and Code Reviews: Improving the Way We Give Feedback](https://product.voxmedia.com/2018/8/21/17549400/kindness-and-code-reviews-improving-the-way-we-give-feedback)
-* [Code Review Guidelines for Humans: Examples of good and back feedback](https://phauer.com/2018/code-review-guidelines/#code-reviews-guidelines-for-the-reviewer)
+* [Code Review Guidelines for Humans](https://phauer.com/2018/code-review-guidelines/#code-reviews-guidelines-for-the-reviewer)

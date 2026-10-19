@@ -2,7 +2,7 @@
 Please make sure you've read and understood our contributing guidelines;
 https://github.com/ovn-kubernetes/ovn-kubernetes/blob/master/CONTRIBUTING.md
 
-** Make sure all your commits include a signature generated with `git commit -s` **
+**Make sure all your commits include a DCO sign-off added with `git commit -s`.**
 
 All changes must adhere to this template to make it easy for reviewers
 and preserve rationale/history behind every change

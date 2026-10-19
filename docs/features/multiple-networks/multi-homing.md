@@ -283,7 +283,7 @@ The user can specify attachment parameters via
 [network-selection-elements](https://github.com/k8snetworkplumbingwg/network-attachment-definition-client/blob/63033d5c63d1cf56f924a5454c8f2ac444b6736d/pkg/apis/k8s.cni.cncf.io/v1/types.go#L137),
 namely IP, MAC, and interface name.
 
-Refer to the following yaml for an example on how to request a static IP for a
+Refer to the following YAML for an example on how to request a static IP for a
 pod, a MAC address, and specify the pod interface name.
 
 ```yaml

@@ -55,11 +55,11 @@ chmod +x $GOPATH/src/k8s.io/kubernetes/_output/bin/deepcopy-gen
 
 ## Export environment variables
 
-Before setting up KIND and before running the actual tests, export essential environment variables.
+Before setting up KinD and before running the actual tests, export essential environment variables.
 
 The environment variables and their values depend on the actual test scenario that you want to run.
 
-Look at the `e2e` action (search for `name: e2e`) in [ovn-kubernetes/.github/workflows/test.yml](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/master/.github/workflows/test.yml). Prior to installing kind, set the following environment variables according to your needs:
+Look at the `e2e` action (search for `name: e2e`) in [ovn-kubernetes/.github/workflows/test.yml](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/master/.github/workflows/test.yml). Prior to installing KinD, set the following environment variables according to your needs:
 ```
 export KIND_CLUSTER_NAME=ovn
 export KIND_INSTALL_INGRESS=[true|false]
@@ -73,7 +73,7 @@ export OVN_DISABLE_SNAT_MULTIPLE_GWS=[true|false]
 export OVN_GATEWAY_MODE=["local"|"shared"]
 export PLATFORM_IPV4_SUPPORT=[true|false]
 export PLATFORM_IPV6_SUPPORT=[true|false]
-# not required for the OVN Kind installation script, but export this already for later
+# not required for the OVN KinD installation script, but export this already for later
 export OVN_SECOND_BRIDGE=[true|false]
 ```
 
@@ -93,20 +93,20 @@ export OVN_DISABLE_SNAT_MULTIPLE_GWS=false
 export OVN_GATEWAY_MODE="local"
 export PLATFORM_IPV4_SUPPORT=true
 export PLATFORM_IPV6_SUPPORT=false
-# not required for the OVN Kind installation script, but export this already for later
+# not required for the OVN KinD installation script, but export this already for later
 export OVN_SECOND_BRIDGE=false
 ```
 
-## KIND
+## KinD
 
-Kubernetes in Docker (KIND) is used to deploy Kubernetes locally where a docker (or podman)
+KinD is used to deploy Kubernetes locally where a docker (or podman)
 container is created per Kubernetes node. The CI tests run on this Kubernetes
-deployment. Therefore, KIND will need to be installed locally.
+deployment. Therefore, KinD will need to be installed locally.
 
-Generic instructions for installing and running OVN-Kubernetes with KIND can be found at:
-[OVN-Kubernetes KIND Setup](../installation/launching-ovn-kubernetes-on-kind.md)
+Generic instructions for installing and running OVN-Kubernetes with KinD can be found at:
+[OVN-Kubernetes KinD Setup](../installation/launching-ovn-kubernetes-on-kind.md)
 
-Make sure to set the required environment variables first (see section above). Then, deploy kind:
+Make sure to set the required environment variables first (see section above). Then, deploy KinD:
 ```
 $ pushd contrib
 $ ./kind.sh
@@ -115,7 +115,7 @@ $ popd
 
 ## Run Tests
 
-To run the tests locally, run a KIND deployment as described above. The E2E
+To run the tests locally, run a KinD deployment as described above. The E2E
 tests look for the kube config file in a special location, so make a copy:
 
 ```
@@ -216,7 +216,7 @@ Test Suite Passed
 CRD integration tests live in `test/crd-integration/` and run against a real
 kube-apiserver + etcd started by [envtest](https://pkg.go.dev/sigs.k8s.io/controller-runtime/pkg/envtest).
 They verify CRD admission behaviour — defaulting, validation, and CEL rules —
-without requiring a full Kind cluster.
+without requiring a full KinD cluster.
 
 The tests are the intended future home for scenarios currently living in
 `test/e2e/testscenario/` that do not need live pod networking. This migration
