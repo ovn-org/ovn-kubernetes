@@ -154,7 +154,11 @@ func (h *nodeEventHandler) GetResourceFromInformerCache(key string) (interface{}
 func (h *nodeEventHandler) AddResource(obj interface{}, _ bool) error {
 	switch h.objType {
 	case factory.EndpointSliceForStaleConntrackRemovalType:
-		// no action needed upon add event
+		// Handle add events to detect 0→N endpoint transitions and flush stale conntrack entries
+		epSlice := obj.(*discovery.EndpointSlice)
+		if err := h.nc.reconcileConntrackUponEndpointSliceEvents(nil, epSlice); err != nil {
+			return fmt.Errorf("failed to reconcile conntrack for added EndpointSlice %s/%s: %w", epSlice.Namespace, epSlice.Name, err)
+		}
 		return nil
 
 	case factory.NodeType:
@@ -329,8 +333,9 @@ func (h *nodeEventHandler) SyncFunc(objs []interface{}) error {
 
 		switch h.objType {
 		case factory.EndpointSliceForStaleConntrackRemovalType:
-			// no sync needed
-			syncFunc = nil
+			// Use syncEndpointSlices to process initial sync without triggering
+			// false 0→N transitions that would flush conntrack on every restart
+			syncFunc = h.nc.syncEndpointSlices
 		case factory.NodeType:
 			syncFunc = h.nc.syncNodes
 

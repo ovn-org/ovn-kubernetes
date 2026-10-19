@@ -5,6 +5,7 @@ package node
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"strings"
@@ -22,6 +23,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/kubernetes/fake"
 
@@ -1856,6 +1859,8 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2002:db8:1::4 }
 			newEndpointSlice       *discovery.EndpointSlice
 			expectedConntrackCalls int
 			expectedFilters        []expectedConntrackFilter
+			initialSyncSlices      []interface{}
+			initialNonZeroState    bool
 		}
 
 		type endpointPortConfig struct {
@@ -1871,8 +1876,7 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2002:db8:1::4 }
 			protocol   corev1.Protocol
 		}
 
-		// Helper to create EndpointSlice
-		makeEndpointSlice := func(portConfigs []endpointPortConfig, addresses []string) *discovery.EndpointSlice {
+		makeEndpointSlice := func(portConfigs []endpointPortConfig, addresses []string, addressType discovery.AddressType) *discovery.EndpointSlice {
 			ports := make([]discovery.EndpointPort, len(portConfigs))
 			for i, pc := range portConfigs {
 				p := pc.port
@@ -1892,14 +1896,14 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2002:db8:1::4 }
 						discovery.LabelServiceName: testServiceName,
 					},
 				},
-				Ports: ports,
+				AddressType: addressType,
+				Ports:       ports,
 				Endpoints: []discovery.Endpoint{
 					{Addresses: addresses},
 				},
 			}
 		}
 
-		// Helper to create Service
 		makeService := func(portConfigs []servicePortConfig) *corev1.Service {
 			ports := make([]corev1.ServicePort, len(portConfigs))
 			for i, pc := range portConfigs {
@@ -1922,7 +1926,6 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2002:db8:1::4 }
 			}
 		}
 
-		// Helper to create NodePort or LoadBalancer Service by invoking makeService
 		makeServiceWithNodePort := func(portConfigs []servicePortConfig, nodePorts []int32, svcType corev1.ServiceType) *corev1.Service {
 			svc := makeService(portConfigs)
 			svc.Spec.Type = svcType
@@ -1962,25 +1965,44 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2002:db8:1::4 }
 
 		DescribeTable("should handle conntrack deletion correctly",
 			func(tc reconcileConntrackTestCase) {
-				// Setup mock for ConntrackDeleteFilters
 				mockNetLinkOps := new(utilMocks.NetLinkOps)
 				util.SetNetLinkOpMockInst(mockNetLinkOps)
 				defer util.ResetNetLinkOpMockInst()
 
-				// Mock ConntrackDeleteFilters
 				mockNetLinkOps.On("ConntrackDeleteFilters",
 					mock.AnythingOfType("netlink.ConntrackTableType"),
 					mock.AnythingOfType("netlink.InetFamily"),
 					mock.AnythingOfType("*netlink.ConntrackFilter")).
 					Return(uint(1), nil).Maybe()
 
-				// Setup fake client with service if provided
-				var fakeClient *fake.Clientset
+				// Build object list for fake client
+				objects := []runtime.Object{}
 				if tc.service != nil {
-					fakeClient = fake.NewSimpleClientset(tc.service)
-				} else {
-					fakeClient = fake.NewSimpleClientset()
+					objects = append(objects, tc.service)
 				}
+				if tc.newEndpointSlice != nil {
+					objects = append(objects, tc.newEndpointSlice)
+				}
+				for _, obj := range tc.initialSyncSlices {
+					if epSlice, ok := obj.(*discovery.EndpointSlice); ok {
+						objects = append(objects, epSlice)
+					}
+				}
+
+				// Add test node for NodePort conntrack cleanup
+				testNode := &corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "test-node",
+					},
+					Status: corev1.NodeStatus{
+						Addresses: []corev1.NodeAddress{
+							{Type: corev1.NodeInternalIP, Address: "10.0.0.1"},
+						},
+					},
+				}
+				objects = append(objects, testNode)
+
+				fakeClient := fake.NewSimpleClientset(objects...)
 
 				wf, err := factory.NewNodeWatchFactory(&util.OVNNodeClientset{
 					KubeClient: fakeClient,
@@ -1994,16 +2016,27 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2002:db8:1::4 }
 				nc := &DefaultNodeNetworkController{
 					BaseNodeNetworkController: BaseNodeNetworkController{
 						CommonNodeNetworkControllerInfo: CommonNodeNetworkControllerInfo{
+							name:         "test-node",
 							watchFactory: wf,
 						},
+						ReconcilableNetInfo: &util.DefaultNetInfo{},
 					},
 				}
 
-				// Execute the function under test
+				if tc.initialSyncSlices != nil {
+					err = nc.syncEndpointSlices(tc.initialSyncSlices)
+					Expect(err).NotTo(HaveOccurred())
+				}
+
+				if tc.initialNonZeroState && tc.newEndpointSlice != nil && tc.service != nil {
+					stateKey := fmt.Sprintf("%s/%s/%s", tc.newEndpointSlice.Namespace,
+						tc.service.Name, tc.newEndpointSlice.AddressType)
+					nc.udpServiceZeroState.Store(stateKey, struct{}{})
+				}
+
 				err = nc.reconcileConntrackUponEndpointSliceEvents(tc.oldEndpointSlice, tc.newEndpointSlice)
 				Expect(err).NotTo(HaveOccurred())
 
-				// Verify the number of ConntrackDeleteFilters calls
 				mockNetLinkOps.AssertNumberOfCalls(GinkgoT(), "ConntrackDeleteFilters", tc.expectedConntrackCalls)
 
 				// Collect all actual filters from the mock calls.
@@ -2032,10 +2065,14 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2002:db8:1::4 }
 
 			Entry("old endpointslice is nil",
 				reconcileConntrackTestCase{
-					desc:                   "should not delete any conntrack entries when old endpoint is nil",
-					service:                makeService([]servicePortConfig{{name: "", port: testServicePort1, targetPort: testEndpointPort1, protocol: udpProtocol}}),
-					oldEndpointSlice:       nil,
-					newEndpointSlice:       &discovery.EndpointSlice{},
+					desc:             "should not delete any conntrack entries when old endpoint is nil",
+					service:          makeService([]servicePortConfig{{name: "", port: testServicePort1, targetPort: testEndpointPort1, protocol: udpProtocol}}),
+					oldEndpointSlice: nil,
+					newEndpointSlice: makeEndpointSlice(
+						[]endpointPortConfig{{name: nil, port: testEndpointPort1, protocol: udpProtocol}},
+						[]string{},
+						discovery.AddressTypeIPv4,
+					),
 					expectedConntrackCalls: 0,
 				},
 			),
@@ -2047,6 +2084,7 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2002:db8:1::4 }
 					oldEndpointSlice: makeEndpointSlice(
 						[]endpointPortConfig{{name: nil, port: testEndpointPort1, protocol: udpProtocol}},
 						[]string{"10.0.0.1"},
+						discovery.AddressTypeIPv4,
 					),
 					newEndpointSlice:       nil,
 					expectedConntrackCalls: 1,
@@ -2063,6 +2101,7 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2002:db8:1::4 }
 					oldEndpointSlice: makeEndpointSlice(
 						[]endpointPortConfig{{name: strPtr("http"), port: testEndpointPort1, protocol: udpProtocol}},
 						[]string{"10.0.0.1"},
+						discovery.AddressTypeIPv4,
 					),
 					newEndpointSlice:       nil,
 					expectedConntrackCalls: 1,
@@ -2079,6 +2118,7 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2002:db8:1::4 }
 					oldEndpointSlice: makeEndpointSlice(
 						[]endpointPortConfig{{name: strPtr("grpc"), port: testEndpointPort1, protocol: udpProtocol}},
 						[]string{"10.0.0.1"},
+						discovery.AddressTypeIPv4,
 					),
 					newEndpointSlice:       nil,
 					expectedConntrackCalls: 0,
@@ -2092,6 +2132,7 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2002:db8:1::4 }
 					oldEndpointSlice: makeEndpointSlice(
 						[]endpointPortConfig{{name: nil, port: testEndpointPort1, protocol: udpProtocol}},
 						[]string{"10.0.0.1"},
+						discovery.AddressTypeIPv4,
 					),
 					newEndpointSlice:       nil,
 					expectedConntrackCalls: 0,
@@ -2105,6 +2146,7 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2002:db8:1::4 }
 					oldEndpointSlice: makeEndpointSlice(
 						[]endpointPortConfig{{name: nil, port: testEndpointPort1, protocol: tcpProtocol}},
 						[]string{"10.0.0.1"},
+						discovery.AddressTypeIPv4,
 					),
 					newEndpointSlice:       nil,
 					expectedConntrackCalls: 0,
@@ -2118,6 +2160,7 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2002:db8:1::4 }
 					oldEndpointSlice: makeEndpointSlice(
 						[]endpointPortConfig{{name: nil, port: testEndpointPort1, protocol: udpProtocol}},
 						[]string{"10.0.0.1", "10.0.0.2", "10.0.0.3"},
+						discovery.AddressTypeIPv4,
 					),
 					newEndpointSlice:       nil,
 					expectedConntrackCalls: 3,
@@ -2135,7 +2178,7 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2002:db8:1::4 }
 					service: makeService([]servicePortConfig{{name: "", port: testServicePort1, targetPort: testEndpointPort1, protocol: udpProtocol}}),
 					oldEndpointSlice: makeEndpointSlice(
 						[]endpointPortConfig{{name: nil, port: testEndpointPort1, protocol: udpProtocol}},
-						[]string{"fd00::1"},
+						[]string{"fd00::1"}, discovery.AddressTypeIPv6,
 					),
 					newEndpointSlice:       nil,
 					expectedConntrackCalls: 1,
@@ -2152,6 +2195,7 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2002:db8:1::4 }
 					oldEndpointSlice: makeEndpointSlice(
 						[]endpointPortConfig{{name: nil, port: testEndpointPort1, protocol: udpProtocol}},
 						[]string{"10.0.0.1", "fd00::1"},
+						discovery.AddressTypeIPv4,
 					),
 					newEndpointSlice:       nil,
 					expectedConntrackCalls: 2,
@@ -2175,6 +2219,7 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2002:db8:1::4 }
 							{name: strPtr("https"), port: testEndpointPort2, protocol: udpProtocol},
 						},
 						[]string{"10.0.0.1"},
+						discovery.AddressTypeIPv4,
 					),
 					newEndpointSlice:       nil,
 					expectedConntrackCalls: 2,
@@ -2188,13 +2233,14 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2002:db8:1::4 }
 				desc: "should delete conntrack entries for both service port and NodePort",
 				service: makeServiceWithNodePort([]servicePortConfig{{name: "", port: testServicePort1, targetPort: testEndpointPort1, protocol: udpProtocol}},
 					[]int32{30000}, corev1.ServiceTypeNodePort),
-				oldEndpointSlice:       makeEndpointSlice([]endpointPortConfig{{name: nil, port: testEndpointPort1, protocol: udpProtocol}}, []string{"10.128.0.1"}),
-				newEndpointSlice:       makeEndpointSlice([]endpointPortConfig{{name: nil, port: testEndpointPort1, protocol: udpProtocol}}, []string{"10.128.0.2"}),
+				oldEndpointSlice:       makeEndpointSlice([]endpointPortConfig{{name: nil, port: testEndpointPort1, protocol: udpProtocol}}, []string{"10.128.0.1"}, discovery.AddressTypeIPv4),
+				newEndpointSlice:       makeEndpointSlice([]endpointPortConfig{{name: nil, port: testEndpointPort1, protocol: udpProtocol}}, []string{"10.128.0.2"}, discovery.AddressTypeIPv4),
 				expectedConntrackCalls: 2,
 				expectedFilters: []expectedConntrackFilter{
 					{ip: "10.128.0.1", port: uint16(testServicePort1), protocol: syscall.IPPROTO_UDP},
 					{ip: "10.128.0.1", port: 30000, protocol: syscall.IPPROTO_UDP},
 				},
+				initialNonZeroState: true,
 			}),
 			Entry("NodePort service with mixed protocols should only clean UDP NodePort", reconcileConntrackTestCase{
 				desc: "should only delete conntrack for UDP NodePort, not TCP (protocol filtering)",
@@ -2202,13 +2248,14 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2002:db8:1::4 }
 					{name: "", port: testServicePort1, targetPort: testEndpointPort1, protocol: udpProtocol},
 					{name: "", port: testServicePort2, targetPort: testEndpointPort1, protocol: tcpProtocol},
 				}, []int32{30000, 30001}, corev1.ServiceTypeNodePort),
-				oldEndpointSlice:       makeEndpointSlice([]endpointPortConfig{{name: nil, port: testEndpointPort1, protocol: udpProtocol}}, []string{"10.128.0.1"}),
-				newEndpointSlice:       makeEndpointSlice([]endpointPortConfig{{name: nil, port: testEndpointPort1, protocol: udpProtocol}}, []string{"10.128.0.2"}),
+				oldEndpointSlice:       makeEndpointSlice([]endpointPortConfig{{name: nil, port: testEndpointPort1, protocol: udpProtocol}}, []string{"10.128.0.1"}, discovery.AddressTypeIPv4),
+				newEndpointSlice:       makeEndpointSlice([]endpointPortConfig{{name: nil, port: testEndpointPort1, protocol: udpProtocol}}, []string{"10.128.0.2"}, discovery.AddressTypeIPv4),
 				expectedConntrackCalls: 2, // Only UDP: service port + NodePort (TCP port 30001 should be skipped)
 				expectedFilters: []expectedConntrackFilter{
 					{ip: "10.128.0.1", port: uint16(testServicePort1), protocol: syscall.IPPROTO_UDP},
 					{ip: "10.128.0.1", port: 30000, protocol: syscall.IPPROTO_UDP},
 				},
+				initialNonZeroState: true,
 			}),
 			Entry("NodePort service with multiple UDP ports", reconcileConntrackTestCase{
 				desc: "should delete conntrack entries only for the specific NodePort that changed",
@@ -2216,13 +2263,14 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2002:db8:1::4 }
 					{name: "dns", port: testServicePort1, targetPort: testEndpointPort1, protocol: udpProtocol},
 					{name: "snmp", port: testServicePort2, targetPort: testEndpointPort1, protocol: udpProtocol},
 				}, []int32{30000, 30002}, corev1.ServiceTypeNodePort),
-				oldEndpointSlice:       makeEndpointSlice([]endpointPortConfig{{name: strPtr("dns"), port: testEndpointPort1, protocol: udpProtocol}}, []string{"10.128.0.1"}),
-				newEndpointSlice:       makeEndpointSlice([]endpointPortConfig{{name: strPtr("dns"), port: testEndpointPort1, protocol: udpProtocol}}, []string{"10.128.0.2"}),
+				oldEndpointSlice:       makeEndpointSlice([]endpointPortConfig{{name: strPtr("dns"), port: testEndpointPort1, protocol: udpProtocol}}, []string{"10.128.0.1"}, discovery.AddressTypeIPv4),
+				newEndpointSlice:       makeEndpointSlice([]endpointPortConfig{{name: strPtr("dns"), port: testEndpointPort1, protocol: udpProtocol}}, []string{"10.128.0.2"}, discovery.AddressTypeIPv4),
 				expectedConntrackCalls: 2, // service port + NodePort for "dns" only
 				expectedFilters: []expectedConntrackFilter{
 					{ip: "10.128.0.1", port: uint16(testServicePort1), protocol: syscall.IPPROTO_UDP},
 					{ip: "10.128.0.1", port: 30000, protocol: syscall.IPPROTO_UDP},
 				},
+				initialNonZeroState: true,
 			}),
 			Entry("LoadBalancer service with NodePort allocation", reconcileConntrackTestCase{
 				desc: "should delete conntrack entries for both service port and NodePort",
@@ -2236,13 +2284,14 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2002:db8:1::4 }
 					}
 					return svc
 				}(),
-				oldEndpointSlice:       makeEndpointSlice([]endpointPortConfig{{name: nil, port: testEndpointPort1, protocol: udpProtocol}}, []string{"10.128.0.1"}),
-				newEndpointSlice:       makeEndpointSlice([]endpointPortConfig{{name: nil, port: testEndpointPort1, protocol: udpProtocol}}, []string{"10.128.0.2"}),
+				oldEndpointSlice:       makeEndpointSlice([]endpointPortConfig{{name: nil, port: testEndpointPort1, protocol: udpProtocol}}, []string{"10.128.0.1"}, discovery.AddressTypeIPv4),
+				newEndpointSlice:       makeEndpointSlice([]endpointPortConfig{{name: nil, port: testEndpointPort1, protocol: udpProtocol}}, []string{"10.128.0.2"}, discovery.AddressTypeIPv4),
 				expectedConntrackCalls: 2,
 				expectedFilters: []expectedConntrackFilter{
 					{ip: "10.128.0.1", port: uint16(testServicePort1), protocol: syscall.IPPROTO_UDP},
 					{ip: "10.128.0.1", port: 30000, protocol: syscall.IPPROTO_UDP},
 				},
+				initialNonZeroState: true,
 			}),
 			Entry("LoadBalancer service with AllocateLoadBalancerNodePorts=false", func() reconcileConntrackTestCase {
 				allocateNodePorts := false
@@ -2259,15 +2308,749 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2002:db8:1::4 }
 						}
 						return svc
 					}(),
-					oldEndpointSlice:       makeEndpointSlice([]endpointPortConfig{{name: nil, port: testEndpointPort1, protocol: udpProtocol}}, []string{"10.128.0.1"}),
-					newEndpointSlice:       makeEndpointSlice([]endpointPortConfig{{name: nil, port: testEndpointPort1, protocol: udpProtocol}}, []string{"10.128.0.2"}),
+					oldEndpointSlice:       makeEndpointSlice([]endpointPortConfig{{name: nil, port: testEndpointPort1, protocol: udpProtocol}}, []string{"10.128.0.1"}, discovery.AddressTypeIPv4),
+					newEndpointSlice:       makeEndpointSlice([]endpointPortConfig{{name: nil, port: testEndpointPort1, protocol: udpProtocol}}, []string{"10.128.0.2"}, discovery.AddressTypeIPv4),
 					expectedConntrackCalls: 1,
 					expectedFilters: []expectedConntrackFilter{
 						{ip: "10.128.0.1", port: uint16(testServicePort1), protocol: syscall.IPPROTO_UDP},
 					},
+					initialNonZeroState: true,
 				}
 			}()),
 		)
+	})
+
+	Describe("state-based 0→N transition detection", func() {
+		BeforeEach(func() {
+			config.IPv4Mode = true
+			config.IPv6Mode = false
+		})
+
+		AfterEach(func() {
+			Expect(config.PrepareTestConfig()).To(Succeed(), "failed to restore test config")
+		})
+
+		const (
+			testNamespace   = "test-ns"
+			testServiceName = "test-service"
+			testNodeName    = "test-node"
+		)
+
+		var udpProtocol = corev1.ProtocolUDP
+
+		makeSlice := func(uid, name string, addresses []string, addressType discovery.AddressType) *discovery.EndpointSlice {
+			port := int32(8080)
+			return &discovery.EndpointSlice{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      name,
+					Namespace: testNamespace,
+					UID:       k8stypes.UID(uid),
+					Labels: map[string]string{
+						discovery.LabelServiceName: testServiceName,
+					},
+				},
+				AddressType: addressType,
+				Ports: []discovery.EndpointPort{
+					{Port: &port, Protocol: &udpProtocol},
+				},
+				Endpoints: []discovery.Endpoint{
+					{
+						Addresses: addresses,
+						Conditions: discovery.EndpointConditions{
+							Ready: boolPtr(true),
+						},
+					},
+				},
+			}
+		}
+
+		makeService := func() *corev1.Service {
+			return &corev1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      testServiceName,
+					Namespace: testNamespace,
+				},
+				Spec: corev1.ServiceSpec{
+					Type:      corev1.ServiceTypeClusterIP,
+					ClusterIP: "10.96.0.1",
+					Ports: []corev1.ServicePort{
+						{Port: 80, Protocol: udpProtocol},
+					},
+				},
+			}
+		}
+
+		It("should skip replayed initial-sync add events", func() {
+			slice := makeSlice("uid-1", "slice-1", []string{"10.0.0.1"}, discovery.AddressTypeIPv4)
+			svc := makeService()
+
+			fakeClient := fake.NewSimpleClientset(svc, slice)
+			wf, err := factory.NewNodeWatchFactory(&util.OVNNodeClientset{
+				KubeClient: fakeClient,
+			}, testNodeName)
+			Expect(err).NotTo(HaveOccurred())
+			defer wf.Shutdown()
+
+			nc := &DefaultNodeNetworkController{
+				BaseNodeNetworkController: BaseNodeNetworkController{
+					CommonNodeNetworkControllerInfo: CommonNodeNetworkControllerInfo{
+						name:         testNodeName,
+						watchFactory: wf,
+					},
+					ReconcilableNetInfo: &util.DefaultNetInfo{},
+				},
+			}
+
+			err = wf.Start()
+			Expect(err).NotTo(HaveOccurred())
+
+			err = nc.syncEndpointSlices([]interface{}{slice})
+			Expect(err).NotTo(HaveOccurred())
+
+			_, tracked := nc.initialSyncEndpointSliceUIDs.Load(slice.UID)
+			Expect(tracked).To(BeTrue(), "slice UID should be tracked after sync")
+
+			// Simulate replayed add (oldSlice=nil, newSlice=slice)
+			mockNetLinkOps := new(utilMocks.NetLinkOps)
+			util.SetNetLinkOpMockInst(mockNetLinkOps)
+			defer util.ResetNetLinkOpMockInst()
+
+			err = nc.reconcileConntrackUponEndpointSliceEvents(nil, slice)
+			Expect(err).NotTo(HaveOccurred())
+
+			mockNetLinkOps.AssertNumberOfCalls(GinkgoT(), "ConntrackDeleteFilters", 0)
+
+			_, tracked = nc.initialSyncEndpointSliceUIDs.Load(slice.UID)
+			Expect(tracked).To(BeFalse(), "slice UID should be removed after replayed add")
+		})
+
+		It("should flush conntrack after UID consumed on second call", func() {
+			slice := makeSlice("uid-consumed-test", "slice-1", []string{"10.0.0.1"}, discovery.AddressTypeIPv4)
+			svc := makeService()
+
+			fakeClient := fake.NewSimpleClientset(svc, slice)
+			wf, err := factory.NewNodeWatchFactory(&util.OVNNodeClientset{
+				KubeClient: fakeClient,
+			}, testNodeName)
+			Expect(err).NotTo(HaveOccurred())
+			defer wf.Shutdown()
+
+			nc := &DefaultNodeNetworkController{
+				BaseNodeNetworkController: BaseNodeNetworkController{
+					CommonNodeNetworkControllerInfo: CommonNodeNetworkControllerInfo{
+						name:         testNodeName,
+						watchFactory: wf,
+					},
+					ReconcilableNetInfo: &util.DefaultNetInfo{},
+				},
+			}
+
+			err = wf.Start()
+			Expect(err).NotTo(HaveOccurred())
+
+			err = nc.syncEndpointSlices([]interface{}{slice})
+			Expect(err).NotTo(HaveOccurred())
+
+			stateKey := fmt.Sprintf("%s/%s/%s", testNamespace, testServiceName, discovery.AddressTypeIPv4)
+			nc.udpServiceZeroState.Delete(stateKey)
+
+			mockNetLinkOps := new(utilMocks.NetLinkOps)
+			util.SetNetLinkOpMockInst(mockNetLinkOps)
+			defer util.ResetNetLinkOpMockInst()
+
+			mockNetLinkOps.On("ConntrackDeleteFilters",
+				mock.AnythingOfType("netlink.ConntrackTableType"),
+				mock.AnythingOfType("netlink.InetFamily"),
+				mock.AnythingOfType("*netlink.ConntrackFilter")).
+				Return(uint(1), nil)
+
+			// First call: replayed add, UID consumed, no flush
+			err = nc.reconcileConntrackUponEndpointSliceEvents(nil, slice)
+			Expect(err).NotTo(HaveOccurred())
+			mockNetLinkOps.AssertNumberOfCalls(GinkgoT(), "ConntrackDeleteFilters", 0)
+
+			_, tracked := nc.initialSyncEndpointSliceUIDs.Load(slice.UID)
+			Expect(tracked).To(BeFalse(), "UID should be consumed after first call")
+
+			// Second call: same UID but now consumed, should detect 0→N and flush
+			err = nc.reconcileConntrackUponEndpointSliceEvents(nil, slice)
+			Expect(err).NotTo(HaveOccurred())
+			mockNetLinkOps.AssertNumberOfCalls(GinkgoT(), "ConntrackDeleteFilters", 1)
+
+			_, exists := nc.udpServiceZeroState.Load(stateKey)
+			Expect(exists).To(BeTrue(), "state should be updated to non-zero after flush")
+		})
+
+		It("should initialize state correctly in syncEndpointSlices", func() {
+			emptySlice := makeSlice("uid-empty", "slice-empty", []string{}, discovery.AddressTypeIPv4)
+			nonEmptySlice := makeSlice("uid-nonempty", "slice-nonempty", []string{"10.0.0.1"}, discovery.AddressTypeIPv4)
+			svc := makeService()
+
+			fakeClient := fake.NewSimpleClientset(svc, emptySlice, nonEmptySlice)
+			wf, err := factory.NewNodeWatchFactory(&util.OVNNodeClientset{
+				KubeClient: fakeClient,
+			}, testNodeName)
+			Expect(err).NotTo(HaveOccurred())
+			defer wf.Shutdown()
+
+			nc := &DefaultNodeNetworkController{
+				BaseNodeNetworkController: BaseNodeNetworkController{
+					CommonNodeNetworkControllerInfo: CommonNodeNetworkControllerInfo{
+						name:         testNodeName,
+						watchFactory: wf,
+					},
+					ReconcilableNetInfo: &util.DefaultNetInfo{},
+				},
+			}
+
+			err = wf.Start()
+			Expect(err).NotTo(HaveOccurred())
+
+			err = nc.syncEndpointSlices([]interface{}{emptySlice, nonEmptySlice})
+			Expect(err).NotTo(HaveOccurred())
+
+			_, tracked1 := nc.initialSyncEndpointSliceUIDs.Load(emptySlice.UID)
+			_, tracked2 := nc.initialSyncEndpointSliceUIDs.Load(nonEmptySlice.UID)
+			Expect(tracked1).To(BeTrue(), "empty slice UID should be tracked")
+			Expect(tracked2).To(BeTrue(), "non-empty slice UID should be tracked")
+
+			stateKey := fmt.Sprintf("%s/%s/%s", testNamespace, testServiceName, discovery.AddressTypeIPv4)
+			_, exists := nc.udpServiceZeroState.Load(stateKey)
+			Expect(exists).To(BeTrue(), "state should be non-zero because nonEmptySlice has endpoints")
+		})
+
+		It("should initialize state as zero when service has no endpoints", func() {
+			emptySlice := makeSlice("uid-empty", "slice-empty", []string{}, discovery.AddressTypeIPv4)
+			svc := makeService()
+
+			fakeClient := fake.NewSimpleClientset(svc, emptySlice)
+			wf, err := factory.NewNodeWatchFactory(&util.OVNNodeClientset{
+				KubeClient: fakeClient,
+			}, testNodeName)
+			Expect(err).NotTo(HaveOccurred())
+			defer wf.Shutdown()
+
+			nc := &DefaultNodeNetworkController{
+				BaseNodeNetworkController: BaseNodeNetworkController{
+					CommonNodeNetworkControllerInfo: CommonNodeNetworkControllerInfo{
+						name:         testNodeName,
+						watchFactory: wf,
+					},
+					ReconcilableNetInfo: &util.DefaultNetInfo{},
+				},
+			}
+
+			err = wf.Start()
+			Expect(err).NotTo(HaveOccurred())
+
+			err = nc.syncEndpointSlices([]interface{}{emptySlice})
+			Expect(err).NotTo(HaveOccurred())
+
+			stateKey := fmt.Sprintf("%s/%s/%s", testNamespace, testServiceName, discovery.AddressTypeIPv4)
+			_, exists := nc.udpServiceZeroState.Load(stateKey)
+			Expect(exists).To(BeFalse(), "state should be zero (absent) when all slices are empty")
+		})
+
+		It("should detect 0→N transition for dual-stack secondary family", func() {
+			ipv4Slice := makeSlice("uid-ipv4", "slice-ipv4", []string{"10.0.0.1"}, discovery.AddressTypeIPv4)
+			ipv6SliceWithEndpoints := makeSlice("uid-ipv6", "slice-ipv6", []string{"2001:db8::1"}, discovery.AddressTypeIPv6)
+			svc := makeService()
+			svc.Spec.ClusterIPs = []string{"10.96.0.1", "fd00::1"}
+
+			fakeClient := fake.NewSimpleClientset(svc, ipv4Slice, ipv6SliceWithEndpoints)
+			wf, err := factory.NewNodeWatchFactory(&util.OVNNodeClientset{
+				KubeClient: fakeClient,
+			}, testNodeName)
+			Expect(err).NotTo(HaveOccurred())
+			defer wf.Shutdown()
+
+			nc := &DefaultNodeNetworkController{
+				BaseNodeNetworkController: BaseNodeNetworkController{
+					CommonNodeNetworkControllerInfo: CommonNodeNetworkControllerInfo{
+						name:         testNodeName,
+						watchFactory: wf,
+					},
+					ReconcilableNetInfo: &util.DefaultNetInfo{},
+				},
+			}
+
+			err = wf.Start()
+			Expect(err).NotTo(HaveOccurred())
+
+			mockNetLinkOps := new(utilMocks.NetLinkOps)
+			util.SetNetLinkOpMockInst(mockNetLinkOps)
+			defer util.ResetNetLinkOpMockInst()
+			mockNetLinkOps.On("ConntrackDeleteFilters",
+				mock.AnythingOfType("netlink.ConntrackTableType"),
+				mock.AnythingOfType("netlink.InetFamily"),
+				mock.AnythingOfType("*netlink.ConntrackFilter")).
+				Return(uint(1), nil)
+
+			ipv4Key := fmt.Sprintf("%s/%s/%s", testNamespace, testServiceName, discovery.AddressTypeIPv4)
+			ipv6Key := fmt.Sprintf("%s/%s/%s", testNamespace, testServiceName, discovery.AddressTypeIPv6)
+
+			nc.udpServiceZeroState.Store(ipv4Key, struct{}{})
+
+			_, ipv4Exists := nc.udpServiceZeroState.Load(ipv4Key)
+			_, ipv6Exists := nc.udpServiceZeroState.Load(ipv6Key)
+			Expect(ipv4Exists).To(BeTrue(), "IPv4 family should have non-zero state")
+			Expect(ipv6Exists).To(BeFalse(), "IPv6 family should be absent (zero state)")
+
+			err = nc.reconcileConntrackUponEndpointSliceEvents(nil, ipv6SliceWithEndpoints)
+			Expect(err).NotTo(HaveOccurred())
+
+			mockNetLinkOps.AssertNumberOfCalls(GinkgoT(), "ConntrackDeleteFilters", 1)
+
+			_, ipv6ExistsAfter := nc.udpServiceZeroState.Load(ipv6Key)
+			Expect(ipv6ExistsAfter).To(BeTrue(), "IPv6 family should transition to non-zero state after adding endpoints")
+		})
+
+		It("should preserve zero state when flush fails and retry flush on next event", func() {
+			slice := makeSlice("uid-1", "slice-1", []string{"10.0.0.1"}, discovery.AddressTypeIPv4)
+			svc := makeService()
+
+			fakeClient := fake.NewSimpleClientset(svc, slice)
+			wf, err := factory.NewNodeWatchFactory(&util.OVNNodeClientset{
+				KubeClient: fakeClient,
+			}, testNodeName)
+			Expect(err).NotTo(HaveOccurred())
+			defer wf.Shutdown()
+
+			nc := &DefaultNodeNetworkController{
+				BaseNodeNetworkController: BaseNodeNetworkController{
+					CommonNodeNetworkControllerInfo: CommonNodeNetworkControllerInfo{
+						name:         testNodeName,
+						watchFactory: wf,
+					},
+					ReconcilableNetInfo: &util.DefaultNetInfo{},
+				},
+			}
+
+			err = wf.Start()
+			Expect(err).NotTo(HaveOccurred())
+
+			mockNetLinkOps := new(utilMocks.NetLinkOps)
+			util.SetNetLinkOpMockInst(mockNetLinkOps)
+			defer util.ResetNetLinkOpMockInst()
+
+			stateKey := fmt.Sprintf("%s/%s/%s", testNamespace, testServiceName, discovery.AddressTypeIPv4)
+
+			mockNetLinkOps.On("ConntrackDeleteFilters",
+				mock.AnythingOfType("netlink.ConntrackTableType"),
+				mock.AnythingOfType("netlink.InetFamily"),
+				mock.AnythingOfType("*netlink.ConntrackFilter")).
+				Return(uint(0), fmt.Errorf("conntrack flush failed")).
+				Once()
+
+			err = nc.reconcileConntrackUponEndpointSliceEvents(nil, slice)
+			Expect(err).To(HaveOccurred(), "should return error when flush fails")
+
+			_, exists := nc.udpServiceZeroState.Load(stateKey)
+			Expect(exists).To(BeFalse(), "state should remain zero (absent) when flush fails")
+
+			mockNetLinkOps.AssertNumberOfCalls(GinkgoT(), "ConntrackDeleteFilters", 1)
+
+			mockNetLinkOps.On("ConntrackDeleteFilters",
+				mock.AnythingOfType("netlink.ConntrackTableType"),
+				mock.AnythingOfType("netlink.InetFamily"),
+				mock.AnythingOfType("*netlink.ConntrackFilter")).
+				Return(uint(1), nil).
+				Once()
+
+			err = nc.reconcileConntrackUponEndpointSliceEvents(nil, slice)
+			Expect(err).NotTo(HaveOccurred(), "retry should succeed when flush succeeds")
+
+			mockNetLinkOps.AssertNumberOfCalls(GinkgoT(), "ConntrackDeleteFilters", 2)
+
+			_, existsAfterRetry := nc.udpServiceZeroState.Load(stateKey)
+			Expect(existsAfterRetry).To(BeTrue(), "state should be updated to non-zero after successful flush")
+		})
+
+	})
+
+	Describe("flushConntrackForServiceVIPs", func() {
+		BeforeEach(func() {
+			config.IPv4Mode = true
+			config.IPv6Mode = false
+		})
+
+		AfterEach(func() {
+			Expect(config.PrepareTestConfig()).To(Succeed(), "failed to restore test config after VIP flush test")
+		})
+
+		const (
+			testNamespace   = "test-ns"
+			testServiceName = "test-service"
+			testNodeName    = "test-node"
+		)
+
+		var (
+			udpProtocol = corev1.ProtocolUDP
+			tcpProtocol = corev1.ProtocolTCP
+		)
+
+		type testCase struct {
+			desc                   string
+			service                *corev1.Service
+			node                   *corev1.Node
+			addressType            discovery.AddressType
+			expectedConntrackCalls int
+		}
+
+		makeServiceWithVIPs := func(svcType corev1.ServiceType, clusterIP string, externalIPs []string, lbIP string, nodePort int32) *corev1.Service {
+			svc := &corev1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      testServiceName,
+					Namespace: testNamespace,
+				},
+				Spec: corev1.ServiceSpec{
+					Type:      svcType,
+					ClusterIP: clusterIP,
+					Ports: []corev1.ServicePort{
+						{Port: 80, Protocol: udpProtocol, NodePort: nodePort},
+					},
+				},
+			}
+			if len(externalIPs) > 0 {
+				svc.Spec.ExternalIPs = externalIPs
+			}
+			if lbIP != "" {
+				svc.Status = corev1.ServiceStatus{
+					LoadBalancer: corev1.LoadBalancerStatus{
+						Ingress: []corev1.LoadBalancerIngress{
+							{IP: lbIP},
+						},
+					},
+				}
+			}
+			return svc
+		}
+
+		makeNode := func(ips ...string) *corev1.Node {
+			addresses := []corev1.NodeAddress{}
+			cidrs := []string{}
+			for _, ip := range ips {
+				addresses = append(addresses, corev1.NodeAddress{
+					Type:    corev1.NodeInternalIP,
+					Address: ip,
+				})
+				// Add /32 for IPv4, /128 for IPv6
+				if strings.Contains(ip, ":") {
+					cidrs = append(cidrs, ip+"/128")
+				} else {
+					cidrs = append(cidrs, ip+"/32")
+				}
+			}
+			cidrsJSON, _ := json.Marshal(cidrs)
+			return &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: testNodeName,
+					Annotations: map[string]string{
+						util.OVNNodeHostCIDRs: string(cidrsJSON),
+					},
+				},
+				Status: corev1.NodeStatus{
+					Addresses: addresses,
+				},
+			}
+		}
+
+		// setupConntrackTest creates common test infrastructure for conntrack tests.
+		// Returns mock NetLinkOps, node controller, and cleanup function.
+		setupConntrackTest := func(objects ...runtime.Object) (*utilMocks.NetLinkOps, *DefaultNodeNetworkController, func()) {
+			mockNetLinkOps := new(utilMocks.NetLinkOps)
+			util.SetNetLinkOpMockInst(mockNetLinkOps)
+
+			mockNetLinkOps.On("ConntrackDeleteFilters",
+				mock.AnythingOfType("netlink.ConntrackTableType"),
+				mock.AnythingOfType("netlink.InetFamily"),
+				mock.AnythingOfType("*netlink.ConntrackFilter")).
+				Return(uint(1), nil).Maybe()
+
+			fakeClient := fake.NewSimpleClientset(objects...)
+
+			wf, err := factory.NewNodeWatchFactory(&util.OVNNodeClientset{
+				KubeClient: fakeClient,
+			}, testNodeName)
+			Expect(err).NotTo(HaveOccurred(), "failed to create watch factory for conntrack test")
+
+			err = wf.Start()
+			Expect(err).NotTo(HaveOccurred(), "failed to start watch factory for conntrack test")
+
+			nc := &DefaultNodeNetworkController{
+				BaseNodeNetworkController: BaseNodeNetworkController{
+					CommonNodeNetworkControllerInfo: CommonNodeNetworkControllerInfo{
+						watchFactory: wf,
+						name:         testNodeName,
+					},
+					ReconcilableNetInfo: &util.DefaultNetInfo{},
+				},
+			}
+
+			cleanup := func() {
+				wf.Shutdown()
+				util.ResetNetLinkOpMockInst()
+			}
+
+			return mockNetLinkOps, nc, cleanup
+		}
+
+		DescribeTable("should flush conntrack for correct VIPs",
+			func(tc testCase) {
+				mockNetLinkOps, nc, cleanup := setupConntrackTest(tc.service, tc.node)
+				defer cleanup()
+
+				err := nc.flushConntrackForServiceVIPs(tc.service, tc.addressType)
+				Expect(err).NotTo(HaveOccurred(), "flushConntrackForServiceVIPs failed for: "+tc.desc)
+
+				mockNetLinkOps.AssertNumberOfCalls(GinkgoT(), "ConntrackDeleteFilters", tc.expectedConntrackCalls)
+			},
+
+			Entry("ClusterIP service only",
+				testCase{
+					desc:                   "should flush conntrack for ClusterIP only",
+					service:                makeServiceWithVIPs(corev1.ServiceTypeClusterIP, "10.96.0.1", nil, "", 0),
+					node:                   makeNode("192.168.1.10"),
+					expectedConntrackCalls: 1,
+					addressType:            discovery.AddressTypeIPv4,
+				},
+			),
+
+			Entry("ClusterIP with ExternalIPs",
+				testCase{
+					desc:                   "should flush conntrack for ClusterIP and ExternalIPs",
+					service:                makeServiceWithVIPs(corev1.ServiceTypeClusterIP, "10.96.0.1", []string{"1.2.3.4", "5.6.7.8"}, "", 0),
+					node:                   makeNode("192.168.1.10"),
+					expectedConntrackCalls: 3,
+					addressType:            discovery.AddressTypeIPv4,
+				},
+			),
+
+			Entry("LoadBalancer service",
+				testCase{
+					desc:                   "should flush conntrack for ClusterIP and LB IP",
+					service:                makeServiceWithVIPs(corev1.ServiceTypeLoadBalancer, "10.96.0.1", nil, "203.0.113.10", 30080),
+					node:                   makeNode("192.168.1.10"),
+					expectedConntrackCalls: 3,
+					addressType:            discovery.AddressTypeIPv4,
+				},
+			),
+
+			Entry("NodePort service with multiple node IPs",
+				testCase{
+					desc:                   "should flush conntrack for ClusterIP and all node IPs",
+					service:                makeServiceWithVIPs(corev1.ServiceTypeNodePort, "10.96.0.1", nil, "", 30080),
+					node:                   makeNode("192.168.1.10", "192.168.1.11"),
+					expectedConntrackCalls: 3,
+					addressType:            discovery.AddressTypeIPv4,
+				},
+			),
+
+			Entry("service with TCP ports only (no UDP)",
+				testCase{
+					desc: "should not flush any conntrack when no UDP ports",
+					service: &corev1.Service{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      testServiceName,
+							Namespace: testNamespace,
+						},
+						Spec: corev1.ServiceSpec{
+							ClusterIP: "10.96.0.1",
+							Ports: []corev1.ServicePort{
+								{Port: 80, Protocol: tcpProtocol},
+							},
+						},
+					},
+					node:                   makeNode("192.168.1.10"),
+					expectedConntrackCalls: 0,
+					addressType:            discovery.AddressTypeIPv4,
+				},
+			),
+
+			Entry("service with mixed UDP and TCP ports",
+				testCase{
+					desc: "should flush conntrack only for UDP ports",
+					service: &corev1.Service{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      testServiceName,
+							Namespace: testNamespace,
+						},
+						Spec: corev1.ServiceSpec{
+							ClusterIP: "10.96.0.1",
+							Ports: []corev1.ServicePort{
+								{Port: 80, Protocol: udpProtocol},
+								{Port: 443, Protocol: tcpProtocol},
+							},
+						},
+					},
+					node:                   makeNode("192.168.1.10"),
+					expectedConntrackCalls: 1,
+					addressType:            discovery.AddressTypeIPv4,
+				},
+			),
+		)
+
+		Context("IPv6-only VIP flushing", func() {
+			BeforeEach(func() {
+				config.IPv4Mode = false
+				config.IPv6Mode = true
+			})
+
+			AfterEach(func() {
+				Expect(config.PrepareTestConfig()).To(Succeed(), "failed to restore test config after IPv6 conntrack test")
+			})
+
+			DescribeTable("should flush conntrack for IPv6 VIPs",
+				func(tc testCase) {
+					mockNetLinkOps, nc, cleanup := setupConntrackTest(tc.service, tc.node)
+					defer cleanup()
+
+					err := nc.flushConntrackForServiceVIPs(tc.service, tc.addressType)
+					Expect(err).NotTo(HaveOccurred(), "flushConntrackForServiceVIPs failed for: "+tc.desc)
+
+					mockNetLinkOps.AssertNumberOfCalls(GinkgoT(), "ConntrackDeleteFilters", tc.expectedConntrackCalls)
+				},
+
+				Entry("IPv6 ClusterIP service only",
+					testCase{
+						desc:                   "should flush conntrack for IPv6 ClusterIP",
+						service:                makeServiceWithVIPs(corev1.ServiceTypeClusterIP, "fd00::1", nil, "", 0),
+						node:                   makeNode("2001:db8::10"),
+						addressType:            discovery.AddressTypeIPv6,
+						expectedConntrackCalls: 1,
+					},
+				),
+
+				Entry("IPv6 NodePort service",
+					testCase{
+						desc:                   "should flush conntrack for IPv6 ClusterIP and node IPs",
+						service:                makeServiceWithVIPs(corev1.ServiceTypeNodePort, "fd00::1", nil, "", 30080),
+						node:                   makeNode("2001:db8::10", "2001:db8::11"),
+						addressType:            discovery.AddressTypeIPv6,
+						expectedConntrackCalls: 3,
+					},
+				),
+
+				Entry("IPv6 LoadBalancer service",
+					testCase{
+						desc:                   "should flush conntrack for IPv6 ClusterIP and LB IP",
+						service:                makeServiceWithVIPs(corev1.ServiceTypeLoadBalancer, "fd00::1", nil, "2001:db8:1b::1", 30080),
+						node:                   makeNode("2001:db8::10"),
+						addressType:            discovery.AddressTypeIPv6,
+						expectedConntrackCalls: 3,
+					},
+				),
+			)
+		})
+
+		Context("Dual-stack VIP flushing", func() {
+			BeforeEach(func() {
+				config.IPv4Mode = true
+				config.IPv6Mode = true
+			})
+
+			AfterEach(func() {
+				Expect(config.PrepareTestConfig()).To(Succeed(), "failed to restore test config after dual-stack conntrack test")
+			})
+
+			DescribeTable("should flush conntrack for dual-stack VIPs",
+				func(tc testCase) {
+					mockNetLinkOps, nc, cleanup := setupConntrackTest(tc.service, tc.node)
+					defer cleanup()
+
+					err := nc.flushConntrackForServiceVIPs(tc.service, tc.addressType)
+					Expect(err).NotTo(HaveOccurred(), "flushConntrackForServiceVIPs failed for: "+tc.desc)
+
+					mockNetLinkOps.AssertNumberOfCalls(GinkgoT(), "ConntrackDeleteFilters", tc.expectedConntrackCalls)
+				},
+
+				Entry("Dual-stack ClusterIP service (IPv4 family)",
+					testCase{
+						desc: "should flush conntrack for IPv4 ClusterIP only in dual-stack service",
+						service: func() *corev1.Service {
+							svc := &corev1.Service{
+								ObjectMeta: metav1.ObjectMeta{
+									Name:      testServiceName,
+									Namespace: testNamespace,
+								},
+								Spec: corev1.ServiceSpec{
+									Type:       corev1.ServiceTypeClusterIP,
+									ClusterIP:  "10.96.0.1",
+									ClusterIPs: []string{"10.96.0.1", "fd00::1"},
+									Ports: []corev1.ServicePort{
+										{Port: 80, Protocol: udpProtocol},
+									},
+								},
+							}
+							return svc
+						}(),
+						node:                   makeNode("192.168.1.10", "2001:db8::10"),
+						addressType:            discovery.AddressTypeIPv4,
+						expectedConntrackCalls: 1,
+					},
+				),
+
+				Entry("Dual-stack NodePort service (IPv4 family)",
+					testCase{
+						desc: "should flush conntrack for IPv4 ClusterIP and IPv4 node IP only",
+						service: func() *corev1.Service {
+							svc := &corev1.Service{
+								ObjectMeta: metav1.ObjectMeta{
+									Name:      testServiceName,
+									Namespace: testNamespace,
+								},
+								Spec: corev1.ServiceSpec{
+									Type:       corev1.ServiceTypeNodePort,
+									ClusterIP:  "10.96.0.1",
+									ClusterIPs: []string{"10.96.0.1", "fd00::1"},
+									Ports: []corev1.ServicePort{
+										{Port: 80, Protocol: udpProtocol, NodePort: 30080},
+									},
+								},
+							}
+							return svc
+						}(),
+						node:                   makeNode("192.168.1.10", "2001:db8::10"),
+						addressType:            discovery.AddressTypeIPv4,
+						expectedConntrackCalls: 2,
+					},
+				),
+
+				Entry("Dual-stack LoadBalancer service (IPv4 family)",
+					testCase{
+						desc: "should flush conntrack for IPv4 ClusterIP, LB ingress IP, and node IP only",
+						service: func() *corev1.Service {
+							svc := &corev1.Service{
+								ObjectMeta: metav1.ObjectMeta{
+									Name:      testServiceName,
+									Namespace: testNamespace,
+								},
+								Spec: corev1.ServiceSpec{
+									Type:       corev1.ServiceTypeLoadBalancer,
+									ClusterIP:  "10.96.0.1",
+									ClusterIPs: []string{"10.96.0.1", "fd00::1"},
+									Ports: []corev1.ServicePort{
+										{Port: 80, Protocol: udpProtocol, NodePort: 30080},
+									},
+								},
+								Status: corev1.ServiceStatus{
+									LoadBalancer: corev1.LoadBalancerStatus{
+										Ingress: []corev1.LoadBalancerIngress{
+											{IP: "203.0.113.10"},
+											{IP: "2001:db8:1b::1"},
+										},
+									},
+								},
+							}
+							return svc
+						}(),
+						node:                   makeNode("192.168.1.10", "2001:db8::10"),
+						addressType:            discovery.AddressTypeIPv4,
+						expectedConntrackCalls: 3,
+					},
+				),
+			)
+		})
 	})
 
 	Describe("advertised UDN isolation nftables", func() {
@@ -2306,91 +3089,6 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2002:db8:1::4 }
 func strPtr(s string) *string {
 	return &s
 }
-
-var _ = Describe("Node object deletion", func() {
-	const (
-		nodeName       = "my-node"
-		remoteNodeName = "other-node"
-		nodeIP         = "169.254.254.60"
-		remoteNodeIP   = "169.254.254.61"
-	)
-
-	var (
-		stop     chan struct{}
-		wg       *sync.WaitGroup
-		wf       *factory.WatchFactory
-		origExit func(string)
-	)
-
-	BeforeEach(func() {
-		origExit = ownNodeDeletedExit
-		Expect(config.PrepareTestConfig()).To(Succeed())
-		config.IPv4Mode = true
-		config.IPv6Mode = false
-		// The exit is specific to DPU mode: the process does not run on the
-		// deleted node, so nothing else terminates it.
-		config.OvnKubeNode.Mode = types.NodeModeDPU
-		stop = make(chan struct{})
-		wg = &sync.WaitGroup{}
-	})
-
-	AfterEach(func() {
-		close(stop)
-		wg.Wait()
-		if wf != nil {
-			wf.Shutdown()
-		}
-		ownNodeDeletedExit = origExit
-	})
-
-	newNode := func(name, ip string) corev1.Node {
-		return corev1.Node{
-			ObjectMeta: metav1.ObjectMeta{Name: name},
-			Status: corev1.NodeStatus{
-				Addresses: []corev1.NodeAddress{{Type: corev1.NodeInternalIP, Address: ip}},
-			},
-		}
-	}
-
-	It("exits only when the Node object the controller runs on behalf of is deleted", func() {
-		nodenft.SetFakeNFTablesHelper()
-		kubeFakeClient := fake.NewSimpleClientset(&corev1.NodeList{
-			Items: []corev1.Node{newNode(nodeName, nodeIP), newNode(remoteNodeName, remoteNodeIP)},
-		})
-		fakeClient := &util.OVNNodeClientset{
-			KubeClient:             kubeFakeClient,
-			AdminPolicyRouteClient: adminpolicybasedrouteclient.NewSimpleClientset(),
-			NetworkAttchDefClient:  nadfake.NewSimpleClientset(),
-		}
-		var err error
-		wf, err = factory.NewNodeWatchFactory(fakeClient, nodeName)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(wf.Start()).To(Succeed())
-
-		routeManager := routemanager.NewController()
-		cnnci := NewCommonNodeNetworkControllerInfo(kubeFakeClient, fakeClient.AdminPolicyRouteClient, wf, nil, nodeName, routeManager)
-		nc := newDefaultNodeNetworkController(cnnci, stop, wg, routeManager, nil, nil)
-		nc.initRetryFrameworkForNode()
-		Expect(setupRemoteNodeNFTSets()).To(Succeed())
-		Expect(setupPMTUDNFTChain()).To(Succeed())
-		nc.Gateway = &gateway{
-			openflowManager: &openflowManager{
-				defaultBridge: newOpenflowBridge(bridgeconfig.TestDefaultBridgeConfig()),
-				uplinkBridges: map[string]*openflowBridge{},
-			},
-		}
-
-		exited := make(chan string, 1)
-		ownNodeDeletedExit = func(name string) { exited <- name }
-
-		Expect(nc.WatchNodes()).To(Succeed())
-
-		By("deleting another node keeps the controller running")
-		Expect(kubeFakeClient.CoreV1().Nodes().Delete(context.TODO(), remoteNodeName, metav1.DeleteOptions{})).To(Succeed())
-		Consistently(exited).WithTimeout(500 * time.Millisecond).ShouldNot(Receive())
-
-		By("deleting the controller's own node terminates it")
-		Expect(kubeFakeClient.CoreV1().Nodes().Delete(context.TODO(), nodeName, metav1.DeleteOptions{})).To(Succeed())
-		Eventually(exited).WithTimeout(2 * time.Second).Should(Receive(Equal(nodeName)))
-	})
-})
+func boolPtr(b bool) *bool {
+	return &b
+}
