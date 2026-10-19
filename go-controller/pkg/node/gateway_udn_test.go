@@ -326,6 +326,75 @@ func TestUplinkGatewayInterfaceName(t *testing.T) {
 	}
 }
 
+func TestDelMarkChainRemovesOnlyItsServiceMapReferences(t *testing.T) {
+	nft := nodenft.SetFakeNFTablesHelper()
+	targetChain := GetUDNMarkChain("0x1001")
+	otherChain := GetUDNMarkChain("0x1002")
+
+	mapElements := map[string][]*knftables.Element{
+		nftablesUDNMarkNodePortsMap: {
+			{Key: []string{"tcp", "30080"}, Value: []string{"jump " + targetChain}},
+			{Key: []string{"tcp", "30081"}, Value: []string{"jump " + otherChain}},
+		},
+		nftablesUDNMarkExternalIPsV4Map: {
+			{Key: []string{"192.0.2.1", "tcp", "80"}, Value: []string{"jump " + targetChain}},
+			{Key: []string{"192.0.2.2", "tcp", "80"}, Value: []string{"jump " + otherChain}},
+		},
+		nftablesUDNMarkExternalIPsV6Map: {
+			{Key: []string{"2001:db8::1", "tcp", "80"}, Value: []string{"jump " + targetChain}},
+			{Key: []string{"2001:db8::2", "tcp", "80"}, Value: []string{"jump " + otherChain}},
+		},
+	}
+
+	tx := nft.NewTransaction()
+	tx.Add(&knftables.Chain{Name: targetChain})
+	tx.Add(&knftables.Chain{Name: otherChain})
+	for mapName, elements := range mapElements {
+		mapType := "inet_proto . inet_service : verdict"
+		if mapName == nftablesUDNMarkExternalIPsV4Map {
+			mapType = "ipv4_addr . inet_proto . inet_service : verdict"
+		} else if mapName == nftablesUDNMarkExternalIPsV6Map {
+			mapType = "ipv6_addr . inet_proto . inet_service : verdict"
+		}
+		tx.Add(&knftables.Map{Name: mapName, Type: mapType})
+		for _, element := range elements {
+			element.Map = mapName
+			tx.Add(element)
+		}
+	}
+	if err := nft.Run(context.Background(), tx); err != nil {
+		t.Fatalf("failed to set up fake nftables state: %v", err)
+	}
+
+	udng := &UserDefinedNetworkGateway{pktMark: 0x1001}
+	if err := udng.delMarkChain(); err != nil {
+		t.Fatalf("delMarkChain failed: %v", err)
+	}
+
+	for mapName := range mapElements {
+		elements, err := nft.ListElements(context.Background(), "map", mapName)
+		if err != nil {
+			t.Fatalf("failed to list map %s: %v", mapName, err)
+		}
+		if len(elements) != 1 || elements[0].Value[0] != "jump "+otherChain {
+			t.Errorf("expected map %s to retain only the entry for %s, got %#v", mapName, otherChain, elements)
+		}
+	}
+
+	chains, err := nft.List(context.Background(), "chain")
+	if err != nil {
+		t.Fatalf("failed to list chains: %v", err)
+	}
+	hasTarget, hasOther := false, false
+	for _, chain := range chains {
+		hasTarget = hasTarget || chain == targetChain
+		hasOther = hasOther || chain == otherChain
+	}
+	if hasTarget || !hasOther {
+		t.Errorf("expected %s to be deleted and %s to remain; chains are %v", targetChain, otherChain, chains)
+	}
+}
+
 func TestConfigureUplinkStaticFDBEntry(t *testing.T) {
 	tests := []struct {
 		name        string
