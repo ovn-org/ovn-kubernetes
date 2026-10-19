@@ -50,6 +50,7 @@ jobs:
         with:
           go-version-file: dpu-simulator/go.mod
           cache: true
+          cache-dependency-path: "**/*.sum"
 
       - name: Install libvirt development headers
         run: sudo apt-get update && sudo apt-get install -y libvirt-dev
@@ -161,6 +162,7 @@ jobs:
         with:
           go-version-file: dpu-simulator/go.mod
           cache: true
+          cache-dependency-path: "**/*.sum"
 
       - name: Install libvirt development headers
         run: sudo apt-get update && sudo apt-get install -y libvirt-dev
