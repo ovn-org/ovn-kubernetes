@@ -138,7 +138,7 @@ jobs:
       uses: actions/setup-go@v6
       with:
         go-version-file: 'go-controller/go.mod'
-        cache: false
+        cache-dependency-path: "**/*.sum"
       id: go
 
     - name: Set up environment
@@ -470,7 +470,7 @@ jobs:
       uses: actions/setup-go@v6
       with:
         go-version-file: 'go-controller/go.mod'
-        cache: false
+        cache-dependency-path: "**/*.sum"
       id: go
 
     - name: Build
