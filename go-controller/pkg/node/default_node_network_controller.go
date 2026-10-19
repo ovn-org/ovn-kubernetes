@@ -1354,7 +1354,7 @@ func (nc *DefaultNodeNetworkController) reconcileConntrackUponEndpointSliceEvent
 			_, exists := nc.udpServiceZeroState.Load(stateKey)
 			wasZero := !exists
 
-			currentEligibleCount := countUDPEligibleEndpointsForPort(matchingSlices, svc, svcPort.Port)
+			currentEligibleCount := countUDPEligibleEndpointsForPort(matchingSlices, svcPort)
 			isNowZero := currentEligibleCount == 0
 
 			shouldFlush := wasZero && !isNowZero
@@ -1498,7 +1498,7 @@ func (nc *DefaultNodeNetworkController) syncEndpointSlices(objs []interface{}) e
 			}
 
 			portKey := fmt.Sprintf("%s/%d", key, svcPort.Port)
-			eligibleCount := countUDPEligibleEndpointsForPort(slices, svc, svcPort.Port)
+			eligibleCount := countUDPEligibleEndpointsForPort(slices, svcPort)
 			isZero := eligibleCount == 0
 			if !isZero {
 				nc.udpServiceZeroState.Store(portKey, struct{}{})
@@ -1516,16 +1516,23 @@ func (nc *DefaultNodeNetworkController) syncEndpointSlices(objs []interface{}) e
 // countUDPEligibleEndpointsForPort returns the count of ready endpoints for a specific UDP port
 // across all endpoint slices. This allows per-port 0→N transition detection.
 //
+// Matches EndpointSlice ports by name and protocol, not by port number. The EndpointSlice port
+// is the resolved targetPort, which can differ from the Service port. For example, a Service
+// with port: 53 and targetPort: 5353 has EndpointSlice ports with value 5353.
+//
 // Example: Service has UDP:53 and UDP:5353. Port 53 already has endpoints, port 5353 is empty.
 // When first endpoint arrives for port 5353, we detect port 5353's 0→N transition independently.
-func countUDPEligibleEndpointsForPort(slices []*discovery.EndpointSlice, _ *corev1.Service, port int32) int {
+func countUDPEligibleEndpointsForPort(slices []*discovery.EndpointSlice, svcPort corev1.ServicePort) int {
 	count := 0
 	for _, slice := range slices {
-		// Find matching port in the slice
+		// Find matching port in the slice by name and protocol
 		hasMatchingPort := false
 		for _, slicePort := range slice.Ports {
-			if slicePort.Protocol != nil && *slicePort.Protocol == corev1.ProtocolUDP &&
-				slicePort.Port != nil && *slicePort.Port == port {
+			name := ""
+			if slicePort.Name != nil {
+				name = *slicePort.Name
+			}
+			if slicePort.Protocol != nil && *slicePort.Protocol == corev1.ProtocolUDP && name == svcPort.Name {
 				hasMatchingPort = true
 				break
 			}

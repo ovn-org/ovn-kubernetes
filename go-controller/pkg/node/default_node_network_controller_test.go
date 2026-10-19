@@ -2683,8 +2683,8 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2002:db8:1::4 }
 					Type:      corev1.ServiceTypeClusterIP,
 					ClusterIP: "10.96.0.1",
 					Ports: []corev1.ServicePort{
-						{Port: port53, Protocol: udpProtocol},
-						{Port: port5353, Protocol: udpProtocol},
+						{Name: "dns", Port: port53, Protocol: udpProtocol},
+						{Name: "mdns", Port: port5353, Protocol: udpProtocol},
 					},
 				},
 			}
@@ -2700,7 +2700,7 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2002:db8:1::4 }
 				},
 				AddressType: discovery.AddressTypeIPv4,
 				Ports: []discovery.EndpointPort{
-					{Port: &port53, Protocol: &udpProtocol},
+					{Name: strPtr("dns"), Port: &port53, Protocol: &udpProtocol},
 				},
 				Endpoints: []discovery.Endpoint{
 					{
@@ -2723,7 +2723,7 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2002:db8:1::4 }
 				},
 				AddressType: discovery.AddressTypeIPv4,
 				Ports: []discovery.EndpointPort{
-					{Port: &port5353, Protocol: &udpProtocol},
+					{Name: strPtr("mdns"), Port: &port5353, Protocol: &udpProtocol},
 				},
 				Endpoints: []discovery.Endpoint{
 					{
@@ -2793,6 +2793,103 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2002:db8:1::4 }
 
 			_, existsPort5353After := nc.udpServiceZeroState.Load(stateKeyPort5353)
 			Expect(existsPort5353After).To(BeTrue(), "port 5353 should have non-zero state after transition")
+		})
+
+		It("should count endpoints correctly when Service port differs from targetPort", func() {
+			servicePort := int32(53)
+			targetPort := int32(5353)
+			svc := &corev1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      testServiceName,
+					Namespace: testNamespace,
+				},
+				Spec: corev1.ServiceSpec{
+					Type:      corev1.ServiceTypeClusterIP,
+					ClusterIP: "10.96.0.1",
+					Ports: []corev1.ServicePort{
+						{Name: "dns", Port: servicePort, TargetPort: intstr.FromInt32(targetPort), Protocol: udpProtocol},
+					},
+				},
+			}
+
+			// EndpointSlice contains the resolved targetPort (5353), not the Service port (53)
+			slice := &discovery.EndpointSlice{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "slice-1",
+					Namespace: testNamespace,
+					UID:       "uid-1",
+					Labels: map[string]string{
+						discovery.LabelServiceName: testServiceName,
+					},
+				},
+				AddressType: discovery.AddressTypeIPv4,
+				Ports: []discovery.EndpointPort{
+					{Name: strPtr("dns"), Port: &targetPort, Protocol: &udpProtocol},
+				},
+				Endpoints: []discovery.Endpoint{
+					{
+						Addresses: []string{"10.0.0.1"},
+						Conditions: discovery.EndpointConditions{
+							Ready: boolPtr(true),
+						},
+					},
+				},
+			}
+
+			fakeClient := fake.NewSimpleClientset(svc)
+			wf, err := factory.NewNodeWatchFactory(&util.OVNNodeClientset{
+				KubeClient: fakeClient,
+			}, testNodeName)
+			Expect(err).NotTo(HaveOccurred())
+			defer wf.Shutdown()
+
+			nc := &DefaultNodeNetworkController{
+				BaseNodeNetworkController: BaseNodeNetworkController{
+					CommonNodeNetworkControllerInfo: CommonNodeNetworkControllerInfo{
+						name:         testNodeName,
+						watchFactory: wf,
+					},
+					ReconcilableNetInfo: &util.DefaultNetInfo{},
+				},
+			}
+
+			err = wf.Start()
+			Expect(err).NotTo(HaveOccurred())
+
+			// State key uses Service port, not targetPort
+			stateKey := fmt.Sprintf("%s/%s/%s/%d", testNamespace, testServiceName, discovery.AddressTypeIPv4, servicePort)
+
+			// Initially no endpoints
+			err = nc.syncEndpointSlices([]interface{}{})
+			Expect(err).NotTo(HaveOccurred())
+
+			_, exists := nc.udpServiceZeroState.Load(stateKey)
+			Expect(exists).To(BeFalse(), "should start with zero state (no endpoints)")
+
+			// Add endpoint with targetPort 5353
+			_, err = fakeClient.DiscoveryV1().EndpointSlices(testNamespace).Create(
+				context.Background(), slice, metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+
+			mockNetLinkOps := new(utilMocks.NetLinkOps)
+			util.SetNetLinkOpMockInst(mockNetLinkOps)
+			defer util.ResetNetLinkOpMockInst()
+
+			mockNetLinkOps.On("ConntrackDeleteFilters",
+				mock.AnythingOfType("netlink.ConntrackTableType"),
+				mock.AnythingOfType("netlink.InetFamily"),
+				mock.AnythingOfType("*netlink.ConntrackFilter")).
+				Return(uint(1), nil)
+
+			// This should trigger 0→N transition even though EndpointSlice port (5353) != Service port (53)
+			err = nc.reconcileConntrackUponEndpointSliceEvents(nil, slice)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Should flush conntrack for the SERVICE port (53), not the targetPort (5353)
+			mockNetLinkOps.AssertNumberOfCalls(GinkgoT(), "ConntrackDeleteFilters", 1)
+
+			_, existsAfter := nc.udpServiceZeroState.Load(stateKey)
+			Expect(existsAfter).To(BeTrue(), "should have non-zero state after adding endpoint")
 		})
 
 		It("should detect 0→N transition in 1→0→1 endpoint sequence", func() {
