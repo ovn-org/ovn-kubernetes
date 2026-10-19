@@ -1239,7 +1239,7 @@ func (nc *DefaultNodeNetworkController) reconcileConntrackUponEndpointSliceEvent
 			// Delete all per-port state for this service (all address families and ports)
 			prefix := fmt.Sprintf("%s/%s/", namespacedName.Namespace, namespacedName.Name)
 			deletedCount := 0
-			nc.udpServiceZeroState.Range(func(key, value interface{}) bool {
+			nc.udpServiceZeroState.Range(func(key, _ interface{}) bool {
 				keyStr, ok := key.(string)
 				if ok && strings.HasPrefix(keyStr, prefix) {
 					nc.udpServiceZeroState.Delete(key)
@@ -1264,114 +1264,126 @@ func (nc *DefaultNodeNetworkController) reconcileConntrackUponEndpointSliceEvent
 		return utilerrors.Join(errors...)
 	}
 
-	allSlices, err := nc.watchFactory.GetServiceEndpointSlices(namespacedName.Namespace, namespacedName.Name, nc.GetNetworkName())
-	if err != nil && !apierrors.IsNotFound(err) {
-		return fmt.Errorf("failed to get endpoint slices for service %s/%s: %w",
-			namespacedName.Namespace, namespacedName.Name, err)
+	// Skip zero-state work for services without UDP ports to avoid unnecessary
+	// list/filter/count operations serialized by the controller-wide mutex.
+	hasUDPPort := false
+	for _, p := range svc.Spec.Ports {
+		if p.Protocol == corev1.ProtocolUDP {
+			hasUDPPort = true
+			break
+		}
 	}
 
-	var matchingSlices []*discovery.EndpointSlice
-	for _, slice := range allSlices {
-		if slice.AddressType == addressType {
-			// For delete events (newEndpointSlice == nil), exclude the deleted slice from the count
-			if newEndpointSlice == nil && oldEndpointSlice != nil && slice.UID == oldEndpointSlice.UID {
+	if hasUDPPort {
+		allSlices, err := nc.watchFactory.GetServiceEndpointSlices(namespacedName.Namespace, namespacedName.Name, nc.GetNetworkName())
+		if err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("failed to get endpoint slices for service %s/%s: %w",
+				namespacedName.Namespace, namespacedName.Name, err)
+		}
+
+		var matchingSlices []*discovery.EndpointSlice
+		for _, slice := range allSlices {
+			if slice.AddressType == addressType {
+				// For delete events (newEndpointSlice == nil), exclude the deleted slice from the count
+				if newEndpointSlice == nil && oldEndpointSlice != nil && slice.UID == oldEndpointSlice.UID {
+					continue
+				}
+				matchingSlices = append(matchingSlices, slice)
+			}
+		}
+
+		// If newEndpointSlice is provided and matches the address type, ensure it's in matchingSlices.
+		// This handles the case where the event arrives before the informer cache is updated.
+		if newEndpointSlice != nil && newEndpointSlice.AddressType == addressType {
+			found := false
+			for _, slice := range matchingSlices {
+				if slice.UID == newEndpointSlice.UID {
+					found = true
+					break
+				}
+			}
+			if !found {
+				matchingSlices = append(matchingSlices, newEndpointSlice)
+			}
+		}
+
+		// Track per-port to detect 0→N transitions for each UDP port independently.
+		// A service with multiple UDP ports (e.g., DNS on 53 and 5353) can have one port
+		// transition from 0→N while another already has endpoints.
+		type portState struct {
+			port          int32
+			stateKey      string
+			wasZero       bool
+			isNowZero     bool
+			eligibleCount int
+			shouldFlush   bool
+		}
+
+		var portStates []portState
+		for _, svcPort := range svc.Spec.Ports {
+			if svcPort.Protocol != corev1.ProtocolUDP {
 				continue
 			}
-			matchingSlices = append(matchingSlices, slice)
-		}
-	}
 
-	// If newEndpointSlice is provided and matches the address type, ensure it's in matchingSlices.
-	// This handles the case where the event arrives before the informer cache is updated.
-	if newEndpointSlice != nil && newEndpointSlice.AddressType == addressType {
-		found := false
-		for _, slice := range matchingSlices {
-			if slice.UID == newEndpointSlice.UID {
-				found = true
-				break
+			stateKey := fmt.Sprintf("%s/%s/%s/%d", namespacedName.Namespace, namespacedName.Name, addressType, svcPort.Port)
+
+			nc.udpServiceZeroStateMu.Lock()
+			_, exists := nc.udpServiceZeroState.Load(stateKey)
+			wasZero := !exists
+
+			currentEligibleCount := countUDPEligibleEndpointsForPort(matchingSlices, svc, svcPort.Port)
+			isNowZero := currentEligibleCount == 0
+
+			shouldFlush := wasZero && !isNowZero
+
+			if shouldFlush {
+				klog.V(5).Infof("Detected 0→N transition for service %s port %d (wasZero=%v, currentCount=%d), will flush conntrack",
+					stateKey, svcPort.Port, wasZero, currentEligibleCount)
+			}
+			nc.udpServiceZeroStateMu.Unlock()
+
+			portStates = append(portStates, portState{
+				port:          svcPort.Port,
+				stateKey:      stateKey,
+				wasZero:       wasZero,
+				isNowZero:     isNowZero,
+				eligibleCount: currentEligibleCount,
+				shouldFlush:   shouldFlush,
+			})
+		}
+
+		// Flush conntrack for ports that transitioned 0→N
+		var portsToFlush []int32
+		for _, ps := range portStates {
+			if ps.shouldFlush {
+				portsToFlush = append(portsToFlush, ps.port)
 			}
 		}
-		if !found {
-			matchingSlices = append(matchingSlices, newEndpointSlice)
-		}
-	}
 
-	// Track per-port to detect 0→N transitions for each UDP port independently.
-	// A service with multiple UDP ports (e.g., DNS on 53 and 5353) can have one port
-	// transition from 0→N while another already has endpoints.
-	type portState struct {
-		port          int32
-		stateKey      string
-		wasZero       bool
-		isNowZero     bool
-		eligibleCount int
-		shouldFlush   bool
-	}
-
-	var portStates []portState
-	for _, svcPort := range svc.Spec.Ports {
-		if svcPort.Protocol != corev1.ProtocolUDP {
-			continue
+		var flushErr error
+		if len(portsToFlush) > 0 {
+			flushErr = nc.flushConntrackForServicePorts(svc, addressType, portsToFlush)
+			if flushErr != nil {
+				errors = append(errors, flushErr)
+			}
 		}
 
-		stateKey := fmt.Sprintf("%s/%s/%s/%d", namespacedName.Namespace, namespacedName.Name, addressType, svcPort.Port)
-
-		nc.udpServiceZeroStateMu.Lock()
-		_, exists := nc.udpServiceZeroState.Load(stateKey)
-		wasZero := !exists
-
-		currentEligibleCount := countUDPEligibleEndpointsForPort(matchingSlices, svc, svcPort.Port)
-		isNowZero := currentEligibleCount == 0
-
-		shouldFlush := wasZero && !isNowZero
-
-		if shouldFlush {
-			klog.V(5).Infof("Detected 0→N transition for service %s port %d (wasZero=%v, currentCount=%d), will flush conntrack",
-				stateKey, svcPort.Port, wasZero, currentEligibleCount)
-		}
-		nc.udpServiceZeroStateMu.Unlock()
-
-		portStates = append(portStates, portState{
-			port:          svcPort.Port,
-			stateKey:      stateKey,
-			wasZero:       wasZero,
-			isNowZero:     isNowZero,
-			eligibleCount: currentEligibleCount,
-			shouldFlush:   shouldFlush,
-		})
-	}
-
-	// Flush conntrack for ports that transitioned 0→N
-	var portsToFlush []int32
-	for _, ps := range portStates {
-		if ps.shouldFlush {
-			portsToFlush = append(portsToFlush, ps.port)
-		}
-	}
-
-	var flushErr error
-	if len(portsToFlush) > 0 {
-		flushErr = nc.flushConntrackForServicePorts(svc, addressType, portsToFlush)
-		if flushErr != nil {
-			errors = append(errors, flushErr)
-		}
-	}
-
-	// Update state only after successful flush or for non-flush transitions
-	for _, ps := range portStates {
-		nc.udpServiceZeroStateMu.Lock()
-		if ps.shouldFlush && flushErr != nil {
-			klog.V(5).Infof("Preserving zero-state for %s due to flush failure", ps.stateKey)
-		} else {
-			if ps.isNowZero {
-				nc.udpServiceZeroState.Delete(ps.stateKey)
+		// Update state only after successful flush or for non-flush transitions
+		for _, ps := range portStates {
+			nc.udpServiceZeroStateMu.Lock()
+			if ps.shouldFlush && flushErr != nil {
+				klog.V(5).Infof("Preserving zero-state for %s due to flush failure", ps.stateKey)
 			} else {
-				nc.udpServiceZeroState.Store(ps.stateKey, struct{}{})
+				if ps.isNowZero {
+					nc.udpServiceZeroState.Delete(ps.stateKey)
+				} else {
+					nc.udpServiceZeroState.Store(ps.stateKey, struct{}{})
+				}
+				klog.V(5).Infof("Updated zero-state for %s: %v (eligible endpoints: %d)",
+					ps.stateKey, ps.isNowZero, ps.eligibleCount)
 			}
-			klog.V(5).Infof("Updated zero-state for %s: %v (eligible endpoints: %d)",
-				ps.stateKey, ps.isNowZero, ps.eligibleCount)
+			nc.udpServiceZeroStateMu.Unlock()
 		}
-		nc.udpServiceZeroStateMu.Unlock()
 	}
 
 	if oldEndpointSlice == nil {
@@ -1485,7 +1497,7 @@ func (nc *DefaultNodeNetworkController) syncEndpointSlices(objs []interface{}) e
 //
 // Example: Service has UDP:53 and UDP:5353. Port 53 already has endpoints, port 5353 is empty.
 // When first endpoint arrives for port 5353, we detect port 5353's 0→N transition independently.
-func countUDPEligibleEndpointsForPort(slices []*discovery.EndpointSlice, svc *corev1.Service, port int32) int {
+func countUDPEligibleEndpointsForPort(slices []*discovery.EndpointSlice, _ *corev1.Service, port int32) int {
 	count := 0
 	for _, slice := range slices {
 		// Find matching port in the slice
