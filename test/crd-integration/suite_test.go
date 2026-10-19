@@ -25,6 +25,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/rest"
@@ -53,6 +54,7 @@ var _ = BeforeSuite(func() {
 	// Register every CRD's types the suite exercises.  Add new CRDs here.
 	scheme := k8sruntime.NewScheme()
 	utilruntime.Must(adminpolicybasedroutev1.AddToScheme(scheme))
+	utilruntime.Must(apiextensionsv1.AddToScheme(scheme))
 	utilruntime.Must(egressfirewallv1.AddToScheme(scheme))
 	utilruntime.Must(egressipv1.AddToScheme(scheme))
 	utilruntime.Must(uplinkv1alpha1.AddToScheme(scheme))
