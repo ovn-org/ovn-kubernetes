@@ -23,6 +23,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8stypes "k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/sets"
 	coreinformers "k8s.io/client-go/informers/core/v1"
 	listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
@@ -1174,7 +1175,30 @@ func (udng *UserDefinedNetworkGateway) addUDNManagementPortIPs(mpLink netlink.Li
 	klog.V(5).Infof("Add management port IPs on interface %s for network %s subnets %+v",
 		mpLink.Attrs().Name, udng.GetNetworkName(), networkLocalSubnets)
 
-	// extract management port IP from subnets and add it to link
+	// The interface survives node-agent restarts, while the node's subnet
+	// allocation may change. Retaining an old address also retains a connected
+	// route that can shadow the BGP route to the subnet's new owner.
+	desiredAddresses := sets.New[string]()
+	for _, subnet := range networkLocalSubnets {
+		if config.IPv6Mode && utilnet.IsIPv6CIDR(subnet) || config.IPv4Mode && utilnet.IsIPv4CIDR(subnet) {
+			desiredAddresses.Insert(udng.GetNodeManagementIP(subnet).String())
+		}
+	}
+	existingAddresses, err := util.GetNetLinkOps().AddrList(mpLink, netlink.FAMILY_ALL)
+	if err != nil {
+		return fmt.Errorf("failed to list management port addresses on %s for network %s: %w", mpLink.Attrs().Name, udng.GetNetworkName(), err)
+	}
+	for _, address := range existingAddresses {
+		if utilnet.IsIPv6(address.IP) && address.IP.IsLinkLocalUnicast() || desiredAddresses.Has(address.IPNet.String()) {
+			continue
+		}
+		if err := util.GetNetLinkOps().AddrDel(mpLink, &address); err != nil && !errors.Is(err, unix.EADDRNOTAVAIL) {
+			return fmt.Errorf("failed to delete stale management port address %s on %s for network %s: %w", address.IPNet, mpLink.Attrs().Name, udng.GetNetworkName(), err)
+		}
+	}
+
+	// Re-read desired addresses after deletion: removing an IPv4 primary can
+	// also remove a desired secondary address in the same subnet.
 	for _, subnet := range networkLocalSubnets {
 		if config.IPv6Mode && utilnet.IsIPv6CIDR(subnet) || config.IPv4Mode && utilnet.IsIPv4CIDR(subnet) {
 			ip := udng.GetNodeManagementIP(subnet)
@@ -1189,14 +1213,6 @@ func (udng *UserDefinedNetworkGateway) addUDNManagementPortIPs(mpLink netlink.Li
 			if err != nil {
 				return fmt.Errorf("failed to find management port IP from subnet %s on netdevice %s for network %s, err: %v",
 					subnet, mpLink.Attrs().Name, udng.GetNetworkName(), err)
-			}
-			if existingIP != nil && existingIP.String() != ip.String() {
-				err = util.LinkAddrDel(mpLink, existingIP)
-				if err != nil {
-					return fmt.Errorf("failed to delete stale management port IP %s from netdevice %s for network %s, err: %v",
-						existingIP, mpLink.Attrs().Name, udng.GetNetworkName(), err)
-				}
-				existingIP = nil
 			}
 			if existingIP == nil {
 				err = util.LinkAddrAdd(mpLink, ip, addrFlags, 0, 0)
