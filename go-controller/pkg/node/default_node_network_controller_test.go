@@ -3444,6 +3444,94 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2002:db8:1::4 }
 	})
 })
 
+var _ = Describe("Node object deletion", func() {
+	const (
+		nodeName       = "my-node"
+		remoteNodeName = "other-node"
+		nodeIP         = "169.254.254.60"
+		remoteNodeIP   = "169.254.254.61"
+	)
+
+	var (
+		stop     chan struct{}
+		wg       *sync.WaitGroup
+		wf       *factory.WatchFactory
+		origExit func(string)
+	)
+
+	BeforeEach(func() {
+		origExit = ownNodeDeletedExit
+		Expect(config.PrepareTestConfig()).To(Succeed())
+		config.IPv4Mode = true
+		config.IPv6Mode = false
+		// The exit is specific to DPU mode: the process does not run on the
+		// deleted node, so nothing else terminates it.
+		config.OvnKubeNode.Mode = types.NodeModeDPU
+		stop = make(chan struct{})
+		wg = &sync.WaitGroup{}
+	})
+
+	AfterEach(func() {
+		close(stop)
+		wg.Wait()
+		if wf != nil {
+			wf.Shutdown()
+		}
+		ownNodeDeletedExit = origExit
+	})
+
+	newNode := func(name, ip string) corev1.Node {
+		return corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{Name: name},
+			Status: corev1.NodeStatus{
+				Addresses: []corev1.NodeAddress{{Type: corev1.NodeInternalIP, Address: ip}},
+			},
+		}
+	}
+
+	It("exits only when the Node object the controller runs on behalf of is deleted", func() {
+		nodenft.SetFakeNFTablesHelper()
+		kubeFakeClient := fake.NewSimpleClientset(&corev1.NodeList{
+			Items: []corev1.Node{newNode(nodeName, nodeIP), newNode(remoteNodeName, remoteNodeIP)},
+		})
+		fakeClient := &util.OVNNodeClientset{
+			KubeClient:             kubeFakeClient,
+			AdminPolicyRouteClient: adminpolicybasedrouteclient.NewSimpleClientset(),
+			NetworkAttchDefClient:  nadfake.NewSimpleClientset(),
+		}
+		var err error
+		wf, err = factory.NewNodeWatchFactory(fakeClient, nodeName)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(wf.Start()).To(Succeed())
+
+		routeManager := routemanager.NewController()
+		cnnci := NewCommonNodeNetworkControllerInfo(kubeFakeClient, fakeClient.AdminPolicyRouteClient, wf, nil, nodeName, routeManager)
+		nc := newDefaultNodeNetworkController(cnnci, stop, wg, routeManager, nil, nil)
+		nc.initRetryFrameworkForNode()
+		Expect(setupRemoteNodeNFTSets()).To(Succeed())
+		Expect(setupPMTUDNFTChain()).To(Succeed())
+		nc.Gateway = &gateway{
+			openflowManager: &openflowManager{
+				defaultBridge: newOpenflowBridge(bridgeconfig.TestDefaultBridgeConfig()),
+				uplinkBridges: map[string]*openflowBridge{},
+			},
+		}
+
+		exited := make(chan string, 1)
+		ownNodeDeletedExit = func(name string) { exited <- name }
+
+		Expect(nc.WatchNodes()).To(Succeed())
+
+		By("deleting another node keeps the controller running")
+		Expect(kubeFakeClient.CoreV1().Nodes().Delete(context.TODO(), remoteNodeName, metav1.DeleteOptions{})).To(Succeed())
+		Consistently(exited).WithTimeout(500 * time.Millisecond).ShouldNot(Receive())
+
+		By("deleting the controller's own node terminates it")
+		Expect(kubeFakeClient.CoreV1().Nodes().Delete(context.TODO(), nodeName, metav1.DeleteOptions{})).To(Succeed())
+		Eventually(exited).WithTimeout(2 * time.Second).Should(Receive(Equal(nodeName)))
+	})
+})
+
 // Helper function to create string pointer
 func strPtr(s string) *string {
 	return &s

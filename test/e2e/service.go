@@ -1156,12 +1156,6 @@ ginkgo.It("should flush kernel conntrack when UDP service transitions from 0 to 
 })
 
 ginkgo.It("should listen on each host addresses", func() {
-	endPoints := make([]*v1.Pod, 0)
-	endpointsSelector := map[string]string{"servicebackend": "true"}
-	nodesHostnames := sets.New[string]()
-
-
-		ginkgo.It("should listen on each host addresses", func() {
 			endPoints := make([]*v1.Pod, 0)
 			endpointsSelector := map[string]string{"servicebackend": "true"}
 			nodesHostnames := sets.New[string]()
