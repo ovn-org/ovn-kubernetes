@@ -2901,7 +2901,7 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2002:db8:1::4 }
 			err = nc.reconcileConntrackUponEndpointSliceEvents(nil, slice2)
 			Expect(err).NotTo(HaveOccurred())
 
-			mockNetLinkOps.AssertNumberOfCalls(GinkgoT(), "ConntrackDeleteFilters", 1)
+			mockNetLinkOps.AssertNumberOfCalls(GinkgoT(), "ConntrackDeleteFilters", 2)
 
 			_, exists = nc.udpServiceZeroState.Load(stateKey)
 			Expect(exists).To(BeTrue(), "state should be non-zero after adding new endpoint")

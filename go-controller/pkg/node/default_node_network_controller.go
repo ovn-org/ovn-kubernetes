@@ -1273,7 +1273,26 @@ func (nc *DefaultNodeNetworkController) reconcileConntrackUponEndpointSliceEvent
 	var matchingSlices []*discovery.EndpointSlice
 	for _, slice := range allSlices {
 		if slice.AddressType == addressType {
+			// For delete events (newEndpointSlice == nil), exclude the deleted slice from the count
+			if newEndpointSlice == nil && oldEndpointSlice != nil && slice.UID == oldEndpointSlice.UID {
+				continue
+			}
 			matchingSlices = append(matchingSlices, slice)
+		}
+	}
+
+	// If newEndpointSlice is provided and matches the address type, ensure it's in matchingSlices.
+	// This handles the case where the event arrives before the informer cache is updated.
+	if newEndpointSlice != nil && newEndpointSlice.AddressType == addressType {
+		found := false
+		for _, slice := range matchingSlices {
+			if slice.UID == newEndpointSlice.UID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			matchingSlices = append(matchingSlices, newEndpointSlice)
 		}
 	}
 
