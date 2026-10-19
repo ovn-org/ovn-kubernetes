@@ -80,7 +80,7 @@ data:
     frr-namespace = {{ .Values.global.managedBGPFRRNamespace | default "frr-k8s-system" }}
 {{- end }}
 {{- end }}
-{{- if or (hasKey .Values.global "routingTableIDStart") (hasKey .Values.global "kubeletCgroupPath") }}
+{{- if or (hasKey .Values.global "routingTableIDStart") (hasKey .Values.global "kubeletCgroupPath") (hasKey .Values.global "startupReadinessTimeout") }}
 
     [ovnkubenode]
 {{- if hasKey .Values.global "routingTableIDStart" }}
@@ -88,6 +88,9 @@ data:
 {{- end }}
 {{- if hasKey .Values.global "kubeletCgroupPath" }}
     kubelet-cgroup-path = {{ .Values.global.kubeletCgroupPath }}
+{{- end }}
+{{- if hasKey .Values.global "startupReadinessTimeout" }}
+    startup-readiness-timeout = {{ .Values.global.startupReadinessTimeout }}
 {{- end }}
 {{- end }}
 

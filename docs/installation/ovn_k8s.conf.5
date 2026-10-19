@@ -141,6 +141,13 @@ If unset, the kubelet.service cgroup is looked up under /sys/fs/cgroup, which
 requires kubelet to be managed by systemd. When neither is available, kubelet
 probes to primary UDN pods are not allowed and the node reports a
 UDNKubeletProbesNotSupported event.
+.TP
+\fBstartup-readiness-timeout\fR=
+Optional time in seconds that ovnkube-node waits at startup for its gateway and
+management port to be created in OVN before it gives up and exits. The default
+is 300. Values of 0 or less are rejected. It may need increasing on clusters
+with many user-defined networks or network policies, where ovnkube-controller
+syncs all of them before it creates the node's gateway and management port.
 
 .SH [Gateway]
 .TP

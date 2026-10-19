@@ -952,7 +952,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) (err error) {
 	}
 
 	// Wait for management port and gateway resources to be created by the master
-	klog.Infof("Waiting for gateway and management port readiness...")
+	klog.Infof("Waiting up to %v for gateway and management port readiness...", waiter.timeout)
 	start := time.Now()
 	if err := waiter.Wait(); err != nil {
 		return err
@@ -977,7 +977,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) (err error) {
 	if err != nil {
 		return fmt.Errorf("failed to start gateway: %w", err)
 	}
-	klog.Infof("Gateway and management port readiness took %v", time.Since(start))
+	klog.Infof("Gateway and management port readiness took %v (timeout %v)", time.Since(start), waiter.timeout)
 
 	// Note(adrianc): DPU deployments are expected to support the new shared gateway changes, upgrade flow
 	// is not needed. Future upgrade flows will need to take DPUs into account.

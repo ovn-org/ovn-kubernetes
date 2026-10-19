@@ -254,6 +254,7 @@ var (
 		DPUNodeLeaseRenewInterval: 10,
 		DPUNodeLeaseDuration:      40,
 		RoutingTableIDStart:       DefaultRoutingTableIDStart,
+		StartupReadinessTimeout:   300,
 	}
 
 	ClusterManager = ClusterManagerConfig{
@@ -718,6 +719,11 @@ type OvnKubeNodeConfig struct {
 	// KubeletCgroupPath is the cgroup v2 path kubelet runs under, relative to
 	// /sys/fs/cgroup. When empty, the kubelet.service cgroup is looked up instead.
 	KubeletCgroupPath string `gcfg:"kubelet-cgroup-path"`
+	// StartupReadinessTimeout is how long, in seconds, ovnkube-node waits at startup for its
+	// gateway and management port to be created in OVN. It may need increasing on clusters with
+	// many user-defined networks or network policies, where ovnkube-controller syncs all of them
+	// before it creates this node's gateway and management port.
+	StartupReadinessTimeout int `gcfg:"startup-readiness-timeout"`
 }
 
 // ClusterManagerConfig holds configuration for ovnkube-cluster-manager
@@ -1915,6 +1921,14 @@ var OvnKubeNodeFlags = []cli.Flag{
 			MinimumRoutingTableIDStart, MaximumRoutingTableIDStart),
 		Value:       OvnKubeNode.RoutingTableIDStart,
 		Destination: &cliConfig.OvnKubeNode.RoutingTableIDStart,
+	},
+	&cli.IntFlag{
+		Name: "startup-readiness-timeout",
+		Usage: "Time in seconds ovnkube-node waits at startup for its gateway and management port " +
+			"to be created in OVN, may be useful to increase for clusters with many user-defined " +
+			"networks or network policies.",
+		Value:       OvnKubeNode.StartupReadinessTimeout,
+		Destination: &cliConfig.OvnKubeNode.StartupReadinessTimeout,
 	},
 }
 
@@ -3215,6 +3229,9 @@ func buildOvnKubeNodeConfig(cli, file *config) error {
 	if OvnKubeNode.RoutingTableIDStart > MaximumRoutingTableIDStart {
 		return fmt.Errorf("invalid routing-table-id-start '%d'. must be <= %d",
 			OvnKubeNode.RoutingTableIDStart, MaximumRoutingTableIDStart)
+	}
+	if OvnKubeNode.StartupReadinessTimeout <= 0 {
+		return fmt.Errorf("invalid startup-readiness-timeout '%d'. must be > 0", OvnKubeNode.StartupReadinessTimeout)
 	}
 
 	// Warn the user if both MgmtPortNetdev and MgmtPortDPResourceName are specified since they

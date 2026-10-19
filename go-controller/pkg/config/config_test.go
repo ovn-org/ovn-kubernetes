@@ -397,6 +397,7 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(OvnKubeNode.MgmtPortNetdev).To(gomega.Equal(""))
 			gomega.Expect(OvnKubeNode.MgmtPortDPResourceName).To(gomega.Equal(""))
 			gomega.Expect(OvnKubeNode.RoutingTableIDStart).To(gomega.Equal(DefaultRoutingTableIDStart))
+			gomega.Expect(OvnKubeNode.StartupReadinessTimeout).To(gomega.Equal(300))
 			gomega.Expect(Gateway.RouterSubnet).To(gomega.Equal(""))
 			gomega.Expect(Gateway.SingleNode).To(gomega.BeFalse())
 			gomega.Expect(Gateway.DisableForwarding).To(gomega.BeFalse())
@@ -479,6 +480,60 @@ routing-table-id-start=2002
 			app.Name,
 			"--config-file=" + cfgFile.Name(),
 			"--ovnkube-node-routing-table-id-start=2003",
+		})
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	})
+
+	It("parses startup readiness timeout from config file", func() {
+		err := os.WriteFile(cfgFile.Name(), []byte(`[ovnkubenode]
+startup-readiness-timeout=600
+`), 0o644)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+		app.Action = func(ctx *cli.Context) error {
+			_, err := InitConfig(ctx, kexec.New(), nil)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(OvnKubeNode.StartupReadinessTimeout).To(gomega.Equal(600))
+			return nil
+		}
+
+		err = app.Run([]string{app.Name, "-config-file=" + cfgFile.Name()})
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	})
+
+	It("parses startup readiness timeout from CLI", func() {
+		app.Action = func(ctx *cli.Context) error {
+			_, err := InitConfig(ctx, kexec.New(), nil)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(OvnKubeNode.StartupReadinessTimeout).To(gomega.Equal(900))
+			return nil
+		}
+
+		err := app.Run([]string{
+			app.Name,
+			"--config-file=" + cfgFile.Name(),
+			"--startup-readiness-timeout=900",
+		})
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	})
+
+	It("overrides startup readiness timeout from config file with CLI", func() {
+		err := os.WriteFile(cfgFile.Name(), []byte(`[ovnkubenode]
+startup-readiness-timeout=600
+`), 0o644)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+		app.Action = func(ctx *cli.Context) error {
+			_, err := InitConfig(ctx, kexec.New(), nil)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(OvnKubeNode.StartupReadinessTimeout).To(gomega.Equal(900))
+			return nil
+		}
+
+		err = app.Run([]string{
+			app.Name,
+			"--config-file=" + cfgFile.Name(),
+			"--startup-readiness-timeout=900",
 		})
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	})
@@ -1824,6 +1879,25 @@ udn-allowed-default-services= ns/svc, ns1/svc1
 			gomega.Expect(err).To(gomega.HaveOccurred())
 			gomega.Expect(err.Error()).To(gomega.ContainSubstring("routing-table-id-start"))
 			gomega.Expect(err.Error()).To(gomega.ContainSubstring("must be <="))
+		})
+
+		It("Fails if startup readiness timeout is zero", func() {
+			cliConfig := config{OvnKubeNode: nodeConfig()}
+			file := config{OvnKubeNode: nodeConfig()}
+			file.OvnKubeNode.StartupReadinessTimeout = 0
+
+			err := buildOvnKubeNodeConfig(&cliConfig, &file)
+			gomega.Expect(err).To(gomega.HaveOccurred())
+			gomega.Expect(err.Error()).To(gomega.ContainSubstring("startup-readiness-timeout"))
+		})
+
+		It("Fails if startup readiness timeout is negative", func() {
+			cliConfig := config{OvnKubeNode: nodeConfig()}
+			cliConfig.OvnKubeNode.StartupReadinessTimeout = -1
+
+			err := buildOvnKubeNodeConfig(&cliConfig, &config{OvnKubeNode: nodeConfig()})
+			gomega.Expect(err).To(gomega.HaveOccurred())
+			gomega.Expect(err.Error()).To(gomega.ContainSubstring("startup-readiness-timeout"))
 		})
 
 		It("Fails with unsupported mode", func() {

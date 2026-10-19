@@ -329,11 +329,12 @@ func (nc *DefaultNodeNetworkController) initGatewayPreStart(
 	nc.Gateway = gw
 
 	// Wait for management port and gateway resources to be created by the master
+	klog.Infof("Waiting up to %v for gateway and management port readiness...", waiter.timeout)
 	start := time.Now()
 	if err := waiter.Wait(); err != nil {
 		return nil, err
 	}
-	klog.Infof("Gateway and management port readiness took %v", time.Since(start))
+	klog.Infof("Gateway and management port readiness took %v (timeout %v)", time.Since(start), waiter.timeout)
 
 	return gw, nil
 }

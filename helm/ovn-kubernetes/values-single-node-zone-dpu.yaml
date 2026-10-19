@@ -72,6 +72,9 @@ global:
   # -- Optional Linux routing table ID start used by ovnkube-node for generated VRF/route tables.
   # -- Minimum: 1000. If unset, ovnkube-node uses its built-in default.
   # routingTableIDStart: 1002
+  # -- Optional time in seconds ovnkube-node waits at startup for its gateway and management port.
+  # -- May need increasing on clusters with many user-defined networks. If unset, defaults to 300.
+  # startupReadinessTimeout: 600
   # -- Configure to enable no-overlay mode for the default network
   enableNoOverlay: false
   # -- Configure to enable SNAT for outbound traffic in no-overlay mode
