@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/ovn-kubernetes/libovsdb/client"
@@ -21,9 +22,9 @@ import (
 )
 
 type SampleDecoder struct {
-	nbClient          client.Client
-	ovsdbClient       client.Client
-	cleanupCollectors []int
+	nbClient    client.Client
+	ovsdbClient client.Client
+	collectorID int
 }
 
 type Cookie struct {
@@ -32,7 +33,6 @@ type Cookie struct {
 }
 
 const CookieSize = 8
-const bridgeName = "br-int"
 
 var SampleEndian = getEndian()
 
@@ -55,11 +55,13 @@ func getLocalOVSDBClient(ctx context.Context) (client.Client, error) {
 	return newOVSDBClient(ctx, "unix:/var/run/openvswitch/db.sock")
 }
 
-// NewSampleDecoderWithDefaultCollector creates a new SampleDecoder, initializes the OVSDB client and adds the default collector.
-// It allows to set the groupID and ownerName for the created default collector.
-// If the default collector already exists with a different owner or different groupID an error will be returned.
+// NewSampleDecoderWithCollector creates a new SampleDecoder, initializes the OVSDB client and adds the collector with the provided collectorID.
+// It allows to set the groupID and ownerName for the created collector.
+// If a collector with the same collectorID already exists on br-int and belongs to the same owner with the same
+// groupID, it is reused (idempotent, e.g. after the owning process restarted without cleaning up).
+// If it exists with a different owner or a different groupID, an error is returned.
 // Shutdown should be called to clean up the collector and close the database clients.
-func NewSampleDecoderWithDefaultCollector(ctx context.Context, nbdbSocketPath string, ownerName string, groupID int) (*SampleDecoder, error) {
+func NewSampleDecoderWithCollector(ctx context.Context, nbdbSocketPath string, ownerName string, collectorID, groupID int) (*SampleDecoder, error) {
 	nbClient, err := getLocalNBClient(ctx, nbdbSocketPath)
 	if err != nil {
 		return nil, err
@@ -73,12 +75,11 @@ func NewSampleDecoderWithDefaultCollector(ctx context.Context, nbdbSocketPath st
 		nbClient:    nbClient,
 		ovsdbClient: ovsdbClient,
 	}
-	err = decoder.AddCollector(observability.DefaultObservabilityCollectorSetID, groupID, ownerName)
-	if err != nil {
+	if err := decoder.AddCollector(collectorID, groupID, ownerName); err != nil {
 		decoder.Shutdown()
 		return nil, err
 	}
-	decoder.cleanupCollectors = append(decoder.cleanupCollectors, observability.DefaultObservabilityCollectorSetID)
+	decoder.collectorID = collectorID
 	return decoder, nil
 }
 
@@ -94,18 +95,16 @@ func NewSampleDecoder(ctx context.Context, nbdbSocketPath string) (*SampleDecode
 	}, nil
 }
 
-// Shutdown removes collectors owned by the decoder and closes its database clients.
+// Shutdown removes the collector this decoder added (if any) and closes its database clients.
 func (d *SampleDecoder) Shutdown() {
 	if d.ovsdbClient != nil {
-		for _, collectorID := range d.cleanupCollectors {
-			err := d.DeleteCollector(collectorID)
-			if err != nil {
-				fmt.Printf("Error deleting collector with ID=%d: %v", collectorID, err)
+		if d.collectorID != 0 {
+			if err := d.DeleteCollector(d.collectorID); err != nil {
+				fmt.Printf("Error deleting collector with ID=%d: %v", d.collectorID, err)
 			}
 		}
 		d.ovsdbClient.Close()
 		d.ovsdbClient = nil
-		d.cleanupCollectors = nil
 	}
 	if d.nbClient != nil {
 		d.nbClient.Close()
@@ -236,36 +235,81 @@ func getGroupID(groupID *int) string {
 	return fmt.Sprintf("%d", *groupID)
 }
 
-func (d *SampleDecoder) AddCollector(collectorID, groupID int, ownerName string) error {
-	if d.ovsdbClient == nil {
-		return fmt.Errorf("OVSDB client is not initialized")
+// validateCollectorReuse makes sure that an existing collector may be reused by a caller identified by ownerName/groupID.
+// Reuse is only allowed when the existing collector has the same owner and the same group.
+// A different owner or a different group is reported as a conflict.
+func validateCollectorReuse(existing *ovsdb.FlowSampleCollectorSet, groupID int, ownerName string) error {
+	if existing.ExternalIDs["owner"] != ownerName ||
+		existing.LocalGroupID == nil || *existing.LocalGroupID != groupID {
+		return fmt.Errorf("requested collector with id=%v is already in use "+
+			"(owner=%q, local_group_id=%v)", existing.ID, existing.ExternalIDs["owner"], getGroupID(existing.LocalGroupID))
 	}
-	// find existing collector with the same ID
+	return nil
+}
+
+// getCollectorOnBrInt retrieves an existing collector set up on br-int, if any. It returns the collector, the br-int UUID, and an error, if any.
+func getCollectorOnBrInt(ovsdbClient client.Client, collectorID int) (*ovsdb.FlowSampleCollectorSet, string, error) {
+	// Retrieve br-int UUID
+	bridges := []*ovsdb.Bridge{}
+	err := ovsdbClient.WhereCache(func(item *ovsdb.Bridge) bool {
+		return item.Name == "br-int"
+	}).List(context.Background(), &bridges)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed finding br-int: %w", err)
+	}
+	if len(bridges) != 1 {
+		return nil, "", fmt.Errorf("expected exactly 1 br-int bridge, found %d", len(bridges))
+	}
+	brIntUUID := bridges[0].UUID
+
+	// Retrieve collectors matching collectorID (any bridge)
 	collectors := []*ovsdb.FlowSampleCollectorSet{}
-	err := d.ovsdbClient.WhereCache(func(item *ovsdb.FlowSampleCollectorSet) bool {
+	err = ovsdbClient.WhereCache(func(item *ovsdb.FlowSampleCollectorSet) bool {
 		return item.ID == collectorID
 	}).List(context.Background(), &collectors)
 	if err != nil {
-		return fmt.Errorf("failed finding existing collector: %w", err)
-	}
-	if len(collectors) > 0 && (collectors[0].ExternalIDs["owner"] != ownerName ||
-		collectors[0].LocalGroupID == nil || *collectors[0].LocalGroupID != groupID) {
-		return fmt.Errorf("requested collector with id=%v already exists "+
-			"with the external_ids=%+v, local_group_id=%v", collectorID, collectors[0].ExternalIDs["owner"], getGroupID(collectors[0].LocalGroupID))
+		return nil, "", fmt.Errorf("failed finding existing collector: %w", err)
 	}
 
-	// find br-int UUID to attach collector
-	bridges := []*ovsdb.Bridge{}
-	err = d.ovsdbClient.WhereCache(func(item *ovsdb.Bridge) bool {
-		return item.Name == bridgeName
-	}).List(context.Background(), &bridges)
-	if err != nil || len(bridges) != 1 {
-		return fmt.Errorf("failed finding br-int: %w", err)
+	// Return collector with bridge matching br-int
+	for _, c := range collectors {
+		if c.Bridge == brIntUUID {
+			return c, brIntUUID, nil
+		}
+	}
+	return nil, brIntUUID, nil
+}
+
+// AddCollector ensures a Flow_Sample_Collector_Set with the given collectorID exists on br-int,
+// creating it if necessary or reusing an existing one owned by the same owner with the same group.
+func (d *SampleDecoder) AddCollector(collectorID, groupID int, ownerName string) error {
+	// Match the ObservabilityConfig CRD bounds (set_id is an OVS uint32) so both sides agree on
+	// the valid range. collectorID 0 is additionally reserved: Shutdown treats a zero collectorID
+	// as "no collector to clean up", so a collector created with ID 0 would leak. int64 comparison
+	// keeps this correct on 32-bit platforms where int cannot hold math.MaxUint32.
+	if collectorID < 1 || int64(collectorID) > math.MaxUint32 {
+		return fmt.Errorf("collector ID must be between 1 and %d, got %d", int64(math.MaxUint32), collectorID)
+	}
+	if d.ovsdbClient == nil {
+		return fmt.Errorf("OVSDB client is not initialized")
+	}
+
+	// Find existing collector with the same ID on br-int.
+	existing, brIntUUID, err := getCollectorOnBrInt(d.ovsdbClient, collectorID)
+	if err != nil {
+		return err
+	} else if existing != nil {
+		// A collector with this ID already exists on br-int. If it belongs to the same owner
+		// with the same group, treat this as an idempotent re-registration (e.g. the owning
+		// process restarted without cleaning up) and reuse it instead of creating a
+		// duplicate row. Otherwise it is a genuine conflict with a different consumer,
+		// or the same owner requesting a different group, which we reject.
+		return validateCollectorReuse(existing, groupID, ownerName)
 	}
 
 	ops, err := d.ovsdbClient.Create(&ovsdb.FlowSampleCollectorSet{
 		ID:           collectorID,
-		Bridge:       bridges[0].UUID,
+		Bridge:       brIntUUID,
 		LocalGroupID: &groupID,
 		ExternalIDs:  map[string]string{"owner": ownerName},
 	})
@@ -277,23 +321,19 @@ func (d *SampleDecoder) AddCollector(collectorID, groupID int, ownerName string)
 }
 
 func (d *SampleDecoder) DeleteCollector(collectorID int) error {
-	collectors := []*ovsdb.FlowSampleCollectorSet{}
-	err := d.ovsdbClient.WhereCache(func(item *ovsdb.FlowSampleCollectorSet) bool {
-		return item.ID == collectorID
-	}).List(context.Background(), &collectors)
+	existing, _, err := getCollectorOnBrInt(d.ovsdbClient, collectorID)
 	if err != nil {
-		return fmt.Errorf("failed finding exisiting collector: %w", err)
-	}
-	if len(collectors) != 1 {
-		return fmt.Errorf("expected only 1 collector with given id")
+		return err
+	} else if existing == nil {
+		// Nothing to delete
+		return nil
 	}
 
-	ops, err := d.ovsdbClient.Where(collectors[0]).Delete()
+	ops, err := d.ovsdbClient.Where(existing).Delete()
 	if err != nil {
-		return fmt.Errorf("failed creating collector: %w", err)
+		return fmt.Errorf("failed deleting collector: %w", err)
 	}
-	res, err := d.ovsdbClient.Transact(context.Background(), ops...)
-	fmt.Println("res: ", res)
+	_, err = d.ovsdbClient.Transact(context.Background(), ops...)
 	return err
 }
 

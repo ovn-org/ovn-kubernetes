@@ -6,6 +6,7 @@ package ovn
 import (
 	"context"
 	"fmt"
+	"net"
 	"reflect"
 	"sync"
 	"time"
@@ -144,6 +145,13 @@ type DefaultNetworkController struct {
 	zoneChassisHandler *zoneic.ZoneChassisHandler
 
 	gatewayTopologyFactory *topology.GatewayTopologyFactory
+
+	// udnMgmtPortIPs caches the management port IPs last used to build the UDN isolation ACLs
+	// (see setupUDNACLs). The observability resync handler needs them to re-apply those ACLs'
+	// Sample.Collectors, since the mgmtPortIPs are otherwise only available on the node
+	// management-port reconcile path. Guarded by udnMgmtPortIPsMutex.
+	udnMgmtPortIPs      []net.IP
+	udnMgmtPortIPsMutex sync.Mutex
 }
 
 // NewDefaultNetworkController creates a new OVN controller for creating logical network
@@ -706,6 +714,10 @@ func (oc *DefaultNetworkController) run(_ context.Context) error {
 	if err := WithSyncDurationMetric("network policy", oc.WatchNetworkPolicy); err != nil {
 		return err
 	}
+
+	// Register for observability resync now that the namespace and network policy caches are
+	// populated, so an ObservabilityConfig change re-applies these features' ACL Sample.Collectors.
+	oc.registerObservabilityResyncHandlers()
 
 	if config.OVNKubernetesFeature.EnableEgressIP {
 		if err := oc.eIPC.StartNADReconciler(); err != nil {

@@ -151,6 +151,16 @@ func NewSamplingConfig(featureCollectors map[SampleFeature][]string) *SamplingCo
 	}
 }
 
+// Collectors returns the collectors resolved for the given feature, or nil if sampling is not
+// configured for it. Nil-safe: a nil *SamplingConfig (sampling disabled) returns nil. The
+// returned slice is used to detect changes in a feature's collector assignment.
+func (c *SamplingConfig) Collectors(feature SampleFeature) []string {
+	if c == nil {
+		return nil
+	}
+	return c.featureCollectors[feature]
+}
+
 func addSample(c *SamplingConfig, opModels []operationModel, model model.Model) []operationModel {
 	switch t := model.(type) {
 	case *nbdb.ACL:

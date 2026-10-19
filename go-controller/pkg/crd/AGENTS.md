@@ -33,6 +33,7 @@ Each CRD has its own sub-package with this structure:
 | `egressqos/` | EgressQoS |
 | `egressservice/` | EgressService |
 | `networkqos/` | NetworkQoS |
+| `observabilityconfig/` | ObservabilityConfig |
 | `routeadvertisements/` | RouteAdvertisements |
 | `userdefinednetwork/` | UserDefinedNetwork, ClusterUserDefinedNetwork |
 | `vtep/` | VTEP |

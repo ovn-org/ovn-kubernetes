@@ -149,7 +149,7 @@ func (bnc *BaseNetworkController) createMulticastAllowPolicy(ns string, nsInfo *
 	ingressACL := libovsdbutil.BuildACLWithDefaultTier(dbIDs, types.DefaultMcastAllowPriority, ingressMatch, nbdb.ACLActionAllow, nil, aclPipeline)
 
 	acls := []*nbdb.ACL{egressACL, ingressACL}
-	ops, err := libovsdbops.CreateOrUpdateACLsOps(bnc.nbClient, nil, bnc.GetSamplingConfig(), acls...)
+	ops, err := libovsdbops.CreateOrUpdateACLsOps(bnc.nbClient, nil, bnc.GetSamplingConfig(ns, libovsdbops.MulticastSample), acls...)
 	if err != nil {
 		return err
 	}
@@ -220,7 +220,7 @@ func (bnc *BaseNetworkController) createDefaultDenyMulticastPolicy() error {
 		acl := libovsdbutil.BuildACLWithDefaultTier(dbIDs, types.DefaultMcastDenyPriority, match, nbdb.ACLActionDrop, nil, aclPipeline)
 		acls = append(acls, acl)
 	}
-	ops, err := libovsdbops.CreateOrUpdateACLsOps(bnc.nbClient, nil, bnc.GetSamplingConfig(), acls...)
+	ops, err := libovsdbops.CreateOrUpdateACLsOps(bnc.nbClient, nil, bnc.GetSamplingConfig("", libovsdbops.MulticastSample), acls...)
 	if err != nil {
 		return err
 	}
@@ -263,7 +263,7 @@ func (bnc *BaseNetworkController) createDefaultAllowMulticastPolicy() error {
 		acls = append(acls, acl)
 	}
 
-	ops, err := libovsdbops.CreateOrUpdateACLsOps(bnc.nbClient, nil, bnc.GetSamplingConfig(), acls...)
+	ops, err := libovsdbops.CreateOrUpdateACLsOps(bnc.nbClient, nil, bnc.GetSamplingConfig("", libovsdbops.MulticastSample), acls...)
 	if err != nil {
 		return err
 	}

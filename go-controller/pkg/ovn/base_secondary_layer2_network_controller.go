@@ -223,7 +223,7 @@ func (oc *BaseLayer2UserDefinedNetworkController) initializeLogicalSwitch(switch
 		logicalSwitch.LoadBalancerGroup = []string{clusterLoadBalancerGroupUUID, switchLoadBalancerGroupUUID}
 	}
 
-	ops, err := libovsdbops.CreateOrUpdateACLsOps(oc.nbClient, nil, oc.GetSamplingConfig(), acls...)
+	ops, err := libovsdbops.CreateOrUpdateACLsOps(oc.nbClient, nil, oc.GetSamplingConfig("", libovsdbops.UDNIsolationSample), acls...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create ACLs: %w", err)
 	}

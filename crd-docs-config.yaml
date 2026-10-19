@@ -1,6 +1,6 @@
 processor:
   ignoreTypes:
-    - "(EgressIP|EgressQoS|EgressFirewall|EgressService|AdminPolicyBasedExternalRoute)List$"
+    - "(EgressIP|EgressQoS|EgressFirewall|EgressService|AdminPolicyBasedExternalRoute|ObservabilityConfig)List$"
   ignoreFields:
     - "TypeMeta$"
 

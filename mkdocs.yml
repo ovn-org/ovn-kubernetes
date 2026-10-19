@@ -149,6 +149,7 @@ nav:
       - EgressService: api-reference/egress-service-api-spec.md
       - EgressQoS: api-reference/egress-qos-api-spec.md
       - EgressFirewall: api-reference/egress-firewall-api-spec.md
+      - ObservabilityConfig: api-reference/observabilityconfig-api-spec.md
       - AdminPolicyBasedExternalRoutes: api-reference/admin-epbr-api-spec.md
       - UserDefinedNetwork: api-reference/userdefinednetwork-api-spec.md
       - Uplink and UplinkState: api-reference/uplink-api-spec.md

@@ -140,7 +140,7 @@ func (oc *DefaultNetworkController) setupUDNACLs(mgmtPortIPs []net.IP) error {
 	ingressAllowACL := libovsdbutil.BuildACL(ingressAllowIDs, types.PrimaryUDNAllowPriority, match, nbdb.ACLActionAllowRelated,
 		nil, libovsdbutil.LportIngress, isolationTier)
 
-	ops, err := libovsdbops.CreateOrUpdateACLsOps(oc.nbClient, nil, oc.GetSamplingConfig(), egressDenyACL, egressARPACL, ingressARPACL, ingressDenyACL, ingressAllowACL)
+	ops, err := libovsdbops.CreateOrUpdateACLsOps(oc.nbClient, nil, oc.GetSamplingConfig("", libovsdbops.UDNIsolationSample), egressDenyACL, egressARPACL, ingressARPACL, ingressDenyACL, ingressAllowACL)
 	if err != nil {
 		return fmt.Errorf("failed to create or update UDN ACLs: %v", err)
 	}
@@ -243,7 +243,7 @@ func (oc *DefaultNetworkController) setUDNPodOpenPortsOps(podNamespacedName stri
 		}
 	} else {
 		// update ACLs
-		ops, err = libovsdbops.CreateOrUpdateACLsOps(oc.nbClient, ops, oc.GetSamplingConfig(), ingressACL, egressACL)
+		ops, err = libovsdbops.CreateOrUpdateACLsOps(oc.nbClient, ops, oc.GetSamplingConfig("", libovsdbops.UDNIsolationSample), ingressACL, egressACL)
 		if err != nil {
 			return ops, parseErr, fmt.Errorf("failed to create or update open ports UDN ACLs: %v", err)
 		}
@@ -649,7 +649,7 @@ func (oc *DefaultNetworkController) syncUDNIsolation() error {
 
 	if len(aclsToUpdate) > 0 {
 		err := batching.Batch(20000, aclsToUpdate, func(batchACLs []*nbdb.ACL) error {
-			return libovsdbops.CreateOrUpdateACLs(oc.nbClient, oc.GetSamplingConfig(), batchACLs...)
+			return libovsdbops.CreateOrUpdateACLs(oc.nbClient, oc.GetSamplingConfig("", libovsdbops.UDNIsolationSample), batchACLs...)
 		})
 		if err != nil {
 			return fmt.Errorf("failed to create or update UDN ACLs: %w", err)

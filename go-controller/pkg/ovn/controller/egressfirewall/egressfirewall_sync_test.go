@@ -13,6 +13,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 	corelisters "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
 
@@ -21,6 +22,7 @@ import (
 
 	ovncnitypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/controller"
 	egressfirewallapi "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	egressfirewalllisters "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/listers/egressfirewall/v1"
 	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
@@ -303,4 +305,129 @@ func TestEFControllerSync_AddsCIDRExclusionWhenPrimaryNetworkAddsOverlappingSubn
 	require.True(t, ok)
 	require.Equal(t, pgName, entry.pgName)
 	require.True(t, util.IsIPNetsEqual(subnetsForNetInfo(netInfoAfter), entry.subnets))
+}
+
+// TestEntriesEqual_DetectsSamplingChange verifies that a change in the resolved sampling
+// collectors alone is enough to make entriesEqual report inequality, so sync re-applies
+// Sample.Collectors after an ObservabilityConfig change without invalidating the entry.
+func TestEntriesEqual_DetectsSamplingChange(t *testing.T) {
+	base := &cacheEntry{pgName: "pg", efResourceVersion: "1"}
+	require.True(t, entriesEqual(base, &cacheEntry{pgName: "pg", efResourceVersion: "1"}))
+
+	withCollectors := &cacheEntry{pgName: "pg", efResourceVersion: "1", sampledCollectors: []string{"1"}}
+	require.False(t, entriesEqual(base, withCollectors), "adding collectors must be detected")
+	require.True(t, entriesEqual(withCollectors, &cacheEntry{pgName: "pg", efResourceVersion: "1", sampledCollectors: []string{"1"}}))
+	require.False(t, entriesEqual(withCollectors, &cacheEntry{pgName: "pg", efResourceVersion: "1", sampledCollectors: []string{"2"}}),
+		"a different collector set must be detected")
+}
+
+// TestEFControllerResyncSampling_PreservesCacheEntryForDeletePath guards the regression where
+// ResyncSampling deleted the namespace cache entry to force a re-apply. If the EgressFirewall was
+// then deleted before the queued key was processed (the workqueue coalesces both into one key),
+// sync saw existingEntry == nil and newEntry == nil, short-circuited on entriesEqual, and left the
+// ACLs on the port group. The entry must survive a sampling resync so the delete path can clean up.
+func TestEFControllerResyncSampling_PreservesCacheEntryForDeletePath(t *testing.T) {
+	require.NoError(t, config.PrepareTestConfig())
+	config.OVNKubernetesFeature.EnableMultiNetwork = true
+	config.OVNKubernetesFeature.EnableNetworkSegmentation = true
+
+	const (
+		namespace = "namespace1"
+		udnName   = "udn-test"
+		zone      = "node1"
+	)
+
+	netInfo := mustNetInfo(t, udnName, "10.128.0.0/14")
+	networkManager := &fakenetworkmanager.FakeNetworkManager{
+		PrimaryNetworks: map[string]util.NetInfo{namespace: netInfo},
+	}
+
+	ownerController := udnName + "-network-controller"
+	pgName := libovsdbutil.GetPortGroupName(getNamespacePortGroupDbIDs(namespace, ownerController))
+
+	initialDB := libovsdbtest.TestSetup{
+		NBData: []libovsdbtest.TestData{
+			&nbdb.PortGroup{
+				Name: pgName,
+				ExternalIDs: map[string]string{
+					libovsdbops.OwnerTypeKey.String():       libovsdbops.NamespaceOwnerType,
+					libovsdbops.OwnerControllerKey.String(): ownerController,
+					libovsdbops.ObjectNameKey.String():      namespace,
+				},
+			},
+		},
+	}
+	nbClient, _, cleanup, err := libovsdbtest.NewNBSBTestHarness(initialDB)
+	require.NoError(t, err)
+	t.Cleanup(cleanup.Cleanup)
+
+	nsIndexer := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})
+	require.NoError(t, nsIndexer.Add(&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespace}}))
+	namespaceLister := corelisters.NewNamespaceLister(nsIndexer)
+
+	efIndexer := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc})
+	ef := &egressfirewallapi.EgressFirewall{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            egressFirewallName,
+			Namespace:       namespace,
+			ResourceVersion: "1",
+		},
+		Spec: egressfirewallapi.EgressFirewallSpec{
+			Egress: []egressfirewallapi.EgressFirewallRule{
+				{
+					Type: egressfirewallapi.EgressFirewallRuleAllow,
+					To:   egressfirewallapi.EgressFirewallDestination{CIDRSelector: "10.128.1.0/24"},
+				},
+			},
+		},
+		Status: egressfirewallapi.EgressFirewallStatus{
+			Messages: []string{types.GetZoneStatus(zone, EgressFirewallAppliedCorrectly)},
+		},
+	}
+	require.NoError(t, efIndexer.Add(ef))
+	efLister := egressfirewalllisters.NewEgressFirewallLister(efIndexer)
+
+	oc := &EFController{
+		name:            "test",
+		zone:            zone,
+		cache:           syncmap.NewSyncMap[*cacheEntry](),
+		nbClient:        nbClient,
+		kube:            nil, // status updates are no-op in this test due to pre-seeded status message
+		namespaceLister: namespaceLister,
+		efLister:        efLister,
+		networkManager:  networkManager,
+		ruleCounter:     sync.Map{},
+		dnsNameResolver: noopDNSNameResolver{},
+	}
+	// ResyncSampling re-enqueues through the controller; a queue-only controller (never started)
+	// is enough here since sync is driven manually.
+	oc.controller = controller.NewController[egressfirewallapi.EgressFirewall](
+		"test", &controller.ControllerConfig[egressfirewallapi.EgressFirewall]{})
+
+	key := namespace + "/" + egressFirewallName
+	oc.ruleCounter.Store(key, uint32(len(ef.Spec.Egress)))
+
+	// First sync creates the ACLs and stores the cache entry.
+	require.NoError(t, oc.sync(key))
+	p := libovsdbops.GetPredicate[*nbdb.ACL](oc.GetEgressFirewallACLDbIDs(namespace, 0), nil)
+	acls, err := libovsdbops.FindACLsWithPredicate(oc.nbClient, p)
+	require.NoError(t, err)
+	require.Len(t, acls, 1)
+
+	// A sampling resync must NOT invalidate the cache entry: the delete path depends on it.
+	require.NoError(t, oc.ResyncSampling(libovsdbops.EgressFirewallSample, sets.New(namespace)))
+	_, ok := oc.cache.Load(namespace)
+	require.True(t, ok, "ResyncSampling must not delete the cache entry")
+
+	// Coalesced-events race: the EgressFirewall is deleted before the resync key is processed. With
+	// the entry preserved, sync still has existingEntry.pgName to clean up the ACLs.
+	require.NoError(t, efIndexer.Delete(ef))
+	require.NoError(t, oc.sync(key))
+
+	acls, err = libovsdbops.FindACLsWithPredicate(oc.nbClient, p)
+	require.NoError(t, err)
+	require.Empty(t, acls, "EgressFirewall ACLs must be removed after the EF is deleted")
+
+	_, ok = oc.cache.Load(namespace)
+	require.False(t, ok, "cache entry must be removed after the EF is deleted")
 }

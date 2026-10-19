@@ -12,6 +12,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 	corev1informers "k8s.io/client-go/informers/core/v1"
 	corev1listers "k8s.io/client-go/listers/core/v1"
@@ -226,6 +227,12 @@ func (c *Controller) Run(threadiness int, stopCh <-chan struct{}) {
 		utilruntime.HandleError(fmt.Errorf("timed out waiting for admin network policy caches to sync"))
 		klog.Errorf("Error syncing caches for admin network policy and baseline admin network policy")
 		return
+	}
+
+	// Register for observability resync so an ObservabilityConfig change re-applies the ACLs'
+	// Sample.Collectors (ANP/BANP is external to that config, so it produces no ANP/BANP events).
+	if c.observManager != nil {
+		c.observManager.RegisterResyncHandler(libovsdbops.AdminNetworkPolicySample, c)
 	}
 
 	klog.Infof("Repairing Admin Network Policies")
@@ -592,7 +599,30 @@ func (c *Controller) onANPNodeDelete(obj interface{}) {
 
 func (c *Controller) GetSamplingConfig() *libovsdbops.SamplingConfig {
 	if c.observManager != nil {
-		return c.observManager.SamplingConfig()
+		return c.observManager.SamplingConfigForContext("", libovsdbops.AdminNetworkPolicySample)
+	}
+	return nil
+}
+
+// ResyncSampling re-enqueues every ANP and the BANP so their ACLs' Sample.Collectors are
+// re-applied after an ObservabilityConfig change. ANP/BANP are cluster-scoped, so the
+// namespaces argument is ignored (it is always the whole feature). The actual re-apply is
+// gated by the sampling diff in updateExistingANP; re-enqueuing is only the trigger, since the
+// change originates from a different resource and does not produce ANP/BANP events.
+func (c *Controller) ResyncSampling(_ libovsdbops.SampleFeature, _ sets.Set[string]) error {
+	anps, err := c.anpLister.List(labels.Everything())
+	if err != nil {
+		return fmt.Errorf("failed to list AdminNetworkPolicies for observability resync: %w", err)
+	}
+	for _, anp := range anps {
+		c.anpQueue.Add(anp.Name)
+	}
+	banps, err := c.banpLister.List(labels.Everything())
+	if err != nil {
+		return fmt.Errorf("failed to list BaselineAdminNetworkPolicies for observability resync: %w", err)
+	}
+	for _, banp := range banps {
+		c.banpQueue.Add(banp.Name)
 	}
 	return nil
 }

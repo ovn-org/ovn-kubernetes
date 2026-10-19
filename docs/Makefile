@@ -48,6 +48,7 @@ generate-api-reference: crd-ref-docs
 		[egressip]=egress-ip-api-spec.md \
 		[egressqos]=egress-qos-api-spec.md \
 		[egressservice]=egress-service-api-spec.md \
+		[observabilityconfig]=observabilityconfig-api-spec.md \
 		[routeadvertisements]=routeadvertisements-api-spec.md \
 		[uplink]=uplink-api-spec.md \
 		[userdefinednetwork]=userdefinednetwork-api-spec.md \

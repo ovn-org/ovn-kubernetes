@@ -340,7 +340,7 @@ func (bnc *BaseNetworkController) addAllowACLFromNode(switchName string, mgmtPor
 	nodeACL := libovsdbutil.BuildACLWithDefaultTier(dbIDs, types.DefaultAllowPriority, match,
 		nbdb.ACLActionAllowRelated, nil, libovsdbutil.LportIngress)
 
-	ops, err := libovsdbops.CreateOrUpdateACLsOps(bnc.nbClient, nil, bnc.GetSamplingConfig(), nodeACL)
+	ops, err := libovsdbops.CreateOrUpdateACLsOps(bnc.nbClient, nil, bnc.GetSamplingConfig("", libovsdbops.NetworkPolicySample), nodeACL)
 	if err != nil {
 		return fmt.Errorf("failed to create or update ACL %v: %v", nodeACL, err)
 	}
@@ -452,7 +452,7 @@ func (bnc *BaseNetworkController) createDefaultDenyPGAndACLs(namespace, policy s
 	egressPGName := libovsdbutil.GetPortGroupName(egressPGIDs)
 	egressACLs := bnc.buildDenyACLs(namespace, egressPGName, aclLogging, libovsdbutil.ACLEgress)
 	allACLs := append(ingressACLs, egressACLs...)
-	ops, err := libovsdbops.CreateOrUpdateACLsOps(bnc.nbClient, nil, bnc.GetSamplingConfig(), allACLs...)
+	ops, err := libovsdbops.CreateOrUpdateACLsOps(bnc.nbClient, nil, bnc.GetSamplingConfig(namespace, libovsdbops.NetworkPolicySample), allACLs...)
 	if err != nil {
 		return err
 	}
@@ -1099,7 +1099,7 @@ func (bnc *BaseNetworkController) createNetworkPolicy(policy *knet.NetworkPolicy
 		ops := []ovsdb.Operation{}
 
 		acls := bnc.buildNetworkPolicyACLs(np, aclLogging)
-		ops, err = libovsdbops.CreateOrUpdateACLsOps(bnc.nbClient, ops, bnc.GetSamplingConfig(), acls...)
+		ops, err = libovsdbops.CreateOrUpdateACLsOps(bnc.nbClient, ops, bnc.GetSamplingConfig(policy.Namespace, libovsdbops.NetworkPolicySample), acls...)
 		if err != nil {
 			return fmt.Errorf("failed to create ACL ops: %v", err)
 		}

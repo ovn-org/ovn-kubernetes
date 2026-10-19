@@ -44,7 +44,9 @@ To see the samples, use `ovnkube-observ` binary, with `-h` to see allowed flags.
 kubectl -n ovn-kubernetes exec -it <ovnkube pod> -c ovnkube-controller -- ovnkube-observ -h
 Usage of ovnkube-observ:
   -add-ovs-collector
-    	Add ovs collector to enable sampling. Use with caution. Make sure no one else is using observability.
+    	Add OVS collector to enable sampling.
+  -ovs-collector-id int
+      Set a unique OVS collector ID to use. Use with -add-ovs-collector. (default 1)
   -enable-enrichment
     	Enrich samples with nbdb data. (default true)
   -filter-dst-ip string
@@ -63,9 +65,24 @@ This feature requires OVS 3.4 and linux kernel 6.11.
 
 ## Workflow Description
 
-- Observability is enabled by setting the `--enable-observability` flag in the `ovnkube` binary.
-- For now all mentioned features are enabled by this flag at the same time.
-- To start observing and display the samples, run `ovnkube-observ -add-ovs-collector`. Samples are only generated when the real traffic matching the ACLs is sent through the OVS. An example output is:
+- Observability is enabled by setting the `--enable-observability` flag in the `ovnkube` binary and remains idling at this point.
+- An `ObservabilityConfig` custom resource must be created to configure which features to sample, possibly with filters and probability. For example, to sample all network policy traffic and bind it to collector `1`:
+
+```yaml
+apiVersion: k8s.ovn.org/v1alpha1
+kind: ObservabilityConfig
+metadata:
+  name: default
+spec:
+  # collectorID is referenced by ovnkube-observ via -ovs-collector-id (see below).
+  collectorID: 1
+  features:
+    - feature: NetworkPolicy
+      probability: 100
+```
+
+  See [User-facing API](#user-facing-api) for the full list of features, filtering options and field reference.
+- To start observing and display the samples, run `ovnkube-observ -add-ovs-collector -ovs-collector-id <collectorID>`, using the same collectorID as in the `ObservabilityConfig` resource. Samples are only generated when the real traffic matching the ACLs is sent through the OVS. An example output is:
 
 ```
 OVN-K message: Allowed by default allow from local node policy, direction ingress
@@ -78,9 +95,41 @@ src=10.129.2.2, dst=10.129.2.5
 
 ## Implementation Details
 
-### User facing API Changes
+### User-facing API
 
-No API changes were done.
+The `ObservabilityConfig` CRD allows you to bind observed samples to a configured collector ID, for a given set of features and filters. `ObservabilityConfig` is cluster-scoped; multiple resources may be created, each binding its own set of features to a `collectorID`. See [OKEP-5212](../okeps/okep-5212-ovnobserv-api.md) for more details, and the [API reference](../api-reference/observabilityconfig-api-spec.md) for the full field reference and validation rules.
+
+#### Sharing a collectorID across nodes
+
+A `collectorID` is resolved per node: each node applies only the `ObservabilityConfig` resources that match it (via `filter.nodeSelector`), and turns the `collectorID` into a collector on that node's `br-int` (collector IDs are unique per bridge). The same `collectorID` may therefore be reused across several `ObservabilityConfig` resources - a common pattern is one resource per node group, all sharing a single `collectorID` - so that a consumer (for example NetObserv, or `ovnkube-observ -ovs-collector-id <id>`) can pull the aggregated sample stream from every node using that one ID.
+
+The only per-node/feature constraint is consistency: on a given node and a given feature, a `collectorID` must map to a single probability. Avoid configuring two resources that both apply to the same node and feature with the same `collectorID` but different probabilities, as they would resolve to conflicting collectors on that node's bridge.
+
+The following example samples all `NetworkPolicy` traffic and 10% of `EgressFirewall` traffic, restricted to the `frontend` and `backend` namespaces on nodes labelled `observability=enabled`:
+
+```yaml
+apiVersion: k8s.ovn.org/v1alpha1
+kind: ObservabilityConfig
+metadata:
+  name: default
+spec:
+  collectorID: 1
+  features:
+    - feature: NetworkPolicy
+      probability: 100
+    - feature: EgressFirewall
+      probability: 10
+  # filter is optional; when omitted, the config applies cluster-wide.
+  filter:
+    nodeSelector:
+      matchLabels:
+        observability: enabled
+    namespaces:
+      - frontend
+      - backend
+```
+
+`probability` is a percentage (0-100) controlling how much matching traffic is sampled. The `namespaces` filter only applies to namespaced features (currently `NetworkPolicy` and `EgressFirewall`); a config that combines a `namespaces` filter with a cluster-scoped feature such as `AdminNetworkPolicy`, `UDNIsolation` or `MulticastIsolation` is rejected.
 
 ### OVN sampling details
 
@@ -99,8 +148,9 @@ that is decoded by `go-controller/observability-lib`.
 
 ### OVN-Kubernetes Implementation Details
 
-`Sample_collector` and `Sampling_app` are created or cleaned up when the observability is enabled/disabled on startup.
-When one of the supported objects (for example, network policy) is created, ovn-kuberentes generates an nbdb `Sample` for it.
+`Sampling_app` entries are created at startup when observability is enabled, and cleaned up when it is disabled.
+`Sample_collector` entries are created and cleaned up as `ObservabilityConfig` resources are added, updated or removed, one collector per configured `CollectorID`/probability combination.
+When one of the supported objects (for example, network policy) is created, ovn-kubernetes generates a nbdb `Sample` for it.
 
 To decode the samples into human-readable information, `go-controller/observability-lib` is used. It finds `Sample`
 by the attached `Sample.Metadata` and then gets corresponding db object (e.g. ACL) based on `Sampling_app.ID` and `Sample.UUID`.
@@ -112,11 +162,18 @@ The diagram shows how all involved components (kernel, OVS, OVN, ovn-kubernetes)
 
 #### Enabling collectors
 
-Currently, we have only 1 default collector with hard-coded ID, which is set via the `Sample_collector.SetID` field.
+Collectors can be enabled via `ovnkube-observ -add-ovs-collector`, or through third-party tools such as NetObserv. The provided collector ID is set to `Sample_collector.SetID` field.
 To make OVS start sending samples for an existing `Sample_collector`, a new OVSDB `Flow_Sample_Collector_Set` entry
 needs to be created with `Flow_Sample_Collector_Set.ID` value of `Sample_collector.SetID`. 
 This is done by the `go-controller/observability-lib` and it is important to note that only one `Flow_Sample_Collector_Set`
-should be created for a given `Sample_collector.SetID` value at a time. But if such entry already exists, it can be reused.
+should be created for a given `Sample_collector.SetID` value on `br-int` at a time (collector IDs are unique per bridge). If
+such an entry already exists on `br-int`, it is reused only when it belongs to the same owner with the same group; the
+registration is otherwise rejected as a conflict. This makes re-registration idempotent for a given owner (for example after
+the owning process restarts without cleaning up), while preventing two unrelated consumers from fighting over the same
+collector ID.
+
+For this reason, concurrent instances should each use a distinct `-ovs-collector-id`: a reused collector row is deleted on
+shutdown by whichever instance holds it, so two instances sharing the same ID would cut samples off from each other.
 
 ## Best Practices
 

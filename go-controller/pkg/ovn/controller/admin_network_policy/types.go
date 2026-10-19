@@ -97,6 +97,10 @@ type adminNetworkPolicyState struct {
 	// aclLoggingParams stores the log levels for the ACLs created for this ANP
 	// this is based off the "k8s.ovn.org/acl-logging" annotation set on the ANP's
 	aclLoggingParams *libovsdbutil.ACLLoggingLevels
+	// sampledCollectors stores the observability collectors resolved for this ANP's ACLs.
+	// It follows the same mechanism as aclLoggingParams above: recomputed on every sync, cached
+	// here, and diffed against the desired state to decide whether the ACLs must be re-applied.
+	sampledCollectors []string
 }
 
 // newAdminNetworkPolicyState takes the provided ANP API object and creates a new corresponding

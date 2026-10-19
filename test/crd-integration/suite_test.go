@@ -32,6 +32,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 
 	egressipv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
+	observabilityconfigv1alpha1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/observabilityconfig/v1alpha1"
 	uplinkv1alpha1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/uplink/v1alpha1"
 )
 
@@ -51,6 +52,7 @@ var _ = BeforeSuite(func() {
 	// Register every CRD's types the suite exercises.  Add new CRDs here.
 	scheme := k8sruntime.NewScheme()
 	utilruntime.Must(egressipv1.AddToScheme(scheme))
+	utilruntime.Must(observabilityconfigv1alpha1.AddToScheme(scheme))
 	utilruntime.Must(uplinkv1alpha1.AddToScheme(scheme))
 
 	testEnv = &envtest.Environment{

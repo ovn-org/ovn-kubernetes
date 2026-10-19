@@ -51,23 +51,27 @@ const (
 )
 
 type SampleReader struct {
-	enableDecoder   bool
-	logCookie       bool
-	printFullPacket bool
-	addOVSCollector bool
-	srcIP, dstIP    string
-	outputFile      string
+	enableDecoder        bool
+	logCookie            bool
+	printFullPacket      bool
+	addOVSCollector      bool
+	collectorID, groupID int
+	srcIP, dstIP         string
+	outputFile           string
 
 	decoder   *sampledecoder.SampleDecoder
 	cookieStr []string
 }
 
-func NewSampleReader(enableDecoder, logCookie, printFullPacket, addOVSCollector bool, srcIP, dstIP, outputFile string) *SampleReader {
+// NewSampleReader initializes a new SampleReader.
+func NewSampleReader(enableDecoder, logCookie, printFullPacket, addOVSCollector bool, collectorID, groupID int, srcIP, dstIP, outputFile string) *SampleReader {
 	r := &SampleReader{
 		enableDecoder:   enableDecoder,
 		logCookie:       logCookie,
 		printFullPacket: printFullPacket,
 		addOVSCollector: addOVSCollector,
+		collectorID:     collectorID,
+		groupID:         groupID,
 		srcIP:           srcIP,
 		dstIP:           dstIP,
 		outputFile:      outputFile,
@@ -78,13 +82,14 @@ func NewSampleReader(enableDecoder, logCookie, printFullPacket, addOVSCollector 
 	return r
 }
 
+// ReadSamples starts the observability samples read and decoding loop until the context is closed.
 func (r *SampleReader) ReadSamples(ctx context.Context) error {
 	if r.enableDecoder {
 		var err error
 		// currently only local nbdb connection is supported.
 		nbdbSocketPath := "/var/run/ovn/ovnnb_db.sock"
 		if r.addOVSCollector {
-			r.decoder, err = sampledecoder.NewSampleDecoderWithDefaultCollector(ctx, nbdbSocketPath, "ovnk-debug", 123)
+			r.decoder, err = sampledecoder.NewSampleDecoderWithCollector(ctx, nbdbSocketPath, "ovnk-debug", r.collectorID, r.groupID)
 			if err != nil {
 				return fmt.Errorf("error creating decoder: %w", err)
 			}
@@ -204,8 +209,7 @@ func (r *SampleReader) parseMsg(msgs []syscall.NetlinkMessage, printlnFunc func(
 						return err
 					}
 					if r.logCookie {
-						r.cookieStr[1] = fmt.Sprintf("obs_domain=%v, obs_point=%v",
-							c.ObsDomainID, c.ObsPointID)
+						r.cookieStr[1] = fmt.Sprintf("obs_domain=%v, obs_point=%v", c.ObsDomainID, c.ObsPointID)
 					}
 					if r.decoder != nil {
 						decoded, err := r.decoder.DecodeCookieIDs(c.ObsDomainID, c.ObsPointID)

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -122,6 +123,9 @@ func (c *Controller) ensureAdminNetworkPolicy(anp *anpapi.AdminNetworkPolicy) er
 	if err != nil {
 		return err
 	}
+	// Sampling collectors come from a separate ObservabilityConfig resource; resolve them now so a
+	// change is detected against the cached state, using the same recompute-and-diff mechanism as aclLoggingParams.
+	desiredANPState.sampledCollectors = c.GetSamplingConfig().Collectors(libovsdbops.AdminNetworkPolicySample)
 
 	// fetch the anpState from our cache if it exists
 	currentANPState, loaded := c.anpCache[anp.Name]
@@ -669,6 +673,7 @@ func (c *Controller) updateExistingANP(currentANPState, desiredANPState *adminNe
 	if !isBanp {
 		hasACLLoggingParamsChanged = hasACLLoggingParamsChanged || currentANPState.aclLoggingParams.Pass != desiredANPState.aclLoggingParams.Pass
 	}
+	hasSamplingChanged := !slices.Equal(currentANPState.sampledCollectors, desiredANPState.sampledCollectors)
 	// The rules which didn't change -> those updates will be no-ops thanks to libovsdb
 	// The rules that changed in terms of their `getACLMutableFields`
 	// will be simply updated since externalIDs will remain the same for these ACLs
@@ -678,7 +683,8 @@ func (c *Controller) updateExistingANP(currentANPState, desiredANPState *adminNe
 	// (2) atLeastOneRuleUpdated=true which means the gress rules were of same lengths but action or ports changed on at least one rule
 	// (3) hasPriorityChanged=true which means we should update acl.Priority for every ACL
 	// (4) hasACLLoggingParamsChanged=true which means we should update acl.Severity/acl.Log for every ACL
-	if fullPeerRecompute || atLeastOneRuleUpdated || hasPriorityChanged || hasACLLoggingParamsChanged {
+	// (5) hasSamplingChanged=true which means we should update acl.SampleNew/acl.SampleEst for every ACL
+	if fullPeerRecompute || atLeastOneRuleUpdated || hasPriorityChanged || hasACLLoggingParamsChanged || hasSamplingChanged {
 		klog.V(3).Infof("ANP %s with priority %d was updated", desiredANPState.name, desiredANPState.anpPriority)
 		// now update the acls to the desired ones
 		ops, err = libovsdbops.CreateOrUpdateACLsOps(c.nbClient, ops, c.GetSamplingConfig(), desiredACLs...)

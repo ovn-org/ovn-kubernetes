@@ -45,6 +45,9 @@ get_crd_version() {
     networkqos)
       echo "v1alpha1"
       ;;
+    observabilityconfig)
+      echo "v1alpha1"
+      ;;
     *)
       echo "v1"
       ;;
@@ -179,6 +182,8 @@ echo "Copying egressService CRD"
 cp _output/crds/k8s.ovn.org_egressservices.yaml ../helm/ovn-kubernetes/crds/k8s.ovn.org_egressservices.yaml
 echo "Copying networkQoS CRD"
 cp _output/crds/k8s.ovn.org_networkqoses.yaml ../helm/ovn-kubernetes/crds/k8s.ovn.org_networkqoses.yaml
+echo "Copying observabilityConfig CRD"
+cp _output/crds/k8s.ovn.org_observabilityconfigs.yaml ../helm/ovn-kubernetes/crds/k8s.ovn.org_observabilityconfigs.yaml
 echo "Copying userdefinednetworks CRD"
 cp _output/crds/k8s.ovn.org_userdefinednetworks.yaml ../helm/ovn-kubernetes/crds/k8s.ovn.org_userdefinednetworks.yaml
 echo "Copying clusteruserdefinednetworks CRD"

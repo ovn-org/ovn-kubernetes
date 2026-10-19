@@ -125,6 +125,9 @@ func (c *Controller) ensureBaselineAdminNetworkPolicy(banp *anpapi.BaselineAdmin
 	if err != nil {
 		return err
 	}
+	// Sampling collectors come from a separate ObservabilityConfig resource; resolve them now so a
+	// change is detected against the cached state, using the same recompute-and-diff mechanism as aclLoggingParams.
+	desiredBANPState.sampledCollectors = c.GetSamplingConfig().Collectors(libovsdbops.AdminNetworkPolicySample)
 	// fetch the banpState from our cache
 	currentBANPState := c.banpCache
 	// Based on the latest kapi BANP, namespace and pod objects:

@@ -14,6 +14,10 @@ import (
 	observ "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/observability-lib"
 )
 
+const (
+	groupID = 123
+)
+
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	sigc := make(chan os.Signal, 1)
@@ -30,13 +34,14 @@ func main() {
 	enableDecoder := flag.Bool("enable-enrichment", true, "Enrich samples with nbdb data.")
 	logCookie := flag.Bool("log-cookie", false, "Print raw sample cookie with psample group_id.")
 	printPacket := flag.Bool("print-full-packet", false, "Print full received packet. When false, only src and dst ips are printed with every sample.")
-	addOVSCollector := flag.Bool("add-ovs-collector", false, "Add ovs collector to enable sampling. Use with caution. Make sure no one else is using observability.")
+	addOVSCollector := flag.Bool("add-ovs-collector", false, "Add OVS collector to enable sampling.")
+	ovsCollectorID := flag.Int("ovs-collector-id", 1, "Set a unique OVS collector ID to use. Use with -add-ovs-collector.")
 	outputFile := flag.String("output-file", "", "Output file to write the samples to.")
 	filterSrcIP := flag.String("filter-src-ip", "", "Filter in only packets from a given source ip.")
 	filterDstIP := flag.String("filter-dst-ip", "", "Filter in only packets to a given destination ip.")
 	flag.Parse()
 
-	reader := observ.NewSampleReader(*enableDecoder, *logCookie, *printPacket, *addOVSCollector, *filterSrcIP, *filterDstIP, *outputFile)
+	reader := observ.NewSampleReader(*enableDecoder, *logCookie, *printPacket, *addOVSCollector, *ovsCollectorID, groupID, *filterSrcIP, *filterDstIP, *outputFile)
 	err := reader.ReadSamples(ctx)
 	if err != nil {
 		fmt.Println(err.Error())
