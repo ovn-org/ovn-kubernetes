@@ -258,7 +258,11 @@ jobs:
           source "${DPU_SIM_PATH}/kubeconfig/helm-values/dpu-sim-dpu-frr-k8s.env"
           export KUBECONFIG="${DPU_SIM_PATH}/kubeconfig/dpu-sim-host.kubeconfig"
           export OVN_TEST_DPU_UPLINK_NETWORK="dpu-sim-uplink"
-          export OVN_TEST_DPU_UPLINK_HOST_INTERFACE="eth0-16"
+          if [ -z "${DPU_SIM_UPLINK_HOST_INTERFACES:-}" ]; then
+            echo "::error::dpu-sim did not publish DPU_SIM_UPLINK_HOST_INTERFACES; check uplink_vfs_count in its config"
+            exit 1
+          fi
+          export OVN_TEST_DPU_UPLINK_HOST_INTERFACE="${DPU_SIM_UPLINK_HOST_INTERFACES%%,*}"
           export OVN_TEST_DPU_UPLINK_EXPECTED_BRIDGE="breth-uplink"
           export OVN_TEST_BGP_SERVER_NET_SUBNET_IPV4="172.29.0.0/16"
           export OVN_TEST_BGP_SERVER_NET_SUBNET_IPV6="fc00:f853:ccd:e797::/64"
