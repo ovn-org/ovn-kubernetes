@@ -488,6 +488,29 @@ var _ = Describe("DeleteEndpointSlice", func() {
 		Entry("reverted update", false),
 	)
 
+	It("retains old Service rules across failed update and deletion attempts", func() {
+		service := newService(testService, testNamespace, "10.96.0.1",
+			[]corev1.ServicePort{{Name: "http", Protocol: corev1.ProtocolTCP, Port: 80, NodePort: 30080}},
+			corev1.ServiceTypeNodePort, nil, corev1.ServiceStatus{}, false, false)
+		Expect(npw.AddService(service)).To(Succeed())
+		updatedService := service.DeepCopy()
+		updatedService.Spec.Ports[0].NodePort = 30081
+		nodenft.SetNFTablesHelper(&nftRunFailer{Interface: nft, failures: 2})
+		DeferCleanup(nodenft.SetNFTablesHelper, nft)
+		Expect(npw.UpdateService(service, updatedService)).NotTo(Succeed())
+
+		netlinkMock := new(utilMocks.NetLinkOps)
+		netlinkMock.On("ConntrackDeleteFilters", mock.Anything, mock.Anything, mock.Anything).Return(uint(0), nil)
+		originalNetlinkOps := util.GetNetLinkOps()
+		util.SetNetLinkOpMockInst(netlinkMock)
+		DeferCleanup(util.SetNetLinkOpMockInst, originalNetlinkOps)
+		Expect(npw.DeleteService(updatedService)).NotTo(Succeed())
+		verifyNFTablesRule(nft, service.Spec.ClusterIP, 80, 30080, true, "failed deletion must remain retryable")
+		Expect(npw.DeleteService(updatedService)).To(Succeed())
+		verifyNFTablesRule(nft, service.Spec.ClusterIP, 80, 30080, false, "retry must remove the cached old NodePort")
+		Expect(npw.ofm.defaultBridge.flows()).To(BeEmpty())
+	})
+
 	It("retries UDP conntrack cleanup with the old Service definition", func() {
 		service := newService(testService, testNamespace, "10.96.0.1",
 			[]corev1.ServicePort{{Name: "dns", Protocol: corev1.ProtocolUDP, Port: 53, NodePort: 30080}},

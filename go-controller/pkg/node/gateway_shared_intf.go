@@ -747,15 +747,6 @@ func (npw *nodePortWatcher) generateARPBypassFlow(ofPorts []string, ofPortPatch,
 	return arpFlow
 }
 
-// getAndDeleteServiceInfo returns the serviceConfig for a service and if it exists and then deletes the entry
-func (npw *nodePortWatcher) getAndDeleteServiceInfo(index ktypes.NamespacedName) (out *serviceConfig, exists bool) {
-	npw.serviceInfoLock.Lock()
-	defer npw.serviceInfoLock.Unlock()
-	out, exists = npw.serviceInfo[index]
-	delete(npw.serviceInfo, index)
-	return out, exists
-}
-
 // getAndSetServiceInfo creates and sets the serviceConfig, returns if it existed and whatever was there
 func (npw *nodePortWatcher) getAndSetServiceInfo(index ktypes.NamespacedName, service *corev1.Service, hasLocalHostNetworkEp bool, localEndpoints util.PortToLBEndpoints) (old *serviceConfig, exists bool) {
 	npw.serviceInfoLock.Lock()
@@ -1157,13 +1148,13 @@ func (npw *nodePortWatcher) deleteConntrackForService(service *corev1.Service) e
 func (npw *nodePortWatcher) DeleteService(service *corev1.Service) error {
 	var err error
 	var errors []error
-	if !util.ServiceTypeHasClusterIP(service) || !util.IsClusterIPSet(service) {
-		return nil
-	}
-
 	klog.V(5).Infof("Deleting service %s in namespace %s", service.Name, service.Namespace)
 	name := ktypes.NamespacedName{Namespace: service.Namespace, Name: service.Name}
-	if svcConfig, exists := npw.getAndDeleteServiceInfo(name); exists {
+	npw.serviceInfoLock.Lock()
+	defer npw.serviceInfoLock.Unlock()
+	if svcConfig, exists := npw.serviceInfo[name]; exists {
+		svcConfig.serviceRulesDirty = true
+		service = svcConfig.service
 		if err = delServiceRules(svcConfig.service, svcConfig.localEndpoints, npw); err != nil {
 			errors = append(errors, err)
 		}
@@ -1180,6 +1171,7 @@ func (npw *nodePortWatcher) DeleteService(service *corev1.Service) error {
 	if err = utilerrors.Join(errors...); err != nil {
 		return fmt.Errorf("DeleteService failed for nodePortWatcher: %v", err)
 	}
+	delete(npw.serviceInfo, name)
 	return nil
 
 }
