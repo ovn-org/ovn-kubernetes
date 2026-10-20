@@ -45,12 +45,21 @@ webhooks:
     admissionReviewVersions: ['v1']
     sideEffects: None
     matchConditions:
+      # Avoid a bootstrap dependency on the identity webhook for its own pods.
+      # Skip only when neither the old nor the new pod has protected annotations;
+      # adding, removing, or retaining it must still invoke admission, even if
+      # the caller supplies the identity pod label.
       - name: skip-ovnkube-identity-self-pods
-        expression: '!(request.namespace == "ovn-kubernetes" && has(object.metadata.labels) && "name" in object.metadata.labels && object.metadata.labels["name"] == "ovnkube-identity")'
+        expression: >-
+          !(request.namespace == "ovn-kubernetes" && has(object.metadata.labels) &&
+          "name" in object.metadata.labels && object.metadata.labels["name"] == "ovnkube-identity" &&
+          [object, oldObject].all(p, p == null || !has(p.metadata.annotations) ||
+            !["k8s.ovn.org/pod-networks", "k8s.ovn.org/dpu.connection-details",
+              "k8s.ovn.org/dpu.connection-status"].exists(k, k in p.metadata.annotations)))
     rules:
-      - operations: [ "UPDATE" ]
+      - operations: [ "CREATE", "UPDATE" ]
         apiGroups: ["*"]
         apiVersions: ["*"]
-        resources: ["pods/status"] # Using /status subresource doesn't protect from other users changing the annotations
+        resources: ["pods", "pods/status"]
         scope: "*"
 {{- end }}

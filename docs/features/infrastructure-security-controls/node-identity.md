@@ -48,8 +48,11 @@ This is intentional as it helps ensure that the certificate rotation works seaml
 
 ## Validating Admission Webhook
 
-The feature introduces a validating webhook for updates to `pod/status` and `node/status`.\
-The `ovnkube-node` pod exclusively updates the status on both resources, so it is sufficient to verify only update requests.\
+The feature introduces a validating webhook for pod creation, updates to `pods` and
+`pods/status`, and updates to `nodes/status`.
+
+For cluster-wide pod annotation protection, see [Security](security.md#protected-pod-annotations).
+
 The webhooks include the following checks for each `ovnkube-node` pod:
 - Modifying annotations on pods hosted on its own node.
 - Modifying annotations on its own node.

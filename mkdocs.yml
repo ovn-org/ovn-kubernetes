@@ -177,6 +177,7 @@ nav:
       - EgressQoS: features/cluster-egress-controls/egress-qos.md
     - InfrastructureSecurityControls:
       - features/infrastructure-security-controls/index.md
+      - Security: features/infrastructure-security-controls/security.md
       - NodeIdentity: features/infrastructure-security-controls/node-identity.md
     - MultiNetworking:
       - features/multiple-networks/index.md

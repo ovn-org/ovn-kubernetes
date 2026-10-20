@@ -115,18 +115,28 @@ func NewPodAdmissionWebhook(nodeLister listers.NodeLister, podAdmissions []PodAd
 	}
 }
 
-func (p PodAdmission) ValidateCreate(_ context.Context, _ *corev1.Pod) (warnings admission.Warnings, err error) {
-	// Ignore creation, the webhook is configured to only handle pod/status updates
+// ValidateCreate reserves protected pod annotations for post-creation network setup.
+func (p PodAdmission) ValidateCreate(_ context.Context, pod *corev1.Pod) (warnings admission.Warnings, err error) {
+	// Protected annotations are written by network components after creation.
+	// No creator, including a controller copying a pod template, may supply them.
+	for key := range pod.Annotations {
+		if p.annotationKeys.Has(key) {
+			return nil, fmt.Errorf("annotation %s must not be supplied on pod creation", key)
+		}
+	}
 	return nil, nil
 }
 
+// ValidateDelete allows pod deletion without annotation validation.
 func (p PodAdmission) ValidateDelete(_ context.Context, _ *corev1.Pod) (warnings admission.Warnings, err error) {
-	// Ignore creation, the webhook is configured to only handle pod/status updates
+	// Pod deletion does not introduce or modify network configuration.
 	return nil, nil
 }
 
 var _ admission.Validator[*corev1.Pod] = &PodAdmission{}
 
+// ValidateUpdate authorizes annotation changes and restricts network-node writers
+// to their assigned pods and permitted fields.
 func (p PodAdmission) ValidateUpdate(ctx context.Context, oldPod, newPod *corev1.Pod) (warnings admission.Warnings, err error) {
 
 	req, err := admission.RequestFromContext(ctx)
@@ -196,16 +206,17 @@ func (p PodAdmission) ValidateUpdate(ctx context.Context, oldPod, newPod *corev1
 	}
 
 	// Verify that nothing but the annotations changed.
-	// Since ovnkube-node only has the pod/status permissions, it is enough to check .Status and .ObjectMeta only.
+	// Check Spec as well because the webhook also handles the main pod resource.
 	// Ignore .ManagedFields fields which are modified on every update.
-	oldPodShallowCopy := oldPod
-	newPodShallowCopy := newPod
-	oldPodShallowCopy.Annotations = nil
-	newPodShallowCopy.Annotations = nil
-	oldPodShallowCopy.ManagedFields = nil
-	newPodShallowCopy.ManagedFields = nil
-	if !apiequality.Semantic.DeepEqual(oldPodShallowCopy.ObjectMeta, newPodShallowCopy.ObjectMeta) ||
-		!apiequality.Semantic.DeepEqual(oldPodShallowCopy.Status, newPodShallowCopy.Status) {
+	oldPodCopy := oldPod.DeepCopy()
+	newPodCopy := newPod.DeepCopy()
+	oldPodCopy.Annotations = nil
+	newPodCopy.Annotations = nil
+	oldPodCopy.ManagedFields = nil
+	newPodCopy.ManagedFields = nil
+	if !apiequality.Semantic.DeepEqual(oldPodCopy.ObjectMeta, newPodCopy.ObjectMeta) ||
+		!apiequality.Semantic.DeepEqual(oldPodCopy.Status, newPodCopy.Status) ||
+		!apiequality.Semantic.DeepEqual(oldPodCopy.Spec, newPodCopy.Spec) {
 		return nil, fmt.Errorf("%s on node: %q is not allowed to modify anything other than annotations", prefixName, nodeName)
 	}
 

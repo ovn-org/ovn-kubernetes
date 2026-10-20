@@ -6,7 +6,11 @@ hide:
 
 # Infrastructure Security Controls
 
-Node-level security mechanisms for OVN-Kubernetes infrastructure.
+Security mechanisms for OVN-Kubernetes infrastructure.
+
+**[Security](security.md)**
+
+Protection of OVN-Kubernetes-owned annotations and pod network allocations.
 
 ## Controller-owned Node annotations
 

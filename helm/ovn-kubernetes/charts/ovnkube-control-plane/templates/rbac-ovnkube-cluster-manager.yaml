@@ -214,9 +214,10 @@ spec:
   failurePolicy: Fail
   validations:
     - expression: >
-        ('v1.multus-cni.io/default-network' in oldObject.metadata.annotations)
-        ? ('v1.multus-cni.io/default-network' in object.metadata.annotations) && oldObject.metadata.annotations['v1.multus-cni.io/default-network'] == object.metadata.annotations['v1.multus-cni.io/default-network']
-        : !('v1.multus-cni.io/default-network' in object.metadata.annotations)
+        (has(oldObject.metadata.annotations) && 'v1.multus-cni.io/default-network' in oldObject.metadata.annotations)
+        ? (has(object.metadata.annotations) && 'v1.multus-cni.io/default-network' in object.metadata.annotations &&
+           oldObject.metadata.annotations['v1.multus-cni.io/default-network'] == object.metadata.annotations['v1.multus-cni.io/default-network'])
+        : (!has(object.metadata.annotations) || !('v1.multus-cni.io/default-network' in object.metadata.annotations))
       message: "The 'v1.multus-cni.io/default-network' annotation cannot be changed after the pod was created"
 
 ---
