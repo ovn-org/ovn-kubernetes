@@ -535,3 +535,71 @@ func TestPodAdmission_ValidateUpdateExtraUsers(t *testing.T) {
 		})
 	}
 }
+
+// TestPodNetworkAnnotationCreate checks allocation output is rejected while network requests remain valid.
+func TestPodNetworkAnnotationCreate(t *testing.T) {
+	validator := NewPodAdmissionWebhook(nil, nil)
+	for _, tc := range []struct {
+		name        string
+		annotations map[string]string
+		deny        bool
+	}{
+		{"ordinary pod", nil, false},
+		{"allocation result", map[string]string{types.OvnPodAnnotationName: `{"default":{"ip_addresses":["10.128.0.5/23"]}}`}, true},
+		{"empty allocation result", map[string]string{types.OvnPodAnnotationName: ""}, true},
+		{"static IP and claim request", map[string]string{"k8s.v1.cni.cncf.io/networks": `[{"name":"net","ips":["10.128.0.5/23"],"ipam-claim-reference":"claim"}]`}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := validator.ValidateCreate(context.Background(), &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: tc.annotations}})
+			if (err != nil) != tc.deny {
+				t.Fatalf("error = %v, want denied = %v", err, tc.deny)
+			}
+		})
+	}
+}
+
+// TestProtectedPodAnnotationsCreate checks creation restrictions also apply to newly registered keys.
+func TestProtectedPodAnnotationsCreate(t *testing.T) {
+	validator := NewPodAdmissionWebhook(nil, nil)
+	// A newly registered key must inherit creation protection automatically.
+	validator.annotationKeys.Insert("k8s.ovn.org/future-controller-state")
+	for key := range validator.annotationKeys {
+		for _, value := range []string{"", "controller-state"} {
+			t.Run(key+"/"+value, func(t *testing.T) {
+				_, err := validator.ValidateCreate(context.Background(), &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{key: value},
+				}})
+				if err == nil {
+					t.Fatalf("creation accepted protected annotation %s", key)
+				}
+			})
+		}
+	}
+}
+
+// TestPodNetworkAnnotationUpdate checks allocation protection on both pod update endpoints.
+func TestPodNetworkAnnotationUpdate(t *testing.T) {
+	validator := NewPodAdmissionWebhook(nil, nil)
+	for _, subresource := range []string{"", "status"} {
+		for _, tc := range []struct {
+			name     string
+			old, new map[string]string
+			deny     bool
+		}{
+			{"add", nil, map[string]string{types.OvnPodAnnotationName: "forged"}, true},
+			{"change", map[string]string{types.OvnPodAnnotationName: "allocated"}, map[string]string{types.OvnPodAnnotationName: "forged"}, true},
+			{"remove", map[string]string{types.OvnPodAnnotationName: "allocated"}, nil, true},
+			{"unrelated update", map[string]string{types.OvnPodAnnotationName: "allocated"}, map[string]string{types.OvnPodAnnotationName: "allocated", "example.com/note": "note"}, false},
+		} {
+			t.Run(subresource+"/"+tc.name, func(t *testing.T) {
+				ctx := admission.NewContextWithRequest(context.Background(), admission.Request{AdmissionRequest: admv1.AdmissionRequest{
+					Operation: admv1.Update, SubResource: subresource, UserInfo: authenticationv1.UserInfo{Username: "pod-creator"},
+				}})
+				_, err := validator.ValidateUpdate(ctx, &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: tc.old}}, &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: tc.new}})
+				if (err != nil) != tc.deny {
+					t.Fatalf("error = %v, want denied = %v", err, tc.deny)
+				}
+			})
+		}
+	}
+}
