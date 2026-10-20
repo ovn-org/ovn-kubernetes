@@ -82,11 +82,7 @@ jobs:
       uses: actions/setup-go@v6
       with:
         go-version-file: 'go-controller/go.mod'
-        # Disabling cache to avoid warnings until these two issues are fixed
-        # https://github.com/actions/setup-go/issues/424
-        # https://github.com/actions/setup-go/issues/403
-        # cache-dependency-path: "**/*.sum"
-        cache: false
+        cache-dependency-path: "**/*.sum"
       id: go
 
     - name: Verify linting rules are enforced
@@ -155,11 +151,7 @@ jobs:
       uses: actions/setup-go@v6
       with:
         go-version-file: 'go-controller/go.mod'
-        # Disabling cache to avoid warnings until these two issues are fixed
-        # https://github.com/actions/setup-go/issues/424
-        # https://github.com/actions/setup-go/issues/403
-        # cache-dependency-path: "**/*.sum"
-        cache: false
+        cache-dependency-path: "**/*.sum"
       id: go
 
     - name: Build - from base branch
@@ -253,11 +245,7 @@ jobs:
       uses: actions/setup-go@v6
       with:
         go-version-file: 'go-controller/go.mod'
-        # Disabling cache to avoid warnings until these two issues are fixed
-        # https://github.com/actions/setup-go/issues/424
-        # https://github.com/actions/setup-go/issues/403
-        # cache-dependency-path: "**/*.sum"
-        cache: false
+        cache-dependency-path: "**/*.sum"
       id: go
 
     - name: Build - from current pr branch
@@ -338,11 +326,7 @@ jobs:
       uses: actions/setup-go@v6
       with:
         go-version-file: 'go-controller/go.mod'
-        # Disabling cache to avoid warnings until these two issues are fixed
-        # https://github.com/actions/setup-go/issues/424
-        # https://github.com/actions/setup-go/issues/403
-        # cache-dependency-path: "**/*.sum"
-        cache: false
+        cache-dependency-path: "**/*.sum"
       id: go
 
     - name: Install VRF kernel module
@@ -424,11 +408,7 @@ jobs:
       uses: actions/setup-go@v6
       with:
         go-version-file: 'go-controller/go.mod'
-        # Disabling cache to avoid warnings until these two issues are fixed
-        # https://github.com/actions/setup-go/issues/424
-        # https://github.com/actions/setup-go/issues/403
-        # cache-dependency-path: "**/*.sum"
-        cache: false
+        cache-dependency-path: "**/*.sum"
       id: go
 
     - name: Set up environment
@@ -701,11 +681,7 @@ jobs:
       uses: actions/setup-go@v6
       with:
         go-version-file: 'go-controller/go.mod'
-        # Disabling cache to avoid warnings until these two issues are fixed
-        # https://github.com/actions/setup-go/issues/424
-        # https://github.com/actions/setup-go/issues/403
-        # cache-dependency-path: "**/*.sum"
-        cache: false
+        cache-dependency-path: "**/*.sum"
       id: go
 
     - name: Set up environment
@@ -891,11 +867,7 @@ jobs:
       uses: actions/setup-go@v6
       with:
         go-version-file: 'go-controller/go.mod'
-        # Disabling cache to avoid warnings until these two issues are fixed
-        # https://github.com/actions/setup-go/issues/424
-        # https://github.com/actions/setup-go/issues/403
-        # cache-dependency-path: "**/*.sum"
-        cache: false
+        cache-dependency-path: "**/*.sum"
       id: go
 
     - name: Set up environment
