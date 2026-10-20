@@ -5551,7 +5551,7 @@ exhausted on a 500th day, now the admin cannot mutate UDN-Old to change
 or expand its subnet CIDR range. Admin creates a new UDN-New (could be
 in a totally different cluster) and now wants to interconnect them
 together.</p>
-<p><a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../images/user-story-1.png" data-desc-position="bottom"><img alt="user-story-1" src="../images/user-story-1.png"></a></p>
+<p></p>
 <h3 id="story-2-allowing-connectivity-between-two-tenants-through-exposed-clusterip-services">Story 2: Allowing connectivity between two tenants through exposed clusterIP services<a class="headerlink" href="#story-2-allowing-connectivity-between-two-tenants-through-exposed-clusterip-services" title="Permanent link">¶</a></h3>
 <p><strong>As a cluster admin</strong>, <strong>I want</strong> to allow tenant-Green to be able to
 access the clusterIP microservice exposed by tenant-Blue without direct
@@ -5563,7 +5563,7 @@ the backend service.</p>
 but now wants to allow partial inter-tenant communication. Say data
 produced by microservice blue needs to be consumed by microservice
 green to do its task.</p>
-<p><a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../images/user-story-2.png" data-desc-position="bottom"><img alt="user-story-2" src="../images/user-story-2.png"></a></p>
+<p></p>
 <p>When the two networks have overlapping subnets, using service clusterIP
 as a way to allow communication is valid use case.</p>
 <h3 id="story-3-allowing-connectivity-between-two-networks-with-overlapping-subnets-through-exposed-clusterip-services">Story 3: Allowing connectivity between two networks with overlapping subnets through exposed clusterIP services<a class="headerlink" href="#story-3-allowing-connectivity-between-two-networks-with-overlapping-subnets-through-exposed-clusterip-services" title="Permanent link">¶</a></h3>
@@ -5608,7 +5608,7 @@ hence the UDN used by the Gateways is Layer2 (Primary).</p>
 <p>To make tenants' traffic flow through the gateways, I need to
 interconnect Primary Layer3 network with Primary Layer2 network. Here is
 a diagram illustrating this ask:</p>
-<p><a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../images/user-story-3.png" data-desc-position="bottom"><img alt="user-story-3" src="../images/user-story-3.png"></a></p>
+<p></p>
 <h3 id="story-7-migration-of-connected-tenant-workloads-from-other-platforms-like-nsx-into-ovn-kubernetes">Story 7: Migration of connected tenant workloads from other platforms like NSX into OVN-Kubernetes<a class="headerlink" href="#story-7-migration-of-connected-tenant-workloads-from-other-platforms-like-nsx-into-ovn-kubernetes" title="Permanent link">¶</a></h3>
 <p><strong>As a cluster admin</strong>, <strong>I manage</strong> isolated tenants on my native NSX
 platform where they are already seggregated into segments using networks.
@@ -5622,7 +5622,7 @@ on each tenant since tenant own their networks.</p>
 <p>Example: Tenant-frontend has access to Tenant-backend's databaseAPI
 workloads on NSX through vRouter, I want to migrate both these tenants
 into OVN-Kubernetes platform keeping that architecture intact.</p>
-<p><a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../images/user-story-4.png" data-desc-position="bottom"><img alt="user-story-4" src="../images/user-story-4.png"></a></p>
+<p></p>
 <h3 id="story-8-future-use-case-tenant-self-connection-without-admin-intervention">Story 8: [Future Use Case] Tenant self-connection without admin intervention<a class="headerlink" href="#story-8-future-use-case-tenant-self-connection-without-admin-intervention" title="Permanent link">¶</a></h3>
 <p><strong>As a tenant owner</strong>, <strong>I want</strong> to connect my workloads which are
 part of two different namespaces (networks) in the same cluster with no
@@ -6130,7 +6130,7 @@ which were discarded and listed in the alternatives section.</p>
 <p>The below diagram shows the overlay part of the OVN Topology that
 OVN-Kubernetes creates for 3 UDN networks (blue, green and yellow)
 across two nodes.</p>
-<p><a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../images/l3-connecting-udns-0.png" data-desc-position="bottom"><img alt="3-isolated-l3-networks" src="../images/l3-connecting-udns-0.png"></a></p>
+<p></p>
 <p>Let's take a look at how we can connect a blue network, green network
 and yellow network at the OVN layer.</p>
 <p><strong>Add a new transit router between the ovn_cluster_routers of the
@@ -6147,7 +6147,7 @@ networks, the controller will make the following changes to the topology:
   value provided on the CR. For connecting N networks on M nodes we
   would need 2×(N×M) IPs from the <code>connectSubnets</code>. See the controller
   design section for more details.</p>
-<p><a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../images/l3-connecting-udns-v1.png" data-desc-position="bottom"><img alt="blue-green-yellow-l3-connect-idea" src="../images/l3-connecting-udns-v1.png"></a></p>
+<p></p>
 <p>So in this proposal it will be 1 new transit router per
 <code>ClusterNetworkConnect</code> API.
 NOTE: Please keep reading to the <strong>Pods</strong> and <strong>Services</strong> sections for
@@ -6266,7 +6266,7 @@ OVN-Kubernetes creates for 3 UDN networks (blue, green and yellow)
 across two nodes. NOTE: The topology representation is that of the new
 upcoming Layer2 topology. See enhancement on <a href="../../okep-5094-layer2-transit-router/">new Layer2 topology</a>
 for more details on the new design.</p>
-<p><a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../images/l2-connecting-udns-0.png" data-desc-position="bottom"><img alt="3-isolated-l2-networks" src="../images/l2-connecting-udns-0.png"></a></p>
+<p></p>
 <p><strong>Add a new transit router between the transit routers of the networks</strong></p>
 <p>When the <code>ClusterNetworkConnect</code> CR gets created selecting these three
 networks, the controller will make the following changes to the topology:
@@ -6284,12 +6284,12 @@ networks, the controller will make the following changes to the topology:
   value provided on the CR. For connecting N networks on M nodes we
   would need 2×N IPs from the <code>connectSubnets</code>. See the controller
   design section for more details.</p>
-<p><a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../images/l2-connecting-udns-v1.png" data-desc-position="bottom"><img alt="blue-green-yellow-l2-connect-idea" src="../images/l2-connecting-udns-v1.png"></a></p>
+<p></p>
 <p><strong>Connecting mixed type (layer3 and/or layer2) networks together</strong></p>
 <p>The below diagram shows the overlay part of the OVN Topology that OVN-Kubernetes
 creates for 3 UDN networks (blue(l3), green(l3) and yellow(l2)) across two
 nodes.</p>
-<p><a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../images/mixed-connecting-udns-0.png" data-desc-position="bottom"><img alt="3-isolated-mixed-networks" src="../images/mixed-connecting-udns-0.png"></a></p>
+<p></p>
 <p><strong>Add a new transit router between the ovn_cluster_router's and transit-routers of the networks</strong></p>
 <p>When the <code>ClusterNetworkConnect</code> CR gets created selecting these three
 networks, the controller will make the following changes to the topology:
@@ -6306,7 +6306,7 @@ networks, the controller will make the following changes to the topology:
   value provided on the CR. For connecting N_L3 and N_L2 networks on M nodes
   we would need 2×(N_L3×M+N_L2) IPs from the <code>connectSubnets</code>. See the
   controller design section for more details.</p>
-<p><a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../images/mixed-connecting-udns-v1.png" data-desc-position="bottom"><img alt="blue-green-yellow-mixed-connect-idea" src="../images/mixed-connecting-udns-v1.png"></a></p>
+<p></p>
 <h4 id="pods">Pods<a class="headerlink" href="#pods" title="Permanent link">¶</a></h4>
 <p>In order to ensure pods in different connected networks can talk to
 each other we will need to add appropriate routes on the routers.</p>
@@ -6881,7 +6881,7 @@ connect UDNs when overlay is turned off.</p>
 <li>The annotations we add to the CNC has cost of marshal and unmarshal
   at each ovnkube-controller</li>
 </ul>
-<p><a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../images/l3-connecting-udns-scale.png" data-desc-position="bottom"><img alt="blue-green-yellow-l3-connect-scale" src="../images/l3-connecting-udns-scale.png"></a></p>
+<p></p>
 <h2 id="ovn-kubernetes-version-skew">OVN Kubernetes Version Skew<a class="headerlink" href="#ovn-kubernetes-version-skew" title="Permanent link">¶</a></h2>
 <p>Targeting release 1.2</p>
 <h2 id="alternatives">Alternatives<a class="headerlink" href="#alternatives" title="Permanent link">¶</a></h2>

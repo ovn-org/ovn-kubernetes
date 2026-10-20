@@ -5472,7 +5472,7 @@ use an environment where a user has created an FRRConfiguration:</p>
 network named "blue", has been created with a network of 10.0.0.0/16, and a matching vrf exists in the Linux host. The slice
 of this supernet that has been allocated to node ovn-worker is 10.0.1.0/24.</p>
 <h4 id="example-1-advertising-pod-ips-from-a-user-defined-network-over-bgp">Example 1: Advertising pod IPs from a user-defined network over BGP<a class="headerlink" href="#example-1-advertising-pod-ips-from-a-user-defined-network-over-bgp" title="Permanent link">¶</a></h4>
-<p><a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../../images/bgp_novpn_advertisements.png" data-desc-position="bottom"><img alt="" src="../../images/bgp_novpn_advertisements.png"></a></p>
+<p></p>
 <p>In this example a user wants to expose network blue outside their OCP cluster so that pod IPs are reachable on the
 external network. The admin has creates the following RouteAdvertisements CR for the blue tenant:
 </p><div class="highlight"><pre><span></span><code><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">k8s.ovn.org/v1</span>
@@ -5534,7 +5534,7 @@ into the blue VRF. At the time of this writing, FRR-K8S does not support importi
 is used. However, when implementing this enhancement every attempt should be made to add support into FRR-K8S to use its
 API rather than using rawConfig.</p>
 <h4 id="example-2-vrf-lite-advertising-pod-ips-from-a-user-defined-network-over-bgp-with-vpn">Example 2: VRF Lite - Advertising pod IPs from a user-defined network over BGP with VPN<a class="headerlink" href="#example-2-vrf-lite-advertising-pod-ips-from-a-user-defined-network-over-bgp-with-vpn" title="Permanent link">¶</a></h4>
-<p><a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../../images/vrf-lite.png" data-desc-position="bottom"><img alt="" src="../../images/vrf-lite.png"></a></p>
+<p></p>
 <p>In this example, the user provisions a VLAN interface, enslaved to the VRF, which carries the blue network in isolation
 to the external PE router. This provides a VRF-Lite design where FRR-K8S is going to be leveraged to advertise the blue
 network only over the corresponding VRF/VLAN link to the next hop PE router. The same is done for the red tenant.

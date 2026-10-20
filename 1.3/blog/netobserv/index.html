@@ -4316,7 +4316,7 @@ Go to the <code>Traffic flows</code> tab and select namespace blue. Also make su
 because it is not set by default, you can configure visible columns by clicking the <code>Manage columns</code> button.
 Also make sure to either put some non-zero <code>Refresh interval</code> or manually refresh when checking for the latest data.
 You should see something like this:</p>
-<p><a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../images/netobserv-anp-drop.png" data-desc-position="bottom"><img alt="netobserv-anp-drop" src="../images/netobserv-anp-drop.png"></a></p>
+<p></p>
 <p>We didn't create any <code>NetworkPolicies</code>, but cluster admin can create cluster-wide policies using <code>AdminNetworkPolicy</code>,
 that may affect any namespace in the cluster, and without the right observability tools, it may be hard to understand
 why some traffic is allowed or dropped.
@@ -4365,7 +4365,7 @@ aaand check:<p></p>
 <span class="w">  </span><span class="m">0</span><span class="w">     </span><span class="m">0</span><span class="w">    </span><span class="m">0</span><span class="w">     </span><span class="m">0</span><span class="w">    </span><span class="m">0</span><span class="w">     </span><span class="m">0</span><span class="w">      </span><span class="m">0</span><span class="w">      </span><span class="m">0</span><span class="w"> </span>--:--:--<span class="w">  </span><span class="m">0</span>:00:02<span class="w"> </span>--:--:--<span class="w">     </span><span class="m">0</span>^C
 </code></pre></div>
 that was unexpected, what now? Let's check the NetObserv console again (don't forget to refresh)<p></p>
-<p><a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../images/netobserv-netpol-drop.png" data-desc-position="bottom"><img alt="netobserv-netpol-drop" src="../images/netobserv-netpol-drop.png"></a></p>
+<p></p>
 <p>it says "Dropped by network policies isolation in namespace blue, direction Egress"</p>
 <p>We wanted to allow that connection with the <code>allow-server</code> NetworkPolicy, why doesn't it work?
 Oh, the port is wrong, it should be <code>8080</code> and not <code>80</code>, let's fix that</p>
