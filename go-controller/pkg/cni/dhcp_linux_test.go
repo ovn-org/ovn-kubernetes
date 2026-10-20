@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -618,7 +619,7 @@ func TestRunLocalnetVFIODHCPAlwaysRebindsVFIO(t *testing.T) {
 		devicesRoot, _ := fakeSysfsPCI(t, deviceID, vfioPCIDriver, vfioPCIDriver)
 		stub := stubBind(t, nil)
 
-		// the fake device does not exist on the host, so getNetdevName fails
+		// the fake device has no netdev, so getNetdevIndex fails
 		_, err := newVFIOPodRequest(t).runLocalnetVFIODHCP()
 		require.ErrorContains(t, err, "failed to find netdev")
 
@@ -671,7 +672,8 @@ func TestRunLocalnetVFIODHCPAlwaysRebindsVFIO(t *testing.T) {
 			"no journal must be written when the vendor is unsupported")
 	})
 
-	t.Run("rollback release is skipped when no netdev exists", func(_ *testing.T) {
+	t.Run("rollback release is skipped when no netdev exists", func(t *testing.T) {
+		fakeSysfsPCI(t, deviceID, "")
 		// The retained probe lease is released on the rebind-failure rollback
 		// only when a netdev survived (or was recreated by) the failed rebind.
 		// With no netdev anywhere — the double-failure state where the device
@@ -682,8 +684,7 @@ func TestRunLocalnetVFIODHCPAlwaysRebindsVFIO(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 		lease := &nclient4.Lease{ACK: &dhcpv4.DHCPv4{YourIPAddr: net.IPv4(172, 18, 0, 5)}}
-		releaseVFIOProbeLease(ctx, deviceID, nadapi.DeviceInfo{},
-			lease, ovntest.MustParseMAC("02:00:00:00:20:0b"))
+		releaseVFIOProbeLease(ctx, deviceID, lease, ovntest.MustParseMAC("02:00:00:00:20:0b"))
 	})
 }
 
@@ -1259,4 +1260,272 @@ func TestAllocateDHCPMACAnnotation(t *testing.T) {
 		_, _, err := pr.allocateDHCPMACAnnotation(pod)
 		require.ErrorContains(t, err, "not-a-mac")
 	})
+}
+
+// fakeSysfsNetdev lists netdev name with ifindex under the fake sysfs PCI
+// device, as the kernel does once a driver binds the VF.
+func fakeSysfsNetdev(t *testing.T, devicesRoot, deviceID, name string, index int) {
+	t.Helper()
+	dir := filepath.Join(devicesRoot, deviceID, "net", name)
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "ifindex"), []byte(fmt.Sprintf("%d\n", index)), 0o644))
+}
+
+func TestGetNetdevIndex(t *testing.T) {
+	const deviceID = "0000:65:00.2"
+
+	t.Run("returns the ifindex of the device's netdev", func(t *testing.T) {
+		devicesRoot, _ := fakeSysfsPCI(t, deviceID, mlx5CoreDriver, mlx5CoreDriver)
+		fakeSysfsNetdev(t, devicesRoot, deviceID, "eth1", 81)
+
+		index, err := getNetdevIndex(context.Background(), deviceID)
+		require.NoError(t, err)
+		assert.Equal(t, 81, index)
+	})
+
+	t.Run("waits for the netdev and retries a rename that races the ifindex read", func(t *testing.T) {
+		devicesRoot, _ := fakeSysfsPCI(t, deviceID, mlx5CoreDriver, mlx5CoreDriver)
+		netDir := filepath.Join(devicesRoot, deviceID, "net")
+		// The netdev is listed before its ifindex can be read: udev renames
+		// it right after the listing.
+		require.NoError(t, os.MkdirAll(filepath.Join(netDir, "eth1"), 0o755))
+		renamed := make(chan error, 1)
+		time.AfterFunc(2*netDevPollInterval, func() {
+			err := os.Rename(filepath.Join(netDir, "eth1"), filepath.Join(netDir, "enp101s0f0v2"))
+			if err == nil {
+				err = os.WriteFile(filepath.Join(netDir, "enp101s0f0v2", "ifindex"), []byte("81\n"), 0o644)
+			}
+			renamed <- err
+		})
+
+		index, err := getNetdevIndex(context.Background(), deviceID)
+		require.NoError(t, <-renamed)
+		require.NoError(t, err)
+		assert.Equal(t, 81, index)
+	})
+
+	t.Run("fails when the device has no netdev", func(t *testing.T) {
+		fakeSysfsPCI(t, deviceID, mlx5CoreDriver, mlx5CoreDriver)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+
+		_, err := getNetdevIndex(ctx, deviceID)
+		require.ErrorContains(t, err, "failed to find netdev")
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+	})
+
+	t.Run("fails when the device lists more than one netdev", func(t *testing.T) {
+		devicesRoot, _ := fakeSysfsPCI(t, deviceID, mlx5CoreDriver, mlx5CoreDriver)
+		fakeSysfsNetdev(t, devicesRoot, deviceID, "eth1", 81)
+		fakeSysfsNetdev(t, devicesRoot, deviceID, "eth2", 82)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+
+		_, err := getNetdevIndex(ctx, deviceID)
+		require.ErrorContains(t, err, "found 2 netdevs")
+	})
+
+	t.Run("names the ifindex file when its content is not a number", func(t *testing.T) {
+		devicesRoot, _ := fakeSysfsPCI(t, deviceID, mlx5CoreDriver, mlx5CoreDriver)
+		ifindexPath := filepath.Join(devicesRoot, deviceID, "net", "eth1", "ifindex")
+		require.NoError(t, os.MkdirAll(filepath.Dir(ifindexPath), 0o755))
+		require.NoError(t, os.WriteFile(ifindexPath, []byte("eth1\n"), 0o644))
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+
+		_, err := getNetdevIndex(ctx, deviceID)
+		require.ErrorContains(t, err, ifindexPath)
+		require.ErrorIs(t, err, strconv.ErrSyntax)
+	})
+}
+
+// TestNewDHCPClientBindsByIndex checks that the DHCP client's raw socket is
+// opened on the link's ifindex: the link's name is stale after a udev rename,
+// and no interface of that name exists here.
+func TestNewDHCPClientBindsByIndex(t *testing.T) {
+	oldOpen := openRawDHCPConn
+	t.Cleanup(func() { openRawDHCPConn = oldOpen })
+	var openedIndex int
+	openRawDHCPConn = func(index int) (net.PacketConn, error) {
+		openedIndex = index
+		return net.ListenPacket("udp4", "127.0.0.1:0")
+	}
+
+	link := &netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Name: "ovnk-renamed0", Index: 81,
+		HardwareAddr: ovntest.MustParseMAC("02:00:00:00:20:0b")}}
+	client, err := newDHCPClient(link)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = client.Close() })
+	assert.Equal(t, 81, openedIndex)
+}
+
+// leaseDHCPOps replaces only the DHCP exchange and release, which otherwise
+// require a privileged raw socket.
+type leaseDHCPOps struct {
+	bindStubDHCPOps
+	acquire func(context.Context, netlink.Link) (*current.Result, *nclient4.Lease, error)
+	release func(netlink.Link, *nclient4.Lease, net.HardwareAddr) error
+}
+
+func (s *leaseDHCPOps) AcquireLease(ctx context.Context, link netlink.Link) (*current.Result, *nclient4.Lease, error) {
+	return s.acquire(ctx, link)
+}
+
+func (s *leaseDHCPOps) ReleaseLease(link netlink.Link, lease *nclient4.Lease, hwAddr net.HardwareAddr) error {
+	return s.release(link, lease, hwAddr)
+}
+
+// TestVFIODHCPUsesNetdevIndex fakes sysfs, netlink and the DHCP exchange: VF
+// driver rebinds and udev renames need SR-IOV hardware, which the KIND-based
+// E2E jobs do not have. The netlink mock has no LinkByName, so a lookup by
+// name fails the test.
+func TestVFIODHCPUsesNetdevIndex(t *testing.T) {
+	const deviceID = "0000:65:00.2"
+	mac := ovntest.MustParseMAC("02:00:00:00:20:0b")
+	tests := []struct {
+		name        string
+		linkErr     error
+		linkUpErr   error
+		acquireErr  error
+		wantErrText string
+	}{
+		{
+			name: "acquires the lease on the netdev found by index although udev renamed it",
+		},
+		{
+			name:        "a DHCP transaction failure is final",
+			acquireErr:  fmt.Errorf("no matching response packet received"),
+			wantErrText: "DHCP lease acquisition failed",
+		},
+		{
+			name:        "a failed link lookup fails the ADD",
+			linkErr:     fmt.Errorf("link not found"),
+			wantErrText: "failed to look up netdev 81",
+		},
+		{
+			name:        "a failed link-up fails the ADD",
+			linkUpErr:   fmt.Errorf("device or resource busy"),
+			wantErrText: "failed to bring up netdev eth1",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			devicesRoot, _ := fakeSysfsPCI(t, deviceID, vfioPCIDriver, vfioPCIDriver)
+			fakeSysfsNetdev(t, devicesRoot, deviceID, "eth1", 81)
+			oldJournal := vfioHandoffJournalDir
+			vfioHandoffJournalDir = t.TempDir()
+			oldDHCP := dhcpOps
+			oldNetlink := util.GetNetLinkOps()
+			t.Cleanup(func() {
+				vfioHandoffJournalDir = oldJournal
+				dhcpOps = oldDHCP
+				util.SetNetLinkOpMockInst(oldNetlink)
+			})
+
+			link := &netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Name: "eth1", Index: 81, HardwareAddr: mac}}
+			links := &util_mocks.NetLinkOps{}
+			if tc.linkErr != nil {
+				links.On("LinkByIndex", 81).Return(nil, tc.linkErr).Once()
+			} else {
+				links.On("LinkByIndex", 81).Return(link, nil).Once()
+				links.On("LinkSetUp", link).Run(func(mock.Arguments) {
+					// udev renames the netdev while the handoff runs
+					netDir := filepath.Join(devicesRoot, deviceID, "net")
+					require.NoError(t, os.Rename(filepath.Join(netDir, "eth1"), filepath.Join(netDir, "enp101s0f0v2")))
+				}).Return(tc.linkUpErr).Once()
+			}
+			util.SetNetLinkOpMockInst(links)
+
+			pr := newDHCPPodRequest(t)
+			pr.IsVFIO = true
+			pr.CNIConf.DeviceID = deviceID
+			attempts := 0
+			leaseResult := &current.Result{IPs: []*current.IPConfig{{Address: net.IPNet{IP: net.IPv4(192, 0, 2, 10), Mask: net.CIDRMask(24, 32)}}}}
+			ops := &leaseDHCPOps{acquire: func(ctx context.Context, actual netlink.Link) (*current.Result, *nclient4.Lease, error) {
+				attempts++
+				assert.Same(t, pr.ctx, ctx, "DHCP must keep the request context and deadline")
+				assert.Same(t, link, actual)
+				if tc.acquireErr != nil {
+					return nil, nil, tc.acquireErr
+				}
+				return leaseResult, &nclient4.Lease{}, nil
+			}}
+			dhcpOps = ops
+			// Run these checks even when a fatal assertion stops the test early.
+			t.Cleanup(func() {
+				assert.Equal(t, []string{mlx5CoreDriver, vfioPCIDriver}, ops.calls)
+				pin, readErr := os.ReadFile(filepath.Join(devicesRoot, deviceID, "driver_override"))
+				require.NoError(t, readErr)
+				assert.Equal(t, vfioPCIDriver, string(pin))
+				_, statErr := os.Stat(vfioHandoffJournalPath(deviceID))
+				assert.True(t, os.IsNotExist(statErr), "completed handoff must remove its journal")
+				links.AssertExpectations(t)
+			})
+
+			result, err := pr.runLocalnetVFIODHCP()
+			if tc.wantErrText != "" {
+				require.ErrorContains(t, err, tc.wantErrText)
+				assert.Nil(t, result)
+			} else {
+				require.NoError(t, err)
+				assert.Same(t, leaseResult, result)
+			}
+			wantAttempts := 1
+			if tc.linkErr != nil || tc.linkUpErr != nil {
+				wantAttempts = 0
+			}
+			assert.Equal(t, wantAttempts, attempts, "the DHCP exchange runs at most once")
+		})
+	}
+}
+
+// TestReleaseVFIOProbeLease covers the release after a failed rebind to
+// vfio-pci. bindPCIDeviceDriver then restores the kernel driver, whose new
+// netdev starts down, so the release brings it up first.
+func TestReleaseVFIOProbeLease(t *testing.T) {
+	const deviceID = "0000:65:00.2"
+	mac := ovntest.MustParseMAC("02:00:00:00:20:0b")
+	lease := &nclient4.Lease{ACK: &dhcpv4.DHCPv4{YourIPAddr: net.IPv4(192, 0, 2, 10)}}
+	for _, releaseErr := range []error{nil, fmt.Errorf("network is down")} {
+		name := "releases on the netdev found by index, then brings it back down"
+		if releaseErr != nil {
+			name = "a failed release is logged, not retried, and the netdev goes back down"
+		}
+		t.Run(name, func(t *testing.T) {
+			devicesRoot, _ := fakeSysfsPCI(t, deviceID, mlx5CoreDriver, mlx5CoreDriver)
+			fakeSysfsNetdev(t, devicesRoot, deviceID, "eth1", 82)
+			oldDHCP := dhcpOps
+			oldNetlink := util.GetNetLinkOps()
+			t.Cleanup(func() {
+				dhcpOps = oldDHCP
+				util.SetNetLinkOpMockInst(oldNetlink)
+			})
+
+			link := &netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Name: "eth1", Index: 82, HardwareAddr: mac}}
+			releases := 0
+			links := &util_mocks.NetLinkOps{}
+			links.On("LinkByIndex", 82).Return(link, nil).Once()
+			links.On("LinkSetUp", link).Return(nil).Once()
+			// The restored kernel driver's netdev started down; the failed ADD
+			// must not leave it up on the VM's network.
+			links.On("LinkSetDown", link).Run(func(mock.Arguments) {
+				assert.Equal(t, 1, releases, "the netdev must go down only after the release attempt")
+			}).Return(nil).Once()
+			util.SetNetLinkOpMockInst(links)
+			dhcpOps = &leaseDHCPOps{release: func(actual netlink.Link, actualLease *nclient4.Lease, hwAddr net.HardwareAddr) error {
+				releases++
+				assert.Same(t, link, actual)
+				assert.Same(t, lease, actualLease)
+				assert.Equal(t, mac, hwAddr)
+				return releaseErr
+			}}
+
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			releaseVFIOProbeLease(ctx, deviceID, lease, mac)
+
+			assert.Equal(t, 1, releases)
+			links.AssertExpectations(t)
+		})
+	}
 }

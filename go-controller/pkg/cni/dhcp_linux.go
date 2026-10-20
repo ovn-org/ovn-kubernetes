@@ -19,6 +19,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"time"
 
@@ -28,8 +29,9 @@ import (
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/insomniacslk/dhcp/dhcpv4"
 	"github.com/insomniacslk/dhcp/dhcpv4/nclient4"
-	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+	"github.com/mdlayher/packet"
 	"github.com/vishvananda/netlink"
+	"golang.org/x/sys/unix"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -249,6 +251,8 @@ type DHCPOps interface {
 	DoOneShot(pr *PodRequest) (*current.Result, error)
 	ApplyResult(netnsPath, ifName string, dhcpResult *current.Result) error
 	BindPCIDeviceDriver(deviceID, driver string) error
+	AcquireLease(ctx context.Context, link netlink.Link) (*current.Result, *nclient4.Lease, error)
+	ReleaseLease(link netlink.Link, lease *nclient4.Lease, hwAddr net.HardwareAddr) error
 }
 
 type defaultDHCPOps struct{}
@@ -265,6 +269,14 @@ func (*defaultDHCPOps) ApplyResult(netnsPath, ifName string, dhcpResult *current
 }
 func (*defaultDHCPOps) BindPCIDeviceDriver(deviceID, driver string) error {
 	return bindPCIDeviceDriver(deviceID, driver)
+}
+
+func (*defaultDHCPOps) AcquireLease(ctx context.Context, link netlink.Link) (*current.Result, *nclient4.Lease, error) {
+	return acquireDHCPLease(ctx, link)
+}
+
+func (*defaultDHCPOps) ReleaseLease(link netlink.Link, lease *nclient4.Lease, hwAddr net.HardwareAddr) error {
+	return releaseDHCPLease(link, lease, hwAddr)
 }
 
 // dhcpPluginExec overrides the exec environment handed to the CNI invoke API
@@ -659,25 +671,62 @@ const (
 	netDevPollInterval = 200 * time.Millisecond
 )
 
-// getNetdevName resolves the host netdev name for a PCI/aux device. The
-// kernel creates the netdev asynchronously after a driver bind, so the
-// lookup polls until it appears.
-func getNetdevName(ctx context.Context, deviceID string, deviceInfo nadapi.DeviceInfo) (string, error) {
-	var netdevName string
-	retries := 0
+// getNetdevIndex returns the ifindex of the netdev of PCI device deviceID.
+// The kernel creates the netdev asynchronously after a driver bind, and udev
+// can rename it at any time, also between listing it and reading its
+// ifindex, so the lookup polls until the one netdev and its ifindex are
+// read. The ifindex stays the same across renames.
+func getNetdevIndex(ctx context.Context, deviceID string) (int, error) {
+	netDir := filepath.Join(sysBusPCIDevices, deviceID, "net")
+	var index int
+	var lastErr error
 	err := wait.PollUntilContextTimeout(ctx, netDevPollInterval, netDevPollTimeout, true,
-		func(_ context.Context) (bool, error) {
-			var localErr error
-			netdevName, localErr = util.GetNetdevNameFromDeviceId(deviceID, deviceInfo)
-			retries++
-			// The netdev may not exist yet right after a driver rebind; keep
-			// polling rather than aborting on the transient "no netdevice" error.
-			return localErr == nil && netdevName != "", nil
+		func(context.Context) (bool, error) {
+			index, lastErr = readNetdevIndex(netDir)
+			return lastErr == nil, nil
 		})
 	if err != nil {
-		return "", fmt.Errorf("failed to find netdev for device %s after %d retries: %w", deviceID, retries, err)
+		return 0, fmt.Errorf("failed to find netdev for device %s: %w", deviceID, errors.Join(err, lastErr))
 	}
-	return netdevName, nil
+	return index, nil
+}
+
+func readNetdevIndex(netDir string) (int, error) {
+	entries, err := os.ReadDir(netDir)
+	if err != nil {
+		return 0, err
+	}
+	if len(entries) != 1 {
+		return 0, fmt.Errorf("found %d netdevs in %s, expected 1", len(entries), netDir)
+	}
+	path := filepath.Join(netDir, entries[0].Name(), "ifindex")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return 0, err
+	}
+	index, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse %s: %w", path, err)
+	}
+	return index, nil
+}
+
+// vfioNetdevUp waits for the netdev of PCI device deviceID and brings it up.
+// It looks the netdev up by ifindex, and the returned link is used by index
+// only, so a udev rename cannot make a later step fail.
+func vfioNetdevUp(ctx context.Context, deviceID string) (netlink.Link, error) {
+	index, err := getNetdevIndex(ctx, deviceID)
+	if err != nil {
+		return nil, err
+	}
+	link, err := util.GetNetLinkOps().LinkByIndex(index)
+	if err != nil {
+		return nil, fmt.Errorf("failed to look up netdev %d of device %s: %w", index, deviceID, err)
+	}
+	if err := util.GetNetLinkOps().LinkSetUp(link); err != nil {
+		return nil, fmt.Errorf("failed to bring up netdev %s of device %s: %w", link.Attrs().Name, deviceID, err)
+	}
+	return link, nil
 }
 
 // vfioHandoffJournal records who started the handoff, for operator debugging;
@@ -777,7 +826,7 @@ func (pr *PodRequest) runLocalnetVFIODHCP() (dhcpResult *current.Result, retErr 
 			// kubelet retries this ADD regardless, and the same-MAC re-acquire makes an unreleased
 			// lease self-correcting.
 			if probeLease != nil {
-				releaseVFIOProbeLease(pr.ctx, deviceID, pr.deviceInfo, probeLease, probeMAC)
+				releaseVFIOProbeLease(pr.ctx, deviceID, probeLease, probeMAC)
 			}
 		} else {
 			klog.Infof("VFIO DHCP: device %s rebound to %s",
@@ -819,31 +868,20 @@ func (pr *PodRequest) runLocalnetVFIODHCP() (dhcpResult *current.Result, retErr 
 		return nil, fmt.Errorf("failed to bind device %s to %s: %w",
 			deviceID, kernelDriver, err)
 	}
-	// Discover the temporary netdev
-	netdevName, err := getNetdevName(pr.ctx, deviceID, pr.deviceInfo)
+	link, err := vfioNetdevUp(pr.ctx, deviceID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to find netdev for device %s: %w",
-			deviceID, err)
+		return nil, err
 	}
-
-	link, err := util.GetNetLinkOps().LinkByName(netdevName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to lookup netdev %s: %w", netdevName, err)
-	}
-	if err := util.GetNetLinkOps().LinkSetUp(link); err != nil {
-		return nil, fmt.Errorf("failed to bring up %s: %w", netdevName, err)
-	}
-
-	klog.Infof("VFIO DHCP: device %s netdev %s MAC %s is up, starting DHCP",
-		deviceID, netdevName, link.Attrs().HardwareAddr)
+	probeMAC = link.Attrs().HardwareAddr
+	klog.Infof("VFIO DHCP: device %s netdev %s (index %d) MAC %s is up, starting DHCP",
+		deviceID, link.Attrs().Name, link.Attrs().Index, probeMAC)
 
 	// The netdev carries the VM's MAC (set on the VF by ConfigureInterface),
 	// so the DHCP server sees the guest's identity and leases it the VM's IP.
-	dhcpResult, probeLease, err = acquireDHCPLease(pr.ctx, netdevName, link.Attrs().HardwareAddr)
+	dhcpResult, probeLease, err = dhcpOps.AcquireLease(pr.ctx, link)
 	if err != nil {
-		return nil, fmt.Errorf("DHCP lease acquisition failed on %s: %w", netdevName, err)
+		return nil, fmt.Errorf("DHCP lease acquisition failed on device %s: %w", deviceID, err)
 	}
-	probeMAC = link.Attrs().HardwareAddr
 
 	klog.Infof("VFIO DHCP: pod %s/%s device %s got IP=%s gw=%s",
 		pr.PodNamespace, pr.PodName, deviceID,
@@ -893,7 +931,7 @@ func (pr *PodRequest) acquireOneShotDHCPInPodNetns() (*current.Result, error) {
 		// so the lease is keyed to the guest's DHCP identity and is handed
 		// over at boot, not leaked. Releasing it here would only open a
 		// window for the pool to reassign the IP before the guest boots.
-		dhcpResult, _, err = acquireDHCPLease(pr.ctx, pr.IfName, link.Attrs().HardwareAddr)
+		dhcpResult, _, err = acquireDHCPLease(pr.ctx, link)
 		if err != nil {
 			return fmt.Errorf("DHCP lease acquisition failed on %s: %w", pr.IfName, err)
 		}
@@ -936,6 +974,29 @@ func dhcpClientID(hwAddr net.HardwareAddr) []byte {
 	return append([]byte{0x01}, hwAddr...)
 }
 
+// openRawDHCPConn opens a raw IPv4 socket bound to the netdev with ifindex
+// index. Tests replace it, as a raw socket needs privileges.
+var openRawDHCPConn = func(index int) (net.PacketConn, error) {
+	return packet.Listen(&net.Interface{Index: index}, packet.Datagram, unix.ETH_P_IP, nil)
+}
+
+// newDHCPClient creates a raw-socket DHCP client on link. It binds the socket
+// to the link's ifindex, not its name, so a udev rename cannot make it fail.
+func newDHCPClient(link netlink.Link, opts ...nclient4.ClientOpt) (*nclient4.Client, error) {
+	attrs := link.Attrs()
+	rawConn, err := openRawDHCPConn(attrs.Index)
+	if err != nil {
+		return nil, err
+	}
+	conn := nclient4.NewBroadcastUDPConn(rawConn, &net.UDPAddr{Port: nclient4.ClientPort})
+	client, err := nclient4.NewWithConn(conn, attrs.HardwareAddr, opts...)
+	if err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	return client, nil
+}
+
 // acquireDHCPLease performs a DHCP DORA (Discover, Offer, Request, Ack)
 // exchange on the given interface and returns the result together with the
 // underlying lease.
@@ -945,10 +1006,10 @@ func dhcpClientID(hwAddr net.HardwareAddr) []byte {
 // this lease and the guest's later requests identically, and the guest
 // renews this very lease instead of being allocated a different IP.
 // Additional DHCP options for the exchange may be passed via extraOpts.
-func acquireDHCPLease(ctx context.Context, ifName string, hwAddr net.HardwareAddr,
+func acquireDHCPLease(ctx context.Context, link netlink.Link,
 	extraOpts ...dhcpv4.Modifier) (*current.Result, *nclient4.Lease, error) {
-	// Create a raw DHCP client on the interface
-	client, err := nclient4.New(ifName,
+	ifName, hwAddr := link.Attrs().Name, link.Attrs().HardwareAddr
+	client, err := newDHCPClient(link,
 		nclient4.WithTimeout(vmDHCPTimeout),
 		nclient4.WithRetry(vmDHCPRetries),
 	)
@@ -976,36 +1037,26 @@ func acquireDHCPLease(ctx context.Context, ifName string, hwAddr net.HardwareAdd
 	return result, lease, nil
 }
 
-// releaseVFIOProbeLease sends a best-effort DHCPRELEASE for the probe lease
-// when the rebind to vfio-pci failed and no VM will boot to take the lease
-// over. A failed release is only logged as a retried ADD, presenting the
-// same MAC-keyed client-id, re-acquires this same lease, or it expires at
-// TTL. The leased address is configured transiently on the netdev because per
-// RFC 2131 the release must be unicast from the leased address, and the
-// Client-ID (option 61) is included because the server matched the lease on it.
-func releaseVFIOProbeLease(ctx context.Context, deviceID string, deviceInfo nadapi.DeviceInfo,
-	lease *nclient4.Lease, hwAddr net.HardwareAddr) {
-	netdevName, err := getNetdevName(ctx, deviceID, deviceInfo)
-	if err != nil {
-		klog.Warningf("VFIO DHCP: cannot release lease %s: device %s has no netdev after the failed rebind: %v",
-			lease.ACK.YourIPAddr, deviceID, err)
-		return
-	}
-
+// releaseDHCPLease sends a DHCPRELEASE for the lease on the given interface.
+// The leased address is configured transiently on link because per RFC 2131
+// the release must be unicast from the leased address, and the Client-ID
+// (option 61) is included because the server matched the lease on it.
+func releaseDHCPLease(link netlink.Link, lease *nclient4.Lease, hwAddr net.HardwareAddr) error {
+	ifName := link.Attrs().Name
 	clientID := dhcpv4.WithOption(dhcpv4.OptClientIdentifier(dhcpClientID(hwAddr)))
 	leasedIP := lease.ACK.YourIPAddr
-	mask := lease.ACK.SubnetMask()
 
-	if link, err := util.GetNetLinkOps().LinkByName(netdevName); err == nil && mask != nil {
+	if mask := lease.ACK.SubnetMask(); mask != nil {
 		addr := &netlink.Addr{IPNet: &net.IPNet{IP: leasedIP, Mask: mask}}
 		if err := util.GetNetLinkOps().AddrAdd(link, addr); err == nil {
 			defer func() { _ = util.GetNetLinkOps().AddrDel(link, addr) }()
-			c, err := nclient4.New(netdevName,
+			// a UDP socket bound to the leased address needs no interface
+			c, err := nclient4.NewWithConn(nil, link.Attrs().HardwareAddr,
 				nclient4.WithUnicast(&net.UDPAddr{IP: leasedIP, Port: nclient4.ClientPort}))
 			if err == nil {
 				defer c.Close()
 				if err := c.Release(lease, clientID); err == nil {
-					return
+					return nil
 				}
 			}
 		}
@@ -1013,16 +1064,37 @@ func releaseVFIOProbeLease(ctx context.Context, deviceID string, deviceInfo nada
 
 	// if the unicast release failed, fall back to a legacy raw-socket
 	// release (source 0.0.0.0, L2 broadcast), which lenient servers accept.
-	if err := func() error {
-		c, err := nclient4.New(netdevName)
-		if err != nil {
-			return err
+	c, err := newDHCPClient(link)
+	if err != nil {
+		return fmt.Errorf("failed to create DHCP client on %s: %w", ifName, err)
+	}
+	defer c.Close()
+	if err := c.Release(lease, clientID); err != nil {
+		return fmt.Errorf("DHCP release failed on %s: %w", ifName, err)
+	}
+	return nil
+}
+
+// releaseVFIOProbeLease sends a best-effort DHCPRELEASE for the probe lease
+// when the rebind to vfio-pci failed and no VM will boot to take the lease
+// over. A failed release is only logged as a retried ADD, presenting the
+// same MAC-keyed client-id, re-acquires this same lease, or it expires at
+// TTL. When the bind fails, bindPCIDeviceDriver restores the kernel driver,
+// whose new netdev starts down, so the release brings it up first and takes
+// it down again afterward: the failed ADD must not leave a host interface up
+// on the VM's network.
+func releaseVFIOProbeLease(ctx context.Context, deviceID string, lease *nclient4.Lease, hwAddr net.HardwareAddr) {
+	link, err := vfioNetdevUp(ctx, deviceID)
+	if err == nil {
+		err = dhcpOps.ReleaseLease(link, lease, hwAddr)
+		if downErr := util.GetNetLinkOps().LinkSetDown(link); downErr != nil {
+			klog.Warningf("VFIO DHCP: failed to bring down netdev %s of device %s after the lease release: %v",
+				link.Attrs().Name, deviceID, downErr)
 		}
-		defer c.Close()
-		return c.Release(lease, clientID)
-	}(); err != nil {
-		klog.Warningf("VFIO DHCP: best-effort release of lease %s on %s failed: %v",
-			leasedIP, netdevName, err)
+	}
+	if err != nil {
+		klog.Warningf("VFIO DHCP: best-effort release of lease %s for device %s failed: %v",
+			lease.ACK.YourIPAddr, deviceID, err)
 	}
 }
 
