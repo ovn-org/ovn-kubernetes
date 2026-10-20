@@ -1354,7 +1354,7 @@ func (nc *DefaultNodeNetworkController) reconcileConntrackUponEndpointSliceEvent
 			_, exists := nc.udpServiceZeroState.Load(stateKey)
 			wasZero := !exists
 
-			currentEligibleCount := countUDPEligibleEndpointsForPort(matchingSlices, svcPort)
+			currentEligibleCount := countUDPEligibleEndpointsForPort(matchingSlices, svcPort, svc)
 			isNowZero := currentEligibleCount == 0
 
 			shouldFlush := wasZero && !isNowZero
@@ -1498,7 +1498,7 @@ func (nc *DefaultNodeNetworkController) syncEndpointSlices(objs []interface{}) e
 			}
 
 			portKey := fmt.Sprintf("%s/%d", key, svcPort.Port)
-			eligibleCount := countUDPEligibleEndpointsForPort(slices, svcPort)
+			eligibleCount := countUDPEligibleEndpointsForPort(slices, svcPort, svc)
 			isZero := eligibleCount == 0
 			if !isZero {
 				nc.udpServiceZeroState.Store(portKey, struct{}{})
@@ -1513,8 +1513,13 @@ func (nc *DefaultNodeNetworkController) syncEndpointSlices(objs []interface{}) e
 	return nil
 }
 
-// countUDPEligibleEndpointsForPort returns the count of ready endpoints for a specific UDP port
+// countUDPEligibleEndpointsForPort returns the count of eligible endpoints for a specific UDP port
 // across all endpoint slices. This allows per-port 0→N transition detection.
+//
+// Uses Service-aware eligibility logic to match the cleanup path behavior:
+// - If PublishNotReadyAddresses is true, counts all endpoints
+// - Otherwise, counts ready endpoints
+// - Falls back to serving+terminating endpoints if no ready endpoints exist
 //
 // Matches EndpointSlice ports by name and protocol, not by port number. The EndpointSlice port
 // is the resolved targetPort, which can differ from the Service port. For example, a Service
@@ -1522,7 +1527,7 @@ func (nc *DefaultNodeNetworkController) syncEndpointSlices(objs []interface{}) e
 //
 // Example: Service has UDP:53 and UDP:5353. Port 53 already has endpoints, port 5353 is empty.
 // When first endpoint arrives for port 5353, we detect port 5353's 0→N transition independently.
-func countUDPEligibleEndpointsForPort(slices []*discovery.EndpointSlice, svcPort corev1.ServicePort) int {
+func countUDPEligibleEndpointsForPort(slices []*discovery.EndpointSlice, svcPort corev1.ServicePort, svc *corev1.Service) int {
 	count := 0
 	for _, slice := range slices {
 		// Find matching port in the slice by name and protocol
@@ -1541,12 +1546,11 @@ func countUDPEligibleEndpointsForPort(slices []*discovery.EndpointSlice, svcPort
 			continue
 		}
 
-		// Count ready endpoints
-		for _, endpoint := range slice.Endpoints {
-			if util.IsEndpointReady(endpoint) && util.IsEndpointServing(endpoint) {
-				count += len(endpoint.Addresses)
-			}
-		}
+		// Count eligible endpoints using Service-aware logic
+		// This matches the eligibility rules in util.DoesEndpointSliceContainEligibleEndpoint
+		// to prevent mismatches between count and cleanup paths
+		eligibleAddresses := util.GetEligibleEndpointAddressesFromSlices([]*discovery.EndpointSlice{slice}, svc)
+		count += len(eligibleAddresses)
 	}
 	return count
 }

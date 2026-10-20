@@ -3004,6 +3004,94 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2002:db8:1::4 }
 			Expect(exists).To(BeTrue(), "state should be non-zero after adding new endpoint")
 		})
 
+		It("should count not-ready endpoints for PublishNotReadyAddresses services", func() {
+			servicePort := int32(80)
+			endpointIP := "10.0.0.1"
+
+			// Service with PublishNotReadyAddresses: true
+			svc := &corev1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      testServiceName,
+					Namespace: testNamespace,
+				},
+				Spec: corev1.ServiceSpec{
+					ClusterIP:                "10.96.0.1",
+					PublishNotReadyAddresses: true,
+					Ports: []corev1.ServicePort{
+						{Name: "http", Port: servicePort, Protocol: udpProtocol},
+					},
+				},
+			}
+
+			// EndpointSlice with not-ready endpoint
+			slice := &discovery.EndpointSlice{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "slice-1",
+					Namespace: testNamespace,
+					UID:       "uid-1",
+					Labels: map[string]string{
+						discovery.LabelServiceName: testServiceName,
+					},
+				},
+				AddressType: discovery.AddressTypeIPv4,
+				Ports: []discovery.EndpointPort{
+					{Name: strPtr("http"), Port: &servicePort, Protocol: &udpProtocol},
+				},
+				Endpoints: []discovery.Endpoint{
+					{
+						Addresses: []string{endpointIP},
+						Conditions: discovery.EndpointConditions{
+							Ready:       boolPtr(false), // Not ready
+							Serving:     boolPtr(true),
+							Terminating: boolPtr(false),
+						},
+					},
+				},
+			}
+
+			fakeClient := fake.NewSimpleClientset(svc, slice)
+			wf, err := factory.NewNodeWatchFactory(&util.OVNNodeClientset{
+				KubeClient: fakeClient,
+			}, testNodeName)
+			Expect(err).NotTo(HaveOccurred())
+			defer wf.Shutdown()
+
+			nc := &DefaultNodeNetworkController{
+				BaseNodeNetworkController: BaseNodeNetworkController{
+					CommonNodeNetworkControllerInfo: CommonNodeNetworkControllerInfo{
+						name:         testNodeName,
+						watchFactory: wf,
+					},
+					ReconcilableNetInfo: &util.DefaultNetInfo{},
+				},
+			}
+
+			err = wf.Start()
+			Expect(err).NotTo(HaveOccurred())
+
+			mockNetLinkOps := new(utilMocks.NetLinkOps)
+			util.SetNetLinkOpMockInst(mockNetLinkOps)
+			defer util.ResetNetLinkOpMockInst()
+
+			mockNetLinkOps.On("ConntrackDeleteFilters",
+				mock.AnythingOfType("netlink.ConntrackTableType"),
+				mock.AnythingOfType("netlink.InetFamily"),
+				mock.AnythingOfType("*netlink.ConntrackFilter")).
+				Return(uint(1), nil)
+
+			// Process the add event for the not-ready endpoint
+			err = nc.reconcileConntrackUponEndpointSliceEvents(nil, slice)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Because PublishNotReadyAddresses is true, the not-ready endpoint
+			// should be counted as eligible, triggering a 0→N flush
+			mockNetLinkOps.AssertNumberOfCalls(GinkgoT(), "ConntrackDeleteFilters", 1)
+
+			stateKey := fmt.Sprintf("%s/%s/%s/%d", testNamespace, testServiceName, discovery.AddressTypeIPv4, 80)
+			_, exists := nc.udpServiceZeroState.Load(stateKey)
+			Expect(exists).To(BeTrue(), "state should be non-zero with not-ready but eligible endpoint")
+		})
+
 	})
 
 	Describe("flushConntrackForServiceVIPs", func() {
