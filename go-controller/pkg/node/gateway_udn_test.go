@@ -1176,6 +1176,8 @@ func noOverlayLayer3NetInfo(t *testing.T) util.NetInfo {
 	return netInfo
 }
 
+// TestShouldAddUDNServiceMarkRules checks eligibility for the primary network's
+// default-VRF service path across transports and advertisement targets.
 func TestShouldAddUDNServiceMarkRules(t *testing.T) {
 	if err := config.PrepareTestConfig(); err != nil {
 		t.Fatalf("failed to prepare test config: %v", err)
@@ -1215,8 +1217,8 @@ func TestShouldAddUDNServiceMarkRules(t *testing.T) {
 	}
 
 	noOverlayNetInfo := noOverlayLayer3NetInfo(t)
-	if !shouldAddUDNServiceMarkRules(noOverlayNetInfo, nodeName) {
-		t.Fatalf("expected service mark rules for no-overlay network without explicit advertised VRF")
+	if shouldAddUDNServiceMarkRules(noOverlayNetInfo, nodeName) {
+		t.Fatalf("expected no service mark rules for no-overlay network without explicit default VRF")
 	}
 
 	noOverlayDefaultVRFNetInfo := util.NewMutableNetInfo(noOverlayNetInfo)
