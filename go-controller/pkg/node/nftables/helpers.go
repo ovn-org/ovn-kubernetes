@@ -21,6 +21,11 @@ const OVNKubernetesEgressIPNFTablesName = "ovn-kubernetes-egressip"
 var nftHelper knftables.Interface
 var nftEgressIPHelper knftables.Interface
 
+// SetNFTablesHelper sets the nftables interface to use.
+func SetNFTablesHelper(helper knftables.Interface) {
+	nftHelper = helper
+}
+
 // SetFakeNFTablesHelper creates a fake knftables.Interface
 func SetFakeNFTablesHelper() *knftables.Fake {
 	fake := knftables.NewFake(knftables.InetFamily, OVNKubernetesNFTablesName)
@@ -32,8 +37,8 @@ func SetFakeNFTablesHelper() *knftables.Fake {
 	return fake
 }
 
-// GetNFTablesHelper returns a knftables.Interface. If SetFakeNFTablesHelper has not been
-// called, it will create a "real" knftables.Interface
+// GetNFTablesHelper returns the configured nftables interface, creating a real
+// interface if none has been configured.
 func GetNFTablesHelper() (knftables.Interface, error) {
 	if nftHelper == nil {
 		nft, err := knftables.New(knftables.InetFamily, OVNKubernetesNFTablesName)

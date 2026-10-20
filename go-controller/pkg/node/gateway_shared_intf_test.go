@@ -410,6 +410,136 @@ var _ = Describe("DeleteEndpointSlice", func() {
 		watcher.Shutdown()
 	})
 
+	It("cleans up old NodePort rules after a failed Service update", func() {
+		service := newService(testService, testNamespace, "10.96.0.1",
+			[]corev1.ServicePort{{Name: "http", Protocol: corev1.ProtocolTCP, Port: 80, TargetPort: intstr.FromInt(8080), NodePort: 30080}},
+			corev1.ServiceTypeNodePort, nil, corev1.ServiceStatus{}, false, false)
+		Expect(npw.AddService(service)).To(Succeed())
+		verifyNFTablesRule(nft, service.Spec.ClusterIP, 80, 30080, true, "the original NodePort must be programmed")
+
+		updatedService := service.DeepCopy()
+		updatedService.Spec.Ports[0].NodePort = 30081
+		// Wrap the existing fake to inject a failure while preserving its rules.
+		// SetFakeNFTablesHelper would create a fresh fake and discard those rules.
+		nodenft.SetNFTablesHelper(&nftRunFailer{Interface: nft, failures: 1})
+		DeferCleanup(nodenft.SetNFTablesHelper, nft)
+		Expect(npw.UpdateService(service, updatedService)).To(MatchError(ContainSubstring("Could not process rule")))
+		verifyNFTablesRule(nft, service.Spec.ClusterIP, 80, 30081, false, "replacement must wait for old-rule cleanup")
+
+		// Gateway retries reconcile the latest Service through AddService,
+		// rather than replaying UpdateService with the old definition.
+		Expect(npw.AddService(updatedService)).To(Succeed())
+		verifyNFTablesRule(nft, service.Spec.ClusterIP, 80, 30081, true, "the replacement NodePort must be programmed")
+		verifyNFTablesRule(nft, service.Spec.ClusterIP, 80, 30080, false, "retry must remove the obsolete NodePort")
+	})
+
+	DescribeTable("reconciles a pending Service update from EndpointSlice events", func(reconcile func(*nodePortWatcher, *discovery.EndpointSlice) error) {
+		service := newService(testService, testNamespace, "10.96.0.1",
+			[]corev1.ServicePort{{Name: "http", Protocol: corev1.ProtocolTCP, Port: 80, NodePort: 30080}},
+			corev1.ServiceTypeNodePort, nil, corev1.ServiceStatus{}, false, false)
+		Expect(npw.AddService(service)).To(Succeed())
+		updatedService := service.DeepCopy()
+		updatedService.Spec.Ports[0].NodePort = 30081
+		nodenft.SetNFTablesHelper(&nftRunFailer{Interface: nft, failures: 1})
+		DeferCleanup(nodenft.SetNFTablesHelper, nft)
+		Expect(npw.UpdateService(service, updatedService)).NotTo(Succeed())
+
+		_, err := fakeClient.KubeClient.CoreV1().Services(testNamespace).Create(context.Background(), updatedService, metav1.CreateOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		Eventually(func() error {
+			_, err := watcher.GetService(testNamespace, testService)
+			return err
+		}).Should(Succeed())
+		ep := newEndpointSlice(testService, testNamespace, nil, nil)
+		Expect(reconcile(npw, ep)).To(Succeed())
+		Expect(npw.AddService(updatedService)).To(Succeed())
+		verifyNFTablesRule(nft, service.Spec.ClusterIP, 80, 30080, false, "endpoint events must preserve old keys until cleanup")
+		verifyNFTablesRule(nft, service.Spec.ClusterIP, 80, 30081, true, "the latest Service must be installed")
+	},
+		Entry("slice addition", (*nodePortWatcher).AddEndpointSlice),
+		Entry("slice deletion", (*nodePortWatcher).DeleteEndpointSlice),
+	)
+
+	DescribeTable("recovers Service steering after a partial rule update", func(failAddition bool) {
+		config.Gateway.Mode = config.GatewayModeShared
+		service := newService(testService, testNamespace, "10.96.0.1",
+			[]corev1.ServicePort{{Name: "http", Protocol: corev1.ProtocolTCP, Port: 80, NodePort: 30080}},
+			corev1.ServiceTypeNodePort, nil, corev1.ServiceStatus{}, false, false)
+		failure := &nftRunFailer{Interface: nft}
+		nodenft.SetNFTablesHelper(failure)
+		DeferCleanup(nodenft.SetNFTablesHelper, nft)
+		if failAddition {
+			failure.failures = 1
+			Expect(npw.AddService(service)).NotTo(Succeed())
+		} else {
+			Expect(npw.AddService(service)).To(Succeed())
+			updatedService := service.DeepCopy()
+			updatedService.Spec.Ports[0].NodePort = 30081
+			failure.failures = 1
+			Expect(npw.UpdateService(service, updatedService)).NotTo(Succeed())
+		}
+
+		Expect(npw.AddService(service)).To(Succeed())
+		verifyNFTablesRule(nft, service.Spec.ClusterIP, 80, 30080, true, "retry must restore the requested NodePort")
+		verifyNFTablesRule(nft, service.Spec.ClusterIP, 80, 30081, false, "a failed replacement must not leave rules")
+		Expect(strings.Join(npw.ofm.defaultBridge.flows(), "\n")).To(ContainSubstring("tp_dst=30080"))
+	},
+		Entry("failed addition", true),
+		Entry("reverted update", false),
+	)
+
+	It("retries UDP conntrack cleanup with the old Service definition", func() {
+		service := newService(testService, testNamespace, "10.96.0.1",
+			[]corev1.ServicePort{{Name: "dns", Protocol: corev1.ProtocolUDP, Port: 53, NodePort: 30080}},
+			corev1.ServiceTypeNodePort, nil, corev1.ServiceStatus{}, false, false)
+		Expect(npw.AddService(service)).To(Succeed())
+		updatedService := service.DeepCopy()
+		updatedService.Spec.Ports[0].Port = 54
+		updatedService.Spec.Ports[0].NodePort = 30081
+
+		netlinkMock := new(utilMocks.NetLinkOps)
+		filter := makeConntrackFilter(service.Spec.ClusterIP, 53, corev1.ProtocolUDP, netlink.ConntrackOrigDstIP)
+		netlinkMock.On("ConntrackDeleteFilters", netlink.ConntrackTableType(netlink.ConntrackTable), netlink.InetFamily(netlink.FAMILY_V4), filter).
+			Return(uint(0), fmt.Errorf("injected conntrack failure")).Once()
+		netlinkMock.On("ConntrackDeleteFilters", netlink.ConntrackTableType(netlink.ConntrackTable), netlink.InetFamily(netlink.FAMILY_V4), filter).
+			Return(uint(0), nil).Once()
+		originalNetlinkOps := util.GetNetLinkOps()
+		util.SetNetLinkOpMockInst(netlinkMock)
+		DeferCleanup(util.SetNetLinkOpMockInst, originalNetlinkOps)
+		Expect(npw.UpdateService(service, updatedService)).To(MatchError(ContainSubstring("injected conntrack failure")))
+		Expect(npw.AddService(updatedService)).To(Succeed())
+		netlinkMock.AssertExpectations(GinkgoT())
+		elements, err := nft.ListElements(context.Background(), "map", "nodeports-v4")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(elements).To(HaveLen(1))
+		Expect(elements[0].Key).To(Equal([]string{"udp", "30081"}))
+		Expect(elements[0].Value).To(Equal([]string{"10.96.0.1", "54"}))
+	})
+
+	DescribeTable("removes old rules when a Service no longer needs gateway rules", func(networkInactive bool) {
+		service := newService(testService, testNamespace, "10.96.0.1",
+			[]corev1.ServicePort{{Name: "http", Protocol: corev1.ProtocolTCP, Port: 80, NodePort: 30080}},
+			corev1.ServiceTypeNodePort, nil, corev1.ServiceStatus{}, false, false)
+		Expect(npw.AddService(service)).To(Succeed())
+		updatedService := service.DeepCopy()
+		if networkInactive {
+			npw.networkManager = &mockNetworkManagerWithInactiveNode{}
+			updatedService.Spec.Ports[0].NodePort = 30081
+		} else {
+			updatedService.Spec.Type = corev1.ServiceTypeExternalName
+			updatedService.Spec.ExternalName = "example.org"
+			updatedService.Spec.ClusterIP = ""
+			updatedService.Spec.ClusterIPs = nil
+			updatedService.Spec.Ports[0].NodePort = 0
+		}
+		Expect(npw.UpdateService(service, updatedService)).To(Succeed())
+		verifyNFTablesRule(nft, service.Spec.ClusterIP, 80, 30080, false, "the old NodePort must be removed")
+		verifyNFTablesRule(nft, service.Spec.ClusterIP, 80, 30081, false, "no replacement should be installed")
+	},
+		Entry("inactive network", true),
+		Entry("ExternalName Service", false),
+	)
+
 	DescribeTable("preserves Service steering across endpoint changes", func(mode config.GatewayMode, serviceType corev1.ServiceType, nodePort bool, etpLocal, itpLocal, udn bool) {
 		config.Gateway.Mode = mode
 		config.IPv6Mode = true
