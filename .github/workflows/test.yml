@@ -340,6 +340,14 @@ jobs:
           sudo modprobe vrf
         fi
 
+    - name: Setup envtest
+      run: |
+        # Pin to release-0.23: the @latest tag (v0.24.x) requires Go 1.26, while
+        # this repo builds with Go 1.25. release-0.23 still fetches 1.35.x binaries.
+        go install sigs.k8s.io/controller-runtime/tools/setup-envtest@release-0.23
+        ENVTEST_ASSETS=$(setup-envtest use 1.35.x --bin-dir ${{ github.workspace }}/envtest-bins -p path)
+        echo "KUBEBUILDER_ASSETS=${ENVTEST_ASSETS}" >> $GITHUB_ENV
+
     - name: Run unit tests
       run: |
         set -x

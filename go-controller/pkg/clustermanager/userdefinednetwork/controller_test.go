@@ -22,6 +22,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/testing"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -31,11 +32,13 @@ import (
 	ovncnitypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	ratypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1"
+	raclient "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/clientset/versioned"
 	apitypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/types"
 	udnv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1"
 	udnclient "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/clientset/versioned"
 	udnfakeclient "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/clientset/versioned/fake"
 	vtepv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/vtep/v1"
+	vtepclient "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/vtep/v1/apis/clientset/versioned"
 	vtepinformer "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/vtep/v1/apis/informers/externalversions/vtep/v1"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/metrics"
@@ -118,6 +121,48 @@ var _ = Describe("User Defined Network Controller", func() {
 		return New(cs.NetworkAttchDefClient, f.NADInformer(),
 			cs.UserDefinedNetworkClient, f.UserDefinedNetworkInformer(), f.ClusterUserDefinedNetworkInformer(),
 			renderNADStub, nm.Interface(), f.PodCoreInformer(), f.NamespaceInformer(), vtepInformer, f.RouteAdvertisementsInformer(), nil,
+		)
+	}
+
+	// newEnvtestController creates a controller backed by the shared envtest apiserver.
+	// Each test must use a unique namespace name because envtest state persists across
+	// tests: namespace deletion is async (Terminating phase) and leftover primary NADs
+	// cause "primary network already exist" conflicts.
+	newEnvtestController := func() *Controller {
+		cs = util.GetOVNClientset().GetClusterManagerClientset()
+
+		kubeClient, err := kubernetes.NewForConfig(restCfg)
+		Expect(err).NotTo(HaveOccurred())
+		nadClient, err := netv1clientset.NewForConfig(restCfg)
+		Expect(err).NotTo(HaveOccurred())
+		udnClient, err := udnclient.NewForConfig(restCfg)
+		Expect(err).NotTo(HaveOccurred())
+		vtepClient, err := vtepclient.NewForConfig(restCfg)
+		Expect(err).NotTo(HaveOccurred())
+		raClient, err := raclient.NewForConfig(restCfg)
+		Expect(err).NotTo(HaveOccurred())
+
+		cs.KubeClient = kubeClient
+		cs.NetworkAttchDefClient = nadClient
+		cs.UserDefinedNetworkClient = udnClient
+		cs.VTEPClient = vtepClient
+		cs.RouteAdvertisementsClient = raClient
+
+		f, err = factory.NewClusterManagerWatchFactory(cs)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(f.Start()).To(Succeed())
+
+		nm, err = networkmanager.NewForCluster(
+			&networkmanager.FakeControllerManager{}, f, cs, nil,
+			id.NewTunnelKeyAllocator("TunnelKeys"),
+		)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(nm.Start()).To(Succeed())
+
+		return New(cs.NetworkAttchDefClient, f.NADInformer(),
+			cs.UserDefinedNetworkClient, f.UserDefinedNetworkInformer(), f.ClusterUserDefinedNetworkInformer(),
+			template.RenderNetAttachDefManifest, nm.Interface(),
+			f.PodCoreInformer(), f.NamespaceInformer(), f.VTEPInformer(), f.RouteAdvertisementsInformer(), nil,
 		)
 	}
 
@@ -220,46 +265,93 @@ var _ = Describe("User Defined Network Controller", func() {
 			})
 
 			It("should create NAD successfully", func() {
-				udn := testPrimaryUDN()
-				expectedNAD := testNAD()
-				c = newTestController(renderNadStub(expectedNAD), udn, testNamespace("test"))
+				c = newEnvtestController()
+
+				_, err := cs.KubeClient.CoreV1().Namespaces().Create(context.Background(), testNamespace("test-create"), metav1.CreateOptions{})
+				if apierrors.IsAlreadyExists(err) {
+					err = nil
+				}
+				Expect(err).NotTo(HaveOccurred())
+
+				udn := &udnv1.UserDefinedNetwork{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test",
+						Namespace: "test-create",
+					},
+					Spec: udnv1.UserDefinedNetworkSpec{
+						Topology: udnv1.NetworkTopologyLayer3,
+						Layer3: &udnv1.Layer3Config{
+							Role:    udnv1.NetworkRolePrimary,
+							Subnets: []udnv1.Layer3Subnet{{CIDR: "10.100.0.0/16"}},
+						},
+					},
+				}
+				_, err = cs.UserDefinedNetworkClient.K8sV1().UserDefinedNetworks("test-create").Create(context.Background(), udn, metav1.CreateOptions{})
+				Expect(err).NotTo(HaveOccurred())
+
 				Expect(c.Run()).To(Succeed())
 
 				Eventually(func() []metav1.Condition {
-					udn, err := cs.UserDefinedNetworkClient.K8sV1().UserDefinedNetworks(udn.Namespace).Get(context.Background(), udn.Name, metav1.GetOptions{})
-					Expect(err).NotTo(HaveOccurred())
-					return normalizeConditions(udn.Status.Conditions)
-				}).Should(Equal([]metav1.Condition{{
+					updatedUDN, err := cs.UserDefinedNetworkClient.K8sV1().UserDefinedNetworks("test-create").Get(context.Background(), "test", metav1.GetOptions{})
+					if err != nil {
+						return nil
+					}
+					return normalizeConditions(updatedUDN.Status.Conditions)
+				}, 5*time.Second, 100*time.Millisecond).Should(Equal([]metav1.Condition{{
 					Type:    "NetworkCreated",
 					Status:  "True",
 					Reason:  "NetworkAttachmentDefinitionCreated",
 					Message: "NetworkAttachmentDefinition has been created",
 				}}))
 
-				nad, err := cs.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(udn.Namespace).Get(context.Background(), udn.Name, metav1.GetOptions{})
+				nad, err := cs.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions("test-create").Get(context.Background(), "test", metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
-
-				Expect(nad).To(Equal(expectedNAD))
+				Expect(nad.Name).To(Equal("test"))
+				Expect(nad.Namespace).To(Equal("test-create"))
+				Expect(nad.Labels).To(HaveKeyWithValue("k8s.ovn.org/user-defined-network", ""))
 			})
 
 			It("should fail when required namespace label is missing for primary network", func() {
-				udn := testPrimaryUDN()
-				expectedNAD := testNAD()
-				c = newTestController(renderNadStub(expectedNAD), udn, invalidTestNamespace("test"))
+				c = newEnvtestController()
+
+				_, err := cs.KubeClient.CoreV1().Namespaces().Create(context.Background(), invalidTestNamespace("test-no-label"), metav1.CreateOptions{})
+				if apierrors.IsAlreadyExists(err) {
+					err = nil
+				}
+				Expect(err).NotTo(HaveOccurred())
+
+				udn := &udnv1.UserDefinedNetwork{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test",
+						Namespace: "test-no-label",
+					},
+					Spec: udnv1.UserDefinedNetworkSpec{
+						Topology: udnv1.NetworkTopologyLayer3,
+						Layer3: &udnv1.Layer3Config{
+							Role:    udnv1.NetworkRolePrimary,
+							Subnets: []udnv1.Layer3Subnet{{CIDR: "10.101.0.0/16"}},
+						},
+					},
+				}
+				_, err = cs.UserDefinedNetworkClient.K8sV1().UserDefinedNetworks("test-no-label").Create(context.Background(), udn, metav1.CreateOptions{})
+				Expect(err).NotTo(HaveOccurred())
+
 				Expect(c.Run()).To(Succeed())
 
 				Eventually(func() []metav1.Condition {
-					udn, err := cs.UserDefinedNetworkClient.K8sV1().UserDefinedNetworks(udn.Namespace).Get(context.Background(), udn.Name, metav1.GetOptions{})
-					Expect(err).NotTo(HaveOccurred())
-					return normalizeConditions(udn.Status.Conditions)
-				}).Should(Equal([]metav1.Condition{{
+					updatedUDN, err := cs.UserDefinedNetworkClient.K8sV1().UserDefinedNetworks("test-no-label").Get(context.Background(), "test", metav1.GetOptions{})
+					if err != nil {
+						return nil
+					}
+					return normalizeConditions(updatedUDN.Status.Conditions)
+				}, 5*time.Second, 100*time.Millisecond).Should(Equal([]metav1.Condition{{
 					Type:    "NetworkCreated",
 					Status:  "False",
 					Reason:  "SyncError",
-					Message: "invalid primary network state for namespace \"test\": a valid primary user defined network or network attachment definition custom resource, and required namespace label \"k8s.ovn.org/primary-user-defined-network\" must both be present",
+					Message: "invalid primary network state for namespace \"test-no-label\": a valid primary user defined network or network attachment definition custom resource, and required namespace label \"k8s.ovn.org/primary-user-defined-network\" must both be present",
 				}}))
 
-				_, err := cs.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(udn.Namespace).Get(context.Background(), udn.Name, metav1.GetOptions{})
+				_, err = cs.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions("test-no-label").Get(context.Background(), "test", metav1.GetOptions{})
 				Expect(apierrors.IsNotFound(err)).To(BeTrue())
 			})
 
@@ -350,32 +442,62 @@ var _ = Describe("User Defined Network Controller", func() {
 				}}))
 			})
 			It("should reconcile mutated NAD", func() {
-				udn := testPrimaryUDN()
-				expectedNAD := testNAD()
-				c = newTestController(renderNadStub(expectedNAD), udn, testNamespace("test"))
+				c = newEnvtestController()
+
+				_, err := cs.KubeClient.CoreV1().Namespaces().Create(context.Background(), testNamespace("test-reconcile"), metav1.CreateOptions{})
+				if apierrors.IsAlreadyExists(err) {
+					err = nil
+				}
+				Expect(err).NotTo(HaveOccurred())
+
+				udn := &udnv1.UserDefinedNetwork{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test",
+						Namespace: "test-reconcile",
+					},
+					Spec: udnv1.UserDefinedNetworkSpec{
+						Topology: udnv1.NetworkTopologyLayer3,
+						Layer3: &udnv1.Layer3Config{
+							Role:    udnv1.NetworkRolePrimary,
+							Subnets: []udnv1.Layer3Subnet{{CIDR: "10.102.0.0/16"}},
+						},
+					},
+				}
+				_, err = cs.UserDefinedNetworkClient.K8sV1().UserDefinedNetworks("test-reconcile").Create(context.Background(), udn, metav1.CreateOptions{})
+				Expect(err).NotTo(HaveOccurred())
+
 				Expect(c.Run()).To(Succeed())
 
+				var originalConfig string
 				Eventually(func() []metav1.Condition {
-					udn, err := cs.UserDefinedNetworkClient.K8sV1().UserDefinedNetworks(udn.Namespace).Get(context.Background(), udn.Name, metav1.GetOptions{})
-					Expect(err).NotTo(HaveOccurred())
-					return normalizeConditions(udn.Status.Conditions)
-				}).Should(Equal([]metav1.Condition{{
+					updatedUDN, err := cs.UserDefinedNetworkClient.K8sV1().UserDefinedNetworks("test-reconcile").Get(context.Background(), "test", metav1.GetOptions{})
+					if err != nil {
+						return nil
+					}
+					return normalizeConditions(updatedUDN.Status.Conditions)
+				}, 5*time.Second, 100*time.Millisecond).Should(Equal([]metav1.Condition{{
 					Type:    "NetworkCreated",
 					Status:  "True",
 					Reason:  "NetworkAttachmentDefinitionCreated",
 					Message: "NetworkAttachmentDefinition has been created",
 				}}))
 
-				mutatedNAD := expectedNAD.DeepCopy()
+				nad, err := cs.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions("test-reconcile").Get(context.Background(), "test", metav1.GetOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				originalConfig = nad.Spec.Config
+
+				mutatedNAD := nad.DeepCopy()
 				mutatedNAD.Spec.Config = "MUTATED"
-				_, err := cs.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(udn.Namespace).Update(context.Background(), mutatedNAD, metav1.UpdateOptions{})
+				_, err = cs.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions("test-reconcile").Update(context.Background(), mutatedNAD, metav1.UpdateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 
-				Eventually(func() *netv1.NetworkAttachmentDefinition {
-					updatedNAD, err := cs.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(udn.Namespace).Get(context.Background(), udn.Name, metav1.GetOptions{})
-					Expect(err).NotTo(HaveOccurred())
-					return updatedNAD
-				}).Should(Equal(expectedNAD))
+				Eventually(func() string {
+					updatedNAD, err := cs.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions("test-reconcile").Get(context.Background(), "test", metav1.GetOptions{})
+					if err != nil {
+						return ""
+					}
+					return updatedNAD.Spec.Config
+				}, 5*time.Second, 100*time.Millisecond).Should(Equal(originalConfig))
 			})
 			It("should fail when update mutated NAD fails", func() {
 				udn := testPrimaryUDN()
@@ -475,16 +597,39 @@ var _ = Describe("User Defined Network Controller", func() {
 			})
 
 			It("should add finalizer to UDN", func() {
-				udn := testPrimaryUDN()
-				udn.Finalizers = nil
-				c = newTestController(noopRenderNadStub(), udn, testNamespace("test"))
+				c = newEnvtestController()
+
+				_, err := cs.KubeClient.CoreV1().Namespaces().Create(context.Background(), testNamespace("test-finalizer"), metav1.CreateOptions{})
+				if apierrors.IsAlreadyExists(err) {
+					err = nil
+				}
+				Expect(err).NotTo(HaveOccurred())
+
+				udn := &udnv1.UserDefinedNetwork{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test",
+						Namespace: "test-finalizer",
+					},
+					Spec: udnv1.UserDefinedNetworkSpec{
+						Topology: udnv1.NetworkTopologyLayer3,
+						Layer3: &udnv1.Layer3Config{
+							Role:    udnv1.NetworkRolePrimary,
+							Subnets: []udnv1.Layer3Subnet{{CIDR: "10.103.0.0/16"}},
+						},
+					},
+				}
+				_, err = cs.UserDefinedNetworkClient.K8sV1().UserDefinedNetworks("test-finalizer").Create(context.Background(), udn, metav1.CreateOptions{})
+				Expect(err).NotTo(HaveOccurred())
+
 				Expect(c.Run()).To(Succeed())
 
 				Eventually(func() []string {
-					udn, err := cs.UserDefinedNetworkClient.K8sV1().UserDefinedNetworks(udn.Namespace).Get(context.Background(), udn.Name, metav1.GetOptions{})
-					Expect(err).NotTo(HaveOccurred())
-					return udn.Finalizers
-				}).Should(Equal([]string{"k8s.ovn.org/user-defined-network-protection"}))
+					updatedUDN, err := cs.UserDefinedNetworkClient.K8sV1().UserDefinedNetworks("test-finalizer").Get(context.Background(), "test", metav1.GetOptions{})
+					if err != nil {
+						return nil
+					}
+					return updatedUDN.Finalizers
+				}, 5*time.Second, 100*time.Millisecond).Should(Equal([]string{"k8s.ovn.org/user-defined-network-protection"}))
 			})
 			It("should fail when add finalizer to UDN fails", func() {
 				udn := testPrimaryUDN()

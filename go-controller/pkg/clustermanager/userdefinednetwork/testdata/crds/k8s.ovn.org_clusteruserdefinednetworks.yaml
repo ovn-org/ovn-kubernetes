@@ -1,0 +1,992 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.19.0
+  name: clusteruserdefinednetworks.k8s.ovn.org
+spec:
+  group: k8s.ovn.org
+  names:
+    kind: ClusterUserDefinedNetwork
+    listKind: ClusterUserDefinedNetworkList
+    plural: clusteruserdefinednetworks
+    shortNames:
+    - cudn
+    singular: clusteruserdefinednetwork
+  scope: Cluster
+  versions:
+  - name: v1
+    schema:
+      openAPIV3Schema:
+        description: ClusterUserDefinedNetwork describe network request for a shared
+          network across namespaces.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: ClusterUserDefinedNetworkSpec defines the desired state of
+              ClusterUserDefinedNetwork.
+            properties:
+              namespaceSelector:
+                description: NamespaceSelector Label selector for which namespace
+                  network should be available for.
+                properties:
+                  matchExpressions:
+                    description: matchExpressions is a list of label selector requirements.
+                      The requirements are ANDed.
+                    items:
+                      description: |-
+                        A label selector requirement is a selector that contains values, a key, and an operator that
+                        relates the key and values.
+                      properties:
+                        key:
+                          description: key is the label key that the selector applies
+                            to.
+                          type: string
+                        operator:
+                          description: |-
+                            operator represents a key's relationship to a set of values.
+                            Valid operators are In, NotIn, Exists and DoesNotExist.
+                          type: string
+                        values:
+                          description: |-
+                            values is an array of string values. If the operator is In or NotIn,
+                            the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                            the values array must be empty. This array is replaced during a strategic
+                            merge patch.
+                          items:
+                            type: string
+                          type: array
+                          x-kubernetes-list-type: atomic
+                      required:
+                      - key
+                      - operator
+                      type: object
+                    type: array
+                    x-kubernetes-list-type: atomic
+                  matchLabels:
+                    additionalProperties:
+                      type: string
+                    description: |-
+                      matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                      map is equivalent to an element of matchExpressions, whose key field is "key", the
+                      operator is "In", and the values array contains only "value". The requirements are ANDed.
+                    type: object
+                type: object
+                x-kubernetes-map-type: atomic
+              network:
+                description: Network is the user-defined-network spec
+                properties:
+                  evpn:
+                    description: |-
+                      EVPN contains configuration for EVPN mode.
+                      This is only allowed when Transport is "EVPN".
+                    properties:
+                      ipVRF:
+                        description: |-
+                          IPVRF contains the IP-VRF configuration for Layer 3 EVPN.
+                          This field is required for Layer3 topology and optional for Layer2 topology.
+                        properties:
+                          routeTarget:
+                            description: |-
+                              RouteTarget is the import/export route target for this VRF.
+                              If not specified, it will be auto-generated as "<AS (Autonomous System)>:<VNI (Virtual Network Identifier)>".
+                              Auto-generation will use 2-byte AS if VNI > 65535, since 4-byte AS/IPv4 only allows 2-byte local admin.
+
+                              Follows FRR EVPN L3 Route-Target format (A.B.C.D:MN|EF:OPQR|GHJK:MN|*:OPQR|*:MN):
+                                - EF:OPQR   = 2-byte AS (1-65535) : local admin (4 bytes, 1-4294967295)
+                                - GHJK:MN   = 4-byte AS (65536-4294967295) : local admin (2 bytes, 1-65535)
+                                - A.B.C.D:MN = IPv4 address : local admin (2 bytes, 1-65535)
+                                - *:OPQR    = wildcard AS : local admin (4 bytes, 1-4294967295) - for import matching
+                                - *:MN      = wildcard AS : local admin (2 bytes, 1-65535) - for import matching
+
+                              The 6-byte value constraint (RFC 4360) means AS size + local admin size = 6 bytes.
+                            maxLength: 21
+                            type: string
+                            x-kubernetes-validations:
+                            - message: RT must contain exactly one colon
+                              rule: self.split(':').size() == 2
+                            - message: RT global administrator must be either '*',
+                                an IPv4 address, or a number
+                              rule: self.split(':').size() != 2 || (self.startsWith('*:')
+                                || isIP(self.split(':')[0]) || self.split(':')[0].matches('^[0-9]+$'))
+                            - message: RT local administrator must be a number
+                              rule: self.split(':').size() != 2 || self.split(':')[1].matches('^[0-9]+$')
+                            - message: RT with wildcard global administrator must
+                                have format *:OPQR where OPQR <= 4294967295
+                              rule: self.split(':').size() != 2 || !self.startsWith('*:')
+                                || (self.split(':')[1].matches('^[0-9]+$') && uint(self.split(':')[1])
+                                <= 4294967295u)
+                            - message: RT with IPv4 global administrator must have
+                                format A.B.C.D:MN where MN <= 65535
+                              rule: self.split(':').size() != 2 || !self.split(':')[0].contains('.')
+                                || (self.split(':')[1].matches('^[0-9]+$') && uint(self.split(':')[1])
+                                <= 65535u)
+                            - message: RT with 4-byte ASN global administrator must
+                                have format GHJK:MN where GHJK <= 4294967295 and MN
+                                <= 65535
+                              rule: self.split(':').size() != 2 || self.startsWith('*:')
+                                || self.split(':')[0].contains('.') || !self.split(':')[0].matches('^[0-9]+$')
+                                || !self.split(':')[1].matches('^[0-9]+$') || uint(self.split(':')[0])
+                                <= 65535u || uint(self.split(':')[1]) <= 65535u
+                            - message: RT with 2-byte ASN global administrator must
+                                have format EF:OPQR where EF <= 65535 and OPQR <=
+                                4294967295
+                              rule: self.split(':').size() != 2 || self.startsWith('*:')
+                                || self.split(':')[0].contains('.') || !self.split(':')[0].matches('^[0-9]+$')
+                                || !self.split(':')[1].matches('^[0-9]+$') || uint(self.split(':')[0])
+                                > 65535u || uint(self.split(':')[1]) <= 4294967295u
+                          vni:
+                            description: |-
+                              VNI is the Virtual Network Identifier for this VRF.
+                              VNI is a 24-bit field in the VXLAN header (RFC 7348), allowing values from 1 to 16777215.
+                              but in the future this could be having different limit for other dataplane implementations.
+                              Must be unique across all EVPN configurations in the cluster.
+                            format: int32
+                            maximum: 16777215
+                            minimum: 1
+                            type: integer
+                        required:
+                        - vni
+                        type: object
+                      macVRF:
+                        description: |-
+                          MACVRF contains the MAC-VRF configuration for Layer 2 EVPN.
+                          This field is required for Layer2 topology and forbidden for Layer3 topology.
+                        properties:
+                          routeTarget:
+                            description: |-
+                              RouteTarget is the import/export route target for this VRF.
+                              If not specified, it will be auto-generated as "<AS (Autonomous System)>:<VNI (Virtual Network Identifier)>".
+                              Auto-generation will use 2-byte AS if VNI > 65535, since 4-byte AS/IPv4 only allows 2-byte local admin.
+
+                              Follows FRR EVPN L3 Route-Target format (A.B.C.D:MN|EF:OPQR|GHJK:MN|*:OPQR|*:MN):
+                                - EF:OPQR   = 2-byte AS (1-65535) : local admin (4 bytes, 1-4294967295)
+                                - GHJK:MN   = 4-byte AS (65536-4294967295) : local admin (2 bytes, 1-65535)
+                                - A.B.C.D:MN = IPv4 address : local admin (2 bytes, 1-65535)
+                                - *:OPQR    = wildcard AS : local admin (4 bytes, 1-4294967295) - for import matching
+                                - *:MN      = wildcard AS : local admin (2 bytes, 1-65535) - for import matching
+
+                              The 6-byte value constraint (RFC 4360) means AS size + local admin size = 6 bytes.
+                            maxLength: 21
+                            type: string
+                            x-kubernetes-validations:
+                            - message: RT must contain exactly one colon
+                              rule: self.split(':').size() == 2
+                            - message: RT global administrator must be either '*',
+                                an IPv4 address, or a number
+                              rule: self.split(':').size() != 2 || (self.startsWith('*:')
+                                || isIP(self.split(':')[0]) || self.split(':')[0].matches('^[0-9]+$'))
+                            - message: RT local administrator must be a number
+                              rule: self.split(':').size() != 2 || self.split(':')[1].matches('^[0-9]+$')
+                            - message: RT with wildcard global administrator must
+                                have format *:OPQR where OPQR <= 4294967295
+                              rule: self.split(':').size() != 2 || !self.startsWith('*:')
+                                || (self.split(':')[1].matches('^[0-9]+$') && uint(self.split(':')[1])
+                                <= 4294967295u)
+                            - message: RT with IPv4 global administrator must have
+                                format A.B.C.D:MN where MN <= 65535
+                              rule: self.split(':').size() != 2 || !self.split(':')[0].contains('.')
+                                || (self.split(':')[1].matches('^[0-9]+$') && uint(self.split(':')[1])
+                                <= 65535u)
+                            - message: RT with 4-byte ASN global administrator must
+                                have format GHJK:MN where GHJK <= 4294967295 and MN
+                                <= 65535
+                              rule: self.split(':').size() != 2 || self.startsWith('*:')
+                                || self.split(':')[0].contains('.') || !self.split(':')[0].matches('^[0-9]+$')
+                                || !self.split(':')[1].matches('^[0-9]+$') || uint(self.split(':')[0])
+                                <= 65535u || uint(self.split(':')[1]) <= 65535u
+                            - message: RT with 2-byte ASN global administrator must
+                                have format EF:OPQR where EF <= 65535 and OPQR <=
+                                4294967295
+                              rule: self.split(':').size() != 2 || self.startsWith('*:')
+                                || self.split(':')[0].contains('.') || !self.split(':')[0].matches('^[0-9]+$')
+                                || !self.split(':')[1].matches('^[0-9]+$') || uint(self.split(':')[0])
+                                > 65535u || uint(self.split(':')[1]) <= 4294967295u
+                          vni:
+                            description: |-
+                              VNI is the Virtual Network Identifier for this VRF.
+                              VNI is a 24-bit field in the VXLAN header (RFC 7348), allowing values from 1 to 16777215.
+                              but in the future this could be having different limit for other dataplane implementations.
+                              Must be unique across all EVPN configurations in the cluster.
+                            format: int32
+                            maximum: 16777215
+                            minimum: 1
+                            type: integer
+                        required:
+                        - vni
+                        type: object
+                      vtep:
+                        description: VTEP is the name of the VTEP CR that defines
+                          VTEP IPs for EVPN.
+                        minLength: 1
+                        type: string
+                    required:
+                    - vtep
+                    type: object
+                    x-kubernetes-validations:
+                    - message: at least one of macVRF or ipVRF must be specified
+                      rule: has(self.macVRF) || has(self.ipVRF)
+                    - message: macVRF and ipVRF must use different VNIs
+                      rule: '!has(self.macVRF) || !has(self.ipVRF) || self.macVRF.vni
+                        != self.ipVRF.vni'
+                  layer2:
+                    description: Layer2 is the Layer2 topology configuration.
+                    properties:
+                      defaultGatewayIPs:
+                        description: |-
+                          defaultGatewayIPs specifies the default gateway IP used in the internal OVN topology.
+
+                          Dual-stack clusters may set 2 IPs (one for each IP family), otherwise only 1 IP is allowed.
+                          This field is only allowed for "Primary" network.
+                          It is not recommended to set this field without explicit need and understanding of the OVN network topology.
+                          When omitted, an IP from the subnets field is used.
+                        items:
+                          type: string
+                          x-kubernetes-validations:
+                          - message: IP is invalid
+                            rule: isIP(self)
+                        maxItems: 2
+                        minItems: 1
+                        type: array
+                        x-kubernetes-validations:
+                        - message: When 2 IPs are set, they must be from different
+                            IP families
+                          rule: size(self) != 2 || !isIP(self[0]) || !isIP(self[1])
+                            || ip(self[0]).family() != ip(self[1]).family()
+                      infrastructureSubnets:
+                        description: |-
+                          infrastructureSubnets specifies a list of internal CIDR ranges that OVN-Kubernetes will reserve for internal network infrastructure.
+                          Any IP addresses within these ranges cannot be assigned to workloads.
+                          When omitted, OVN-Kubernetes will automatically allocate IP addresses from `subnets` for its infrastructure needs.
+                          When there are not enough available IPs in the provided infrastructureSubnets, OVN-Kubernetes will automatically allocate IP addresses from subnets for its infrastructure needs.
+                          When `reservedSubnets` is also specified the CIDRs cannot overlap.
+                          When `defaultGatewayIPs` is also specified, the default gateway IPs must belong to one of the infrastructure subnet CIDRs.
+                          Each item should be in range of the specified CIDR(s) in `subnets`.
+                          The maximum number of entries allowed is 4.
+                          The format should match standard CIDR notation (for example, "10.128.0.0/16").
+                          This field must be omitted if `subnets` is unset or `ipam.mode` is `Disabled`.
+                        items:
+                          maxLength: 43
+                          type: string
+                          x-kubernetes-validations:
+                          - message: CIDR is invalid
+                            rule: isCIDR(self)
+                        maxItems: 4
+                        minItems: 1
+                        type: array
+                      ipam:
+                        description: IPAM section contains IPAM-related configuration
+                          for the network.
+                        minProperties: 1
+                        properties:
+                          lifecycle:
+                            description: |-
+                              Lifecycle controls IP addresses management lifecycle.
+
+                              The only allowed value is Persistent. When set, the IP addresses assigned by OVN-Kubernetes will be persisted in an
+                              `ipamclaims.k8s.cni.cncf.io` object. These IP addresses will be reused by other pods if requested.
+                              Only supported when mode is `Enabled`.
+                            enum:
+                            - Persistent
+                            type: string
+                          mode:
+                            description: |-
+                              Mode controls how much of the IP configuration will be managed by OVN.
+                              `Enabled` means OVN-Kubernetes will apply IP configuration to the SDN infrastructure and it will also assign IPs
+                              from the selected subnet to the individual pods.
+                              `Disabled` means OVN-Kubernetes will only assign MAC addresses and provide layer 2 communication, letting users
+                              configure IP addresses for the pods.
+                              `Disabled` is only available for Secondary networks.
+                              By disabling IPAM, any Kubernetes features that rely on selecting pods by IP will no longer function
+                              (such as network policy, services, etc). Additionally, IP port security will also be disabled for interfaces attached to this network.
+                              Defaults to `Enabled`.
+                            enum:
+                            - Enabled
+                            - Disabled
+                            type: string
+                        type: object
+                        x-kubernetes-validations:
+                        - message: lifecycle Persistent is only supported when ipam.mode
+                            is Enabled
+                          rule: '!has(self.lifecycle) || self.lifecycle != ''Persistent''
+                            || !has(self.mode) || self.mode == ''Enabled'''
+                      joinSubnets:
+                        description: |-
+                          JoinSubnets are used inside the OVN network topology.
+
+                          Dual-stack clusters may set 2 subnets (one for each IP family), otherwise only 1 subnet is allowed.
+                          This field is only allowed for "Primary" network.
+                          It is not recommended to set this field without explicit need and understanding of the OVN network topology.
+                          When omitted, the platform will choose a reasonable default which is subject to change over time.
+                        items:
+                          maxLength: 43
+                          type: string
+                          x-kubernetes-validations:
+                          - message: CIDR is invalid
+                            rule: isCIDR(self)
+                        maxItems: 2
+                        minItems: 1
+                        type: array
+                        x-kubernetes-validations:
+                        - message: When 2 CIDRs are set, they must be from different
+                            IP families
+                          rule: size(self) != 2 || !isCIDR(self[0]) || !isCIDR(self[1])
+                            || cidr(self[0]).ip().family() != cidr(self[1]).ip().family()
+                      mtu:
+                        description: |-
+                          MTU is the maximum transmission unit for a network.
+                          MTU is optional, if not provided, the globally configured value in OVN-Kubernetes (defaults to 1400) is used for the network.
+                        format: int32
+                        maximum: 65536
+                        minimum: 576
+                        type: integer
+                      reservedSubnets:
+                        description: |-
+                          reservedSubnets specifies a list of CIDRs reserved for static IP assignment, excluded from automatic allocation.
+                          reservedSubnets is optional. When omitted, all IP addresses in `subnets` are available for automatic assignment.
+                          IPs from these ranges can still be requested through static IP assignment.
+                          Each item should be in range of the specified CIDR(s) in `subnets`.
+                          The maximum number of entries allowed is 25.
+                          The format should match standard CIDR notation (for example, "10.128.0.0/16").
+                          This field must be omitted if `subnets` is unset or `ipam.mode` is `Disabled`.
+                        items:
+                          maxLength: 43
+                          type: string
+                          x-kubernetes-validations:
+                          - message: CIDR is invalid
+                            rule: isCIDR(self)
+                        maxItems: 25
+                        minItems: 1
+                        type: array
+                      role:
+                        description: |-
+                          Role describes the network role in the pod.
+
+                          Allowed value is "Secondary".
+                          Secondary network is only assigned to pods that use `k8s.v1.cni.cncf.io/networks` annotation to select given network.
+                        enum:
+                        - Primary
+                        - Secondary
+                        type: string
+                      subnets:
+                        description: |-
+                          Subnets are used for the pod network across the cluster.
+                          Dual-stack clusters may set 2 subnets (one for each IP family), otherwise only 1 subnet is allowed.
+
+                          The format should match standard CIDR notation (for example, "10.128.0.0/16").
+                          This field must be omitted if `ipam.mode` is `Disabled`.
+                        items:
+                          maxLength: 43
+                          type: string
+                          x-kubernetes-validations:
+                          - message: CIDR is invalid
+                            rule: isCIDR(self)
+                        maxItems: 2
+                        minItems: 1
+                        type: array
+                        x-kubernetes-validations:
+                        - message: When 2 CIDRs are set, they must be from different
+                            IP families
+                          rule: size(self) != 2 || !isCIDR(self[0]) || !isCIDR(self[1])
+                            || cidr(self[0]).ip().family() != cidr(self[1]).ip().family()
+                    required:
+                    - role
+                    type: object
+                    x-kubernetes-validations:
+                    - message: Layer2 is immutable
+                      rule: self == oldSelf
+                    - message: Subnets is required with ipam.mode is Enabled or unset
+                      rule: has(self.ipam) && has(self.ipam.mode) && self.ipam.mode
+                        != 'Enabled' || has(self.subnets)
+                    - message: Subnets must be unset when ipam.mode is Disabled
+                      rule: '!has(self.ipam) || !has(self.ipam.mode) || self.ipam.mode
+                        != ''Disabled'' || !has(self.subnets)'
+                    - message: Disabled ipam.mode is only supported for Secondary
+                        network
+                      rule: '!has(self.ipam) || !has(self.ipam.mode) || self.ipam.mode
+                        != ''Disabled'' || self.role == ''Secondary'''
+                    - message: JoinSubnets is only supported for Primary network
+                      rule: '!has(self.joinSubnets) || has(self.role) && self.role
+                        == ''Primary'''
+                    - message: MTU should be greater than or equal to 1280 when IPv6
+                        subnet is used
+                      rule: '!has(self.subnets) || !has(self.mtu) || !self.subnets.exists_one(i,
+                        isCIDR(i) && cidr(i).ip().family() == 6) || self.mtu >= 1280'
+                    - message: defaultGatewayIPs is only supported for Primary network
+                      rule: '!has(self.defaultGatewayIPs) || has(self.role) && self.role
+                        == ''Primary'''
+                    - message: defaultGatewayIPs must belong to one of the subnets
+                        specified in the subnets field
+                      rule: '!has(self.defaultGatewayIPs) || self.defaultGatewayIPs.all(ip,
+                        self.subnets.exists(subnet, cidr(subnet).containsIP(ip)))'
+                    - message: defaultGatewayIPs must be specified for all IP families
+                      rule: '!has(self.defaultGatewayIPs) || size(self.defaultGatewayIPs)
+                        == size(self.subnets)'
+                    - message: reservedSubnets must be unset when subnets is unset
+                      rule: '!has(self.reservedSubnets) || has(self.subnets)'
+                    - message: reservedSubnets is only supported for Primary network
+                      rule: '!has(self.reservedSubnets) || has(self.role) && self.role
+                        == ''Primary'''
+                    - message: infrastructureSubnets must be unset when subnets is
+                        unset
+                      rule: '!has(self.infrastructureSubnets) || has(self.subnets)'
+                    - message: infrastructureSubnets is only supported for Primary
+                        network
+                      rule: '!has(self.infrastructureSubnets) || has(self.role) &&
+                        self.role == ''Primary'''
+                    - message: defaultGatewayIPs have to belong to infrastructureSubnets
+                      rule: '!has(self.infrastructureSubnets) || !has(self.defaultGatewayIPs)
+                        || self.defaultGatewayIPs.all(ip, self.infrastructureSubnets.exists(subnet,
+                        cidr(subnet).containsIP(ip)))'
+                    - fieldPath: .reservedSubnets
+                      message: reservedSubnets must be subnetworks of the networks
+                        specified in the subnets field
+                      rule: '!has(self.reservedSubnets) || self.reservedSubnets.all(e,
+                        self.subnets.exists(s, cidr(s).containsCIDR(cidr(e))))'
+                    - fieldPath: .infrastructureSubnets
+                      message: infrastructureSubnets must be subnetworks of the networks
+                        specified in the subnets field
+                      rule: '!has(self.infrastructureSubnets) || self.infrastructureSubnets.all(e,
+                        self.subnets.exists(s, cidr(s).containsCIDR(cidr(e))))'
+                    - message: infrastructureSubnets and reservedSubnets must not
+                        overlap
+                      rule: '!has(self.infrastructureSubnets) || !has(self.reservedSubnets)
+                        || self.infrastructureSubnets.all(infra, !self.reservedSubnets.exists(reserved,
+                        cidr(infra).containsCIDR(reserved) || cidr(reserved).containsCIDR(infra)))'
+                    - message: infrastructureSubnets must be a masked network address
+                        (no host bits set)
+                      rule: '!has(self.infrastructureSubnets) || self.infrastructureSubnets.all(s,
+                        isCIDR(s) && cidr(s) == cidr(s).masked())'
+                    - message: reservedSubnets must be a masked network address (no
+                        host bits set)
+                      rule: '!has(self.reservedSubnets) || self.reservedSubnets.all(s,
+                        isCIDR(s) && cidr(s) == cidr(s).masked())'
+                  layer3:
+                    description: Layer3 is the Layer3 topology configuration.
+                    properties:
+                      joinSubnets:
+                        description: |-
+                          JoinSubnets are used inside the OVN network topology.
+
+                          Dual-stack clusters may set 2 subnets (one for each IP family), otherwise only 1 subnet is allowed.
+                          This field is only allowed for "Primary" network.
+                          It is not recommended to set this field without explicit need and understanding of the OVN network topology.
+                          When omitted, the platform will choose a reasonable default which is subject to change over time.
+                        items:
+                          maxLength: 43
+                          type: string
+                          x-kubernetes-validations:
+                          - message: CIDR is invalid
+                            rule: isCIDR(self)
+                        maxItems: 2
+                        minItems: 1
+                        type: array
+                        x-kubernetes-validations:
+                        - message: joinSubnets is immutable
+                          rule: self == oldSelf
+                        - message: When 2 CIDRs are set, they must be from different
+                            IP families
+                          rule: size(self) != 2 || !isCIDR(self[0]) || !isCIDR(self[1])
+                            || cidr(self[0]).ip().family() != cidr(self[1]).ip().family()
+                      mtu:
+                        description: |-
+                          MTU is the maximum transmission unit for a network.
+
+                          MTU is optional, if not provided, the globally configured value in OVN-Kubernetes (defaults to 1400) is used for the network.
+                        format: int32
+                        maximum: 65536
+                        minimum: 576
+                        type: integer
+                        x-kubernetes-validations:
+                        - message: mtu is immutable
+                          rule: self == oldSelf
+                      role:
+                        description: |-
+                          Role describes the network role in the pod.
+
+                          Allowed values are "Primary" and "Secondary".
+                          Primary network is automatically assigned to every pod created in the same namespace.
+                          Secondary network is only assigned to pods that use `k8s.v1.cni.cncf.io/networks` annotation to select given network.
+                        enum:
+                        - Primary
+                        - Secondary
+                        type: string
+                        x-kubernetes-validations:
+                        - message: role is immutable
+                          rule: self == oldSelf
+                      subnets:
+                        description: |-
+                          Subnets are used for the pod network across the cluster.
+
+                          Each IP family can have multiple subnets.
+                          For each IP family, every node allocates a smaller subnet from the provided subnets.
+                        items:
+                          properties:
+                            cidr:
+                              description: CIDR specifies L3Subnet, which is split
+                                into smaller subnets for every node.
+                              maxLength: 43
+                              type: string
+                              x-kubernetes-validations:
+                              - message: CIDR is invalid
+                                rule: isCIDR(self)
+                            hostSubnet:
+                              description: |-
+                                HostSubnet specifies the subnet size for every node.
+
+                                When not set, it will be assigned automatically.
+                              format: int32
+                              maximum: 127
+                              minimum: 1
+                              type: integer
+                          required:
+                          - cidr
+                          type: object
+                          x-kubernetes-validations:
+                          - message: HostSubnet must be smaller than CIDR subnet
+                            rule: '!has(self.hostSubnet) || !isCIDR(self.cidr) ||
+                              self.hostSubnet > cidr(self.cidr).prefixLength()'
+                          - message: HostSubnet must < 32 for ipv4 CIDR
+                            rule: '!has(self.hostSubnet) || !isCIDR(self.cidr) ||
+                              (cidr(self.cidr).ip().family() != 4 || self.hostSubnet
+                              < 32)'
+                        maxItems: 400
+                        minItems: 1
+                        type: array
+                    required:
+                    - role
+                    - subnets
+                    type: object
+                    x-kubernetes-validations:
+                    - message: Subnets is immutable for Secondary role
+                      rule: self.role != 'Secondary' || self.subnets == oldSelf.subnets
+                    - message: Secondary networks may define at most 2 subnets
+                      rule: self.role != 'Secondary' || !has(self.subnets) || self.subnets.size()
+                        <= 2
+                    - message: When 2 CIDRs are set for Secondary networks, they must
+                        be from different IP families
+                      rule: self.role != 'Secondary' || size(self.subnets) != 2 ||
+                        !isCIDR(self.subnets[0].cidr) || !isCIDR(self.subnets[1].cidr)
+                        || cidr(self.subnets[0].cidr).ip().family() != cidr(self.subnets[1].cidr).ip().family()
+                    - message: JoinSubnets is only supported for Primary network
+                      rule: '!has(self.joinSubnets) || has(self.role) && self.role
+                        == ''Primary'''
+                    - message: MTU should be greater than or equal to 1280 when IPv6
+                        subnet is used
+                      rule: '!has(self.subnets) || !has(self.mtu) || !self.subnets.exists_one(i,
+                        isCIDR(i.cidr) && cidr(i.cidr).ip().family() == 6) || self.mtu
+                        >= 1280'
+                    - message: Removing existing subnets is not allowed
+                      rule: '!has(oldSelf.subnets) || oldSelf.subnets.all(old, self.subnets.exists(new,
+                        new.cidr == old.cidr))'
+                    - message: Subnets must not overlap or contain each other
+                      rule: '!has(self.subnets) || self.subnets.size() == 1 || !self.subnets.exists(i,
+                        self.subnets.exists(j, i != j && cidr(i.cidr).containsCIDR(j.cidr)))'
+                    - message: Subnets with same CIDR are not allowed
+                      rule: '!has(self.subnets) || self.subnets.size() == 1 || !self.subnets.exists(i,
+                        self.subnets.filter(j, j.cidr == i.cidr).size() > 1)'
+                    - message: hostSubnet is immutable
+                      rule: '!has(oldSelf.subnets) || oldSelf.subnets.all(old, self.subnets.exists(new,
+                        new.cidr == old.cidr && (!has(old.hostSubnet) && !has(new.hostSubnet)
+                        || has(old.hostSubnet) && has(new.hostSubnet) && old.hostSubnet
+                        == new.hostSubnet)))'
+                    - message: Subnets from the same IP family must use the same hostSubnet
+                        value
+                      rule: '!has(self.subnets) || self.subnets.size() == 1 || self.subnets.all(i,
+                        self.subnets.all(j, cidr(i.cidr).ip().family() != cidr(j.cidr).ip().family()
+                        || (has(i.hostSubnet) == has(j.hostSubnet) && (!has(i.hostSubnet)
+                        || i.hostSubnet == j.hostSubnet))))'
+                  localnet:
+                    description: Localnet is the Localnet topology configuration.
+                    properties:
+                      excludeSubnets:
+                        description: |-
+                          excludeSubnets is a list of CIDRs to be removed from the specified CIDRs in `subnets`.
+                          The CIDRs in this list must be in range of at least one subnet specified in `subnets`.
+                          excludeSubnets is optional. When omitted no IP address is excluded and all IP addresses specified in `subnets`
+                          are subject to assignment.
+                          The format should match standard CIDR notation (for example, "10.128.0.0/16").
+                          This field must be omitted if `subnets` is unset or `ipam.mode` is `Disabled`.
+                          When `physicalNetworkName` points to OVS bridge mapping of a network with reserved IP addresses
+                          (which shouldn't be assigned by OVN-Kubernetes), the specified CIDRs will not be assigned. For example:
+                          Given: `subnets: "10.0.0.0/24"`, `excludeSubnets: "10.0.0.200/30", the following addresses will not be assigned
+                          to pods: `10.0.0.201`, `10.0.0.202`.
+                        items:
+                          maxLength: 43
+                          type: string
+                          x-kubernetes-validations:
+                          - message: CIDR is invalid
+                            rule: isCIDR(self)
+                        maxItems: 25
+                        minItems: 1
+                        type: array
+                      ipam:
+                        description: "ipam configurations for the network.\nipam is
+                          optional. When omitted, `subnets` must be specified.\nWhen
+                          `ipam.mode` is `Disabled`, `subnets` must be omitted.\n`ipam.mode`
+                          controls how much of the IP configuration will be managed
+                          by OVN.\n   When `Enabled`, OVN-Kubernetes will apply IP
+                          configuration to the SDN infra and assign IPs from the selected\n
+                          \  subnet to the pods.\n   When `Disabled`, OVN-Kubernetes
+                          only assigns MAC addresses, and provides layer2 communication,
+                          and enables users\n   to configure IP addresses on the pods.\n`ipam.lifecycle`
+                          controls IP addresses management lifecycle.\n   When set
+                          to 'Persistent', the assigned IP addresses will be persisted
+                          in `ipamclaims.k8s.cni.cncf.io` object.\n\t  Useful for
+                          VMs, IP address will be persistent after restarts and migrations.
+                          Supported when `ipam.mode` is `Enabled`."
+                        minProperties: 1
+                        properties:
+                          lifecycle:
+                            description: |-
+                              Lifecycle controls IP addresses management lifecycle.
+
+                              The only allowed value is Persistent. When set, the IP addresses assigned by OVN-Kubernetes will be persisted in an
+                              `ipamclaims.k8s.cni.cncf.io` object. These IP addresses will be reused by other pods if requested.
+                              Only supported when mode is `Enabled`.
+                            enum:
+                            - Persistent
+                            type: string
+                          mode:
+                            description: |-
+                              Mode controls how much of the IP configuration will be managed by OVN.
+                              `Enabled` means OVN-Kubernetes will apply IP configuration to the SDN infrastructure and it will also assign IPs
+                              from the selected subnet to the individual pods.
+                              `Disabled` means OVN-Kubernetes will only assign MAC addresses and provide layer 2 communication, letting users
+                              configure IP addresses for the pods.
+                              `Disabled` is only available for Secondary networks.
+                              By disabling IPAM, any Kubernetes features that rely on selecting pods by IP will no longer function
+                              (such as network policy, services, etc). Additionally, IP port security will also be disabled for interfaces attached to this network.
+                              Defaults to `Enabled`.
+                            enum:
+                            - Enabled
+                            - Disabled
+                            type: string
+                        type: object
+                        x-kubernetes-validations:
+                        - message: lifecycle Persistent is only supported when ipam.mode
+                            is Enabled
+                          rule: '!has(self.lifecycle) || self.lifecycle != ''Persistent''
+                            || !has(self.mode) || self.mode == ''Enabled'''
+                      mtu:
+                        description: |-
+                          mtu is the maximum transmission unit for a network.
+                          mtu is optional. When omitted, the configured value in OVN-Kubernetes (defaults to 1500 for localnet topology)
+                          is used for the network.
+                          Minimum value for IPv4 subnet is 576, and for IPv6 subnet is 1280.
+                          Maximum value is 65536.
+                          In a scenario `physicalNetworkName` points to OVS bridge mapping of a network configured with certain MTU settings,
+                          this field enables configuring the same MTU on pod interface, having the pod MTU aligned with the network MTU.
+                          Misaligned MTU across the stack (e.g.: pod has MTU X, node NIC has MTU Y), could result in network disruptions
+                          and bad performance.
+                        format: int32
+                        maximum: 65536
+                        minimum: 576
+                        type: integer
+                      physicalNetworkName:
+                        description: |-
+                          physicalNetworkName points to the OVS bridge-mapping's network-name configured in the nodes, required.
+                          Min length is 1, max length is 253, cannot contain `,` or `:` characters.
+                          In case OVS bridge-mapping is defined by Kubernetes-nmstate with `NodeNetworkConfigurationPolicy` (NNCP),
+                          this field should point to the NNCP `spec.desiredState.ovn.bridge-mappings` item's `localnet` value.
+                        maxLength: 253
+                        minLength: 1
+                        type: string
+                        x-kubernetes-validations:
+                        - message: physicalNetworkName cannot contain `,` or `:` characters
+                          rule: self.matches('^[^,:]+$')
+                      role:
+                        description: |-
+                          role describes the network role in the pod, required.
+                          Controls whether the pod interface will act as primary or secondary.
+                          Localnet topology supports `Secondary` only.
+                          The network will be assigned to pods that have the `k8s.v1.cni.cncf.io/networks` annotation in place pointing
+                          to subject.
+                        enum:
+                        - Secondary
+                        type: string
+                      subnets:
+                        description: |-
+                          subnets is a list of subnets used for pods in this localnet network across the cluster.
+                          The list may be either 1 IPv4 subnet, 1 IPv6 subnet, or 1 of each IP family.
+                          When set, OVN-Kubernetes assigns an IP address from the specified CIDRs to the connected pod,
+                          eliminating the need for manual IP assignment or reliance on an external IPAM service (e.g., a DHCP server).
+                          subnets is optional. When omitted OVN-Kubernetes won't assign IP address automatically.
+                          Dual-stack clusters may set 2 subnets (one for each IP family), otherwise only 1 subnet is allowed.
+                          The format should match standard CIDR notation (for example, "10.128.0.0/16").
+                          This field must be omitted if `ipam.mode` is `Disabled`.
+                          When physicalNetworkName points to the OVS bridge mapping of a network that provides IPAM services
+                          (e.g., a DHCP server), ipam.mode should be set to Disabled. This turns off OVN-Kubernetes IPAM and avoids
+                          conflicts with the existing IPAM services on this localnet network.
+                        items:
+                          maxLength: 43
+                          type: string
+                          x-kubernetes-validations:
+                          - message: CIDR is invalid
+                            rule: isCIDR(self)
+                        maxItems: 2
+                        minItems: 1
+                        type: array
+                        x-kubernetes-validations:
+                        - message: When 2 CIDRs are set, they must be from different
+                            IP families
+                          rule: size(self) != 2 || !isCIDR(self[0]) || !isCIDR(self[1])
+                            || cidr(self[0]).ip().family() != cidr(self[1]).ip().family()
+                      vlan:
+                        description: |-
+                          vlan configuration for the network.
+                          vlan.mode is the VLAN mode.
+                            When "Access" is set, OVN-Kubernetes configures the network logical switch port in access mode.
+                          vlan.access is the access VLAN configuration.
+                          vlan.access.id is the VLAN ID (VID) to be set on the network logical switch port.
+                          vlan is optional, when omitted the underlying network default VLAN will be used (usually `1`).
+                          When set, OVN-Kubernetes will apply VLAN configuration to the SDN infra and to the connected pods.
+                        properties:
+                          access:
+                            description: Access is the access VLAN configuration
+                            properties:
+                              id:
+                                description: |-
+                                  id is the VLAN ID (VID) to be set for the network.
+                                  id should be higher than 0 and lower than 4095.
+                                format: int32
+                                maximum: 4094
+                                minimum: 1
+                                type: integer
+                            required:
+                            - id
+                            type: object
+                          mode:
+                            description: |-
+                              mode describe the network VLAN mode.
+                              Allowed value is "Access".
+                              Access sets the network logical switch port in access mode, according to the config.
+                            enum:
+                            - Access
+                            type: string
+                        required:
+                        - mode
+                        type: object
+                        x-kubernetes-validations:
+                        - message: vlan access config is required when vlan mode is
+                            'Access', and forbidden otherwise
+                          rule: 'has(self.mode) && self.mode == ''Access'' ? has(self.access):
+                            !has(self.access)'
+                    required:
+                    - physicalNetworkName
+                    - role
+                    type: object
+                    x-kubernetes-validations:
+                    - message: Localnet is immutable
+                      rule: self == oldSelf
+                    - message: Subnets is required with ipam.mode is Enabled or unset,
+                        and forbidden otherwise
+                      rule: '!has(self.ipam) || !has(self.ipam.mode) || self.ipam.mode
+                        == ''Enabled'' ? has(self.subnets) : !has(self.subnets)'
+                    - message: excludeSubnets must be unset when subnets is unset
+                      rule: '!has(self.excludeSubnets) || has(self.subnets)'
+                    - message: MTU should be greater than or equal to 1280 when an
+                        IPv6 subnet is used
+                      rule: '!has(self.subnets) || !has(self.mtu) || !self.subnets.exists_one(i,
+                        isCIDR(i) && cidr(i).ip().family() == 6) || self.mtu >= 1280'
+                  noOverlay:
+                    description: |-
+                      NoOverlay contains configuration for no-overlay mode.
+                      This is only allowed when Transport is "NoOverlay".
+                    properties:
+                      outboundSNAT:
+                        description: OutboundSNAT defines the SNAT behavior for outbound
+                          traffic from pods.
+                        enum:
+                        - Enabled
+                        - Disabled
+                        type: string
+                      routing:
+                        description: Routing specifies whether the pod network routing
+                          is managed by OVN-Kubernetes or users.
+                        enum:
+                        - Managed
+                        - Unmanaged
+                        type: string
+                    required:
+                    - outboundSNAT
+                    - routing
+                    type: object
+                    x-kubernetes-validations:
+                    - message: NoOverlay is immutable
+                      rule: self == oldSelf
+                  topology:
+                    description: |-
+                      Topology describes network configuration.
+
+                      Allowed values are "Layer3", "Layer2" and "Localnet".
+                      Layer3 topology creates a layer 2 segment per node, each with a different subnet. Layer 3 routing is used to interconnect node subnets.
+                      Layer2 topology creates one logical switch shared by all nodes.
+                      Localnet topology is based on layer 2 topology, but also allows connecting to an existent (configured) physical network to provide north-south traffic to the workloads.
+                    enum:
+                    - Layer2
+                    - Layer3
+                    - Localnet
+                    type: string
+                    x-kubernetes-validations:
+                    - message: Topology is immutable
+                      rule: self == oldSelf
+                  transport:
+                    description: |-
+                      Transport describes the transport technology for pod-to-pod traffic.
+                      Allowed values are "NoOverlay" and "EVPN".
+                      - "NoOverlay": The network operates in no-overlay mode.
+                      - "EVPN": The network uses EVPN transport.
+                      When omitted, the network uses the default OVN overlay transport (e.g. Geneve, VXLAN)
+                      as configured by ovn-encap-type.
+                    enum:
+                    - NoOverlay
+                    - EVPN
+                    type: string
+                    x-kubernetes-validations:
+                    - message: Transport is immutable
+                      rule: self == oldSelf
+                required:
+                - topology
+                type: object
+                x-kubernetes-validations:
+                - message: spec.layer3 is required when topology is Layer3 and forbidden
+                    otherwise
+                  rule: 'has(self.topology) && self.topology == ''Layer3'' ? has(self.layer3):
+                    !has(self.layer3)'
+                - message: spec.layer2 is required when topology is Layer2 and forbidden
+                    otherwise
+                  rule: 'has(self.topology) && self.topology == ''Layer2'' ? has(self.layer2):
+                    !has(self.layer2)'
+                - message: spec.localnet is required when topology is Localnet and
+                    forbidden otherwise
+                  rule: 'has(self.topology) && self.topology == ''Localnet'' ? has(self.localnet):
+                    !has(self.localnet)'
+                - message: transport 'NoOverlay' is only supported for Layer3 primary
+                    networks
+                  rule: '!has(self.transport) || self.transport != ''NoOverlay'' ||
+                    (self.topology == ''Layer3'' && has(self.layer3) && self.layer3.role
+                    == ''Primary'')'
+                - message: spec.noOverlay is required when type transport is 'NoOverlay'
+                  rule: '!has(self.transport) || self.transport != ''NoOverlay'' ||
+                    has(self.noOverlay)'
+                - message: spec.noOverlay is forbidden when transport type is not
+                    'NoOverlay'
+                  rule: (has(self.transport) && self.transport == 'NoOverlay') ||
+                    !has(self.noOverlay)
+                - message: transport 'EVPN' is only supported for Layer2 or Layer3
+                    primary networks
+                  rule: '!has(self.transport) || self.transport != ''EVPN'' || ((self.topology
+                    == ''Layer2'' && has(self.layer2) && self.layer2.role == ''Primary'')
+                    || (self.topology == ''Layer3'' && has(self.layer3) && self.layer3.role
+                    == ''Primary''))'
+                - message: spec.evpn field is required when transport is 'EVPN'
+                  rule: '!has(self.transport) || self.transport != ''EVPN'' || has(self.evpn)'
+                - message: spec.evpn field is forbidden when transport is not 'EVPN'
+                  rule: (has(self.transport) && self.transport == 'EVPN') || !has(self.evpn)
+                - message: spec.evpn.macVRF field is required for Layer2 topology
+                    when transport is 'EVPN'
+                  rule: '!has(self.transport) || self.transport != ''EVPN'' || self.topology
+                    != ''Layer2'' || (has(self.evpn) && has(self.evpn.macVRF))'
+                - message: spec.evpn.ipVRF field is required for Layer3 topology when
+                    transport is 'EVPN'
+                  rule: '!has(self.transport) || self.transport != ''EVPN'' || self.topology
+                    != ''Layer3'' || (has(self.evpn) && has(self.evpn.ipVRF))'
+                - message: spec.evpn.macVRF field is forbidden for Layer3 topology
+                    when transport is 'EVPN'
+                  rule: '!has(self.transport) || self.transport != ''EVPN'' || self.topology
+                    != ''Layer3'' || !has(self.evpn) || !has(self.evpn.macVRF)'
+            required:
+            - namespaceSelector
+            - network
+            type: object
+          status:
+            description: ClusterUserDefinedNetworkStatus contains the observed status
+              of the ClusterUserDefinedNetwork.
+            properties:
+              conditions:
+                description: Conditions slice of condition objects indicating details
+                  about ClusterUserDefineNetwork status.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

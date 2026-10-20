@@ -1,0 +1,178 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.19.0
+  name: vteps.k8s.ovn.org
+spec:
+  group: k8s.ovn.org
+  names:
+    kind: VTEP
+    listKind: VTEPList
+    plural: vteps
+    singular: vtep
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.conditions[?(@.type=="Accepted")].status
+      name: Accepted
+      type: string
+    - jsonPath: .status.conditions[?(@.type=="Accepted")].reason
+      name: Reason
+      type: string
+    name: v1
+    schema:
+      openAPIV3Schema:
+        description: VTEP defines VTEP (VXLAN Tunnel Endpoint) IP configuration for
+          EVPN.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: Spec defines the desired VTEP configuration.
+            properties:
+              cidrs:
+                description: |-
+                  CIDRs is the list of IP ranges from which VTEP IPs are discovered (unmanaged mode) or allocated (managed mode).
+                  Multiple CIDRs may be specified to expand capacity over time without recreating the VTEP.
+                  Each entry must be a valid network address in CIDR notation (for example, "100.64.0.0/24" or "fd00:100::/64").
+                  Each node receives at most one IP per address family from the CIDRs listed here.
+                  In managed mode, CIDRs are consumed sequentially: IPs are allocated from the first CIDR until it is
+                  exhausted, then from the next, and so on.
+                  In managed mode, CIDRs are append-only: existing entries cannot be removed, reordered, or shrunk to a
+                  smaller mask; they can only be expanded to a wider mask, and new entries may be appended.
+                  In unmanaged mode, if multiple IPs on a node match the configured CIDRs, or if the match is otherwise
+                  ambiguous, the VTEP will be placed into a failed status.
+                  In unmanaged mode, CIDRs may be freely added, removed, reordered, or resized.
+                  Caution: removing or modifying CIDRs in unmanaged mode that are actively in use may cause traffic disruption;
+                  no downtime guarantees are provided for such operations.
+                items:
+                  description: CIDR represents a CIDR notation IP range.
+                  maxLength: 43
+                  type: string
+                  x-kubernetes-validations:
+                  - message: CIDR must be a valid network address
+                    rule: isCIDR(self) && cidr(self) == cidr(self).masked()
+                maxItems: 20
+                minItems: 1
+                type: array
+                x-kubernetes-validations:
+                - message: CIDRs must not overlap with each other
+                  rule: self.all(i, a, self.all(j, b, i == j || !(cidr(a).containsIP(cidr(b).ip())
+                    || cidr(b).containsIP(cidr(a).ip()))))
+              mode:
+                allOf:
+                - enum:
+                  - Managed
+                  - Unmanaged
+                - enum:
+                  - Managed
+                  - Unmanaged
+                default: Managed
+                description: |-
+                  Mode specifies how VTEP IPs are managed.
+                  "Managed" means OVN-Kubernetes allocates and assigns VTEP IPs per node automatically.
+                  "Unmanaged" means an external provider handles IP assignment; OVN-Kubernetes discovers existing IPs on nodes.
+                  Defaults to "Managed".
+                type: string
+            required:
+            - cidrs
+            type: object
+            x-kubernetes-validations:
+            - message: CIDRs cannot be removed in managed mode; only appending new
+                CIDRs or expanding the existing CIDRs is allowed
+              rule: self.mode != 'Managed' || size(self.cidrs) >= size(oldSelf.cidrs)
+            - message: In managed mode, existing CIDRs must remain at the same position
+                and can only be expanded to a wider mask; shrinking the mask or reordering
+                is not allowed
+              rule: self.mode != 'Managed' || self.cidrs.all(i, v, i >= size(oldSelf.cidrs)
+                || (cidr(v).containsIP(cidr(oldSelf.cidrs[i]).ip()) && cidr(v).prefixLength()
+                <= cidr(oldSelf.cidrs[i]).prefixLength()))
+          status:
+            description: Status contains the observed state of the VTEP.
+            properties:
+              conditions:
+                description: Conditions slice of condition objects indicating details
+                  about VTEP status.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
