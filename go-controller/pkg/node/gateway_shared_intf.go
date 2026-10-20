@@ -915,8 +915,6 @@ func serviceUpdateNotNeeded(old, new *corev1.Service) bool {
 
 // AddService handles configuring shared gateway bridge flows to steer External IP, Node Port, Ingress LB traffic into OVN
 func (npw *nodePortWatcher) AddService(service *corev1.Service) error {
-	var localEndpoints util.PortToLBEndpoints
-	var hasLocalHostNetworkEp bool
 	if !util.ServiceTypeHasClusterIP(service) || !util.IsClusterIPSet(service) {
 		return nil
 	}
@@ -933,7 +931,7 @@ func (npw *nodePortWatcher) AddService(service *corev1.Service) error {
 	}
 
 	name := ktypes.NamespacedName{Namespace: service.Namespace, Name: service.Name}
-	epSlices, err := npw.watchFactory.GetServiceEndpointSlices(service.Namespace, service.Name, netInfo.GetNetworkName())
+	localEndpoints, hasLocalHostNetworkEp, err := npw.getServiceEndpointInfo(service, netInfo)
 	if err != nil {
 		if !apierrors.IsNotFound(err) {
 			return fmt.Errorf("error retrieving all endpointslices for service %s/%s during service add: %w",
@@ -941,12 +939,6 @@ func (npw *nodePortWatcher) AddService(service *corev1.Service) error {
 		}
 		klog.V(5).Infof("No endpointslice found for service %s in namespace %s during service Add",
 			service.Name, service.Namespace)
-		// No endpoint object exists yet so default to false
-		hasLocalHostNetworkEp = false
-	} else {
-		nodeIPs, _ := npw.nodeIPManager.ListAddresses()
-		localEndpoints = npw.GetLocalEligibleEndpointAddresses(epSlices, service)
-		hasLocalHostNetworkEp = util.HasLocalHostNetworkEndpoints(localEndpoints, nodeIPs)
 	}
 	// If something didn't already do it add correct Service rules
 	if exists := npw.addOrSetServiceInfo(name, service, hasLocalHostNetworkEp, localEndpoints); !exists {
@@ -1268,7 +1260,7 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) error {
 			continue
 		}
 
-		epSlices, err := npw.watchFactory.GetServiceEndpointSlices(service.Namespace, service.Name, netInfo.GetNetworkName())
+		localEndpoints, hasLocalHostNetworkEp, err := npw.getServiceEndpointInfo(service, netInfo)
 		if err != nil {
 			if !apierrors.IsNotFound(err) {
 				return fmt.Errorf("error retrieving all endpointslices for service %s/%s during SyncServices: %w",
@@ -1277,9 +1269,6 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) error {
 			klog.V(5).Infof("No endpointslice found for service %s in namespace %s during sync", service.Name, service.Namespace)
 			continue
 		}
-		nodeIPs, _ := npw.nodeIPManager.ListAddresses()
-		localEndpoints := npw.GetLocalEligibleEndpointAddresses(epSlices, service)
-		hasLocalHostNetworkEp := util.HasLocalHostNetworkEndpoints(localEndpoints, nodeIPs)
 		npw.getAndSetServiceInfo(name, service, hasLocalHostNetworkEp, localEndpoints)
 
 		// Replace each service entry in place; a concurrent sync must not
@@ -1399,14 +1388,11 @@ func (npw *nodePortWatcher) AddEndpointSlice(epSlice *discovery.EndpointSlice) e
 	}
 
 	klog.V(5).Infof("Adding endpointslice %s in namespace %s", epSlice.Name, epSlice.Namespace)
-	nodeIPs, _ := npw.nodeIPManager.ListAddresses()
-	epSlices, err := npw.watchFactory.GetServiceEndpointSlices(svc.Namespace, svc.Name, netInfo.GetNetworkName())
+	localEndpoints, hasLocalHostNetworkEp, err := npw.getServiceEndpointInfo(svc, netInfo)
 	if err != nil {
 		// No need to continue adding the new endpoint slice, if we can't retrieve all slices for this service
 		return fmt.Errorf("error retrieving endpointslices for service %s/%s during endpointslice add: %w", svc.Namespace, svc.Name, err)
 	}
-	localEndpoints := npw.GetLocalEligibleEndpointAddresses(epSlices, svc)
-	hasLocalHostNetworkEp := util.HasLocalHostNetworkEndpoints(localEndpoints, nodeIPs)
 
 	// Install rules when the Service event has not arrived yet. Once installed,
 	// endpoint reconciliation changes only endpoint-dependent forwarding.
@@ -1503,6 +1489,17 @@ func (npw *nodePortWatcher) DeleteEndpointSlice(epSlice *discovery.EndpointSlice
 		return utilerrors.Join(errors...)
 	}
 	return nil
+}
+
+func (npw *nodePortWatcher) getServiceEndpointInfo(service *corev1.Service, netInfo util.NetInfo) (util.PortToLBEndpoints, bool, error) {
+	epSlices, err := npw.watchFactory.GetServiceEndpointSlices(service.Namespace, service.Name, netInfo.GetNetworkName())
+	if err != nil {
+		return nil, false, err
+	}
+
+	nodeIPs, _ := npw.nodeIPManager.ListAddresses()
+	localEndpoints := npw.GetLocalEligibleEndpointAddresses(epSlices, service)
+	return localEndpoints, util.HasLocalHostNetworkEndpoints(localEndpoints, nodeIPs), nil
 }
 
 // GetLocalEligibleEndpointAddresses returns eligible endpoints that are local to the node.
