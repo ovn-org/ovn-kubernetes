@@ -30,6 +30,23 @@ func FindQoSesWithPredicate(nbClient libovsdbclient.Client, p QoSPredicate) ([]*
 	return found, err
 }
 
+// GetQoS looks up a cached QoS by UUID or its indexed primary external ID.
+func GetQoS(nbClient libovsdbclient.Client, qos *nbdb.QoS) (*nbdb.QoS, error) {
+	found := []*nbdb.QoS{}
+	opModel := operationModel{
+		Model:          qos,
+		ExistingResult: &found,
+		ErrNotFound:    true,
+		BulkOp:         false,
+	}
+
+	m := newModelClient(nbClient)
+	if err := m.Lookup(opModel); err != nil {
+		return nil, err
+	}
+	return found[0], nil
+}
+
 // CreateOrUpdateQoSesOps returns the ops to create or update the provided QoSes.
 func CreateOrUpdateQoSesOps(nbClient libovsdbclient.Client, ops []ovsdb.Operation, qoses ...*nbdb.QoS) ([]ovsdb.Operation, error) {
 	opModels := make([]operationModel, 0, len(qoses))

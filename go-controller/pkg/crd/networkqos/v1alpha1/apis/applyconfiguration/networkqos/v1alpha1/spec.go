@@ -16,7 +16,6 @@ import (
 // Spec defines the desired state of NetworkQoS
 type SpecApplyConfiguration struct {
 	// networkSelector selects the networks on which the pod IPs need to be added to the source address set.
-	// NetworkQoS controller currently supports `NetworkAttachmentDefinitions` type only.
 	NetworkSelectors *types.NetworkSelectors `json:"networkSelectors,omitempty"`
 	// podSelector applies the NetworkQoS rule only to the pods in the namespace whose label
 	// matches this definition. This field is optional, and in case it is not set

@@ -5,241 +5,127 @@ package networkqos
 
 import (
 	"fmt"
-	"slices"
+	"net/netip"
 	"sort"
-	"strconv"
 	"strings"
-	"sync"
-	"time"
 
-	corev1 "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
-	"k8s.io/apimachinery/pkg/labels"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
 	networkqosv1alpha1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1alpha1"
 	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
-	addressset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/address_set"
-	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 )
 
-// networkQoSState is the cache that keeps the state of a single
-// network qos in the cluster with namespace+name being unique
+// nqosCacheEntry holds the state of one NetworkQoS on each of its networks, by network name.
+type nqosCacheEntry struct {
+	networks map[string]*networkQoSState
+}
+
+// key is used to release the set. The hashes are used in OVN matches.
+type addrSetRef struct {
+	key    string
+	hashV4 string
+	hashV6 string
+}
+
 type networkQoSState struct {
-	sync.RWMutex
-	// name of the network qos
 	name      string
 	namespace string
 
-	SrcAddrSet  addressset.AddressSet
-	Pods        sync.Map // pods name -> ips in the srcAddrSet
-	SwitchRefs  sync.Map // switch name -> list of source pods
-	PodSelector labels.Selector
+	networkName    string
+	controllerName string
+	// Requeue this policy if a switch with this name is created.
+	switchName string
 
-	// egressRules stores the objects needed to track .Spec.Egress changes
-	EgressRules []*GressRule
+	// source or destination selectors may share the same address set.
+	addrSetKeys sets.Set[string]
+
+	applied bool
+
+	// Keep this true until reconciliation succeeds.
+	// Rules of a previous process may be bound to the switches of other topologies.
+	inherited bool
 }
 
-func (nqosState *networkQoSState) getObjectNameKey() string {
-	return joinMetaNamespaceAndName(nqosState.namespace, nqosState.name, ":")
+func (state *networkQoSState) getObjectNameKey() string {
+	return ovnObjectName(state.namespace, state.name)
 }
 
-func (nqosState *networkQoSState) getDbObjectIDs(controller string, ruleIndex int) *libovsdbops.DbObjectIDs {
-	return libovsdbops.NewDbObjectIDs(libovsdbops.NetworkQoS, controller, map[libovsdbops.ExternalIDKey]string{
-		libovsdbops.ObjectNameKey: nqosState.getObjectNameKey(),
-		libovsdbops.RuleIndex:     fmt.Sprintf("%d", ruleIndex),
+func (state *networkQoSState) getDbObjectIDs(ruleID string) *libovsdbops.DbObjectIDs {
+	return qosDbObjectIDs(state.controllerName, state.getObjectNameKey(), ruleID)
+}
+
+func qosDbObjectIDs(controllerName, objectName, ruleID string) *libovsdbops.DbObjectIDs {
+	return libovsdbops.NewDbObjectIDs(libovsdbops.NetworkQoS, controllerName, map[libovsdbops.ExternalIDKey]string{
+		libovsdbops.ObjectNameKey: objectName,
+		libovsdbops.RuleIndex:     ruleID,
 	})
 }
 
-func (nqosState *networkQoSState) initAddressSets(addressSetFactory addressset.AddressSetFactory, controllerName string) error {
-	var err error
-	// init source address set
-	nqosState.SrcAddrSet, err = addressSetFactory.EnsureAddressSet(GetNetworkQoSAddrSetDbIDs(nqosState.namespace, nqosState.name, "src", "0", controllerName))
-	if err != nil {
-		return fmt.Errorf("failed to init source address set for %s/%s: %w", nqosState.namespace, nqosState.name, err)
-	}
-	// ensure destination address sets
-	for ruleIndex, rule := range nqosState.EgressRules {
-		for destIndex, dest := range rule.Classifier.Destinations {
-			if dest.NamespaceSelector == nil && dest.PodSelector == nil {
-				continue
-			}
-			dest.DestAddrSet, err = addressSetFactory.EnsureAddressSet(GetNetworkQoSAddrSetDbIDs(nqosState.namespace, nqosState.name, strconv.Itoa(ruleIndex), strconv.Itoa(destIndex), controllerName))
-			if err != nil {
-				return fmt.Errorf("failed to init destination address set for %s/%s: %w", nqosState.namespace, nqosState.name, err)
-			}
-		}
-	}
-	return nil
+func ruleStringID(ruleIndex int) string {
+	return fmt.Sprintf("%d", ruleIndex)
 }
 
-func (nqosState *networkQoSState) matchSourceSelector(pod *corev1.Pod) bool {
-	if pod.Namespace != nqosState.namespace {
-		return false
-	}
-	if nqosState.PodSelector == nil {
-		return true
-	}
-	return nqosState.PodSelector.Matches(labels.Set(pod.Labels))
+// The row of a rule for the packets routers send into the switch.
+func returnPassRuleID(ruleIndex int) string {
+	return ruleStringID(ruleIndex) + "-return"
 }
 
-func (nqosState *networkQoSState) configureSourcePod(ctrl *Controller, pod *corev1.Pod, addresses []string) error {
-	fullPodName := joinMetaNamespaceAndName(pod.Namespace, pod.Name)
-	// the pod's IP can change while it still matches the selector (a DHCP
-	// lease may be replaced across a sandbox recreation), delete what this pod
-	// previously contributed before adding the current addresses, or the
-	// stale IP stays in the address set until the pod is deleted
-	if previousAddresses, ok := nqosState.Pods.Load(fullPodName); ok {
-		if stale := staleAddresses(previousAddresses.([]string), addresses); len(stale) > 0 {
-			if err := nqosState.SrcAddrSet.DeleteAddresses(stale); err != nil {
-				return fmt.Errorf("failed to delete stale addresses {%s} from address set %s: %v",
-					strings.Join(stale, ","), nqosState.SrcAddrSet.GetName(), err)
-			}
-		}
-	}
-	if err := nqosState.SrcAddrSet.AddAddresses(addresses); err != nil {
-		return fmt.Errorf("failed to add addresses {%s} to address set %s for NetworkQoS %s/%s: %v", strings.Join(addresses, ","), nqosState.SrcAddrSet.GetName(), nqosState.namespace, nqosState.name, err)
-	}
-	nqosState.Pods.Store(fullPodName, addresses)
-	klog.V(4).Infof("Successfully added address (%s) of pod %s to address set %s", strings.Join(addresses, ","), fullPodName, nqosState.SrcAddrSet.GetName())
-	// get switch name
-	switchName := ctrl.getLogicalSwitchName(pod.Spec.NodeName)
-	if switchName == "" {
-		return fmt.Errorf("failed to get logical switch name for node %s, topology %s", pod.Spec.NodeName, ctrl.TopologyType())
-	}
+const addrSetBackRefPrefix = "NetworkQoS:"
 
-	podList := []string{}
-	val, loaded := nqosState.SwitchRefs.Load(switchName)
-	if loaded {
-		podList = val.([]string)
-	}
-
-	if !loaded {
-		klog.V(4).Infof("Adding NetworkQoS %s/%s to logical switch %s", nqosState.namespace, nqosState.name, switchName)
-		start := time.Now()
-		if err := ctrl.addQoSToLogicalSwitch(nqosState, switchName); err != nil {
-			return err
-		}
-		recordOvnOperationDuration("add", time.Since(start).Milliseconds())
-	}
-
-	podList = append(podList, fullPodName)
-	nqosState.SwitchRefs.Store(switchName, podList)
-	return nil
+// Address set keys already include the network, so the back reference only needs the policy.
+func (state *networkQoSState) addrSetBackRef() string {
+	return addrSetBackRefPrefix + nqosKey(state.namespace, state.name)
 }
 
-func (nqosState *networkQoSState) removePodFromSource(ctrl *Controller, fullPodName string, addresses []string) error {
-	if len(addresses) == 0 {
-		// if no addresses is provided, try lookup in cache
-		if val, ok := nqosState.Pods.Load(fullPodName); ok {
-			addresses = val.([]string)
-		}
+func (state *networkQoSState) holdAddressSet(ref addrSetRef) {
+	if state.addrSetKeys == nil {
+		state.addrSetKeys = sets.New[string]()
 	}
-	if len(addresses) > 0 {
-		if err := nqosState.SrcAddrSet.DeleteAddresses(addresses); err != nil {
-			return fmt.Errorf("failed to delete addresses (%s) from address set %s: %v", strings.Join(addresses, ","), nqosState.SrcAddrSet.GetName(), err)
-		}
-	}
-	nqosState.Pods.Delete(fullPodName)
-	return nqosState.removeZeroQoSNodes(ctrl, fullPodName)
+	state.addrSetKeys.Insert(ref.key)
 }
 
-func (nqosState *networkQoSState) removeZeroQoSNodes(ctrl *Controller, fullPodName string) error {
-	zeroQoSSwitches := []string{}
-	// since node is unknown when pod is delete, iterate the SwitchRefs to remove the pod
-	nqosState.SwitchRefs.Range(func(key, val any) bool {
-		switchName := key.(string)
-		podList := val.([]string)
-		podList = slices.DeleteFunc(podList, func(s string) bool {
-			return s == fullPodName
-		})
-		if len(podList) == 0 {
-			zeroQoSSwitches = append(zeroQoSSwitches, switchName)
-		} else {
-			nqosState.SwitchRefs.Store(switchName, podList)
-		}
-		return true
-	})
-	// unbind qos from L3 logical switches where doesn't have source pods any more
-	if len(zeroQoSSwitches) > 0 && ctrl.TopologyType() == types.Layer3Topology {
-		start := time.Now()
-		if err := ctrl.removeQoSFromLogicalSwitches(nqosState, zeroQoSSwitches); err != nil {
-			return err
-		}
-		recordOvnOperationDuration("remove", time.Since(start).Milliseconds())
-		for _, lsw := range zeroQoSSwitches {
-			nqosState.SwitchRefs.Delete(lsw)
-		}
-	}
-	return nil
-}
-
-func (nqosState *networkQoSState) getAddressSetHashNames() []string {
-	addrsetNames := []string{}
-	if nqosState.SrcAddrSet != nil {
-		v4Hash, v6Hash := nqosState.SrcAddrSet.GetASHashNames()
-		addrsetNames = append(addrsetNames, v4Hash, v6Hash)
-	}
-	for _, rule := range nqosState.EgressRules {
-		for _, dest := range rule.Classifier.Destinations {
-			if dest.DestAddrSet != nil {
-				v4Hash, v6Hash := dest.DestAddrSet.GetASHashNames()
-				addrsetNames = append(addrsetNames, v4Hash, v6Hash)
-			}
-		}
-	}
-	return addrsetNames
-}
-
-func (nqosState *networkQoSState) cleanupStaleAddresses(addressSetMap map[string]sets.Set[string]) error {
-	if nqosState.SrcAddrSet != nil {
-		addresses := addressSetMap[nqosState.SrcAddrSet.GetName()]
-		v4Addresses, _ := nqosState.SrcAddrSet.GetAddresses()
-		staleAddresses := []string{}
-		for _, address := range v4Addresses {
-			if !addresses.Has(address) {
-				staleAddresses = append(staleAddresses, address)
-			}
-		}
-		if len(staleAddresses) > 0 {
-			if err := nqosState.SrcAddrSet.DeleteAddresses(staleAddresses); err != nil {
-				return err
-			}
-		}
-	}
-	for _, egress := range nqosState.EgressRules {
-		for _, dest := range egress.Classifier.Destinations {
-			if dest.DestAddrSet == nil {
-				continue
-			}
-			addresses := addressSetMap[dest.DestAddrSet.GetName()]
-			v4Addresses, _ := dest.DestAddrSet.GetAddresses()
-			staleAddresses := []string{}
-			for _, address := range v4Addresses {
-				if !addresses.Has(address) {
-					staleAddresses = append(staleAddresses, address)
-				}
-			}
-			if len(staleAddresses) > 0 {
-				if err := dest.DestAddrSet.DeleteAddresses(staleAddresses); err != nil {
-					return err
-				}
-			}
-		}
-	}
-	return nil
-}
-
+// GressRule represents one egress rule and its OVN QoS settings.
 type GressRule struct {
 	Priority   int
 	Dscp       int
 	Classifier *Classifier
 
-	// bandwitdh
 	Rate  *int
 	Burst *int
+}
+
+// The spec must already be validated and its CIDRs normalized.
+func buildGressRules(nqos *networkqosv1alpha1.NetworkQoS) []*GressRule {
+	rules := make([]*GressRule, 0, len(nqos.Spec.Egress))
+	for index, ruleSpec := range nqos.Spec.Egress {
+		rule := &GressRule{
+			Priority: getQoSRulePriority(nqos.Spec.Priority, index),
+			Dscp:     ruleSpec.DSCP,
+		}
+		if rate := int(ruleSpec.Bandwidth.Rate); rate > 0 {
+			rule.Rate = &rate
+		}
+		if burst := int(ruleSpec.Bandwidth.Burst); burst > 0 {
+			rule.Burst = &burst
+		}
+		destinations := make([]*Destination, 0, len(ruleSpec.Classifier.To))
+		for _, destSpec := range ruleSpec.Classifier.To {
+			destinations = append(destinations, &Destination{
+				IpBlock:           destSpec.IPBlock.DeepCopy(),
+				NamespaceSelector: destSpec.NamespaceSelector.DeepCopy(),
+				PodSelector:       destSpec.PodSelector.DeepCopy(),
+			})
+		}
+		rule.Classifier = &Classifier{
+			Destinations: destinations,
+			Ports:        ruleSpec.Classifier.Ports,
+		}
+		rules = append(rules, rule)
+	}
+	return rules
 }
 
 type trafficDirection string
@@ -249,16 +135,13 @@ const (
 	trafficDirDest   trafficDirection = "dst"
 )
 
+// Classifier selects egress destinations, protocols, and ports.
 type Classifier struct {
 	Destinations []*Destination
 	Ports        []*networkqosv1alpha1.Port
 }
 
-// ToQosMatchString generates dest and protocol/port part of QoS match string, based on
-// Classifier's destinations, protocol and port fields, example:
-// (ip4.dst == $addr_set_name || (ip4.dst == 128.116.0.0/17 && ip4.dst != {128.116.0.0,128.116.0.255})) && tcp && tcp.dst == 8080
-// Multiple destinations will be connected by "||".
-// See https://github.com/ovn-org/ovn/blob/2bdf1129c19d5bd2cd58a3ddcb6e2e7254b05054/ovn-nb.xml#L2942-L3025 for details
+// ToQosMatchString builds the OVN match for destinations, protocols, and ports.
 func (c *Classifier) ToQosMatchString(ipv4Enabled, ipv6Enabled bool) string {
 	if c == nil {
 		return ""
@@ -266,13 +149,10 @@ func (c *Classifier) ToQosMatchString(ipv4Enabled, ipv6Enabled bool) string {
 	destMatchStrings := []string{}
 	for _, dest := range c.Destinations {
 		match := "ip4.dst == 0.0.0.0/0 || ip6.dst == ::/0"
-		if dest.DestAddrSet != nil {
-			match = addressSetToMatchString(dest.DestAddrSet, trafficDirDest, ipv4Enabled, ipv6Enabled)
+		if dest.hasSelectors() {
+			match = dest.addrSet.matchString(trafficDirDest, ipv4Enabled, ipv6Enabled)
 		} else if dest.IpBlock != nil && dest.IpBlock.CIDR != "" {
-			ipVersion := "ip4"
-			if utilnet.IsIPv6CIDRString(dest.IpBlock.CIDR) {
-				ipVersion = "ip6"
-			}
+			ipVersion := ipBlockFamily(dest.IpBlock.CIDR)
 			if len(dest.IpBlock.Except) == 0 {
 				match = fmt.Sprintf("%s.%s == %s", ipVersion, trafficDirDest, dest.IpBlock.CIDR)
 			} else {
@@ -301,19 +181,29 @@ func (c *Classifier) ToQosMatchString(ipv4Enabled, ipv6Enabled bool) string {
 		output = fmt.Sprintf("(%s)", output)
 	}
 	protoPortMap := map[string][]string{}
+	addPort := func(protocol string, port *int32) {
+		ports, exists := protoPortMap[protocol]
+		// A protocol with no port matches all its ports, even if other entries specify
+		// ports.
+		if exists && len(ports) == 0 {
+			return
+		}
+		if port == nil {
+			protoPortMap[protocol] = nil
+			return
+		}
+		protoPortMap[protocol] = append(ports, fmt.Sprintf("%d", *port))
+	}
 	for _, port := range c.Ports {
-		if port.Protocol == "" {
-			continue
+		switch {
+		case port.Protocol != "":
+			addPort(strings.ToLower(port.Protocol), port.Port)
+		case port.Port != nil:
+			// Earlier CRDs admit a port without a protocol. Match the port on every protocol.
+			for _, protocol := range []string{"tcp", "udp", "sctp"} {
+				addPort(protocol, port.Port)
+			}
 		}
-		protocol := strings.ToLower(port.Protocol)
-		ports := protoPortMap[protocol]
-		if ports == nil {
-			ports = []string{}
-		}
-		if port.Port != nil {
-			ports = append(ports, fmt.Sprintf("%d", *port.Port))
-		}
-		protoPortMap[protocol] = ports
 	}
 
 	sortedProtocols := make([]string, 0, len(protoPortMap))
@@ -333,83 +223,46 @@ func (c *Classifier) ToQosMatchString(ipv4Enabled, ipv6Enabled bool) string {
 		}
 		portMatches = append(portMatches, match)
 	}
-	if len(portMatches) == 1 {
-		output = fmt.Sprintf("%s && %s", output, portMatches[0])
-	} else if len(portMatches) > 1 {
-		output = fmt.Sprintf("%s && ((%s))", output, strings.Join(portMatches, ") || ("))
+	if len(portMatches) == 0 {
+		return output
 	}
-	return output
+	portMatch := portMatches[0]
+	if len(portMatches) > 1 {
+		portMatch = fmt.Sprintf("((%s))", strings.Join(portMatches, ") || ("))
+	}
+	if output == "" {
+		return portMatch
+	}
+	return output + " && " + portMatch
 }
 
+// IPv4-mapped IPv6 prefixes still need an ip6 match.
+func ipBlockFamily(cidr string) string {
+	prefix, err := netip.ParsePrefix(cidr)
+	if err != nil {
+		if utilnet.IsIPv6CIDRString(cidr) {
+			return "ip6"
+		}
+		return "ip4"
+	}
+	if prefix.Addr().Is4() {
+		return "ip4"
+	}
+	return "ip6"
+}
+
+// Destination selects pods, an IP block, or all destinations.
 type Destination struct {
 	IpBlock *knet.IPBlock
 
-	DestAddrSet       addressset.AddressSet
-	PodSelector       labels.Selector
-	Pods              sync.Map // pods name -> ips in the destAddrSet
-	NamespaceSelector labels.Selector
+	// Keep selectors for the address set manager to evaluate. Nil is unspecified, while an
+	// empty selector matches all.
+	PodSelector       *metav1.LabelSelector
+	NamespaceSelector *metav1.LabelSelector
+
+	addrSet addrSetRef
 }
 
-func (dest *Destination) matchPod(podNs *corev1.Namespace, pod *corev1.Pod, qosNamespace string) bool {
-	switch {
-	case dest.NamespaceSelector != nil && dest.PodSelector != nil:
-		return dest.NamespaceSelector.Matches(labels.Set(podNs.Labels)) && dest.PodSelector.Matches(labels.Set(pod.Labels))
-	case dest.NamespaceSelector == nil && dest.PodSelector != nil:
-		return pod.Namespace == qosNamespace && dest.PodSelector.Matches(labels.Set(pod.Labels))
-	case dest.NamespaceSelector != nil && dest.PodSelector == nil:
-		return dest.NamespaceSelector.Matches(labels.Set(podNs.Labels))
-	default: //dest.NamespaceSelector == nil && dest.PodSelector == nil:
-		return false
-	}
-}
-
-func (dest *Destination) addPod(podNamespace, podName string, addresses []string) error {
-	fullPodName := joinMetaNamespaceAndName(podNamespace, podName)
-	// drop addresses the pod no longer holds.
-	if val, ok := dest.Pods.Load(fullPodName); ok {
-		if stale := staleAddresses(val.([]string), addresses); len(stale) > 0 {
-			if err := dest.DestAddrSet.DeleteAddresses(stale); err != nil {
-				return fmt.Errorf("failed to delete stale addresses (%s): %v", strings.Join(stale, ","), err)
-			}
-		}
-	}
-	if err := dest.DestAddrSet.AddAddresses(addresses); err != nil {
-		return err
-	}
-	// add pod to map
-	dest.Pods.Store(fullPodName, addresses)
-	return nil
-}
-
-// staleAddresses returns the entries of old that are absent from current.
-func staleAddresses(old, current []string) []string {
-	currentSet := make(map[string]struct{}, len(current))
-	for _, a := range current {
-		currentSet[a] = struct{}{}
-	}
-	var stale []string
-	for _, a := range old {
-		if _, ok := currentSet[a]; !ok {
-			stale = append(stale, a)
-		}
-	}
-	return stale
-}
-
-func (dest *Destination) removePod(fullPodName string, addresses []string) error {
-	if len(addresses) == 0 {
-		val, ok := dest.Pods.Load(fullPodName)
-		if ok && val != nil {
-			addresses = val.([]string)
-		}
-	}
-	if err := dest.DestAddrSet.DeleteAddresses(addresses); err != nil {
-		return fmt.Errorf("failed to remove addresses (%s): %v", strings.Join(addresses, ","), err)
-	}
-	dest.Pods.Delete(fullPodName)
-	return nil
-}
-
-func getQoSRulePriority(qosPriority, ruleIndex int) int {
-	return 10000 + qosPriority*10 + ruleIndex
+func (dest *Destination) hasSelectors() bool {
+	return dest.PodSelector != nil || dest.NamespaceSelector != nil
 }

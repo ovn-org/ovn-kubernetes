@@ -10,6 +10,8 @@ import (
 	"sync"
 	"time"
 
+	nadinformerv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/informers/externalversions/k8s.cni.cncf.io/v1"
+
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes/scheme"
 	ref "k8s.io/client-go/tools/reference"
@@ -26,6 +28,7 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/addresssetmanager"
 	anpcontroller "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/controller/admin_network_policy"
 	egresssvc_zone "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/controller/egressservice"
+	nqoscontroller "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/controller/network_qos"
 	networkconnectcontroller "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/controller/networkconnect"
 	ovntypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
@@ -409,4 +412,24 @@ func (oc *DefaultNetworkController) newNetworkConnectController() error {
 		oc.networkManager,
 	)
 	return nil
+}
+
+func (oc *DefaultNetworkController) newNetworkQoSController() error {
+	var nadInformer nadinformerv1.NetworkAttachmentDefinitionInformer
+	if config.OVNKubernetesFeature.EnableMultiNetwork {
+		nadInformer = oc.watchFactory.NADInformer()
+	}
+	var err error
+	oc.nqosController, err = nqoscontroller.NewController(
+		oc.nodeName,
+		oc.nbClient,
+		oc.kube.NetworkQoSClient,
+		oc.watchFactory.NetworkQoSInformer(),
+		oc.watchFactory.NamespaceCoreInformer(),
+		nadInformer,
+		oc.networkManager,
+		oc.addressSetManager,
+		1,
+	)
+	return err
 }

@@ -445,13 +445,6 @@ func (oc *Layer3UserDefinedNetworkController) Cleanup() error {
 		return err
 	}
 
-	// cleanup address sets after ACLs are deleted to avoid ovn-controller errors
-	if oc.addressSetManager != nil {
-		if err = oc.addressSetManager.CleanupForController(oc.controllerName); err != nil {
-			return fmt.Errorf("failed to cleanup address sets for controller %s: %v", oc.controllerName, err)
-		}
-	}
-
 	// Delete QoS rows for this network (e.g. from NetworkQoS controller). Applies to primary and
 	// secondary Layer3 UDNs when EnableNetworkQoS is set.
 	ops, err = libovsdbops.DeleteQoSesWithPredicateOps(oc.nbClient, ops,
@@ -465,6 +458,13 @@ func (oc *Layer3UserDefinedNetworkController) Cleanup() error {
 	_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
 	if err != nil {
 		return fmt.Errorf("failed to deleting routers/switches of network %s: %v", netName, err)
+	}
+
+	// Remove ACLs and QoS rules before deleting their address sets.
+	if oc.addressSetManager != nil {
+		if err = oc.addressSetManager.CleanupForController(oc.controllerName); err != nil {
+			return fmt.Errorf("failed to cleanup address sets for controller %s: %v", oc.controllerName, err)
+		}
 	}
 
 	if err = oc.zoneICHandler.Cleanup(); err != nil {
@@ -548,19 +548,6 @@ func (oc *Layer3UserDefinedNetworkController) run() error {
 		if err != nil {
 			return fmt.Errorf("failed to add network %s to the route import manager: %v", oc.GetNetworkName(), err)
 		}
-	}
-	// start NetworkQoS controller if feature is enabled
-	if config.OVNKubernetesFeature.EnableNetworkQoS {
-		err := oc.newNetworkQoSController()
-		if err != nil {
-			return fmt.Errorf("unable to create network qos controller, err: %w", err)
-		}
-		oc.wg.Add(1)
-		go func(ch <-chan struct{}) {
-			defer oc.wg.Done()
-			// Until we have scale issues in future let's spawn only one thread
-			oc.nqosController.Run(1, ch)
-		}(oc.stopChan)
 	}
 
 	klog.Infof("Completing all the Watchers for network %s took %v", oc.GetNetworkName(), time.Since(start))

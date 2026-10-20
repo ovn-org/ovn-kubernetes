@@ -11,7 +11,7 @@ package v1alpha1
 // Port specifies destination protocol and port on which NetworkQoS
 // rule is applied
 type PortApplyConfiguration struct {
-	// protocol (tcp, udp, sctp) that the traffic must match.
+	// protocol (TCP, UDP or SCTP) that the traffic must match.
 	Protocol *string `json:"protocol,omitempty"`
 	// port that the traffic must match
 	Port *int32 `json:"port,omitempty"`

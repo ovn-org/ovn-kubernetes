@@ -107,8 +107,32 @@ networkqoses                                           k8s.ovn.org/v1alpha1     
 
 $ kubectl get networkqoses qos-external -n default -owide
 NAME           STATUS
-qos-external   NetworkQoS Destinations applied
+qos-external   No NetworkQoS errors reported
 ```
+
+A node only writes a `Ready-In-Zone-<node>` condition when it fails to apply a
+NetworkQoS, and retracts it once it succeeds, so that the object does not grow a
+condition per node of the cluster. `No NetworkQoS errors reported` therefore
+means no node is reporting a failure rather than every node having confirmed it
+applied the object: a node whose ovnkube-controller is down reports nothing.
+`kubectl get networkqos <name> -o yaml` shows the conditions of the nodes that
+are failing, up to 20 of them. A spec no node can apply is reported by a single
+node, with a message saying it is not applied on any node. A node on which a
+selected network is still being set up is not failing: it applies the NetworkQoS
+as soon as the logical switch of that network is created on it. A node also
+reports a failure when it cannot resolve the addresses of the pods a NetworkQoS
+selects, for example because of a malformed pod annotation: the QoS rules stay
+applied, but they match the addresses known before the failure until it is
+resolved.
+
+Versions that reported a condition for every node also reported success. An
+upgraded node keeps the success condition it reported until the cluster manager
+reports `No NetworkQoS errors reported`, which only an upgraded cluster manager
+does, and then retracts it, so the cluster manager and the nodes can be upgraded
+in any order. While the nodes are upgraded before the cluster manager, the
+status of a NetworkQoS created in the meantime, or that recovered from a failure
+on an upgraded node, reads empty until the cluster manager is upgraded: the
+previous cluster manager waits for a condition from every node.
 
 ## **4 Create Sample Pods and Verify the Configuration**
 
@@ -295,9 +319,9 @@ Below is an *abbreviated* map of the CRD schema returned by `kubectl explain net
 | Field | Type | Required | Purpose |
 | ----- | ----- | ----- | ----- |
 | **podSelector** | `LabelSelector` | No | Selects pods whose traffic will be evaluated by the QoS rules. If empty, all pods in the namespace are selected. |
-| **networkSelectors[]** | list `NetworkSelector` | No | Restricts the rule to traffic on specific networks. If absent, the rule matches any interface. *(See §5.2)* |
-| **priority** | `int` | **Yes** | Higher number → chosen first when multiple `NetworkQoS` objects match the same packet. |
-| **egress[]** | list `EgressRule` | **Yes** | One or more marking / policing rules. Evaluated in the order listed. *(See §5.3)* |
+| **networkSelectors[]** | list `NetworkSelector` | No | Restricts the rule to traffic on specific networks. If absent, the rule applies to the cluster default network. *(See §5.2)* |
+| **priority** | `int` (0 – 100) | **Yes** | Higher number → chosen first when multiple `NetworkQoS` objects match the same packet. Every rule of a higher priority takes precedence over every rule of a lower one. |
+| **egress[]** | list `EgressRule` | **Yes** | One or more marking / policing rules. Later rules take precedence over earlier ones. *(See §5.3)* |
 
 Note the square-bracket notation (`[]`) for **both** `egress` and `networkSelectors`—each is an array in the CRD.
 
@@ -309,12 +333,14 @@ Each list element tells the controller **where** the pods' egress traffic must f
 
 | Key | Required | Description |
 | :---- | :---- | :---- |
-| `networkSelectionType` | **Yes** | Enum that declares which selector below is populated. Common values: `NetworkAttachmentDefinitions`, `DefaultNetwork`, `SecondaryUserDefinedNetworks`, … |
-| `networkAttachmentDefinitionSelector` | conditional | When `networkSelectionType=NetworkAttachmentDefinitions`. Selects NADs by **namespaceSelector** (required) *and* **networkSelector** (required). Both are ordinary `LabelSelectors`. |
-| `secondaryUserDefinedNetworkSelector` | conditional | Used when `networkSelectionType=SecondaryUserDefinedNetworks`. Similar structure: required **namespaceSelector** & **networkSelector**. |
-| `clusterUserDefinedNetworkSelector`, `primaryUserDefinedNetworkSelector` | conditional | Additional selector styles, each with required sub‑selectors as per the CRD. |
+| `networkSelectionType` | **Yes** | Enum that declares which selector below is populated. NetworkQoS accepts `NetworkAttachmentDefinitions` and `ClusterUserDefinedNetworks`. |
+| `networkAttachmentDefinitionSelector` | conditional | When `networkSelectionType=NetworkAttachmentDefinitions`. Selects NADs by **namespaceSelector** (required) *and* **networkSelector** (required). Both are ordinary `LabelSelectors`: an empty one selects everything. |
+| `clusterUserDefinedNetworkSelector` | conditional | When `networkSelectionType=ClusterUserDefinedNetworks`. Selects ClusterUserDefinedNetworks by **networkSelector** (required). An empty selector selects all of them. |
 
 **Typical usage** – `networkSelectionType: NetworkAttachmentDefinitions` + `networkAttachmentDefinitionSelector`.
+
+Selected networks without IP addresses, such as localnet networks without IPAM,
+are ignored: there are no pod addresses to match their traffic on.
 
 ---
 
@@ -326,6 +352,64 @@ Each list element tells the controller **where** the pods' egress traffic must f
 | `bandwidth.rate` | `int` (kbps) | No | Sustained rate for the token-bucket policer (in kilobits per second). |
 | `bandwidth.burst` | `int` (kilobits) | No | Maximum burst size that can accrue (in kilobits). |
 | `classifier.to` / `classifier.from` | list `TrafficSelector` | No | CIDRs the packet destination (or source) must match. Each entry is an `ipBlock` supporting an `except` list. |
-| `classifier.ports[]` | list | No | List of `{protocol, port}` tuples the packet must match; protocol is `TCP`, `UDP`, or `SCTP`. |
+| `classifier.ports[]` | list | No | List of `{protocol, port}` tuples the packet must match; protocol is `TCP`, `UDP`, or `SCTP`, and is required when `port` is set. An entry without a port matches every port of its protocol. |
 
 If **all** specified classifier conditions match, the packet gets the DSCP mark and/or bandwidth policer defined above. This allows for fine-grained control over which traffic flows receive QoS treatment.
+
+`classifier.ports` can be used without `classifier.to` to match the selected
+protocols and ports regardless of destination. Entries in the ports list are
+alternatives: `{protocol: TCP}` includes every TCP port, even when another entry
+specifies a particular TCP port.
+
+Earlier versions ignored a port without a protocol, so `ports: [{port: 8080}]`
+matched every port and protocol. NetworkQoS objects created that way now match
+the port on TCP, UDP and SCTP. Earlier CRDs also admitted protocols such as
+`TCPX`, which OVN cannot match on, without reporting an error. NetworkQoS
+objects with such a protocol are now reported as invalid specs and are not
+applied until they are fixed.
+
+The current CRD rejects new objects with either. It also rejects a change to any
+rule of an existing object with either until that port or protocol is fixed:
+the rules form a single list, and Kubernetes only skips validating the parts of
+an object that an update leaves unchanged. Helm installs the CRDs of its chart
+but does not upgrade them, so a cluster upgraded with Helm keeps accepting both
+until the new CRD is applied.
+
+Versions that programmed one NetworkQoS controller per network did not mark or
+meter the traffic between pods on different nodes of a layer2 network. It is
+now marked and metered on the node of the sending pod, before it leaves the
+node, as on other networks.
+
+Packets sent to a Service whose selected pod is on the same node as the sending
+pod go through the router of the network and pass the logical switch of that
+node twice. A rule applies its bandwidth limit to them once. Versions that
+programmed one NetworkQoS controller per network applied it twice. On the
+default network, a rule sets their DSCP on both passes, so that an EgressQoS
+selecting the same pods does not override it on the second pass. On
+layer2 networks, packets a pod sends to the router itself, such as those to the
+gateway address, are not marked. Rules on layer2 networks also see the first
+packet of each connection to a Service before it is load balanced, with the
+Service address as its destination, so a rule matching that address counts it
+against its bandwidth limit as well.
+
+For pod destinations, `podSelector: {}` selects all pods in the NetworkQoS
+namespace. Adding `namespaceSelector: {}` extends that selection to all
+namespaces. A destination entry with neither selectors nor an `ipBlock` leaves
+the destination unrestricted. This is what the CRD and
+[OKEP-4380](../../okeps/okep-4380-network-qos.md) specify: a selector that is
+present but empty selects everything. Versions that programmed one NetworkQoS
+controller per network deviated from it and ignored empty selectors: an entry
+with `podSelector: {}` left the destination unrestricted, and
+`namespaceSelector: {}` did not extend a pod selector beyond the NetworkQoS
+namespace. NetworkQoS objects relying on that select different destinations
+after an upgrade; review them before upgrading.
+
+The controller canonicalizes `ipBlock.cidr` and `ipBlock.except` CIDRs before
+building OVN matches. For example, `10.0.0.7/24` becomes `10.0.0.0/24`, and
+expanded IPv6 addresses use compressed notation. A bare address, such as
+`10.0.0.7`, stands for that single host. An `ipBlock` with an empty `cidr` leaves
+the destination unrestricted. The exceptions must be of the IP family of the
+`cidr`; an IPv4-mapped IPv6 prefix such as `::ffff:10.0.0.0/104` is an IPv6
+prefix. The submitted resource is preserved; malformed CIDRs are reported
+through the NetworkQoS failure status, and nothing of a NetworkQoS whose spec is
+invalid stays programmed until the spec is fixed.

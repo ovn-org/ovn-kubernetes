@@ -52,21 +52,22 @@ func (m *networkQoSManager) getManagedFields(networkQoS *networkqosapi.NetworkQo
 	return networkQoS.ManagedFields
 }
 
+// Zones only report failures.
+// Ignore applyEmptyOrFailed because waiting for a condition from every zone would leave status empty forever.
+//
 //lint:ignore U1000 generic interfaces throw false-positives
 func (m *networkQoSManager) updateStatus(networkQoS *networkqosapi.NetworkQoS, applyOpts *metav1.ApplyOptions,
-	applyEmptyOrFailed bool) error {
+	_ bool) error {
 	if networkQoS == nil {
 		return nil
 	}
-	newStatus := "NetworkQoS Destinations applied"
+	newStatus := types.NetworkQoSNoErrorsMsg
 	for _, condition := range networkQoS.Status.Conditions {
-		if strings.Contains(condition.Message, types.NetworkQoSErrorMsg) {
+		// Older zones report failures without the error prefix.
+		if condition.Status == metav1.ConditionFalse || strings.Contains(condition.Message, types.NetworkQoSErrorMsg) {
 			newStatus = types.NetworkQoSErrorMsg
 			break
 		}
-	}
-	if applyEmptyOrFailed && newStatus != types.NetworkQoSErrorMsg {
-		newStatus = ""
 	}
 
 	if networkQoS.Status.Status == newStatus {
@@ -74,13 +75,8 @@ func (m *networkQoSManager) updateStatus(networkQoS *networkqosapi.NetworkQoS, a
 		return nil
 	}
 
-	applyStatus := networkqosapply.Status()
-	if newStatus != "" {
-		applyStatus.WithStatus(newStatus)
-	}
-
 	applyObj := networkqosapply.NetworkQoS(networkQoS.Name, networkQoS.Namespace).
-		WithStatus(applyStatus)
+		WithStatus(networkqosapply.Status().WithStatus(newStatus))
 
 	_, err := m.client.K8sV1alpha1().NetworkQoSes(networkQoS.Namespace).ApplyStatus(context.TODO(), applyObj, *applyOpts)
 	return err

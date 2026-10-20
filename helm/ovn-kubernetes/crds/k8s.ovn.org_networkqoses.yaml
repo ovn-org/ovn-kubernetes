@@ -100,11 +100,17 @@ spec:
                                 minimum: 1
                                 type: integer
                               protocol:
-                                description: protocol (tcp, udp, sctp) that the traffic
-                                  must match.
-                                pattern: ^TCP|UDP|SCTP$
+                                description: protocol (TCP, UDP or SCTP) that the
+                                  traffic must match.
+                                enum:
+                                - TCP
+                                - UDP
+                                - SCTP
                                 type: string
                             type: object
+                            x-kubernetes-validations:
+                            - message: protocol is required when port is set
+                              rule: '!has(self.port) || has(self.protocol)'
                           type: array
                           x-kubernetes-list-type: atomic
                         to:
@@ -262,9 +268,8 @@ spec:
                 type: array
                 x-kubernetes-list-type: atomic
               networkSelectors:
-                description: |-
-                  networkSelector selects the networks on which the pod IPs need to be added to the source address set.
-                  NetworkQoS controller currently supports `NetworkAttachmentDefinitions` type only.
+                description: networkSelector selects the networks on which the pod
+                  IPs need to be added to the source address set.
                 items:
                   description: NetworkSelector selects a set of networks.
                   properties:
@@ -638,7 +643,7 @@ spec:
                 - networkSelectionType
                 x-kubernetes-list-type: map
                 x-kubernetes-validations:
-                - message: networkSelector is immutable
+                - message: networkSelectors are immutable
                   rule: self == oldSelf
                 - message: Unsupported network selection type
                   rule: self.all(sel, sel.networkSelectionType == 'ClusterUserDefinedNetworks'

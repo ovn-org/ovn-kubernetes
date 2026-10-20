@@ -147,6 +147,12 @@ const (
 	EgressIPSNATMarkPriority           = 95
 	EgressLiveMigrationReroutePriority = 10
 
+	// NetworkQoSBasePriority is the start of the QoS priority range.
+	// Each spec.priority gets `NetworkQoSMaxRules`` slots so its rules
+	// cannot overlap another policy priority.
+	NetworkQoSBasePriority = 10000
+	NetworkQoSMaxRules     = 20
+
 	// EndpointSliceMirrorControllerName mirror EndpointSlice controller name (used as a value for the "endpointslice.kubernetes.io/managed-by" label)
 	EndpointSliceMirrorControllerName = "endpointslice-mirror-controller.k8s.ovn.org"
 	// EndpointSliceDefaultControllerName default kubernetes EndpointSlice controller name (used as a value for the "endpointslice.kubernetes.io/managed-by" label)
