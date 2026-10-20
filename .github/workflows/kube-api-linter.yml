@@ -1,0 +1,47 @@
+name: kube-api-linter
+
+on:
+  pull_request:
+    branches: [ master, release-* ]
+    paths:
+      - 'go-controller/pkg/crd/**'
+  merge_group:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kube-api-linter-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  api-lint:
+    name: Kube API Linter
+    runs-on: ubuntu-24.04
+    steps:
+    - name: Check out code
+      uses: actions/checkout@v6
+
+    - name: Set up Go
+      uses: actions/setup-go@v6
+      with:
+        go-version-file: 'go-controller/go.mod'
+        cache: false
+
+    - name: Build custom golangci-lint with KAL
+      run: |
+        go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.0
+        cd go-controller
+        golangci-lint custom
+      env:
+        GOFLAGS: ""
+
+    - name: Run kube-api-linter
+      run: |
+        cd go-controller
+        ./bin/golangci-lint-kube-api-linter run \
+          --config .golangci-kal.yml \
+          --modules-download-mode=vendor \
+          --timeout=10m0s \
+          --verbose \
+          ./pkg/crd/...

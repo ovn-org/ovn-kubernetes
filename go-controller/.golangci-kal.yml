@@ -1,0 +1,38 @@
+version: "2"
+linters:
+  default: none
+  enable:
+    - kubeapilinter
+  settings:
+    custom:
+      kubeapilinter:
+        type: "module"
+        description: >-
+          Kube API Linter checks CRD types against
+          Kubernetes API conventions and best practices.
+        settings:
+          linters:
+            enable:
+              - commentstart
+              - conditions
+              - integers
+              - jsontags
+              - optionalorrequired
+              - statussubresource
+            disable:
+              # nomaps is too strict for CRD projects
+              - nomaps
+              # nonpointerstructs is intended for native types
+              - nonpointerstructs
+          lintersConfig:
+            optionalOrRequired:
+              preferredOptionalMarker: "optional"
+              preferredRequiredMarker: "required"
+  exclusions:
+    generated: lax
+    paths:
+      - vendor
+      - third_party$
+run:
+  build-tags:
+    - tools
