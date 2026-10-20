@@ -209,6 +209,49 @@ func TestAlignCPUAffinity(t *testing.T) {
 	}
 }
 
+func TestAlignCPUAffinityPodResourcesFailure(t *testing.T) {
+	for _, failingMethod := range []string{"GetAllocatableResources", "List"} {
+		t.Run(failingMethod, func(t *testing.T) {
+			defer setTickDuration(20 * time.Millisecond)()
+			defer mockFeatureEnableFile(t, "1")()
+			defer mockKubeletConfigFile(t, cpuset.New(0))()
+			ovsClient, ovsTestCtx, err := libovsdbtest.NewOVSTestHarness(libovsdbtest.TestSetup{
+				OVSData: []libovsdbtest.TestData{&vswitchd.OpenvSwitch{UUID: "root-ovs"}},
+			})
+			require.NoError(t, err)
+			defer ovsTestCtx.Cleanup()
+
+			// saves the original PID lookup functions
+			previousVSwitchdGetter, previousDBGetter := getOvsVSwitchdPIDFn, getOvsDBServerPIDFn
+			// restores the original PID lookup functions, so other tests are not affected
+			defer func() {
+				getOvsVSwitchdPIDFn, getOvsDBServerPIDFn = previousVSwitchdGetter, previousDBGetter
+			}()
+			// defines a replacement PID lookup function. calling it fails the test.
+			// PID lookup is the first operation in each daemon's affinity-update function, so reaching this replacement means the loop incorrectly attempted an update.
+			unexpectedAffinityUpdate := func() (string, error) {
+				t.Error("must not attempt an affinity update after a PodResources query failure")
+				return "", fmt.Errorf("unexpected affinity update")
+			}
+			getOvsVSwitchdPIDFn, getOvsDBServerPIDFn = unexpectedAffinityUpdate, unexpectedAffinityUpdate
+
+			stopCh := make(chan struct{})
+			var stopOnce sync.Once
+			mockClient := mocks.NewPodResourcesListerClient(t)
+			if failingMethod == "List" {
+				mockClient.On("GetAllocatableResources", mock.Anything, mock.Anything).
+					Return(&kubeletpodresourcesv1.AllocatableResourcesResponse{CpuIds: []int64{1}}, nil)
+			}
+			// closing stopCh stops the loop after it finishes handling the failed tick.
+			mockClient.On(failingMethod, mock.Anything, mock.Anything).
+				Run(func(mock.Arguments) { stopOnce.Do(func() { close(stopCh) }) }).
+				Return(nil, context.DeadlineExceeded) // returns a deadline exceeded error, which will exercise the error path in the loop
+
+			Run(context.Background(), stopCh, mockClient, ovsClient)
+		})
+	}
+}
+
 func TestIsFileNotEmpty(t *testing.T) {
 	defer mockFeatureEnableFile(t, "")()
 
