@@ -48,7 +48,7 @@ const (
 	// It is set on managed RouteAdvertisements, FRRConfigurations, and CUDNs.
 	managedNetworkLabel = "k8s.ovn.org/managed-bgp"
 	// managedNamePrefix is the name for the managed base FRRConfiguration and prefix for RouteAdvertisements
-	managedNamePrefix = "ovnk-managed-bgp"
+	managedNamePrefix = types.ManagedBGPConfigurationName
 )
 
 // Controller manages the BGP topology for no-overlay networks with managed routing

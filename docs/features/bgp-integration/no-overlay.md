@@ -134,6 +134,31 @@ With this configuration, OVN-Kubernetes creates:
 The managed `FRRConfiguration` peers node FRR speakers with each other and
 allows them to receive the no-overlay pod subnet routes.
 
+The shared base template lists the nodes' Kubernetes `InternalIP` addresses as
+BGP neighbors. When generating an individual node's `FRRConfiguration`,
+OVN-Kubernetes removes that node's own InternalIPs from the neighbor list. This
+prevents self-peering: a node attempting to establish a BGP session with itself.
+Filtering uses the same address source as the template, rather than the
+`k8s.ovn.org/node-primary-ifaddr` annotation, which may be absent or contain
+different addresses.
+
+If a selected node has no InternalIP, generation stops for the entire
+`RouteAdvertisements` resource. Existing FRR configurations remain in place,
+but configuration updates for the other selected nodes also wait. The
+controller retries with backoff up to 15 times after the initial attempt;
+this limit is an internal controller setting, not a user-configurable option.
+The RA status remains unchanged during these retries. If they are exhausted,
+the controller attempts to report `Accepted=False` with reason `InternalError`
+and stops automatic error retries. Existing FRR configurations are still
+preserved.
+
+A subsequent node address update triggers reconciliation again, even after
+the retry limit has been reached. Once the required InternalIPs are available,
+successful reconciliation updates the configurations and reports
+`Accepted=True`. No controller restart is needed. User-provided templates do
+not require InternalIPs or receive this automatic neighbor filtering; see the
+[Route Advertisements workflow](route-advertisements.md#workflow-description).
+
 When deploying with the OVN-Kubernetes Helm chart, the equivalent global values
 are:
 

@@ -135,6 +135,17 @@ to use as template, and as a consequence, provides the flexibility to export
 routes in a different number of ways including: which BGP peers to export to,
 the use of iBGP or eBGP, etc.
 
+For user-provided `FRRConfiguration` templates, neighbor lists are preserved,
+including entries that match the target node's address. These peers may use
+different uplinks or VRFs, so OVN-Kubernetes does not use the node's primary
+interface address or Kubernetes `InternalIP` addresses to filter them.
+Administrators must ensure that each template's neighbors are appropriate for
+every node selected by its `nodeSelector`. A shared template peering with
+external routers is valid; for node-to-node full-mesh peering, use per-node
+templates and selectors that exclude each node's own peering address.
+For automatic configuration of node-to-node peers, see
+[managed routing in no-overlay mode](no-overlay.md#managed-routing).
+
 ### Import routes into the default pod network
 
 The following example represents an initial FRR-k8s configuration that
