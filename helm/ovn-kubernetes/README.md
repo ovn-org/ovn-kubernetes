@@ -341,6 +341,15 @@ true
 			<td>A comma separated set of IP subnets and the associated hostsubnetlengths (eg, \"10.128.0.0/14/23,10.0.0.0/14/23\") to use with the extended hybrid network</td>
 		</tr>
 		<tr>
+			<td>global.hybridOverlaySubnetWriters</td>
+			<td>list</td>
+			<td><pre lang="json">
+[]
+</pre>
+</td>
+			<td>Users other than ovnkube-cluster-manager allowed to write the hybrid overlay node subnet annotation</td>
+		</tr>
+		<tr>
 			<td>global.image.pullPolicy</td>
 			<td>string</td>
 			<td><pre lang="json">

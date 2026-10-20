@@ -3990,11 +3990,11 @@ spec:
 			egressNode, err := f.ClientSet.CoreV1().Nodes().Get(
 				context.TODO(), egress1Node.name, metav1.GetOptions{})
 			framework.ExpectNoError(err, "Failed to get egress node %s", egress1Node.name)
-			// Copy the network annotations needed for allocator initialization and
-			// reachability. Deliberately omit host-cidrs so the node is rejected.
+			// Copy the egress configuration, but let cluster-manager assign its
+			// own node subnet: admission permits only that controller to write it.
+			// Deliberately omit host-cidrs so the node is rejected.
 			orphanNodeAnnotations := map[string]string{
-				util.OvnNodeIfAddr:          egressNode.Annotations[util.OvnNodeIfAddr],
-				types.NodeSubnetsAnnotation: egressNode.Annotations[types.NodeSubnetsAnnotation],
+				util.OvnNodeIfAddr: egressNode.Annotations[util.OvnNodeIfAddr],
 			}
 			const cloudEgressIPConfigAnnotation = "cloud.network.openshift.io/egress-ipconfig"
 			if cloudEgressIPConfig, ok := egressNode.Annotations[cloudEgressIPConfigAnnotation]; ok {
@@ -4039,7 +4039,8 @@ spec:
 					)
 					return false, nil
 				}
-				return node.Annotations[util.OvnNodeID] != "", nil
+				subnets, err := util.ParseNodeHostSubnetAnnotation(node, types.DefaultNetworkName)
+				return node.Annotations[util.OvnNodeID] != "" && err == nil && len(subnets) > 0, nil
 			})
 			framework.ExpectNoError(err,
 				"Cluster-manager did not observe orphan node %s", orphanNodeName)

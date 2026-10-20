@@ -51,6 +51,8 @@ global:
   enableOvnKubeIdentity: true
   # -- Whether or not to enable hybrid overlay functionality
   enableHybridOverlay: ""
+  # -- Users other than ovnkube-cluster-manager allowed to write the hybrid overlay node subnet annotation
+  hybridOverlaySubnetWriters: []
   # -- A comma separated set of IP subnets and the associated hostsubnetlengths (eg, \"10.128.0.0/14/23,10.0.0.0/14/23\") to use with the extended hybrid network
   hybridOverlayNetCidr: ""
   # -- Whether or not to use Admin Network Policy CRD feature with ovn-kubernetes
