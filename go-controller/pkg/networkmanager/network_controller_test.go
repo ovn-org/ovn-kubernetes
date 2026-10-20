@@ -6,14 +6,17 @@ package networkmanager
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	cnitypes "github.com/containernetworking/cni/pkg/types"
+	frrtypes "github.com/metallb/frr-k8s/api/v1beta1"
 	"github.com/onsi/gomega"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/cache"
 
@@ -47,6 +50,11 @@ func TestSetAdvertisements(t *testing.T) {
 		Role:     "primary",
 		MTU:      1400,
 	}
+
+	noOverlayNetwork := *primaryNetwork
+	noOverlayNetwork.Transport = types.NetworkTransportNoOverlay
+	evpnNetwork := *primaryNetwork
+	evpnNetwork.Transport = types.NetworkTransportEVPN
 
 	podNetworkRA := ratypes.RouteAdvertisements{
 		ObjectMeta: metav1.ObjectMeta{
@@ -85,6 +93,12 @@ func TestSetAdvertisements(t *testing.T) {
 			},
 		},
 	}
+	podNetworkRADegraded := *podNetworkRA.DeepCopy()
+	podNetworkRADegraded.Status.Conditions = append(podNetworkRADegraded.Status.Conditions,
+		metav1.Condition{Type: "Degraded", Status: metav1.ConditionTrue, Reason: "NodeConfigurationFailed"})
+	degradedDefaultVRFRA := *podNetworkRADegraded.DeepCopy()
+	degradedDefaultVRFRA.Spec.TargetVRF = ""
+
 	podNetworkRANotAccepted := podNetworkRA
 	podNetworkRANotAccepted.Status = ratypes.RouteAdvertisementsStatus{}
 	podNetworkRARejected := *podNetworkRA.DeepCopy()
@@ -132,6 +146,27 @@ func TestSetAdvertisements(t *testing.T) {
 			expected: map[string][]string{
 				testNodeName: {testVRFName},
 			},
+		},
+		{
+			name:    "does not advertise a degraded network without generated node configs",
+			network: primaryNetwork,
+			ra:      &podNetworkRADegraded,
+			node:    testNode,
+		},
+		{
+			name:    "retains default VRF for degraded no-overlay without generated configs",
+			network: &noOverlayNetwork, ra: &degradedDefaultVRFRA, node: testNode,
+			expected: map[string][]string{testNodeName: {types.DefaultNetworkName}},
+		},
+		{
+			name:    "retains non-default VRF for degraded no-overlay without generated configs",
+			network: &noOverlayNetwork, ra: &podNetworkRADegraded, node: testNode,
+			expected: map[string][]string{testNodeName: {testVRFName}},
+		},
+		{
+			name:    "retains target VRF for degraded EVPN without generated configs",
+			network: &evpnNetwork, ra: &podNetworkRADegraded, node: testNode,
+			expected: map[string][]string{testNodeName: {testVRFName}},
 		},
 		{
 			name:    "ignores advertisements that are not for the pod network",
@@ -208,7 +243,7 @@ func TestSetAdvertisements(t *testing.T) {
 			config.OVNKubernetesFeature.EnableMultiNetwork = true
 			config.OVNKubernetesFeature.EnableRouteAdvertisements = true
 			fakeClient := util.GetOVNClientset().GetOVNKubeControllerClientset()
-			wf, err := factory.NewOVNKubeControllerWatchFactory(fakeClient, "test-node")
+			wf, err := factory.NewOVNKubeControllerWatchFactory(fakeClient, testNodeName)
 			g.Expect(err).ToNot(gomega.HaveOccurred())
 
 			tcm := &testControllerManager{
@@ -298,6 +333,41 @@ func TestSetAdvertisements(t *testing.T) {
 
 			g.Eventually(meetsExpectations).Should(gomega.Succeed())
 			g.Consistently(meetsExpectations).Should(gomega.Succeed())
+			if tt.ra != &podNetworkRADegraded || tt.network.Transport != "" {
+				return
+			}
+			// The RA stays degraded while this node recovers or fails again.
+			// FRR events alone must update the advertised state, without polling.
+			cfg := &frrtypes.FRRConfiguration{ObjectMeta: metav1.ObjectMeta{
+				Name: "generated", Namespace: "frr",
+				Labels:      map[string]string{types.OvnRouteAdvertisementsKey: testRAName, types.OvnRouteAdvertisementsNodeKey: testNodeName},
+				Annotations: map[string]string{types.OvnRouteAdvertisementsReadyKey: util.RouteAdvertisementsReadyToken(tt.ra, 1)},
+			}}
+			cfg, err = fakeClient.FRRClient.ApiV1beta1().FRRConfigurations("frr").Create(context.Background(), cfg, metav1.CreateOptions{})
+			g.Expect(err).NotTo(gomega.HaveOccurred())
+			tt.expected = map[string][]string{testNodeName: {testVRFName}}
+			g.Eventually(meetsExpectations).Should(gomega.Succeed())
+			delete(cfg.Annotations, types.OvnRouteAdvertisementsReadyKey)
+			cfg, err = fakeClient.FRRClient.ApiV1beta1().FRRConfigurations("frr").Update(context.Background(), cfg, metav1.UpdateOptions{})
+			g.Expect(err).NotTo(gomega.HaveOccurred())
+			tt.expected = map[string][]string{}
+			g.Eventually(meetsExpectations).Should(gomega.Succeed())
+			cfg.Annotations[types.OvnRouteAdvertisementsReadyKey] = util.RouteAdvertisementsReadyToken(tt.ra, 1)
+			_, err = fakeClient.FRRClient.ApiV1beta1().FRRConfigurations("frr").Update(context.Background(), cfg, metav1.UpdateOptions{})
+			g.Expect(err).NotTo(gomega.HaveOccurred())
+			tt.expected = map[string][]string{testNodeName: {testVRFName}}
+			g.Eventually(meetsExpectations).Should(gomega.Succeed())
+			g.Expect(fakeClient.FRRClient.ApiV1beta1().FRRConfigurations("frr").Delete(context.Background(), cfg.Name, metav1.DeleteOptions{})).To(gomega.Succeed())
+			tt.expected = map[string][]string{}
+			g.Eventually(meetsExpectations).Should(gomega.Succeed())
+			// Clearing Degraded restores the healthy path without FRR lookups.
+			ra := tt.ra.DeepCopy()
+			ra.ResourceVersion = "2"
+			meta.FindStatusCondition(ra.Status.Conditions, "Degraded").Status = metav1.ConditionFalse
+			_, err = fakeClient.RouteAdvertisementsClient.K8sV1().RouteAdvertisements().Update(context.Background(), ra, metav1.UpdateOptions{})
+			g.Expect(err).NotTo(gomega.HaveOccurred())
+			tt.expected = map[string][]string{testNodeName: {testVRFName}}
+			g.Eventually(meetsExpectations).Should(gomega.Succeed())
 		})
 	}
 }
@@ -909,4 +979,66 @@ func TestNetworkController_ConcurrentReconciliationMixed(t *testing.T) {
 			g.Expect(retrieved).ToNot(gomega.BeNil())
 		}
 	}).Should(gomega.Succeed())
+}
+
+func TestDegradedNodeAdvertisementsReady(t *testing.T) {
+	for _, nodeName := range []string{"node", strings.Repeat("a", 63) + ".example.org"} {
+		t.Run(nodeName, func(t *testing.T) {
+			g := gomega.NewWithT(t)
+			g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+			t.Cleanup(func() { g.Expect(config.PrepareTestConfig()).To(gomega.Succeed()) })
+			config.OVNKubernetesFeature.EnableMultiNetwork = true
+			config.OVNKubernetesFeature.EnableRouteAdvertisements = true
+			wf, err := factory.NewClusterManagerWatchFactory(util.GetOVNClientset().GetClusterManagerClientset())
+			g.Expect(err).NotTo(gomega.HaveOccurred())
+			defer wf.Shutdown()
+			indexer := wf.FRRConfigurationsInformer().Informer().GetIndexer()
+			c := &networkController{frrIndexer: indexer}
+			ra := &ratypes.RouteAdvertisements{ObjectMeta: metav1.ObjectMeta{Name: "ra", UID: "uid", Generation: 2}}
+			cfg := func(name, node, token string) *frrtypes.FRRConfiguration {
+				return &frrtypes.FRRConfiguration{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "frr",
+					Labels:      map[string]string{types.OvnRouteAdvertisementsKey: ra.Name, types.OvnRouteAdvertisementsNodeKey: util.RouteAdvertisementsNodeLabel(node)},
+					Annotations: map[string]string{types.OvnRouteAdvertisementsReadyKey: token}}}
+			}
+			check := func(expected bool) {
+				t.Helper()
+				ready, err := c.nodeAdvertisementsReady(ra, nodeName)
+				g.Expect(err).NotTo(gomega.HaveOccurred())
+				g.Expect(ready).To(gomega.Equal(expected))
+			}
+			check(false)
+			// Other nodes cannot make this node ready.
+			g.Expect(indexer.Add(cfg("other", "other-node", util.RouteAdvertisementsReadyToken(ra, 1)))).To(gomega.Succeed())
+			check(false)
+			first := cfg("first", nodeName, util.RouteAdvertisementsReadyToken(ra, 2))
+			g.Expect(indexer.Add(first)).To(gomega.Succeed())
+			check(false) // one of two templates is still absent
+			second := cfg("second", nodeName, util.RouteAdvertisementsReadyToken(ra, 2))
+			g.Expect(indexer.Add(second)).To(gomega.Succeed())
+			check(true)
+			for _, token := range []string{"", "uid/1/2", "previous-uid/2/2", "uid/2/1"} {
+				stale := second.DeepCopy()
+				stale.Annotations[types.OvnRouteAdvertisementsReadyKey] = token
+				g.Expect(indexer.Update(stale)).To(gomega.Succeed())
+				check(false)
+			}
+			g.Expect(indexer.Update(second)).To(gomega.Succeed())
+			check(true)
+			deleting := second.DeepCopy()
+			now := metav1.Now()
+			deleting.DeletionTimestamp = &now
+			g.Expect(indexer.Update(deleting)).To(gomega.Succeed())
+			check(false)
+
+			// Events for this node must trigger degraded reconciliation; other nodes
+			// must remain excluded even when their names require encoding too.
+			c.node = nodeName
+			c.raLister = wf.RouteAdvertisementsInformer().Lister()
+			ra.Status.Conditions = []metav1.Condition{{Type: "Degraded", Status: metav1.ConditionTrue}}
+			g.Expect(wf.RouteAdvertisementsInformer().Informer().GetIndexer().Add(ra)).To(gomega.Succeed())
+			g.Expect(c.frrNeedsUpdate(nil, first)).To(gomega.BeTrue())
+			g.Expect(c.frrNeedsUpdate(first, nil)).To(gomega.BeTrue())
+			g.Expect(c.frrNeedsUpdate(nil, cfg("remote", strings.Repeat("b", 63)+".example.org", ""))).To(gomega.BeFalse())
+		})
+	}
 }

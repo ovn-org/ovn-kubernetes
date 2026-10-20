@@ -196,6 +196,10 @@ rules:
       resources:
           - routeadvertisements
       verbs: [ "get", "list", "watch" ]
+    - apiGroups: ["frrk8s.metallb.io"]
+      resources:
+          - frrconfigurations
+      verbs: ["get", "list", "watch"]
     {{- end }}
     {{- if eq (hasKey .Values.global "enableOvnKubeIdentity" | ternary .Values.global.enableOvnKubeIdentity true) true }}
     - apiGroups: ["certificates.k8s.io"]

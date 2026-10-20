@@ -7,6 +7,7 @@ package mocks
 
 import (
 	k8s_cni_cncf_iov1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/informers/externalversions/k8s.cni.cncf.io/v1"
+	v1beta1 "github.com/metallb/frr-k8s/pkg/client/informers/externalversions/api/v1beta1"
 	v1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/informers/externalversions/adminpolicybasedroute/v1"
 	clusternetworkconnectv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/clusternetworkconnect/v1/apis/informers/externalversions/clusternetworkconnect/v1"
 	egressipv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/informers/externalversions/egressip/v1"
@@ -252,6 +253,26 @@ func (_m *NodeWatchFactory) EgressIPInformer() egressipv1.EgressIPInformer {
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(egressipv1.EgressIPInformer)
+		}
+	}
+
+	return r0
+}
+
+// FRRConfigurationsInformer provides a mock function with no fields
+func (_m *NodeWatchFactory) FRRConfigurationsInformer() v1beta1.FRRConfigurationInformer {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for FRRConfigurationsInformer")
+	}
+
+	var r0 v1beta1.FRRConfigurationInformer
+	if rf, ok := ret.Get(0).(func() v1beta1.FRRConfigurationInformer); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(v1beta1.FRRConfigurationInformer)
 		}
 	}
 

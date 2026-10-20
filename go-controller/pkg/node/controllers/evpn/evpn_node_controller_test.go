@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	nadfake "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/fake"
+	frrfake "github.com/metallb/frr-k8s/pkg/client/clientset/versioned/fake"
 	"github.com/stretchr/testify/mock"
 	"github.com/vishvananda/netlink"
 
@@ -818,6 +819,7 @@ var _ = Describe("EVPN node controller", func() {
 				NetworkAttchDefClient:     nadfake.NewSimpleClientset(),
 				UserDefinedNetworkClient:  udnfake.NewClientset(),
 				RouteAdvertisementsClient: routeadvertisementsfake.NewClientset(),
+				FRRClient:                 frrfake.NewSimpleClientset(),
 				UplinkClient:              uplinkfake.NewSimpleClientset(),
 				VTEPClient:                vtepClient,
 			}, nodeName)

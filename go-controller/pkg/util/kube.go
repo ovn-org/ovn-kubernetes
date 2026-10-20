@@ -103,6 +103,7 @@ type OVNKubeControllerClientset struct {
 	NetworkConnectClient      networkconnectclientset.Interface
 	UplinkClient              uplinkclientset.Interface
 	VTEPClient                vtepclientset.Interface
+	FRRClient                 frrclientset.Interface
 }
 
 type OVNNodeClientset struct {
@@ -115,6 +116,7 @@ type OVNNodeClientset struct {
 	RouteAdvertisementsClient routeadvertisementsclientset.Interface
 	UplinkClient              uplinkclientset.Interface
 	VTEPClient                vtepclientset.Interface
+	FRRClient                 frrclientset.Interface
 }
 
 type OVNClusterManagerClientset struct {
@@ -163,6 +165,7 @@ func (cs *OVNClientset) GetOVNKubeControllerClientset() *OVNKubeControllerClient
 		NetworkAttchDefClient:     cs.NetworkAttchDefClient,
 		UserDefinedNetworkClient:  cs.UserDefinedNetworkClient,
 		RouteAdvertisementsClient: cs.RouteAdvertisementsClient,
+		FRRClient:                 cs.FRRClient,
 		NetworkQoSClient:          cs.NetworkQoSClient,
 		NetworkConnectClient:      cs.NetworkConnectClient,
 		UplinkClient:              cs.UplinkClient,
@@ -202,6 +205,7 @@ func (cs *OVNClientset) GetNodeClientset() *OVNNodeClientset {
 		NetworkAttchDefClient:     cs.NetworkAttchDefClient,
 		UserDefinedNetworkClient:  cs.UserDefinedNetworkClient,
 		RouteAdvertisementsClient: cs.RouteAdvertisementsClient,
+		FRRClient:                 cs.FRRClient,
 		UplinkClient:              cs.UplinkClient,
 		VTEPClient:                cs.VTEPClient,
 	}
