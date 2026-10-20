@@ -756,6 +756,25 @@ func shouldAddUDNServiceMarkRules(netInfo util.NetInfo, nodeName string) bool {
 		util.IsPodNetworkAdvertisedAtNodeDefaultVRF(netInfo, nodeName)
 }
 
+// reconcileUDNServiceMarkRules also removes old entries when an advertisement
+// changes the service's routing domain without changing the Service object.
+func reconcileUDNServiceMarkRules(service *corev1.Service, netInfo util.NetInfo, nodeName string, netConfig *bridgeconfig.BridgeUDNConfiguration) error {
+	if !netInfo.IsPrimaryNetwork() {
+		return nil
+	}
+	var err error
+	if shouldAddUDNServiceMarkRules(netInfo, nodeName) {
+		err = nodenft.AddObjects(getUDNNFTRules(service, netConfig))
+	} else {
+		err = nodenft.DeleteObjects(getUDNNFTRules(service, nil))
+	}
+	if err != nil {
+		return fmt.Errorf("failed to reconcile UDN service mark rules for service %s/%s: %w",
+			service.Namespace, service.Name, err)
+	}
+	return nil
+}
+
 // getUDNNFTContainerObjects returns all of the "container" objects (Sets/Maps/Chains)
 // used by getUDNNFTRules. This is used (possibly along with
 // getGatewayNFTContainerObjects) to determine the sets/maps/chains whose contents will be
