@@ -9,6 +9,30 @@ runs:
         echo "=== Disk usage before cleanup ==="
         df -h
 
+        echo "=== Checking allocated disk space ==="
+        TOTAL_DISK_GB=$(df -BG / | tail -1 | awk '{print $2}' | sed 's/G//')
+        if ! [[ "$TOTAL_DISK_GB" =~ ^[0-9]+$ ]]; then
+          echo "ERROR: Could not determine disk size (got '${TOTAL_DISK_GB}')"
+          exit 1
+        fi
+        echo "Total disk allocated: ${TOTAL_DISK_GB}GB"
+
+        # Fail fast if runner has insufficient disk
+        # GitHub has a mix of runner sizes (72GB and 145GB) across all regions
+        MIN_REQUIRED_GB=100
+        if [ "$TOTAL_DISK_GB" -lt "$MIN_REQUIRED_GB" ]; then
+          echo "ERROR: Insufficient disk space allocated to this runner"
+          echo "  Allocated: ${TOTAL_DISK_GB}GB"
+          echo "  Required:  ${MIN_REQUIRED_GB}GB minimum"
+          echo ""
+          echo "GitHub Actions has a mix of runner VM sizes across all regions."
+          echo "This runner has a smaller disk (${TOTAL_DISK_GB}GB vs standard 145GB)."
+          echo ""
+          echo "Failing fast to trigger job retry on a runner with more disk space."
+          exit 1
+        fi
+        echo "Disk allocation check passed: ${TOTAL_DISK_GB}GB >= ${MIN_REQUIRED_GB}GB"
+
         echo "=== Remove Android SDK ==="
         sudo rm -rf /usr/local/lib/android/sdk
 
