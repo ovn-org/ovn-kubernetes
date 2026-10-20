@@ -73,9 +73,16 @@ func Run(ctx context.Context, restCfg *rest.Config, config Config) error {
 
 	webhookMux := http.NewServeMux()
 
+	informerFactory := informers.NewSharedInformerFactory(kubeClient, 10*time.Minute)
+	nodeInformer := informerFactory.Core().V1().Nodes().Informer()
+	informerFactory.Start(stopCh)
+	klog.Infof("Waiting for caches to sync")
+	cache.WaitForCacheSync(ctx.Done(), nodeInformer.HasSynced)
+
+	nodeLister := listers.NewNodeLister(nodeInformer.GetIndexer())
 	nodeWebhook := admission.WithValidator(
 		scheme.Scheme,
-		ovnwebhook.NewNodeAdmissionWebhook(config.EnableHybridOverlay, config.ExtraAllowedUsers...),
+		ovnwebhook.NewNodeAdmissionWebhook(nodeLister, config.EnableHybridOverlay, config.ExtraAllowedUsers...),
 	).WithRecoverPanic(true)
 
 	nodeHandler, err := admission.StandaloneWebhook(
@@ -90,13 +97,6 @@ func Run(ctx context.Context, restCfg *rest.Config, config Config) error {
 	}
 	webhookMux.Handle("/node", nodeHandler)
 
-	informerFactory := informers.NewSharedInformerFactory(kubeClient, 10*time.Minute)
-	nodeInformer := informerFactory.Core().V1().Nodes().Informer()
-	informerFactory.Start(stopCh)
-	klog.Infof("Waiting for caches to sync")
-	cache.WaitForCacheSync(ctx.Done(), nodeInformer.HasSynced)
-
-	nodeLister := listers.NewNodeLister(nodeInformer.GetIndexer())
 	podWebhook := admission.WithValidator(
 		scheme.Scheme,
 		ovnwebhook.NewPodAdmissionWebhook(nodeLister, config.PodAdmissionConditions, config.ExtraAllowedUsers...),

@@ -198,7 +198,7 @@ func (oc *DefaultNetworkController) checkNodeChassisMismatch(node *corev1.Node) 
 	}
 
 	for _, chassis := range chassisList {
-		if chassis.Hostname == node.Name && chassis.Name != chassisID {
+		if libovsdbops.ChassisOwnedByNode(chassis, node.Name) && chassis.Name != chassisID {
 			return chassis.Name, nil
 		}
 	}
@@ -213,7 +213,7 @@ func (oc *DefaultNetworkController) deleteStaleNodeChassis(node *corev1.Node) er
 	} else if staleChassis != "" {
 		klog.V(5).Infof("Node %s now has a new chassis ID, delete its stale chassis %s in SBDB", node.Name, staleChassis)
 		p := func(item *sbdb.Chassis) bool {
-			return item.Name == staleChassis
+			return item.Name == staleChassis && libovsdbops.ChassisOwnedByNode(item, node.Name)
 		}
 		if err = libovsdbops.DeleteChassisTemplateVar(oc.nbClient, &nbdb.ChassisTemplateVar{Chassis: staleChassis}); err != nil {
 			// Send an event and Log on failure
@@ -249,7 +249,7 @@ func (oc *DefaultNetworkController) cleanupNodeResources(nodeName string) error 
 
 	chassisTemplateVars := make([]*nbdb.ChassisTemplateVar, 0)
 	p := func(item *sbdb.Chassis) bool {
-		if item.Hostname == nodeName {
+		if libovsdbops.ChassisOwnedByNode(item, nodeName) {
 			chassisTemplateVars = append(chassisTemplateVars, &nbdb.ChassisTemplateVar{Chassis: item.Name})
 			return true
 		}

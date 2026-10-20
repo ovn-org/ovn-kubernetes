@@ -13,7 +13,9 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/sets"
+	listers "k8s.io/client-go/listers/core/v1"
 	nodeutil "k8s.io/component-helpers/node/util"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
@@ -75,12 +77,13 @@ var hybridOverlayNodeAnnotationChecks = map[string]checkNodeAnnot{
 }
 
 type NodeAdmission struct {
+	nodeLister        listers.NodeLister
 	annotationChecks  map[string]checkNodeAnnot
 	annotationKeys    sets.Set[string]
 	extraAllowedUsers sets.Set[string]
 }
 
-func NewNodeAdmissionWebhook(enableHybridOverlay bool, extraAllowedUsers ...string) *NodeAdmission {
+func NewNodeAdmissionWebhook(nodeLister listers.NodeLister, enableHybridOverlay bool, extraAllowedUsers ...string) *NodeAdmission {
 	checks := make(map[string]checkNodeAnnot)
 	maps.Copy(checks, commonNodeAnnotationChecks)
 	maps.Copy(checks, interconnectNodeAnnotationChecks)
@@ -88,6 +91,7 @@ func NewNodeAdmissionWebhook(enableHybridOverlay bool, extraAllowedUsers ...stri
 		maps.Copy(checks, hybridOverlayNodeAnnotationChecks)
 	}
 	return &NodeAdmission{
+		nodeLister:        nodeLister,
 		annotationChecks:  checks,
 		annotationKeys:    sets.New[string](slices.Collect(maps.Keys(checks))...),
 		extraAllowedUsers: sets.New[string](extraAllowedUsers...),
@@ -140,6 +144,16 @@ func (p NodeAdmission) ValidateUpdate(ctx context.Context, oldNode, newNode *cor
 			if err := check(changes[key], nodeName); err != nil {
 				return nil, fmt.Errorf("user: %q is not allowed to set %s on node %q: %v", req.UserInfo.Username, key, newNode.Name, err)
 			}
+		}
+	}
+
+	if change, ok := changes[util.OvnNodeChassisID]; ok && change.action == added {
+		nodes, err := p.nodeLister.List(labels.Everything())
+		if err != nil {
+			return nil, fmt.Errorf("failed to check chassis ID uniqueness: %w", err)
+		}
+		if err := util.ValidateNodeChassisID(newNode.Name, change.value, nodes); err != nil {
+			return nil, err
 		}
 	}
 

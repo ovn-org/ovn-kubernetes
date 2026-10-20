@@ -15,6 +15,8 @@ import (
 	authenticationv1 "k8s.io/api/authentication/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	listers "k8s.io/client-go/listers/core/v1"
+	"k8s.io/client-go/tools/cache"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	hotypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
@@ -47,7 +49,7 @@ func TestNewNodeAdmissionWebhook(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := NewNodeAdmissionWebhook(tt.enableHybridOverlay); !got.annotationKeys.HasAll(tt.expectedKeys...) {
+			if got := NewNodeAdmissionWebhook(listers.NewNodeLister(cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})), tt.enableHybridOverlay); !got.annotationKeys.HasAll(tt.expectedKeys...) {
 				t.Errorf("NewNodeAdmissionWebhook() = %v, want %v", got.annotationKeys, tt.expectedKeys)
 			}
 		})
@@ -60,7 +62,7 @@ var additionalNamePrefix = "system:foobar"
 var additionalUserName = fmt.Sprintf("%s:%s", additionalNamePrefix, nodeName)
 
 func TestNodeAdmission_ValidateUpdate(t *testing.T) {
-	adm := NewNodeAdmissionWebhook(false)
+	adm := NewNodeAdmissionWebhook(listers.NewNodeLister(cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})), false)
 	tests := []struct {
 		name        string
 		ctx         context.Context
@@ -427,7 +429,7 @@ func TestNodeAdmission_ValidateUpdate(t *testing.T) {
 	}
 }
 func TestNodeAdmission_ValidateUpdateHybridOverlay(t *testing.T) {
-	adm := NewNodeAdmissionWebhook(true)
+	adm := NewNodeAdmissionWebhook(listers.NewNodeLister(cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})), true)
 	tests := []struct {
 		name        string
 		ctx         context.Context
@@ -480,6 +482,38 @@ func TestNodeAdmission_ValidateUpdateHybridOverlay(t *testing.T) {
 			if err != tt.expectedErr && err.Error() != tt.expectedErr.Error() {
 				t.Errorf("ValidateUpdateIC() error = %v, wantErr %v", err, tt.expectedErr)
 				return
+			}
+		})
+	}
+}
+
+func TestNodeAdmissionChassisIDUniqueness(t *testing.T) {
+	for _, tt := range []struct {
+		name      string
+		chassisID string
+		otherNode string
+		wantError bool
+	}{
+		{name: "unique", chassisID: "new-chassis", otherNode: "other"},
+		{name: "duplicate", chassisID: "claimed-chassis", otherNode: "other", wantError: true},
+		{name: "same node in cache", chassisID: "claimed-chassis", otherNode: nodeName},
+		{name: "empty", otherNode: "other", wantError: true},
+		{name: "whitespace", chassisID: " ", otherNode: "other", wantError: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			indexer := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})
+			err := indexer.Add(&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: tt.otherNode, Annotations: map[string]string{util.OvnNodeChassisID: "claimed-chassis"}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			adm := NewNodeAdmissionWebhook(listers.NewNodeLister(indexer), false)
+			oldNode := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}}
+			newNode := oldNode.DeepCopy()
+			newNode.Annotations = map[string]string{util.OvnNodeChassisID: tt.chassisID}
+			ctx := admission.NewContextWithRequest(context.Background(), admission.Request{AdmissionRequest: v1.AdmissionRequest{UserInfo: authenticationv1.UserInfo{Username: userName}}})
+			_, err = adm.ValidateUpdate(ctx, oldNode, newNode)
+			if (err != nil) != tt.wantError {
+				t.Fatalf("ValidateUpdate error = %v, wantError %t", err, tt.wantError)
 			}
 		})
 	}

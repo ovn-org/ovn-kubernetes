@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/netip"
 	"strconv"
+	"strings"
 
 	"github.com/gaissmai/cidrtree"
 
@@ -395,6 +396,21 @@ func ParseNodeChassisIDAnnotation(node *corev1.Node) (string, error) {
 	}
 
 	return chassisID, nil
+}
+
+// ValidateNodeChassisID rejects empty chassis IDs and IDs advertised by another node.
+// Callers must also enforce chassis ownership when writing to OVN: a node cache
+// cannot serialize concurrent first assignments.
+func ValidateNodeChassisID(nodeName, chassisID string, nodes []*corev1.Node) error {
+	if strings.TrimSpace(chassisID) == "" {
+		return fmt.Errorf("%s cannot be empty", OvnNodeChassisID)
+	}
+	for _, node := range nodes {
+		if node.Name != nodeName && node.Annotations[OvnNodeChassisID] == chassisID {
+			return fmt.Errorf("chassis ID %q is already advertised by node %q", chassisID, node.Name)
+		}
+	}
+	return nil
 }
 
 func NodeChassisIDAnnotationChanged(oldNode, newNode *corev1.Node) bool {
