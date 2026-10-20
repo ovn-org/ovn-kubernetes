@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"math/big"
 	"net"
+	"sync"
 
 	utilnet "k8s.io/utils/net"
 
@@ -96,6 +97,11 @@ type Range struct {
 	max int
 
 	alloc allocator.Interface
+
+	// staticIPsOutOfRange tracks static IPv6 allocations whose offset from the
+	// subnet base exceeds the bitmap cap (65535). Keyed by the canonical IP string.
+	staticIPsOutOfRange map[string]bool
+	mu                  sync.RWMutex
 }
 
 // NewAllocatorCIDRRange creates a Range over a net.IPNet, calling allocatorFactory to construct the backing store.
@@ -134,9 +140,10 @@ func NewAllocatorFullCIDRRange(cidr *net.IPNet, allocatorFactory allocator.Alloc
 		}
 	}
 	r := Range{
-		net:  cidr,
-		base: base,
-		max:  int(max),
+		net:                 cidr,
+		base:                base,
+		max:                 int(max),
+		staticIPsOutOfRange: make(map[string]bool),
 	}
 	var err error
 	r.alloc, err = allocatorFactory(r.max, rangeSpec)
@@ -177,19 +184,40 @@ func (r *Range) CIDR() net.IPNet {
 // or has already been reserved.  ErrFull will be returned if there
 // are no addresses left.
 func (r *Range) Allocate(ip net.IP) error {
-	ok, offset := r.contains(ip)
-	if !ok {
+	if !r.net.Contains(ip) {
 		return &ErrNotInRange{r.net.String()}
 	}
 
-	allocated, err := r.alloc.Allocate(offset)
-	if err != nil {
-		return err
+	bigOffset := calculateIPOffsetBig(r.base, ip)
+	if bigOffset.Sign() < 0 {
+		return &ErrNotInRange{r.net.String()}
 	}
-	if !allocated {
-		return ErrAllocated
+
+	if bigOffset.IsInt64() && int(bigOffset.Int64()) < r.max {
+		allocated, err := r.alloc.Allocate(int(bigOffset.Int64()))
+		if err != nil {
+			return err
+		}
+		if !allocated {
+			return ErrAllocated
+		}
+		return nil
 	}
-	return nil
+
+	// For IPv6 subnets where the bitmap was capped, allow static allocation
+	// of IPs beyond the bitmap range using the overflow map.
+	if utilnet.IsIPv6CIDR(r.net) {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		ipStr := ip.String()
+		if r.staticIPsOutOfRange[ipStr] {
+			return ErrAllocated
+		}
+		r.staticIPsOutOfRange[ipStr] = true
+		return nil
+	}
+
+	return &ErrNotInRange{r.net.String()}
 }
 
 // AllocateNext reserves one of the IPs from the pool. ErrFull may
@@ -209,12 +237,25 @@ func (r *Range) AllocateNext() (net.IP, error) {
 // unallocated IP or an IP out of the range is a no-op and
 // returns no error.
 func (r *Range) Release(ip net.IP) {
-	ok, offset := r.contains(ip)
-	if !ok {
+	if !r.net.Contains(ip) {
 		return
 	}
 
-	r.alloc.Release(offset)
+	bigOffset := calculateIPOffsetBig(r.base, ip)
+	if bigOffset.Sign() < 0 {
+		return
+	}
+
+	if bigOffset.IsInt64() && int(bigOffset.Int64()) < r.max {
+		r.alloc.Release(int(bigOffset.Int64()))
+		return
+	}
+
+	if utilnet.IsIPv6CIDR(r.net) {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		delete(r.staticIPsOutOfRange, ip.String())
+	}
 }
 
 // ForEach calls the provided function for each allocated IP.
@@ -223,17 +264,40 @@ func (r *Range) ForEach(fn func(net.IP)) {
 		ip, _ := utilnet.GetIndexedIP(r.net, offset+1) // +1 because Range doesn't store IP 0
 		fn(ip)
 	})
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for ipStr := range r.staticIPsOutOfRange {
+		ip := net.ParseIP(ipStr)
+		if ip != nil {
+			fn(ip)
+		}
+	}
 }
 
 // Has returns true if the provided IP is already allocated and a call
 // to Allocate(ip) would fail with ErrAllocated.
 func (r *Range) Has(ip net.IP) bool {
-	ok, offset := r.contains(ip)
-	if !ok {
+	if !r.net.Contains(ip) {
 		return false
 	}
 
-	return r.alloc.Has(offset)
+	bigOffset := calculateIPOffsetBig(r.base, ip)
+	if bigOffset.Sign() < 0 {
+		return false
+	}
+
+	if bigOffset.IsInt64() && int(bigOffset.Int64()) < r.max {
+		return r.alloc.Has(int(bigOffset.Int64()))
+	}
+
+	if utilnet.IsIPv6CIDR(r.net) {
+		r.mu.RLock()
+		defer r.mu.RUnlock()
+		return r.staticIPsOutOfRange[ip.String()]
+	}
+
+	return false
 }
 
 // Reserved returns true if the provided IP can't be allocated. This is *only*
@@ -270,22 +334,8 @@ func (r *Range) Reserved(ip net.IP) bool {
 	return false
 }
 
-// contains returns true and the offset if the ip is in the range, and false
-// and nil otherwise. The first and last addresses of the CIDR are omitted.
-func (r *Range) contains(ip net.IP) (bool, int) {
-	if !r.net.Contains(ip) {
-		return false, 0
-	}
-
-	offset := calculateIPOffset(r.base, ip)
-	if offset < 0 || offset >= r.max {
-		return false, 0
-	}
-	return true, offset
-}
-
-// calculateIPOffset calculates the integer offset of ip from base such that
-// base + offset = ip. It requires ip >= base.
-func calculateIPOffset(base *big.Int, ip net.IP) int {
-	return int(big.NewInt(0).Sub(utilnet.BigForIP(ip), base).Int64())
+// calculateIPOffsetBig calculates the offset of ip from base as a *big.Int,
+// safe for arbitrarily large IPv6 offsets that would overflow int/int64.
+func calculateIPOffsetBig(base *big.Int, ip net.IP) *big.Int {
+	return new(big.Int).Sub(utilnet.BigForIP(ip), base)
 }

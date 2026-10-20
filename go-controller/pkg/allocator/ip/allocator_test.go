@@ -20,7 +20,9 @@ limitations under the License.
 package ip
 
 import (
+	"fmt"
 	"net"
+	"sync"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -54,10 +56,9 @@ func TestAllocate(t *testing.T) {
 			free:     65535,
 			released: "2001:db8:1::5",
 			outOfRange: []string{
-				"2001:db8::1",     // not in 2001:db8:1::/48
-				"2001:db8:1::",    // reserved (base address)
-				"2001:db8:1::1:0", // not in the low 16 bits of 2001:db8:1::/48
-				"2001:db8:2::2",   // not in 2001:db8:1::/48
+				"2001:db8::1",   // not in 2001:db8:1::/48
+				"2001:db8:1::",  // reserved (base address)
+				"2001:db8:2::2", // not in 2001:db8:1::/48
 			},
 			alreadyAllocated: "2001:db8:1::1",
 		},
@@ -67,10 +68,9 @@ func TestAllocate(t *testing.T) {
 			free:     65535,
 			released: "2605:b100:283:1::e",
 			outOfRange: []string{
-				"2605:b100:283:0::1",   // not in 2605:b100:283:1::/64
-				"2605:b100:283:1::",    // reserved (base address)
-				"2605:b100:283:1::1:0", // not in the low 16 bits of 2605:b100:283:1::/64
-				"2605:b100:284:2::2",   // not in 2605:b100:283:1::/64
+				"2605:b100:283:0::1", // not in 2605:b100:283:1::/64
+				"2605:b100:283:1::",  // reserved (base address)
+				"2605:b100:284:2::2", // not in 2605:b100:283:1::/64
 			},
 			alreadyAllocated: "2605:b100:283:1::1",
 		},
@@ -286,5 +286,210 @@ func TestReserved(t *testing.T) {
 
 	if r.Reserved(net.ParseIP("192.168.1.254")) {
 		t.Errorf("should not be a reserved address: %s", "192.168.1.254")
+	}
+}
+
+func TestIPv6StaticAllocationBeyondBitmapCap(t *testing.T) {
+	testCases := []struct {
+		name  string
+		cidr  string
+		ips   []string
+		notIn []string // IPs truly outside the CIDR
+	}{
+		{
+			name: "/64 subnet",
+			cidr: "2001:db8:1::/64",
+			ips: []string{
+				"2001:db8:1::1:0",       // offset 65536
+				"2001:db8:1::2:0",       // offset 131072
+				"2001:db8:1::ffff:ffff", // large offset
+			},
+			notIn: []string{
+				"2001:db8:2::1", // different subnet
+			},
+		},
+		{
+			name: "/48 subnet",
+			cidr: "2001:db8:1::/48",
+			ips: []string{
+				"2001:db8:1::1:0",     // offset 65536
+				"2001:db8:1:1::1",     // offset in different /64 block
+				"2001:db8:1:ffff::99", // far into the /48
+			},
+			notIn: []string{
+				"2001:db8:2::1", // different /48
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, cidr, err := net.ParseCIDR(tc.cidr)
+			if err != nil {
+				t.Fatalf("failed to parse CIDR %q: %v", tc.cidr, err)
+			}
+			r, err := NewCIDRRange(cidr)
+			if err != nil {
+				t.Fatalf("failed to create Range for CIDR %q: %v", tc.cidr, err)
+			}
+
+			// Allocate IPs beyond bitmap cap
+			for _, ipStr := range tc.ips {
+				ip := net.ParseIP(ipStr)
+				if err := r.Allocate(ip); err != nil {
+					t.Errorf("Allocate(%s) should succeed, got: %v", ipStr, err)
+				}
+				if !r.Has(ip) {
+					t.Errorf("Has(%s) should return true after allocation", ipStr)
+				}
+			}
+
+			// Double allocation must fail with ErrAllocated
+			for _, ipStr := range tc.ips {
+				ip := net.ParseIP(ipStr)
+				if err := r.Allocate(ip); err != ErrAllocated {
+					t.Errorf("Allocate(%s) twice should return ErrAllocated, got: %v", ipStr, err)
+				}
+			}
+
+			// IPs outside the CIDR must still be rejected
+			for _, ipStr := range tc.notIn {
+				ip := net.ParseIP(ipStr)
+				err := r.Allocate(ip)
+				if _, ok := err.(*ErrNotInRange); !ok {
+					t.Errorf("Allocate(%s) should return ErrNotInRange, got: %v", ipStr, err)
+				}
+			}
+
+			// Release and re-allocate
+			for _, ipStr := range tc.ips {
+				ip := net.ParseIP(ipStr)
+				r.Release(ip)
+				if r.Has(ip) {
+					t.Errorf("Has(%s) should return false after release", ipStr)
+				}
+				if err := r.Allocate(ip); err != nil {
+					t.Errorf("re-Allocate(%s) after release should succeed, got: %v", ipStr, err)
+				}
+			}
+
+			// ForEach must include out-of-range static IPs
+			found := sets.New[string]()
+			r.ForEach(func(ip net.IP) {
+				found.Insert(ip.String())
+			})
+			for _, ipStr := range tc.ips {
+				canonical := net.ParseIP(ipStr).String()
+				if !found.Has(canonical) {
+					t.Errorf("ForEach should include %s", ipStr)
+				}
+			}
+		})
+	}
+}
+
+func TestIPv6StaticAndDynamicCoexistence(t *testing.T) {
+	_, cidr, err := net.ParseCIDR("2001:db8:1::/64")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := NewCIDRRange(cidr)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Static allocation within bitmap range
+	inRange := net.ParseIP("2001:db8:1::100")
+	if err := r.Allocate(inRange); err != nil {
+		t.Fatalf("static Allocate within bitmap should succeed: %v", err)
+	}
+
+	// Static allocation beyond bitmap range
+	outRange := net.ParseIP("2001:db8:1::1:0")
+	if err := r.Allocate(outRange); err != nil {
+		t.Fatalf("static Allocate beyond bitmap should succeed: %v", err)
+	}
+
+	// Dynamic allocation should skip the in-range static IP
+	for i := 0; i < 200; i++ {
+		ip, err := r.AllocateNext()
+		if err != nil {
+			t.Fatalf("AllocateNext error at %d: %v", i, err)
+		}
+		if ip.Equal(inRange) {
+			t.Fatalf("AllocateNext returned statically allocated IP %s", inRange)
+		}
+	}
+
+	// Both IPs should report as allocated
+	if !r.Has(inRange) {
+		t.Error("Has should be true for in-range static IP")
+	}
+	if !r.Has(outRange) {
+		t.Error("Has should be true for out-of-range static IP")
+	}
+}
+
+func TestIPv6SmallSubnetUnaffected(t *testing.T) {
+	// /112 has exactly 65536 addresses, should work unchanged
+	_, cidr, err := net.ParseCIDR("2001:db8:1::/112")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := NewCIDRRange(cidr)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Last IP in /112 range should be allocatable
+	ip := net.ParseIP("2001:db8:1::fffe")
+	if err := r.Allocate(ip); err != nil {
+		t.Errorf("Allocate last-but-one IP in /112 should succeed: %v", err)
+	}
+
+	// IP outside /112 must be rejected
+	ipOutside := net.ParseIP("2001:db8:1::1:0")
+	err = r.Allocate(ipOutside)
+	if _, ok := err.(*ErrNotInRange); !ok {
+		t.Errorf("Allocate outside /112 should return ErrNotInRange, got: %v", err)
+	}
+}
+
+func TestIPv6StaticAllocationConcurrency(t *testing.T) {
+	_, cidr, err := net.ParseCIDR("2001:db8:cafe::/64")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := NewCIDRRange(cidr)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const count = 100
+	var wg sync.WaitGroup
+	errs := make(chan error, count)
+
+	for i := 0; i < count; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			ip := net.ParseIP(fmt.Sprintf("2001:db8:cafe::%x:0", idx+1))
+			if err := r.Allocate(ip); err != nil {
+				errs <- fmt.Errorf("Allocate(%s): %w", ip, err)
+			}
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		t.Error(err)
+	}
+
+	for i := 0; i < count; i++ {
+		ip := net.ParseIP(fmt.Sprintf("2001:db8:cafe::%x:0", i+1))
+		if !r.Has(ip) {
+			t.Errorf("Has(%s) should be true after concurrent allocation", ip)
+		}
 	}
 }
