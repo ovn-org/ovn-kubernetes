@@ -6,8 +6,8 @@ All are welcome to join our meetings! If you want to discuss something with the 
 
 ## Meeting time
 
-We meet alternate Monday's at 5:00 PM CET/CEST.
-In order to figure out when our next meeting is, please check our agenda for previous meeting history.
+We meet on alternate Mondays at 5:00 PM CET/CEST.
+Subscribe to the [project community calendar (ICS)](https://webcal.prod.itx.linuxfoundation.org/lfx/lfUT0YkGZgOXRcnNGf) to see the next meeting.
 The meetings last up to 1 hour.
 
 ## Meeting location
@@ -16,9 +16,7 @@ The meetings last up to 1 hour.
 * [Meeting Link](https://zoom-lfx.platform.linuxfoundation.org/meeting/98741709730?password=ec6c1c1d-8f40-4a3a-a13d-5e284db7ff43)
 * MeetingID: 98741709730
 * Meeting Passcode: Please check the Meeting Notes Top section where passcode is represented
-* [Project Community Calendar ics Link for importing](https://webcal.prod.itx.linuxfoundation.org/lfx/lfUT0YkGZgOXRcnNGf)
 
 ## Meeting agenda and minutes
-
 [Meeting agenda](https://docs.google.com/document/d/1ciZS1CajH07THAiH_9j4-6uX4HAJFEoUzwyRdjsQK1k)  - edit responsibly
 

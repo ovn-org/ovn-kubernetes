@@ -2,7 +2,7 @@
 
 OVN-Kubernetes collects metrics from ovn-controller, ovn-northd, and the OVN
 northbound and southbound databases. Only the `coverage/show` and
-stopwatch/show` entries selected by OVN-Kubernetes, along with separately
+`stopwatch/show` entries selected by OVN-Kubernetes, along with separately
 collected database, build, status, connection, and configuration metrics, are exported.
 
 Coverage values are represented as Prometheus gauges, although the underlying

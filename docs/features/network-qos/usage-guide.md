@@ -12,7 +12,7 @@
 
 Differentiated Services Code Point (DSCP) marking and egress bandwidth metering let you prioritize or police specific traffic flows. The new **NetworkQoS** Custom Resource Definition (CRD) in [ovn-kubernetes](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/master/helm/ovn-kubernetes/crds/k8s.ovn.org_networkqoses.yaml) makes both features available to Kubernetes users on **all** pod interfaces—primary or secondary—without touching pod manifests.
 
-This guide provides a step-by-step example of how to use this feature. Before you begin, ensure that you have a Kubernetes cluster configured with the ovn-kubernetes CNI. Since the examples use network attachments, you must run the cluster with multiple network support enabled. In a kind cluster, you would use the following flags:
+This guide provides a step-by-step example of how to use this feature. Before you begin, ensure that you have a Kubernetes cluster configured with the ovn-kubernetes CNI. Since the examples use network attachments, you must run the cluster with multiple network support enabled. In a KinD cluster, you would use the following flags:
 
 ```bash
 cd contrib

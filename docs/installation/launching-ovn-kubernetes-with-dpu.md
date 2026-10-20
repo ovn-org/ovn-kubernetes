@@ -10,7 +10,7 @@ Refer [DPU support](../features/hardware-offload/dpu-support.md) for more detail
 
 ## DPU simulation
 
-The SR-IOV, OVS offload, and bridge examples below assume **hardware** DPUs and DPU hosts with switchdev-capable DPU NICs. For **simulated** DPU topologies (for example Kind/VM cluster used in development and CI), the same two-cluster layout and Helm charts apply, but you should enable **`global.simulateDpu: true`** on the DPU and DPU-host ovnkube workloads so the containers pass **`--simulate-dpu`**. That selects the simulated DPU operations backend (representor naming, device IDs, and discovery) instead of real SR-IOV/switchdev metadata.
+The SR-IOV, OVS offload, and bridge examples below assume **hardware** DPUs and DPU hosts with switchdev-capable DPU NICs. For **simulated** DPU topologies (for example KinD/VM cluster used in development and CI), the same two-cluster layout and Helm charts apply, but you should enable **`global.simulateDpu: true`** on the DPU and DPU-host ovnkube workloads so the containers pass **`--simulate-dpu`**. That selects the simulated DPU operations backend (representor naming, device IDs, and discovery) instead of real SR-IOV/switchdev metadata.
 
 For a full description of the flag and when it applies, see the **Simulated DPU (`simulate-dpu`)** subsection in [DPU support](../features/hardware-offload/dpu-support.md). On the DPU host, if the host-gateway representor is not auto-discovered, set **`global.dpuHostGatewayRepresentorInterface`** as documented under [DPU host gateway representor interface](../features/hardware-offload/dpu-gateway-interface.md#dpu-host-gateway-representor-interface).
 
@@ -59,7 +59,7 @@ mgmtPortVFsCount: 2                      # If using UDNs, the number of VFs requ
 mgmtPortVFResourceName will be prioritized over nodeMgmtPortNetdev if both are specified.
 If using UDNs, mgmtPortVFResourceName and mgmtPortVFsCount should be specified.
 
-Launch OVN K8s using
+Launch OVN-Kubernetes using
 ```
 helm install ovn-kubernetes . -f values-single-node-zone.yaml
 ```
@@ -188,7 +188,7 @@ global:
 
 The rest of the fields can be set as needed.
 
-Launch OVN K8s using
+Launch OVN-Kubernetes using
 ```
 helm install ovn-kubernetes . -f values-single-node-zone-dpu.yaml
 ```

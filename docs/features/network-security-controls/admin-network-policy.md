@@ -104,8 +104,6 @@ NAME                                                    CREATED AT
 baselineadminnetworkpolicies.policy.networking.k8s.io   2023-10-01T11:33:58Z
 ```
 
-## Workflow Description
-
 ## Implementation Details
 
 ### User facing API Changes
@@ -227,8 +225,8 @@ spec:
       - 0.0.0.0/0
 ```
 
-* `subject` is the set of pods selected by `cluster-control` ANP, on
-  which the rules in the policy are applied on. Here its all the pods
+* `subject` is the set of pods selected by `cluster-control` ANP, to
+  which the rules in the policy apply. Here, that is all the pods
   in the cluster.
 * Each AdminNetworkPolicy resource will have a`.spec.priority` field. `priority`
   is 34 here that determines the priority of this ANP versus other
@@ -302,7 +300,7 @@ you are selecting ALL the pods in the cluster including
 `kube-system` and `ovn-kubernetes` namespaces which is
 something you probably don't want to do. If you do this,
 then the cluster will go into a non-functional state since
-basic infrastructued pods cannot communicate unless you
+basic infrastructure pods cannot communicate unless you
 explicitly define higher priority allow rules.
 
 Almost always you probably need a policy that looks like:
@@ -1117,7 +1115,7 @@ Here you can see that `0.0.0.0/0` is the only IP in
 the set but it means all IPs.
 
 So now match makes more sense: Where we are saying
-source of traffic shoule be the port of any one of these pods in the
+source of traffic should be the port of any one of these pods in the
 port-group AND destination is any IP, then we `drop` the
 packet which is the `action` on the ACL.
 
@@ -1269,7 +1267,7 @@ help users understand what's happening in this feature.
   pods; so atmost only "DENY from all other pods" can be expressed as the best
   case default deny for ingress. In case of egress, one can deny to 0.0.0.0/0
   and it will act like a default deny to everything.
-* When using 0.0.0.0/0 to DENY everything, it is recommeded to be extra careful.
+* When using 0.0.0.0/0 to DENY everything, it is recommended to be extra careful.
   If higher priority allow rules for essential traffic like towards DNS and
   KAPI-server are not defined before doing the default-deny, then you have the
   potential to lock up your entire cluster leaving it in a non-functional state.

@@ -6,7 +6,7 @@ The EgressFirewall feature enables a cluster administrator to
 limit the external hosts that a pod in a project can access.
 The EgressFirewall object rules apply to all pods that share
 the namespace with the egressfirewall object. A namespace only
-supports having one EgressFirewallObject.
+supports having one EgressFirewall object.
 
 ## Example
 
@@ -41,11 +41,11 @@ spec:
 
 This example allows Pods in the default namespace to connect to
 the host(s) that www.openvswitch.org translates to, any external
-host within the range 1.2.3.0 to 1.2.3.255, and in addtion allows
+host within the range 1.2.3.0 to 1.2.3.255, and in addition allows
 traffic to 4.5.6.0 to 4.5.6.255 only for the UDP protocol on port
 number 55 and denies traffic to all other external hosts. The ports 
-section is optional and allows the user to specify specific ports 
-to and protocols to allow or deny traffic.
+section is optional and allows the user to specify ports
+and protocols to allow or deny traffic.
 
 The priority of a rule is determined by its placement in the egress
 array. An earlier rule is processed before a later rule. In the 

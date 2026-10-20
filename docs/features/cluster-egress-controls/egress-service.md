@@ -121,7 +121,7 @@ It is the user's responsibility to make sure that the pods backing an EgressServ
 The feature is implemented by reacting to events from `EgressServices`, `Services`, `EndpointSlices` and `Nodes` changes -
 updating OVN's northbound database `Logical_Router_Policy` objects to steer the traffic to the selected node and creating iptables SNAT rules in its `OVN-KUBE-EGRESS-SVC` chain, which is called by the POSTROUTING chain of its nat table.
 
-We'll see how the related objects are changed once a LoadBalancer is requested to act as an "Egress Service" by creating a corresponding `EgressService` named after it in a Dual-Stack kind cluster.
+We'll see how the related objects are changed once a LoadBalancer is requested to act as an "Egress Service" by creating a corresponding `EgressService` named after it in a Dual-Stack KinD cluster.
 
 We start with a clean cluster:
 ```

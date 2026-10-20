@@ -37,15 +37,15 @@ Usage:
   -config-file string
      configuration file path (default: /etc/openvswitch/ovn_k8s.conf)
   -cluster-subnets string
-     cluster wide IP subnet to use (default: 11.11.0.0/16)
+     cluster-wide IP subnet to use (default: 11.11.0.0/16)
   -init-cluster-manager string
      initialize cluster manager that watches nodes (allocates subnet for each node from the cluster-subnets), requires the hostname as argument and doesn't connect to the OVN dbs.
   -init-ovnkube-controller string
      initialize ovnkube-controller (which watches pods/nodes/services/policies and creates OVN db resources), requires the Kubernetes node name as argument.
   -init-node string
-     initialize node, requires the name that node is registered with in kubernetes cluster
+     initialize node, requires the name under which the node is registered in the Kubernetes cluster
   -cleanup-node string
-     cleanup up OVS resources on the k8s node (after ovnkube-node daemonset deletion), requires the name that node is registered with in kubernetes cluster
+     clean up OVS resources on the k8s node (after ovnkube-node daemonset deletion), requires the name under which the node is registered in the Kubernetes cluster
   -remove-node string
      remove a node from the OVN cluster. Requires the name that node is
      registered with in kubernetes cluster
@@ -84,11 +84,11 @@ Values for some configuration options can be passed in environment variables.
   -KUBECONFIG
      absolute path to the Kubernetes kubeconfig file overridden by --k8s-kubeconfig
   -K8S_APISERVER
-     URL of the Kubernetes API server overriden by --k8s-apiserver
+     URL of the Kubernetes API server overridden by --k8s-apiserver
   -K8S_CACERT
-     the absolute path to the Kubernetes API CA certificate overriden by --k8s-cacert
+     the absolute path to the Kubernetes API CA certificate overridden by --k8s-cacert
   -K8S_TOKEN
-     the Kubernetes API authentication token overriden by --k8s-token
+     the Kubernetes API authentication token overridden by --k8s-token
 ```
 
 ### Service Account Files
@@ -96,16 +96,16 @@ The cluster makes the serviceaccount ca.crt and token available in files that ar
 
 ```
   -/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
-     contains the Kubernetes API CA certificate overriden by --k8s-cacert and K8S_CACERT.
+     contains the Kubernetes API CA certificate overridden by --k8s-cacert and K8S_CACERT.
   -/var/run/secrets/kubernetes.io/serviceaccount/token
-     contains the Kubernetes API token overriden by --k8s-token and K8S_TOKEN
+     contains the Kubernetes API token overridden by --k8s-token and K8S_TOKEN
 ```
 
 ### Configuration File
 
 Generic configuration options (those common between control plane, node, and gateway modes) can also be specified in the configuration file.
 The default configuration file path is /etc/openvswitch/ovn_k8s.conf but can be changed with the -config-file option.
-Options specified in the config file override defautl values, but are themselves overridden by command-line options.
+Options specified in the config file override default values, but are themselves overridden by command-line options.
 
 #### Example configuration file
 
@@ -183,7 +183,7 @@ Remember to install the cni binary first. Use the Makefile, or, manually copy 'o
 make install
 ```
 
-Then, run the ovnkube executable to initalize the node:
+Then, run the ovnkube executable to initialize the node:
 
 ```
 ovnkube --init-node <name of the node as identified in kubernetes> \

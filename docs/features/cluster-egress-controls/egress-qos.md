@@ -51,7 +51,7 @@ The code is implemented under `pkg/ovn/egressqos.go` and most of the logic for t
 the `syncEgressQoS`, `syncEgressQoSPod`, `syncEgressQoSNode` functions.
 
 We'll use the example YAML above and see how the related objects are changed in OVN's northbound database
-in a Dual-Stack kind cluster.
+in a Dual-Stack KinD cluster.
 
 ```
 $ kubectl get nodes
@@ -185,7 +185,7 @@ external_ids        : {name=egress-qos-pods-default-999_v4}
 name                : a10759091379580272948
 ```
 
-When a pod is deleted or its labels change and do not longer match the rule's `podSelector`
+When a pod is deleted or its labels change and no longer match the rule's `podSelector`
 its IPs are deleted from the relevant address set:
 ```
 $ kubectl get pods -o=custom-columns=Name:.metadata.name,IPs:.status.podIPs,LABELS:.metadata.labels

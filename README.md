@@ -35,7 +35,7 @@ Here are some links to help in your ovn-kubernetes journey:
 
 - [Welcome to ovn-kubernetes](https://ovn-kubernetes.io/) for overview of ovn-kubernetes.
 - [Architecture of ovn-kubernetes](https://ovn-kubernetes.io/master/design/architecture/)
-- [Deploying OVN-Kubernetes cluster using KIND](https://ovn-kubernetes.io/master/installation/launching-ovn-kubernetes-on-kind/)
+- [Deploying OVN-Kubernetes cluster using KinD](https://ovn-kubernetes.io/master/installation/launching-ovn-kubernetes-on-kind/)
 - [Deploying OVN-Kubernetes CNI using Helm](https://ovn-kubernetes.io/master/installation/launching-ovn-kubernetes-with-helm/)
 - [Contributing to OVN-Kubernetes](https://ovn-kubernetes.io/master/governance/CONTRIBUTING/) for how to get involved
   in our project
@@ -45,7 +45,7 @@ Here are some links to help in your ovn-kubernetes journey:
 
 ## License
 
-Everything is distributed under the terms of the [Apache License] (version 2.0).
+Everything is distributed under the terms of the [Apache License](LICENSE) (version 2.0).
 See [LICENSES/README.md](LICENSES/README.md) for how third-party license files
 are determined for this repository.
 

@@ -2,16 +2,15 @@
 
 # OVN-Kubernetes: A Robust Kubernetes Networking Provider
 
-OVN-Kubernetes (Open Virtual Networking - Kubernetes) is an open-source project
+OVN-Kubernetes (Open Virtual Network - Kubernetes) is an open-source project
 that provides a robust networking solution for Kubernetes clusters with
-OVN (Open Virtual Networking) and Open vSwitch (Open Virtual Switch) at its core.
+OVN (Open Virtual Network) and Open vSwitch (Open Virtual Switch) at its core.
 It is a Kubernetes networking conformant plugin written according to the
 CNI (Container Network Interface) specifications.
 
 ## Challenges for Cluster Networking in Kubernetes Ecosystem
 
-* Kubernetes at its core is a bunch of powerful APIs like Pods, Services, EndpointSlices
-  and NetworkPolicies.
+* Kubernetes provides APIs for Pods, Services, EndpointSlices, and NetworkPolicies.
     * If we look at [The Kubernetes Network Model](https://kubernetes.io/docs/concepts/services-networking/)
     it imposes a set of fundamental requirements for how networking is expected
     to behave for pods in a cluster.
@@ -34,7 +33,7 @@ CNI (Container Network Interface) specifications.
 * Networking on Kubernetes is not simple.
     * There are complicated features such as service traffic policies, terminating
     endpoints, topology aware hints which involve multiple moving pieces and
-    components that needs a "driver" that ensures they work as expected.
+    components that need a "driver" that ensures they work as expected.
 
 ## What is OVN-Kubernetes?
 
@@ -55,7 +54,7 @@ The key functionalities and features that OVN-Kubernetes provides include:
     and virtual ethernet (veth) interface for the pod.
     - Programs overlay based networking implementation for Kubernetes clusters
     using Generic Network Virtualization Encapsulation GENEVE tunnels that
-    enables pod-to-pod communication.
+    enable pod-to-pod communication.
     - Implements Kubernetes Services & EndpointSlices through OVN Load Balancers.
     - Implements Kubernetes NetworkPolicies and AdminNetworkPolicies through
     OVN Access Control Lists (ACLs).
@@ -80,7 +79,7 @@ The key functionalities and features that OVN-Kubernetes provides include:
     - Provides ability to offload networking tasks from CPU to NIC using OVS Hardware
     Offload thus providing increased data-plane performance.
     - Adds support for creating secondary and local networks in addition to the
-    default primary networks
+    default primary networks.
 
 ## Why choose OVN-Kubernetes in Kubernetes ecosystem?
 
@@ -99,10 +98,10 @@ to be a highly scalable and performant Networking Platform.
 For more details, please see the following:
 
 - [OVN-Kubernetes Architecture](design/architecture.md)
-- [Deploying OVN-Kubernetes cluster using KIND](installation/launching-ovn-kubernetes-on-kind.md)
+- [Deploying OVN-Kubernetes cluster using KinD](installation/launching-ovn-kubernetes-on-kind.md)
 - [Deploying OVN-Kubernetes CNI using Helm](installation/launching-ovn-kubernetes-with-helm.md)
-- [Setup and Building OVN-Kubernetes](developer-guide/documentation.md) for instructions
-  on setting up your development environment and building ovn-kubernetes.
+- [Writing OVN-Kubernetes documentation](developer-guide/documentation.md) for instructions
+  on building and previewing the website.
 - [Contributing to OVN-Kubernetes](governance/CONTRIBUTING.md) for how to get involved
   in our project
 - [Meet the Community](governance/MEETINGS.md) for details on community

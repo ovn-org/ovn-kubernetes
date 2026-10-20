@@ -29,7 +29,7 @@ This list is to help notify if there are additions, changes or removals to metri
 - Remove ovnkube_controller_ovn_cli_latency_seconds metrics since we have moved most of the OVN DB operations to libovsdb.
 - Effect of OVN IC architecture:
   - Move all the metrics from the legacy master subsystem to subsystem "ovnkube-controller". Metrics scraping continues through the controller and cluster-manager pods. See https://github.com/ovn-kubernetes/ovn-kubernetes/pull/3723 for details
-  - Move the following metrics from subsystem "master" to subsystem "clustermanager". Therefore, the follow metrics are renamed.
+  - Move the following metrics from subsystem "master" to subsystem "clustermanager". Therefore, the following metrics are renamed.
     - `ovnkube_master_num_v4_host_subnets` -> `ovnkube_clustermanager_num_v4_host_subnets`
     - `ovnkube_master_num_v6_host_subnets` -> `ovnkube_clustermanager_num_v6_host_subnets`
     - `ovnkube_master_allocated_v4_host_subnets` -> `ovnkube_clustermanager_allocated_v4_host_subnets`

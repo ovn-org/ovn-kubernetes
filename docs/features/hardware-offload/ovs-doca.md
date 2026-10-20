@@ -39,7 +39,7 @@ OVS-DOCA is part of the DOCA-Host package. DOCA-Host is available in different i
 See more details including supported OS and kernel versions, installation packages and instructions for installation at the corresponding product page for DOCA and OVS-DOCA.
 Additional tuning options for OVS are also provided there.
 
-## Worker Node Configuation
+## Worker Node Configuration
 
 
 ### Configure Huge Pages
@@ -48,7 +48,7 @@ mkdir -p /hugepages
 mount -t hugetlbfs hugetlbfs /hugepages
 echo 4096 > /sys/devices/system/node/node0/hugepages/hugepages-2048kB/nr_hugepages
 ```
-Note: Persistentance of huge pages (node reboot etc.) is beyond the scope of this document.
+Note: Persistence of huge pages (node reboot etc.) is beyond the scope of this document.
 
 ### Switchdev mode
 
@@ -138,8 +138,8 @@ Deploy SR-IOV network device plugin as daemonset see https://github.com/k8snetwo
 
 Deploy multus CNI as daemonset based on https://github.com/k8snetworkplumbingwg/multus-cni/blob/master/deployments/multus-daemonset.yml
 
-## NetworkAttachementDefinition
-Create NetworkAttachementDefinition CRD with OVN CNI config
+## NetworkAttachmentDefinition
+Create NetworkAttachmentDefinition CRD with OVN CNI config
 
 ```yaml
 apiVersion: "k8s.cni.cncf.io/v1"

@@ -46,7 +46,7 @@ to the workloads in those networks from workloads in other networks.
 Here the tenants BERLIN and MUNICH are isolated from each other.
 So the workloads in namespaces belonging to BERLIN across the
 four namespaces - purple, yellow, green and blue can talk to each other
-but they can't talk to the workloads belogning to MUNICH tenant
+but they can't talk to the workloads belonging to MUNICH tenant
 across namespaces brown, cyan, orange and violet.
 
 There are more user stories which will be covered in the sections below
@@ -278,7 +278,7 @@ external DHCP server instead of an OVN-Kubernetes-managed pool. See the
 
 ### Creating UserDefinedNetworks
 
-Now that we understand what a UDN is, let's get handson!
+Now that we understand what a UDN is, let's get hands-on!
 
 Let's create two namespaces `blue` and `green`:
 
@@ -827,7 +827,7 @@ NAME                 ADDRESSTYPE   PORTS   ENDPOINTS                 AGE
 service-blue-55d6c   IPv4          8080    103.103.1.5,103.103.0.5   65s
 service-blue-pkll7   IPv4          8080    10.244.0.3,10.244.1.8     66s
 ```
-One set of endpoints show the UDN ntework IPs of the pods and the other set
+One set of endpoints shows the UDN network IPs of the pods and the other set
 shows default network IPs.
 
 When the service is created inside the blue namespace, the

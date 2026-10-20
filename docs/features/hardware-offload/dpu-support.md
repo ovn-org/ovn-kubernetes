@@ -51,7 +51,7 @@ DPU side resolves the local OVS bridge from that state.
 
 ### Simulated DPU (`simulate-dpu`)
 
-Hardware DPUs rely on SR-IOV and switchdev metadata so OVN-Kubernetes can resolve representors, PCI relationships, and related details. For development and CI, the same code paths can run on **simulated** platforms (for example Kind or VMs using virtio instead of a real switchdev DPU NICs) where that metadata is absent or different.
+Hardware DPUs rely on SR-IOV and switchdev metadata so OVN-Kubernetes can resolve representors, PCI relationships, and related details. For development and CI, the same code paths can run on **simulated** platforms (for example KinD or VMs using virtio instead of a real switchdev DPU NICs) where that metadata is absent or different.
 
 The ovnkube-node flag **`--simulate-dpu`** (config file `[OvnKubeNode]` key `simulate-dpu`, Helm `global.simulateDpu`) turns on **simulated DPU operations** instead of the default switchdev-based implementation. When the node mode is `dpu` or `dpu-host`, this selects the simulated `DPUOps` backend. Operational parameters such as representor naming, device addressing, and host-representor discovery follow the patterns used in simulated environments (for example `rep<pfId>-<funcId>` style names and netdev-based identifiers) rather than sysfs/sriovnet switchdev discovery.
 

@@ -15,7 +15,7 @@ This Helm chart deploys OVN-Kubernetes, an OVN-based CNI plugin for Kubernetes t
 
 For installation instructions, see:
 
-- [Launching OVN-Kubernetes with Helm](../../docs/installation/launching-ovn-kubernetes-with-helm.md) — Kind quickstart and step-by-step install.
+- [Launching OVN-Kubernetes with Helm](../../docs/installation/launching-ovn-kubernetes-with-helm.md) — KinD quickstart and step-by-step install.
 - [Launching OVN-Kubernetes with kubeadm](../../docs/installation/INSTALL.KUBEADM.md) — multi-VM walkthrough on a `kubeadm`-bootstrapped cluster.
 
 The rest of this README documents the chart values.
@@ -77,7 +77,7 @@ false
 }
 </pre>
 </td>
-			<td>The secret used for pulling image. Use only if needed. Set create to have have secret created by helm</td>
+			<td>The secret used for pulling image. Use only if needed. Set create to have the secret created by helm</td>
 		</tr>
 		<tr>
 			<td>global.dummyGatewayBridge</td>

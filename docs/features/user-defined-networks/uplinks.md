@@ -32,7 +32,7 @@ Enable it by passing `--enable-uplink` to the ovnkube components (this requires
     enableUplink: true
 ```
 
-* kind: pass `--multi-network-enable` (`-mne`), `--network-segmentation-enable`
+* KinD: pass `--multi-network-enable` (`-mne`), `--network-segmentation-enable`
   (`-nse`), and `--uplink-enable` (`-ue`) to `contrib/kind.sh`
 
 A `ClusterUserDefinedNetwork` keeps its `spec.uplinks` field regardless of the

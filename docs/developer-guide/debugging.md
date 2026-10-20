@@ -10,7 +10,7 @@ what went wrong.
 
 ### How It Works
 
-1. **Coredump collection is enabled** via `ENABLE_COREDUMPS=true` in KIND clusters.
+1. **Coredump collection is enabled** via `ENABLE_COREDUMPS=true` in KinD clusters.
    This sets up:
    - `kernel.core_pattern` to pipe coredumps to `/tmp/kind/logs/coredumps/`
    - `GOTRACEBACK=crash` environment variable for Go binaries (required for Go to
@@ -44,7 +44,7 @@ job page. Extract it to find:
 ### Automated Stack Trace Extraction
 
 The `contrib/coredump/extract-stacktraces.sh` script accepts either a tar archive
-of exported KIND logs or an extracted `coredumps` directory and writes stack
+of exported KinD logs or an extracted `coredumps` directory and writes stack
 traces to a local directory:
 
 ```bash
@@ -291,7 +291,7 @@ You need:
 
 ### Local Development
 
-To enable coredump collection in a local KIND cluster:
+To enable coredump collection in a local KinD cluster:
 
 ```bash
 ENABLE_COREDUMPS=true ./contrib/kind.sh
