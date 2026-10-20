@@ -6,6 +6,9 @@ package types
 import "time"
 
 const (
+	// ManagedBGPConfigurationName identifies the shared full-mesh BGP template.
+	ManagedBGPConfigurationName = "ovnk-managed-bgp"
+
 	// Default network name
 	DefaultNetworkName           = "default"
 	DefaultNetworkControllerName = "default-network-controller"

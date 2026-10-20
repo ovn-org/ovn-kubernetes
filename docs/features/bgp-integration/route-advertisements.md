@@ -135,6 +135,17 @@ to use as template, and as a consequence, provides the flexibility to export
 routes in a different number of ways including: which BGP peers to export to,
 the use of iBGP or eBGP, etc.
 
+OVN-Kubernetes removes self-peering entries only when generating configurations
+from its managed full-mesh BGP template. It uses the target node's Kubernetes
+`InternalIP` addresses, which also populate that template's neighbor list.
+For user-provided templates, neighbor lists are preserved, including entries
+that match the target node's address. These peers may use different uplinks or
+VRFs, so the primary-interface address is not used to identify self-peers.
+Administrators must ensure that each template's neighbors are appropriate for
+every node selected by its `nodeSelector`. A shared template peering with
+external routers is valid; for node-to-node full-mesh peering, use per-node
+templates and selectors that exclude each node's own peering address.
+
 ### Import routes into the default pod network
 
 The following example represents an initial FRR-k8s configuration that
