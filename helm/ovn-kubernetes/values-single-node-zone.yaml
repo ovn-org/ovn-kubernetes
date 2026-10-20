@@ -194,3 +194,8 @@ monitoring:
   enableServiceMonitor: false
   # -- deploy PrometheusRules for specific metric collection using the Prometheus Operator
   enablePrometheusRule: false
+  # -- whether kube-state-metrics is scraped with honorLabels: true. When false,
+  # the alert rules use exported_namespace/exported_pod label names to match
+  # against kube-state-metrics' relabeled series.
+  # @default -- true
+  ksmHonorLabels: true

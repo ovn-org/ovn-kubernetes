@@ -3,6 +3,14 @@
 {{- end }}
 
 {{ if .Values.monitoring.enablePrometheusRule }}
+
+{{- $nsLabel := "namespace" -}}
+{{- $podLabel := "pod" -}}
+{{- if and (hasKey .Values.monitoring "ksmHonorLabels") (not .Values.monitoring.ksmHonorLabels) -}}
+{{- $nsLabel = "exported_namespace" -}}
+{{- $podLabel = "exported_pod" -}}
+{{- end }}
+
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
@@ -41,19 +49,19 @@ spec:
 
     - alert: OvnKubePodRestarts
       expr: |
-        rate(kube_pod_container_status_restarts_total{namespace="ovn-kubernetes", container=~"ovnkube.*"}[15m]) * 60 * 5 > 0
+        rate(kube_pod_container_status_restarts_total{ {{ $nsLabel }}="ovn-kubernetes", container=~"ovnkube.*"}[15m]) * 60 * 5 > 0
       for: 30m
       labels:
        severity: critical
       annotations:
        description: |
-         {{`Pod ovn-kubernetes/ {{ $labels.pod }} {{ $labels.container}} is restarting 
-         {{ printf "%.2f" $value }} times / 5 minutes.`}}        
+         {{`Pod ovn-kubernetes/ {{ $labels.`}}{{ $podLabel }}{{` }} {{ $labels.container}} is restarting
+         {{ printf "%.2f" $value }} times / 5 minutes.`}}
                 
     - alert: K8sNodeWithoutOvnKubeAgentRunning
       expr: |
         kube_node_info unless on(node)
-        (kube_pod_info{namespace="ovn-kubernetes", pod=~"ovnkube-node.*"}) > 0
+        (kube_pod_info{ {{ $nsLabel }}="ovn-kubernetes", {{ $podLabel }}=~"ovnkube-node.*"}) > 0
       for: 10m
       labels:
        severity: warning
@@ -217,35 +225,35 @@ spec:
 
     - alert: OvnNBDBContainerRestarts
       expr: |
-        rate(kube_pod_container_status_restarts_total{namespace="ovn-kubernetes", container="nb-ovsdb"}[15m]) * 60 * 5 > 0
+        rate(kube_pod_container_status_restarts_total{ {{ $nsLabel }}="ovn-kubernetes", container="nb-ovsdb"}[15m]) * 60 * 5 > 0
       for: 30m
       labels:
        severity: critical
       annotations:
        description: |
-         {{`Pod ovn-kubernetes/ {{ $labels.pod }} nbdb container is 
+         {{`Pod ovn-kubernetes/ {{ $labels.`}}{{ $podLabel }}{{` }} nbdb container is
          restarting {{ printf "%.2f" $value }} times / 5 minutes`}}
 
     - alert: OvnSBDBContainerRestarts
       expr: |
-        rate(kube_pod_container_status_restarts_total{namespace="ovn-kubernetes", container="sb-ovsdb"}[15m]) * 60 * 5 > 0
+        rate(kube_pod_container_status_restarts_total{ {{ $nsLabel }}="ovn-kubernetes", container="sb-ovsdb"}[15m]) * 60 * 5 > 0
       for: 30m
       labels:
        severity: critical
       annotations:
        description: |
-         {{`Pod ovn-kubernetes/ {{ $labels.pod }} sbdb container is 
+         {{`Pod ovn-kubernetes/ {{ $labels.`}}{{ $podLabel }}{{` }} sbdb container is
          restarting {{ printf "%.2f" $value }} times / 5 minutes.`}}
 
     - alert: OvnNorthdContainerRestarts
       expr: |
-        rate(kube_pod_container_status_restarts_total{namespace="ovn-kubernetes", container="ovn-northd"}[15m]) * 60 * 5 > 0
+        rate(kube_pod_container_status_restarts_total{ {{ $nsLabel }}="ovn-kubernetes", container="ovn-northd"}[15m]) * 60 * 5 > 0
       for: 30m
       labels:
        severity: critical
       annotations:
        description: |
-         {{`Pod ovn-kubernetes/ {{ $labels.pod }} ovn-northd container is 
+         {{`Pod ovn-kubernetes/ {{ $labels.`}}{{ $podLabel }}{{` }} ovn-northd container is
          restarting {{ printf "%.2f" $value }} times / 5 minutes`}}
 
     - alert: OvnNorthdNotActive
@@ -285,14 +293,14 @@ spec:
 
     - alert: OvnControllerContainerRestarts
       expr: |
-        rate(kube_pod_container_status_restarts_total{namespace="ovn-kubernetes", 
+        rate(kube_pod_container_status_restarts_total{ {{ $nsLabel }}="ovn-kubernetes",
         container="ovn-controller"}[15m]) * 60 * 5 > 0
       for: 30m
       labels:
        severity: critical
       annotations:
        description: |
-         {{`Pod ovn-kubernetes/ {{ $labels.pod }} ovn-controller container 
+         {{`Pod ovn-kubernetes/ {{ $labels.`}}{{ $podLabel }}{{` }} ovn-controller container
          is restarting {{ printf "%.2f" $value }} times / 5 minutes`}}
 
     - alert: OvnControllerTxnError
