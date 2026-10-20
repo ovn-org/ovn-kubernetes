@@ -1,0 +1,58 @@
+{{- /*
+SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+SPDX-License-Identifier: Apache-2.0
+*/ -}}
+{{- $hybridOverlayEnabled := eq (toString (default false .Values.global.enableHybridOverlay)) "true" }}
+{{- $clusterManager := "system:serviceaccount:ovn-kubernetes:ovnkube-cluster-manager" }}
+{{- $hybridOverlayWriters := concat (list $clusterManager) (default (list) .Values.global.hybridOverlaySubnetWriters) | uniq }}
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: ovn-controller-owned-node-annotations
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["nodes", "nodes/status"]
+  variables:
+    - name: annotationOwners
+      expression: >-
+        {
+          "k8s.ovn.org/node-subnets": {{ list $clusterManager | toJson }}{{- if $hybridOverlayEnabled }},
+          "k8s.ovn.org/hybrid-overlay-node-subnet": {{ $hybridOverlayWriters | toJson }}
+          {{- end }}
+        }
+    # Normalize CREATE requests and objects without annotations to empty maps.
+    - name: previousAnnotations
+      expression: >-
+        request.operation == "UPDATE" && has(oldObject.metadata.annotations)
+          ? oldObject.metadata.annotations
+          : {}
+    - name: requestedAnnotations
+      expression: >-
+        has(object.metadata.annotations) ? object.metadata.annotations : {}
+    # An annotation changed if it was added, removed, or assigned a new value.
+    - name: changedAnnotations
+      expression: >-
+        variables.annotationOwners.filter(annotation,
+          (annotation in variables.previousAnnotations) != (annotation in variables.requestedAnnotations) ||
+          (annotation in variables.requestedAnnotations && variables.previousAnnotations[annotation] != variables.requestedAnnotations[annotation]))
+  validations:
+    - expression: >-
+        variables.changedAnnotations.all(annotation,
+          request.userInfo.username in variables.annotationOwners[annotation])
+      message: >-
+        user is not allowed to modify the following controller-owned annotations
+      reason: Forbidden
+
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: ovn-controller-owned-node-annotations
+spec:
+  policyName: ovn-controller-owned-node-annotations
+  validationActions: [Deny]

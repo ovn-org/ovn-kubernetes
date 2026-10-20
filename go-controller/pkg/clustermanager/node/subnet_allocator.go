@@ -398,15 +398,15 @@ func IsAlreadyOwnedError(err error) bool {
 	return ok
 }
 
-// markAllocatedNetwork marks network as being in use, if it is part of snr's range.
-// It returns whether the network was in snr's range, and returns an error if
-// network was already allocated to a different owner.
+// markAllocatedNetwork marks network as being in use if it is one of the
+// fixed-size subnets managed by snr. It returns whether the network was valid
+// for the range, and returns an error if it was allocated to a different owner.
 func (snr *subnetAllocatorRange) markAllocatedNetwork(owner string, network *net.IPNet) (bool, error) {
-	str := network.String()
-	if !snr.network.Contains(network.IP) {
+	if !snr.isValidAllocation(network) {
 		return false, nil
 	}
 
+	str := network.String()
 	existingOwner, ok := snr.allocMap[str]
 	if !ok {
 		snr.allocMap[str] = owner
@@ -417,6 +417,17 @@ func (snr *subnetAllocatorRange) markAllocatedNetwork(owner string, network *net
 	}
 
 	return false, alreadyOwnedError{str, existingOwner}
+}
+
+// isValidAllocation reports whether network is one of the fixed-size subnets
+// managed by this range.
+func (snr *subnetAllocatorRange) isValidAllocation(network *net.IPNet) bool {
+	networkPrefixLen, addressLen := network.Mask.Size()
+	rangePrefixLen, rangeAddressLen := snr.network.Mask.Size()
+
+	return addressLen == rangeAddressLen &&
+		networkPrefixLen == rangePrefixLen+int(snr.subnetBits) &&
+		snr.network.Contains(network.IP)
 }
 
 // allocateNetwork returns a new subnet, or nil if the range is full
