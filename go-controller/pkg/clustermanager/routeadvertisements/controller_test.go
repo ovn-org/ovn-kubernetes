@@ -27,7 +27,9 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	meta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
+	corelisters "k8s.io/client-go/listers/core/v1"
 	ctesting "k8s.io/client-go/testing"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
@@ -38,6 +40,7 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	controllerutil "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/controller"
 	eiptypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
+	eiplisters "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/listers/egressip/v1"
 	ratypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1"
 	rafake "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/clientset/versioned/fake"
 	apitypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/types"
@@ -3495,6 +3498,11 @@ const unsafeInputValue = "eth0\nx"
 
 func newUnsafeInputTest(t *testing.T, g *gomega.WithT, generated ...*testFRRConfig) *unsafeInputTest {
 	t.Helper()
+	return newFRRReconcileTest(t, g, unsafeInputValue, generated...)
+}
+
+func newFRRReconcileTest(t *testing.T, g *gomega.WithT, peerInterface string, generated ...*testFRRConfig) *unsafeInputTest {
+	t.Helper()
 	previousDefault, previousFeatures, previousGateway := config.Default, config.OVNKubernetesFeature, config.Gateway
 	t.Cleanup(func() {
 		config.Default, config.OVNKubernetesFeature, config.Gateway = previousDefault, previousFeatures, previousGateway
@@ -3508,6 +3516,7 @@ func newUnsafeInputTest(t *testing.T, g *gomega.WithT, generated ...*testFRRConf
 	}
 	config.OVNKubernetesFeature.EnableMultiNetwork = true
 	config.OVNKubernetesFeature.EnableRouteAdvertisements = true
+	config.OVNKubernetesFeature.EnableEgressIP = true
 	config.OVNKubernetesFeature.EnableEVPN = true
 	config.OVNKubernetesFeature.EnableNetworkSegmentation = true
 	config.Gateway.Mode = config.GatewayModeLocal
@@ -3539,7 +3548,7 @@ func newUnsafeInputTest(t *testing.T, g *gomega.WithT, generated ...*testFRRConf
 		Namespace: frrNamespace,
 		Routers: []*testRouter{
 			{ASN: 1, Prefixes: []string{"1.1.1.0/24"}, Neighbors: []*testNeighbor{
-				{ASN: 1, Interface: unsafeInputValue},
+				{ASN: 1, Interface: peerInterface},
 			}},
 		},
 	}
@@ -3587,6 +3596,8 @@ func newUnsafeInputTest(t *testing.T, g *gomega.WithT, generated ...*testFRRConf
 		wf.FRRConfigurationsInformer().Informer().HasSynced,
 		wf.NADInformer().Informer().HasSynced,
 		wf.NodeCoreInformer().Informer().HasSynced,
+		wf.EgressIPInformer().Informer().HasSynced,
+		wf.NamespaceInformer().Informer().HasSynced,
 	)
 
 	t.Cleanup(func() { metrics.DeleteRouteAdvertisementCondition("ra") })
@@ -4336,4 +4347,277 @@ func TestController_updateRAStatus(t *testing.T) {
 	g.Expect(accepted).NotTo(gomega.BeNil(), "the Accepted condition should still be set after a successful reconcile")
 	g.Expect(accepted.Status).To(gomega.Equal(metav1.ConditionTrue), "the Accepted condition should be true after a successful reconcile")
 	g.Expect(accepted.LastTransitionTime.Time).To(gomega.BeTemporally(">", rewound.Time), "a status flip should bump the transition time")
+}
+
+// Healthy nodes on both sides of a failing node must be updated, while only
+// still-selected configurations for the failed node survive reconciliation.
+func TestController_reconcilePartialNodeFailure(t *testing.T) {
+	for _, pending := range []bool{false, true} {
+		t.Run(fmt.Sprintf("pending=%t", pending), func(t *testing.T) {
+			g := gomega.NewWithT(t)
+			old := generatedFRRConfig("ovnk-generated-old", "node1", true)
+			obsolete := generatedFRRConfig("ovnk-generated-deleted", "deleted-node", true)
+			removedSource := generatedFRRConfig("ovnk-generated-removed-source", "node1", true)
+			removedSource.Annotations[types.OvnRouteAdvertisementsKey] = "ra/removed-source/node1"
+			tt := newFRRReconcileTest(t, g, "eth0", old, obsolete, removedSource)
+			config.Gateway.Mode = config.GatewayModeShared
+			ctx := context.Background()
+			node := (&testNode{Name: "node1", SubnetsAnnotation: `{"default":"1.1.1.0/24"}`}).Node()
+			if pending {
+				node.Annotations[util.OVNNodePrimaryDPUHostAddr] = `{"ipv4":"172.18.0.1/24"}`
+			} else {
+				node.Annotations["k8s.ovn.org/node-subnets"] = "invalid"
+			}
+			_, err := tt.fakeClientset.KubeClient.CoreV1().Nodes().Create(ctx, node, metav1.CreateOptions{})
+			g.Expect(err).NotTo(gomega.HaveOccurred())
+			healthy := (&testNode{Name: "node2", SubnetsAnnotation: `{"default":"1.1.2.0/24"}`, OmitPrimaryAddress: true}).Node()
+			_, err = tt.fakeClientset.KubeClient.CoreV1().Nodes().Create(ctx, healthy, metav1.CreateOptions{})
+			g.Expect(err).NotTo(gomega.HaveOccurred())
+			g.Eventually(func() error { _, err := tt.c.nodeLister.Get("node2"); return err }).Should(gomega.Succeed())
+			g.Eventually(func() error { _, err := tt.c.nodeLister.Get("node1"); return err }).Should(gomega.Succeed())
+			g.Expect(tt.c.reconcile("ra")).To(gomega.Succeed())
+			configs, err := tt.fakeClientset.FRRClient.ApiV1beta1().FRRConfigurations("frrNamespace").List(ctx, metav1.ListOptions{})
+			g.Expect(err).NotTo(gomega.HaveOccurred())
+			var keys []string
+			for _, cfg := range configs.Items {
+				if key := cfg.Annotations[types.OvnRouteAdvertisementsKey]; key != "" {
+					keys = append(keys, key)
+				}
+			}
+			g.Expect(keys).To(gomega.ConsistOf("ra/frrConfig/node", "ra/frrConfig/node1", "ra/frrConfig/node2"))
+			preserved, err := tt.fakeClientset.FRRClient.ApiV1beta1().FRRConfigurations("frrNamespace").Get(ctx, old.Name, metav1.GetOptions{})
+			g.Expect(err).NotTo(gomega.HaveOccurred())
+			g.Expect(preserved.Spec).To(gomega.Equal(old.FRRConfiguration().Spec))
+			ra, err := tt.fakeClientset.RouteAdvertisementsClient.K8sV1().RouteAdvertisements().Get(ctx, "ra", metav1.GetOptions{})
+			g.Expect(err).NotTo(gomega.HaveOccurred())
+			condition := meta.FindStatusCondition(ra.Status.Conditions, "Accepted")
+			g.Expect(condition).NotTo(gomega.BeNil())
+			g.Expect(condition.Status).To(gomega.Equal(metav1.ConditionFalse))
+			g.Expect(condition.Message).To(gomega.ContainSubstring("node1"))
+			// Recover the node, then verify the preserved configuration is replaced.
+			delete(node.Annotations, util.OVNNodePrimaryDPUHostAddr)
+			node.Annotations["k8s.ovn.org/node-subnets"] = `{"default":"1.1.1.0/24"}`
+			_, err = tt.fakeClientset.KubeClient.CoreV1().Nodes().Update(ctx, node, metav1.UpdateOptions{})
+			g.Expect(err).NotTo(gomega.HaveOccurred())
+			g.Eventually(func() map[string]string { n, _ := tt.c.nodeLister.Get("node1"); return n.Annotations }).Should(gomega.Equal(node.Annotations))
+			// Counts can match before the cache observes the creates and deletes.
+			g.Eventually(func() ([]string, error) {
+				cfgs, err := tt.c.frrLister.List(labels.Everything())
+				if err != nil {
+					return nil, err
+				}
+				var keys []string
+				for _, cfg := range cfgs {
+					if key := cfg.Annotations[types.OvnRouteAdvertisementsKey]; key != "" {
+						keys = append(keys, key)
+					}
+				}
+				return keys, nil
+			}).Should(gomega.ConsistOf("ra/frrConfig/node", "ra/frrConfig/node1", "ra/frrConfig/node2"))
+			g.Expect(tt.c.reconcile("ra")).To(gomega.Succeed())
+			updated, err := tt.fakeClientset.FRRClient.ApiV1beta1().FRRConfigurations("frrNamespace").Get(ctx, old.Name, metav1.GetOptions{})
+			g.Expect(err).NotTo(gomega.HaveOccurred())
+			g.Expect(updated.Spec.BGP.Routers[0].Prefixes).To(gomega.Equal([]string{"1.1.1.0/24"}))
+			configs, err = tt.fakeClientset.FRRClient.ApiV1beta1().FRRConfigurations("frrNamespace").List(ctx, metav1.ListOptions{})
+			g.Expect(err).NotTo(gomega.HaveOccurred())
+			keys = nil
+			for _, cfg := range configs.Items {
+				if key := cfg.Annotations[types.OvnRouteAdvertisementsKey]; key != "" {
+					keys = append(keys, key)
+				}
+			}
+			g.Expect(keys).To(gomega.ConsistOf("ra/frrConfig/node", "ra/frrConfig/node1", "ra/frrConfig/node2"))
+			ra, err = tt.fakeClientset.RouteAdvertisementsClient.K8sV1().RouteAdvertisements().Get(ctx, "ra", metav1.GetOptions{})
+			g.Expect(err).NotTo(gomega.HaveOccurred())
+			g.Expect(meta.IsStatusConditionTrue(ra.Status.Conditions, "Accepted")).To(gomega.BeTrue())
+		})
+	}
+}
+
+type failingEgressIPLister struct {
+	eiplisters.EgressIPLister
+	err   error
+	calls int
+}
+
+func (l *failingEgressIPLister) List(labels.Selector) ([]*eiptypes.EgressIP, error) {
+	l.calls++
+	return nil, l.err
+}
+
+type failingNamespaceLister struct {
+	corelisters.NamespaceLister
+	err   error
+	calls int
+}
+
+func (l *failingNamespaceLister) List(labels.Selector) ([]*corev1.Namespace, error) {
+	l.calls++
+	return nil, l.err
+}
+
+func TestController_reconcileEgressIPLookupFailure(t *testing.T) {
+	for _, lookup := range []string{"egressIPs", "namespaces"} {
+		t.Run(lookup, func(t *testing.T) {
+			g := gomega.NewWithT(t)
+			ctx := context.Background()
+			old := generatedFRRConfig("ovnk-generated-node", "node", true)
+			other := generatedFRRConfig("ovnk-generated-node1", "node1", true)
+			tt := newFRRReconcileTest(t, g, "eth0", old, other)
+			ra := (&testRA{Name: "ra", SelectsDefault: true, AdvertisePods: true, AdvertiseEgressIPs: true}).RouteAdvertisements()
+			_, err := tt.fakeClientset.RouteAdvertisementsClient.K8sV1().RouteAdvertisements().Update(ctx, ra, metav1.UpdateOptions{})
+			g.Expect(err).NotTo(gomega.HaveOccurred(), "enable mixed advertisements")
+			_, err = tt.fakeClientset.KubeClient.CoreV1().Nodes().Create(ctx,
+				(&testNode{Name: "node1", SubnetsAnnotation: `{"default":"1.1.1.0/24"}`}).Node(), metav1.CreateOptions{})
+			g.Expect(err).NotTo(gomega.HaveOccurred(), "create second node")
+			_, err = tt.fakeClientset.EgressIPClient.K8sV1().EgressIPs().Create(ctx,
+				(&testEIP{Name: "eip", EIPs: map[string]string{"node": "192.0.2.10"}}).EgressIP(), metav1.CreateOptions{})
+			g.Expect(err).NotTo(gomega.HaveOccurred(), "create EgressIP assignment")
+			g.Eventually(func() error { _, err := tt.c.eipLister.Get("eip"); return err }, 5*time.Second).Should(gomega.Succeed())
+			g.Eventually(func() error { _, err := tt.c.nodeLister.Get("node1"); return err }, 5*time.Second).Should(gomega.Succeed())
+			g.Eventually(func() ([]ratypes.AdvertisementType, error) {
+				current, err := tt.c.raLister.Get("ra")
+				if err != nil {
+					return nil, err
+				}
+				return current.Spec.Advertisements, nil
+			}, 5*time.Second).Should(gomega.ContainElement(ratypes.EgressIP))
+
+			before, err := tt.fakeClientset.FRRClient.ApiV1beta1().FRRConfigurations("frrNamespace").List(ctx, metav1.ListOptions{})
+			g.Expect(err).NotTo(gomega.HaveOccurred())
+			beforeNAD := tt.defaultNADAnnotation()
+			injected := errors.New("shared lookup failure")
+			eipLister, namespaceLister := tt.c.eipLister, tt.c.namespaceLister
+			failedEIPs := &failingEgressIPLister{EgressIPLister: eipLister, err: injected}
+			failedNamespaces := &failingNamespaceLister{NamespaceLister: namespaceLister, err: injected}
+			if lookup == "egressIPs" {
+				tt.c.eipLister = failedEIPs
+			} else {
+				tt.c.namespaceLister = failedNamespaces
+			}
+			err = tt.c.reconcile("ra")
+			g.Expect(errors.Is(err, injected)).To(gomega.BeTrue(), "shared failure must be returned for retry")
+			var nodeErr *nodeGenerationError
+			g.Expect(errors.As(err, &nodeErr)).To(gomega.BeFalse(), "shared failures must not be classified as node failures")
+			g.Expect(failedEIPs.calls+failedNamespaces.calls).To(gomega.Equal(1), "do not repeat the shared lookup for each node")
+			after, err := tt.fakeClientset.FRRClient.ApiV1beta1().FRRConfigurations("frrNamespace").List(ctx, metav1.ListOptions{})
+			g.Expect(err).NotTo(gomega.HaveOccurred())
+			g.Expect(after.Items).To(gomega.ConsistOf(before.Items), "retain complete existing configurations")
+			g.Expect(tt.defaultNADAnnotation()).To(gomega.Equal(beforeNAD))
+			current, err := tt.fakeClientset.RouteAdvertisementsClient.K8sV1().RouteAdvertisements().Get(ctx, "ra", metav1.GetOptions{})
+			g.Expect(err).NotTo(gomega.HaveOccurred())
+			g.Expect(current.Status).To(gomega.Equal(ra.Status), "shared lookup failure must leave status unchanged")
+
+			tt.c.eipLister, tt.c.namespaceLister = eipLister, namespaceLister
+			g.Expect(tt.c.reconcile("ra")).To(gomega.Succeed(), "retry succeeds after the shared lookup recovers")
+			updated, err := tt.fakeClientset.FRRClient.ApiV1beta1().FRRConfigurations("frrNamespace").Get(ctx, old.Name, metav1.GetOptions{})
+			g.Expect(err).NotTo(gomega.HaveOccurred())
+			g.Expect(updated.Spec.BGP.Routers[0].Prefixes).To(gomega.ConsistOf("1.1.0.0/24", "192.0.2.10/32"))
+		})
+	}
+}
+
+// A failed former EgressIP owner must not retain its stale advertisement.
+func TestController_reconcileEgressIPOwnerFailure(t *testing.T) {
+	for _, tc := range []struct {
+		name, ip string
+		moved    bool
+	}{
+		{"IPv4 removed", "192.0.2.10", false},
+		{"IPv4 moved", "192.0.2.10", true},
+		{"IPv6 removed", "2001:db8::10", false},
+		{"IPv6 moved", "2001:db8::10", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			g := gomega.NewWithT(t)
+			ctx := context.Background()
+			old := generatedFRRConfig("ovnk-generated-old", "node1", true)
+			old.Routers[0].Prefixes = []string{"1.1.1.0/24", tc.ip + util.GetIPFullMaskString(tc.ip)}
+			old.Routers[0].Neighbors[0].Advertise = old.Routers[0].Prefixes
+			tt := newFRRReconcileTest(t, g, "eth0", old)
+			ra := (&testRA{Name: "ra", SelectsDefault: true, AdvertisePods: true, AdvertiseEgressIPs: true}).RouteAdvertisements()
+			_, err := tt.fakeClientset.RouteAdvertisementsClient.K8sV1().RouteAdvertisements().Update(ctx, ra, metav1.UpdateOptions{})
+			g.Expect(err).NotTo(gomega.HaveOccurred(), "enable EgressIP advertisements")
+			node := (&testNode{Name: "node1", SubnetsAnnotation: "invalid"}).Node()
+			_, err = tt.fakeClientset.KubeClient.CoreV1().Nodes().Create(ctx, node, metav1.CreateOptions{})
+			g.Expect(err).NotTo(gomega.HaveOccurred(), "create failed former owner")
+			if tc.moved {
+				eip := (&testEIP{Name: "eip", EIPs: map[string]string{"node": tc.ip}}).EgressIP()
+				_, err = tt.fakeClientset.EgressIPClient.K8sV1().EgressIPs().Create(ctx, eip, metav1.CreateOptions{})
+				g.Expect(err).NotTo(gomega.HaveOccurred(), "move address to healthy node")
+				g.Eventually(func() error { _, err := tt.c.eipLister.Get("eip"); return err }, 5*time.Second).Should(gomega.Succeed())
+			}
+			g.Eventually(func() error { _, err := tt.c.nodeLister.Get("node1"); return err }, 5*time.Second).Should(gomega.Succeed())
+			g.Eventually(func() ([]ratypes.AdvertisementType, error) {
+				ra, err := tt.c.raLister.Get("ra")
+				if err != nil {
+					return nil, err
+				}
+				return ra.Spec.Advertisements, nil
+			}, 5*time.Second).Should(gomega.ContainElement(ratypes.EgressIP))
+
+			// A failed withdrawal must stop replacement publication and be retried.
+			failDelete := true
+			tt.fakeClientset.FRRClient.(Fake).PrependReactor("delete", "frrconfigurations", func(action ctesting.Action) (bool, runtime.Object, error) {
+				if failDelete && action.(ctesting.DeleteAction).GetName() == old.Name {
+					return true, nil, errors.New("injected withdrawal failure")
+				}
+				return false, nil, nil
+			})
+			g.Expect(tt.c.reconcile("ra")).NotTo(gomega.Succeed(), "retry failed withdrawal")
+			configs, err := tt.fakeClientset.FRRClient.ApiV1beta1().FRRConfigurations("frrNamespace").List(ctx, metav1.ListOptions{})
+			g.Expect(err).NotTo(gomega.HaveOccurred(), "list after failed withdrawal")
+			g.Expect(configs.Items).To(gomega.HaveLen(2), "only the template and old configuration should exist")
+			failDelete = false
+			g.Expect(tt.c.reconcile("ra")).To(gomega.Succeed(), "withdraw former owner and configure healthy node")
+			configs, err = tt.fakeClientset.FRRClient.ApiV1beta1().FRRConfigurations("frrNamespace").List(ctx, metav1.ListOptions{})
+			g.Expect(err).NotTo(gomega.HaveOccurred(), "list after successful withdrawal")
+			var generated []frrapi.FRRConfiguration
+			for _, cfg := range configs.Items {
+				if cfg.Annotations[types.OvnRouteAdvertisementsKey] != "" {
+					generated = append(generated, cfg)
+				}
+			}
+			g.Expect(generated).To(gomega.HaveLen(1), "failed former owner must not retain its configuration")
+			g.Expect(generated[0].Annotations[types.OvnRouteAdvertisementsKey]).To(gomega.Equal("ra/frrConfig/node"))
+			prefixes := []string{"1.1.0.0/24"}
+			if tc.moved {
+				prefixes = append(prefixes, tc.ip+util.GetIPFullMaskString(tc.ip))
+			}
+			g.Expect(generated[0].Spec.BGP.Routers[0].Prefixes).To(gomega.ConsistOf(prefixes))
+			ra, err = tt.fakeClientset.RouteAdvertisementsClient.K8sV1().RouteAdvertisements().Get(ctx, "ra", metav1.GetOptions{})
+			g.Expect(err).NotTo(gomega.HaveOccurred(), "get partially programmed RA")
+			g.Expect(meta.IsStatusConditionFalse(ra.Status.Conditions, "Accepted")).To(gomega.BeTrue())
+		})
+	}
+}
+
+// Truncating diagnostics must not hide a transient error from retry logic.
+func TestNodeGenerationErrorReporting(t *testing.T) {
+	g := gomega.NewWithT(t)
+	failure := &nodeGenerationError{}
+	g.Expect(failure.Error()).To(gomega.BeEmpty())
+	g.Expect((&nodeGenerationError{errs: []error{}}).Error()).To(gomega.BeEmpty())
+	g.Expect((&nodeGenerationError{errs: []error{nil}}).Error()).To(gomega.BeEmpty())
+	var messages []string
+	for i := 0; i < maxReportedNodeErrors; i++ {
+		err := fmt.Errorf("node-%d: %w", i, errPending)
+		failure.errs = append(failure.errs, err)
+		messages = append(messages, err.Error())
+	}
+	g.Expect(failure.Error()).To(gomega.Equal(strings.Join(messages, "\n")))
+	g.Expect(failure.retryError()).To(gomega.Succeed())
+
+	transient := errors.New("transient API failure")
+	for i := 0; i < maxReportedNodeErrors+1; i++ {
+		failure.errs = append(failure.errs, fmt.Errorf("retry-node-%d: %w", i, transient))
+	}
+	g.Expect(failure.Error()).To(gomega.Equal(strings.Join(messages, "\n") + "\n... and 11 more node errors"))
+	g.Expect(errors.Is(failure, transient)).To(gomega.BeTrue())
+	retry := failure.retryError()
+	g.Expect(errors.Is(retry, transient)).To(gomega.BeTrue())
+	g.Expect(errors.Is(retry, errPending)).To(gomega.BeFalse())
+	g.Expect(retry.Error()).To(gomega.HaveSuffix("... and 1 more node errors"))
+	g.Expect(retry.Error()).NotTo(gomega.ContainSubstring("retry-node-10:"))
+	g.Expect(failure.errs).To(gomega.HaveLen(21))
 }
