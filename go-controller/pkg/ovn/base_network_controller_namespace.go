@@ -192,6 +192,11 @@ func (bnc *BaseNetworkController) multicastUpdateNamespace(ns *corev1.Namespace,
 	enabled := isNamespaceMulticastEnabled(ns.Annotations)
 	enabledOld := nsInfo.multicastEnabled
 	if enabledOld == enabled {
+		// On retry after a failed syncNodeLogicalSwitchQueriers, the ACL state
+		// is already correct but the switch querier config may be stale.
+		if err := bnc.syncNodeLogicalSwitchQueriers(); err != nil {
+			return fmt.Errorf("failed to synchronize querier state for namespace %s: %w", ns.Name, err)
+		}
 		return nil
 	}
 
@@ -205,6 +210,9 @@ func (bnc *BaseNetworkController) multicastUpdateNamespace(ns *corev1.Namespace,
 	if err != nil {
 		return err
 	}
+	if err := bnc.syncNodeLogicalSwitchQueriers(); err != nil {
+		return fmt.Errorf("failed to synchronize querier state for namespace %s: %w", ns.Name, err)
+	}
 	return nil
 }
 
@@ -216,6 +224,9 @@ func (bnc *BaseNetworkController) multicastDeleteNamespace(ns *corev1.Namespace,
 		if err := bnc.deleteMulticastAllowPolicy(ns.Name, nsInfo); err != nil {
 			return err
 		}
+	}
+	if err := bnc.syncNodeLogicalSwitchQueriers(); err != nil {
+		return fmt.Errorf("failed to synchronize querier state after deleting namespace %s: %w", ns.Name, err)
 	}
 	return nil
 }

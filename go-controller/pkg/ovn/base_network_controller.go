@@ -134,6 +134,10 @@ type BaseNetworkController struct {
 	namespaces      map[string]*namespaceInfo
 	namespacesMutex sync.Mutex
 
+	// mcastQuerierMutex serializes multicast querier sync operations to prevent race conditions
+	// during concurrent namespace updates.
+	mcastQuerierMutex sync.Mutex
+
 	// An address set factory that creates address sets
 	addressSetFactory addressset.AddressSetFactory
 
@@ -597,19 +601,25 @@ func (bnc *BaseNetworkController) createNodeLogicalSwitch(nodeName string, hostS
 	}
 
 	// If supported, enable IGMP/MLD snooping and querier on the node.
+	// Lock mcastQuerierMutex across the state check and switch write so that a
+	// concurrent syncNodeLogicalSwitchQueriers cannot complete between the two.
 	if bnc.multicastSupport {
 		logicalSwitch.OtherConfig["mcast_snoop"] = "true"
 
-		// Configure IGMP/MLD querier if the gateway IP address is known.
-		// Otherwise disable it.
+		bnc.mcastQuerierMutex.Lock()
 		if v4Gateway != nil || v6Gateway != nil {
-			logicalSwitch.OtherConfig["mcast_querier"] = "true"
 			logicalSwitch.OtherConfig["mcast_eth_src"] = nodeLRPMAC.String()
 			if v4Gateway != nil {
 				logicalSwitch.OtherConfig["mcast_ip4_src"] = v4Gateway.String()
 			}
 			if v6Gateway != nil {
 				logicalSwitch.OtherConfig["mcast_ip6_src"] = util.HWAddrToIPv6LLA(nodeLRPMAC).String()
+			}
+
+			if bnc.isAnyNamespaceMulticastEnabled() {
+				logicalSwitch.OtherConfig["mcast_querier"] = "true"
+			} else {
+				logicalSwitch.OtherConfig["mcast_querier"] = "false"
 			}
 		} else {
 			logicalSwitch.OtherConfig["mcast_querier"] = "false"
@@ -618,6 +628,9 @@ func (bnc *BaseNetworkController) createNodeLogicalSwitch(nodeName string, hostS
 
 	err := libovsdbops.CreateOrUpdateLogicalSwitch(bnc.nbClient, &logicalSwitch, &logicalSwitch.OtherConfig,
 		&logicalSwitch.LoadBalancerGroup, &logicalSwitch.ExternalIDs)
+	if bnc.multicastSupport {
+		bnc.mcastQuerierMutex.Unlock()
+	}
 	if err != nil {
 		return fmt.Errorf("failed to add logical switch %+v: %v", logicalSwitch, err)
 	}
@@ -1260,4 +1273,83 @@ func (bnc *BaseNetworkController) ensureDHCP(pod *corev1.Pod, podAnnotation *uti
 	opts = append(opts, kubevirt.WithIPv4DNSServer(ipv4DNSServer), kubevirt.WithIPv6DNSServer(ipv6DNSServer))
 
 	return kubevirt.EnsureDHCPOptionsForLSP(bnc.controllerName, bnc.nbClient, pod, podAnnotation.IPs, lsp, opts...)
+}
+
+// isAnyNamespaceMulticastEnabled returns true if at least one namespace managed by this
+// controller currently has multicast enabled. It checks this by querying the OVN
+// Northbound DB cache for the existence of namespace-scoped multicast ACLs.
+func (bnc *BaseNetworkController) isAnyNamespaceMulticastEnabled() bool {
+	if bnc.nbClient == nil {
+		return false
+	}
+
+	// Search for any multicast allow ACLs owned by this controller.
+	// This lookup is efficient as it uses the libovsdb cache index.
+	predicateIDs := libovsdbops.NewDbObjectIDs(libovsdbops.ACLMulticastNamespace, bnc.controllerName, nil)
+	p := libovsdbops.GetPredicate[*nbdb.ACL](predicateIDs, nil)
+	acls, err := libovsdbops.FindACLsWithPredicate(bnc.nbClient, p)
+	if err != nil {
+		klog.Errorf("Failed to query multicast ACLs for querier check: %v", err)
+		return false
+	}
+	return len(acls) > 0
+}
+
+// syncNodeLogicalSwitchQueriers updates mcast_querier on this network's node logical
+// switches based on whether any namespace managed by this controller has multicast enabled.
+func (bnc *BaseNetworkController) syncNodeLogicalSwitchQueriers() error {
+	if !bnc.multicastSupport {
+		return nil
+	}
+
+	bnc.mcastQuerierMutex.Lock()
+	defer bnc.mcastQuerierMutex.Unlock()
+
+	enabled := bnc.isAnyNamespaceMulticastEnabled()
+	mcastQuerier := "false"
+	if enabled {
+		mcastQuerier = "true"
+	}
+
+	// Find all node switches belonging to this network
+	networkName := bnc.GetNetworkName()
+	p := func(item *nbdb.LogicalSwitch) bool {
+		if item.OtherConfig["mcast_snoop"] != "true" {
+			return false
+		}
+		swNetwork := item.ExternalIDs[types.NetworkExternalID]
+		if bnc.IsUserDefinedNetwork() {
+			return swNetwork == networkName
+		}
+		return swNetwork == ""
+	}
+	switches, err := libovsdbops.FindLogicalSwitchesWithPredicate(bnc.nbClient, p)
+	if err != nil {
+		return fmt.Errorf("failed to find logical switches for querier sync: %w", err)
+	}
+
+	var updateErrs []error
+	for _, sw := range switches {
+		if sw.OtherConfig["mcast_querier"] == mcastQuerier {
+			continue
+		}
+		// Skip if missing source config (will be handled by createNodeLogicalSwitch later)
+		if enabled && sw.OtherConfig["mcast_eth_src"] == "" {
+			continue
+		}
+		if enabled && sw.OtherConfig["mcast_ip4_src"] == "" && sw.OtherConfig["mcast_ip6_src"] == "" {
+			continue
+		}
+
+		newConfig := make(map[string]string)
+		for k, v := range sw.OtherConfig {
+			newConfig[k] = v
+		}
+		newConfig["mcast_querier"] = mcastQuerier
+		sw.OtherConfig = newConfig
+		if err := libovsdbops.UpdateLogicalSwitchSetOtherConfig(bnc.nbClient, sw); err != nil {
+			updateErrs = append(updateErrs, fmt.Errorf("switch %s: %w", sw.Name, err))
+		}
+	}
+	return errors.Join(updateErrs...)
 }

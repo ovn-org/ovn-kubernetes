@@ -131,14 +131,20 @@ lists is the switch that is configured to act as an IGMP querier - on OVN-K's
 case, the node's logical switches.
 
 For these membership requests to be allowed in the network, each node's logical
-switch's must declare themselves "multicast queriers", by using the
+switch must declare itself a "multicast querier" using the
 `other_config:mcast_querier=true` option.
 
-The `other_config:mcast_snoop=true` is also used so the logical switches can
-passively snoop IGMP query / report / leave packets transferred between the
-multicast hosts and switches to compute group membership.
+To optimize control plane performance and avoid hitting OVS scale limits (such
+as the 4096 resubmit limit), `mcast_querier` is enabled dynamically only when
+at least one namespace managed by the controller has multicast enabled via the
+`k8s.ovn.org/multicast-enabled=true` annotation. OVN-Kubernetes synchronizes
+this setting across all node logical switches as namespaces are updated.
 
-Without these two options, multicast traffic would be treated as broadcast
+The `other_config:mcast_snoop=true` option remains always enabled when
+multicast support is on, allowing logical switches to passively snoop IGMP/MLD
+query, report, and leave packets to compute group membership.
+
+Without these options, multicast traffic would be treated as broadcast
 traffic, which forwards packets to all ports on the network.
 
 Please refer to the following snippet featuring the node's logical swithes
