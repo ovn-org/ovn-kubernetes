@@ -766,7 +766,7 @@ func reconcileUDNServiceMarkRules(service *corev1.Service, netInfo util.NetInfo,
 	if shouldAddUDNServiceMarkRules(netInfo, nodeName) {
 		err = nodenft.AddObjects(getUDNNFTRules(service, netConfig))
 	} else {
-		err = nodenft.DeleteObjects(getUDNNFTRules(service, nil))
+		err = nodenft.DeleteElementsIfMatching(getUDNNFTRules(service, netConfig))
 	}
 	if err != nil {
 		return fmt.Errorf("failed to reconcile UDN service mark rules for service %s/%s: %w",

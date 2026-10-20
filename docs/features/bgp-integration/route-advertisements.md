@@ -845,7 +845,9 @@ advertisement mapping does not enable default-VRF service marking.
 
 Changes to the routing decision refresh the affected network's service rules,
 removing or restoring service marks even when the Service object itself has
-not changed.
+not changed. Removal checks the existing network mark so a service with an
+overlapping ExternalIP or LoadBalancer address does not remove another
+network's mark during advertisement reconciliation.
 
 ## Troubleshooting
 

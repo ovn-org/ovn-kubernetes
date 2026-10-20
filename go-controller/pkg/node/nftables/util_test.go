@@ -7,7 +7,10 @@
 package nftables
 
 import (
+	"context"
+	"reflect"
 	"testing"
+	"time"
 
 	"sigs.k8s.io/knftables"
 )
@@ -546,5 +549,83 @@ func TestSyncObjects(t *testing.T) {
 				t.Fatalf("unexpected final result: %v", err)
 			}
 		})
+	}
+}
+
+// pausedMapLookup holds the ownership snapshot while another helper tries to
+// replace the element, exercising the lookup-to-delete race deterministically.
+type pausedMapLookup struct {
+	knftables.Interface
+	listed chan struct{}
+	resume chan struct{}
+}
+
+func (n *pausedMapLookup) ListElements(ctx context.Context, objectType, name string) ([]*knftables.Element, error) {
+	elements, err := n.Interface.ListElements(ctx, objectType, name)
+	close(n.listed)
+	<-n.resume
+	return elements, err
+}
+
+// TestDeleteElementsIfMatchingConcurrentReplacement ensures that a new owner
+// cannot be installed between the old owner's snapshot and key deletion.
+func TestDeleteElementsIfMatchingConcurrentReplacement(t *testing.T) {
+	fake := SetFakeNFTablesHelper()
+	original := &knftables.Element{Map: "owners", Key: []string{"80"}, Value: []string{"1"}}
+	replacement := &knftables.Element{Map: "owners", Key: []string{"80"}, Value: []string{"2"}}
+	if err := AddObjects([]knftables.Object{&knftables.Map{Name: "owners", Type: "inet_service : mark"}, original}); err != nil {
+		t.Fatalf("initialize ownership map: %v", err)
+	}
+	paused := &pausedMapLookup{Interface: fake, listed: make(chan struct{}), resume: make(chan struct{})}
+	nftHelper = paused
+	t.Cleanup(func() { nftHelper = fake })
+	deleted := make(chan error, 1)
+	go func() { deleted <- DeleteElementsIfMatching([]knftables.Object{original}) }()
+	select {
+	case <-paused.listed:
+	case <-time.After(5 * time.Second):
+		close(paused.resume)
+		t.Fatal("timed out waiting for ownership lookup")
+	}
+	started := make(chan struct{})
+	added := make(chan error, 1)
+	go func() {
+		close(started)
+		added <- AddObjects([]knftables.Object{replacement})
+	}()
+	<-started
+	// The replacement must wait while the conditional deletion owns its snapshot.
+	var early bool
+	select {
+	case err := <-added:
+		early = true
+		t.Errorf("replacement completed during ownership lookup: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(paused.resume)
+	select {
+	case err := <-deleted:
+		if err != nil {
+			t.Errorf("delete original owner: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out deleting original owner")
+	}
+	if !early {
+		select {
+		case err := <-added:
+			if err != nil {
+				t.Errorf("install replacement owner: %v", err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out installing replacement owner")
+		}
+	}
+	elements, err := fake.ListElements(context.Background(), "map", "owners")
+	if err != nil {
+		t.Fatalf("read replacement owner: %v", err)
+	}
+	if len(elements) != 1 || !reflect.DeepEqual(elements[0].Value, replacement.Value) {
+		t.Fatalf("replacement owner was lost: %+v", elements)
 	}
 }

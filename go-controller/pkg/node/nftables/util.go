@@ -9,14 +9,22 @@ package nftables
 import (
 	"context"
 	"fmt"
+	"slices"
+	"sync"
 
 	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/knftables"
 )
 
+// Serialize helper transactions with read-before-delete operations so an element
+// cannot be replaced between checking its owner and deleting its key.
+var objectsMutex sync.Mutex
+
 // AddObjects adds each element of objects to nftables in a single transaction, using
 // tx.Add() for each object.
 func AddObjects(objects []knftables.Object) error {
+	objectsMutex.Lock()
+	defer objectsMutex.Unlock()
 	nft, err := GetNFTablesHelper()
 	if err != nil {
 		return err
@@ -43,6 +51,8 @@ func AddObjects(objects []knftables.Object) error {
 // non-nil Comment. DeleteObjects will first "list" the Rule's Chain to find its current
 // contents, and then delete every rule in the chain with a matching comment.
 func DeleteObjects(objects []knftables.Object) error {
+	objectsMutex.Lock()
+	defer objectsMutex.Unlock()
 	nft, err := GetNFTablesHelper()
 	if err != nil {
 		return err
@@ -125,10 +135,50 @@ func DeleteObjects(objects []knftables.Object) error {
 	return nft.Run(context.TODO(), tx)
 }
 
+// DeleteElementsIfMatching deletes map elements only when their current values
+// match the supplied values. Other helper mutations are excluded across the
+// lookup and deletion, preserving replacements owned by another network.
+func DeleteElementsIfMatching(objects []knftables.Object) error {
+	objectsMutex.Lock()
+	defer objectsMutex.Unlock()
+	nft, err := GetNFTablesHelper()
+	if err != nil {
+		return err
+	}
+	existingMaps := make(map[string][]*knftables.Element)
+	tx := nft.NewTransaction()
+	for _, obj := range objects {
+		element, ok := obj.(*knftables.Element)
+		if !ok || element.Map == "" || len(element.Value) == 0 {
+			return fmt.Errorf("expected a map element with an ownership value, got %T", obj)
+		}
+		existing, listed := existingMaps[element.Map]
+		if !listed {
+			existing, err = nft.ListElements(context.TODO(), "map", element.Map)
+			if err != nil {
+				return fmt.Errorf("failed to list map %s: %w", element.Map, err)
+			}
+			existingMaps[element.Map] = existing
+		}
+		current := findElement(existing, element.Key)
+		if current != nil && slices.Equal(current.Value, element.Value) {
+			tx.Delete(current)
+			// A Service can refer to the same address in ExternalIPs and
+			// LoadBalancer status. Delete each matching key only once.
+			existingMaps[element.Map] = slices.DeleteFunc(slices.Clone(existing), func(e *knftables.Element) bool {
+				return slices.Equal(e.Key, element.Key)
+			})
+		}
+	}
+	return nft.Run(context.TODO(), tx)
+}
+
 // SyncObjects synchronizes the given nftables containers to contain only the elements in
 // contents. containers can contain Sets, Maps, and Chains, and contents can contain
 // Elements and Rules.
 func SyncObjects(containers, contents []knftables.Object) error {
+	objectsMutex.Lock()
+	defer objectsMutex.Unlock()
 	nft, err := GetNFTablesHelper()
 	if err != nil {
 		return err

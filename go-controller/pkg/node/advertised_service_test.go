@@ -142,3 +142,55 @@ func TestExistingServiceRefreshesAdvertisementMarks(t *testing.T) {
 		g.Expect(elems).To(gomega.HaveLen(expected), "target VRFs %v", vrfs)
 	}
 }
+
+// TestServiceMarkCleanupPreservesOtherNetworks covers overlapping ExternalIP and
+// LoadBalancer tuples when an unrelated network loses mark eligibility.
+func TestServiceMarkCleanupPreservesOtherNetworks(t *testing.T) {
+	g := gomega.NewWithT(t)
+	nft := nodenft.SetFakeNFTablesHelper()
+	g.Expect(configureUDNServicesNFTables()).To(gomega.Succeed(), "initialize shared service maps")
+	bridges := []*bridgeconfig.BridgeUDNConfiguration{{PktMark: "4099"}, {PktMark: "4100"}}
+	tx := nft.NewTransaction()
+	for _, bridge := range bridges {
+		tx.Add(&knftables.Chain{Name: GetUDNMarkChain(bridge.PktMark)})
+	}
+	g.Expect(nft.Run(context.Background(), tx)).To(gomega.Succeed(), "create network mark chains")
+	info, err := util.NewNetInfo(&ovncnitypes.NetConf{NetConf: cnitypes.NetConf{Name: "blue"}, Role: types.NetworkRolePrimary, Topology: types.Layer3Topology})
+	g.Expect(err).NotTo(gomega.HaveOccurred(), "create blue network info")
+	blue := util.NewMutableNetInfo(info)
+	info, err = util.NewNetInfo(&ovncnitypes.NetConf{NetConf: cnitypes.NetConf{Name: "red"}, Role: types.NetworkRolePrimary, Topology: types.Layer3Topology})
+	g.Expect(err).NotTo(gomega.HaveOccurred(), "create red network info")
+	red := util.NewMutableNetInfo(info)
+	red.SetPodNetworkAdvertisedVRFs(map[string][]string{"node": {"red"}})
+	service := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "svc", Namespace: "blue"}, Spec: corev1.ServiceSpec{
+		Type:        corev1.ServiceTypeLoadBalancer,
+		Ports:       []corev1.ServicePort{{Protocol: corev1.ProtocolTCP, Port: 80, NodePort: 30080}},
+		ExternalIPs: []string{"192.0.2.1", "2001:db8::1"},
+	}, Status: corev1.ServiceStatus{LoadBalancer: corev1.LoadBalancerStatus{Ingress: []corev1.LoadBalancerIngress{
+		{IP: "192.0.2.1"}, {IP: "2001:db8::1"}, {IP: "192.0.2.2"}, {IP: "2001:db8::2"},
+	}}}}
+	other := service.DeepCopy()
+	other.Namespace = "red"
+	other.Spec.Ports[0].NodePort = 30081
+	g.Expect(reconcileUDNServiceMarkRules(service, blue, "node", bridges[0])).To(gomega.Succeed(), "program blue marks")
+	for i := 0; i < 2; i++ {
+		g.Expect(reconcileUDNServiceMarkRules(other, red, "node", bridges[1])).To(gomega.Succeed(), "refresh ineligible red service, attempt %d", i)
+		for _, name := range []string{nftablesUDNMarkExternalIPsV4Map, nftablesUDNMarkExternalIPsV6Map} {
+			elems, err := nft.ListElements(context.Background(), "map", name)
+			g.Expect(err).NotTo(gomega.HaveOccurred(), "list %s", name)
+			g.Expect(elems).To(gomega.HaveLen(2), "preserve blue's ExternalIP and LoadBalancer marks in %s", name)
+			for _, elem := range elems {
+				g.Expect(elem.Value).To(gomega.Equal([]string{"jump " + GetUDNMarkChain(bridges[0].PktMark)}), "retain blue ownership in %s", name)
+			}
+		}
+	}
+	blue.SetPodNetworkAdvertisedVRFs(map[string][]string{"node": {"blue"}})
+	for i := 0; i < 2; i++ {
+		g.Expect(reconcileUDNServiceMarkRules(service, blue, "node", bridges[0])).To(gomega.Succeed(), "remove own marks idempotently, attempt %d", i)
+	}
+	for _, name := range []string{nftablesUDNMarkExternalIPsV4Map, nftablesUDNMarkExternalIPsV6Map} {
+		elems, err := nft.ListElements(context.Background(), "map", name)
+		g.Expect(err).NotTo(gomega.HaveOccurred(), "list cleaned map %s", name)
+		g.Expect(elems).To(gomega.BeEmpty(), "remove only the owner's marks in %s", name)
+	}
+}
