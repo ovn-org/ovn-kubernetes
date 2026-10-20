@@ -5947,7 +5947,7 @@ to the Linux Bridge. More technical details on that in the sections ahead.</p>
 <p>This use case is about connecting a Kubernetes cluster to one or more external networks and preserving the network
 isolation of the UDN and external virtual routing and forwarding instances (VRFs) segments. Consider the following
 diagram:</p>
-<p><a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../images/hybrid-ip-vrf-evpn.png" data-desc-position="bottom"><img alt="" src="../images/hybrid-ip-vrf-evpn.png"></a></p>
+<p></p>
 <p>In this example a user has traditional Finance and HR networks. These networks are in their own VRFs, meaning they are
 isolated from one another and are unable to communicate or even know about the other. These networks may overlap in IP
 addressing. Additionally, the user has a Kubernetes cluster where they are migrating some traditional servers/VMs
@@ -5964,7 +5964,7 @@ UDN and the corresponding external network, while with the latter, the UDN and t
 same layer 2 broadcast domain. VM migration relies on being a part of the same L2 segment in order to preserve MAC
 address reachability as well as IP address consistency. With MAC-VRFs and EVPN it becomes possible to extend the
 layer 2 network between the kubernetes cluster and outside world:</p>
-<p><a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../images/l2-evpn-vm-migration.png" data-desc-position="bottom"><img alt="" src="../images/l2-evpn-vm-migration.png"></a></p>
+<p></p>
 <p>The image above depicts a Layer 2 UDN which not only exists across the worker nodes node-1 and node-2 but is also stretched
 into Provider Network 1. In this scenario, vm-2 is able to migrate into node-1 on the UDN network, preserving the same IP
 address it had in the external provider network. Similarly, there is another Provider Network 2 which may or may not
@@ -6348,7 +6348,7 @@ To do that, we connect br-int to the linux bridge for the MAC-VRF. This will all
 travel through br-blue and then eventually into the EVPN fabric via the VNID 100. This enables a user to disable the
 Geneve overlay and allow L2 communication between UDNs on different nodes via the MAC-VRF:</p>
 <p><a id="l2evpn-anchor"></a>
-<a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../images/l2evpn.png" data-desc-position="bottom"><img alt="" src="../images/l2evpn.png"></a></p>
+</p>
 <p>Note, the Layer 2 domain for the MAC-VRF may be extended into the provider's physical network, and not just extended across
 Kubernetes nodes. This allows for VM migration and other layer 2 connectivity between entities external to the cluster
 and entities within.</p>
@@ -6485,7 +6485,7 @@ router<span class="w"> </span>bgp<span class="w"> </span><span class="m">65000</
 !<span class="w"> </span>IP-VRF<span class="w"> </span>config<span class="w"> </span>end
 </code></pre></div>
 <p>An IP-VRF with a layer 3 UDN would look something like this:</p>
-<p><a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../images/l3evpn.png" data-desc-position="bottom"><img alt="" src="../images/l3evpn.png"></a></p>
+<p></p>
 <p>In this case each node has its own layer 2 domain, and routing is used via the IP-VRF for inter-node UDN communication. </p>
 <h4 id="mac-vrf-layer-2-udn">MAC-VRF + Layer 2 UDN<a class="headerlink" href="#mac-vrf-layer-2-udn" title="Permanent link">¶</a></h4>
 <p>With only a MAC-VRF it is also a subset of the previous node configuration:</p>

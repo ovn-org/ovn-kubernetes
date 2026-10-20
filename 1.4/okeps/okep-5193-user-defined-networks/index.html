@@ -7162,7 +7162,7 @@ br-ex bridge. OVN-Kubernetes will be responsible for being VRF/network aware and
 to the right GR. Each per-network GR will only have load balancers configured on it for its network, and only be able to
 route to pods in its network. The logical topology would look something like this, if we use an example of having a
 cluster default primary network, a layer 3 primary network, and a layer 2 primary network:</p>
-<p><a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../../images/VRFs.svg" data-desc-position="bottom"><img alt="VRF Topology" src="../../images/VRFs.svg"></a></p>
+<p></p>
 <p>In the above diagram, each network is assigned a unique conntrack zone and conntrack mark. These are required in order
 to be able to handle overlapping networks egressing into the same VRF and SNAT’ing to the host IP. Note, the default
 cluster network does not need to use a unique CT mark or zone, and will continue to work as it does today. This is due
@@ -7198,7 +7198,7 @@ OVN should send a GARP for VMs to clean up its ARP tables since the gateway IP h
 Since there is no MAC learning between zones, so we can have the same extra address on every gateway router port, basically
 implementing anycast for this SVI address.</p>
 <p>Following is a picture that illustrate all these bits with a topology</p>
-<p><a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../../images/multi-homing-l2-gw.svg" data-desc-position="bottom"><img alt="Layer 2 Egress Topology" src="../../images/multi-homing-l2-gw.svg"></a></p>
+<p></p>
 <h5 id="services_1">Services<a class="headerlink" href="#services_1" title="Permanent link">¶</a></h5>
 <p>When ingress service traffic enters br-ex, there are flows installed that steer service traffic towards the OVN GR. With
 additional networks, these flows will be modified to steer traffic to the correct GR-&lt;network&gt;’s patch port.</p>
@@ -7267,11 +7267,11 @@ in that section where the GR SNATs to the masquerade subnet must be utilized. Ho
 we will need a way to tell if it was sent from a pod affected by a specific egress IP. To address this, pkt_mark will be
 used to mark egress IP packets and signify to br-ex which egress IP to SNAT to. An example where the egress IP is
 1.1.1.1 that maps to pkt_mark 10 would look something like this:</p>
-<p><a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../../images/egress-ip-vrf-sgw.svg" data-desc-position="bottom"><img alt="Egress IP VRF SGW" src="../../images/egress-ip-vrf-sgw.svg"></a></p>
+<p></p>
 <p>For layer 2, egress IP has never been supported before. With the IC design, there is no need to have an
 ovn_cluster_router and join switch separating the layer 2 switch network (transit switch) from the GR. Non-IC will
 not be supported. In the layer 2 IC model, GRs per node on a network will all be connected to the layer 2 transit switch:</p>
-<p><a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../../images/egress-ip-l2-primary.svg" data-desc-position="bottom"><img alt="Egress IP Layer 2" src="../../images/egress-ip-l2-primary.svg"></a></p>
+<p></p>
 <p>In the above diagram, Node 2 is chosen to be the egress IP node for any pods in namespace A. Pod 1 and Pod 2 have
 default gateway routes to their respective GR on their node. When egress traffic leaves Pod 2, it is sent towards its
 GR-A on node 2, where it is SNAT’ed to the egress IP and the traffic sent to br-ex. For Pod 1, its traffic is sent to
@@ -7299,7 +7299,7 @@ the OVN topology tied to the cluster default network. There will need to be mult
 network. Additionally, all of these ports cannot reside in the default VRF of the host network. Doing so would result in
 an inability to have overlapping subnets, as well as the host VRF would be capable of routing packets between namespace
 networks, which is undesirable. Therefore, each ovn-k8s-mp0-&lt;network&gt; interface must be placed in its own VRF:</p>
-<p><a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../../images/local-gw-node-setup-vrfs.svg" data-desc-position="bottom"><img alt="Local GW Node Setup" src="../../images/local-gw-node-setup-vrfs.svg"></a></p>
+<p></p>
 <p>The VRFs will clone the default routing table, excluding routes that are created by OVN-Kubernetes for its networks.
 This is similar to the methodology in place today for supporting
 <a href="https://github.com/ovn-kubernetes/ovn-kubernetes/blob/master/docs/features/cluster-egress-controls/egress-ip.md#egressip-ip-is-assigned-to-a-secondary-host-interface">Egress IP with multiple NICs</a>.</p>
@@ -7386,7 +7386,7 @@ default dev eth1
 egress IP VRF. CONNMARK will continue to be used so that return traffic is sent back to the correct VRF. Step 5 in the
 above may need to be tweaked to match on mark in case 2 pods have overlapping IPs, and are both egressing
 the same interface with different Egress IPs. The flow would look something like this:</p>
-<p><a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../../images/egress-ip-vrf-lgw.svg" data-desc-position="bottom"><img alt="Egress IP VRF LGW" src="../../images/egress-ip-vrf-lgw.svg"></a></p>
+<p></p>
 <h5 id="egress-firewall_1">Egress Firewall<a class="headerlink" href="#egress-firewall_1" title="Permanent link">¶</a></h5>
 <p>Egress firewall is enforced at the OVN logical switch, and this proposal has no effect on its functionality.</p>
 <h5 id="egress-qos_1">Egress QoS<a class="headerlink" href="#egress-qos_1" title="Permanent link">¶</a></h5>
