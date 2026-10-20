@@ -26,6 +26,10 @@ var _ = ginkgo.Describe("Hybrid-overlay subnet claims", ginkgo.Label("HybridOver
 	f := wrappedTestFramework("hybrid-overlay-subnet")
 
 	ginkgo.It("rejects a remote node claiming an arbitrary subnet", func() {
+		if !isInterconnectEnabled() {
+			ginkgo.Skip("node annotation ownership policy requires interconnect")
+		}
+
 		if os.Getenv("OVN_HYBRID_OVERLAY_ENABLE") != "true" {
 			ginkgo.Skip("hybrid overlay is not enabled")
 		}

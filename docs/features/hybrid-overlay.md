@@ -26,8 +26,8 @@ It is recommended the hybrid overlay feature be enabled at cluster install time.
 ## Subnet ownership
 
 The `k8s.ovn.org/hybrid-overlay-node-subnet` annotation is used to configure
-networking on other nodes. An admission policy therefore permits only
-`ovnkube-cluster-manager` to change it by default.
+networking on other nodes. In interconnect deployments, an admission policy
+therefore permits only `ovnkube-cluster-manager` to change it by default.
 
 Deployments where another controller manages hybrid overlay subnets, such as
 during an OpenShiftSDN migration, can add that controller's Kubernetes username

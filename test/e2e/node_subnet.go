@@ -28,6 +28,10 @@ var _ = ginkgo.Describe("Node subnet claims", func() {
 	f := wrappedTestFramework("node-subnet-claim")
 
 	ginkgo.It("rejects a node claiming a sub-prefix of another node's subnet", func() {
+		if !isInterconnectEnabled() {
+			ginkgo.Skip("node annotation ownership policy requires interconnect")
+		}
+
 		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cancel()
 
