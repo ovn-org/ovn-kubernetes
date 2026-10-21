@@ -342,6 +342,8 @@ func (oc *DefaultNetworkController) StartServiceController(wg *sync.WaitGroup, r
 	return nil
 }
 
+// InitEgressServiceZoneController wires the zone controller to shared informers
+// and the default network routing and address-set operations.
 func (oc *DefaultNetworkController) InitEgressServiceZoneController() (*egresssvc_zone.Controller, error) {
 	// If the EgressIP controller is enabled it will take care of creating the
 	// "no reroute" policies - we can pass "noop" functions to the egress service controller.
@@ -377,7 +379,7 @@ func (oc *DefaultNetworkController) InitEgressServiceZoneController() (*egresssv
 		createDefaultNodeRouteToExternal,
 		oc.stopChan, oc.watchFactory.EgressServiceInformer(), oc.watchFactory.ServiceCoreInformer(),
 		oc.watchFactory.EndpointSliceCoreInformer(),
-		oc.watchFactory.NodeCoreInformer(), oc.nodeName)
+		oc.watchFactory.NodeCoreInformer(), oc.watchFactory.PodCoreInformer(), oc.nodeName)
 }
 
 func (oc *DefaultNetworkController) newANPController() error {

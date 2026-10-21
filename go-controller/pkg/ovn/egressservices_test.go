@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"time"
 
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
@@ -300,6 +301,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				fakeOVN.startWithDBSetup(dbSetup,
+					egressServiceTestPods(),
 					&corev1.NamespaceList{
 						Items: []corev1.Namespace{
 							namespaceT,
@@ -510,6 +512,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 				}
 
 				fakeOVN.startWithDBSetup(dbSetup,
+					egressServiceTestPods(),
 					&corev1.NamespaceList{
 						Items: []corev1.Namespace{
 							namespaceT,
@@ -651,7 +654,22 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 					},
 				}
 
+				// An extra slice endpoint must not authorize egress rules for a
+				// pod in another namespace, even with a forged target reference.
+				v4EpSlice.Endpoints = append(v4EpSlice.Endpoints, discovery.Endpoint{
+					Addresses: []string{"10.128.1.99"}, NodeName: &node1.Name,
+					TargetRef: &corev1.ObjectReference{Kind: "Pod", Namespace: "testns", Name: "node1-pod-0"},
+				})
+				v6EpSlice.Endpoints = append(v6EpSlice.Endpoints, discovery.Endpoint{
+					Addresses: []string{"fe00:10:128:1::99"}, NodeName: &node1.Name,
+				})
+				// A valid local pod IP cannot be presented as a remote endpoint.
+				v4EpSlice.Endpoints = append(v4EpSlice.Endpoints, discovery.Endpoint{
+					Addresses: []string{"10.128.1.5"}, NodeName: &node2.Name,
+				})
+
 				fakeOVN.startWithDBSetup(dbSetup,
+					egressServiceTestPods(),
 					&corev1.NamespaceList{
 						Items: []corev1.Namespace{
 							namespaceT,
@@ -702,10 +720,40 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 				fakeOVN.asf.ExpectAddressSetWithAddresses(egresssvc.GetEgressServiceAddrSetDbIDs(controllerName), expectedEgressSvcAddrSet)
 
+				ginkgo.By("removing pod egress rules while its EndpointSlice remains unchanged")
+				pod, err := fakeOVN.fakeClient.KubeClient.CoreV1().Pods("testns").Get(context.TODO(), "node1-pod-0", metav1.GetOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred(), "failed to get testns/node1-pod-0 before deletion")
+				gomega.Expect(fakeOVN.fakeClient.KubeClient.CoreV1().Pods("testns").Delete(context.TODO(), pod.Name, metav1.DeleteOptions{})).To(gomega.Succeed(), "failed to delete pod %s/%s", pod.Namespace, pod.Name)
+				routerWithoutPod := *clusterRouter
+				routerWithoutPod.Policies = nil
+				for _, policy := range clusterRouter.Policies {
+					if policy != v4lrp1.UUID {
+						routerWithoutPod.Policies = append(routerWithoutPod.Policies, policy)
+					}
+				}
+				var withoutPodState []libovsdbtest.TestData
+				for _, item := range expectedDatabaseState {
+					switch item {
+					case clusterRouter:
+						withoutPodState = append(withoutPodState, &routerWithoutPod)
+					case v4lrp1:
+					default:
+						withoutPodState = append(withoutPodState, item)
+					}
+				}
+				gomega.Eventually(fakeOVN.nbClient, 5*time.Second, 10*time.Millisecond).Should(libovsdbtest.HaveData(withoutPodState), "egress policies must exclude the deleted pod")
+				fakeOVN.asf.ExpectAddressSetWithAddresses(egresssvc.GetEgressServiceAddrSetDbIDs(controllerName), []string{"fe00:10:128:1::5"})
+
+				ginkgo.By("reconciling a pod that arrives after its EndpointSlice")
+				_, err = fakeOVN.fakeClient.KubeClient.CoreV1().Pods("testns").Create(context.TODO(), pod, metav1.CreateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred(), "failed to recreate pod %s/%s", pod.Namespace, pod.Name)
+				gomega.Eventually(fakeOVN.nbClient, 5*time.Second, 10*time.Millisecond).Should(libovsdbtest.HaveData(expectedDatabaseState), "egress policies must include the recreated pod")
+				fakeOVN.asf.ExpectAddressSetWithAddresses(egresssvc.GetEgressServiceAddrSetDbIDs(controllerName), expectedEgressSvcAddrSet)
+
 				ginkgo.By("updating the EgressService's status to the second node so its setup will be updated")
 				esvc1.Status.Host = node2Name
 				esvc1.ResourceVersion = "2"
-				_, err := fakeOVN.fakeClient.EgressServiceClient.K8sV1().EgressServices("testns").Update(context.TODO(), &esvc1, metav1.UpdateOptions{})
+				_, err = fakeOVN.fakeClient.EgressServiceClient.K8sV1().EgressServices("testns").Update(context.TODO(), &esvc1, metav1.UpdateOptions{})
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
 
 				v4lrp1 = egressServiceRouterPolicy("v4lrp1-UUID", "testns/svc1", "10.128.1.5", node2transitIPv4)
@@ -809,6 +857,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 				}
 
 				fakeOVN.startWithDBSetup(dbSetup,
+					egressServiceTestPods(),
 					&corev1.NamespaceList{
 						Items: []corev1.Namespace{
 							namespaceT,
@@ -969,6 +1018,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 				}
 
 				fakeOVN.startWithDBSetup(dbSetup,
+					egressServiceTestPods(),
 					&corev1.NamespaceList{
 						Items: []corev1.Namespace{
 							namespaceT,
@@ -1224,6 +1274,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 				}
 
 				fakeOVN.startWithDBSetup(dbSetup,
+					egressServiceTestPods(),
 					&corev1.NamespaceList{
 						Items: []corev1.Namespace{
 							namespaceT,
@@ -1547,4 +1598,27 @@ func nodeFor(name, ipv4, ipv6, v4subnet, v6subnet, transitIPv4, transitIPv6 stri
 			},
 		},
 	}
+}
+
+// These pods are independent of the EndpointSlices so the controller must check
+// real namespace ownership, including for endpoints added later in a test.
+func egressServiceTestPods() *corev1.PodList {
+	pods := &corev1.PodList{Items: []corev1.Pod{{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "victim", Name: "victim"},
+		Spec:       corev1.PodSpec{NodeName: "node1"},
+		Status:     corev1.PodStatus{PodIPs: []corev1.PodIP{{IP: "10.128.1.99"}, {IP: "fe00:10:128:1::99"}}},
+	}}}
+	for node, addresses := range map[string][]string{
+		"node1": {"10.128.1.5", "10.128.1.6", "10.128.1.7", "10.128.1.27", "10.128.2.50", "fe00:10:128:1::5", "fe00:10:128:1::6"},
+		"node2": {"10.128.2.5", "10.128.2.6", "fe00:10:128:2::5"},
+	} {
+		for i, ip := range addresses {
+			pods.Items = append(pods.Items, corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Namespace: "testns", Name: fmt.Sprintf("%s-pod-%d", node, i)},
+				Spec:       corev1.PodSpec{NodeName: node},
+				Status:     corev1.PodStatus{PodIPs: []corev1.PodIP{{IP: ip}}},
+			})
+		}
+	}
+	return pods
 }

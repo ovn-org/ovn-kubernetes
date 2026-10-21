@@ -79,6 +79,9 @@ type Controller struct {
 	egressServiceSynced cache.InformerSynced
 	egressServiceQueue  workqueue.TypedRateLimitingInterface[string]
 
+	podLister  corelisters.PodLister
+	podsSynced cache.InformerSynced
+
 	serviceLister  corelisters.ServiceLister
 	servicesSynced cache.InformerSynced
 
@@ -119,6 +122,8 @@ type nodeState struct {
 	transitIPV6 net.IP
 }
 
+// NewController registers informers for EgressService reconciliation, including
+// pod ownership changes that can invalidate existing endpoint rules.
 func NewController(
 	netInfo util.NetInfo,
 	controllerName string,
@@ -134,6 +139,7 @@ func NewController(
 	serviceInformer coreinformers.ServiceInformer,
 	endpointSliceInformer discoveryinformers.EndpointSliceInformer,
 	nodeInformer coreinformers.NodeInformer,
+	podInformer coreinformers.PodInformer,
 	zone string) (*Controller, error) {
 	klog.Info("Setting up event handlers for Egress Services")
 
@@ -180,6 +186,14 @@ func NewController(
 		return nil, err
 	}
 
+	c.podLister = podInformer.Lister()
+	c.podsSynced = podInformer.Informer().HasSynced
+	_, err = podInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(
+		util.EgressServicePodEventHandler(c.egressServiceLister, c.egressServiceQueue.Add)))
+	if err != nil {
+		return nil, fmt.Errorf("failed to register EgressService pod event handler: %w", err)
+	}
+
 	c.endpointSliceLister = endpointSliceInformer.Lister()
 	c.endpointSlicesSynced = endpointSliceInformer.Informer().HasSynced
 	_, err = endpointSliceInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(
@@ -211,6 +225,8 @@ func NewController(
 	return c, nil
 }
 
+// Run waits for informer caches, repairs stale EgressService state, and starts
+// reconciliation workers that stop when the controller stop channel closes.
 func (c *Controller) Run(wg *sync.WaitGroup, threadiness int) error {
 	defer utilruntime.HandleCrash()
 
@@ -222,6 +238,10 @@ func (c *Controller) Run(wg *sync.WaitGroup, threadiness int) error {
 
 	if !util.WaitForInformerCacheSyncWithTimeout("egressservices_services", c.stopCh, c.servicesSynced) {
 		return fmt.Errorf("timed out waiting for service caches (for egress services) to sync")
+	}
+
+	if !util.WaitForInformerCacheSyncWithTimeout("egressservices_pods", c.stopCh, c.podsSynced) {
+		return fmt.Errorf("timed out waiting for pod caches (for egress services) to sync")
 	}
 
 	if !util.WaitForInformerCacheSyncWithTimeout("egressservices_endpointslices", c.stopCh, c.endpointSlicesSynced) {

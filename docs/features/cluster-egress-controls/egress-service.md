@@ -10,6 +10,8 @@ By introducing a new CRD `EgressService`, users could request that egress packet
 The CRD is namespace scoped. The name of the EgressService corresponds to the name of a LoadBalancer Service that should be affected by this functionality. Note the mapping of EgressService to Kubernetes Service is 1to1.
 The feature is supported fully by "Local" gateway mode and almost entirely by "Shared" gateway mode (it does not support [Network without LoadBalancer SNAT](#network-without-loadbalancer-snat). In any case the affected traffic will be that which is coming from a pod to a destination outside of the cluster - meaning pod-pod / pod-service / pod-node traffic will not be affected.
 
+EndpointSlice addresses are eligible for egress rules only when they match the status IPs of non-host-network pods in the Service's namespace. EndpointSlices determine which pods receive egress rules; the pods do not need to match the Service selector. This also supports manually managed EndpointSlices and selectorless Services. Each endpoint must specify the pod's assigned node in `nodeName`, except when using `sourceIPBy: Network` in Local gateway mode, where `nodeName` may be omitted. If specified, `nodeName` must always match the pod's assigned node. Addresses without a matching pod, including addresses belonging to another namespace, are ignored.
+
 Announcing the service externally (for ingress traffic) is handled by a LoadBalancer provider (like MetalLB) and not by OVN-Kubernetes as explained later.
 
 Always check the dependencies on the [Requirements page](../requirements.md)
@@ -118,8 +120,11 @@ It is the user's responsibility to make sure that the pods backing an EgressServ
 
 ## Changes in OVN northbound database and iptables
 
-The feature is implemented by reacting to events from `EgressServices`, `Services`, `EndpointSlices` and `Nodes` changes -
+The feature is implemented by reacting to events from `EgressServices`, `Services`, `EndpointSlices`, `Pods` and `Nodes` changes -
 updating OVN's northbound database `Logical_Router_Policy` objects to steer the traffic to the selected node and creating iptables SNAT rules in its `OVN-KUBE-EGRESS-SVC` chain, which is called by the POSTROUTING chain of its nat table.
+
+EndpointSlice addresses are validated against eligible Pod IPs in the Service namespace before rules are created.
+Pod changes trigger reconciliation even when EndpointSlices remain unchanged, removing stale rules when a Pod disappears and adding rules when an eligible Pod becomes available.
 
 We'll see how the related objects are changed once a LoadBalancer is requested to act as an "Egress Service" by creating a corresponding `EgressService` named after it in a Dual-Stack KinD cluster.
 
