@@ -399,8 +399,7 @@ func getIntegrationBridgeOpenFlowCount() (float64, error) {
 }
 
 // updateOvnControllerIntegrationBridgeMetrics refreshes the br-int flow/port
-// metrics. Called from the background collection loop so the ovs-ofctl exec and
-// OVSDB queries never run on the scrape path.
+// metrics using ovs-ofctl and OVSDB queries.
 // Metrics are conditionally updated upon extraction success, otherwise
 // maintained with the previous value, this makes the zero value representative.
 func updateOvnControllerIntegrationBridgeMetrics(ovsDBClient libovsdbclient.Client) {

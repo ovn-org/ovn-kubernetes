@@ -66,8 +66,7 @@ func getOvnNorthdStatusInfo() float64 {
 }
 
 // updateOvnNorthdStatusMetrics refreshes the ovn-northd status and connection
-// metrics by exec-ing ovn-appctl. Called from the background collection loop so
-// these appctls never run on the scrape path.
+// metrics by exec-ing ovn-appctl.
 func updateOvnNorthdStatusMetrics() {
 	metricOvnNorthdStatus.Set(getOvnNorthdStatusInfo())
 	metricOvnNorthdNbConnectionStatus.Set(getOvnNorthdConnectionStatusInfo(nbConnectionStatus))

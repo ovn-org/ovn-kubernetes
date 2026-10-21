@@ -322,10 +322,11 @@ func startOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 
 	if config.Metrics.BindAddress != "" && !combineMetricsEndpoints(runMode) {
 		opts := metrics.MetricServerOptions{
-			BindAddress: config.Metrics.BindAddress,
-			CertFile:    config.Metrics.NodeServerCert,
-			KeyFile:     config.Metrics.NodeServerPrivKey,
-			EnablePprof: config.Metrics.EnablePprof,
+			BindAddress:        config.Metrics.BindAddress,
+			CollectionInterval: time.Duration(config.Metrics.CollectionInterval) * time.Second,
+			CertFile:           config.Metrics.NodeServerCert,
+			KeyFile:            config.Metrics.NodeServerPrivKey,
+			EnablePprof:        config.Metrics.EnablePprof,
 			// Use default registry so existing metric registrations keep working.
 			Registerer:      prometheus.DefaultRegisterer,
 			ApplyTLSOptions: config.TLS.ApplyOptions,

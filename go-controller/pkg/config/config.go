@@ -168,7 +168,9 @@ var (
 	}
 
 	// Metrics holds Prometheus metrics-related parameters.
-	Metrics MetricsConfig
+	Metrics = MetricsConfig{
+		CollectionInterval: int(DefaultMetricsCollectionInterval / time.Second),
+	}
 
 	// TLS holds TLS-related configuration parameters.
 	TLS TLSConfig
@@ -484,9 +486,8 @@ type KubernetesConfig struct {
 	DNSServiceName      string `gcfg:"dns-service-name"`
 }
 
-// DefaultMetricsCollectionInterval is the default interval, in seconds, at which
-// OVS/OVN metric values are extracted into the registry when
-// MetricsConfig.CollectionInterval is unset or non-positive.
+// DefaultMetricsCollectionInterval is used when the metrics collection interval
+// is not configured or is negative.
 const DefaultMetricsCollectionInterval = 30 * time.Second
 
 // MetricsConfig holds Prometheus metrics-related parameters.
@@ -502,8 +503,8 @@ type MetricsConfig struct {
 	EnableConfigDuration bool `gcfg:"enable-config-duration"`
 	EnableScaleMetrics   bool `gcfg:"enable-scale-metrics"`
 	// CollectionInterval is how often (in seconds) OVS/OVN metric values are
-	// extracted into the registry, independent of Prometheus scrapes. A
-	// non-positive value uses DefaultMetricsCollectionInterval.
+	// extracted into the registry. Zero collects on demand during each scrape.
+	// A negative value uses DefaultMetricsCollectionInterval.
 	CollectionInterval int `gcfg:"collection-interval"`
 }
 
@@ -1593,8 +1594,9 @@ var MetricsFlags = []cli.Flag{
 	&cli.IntFlag{
 		Name: "metrics-collection-interval",
 		Usage: fmt.Sprintf("Interval in seconds at which OVS/OVN metric values are extracted "+
-			"into the registry, independent of Prometheus scrapes. Non-positive uses the "+
+			"into the registry. Zero collects on demand during each scrape. Negative uses the "+
 			"default (%fs).", DefaultMetricsCollectionInterval.Seconds()),
+		Value:       Metrics.CollectionInterval,
 		Destination: &cliConfig.Metrics.CollectionInterval,
 	},
 }
@@ -2813,6 +2815,7 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 		CNI:                  savedCNI,
 		OVNKubernetesFeature: savedOVNKubernetesFeature,
 		Kubernetes:           savedKubernetes,
+		Metrics:              savedMetrics,
 		OvnNorth: legacyOvnNorthConfig{
 			OvnDBConfig:                  savedOvnNorth,
 			EgressIPHealthCheckTLSConfig: savedEgressIPHealthCheckTLS,
@@ -2910,6 +2913,10 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 	// legacy Kubernetes metrics options
 	if err = buildMetricsConfig(&cliConfig, &cfg); err != nil {
 		return "", err
+	}
+	// An explicitly set default must override the file too, including on-demand mode.
+	if ctx.IsSet("metrics-collection-interval") {
+		Metrics.CollectionInterval = ctx.Int("metrics-collection-interval")
 	}
 
 	if err = buildTLSConfig(&cliConfig, &cfg); err != nil {

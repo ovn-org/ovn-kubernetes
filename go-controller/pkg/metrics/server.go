@@ -31,10 +31,9 @@ type MetricServerOptions struct {
 	// Server configuration
 	BindAddress string
 
-	// CollectionInterval is how often the background loop extracts OVS/OVN metric
-	// values into the registry. Scrapes only serialize the registry, so scrape
-	// latency is independent of extraction latency. Non-positive falls back to
-	// defaultCollectionInterval.
+	// CollectionInterval controls OVS/OVN metric extraction. Positive values use
+	// periodic collection, zero collects on demand, and negative values use the
+	// default interval.
 	CollectionInterval time.Duration
 
 	// TLS configuration
@@ -92,9 +91,15 @@ func NewMetricServer(opts MetricServerOptions) *MetricServer {
 	tg := prometheus.ToTransactionalGatherer(server.registerer.(prometheus.Gatherer))
 	metricsHandler := promhttp.HandlerForTransactional(tg, promhttp.HandlerOpts{})
 
-	// The scrape path only serializes the registry. Metric values are refreshed
-	// out of band by runCollectionLoop, so scrape latency is independent of how
-	// expensive extraction is.
+	if opts.CollectionInterval == 0 {
+		next := metricsHandler
+		metricsHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			klog.V(5).Infof("Metrics scrape requested for collecting metrics on-demand")
+			server.collect()
+			next.ServeHTTP(w, r)
+		})
+	}
+
 	server.mux.Handle("/metrics", promhttp.InstrumentMetricHandler(
 		server.registerer,
 		metricsHandler,
@@ -188,8 +193,8 @@ func (s *MetricServer) updateOvnDBMetrics() {
 
 // collect refreshes all enabled OVS/OVN metric values in the registry. It execs
 // ovs-appctl/ovn-appctl subprocesses (each bounded by metricsAppctlTimeout) and
-// queries OVSDB. It runs off the scrape path, driven by runCollectionLoop, so a
-// slow daemon never blocks a scrape. A panic in any metric path only fails the
+// queries OVSDB. It runs either in runCollectionLoop or during a scrape when
+// CollectionInterval is zero. A panic in any metric path only fails the
 // current cycle rather than crashing the process.
 func (s *MetricServer) collect() {
 	defer func() {
@@ -212,10 +217,10 @@ func (s *MetricServer) collect() {
 	}
 }
 
-// resolveCollectionInterval clamps a non-positive configured interval to
-// defaultCollectionInterval so a missing or invalid flag still ticks.
+// resolveCollectionInterval preserves zero for on-demand collection and falls
+// back to defaultCollectionInterval for negative intervals.
 func resolveCollectionInterval(d time.Duration) time.Duration {
-	if d <= 0 {
+	if d < 0 {
 		return defaultCollectionInterval
 	}
 	return d
@@ -229,6 +234,9 @@ func resolveCollectionInterval(d time.Duration) time.Duration {
 // a stalled extraction operation to finish.
 func (s *MetricServer) runCollectionLoop(stopChan <-chan struct{}) {
 	interval := resolveCollectionInterval(s.opts.CollectionInterval)
+	if interval == 0 {
+		return
+	}
 	klog.Infof("MetricServer collection loop running every %s", interval)
 
 	s.collect()
@@ -241,6 +249,7 @@ func (s *MetricServer) runCollectionLoop(stopChan <-chan struct{}) {
 			collectDone := make(chan struct{})
 			go func() {
 				defer close(collectDone)
+				klog.V(5).Infof("Collecting metrics on scheduled interval")
 				s.collect()
 			}()
 			// Wait for this cycle to complete or shutdown to signal. If shutdown

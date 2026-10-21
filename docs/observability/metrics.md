@@ -19,6 +19,30 @@ OVN and OVS coverage metrics are exported as Prometheus gauges even when the
 underlying daemon value is cumulative. A daemon restart can reset these
 values.
 
+## OVN/OVS collection mode
+
+The `--metrics-collection-interval` option controls when OVN and OVS metric
+values are refreshed. It is specified in seconds and defaults to `30`.
+
+- A positive value collects metrics in the background at the configured interval.
+  Scrapes return the latest stored values without waiting for OVN/OVS commands.
+- `0` collects metrics on demand during each `/metrics` scrape, before returning
+  the response. No background collection runs in this mode. Concurrent scrapes
+  are serialized through collection and response generation.
+- A negative value falls back to the default interval of 30 seconds.
+
+On-demand collection provides fresh values and avoids periodic extraction when
+metrics are not scraped. Scrape duration includes the time spent running OVN/OVS
+commands, so slow commands can cause Prometheus scrape timeouts. Background
+collection avoids that delay, but values may be stale between cycles and a scrape
+can observe an update in progress.
+
+The equivalent configuration file option is `collection-interval` in the
+`[metrics]` section. An explicit command-line value takes precedence over the
+configuration file. The standalone `ovn-kube-util ovs-exporter` accepts the same
+`--metrics-collection-interval` option, but does not read the `[metrics]`
+configuration section.
+
 ## Change log
 This list is to help notify if there are additions, changes or removals to metrics. Latest changes are at the top of this list.
 

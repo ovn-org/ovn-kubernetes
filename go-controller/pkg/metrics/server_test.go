@@ -15,6 +15,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/go-cmp/cmp"
@@ -46,10 +47,15 @@ var _ = Describe("MetricServer", func() {
 	t := newMetricsTestDriver()
 
 	DescribeTableSubtree("",
-		func(desc string, tc metricsTestCase, registerer prometheus.Registerer) {
+		func(desc string, tc metricsTestCase, registerer prometheus.Registerer, interval time.Duration) {
 			BeforeEach(func() {
+				t.opts.CollectionInterval = interval
 				t.opts.Registerer = registerer
 				t.opts.EnableOVSMetrics = tc.enableOVS
+				if tc.enableOVS {
+					// Each case registers OVS metrics in a fresh registry.
+					registerOvsMetricsOnce = sync.Once{}
+				}
 				t.opts.EnableOVNDBMetrics = tc.enableOVNDB
 				t.opts.EnableOVNControllerMetrics = tc.enableOVNController
 				t.opts.EnableOVNNorthdMetrics = tc.enableOVNNorthd
@@ -116,11 +122,15 @@ var _ = Describe("MetricServer", func() {
 			})
 		},
 
-		Entry("", "OVS", OVSMetricsTestCase, nil),
-		Entry("", "OVN DB", OVNDBMetricsTestCase, nil),
-		Entry("", "OVN Controller", OVNControllerMetricsTestCase, nil),
-		Entry("", "OVN Northd", OVNNorthdMetricsTestCase, nil),
-		Entry("", "default registry", DefaultMetricsTestCase, prometheus.DefaultRegisterer),
+		Entry("periodic", "OVS", OVSMetricsTestCase, nil, defaultCollectionInterval),
+		Entry("on-demand", "OVS", OVSMetricsTestCase, nil, time.Duration(0)),
+		Entry("periodic", "OVN DB", OVNDBMetricsTestCase, nil, defaultCollectionInterval),
+		Entry("on-demand", "OVN DB", OVNDBMetricsTestCase, nil, time.Duration(0)),
+		Entry("periodic", "OVN Controller", OVNControllerMetricsTestCase, nil, defaultCollectionInterval),
+		Entry("on-demand", "OVN Controller", OVNControllerMetricsTestCase, nil, time.Duration(0)),
+		Entry("periodic", "OVN Northd", OVNNorthdMetricsTestCase, nil, defaultCollectionInterval),
+		Entry("on-demand", "OVN Northd", OVNNorthdMetricsTestCase, nil, time.Duration(0)),
+		Entry("", "default registry", DefaultMetricsTestCase, prometheus.DefaultRegisterer, defaultCollectionInterval),
 	)
 
 	When("EnablePprof", func() {
@@ -334,6 +344,7 @@ var _ = Describe("scrape decoupled from extraction", func() {
 		util.RunCmdExecRunner = runner
 
 		opts := MetricServerOptions{
+			CollectionInterval:         defaultCollectionInterval,
 			EnableOVNControllerMetrics: true,
 			OVSDBClient:                ovsClient,
 			Registerer:                 prometheus.NewRegistry(),
@@ -378,8 +389,10 @@ var _ = Describe("scrape decoupled from extraction", func() {
 })
 
 var _ = Describe("resolveCollectionInterval", func() {
-	It("clamps non-positive intervals to the default", func() {
-		Expect(resolveCollectionInterval(0)).To(Equal(defaultCollectionInterval))
+	It("preserves zero for on-demand collection", func() {
+		Expect(resolveCollectionInterval(0)).To(BeZero())
+	})
+	It("clamps negative intervals to the default", func() {
 		Expect(resolveCollectionInterval(-5 * time.Second)).To(Equal(defaultCollectionInterval))
 	})
 	It("keeps a positive interval as configured", func() {
@@ -403,7 +416,8 @@ func newMetricsTestDriver() *metricsTestDriver {
 		savedRunner := util.RunCmdExecRunner
 
 		t.opts = MetricServerOptions{
-			BindAddress: fmt.Sprintf("127.0.0.1:%d", getFreePort()),
+			BindAddress:        fmt.Sprintf("127.0.0.1:%d", getFreePort()),
+			CollectionInterval: defaultCollectionInterval,
 		}
 
 		setupAppFs()
