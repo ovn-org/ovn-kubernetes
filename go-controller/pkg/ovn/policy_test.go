@@ -33,6 +33,7 @@ import (
 	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	libovsdbutil "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/nbdb"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/observability"
 	addressset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/addresssetmanager"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/retry"
@@ -652,6 +653,45 @@ func getTestPodAdvanced(namespace, nodeName, podIP string, hostNetwork bool) tes
 	return tPod
 }
 
+// getSamples returns all the Sample rows present in the northbound database.
+func getSamples(nbClient libovsdbclient.Client) ([]nbdb.Sample, error) {
+	samples := []nbdb.Sample{}
+	err := nbClient.List(context.Background(), &samples)
+	return samples, err
+}
+
+// getACLsWithSamples returns the ACLs that reference a Sample.
+func getACLsWithSamples(nbClient libovsdbclient.Client) ([]nbdb.ACL, error) {
+	return filterACLs(nbClient, func(acl *nbdb.ACL) bool {
+		return acl.SampleNew != nil || acl.SampleEst != nil
+	})
+}
+
+// getNetpolACLs returns the ACLs owned by the network policy handlers.
+func getNetpolACLs(nbClient libovsdbclient.Client) ([]nbdb.ACL, error) {
+	return filterACLs(nbClient, func(acl *nbdb.ACL) bool {
+		switch acl.ExternalIDs[libovsdbops.OwnerTypeKey.String()] {
+		case libovsdbops.NetworkPolicyOwnerType, libovsdbops.NetpolNamespaceOwnerType, libovsdbops.NetpolNodeOwnerType:
+			return true
+		}
+		return false
+	})
+}
+
+func filterACLs(nbClient libovsdbclient.Client, keep func(*nbdb.ACL) bool) ([]nbdb.ACL, error) {
+	acls := []nbdb.ACL{}
+	if err := nbClient.List(context.Background(), &acls); err != nil {
+		return nil, err
+	}
+	filtered := []nbdb.ACL{}
+	for _, acl := range acls {
+		if keep(&acl) {
+			filtered = append(filtered, acl)
+		}
+	}
+	return filtered, nil
+}
+
 var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 	const (
 		namespaceName1        = "namespace1"
@@ -737,6 +777,13 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 		)
 		for _, testPod := range pods {
 			testPod.populateLogicalSwitchCache(fakeOvn)
+		}
+		if config.OVNKubernetesFeature.EnableObservability {
+			// The observability manager is what makes the controller attach Sample
+			// references to the ACLs it creates, see BaseNetworkController.GetSamplingConfig.
+			// It has to be set before the network policy handler runs.
+			fakeOvn.controller.observManager = observability.NewManager(fakeOvn.nbClient)
+			gomega.Expect(fakeOvn.controller.observManager.Init()).To(gomega.Succeed())
 		}
 		var err error
 		if namespaces != nil {
@@ -1259,6 +1306,52 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 
 				expectedData = getUpdatedInitialDB([]testPod{nPodTest})
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedData))
+
+				return nil
+			}
+
+			gomega.Expect(app.Run([]string{app.Name})).To(gomega.Succeed())
+		})
+
+		ginkgo.It("correctly deletes observability Samples when a networkpolicy is deleted", func() {
+			app.Action = func(*cli.Context) error {
+				config.OVNKubernetesFeature.EnableObservability = true
+				namespace1 := *ovntest.NewNamespace(namespaceName1)
+				nPodTest := getTestPod(namespace1.Name, nodeName)
+				networkPolicy := getPortNetworkPolicy(netPolicyName1, namespace1.Name, labelName, labelVal, portNum)
+				startOvn(initialDB, []corev1.Namespace{namespace1}, []knet.NetworkPolicy{*networkPolicy},
+					[]testPod{nPodTest}, map[string]string{labelName: labelVal})
+
+				ginkgo.By("Check the network policy ACLs got Sample references")
+				// Every sampled ACL belongs to the network policy: the hairpinning
+				// ACLs of the initial db have the NetpolDefault owner type, which
+				// maps to no sampling feature.
+				gomega.Eventually(func() ([]nbdb.ACL, error) {
+					return getACLsWithSamples(fakeOvn.nbClient)
+				}, 5*time.Second).ShouldNot(gomega.BeEmpty())
+				gomega.Eventually(func() ([]nbdb.Sample, error) {
+					return getSamples(fakeOvn.nbClient)
+				}, 5*time.Second).ShouldNot(gomega.BeEmpty())
+
+				ginkgo.By("Deleting the network policy")
+				err := fakeOvn.fakeClient.KubeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).
+					Delete(context.TODO(), networkPolicy.Name, metav1.DeleteOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				ginkgo.By("Check the Samples are deleted along with the ACLs")
+				// Sample is not a root table and ACL references it with a strong
+				// reference, so deleting the ACLs must leave no Sample behind.
+				gomega.Eventually(func() ([]nbdb.ACL, error) {
+					return getACLsWithSamples(fakeOvn.nbClient)
+				}, 5*time.Second).Should(gomega.BeEmpty())
+				gomega.Eventually(func() ([]nbdb.Sample, error) {
+					return getSamples(fakeOvn.nbClient)
+				}, 5*time.Second).Should(gomega.BeEmpty())
+				// The ACLs themselves are gone too, so that an ACL that lost only its
+				// Sample reference cannot pass the assertions above.
+				gomega.Eventually(func() ([]nbdb.ACL, error) {
+					return getNetpolACLs(fakeOvn.nbClient)
+				}, 5*time.Second).Should(gomega.BeEmpty())
 
 				return nil
 			}

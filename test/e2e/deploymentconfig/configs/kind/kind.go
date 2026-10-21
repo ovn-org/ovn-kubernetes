@@ -119,6 +119,10 @@ func (k *kind) IsConfigurationEnabled(config api.Config) bool {
 		// Currently enabled by default for Kind cluster. Could use
 		// an ENV variable check instead if we need variability later.
 		return true
+	case api.ObservabilityConfig:
+		return os.Getenv("OVN_OBSERV_ENABLE") == "true"
+	case api.NetworkSegmentationConfig:
+		return os.Getenv("ENABLE_NETWORK_SEGMENTATION") == "true"
 	default:
 		return false
 	}

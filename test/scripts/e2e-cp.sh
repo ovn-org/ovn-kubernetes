@@ -195,6 +195,12 @@ if [ "$ENABLE_EVPN" != true ]; then
   skip_label "Feature:EVPN"
 fi
 
+# Observability (sampling) specs need a cluster deployed with
+# --observability (OVN_OBSERV_ENABLE=true).
+if [ "$OVN_OBSERV_ENABLE" != true ]; then
+  skip_label "Feature:Observability"
+fi
+
 if [ "$ENABLE_NO_OVERLAY" != true ]; then
   skip_label "Feature:NoOverlay"
 fi

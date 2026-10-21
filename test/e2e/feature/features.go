@@ -45,6 +45,7 @@ var (
 	Unidle                        = New("Unidle")
 	NetworkQos                    = New("NetworkQos")
 	NetworkConnect                = New("NetworkConnect")
+	Observability                 = New("Observability")
 	Metrics                       = New("Metrics")
 	MACSecurity                   = New("MACSecurity")
 )
