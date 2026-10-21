@@ -1,0 +1,21 @@
+name: Prepare Go module cache
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    name: Download Go dependencies
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+    - name: Check out code
+      uses: actions/checkout@v6
+
+    - name: Populate module cache
+      uses: ./.github/actions/setup-go
+      with:
+        populate-cache: 'true'
