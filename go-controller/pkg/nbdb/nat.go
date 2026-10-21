@@ -34,8 +34,8 @@ type NAT struct {
 	LogicalPort       *string           `ovsdb:"logical_port"`
 	Match             string            `ovsdb:"match"`
 	Options           map[string]string `ovsdb:"options"`
-	Priority          int               `ovsdb:"priority"`
-	Type              NATType           `ovsdb:"type"`
+	Priority          int               `ovsdb:"priority" validate:"min=0,max=32767"`
+	Type              NATType           `ovsdb:"type" validate:"oneof='dnat' 'snat' 'dnat_and_snat'"`
 }
 
 func (a *NAT) GetUUID() string {

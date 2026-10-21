@@ -30,7 +30,7 @@ type LoadBalancer struct {
 	LsDatapathGroup *string               `ovsdb:"ls_datapath_group"`
 	Name            string                `ovsdb:"name"`
 	Options         map[string]string     `ovsdb:"options"`
-	Protocol        *LoadBalancerProtocol `ovsdb:"protocol"`
+	Protocol        *LoadBalancerProtocol `ovsdb:"protocol" validate:"omitempty,oneof='tcp' 'udp' 'sctp'"`
 	Vips            map[string]string     `ovsdb:"vips"`
 }
 

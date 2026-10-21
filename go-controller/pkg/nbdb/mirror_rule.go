@@ -22,9 +22,9 @@ var (
 // MirrorRule defines an object in Mirror_Rule table
 type MirrorRule struct {
 	UUID     string           `ovsdb:"_uuid"`
-	Action   MirrorRuleAction `ovsdb:"action"`
+	Action   MirrorRuleAction `ovsdb:"action" validate:"oneof='mirror' 'skip'"`
 	Match    string           `ovsdb:"match"`
-	Priority int              `ovsdb:"priority"`
+	Priority int              `ovsdb:"priority" validate:"min=0,max=32767"`
 }
 
 func (a *MirrorRule) GetUUID() string {

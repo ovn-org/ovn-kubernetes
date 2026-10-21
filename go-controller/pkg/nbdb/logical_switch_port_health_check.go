@@ -29,10 +29,10 @@ type LogicalSwitchPortHealthCheck struct {
 	UUID     string                               `ovsdb:"_uuid"`
 	Address  string                               `ovsdb:"address"`
 	Options  map[string]string                    `ovsdb:"options"`
-	Port     int                                  `ovsdb:"port"`
-	Protocol LogicalSwitchPortHealthCheckProtocol `ovsdb:"protocol"`
+	Port     int                                  `ovsdb:"port" validate:"min=0,max=65535"`
+	Protocol LogicalSwitchPortHealthCheckProtocol `ovsdb:"protocol" validate:"oneof='tcp' 'udp' 'icmp'"`
 	SrcIP    string                               `ovsdb:"src_ip"`
-	Status   *LogicalSwitchPortHealthCheckStatus  `ovsdb:"status"`
+	Status   *LogicalSwitchPortHealthCheckStatus  `ovsdb:"status" validate:"omitempty,oneof='online' 'offline' 'error'"`
 }
 
 func (a *LogicalSwitchPortHealthCheck) GetUUID() string {

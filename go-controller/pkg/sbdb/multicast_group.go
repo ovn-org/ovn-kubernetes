@@ -16,7 +16,7 @@ type MulticastGroup struct {
 	Datapath  string   `ovsdb:"datapath"`
 	Name      string   `ovsdb:"name"`
 	Ports     []string `ovsdb:"ports"`
-	TunnelKey int      `ovsdb:"tunnel_key"`
+	TunnelKey int      `ovsdb:"tunnel_key" validate:"min=32768,max=65535"`
 }
 
 func (a *MulticastGroup) GetUUID() string {

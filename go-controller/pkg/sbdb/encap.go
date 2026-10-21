@@ -25,7 +25,7 @@ type Encap struct {
 	ChassisName string            `ovsdb:"chassis_name"`
 	IP          string            `ovsdb:"ip"`
 	Options     map[string]string `ovsdb:"options"`
-	Type        EncapType         `ovsdb:"type"`
+	Type        EncapType         `ovsdb:"type" validate:"oneof='geneve' 'vxlan'"`
 }
 
 func (a *Encap) GetUUID() string {

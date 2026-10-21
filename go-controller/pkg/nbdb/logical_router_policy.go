@@ -24,7 +24,7 @@ var (
 // LogicalRouterPolicy defines an object in Logical_Router_Policy table
 type LogicalRouterPolicy struct {
 	UUID        string                    `ovsdb:"_uuid"`
-	Action      LogicalRouterPolicyAction `ovsdb:"action"`
+	Action      LogicalRouterPolicyAction `ovsdb:"action" validate:"oneof='allow' 'drop' 'reroute' 'jump'"`
 	BFDSessions []string                  `ovsdb:"bfd_sessions"`
 	Chain       *string                   `ovsdb:"chain"`
 	ExternalIDs map[string]string         `ovsdb:"external_ids"`
@@ -34,7 +34,7 @@ type LogicalRouterPolicy struct {
 	Nexthops    []string                  `ovsdb:"nexthops"`
 	Options     map[string]string         `ovsdb:"options"`
 	OutputPort  *string                   `ovsdb:"output_port"`
-	Priority    int                       `ovsdb:"priority"`
+	Priority    int                       `ovsdb:"priority" validate:"min=0,max=32767"`
 }
 
 func (a *LogicalRouterPolicy) GetUUID() string {

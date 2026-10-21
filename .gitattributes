@@ -1,0 +1,2 @@
+# Preserve third-party license files exactly as distributed upstream.
+LICENSES/** -text

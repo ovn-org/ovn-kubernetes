@@ -14,7 +14,7 @@ const SampleTable = "Sample"
 type Sample struct {
 	UUID       string   `ovsdb:"_uuid"`
 	Collectors []string `ovsdb:"collectors"`
-	Metadata   int      `ovsdb:"metadata"`
+	Metadata   int      `ovsdb:"metadata" validate:"min=1,max=4294967295"`
 }
 
 func (a *Sample) GetUUID() string {

@@ -15,7 +15,7 @@ type NetworkFunction struct {
 	UUID        string            `ovsdb:"_uuid"`
 	ExternalIDs map[string]string `ovsdb:"external_ids"`
 	HealthCheck *string           `ovsdb:"health_check"`
-	ID          int               `ovsdb:"id"`
+	ID          int               `ovsdb:"id" validate:"min=1,max=255"`
 	Inport      string            `ovsdb:"inport"`
 	Name        string            `ovsdb:"name"`
 	Outport     *string           `ovsdb:"outport"`

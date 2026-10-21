@@ -26,9 +26,9 @@ var (
 type NetworkFunctionGroup struct {
 	UUID                  string                        `ovsdb:"_uuid"`
 	ExternalIDs           map[string]string             `ovsdb:"external_ids"`
-	Fallback              *NetworkFunctionGroupFallback `ovsdb:"fallback"`
-	ID                    int                           `ovsdb:"id"`
-	Mode                  NetworkFunctionGroupMode      `ovsdb:"mode"`
+	Fallback              *NetworkFunctionGroupFallback `ovsdb:"fallback" validate:"omitempty,oneof='fail-open' 'fail-close'"`
+	ID                    int                           `ovsdb:"id" validate:"min=1,max=255"`
+	Mode                  NetworkFunctionGroupMode      `ovsdb:"mode" validate:"oneof='inline' 'vtap'"`
 	Name                  string                        `ovsdb:"name"`
 	NetworkFunction       []string                      `ovsdb:"network_function"`
 	NetworkFunctionActive *string                       `ovsdb:"network_function_active"`

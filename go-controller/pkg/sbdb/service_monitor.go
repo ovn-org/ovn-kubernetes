@@ -39,13 +39,13 @@ type ServiceMonitor struct {
 	LogicalPort      string                  `ovsdb:"logical_port"`
 	MAC              string                  `ovsdb:"mac"`
 	Options          map[string]string       `ovsdb:"options"`
-	Port             int                     `ovsdb:"port"`
-	Protocol         *ServiceMonitorProtocol `ovsdb:"protocol"`
+	Port             int                     `ovsdb:"port" validate:"min=0,max=65535"`
+	Protocol         *ServiceMonitorProtocol `ovsdb:"protocol" validate:"omitempty,oneof='tcp' 'udp' 'icmp'"`
 	Remote           bool                    `ovsdb:"remote"`
 	SrcIP            string                  `ovsdb:"src_ip"`
 	SrcMAC           string                  `ovsdb:"src_mac"`
-	Status           *ServiceMonitorStatus   `ovsdb:"status"`
-	Type             *ServiceMonitorType     `ovsdb:"type"`
+	Status           *ServiceMonitorStatus   `ovsdb:"status" validate:"omitempty,oneof='online' 'offline' 'error'"`
+	Type             *ServiceMonitorType     `ovsdb:"type" validate:"omitempty,oneof='load-balancer' 'network-function' 'logical-switch-port'"`
 }
 
 func (a *ServiceMonitor) GetUUID() string {
