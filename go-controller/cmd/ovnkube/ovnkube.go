@@ -436,7 +436,7 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 	startTime := time.Now()
 
 	if runMode.cleanupNode {
-		return ovnnode.CleanupClusterNode(runMode.identity)
+		return ovnnode.CleanupClusterNode(ctx, runMode.identity)
 	}
 
 	watchFactory, err := newWatchFactory(runMode, ovnClientset)

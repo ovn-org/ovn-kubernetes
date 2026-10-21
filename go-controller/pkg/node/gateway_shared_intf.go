@@ -28,6 +28,7 @@ import (
 	"sigs.k8s.io/knftables"
 
 	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
+	"github.com/ovn-kubernetes/libovsdb/ovsdb"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
@@ -1854,7 +1855,7 @@ func newNodePortWatcher(
 	return npw, nil
 }
 
-func cleanupSharedGateway(ovsClient libovsdbclient.Client) error {
+func cleanupSharedGateway(ctx context.Context, ovsClient libovsdbclient.Client) error {
 	if (config.IsModeDPU() || config.IsModeFull()) && ovsClient != nil {
 		// NicToBridge() may be created before-hand, only delete the patch port here
 		ports, err := ovsops.FindOVSPortsWithPredicate(ovsClient, func(p *vswitchd.Port) bool {
@@ -1864,17 +1865,33 @@ func cleanupSharedGateway(ovsClient libovsdbclient.Client) error {
 		if err != nil {
 			return fmt.Errorf("failed to list ovn-localnet-port ports: %w", err)
 		}
+		var ops []ovsdb.Operation
+		var cleanupErrors []error
 		for _, port := range ports {
 			bridge, err := ovsops.GetPortBridge(ovsClient, port.Name)
 			if err != nil {
 				if errors.Is(err, libovsdbclient.ErrNotFound) {
 					continue
 				}
-				return fmt.Errorf("failed to find bridge for port %s: %w", port.Name, err)
+				cleanupErrors = append(cleanupErrors, fmt.Errorf("failed to find bridge for port %s: %w", port.Name, err))
+				continue
 			}
-			if err := ovsops.DeletePortWithInterfaces(ovsClient, bridge.Name, port.Name); err != nil {
-				return fmt.Errorf("failed to delete port %s: %w", port.Name, err)
+			portOps, err := ovsops.DeletePortWithInterfacesOps(ovsClient, nil, port, bridge.Name)
+			if err != nil {
+				cleanupErrors = append(cleanupErrors, fmt.Errorf("failed to build operations to delete port %s: %w", port.Name, err))
+				continue
 			}
+			ops = append(ops, portOps...)
+		}
+		// Removing the OVSDB rows does not mean ovs-vswitchd has removed the
+		// patch ports yet. Wait before restoring NORMAL flows below so those
+		// flows cannot forward traffic through the old OVN patch ports.
+		// This runs during node cleanup, outside the CNI ADD path.
+		if err := ovsops.TransactAndCheckAndWaitForVSwitchd(ctx, ovsClient, ops); err != nil {
+			cleanupErrors = append(cleanupErrors, fmt.Errorf("failed to delete ovn-localnet-port ports: %w", err))
+		}
+		if err := errors.Join(cleanupErrors...); err != nil {
+			return err
 		}
 
 		// Get the OVS bridge name from ovn-bridge-mappings
