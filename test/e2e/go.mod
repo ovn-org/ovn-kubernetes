@@ -176,7 +176,7 @@ require (
 	github.com/onsi/ginkgo v1.16.5
 	github.com/openshift-kni/k8sreporter v1.0.6
 	github.com/ovn-kubernetes/ovn-kubernetes/go-controller v1.0.0
-	go.universe.tf/metallb v0.0.0-00010101000000-000000000000
+	go.universe.tf/metallb v0.14.9
 	golang.org/x/crypto v0.54.0
 	google.golang.org/grpc v1.84.0
 	gopkg.in/yaml.v2 v2.4.0
@@ -192,5 +192,4 @@ replace (
 	github.com/coreos/go-iptables => github.com/trozet/go-iptables v0.0.0-20240328221912-077e672b3808
 	github.com/docker/docker => github.com/docker/docker v26.1.5+incompatible
 	github.com/ovn-kubernetes/ovn-kubernetes/go-controller => ../../go-controller
-	go.universe.tf/metallb => github.com/metallb/metallb v0.14.9
 )
