@@ -752,8 +752,9 @@ func (c *Controller) ensureVXLAN(vxlanName string, bridgeName string, srcIP net.
 // discoverUnmanagedVTEPIPs resolves the IPs to use for an unmanaged VTEP.
 // For each IP family present in the VTEP's CIDRs, it checks the node's VTEP annotation
 // for a previously selected IP. If that IP is still present in the address manager and
-// within the VTEP's CIDRs, it is reused for stability. Otherwise, a new IP is discovered
-// from the address manager and the annotation is updated.
+// within the VTEP's CIDRs, it is reused for stability unless an eligible primary
+// address is preferred. Otherwise, a new IP is discovered from the address manager
+// and the annotation is updated.
 func (c *Controller) discoverUnmanagedVTEPIPs(vtep *vtepv1.VTEP) (net.IP, net.IP, error) {
 	// fetch the annotated VTEP IPs
 	vtepsAnnotation, err := c.getVTEPsAnnotation()
@@ -774,7 +775,7 @@ func (c *Controller) discoverUnmanagedVTEPIPs(vtep *vtepv1.VTEP) (net.IP, net.IP
 	}
 	v4VTEPCIDRS, v6VTEPCIDRS := util.SplitIPNetsByIPFamily(vtepIPNets)
 
-	// reuse the annotated IP if still valid otherwise select a new one,
+	// Prefer an eligible primary address; otherwise reuse a valid annotated IP,
 	// resolving each IP family independently
 	v4SelectedIP, err := c.resolveVTEPIP(netlink.FAMILY_V4, v4VTEPCIDRS, v4NodeIPs, v4AnnotatedIP)
 	if err != nil {
@@ -797,24 +798,46 @@ func (c *Controller) discoverUnmanagedVTEPIPs(vtep *vtepv1.VTEP) (net.IP, net.IP
 
 // resolveVTEPIP returns the IP to use for a given family. If the VTEP IP
 // is still present among the node IPs and within the VTEP's CIDRs, it is
-// returned. Otherwise, a new IP is selected from matching node IPs.
+// returned, unless the node's primary address is a better candidate that
+// was not available when the VTEP IP was chosen. Otherwise, a new IP is
+// selected from matching node IPs.
 func (c *Controller) resolveVTEPIP(family int, vtepCIDRs []*net.IPNet, nodeIPs []net.IP, vtepIP net.IP) (net.IP, error) {
 	if len(vtepCIDRs) == 0 {
 		return nil, nil
 	}
 
-	equalsVTEPIP := func(ip net.IP) bool { return ip.Equal(vtepIP) }
-	if vtepIP != nil && slices.ContainsFunc(nodeIPs, equalsVTEPIP) && util.IsIPContainedInAnyCIDR(vtepIP, vtepCIDRs...) {
-		return vtepIP, nil
-	}
-
-	// Select a new IP from node addresses matching the CIDRs.
 	var matches []net.IP
 	for _, nodeIP := range nodeIPs {
 		if util.IsIPContainedInAnyCIDR(nodeIP, vtepCIDRs...) {
 			matches = append(matches, nodeIP)
 		}
 	}
+
+	equalsVTEPIP := func(ip net.IP) bool { return ip.Equal(vtepIP) }
+	if vtepIP != nil && slices.ContainsFunc(matches, equalsVTEPIP) {
+		// A VIP may have been annotated before the primary address was
+		// available (or before this preference existed); converge to the
+		// primary address once it is a candidate instead of staying on the
+		// VIP until it moves away.
+		primary := c.nodePrimaryIP(family)
+		if primary == nil || primary.Equal(vtepIP) ||
+			!slices.ContainsFunc(matches, func(ip net.IP) bool { return ip.Equal(primary) }) {
+			return vtepIP, nil
+		}
+		// Only move off the retained address if the selection actually lands
+		// on the primary. If the primary is filtered out (e.g. a stale
+		// annotation pointing at an address that is now secondary), keep the
+		// current VTEP IP rather than flapping to another candidate.
+		selected, err := c.pickVTEPIP(matches, family)
+		if err != nil {
+			return nil, err
+		}
+		if selected != nil && selected.Equal(primary) {
+			return selected, nil
+		}
+		return vtepIP, nil
+	}
+
 	return c.pickVTEPIP(matches, family)
 }
 
@@ -893,7 +916,8 @@ func (c *Controller) setVTEPAnnotation(vtepName string, ipv4, ipv6 net.IP) (err 
 // pickVTEPIP selects a single VTEP IP from the candidates for the given address family.
 // If there's exactly one match, it's used directly. Multiple matches trigger a netlink
 // lookup to filter out keepalived VIPs and secondary addresses (which can float between
-// nodes). If ambiguity remains, the lexicographically lowest IP is chosen for determinism.
+// nodes). The eligible node primary address is preferred; otherwise, the lowest
+// remaining IP is chosen for determinism.
 func (c *Controller) pickVTEPIP(matches []net.IP, family int) (net.IP, error) {
 	if len(matches) <= 1 {
 		if len(matches) == 1 {
@@ -919,6 +943,15 @@ func (c *Controller) pickVTEPIP(matches []net.IP, family int) (net.IP, error) {
 			filtered = append(filtered, ip)
 		}
 	}
+	// VIPs that are not keepalived-labelled (e.g. kube-vip in routing-table
+	// mode, or any VIP on IPv6 where labels do not exist) survive the filter
+	// above and, being conventionally low in the subnet, would win the sort.
+	// The node's primary interface address is never a VIP: prefer it.
+	if primary := c.nodePrimaryIP(family); primary != nil &&
+		slices.ContainsFunc(filtered, func(ip net.IP) bool { return ip.Equal(primary) }) {
+		klog.Infof("Selecting node primary address %s as VTEP IP (family %d)", primary, family)
+		return primary, nil
+	}
 	slices.SortFunc(filtered, func(a, b net.IP) int {
 		addrA, _ := netip.AddrFromSlice(a)
 		addrB, _ := netip.AddrFromSlice(b)
@@ -929,6 +962,35 @@ func (c *Controller) pickVTEPIP(matches []net.IP, family int) (net.IP, error) {
 	}
 	return nil, nil
 
+}
+
+// nodePrimaryIP returns the node's primary interface address for the given
+// family from the k8s.ovn.org/node-primary-ifaddr annotation, or nil when it
+// is not available; callers fall back to their default selection.
+func (c *Controller) nodePrimaryIP(family int) net.IP {
+	node, err := c.watchFactory.GetNode(c.nodeName)
+	if err != nil {
+		klog.V(4).Infof("Failed to get node %s for primary address lookup: %v", c.nodeName, err)
+		return nil
+	}
+	ifAddr, err := util.GetNodeIfAddrAnnotation(node)
+	if err != nil {
+		klog.V(4).Infof("Node %s has no usable primary interface address annotation: %v", c.nodeName, err)
+		return nil
+	}
+	cidr := ifAddr.IPv4
+	if family == netlink.FAMILY_V6 {
+		cidr = ifAddr.IPv6
+	}
+	if cidr == "" {
+		return nil
+	}
+	ip, _, err := net.ParseCIDR(cidr)
+	if err != nil {
+		klog.V(4).Infof("Node %s primary interface address %q is not a valid CIDR: %v", c.nodeName, cidr, err)
+		return nil
+	}
+	return ip
 }
 
 func matchFirstIPStringFamily(isIPv6 bool, ips []string) string {
