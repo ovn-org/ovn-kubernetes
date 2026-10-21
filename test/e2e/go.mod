@@ -187,10 +187,7 @@ require (
 )
 
 replace (
-	// libovsdb's transitive deps want docker v28+, but
-	// multihoming_utils.go uses pre-v28 types.NetworkInspectOptions.
 	github.com/coreos/go-iptables => github.com/trozet/go-iptables v0.0.0-20240328221912-077e672b3808
-	github.com/docker/docker => github.com/docker/docker v26.1.5+incompatible
 	github.com/ovn-kubernetes/ovn-kubernetes/go-controller => ../../go-controller
 	go.universe.tf/metallb => github.com/metallb/metallb v0.14.9
 )
