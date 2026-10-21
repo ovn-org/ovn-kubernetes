@@ -4,6 +4,7 @@
 package ovn
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"maps"
@@ -593,37 +594,9 @@ func (gw *GatewayManager) updateGWRouterStaticRoutes(gwConfig *GatewayConfig, ex
 				return fmt.Errorf("failed to add a static route %+v in GR %s with distributed router as the nexthop, err: %v", lrsr, gw.gwRouterName, err)
 			}
 		}
-		// The set of subnets routed towards the ovn_cluster_router differs
-		// between overlay and no-overlay mode (see above), so on a transition
-		// between the two transports (e.g. an upgrade) the gateway router can be
-		// left with stale routes from the previous mode. Remove them so the
-		// gateway router converges to the correct set of distributed-router
-		// routes for the current transport.
-		if gw.netInfo.Transport() == types.NetworkTransportNoOverlay {
-			// We now only route this node's host subnet(s) towards the
-			// ovn_cluster_router. Remove any stale full cluster-subnet route
-			// pointing at the distributed router (programmed previously in
-			// overlay mode), so the gateway router does not forward off-node pod
-			// traffic to the ovn_cluster_router.
-			hostSubnetSet := sets.New[string]()
-			for _, hostSubnet := range gwConfig.hostSubnets {
-				hostSubnetSet.Insert(hostSubnet.String())
-			}
-			if err := gw.deleteStaleDRRoutes(gwConfig, gwConfig.clusterSubnets, hostSubnetSet); err != nil {
-				return err
-			}
-		} else {
-			// We now route the whole cluster subnet(s) towards the
-			// ovn_cluster_router. Remove any stale per-host subnet route pointing
-			// at the distributed router (programmed previously in no-overlay
-			// mode), so it does not shadow the cluster-subnet route.
-			clusterSubnetSet := sets.New[string]()
-			for _, clusterSubnet := range gwConfig.clusterSubnets {
-				clusterSubnetSet.Insert(clusterSubnet.String())
-			}
-			if err := gw.deleteStaleDRRoutes(gwConfig, gwConfig.hostSubnets, clusterSubnetSet); err != nil {
-				return err
-			}
+		if err := gw.deleteStaleSubnetRoutes(gw.gwRouterName, gwConfig.clusterSubnets, drRoutedSubnets,
+			util.IPNetsToIPs(gwConfig.ovnClusterLRPToJoinIfAddrs), nil); err != nil {
+			return err
 		}
 	}
 	// for layer2 topology with transit router, add pod subnet routes via transit router, like so:
@@ -717,30 +690,52 @@ func (gw *GatewayManager) updateGWRouterStaticRoutes(gwConfig *GatewayConfig, ex
 	return nil
 }
 
-// deleteStaleDRRoutes removes routes on the gateway router that point at the
-// distributed router (ovn_cluster_router) for any subnet in staleSubnets,
-// skipping subnets present in keepSubnets. It is used to clean up routes left
-// over from the previous network transport when transitioning between overlay
-// and no-overlay mode (the two modes route a different set of subnets towards
-// the distributed router).
-func (gw *GatewayManager) deleteStaleDRRoutes(gwConfig *GatewayConfig, staleSubnets []*net.IPNet, keepSubnets sets.Set[string]) error {
-	for _, subnet := range staleSubnets {
-		if keepSubnets.Has(subnet.String()) {
-			continue
+// deleteStaleSubnetRoutes reconciles the subnet routes owned by this gateway.
+// Both a transport change and a node subnet reassignment can leave prefixes
+// that no longer appear in the current host subnet list.
+func (gw *GatewayManager) deleteStaleSubnetRoutes(routerName string, clusterSubnets, desiredSubnets []*net.IPNet,
+	nextHops []net.IP, policy *string) error {
+	keep := sets.New[string]()
+	for _, subnet := range desiredSubnets {
+		keep.Insert(subnet.String())
+	}
+	hops := sets.New(util.StringSlice(nextHops)...)
+	p := func(item *nbdb.LogicalRouterStaticRoute) bool {
+		if keep.Has(item.IPPrefix) || !hops.Has(item.Nexthop) ||
+			!libovsdbops.PolicyEqualPredicate(item.Policy, policy) ||
+			item.OutputPort != nil || item.RouteTable != "" {
+			return false
 		}
-		drLRPIfAddr, err := util.MatchFirstIPNetFamily(utilnet.IsIPv6CIDR(subnet), gwConfig.ovnClusterLRPToJoinIfAddrs)
-		if err != nil {
-			continue
+		// Hybrid-overlay uses a legacy ownership marker instead of OwnerController.
+		if item.ExternalIDs[libovsdbops.OwnerControllerKey.String()] != "" ||
+			strings.HasPrefix(item.ExternalIDs["name"], types.HybridSubnetPrefix) {
+			return false
 		}
-		prefix := subnet.String()
-		nexthop := drLRPIfAddr.IP.String()
-		p := func(item *nbdb.LogicalRouterStaticRoute) bool {
-			return item.IPPrefix == prefix && item.Nexthop == nexthop && item.OutputPort == nil
+		networkName := item.ExternalIDs[types.NetworkExternalID]
+		if networkName == "" {
+			networkName = types.DefaultNetworkName
 		}
-		if err := libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicate(gw.nbClient, gw.gwRouterName, p); err != nil {
-			return fmt.Errorf("failed to delete stale route %s via %s in GR %s: %v",
-				prefix, nexthop, gw.gwRouterName, err)
+		if networkName != gw.netInfo.GetNetworkName() {
+			return false
 		}
+		_, subnet, err := net.ParseCIDR(item.IPPrefix)
+		if err != nil || !util.IsContainedInAnyCIDR(subnet, clusterSubnets...) {
+			return false
+		}
+		if policy != nil && *policy == nbdb.LogicalRouterStaticRoutePolicySrcIP {
+			// Only reconcile node-sized source routes. Egress features and VM
+			// migration own broader catch-all prefixes, including during expansion.
+			for _, hostSubnet := range desiredSubnets {
+				if bytes.Equal(subnet.Mask, hostSubnet.Mask) {
+					return true
+				}
+			}
+			return false
+		}
+		return true
+	}
+	if err := libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicate(gw.nbClient, routerName, p); err != nil {
+		return fmt.Errorf("failed to delete stale subnet routes on router %s: %w", routerName, err)
 	}
 	return nil
 }
@@ -855,6 +850,10 @@ func (gw *GatewayManager) updateClusterRouterStaticRoutes(gwConfig *GatewayConfi
 				return fmt.Errorf("error deleting static route %+v in GR %s: %v", lrsr, gw.clusterRouterName, err)
 			}
 		}
+	}
+	if err := gw.deleteStaleSubnetRoutes(gw.clusterRouterName, gwConfig.clusterSubnets, gwConfig.hostSubnets,
+		nextHops, &nbdb.LogicalRouterStaticRoutePolicySrcIP); err != nil {
+		return err
 	}
 	return nil
 }
