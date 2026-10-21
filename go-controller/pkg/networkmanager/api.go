@@ -8,6 +8,7 @@ import (
 	"errors"
 
 	nadinformers "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/informers/externalversions/k8s.cni.cncf.io/v1"
+	frrinformers "github.com/metallb/frr-k8s/pkg/client/informers/externalversions/api/v1beta1"
 
 	coreinformers "k8s.io/client-go/informers/core/v1"
 	"k8s.io/client-go/tools/record"
@@ -50,6 +51,7 @@ type watchFactory interface {
 	ClusterUserDefinedNetworkInformer() userdefinednetworkinformer.ClusterUserDefinedNetworkInformer
 	NamespaceInformer() coreinformers.NamespaceInformer
 	RouteAdvertisementsInformer() rainformers.RouteAdvertisementsInformer
+	FRRConfigurationsInformer() frrinformers.FRRConfigurationInformer
 	NodeCoreInformer() coreinformers.NodeInformer
 	PodCoreInformer() coreinformers.PodInformer
 	EgressIPInformer() egressipinformer.EgressIPInformer

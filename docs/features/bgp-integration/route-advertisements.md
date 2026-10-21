@@ -135,6 +135,17 @@ to use as template, and as a consequence, provides the flexibility to export
 routes in a different number of ways including: which BGP peers to export to,
 the use of iBGP or eBGP, etc.
 
+OVN-Kubernetes removes self-peering entries only when generating configurations
+from its managed full-mesh BGP template. It uses the target node's Kubernetes
+`InternalIP` addresses, which also populate that template's neighbor list.
+For user-provided templates, neighbor lists are preserved, including entries
+that match the target node's address. These peers may use different uplinks or
+VRFs, so the primary-interface address is not used to identify self-peers.
+Administrators must ensure that each template's neighbors are appropriate for
+every node selected by its `nodeSelector`. A shared template peering with
+external routers is valid; for node-to-node full-mesh peering, use per-node
+templates and selectors that exclude each node's own peering address.
+
 ### Import routes into the default pod network
 
 The following example represents an initial FRR-k8s configuration that
@@ -847,6 +858,81 @@ NAME       STATUS
 default    Accepted
 extranet   Not Accepted: configuration pending: no networks selected
 ```
+
+#### Acceptance and partial node failures
+
+The `Accepted` condition permits OVN-Kubernetes to configure the requested
+advertisement paths. A valid advertisement remains accepted when individual
+nodes cannot yet be programmed, including when all selected nodes are still
+initializing. The separate `Degraded` condition reports failures recorded by
+reconciliation's status update and becomes `False` after successful
+reconciliation. For node generation failures, its reason is
+`NodeConfigurationFailed` and its message lists up to ten errors with a count
+of any remaining errors. Apply failures leave existing conditions unchanged,
+as described below.
+
+Healthy nodes receive their generated `FRRConfiguration` objects while failed
+nodes retain existing configurations for still-selected templates when the RA
+advertises only pod networks. If the RA includes `EgressIP`, failed nodes' old
+configurations are withdrawn to avoid retaining advertisements for addresses
+that have moved to another node. For an RA advertising both `PodNetwork` and
+`EgressIP`, this also withdraws the failed node's pod routes until recovery.
+Withdrawal requests precede replacement creation, but FRR applies changes
+asynchronously; this does not guarantee an atomic EgressIP handoff. Node updates
+and retries allow reconciliation to recover. `Accepted=True` does not guarantee
+that every node has an FRR configuration, that BGP sessions are established, or
+that routes are reachable.
+
+When `Accepted=True` and `Degraded=True`, behavior depends on the network's
+transport:
+
+| Transport | Behavior on a node whose FRR configuration could not be generated |
+| --- | --- |
+| Overlay | The RA does not enable advertised VRFs on that node until its complete configuration set has been generated successfully for the current RA generation. If no other RA advertises the network there, the node uses unadvertised behavior, including normal external SNAT. |
+| No-overlay | The valid RA's target-VRF mapping remains in effect. The node continues configuring default-VRF or non-default-VRF routing as requested, even while generation fails. |
+| EVPN | The node continues configuring advertised, non-default-VRF gateway behavior. Its main gateway routing decisions do not wait for successful FRR generation. |
+
+Preserved FRR configurations do not count as a successful current configuration
+set for the overlay check. No-overlay and EVPN are always treated as advertised;
+removing their target-VRF mapping could change the routing domain rather than
+provide a fallback. Neither transport gains an unadvertised/SNAT fallback from
+this check. Retaining the intended routing configuration does not guarantee
+external connectivity while FRR configuration is incomplete.
+
+Nodes watch only their own generated configurations and use cached lookups.
+Configuration changes and changes to `Degraded` trigger reconciliation, including
+recovery while other nodes still fail. Healthy RAs use the existing `Accepted`
+path without this extra check. This is eventually consistent programming state,
+not confirmation that FRR has applied the configuration or established BGP
+sessions.
+
+Invalid RA or template input is reported as `Accepted=False` when reconciliation
+reaches the status update. Selecting no networks or no source configurations
+reports configuration pending after the required updates complete. Errors while
+updating FRR configurations or NAD annotations are retried but return before the
+status update. The existing status and conditions remain unchanged, potentially
+including `Accepted=True` and `Degraded=False` from an earlier reconciliation.
+The existing `status` summary reports acceptance; inspect the conditions for
+degradation details:
+
+```shell
+kubectl describe routeadvertisements <name>
+```
+
+For example, if an overlay RA selects nodes A and B and generation fails only
+on B, the RA reports `Accepted=True` and `Degraded=True`. Node A receives its new
+configuration. Node B retains any previous FRR configuration, but this RA does
+not enable advertised datapath behavior there. Once B recovers, reconciliation
+updates its configuration and advertised state. A recovering node can resume
+advertising even if another node still fails and the RA remains degraded.
+
+While a network's NAD still references an RA, an unaccepted RA or a status for
+an older RA generation does not apply a new target-VRF mapping. Network manager
+retains its previous mapping, if any, rather than tearing down previously
+configured advertisements. Consequently,
+`Accepted=False` is not a command to withdraw all existing routes.
+
+#### Invalid configuration
 
 The controller validates every value it interpolates into the generated raw
 FRR configuration before generating it. A `RouteAdvertisements` is reported as

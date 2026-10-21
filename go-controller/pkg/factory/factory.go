@@ -533,7 +533,6 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 		if err != nil {
 			return nil, err
 		}
-
 	}
 
 	if util.IsNetworkSegmentationSupportEnabled() {
@@ -583,6 +582,13 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 		wf.raFactory = routeadvertisementsinformerfactory.NewSharedInformerFactory(ovnClientset.RouteAdvertisementsClient, resyncInterval)
 		// make sure shared informer is created for a factory, so on wf.raFactory.Start() it is initialized and caches are synced.
 		wf.raFactory.K8s().V1().RouteAdvertisements().Informer()
+		wf.frrFactory = frrinformerfactory.NewSharedInformerFactoryWithOptions(ovnClientset.FRRClient, resyncInterval,
+			frrinformerfactory.WithTweakListOptions(func(options *metav1.ListOptions) {
+				options.LabelSelector = labels.Set{types.OvnRouteAdvertisementsNodeKey: util.RouteAdvertisementsNodeLabel(nodeName)}.String()
+			}))
+		if err := addRouteAdvertisementsIndex(wf.FRRConfigurationsInformer().Informer()); err != nil {
+			return nil, err
+		}
 	}
 
 	if config.OVNKubernetesFeature.EnableNetworkQoS {
@@ -929,6 +935,13 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeName string) (
 		wf.raFactory = routeadvertisementsinformerfactory.NewSharedInformerFactory(ovnClientset.RouteAdvertisementsClient, resyncInterval)
 		// make sure shared informer is created for a factory, so on wf.raFactory.Start() it is initialized and caches are synced.
 		wf.raFactory.K8s().V1().RouteAdvertisements().Informer()
+		wf.frrFactory = frrinformerfactory.NewSharedInformerFactoryWithOptions(ovnClientset.FRRClient, resyncInterval,
+			frrinformerfactory.WithTweakListOptions(func(options *metav1.ListOptions) {
+				options.LabelSelector = labels.Set{types.OvnRouteAdvertisementsNodeKey: util.RouteAdvertisementsNodeLabel(nodeName)}.String()
+			}))
+		if err := addRouteAdvertisementsIndex(wf.FRRConfigurationsInformer().Informer()); err != nil {
+			return nil, err
+		}
 	}
 
 	if util.IsEVPNEnabled() {
@@ -1231,6 +1244,9 @@ func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset
 		wf.frrFactory = frrinformerfactory.NewSharedInformerFactory(ovnClientset.FRRClient, resyncInterval)
 		// make sure shared informer is created for a factory, so on wf.frrFactory.Start() it is initialized and caches are synced.
 		wf.frrFactory.Api().V1beta1().FRRConfigurations().Informer()
+		if err := addRouteAdvertisementsIndex(wf.FRRConfigurationsInformer().Informer()); err != nil {
+			return nil, err
+		}
 	}
 
 	return wf, nil
@@ -2095,4 +2111,18 @@ func getEndpointSliceSelector() func(options *metav1.ListOptions) {
 		endpointSliceSelector = noHeadlessServiceSelector()
 	}
 	return endpointSliceSelector
+}
+
+// Index by RA and the stored node label (already encoded for long node names),
+// so degraded checks do not scan the cluster-wide cache in cluster manager.
+// Node factories also filter server-side using the same label value.
+func addRouteAdvertisementsIndex(informer cache.SharedIndexInformer) error {
+	return informer.AddIndexers(cache.Indexers{types.OvnRouteAdvertisementsKey: func(obj interface{}) ([]string, error) {
+		cfg := obj.(*frrapi.FRRConfiguration)
+		ra, node := cfg.Labels[types.OvnRouteAdvertisementsKey], cfg.Labels[types.OvnRouteAdvertisementsNodeKey]
+		if ra == "" || node == "" {
+			return nil, nil
+		}
+		return []string{ra + "/" + node}, nil
+	}})
 }

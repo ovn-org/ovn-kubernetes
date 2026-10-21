@@ -13,6 +13,7 @@ import (
 	"time"
 
 	nadlisters "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
+	frrtypes "github.com/metallb/frr-k8s/api/v1beta1"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -64,11 +65,20 @@ func newNetworkController(name, node string, cm ControllerManager, wf watchFacto
 		networkConfig,
 	)
 
-	// we don't care about route advertisements in cluster manager
+	// Advertisement consumers share the same per-node state calculation.
 	if nc.hasRouteAdvertisements() {
 		nc.nadLister = wf.NADInformer().Lister()
 		nc.raLister = wf.RouteAdvertisementsInformer().Lister()
 		nc.nodeLister = wf.NodeCoreInformer().Lister()
+		nc.frrIndexer = wf.FRRConfigurationsInformer().Informer().GetIndexer()
+		nc.frrController = controller.NewController(nc.name+" FRR", &controller.ControllerConfig[frrtypes.FRRConfiguration]{
+			RateLimiter:    workqueue.DefaultTypedControllerRateLimiter[string](),
+			Informer:       wf.FRRConfigurationsInformer().Informer(),
+			Lister:         wf.FRRConfigurationsInformer().Lister().List,
+			Reconcile:      func(string) error { return nc.syncRunningNetworks() },
+			ObjNeedsUpdate: nc.frrNeedsUpdate,
+			Threadiness:    1,
+		})
 
 		// ra controller
 		raConfig := &controller.ControllerConfig[ratypes.RouteAdvertisements]{
@@ -117,9 +127,11 @@ type networkController struct {
 	name string
 	node string
 
-	nadLister  nadlisters.NetworkAttachmentDefinitionLister
-	raLister   ralisters.RouteAdvertisementsLister
-	nodeLister corelisters.NodeLister
+	nadLister     nadlisters.NetworkAttachmentDefinitionLister
+	raLister      ralisters.RouteAdvertisementsLister
+	nodeLister    corelisters.NodeLister
+	frrIndexer    cache.Indexer
+	frrController controller.Controller
 
 	networkReconciler controller.Reconciler
 	raController      controller.Controller
@@ -150,6 +162,9 @@ type networkController struct {
 // EnsuredNetwork before this call
 func (c *networkController) Start() error {
 	controllers := []controller.Reconciler{c.networkReconciler}
+	if c.frrController != nil {
+		controllers = append(controllers, c.frrController)
+	}
 	if c.raController != nil {
 		controllers = append(controllers, c.raController)
 	}
@@ -164,6 +179,9 @@ func (c *networkController) Start() error {
 
 func (c *networkController) Stop() {
 	controllers := []controller.Reconciler{c.networkReconciler}
+	if c.frrController != nil {
+		controllers = append(controllers, c.frrController)
+	}
 	if c.raController != nil {
 		controllers = append(controllers, c.raController)
 	}
@@ -627,6 +645,19 @@ func (c *networkController) setAdvertisements(network util.MutableNetInfo, curre
 			if !c.isNodeManaged(node) {
 				continue
 			}
+			// Overlay can fall back to unadvertised/SNAT behavior. No-overlay
+			// and EVPN are always advertised: retain the valid RA's target VRF
+			// even on failure, rather than selecting a different routing domain.
+			if network.Transport() != types.NetworkTransportNoOverlay && network.Transport() != types.NetworkTransportEVPN &&
+				meta.IsStatusConditionTrue(ra.Status.Conditions, "Degraded") {
+				ready, err := c.nodeAdvertisementsReady(ra, node.Name)
+				if err != nil {
+					return err
+				}
+				if !ready {
+					continue
+				}
+			}
 			if advertisements.Has(ratypes.PodNetwork) {
 				podAdvertisements[node.Name] = append(podAdvertisements[node.Name], vrf)
 			}
@@ -696,7 +727,8 @@ func raNeedsUpdate(oldRA, newRA *ratypes.RouteAdvertisements) bool {
 	if oldCondition == nil {
 		return true
 	}
-	return oldCondition.ObservedGeneration != newCondition.ObservedGeneration || oldCondition.Status != newCondition.Status
+	return oldCondition.ObservedGeneration != newCondition.ObservedGeneration || oldCondition.Status != newCondition.Status ||
+		!reflect.DeepEqual(meta.FindStatusCondition(oldRA.Status.Conditions, "Degraded"), meta.FindStatusCondition(newRA.Status.Conditions, "Degraded"))
 }
 
 func nodeNeedsUpdate(oldNode, newNode *corev1.Node) bool {
@@ -737,4 +769,50 @@ func (c *networkController) GetNetworkByID(id int) util.NetInfo {
 		return c.networks[name]
 	}
 	return nil
+}
+
+// nodeAdvertisementsReady is only consulted for degraded RAs. Preserved configs
+// have no ready token, and configs from an older RA generation cannot authorize
+// a new target VRF. All configurations in the generated node set must be present.
+func (c *networkController) nodeAdvertisementsReady(ra *ratypes.RouteAdvertisements, node string) (bool, error) {
+	configs, err := c.frrIndexer.ByIndex(types.OvnRouteAdvertisementsKey, ra.Name+"/"+util.RouteAdvertisementsNodeLabel(node))
+	if err != nil {
+		return false, err
+	}
+	if len(configs) == 0 {
+		return false, nil
+	}
+	expected := util.RouteAdvertisementsReadyToken(ra, len(configs))
+	for _, obj := range configs {
+		cfg := obj.(*frrtypes.FRRConfiguration)
+		if !cfg.DeletionTimestamp.IsZero() || cfg.Annotations[types.OvnRouteAdvertisementsReadyKey] != expected {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+func (c *networkController) frrNeedsUpdate(old, new *frrtypes.FRRConfiguration) bool {
+	if old != nil && new != nil && reflect.DeepEqual(old.Labels, new.Labels) &&
+		old.Annotations[types.OvnRouteAdvertisementsReadyKey] == new.Annotations[types.OvnRouteAdvertisementsReadyKey] &&
+		reflect.DeepEqual(old.DeletionTimestamp, new.DeletionTimestamp) {
+		return false
+	}
+	for _, cfg := range []*frrtypes.FRRConfiguration{old, new} {
+		if cfg == nil {
+			continue
+		}
+		if c.node != "" && cfg.Labels[types.OvnRouteAdvertisementsNodeKey] != util.RouteAdvertisementsNodeLabel(c.node) {
+			continue
+		}
+		raName := cfg.Labels[types.OvnRouteAdvertisementsKey]
+		if raName == "" {
+			continue
+		}
+		ra, err := c.raLister.Get(raName)
+		if err == nil && meta.IsStatusConditionTrue(ra.Status.Conditions, "Degraded") {
+			return true
+		}
+	}
+	return false
 }

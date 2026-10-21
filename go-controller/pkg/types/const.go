@@ -6,6 +6,9 @@ package types
 import "time"
 
 const (
+	// ManagedBGPConfigurationName identifies the shared full-mesh BGP template.
+	ManagedBGPConfigurationName = "ovnk-managed-bgp"
+
 	// Default network name
 	DefaultNetworkName           = "default"
 	DefaultNetworkControllerName = "default-network-controller"
@@ -234,6 +237,13 @@ const (
 	// OvnRouteAdvertisementsValidatedKey annotates a FRRConfiguration
 	// generated from input validated by the RouteAdvertisements controller
 	OvnRouteAdvertisementsValidatedKey = OvnK8sPrefix + "/route-advertisements-validated"
+
+	// OvnRouteAdvertisementsNodeKey labels generated configurations for node-scoped watches.
+	OvnRouteAdvertisementsNodeKey = OvnK8sPrefix + "/route-advertisements-node"
+	// OvnRouteAdvertisementsReadyKey records RA UID/generation/configuration count
+	// after all templates for a node were generated successfully. It is removed
+	// from preserved configurations when generation fails; it is not BGP readiness.
+	OvnRouteAdvertisementsReadyKey = OvnK8sPrefix + "/route-advertisements-ready"
 
 	// name of the configmap used to synchronize status (e.g. watch for topology changes)
 	OvnK8sStatusCMName         = "control-plane-status"
