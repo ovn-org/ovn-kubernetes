@@ -448,6 +448,35 @@ var _ = Describe("Config Operations", func() {
 
 	})
 
+	DescribeTable("externally managed floating IP configuration", func(fileIPs string, args []string, expected []string, expectedErr string) {
+		err := os.WriteFile(cfgFile.Name(), []byte("[default]\nexternally-managed-floating-ips="+fileIPs+"\n"), 0o644)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		app.Flags = CommonFlags
+		app.Action = func(ctx *cli.Context) error {
+			_, err := InitConfig(ctx, kexec.New(), nil)
+			return err
+		}
+		err = app.Run(append([]string{app.Name, "--config-file=" + cfgFile.Name()}, args...))
+		if expectedErr != "" {
+			gomega.Expect(err).To(gomega.MatchError(gomega.ContainSubstring(expectedErr)))
+			return
+		}
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		gomega.Expect(Default.ExternallyManagedFloatingIPs.UnsortedList()).To(gomega.ConsistOf(expected))
+	},
+		Entry("defaults to no explicit VIPs", "", nil, []string{}, ""),
+		Entry("accepts an empty flag", "", []string{"--externally-managed-floating-ips="}, []string{}, ""),
+		Entry("accepts whitespace as an empty list", "", []string{"--externally-managed-floating-ips=  "}, []string{}, ""),
+		Entry("accepts IPv4", "", []string{"--externally-managed-floating-ips=192.0.2.100"}, []string{"192.0.2.100"}, ""),
+		Entry("normalizes IPv6", "", []string{"--externally-managed-floating-ips=2001:0db8:0:0::100"}, []string{"2001:db8::100"}, ""),
+		Entry("trims and deduplicates dual-stack addresses", "",
+			[]string{"--externally-managed-floating-ips= 192.0.2.100, 2001:db8::100 ,192.0.2.100,2001:0db8:0:0::100,::ffff:192.0.2.100 "},
+			[]string{"192.0.2.100", "2001:db8::100"}, ""),
+		Entry("reads the config file", "192.0.2.100,2001:db8::100", nil, []string{"192.0.2.100", "2001:db8::100"}, ""),
+		Entry("rejects an invalid IP from the CLI", "", []string{"--externally-managed-floating-ips=192.0.2.100,invalid"}, nil, `invalid externally-managed-floating-ips IP "invalid"`),
+		Entry("rejects an invalid IP from the config file", "invalid", nil, nil, `invalid externally-managed-floating-ips IP "invalid"`),
+	)
+
 	It("parses routing table ID start from config file", func() {
 		err := os.WriteFile(cfgFile.Name(), []byte(`[ovnkubenode]
 routing-table-id-start=2002

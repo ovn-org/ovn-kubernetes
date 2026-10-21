@@ -12,6 +12,7 @@ import (
 	nadfake "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/fake"
 	"github.com/stretchr/testify/mock"
 	"github.com/vishvananda/netlink"
+	"golang.org/x/sys/unix"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -1379,6 +1380,11 @@ func (f *fakeAddressManager) AddOnAddressesChangedHandler(func()) {}
 var _ = Describe("discoverUnmanagedVTEPIPs", func() {
 	const nodeName = "node1"
 
+	BeforeEach(func() {
+		Expect(config.PrepareTestConfig()).To(Succeed())
+		DeferCleanup(config.PrepareTestConfig)
+	})
+
 	type testController struct {
 		*Controller
 		node     *corev1.Node
@@ -1390,6 +1396,11 @@ var _ = Describe("discoverUnmanagedVTEPIPs", func() {
 		kubeMock := &kubemocks.Interface{}
 		kubeMock.On("SetAnnotationsOnNodeWithFieldManager", nodeName, mock.Anything, vtepAnnotationFieldManager).Return(nil).Run(func(args mock.Arguments) {
 			for k, v := range args.Get(1).(map[string]interface{}) {
+				// A nil patch value removes the annotation.
+				if v == nil {
+					delete(node.Annotations, k)
+					continue
+				}
 				if node.Annotations == nil {
 					node.Annotations = make(map[string]string)
 				}
@@ -1494,6 +1505,89 @@ var _ = Describe("discoverUnmanagedVTEPIPs", func() {
 		Expect(vteps).To(HaveLen(1))
 		Expect(vteps["vtep1"].IPs).To(ConsistOf("100.64.0.1"))
 	})
+
+	// The .100 addresses have no label; only the configured IP list identifies them as VIPs.
+	v4VIP := netlink.Addr{IPNet: &net.IPNet{IP: net.ParseIP("192.0.2.100"), Mask: net.CIDRMask(24, 32)}}
+	v6VIP := netlink.Addr{IPNet: &net.IPNet{IP: net.ParseIP("2001:db8::100"), Mask: net.CIDRMask(64, 128)}}
+	v4NodeAddr := netlink.Addr{IPNet: &net.IPNet{IP: net.ParseIP("192.0.2.1"), Mask: net.CIDRMask(24, 32)}}
+	v6NodeAddr := netlink.Addr{IPNet: &net.IPNet{IP: net.ParseIP("2001:db8::1"), Mask: net.CIDRMask(64, 128)}}
+	v4LabelledVIP := v4NodeAddr
+	v4LabelledVIP.Label = "eth0:vip"
+	v4SecondaryAddr := netlink.Addr{IPNet: &net.IPNet{IP: net.ParseIP("192.0.2.2"), Mask: net.CIDRMask(24, 32)}, Flags: unix.IFA_F_SECONDARY}
+	v4OtherNodeAddr := netlink.Addr{IPNet: &net.IPNet{IP: net.ParseIP("192.0.2.3"), Mask: net.CIDRMask(24, 32)}}
+
+	// Verify VTEP selection excludes externally managed and keepalived labeled VIPs and updates or removes the annotation.
+	// externallyManagedFloatingIPs is the configured exclusion list. addrs supplies the node IPs and netlink addresses,
+	// including labels and flags. annotation is the initial VTEP annotation JSON (empty means absent).
+	// expected contains the selected IPs; an empty list means no eligible IPs remain.
+	DescribeTable("selects VTEP IPs excluding externally managed and keepalived labeled VIPs", func(externallyManagedFloatingIPs []string, addrs []netlink.Addr, annotation string, expected []string) {
+		config.Default.ExternallyManagedFloatingIPs = sets.New(externallyManagedFloatingIPs...)
+
+		ips := make([]net.IP, 0, len(addrs))
+		var v4Addrs, v6Addrs []netlink.Addr
+		for _, addr := range addrs {
+			ips = append(ips, addr.IP)
+			if addr.IP.To4() != nil {
+				v4Addrs = append(v4Addrs, addr)
+			} else {
+				v6Addrs = append(v6Addrs, addr)
+			}
+		}
+		annotations := map[string]string{}
+		if annotation != "" {
+			annotations[util.OVNNodeVTEPs] = annotation
+		}
+		tc := newTestController(ips, annotations)
+		vtep := &vtepv1.VTEP{
+			ObjectMeta: metav1.ObjectMeta{Name: "vtep1"},
+			Spec:       vtepv1.VTEPSpec{CIDRs: []vtepv1.CIDR{"192.0.2.0/24", "2001:db8::/64"}},
+		}
+		nlMock := &mocks.NetLinkOps{}
+		util.SetNetLinkOpMockInst(nlMock)
+		DeferCleanup(util.ResetNetLinkOpMockInst)
+		nlMock.On("AddrList", mock.Anything, netlink.FAMILY_V4).Return(v4Addrs, nil)
+		nlMock.On("AddrList", mock.Anything, netlink.FAMILY_V6).Return(v6Addrs, nil)
+
+		v4, v6, err := tc.discoverUnmanagedVTEPIPs(vtep)
+		Expect(err).NotTo(HaveOccurred())
+		selected := []string{}
+		for _, ip := range []net.IP{v4, v6} {
+			if ip != nil {
+				selected = append(selected, ip.String())
+			}
+		}
+		Expect(selected).To(ConsistOf(expected))
+		if len(expected) > 0 {
+			vteps, err := util.ParseNodeVTEPs(tc.node)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(vteps["vtep1"].IPs).To(ConsistOf(expected))
+		} else {
+			Expect(tc.node.Annotations).NotTo(HaveKey(util.OVNNodeVTEPs))
+		}
+	},
+		// Entry arguments: description, externally managed floating IPs, interface addresses, initial VTEP annotation JSON, expected selected IPs.
+		Entry("selects stable dual-stack addresses instead of unlabelled VIPs",
+			[]string{v4VIP.IP.String(), v6VIP.IP.String()}, []netlink.Addr{v4VIP, v4NodeAddr, v6VIP, v6NodeAddr}, "", []string{v4NodeAddr.IP.String(), v6NodeAddr.IP.String()}),
+		Entry("excludes the keepalived labeled VIP when no externally managed floating IPs are configured",
+			[]string{}, []netlink.Addr{v4LabelledVIP, v4VIP}, "", []string{v4VIP.IP.String()}),
+		Entry("excludes both labelled and explicitly configured VIPs",
+			[]string{v4VIP.IP.String()}, []netlink.Addr{v4LabelledVIP, v4VIP}, "", []string{}),
+		Entry("checks IPv4 labels when only IPv6 IPs are configured",
+			[]string{v6VIP.IP.String()}, []netlink.Addr{v4LabelledVIP, v4VIP, v6VIP}, "", []string{v4VIP.IP.String()}),
+		Entry("rejects sole VIP candidates in both families",
+			[]string{v4VIP.IP.String(), v6VIP.IP.String()}, []netlink.Addr{v4VIP, v6VIP}, "", []string{}),
+		Entry("replaces previously annotated VIPs",
+			[]string{v4VIP.IP.String(), v6VIP.IP.String()}, []netlink.Addr{v4VIP, v4NodeAddr, v6VIP, v6NodeAddr},
+			`{"vtep1":{"ips":["192.0.2.100","2001:db8::100"]}}`, []string{v4NodeAddr.IP.String(), v6NodeAddr.IP.String()}),
+		Entry("removes the annotation when only excluded VIPs remain",
+			[]string{v4VIP.IP.String(), v6VIP.IP.String()}, []netlink.Addr{v4VIP, v6VIP}, `{"vtep1":{"ips":["192.0.2.100","2001:db8::100"]}}`, []string{}),
+		Entry("keeps an eligible address in the other family",
+			[]string{v4VIP.IP.String(), v6VIP.IP.String()}, []netlink.Addr{v4VIP, v6NodeAddr}, "", []string{v6NodeAddr.IP.String()}),
+		Entry("filters configured VIPs, labelled VIPs and secondary addresses",
+			[]string{v4VIP.IP.String()}, []netlink.Addr{v4SecondaryAddr, v4LabelledVIP, v4OtherNodeAddr, v4VIP}, "", []string{v4OtherNodeAddr.IP.String()}),
+		Entry("does not select a secondary address when the other candidate is an explicit VIP",
+			[]string{v4VIP.IP.String()}, []netlink.Addr{v4SecondaryAddr, v4VIP}, "", []string{}),
+	)
 
 	It("picks the lowest IP when multiple non-VIP IPs match and annotates it", func() {
 		tc := newTestController([]net.IP{net.ParseIP("100.64.0.5"), net.ParseIP("100.64.0.2")}, nil)

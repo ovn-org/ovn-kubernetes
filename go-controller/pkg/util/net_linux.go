@@ -849,7 +849,8 @@ func DeleteConntrackServicePort(ip string, port int32, protocol corev1.Protocol,
 }
 
 // GetFilteredInterfaceV4V6IPs returns the IP addresses for the network interface 'iface' for ipv4 and ipv6.
-// Filter out addresses that are link local, reserved for internal use or added by keepalived.
+// Filter out link-local addresses, addresses reserved for internal use, externally managed floating IPs,
+// and addresses marked as secondary or deprecated.
 func GetFilteredInterfaceV4V6IPs(iface string) ([]*net.IPNet, error) {
 	link, err := netLinkOps.LinkByName(iface)
 	if err != nil {
@@ -867,7 +868,7 @@ func GetFilteredInterfaceV4V6IPs(iface string) ([]*net.IPNet, error) {
 }
 
 // GetFilteredInterfaceAddrs returns addresses attached to a link and filters out link local addresses, OVN reserved IPs,
-// keepalived IPs and addresses marked as secondary or deprecated.
+// externally managed floating IPs and addresses marked as secondary or deprecated.
 func GetFilteredInterfaceAddrs(link netlink.Link, v4, v6 bool) ([]netlink.Addr, error) {
 	var ipFamily int // value of 0 means include both IP v4 and v6 addresses
 	if v4 && !v6 {
@@ -881,7 +882,8 @@ func GetFilteredInterfaceAddrs(link netlink.Link, v4, v6 bool) ([]netlink.Addr, 
 	}
 	validAddrs := make([]netlink.Addr, 0)
 	for _, addr := range addrs {
-		if addr.IP.IsLinkLocalUnicast() || IsAddressReservedForInternalUse(addr.IP) || IsAddressAddedByKeepAlived(addr) {
+		if addr.IP.IsLinkLocalUnicast() || IsAddressReservedForInternalUse(addr.IP) ||
+			IsExternallyManagedFloatingIP(addr.IP.String()) || IsAddressAddedByKeepAlived(addr) {
 			continue
 		}
 		// Ignore addresses marked as secondary or deprecated since they may
@@ -912,11 +914,18 @@ func IsAddressReservedForInternalUse(addr net.IP) bool {
 	return subnet.Contains(addr)
 }
 
+// IsExternallyManagedFloatingIP reports whether an IP is configured as a floating IP managed outside OVN-Kubernetes.
+func IsExternallyManagedFloatingIP(ip string) bool {
+	return config.Default.ExternallyManagedFloatingIPs.Has(ip)
+}
+
 // IsAddressAddedByKeepAlived returns true if the input interface address obtained
 // through netlink has a "vip" label which is how keepalived
 // marks the IP addresses it adds (https://github.com/openshift/machine-config-operator/pull/4040)
 // A previous implementation made the label end with ":vip", so for backwards compatibility
 // "HasSuffix" is used.
+// FIXME: Remove keepalived VIP detection via labels in v2.0.0
+// and only rely on configuration option Default.ExternallyManagedFloatingIPs.
 func IsAddressAddedByKeepAlived(addr netlink.Addr) bool {
 	return strings.HasSuffix(addr.Label, "vip")
 }

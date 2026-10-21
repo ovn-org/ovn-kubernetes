@@ -27,6 +27,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/validation"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 	kexec "k8s.io/utils/exec"
@@ -295,6 +296,10 @@ const (
 
 // DefaultConfig holds parsed config file parameters and command-line overrides
 type DefaultConfig struct {
+	// RawExternallyManagedFloatingIPs holds the unparsed externally managed floating IPs.
+	RawExternallyManagedFloatingIPs string `gcfg:"externally-managed-floating-ips"`
+	// ExternallyManagedFloatingIPs contains floating IPs not owned or managed by OVN-Kubernetes.
+	ExternallyManagedFloatingIPs sets.Set[string]
 	// MTU value used for the overlay networks.
 	MTU int `gcfg:"mtu"`
 	// RoutableMTU is the maximum routable MTU between nodes, used to facilitate
@@ -998,6 +1003,13 @@ var CommonFlags = []cli.Flag{
 		Name:  "config-file",
 		Usage: "configuration file path (default: /etc/openvswitch/ovn_k8s.conf)",
 		//Value: "/etc/openvswitch/ovn_k8s.conf",
+	},
+	&cli.StringFlag{
+		Name: "externally-managed-floating-ips",
+		Usage: "Comma-separated IPv4 and IPv6 floating IPs not owned or managed by OVN-Kubernetes, " +
+			"such as those provided by keepalived or kube-vip",
+		Value:       Default.RawExternallyManagedFloatingIPs,
+		Destination: &cliConfig.Default.RawExternallyManagedFloatingIPs,
 	},
 	&cli.IntFlag{
 		Name:        "mtu",
@@ -2673,6 +2685,17 @@ func buildDefaultConfig(cli, file *config) error {
 // completeDefaultConfig completes the Default config by parsing raw values
 // into their final form.
 func completeDefaultConfig(allSubnets *ConfigSubnets) error {
+	Default.ExternallyManagedFloatingIPs = sets.New[string]()
+	if rawIPs := strings.TrimSpace(Default.RawExternallyManagedFloatingIPs); rawIPs != "" {
+		for _, rawIP := range strings.Split(rawIPs, ",") {
+			ip := net.ParseIP(strings.TrimSpace(rawIP))
+			if ip == nil {
+				return fmt.Errorf("invalid externally-managed-floating-ips IP %q", rawIP)
+			}
+			Default.ExternallyManagedFloatingIPs.Insert(ip.String())
+		}
+	}
+
 	var err error
 	Default.ClusterSubnets, err = ParseClusterSubnetEntries(Default.RawClusterSubnets)
 	if err != nil {

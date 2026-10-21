@@ -1414,7 +1414,7 @@ func findLinkOnSameNetworkAsIPUsingLPM(ip net.IP, v4, v6 bool) (bool, netlink.Li
 
 // getFilteredPrefixes returns address Prefixes from interfaces with the following characteristics:
 // Link must be up
-// Exclude keepalived assigned addresses
+// Exclude externally managed floating IPs, for example keepalived or kube-vip IPs
 // Exclude addresses assigned by metal LB
 // Exclude OVN reserved addresses
 // Exclude networks with just one IP i.e  masks /32 for IPv4 or /128 for IPv6
