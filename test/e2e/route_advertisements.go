@@ -44,6 +44,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/dynamic"
@@ -3682,6 +3683,121 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 		},
 		networksToTest,
 	)
+
+	// The node annotation is shared by all EVPN networks on that node, so this
+	// test must not overlap other tests that configure or depend on those networks.
+	ginkgo.It("withdraws and restores VTEP advertisements after an invalid node annotation", feature.EVPN, ginkgo.Serial, func() {
+		// configureNetworkWithInfra provisions only IPv4 VTEPs, including for
+		// dual-stack tenant networks; IPv6 VTEP coverage needs infrastructure support.
+		if !ipFamilySet.Has(utilnet.IPv4) {
+			e2eskipper.Skipf("IPv6 VTEPs are not supported")
+		}
+		ctx := context.Background()
+		nodes, err := e2enode.GetReadySchedulableNodes(ctx, f.ClientSet)
+		framework.ExpectNoError(err, "listing nodes for VTEP withdrawal test")
+		if len(nodes.Items) < 2 {
+			e2eskipper.Skipf("VTEP withdrawal test requires two schedulable nodes")
+		}
+		bgpAlloc, err := allocators.AllocateBGP(f, ictx)
+		framework.ExpectNoError(err, "allocating BGP test infrastructure")
+		spec := layer3IPVRFNetworkSpecGen(bgpAlloc.UDNSubnet, bgpAlloc.UDNSubnet6, bgpAlloc)
+		spec.Layer3.Subnets = matchL3SubnetsByIPFamilies(ipFamilySet, spec.Layer3.Subnets...)
+		namespace, _, _ := configureNetworkWithInfra(f, ictx, testBaseName, ipFamilySet,
+			testNetworkName, cudnAdvertisedEVPNUnmanagedRandomVTEP, spec, bgpAlloc)
+		// Keep the network active on both nodes with dynamic UDN allocation.
+		for _, node := range nodes.Items[:2] {
+			e2epod.CreateExecPodOrFail(ctx, f.ClientSet, namespace.Name, "vtep-"+node.Name, func(p *corev1.Pod) {
+				p.Spec.NodeName = node.Name
+			})
+		}
+		raClient, err := raclientset.NewForConfig(f.ClientConfig())
+		framework.ExpectNoError(err, "creating the RouteAdvertisements client")
+		gomega.Eventually(routeAdvertisementsReadyFunc(*raClient, testNetworkName), timeout, polling).Should(gomega.Succeed(), "waiting for initial RouteAdvertisements acceptance")
+		vtepName := testNetworkName + "-vtep"
+		var original string
+		prefixes := make([]string, 2)
+		gomega.Eventually(func() error {
+			for i, node := range nodes.Items[:2] {
+				current, err := f.ClientSet.CoreV1().Nodes().Get(ctx, node.Name, metav1.GetOptions{})
+				if err != nil {
+					return fmt.Errorf("reading node %s for VTEP prefixes: %w", node.Name, err)
+				}
+				vteps, err := ovnutil.ParseNodeVTEPs(current)
+				if err != nil {
+					return fmt.Errorf("parsing node %s VTEP annotation: %w", node.Name, err)
+				}
+				ips := vteps[vtepName].IPs
+				if len(ips) != 1 || !utilnet.IsIPv4String(ips[0]) {
+					return fmt.Errorf("node %s has no single IPv4 VTEP for %s: %v", node.Name, vtepName, ips)
+				}
+				prefixes[i] = ips[0] + "/32"
+				if i == 0 {
+					original = current.Annotations[ovnutil.OVNNodeVTEPs]
+				}
+			}
+			return nil
+		}, timeout, polling).Should(gomega.Succeed(), "reading both node VTEP prefixes")
+		gomega.Expect(prefixes[0]).NotTo(gomega.Equal(prefixes[1]), "test nodes must have distinct VTEP addresses")
+		checkRoutes := func(targetPresent bool) error {
+			for i, prefix := range prefixes {
+				output, err := infraprovider.Get().ExecExternalContainerCommand(
+					infraapi.ExternalContainer{Name: routerContainerName},
+					[]string{"vtysh", "-c", "show bgp ipv4 unicast " + prefix + " json"})
+				if err != nil {
+					return fmt.Errorf("querying external FRR for VTEP prefix %s: %w", prefix, err)
+				}
+				var route struct {
+					Prefix string            `json:"prefix"`
+					Paths  []json.RawMessage `json:"paths"`
+				}
+				if err := json.Unmarshal([]byte(output), &route); err != nil {
+					return fmt.Errorf("decoding FRR route %s: %w", prefix, err)
+				}
+				present := route.Prefix == prefix && len(route.Paths) > 0
+				if present != (i == 1 || targetPresent) {
+					return fmt.Errorf("unexpected external FRR route for %s: %s", prefix, output)
+				}
+			}
+			return nil
+		}
+		ginkgo.By("observing both nodes' VTEP host routes on external FRR")
+		gomega.Eventually(func() error { return checkRoutes(true) }, timeout, polling).Should(gomega.Succeed(), "waiting for both VTEP routes in external FRR")
+		patchAnnotation := func(value string) error {
+			patch, err := json.Marshal(map[string]interface{}{"metadata": map[string]interface{}{
+				"annotations": map[string]string{ovnutil.OVNNodeVTEPs: value},
+			}})
+			if err != nil {
+				return fmt.Errorf("encoding VTEP annotation patch: %w", err)
+			}
+			_, err = f.ClientSet.CoreV1().Nodes().Patch(ctx, nodes.Items[0].Name, k8stypes.MergePatchType, patch, metav1.PatchOptions{}, "status")
+			if err != nil {
+				return fmt.Errorf("patching node %s VTEP annotation: %w", nodes.Items[0].Name, err)
+			}
+			return nil
+		}
+		ginkgo.DeferCleanup(func() {
+			gomega.Eventually(func() error { return patchAnnotation(original) }, timeout, polling).Should(gomega.Succeed(), "restoring the original annotation during cleanup")
+		})
+		ginkgo.By("applying malformed JSON so node-side repair cannot race withdrawal")
+		framework.ExpectNoError(patchAnnotation("not-json"), "injecting a malformed VTEP annotation")
+		gomega.Eventually(func() error {
+			ra, err := raClient.K8sV1().RouteAdvertisements().Get(ctx, testNetworkName, metav1.GetOptions{})
+			if err != nil {
+				return fmt.Errorf("reading RouteAdvertisements %s after annotation update: %w", testNetworkName, err)
+			}
+			condition := meta.FindStatusCondition(ra.Status.Conditions, "Accepted")
+			if condition == nil || condition.Status != metav1.ConditionFalse ||
+				!strings.Contains(condition.Message, nodes.Items[0].Name) || !strings.Contains(condition.Message, ovnutil.OVNNodeVTEPs) {
+				return fmt.Errorf("waiting for RA to reject node %s: %v", nodes.Items[0].Name, condition)
+			}
+			return checkRoutes(false)
+		}, timeout, polling).Should(gomega.Succeed(), "waiting for RA rejection and route withdrawal")
+		gomega.Consistently(func() error { return checkRoutes(false) }, 5*time.Second, polling).Should(gomega.Succeed(), "the rejected VTEP route must stay withdrawn while the other node remains advertised")
+		ginkgo.By("restoring the annotation and observing the VTEP route return")
+		framework.ExpectNoError(patchAnnotation(original), "restoring the valid VTEP annotation")
+		gomega.Eventually(routeAdvertisementsReadyFunc(*raClient, testNetworkName), timeout, polling).Should(gomega.Succeed(), "waiting for RouteAdvertisements acceptance after restoration")
+		gomega.Eventually(func() error { return checkRoutes(true) }, timeout, polling).Should(gomega.Succeed(), "waiting for both VTEP routes to return")
+	})
 
 	ginkgo.DescribeTable("Validates BUM suppression is in effect for L2 EVPN networks",
 		func(bumTestBaseName string, networkSpecGen func(string, string, allocators.BGPAllocation) *udnv1.NetworkSpec) {
