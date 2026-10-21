@@ -4054,6 +4054,86 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 		ginkgo.Entry("MAC-VRF only", feature.EVPN, "bsup1", layer2MACVRFNetworkSpecGen),
 		ginkgo.Entry("MAC-VRF and IP-VRF", feature.EVPN, "bsup2", layer2MACVRFIPVRFNetworkSpecGen),
 	)
+
+	// Multicast is only supported on Layer2 EVPN networks, not Layer3.
+	evpnNetworks := []ginkgo.TableEntry{
+		ginkgo.Entry("Layer 2 CUDN EVPN MAC-VRF", feature.EVPN, layer2MACVRFNetworkSpecGen),
+		ginkgo.Entry("Layer 2 CUDN EVPN MAC-VRF and IP-VRF", feature.EVPN, layer2MACVRFIPVRFNetworkSpecGen),
+	}
+
+	ginkgo.DescribeTableSubtree("with multicast feature enabled for namespace",
+		func(networkSpecGen func() *udnv1.NetworkSpec) {
+			var (
+				clientNodeInfo, serverNodeInfo nodeInfo
+				testNamespace                  *corev1.Namespace
+			)
+
+			ginkgo.BeforeEach(func() {
+				nodes, err := e2enode.GetBoundedReadySchedulableNodes(context.TODO(), f.ClientSet, 2)
+				framework.ExpectNoError(err)
+				if len(nodes.Items) < 2 {
+					e2eskipper.Skipf(
+						"Test requires >= 2 Ready nodes, but there are only %v nodes",
+						len(nodes.Items))
+				}
+
+				nodeInternalIPv4 := func(node *corev1.Node) string {
+					ginkgo.GinkgoHelper()
+					ips := e2enode.GetAddressesByTypeAndFamily(node, corev1.NodeInternalIP, corev1.IPv4Protocol)
+					if len(ips) == 0 {
+						e2eskipper.Skipf("EVPN multicast tests require an IPv4 InternalIP on node %s", node.Name)
+					}
+					return ips[0]
+				}
+
+				clientNodeInfo = nodeInfo{
+					name:   nodes.Items[0].Name,
+					nodeIP: nodeInternalIPv4(&nodes.Items[0]),
+				}
+
+				serverNodeInfo = nodeInfo{
+					name:   nodes.Items[1].Name,
+					nodeIP: nodeInternalIPv4(&nodes.Items[1]),
+				}
+
+				networkSpec := networkSpecGen()
+				// Match subnets by IP families
+				switch {
+				case networkSpec.Layer3 != nil:
+					networkSpec.Layer3.Subnets = matchL3SubnetsByIPFamilies(ipFamilySet, networkSpec.Layer3.Subnets...)
+				case networkSpec.Layer2 != nil:
+					networkSpec.Layer2.Subnets = matchL2SubnetsByIPFamilies(ipFamilySet, networkSpec.Layer2.Subnets...)
+				}
+
+				testNamespace, _ = configureNetworkWithInfra(
+					f,
+					ictx,
+					testBaseName,
+					ipFamilySet,
+					testNetworkName,
+					cudnAdvertisedEVPNUnmanagedSharedVTEP,
+					networkSpec,
+				)
+				f.Namespace = testNamespace
+
+				ginkgo.By("Enabling multicast for namespace")
+				enableMulticastForNamespace(f)
+			})
+
+			ginkgo.It("handle multicast UDP traffic", func() {
+				ginkgo.By("send multicast UDP traffic between nodes")
+				testMulticastUDPTraffic(f, clientNodeInfo, serverNodeInfo, udnPodInterface)
+			})
+
+			ginkgo.It("handle multicast IGMP query", func() {
+				// TODO: this test is broken, see https://github.com/ovn-kubernetes/ovn-kubernetes/issues/5309
+				e2eskipper.Skipf("Layer2 EVPN IGMP query validation is disabled pending issue #5309")
+				ginkgo.By("receive multicast IGMP query")
+				testMulticastIGMPQuery(f, clientNodeInfo, serverNodeInfo)
+			})
+		},
+		evpnNetworks,
+	)
 })
 
 // getFRRK8sPodOnNode returns the frr-k8s DaemonSet pod on the given node.
