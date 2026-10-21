@@ -12,6 +12,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -19,6 +20,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/containernetworking/cni/pkg/skel"
@@ -267,21 +269,38 @@ func (p *Plugin) CmdAdd(args *skel.CmdArgs) error {
 		}
 
 		// In the case where ovnkube-node is running in Unprivileged mode, all the work
+		// of configuring the pod interfaces is done here. The default network and
+		// primary UDN interfaces are configured concurrently; a failure on either
+		// side cancels the other.
+		var primaryUDNResult *current.Result
+		var primaryUDNErr error
+		var wg sync.WaitGroup
+		primaryUDNPodRequest := response.PrimaryUDNPodReq
+		if response.PrimaryUDNPodInfo != nil {
+			primaryUDNPodRequest.ctx = ctx
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				primaryUDNResult, primaryUDNErr = getCNIResult(primaryUDNPodRequest, nil, clientset, response.PrimaryUDNPodInfo)
+				if primaryUDNErr != nil {
+					primaryUDNErr = fmt.Errorf("failed to get CNI Result from primary UDN pod interface info %v: %w",
+						response.PrimaryUDNPodInfo, primaryUDNErr)
+					cancel()
+				}
+			}()
+		}
 		result, err = getCNIResult(pr, nil, clientset, response.PodIFInfo)
 		if err != nil {
-			err = fmt.Errorf("failed to get CNI Result from pod interface info %v: %v", response.PodIFInfo, err)
+			err = fmt.Errorf("failed to get CNI Result from pod interface info %v: %w", response.PodIFInfo, err)
+			cancel()
+		}
+		wg.Wait()
+		if err != nil || primaryUDNErr != nil {
+			err = errors.Join(err, primaryUDNErr)
 			klog.Error(err.Error())
 			return err
 		}
 		if response.PrimaryUDNPodInfo != nil {
-			primaryUDNPodRequest := response.PrimaryUDNPodReq
-			primaryUDNPodRequest.ctx = ctx
-
-			primaryUDNResult, err := getCNIResult(primaryUDNPodRequest, nil, clientset, response.PrimaryUDNPodInfo)
-			if err != nil {
-				klog.Error(err.Error())
-				return err
-			}
 			mergePrimaryUDNResponse(&Response{Result: result}, &Response{Result: primaryUDNResult}, primaryUDNPodRequest)
 		}
 	}

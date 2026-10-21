@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	cnitypes "github.com/containernetworking/cni/pkg/types"
@@ -21,6 +22,8 @@ import (
 	nadv1Listers "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
 	nadutils "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/utils"
 
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/kubernetes"
 	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
@@ -332,7 +335,7 @@ func (s *Server) handleCNIRequest(r *http.Request) (result []byte, err error) {
 	klog.Infof("%s %s starting CNI request", request, request.Command)
 	switch request.Command {
 	case CNIAdd:
-		response, err = request.cmdAdd(s.kubeAuth, s.clientSet, s.ovsClient)
+		response, err = s.cmdAdd(request)
 	case CNIDel:
 		response, err = request.cmdDel(s.clientSet)
 	default:
@@ -343,34 +346,60 @@ func (s *Server) handleCNIRequest(r *http.Request) (result []byte, err error) {
 		return nil, err
 	}
 
-	// check if this is a default network request for a pod with primary UDN
-	// and create a primary interface if so
-	if request.Command == CNIAdd {
-		// There is no primary UDN pod request for CNIDel: the default-network
-		// cmdDel tears down all of the pod's attachments. UnconfigureInterface
-		// deletes all the pod's OVS ports in batch and, in simulated DPU-host
-		// mode, also returns the primary UDN netdevice to the host namespace
-		// (see returnSimulatedNetdevsToHost).
-		primaryPodRequest, err := s.getPrimaryUDNPodRequest(request)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get primary UDN pod request: %v", err)
-		}
-		if primaryPodRequest != nil {
-			klog.V(4).Infof("Pod %s/%s primaryUDN podRequest %v", primaryPodRequest.PodNamespace, primaryPodRequest.PodName, primaryPodRequest)
-			primaryResponse, err := primaryPodRequest.cmdAdd(s.kubeAuth, s.clientSet, s.ovsClient)
-			if err != nil {
-				return nil, fmt.Errorf("failed to add primary UDN pod request: %v", err)
-			}
-			// merge primary response into the original response
-			mergePrimaryUDNResponse(response, primaryResponse, primaryPodRequest)
-		}
-	}
-
 	if result, err = response.Marshal(); err != nil {
 		return nil, fmt.Errorf("failed to marshal result: %v", err)
 	}
 
 	return result, nil
+}
+
+// cmdAdd configures the pod's default network interface and, for a pod in a
+// primary UDN namespace, its primary UDN interface. The two are configured
+// concurrently. There is no primary UDN pod request for CNIDel: the
+// default-network cmdDel tears down all of the pod's attachments.
+// UnconfigureInterface deletes all the pod's OVS ports in batch and, in
+// simulated DPU-host mode, also returns the primary UDN netdevice to the host
+// namespace (see returnSimulatedNetdevsToHost).
+func (s *Server) cmdAdd(request *PodRequest) (*Response, error) {
+	primaryPodRequest, err := s.getPrimaryUDNPodRequest(request)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get primary UDN pod request: %w", err)
+	}
+	if primaryPodRequest == nil {
+		return request.cmdAdd(s.kubeAuth, s.clientSet, s.ovsClient)
+	}
+	klog.V(4).Infof("Pod %s/%s primaryUDN podRequest %v", primaryPodRequest.PodNamespace, primaryPodRequest.PodName, primaryPodRequest)
+
+	// A failure on either side cancels the other one.
+	ctx, cancel := context.WithCancel(request.ctx)
+	defer cancel()
+	request.ctx = ctx
+	primaryPodRequest.ctx = ctx
+
+	var response, primaryResponse *Response
+	var defaultErr, primaryErr error
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		if response, defaultErr = request.cmdAdd(s.kubeAuth, s.clientSet, s.ovsClient); defaultErr != nil {
+			cancel()
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		if primaryResponse, primaryErr = primaryPodRequest.cmdAdd(s.kubeAuth, s.clientSet, s.ovsClient); primaryErr != nil {
+			primaryErr = fmt.Errorf("failed to add primary UDN pod request: %w", primaryErr)
+			cancel()
+		}
+	}()
+	wg.Wait()
+
+	if defaultErr != nil || primaryErr != nil {
+		return nil, errors.Join(defaultErr, primaryErr)
+	}
+	mergePrimaryUDNResponse(response, primaryResponse, primaryPodRequest)
+	return response, nil
 }
 
 func (s *Server) getPrimaryUDNPodRequest(originalPodRequest *PodRequest) (*PodRequest, error) {
@@ -384,15 +413,22 @@ func (s *Server) getPrimaryUDNPodRequest(originalPodRequest *PodRequest) (*PodRe
 	}
 	podNamespace := originalPodRequest.PodNamespace
 	podName := originalPodRequest.PodName
-	// this function is only called after the default network is set up, so the pod should already be in the
-	// network manager's cache and have an active network
-	activeNetwork, err := s.networkManager.GetActiveNetworkForNamespace(podNamespace)
+	// The CNI ADD can arrive before this node's informers and network manager
+	// have caught up with the pod and its namespace's primary network, so wait
+	// for both, like the default network cmdAdd waits for the pod.
+	var activeNetwork util.NetInfo
+	pod, _, _, err := getPodWithAnnotations(originalPodRequest.ctx, s.clientSet, podNamespace, podName, "",
+		originalPodRequest.PodUID, false,
+		func(*corev1.Pod, string) (*util.PodAnnotation, bool, error) {
+			var err error
+			activeNetwork, err = s.networkManager.GetActiveNetworkForNamespace(podNamespace)
+			if util.IsInvalidPrimaryNetworkError(err) || apierrors.IsNotFound(err) {
+				return nil, false, nil
+			}
+			return nil, activeNetwork != nil, err
+		})
 	if err != nil {
-		return nil, err
-	}
-	// CNI should always have an active network for a pod on our node
-	if activeNetwork == nil {
-		return nil, fmt.Errorf("no active network found for namespace %s", podNamespace)
+		return nil, fmt.Errorf("failed waiting for the active network of pod %s/%s: %w", podNamespace, podName, err)
 	}
 	if activeNetwork.IsDefault() {
 		// there is no primary NAD
@@ -433,10 +469,6 @@ func (s *Server) getPrimaryUDNPodRequest(originalPodRequest *PodRequest) (*PodRe
 	}
 	resourceName := nad.Annotations[resourceNameAnnot]
 	if resourceName != "" {
-		pod, err := s.clientSet.getPod(podNamespace, podName)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get pod %s/%s: %v", podNamespace, podName, err)
-		}
 		deviceID, err := udn.GetPodPrimaryUDNDeviceID(pod, resourceName)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get primary UDN device ID for pod %s/%s resource %s: %v",
@@ -475,7 +507,7 @@ func mergePrimaryUDNResponse(originalResponse, primaryResponse *Response, primar
 		result.Interfaces = append(result.Interfaces, primaryUDNResult.Interfaces...)
 		result.IPs = append(result.IPs, primaryUDNResult.IPs...)
 
-		// Offset the index of the default network IPs to correctly point to the default network interfaces
+		// Offset the index of the primary UDN IPs to correctly point to the primary UDN interfaces
 		for i := numOfInitialIPs; i < len(result.IPs); i++ {
 			ifaceIPConfig := result.IPs[i].Copy()
 			if result.IPs[i].Interface != nil {

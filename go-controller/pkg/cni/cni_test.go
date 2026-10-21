@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	cnitypes "github.com/containernetworking/cni/pkg/types"
@@ -64,6 +65,50 @@ func (stub *podRequestInterfaceOpsStub) ConfigureInterface(pr *PodRequest, _ cli
 func (stub *podRequestInterfaceOpsStub) UnconfigureInterface(_ *PodRequest, ifInfo *PodInterfaceInfo, _ corev1listers.PodLister, _ *corev1.Pod) error {
 	stub.unconfiguredInterfaces = append(stub.unconfiguredInterfaces, ifInfo)
 	return nil
+}
+
+// concurrentPodRequestInterfaceOpsStub makes each ConfigureInterface call wait
+// until the expected number of calls have started, so the calls only succeed
+// if they run concurrently.
+type concurrentPodRequestInterfaceOpsStub struct {
+	podRequestInterfaceOpsStub
+	started    sync.WaitGroup
+	allStarted chan struct{}
+}
+
+func newConcurrentPodRequestInterfaceOpsStub(calls int) *concurrentPodRequestInterfaceOpsStub {
+	stub := &concurrentPodRequestInterfaceOpsStub{allStarted: make(chan struct{})}
+	stub.started.Add(calls)
+	go func() {
+		stub.started.Wait()
+		close(stub.allStarted)
+	}()
+	return stub
+}
+
+func (stub *concurrentPodRequestInterfaceOpsStub) ConfigureInterface(pr *PodRequest, ovsClient client.Client, getter PodInfoGetter, pii *PodInterfaceInfo) ([]*current.Interface, error) {
+	stub.started.Done()
+	select {
+	case <-stub.allStarted:
+		return stub.podRequestInterfaceOpsStub.ConfigureInterface(pr, ovsClient, getter, pii)
+	case <-pr.ctx.Done():
+		return nil, fmt.Errorf("%s was not configured concurrently: %w", pr.IfName, pr.ctx.Err())
+	}
+}
+
+// failingPodRequestInterfaceOpsStub fails ConfigureInterface for failIfName
+// and blocks any other interface until its request is cancelled.
+type failingPodRequestInterfaceOpsStub struct {
+	podRequestInterfaceOpsStub
+	failIfName string
+}
+
+func (stub *failingPodRequestInterfaceOpsStub) ConfigureInterface(pr *PodRequest, _ client.Client, _ PodInfoGetter, _ *PodInterfaceInfo) ([]*current.Interface, error) {
+	if pr.IfName == stub.failIfName {
+		return nil, fmt.Errorf("boom")
+	}
+	<-pr.ctx.Done()
+	return nil, pr.ctx.Err()
 }
 
 // dhcpPodRequestInterfaceOpsStub mimics ConfigureInterface for DHCP IPAM
@@ -350,7 +395,18 @@ var _ = Describe("Network Segmentation", func() {
 		Context("pod with a user defined primary network", func() {
 			const namespace = "foo-ns"
 
-			var nadMegaNet runtime.Object
+			var (
+				nadMegaNet runtime.Object
+				nadNetwork util.NetInfo
+			)
+
+			// handlePodRequestWithTimeout bounds how long a stub may block, so a
+			// regression fails instead of hanging
+			handlePodRequestWithTimeout := func() ([]byte, error) {
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancel()
+				return cniServer.handleCNIRequest(podRequestToHTTPRequest(&pr).WithContext(ctx))
+			}
 
 			BeforeEach(func() {
 				pod = &corev1.Pod{
@@ -364,7 +420,8 @@ var _ = Describe("Network Segmentation", func() {
 				}
 				nad := testing.GenerateNADWithConfig("meganet", namespace, dummyPrimaryUDNConfig(namespace, "meganet"))
 				nadMegaNet = nad
-				nadNetwork, err := util.ParseNADInfo(nad)
+				var err error
+				nadNetwork, err = util.ParseNADInfo(nad)
 				Expect(err).NotTo(HaveOccurred())
 				fakeNetworkManager.PrimaryNetworks[namespace] = nadNetwork
 				fakeNetworkManager.NADNetworks = map[string]util.NetInfo{
@@ -428,6 +485,59 @@ var _ = Describe("Network Segmentation", func() {
 							},
 						},
 					))
+				})
+
+				It("configures the default network and the primary UDN concurrently", func() {
+					podRequestInterfaceOps = newConcurrentPodRequestInterfaceOpsStub(2)
+					startCNIServer(testing.NewNamespace(pod.Namespace), pod, nadMegaNet)
+
+					res, err := handlePodRequestWithTimeout()
+					Expect(err).NotTo(HaveOccurred())
+					response := &Response{}
+					Expect(json.Unmarshal(res, response)).To(Succeed())
+					Expect(response.Result.Interfaces).To(HaveLen(4))
+				})
+
+				DescribeTable("returns the error and aborts the other interface",
+					func(failIfName string) {
+						podRequestInterfaceOps = &failingPodRequestInterfaceOpsStub{failIfName: failIfName}
+						startCNIServer(testing.NewNamespace(pod.Namespace), pod, nadMegaNet)
+
+						_, err := handlePodRequestWithTimeout()
+						Expect(err).To(MatchError(ContainSubstring("boom")))
+						Expect(err).NotTo(MatchError(ContainSubstring("deadline exceeded")),
+							"the other interface should be cancelled, not time out")
+					},
+					Entry("when the default network fails", "eth0"),
+					Entry("when the primary UDN fails", primaryUDNIfName),
+				)
+
+				It("waits for the primary network to be known to the node", func() {
+					// the namespace requires a primary UDN that this node doesn't know about yet
+					fakeNetworkManager.PrimaryNetworks[namespace] = nil
+					startCNIServer(testing.NewNamespace(pod.Namespace), pod, nadMegaNet)
+
+					type result struct {
+						res []byte
+						err error
+					}
+					done := make(chan result, 1)
+					go func() {
+						res, err := handlePodRequestWithTimeout()
+						done <- result{res, err}
+					}()
+					Consistently(done, 300*time.Millisecond).ShouldNot(Receive())
+
+					fakeNetworkManager.Lock()
+					fakeNetworkManager.PrimaryNetworks[namespace] = nadNetwork
+					fakeNetworkManager.Unlock()
+
+					var r result
+					Eventually(done, 5*time.Second).Should(Receive(&r))
+					Expect(r.err).NotTo(HaveOccurred())
+					response := &Response{}
+					Expect(json.Unmarshal(r.res, response)).To(Succeed())
+					Expect(response.Result.Interfaces).To(HaveLen(4))
 				})
 			})
 			Context("with CNI Unprivileged Mode", func() {
