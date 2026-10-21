@@ -1964,8 +1964,8 @@ func (c *Controller) getEgressIPsByNodesByNetworks(networks sets.Set[string]) (m
 
 // isOwnUpdate checks if an object was updated by us last, as indicated by its
 // managed fields. Used to avoid reconciling an update that we made ourselves.
-func isOwnUpdate(managedFields []metav1.ManagedFieldsEntry) bool {
-	return util.IsLastUpdatedByManager(fieldManager, managedFields)
+func isOwnUpdate(oldManagedFields, newManagedFields []metav1.ManagedFieldsEntry) bool {
+	return util.IsLastUpdatedByManager(fieldManager, oldManagedFields, newManagedFields)
 }
 
 func raNeedsUpdate(oldObj, newObj *ratypes.RouteAdvertisements) bool {
@@ -1974,7 +1974,11 @@ func raNeedsUpdate(oldObj, newObj *ratypes.RouteAdvertisements) bool {
 
 func frrConfigurationNeedsUpdate(oldObj, newObj *frrtypes.FRRConfiguration) bool {
 	// ignore if it was created or updated by ourselves
-	if newObj != nil && isOwnUpdate(newObj.ManagedFields) {
+	var oldManagedFields []metav1.ManagedFieldsEntry
+	if oldObj != nil {
+		oldManagedFields = oldObj.ManagedFields
+	}
+	if newObj != nil && isOwnUpdate(oldManagedFields, newObj.ManagedFields) {
 		return false
 	}
 	return oldObj == nil || newObj == nil || oldObj.Generation != newObj.Generation ||
@@ -1984,7 +1988,11 @@ func frrConfigurationNeedsUpdate(oldObj, newObj *frrtypes.FRRConfiguration) bool
 
 func nadNeedsUpdate(oldObj, newObj *nadtypes.NetworkAttachmentDefinition) bool {
 	// ignore if it updated by ourselves
-	if newObj != nil && isOwnUpdate(newObj.ManagedFields) {
+	var oldManagedFields []metav1.ManagedFieldsEntry
+	if oldObj != nil {
+		oldManagedFields = oldObj.ManagedFields
+	}
+	if newObj != nil && isOwnUpdate(oldManagedFields, newObj.ManagedFields) {
 		return false
 	}
 	nadSupported := func(nad *nadtypes.NetworkAttachmentDefinition) bool {

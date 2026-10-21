@@ -9,6 +9,7 @@ import (
 	"net"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 
@@ -855,6 +856,91 @@ func TestDoesEndpointSliceContainEligibleEndpoint(t *testing.T) {
 			if !reflect.DeepEqual(answer, tt.want) {
 				t.Errorf("got %v, want %v", answer, tt.want)
 			}
+		})
+	}
+}
+
+func TestLikelyLastUpdatedByManager(t *testing.T) {
+	t1 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	t2 := t1.Add(time.Second)
+	t3 := t2.Add(time.Second)
+
+	mf := func(manager string, t time.Time) metav1.ManagedFieldsEntry {
+		return metav1.ManagedFieldsEntry{
+			Manager: manager,
+			Time:    &metav1.Time{Time: t},
+		}
+	}
+
+	tests := []struct {
+		name             string
+		manager          string
+		oldManagedFields []metav1.ManagedFieldsEntry
+		newManagedFields []metav1.ManagedFieldsEntry
+		want             bool
+	}{
+		{
+			name:             "manager made the latest update",
+			manager:          "us",
+			oldManagedFields: []metav1.ManagedFieldsEntry{mf("us", t1), mf("them", t1)},
+			newManagedFields: []metav1.ManagedFieldsEntry{mf("us", t2), mf("them", t1)},
+			want:             true,
+		},
+		{
+			name:             "another manager made the latest update",
+			manager:          "us",
+			oldManagedFields: []metav1.ManagedFieldsEntry{mf("us", t1), mf("them", t1)},
+			newManagedFields: []metav1.ManagedFieldsEntry{mf("us", t1), mf("them", t2)},
+			want:             false,
+		},
+		{
+			name:             "another manager reset fields: our timestamp is latest but unchanged",
+			manager:          "us",
+			oldManagedFields: []metav1.ManagedFieldsEntry{mf("us", t2), mf("them", t1)},
+			newManagedFields: []metav1.ManagedFieldsEntry{mf("us", t2), mf("them", t1)},
+			want:             false,
+		},
+		{
+			name:             "no old managed fields (object creation)",
+			manager:          "us",
+			oldManagedFields: nil,
+			newManagedFields: []metav1.ManagedFieldsEntry{mf("us", t2), mf("them", t1)},
+			want:             true,
+		},
+		{
+			name:             "manager not present in new managed fields",
+			manager:          "us",
+			oldManagedFields: []metav1.ManagedFieldsEntry{mf("them", t1)},
+			newManagedFields: []metav1.ManagedFieldsEntry{mf("them", t2)},
+			want:             false,
+		},
+		{
+			name:             "only our manager present",
+			manager:          "us",
+			oldManagedFields: []metav1.ManagedFieldsEntry{mf("us", t1)},
+			newManagedFields: []metav1.ManagedFieldsEntry{mf("us", t2)},
+			want:             true,
+		},
+		{
+			name:             "multiple other managers, ours is latest and advanced",
+			manager:          "us",
+			oldManagedFields: []metav1.ManagedFieldsEntry{mf("us", t1), mf("a", t1), mf("b", t1)},
+			newManagedFields: []metav1.ManagedFieldsEntry{mf("us", t3), mf("a", t1), mf("b", t2)},
+			want:             true,
+		},
+		{
+			name:             "multiple other managers, ours is not latest",
+			manager:          "us",
+			oldManagedFields: []metav1.ManagedFieldsEntry{mf("us", t1), mf("a", t1), mf("b", t1)},
+			newManagedFields: []metav1.ManagedFieldsEntry{mf("us", t2), mf("a", t1), mf("b", t3)},
+			want:             false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := IsLastUpdatedByManager(tt.manager, tt.oldManagedFields, tt.newManagedFields)
+			assert.Equal(t, tt.want, got)
 		})
 	}
 }

@@ -217,8 +217,8 @@ func (c *Controller) onFRRUpdate(oldObj, newObj interface{}) {
 // isOwnUpdate checks if an object was last updated by this controller,
 // as indicated by its managed fields. Used to avoid reconciling events
 // that result from our own writes.
-func isOwnUpdate(managedFields []metav1.ManagedFieldsEntry) bool {
-	return util.IsLastUpdatedByManager(fieldManager, managedFields)
+func isOwnUpdate(oldManagedFields, newManagedFields []metav1.ManagedFieldsEntry) bool {
+	return util.IsLastUpdatedByManager(fieldManager, oldManagedFields, newManagedFields)
 }
 
 // isManagedRA returns true if RA name has ovnk-managed-bgp prefix
@@ -295,7 +295,7 @@ func (c *Controller) cudnNeedsUpdate(oldCUDN, newCUDN *userdefinednetworkv1.Clus
 		return false
 	}
 	// Ignore events from our own writes (e.g. ensureManagedNetworkLabel)
-	if isOwnUpdate(newCUDN.ManagedFields) {
+	if isOwnUpdate(oldCUDN.ManagedFields, newCUDN.ManagedFields) {
 		return false
 	}
 
@@ -321,9 +321,15 @@ func (c *Controller) raNeedsUpdate(oldRA, newRA *ratypes.RouteAdvertisements) bo
 	if newRA == nil {
 		return true
 	}
+	var oldManagedFields []metav1.ManagedFieldsEntry
+	if oldRA != nil {
+		oldManagedFields = oldRA.ManagedFields
+	}
+	if isOwnUpdate(oldManagedFields, newRA.ManagedFields) {
+		return false
+	}
 	if oldRA == nil {
-		// Ignore events from our own creations
-		return !isOwnUpdate(newRA.ManagedFields)
+		return true
 	}
 	return !reflect.DeepEqual(oldRA.Spec, newRA.Spec)
 }
@@ -335,9 +341,15 @@ func (c *Controller) frrNeedsUpdate(oldFRR, newFRR *frrtypes.FRRConfiguration) b
 	if newFRR == nil {
 		return true
 	}
+	var oldManagedFields []metav1.ManagedFieldsEntry
+	if oldFRR != nil {
+		oldManagedFields = oldFRR.ManagedFields
+	}
+	if isOwnUpdate(oldManagedFields, newFRR.ManagedFields) {
+		return false
+	}
 	if oldFRR == nil {
-		// Ignore events from our own creations
-		return !isOwnUpdate(newFRR.ManagedFields)
+		return true
 	}
 	oldValue, oldHasLabel := oldFRR.Labels[managedNetworkLabel]
 	newValue, newHasLabel := newFRR.Labels[managedNetworkLabel]

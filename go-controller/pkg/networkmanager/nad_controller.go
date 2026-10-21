@@ -1285,8 +1285,8 @@ func (c *nadController) syncNAD(key string, nad *nettypes.NetworkAttachmentDefin
 
 // isOwnUpdate checks if an object was updated by us last, as indicated by its
 // managed fields. Used to avoid reconciling an update that we made ourselves.
-func isOwnUpdate(manager string, managedFields []metav1.ManagedFieldsEntry) bool {
-	return util.IsLastUpdatedByManager(manager, managedFields)
+func isOwnUpdate(manager string, oldManagedFields, newManagedFields []metav1.ManagedFieldsEntry) bool {
+	return util.IsLastUpdatedByManager(manager, oldManagedFields, newManagedFields)
 }
 
 func (c *nadController) nadNeedsUpdate(oldNAD, newNAD *nettypes.NetworkAttachmentDefinition) (needsUpdate bool) {
@@ -1300,7 +1300,7 @@ func (c *nadController) nadNeedsUpdate(oldNAD, newNAD *nettypes.NetworkAttachmen
 		return false
 	}
 
-	if isOwnUpdate(c.name, newNAD.ManagedFields) {
+	if isOwnUpdate(c.name, oldNAD.ManagedFields, newNAD.ManagedFields) {
 		return false
 	}
 

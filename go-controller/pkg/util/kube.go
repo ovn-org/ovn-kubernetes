@@ -897,11 +897,18 @@ func GetConntrackZone() int {
 	return config.Default.ConntrackZone
 }
 
-// IsLastUpdatedByManager checks if an object was updated by the manager last,
-// as indicated by a set of managed fields.
-func IsLastUpdatedByManager(manager string, managedFields []metav1.ManagedFieldsEntry) bool {
+// IsLastUpdatedByManager reports whether the named manager made the most recent
+// update to an object by comparing the managed fields timestamps before and
+// after the update. It returns true only when the manager holds the latest
+// timestamp among all managers AND that timestamp advanced from old to new.
+// This avoids false positives when other managers are just resetting fields,
+// which doesn't update any timestamp. False negatives are possible when the
+// manager itself resets fields without updating or claiming new ones, as its
+// timestamp won't advance; callers should consider this so that these false
+// negatives ideally lead to no-op reconciliations.
+func IsLastUpdatedByManager(manager string, oldManagedFields, newManagedFields []metav1.ManagedFieldsEntry) bool {
 	var lastUpdateTheirs, lastUpdateOurs time.Time
-	for _, managedFieldEntry := range managedFields {
+	for _, managedFieldEntry := range newManagedFields {
 		switch managedFieldEntry.Manager {
 		case manager:
 			if managedFieldEntry.Time.Time.After(lastUpdateOurs) {
@@ -913,5 +920,14 @@ func IsLastUpdatedByManager(manager string, managedFields []metav1.ManagedFields
 			}
 		}
 	}
-	return lastUpdateOurs.After(lastUpdateTheirs)
+	if !lastUpdateOurs.After(lastUpdateTheirs) {
+		return false
+	}
+	var oldLastUpdateOurs time.Time
+	for _, managedFieldEntry := range oldManagedFields {
+		if managedFieldEntry.Manager == manager && managedFieldEntry.Time.Time.After(oldLastUpdateOurs) {
+			oldLastUpdateOurs = managedFieldEntry.Time.Time
+		}
+	}
+	return lastUpdateOurs.After(oldLastUpdateOurs)
 }

@@ -277,7 +277,7 @@ func (c *Controller) onNodeUpdate(oldObj, newObj interface{}) {
 		return
 	}
 	// don't reconcile on our own updates
-	if util.IsLastUpdatedByManager(vtepAnnotationFieldManager, newNode.ManagedFields) {
+	if util.IsLastUpdatedByManager(vtepAnnotationFieldManager, oldNode.ManagedFields, newNode.ManagedFields) {
 		return
 	}
 
