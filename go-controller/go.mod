@@ -20,7 +20,7 @@ require (
 	github.com/google/go-cmp v0.7.0
 	github.com/google/gopacket v1.1.19
 	github.com/google/uuid v1.6.0
-	github.com/gorilla/mux v1.8.0
+	github.com/gorilla/mux v1.8.1
 	github.com/insomniacslk/dhcp v0.0.0-20260403204709-237bfc891625
 	github.com/k8snetworkplumbingwg/govdpa v0.1.5-0.20230926073613-07c1031aea47
 	github.com/k8snetworkplumbingwg/ipamclaims v0.5.1-alpha
@@ -84,7 +84,10 @@ require (
 	github.com/cenkalti/hub v1.0.2 // indirect
 	github.com/cenkalti/rpc2 v1.0.6 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
-	github.com/containerd/cgroups v1.1.0 // indirect
+	github.com/containerd/cgroups/v3 v3.0.3 // indirect
+	github.com/containerd/errdefs v1.0.0 // indirect
+	github.com/containerd/errdefs/pkg v0.3.0 // indirect
+	github.com/containerd/typeurl/v2 v2.2.3 // indirect
 	github.com/cpuguy83/go-md2man/v2 v2.0.6 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/emicklei/go-restful/v3 v3.13.0 // indirect
@@ -171,7 +174,6 @@ require (
 )
 
 replace (
-	github.com/Microsoft/hcsshim => github.com/Microsoft/hcsshim v0.8.20
 	// This adds support for iptables-replace to improve performance
 	// Required until https://github.com/coreos/go-iptables/pull/124 is merged
 	// and the dependency above bumped to a release containing that change,
