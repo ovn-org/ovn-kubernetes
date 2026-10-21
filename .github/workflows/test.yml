@@ -68,9 +68,14 @@ jobs:
               (file.previous_filename && !isDoc(file.previous_filename)));
           core.setOutput('run_ci', String(runCI));
 
+  go-cache:
+    needs: changes
+    if: needs.changes.outputs.run_ci == 'true'
+    uses: ./.github/workflows/prepare-go-cache.yml
+
   # separate job for parallelism
   verify-lint-generated-code:
-    needs: changes
+    needs: [ changes, go-cache ]
     if: needs.changes.outputs.run_ci == 'true'
     name: Verify lint and generated code
     runs-on: ubuntu-24.04
@@ -79,10 +84,7 @@ jobs:
       uses: actions/checkout@v6
 
     - name: Set up Go
-      uses: actions/setup-go@v6
-      with:
-        go-version-file: 'go-controller/go.mod'
-        cache-dependency-path: "**/*.sum"
+      uses: ./.github/actions/setup-go
       id: go
 
     - name: Verify linting rules are enforced
@@ -195,7 +197,7 @@ jobs:
         path: ${{ env.CI_IMAGE_BASE_TAR }}
 
   build-pr:
-    needs: changes
+    needs: [ changes, go-cache ]
     # A failed file check must fail this required check, rather than skip it.
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.run_ci != 'false') }}
     name: Build-PR
@@ -211,6 +213,11 @@ jobs:
         CHANGES_RESULT: ${{ needs.changes.result }}
         RUN_CI: ${{ needs.changes.outputs.run_ci }}
       run: test "$CHANGES_RESULT" = success && test "$RUN_CI" = true
+
+    - name: Verify module cache preparation succeeded
+      env:
+        CACHE_RESULT: ${{ needs.go-cache.result }}
+      run: test "$CACHE_RESULT" = success
     # These anchored steps are shared with build-pr-ubuntu below.
     - &restore_pr_image_cache
       name: Restore PR image cache
@@ -242,10 +249,7 @@ jobs:
     - &setup_pr_image_go
       name: Set up Go
       if: steps.is_pr_image_build_needed.outputs.PR_IMAGE_RESTORED != 'true' && success()
-      uses: actions/setup-go@v6
-      with:
-        go-version-file: 'go-controller/go.mod'
-        cache-dependency-path: "**/*.sum"
+      uses: ./.github/actions/setup-go
       id: go
 
     - name: Build - from current pr branch
@@ -294,7 +298,7 @@ jobs:
         path: ${{ env.CI_DIST_IMAGES_OUTPUT }}/${{ env.CI_IMAGE_PR_TAR }}
 
   build-pr-ubuntu:
-    needs: changes
+    needs: [ changes, go-cache ]
     if: needs.changes.outputs.run_ci == 'true'
     name: Build-PR (Ubuntu)
     runs-on: ubuntu-24.04
@@ -314,7 +318,7 @@ jobs:
     - *upload_pr_image
 
   test-pr:
-    needs: changes
+    needs: [ changes, go-cache ]
     if: needs.changes.outputs.run_ci == 'true'
     name: Test-PR
     runs-on: ubuntu-24.04
@@ -323,10 +327,7 @@ jobs:
       uses: actions/checkout@v6
 
     - name: Set up Go
-      uses: actions/setup-go@v6
-      with:
-        go-version-file: 'go-controller/go.mod'
-        cache-dependency-path: "**/*.sum"
+      uses: ./.github/actions/setup-go
       id: go
 
     - name: Install VRF kernel module
@@ -408,7 +409,9 @@ jobs:
       uses: actions/setup-go@v6
       with:
         go-version-file: 'go-controller/go.mod'
-        cache-dependency-path: "**/*.sum"
+        # Restore modules after the PR checkout below, avoiding two cache
+        # extractions into the same directory with overlapping read-only files.
+        cache: false
       id: go
 
     - name: Set up environment
@@ -457,6 +460,9 @@ jobs:
 
     - name: Check out code into the Go module directory - from PR branch
       uses: actions/checkout@v6
+
+    - name: Restore PR Go modules
+      uses: ./.github/actions/setup-go
 
     - name: Export kind logs
       if: always()
@@ -678,10 +684,7 @@ jobs:
         docker system info
 
     - name: Set up Go
-      uses: actions/setup-go@v6
-      with:
-        go-version-file: 'go-controller/go.mod'
-        cache-dependency-path: "**/*.sum"
+      uses: ./.github/actions/setup-go
       id: go
 
     - name: Set up environment
@@ -864,10 +867,7 @@ jobs:
       uses: actions/checkout@v6
 
     - name: Set up Go
-      uses: actions/setup-go@v6
-      with:
-        go-version-file: 'go-controller/go.mod'
-        cache-dependency-path: "**/*.sum"
+      uses: ./.github/actions/setup-go
       id: go
 
     - name: Set up environment
