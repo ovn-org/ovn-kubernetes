@@ -206,7 +206,11 @@ nor the programmed routes can express weights, so the lighter paths are omitted
 rather than promoted to equal-cost paths. It publishes the distinct gateways in
 deterministic order, up to 256 total across both IP families per node and
 Uplink. Each network on the uplink installs the published gateways for its
-configured IP families as default routes on its OVN gateway router.
+configured IP families as one static default route per gateway on its OVN
+gateway router, which OVN load-balances as ECMP, and as one default route per
+IP family in the network's VRF on the node, a multipath route when the family
+has several gateways. A gateway that drops out of `status.defaultGateways` is
+removed from both.
 
 With VRF-Lite (`targetVRF: auto`), OVN-Kubernetes moves the selected host
 interface into the CUDN VRF and preserves its existing static and DHCP routes,
