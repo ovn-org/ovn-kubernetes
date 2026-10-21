@@ -4,9 +4,23 @@ on:
 
 jobs:
   labeler:
+    concurrency:
+      group: pr-labeler-${{ github.event.pull_request.number }}
     permissions:
       contents: read
       pull-requests: write
     runs-on: ubuntu-26.04
     steps:
     - uses: actions/labeler@v5
+    # pull_request_target runs trusted base code, including the size-labeling script.
+    - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      with:
+        ref: ${{ github.sha }}
+        persist-credentials: false
+        sparse-checkout: .github/scripts
+    - name: Label PR size
+      uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+      with:
+        script: |
+          const labelPRSize = require('./.github/scripts/label-pr-size.js');
+          await labelPRSize({ github, context, core });
