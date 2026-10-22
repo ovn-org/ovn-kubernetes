@@ -35,6 +35,20 @@ reviews:
       instructions: |
         - OVN-Kubernetes is a Kubernetes network plugin built on OVN/OVS.
           All Go source lives under go-controller/.
+        - Evaluate the PR's motivation as well as its implementation.
+          Identify the concrete bug, user need, or maintenance benefit
+          from the PR description and available evidence, and check that
+          the change addresses it. Question assumptions contradicted by
+          the code, unreachable failure scenarios, redundant functionality,
+          and complexity disproportionate to the benefit. If the rationale
+          is unclear, request specific evidence or clarification rather
+          than inventing a justification. Ground concerns in the code or
+          stated requirements, not speculation or personal preference.
+          Do not require a linked issue or production incident: valid
+          motivations include preventative fixes for reachable failures,
+          performance improvements, refactoring, documentation, and test
+          coverage. Distinguish an unexplained motivation from evidence
+          that the proposed change does not solve the stated problem.
         - Do not approve PRs that add new Go dependencies without
           clear justification in the PR description.
         - Generated code (zz_generated*, vendor/, or files that have a comment 
@@ -42,6 +56,17 @@ reviews:
           reviewed for style — only verify it was regenerated correctly.
         - Dual-stack (IPv4+IPv6) must always be considered — flag
           changes that only handle single-stack.
+        - Flag nil checks, fallback paths, optional callbacks, or other
+          production hooks for states excluded by supported initialization,
+          the call chain, or API contracts. Establish production reachability
+          before requesting defensive handling; retain checks for genuinely
+          optional inputs, external data, and reachable lifecycle/error states.
+          Do not request or accept production branches that weaken invariants
+          or silently skip required work solely to accommodate partially
+          initialized unit-test objects or avoid the normal test harness.
+          Prefer existing fixtures, fakes, and harnesses, with test-only
+          helpers in test files. New production injection points need a
+          design justification beyond simplifying a particular test.
         - Every feature or bug fix should include unit tests. Flag PRs
           that modify product behavior without corresponding test updates,
           subject to the test/ and website/documentation exceptions below.
@@ -172,8 +197,10 @@ reviews:
           for easy addition of new cases (prefer table-driven or flat
           ginkgo entries over deeply nested contexts).
         - Flag duplicate tests covering the same scenario.
-        - Flag missing edge cases: nil inputs, empty lists, dual-stack,
-          error paths, and boundary conditions.
+        - Flag missing reachable edge cases: optional nil inputs, empty
+          lists, dual-stack, error paths, and boundary conditions. Do not
+          demand tests or production guards for states excluded by the
+          initialization flow or API contract.
         - Flag test helper/utility duplication — check if similar
           helpers already exist in pkg/testing/ or other test files
           in the same package before adding new ones.
@@ -246,6 +273,16 @@ reviews:
           intent, trade-offs, or constraints warrant a comment.
     - path: "test/e2e/**"
       instructions: |
+        - Verify CI reachability for every new spec or changed selection
+          requirement. Identify a concrete lane in .github/workflows/
+          and trace test/Makefile and test/scripts/ selection, focus/skip
+          expressions, feature labels, Serial/PARALLEL handling, cluster
+          flags, and runtime skip prerequisites. Flag specs excluded by
+          every suitable lane. Kubernetes conformance jobs do not execute
+          OVN-Kubernetes specs in test/e2e/. Compilation or a focused
+          dry-run alone is not evidence of CI execution. When available,
+          inspect CI logs/reports for the specific spec running rather
+          than being skipped; otherwise report execution as unverified.
         - E2E tests must be backwards compatible — adding tests for
           new features must not break existing tests for users who
           don't use the new feature.
@@ -405,8 +442,19 @@ reviews:
           this PR.
 
           Fail if user-facing behavior changed with no E2E test changes.
-          Pass only if no user-facing behavior changed, or if E2E test
-          files are included.
+          E2E file presence alone is not sufficient. For new specs or
+          changed selection requirements, identify a concrete CI lane
+          whose test command selects them with the required cluster
+          features enabled. Trace workflow and runner-script focus/skip
+          expressions, feature labels, Serial/PARALLEL handling, and
+          runtime skip prerequisites. Fail if no suitable lane executes
+          the specs, and request CI wiring in the same PR. Kubernetes
+          conformance jobs do not cover OVN-Kubernetes E2E specs.
+          Report the lane and selection evidence. When CI logs or reports
+          are available, confirm the specific specs ran rather than being
+          skipped. If execution is pending or unavailable, state that
+          limitation; do not treat compilation, an unrelated passing job,
+          or a focused dry-run as proof of CI execution.
 
           If failing, advise the author: if E2E tests are genuinely not
           feasible for this change, document the justification in the
@@ -436,6 +484,16 @@ reviews:
           (CONTRIBUTING.md) must be updated to document the new
           convention. Fail if a new pattern is introduced without
           documenting it for future contributors.
+
+          Changes to agent instructions or automated review guidance
+          do not require duplicate contributor or product documentation.
+          AGENTS.md and .coderabbit.yml are appropriate places for that
+          guidance. Do not treat instructions about how agents assess
+          or validate work as new contributor conventions by themselves.
+          Require additional documentation only when the change
+          independently alters a contributor workflow, product behavior,
+          or architecture; apply that requirement to the relevant changes
+          even when the PR also modifies agent or review guidance.
 
           Fail if a new doc page (*.md) is added under docs/ but the
           mkdocs.yml nav section is not updated to include it.
@@ -474,7 +532,7 @@ reviews:
           project files stale or inaccurate: .coderabbit.yml (path
           instructions, pre-merge checks, global review instructions),
           CONTRIBUTING.md, AGENTS.md, docs/developer-guide/,
-          docs/governance/, ARCHITECTURE.md, CODEOWNERS, or mkdocs.yml
+          docs/governance/, docs/design/architecture.md, CODEOWNERS, or mkdocs.yml
           navigation entries.
 
           Examples of staleness:
@@ -490,7 +548,7 @@ reviews:
           or removed but still referenced in docs or AGENTS.md.
 
           4. Architecture or component boundaries change but
-          ARCHITECTURE.md is not updated.
+          docs/design/architecture.md is not updated.
 
           Fail if any project docs or config become stale due to the
           changes. Pass only if the PR does not introduce any such
@@ -685,7 +743,7 @@ reviews:
         mode: "error"
         instructions: >-
           If the PR modifies .coderabbit.yml, any **/AGENTS.md, or
-          any **/ARCHITECTURE.md file, check whether the PR author's
+          docs/design/architecture.md, check whether the PR author's
           GitHub handle is listed in MAINTAINERS.md as a current
           maintainer. These files control AI review behavior, agent
           instructions, and architectural documentation — changes
@@ -693,8 +751,8 @@ reviews:
           review quality or introducing security issues.
 
           Fail if the PR author is not listed in MAINTAINERS.md and
-          the PR modifies .coderabbit.yml, any **/AGENTS.md, or any
-          **/ARCHITECTURE.md file. Advise the author that these
+          the PR modifies .coderabbit.yml, any **/AGENTS.md, or
+          docs/design/architecture.md. Advise the author that these
           files may only be changed by recognized maintainers listed
           in MAINTAINERS.md.
 
