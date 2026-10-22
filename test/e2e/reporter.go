@@ -110,7 +110,7 @@ func DumpInfo(reporter *k8sreporter.KubernetesReporter) {
 // DumpBGPInfo dumps current bgp specific configuration from frr router container and metallb
 // speaker pod's frr container which helps to troubleshoot if there is any problem with route
 // advertisement for a load balancer service ip address.
-func DumpBGPInfo(basePath, testName string, f *framework.Framework) {
+func DumpBGPInfo(basePath, testName string, f *framework.Framework, namespaces ...string) {
 	testPath := path.Join(basePath, strings.ReplaceAll(testName, " ", "-"))
 	err := os.MkdirAll(testPath, 0755)
 	if err != nil && !errors.Is(err, os.ErrExist) {
@@ -157,7 +157,13 @@ func DumpBGPInfo(basePath, testName string, f *framework.Framework) {
 			continue
 		}
 	}
-	describeSvc(f.Namespace.Name)
+	if len(namespaces) == 0 {
+		namespaces = []string{f.Namespace.Name}
+	}
+	for _, ns := range namespaces {
+		describeSvc(ns)
+		describePods(ns)
+	}
 }
 
 func logFileFor(base string, kind string) (*os.File, error) {
@@ -275,8 +281,16 @@ func speakerPods(cs clientset.Interface) ([]*corev1.Pod, error) {
 
 // describeSvc logs the output of kubectl describe svc for the given namespace.
 func describeSvc(ns string) {
-	framework.Logf("\nOutput of kubectl describe svc:\n")
+	framework.Logf("\nOutput of kubectl describe svc in namespace %s:\n", ns)
 	desc, _ := e2ekubectl.RunKubectl(
 		ns, "describe", "svc", fmt.Sprintf("--namespace=%v", ns))
+	framework.Logf("%s", desc)
+}
+
+// describePods logs the output of kubectl describe pods for the given namespace.
+func describePods(ns string) {
+	framework.Logf("\nOutput of kubectl describe pods in namespace %s:\n", ns)
+	desc, _ := e2ekubectl.RunKubectl(
+		ns, "describe", "pods", fmt.Sprintf("--namespace=%v", ns))
 	framework.Logf("%s", desc)
 }

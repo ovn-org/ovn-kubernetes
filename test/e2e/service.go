@@ -2758,7 +2758,7 @@ spec:
 
 	ginkgo.JustAfterEach(func() {
 		if ginkgo.CurrentSpecReport().Failed() {
-			DumpBGPInfo(reportPath, ginkgo.CurrentSpecReport().LeafNodeText, f)
+			DumpBGPInfo(reportPath, ginkgo.CurrentSpecReport().LeafNodeText, f, namespaceName)
 			k8sReporter := InitReporter(framework.TestContext.KubeConfig, reportPath,
 				[]string{metallbNamespace, namespaceName})
 			DumpInfo(k8sReporter)
