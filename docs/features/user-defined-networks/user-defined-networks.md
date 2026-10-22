@@ -138,6 +138,13 @@ Cluster manager owns the network ID and tunnel key annotations on
 NetworkAttachmentDefinitions. Configure networks through the UDN/CUDN API or
 NAD network configuration; do not assign these allocation annotations manually.
 
+An admission policy permits only cluster manager to add, change, or remove
+`k8s.ovn.org/network-id` and `k8s.ovn.org/tunnel-keys`, including during NAD
+creation. When restoring a NAD from saved YAML, omit these annotations and let
+cluster manager regenerate them.
+Unchanged annotations, including legacy invalid values, do not block unrelated
+updates.
+
 Cluster manager preserves allocated tunnel keys across restarts and NAD
 configuration changes. A failed annotation update does not release the
 network's existing tunnel keys.
