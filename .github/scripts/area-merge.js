@@ -341,13 +341,27 @@ module.exports = async ({ github, context, core }) => {
 
     if (failedChecks.length > 0) {
       core.info(`Failed checks: ${failedChecks.join(', ')}`);
+      const failureMarker = `<!-- area-merge-failed-sha:${ref}:${[...failedChecks].sort().join(',')} -->`;
+      if (!allComments) allComments = await fetchAllComments(prNumber);
+      if (context.eventName !== 'issue_comment' && allComments.some(c =>
+        c.user.login === botLogin && c.body.includes(failureMarker)
+      )) {
+        continue;
+      }
+      const alreadyWaiting = allComments.some(c =>
+        c.user.login === botLogin && c.body.includes(`<!-- area-merge-sha:${ref} -->`)
+      );
+      const guidance = alreadyWaiting
+        ? `Please fix or rerun the failed checks. This approved SHA will merge automatically when all checks pass. ` +
+          `If you push new commits, run \`/area-maintainer-approved\` again after review.`
+        : `Please fix the failures and run \`/area-maintainer-approved\` again.`;
       await github.rest.issues.createComment({
         owner: context.repo.owner,
         repo: context.repo.repo,
         issue_number: prNumber,
-        body: `Cannot merge via \`/area-maintainer-approved\`: the following CI checks have failed:\n` +
+        body: `${failureMarker}\nCannot merge via \`/area-maintainer-approved\`: the following CI checks have failed:\n` +
           failedChecks.map(c => `- \`${c}\``).join('\n') +
-          `\n\nPlease fix the failures and run \`/area-maintainer-approved\` again.`,
+          `\n\n${guidance}`,
       });
       continue;
     }

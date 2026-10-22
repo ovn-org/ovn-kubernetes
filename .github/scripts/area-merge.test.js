@@ -241,6 +241,70 @@ test('a failing commit status blocks the retry', async t => {
   assert.match(f.comments.at(-1).body, /external-ci/);
 });
 
+for (const eventName of ['workflow_run', 'check_suite']) {
+  test(`${eventName} reports the same failures only once regardless of order`, async t => {
+    const f = fixture(t, eventName);
+    f.checks[0].conclusion = 'failure';
+    f.checks.push({ name: 'unit', status: 'completed', conclusion: 'failure' });
+    await f.run();
+    assert.match(f.comments.at(-1).body, /- `e2e`\n- `unit`/);
+    assert.match(f.comments.at(-1).body, /will merge automatically when all checks pass/);
+    f.checks.reverse();
+    await f.run();
+    assert.equal(f.github.rest.issues.createComment.mock.callCount(), 1);
+    assert.equal(f.merge.mock.callCount(), 0);
+
+    for (const check of f.checks) check.conclusion = 'success';
+    await f.run();
+    assert.equal(f.merge.mock.callCount(), 1);
+  });
+}
+
+test('retries report changed failures and failures on a newly approved SHA', async t => {
+  const f = fixture(t);
+  f.checks[0].conclusion = 'failure';
+  await f.run();
+  f.status.state = 'failure';
+  f.status.statuses = [{ context: 'external-ci', state: 'failure' }];
+  await f.run();
+  assert.equal(f.github.rest.issues.createComment.mock.callCount(), 2);
+  assert.match(f.comments.at(-1).body, /external-ci/);
+
+  f.pr.head.sha = f.source.head_sha = 'new-approved-sha';
+  f.comments[1].body = '<!-- area-merge-sha:new-approved-sha -->';
+  await f.run();
+  assert.equal(f.github.rest.issues.createComment.mock.callCount(), 3);
+  assert.equal(f.merge.mock.callCount(), 0);
+});
+
+test('a human failure marker cannot suppress a retry notification', async t => {
+  const f = fixture(t);
+  f.checks[0].conclusion = 'failure';
+  await f.run();
+  f.comments.at(-1).user = f.command.user;
+  await f.run();
+  assert.equal(f.github.rest.issues.createComment.mock.callCount(), 2);
+  assert.equal(f.merge.mock.callCount(), 0);
+});
+
+for (const waiting of [false, true]) {
+  test(`explicit commands always report failures with waiting=${waiting}`, async t => {
+    const f = fixture(t, 'issue_comment');
+    if (!waiting) f.comments.pop();
+    f.checks[0].conclusion = 'failure';
+    await f.run();
+    await f.run();
+    assert.equal(f.github.rest.issues.createComment.mock.callCount(), 2);
+    assert.equal(f.merge.mock.callCount(), 0);
+    if (waiting) {
+      assert.match(f.comments.at(-1).body, /will merge automatically when all checks pass/);
+    } else {
+      assert.match(f.comments.at(-1).body, /Please fix the failures and run `\/area-maintainer-approved` again/);
+      assert.doesNotMatch(f.comments.at(-1).body, /will merge automatically/);
+    }
+  });
+}
+
 test('workflow completion rechecks area authorization', async t => {
   const f = fixture(t);
   f.command.user.login = 'other-reviewer';
