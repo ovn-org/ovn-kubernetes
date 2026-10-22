@@ -180,3 +180,5 @@ replace (
 	github.com/gogo/protobuf => github.com/gogo/protobuf v1.3.2
 	github.com/j-keck/arping => github.com/JacobTanenbaum/arping v0.0.0-20240209152419-3987db83bd51
 )
+
+tool github.com/ovn-kubernetes/libovsdb/cmd/modelgen

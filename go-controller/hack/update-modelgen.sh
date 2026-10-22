@@ -5,14 +5,6 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-# Install modelgen in an isolated directory so generation always uses the
-# version pinned here instead of an arbitrary binary already on PATH.
-builddir="$(mktemp -d)"
-trap 'rm -rf "${builddir}"' EXIT
-GOBIN="${builddir}/bin" GO111MODULE=on \
-  go install github.com/ovn-kubernetes/libovsdb/cmd/modelgen@v0.9.0
-export PATH="${builddir}/bin:${PATH}"
-
 go generate ./pkg/nbdb
 go generate ./pkg/sbdb
 go generate ./pkg/vswitchd

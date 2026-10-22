@@ -3,4 +3,4 @@
 
 package ovsdb
 
-//go:generate modelgen --extended -p ovsdb -o . vswitch.ovsschema
+//go:generate go tool modelgen --extended -p ovsdb -o . vswitch.ovsschema

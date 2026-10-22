@@ -3,4 +3,4 @@
 
 package vswitchd
 
-//go:generate modelgen --extended -p vswitchd -o . vswitch.ovsschema
+//go:generate go tool modelgen --extended -p vswitchd -o . vswitch.ovsschema
