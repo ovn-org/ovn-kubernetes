@@ -64,17 +64,25 @@ var metricPodCreationLatency = prometheus.NewHistogram(prometheus.HistogramOpts{
 	Buckets:   prometheus.ExponentialBuckets(.1, 2, 15),
 })
 
-// MetricResourceUpdateCount is the number of times a particular resource's UpdateFunc has been called.
+// MetricResourceUpdateCount is the number of resource events dispatched after per-key update coalescing.
 var MetricResourceUpdateCount = prometheus.NewCounterVec(prometheus.CounterOpts{
 	Namespace: types.MetricOvnkubeNamespace,
 	Subsystem: types.MetricOvnkubeSubsystemController,
 	Name:      "resource_update_total",
-	Help:      "The number of times a given resource event (add, update, or delete) has been handled"},
+	Help:      "The number of resource add, update, and delete events dispatched after per-key update coalescing"},
 	[]string{
 		"name",
 		"event",
 	},
 )
+
+// MetricResourceUpdateCoalescedCount counts update events merged into a pending callback.
+var MetricResourceUpdateCoalescedCount = prometheus.NewCounterVec(prometheus.CounterOpts{
+	Namespace: types.MetricOvnkubeNamespace,
+	Subsystem: types.MetricOvnkubeSubsystemController,
+	Name:      "resource_update_coalesced_total",
+	Help:      "The number of queued resource update events coalesced before callback delivery",
+}, []string{"name"})
 
 // MetricResourceAddLatency is the time taken to complete resource update by an handler.
 // This measures the latency for all of the handlers for a given resource.
@@ -368,6 +376,7 @@ func RegisterOVNKubeControllerPerformance(nbClient libovsdbclient.Client) {
 	// No need to unregister because process exits when leadership is lost.
 	prometheus.MustRegister(metricPodCreationLatency)
 	prometheus.MustRegister(MetricResourceUpdateCount)
+	prometheus.MustRegister(MetricResourceUpdateCoalescedCount)
 	prometheus.MustRegister(MetricResourceAddLatency)
 	prometheus.MustRegister(MetricResourceUpdateLatency)
 	prometheus.MustRegister(MetricResourceDeleteLatency)

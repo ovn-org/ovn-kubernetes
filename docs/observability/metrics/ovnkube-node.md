@@ -10,15 +10,24 @@ All metrics in this section are rooted at `ovnkube_controller_`.
 
 ### Lifecycle and Resource Processing
 
+Consecutive pending update events for the same resource key are coalesced only
+when the incoming update keeps the UID unchanged and neither update changes a
+handler's filter membership. Add and delete callbacks remain separate and retain
+their per-key order. The resource counter and latency histograms below measure
+events dispatched after coalescing; the latency histograms time the handler pass
+for each dispatched event. The coalesced event counter counts incoming updates
+merged into a pending update.
+
 | Name | Type | Labels | Description |
 | --- | --- | --- | --- |
 | `build_info` | Gauge | `version`, `revision`, `branch`, `build_user`, `build_date`, `goversion` | Build information. The value is always `1`. |
 | `ready_duration_seconds` | Gauge | None | Time for ovnkube-controller to become ready. |
 | `sync_duration_seconds` | Gauge | `resource_name` | Time to complete initial synchronization and set up handlers for a resource. |
-| `resource_update_total` | Counter | `name`, `event` | Resource add, update, and delete events handled. |
-| `resource_add_latency_seconds` | Histogram | None | Time to process all handlers for an add event. |
-| `resource_update_latency_seconds` | Histogram | None | Time to process all handlers for an update event. |
-| `resource_delete_latency_seconds` | Histogram | None | Time to process all handlers for a delete event. |
+| `resource_update_total` | Counter | `name`, `event` | Resource add, update, and delete events dispatched after per-key queue coalescing. |
+| `resource_update_coalesced_total` | Counter | `name` | Queued update events merged into another callback for the same resource key. |
+| `resource_add_latency_seconds` | Histogram | None | Time to process all handlers for a delivered add callback. |
+| `resource_update_latency_seconds` | Histogram | None | Time to process all handlers for a delivered update callback. |
+| `resource_delete_latency_seconds` | Histogram | None | Time to process all handlers for a delivered delete callback. |
 | `logfile_size_bytes` | Gauge | `logfile_name` | Size of the configured ovnkube-controller log file. No series is produced when file logging is not configured. |
 
 ### Pod and Service Programming

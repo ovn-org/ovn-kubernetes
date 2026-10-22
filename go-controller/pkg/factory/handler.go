@@ -17,11 +17,11 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ktypes "k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/rand"
 	listers "k8s.io/client-go/listers/core/v1"
 	discoverylisters "k8s.io/client-go/listers/discovery/v1"
 	netlisters "k8s.io/client-go/listers/networking/v1"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 	anplister "sigs.k8s.io/network-policy-api/pkg/client/listers/apis/v1alpha1"
 
@@ -89,33 +89,42 @@ func (h *Handler) kill() bool {
 	return atomic.CompareAndSwapUint32(&h.tombstone, handlerAlive, handlerDead)
 }
 
+// event preserves the objects and callback needed to deliver a queued informer notification.
 type event struct {
-	obj     interface{}
-	oldObj  interface{}
-	process func(*event)
+	obj              interface{}
+	oldObj           interface{}
+	process          func(*event)
+	eventType        eventType
+	filterTransition bool
 }
+
+type eventType uint8
+
+const (
+	eventTypeAdd eventType = iota
+	eventTypeUpdate
+	eventTypeDelete
+)
 
 type listerInterface interface{}
 
 type initialAddFn func(*Handler, []interface{})
 
+// queueMap dispatches callbacks by resource key while preserving per-key ordering.
 type queueMap struct {
 	sync.Mutex
-	entries  map[ktypes.NamespacedName]*queueMapEntry
-	queues   []chan *event
-	wg       *sync.WaitGroup
-	stopChan chan struct{}
+	entries    map[ktypes.NamespacedName]*queueMapEntry
+	queue      workqueue.TypedInterface[ktypes.NamespacedName]
+	numWorkers int
+	stopped    bool
+	wg         *sync.WaitGroup
+	stopChan   chan struct{}
 }
 
+// queueMapEntry holds callbacks for one object key until its worker delivers them.
 type queueMapEntry struct {
-	queue uint32
-	// The high bit records a pending delete; the remaining bits count
-	// in-flight events. Keep the entry eight bytes: these exist per object
-	// in every active internal informer slot.
-	refcount uint32
+	pending []*event
 }
-
-const queueEntryDeleted uint32 = 1 << 31
 
 type internalInformer struct {
 	sync.RWMutex
@@ -126,7 +135,12 @@ type internalInformer struct {
 	// NOTE: we can have multiple handlers with the same priority hence the value
 	// is a map of handlers keyed by its unique id.
 	handlers map[int]map[uint64]*Handler
-	// queueMap handles distributing events across a queued handler's queues
+	// coalescingFilters tracks handlers while they are registered or being
+	// removed. Its lock is held through update enqueueing so membership checks
+	// cannot be separated from their queued events.
+	coalescingFiltersMu sync.RWMutex
+	coalescingFilters   map[uint64]func(interface{}) bool
+	// queueMap serializes and dispatches queued events by object key.
 	queueMap *queueMap
 	// hasHandlers is an atomic used to determine if this internal informer actually has handlers attached to it or not
 	hasHandlers uint32
@@ -144,6 +158,7 @@ type informer struct {
 	internalInformers []*internalInformer
 }
 
+// forEachQueuedHandler invokes f in ascending priority order while holding the read lock.
 func (inf *internalInformer) forEachQueuedHandler(f func(h *Handler)) {
 	inf.RLock()
 	defer inf.RUnlock()
@@ -152,6 +167,34 @@ func (inf *internalInformer) forEachQueuedHandler(f func(h *Handler)) {
 			f(handler)
 		}
 	}
+}
+
+// hasFilterTransition reports whether an update changes membership for a live or registering handler.
+// The caller must hold coalescingFiltersMu.RLock through queueing the event.
+func (inf *internalInformer) hasFilterTransition(oldObj, newObj interface{}) bool {
+	for _, filter := range inf.coalescingFilters {
+		if filter(oldObj) != filter(newObj) {
+			return true
+		}
+	}
+	return false
+}
+
+// addCoalescingFilter registers a handler's filter before its initial store snapshot is taken.
+func (inf *internalInformer) addCoalescingFilter(id uint64, filter func(interface{}) bool) {
+	inf.coalescingFiltersMu.Lock()
+	defer inf.coalescingFiltersMu.Unlock()
+	if inf.coalescingFilters == nil {
+		inf.coalescingFilters = make(map[uint64]func(interface{}) bool)
+	}
+	inf.coalescingFilters[id] = filter
+}
+
+// removeCoalescingFilter removes a filter after its handler is removed from dispatch.
+func (inf *internalInformer) removeCoalescingFilter(id uint64) {
+	inf.coalescingFiltersMu.Lock()
+	defer inf.coalescingFiltersMu.Unlock()
+	delete(inf.coalescingFilters, id)
 }
 
 func (inf *internalInformer) forEachQueuedHandlerReversed(f func(h *Handler)) {
@@ -165,6 +208,8 @@ func (inf *internalInformer) forEachQueuedHandlerReversed(f func(h *Handler)) {
 	}
 }
 
+// addHandler delivers existing items and then registers the handler for queued events.
+// The caller must hold the selected internal informer's write lock.
 func (i *informer) addHandler(internalInformerIndex int, id uint64, priority int, filterFunc func(obj interface{}) bool, funcs cache.ResourceEventHandler, existingItems []interface{}) *Handler {
 	handler := &Handler{
 		cache.FilteringResourceEventHandler{
@@ -193,6 +238,7 @@ func (i *informer) addHandler(internalInformerIndex int, id uint64, priority int
 	return handler
 }
 
+// removeHandler tombstones a handler immediately, then removes it from the map asynchronously.
 func (i *informer) removeHandler(handler *Handler) {
 	if !handler.kill() {
 		klog.Errorf("Removing already-removed %v event handler %d", i.oType, handler.id)
@@ -221,6 +267,9 @@ func (i *informer) removeHandler(handler *Handler) {
 			}
 			numHandlers += len(intInf.handlers[priority])
 		}
+		if removed {
+			intInf.removeCoalescingFilter(handler.id)
+		}
 
 		// if this internal informer has no handlers, update the atomic
 		if numHandlers == 0 {
@@ -233,141 +282,123 @@ func (i *informer) removeHandler(handler *Handler) {
 	}()
 }
 
-func newQueueMap(qSize uint32, numEventQueues uint32, wg *sync.WaitGroup, stopChan chan struct{}) *queueMap {
-	qm := &queueMap{
-		entries:  make(map[ktypes.NamespacedName]*queueMapEntry),
-		queues:   make([]chan *event, numEventQueues),
-		wg:       wg,
-		stopChan: stopChan,
+// newQueueMap creates a keyed workqueue with the configured callback parallelism.
+func newQueueMap(_ uint32, numWorkers uint32, wg *sync.WaitGroup, stopChan chan struct{}) *queueMap {
+	if numWorkers == 0 {
+		numWorkers = 1
 	}
-	for j := 0; j < int(numEventQueues); j++ {
-		qm.queues[j] = make(chan *event, qSize)
+	return &queueMap{
+		entries:    make(map[ktypes.NamespacedName]*queueMapEntry),
+		queue:      workqueue.NewTyped[ktypes.NamespacedName](),
+		numWorkers: int(numWorkers),
+		wg:         wg,
+		stopChan:   stopChan,
 	}
-	return qm
 }
 
-func (qm *queueMap) processEvents(queue chan *event) {
+// processEvents delivers one callback for a key per queue turn. The workqueue
+// prevents another worker from handling that key until Done, while requeueing
+// dirty keys at the tail lets other resources make progress.
+func (qm *queueMap) processEvents() {
 	defer qm.wg.Done()
 	for {
-		select {
-		case e, ok := <-queue:
-			if !ok {
-				return
-			}
-			e.process(e)
-		case <-qm.stopChan:
+		key, shutdown := qm.queue.Get()
+		if shutdown {
 			return
 		}
-	}
-}
 
-func (qm *queueMap) start() {
-	qm.wg.Add(len(qm.queues))
-	for _, q := range qm.queues {
-		go qm.processEvents(q)
-	}
-}
+		for {
+			qm.Lock()
+			entry := qm.entries[key]
+			if entry == nil || len(entry.pending) == 0 {
+				delete(qm.entries, key)
+				qm.Unlock()
+				qm.queue.Done(key)
+				break
+			}
+			event := entry.pending[0]
+			entry.pending[0] = nil
+			entry.pending = entry.pending[1:]
+			qm.Unlock()
 
-func (qm *queueMap) shutdown() {
-	// Close all the event channels
-	for _, q := range qm.queues {
-		close(q)
-	}
-}
+			event.process(event)
 
-// getNewQueueNum finds and returns the index of the queue with the lowest
-// number of items
-func (qm *queueMap) getNewQueueNum() uint32 {
-	var j, startIdx, queueIdx uint32
-	numEventQueues := uint32(len(qm.queues))
-	if numEventQueues == 1 {
-		return 0
-	}
-	startIdx = uint32(rand.Intn(int(numEventQueues - 1)))
-	queueIdx = startIdx
-	lowestNum := len(qm.queues[startIdx])
-	for j = 0; j < numEventQueues; j++ {
-		tryQueue := (startIdx + j) % numEventQueues
-		num := len(qm.queues[tryQueue])
-		if num < lowestNum {
-			lowestNum = num
-			queueIdx = tryQueue
+			qm.Lock()
+			entry = qm.entries[key]
+			if entry == nil || len(entry.pending) == 0 {
+				delete(qm.entries, key)
+				qm.Unlock()
+				qm.queue.Done(key)
+				break
+			}
+			if !qm.stopped {
+				qm.queue.Add(key)
+				qm.Unlock()
+				qm.queue.Done(key)
+				break
+			}
+			// Shutdown rejects new events before it shuts down the workqueue.
+			// Drain this key here so accepted callbacks are not lost in between.
+			qm.Unlock()
 		}
 	}
-	return queueIdx
 }
 
-// getQueueMapEntry creates or returns an existing entry for the given object's
-// NamespacedName. This entry tracks the queue number for that NamespacedName
-// so that all objects with the NamespacedName are serialized into the same
-// queue slot. This prevents parallel processing of events for the same object
-// that might happen out-of-order.
-//
-// If there is no entry for the NamespacedName a new one is created and assigned
-// a queue slot with the least number of items (to attempt to balance queue
-// length).
-//
-// If an existing entry exists it will be returned and the already-assigned
-// queue slot will be used to ensure serialization.
-func (qm *queueMap) getQueueMapEntry(oType reflect.Type, obj interface{}) (ktypes.NamespacedName, *queueMapEntry) {
+// start launches enough workers to preserve the watch factory's callback parallelism.
+func (qm *queueMap) start() {
+	qm.wg.Add(qm.numWorkers)
+	for i := 0; i < qm.numWorkers; i++ {
+		go qm.processEvents()
+	}
+}
+
+// shutdown rejects new events and drains events accepted before shutdown.
+func (qm *queueMap) shutdown() {
+	qm.Lock()
+	qm.stopped = true
+	qm.Unlock()
+	qm.queue.ShutDown()
+}
+
+// getQueueMapEntry returns the NamespacedName for the given object after
+// validating that its metadata can be read.
+func (qm *queueMap) getQueueMapEntry(oType reflect.Type, obj interface{}) (ktypes.NamespacedName, bool) {
 	meta, err := getObjectMeta(oType, obj)
 	if err != nil {
 		klog.Errorf("Object has no meta: %v", err)
-		return ktypes.NamespacedName{}, nil
+		return ktypes.NamespacedName{}, false
 	}
 
 	namespacedName := ktypes.NamespacedName{Namespace: meta.Namespace, Name: meta.Name}
-
-	qm.Lock()
-	defer qm.Unlock()
-
-	entry, ok := qm.entries[namespacedName]
-	if ok {
-		if atomic.AddUint32(&entry.refcount, 1)&^queueEntryDeleted == 1 {
-			// Entry is unused because add/update operations completed
-			// but we haven't seen a delete yet. Assign new queue to
-			// ensure queue balance.
-			entry.queue = qm.getNewQueueNum()
-		}
-	} else {
-		// no entry found, assign new queue
-		entry = &queueMapEntry{
-			refcount: 1,
-			queue:    qm.getNewQueueNum(),
-		}
-		qm.entries[namespacedName] = entry
-	}
-	return namespacedName, entry
+	return namespacedName, true
 }
 
-// releaseQueueMapEntry is called when an event has finished processing. It
-// decreases the reference count on the queue map entry and if that entry
-// is less-than-or-equal-to-zero (meaning there are no in-flight events for the
-// object) removes it from the entries map. The next event for the given
-// NamespacedName will be rebalanced to a new queue slot.
-func (qm *queueMap) releaseQueueMapEntry(key ktypes.NamespacedName, entry *queueMapEntry, del bool) {
-	if entry == nil {
-		return
-	}
-
-	if del {
-		atomic.OrUint32(&entry.refcount, queueEntryDeleted)
-	}
-	// Keep the frequent add/update path lock-free unless a delete was seen.
-	if atomic.AddUint32(&entry.refcount, ^uint32(0)) != queueEntryDeleted {
-		return
-	}
-
-	qm.Lock()
-	defer qm.Unlock()
-	// A new event may have acquired this entry before we obtained the lock.
-	if qm.entries[key] == entry && atomic.LoadUint32(&entry.refcount) == queueEntryDeleted {
-		delete(qm.entries, key)
-	}
+// isUIDReplacement reports whether an update changes object identity.
+func isUIDReplacement(e *event) bool {
+	oldObject, oldOK := e.oldObj.(metav1.Object)
+	newObject, newOK := e.obj.(metav1.Object)
+	return !oldOK || !newOK || oldObject.GetUID() != newObject.GetUID()
 }
 
-// forgetDeletedObject handles deletes even when a slot has no subscribers.
-// Skipping notification must not leave its historical name-to-queue mapping.
+// coalesceEvent merges only consecutive updates with no filter boundary or UID replacement.
+// Lifecycle events stay in the pending sequence so their callbacks cannot be lost.
+func coalesceEvent(entry *queueMapEntry, incoming *event) bool {
+	if len(entry.pending) == 0 {
+		return false
+	}
+
+	last := entry.pending[len(entry.pending)-1]
+	if last.eventType != eventTypeUpdate || incoming.eventType != eventTypeUpdate ||
+		last.filterTransition || incoming.filterTransition || isUIDReplacement(incoming) {
+		return false
+	}
+	last.obj = incoming.obj
+	return true
+}
+
+// forgetDeletedObject removes an idle deleted object's queue mapping even when
+// a slot has no subscribers. The workqueue still serializes any recreated key
+// behind a callback already in progress.
 func (qm *queueMap) forgetDeletedObject(oType reflect.Type, obj interface{}) {
 	meta, err := getObjectMeta(oType, obj)
 	if err != nil {
@@ -377,30 +408,75 @@ func (qm *queueMap) forgetDeletedObject(oType reflect.Type, obj interface{}) {
 	key := ktypes.NamespacedName{Namespace: meta.Namespace, Name: meta.Name}
 	qm.Lock()
 	defer qm.Unlock()
-	if entry := qm.entries[key]; entry != nil {
-		atomic.OrUint32(&entry.refcount, queueEntryDeleted)
-		if atomic.LoadUint32(&entry.refcount) == queueEntryDeleted {
-			delete(qm.entries, key)
-		}
+	if entry := qm.entries[key]; entry != nil && len(entry.pending) == 0 {
+		delete(qm.entries, key)
 	}
 }
 
-// enqueueEvent adds an event to the appropriate queue for the object
+// enqueueEvent adds or coalesces an event on the object's key queue.
 func (qm *queueMap) enqueueEvent(oldObj, obj interface{}, oType reflect.Type, isDel bool, processFunc func(*event)) {
-	key, entry := qm.getQueueMapEntry(oType, obj)
+	qm.enqueueEventWithFilterTransition(oldObj, obj, oType, isDel, nil, processFunc)
+}
+
+// enqueueEventWithFilterTransition queues an event while preserving filter-boundary updates from coalescing.
+// filterTransitionFunc is called under qm.Lock only when adjacent updates could otherwise coalesce. Callers must
+// hold any lock that protects the filter state until this method returns.
+func (qm *queueMap) enqueueEventWithFilterTransition(oldObj, obj interface{}, oType reflect.Type, isDel bool, filterTransitionFunc func(interface{}, interface{}) bool, processFunc func(*event)) bool {
+	select {
+	case <-qm.stopChan:
+		return false
+	default:
+	}
+
+	key, ok := qm.getQueueMapEntry(oType, obj)
+	if !ok {
+		return false
+	}
+	eventType := eventTypeUpdate
+	if isDel {
+		eventType = eventTypeDelete
+	} else if oldObj == nil {
+		eventType = eventTypeAdd
+	}
 	event := &event{
-		obj:    obj,
-		oldObj: oldObj,
-		process: func(e *event) {
-			processFunc(e)
-			qm.releaseQueueMapEntry(key, entry, isDel)
-		},
+		obj:       obj,
+		oldObj:    oldObj,
+		process:   processFunc,
+		eventType: eventType,
+	}
+
+	qm.Lock()
+	defer qm.Unlock()
+	if qm.stopped {
+		return false
 	}
 	select {
-	case qm.queues[entry.queue] <- event:
 	case <-qm.stopChan:
-		return
+		return false
+	default:
 	}
+
+	entry, ok := qm.entries[key]
+	if !ok {
+		entry = &queueMapEntry{}
+		qm.entries[key] = entry
+	}
+	if len(entry.pending) != 0 {
+		last := entry.pending[len(entry.pending)-1]
+		if filterTransitionFunc != nil && last.eventType == eventTypeUpdate && event.eventType == eventTypeUpdate &&
+			!last.filterTransition && !isUIDReplacement(event) {
+			last.filterTransition = filterTransitionFunc(last.oldObj, last.obj)
+			if !last.filterTransition {
+				event.filterTransition = filterTransitionFunc(event.oldObj, event.obj)
+			}
+		}
+	}
+	coalesced := coalesceEvent(entry, event)
+	if !coalesced {
+		entry.pending = append(entry.pending, event)
+	}
+	qm.queue.Add(key)
+	return coalesced
 }
 
 func ensureObjectOnDelete(obj interface{}, expectedType reflect.Type) (interface{}, error) {
@@ -419,6 +495,7 @@ func ensureObjectOnDelete(obj interface{}, expectedType reflect.Type) (interface
 	return obj, nil
 }
 
+// newFederatedQueuedHandler routes informer notifications through the internal informer's key queues.
 func (i *informer) newFederatedQueuedHandler(internalInformerIndex int) cache.ResourceEventHandlerFuncs {
 	name := i.oType.Elem().Name()
 	intInf := i.internalInformers[internalInformerIndex]
@@ -442,23 +519,30 @@ func (i *informer) newFederatedQueuedHandler(internalInformerIndex int) cache.Re
 			if atomic.LoadUint32(&intInf.hasHandlers) == hasNoHandler {
 				return
 			}
-			intInf.queueMap.enqueueEvent(oldObj, newObj, i.oType, false, func(e *event) {
-				metrics.MetricResourceUpdateCount.WithLabelValues(name, "update").Inc()
-				start := time.Now()
-				intInf.forEachQueuedHandler(func(h *Handler) {
-					old := oldObj.(metav1.Object)
-					new := newObj.(metav1.Object)
-					if old.GetUID() != new.GetUID() {
-						// This occurs not so often, so log this occurance.
-						klog.Infof("Object %s/%s is replaced, invoking delete followed by add handler", new.GetNamespace(), new.GetName())
-						h.OnDelete(e.oldObj)
-						h.OnAdd(e.obj, false)
-					} else {
-						h.OnUpdate(e.oldObj, e.obj)
-					}
+			coalesced := func() bool {
+				intInf.coalescingFiltersMu.RLock()
+				defer intInf.coalescingFiltersMu.RUnlock()
+				return intInf.queueMap.enqueueEventWithFilterTransition(oldObj, newObj, i.oType, false, intInf.hasFilterTransition, func(e *event) {
+					metrics.MetricResourceUpdateCount.WithLabelValues(name, "update").Inc()
+					start := time.Now()
+					intInf.forEachQueuedHandler(func(h *Handler) {
+						old := e.oldObj.(metav1.Object)
+						new := e.obj.(metav1.Object)
+						if old.GetUID() != new.GetUID() {
+							// This occurs not so often, so log this occurance.
+							klog.Infof("Object %s/%s is replaced, invoking delete followed by add handler", new.GetNamespace(), new.GetName())
+							h.OnDelete(e.oldObj)
+							h.OnAdd(e.obj, false)
+						} else {
+							h.OnUpdate(e.oldObj, e.obj)
+						}
+					})
+					metrics.MetricResourceUpdateLatency.Observe(time.Since(start).Seconds())
 				})
-				metrics.MetricResourceUpdateLatency.Observe(time.Since(start).Seconds())
-			})
+			}()
+			if coalesced {
+				metrics.MetricResourceUpdateCoalescedCount.WithLabelValues(name).Inc()
+			}
 		},
 		DeleteFunc: func(obj interface{}) {
 			realObj, err := ensureObjectOnDelete(obj, i.oType)
@@ -495,8 +579,14 @@ func (inf *informer) removeAllHandlers() {
 	}
 }
 
+// shutdown removes handlers, stops queued workers, and waits for event processing to finish.
 func (i *informer) shutdown() {
 	i.removeAllHandlers()
+	for _, intInf := range i.internalInformers {
+		if intInf.queueMap != nil {
+			intInf.queueMap.shutdown()
+		}
+	}
 
 	// Wait for all event processors to finish
 	i.shutdownWg.Wait()
@@ -562,8 +652,9 @@ func newBaseInformer(oType reflect.Type, sharedInformer cache.SharedIndexInforme
 	internalInformers := make([]*internalInformer, 0, internalInformerPoolSize)
 	for i := 0; i < internalInformerPoolSize; i++ {
 		internalInformers = append(internalInformers, &internalInformer{
-			oType:    oType,
-			handlers: make(map[int]map[uint64]*Handler),
+			oType:             oType,
+			handlers:          make(map[int]map[uint64]*Handler),
+			coalescingFilters: make(map[uint64]func(interface{}) bool),
 		})
 	}
 
@@ -575,6 +666,7 @@ func newBaseInformer(oType reflect.Type, sharedInformer cache.SharedIndexInforme
 	}, nil
 }
 
+// newQueuedInformer wires an informer to serialized, key-deduplicated event queues.
 func newQueuedInformer(queueSize uint32, oType reflect.Type, sharedInformer cache.SharedIndexInformer,
 	stopChan chan struct{}, numEventQueues uint32) (*informer, error) {
 	informer, err := newBaseInformer(oType, sharedInformer)
