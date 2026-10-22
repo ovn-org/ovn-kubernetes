@@ -958,6 +958,26 @@ fi
 			return addresses
 		}
 
+		virtualMachineMACFromStatus = func(vmi *kubevirtv1.VirtualMachineInstance, interfaceName string) string {
+			GinkgoHelper()
+			var mac string
+			Eventually(func() (string, error) {
+				if err := crClient.Get(context.Background(), crclient.ObjectKeyFromObject(vmi), vmi); err != nil {
+					return "", err
+				}
+				mac = ""
+				for _, iface := range vmi.Status.Interfaces {
+					if iface.Name == interfaceName {
+						mac = iface.MAC
+						break
+					}
+				}
+				return mac, nil
+			}).WithPolling(time.Second).WithTimeout(10*time.Second).ShouldNot(BeEmpty(),
+				"VMI %s/%s should report a MAC for interface %s", vmi.Namespace, vmi.Name, interfaceName)
+			return mac
+		}
+
 		generateVM = func(vmi *kubevirtv1.VirtualMachineInstance) *kubevirtv1.VirtualMachine {
 			return composeVM(namespace, vmi)
 		}
@@ -1448,7 +1468,6 @@ config:
 			vmi                     *kubevirtv1.VirtualMachineInstance
 			cidrIPv4, cidrIPv6      string
 			staticIPv4, staticIPv6  string
-			staticMAC               = "02:00:00:00:00:01"
 			externalMACVRFContainer = infraapi.ExternalContainer{
 				CmdArgs: []string{"sleep", "infinity"},
 			}
@@ -1546,6 +1565,10 @@ write_files:
 
 					annotations, err := kubevirt.GenerateAddressesAnnotations("net1", filterIPs(fr.ClientSet, staticIPv4, staticIPv6))
 					Expect(err).NotTo(HaveOccurred())
+					// Keep the requested MAC stable within this VM, but independent
+					// of other static-address cases running concurrently.
+					staticMAC, err := util.GenerateRandMAC()
+					Expect(err).NotTo(HaveOccurred())
 
 					vm = fedoraWithTestToolingVM(nil /*labels*/, annotations, nil, /*nodeSelector*/
 						kubevirtv1.NetworkSource{
@@ -1553,7 +1576,7 @@ write_files:
 						}, userDataWithIperfServer, networkDataDualStack)
 					vm.Spec.Template.Spec.Domain.Devices.Interfaces[0].Bridge = nil
 					vm.Spec.Template.Spec.Domain.Devices.Interfaces[0].Binding = &kubevirtv1.PluginBinding{Name: "l2bridge"}
-					vm.Spec.Template.Spec.Domain.Devices.Interfaces[0].MacAddress = staticMAC
+					vm.Spec.Template.Spec.Domain.Devices.Interfaces[0].MacAddress = staticMAC.String()
 					createVirtualMachine(vm)
 					return vm.Name
 				},
@@ -1866,8 +1889,10 @@ ip route add %[3]s via %[4]s
 			if _, hasIPRequests := vmi.Annotations[kubevirt.AddressesAnnotation]; hasIPRequests {
 				Expect(expectedAddreses).To(ConsistOf(filterIPs(fr.ClientSet, staticIPv4, staticIPv6)), "expected addresses should be consistent with the static IPs")
 			}
-			if vmi.Spec.Domain.Devices.Interfaces[0].MacAddress != "" {
-				Expect(vmi.Spec.Domain.Devices.Interfaces[0].MacAddress).To(Equal(vmi.Status.Interfaces[0].MAC), "expected mac address should be consistent with the static MAC")
+			requestedInterface := vmi.Spec.Domain.Devices.Interfaces[0]
+			expectedMAC := virtualMachineMACFromStatus(vmi, requestedInterface.Name)
+			if requestedInterface.MacAddress != "" {
+				Expect(expectedMAC).To(Equal(requestedInterface.MacAddress), "expected MAC should be consistent with the requested MAC")
 			}
 
 			expectedAddresesAtGuest := expectedAddreses
@@ -1930,8 +1955,10 @@ ip route add %[3]s via %[4]s
 			Expect(virtClient.LoginToFedora(vmi, "fedora", "fedora")).To(Succeed(), step)
 
 			obtainedAddresses := virtualMachineAddressesFromStatus(vmi, expectedNumberOfAddresses)
+			obtainedMAC := virtualMachineMACFromStatus(vmi, requestedInterface.Name)
 
 			Expect(obtainedAddresses).To(Equal(expectedAddreses))
+			Expect(obtainedMAC).To(Equal(expectedMAC), "VMI %s/%s should preserve its MAC after %s", namespace, vmi.Name, td.test.description)
 			Eventually(kubevirt.RetrieveAllGlobalAddressesFromGuest).
 				WithArguments(virtClient, vmi).
 				WithTimeout(5*time.Second).
@@ -2630,7 +2657,10 @@ runcmd:
 		}
 
 		It("should fail when creating second VM with duplicate user requested MAC", func() {
-			const testMAC = "02:a1:b2:c3:d4:e5"
+			mac, err := util.GenerateRandMAC()
+			Expect(err).NotTo(HaveOccurred())
+			// Reuse this MAC only for the two VMs whose collision is under test.
+			testMAC := mac.String()
 			vmi1 := newVMIWithPrimaryIfaceMAC(testMAC)
 			vm1 := generateVM(vmi1)
 			createVirtualMachine(vm1)
