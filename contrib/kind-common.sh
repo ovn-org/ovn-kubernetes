@@ -194,6 +194,7 @@ set_common_default_params() {
   # Script behavior
   KIND_INSTALL_PROMETHEUS=${KIND_INSTALL_PROMETHEUS:-false}
   KIND_ALLOW_SYSTEM_WRITES=${KIND_ALLOW_SYSTEM_WRITES:-false}
+  HOST_DOCKER_DAEMON_LOG_SINCE_HOURS=${HOST_DOCKER_DAEMON_LOG_SINCE_HOURS:-4}
   RUN_IN_CONTAINER=${RUN_IN_CONTAINER:-false}
   OVN_DUMMY_GATEWAY_BRIDGE=${OVN_DUMMY_GATEWAY_BRIDGE:-false}
   OVN_GATEWAY_OPTS=${OVN_GATEWAY_OPTS:-""}
@@ -2110,6 +2111,11 @@ export_logs() {
 
   kind export logs --name "${KIND_CLUSTER_NAME}" --verbosity 4 "$logs_dir"
   collect_coredump_binaries
+
+  # Collect host docker daemon logs for debugging container/network lifecycle
+  # operations that happen outside the kind nodes (e.g. external container
+  # cleanup in e2e tests).
+  journalctl -u docker --since "-${HOST_DOCKER_DAEMON_LOG_SINCE_HOURS}h" --no-pager > "$logs_dir/host-docker-daemon.log" 2>&1 || true
 }
 
 # Helper function to try extracting a binary from a container
