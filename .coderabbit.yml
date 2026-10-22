@@ -485,6 +485,16 @@ reviews:
           convention. Fail if a new pattern is introduced without
           documenting it for future contributors.
 
+          Changes to agent instructions or automated review guidance
+          do not require duplicate contributor or product documentation.
+          AGENTS.md and .coderabbit.yml are appropriate places for that
+          guidance. Do not treat instructions about how agents assess
+          or validate work as new contributor conventions by themselves.
+          Require additional documentation only when the change
+          independently alters a contributor workflow, product behavior,
+          or architecture; apply that requirement to the relevant changes
+          even when the PR also modifies agent or review guidance.
+
           Fail if a new doc page (*.md) is added under docs/ but the
           mkdocs.yml nav section is not updated to include it.
 
