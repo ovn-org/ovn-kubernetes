@@ -971,6 +971,9 @@ var _ = Describe("EVPN node controller", func() {
 
 			bridgeName := GetEVPNBridgeName(vtepName)
 			vxlan4Name := GetEVPNVXLANName(vtepName, utilnet.IPv4)
+			// The initial annotation write queues another reconciliation through
+			// onNodeUpdate. Wait for both passes before asserting that an
+			// unchanged-address event does not cause any more device updates.
 			Eventually(func() []string {
 				ensuredMu.Lock()
 				defer ensuredMu.Unlock()
@@ -979,7 +982,7 @@ var _ = Describe("EVPN node controller", func() {
 					names = append(names, cfg.Link.Attrs().Name)
 				}
 				return names
-			}).Should(ContainElements(bridgeName, vxlan4Name))
+			}).Should(ConsistOf(bridgeName, vxlan4Name, bridgeName, vxlan4Name))
 
 			By("recording call count after initial reconciliation completes")
 			ensuredMu.Lock()
