@@ -1128,7 +1128,64 @@ func (eIPC *egressIPClusterController) reconcileEgressIP(old, new *egressipv1.Eg
 		// Execute CloudPrivateIPConfig changes for assignments which need to be
 		// added/removed, assignments which don't change do not require any
 		// further setup.
-		if err := eIPC.executeCloudPrivateIPConfigChange(name, statusToAdd, statusToRemove); err != nil {
+		// Validate CloudPrivateIPConfig creation for both IPv4 and IPv6
+		validStatusToAdd := statusToAdd
+		if len(statusToAdd) > 0 {
+			eIPC.nodeAllocator.Lock()
+			validStatusToAdd = []egressipv1.EgressIPStatusItem{}
+
+			for _, item := range statusToAdd {
+				eNode, exists := eIPC.nodeAllocator.cache[item.Node]
+				if !exists {
+					klog.Warningf("Node %s not in allocator cache for EgressIP %s, skipping CloudPrivateIPConfig for %s",
+						item.Node, name, item.EgressIP)
+					continue
+				}
+
+				if _, alreadyAllocated := eNode.allocations[item.EgressIP]; !alreadyAllocated {
+					klog.Warningf("IP %s for EgressIP %s NOT in allocations for Node %s, skipping CloudPrivateIPConfig",
+						item.EgressIP, name, item.Node)
+					continue
+				}
+
+				// Validate capacity for IPv4
+				eIP := net.ParseIP(item.EgressIP)
+				if utilnet.IsIPv4(eIP) && eNode.egressIPConfig.Capacity.IPv4 != nil {
+					if *eNode.egressIPConfig.Capacity.IPv4 < util.UnlimitedNodeCapacity {
+						ipv4Allocated := getIPFamilyAllocationCount(eNode.allocations, false)
+						if ipv4Allocated > *eNode.egressIPConfig.Capacity.IPv4 {
+							klog.Warningf("IPv4 capacity exceeded for Node %s: allocated=%d, capacity=%d, rejecting %s",
+								item.Node, ipv4Allocated, *eNode.egressIPConfig.Capacity.IPv4, item.EgressIP)
+							// Remove rejected IPv4 from allocation map to clear stale cache
+							delete(eNode.allocations, item.EgressIP)
+							continue
+						}
+					}
+				}
+
+				// Validate capacity for IPv6
+				if utilnet.IsIPv6(eIP) && eNode.egressIPConfig.Capacity.IPv6 != nil {
+					if *eNode.egressIPConfig.Capacity.IPv6 < util.UnlimitedNodeCapacity {
+						ipv6Allocated := getIPFamilyAllocationCount(eNode.allocations, true)
+						if ipv6Allocated > *eNode.egressIPConfig.Capacity.IPv6 {
+							klog.Warningf("IPv6 capacity exceeded for Node %s: allocated=%d, capacity=%d, rejecting %s",
+								item.Node, ipv6Allocated, *eNode.egressIPConfig.Capacity.IPv6, item.EgressIP)
+							// Remove rejected IPv6 from allocation map to clear stale cache
+							delete(eNode.allocations, item.EgressIP)
+							continue
+						}
+					}
+				}
+
+				validStatusToAdd = append(validStatusToAdd, item)
+			}
+			eIPC.nodeAllocator.Unlock()
+
+			if len(validStatusToAdd) == 0 {
+				klog.Warningf("No valid IPs for CloudPrivateIPConfig creation for EgressIP %s", name)
+			}
+		}
+		if err := eIPC.executeCloudPrivateIPConfigChange(name, validStatusToAdd, statusToRemove); err != nil {
 			return err
 		}
 	}
@@ -1162,12 +1219,31 @@ func (eIPC *egressIPClusterController) syncCloudPrivateIPConfigs(objs []interfac
 		for _, status := range egressIP.Status.Items {
 			cloudPrivateIPConfigName := ipStringToCloudPrivateIPConfigName(status.EgressIP)
 			if _, exists := cloudPrivateIPConfigMap[cloudPrivateIPConfigName]; exists {
+				// CPIC exists - check if it has failed status by fetching the actual object
+				cpic, err := eIPC.watchFactory.GetCloudPrivateIPConfig(cloudPrivateIPConfigName)
+				if err == nil && cpic != nil {
+					if cond := meta.FindStatusCondition(cpic.Status.Conditions, string(ocpcloudnetworkapi.Assigned)); cond != nil && cond.Status == metav1.ConditionFalse {
+						// This CPIC failed - don't include in updated status
+						klog.Warningf("Removing failed CloudPrivateIPConfig %s from EgressIP %s status. Reason: %s",
+							cloudPrivateIPConfigName, egressIP.Name, cond.Message)
+						cloudPrivateIPNotFound = true
+						continue
+					}
+				}
+				// CPIC exists and either succeeded or we can't check its status - keep the status item
 				updatedStatus = append(updatedStatus, status)
 			} else {
 				// Set cloudPrivateIPNotFoundOrInvalid flag to true because egress ip entry not found in
 				// cloud private ip config object. Note that the egress ip status might still reflect an
 				// old node assignment if the informer cache has old data, so do not invalidate if it is
 				// not the same node as the cloud private ip config assignment.
+				// CPIC doesn't exist
+				eIP := net.ParseIP(status.EgressIP)
+				if utilnet.IsIPv4(eIP) {
+					klog.Infof("IPv4 CloudPrivateIPConfig %s not found for EgressIP %s", cloudPrivateIPConfigName, egressIP.Name)
+				} else if utilnet.IsIPv6(eIP) {
+					klog.Infof("IPv6 CloudPrivateIPConfig %s not found for EgressIP %s", cloudPrivateIPConfigName, egressIP.Name)
+				}
 				cloudPrivateIPNotFound = true
 			}
 		}
@@ -1363,14 +1439,30 @@ func (eIPC *egressIPClusterController) assignEgressIPs(name string, egressIPs []
 				}
 			}
 			if eNode.egressIPConfig.Capacity.IPv4 != nil && *eNode.egressIPConfig.Capacity.IPv4 < util.UnlimitedNodeCapacity && utilnet.IsIPv4(eIP) {
-				if *eNode.egressIPConfig.Capacity.IPv4-getIPFamilyAllocationCount(eNode.allocations, false) <= 0 {
-					klog.V(5).Infof("Additional allocation on Node: %s exhausts it's IPv4 capacity, trying another node", eNode.name)
+				ipv4Allocated := getIPFamilyAllocationCount(eNode.allocations, false)
+				ipv4Capacity := *eNode.egressIPConfig.Capacity.IPv4
+				ipv4Remaining := ipv4Capacity - ipv4Allocated
+
+				klog.V(5).Infof("IPv4 capacity check for EgressIP %s IP %s on node %s: capacity=%d, allocated=%d, remaining=%d",
+					name, eIP.String(), eNode.name, ipv4Capacity, ipv4Allocated, ipv4Remaining)
+
+				if ipv4Remaining <= 0 {
+					klog.Warningf("Node %s cannot host EgressIP %s IP %s: IPv4 capacity full (capacity=%d, allocated=%d)",
+						eNode.name, name, eIP.String(), ipv4Capacity, ipv4Allocated)
 					continue
 				}
 			}
 			if eNode.egressIPConfig.Capacity.IPv6 != nil && *eNode.egressIPConfig.Capacity.IPv6 < util.UnlimitedNodeCapacity && utilnet.IsIPv6(eIP) {
-				if *eNode.egressIPConfig.Capacity.IPv6-getIPFamilyAllocationCount(eNode.allocations, true) <= 0 {
-					klog.V(5).Infof("Additional allocation on Node: %s exhausts it's IPv6 capacity, trying another node", eNode.name)
+				ipv6Allocated := getIPFamilyAllocationCount(eNode.allocations, true)
+				ipv6Capacity := *eNode.egressIPConfig.Capacity.IPv6
+				ipv6Remaining := ipv6Capacity - ipv6Allocated
+
+				klog.V(5).Infof("IPv6 capacity check for EgressIP %s IP %s on node %s: capacity=%d, allocated=%d, remaining=%d",
+					name, eIP.String(), eNode.name, ipv6Capacity, ipv6Allocated, ipv6Remaining)
+
+				if ipv6Remaining <= 0 {
+					klog.Warningf("Node %s cannot host EgressIP %s IP %s: IPv6 capacity full (capacity=%d, allocated=%d)",
+						eNode.name, name, eIP.String(), ipv6Capacity, ipv6Allocated)
 					continue
 				}
 			}
