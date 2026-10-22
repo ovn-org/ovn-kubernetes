@@ -2131,6 +2131,31 @@ udn-allowed-default-services= ns/svc, ns1/svc1
 			err := validateNoOverlayConfig()
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 		})
+
+		It("allows unmanaged no-overlay with RouteAdvertisements disabled", func() {
+			for _, outboundSNAT := range []string{types.NoOverlaySNATDisabled, types.NoOverlaySNATEnabled} {
+				OVNKubernetesFeature.EnableRouteAdvertisements = false
+				Default.Transport = types.NetworkTransportNoOverlay
+				NoOverlay.OutboundSNAT = outboundSNAT
+				NoOverlay.Routing = NoOverlayRoutingUnmanaged
+
+				err := validateNoOverlayConfig()
+				gomega.Expect(err).ToNot(gomega.HaveOccurred())
+			}
+		})
+
+		It("still requires RouteAdvertisements outside unmanaged no-overlay", func() {
+			OVNKubernetesFeature.EnableRouteAdvertisements = false
+			Default.Transport = types.NetworkTransportNoOverlay
+			NoOverlay.OutboundSNAT = types.NoOverlaySNATEnabled
+			NoOverlay.Routing = NoOverlayRoutingManaged
+			ManagedBGP.Topology = ManagedBGPTopologyFullMesh
+			ManagedBGP.FRRNamespace = "frr-k8s-system"
+
+			err := validateNoOverlayConfig()
+			gomega.Expect(err).To(gomega.HaveOccurred())
+			gomega.Expect(err.Error()).To(gomega.ContainSubstring("enable-route-advertisements must be true"))
+		})
 	})
 
 	Describe("BGP Configuration", func() {

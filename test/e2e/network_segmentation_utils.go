@@ -27,9 +27,8 @@ func cudnGatewayRouterName(cudnName, nodeName string) string {
 	return types.GWRouterPrefix + util.GetUserDefinedNetworkPrefix(types.CUDNPrefix+cudnName) + nodeName
 }
 
-// cudnGRRoutesForNode returns the output of `ovn-nbctl lr-route-list` for
-// the CUDN gateway router of the given CUDN on the given node.
-func cudnGRRoutesForNode(k8sClient kubernetes.Interface, cudnName, nodeName string) (string, error) {
+// runOVNNbctlOnNode runs ovn-nbctl from the ovnkube-node pod on the given node.
+func runOVNNbctlOnNode(k8sClient kubernetes.Interface, nodeName string, args ...string) (string, error) {
 	ns := deploymentconfig.Get().OVNKubernetesNamespace()
 	nbPods, err := k8sClient.CoreV1().Pods(ns).List(context.TODO(), metav1.ListOptions{
 		LabelSelector: "app=ovnkube-node",
@@ -42,17 +41,24 @@ func cudnGRRoutesForNode(k8sClient kubernetes.Interface, cudnName, nodeName stri
 		return "", fmt.Errorf("no ovnkube-node pod found on node %s", nodeName)
 	}
 	nbPod := nbPods.Items[0]
-	if len(nbPod.Spec.Containers) == 0 {
-		return "", fmt.Errorf("no containers found in ovnkube-node pod %s on node %s", nbPod.Name, nodeName)
+	hasNBOVSDBContainer := false
+	for _, container := range nbPod.Spec.Containers {
+		if container.Name == "nb-ovsdb" {
+			hasNBOVSDBContainer = true
+			break
+		}
 	}
-	nbContainerName := nbPod.Spec.Containers[0].Name
-	if nbContainerName == "" {
-		return "", fmt.Errorf("first container has no name in ovnkube-node pod %s on node %s", nbPod.Name, nodeName)
+	if !hasNBOVSDBContainer {
+		return "", fmt.Errorf("ovnkube-node pod %s on node %s has no nb-ovsdb container", nbPod.Name, nodeName)
 	}
-	return e2ekubectl.RunKubectl(ns,
-		"exec", nbPod.Name, "-c", nbContainerName, "--",
-		"ovn-nbctl", "lr-route-list",
-		cudnGatewayRouterName(cudnName, nodeName))
+	kubectlArgs := append([]string{"exec", nbPod.Name, "-c", "nb-ovsdb", "--", "ovn-nbctl"}, args...)
+	return e2ekubectl.RunKubectl(ns, kubectlArgs...)
+}
+
+// cudnGRRoutesForNode returns the output of `ovn-nbctl lr-route-list` for
+// the CUDN gateway router of the given CUDN on the given node.
+func cudnGRRoutesForNode(k8sClient kubernetes.Interface, cudnName, nodeName string) (string, error) {
+	return runOVNNbctlOnNode(k8sClient, nodeName, "lr-route-list", cudnGatewayRouterName(cudnName, nodeName))
 }
 
 // podIPsForUserDefinedPrimaryNetwork returns the v4 or v6 IPs for a pod on the UDN

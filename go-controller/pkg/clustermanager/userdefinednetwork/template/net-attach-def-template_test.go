@@ -588,8 +588,39 @@ var _ = Describe("NetAttachDefTemplate", func() {
 				"topology": "layer3",
 				"joinSubnet": "100.65.0.0/16,fd99::/64",
 				"subnets": "192.168.100.0/16,2001:dbb::/60",
-				"mtu": 1500
-			}`,
+					"mtu": 1500
+				}`,
+		),
+		Entry("primary network, layer3 with no-overlay unmanaged routing",
+			udnv1.NetworkSpec{
+				Topology: udnv1.NetworkTopologyLayer3,
+				Layer3: &udnv1.Layer3Config{
+					Role: udnv1.NetworkRolePrimary,
+					Subnets: []udnv1.Layer3Subnet{
+						{CIDR: "192.168.100.0/16"},
+					},
+					MTU: 1500,
+				},
+				Transport: udnv1.TransportOptionNoOverlay,
+				NoOverlay: &udnv1.NoOverlayConfig{
+					OutboundSNAT: udnv1.SNATEnabled,
+					Routing:      udnv1.RoutingUnmanaged,
+				},
+			},
+			`{
+					"cniVersion": "1.1.0",
+					"type": "ovn-k8s-cni-overlay",
+					"name": "cluster_udn_test-net",
+					"netAttachDefName": "mynamespace/test-net",
+					"role": "primary",
+					"topology": "layer3",
+					"joinSubnet": "100.65.0.0/16,fd99::/64",
+					"subnets": "192.168.100.0/16",
+					"mtu": 1500,
+					"transport": "no-overlay",
+					"outboundSNAT": "enabled",
+					"noOverlayRouting": "unmanaged"
+				}`,
 		),
 		Entry("primary network, layer2",
 			udnv1.NetworkSpec{

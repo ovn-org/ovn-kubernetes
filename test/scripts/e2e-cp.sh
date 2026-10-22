@@ -58,6 +58,58 @@ require_label() {
   LABELED_TESTS+="$*"
 }
 
+skip_default_pod_network_underlay_incompatible_tests() {
+  # Some tests do not work when default pod-network traffic uses the underlay,
+  # either because the test configuration no longer makes sense or because of
+  # an existing functional gap. Call out cases individually.
+
+  # Pod reached from default network through secondary interface: asymmetric
+  # configuration that does not make sense in this mode.
+  # TODO: perhaps the secondary network attached pods should not be attached to default network
+  skip "Multi Homing A single pod with an OVN-K secondary network attached to a localnet network mapped to external primary interface bridge can be reached by a client pod in the default network on the same node"
+  skip "Multi Homing A single pod with an OVN-K secondary network attached to a localnet network mapped to external primary interface bridge can be reached by a client pod in the default network on a different node"
+  if [ "$PLATFORM_IPV6_SUPPORT" == true ] && [ "$PLATFORM_IPV4_SUPPORT" == false ]; then
+    # Skip all Multi Homing tests in BGP IPv6 only mode
+    # TODO: The tests are doing weird static ipv4, ipv6, dualstack specific ginkgo entries instead of relying on
+    # cluster family type to make a dynamic determination. These tests need to be refactored to be family-friendly
+    # instead of assuming only single stack v4 or dualstack lanes exist.
+    # https://github.com/ovn-kubernetes/ovn-kubernetes/issues/5569
+    skip "Multi Homing"
+  fi
+  if [ "$PLATFORM_IPV4_SUPPORT" == true ] && [ "$PLATFORM_IPV6_SUPPORT" == false ]; then
+    # Skip IPv6/dual-stack multihoming secondary network tests in IPv4-only clusters.
+    skip "Multi Homing.*L3 - routed - secondary network with IPv6 subnet"
+    skip "Multi Homing.*L3 - routed - secondary network with a dual stack configuration"
+  fi
+  # These tests require MetalLB, whose setup is not compatible with this default-network underlay mode.
+  # TODO: consolidate configuration
+  skip "Load Balancer Service Tests with MetalLB"
+  skip "EgressService"
+
+  # tests that specifically expect the node SNAT to happen
+  # TODO: expect the pod IP where it makes sense
+  skip "e2e egress firewall policy validation with external containers"
+  skip "e2e egress IP validation on network of type Cluster Default \[OVN network\] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts"
+  skip "e2e egress IP validation on network of type Cluster Default \[OVN network\] Should validate the egress IP SNAT functionality against host-networked pods"
+  skip "e2e egress IP validation on network of type Cluster Default Should validate egress IP logic when one pod is managed by more than one egressIP object"
+  skip "e2e egress IP validation on network of type Cluster Default Should re-assign egress IPs when node readiness / reachability goes down/up"
+  skip "Pod to external server PMTUD when a client ovnk pod targeting an external server is created when tests are run towards the agnhost echo server queries to the hostNetworked server pod on another node shall work for UDP"
+  skip "e2e egress IP validation on network of type Cluster Default Should handle EIP reassignment correctly on namespace and pod label updates, and EIP object updates"
+
+  # https://issues.redhat.com/browse/OCPBUGS-55028
+  skip "e2e egress IP validation on network of type Cluster Default \[secondary-host-eip\]"
+
+  # https://github.com/ovn-kubernetes/ovn-kubernetes/issues/5240
+  skip "e2e control plane test node readiness according to its defaults interface MTU size should get node not ready with a too small MTU"
+
+  # buggy tests that don't work in dual stack mode
+  skip "Service Hairpin SNAT Should ensure service hairpin traffic is NOT SNATed to hairpin masquerade IP; GR LB"
+  skip "Services when a nodePort service targeting a pod with hostNetwork:false is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for TCP"
+  skip "Services when a nodePort service targeting a pod with hostNetwork:true is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for TCP"
+  skip "Services when a nodePort service targeting a pod with hostNetwork:false is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for UDP"
+  skip "Services when a nodePort service targeting a pod with hostNetwork:true is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for UDP"
+}
+
 if [ "$PLATFORM_IPV4_SUPPORT" == true ]; then
   if  [ "$PLATFORM_IPV6_SUPPORT" == true ]; then
 	  # No support for these features in dual-stack yet
@@ -109,6 +161,10 @@ fi
 
 if [ "$OVN_NETWORK_QOS_ENABLE" != "true" ]; then
   skip "e2e NetworkQoS validation"
+fi
+
+if [ "$KIND_INSTALL_METALLB" != true ]; then
+  skip "Load Balancer Service Tests with MetalLB"
 fi
 
 # Only run Node IP/MAC address migration tests if they are explicitly requested
@@ -169,9 +225,12 @@ fi
 
 # Network Segmentation suite selection uses a feature label and removes the
 # suite prefix from the positional arguments. Keep any text after that prefix
-# as a narrower Ginkgo focus.
-if [[ "${WHAT}" == "${NETWORK_SEGMENTATION_TESTS} "* ]]; then
-  set -- "${WHAT#"${NETWORK_SEGMENTATION_TESTS} "}"
+# as a narrower Ginkgo focus. Match any prefix continuation (e.g. both
+# "Network Segmentation UDN Pod ..." and "Network Segmentation: services"),
+# not just a space, so a suite named with a colon does not silently fall back
+# to running the whole label.
+if [[ "${WHAT}" == "${NETWORK_SEGMENTATION_TESTS}"* && "${WHAT}" != "${NETWORK_SEGMENTATION_TESTS}" ]]; then
+  set -- "${WHAT#"${NETWORK_SEGMENTATION_TESTS}"}"
 fi
 
 # Only run cluster network connect tests if they are explicitly requested
@@ -215,61 +274,13 @@ if [ "$DYNAMIC_UDN_ALLOCATION" == true ]; then
   skip "BGP: For BGP configured networks"
 fi
 
-if [ "$ENABLE_ROUTE_ADVERTISEMENTS" != true ]; then
+if [ "$ADVERTISE_DEFAULT_NETWORK" = true ] || { [ "$ENABLE_NO_OVERLAY" == true ] && [ "$ENABLE_NO_OVERLAY_MANAGED_ROUTING" != true ]; }; then
+  skip_default_pod_network_underlay_incompatible_tests
+fi
+
+# Some lanes keep RouteAdvertisements enabled in the cluster while skipping RA-specific tests.
+if [ "$ENABLE_ROUTE_ADVERTISEMENTS" != true ] || [ "$SKIP_ROUTE_ADVERTISEMENTS_TESTS" == true ]; then
   skip_label "Feature:RouteAdvertisements"
-else
-  if [ "$ADVERTISE_DEFAULT_NETWORK" = true ]; then
-    # Some test don't work when the default network is advertised, either because
-    # the configuration that the test excercises does not make sense for an advertised network, or
-    # there is some bug or functional gap
-    # call out case by case
-
-    # pod reached from default network through secondary interface, asymetric, configuration does not make sense
-    # TODO: perhaps the secondary network attached pods should not be attached to default network
-    skip "Multi Homing A single pod with an OVN-K secondary network attached to a localnet network mapped to external primary interface bridge can be reached by a client pod in the default network on the same node"
-    skip "Multi Homing A single pod with an OVN-K secondary network attached to a localnet network mapped to external primary interface bridge can be reached by a client pod in the default network on a different node"
-    if [ "$PLATFORM_IPV6_SUPPORT" == true ] && [ "$PLATFORM_IPV4_SUPPORT" == false ]; then
-      # Skip all Multi Homing tests in BGP IPv6 only mode
-      # TODO: The tests are doing weird static ipv4, ipv6, dualstack specific ginkgo entries instead of relying on
-      # cluster family type to make a dynamic determination. These tests need to be refactored to be family-friendly
-      # instead of assuming only single stack v4 or dualstack lanes exist.
-      # https://github.com/ovn-kubernetes/ovn-kubernetes/issues/5569
-      skip "Multi Homing"
-    fi
-    if [ "$PLATFORM_IPV4_SUPPORT" == true ] && [ "$PLATFORM_IPV6_SUPPORT" == false ]; then
-      # Skip IPv6/dual-stack multihoming secondary network tests in IPv4-only clusters.
-      skip "Multi Homing.*L3 - routed - secondary network with IPv6 subnet"
-      skip "Multi Homing.*L3 - routed - secondary network with a dual stack configuration"
-    fi
-    # these tests require metallb but the configuration we do for it is not compatible with the configuration we do to advertise the default network
-    # TODO: consolidate configuration
-    skip "Load Balancer Service Tests with MetalLB"
-    skip "EgressService"
-
-    # tests that specifically expect the node SNAT to happen
-    # TODO: expect the pod IP where it makes sense
-    skip "e2e egress firewall policy validation with external containers"
-    skip "e2e egress IP validation on network of type Cluster Default \[OVN network\] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts"
-    skip "e2e egress IP validation on network of type Cluster Default \[OVN network\] Should validate the egress IP SNAT functionality against host-networked pods"
-    skip "e2e egress IP validation on network of type Cluster Default Should validate egress IP logic when one pod is managed by more than one egressIP object"
-    skip "e2e egress IP validation on network of type Cluster Default Should re-assign egress IPs when node readiness / reachability goes down/up"
-    skip "Pod to external server PMTUD when a client ovnk pod targeting an external server is created when tests are run towards the agnhost echo server queries to the hostNetworked server pod on another node shall work for UDP"
-    skip "e2e egress IP validation on network of type Cluster Default Should handle EIP reassignment correctly on namespace and pod label updates, and EIP object updates"
-
-    # https://issues.redhat.com/browse/OCPBUGS-55028
-    skip "e2e egress IP validation on network of type Cluster Default \[secondary-host-eip\]"
-
-
-    # https://github.com/ovn-kubernetes/ovn-kubernetes/issues/5240
-    skip "e2e control plane test node readiness according to its defaults interface MTU size should get node not ready with a too small MTU"
-
-    # buggy tests that don't work in dual stack mode
-    skip "Service Hairpin SNAT Should ensure service hairpin traffic is NOT SNATed to hairpin masquerade IP; GR LB"
-    skip "Services when a nodePort service targeting a pod with hostNetwork:false is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for TCP"
-    skip "Services when a nodePort service targeting a pod with hostNetwork:true is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for TCP"
-    skip "Services when a nodePort service targeting a pod with hostNetwork:false is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for UDP"
-    skip "Services when a nodePort service targeting a pod with hostNetwork:true is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for UDP"
-  fi
 fi
 
 # if we set PARALLEL=true, skip serial test

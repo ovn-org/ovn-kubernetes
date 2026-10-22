@@ -12,6 +12,7 @@ import (
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/tools/record"
@@ -69,6 +70,15 @@ func (tra testRA) RouteAdvertisements() *ratypes.RouteAdvertisements {
 	return ra
 }
 
+func startRouteAdvertisementsInformer(wf *factory.WatchFactory) chan struct{} {
+	stopCh := make(chan struct{})
+	go wf.RouteAdvertisementsInformer().Informer().Run(stopCh)
+	gomega.Eventually(func() bool {
+		return wf.RouteAdvertisementsInformer().Informer().HasSynced()
+	}, 2*time.Second, 100*time.Millisecond).Should(gomega.BeTrue())
+	return stopCh
+}
+
 var _ = ginkgo.Describe("No-Overlay Controller", func() {
 	var (
 		recorder *record.FakeRecorder
@@ -105,7 +115,7 @@ var _ = ginkgo.Describe("No-Overlay Controller", func() {
 			gomega.Expect(controller.raController).NotTo(gomega.BeNil())
 		})
 
-		ginkgo.It("should have empty last validation error on creation", func() {
+		ginkgo.It("should have empty last validation state on creation", func() {
 			fakeClient := &util.OVNClusterManagerClientset{
 				KubeClient:                fake.NewSimpleClientset(),
 				NetworkAttchDefClient:     nadfake.NewSimpleClientset(),
@@ -117,7 +127,7 @@ var _ = ginkgo.Describe("No-Overlay Controller", func() {
 			defer wf.Shutdown()
 
 			controller := NewController(wf, recorder)
-			gomega.Expect(controller.lastValidationError).To(gomega.BeEmpty())
+			gomega.Expect(controller.lastValidationState).To(gomega.Equal(validationState{}))
 		})
 	})
 
@@ -155,17 +165,12 @@ var _ = ginkgo.Describe("No-Overlay Controller", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			defer wf.Shutdown()
 
-			err = wf.Start()
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			stopCh := startRouteAdvertisementsInformer(wf)
+			defer close(stopCh)
 
 			controller := NewController(wf, recorder)
 
-			// Give time for informers to sync
-			gomega.Eventually(func() bool {
-				return wf.RouteAdvertisementsInformer().Informer().HasSynced()
-			}, 2*time.Second, 100*time.Millisecond).Should(gomega.BeTrue())
-
-			err = controller.validate()
+			_, err = controller.validate()
 			if expectError {
 				gomega.Expect(err).To(gomega.HaveOccurred())
 				if expectErrorSubstring != "" {
@@ -238,6 +243,126 @@ var _ = ginkgo.Describe("No-Overlay Controller", func() {
 			"",
 		),
 	)
+
+	ginkgo.Context("unmanaged no-overlay validation without RouteAdvertisements", func() {
+		ginkgo.BeforeEach(func() {
+			config.NoOverlay.OutboundSNAT = types.NoOverlaySNATEnabled
+			config.NoOverlay.Routing = config.NoOverlayRoutingUnmanaged
+		})
+
+		ginkgo.It("should pass when no RouteAdvertisements CR exists", func() {
+			fakeClient := &util.OVNClusterManagerClientset{
+				KubeClient:                fake.NewSimpleClientset(),
+				NetworkAttchDefClient:     nadfake.NewSimpleClientset(),
+				RouteAdvertisementsClient: rafake.NewSimpleClientset(),
+				FRRClient:                 frrfake.NewSimpleClientset(),
+			}
+
+			wf, err := factory.NewClusterManagerWatchFactory(fakeClient)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			defer wf.Shutdown()
+
+			stopCh := startRouteAdvertisementsInformer(wf)
+			defer close(stopCh)
+			controller := NewController(wf, recorder)
+
+			mode, err := controller.validate()
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(mode).To(gomega.Equal(validationModeNoRouteAdvertisements))
+		})
+
+		ginkgo.It("should fail when a matching RouteAdvertisements CR exists but is not accepted", func() {
+			ra := testRA{
+				Name:           "test-ra",
+				SelectsDefault: true,
+				AdvertisePods:  true,
+				AcceptedStatus: ptr.To(metav1.ConditionFalse),
+			}
+			fakeClient := &util.OVNClusterManagerClientset{
+				KubeClient:                fake.NewSimpleClientset(),
+				NetworkAttchDefClient:     nadfake.NewSimpleClientset(),
+				RouteAdvertisementsClient: rafake.NewSimpleClientset(),
+				FRRClient:                 frrfake.NewSimpleClientset(),
+			}
+
+			wf, err := factory.NewClusterManagerWatchFactory(fakeClient)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			defer wf.Shutdown()
+
+			stopCh := startRouteAdvertisementsInformer(wf)
+			defer close(stopCh)
+			controller := NewController(wf, recorder)
+
+			raObj := ra.RouteAdvertisements()
+			_, err = fakeClient.RouteAdvertisementsClient.K8sV1().RouteAdvertisements().Create(context.Background(), raObj, metav1.CreateOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			_, err = fakeClient.RouteAdvertisementsClient.K8sV1().RouteAdvertisements().UpdateStatus(context.Background(), raObj, metav1.UpdateOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Eventually(func() bool {
+				raObj, getErr := wf.RouteAdvertisementsInformer().Lister().Get("test-ra")
+				if getErr != nil || raObj == nil {
+					return false
+				}
+				condition := meta.FindStatusCondition(raObj.Status.Conditions, ratypes.RouteAdvertisementsAccepted)
+				return condition != nil && condition.Status == metav1.ConditionFalse
+			}, 2*time.Second, 100*time.Millisecond).Should(gomega.BeTrue())
+
+			_, err = controller.validate()
+			gomega.Expect(err).To(gomega.HaveOccurred())
+			gomega.Expect(err.Error()).To(gomega.ContainSubstring("but none have status Accepted=True"))
+		})
+
+		ginkgo.It("should pass and emit a ready event when RouteAdvertisements are disabled", func() {
+			config.OVNKubernetesFeature.EnableRouteAdvertisements = false
+
+			fakeClient := &util.OVNClusterManagerClientset{
+				KubeClient:                fake.NewSimpleClientset(),
+				NetworkAttchDefClient:     nadfake.NewSimpleClientset(),
+				RouteAdvertisementsClient: rafake.NewSimpleClientset(),
+				FRRClient:                 frrfake.NewSimpleClientset(),
+			}
+
+			wf, err := factory.NewClusterManagerWatchFactory(fakeClient)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			defer wf.Shutdown()
+
+			controller := NewController(wf, recorder)
+			gomega.Expect(controller.raController).To(gomega.BeNil())
+
+			mode, err := controller.validate()
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(mode).To(gomega.Equal(validationModeNoRouteAdvertisements))
+
+			gomega.Expect(controller.Start()).To(gomega.Succeed())
+			defer controller.Stop()
+			var event string
+			gomega.Eventually(recorder.Events, 2*time.Second).Should(gomega.Receive(&event))
+			gomega.Expect(event).To(gomega.ContainSubstring("NoOverlayConfigurationReady"))
+			gomega.Expect(event).To(gomega.ContainSubstring("unmanaged routing and no RouteAdvertisements"))
+		})
+
+		ginkgo.It("should fail when RouteAdvertisements are disabled and routing is managed", func() {
+			config.OVNKubernetesFeature.EnableRouteAdvertisements = false
+			config.NoOverlay.Routing = config.NoOverlayRoutingManaged
+
+			fakeClient := &util.OVNClusterManagerClientset{
+				KubeClient:                fake.NewSimpleClientset(),
+				NetworkAttchDefClient:     nadfake.NewSimpleClientset(),
+				RouteAdvertisementsClient: rafake.NewSimpleClientset(),
+				FRRClient:                 frrfake.NewSimpleClientset(),
+			}
+
+			wf, err := factory.NewClusterManagerWatchFactory(fakeClient)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			defer wf.Shutdown()
+
+			controller := NewController(wf, recorder)
+
+			_, err = controller.validate()
+			gomega.Expect(err).To(gomega.HaveOccurred())
+			gomega.Expect(err.Error()).To(gomega.ContainSubstring("RouteAdvertisements are disabled"))
+		})
+	})
 
 	ginkgo.Context("RA needsValidation logic", func() {
 		var controller *Controller
@@ -366,7 +491,8 @@ var _ = ginkgo.Describe("No-Overlay Controller", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			defer wf.Shutdown()
 
-			gomega.Expect(wf.Start()).To(gomega.Succeed())
+			stopCh := startRouteAdvertisementsInformer(wf)
+			defer close(stopCh)
 
 			controller := NewController(wf, localRecorder)
 
@@ -400,7 +526,8 @@ var _ = ginkgo.Describe("No-Overlay Controller", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			defer wf.Shutdown()
 
-			gomega.Expect(wf.Start()).To(gomega.Succeed())
+			stopCh := startRouteAdvertisementsInformer(wf)
+			defer close(stopCh)
 
 			controller := NewController(wf, localRecorder)
 
@@ -426,7 +553,8 @@ var _ = ginkgo.Describe("No-Overlay Controller", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			defer wf.Shutdown()
 
-			gomega.Expect(wf.Start()).To(gomega.Succeed())
+			stopCh := startRouteAdvertisementsInformer(wf)
+			defer close(stopCh)
 
 			controller := NewController(wf, localRecorder)
 
@@ -491,7 +619,8 @@ var _ = ginkgo.Describe("No-Overlay Controller", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			defer wf.Shutdown()
 
-			gomega.Expect(wf.Start()).To(gomega.Succeed())
+			stopCh := startRouteAdvertisementsInformer(wf)
+			defer close(stopCh)
 
 			controller := NewController(wf, recorder)
 

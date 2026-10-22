@@ -41,7 +41,6 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/clustermanager/userdefinednetwork/template"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/controller"
-	ratypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1"
 	rainformer "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/informers/externalversions/routeadvertisements/v1"
 	ralister "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/listers/routeadvertisements/v1"
 	userdefinednetworkv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1"
@@ -1372,61 +1371,27 @@ func cudnReferencesVTEP(cudn *userdefinednetworkv1.ClusterUserDefinedNetwork, vt
 	return cudn.Spec.Network.EVPN.VTEP == vtepName
 }
 
-// ReconcileRouteAdvertisements handles RouteAdvertisements events by re-queuing CUDNs that are selected by the RA.
-// This is called when a RouteAdvertisements CR is created, updated, or deleted to trigger validation
-// of CUDNs that depend on RouteAdvertisements for transport validation.
+// ReconcileRouteAdvertisements handles RouteAdvertisements events by re-queuing CUDNs
+// whose transport validation depends on RouteAdvertisements.
+// This is called when a RouteAdvertisements CR is created, updated, or deleted.
 func (c *Controller) ReconcileRouteAdvertisements(raName string) error {
 	cudns, err := c.cudnLister.List(labels.Everything())
 	if err != nil {
 		return fmt.Errorf("failed to list CUDNs: %w", err)
 	}
 
-	// Try to get the RA object to check which CUDNs it selects
-	ra, err := c.raLister.Get(raName)
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			// RA not found (likely a delete event) - fall back to requeueing all no-overlay/EVPN CUDNs
-			// since we can't determine which CUDNs were selected by the deleted RA
-			klog.V(4).InfoS("RouteAdvertisements not found, re-queueing all CUDNs with no-overlay or EVPN transport", "ra", raName)
-			for _, cudn := range cudns {
-				transport := cudn.Spec.Network.GetTransport()
-				if transport == userdefinednetworkv1.TransportOptionNoOverlay || transport == userdefinednetworkv1.TransportOptionEVPN {
-					klog.V(4).InfoS("Re-queueing CUDN following RouteAdvertisements deletion", "cudn", cudn.Name, "ra", raName, "transport", transport)
-					c.cudnController.Reconcile(cudn.Name)
-				}
-			}
-			return nil
-		}
-		return fmt.Errorf("failed to get RA %q: %w", raName, err)
-	}
-
-	// RA exists (create/update event) - only requeue CUDNs that are selected by this RA
-	var errs []error
+	// Requeue all no-overlay/EVPN CUDNs. Filtering on what the RA currently selects
+	// would miss CUDNs that an update deselected (or that a deleted RA selected), whose
+	// acceptance status may need to change as a result; with only the RA name available
+	// there is no way to tell which CUDNs those were. RA events are rare and the
+	// notifier already filters out changes irrelevant to transport validation.
 	for _, cudn := range cudns {
 		transport := cudn.Spec.Network.GetTransport()
-
-		// Only consider CUDNs with no-overlay or EVPN transport (both require RouteAdvertisements)
-		if transport != userdefinednetworkv1.TransportOptionNoOverlay && transport != userdefinednetworkv1.TransportOptionEVPN {
-			continue
-		}
-
-		// Check if this RA selects this CUDN
-		selects, err := isRASelectingCUDN(ra, cudn)
-		if err != nil {
-			errs = append(errs, fmt.Errorf("failed to check if RouteAdvertisements %q selects CUDN %q: %w", raName, cudn.Name, err))
-			continue
-		}
-
-		if selects {
-			// Check if it advertises pod networks (required for CUDN transport validation)
-			if !slices.Contains(ra.Spec.Advertisements, ratypes.PodNetwork) {
-				continue
-			}
-
-			klog.V(4).InfoS("Re-queueing CUDN selected by RouteAdvertisements", "cudn", cudn.Name, "ra", raName, "transport", transport)
+		if transport == userdefinednetworkv1.TransportOptionNoOverlay || transport == userdefinednetworkv1.TransportOptionEVPN {
+			klog.V(4).InfoS("Re-queueing CUDN following RouteAdvertisements event", "cudn", cudn.Name, "ra", raName, "transport", transport)
 			c.cudnController.Reconcile(cudn.Name)
 		}
 	}
 
-	return errors.Join(errs...)
+	return nil
 }

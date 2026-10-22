@@ -533,7 +533,8 @@ jobs:
         # Valid options are:
         # target: ["shard-conformance", "no-uplink", "control-plane", "multi-homing", "node-ip-mac-migration",
         #          "external-gateway", "kv-live-migration", "network-segmentation",
-        #          "network-segmentation-dynamic", "bgp", "bgp-no-overlay", "bgp-no-overlay-dynamic", "bgp-loose-isolation",
+        #          "network-segmentation-dynamic", "bgp", "bgp-no-overlay", "bgp-no-overlay-dynamic",
+        #          "bgp-no-overlay-unmanaged-no-ra", "bgp-loose-isolation",
         #          "evpn", "traffic-flow-test-only", "tools", "serial"]
         #         shard-conformance: hybrid-overlay = multicast-enable = emptylb-enable = false
         #         control-plane: hybrid-overlay = multicast-enable = emptylb-enable = true
@@ -587,6 +588,9 @@ jobs:
           # no-overlay (e.g. BGP route advertisements, network-segmentation) where implementations are not strictly orthogonal.
           - {"target": "bgp-no-overlay-dynamic", "gateway-mode": "shared", "ipfamily": "dualstack", "disable-snat-multiple-gws": "SnatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones", "routeadvertisements": "advertise-default", "network-segmentation": "enable-network-segmentation", "no-overlay": "snat-enabled"}
           - {"target": "bgp-no-overlay", "gateway-mode": "local",  "ipfamily": "dualstack", "disable-snat-multiple-gws": "noSnatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones", "routeadvertisements": "advertise-default", "network-segmentation": "enable-network-segmentation", "no-overlay": "true"}
+          - {"target": "bgp-no-overlay-unmanaged-no-ra", "gateway-mode": "local",  "ipfamily": "dualstack", "disable-snat-multiple-gws": "noSnatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones", "routeadvertisements": "unmanaged-no-ra", "network-segmentation": "enable-network-segmentation", "no-overlay": "true"}
+          # no routeadvertisements: covers unmanaged no-overlay with the RouteAdvertisements feature disabled
+          - {"target": "bgp-no-overlay-unmanaged-no-ra", "gateway-mode": "shared", "ipfamily": "ipv4",      "disable-snat-multiple-gws": "SnatGW",     "second-bridge": "1br", "ic": "ic-single-node-zones", "network-segmentation": "enable-network-segmentation", "no-overlay": "snat-enabled"}
           - {"target": "bgp-loose-isolation", "gateway-mode": "shared", "ipfamily": "dualstack", "disable-snat-multiple-gws": "snatGW", "second-bridge": "1br", "ic": "ic-single-node-zones", "routeadvertisements": "advertise-default", "network-segmentation": "enable-network-segmentation", "advertised-udn-isolation-mode": "loose"}
           - {"target": "evpn", "gateway-mode": "local", "ipfamily": "dualstack", "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "1br", "ic": "ic-single-node-zones", "routeadvertisements": "advertise-default", "network-segmentation": "enable-network-segmentation", "evpn": "enable-evpn"}
           - {"target": "traffic-flow-test-only", "gateway-mode": "shared", "ipfamily": "ipv4", "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "1br", "ic": "ic-single-node-zones", "traffic-flow-tests": "1-24", "network-segmentation": "enable-network-segmentation"}
@@ -608,7 +612,7 @@ jobs:
       OVN_GATEWAY_MODE: "${{ matrix.gateway-mode }}"
       OVN_DUMMY_GATEWAY_BRIDGE: "${{ matrix.target == 'no-uplink' }}"
       OVN_SECOND_BRIDGE: "${{ matrix.second-bridge == '2br' }}"
-      ENABLE_MULTI_NET: "${{ matrix.target == 'multi-homing' || matrix.target == 'kv-live-migration' || startsWith(matrix.target, 'network-segmentation') || matrix.target == 'tools' || matrix.target == 'traffic-flow-test-only' || matrix.routeadvertisements != '' }}"
+      ENABLE_MULTI_NET: "${{ matrix.target == 'multi-homing' || matrix.target == 'kv-live-migration' || startsWith(matrix.target, 'network-segmentation') || matrix.target == 'tools' || matrix.target == 'traffic-flow-test-only' || matrix.routeadvertisements != '' || matrix.network-segmentation == 'enable-network-segmentation' }}"
       ENABLE_NETWORK_SEGMENTATION: "${{ startsWith(matrix.target, 'network-segmentation') || matrix.network-segmentation == 'enable-network-segmentation' }}"
       PLATFORM_IPV4_SUPPORT: "${{ matrix.ipfamily == 'IPv4' || matrix.ipfamily == 'dualstack' }}"
       PLATFORM_IPV6_SUPPORT: "${{ matrix.ipfamily == 'IPv6' || matrix.ipfamily == 'dualstack' }}"
@@ -700,7 +704,13 @@ jobs:
         fi
         if [ "$ADVERTISE_DEFAULT_NETWORK" == "true" ]; then
           echo "ADVERTISE_DEFAULT_NETWORK=true" >> $GITHUB_ENV
-
+        fi
+        # Pod IPs are externally visible when the default network is advertised
+        # via BGP or when unmanaged no-overlay without RouteAdvertisements
+        # relies on static underlay routes (see needs_host_pod_subnet_routes in
+        # contrib/kind-common.sh): masquerade them on the runner host so
+        # internet-bound traffic doesn't leave with a raw pod source IP.
+        if [ "$ADVERTISE_DEFAULT_NETWORK" == "true" ] || { [ "$ENABLE_NO_OVERLAY" == "true" ] && [ "$ENABLE_NO_OVERLAY_MANAGED_ROUTING" != "true" ]; }; then
           # Use proper variable declaration with default values
           if [ $MULTI_POD_SUBNET == "true" ]; then
             NET_CIDR_IPV4=${NET_CIDR_IPV4:-10.243.0.0/23,10.244.0.0/16}
@@ -798,7 +808,14 @@ jobs:
           make -C test control-plane WHAT="ClusterNetworkConnect"
         elif [ "${{ matrix.target }}" == "evpn" ]; then
           make -C test control-plane WHAT="EVPN"
-        elif [ "${{ matrix.target }}" == "bgp" ] || [ "${{ matrix.target }}" == "bgp-no-overlay" ] || [ "${{ matrix.target }}" == "bgp-no-overlay-dynamic" ] || [ "${{ matrix.target }}" == "bgp-loose-isolation" ]; then
+        elif [ "${{ matrix.target }}" == "bgp-no-overlay-unmanaged-no-ra" ]; then
+          # SKIP_ROUTE_ADVERTISEMENTS_TESTS matters only on the lane that keeps the
+          # RouteAdvertisements feature enabled without advertising the default
+          # network; the unmanaged no-overlay CUDN suite is labeled
+          # Feature:NoOverlay and runs as part of Network Segmentation below
+          SKIP_ROUTE_ADVERTISEMENTS_TESTS=true make -C test control-plane
+          SKIP_ROUTE_ADVERTISEMENTS_TESTS=true make -C test control-plane WHAT="Network Segmentation"
+        elif [[ "${{ matrix.target }}" == bgp* ]]; then
           make -C test control-plane
         elif [ "${{ matrix.target }}" == "serial" ]; then
           # Run only Serial tests with ginkgo focus
