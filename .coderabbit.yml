@@ -35,6 +35,20 @@ reviews:
       instructions: |
         - OVN-Kubernetes is a Kubernetes network plugin built on OVN/OVS.
           All Go source lives under go-controller/.
+        - Evaluate the PR's motivation as well as its implementation.
+          Identify the concrete bug, user need, or maintenance benefit
+          from the PR description and available evidence, and check that
+          the change addresses it. Question assumptions contradicted by
+          the code, unreachable failure scenarios, redundant functionality,
+          and complexity disproportionate to the benefit. If the rationale
+          is unclear, request specific evidence or clarification rather
+          than inventing a justification. Ground concerns in the code or
+          stated requirements, not speculation or personal preference.
+          Do not require a linked issue or production incident: valid
+          motivations include preventative fixes for reachable failures,
+          performance improvements, refactoring, documentation, and test
+          coverage. Distinguish an unexplained motivation from evidence
+          that the proposed change does not solve the stated problem.
         - Do not approve PRs that add new Go dependencies without
           clear justification in the PR description.
         - Generated code (zz_generated*, vendor/, or files that have a comment 
