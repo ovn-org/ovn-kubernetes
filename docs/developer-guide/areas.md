@@ -45,6 +45,40 @@ The workflow generates a short-lived installation token via
 [`actions/create-github-app-token`](https://github.com/actions/create-github-app-token)
 at the start of each run. No long-lived access tokens are used during workflow execution.
 
+### Waiting for CI and automatic retries
+
+If an authorized `/area-maintainer-approved` request finds pending CI checks
+and no failures, the bot posts a waiting comment containing a marker for the
+PR's current head commit SHA. The bot retries when it receives either:
+
+* A `check_suite: completed` event. GitHub Actions-created check suites do not
+  trigger this workflow event.
+* A `workflow_run: completed` event for `ovn-ci`, `DPU Offload`,
+  `performance-test`, `Test Docs Build`, or `License Header Check`, provided
+  the completed workflow was triggered by `pull_request`.
+
+Each retry rechecks the PR's current head, the bot-authored waiting marker,
+the requester's area authorization, and all CI results before attempting a
+merge pinned to that SHA. Completion events for older commits are ignored.
+**After pushing new commits, obtain a new `/area-maintainer-approved` request
+after review**; the old waiting marker does not authorize the new head.
+Completion retries for the same SHA are queued and processed one at a time;
+a later retry skips a PR that has already merged.
+
+Fork PRs are supported even when the completion event's `pull_requests` list
+is empty. The bot first looks up open PRs associated with the completed
+commit. If that lookup is also empty for a workflow completion, it looks up
+open PRs by source owner and branch, then verifies the source repository,
+branch, and head SHA before applying the same approval and CI checks.
+
+When CI fails, the bot reports the failed checks. Automatic retries suppress
+duplicate failure notifications for the same head SHA and set of failed
+checks; explicit `/area-maintainer-approved` commands still receive a
+response. If a waiting marker already exists for that SHA, rerunning the
+failed checks successfully allows a later completion event to trigger a merge
+without another approval. If there is no waiting marker, fix the failures
+and obtain another `/area-maintainer-approved` request.
+
 ## Current Areas
 
 ### Virtualization
