@@ -185,11 +185,13 @@ func newEgressTestNode(name, ipv4, ipv6, hostCIDRs string, egressLabelled bool) 
 }
 
 func setupNode(nodeName string, ipNets []string, mockAllocationIPs map[string]string) egressNode {
-	unlimited := util.UnlimitedNodeCapacity
+	unlimitedIPv4 := util.UnlimitedNodeCapacity
+	unlimitedIPv6 := util.UnlimitedNodeCapacity
+	unlimitedIP := util.UnlimitedNodeCapacity
 	var config = &util.ParsedNodeEgressIPConfiguration{Capacity: util.Capacity{
-		IP:   &unlimited,
-		IPv4: &unlimited,
-		IPv6: &unlimited,
+		IP:   &unlimitedIP,
+		IPv4: &unlimitedIPv4,
+		IPv6: &unlimitedIPv6,
 	}}
 	for _, ipNetStr := range ipNets {
 		ip, ipNet, _ := net.ParseCIDR(ipNetStr)
