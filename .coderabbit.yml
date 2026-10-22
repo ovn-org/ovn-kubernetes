@@ -522,7 +522,7 @@ reviews:
           project files stale or inaccurate: .coderabbit.yml (path
           instructions, pre-merge checks, global review instructions),
           CONTRIBUTING.md, AGENTS.md, docs/developer-guide/,
-          docs/governance/, ARCHITECTURE.md, CODEOWNERS, or mkdocs.yml
+          docs/governance/, docs/design/architecture.md, CODEOWNERS, or mkdocs.yml
           navigation entries.
 
           Examples of staleness:
@@ -538,7 +538,7 @@ reviews:
           or removed but still referenced in docs or AGENTS.md.
 
           4. Architecture or component boundaries change but
-          ARCHITECTURE.md is not updated.
+          docs/design/architecture.md is not updated.
 
           Fail if any project docs or config become stale due to the
           changes. Pass only if the PR does not introduce any such
@@ -733,7 +733,7 @@ reviews:
         mode: "error"
         instructions: >-
           If the PR modifies .coderabbit.yml, any **/AGENTS.md, or
-          any **/ARCHITECTURE.md file, check whether the PR author's
+          docs/design/architecture.md, check whether the PR author's
           GitHub handle is listed in MAINTAINERS.md as a current
           maintainer. These files control AI review behavior, agent
           instructions, and architectural documentation — changes
@@ -741,8 +741,8 @@ reviews:
           review quality or introducing security issues.
 
           Fail if the PR author is not listed in MAINTAINERS.md and
-          the PR modifies .coderabbit.yml, any **/AGENTS.md, or any
-          **/ARCHITECTURE.md file. Advise the author that these
+          the PR modifies .coderabbit.yml, any **/AGENTS.md, or
+          docs/design/architecture.md. Advise the author that these
           files may only be changed by recognized maintainers listed
           in MAINTAINERS.md.
 
