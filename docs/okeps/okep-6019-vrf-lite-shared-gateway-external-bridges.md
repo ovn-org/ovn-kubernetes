@@ -386,9 +386,12 @@ moving the common gateway fields under `ovsBridge`.
   shape when internal compatibility requires it. If no default route exists, this field can be empty; the Uplink still
   resolves, no condition degrades, and egress can still work for destinations covered by BGP-learned routes imported by
   OVN-Kubernetes. Platform monitoring can alert on an empty field where a default gateway is expected. Host route
-  changes generate netlink events, but those events do not currently enqueue Uplink discovery. Discovery therefore
-  polls the host routes at a fixed interval while any addressed IP family lacks a default gateway, publishing newly
-  discovered gateways for use as default route next hops on the OVN gateway router. With VRF-Lite (`targetVRF: auto`),
+  changes generate netlink events, which the node's route manager already subscribes to; Uplink discovery registers
+  for them and rediscovers the node's Uplinks when a default route changes in any routing table, once the change has
+  settled, publishing added gateways and withdrawing removed ones. The OVN gateway router's default routes follow the
+  published list, withdrawn next hops included. A change limited to the default gateways updates the routes of an
+  active network without rebuilding its Uplink gateway. While an addressed IP family lacks a default gateway,
+  discovery also polls the host routes at a fixed interval as a fallback. With VRF-Lite (`targetVRF: auto`),
   the selected host interface's existing static and DHCP routes, including defaults, are preserved in the CUDN VRF
   and discovery reads them there. Discovery selects the lowest-metric
   defaults per IP family through the selected interface and, among their next hops, keeps only the ones with the
@@ -396,9 +399,8 @@ moving the common gateway fields under `ovsBridge`.
   gateways in deterministic order, up to 256 total across both families per node and Uplink.
   More than 256 fails discovery with `GatewayInfoUnavailable` and retries, rather than publishing a subset. The API
   bound accommodates 128 next hops per family; see the [feature documentation](../features/user-defined-networks/uplinks.md)
-  for its rationale. Polling stops once each addressed family has a gateway; subsequent route changes need another
-  reconciliation trigger until
-  [event-driven discovery](https://github.com/ovn-kubernetes/ovn-kubernetes/issues/6784) is implemented.
+  for its rationale. Polling stops once each addressed family has a gateway; route events drive later rediscovery
+  ([#6784](https://github.com/ovn-kubernetes/ovn-kubernetes/issues/6784)).
 
 In DPU deployments, the DPU-Host initializes the top-level status with host-side L3 data. The DPU side patches DPU-local
 fields on the same object, including `ovsBridge.name` and DPU-side validation state.

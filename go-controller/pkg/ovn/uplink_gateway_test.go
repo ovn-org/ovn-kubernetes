@@ -4,6 +4,8 @@
 package ovn
 
 import (
+	"fmt"
+	"net"
 	"testing"
 	"time"
 
@@ -13,8 +15,106 @@ import (
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	uplinkv1alpha1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/uplink/v1alpha1"
+	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/nbdb"
+	libovsdbtest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	uplinkutil "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/uplink"
+	multinetworkmocks "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util/mocks/multinetwork"
 )
+
+func TestSyncUplinkDefaultRoutes(t *testing.T) {
+	for _, dualStack := range []bool{false, true} {
+		t.Run(map[bool]string{false: "IPv4", true: "dual stack"}[dualStack], func(t *testing.T) {
+			g := gomega.NewWithT(t)
+			netInfo := multinetworkmocks.NewNetInfo(t)
+			netInfo.On("GetNetworkName").Return("blue")
+			netInfo.On("TopologyType").Return(types.Layer3Topology)
+			netInfo.On("IPMode").Return(true, dualStack)
+			port, otherPort := "rtoe-GR_blue", "other-port"
+			preserved := []*nbdb.LogicalRouterStaticRoute{
+				{UUID: "imported", IPPrefix: "0.0.0.0/0", Nexthop: "192.0.2.1", OutputPort: &port,
+					ExternalIDs: map[string]string{string(libovsdbops.OwnerControllerKey): "RouteImport", types.NetworkExternalID: "blue"}},
+				{UUID: "other-table", IPPrefix: "0.0.0.0/0", Nexthop: "192.0.2.99", OutputPort: &port, RouteTable: "other",
+					ExternalIDs: map[string]string{types.NetworkExternalID: "blue"}},
+				{UUID: "other-port", IPPrefix: "0.0.0.0/0", Nexthop: "192.0.2.99", OutputPort: &otherPort,
+					ExternalIDs: map[string]string{types.NetworkExternalID: "blue"}},
+				// The masquerade return route of the network shares the tags
+				// and the port of the default routes and must not be touched.
+				{UUID: "masquerade", IPPrefix: "169.254.169.0/29", Nexthop: "169.254.169.4", OutputPort: &port,
+					ExternalIDs: map[string]string{types.NetworkExternalID: "blue", types.TopologyExternalID: types.Layer3Topology}},
+			}
+			router := &nbdb.LogicalRouter{UUID: "router", Name: "GR_blue"}
+			data := []libovsdbtest.TestData{router}
+			for _, route := range preserved {
+				router.StaticRoutes = append(router.StaticRoutes, route.UUID)
+				data = append(data, route)
+			}
+			nbClient, cleanup, err := libovsdbtest.NewNBTestHarness(libovsdbtest.TestSetup{NBData: data}, nil)
+			g.Expect(err).NotTo(gomega.HaveOccurred())
+			t.Cleanup(cleanup.Cleanup)
+			// Capture the assigned UUIDs as well as the contents, so updates
+			// must preserve these exact rows.
+			allRoutes := func(*nbdb.LogicalRouterStaticRoute) bool { return true }
+			preserved, err = libovsdbops.GetRouterLogicalRouterStaticRoutesWithPredicate(nbClient, router, allRoutes)
+			g.Expect(err).NotTo(gomega.HaveOccurred())
+			g.Expect(preserved).To(gomega.HaveLen(4))
+			gw := &GatewayManager{nbClient: nbClient, netInfo: netInfo, gwRouterName: router.Name}
+			var many []string
+			for i := 1; i <= 256; i++ {
+				if dualStack && i > 128 {
+					many = append(many, fmt.Sprintf("2001:db8::%x", i-128))
+				} else {
+					many = append(many, fmt.Sprintf("192.0.%d.%d", i/256, i%256))
+				}
+			}
+			for _, nextHops := range [][]string{
+				{"192.0.2.1", "192.0.2.2", "2001:db8::1", "192.0.2.1"},
+				{"192.0.2.2", "192.0.2.1", "2001:db8::1"},
+				{"192.0.2.2", "2001:db8::2"},
+				many,
+				nil,
+			} {
+				var ips []net.IP
+				// next hop -> expected default prefix of its family
+				expected := map[string]string{}
+				for _, nextHop := range nextHops {
+					ip := net.ParseIP(nextHop)
+					ips = append(ips, ip)
+					if ip.To4() != nil {
+						expected[nextHop] = "0.0.0.0/0"
+					} else if dualStack {
+						expected[nextHop] = "::/0"
+					}
+				}
+				g.Expect(gw.syncUplinkDefaultRoutes(ips, port)).To(gomega.Succeed())
+				routes, err := libovsdbops.GetRouterLogicalRouterStaticRoutesWithPredicate(nbClient, router, allRoutes)
+				g.Expect(err).NotTo(gomega.HaveOccurred())
+				// A repeated sync with the same next hops changes nothing.
+				g.Expect(gw.syncUplinkDefaultRoutes(ips, port)).To(gomega.Succeed())
+				again, err := libovsdbops.GetRouterLogicalRouterStaticRoutesWithPredicate(nbClient, router, allRoutes)
+				g.Expect(err).NotTo(gomega.HaveOccurred())
+				g.Expect(again).To(gomega.ConsistOf(routes))
+				g.Expect(routes).To(gomega.HaveLen(len(preserved) + len(expected)))
+				for _, route := range preserved {
+					g.Expect(routes).To(gomega.ContainElement(route))
+				}
+				for nextHop, prefix := range expected {
+					g.Expect(routes).To(gomega.ContainElement(gomega.And(
+						gomega.HaveField("Nexthop", nextHop),
+						gomega.HaveField("IPPrefix", prefix),
+						gomega.HaveField("OutputPort", gomega.HaveValue(gomega.Equal(port))),
+						gomega.HaveField("Policy", gomega.BeNil()),
+						gomega.HaveField("RouteTable", ""),
+						gomega.HaveField("ExternalIDs", gomega.Equal(map[string]string{
+							types.NetworkExternalID: "blue", types.TopologyExternalID: types.Layer3Topology,
+						})),
+					)))
+				}
+			}
+		})
+	}
+}
 
 func TestResolvedUplinkL3GatewayConfig(t *testing.T) {
 	g := gomega.NewWithT(t)

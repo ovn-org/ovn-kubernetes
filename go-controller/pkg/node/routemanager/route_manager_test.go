@@ -639,3 +639,22 @@ func getIPFamily(ip net.IP) int {
 	}
 	return netlink.FAMILY_V4
 }
+
+var _ = ginkgo.Describe("Route Manager route event handlers", func() {
+	ginkgo.It("fans route events and subscription losses out to every handler", func() {
+		rm := NewController()
+		var updates []netlink.RouteUpdate
+		lost := 0
+		for range 2 {
+			rm.AddOnRouteUpdateHandler(func(routeUpdate netlink.RouteUpdate) { updates = append(updates, routeUpdate) })
+			rm.AddOnRouteEventsLostHandler(func() { lost++ })
+		}
+
+		update := netlink.RouteUpdate{Route: netlink.Route{Dst: ovntest.MustParseIPNet("10.0.0.0/8")}}
+		rm.notifyRouteUpdate(update)
+		rm.notifyRouteEventsLost()
+
+		gomega.Expect(updates).To(gomega.Equal([]netlink.RouteUpdate{update, update}))
+		gomega.Expect(lost).To(gomega.Equal(2))
+	})
+})

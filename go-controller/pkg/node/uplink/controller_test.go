@@ -966,6 +966,108 @@ func TestNodeUplinkControllerRejectsBridgeUplinkAsHostInterface(t *testing.T) {
 	)))
 }
 
+func TestNodeUplinkControllerRediscoversOnDefaultRouteChanges(t *testing.T) {
+	g := gomega.NewWithT(t)
+	g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+	config.OvnKubeNode.Mode = ovntypes.NodeModeFull
+
+	controller, _ := newTestController(t,
+		fakeHostDiscoverer{err: fmt.Errorf("must not discover")},
+		fakeBridgeResolver{bridgeName: "br-blue", bridgeUplink: "eth0"},
+		newUplinkState("br-blue.node-a", "br-blue", "node-a"),
+		newUplinkState("br-blue.node-b", "br-blue", "node-b"),
+	)
+	fake := controller.uplinkStateController.(*controllerutil.FakeController)
+
+	// Non-default routes and ovnkube's own managed defaults do not change a
+	// discovered gateway.
+	controller.onRouteUpdate(netlink.RouteUpdate{Route: netlink.Route{
+		Dst: ovntest.MustParseIPNet("10.0.0.0/8"), Gw: net.ParseIP("192.0.2.1"), Type: unix.RTN_UNICAST}})
+	controller.onRouteUpdate(netlink.RouteUpdate{Route: netlink.Route{
+		Dst: ovntest.MustParseIPNet("0.0.0.0/0"), Type: unix.RTN_UNREACHABLE, Protocol: ovntypes.OVNKProtocol, Table: 1005}})
+	controller.onRouteUpdate(netlink.RouteUpdate{Route: netlink.Route{
+		Dst: ovntest.MustParseIPNet("0.0.0.0/0"), Gw: net.ParseIP("192.0.2.1"), Type: unix.RTN_UNICAST,
+		Protocol: ovntypes.OVNKProtocol, Table: 1005}})
+	g.Expect(fake.Reconciles).To(gomega.BeEmpty())
+
+	// A default route change in any table, an in-place replacement by an
+	// unreachable default included, schedules a delayed rediscovery of this
+	// node's UplinkStates only.
+	controller.onRouteUpdate(netlink.RouteUpdate{Route: netlink.Route{
+		Dst: ovntest.MustParseIPNet("::/0"), Gw: net.ParseIP("2001:db8::1"), Type: unix.RTN_UNICAST, Table: 1005}})
+	controller.onRouteUpdate(netlink.RouteUpdate{Route: netlink.Route{
+		Dst: ovntest.MustParseIPNet("0.0.0.0/0"), Type: unix.RTN_UNREACHABLE, Table: 1005}})
+	g.Expect(fake.Reconciles).To(gomega.ConsistOf("After:br-blue.node-a", "After:br-blue.node-a"))
+}
+
+// A family whose gateways vanish from one dump keeps them published until a
+// rediscovery after the routes settled confirms the withdrawal.
+func TestNodeUplinkControllerConfirmsDefaultGatewayWithdrawal(t *testing.T) {
+	g := gomega.NewWithT(t)
+	g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+	config.OvnKubeNode.Mode = ovntypes.NodeModeFull
+
+	state := newUplinkState("br-blue.node-a", "br-blue", "node-a")
+	state.Status.HostInterfaceName = "breth0"
+	state.Status.DefaultGateways = []uplinkv1alpha1.IPAddress{"192.0.2.1", "192.0.2.2", "2001:db8::1", "2001:db8::2"}
+	discoverer := &copyingHostDiscoverer{state: &hostInterfaceState{
+		macAddress: net.HardwareAddr{0x02, 0x42, 0xac, 0x12, 0x00, 0x02},
+		ipAddresses: []*net.IPNet{
+			ovntest.MustParseIPNet("192.0.2.10/24"),
+			ovntest.MustParseIPNet("2001:db8::10/64"),
+		},
+		defaultGateways: []net.IP{ovntest.MustParseIP("192.0.2.1")},
+	}}
+	controller, client := newTestController(t,
+		discoverer,
+		fakeBridgeResolver{bridgeName: "br-blue", bridgeUplink: "eth0"},
+		newNode("node-a", map[string]string{"role": "blue"}),
+		newUplink("br-blue", "role", "blue", "breth0"),
+		state,
+	)
+	fake := controller.uplinkStateController.(*controllerutil.FakeController)
+
+	// The lister sees what the controller publishes, as a live informer would.
+	reconcile := func() *uplinkv1alpha1.UplinkState {
+		g.Expect(controller.reconcileUplinkState("br-blue.node-a")).To(gomega.Succeed())
+		published := getUplinkState(g, client, "br-blue.node-a")
+		state.Status = published.Status
+		return published
+	}
+
+	// Dumps without the IPv6 gateways inside the confirm delay keep them and
+	// schedule the confirming rediscovery.
+	for range 2 {
+		published := reconcile()
+		g.Expect(published.Status.DefaultGateways).To(gomega.Equal([]uplinkv1alpha1.IPAddress{"192.0.2.1", "2001:db8::1", "2001:db8::2"}))
+	}
+	g.Expect(fake.Reconciles).To(gomega.ConsistOf("After:br-blue.node-a", "After:br-blue.node-a"))
+
+	// The IPv6 gateways return while the IPv4 one goes missing: IPv4 gets
+	// its own confirm delay, IPv6 is no longer pending.
+	discoverer.state.defaultGateways = []net.IP{ovntest.MustParseIP("2001:db8::1")}
+	published := reconcile()
+	g.Expect(published.Status.DefaultGateways).To(gomega.Equal([]uplinkv1alpha1.IPAddress{"192.0.2.1", "2001:db8::1"}))
+
+	// A dump without it once the delay has passed withdraws it.
+	confirmDelay := withdrawalConfirmDelay
+	withdrawalConfirmDelay = 0
+	t.Cleanup(func() { withdrawalConfirmDelay = confirmDelay })
+	published = reconcile()
+	g.Expect(published.Status.DefaultGateways).To(gomega.Equal([]uplinkv1alpha1.IPAddress{"2001:db8::1"}))
+}
+
+// copyingHostDiscoverer returns a fresh copy per call, as discovery does.
+type copyingHostDiscoverer struct {
+	state *hostInterfaceState
+}
+
+func (d *copyingHostDiscoverer) Discover(string) (*hostInterfaceState, error) {
+	state := *d.state
+	state.defaultGateways = slices.Clone(d.state.defaultGateways)
+	return &state, nil
+}
+
 func TestNodeUplinkControllerRepollsWhileDefaultGatewaysMissing(t *testing.T) {
 	hostState := &hostInterfaceState{
 		macAddress:  net.HardwareAddr{0x02, 0x42, 0xac, 0x12, 0x00, 0x02},
