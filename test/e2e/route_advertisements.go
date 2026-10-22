@@ -1028,6 +1028,19 @@ var _ = ginkgo.Describe("BGP: Pod to external server when CUDN network is advert
 				}
 			}
 
+			ginkgo.By("routes from CUDN are exported to external FRR router")
+			for _, serverContainerIP := range serverContainerIPs {
+				for _, node := range advertisedNodes {
+					if cudnTemplate.Spec.Network.Layer3 != nil {
+						checkL3NodePodRoute(node, serverContainerIP, routerContainerName, types.CUDNPrefix+cUDN.Name)
+					} else if cudnTemplate.Spec.Network.Layer2 != nil {
+						checkL2NodePodRoute(node, serverContainerIP, routerContainerName, cudnTemplate.Spec.Network.Layer2.Subnets)
+					} else {
+						ginkgo.Fail("unexpected topology: neither Layer3 nor Layer2 network spec is set")
+					}
+				}
+			}
+
 			expectSNAT := cudnTemplate.Spec.Network.NoOverlay != nil &&
 				cudnTemplate.Spec.Network.NoOverlay.OutboundSNAT == udnv1.SNATEnabled
 
