@@ -613,7 +613,7 @@ jobs:
       KIND_NUM_WORKER: "${{ matrix.num-workers }}"
       OVN_DISABLE_FORWARDING: "${{ matrix.forwarding == 'disable-forwarding' }}"
       OVN_ENABLE_DNSNAMERESOLVER: "${{ matrix.dns-name-resolver == 'enable-dns-name-resolver' }}"
-      OVN_NETWORK_QOS_ENABLE: "${{ matrix.target == 'control-plane' || matrix.target == 'kv-live-migration' }}"
+      OVN_NETWORK_QOS_ENABLE: "${{ matrix.target == 'control-plane' || matrix.target == 'kv-live-migration' || startsWith(matrix.target, 'network-segmentation') }}"
       TRAFFIC_FLOW_TESTS: "${{ matrix.traffic-flow-tests }}"
       ENABLE_ROUTE_ADVERTISEMENTS: "${{ matrix.routeadvertisements != '' }}"
       ENABLE_EVPN: "${{ matrix.target == 'evpn' || matrix.evpn == 'enable-evpn' }}"

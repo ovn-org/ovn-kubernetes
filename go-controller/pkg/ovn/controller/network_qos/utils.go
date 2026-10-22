@@ -5,77 +5,120 @@ package networkqos
 
 import (
 	"fmt"
+	"net"
+	"strings"
 
-	corev1 "k8s.io/api/core/v1"
+	utilnet "k8s.io/utils/net"
 
 	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
-	addressset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
-	ovnkutil "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
 
-func joinMetaNamespaceAndName(namespace, name string, separator ...string) string {
-	if namespace == "" {
-		return name
-	}
-	sep := "/"
-	if len(separator) > 0 {
-		sep = separator[0]
-	}
-	return namespace + sep + name
+func nqosKey(namespace, name string) string {
+	return namespace + "/" + name
 }
 
-func GetNetworkQoSAddrSetDbIDs(nqosNamespace, nqosName, ruleIndex, ipBlockIndex, controller string) *libovsdbops.DbObjectIDs {
-	return libovsdbops.NewDbObjectIDs(libovsdbops.AddressSetNetworkQoS, controller,
-		map[libovsdbops.ExternalIDKey]string{
-			libovsdbops.ObjectNameKey: joinMetaNamespaceAndName(nqosNamespace, nqosName, ":"),
-			// rule index is the unique id for address set within given objectName
-			libovsdbops.RuleIndex:       ruleIndex,
-			libovsdbops.IpBlockIndexKey: ipBlockIndex,
-		})
+// Existing OVN external IDs use this separator. Changing it would break object lookups.
+const ovnObjectNameSeparator = ":"
+
+func ovnObjectName(namespace, name string) string {
+	return namespace + ovnObjectNameSeparator + name
 }
 
-func getPodAddresses(pod *corev1.Pod, networkInfo ovnkutil.NetInfo, resolver func(nadKey string) string) ([]string, error) {
-	// check annotation "k8s.ovn.org/pod-networks" before calling GetPodIPsOfNetwork,
-	// as it's no easy to check if the error is caused by missing annotation, while
-	// we don't want to return error for such case as it will trigger retry
-	_, ok := pod.Annotations[types.OvnPodAnnotationName]
-	if !ok {
-		// pod hasn't been annotated yet, return nil to avoid retry
-		return nil, nil
-	}
-	ips, err := ovnkutil.GetPodIPsOfNetwork(pod, networkInfo, resolver)
-	if err != nil {
-		return nil, err
-	}
-	addresses := []string{}
-	for _, ip := range ips {
-		addresses = append(addresses, ip.String())
-	}
-	return addresses, nil
+// An empty ownerController matches every network.
+func isNetworkQoSObject(externalIDs map[string]string, ownerController, objectName string) bool {
+	return externalIDs[libovsdbops.OwnerTypeKey.String()] == string(libovsdbops.NetworkQoSOwnerType) &&
+		(ownerController == "" || externalIDs[libovsdbops.OwnerControllerKey.String()] == ownerController) &&
+		externalIDs[libovsdbops.ObjectNameKey.String()] == objectName
 }
 
-func generateNetworkQoSMatch(qosState *networkQoSState, rule *GressRule, ipv4Enabled, ipv6Enabled bool) string {
-	match := addressSetToMatchString(qosState.SrcAddrSet, trafficDirSource, ipv4Enabled, ipv6Enabled)
-
-	classiferMatchString := rule.Classifier.ToQosMatchString(ipv4Enabled, ipv6Enabled)
-	if classiferMatchString != "" {
-		match = match + " && " + classiferMatchString
+func generateNetworkQoSMatch(source addrSetRef, rule *GressRule, ipv4Enabled, ipv6Enabled bool) string {
+	match := source.matchString(trafficDirSource, ipv4Enabled, ipv6Enabled)
+	if classifierMatch := rule.Classifier.ToQosMatchString(ipv4Enabled, ipv6Enabled); classifierMatch != "" {
+		match += " && " + classifierMatch
 	}
-
 	return match
 }
 
-func addressSetToMatchString(addrset addressset.AddressSet, dir trafficDirection, ipv4Enabled, ipv6Enabled bool) string {
-	ipv4AddrSetHashName, ipv6AddrSetHashName := addrset.GetASHashNames()
-	output := ""
+// A shared set may have been created before the network changed IP families. Only use
+// families with a hash, or OVN will reject the match. Return empty if none are usable.
+func (ref addrSetRef) matchString(dir trafficDirection, ipv4Enabled, ipv6Enabled bool) string {
+	ipv4 := ipv4Enabled && ref.hashV4 != ""
+	ipv6 := ipv6Enabled && ref.hashV6 != ""
 	switch {
-	case ipv4Enabled && ipv6Enabled:
-		output = fmt.Sprintf("(ip4.%s == {$%s} || ip6.%s == {$%s})", dir, ipv4AddrSetHashName, dir, ipv6AddrSetHashName)
-	case ipv4Enabled:
-		output = fmt.Sprintf("ip4.%s == {$%s}", dir, ipv4AddrSetHashName)
-	case ipv6Enabled:
-		output = fmt.Sprintf("ip6.%s == {$%s}", dir, ipv6AddrSetHashName)
+	case ipv4 && ipv6:
+		return fmt.Sprintf("(ip4.%s == {$%s} || ip6.%s == {$%s})", dir, ref.hashV4, dir, ref.hashV6)
+	case ipv4:
+		return fmt.Sprintf("ip4.%s == {$%s}", dir, ref.hashV4)
+	case ipv6:
+		return fmt.Sprintf("ip6.%s == {$%s}", dir, ref.hashV6)
+	default:
+		return ""
 	}
-	return output
+}
+
+// Each spec.priority gets a band of priorities. Within the band, later rules win.
+func getQoSRulePriority(qosPriority, ruleIndex int) int {
+	return types.NetworkQoSBasePriority + qosPriority*types.NetworkQoSMaxRules + ruleIndex
+}
+
+// Packets to a Service whose selected pod is behind the same switch, or to another subnet of
+// the switch, pass it twice on their source node: towards a router of the network, and back.
+// These exclusions skip one pass. Both return empty without router MACs.
+//
+// Where rules apply as packets enter the switch, skip the packets addressed to a router for a
+// destination on the network. They are classified when they come back, load balanced.
+func routerReentryExclusion(routerMACs []string, subnets []*net.IPNet, ipv4Enabled, ipv6Enabled bool) string {
+	if len(routerMACs) == 0 {
+		return ""
+	}
+	var v4Subnets, v6Subnets []string
+	for _, subnet := range subnets {
+		if utilnet.IsIPv6CIDR(subnet) {
+			if ipv6Enabled {
+				v6Subnets = append(v6Subnets, subnet.String())
+			}
+		} else if ipv4Enabled {
+			v4Subnets = append(v4Subnets, subnet.String())
+		}
+	}
+	var destinations []string
+	if len(v4Subnets) > 0 {
+		destinations = append(destinations, "ip4.dst == "+matchSet(v4Subnets))
+	}
+	if len(v6Subnets) > 0 {
+		destinations = append(destinations, "ip6.dst == "+matchSet(v6Subnets))
+	}
+	if len(destinations) == 0 {
+		return ""
+	}
+	destination := destinations[0]
+	if len(destinations) > 1 {
+		destination = "(" + strings.Join(destinations, " || ") + ")"
+	}
+	return fmt.Sprintf("!(eth.dst == %s && %s)", matchSet(routerMACs), destination)
+}
+
+// Where rules apply as packets leave the switch, skip the packets a router sends into it.
+// They were classified as they left the switch towards the router, with the same addresses.
+func routerReturnExclusion(routerMACs []string) string {
+	if len(routerMACs) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("!(%s)", routerReturnMatch(routerMACs))
+}
+
+// The packets a router sends into the switch, which routerReturnExclusion skips.
+func routerReturnMatch(routerMACs []string) string {
+	if len(routerMACs) == 0 {
+		return ""
+	}
+	return "eth.src == " + matchSet(routerMACs)
+}
+
+func matchSet(values []string) string {
+	if len(values) == 1 {
+		return values[0]
+	}
+	return "{" + strings.Join(values, ", ") + "}"
 }

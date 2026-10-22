@@ -99,14 +99,14 @@ These metrics are registered only when `--metrics-enable-scale` is enabled.
 NetworkQoS metrics are registered by the NetworkQoS controller package.
 Duration values use milliseconds, as indicated by the metric names.
 
-| Name | Type | Labels | Description |
-| --- | --- | --- | --- |
-| `num_network_qoses` | Gauge | `network` | Number of NetworkQoS resources per network. |
+| Name                             | Type      | Labels      | Description                                                                                                        |
+| -------------------------------- | --------- | ----------- | ------------------------------------------------------------------------------------------------------------------ |
+| `num_network_qoses`              | Gauge     | None        | Number of NetworkQoS resources applied. |
 | `nqos_ovn_operation_duration_ms` | Histogram | `operation` | Time spent on an OVN operation during NetworkQoS reconciliation. |
-| `nqos_creation_duration_ms` | Histogram | `network` | Time spent reconciling a NetworkQoS event. |
-| `nqos_deletion_duration_ms` | Histogram | `network` | Time spent reconciling a pod event for NetworkQoS. The historical metric name is retained for compatibility. |
-| `nqos_ns_reconcile_duration_ms` | Histogram | `network` | Time spent applying a namespace change to related NetworkQoS pods. |
-| `nqos_status_patch_duration_ms` | Histogram | `network` | Time spent patching NetworkQoS status. |
+| `nqos_creation_duration_ms`      | Histogram | None        | Time spent reconciling a NetworkQoS event. |
+| `nqos_deletion_duration_ms`      | Histogram | None        | Time spent removing a NetworkQoS from a network it no longer selects, or from all its networks when it is deleted. |
+| `nqos_ns_reconcile_duration_ms`  | Histogram | None        | Time spent requeueing the NetworkQoS resources that select NetworkAttachmentDefinitions when a namespace changes.  |
+| `nqos_status_patch_duration_ms`  | Histogram | None        | Time spent patching NetworkQoS status. |
 
 ## OVN-Kubernetes Node Metrics
 

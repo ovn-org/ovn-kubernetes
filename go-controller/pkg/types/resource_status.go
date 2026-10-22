@@ -13,6 +13,8 @@ const (
 	EgressFirewallErrorMsg = "EgressFirewall Rules not correctly applied"
 	EgressQoSErrorMsg      = "EgressQoS Rules not correctly applied"
 	NetworkQoSErrorMsg     = "NetworkQoS Destinations not correctly applied"
+	// NetworkQoSNoErrorsMsg means no zone reported an error.
+	NetworkQoSNoErrorsMsg = "No NetworkQoS errors reported"
 )
 
 func GetZoneStatus(zoneID, message string) string {

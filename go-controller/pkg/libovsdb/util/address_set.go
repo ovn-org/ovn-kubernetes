@@ -63,6 +63,55 @@ func DeleteAddrSetsWithoutMatchRef(predicateIDs *libovsdbops.DbObjectIDs, nbClie
 	return nil
 }
 
+// DeleteAddrSetsWithoutMatchRefAnyController deletes the address sets of the given owner type,
+// across all controllers, that no ACL, NAT, logical router policy or QoS match refers to.
+func DeleteAddrSetsWithoutMatchRefAnyController(dbOwnerType *libovsdbops.ObjectIDsType, nbClient libovsdbclient.Client) error {
+	addrSets, err := libovsdbops.FindAddressSetsWithPredicate(
+		nbClient,
+		libovsdbops.GetAnyControllerPredicate[*nbdb.AddressSet](dbOwnerType, nil),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to find address sets with predicate: %w", err)
+	}
+	if len(addrSets) == 0 {
+		return nil
+	}
+
+	addrSetNames := sets.New[string]()
+	for _, addrSet := range addrSets {
+		addrSetNames.Insert(addrSet.Name)
+	}
+	referencedNames, err := addressSetNamesReferencedInMatches(nbClient, addrSetNames)
+	if err != nil {
+		return err
+	}
+	_, err = libovsdbops.FindQoSesWithPredicate(nbClient, func(qos *nbdb.QoS) bool {
+		for addrSetName := range addrSetNames {
+			if strings.Contains(qos.Match, addrSetName) {
+				referencedNames.Insert(addrSetName)
+			}
+		}
+		return false
+	})
+	if err != nil {
+		return fmt.Errorf("failed to find QoSes referencing address sets: %w", err)
+	}
+
+	staleAddressSets := make([]*nbdb.AddressSet, 0, len(addrSets))
+	for _, addrSet := range addrSets {
+		if !referencedNames.Has(addrSet.Name) {
+			staleAddressSets = append(staleAddressSets, addrSet)
+		}
+	}
+	if len(staleAddressSets) == 0 {
+		return nil
+	}
+	if err := libovsdbops.DeleteAddressSets(nbClient, staleAddressSets...); err != nil {
+		return fmt.Errorf("failed to delete address sets without match references: %w", err)
+	}
+	return nil
+}
+
 func addressSetNamesReferencedInMatches(nbClient libovsdbclient.Client, addressSetNames sets.Set[string]) (sets.Set[string], error) {
 	referencedNames := sets.New[string]()
 	recordReferences := func(match string) {

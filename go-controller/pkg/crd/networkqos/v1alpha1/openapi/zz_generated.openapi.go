@@ -343,7 +343,7 @@ func schema_pkg_crd_networkqos_v1alpha1_Port(ref common.ReferenceCallback) commo
 				Properties: map[string]spec.Schema{
 					"protocol": {
 						SchemaProps: spec.SchemaProps{
-							Description: "protocol (tcp, udp, sctp) that the traffic must match.",
+							Description: "protocol (TCP, UDP or SCTP) that the traffic must match.",
 							Default:     "",
 							Type:        []string{"string"},
 							Format:      "",
@@ -407,7 +407,7 @@ func schema_pkg_crd_networkqos_v1alpha1_Spec(ref common.ReferenceCallback) commo
 				Properties: map[string]spec.Schema{
 					"networkSelectors": {
 						SchemaProps: spec.SchemaProps{
-							Description: "networkSelector selects the networks on which the pod IPs need to be added to the source address set. NetworkQoS controller currently supports `NetworkAttachmentDefinitions` type only.",
+							Description: "networkSelector selects the networks on which the pod IPs need to be added to the source address set.",
 							Type:        []string{"array"},
 							Items: &spec.SchemaOrArray{
 								Schema: &spec.Schema{

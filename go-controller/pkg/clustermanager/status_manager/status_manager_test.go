@@ -16,6 +16,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
+	metaapplyv1 "k8s.io/client-go/applyconfigurations/meta/v1"
 	clienttesting "k8s.io/client-go/testing"
 	"k8s.io/klog/v2"
 	"k8s.io/utils/ptr"
@@ -30,6 +31,8 @@ import (
 	egressfirewallfake "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
 	egressqosapi "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1"
 	networkqosapi "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1alpha1"
+	networkqosapply "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1alpha1/apis/applyconfiguration/networkqos/v1alpha1"
+	nqosfake "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1alpha1/apis/clientset/versioned/fake"
 	crdtypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/networkmanager"
@@ -277,18 +280,9 @@ func checkNQStatusEventually(networkQoS *networkqosapi.NetworkQoS, expectFailure
 		} else if expectEmpty {
 			return eq.Status.Status == ""
 		} else {
-			return strings.Contains(eq.Status.Status, "applied")
+			return strings.Contains(eq.Status.Status, types.NetworkQoSNoErrorsMsg)
 		}
 	}).Should(BeTrue(), fmt.Sprintf("expected network QoS status with expectFailure=%v expectEmpty=%v", expectFailure, expectEmpty))
-}
-
-func checkEmptyNQStatusConsistently(networkQoS *networkqosapi.NetworkQoS, fakeClient *util.OVNClusterManagerClientset) {
-	Consistently(func() bool {
-		ef, err := fakeClient.NetworkQoSClient.K8sV1alpha1().NetworkQoSes(networkQoS.Namespace).
-			Get(context.TODO(), networkQoS.Name, metav1.GetOptions{})
-		Expect(err).NotTo(HaveOccurred())
-		return ef.Status.Status == ""
-	}).Should(BeTrue(), "expected Status to be consistently empty")
 }
 
 var _ = Describe("Cluster Manager Status Manager", func() {
@@ -724,57 +718,105 @@ var _ = Describe("Cluster Manager Status Manager", func() {
 
 	})
 
-	It("updates NetworkQoS status with 1 zone", func() {
+	It("reports no NetworkQoS error while no zone reports one", func() {
 		config.OVNKubernetesFeature.EnableNetworkQoS = true
 		zones := sets.New[string]("zone1")
 		namespace1 := util.NewNamespace(namespace1Name)
 		networkQoS := newNetworkQoS(namespace1.Name)
 		start(zones, namespace1, networkQoS)
-		updateNetworkQoSStatus(networkQoS, &networkqosapi.Status{
-			Conditions: []metav1.Condition{{
-				Type:    "Ready-In-Zone-zone1",
-				Status:  metav1.ConditionTrue,
-				Reason:  "SetupSucceeded",
-				Message: "NetworkQoS Destinations applied",
-			}},
-		}, fakeClient)
 
+		// No zone has reported a failure.
 		checkNQStatusEventually(networkQoS, false, false, fakeClient)
 	})
 
-	It("updates NetworkQoS status with 2 zones", func() {
+	It("reports a NetworkQoS failure of a single zone", func() {
 		config.OVNKubernetesFeature.EnableNetworkQoS = true
 		zones := sets.New[string]("zone1", "zone2")
 		namespace1 := util.NewNamespace(namespace1Name)
 		networkQoS := newNetworkQoS(namespace1.Name)
 		start(zones, namespace1, networkQoS)
 
-		updateNetworkQoSStatus(networkQoS, &networkqosapi.Status{
-			Conditions: []metav1.Condition{{
-				Type:    "Ready-In-Zone-zone1",
-				Status:  metav1.ConditionTrue,
-				Reason:  "SetupSucceeded",
-				Message: "NetworkQoS Destinations applied",
-			}},
-		}, fakeClient)
-
-		checkEmptyNQStatusConsistently(networkQoS, fakeClient)
-
-		updateNetworkQoSStatus(networkQoS, &networkqosapi.Status{
-			Conditions: []metav1.Condition{{
-				Type:    "Ready-In-Zone-zone1",
-				Status:  metav1.ConditionTrue,
-				Reason:  "SetupSucceeded",
-				Message: "NetworkQoS Destinations applied",
-			}, {
-				Type:    "Ready-In-Zone-zone2",
-				Status:  metav1.ConditionTrue,
-				Reason:  "SetupSucceeded",
-				Message: "NetworkQoS Destinations applied",
-			}},
-		}, fakeClient)
 		checkNQStatusEventually(networkQoS, false, false, fakeClient)
 
+		// Report a failure without waiting for every zone.
+		updateNetworkQoSStatus(networkQoS, &networkqosapi.Status{
+			Conditions: []metav1.Condition{{
+				Type:    "Ready-In-Zone-zone1",
+				Status:  metav1.ConditionFalse,
+				Reason:  "SetupFailed",
+				Message: types.NetworkQoSErrorMsg + ": failed to reconcile",
+			}},
+		}, fakeClient)
+		checkNQStatusEventually(networkQoS, true, false, fakeClient)
+
+		// the zone retracts its condition once it succeeds
+		updateNetworkQoSStatus(networkQoS, &networkqosapi.Status{}, fakeClient)
+		checkNQStatusEventually(networkQoS, false, false, fakeClient)
+	})
+
+	It("reports the NetworkQoS failure a zone of an older version wrote", func() {
+		config.OVNKubernetesFeature.EnableNetworkQoS = true
+		zones := sets.New[string]("zone1")
+		namespace1 := util.NewNamespace(namespace1Name)
+		networkQoS := newNetworkQoS(namespace1.Name)
+		start(zones, namespace1, networkQoS)
+		checkNQStatusEventually(networkQoS, false, false, fakeClient)
+
+		// the zones of an older version did not prefix their failures
+		updateNetworkQoSStatus(networkQoS, &networkqosapi.Status{
+			Conditions: []metav1.Condition{{
+				Type:    "Ready-In-Zone-zone1",
+				Status:  metav1.ConditionFalse,
+				Reason:  "Failed",
+				Message: "NetworkQoS namespace1/default - failed to reconcile, error details: some error",
+			}},
+		}, fakeClient)
+		checkNQStatusEventually(networkQoS, true, false, fakeClient)
+	})
+
+	It("cleans up the NetworkQoS failure of a stale zone without reporting it", func() {
+		config.OVNKubernetesFeature.EnableNetworkQoS = true
+		namespace1 := util.NewNamespace(namespace1Name)
+		networkQoS := newNetworkQoS(namespace1.Name)
+		fakeClient = util.GetOVNClientset(namespace1, getNode("zone1")).GetClusterManagerClientset()
+		// The default fake cannot track field ownership, so an empty apply would not remove
+		// the old condition.
+		nqosClient := nqosfake.NewClientset(networkQoS)
+		fakeClient.NetworkQoSClient = nqosClient
+		staleFailure := metaapplyv1.Condition().
+			WithType("Ready-In-Zone-zone2").
+			WithStatus(metav1.ConditionFalse).
+			WithReason("Failed").
+			WithMessage(types.NetworkQoSErrorMsg + ": failed to configure network(s) stream").
+			WithLastTransitionTime(metav1.Now())
+		_, err := nqosClient.K8sV1alpha1().NetworkQoSes(networkQoS.Namespace).ApplyStatus(context.TODO(),
+			networkqosapply.NetworkQoS(networkQoS.Name, networkQoS.Namespace).
+				WithStatus(networkqosapply.Status().WithConditions(staleFailure)),
+			metav1.ApplyOptions{FieldManager: "zone2", Force: true})
+		Expect(err).NotTo(HaveOccurred())
+		var errorStatusWrites atomic.Int32
+		nqosClient.PrependReactor("patch", "networkqoses", func(action clienttesting.Action) (bool, runtime.Object, error) {
+			patch := action.(clienttesting.PatchAction)
+			if patch.GetSubresource() == "status" &&
+				strings.Contains(string(patch.GetPatch()), fmt.Sprintf("%q:%q", "status", types.NetworkQoSErrorMsg)) {
+				errorStatusWrites.Add(1)
+			}
+			return false, nil, nil
+		})
+
+		wf, err = factory.NewClusterManagerWatchFactory(fakeClient)
+		Expect(err).NotTo(HaveOccurred())
+		statusManager = NewStatusManager(wf, fakeClient, networkmanager.Default().Interface())
+		Expect(wf.Start()).To(Succeed())
+		Expect(statusManager.Start()).To(Succeed())
+
+		checkNQStatusEventually(networkQoS, false, false, fakeClient)
+		Eventually(func() []metav1.Condition {
+			nqos, err := nqosClient.K8sV1alpha1().NetworkQoSes(networkQoS.Namespace).Get(context.TODO(), networkQoS.Name, metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			return nqos.Status.Conditions
+		}).Should(BeEmpty())
+		Expect(errorStatusWrites.Load()).To(BeZero(), "the failure of the stale zone must not be aggregated")
 	})
 
 	It("cleans up stale zone managedFields during startup", func() {

@@ -34,6 +34,7 @@ import (
 	apbroutecontroller "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/controller/apbroute"
 	efcontroller "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/controller/egressfirewall"
 	egresssvc "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/controller/egressservice"
+	nqoscontroller "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/controller/network_qos"
 	networkconnectcontroller "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/controller/networkconnect"
 	svccontroller "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/controller/unidling"
@@ -115,6 +116,9 @@ type DefaultNetworkController struct {
 	// used in egress firewall rules
 	dnsNameResolver dnsnameresolver.DNSNameResolver
 	efController    *efcontroller.EFController
+
+	// nqosController programs NetworkQoS across all networks.
+	nqosController *nqoscontroller.Controller
 
 	// retry framework for egress IP
 	retryEgressIPs *retry.RetryFramework
@@ -361,6 +365,9 @@ func (oc *DefaultNetworkController) Stop() {
 	}
 	if oc.efController != nil {
 		oc.efController.Stop()
+	}
+	if oc.nqosController != nil {
+		oc.nqosController.Stop()
 	}
 	if oc.eIPC != nil {
 		oc.eIPC.StopNADReconciler()
@@ -811,16 +818,12 @@ func (oc *DefaultNetworkController) run(_ context.Context) error {
 	}
 
 	if config.OVNKubernetesFeature.EnableNetworkQoS {
-		err := oc.newNetworkQoSController()
-		if err != nil {
+		if err := oc.newNetworkQoSController(); err != nil {
 			return fmt.Errorf("unable to create network qos controller, err: %w", err)
 		}
-		oc.wg.Add(1)
-		go func() {
-			defer oc.wg.Done()
-			// Until we have scale issues in future let's spawn only one thread
-			oc.nqosController.Run(1, oc.stopChan)
-		}()
+		if err := oc.nqosController.Start(); err != nil {
+			return fmt.Errorf("unable to start network qos controller, err: %w", err)
+		}
 	}
 
 	if util.IsNetworkConnectEnabled() {

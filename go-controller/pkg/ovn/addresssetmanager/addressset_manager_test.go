@@ -6,6 +6,7 @@ package addresssetmanager
 import (
 	"context"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -23,6 +24,7 @@ import (
 
 	ovncnitypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/controller"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
 	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/nbdb"
@@ -723,6 +725,200 @@ var _ = ginkgo.Describe("OVN podSelectorAddressSet", func() {
 
 		gomega.Expect(addressSetManager.CleanupForController(controllerName)).To(gomega.Succeed())
 		gomega.Eventually(addressSetManager.nbClient).Should(libovsdbtest.HaveEmptyData())
+	})
+
+	ginkgo.It("keeps node-name address sets distinct from each other and unrestricted sets", func() {
+		namespace := *testing.NewNamespace(namespaceName1)
+		localPod := testing.NewPod(namespace.Name, "local", "node1", ip1)
+		remotePod := testing.NewPod(namespace.Name, "remote", "node2", ip2)
+		// Node objects and their labels are not needed for a spec.nodeName filter.
+		startAddrSetManager(initialDB, []corev1.Namespace{namespace}, []corev1.Pod{*localPod, *remotePod})
+		podSelector := &metav1.LabelSelector{}
+		for _, node := range []string{"", "node1", "node2"} {
+			_, _, _, err := addressSetManager.EnsureAddressSet(podSelector, nil, nil, namespace.Name,
+				"backRef", controllerName, &util.DefaultNetInfo{}, false, WithNodeName(node))
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		}
+		expectAddresses := func(localIPs, remoteIPs []string) {
+			var expected []libovsdbtest.TestData
+			for node, ips := range map[string][]string{
+				"": append(append([]string{}, localIPs...), remoteIPs...), "node1": localIPs, "node2": remoteIPs,
+			} {
+				dbIDs := GetPodSelectorAddrSetDbIDs(podSelector, nil, nil, namespace.Name, controllerName, false, WithNodeName(node))
+				addrSet, _ := addressset.GetTestDbAddrSets(dbIDs, ips)
+				expected = append(expected, addrSet)
+			}
+			gomega.Eventually(addressSetManager.nbClient).Should(libovsdbtest.HaveData(expected))
+		}
+		expectAddresses([]string{ip1}, []string{ip2})
+
+		newPod := testing.NewPod(namespace.Name, "new-local", "node1", ip3)
+		_, err := clientSet.KubeClient.CoreV1().Pods(namespace.Name).Create(context.TODO(), newPod, metav1.CreateOptions{})
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		expectAddresses([]string{ip1, ip3}, []string{ip2})
+
+		err = clientSet.KubeClient.CoreV1().Pods(namespace.Name).Delete(context.TODO(), localPod.Name, metav1.DeleteOptions{})
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		expectAddresses([]string{ip3}, []string{ip2})
+	})
+
+	ginkgo.DescribeTable("removes a local pod replaced on another node before its key is processed",
+		func(nodeSelector *metav1.LabelSelector, selectedNode string) {
+			namespace := *testing.NewNamespace(namespaceName1)
+			pod := testing.NewPod(namespace.Name, "stateful-pod-0", "node1", ip1)
+			nodes := []corev1.Node{
+				{ObjectMeta: metav1.ObjectMeta{Name: "node1", Labels: map[string]string{"role": "worker"}}},
+				{ObjectMeta: metav1.ObjectMeta{Name: "node2", Labels: map[string]string{"role": "control-plane"}}},
+			}
+			startAddrSetManagerWithNodes(initialDB, []corev1.Namespace{namespace}, []corev1.Pod{*pod}, nodes)
+			// Wait for both informer events before processing the pod key. Leave the
+			// address set worker running to handle the requeue.
+			controller.Stop(addressSetManager.podController, addressSetManager.nsController, addressSetManager.nodeController)
+			podSelector := &metav1.LabelSelector{}
+			_, _, _, err := addressSetManager.EnsureAddressSet(podSelector, nil, nodeSelector, namespace.Name,
+				"backRef", controllerName, &util.DefaultNetInfo{}, false, WithNodeName(selectedNode))
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			dbIDs := GetPodSelectorAddrSetDbIDs(podSelector, nil, nodeSelector, namespace.Name, controllerName, false,
+				WithNodeName(selectedNode))
+			populatedAS, _ := addressset.GetTestDbAddrSets(dbIDs, []string{ip1})
+			gomega.Eventually(addressSetManager.nbClient).Should(libovsdbtest.HaveData([]libovsdbtest.TestData{populatedAS}))
+
+			gomega.Expect(clientSet.KubeClient.CoreV1().Pods(namespace.Name).Delete(context.TODO(), pod.Name, metav1.DeleteOptions{})).To(gomega.Succeed())
+			replacement := testing.NewPod(namespace.Name, pod.Name, "node2", ip2)
+			_, err = clientSet.KubeClient.CoreV1().Pods(namespace.Name).Create(context.TODO(), replacement, metav1.CreateOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Eventually(func() string {
+				current, err := addressSetManager.podLister.Pods(namespace.Name).Get(pod.Name)
+				if err != nil {
+					return ""
+				}
+				return current.Spec.NodeName
+			}).Should(gomega.Equal("node2"))
+			gomega.Expect(addressSetManager.reconcilePod(namespace.Name + "/" + pod.Name)).To(gomega.Succeed())
+			emptyAS, _ := addressset.GetTestDbAddrSets(dbIDs, nil)
+			gomega.Eventually(addressSetManager.nbClient).Should(libovsdbtest.HaveData([]libovsdbtest.TestData{emptyAS}))
+		},
+		ginkgo.Entry("with an explicit node name", nil, "node1"),
+		ginkgo.Entry("with a node selector", &metav1.LabelSelector{MatchLabels: map[string]string{"role": "worker"}}, ""),
+		ginkgo.Entry("with both restrictions", &metav1.LabelSelector{MatchLabels: map[string]string{"role": "worker"}}, "node1"),
+	)
+
+	ginkgo.It("intersects node-name restrictions with node selectors", func() {
+		namespace := *testing.NewNamespace(namespaceName1)
+		pod := testing.NewPod(namespace.Name, "pod1", "node1", ip1)
+		node := corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}}
+		startAddrSetManagerWithNodes(initialDB, []corev1.Namespace{namespace}, []corev1.Pod{*pod}, []corev1.Node{node})
+		podSelector := &metav1.LabelSelector{}
+		nodeSelector := &metav1.LabelSelector{MatchLabels: map[string]string{"role": "worker"}}
+		_, _, _, err := addressSetManager.EnsureAddressSet(podSelector, nil, nodeSelector, namespace.Name,
+			"backRef", controllerName, &util.DefaultNetInfo{}, false, WithNodeName(node.Name))
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		dbIDs := GetPodSelectorAddrSetDbIDs(podSelector, nil, nodeSelector, namespace.Name, controllerName, false, WithNodeName(node.Name))
+		emptyAS, _ := addressset.GetTestDbAddrSets(dbIDs, nil)
+		gomega.Eventually(addressSetManager.nbClient).Should(libovsdbtest.HaveData([]libovsdbtest.TestData{emptyAS}))
+		node.Labels = map[string]string{"role": "worker"}
+		_, err = clientSet.KubeClient.CoreV1().Nodes().Update(context.TODO(), &node, metav1.UpdateOptions{})
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		populatedAS, _ := addressset.GetTestDbAddrSets(dbIDs, []string{ip1})
+		gomega.Eventually(addressSetManager.nbClient).Should(libovsdbtest.HaveData([]libovsdbtest.TestData{populatedAS}))
+	})
+
+	ginkgo.It("only reconciles an address set restricted to a node for the pods it selects or may select", func() {
+		namespace := *testing.NewNamespace(namespaceName1)
+		localPod := testing.NewPod(namespace.Name, "local", "node1", ip1)
+		remotePod := testing.NewPod(namespace.Name, "remote", "node2", ip2)
+		startAddrSetManager(initialDB, []corev1.Namespace{namespace}, []corev1.Pod{*localPod, *remotePod})
+		podSelector := &metav1.LabelSelector{}
+		restricted, _, _, err := addressSetManager.EnsureAddressSet(podSelector, nil, nil, namespace.Name, "backRef",
+			controllerName, &util.DefaultNetInfo{}, false, WithNodeName("node1"))
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		unrestricted, _, _, err := addressSetManager.EnsureAddressSet(podSelector, nil, nil, namespace.Name, "backRef",
+			controllerName, &util.DefaultNetInfo{}, false)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		// Stop workers so only the calls below can add to the queue.
+		controller.Stop(addressSetManager.podController, addressSetManager.nsController, addressSetManager.nodeController,
+			addressSetManager.addressSetReconciler)
+		reconciler := &controller.FakeController{}
+		addressSetManager.addressSetReconciler = reconciler
+		requeued := func(podName string) []string {
+			reconciler.Lock()
+			reconciler.Reconciles = nil
+			reconciler.Unlock()
+			gomega.Expect(addressSetManager.reconcilePod(namespace.Name + "/" + podName)).To(gomega.Succeed())
+			reconciler.Lock()
+			defer reconciler.Unlock()
+			return append([]string(nil), reconciler.Reconciles...)
+		}
+
+		gomega.Expect(requeued("local")).To(gomega.ConsistOf("Reconcile:"+restricted, "Reconcile:"+unrestricted))
+		// a pod of another node, that the restricted address set never selected
+		gomega.Expect(requeued("remote")).To(gomega.ConsistOf("Reconcile:" + unrestricted))
+		gomega.Expect(requeued("unknown")).To(gomega.ConsistOf("Reconcile:" + unrestricted))
+		ginkgo.By("reconciling it for a pod it selected, now replaced on another node")
+		gomega.Expect(clientSet.KubeClient.CoreV1().Pods(namespace.Name).Delete(context.TODO(), localPod.Name, metav1.DeleteOptions{})).To(gomega.Succeed())
+		replacement := testing.NewPod(namespace.Name, localPod.Name, "node2", ip3)
+		_, err = clientSet.KubeClient.CoreV1().Pods(namespace.Name).Create(context.TODO(), replacement, metav1.CreateOptions{})
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		gomega.Eventually(func() string {
+			current, err := addressSetManager.podLister.Pods(namespace.Name).Get(localPod.Name)
+			if err != nil {
+				return ""
+			}
+			return current.Spec.NodeName
+		}).Should(gomega.Equal("node2"))
+		gomega.Expect(requeued("local")).To(gomega.ConsistOf("Reconcile:"+restricted, "Reconcile:"+unrestricted))
+	})
+
+	ginkgo.It("tells the users of an address set when it starts and stops failing to resolve the addresses of its pods", func() {
+		namespace := *testing.NewNamespace(namespaceName1)
+		pod := testing.NewPod(namespace.Name, "pod", nodeName, ip1)
+		pod.Annotations = map[string]string{types.OvnPodAnnotationName: "malformed"}
+		startAddrSetManager(initialDB, []corev1.Namespace{namespace}, []corev1.Pod{*pod})
+		var lock sync.Mutex
+		var notified [][]string
+		addressSetManager.OnAddressSetErrorChange(func(backRefs []string) {
+			lock.Lock()
+			defer lock.Unlock()
+			notified = append(notified, backRefs)
+		})
+		notifications := func() [][]string {
+			lock.Lock()
+			defer lock.Unlock()
+			return append([][]string(nil), notified...)
+		}
+		blue := newNetInfo("blue", types.Layer3Topology, types.NetworkRolePrimary, "10.129.0.0/16/24")
+		key, _, _, err := addressSetManager.EnsureAddressSet(&metav1.LabelSelector{}, nil, nil, namespace.Name, "user",
+			"blue-network-controller", blue, false)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred(), "ensuring an address set does not fail on its addresses")
+		gomega.Expect(addressSetManager.AddressSetError(key)).To(gomega.HaveOccurred())
+		gomega.Expect(notifications()).To(gomega.ConsistOf(gomega.ConsistOf("user")))
+
+		ginkgo.By("notifying again once the addresses can be resolved")
+		pod.Annotations[types.OvnPodAnnotationName] = "{}"
+		pod.ResourceVersion = "2"
+		_, err = clientSet.KubeClient.CoreV1().Pods(namespace.Name).Update(context.TODO(), pod, metav1.UpdateOptions{})
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		gomega.Eventually(func() error { return addressSetManager.AddressSetError(key) }).Should(gomega.Succeed())
+		gomega.Expect(notifications()).To(gomega.HaveLen(2))
+	})
+
+	ginkgo.It("does not tell the users of an address set about a pod that has no IP yet", func() {
+		namespace := *testing.NewNamespace(namespaceName1)
+		// annotated for another network before the default network gives it an IP
+		pod := testing.NewPod(namespace.Name, "pod", nodeName, "")
+		pod.Annotations = map[string]string{
+			types.OvnPodAnnotationName: `{"ns/other":{"ip_addresses":["10.1.1.1/24"],"mac_address":"0a:58:0a:01:01:01"}}`,
+		}
+		startAddrSetManager(initialDB, []corev1.Namespace{namespace}, []corev1.Pod{*pod})
+		var notified atomic.Int32
+		addressSetManager.OnAddressSetErrorChange(func([]string) { notified.Add(1) })
+		key, _, _, err := addressSetManager.EnsureAddressSet(&metav1.LabelSelector{}, nil, nil, namespace.Name, "user",
+			controllerName, &util.DefaultNetInfo{}, false)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		gomega.Expect(addressSetManager.reconcileAddressSet(key)).To(gomega.MatchError(util.ErrNoPodIPFound),
+			"the reconciliation fails and is retried until the pod has an IP")
+		gomega.Expect(addressSetManager.AddressSetError(key)).To(gomega.Succeed())
+		gomega.Expect(notified.Load()).To(gomega.BeZero())
 	})
 
 	ginkgo.When("node selector is set", func() {
