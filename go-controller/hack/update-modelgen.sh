@@ -5,19 +5,13 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-# generate ovsdb bindings
-if  ! ( command -v modelgen > /dev/null ); then
-  echo "modelgen not found, installing github.com/ovn-kubernetes/libovsdb/cmd/modelgen"
-  olddir="${PWD}"
-  builddir="$(mktemp -d)"
-  cd "${builddir}"
-  # ensure the hash value is not outdated, if wrong bindings are being generated re-install modelgen
-  GO111MODULE=on go install github.com/ovn-kubernetes/libovsdb/cmd/modelgen@v0.9.0
-  cd "${olddir}"
-  if [[ "${builddir}" == /tmp/* ]]; then #paranoia
-      rm -rf "${builddir}"
-  fi
-fi
+# Install modelgen in an isolated directory so generation always uses the
+# version pinned here instead of an arbitrary binary already on PATH.
+builddir="$(mktemp -d)"
+trap 'rm -rf "${builddir}"' EXIT
+GOBIN="${builddir}/bin" GO111MODULE=on \
+  go install github.com/ovn-kubernetes/libovsdb/cmd/modelgen@v0.9.0
+export PATH="${builddir}/bin:${PATH}"
 
 go generate ./pkg/nbdb
 go generate ./pkg/sbdb
