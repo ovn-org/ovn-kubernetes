@@ -60,7 +60,8 @@ jobs:
             per_page: 100,
           });
           const isDoc = path => path.startsWith('docs/') || path.endsWith('.md') ||
-            path === 'mkdocs.yml' || path.startsWith('.github/ISSUE_TEMPLATE/');
+            path === 'mkdocs.yml' || path === '.coderabbit.yml' ||
+            path.startsWith('.github/ISSUE_TEMPLATE/');
           // The API caps results at 3000 files. Never skip CI on an incomplete list.
           // Check both paths of a rename so moving code into docs still runs CI.
           const runCI = files.length === 0 || files.length >= 3000 ||
