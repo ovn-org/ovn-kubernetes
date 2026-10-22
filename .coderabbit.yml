@@ -42,6 +42,17 @@ reviews:
           reviewed for style — only verify it was regenerated correctly.
         - Dual-stack (IPv4+IPv6) must always be considered — flag
           changes that only handle single-stack.
+        - Flag nil checks, fallback paths, optional callbacks, or other
+          production hooks for states excluded by supported initialization,
+          the call chain, or API contracts. Establish production reachability
+          before requesting defensive handling; retain checks for genuinely
+          optional inputs, external data, and reachable lifecycle/error states.
+          Do not request or accept production branches that weaken invariants
+          or silently skip required work solely to accommodate partially
+          initialized unit-test objects or avoid the normal test harness.
+          Prefer existing fixtures, fakes, and harnesses, with test-only
+          helpers in test files. New production injection points need a
+          design justification beyond simplifying a particular test.
         - Every feature or bug fix should include unit tests. Flag PRs
           that modify product behavior without corresponding test updates,
           subject to the test/ and website/documentation exceptions below.
@@ -172,8 +183,10 @@ reviews:
           for easy addition of new cases (prefer table-driven or flat
           ginkgo entries over deeply nested contexts).
         - Flag duplicate tests covering the same scenario.
-        - Flag missing edge cases: nil inputs, empty lists, dual-stack,
-          error paths, and boundary conditions.
+        - Flag missing reachable edge cases: optional nil inputs, empty
+          lists, dual-stack, error paths, and boundary conditions. Do not
+          demand tests or production guards for states excluded by the
+          initialization flow or API contract.
         - Flag test helper/utility duplication — check if similar
           helpers already exist in pkg/testing/ or other test files
           in the same package before adding new ones.

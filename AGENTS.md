@@ -95,6 +95,20 @@ See `CONTRIBUTING.md` for full details:
 - [Sign your commits (DCO)](CONTRIBUTING.md#sign-your-commits)
 - [AI guidelines](CONTRIBUTING.md#ai-guidelines)
 
+### Production invariants and test setup
+
+Do not add nil checks, fallback paths, optional callbacks, or other production
+hooks for states excluded by the supported initialization flow, call chain,
+or API contract. Establish whether a condition is reachable in production
+before adding defensive handling. Keep checks for genuinely optional inputs,
+external data, and reachable lifecycle or error conditions.
+
+Do not weaken production invariants or silently skip required work just to let
+unit tests use partially initialized objects or avoid the normal test harness.
+Use existing fixtures, fakes, and harnesses to construct valid objects, and keep
+test-only helpers in test files. New production injection points or abstractions
+must have a design justification beyond making a particular test easier to write.
+
 ## OKEPs (Enhancement Proposals)
 
 New features require an OKEP in `docs/okeps/`. See `docs/okeps/okep-4368-template.md` for the
