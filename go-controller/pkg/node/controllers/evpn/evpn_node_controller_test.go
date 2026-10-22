@@ -1209,14 +1209,17 @@ var _ = Describe("EVPN node controller", func() {
 			const nadKey = "test-ns/test-nad"
 
 			var ensuredMu sync.Mutex
-			var ensuredCfgs []netlinkdevicemanager.DeviceConfig
+			// Keep the latest desired state: an in-flight reconcile can still
+			// apply old mappings after the network is removed.
+			ensuredCfgs := map[string]netlinkdevicemanager.DeviceConfig{}
 
 			By("allowing any NDM calls throughout the test")
 			ndm.On("DeleteLink", mock.Anything).Return(nil)
 			ndm.On("EnsureLink", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
 				ensuredMu.Lock()
 				defer ensuredMu.Unlock()
-				ensuredCfgs = append(ensuredCfgs, args.Get(0).(netlinkdevicemanager.DeviceConfig))
+				cfg := args.Get(0).(netlinkdevicemanager.DeviceConfig)
+				ensuredCfgs[cfg.Link.Attrs().Name] = cfg
 			})
 
 			By("creating an unmanaged VTEP and setting up addresses")
@@ -1245,8 +1248,10 @@ var _ = Describe("EVPN node controller", func() {
 			netInfo.On("GetNetworkName").Return("mynet")
 			netInfo.On("GetNetworkID").Return(5)
 			netInfo.On("GetNetworkScopedSwitchName", mock.Anything).Return("mynet_ovn_layer2_switch")
+			fakeNM.Lock()
 			fakeNM.NADNetworks = map[string]util.NetInfo{nadKey: netInfo}
 			fakeNM.PrimaryNetworks = map[string]util.NetInfo{"test-ns": netInfo}
+			fakeNM.Unlock()
 			fakeNM.TriggerHandlers(nadKey, netInfo, false)
 
 			l3SVIName := GetEVPNL3SVIName(netInfo)
@@ -1300,25 +1305,19 @@ var _ = Describe("EVPN node controller", func() {
 			ensuredMu.Unlock()
 
 			By("simulating network removal and verifying VXLAN has no mappings")
-			ensuredMu.Lock()
-			ensuredCfgs = nil
-			ensuredMu.Unlock()
 			fakeNM.Lock()
 			fakeNM.NADNetworks = nil
 			fakeNM.PrimaryNetworks = nil
 			fakeNM.Unlock()
 			fakeNM.TriggerHandlers(nadKey, nil, true)
 
-			Eventually(func() bool {
+			Eventually(func(g Gomega) {
 				ensuredMu.Lock()
 				defer ensuredMu.Unlock()
-				for _, cfg := range ensuredCfgs {
-					if cfg.Link.Attrs().Name == vxlan4Name {
-						return len(cfg.VIDVNIMappings) == 0
-					}
-				}
-				return false
-			}).Should(BeTrue())
+				cfg, found := ensuredCfgs[vxlan4Name]
+				g.Expect(found).To(BeTrue(), "VXLAN configuration recorded")
+				g.Expect(cfg.VIDVNIMappings).To(BeEmpty(), "latest VXLAN mappings after network removal")
+			}).Should(Succeed())
 
 			By("verifying stale SVIs were deleted after network removal")
 			Eventually(func() bool {
