@@ -4,14 +4,14 @@
 // Use []interface{} as the type of argument when sending and receiving methods.
 //
 // Positional arguments example:
-// 	server.Handle("add", func(client *rpc2.Client, args []interface{}, result *float64) error {
-// 		*result = args[0].(float64) + args[1].(float64)
-// 		return nil
-// 	})
+//
+//	server.Handle("add", func(client *rpc2.Client, args []interface{}, result *float64) error {
+//		*result = args[0].(float64) + args[1].(float64)
+//		return nil
+//	})
 //
 //	var result float64
-// 	client.Call("add", []interface{}{1, 2}, &result)
-//
+//	client.Call("add", []interface{}{1, 2}, &result)
 package jsonrpc
 
 import (
@@ -44,6 +44,11 @@ type jsonCodec struct {
 	mutex   sync.Mutex // protects seq, pending
 	pending map[uint64]*json.RawMessage
 	seq     uint64
+
+	// writeMu serializes WriteRequest and WriteResponse.
+	// json.Encoder isn't safe for concurrent Encode calls.
+	// Separate from rpc2.Client's own "sending" mutex, which never covers WriteResponse.
+	writeMu sync.Mutex
 }
 
 // NewJSONCodec returns a new rpc2.Codec using JSON-RPC on conn.
@@ -200,6 +205,9 @@ func (c *jsonCodec) WriteRequest(r *rpc2.Request, param interface{}) error {
 		seq := r.Seq
 		req.Id = &seq
 	}
+
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
 	return c.enc.Encode(req)
 }
 
@@ -225,6 +233,9 @@ func (c *jsonCodec) WriteResponse(r *rpc2.Response, x interface{}) error {
 	} else {
 		resp.Error = r.Error
 	}
+
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
 	return c.enc.Encode(resp)
 }
 

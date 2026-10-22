@@ -24,8 +24,8 @@ var (
 type SamplingApp struct {
 	UUID        string            `ovsdb:"_uuid"`
 	ExternalIDs map[string]string `ovsdb:"external_ids"`
-	ID          int               `ovsdb:"id"`
-	Type        SamplingAppType   `ovsdb:"type"`
+	ID          int               `ovsdb:"id" validate:"min=1,max=255"`
+	Type        SamplingAppType   `ovsdb:"type" validate:"oneof='drop' 'acl-new' 'acl-est'"`
 }
 
 func (a *SamplingApp) GetUUID() string {

@@ -25,8 +25,8 @@ type DatapathBinding struct {
 	ExternalIDs   map[string]string    `ovsdb:"external_ids"`
 	LoadBalancers []string             `ovsdb:"load_balancers"`
 	NbUUID        *string              `ovsdb:"nb_uuid"`
-	TunnelKey     int                  `ovsdb:"tunnel_key"`
-	Type          *DatapathBindingType `ovsdb:"type"`
+	TunnelKey     int                  `ovsdb:"tunnel_key" validate:"min=1,max=16777215"`
+	Type          *DatapathBindingType `ovsdb:"type" validate:"omitempty,oneof='logical-switch' 'logical-router'"`
 }
 
 func (a *DatapathBinding) GetUUID() string {

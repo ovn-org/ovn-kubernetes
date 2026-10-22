@@ -17,7 +17,7 @@ type GatewayChassis struct {
 	ExternalIDs map[string]string `ovsdb:"external_ids"`
 	Name        string            `ovsdb:"name"`
 	Options     map[string]string `ovsdb:"options"`
-	Priority    int               `ovsdb:"priority"`
+	Priority    int               `ovsdb:"priority" validate:"min=0,max=32767"`
 }
 
 func (a *GatewayChassis) GetUUID() string {
