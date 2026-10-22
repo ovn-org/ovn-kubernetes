@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	cnitypes "github.com/containernetworking/cni/pkg/types"
 	"github.com/google/uuid"
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
@@ -24,6 +25,7 @@ import (
 	utilnet "k8s.io/utils/net"
 	"k8s.io/utils/ptr"
 
+	ovncnitypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	egressipv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
@@ -121,6 +123,279 @@ var _ = ginkgo.Describe("EgressIP node locality", func() {
 		isLocal, loaded = controller.getNodeLocality("node1")
 		gomega.Expect(isLocal).To(gomega.BeFalse())
 		gomega.Expect(loaded).To(gomega.BeFalse())
+	})
+})
+
+var _ = ginkgo.Describe("EgressIP network registration", func() {
+	const node1Name = "node1"
+
+	var (
+		app     *cli.App
+		fakeOvn *FakeOVN
+	)
+
+	ginkgo.BeforeEach(func() {
+		gomega.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+		config.OVNKubernetesFeature.EnableEgressIP = true
+		config.OVNKubernetesFeature.EgressIPNodeHealthCheckPort = 1234
+		app = cli.NewApp()
+		app.Name = "test"
+		app.Flags = config.Flags
+		fakeOvn = NewFakeOVN(false, node1Name)
+	})
+
+	ginkgo.AfterEach(func() {
+		if fakeOvn != nil && fakeOvn.watcher != nil {
+			fakeOvn.shutdown()
+		}
+	})
+
+	ginkgo.It("registers and unregisters", func() {
+		controller := &EgressIPController{}
+		networkName := "udn1"
+
+		gomega.Expect(controller.IsNetworkRegistered(networkName)).To(gomega.BeFalse())
+		controller.ensureNetworkPending(networkName)
+		gomega.Expect(controller.IsNetworkRegistered(networkName)).To(gomega.BeFalse())
+		controller.registerNetwork(networkName)
+		gomega.Expect(controller.IsNetworkRegistered(networkName)).To(gomega.BeTrue())
+
+		controller.UnregisterNetwork(networkName)
+		gomega.Expect(controller.IsNetworkRegistered(networkName)).To(gomega.BeFalse())
+	})
+
+	ginkgo.It("skips SyncNetworkReady after unregister without a new enqueue", func() {
+		controller := &EgressIPController{}
+		networkName := "udn1"
+
+		controller.ensureNetworkPending(networkName)
+		controller.UnregisterNetwork(networkName)
+		gomega.Expect(controller.SyncNetworkReady(networkName)).To(gomega.Succeed())
+		gomega.Expect(controller.IsNetworkRegistered(networkName)).To(gomega.BeFalse())
+	})
+
+	ginkgo.It("returns a retryable error from addPodEgressIPAssignmentsWithLock when the network is not registered", func() {
+		controller := &EgressIPController{}
+		ni, err := util.NewNetInfo(&ovncnitypes.NetConf{
+			NetConf:  cnitypes.NetConf{Name: "udn1"},
+			Role:     types.NetworkRolePrimary,
+			Topology: types.Layer3Topology,
+			Subnets:  "10.128.0.0/16",
+		})
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+		err = controller.addPodEgressIPAssignmentsWithLock(ni, "eip1", nil, util.EgressIPMark{}, nil)
+		gomega.Expect(err).To(gomega.MatchError(gomega.ContainSubstring(
+			"network udn1 is not ready for EgressIP programming")))
+	})
+
+	ginkgo.It("re-runs stale sync after UnregisterNetwork so recreate can clean again", func() {
+		app.Action = func(*cli.Context) error {
+			egressIP1 := "192.168.126.25"
+			node1IPv4 := "192.168.126.51"
+			node1IPv4CIDR := node1IPv4 + "/24"
+			egressNamespace := ovntest.NewNamespace(eipNamespace)
+			annotations := map[string]string{
+				"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4CIDR, ""),
+				"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":\"%s\"}", v4Node1Subnet),
+				util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", node1IPv4CIDR),
+			}
+			node1 := getNodeObj(node1Name, annotations, map[string]string{"k8s.ovn.org/egress-assignable": ""})
+			eIP := egressipv1.EgressIP{
+				ObjectMeta: newEgressIPMeta(egressIPName),
+				Spec: egressipv1.EgressIPSpec{
+					EgressIPs: []string{egressIP1},
+					PodSelector: metav1.LabelSelector{
+						MatchLabels: egressPodLabel,
+					},
+					NamespaceSelector: metav1.LabelSelector{
+						MatchLabels: map[string]string{
+							"name": egressNamespace.Name,
+						},
+					},
+				},
+				Status: egressipv1.EgressIPStatus{
+					Items: []egressipv1.EgressIPStatusItem{{
+						Node:     node1.Name,
+						EgressIP: egressIP1,
+					}},
+				},
+			}
+			staleLRP := &nbdb.LogicalRouterPolicy{
+				UUID: "stale-reroute-UUID",
+				ExternalIDs: getEgressIPLRPReRouteDbIDs(eIP.Name, egressNamespace.Name, "doesnt-exist-pod",
+					IPFamilyValueV4, types.DefaultNetworkName, types.DefaultNetworkControllerName).GetExternalIDs(),
+				Match:    "ip.src == 10.128.3.8",
+				Priority: types.EgressIPReroutePriority,
+				Action:   nbdb.LogicalRouterPolicyActionReroute,
+			}
+			clusterRouter := &nbdb.LogicalRouter{
+				Name:     types.OVNClusterRouter,
+				UUID:     types.OVNClusterRouter + "-UUID",
+				Policies: []string{staleLRP.UUID},
+			}
+
+			fakeOvn.startWithDBSetup(
+				libovsdbtest.TestSetup{
+					NBData: []libovsdbtest.TestData{staleLRP, clusterRouter},
+				},
+				&egressipv1.EgressIPList{Items: []egressipv1.EgressIP{eIP}},
+				&corev1.NodeList{Items: []corev1.Node{node1}},
+				&corev1.NamespaceList{Items: []corev1.Namespace{*egressNamespace}},
+			)
+
+			staleLRPPredicate := func(item *nbdb.LogicalRouterPolicy) bool {
+				return item.Priority == types.EgressIPReroutePriority &&
+					item.Match == "ip.src == 10.128.3.8"
+			}
+			countStaleLRPs := func() int {
+				lrps, err := libovsdbops.FindLogicalRouterPoliciesWithPredicate(fakeOvn.nbClient, staleLRPPredicate)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				return len(lrps)
+			}
+
+			fakeOvn.eIPController.ensureNetworkPending(types.DefaultNetworkName)
+			gomega.Expect(fakeOvn.eIPController.SyncNetworkReady(types.DefaultNetworkName)).To(gomega.Succeed())
+			gomega.Expect(fakeOvn.eIPController.IsNetworkRegistered(types.DefaultNetworkName)).To(gomega.BeTrue())
+			gomega.Eventually(countStaleLRPs).Should(gomega.Equal(0))
+
+			// Recreate the same stale LRP while the network stays registered.
+			staleLRP = &nbdb.LogicalRouterPolicy{
+				ExternalIDs: getEgressIPLRPReRouteDbIDs(eIP.Name, egressNamespace.Name, "doesnt-exist-pod",
+					IPFamilyValueV4, types.DefaultNetworkName, types.DefaultNetworkControllerName).GetExternalIDs(),
+				Match:    "ip.src == 10.128.3.8",
+				Priority: types.EgressIPReroutePriority,
+				Action:   nbdb.LogicalRouterPolicyActionReroute,
+			}
+			gomega.Expect(libovsdbops.CreateOrUpdateLogicalRouterPolicyWithPredicate(
+				fakeOvn.nbClient, types.OVNClusterRouter, staleLRP,
+				func(*nbdb.LogicalRouterPolicy) bool { return false })).To(gomega.Succeed())
+			gomega.Expect(countStaleLRPs()).To(gomega.Equal(1))
+
+			// Still synced: SyncNetworkReady skips stale sync and leaves the stale LRP.
+			gomega.Expect(fakeOvn.eIPController.SyncNetworkReady(types.DefaultNetworkName)).To(gomega.Succeed())
+			gomega.Consistently(countStaleLRPs, "500ms").Should(gomega.Equal(1))
+
+			// Unregister without a new enqueue: SyncNetworkReady must skip.
+			fakeOvn.eIPController.UnregisterNetwork(types.DefaultNetworkName)
+			gomega.Expect(fakeOvn.eIPController.IsNetworkRegistered(types.DefaultNetworkName)).To(gomega.BeFalse())
+			gomega.Expect(fakeOvn.eIPController.SyncNetworkReady(types.DefaultNetworkName)).To(gomega.Succeed())
+			gomega.Expect(fakeOvn.eIPController.IsNetworkRegistered(types.DefaultNetworkName)).To(gomega.BeFalse())
+			gomega.Consistently(countStaleLRPs, "500ms").Should(gomega.Equal(1))
+
+			// Recreate enqueue then SyncNetworkReady must clean again.
+			fakeOvn.eIPController.ensureNetworkPending(types.DefaultNetworkName)
+			gomega.Expect(fakeOvn.eIPController.SyncNetworkReady(types.DefaultNetworkName)).To(gomega.Succeed())
+			gomega.Expect(fakeOvn.eIPController.IsNetworkRegistered(types.DefaultNetworkName)).To(gomega.BeTrue())
+			gomega.Eventually(countStaleLRPs).Should(gomega.Equal(0))
+			return nil
+		}
+		gomega.Expect(app.Run([]string{app.Name})).To(gomega.Succeed())
+	})
+
+	ginkgo.It("programs pod EIP config only after SyncNetworkReady registers the network", func() {
+		app.Action = func(*cli.Context) error {
+			egressIP := net.ParseIP("192.168.126.211")
+			nodeIPv4 := "192.168.126.210/24"
+			egressPod := *ovntest.NewPodWithLabels(eipNamespace, podName, node1Name, podV4IP, egressPodLabel)
+			egressNamespace := ovntest.NewNamespace(eipNamespace)
+			_, nodeSubnetV4, _ := net.ParseCIDR(v4Node1Subnet)
+			annotations := map[string]string{
+				"k8s.ovn.org/node-primary-ifaddr":             fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", nodeIPv4, ""),
+				"k8s.ovn.org/node-subnets":                    fmt.Sprintf("{\"default\":\"%s\"}", v4Node1Subnet),
+				"k8s.ovn.org/node-transit-switch-port-ifaddr": "{\"ipv4\":\"100.88.0.2/16\"}",
+				util.OVNNodeHostCIDRs:                         fmt.Sprintf("[\"%s\"]", nodeIPv4),
+			}
+			node := getNodeObj(node1Name, annotations, map[string]string{"k8s.ovn.org/egress-assignable": ""})
+			eIP := egressipv1.EgressIP{
+				ObjectMeta: newEgressIPMeta(egressIPName),
+				Spec: egressipv1.EgressIPSpec{
+					EgressIPs: []string{egressIP.String()},
+					NamespaceSelector: metav1.LabelSelector{
+						MatchLabels: map[string]string{"name": egressNamespace.Name},
+					},
+					PodSelector: metav1.LabelSelector{
+						MatchLabels: egressPodLabel,
+					},
+				},
+				Status: egressipv1.EgressIPStatus{
+					Items: []egressipv1.EgressIPStatusItem{{
+						Node:     node1Name,
+						EgressIP: egressIP.String(),
+					}},
+				},
+			}
+
+			fakeOvn.startWithDBSetup(
+				libovsdbtest.TestSetup{
+					NBData: []libovsdbtest.TestData{
+						&nbdb.LogicalRouterPort{
+							UUID:     types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1Name + "-UUID",
+							Name:     types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1Name,
+							Networks: []string{nodeLogicalRouterIfAddrV4},
+						},
+						&nbdb.LogicalRouter{
+							Name: types.OVNClusterRouter,
+							UUID: types.OVNClusterRouter + "-UUID",
+						},
+						&nbdb.LogicalRouter{
+							Name:  types.GWRouterPrefix + node1Name,
+							UUID:  types.GWRouterPrefix + node1Name + "-UUID",
+							Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1Name + "-UUID"},
+						},
+						&nbdb.LogicalSwitchPort{
+							UUID:      "k8s-" + node.Name + "-UUID",
+							Name:      "k8s-" + node.Name,
+							Addresses: []string{"fe:1a:b2:3f:0e:fb " + util.GetNodeManagementIfAddr(nodeSubnetV4).IP.String()},
+						},
+						&nbdb.LogicalSwitch{
+							UUID:  node.Name + "-UUID",
+							Name:  node.Name,
+							Ports: []string{"k8s-" + node.Name + "-UUID"},
+						},
+					},
+				},
+				&corev1.NamespaceList{Items: []corev1.Namespace{*egressNamespace}},
+				&corev1.PodList{Items: []corev1.Pod{egressPod}},
+				&corev1.NodeList{Items: []corev1.Node{node}},
+				&egressipv1.EgressIPList{Items: []egressipv1.EgressIP{eIP}},
+			)
+
+			i, n, _ := net.ParseCIDR(podV4IP + "/23")
+			n.IP = i
+			fakeOvn.controller.logicalPortCache.add(&egressPod, "", types.DefaultNetworkName, "", nil, []*net.IPNet{n})
+			gomega.Expect(fakeOvn.eIPController.SyncNodeCache()).To(gomega.Succeed())
+
+			gomega.Expect(fakeOvn.eIPController.IsNetworkRegistered(types.DefaultNetworkName)).To(gomega.BeFalse())
+			ni := fakeOvn.eIPController.networkManager.GetNetwork(types.DefaultNetworkName)
+			gomega.Expect(ni).NotTo(gomega.BeNil())
+			mark, err := util.ParseEgressIPMark(eIP.Annotations)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			err = fakeOvn.eIPController.addPodEgressIPAssignmentsWithLock(ni, eIP.Name, eIP.Status.Items, mark, &egressPod)
+			gomega.Expect(err).To(gomega.MatchError(gomega.ContainSubstring(
+				"network " + types.DefaultNetworkName + " is not ready for EgressIP programming")))
+			podKey := getPodKey(&egressPod)
+			fakeOvn.eIPController.podAssignment.LockKey(podKey)
+			_, exists := fakeOvn.eIPController.podAssignment.Load(podKey)
+			fakeOvn.eIPController.podAssignment.UnlockKey(podKey)
+			gomega.Expect(exists).To(gomega.BeFalse())
+
+			fakeOvn.eIPController.ensureNetworkPending(types.DefaultNetworkName)
+			gomega.Expect(fakeOvn.eIPController.SyncNetworkReady(types.DefaultNetworkName)).To(gomega.Succeed())
+			gomega.Expect(fakeOvn.eIPController.IsNetworkRegistered(types.DefaultNetworkName)).To(gomega.BeTrue())
+
+			gomega.Expect(fakeOvn.eIPController.addPodEgressIPAssignmentsWithLock(
+				ni, eIP.Name, eIP.Status.Items, mark, &egressPod)).To(gomega.Succeed())
+			fakeOvn.eIPController.podAssignment.LockKey(podKey)
+			pas, exists := fakeOvn.eIPController.podAssignment.Load(podKey)
+			fakeOvn.eIPController.podAssignment.UnlockKey(podKey)
+			gomega.Expect(exists).To(gomega.BeTrue())
+			gomega.Expect(pas).NotTo(gomega.BeNil())
+			gomega.Expect(pas.egressIPName).To(gomega.Equal(eIP.Name))
+			gomega.Expect(pas.egressStatuses.statusMap).NotTo(gomega.BeEmpty())
+			return nil
+		}
+		gomega.Expect(app.Run([]string{app.Name})).To(gomega.Succeed())
 	})
 })
 
@@ -7927,9 +8202,9 @@ var _ = ginkgo.Describe("OVN EgressIP Operations cluster default network", func(
 					fakeOvn.controller.eIPC.podAssignment = syncmap.NewSyncMap[*podAssignmentState]()
 					oldPodAssignment.UnlockKey(egressPod1Key)
 					// replicates controller startup state
-					egressIPCache, err := fakeOvn.controller.eIPC.generateCacheForEgressIP()
+					egressIPCache, err := fakeOvn.controller.eIPC.generateCacheForEgressIP(egressIPAllNetworks)
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
-					err = fakeOvn.controller.eIPC.syncPodAssignmentCache(egressIPCache)
+					err = fakeOvn.controller.eIPC.syncPodAssignmentCache(egressIPCache, egressIPAllNetworks)
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 					pas = getPodAssignmentState(&egressPod1)
@@ -8102,9 +8377,9 @@ var _ = ginkgo.Describe("OVN EgressIP Operations cluster default network", func(
 					fakeOvn.controller.eIPC.podAssignment = syncmap.NewSyncMap[*podAssignmentState]()
 					oldPodAssignment.UnlockKey(egressPod1Key)
 
-					egressIPCache, err = fakeOvn.controller.eIPC.generateCacheForEgressIP()
+					egressIPCache, err = fakeOvn.controller.eIPC.generateCacheForEgressIP(egressIPAllNetworks)
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
-					err = fakeOvn.controller.eIPC.syncPodAssignmentCache(egressIPCache)
+					err = fakeOvn.controller.eIPC.syncPodAssignmentCache(egressIPCache, egressIPAllNetworks)
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 					// we don't have any egressIPs, so cache is nil

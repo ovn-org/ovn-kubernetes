@@ -263,7 +263,10 @@ func NewLayer3UserDefinedNetworkController(
 		oc.onLogicalPortCacheAdd = func(pod *corev1.Pod, _ string) {
 			oc.requestLocalPodPolicyRetriesForPod(pod, "logical port cache update")
 			if oc.eIPController != nil {
-				oc.eIPController.addEgressIPPodRetry(pod, "logical port cache update")
+				if err := oc.eIPController.addEgressIPPodRetry(pod, "logical port cache update"); err != nil {
+					klog.Warningf("Failed to enqueue EgressIP retry for pod %s/%s after logical port cache update: %v",
+						pod.Namespace, pod.Name, err)
+				}
 			}
 		}
 	}
@@ -359,6 +362,7 @@ func (oc *Layer3UserDefinedNetworkController) Stop() {
 		return
 	}
 	klog.Infof("Stop %s UDN controller of network %s", oc.TopologyType(), oc.GetNetworkName())
+	oc.unregisterEgressIPNetwork()
 	oc.DeregisterServiceNetwork()
 	oc.DeregisterNodeHandler()
 	close(oc.stopChan)
@@ -393,6 +397,7 @@ func (oc *Layer3UserDefinedNetworkController) Cleanup() error {
 	// Note : Cluster manager removes the subnet annotation for the node.
 	netName := oc.GetNetworkName()
 	klog.Infof("Delete OVN logical entities for %s network controller of network %s", types.Layer3Topology, netName)
+	oc.unregisterEgressIPNetwork()
 
 	// For primary L3 UDN only: when this is a cleanup-only controller (dummy for stale UDN
 	// cleanup; GetNetworkID() is InvalidID because netInfo was never reconciled from a NAD),
@@ -445,13 +450,6 @@ func (oc *Layer3UserDefinedNetworkController) Cleanup() error {
 		return err
 	}
 
-	// cleanup address sets after ACLs are deleted to avoid ovn-controller errors
-	if oc.addressSetManager != nil {
-		if err = oc.addressSetManager.CleanupForController(oc.controllerName); err != nil {
-			return fmt.Errorf("failed to cleanup address sets for controller %s: %v", oc.controllerName, err)
-		}
-	}
-
 	// Delete QoS rows for this network (e.g. from NetworkQoS controller). Applies to primary and
 	// secondary Layer3 UDNs when EnableNetworkQoS is set.
 	ops, err = libovsdbops.DeleteQoSesWithPredicateOps(oc.nbClient, ops,
@@ -465,6 +463,20 @@ func (oc *Layer3UserDefinedNetworkController) Cleanup() error {
 	_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
 	if err != nil {
 		return fmt.Errorf("failed to deleting routers/switches of network %s: %v", netName, err)
+	}
+
+	// Cleanup address sets after topology/ACL teardown has been applied so
+	// ovn-controller does not see address-set deletes while ACLs still reference them.
+	if oc.addressSetManager != nil {
+		if err = oc.addressSetManager.CleanupForController(oc.controllerName); err != nil {
+			return fmt.Errorf("failed to cleanup address sets for controller %s: %v", oc.controllerName, err)
+		}
+	}
+
+	// Remove the EgressIP served-pods address set; it is not covered by the
+	// per-network address-set cleanup above.
+	if err = oc.cleanupEgressIPAddressSet(); err != nil {
+		return err
 	}
 
 	if err = oc.zoneICHandler.Cleanup(); err != nil {
@@ -528,6 +540,8 @@ func (oc *Layer3UserDefinedNetworkController) run() error {
 		return err
 	}
 
+	oc.enqueueEgressIPNetwork()
+
 	if util.IsMultiNetworkPoliciesSupportEnabled() && !oc.IsPrimaryNetwork() {
 		// WatchMultiNetworkPolicy depends on WatchPods and WatchNamespaces
 		if err := oc.WatchMultiNetworkPolicy(); err != nil {
@@ -566,6 +580,30 @@ func (oc *Layer3UserDefinedNetworkController) run() error {
 	klog.Infof("Completing all the Watchers for network %s took %v", oc.GetNetworkName(), time.Since(start))
 
 	return nil
+}
+
+func (oc *Layer3UserDefinedNetworkController) enqueueEgressIPNetwork() {
+	if !config.OVNKubernetesFeature.EnableEgressIP || !util.IsNetworkSegmentationSupportEnabled() ||
+		!oc.IsPrimaryNetwork() || oc.eIPController == nil {
+		return
+	}
+	oc.eIPController.EnqueueNetwork(oc.GetNetworkName())
+}
+
+func (oc *Layer3UserDefinedNetworkController) unregisterEgressIPNetwork() {
+	if !config.OVNKubernetesFeature.EnableEgressIP || !util.IsNetworkSegmentationSupportEnabled() ||
+		!oc.IsPrimaryNetwork() || oc.eIPController == nil {
+		return
+	}
+	oc.eIPController.UnregisterNetwork(oc.GetNetworkName())
+}
+
+func (oc *Layer3UserDefinedNetworkController) cleanupEgressIPAddressSet() error {
+	if !config.OVNKubernetesFeature.EnableEgressIP || !util.IsNetworkSegmentationSupportEnabled() ||
+		!oc.IsPrimaryNetwork() || oc.eIPController == nil {
+		return nil
+	}
+	return oc.eIPController.DestroyNetworkServedPodsAddressSet(oc.GetNetworkName())
 }
 
 func (oc *Layer3UserDefinedNetworkController) waitForLocalZoneNodeLogicalSwitches() error {

@@ -192,6 +192,13 @@ func (tr *testNetworkRefReconciler) Reconcile(node, networkName string) {
 
 func (tnc *testNetworkController) Start(context.Context) error {
 	tnc.tcm.Lock()
+	delay := tnc.tcm.startDelay
+	tnc.tcm.Unlock()
+	if delay > 0 {
+		// Simulate a slow UDN Start so async syncAll can return before Start finishes.
+		time.Sleep(delay)
+	}
+	tnc.tcm.Lock()
 	defer tnc.tcm.Unlock()
 	fmt.Printf("starting network: %s\n", testNetworkKey(tnc))
 	tnc.tcm.started = append(tnc.tcm.started, testNetworkKey(tnc))
@@ -369,6 +376,8 @@ type testControllerManager struct {
 	raiseErrorWhenCreatingController error
 	raiseErrorWhenStartingController error
 	raiseErrorWhenCleaningController error
+	// startDelay is applied inside testNetworkController.Start for async start tests.
+	startDelay time.Duration
 
 	valid []util.NetInfo
 }
@@ -893,7 +902,7 @@ func TestNADController(t *testing.T) {
 			nadController := &nadController{
 				nads:                map[string]string{},
 				primaryNADs:         map[string]string{},
-				networkController:   newNetworkController("", "", tcm, nil),
+				networkController:   newNetworkController("", "", tcm, nil, false),
 				networkIDAllocator:  id.NewIDAllocator("NetworkIDs", MaxNetworks),
 				tunnelKeysAllocator: id.NewTunnelKeyAllocator("TunnelKeys"),
 				nadClient:           fakeClient.NetworkAttchDefClient,
@@ -1046,7 +1055,7 @@ func TestNetworkGracePeriodCleanup(t *testing.T) {
 	nadController := &nadController{
 		nads:                map[string]string{},
 		primaryNADs:         map[string]string{},
-		networkController:   newNetworkController("", "", tcm, nil),
+		networkController:   newNetworkController("", "", tcm, nil, false),
 		networkIDAllocator:  id.NewIDAllocator("NetworkIDs", MaxNetworks),
 		tunnelKeysAllocator: id.NewTunnelKeyAllocator("TunnelKeys"),
 		nadClient:           fakeClient.NetworkAttchDefClient,
@@ -1143,7 +1152,7 @@ func TestFilteredNADDeleteReleasesNetworkID(t *testing.T) {
 	nadController := &nadController{
 		nads:               map[string]string{},
 		primaryNADs:        map[string]string{},
-		networkController:  newNetworkController("", "", tcm, nil),
+		networkController:  newNetworkController("", "", tcm, nil, false),
 		networkIDAllocator: id.NewIDAllocator("NetworkIDs", MaxNetworks),
 		filterNADsOnNode:   "node1",
 	}
@@ -1209,7 +1218,7 @@ func TestFilteredAndActiveNADDeleteRetainsIDUntilNoRefs(t *testing.T) {
 	nadController := &nadController{
 		nads:               map[string]string{},
 		primaryNADs:        map[string]string{},
-		networkController:  newNetworkController("", "", tcm, nil),
+		networkController:  newNetworkController("", "", tcm, nil, false),
 		networkIDAllocator: id.NewIDAllocator("NetworkIDs", MaxNetworks),
 		filterNADsOnNode:   "node1",
 		podTracker:         pt,
@@ -1301,7 +1310,7 @@ func TestNodeHasNetworkIgnoresDynamicFilteringForBareNADs(t *testing.T) {
 				nadsByNetwork:      map[string]sets.Set[string]{},
 				dynamicFilterNADs:  map[string]bool{},
 				primaryNADs:        map[string]string{},
-				networkController:  newNetworkController("", "", tcm, nil),
+				networkController:  newNetworkController("", "", tcm, nil, false),
 				networkIDAllocator: id.NewIDAllocator("NetworkIDs", MaxNetworks),
 				filterNADsOnNode:   "node1",
 			}
@@ -1354,7 +1363,7 @@ func TestDynamicDeleteDoesNotReleaseNetworkID(t *testing.T) {
 	nadController := &nadController{
 		nads:               map[string]string{},
 		primaryNADs:        map[string]string{},
-		networkController:  newNetworkController("", "", tcm, nil),
+		networkController:  newNetworkController("", "", tcm, nil, false),
 		networkIDAllocator: id.NewIDAllocator("NetworkIDs", MaxNetworks),
 	}
 	g.Expect(nadController.networkIDAllocator.ReserveID(types.DefaultNetworkName, types.DefaultNetworkID)).To(gomega.Succeed())
@@ -1812,7 +1821,7 @@ func TestResourceCleanup(t *testing.T) {
 	nadController := &nadController{
 		nads:                map[string]string{},
 		primaryNADs:         map[string]string{},
-		networkController:   newNetworkController("", "", tcm, nil),
+		networkController:   newNetworkController("", "", tcm, nil, false),
 		networkIDAllocator:  id.NewIDAllocator("NetworkIDs", MaxNetworks),
 		tunnelKeysAllocator: id.NewTunnelKeyAllocator("TunnelKeys"),
 		nadClient:           fakeClient.NetworkAttchDefClient,
@@ -2257,7 +2266,7 @@ func TestSyncNADNotFilteredWhenCNCConnectedNetworkActive(t *testing.T) {
 	g.Expect(networkIDAllocator.ReserveID("net-a", 1)).To(gomega.Succeed())
 
 	nc := &nadController{
-		networkController:  newNetworkController("test-nad", "", nil, nil),
+		networkController:  newNetworkController("test-nad", "", nil, nil, false),
 		nads:               map[string]string{"ns1/nad-a": "net-a"},
 		nadsByNetwork:      map[string]sets.Set[string]{"net-a": sets.New[string]("ns1/nad-a")},
 		dynamicFilterNADs:  map[string]bool{"ns1/nad-a": true},
@@ -2317,7 +2326,7 @@ func TestSyncNADClearsStaleRemovalMarkWhenDynamicNetworkActive(t *testing.T) {
 	g.Expect(networkIDAllocator.ReserveID(types.DefaultNetworkName, types.DefaultNetworkID)).To(gomega.Succeed())
 
 	nc := &nadController{
-		networkController:    newNetworkController("test-nad", "", nil, nil),
+		networkController:    newNetworkController("test-nad", "", nil, nil, false),
 		nads:                 map[string]string{},
 		nadsByNetwork:        map[string]sets.Set[string]{},
 		dynamicFilterNADs:    map[string]bool{},
@@ -2387,7 +2396,7 @@ func TestSyncNADClearsExpiredRemovalMarkWhenDynamicNetworkActive(t *testing.T) {
 
 	nc := &nadController{
 		controller:         &controller.FakeController{},
-		networkController:  newNetworkController("test-nad", "", nil, nil),
+		networkController:  newNetworkController("test-nad", "", nil, nil, false),
 		nads:               map[string]string{key: "net-a"},
 		nadsByNetwork:      map[string]sets.Set[string]{"net-a": sets.New[string](key)},
 		dynamicFilterNADs:  map[string]bool{key: true},
@@ -2447,7 +2456,7 @@ func TestSyncNADDoesNotRescheduleAlreadyDynamicallyRemovedNAD(t *testing.T) {
 	netInfo, err := util.NewNetInfo(netConf)
 	g.Expect(err).ToNot(gomega.HaveOccurred())
 
-	networkController := newNetworkController("test-nad", "", nil, nil)
+	networkController := newNetworkController("test-nad", "", nil, nil, false)
 	mutableNetInfo := util.NewMutableNetInfo(netInfo)
 	mutableNetInfo.SetNADs(key)
 	networkController.setNetwork("net-a", mutableNetInfo)
@@ -2514,7 +2523,7 @@ func newDynamicRemovalTestController(g *gomega.WithT) (*nadController, string, s
 	netInfo, err := util.NewNetInfo(netConf)
 	g.Expect(err).ToNot(gomega.HaveOccurred())
 
-	networkController := newNetworkController("test-nad", "", nil, nil)
+	networkController := newNetworkController("test-nad", "", nil, nil, false)
 	mutableNetInfo := util.NewMutableNetInfo(netInfo)
 	mutableNetInfo.SetNADs(keyA, keyB)
 	networkController.setNetwork("net-a", mutableNetInfo)
@@ -2687,7 +2696,7 @@ func TestOnNetworkRefChangeNotifiesConnectedNetworkRefReconcilers(t *testing.T) 
 	nc := &nadController{
 		controller:            nadSyncController,
 		filterNADsOnNode:      "local-node",
-		networkController:     newNetworkController("", "", nil, nil),
+		networkController:     newNetworkController("", "", nil, nil, false),
 		networkIDAllocator:    id.NewIDAllocator("NetworkIDs", MaxNetworks),
 		nadLister:             &fakeNADLister{nads: map[string]*nettypes.NetworkAttachmentDefinition{nadA.Name: nadA}},
 		networkRefReconcilers: map[uint64]networkRefReconcilerRegistration{},
@@ -2805,7 +2814,7 @@ func TestOnNetworkRefChangeRendersCNCConnectedNetworksWhenNodeBecomesActive(t *t
 		controller:         nadSyncController,
 		filterNADsOnNode:   "node1",
 		podTracker:         podTracker,
-		networkController:  newNetworkController("test-nad", "", nil, nil),
+		networkController:  newNetworkController("test-nad", "", nil, nil, false),
 		networkIDAllocator: networkIDAllocator,
 		nads:               map[string]string{},
 		nadsByNetwork:      map[string]sets.Set[string]{},
@@ -2900,7 +2909,7 @@ func TestOnNetworkRefChangeClearsCNCConnectedRemovalMarks(t *testing.T) {
 		controller:         &controller.FakeController{},
 		filterNADsOnNode:   "node1",
 		podTracker:         podTracker,
-		networkController:  newNetworkController("test-nad", "", nil, nil),
+		networkController:  newNetworkController("test-nad", "", nil, nil, false),
 		networkIDAllocator: networkIDAllocator,
 		primaryNADs:        map[string]string{},
 		nadLister: &fakeNADLister{nads: map[string]*nettypes.NetworkAttachmentDefinition{
@@ -2992,7 +3001,7 @@ func TestOnNetworkRefChangeMarksCNCConnectedNetworksInactive(t *testing.T) {
 		podTracker: &PodTrackerController{
 			nodeNADToPodCache: map[string]map[string]map[string]struct{}{},
 		},
-		networkController:  newNetworkController("test-nad", "", nil, nil),
+		networkController:  newNetworkController("test-nad", "", nil, nil, false),
 		networkIDAllocator: networkIDAllocator,
 		primaryNADs:        map[string]string{},
 		nadLister: &fakeNADLister{nads: map[string]*nettypes.NetworkAttachmentDefinition{
@@ -3075,7 +3084,7 @@ func TestOnNetworkRefChangeKeepsNADActiveWhenAnotherTrackerStillReferencesIt(t *
 		egressIPTracker: &EgressIPTrackerController{
 			cache: map[string]map[string]struct{}{},
 		},
-		networkController:  newNetworkController("test-nad", "", nil, nil),
+		networkController:  newNetworkController("test-nad", "", nil, nil, false),
 		networkIDAllocator: networkIDAllocator,
 		primaryNADs:        map[string]string{},
 		nadLister: &fakeNADLister{nads: map[string]*nettypes.NetworkAttachmentDefinition{
@@ -3277,7 +3286,7 @@ func TestOnNetworkRefChangeNotifiesNetworkController(t *testing.T) {
 			nc := &nadController{
 				nads:                map[string]string{},
 				primaryNADs:         map[string]string{},
-				networkController:   newNetworkController("", "", tcm, nil),
+				networkController:   newNetworkController("", "", tcm, nil, false),
 				networkIDAllocator:  id.NewIDAllocator("NetworkIDs", MaxNetworks),
 				tunnelKeysAllocator: id.NewTunnelKeyAllocator("TunnelKeys"),
 				nadLister:           nadLister,
@@ -3400,7 +3409,7 @@ func TestOnNetworkRefChangeNotifiesConnectedRemoteNetworkControllers(t *testing.
 					ReconcilableNetInfo: &util.DefaultNetInfo{},
 				},
 			}
-			networkController := newNetworkController("", "", tcm, nil)
+			networkController := newNetworkController("", "", tcm, nil, false)
 			nc := &nadController{
 				filterNADsOnNode:   "local-node",
 				podTracker:         podTracker,

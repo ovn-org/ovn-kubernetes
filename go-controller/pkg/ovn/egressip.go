@@ -189,8 +189,12 @@ type EgressIPController struct {
 	watchFactory *factory.WatchFactory
 	// event recorder used to post events to k8s
 	recorder record.EventRecorder
+	// lock serializes per-network EgressIP bring-up and teardown against live
+	// EgressIP/pod/namespace handlers (handlers take RLock; bring-up/teardown take Lock).
+	lock sync.RWMutex
 	// used as a locking mechanism to serialize egress IP processing on a per egress IP basis
-	// the order of locking should always be egressIPCache, then podAssignment, then nodeState
+	// the order of locking should always be lock (RLock), then egressIPCache, then
+	// podAssignment, then nodeState
 	egressIPCache *syncmap.SyncMap[bool]
 	// networkMutexes is used for three reasons:
 	// (1) to ensure safe handling of node ip address updates. VIP addresses are
@@ -214,6 +218,8 @@ type EgressIPController struct {
 	nadReconciler           networkmanager.NADReconciler
 	nadReconcilerID         uint64
 	nadReconcilerRegistered bool
+	// networkReconciler handles EnqueueNetwork → SyncNetworkReady (stale sync + register)
+	networkReconciler controller.Reconciler
 	// retryEgressIPPods allows requeuing egressIP pod processing on NAD changes
 	retryEgressIPPods *ovnretry.RetryFramework
 	// An address set factory that creates address sets
@@ -226,7 +232,21 @@ type EgressIPController struct {
 	v6       bool
 	// controllerName is the name of the controller. For backward compatibility reasons, this is the default network controller name.
 	controllerName string
+	// registeredNetworks tracks per-network EgressIP bring-up state (pending or synced).
+	// Live handlers may program a network only when it is synced. Missing means the
+	// network was never enqueued or was unregistered (e.g. UDN deleted).
+	registeredNetworks sync.Map
 }
+
+// networkSyncState is the EgressIP bring-up state for a network.
+type networkSyncState string
+
+const (
+	// networkPending: enqueued for bring-up; stale sync not finished yet.
+	networkPending networkSyncState = "pending"
+	// networkSynced: stale sync finished; live handlers may program the network.
+	networkSynced networkSyncState = "synced"
+)
 
 func NewEIPController(
 	nbClient libovsdbclient.Client,
@@ -268,6 +288,16 @@ func NewEIPController(
 	e.nadReconciler = controller.NewReconciler(
 		controllerName+"-egressip-nad",
 		nadReconcilerConfig,
+	)
+	networkReconcilerConfig := &controller.ReconcilerConfig{
+		RateLimiter: workqueue.DefaultTypedControllerRateLimiter[string](),
+		Reconcile:   e.SyncNetworkReady,
+		Threadiness: 1,
+		MaxAttempts: controller.InfiniteAttempts,
+	}
+	e.networkReconciler = controller.NewReconciler(
+		controllerName+"-egressip-network",
+		networkReconcilerConfig,
 	)
 	return e
 }
@@ -318,6 +348,9 @@ func (e *EgressIPController) unlockNetwork(networkName string) {
 //
 //	We only care about `Spec.NamespaceSelector`, `Spec.PodSelector` and `Status` field
 func (e *EgressIPController) reconcileEgressIP(old, new *egressipv1.EgressIP) (err error) {
+	e.lock.RLock()
+	defer e.lock.RUnlock()
+
 	var egressIPName string
 	if old != nil {
 		egressIPName = old.Name
@@ -575,6 +608,9 @@ func (e *EgressIPController) reconcileEgressIP(old, new *egressipv1.EgressIP) (e
 // based on received namespace objects.
 // NOTE: we only care about namespace label updates
 func (e *EgressIPController) reconcileEgressIPNamespace(old, new *corev1.Namespace) error {
+	e.lock.RLock()
+	defer e.lock.RUnlock()
+
 	// Same as for reconcileEgressIP: labels play nicely with empty object, not
 	// nil ones.
 	var namespaceName string
@@ -663,6 +699,9 @@ func (e *EgressIPController) reconcileEgressIPNamespace(old, new *corev1.Namespa
 // based on received pod objects.
 // NOTE: we only care about pod label updates
 func (e *EgressIPController) reconcileEgressIPPod(old, new *corev1.Pod) (err error) {
+	e.lock.RLock()
+	defer e.lock.RUnlock()
+
 	oldPod, newPod := &corev1.Pod{}, &corev1.Pod{}
 	if old != nil {
 		oldPod = old
@@ -863,6 +902,13 @@ func (e *EgressIPController) addNamespaceEgressIPAssignments(ni util.NetInfo, na
 }
 
 func (e *EgressIPController) addPodEgressIPAssignmentsWithLock(ni util.NetInfo, name string, statusAssignments []egressipv1.EgressIPStatusItem, mark util.EgressIPMark, pod *corev1.Pod) error {
+	// Gate live programming until SyncNetworkReady has finished stale sync for
+	// this network (same sequencing as the former bulk syncEgressIPs barrier).
+	// Return an error so the retry framework requeues until the network is registered.
+	if !e.IsNetworkRegistered(ni.GetNetworkName()) {
+		return fmt.Errorf("network %s is not ready for EgressIP programming", ni.GetNetworkName())
+	}
+
 	e.podAssignment.LockKey(getPodKey(pod))
 	defer e.podAssignment.UnlockKey(getPodKey(pod))
 	e.deletePreviousNetworkPodEgressIPAssignments(ni, name, statusAssignments, pod, false)
@@ -1348,45 +1394,156 @@ func (r redirectIPs) containsIP(ip string) bool {
 	return false
 }
 
-func (e *EgressIPController) syncEgressIPs(_ []interface{}) error {
-	// This part will take of syncing stale data which we might have in OVN if
-	// there's no ovnkube-controller running for a while, while there are changes to
-	// pods/egress IPs.
-	// It will sync:
-	// - Egress IPs which have been deleted while ovnkube-controller was down
-	// - pods/namespaces which have stopped matching on egress IPs while
-	//   ovnkube-controller was down
-	// - create an address-set that can hold all the egressIP pods and sync the address set by
-	//   resetting pods that are managed by egressIPs based on the constructed kapi cache
-	// This function is called when handlers for EgressIPNamespaceType are started
-	// since namespaces is the first object that egressIP feature starts watching
+// egressIPNetworkFilter selects which networks a stale-NB sync should process.
+type egressIPNetworkFilter func(networkName string) bool
 
-	// Update the EgressIP controller's node cache. Node reconciliation runs
-	// before WatchEgressIPNamespaces() so the cache
-	// will be updated whereas WatchEgressNodes() is called after WatchEgressIPNamespaces()
-	// and so we must update the cache to ensure we are not stale.
+func egressIPAllNetworks(_ string) bool {
+	return true
+}
+
+func (e *EgressIPController) syncEgressIPs(_ []interface{}) error {
+	// Initial EgressIP informer sync for the default network.
+	e.ensureNetworkPending(types.DefaultNetworkName)
+	return e.SyncNetworkReady(types.DefaultNetworkName)
+}
+
+// EnqueueNetwork marks the network pending (if absent) and queues EgressIP bring-up.
+func (e *EgressIPController) EnqueueNetwork(networkName string) {
+	e.ensureNetworkPending(networkName)
+	e.networkReconciler.Reconcile(networkName)
+}
+
+// ensureNetworkPending records that the network should be brought up. No-op if
+// an entry already exists (pending or synced).
+func (e *EgressIPController) ensureNetworkPending(networkName string) {
+	e.registeredNetworks.LoadOrStore(networkName, networkPending)
+}
+
+func (e *EgressIPController) networkState(networkName string) (networkSyncState, bool) {
+	val, ok := e.registeredNetworks.Load(networkName)
+	if !ok {
+		return "", false
+	}
+	state, ok := val.(networkSyncState)
+	return state, ok
+}
+
+// IsNetworkRegistered reports whether the network finished EgressIP stale sync
+// and live handlers may program it.
+func (e *EgressIPController) IsNetworkRegistered(networkName string) bool {
+	state, ok := e.networkState(networkName)
+	return ok && state == networkSynced
+}
+
+// registerNetwork marks the network synced for live EgressIP programming.
+// Caller must hold the exclusive lock after confirming the entry still exists.
+func (e *EgressIPController) registerNetwork(networkName string) {
+	e.registeredNetworks.Store(networkName, networkSynced)
+}
+
+// UnregisterNetwork removes the network's bring-up entry so a later enqueue can
+// start fresh (e.g. after UDN stop/recreate). Takes the exclusive lock so an
+// in-flight bring-up cannot mark the network synced after teardown.
+func (e *EgressIPController) UnregisterNetwork(networkName string) {
+	e.lock.Lock()
+	defer e.lock.Unlock()
+	e.registeredNetworks.Delete(networkName)
+}
+
+// SyncNetworkReady runs initial stale sync when the network is pending, then
+// enqueues pods. Skips networks with no entry (never enqueued or unregistered).
+// When already synced, only pod enqueue is retried.
+func (e *EgressIPController) SyncNetworkReady(networkName string) error {
+	if err := e.ensureNetworkRegistered(networkName); err != nil {
+		return err
+	}
+	// Skip enqueue if never enqueued, or the entry was removed during sync.
+	if _, exists := e.networkState(networkName); !exists {
+		return nil
+	}
+	return e.enqueueEgressIPPodsForNetwork(networkName)
+}
+
+// ensureNetworkRegistered runs stale cleanup and registers the network if it is
+// still pending. Serializes against live EgressIP/pod/namespace handlers and teardown.
+func (e *EgressIPController) ensureNetworkRegistered(networkName string) error {
+	e.lock.Lock()
+	defer e.lock.Unlock()
+	state, exists := e.networkState(networkName)
+	if !exists {
+		return nil
+	}
+	if state == networkSynced {
+		return nil
+	}
+	if err := e.syncNetworkStaleEntries(networkName); err != nil {
+		return fmt.Errorf("failed to sync stale EgressIP entries for network %s: %w", networkName, err)
+	}
+	e.registerNetwork(networkName)
+	return nil
+}
+
+func (e *EgressIPController) enqueueEgressIPPodsForNetwork(networkName string) error {
+	namespaces, err := e.watchFactory.GetNamespaces()
+	if err != nil {
+		return fmt.Errorf("failed to list namespaces while enqueueing EgressIP pods for network %s: %w", networkName, err)
+	}
+	for _, namespace := range namespaces {
+		ni, err := e.networkManager.GetActiveNetworkForNamespace(namespace.Name)
+		if err != nil {
+			if apierrors.IsNotFound(err) || util.IsInvalidPrimaryNetworkError(err) {
+				continue
+			}
+			return fmt.Errorf("failed to get active network for namespace %s while enqueueing EgressIP pods for network %s: %w",
+				namespace.Name, networkName, err)
+		}
+		if ni == nil || ni.GetNetworkName() != networkName {
+			continue
+		}
+		if err := e.addEgressIPPodRetriesForNamespace(namespace.Name, "network ready"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// DestroyNetworkServedPodsAddressSet removes the EgressIP served-pods address set
+// for a network. That set is owned by the default EgressIP controller, so
+// per-network UDN address-set cleanup does not remove it.
+func (e *EgressIPController) DestroyNetworkServedPodsAddressSet(networkName string) error {
+	dbIDs := getEgressIPAddrSetDbIDs(EgressIPServedPodsAddrSetName, networkName, e.controllerName)
+	if err := e.addressSetFactory.DestroyAddressSet(dbIDs); err != nil {
+		return fmt.Errorf("failed to destroy EgressIP served-pods address set for network %s: %w", networkName, err)
+	}
+	return nil
+}
+
+func (e *EgressIPController) syncNetworkStaleEntries(networkName string) error {
+	include := func(name string) bool { return name == networkName }
+	// Sync stale OVN state for this network (deleted EIPs, pods/namespaces that
+	// stopped matching, address-set reset from the constructed kapi cache).
 	// FIXME(martinkennelly): re-enable when EIP controller is fully extracted from DNC
 	//if err := e.SyncNodeCache(); err != nil {
 	//	return fmt.Errorf("SyncNodeCache unable to update the node cache: %v", err)
 	//}
-	egressIPCache, err := e.generateCacheForEgressIP()
+	egressIPCache, err := e.generateCacheForEgressIP(include)
 	if err != nil {
-		return fmt.Errorf("syncEgressIPs unable to generate cache for egressip: %v", err)
+		return fmt.Errorf("unable to generate cache for egressip: %v", err)
 	}
-	if err = e.syncStaleEgressReroutePolicy(egressIPCache); err != nil {
-		return fmt.Errorf("syncEgressIPs unable to remove stale reroute policies: %v", err)
+	if err = e.syncStaleEgressReroutePolicy(egressIPCache, include); err != nil {
+		return fmt.Errorf("unable to remove stale reroute policies: %v", err)
 	}
-	if err = e.syncStaleSNATRules(egressIPCache); err != nil {
-		return fmt.Errorf("syncEgressIPs unable to remove stale nats: %v", err)
+	if err = e.syncStaleSNATRules(egressIPCache, include); err != nil {
+		return fmt.Errorf("unable to remove stale nats: %v", err)
 	}
-	if err = e.syncPodAssignmentCache(egressIPCache); err != nil {
-		return fmt.Errorf("syncEgressIPs unable to sync internal pod assignment cache: %v", err)
+	if err = e.syncPodAssignmentCache(egressIPCache, include); err != nil {
+		return fmt.Errorf("unable to sync internal pod assignment cache: %v", err)
 	}
-	if err = e.syncStaleAddressSetIPs(egressIPCache); err != nil {
-		return fmt.Errorf("syncEgressIPs unable to reset stale address IPs: %v", err)
+	if err = e.syncStaleAddressSetIPs(egressIPCache, include); err != nil {
+		return fmt.Errorf("unable to reset stale address IPs: %v", err)
 	}
-	if err = e.syncStaleGWMarkRules(egressIPCache); err != nil {
-		return fmt.Errorf("syncEgressIPs unable to sync GW packet mark rules: %v", err)
+	if err = e.syncStaleGWMarkRules(egressIPCache, include); err != nil {
+		return fmt.Errorf("unable to sync GW packet mark rules: %v", err)
 	}
 	return nil
 }
@@ -1415,6 +1572,9 @@ func (e *EgressIPController) getLocalNodeName() (string, error) {
 }
 
 func (e *EgressIPController) StartNADReconciler() (err error) {
+	if err = e.StartNetworkReconciler(); err != nil {
+		return err
+	}
 	if e.networkManager == nil || e.nadReconciler == nil {
 		return nil
 	}
@@ -1434,7 +1594,14 @@ func (e *EgressIPController) StartNADReconciler() (err error) {
 	return controller.Start(e.nadReconciler)
 }
 
+// StartNetworkReconciler starts the network reconciler that runs SyncNetworkReady
+// for networks enqueued via EnqueueNetwork.
+func (e *EgressIPController) StartNetworkReconciler() error {
+	return controller.Start(e.networkReconciler)
+}
+
 func (e *EgressIPController) StopNADReconciler() {
+	e.StopNetworkReconciler()
 	if e.nadReconciler == nil {
 		return
 	}
@@ -1445,6 +1612,10 @@ func (e *EgressIPController) StopNADReconciler() {
 	controller.Stop(e.nadReconciler)
 	e.nadReconcilerID = 0
 	e.nadReconciler = nil
+}
+
+func (e *EgressIPController) StopNetworkReconciler() {
+	controller.Stop(e.networkReconciler)
 }
 
 func (e *EgressIPController) syncNAD(key string) error {
@@ -1470,43 +1641,49 @@ func (e *EgressIPController) syncNAD(key string) error {
 	}
 	// Ensure egressIP pods for this namespace are retried after NAD processing so
 	// we don't miss the UDN IPs if pod updates raced the NAD event.
-	e.addEgressIPPodRetriesForNamespace(namespace)
-	return nil
+	return e.addEgressIPPodRetriesForNamespace(namespace, "NAD change")
 }
 
-func (e *EgressIPController) addEgressIPPodRetriesForNamespace(namespace string) {
+func (e *EgressIPController) addEgressIPPodRetriesForNamespace(namespace, reason string) error {
 	if e.retryEgressIPPods == nil {
-		return
+		return nil
 	}
 	pods, err := e.watchFactory.GetPods(namespace)
 	if err != nil {
-		klog.Warningf("Failed to list pods for EgressIP NAD retry in namespace %s: %v", namespace, err)
-		return
+		return fmt.Errorf("failed to list pods for EgressIP retry in namespace %s: %w", namespace, err)
 	}
+	var errs []error
 	for _, pod := range pods {
 		pod := *pod
 		if util.PodCompleted(&pod) {
 			continue
 		}
-		e.addEgressIPPodRetry(&pod, "NAD change")
+		if err := e.addEgressIPPodRetry(&pod, reason); err != nil {
+			errs = append(errs, err)
+		}
 	}
+	return utilerrors.Join(errs...)
 }
 
-func (e *EgressIPController) addEgressIPPodRetry(pod *corev1.Pod, reason string) {
+func (e *EgressIPController) addEgressIPPodRetry(pod *corev1.Pod, reason string) error {
 	if e.retryEgressIPPods == nil || pod == nil || util.PodCompleted(pod) || !util.PodNeedsSNAT(pod) {
-		return
+		return nil
 	}
 	klog.V(5).Infof("Adding egress IP pod %s/%s for immediate retry due to %s", pod.Namespace, pod.Name, reason)
 	if err := e.retryEgressIPPods.AddRetryObjWithAddNoBackoff(pod); err != nil {
-		klog.Warningf("Failed to add pod %s/%s to egressIP retry queue: %v", pod.Namespace, pod.Name, err)
-		return
+		return fmt.Errorf("failed to add pod %s/%s to egressIP retry queue due to %s: %w",
+			pod.Namespace, pod.Name, reason, err)
 	}
 	e.retryEgressIPPods.RequestRetryObjs()
+	return nil
 }
 
-func (e *EgressIPController) syncStaleAddressSetIPs(egressIPCache egressIPCache) error {
+func (e *EgressIPController) syncStaleAddressSetIPs(egressIPCache egressIPCache, include egressIPNetworkFilter) error {
 	for _, networkPodCache := range egressIPCache.egressIPNameToPods {
 		for networkName, podCache := range networkPodCache {
+			if !include(networkName) {
+				continue
+			}
 			dbIDs := getEgressIPAddrSetDbIDs(EgressIPServedPodsAddrSetName, networkName, e.controllerName)
 			as, err := e.addressSetFactory.EnsureAddressSet(dbIDs)
 			if err != nil {
@@ -1533,7 +1710,7 @@ func (e *EgressIPController) syncStaleAddressSetIPs(egressIPCache egressIPCache)
 
 // syncStaleGWMarkRules removes stale or invalid LRP that packet mark. They are attached to egress nodes gateway router.
 // It adds expected LRPs that packet mark. This is valid only for L3 networks.
-func (e *EgressIPController) syncStaleGWMarkRules(egressIPCache egressIPCache) error {
+func (e *EgressIPController) syncStaleGWMarkRules(egressIPCache egressIPCache, include egressIPNetworkFilter) error {
 	// Delete all stale LRPs then add missing LRPs
 	// This determines if an LRP is valid for this controller, but doesn't determine whether the
 	// LRP is attached to the correct gateway router.
@@ -1543,7 +1720,7 @@ func (e *EgressIPController) syncStaleGWMarkRules(egressIPCache egressIPCache) e
 	for _, networkPodCache := range egressIPCache.egressIPNameToPods {
 		for networkName, podCache := range networkPodCache {
 			// skip GW mark rules processing for CDN because they don't exist
-			if networkName == types.DefaultNetworkName {
+			if networkName == types.DefaultNetworkName || !include(networkName) {
 				continue
 			}
 
@@ -1682,6 +1859,9 @@ func (e *EgressIPController) syncStaleGWMarkRules(egressIPCache egressIPCache) e
 			continue
 		}
 		for networkName, podCache := range networkPodCache {
+			if networkName == types.DefaultNetworkName || !include(networkName) {
+				continue
+			}
 			for eIPIP, nodeName := range egressIPCache.egressIPIPToNodeCache {
 				if egressIPCache.egressLocalNode != nodeName {
 					continue
@@ -1728,9 +1908,12 @@ func (e *EgressIPController) syncStaleGWMarkRules(egressIPCache egressIPCache) e
 // This corner case  of same pod matching more than one object will not work for IC deployments
 // since internal cache based logic will be different for different ovnkube-controllers.
 // One controller can think objA is active while another thinks objB is active if both have multiple choices.
-func (e *EgressIPController) syncPodAssignmentCache(egressIPCache egressIPCache) error {
+func (e *EgressIPController) syncPodAssignmentCache(egressIPCache egressIPCache, include egressIPNetworkFilter) error {
 	for egressIPName, networkPods := range egressIPCache.egressIPNameToPods {
 		for networkName, podCache := range networkPods {
+			if !include(networkName) {
+				continue
+			}
 			p1 := func(item *nbdb.LogicalRouterPolicy) bool {
 				return item.Priority == types.EgressIPReroutePriority &&
 					item.ExternalIDs[libovsdbops.NetworkKey.String()] == networkName &&
@@ -1840,7 +2023,7 @@ func (e *EgressIPController) syncPodAssignmentCache(egressIPCache egressIPCache)
 // It removes OVN logical router policies used by EgressIPs deleted while ovnkube-controller was down.
 // It also removes stale nexthops from router policies used by EgressIPs.
 // Upon failure, it may be invoked multiple times in order to avoid a pod restart.
-func (e *EgressIPController) syncStaleEgressReroutePolicy(cache egressIPCache) error {
+func (e *EgressIPController) syncStaleEgressReroutePolicy(cache egressIPCache, include egressIPNetworkFilter) error {
 	// limit Nodes only to egress node(s) for the EgressIP name
 	limitToValidEgressNodes := func(eipName string, nodeRedirectCache map[string]redirectIPs) map[string]redirectIPs {
 		filteredEgressNodesRedirectsCache := make(map[string]redirectIPs, 0)
@@ -1858,6 +2041,9 @@ func (e *EgressIPController) syncStaleEgressReroutePolicy(cache egressIPCache) e
 
 	for eipName, networkCache := range cache.egressIPNameToPods {
 		for networkName, data := range networkCache {
+			if !include(networkName) {
+				continue
+			}
 			logicalRouterPolicyStaleNexthops := []*nbdb.LogicalRouterPolicy{}
 			// select LRPs scoped to the correct LRP priority, network and EIP name
 			p := func(item *nbdb.LogicalRouterPolicy) bool {
@@ -1955,7 +2141,11 @@ func (e *EgressIPController) syncStaleEgressReroutePolicy(cache egressIPCache) e
 // It removes OVN NAT rules used by EgressIPs deleted while ovnkube-controller was down for the default cluster network only.
 // Upon failure, it may be invoked multiple times in order to avoid a pod restart. For UDNs, we do not SNAT to the EgressIP
 // using OVNs gateway router and in-fact we do not use OVN, but instead we add OVS flows in the external bridge to SNAT to the EgressIP. This is not managed here.
-func (e *EgressIPController) syncStaleSNATRules(egressIPCache egressIPCache) error {
+func (e *EgressIPController) syncStaleSNATRules(egressIPCache egressIPCache, include egressIPNetworkFilter) error {
+	// OVN SNATs are only programmed for the default network.
+	if !include(types.DefaultNetworkName) {
+		return nil
+	}
 	predicate := func(item *nbdb.NAT) bool {
 		if item.Type != nbdb.NATTypeSNAT {
 			return false
@@ -2070,8 +2260,12 @@ func (e *EgressIPController) syncStaleSNATRules(egressIPCache egressIPCache) err
 // access when syncing egress IPs. The Egress IP setup will return a lot of
 // atomic items with the same general information repeated across most (egressIP
 // name, logical IP defined for that name), hence use a cache to avoid round
-// trips to the API server per item.
-func (e *EgressIPController) generateCacheForEgressIP() (egressIPCache, error) {
+// trips to the API server per item. include limits which networks are walked so
+// a per-network stale sync does not depend on other networks' state.
+func (e *EgressIPController) generateCacheForEgressIP(include egressIPNetworkFilter) (egressIPCache, error) {
+	if include == nil {
+		include = egressIPAllNetworks
+	}
 	cache := egressIPCache{}
 	namespaces, err := e.watchFactory.GetNamespaces()
 	if err != nil {
@@ -2099,6 +2293,9 @@ func (e *EgressIPController) generateCacheForEgressIP() (egressIPCache, error) {
 		}
 		if ni == nil {
 			klog.V(5).Infof("Skipping namespace %s while building egress IP cache: network not active for this controller", namespace.Name)
+			continue
+		}
+		if !include(ni.GetNetworkName()) {
 			continue
 		}
 		// skip if already processed
@@ -2246,6 +2443,9 @@ func (e *EgressIPController) generateCacheForEgressIP() (egressIPCache, error) {
 			}
 			if ni == nil {
 				klog.V(5).Infof("Skipping namespace %s while building egress IP sync cache: network not active for this controller", namespace.Name)
+				continue
+			}
+			if !include(ni.GetNetworkName()) {
 				continue
 			}
 			_, ok := egressIPsCache[egressIP.Name][ni.GetNetworkName()]
