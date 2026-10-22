@@ -1,0 +1,61 @@
+name: Set up Go and module cache
+description: Restore shared modules, optionally downloading and saving all dependencies
+
+inputs:
+  populate-cache:
+    description: Download all modules and save the cache on a miss
+    default: 'false'
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Go
+      id: go
+      uses: actions/setup-go@v6
+      with:
+        go-version-file: go-controller/go.mod
+        cache: false
+
+    - name: Find module cache
+      id: paths
+      shell: bash
+      run: echo "modules=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
+
+    # Only the prerequisite job saves this cache, after every module is downloaded.
+    # Consumers restore modules without saving their job-specific build results.
+    # On a hit, the prerequisite only checks existence; it does not need the files.
+    - name: Check or restore modules
+      id: cache
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ steps.paths.outputs.modules }}
+        key: go-modules-v1-${{ runner.os }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go-controller/go.mod', 'go-controller/go.sum', 'test/*/go.mod', 'test/*/go.sum') }}
+        lookup-only: ${{ inputs.populate-cache == 'true' }}
+
+    - name: Download all modules
+      if: inputs.populate-cache == 'true' && steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        for modfile in go-controller/go.mod test/*/go.mod; do
+          module=${modfile%/go.mod}
+
+          for attempt in 1 2 3; do
+            if go -C "$module" mod download; then
+              break
+            fi
+
+            if [ "$attempt" -eq 3 ]; then
+              echo "Failed to download dependencies for $module" >&2
+              exit 1
+            fi
+
+            sleep 10
+          done
+        done
+
+    - name: Save modules
+      if: inputs.populate-cache == 'true' && steps.cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: ${{ steps.paths.outputs.modules }}
+        key: ${{ steps.cache.outputs.cache-primary-key }}
