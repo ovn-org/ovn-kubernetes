@@ -246,6 +246,16 @@ reviews:
           intent, trade-offs, or constraints warrant a comment.
     - path: "test/e2e/**"
       instructions: |
+        - Verify CI reachability for every new spec or changed selection
+          requirement. Identify a concrete lane in .github/workflows/
+          and trace test/Makefile and test/scripts/ selection, focus/skip
+          expressions, feature labels, Serial/PARALLEL handling, cluster
+          flags, and runtime skip prerequisites. Flag specs excluded by
+          every suitable lane. Kubernetes conformance jobs do not execute
+          OVN-Kubernetes specs in test/e2e/. Compilation or a focused
+          dry-run alone is not evidence of CI execution. When available,
+          inspect CI logs/reports for the specific spec running rather
+          than being skipped; otherwise report execution as unverified.
         - E2E tests must be backwards compatible — adding tests for
           new features must not break existing tests for users who
           don't use the new feature.
@@ -405,8 +415,19 @@ reviews:
           this PR.
 
           Fail if user-facing behavior changed with no E2E test changes.
-          Pass only if no user-facing behavior changed, or if E2E test
-          files are included.
+          E2E file presence alone is not sufficient. For new specs or
+          changed selection requirements, identify a concrete CI lane
+          whose test command selects them with the required cluster
+          features enabled. Trace workflow and runner-script focus/skip
+          expressions, feature labels, Serial/PARALLEL handling, and
+          runtime skip prerequisites. Fail if no suitable lane executes
+          the specs, and request CI wiring in the same PR. Kubernetes
+          conformance jobs do not cover OVN-Kubernetes E2E specs.
+          Report the lane and selection evidence. When CI logs or reports
+          are available, confirm the specific specs ran rather than being
+          skipped. If execution is pending or unavailable, state that
+          limitation; do not treat compilation, an unrelated passing job,
+          or a focused dry-run as proof of CI execution.
 
           If failing, advise the author: if E2E tests are genuinely not
           feasible for this change, document the justification in the
