@@ -341,8 +341,6 @@ github.com/mdlayher/socket v0.5.1 h1:VZaqt6RkGkt2OE9l3GcC6nZkqD3xKeQLyfleW/uBcos
 github.com/mdlayher/socket v0.5.1/go.mod h1:TjPLHI1UgwEv5J1B5q0zTZq12A/6H7nKmtTanQE37IQ=
 github.com/metallb/frr-k8s v0.0.21 h1:JLlCeXVlW5BLVdPy2u5sS9UCVlnK9x2vzWbIkxb8Atk=
 github.com/metallb/frr-k8s v0.0.21/go.mod h1:VMnCZUVXYy7k0Fsa2L3XKwISFs3Thv0Uord7rSZPQZw=
-github.com/metallb/metallb v0.14.9 h1:rjhftr7b0vv56c8pXm7UDo7ad61EwKT6lbGGocrN/VM=
-github.com/metallb/metallb v0.14.9/go.mod h1:qUh1zVwYAfp3JLxhZrDH20j55QvYwCkI37QU4gUG3ns=
 github.com/mfridman/tparse v0.18.0 h1:wh6dzOKaIwkUGyKgOntDW4liXSo37qg5AXbIhkMV3vE=
 github.com/mfridman/tparse v0.18.0/go.mod h1:gEvqZTuCgEhPbYk/2lS3Kcxg1GmTxxU7kTC8DvP0i/A=
 github.com/miekg/dns v1.1.43 h1:JKfpVSCB84vrAmHzyrsxB5NAr5kLoMXZArPSw7Qlgyg=
@@ -522,6 +520,8 @@ go.uber.org/multierr v1.11.0 h1:blXXJkSxSSfBVBlC76pxqeO+LN3aDfLQo+309xJstO0=
 go.uber.org/multierr v1.11.0/go.mod h1:20+QtiLqy0Nd6FdQB9TLXag12DsQkrbs3htMFfDN80Y=
 go.uber.org/zap v1.27.1 h1:08RqriUEv8+ArZRYSTXy1LeBScaMpVSTBhCeaZYfMYc=
 go.uber.org/zap v1.27.1/go.mod h1:GB2qFLM7cTU87MWRP2mPIjqfIDnGu+VIO4V/SdhGo2E=
+go.universe.tf/metallb v0.14.9 h1:FYLII4Rpnju8pLY79H0BIoJVQI4mmEzeO9BJ0X44HX8=
+go.universe.tf/metallb v0.14.9/go.mod h1:qUh1zVwYAfp3JLxhZrDH20j55QvYwCkI37QU4gUG3ns=
 go.yaml.in/yaml/v2 v2.4.3 h1:6gvOSjQoTB3vt1l+CU+tSyi/HOjfOjRLJ4YwYZGwRO0=
 go.yaml.in/yaml/v2 v2.4.3/go.mod h1:zSxWcmIDjOzPXpjlTTbAsKokqkDNAVtZO0WOMiT90s8=
 go.yaml.in/yaml/v3 v3.0.4 h1:tfq32ie2Jv2UxXFdLJdh3jXuOzWiL1fo0bu/FbuKpbc=
