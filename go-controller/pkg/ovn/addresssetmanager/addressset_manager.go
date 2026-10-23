@@ -577,19 +577,19 @@ func (m *AddressSetManager) reconcileNamespace(nsKey string) error {
 				// nothing to do
 				return nil
 			}
-			// first find namespaces that currently match this address set
-			currentlyMatchedNamespaces, err := m.getSelectedNamespaces(addrSet)
+			// first check if this namespace currently matches this address set
+			currentlyMatches, err := m.selectsNamespace(addrSet, nsKey)
 			if err != nil {
 				return err
 			}
-			if currentlyMatchedNamespaces.Has(nsKey) {
+			if currentlyMatches {
 				// this namespace is relevant for this address set, reconcile
 				m.addressSetReconciler.Reconcile(addrSetKey)
 				return nil
 			}
 			// now check if this address set was matching this namespace before, if yes, reconcile since it might not match anymore
 			previouslyMatchedNamespaces := addrSet.selectedNamespaces
-			if previouslyMatchedNamespaces.Has(nsKey) {
+			if previouslyMatchedNamespaces == nil || previouslyMatchedNamespaces.Has(nsKey) {
 				m.addressSetReconciler.Reconcile(addrSetKey)
 				return nil
 			}
@@ -910,6 +910,20 @@ func (m *AddressSetManager) getSelectedNamespaces(s *podSelectorAddressSet) (*se
 	} else if s.namespaceSelector.Empty() {
 		// any namespace
 		matchedNamespaces.all = true
+	} else if nsName, pinned := s.namespaceSelector.RequiresExactMatch(corev1.LabelMetadataName); pinned {
+		// Pinning kubernetes.io/metadata.name is the idiomatic way to write
+		// "this one namespace" as a network policy peer. The apiserver keeps that
+		// label equal to the namespace name, so the selector can be resolved with
+		// a single lookup instead of evaluating it against every namespace in the
+		// cluster. Any remaining requirements are still checked below.
+		ns, err := m.namespaceLister.Get(nsName)
+		if err != nil {
+			if !apierrors.IsNotFound(err) {
+				return nil, fmt.Errorf("failed to get namespace %s: %v", nsName, err)
+			}
+		} else if s.namespaceSelector.Matches(labels.Set(ns.Labels)) {
+			matchedNamespaces.set.Insert(ns.Name)
+		}
 	} else {
 		// selected namespaces
 		namespaces, err := m.namespaceLister.List(s.namespaceSelector)
@@ -921,6 +935,33 @@ func (m *AddressSetManager) getSelectedNamespaces(s *podSelectorAddressSet) (*se
 		}
 	}
 	return matchedNamespaces, nil
+}
+
+// selectsNamespace reports whether the given namespace is selected by the
+// address set's namespace selector. It answers the same question as
+// getSelectedNamespaces(s).Has(nsName) without materializing the whole set, so
+// callers that only need a membership test don't pay for a full namespace scan.
+func (m *AddressSetManager) selectsNamespace(s *podSelectorAddressSet, nsName string) (bool, error) {
+	if s.namespace != "" {
+		// static namespace case
+		return s.namespace == nsName, nil
+	}
+	if s.namespaceSelector.Empty() {
+		// any namespace
+		return true, nil
+	}
+	if pinnedNs, pinned := s.namespaceSelector.RequiresExactMatch(corev1.LabelMetadataName); pinned && pinnedNs != nsName {
+		return false, nil
+	}
+	ns, err := m.namespaceLister.Get(nsName)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			// a deleted namespace is not selected anymore
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to get namespace %s: %v", nsName, err)
+	}
+	return s.namespaceSelector.Matches(labels.Set(ns.Labels)), nil
 }
 
 // getSelectedNodes returns the set of node names that match the node selector.

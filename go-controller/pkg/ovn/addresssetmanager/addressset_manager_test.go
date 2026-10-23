@@ -16,7 +16,10 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/sets"
+	listers "k8s.io/client-go/listers/core/v1"
+	"k8s.io/client-go/tools/cache"
 
 	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
 	"github.com/ovn-kubernetes/libovsdb/ovsdb"
@@ -1046,6 +1049,226 @@ var _ = ginkgo.Describe("OVN podSelectorAddressSet", func() {
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		emptyAS, _ = addressset.GetTestDbAddrSets(hostNSASIDs, []string{})
 		gomega.Eventually(addressSetManager.nbClient).Should(libovsdbtest.HaveData([]libovsdbtest.TestData{emptyAS}))
+	})
+	ginkgo.It("reconciles address sets with exact-name namespace selectors on namespace events", func() {
+		namespace1 := *testing.NewNamespaceWithLabels(namespaceName1, map[string]string{
+			corev1.LabelMetadataName: namespaceName1,
+			"tier":                   "backend",
+		})
+		namespace2 := *testing.NewNamespaceWithLabels(namespaceName2, map[string]string{
+			corev1.LabelMetadataName: namespaceName2,
+			"tier":                   "backend",
+		})
+		nodeName := "node1"
+		pod1IP := "10.128.1.3"
+		pod2IP := "10.128.1.4"
+		pod1 := testing.NewPod(namespace1.Name, "pod1", nodeName, pod1IP)
+		pod2 := testing.NewPod(namespace2.Name, "pod2", nodeName, pod2IP)
+
+		peer := knet.NetworkPolicyPeer{
+			PodSelector: &metav1.LabelSelector{},
+			NamespaceSelector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{
+					corev1.LabelMetadataName: namespaceName1,
+				},
+			},
+		}
+
+		startAddrSetManager(initialDB, []corev1.Namespace{namespace1, namespace2}, []corev1.Pod{*pod1, *pod2})
+
+		_, _, _, err := addressSetManager.EnsureAddressSet(
+			peer.PodSelector, peer.NamespaceSelector, nil, "", "backRef", controllerName, &util.DefaultNetInfo{}, false)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+		// pod1 should be in the address set, pod2 should not
+		eventuallyExpectAddressSetsWithIP(addressSetManager.nbClient, peer, "", pod1IP)
+
+		// Delete namespace1; address set should be reconciled to empty
+		err = clientSet.KubeClient.CoreV1().Namespaces().Delete(context.TODO(), namespace1.Name, metav1.DeleteOptions{})
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		eventuallyExpectEmptyAddressSetsExist(addressSetManager.nbClient, peer, "")
+	})
+})
+
+var _ = ginkgo.Describe("selectsNamespace and getSelectedNamespaces", func() {
+	var (
+		indexer cache.Indexer
+		m       *AddressSetManager
+	)
+
+	ginkgo.BeforeEach(func() {
+		indexer = cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})
+		m = &AddressSetManager{namespaceLister: listers.NewNamespaceLister(indexer)}
+
+		ns1 := &corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "ns1",
+				Labels: map[string]string{
+					corev1.LabelMetadataName: "ns1",
+					"env":                    "prod",
+				},
+			},
+		}
+		ns2 := &corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "ns2",
+				Labels: map[string]string{
+					corev1.LabelMetadataName: "ns2",
+					"env":                    "dev",
+				},
+			},
+		}
+		gomega.Expect(indexer.Add(ns1)).To(gomega.Succeed())
+		gomega.Expect(indexer.Add(ns2)).To(gomega.Succeed())
+	})
+
+	ginkgo.Describe("selectsNamespace", func() {
+		ginkgo.It("handles static namespace", func() {
+			ps := &podSelectorAddressSet{namespace: "ns1"}
+			matches, err := m.selectsNamespace(ps, "ns1")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(matches).To(gomega.BeTrue())
+
+			matches, err = m.selectsNamespace(ps, "ns2")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(matches).To(gomega.BeFalse())
+		})
+
+		ginkgo.It("handles empty namespace selector (matches any namespace)", func() {
+			ps := &podSelectorAddressSet{namespaceSelector: labels.Everything()}
+			matches, err := m.selectsNamespace(ps, "ns1")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(matches).To(gomega.BeTrue())
+		})
+
+		ginkgo.It("handles pinned kubernetes.io/metadata.name selector", func() {
+			sel, err := metav1.LabelSelectorAsSelector(&metav1.LabelSelector{
+				MatchLabels: map[string]string{corev1.LabelMetadataName: "ns1"},
+			})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			ps := &podSelectorAddressSet{namespaceSelector: sel}
+
+			// Matching namespace
+			matches, err := m.selectsNamespace(ps, "ns1")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(matches).To(gomega.BeTrue())
+
+			// Non-matching namespace (triggers early exit without lister lookup)
+			matches, err = m.selectsNamespace(ps, "ns2")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(matches).To(gomega.BeFalse())
+
+			// Non-existent namespace
+			matches, err = m.selectsNamespace(ps, "non-existent")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(matches).To(gomega.BeFalse())
+		})
+
+		ginkgo.It("handles compound selector with pinned name and secondary labels", func() {
+			sel, err := metav1.LabelSelectorAsSelector(&metav1.LabelSelector{
+				MatchLabels: map[string]string{
+					corev1.LabelMetadataName: "ns1",
+					"env":                    "dev", // ns1 has env: prod, so should not match
+				},
+			})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			ps := &podSelectorAddressSet{namespaceSelector: sel}
+
+			matches, err := m.selectsNamespace(ps, "ns1")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(matches).To(gomega.BeFalse())
+		})
+
+		ginkgo.It("handles arbitrary label selector", func() {
+			sel, err := metav1.LabelSelectorAsSelector(&metav1.LabelSelector{
+				MatchLabels: map[string]string{"env": "prod"},
+			})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			ps := &podSelectorAddressSet{namespaceSelector: sel}
+
+			matches, err := m.selectsNamespace(ps, "ns1")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(matches).To(gomega.BeTrue())
+
+			matches, err = m.selectsNamespace(ps, "ns2")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(matches).To(gomega.BeFalse())
+
+			// Deleted/missing namespace
+			matches, err = m.selectsNamespace(ps, "deleted-ns")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(matches).To(gomega.BeFalse())
+		})
+	})
+
+	ginkgo.Describe("getSelectedNamespaces", func() {
+		ginkgo.It("handles static namespace", func() {
+			ps := &podSelectorAddressSet{namespace: "ns1"}
+			selected, err := m.getSelectedNamespaces(ps)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(selected.all).To(gomega.BeFalse())
+			gomega.Expect(selected.set.Has("ns1")).To(gomega.BeTrue())
+		})
+
+		ginkgo.It("handles empty namespace selector", func() {
+			ps := &podSelectorAddressSet{namespaceSelector: labels.Everything()}
+			selected, err := m.getSelectedNamespaces(ps)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(selected.all).To(gomega.BeTrue())
+		})
+
+		ginkgo.It("handles pinned kubernetes.io/metadata.name selector", func() {
+			sel, err := metav1.LabelSelectorAsSelector(&metav1.LabelSelector{
+				MatchLabels: map[string]string{corev1.LabelMetadataName: "ns1"},
+			})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			ps := &podSelectorAddressSet{namespaceSelector: sel}
+
+			selected, err := m.getSelectedNamespaces(ps)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(selected.set.Len()).To(gomega.Equal(1))
+			gomega.Expect(selected.set.Has("ns1")).To(gomega.BeTrue())
+		})
+
+		ginkgo.It("handles pinned kubernetes.io/metadata.name when namespace does not exist", func() {
+			sel, err := metav1.LabelSelectorAsSelector(&metav1.LabelSelector{
+				MatchLabels: map[string]string{corev1.LabelMetadataName: "missing-ns"},
+			})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			ps := &podSelectorAddressSet{namespaceSelector: sel}
+
+			selected, err := m.getSelectedNamespaces(ps)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(selected.set.Len()).To(gomega.Equal(0))
+		})
+
+		ginkgo.It("handles pinned kubernetes.io/metadata.name with non-matching additional label", func() {
+			sel, err := metav1.LabelSelectorAsSelector(&metav1.LabelSelector{
+				MatchLabels: map[string]string{
+					corev1.LabelMetadataName: "ns1",
+					"env":                    "dev",
+				},
+			})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			ps := &podSelectorAddressSet{namespaceSelector: sel}
+
+			selected, err := m.getSelectedNamespaces(ps)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(selected.set.Len()).To(gomega.Equal(0))
+		})
+
+		ginkgo.It("falls back to listing for general label selectors", func() {
+			sel, err := metav1.LabelSelectorAsSelector(&metav1.LabelSelector{
+				MatchLabels: map[string]string{"env": "prod"},
+			})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			ps := &podSelectorAddressSet{namespaceSelector: sel}
+
+			selected, err := m.getSelectedNamespaces(ps)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(selected.set.Len()).To(gomega.Equal(1))
+			gomega.Expect(selected.set.Has("ns1")).To(gomega.BeTrue())
+		})
 	})
 })
 
