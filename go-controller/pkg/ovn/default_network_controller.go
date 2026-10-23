@@ -271,6 +271,12 @@ func newDefaultNetworkControllerCommon(
 	if oc.eIPC != nil {
 		oc.eIPC.retryEgressIPPods = oc.retryEgressIPPods
 	}
+	oc.onLogicalPortCacheAdd = func(pod *corev1.Pod, _ string) {
+		oc.requestLocalPodPolicyRetriesForPod(pod, "logical port cache update")
+		if oc.eIPC != nil {
+			oc.eIPC.requestEgressIPPodRetry(pod, "logical port cache update")
+		}
+	}
 	return oc, nil
 }
 

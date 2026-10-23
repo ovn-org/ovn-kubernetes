@@ -282,10 +282,7 @@ func NewLayer2UserDefinedNetworkController(
 		oc.onLogicalPortCacheAdd = func(pod *corev1.Pod, _ string) {
 			oc.requestLocalPodPolicyRetriesForPod(pod, "logical port cache update")
 			if oc.eIPController != nil {
-				if err := oc.eIPController.addEgressIPPodRetry(pod, "logical port cache update"); err != nil {
-					klog.Warningf("Failed to enqueue EgressIP retry for pod %s/%s after logical port cache update: %v",
-						pod.Namespace, pod.Name, err)
-				}
+				oc.eIPController.requestEgressIPPodRetry(pod, "logical port cache update")
 			}
 		}
 	}
