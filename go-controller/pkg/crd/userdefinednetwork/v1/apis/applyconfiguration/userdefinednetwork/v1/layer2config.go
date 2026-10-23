@@ -16,15 +16,18 @@ type Layer2ConfigApplyConfiguration struct {
 	//
 	// Allowed value is "Secondary".
 	// Secondary network is only assigned to pods that use `k8s.v1.cni.cncf.io/networks` annotation to select given network.
+	//
 	Role *userdefinednetworkv1.NetworkRole `json:"role,omitempty"`
 	// MTU is the maximum transmission unit for a network.
 	// MTU is optional, if not provided, the globally configured value in OVN-Kubernetes (defaults to 1400) is used for the network.
+	//
 	MTU *int32 `json:"mtu,omitempty"`
 	// Subnets are used for the pod network across the cluster.
 	// Dual-stack clusters may set 2 subnets (one for each IP family), otherwise only 1 subnet is allowed.
 	//
 	// The format should match standard CIDR notation (for example, "10.128.0.0/16").
 	// This field must be omitted if `ipam.mode` is `Disabled`.
+	//
 	Subnets *userdefinednetworkv1.DualStackCIDRs `json:"subnets,omitempty"`
 	// reservedSubnets specifies a list of CIDRs reserved for static IP assignment, excluded from automatic allocation.
 	// reservedSubnets is optional. When omitted, all IP addresses in `subnets` are available for automatic assignment.
@@ -51,6 +54,7 @@ type Layer2ConfigApplyConfiguration struct {
 	// This field is only allowed for "Primary" network.
 	// It is not recommended to set this field without explicit need and understanding of the OVN network topology.
 	// When omitted, an IP from the subnets field is used.
+	//
 	DefaultGatewayIPs *userdefinednetworkv1.DualStackIPs `json:"defaultGatewayIPs,omitempty"`
 	// JoinSubnets are used inside the OVN network topology.
 	//
@@ -58,10 +62,12 @@ type Layer2ConfigApplyConfiguration struct {
 	// This field is only allowed for "Primary" network.
 	// It is not recommended to set this field without explicit need and understanding of the OVN network topology.
 	// When omitted, the platform will choose a reasonable default which is subject to change over time.
+	//
 	JoinSubnets *userdefinednetworkv1.DualStackCIDRs `json:"joinSubnets,omitempty"`
 	// IPAM section contains IPAM-related configuration for the network.
 	IPAM *IPAMConfigApplyConfiguration `json:"ipam,omitempty"`
 	// macSecurity configures MAC spoof protection on the network's logical switch ports.
+	//
 	MACSecurity *MACSecurityConfigApplyConfiguration `json:"macSecurity,omitempty"`
 }
 

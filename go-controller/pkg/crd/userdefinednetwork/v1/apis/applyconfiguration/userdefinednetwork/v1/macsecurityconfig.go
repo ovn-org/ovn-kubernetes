@@ -19,6 +19,7 @@ type MACSecurityConfigApplyConfiguration struct {
 	// `Disabled` removes all MAC spoof protection restrictions and enables unknown MAC address
 	// handling for nested virtualization and NFV use cases.
 	// Only `Disabled` requires ipam.mode to be Disabled.
+	//
 	Mode *userdefinednetworkv1.MACSecurityMode `json:"mode,omitempty"`
 }
 

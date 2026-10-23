@@ -17,11 +17,13 @@ type LocalnetConfigApplyConfiguration struct {
 	// Localnet topology supports `Secondary` only.
 	// The network will be assigned to pods that have the `k8s.v1.cni.cncf.io/networks` annotation in place pointing
 	// to subject.
+	//
 	Role *userdefinednetworkv1.NetworkRole `json:"role,omitempty"`
 	// physicalNetworkName points to the OVS bridge-mapping's network-name configured in the nodes, required.
 	// Min length is 1, max length is 253, cannot contain `,` or `:` characters.
 	// In case OVS bridge-mapping is defined by Kubernetes-nmstate with `NodeNetworkConfigurationPolicy` (NNCP),
 	// this field should point to the NNCP `spec.desiredState.ovn.bridge-mappings` item's `localnet` value.
+	//
 	PhysicalNetworkName *string `json:"physicalNetworkName,omitempty"`
 	// subnets is a list of subnets used for pods in this localnet network across the cluster.
 	// The list may be either 1 IPv4 subnet, 1 IPv6 subnet, or 1 of each IP family.
@@ -35,6 +37,7 @@ type LocalnetConfigApplyConfiguration struct {
 	// ipam.mode should be set to `Disabled` (users configure the pod IPs themselves) or `DHCP` (a DHCP
 	// server on that network assigns them). Both turn off OVN-Kubernetes IPAM and avoid conflicts with
 	// the existing IPAM services on this localnet network.
+	//
 	Subnets *userdefinednetworkv1.DualStackCIDRs `json:"subnets,omitempty"`
 	// excludeSubnets is a list of CIDRs to be removed from the specified CIDRs in `subnets`.
 	// The CIDRs in this list must be in range of at least one subnet specified in `subnets`.
@@ -46,6 +49,7 @@ type LocalnetConfigApplyConfiguration struct {
 	// (which shouldn't be assigned by OVN-Kubernetes), the specified CIDRs will not be assigned. For example:
 	// Given: `subnets: "10.0.0.0/24"`, `excludeSubnets`: "10.0.0.200/30", the following addresses will not be assigned
 	// to pods: `10.0.0.201`, `10.0.0.202`.
+	//
 	ExcludeSubnets []userdefinednetworkv1.CIDR `json:"excludeSubnets,omitempty"`
 	// ipam configurations for the network.
 	// ipam is optional. When omitted, `subnets` must be specified.
@@ -60,6 +64,7 @@ type LocalnetConfigApplyConfiguration struct {
 	// `ipam.lifecycle` controls IP addresses management lifecycle.
 	// When set to 'Persistent', the assigned IP addresses will be persisted in `ipamclaims.k8s.cni.cncf.io` object.
 	// Useful for VMs, IP address will be persistent after restarts and migrations. Supported when `ipam.mode` is `Enabled`.
+	//
 	IPAM *IPAMConfigApplyConfiguration `json:"ipam,omitempty"`
 	// mtu is the maximum transmission unit for a network.
 	// mtu is optional. When omitted, the configured value in OVN-Kubernetes (defaults to 1500 for localnet topology)
@@ -70,6 +75,7 @@ type LocalnetConfigApplyConfiguration struct {
 	// this field enables configuring the same MTU on pod interface, having the pod MTU aligned with the network MTU.
 	// Misaligned MTU across the stack (e.g.: pod has MTU X, node NIC has MTU Y), could result in network disruptions
 	// and bad performance.
+	//
 	MTU *int32 `json:"mtu,omitempty"`
 	// vlan configuration for the network.
 	// vlan.mode is the VLAN mode.
@@ -78,8 +84,10 @@ type LocalnetConfigApplyConfiguration struct {
 	// vlan.access.id is the VLAN ID (VID) to be set on the network logical switch port.
 	// vlan is optional, when omitted the underlying network default VLAN will be used (usually `1`).
 	// When set, OVN-Kubernetes will apply VLAN configuration to the SDN infra and to the connected pods.
+	//
 	VLAN *VLANConfigApplyConfiguration `json:"vlan,omitempty"`
 	// macSecurity configures MAC spoof protection on the network's logical switch ports.
+	//
 	MACSecurity *MACSecurityConfigApplyConfiguration `json:"macSecurity,omitempty"`
 }
 
