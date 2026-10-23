@@ -26,6 +26,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/workqueue"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/allocator/id"
@@ -578,9 +579,10 @@ func TestNADController(t *testing.T) {
 	}
 
 	type args struct {
-		nad     string
-		network *ovncnitypes.NetConf
-		wantErr bool
+		nad       string
+		network   *ovncnitypes.NetConf
+		wantErr   bool
+		wantEvent string
 	}
 	type expected struct {
 		network *ovncnitypes.NetConf
@@ -812,9 +814,10 @@ func TestNADController(t *testing.T) {
 					network: networkAPrimary,
 				},
 				{
-					nad:     "test/nad_2",
-					network: networkAIncompatible,
-					wantErr: true,
+					nad:       "test/nad_2",
+					network:   networkAIncompatible,
+					wantErr:   false,
+					wantEvent: "InvalidConfig",
 				},
 			},
 			expected: []expected{
@@ -855,9 +858,10 @@ func TestNADController(t *testing.T) {
 					network: networkASecondary,
 				},
 				{
-					nad:     "test/nad_1",
-					network: networkAIncompatible,
-					wantErr: true,
+					nad:       "test/nad_1",
+					network:   networkAIncompatible,
+					wantErr:   false,
+					wantEvent: "InvalidConfig",
 				},
 			},
 			expected: []expected{
@@ -899,6 +903,7 @@ func TestNADController(t *testing.T) {
 			fakeClient := util.GetOVNClientset().GetClusterManagerClientset()
 			wf, err := factory.NewClusterManagerWatchFactory(fakeClient)
 			g.Expect(err).ToNot(gomega.HaveOccurred())
+			fakeRecorder := record.NewFakeRecorder(10)
 			nadController := &nadController{
 				nads:                map[string]string{},
 				primaryNADs:         map[string]string{},
@@ -908,6 +913,7 @@ func TestNADController(t *testing.T) {
 				nadClient:           fakeClient.NetworkAttchDefClient,
 				nodeLister:          wf.NodeCoreInformer().Lister(),
 				namespaceLister:     &fakeNamespaceLister{},
+				recorder:            fakeRecorder,
 			}
 			err = nadController.networkIDAllocator.ReserveID(types.DefaultNetworkName, types.DefaultNetworkID)
 			g.Expect(err).ToNot(gomega.HaveOccurred())
@@ -947,6 +953,9 @@ func TestNADController(t *testing.T) {
 					g.Expect(err).To(gomega.HaveOccurred())
 				} else {
 					g.Expect(err).NotTo(gomega.HaveOccurred())
+				}
+				if args.wantEvent != "" {
+					g.Expect(fakeRecorder.Events).Should(gomega.Receive(gomega.ContainSubstring(args.wantEvent)))
 				}
 				syncTouchedNetworks(args.nad, prevNetwork)
 			}
@@ -1801,6 +1810,83 @@ func TestSyncAll(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestSyncAllDeterministicOrdering(t *testing.T) {
+	g := gomega.NewWithT(t)
+
+	g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+	config.OVNKubernetesFeature.EnableNetworkSegmentation = true
+	config.OVNKubernetesFeature.EnableMultiNetwork = true
+
+	fakeClient := util.GetOVNClientset().GetClusterManagerClientset()
+	wf, err := factory.NewClusterManagerWatchFactory(fakeClient)
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+
+	tcm := &testControllerManager{
+		controllers: map[string]NetworkController{},
+	}
+
+	fakeRecorder := record.NewFakeRecorder(10)
+	controller, err := NewForCluster(tcm, wf, fakeClient, fakeRecorder, id.NewTunnelKeyAllocator("TunnelKeys"))
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+
+	_, err = fakeClient.KubeClient.CoreV1().Namespaces().Create(context.TODO(),
+		&corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:   "test",
+				Labels: map[string]string{types.RequiredUDNNamespaceLabel: ""},
+			},
+		}, metav1.CreateOptions{},
+	)
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+
+	baseNetwork := &ovncnitypes.NetConf{
+		Topology: types.LocalnetTopology,
+		NetConf: cnitypes.NetConf{
+			Name: "vlan-trunk",
+			Type: "ovn-k8s-cni-overlay",
+		},
+	}
+
+	olderNetworkNoVLAN := *baseNetwork
+	olderNetworkNoVLAN.NADName = "test/nad-no-vlan"
+	olderNAD, err := ovntesting.BuildNAD("nad-no-vlan", "test", &olderNetworkNoVLAN)
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+	olderNAD.CreationTimestamp = metav1.NewTime(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
+
+	newerNetworkWithVLAN := *baseNetwork
+	newerNetworkWithVLAN.NADName = "test/nad-vlan-2106"
+	newerNetworkWithVLAN.VLANID = 2106
+	newerNAD, err := ovntesting.BuildNAD("nad-vlan-2106", "test", &newerNetworkWithVLAN)
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+	newerNAD.CreationTimestamp = metav1.NewTime(time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC))
+
+	// Create NADs in reverse order (newer first) to ensure the sort is what
+	// determines the winner, not insertion order.
+	_, err = fakeClient.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions("test").Create(
+		context.Background(), newerNAD, metav1.CreateOptions{})
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+	_, err = fakeClient.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions("test").Create(
+		context.Background(), olderNAD, metav1.CreateOptions{})
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+
+	g.Expect(wf.Start()).To(gomega.Succeed())
+	defer wf.Shutdown()
+
+	// syncAll should NOT crash — the older NAD (no VLAN) should win
+	g.Expect(controller.Start()).To(gomega.Succeed())
+	controller.Stop()
+
+	// The older NAD's network (no VLAN) should be established
+	g.Expect(tcm.valid).To(gomega.HaveLen(1))
+	g.Expect(tcm.valid[0].GetNetworkName()).To(gomega.Equal("vlan-trunk"))
+	expectedNetInfo, err := util.ParseNADInfo(olderNAD)
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+	g.Expect(util.AreNetworksCompatible(tcm.valid[0], expectedNetInfo)).To(gomega.BeTrue())
+
+	// A Warning event should have been recorded for the rejected NAD
+	g.Expect(fakeRecorder.Events).Should(gomega.Receive(gomega.ContainSubstring("InvalidConfig")))
 }
 
 func TestResourceCleanup(t *testing.T) {

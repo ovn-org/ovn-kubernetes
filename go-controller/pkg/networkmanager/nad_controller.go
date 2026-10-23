@@ -38,6 +38,8 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util/errors"
 )
 
+const nadKind = "NetworkAttachmentDefinition"
+
 // nadController handles namespaced scoped NAD events and
 // manages cluster scoped networks defined in those NADs. NADs are mostly
 // referenced from pods to give them access to the network. Different NADs can
@@ -930,6 +932,11 @@ func (c *nadController) syncAll() (err error) {
 		return fmt.Errorf("%s: failed to list NADs: %w", c.name, err)
 	}
 
+	// Sort NADs deterministically so that in case of conflicting NADs the
+	// oldest NAD always wins, preserving established networks across
+	// controller restarts.
+	sortNADsByAge(existingNADs)
+
 	syncNAD := func(nad *nettypes.NetworkAttachmentDefinition) error {
 		key, err := cache.MetaNamespaceKeyFunc(nad)
 		if err != nil {
@@ -1000,6 +1007,31 @@ func (c *nadController) syncAll() (err error) {
 	}
 
 	return nil
+}
+
+// sortNADsByAge sorts NADs by CreationTimestamp (oldest first), using
+// namespace/name as a tiebreaker for NADs created within the same second.
+func sortNADsByAge(nads []*nettypes.NetworkAttachmentDefinition) {
+	var errs []error
+	sort.Slice(nads, func(i, j int) bool {
+		ti := nads[i].CreationTimestamp.Time
+		tj := nads[j].CreationTimestamp.Time
+		if !ti.Equal(tj) {
+			return ti.Before(tj)
+		}
+		ki, err := cache.MetaNamespaceKeyFunc(nads[i])
+		if err != nil {
+			errs = append(errs, err)
+		}
+		kj, err := cache.MetaNamespaceKeyFunc(nads[j])
+		if err != nil {
+			errs = append(errs, err)
+		}
+		return ki < kj
+	})
+	for _, err := range errs {
+		klog.Warningf("sortNADsByAge: failed to compute NAD key: %v", err)
+	}
 }
 
 func (c *nadController) sync(key string) error {
@@ -1092,7 +1124,7 @@ func (c *nadController) syncNAD(key string, nad *nettypes.NetworkAttachmentDefin
 			}
 
 			if c.recorder != nil {
-				c.recorder.Eventf(&corev1.ObjectReference{Kind: nad.Kind, Namespace: nad.Namespace, Name: nad.Name}, corev1.EventTypeWarning,
+				c.recorder.Eventf(&corev1.ObjectReference{Kind: nadKind, Namespace: nad.Namespace, Name: nad.Name, UID: nad.UID}, corev1.EventTypeWarning,
 					"InvalidConfig", "Failed to parse network config: %v", err.Error())
 			}
 			klog.Errorf("%s: failed parsing NAD %s: %v", c.name, key, err)
@@ -1165,14 +1197,27 @@ func (c *nadController) syncNAD(key string, nad *nettypes.NetworkAttachmentDefin
 		oldNetwork = currentNetwork
 		ensureNetwork = util.NewMutableNetInfo(nadNetwork)
 	// the NAD refers to an existing incompatible network referred by other
-	// NADs, return error
+	// NADs, log error and skip the NAD
 	case oldNetwork == nil:
 		// the NAD refers to the same network as before but with different
 		// incompatible configuration, remove the NAD reference from the network
 		oldNetwork = currentNetwork
 		fallthrough
 	default:
-		err = fmt.Errorf("%s: NAD %s CNI config does not match that of network %s", c.name, key, nadNetworkName)
+		owningNADs := c.nadsByNetwork[nadNetworkName]
+		klog.Errorf("%s: NAD %s CNI config does not match that of network %s (established by %v)",
+			c.name, key, nadNetworkName, owningNADs.UnsortedList())
+		if c.recorder != nil && nad != nil {
+			c.recorder.Eventf(
+				&corev1.ObjectReference{Kind: nadKind, Namespace: nad.Namespace, Name: nad.Name, UID: nad.UID},
+				corev1.EventTypeWarning,
+				"InvalidConfig",
+				"CNI config does not match that of network %s (established by %v); "+
+					"ensure the NAD config is compatible or use a different network name "+
+					"(e.g. via physicalNetworkName). To re-sync after fixing the config, "+
+					"edit this NAD.", nadNetworkName, owningNADs.UnsortedList(),
+			)
+		}
 	}
 
 	// remove the NAD reference from the old network and delete the network if
