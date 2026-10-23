@@ -27,6 +27,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/kubernetes/test/e2e/framework"
+	e2ekubectl "k8s.io/kubernetes/test/e2e/framework/kubectl"
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
 	e2eservice "k8s.io/kubernetes/test/e2e/framework/service"
@@ -70,6 +71,93 @@ var _ = Describe("Network Segmentation: services", feature.NetworkSegmentation, 
 			})
 			f.Namespace = namespace
 			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("replays NodePort programming when a namespace joins an active primary network", func() {
+			ctx := context.Background()
+			lateNamespace := f.Namespace.Name + "-late"
+			_, err := cs.CoreV1().Namespaces().Create(ctx, &v1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: lateNamespace,
+					Labels: map[string]string{
+						RequiredUDNNamespaceLabel: "",
+					},
+				},
+			}, metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(func() {
+				Expect(cs.CoreV1().Namespaces().Delete(ctx, lateNamespace, metav1.DeleteOptions{})).To(Succeed())
+			})
+
+			jig := e2eservice.NewTestJig(cs, lateNamespace, "late-udn-service")
+			service, err := jig.CreateUDPService(ctx, func(s *v1.Service) {
+				policy := v1.IPFamilyPolicyPreferDualStack
+				s.Spec.IPFamilyPolicy = &policy
+				s.Spec.Ports = []v1.ServicePort{{
+					Name:       "udp",
+					Protocol:   v1.ProtocolUDP,
+					Port:       servicePort,
+					TargetPort: intstr.FromInt(serviceTargetPort),
+				}}
+				s.Spec.Type = v1.ServiceTypeNodePort
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			cudnName := randomNetworkMetaName()
+			cleanupManifest, err := createManifest("", newPrimaryClusterUDNManifest(cs, cudnName, f.Namespace.Name))
+			DeferCleanup(cleanupManifest)
+			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(func() {
+				Expect(cs.CoreV1().Services(lateNamespace).Delete(ctx, service.Name, metav1.DeleteOptions{})).To(Succeed())
+				for _, namespace := range []string{f.Namespace.Name, lateNamespace} {
+					Expect(cs.CoreV1().Pods(namespace).DeleteCollection(ctx, metav1.DeleteOptions{}, metav1.ListOptions{})).To(Succeed())
+				}
+				_, err := e2ekubectl.RunKubectl("", "delete", "clusteruserdefinednetwork", cudnName, "--wait", "--timeout=120s")
+				Expect(err).NotTo(HaveOccurred())
+			})
+
+			Eventually(clusterUserDefinedNetworkReadyFunc(f.DynamicClient, cudnName), 30*time.Second, time.Second).Should(Succeed())
+			nodes, err := e2enode.GetBoundedReadySchedulableNodes(ctx, cs, 1)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(nodes.Items).To(HaveLen(1))
+			node := &nodes.Items[0]
+
+			By("starting the primary network on the selected node")
+			networkPod := e2epod.NewAgnhostPod(f.Namespace.Name, "network-start", nil, nil, nil)
+			networkPod.Spec.NodeName = node.Name
+			e2epod.NewPodClient(f).CreateSync(ctx, networkPod)
+
+			By("adding the namespace with its existing Service to the running CUDN")
+			patch := fmt.Sprintf(`[{"op":"add","path":"/spec/namespaceSelector/matchExpressions/0/values/-","value":%q}]`, lateNamespace)
+			_, err = e2ekubectl.RunKubectl("", "patch", "clusteruserdefinednetwork", cudnName, "--type=json", "-p="+patch)
+			Expect(err).NotTo(HaveOccurred())
+			Eventually(func() error {
+				_, err := nadClient.NetworkAttachmentDefinitions(lateNamespace).Get(ctx, cudnName, metav1.GetOptions{})
+				return err
+			}, 30*time.Second, time.Second).Should(Succeed(), "the primary NAD should be created in the late namespace")
+
+			By("creating a backend and client after the primary NAD arrives")
+			serverPod := e2epod.NewAgnhostPod(
+				lateNamespace, "service-backend", nil, nil,
+				[]v1.ContainerPort{{ContainerPort: serviceTargetPort, Protocol: v1.ProtocolUDP}},
+				"-c", fmt.Sprintf(`
+set -xe
+iface=ovn-udn1
+ips=$(ip -o addr show dev $iface | grep global | awk '{print $4}' | cut -d/ -f1 | paste -sd, -)
+./agnhost netexec --udp-port=%d --udp-listen-addresses=$ips
+`, serviceTargetPort))
+			serverPod.Spec.Containers[0].Command = []string{"/bin/bash"}
+			serverPod.Labels = jig.Labels
+			serverPod.Spec.NodeName = node.Name
+			serverPod = e2epod.PodClientNS(f, lateNamespace).CreateSync(ctx, serverPod)
+
+			clientPod := e2epod.NewAgnhostPod(lateNamespace, "service-client", nil, nil, nil)
+			clientPod.Spec.NodeName = node.Name
+			clientPod = e2epod.PodClientNS(f, lateNamespace).CreateSync(ctx, clientPod)
+
+			service, err = cs.CoreV1().Services(lateNamespace).Get(ctx, service.Name, metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			checkConnectionToNodePort(f, clientPod, service, node, "local node", serverPod.Name)
 		})
 
 		DescribeTable(

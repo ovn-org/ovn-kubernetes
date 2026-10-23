@@ -172,6 +172,31 @@ func TestEFControllerSync_UpdatesOnSubnetChangeAndSkipsWhenUnchanged(t *testing.
 	require.NotContains(t, acls[0].Match, "ip4.dst != 10.128.0.0/14")
 	require.Contains(t, acls[0].Match, "ip4.dst != 10.128.0.0/15")
 
+	// Deleting a primary NAD transiently leaves its namespace with the required
+	// UDN label but no active primary network. This must clean up EF state without
+	// returning an error to the infinite-retry EF controller. Once the primary
+	// network is active again, the NAD reconciler requeues and restores the EF.
+	networkManager.Lock()
+	networkManager.PrimaryNetworks[namespace] = nil
+	networkManager.Unlock()
+	require.NoError(t, oc.sync(namespace+"/"+egressFirewallName))
+
+	acls, err = libovsdbops.FindACLsWithPredicate(oc.nbClient, p)
+	require.NoError(t, err)
+	require.Empty(t, acls)
+	_, ok := oc.cache.Load(namespace)
+	require.False(t, ok)
+
+	networkManager.Lock()
+	networkManager.PrimaryNetworks[namespace] = netInfo2
+	networkManager.Unlock()
+	require.NoError(t, oc.sync(namespace+"/"+egressFirewallName))
+
+	acls, err = libovsdbops.FindACLsWithPredicate(oc.nbClient, p)
+	require.NoError(t, err)
+	require.Len(t, acls, 1)
+	require.Contains(t, acls[0].Match, "ip4.dst != 10.128.0.0/15")
+
 	// Now that netInfo, EF, and PG are stable, ensure we skip OVN updates.
 	oc.nbClient = &panicTransactClient{Client: nbClient}
 	require.NotPanics(t, func() {

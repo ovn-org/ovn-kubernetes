@@ -925,6 +925,18 @@ func (npw *nodePortWatcher) AddService(service *corev1.Service) error {
 	klog.V(5).Infof("Adding service %s in namespace %s", service.Name, service.Namespace)
 	netInfo, err := npw.networkManager.GetActiveNetworkForNamespace(service.Namespace)
 	if err != nil {
+		// A namespace that requires a primary UDN can briefly have no active
+		// network while its NAD is being added or removed. Do not put the service
+		// in the retry framework in that state: the namespace's services are
+		// replayed once its network becomes active (ReconcileNetwork when the
+		// network starts, UserDefinedNodeNetworkController.Reconcile when the
+		// namespace joins a running network), and a removed primary network has
+		// no service rules to add.
+		if util.IsInvalidPrimaryNetworkError(err) {
+			klog.V(5).Infof("Skipping service add for %s/%s: primary network unavailable: %v",
+				service.Namespace, service.Name, err)
+			return nil
+		}
 		return fmt.Errorf("error getting active network for service %s in namespace %s: %w", service.Name, service.Namespace, err)
 	}
 
@@ -1543,6 +1555,13 @@ func (npwnft *nodePortWatcherNFTables) AddService(service *corev1.Service) error
 
 	netInfo, err := npwnft.networkManager.GetActiveNetworkForNamespace(service.Namespace)
 	if err != nil {
+		// See nodePortWatcher.AddService. A network activation reconciles this
+		// namespace again; a network removal must not retry service programming.
+		if util.IsInvalidPrimaryNetworkError(err) {
+			klog.V(5).Infof("Skipping nftables service add for %s/%s: primary network unavailable: %v",
+				service.Namespace, service.Name, err)
+			return nil
+		}
 		return fmt.Errorf("error getting active network for service %s in namespace %s: %w", service.Name, service.Namespace, err)
 	}
 	if netInfo == nil {

@@ -408,12 +408,15 @@ func (oc *EFController) sync(key string) (updateErr error) {
 
 		activeNetwork, netErr := oc.networkManager.GetActiveNetworkForNamespace(namespace)
 		switch {
-		case netErr != nil:
+		case netErr != nil && !util.IsInvalidPrimaryNetworkError(netErr):
 			// Failed to resolve active network; surface this in EF status.
 			updateErr = netErr
 		case activeNetwork == nil:
-			// No active network for this namespace in this controller context (e.g. filtered by D-UDN):
-			// cleanup stale EF config but don't report an EF status error.
+			// No active network means no EF state to program. This includes a
+			// primary UDN temporarily unavailable while its NAD is added or
+			// removed, and a namespace filtered by Dynamic UDN allocation. Clean
+			// up stale state without retrying or setting an error status; a primary
+			// NAD becoming active requeues the EF through the NAD reconciler.
 			skipStatusUpdate = true
 		default:
 			aclLoggingLevels, logErr := oc.getNamespaceACLLogging(namespace)

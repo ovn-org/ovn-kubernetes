@@ -609,11 +609,18 @@ func (g *gateway) resyncAllServices() []error {
 }
 
 // resyncNetworkServices enqueues only the services in netInfo's namespaces
-// (GetNADNamespaces) for reprogramming, instead of scanning every service. A selected
-// namespace whose NAD has not landed yet recovers via its own per-service retry.
+// (GetNADNamespaces) for reprogramming, instead of scanning every service. A
+// namespace whose NAD lands after the network started is replayed by
+// resyncNamespaceServices from UserDefinedNodeNetworkController.Reconcile.
 func (g *gateway) resyncNetworkServices(netInfo util.NetInfo) []error {
+	return g.resyncNamespaceServices(netInfo.GetNADNamespaces())
+}
+
+// resyncNamespaceServices enqueues the services in the given namespaces for
+// reprogramming.
+func (g *gateway) resyncNamespaceServices(namespaces []string) []error {
 	var svcs []*corev1.Service
-	for _, namespace := range netInfo.GetNADNamespaces() {
+	for _, namespace := range namespaces {
 		nsSvcs, err := g.watchFactory.GetServicesByNamespace(namespace)
 		if err != nil {
 			return []error{err}

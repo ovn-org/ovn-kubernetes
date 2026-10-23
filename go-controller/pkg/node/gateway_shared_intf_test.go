@@ -12,6 +12,8 @@ import (
 	"net"
 	"reflect"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -273,6 +275,36 @@ func (m *mockNetworkManagerWithActiveUDN) NodeHasNetwork(_, _ string) bool {
 }
 
 func (m *mockNetworkManagerWithActiveUDN) GetActiveNetworkForNamespace(_ string) (util.NetInfo, error) {
+	return m.netInfo, nil
+}
+
+// mockNetworkManagerWithLateNAD models a namespace whose primary NAD lands after
+// its services: invalid primary network until nadLanded is set, then active UDN.
+type mockNetworkManagerWithLateNAD struct {
+	networkmanager.Interface
+	nadLanded atomic.Bool
+	netInfo   util.NetInfo
+}
+
+func (m *mockNetworkManagerWithLateNAD) GetPrimaryNADForNamespace(namespace string) (string, error) {
+	if !m.nadLanded.Load() {
+		return "", util.NewInvalidPrimaryNetworkError(namespace)
+	}
+	return "test-namespace/test-nad", nil
+}
+
+func (m *mockNetworkManagerWithLateNAD) GetNetworkNameForNADKey(_ string) string {
+	return m.netInfo.GetNetworkName()
+}
+
+func (m *mockNetworkManagerWithLateNAD) NodeHasNetwork(_, _ string) bool {
+	return m.nadLanded.Load()
+}
+
+func (m *mockNetworkManagerWithLateNAD) GetActiveNetworkForNamespace(namespace string) (util.NetInfo, error) {
+	if !m.nadLanded.Load() {
+		return nil, util.NewInvalidPrimaryNetworkError(namespace)
+	}
 	return m.netInfo, nil
 }
 
@@ -983,6 +1015,99 @@ var _ = Describe("SyncServices", func() {
 	})
 
 	Context("when namespace has invalid primary network", func() {
+		It("should replay services of a namespace that joins an already running network (DPU-host path)", func() {
+			// The network is already running on this node for another namespace, so
+			// when this namespace's NAD lands the node goes through
+			// UserDefinedNodeNetworkController.Reconcile, not AddNetwork.
+			service := newService(testService, testNamespace, "10.96.0.21",
+				[]corev1.ServicePort{{
+					Name:       "http",
+					Protocol:   corev1.ProtocolTCP,
+					Port:       80,
+					TargetPort: intstr.FromInt(8080),
+					NodePort:   30091,
+				}},
+				corev1.ServiceTypeNodePort, nil, corev1.ServiceStatus{}, false, false)
+
+			nad := ovntest.GenerateNAD("test-udn", "test-nad", testNamespace, types.Layer3Topology, "10.1.0.0/16", types.NetworkRolePrimary)
+			netInfo, err := util.ParseNADInfo(nad)
+			Expect(err).NotTo(HaveOccurred())
+			nm := &mockNetworkManagerWithLateNAD{netInfo: netInfo}
+
+			stopChan := make(chan struct{})
+			defer close(stopChan)
+			g := &gateway{
+				watchFactory:            watcher,
+				stopChan:                stopChan,
+				wg:                      &sync.WaitGroup{},
+				nodePortWatcherNFTables: newNodePortWatcherNFTables(nm),
+			}
+			g.servicesRetryFramework = g.newRetryFrameworkNode(factory.ServiceForGatewayType)
+			_, err = g.servicesRetryFramework.WatchResource()
+			Expect(err).NotTo(HaveOccurred())
+
+			ruleExists := func() bool {
+				elements, err := nft.ListElements(context.Background(), "map", "nodeports-v4")
+				Expect(err).NotTo(HaveOccurred())
+				for _, elem := range elements {
+					if elem.Key[0] == "tcp" && elem.Key[1] == "30091" && elem.Value[0] == "10.96.0.21" {
+						return true
+					}
+				}
+				return false
+			}
+
+			// 1. The service is created before the namespace's primary NAD exists.
+			_, err = fakeClient.KubeClient.CoreV1().Services(testNamespace).Create(context.Background(), service, metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			Eventually(func() error {
+				_, err := watcher.GetService(testNamespace, testService)
+				return err
+			}).Should(Succeed())
+			Consistently(ruleExists, 200*time.Millisecond).Should(BeFalse(),
+				"no rule can exist before the primary network is active")
+
+			// 2. The NAD lands on the running network: the NAD set grows and the
+			//    node controller reconciles the existing network.
+			nm.nadLanded.Store(true)
+			running := util.NewMutableNetInfo(netInfo)
+			running.SetNADs()
+			joined := util.NewMutableNetInfo(netInfo)
+			joined.SetNADs(util.GetNADName(testNamespace, "test-nad"))
+			nc := &UserDefinedNodeNetworkController{
+				BaseNodeNetworkController: BaseNodeNetworkController{
+					ReconcilableNetInfo: util.NewReconcilableNetInfo(running),
+				},
+				gateway: &UserDefinedNetworkGateway{NetInfo: netInfo, gateway: g},
+			}
+			Expect(nc.Reconcile(joined)).To(Succeed())
+
+			// 3. The service must end up programmed without any further service event.
+			Eventually(ruleExists, 5*time.Second).Should(BeTrue(),
+				"nodeport rule must be installed once the namespace's primary network is active")
+		})
+
+		It("should treat service add as a no-op", func() {
+			service := newService(testService, testNamespace, "10.96.0.19",
+				[]corev1.ServicePort{{
+					Name:       "http",
+					Protocol:   corev1.ProtocolTCP,
+					Port:       80,
+					TargetPort: intstr.FromInt(8080),
+					NodePort:   30090,
+				}},
+				corev1.ServiceTypeNodePort, nil, corev1.ServiceStatus{}, false, false)
+
+			invalidNetworkManager := &mockNetworkManagerWithInvalidPrimaryNetworkSkip{}
+			npw.networkManager = invalidNetworkManager
+			npwnft := newNodePortWatcherNFTables(invalidNetworkManager)
+
+			Expect(npw.AddService(service)).To(Succeed())
+			Expect(npwnft.AddService(service)).To(Succeed())
+			verifyNFTablesRule(nft, "10.96.0.19", 80, 30090, false,
+				"nftables rule should not be created when primary network is invalid")
+		})
+
 		It("should skip service sync without failing startup", func() {
 			service := newService(testService, testNamespace, "10.96.0.20",
 				[]corev1.ServicePort{{
