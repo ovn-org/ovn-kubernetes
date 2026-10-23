@@ -149,7 +149,7 @@ func (h *egressNodeAvailabilityHandlerViaHealthCheck) checkMode(restore bool) (s
 
 // setMode reconfigures ovnkube, if needed, to use the health check type, either
 // GRPC or Legacy, as indicated by the h.Legacy setting. Additionaly it can
-// configure an iptables rule to drop the health check traffic on the given
+// configure an nftables rule to drop the health check traffic on the given
 // node. If restore is true, it will restore the configuration to the one first
 // observed.
 func (h *egressNodeAvailabilityHandlerViaHealthCheck) setMode(nodeName string, reject, restore bool) {

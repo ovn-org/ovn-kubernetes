@@ -1203,47 +1203,31 @@ func setUnsetTemplateContainerEnv(c kubernetes.Interface, namespace, resource, c
 	framework.ExpectNoError(err)
 }
 
-// allowOrDropNodeInputTrafficOnPort ensures or deletes a drop iptables
-// input rule for the specified node, protocol and port
+// allowOrDropNodeInputTrafficOnPort ensures or deletes a drop nftables input rule for the
+// specified node, protocol and port
 func allowOrDropNodeInputTrafficOnPort(op, nodeName, protocol, port string) {
-	ipTablesArgs := []string{"INPUT", "-p", protocol, "--dport", port, "-j", "DROP"}
+	// Create a chain name specific to this protocol/port. Ensure that the chain exists
+	// (so we can "nft delete" it without error) then either fill it in or delete it.
+	chain := fmt.Sprintf("drop-%s-%s", protocol, port)
+	execNodeNFT(nodeName, "add table inet ovn-kube-e2e")
+	execNodeNFT(nodeName, fmt.Sprintf("add chain inet ovn-kube-e2e %s { type filter hook input priority filter ; }", chain))
+
 	switch op {
 	case "Allow":
-		op = "delete"
+		execNodeNFT(nodeName, fmt.Sprintf("delete chain inet ovn-kube-e2e %s", chain))
 	case "Drop":
-		op = "insert"
+		execNodeNFT(nodeName, fmt.Sprintf("flush chain inet ovn-kube-e2e %s", chain))
+		execNodeNFT(nodeName, fmt.Sprintf("add rule inet ovn-kube-e2e %s %s dport %s drop", chain, protocol, port))
 	default:
 		framework.Failf("unsupported op %s", op)
 	}
-	updateIPTablesRulesForNode(op, nodeName, ipTablesArgs, false)
-	updateIPTablesRulesForNode(op, nodeName, ipTablesArgs, true)
 }
 
-func updateIPTablesRulesForNode(op, nodeName string, ipTablesArgs []string, ipv6 bool) {
-	iptables := "iptables"
-	if ipv6 {
-		iptables = "ip6tables"
-	}
-	_, err := infraprovider.Get().ExecK8NodeCommand(nodeName, append([]string{iptables, "-v", "--check"}, ipTablesArgs...))
-	// errors known to be equivalent to not found
-	notFound1 := "No chain/target/match by that name"
-	notFound2 := "does a matching rule exist in that chain?"
-	notFound := err != nil && (strings.Contains(err.Error(), notFound1) || strings.Contains(err.Error(), notFound2))
-	if err != nil && !notFound {
-		framework.Failf("failed to check existence of %s rule on node %s: %v", iptables, nodeName, err)
-	}
-	if op == "delete" && notFound {
-		// rule is not there
-		return
-	} else if op == "insert" && err == nil {
-		// rule is already there
-		return
-	}
-	framework.Logf("%s %s rule: %q on node %s", op, iptables, strings.Join(ipTablesArgs, ","), nodeName)
-	args := []string{iptables, "--" + op}
-	_, err = infraprovider.Get().ExecK8NodeCommand(nodeName, append(args, ipTablesArgs...))
+func execNodeNFT(nodeName, nftCmd string) {
+	framework.Logf("node %s, nft %v", nodeName, nftCmd)
+	_, err := infraprovider.Get().ExecK8NodeCommand(nodeName, []string{"nft", nftCmd})
 	if err != nil {
-		framework.Failf("failed to update %s rule on node %s: %v", iptables, nodeName, err)
+		framework.Failf("failed to update nft rule on node %s: %v", nodeName, err)
 	}
 }
 
