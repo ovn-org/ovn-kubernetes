@@ -18,6 +18,7 @@ type ClusterNetworkConnectSpecApplyConfiguration struct {
 	// networkSelectors selects the networks to be connected together.
 	// This can match User Defined Networks (UDNs) and/or Cluster User Defined Networks (CUDNs).
 	// Only ClusterUserDefinedNetworkSelector and PrimaryUserDefinedNetworkSelector can be selected.
+	//
 	NetworkSelectors *types.NetworkSelectors `json:"networkSelectors,omitempty"`
 	// connectSubnets specifies the subnets used for interconnecting the selected networks.
 	// This creates a shared subnet space that connected networks can use to communicate.
@@ -35,6 +36,7 @@ type ClusterNetworkConnectSpecApplyConfiguration struct {
 	// that user takes care in setting non-overlapping subnets.
 	ConnectSubnets []ConnectSubnetApplyConfiguration `json:"connectSubnets,omitempty"`
 	// connectivity specifies which connectivity types should be enabled for the connected networks.
+	//
 	Connectivity []clusternetworkconnectv1.ConnectivityType `json:"connectivity,omitempty"`
 }
 

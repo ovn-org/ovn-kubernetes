@@ -45,6 +45,7 @@ type ConnectSubnetApplyConfiguration struct {
 	// if you plan to deploy 5000 nodes, set the networkPrefix to /17 (20000+ IPs)
 	// This field restricts the maximum number of nodes that can be deployed in the cluster
 	// and hence its good to plan this value carefully along with the CIDR.
+	//
 	NetworkPrefix *int32 `json:"networkPrefix,omitempty"`
 }
 
