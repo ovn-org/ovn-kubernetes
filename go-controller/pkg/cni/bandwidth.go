@@ -4,6 +4,8 @@
 package cni
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -96,7 +98,84 @@ func clearPodBandwidthForPorts(portList []string, sandboxID string) error {
 	return nil
 }
 
-func setPodBandwidth(sandboxID, ifname string, ingressBPS, egressBPS int64) error {
+func setPodBandwidth(ovsClient libovsdbclient.Client, sandboxID, ifname string, ingressBPS, egressBPS int64) error {
+	if ovsClient != nil {
+		return setPodBandwidthWithOVSClient(ovsClient, sandboxID, ifname, ingressBPS, egressBPS)
+	}
+	return setPodBandwidthCLI(sandboxID, ifname, ingressBPS, egressBPS)
+}
+
+func setPodBandwidthWithOVSClient(ovsClient libovsdbclient.Client, sandboxID, ifname string, ingressBPS, egressBPS int64) error {
+	var ops []ovsdb.Operation
+
+	if ingressBPS > 0 {
+		port, err := ovsops.GetOVSPort(ovsClient, ifname)
+		if err != nil {
+			return fmt.Errorf("failed to get port %s: %w", ifname, err)
+		}
+
+		namedUUID := "named_qos"
+		qos := &vswitchd.QoS{
+			UUID: namedUUID,
+			Type: "linux-htb",
+			OtherConfig: map[string]string{
+				"max-rate": strconv.FormatInt(ingressBPS, 10),
+			},
+			ExternalIDs: map[string]string{
+				"sandbox": sandboxID,
+			},
+		}
+		qosOps, err := ovsClient.Create(qos)
+		if err != nil {
+			return fmt.Errorf("failed to create QoS for port %s: %w", ifname, err)
+		}
+		ops = append(ops, qosOps...)
+
+		portUpdate := &vswitchd.Port{
+			UUID: port.UUID,
+			QOS:  &namedUUID,
+		}
+		portOps, err := ovsClient.Where(portUpdate).Update(portUpdate, &portUpdate.QOS)
+		if err != nil {
+			return fmt.Errorf("failed to update port %s with QoS: %w", ifname, err)
+		}
+		ops = append(ops, portOps...)
+	}
+
+	if egressBPS > 0 {
+		iface, err := ovsops.GetOVSInterface(ovsClient, ifname)
+		if err != nil {
+			return fmt.Errorf("failed to get interface %s: %w", ifname, err)
+		}
+
+		egressKBPS := int(egressBPS / 1000)
+		burstKBPS := egressKBPS / 10
+
+		ifaceUpdate := &vswitchd.Interface{
+			UUID:                 iface.UUID,
+			IngressPolicingRate:  egressKBPS,
+			IngressPolicingBurst: burstKBPS,
+		}
+		ifaceOps, err := ovsClient.Where(ifaceUpdate).Update(ifaceUpdate,
+			&ifaceUpdate.IngressPolicingRate,
+			&ifaceUpdate.IngressPolicingBurst,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to update interface %s policing rate: %w", ifname, err)
+		}
+		ops = append(ops, ifaceOps...)
+	}
+
+	if len(ops) > 0 {
+		if _, err := ovsops.TransactAndCheck(ovsClient, ops); err != nil {
+			return fmt.Errorf("failed to set pod bandwidth for %s: %w", ifname, err)
+		}
+	}
+
+	return nil
+}
+
+func setPodBandwidthCLI(sandboxID, ifname string, ingressBPS, egressBPS int64) error {
 	// note pod ingress == OVS egress and vice versa
 
 	if ingressBPS > 0 {
@@ -127,7 +206,11 @@ func setPodBandwidth(sandboxID, ifname string, ingressBPS, egressBPS int64) erro
 	return nil
 }
 
-func getOvsPortBandwidth(ifname string, dir direction) (int64, error) {
+func getOvsPortBandwidth(ovsClient libovsdbclient.Client, ifname string, dir direction) (int64, error) {
+	if ovsClient != nil {
+		return getOvsPortBandwidthWithOVSClient(ovsClient, ifname, dir)
+	}
+
 	// note pod ingress == OVS egress and vice versa
 	// so we ingress_policing_rate is egress and max-rate is ingress from the pod's
 	// perspective
@@ -138,6 +221,54 @@ func getOvsPortBandwidth(ifname string, dir direction) (int64, error) {
 	}
 	// egreessBPS
 	return getInterfaceEgressBandwith(ifname)
+}
+
+func getOvsPortBandwidthWithOVSClient(ovsClient libovsdbclient.Client, ifname string, dir direction) (int64, error) {
+	if dir == Ingress {
+		port, err := ovsops.GetOVSPort(ovsClient, ifname)
+		if err != nil {
+			if errors.Is(err, libovsdbclient.ErrNotFound) {
+				return 0, BandwidthNotFound
+			}
+			return 0, fmt.Errorf("failed to get port %s: %w", ifname, err)
+		}
+		if port.QOS == nil || *port.QOS == "" {
+			return 0, BandwidthNotFound
+		}
+
+		qos := &vswitchd.QoS{UUID: *port.QOS}
+		if err := ovsClient.Get(context.Background(), qos); err != nil {
+			if errors.Is(err, libovsdbclient.ErrNotFound) {
+				return 0, BandwidthNotFound
+			}
+			return 0, fmt.Errorf("failed to get qos for port %s: %w", ifname, err)
+		}
+
+		maxRate, ok := qos.OtherConfig["max-rate"]
+		if !ok || len(maxRate) == 0 {
+			return 0, BandwidthNotFound
+		}
+		maxRate = strings.ReplaceAll(maxRate, "\"", "")
+		ingressBPS, err := strconv.ParseInt(maxRate, 10, 64)
+		if err != nil {
+			return 0, fmt.Errorf("failed to parse qos max rate for %s: %w", ifname, err)
+		}
+		return ingressBPS, nil
+	}
+
+	iface, err := ovsops.GetOVSInterface(ovsClient, ifname)
+	if err != nil {
+		if errors.Is(err, libovsdbclient.ErrNotFound) {
+			return 0, BandwidthNotFound
+		}
+		return 0, fmt.Errorf("failed to get interface %s: %w", ifname, err)
+	}
+
+	if iface.IngressPolicingRate == 0 {
+		return 0, BandwidthNotFound
+	}
+
+	return int64(iface.IngressPolicingRate) * 1000, nil
 }
 
 func getInterfaceIngressBandwith(ifname string) (int64, error) {

@@ -831,7 +831,7 @@ func ConfigureOVS(ctx context.Context, ovsClient client.Client, namespace, podNa
 			return fmt.Errorf("failed to set host veth txqlen: %v", err)
 		}
 
-		if err := setPodBandwidth(sandboxID, hostIfaceName, ifInfo.Ingress, ifInfo.Egress); err != nil {
+		if err := setPodBandwidth(ovsClient, sandboxID, hostIfaceName, ifInfo.Ingress, ifInfo.Egress); err != nil {
 			return err
 		}
 	}

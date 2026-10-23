@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	kexec "k8s.io/utils/exec"
+	"k8s.io/utils/ptr"
 
 	"github.com/ovn-kubernetes/libovsdb/ovsdb"
 
@@ -294,7 +295,7 @@ func TestSetPodBandwidth(t *testing.T) {
 			// note runner is defined in pkg/cni/ovs.go file
 			runner = tc.runnerInstance
 
-			e := setPodBandwidth("sandboxID", "ifname", 1, tc.egressBPS)
+			e := setPodBandwidth(nil, "sandboxID", "ifname", 1, tc.egressBPS)
 
 			if tc.expectedErr {
 				require.Error(t, e)
@@ -304,6 +305,109 @@ func TestSetPodBandwidth(t *testing.T) {
 
 			mockCmd.AssertExpectations(t)
 			mockKexecIface.AssertExpectations(t)
+		})
+	}
+}
+
+func TestSetPodBandwidthWithOVSClient(t *testing.T) {
+	const (
+		ovsUUID          = "00000000-0000-0000-0000-000000000001"
+		bridgeUUID       = "00000000-0000-0000-0000-000000000002"
+		sandboxPortUUID  = "00000000-0000-0000-0000-000000000003"
+		sandboxIfaceUUID = "00000000-0000-0000-0000-000000000004"
+	)
+
+	tests := []struct {
+		desc                  string
+		portExists            bool
+		ingressBPS            int64
+		egressBPS             int64
+		expectedErr           bool
+		expectedMaxRate       string
+		expectedPolicingRate  int
+		expectedPolicingBurst int
+	}{
+		{
+			desc:                  "Positive test code path when both ingressBPS and egressBPS are greater than zero",
+			portExists:            true,
+			ingressBPS:            10000000,
+			egressBPS:             5000000,
+			expectedMaxRate:       "10000000",
+			expectedPolicingRate:  5000,
+			expectedPolicingBurst: 500,
+		},
+		{
+			desc:            "Positive test code path when only ingressBPS is greater than zero",
+			portExists:      true,
+			ingressBPS:      10000000,
+			expectedMaxRate: "10000000",
+		},
+		{
+			desc:                  "Positive test code path when only egressBPS is greater than zero",
+			portExists:            true,
+			egressBPS:             5000000,
+			expectedPolicingRate:  5000,
+			expectedPolicingBurst: 500,
+		},
+		{
+			desc:       "Positive test code path when neither ingressBPS nor egressBPS is set",
+			portExists: true,
+		},
+		{
+			desc:        "Negative test code path when the port does not exist",
+			ingressBPS:  10000000,
+			expectedErr: true,
+		},
+		{
+			desc:        "Negative test code path when the interface does not exist",
+			egressBPS:   5000000,
+			expectedErr: true,
+		},
+	}
+
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			bridge := &vswitchd.Bridge{UUID: bridgeUUID, Name: "br-int"}
+			data := []libovsdbtest.TestData{
+				&vswitchd.OpenvSwitch{UUID: ovsUUID, Bridges: []string{bridgeUUID}},
+				bridge,
+			}
+			if tc.portExists {
+				bridge.Ports = []string{sandboxPortUUID}
+				data = append(data,
+					&vswitchd.Port{UUID: sandboxPortUUID, Name: "sandbox-port", Interfaces: []string{sandboxIfaceUUID}},
+					&vswitchd.Interface{UUID: sandboxIfaceUUID, Name: "sandbox-port", ExternalIDs: map[string]string{"sandbox": "sandboxID"}},
+				)
+			}
+
+			ovsClient, cleanup, err := libovsdbtest.NewOVSTestHarness(libovsdbtest.TestSetup{OVSData: data})
+			require.NoError(t, err)
+			t.Cleanup(cleanup.Cleanup)
+
+			err = setPodBandwidth(ovsClient, "sandboxID", "sandbox-port", tc.ingressBPS, tc.egressBPS)
+			if tc.expectedErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+
+			port := &vswitchd.Port{UUID: sandboxPortUUID}
+			require.NoError(t, ovsClient.Get(context.Background(), port))
+			if tc.expectedMaxRate == "" {
+				require.Nil(t, port.QOS)
+			} else {
+				require.NotNil(t, port.QOS)
+				qos := &vswitchd.QoS{UUID: *port.QOS}
+				require.NoError(t, ovsClient.Get(context.Background(), qos))
+				assert.Equal(t, "linux-htb", qos.Type)
+				assert.Equal(t, tc.expectedMaxRate, qos.OtherConfig["max-rate"])
+				assert.Equal(t, "sandboxID", qos.ExternalIDs["sandbox"])
+			}
+
+			iface := &vswitchd.Interface{UUID: sandboxIfaceUUID}
+			require.NoError(t, ovsClient.Get(context.Background(), iface))
+			assert.Equal(t, tc.expectedPolicingRate, iface.IngressPolicingRate)
+			assert.Equal(t, tc.expectedPolicingBurst, iface.IngressPolicingBurst)
 		})
 	}
 }
@@ -425,7 +529,7 @@ func TestGetIngressPodBandwidth(t *testing.T) {
 			}
 			// note runner is defined in pkg/cni/ovs.go file
 			runner = tc.runnerInstance
-			bandwidth, e := getOvsPortBandwidth("ifname", Ingress)
+			bandwidth, e := getOvsPortBandwidth(nil, "ifname", Ingress)
 			switch {
 			case tc.expectedErr:
 				require.Error(t, e)
@@ -437,6 +541,96 @@ func TestGetIngressPodBandwidth(t *testing.T) {
 			}
 			mockCmd.AssertExpectations(t)
 			mockKexecIface.AssertExpectations(t)
+		})
+	}
+}
+
+func TestGetIngressPodBandwidthWithOVSClient(t *testing.T) {
+	const (
+		ovsUUID    = "00000000-0000-0000-0000-000000000001"
+		bridgeUUID = "00000000-0000-0000-0000-000000000002"
+		portUUID   = "00000000-0000-0000-0000-000000000003"
+		ifaceUUID  = "00000000-0000-0000-0000-000000000004"
+		qosUUID    = "00000000-0000-0000-0000-000000000005"
+	)
+
+	tests := []struct {
+		desc             string
+		portExists       bool
+		qos              *vswitchd.QoS
+		expectedErr      bool
+		expectedNotFound bool
+		bps              int64
+	}{
+		{
+			desc:       "Positive test code path when ingressBPS is correctly set",
+			portExists: true,
+			qos: &vswitchd.QoS{
+				UUID:        qosUUID,
+				Type:        "linux-htb",
+				OtherConfig: map[string]string{"max-rate": "10000000"},
+			},
+			bps: 10000000,
+		},
+		{
+			desc:             "Not found code path when the port has no QoS",
+			portExists:       true,
+			expectedNotFound: true,
+		},
+		{
+			desc:             "Not found code path when the QoS has no max-rate",
+			portExists:       true,
+			qos:              &vswitchd.QoS{UUID: qosUUID, Type: "linux-htb"},
+			expectedNotFound: true,
+		},
+		{
+			desc:             "Not found code path when the port does not exist",
+			expectedNotFound: true,
+		},
+		{
+			desc:       "Negative test code path when max-rate value cannot be transfer to integer",
+			portExists: true,
+			qos: &vswitchd.QoS{
+				UUID:        qosUUID,
+				Type:        "linux-htb",
+				OtherConfig: map[string]string{"max-rate": "test"},
+			},
+			expectedErr: true,
+		},
+	}
+
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			bridge := &vswitchd.Bridge{UUID: bridgeUUID, Name: "br-int"}
+			data := []libovsdbtest.TestData{
+				&vswitchd.OpenvSwitch{UUID: ovsUUID, Bridges: []string{bridgeUUID}},
+				bridge,
+			}
+			if tc.portExists {
+				port := &vswitchd.Port{UUID: portUUID, Name: "ifname", Interfaces: []string{ifaceUUID}}
+				if tc.qos != nil {
+					port.QOS = ptr.To(tc.qos.UUID)
+					data = append(data, tc.qos)
+				}
+				bridge.Ports = []string{portUUID}
+				data = append(data, port, &vswitchd.Interface{UUID: ifaceUUID, Name: "ifname"})
+			}
+
+			ovsClient, cleanup, err := libovsdbtest.NewOVSTestHarness(libovsdbtest.TestSetup{OVSData: data})
+			require.NoError(t, err)
+			t.Cleanup(cleanup.Cleanup)
+
+			bandwidth, e := getOvsPortBandwidth(ovsClient, "ifname", Ingress)
+			switch {
+			case tc.expectedErr:
+				require.Error(t, e)
+				require.NotErrorIs(t, e, BandwidthNotFound)
+			case tc.expectedNotFound:
+				require.ErrorIs(t, e, BandwidthNotFound)
+			default:
+				require.NoError(t, e)
+				assert.Equal(t, tc.bps, bandwidth)
+			}
 		})
 	}
 }
@@ -539,7 +733,7 @@ func TestGetEgressPodBandwidth(t *testing.T) {
 			}
 			// note runner is defined in pkg/cni/ovs.go file
 			runner = tc.runnerInstance
-			bandwidth, e := getOvsPortBandwidth("ifname", Egress)
+			bandwidth, e := getOvsPortBandwidth(nil, "ifname", Egress)
 			switch {
 			case tc.expectedErr:
 				require.Error(t, e)
@@ -551,6 +745,68 @@ func TestGetEgressPodBandwidth(t *testing.T) {
 			}
 			mockCmd.AssertExpectations(t)
 			mockKexecIface.AssertExpectations(t)
+		})
+	}
+}
+
+func TestGetEgressPodBandwidthWithOVSClient(t *testing.T) {
+	const (
+		ovsUUID    = "00000000-0000-0000-0000-000000000001"
+		bridgeUUID = "00000000-0000-0000-0000-000000000002"
+		portUUID   = "00000000-0000-0000-0000-000000000003"
+		ifaceUUID  = "00000000-0000-0000-0000-000000000004"
+	)
+
+	tests := []struct {
+		desc                string
+		ifaceExists         bool
+		ingressPolicingRate int
+		expectedNotFound    bool
+		bps                 int64
+	}{
+		{
+			desc:                "Positive test code path when egressBPS is correctly set",
+			ifaceExists:         true,
+			ingressPolicingRate: 10000,
+			bps:                 10000000,
+		},
+		{
+			desc:             "Not found code path when ingress_policing_rate is not set",
+			ifaceExists:      true,
+			expectedNotFound: true,
+		},
+		{
+			desc:             "Not found code path when the interface does not exist",
+			expectedNotFound: true,
+		},
+	}
+
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			bridge := &vswitchd.Bridge{UUID: bridgeUUID, Name: "br-int"}
+			data := []libovsdbtest.TestData{
+				&vswitchd.OpenvSwitch{UUID: ovsUUID, Bridges: []string{bridgeUUID}},
+				bridge,
+			}
+			if tc.ifaceExists {
+				bridge.Ports = []string{portUUID}
+				data = append(data,
+					&vswitchd.Port{UUID: portUUID, Name: "ifname", Interfaces: []string{ifaceUUID}},
+					&vswitchd.Interface{UUID: ifaceUUID, Name: "ifname", IngressPolicingRate: tc.ingressPolicingRate},
+				)
+			}
+
+			ovsClient, cleanup, err := libovsdbtest.NewOVSTestHarness(libovsdbtest.TestSetup{OVSData: data})
+			require.NoError(t, err)
+			t.Cleanup(cleanup.Cleanup)
+
+			bandwidth, e := getOvsPortBandwidth(ovsClient, "ifname", Egress)
+			if tc.expectedNotFound {
+				require.ErrorIs(t, e, BandwidthNotFound)
+				return
+			}
+			require.NoError(t, e)
+			assert.Equal(t, tc.bps, bandwidth)
 		})
 	}
 }

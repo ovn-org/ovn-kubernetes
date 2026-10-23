@@ -238,6 +238,7 @@ func NewOVSClientWithEndpoint(endpoint string, stopCh <-chan struct{}) (client.C
 			client.WithTable(&vswitchd.Bridge{}),
 			client.WithTable(&vswitchd.Port{}),
 			client.WithTable(&vswitchd.Interface{}),
+			client.WithTable(&vswitchd.QoS{}),
 		),
 	)
 	if err != nil {
