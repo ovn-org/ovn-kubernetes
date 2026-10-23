@@ -5183,7 +5183,7 @@ When one of the supported objects (for example, network policy) is created, ovn-
 <p>To decode the samples into human-readable information, <code>go-controller/observability-lib</code> is used. It finds <code>Sample</code>
 by the attached <code>Sample.Metadata</code> and then gets corresponding db object (e.g. ACL) based on <code>Sampling_app.ID</code> and <code>Sample.UUID</code>.
 The message is then constructed using db object (e.g. ACL) <code>external_ids</code>.</p>
-<p></p>
+<p><a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../../images/ovnkube-observ.png" data-desc-position="bottom"><img alt="ovnkube-observ" src="../../images/ovnkube-observ.png"></a></p>
 <p>The diagram shows how all involved components (kernel, OVS, OVN, ovn-kubernetes) are connected.</p>
 <h4 id="enabling-collectors">Enabling collectors<a class="headerlink" href="#enabling-collectors" title="Permanent link">¶</a></h4>
 <p>Currently, we have only 1 default collector with hard-coded ID, which is set via the <code>Sample_collector.SetID</code> field.

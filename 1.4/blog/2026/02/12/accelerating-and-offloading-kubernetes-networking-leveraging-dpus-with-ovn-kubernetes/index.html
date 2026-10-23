@@ -4902,7 +4902,7 @@ throughput and lower latency.</p>
 In an unaccelerated+non-offloaded environment, OVN-Kubernetes behaves the same way, with its stack composed of OVN-Kubernetes,
 Open Virtual Network (OVN), and Open vSwitch (OVS). OVN-Kubernetes listens for KAPI events, configures a logical topology in OVN,
 and then OVN translates that into OpenFlow which is programmed into the OVS datapath. Here is an overview of a typical setup:</p>
-<p></p>
+<p><a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../../../../../images/ovnk-unaccelerated.svg" data-desc-position="bottom"><img alt="Regular OVN-Kubernetes Worker Node" src="../../../../../images/ovnk-unaccelerated.svg"></a></p>
 <hr>
 <p>In this environment there are several potential issues to highlight:</p>
 <ul>
@@ -4924,7 +4924,7 @@ This solves the aforementioned issues by:</p>
 </ul>
 <hr>
 <p>Here is a diagram of a DPU accelerated worker node with OVN-Kubernetes:</p>
-<p></p>
+<p><a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../../../../../images/ovnk-accelerated.svg" data-desc-position="bottom"><img alt="Accelerated OVN-Kubernetes Worker Node" src="../../../../../images/ovnk-accelerated.svg"></a></p>
 <hr>
 <p>In this kind of deployment the DPU is not part of the <em>Host Kubernetes Cluster</em>. This is typically referred to as an “<em>off-host-cluster</em>”
 type of deployment. OVN-Kubernetes running in the DPU is typically managed as a secondary Kubernetes cluster, but it does not have to be.
