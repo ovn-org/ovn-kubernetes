@@ -138,6 +138,24 @@ type DefaultNodeNetworkController struct {
 	masqReconciler *masqueradeReconciler
 
 	nodeAddress net.IP
+
+	// udpServiceZeroStateLocks provides per-Service mutexes to serialize zero-state
+	// transitions for the same Service. The retry path can have overlapping goroutines
+	// for different EndpointSlices of the same Service, so we need per-Service locking
+	// to prevent duplicate flushes or state corruption.
+	udpServiceZeroStateLocks sync.Map // map[string]*sync.Mutex
+
+	// udpServiceZeroState tracks service+family+port combinations that have non-zero eligible
+	// UDP endpoints. Key format: "namespace/name/IPv4/port" or "namespace/name/IPv6/port".
+	// Absent key means zero endpoints. Updated on every EndpointSlice add/update/delete.
+	// Used to detect 0→N transitions for conntrack flushing without race conditions from
+	// reading the informer cache.
+	udpServiceZeroState sync.Map // map[string]struct{}
+
+	// initialSyncEndpointSliceUIDs tracks EndpointSlice UIDs seen during initial sync.
+	// Used to skip replayed initial-sync adds that the watch factory sends after sync
+	// completes. Without this, replays could trigger false 0→N transitions.
+	initialSyncEndpointSliceUIDs sync.Map // map[types.UID]struct{}
 }
 
 func newDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, stopChan chan struct{},
@@ -919,8 +937,10 @@ func (nc *DefaultNodeNetworkController) Init(ctx context.Context) error {
 
 // Start learns the subnets assigned to it by the master controller
 // and calls the SetupNode script which establishes the logical switch
-func (nc *DefaultNodeNetworkController) Start(ctx context.Context) (err error) {
+func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	klog.Infof("Starting the default node network controller")
+
+	var err error
 
 	if nc.mgmtPortController == nil {
 		return fmt.Errorf("default node network controller hasn't been pre-started")
@@ -1176,36 +1196,227 @@ func (nc *DefaultNodeNetworkController) startEgressIPHealthCheckingServer(mgmtPo
 	return nil
 }
 
+// ownNodeDeletedExit terminates ovnkube-node once the Node object it runs on
+// behalf of is deleted. Extracted as a var for test mocking.
+var ownNodeDeletedExit = func(nodeName string) {
+	klog.Errorf("Node %q that this ovnkube-node instance runs on behalf of was deleted; exiting so that "+
+		"the restarted process re-initializes against the current Node object", nodeName)
+	klog.FlushAndExit(klog.ExitFlushTimeout, 1)
+}
+
+// lockServiceZeroState acquires a per-Service mutex to serialize zero-state
+// transitions for the same Service across retry goroutines.
+func (nc *DefaultNodeNetworkController) lockServiceZeroState(serviceKey string) *sync.Mutex {
+	actual, _ := nc.udpServiceZeroStateLocks.LoadOrStore(serviceKey, &sync.Mutex{})
+	mu := actual.(*sync.Mutex)
+	mu.Lock()
+	return mu
+}
+
+// reconcileConntrackUponEndpointSliceEvents detects 0→N endpoint transitions by comparing
+// tracked per-service state against current cache state, avoiding race conditions from reading
+// the informer cache at processing time. The decision is based on stored state (updated on
+// every event) rather than computing from "other slices" which may already contain later
+// updates when this handler runs.
 func (nc *DefaultNodeNetworkController) reconcileConntrackUponEndpointSliceEvents(oldEndpointSlice, newEndpointSlice *discovery.EndpointSlice) error {
 	var errors []error
-	if oldEndpointSlice == nil {
-		// nothing to do upon an add event
+
+	epSlice := newEndpointSlice
+	if epSlice == nil {
+		epSlice = oldEndpointSlice
+	}
+	if epSlice == nil {
 		return nil
 	}
-	namespacedName, err := util.ServiceNamespacedNameFromEndpointSlice(oldEndpointSlice)
+
+	// Skip replayed initial-sync adds to prevent false 0→N transitions on startup.
+	// After syncEndpointSlices completes, the watch factory replays each existing slice
+	// as an add event (oldSlice=nil, newSlice). Without this check, these replays could
+	// trigger incorrect state transitions even with state-based tracking.
+	if oldEndpointSlice == nil && newEndpointSlice != nil {
+		if _, wasInitialSync := nc.initialSyncEndpointSliceUIDs.LoadAndDelete(newEndpointSlice.UID); wasInitialSync {
+			klog.V(5).Infof("Skipping replayed initial-sync add for EndpointSlice %s/%s (UID: %s)",
+				newEndpointSlice.Namespace, newEndpointSlice.Name, newEndpointSlice.UID)
+			return nil
+		}
+	}
+
+	namespacedName, err := util.ServiceNamespacedNameFromEndpointSlice(epSlice)
 	if err != nil {
-		return fmt.Errorf("cannot reconcile conntrack: %v", err)
+		return fmt.Errorf("cannot reconcile conntrack: %w", err)
 	}
 	svc, err := nc.watchFactory.GetService(namespacedName.Namespace, namespacedName.Name)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
-			klog.V(5).Infof("Service %s/%s not found (might have been deleted) when reconciling conntrack for endpointslice %s",
-				namespacedName.Namespace, namespacedName.Name, oldEndpointSlice.Name)
-			// service is not found, likely deleted, flushing service conntrack entries will be handled at service reconciliation. No-op here.
+			// Serialize state cleanup for this Service
+			serviceKey := fmt.Sprintf("%s/%s", namespacedName.Namespace, namespacedName.Name)
+			serviceMu := nc.lockServiceZeroState(serviceKey)
+			defer serviceMu.Unlock()
+			// Delete all per-port state for this service (all address families and ports)
+			prefix := fmt.Sprintf("%s/%s/", namespacedName.Namespace, namespacedName.Name)
+			deletedCount := 0
+			nc.udpServiceZeroState.Range(func(key, _ interface{}) bool {
+				keyStr, ok := key.(string)
+				if ok && strings.HasPrefix(keyStr, prefix) {
+					nc.udpServiceZeroState.Delete(key)
+					deletedCount++
+				}
+				return true
+			})
+			klog.V(5).Infof("Service %s/%s not found (deleted), cleared %d zero-state entries",
+				namespacedName.Namespace, namespacedName.Name, deletedCount)
 			return nil
 		}
-		return fmt.Errorf("error while retrieving service for endpointslice %s/%s when reconciling conntrack: %v",
-			oldEndpointSlice.Namespace, oldEndpointSlice.Name, err)
+		return fmt.Errorf("error while retrieving service for endpointslice %s/%s when reconciling conntrack: %w",
+			epSlice.Namespace, epSlice.Name, err)
+	}
+
+	var addressType discovery.AddressType
+	if newEndpointSlice != nil {
+		addressType = newEndpointSlice.AddressType
+	} else if oldEndpointSlice != nil {
+		addressType = oldEndpointSlice.AddressType
+	} else {
+		return utilerrors.Join(errors...)
+	}
+
+	// Skip zero-state work for services without UDP ports to avoid unnecessary
+	// list/filter/count operations serialized by the controller-wide mutex.
+	hasUDPPort := false
+	for _, p := range svc.Spec.Ports {
+		if p.Protocol == corev1.ProtocolUDP {
+			hasUDPPort = true
+			break
+		}
+	}
+
+	if hasUDPPort {
+		// Serialize the cache read, endpoint count, flush, and state update for this Service.
+		// The lock must be held before reading the cache to prevent handlers from applying
+		// stale snapshots. Without this, two overlapping handlers can read the cache at
+		// different times, then serialize on the lock but apply outdated state transitions.
+		serviceKey := fmt.Sprintf("%s/%s", namespacedName.Namespace, namespacedName.Name)
+		serviceMu := nc.lockServiceZeroState(serviceKey)
+
+		allSlices, err := nc.watchFactory.GetServiceEndpointSlices(namespacedName.Namespace, namespacedName.Name, nc.GetNetworkName())
+		if err != nil && !apierrors.IsNotFound(err) {
+			serviceMu.Unlock()
+			return fmt.Errorf("failed to get endpoint slices for service %s/%s: %w",
+				namespacedName.Namespace, namespacedName.Name, err)
+		}
+
+		var matchingSlices []*discovery.EndpointSlice
+		for _, slice := range allSlices {
+			if slice.AddressType == addressType {
+				// For delete events (newEndpointSlice == nil), exclude the deleted slice from the count
+				if newEndpointSlice == nil && oldEndpointSlice != nil && slice.UID == oldEndpointSlice.UID {
+					continue
+				}
+				matchingSlices = append(matchingSlices, slice)
+			}
+		}
+
+		// If newEndpointSlice is provided and matches the address type, ensure it's in matchingSlices.
+		// This handles the case where the event arrives before the informer cache is updated.
+		if newEndpointSlice != nil && newEndpointSlice.AddressType == addressType {
+			found := false
+			for _, slice := range matchingSlices {
+				if slice.UID == newEndpointSlice.UID {
+					found = true
+					break
+				}
+			}
+			if !found {
+				matchingSlices = append(matchingSlices, newEndpointSlice)
+			}
+		}
+
+		// Track per-port to detect 0→N transitions for each UDP port independently.
+		// A service with multiple UDP ports (e.g., DNS on 53 and 5353) can have one port
+		// transition from 0→N while another already has endpoints.
+		type portState struct {
+			port          int32
+			stateKey      string
+			wasZero       bool
+			isNowZero     bool
+			eligibleCount int
+			shouldFlush   bool
+		}
+
+		var portStates []portState
+		for _, svcPort := range svc.Spec.Ports {
+			if svcPort.Protocol != corev1.ProtocolUDP {
+				continue
+			}
+
+			stateKey := fmt.Sprintf("%s/%s/%s/%d", namespacedName.Namespace, namespacedName.Name, addressType, svcPort.Port)
+
+			_, exists := nc.udpServiceZeroState.Load(stateKey)
+			wasZero := !exists
+
+			currentEligibleCount := countUDPEligibleEndpointsForPort(matchingSlices, svcPort, svc)
+			isNowZero := currentEligibleCount == 0
+
+			shouldFlush := wasZero && !isNowZero
+
+			if shouldFlush {
+				klog.V(5).Infof("Detected 0→N transition for service %s port %d (wasZero=%v, currentCount=%d), will flush conntrack",
+					stateKey, svcPort.Port, wasZero, currentEligibleCount)
+			}
+
+			portStates = append(portStates, portState{
+				port:          svcPort.Port,
+				stateKey:      stateKey,
+				wasZero:       wasZero,
+				isNowZero:     isNowZero,
+				eligibleCount: currentEligibleCount,
+				shouldFlush:   shouldFlush,
+			})
+		}
+
+		// Flush conntrack for ports that transitioned 0→N
+		var portsToFlush []int32
+		for _, ps := range portStates {
+			if ps.shouldFlush {
+				portsToFlush = append(portsToFlush, ps.port)
+			}
+		}
+
+		var flushErr error
+		if len(portsToFlush) > 0 {
+			flushErr = nc.flushConntrackForServicePorts(svc, addressType, portsToFlush)
+			if flushErr != nil {
+				errors = append(errors, flushErr)
+			}
+		}
+
+		// Update state only after successful flush or for non-flush transitions
+		for _, ps := range portStates {
+			if ps.shouldFlush && flushErr != nil {
+				klog.V(5).Infof("Preserving zero-state for %s due to flush failure", ps.stateKey)
+			} else {
+				if ps.isNowZero {
+					nc.udpServiceZeroState.Delete(ps.stateKey)
+				} else {
+					nc.udpServiceZeroState.Store(ps.stateKey, struct{}{})
+				}
+				klog.V(5).Infof("Updated zero-state for %s: %v (eligible endpoints: %d)",
+					ps.stateKey, ps.isNowZero, ps.eligibleCount)
+			}
+		}
+		serviceMu.Unlock()
+	}
+
+	if oldEndpointSlice == nil {
+		return utilerrors.Join(errors...)
 	}
 	for _, oldPort := range oldEndpointSlice.Ports {
-		if *oldPort.Protocol != corev1.ProtocolUDP { // flush conntrack only for UDP
+		if *oldPort.Protocol != corev1.ProtocolUDP {
 			continue
 		}
 		for _, oldEndpoint := range oldEndpointSlice.Endpoints {
 			for _, oldIP := range oldEndpoint.Addresses {
 				oldIPStr := utilnet.ParseIPSloppy(oldIP).String()
-				// upon an update event, remove conntrack entries for IP addresses that are no longer
-				// in the endpointslice, skip otherwise
 				if newEndpointSlice != nil && util.DoesEndpointSliceContainEligibleEndpoint(newEndpointSlice, oldIPStr, *oldPort.Port, *oldPort.Protocol, svc) {
 					continue
 				}
@@ -1218,16 +1429,14 @@ func (nc *DefaultNodeNetworkController) reconcileConntrackUponEndpointSliceEvent
 					klog.Errorf("Failed to get service port for endpoint %s: %v", oldIPStr, err)
 					continue
 				}
-				// upon update and delete events, flush UDP conntrack for Service port
 				if _, err := util.DeleteConntrackServicePort(oldIPStr, servicePort.Port, *oldPort.Protocol,
 					netlink.ConntrackReplyAnyIP, nil); err != nil {
 					klog.Errorf("Failed to delete conntrack entry for %s port %d: %v", oldIPStr, servicePort.Port, err)
 					errors = append(errors, err)
 				}
 
-				// Flush UDP conntrack entries for NodePort (and LoadBalancer services that allocate NodePorts)
 				// TODO: Once vishvananda/netlink support ConntrackFilterType '--reply-port-src', we can use one DeleteConntrackServicePort() call
-				//       conntrack entries for both ClusterIP and NodePort.
+				//       for both ClusterIP and NodePort.
 				if util.ServiceTypeHasNodePort(svc) && servicePort.NodePort > 0 {
 					if _, err := util.DeleteConntrackServicePort(oldIPStr, servicePort.NodePort, *oldPort.Protocol,
 						netlink.ConntrackReplyAnyIP, nil); err != nil {
@@ -1241,6 +1450,237 @@ func (nc *DefaultNodeNetworkController) reconcileConntrackUponEndpointSliceEvent
 	return utilerrors.Join(errors...)
 
 }
+
+// syncEndpointSlices initializes the UDP service zero-state map by grouping slices by
+// service and address family, counting eligible UDP endpoints, and recording which
+// service+family combinations have non-zero endpoints. This initial state is used by the
+// event handlers to detect 0→N transitions without race conditions from reading the
+// informer cache.
+func (nc *DefaultNodeNetworkController) syncEndpointSlices(objs []interface{}) error {
+	slicesByKey := make(map[string][]*discovery.EndpointSlice)
+
+	for _, obj := range objs {
+		epSlice, ok := obj.(*discovery.EndpointSlice)
+		if !ok {
+			continue
+		}
+
+		nc.initialSyncEndpointSliceUIDs.Store(epSlice.UID, struct{}{})
+
+		namespacedName, err := util.ServiceNamespacedNameFromEndpointSlice(epSlice)
+		if err != nil {
+			klog.Warningf("Failed to get service name from EndpointSlice %s/%s during sync: %v",
+				epSlice.Namespace, epSlice.Name, err)
+			continue
+		}
+
+		key := fmt.Sprintf("%s/%s/%s", namespacedName.Namespace, namespacedName.Name, epSlice.AddressType)
+		slicesByKey[key] = append(slicesByKey[key], epSlice)
+	}
+
+	for key, slices := range slicesByKey {
+		parts := strings.SplitN(key, "/", 3)
+		if len(parts) != 3 {
+			continue
+		}
+		namespace, name := parts[0], parts[1]
+
+		svc, err := nc.watchFactory.GetService(namespace, name)
+		if err != nil {
+			klog.V(5).Infof("Service %s/%s not found during EndpointSlice sync: %v", namespace, name, err)
+			continue
+		}
+
+		// Track per-port instead of aggregate
+		for _, svcPort := range svc.Spec.Ports {
+			if svcPort.Protocol != corev1.ProtocolUDP {
+				continue
+			}
+
+			portKey := fmt.Sprintf("%s/%d", key, svcPort.Port)
+			eligibleCount := countUDPEligibleEndpointsForPort(slices, svcPort, svc)
+			isZero := eligibleCount == 0
+			if !isZero {
+				nc.udpServiceZeroState.Store(portKey, struct{}{})
+			}
+
+			klog.V(5).Infof("Initial sync: service %s port %d has %d eligible UDP endpoints, zero-state=%v",
+				key, svcPort.Port, eligibleCount, isZero)
+		}
+	}
+
+	klog.V(5).Infof("Initialized UDP service zero-state for %d service+addressType combinations", len(slicesByKey))
+	return nil
+}
+
+// countUDPEligibleEndpointsForPort returns the count of eligible endpoints for a specific UDP port
+// across all endpoint slices. This allows per-port 0→N transition detection.
+//
+// Uses Service-aware eligibility logic to match the cleanup path behavior:
+// - If PublishNotReadyAddresses is true, counts all endpoints
+// - Otherwise, counts ready endpoints
+// - Falls back to serving+terminating endpoints if no ready endpoints exist
+//
+// Matches EndpointSlice ports by name and protocol, not by port number. The EndpointSlice port
+// is the resolved targetPort, which can differ from the Service port. For example, a Service
+// with port: 53 and targetPort: 5353 has EndpointSlice ports with value 5353.
+//
+// Example: Service has UDP:53 and UDP:5353. Port 53 already has endpoints, port 5353 is empty.
+// When first endpoint arrives for port 5353, we detect port 5353's 0→N transition independently.
+func countUDPEligibleEndpointsForPort(slices []*discovery.EndpointSlice, svcPort corev1.ServicePort, svc *corev1.Service) int {
+	count := 0
+	for _, slice := range slices {
+		// Find matching port in the slice by name and protocol
+		hasMatchingPort := false
+		for _, slicePort := range slice.Ports {
+			name := ""
+			if slicePort.Name != nil {
+				name = *slicePort.Name
+			}
+			if slicePort.Protocol != nil && *slicePort.Protocol == corev1.ProtocolUDP && name == svcPort.Name {
+				hasMatchingPort = true
+				break
+			}
+		}
+		if !hasMatchingPort {
+			continue
+		}
+
+		// Count eligible endpoints using Service-aware logic
+		// This matches the eligibility rules in util.DoesEndpointSliceContainEligibleEndpoint
+		// to prevent mismatches between count and cleanup paths
+		eligibleAddresses := util.GetEligibleEndpointAddressesFromSlices([]*discovery.EndpointSlice{slice}, svc)
+		count += len(eligibleAddresses)
+	}
+	return count
+}
+
+// matchesAddressType returns true if the IP address family matches the specified
+// EndpointSlice address type (IPv4 or IPv6).
+func matchesAddressType(ip string, addressType discovery.AddressType) bool {
+	parsedIP := net.ParseIP(ip)
+	if parsedIP == nil {
+		return false
+	}
+
+	isIPv4 := parsedIP.To4() != nil
+	if addressType == discovery.AddressTypeIPv4 {
+		return isIPv4
+	} else if addressType == discovery.AddressTypeIPv6 {
+		return !isIPv4
+	}
+	return false
+}
+
+// flushConntrackForVIPs flushes UDP conntrack entries for a list of VIPs.
+// It returns the count of deleted entries and any errors encountered.
+func flushConntrackForVIPs(vips []string, svc *corev1.Service, addressType discovery.AddressType, vipType string, portsToFlush []int32) (uint, []error) {
+	var errors []error
+	var deletedCount uint
+
+	for _, vip := range vips {
+		if !matchesAddressType(vip, addressType) {
+			continue
+		}
+		for _, port := range svc.Spec.Ports {
+			if port.Protocol != corev1.ProtocolUDP {
+				continue
+			}
+			// If portsToFlush is specified, only flush those specific ports
+			if len(portsToFlush) > 0 {
+				shouldFlush := false
+				for _, p := range portsToFlush {
+					if p == port.Port {
+						shouldFlush = true
+						break
+					}
+				}
+				if !shouldFlush {
+					continue
+				}
+			}
+			deleted, err := util.DeleteConntrackServicePort(vip, port.Port, port.Protocol, netlink.ConntrackOrigDstIP, nil)
+			if err != nil {
+				errors = append(errors, fmt.Errorf("failed to delete conntrack for %s %s:%d: %w", vipType, vip, port.Port, err))
+			} else {
+				deletedCount += deleted
+			}
+		}
+	}
+	return deletedCount, errors
+}
+
+// flushConntrackForServicePorts deletes conntrack entries for specific UDP ports of a service
+// for the specified address family. This clears stale blackhole entries created when
+// clients sent packets before endpoints existed.
+//
+// Only flushes conntrack for the ports that transitioned from 0→N endpoints.
+func (nc *DefaultNodeNetworkController) flushConntrackForServicePorts(svc *corev1.Service, addressType discovery.AddressType, portsToFlush []int32) error {
+	var errors []error
+	var deletedCount uint
+
+	klog.V(5).Infof("Service %s/%s transitioned 0→N %s endpoints for ports %v, flushing UDP conntrack",
+		svc.Namespace, svc.Name, addressType, portsToFlush)
+
+	deleted, errs := flushConntrackForVIPs(util.GetClusterIPs(svc), svc, addressType, "ClusterIP", portsToFlush)
+	deletedCount += deleted
+	errors = append(errors, errs...)
+
+	deleted, errs = flushConntrackForVIPs(util.GetExternalAndLBIPs(svc), svc, addressType, "ExternalIP", portsToFlush)
+	deletedCount += deleted
+	errors = append(errors, errs...)
+
+	if util.ServiceTypeHasNodePort(svc) {
+		node, err := nc.watchFactory.GetNode(nc.name)
+		if err != nil {
+			errors = append(errors, fmt.Errorf("failed to get node for NodePort conntrack cleanup: %w", err))
+		} else {
+			nodeIPv4, nodeIPv6, err := util.GetNodeAddresses(config.IPv4Mode, config.IPv6Mode, node)
+			if err != nil {
+				errors = append(errors, fmt.Errorf("failed to get node addresses for NodePort conntrack cleanup: %w", err))
+			} else {
+				var nodeIPs []net.IP
+				if addressType == discovery.AddressTypeIPv4 {
+					nodeIPs = nodeIPv4
+				} else if addressType == discovery.AddressTypeIPv6 {
+					nodeIPs = nodeIPv6
+				}
+
+				for _, nodeIP := range nodeIPs {
+					for _, port := range svc.Spec.Ports {
+						if port.Protocol != corev1.ProtocolUDP || port.NodePort == 0 {
+							continue
+						}
+						// Only flush NodePort for the specific service ports that transitioned
+						shouldFlush := false
+						for _, p := range portsToFlush {
+							if p == port.Port {
+								shouldFlush = true
+								break
+							}
+						}
+						if !shouldFlush {
+							continue
+						}
+						deleted, err := util.DeleteConntrackServicePort(nodeIP.String(), port.NodePort, port.Protocol, netlink.ConntrackOrigDstIP, nil)
+						if err != nil {
+							errors = append(errors, fmt.Errorf("failed to delete conntrack for NodePort %s:%d: %w", nodeIP.String(), port.NodePort, err))
+						} else {
+							deletedCount += deleted
+						}
+					}
+				}
+			}
+		}
+	}
+
+	if deletedCount > 0 {
+		klog.Infof("Deleted %d UDP conntrack entries for service %s/%s ports %v", deletedCount, svc.Namespace, svc.Name, portsToFlush)
+	}
+
+	return utilerrors.Join(errors...)
+}
+
 func (nc *DefaultNodeNetworkController) WatchEndpointSlices() error {
 	if util.IsNetworkSegmentationSupportEnabled() {
 		// Filter out objects without the default serviceName label to exclude mirrored EndpointSlices
@@ -1331,14 +1771,6 @@ func removePMTUDNodeNFTRules(nodeIPs []net.IP) error {
 		}
 	}
 	return nil
-}
-
-// ownNodeDeletedExit terminates ovnkube-node once the Node object it runs on
-// behalf of is deleted; a variable so that unit tests can intercept the exit.
-var ownNodeDeletedExit = func(nodeName string) {
-	klog.Errorf("Node %q that this ovnkube-node instance runs on behalf of was deleted; exiting so that "+
-		"the restarted process re-initializes against the current Node object", nodeName)
-	klog.FlushAndExit(klog.ExitFlushTimeout, 1)
 }
 
 func (nc *DefaultNodeNetworkController) deleteNode(node *corev1.Node) {
