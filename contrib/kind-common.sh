@@ -1253,8 +1253,11 @@ install_multus() {
     "$OCI_BIN" pull "$image"
     install_image "$image"
   fi
+  # The upstream 50Mi memory limit gets the thin plugin OOM-killed on newer
+  # (7.0+) kernels, so bump it.
   wget -qO- "https://raw.githubusercontent.com/k8snetworkplumbingwg/multus-cni/${version}/deployments/multus-daemonset.yml" |\
-    sed -e "s|multus-cni:snapshot|multus-cni:${version}|g" |\
+    sed -e "s|multus-cni:snapshot|multus-cni:${version}|g" \
+        -e 's|memory: "50Mi"|memory: "200Mi"|g' |\
     run_kubectl apply -f -
 }
 
