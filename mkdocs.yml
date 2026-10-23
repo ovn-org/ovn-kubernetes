@@ -243,5 +243,6 @@ nav:
     - EgressIP Node Selector: okeps/okep-6800-egressip-node-selector.md
     - NetworkQoS for Ipamless Localnet Networks: okeps/okep-6815-network-qos-ipamless.md
     - Scalable ARP/NDP Broadcast Handling for UDN: okeps/okep-6691-scalable-arp-ndp-broadcast-udn.md
+    - BGP NodeSelector for PodNetwork: okeps/okep-7040-bgp-node-selector-for-pod-network.md
   - Blog:
     - OVN-Kubernetes Blog: blog/index.md
