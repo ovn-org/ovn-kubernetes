@@ -5,7 +5,9 @@ inputs:
     description: 'GitHub API Token'
     required: true
 runs:
-  using: 'docker'
-  image: 'Dockerfile'
-  env:
-    GITHUB_TOKEN: ${{ inputs.token }}
+  using: 'composite'
+  steps:
+    - shell: sh
+      env:
+        GITHUB_TOKEN: ${{ inputs.token }}
+      run: sh "$GITHUB_ACTION_PATH/entrypoint.sh"
