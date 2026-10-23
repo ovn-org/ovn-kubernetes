@@ -2,7 +2,7 @@ module github.com/ovn-kubernetes/ovn-kubernetes/go-controller
 
 go 1.26.0
 
-toolchain go1.26.3
+toolchain go1.26.10
 
 require (
 	github.com/Microsoft/hcsshim v0.13.0
@@ -48,7 +48,7 @@ require (
 	github.com/urfave/cli/v2 v2.27.2
 	github.com/vishvananda/netlink v1.3.2-0.20260831221819-dcee5577542a
 	golang.org/x/exp v0.0.0-20251219203646-944ab1f22d93
-	golang.org/x/net v0.58.0
+	golang.org/x/net v0.60.0
 	golang.org/x/sync v0.23.0
 	golang.org/x/sys v0.48.0
 	golang.org/x/time v0.14.0
