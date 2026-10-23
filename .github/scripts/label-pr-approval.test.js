@@ -158,6 +158,19 @@ test('finds approvals beyond the first page and removes the label when they are 
   assert.ok(!pr.labels.has('has-approval'));
 });
 
+test('refreshes all open PRs across pages on manual dispatch', async () => {
+  const prs = Array.from({ length: 280 }, (_, i) =>
+    pullRequest(i + 1, i % 2 ? [] : [review('APPROVED')], ['has-approval', 'size/S']));
+  prs[0].state = 'closed';
+
+  await createRepository(prs).label('workflow_dispatch', {});
+
+  for (const pr of prs) {
+    assert.equal(pr.labels.has('has-approval'), pr.number % 2 === 1);
+    assert.ok(pr.labels.has('size/S'));
+  }
+});
+
 test('labels all PRs from the triggering source branch and leaves other PRs untouched', async t => {
   for (const eventName of ['pull_request_target', 'workflow_run']) {
     await t.test(eventName, async () => {

@@ -1,4 +1,13 @@
 async function pullRequestsToLabel({ github, context }) {
+  if (context.eventName === 'workflow_dispatch') {
+    const prs = await github.paginate(github.rest.pulls.list, {
+      ...context.repo,
+      state: 'open',
+      per_page: 100,
+    });
+    return prs.map(pr => pr.number);
+  }
+
   let source;
   if (context.eventName === 'pull_request_target') {
     source = context.payload.pull_request.head;
