@@ -250,9 +250,7 @@ func (c *Controller) initialSync() error {
 		if !stale {
 			continue
 		}
-		klog.Infof("Deleting stale UplinkState %s during initial sync: %s",
-			state.Name, reason)
-		if err := c.deleteUplinkState(state.Name); err != nil {
+		if err := c.deleteStaleUplinkState(state.Name, reason); err != nil {
 			errs = append(errs, err)
 		}
 	}
@@ -333,13 +331,26 @@ func (c *Controller) reconcileUplink(key string) error {
 	return nil
 }
 
+// reconcileUplinkState requeues the Uplink an UplinkState belongs to and
+// deletes the state when its Node is gone.
 func (c *Controller) reconcileUplinkState(key string) error {
 	uplinkState, err := c.uplinkStateLister.Get(key)
 	if err != nil && !apierrors.IsNotFound(err) {
 		return fmt.Errorf("failed to get UplinkState %s: %w", key, err)
 	}
 	if err == nil {
-		if uplinkName, _ := c.rememberUplinkStateIdentity(uplinkState); uplinkName != "" {
+		uplinkName, nodeName := c.rememberUplinkStateIdentity(uplinkState)
+		if nodeName != "" {
+			if _, err := c.nodeLister.Get(nodeName); err != nil {
+				if !apierrors.IsNotFound(err) {
+					return fmt.Errorf("failed to get Node %s for UplinkState %s: %w", nodeName, key, err)
+				}
+				// A node controller that has not yet observed its Node's
+				// deletion can recreate the state after reconcileNode swept it.
+				return c.deleteStaleUplinkState(key, fmt.Sprintf("Node %s is missing", nodeName))
+			}
+		}
+		if uplinkName != "" {
 			c.uplinkController.Reconcile(uplinkName)
 			return nil
 		}
@@ -365,8 +376,19 @@ func (c *Controller) reconcileUplinkState(key string) error {
 	return nil
 }
 
-func (c *Controller) reconcileNode(_ string) error {
+// reconcileNode requeues every Uplink, since any of them may select the node,
+// and deletes the UplinkStates of a node that no longer exists.
+func (c *Controller) reconcileNode(key string) error {
 	c.uplinkController.ReconcileAll()
+	if _, err := c.nodeLister.Get(key); err != nil {
+		if !apierrors.IsNotFound(err) {
+			return fmt.Errorf("failed to get Node %s: %w", key, err)
+		}
+		// Node controllers delete their own UplinkStates only while their
+		// Node exists, and the states are owned by their Uplink, not the
+		// Node, so garbage collection does not remove them either.
+		return c.deleteUplinkStatesForNode(key)
+	}
 	return nil
 }
 
@@ -647,19 +669,45 @@ func (c *Controller) resolveSelectedNodeConfigs(
 }
 
 func (c *Controller) deleteUplinkStatesFor(uplinkName string) error {
+	return c.deleteUplinkStatesMatching(
+		fmt.Sprintf("Uplink %s is missing", uplinkName),
+		func(state *uplinkv1alpha1.UplinkState) bool {
+			return state.Spec.UplinkName == uplinkName
+		})
+}
+
+func (c *Controller) deleteUplinkStatesForNode(nodeName string) error {
+	return c.deleteUplinkStatesMatching(
+		fmt.Sprintf("Node %s is missing", nodeName),
+		func(state *uplinkv1alpha1.UplinkState) bool {
+			return state.Spec.NodeName == nodeName
+		})
+}
+
+// deleteUplinkStatesMatching deletes every cached UplinkState accepted by
+// match, logging reason for each, and attempts all of them before returning
+// the joined errors.
+func (c *Controller) deleteUplinkStatesMatching(reason string, match func(*uplinkv1alpha1.UplinkState) bool) error {
 	states, err := c.uplinkStateLister.List(labels.Everything())
 	if err != nil {
 		return fmt.Errorf("failed to list UplinkStates: %w", err)
 	}
+	var errs []error
 	for _, state := range states {
-		if state.Spec.UplinkName != uplinkName {
+		if !match(state) {
 			continue
 		}
-		if err := c.deleteUplinkState(state.Name); err != nil {
-			return err
+		if err := c.deleteStaleUplinkState(state.Name, reason); err != nil {
+			errs = append(errs, err)
 		}
 	}
-	return nil
+	return errors.Join(errs...)
+}
+
+// deleteStaleUplinkState deletes one UplinkState and logs why it is stale.
+func (c *Controller) deleteStaleUplinkState(name, reason string) error {
+	klog.Infof("Deleting stale UplinkState %s: %s", name, reason)
+	return c.deleteUplinkState(name)
 }
 
 func (c *Controller) deleteUplinkState(name string) error {
