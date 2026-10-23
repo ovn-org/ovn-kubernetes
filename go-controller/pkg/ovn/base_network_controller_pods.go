@@ -370,6 +370,14 @@ func (bnc *BaseNetworkController) podExpectedInLogicalCache(pod *corev1.Pod) boo
 		!util.PodCompleted(pod)
 }
 
+func (bnc *BaseNetworkController) shouldEnsurePodLogicalPort(pod *corev1.Pod, nadKey string) bool {
+	if !util.PodScheduled(pod) || !bnc.podExpectedInLogicalCache(pod) {
+		return false
+	}
+	portInfo, err := bnc.logicalPortCache.get(pod, nadKey)
+	return err != nil || !portInfo.expires.IsZero()
+}
+
 func (bnc *BaseNetworkController) getExpectedSwitchName(pod *corev1.Pod) (string, error) {
 	switchName := pod.Spec.NodeName
 	if bnc.IsUserDefinedNetwork() {

@@ -12,6 +12,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
@@ -220,26 +221,27 @@ func newDefaultNetworkControllerCommon(
 
 	oc := &DefaultNetworkController{
 		BaseNetworkController: BaseNetworkController{
-			CommonNetworkControllerInfo: *cnci,
-			controllerName:              types.DefaultNetworkControllerName,
-			ReconcilableNetInfo:         defaultNetInfo,
-			lsManager:                   lsm.NewLogicalSwitchManager(),
-			logicalPortCache:            portCache,
-			namespaces:                  make(map[string]*namespaceInfo),
-			namespacesMutex:             sync.Mutex{},
-			addressSetFactory:           addressSetFactory,
-			networkPolicies:             syncmap.NewSyncMap[*networkPolicy](),
-			sharedNetpolPortGroups:      syncmap.NewSyncMap[*defaultDenyPortGroups](),
-			stopChan:                    defaultStopChan,
-			wg:                          defaultWg,
-			zoneICHandler:               zoneICHandler,
-			cancelableCtx:               util.NewCancelableContext(),
-			observManager:               observManager,
-			networkManager:              networkManager,
-			routeImportManager:          routeImportManager,
-			addressSetManager:           addressSetManager,
-			nodeReconciler:              nodeReconciler,
-			nodeAnnotationCache:         nodeReconciler.AnnotationCache(),
+			CommonNetworkControllerInfo:  *cnci,
+			controllerName:               types.DefaultNetworkControllerName,
+			ReconcilableNetInfo:          defaultNetInfo,
+			lsManager:                    lsm.NewLogicalSwitchManager(),
+			logicalPortCache:             portCache,
+			namespaces:                   make(map[string]*namespaceInfo),
+			namespacesMutex:              sync.Mutex{},
+			addressSetFactory:            addressSetFactory,
+			networkPolicies:              syncmap.NewSyncMap[*networkPolicy](),
+			networkPolicyKeysByNamespace: syncmap.NewSyncMap[sets.Set[string]](),
+			sharedNetpolPortGroups:       syncmap.NewSyncMap[*defaultDenyPortGroups](),
+			stopChan:                     defaultStopChan,
+			wg:                           defaultWg,
+			zoneICHandler:                zoneICHandler,
+			cancelableCtx:                util.NewCancelableContext(),
+			observManager:                observManager,
+			networkManager:               networkManager,
+			routeImportManager:           routeImportManager,
+			addressSetManager:            addressSetManager,
+			nodeReconciler:               nodeReconciler,
+			nodeAnnotationCache:          nodeReconciler.AnnotationCache(),
 		},
 		externalGatewayRouteInfo:   apbExternalRouteController.ExternalGWRouteInfoCache,
 		eIPC:                       eIPController,
@@ -915,7 +917,8 @@ func (h *defaultNetworkControllerEventHandler) GetInternalCacheEntry(obj interfa
 	switch h.objType {
 	case factory.PodType:
 		pod := obj.(*corev1.Pod)
-		return h.oc.getPortInfo(pod)
+		// Avoid typed-nil applied state.
+		return h.oc.GetPodState(pod)
 	default:
 		return nil
 	}
@@ -1012,7 +1015,7 @@ func (h *defaultNetworkControllerEventHandler) AddResource(obj interface{}, from
 		if !ok {
 			return fmt.Errorf("could not cast %T object to *corev1.Pod", obj)
 		}
-		return h.oc.ensurePod(nil, pod, true)
+		return h.oc.ReconcilePod(nil, pod, nil, fromRetryLoop)
 
 	case factory.EgressIPType:
 		eIP := obj.(*egressipv1.EgressIP)
@@ -1094,8 +1097,7 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 	case factory.PodType:
 		oldPod := oldObj.(*corev1.Pod)
 		newPod := newObj.(*corev1.Pod)
-
-		return h.oc.ensurePod(oldPod, newPod, inRetryCache || util.PodScheduled(oldPod) != util.PodScheduled(newPod))
+		return h.oc.ReconcilePod(oldPod, newPod, nil, inRetryCache)
 
 	case factory.EgressIPType:
 		oldEIP := oldObj.(*egressipv1.EgressIP)
@@ -1168,13 +1170,8 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 func (h *defaultNetworkControllerEventHandler) DeleteResource(obj, cachedObj interface{}) error {
 	switch h.objType {
 	case factory.PodType:
-		var portInfo *lpInfo
 		pod := obj.(*corev1.Pod)
-
-		if cachedObj != nil {
-			portInfo = cachedObj.(*lpInfo)
-		}
-		return h.oc.removePod(pod, portInfo)
+		return h.oc.ReconcilePod(pod, nil, cachedObj, false)
 
 	case factory.EgressIPType:
 		eIP := obj.(*egressipv1.EgressIP)

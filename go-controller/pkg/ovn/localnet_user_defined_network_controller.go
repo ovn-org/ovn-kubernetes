@@ -12,6 +12,8 @@ import (
 
 	mnpapi "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta1"
 
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/allocator/pod"
@@ -96,16 +98,27 @@ func (h *LocalnetUserDefinedNetworkControllerEventHandler) RecordSuccessEvent(ob
 func (h *LocalnetUserDefinedNetworkControllerEventHandler) RecordErrorEvent(_ interface{}, _ string, _ error) {
 }
 
-// IsResourceScheduled returns true if the given object has been scheduled.
-// Only applied to pods for now. Returns true for all other types.
+// IsResourceScheduled lets the retry framework process unscheduled UDN pods.
+// Their reconcile path performs identity-based policy cleanup without trying
+// to create an LSP; skipping them would silently discard cleanup failures.
 func (h *LocalnetUserDefinedNetworkControllerEventHandler) IsResourceScheduled(obj interface{}) bool {
+	if h.objType == factory.PodType {
+		return true
+	}
 	return h.baseHandler.isResourceScheduled(h.objType, obj)
 }
 
 // AddResource adds the specified object to the cluster according to its type and returns the error,
 // if any, yielded during object creation.
 // Given an object to add and a boolean specifying if the function was executed from iterateRetryResources
-func (h *LocalnetUserDefinedNetworkControllerEventHandler) AddResource(obj interface{}, _ bool) error {
+func (h *LocalnetUserDefinedNetworkControllerEventHandler) AddResource(obj interface{}, fromRetryLoop bool) error {
+	if h.objType == factory.PodType {
+		pod, ok := obj.(*corev1.Pod)
+		if !ok {
+			return fmt.Errorf("could not cast %T object to *corev1.Pod", obj)
+		}
+		return h.oc.ReconcilePod(nil, pod, nil, fromRetryLoop)
+	}
 	return h.oc.AddUserDefinedNetworkResourceCommon(h.objType, obj)
 }
 
@@ -184,23 +197,24 @@ func NewLocalnetUserDefinedNetworkController(
 		BaseLayer2UserDefinedNetworkController{
 			BaseUserDefinedNetworkController: BaseUserDefinedNetworkController{
 				BaseNetworkController: BaseNetworkController{
-					CommonNetworkControllerInfo: *cnci,
-					controllerName:              getNetworkControllerName(netInfo.GetNetworkName()),
-					ReconcilableNetInfo:         util.NewReconcilableNetInfo(netInfo),
-					lsManager:                   lsm.NewL2SwitchManager(),
-					logicalPortCache:            NewPortCache(stopChan),
-					namespaces:                  make(map[string]*namespaceInfo),
-					namespacesMutex:             sync.Mutex{},
-					addressSetFactory:           addressSetFactory,
-					networkPolicies:             syncmap.NewSyncMap[*networkPolicy](),
-					sharedNetpolPortGroups:      syncmap.NewSyncMap[*defaultDenyPortGroups](),
-					stopChan:                    stopChan,
-					wg:                          &sync.WaitGroup{},
-					cancelableCtx:               util.NewCancelableContext(),
-					networkManager:              networkManager,
-					addressSetManager:           addressSetManager,
-					nodeReconciler:              nodeReconciler,
-					nodeAnnotationCache:         nodeAnnotationCache,
+					CommonNetworkControllerInfo:  *cnci,
+					controllerName:               getNetworkControllerName(netInfo.GetNetworkName()),
+					ReconcilableNetInfo:          util.NewReconcilableNetInfo(netInfo),
+					lsManager:                    lsm.NewL2SwitchManager(),
+					logicalPortCache:             NewPortCache(stopChan),
+					namespaces:                   make(map[string]*namespaceInfo),
+					namespacesMutex:              sync.Mutex{},
+					addressSetFactory:            addressSetFactory,
+					networkPolicies:              syncmap.NewSyncMap[*networkPolicy](),
+					networkPolicyKeysByNamespace: syncmap.NewSyncMap[sets.Set[string]](),
+					sharedNetpolPortGroups:       syncmap.NewSyncMap[*defaultDenyPortGroups](),
+					stopChan:                     stopChan,
+					wg:                           &sync.WaitGroup{},
+					cancelableCtx:                util.NewCancelableContext(),
+					networkManager:               networkManager,
+					addressSetManager:            addressSetManager,
+					nodeReconciler:               nodeReconciler,
+					nodeAnnotationCache:          nodeAnnotationCache,
 				},
 			},
 		},

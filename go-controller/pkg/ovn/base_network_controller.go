@@ -140,14 +140,16 @@ type BaseNetworkController struct {
 	// network policies map, key should be retrieved with getPolicyKey(policy *knet.NetworkPolicy).
 	// network policies that failed to be created will also be added here, and can be retried or cleaned up later.
 	// network policy is only deleted from this map after successful cleanup.
-	// Allowed order of locking is namespace Lock -> oc.networkPolicies key Lock -> networkPolicy.Lock
+	// Allowed order of locking is namespace Lock -> networkPolicies key Lock -> sharedNetpolPortGroups key Lock.
 	// Don't take namespace Lock while holding networkPolicy key lock to avoid deadlock.
 	networkPolicies *syncmap.SyncMap[*networkPolicy]
+	// Indexes policies by namespace for pod membership reconciliation.
+	networkPolicyKeysByNamespace *syncmap.SyncMap[sets.Set[string]]
 
 	// map of existing shared port groups for network policies
 	// port group exists in the db if and only if port group key is present in this map
 	// key is namespace
-	// allowed locking order is namespace Lock -> networkPolicy.Lock -> sharedNetpolPortGroups key Lock
+	// allowed locking order is namespace Lock -> networkPolicies key Lock -> sharedNetpolPortGroups key Lock
 	// make sure to keep this order to avoid deadlocks
 	sharedNetpolPortGroups *syncmap.SyncMap[*defaultDenyPortGroups]
 
@@ -927,12 +929,11 @@ func (bnc *BaseNetworkController) doesNetworkHaveDiscoverablePodIPs() bool {
 	return util.DoesNetworkHaveDiscoverablePodIPs(bnc.GetNetInfo())
 }
 
-func (bnc *BaseNetworkController) getPodNADKeys(pod *corev1.Pod) []string {
+func (bnc *BaseNetworkController) getPodNADKeys(pod *corev1.Pod) ([]string, error) {
 	if !bnc.IsUserDefinedNetwork() {
-		return []string{types.DefaultNetworkName}
+		return []string{types.DefaultNetworkName}, nil
 	}
-	podNADKeys, _ := util.PodNADKeys(pod, bnc.GetNetInfo(), bnc.networkManager.GetNetworkNameForNADKey)
-	return podNADKeys
+	return util.PodNADKeys(pod, bnc.GetNetInfo(), bnc.networkManager.GetNetworkNameForNADKey)
 }
 
 func (bnc *BaseNetworkController) getClusterPortGroupDbIDs(base string) *libovsdbops.DbObjectIDs {

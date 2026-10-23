@@ -101,9 +101,13 @@ func (h *Layer3UserDefinedNetworkControllerEventHandler) RecordSuccessEvent(obj 
 func (h *Layer3UserDefinedNetworkControllerEventHandler) RecordErrorEvent(_ interface{}, _ string, _ error) {
 }
 
-// IsResourceScheduled returns true if the given object has been scheduled.
-// Only applied to pods for now. Returns true for all other types.
+// IsResourceScheduled lets the retry framework process unscheduled UDN pods.
+// Their reconcile path performs identity-based policy cleanup without trying
+// to create an LSP; skipping them would silently discard cleanup failures.
 func (h *Layer3UserDefinedNetworkControllerEventHandler) IsResourceScheduled(obj interface{}) bool {
+	if h.objType == factory.PodType {
+		return true
+	}
 	return h.baseHandler.isResourceScheduled(h.objType, obj)
 }
 
@@ -111,7 +115,13 @@ func (h *Layer3UserDefinedNetworkControllerEventHandler) IsResourceScheduled(obj
 // if any, yielded during object creation.
 // Given an object to add and a boolean specifying if the function was executed from iterateRetryResources
 func (h *Layer3UserDefinedNetworkControllerEventHandler) AddResource(obj interface{}, fromRetryLoop bool) error {
-	_ = fromRetryLoop
+	if h.objType == factory.PodType {
+		pod, ok := obj.(*corev1.Pod)
+		if !ok {
+			return fmt.Errorf("could not cast %T object to *corev1.Pod", obj)
+		}
+		return h.oc.ReconcilePod(nil, pod, nil, fromRetryLoop)
+	}
 	return h.oc.AddUserDefinedNetworkResourceCommon(h.objType, obj)
 }
 
@@ -229,24 +239,25 @@ func NewLayer3UserDefinedNetworkController(
 	oc := &Layer3UserDefinedNetworkController{
 		BaseUserDefinedNetworkController: BaseUserDefinedNetworkController{
 			BaseNetworkController: BaseNetworkController{
-				CommonNetworkControllerInfo: *cnci,
-				controllerName:              getNetworkControllerName(netInfo.GetNetworkName()),
-				ReconcilableNetInfo:         util.NewReconcilableNetInfo(netInfo),
-				lsManager:                   lsm.NewLogicalSwitchManager(),
-				logicalPortCache:            portCache,
-				namespaces:                  make(map[string]*namespaceInfo),
-				namespacesMutex:             sync.Mutex{},
-				addressSetFactory:           addressSetFactory,
-				networkPolicies:             syncmap.NewSyncMap[*networkPolicy](),
-				sharedNetpolPortGroups:      syncmap.NewSyncMap[*defaultDenyPortGroups](),
-				stopChan:                    stopChan,
-				wg:                          &sync.WaitGroup{},
-				cancelableCtx:               util.NewCancelableContext(),
-				networkManager:              networkManager,
-				routeImportManager:          routeImportManager,
-				addressSetManager:           addressSetManager,
-				nodeReconciler:              nodeReconciler,
-				nodeAnnotationCache:         nodeAnnotationCache,
+				CommonNetworkControllerInfo:  *cnci,
+				controllerName:               getNetworkControllerName(netInfo.GetNetworkName()),
+				ReconcilableNetInfo:          util.NewReconcilableNetInfo(netInfo),
+				lsManager:                    lsm.NewLogicalSwitchManager(),
+				logicalPortCache:             portCache,
+				namespaces:                   make(map[string]*namespaceInfo),
+				namespacesMutex:              sync.Mutex{},
+				addressSetFactory:            addressSetFactory,
+				networkPolicies:              syncmap.NewSyncMap[*networkPolicy](),
+				networkPolicyKeysByNamespace: syncmap.NewSyncMap[sets.Set[string]](),
+				sharedNetpolPortGroups:       syncmap.NewSyncMap[*defaultDenyPortGroups](),
+				stopChan:                     stopChan,
+				wg:                           &sync.WaitGroup{},
+				cancelableCtx:                util.NewCancelableContext(),
+				networkManager:               networkManager,
+				routeImportManager:           routeImportManager,
+				addressSetManager:            addressSetManager,
+				nodeReconciler:               nodeReconciler,
+				nodeAnnotationCache:          nodeAnnotationCache,
 			},
 		},
 		mgmtPortFailed:              sync.Map{},
@@ -261,7 +272,6 @@ func NewLayer3UserDefinedNetworkController(
 
 	if oc.IsPrimaryNetwork() {
 		oc.onLogicalPortCacheAdd = func(pod *corev1.Pod, _ string) {
-			oc.requestLocalPodPolicyRetriesForPod(pod, "logical port cache update")
 			if oc.eIPController != nil {
 				if err := oc.eIPController.addEgressIPPodRetry(pod, "logical port cache update"); err != nil {
 					klog.Warningf("Failed to enqueue EgressIP retry for pod %s/%s after logical port cache update: %v",
@@ -398,6 +408,10 @@ func (oc *Layer3UserDefinedNetworkController) Cleanup() error {
 	netName := oc.GetNetworkName()
 	klog.Infof("Delete OVN logical entities for %s network controller of network %s", types.Layer3Topology, netName)
 	oc.unregisterEgressIPNetwork()
+
+	if oc.logicalPortCache != nil {
+		oc.logicalPortCache.removeAllForNetwork(netName)
+	}
 
 	// For primary L3 UDN only: when this is a cleanup-only controller (dummy for stale UDN
 	// cleanup; GetNetworkID() is InvalidID because netInfo was never reconciled from a NAD),

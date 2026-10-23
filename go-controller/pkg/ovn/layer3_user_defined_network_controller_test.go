@@ -5,6 +5,7 @@ package ovn
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"slices"
@@ -20,6 +21,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	knet "k8s.io/utils/net"
 	"k8s.io/utils/ptr"
+
+	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
 
 	ovncnitypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
@@ -139,7 +142,27 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 3 network", func() {
 				const nodeIPv4CIDR = "192.168.126.202/24"
 				testNode, err := newNodeWithUserDefinedNetworks(nodeName, nodeIPv4CIDR, netInfo)
 				Expect(err).NotTo(HaveOccurred())
-				networkPolicy := testing.NewMatchLabelsNetworkPolicy(denyPolicyName, ns, "", "", false, false)
+				const netpolPodLabel = "pod-role"
+				const netpolPodLabelValue = "server"
+				const netpolPodUpdatedLabelValue = "client"
+				pod := newMultiHomedPod(podInfo, netInfo)
+				pod.Labels[netpolPodLabel] = netpolPodLabelValue
+				networkPolicy := &networkingv1.NetworkPolicy{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      denyPolicyName,
+						Namespace: ns,
+					},
+					Spec: networkingv1.NetworkPolicySpec{
+						PodSelector: metav1.LabelSelector{
+							MatchLabels: map[string]string{
+								netpolPodLabel: netpolPodLabelValue,
+							},
+						},
+						PolicyTypes: []networkingv1.PolicyType{
+							networkingv1.PolicyTypeIngress,
+						},
+					},
+				}
 				nodes := []corev1.Node{*testNode}
 				if testConfig.withRemoteNode {
 					By("adding a remote node")
@@ -174,7 +197,7 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 3 network", func() {
 					},
 					&corev1.PodList{
 						Items: []corev1.Pod{
-							*newMultiHomedPod(podInfo, netInfo),
+							*pod,
 						},
 					},
 					&nadapi.NetworkAttachmentDefinitionList{
@@ -187,9 +210,9 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 3 network", func() {
 				podInfo.populateLogicalSwitchCache(fakeOvn)
 
 				// pod exists, networks annotations don't
-				pod, err := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(podInfo.namespace).Get(context.Background(), podInfo.podName, metav1.GetOptions{})
+				initialPod, err := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(podInfo.namespace).Get(context.Background(), podInfo.podName, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
-				_, ok := pod.Annotations[types.OvnPodAnnotationName]
+				_, ok := initialPod.Annotations[types.OvnPodAnnotationName]
 				Expect(ok).To(BeFalse())
 
 				// succeed the check for Load_Balancer_Group support
@@ -274,6 +297,26 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 3 network", func() {
 					newUserDefinedNetworkExpectationMachine(fakeOvn, []testPod{podInfo}, expectationOptions...).expectedLogicalSwitchesAndPorts(nodeName)...,
 				)
 				Eventually(fakeOvn.nbClient).WithTimeout(5 * time.Second).Should(libovsdbtest.HaveData(expectedNBData))
+				if netInfo.isPrimary {
+					By("reconciling UDN network policy membership on a label-only pod update")
+					updatedPod, err := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(podInfo.namespace).Get(context.Background(), podInfo.podName, metav1.GetOptions{})
+					Expect(err).NotTo(HaveOccurred())
+					updatedPod.Labels[netpolPodLabel] = netpolPodUpdatedLabelValue
+					_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(podInfo.namespace).Update(context.Background(), updatedPod, metav1.UpdateOptions{})
+					Expect(err).NotTo(HaveOccurred())
+
+					networkPolicyPGName := libovsdbutil.GetPortGroupName(getNetworkPolicyPortGroupDbIDs(ns, userDefinedNetController.bnc.controllerName, denyPolicyName))
+					ingressDefaultDenyPGName := userDefinedNetController.bnc.defaultDenyPortGroupName(ns, libovsdbutil.ACLIngress)
+					Eventually(func(g Gomega) {
+						networkPolicyPG, err := libovsdbops.GetPortGroup(fakeOvn.nbClient, &nbdb.PortGroup{Name: networkPolicyPGName})
+						g.Expect(err).NotTo(HaveOccurred())
+						g.Expect(networkPolicyPG.Ports).To(BeEmpty())
+
+						ingressDefaultDenyPG, err := libovsdbops.GetPortGroup(fakeOvn.nbClient, &nbdb.PortGroup{Name: ingressDefaultDenyPGName})
+						g.Expect(err).NotTo(HaveOccurred())
+						g.Expect(ingressDefaultDenyPG.Ports).To(BeEmpty())
+					}).WithTimeout(5 * time.Second).Should(Succeed())
+				}
 
 				return nil
 			}
@@ -326,6 +369,132 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 3 network", func() {
 			config.GatewayModeLocal,
 		),
 	)
+
+	It("deletes OVN pod state on a cache miss when the OVN pod network annotation is missing", func() {
+		app.Action = func(*cli.Context) error {
+			config.OVNKubernetesFeature.EnableMultiNetwork = true
+			config.OVNKubernetesFeature.EnableEgressFirewall = true
+			config.Gateway.Mode = config.GatewayModeShared
+			netInfo := dummySecondaryLayer3UserDefinedNetwork("192.168.0.0/16", "192.168.1.0/24")
+			podInfo := dummyTestPod(ns, netInfo)
+			netConf := netInfo.netconf()
+			networkConfig, err := util.NewNetInfo(netConf)
+			Expect(err).NotTo(HaveOccurred())
+			nad, err := newNetworkAttachmentDefinition(ns, nadName, *netConf)
+			Expect(err).NotTo(HaveOccurred())
+			testNode, err := newNodeWithUserDefinedNetworks(nodeName, "192.168.126.202/24", netInfo)
+			Expect(err).NotTo(HaveOccurred())
+
+			initialPod := newMultiHomedPod(podInfo, netInfo)
+			delete(initialPod.Annotations, types.OvnPodAnnotationName)
+
+			udnPortInfo := podInfo.udnPodInfos[netInfo.netName].allportInfo[netInfo.nadName]
+			ovnPodInfo := podInfo
+			ovnPodInfo.portUUID = udnPortInfo.portUUID
+			ovnPodInfo.podIP = udnPortInfo.podIP
+			ovnPodInfo.podMAC = udnPortInfo.podMAC
+			initialNBData := append([]libovsdbtest.TestData{}, initialDB.NBData...)
+			initialNBData = append(initialNBData, getExpectedPodsAndSwitches(networkConfig, []testPod{ovnPodInfo}, []string{nodeName}, netInfo.nadName)...)
+			portName := util.GetUserDefinedNetworkLogicalPortName(podInfo.namespace, podInfo.podName, netInfo.nadName)
+			portUUID := portName + "-UUID"
+			nsPG := buildNamespacedPortGroup(podInfo.namespace, getNetworkControllerName(netInfo.netName))
+			nsPG.Ports = []string{portUUID}
+			initialNBData = append(initialNBData, nsPG)
+
+			fakeOvn.startWithDBSetup(
+				libovsdbtest.TestSetup{NBData: initialNBData},
+				&corev1.NamespaceList{Items: []corev1.Namespace{*testing.NewNamespace(ns)}},
+				&corev1.NodeList{Items: []corev1.Node{*testNode}},
+				&corev1.PodList{Items: []corev1.Pod{*initialPod}},
+				&nadapi.NetworkAttachmentDefinitionList{Items: []nadapi.NetworkAttachmentDefinition{*nad}},
+			)
+
+			Expect(fakeOvn.NewUserDefinedNetworkController(nad)).To(Succeed())
+			userDefinedNetController, ok := fakeOvn.userDefinedNetworkControllers[userDefinedNetworkName]
+			Expect(ok).To(BeTrue())
+			podInfo.populateUserDefinedNetworkLogicalSwitchCache(userDefinedNetController)
+
+			Expect(userDefinedNetController.bnc.getPortInfoForUserDefinedNetwork(initialPod)).To(BeNil())
+
+			userDefinedNetController.bnc.networkManager = networkmanager.Default().Interface()
+			Expect(userDefinedNetController.bnc.removePodForUserDefinedNetwork(initialPod, nil)).To(Succeed())
+
+			_, err = libovsdbops.GetLogicalSwitchPort(fakeOvn.nbClient, &nbdb.LogicalSwitchPort{Name: portName})
+			Expect(errors.Is(err, libovsdbclient.ErrNotFound)).To(BeTrue())
+
+			pg, err := libovsdbops.GetPortGroup(fakeOvn.nbClient, &nbdb.PortGroup{Name: nsPG.Name})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(pg.Ports).To(BeEmpty())
+
+			return nil
+		}
+
+		Expect(app.Run([]string{app.Name})).To(Succeed())
+	})
+
+	It("deletes OVN pod state on a cache miss when the OVN pod network annotation is malformed", func() {
+		app.Action = func(*cli.Context) error {
+			config.OVNKubernetesFeature.EnableMultiNetwork = true
+			config.OVNKubernetesFeature.EnableEgressFirewall = true
+			config.Gateway.Mode = config.GatewayModeShared
+
+			netInfo := dummySecondaryLayer3UserDefinedNetwork("192.168.0.0/16", "192.168.1.0/24")
+			podInfo := dummyTestPod(ns, netInfo)
+			netConf := netInfo.netconf()
+			networkConfig, err := util.NewNetInfo(netConf)
+			Expect(err).NotTo(HaveOccurred())
+			nad, err := newNetworkAttachmentDefinition(ns, nadName, *netConf)
+			Expect(err).NotTo(HaveOccurred())
+			testNode, err := newNodeWithUserDefinedNetworks(nodeName, "192.168.126.202/24", netInfo)
+			Expect(err).NotTo(HaveOccurred())
+
+			initialPod := newMultiHomedPod(podInfo, netInfo)
+			// Malformed delete annotations must not block applied-state teardown.
+			initialPod.Annotations[types.OvnPodAnnotationName] = "not-a-json-annotation"
+
+			udnPortInfo := podInfo.udnPodInfos[netInfo.netName].allportInfo[netInfo.nadName]
+			ovnPodInfo := podInfo
+			ovnPodInfo.portUUID = udnPortInfo.portUUID
+			ovnPodInfo.podIP = udnPortInfo.podIP
+			ovnPodInfo.podMAC = udnPortInfo.podMAC
+			initialNBData := append([]libovsdbtest.TestData{}, initialDB.NBData...)
+			initialNBData = append(initialNBData, getExpectedPodsAndSwitches(networkConfig, []testPod{ovnPodInfo}, []string{nodeName}, netInfo.nadName)...)
+			portName := util.GetUserDefinedNetworkLogicalPortName(podInfo.namespace, podInfo.podName, netInfo.nadName)
+			portUUID := portName + "-UUID"
+			nsPG := buildNamespacedPortGroup(podInfo.namespace, getNetworkControllerName(netInfo.netName))
+			nsPG.Ports = []string{portUUID}
+			initialNBData = append(initialNBData, nsPG)
+
+			fakeOvn.startWithDBSetup(
+				libovsdbtest.TestSetup{NBData: initialNBData},
+				&corev1.NamespaceList{Items: []corev1.Namespace{*testing.NewNamespace(ns)}},
+				&corev1.NodeList{Items: []corev1.Node{*testNode}},
+				&corev1.PodList{Items: []corev1.Pod{*initialPod}},
+				&nadapi.NetworkAttachmentDefinitionList{Items: []nadapi.NetworkAttachmentDefinition{*nad}},
+			)
+
+			Expect(fakeOvn.NewUserDefinedNetworkController(nad)).To(Succeed())
+			userDefinedNetController, ok := fakeOvn.userDefinedNetworkControllers[userDefinedNetworkName]
+			Expect(ok).To(BeTrue())
+			podInfo.populateUserDefinedNetworkLogicalSwitchCache(userDefinedNetController)
+
+			Expect(userDefinedNetController.bnc.getPortInfoForUserDefinedNetwork(initialPod)).To(BeNil())
+
+			userDefinedNetController.bnc.networkManager = networkmanager.Default().Interface()
+			Expect(userDefinedNetController.bnc.removePodForUserDefinedNetwork(initialPod, nil)).To(Succeed())
+
+			_, err = libovsdbops.GetLogicalSwitchPort(fakeOvn.nbClient, &nbdb.LogicalSwitchPort{Name: portName})
+			Expect(errors.Is(err, libovsdbclient.ErrNotFound)).To(BeTrue())
+
+			pg, err := libovsdbops.GetPortGroup(fakeOvn.nbClient, &nbdb.PortGroup{Name: nsPG.Name})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(pg.Ports).To(BeEmpty())
+
+			return nil
+		}
+
+		Expect(app.Run([]string{app.Name})).To(Succeed())
+	})
 
 	DescribeTable(
 		"the gateway is properly cleaned up",

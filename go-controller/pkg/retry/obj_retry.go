@@ -384,7 +384,8 @@ func (r *RetryFramework) resourceRetry(objKey string, now time.Time) {
 			}
 			entry.newObj = kObj
 		}
-		if r.ResourceHandler.NeedsUpdateDuringRetry && entry.config != nil && entry.newObj != nil {
+		terminal := entry.newObj != nil && r.ResourceHandler.IsObjectInTerminalState(entry.newObj)
+		if !terminal && r.ResourceHandler.NeedsUpdateDuringRetry && entry.config != nil && entry.newObj != nil {
 			klog.Infof("%s: %v retry: updating object %s", r.name, r.ResourceHandler.ObjType, objKey)
 			if !r.ResourceHandler.IsResourceScheduled(entry.newObj) {
 				// unscheduled resources (pods) will be retried again later we do not track these as failures, and should not retry.
@@ -429,6 +430,13 @@ func (r *RetryFramework) resourceRetry(objKey string, now time.Time) {
 
 			// create new object if needed
 			if entry.newObj != nil {
+				if terminal {
+					// Any pending deletion has finished. Drop the stale ADD before
+					// terminal handling, which may already have processed this object.
+					r.DeleteRetryObj(key)
+					r.processObjectInTerminalState(entry.newObj, key, resourceEventRetry)
+					return
+				}
 				klog.V(5).Infof("%s: adding new object: %s %s", r.name, r.ResourceHandler.ObjType, objKey)
 				if !r.ResourceHandler.IsResourceScheduled(entry.newObj) {
 					// unscheduled resources (pods) will be retried again later we do not track these as failures, and should not retry.
@@ -515,6 +523,7 @@ type resourceEvent string
 var (
 	resourceEventAdd    resourceEvent = "add"
 	resourceEventUpdate resourceEvent = "update"
+	resourceEventRetry  resourceEvent = "retry"
 )
 
 // processObjectInTerminalState is executed when an object has been added or updated and is actually in a terminal state

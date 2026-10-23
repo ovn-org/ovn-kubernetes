@@ -18,6 +18,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ktypes "k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/sets"
 
 	ipallocator "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/allocator/ip"
 	ovncnitypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni/types"
@@ -27,6 +28,7 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/nbdb"
 	apbroutecontroller "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/controller/apbroute"
 	logicalswitchmanager "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/syncmap"
 	ovntest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing"
 	libovsdbtest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	ovntypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
@@ -200,10 +202,12 @@ func TestMigratedVMPodIPOwnershipOnSubnetReuse(t *testing.T) {
 				t.Cleanup(func() { close(stopChan) })
 				oc := &DefaultNetworkController{
 					BaseNetworkController: BaseNetworkController{
-						CommonNetworkControllerInfo: CommonNetworkControllerInfo{watchFactory: wf, nodeName: "replacement-node", nbClient: nbClient},
-						ReconcilableNetInfo:         &util.DefaultNetInfo{},
-						lsManager:                   logicalswitchmanager.NewLogicalSwitchManager(),
-						logicalPortCache:            NewPortCache(stopChan),
+						CommonNetworkControllerInfo:  CommonNetworkControllerInfo{watchFactory: wf, nodeName: "replacement-node", nbClient: nbClient},
+						ReconcilableNetInfo:          &util.DefaultNetInfo{},
+						lsManager:                    logicalswitchmanager.NewLogicalSwitchManager(),
+						logicalPortCache:             NewPortCache(stopChan),
+						networkPolicies:              syncmap.NewSyncMap[*networkPolicy](),
+						networkPolicyKeysByNamespace: syncmap.NewSyncMap[sets.Set[string]](),
 					},
 					externalGatewayRouteInfo: apbroutecontroller.NewExternalGatewayRouteInfoCache(),
 				}
@@ -242,7 +246,7 @@ func TestMigratedVMPodIPOwnershipOnSubnetReuse(t *testing.T) {
 					}
 					g.Expect(libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitch(nbClient,
 						&nbdb.LogicalSwitch{Name: podNode}, lsp)).To(gomega.Succeed())
-					portInfo = oc.logicalPortCache.add(pod, podNode, nad, lsp.UUID, annotation.MAC, ips)
+					portInfo = oc.logicalPortCache.add(pod, podNode, nad, oc.GetNetworkName(), lsp.UUID, annotation.MAC, ips)
 				}
 				g.Expect(oc.removePod(pod, portInfo)).To(gomega.Succeed())
 				if portInfo != nil {
