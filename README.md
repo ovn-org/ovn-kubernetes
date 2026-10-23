@@ -9,6 +9,7 @@
 [![Go Doc][go-doc-badge]][go-doc-url]
 [![Static Badge][slack-badge]][slack-url]
 [![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fovn-kubernetes%2Fovn-kubernetes.svg?type=shield)](https://app.fossa.com/projects/git%2Bgithub.com%2Fovn-kubernetes%2Fovn-kubernetes?ref=badge_shield)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/ovn-kubernetes/ovn-kubernetes)
 
 
 [apache2-badge]: https://img.shields.io/badge/License-Apache%202.0-blue.svg
