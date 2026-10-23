@@ -3,4 +3,4 @@
 
 package nbdb
 
-//go:generate modelgen --extended -p nbdb -o . ovn-nb.ovsschema
+//go:generate go tool modelgen --extended -p nbdb -o . ovn-nb.ovsschema

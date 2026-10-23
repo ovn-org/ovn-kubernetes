@@ -126,10 +126,7 @@ COPY ${OVN_KUBERNETES_DIR} ovn-kubernetes
 WORKDIR /workspace/ovn-kubernetes/go-controller
 # Get a working version of libovsdb (for modelgen).
 RUN GO111MODULE=on go install \
-    github.com/ovn-kubernetes/libovsdb/cmd/modelgen@$( \
-    go list -mod=mod -m -f '{{ .Version }}' \
-    github.com/ovn-kubernetes/libovsdb \
-)
+    github.com/ovn-kubernetes/libovsdb/cmd/modelgen
 # Regenerate models based on the actual OVN NB/SB schema.
 COPY --from=ovnbuilder /root/ovn/ovn-nb.ovsschema pkg/nbdb/ovn-nb.ovsschema
 COPY --from=ovnbuilder /root/ovn/ovn-sb.ovsschema pkg/sbdb/ovn-sb.ovsschema
