@@ -549,6 +549,10 @@
          <lastmod>2026-10-23</lastmod>
     </url>
     <url>
+         <loc>https://www.ovn.org/ovn-kubernetes/master/okeps/okep-6691-scalable-arp-ndp-broadcast-udn/</loc>
+         <lastmod>2026-10-23</lastmod>
+    </url>
+    <url>
          <loc>https://www.ovn.org/ovn-kubernetes/master/okeps/okep-6800-egressip-node-selector/</loc>
          <lastmod>2026-10-23</lastmod>
     </url>
