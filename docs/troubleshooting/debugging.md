@@ -17,7 +17,7 @@ same system-id for all your VMs - which is a problem.
 
 ### All nodes should register with OVN SB database.
 
-On the master, run:
+On the control-plane node, run:
 
 ```
 ovn-sbctl list chassis
@@ -92,7 +92,7 @@ for any errors with the OVN database and northd setup.
 
 ### Check the watcher's log file.
 
-On the master, check whether ovnkube is running by:
+On the control-plane node, check whether ovnkube is running by:
 
 ```
 ps -ef | grep ovnkube

@@ -1066,12 +1066,9 @@ func displayNodeInfo(coreclient *corev1client.CoreV1Client) {
 
 	klog.V(5).Infof(" Nodes: ")
 	for _, node := range nodes.Items {
-		// look for both labels until master label is removed in kubernetes 1.25
-		// https://github.com/kubernetes/kubernetes/pull/107533
-		_, foundMaster := node.Labels["node-role.kubernetes.io/master"]
 		_, foundControlPlane := node.Labels["node-role.kubernetes.io/control-plane"]
-		if foundMaster || foundControlPlane {
-			klog.V(5).Infof("  Name: %s is a master", node.Name)
+		if foundControlPlane {
+			klog.V(5).Infof("  Name: %s is a control-plane node", node.Name)
 			for _, s := range node.Status.Addresses {
 				addrStr := utilnet.ParseIPSloppy(s.Address).String()
 				klog.V(5).Infof("  Address Type: %s - Address: %s", s.Type, addrStr)
