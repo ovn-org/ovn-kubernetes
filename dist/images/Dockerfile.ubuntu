@@ -38,8 +38,8 @@ USER root
 
 # Install bootstrap packages, verify the Kubernetes repo signing key
 # fingerprint, then install runtime dependencies and kubectl in one layer.
-RUN apt-get update && apt-get install -y \
-    ca-certificates curl gpg iproute2 software-properties-common util-linux nftables ndisc6 libndp-tools && \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates curl gpg iproute2 util-linux nftables ndisc6 libndp-tools && \
     mkdir -p -m 755 /etc/apt/keyrings && \
     kubectl_apt_signing_fingerprint=DE15B14486CD377B9E876E1A234654DA9A296436 && \
     kubectl_key=/tmp/kubernetes-apt-keyring.asc && \
@@ -50,9 +50,11 @@ RUN apt-get update && apt-get install -y \
     chmod 644 /etc/apt/keyrings/kubernetes-apt-keyring.gpg && \
     echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v${KUBECTL_MINOR}/deb/ /" > /etc/apt/sources.list.d/kubernetes.list && \
     chmod 644 /etc/apt/sources.list.d/kubernetes.list && \
-    apt-get update && apt-get install -y \
+    apt-get update && apt-get install -y --no-install-recommends \
+    systemd-standalone-sysusers \
     openvswitch-switch openvswitch-common openvswitch-test \
     ovn-central=${OVN_DEB_VERSION} ovn-common=${OVN_DEB_VERSION} ovn-host=${OVN_DEB_VERSION} kubectl tcpdump && \
+    apt-get purge -y --autoremove curl && \
     rm -rf /var/lib/apt/lists/*
 
 # Built in the ovnkube-builder stage, then the binaries are copied here.
