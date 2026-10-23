@@ -10,10 +10,14 @@ HERE=$(dirname "$(readlink --canonicalize "$BASH_SOURCE")")
 ROOT=$(readlink --canonicalize "$HERE/..")
 
 echo "Checking that go mod / sum and vendor/ is correct"
-cd "$ROOT/"
-go mod tidy
-go mod vendor
-cd -
+for modfile in "$ROOT/go.mod" "$ROOT"/../test/*/go.mod; do
+    module=${modfile%/go.mod}
+    echo "Checking go.mod and go.sum in $module"
+    go -C "$module" mod tidy
+done
+
+go -C "$ROOT" mod vendor
+
 CHANGES=$(git status --porcelain)
 if [ -n "$CHANGES" ] ; then
     echo "ERROR: detected go mod / sum or vendor inconsistency after 'go mod tidy; go mod vendor':"
