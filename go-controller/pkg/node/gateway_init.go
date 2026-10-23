@@ -378,13 +378,8 @@ func (nc *DefaultNodeNetworkController) initGatewayMainStart(gw *gateway, waiter
 	return nc.validateVTEPInterfaceMTU()
 }
 
-// interfaceForEXGW takes the interface requested to act as exgw bridge
-// and returns the name of the bridge if exists, or the interface itself
-// if the bridge needs to be created. In this last scenario, BridgeForInterface
-// will create the bridge.
 func interfaceForEXGW(ovsClient libovsdbclient.Client, intfName string) (string, error) {
 	if _, err := ovsops.GetBridge(ovsClient, intfName); err == nil {
-		// It's a bridge
 		return intfName, nil
 	} else if !errors.Is(err, libovsdbclient.ErrNotFound) {
 		return "", fmt.Errorf("failed to check whether %s is an OVS bridge: %w", intfName, err)
@@ -392,7 +387,9 @@ func interfaceForEXGW(ovsClient libovsdbclient.Client, intfName string) (string,
 
 	bridge := util.GetBridgeName(intfName)
 	if _, err := ovsops.GetBridge(ovsClient, bridge); err == nil {
-		// not a bridge, but the corresponding bridge was already created
+		if actualBridge, _, err := util.RunOVSVsctl("port-to-br", intfName); err != nil || strings.TrimSpace(actualBridge) != bridge {
+			return intfName, nil
+		}
 		return bridge, nil
 	} else if !errors.Is(err, libovsdbclient.ErrNotFound) {
 		return "", fmt.Errorf("failed to check whether OVS bridge %s exists for interface %s: %w", bridge, intfName, err)
