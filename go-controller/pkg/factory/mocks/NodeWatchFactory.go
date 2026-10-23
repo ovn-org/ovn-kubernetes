@@ -258,6 +258,26 @@ func (_m *NodeWatchFactory) EgressIPInformer() egressipv1.EgressIPInformer {
 	return r0
 }
 
+// EndpointSliceInformer provides a mock function with no fields
+func (_m *NodeWatchFactory) EndpointSliceInformer() cache.SharedIndexInformer {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for EndpointSliceInformer")
+	}
+
+	var r0 cache.SharedIndexInformer
+	if rf, ok := ret.Get(0).(func() cache.SharedIndexInformer); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(cache.SharedIndexInformer)
+		}
+	}
+
+	return r0
+}
+
 // GetAllPods provides a mock function with no fields
 func (_m *NodeWatchFactory) GetAllPods() ([]*corev1.Pod, error) {
 	ret := _m.Called()
@@ -772,6 +792,26 @@ func (_m *NodeWatchFactory) RouteAdvertisementsInformer() routeadvertisementsv1.
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(routeadvertisementsv1.RouteAdvertisementsInformer)
+		}
+	}
+
+	return r0
+}
+
+// ServiceInformer provides a mock function with no fields
+func (_m *NodeWatchFactory) ServiceInformer() cache.SharedIndexInformer {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for ServiceInformer")
+	}
+
+	var r0 cache.SharedIndexInformer
+	if rf, ok := ret.Get(0).(func() cache.SharedIndexInformer); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(cache.SharedIndexInformer)
 		}
 	}
 

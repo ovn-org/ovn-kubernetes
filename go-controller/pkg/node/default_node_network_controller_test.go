@@ -21,13 +21,18 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes/fake"
+	"k8s.io/client-go/util/workqueue"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/controller"
 	adminpolicybasedrouteclient "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
+	factoryMocks "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory/mocks"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube/mocks"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/bridgeconfig"
@@ -877,13 +882,18 @@ var _ = Describe("Node", func() {
 						NetworkAttchDefClient:  nadfake.NewSimpleClientset(),
 					}
 
+					nc = nil
 					stop := make(chan struct{})
 					wf, err := factory.NewNodeWatchFactory(fakeClient, nodeName)
 					Expect(err).NotTo(HaveOccurred())
 					wg := &sync.WaitGroup{}
 					defer func() {
-						close(stop)
-						wg.Wait()
+						if nc != nil {
+							nc.Stop()
+						} else {
+							close(stop)
+							wg.Wait()
+						}
 						wf.Shutdown()
 					}()
 
@@ -891,8 +901,8 @@ var _ = Describe("Node", func() {
 					Expect(err).NotTo(HaveOccurred())
 					routeManager := routemanager.NewController()
 					cnnci := NewCommonNodeNetworkControllerInfo(kubeFakeClient, fakeClient.AdminPolicyRouteClient, wf, nil, nodeName, routeManager)
-					nc = newDefaultNodeNetworkController(cnnci, stop, wg, routeManager, nil, nil)
-					nc.initRetryFrameworkForNode()
+					nc, err = newDefaultNodeNetworkController(cnnci, stop, wg, routeManager, nil, nil)
+					Expect(err).NotTo(HaveOccurred())
 					err = setupRemoteNodeNFTSets()
 					Expect(err).NotTo(HaveOccurred())
 					err = setupPMTUDNFTChain()
@@ -914,17 +924,37 @@ var _ = Describe("Node", func() {
 					}()
 					By("start up should add nftables rules for remote node")
 
-					err = nc.WatchNodes()
+					err = nc.WatchNodes(wait.ContextForChannel(stop), 1)
 					Expect(err).NotTo(HaveOccurred())
 					nftRules := v4PMTUDNFTRules + `
 add element inet ovn-kubernetes remote-node-ips-v4 { 169.254.254.61 }
 `
-					err = nodenft.MatchNFTRules(nftRules, nft.Dump())
-					Expect(err).NotTo(HaveOccurred())
+					Eventually(func() error {
+						return nodenft.MatchNFTRules(nftRules, nft.Dump())
+					}).WithTimeout(2 * time.Second).ShouldNot(HaveOccurred())
 					gw := nc.Gateway.(*gateway)
 					By("start up should add openflow rules for remote node")
-					flows := gw.openflowManager.getFlowsByKey(getPMTUDKey(remoteNodeName))
-					Expect(flows).To(HaveLen(1))
+					Eventually(func() []string {
+						return gw.openflowManager.getFlowsByKey(getPMTUDKey(remoteNodeName))
+					}).WithTimeout(2 * time.Second).Should(HaveLen(1))
+
+					By("updating the remote node IP should update the nftables element")
+					newRemoteIP := "169.254.254.62"
+					otherNode.Annotations[util.OVNNodeHostCIDRs] = fmt.Sprintf("[\"%s\"]", newRemoteIP+"/24")
+					otherNode.Status.Addresses = []corev1.NodeAddress{
+						{
+							Type:    corev1.NodeInternalIP,
+							Address: newRemoteIP,
+						},
+					}
+					_, err = kubeFakeClient.CoreV1().Nodes().Update(context.TODO(), &otherNode, metav1.UpdateOptions{})
+					Expect(err).NotTo(HaveOccurred())
+					updatedNFTRules := v4PMTUDNFTRules + fmt.Sprintf(`
+add element inet ovn-kubernetes remote-node-ips-v4 { %s }
+`, newRemoteIP)
+					Eventually(func() error {
+						return nodenft.MatchNFTRules(updatedNFTRules, nft.Dump())
+					}).WithTimeout(2 * time.Second).ShouldNot(HaveOccurred())
 
 					By("deleting the remote node should remove the nftables element")
 					err = kubeFakeClient.CoreV1().Nodes().Delete(context.TODO(), remoteNodeName, metav1.DeleteOptions{})
@@ -988,13 +1018,18 @@ add element inet ovn-kubernetes remote-node-ips-v4 { 169.254.254.61 }
 						NetworkAttchDefClient:  nadfake.NewSimpleClientset(),
 					}
 
+					nc = nil
 					stop := make(chan struct{})
 					wf, err := factory.NewNodeWatchFactory(fakeClient, nodeName)
 					Expect(err).NotTo(HaveOccurred())
 					wg := &sync.WaitGroup{}
 					defer func() {
-						close(stop)
-						wg.Wait()
+						if nc != nil {
+							nc.Stop()
+						} else {
+							close(stop)
+							wg.Wait()
+						}
 						wf.Shutdown()
 					}()
 
@@ -1002,8 +1037,8 @@ add element inet ovn-kubernetes remote-node-ips-v4 { 169.254.254.61 }
 					Expect(err).NotTo(HaveOccurred())
 					routeManager := routemanager.NewController()
 					cnnci := NewCommonNodeNetworkControllerInfo(kubeFakeClient, fakeClient.AdminPolicyRouteClient, wf, nil, nodeName, routeManager)
-					nc = newDefaultNodeNetworkController(cnnci, stop, wg, routeManager, nil, nil)
-					nc.initRetryFrameworkForNode()
+					nc, err = newDefaultNodeNetworkController(cnnci, stop, wg, routeManager, nil, nil)
+					Expect(err).NotTo(HaveOccurred())
 					err = setupRemoteNodeNFTSets()
 					Expect(err).NotTo(HaveOccurred())
 					err = setupPMTUDNFTChain()
@@ -1025,17 +1060,19 @@ add element inet ovn-kubernetes remote-node-ips-v4 { 169.254.254.61 }
 					}()
 					By("start up should add nftables rules for remote node")
 
-					err = nc.WatchNodes()
+					err = nc.WatchNodes(wait.ContextForChannel(stop), 1)
 					Expect(err).NotTo(HaveOccurred())
 					nftRules := v4PMTUDNFTRules + `
 add element inet ovn-kubernetes remote-node-ips-v4 { 169.254.253.61 }
 `
-					err = nodenft.MatchNFTRules(nftRules, nft.Dump())
-					Expect(err).NotTo(HaveOccurred())
+					Eventually(func() error {
+						return nodenft.MatchNFTRules(nftRules, nft.Dump())
+					}).WithTimeout(2 * time.Second).ShouldNot(HaveOccurred())
 					gw := nc.Gateway.(*gateway)
 					By("start up should add openflow rules for remote node")
-					flows := gw.openflowManager.getFlowsByKey(getPMTUDKey(remoteNodeName))
-					Expect(flows).To(HaveLen(1))
+					Eventually(func() []string {
+						return gw.openflowManager.getFlowsByKey(getPMTUDKey(remoteNodeName))
+					}).WithTimeout(2 * time.Second).Should(HaveLen(1))
 
 					By("deleting the remote node should remove the nftables element")
 					err = kubeFakeClient.CoreV1().Nodes().Delete(context.TODO(), remoteNodeName, metav1.DeleteOptions{})
@@ -1141,13 +1178,18 @@ add element inet ovn-kubernetes remote-node-ips-v4 { 169.254.253.61 }
 						NetworkAttchDefClient:  nadfake.NewSimpleClientset(),
 					}
 
+					nc = nil
 					stop := make(chan struct{})
 					wf, err := factory.NewNodeWatchFactory(fakeClient, nodeName)
 					Expect(err).NotTo(HaveOccurred())
 					wg := &sync.WaitGroup{}
 					defer func() {
-						close(stop)
-						wg.Wait()
+						if nc != nil {
+							nc.Stop()
+						} else {
+							close(stop)
+							wg.Wait()
+						}
 						wf.Shutdown()
 					}()
 
@@ -1155,8 +1197,8 @@ add element inet ovn-kubernetes remote-node-ips-v4 { 169.254.253.61 }
 					Expect(err).NotTo(HaveOccurred())
 					routeManager := routemanager.NewController()
 					cnnci := NewCommonNodeNetworkControllerInfo(kubeFakeClient, fakeClient.AdminPolicyRouteClient, wf, nil, nodeName, routeManager)
-					nc = newDefaultNodeNetworkController(cnnci, stop, wg, routeManager, nil, nil)
-					nc.initRetryFrameworkForNode()
+					nc, err = newDefaultNodeNetworkController(cnnci, stop, wg, routeManager, nil, nil)
+					Expect(err).NotTo(HaveOccurred())
 					err = setupRemoteNodeNFTSets()
 					Expect(err).NotTo(HaveOccurred())
 					err = setupPMTUDNFTChain()
@@ -1178,17 +1220,19 @@ add element inet ovn-kubernetes remote-node-ips-v4 { 169.254.253.61 }
 					}()
 					By("start up should add nftables rules for remote node")
 
-					err = nc.WatchNodes()
+					err = nc.WatchNodes(wait.ContextForChannel(stop), 1)
 					Expect(err).NotTo(HaveOccurred())
 					nftRules := v6PMTUDNFTRules + `
 add element inet ovn-kubernetes remote-node-ips-v6 { 2001:db8:1::4 }
 `
-					err = nodenft.MatchNFTRules(nftRules, nft.Dump())
-					Expect(err).NotTo(HaveOccurred())
+					Eventually(func() error {
+						return nodenft.MatchNFTRules(nftRules, nft.Dump())
+					}).WithTimeout(2 * time.Second).ShouldNot(HaveOccurred())
 					gw := nc.Gateway.(*gateway)
 					By("start up should add openflow rules for remote node")
-					flows := gw.openflowManager.getFlowsByKey(getPMTUDKey(remoteNodeName))
-					Expect(flows).To(HaveLen(1))
+					Eventually(func() []string {
+						return gw.openflowManager.getFlowsByKey(getPMTUDKey(remoteNodeName))
+					}).WithTimeout(2 * time.Second).Should(HaveLen(1))
 
 					By("deleting the remote node should remove the nftables element")
 					err = kubeFakeClient.CoreV1().Nodes().Delete(context.TODO(), remoteNodeName, metav1.DeleteOptions{})
@@ -1251,13 +1295,18 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2001:db8:1::4 }
 						NetworkAttchDefClient:  nadfake.NewSimpleClientset(),
 					}
 
+					nc = nil
 					stop := make(chan struct{})
 					wf, err := factory.NewNodeWatchFactory(fakeClient, nodeName)
 					Expect(err).NotTo(HaveOccurred())
 					wg := &sync.WaitGroup{}
 					defer func() {
-						close(stop)
-						wg.Wait()
+						if nc != nil {
+							nc.Stop()
+						} else {
+							close(stop)
+							wg.Wait()
+						}
 						wf.Shutdown()
 					}()
 
@@ -1265,8 +1314,8 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2001:db8:1::4 }
 					Expect(err).NotTo(HaveOccurred())
 					routeManager := routemanager.NewController()
 					cnnci := NewCommonNodeNetworkControllerInfo(kubeFakeClient, fakeClient.AdminPolicyRouteClient, wf, nil, nodeName, routeManager)
-					nc = newDefaultNodeNetworkController(cnnci, stop, wg, routeManager, nil, nil)
-					nc.initRetryFrameworkForNode()
+					nc, err = newDefaultNodeNetworkController(cnnci, stop, wg, routeManager, nil, nil)
+					Expect(err).NotTo(HaveOccurred())
 					err = setupRemoteNodeNFTSets()
 					Expect(err).NotTo(HaveOccurred())
 					err = setupPMTUDNFTChain()
@@ -1288,17 +1337,19 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2001:db8:1::4 }
 					}()
 					By("start up should add nftables rules for remote node")
 
-					err = nc.WatchNodes()
+					err = nc.WatchNodes(wait.ContextForChannel(stop), 1)
 					Expect(err).NotTo(HaveOccurred())
 					nftRules := v6PMTUDNFTRules + `
 add element inet ovn-kubernetes remote-node-ips-v6 { 2002:db8:1::4 }
 `
-					err = nodenft.MatchNFTRules(nftRules, nft.Dump())
-					Expect(err).NotTo(HaveOccurred())
+					Eventually(func() error {
+						return nodenft.MatchNFTRules(nftRules, nft.Dump())
+					}).WithTimeout(2 * time.Second).ShouldNot(HaveOccurred())
 					gw := nc.Gateway.(*gateway)
 					By("start up should add openflow rules for remote node")
-					flows := gw.openflowManager.getFlowsByKey(getPMTUDKey(remoteNodeName))
-					Expect(flows).To(HaveLen(1))
+					Eventually(func() []string {
+						return gw.openflowManager.getFlowsByKey(getPMTUDKey(remoteNodeName))
+					}).WithTimeout(2 * time.Second).Should(HaveLen(1))
 
 					By("deleting the remote node should remove the nftables element")
 					err = kubeFakeClient.CoreV1().Nodes().Delete(context.TODO(), remoteNodeName, metav1.DeleteOptions{})
@@ -1412,13 +1463,18 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2002:db8:1::4 }
 						NetworkAttchDefClient:  nadfake.NewSimpleClientset(),
 					}
 
+					nc = nil
 					stop := make(chan struct{})
 					wf, err := factory.NewNodeWatchFactory(fakeClient, nodeName)
 					Expect(err).NotTo(HaveOccurred())
 					wg := &sync.WaitGroup{}
 					defer func() {
-						close(stop)
-						wg.Wait()
+						if nc != nil {
+							nc.Stop()
+						} else {
+							close(stop)
+							wg.Wait()
+						}
 						wf.Shutdown()
 					}()
 
@@ -1426,8 +1482,8 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2002:db8:1::4 }
 					Expect(err).NotTo(HaveOccurred())
 					routeManager := routemanager.NewController()
 					cnnci := NewCommonNodeNetworkControllerInfo(kubeFakeClient, fakeClient.AdminPolicyRouteClient, wf, nil, nodeName, routeManager)
-					nc = newDefaultNodeNetworkController(cnnci, stop, wg, routeManager, nil, nil)
-					nc.initRetryFrameworkForNode()
+					nc, err = newDefaultNodeNetworkController(cnnci, stop, wg, routeManager, nil, nil)
+					Expect(err).NotTo(HaveOccurred())
 					err = setupRemoteNodeNFTSets()
 					Expect(err).NotTo(HaveOccurred())
 					err = setupPMTUDNFTChain()
@@ -1452,7 +1508,7 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2002:db8:1::4 }
 					}()
 					By("no nftables elements should present at startup")
 
-					err = nc.WatchNodes()
+					err = nc.WatchNodes(wait.ContextForChannel(stop), 1)
 					Expect(err).NotTo(HaveOccurred())
 					Expect(nft.Dump()).NotTo(ContainSubstring("add element inet ovn-kubernetes mgmtport-no-snat-subnets-v4 { 192.168.1.0/24 }"))
 					Expect(nft.Dump()).NotTo(ContainSubstring("add element inet ovn-kubernetes mgmtport-no-snat-subnets-v6 { fd00::/64 }"))
@@ -1482,6 +1538,19 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2002:db8:1::4 }
 						return strings.Contains(cleanDump, "add element inet ovn-kubernetes mgmtport-no-snat-subnets-v4 { 192.167.1.0/24 }") &&
 							strings.Contains(cleanDump, "add element inet ovn-kubernetes mgmtport-no-snat-subnets-v4 { 192.169.1.0/24 }") &&
 							strings.Contains(cleanDump, "add element inet ovn-kubernetes mgmtport-no-snat-subnets-v6 { fd00::/64 }")
+					}).WithTimeout(2 * time.Second).Should(BeTrue())
+
+					By("removing subnets from node annotation should remove nftables elements")
+					delete(node.Annotations, util.OvnNodeDontSNATSubnets)
+					_, err = kubeFakeClient.CoreV1().Nodes().Update(context.TODO(), &node, metav1.UpdateOptions{})
+					Expect(err).NotTo(HaveOccurred())
+
+					Eventually(func() bool {
+						cleanDump := strings.ReplaceAll(nft.Dump(), "\r", "")
+						return !strings.Contains(cleanDump, "mgmtport-no-snat-subnets-v4 { 192.167.1.0/24 }") &&
+							!strings.Contains(cleanDump, "mgmtport-no-snat-subnets-v4 { 192.169.1.0/24 }") &&
+							!strings.Contains(cleanDump, "mgmtport-no-snat-subnets-v6 { fd00::/64 }") &&
+							!strings.Contains(cleanDump, "mgmtport-no-snat-subnets-v6 { fd11::/64 }")
 					}).WithTimeout(2 * time.Second).Should(BeTrue())
 
 					By("deleting node should remove nftables elements")
@@ -1533,13 +1602,18 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2002:db8:1::4 }
 						NetworkAttchDefClient:  nadfake.NewSimpleClientset(),
 					}
 
+					nc = nil
 					stop := make(chan struct{})
 					wf, err := factory.NewNodeWatchFactory(fakeClient, nodeName)
 					Expect(err).NotTo(HaveOccurred())
 					wg := &sync.WaitGroup{}
 					defer func() {
-						close(stop)
-						wg.Wait()
+						if nc != nil {
+							nc.Stop()
+						} else {
+							close(stop)
+							wg.Wait()
+						}
 						wf.Shutdown()
 					}()
 
@@ -1547,8 +1621,8 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2002:db8:1::4 }
 					Expect(err).NotTo(HaveOccurred())
 					routeManager := routemanager.NewController()
 					cnnci := NewCommonNodeNetworkControllerInfo(kubeFakeClient, fakeClient.AdminPolicyRouteClient, wf, nil, nodeName, routeManager)
-					nc = newDefaultNodeNetworkController(cnnci, stop, wg, routeManager, nil, nil)
-					nc.initRetryFrameworkForNode()
+					nc, err = newDefaultNodeNetworkController(cnnci, stop, wg, routeManager, nil, nil)
+					Expect(err).NotTo(HaveOccurred())
 					err = setupRemoteNodeNFTSets()
 					Expect(err).NotTo(HaveOccurred())
 					err = setupPMTUDNFTChain()
@@ -1573,10 +1647,10 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2002:db8:1::4 }
 					}()
 					By("expected nftables elements should present at startup")
 
-					err = nc.WatchNodes()
+					err = nc.WatchNodes(wait.ContextForChannel(stop), 1)
 					Expect(err).NotTo(HaveOccurred())
-					Expect(nft.Dump()).To(ContainSubstring("add element inet ovn-kubernetes mgmtport-no-snat-subnets-v4 { 192.168.1.0/24 }"))
-					Expect(nft.Dump()).To(ContainSubstring("add element inet ovn-kubernetes mgmtport-no-snat-subnets-v6 { fd00::/64 }"))
+					Eventually(func() string { return nft.Dump() }).WithTimeout(2 * time.Second).Should(ContainSubstring("add element inet ovn-kubernetes mgmtport-no-snat-subnets-v4 { 192.168.1.0/24 }"))
+					Eventually(func() string { return nft.Dump() }).WithTimeout(2 * time.Second).Should(ContainSubstring("add element inet ovn-kubernetes mgmtport-no-snat-subnets-v6 { fd00::/64 }"))
 
 					By("editing subnets on node annotation should update nftables elements")
 					node.Annotations[util.OvnNodeDontSNATSubnets] = `["192.167.1.0/24"]`
@@ -1603,6 +1677,19 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2002:db8:1::4 }
 						return strings.Contains(cleanDump, "add element inet ovn-kubernetes mgmtport-no-snat-subnets-v4 { 192.167.1.0/24 }") &&
 							strings.Contains(cleanDump, "add element inet ovn-kubernetes mgmtport-no-snat-subnets-v4 { 192.169.1.0/24 }") &&
 							strings.Contains(cleanDump, "add element inet ovn-kubernetes mgmtport-no-snat-subnets-v6 { fd00::/64 }")
+					}).WithTimeout(2 * time.Second).Should(BeTrue())
+
+					By("removing subnets from node annotation should remove nftables elements")
+					delete(node.Annotations, util.OvnNodeDontSNATSubnets)
+					_, err = kubeFakeClient.CoreV1().Nodes().Update(context.TODO(), &node, metav1.UpdateOptions{})
+					Expect(err).NotTo(HaveOccurred())
+
+					Eventually(func() bool {
+						cleanDump := strings.ReplaceAll(nft.Dump(), "\r", "")
+						return !strings.Contains(cleanDump, "mgmtport-no-snat-subnets-v4 { 192.167.1.0/24 }") &&
+							!strings.Contains(cleanDump, "mgmtport-no-snat-subnets-v4 { 192.169.1.0/24 }") &&
+							!strings.Contains(cleanDump, "mgmtport-no-snat-subnets-v6 { fd00::/64 }") &&
+							!strings.Contains(cleanDump, "mgmtport-no-snat-subnets-v6 { fd11::/64 }")
 					}).WithTimeout(2 * time.Second).Should(BeTrue())
 
 					By("deleting node should remove nftables elements")
@@ -1983,7 +2070,8 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2002:db8:1::4 }
 				}
 
 				wf, err := factory.NewNodeWatchFactory(&util.OVNNodeClientset{
-					KubeClient: fakeClient,
+					KubeClient:            fakeClient,
+					NetworkAttchDefClient: nadfake.NewSimpleClientset(),
 				}, "test-node")
 				Expect(err).NotTo(HaveOccurred())
 				defer wf.Shutdown()
@@ -2268,6 +2356,301 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2002:db8:1::4 }
 				}
 			}()),
 		)
+
+		It("onConntrackEndpointSliceAdd does not overwrite existing cache entry", func() {
+			nc := &DefaultNodeNetworkController{}
+			key := "default/test-eps"
+			eps1 := &discovery.EndpointSlice{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-eps", Namespace: "default"},
+			}
+			eps2 := &discovery.EndpointSlice{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-eps", Namespace: "default", ResourceVersion: "2"},
+			}
+			nc.conntrackEndpointSliceCache.Store(key, eps1)
+			nc.onConntrackEndpointSliceAdd(eps2)
+			val, ok := nc.conntrackEndpointSliceCache.Load(key)
+			Expect(ok).To(BeTrue())
+			Expect(val).To(Equal(eps1))
+		})
+
+		It("onConntrackEndpointSliceUpdate enqueues EndpointSlice when service label is removed", func() {
+			Expect(config.PrepareTestConfig()).To(Succeed())
+			config.OVNKubernetesFeature.EnableMultiNetwork = true
+			config.OVNKubernetesFeature.EnableNetworkSegmentation = true
+			defer func() {
+				_ = config.PrepareTestConfig()
+			}()
+			q := workqueue.NewTypedRateLimitingQueueWithConfig(
+				controller.DefaultRateLimiter[string](),
+				workqueue.TypedRateLimitingQueueConfig[string]{Name: "test-queue"},
+			)
+			defer q.ShutDown()
+			nc := &DefaultNodeNetworkController{
+				conntrackEndpointSliceQueue: q,
+			}
+			oldEPS := &discovery.EndpointSlice{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-eps",
+					Namespace: "default",
+					Labels: map[string]string{
+						discovery.LabelServiceName: "test-service",
+					},
+				},
+			}
+			newEPS := &discovery.EndpointSlice{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-eps",
+					Namespace: "default",
+					Labels:    map[string]string{},
+				},
+			}
+			nc.onConntrackEndpointSliceUpdate(oldEPS, newEPS)
+			Expect(q.Len()).To(Equal(1))
+			item, _ := q.Get()
+			Expect(item).To(Equal("default/test-eps"))
+
+			By("not enqueuing when both old and new EndpointSlices lack service label")
+			unlabeledOld := &discovery.EndpointSlice{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "unlabeled-eps",
+					Namespace: "default",
+					Labels:    map[string]string{},
+				},
+			}
+			unlabeledNew := &discovery.EndpointSlice{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "unlabeled-eps",
+					Namespace: "default",
+					Labels:    map[string]string{},
+				},
+			}
+			nc.onConntrackEndpointSliceUpdate(unlabeledOld, unlabeledNew)
+			Expect(q.Len()).To(Equal(0))
+		})
+
+		It("reconcileEndpointSliceConntrack flushes conntrack using cached state on deletion", func() {
+			mockNetLinkOps := new(utilMocks.NetLinkOps)
+			util.SetNetLinkOpMockInst(mockNetLinkOps)
+			defer util.ResetNetLinkOpMockInst()
+
+			mockNetLinkOps.On("ConntrackDeleteFilters",
+				mock.AnythingOfType("netlink.ConntrackTableType"),
+				mock.AnythingOfType("netlink.InetFamily"),
+				mock.AnythingOfType("*netlink.ConntrackFilter")).
+				Return(uint(1), nil).Once()
+
+			svc := makeService([]servicePortConfig{{name: "http", port: testServicePort1, targetPort: testEndpointPort1, protocol: udpProtocol}})
+			fakeClient := fake.NewSimpleClientset(svc)
+
+			wf, err := factory.NewNodeWatchFactory(&util.OVNNodeClientset{
+				KubeClient:            fakeClient,
+				NetworkAttchDefClient: nadfake.NewSimpleClientset(),
+			}, "test-node")
+			Expect(err).NotTo(HaveOccurred())
+			defer wf.Shutdown()
+			Expect(wf.Start()).To(Succeed())
+
+			nc := &DefaultNodeNetworkController{
+				BaseNodeNetworkController: BaseNodeNetworkController{
+					CommonNodeNetworkControllerInfo: CommonNodeNetworkControllerInfo{
+						watchFactory: wf,
+					},
+				},
+			}
+
+			key := "test-ns/test-endpointslice"
+			cachedEPS := makeEndpointSlice([]endpointPortConfig{
+				{name: strPtr("http"), port: testEndpointPort1, protocol: udpProtocol},
+			}, []string{"10.0.0.1"})
+			nc.conntrackEndpointSliceCache.Store(key, cachedEPS)
+
+			// EndpointSlice does not exist in fakeClient (deleted)
+			Expect(nc.reconcileEndpointSliceConntrack(key)).To(Succeed())
+			mockNetLinkOps.AssertExpectations(GinkgoT())
+
+			_, inCache := nc.conntrackEndpointSliceCache.Load(key)
+			Expect(inCache).To(BeFalse())
+		})
+
+		It("reconcileEndpointSliceConntrack does not delete newly seeded cache entry if added during deletion", func() {
+			mockNetLinkOps := new(utilMocks.NetLinkOps)
+			util.SetNetLinkOpMockInst(mockNetLinkOps)
+			defer util.ResetNetLinkOpMockInst()
+
+			svc := makeService([]servicePortConfig{{name: "http", port: testServicePort1, targetPort: testEndpointPort1, protocol: udpProtocol}})
+			fakeClient := fake.NewSimpleClientset(svc)
+
+			wf, err := factory.NewNodeWatchFactory(&util.OVNNodeClientset{
+				KubeClient:            fakeClient,
+				NetworkAttchDefClient: nadfake.NewSimpleClientset(),
+			}, "test-node")
+			Expect(err).NotTo(HaveOccurred())
+			defer wf.Shutdown()
+			Expect(wf.Start()).To(Succeed())
+
+			nc := &DefaultNodeNetworkController{
+				BaseNodeNetworkController: BaseNodeNetworkController{
+					CommonNodeNetworkControllerInfo: CommonNodeNetworkControllerInfo{
+						watchFactory: wf,
+					},
+				},
+			}
+
+			key := "test-ns/test-endpointslice"
+			oldEPS := makeEndpointSlice([]endpointPortConfig{
+				{name: strPtr("http"), port: testEndpointPort1, protocol: udpProtocol},
+			}, []string{"10.0.0.1"})
+			nc.conntrackEndpointSliceCache.Store(key, oldEPS)
+
+			newEPS := makeEndpointSlice([]endpointPortConfig{
+				{name: strPtr("http"), port: testEndpointPort1, protocol: udpProtocol},
+			}, []string{"10.0.0.2"})
+
+			mockNetLinkOps.On("ConntrackDeleteFilters",
+				mock.AnythingOfType("netlink.ConntrackTableType"),
+				mock.AnythingOfType("netlink.InetFamily"),
+				mock.AnythingOfType("*netlink.ConntrackFilter")).
+				Run(func(_ mock.Arguments) {
+					// Simulate concurrent Add event storing newEPS before CompareAndDelete
+					nc.conntrackEndpointSliceCache.Store(key, newEPS)
+				}).
+				Return(uint(1), nil).Once()
+
+			Expect(nc.reconcileEndpointSliceConntrack(key)).To(Succeed())
+			mockNetLinkOps.AssertExpectations(GinkgoT())
+
+			// Verify newEPS was NOT deleted by CompareAndDelete
+			val, inCache := nc.conntrackEndpointSliceCache.Load(key)
+			Expect(inCache).To(BeTrue())
+			Expect(val).To(Equal(newEPS))
+		})
+
+		It("reconcileEndpointSliceConntrack flushes conntrack and deletes from cache when service label is removed under segmentation", func() {
+			Expect(config.PrepareTestConfig()).To(Succeed())
+			config.OVNKubernetesFeature.EnableMultiNetwork = true
+			config.OVNKubernetesFeature.EnableNetworkSegmentation = true
+			defer func() {
+				_ = config.PrepareTestConfig()
+			}()
+
+			mockNetLinkOps := new(utilMocks.NetLinkOps)
+			util.SetNetLinkOpMockInst(mockNetLinkOps)
+			defer util.ResetNetLinkOpMockInst()
+
+			mockNetLinkOps.On("ConntrackDeleteFilters",
+				mock.AnythingOfType("netlink.ConntrackTableType"),
+				mock.AnythingOfType("netlink.InetFamily"),
+				mock.AnythingOfType("*netlink.ConntrackFilter")).
+				Return(uint(1), nil).Once()
+
+			svc := makeService([]servicePortConfig{{name: "http", port: testServicePort1, targetPort: testEndpointPort1, protocol: udpProtocol}})
+			// curEPS exists in API, but has no service label
+			curEPS := makeEndpointSlice([]endpointPortConfig{
+				{name: strPtr("http"), port: testEndpointPort1, protocol: udpProtocol},
+			}, []string{"10.0.0.1"})
+			curEPS.Labels = map[string]string{}
+
+			ovnClient := util.GetOVNClientset(svc, curEPS)
+			wf, err := factory.NewNodeWatchFactory(ovnClient.GetNodeClientset(), "test-node")
+			Expect(err).NotTo(HaveOccurred())
+			defer wf.Shutdown()
+			Expect(wf.Start()).To(Succeed())
+
+			nc := &DefaultNodeNetworkController{
+				BaseNodeNetworkController: BaseNodeNetworkController{
+					CommonNodeNetworkControllerInfo: CommonNodeNetworkControllerInfo{
+						watchFactory: wf,
+					},
+				},
+			}
+
+			key := "test-ns/test-endpointslice"
+			cachedEPS := makeEndpointSlice([]endpointPortConfig{
+				{name: strPtr("http"), port: testEndpointPort1, protocol: udpProtocol},
+			}, []string{"10.0.0.1"})
+			nc.conntrackEndpointSliceCache.Store(key, cachedEPS)
+
+			Expect(nc.reconcileEndpointSliceConntrack(key)).To(Succeed())
+			mockNetLinkOps.AssertExpectations(GinkgoT())
+
+			_, inCache := nc.conntrackEndpointSliceCache.Load(key)
+			Expect(inCache).To(BeFalse())
+		})
+
+		It("processConntrackEndpointSliceItem drops item from queue when max attempts are exceeded", func() {
+			q := workqueue.NewTypedRateLimitingQueueWithConfig(
+				controller.DefaultRateLimiter[string](),
+				workqueue.TypedRateLimitingQueueConfig[string]{Name: "test-eps-queue"},
+			)
+			defer q.ShutDown()
+
+			wfMock := &factoryMocks.NodeWatchFactory{}
+			wfMock.On("GetEndpointSlice", "test-ns", "test-eps").Return(nil, apierrors.NewNotFound(discovery.Resource("endpointslices"), "test-eps"))
+			wfMock.On("GetService", "test-ns", "test-service").Return(nil, fmt.Errorf("service error"))
+
+			nc := &DefaultNodeNetworkController{
+				BaseNodeNetworkController: BaseNodeNetworkController{
+					CommonNodeNetworkControllerInfo: CommonNodeNetworkControllerInfo{
+						watchFactory: wfMock,
+					},
+				},
+				conntrackEndpointSliceQueue: q,
+			}
+
+			key := "test-ns/test-eps"
+			cachedEPS := makeEndpointSlice([]endpointPortConfig{
+				{name: strPtr("http"), port: testEndpointPort1, protocol: udpProtocol},
+			}, []string{"10.0.0.1"})
+			nc.conntrackEndpointSliceCache.Store(key, cachedEPS)
+
+			for i := 0; i < controller.DefaultMaxAttempts; i++ {
+				q.AddRateLimited(key)
+			}
+			item, _ := q.Get()
+			q.Done(item)
+			q.Add(key)
+
+			Expect(nc.processConntrackEndpointSliceItem()).To(BeTrue())
+			Expect(q.NumRequeues(key)).To(Equal(0))
+			// Verify stale cache entry is cleaned up on drop when slice is not found
+			_, inCache := nc.conntrackEndpointSliceCache.Load(key)
+			Expect(inCache).To(BeFalse())
+		})
+
+		It("processNodeItem drops item from queue when max attempts are exceeded", func() {
+			q := workqueue.NewTypedRateLimitingQueueWithConfig(
+				controller.DefaultRateLimiter[string](),
+				workqueue.TypedRateLimitingQueueConfig[string]{Name: "test-node-queue"},
+			)
+			defer q.ShutDown()
+
+			wfMock := &factoryMocks.NodeWatchFactory{}
+			wfMock.On("GetNode", "bad-node").Return(nil, apierrors.NewNotFound(corev1.Resource("nodes"), "bad-node"))
+
+			nc := &DefaultNodeNetworkController{
+				BaseNodeNetworkController: BaseNodeNetworkController{
+					CommonNodeNetworkControllerInfo: CommonNodeNetworkControllerInfo{
+						watchFactory: wfMock,
+					},
+				},
+				nodeQueue: q,
+			}
+
+			nc.remoteNodeIPs.Store("bad-node", []net.IP{net.ParseIP("10.0.0.1")})
+
+			for i := 0; i < controller.DefaultMaxAttempts; i++ {
+				q.AddRateLimited("bad-node")
+			}
+			item, _ := q.Get()
+			q.Done(item)
+			q.Add("bad-node")
+
+			Expect(nc.processNodeItem()).To(BeTrue())
+			Expect(q.NumRequeues("bad-node")).To(Equal(0))
+			// Verify remoteNodeIPs is cleaned up on drop when node is not found
+			_, inCache := nc.remoteNodeIPs.Load("bad-node")
+			Expect(inCache).To(BeFalse())
+		})
 	})
 
 	Describe("advertised UDN isolation nftables", func() {
@@ -2320,6 +2703,7 @@ var _ = Describe("Node object deletion", func() {
 		wg       *sync.WaitGroup
 		wf       *factory.WatchFactory
 		origExit func(string)
+		nc       *DefaultNodeNetworkController
 	)
 
 	BeforeEach(func() {
@@ -2332,13 +2716,20 @@ var _ = Describe("Node object deletion", func() {
 		config.OvnKubeNode.Mode = types.NodeModeDPU
 		stop = make(chan struct{})
 		wg = &sync.WaitGroup{}
+		nc = nil
+		wf = nil
 	})
 
 	AfterEach(func() {
-		close(stop)
-		wg.Wait()
+		if nc != nil {
+			nc.Stop()
+		} else {
+			close(stop)
+			wg.Wait()
+		}
 		if wf != nil {
 			wf.Shutdown()
+			wf = nil
 		}
 		ownNodeDeletedExit = origExit
 	})
@@ -2369,10 +2760,8 @@ var _ = Describe("Node object deletion", func() {
 
 		routeManager := routemanager.NewController()
 		cnnci := NewCommonNodeNetworkControllerInfo(kubeFakeClient, fakeClient.AdminPolicyRouteClient, wf, nil, nodeName, routeManager)
-		nc := newDefaultNodeNetworkController(cnnci, stop, wg, routeManager, nil, nil)
-		nc.initRetryFrameworkForNode()
-		Expect(setupRemoteNodeNFTSets()).To(Succeed())
-		Expect(setupPMTUDNFTChain()).To(Succeed())
+		nc, err = newDefaultNodeNetworkController(cnnci, stop, wg, routeManager, nil, nil)
+		Expect(err).NotTo(HaveOccurred())
 		nc.Gateway = &gateway{
 			openflowManager: &openflowManager{
 				defaultBridge: newOpenflowBridge(bridgeconfig.TestDefaultBridgeConfig()),
@@ -2383,7 +2772,7 @@ var _ = Describe("Node object deletion", func() {
 		exited := make(chan string, 1)
 		ownNodeDeletedExit = func(name string) { exited <- name }
 
-		Expect(nc.WatchNodes()).To(Succeed())
+		Expect(nc.WatchNodes(wait.ContextForChannel(stop), 1)).To(Succeed())
 
 		By("deleting another node keeps the controller running")
 		Expect(kubeFakeClient.CoreV1().Nodes().Delete(context.TODO(), remoteNodeName, metav1.DeleteOptions{})).To(Succeed())
@@ -2392,5 +2781,23 @@ var _ = Describe("Node object deletion", func() {
 		By("deleting the controller's own node terminates it")
 		Expect(kubeFakeClient.CoreV1().Nodes().Delete(context.TODO(), nodeName, metav1.DeleteOptions{})).To(Succeed())
 		Eventually(exited).WithTimeout(2 * time.Second).Should(Receive(Equal(nodeName)))
+	})
+
+	It("does not re-update gateway address annotations if primary-dpu-host-addr is unchanged in DPU mode", func() {
+		node := newNode(nodeName, nodeIP)
+		node.Annotations = map[string]string{
+			util.OVNNodePrimaryDPUHostAddr: `{"ipv4":"10.1.1.10/24"}`,
+		}
+		localNC := &DefaultNodeNetworkController{
+			BaseNodeNetworkController: BaseNodeNetworkController{
+				CommonNodeNetworkControllerInfo: CommonNodeNetworkControllerInfo{
+					name: nodeName,
+				},
+			},
+			primaryDPUHostAddr: `{"ipv4":"10.1.1.10/24"}`,
+		}
+		// Since primaryDPUHostAddr matches, Gateway is not touched and reconcileLocalNode succeeds
+		Expect(localNC.reconcileLocalNode(&node)).To(Succeed())
+		Expect(localNC.primaryDPUHostAddr).To(Equal(`{"ipv4":"10.1.1.10/24"}`))
 	})
 })
