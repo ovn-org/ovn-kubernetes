@@ -146,6 +146,7 @@ var _ = Describe("Run", func() {
 				tlsConfig.CipherSuites = []uint16{
 					tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
 				}
+				tlsConfig.CurvePreferences = []tls.CurveID{tls.CurveP384}
 			}
 		})
 
@@ -169,6 +170,7 @@ var _ = Describe("Run", func() {
 				g.Expect(int(state.Version)).To(Equal(tls.VersionTLS12))
 				g.Expect(state.CipherSuite).To(Equal(tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256))
 				g.Expect(state.NegotiatedProtocol).To(Equal("h2"))
+				g.Expect(state.CurveID).To(Equal(tls.CurveP384))
 			}).Within(5 * time.Second).ProbeEvery(100 * time.Millisecond).Should(Succeed())
 		})
 
