@@ -334,7 +334,7 @@ func (s *Server) handleCNIRequest(r *http.Request) (result []byte, err error) {
 	case CNIAdd:
 		response, err = request.cmdAdd(s.kubeAuth, s.clientSet, s.ovsClient)
 	case CNIDel:
-		response, err = request.cmdDel(s.clientSet)
+		response, err = request.cmdDel(s.clientSet, s.ovsClient)
 	default:
 		err = fmt.Errorf("unsupported CNI command %s", request.Command)
 	}

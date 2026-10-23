@@ -32,8 +32,12 @@ import (
 	kexec "k8s.io/utils/exec"
 	"sigs.k8s.io/knftables"
 
+	"github.com/ovn-kubernetes/libovsdb/client"
+
 	ovncnitypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni/types"
+	ovsops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	ovntest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing"
+	libovsdbtest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	cni_type_mocks "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/containernetworking/cni/pkg/types"
 	cni_ns_mocks "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/containernetworking/plugins/pkg/ns"
 	netlink_mocks "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/vishvananda/netlink"
@@ -42,6 +46,7 @@ import (
 	ovntypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 	util_mocks "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util/mocks"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/vswitchd"
 )
 
 func TestRenameLink(t *testing.T) {
@@ -2357,5 +2362,61 @@ func TestReturnSimulatedNetdevsToHost(t *testing.T) {
 		require.ErrorContains(t, err, "mock rename error")
 		mockNetLinkOps.AssertCalled(t, "LinkSetNsFd", succeeding, 7)
 		mockNetLinkOps.AssertNotCalled(t, "LinkSetNsFd", failing, mock.Anything)
+	})
+}
+
+func TestDeletePort(t *testing.T) {
+	origNetLinkOps := util.GetNetLinkOps()
+	mockNetLinkOps := new(util_mocks.NetLinkOps)
+	util.SetNetLinkOpMockInst(mockNetLinkOps)
+	t.Cleanup(func() { util.SetNetLinkOpMockInst(origNetLinkOps) })
+
+	t.Run("with ovsClient", func(t *testing.T) {
+		bridgeUUID := "00000000-0000-0000-0000-000000000001"
+		portUUID := "00000000-0000-0000-0000-000000000002"
+		ifaceUUID := "00000000-0000-0000-0000-000000000003"
+		ovsClient, cleanup, err := libovsdbtest.NewOVSTestHarness(libovsdbtest.TestSetup{
+			OVSData: []libovsdbtest.TestData{
+				&vswitchd.Bridge{UUID: bridgeUUID, Name: "br-int", Ports: []string{portUUID}},
+				&vswitchd.Port{UUID: portUUID, Name: "test-port", Interfaces: []string{ifaceUUID}},
+				&vswitchd.Interface{UUID: ifaceUUID, Name: "test-port"},
+			},
+		})
+		require.NoError(t, err)
+		defer cleanup.Cleanup()
+
+		mockNetLinkOps.On("LinkByName", "test-port").Return(nil, fmt.Errorf("not found")).Once()
+
+		pr := &PodRequest{
+			PodNamespace: "default",
+			PodName:      "test-pod",
+			CNIConf:      &ovncnitypes.NetConf{},
+		}
+		pr.deletePort(ovsClient, "test-port", "default", "test-pod")
+
+		// Verify port was deleted from OVS
+		_, err = ovsops.GetOVSPort(ovsClient, "test-port")
+		require.ErrorIs(t, err, client.ErrNotFound)
+	})
+
+	t.Run("fallback to shell without ovsClient", func(t *testing.T) {
+		fexec := ovntest.NewFakeExec()
+		err := SetExec(fexec)
+		require.NoError(t, err)
+		defer ResetRunner()
+
+		mockNetLinkOps.On("LinkByName", "test-port").Return(nil, fmt.Errorf("not found")).Once()
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ovs-vsctl --timeout=30 del-port br-int test-port",
+			Output: "",
+		})
+
+		pr := &PodRequest{
+			PodNamespace: "default",
+			PodName:      "test-pod",
+			CNIConf:      &ovncnitypes.NetConf{},
+		}
+		pr.deletePort(nil, "test-port", "default", "test-pod")
+		require.True(t, fexec.CalledMatchesExpected())
 	})
 }

@@ -347,7 +347,7 @@ func (p *Plugin) CmdDel(args *skel.CmdArgs) error {
 		// The unprivileged CNI shim has no apiserver/pod-lister access, so the
 		// live-migration IP-preservation guard in deletePodConntrack cannot run
 		// here; pass a nil lister to keep the previous conntrack-flush behavior.
-		err = podRequestInterfaceOps.UnconfigureInterface(pr, response.PodIFInfo, nil, nil)
+		err = podRequestInterfaceOps.UnconfigureInterface(pr, nil, response.PodIFInfo, nil, nil)
 	}
 	return err
 }

@@ -136,7 +136,7 @@ func TestCmdDelDPUPodUIDMismatch(t *testing.T) {
 						return handled, obj, patchErr
 					})
 
-					response, err := pr.cmdDel(&ClientSet{kclient: client, podLister: podLister})
+					response, err := pr.cmdDel(&ClientSet{kclient: client, podLister: podLister}, nil)
 					if tc.wantErr {
 						require.Error(t, err)
 						if tc.patchReplaced {
