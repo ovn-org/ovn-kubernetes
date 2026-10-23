@@ -526,13 +526,18 @@ func (npw *nodePortWatcher) createLbAndExternalSvcFlows(service *corev1.Service,
 			nwDst = "ipv6_dst"
 			nwSrc = "ipv6_src"
 		}
-		cookie, err := svcToCookie(service.Namespace, service.Name, externalIPOrLBIngressIP, svcPort.Port)
+		// Include flowProtocol in cookie/key so TCP and UDP Services that share the same
+		// port number do not overwrite each other's gateway-bridge flow cache entries.
+		// NodePort flows already key by protocol; LB/externalIP paths must match that.
+		cookie, err := svcToCookie(service.Namespace, service.Name,
+			fmt.Sprintf("%s_%s", flowProtocol, externalIPOrLBIngressIP), svcPort.Port)
 		if err != nil {
-			klog.Warningf("Unable to generate cookie for %s svc: %s, %s, %s, %d, error: %v",
-				ipType, service.Namespace, service.Name, externalIPOrLBIngressIP, svcPort.Port, err)
+			klog.Warningf("Unable to generate cookie for %s svc: %s, %s, %s, %s, %d, error: %v",
+				ipType, service.Namespace, service.Name, flowProtocol, externalIPOrLBIngressIP, svcPort.Port, err)
 			cookie = "0"
 		}
-		key := strings.Join([]string{ipType, service.Namespace, service.Name, externalIPOrLBIngressIP, fmt.Sprintf("%d", svcPort.Port)}, "_")
+		key := strings.Join([]string{ipType, service.Namespace, service.Name, flowProtocol,
+			externalIPOrLBIngressIP, fmt.Sprintf("%d", svcPort.Port)}, "_")
 		// Delete if needed and skip to next protocol
 		if !add {
 			npw.ofm.deleteNetworkFlowsByKey(key)

@@ -638,16 +638,16 @@ var _ = Describe("Node Operations", func() {
 				Expect(err).NotTo(HaveOccurred())
 
 				expectedLBIngressFlows := []string{
-					"cookie=0x10c6b89e483ea111, priority=110, in_port=eth0, arp, arp_op=1, arp_tpa=5.5.5.5, actions=output:LOCAL",
+					"cookie=0xd93c9b3aaadf9769, priority=110, in_port=eth0, arp, arp_op=1, arp_tpa=5.5.5.5, actions=output:LOCAL",
 				}
 				expectedLBExternalIPFlows := []string{
-					"cookie=0x71765945a31dc2f1, priority=110, in_port=eth0, arp, arp_op=1, arp_tpa=1.1.1.1, actions=output:LOCAL",
+					"cookie=0xbee1de4b64e2b189, priority=110, in_port=eth0, arp, arp_op=1, arp_tpa=1.1.1.1, actions=output:LOCAL",
 				}
 				flows := fNPW.ofm.getFlowsByKey("NodePort_namespace1_service1_tcp_31111")
 				Expect(flows).To(BeNil())
-				flows = fNPW.ofm.getFlowsByKey("Ingress_namespace1_service1_5.5.5.5_8080")
+				flows = fNPW.ofm.getFlowsByKey("Ingress_namespace1_service1_tcp_5.5.5.5_8080")
 				Expect(flows).To(Equal(expectedLBIngressFlows))
-				flows = fNPW.ofm.getFlowsByKey("External_namespace1_service1_1.1.1.1_8080")
+				flows = fNPW.ofm.getFlowsByKey("External_namespace1_service1_tcp_1.1.1.1_8080")
 				Expect(flows).To(Equal(expectedLBExternalIPFlows))
 
 				return nil
@@ -746,13 +746,13 @@ var _ = Describe("Node Operations", func() {
 				Expect(err).NotTo(HaveOccurred())
 
 				expectedLBIngressFlows := []string{
-					"cookie=0xd8c1fe514f305bc1, priority=110, in_port=eth0, arp, arp_op=1, arp_tpa=5.5.5.5, actions=output:LOCAL",
+					"cookie=0xab26a2ed923fd309, priority=110, in_port=eth0, arp, arp_op=1, arp_tpa=5.5.5.5, actions=output:LOCAL",
 				}
 				expectedLBExternalIPFlows := []string{
-					"cookie=0x799e0efe5404e9a1, priority=110, in_port=eth0, arp, arp_op=1, arp_tpa=1.1.1.1, actions=output:LOCAL",
+					"cookie=0xaf8df8bfad69df29, priority=110, in_port=eth0, arp, arp_op=1, arp_tpa=1.1.1.1, actions=output:LOCAL",
 				}
-				Expect(fNPW.ofm.getFlowsByKey("Ingress_namespace1_service1_5.5.5.5_80")).To(Equal(expectedLBIngressFlows))
-				Expect(fNPW.ofm.getFlowsByKey("External_namespace1_service1_1.1.1.1_80")).To(Equal(expectedLBExternalIPFlows))
+				Expect(fNPW.ofm.getFlowsByKey("Ingress_namespace1_service1_tcp_5.5.5.5_80")).To(Equal(expectedLBIngressFlows))
+				Expect(fNPW.ofm.getFlowsByKey("External_namespace1_service1_tcp_1.1.1.1_80")).To(Equal(expectedLBExternalIPFlows))
 
 				// Delete the service and confirm the rules get deleted
 				addConntrackMocks(netlinkMock, []ctFilterDesc{
@@ -767,8 +767,8 @@ var _ = Describe("Node Operations", func() {
 					return nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 				}, "2s").Should(Succeed())
 
-				Expect(fNPW.ofm.getFlowsByKey("Ingress_namespace1_service1_5.5.5.5_80")).To(BeEmpty())
-				Expect(fNPW.ofm.getFlowsByKey("External_namespace1_service1_1.1.1.1_80")).To(BeEmpty())
+				Expect(fNPW.ofm.getFlowsByKey("Ingress_namespace1_service1_tcp_5.5.5.5_80")).To(BeEmpty())
+				Expect(fNPW.ofm.getFlowsByKey("External_namespace1_service1_tcp_1.1.1.1_80")).To(BeEmpty())
 
 				return nil
 			}
@@ -937,17 +937,108 @@ var _ = Describe("Node Operations", func() {
 				Expect(err).NotTo(HaveOccurred())
 
 				expectedLBIngressFlows := []string{
-					"cookie=0x10c6b89e483ea111, priority=110, in_port=eth0, arp, arp_op=1, arp_tpa=5.5.5.5, actions=output:LOCAL",
+					"cookie=0xd93c9b3aaadf9769, priority=110, in_port=eth0, arp, arp_op=1, arp_tpa=5.5.5.5, actions=output:LOCAL",
 				}
 				expectedLBExternalIPFlows := []string{
-					"cookie=0x71765945a31dc2f1, priority=110, in_port=eth0, arp, arp_op=1, arp_tpa=1.1.1.1, actions=output:LOCAL",
+					"cookie=0xbee1de4b64e2b189, priority=110, in_port=eth0, arp, arp_op=1, arp_tpa=1.1.1.1, actions=output:LOCAL",
 				}
 				flows := fNPW.ofm.getFlowsByKey("NodePort_namespace1_service1_tcp_31111")
 				Expect(flows).To(BeNil())
-				flows = fNPW.ofm.getFlowsByKey("Ingress_namespace1_service1_5.5.5.5_8080")
+				flows = fNPW.ofm.getFlowsByKey("Ingress_namespace1_service1_tcp_5.5.5.5_8080")
 				Expect(flows).To(Equal(expectedLBIngressFlows))
-				flows = fNPW.ofm.getFlowsByKey("External_namespace1_service1_1.1.1.1_8080")
+				flows = fNPW.ofm.getFlowsByKey("External_namespace1_service1_tcp_1.1.1.1_8080")
 				Expect(flows).To(Equal(expectedLBExternalIPFlows))
+
+				return nil
+			}
+			err := app.Run([]string{app.Name})
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		// Regression for https://github.com/ovn-kubernetes/ovn-kubernetes/issues/6770:
+		// TCP and UDP Service ports that share the same port number must keep distinct
+		// LB/externalIP gateway-bridge flow cache entries (keyed by L4 protocol).
+		It("keeps distinct LB/externalIP openflows when TCP and UDP share the same port", func() {
+			app.Action = func(*cli.Context) error {
+				externalIP := "1.1.1.1"
+				config.Gateway.Mode = config.GatewayModeLocal
+				// Two Service ports => two ovs-ofctl show calls when adding flows.
+				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: "ovs-ofctl show breth0",
+					Err: fmt.Errorf("deliberate error to fall back to output:LOCAL"),
+				})
+				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: "ovs-ofctl show breth0",
+					Err: fmt.Errorf("deliberate error to fall back to output:LOCAL"),
+				})
+				service := *newService("service1", "namespace1", "10.129.0.2",
+					[]corev1.ServicePort{
+						{
+							Protocol: corev1.ProtocolTCP,
+							Port:     int32(40000),
+						},
+						{
+							Protocol: corev1.ProtocolUDP,
+							Port:     int32(40000),
+						},
+					},
+					corev1.ServiceTypeLoadBalancer,
+					[]string{externalIP},
+					corev1.ServiceStatus{
+						LoadBalancer: corev1.LoadBalancerStatus{
+							Ingress: []corev1.LoadBalancerIngress{{
+								IP: "5.5.5.5",
+							}},
+						},
+					},
+					false, false, // ETP=cluster
+				)
+				endpointSlice := *newEndpointSlice(
+					"service1",
+					"namespace1",
+					[]discovery.Endpoint{},
+					[]discovery.EndpointPort{},
+				)
+
+				stopChan := make(chan struct{})
+				fakeClient := util.GetOVNClientset(&service, &endpointSlice).GetNodeClientset()
+				wf, err := factory.NewNodeWatchFactory(fakeClient, "node")
+				Expect(err).ToNot(HaveOccurred())
+				Expect(wf.Start()).To(Succeed())
+				defer func() {
+					close(stopChan)
+					wf.Shutdown()
+				}()
+
+				fNPW.watchFactory = wf
+				Expect(startNodePortWatcher(fNPW, fakeClient)).To(Succeed())
+
+				tcpIngress := fNPW.ofm.getFlowsByKey("Ingress_namespace1_service1_tcp_5.5.5.5_40000")
+				udpIngress := fNPW.ofm.getFlowsByKey("Ingress_namespace1_service1_udp_5.5.5.5_40000")
+				tcpExternal := fNPW.ofm.getFlowsByKey("External_namespace1_service1_tcp_1.1.1.1_40000")
+				udpExternal := fNPW.ofm.getFlowsByKey("External_namespace1_service1_udp_1.1.1.1_40000")
+
+				Expect(tcpIngress).ToNot(BeEmpty())
+				Expect(udpIngress).ToNot(BeEmpty())
+				Expect(tcpExternal).ToNot(BeEmpty())
+				Expect(udpExternal).ToNot(BeEmpty())
+
+				Expect(tcpIngress).To(Equal([]string{
+					"cookie=0x9ce81dc216415c97, priority=110, in_port=eth0, arp, arp_op=1, arp_tpa=5.5.5.5, actions=output:LOCAL",
+				}))
+				Expect(udpIngress).To(Equal([]string{
+					"cookie=0x2ec2e49897806c9b, priority=110, in_port=eth0, arp, arp_op=1, arp_tpa=5.5.5.5, actions=output:LOCAL",
+				}))
+				Expect(tcpExternal).To(Equal([]string{
+					"cookie=0x30edef058419cf37, priority=110, in_port=eth0, arp, arp_op=1, arp_tpa=1.1.1.1, actions=output:LOCAL",
+				}))
+				Expect(udpExternal).To(Equal([]string{
+					"cookie=0xad3cee06faa46c1b, priority=110, in_port=eth0, arp, arp_op=1, arp_tpa=1.1.1.1, actions=output:LOCAL",
+				}))
+
+				// Stale key format without protocol must not match either entry.
+				Expect(fNPW.ofm.getFlowsByKey("Ingress_namespace1_service1_5.5.5.5_40000")).To(BeEmpty())
+				Expect(fNPW.ofm.getFlowsByKey("External_namespace1_service1_1.1.1.1_40000")).To(BeEmpty())
 
 				return nil
 			}
@@ -1023,24 +1114,24 @@ var _ = Describe("Node Operations", func() {
 						gwMAC),
 				}
 				expectedLBIngressFlows := []string{
-					"cookie=0x10c6b89e483ea111, priority=110, in_port=eth0, arp, arp_op=1, arp_tpa=5.5.5.5, actions=output:LOCAL",
-					"cookie=0x10c6b89e483ea111, priority=110, in_port=eth0, icmp, nw_dst=5.5.5.5, icmp_type=3, icmp_code=4, actions=output:patch-breth0_ov",
-					"cookie=0x10c6b89e483ea111, priority=110, in_port=eth0, tcp, nw_dst=5.5.5.5, tp_dst=8080, actions=output:patch-breth0_ov",
-					fmt.Sprintf("cookie=0x10c6b89e483ea111, priority=110, in_port=patch-breth0_ov, dl_src=%s, tcp, nw_src=5.5.5.5, tp_src=8080, actions=output:eth0",
+					"cookie=0xd93c9b3aaadf9769, priority=110, in_port=eth0, arp, arp_op=1, arp_tpa=5.5.5.5, actions=output:LOCAL",
+					"cookie=0xd93c9b3aaadf9769, priority=110, in_port=eth0, icmp, nw_dst=5.5.5.5, icmp_type=3, icmp_code=4, actions=output:patch-breth0_ov",
+					"cookie=0xd93c9b3aaadf9769, priority=110, in_port=eth0, tcp, nw_dst=5.5.5.5, tp_dst=8080, actions=output:patch-breth0_ov",
+					fmt.Sprintf("cookie=0xd93c9b3aaadf9769, priority=110, in_port=patch-breth0_ov, dl_src=%s, tcp, nw_src=5.5.5.5, tp_src=8080, actions=output:eth0",
 						gwMAC),
 				}
 				expectedLBExternalIPFlows := []string{
-					"cookie=0x71765945a31dc2f1, priority=110, in_port=eth0, arp, arp_op=1, arp_tpa=1.1.1.1, actions=output:LOCAL",
-					"cookie=0x71765945a31dc2f1, priority=110, in_port=eth0, icmp, nw_dst=1.1.1.1, icmp_type=3, icmp_code=4, actions=output:patch-breth0_ov",
-					"cookie=0x71765945a31dc2f1, priority=110, in_port=eth0, tcp, nw_dst=1.1.1.1, tp_dst=8080, actions=output:patch-breth0_ov",
-					fmt.Sprintf("cookie=0x71765945a31dc2f1, priority=110, in_port=patch-breth0_ov, dl_src=%s, tcp, nw_src=1.1.1.1, tp_src=8080, actions=output:eth0",
+					"cookie=0xbee1de4b64e2b189, priority=110, in_port=eth0, arp, arp_op=1, arp_tpa=1.1.1.1, actions=output:LOCAL",
+					"cookie=0xbee1de4b64e2b189, priority=110, in_port=eth0, icmp, nw_dst=1.1.1.1, icmp_type=3, icmp_code=4, actions=output:patch-breth0_ov",
+					"cookie=0xbee1de4b64e2b189, priority=110, in_port=eth0, tcp, nw_dst=1.1.1.1, tp_dst=8080, actions=output:patch-breth0_ov",
+					fmt.Sprintf("cookie=0xbee1de4b64e2b189, priority=110, in_port=patch-breth0_ov, dl_src=%s, tcp, nw_src=1.1.1.1, tp_src=8080, actions=output:eth0",
 						gwMAC),
 				}
 				flows := fNPW.ofm.getFlowsByKey("NodePort_namespace1_service1_tcp_31111")
 				Expect(flows).To(Equal(expectedNodePortFlows))
-				flows = fNPW.ofm.getFlowsByKey("Ingress_namespace1_service1_5.5.5.5_8080")
+				flows = fNPW.ofm.getFlowsByKey("Ingress_namespace1_service1_tcp_5.5.5.5_8080")
 				Expect(flows).To(Equal(expectedLBIngressFlows))
-				flows = fNPW.ofm.getFlowsByKey("External_namespace1_service1_1.1.1.1_8080")
+				flows = fNPW.ofm.getFlowsByKey("External_namespace1_service1_tcp_1.1.1.1_8080")
 				Expect(flows).To(Equal(expectedLBExternalIPFlows))
 
 				return nil
@@ -1137,9 +1228,9 @@ var _ = Describe("Node Operations", func() {
 					"cookie=0xe745ecf105, priority=110, table=7, actions=output:eth0",
 				}
 				expectedLBIngressFlows := []string{
-					fmt.Sprintf("cookie=0x10c6b89e483ea111, priority=110, in_port=eth0, arp, arp_op=1, arp_tpa=%s, "+
+					fmt.Sprintf("cookie=0xd93c9b3aaadf9769, priority=110, in_port=eth0, arp, arp_op=1, arp_tpa=%s, "+
 						"actions=output:LOCAL", svcStatusIP),
-					fmt.Sprintf("cookie=0x10c6b89e483ea111, priority=110, in_port=eth0, tcp, nw_dst=%s, tp_dst=%d, "+
+					fmt.Sprintf("cookie=0xd93c9b3aaadf9769, priority=110, in_port=eth0, tcp, nw_dst=%s, tp_dst=%d, "+
 						"actions=ct(commit,zone=64003,nat(dst=%s:%d),table=6)",
 						svcStatusIP, svcPort, v4localnetGatewayIP, epPortValue),
 					"cookie=0xe745ecf105, priority=110, table=6, actions=output:LOCAL",
@@ -1148,9 +1239,9 @@ var _ = Describe("Node Operations", func() {
 					"cookie=0xe745ecf105, priority=110, table=7, actions=output:eth0",
 				}
 				expectedLBExternalIPFlows := []string{
-					fmt.Sprintf("cookie=0x71765945a31dc2f1, priority=110, in_port=eth0, arp, arp_op=1, arp_tpa=%s, "+
+					fmt.Sprintf("cookie=0xbee1de4b64e2b189, priority=110, in_port=eth0, arp, arp_op=1, arp_tpa=%s, "+
 						"actions=output:LOCAL", externalIP),
-					fmt.Sprintf("cookie=0x71765945a31dc2f1, priority=110, in_port=eth0, tcp, nw_dst=%s, tp_dst=%d, "+
+					fmt.Sprintf("cookie=0xbee1de4b64e2b189, priority=110, in_port=eth0, tcp, nw_dst=%s, tp_dst=%d, "+
 						"actions=ct(commit,zone=64003,nat(dst=%s:%d),table=6)",
 						externalIP, svcPort, v4localnetGatewayIP, epPortValue),
 					"cookie=0xe745ecf105, priority=110, table=6, actions=output:LOCAL",
@@ -1160,9 +1251,9 @@ var _ = Describe("Node Operations", func() {
 				}
 				flows := fNPW.ofm.getFlowsByKey("NodePort_namespace1_service1_tcp_31111")
 				Expect(flows).To(Equal(expectedNodePortFlows))
-				flows = fNPW.ofm.getFlowsByKey("Ingress_namespace1_service1_5.5.5.5_8080")
+				flows = fNPW.ofm.getFlowsByKey("Ingress_namespace1_service1_tcp_5.5.5.5_8080")
 				Expect(flows).To(Equal(expectedLBIngressFlows))
-				flows = fNPW.ofm.getFlowsByKey("External_namespace1_service1_1.1.1.1_8080")
+				flows = fNPW.ofm.getFlowsByKey("External_namespace1_service1_tcp_1.1.1.1_8080")
 				Expect(flows).To(Equal(expectedLBExternalIPFlows))
 
 				return nil
@@ -1913,26 +2004,26 @@ var _ = Describe("Node Operations", func() {
 				Expect(startNodePortWatcher(fNPW, fakeClient)).To(Succeed())
 
 				expectedLBIngressFlows := []string{
-					"cookie=0x10c6b89e483ea111, priority=110, in_port=eth0, arp, arp_op=1, arp_tpa=5.5.5.5, actions=output:LOCAL",
+					"cookie=0xd93c9b3aaadf9769, priority=110, in_port=eth0, arp, arp_op=1, arp_tpa=5.5.5.5, actions=output:LOCAL",
 				}
 				expectedLBExternalIPFlows1 := []string{
-					"cookie=0x71765945a31dc2f1, priority=110, in_port=eth0, arp, arp_op=1, arp_tpa=1.1.1.1, actions=output:LOCAL",
+					"cookie=0xbee1de4b64e2b189, priority=110, in_port=eth0, arp, arp_op=1, arp_tpa=1.1.1.1, actions=output:LOCAL",
 				}
 				expectedLBExternalIPFlows2 := []string{
-					"cookie=0x77df6d2c74c0a658, priority=110, in_port=eth0, arp, arp_op=1, arp_tpa=1.1.1.2, actions=output:LOCAL",
+					"cookie=0x84e392305ecdb750, priority=110, in_port=eth0, arp, arp_op=1, arp_tpa=1.1.1.2, actions=output:LOCAL",
 				}
 
 				Eventually(func() []string {
 					return fNPW.ofm.getFlowsByKey("NodePort_namespace1_service1_tcp_31111")
 				}).Should(BeNil())
 				Eventually(func() []string {
-					return fNPW.ofm.getFlowsByKey("Ingress_namespace1_service1_5.5.5.5_8080")
+					return fNPW.ofm.getFlowsByKey("Ingress_namespace1_service1_tcp_5.5.5.5_8080")
 				}).Should(Equal(expectedLBIngressFlows))
 				Eventually(func() []string {
-					return fNPW.ofm.getFlowsByKey("External_namespace1_service1_1.1.1.1_8080")
+					return fNPW.ofm.getFlowsByKey("External_namespace1_service1_tcp_1.1.1.1_8080")
 				}).Should(Equal(expectedLBExternalIPFlows1))
 				Eventually(func() []string {
-					return fNPW.ofm.getFlowsByKey("External_namespace1_service1_1.1.1.2_8080")
+					return fNPW.ofm.getFlowsByKey("External_namespace1_service1_tcp_1.1.1.2_8080")
 				}).Should(Equal(expectedLBExternalIPFlows2))
 
 				addConntrackMocks(netlinkMock, []ctFilterDesc{
@@ -1950,13 +2041,13 @@ var _ = Describe("Node Operations", func() {
 					return fNPW.ofm.getFlowsByKey("NodePort_namespace1_service1_tcp_31111")
 				}, "2s").Should(BeNil())
 				Eventually(func() []string {
-					return fNPW.ofm.getFlowsByKey("Ingress_namespace1_service1_5.5.5.5_8080")
+					return fNPW.ofm.getFlowsByKey("Ingress_namespace1_service1_tcp_5.5.5.5_8080")
 				}, "2s").Should(BeNil())
 				Eventually(func() []string {
-					return fNPW.ofm.getFlowsByKey("External_namespace1_service1_1.1.1.1_8080")
+					return fNPW.ofm.getFlowsByKey("External_namespace1_service1_tcp_1.1.1.1_8080")
 				}, "2s").Should(BeNil())
 				Eventually(func() []string {
-					return fNPW.ofm.getFlowsByKey("External_namespace1_service1_1.1.1.2_8080")
+					return fNPW.ofm.getFlowsByKey("External_namespace1_service1_tcp_1.1.1.2_8080")
 				}, "2s").Should(BeNil())
 
 				return nil
