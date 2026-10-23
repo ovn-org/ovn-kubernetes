@@ -317,6 +317,36 @@ func (_m *NetLinkOps) ConntrackDeleteFilters(table netlink.ConntrackTableType, f
 	return r0, r1
 }
 
+// ConntrackTableList provides a mock function with given fields: table, family
+func (_m *NetLinkOps) ConntrackTableList(table netlink.ConntrackTableType, family netlink.InetFamily) ([]*netlink.ConntrackFlow, error) {
+	ret := _m.Called(table, family)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ConntrackTableList")
+	}
+
+	var r0 []*netlink.ConntrackFlow
+	var r1 error
+	if rf, ok := ret.Get(0).(func(netlink.ConntrackTableType, netlink.InetFamily) ([]*netlink.ConntrackFlow, error)); ok {
+		return rf(table, family)
+	}
+	if rf, ok := ret.Get(0).(func(netlink.ConntrackTableType, netlink.InetFamily) []*netlink.ConntrackFlow); ok {
+		r0 = rf(table, family)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*netlink.ConntrackFlow)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(netlink.ConntrackTableType, netlink.InetFamily) error); ok {
+		r1 = rf(table, family)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // IsAlreadyExistsError provides a mock function with given fields: err
 func (_m *NetLinkOps) IsAlreadyExistsError(err error) bool {
 	ret := _m.Called(err)
