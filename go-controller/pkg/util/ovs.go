@@ -22,7 +22,6 @@ import (
 	kexec "k8s.io/utils/exec"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 )
 
 const (
@@ -31,14 +30,12 @@ const (
 	// external Powershell commandlets.
 	// TODO: Decrease the timeout once port adding is improved on Windows
 	ovsCommandTimeout  = 15
-	ovsVsctlCommand    = "ovs-vsctl"
 	ovsOfctlCommand    = "ovs-ofctl"
 	ovsAppctlCommand   = "ovs-appctl"
 	ovnNbctlCommand    = "ovn-nbctl"
 	ovnSbctlCommand    = "ovn-sbctl"
 	ovnAppctlCommand   = "ovn-appctl"
 	ovsdbClientCommand = "ovsdb-client"
-	ovsdbToolCommand   = "ovsdb-tool"
 	ipCommand          = "ip"
 	powershellCommand  = "powershell"
 	netshCommand       = "netsh"
@@ -124,14 +121,12 @@ func runningPlatform() (string, error) {
 type execHelper struct {
 	exec            kexec.Interface
 	ofctlPath       string
-	vsctlPath       string
 	appctlPath      string
 	ovnappctlPath   string
 	nbctlPath       string
 	sbctlPath       string
 	ovnctlPath      string
 	ovsdbClientPath string
-	ovsdbToolPath   string
 	ovnRunDir       string
 	ipPath          string
 	powershellPath  string
@@ -192,10 +187,6 @@ func SetExec(exec kexec.Interface) error {
 	if err != nil {
 		return err
 	}
-	runner.vsctlPath, err = exec.LookPath(ovsVsctlCommand)
-	if err != nil {
-		return err
-	}
 	runner.appctlPath, err = exec.LookPath(ovsAppctlCommand)
 	if err != nil {
 		return err
@@ -230,11 +221,6 @@ func SetExec(exec kexec.Interface) error {
 	if err != nil {
 		return err
 	}
-	runner.ovsdbToolPath, err = exec.LookPath(ovsdbToolCommand)
-	if err != nil {
-		return err
-	}
-
 	return nil
 }
 
@@ -265,26 +251,6 @@ func SetExecWithoutOVS(exec kexec.Interface) error {
 		runner.sysctlPath, err = exec.LookPath(sysctlCommand)
 		if err != nil {
 			return err
-		}
-	}
-	return nil
-}
-
-// SetSpecificExec validates executable paths for selected commands. It also saves the given
-// exec interface to be used for running selected commands
-func SetSpecificExec(exec kexec.Interface, commands ...string) error {
-	var err error
-
-	runner = &execHelper{exec: exec}
-	for _, command := range commands {
-		switch command {
-		case ovsVsctlCommand:
-			runner.vsctlPath, err = exec.LookPath(ovsVsctlCommand)
-			if err != nil {
-				return err
-			}
-		default:
-			return fmt.Errorf("unknown command: %q", command)
 		}
 	}
 	return nil
@@ -378,48 +344,6 @@ func GetNoFloodPorts(bridgeName string) (map[string]bool, error) {
 		}
 	}
 	return result, nil
-}
-
-// RunOVSVsctl runs a command via ovs-vsctl.
-func RunOVSVsctl(args ...string) (string, string, error) {
-	cmdArgs := []string{fmt.Sprintf("--timeout=%d", ovsCommandTimeout)}
-	cmdArgs = append(cmdArgs, args...)
-	stdout, stderr, err := run(runner.vsctlPath, cmdArgs...)
-	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
-}
-
-// GetOVSOfPort runs get ofport via ovs-vsctl and handle special return strings.
-func GetOVSOfPort(args ...string) (string, string, error) {
-	stdout, stderr, err := RunOVSVsctl(args...)
-	if stdout == "[]" || stdout == "-1" {
-		err = fmt.Errorf("%s return invalid result %s err %s", args, stdout, err)
-	}
-	return stdout, stderr, err
-}
-
-func GetDatapathType(bridge string) (string, error) {
-	br_type, err := getOvsEntry("bridge", bridge, "datapath_type", "")
-	if err != nil {
-		return "", err
-	}
-	return br_type, nil
-}
-
-// getOvsEntry queries the OVS-DB using ovs-vsctl and returns
-// the requested entries.
-func getOvsEntry(table, record, column, key string) (string, error) {
-	args := []string{"--if-exists", "get", table, record}
-	if key != "" {
-		args = append(args, fmt.Sprintf("%s:%s", column, key))
-	} else {
-		args = append(args, column)
-	}
-	stdout, stderr, err := RunOVSVsctl(args...)
-	if err != nil {
-		return "", fmt.Errorf("failed to run 'ovs-vsctl %s': %v: %q",
-			strings.Join(args, " "), err, stderr)
-	}
-	return stdout, err
 }
 
 // RunOVSAppctlWithTimeout runs a command via ovs-appctl.
@@ -516,12 +440,6 @@ func RunOVNSbctlWithTimeout(timeout int, args ...string) (string, string,
 // RunOVSDBClient runs an 'ovsdb-client [OPTIONS] COMMAND [ARG...] command'.
 func RunOVSDBClient(args ...string) (string, string, error) {
 	stdout, stderr, err := runOVNretry(runner.ovsdbClientPath, nil, nil, args...)
-	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
-}
-
-// RunOVSDBTool runs an 'ovsdb-tool [OPTIONS] COMMAND [ARG...] command'.
-func RunOVSDBTool(args ...string) (string, string, error) {
-	stdout, stderr, err := run(runner.ovsdbToolPath, args...)
 	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
 }
 
@@ -868,23 +786,6 @@ func SetStaticFDBEntry(bridge, port string, mac net.HardwareAddr, vlanID uint) e
 	return nil
 }
 
-// IsOvsHwOffloadEnabled checks if OvS Hardware Offload is enabled.
-func IsOvsHwOffloadEnabled() (bool, error) {
-	stdout, stderr, err := RunOVSVsctl("--if-exists", "get",
-		"Open_vSwitch", ".", "other_config:hw-offload")
-	if err != nil {
-		klog.Errorf("Failed to get output from ovs-vsctl --if-exists get Open_vSwitch . "+
-			"other_config:hw-offload stderr(%s) : %v", stderr, err)
-		return false, err
-	}
-
-	// For the case if the hw-offload key doesn't exist, we check for empty output.
-	if len(stdout) == 0 || stdout == "false" {
-		return false, nil
-	}
-	return true, nil
-}
-
 type OvsDbProperties struct {
 	AppCtl  func(timeout int, args ...string) (string, string, error)
 	DbAlias string
@@ -920,24 +821,4 @@ func GetExternalIDValByKey(keyValString, key string) string {
 		}
 	}
 	return ""
-}
-
-// GetOVSPortPodInfo gets OVS interface associated pod information (sandbox/NAD),
-// returns false if the OVS interface does not exists
-func GetOVSPortPodInfo(hostIfName string) (bool, string, string, error) {
-	stdout, stderr, err := RunOVSVsctl("--no-heading", "--format=csv", "--data=bare",
-		"--columns=external_ids", "find", "Interface", "name="+hostIfName)
-	if err != nil {
-		return false, "", "", fmt.Errorf("failed to get OVS interface %s, stderr %v: %v", hostIfName, stderr, err)
-	}
-	if stdout == "" {
-		return false, "", "", nil
-	}
-	sandbox := GetExternalIDValByKey(stdout, "sandbox")
-	nadkey := GetExternalIDValByKey(stdout, types.NADExternalID)
-	// if network_name does not exists, it is default network
-	if nadkey == "" {
-		nadkey = types.DefaultNetworkName
-	}
-	return true, sandbox, nadkey, nil
 }

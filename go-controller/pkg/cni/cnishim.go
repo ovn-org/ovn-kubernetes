@@ -3,9 +3,8 @@
 
 package cni
 
-// contains code for cnishim - one that gets called as the cni Plugin
-// This does not do the real cni work. This is just the client to the cniserver
-// that does the real work.
+// The CNI shim delegates requests to the node's CNI server. In unprivileged
+// mode, the server returns interface information for the shim to configure.
 
 import (
 	"bytes"
@@ -31,11 +30,16 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
-	kexec "k8s.io/utils/exec"
+
+	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
+	"github.com/ovn-kubernetes/libovsdb/model"
+	"github.com/ovn-kubernetes/libovsdb/ovsdb"
 
 	ovncnitypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/vswitchd"
 )
 
 // Plugin is the structure to hold the endpoint information and the corresponding
@@ -189,6 +193,32 @@ func (c *shimClientset) getPod(namespace, name string) (*corev1.Pod, error) {
 	return c.kclient.CoreV1().Pods(namespace).Get(context.TODO(), name, metav1.GetOptions{})
 }
 
+// shimOVSMonitorOptions limits the short-lived shim cache to columns read by
+// CNI and its OVS helpers. Writes to other columns don't require monitoring them.
+func shimOVSMonitorOptions(cmd command) []libovsdbclient.MonitorOption {
+	port := &vswitchd.Port{}
+	iface := &vswitchd.Interface{}
+	bridge := &vswitchd.Bridge{}
+	// Keep all ports/interfaces: the host interface name may only become known
+	// during setup, and an interface can belong to a differently named bond.
+	opts := []libovsdbclient.MonitorOption{
+		libovsdbclient.WithTable(port, &port.Name, &port.Interfaces),
+		libovsdbclient.WithTable(iface, &iface.Name, &iface.ExternalIDs),
+	}
+	if cmd == CNIDel {
+		// DEL only detaches ports from br-int; it never claims ports from another bridge.
+		return append(opts, libovsdbclient.WithConditionalTable(bridge, []model.Condition{
+			{Field: &bridge.Name, Function: ovsdb.ConditionEqual, Value: "br-int"},
+		}, &bridge.Name, &bridge.Ports))
+	}
+	ovs := &vswitchd.OpenvSwitch{}
+	return append(opts,
+		libovsdbclient.WithTable(ovs, &ovs.ExternalIDs),
+		// ADD must see all bridge memberships to reject cross-bridge conflicts.
+		libovsdbclient.WithTable(bridge, &bridge.Name, &bridge.Ports, &bridge.DatapathType),
+	)
+}
+
 // CmdAdd is the callback for 'add' cni calls from skel
 func (p *Plugin) CmdAdd(args *skel.CmdArgs) error {
 	var err error
@@ -257,17 +287,19 @@ func (p *Plugin) CmdAdd(args *skel.CmdArgs) error {
 			return err
 		}
 
+		var ovsClient libovsdbclient.Client
 		if !response.PodIFInfo.IsDPUHostMode {
-			// Initialize OVS exec runner; find OVS binaries that the CNI code uses.
-			if err := SetExec(kexec.New()); err != nil {
-				err = fmt.Errorf("failed to initialize OVS exec runner: %v", err)
+			ovsClient, err = libovsdb.NewOVSClient(ctx.Done(), shimOVSMonitorOptions(CNIAdd)...)
+			if err != nil {
+				err = fmt.Errorf("failed to initialize OVS client: %w", err)
 				klog.Error(err.Error())
 				return err
 			}
+			defer ovsClient.Close()
 		}
 
-		// In the case where ovnkube-node is running in Unprivileged mode, all the work
-		result, err = getCNIResult(pr, nil, clientset, response.PodIFInfo)
+		// Share the client and its cache across both attachments in this invocation.
+		result, err = getCNIResult(pr, ovsClient, clientset, response.PodIFInfo)
 		if err != nil {
 			err = fmt.Errorf("failed to get CNI Result from pod interface info %v: %v", response.PodIFInfo, err)
 			klog.Error(err.Error())
@@ -277,7 +309,7 @@ func (p *Plugin) CmdAdd(args *skel.CmdArgs) error {
 			primaryUDNPodRequest := response.PrimaryUDNPodReq
 			primaryUDNPodRequest.ctx = ctx
 
-			primaryUDNResult, err := getCNIResult(primaryUDNPodRequest, nil, clientset, response.PrimaryUDNPodInfo)
+			primaryUDNResult, err := getCNIResult(primaryUDNPodRequest, ovsClient, clientset, response.PrimaryUDNPodInfo)
 			if err != nil {
 				klog.Error(err.Error())
 				return err
@@ -335,19 +367,21 @@ func (p *Plugin) CmdDel(args *skel.CmdArgs) error {
 			return err
 		}
 
+		var ovsClient libovsdbclient.Client
 		if !response.PodIFInfo.IsDPUHostMode {
-			// Initialize OVS exec runner; find OVS binaries that the CNI code uses.
-			if err := SetExec(kexec.New()); err != nil {
-				err = fmt.Errorf("failed to initialize OVS exec runner: %v", err)
+			ovsClient, err = libovsdb.NewOVSClient(ctx.Done(), shimOVSMonitorOptions(CNIDel)...)
+			if err != nil {
+				err = fmt.Errorf("failed to initialize OVS client: %w", err)
 				klog.Error(err.Error())
 				return err
 			}
+			defer ovsClient.Close()
 		}
 
 		// The unprivileged CNI shim has no apiserver/pod-lister access, so the
 		// live-migration IP-preservation guard in deletePodConntrack cannot run
 		// here; pass a nil lister to keep the previous conntrack-flush behavior.
-		err = podRequestInterfaceOps.UnconfigureInterface(pr, response.PodIFInfo, nil, nil)
+		err = podRequestInterfaceOps.UnconfigureInterface(pr, ovsClient, response.PodIFInfo, nil, nil)
 	}
 	return err
 }

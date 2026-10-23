@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -57,6 +58,7 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 	utilerrors "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util/errors"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/vswitchd"
 )
 
 type CommonNodeNetworkControllerInfo struct {
@@ -276,117 +278,65 @@ func (oc *DefaultNodeNetworkController) Reconcile(netInfo util.NetInfo) error {
 	return nil
 }
 
-func clearOVSFlowTargets() error {
-	_, _, err := util.RunOVSVsctl(
-		"--",
-		"clear", "bridge", "br-int", "netflow",
-		"--",
-		"clear", "bridge", "br-int", "sflow",
-		"--",
-		"clear", "bridge", "br-int", "ipfix",
-	)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-// collectorsString joins all HostPort entry into a string that is acceptable as
-// target by the ovs-vsctl command. If an entry has an empty host, it uses the Node IP
-func collectorsString(node *corev1.Node, targets []config.HostPort) (string, error) {
+func collectorTargets(node *corev1.Node, targets []config.HostPort) ([]string, error) {
 	if len(targets) == 0 {
-		return "", errors.New("collector targets can't be empty")
+		return nil, errors.New("collector targets can't be empty")
 	}
-	var joined strings.Builder
-	for n, v := range targets {
-		if n == 0 {
-			joined.WriteByte('"')
-		} else {
-			joined.WriteString(`","`)
-		}
+	collectors := make([]string, 0, len(targets))
+	for _, v := range targets {
 		var host string
 		if v.Host != nil && len(*v.Host) != 0 {
 			host = v.Host.String()
 		} else {
 			var err error
 			if host, err = util.GetNodePrimaryIP(node); err != nil {
-				return "", fmt.Errorf("composing flow collectors' IPs: %w", err)
+				return nil, fmt.Errorf("composing flow collectors' IPs: %w", err)
 			}
 		}
-		joined.WriteString(util.JoinHostPortInt32(host, v.Port))
+		collectors = append(collectors, util.JoinHostPortInt32(host, v.Port))
 	}
-	joined.WriteByte('"')
-	return joined.String(), nil
+	return collectors, nil
 }
 
-func setOVSFlowTargets(node *corev1.Node) error {
+func setOVSFlowTargets(ovsClient client.Client, node *corev1.Node) error {
+	if ovsClient == nil {
+		return errors.New("OVS client is required to configure flow targets")
+	}
+	var netflow *vswitchd.NetFlow
 	if len(config.Monitoring.NetFlowTargets) != 0 {
-		collectors, err := collectorsString(node, config.Monitoring.NetFlowTargets)
+		targets, err := collectorTargets(node, config.Monitoring.NetFlowTargets)
 		if err != nil {
 			return fmt.Errorf("error joining NetFlow targets: %w", err)
 		}
-
-		_, stderr, err := util.RunOVSVsctl(
-			"--",
-			"--id=@netflow",
-			"create",
-			"netflow",
-			fmt.Sprintf("targets=[%s]", collectors),
-			"active_timeout=60",
-			"--",
-			"set", "bridge", "br-int", "netflow=@netflow",
-		)
-		if err != nil {
-			return fmt.Errorf("error setting NetFlow: %v\n  %q", err, stderr)
-		}
+		netflow = &vswitchd.NetFlow{Targets: targets, ActiveTimeout: 60}
 	}
+	var sflow *vswitchd.SFlow
 	if len(config.Monitoring.SFlowTargets) != 0 {
-		collectors, err := collectorsString(node, config.Monitoring.SFlowTargets)
+		targets, err := collectorTargets(node, config.Monitoring.SFlowTargets)
 		if err != nil {
 			return fmt.Errorf("error joining SFlow targets: %w", err)
 		}
-
-		_, stderr, err := util.RunOVSVsctl(
-			"--",
-			"--id=@sflow",
-			"create",
-			"sflow",
-			"agent="+types.SFlowAgent,
-			fmt.Sprintf("targets=[%s]", collectors),
-			"--",
-			"set", "bridge", "br-int", "sflow=@sflow",
-		)
-		if err != nil {
-			return fmt.Errorf("error setting SFlow: %v\n  %q", err, stderr)
-		}
+		agent := types.SFlowAgent
+		sflow = &vswitchd.SFlow{Targets: targets, Agent: &agent}
 	}
+	var ipfix *vswitchd.IPFIX
 	if len(config.Monitoring.IPFIXTargets) != 0 {
-		collectors, err := collectorsString(node, config.Monitoring.IPFIXTargets)
+		targets, err := collectorTargets(node, config.Monitoring.IPFIXTargets)
 		if err != nil {
 			return fmt.Errorf("error joining IPFIX targets: %w", err)
 		}
-
-		args := []string{
-			"--",
-			"--id=@ipfix",
-			"create",
-			"ipfix",
-			fmt.Sprintf("targets=[%s]", collectors),
-			fmt.Sprintf("cache_active_timeout=%d", config.IPFIX.CacheActiveTimeout),
-		}
+		activeTimeout := int(config.IPFIX.CacheActiveTimeout)
+		ipfix = &vswitchd.IPFIX{Targets: targets, CacheActiveTimeout: &activeTimeout}
 		if config.IPFIX.CacheMaxFlows != 0 {
-			args = append(args, fmt.Sprintf("cache_max_flows=%d", config.IPFIX.CacheMaxFlows))
+			cacheMaxFlows := int(config.IPFIX.CacheMaxFlows)
+			ipfix.CacheMaxFlows = &cacheMaxFlows
 		}
 		if config.IPFIX.Sampling != 0 {
-			args = append(args, fmt.Sprintf("sampling=%d", config.IPFIX.Sampling))
-		}
-		args = append(args, "--", "set", "bridge", "br-int", "ipfix=@ipfix")
-		_, stderr, err := util.RunOVSVsctl(args...)
-		if err != nil {
-			return fmt.Errorf("error setting IPFIX: %v\n  %q", err, stderr)
+			sampling := int(config.IPFIX.Sampling)
+			ipfix.Sampling = &sampling
 		}
 	}
-	return nil
+	return ovsops.SetBridgeFlowCollectors(ovsClient, "br-int", netflow, sflow, ipfix)
 }
 
 // validateEncapIP returns false if there is an error or if the given IP is not known local IP address.
@@ -409,7 +359,10 @@ func validateEncapIP(encapIP string) (bool, error) {
 	return false, nil
 }
 
-func setupOVNNode(node *corev1.Node) error {
+func setupOVNNode(ovsClient client.Client, node *corev1.Node) error {
+	if ovsClient == nil {
+		return errors.New("OVS client is required to set up the OVN node")
+	}
 	var err error
 
 	nodePrimaryIP, err := util.GetNodePrimaryIP(node)
@@ -453,60 +406,45 @@ func setupOVNNode(node *corev1.Node) error {
 		}
 	}
 
-	setExternalIdsCmd := []string{
-		"set",
-		"Open_vSwitch",
-		".",
-		fmt.Sprintf("external_ids:ovn-encap-type=%s", config.Default.EncapType),
-		fmt.Sprintf("external_ids:ovn-encap-ip=%s", config.Default.EffectiveEncapIP),
-		fmt.Sprintf("external_ids:ovn-remote-probe-interval=%d",
-			config.Default.InactivityProbe),
-		fmt.Sprintf("external_ids:ovn-bridge-remote-probe-interval=%d",
-			config.Default.OpenFlowProbe),
+	externalIDs := map[string]string{
+		"ovn-encap-type":                   config.Default.EncapType,
+		"ovn-encap-ip":                     config.Default.EffectiveEncapIP,
+		"ovn-remote-probe-interval":        strconv.Itoa(config.Default.InactivityProbe),
+		"ovn-remote":                       config.OvnSouth.GetURL(),
+		"ovn-bridge-remote-probe-interval": strconv.Itoa(config.Default.OpenFlowProbe),
+		"ovn-is-interconn":                 "true",
+		"ovn-monitor-all":                  strconv.FormatBool(config.Default.MonitorAll),
+		"ovn-ofctrl-wait-before-clear":     strconv.Itoa(config.Default.OfctrlWaitBeforeClear),
+		"ovn-enable-lflow-cache":           strconv.FormatBool(config.Default.LFlowCacheEnable),
+		// When creating tunnel ports, set local_ip to support multiple interfaces and IPv6.
+		"ovn-set-local-ip": "true",
+	}
+	otherConfig := map[string]string{
 		// bundle-idle-timeout default value is 10s, it should be set
 		// as high as the ovn-bridge-remote-probe-interval to allow ovn-controller
 		// to finish computation specially with complex acl configuration with port range.
-		fmt.Sprintf("other_config:bundle-idle-timeout=%d",
-			config.Default.OpenFlowProbe),
-		// Tell ovn-controller to make this node/chassis an interconnect gateway.
-		"external_ids:ovn-is-interconn=true",
-		fmt.Sprintf("external_ids:ovn-monitor-all=%t", config.Default.MonitorAll),
-		fmt.Sprintf("external_ids:ovn-ofctrl-wait-before-clear=%d", config.Default.OfctrlWaitBeforeClear),
-		fmt.Sprintf("external_ids:ovn-enable-lflow-cache=%t", config.Default.LFlowCacheEnable),
-		// when creating tunnel ports set local_ip, helps ensures multiple interfaces and ipv6 will work
-		"external_ids:ovn-set-local-ip=\"true\"",
+		"bundle-idle-timeout": strconv.Itoa(config.Default.OpenFlowProbe),
 	}
 
 	if config.Default.LFlowCacheLimit > 0 {
-		setExternalIdsCmd = append(setExternalIdsCmd,
-			fmt.Sprintf("external_ids:ovn-limit-lflow-cache=%d", config.Default.LFlowCacheLimit),
-		)
+		externalIDs["ovn-limit-lflow-cache"] = strconv.FormatUint(uint64(config.Default.LFlowCacheLimit), 10)
 	}
 
 	if config.Default.LFlowCacheLimitKb > 0 {
-		setExternalIdsCmd = append(setExternalIdsCmd,
-			fmt.Sprintf("external_ids:ovn-memlimit-lflow-cache-kb=%d", config.Default.LFlowCacheLimitKb),
-		)
+		externalIDs["ovn-memlimit-lflow-cache-kb"] = strconv.FormatUint(uint64(config.Default.LFlowCacheLimitKb), 10)
 	}
 
 	// In the case of DPU, the hostname should be that of the DPU and not
 	// the K8s Node's. So skip setting the incorrect hostname.
 	if config.IsModeDPUHost() || config.IsModeFull() {
-		setExternalIdsCmd = append(setExternalIdsCmd, fmt.Sprintf("external_ids:hostname=\"%s\"", node.Name))
+		externalIDs["hostname"] = node.Name
 	}
 
-	_, stderr, err := util.RunOVSVsctl(setExternalIdsCmd...)
-	if err != nil {
-		return fmt.Errorf("error setting OVS external IDs: %v\n  %q", err, stderr)
+	if err := ovsops.UpdateOpenvSwitchSettings(ovsClient, externalIDs, otherConfig); err != nil {
+		return fmt.Errorf("error setting OVS external IDs: %w", err)
 	}
-
-	// clear stale ovs flow targets if needed
-	err = clearOVSFlowTargets()
-	if err != nil {
-		return fmt.Errorf("error clearing stale ovs flow targets: %q", err)
-	}
-	// set new ovs flow targets if needed
-	err = setOVSFlowTargets(node)
+	// Replace all flow targets in one transaction.
+	err = setOVSFlowTargets(ovsClient, node)
 	if err != nil {
 		return fmt.Errorf("error setting ovs flow targets: %q", err)
 	}
@@ -514,8 +452,23 @@ func setupOVNNode(node *corev1.Node) error {
 	return nil
 }
 
-func setEncapPort(ctx context.Context) error {
-	systemID, err := util.GetNodeChassisID()
+func getNodeChassisID(ovsClient client.Client) (string, error) {
+	if ovsClient == nil {
+		return "", errors.New("OVS client is required to get the node chassis ID")
+	}
+	ovs, err := ovsops.GetOpenvSwitch(ovsClient)
+	if err != nil {
+		return "", fmt.Errorf("failed to get Open_vSwitch row: %w", err)
+	}
+	systemID := ovs.ExternalIDs["system-id"]
+	if systemID == "" {
+		return "", fmt.Errorf("Open_vSwitch system-id is not set")
+	}
+	return systemID, nil
+}
+
+func setEncapPort(ctx context.Context, ovsClient client.Client) error {
+	systemID, err := getNodeChassisID(ovsClient)
 	if err != nil {
 		return err
 	}
@@ -795,11 +748,7 @@ func (nc *DefaultNodeNetworkController) Init(ctx context.Context) error {
 	}
 
 	if !config.IsModeDPUHost() {
-		if err := config.OvnSouth.SetOVNRemote(); err != nil {
-			return err
-		}
-
-		err = setupOVNNode(node)
+		err = setupOVNNode(nc.ovsClient, node)
 		if err != nil {
 			return err
 		}
@@ -888,13 +837,6 @@ func (nc *DefaultNodeNetworkController) Init(ctx context.Context) error {
 		return fmt.Errorf("failed to set node %s annotations: %w", nc.name, err)
 	}
 
-	// Connect ovn-controller to SBDB
-	if config.IsModeDPU() || config.IsModeFull() {
-		if err := config.OvnSouth.SetOVNRemote(); err != nil {
-			return fmt.Errorf("unable to configure the local OVN Southbound database endpoint: %w", err)
-		}
-	}
-
 	// First part of gateway initialization. It will be completed by (nc *DefaultNodeNetworkController) Start()
 	if config.IsModeDPU() || config.IsModeFull() {
 		// IPv6 is not supported in DPU enabled nodes, error out if ovnkube is not set in IPv4 mode
@@ -946,7 +888,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) (err error) {
 	// NOTE: ovnkube-node in DPU-host mode has no SBDB to connect to. The encap port will be handled by the
 	// ovnkube-node running in DPU mode on behalf of the host.
 	if (config.IsModeDPU() || config.IsModeFull()) && config.Default.EncapPort != config.DefaultEncapPort {
-		if err := setEncapPort(ctx); err != nil {
+		if err := setEncapPort(ctx, nc.ovsClient); err != nil {
 			return err
 		}
 	}
@@ -1000,6 +942,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) (err error) {
 			nc.watchFactory.PodInformer(),
 			informer.NewDefaultEventHandler,
 			false,
+			nc.ovsClient,
 		)
 		if err != nil {
 			return err
@@ -1351,7 +1294,7 @@ func (nc *DefaultNodeNetworkController) deleteNode(node *corev1.Node) {
 	}
 
 	gw := nc.Gateway.(*gateway)
-	gw.openflowManager.deleteFlowsByKey(getPMTUDKey(node.Name))
+	gw.openflowManager.deleteBridgePMTUDFlowCache(getPMTUDKey(node.Name))
 
 	// Use GetNodeAddresses to get node IPs
 	ipsv4, ipsv6, err := util.GetNodeAddresses(config.IPv4Mode, config.IPv6Mode, node)

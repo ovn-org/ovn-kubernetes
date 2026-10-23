@@ -663,8 +663,6 @@ type OvnDBConfig struct {
 	RunDir string `gcfg:"run-dir"`
 	// DbLocation is OVN northbound/southbound database location.
 	DbLocation string `gcfg:"db-location"`
-
-	exec kexec.Interface
 }
 
 // legacyOvnNorthConfig preserves the historical [ovnnorth] config-file layout
@@ -2026,18 +2024,6 @@ func getOVSExternalID(exec kexec.Interface, name string) string {
 	return out
 }
 
-func setOVSExternalID(exec kexec.Interface, key, value string) error {
-	out, err := runOVSVsctl(exec,
-		"set",
-		"Open_vSwitch",
-		".",
-		fmt.Sprintf("external_ids:%s=%s", key, value))
-	if err != nil {
-		return fmt.Errorf("error setting OVS external ID '%s=%s': %v\n  %q", key, value, err, out)
-	}
-	return nil
-}
-
 // reconcileKubernetesAuthFields ensures that if a config stage provides Token/TokenFile
 // or CACert/CACertData, stale value for any of these set by previous stage is cleared.
 // This is required since any combination of these fields could be set by any stage
@@ -2960,13 +2946,13 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 		return "", err
 	}
 
-	tmpDBConfig, err := buildOvnDBConfig(exec, true, &cliConfig.OvnNorth.OvnDBConfig, &cfg.OvnNorth.OvnDBConfig)
+	tmpDBConfig, err := buildOvnDBConfig(true, &cliConfig.OvnNorth.OvnDBConfig, &cfg.OvnNorth.OvnDBConfig)
 	if err != nil {
 		return "", err
 	}
 	OvnNorth = *tmpDBConfig
 
-	tmpDBConfig, err = buildOvnDBConfig(exec, false, &cliConfig.OvnSouth, &cfg.OvnSouth)
+	tmpDBConfig, err = buildOvnDBConfig(false, &cliConfig.OvnSouth, &cfg.OvnSouth)
 	if err != nil {
 		return "", err
 	}
@@ -3087,7 +3073,7 @@ func pathExists(path string) bool {
 
 // buildOvnDBConfig returns an OvnDBConfig describing how to connect to a local
 // OVN database via unix socket.
-func buildOvnDBConfig(exec kexec.Interface, northbound bool, cliDB, fileDB *OvnDBConfig) (*OvnDBConfig, error) {
+func buildOvnDBConfig(northbound bool, cliDB, fileDB *OvnDBConfig) (*OvnDBConfig, error) {
 	var defaultConfig *OvnDBConfig
 	if northbound {
 		defaultConfig = &savedOvnNorth
@@ -3097,7 +3083,6 @@ func buildOvnDBConfig(exec kexec.Interface, northbound bool, cliDB, fileDB *OvnD
 
 	dbConfig := &OvnDBConfig{
 		northbound: northbound,
-		exec:       exec,
 		RunDir:     defaultConfig.RunDir,
 		DbLocation: defaultConfig.DbLocation,
 	}
@@ -3137,15 +3122,6 @@ func (a *OvnDBConfig) GetURL() string {
 		direction = "nb"
 	}
 	return fmt.Sprintf("unix:%s", filepath.Join(a.RunDir, fmt.Sprintf("ovn%s_db.sock", direction)))
-}
-
-// SetOVNRemote tells ovn-controller where to find the local SB database via
-// the "ovn-remote" external ID.
-func (a *OvnDBConfig) SetOVNRemote() error {
-	if a.northbound {
-		return fmt.Errorf("cannot configure ovn-controller with the northbound database")
-	}
-	return setOVSExternalID(a.exec, "ovn-remote", "\""+a.GetURL()+"\"")
 }
 
 // ovnKubeNodeModeSupported validates the provided mode is supported by ovnkube node

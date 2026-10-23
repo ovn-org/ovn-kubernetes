@@ -73,7 +73,9 @@ var _ = Describe("MetricServer", func() {
 					Maybe().Return(mockCmd)
 				mockKexecIface.Mock.On("Command", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything,
 					mock.Anything).Maybe().Return(mockCmd)
-				_ = util.SetSpecificExec(mockKexecIface)
+				mockKexecIface.Mock.On("LookPath", "ip").Return("ip", nil).Once()
+				mockKexecIface.Mock.On("LookPath", "sysctl").Return("sysctl", nil).Once()
+				Expect(util.SetExecWithoutOVS(mockKexecIface)).To(Succeed())
 
 				DeferCleanup(func() {
 					// Reset exec interface to avoid test pollution
@@ -325,7 +327,9 @@ var _ = Describe("scrape decoupled from extraction", func() {
 			}
 			mockKexecIface.Mock.On("Command", anys...).Maybe().Return(mockCmd)
 		}
-		_ = util.SetSpecificExec(mockKexecIface)
+		mockKexecIface.Mock.On("LookPath", "ip").Return("ip", nil).Once()
+		mockKexecIface.Mock.On("LookPath", "sysctl").Return("sysctl", nil).Once()
+		Expect(util.SetExecWithoutOVS(mockKexecIface)).To(Succeed())
 		DeferCleanup(util.ResetRunner)
 
 		// The collection path (coverage/show) blocks until released; everything

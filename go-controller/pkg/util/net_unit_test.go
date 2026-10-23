@@ -4,7 +4,6 @@
 package util
 
 import (
-	"bytes"
 	"fmt"
 	"net"
 	"testing"
@@ -15,8 +14,6 @@ import (
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	ovntest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing"
-	mock_k8s_io_utils_exec "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/utils/exec"
-	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util/mocks"
 )
 
 func TestCalculateRouteTableID(t *testing.T) {
@@ -79,60 +76,6 @@ func TestNextSloppyIP(t *testing.T) {
 			res := iputils.NextIP(ovntest.MustParseIP(tc.input))
 			t.Log(res.String())
 			assert.Equal(t, tc.expOutput, res.String())
-		})
-	}
-}
-
-func TestGetOVSPortMACAddress(t *testing.T) {
-	mockKexecIface := new(mock_k8s_io_utils_exec.Interface)
-	mockExecRunner := new(mocks.ExecRunner)
-	mockCmd := new(mock_k8s_io_utils_exec.Cmd)
-	// below is defined in ovs.go
-	RunCmdExecRunner = mockExecRunner
-	// note runner is defined in ovs.go file
-	runner = &execHelper{exec: mockKexecIface}
-
-	tests := []struct {
-		desc                    string
-		input                   string
-		errExpected             bool
-		onRetArgsExecUtilsIface *ovntest.TestifyMockHelper
-		onRetArgsKexecIface     *ovntest.TestifyMockHelper
-	}{
-		// NOTE: May need a test to validate (e.g; zero length string ) portName parameter that is passed to function
-		{
-			desc:                    "tests code path when RunOVSVsctl returns error",
-			input:                   "TEST_PORT",
-			errExpected:             true,
-			onRetArgsExecUtilsIface: &ovntest.TestifyMockHelper{OnCallMethodName: "RunCmd", OnCallMethodArgType: []string{"*mocks.Cmd", "string", "[]string", "string", "string", "string", "string", "string", "string"}, RetArgList: []interface{}{nil, nil, fmt.Errorf("executable file not found in $PATH")}},
-			onRetArgsKexecIface:     &ovntest.TestifyMockHelper{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string", "string", "string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
-		},
-		{
-			desc:                    "tests code path when MAC address returned is []",
-			input:                   "TEST_PORT",
-			errExpected:             true,
-			onRetArgsExecUtilsIface: &ovntest.TestifyMockHelper{OnCallMethodName: "RunCmd", OnCallMethodArgType: []string{"*mocks.Cmd", "string", "[]string", "string", "string", "string", "string", "string", "string"}, RetArgList: []interface{}{bytes.NewBuffer([]byte("[]")), nil, nil}},
-			onRetArgsKexecIface:     &ovntest.TestifyMockHelper{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string", "string", "string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
-		},
-		{
-			desc:                    "tests code path when Valid MAC address is returned",
-			input:                   "TEST_PORT",
-			onRetArgsExecUtilsIface: &ovntest.TestifyMockHelper{OnCallMethodName: "RunCmd", OnCallMethodArgType: []string{"*mocks.Cmd", "string", "[]string", "string", "string", "string", "string", "string", "string"}, RetArgList: []interface{}{bytes.NewBuffer([]byte("00:00:a9:fe:21:01")), nil, nil}},
-			onRetArgsKexecIface:     &ovntest.TestifyMockHelper{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string", "string", "string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
-		},
-	}
-	for i, tc := range tests {
-		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			ovntest.ProcessMockFn(&mockExecRunner.Mock, *tc.onRetArgsExecUtilsIface)
-			ovntest.ProcessMockFn(&mockKexecIface.Mock, *tc.onRetArgsKexecIface)
-
-			res, err := GetOVSPortMACAddress(tc.input)
-			t.Log(res, err)
-			if tc.errExpected {
-				require.Error(t, err)
-			}
-			mockKexecIface.AssertExpectations(t)
-			mockExecRunner.AssertExpectations(t)
 		})
 	}
 }

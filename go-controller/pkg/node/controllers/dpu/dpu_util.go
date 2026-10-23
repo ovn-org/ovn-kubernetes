@@ -159,7 +159,7 @@ func (c *Controller) handleAddOrUpdateDPUPod(podKey string, pod *corev1.Pod, cli
 		desired, exists := desiredNADs[nadKey]
 		if !exists || dpuConnectionStateChanged(state, desired.state) {
 			klog.Infof("Deleting stale VF representor %s for pod %s NAD %s", state.vfRepName, podKey, nadKey)
-			valid, err := validateRepPort(state.vfRepName, state.sandboxId, nadKey)
+			valid, err := validateRepPort(c.ovsClient, state.vfRepName, state.sandboxId, nadKey)
 			if err != nil {
 				return fmt.Errorf("failed to validate representor %s for pod %s NAD %s: %w", state.vfRepName, podKey, nadKey, err)
 			}
@@ -304,7 +304,7 @@ func (c *Controller) handleDeleteDPUPod(podKey string, pod *corev1.Pod) error {
 	var portsToDelete []string
 	for nadKey, state := range ps.nadStates {
 		klog.Infof("Deleting VF representor %s for pod %s NAD %s", state.vfRepName, podKey, nadKey)
-		valid, err := validateRepPort(state.vfRepName, state.sandboxId, nadKey)
+		valid, err := validateRepPort(c.ovsClient, state.vfRepName, state.sandboxId, nadKey)
 		if err != nil {
 			return fmt.Errorf("failed to validate representor %s for pod %s NAD %s: %w", state.vfRepName, podKey, nadKey, err)
 		}
@@ -382,7 +382,7 @@ func (c *Controller) addRepPort(pod *corev1.Pod, state *dpuConnectionState, ifIn
 func (c *Controller) delRepPort(pod *corev1.Pod, state *dpuConnectionState, nadKey string) error {
 	podDesc := fmt.Sprintf("pod %s/%s for NAD %s", pod.Namespace, pod.Name, nadKey)
 	klog.Infof("Deleting VF representor %s for %s", state.vfRepName, podDesc)
-	valid, err := validateRepPort(state.vfRepName, state.sandboxId, nadKey)
+	valid, err := validateRepPort(c.ovsClient, state.vfRepName, state.sandboxId, nadKey)
 	if err != nil {
 		return err
 	}
@@ -401,14 +401,26 @@ func (c *Controller) delRepPort(pod *corev1.Pod, state *dpuConnectionState, nadK
 // key. Returns (true, nil) if valid; (false, nil) if the port doesn't exist or
 // belongs to a different pod/NAD, which no retry can fix and is logged as an
 // error; (false, err) only on transient OVS lookup failures.
-func validateRepPort(vfRepName, sandboxId, nadKey string) (bool, error) {
-	ifExists, sandbox, expectedNADKey, err := util.GetOVSPortPodInfo(vfRepName)
+func validateRepPort(ovsClient libovsdbclient.Client, vfRepName, sandboxId, nadKey string) (bool, error) {
+	if ovsClient == nil {
+		return false, fmt.Errorf("cannot validate VF representor %s without an OVS client", vfRepName)
+	}
+	iface, err := libovsdbops.GetOVSInterface(ovsClient, vfRepName)
+	ifExists := err == nil
+	if errors.Is(err, libovsdbclient.ErrNotFound) {
+		err = nil
+	}
 	if err != nil {
 		return false, err
 	}
 	if !ifExists {
 		klog.Infof("VF representor %s is not an OVS interface, nothing to do", vfRepName)
 		return false, nil
+	}
+	sandbox := iface.ExternalIDs["sandbox"]
+	expectedNADKey := iface.ExternalIDs[types.NADExternalID]
+	if expectedNADKey == "" {
+		expectedNADKey = types.DefaultNetworkName
 	}
 	if sandbox != sandboxId {
 		klog.Errorf("OVS port %s belongs to sandbox %s, not the expected %s; leaving it in place",

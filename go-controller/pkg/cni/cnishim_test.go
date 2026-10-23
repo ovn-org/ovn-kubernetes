@@ -6,8 +6,11 @@ package cni
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
+	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -18,8 +21,12 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
+
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	libovsdbtest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/vswitchd"
 )
 
 func TestCmdAdd_PrivilegedMode(t *testing.T) {
@@ -93,7 +100,9 @@ func TestCmdAdd_UnprivilegedMode(t *testing.T) {
 		config.OVNKubernetesFeature.EnableMultiNetwork = true
 		config.OVNKubernetesFeature.EnableNetworkSegmentation = true
 
-		podRequestInterfaceOps = &podRequestInterfaceOpsStub{}
+		setupShimOVS(t)
+		stub := &podRequestInterfaceOpsStub{}
+		podRequestInterfaceOps = stub
 		defer func() { podRequestInterfaceOps = &defaultPodRequestInterfaceOps{} }()
 		pr := PodRequest{
 			PodNamespace: "foo-ns",
@@ -124,16 +133,12 @@ func TestCmdAdd_UnprivilegedMode(t *testing.T) {
 				MTU:           1400,
 				NetName:       "default",
 				NADKey:        "foo-ns/default",
-				// hack to bypass OVS exec check
-				IsDPUHostMode: true,
 			},
 			PrimaryUDNPodInfo: &PodInterfaceInfo{
 				PodAnnotation: *udnPodNADAnnotation,
 				MTU:           1400,
 				NetName:       "tenantred",
 				NADKey:        "foo-ns/meganet",
-				// hack to bypass OVS exec check
-				IsDPUHostMode: true,
 			},
 			PrimaryUDNPodReq: &PodRequest{
 				PodNamespace: "default",
@@ -166,6 +171,10 @@ func TestCmdAdd_UnprivilegedMode(t *testing.T) {
 		}
 		err = p.CmdAdd(args)
 		require.NoError(t, err)
+		require.Len(t, stub.configureOVSClients, 2)
+		require.NotNil(t, stub.configureOVSClients[0])
+		require.Same(t, stub.configureOVSClients[0], stub.configureOVSClients[1])
+		require.False(t, stub.configureOVSClients[0].Connected())
 
 		// Collect stdout
 		w.Close()
@@ -253,6 +262,7 @@ func TestCmdDel_PrivilegedMode(t *testing.T) {
 func TestCmdDel_UnprivilegedMode(t *testing.T) {
 	withCNIEnv(t, func() {
 		p := &Plugin{}
+		setupShimOVS(t)
 		config.OVNKubernetesFeature.EnableMultiNetwork = true
 		config.OVNKubernetesFeature.EnableNetworkSegmentation = true
 
@@ -263,14 +273,12 @@ func TestCmdDel_UnprivilegedMode(t *testing.T) {
 		resp := &Response{
 			Result: nil,
 			PodIFInfo: &PodInterfaceInfo{
-				NetName:       "default",
-				NADKey:        "foo-ns/default",
-				IsDPUHostMode: true,
+				NetName: "default",
+				NADKey:  "foo-ns/default",
 			},
 			PrimaryUDNPodInfo: &PodInterfaceInfo{
-				NetName:       "tenantred",
-				NADKey:        "foo-ns/meganet",
-				IsDPUHostMode: true,
+				NetName: "tenantred",
+				NADKey:  "foo-ns/meganet",
 			},
 			PrimaryUDNPodReq: &PodRequest{
 				PodNamespace: "default",
@@ -293,11 +301,81 @@ func TestCmdDel_UnprivilegedMode(t *testing.T) {
 		}
 		err := p.CmdDel(args)
 		require.NoError(t, err)
+		require.Len(t, stub.unconfigureOVSClients, 1)
+		require.NotNil(t, stub.unconfigureOVSClients[0])
+		require.False(t, stub.unconfigureOVSClients[0].Connected())
 
 		if len(stub.unconfiguredInterfaces) <= 0 {
 			t.Fatalf("no unconfigured interfaces found")
 		}
 	})
+}
+
+func setupShimOVS(t *testing.T) {
+	t.Helper()
+	ovsClient, _ := newShimOVSTestServer(t, []libovsdbtest.TestData{
+		&vswitchd.OpenvSwitch{UUID: "ovs", Bridges: []string{"br_int"}},
+		&vswitchd.Bridge{UUID: "br_int", Name: "br-int"},
+	})
+	oldRunDir := config.OvsPaths.RunDir
+	config.OvsPaths.RunDir = t.TempDir()
+	t.Cleanup(func() { config.OvsPaths.RunDir = oldRunDir })
+	require.NoError(t, os.Symlink(strings.TrimPrefix(ovsClient.CurrentEndpoint(), "unix:"),
+		filepath.Join(config.OvsPaths.RunDir, "db.sock")))
+}
+
+func TestShimOVSClientLifecycle(t *testing.T) {
+	for _, cmd := range []command{CNIAdd, CNIDel} {
+		for _, scenario := range []string{"DPU host", "OVS unavailable", "interface operation fails"} {
+			t.Run(string(cmd)+"/"+scenario, func(t *testing.T) {
+				withCNIEnv(t, func() {
+					require.NoError(t, os.Setenv("CNI_COMMAND", string(cmd)))
+					oldRunDir := config.OvsPaths.RunDir
+					config.OvsPaths.RunDir = t.TempDir()
+					t.Cleanup(func() { config.OvsPaths.RunDir = oldRunDir })
+					stub := &podRequestInterfaceOpsStub{}
+					oldOps := podRequestInterfaceOps
+					podRequestInterfaceOps = stub
+					t.Cleanup(func() { podRequestInterfaceOps = oldOps })
+					if scenario == "interface operation fails" {
+						setupShimOVS(t)
+						stub.configureErr = errors.New("interface operation failed")
+						stub.unconfigureErr = stub.configureErr
+					}
+					body, err := json.Marshal(&Response{
+						PodIFInfo: &PodInterfaceInfo{IsDPUHostMode: scenario == "DPU host"},
+						KubeAuth:  &KubeAPIAuth{},
+					})
+					require.NoError(t, err)
+					p := &Plugin{doCNIFunc: func(_ string, _ interface{}) ([]byte, error) { return body, nil }}
+					args := &skel.CmdArgs{
+						StdinData: []byte(`{"cniVersion":"1.1.0","name":"mynet","type":"ovn-k8s-cni-overlay"}`),
+					}
+					var clients []libovsdbclient.Client
+					if cmd == CNIAdd {
+						err = p.CmdAdd(args)
+						clients = stub.configureOVSClients
+					} else {
+						err = p.CmdDel(args)
+						clients = stub.unconfigureOVSClients
+					}
+					switch scenario {
+					case "DPU host":
+						require.NoError(t, err)
+						require.Equal(t, []libovsdbclient.Client{nil}, clients)
+					case "OVS unavailable":
+						require.ErrorContains(t, err, "failed to initialize OVS client")
+						require.Empty(t, clients)
+					case "interface operation fails":
+						require.ErrorContains(t, err, "interface operation failed")
+						require.Len(t, clients, 1)
+						require.NotNil(t, clients[0])
+						require.False(t, clients[0].Connected())
+					}
+				})
+			})
+		}
+	}
 }
 
 func TestCmdGC(t *testing.T) {

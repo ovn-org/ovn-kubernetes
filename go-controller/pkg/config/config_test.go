@@ -1653,38 +1653,6 @@ udn-allowed-default-services= ns/svc, ns1/svc1
 		})
 	})
 
-	Describe("OvnDBConfig operations", func() {
-		It("configures ovn-controller to use the local southbound DB socket", func() {
-			fexec := ovntest.NewFakeExec()
-			expectedURL := "unix:/var/run/ovn/ovnsb_db.sock"
-			fexec.AddFakeCmdsNoOutputNoError([]string{
-				"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-remote=\"" + expectedURL + "\"",
-			})
-
-			cli := &OvnDBConfig{RunDir: "/var/run/ovn/"}
-			a, err := buildOvnDBConfig(fexec, false, cli, &OvnDBConfig{RunDir: "/var/run/ovn/"})
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			gomega.Expect(a.northbound).To(gomega.BeFalse())
-			gomega.Expect(a.GetURL()).To(gomega.Equal(expectedURL))
-
-			err = a.SetOVNRemote()
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue(), fexec.ErrorDesc)
-		})
-
-		It("rejects configuring ovn-controller with the northbound DB", func() {
-			fexec := ovntest.NewFakeExec()
-			cli := &OvnDBConfig{RunDir: "/var/run/ovn/"}
-			a, err := buildOvnDBConfig(fexec, true, cli, &OvnDBConfig{RunDir: "/var/run/ovn/"})
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			gomega.Expect(a.northbound).To(gomega.BeTrue())
-			gomega.Expect(a.GetURL()).To(gomega.Equal("unix:/var/run/ovn/ovnnb_db.sock"))
-
-			err = a.SetOVNRemote()
-			gomega.Expect(err).To(gomega.MatchError("cannot configure ovn-controller with the northbound database"))
-		})
-	})
-
 	// This testcase factory function exists only to ensure that 'runType'
 	// and 'dir' are evaluated when this factory function is called (and
 	// the It() is created), but that the CLI arguments are evaluated only

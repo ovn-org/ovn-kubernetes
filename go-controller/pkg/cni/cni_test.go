@@ -44,10 +44,18 @@ import (
 )
 
 type podRequestInterfaceOpsStub struct {
+	configureOVSClients    []client.Client
+	configureErr           error
 	unconfiguredInterfaces []*PodInterfaceInfo
+	unconfigureOVSClients  []client.Client
+	unconfigureErr         error
 }
 
-func (stub *podRequestInterfaceOpsStub) ConfigureInterface(pr *PodRequest, _ client.Client, _ PodInfoGetter, pii *PodInterfaceInfo) ([]*current.Interface, error) {
+func (stub *podRequestInterfaceOpsStub) ConfigureInterface(pr *PodRequest, ovsClient client.Client, _ PodInfoGetter, pii *PodInterfaceInfo) ([]*current.Interface, error) {
+	stub.configureOVSClients = append(stub.configureOVSClients, ovsClient)
+	if stub.configureErr != nil {
+		return nil, stub.configureErr
+	}
 	if len(pii.IPs) > 0 {
 		return []*current.Interface{
 			{
@@ -61,9 +69,10 @@ func (stub *podRequestInterfaceOpsStub) ConfigureInterface(pr *PodRequest, _ cli
 	}
 	return nil, nil
 }
-func (stub *podRequestInterfaceOpsStub) UnconfigureInterface(_ *PodRequest, ifInfo *PodInterfaceInfo, _ corev1listers.PodLister, _ *corev1.Pod) error {
+func (stub *podRequestInterfaceOpsStub) UnconfigureInterface(_ *PodRequest, ovsClient client.Client, ifInfo *PodInterfaceInfo, _ corev1listers.PodLister, _ *corev1.Pod) error {
 	stub.unconfiguredInterfaces = append(stub.unconfiguredInterfaces, ifInfo)
-	return nil
+	stub.unconfigureOVSClients = append(stub.unconfigureOVSClients, ovsClient)
+	return stub.unconfigureErr
 }
 
 // dhcpPodRequestInterfaceOpsStub mimics ConfigureInterface for DHCP IPAM
@@ -269,17 +278,20 @@ var _ = Describe("Network Segmentation", func() {
 				},
 			}
 		})
-		It("should not fail at cmdAdd or cmdDel", func() {
+		It("should not fail at cmdAdd", func() {
 			startCNIServer(testing.NewNamespace(pod.Namespace), pod)
 
 			By("cmdAdd primary pod interface should be added")
 			response := handlePodRequest()
 			Expect(response.Result).NotTo(BeNil())
 			Expect(response.Result.Interfaces).To(HaveLen(2))
-			By("cmdDel primary pod interface should be removed")
+		})
+		It("should not fail at cmdDel", func() {
+			startCNIServer(testing.NewNamespace(pod.Namespace), pod)
 			pr.Command = CNIDel
 			handlePodRequest()
 			Expect(prInterfaceOpsStub.unconfiguredInterfaces).To(HaveLen(1))
+			Expect(prInterfaceOpsStub.unconfigureOVSClients).To(ConsistOf(cniServer.ovsClient))
 		})
 	})
 	Context("with network segmentation fg enabled and annotation with role field", func() {
@@ -302,7 +314,7 @@ var _ = Describe("Network Segmentation", func() {
 			})
 
 			Context("with CNI Privileged Mode", func() {
-				It("should not fail at cmdAdd or cmdDel", func() {
+				It("should not fail at cmdAdd", func() {
 					startCNIServer(testing.NewNamespace(pod.Namespace), pod)
 					By("cmdAdd primary pod interface should be added")
 					response := handlePodRequest()
@@ -311,14 +323,25 @@ var _ = Describe("Network Segmentation", func() {
 					Expect(response.Result.Interfaces).To(HaveLen(2))
 					Expect(response.PrimaryUDNPodInfo).To(BeNil())
 					Expect(response.PrimaryUDNPodReq).To(BeNil())
-					By("cmdDel primary pod interface should be removed")
+				})
+				It("should not fail at cmdDel", func() {
+					startCNIServer(testing.NewNamespace(pod.Namespace), pod)
 					pr.Command = CNIDel
 					handlePodRequest()
 					Expect(prInterfaceOpsStub.unconfiguredInterfaces).To(HaveLen(1))
+					Expect(prInterfaceOpsStub.unconfigureOVSClients).To(ConsistOf(cniServer.ovsClient))
 				})
 				It("should fail cmdAdd when the server has no OVS client", func() {
 					startCNIServer(testing.NewNamespace(pod.Namespace), pod)
 					cniServer.ovsClient = nil
+
+					_, err := cniServer.handleCNIRequest(podRequestToHTTPRequest(&pr))
+					Expect(err).To(MatchError(ContainSubstring("OVS client is required in privileged mode")))
+				})
+				It("should fail cmdDel when the server has no OVS client", func() {
+					startCNIServer(testing.NewNamespace(pod.Namespace), pod)
+					cniServer.ovsClient = nil
+					pr.Command = CNIDel
 
 					_, err := cniServer.handleCNIRequest(podRequestToHTTPRequest(&pr))
 					Expect(err).To(MatchError(ContainSubstring("OVS client is required in privileged mode")))
@@ -561,15 +584,7 @@ var _ = Describe("DHCP IPAM workload differentiation", func() {
 		prInterfaceOpsStub *dhcpPodRequestInterfaceOpsStub
 		cniServer          *Server
 		wf                 factory.NodeWatchFactory
-		fexec              *testing.FakeExec
 		dhcpStub           *dhcpOpsStub
-	)
-
-	// cmdDel resolves the host-side OVS interface of a DeviceID-backed
-	// attachment with these lookups (newest key first, NAD-key fallback)
-	const (
-		hostIfaceFindCmd         = "ovs-vsctl --timeout=30 --no-heading --format=csv --data=bare --columns=name find Interface external-ids:sandbox=824bceff24af3 external_ids:pod-if-name=net1"
-		hostIfaceFallbackFindCmd = "ovs-vsctl --timeout=30 --no-heading --format=csv --data=bare --columns=name find Interface external-ids:sandbox=824bceff24af3 external_ids:k8s.ovn.org/nad=foo-ns/localnet-nad"
 	)
 
 	dhcpIP := func() *current.IPConfig {
@@ -586,10 +601,6 @@ var _ = Describe("DHCP IPAM workload differentiation", func() {
 
 		prInterfaceOpsStub = &dhcpPodRequestInterfaceOpsStub{}
 		podRequestInterfaceOps = prInterfaceOpsStub
-
-		// every expected ovs-vsctl invocation is declared per spec
-		fexec = testing.NewFakeExec()
-		Expect(SetExec(fexec)).To(Succeed())
 
 		fakeNetworkManager = &networkmanager.FakeNetworkManager{
 			PrimaryNetworks: make(map[string]util.NetInfo),
@@ -644,7 +655,6 @@ var _ = Describe("DHCP IPAM workload differentiation", func() {
 	AfterEach(func() {
 		dhcpOps = &defaultDHCPOps{}
 		podRequestInterfaceOps = &defaultPodRequestInterfaceOps{}
-		ResetRunner()
 		if wf != nil {
 			wf.Shutdown()
 			wf = nil
@@ -930,14 +940,11 @@ var _ = Describe("DHCP IPAM workload differentiation", func() {
 			fakeSriovnetOps.On("IsVfPciVfioBound", "0000:65:00.2").Return(true)
 			// the DeviceID teardown path resolves the host-side OVS interface;
 			// none exists in this harness and the lookup failure is tolerated
-			fexec.AddFakeCmd(&testing.ExpectedCmd{Cmd: hostIfaceFindCmd, Output: ""})
-			fexec.AddFakeCmd(&testing.ExpectedCmd{Cmd: hostIfaceFallbackFindCmd, Output: ""})
 			startCNIServer(testing.NewNamespace(podNamespace), pod)
 
 			handlePodRequest()
 
 			Expect(dhcpStub.delCalls).To(BeZero(), "the guest owns a VFIO device's lease; no RELEASE may be sent")
-			Expect(fexec.CalledMatchesExpected()).To(BeTrue())
 		})
 	})
 })

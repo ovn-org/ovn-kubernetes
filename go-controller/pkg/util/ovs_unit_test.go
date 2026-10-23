@@ -491,13 +491,13 @@ func TestSetExec(t *testing.T) {
 		{
 			desc:         "positive, test when 'runner' is nil",
 			expectedErr:  nil,
-			onRetArgs:    &ovntest.TestifyMockHelper{OnCallMethodName: "LookPath", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{"ip", nil}, CallTimes: 10},
+			onRetArgs:    &ovntest.TestifyMockHelper{OnCallMethodName: "LookPath", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{"ip", nil}, CallTimes: 8},
 			setRunnerNil: true,
 		},
 		{
 			desc:         "positive, test when 'runner' is not nil",
 			expectedErr:  nil,
-			onRetArgs:    &ovntest.TestifyMockHelper{OnCallMethodName: "LookPath", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{"", nil}, CallTimes: 10},
+			onRetArgs:    &ovntest.TestifyMockHelper{OnCallMethodName: "LookPath", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{"", nil}, CallTimes: 8},
 			setRunnerNil: false,
 		},
 	}
@@ -550,46 +550,6 @@ func TestSetExecWithoutOVS(t *testing.T) {
 			ovntest.ProcessMockFn(&mockKexecIface.Mock, *tc.onRetArgs)
 
 			e := SetExecWithoutOVS(mockKexecIface)
-			assert.Equal(t, tc.expectedErr, e)
-			mockKexecIface.AssertExpectations(t)
-		})
-	}
-}
-
-func TestSetSpecificExec(t *testing.T) {
-	mockKexecIface := new(mock_k8s_io_utils_exec.Interface)
-	tests := []struct {
-		desc        string
-		expectedErr error
-		fnArg       string
-		onRetArgs   *ovntest.TestifyMockHelper
-	}{
-		{
-			desc:        "positive: ovs-vsctl path found",
-			expectedErr: nil,
-			fnArg:       "ovs-vsctl",
-			onRetArgs:   &ovntest.TestifyMockHelper{OnCallMethodName: "LookPath", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{"ovs-vsctl", nil}},
-		},
-		{
-			desc:        "negative: ovs-vsctl path not found",
-			expectedErr: fmt.Errorf(`exec: \"ovs-vsctl:\" executable file not found in $PATH`),
-			fnArg:       "ovs-vsctl",
-			onRetArgs:   &ovntest.TestifyMockHelper{OnCallMethodName: "LookPath", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{"", fmt.Errorf(`exec: \"ovs-vsctl:\" executable file not found in $PATH`)}},
-		},
-		{
-			desc:        "negative: unknown command",
-			expectedErr: fmt.Errorf(`unknown command: "ovs-appctl"`),
-			fnArg:       "ovs-appctl",
-		},
-	}
-
-	for i, tc := range tests {
-		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			if tc.onRetArgs != nil {
-				ovntest.ProcessMockFn(&mockKexecIface.Mock, *tc.onRetArgs)
-			}
-
-			e := SetSpecificExec(mockKexecIface, tc.fnArg)
 			assert.Equal(t, tc.expectedErr, e)
 			mockKexecIface.AssertExpectations(t)
 		})
@@ -924,47 +884,6 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0
 	}
 }
 
-func TestRunOVSVsctl(t *testing.T) {
-	mockKexecIface := new(mock_k8s_io_utils_exec.Interface)
-	mockExecRunner := new(mocks.ExecRunner)
-	mockCmd := new(mock_k8s_io_utils_exec.Cmd)
-	// below is defined in ovs.go
-	RunCmdExecRunner = mockExecRunner
-	// note runner is defined in ovs.go file
-	runner = &execHelper{exec: mockKexecIface}
-	tests := []struct {
-		desc                    string
-		expectedErr             error
-		onRetArgsExecUtilsIface *ovntest.TestifyMockHelper
-		onRetArgsKexecIface     *ovntest.TestifyMockHelper
-	}{
-		{
-			desc:                    "negative: run `ovs-vsctl` command",
-			expectedErr:             fmt.Errorf("failed to execute ovs-vsctl command"),
-			onRetArgsExecUtilsIface: &ovntest.TestifyMockHelper{OnCallMethodName: "RunCmd", OnCallMethodArgType: []string{"*mocks.Cmd", "string", "[]string", "string"}, RetArgList: []interface{}{nil, nil, fmt.Errorf("failed to execute ovs-vsctl command")}},
-			onRetArgsKexecIface:     &ovntest.TestifyMockHelper{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
-		},
-		{
-			desc:                    "positive: run `ovs-vsctl` ",
-			expectedErr:             nil,
-			onRetArgsExecUtilsIface: &ovntest.TestifyMockHelper{OnCallMethodName: "RunCmd", OnCallMethodArgType: []string{"*mocks.Cmd", "string", "[]string", "string"}, RetArgList: []interface{}{bytes.NewBuffer([]byte("testblah")), bytes.NewBuffer([]byte("")), nil}},
-			onRetArgsKexecIface:     &ovntest.TestifyMockHelper{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
-		},
-	}
-	for i, tc := range tests {
-		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			ovntest.ProcessMockFn(&mockExecRunner.Mock, *tc.onRetArgsExecUtilsIface)
-			ovntest.ProcessMockFn(&mockKexecIface.Mock, *tc.onRetArgsKexecIface)
-
-			_, _, e := RunOVSVsctl()
-
-			assert.Equal(t, tc.expectedErr, e)
-			mockExecRunner.AssertExpectations(t)
-			mockKexecIface.AssertExpectations(t)
-		})
-	}
-}
-
 func TestRunOVSAppctlWithTimeout(t *testing.T) {
 	mockKexecIface := new(mock_k8s_io_utils_exec.Interface)
 	mockExecRunner := new(mocks.ExecRunner)
@@ -1188,49 +1107,6 @@ func TestRunOVNSbctlWithTimeout(t *testing.T) {
 	}
 }
 
-func TestRunOVNSbctl(t *testing.T) {
-	mockKexecIface := new(mock_k8s_io_utils_exec.Interface)
-	mockExecRunner := new(mocks.ExecRunner)
-	mockCmd := new(mock_k8s_io_utils_exec.Cmd)
-	// below is defined in ovs.go
-	RunCmdExecRunner = mockExecRunner
-	// note runner is defined in ovs.go file
-	runner = &execHelper{exec: mockKexecIface}
-	tests := []struct {
-		desc                    string
-		expectedErr             error
-		onRetArgsExecUtilsIface *ovntest.TestifyMockHelper
-		onRetArgsKexecIface     *ovntest.TestifyMockHelper
-	}{
-		{
-			desc:                    "negative: run `ovn-sbctl` command",
-			expectedErr:             fmt.Errorf("failed to execute ovn-sbctl command"),
-			onRetArgsExecUtilsIface: &ovntest.TestifyMockHelper{OnCallMethodName: "RunCmd", OnCallMethodArgType: []string{"*mocks.Cmd", "string", "[]string", "string", "string"}, RetArgList: []interface{}{nil, nil, fmt.Errorf("failed to execute ovn-sbctl command")}},
-			onRetArgsKexecIface:     &ovntest.TestifyMockHelper{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
-		},
-		{
-			desc:                    "positive: run `ovn-sbctl` command",
-			expectedErr:             nil,
-			onRetArgsExecUtilsIface: &ovntest.TestifyMockHelper{OnCallMethodName: "RunCmd", OnCallMethodArgType: []string{"*mocks.Cmd", "string", "[]string", "string", "string"}, RetArgList: []interface{}{bytes.NewBuffer([]byte("testblah")), bytes.NewBuffer([]byte("")), nil}},
-			onRetArgsKexecIface:     &ovntest.TestifyMockHelper{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
-		},
-	}
-	for i, tc := range tests {
-		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			ovntest.ProcessMockFn(&mockExecRunner.Mock, *tc.onRetArgsExecUtilsIface)
-			ovntest.ProcessMockFn(&mockKexecIface.Mock, *tc.onRetArgsKexecIface)
-
-			_, _, e := RunOVNSbctl()
-
-			if tc.expectedErr != nil {
-				require.Error(t, e)
-			}
-			mockExecRunner.AssertExpectations(t)
-			mockKexecIface.AssertExpectations(t)
-		})
-	}
-}
-
 func TestRunOVSDBClient(t *testing.T) {
 	mockKexecIface := new(mock_k8s_io_utils_exec.Interface)
 	mockExecRunner := new(mocks.ExecRunner)
@@ -1274,11 +1150,11 @@ func TestRunOVSDBClient(t *testing.T) {
 	}
 }
 
-func TestRunOVSDBTool(t *testing.T) {
+func TestRunOVNSbctl(t *testing.T) {
 	mockKexecIface := new(mock_k8s_io_utils_exec.Interface)
 	mockExecRunner := new(mocks.ExecRunner)
 	mockCmd := new(mock_k8s_io_utils_exec.Cmd)
-	// below is defined in ovs.go.
+	// below is defined in ovs.go
 	RunCmdExecRunner = mockExecRunner
 	// note runner is defined in ovs.go file
 	runner = &execHelper{exec: mockKexecIface}
@@ -1289,16 +1165,16 @@ func TestRunOVSDBTool(t *testing.T) {
 		onRetArgsKexecIface     *ovntest.TestifyMockHelper
 	}{
 		{
-			desc:                    "negative: run `ovsdb-tool` command",
-			expectedErr:             fmt.Errorf("failed to execute ovsdb-tool command"),
-			onRetArgsExecUtilsIface: &ovntest.TestifyMockHelper{OnCallMethodName: "RunCmd", OnCallMethodArgType: []string{"*mocks.Cmd", "string", "[]string", "string"}, RetArgList: []interface{}{nil, nil, fmt.Errorf("failed to execute ovsdb-tool command")}},
-			onRetArgsKexecIface:     &ovntest.TestifyMockHelper{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string"}, RetArgList: []interface{}{mockCmd}},
+			desc:                    "negative: run `ovn-sbctl` command",
+			expectedErr:             fmt.Errorf("failed to execute ovn-sbctl command"),
+			onRetArgsExecUtilsIface: &ovntest.TestifyMockHelper{OnCallMethodName: "RunCmd", OnCallMethodArgType: []string{"*mocks.Cmd", "string", "[]string", "string", "string"}, RetArgList: []interface{}{nil, nil, fmt.Errorf("failed to execute ovn-sbctl command")}},
+			onRetArgsKexecIface:     &ovntest.TestifyMockHelper{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
 		},
 		{
-			desc:                    "positive: run `ovsdb-tool` command",
+			desc:                    "positive: run `ovn-sbctl` command",
 			expectedErr:             nil,
-			onRetArgsExecUtilsIface: &ovntest.TestifyMockHelper{OnCallMethodName: "RunCmd", OnCallMethodArgType: []string{"*mocks.Cmd", "string", "[]string", "string"}, RetArgList: []interface{}{bytes.NewBuffer([]byte("testblah")), bytes.NewBuffer([]byte("")), nil}},
-			onRetArgsKexecIface:     &ovntest.TestifyMockHelper{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string"}, RetArgList: []interface{}{mockCmd}},
+			onRetArgsExecUtilsIface: &ovntest.TestifyMockHelper{OnCallMethodName: "RunCmd", OnCallMethodArgType: []string{"*mocks.Cmd", "string", "[]string", "string", "string"}, RetArgList: []interface{}{bytes.NewBuffer([]byte("testblah")), bytes.NewBuffer([]byte("")), nil}},
+			onRetArgsKexecIface:     &ovntest.TestifyMockHelper{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
 		},
 	}
 	for i, tc := range tests {
@@ -1306,7 +1182,7 @@ func TestRunOVSDBTool(t *testing.T) {
 			ovntest.ProcessMockFn(&mockExecRunner.Mock, *tc.onRetArgsExecUtilsIface)
 			ovntest.ProcessMockFn(&mockKexecIface.Mock, *tc.onRetArgsKexecIface)
 
-			_, _, e := RunOVSDBTool()
+			_, _, e := RunOVNSbctl()
 
 			if tc.expectedErr != nil {
 				require.Error(t, e)

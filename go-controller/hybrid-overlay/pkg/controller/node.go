@@ -15,6 +15,8 @@ import (
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 
+	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
+
 	hotypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	houtil "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/hybrid-overlay/pkg/util"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/informer"
@@ -91,6 +93,7 @@ func podChanged(old, new interface{}) bool {
 // When used by ovnkube-node binary, it prepares the OVN nodes for the HO tunnel.
 // When used by the HO binary, it prepares the windows or SDN (SDN <-> OVN
 // migration) nodes for the HO tunnel. This is flagged by setting isHONode to true.
+// ovsClient is required for OVN nodes and unused for HO nodes.
 
 func NewNode(
 	kube kube.Interface,
@@ -99,12 +102,15 @@ func NewNode(
 	podInformer cache.SharedIndexInformer,
 	eventHandlerCreateFunction informer.EventHandlerCreateFunction,
 	isHONode bool,
+	ovsClient libovsdbclient.Client,
 ) (*Node, error) {
-
+	if !isHONode && ovsClient == nil {
+		return nil, fmt.Errorf("OVS client is required for an OVN node")
+	}
 	nodeLister := listers.NewNodeLister(nodeInformer.GetIndexer())
 	localPodLister := listers.NewPodLister(podInformer.GetIndexer())
 
-	controller, err := newNodeController(kube, nodeName, nodeLister, localPodLister, isHONode)
+	controller, err := newNodeController(kube, nodeName, nodeLister, localPodLister, isHONode, ovsClient)
 	if err != nil {
 		return nil, err
 	}

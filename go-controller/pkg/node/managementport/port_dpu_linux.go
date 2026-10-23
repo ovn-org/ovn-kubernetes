@@ -71,11 +71,11 @@ func (mp *managementPortRepresentor) create() error {
 	}
 	// connect representor port to br-int, set OvnManagementPortNameExternalID external-id to indicate its
 	// associated network name and management port device name
-	externalIDs := []string{fmt.Sprintf("%s=%s", types.OvnManagementPortNameExternalID, types.K8sMgmtIntfName)}
+	externalIDs := map[string]string{types.OvnManagementPortNameExternalID: types.K8sMgmtIntfName}
 	if mp.repDevName != mp.ifName {
-		externalIDs = append(externalIDs, fmt.Sprintf("ovn-orig-mgmt-port-rep-name=%s", mp.repDevName))
+		externalIDs["ovn-orig-mgmt-port-rep-name"] = mp.repDevName
 	}
-	err = createManagementPortOVSRepresentor(types.DefaultNetworkName, mp.ifName, types.K8sPrefix+mp.cfg.nodeName, config.Default.MTU, externalIDs)
+	err = createManagementPortOVSRepresentor(mp.ovsClient, types.DefaultNetworkName, mp.ifName, types.K8sPrefix+mp.cfg.nodeName, config.Default.MTU, externalIDs)
 	if err != nil {
 		return err
 	}
