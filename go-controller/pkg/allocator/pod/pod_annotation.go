@@ -316,16 +316,16 @@ func validateIPFamilyMatchesNetwork(netInfo util.NetInfo, ipRequests []string) e
 // IPs, a mac address, routes, gateways and an ID. Returns the allocated pod
 // annotation and a pod with that annotation set. Returns a nil pod and the existing
 // PodAnnotation if no updates are warranted to the pod.
-
+//
 // The allocation of network information can be requested through the network
 // selection element or derived from the allocator provided IPs. If no IP
 // allocation is required, set allocateIP to false. If the requested IPs cannot
 // be honored, a new set of IPs will be allocated unless reallocateIP is set to
 // false.
-
+//
 // A rollback function is returned to rollback the IP allocation if there was
 // any.
-
+//
 // This function is designed to be used in AllocateToPodWithRollbackFunc
 // implementations. Use an inlined implementation if you want to extract
 // information from it as a side-effect.
@@ -402,11 +402,12 @@ func allocatePodAnnotationWithRollback(
 
 	// work on a tentative pod annotation based on the existing one
 	tentative := &util.PodAnnotation{
-		IPs:      podAnnotation.IPs,
-		MAC:      podAnnotation.MAC,
-		TunnelID: podAnnotation.TunnelID,
-		Role:     networkRole,
-		IPAMMode: netInfo.IPAMType(),
+		IPs:            podAnnotation.IPs,
+		MAC:            podAnnotation.MAC,
+		TunnelID:       podAnnotation.TunnelID,
+		Role:           networkRole,
+		IPAMMode:       netInfo.IPAMType(),
+		GatewayIPv6LLA: podAnnotation.GatewayIPv6LLA,
 	}
 
 	hasIDAllocation := util.DoesNetworkRequireTunnelIDs(netInfo)
@@ -632,10 +633,6 @@ func AddRoutesGatewayIP(
 			if !util.IsNetworkSegmentationSupportEnabled() || !netinfo.IsPrimaryNetwork() {
 				return nil
 			}
-			// logical router port MAC is based on IPv4 subnet if there is one, else IPv6
-			// hasV4 is used to ensure that if ipv4 address was found, it is not overridden by an ipv6 address
-			var nodeLRPMAC net.HardwareAddr
-			var hasV4 bool
 			for _, podIfAddr := range podAnnotation.IPs {
 				isIPv6 := utilnet.IsIPv6CIDR(podIfAddr)
 				nodeSubnet, err := util.MatchFirstIPNetFamily(isIPv6, nodeSubnets)
@@ -650,16 +647,6 @@ func AddRoutesGatewayIP(
 				if network != nil && len(network.GatewayRequest) == 0 { // if specific default route for pod was not requested then add gatewayIP
 					podAnnotation.Gateways = append(podAnnotation.Gateways, gatewayIPnet.IP)
 				}
-				if !isIPv6 {
-					hasV4 = true
-					nodeLRPMAC = util.IPAddrToHWAddr(gatewayIPnet.IP)
-				} else if !hasV4 {
-					// only use IPv6 address to derive MAC if IPv4 address hasn't been found yet
-					nodeLRPMAC = util.IPAddrToHWAddr(gatewayIPnet.IP)
-				}
-			}
-			if _, isIPv6Mode := netinfo.IPMode(); isIPv6Mode {
-				podAnnotation.GatewayIPv6LLA = util.HWAddrToIPv6LLA(nodeLRPMAC)
 			}
 			return nil
 		case types.Layer3Topology:

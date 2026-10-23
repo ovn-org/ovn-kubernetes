@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	cnitypes "github.com/containernetworking/cni/pkg/types"
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 
@@ -21,6 +22,7 @@ import (
 	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
 	"github.com/ovn-kubernetes/libovsdb/model"
 
+	ovncnitypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	libovsdbutil "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/util"
@@ -34,6 +36,78 @@ import (
 	ovntypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
+
+// TestNamespaceRAGuard verifies source-port scoping, policy precedence and
+// reconciliation of existing groups without removing their ports or ACLs.
+func TestNamespaceRAGuard(t *testing.T) {
+	for _, tc := range []struct {
+		name, topology, role, subnets string
+		existing, wantGuard           bool
+	}{
+		{"primary L2 IPv6", ovntypes.Layer2Topology, ovntypes.NetworkRolePrimary, "fd10::/64", false, true},
+		{"existing primary L2 dual stack", ovntypes.Layer2Topology, ovntypes.NetworkRolePrimary, "10.128.0.0/16,fd10::/64", true, true},
+		{"primary L2 IPv4", ovntypes.Layer2Topology, ovntypes.NetworkRolePrimary, "10.128.0.0/16", false, false},
+		{"secondary L2", ovntypes.Layer2Topology, ovntypes.NetworkRoleSecondary, "fd10::/64", false, false},
+		{"primary L3", ovntypes.Layer3Topology, ovntypes.NetworkRolePrimary, "fd10::/48/64", false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			g := gomega.NewWithT(t)
+			g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+			t.Cleanup(func() { g.Expect(config.PrepareTestConfig()).To(gomega.Succeed()) })
+			config.IPv4Mode, config.IPv6Mode = true, true
+			ni, err := util.NewNetInfo(&ovncnitypes.NetConf{
+				NetConf: cnitypes.NetConf{Name: "blue"}, Topology: tc.topology, Role: tc.role, Subnets: tc.subnets,
+			})
+			g.Expect(err).NotTo(gomega.HaveOccurred())
+			bnc := &BaseNetworkController{controllerName: "blue-controller", ReconcilableNetInfo: util.NewReconcilableNetInfo(ni)}
+			pg := libovsdbutil.BuildPortGroup(getNamespacePortGroupDbIDs("ns", bnc.controllerName), nil, nil)
+			initial := []libovsdb.TestData{}
+			if tc.existing {
+				pg.Ports, pg.ACLs = []string{"pod-port"}, []string{"other-acl"}
+				initial = append(initial, pg,
+					&nbdb.LogicalSwitchPort{UUID: "pod-port", Name: "pod"},
+					&nbdb.LogicalSwitch{Name: "blue", Ports: []string{"pod-port"}},
+					&nbdb.ACL{UUID: "other-acl", Direction: nbdb.ACLDirectionFromLport, Priority: 1, Match: "ip6", Action: nbdb.ACLActionAllow})
+			}
+			client, dbCtx, err := libovsdb.NewNBTestHarness(libovsdb.TestSetup{NBData: initial}, nil)
+			g.Expect(err).NotTo(gomega.HaveOccurred())
+			t.Cleanup(dbCtx.Cleanup)
+			bnc.nbClient = client
+			for range 2 {
+				_, err = bnc.createNamespacePortGroup("ns")
+				g.Expect(err).NotTo(gomega.HaveOccurred())
+			}
+			g.Eventually(func(g gomega.Gomega) {
+				var acls []nbdb.ACL
+				g.Expect(client.List(context.Background(), &acls)).To(gomega.Succeed())
+				count := 0
+				if tc.wantGuard {
+					count++
+				}
+				if tc.existing {
+					count++
+				}
+				g.Expect(acls).To(gomega.HaveLen(count))
+				storedPG, err := libovsdbops.GetPortGroup(client, &nbdb.PortGroup{Name: pg.Name})
+				g.Expect(err).NotTo(gomega.HaveOccurred())
+				g.Expect(storedPG.ACLs).To(gomega.HaveLen(count))
+				if tc.existing {
+					g.Expect(storedPG.Ports).To(gomega.HaveLen(1), "retain pod membership")
+				}
+				for _, acl := range acls {
+					if acl.Priority == 1 {
+						continue
+					}
+					g.Expect(acl.Match).To(gomega.Equal("inport == @" + pg.Name + " && nd_ra"))
+					g.Expect(acl.Direction).To(gomega.Equal(nbdb.ACLDirectionFromLport))
+					g.Expect(acl.Action).To(gomega.Equal(nbdb.ACLActionDrop))
+					g.Expect(acl.Tier).To(gomega.Equal(ovntypes.PrimaryACLTier))
+					g.Expect(acl.Priority).To(gomega.BeNumerically(">", ovntypes.AdvertisedNetworkPassPriority))
+				}
+			}).Should(gomega.Succeed())
+		})
+	}
+}
 
 func newUDNNamespaceWithLabels(namespace string, additionalLabels map[string]string) *corev1.Namespace {
 	n := &corev1.Namespace{
