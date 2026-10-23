@@ -76,36 +76,6 @@ var MetricResourceUpdateCount = prometheus.NewCounterVec(prometheus.CounterOpts{
 	},
 )
 
-// MetricResourceAddLatency is the time taken to complete resource update by an handler.
-// This measures the latency for all of the handlers for a given resource.
-var MetricResourceAddLatency = prometheus.NewHistogram(prometheus.HistogramOpts{
-	Namespace: types.MetricOvnkubeNamespace,
-	Subsystem: types.MetricOvnkubeSubsystemController,
-	Name:      "resource_add_latency_seconds",
-	Help:      "The duration to process all handlers for a given resource event - add.",
-	Buckets:   prometheus.ExponentialBuckets(.1, 2, 15)},
-)
-
-// MetricResourceUpdateLatency is the time taken to complete resource update by an handler.
-// This measures the latency for all of the handlers for a given resource.
-var MetricResourceUpdateLatency = prometheus.NewHistogram(prometheus.HistogramOpts{
-	Namespace: types.MetricOvnkubeNamespace,
-	Subsystem: types.MetricOvnkubeSubsystemController,
-	Name:      "resource_update_latency_seconds",
-	Help:      "The duration to process all handlers for a given resource event - update.",
-	Buckets:   prometheus.ExponentialBuckets(.1, 2, 15)},
-)
-
-// MetricResourceDeleteLatency is the time taken to complete resource update by an handler.
-// This measures the latency for all of the handlers for a given resource.
-var MetricResourceDeleteLatency = prometheus.NewHistogram(prometheus.HistogramOpts{
-	Namespace: types.MetricOvnkubeNamespace,
-	Subsystem: types.MetricOvnkubeSubsystemController,
-	Name:      "resource_delete_latency_seconds",
-	Help:      "The duration to process all handlers for a given resource event - delete.",
-	Buckets:   prometheus.ExponentialBuckets(.1, 2, 15)},
-)
-
 // MetricRequeueServiceCount is the number of times a particular service has been requeued.
 var MetricRequeueServiceCount = prometheus.NewCounter(prometheus.CounterOpts{
 	Namespace: types.MetricOvnkubeNamespace,
@@ -368,9 +338,6 @@ func RegisterOVNKubeControllerPerformance(nbClient libovsdbclient.Client) {
 	// No need to unregister because process exits when leadership is lost.
 	prometheus.MustRegister(metricPodCreationLatency)
 	prometheus.MustRegister(MetricResourceUpdateCount)
-	prometheus.MustRegister(MetricResourceAddLatency)
-	prometheus.MustRegister(MetricResourceUpdateLatency)
-	prometheus.MustRegister(MetricResourceDeleteLatency)
 	prometheus.MustRegister(MetricRequeueServiceCount)
 	prometheus.MustRegister(MetricSyncServiceCount)
 	prometheus.MustRegister(MetricSyncServiceLatency)

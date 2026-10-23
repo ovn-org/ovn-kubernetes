@@ -8,7 +8,6 @@ import (
 	"reflect"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	ipamclaimslister "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1/apis/listers/ipamclaims/v1alpha1"
 	multinetworkpolicylister "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/client/listers/k8s.cni.cncf.io/v1beta1"
@@ -430,11 +429,9 @@ func (i *informer) newFederatedQueuedHandler(internalInformerIndex int) cache.Re
 			}
 			intInf.queueMap.enqueueEvent(nil, obj, i.oType, false, func(e *event) {
 				metrics.MetricResourceUpdateCount.WithLabelValues(name, "add").Inc()
-				start := time.Now()
 				intInf.forEachQueuedHandler(func(h *Handler) {
 					h.OnAdd(e.obj, false)
 				})
-				metrics.MetricResourceAddLatency.Observe(time.Since(start).Seconds())
 			})
 		},
 		UpdateFunc: func(oldObj, newObj interface{}) {
@@ -444,7 +441,6 @@ func (i *informer) newFederatedQueuedHandler(internalInformerIndex int) cache.Re
 			}
 			intInf.queueMap.enqueueEvent(oldObj, newObj, i.oType, false, func(e *event) {
 				metrics.MetricResourceUpdateCount.WithLabelValues(name, "update").Inc()
-				start := time.Now()
 				intInf.forEachQueuedHandler(func(h *Handler) {
 					old := oldObj.(metav1.Object)
 					new := newObj.(metav1.Object)
@@ -457,7 +453,6 @@ func (i *informer) newFederatedQueuedHandler(internalInformerIndex int) cache.Re
 						h.OnUpdate(e.oldObj, e.obj)
 					}
 				})
-				metrics.MetricResourceUpdateLatency.Observe(time.Since(start).Seconds())
 			})
 		},
 		DeleteFunc: func(obj interface{}) {
@@ -473,11 +468,9 @@ func (i *informer) newFederatedQueuedHandler(internalInformerIndex int) cache.Re
 			}
 			intInf.queueMap.enqueueEvent(nil, realObj, i.oType, true, func(e *event) {
 				metrics.MetricResourceUpdateCount.WithLabelValues(name, "delete").Inc()
-				start := time.Now()
 				intInf.forEachQueuedHandlerReversed(func(h *Handler) {
 					h.OnDelete(e.obj)
 				})
-				metrics.MetricResourceDeleteLatency.Observe(time.Since(start).Seconds())
 			})
 		},
 	}

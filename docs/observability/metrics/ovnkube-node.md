@@ -16,9 +16,6 @@ All metrics in this section are rooted at `ovnkube_controller_`.
 | `ready_duration_seconds` | Gauge | None | Time for ovnkube-controller to become ready. |
 | `sync_duration_seconds` | Gauge | `resource_name` | Time to complete initial synchronization and set up handlers for a resource. |
 | `resource_update_total` | Counter | `name`, `event` | Resource add, update, and delete events handled. |
-| `resource_add_latency_seconds` | Histogram | None | Time to process all handlers for an add event. |
-| `resource_update_latency_seconds` | Histogram | None | Time to process all handlers for an update event. |
-| `resource_delete_latency_seconds` | Histogram | None | Time to process all handlers for a delete event. |
 | `logfile_size_bytes` | Gauge | `logfile_name` | Size of the configured ovnkube-controller log file. No series is produced when file logging is not configured. |
 
 ### Pod and Service Programming

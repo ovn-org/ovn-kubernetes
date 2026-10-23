@@ -22,6 +22,7 @@ values.
 ## Change log
 This list is to help notify if there are additions, changes or removals to metrics. Latest changes are at the top of this list.
 
+- Remove `ovnkube_controller_resource_add_latency_seconds/ovnkube_controller_resource_update_latency_seconds/ovnkube_controller_resource_delete_latency_seconds`. These histograms have no resource type label, so they cannot identify which resource is slow.
 - Remove the Raft-only `ovn_db_cluster_*` metrics because supported OVN NB and SB databases run as standalone instances.
 - Add `ovnkube_clustermanager_route_advertisement_condition`, `ovnkube_clustermanager_cluster_user_defined_network_condition`, and `ovnkube_clustermanager_vtep_condition` condition metrics
 - Add `transport` label to `ovnkube_clustermanager_cluster_user_defined_networks` to distinguish CUDNs by transport type (Default, EVPN, NoOverlay)
