@@ -1,0 +1,15 @@
+name: "Pull Request Review"
+
+on:
+  pull_request_review:
+    types: [submitted, dismissed]
+
+permissions: {}
+
+jobs:
+  review:
+    runs-on: ubuntu-26.04
+    steps:
+    # Fork review events have read-only tokens. The labeler handles this run's
+    # completion with a write token and code from the trusted default branch.
+    - run: echo "Reconcile approval labels in the Pull Request Labeler workflow."
