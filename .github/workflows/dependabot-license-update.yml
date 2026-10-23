@@ -1,0 +1,111 @@
+name: Dependabot License Update
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+    branches: [ master, release-* ]
+    paths:
+      - 'go-controller/go.mod'
+      - 'go-controller/go.sum'
+      - 'go-controller/vendor/**'
+      - 'test/conformance/go.mod'
+      - 'test/conformance/go.sum'
+      - 'test/e2e/go.mod'
+      - 'test/e2e/go.sum'
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: dependabot-license-update-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  update-licenses:
+    name: Update third-party license files
+    runs-on: ubuntu-latest
+    if: >-
+      ${{
+        github.actor == 'dependabot[bot]' &&
+        github.event.pull_request.head.repo.full_name == github.repository
+      }}
+    steps:
+      - name: Check Dependabot change scope
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          disallowed_files=$(
+            gh api --paginate "repos/${REPOSITORY}/pulls/${PR_NUMBER}/files" \
+              --jq '.[].filename' \
+              | grep -Ev '^(go-controller/(go\.mod|go\.sum|vendor/)|test/(conformance|e2e)/(go\.mod|go\.sum)|LICENSE$|LICENSES/)' \
+              || true
+          )
+
+          if [[ -n "${disallowed_files}" ]]; then
+            echo "Refusing to update licenses for a Dependabot PR with unexpected files:" >&2
+            echo "${disallowed_files}" >&2
+            exit 1
+          fi
+
+      - name: Check out Dependabot branch
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: 'go-controller/go.mod'
+          cache: false
+
+      - name: Generate third-party license files
+        run: make -C go-controller third-party-licenses
+
+      - name: Check generated changes
+        id: changes
+        run: |
+          set -euo pipefail
+
+          git add LICENSE LICENSES
+          if git diff --cached --quiet; then
+            echo "changed=false" >> "${GITHUB_OUTPUT}"
+          else
+            echo "changed=true" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Commit generated license files
+        if: steps.changes.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "[dependabot skip] Update third-party license files"
+
+      - name: Push generated license files
+        if: steps.changes.outputs.changed == 'true'
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          # Configure this as a Dependabot secret; regular Actions secrets are not
+          # available to Dependabot pull_request workflows.
+          PUSH_TOKEN: ${{ secrets.DEPENDABOT_LICENSE_UPDATE_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${PUSH_TOKEN}" ]]; then
+            echo "DEPENDABOT_LICENSE_UPDATE_TOKEN Dependabot secret is required to push generated license files." >&2
+            exit 1
+          fi
+
+          # Keep the token out of process arguments and persistent git config.
+          git \
+            -c credential.helper= \
+            -c credential.helper='!f() { if [ "$1" = get ]; then printf "%s\n" username=x-access-token; printf "password=%s\n" "${PUSH_TOKEN}"; fi; }; f' \
+            push "https://github.com/${REPOSITORY}.git" "HEAD:${HEAD_REF}"
