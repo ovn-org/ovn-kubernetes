@@ -25,6 +25,8 @@ jobs:
           pip install mkdocs-awesome-pages-plugin
           pip install $(mkdocs-get-deps)
       - run: mkdocs build --strict
+      - name: Lint docs links
+        run: python3 hack/lint-docs-links.py
       - name: Test root 404 install helper
         run: ./hack/test-install-gh-pages-404.sh
       - name: Upload Artifact (Test)
