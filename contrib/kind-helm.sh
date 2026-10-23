@@ -53,6 +53,7 @@ usage() {
     echo "       [-adv | --advertise-default-network]"
     echo "       [-rud | --routed-udn-isolation-disable]"
     echo "       [ -nqe | --network-qos-enable ]"
+    echo "       [ -esm | --enable-status-metrics ]"
     echo "       [ -noe | --no-overlay-enable [snat-enabled|managed] ]"
     echo "       [ -n4  | --no-ipv4 ]"
     echo "       [ -i6  | --ipv6 ]"
@@ -103,6 +104,7 @@ usage() {
     echo "-adv | --advertise-default-network            Applies a RouteAdvertisements configuration to advertise the default network on all nodes"
     echo "-rud | --routed-udn-isolation-disable         Disable isolation across BGP-advertised UDNs (sets advertised-udn-isolation-mode=loose). DEFAULT: strict."
     echo "-nqe | --network-qos-enable                   Enable network QoS. DEFAULT: Disabled"
+    echo "-esm | --enable-status-metrics                Enable status metrics mode. DEFAULT: Disabled"
     echo "-noe | --no-overlay-enable [snat-enabled|managed] Enable no overlay for the default network. Optional value: 'snat-enabled' to enable SNAT, 'managed' to enable SNAT and managed routing. DEFAULT: disabled."
     echo "-ds  | --disable-snat-multiple-gws            Disable SNAT for multiple external gateways. DEFAULT: Enabled"
     echo "-df  | --disable-forwarding                   Disable forwarding on all interfaces. DEFAULT: Enabled"
@@ -233,6 +235,8 @@ parse_args() {
                                                   fi
                                                   ;;
             -nqe | --network-qos-enable )         OVN_NETWORK_QOS_ENABLE=true
+                                                  ;;
+            -esm | --enable-status-metrics )      OVN_ENABLE_STATUS_METRICS=true
                                                   ;;
             -noe | --no-overlay-enable )          ENABLE_NO_OVERLAY=true
                                                   # Check if next argument is a valid value
@@ -528,6 +532,7 @@ print_params() {
      echo "ADVERTISE_DEFAULT_NETWORK = $ADVERTISE_DEFAULT_NETWORK"
      echo "ADVERTISED_UDN_ISOLATION_MODE = $ADVERTISED_UDN_ISOLATION_MODE"
      echo "OVN_NETWORK_QOS_ENABLE = $OVN_NETWORK_QOS_ENABLE"
+     echo "OVN_ENABLE_STATUS_METRICS = $OVN_ENABLE_STATUS_METRICS"
      echo "ENABLE_NO_OVERLAY = $ENABLE_NO_OVERLAY"
      echo "ENABLE_NO_OVERLAY_OUTBOUND_SNAT = $ENABLE_NO_OVERLAY_OUTBOUND_SNAT"
      echo "ENABLE_NO_OVERLAY_MANAGED_ROUTING = $ENABLE_NO_OVERLAY_MANAGED_ROUTING"
@@ -689,6 +694,7 @@ helm upgrade --install ovn-kubernetes . -f "${value_file}" ${extra_values_args} 
           --set global.emptyLbEvents=$(if [ "${OVN_EMPTY_LB_EVENTS}" == "true" ]; then echo "true"; else echo "false"; fi) \
           --set global.enableDNSNameResolver=$(if [ "${OVN_ENABLE_DNSNAMERESOLVER}" == "true" ]; then echo "true"; else echo "false"; fi) \
           --set global.enableNetworkQos=$(if [ "${OVN_NETWORK_QOS_ENABLE}" == "true" ]; then echo "true"; else echo "false"; fi) \
+          --set global.enableStatusMetrics=$(if [ "${OVN_ENABLE_STATUS_METRICS}" == "true" ]; then echo "true"; else echo "false"; fi) \
           --set global.enableNoOverlay=$(if [ "${ENABLE_NO_OVERLAY}" == "true" ]; then echo "true"; else echo "false"; fi) \
           --set global.enableNoOverlaySnat=$(if [ "${ENABLE_NO_OVERLAY_OUTBOUND_SNAT}" == "true" ]; then echo "true"; else echo "false"; fi) \
           --set global.enableNoOverlayManagedRouting=$(if [ "${ENABLE_NO_OVERLAY_MANAGED_ROUTING}" == "true" ]; then echo "true"; else echo "false"; fi) \

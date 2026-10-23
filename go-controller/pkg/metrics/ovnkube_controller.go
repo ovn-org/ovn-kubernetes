@@ -410,6 +410,9 @@ func RegisterOVNKubeControllerFunctional(stopChan <-chan struct{}) {
 	prometheus.MustRegister(metricEgressRoutingViaHost)
 	prometheus.MustRegister(metricANPCount)
 	prometheus.MustRegister(metricBANPCount)
+	if config.OVNKubernetesFeature.EnableStatusMetrics {
+		RegisterResourceSyncStatusMetrics()
+	}
 	if err := prometheus.Register(MetricResourceRetryFailuresCount); err != nil {
 		if _, ok := err.(prometheus.AlreadyRegisteredError); !ok {
 			panic(err)

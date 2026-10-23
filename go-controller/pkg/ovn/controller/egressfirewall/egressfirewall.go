@@ -465,6 +465,14 @@ func (oc *EFController) sync(key string) (updateErr error) {
 			klog.V(4).Infof("Unable to decrement egress firewall rule count, cache miss for key: %s", key)
 		}
 		metrics.DecrementEgressFirewallCount()
+		if config.OVNKubernetesFeature.EnableStatusMetrics {
+			// EF is always named "default" in a namespace; use key name when available.
+			name := efName
+			if name == "" {
+				name = "default"
+			}
+			metrics.DeleteEgressFirewallSyncSucceeded(oc.zone, namespace, name)
+		}
 		return updateErr
 	}
 
@@ -920,6 +928,11 @@ func (oc *EFController) setEgressFirewallStatus(egressFirewall *egressfirewallap
 			metrics.UpdateEgressFirewallRuleCount(float64(newCount))
 		}
 		oc.ruleCounter.Store(key, newCount)
+	}
+
+	if config.OVNKubernetesFeature.EnableStatusMetrics {
+		metrics.SetEgressFirewallSyncSucceeded(oc.zone, egressFirewall.Namespace, egressFirewall.Name, handlerErr == nil)
+		return nil
 	}
 
 	newMsg = types.GetZoneStatus(oc.zone, newMsg)

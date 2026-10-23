@@ -505,6 +505,11 @@ type MetricsConfig struct {
 	// extracted into the registry, independent of Prometheus scrapes. A
 	// non-positive value uses DefaultMetricsCollectionInterval.
 	CollectionInterval int `gcfg:"collection-interval"`
+	// StatusMetricsPrometheusURL is the Prometheus query API base URL used by
+	// cluster-manager to roll up coarse CR status when EnableStatusMetrics is
+	// true (for example http://prometheus.monitoring.svc:9090). Empty means
+	// Prometheus is unavailable and summary patches are skipped.
+	StatusMetricsPrometheusURL string `gcfg:"status-metrics-prometheus-url"`
 }
 
 // TLSConfig holds TLS-related configuration parameters.
@@ -558,7 +563,14 @@ type OVNKubernetesFeatureConfig struct {
 	EnableServiceTemplateSupport    bool `gcfg:"enable-svc-template-support"`
 	EnableObservability             bool `gcfg:"enable-observability"`
 	EnableNetworkQoS                bool `gcfg:"enable-network-qos"`
-	AllowICMPNetworkPolicy          bool `gcfg:"allow-icmp-network-policy"`
+	// EnableStatusMetrics, when true, stops per-node status SSA shards on
+	// EgressFirewall, EgressQoS, NetworkQoS, AdminPolicyBasedExternalRoute,
+	// AdminNetworkPolicy and BaselineAdminNetworkPolicy, and exports sync
+	// outcomes as Prometheus metrics instead. Cluster-manager rolls up a
+	// coarse summary from Prometheus when StatusMetricsPrometheusURL is set.
+	// Default false preserves legacy per-node status behaviour.
+	EnableStatusMetrics    bool `gcfg:"enable-status-metrics"`
+	AllowICMPNetworkPolicy bool `gcfg:"allow-icmp-network-policy"`
 	// This feature requires a kernel fix https://github.com/torvalds/linux/commit/7f3287db654395f9c5ddd246325ff7889f550286
 	// to work on a kind cluster. Flag allows to disable it for current CI, will be turned on when github runners have this fix.
 	AdvertisedUDNIsolationMode string `gcfg:"advertised-udn-isolation-mode"`
@@ -1404,6 +1416,17 @@ var OVNK8sFeatureFlags = []cli.Flag{
 		Value:       OVNKubernetesFeature.EnableNetworkQoS,
 	},
 	&cli.BoolFlag{
+		Name: "enable-status-metrics",
+		Usage: "When true, per-node controllers export sync outcomes as Prometheus " +
+			"metrics instead of writing per-node status shards on EgressFirewall, " +
+			"EgressQoS, NetworkQoS, AdminPolicyBasedExternalRoute, AdminNetworkPolicy " +
+			"and BaselineAdminNetworkPolicy. Cluster-manager rolls up a coarse summary " +
+			"from Prometheus when --metrics-status-prometheus-url is set. Default false " +
+			"preserves legacy per-node status behaviour.",
+		Destination: &cliConfig.OVNKubernetesFeature.EnableStatusMetrics,
+		Value:       OVNKubernetesFeature.EnableStatusMetrics,
+	},
+	&cli.BoolFlag{
 		Name:        "enable-dynamic-udn-allocation",
 		Usage:       "Configure to use the dynamic UDN allocation feature with ovn-kubernetes.",
 		Destination: &cliConfig.OVNKubernetesFeature.EnableDynamicUDNAllocation,
@@ -1596,6 +1619,12 @@ var MetricsFlags = []cli.Flag{
 			"into the registry, independent of Prometheus scrapes. Non-positive uses the "+
 			"default (%fs).", DefaultMetricsCollectionInterval.Seconds()),
 		Destination: &cliConfig.Metrics.CollectionInterval,
+	},
+	&cli.StringFlag{
+		Name: "metrics-status-prometheus-url",
+		Usage: "Prometheus query API base URL for cluster-manager status metrics rollup " +
+			"(used when --enable-status-metrics is true). Empty skips summary patches.",
+		Destination: &cliConfig.Metrics.StatusMetricsPrometheusURL,
 	},
 }
 

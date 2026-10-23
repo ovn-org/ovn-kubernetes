@@ -142,6 +142,7 @@ usage: kind-helm.sh [--delete]
        [-adv | --advertise-default-network]
        [-rud | --routed-udn-isolation-disable]
        [ -nqe | --network-qos-enable ]
+       [ -esm | --enable-status-metrics ]
        [ -noe | --no-overlay-enable [snat-enabled|managed] ]
        [ -n4  | --no-ipv4 ]
        [ -i6  | --ipv6 ]
@@ -179,6 +180,7 @@ usage: kind-helm.sh [--delete]
 -adv | --advertise-default-network            Applies a RouteAdvertisements configuration to advertise the default network on all nodes
 -rud | --routed-udn-isolation-disable         Disable isolation across BGP-advertised UDNs (sets advertised-udn-isolation-mode=loose). DEFAULT: strict.
 -nqe | --network-qos-enable                   Enable network QoS. DEFAULT: Disabled
+-esm | --enable-status-metrics                Enable status metrics mode. DEFAULT: Disabled
 -noe | --no-overlay-enable [snat-enabled|managed] Enable no overlay for the default network. Optional value: 'snat-enabled' to enable SNAT, 'managed' to enable SNAT and managed routing. DEFAULT: disabled.
 -ds  | --disable-snat-multiple-gws            Disable SNAT for multiple external gateways. DEFAULT: Enabled
 -df  | --disable-forwarding                   Disable forwarding on all interfaces. DEFAULT: Enabled

@@ -228,6 +228,10 @@ spec:
           value: {{ hasKey .Values.global "enableOvnKubeIdentity" | ternary .Values.global.enableOvnKubeIdentity true | quote }}
         - name: OVN_NETWORK_QOS_ENABLE
           value: {{ hasKey .Values.global "enableNetworkQos" | ternary .Values.global.enableNetworkQos false | quote }}
+        - name: OVN_ENABLE_STATUS_METRICS
+          value: {{ hasKey .Values.global "enableStatusMetrics" | ternary .Values.global.enableStatusMetrics false | quote }}
+        - name: OVN_STATUS_METRICS_PROMETHEUS_URL
+          value: {{ default "" .Values.global.statusMetricsPrometheusURL | quote }}
         - name: OVNKUBE_NODE_MODE
           value: "dpu-host"
         - name: OVN_DYNAMIC_UDN_ALLOCATION

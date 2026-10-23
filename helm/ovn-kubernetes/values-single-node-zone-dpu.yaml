@@ -61,6 +61,10 @@ global:
   enableEgressQos: false
   # -- Enables network QoS support from/to pods
   enableNetworkQos: false
+  # -- When true, export per-node sync outcomes as metrics instead of status shards
+  enableStatusMetrics: false
+  # -- Prometheus query API URL for cluster-manager status metrics rollup
+  statusMetricsPrometheusURL: ""
   # -- Enables multicast support between the pods within the same namespace
   enableMulticast: ""
   # -- Configure to use multiple NetworkAttachmentDefinition CRD feature with ovn-kubernetes

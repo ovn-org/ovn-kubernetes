@@ -111,6 +111,10 @@ if [ "$OVN_NETWORK_QOS_ENABLE" != "true" ]; then
   skip "e2e NetworkQoS validation"
 fi
 
+if [ "${OVN_ENABLE_STATUS_METRICS}" != "true" ]; then
+  skip "Status metrics mode"
+fi
+
 # Only run Node IP/MAC address migration tests if they are explicitly requested
 IP_MIGRATION_TESTS="Node IP and MAC address migration"
 if [[ "${WHAT}" != "${IP_MIGRATION_TESTS}"* ]]; then

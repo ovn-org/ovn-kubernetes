@@ -19,9 +19,26 @@ OVN and OVS coverage metrics are exported as Prometheus gauges even when the
 underlying daemon value is cumulative. A daemon restart can reset these
 values.
 
+## Status sync outcomes (EnableStatusMetrics)
+
+When `--enable-status-metrics` is true, per-node controllers export the gauges
+below instead of writing per-node CR status shards. See
+[Status metrics mode](status-metrics.md) for flags, rollup behaviour, and
+migration notes.
+
+| Name | Prometheus type | Labels | Description |
+|--|--|--|--|
+| ovnkube_egressfirewall_sync_succeeded | Gauge | node, namespace, name | 1 if EgressFirewall synced successfully on the node |
+| ovnkube_adminnetworkpolicy_sync_succeeded | Gauge | node, name | 1 if AdminNetworkPolicy synced successfully on the node |
+| ovnkube_baselineadminnetworkpolicy_sync_succeeded | Gauge | node, name | 1 if BaselineAdminNetworkPolicy synced successfully on the node |
+| ovnkube_egressqos_sync_succeeded | Gauge | node, namespace, name | 1 if EgressQoS synced successfully on the node |
+| ovnkube_networkqos_sync_succeeded | Gauge | node, namespace, name | 1 if NetworkQoS synced successfully on the node |
+| ovnkube_adminpolicybasedexternalroute_sync_succeeded | Gauge | node, name | 1 if AdminPolicyBasedExternalRoute synced successfully on the node |
+
 ## Change log
 This list is to help notify if there are additions, changes or removals to metrics. Latest changes are at the top of this list.
 
+- Add per-node sync outcome gauges for EgressFirewall, AdminNetworkPolicy, BaselineAdminNetworkPolicy, EgressQoS, NetworkQoS, and AdminPolicyBasedExternalRoute (`ovnkube_*_sync_succeeded`) when EnableStatusMetrics is on (OKEP-6414).
 - Remove the Raft-only `ovn_db_cluster_*` metrics because supported OVN NB and SB databases run as standalone instances.
 - Add `ovnkube_clustermanager_route_advertisement_condition`, `ovnkube_clustermanager_cluster_user_defined_network_condition`, and `ovnkube_clustermanager_vtep_condition` condition metrics
 - Add `transport` label to `ovnkube_clustermanager_cluster_user_defined_networks` to distinguish CUDNs by transport type (Default, EVPN, NoOverlay)

@@ -36,6 +36,7 @@ import (
 	egressqosinformer "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/informers/externalversions/egressqos/v1"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
 	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
@@ -473,6 +474,9 @@ func (oc *DefaultNetworkController) syncEgressQoS(key string, eq *egressqosapi.E
 	}
 
 	if eq == nil { // it was deleted no need to process further
+		if config.OVNKubernetesFeature.EnableStatusMetrics {
+			metrics.DeleteEgressQoSSyncSucceeded(oc.nodeName, namespace, name)
+		}
 		return nil
 	}
 
@@ -1048,6 +1052,12 @@ func (oc *DefaultNetworkController) updateEgressQoSZoneStatusToNotReady(egressQo
 
 func (oc *DefaultNetworkController) updateEgressQoSZoneStatusCondition(newCondition metav1.Condition,
 	namespace, name string) error {
+	if config.OVNKubernetesFeature.EnableStatusMetrics {
+		succeeded := newCondition.Status == metav1.ConditionTrue
+		metrics.SetEgressQoSSyncSucceeded(oc.nodeName, namespace, name, succeeded)
+		return nil
+	}
+
 	eq, err := oc.egressQoSLister.EgressQoSes(namespace).Get(name)
 	if err != nil {
 		return err

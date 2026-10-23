@@ -242,6 +242,24 @@ false
 			<td>Enables network QoS support from/to pods</td>
 		</tr>
 		<tr>
+			<td>global.enableStatusMetrics</td>
+			<td>bool</td>
+			<td><pre lang="json">
+false
+</pre>
+</td>
+			<td>When true, export per-node sync outcomes as Prometheus metrics instead of status shards</td>
+		</tr>
+		<tr>
+			<td>global.statusMetricsPrometheusURL</td>
+			<td>string</td>
+			<td><pre lang="json">
+""
+</pre>
+</td>
+			<td>Prometheus query API URL for cluster-manager status metrics rollup</td>
+		</tr>
+		<tr>
 			<td>global.enableMulticast</td>
 			<td>string</td>
 			<td><pre lang="json">

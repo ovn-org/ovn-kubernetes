@@ -23,10 +23,12 @@ import (
 	"k8s.io/klog/v2"
 	"k8s.io/utils/ptr"
 
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	networkqosapi "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1alpha1"
 	nqosapiapply "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1alpha1/apis/applyconfiguration/networkqos/v1alpha1"
 	crdtypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/types"
 	udnv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -190,6 +192,9 @@ func (c *Controller) clearNetworkQos(nqosNamespace, nqosName string) error {
 	}
 	c.nqosCache.Delete(k8sFullName)
 	updateNetworkQoSCount(c.controllerName, len(c.nqosCache.GetKeys()))
+	if config.OVNKubernetesFeature.EnableStatusMetrics {
+		metrics.DeleteNetworkQoSSyncSucceeded(c.nodeName, nqosNamespace, nqosName)
+	}
 	return nil
 }
 
@@ -240,6 +245,11 @@ func (c *Controller) updateNQOSStatusToNotReady(namespace, name, reason string, 
 }
 
 func (c *Controller) updateNQOStatusCondition(newCondition metav1.Condition, namespace, name string) error {
+	if config.OVNKubernetesFeature.EnableStatusMetrics {
+		metrics.SetNetworkQoSSyncSucceeded(c.nodeName, namespace, name, newCondition.Status == metav1.ConditionTrue)
+		return nil
+	}
+
 	nqos, err := c.nqosLister.NetworkQoSes(namespace).Get(name)
 	if err != nil {
 		if apierrors.IsNotFound(err) {

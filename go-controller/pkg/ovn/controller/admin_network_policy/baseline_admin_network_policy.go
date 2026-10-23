@@ -14,6 +14,7 @@ import (
 	"k8s.io/klog/v2"
 	anpapi "sigs.k8s.io/network-policy-api/apis/v1alpha1"
 
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/metrics"
 )
@@ -113,6 +114,9 @@ func (c *Controller) clearBaselineAdminNetworkPolicy(banpName string) error {
 	// we can delete the object from the cache now (set the cache back to empty value).
 	c.banpCache = &adminNetworkPolicyState{}
 	metrics.DecrementBANPCount()
+	if config.OVNKubernetesFeature.EnableStatusMetrics {
+		metrics.DeleteBaselineAdminNetworkPolicySyncSucceeded(c.nodeName, banp.name)
+	}
 
 	return nil
 }

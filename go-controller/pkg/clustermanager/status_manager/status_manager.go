@@ -224,6 +224,10 @@ func (m *typedStatusManager[T]) ReconcileAll() {
 	m.objController.ReconcileAll()
 }
 
+func (m *typedStatusManager[T]) cleanupAllShards() error {
+	return m.doStartupCleanup(sets.New[string]())
+}
+
 // StatusManager updates cumulative status for different object types based on features enabled in config
 type StatusManager struct {
 	typedManagers map[string]resourceReconciler
@@ -231,12 +235,18 @@ type StatusManager struct {
 	zones         sets.Set[string]
 	zoneTracker   *zone_tracker.ZoneTracker
 	ovnClient     *util.OVNClusterManagerClientset
+	// metricsMode is true when EnableStatusMetrics is set: skip shard-based
+	// rollup controllers and only run one-time cleanup of per-node status shards.
+	metricsMode bool
 }
 
 type resourceReconciler interface {
 	Start() error
 	Stop()
 	ReconcileAll()
+	// cleanupAllShards removes every non-cluster-manager status managedFields
+	// entry (used when switching to EnableStatusMetrics).
+	cleanupAllShards() error
 }
 
 func NewStatusManager(wf *factory.WatchFactory, ovnClient *util.OVNClusterManagerClientset, networkManager networkmanager.Interface) *StatusManager {
@@ -245,6 +255,7 @@ func NewStatusManager(wf *factory.WatchFactory, ovnClient *util.OVNClusterManage
 		zonesLock:     sync.RWMutex{},
 		zones:         sets.New[string](),
 		ovnClient:     ovnClient,
+		metricsMode:   config.OVNKubernetesFeature.EnableStatusMetrics,
 	}
 	zoneTracker := zone_tracker.NewZoneTracker(wf.NodeCoreInformer(), sm.onZoneUpdate)
 	sm.zoneTracker = zoneTracker
@@ -293,6 +304,11 @@ func NewStatusManager(wf *factory.WatchFactory, ovnClient *util.OVNClusterManage
 }
 
 func (sm *StatusManager) Start() error {
+	if sm.metricsMode {
+		klog.Infof("StatusManager running in metrics mode: cleaning per-node status shards, skipping shard rollup")
+		return sm.cleanupShardsForMetricsMode()
+	}
+
 	klog.Infof("Starting StatusManager with typed managers: %v", sm.typedManagers)
 	if len(sm.typedManagers) > 0 {
 		if err := sm.zoneTracker.Start(); err != nil {
@@ -322,10 +338,29 @@ func (sm *StatusManager) Start() error {
 	return nil
 }
 
+// cleanupShardsForMetricsMode removes all per-node status managedFields shards
+// so they do not linger after switching to EnableStatusMetrics.
+func (sm *StatusManager) cleanupShardsForMetricsMode() error {
+	for managerName, manager := range sm.typedManagers {
+		if err := manager.cleanupAllShards(); err != nil {
+			return fmt.Errorf("metrics-mode cleanup for %s: %w", managerName, err)
+		}
+	}
+	if config.OVNKubernetesFeature.EnableAdminNetworkPolicy {
+		anpManager := newANPManager(sm.ovnClient.ANPClient)
+		if err := anpManager.doStartupCleanup(sets.New[string]()); err != nil {
+			return fmt.Errorf("metrics-mode ANP/BANP cleanup: %w", err)
+		}
+	}
+	return nil
+}
+
 func (sm *StatusManager) Stop() {
-	sm.zoneTracker.Stop()
-	for _, manager := range sm.typedManagers {
-		manager.Stop()
+	if !sm.metricsMode {
+		sm.zoneTracker.Stop()
+		for _, manager := range sm.typedManagers {
+			manager.Stop()
+		}
 	}
 	sm.typedManagers = map[string]resourceReconciler{}
 }

@@ -24,6 +24,7 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/clustermanager/nooverlay"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/clustermanager/routeadvertisements"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/clustermanager/status_manager"
+	statusmetrics "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/clustermanager/status_metrics"
 	uplinkcontroller "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/clustermanager/uplink"
 	udncontroller "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/clustermanager/userdefinednetwork"
 	udntemplate "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/clustermanager/userdefinednetwork/template"
@@ -72,6 +73,9 @@ type ClusterManager struct {
 	// used for leader election
 	identity      string
 	statusManager *status_manager.StatusManager
+	// statusMetricsManager rolls up coarse CR summaries from Prometheus when
+	// EnableStatusMetrics is true.
+	statusMetricsManager *statusmetrics.Manager
 
 	// networkManager creates and deletes network controllers
 	networkManager networkmanager.Controller
@@ -119,6 +123,10 @@ func NewClusterManager(
 		}
 	}
 	cm.statusManager = status_manager.NewStatusManager(wf, ovnClient, cm.networkManager.Interface())
+	if config.OVNKubernetesFeature.EnableStatusMetrics {
+		cm.statusMetricsManager = statusmetrics.NewManager(wf, ovnClient, cm.networkManager.Interface())
+		statusmetrics.RegisterConfiguredRollers(cm.statusMetricsManager)
+	}
 
 	nodeController := nodecontroller.NewController(wf, "clustermanager-node", cm.networkManager.Interface())
 	defaultNetClusterController := newDefaultNetworkClusterController(&util.DefaultNetInfo{}, ovnClient, wf, recorder, nodeController)
@@ -290,6 +298,11 @@ func (cm *ClusterManager) Start(ctx context.Context) error {
 	if err := cm.statusManager.Start(); err != nil {
 		return err
 	}
+	if cm.statusMetricsManager != nil {
+		if err := cm.statusMetricsManager.Start(); err != nil {
+			return err
+		}
+	}
 
 	if util.IsDNSNameResolverEnabled() {
 		if err := cm.dnsNameResolverController.Start(); err != nil {
@@ -359,6 +372,9 @@ func (cm *ClusterManager) Stop() {
 		cm.endpointSliceMirrorController.Stop()
 	}
 	cm.statusManager.Stop()
+	if cm.statusMetricsManager != nil {
+		cm.statusMetricsManager.Stop()
+	}
 	if util.IsDNSNameResolverEnabled() {
 		cm.dnsNameResolverController.Stop()
 	}

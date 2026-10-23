@@ -22,6 +22,7 @@ import (
 	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
 	"github.com/ovn-kubernetes/libovsdb/ovsdb"
 
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	libovsdbutil "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/metrics"
@@ -551,6 +552,9 @@ func (c *Controller) clearAdminNetworkPolicy(anpName string) error {
 	}
 	delete(c.anpCache, anpName)
 	metrics.DecrementANPCount()
+	if config.OVNKubernetesFeature.EnableStatusMetrics {
+		metrics.DeleteAdminNetworkPolicySyncSucceeded(c.nodeName, anpName)
+	}
 
 	return nil
 }

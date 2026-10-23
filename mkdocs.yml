@@ -217,6 +217,7 @@ nav:
       - OVN-Kubernetes node: observability/metrics/ovnkube-node.md
       - OVN: observability/metrics/ovn.md
       - Open vSwitch: observability/metrics/ovs.md
+    - Status metrics mode: observability/status-metrics.md
     - SDN Dashboard: observability/sdn-dashboard.md
     - OVN observability: observability/ovn-observability.md
   - Enhancement Proposals:

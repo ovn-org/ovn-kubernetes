@@ -12,6 +12,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog/v2"
 	anpapiapply "sigs.k8s.io/network-policy-api/pkg/client/applyconfiguration/apis/v1alpha1"
+
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/metrics"
 )
 
 // Defined status.type fields for Admin Network Policy - This is prefixed with the zone name thus
@@ -104,6 +107,11 @@ func (c *Controller) updateANPStatusToNotReady(anpName, message string) error {
 }
 
 func (c *Controller) updateANPZoneStatusCondition(newCondition metav1.Condition, anpName string) error {
+	if config.OVNKubernetesFeature.EnableStatusMetrics {
+		metrics.SetAdminNetworkPolicySyncSucceeded(c.nodeName, anpName, newCondition.Status == metav1.ConditionTrue)
+		return nil
+	}
+
 	anp, err := c.anpLister.Get(anpName)
 	if err != nil {
 		return err
@@ -171,6 +179,11 @@ func (c *Controller) updateBANPStatusToNotReady(banpName, message string) error 
 }
 
 func (c *Controller) updateBANPZoneStatusCondition(newCondition metav1.Condition, banpName string) error {
+	if config.OVNKubernetesFeature.EnableStatusMetrics {
+		metrics.SetBaselineAdminNetworkPolicySyncSucceeded(c.nodeName, banpName, newCondition.Status == metav1.ConditionTrue)
+		return nil
+	}
+
 	banp, err := c.banpLister.Get(banpName)
 	if err != nil {
 		return err

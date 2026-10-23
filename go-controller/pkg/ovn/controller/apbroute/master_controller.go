@@ -19,10 +19,12 @@ import (
 
 	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
 
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	adminpolicybasedrouteapi "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1"
 	adminpolicybasedrouteapply "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/applyconfiguration/adminpolicybasedroute/v1"
 	adminpolicybasedrouteclient "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/clientset/versioned"
 	adminpolicybasedrouteinformer "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/informers/externalversions/adminpolicybasedroute/v1"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/metrics"
 	addressset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
@@ -106,6 +108,14 @@ func (c *ExternalGatewayMasterController) updateStatusAPBExternalRoute(policyNam
 	syncError error) error {
 	if gwIPs == nil {
 		// policy doesn't exist anymore, nothing to do
+		if config.OVNKubernetesFeature.EnableStatusMetrics {
+			metrics.DeleteAPBExternalRouteSyncSucceeded(c.nodeName, policyName)
+		}
+		return nil
+	}
+
+	if config.OVNKubernetesFeature.EnableStatusMetrics {
+		metrics.SetAPBExternalRouteSyncSucceeded(c.nodeName, policyName, syncError == nil)
 		return nil
 	}
 
