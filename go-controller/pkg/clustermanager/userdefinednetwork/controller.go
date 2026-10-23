@@ -129,6 +129,13 @@ func (e *evpnConfigError) Error() string {
 	return e.msg
 }
 
+// primaryNetworkClaim identifies the network that first created a primary NAD
+// in a namespace.
+type primaryNetworkClaim struct {
+	nadName  string
+	ownerUID types.UID
+}
+
 type Controller struct {
 	// cudnController manage ClusterUserDefinedNetwork CRs.
 	cudnController controller.Controller
@@ -149,9 +156,12 @@ type Controller struct {
 	cudnMetricTracker map[cudnMetricKey]sets.Set[string]
 	// renderNadFn render NAD manifest from given object, enable replacing in tests.
 	renderNadFn RenderNetAttachDefManifest
-	// createNetworkLock lock should be held when NAD is created to avoid having two components
-	// trying to create an object with the same name.
+	// createNetworkLock serializes NAD creation across the UDN and CUDN controllers and guards
+	// primaryNetworkClaims.
 	createNetworkLock sync.Mutex
+	// primaryNetworkClaims records primary NADs created by this controller. It supplements the NAD
+	// informer during the interval between a successful API creation and cache observation.
+	primaryNetworkClaims map[string]primaryNetworkClaim
 
 	networkManager networkmanager.Interface
 
@@ -205,20 +215,21 @@ func New(
 	vidAllocator := id.NewIDAllocator("EVPN-VIDs", MaxEVPNVIDs)
 
 	c := &Controller{
-		nadClient:         nadClient,
-		nadLister:         nadInfomer.Lister(),
-		udnClient:         udnClient,
-		udnLister:         udnLister,
-		cudnLister:        cudnLister,
-		renderNadFn:       renderNadFn,
-		podInformer:       podInformer,
-		namespaceInformer: namespaceInformer,
-		networkManager:    networkManager,
-		namespaceTracker:  map[string]sets.Set[string]{},
-		cudnMetricTracker: map[cudnMetricKey]sets.Set[string]{},
-		vidAllocator:      vidAllocator,
-		reservedVNIs:      map[vniKey]string{},
-		eventRecorder:     eventRecorder,
+		nadClient:            nadClient,
+		nadLister:            nadInfomer.Lister(),
+		udnClient:            udnClient,
+		udnLister:            udnLister,
+		cudnLister:           cudnLister,
+		renderNadFn:          renderNadFn,
+		podInformer:          podInformer,
+		namespaceInformer:    namespaceInformer,
+		networkManager:       networkManager,
+		namespaceTracker:     map[string]sets.Set[string]{},
+		cudnMetricTracker:    map[cudnMetricKey]sets.Set[string]{},
+		primaryNetworkClaims: map[string]primaryNetworkClaim{},
+		vidAllocator:         vidAllocator,
+		reservedVNIs:         map[vniKey]string{},
+		eventRecorder:        eventRecorder,
 	}
 	udnCfg := &controller.ControllerConfig[userdefinednetworkv1.UserDefinedNetwork]{
 		RateLimiter:    workqueue.DefaultTypedControllerRateLimiter[string](),

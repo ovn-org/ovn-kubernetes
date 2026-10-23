@@ -431,6 +431,53 @@ var _ = Describe("User Defined Network Controller", func() {
 				}).Should(Equal(mutatedNAD))
 			})
 
+			It("should track primary NAD ownership while the informer cache is stale", func() {
+				udn := testPrimaryUDN()
+				cudn := testLayer3PrimaryClusterUDN("cluster-test", udn.Namespace)
+				cudn.UID = "2"
+
+				renderNAD := func(obj client.Object, namespace string, _ ...template.RenderOption) (*netv1.NetworkAttachmentDefinition, error) {
+					switch obj.(type) {
+					case *udnv1.UserDefinedNetwork:
+						return testNAD(), nil
+					case *udnv1.ClusterUserDefinedNetwork:
+						nad := testClusterUdnNAD(obj.GetName(), namespace)
+						nad.OwnerReferences[0].UID = obj.GetUID()
+						return nad, nil
+					default:
+						return nil, fmt.Errorf("unexpected network type %T", obj)
+					}
+				}
+				c = newTestController(renderNAD, testNamespace(udn.Namespace))
+
+				// Return successful creates without notifying the informer, preserving the
+				// interval where the API has accepted the NAD but the cache is still empty.
+				var createdNADs []string
+				fakeNADClient := cs.NetworkAttchDefClient.(*netv1fakeclientset.Clientset)
+				fakeNADClient.PrependReactor("create", "network-attachment-definitions", func(action testing.Action) (bool, runtime.Object, error) {
+					createdNAD := action.(testing.CreateAction).GetObject().(*netv1.NetworkAttachmentDefinition).DeepCopy()
+					createdNADs = append(createdNADs, createdNAD.Namespace+"/"+createdNAD.Name)
+					return true, createdNAD, nil
+				})
+
+				_, err := c.updateNAD(udn, udn.Namespace)
+				Expect(err).NotTo(HaveOccurred(), "create the UDN's primary NAD")
+				_, err = c.nadLister.NetworkAttachmentDefinitions(udn.Namespace).Get(udn.Name)
+				Expect(apierrors.IsNotFound(err)).To(BeTrue(), "the informer cache should remain stale")
+
+				_, err = c.updateNAD(cudn, udn.Namespace)
+				Expect(err).To(MatchError(`primary network already exist in namespace "test": "test"`),
+					"reject a primary NAD owned by a different network")
+				Expect(createdNADs).To(Equal([]string{"test/test"}), "only the first primary NAD should be created")
+
+				// Removing the winning network releases the namespace for another owner.
+				Expect(c.deleteNAD(udn, udn.Namespace)).To(Succeed(), "delete the winning primary NAD")
+				_, err = c.updateNAD(cudn, udn.Namespace)
+				Expect(err).NotTo(HaveOccurred(), "create the CUDN's primary NAD after releasing the claim")
+				Expect(createdNADs).To(Equal([]string{"test/test", "test/cluster-test"}),
+					"the next owner should create its primary NAD")
+			})
+
 			It("given primary UDN, should fail when primary NAD already exist", func() {
 				primaryUDN := testPrimaryUDN()
 				primaryUDN.Spec.Topology = udnv1.NetworkTopologyLayer2

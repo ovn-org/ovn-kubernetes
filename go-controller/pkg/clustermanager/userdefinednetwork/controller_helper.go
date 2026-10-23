@@ -111,12 +111,16 @@ func (c *Controller) createNAD(obj client.Object, namespace string, desiredNAD *
 	c.createNetworkLock.Lock()
 	defer c.createNetworkLock.Unlock()
 
-	if utiludn.IsPrimaryNetwork(template.GetSpec(obj)) {
+	isPrimary := utiludn.IsPrimaryNetwork(template.GetSpec(obj))
+	if isPrimary {
+		if claim, exists := c.primaryNetworkClaims[namespace]; exists && claim.ownerUID != obj.GetUID() {
+			return nil, fmt.Errorf("primary network already exist in namespace %q: %q", namespace, claim.nadName)
+		}
+
 		actualNads, err := c.nadLister.NetworkAttachmentDefinitions(namespace).List(labels.Everything())
 		if err != nil {
 			return nil, fmt.Errorf("failed to list NetworkAttachmentDefinition: %w", err)
 		}
-		// The informer cache makes this a best-effort check for an existing primary NAD.
 		if err := PrimaryNetAttachDefNotExist(actualNads); err != nil {
 			return nil, err
 		}
@@ -126,8 +130,25 @@ func (c *Controller) createNAD(obj client.Object, namespace string, desiredNAD *
 	if err != nil {
 		return nil, fmt.Errorf("failed to create NetworkAttachmentDefinition: %w", err)
 	}
+	if isPrimary {
+		c.primaryNetworkClaims[namespace] = primaryNetworkClaim{
+			nadName:  newNAD.Name,
+			ownerUID: obj.GetUID(),
+		}
+	}
 
 	return newNAD, nil
+}
+
+// releasePrimaryNetworkClaim allows another network to claim the namespace
+// after the current owner has removed its NAD.
+func (c *Controller) releasePrimaryNetworkClaim(obj client.Object, namespace string) {
+	c.createNetworkLock.Lock()
+	defer c.createNetworkLock.Unlock()
+
+	if claim, exists := c.primaryNetworkClaims[namespace]; exists && claim.ownerUID == obj.GetUID() {
+		delete(c.primaryNetworkClaims, namespace)
+	}
 }
 
 func (c *Controller) applyNADAnnotations(nad *netv1.NetworkAttachmentDefinition, annotations map[string]string) (*netv1.NetworkAttachmentDefinition, error) {
@@ -271,6 +292,7 @@ func (c *Controller) deleteNAD(obj client.Object, namespace string) error {
 		nad, err = c.nadClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(namespace).Get(context.Background(), obj.GetName(), metav1.GetOptions{})
 		if err != nil {
 			if apierrors.IsNotFound(err) {
+				c.releasePrimaryNetworkClaim(obj, namespace)
 				return nil
 			}
 			return fmt.Errorf("failed to get NetworkAttachmentDefinition %s/%s from api: %v", namespace, obj.GetName(), err)
@@ -305,6 +327,7 @@ func (c *Controller) deleteNAD(obj client.Object, namespace string) error {
 	if err != nil && !apierrors.IsNotFound(err) {
 		return err
 	}
+	c.releasePrimaryNetworkClaim(obj, namespace)
 	klog.Infof("Deleted NetworkAttachmetDefinition [%s/%s]", updatedNAD.Namespace, updatedNAD.Name)
 
 	return nil

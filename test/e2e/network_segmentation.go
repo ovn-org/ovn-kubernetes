@@ -1730,6 +1730,86 @@ spec:
 		}))
 	})
 
+	It("creates only one primary network when a UDN and CUDN target the same namespace concurrently", func() {
+		const apiRequestTimeout = 2 * time.Second
+
+		udnName := randomNetworkMetaName()
+		cudnName := randomNetworkMetaName()
+
+		DeferCleanup(func() {
+			_, err := e2ekubectl.RunKubectl("", "delete", "clusteruserdefinednetwork", cudnName,
+				"--ignore-not-found", "--wait", "--timeout=60s")
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		type creationResult struct {
+			cleanup func()
+			err     error
+		}
+		createAfter := func(start <-chan struct{}, namespace, manifest string) <-chan creationResult {
+			result := make(chan creationResult, 1)
+			go func() {
+				<-start
+				cleanup, err := createManifest(namespace, manifest)
+				result <- creationResult{cleanup: cleanup, err: err}
+			}()
+			return result
+		}
+
+		By("creating a primary UDN and CUDN for the namespace concurrently")
+		start := make(chan struct{})
+		udnResult := createAfter(start, f.Namespace.Name, newPrimaryUserDefinedNetworkManifest(cs, udnName))
+		cudnResult := createAfter(start, "", newPrimaryClusterUDNManifest(cs, cudnName, f.Namespace.Name))
+		close(start)
+
+		for _, result := range []creationResult{<-udnResult, <-cudnResult} {
+			if result.cleanup != nil {
+				DeferCleanup(result.cleanup)
+			}
+			Expect(result.err).NotTo(HaveOccurred())
+		}
+
+		networkCreatedStatus := func(g Gomega, resource dynamic.ResourceInterface, name string) metav1.ConditionStatus {
+			getCtx, cancel := context.WithTimeout(context.Background(), apiRequestTimeout)
+			defer cancel()
+
+			network, err := resource.Get(getCtx, name, metav1.GetOptions{}, "status")
+			g.Expect(err).NotTo(HaveOccurred())
+
+			conditions, err := getConditions(network)
+			g.Expect(err).NotTo(HaveOccurred())
+			for _, condition := range conditions {
+				if condition.Type == "NetworkCreated" {
+					return condition.Status
+				}
+			}
+			return ""
+		}
+
+		By("verifying that one controller creates the primary network and the other rejects it")
+		Eventually(func(g Gomega) {
+			var generatedNADs []string
+			for _, name := range []string{udnName, cudnName} {
+				getCtx, cancel := context.WithTimeout(context.Background(), apiRequestTimeout)
+				_, err := nadClient.NetworkAttachmentDefinitions(f.Namespace.Name).Get(
+					getCtx, name, metav1.GetOptions{})
+				cancel()
+				if err == nil {
+					generatedNADs = append(generatedNADs, name)
+					continue
+				}
+				g.Expect(kerrors.IsNotFound(err)).To(BeTrue(), "get generated NAD %q", name)
+			}
+			g.Expect(generatedNADs).To(HaveLen(1), "generated primary NADs: %v", generatedNADs)
+
+			statuses := []metav1.ConditionStatus{
+				networkCreatedStatus(g, f.DynamicClient.Resource(udnGVR).Namespace(f.Namespace.Name), udnName),
+				networkCreatedStatus(g, f.DynamicClient.Resource(clusterUDNGVR), cudnName),
+			}
+			g.Expect(statuses).To(ConsistOf(metav1.ConditionTrue, metav1.ConditionFalse))
+		}, 30*time.Second, 200*time.Millisecond).Should(Succeed())
+	})
+
 	DescribeTable("should manage annotations present when a network is created", func(ctx SpecContext, clusterScoped bool) {
 		name := randomNetworkMetaName()
 		networkSpec := map[string]any{
