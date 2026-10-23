@@ -150,7 +150,7 @@ This applies to
   
   in both cases ANP will have only first-packet sample.
 
-Use caution when running the `ovnkube-observe` tool. Currently it has poor resource management and consumes a lot of 
+Use caution when running the `ovnkube-observ` tool. Currently it has poor resource management and consumes a lot of
 CPU when many packets are sent. Tracked here https://github.com/ovn-kubernetes/ovn-kubernetes/issues/5203
 
 ## References

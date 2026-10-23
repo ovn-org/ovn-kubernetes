@@ -203,8 +203,9 @@ UserDefinedNetworks:
    types of networks have existed for a long time usually created using
    `NetworkAttachmentDefinitions` API but are now more standardised using UDN CRs.
 
-OVN-Kubernetes currently doesn't support north-south traffic for
-secondary networks and none of the core Kubernetes features like Services will work there.
+Secondary Layer2 and Layer3 networks do not support north-south traffic; secondary
+Localnet networks can connect to a provider network. Core Kubernetes features like
+Services do not work on secondary networks.
 Primary networks on the other hand has full support for all features as present
 on cluster default network.
 
@@ -451,7 +452,7 @@ metadata:
           "name": "ovn-kubernetes",                                                                                                                                          
           "interface": "ovn-udn1",                                                                                                                                           
           "ips": [                                                                                                                                                           
-              "200.203.2.5"                                                                                                                                                   
+              "203.203.2.5"
           ],                                                                                                                                                                 
           "mac": "0a:58:c8:0a:02:05",                                                                                                                                        
           "default": true,                                                                                                                                                   
@@ -930,7 +931,6 @@ metadata:
     app: l3pod
     endpointslice.kubernetes.io/managed-by: endpointslice-controller.k8s.io
     kubernetes.io/service-name: sample-deployment
-  name: sample-deployment-rkk4n
   namespace: nad-l3
   resourceVersion: "31533"
 addressType: IPv4

@@ -5,7 +5,7 @@
 To install OVS bits on all nodes, run:
 
 ```
-sudo apt-get install python-six openssl -y
+sudo apt-get install python3-six openssl -y
 
 sudo apt-get install openvswitch-switch openvswitch-common -y
 ```
@@ -30,9 +30,9 @@ Install a few pre-requisite packages.
 apt-get update
 apt-get install -y build-essential fakeroot debhelper \
                     autoconf automake libssl-dev \
-                    openssl python-all \
-                    python-setuptools \
-                    python-six \
+                    openssl python3-all \
+                    python3-setuptools \
+                    python3-six \
                     libtool git dh-autoreconf \
                     linux-headers-$(uname -r)
 ```

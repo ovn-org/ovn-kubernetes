@@ -17,6 +17,7 @@ The current Maintainers Group for the ovn-kubernetes Project consists of:
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md) for general contribution guidelines.
 See [GOVERNANCE.md](./GOVERNANCE.md) for governance guidelines and maintainer responsibilities.
+See [Area Maintainers](./GOVERNANCE.md#area-maintainers) for area ownership roles; `CODEOWNERS` lists the owners of each area.
 
 ## Emeritus Maintainers
 

@@ -407,7 +407,7 @@ or `/127` (no per-node allocation needed).
 
 **Recommended `networkPrefix` values based on cluster size:**
 
-| Max Nodes | Recommended `networkPrefix` | IPs per Network |
+| Max Nodes | Recommended `networkPrefix` | Target IPs (4× nodes) |
 |-----------|---------------------------|-----------------|
 | 10        | /26                       | ~40             |
 | 100       | /23                       | ~400            |

@@ -33,7 +33,7 @@ my namespace. This will secure my namespace’s network traffic.
 
 ## How to enable this feature on an OVN-Kubernetes cluster?
 The `multi-network-policies` feature must be enabled in the OVN-Kubernetes configuration.
-Please use the `Feature Config` option `enable-multi-network` under `OVNKubernetesFeatureConfig` config to enable it.
+Enable both `enable-multi-network` and `enable-multi-networkpolicy` under `OVNKubernetesFeatureConfig`.
 
 Always check the dependencies on the [Requirements page](../requirements.md)
 

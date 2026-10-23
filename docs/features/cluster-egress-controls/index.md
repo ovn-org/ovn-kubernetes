@@ -14,7 +14,7 @@ Assign stable, predictable source IPs to egress traffic from selected pods.
 
 **[EgressService](egress-service.md)**
 
-Route egress traffic from pods through a Service's load balancer IP.
+Control the source IP and host routing table (VRF) used by egress traffic from pods backing a LoadBalancer Service.
 
 **[EgressQoS](egress-qos.md)**
 

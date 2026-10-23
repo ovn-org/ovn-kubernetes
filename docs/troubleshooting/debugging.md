@@ -15,17 +15,17 @@ But if you installed OVS from source, and don't use a startup script,
 this will be empty.  If you clone your VM, then you may endup with
 same system-id for all your VMs - which is a problem.
 
-### All nodes should register with OVN SB database.
+### Check chassis registration in the local OVN SB database.
 
-On the master, run:
+Against the SBDB for the zone being diagnosed, run:
 
 ```
 ovn-sbctl list chassis
 ```
 
-You should see as many records as the number of nodes in your cluster.  The
-"name" column in each record represents the system-id of each host and they
-should all be unique.
+In the interconnect architecture, each node has its own zone and SB database,
+so this command does not list every node in the cluster. The "name" column
+identifies the chassis registered in the local database.
 
 ## Hosts should have unique node names.
 
@@ -59,10 +59,14 @@ modprobe vport-geneve  # or vport-stt for "stt".
 
 ### Sanity check cross host ping.
 
-Since on each host, an OVS internal device named "k8s-$NODENAME" is created
-with the second IP address in the subnet assigned for that node, you should be
-able to check cross host connectivity by pinging these internal devices across
-hosts.
+Since on each host, an OVS internal device named "ovn-k8s-mp0" is created
+with the second address in each assigned node subnet (IPv4, IPv6, or both), you
+should be able to check cross-host connectivity by pinging these internal
+devices across hosts. Find the peer's address with
+`ip -4 addr show dev ovn-k8s-mp0` or `ip -6 addr show dev ovn-k8s-mp0`, then
+run `ping -4 <peer-IPv4-address>` or `ping -6 <peer-IPv6-address>` from this
+host. Ignore the IPv6 link-local address; use the address in the peer's
+assigned node subnet.
 
 ### Firewall blocking overlay networks
 

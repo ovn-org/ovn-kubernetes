@@ -19,7 +19,7 @@ The "derive-from-mgmt-port" feature automates the gateway interface discovery pr
 
 1. **Automatic Discovery**: Automatically finds the PF interface associated with the management port VF
 2. **Hardware Abstraction**: Eliminates the need for manual hardware topology knowledge
-3. **Dynamic Configuration**: Adapts to hardware changes automatically
+3. **Startup Resolution**: Resolves the gateway interface during node initialization
 4. **Reduced Configuration**: Simplifies deployment configuration
 
 ## Benefits
@@ -29,7 +29,7 @@ The "derive-from-mgmt-port" feature automates the gateway interface discovery pr
 - **Simplified Configuration**: No need to manually specify gateway interfaces
 - **Reduced Errors**: Eliminates manual mapping errors
 - **Hardware Agnostic**: Works with any SR-IOV capable hardware
-- **Dynamic Adaptation**: Automatically adapts to hardware changes
+- **Adaptation at startup**: Derives the gateway interface from the current management-port VF when the node starts
 
 ### For Operations
 
@@ -102,23 +102,17 @@ instead when network segmentation is enabled.
 ### Helm Configuration
 
 ```yaml
-ovnkube-node:
-  mode: dpu-host
+ovnkube-node-dpu-host:
   mgmtPortVFResourceName: example.com/sriov_pool
-  
-gateway:
-  interface: derive-from-mgmt-port
+  gatewayOpts: "--gateway-interface=derive-from-mgmt-port"
 ```
 
 Or using the netdev name directly (not supported with network segmentation / UDN):
 
 ```yaml
-ovnkube-node:
-  mode: dpu-host
-  mgmtPortNetdev: pf0vf0
-  
-gateway:
-  interface: derive-from-mgmt-port
+ovnkube-node-dpu-host:
+  nodeMgmtPortNetdev: pf0vf0
+  gatewayOpts: "--gateway-interface=derive-from-mgmt-port"
 ```
 
 ### Configuration File

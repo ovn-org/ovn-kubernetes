@@ -35,7 +35,7 @@ For DPU Hosts cluster use values-single-node-zone.yaml by setting the following 
 
 ```yaml
 tags:
-  ovnkube-node-dpu-host: true      # Removing this line will also enable applying ovnkube-node-dpu-host subchart
+  ovnkube-node-dpu-host: true      # Enable the ovnkube-node-dpu-host subchart
   ovs-node: false                  # Disable ovs-node subchart, as OVS is already provided by the corresponding DPU
 global:
   enableOvnKubeIdentity: false     # This feature is not supported currently for clusters with DPU/DPU-Hosts
@@ -59,9 +59,9 @@ mgmtPortVFsCount: 2                      # If using UDNs, the number of VFs requ
 mgmtPortVFResourceName will be prioritized over nodeMgmtPortNetdev if both are specified.
 If using UDNs, mgmtPortVFResourceName and mgmtPortVFsCount should be specified.
 
-Launch OVN-Kubernetes using
+From the repository root, launch OVN-Kubernetes using:
 ```
-helm install ovn-kubernetes . -f values-single-node-zone.yaml
+helm install ovn-kubernetes helm/ovn-kubernetes -f helm/ovn-kubernetes/values-single-node-zone.yaml
 ```
 
 ## Generating credentials for accessing this cluster from DPU
@@ -188,7 +188,7 @@ global:
 
 The rest of the fields can be set as needed.
 
-Launch OVN-Kubernetes using
+From the repository root, launch OVN-Kubernetes using:
 ```
-helm install ovn-kubernetes . -f values-single-node-zone-dpu.yaml
+helm install ovn-kubernetes helm/ovn-kubernetes -f helm/ovn-kubernetes/values-single-node-zone-dpu.yaml
 ```

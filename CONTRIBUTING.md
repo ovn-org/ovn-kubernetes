@@ -204,6 +204,8 @@ make test
 * All functional changes and new features must be accompanied by extensive end-to-end test coverage
 
 * Documentation updates are required when user-facing behavior changes
+* Fill in the PR template's release-note block with a user-facing summary, or
+  `NONE` if the change has no user-facing impact
 
 ## AI Guidelines
 

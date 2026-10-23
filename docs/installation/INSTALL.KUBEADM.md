@@ -428,8 +428,8 @@ ln -s $(which pip3) /usr/local/bin/pip
 
 Install golang, for further details see [https://golang.org/doc/install](https://golang.org/doc/install):
 ~~~
-curl -L -O https://golang.org/dl/go1.17.linux-amd64.tar.gz
-rm -rf /usr/local/go && tar -C /usr/local -xzf go1.17.linux-amd64.tar.gz
+curl -L -O https://go.dev/dl/go1.26.3.linux-amd64.tar.gz
+rm -rf /usr/local/go && tar -C /usr/local -xzf go1.26.3.linux-amd64.tar.gz
 echo "export PATH=$PATH:/usr/local/go/bin" >> ~/.bashrc
 source ~/.bashrc
 go version

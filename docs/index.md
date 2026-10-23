@@ -80,6 +80,8 @@ The key functionalities and features that OVN-Kubernetes provides include:
     Offload thus providing increased data-plane performance.
     - Adds support for creating secondary and local networks in addition to the
     default primary networks.
+    - Supports User Defined Networks for network isolation and segmentation.
+    - Supports BGP route advertisements for integration with external networks.
 
 ## Why choose OVN-Kubernetes in Kubernetes ecosystem?
 

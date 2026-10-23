@@ -6,24 +6,6 @@ creating a pull request.
 
 ## Download and Build Kubernetes Components
 
-### Go Version
-
-Older versions of Kubernetes do not build with newer versions of Go,
-specifically Kubernetes v1.16.4 doesn't build with Go version 1.13.x. If this is
-a version of Kubernetes that needs to be tested with, as a workaround, Go
-version 1.12.1 can be downloaded to a local directory and the $PATH variable
-updated only where kubernetes is being built.
-
-```
-$ go version
-go version go1.13.8 linux/amd64
-
-$ mkdir -p /home/$USER/src/golang/go1-12-1/; cd /home/$USER/src/golang/go1-12-1/
-$ wget https://dl.google.com/go/go1.12.1.linux-amd64.tar.gz
-$ tar -xzf go1.12.1.linux-amd64.tar.gz
-$ PATH=/home/$USER/src/golang/go1-12-1/go/bin:$GOPATH/src/k8s.io/kubernetes/_output/local/bin/linux/amd64:$PATH
-```
-
 ### Download and Build Kubernetes Components (E2E Tests, ginkgo, kubectl):
 
 Determine which version of Kubernetes is currently used in CI (See

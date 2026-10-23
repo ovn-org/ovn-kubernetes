@@ -18,7 +18,8 @@ For installation instructions, see:
 - [Launching OVN-Kubernetes with Helm](../../docs/installation/launching-ovn-kubernetes-with-helm.md) — KinD quickstart and step-by-step install.
 - [Launching OVN-Kubernetes with kubeadm](../../docs/installation/INSTALL.KUBEADM.md) — multi-VM walkthrough on a `kubeadm`-bootstrapped cluster.
 
-The rest of this README documents the chart values.
+The table below documents selected chart values. Additional settings are defined
+in `values-single-node-zone.yaml`.
 
 ## Values
 
