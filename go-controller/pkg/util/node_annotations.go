@@ -99,9 +99,6 @@ const (
 	// OvnNodeMasqCIDR is the CIDR form representation of the masquerade subnet that is currently configured on this node (i.e. 169.254.169.0/29)
 	OvnNodeMasqCIDR = "k8s.ovn.org/node-masquerade-subnet"
 
-	// OvnNodeEgressLabel is a user assigned node label indicating to ovn-kubernetes that the node is to be used for egress IP assignment
-	ovnNodeEgressLabel = "k8s.ovn.org/egress-assignable"
-
 	// OVNNodeHostCIDRs is used to track the different host IP addresses and subnet masks on the node
 	OVNNodeHostCIDRs = "k8s.ovn.org/host-cidrs"
 
@@ -859,11 +856,6 @@ func parseNodeEgressIPConfig(egressIPConfig *nodeEgressIPConfiguration) (*Parsed
 		}
 	}
 	return parsedEgressIPConfig, nil
-}
-
-// GetNodeEgressLabel returns label annotation needed for marking nodes as egress assignable
-func GetNodeEgressLabel() string {
-	return ovnNodeEgressLabel
 }
 
 func SetNodeHostCIDRs(nodeAnnotator kube.Annotator, cidrs sets.Set[string]) error {

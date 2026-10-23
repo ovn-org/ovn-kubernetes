@@ -23,6 +23,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/retry"
@@ -104,14 +105,17 @@ var hccAllocator healthcheckClientAllocator = &egressIPHealthcheckClientAllocato
 
 // egressNode is a cache helper used for egress IP assignment, representing an egress node
 type egressNode struct {
-	egressIPConfig     *util.ParsedNodeEgressIPConfiguration
-	mgmtIPs            []net.IP
-	allocations        map[string]string
-	healthClient       healthcheck.EgressIPHealthClient
-	isReady            bool
-	isReachable        bool
+	egressIPConfig *util.ParsedNodeEgressIPConfiguration
+	mgmtIPs        []net.IP
+	allocations    map[string]string
+	healthClient   healthcheck.EgressIPHealthClient
+	isReady        bool
+	isReachable    bool
+	// isEgressAssignable checks for host cidr being set on the node but can be
+	// expanded for other checks in future.
 	isEgressAssignable bool
 	name               string
+	labels             labels.Set
 }
 
 func (e *egressNode) getAllocationCountForEgressIP(name string) (count int) {
@@ -386,6 +390,28 @@ type egressIPClusterController struct {
 	egressIPTotalTimeout int
 	// reachability check interval
 	reachabilityCheckInterval time.Duration
+	// reachabilityNudge requests an out-of-band reachability check, so a newly
+	// created or re-selected EgressIP can activate matching nodes immediately
+	// instead of waiting up to reachabilityCheckInterval for the next tick. It
+	// is buffered with size 1: a pending nudge coalesces further requests, and
+	// senders never block (see nudgeReachabilityCheck).
+	//
+	// It is intentionally never closed. Shutdown is driven solely by stopChan:
+	// checkEgressNodesReachability (the only consumer) returns when stopChan is
+	// closed, after which this channel is unreferenced and reclaimed by GC - a
+	// channel only needs an explicit close when a receiver relies on close to
+	// unblock, which is not the case here.
+	//
+	// It cannot be closed safely anyway: the senders are the EgressIP event
+	// handlers (AddResource/UpdateResource -> nudgeReachabilityCheck), which run
+	// on the informer/retry-framework worker goroutines - separate from the
+	// goroutine calling Stop(), and still live after Stop() closes stopChan (the
+	// handlers are only removed later, after wg.Wait()). So a worker could be
+	// mid-nudge when a close happened and send on a closed channel, which panics.
+	// Only the sender side can close a channel safely, and here sends come from
+	// concurrent handlers with no ordering guarantee against shutdown - so there
+	// is no safe point to close.
+	reachabilityNudge chan struct{}
 	// EgressIP Node reachability gRPC port (0 means it should use dial instead)
 	egressIPNodeHealthCheckPort int
 	// retry framework for Egress nodes
@@ -425,6 +451,7 @@ func newEgressIPController(ovnClient *util.OVNClusterManagerClientset, wf *facto
 		reachabilityCheckInterval:         egressIPReachabilityCheckInterval,
 		egressIPNodeHealthCheckPort:       config.OVNKubernetesFeature.EgressIPNodeHealthCheckPort,
 		stopChan:                          make(chan struct{}),
+		reachabilityNudge:                 make(chan struct{}, 1),
 	}
 	eIPC.initRetryFramework()
 	return eIPC
@@ -515,13 +542,15 @@ type egressIPNodeStatus struct {
 	Name string
 }
 
-// getSortedEgressData returns a sorted slice of all egressNodes based on the
-// amount of allocations found in the cache
-func (eIPC *egressIPClusterController) getSortedEgressData() ([]*egressNode, map[string]egressIPNodeStatus) {
+// getSortedEgressData returns a sorted slice of all egressNodes whose labels
+// match the given selector and that are ready and reachable, sorted in
+// ascending order by the number of existing allocations. It also returns a map
+// of every currently allocated egress IP across all nodes.
+func (eIPC *egressIPClusterController) getSortedEgressData(selector labels.Selector) ([]*egressNode, map[string]egressIPNodeStatus) {
 	assignableNodes := []*egressNode{}
 	allAllocations := make(map[string]egressIPNodeStatus)
 	for _, eNode := range eIPC.nodeAllocator.cache {
-		if eNode.isEgressAssignable && eNode.isReady && eNode.isReachable {
+		if selector.Matches(eNode.labels) && eNode.isEgressAssignable && eNode.isReady && eNode.isReachable {
 			assignableNodes = append(assignableNodes, eNode)
 		}
 		for ip, eipName := range eNode.allocations {
@@ -558,17 +587,11 @@ func (eIPC *egressIPClusterController) initEgressNodeReachability(objs []interfa
 	return nil
 }
 
-func (eIPC *egressIPClusterController) setNodeEgressAssignable(nodeName string, isAssignable bool) {
+func (eIPC *egressIPClusterController) setNodeEgressAssignable(nodeName string, assignable bool) {
 	eIPC.nodeAllocator.Lock()
 	defer eIPC.nodeAllocator.Unlock()
 	if eNode, exists := eIPC.nodeAllocator.cache[nodeName]; exists {
-		eNode.isEgressAssignable = isAssignable
-		// if the node is not assignable/ready/reachable anymore we need to
-		// empty all of it's allocations from our cache since we'll clear all
-		// assignments from this node later on, because of this.
-		if !isAssignable {
-			eNode.allocations = make(map[string]string)
-		}
+		eNode.isEgressAssignable = assignable
 	}
 }
 
@@ -620,6 +643,64 @@ func isReachableLegacy(node string, mgmtIPs []net.IP, totalTimeout int) bool {
 	return false
 }
 
+// compileEgressNodeSelectors lists every EgressIP and compiles their
+// egressNodeSelectors into labels.Selectors. It does not require the
+// nodeAllocator lock.
+//
+// The error from listing EgressIPs is returned rather than swallowed: on a
+// failure the callers must not treat the result as "no EgressIP selects any
+// node", which would wrongly disconnect health clients and, worse, let a node
+// deletion skip re-homing its assignments and report success so the retry
+// framework never retries it. Callers propagate the error (event handlers) or
+// skip the current iteration (reachability loop) instead.
+//
+// Selectors are intentionally compiled on the fly rather than cached on the
+// egressNode struct. Both callers (the health-check tick every ~5 s and the
+// node-label-change event handler) need the current set of selectors, which
+// changes whenever an EgressIP is created, updated, or deleted. Caching a
+// per-node "matches any selector" flag would require an additional
+// invalidation path on every EgressIP CRUD event — iterating all nodes under
+// the nodeAllocator lock to recompute the flag. Compiling selectors fresh is
+// cheap (list + struct parsing, microseconds for typical EgressIP counts) and
+// is always consistent, so re-computation is preferred over cache invalidation
+// complexity.
+func (eIPC *egressIPClusterController) compileEgressNodeSelectors() ([]labels.Selector, error) {
+	egressIPs, err := eIPC.kube.GetEgressIPs()
+	if err != nil {
+		return nil, fmt.Errorf("unable to list EgressIPs for selector compilation: %w", err)
+	}
+	selectors := make([]labels.Selector, 0, len(egressIPs))
+	for _, eIP := range egressIPs {
+		sel, err := metav1.LabelSelectorAsSelector(eIP.Spec.EgressNodeSelector)
+		if err != nil {
+			// A selector that fails to compile is a persistent,
+			// per-object misconfiguration (e.g. an invalid operator or
+			// bad matchExpressions values) that only the author can fix;
+			// retrying would never succeed.
+			// We therefore log it for human intervention and skip just
+			// this EgressIP so one bad object does not block selector
+			// compilation for all the others.
+			klog.Errorf("Invalid egressNodeSelector on EgressIP %s, skipping it: %v", eIP.Name, err)
+			continue
+		}
+		selectors = append(selectors, sel)
+	}
+	return selectors, nil
+}
+
+// matchesAnyEgressIPSelector reports whether the given node labels match at
+// least one of the compiled EgressIP egressNodeSelectors. Callers that pass
+// labels read from the nodeAllocator cache (egressNode.labels) must hold the
+// nodeAllocator lock.
+func matchesAnyEgressIPSelector(nodeLabels labels.Labels, selectors []labels.Selector) bool {
+	for _, sel := range selectors {
+		if sel.Matches(nodeLabels) {
+			return true
+		}
+	}
+	return false
+}
+
 // checkEgressNodesReachability continuously checks if all nodes used for egress
 // IP assignment are reachable, and updates the nodes following the result. This
 // is important because egress IP is based upon routing traffic to these nodes,
@@ -631,6 +712,11 @@ func (eIPC *egressIPClusterController) checkEgressNodesReachability() {
 		select {
 		case <-timer.C:
 			checkEgressNodesReachabilityIterate(eIPC)
+		case <-eIPC.reachabilityNudge:
+			// An EgressIP was created or its node selector changed; run the
+			// check now so matching nodes are probed and activated without
+			// waiting for the next tick.
+			checkEgressNodesReachabilityIterate(eIPC)
 		case <-eIPC.stopChan:
 			klog.V(5).Infof("Stop channel got triggered: will stop checkEgressNodesReachability")
 			return
@@ -638,11 +724,37 @@ func (eIPC *egressIPClusterController) checkEgressNodesReachability() {
 	}
 }
 
+// nudgeReachabilityCheck requests an immediate reachability iteration without
+// blocking the caller. The reachabilityNudge channel is buffered with size 1,
+// so a request already queued (not yet consumed by checkEgressNodesReachability)
+// is enough to guarantee one more iteration runs; additional nudges are dropped.
+func (eIPC *egressIPClusterController) nudgeReachabilityCheck() {
+	select {
+	case eIPC.reachabilityNudge <- struct{}{}:
+	default:
+	}
+}
+
 func checkEgressNodesReachabilityIterate(eIPC *egressIPClusterController) {
+	// Compile selectors outside the lock. On a listing failure, skip this
+	// iteration rather than treating every node as unselected, which would
+	// needlessly disconnect all health clients; the next tick retries.
+	selectors, err := eIPC.compileEgressNodeSelectors()
+	if err != nil {
+		klog.Errorf("Skipping egress node reachability check: %v", err)
+		return
+	}
+
 	reAddOrDelete := map[string]bool{}
 	eIPC.nodeAllocator.Lock()
 	for _, eNode := range eIPC.nodeAllocator.cache {
-		if eNode.isEgressAssignable && eNode.isReady {
+		// Only probe nodes that could actually host an EgressIP: they must
+		// match at least one EgressIP object's nodeSelector, be assignable
+		// (usable host-cidrs), and be ready. This mirrors the assignment gate
+		// in getSortedEgressData (which additionally requires isReachable, the
+		// value computed here), so we never waste a health connection on a node
+		// that can't be assigned.
+		if matchesAnyEgressIPSelector(eNode.labels, selectors) && eNode.isEgressAssignable && eNode.isReady {
 			wasReachable := eNode.isReachable
 			isReachable := eIPC.isReachable(eNode.name, eNode.mgmtIPs, eNode.healthClient)
 			if wasReachable && !isReachable {
@@ -652,10 +764,10 @@ func checkEgressNodesReachabilityIterate(eIPC *egressIPClusterController) {
 			}
 			eNode.isReachable = isReachable
 		} else {
-			// End connection (if there is one). This is important because
-			// it accounts for cases where node is not labelled with
-			// egress-assignable, so connection is no longer needed. Calling
-			// this on a already disconnected node is expected to be cheap.
+			// End connection (if there is one). Nodes that aren't egress
+			// candidates (no usable host-cidrs, or not matched by any
+			// EgressIP's nodeSelector) don't need probing. Calling Disconnect
+			// on an already disconnected node is expected to be cheap.
 			eNode.healthClient.Disconnect()
 		}
 	}
@@ -704,12 +816,24 @@ func (eIPC *egressIPClusterController) isEgressNodeReachable(egressNode *corev1.
 	return false
 }
 
+// clearNodeEgressAllocations empties the node's allocation cache. Call this
+// before deleteEgressNode when the node is being removed from the assignment
+// pool (e.g. it stopped matching selectors or its host-cidrs became invalid)
+// so that the cache and EgressIP status stay consistent even if the
+// subsequent reconciliation fails partway through.
+func (eIPC *egressIPClusterController) clearNodeEgressAllocations(nodeName string) {
+	eIPC.nodeAllocator.Lock()
+	defer eIPC.nodeAllocator.Unlock()
+	if eNode, exists := eIPC.nodeAllocator.cache[nodeName]; exists {
+		eNode.allocations = make(map[string]string)
+	}
+}
+
 func (eIPC *egressIPClusterController) setNodeEgressReady(nodeName string, isReady bool) {
 	eIPC.nodeAllocator.Lock()
 	defer eIPC.nodeAllocator.Unlock()
 	if eNode, exists := eIPC.nodeAllocator.cache[nodeName]; exists {
 		eNode.isReady = isReady
-		// see setNodeEgressAssignable
 		if !isReady {
 			eNode.allocations = make(map[string]string)
 		}
@@ -721,7 +845,6 @@ func (eIPC *egressIPClusterController) setNodeEgressReachable(nodeName string, i
 	defer eIPC.nodeAllocator.Unlock()
 	if eNode, exists := eIPC.nodeAllocator.cache[nodeName]; exists {
 		eNode.isReachable = isReachable
-		// see setNodeEgressAssignable
 		if !isReachable {
 			eNode.allocations = make(map[string]string)
 		}
@@ -859,6 +982,16 @@ func (eIPC *egressIPClusterController) deleteEgressNode(nodeName string) error {
 	return nil
 }
 
+// initEgressIPAllocator upserts the node into the allocator cache with the
+// latest egress-IP configuration and management IPs derived from the node's
+// annotations.  It is called for every node in the cluster on every Add and
+// Update event — not only for nodes that carry a particular label — so that
+// annotation changes (written asynchronously by ovnkube-node or the
+// cloud-network-config-controller after the object is first observed) are
+// always reflected.  The function only populates structural fields
+// (egressIPConfig, mgmtIPs, labels); the health flags (isReady, isReachable,
+// isEgressAssignable) are left to the caller, which determines them from the
+// live node object.
 func (eIPC *egressIPClusterController) initEgressIPAllocator(node *corev1.Node) (err error) {
 	parsedEgressIPConfig, err := util.GetNodeEIPConfig(node)
 	if err != nil {
@@ -881,10 +1014,12 @@ func (eIPC *egressIPClusterController) initEgressIPAllocator(node *corev1.Node) 
 			mgmtIPs:        mgmtIPs,
 			allocations:    make(map[string]string),
 			healthClient:   hccAllocator.allocate(node.Name),
+			labels:         labels.Set(node.GetLabels()),
 		}
 	} else {
 		eNode.egressIPConfig = parsedEgressIPConfig
 		eNode.mgmtIPs = mgmtIPs
+		eNode.labels = labels.Set(node.GetLabels())
 	}
 	return nil
 }
@@ -954,6 +1089,13 @@ func (eIPC *egressIPClusterController) reconcileEgressIP(old, new *egressipv1.Eg
 		status = old.Status.Items
 		staleEgressIPs.Insert(old.Spec.EgressIPs...)
 	}
+	// Use the new EgressIP's selector for validation and assignment.
+	// If the selector changed, validateEgressIPStatus will detect nodes
+	// that no longer match and mark their assignments invalid. This will
+	// take care of the add and update cases.
+	// For deletes (new == nil), use labels.Nothing() so that every
+	// assigned node is treated as non-matching and released.
+	var selector labels.Selector
 	if new != nil {
 		newEIP = new
 		name = newEIP.Name
@@ -965,8 +1107,22 @@ func (eIPC *egressIPClusterController) reconcileEgressIP(old, new *egressipv1.Eg
 				}
 			}
 		}
+		selector, err = metav1.LabelSelectorAsSelector(newEIP.Spec.EgressNodeSelector)
+		if err != nil {
+			// Surface the misconfiguration on the EgressIP object so a user can see
+			// it via `kubectl describe egressip`. This is emitted from the EgressIP
+			// reconcile path (add/update/resync) rather than the per-node/per-tick
+			// compileEgressNodeSelectors hot path, and identical events are
+			// aggregated by the EventRecorder, so a single bad selector surfaces as
+			// one event (with a count) instead of a flood.
+			eIPRef := corev1.ObjectReference{Kind: "EgressIP", Name: name}
+			eIPC.recorder.Eventf(&eIPRef, corev1.EventTypeWarning, "InvalidEgressNodeSelector",
+				"egressNodeSelector on EgressIP %s is invalid: %v", name, err)
+			return fmt.Errorf("invalid egressNodeSelector for EgressIP %s: %w", name, err)
+		}
 	} else {
 		eIPC.deallocMark(name)
+		selector = labels.Nothing()
 	}
 
 	// Validate the spec and use only the valid egress IPs when performing any
@@ -982,7 +1138,7 @@ func (eIPC *egressIPClusterController) reconcileEgressIP(old, new *egressipv1.Eg
 	// anymore (specifically if ovnkube-cluster-manager has been crashing for a while).
 	// Any invalid status at this point in time needs to be removed and assigned
 	// to a valid node.
-	validStatus, invalidStatus := eIPC.validateEgressIPStatus(name, status)
+	validStatus, invalidStatus := eIPC.validateEgressIPStatus(name, status, selector)
 	for status := range validStatus {
 		// If the spec has changed and an egress IP has been removed by the
 		// user: we need to un-assign that egress IP
@@ -1052,7 +1208,7 @@ func (eIPC *egressIPClusterController) reconcileEgressIP(old, new *egressipv1.Eg
 			eIPC.deleteAllocatorEgressIPAssignments(statusToRemove)
 		}
 		if len(ipsToAssign) > 0 {
-			statusToAdd = eIPC.assignEgressIPs(name, ipsToAssign.UnsortedList())
+			statusToAdd = eIPC.assignEgressIPs(name, ipsToAssign.UnsortedList(), selector)
 			statusToKeep = append(statusToKeep, statusToAdd...)
 		}
 		// Add all assignments which are to be kept to the allocator cache,
@@ -1116,7 +1272,7 @@ func (eIPC *egressIPClusterController) reconcileEgressIP(old, new *egressipv1.Eg
 		// processing the answer from the requests we make here, and update OVN
 		// accordingly when we know what the outcome is.
 		if len(ipsToAssign) > 0 {
-			statusToAdd = eIPC.assignEgressIPs(name, ipsToAssign.UnsortedList())
+			statusToAdd = eIPC.assignEgressIPs(name, ipsToAssign.UnsortedList(), selector)
 			statusToKeep = append(statusToKeep, statusToAdd...)
 		}
 		// Same as above: Add all assignments which are to be kept to the
@@ -1213,18 +1369,18 @@ func (eIPC *egressIPClusterController) getCloudPrivateIPConfigMap(objs []interfa
 // time, this does not guarantee complete balance, but mostly complete.
 // For Egress IPs that are hosted by secondary host networks, there must be at least
 // one node that hosts the network and exposed via the nodes host-cidrs annotation.
-func (eIPC *egressIPClusterController) assignEgressIPs(name string, egressIPs []string) []egressipv1.EgressIPStatusItem {
+func (eIPC *egressIPClusterController) assignEgressIPs(name string, egressIPs []string, selector labels.Selector) []egressipv1.EgressIPStatusItem {
 	eIPC.nodeAllocator.Lock()
 	defer eIPC.nodeAllocator.Unlock()
 	assignments := []egressipv1.EgressIPStatusItem{}
-	assignableNodes, existingAllocations := eIPC.getSortedEgressData()
+	assignableNodes, existingAllocations := eIPC.getSortedEgressData(selector)
 	if len(assignableNodes) == 0 {
 		eIPRef := corev1.ObjectReference{
 			Kind: "EgressIP",
 			Name: name,
 		}
-		eIPC.recorder.Eventf(&eIPRef, corev1.EventTypeWarning, "NoMatchingNodeFound", "no assignable nodes for EgressIP: %s, please tag at least one node with label: %s", name, util.GetNodeEgressLabel())
-		klog.Errorf("No assignable nodes found for EgressIP: %s and requested IPs: %v", name, egressIPs)
+		eIPC.recorder.Eventf(&eIPRef, corev1.EventTypeWarning, "NoMatchingNodeFound", "no assignable nodes for EgressIP: %s, ensure at least one node matches the egressNodeSelector", name)
+		klog.Errorf("No assignable nodes found for EgressIP: %s and requested IPs: %v, selector: %+v", name, egressIPs, selector)
 		return assignments
 	}
 	klog.V(5).Infof("Current assignments are: %+v", existingAllocations)
@@ -1468,7 +1624,7 @@ func (eIPC *egressIPClusterController) isEgressIPAddrConflict(egressIP net.IP) (
 // cache knows about all egress nodes. WatchEgressNodes is initialized before
 // any other egress IP handler, so the cache should be warm and correct once we
 // start going this.
-func (eIPC *egressIPClusterController) validateEgressIPStatus(name string, items []egressipv1.EgressIPStatusItem) (map[egressipv1.EgressIPStatusItem]string, map[egressipv1.EgressIPStatusItem]string) {
+func (eIPC *egressIPClusterController) validateEgressIPStatus(name string, items []egressipv1.EgressIPStatusItem, selector labels.Selector) (map[egressipv1.EgressIPStatusItem]string, map[egressipv1.EgressIPStatusItem]string) {
 	eIPC.nodeAllocator.Lock()
 	defer eIPC.nodeAllocator.Unlock()
 	valid, invalid := make(map[egressipv1.EgressIPStatusItem]string), make(map[egressipv1.EgressIPStatusItem]string)
@@ -1487,8 +1643,12 @@ func (eIPC *egressIPClusterController) validateEgressIPStatus(name string, items
 				klog.Errorf("Allocator error: EgressIP: %s has mistmach with status vs cache for node: %s with IP: %s", name, eIPStatus.Node, eIPStatus.EgressIP)
 				validAssignment = false
 			}
+			if !selector.Matches(eNode.labels) {
+				klog.Errorf("Allocator error: EgressIP: %s assigned to node: %s which does not match egressNodeSelector, will attempt rebalancing", name, eIPStatus.Node)
+				validAssignment = false
+			}
 			if !eNode.isEgressAssignable {
-				klog.Errorf("Allocator error: EgressIP: %s assigned to node: %s which does not have egress label, will attempt rebalancing", name, eIPStatus.Node)
+				klog.Errorf("Allocator error: EgressIP: %s assigned to node: %s which is not assignable, will attempt rebalancing", name, eIPStatus.Node)
 				validAssignment = false
 			}
 			if !eNode.isReachable {

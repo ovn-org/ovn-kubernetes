@@ -31,6 +31,7 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
 	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/nbdb"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/networkmanager"
 	addressset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/addresssetmanager"
 	egresssvc "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/controller/egressservice"
@@ -15699,6 +15700,200 @@ var _ = ginkgo.Describe("OVN EgressIP Operations cluster default network", func(
 
 				expectedDatabaseState = buildEIPReassignmentState(nil, "", "", "", node1IPv4, node1.Name, false)
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+
+				return nil
+			}
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+	})
+
+	ginkgo.Context("when the default network is advertised", func() {
+		ginkgo.It("programs pod SNATs correctly: per-EgressIP SNAT on assignment; no node-IP SNAT after the EgressIP is removed while advertised (pod keeps its routable pod IP), and node-IP SNAT restored once the network is no longer advertised", func() {
+			app.Action = func(*cli.Context) error {
+				config.Gateway.DisableSNATMultipleGWs = true
+
+				egressIP1 := "192.168.126.101"
+				node1IPv4 := "192.168.126.12"
+				node1IPv4CIDR := node1IPv4 + "/24"
+
+				egressPod := *ovntest.NewPodWithLabels(eipNamespace, podName, node1Name, podV4IP, egressPodLabel)
+				egressNamespace := ovntest.NewNamespace(eipNamespace)
+				annotations := map[string]string{
+					"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\"}", node1IPv4CIDR),
+					"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":\"%s\"}", v4Node1Subnet),
+					"k8s.ovn.org/l3-gateway-config":   `{"default":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"192.168.126.12/24", "next-hop":"192.168.126.1"}}`,
+					"k8s.ovn.org/node-chassis-id":     "79fdcfc4-6fe6-4cd3-8242-c0f85a4668ec",
+					util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", node1IPv4CIDR),
+				}
+				node1 := getNodeObj(node1Name, annotations, map[string]string{})
+				node1Switch := &nbdb.LogicalSwitch{
+					UUID: node1.Name + "-UUID",
+					Name: node1.Name,
+				}
+				node1GR := &nbdb.LogicalRouter{
+					Name:  types.GWRouterPrefix + node1.Name,
+					UUID:  types.GWRouterPrefix + node1.Name + "-UUID",
+					Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1.Name + "-UUID"},
+				}
+
+				eIP := egressipv1.EgressIP{
+					ObjectMeta: newEgressIPMeta(egressIPName),
+					Spec: egressipv1.EgressIPSpec{
+						EgressIPs:         []string{egressIP1},
+						PodSelector:       metav1.LabelSelector{MatchLabels: egressPodLabel},
+						NamespaceSelector: metav1.LabelSelector{MatchLabels: map[string]string{"name": egressNamespace.Name}},
+					},
+					Status: egressipv1.EgressIPStatus{Items: []egressipv1.EgressIPStatusItem{}},
+				}
+
+				// The default network is advertised at node1. GetActiveNetworkForNamespace must
+				// hand the EgressIP flow a netInfo that carries that advertisement state (the
+				// real nadController returns a copy of the live default network); the EgressIP
+				// teardown then keeps the pod on its routable pod IP instead of re-adding a
+				// node-IP SNAT.
+				advertisedDefault := util.NewMutableNetInfo(&util.DefaultNetInfo{})
+				advertisedDefault.SetPodNetworkAdvertisedVRFs(map[string][]string{node1Name: {types.DefaultNetworkName}})
+				fakeOvn.networkManager = &networkmanager.FakeNetworkManager{
+					DefaultNetwork: advertisedDefault,
+				}
+
+				fakeOvn.startWithDBSetup(
+					libovsdbtest.TestSetup{
+						NBData: []libovsdbtest.TestData{
+							&nbdb.LogicalRouter{
+								Name: types.OVNClusterRouter,
+								UUID: types.OVNClusterRouter + "-UUID",
+							},
+							node1GR,
+							&nbdb.LogicalRouterPort{
+								UUID:     types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1.Name + "-UUID",
+								Name:     types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1.Name,
+								Networks: []string{nodeLogicalRouterIfAddrV4},
+							},
+							&nbdb.LogicalSwitchPort{
+								UUID: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name + "-UUID",
+								Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
+								Type: "router",
+								Options: map[string]string{
+									libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+									"nat-addresses":             "router",
+									"exclude-lb-vips-from-garp": "true",
+								},
+							},
+							&nbdb.LogicalSwitch{
+								UUID:  types.ExternalSwitchPrefix + node1Name + "-UUID",
+								Name:  types.ExternalSwitchPrefix + node1Name,
+								Ports: []string{types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name + "-UUID"},
+							},
+							node1Switch,
+						},
+					},
+					&egressipv1.EgressIPList{Items: []egressipv1.EgressIP{eIP}},
+					&corev1.NodeList{Items: []corev1.Node{node1}},
+					&corev1.NamespaceList{Items: []corev1.Namespace{*egressNamespace}},
+					&corev1.PodList{Items: []corev1.Pod{egressPod}},
+				)
+
+				i, n, _ := net.ParseCIDR(podV4IP + "/23")
+				n.IP = i
+				fakeOvn.controller.logicalPortCache.add(&egressPod, "", types.DefaultNetworkName, "", nil, []*net.IPNet{n})
+
+				err := fakeOvn.controller.WatchEgressIPNamespaces()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = fakeOvn.controller.WatchEgressIPPods()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = fakeOvn.controller.WatchEgressIP()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				// Simulate the cluster-manager assigning the EgressIP to the pod's own node
+				// (same-node egress path): CM is what patches EgressIP status in production.
+				node1.Labels = map[string]string{"k8s.ovn.org/egress-assignable": ""}
+				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Nodes().Update(context.TODO(), &node1, metav1.UpdateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				fakeOvn.patchEgressIPObj(node1Name, egressIPName, egressIP1)
+				gomega.Eventually(getEgressIPStatusLen(egressIPName)).Should(gomega.Equal(1))
+
+				// Assignment must create exactly the per-EIP SNAT on node1's GR: the pod IP is
+				// SNAT'd to the egress IP (plain SNAT, no destination match), logical-port scoped
+				// to the pod's node.
+				expectedNatLogicalPort := "k8s-" + node1Name
+				gomega.Eventually(func(g gomega.Gomega) {
+					nats, err := libovsdbops.GetRouterNATs(fakeOvn.nbClient, node1GR)
+					g.Expect(err).NotTo(gomega.HaveOccurred())
+					g.Expect(nats).To(gomega.HaveLen(1))
+					nat := nats[0]
+					g.Expect(nat.Type).To(gomega.Equal(nbdb.NATTypeSNAT))
+					g.Expect(nat.LogicalIP).To(gomega.Equal(podV4IP))
+					g.Expect(nat.ExternalIP).To(gomega.Equal(egressIP1))
+					g.Expect(nat.Match).To(gomega.BeEmpty())
+					g.Expect(nat.LogicalPort).NotTo(gomega.BeNil())
+					g.Expect(*nat.LogicalPort).To(gomega.Equal(expectedNatLogicalPort))
+				}).Should(gomega.Succeed())
+
+				// The EgressIP is removed (as CM would). The teardown restores the pod's
+				// default SNAT; because the default network is advertised at node1 the pod must
+				// keep its routable pod IP, so no node-IP SNAT may be re-added on its gateway router.
+				err = fakeOvn.fakeClient.EgressIPClient.K8sV1().EgressIPs().Delete(context.TODO(), egressIPName, metav1.DeleteOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				// The per-EIP SNAT must be deleted and, because the network is advertised, no
+				// unconditional node-IP SNAT may be re-added - so node1's GR ends up with no NATs.
+				gomega.Eventually(func() []*nbdb.NAT {
+					nats, err := libovsdbops.GetRouterNATs(fakeOvn.nbClient, node1GR)
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					return nats
+				}).Should(gomega.BeEmpty(),
+					"per-EIP SNAT should be deleted and no node-IP SNAT re-added for a pod on an advertised default network")
+
+				// The default network is no longer advertised at node1 (e.g. the
+				// RouteAdvertisements selecting it was deleted). GetActiveNetworkForNamespace now
+				// hands the EgressIP flow a non-advertised netInfo, so removing an EgressIP from
+				// the pod's own node must restore the unconditional node-IP SNAT. Mutate the fake
+				// network manager in place: the controller captured this pointer at startup, and
+				// GetActiveNetworkForNamespace returns a fresh copy of DefaultNetwork on each call.
+				ginkgo.By("stopping advertisement of the default network")
+				nonAdvertisedDefault := util.NewMutableNetInfo(&util.DefaultNetInfo{})
+				fnm := fakeOvn.networkManager.(*networkmanager.FakeNetworkManager)
+				fnm.Lock()
+				fnm.DefaultNetwork = nonAdvertisedDefault
+				fnm.Unlock()
+
+				// Phase 1 deleted the EgressIP, so recreate a fresh object and assign it again
+				// (now against the non-advertised network).
+				ginkgo.By("recreating the EgressIP and assigning it while the network is not advertised")
+				eIP.ResourceVersion = ""
+				eIP.Status = egressipv1.EgressIPStatus{Items: []egressipv1.EgressIPStatusItem{}}
+				_, err = fakeOvn.fakeClient.EgressIPClient.K8sV1().EgressIPs().Create(context.TODO(), &eIP, metav1.CreateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				fakeOvn.patchEgressIPObj(node1Name, egressIPName, egressIP1)
+				gomega.Eventually(getEgressIPStatusLen(egressIPName)).Should(gomega.Equal(1))
+
+				// The fresh assignment recreates the per-EIP SNAT (external IP == egress IP),
+				// refreshing the pod's cached network to the now non-advertised one.
+				gomega.Eventually(func(g gomega.Gomega) {
+					nats, err := libovsdbops.GetRouterNATs(fakeOvn.nbClient, node1GR)
+					g.Expect(err).NotTo(gomega.HaveOccurred())
+					g.Expect(nats).To(gomega.HaveLen(1))
+					g.Expect(nats[0].ExternalIP).To(gomega.Equal(egressIP1))
+				}).Should(gomega.Succeed())
+
+				ginkgo.By("removing the EgressIP and asserting the node-IP SNAT is restored")
+				err = fakeOvn.fakeClient.EgressIPClient.K8sV1().EgressIPs().Delete(context.TODO(), egressIPName, metav1.DeleteOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				// Because the network is not advertised, the teardown re-adds the unconditional
+				// node-IP SNAT: the pod IP is SNAT'd to node1's external (node) IP.
+				gomega.Eventually(func(g gomega.Gomega) {
+					nats, err := libovsdbops.GetRouterNATs(fakeOvn.nbClient, node1GR)
+					g.Expect(err).NotTo(gomega.HaveOccurred())
+					g.Expect(nats).To(gomega.HaveLen(1))
+					nat := nats[0]
+					g.Expect(nat.Type).To(gomega.Equal(nbdb.NATTypeSNAT))
+					g.Expect(nat.LogicalIP).To(gomega.Equal(podV4IP))
+					g.Expect(nat.ExternalIP).To(gomega.Equal(node1IPv4))
+				}).Should(gomega.Succeed(),
+					"node-IP SNAT should be restored on EgressIP removal once the default network is no longer advertised")
 
 				return nil
 			}
