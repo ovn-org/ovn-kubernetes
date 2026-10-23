@@ -4886,24 +4886,24 @@ in your cluster:</p>
 <ul>
 <li>Isolate tenants</li>
 </ul>
-<p></p>
+<p><a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../../../images/isolate-tenants.png" data-desc-position="bottom"><img alt="isolate-tenants" src="../../../images/isolate-tenants.png"></a></p>
 <ul>
 <li>Always allow egress traffic from all workloads to DNS namespace or splunk namespace</li>
 </ul>
-<p></p>
+<p><a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../../../images/allow-egress-to-dns.png" data-desc-position="bottom"><img alt="allow-egress-to-dns" src="../../../images/allow-egress-to-dns.png"></a></p>
 <ul>
 <li>Always allow ingress traffic from monitoring namespace to all workloads</li>
 </ul>
-<p></p>
+<p><a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../../../images/allow-ingress-from-monitoring.png" data-desc-position="bottom"><img alt="allow-ingress-from-monitoring" src="../../../images/allow-ingress-from-monitoring.png"></a></p>
 <ul>
 <li>Delegate to namespace scoped network policies (we will learn more about what this is
   in the following sections)</li>
 </ul>
-<p></p>
+<p><a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../../../images/delegate-sample.png" data-desc-position="bottom"><img alt="delegate-sample" src="../../../images/delegate-sample.png"></a></p>
 <ul>
 <li>Always deny traffic to sensitive namespaces from everywhere</li>
 </ul>
-<p></p>
+<p><a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../../../images/sensitive-deny.png" data-desc-position="bottom"><img alt="sensitive-deny" src="../../../images/sensitive-deny.png"></a></p>
 <h2 id="how-to-enable-this-feature-on-an-ovn-kubernetes-cluster">How to enable this feature on an OVN-Kubernetes cluster?<a class="headerlink" href="#how-to-enable-this-feature-on-an-ovn-kubernetes-cluster" title="Permanent link">¶</a></h2>
 <p>This feature is enabled by default on all OVN-Kubernetes clusters.
 You don't need to do anything extra to start using this feature.
@@ -5164,7 +5164,7 @@ action rule to either the NetworkPolicy OR to the BaselineAdminNetworkPolicy
 defined in the cluster (if either of them match the same set of pods,
 then they will take effect and if not, the result will be an <code>Allow</code>).
 Order of precedence: <code>AdminNetworkPolicy (Tier1) &gt; NetworkPolicy(Tier2) &gt; BaselineAdminNetworkPolicy (Tier3)</code>.</p>
-<p></p>
+<p><a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../../../images/precedence.png" data-desc-position="bottom"><img alt="precedence" src="../../../images/precedence.png"></a></p>
 <p>Ingress rule3 and Egress rule4 are examples of <code>Pass</code> action. Such
 rules are created when the administrator wants to delegate the decision
 of whether that connection should be allowed or not to NetworkPolicies
@@ -5946,10 +5946,10 @@ help users understand what's happening in this feature.</p>
   <code>direction</code> can be either <code>Ingress</code> or <code>Egress</code> and <code>action</code> can be either
   <code>Allow</code> or <code>Deny</code>.</li>
 </ul>
-<p>
-
-
-</p>
+<p><a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../../../images/anp-metrics-1.png" data-desc-position="bottom"><img alt="anp-metrics-1" src="../../../images/anp-metrics-1.png"></a>
+<a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../../../images/anp-metrics-2.png" data-desc-position="bottom"><img alt="anp-metrics-2" src="../../../images/anp-metrics-2.png"></a>
+<a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../../../images/anp-metrics-3.png" data-desc-position="bottom"><img alt="anp-metrics-3" src="../../../images/anp-metrics-3.png"></a>
+<a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../../../images/anp-metrics-4.png" data-desc-position="bottom"><img alt="anp-metrics-4" src="../../../images/anp-metrics-4.png"></a></p>
 <h2 id="best-practices-and-gotchas">Best Practices and Gotchas!<a class="headerlink" href="#best-practices-and-gotchas" title="Permanent link">¶</a></h2>
 <ul>
 <li>Its better to create ANPs at separate priorities so that the precedence

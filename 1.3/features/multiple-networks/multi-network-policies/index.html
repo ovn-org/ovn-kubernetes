@@ -4395,12 +4395,12 @@ my namespace. This will secure my namespace’s network traffic.</p>
   In this case example, VMA is a data processor, VMC is a real-time data producer, and VMB is a monitoring and alerting unit.
   The data producer (VMC) can send data to the data processor (VMA), but cannot communicate with the monitoring unit (VMB).
   The data processor (VMA) can send alerts and metrics to the monitoring unit (VMB).
-  
-  </li>
+  <a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../multi-homing-use-case-layer2.png" data-desc-position="bottom"><img alt="multi-homing-use-case-layer2" src="../multi-homing-use-case-layer2.png"></a>
+  <a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../micro-segmentation-layer2-use-case.png" data-desc-position="bottom"><img alt="micro-segmentation-use-case" src="../micro-segmentation-layer2-use-case.png"></a></li>
 <li>Limit access to a database set outside the cluster, connected to VM and Pod workloads via localnet overlay network:
   In this case example, only the VM has access to the database.
-  
-  </li>
+  <a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../multi-homing-use-case-localnet.png" data-desc-position="bottom"><img alt="multi-homing-use-case-localnet" src="../multi-homing-use-case-localnet.png"></a>
+  <a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../micro-segmentation-localnet-use-case.png" data-desc-position="bottom"><img alt="micro-segmentation-use-case" src="../micro-segmentation-localnet-use-case.png"></a></li>
 </ul>
 <h2 id="how-to-enable-this-feature-on-an-ovn-kubernetes-cluster">How to enable this feature on an OVN-Kubernetes cluster?<a class="headerlink" href="#how-to-enable-this-feature-on-an-ovn-kubernetes-cluster" title="Permanent link">¶</a></h2>
 <p>The <code>multi-network-policies</code> feature must be enabled in the OVN-Kubernetes configuration.

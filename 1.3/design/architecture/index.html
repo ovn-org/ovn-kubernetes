@@ -4518,7 +4518,7 @@ Many of the new features already don't have support on central mode
 and are only available in interconnect mode.</p>
 <p>Let's look at these two modes in depth from architecture standpoint:</p>
 <h2 id="ovn-kubernetes-components-central-mode-deprecated">OVN-Kubernetes Components - Central Mode (DEPRECATED!!)<a class="headerlink" href="#ovn-kubernetes-components-central-mode-deprecated" title="Permanent link">¶</a></h2>
-<p></p>
+<p><a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../../images/ovnkube-centralized-components.png" data-desc-position="bottom"><img alt="ovn-kubernetes-centralized-components" src="../../images/ovnkube-centralized-components.png"></a></p>
 <p>The control plane has the <code>ovnkube-master</code> pod in the <code>ovn-kubernetes</code> namespace
 which are running only on the control plane nodes in your cluster:</p>
 <ul>
@@ -4591,11 +4591,11 @@ namespace which are running on all your nodes in the cluster.</p>
 <p>Now that we know the pods and components running in the central mode, let's tie up
 loose ends and show how these components run on a standard HA Kubernetes cluster.</p>
 <h3 id="control-plane-nodes">Control Plane Nodes:<a class="headerlink" href="#control-plane-nodes" title="Permanent link">¶</a></h3>
-<p></p>
+<p><a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../../images/ovnkube-centralized-arch-cp.png" data-desc-position="bottom"><img alt="ovn-kubernetes-centralized-components-control-plane" src="../../images/ovnkube-centralized-arch-cp.png"></a></p>
 <h3 id="worker-nodes">Worker Nodes:<a class="headerlink" href="#worker-nodes" title="Permanent link">¶</a></h3>
-<p></p>
+<p><a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../../images/ovnkube-centralized-arch-dp.png" data-desc-position="bottom"><img alt="ovn-kubernetes-centralized-components-data-plane" src="../../images/ovnkube-centralized-arch-dp.png"></a></p>
 <h2 id="ovn-kubernetes-components-interconnect-mode-default">OVN-Kubernetes Components - Interconnect mode (DEFAULT)<a class="headerlink" href="#ovn-kubernetes-components-interconnect-mode-default" title="Permanent link">¶</a></h2>
-<p></p>
+<p><a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../../images/ovnkube-distributed-components.png" data-desc-position="bottom"><img alt="ovn-kubernetes-distributed-components" src="../../images/ovnkube-distributed-components.png"></a></p>
 <p>The control plane has the <code>ovnkube-control-plane</code> pod in the <code>ovn-kubernetes</code> namespace
 which is super lightweight and running only on the control plane nodes in your cluster:</p>
 <ul>
@@ -4689,9 +4689,9 @@ show how these components run on a standard HA Kubernetes cluster. By default, e
 the cluster is a <code>zone</code>, so each <code>zone</code> contains 1 node. There is no more RAFT since each
 node has its own database.</p>
 <h3 id="control-plane-nodes_1">Control Plane Nodes:<a class="headerlink" href="#control-plane-nodes_1" title="Permanent link">¶</a></h3>
-<p></p>
+<p><a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../../images/ovnkube-distributed-arch-cp.png" data-desc-position="bottom"><img alt="ovn-kubernetes-distributed-components-control-plane" src="../../images/ovnkube-distributed-arch-cp.png"></a></p>
 <h3 id="worker-nodes_1">Worker Nodes:<a class="headerlink" href="#worker-nodes_1" title="Permanent link">¶</a></h3>
-<p></p>
+<p><a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../../images/ovnkube-distributed-arch-dp.png" data-desc-position="bottom"><img alt="ovn-kubernetes-distributed-components-data-plane" src="../../images/ovnkube-distributed-arch-dp.png"></a></p>
 <h3 id="why-do-we-need-interconnect-mode-in-ovn-kubernetes">Why do we need Interconnect mode in OVN-Kubernetes?<a class="headerlink" href="#why-do-we-need-interconnect-mode-in-ovn-kubernetes" title="Permanent link">¶</a></h3>
 <p>This architecture brings about several improvements:</p>
 <ul>

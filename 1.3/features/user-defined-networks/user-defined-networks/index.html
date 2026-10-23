@@ -4696,12 +4696,12 @@ can use the same IP address ranges for pods, expanding deployment scenarios.</li
 <p>See the <a href="../../../okeps/okep-5193-user-defined-networks/#user-storiesuse-cases">user-stories</a> defined in the enhancement.</p>
 <p>The two main user stories are:</p>
 <h4 id="native-namespace-isolation-using-networks">Native Namespace Isolation using Networks<a class="headerlink" href="#native-namespace-isolation-using-networks" title="Permanent link">¶</a></h4>
-<p>
+<p><a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../images/native-namespace-isolation.png" data-desc-position="bottom"><img alt="namespace-isolation" src="../images/native-namespace-isolation.png"></a>
 Here the blue, green, purple and yellow networks within those
 namespaces cannot reach other and hence provide native isolation
 to the workloads in those networks from workloads in other networks.</p>
 <h4 id="native-tenant-isolation-using-networks">Native Tenant Isolation using Networks<a class="headerlink" href="#native-tenant-isolation-using-networks" title="Permanent link">¶</a></h4>
-<p>
+<p><a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../images/tenant-isolation-lighter.png" data-desc-position="bottom"><img alt="tenant-isolation" src="../images/tenant-isolation-lighter.png"></a>
 Here the tenants BERLIN and MUNICH are isolated from each other.
 So the workloads in namespaces belonging to BERLIN across the
 four namespaces - purple, yellow, green and blue can talk to each other
@@ -4788,7 +4788,7 @@ switch across nodes.</p>
 <li>Can be of type <code>primary</code> or <code>secondary</code></li>
 </ul>
 <p>Let's see how a Layer3 Network looks on the OVN layer.</p>
-<p></p>
+<p><a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../images/L3DeepDive.png" data-desc-position="bottom"><img alt="l3-UDN" src="../images/L3DeepDive.png"></a></p>
 <p>Here we can see a blue and green P-UDN. On node1, pod1 is part of green UDN and
 pod2 is part of blue UDN. They each have a udn-0 interface that is attached to
 the UDN network and a eth0 interface that is attached to the cluster default
@@ -4804,7 +4804,7 @@ same layer2 flat switch.</p>
     during live migration</li>
 <li>Can be of type <code>primary</code> or <code>secondary</code></li>
 </ul>
-<p></p>
+<p><a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../images/L2DeepDive-2segments.jpg" data-desc-position="bottom"><img alt="l2-UDN" src="../images/L2DeepDive-2segments.jpg"></a></p>
 <p>Here we can see a blue and green P-UDN. On node1, pod1 is part of green UDN and
 pod2 is part of blue UDN. They each have a udn-0 interface that is attached to
 the UDN network and a eth0 interface that is attached to the cluster default
@@ -4820,7 +4820,7 @@ network on the overlay can egress to the provider’s physical network</p>
 <li>Can be of type <code>secondary</code>, it cannot be a <code>primary</code> network of a pod.</li>
 <li>Only <code>ClusterUserDefinedNetwork</code> supports <code>localnet</code></li>
 </ul>
-<p></p>
+<p><a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../images/localnet-topology.png" data-desc-position="bottom"><img alt="localnet-UDN" src="../images/localnet-topology.png"></a></p>
 <p>Here we can see blue and green S-UDN localnet networks.</p>
 <p>The ovnkube-cluster-manager component watches for these CR's and the controller
 reacts to it by creating NADs under the hood. The ovnkube-controller watches for
@@ -5028,7 +5028,7 @@ sample_new          : []
 severity            : []
 tier                : 0
 </code></pre></div>
-<p></p>
+<p><a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../images/KubeletHealthchecks-Part1.png" data-desc-position="bottom"><img alt="kubelet-healthchecks-part1" src="../images/KubeletHealthchecks-Part1.png"></a></p>
 <p>As you can see here a default network pod, <code>pod2</code> can't reach
 the UDN pod <code>pod1</code> via its eth0 interface thanks to the ACLs in place.
 So no traffic from the UDN pod ever leaves via <code>eth0</code>. The only traffic
@@ -5039,7 +5039,7 @@ potentially reach the UDN pods. In order to have more tighter security,
 we have cgroups based NFT rules on the host to prevent any non-kubelet
 process from being able to reach the default network <code>eth0</code> port on
 UDN pods.</p>
-<p></p>
+<p><a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../images/KubeletHealthchecks-Part2.png" data-desc-position="bottom"><img alt="kubelet-healthchecks-part2" src="../images/KubeletHealthchecks-Part2.png"></a></p>
 <p>These rules look like this:</p>
 <div class="highlight"><pre><span></span><code>    chain udn-isolation {
         comment "Host isolation for user defined networks"
@@ -5099,12 +5099,12 @@ to reach at those ports.<p></p>
 isolated. We use a <code>masqueradeIP</code> SNAT per UDN to avoid conntrack
 collisions on the host. So traffic leaving each UDN is SNATed to
 a unique IP before being sent to the host.</p>
-<p></p>
+<p><a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../images/overlappingpodIPs.png" data-desc-position="bottom"><img alt="overlapping-podips" src="../images/overlappingpodIPs.png"></a></p>
 <h3 id="vm-livemigration-and-persistentips-over-layer2-udns">VM LiveMigration and PersistentIPs over Layer2 UDNs<a class="headerlink" href="#vm-livemigration-and-persistentips-over-layer2-udns" title="Permanent link">¶</a></h3>
 <p>Users can use the <code>layer2</code> topology when creating virtual machines
 on OVN-Kubernetes and can easily live migrate the VMs across nodes
 along with preserving their IPs.</p>
-<p></p>
+<p><a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../images/Layer2VMMigration.png" data-desc-position="bottom"><img alt="overlapping-podips" src="../images/Layer2VMMigration.png"></a></p>
 <h3 id="services-on-udns">Services on UDNs<a class="headerlink" href="#services-on-udns" title="Permanent link">¶</a></h3>
 <p>Creating a service on UDNs is same as creating them on default
 network, no extra plumbing is required.</p>

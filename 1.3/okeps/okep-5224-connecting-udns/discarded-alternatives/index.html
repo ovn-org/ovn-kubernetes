@@ -4172,7 +4172,7 @@
 <p>The below diagram shows the overlay part of the OVN Topology that
 OVN-Kubernetes creates for 3 UDN networks (blue, green and yellow)
 across two nodes.</p>
-<p></p>
+<p><a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../images/l3-connecting-udns-0.png" data-desc-position="bottom"><img alt="3-isolated-l3-networks" src="../images/l3-connecting-udns-0.png"></a></p>
 <p><strong>Idea1: Add a new transit switch between the two
 ovn_cluster_routers of the networks</strong></p>
 <p>When the UDNConnect CR gets created selecting these three networks, the
@@ -4186,10 +4186,10 @@ controller will make the following changes to the topology:
   node using remote patch ports and tunnelkeys
 * Add routes towards each connected network's CIDR on the ovn_cluster_router's
   of the blue, green and yellow networks on each node.</p>
-<p></p>
+<p><a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../images/l3-connecting-udns-1.png" data-desc-position="bottom"><img alt="blue-green-yellow-l3-connect-idea1" src="../images/l3-connecting-udns-1.png"></a></p>
 <p>So in this idea it will be 1 router per connect API.</p>
 <p>However this would cause an asymmetry for reply traffic:</p>
-<p></p>
+<p><a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../images/l3-idea1-asymmetry.png" data-desc-position="bottom"><img alt="blue-green-yellow-l3-connect-idea1-asymmetry" src="../images/l3-idea1-asymmetry.png"></a></p>
 <p><strong>Idea1.1 Add a new transit router between two ovn_cluster_routers of
 the networks and move the node-network specific routes to the new connect router</strong></p>
 <p>Ultimately Idea 1.1 is what we went with in the main proposal because
@@ -4207,7 +4207,7 @@ controller will make the following changes to the topology:
   <code>connectSubnets</code>.
 These three ports will have their <code>peer</code> field set as each other to
 allow for direct connectivity.</p>
-<p></p>
+<p><a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../images/l3-connecting-udns-4.png" data-desc-position="bottom"><img alt="blue-green-yellow-l3-connect-idea2" src="../images/l3-connecting-udns-4.png"></a></p>
 <p>The above diagram shows what happens when all 3 networks are connected
 together.</p>
 <p><strong>Which idea to pick?</strong></p>
@@ -4300,7 +4300,7 @@ together.</p>
 <p><strong>Idea3: Connect the transit switches of the two UDNs together (either
 using an interconnect switch/router in the middle OR directly using
 remote ports)</strong></p>
-<p></p>
+<p><a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../images/connect-l3-udns-type2-traffic.png" data-desc-position="bottom"><img alt="blue-green-yellow-l3-connect-idea3" src="../images/connect-l3-udns-type2-traffic.png"></a></p>
 <p>This idea was dropped because:
 * Additional burden for the user and new API change: Given each transit
   router today has the same 100.88/16 subnet that is not configurable in
@@ -4328,24 +4328,24 @@ OVN-Kubernetes creates for 3 UDN networks (blue, green and yellow)
 across two nodes. NOTE: The topology representation is that of the new
 upcoming Layer2 topology. The dotted pieces in network colors represent
 the bits in design and not there yet.</p>
-<p></p>
+<p><a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../images/l2-connecting-udns-0.png" data-desc-position="bottom"><img alt="3-isolated-l2-networks" src="../images/l2-connecting-udns-0.png"></a></p>
 <p><strong>Idea1: Add a new transit switch between the two transit routers of
 the networks</strong></p>
-<p></p>
+<p><a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../images/l2-connecting-udns-1.png" data-desc-position="bottom"><img alt="blue-green-yellow-l2-connect-idea1" src="../images/l2-connecting-udns-1.png"></a></p>
 <p><strong>Idea2: Connecting the ovn_cluster_routers directly</strong></p>
-<p></p>
+<p><a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../images/l2-connecting-udns-2.png" data-desc-position="bottom"><img alt="blue-green-yellow-l2-connect-idea2" src="../images/l2-connecting-udns-2.png"></a></p>
 <p><strong>Connecting mixed type (layer3 and/or layer2) networks together</strong></p>
 <p>The below diagram shows the overlay part of the OVN Topology that
 OVN-Kubernetes creates for 3 UDN networks (blue(l3), green(l3) and
 yellow(l2)) across two nodes. NOTE: The yellow topology representation
 is that of the new upcoming Layer2 topology. The dotted pieces in
 network colors represent the bits in design and not there yet.</p>
-<p></p>
+<p><a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../images/mixed-connecting-udns-0.png" data-desc-position="bottom"><img alt="3-isolated-mixed-networks" src="../images/mixed-connecting-udns-0.png"></a></p>
 <p><strong>Idea1: Add a new transit switch between the two transit routers of
 the networks</strong></p>
-<p></p>
+<p><a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../images/mixed-connecting-udns-1.png" data-desc-position="bottom"><img alt="blue-green-yellow-l2-connect-idea1" src="../images/mixed-connecting-udns-1.png"></a></p>
 <p><strong>Idea2: Connecting the ovn_cluster_routers directly</strong></p>
-<p></p>
+<p><a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../images/mixed-connecting-udns-2.png" data-desc-position="bottom"><img alt="blue-green-yellow-l2-connect-idea2" src="../images/mixed-connecting-udns-2.png"></a></p>
 
 
 
