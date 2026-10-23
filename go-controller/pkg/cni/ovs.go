@@ -210,6 +210,8 @@ func waitForPodInterface(ctx context.Context, ovsClient client.Client, ifInfo *P
 
 	mac := ifInfo.MAC.String()
 	ifAddrs := ifInfo.IPs
+	waitTime := 25 * time.Millisecond
+	const maxWaitTime = 200 * time.Millisecond
 	for {
 		select {
 		case <-ctx.Done():
@@ -257,9 +259,12 @@ func waitForPodInterface(ctx context.Context, ovsClient client.Client, ifInfo *P
 			}
 
 			// try again later
-			waitTime := 200 * time.Millisecond
 			time.Sleep(waitTime)
 			metrics.MetricOvsInterfaceUpWait.Add(waitTime.Seconds())
+			waitTime *= 2
+			if waitTime > maxWaitTime {
+				waitTime = maxWaitTime
+			}
 		}
 	}
 }
