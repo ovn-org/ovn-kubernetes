@@ -5,7 +5,6 @@ package node
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -568,21 +567,6 @@ func newPodWithIPs(namespace, name string, primaryUDN bool, ips []string, openPo
 			Annotations: annotations,
 		},
 	}
-}
-
-// nftRunFailer fails the first `failures` calls to Run, then delegates to the wrapped
-// interface. It stands in for a kernel that rejects the socket cgroupv2 match.
-type nftRunFailer struct {
-	knftables.Interface
-	failures int
-}
-
-func (f *nftRunFailer) Run(ctx context.Context, tx *knftables.Transaction) error {
-	if f.failures > 0 {
-		f.failures--
-		return errors.New("Could not process rule: No such file or directory")
-	}
-	return f.Interface.Run(ctx, tx)
 }
 
 var _ = Describe("UDN Host isolation setup", func() {
