@@ -66,11 +66,34 @@ Each new release of OVN-Kubernetes is defined with a "version" that represents t
 * Release notes are generated from the `release-note` blocks of all PRs merged into a release. Any PR with
   a meaningful (non-`NONE`) `release-note` block will be included in the release notes.
 
-## BackPort Request
+## Backport Request
 
 * If a PR needs to be backported to an older release that should be requested
-  by adding the `needs-backport` label.
+  by adding the `needs-backport` label and noting the target releases on the PR.
 * Reach out to the maintainers on slack or by tagging them directly on the PR or come to the community meetings to discuss this.
+
+### Preparing a backport
+
+1. Create a branch from the target `release-X.Y` branch.
+2. Cherry-pick the original commits with `git cherry-pick -x <commit>` so each
+   backport commit records its source.
+3. Resolve any conflicts, keeping the fix appropriate for the release branch.
+   When conflicts occur, we recommend keeping a `Conflicts:` section in the
+   final commit message. List the affected files and briefly explain why each
+   conflict occurred and how it was resolved. For example:
+
+    ```text
+    Conflicts:
+        go-controller/pkg/ovn/example.go
+            The release branch lacks the helper introduced by a later
+            refactor. Applied the fix to the existing inline logic.
+    ```
+
+4. Run the relevant tests on the release branch, including coverage of any
+   conflict resolutions.
+5. Open a PR targeting `release-X.Y`, link the original PR, and describe any
+   adaptations and the testing performed. Prepare a separate PR for each target
+   release.
 
 ## Information on Past Releases
 
