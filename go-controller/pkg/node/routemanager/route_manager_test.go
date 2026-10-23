@@ -524,6 +524,73 @@ var _ = ginkgo.Describe("Route Manager", func() {
 	})
 })
 
+var _ = ginkgo.Describe("Route Manager multipath comparison", func() {
+	wanted := netlink.Route{
+		Dst:   ovntest.MustParseIPNet("0.0.0.0/0"),
+		Table: 1000,
+		MultiPath: []*netlink.NexthopInfo{
+			{LinkIndex: 6, Gw: ovntest.MustParseIP("192.0.2.1")},
+			{LinkIndex: 6, Gw: ovntest.MustParseIP("192.0.2.2")},
+		},
+	}
+
+	ginkgo.It("ignores kernel-owned flags of installed next hops", func() {
+		// The kernel flags a next hop whose device lost carrier; the wanted
+		// route never asked for that.
+		existing := wanted
+		existing.MultiPath = []*netlink.NexthopInfo{
+			{LinkIndex: 6, Gw: ovntest.MustParseIP("192.0.2.1"), Flags: unix.RTNH_F_LINKDOWN},
+			{LinkIndex: 6, Gw: ovntest.MustParseIP("192.0.2.2")},
+		}
+		gomega.Expect(routePartiallyEqualWantedToExisting(&wanted, &existing)).To(gomega.BeTrue())
+	})
+
+	ginkgo.It("requires the flags of the wanted next hops and ignores the other installed ones", func() {
+		onlink := wanted
+		onlink.MultiPath = []*netlink.NexthopInfo{
+			{LinkIndex: 6, Gw: ovntest.MustParseIP("192.0.2.1"), Flags: unix.RTNH_F_ONLINK},
+			{LinkIndex: 6, Gw: ovntest.MustParseIP("192.0.2.2"), Flags: unix.RTNH_F_ONLINK},
+		}
+		existing := wanted
+		existing.MultiPath = []*netlink.NexthopInfo{
+			{LinkIndex: 6, Gw: ovntest.MustParseIP("192.0.2.1"), Flags: unix.RTNH_F_ONLINK | unix.RTNH_F_LINKDOWN},
+			{LinkIndex: 6, Gw: ovntest.MustParseIP("192.0.2.2"), Flags: unix.RTNH_F_ONLINK},
+		}
+		gomega.Expect(routePartiallyEqualWantedToExisting(&onlink, &existing)).To(gomega.BeTrue())
+		// The installed route lacks a flag that was asked for.
+		gomega.Expect(routePartiallyEqualWantedToExisting(&onlink, &wanted)).To(gomega.BeFalse())
+	})
+
+	ginkgo.It("detects a next hop weight different from the requested one", func() {
+		// Hops is the weight minus one: a wanted weight of one is a real
+		// request, so an installed weight of two differs from it.
+		existing := wanted
+		existing.MultiPath = []*netlink.NexthopInfo{
+			{LinkIndex: 6, Gw: ovntest.MustParseIP("192.0.2.1")},
+			{LinkIndex: 6, Gw: ovntest.MustParseIP("192.0.2.2"), Hops: 1},
+		}
+		gomega.Expect(routePartiallyEqualWantedToExisting(&wanted, &existing)).To(gomega.BeFalse())
+	})
+
+	ginkgo.It("detects a different next hop gateway, device or requested weight", func() {
+		for _, existingNextHops := range [][]*netlink.NexthopInfo{
+			{{LinkIndex: 6, Gw: ovntest.MustParseIP("192.0.2.1")}, {LinkIndex: 6, Gw: ovntest.MustParseIP("192.0.2.3")}},
+			{{LinkIndex: 6, Gw: ovntest.MustParseIP("192.0.2.1")}, {LinkIndex: 7, Gw: ovntest.MustParseIP("192.0.2.2")}},
+			{{LinkIndex: 6, Gw: ovntest.MustParseIP("192.0.2.1")}},
+		} {
+			existing := wanted
+			existing.MultiPath = existingNextHops
+			gomega.Expect(routePartiallyEqualWantedToExisting(&wanted, &existing)).To(gomega.BeFalse())
+		}
+		weighted := wanted
+		weighted.MultiPath = []*netlink.NexthopInfo{
+			{LinkIndex: 6, Gw: ovntest.MustParseIP("192.0.2.1"), Hops: 3},
+			{LinkIndex: 6, Gw: ovntest.MustParseIP("192.0.2.2")},
+		}
+		gomega.Expect(routePartiallyEqualWantedToExisting(&weighted, &wanted)).To(gomega.BeFalse())
+	})
+})
+
 func addRouteViaManager(rm *Controller, targetNS ns.NetNS, r netlink.Route) error {
 	return targetNS.Do(func(ns.NetNS) error { return rm.Add(r) })
 }

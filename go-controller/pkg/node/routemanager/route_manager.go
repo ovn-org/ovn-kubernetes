@@ -336,6 +336,45 @@ func equalOrLeftZeroFunc[T any](eq func(l, r T) bool, l, r, z T) bool {
 	return eq(l, z) || eq(l, r)
 }
 
+// flagsPresent reports whether every flag of the wanted route or next hop is
+// set on the existing one. Flags the kernel attaches on its own, such as
+// RTNH_F_LINKDOWN while the device has no carrier, never count as a
+// difference; flags that were asked for, such as RTNH_F_ONLINK, must be there.
+func flagsPresent(wanted, existing int) bool {
+	return existing&wanted == wanted
+}
+
+func destinationEqual(l, r netlink.Destination) bool {
+	return l == r || (l != nil && r != nil && l.Equal(r))
+}
+
+func encapEqual(l, r netlink.Encap) bool {
+	return l == r || (l != nil && r != nil && l.Equal(r))
+}
+
+// nexthopPartiallyEqualWantedToExisting compares a wanted multipath next hop
+// with an existing one the way routePartiallyEqualWantedToExisting compares
+// routes: a zero field in the wanted next hop matches any value in the
+// existing one and flags follow flagsPresent. The weight is compared exactly:
+// Hops is the weight minus one, so zero is a requested value, not an unset
+// one.
+func nexthopPartiallyEqualWantedToExisting(w, e *netlink.NexthopInfo) bool {
+	if w == e {
+		return true
+	}
+	if w == nil || e == nil {
+		return false
+	}
+	var z netlink.NexthopInfo
+	return equalOrLeftZero(w.LinkIndex, e.LinkIndex, z.LinkIndex) &&
+		w.Hops == e.Hops &&
+		equalOrLeftZeroFunc(func(l, r net.IP) bool { return l.Equal(r) }, w.Gw, e.Gw, z.Gw) &&
+		flagsPresent(w.Flags, e.Flags) &&
+		equalOrLeftZeroFunc(destinationEqual, w.NewDst, e.NewDst, z.NewDst) &&
+		equalOrLeftZeroFunc(encapEqual, w.Encap, e.Encap, z.Encap) &&
+		equalOrLeftZeroFunc(destinationEqual, w.Via, e.Via, z.Via)
+}
+
 // routePartiallyEqualWantedToExisting compares non zero values of left wanted route with the
 // right existing route. The reason for not using the Equal method associated
 // with type netlink.Route is because a user will only specify a limited subset
@@ -361,19 +400,17 @@ func routePartiallyEqualWantedToExisting(w, e *netlink.Route) bool {
 		equalOrLeftZeroFunc(func(l, r net.IP) bool { return l.Equal(r) }, w.Gw, e.Gw, z.Gw) &&
 		equalOrLeftZeroFunc(
 			func(l, r []*netlink.NexthopInfo) bool {
-				return slices.EqualFunc(l, r,
-					func(l, r *netlink.NexthopInfo) bool { return l == r || (l != nil && r != nil && l.Equal(*r)) },
-				)
+				return slices.EqualFunc(l, r, nexthopPartiallyEqualWantedToExisting)
 			}, w.MultiPath, e.MultiPath, z.MultiPath) &&
 		equalOrLeftZero(w.Protocol, e.Protocol, z.Protocol) &&
 		equalOrLeftZero(w.Family, e.Family, z.Family) &&
 		equalOrLeftZero(w.Type, e.Type, z.Type) &&
 		equalOrLeftZero(w.Tos, e.Tos, z.Tos) &&
-		equalOrLeftZero(w.Flags, e.Flags, z.Flags) &&
+		flagsPresent(w.Flags, e.Flags) &&
 		equalOrLeftZeroFunc(func(l, r *int) bool { return l == r || (l != nil && r != nil && *l == *r) }, w.MPLSDst, e.MPLSDst, z.MPLSDst) &&
-		equalOrLeftZeroFunc(func(l, r netlink.Destination) bool { return l == r || (l != nil && r != nil && l.Equal(r)) }, w.NewDst, e.NewDst, z.NewDst) &&
-		equalOrLeftZeroFunc(func(l, r netlink.Encap) bool { return l == r || (l != nil && r != nil && l.Equal(r)) }, w.Encap, e.Encap, z.Encap) &&
-		equalOrLeftZeroFunc(func(l, r netlink.Destination) bool { return l == r || (l != nil && r != nil && l.Equal(r)) }, w.Via, e.Via, z.Via) &&
+		equalOrLeftZeroFunc(destinationEqual, w.NewDst, e.NewDst, z.NewDst) &&
+		equalOrLeftZeroFunc(encapEqual, w.Encap, e.Encap, z.Encap) &&
+		equalOrLeftZeroFunc(destinationEqual, w.Via, e.Via, z.Via) &&
 		equalOrLeftZero(w.Realm, e.Realm, z.Realm) &&
 		equalOrLeftZero(w.MTU, e.MTU, z.MTU) &&
 		equalOrLeftZero(w.Window, e.Window, z.Window) &&

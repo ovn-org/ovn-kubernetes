@@ -450,10 +450,23 @@ func (vrfm *Controller) DeleteVRFRoutes(name string, routes []netlink.Route) err
 	if !ok {
 		return fmt.Errorf("failed to find VRF %s", name)
 	}
+	// Every CUDN VRF table holds an unreachable default route (see
+	// computeRoutesForUDN) that must outlive the managed default routes.
+	// It has no link index, and neither has an ECMP default, so the key
+	// records whether a route is unreachable to keep the two apart.
 	type route struct {
-		LinkIndex int
-		Dst       string
-		Table     int
+		LinkIndex   int
+		Dst         string
+		Table       int
+		Unreachable bool
+	}
+	keyOf := func(r netlink.Route) route {
+		return route{
+			LinkIndex:   r.LinkIndex,
+			Dst:         r.Dst.String(),
+			Table:       r.Table,
+			Unreachable: r.Type == unix.RTN_UNREACHABLE,
+		}
 	}
 	deletedRoutes := sets.New[route]()
 	for _, r := range routes {
@@ -464,20 +477,11 @@ func (vrfm *Controller) DeleteVRFRoutes(name string, routes []netlink.Route) err
 		if err = vrfm.routeManager.Del(r); err != nil {
 			break
 		}
-		deletedRoutes.Insert(route{
-			LinkIndex: r.LinkIndex,
-			Dst:       r.Dst.String(),
-			Table:     r.Table,
-		})
+		deletedRoutes.Insert(keyOf(r))
 	}
 
 	vrf.routes = slices.DeleteFunc(vrf.routes, func(r netlink.Route) bool {
-		routeKey := route{
-			LinkIndex: r.LinkIndex,
-			Dst:       r.Dst.String(),
-			Table:     r.Table,
-		}
-		return deletedRoutes.Has(routeKey)
+		return deletedRoutes.Has(keyOf(r))
 	})
 	vrfm.vrfs[vrfLink.Attrs().Index] = vrf
 	return err
@@ -815,16 +819,14 @@ func restoreRoutesToTable(routes []netlink.Route, table uint32) error {
 			}
 			route.MultiPath = nexthops
 		}
-		if err := addRouteWithRetry(&route); err != nil {
+		if err := appendRouteWithRetry(&route); err != nil {
 			if util.GetNetLinkOps().IsAlreadyExistsError(err) {
-				// A route with the same kernel key ({table, dst, tos, priority})
-				// is already in the table and legitimately wins: nothing was
-				// added. When the existing
-				// route is an equivalent copy -- the kernel regenerating an
-				// interface's prefix route, or the route's owner reinstalling
-				// it -- nothing was lost. Otherwise a restore into the main
-				// table leaves the captured route in no table at all, so make
-				// that visible.
+				// An identical route is already in the table. When it is an
+				// equivalent copy -- the kernel regenerating an interface's
+				// prefix route, or the route's owner reinstalling it --
+				// nothing was lost. Otherwise a restore into the main table
+				// leaves the captured route in no table at all, so make that
+				// visible.
 				if table == unix.RT_TABLE_MAIN && !equivalentRouteExists(route) {
 					klog.Warningf("VRF Manager: route %v not restored into the main table, a different route with the same key already exists", route)
 				} else {
@@ -850,18 +852,19 @@ const (
 	routeRestorePollInterval = 100 * time.Millisecond
 )
 
-// addRouteWithRetry adds the route, retrying briefly while the kernel deems
-// its gateway unreachable (EHOSTUNREACH/ENETUNREACH) or its source address
-// invalid (EINVAL): IPv6 connected routes are regenerated asynchronously
-// after a master change and IPv6 addresses re-run duplicate address
-// detection, so a route restored right after — a gateway route, or one
-// carrying a still-tentative IPv6 source — can transiently fail the kernel's
-// validation.
-func addRouteWithRetry(route *netlink.Route) error {
+// appendRouteWithRetry appends the route, retrying briefly while the kernel
+// deems its gateway unreachable (EHOSTUNREACH/ENETUNREACH) or its source
+// address invalid (EINVAL): IPv6 connected routes are regenerated
+// asynchronously after a master change and IPv6 addresses re-run duplicate
+// address detection, so a route restored right after — a gateway route, or
+// one carrying a still-tentative IPv6 source — can transiently fail the
+// kernel's validation. Appending keeps same-key routes with different next
+// hops, e.g. two default routes toward two gateways, side by side.
+func appendRouteWithRetry(route *netlink.Route) error {
 	var err error
 	_ = wait.PollUntilContextTimeout(context.Background(), routeRestorePollInterval, routeRestoreTimeout, true,
 		func(context.Context) (bool, error) {
-			err = util.GetNetLinkOps().RouteAdd(route)
+			err = util.GetNetLinkOps().RouteAppend(route)
 			return err == nil || !(errors.Is(err, unix.EHOSTUNREACH) || errors.Is(err, unix.ENETUNREACH) || errors.Is(err, unix.EINVAL)), nil
 		})
 	return err

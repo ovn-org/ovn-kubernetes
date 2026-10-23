@@ -1399,36 +1399,70 @@ func (udng *UserDefinedNetworkGateway) computeRoutesForUDN(mpLink netlink.Link) 
 	return retVal, nil
 }
 
+// getDefaultRoute builds the default route of each IP family of the network
+// in its VRF table, toward the next hops of that family: a single-path route
+// when there is one gateway, one multipath route carrying every gateway when
+// there are several. Next hops of a family the network has no subnet for,
+// and duplicate next hops, are skipped.
 func (udng *UserDefinedNetworkGateway) getDefaultRoute() ([]netlink.Route, error) {
 	networkMTU := udng.NetInfo.MTU()
 	if networkMTU == 0 {
 		networkMTU = config.Default.MTU
 	}
 
-	var retVal []netlink.Route
-	var defaultAnyCIDR *net.IPNet
-	hasV4Subnet, hasV6Subnet := udng.IPMode()
+	// An Uplink gateway may sit outside the subnets of the host interface
+	// (e.g. a /32 address with an on-link default route), which the kernel
+	// only accepts as an onlink next hop; the service route is onlink for
+	// the same reason.
+	var flags int
 	if udng.Uplink() != "" {
-		if len(udng.nextHops) == 0 {
-			return nil, nil
-		}
+		flags = unix.RTNH_F_ONLINK
 	}
+	var retVal []netlink.Route
+	gateways := map[bool][]*netlink.NexthopInfo{}
+	seen := make(map[string]bool)
+	hasV4Subnet, hasV6Subnet := udng.IPMode()
 	for _, nextHop := range udng.nextHops {
 		isV6 := utilnet.IsIPv6(nextHop)
-		if (isV6 && !hasV6Subnet) || (!isV6 && !hasV4Subnet) {
+		if (isV6 && !hasV6Subnet) || (!isV6 && !hasV4Subnet) || seen[nextHop.String()] {
 			continue
 		}
-		_, defaultAnyCIDR, _ = net.ParseCIDR("0.0.0.0/0")
-		if isV6 {
-			_, defaultAnyCIDR, _ = net.ParseCIDR("::/0")
+		seen[nextHop.String()] = true
+		gateways[isV6] = append(gateways[isV6], &netlink.NexthopInfo{
+			LinkIndex: udng.gwInterfaceIndex,
+			Gw:        nextHop,
+			Flags:     flags,
+		})
+	}
+	for _, isV6 := range []bool{false, true} {
+		nextHops := gateways[isV6]
+		if len(nextHops) == 0 {
+			continue
 		}
-		retVal = append(retVal, netlink.Route{
+		prefix := "0.0.0.0/0"
+		if isV6 {
+			prefix = "::/0"
+		}
+		_, defaultAnyCIDR, _ := net.ParseCIDR(prefix)
+		route := netlink.Route{
 			LinkIndex: udng.gwInterfaceIndex,
 			Dst:       defaultAnyCIDR,
 			MTU:       networkMTU,
-			Gw:        nextHop,
+			Gw:        nextHops[0].Gw,
 			Table:     udng.vrfTableId,
-		})
+			Flags:     flags,
+		}
+		if len(nextHops) > 1 {
+			// Route manager owns one route per prefix/table/metric. Separate
+			// routes with different gateways would overwrite each other.
+			// The kernel reports the flags of a multipath route on its next
+			// hops only, so a route-level flag would never match.
+			route.LinkIndex = 0
+			route.Gw = nil
+			route.Flags = 0
+			route.MultiPath = nextHops
+		}
+		retVal = append(retVal, route)
 	}
 	return retVal, nil
 }
@@ -1864,13 +1898,19 @@ func (udng *UserDefinedNetworkGateway) removeManagedDefaultRoutesFromVRF() error
 	}
 	var managedDefaultRoutes []netlink.Route
 	for _, route := range routes {
-		if int(route.Protocol) != types.OVNKProtocol || len(route.Gw) == 0 || route.Dst != nil && route.Dst.IP != nil && !route.Dst.IP.IsUnspecified() {
+		if int(route.Protocol) != types.OVNKProtocol || len(route.Gw) == 0 && len(route.MultiPath) == 0 {
 			continue
 		}
-		// The kernel reports a default route with a nil destination; the
-		// tracked routes carry the explicit any CIDR of their family.
+		if route.Dst != nil {
+			if ones, bits := route.Dst.Mask.Size(); bits == 0 || ones != 0 {
+				continue
+			}
+		}
+		// A dumped default route carries the zero address with a zero mask,
+		// or no destination at all; the tracked routes carry the canonical
+		// any CIDR of their family, so normalize to it.
 		_, anyCIDR, _ := net.ParseCIDR("0.0.0.0/0")
-		if utilnet.IsIPv6(route.Gw) {
+		if route.Family == netlink.FAMILY_V6 {
 			_, anyCIDR, _ = net.ParseCIDR("::/0")
 		}
 		route.Dst = anyCIDR
