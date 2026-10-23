@@ -4,6 +4,7 @@
 package node
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"sync"
@@ -12,7 +13,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/client-go/listers/core/v1"
+	v1 "k8s.io/client-go/listers/core/v1"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/controller"
@@ -33,7 +34,7 @@ type NodeHandler interface {
 	// stub node; oldState is nil when no cached prior annotations exist. newNode
 	// and newState describe the latest desired state; they are nil when
 	// network-specific state for the node should be deleted.
-	ReconcileNode(oldNode, newNode *corev1.Node, oldState, newState *NodeAnnotationState) error
+	ReconcileNode(ctx context.Context, oldNode, newNode *corev1.Node, oldState, newState *NodeAnnotationState) error
 	// SyncNodes performs the initial full-network sync before per-node
 	// reconciliation is queued for the handler.
 	SyncNodes(nodes []*corev1.Node) error
@@ -223,7 +224,7 @@ func (c *NodeController) DeregisterNetworkController(netName string) {
 }
 
 // reconcileNode handles node add/update/delete by comparing cached state.
-func (c *NodeController) reconcileNode(key string) error {
+func (c *NodeController) reconcileNode(ctx context.Context, key string) error {
 	nodeName, netName := parseScopedNodeQueueKey(key)
 	// if netName is empty, then we always requeue keys based on network.
 	// This trick allows us to always process each network individually, allowing us to retry only
@@ -296,7 +297,7 @@ func (c *NodeController) reconcileNode(key string) error {
 
 		oldState := c.annotationCache.updateNodeAnnotationState(oldNode, updateAnnoCacheOnDelete)
 		if needsDelete {
-			if delErr := c.reconcileDelete(handler, nodeName, netName, oldNode, oldState); delErr != nil {
+			if delErr := c.reconcileDelete(ctx, handler, nodeName, netName, oldNode, oldState); delErr != nil {
 				return fmt.Errorf("%s: failed to delete node %s for network %s: %w", c.name, nodeName, netName, delErr)
 			}
 		}
@@ -315,7 +316,7 @@ func (c *NodeController) reconcileNode(key string) error {
 			oldState = nil
 		}
 
-		return c.reconcileUpdate(handler, oldNode, newNode, netName, oldState, newState)
+		return c.reconcileUpdate(ctx, handler, oldNode, newNode, netName, oldState, newState)
 	})
 }
 
@@ -323,8 +324,8 @@ func (c *NodeController) reconcileNode(key string) error {
 // oldNode is derived from this controller's internal cache.
 // newNode is the latest state of the node from informer cache.
 // Reconciliation is level-driven.
-func (c *NodeController) reconcileUpdate(handler NodeHandler, oldNode, newNode *corev1.Node, netName string, oldState, newState *NodeAnnotationState) error {
-	err := handler.ReconcileNode(oldNode, newNode, oldState, newState)
+func (c *NodeController) reconcileUpdate(ctx context.Context, handler NodeHandler, oldNode, newNode *corev1.Node, netName string, oldState, newState *NodeAnnotationState) error {
+	err := handler.ReconcileNode(ctx, oldNode, newNode, oldState, newState)
 	// Preserve the latest informer object for delete cleanup without
 	// overwriting the last successfully applied node state.
 	c.setLatestInformerNode(netName, newNode)
@@ -340,7 +341,7 @@ func (c *NodeController) reconcileUpdate(handler NodeHandler, oldNode, newNode *
 }
 
 // reconcileDelete handles deletion using cached state.
-func (c *NodeController) reconcileDelete(handler NodeHandler, nodeName, netName string, oldNode *corev1.Node, oldState *NodeAnnotationState) error {
+func (c *NodeController) reconcileDelete(ctx context.Context, handler NodeHandler, nodeName, netName string, oldNode *corev1.Node, oldState *NodeAnnotationState) error {
 	if oldNode == nil {
 		oldNode = c.getLatestInformerNode(netName, nodeName)
 		oldState = c.annotationCache.updateNodeAnnotationState(oldNode, false)
@@ -354,7 +355,7 @@ func (c *NodeController) reconcileDelete(handler NodeHandler, nodeName, netName 
 			},
 		}
 	}
-	if err := handler.ReconcileNode(oldNode, nil, oldState, nil); err != nil {
+	if err := handler.ReconcileNode(ctx, oldNode, nil, oldState, nil); err != nil {
 		return err
 	}
 

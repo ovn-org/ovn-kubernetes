@@ -4,6 +4,7 @@
 package networkconnect
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"reflect"
@@ -155,10 +156,12 @@ func NewController(
 	}
 
 	cncCfg := &controllerutil.ControllerConfig[networkconnectv1.ClusterNetworkConnect]{
-		RateLimiter:    workqueue.DefaultTypedControllerRateLimiter[string](),
-		Informer:       wf.ClusterNetworkConnectInformer().Informer(),
-		Lister:         cncLister.List,
-		Reconcile:      c.reconcileCNC,
+		RateLimiter: workqueue.DefaultTypedControllerRateLimiter[string](),
+		Informer:    wf.ClusterNetworkConnectInformer().Informer(),
+		Lister:      cncLister.List,
+		Reconcile: func(_ context.Context, key string) error {
+			return c.reconcileCNC(key)
+		},
 		ObjNeedsUpdate: cncNeedsUpdate,
 		Threadiness:    1,
 	}
@@ -168,10 +171,12 @@ func NewController(
 	)
 
 	nodeCfg := &controllerutil.ControllerConfig[corev1.Node]{
-		RateLimiter:    workqueue.DefaultTypedControllerRateLimiter[string](),
-		Informer:       wf.NodeCoreInformer().Informer(),
-		Lister:         nodeLister.List,
-		Reconcile:      c.reconcileNode,
+		RateLimiter: workqueue.DefaultTypedControllerRateLimiter[string](),
+		Informer:    wf.NodeCoreInformer().Informer(),
+		Lister:      nodeLister.List,
+		Reconcile: func(_ context.Context, key string) error {
+			return c.reconcileNode(key)
+		},
 		ObjNeedsUpdate: nodeNeedsUpdate,
 		Threadiness:    1,
 	}
@@ -184,7 +189,9 @@ func NewController(
 	// to the queue by NAD Controller
 	nadReconcilerConfig := &controllerutil.ReconcilerConfig{
 		RateLimiter: workqueue.DefaultTypedControllerRateLimiter[string](),
-		Reconcile:   c.syncNAD,
+		Reconcile: func(_ context.Context, key string) error {
+			return c.syncNAD(key)
+		},
 		Threadiness: 1,
 		MaxAttempts: controllerutil.InfiniteAttempts,
 	}
@@ -194,7 +201,9 @@ func NewController(
 	)
 	networkRefReconcilerConfig := &controllerutil.ReconcilerConfig{
 		RateLimiter: workqueue.DefaultTypedControllerRateLimiter[string](),
-		Reconcile:   c.syncNetworkRef,
+		Reconcile: func(_ context.Context, key string) error {
+			return c.syncNetworkRef(key)
+		},
 		Threadiness: 1,
 		MaxAttempts: controllerutil.InfiniteAttempts,
 	}
@@ -214,10 +223,12 @@ func NewController(
 	})
 
 	serviceCfg := &controllerutil.ControllerConfig[corev1.Service]{
-		RateLimiter:    workqueue.DefaultTypedControllerRateLimiter[string](),
-		Informer:       wf.ServiceCoreInformer().Informer(),
-		Lister:         serviceLister.List,
-		Reconcile:      c.reconcileService,
+		RateLimiter: workqueue.DefaultTypedControllerRateLimiter[string](),
+		Informer:    wf.ServiceCoreInformer().Informer(),
+		Lister:      serviceLister.List,
+		Reconcile: func(_ context.Context, key string) error {
+			return c.reconcileService(key)
+		},
 		ObjNeedsUpdate: serviceNeedsUpdate,
 		Threadiness:    1,
 	}

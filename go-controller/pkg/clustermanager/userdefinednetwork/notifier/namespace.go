@@ -4,6 +4,7 @@
 package notifier
 
 import (
+	"context"
 	"errors"
 	"reflect"
 
@@ -57,7 +58,7 @@ func (c *NamespaceNotifier) needUpdate(old, new *corev1.Namespace) bool {
 }
 
 // reconcile notify subscribers with the request namespace key following namespace events.
-func (c *NamespaceNotifier) reconcile(key string) error {
+func (c *NamespaceNotifier) reconcile(_ context.Context, key string) error {
 	var errs []error
 	for _, subscriber := range c.subscribers {
 		if subscriber != nil {

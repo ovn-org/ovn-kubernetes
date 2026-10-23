@@ -6,6 +6,8 @@
 package mocks
 
 import (
+	context "context"
+
 	corev1 "k8s.io/api/core/v1"
 
 	mock "github.com/stretchr/testify/mock"
@@ -133,17 +135,17 @@ func (_m *Interface) PatchNodeStatus(old *corev1.Node, new *corev1.Node) error {
 	return r0
 }
 
-// PatchNodeStatusAnnotations provides a mock function with given fields: oldNode, newNode
-func (_m *Interface) PatchNodeStatusAnnotations(oldNode *corev1.Node, newNode *corev1.Node) error {
-	ret := _m.Called(oldNode, newNode)
+// PatchNodeStatusAnnotations provides a mock function with given fields: ctx, oldNode, newNode
+func (_m *Interface) PatchNodeStatusAnnotations(ctx context.Context, oldNode *corev1.Node, newNode *corev1.Node) error {
+	ret := _m.Called(ctx, oldNode, newNode)
 
 	if len(ret) == 0 {
 		panic("no return value specified for PatchNodeStatusAnnotations")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(*corev1.Node, *corev1.Node) error); ok {
-		r0 = rf(oldNode, newNode)
+	if rf, ok := ret.Get(0).(func(context.Context, *corev1.Node, *corev1.Node) error); ok {
+		r0 = rf(ctx, oldNode, newNode)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -151,17 +153,17 @@ func (_m *Interface) PatchNodeStatusAnnotations(oldNode *corev1.Node, newNode *c
 	return r0
 }
 
-// PatchPodStatusAnnotations provides a mock function with given fields: oldPod, newPod
-func (_m *Interface) PatchPodStatusAnnotations(oldPod *corev1.Pod, newPod *corev1.Pod) error {
-	ret := _m.Called(oldPod, newPod)
+// PatchPodStatusAnnotations provides a mock function with given fields: ctx, oldPod, newPod
+func (_m *Interface) PatchPodStatusAnnotations(ctx context.Context, oldPod *corev1.Pod, newPod *corev1.Pod) error {
+	ret := _m.Called(ctx, oldPod, newPod)
 
 	if len(ret) == 0 {
 		panic("no return value specified for PatchPodStatusAnnotations")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(*corev1.Pod, *corev1.Pod) error); ok {
-		r0 = rf(oldPod, newPod)
+	if rf, ok := ret.Get(0).(func(context.Context, *corev1.Pod, *corev1.Pod) error); ok {
+		r0 = rf(ctx, oldPod, newPod)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -187,17 +189,17 @@ func (_m *Interface) SetAnnotationsOnNamespace(namespaceName string, annotations
 	return r0
 }
 
-// SetAnnotationsOnNode provides a mock function with given fields: nodeName, annotations
-func (_m *Interface) SetAnnotationsOnNode(nodeName string, annotations map[string]interface{}) error {
-	ret := _m.Called(nodeName, annotations)
+// SetAnnotationsOnNode provides a mock function with given fields: ctx, nodeName, annotations
+func (_m *Interface) SetAnnotationsOnNode(ctx context.Context, nodeName string, annotations map[string]interface{}) error {
+	ret := _m.Called(ctx, nodeName, annotations)
 
 	if len(ret) == 0 {
 		panic("no return value specified for SetAnnotationsOnNode")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(string, map[string]interface{}) error); ok {
-		r0 = rf(nodeName, annotations)
+	if rf, ok := ret.Get(0).(func(context.Context, string, map[string]interface{}) error); ok {
+		r0 = rf(ctx, nodeName, annotations)
 	} else {
 		r0 = ret.Error(0)
 	}

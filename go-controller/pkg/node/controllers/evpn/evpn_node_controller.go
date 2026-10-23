@@ -4,6 +4,7 @@
 package evpn
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -151,7 +152,7 @@ func NewController(nodeName string, wf factory.NodeWatchFactory, kube kube.Inter
 	c.podController = controller.NewController("evpn-pod-neighbor-controller",
 		&controller.ControllerConfig[corev1.Pod]{
 			RateLimiter:    workqueue.DefaultTypedControllerRateLimiter[string](),
-			Reconcile:      c.reconcilePod,
+			Reconcile:      func(_ context.Context, key string) error { return c.reconcilePod(key) },
 			ObjNeedsUpdate: c.podNeedsUpdate,
 			Threadiness:    1,
 			Informer:       podInformer.Informer(),
@@ -326,7 +327,7 @@ func (c *Controller) reconcileNodeAddressChange(annotationChanged bool) error {
 // The synthetic keys reconcileVTEPAnnotationChange and
 // reconcileNodeAddressChange trigger reconciliation of unmanaged VTEPs
 // whose annotated IPs are stale or missing.
-func (c *Controller) reconcile(key string) error {
+func (c *Controller) reconcile(_ context.Context, key string) error {
 	switch key {
 	case reconcileVTEPAnnotationChange:
 		// node annotation changed, reset the cached annotation to re-read
@@ -443,7 +444,7 @@ func (c *Controller) ensureDevices(vtep *vtepv1.VTEP, vtepIPv4, vtepIPv6 net.IP)
 	return networks, nil
 }
 
-func (c *Controller) reconcileNAD(key string) error {
+func (c *Controller) reconcileNAD(_ context.Context, key string) error {
 	netInfo := c.networkMgr.GetNetInfoForNADKey(key)
 	c.nadVTEPInfoLock.Lock()
 	defer c.nadVTEPInfoLock.Unlock()

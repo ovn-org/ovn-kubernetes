@@ -4,6 +4,7 @@
 package notifier
 
 import (
+	"context"
 	"errors"
 	"reflect"
 
@@ -95,7 +96,7 @@ func IsRAAccepted(conditions []metav1.Condition) bool {
 }
 
 // reconcile notifies subscribers with the RouteAdvertisements key following RouteAdvertisements events.
-func (c *RouteAdvertisementsNotifier) reconcile(key string) error {
+func (c *RouteAdvertisementsNotifier) reconcile(_ context.Context, key string) error {
 	var errs []error
 	for _, subscriber := range c.subscribers {
 		if subscriber != nil {

@@ -53,7 +53,7 @@ func (m *networkQoSManager) getManagedFields(networkQoS *networkqosapi.NetworkQo
 }
 
 //lint:ignore U1000 generic interfaces throw false-positives
-func (m *networkQoSManager) updateStatus(networkQoS *networkqosapi.NetworkQoS, applyOpts *metav1.ApplyOptions,
+func (m *networkQoSManager) updateStatus(ctx context.Context, networkQoS *networkqosapi.NetworkQoS, applyOpts *metav1.ApplyOptions,
 	applyEmptyOrFailed bool) error {
 	if networkQoS == nil {
 		return nil
@@ -82,14 +82,14 @@ func (m *networkQoSManager) updateStatus(networkQoS *networkqosapi.NetworkQoS, a
 	applyObj := networkqosapply.NetworkQoS(networkQoS.Name, networkQoS.Namespace).
 		WithStatus(applyStatus)
 
-	_, err := m.client.K8sV1alpha1().NetworkQoSes(networkQoS.Namespace).ApplyStatus(context.TODO(), applyObj, *applyOpts)
+	_, err := m.client.K8sV1alpha1().NetworkQoSes(networkQoS.Namespace).ApplyStatus(ctx, applyObj, *applyOpts)
 	return err
 }
 
 //lint:ignore U1000 generic interfaces throw false-positives
-func (m *networkQoSManager) cleanupStatus(networkQoS *networkqosapi.NetworkQoS, applyOpts *metav1.ApplyOptions) error {
+func (m *networkQoSManager) cleanupStatus(ctx context.Context, networkQoS *networkqosapi.NetworkQoS, applyOpts *metav1.ApplyOptions) error {
 	applyObj := networkqosapply.NetworkQoS(networkQoS.Name, networkQoS.Namespace)
 
-	_, err := m.client.K8sV1alpha1().NetworkQoSes(networkQoS.Namespace).ApplyStatus(context.TODO(), applyObj, *applyOpts)
+	_, err := m.client.K8sV1alpha1().NetworkQoSes(networkQoS.Namespace).ApplyStatus(ctx, applyObj, *applyOpts)
 	return err
 }

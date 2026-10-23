@@ -373,7 +373,7 @@ add rule inet ovn-kubernetes udn-isolation ip6 daddr @udn-pod-default-ips-v6 dro
 		Expect(err).NotTo(HaveOccurred())
 		manager = NewUDNHostIsolationManager(true, true, wf.PodCoreInformer(), "node1", nil)
 		Expect(wf.Start()).To(Succeed())
-		Expect(manager.reconcilePod(notReadyPod.Namespace + "/" + notReadyPod.Name)).To(Succeed())
+		Expect(manager.reconcilePod(context.Background(), notReadyPod.Namespace+"/"+notReadyPod.Name)).To(Succeed())
 	})
 
 	Context("updates pod IPs", func() {

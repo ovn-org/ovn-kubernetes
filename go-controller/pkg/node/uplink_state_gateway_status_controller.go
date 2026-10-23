@@ -135,10 +135,12 @@ func NewUplinkStateGatewayStatusController(
 	c.uplinkStateController = controllerutil.NewController(
 		"uplink-state-gateway-status-controller",
 		&controllerutil.ControllerConfig[uplinkv1alpha1.UplinkState]{
-			MaxAttempts:    controllerutil.InfiniteAttempts,
-			Informer:       sharedInformer,
-			Lister:         c.uplinkStateLister.List,
-			Reconcile:      c.reconcileUplinkState,
+			MaxAttempts: controllerutil.InfiniteAttempts,
+			Informer:    sharedInformer,
+			Lister:      c.uplinkStateLister.List,
+			Reconcile: func(_ context.Context, stateName string) error {
+				return c.reconcileUplinkState(stateName)
+			},
 			ObjNeedsUpdate: c.uplinkStateNeedsUpdate,
 			Threadiness:    1,
 		},
@@ -147,7 +149,9 @@ func NewUplinkStateGatewayStatusController(
 		"uplink-state-gateway-status-publisher",
 		&controllerutil.ReconcilerConfig{
 			MaxAttempts: controllerutil.InfiniteAttempts,
-			Reconcile:   c.reconcileGatewayCondition,
+			Reconcile: func(_ context.Context, stateName string) error {
+				return c.reconcileGatewayCondition(stateName)
+			},
 			Threadiness: uplinkGatewayStatusWorkers,
 		},
 	)

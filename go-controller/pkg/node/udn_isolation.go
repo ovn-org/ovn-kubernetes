@@ -662,7 +662,7 @@ func podNeedsUpdate(oldObj, newObj *corev1.Pod) bool {
 		oldObj.Annotations[util.UDNOpenPortsAnnotationName] != newObj.Annotations[util.UDNOpenPortsAnnotationName]
 }
 
-func (m *UDNHostIsolationManager) reconcilePod(key string) error {
+func (m *UDNHostIsolationManager) reconcilePod(_ context.Context, key string) error {
 	namespace, name, err := cache.SplitMetaNamespaceKey(key)
 	if err != nil {
 		klog.Errorf("UDNHostIsolationManager failed to split meta namespace cache key %s for pod: %v", key, err)

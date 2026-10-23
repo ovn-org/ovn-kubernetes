@@ -21,7 +21,7 @@ import (
 // the location configured by the cluster-default-nad option. This allows users
 // to customize the primary UDN attachments with static IPs, and/or MAC address
 // requests, by using the multus-cni `default network` feature.
-func EnsureDefaultNetworkNAD(nadLister nadlisters.NetworkAttachmentDefinitionLister, nadClient nadclientset.Interface) (*nadtypes.NetworkAttachmentDefinition, error) {
+func EnsureDefaultNetworkNAD(ctx context.Context, nadLister nadlisters.NetworkAttachmentDefinitionLister, nadClient nadclientset.Interface) (*nadtypes.NetworkAttachmentDefinition, error) {
 	namespace, name := config.Default.ClusterDefaultNetworkNAD.Namespace, config.Default.ClusterDefaultNetworkNAD.Name
 	nad, err := nadLister.NetworkAttachmentDefinitions(namespace).Get(name)
 	if err != nil && !apierrors.IsNotFound(err) {
@@ -31,7 +31,7 @@ func EnsureDefaultNetworkNAD(nadLister nadlisters.NetworkAttachmentDefinitionLis
 		return nad, nil
 	}
 	return nadClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(namespace).Create(
-		context.Background(),
+		ctx,
 		&nadtypes.NetworkAttachmentDefinition{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      name,

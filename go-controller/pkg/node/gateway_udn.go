@@ -247,15 +247,19 @@ func NewUserDefinedNetworkGateway(netInfo util.NetInfo, node *corev1.Node, nodeI
 		fmt.Sprintf("udn-%s-gateway-reconciler", udng.GetNetworkName()),
 		&controllerutil.ReconcilerConfig{
 			MaxAttempts: controllerutil.InfiniteAttempts,
-			Reconcile:   udng.reconcileGateway,
+			Reconcile: func(_ context.Context, key string) error {
+				return udng.reconcileGateway(key)
+			},
 			Threadiness: 1,
 		},
 	)
 	if netInfo.Uplink() != "" {
 		uplinkStateConfig := &controllerutil.ControllerConfig[uplinkv1alpha1.UplinkState]{
-			MaxAttempts:    controllerutil.InfiniteAttempts,
-			Informer:       uplinkStateInformer.Informer(),
-			Reconcile:      udng.reconcileUplinkState,
+			MaxAttempts: controllerutil.InfiniteAttempts,
+			Informer:    uplinkStateInformer.Informer(),
+			Reconcile: func(_ context.Context, key string) error {
+				return udng.reconcileUplinkState(key)
+			},
 			ObjNeedsUpdate: udng.uplinkStateNeedsUpdate,
 			Threadiness:    1,
 		}

@@ -4,6 +4,7 @@
 package pod
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -74,6 +75,7 @@ func WithMACRegistry(m mac.Register) AllocatorOption {
 // honored, a new set of IPs will be allocated unless reallocateIP is set to
 // false.
 func (allocator *PodAnnotationAllocator) AllocatePodAnnotation(
+	ctx context.Context,
 	ipAllocator subnet.IPAllocator,
 	subnetName, owner string,
 	pod *corev1.Pod,
@@ -86,6 +88,7 @@ func (allocator *PodAnnotationAllocator) AllocatePodAnnotation(
 	error) {
 
 	return allocatePodAnnotation(
+		ctx,
 		allocator.podLister,
 		allocator.kube,
 		ipAllocator,
@@ -102,6 +105,7 @@ func (allocator *PodAnnotationAllocator) AllocatePodAnnotation(
 }
 
 func allocatePodAnnotation(
+	ctx context.Context,
 	podLister listers.PodLister,
 	kube kube.Interface,
 	ipAllocator subnet.IPAllocator,
@@ -124,6 +128,7 @@ func allocatePodAnnotation(
 	allocateToPodWithRollback := func(currentPod *corev1.Pod) (*corev1.Pod, func(), error) {
 		var rollback func()
 		updatedPod, podAnnotation, rollback, err = allocatePodAnnotationWithRollback(
+			ctx,
 			ipAllocator,
 			subnetName, owner,
 			idAllocator,
@@ -140,6 +145,7 @@ func allocatePodAnnotation(
 	}
 
 	err = util.UpdatePodWithRetryOrRollback(
+		ctx,
 		podLister,
 		kube,
 		pod,
@@ -163,6 +169,7 @@ func allocatePodAnnotation(
 // honored, a new set of IPs will be allocated unless reallocateIP is set to
 // false.
 func (allocator *PodAnnotationAllocator) AllocatePodAnnotationWithTunnelID(
+	ctx context.Context,
 	ipAllocator subnet.IPAllocator,
 	subnetName, owner string,
 	idAllocator id.NamedAllocator,
@@ -176,6 +183,7 @@ func (allocator *PodAnnotationAllocator) AllocatePodAnnotationWithTunnelID(
 	error) {
 
 	return allocatePodAnnotationWithTunnelID(
+		ctx,
 		allocator.podLister,
 		allocator.kube,
 		ipAllocator,
@@ -193,6 +201,7 @@ func (allocator *PodAnnotationAllocator) AllocatePodAnnotationWithTunnelID(
 }
 
 func allocatePodAnnotationWithTunnelID(
+	ctx context.Context,
 	podLister listers.PodLister,
 	kube kube.Interface,
 	ipAllocator subnet.IPAllocator,
@@ -213,6 +222,7 @@ func allocatePodAnnotationWithTunnelID(
 	allocateToPodWithRollback := func(currentPod *corev1.Pod) (*corev1.Pod, func(), error) {
 		var rollback func()
 		updatedPod, podAnnotation, rollback, err = allocatePodAnnotationWithRollback(
+			ctx,
 			ipAllocator,
 			subnetName, owner,
 			idAllocator,
@@ -229,6 +239,7 @@ func allocatePodAnnotationWithTunnelID(
 	}
 
 	err = util.UpdatePodWithRetryOrRollback(
+		ctx,
 		podLister,
 		kube,
 		pod,
@@ -330,6 +341,7 @@ func validateIPFamilyMatchesNetwork(netInfo util.NetInfo, ipRequests []string) e
 // implementations. Use an inlined implementation if you want to extract
 // information from it as a side-effect.
 func allocatePodAnnotationWithRollback(
+	ctx context.Context,
 	ipAllocator subnet.IPAllocator,
 	subnetName, owner string,
 	idAllocator id.NamedAllocator,
@@ -458,7 +470,7 @@ func allocatePodAnnotationWithRollback(
 			return
 		}
 		updatedClaim := claimsReconciler.UpdateIPAMClaimStatus(ipamClaim, podAnnotation, pod.Name, err)
-		if reconcileErr := claimsReconciler.Reconcile(ipamClaim, updatedClaim, ipAllocator); reconcileErr != nil {
+		if reconcileErr := claimsReconciler.Reconcile(ctx, ipamClaim, updatedClaim, ipAllocator); reconcileErr != nil {
 			err = errors.Join(err, fmt.Errorf("failed to reconcile IPAM claim %s/%s: %w", ipamClaim.Namespace, ipamClaim.Name, reconcileErr))
 		}
 	}()

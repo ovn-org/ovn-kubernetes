@@ -182,7 +182,7 @@ func ipStringToCloudPrivateIPConfigName(ipString string) (name string) {
 	return
 }
 
-func (eIPC *egressIPClusterController) executeCloudPrivateIPConfigOps(egressIPName string, ops map[string]*cloudPrivateIPConfigOp) error {
+func (eIPC *egressIPClusterController) executeCloudPrivateIPConfigOps(ctx context.Context, egressIPName string, ops map[string]*cloudPrivateIPConfigOp) error {
 	for egressIP, op := range ops {
 		cloudPrivateIPConfigName := ipStringToCloudPrivateIPConfigName(egressIP)
 		cloudPrivateIPConfig, err := eIPC.watchFactory.GetCloudPrivateIPConfig(cloudPrivateIPConfigName)
@@ -197,7 +197,7 @@ func (eIPC *egressIPClusterController) executeCloudPrivateIPConfigOps(egressIPNa
 				return fmt.Errorf("cloud update request failed, CloudPrivateIPConfig: %s is being deleted", cloudPrivateIPConfigName)
 			}
 			cloudPrivateIPConfig.Spec.Node = op.toAdd
-			if _, err := eIPC.kube.UpdateCloudPrivateIPConfig(cloudPrivateIPConfig); err != nil {
+			if _, err := eIPC.kube.UpdateCloudPrivateIPConfig(ctx, cloudPrivateIPConfig); err != nil {
 				eIPRef := corev1.ObjectReference{
 					Kind: "EgressIP",
 					Name: egressIPName,
@@ -230,7 +230,7 @@ func (eIPC *egressIPClusterController) executeCloudPrivateIPConfigOps(egressIPNa
 						eIPC.recorder.Eventf(&eIPRef, corev1.EventTypeWarning, "CloudAssignmentRetry",
 							"egress IP: %s previously failed on deleted node %s (reason: %s), will retry assignment",
 							egressIP, cloudPrivateIPConfig.Status.Node, assignedCondition.Message)
-						if err := eIPC.kube.DeleteCloudPrivateIPConfig(cloudPrivateIPConfigName); err != nil {
+						if err := eIPC.kube.DeleteCloudPrivateIPConfig(ctx, cloudPrivateIPConfigName); err != nil {
 							return fmt.Errorf("failed to delete failed CloudPrivateIPConfig: %s, err: %v", cloudPrivateIPConfigName, err)
 						}
 
@@ -258,7 +258,7 @@ func (eIPC *egressIPClusterController) executeCloudPrivateIPConfigOps(egressIPNa
 					Node: op.toAdd,
 				},
 			}
-			if _, err := eIPC.kube.CreateCloudPrivateIPConfig(&cloudPrivateIPConfig); err != nil {
+			if _, err := eIPC.kube.CreateCloudPrivateIPConfig(ctx, &cloudPrivateIPConfig); err != nil {
 				eIPRef := corev1.ObjectReference{
 					Kind: "EgressIP",
 					Name: egressIPName,
@@ -279,7 +279,7 @@ func (eIPC *egressIPClusterController) executeCloudPrivateIPConfigOps(egressIPNa
 					return fmt.Errorf("cloud deletion request failed for CloudPrivateIPConfig: %s, could not get item, err: %v", cloudPrivateIPConfigName, err)
 				}
 			}
-			if err := eIPC.kube.DeleteCloudPrivateIPConfig(cloudPrivateIPConfigName); err != nil {
+			if err := eIPC.kube.DeleteCloudPrivateIPConfig(ctx, cloudPrivateIPConfigName); err != nil {
 				eIPRef := corev1.ObjectReference{
 					Kind: "EgressIP",
 					Name: egressIPName,
@@ -298,7 +298,7 @@ func (eIPC *egressIPClusterController) executeCloudPrivateIPConfigOps(egressIPNa
 // about an update on the CloudPrivateIPConfig object represented by that egress
 // IP, cloudPrivateIPConfigOp is a helper used to determine that sort of
 // operations from toAssign/toRemove
-func (eIPC *egressIPClusterController) executeCloudPrivateIPConfigChange(egressIPName string, toAssign, toRemove []egressipv1.EgressIPStatusItem) error {
+func (eIPC *egressIPClusterController) executeCloudPrivateIPConfigChange(ctx context.Context, egressIPName string, toAssign, toRemove []egressipv1.EgressIPStatusItem) error {
 	eIPC.pendingCloudPrivateIPConfigsMutex.Lock()
 	defer eIPC.pendingCloudPrivateIPConfigsMutex.Unlock()
 	ops := make(map[string]*cloudPrivateIPConfigOp, len(toAssign)+len(toRemove))
@@ -349,7 +349,7 @@ func (eIPC *egressIPClusterController) executeCloudPrivateIPConfigChange(egressI
 			}
 		}
 	}
-	return eIPC.executeCloudPrivateIPConfigOps(egressIPName, ops)
+	return eIPC.executeCloudPrivateIPConfigOps(ctx, egressIPName, ops)
 }
 
 type egressIPClusterController struct {
@@ -534,7 +534,7 @@ func (eIPC *egressIPClusterController) getSortedEgressData() ([]*egressNode, map
 	return assignableNodes, allAllocations
 }
 
-func (eIPC *egressIPClusterController) initEgressNodeReachability(objs []interface{}) error {
+func (eIPC *egressIPClusterController) initEgressNodeReachability(ctx context.Context, objs []interface{}) error {
 	for _, obj := range objs {
 		node := obj.(*corev1.Node)
 		if err := eIPC.initEgressIPAllocator(node); err != nil {
@@ -546,7 +546,7 @@ func (eIPC *egressIPClusterController) initEgressNodeReachability(objs []interfa
 	// with existing assignments from EgressIP statuses. This prevents duplicate IP
 	// assignments when two EgressIPs have the same IP in their specs but only one has
 	// it assigned in status (e.g., after control-plane restart or during initial sync).
-	egressIPs, err := eIPC.kube.GetEgressIPs()
+	egressIPs, err := eIPC.kube.GetEgressIPs(ctx)
 	if err != nil {
 		return fmt.Errorf("unable to list EgressIPs, err: %v", err)
 	}
@@ -639,6 +639,7 @@ func (eIPC *egressIPClusterController) checkEgressNodesReachability() {
 }
 
 func checkEgressNodesReachabilityIterate(eIPC *egressIPClusterController) {
+	ctx := context.Background()
 	reAddOrDelete := map[string]bool{}
 	eIPC.nodeAllocator.Lock()
 	for _, eNode := range eIPC.nodeAllocator.cache {
@@ -664,7 +665,7 @@ func checkEgressNodesReachabilityIterate(eIPC *egressIPClusterController) {
 		if shouldDelete {
 			metrics.RecordEgressIPUnreachableNode()
 			klog.Warningf("Node: %s is detected as unreachable, deleting it from egress assignment", nodeName)
-			if err := eIPC.deleteEgressNode(nodeName); err != nil {
+			if err := eIPC.deleteEgressNode(ctx, nodeName); err != nil {
 				klog.Errorf("Node: %s is detected as unreachable, but could not re-assign egress IPs, err: %v", nodeName, err)
 			}
 		} else {
@@ -731,9 +732,9 @@ func (eIPC *egressIPClusterController) setNodeEgressReachable(nodeName string, i
 // reconcileSecondaryHostNetworkEIPs is used to reconsider existing assigned EIPs that are assigned to secondary host
 // networks and will send a 'synthetic' reconcile for any EIPs which are hosted by an invalid network which is determined
 // from the nodes host-cidrs annotation
-func (eIPC *egressIPClusterController) reconcileSecondaryHostNetworkEIPs(node *corev1.Node) error {
+func (eIPC *egressIPClusterController) reconcileSecondaryHostNetworkEIPs(ctx context.Context, node *corev1.Node) error {
 	var errorAggregate []error
-	egressIPs, err := eIPC.kube.GetEgressIPs()
+	egressIPs, err := eIPC.kube.GetEgressIPs(ctx)
 	if err != nil {
 		return fmt.Errorf("unable to list EgressIPs, err: %v", err)
 	}
@@ -770,7 +771,7 @@ func (eIPC *egressIPClusterController) reconcileSecondaryHostNetworkEIPs(node *c
 	}
 	eIPC.nodeAllocator.Unlock()
 	for _, egressIP := range reconcileEgressIPs {
-		if err := eIPC.reconcileEgressIP(nil, egressIP); err != nil {
+		if err := eIPC.reconcileEgressIP(ctx, nil, egressIP); err != nil {
 			errorAggregate = append(errorAggregate, fmt.Errorf("re-assignment for EgressIP %s hosted by a "+
 				"secondary host network failed, unable to update object, err: %v", egressIP.Name, err))
 		}
@@ -781,7 +782,7 @@ func (eIPC *egressIPClusterController) reconcileSecondaryHostNetworkEIPs(node *c
 	return nil
 }
 
-func (eIPC *egressIPClusterController) addEgressNode(nodeName string) error {
+func (eIPC *egressIPClusterController) addEgressNode(ctx context.Context, nodeName string) error {
 	var errors []error
 	klog.V(5).Infof("Egress node: %s about to be initialized", nodeName)
 
@@ -789,7 +790,7 @@ func (eIPC *egressIPClusterController) addEgressNode(nodeName string) error {
 	// egress IPs which are missing an assignment. If there are, we need to send a
 	// synthetic update since reconcileEgressIP will then try to assign those IPs to
 	// this node (if possible)
-	egressIPs, err := eIPC.kube.GetEgressIPs()
+	egressIPs, err := eIPC.kube.GetEgressIPs(ctx)
 	if err != nil {
 		return fmt.Errorf("unable to list EgressIPs, err: %v", err)
 	}
@@ -802,7 +803,7 @@ func (eIPC *egressIPClusterController) addEgressNode(nodeName string) error {
 			// implementation will not trigger a watch event for updates on
 			// objects which have no semantic difference, hence: call the
 			// reconciliation function directly.
-			if err := eIPC.reconcileEgressIP(nil, &egressIP); err != nil {
+			if err := eIPC.reconcileEgressIP(ctx, nil, &egressIP); err != nil {
 				errors = append(errors, fmt.Errorf("synthetic update for EgressIP: %s failed, err: %v", egressIP.Name, err))
 			}
 		}
@@ -825,13 +826,13 @@ func (eIPC *egressIPClusterController) deleteNodeForEgress(node *corev1.Node) {
 	eIPC.nodeAllocator.Unlock()
 }
 
-func (eIPC *egressIPClusterController) deleteEgressNode(nodeName string) error {
+func (eIPC *egressIPClusterController) deleteEgressNode(ctx context.Context, nodeName string) error {
 	var errorAggregate []error
 	klog.V(5).Infof("Egress node: %s about to be removed", nodeName)
 	// Since the node has been labelled as "not usable" for egress IP
 	// assignments we need to find all egress IPs which have an assignment to
 	// it, and move them elsewhere.
-	egressIPs, err := eIPC.kube.GetEgressIPs()
+	egressIPs, err := eIPC.kube.GetEgressIPs(ctx)
 	if err != nil {
 		return fmt.Errorf("unable to list EgressIPs, err: %v", err)
 	}
@@ -846,7 +847,7 @@ func (eIPC *egressIPClusterController) deleteEgressNode(nodeName string) error {
 				// workqueue's delta FIFO implementation will not trigger a
 				// watch event for updates on objects which have no semantic
 				// difference, hence: call the reconciliation function directly.
-				if err := eIPC.reconcileEgressIP(nil, &egressIP); err != nil {
+				if err := eIPC.reconcileEgressIP(ctx, nil, &egressIP); err != nil {
 					errorAggregate = append(errorAggregate, fmt.Errorf("re-assignment for EgressIP: %s failed, unable to update object, err: %v", egressIP.Name, err))
 				}
 				break
@@ -928,7 +929,7 @@ func (eIPC *egressIPClusterController) addAllocatorEgressIPAssignments(name stri
 	}
 }
 
-func (eIPC *egressIPClusterController) reconcileEgressIP(old, new *egressipv1.EgressIP) (err error) {
+func (eIPC *egressIPClusterController) reconcileEgressIP(ctx context.Context, old, new *egressipv1.EgressIP) (err error) {
 	// Lock the assignment, this is needed because this function can end up
 	// being called from WatchEgressNodes and WatchEgressIP, i.e: two different
 	// go-routines and we need to make sure the assignment is safe.
@@ -1062,7 +1063,7 @@ func (eIPC *egressIPClusterController) reconcileEgressIP(old, new *egressipv1.Eg
 		// Update the object only on an ADD/UPDATE. If we are processing a
 		// DELETE, new will be nil and we should not update the object.
 		if len(statusToAdd) > 0 || (len(statusToRemove) > 0 && new != nil) {
-			if err := eIPC.patchEgressIP(name, eIPC.generateEgressIPPatches(name, new.Annotations, statusToKeep)...); err != nil {
+			if err := eIPC.patchEgressIP(ctx, name, eIPC.generateEgressIPPatches(name, new.Annotations, statusToKeep)...); err != nil {
 				return err
 			}
 		}
@@ -1090,7 +1091,7 @@ func (eIPC *egressIPClusterController) reconcileEgressIP(old, new *egressipv1.Eg
 			// Update the object only on an ADD/UPDATE. If we are processing a
 			// DELETE, new will be nil and we should not update the object.
 			if new != nil {
-				if err := eIPC.patchEgressIP(name, eIPC.generateEgressIPPatches(name, new.Annotations, statusToKeep)...); err != nil {
+				if err := eIPC.patchEgressIP(ctx, name, eIPC.generateEgressIPPatches(name, new.Annotations, statusToKeep)...); err != nil {
 					return err
 				}
 			}
@@ -1128,7 +1129,7 @@ func (eIPC *egressIPClusterController) reconcileEgressIP(old, new *egressipv1.Eg
 		// Execute CloudPrivateIPConfig changes for assignments which need to be
 		// added/removed, assignments which don't change do not require any
 		// further setup.
-		if err := eIPC.executeCloudPrivateIPConfigChange(name, statusToAdd, statusToRemove); err != nil {
+		if err := eIPC.executeCloudPrivateIPConfigChange(ctx, name, statusToAdd, statusToRemove); err != nil {
 			return err
 		}
 	}
@@ -1144,7 +1145,7 @@ func (eIPC *egressIPClusterController) reconcileEgressIP(old, new *egressipv1.Eg
 // while the cluster manager was down, without the EgressIP status being
 // updated accordingly. This sync ensures the EgressIP status is consistent
 // with the CloudPrivateIPConfig objects currently present.
-func (eIPC *egressIPClusterController) syncCloudPrivateIPConfigs(objs []interface{}) error {
+func (eIPC *egressIPClusterController) syncCloudPrivateIPConfigs(ctx context.Context, objs []interface{}) error {
 	if !util.PlatformTypeIsEgressIPCloudProvider() {
 		return nil
 	}
@@ -1174,7 +1175,7 @@ func (eIPC *egressIPClusterController) syncCloudPrivateIPConfigs(objs []interfac
 		if cloudPrivateIPNotFound {
 			// There could be one or more stale entry found in egress ip object, remove it by patching egressip
 			// object with updated status.
-			err = eIPC.patchEgressIP(egressIP.Name, eIPC.generateEgressIPPatches(egressIP.Name, egressIP.Annotations, updatedStatus)...)
+			err = eIPC.patchEgressIP(ctx, egressIP.Name, eIPC.generateEgressIPPatches(egressIP.Name, egressIP.Annotations, updatedStatus)...)
 			if err != nil {
 				return fmt.Errorf("syncCloudPrivateIPConfigs unable to update EgressIP status: %w", err)
 			}
@@ -1528,7 +1529,7 @@ func (eIPC *egressIPClusterController) validateEgressIPStatus(name string, items
 	return valid, invalid
 }
 
-func (eIPC *egressIPClusterController) reconcileCloudPrivateIPConfig(old, new *ocpcloudnetworkapi.CloudPrivateIPConfig) error {
+func (eIPC *egressIPClusterController) reconcileCloudPrivateIPConfig(ctx context.Context, old, new *ocpcloudnetworkapi.CloudPrivateIPConfig) error {
 	oldCloudPrivateIPConfig, newCloudPrivateIPConfig := &ocpcloudnetworkapi.CloudPrivateIPConfig{}, &ocpcloudnetworkapi.CloudPrivateIPConfig{}
 	shouldDelete, shouldAdd := false, false
 	nodeToDelete := ""
@@ -1610,16 +1611,16 @@ func (eIPC *egressIPClusterController) reconcileCloudPrivateIPConfig(old, new *o
 					updatedStatus = append(updatedStatus, status)
 				}
 			}
-			if err := eIPC.patchEgressIP(egressIP.Name, eIPC.generateEgressIPPatches(egressIP.Name, egressIP.Annotations, updatedStatus)...); err != nil {
+			if err := eIPC.patchEgressIP(ctx, egressIP.Name, eIPC.generateEgressIPPatches(egressIP.Name, egressIP.Annotations, updatedStatus)...); err != nil {
 				return err
 			}
 		}
-		resyncEgressIPs, err := eIPC.removePendingOpsAndGetResyncs(egressIPName, egressIPString)
+		resyncEgressIPs, err := eIPC.removePendingOpsAndGetResyncs(ctx, egressIPName, egressIPString)
 		if err != nil {
 			return err
 		}
 		for _, resyncEgressIP := range resyncEgressIPs {
-			if err := eIPC.reconcileEgressIP(nil, resyncEgressIP); err != nil {
+			if err := eIPC.reconcileEgressIP(ctx, nil, resyncEgressIP); err != nil {
 				return fmt.Errorf("synthetic update for EgressIP: %s failed, err: %v", egressIP.Name, err)
 			}
 		}
@@ -1657,7 +1658,7 @@ func (eIPC *egressIPClusterController) reconcileCloudPrivateIPConfig(old, new *o
 		}
 		if !hasStatus {
 			statusToKeep := append(egressIP.Status.Items, statusItem)
-			if err := eIPC.patchEgressIP(egressIP.Name, eIPC.generateEgressIPPatches(egressIP.Name, egressIP.Annotations, statusToKeep)...); err != nil {
+			if err := eIPC.patchEgressIP(ctx, egressIP.Name, eIPC.generateEgressIPPatches(egressIP.Name, egressIP.Annotations, statusToKeep)...); err != nil {
 				return err
 			}
 		}
@@ -1721,7 +1722,7 @@ func cloudPrivateIPConfigNameToIPString(name string) string {
 // removePendingOps removes the existing pending CloudPrivateIPConfig operations
 // from the cache and returns the EgressIP object which can be re-synced given
 // the new assignment possibilities.
-func (eIPC *egressIPClusterController) removePendingOpsAndGetResyncs(egressIPName, egressIPAddr string) ([]*egressipv1.EgressIP, error) {
+func (eIPC *egressIPClusterController) removePendingOpsAndGetResyncs(ctx context.Context, egressIPName, egressIPAddr string) ([]*egressipv1.EgressIP, error) {
 	eIPC.pendingCloudPrivateIPConfigsMutex.Lock()
 	defer eIPC.pendingCloudPrivateIPConfigsMutex.Unlock()
 	ops, pending := eIPC.pendingCloudPrivateIPConfigsOps[egressIPName]
@@ -1746,7 +1747,7 @@ func (eIPC *egressIPClusterController) removePendingOpsAndGetResyncs(egressIPNam
 	// we process a final deletion for a CloudPrivateIPConfig: have a look
 	// at what other EgressIP objects have something un-assigned, and force
 	// a reconciliation on them by sending a synthetic update.
-	egressIPs, err := eIPC.kube.GetEgressIPs()
+	egressIPs, err := eIPC.kube.GetEgressIPs(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("unable to list EgressIPs, err: %v", err)
 	}
@@ -1799,14 +1800,14 @@ type jsonPatchOperation struct {
 // object update which risks resetting the EgressIP object's fields to the state
 // they had when we started processing the change.
 // 2. Optional, add operation to its metadata.annotations field.
-func (eIPC *egressIPClusterController) patchEgressIP(name string, patches ...jsonPatchOperation) error {
+func (eIPC *egressIPClusterController) patchEgressIP(ctx context.Context, name string, patches ...jsonPatchOperation) error {
 	klog.Infof("Patching status on EgressIP %s: %v", name, patches)
 	op, err := json.Marshal(patches)
 	if err != nil {
 		return fmt.Errorf("error serializing patch operation: %+v, err: %v", patches, err)
 	}
 	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		return eIPC.kube.PatchEgressIP(name, op)
+		return eIPC.kube.PatchEgressIP(ctx, name, op)
 	})
 }
 
@@ -1860,7 +1861,7 @@ func (eIPC *egressIPClusterController) ensureAllocatorEgressIPAssignments(egress
 
 // syncEgressIPMarkAllocator iterates over all existing EgressIPs. It builds a mark cache of existing marks stored on each
 // EgressIP annotation or allocates and adds a new mark to an EgressIP if it doesn't exist.
-func (eIPC *egressIPClusterController) syncEgressIPMarkAllocator(egressIPs []interface{}) error {
+func (eIPC *egressIPClusterController) syncEgressIPMarkAllocator(ctx context.Context, egressIPs []interface{}) error {
 	// Reserve previously assigned marks. Note: the allocator cache is pre-populated with
 	// existing assignments from EgressIP statuses in initEgressNodeReachability, which runs
 	// before this sync function.
@@ -1897,7 +1898,7 @@ func (eIPC *egressIPClusterController) syncEgressIPMarkAllocator(egressIPs []int
 			// Mark range is limited so do not return an error in-order not to block pods attached to the CDN
 			klog.Errorf("Failed to sync mark allocator: unable to allocate for EgressIP %s: %v", egressIP.Name, err)
 		} else {
-			if err = eIPC.patchEgressIP(egressIP.Name, generateMarkPatchOp(mark)); err != nil {
+			if err = eIPC.patchEgressIP(ctx, egressIP.Name, generateMarkPatchOp(mark)); err != nil {
 				releaseMarkFn()
 				return fmt.Errorf("failed to patch EgressIP %s: %v", egressIP.Name, err)
 			}

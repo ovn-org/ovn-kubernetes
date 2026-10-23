@@ -185,7 +185,7 @@ func NewController(
 		c.uplinkStateLister = wf.UplinkStateInformer().Lister()
 	}
 
-	handleError := func(key string, errorstatus error) error {
+	handleError := func(ctx context.Context, key string, errorstatus error) error {
 		ra, err := c.raLister.Get(key)
 		if apierrors.IsNotFound(err) {
 			return nil
@@ -198,7 +198,7 @@ func NewController(
 			)
 		}
 
-		return c.updateRAStatus(ra, false, errorstatus)
+		return c.updateRAStatus(ctx, ra, false, errorstatus)
 	}
 
 	raConfig := &controllerutil.ControllerConfig[ratypes.RouteAdvertisements]{
@@ -235,7 +235,7 @@ func NewController(
 
 	nodeConfig := &controllerutil.ControllerConfig[corev1.Node]{
 		RateLimiter:    workqueue.DefaultTypedControllerRateLimiter[string](),
-		Reconcile:      func(_ string) error { c.raController.ReconcileAll(); return nil },
+		Reconcile:      func(_ context.Context, _ string) error { c.raController.ReconcileAll(); return nil },
 		Threadiness:    1,
 		Informer:       wf.NodeCoreInformer().Informer(),
 		Lister:         wf.NodeCoreInformer().Lister().List,
@@ -246,7 +246,7 @@ func NewController(
 	if util.IsUplinkEnabled() {
 		uplinkStateConfig := &controllerutil.ControllerConfig[uplinkv1alpha1.UplinkState]{
 			RateLimiter:    workqueue.DefaultTypedControllerRateLimiter[string](),
-			Reconcile:      func(_ string) error { c.raController.ReconcileAll(); return nil },
+			Reconcile:      func(_ context.Context, _ string) error { c.raController.ReconcileAll(); return nil },
 			Threadiness:    1,
 			Informer:       wf.UplinkStateInformer().Informer(),
 			Lister:         c.uplinkStateLister.List,
@@ -390,7 +390,7 @@ func (c *Controller) ReconcileNetwork(_ string, old, new util.NetInfo) {
 //
 // The controller processes selected events of RouteAdvertisements,
 // FRRConfigurations, Nodes, EgressIPs, NADs and namespaces.
-func (c *Controller) reconcile(name string) error {
+func (c *Controller) reconcile(ctx context.Context, name string) error {
 	startTime := time.Now()
 	klog.V(5).Infof("Syncing routeadvertisements %q", name)
 	defer func() {
@@ -407,19 +407,19 @@ func (c *Controller) reconcile(name string) error {
 		c.deleteRANetworks(name)
 	}
 
-	hadUpdates, err := c.reconcileRouteAdvertisements(name, ra)
+	hadUpdates, err := c.reconcileRouteAdvertisements(ctx, name, ra)
 	if err != nil && !errors.Is(err, errConfig) && !errors.Is(err, errPending) {
 		return fmt.Errorf("failed to reconcile RouteAdvertisements %q: %w", name, err)
 	}
 
-	return c.updateRAStatus(ra, hadUpdates, err)
+	return c.updateRAStatus(ctx, ra, hadUpdates, err)
 }
 
 // reconcileRouteAdvertisements applies sanitized advertisements and withdraws
 // rejected nodes even when generation cannot produce a complete desired state.
-func (c *Controller) reconcileRouteAdvertisements(name string, ra *ratypes.RouteAdvertisements) (bool, error) {
+func (c *Controller) reconcileRouteAdvertisements(ctx context.Context, name string, ra *ratypes.RouteAdvertisements) (bool, error) {
 	// generate FRRConfigurations
-	frrConfigs, nads, cfgErr := c.generateFRRConfigurations(ra)
+	frrConfigs, nads, cfgErr := c.generateFRRConfigurations(ctx, ra)
 	if cfgErr != nil {
 		cfgErr = fmt.Errorf("failed generating FRRConfigurations for RouteAdvertisements %q: %w", name, cfgErr)
 	}
@@ -428,7 +428,7 @@ func (c *Controller) reconcileRouteAdvertisements(name string, ra *ratypes.Route
 		// The generated state is incomplete. Preserve existing configurations
 		// for other nodes unless upstream input validation also rejects them.
 		unsafeInput := errors.Is(cfgErr, errUnsafeFRRInput)
-		hadUpdates, remaining, err := c.deleteIncompleteVTEPConfigurations(name, incomplete.invalidNodes, unsafeInput)
+		hadUpdates, remaining, err := c.deleteIncompleteVTEPConfigurations(ctx, name, incomplete.invalidNodes, unsafeInput)
 		if err != nil {
 			// Return only operational errors so failed deletions are retried.
 			return hadUpdates, fmt.Errorf("failed cleaning incomplete VTEP configurations for RouteAdvertisements %q: %w", name, err)
@@ -436,7 +436,7 @@ func (c *Controller) reconcileRouteAdvertisements(name string, ra *ratypes.Route
 		// Unsafe input also requires upstream's cleanup of unvalidated
 		// configurations, including those on otherwise valid VTEP nodes.
 		if unsafeInput && remaining == 0 {
-			hadNADUpdates, err := c.updateNADs(name, nil)
+			hadNADUpdates, err := c.updateNADs(ctx, name, nil)
 			if err != nil {
 				return hadUpdates || hadNADUpdates, fmt.Errorf("failed clearing NAD references for RouteAdvertisements %q: %w", name, err)
 			}
@@ -451,7 +451,7 @@ func (c *Controller) reconcileRouteAdvertisements(name string, ra *ratypes.Route
 	if cfgErr != nil && errors.Is(cfgErr, errUnsafeFRRInput) {
 		// FRRConfigurations generated before the input was validated may
 		// carry the rejected value: delete them
-		deleted, remaining, err := c.deleteUnvalidatedFRRConfigurations(name)
+		deleted, remaining, err := c.deleteUnvalidatedFRRConfigurations(ctx, name)
 		if err != nil {
 			// not a configuration error, so that the reconcile is retried
 			return deleted, fmt.Errorf("failed deleting FRRConfigurations for RouteAdvertisements %q rejected with %v: %w", name, cfgErr, err)
@@ -462,7 +462,7 @@ func (c *Controller) reconcileRouteAdvertisements(name string, ra *ratypes.Route
 		// a network stays advertised while its NAD references this
 		// RouteAdvertisements: drop the references once no generated
 		// FRRConfiguration is left for it
-		hadNADUpdates, err := c.updateNADs(name, nil)
+		hadNADUpdates, err := c.updateNADs(ctx, name, nil)
 		if err != nil {
 			return deleted || hadNADUpdates, fmt.Errorf("failed annotating NADs for RouteAdvertisements %q rejected with %v: %w", name, cfgErr, err)
 		}
@@ -475,13 +475,13 @@ func (c *Controller) reconcileRouteAdvertisements(name string, ra *ratypes.Route
 	// update them
 	// VTEP validation errors still apply the sanitized desired state, so a bad
 	// annotation cannot preserve advertisements from the last reconciliation.
-	hadFRRConfigUpdates, err := c.updateFRRConfigurations(name, frrConfigs)
+	hadFRRConfigUpdates, err := c.updateFRRConfigurations(ctx, name, frrConfigs)
 	if err != nil {
 		return false, fmt.Errorf("failed updating FRRConfigurations for RouteAdvertisements %q: %w", name, err)
 	}
 
 	// annotate NADs
-	hadNADUpdates, err := c.updateNADs(name, nads)
+	hadNADUpdates, err := c.updateNADs(ctx, name, nads)
 	if err != nil {
 		return false, fmt.Errorf("failed annotating NADs for RouteAdvertisements %q: %w", name, err)
 	}
@@ -557,7 +557,7 @@ type ipVRFConfig struct {
 
 // generateFRRConfigurations generates FRRConfigurations for the route
 // advertisements. Also returns the selected network NADs.
-func (c *Controller) generateFRRConfigurations(ra *ratypes.RouteAdvertisements) ([]*frrtypes.FRRConfiguration, []*nadtypes.NetworkAttachmentDefinition, error) {
+func (c *Controller) generateFRRConfigurations(ctx context.Context, ra *ratypes.RouteAdvertisements) ([]*frrtypes.FRRConfiguration, []*nadtypes.NetworkAttachmentDefinition, error) {
 	if ra == nil {
 		return nil, nil, nil
 	}
@@ -577,7 +577,7 @@ func (c *Controller) generateFRRConfigurations(ra *ratypes.RouteAdvertisements) 
 
 	// if we are matching on the well known default network label, create an
 	// internal nad for it if it doesn't exist
-	nads, err := c.getSelectedNADs(ra.Spec.NetworkSelectors)
+	nads, err := c.getSelectedNADs(ctx, ra.Spec.NetworkSelectors)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -837,7 +837,7 @@ func (c *Controller) generateFRRConfigurations(ra *ratypes.RouteAdvertisements) 
 		if listErr != nil {
 			return nil, nil, generationError(fmt.Errorf("failed listing existing FRRConfigurations for VTEP conflict detection in RouteAdvertisements %q: %w", ra.Name, listErr))
 		}
-		claims, err := c.vtepClaimsByRA(ra.Name, vtepIPsByNode, existing)
+		claims, err := c.vtepClaimsByRA(ctx, ra.Name, vtepIPsByNode, existing)
 		if err != nil {
 			return nil, nil, generationError(err)
 		}
@@ -1027,7 +1027,7 @@ func (c *Controller) generateFRRConfigurations(ra *ratypes.RouteAdvertisements) 
 // a default-VRF source router. Tenant VRFs share the default-VRF underlay, so
 // their VTEP host prefixes must be checked together. Annotations outside every
 // such RA do not reserve addresses.
-func (c *Controller) vtepClaimsByRA(current string, currentClaims map[string]sets.Set[string], configs []*frrtypes.FRRConfiguration) (map[string]map[string]sets.Set[string], error) {
+func (c *Controller) vtepClaimsByRA(ctx context.Context, current string, currentClaims map[string]sets.Set[string], configs []*frrtypes.FRRConfiguration) (map[string]map[string]sets.Set[string], error) {
 	claims := map[string]map[string]sets.Set[string]{current: currentClaims}
 	ras, err := c.raLister.List(labels.Everything())
 	if err != nil {
@@ -1053,7 +1053,7 @@ func (c *Controller) vtepClaimsByRA(current string, currentClaims map[string]set
 		if err != nil {
 			continue
 		}
-		nads, err := c.getSelectedNADs(ra.Spec.NetworkSelectors)
+		nads, err := c.getSelectedNADs(ctx, ra.Spec.NetworkSelectors)
 		if err != nil {
 			return nil, fmt.Errorf("failed selecting networks for RouteAdvertisements %q during VTEP conflict detection: %w", ra.Name, err)
 		}
@@ -1857,7 +1857,7 @@ func vtepCIDRPrefixSelectors(cidrs []string) []frrtypes.PrefixSelector {
 
 // deleteIncompleteVTEPConfigurations removes rejected generated configurations
 // while retaining other nodes' validated configurations on incomplete generation.
-func (c *Controller) deleteIncompleteVTEPConfigurations(name string, invalidNodes sets.Set[string], unsafeInput bool) (bool, int, error) {
+func (c *Controller) deleteIncompleteVTEPConfigurations(ctx context.Context, name string, invalidNodes sets.Set[string], unsafeInput bool) (bool, int, error) {
 	existing, err := c.frrLister.List(labels.SelectorFromSet(labels.Set{types.OvnRouteAdvertisementsKey: name}))
 	if err != nil {
 		return false, 0, fmt.Errorf("failed listing incomplete VTEP configurations for RouteAdvertisements %q: %w", name, err)
@@ -1874,7 +1874,7 @@ func (c *Controller) deleteIncompleteVTEPConfigurations(name string, invalidNode
 			remaining++
 			continue
 		}
-		err = c.frrClient.ApiV1beta1().FRRConfigurations(config.Namespace).Delete(context.Background(), config.Name, metav1.DeleteOptions{})
+		err = c.frrClient.ApiV1beta1().FRRConfigurations(config.Namespace).Delete(ctx, config.Name, metav1.DeleteOptions{})
 		if err != nil && !apierrors.IsNotFound(err) {
 			errs = append(errs, fmt.Errorf("failed withdrawing FRRConfiguration %s/%s: %w", config.Namespace, config.Name, err))
 			remaining++
@@ -1890,7 +1890,7 @@ func (c *Controller) deleteIncompleteVTEPConfigurations(name string, invalidNode
 // OvnRouteAdvertisementsValidatedKey annotation. Returns whether any was
 // deleted and how many generated FRRConfigurations remain; a failed deletion
 // doesn't stop the others and is reported in the joined error.
-func (c *Controller) deleteUnvalidatedFRRConfigurations(ra string) (deleted bool, remaining int, err error) {
+func (c *Controller) deleteUnvalidatedFRRConfigurations(ctx context.Context, ra string) (deleted bool, remaining int, err error) {
 	selector, err := metav1.LabelSelectorAsSelector(&metav1.LabelSelector{
 		MatchLabels: map[string]string{types.OvnRouteAdvertisementsKey: ra},
 	})
@@ -1910,7 +1910,7 @@ func (c *Controller) deleteUnvalidatedFRRConfigurations(ra string) (deleted bool
 			remaining++
 			continue
 		}
-		err := c.frrClient.ApiV1beta1().FRRConfigurations(frrConfig.Namespace).Delete(context.Background(), frrConfig.Name, metav1.DeleteOptions{})
+		err := c.frrClient.ApiV1beta1().FRRConfigurations(frrConfig.Namespace).Delete(ctx, frrConfig.Name, metav1.DeleteOptions{})
 		if err != nil && !apierrors.IsNotFound(err) {
 			errs = append(errs, fmt.Errorf("failed deleting FRRConfiguration %s/%s: %w", frrConfig.Namespace, frrConfig.Name, err))
 			continue
@@ -1924,7 +1924,7 @@ func (c *Controller) deleteUnvalidatedFRRConfigurations(ra string) (deleted bool
 // RouteAdvertisements. It fetches existing FRRConfigurations by label and
 // indexes them by the annotated key. Then compares this state with desired
 // state and creates, updates or deletes the FRRConfigurations accordingly.
-func (c *Controller) updateFRRConfigurations(ra string, frrConfigurations []*frrtypes.FRRConfiguration) (bool, error) {
+func (c *Controller) updateFRRConfigurations(ctx context.Context, ra string, frrConfigurations []*frrtypes.FRRConfiguration) (bool, error) {
 	var hadUpdates bool
 
 	// fetch the currently existing FRRConfigurations for this
@@ -1958,7 +1958,7 @@ func (c *Controller) updateFRRConfigurations(ra string, frrConfigurations []*frr
 		if len(oldFRRConfigs) == 0 {
 			// does not exist, create
 			_, err := c.frrClient.ApiV1beta1().FRRConfigurations(newFRRConfig.Namespace).Create(
-				context.Background(),
+				ctx,
 				newFRRConfig,
 				metav1.CreateOptions{
 					FieldManager: fieldManager,
@@ -1987,7 +1987,7 @@ func (c *Controller) updateFRRConfigurations(ra string, frrConfigurations []*frr
 		newFRRConfig.Name = oldFRRConfig.Name
 		newFRRConfig.ResourceVersion = oldFRRConfig.ResourceVersion
 		_, err := c.frrClient.ApiV1beta1().FRRConfigurations(newFRRConfig.Namespace).Update(
-			context.Background(),
+			ctx,
 			newFRRConfig,
 			metav1.UpdateOptions{
 				FieldManager: fieldManager,
@@ -2003,7 +2003,7 @@ func (c *Controller) updateFRRConfigurations(ra string, frrConfigurations []*frr
 	for _, obsoleteFRRConfigs := range existing {
 		for _, obsoleteFRRConfig := range obsoleteFRRConfigs {
 			err := c.frrClient.ApiV1beta1().FRRConfigurations(obsoleteFRRConfig.Namespace).Delete(
-				context.Background(),
+				ctx,
 				obsoleteFRRConfig.Name,
 				metav1.DeleteOptions{},
 			)
@@ -2021,7 +2021,7 @@ func (c *Controller) updateFRRConfigurations(ra string, frrConfigurations []*frr
 // RouteAdvertisements. It iterates all the existing NADs updating the
 // annotation accordingly, adding or removing the RouteAdvertisements reference
 // as needed.
-func (c *Controller) updateNADs(ra string, nads []*nadtypes.NetworkAttachmentDefinition) (bool, error) {
+func (c *Controller) updateNADs(ctx context.Context, ra string, nads []*nadtypes.NetworkAttachmentDefinition) (bool, error) {
 	var hadUpdates bool
 	selected := sets.New[string]()
 	for _, nad := range nads {
@@ -2068,6 +2068,7 @@ func (c *Controller) updateNADs(ra string, nads []*nadtypes.NetworkAttachmentDef
 		}
 
 		err = k.SetAnnotationsOnNAD(
+			ctx,
 			nad.Namespace,
 			nad.Name,
 			map[string]string{
@@ -2090,7 +2091,7 @@ func (c *Controller) updateNADs(ra string, nads []*nadtypes.NetworkAttachmentDef
 
 // updateRAStatus update the RouteAdvertisements 'Accepted' status according to
 // the error provided
-func (c *Controller) updateRAStatus(ra *ratypes.RouteAdvertisements, hadUpdates bool, err error) error {
+func (c *Controller) updateRAStatus(ctx context.Context, ra *ratypes.RouteAdvertisements, hadUpdates bool, err error) error {
 	if ra == nil {
 		return nil
 	}
@@ -2147,7 +2148,7 @@ func (c *Controller) updateRAStatus(ra *ratypes.RouteAdvertisements, hadUpdates 
 	}
 
 	_, err = c.raClient.K8sV1().RouteAdvertisements().ApplyStatus(
-		context.Background(),
+		ctx,
 		raapply.RouteAdvertisements(ra.Name).WithStatus(
 			raapply.RouteAdvertisementsStatus().WithStatus(status).WithConditions(
 				util.ConditionToApply(condition),
@@ -2165,14 +2166,14 @@ func (c *Controller) updateRAStatus(ra *ratypes.RouteAdvertisements, hadUpdates 
 	return nil
 }
 
-func (c *Controller) getSelectedNADs(networkSelectors apitypes.NetworkSelectors) ([]*nadtypes.NetworkAttachmentDefinition, error) {
+func (c *Controller) getSelectedNADs(ctx context.Context, networkSelectors apitypes.NetworkSelectors) ([]*nadtypes.NetworkAttachmentDefinition, error) {
 	var selected []*nadtypes.NetworkAttachmentDefinition
 	for _, networkSelector := range networkSelectors {
 		switch networkSelector.NetworkSelectionType {
 		case apitypes.DefaultNetwork:
 			// if we are selecting the default networkdefault network label,
 			// make sure a NAD exists for it
-			nad, err := util.EnsureDefaultNetworkNAD(c.nadLister, c.nadClient)
+			nad, err := util.EnsureDefaultNetworkNAD(ctx, c.nadLister, c.nadClient)
 			if err != nil {
 				return nil, fmt.Errorf("failed to ensure default network NAD: %w", err)
 			}
@@ -2373,7 +2374,7 @@ func nsNeedsUpdate(oldObj, newObj *corev1.Namespace) bool {
 	return oldObj != nil && newObj != nil && !reflect.DeepEqual(oldObj.Labels, newObj.Labels)
 }
 
-func (c *Controller) reconcileFRRConfiguration(key string) error {
+func (c *Controller) reconcileFRRConfiguration(_ context.Context, key string) error {
 	namespace, name, err := cache.SplitMetaNamespaceKey(key)
 	if err != nil {
 		klog.Errorf("Failed spliting FRFConfiguration reconcile key %q: %v", key, err)
@@ -2400,7 +2401,7 @@ func (c *Controller) reconcileFRRConfiguration(key string) error {
 	return nil
 }
 
-func (c *Controller) reconcileNAD(key string) error {
+func (c *Controller) reconcileNAD(_ context.Context, key string) error {
 	namespace, name, err := cache.SplitMetaNamespaceKey(key)
 	if err != nil {
 		klog.Errorf("Failed spliting NAD reconcile key %q: %v", key, err)
@@ -2451,7 +2452,7 @@ func isUnnumberedNeighbor(neighbor frrtypes.Neighbor) bool {
 	return neighbor.Address == "" && neighbor.Interface != ""
 }
 
-func (c *Controller) reconcileEgressIPs(string) error {
+func (c *Controller) reconcileEgressIPs(_ context.Context, _ string) error {
 	// reconcile RAs that advertise EIPs
 	ras, err := c.raLister.List(labels.Everything())
 	if err != nil {

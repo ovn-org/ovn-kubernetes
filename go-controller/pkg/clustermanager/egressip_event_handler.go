@@ -4,6 +4,7 @@
 package clustermanager
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 
@@ -25,7 +26,7 @@ type egressIPClusterControllerEventHandler struct {
 	objretry.DefaultEventHandler
 	objType  reflect.Type
 	eIPC     *egressIPClusterController
-	syncFunc func([]interface{}) error
+	syncFunc func(context.Context, []interface{}) error
 }
 
 func (h *egressIPClusterControllerEventHandler) FilterOutResource(_ interface{}) bool {
@@ -36,7 +37,7 @@ func (h *egressIPClusterControllerEventHandler) FilterOutResource(_ interface{})
 
 // AddResource adds the specified object to the cluster according to its type and
 // returns the error, if any, yielded during object creation.
-func (h *egressIPClusterControllerEventHandler) AddResource(obj interface{}, _ bool) error {
+func (h *egressIPClusterControllerEventHandler) AddResource(ctx context.Context, obj interface{}, _ bool) error {
 	switch h.objType {
 	case factory.EgressNodeType:
 		node := obj.(*corev1.Node)
@@ -76,16 +77,16 @@ func (h *egressIPClusterControllerEventHandler) AddResource(obj interface{}, _ b
 		isReachable := h.eIPC.isEgressNodeReachable(node)
 		if hasEgressLabel && isReachable && isReady {
 			h.eIPC.setNodeEgressReachable(node.Name, true)
-			if err := h.eIPC.addEgressNode(node.Name); err != nil {
+			if err := h.eIPC.addEgressNode(ctx, node.Name); err != nil {
 				return err
 			}
 		}
 	case factory.EgressIPType:
 		eIP := obj.(*egressipv1.EgressIP)
-		return h.eIPC.reconcileEgressIP(nil, eIP)
+		return h.eIPC.reconcileEgressIP(ctx, nil, eIP)
 	case factory.CloudPrivateIPConfigType:
 		cloudPrivateIPConfig := obj.(*ocpcloudnetworkapi.CloudPrivateIPConfig)
-		return h.eIPC.reconcileCloudPrivateIPConfig(nil, cloudPrivateIPConfig)
+		return h.eIPC.reconcileCloudPrivateIPConfig(ctx, nil, cloudPrivateIPConfig)
 	default:
 		return fmt.Errorf("no add function for object type %s", h.objType)
 	}
@@ -95,12 +96,12 @@ func (h *egressIPClusterControllerEventHandler) AddResource(obj interface{}, _ b
 // UpdateResource updates the specified object in the cluster to its version in newObj according
 // to its type and returns the error, if any, yielded during the object update.
 // The inRetryCache boolean argument is to indicate if the given resource is in the retryCache or not.
-func (h *egressIPClusterControllerEventHandler) UpdateResource(oldObj, newObj interface{}, inRetryCache bool) error {
+func (h *egressIPClusterControllerEventHandler) UpdateResource(ctx context.Context, oldObj, newObj interface{}, inRetryCache bool) error {
 	switch h.objType {
 	case factory.EgressIPType:
 		oldEIP := oldObj.(*egressipv1.EgressIP)
 		newEIP := newObj.(*egressipv1.EgressIP)
-		return h.eIPC.reconcileEgressIP(oldEIP, newEIP)
+		return h.eIPC.reconcileEgressIP(ctx, oldEIP, newEIP)
 	case factory.EgressNodeType:
 		oldNode := oldObj.(*corev1.Node)
 		newNode := newObj.(*corev1.Node)
@@ -161,7 +162,7 @@ func (h *egressIPClusterControllerEventHandler) UpdateResource(oldObj, newObj in
 			klog.Infof("Node: %s is no longer assignable (host-cidrs annotation missing or invalid), "+
 				"deleting it from egress assignment", newNode.Name)
 			h.eIPC.setNodeEgressReady(newNode.Name, h.eIPC.isEgressNodeReady(newNode))
-			if err := h.eIPC.deleteEgressNode(newNode.Name); err != nil {
+			if err := h.eIPC.deleteEgressNode(ctx, newNode.Name); err != nil {
 				return fmt.Errorf("failed to delete egress assignments for node %s: %w", newNode.Name, err)
 			}
 			return nil
@@ -169,7 +170,7 @@ func (h *egressIPClusterControllerEventHandler) UpdateResource(oldObj, newObj in
 
 		if oldHadEgressLabel && !newHasEgressLabel {
 			klog.Infof("Node: %s has been un-labeled, deleting it from egress assignment", newNode.Name)
-			return h.eIPC.deleteEgressNode(oldNode.Name)
+			return h.eIPC.deleteEgressNode(ctx, oldNode.Name)
 		}
 		isOldReady := h.eIPC.isEgressNodeReady(oldNode)
 		isNewReady := h.eIPC.isEgressNodeReady(newNode)
@@ -181,7 +182,7 @@ func (h *egressIPClusterControllerEventHandler) UpdateResource(oldObj, newObj in
 			klog.Infof("Node: %s has been labeled, adding it for egress assignment", newNode.Name)
 			if isNewReady && isNewReachable {
 				h.eIPC.setNodeEgressReachable(newNode.Name, isNewReachable)
-				if err := h.eIPC.addEgressNode(newNode.Name); err != nil {
+				if err := h.eIPC.addEgressNode(ctx, newNode.Name); err != nil {
 					return err
 				}
 			} else {
@@ -195,7 +196,7 @@ func (h *egressIPClusterControllerEventHandler) UpdateResource(oldObj, newObj in
 		}
 		if !isNewReady {
 			klog.Warningf("Node: %s is not ready, deleting it from egress assignment", newNode.Name)
-			if err := h.eIPC.deleteEgressNode(newNode.Name); err != nil {
+			if err := h.eIPC.deleteEgressNode(ctx, newNode.Name); err != nil {
 				return err
 			}
 		} else if isNewReady && isNewReachable {
@@ -211,13 +212,13 @@ func (h *egressIPClusterControllerEventHandler) UpdateResource(oldObj, newObj in
 				klog.Infof("Node: %s is ready and reachable, adding it for egress assignment", newNode.Name)
 			}
 			h.eIPC.setNodeEgressReachable(newNode.Name, isNewReachable)
-			if err := h.eIPC.addEgressNode(newNode.Name); err != nil {
+			if err := h.eIPC.addEgressNode(ctx, newNode.Name); err != nil {
 				return err
 			}
 		}
 		if isHostCIDRsAltered {
 			// we only need to consider EIPs that are assigned to networks that aren't managed by OVN
-			if err := h.eIPC.reconcileSecondaryHostNetworkEIPs(newNode); err != nil {
+			if err := h.eIPC.reconcileSecondaryHostNetworkEIPs(ctx, newNode); err != nil {
 				return fmt.Errorf("failed to reconsider egress IPs that are secondary host networks: %v", err)
 			}
 		}
@@ -225,7 +226,7 @@ func (h *egressIPClusterControllerEventHandler) UpdateResource(oldObj, newObj in
 	case factory.CloudPrivateIPConfigType:
 		oldCloudPrivateIPConfig := oldObj.(*ocpcloudnetworkapi.CloudPrivateIPConfig)
 		newCloudPrivateIPConfig := newObj.(*ocpcloudnetworkapi.CloudPrivateIPConfig)
-		return h.eIPC.reconcileCloudPrivateIPConfig(oldCloudPrivateIPConfig, newCloudPrivateIPConfig)
+		return h.eIPC.reconcileCloudPrivateIPConfig(ctx, oldCloudPrivateIPConfig, newCloudPrivateIPConfig)
 	default:
 		return fmt.Errorf("no update function for object type %s", h.objType)
 	}
@@ -233,11 +234,11 @@ func (h *egressIPClusterControllerEventHandler) UpdateResource(oldObj, newObj in
 
 // DeleteResource deletes the object from the cluster according to the delete logic of its resource type.
 // cachedObj is the internal cache entry for this object, used for now for pods and network policies.
-func (h *egressIPClusterControllerEventHandler) DeleteResource(obj, _ interface{}) error {
+func (h *egressIPClusterControllerEventHandler) DeleteResource(ctx context.Context, obj, _ interface{}) error {
 	switch h.objType {
 	case factory.EgressIPType:
 		eIP := obj.(*egressipv1.EgressIP)
-		return h.eIPC.reconcileEgressIP(eIP, nil)
+		return h.eIPC.reconcileEgressIP(ctx, eIP, nil)
 	case factory.EgressNodeType:
 		node := obj.(*corev1.Node)
 		// EgressIP is not supported on hybrid overlay nodes
@@ -249,21 +250,21 @@ func (h *egressIPClusterControllerEventHandler) DeleteResource(obj, _ interface{
 		nodeLabels := node.GetLabels()
 		_, hasEgressLabel := nodeLabels[nodeEgressLabel]
 		if hasEgressLabel {
-			if err := h.eIPC.deleteEgressNode(node.Name); err != nil {
+			if err := h.eIPC.deleteEgressNode(ctx, node.Name); err != nil {
 				return err
 			}
 		}
 		return nil
 	case factory.CloudPrivateIPConfigType:
 		cloudPrivateIPConfig := obj.(*ocpcloudnetworkapi.CloudPrivateIPConfig)
-		return h.eIPC.reconcileCloudPrivateIPConfig(cloudPrivateIPConfig, nil)
+		return h.eIPC.reconcileCloudPrivateIPConfig(ctx, cloudPrivateIPConfig, nil)
 	default:
 		return fmt.Errorf("no delete function for object type %s", h.objType)
 	}
 }
 
-func (h *egressIPClusterControllerEventHandler) SyncFunc(objs []interface{}) error {
-	var syncFunc func([]interface{}) error
+func (h *egressIPClusterControllerEventHandler) SyncFunc(ctx context.Context, objs []interface{}) error {
+	var syncFunc func(context.Context, []interface{}) error
 
 	if h.syncFunc != nil {
 		// syncFunc was provided explicitly
@@ -284,7 +285,7 @@ func (h *egressIPClusterControllerEventHandler) SyncFunc(objs []interface{}) err
 	if syncFunc == nil {
 		return nil
 	}
-	return syncFunc(objs)
+	return syncFunc(ctx, objs)
 }
 
 // getResourceFromInformerCache returns the latest state of the object from the informers cache

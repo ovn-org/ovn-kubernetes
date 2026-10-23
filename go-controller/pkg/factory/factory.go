@@ -1342,7 +1342,7 @@ func getObjectMeta(objType reflect.Type, obj interface{}) (*metav1.ObjectMeta, e
 	return nil, fmt.Errorf("cannot get ObjectMeta from type %v", objType)
 }
 
-type AddHandlerFuncType func(namespace string, sel labels.Selector, funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error)
+type AddHandlerFuncType func(namespace string, sel labels.Selector, funcs cache.ResourceEventHandler, processExisting func(context.Context, []interface{}) error) (*Handler, error)
 
 // GetHandlerPriority returns the priority of each objType's handler
 // Priority of the handler is what determine which handler would get an event first
@@ -1372,69 +1372,69 @@ func (wf *WatchFactory) GetResourceHandlerFunc(objType reflect.Type) (AddHandler
 	priority := wf.GetHandlerPriority(objType)
 	switch objType {
 	case NamespaceType:
-		return func(_ string, _ labels.Selector, funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
+		return func(_ string, _ labels.Selector, funcs cache.ResourceEventHandler, processExisting func(context.Context, []interface{}) error) (*Handler, error) {
 			return wf.AddNamespaceHandler(funcs, processExisting)
 		}, nil
 
 	case PolicyType:
-		return func(_ string, _ labels.Selector, funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
+		return func(_ string, _ labels.Selector, funcs cache.ResourceEventHandler, processExisting func(context.Context, []interface{}) error) (*Handler, error) {
 			return wf.AddPolicyHandler(funcs, processExisting)
 		}, nil
 
 	case MultiNetworkPolicyType:
-		return func(_ string, _ labels.Selector, funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
+		return func(_ string, _ labels.Selector, funcs cache.ResourceEventHandler, processExisting func(context.Context, []interface{}) error) (*Handler, error) {
 			return wf.AddMultiNetworkPolicyHandler(funcs, processExisting)
 		}, nil
 
 	case NodeType, EgressNodeType:
-		return func(_ string, _ labels.Selector, funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
+		return func(_ string, _ labels.Selector, funcs cache.ResourceEventHandler, processExisting func(context.Context, []interface{}) error) (*Handler, error) {
 			return wf.AddNodeHandler(funcs, processExisting, priority)
 		}, nil
 
 	case ServiceForGatewayType, ServiceForFakeNodePortWatcherType:
-		return func(namespace string, _ labels.Selector, funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
+		return func(namespace string, _ labels.Selector, funcs cache.ResourceEventHandler, processExisting func(context.Context, []interface{}) error) (*Handler, error) {
 			return wf.AddFilteredServiceHandler(namespace, funcs, processExisting)
 		}, nil
 
 	case LocalPodSelectorType, PodType, EgressIPPodType:
-		return func(namespace string, sel labels.Selector, funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
+		return func(namespace string, sel labels.Selector, funcs cache.ResourceEventHandler, processExisting func(context.Context, []interface{}) error) (*Handler, error) {
 			return wf.AddFilteredPodHandler(namespace, sel, funcs, processExisting, priority)
 		}, nil
 
 	case EgressIPNamespaceType:
-		return func(namespace string, sel labels.Selector, funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
+		return func(namespace string, sel labels.Selector, funcs cache.ResourceEventHandler, processExisting func(context.Context, []interface{}) error) (*Handler, error) {
 			return wf.AddFilteredNamespaceHandler(namespace, sel, funcs, processExisting, priority)
 		}, nil
 
 	case EgressFirewallType:
-		return func(_ string, _ labels.Selector, funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
+		return func(_ string, _ labels.Selector, funcs cache.ResourceEventHandler, processExisting func(context.Context, []interface{}) error) (*Handler, error) {
 			return wf.AddEgressFirewallHandler(funcs, processExisting)
 		}, nil
 
 	case EgressIPType:
-		return func(_ string, _ labels.Selector, funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
+		return func(_ string, _ labels.Selector, funcs cache.ResourceEventHandler, processExisting func(context.Context, []interface{}) error) (*Handler, error) {
 			return wf.AddEgressIPHandler(funcs, processExisting)
 		}, nil
 
 	case CloudPrivateIPConfigType:
-		return func(_ string, _ labels.Selector, funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
+		return func(_ string, _ labels.Selector, funcs cache.ResourceEventHandler, processExisting func(context.Context, []interface{}) error) (*Handler, error) {
 			return wf.AddCloudPrivateIPConfigHandler(funcs, processExisting)
 		}, nil
 
 	case EndpointSliceForStaleConntrackRemovalType, EndpointSliceForGatewayType:
-		return func(namespace string, sel labels.Selector, funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
+		return func(namespace string, sel labels.Selector, funcs cache.ResourceEventHandler, processExisting func(context.Context, []interface{}) error) (*Handler, error) {
 			return wf.AddFilteredEndpointSliceHandler(namespace, sel, funcs, processExisting)
 		}, nil
 
 	case IPAMClaimsType:
-		return func(_ string, _ labels.Selector, funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
+		return func(_ string, _ labels.Selector, funcs cache.ResourceEventHandler, processExisting func(context.Context, []interface{}) error) (*Handler, error) {
 			return wf.AddIPAMClaimsHandler(funcs, processExisting)
 		}, nil
 	}
 	return nil, fmt.Errorf("cannot get ObjectMeta from type %v", objType)
 }
 
-func (wf *WatchFactory) addHandler(objType reflect.Type, namespace string, sel labels.Selector, funcs cache.ResourceEventHandler, processExisting func([]interface{}) error, priority int) (*Handler, error) {
+func (wf *WatchFactory) addHandler(objType reflect.Type, namespace string, sel labels.Selector, funcs cache.ResourceEventHandler, processExisting func(context.Context, []interface{}) error, priority int) (*Handler, error) {
 	inf, ok := wf.informers[objType]
 	if !ok {
 		klog.Fatalf("Tried to add handler of unknown object type %v", objType)
@@ -1481,7 +1481,9 @@ func (wf *WatchFactory) addHandler(objType reflect.Type, namespace string, sel l
 		// after a restart or whatever. We will wrap it with retries to ensure it succeeds.
 		// Being so, processExisting is expected to be idem-potent!
 		err := utilwait.PollUntilContextTimeout(context.Background(), 500*time.Millisecond, 60*time.Second, true, func(_ context.Context) (bool, error) {
-			if err := processExisting(items); err != nil {
+			// Each attempt gets a fresh context: the poll deadline bounds how long
+			// we keep retrying, it must not cancel a sync that is already in flight.
+			if err := processExisting(context.Background(), items); err != nil {
 				klog.Errorf("Failed (will retry) while processing existing %v items: %v", objType, err)
 				return false, nil
 			}
@@ -1507,12 +1509,12 @@ func (wf *WatchFactory) removeHandler(objType reflect.Type, handler *Handler) {
 }
 
 // AddPodHandler adds a handler function that will be executed on Pod object changes
-func (wf *WatchFactory) AddPodHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
+func (wf *WatchFactory) AddPodHandler(handlerFuncs cache.ResourceEventHandler, processExisting func(context.Context, []interface{}) error) (*Handler, error) {
 	return wf.addHandler(PodType, "", nil, handlerFuncs, processExisting, defaultHandlerPriority)
 }
 
 // AddFilteredPodHandler adds a handler function that will be executed when Pod objects that match the given filters change
-func (wf *WatchFactory) AddFilteredPodHandler(namespace string, sel labels.Selector, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error, priority int) (*Handler, error) {
+func (wf *WatchFactory) AddFilteredPodHandler(namespace string, sel labels.Selector, handlerFuncs cache.ResourceEventHandler, processExisting func(context.Context, []interface{}) error, priority int) (*Handler, error) {
 	return wf.addHandler(PodType, namespace, sel, handlerFuncs, processExisting, priority)
 }
 
@@ -1527,17 +1529,17 @@ func (wf *WatchFactory) RemoveIPAMClaimsHandler(handler *Handler) {
 }
 
 // AddIPAMClaimsHandler adds a handler function that will be executed on AddPersistentIPsobject changes
-func (wf *WatchFactory) AddIPAMClaimsHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
+func (wf *WatchFactory) AddIPAMClaimsHandler(handlerFuncs cache.ResourceEventHandler, processExisting func(context.Context, []interface{}) error) (*Handler, error) {
 	return wf.addHandler(IPAMClaimsType, "", nil, handlerFuncs, processExisting, defaultHandlerPriority)
 }
 
 // AddServiceHandler adds a handler function that will be executed on Service object changes
-func (wf *WatchFactory) AddServiceHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
+func (wf *WatchFactory) AddServiceHandler(handlerFuncs cache.ResourceEventHandler, processExisting func(context.Context, []interface{}) error) (*Handler, error) {
 	return wf.addHandler(ServiceType, "", nil, handlerFuncs, processExisting, defaultHandlerPriority)
 }
 
 // AddFilteredServiceHandler adds a handler function that will be executed on all Service object changes for a specific namespace
-func (wf *WatchFactory) AddFilteredServiceHandler(namespace string, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
+func (wf *WatchFactory) AddFilteredServiceHandler(namespace string, handlerFuncs cache.ResourceEventHandler, processExisting func(context.Context, []interface{}) error) (*Handler, error) {
 	return wf.addHandler(ServiceType, namespace, nil, handlerFuncs, processExisting, defaultHandlerPriority)
 }
 
@@ -1547,7 +1549,7 @@ func (wf *WatchFactory) RemoveServiceHandler(handler *Handler) {
 }
 
 // AddFilteredEndpointSliceHandler adds a handler function that will be executed on EndpointSlice object changes
-func (wf *WatchFactory) AddFilteredEndpointSliceHandler(namespace string, sel labels.Selector, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
+func (wf *WatchFactory) AddFilteredEndpointSliceHandler(namespace string, sel labels.Selector, handlerFuncs cache.ResourceEventHandler, processExisting func(context.Context, []interface{}) error) (*Handler, error) {
 	return wf.addHandler(EndpointSliceType, namespace, sel, handlerFuncs, processExisting, defaultHandlerPriority)
 }
 
@@ -1557,7 +1559,7 @@ func (wf *WatchFactory) RemoveEndpointSliceHandler(handler *Handler) {
 }
 
 // AddPolicyHandler adds a handler function that will be executed on NetworkPolicy object changes
-func (wf *WatchFactory) AddPolicyHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
+func (wf *WatchFactory) AddPolicyHandler(handlerFuncs cache.ResourceEventHandler, processExisting func(context.Context, []interface{}) error) (*Handler, error) {
 	return wf.addHandler(PolicyType, "", nil, handlerFuncs, processExisting, defaultHandlerPriority)
 }
 
@@ -1567,7 +1569,7 @@ func (wf *WatchFactory) RemovePolicyHandler(handler *Handler) {
 }
 
 // AddEgressFirewallHandler adds a handler function that will be executed on EgressFirewall object changes
-func (wf *WatchFactory) AddEgressFirewallHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
+func (wf *WatchFactory) AddEgressFirewallHandler(handlerFuncs cache.ResourceEventHandler, processExisting func(context.Context, []interface{}) error) (*Handler, error) {
 	return wf.addHandler(EgressFirewallType, "", nil, handlerFuncs, processExisting, defaultHandlerPriority)
 }
 
@@ -1603,7 +1605,7 @@ func (wf *WatchFactory) RemoveNetworkQoSHandler(handler *Handler) {
 }
 
 // AddNetworkAttachmentDefinitionHandler adds a handler function that will be executed on NetworkAttachmentDefinition object changes
-func (wf *WatchFactory) AddNetworkAttachmentDefinitionHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
+func (wf *WatchFactory) AddNetworkAttachmentDefinitionHandler(handlerFuncs cache.ResourceEventHandler, processExisting func(context.Context, []interface{}) error) (*Handler, error) {
 	return wf.addHandler(NetworkAttachmentDefinitionType, "", nil, handlerFuncs, processExisting, defaultHandlerPriority)
 }
 
@@ -1613,7 +1615,7 @@ func (wf *WatchFactory) RemoveNetworkAttachmentDefinitionHandler(handler *Handle
 }
 
 // AddEgressIPHandler adds a handler function that will be executed on EgressIP object changes
-func (wf *WatchFactory) AddEgressIPHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
+func (wf *WatchFactory) AddEgressIPHandler(handlerFuncs cache.ResourceEventHandler, processExisting func(context.Context, []interface{}) error) (*Handler, error) {
 	return wf.addHandler(EgressIPType, "", nil, handlerFuncs, processExisting, defaultHandlerPriority)
 }
 
@@ -1623,7 +1625,7 @@ func (wf *WatchFactory) RemoveEgressIPHandler(handler *Handler) {
 }
 
 // AddCloudPrivateIPConfigHandler adds a handler function that will be executed on CloudPrivateIPConfig object changes
-func (wf *WatchFactory) AddCloudPrivateIPConfigHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
+func (wf *WatchFactory) AddCloudPrivateIPConfigHandler(handlerFuncs cache.ResourceEventHandler, processExisting func(context.Context, []interface{}) error) (*Handler, error) {
 	return wf.addHandler(CloudPrivateIPConfigType, "", nil, handlerFuncs, processExisting, defaultHandlerPriority)
 }
 
@@ -1633,7 +1635,7 @@ func (wf *WatchFactory) RemoveCloudPrivateIPConfigHandler(handler *Handler) {
 }
 
 // AddMultiNetworkPolicyHandler adds a handler function that will be executed on MultiNetworkPolicy object changes
-func (wf *WatchFactory) AddMultiNetworkPolicyHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
+func (wf *WatchFactory) AddMultiNetworkPolicyHandler(handlerFuncs cache.ResourceEventHandler, processExisting func(context.Context, []interface{}) error) (*Handler, error) {
 	return wf.addHandler(MultiNetworkPolicyType, "", nil, handlerFuncs, processExisting, defaultHandlerPriority)
 }
 
@@ -1643,12 +1645,12 @@ func (wf *WatchFactory) RemoveMultiNetworkPolicyHandler(handler *Handler) {
 }
 
 // AddNamespaceHandler adds a handler function that will be executed on Namespace object changes
-func (wf *WatchFactory) AddNamespaceHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
+func (wf *WatchFactory) AddNamespaceHandler(handlerFuncs cache.ResourceEventHandler, processExisting func(context.Context, []interface{}) error) (*Handler, error) {
 	return wf.addHandler(NamespaceType, "", nil, handlerFuncs, processExisting, defaultHandlerPriority)
 }
 
 // AddFilteredNamespaceHandler adds a handler function that will be executed when Namespace objects that match the given filters change
-func (wf *WatchFactory) AddFilteredNamespaceHandler(namespace string, sel labels.Selector, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error, priority int) (*Handler, error) {
+func (wf *WatchFactory) AddFilteredNamespaceHandler(namespace string, sel labels.Selector, handlerFuncs cache.ResourceEventHandler, processExisting func(context.Context, []interface{}) error, priority int) (*Handler, error) {
 	return wf.addHandler(NamespaceType, namespace, sel, handlerFuncs, processExisting, priority)
 }
 
@@ -1658,12 +1660,12 @@ func (wf *WatchFactory) RemoveNamespaceHandler(handler *Handler) {
 }
 
 // AddNodeHandler adds a handler function that will be executed on Node object changes
-func (wf *WatchFactory) AddNodeHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error, priority int) (*Handler, error) {
+func (wf *WatchFactory) AddNodeHandler(handlerFuncs cache.ResourceEventHandler, processExisting func(context.Context, []interface{}) error, priority int) (*Handler, error) {
 	return wf.addHandler(NodeType, "", nil, handlerFuncs, processExisting, priority)
 }
 
 // AddFilteredNodeHandler dds a handler function that will be executed when Node objects that match the given label selector
-func (wf *WatchFactory) AddFilteredNodeHandler(sel labels.Selector, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
+func (wf *WatchFactory) AddFilteredNodeHandler(sel labels.Selector, handlerFuncs cache.ResourceEventHandler, processExisting func(context.Context, []interface{}) error) (*Handler, error) {
 	return wf.addHandler(NodeType, "", sel, handlerFuncs, processExisting, defaultHandlerPriority)
 }
 

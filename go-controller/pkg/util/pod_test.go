@@ -4,6 +4,7 @@
 package util
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -20,6 +21,14 @@ import (
 	kubemocks "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube/mocks"
 	v1mocks "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/client-go/listers/core/v1"
 )
+
+// podTestCtxKey tags a test context so mock expectations can assert the caller's
+// own context reaches the API call rather than a fresh root.
+type podTestCtxKey struct{}
+
+func newPodTestCtx(name string) context.Context {
+	return context.WithValue(context.Background(), podTestCtxKey{}, name)
+}
 
 func TestIsPodAnnotationUpdateRetryable(t *testing.T) {
 	if !IsPodAnnotationUpdateRetryable(apierrors.NewConflict(
@@ -153,17 +162,18 @@ func TestUpdatePodWithAllocationOrRollback(t *testing.T) {
 				podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(pod, nil)
 			}
 
+			testCtx := newPodTestCtx(tt.name)
 			if tt.replacedOnRetry {
 				patchErr := apierrors.NewInvalid(schema.GroupKind{Kind: "Pod"}, pod.Name,
 					field.ErrorList{field.Invalid(field.NewPath("metadata", "uid"), pod.UID, "test failed")})
-				kubeMock.On("PatchPodStatusAnnotations", pod, mock.AnythingOfType("*v1.Pod")).Return(patchErr).Once()
+				kubeMock.On("PatchPodStatusAnnotations", testCtx, pod, mock.AnythingOfType("*v1.Pod")).Return(patchErr).Once()
 			} else if tt.updatePodErr {
-				kubeMock.On("PatchPodStatusAnnotations", pod, mock.AnythingOfType("*v1.Pod")).Return(errors.New("Update pod error"))
+				kubeMock.On("PatchPodStatusAnnotations", testCtx, pod, mock.AnythingOfType("*v1.Pod")).Return(errors.New("Update pod error"))
 			} else if tt.expectUpdate {
-				kubeMock.On("PatchPodStatusAnnotations", pod, mock.AnythingOfType("*v1.Pod")).Return(nil)
+				kubeMock.On("PatchPodStatusAnnotations", testCtx, pod, mock.AnythingOfType("*v1.Pod")).Return(nil)
 			}
 
-			err := UpdatePodWithRetryOrRollback(podListerMock, kubeMock, requestedPod, allocate)
+			err := UpdatePodWithRetryOrRollback(testCtx, podListerMock, kubeMock, requestedPod, allocate)
 
 			if (err != nil) != tt.expectErr {
 				t.Errorf("UpdatePodWithAllocationOrRollback() error = %v, expectErr %v", err, tt.expectErr)
@@ -211,15 +221,16 @@ func TestUpdatePodWaitsForInformerBeforeRetry(t *testing.T) {
 		podV1.Name,
 		errors.New("annotation changed"),
 	)
-	kubeMock.On("PatchPodStatusAnnotations", podV1, mock.AnythingOfType("*v1.Pod")).
+	testCtx := newPodTestCtx("waits-for-informer")
+	kubeMock.On("PatchPodStatusAnnotations", testCtx, podV1, mock.AnythingOfType("*v1.Pod")).
 		Return(conflictErr).Once()
-	kubeMock.On("PatchPodStatusAnnotations", podV2, mock.AnythingOfType("*v1.Pod")).
+	kubeMock.On("PatchPodStatusAnnotations", testCtx, podV2, mock.AnythingOfType("*v1.Pod")).
 		Return(nil).Once()
 
 	allocate := func(pod *corev1.Pod) (*corev1.Pod, func(), error) {
 		return pod, nil, nil
 	}
-	err := UpdatePodWithRetryOrRollback(podListerMock, kubeMock, podV1, allocate)
+	err := UpdatePodWithRetryOrRollback(testCtx, podListerMock, kubeMock, podV1, allocate)
 	if err != nil {
 		t.Fatalf("expected cache-advanced retry to succeed: %v", err)
 	}
@@ -243,13 +254,14 @@ func TestUpdatePodDoesNotRepeatPatchFromStaleInformer(t *testing.T) {
 		pod.Name,
 		errors.New("annotation changed"),
 	)
-	kubeMock.On("PatchPodStatusAnnotations", pod, mock.AnythingOfType("*v1.Pod")).
+	testCtx := newPodTestCtx("stale-informer")
+	kubeMock.On("PatchPodStatusAnnotations", testCtx, pod, mock.AnythingOfType("*v1.Pod")).
 		Return(conflictErr).Once()
 
 	allocate := func(pod *corev1.Pod) (*corev1.Pod, func(), error) {
 		return pod, nil, nil
 	}
-	err := UpdatePodWithRetryOrRollback(podListerMock, kubeMock, pod, allocate)
+	err := UpdatePodWithRetryOrRollback(testCtx, podListerMock, kubeMock, pod, allocate)
 	if !apierrors.IsConflict(err) {
 		t.Fatalf("expected the original conflict, got %v", err)
 	}

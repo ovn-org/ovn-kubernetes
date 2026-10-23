@@ -4,6 +4,7 @@
 package nooverlay
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 	"slices"
@@ -122,7 +123,7 @@ func (c *Controller) Stop() {
 }
 
 // reconcileRA is called whenever a RouteAdvertisements resource changes
-func (c *Controller) reconcileRA(key string) error {
+func (c *Controller) reconcileRA(_ context.Context, key string) error {
 	klog.V(5).Infof("No-overlay controller reconciling RouteAdvertisements %q", key)
 	c.runValidation()
 	return nil

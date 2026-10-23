@@ -246,7 +246,7 @@ func (oc *DefaultNodeNetworkController) shouldReconcileNetworkChange(old, new ut
 	return wasPodNetworkAdvertisedAtNode != isPodNetworkAdvertisedAtNode
 }
 
-func (oc *DefaultNodeNetworkController) Reconcile(netInfo util.NetInfo) error {
+func (oc *DefaultNodeNetworkController) Reconcile(_ context.Context, netInfo util.NetInfo) error {
 	// inspect changes first
 	reconcilePodNetwork := oc.shouldReconcileNetworkChange(oc.ReconcilableNetInfo, netInfo)
 

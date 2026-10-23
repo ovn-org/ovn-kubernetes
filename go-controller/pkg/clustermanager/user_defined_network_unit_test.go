@@ -202,7 +202,7 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 						nil,
 						nodeController,
 					)
-					gomega.Expect(nc.init()).To(gomega.Succeed())
+					gomega.Expect(nc.init(ctx.Context)).To(gomega.Succeed())
 					gomega.Expect(nc.Start(ctx.Context)).To(gomega.Succeed())
 
 					firstAllocatableIPs := []string{"192.168.200.1/24", "fd12:1234::1/64"}
@@ -395,7 +395,7 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 					nil,
 					nodeController,
 				)
-				err = oc.init()
+				err = oc.init(ctx.Context)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				err = sncm.CleanupStaleNetworks(oc)
@@ -568,7 +568,7 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 							nil,
 							nodeController,
 						)
-						gomega.Expect(nc.init()).To(gomega.Succeed())
+						gomega.Expect(nc.init(ctx.Context)).To(gomega.Succeed())
 						gomega.Expect(nc.Start(ctx.Context)).To(gomega.Succeed())
 
 						ips, err := util.ParseIPNets([]string{subnetIP})
@@ -624,7 +624,7 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 							nil,
 							nodeController,
 						)
-						gomega.Expect(nc.init()).To(gomega.Succeed())
+						gomega.Expect(nc.init(ctx.Context)).To(gomega.Succeed())
 						gomega.Expect(nc.Start(ctx.Context)).To(gomega.Succeed())
 
 						ips, err := util.ParseIPNets([]string{subnetIP})
@@ -676,7 +676,7 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 							nil,
 							nodeController,
 						)
-						gomega.Expect(nc.init()).To(gomega.Succeed())
+						gomega.Expect(nc.init(ctx.Context)).To(gomega.Succeed())
 						gomega.Expect(nc.Start(ctx.Context)).To(gomega.Succeed())
 
 						ips, err := util.ParseIPNets([]string{subnetIP})
@@ -747,7 +747,7 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 							nil,
 							nodeController,
 						)
-						gomega.Expect(nc.init()).To(gomega.Succeed())
+						gomega.Expect(nc.init(ctx.Context)).To(gomega.Succeed())
 						gomega.Expect(nc.Start(ctx.Context)).To(gomega.Succeed())
 
 						ips, err := util.ParseIPNets([]string{subnetIP})
@@ -821,7 +821,7 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 							nil,
 							nodeController,
 						)
-						gomega.Expect(nc.init()).To(gomega.Succeed())
+						gomega.Expect(nc.init(ctx.Context)).To(gomega.Succeed())
 						gomega.Expect(nc.Start(ctx.Context)).To(gomega.Succeed())
 
 						ips, err := util.ParseIPNets([]string{subnetIP})
@@ -889,7 +889,7 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 						nil,
 						nodeController,
 					)
-					gomega.Expect(nc.init()).To(gomega.Succeed())
+					gomega.Expect(nc.init(ctx.Context)).To(gomega.Succeed())
 					gomega.Expect(nc.Start(ctx.Context)).To(gomega.Succeed())
 
 					for _, alreadyAllocatedIP := range []string{

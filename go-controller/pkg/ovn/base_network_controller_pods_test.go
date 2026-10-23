@@ -135,7 +135,7 @@ func TestVMPodIPOwnershipOnStartup(t *testing.T) {
 	g.Expect(oc.lsManager.OwnsIPs("node", oc.podIPOwner(target, nad), ips)).To(gomega.BeTrue())
 	g.Expect(oc.canCleanupPodIPResources(source, "node", ips)).To(gomega.BeFalse(), "the migrated VM is still running")
 	g.Expect(oc.canCleanupPodIPResources(stale, "node", ips)).To(gomega.BeFalse(), "another VM owns these IPs")
-	g.Expect(oc.removeRemoteZonePod(target)).To(gomega.Succeed())
+	g.Expect(oc.removeRemoteZonePod(context.Background(), target)).To(gomega.Succeed())
 	g.Expect(oc.lsManager.OwnsIPs("node", oc.podIPOwner(target, nad), ips)).To(gomega.BeTrue())
 
 	target.Status.Phase = corev1.PodSucceeded
@@ -146,13 +146,13 @@ func TestVMPodIPOwnershipOnStartup(t *testing.T) {
 		return err == nil && util.PodCompleted(pod)
 	}).Should(gomega.BeTrue())
 	g.Expect(oc.canCleanupPodIPResources(source, "node", ips)).To(gomega.BeTrue())
-	g.Expect(oc.removeRemoteZonePod(target)).To(gomega.Succeed())
+	g.Expect(oc.removeRemoteZonePod(context.Background(), target)).To(gomega.Succeed())
 	g.Expect(oc.lsManager.OwnsIPs("node", oc.podIPOwner(target, nad), ips)).To(gomega.BeFalse())
 
 	ordinary := ovntest.NewPod("namespace", "ordinary", "node", "")
 	g.Expect(oc.lsManager.AllocateIPs("node", oc.podIPOwner(ordinary, nad), ips)).To(gomega.Succeed())
 	g.Expect(oc.canCleanupPodIPResources(source, "node", ips)).To(gomega.BeFalse())
-	g.Expect(oc.removeRemoteZonePod(target)).To(gomega.Succeed())
+	g.Expect(oc.removeRemoteZonePod(context.Background(), target)).To(gomega.Succeed())
 	g.Expect(oc.lsManager.OwnsIPs("node", oc.podIPOwner(ordinary, nad), ips)).To(gomega.BeTrue())
 }
 
@@ -210,12 +210,12 @@ func TestMigratedVMPodIPOwnershipOnSubnetReuse(t *testing.T) {
 				// The source node is gone; this node may inherit either or both of its subnets.
 				g.Expect(oc.createNodeLogicalSwitch("replacement-node", ovntest.MustParseIPNets(tc.subnets...), "", "")).To(gomega.Succeed())
 				for range 2 {
-					g.Expect(oc.syncPods([]interface{}{pod})).To(gomega.Succeed())
+					g.Expect(oc.syncPods(context.Background(), []interface{}{pod})).To(gomega.Succeed())
 				}
 				_, _, annotation, err := oc.allocateSyncMigratablePodIPsOnZone(map[ktypes.NamespacedName]bool{}, pod)
 				g.Expect(err).NotTo(gomega.HaveOccurred())
 				g.Expect(annotation.IPs).To(gomega.Equal(ips), "filtering reservations must not change the VM's annotation")
-				annotation, release, err := oc.allocatePodAnnotation(pod, nil, "namespace/migrated-vm", nad, nil, ovntypes.NetworkRolePrimary)
+				annotation, release, err := oc.allocatePodAnnotation(context.Background(), pod, nil, "namespace/migrated-vm", nad, nil, ovntypes.NetworkRolePrimary)
 				g.Expect(err).NotTo(gomega.HaveOccurred())
 				g.Expect(annotation.IPs).To(gomega.Equal(ips))
 				g.Expect(release).To(gomega.BeFalse())
@@ -223,7 +223,7 @@ func TestMigratedVMPodIPOwnershipOnSubnetReuse(t *testing.T) {
 					other := pod.DeepCopy()
 					other.UID, other.Name = "other", "other"
 					other.Annotations[kubevirtv1.DomainAnnotation] = "other-vm"
-					_, _, err = oc.allocatePodAnnotation(other, nil, "namespace/other", nad, nil, ovntypes.NetworkRolePrimary)
+					_, _, err = oc.allocatePodAnnotation(context.Background(), other, nil, "namespace/other", nad, nil, ovntypes.NetworkRolePrimary)
 					g.Expect(errors.Is(err, ipallocator.ErrAllocatedByOther)).To(gomega.BeTrue())
 				}
 				owner := oc.podIPOwner(pod, nad)
@@ -244,7 +244,7 @@ func TestMigratedVMPodIPOwnershipOnSubnetReuse(t *testing.T) {
 						&nbdb.LogicalSwitch{Name: podNode}, lsp)).To(gomega.Succeed())
 					portInfo = oc.logicalPortCache.add(pod, podNode, nad, lsp.UUID, annotation.MAC, ips)
 				}
-				g.Expect(oc.removePod(pod, portInfo)).To(gomega.Succeed())
+				g.Expect(oc.removePod(context.Background(), pod, portInfo)).To(gomega.Succeed())
 				if portInfo != nil {
 					g.Eventually(func() ([]*nbdb.LogicalSwitchPort, error) {
 						return libovsdbops.FindLogicalSwitchPortWithPredicate(nbClient, func(lsp *nbdb.LogicalSwitchPort) bool {
@@ -263,10 +263,10 @@ func TestMigratedVMPodIPOwnershipOnSubnetReuse(t *testing.T) {
 					current, err := wf.GetPod(pod.Namespace, pod.Name)
 					return err == nil && util.PodCompleted(current)
 				}).Should(gomega.BeTrue())
-				g.Expect(oc.removePod(pod, portInfo)).To(gomega.Succeed())
+				g.Expect(oc.removePod(context.Background(), pod, portInfo)).To(gomega.Succeed())
 				if len(localIPs) != 0 {
 					g.Expect(oc.lsManager.AllocateIPs("replacement-node", "next-owner", localIPs)).To(gomega.Succeed())
-					g.Expect(oc.removePod(pod, portInfo)).To(gomega.Succeed())
+					g.Expect(oc.removePod(context.Background(), pod, portInfo)).To(gomega.Succeed())
 					g.Expect(oc.lsManager.OwnsIPs("replacement-node", "next-owner", localIPs)).To(gomega.BeTrue())
 				}
 			})

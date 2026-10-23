@@ -4,6 +4,7 @@
 package controller
 
 import (
+	"context"
 	"fmt"
 	"net"
 
@@ -71,7 +72,7 @@ func (n *HONodeController) AddNode(node *corev1.Node) error {
 	}
 
 	klog.Infof("Set hybrid overlay DRMAC annotation: %s", drMAC)
-	if err := n.kube.SetAnnotationsOnNode(node.Name, map[string]interface{}{
+	if err := n.kube.SetAnnotationsOnNode(context.TODO(), node.Name, map[string]interface{}{
 		hotypes.HybridOverlayDRMAC: drMAC,
 	}); err != nil {
 		return fmt.Errorf("failed to set DRMAC annotation on node: %v", err)
@@ -95,7 +96,7 @@ func (n *HONodeController) AddPod(pod *corev1.Pod) error {
 		klog.Infof("Remove the ovnkube pod annotation from pod %s", pod.Name)
 		podToUpdate := pod.DeepCopy()
 		delete(podToUpdate.Annotations, types.OvnPodAnnotationName)
-		if err := n.kube.PatchPodStatusAnnotations(pod, podToUpdate); err != nil {
+		if err := n.kube.PatchPodStatusAnnotations(context.TODO(), pod, podToUpdate); err != nil {
 			return fmt.Errorf("failed to remove ovnkube pod annotation from pod %s: %v", pod.Name, err)
 		}
 		return nil

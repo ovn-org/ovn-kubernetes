@@ -4,6 +4,7 @@
 package ovn
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -183,7 +184,7 @@ type BaseNetworkController struct {
 	nqosController *nqoscontroller.Controller
 }
 
-func (oc *BaseNetworkController) reconcile(netInfo util.NetInfo, setNodeFailed func(string)) error {
+func (oc *BaseNetworkController) reconcile(_ context.Context, netInfo util.NetInfo, setNodeFailed func(string)) error {
 	// gather some information first
 	reconcileLocalNode := false
 	subnetsChanged := clusterSubnetsChanged(oc, netInfo)
@@ -1000,7 +1001,7 @@ func (bnc *BaseNetworkController) isLayer2WithInterconnectTransport() bool {
 }
 
 // HandleNetworkRefChange enqueues node reconciliation when a NAD reference becomes active/inactive.
-func (bnc *BaseNetworkController) HandleNetworkRefChange(nodeName string, _ bool) {
+func (bnc *BaseNetworkController) HandleNetworkRefChange(_ context.Context, nodeName string, _ bool) {
 	bnc.nodeReconciler.ReconcileNetwork(nodeName, bnc.GetNetworkName())
 }
 

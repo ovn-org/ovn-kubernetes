@@ -4,6 +4,7 @@
 package pod
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -83,7 +84,7 @@ type persistentIPsStub struct {
 	datastore map[string]ipamclaimsapi.IPAMClaim
 }
 
-func (c *persistentIPsStub) Reconcile(_ *ipamclaimsapi.IPAMClaim, newIPAMClaim *ipamclaimsapi.IPAMClaim, _ persistentips.IPReleaser) error {
+func (c *persistentIPsStub) Reconcile(_ context.Context, _ *ipamclaimsapi.IPAMClaim, newIPAMClaim *ipamclaimsapi.IPAMClaim, _ persistentips.IPReleaser) error {
 	c.datastore[ipamClaimKey(newIPAMClaim.Namespace, newIPAMClaim.Name)] = *newIPAMClaim
 	return nil
 }
@@ -169,7 +170,7 @@ func TestAllocatePodAnnotationIPOwnership(t *testing.T) {
 					&util.PodAnnotation{IPs: ips, MAC: util.IPAddrToHWAddr(ips[0].IP)}, nadKey)
 				g.Expect(err).NotTo(gomega.HaveOccurred())
 			}
-			_, annotation, rollback, err := allocatePodAnnotationWithRollback(allocator, "network", "pod",
+			_, annotation, rollback, err := allocatePodAnnotationWithRollback(context.Background(), allocator, "network", "pod",
 				&idAllocatorStub{nextID: 100}, netInfo, p, nadKey,
 				&nadapi.NetworkSelectionElement{IPRequest: util.StringSlice(ips)}, nil, nil, false, types.NetworkRolePrimary)
 			if tc.owner == "pod" {
@@ -217,6 +218,7 @@ func Test_allocatePodAnnotationReturnsUpdatedPod(t *testing.T) {
 	g.Expect(podIndexer.Add(pod)).To(gomega.Succeed())
 
 	updatedPod, podAnnotation, err := allocatePodAnnotation(
+		context.Background(),
 		corelisters.NewPodLister(podIndexer),
 		&kube.Kube{KClient: fake.NewSimpleClientset(pod.DeepCopy())},
 		&ipAllocatorStub{nextIPs: ovntest.MustParseIPNets("10.128.0.3/24")},
@@ -286,6 +288,7 @@ func Test_allocatePodAnnotationWithTunnelIDReturnsUpdatedPod(t *testing.T) {
 	g.Expect(podIndexer.Add(pod)).To(gomega.Succeed())
 
 	updatedPod, podAnnotation, err := allocatePodAnnotationWithTunnelID(
+		context.Background(),
 		corelisters.NewPodLister(podIndexer),
 		&kube.Kube{KClient: fake.NewSimpleClientset(pod.DeepCopy())},
 		nil,
@@ -1374,6 +1377,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 			}
 
 			pod, podAnnotation, rollback, err := allocatePodAnnotationWithRollback(
+				context.Background(),
 				tt.args.ipAllocator,
 				"test-subnet", "test-owner",
 				tt.args.idAllocator,

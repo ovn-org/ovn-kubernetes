@@ -4,6 +4,7 @@
 package ovn
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -39,10 +40,10 @@ func (oc *DefaultNetworkController) AddNamespace(ns *corev1.Namespace) error {
 
 // configureNamespace ensures internal structures are updated based on namespace
 // must be called with nsInfo lock
-func (oc *DefaultNetworkController) configureNamespace(nsInfo *namespaceInfo, ns *corev1.Namespace) error {
+func (oc *DefaultNetworkController) configureNamespace(ctx context.Context, nsInfo *namespaceInfo, ns *corev1.Namespace) error {
 	var errors []error
 
-	if err := oc.configureNamespaceCommon(nsInfo, ns); err != nil {
+	if err := oc.configureNamespaceCommon(ctx, nsInfo, ns); err != nil {
 		errors = append(errors, err)
 	}
 	return utilerrors.Join(errors...)

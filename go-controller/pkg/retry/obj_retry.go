@@ -4,6 +4,7 @@
 package retry
 
 import (
+	"context"
 	"fmt"
 	"math/rand"
 	"reflect"
@@ -50,10 +51,10 @@ type retryObjEntry struct {
 }
 
 type EventHandler interface {
-	AddResource(obj interface{}, fromRetryLoop bool) error
-	UpdateResource(oldObj, newObj interface{}, inRetryCache bool) error
-	DeleteResource(obj, cachedObj interface{}) error
-	SyncFunc([]interface{}) error
+	AddResource(ctx context.Context, obj interface{}, fromRetryLoop bool) error
+	UpdateResource(ctx context.Context, oldObj, newObj interface{}, inRetryCache bool) error
+	DeleteResource(ctx context.Context, obj, cachedObj interface{}) error
+	SyncFunc(ctx context.Context, objs []interface{}) error
 
 	// auxiliary functions needed in the retry logic
 	GetResourceFromInformerCache(key string) (interface{}, error)
@@ -81,7 +82,7 @@ type deleteResourceFilter interface {
 // methods, that are not required for every handler
 type DefaultEventHandler struct{}
 
-func (h *DefaultEventHandler) SyncFunc([]interface{}) error { return nil }
+func (h *DefaultEventHandler) SyncFunc(context.Context, []interface{}) error { return nil }
 
 func (h *DefaultEventHandler) AreResourcesEqual(_, _ interface{}) (bool, error) {
 	return false, nil
@@ -390,7 +391,7 @@ func (r *RetryFramework) resourceRetry(objKey string, now time.Time) {
 				// unscheduled resources (pods) will be retried again later we do not track these as failures, and should not retry.
 				// we should avoid queuing objects to the retry handler that are not scheduled. Thus treat this as an error.
 				klog.Errorf("%s: %v retry: cannot update object that is not scheduled: %s", r.name, r.ResourceHandler.ObjType, objKey)
-			} else if err := r.ResourceHandler.UpdateResource(entry.config, entry.newObj, true); err != nil {
+			} else if err := r.ResourceHandler.UpdateResource(context.Background(), entry.config, entry.newObj, true); err != nil {
 				entry.timeStamp = time.Now()
 				r.increaseFailedAttemptsCounter(entry)
 				if entry.failedAttempts >= MaxFailedAttempts && !entry.infiniteRetry {
@@ -411,7 +412,7 @@ func (r *RetryFramework) resourceRetry(objKey string, now time.Time) {
 					// unscheduled resources (pods) will be retried again later we do not track these as failures, and should not retry.
 					// we should avoid queuing objects to the retry handler that are not scheduled. Thus treat this as an error.
 					klog.Errorf("%s: %v retry: cannot delete object that was not scheduled %s", r.name, r.ResourceHandler.ObjType, objKey)
-				} else if err := r.ResourceHandler.DeleteResource(entry.oldObj, entry.config); err != nil {
+				} else if err := r.ResourceHandler.DeleteResource(context.Background(), entry.oldObj, entry.config); err != nil {
 					entry.timeStamp = time.Now()
 					r.increaseFailedAttemptsCounter(entry)
 					if entry.failedAttempts >= MaxFailedAttempts && !entry.infiniteRetry {
@@ -434,7 +435,7 @@ func (r *RetryFramework) resourceRetry(objKey string, now time.Time) {
 					// unscheduled resources (pods) will be retried again later we do not track these as failures, and should not retry.
 					// we should avoid queuing objects to the retry handler that are not scheduled. Thus treat this as an error.
 					klog.Errorf("%s: %v retry: cannot create object that is not scheduled %s", r.name, r.ResourceHandler.ObjType, objKey)
-				} else if err := r.ResourceHandler.AddResource(entry.newObj, true); err != nil {
+				} else if err := r.ResourceHandler.AddResource(context.Background(), entry.newObj, true); err != nil {
 					entry.timeStamp = time.Now()
 					r.increaseFailedAttemptsCounter(entry)
 					if entry.failedAttempts >= MaxFailedAttempts && !entry.infiniteRetry {
@@ -535,7 +536,7 @@ func (r *RetryFramework) processObjectInTerminalState(obj interface{}, lockedKey
 		" during %s event: will remove it", r.name, lockedKey, r.ResourceHandler.ObjType, event)
 	internalCacheEntry := r.ResourceHandler.GetInternalCacheEntry(obj)
 	retryEntry := r.initRetryObjWithDelete(obj, lockedKey, internalCacheEntry, true) // set up the retry obj for deletion
-	if err := r.ResourceHandler.DeleteResource(obj, internalCacheEntry); err != nil {
+	if err := r.ResourceHandler.DeleteResource(context.Background(), obj, internalCacheEntry); err != nil {
 		klog.Errorf("%s: failed to delete object %s of type %s in terminal state, during %s event: %v",
 			r.name, lockedKey, r.ResourceHandler.ObjType, event, err)
 		r.ResourceHandler.RecordErrorEvent(obj, "ErrorDeletingResource", err)
@@ -596,7 +597,7 @@ func (r *RetryFramework) WatchResourceFiltered(namespaceForFilteredHandler strin
 							" add of type %s with the same key: %s", r.name,
 							r.ResourceHandler.ObjType, key)
 						internalCacheEntry := r.ResourceHandler.GetInternalCacheEntry(obj)
-						if err := r.ResourceHandler.DeleteResource(retryObj.oldObj, internalCacheEntry); err != nil {
+						if err := r.ResourceHandler.DeleteResource(context.Background(), retryObj.oldObj, internalCacheEntry); err != nil {
 							klog.Errorf("%s: failed to delete old object %s of type %s,"+
 								" during add event: %v", r.name, key, r.ResourceHandler.ObjType, err)
 							r.ResourceHandler.RecordErrorEvent(obj, "ErrorDeletingResource", err)
@@ -606,7 +607,7 @@ func (r *RetryFramework) WatchResourceFiltered(namespaceForFilteredHandler strin
 						r.removeDeleteFromRetryObj(retryObj)
 					}
 					start := time.Now()
-					if err := r.ResourceHandler.AddResource(obj, false); err != nil {
+					if err := r.ResourceHandler.AddResource(context.Background(), obj, false); err != nil {
 						if !ovntypes.IsSuppressedError(err) {
 							klog.Errorf("%s: failed to create %s %s, error: %v", r.name, r.ResourceHandler.ObjType, key, err)
 							r.ResourceHandler.RecordErrorEvent(obj, "ErrorAddingResource", err)
@@ -698,7 +699,7 @@ func (r *RetryFramework) WatchResourceFiltered(namespaceForFilteredHandler strin
 						// [step 1a] there is a retry entry marked for deletion
 						klog.Infof("%s: found retry entry for %s %s marked for deletion: will delete the object",
 							r.name, r.ResourceHandler.ObjType, oldKey)
-						if err := r.ResourceHandler.DeleteResource(retryEntryOrNil.oldObj,
+						if err := r.ResourceHandler.DeleteResource(context.Background(), retryEntryOrNil.oldObj,
 							retryEntryOrNil.config); err != nil {
 							klog.Errorf("%s: failed to delete stale object %s, during update: %v", r.name, oldKey, err)
 							r.ResourceHandler.RecordErrorEvent(retryEntryOrNil.oldObj, "ErrorDeletingResource", err)
@@ -725,7 +726,7 @@ func (r *RetryFramework) WatchResourceFiltered(namespaceForFilteredHandler strin
 							existingCacheEntry = retryEntryOrNil.config
 						}
 						klog.V(5).Infof("%s: deleting old %s of type %s during update", r.name, oldKey, r.ResourceHandler.ObjType)
-						if err := r.ResourceHandler.DeleteResource(old, existingCacheEntry); err != nil {
+						if err := r.ResourceHandler.DeleteResource(context.Background(), old, existingCacheEntry); err != nil {
 							klog.Errorf("%s: failed to delete %s %s, during update: %v",
 								r.name, r.ResourceHandler.ObjType, oldKey, err)
 							r.ResourceHandler.RecordErrorEvent(old, "ErrorDeletingResource", err)
@@ -744,7 +745,7 @@ func (r *RetryFramework) WatchResourceFiltered(namespaceForFilteredHandler strin
 					// function is available.
 					if r.ResourceHandler.HasUpdateFunc {
 						// if this resource type has an update func, just call the update function
-						if err := r.ResourceHandler.UpdateResource(old, latest, found); err != nil {
+						if err := r.ResourceHandler.UpdateResource(context.Background(), old, latest, found); err != nil {
 							if !ovntypes.IsSuppressedError(err) {
 								klog.Errorf("%s: failed to update %s, old=%s, new=%s, error: %v",
 									r.name, r.ResourceHandler.ObjType, oldKey, newKey, err)
@@ -763,7 +764,7 @@ func (r *RetryFramework) WatchResourceFiltered(namespaceForFilteredHandler strin
 							return
 						}
 					} else { // we previously deleted old object, now let's add the new one
-						if err := r.ResourceHandler.AddResource(latest, false); err != nil {
+						if err := r.ResourceHandler.AddResource(context.Background(), latest, false); err != nil {
 							retryEntry := r.initRetryObjWithAdd(latest, key)
 							r.increaseFailedAttemptsCounter(retryEntry)
 							if !ovntypes.IsSuppressedError(err) {
@@ -815,7 +816,7 @@ func (r *RetryFramework) WatchResourceFiltered(namespaceForFilteredHandler strin
 				r.DoWithLock(key, func(key string) {
 					internalCacheEntry := r.ResourceHandler.GetInternalCacheEntry(obj)
 					retryEntry := r.initRetryObjWithDelete(obj, key, internalCacheEntry, false) // set up the retry obj for deletion
-					if err = r.ResourceHandler.DeleteResource(obj, internalCacheEntry); err != nil {
+					if err = r.ResourceHandler.DeleteResource(context.Background(), obj, internalCacheEntry); err != nil {
 						r.increaseFailedAttemptsCounter(retryEntry)
 						klog.Errorf("%s: failed to delete %s %s, error: %v", r.name, r.ResourceHandler.ObjType, key, err)
 						return

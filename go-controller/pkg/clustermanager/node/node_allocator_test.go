@@ -285,6 +285,8 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+
 			config.HybridOverlay.Enabled = true
 			config.Kubernetes.NoHostSubnetNodes, _ = metav1.LabelSelectorAsSelector(&metav1.LabelSelector{
 				MatchLabels: map[string]string{"hybrid-overlay-node": "true"},
@@ -312,7 +314,7 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 				nodeLister:             newFakeNodeLister([]*corev1.Node{}),
 			}
 
-			if err := na.Init(); err != nil {
+			if err := na.Init(ctx); err != nil {
 				t.Fatalf("Failed to initialize node allocator: %v", err)
 			}
 			nodeInterfaces := make([]interface{}, len(tt.existingNodes))
@@ -366,6 +368,8 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 }
 
 func TestController_allocateNodeSubnets_ReleaseOnError(t *testing.T) {
+	ctx := context.Background()
+
 	ranges, err := rangesFromStrings([]string{"172.16.0.0/16", "2000::/127"}, []int{24, 127})
 	if err != nil {
 		t.Fatal(err)
@@ -387,7 +391,7 @@ func TestController_allocateNodeSubnets_ReleaseOnError(t *testing.T) {
 		nodeLister:             newFakeNodeLister([]*corev1.Node{}),
 	}
 
-	if err := na.Init(); err != nil {
+	if err := na.Init(ctx); err != nil {
 		t.Fatalf("Failed to initialize node allocator: %v", err)
 	}
 
@@ -427,6 +431,8 @@ func newFakeNodeLister(nodes []*corev1.Node) listersv1.NodeLister {
 }
 
 func TestController_CleanupStaleAnnotation(t *testing.T) {
+	ctx := context.Background()
+
 	// create a node with an annotation that shouldn't be changed and one that should be cleaned up.
 	newNode := &corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{
@@ -453,8 +459,8 @@ func TestController_CleanupStaleAnnotation(t *testing.T) {
 		kube:       kube,
 		netInfo:    netInfo,
 	}
-	na.CleanupStaleAnnotation()
-	nodes, err := fakeClient.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{})
+	na.CleanupStaleAnnotation(ctx)
+	nodes, err := fakeClient.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -563,6 +569,8 @@ func TestNodeAllocatorNeedsNodeAllocationForIPModeChange(t *testing.T) {
 // TestNodeAllocator_CleanupNodeWithoutNodeObject verifies that CleanupNode correctly releases
 // allocator state when the node object is unavailable (true delete case).
 func TestNodeAllocator_CleanupNodeWithoutNodeObject(t *testing.T) {
+	ctx := context.Background()
+
 	origHybridEnabled := config.HybridOverlay.Enabled
 	origHybridSubnets := config.HybridOverlay.ClusterSubnets
 	origClusterSubnets := config.Default.ClusterSubnets
@@ -607,7 +615,7 @@ func TestNodeAllocator_CleanupNodeWithoutNodeObject(t *testing.T) {
 		t.Fatal("Hybrid overlay allocation should be enabled given the test configuration")
 	}
 
-	if err := na.Init(); err != nil {
+	if err := na.Init(ctx); err != nil {
 		t.Fatalf("Failed to initialize node allocator: %v", err)
 	}
 
@@ -645,7 +653,7 @@ func TestNodeAllocator_CleanupNodeWithoutNodeObject(t *testing.T) {
 		},
 	}
 
-	if err := na.CleanupNode(node.Name, nil); err != nil {
+	if err := na.CleanupNode(ctx, node.Name, nil); err != nil {
 		t.Fatalf("CleanupNode failed: %v", err)
 	}
 
@@ -663,6 +671,8 @@ func TestNodeAllocator_CleanupNodeWithoutNodeObject(t *testing.T) {
 }
 
 func TestController_CleanupNodeRemovesUDNAnnotations(t *testing.T) {
+	ctx := context.Background()
+
 	if err := config.PrepareTestConfig(); err != nil {
 		t.Fatal(err)
 	}
@@ -720,11 +730,11 @@ func TestController_CleanupNodeRemovesUDNAnnotations(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := na.CleanupNode(node.Name, node); err != nil {
+	if err := na.CleanupNode(ctx, node.Name, node); err != nil {
 		t.Fatalf("CleanupNode failed: %v", err)
 	}
 
-	updatedNode, err := fakeClient.CoreV1().Nodes().Get(context.TODO(), node.Name, metav1.GetOptions{})
+	updatedNode, err := fakeClient.CoreV1().Nodes().Get(ctx, node.Name, metav1.GetOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -741,6 +751,8 @@ func TestController_CleanupNodeRemovesUDNAnnotations(t *testing.T) {
 }
 
 func TestController_CleanupNodeReleasesTunnelIDs(t *testing.T) {
+	ctx := context.Background()
+
 	origLayerUsesTransitRouter := config.Layer2UsesTransitRouter
 	t.Cleanup(func() {
 		config.Layer2UsesTransitRouter = origLayerUsesTransitRouter
@@ -799,11 +811,11 @@ func TestController_CleanupNodeReleasesTunnelIDs(t *testing.T) {
 		t.Fatal("HasNodeTunnelIDAllocation should return true in legacy topology")
 	}
 
-	if err := na.CleanupNode(node.Name, node); err != nil {
+	if err := na.CleanupNode(ctx, node.Name, node); err != nil {
 		t.Fatalf("CleanupNode failed: %v", err)
 	}
 
-	updatedNode, err := fakeClient.CoreV1().Nodes().Get(context.TODO(), node.Name, metav1.GetOptions{})
+	updatedNode, err := fakeClient.CoreV1().Nodes().Get(ctx, node.Name, metav1.GetOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -818,6 +830,8 @@ func TestController_CleanupNodeReleasesTunnelIDs(t *testing.T) {
 // TestCleanupNode_TransitRouterMigration verifies that tunnel ID annotations
 // are cleaned up when a node transitions to transit router topology.
 func TestCleanupNode_TransitRouterMigration(t *testing.T) {
+	ctx := context.Background()
+
 	origLayerUsesTransitRouter := config.Layer2UsesTransitRouter
 	t.Cleanup(func() {
 		config.Layer2UsesTransitRouter = origLayerUsesTransitRouter
@@ -883,12 +897,12 @@ func TestCleanupNode_TransitRouterMigration(t *testing.T) {
 	}
 
 	// CleanupNode should remove the stale tunnel ID annotation
-	if err := na.CleanupNode(node.Name, node); err != nil {
+	if err := na.CleanupNode(ctx, node.Name, node); err != nil {
 		t.Fatalf("CleanupNode failed: %v", err)
 	}
 
 	// Verify annotation was removed
-	updatedNode, err := fakeClient.CoreV1().Nodes().Get(context.TODO(), node.Name, metav1.GetOptions{})
+	updatedNode, err := fakeClient.CoreV1().Nodes().Get(ctx, node.Name, metav1.GetOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -982,6 +996,8 @@ func TestSyncNodeNetworkAnnotations_TunnelID(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+
 			na, node1, fakeClient := setup(t)
 			networkName := na.netInfo.GetNetworkName()
 
@@ -995,12 +1011,12 @@ func TestSyncNodeNetworkAnnotations_TunnelID(t *testing.T) {
 			}
 
 			// Sync node annotations
-			if err := na.syncNodeNetworkAnnotations(node1); err != nil {
+			if err := na.syncNodeNetworkAnnotations(ctx, node1); err != nil {
 				t.Fatalf("syncNodeNetworkAnnotations failed: %v", err)
 			}
 
 			// Verify tunnel ID annotation
-			updatedNode, err := fakeClient.CoreV1().Nodes().Get(context.TODO(), node1.Name, metav1.GetOptions{})
+			updatedNode, err := fakeClient.CoreV1().Nodes().Get(ctx, node1.Name, metav1.GetOptions{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1045,10 +1061,12 @@ func TestSyncNodeNetworkAnnotations_TunnelID(t *testing.T) {
 	}
 	for _, tt := range invalidIDTests {
 		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+
 			na, node1, _ := setup(t)
 			networkName := na.netInfo.GetNetworkName()
 			node1.Annotations[types.UDNLayer2NodeGRLRPTunnelIDAnnotation] = fmt.Sprintf(`{"%s":"%s"}`, networkName, tt.invalidTunnelID)
-			if err := na.syncNodeNetworkAnnotations(node1); err == nil {
+			if err := na.syncNodeNetworkAnnotations(ctx, node1); err == nil {
 				t.Fatal("expected invalid tunnel ID to be rejected")
 			}
 			if got := na.idAllocator.GetID(networkName + "_" + node1.Name); got != types.InvalidID {
@@ -1087,6 +1105,8 @@ func TestSyncNodeNetworkAnnotations_ReleaseOnPatchFailure(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+
 			if err := config.PrepareTestConfig(); err != nil {
 				t.Fatal(err)
 			}
@@ -1139,11 +1159,11 @@ func TestSyncNodeNetworkAnnotations_ReleaseOnPatchFailure(t *testing.T) {
 				networkID:              types.DefaultNetworkID,
 				clusterSubnetAllocator: NewSubnetAllocator(),
 			}
-			if err := na.Init(); err != nil {
+			if err := na.Init(ctx); err != nil {
 				t.Fatal(err)
 			}
 
-			if err := na.syncNodeNetworkAnnotations(listerNode); err == nil {
+			if err := na.syncNodeNetworkAnnotations(ctx, listerNode); err == nil {
 				t.Fatal("expected syncNodeNetworkAnnotations to fail due to injected patch failure")
 			}
 

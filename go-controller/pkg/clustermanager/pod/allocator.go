@@ -4,6 +4,7 @@
 package pod
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sync"
@@ -158,13 +159,13 @@ func (a *PodAllocator) GetNetworkRole(pod *corev1.Pod) (string, error) {
 
 // Reconcile allocates or releases IPs for pods updating the pod annotation
 // as necessary with all the additional information derived from those IPs
-func (a *PodAllocator) Reconcile(old, new *corev1.Pod) error {
+func (a *PodAllocator) Reconcile(ctx context.Context, old, new *corev1.Pod) error {
 	releaseFromAllocator := true
-	return a.reconcile(old, new, releaseFromAllocator)
+	return a.reconcile(ctx, old, new, releaseFromAllocator)
 }
 
 // Sync initializes the allocator with pods that already exist on the cluster
-func (a *PodAllocator) Sync(objs []interface{}) error {
+func (a *PodAllocator) Sync(ctx context.Context, objs []interface{}) error {
 	// on sync, we don't release IPs from the allocator, we are just trying to
 	// allocate annotated IPs; specifically we don't want to release IPs of
 	// completed pods that might be being used by other pods
@@ -176,7 +177,7 @@ func (a *PodAllocator) Sync(objs []interface{}) error {
 			klog.Errorf("Could not cast %T object to *corev1.Pod", obj)
 			continue
 		}
-		err := a.reconcile(nil, pod, releaseFromAllocator)
+		err := a.reconcile(ctx, nil, pod, releaseFromAllocator)
 		if err != nil {
 			klog.Errorf("Failed to sync pod %s/%s: %v", pod.Namespace, pod.Name, err)
 		}
@@ -196,7 +197,7 @@ func (a *PodAllocator) Sync(objs []interface{}) error {
 	return nil
 }
 
-func (a *PodAllocator) reconcile(old, new *corev1.Pod, releaseFromAllocator bool) error {
+func (a *PodAllocator) reconcile(ctx context.Context, old, new *corev1.Pod, releaseFromAllocator bool) error {
 	var pod *corev1.Pod
 	if old != nil {
 		pod = old
@@ -266,7 +267,7 @@ func (a *PodAllocator) reconcile(old, new *corev1.Pod, releaseFromAllocator bool
 
 	// reconcile for each NAD
 	for nadKey, network := range networkMap {
-		err = a.reconcileForNAD(old, new, nadKey, network, releaseFromAllocator)
+		err = a.reconcileForNAD(ctx, old, new, nadKey, network, releaseFromAllocator)
 		if err != nil {
 			return err
 		}
@@ -275,7 +276,7 @@ func (a *PodAllocator) reconcile(old, new *corev1.Pod, releaseFromAllocator bool
 	return nil
 }
 
-func (a *PodAllocator) reconcileForNAD(old, new *corev1.Pod, nadKey string, network *nettypes.NetworkSelectionElement, releaseIPsFromAllocator bool) error {
+func (a *PodAllocator) reconcileForNAD(ctx context.Context, old, new *corev1.Pod, nadKey string, network *nettypes.NetworkSelectionElement, releaseIPsFromAllocator bool) error {
 	var pod *corev1.Pod
 	if old != nil {
 		pod = old
@@ -287,13 +288,13 @@ func (a *PodAllocator) reconcileForNAD(old, new *corev1.Pod, nadKey string, netw
 	podCompleted := util.PodCompleted(pod)
 
 	if podCompleted || podDeleted {
-		return a.releasePodOnNAD(pod, nadKey, network, podDeleted, releaseIPsFromAllocator)
+		return a.releasePodOnNAD(ctx, pod, nadKey, network, podDeleted, releaseIPsFromAllocator)
 	}
 
-	return a.allocatePodOnNAD(pod, nadKey, network)
+	return a.allocatePodOnNAD(ctx, pod, nadKey, network)
 }
 
-func (a *PodAllocator) releasePodOnNAD(pod *corev1.Pod, nadKey string, network *nettypes.NetworkSelectionElement,
+func (a *PodAllocator) releasePodOnNAD(_ context.Context, pod *corev1.Pod, nadKey string, network *nettypes.NetworkSelectionElement,
 	podDeleted, releaseFromAllocator bool) error {
 	podAnnotation, _ := util.UnmarshalPodAnnotation(pod.Annotations, nadKey)
 	if podAnnotation == nil {
@@ -377,7 +378,7 @@ func (a *PodAllocator) releasePodOnNAD(pod *corev1.Pod, nadKey string, network *
 	return nil
 }
 
-func (a *PodAllocator) allocatePodOnNAD(pod *corev1.Pod, nadKey string, network *nettypes.NetworkSelectionElement) error {
+func (a *PodAllocator) allocatePodOnNAD(ctx context.Context, pod *corev1.Pod, nadKey string, network *nettypes.NetworkSelectionElement) error {
 	var ipAllocator subnet.IPAllocator
 	if util.DoesNetworkRequireIPAM(a.netInfo) {
 		ipAllocator = a.ipAllocator
@@ -402,6 +403,7 @@ func (a *PodAllocator) allocatePodOnNAD(pod *corev1.Pod, nadKey string, network 
 	}
 
 	updatedPod, podAnnotation, err := a.podAnnotationAllocator.AllocatePodAnnotationWithTunnelID(
+		ctx,
 		ipAllocator,
 		a.netInfo.GetNetworkName(), podIdAllocationName(nadKey, string(pod.UID)),
 		idAllocator,

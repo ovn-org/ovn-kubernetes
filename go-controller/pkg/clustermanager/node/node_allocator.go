@@ -81,11 +81,11 @@ func NewNodeAllocator(networkID int, netInfo util.NetInfo, nodeLister listers.No
 	return na
 }
 
-func (na *NodeAllocator) Init() error {
+func (na *NodeAllocator) Init(ctx context.Context) error {
 	if !na.hasNodeSubnetAllocation() {
 		return nil
 	}
-	na.CleanupStaleAnnotation()
+	na.CleanupStaleAnnotation(ctx)
 
 	clusterSubnets := na.netInfo.Subnets()
 
@@ -113,7 +113,7 @@ func (na *NodeAllocator) Init() error {
 
 // CleanupStaleAnnotation cleans up the stale annotations on all nodes.
 // If an error occurs, it logs the error and continues to the next node.
-func (na *NodeAllocator) CleanupStaleAnnotation() {
+func (na *NodeAllocator) CleanupStaleAnnotation(ctx context.Context) {
 	// only cleanup once with the default network NodeAllocator
 	if !na.netInfo.IsDefault() {
 		return
@@ -129,7 +129,7 @@ func (na *NodeAllocator) CleanupStaleAnnotation() {
 			continue
 		}
 		// to cleanup an annotation, set it to nil
-		if err = na.kube.SetAnnotationsOnNode(node.Name, map[string]interface{}{util.OVNNodeGRLRPAddrs: nil}); err != nil {
+		if err = na.kube.SetAnnotationsOnNode(ctx, node.Name, map[string]interface{}{util.OVNNodeGRLRPAddrs: nil}); err != nil {
 			klog.Warningf("Failed to clear node %s annotation %s: %v",
 				node.Name, util.OVNNodeGRLRPAddrs, err)
 		}
@@ -310,7 +310,7 @@ func (na *NodeAllocator) NeedsNodeCleanup(node *corev1.Node) (bool, error) {
 }
 
 // HandleAddUpdateNodeEvent handles the add or update node event
-func (na *NodeAllocator) HandleAddUpdateNodeEvent(node *corev1.Node) error {
+func (na *NodeAllocator) HandleAddUpdateNodeEvent(ctx context.Context, node *corev1.Node) error {
 	defer na.recordSubnetUsage()
 
 	if util.NoHostSubnet(node) {
@@ -337,7 +337,7 @@ func (na *NodeAllocator) HandleAddUpdateNodeEvent(node *corev1.Node) error {
 		return nil
 	}
 
-	return na.syncNodeNetworkAnnotations(node)
+	return na.syncNodeNetworkAnnotations(ctx, node)
 }
 
 // syncNodeNetworkAnnotations does 2 things
@@ -345,7 +345,7 @@ func (na *NodeAllocator) HandleAddUpdateNodeEvent(node *corev1.Node) error {
 //   - syncs the join subnet annotation
 //   - syncs the layer 2 tunnel id annotation
 //   - syncs the network id in the node network id annotation (legacy)
-func (na *NodeAllocator) syncNodeNetworkAnnotations(node *corev1.Node) error {
+func (na *NodeAllocator) syncNodeNetworkAnnotations(ctx context.Context, node *corev1.Node) error {
 	networkName := na.netInfo.GetNetworkName()
 
 	networkID, err := util.ParseNetworkIDAnnotation(node, networkName)
@@ -423,14 +423,14 @@ func (na *NodeAllocator) syncNodeNetworkAnnotations(node *corev1.Node) error {
 	// Also update the node annotation if the networkID doesn't match
 	if len(updatedSubnetsMap) > 0 || networkID != types.NoNetworkID || newTunnelID != types.NoTunnelID {
 		updateStart := time.Now()
-		err = na.updateNodeNetworkAnnotationsWithRetry(node.Name, updatedSubnetsMap, networkID, newTunnelID)
+		err = na.updateNodeNetworkAnnotationsWithRetry(ctx, node.Name, updatedSubnetsMap, networkID, newTunnelID)
 
 		if err != nil {
 			// Before releasing, read the node from the apiserver and keep
 			// any subnets already recorded in its host-subnet annotation.
 			// Lagging informer cache may not have latest annotations (e.g. from the previous run of the same handler)
 			releaseSubnets := allocatedSubnets
-			if latestNode, getErr := na.nodeClient.CoreV1().Nodes().Get(context.TODO(), node.Name, metav1.GetOptions{}); getErr == nil {
+			if latestNode, getErr := na.nodeClient.CoreV1().Nodes().Get(ctx, node.Name, metav1.GetOptions{}); getErr == nil {
 				if persisted, parseErr := util.ParseNodeHostSubnetAnnotation(latestNode, networkName); parseErr == nil {
 					releaseSubnets = subnetsNotPersisted(allocatedSubnets, persisted)
 				}
@@ -460,7 +460,7 @@ func (na *NodeAllocator) syncNodeNetworkAnnotations(node *corev1.Node) error {
 
 // CleanupNode removes this network's per-node annotations when a node object is available
 // and always releases allocator state for the provided node name.
-func (na *NodeAllocator) CleanupNode(nodeName string, node *corev1.Node) error {
+func (na *NodeAllocator) CleanupNode(ctx context.Context, nodeName string, node *corev1.Node) error {
 	networkName := na.netInfo.GetNetworkName()
 	if node != nil {
 		needsUpdate := util.HasNodeHostSubnetAnnotation(node, networkName)
@@ -483,7 +483,7 @@ func (na *NodeAllocator) CleanupNode(nodeName string, node *corev1.Node) error {
 		if needsUpdate {
 			hostSubnetsMap := map[string][]*net.IPNet{networkName: nil}
 			// passing util.InvalidID deletes the network/tunnel id annotation for the network.
-			if err := na.updateNodeNetworkAnnotationsWithRetry(nodeName, hostSubnetsMap, types.InvalidID, types.InvalidID); err != nil {
+			if err := na.updateNodeNetworkAnnotationsWithRetry(ctx, nodeName, hostSubnetsMap, types.InvalidID, types.InvalidID); err != nil {
 				return fmt.Errorf("failed to clear node %q subnet annotation for network %s: %w",
 					nodeName, networkName, err)
 			}
@@ -573,7 +573,7 @@ func subnetsNotPersisted(allocated, persisted []*net.IPNet) []*net.IPNet {
 }
 
 // updateNodeNetworkAnnotationsWithRetry will update the node's subnet annotation and network id annotation
-func (na *NodeAllocator) updateNodeNetworkAnnotationsWithRetry(nodeName string, hostSubnetsMap map[string][]*net.IPNet, networkId, tunnelID int) error {
+func (na *NodeAllocator) updateNodeNetworkAnnotationsWithRetry(ctx context.Context, nodeName string, hostSubnetsMap map[string][]*net.IPNet, networkId, tunnelID int) error {
 	// Retry if it fails because of potential conflict which is transient. Return error in the
 	// case of other errors (say temporary API server down), and it will be taken care of by the
 	// retry mechanism.
@@ -612,7 +612,7 @@ func (na *NodeAllocator) updateNodeNetworkAnnotationsWithRetry(nodeName string, 
 		// Patch only the changed annotations via the status subresource instead
 		// of a full status update, which would overwrite fields trimmed by the
 		// informer transform (e.g. Images, VolumesAttached).
-		return na.kube.PatchNodeStatusAnnotations(node, cnode)
+		return na.kube.PatchNodeStatusAnnotations(ctx, node, cnode)
 	})
 	if resultErr != nil {
 		return fmt.Errorf("failed to update node %s annotation: %w", nodeName, resultErr)
@@ -621,7 +621,7 @@ func (na *NodeAllocator) updateNodeNetworkAnnotationsWithRetry(nodeName string, 
 }
 
 // Cleanup the subnet annotations from the node
-func (na *NodeAllocator) Cleanup() error {
+func (na *NodeAllocator) Cleanup(ctx context.Context) error {
 	networkName := na.netInfo.GetNetworkName()
 
 	// remove hostsubnet annotation for this network
@@ -640,7 +640,7 @@ func (na *NodeAllocator) Cleanup() error {
 
 		hostSubnetsMap := map[string][]*net.IPNet{networkName: nil}
 		// passing util.InvalidID deletes the network/tunnel id annotation for the network.
-		err = na.updateNodeNetworkAnnotationsWithRetry(node.Name, hostSubnetsMap, types.InvalidID, types.InvalidID)
+		err = na.updateNodeNetworkAnnotationsWithRetry(ctx, node.Name, hostSubnetsMap, types.InvalidID, types.InvalidID)
 		if err != nil {
 			return fmt.Errorf("failed to clear node %q subnet annotation for network %s",
 				node.Name, networkName)

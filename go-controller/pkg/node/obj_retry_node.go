@@ -4,6 +4,7 @@
 package node
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"reflect"
@@ -151,7 +152,7 @@ func (h *nodeEventHandler) GetResourceFromInformerCache(key string) (interface{}
 // the function was executed from iterateRetryResources, AddResource adds the
 // specified object to the cluster according to its type and returns the error,
 // if any, yielded during object creation.
-func (h *nodeEventHandler) AddResource(obj interface{}, _ bool) error {
+func (h *nodeEventHandler) AddResource(_ context.Context, obj interface{}, _ bool) error {
 	switch h.objType {
 	case factory.EndpointSliceForStaleConntrackRemovalType:
 		// no action needed upon add event
@@ -195,7 +196,7 @@ func (h *nodeEventHandler) AddResource(obj interface{}, _ bool) error {
 // the specified object in the cluster to its version in newObj according to its type
 // and returns the error, if any, yielded during the object update. The inRetryCache
 // boolean argument is to indicate if the given resource is in the retryCache or not.
-func (h *nodeEventHandler) UpdateResource(oldObj, newObj interface{}, _ bool) error {
+func (h *nodeEventHandler) UpdateResource(_ context.Context, oldObj, newObj interface{}, _ bool) error {
 	switch h.objType {
 	case factory.EndpointSliceForStaleConntrackRemovalType:
 		oldEndpointSlice := oldObj.(*discovery.EndpointSlice)
@@ -298,7 +299,7 @@ func (h *nodeEventHandler) UpdateResource(oldObj, newObj interface{}, _ bool) er
 // deletes the object from the cluster according to the delete logic of its resource type.
 // cachedObj is the internal cache entry for this object, used for now for pods and network
 // policies.
-func (h *nodeEventHandler) DeleteResource(obj, _ interface{}) error {
+func (h *nodeEventHandler) DeleteResource(_ context.Context, obj, _ interface{}) error {
 	switch h.objType {
 	case factory.EndpointSliceForStaleConntrackRemovalType:
 		endpointslice := obj.(*discovery.EndpointSlice)
@@ -319,7 +320,7 @@ func (h *nodeEventHandler) DeleteResource(obj, _ interface{}) error {
 	}
 }
 
-func (h *nodeEventHandler) SyncFunc(objs []interface{}) error {
+func (h *nodeEventHandler) SyncFunc(_ context.Context, objs []interface{}) error {
 	var syncFunc func([]interface{}) error
 
 	if h.syncFunc != nil {

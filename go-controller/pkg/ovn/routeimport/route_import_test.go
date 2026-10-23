@@ -4,6 +4,7 @@
 package routeimport
 
 import (
+	"context"
 	"errors"
 	"net"
 	"sync"
@@ -616,7 +617,7 @@ func Test_controller_syncNetwork(t *testing.T) {
 				config.Default.Transport = types.NetworkTransportNoOverlay
 			}
 
-			err = c.syncNetwork(tt.args.network)
+			err = c.syncNetwork(context.Background(), tt.args.network)
 			if tt.wantErr {
 				g.Expect(err).To(gomega.HaveOccurred())
 				return
@@ -707,7 +708,7 @@ func Test_controller_syncRouteUpdate(t *testing.T) {
 
 			var reconciled []string
 			var m sync.Mutex
-			reconcile := func(key string) error {
+			reconcile := func(_ context.Context, key string) error {
 				m.Lock()
 				defer m.Unlock()
 				reconciled = append(reconciled, key)
@@ -841,7 +842,7 @@ func Test_controller_syncLinkUpdate(t *testing.T) {
 
 			var reconciled []string
 			var m sync.Mutex
-			reconcile := func(key string) error {
+			reconcile := func(_ context.Context, key string) error {
 				m.Lock()
 				defer m.Unlock()
 				reconciled = append(reconciled, key)

@@ -44,7 +44,7 @@ func (m *apbRouteManager) getManagedFields(route *adminpolicybasedrouteapi.Admin
 }
 
 //lint:ignore U1000 generic interfaces throw false-positives
-func (m *apbRouteManager) updateStatus(route *adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute, applyOpts *metav1.ApplyOptions,
+func (m *apbRouteManager) updateStatus(ctx context.Context, route *adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute, applyOpts *metav1.ApplyOptions,
 	applyEmptyOrFailed bool) error {
 	if route == nil {
 		return nil
@@ -74,13 +74,13 @@ func (m *apbRouteManager) updateStatus(route *adminpolicybasedrouteapi.AdminPoli
 	applyObj := adminpolicybasedrouteapply.AdminPolicyBasedExternalRoute(route.Name).
 		WithStatus(applyStatus)
 
-	_, err := m.client.K8sV1().AdminPolicyBasedExternalRoutes().ApplyStatus(context.TODO(), applyObj, *applyOpts)
+	_, err := m.client.K8sV1().AdminPolicyBasedExternalRoutes().ApplyStatus(ctx, applyObj, *applyOpts)
 	return err
 }
 
 //lint:ignore U1000 generic interfaces throw false-positives
-func (m *apbRouteManager) cleanupStatus(route *adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute, applyOpts *metav1.ApplyOptions) error {
+func (m *apbRouteManager) cleanupStatus(ctx context.Context, route *adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute, applyOpts *metav1.ApplyOptions) error {
 	applyObj := adminpolicybasedrouteapply.AdminPolicyBasedExternalRoute(route.Name)
-	_, err := m.client.K8sV1().AdminPolicyBasedExternalRoutes().ApplyStatus(context.TODO(), applyObj, *applyOpts)
+	_, err := m.client.K8sV1().AdminPolicyBasedExternalRoutes().ApplyStatus(ctx, applyObj, *applyOpts)
 	return err
 }

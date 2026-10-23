@@ -4,6 +4,7 @@
 package node
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 
@@ -111,7 +112,7 @@ func (h *gwEventHandler) GetResourceFromInformerCache(key string) (interface{}, 
 // the function was executed from iterateRetryResources, AddResource adds the
 // specified object to the cluster according to its type and returns the error,
 // if any, yielded during object creation.
-func (h *gwEventHandler) AddResource(obj interface{}, _ bool) error {
+func (h *gwEventHandler) AddResource(_ context.Context, obj interface{}, _ bool) error {
 	switch h.objType {
 	case factory.ServiceForGatewayType:
 		svc := obj.(*corev1.Service)
@@ -134,7 +135,7 @@ func (h *gwEventHandler) AddResource(obj interface{}, _ bool) error {
 // the specified object in the cluster to its version in newObj according to its type
 // and returns the error, if any, yielded during the object update. The inRetryCache
 // boolean argument is to indicate if the given resource is in the retryCache or not.
-func (h *gwEventHandler) UpdateResource(oldObj, newObj interface{}, _ bool) error {
+func (h *gwEventHandler) UpdateResource(_ context.Context, oldObj, newObj interface{}, _ bool) error {
 	switch h.objType {
 	case factory.ServiceForGatewayType:
 		oldSvc := oldObj.(*corev1.Service)
@@ -160,7 +161,7 @@ func (h *gwEventHandler) UpdateResource(oldObj, newObj interface{}, _ bool) erro
 // deletes the object from the cluster according to the delete logic of its resource type.
 // cachedObj is the internal cache entry for this object, used for now for pods and network
 // policies.
-func (h *gwEventHandler) DeleteResource(obj, _ interface{}) error {
+func (h *gwEventHandler) DeleteResource(_ context.Context, obj, _ interface{}) error {
 	switch h.objType {
 	case factory.ServiceForGatewayType:
 		svc := obj.(*corev1.Service)
@@ -179,7 +180,7 @@ func (h *gwEventHandler) DeleteResource(obj, _ interface{}) error {
 	}
 }
 
-func (h *gwEventHandler) SyncFunc(objs []interface{}) error {
+func (h *gwEventHandler) SyncFunc(_ context.Context, objs []interface{}) error {
 	var syncFunc func([]interface{}) error
 
 	if h.syncFunc != nil {

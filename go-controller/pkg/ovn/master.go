@@ -4,6 +4,7 @@
 package ovn
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -302,7 +303,7 @@ func (oc *DefaultNetworkController) syncNodesPeriodic() {
 // watchNodes() will be called for all existing nodes at startup anyway.
 // Note that this list will include the 'join' cluster switch, which we
 // do not want to delete.
-func (oc *DefaultNetworkController) syncNodes(kNodes []interface{}) error {
+func (oc *DefaultNetworkController) syncNodes(_ context.Context, kNodes []interface{}) error {
 	foundNodes := sets.New[string]()
 	var localNode *corev1.Node
 	remoteZoneNodes := make([]*corev1.Node, 0, len(kNodes))
@@ -523,7 +524,7 @@ func nodeNeedsSync(syncs *nodeSyncs) bool {
 		syncs.syncReroute
 }
 
-func (oc *DefaultNetworkController) addUpdateLocalNodeEvent(node *corev1.Node, nSyncs *nodeSyncs) error {
+func (oc *DefaultNetworkController) addUpdateLocalNodeEvent(_ context.Context, node *corev1.Node, nSyncs *nodeSyncs) error {
 	var hostSubnets []*net.IPNet
 	var errs []error
 	var err error

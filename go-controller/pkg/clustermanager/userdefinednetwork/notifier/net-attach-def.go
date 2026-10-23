@@ -4,6 +4,8 @@
 package notifier
 
 import (
+	"context"
+
 	netv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	netv1infomer "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/informers/externalversions/k8s.cni.cncf.io/v1"
 
@@ -47,7 +49,7 @@ func (c *NetAttachDefNotifier) needUpdate(_, _ *netv1.NetworkAttachmentDefinitio
 	return true
 }
 
-func (c *NetAttachDefNotifier) reconcile(key string) error {
+func (c *NetAttachDefNotifier) reconcile(_ context.Context, key string) error {
 	for _, subscriber := range c.subscribers {
 		if subscriber != nil {
 			// enqueue the reconciled NAD key in the subscribers workqueue to

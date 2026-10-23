@@ -146,7 +146,7 @@ var _ = Describe("MgmtPortDeviceManager tests", func() {
 			DeferCleanup(wf.Shutdown)
 			mockDeviceDetails(sriovnetOpsMock, device0, 0, 4)
 
-			kubeMock.On("SetAnnotationsOnNode", testNodeName,
+			kubeMock.On("SetAnnotationsOnNode", mock.Anything, testNodeName,
 				mock.Anything).Return(nil).Once()
 
 			mpdm := NewMgmtPortDeviceManager(kubeMock, wf, testNodeName, allocator)
@@ -169,7 +169,7 @@ var _ = Describe("MgmtPortDeviceManager tests", func() {
 			)
 			DeferCleanup(wf.Shutdown)
 			mockDeviceDetails(sriovnetOpsMock, matchDevice, 3, 5)
-			kubeMock.On("SetAnnotationsOnNode", testNodeName,
+			kubeMock.On("SetAnnotationsOnNode", mock.Anything, testNodeName,
 				mock.Anything).Return(nil).Once()
 
 			mpdm := NewMgmtPortDeviceManager(kubeMock, wf, testNodeName, allocator)

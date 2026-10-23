@@ -4,6 +4,7 @@
 package util
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -440,7 +441,7 @@ func UpdateNodeManagementPortAnnotation(kube kube.Interface, nodeName string, cf
 		return fmt.Errorf("failed to marshal node management port details %v: %w", cfgs, err)
 	}
 	return retry.RetryOnConflict(OvnConflictBackoff, func() error {
-		return kube.SetAnnotationsOnNode(nodeName, map[string]interface{}{OvnNodeManagementPort: string(bytes)})
+		return kube.SetAnnotationsOnNode(context.TODO(), nodeName, map[string]interface{}{OvnNodeManagementPort: string(bytes)})
 	})
 }
 

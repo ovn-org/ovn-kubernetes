@@ -4,6 +4,7 @@
 package ovn
 
 import (
+	"context"
 	"testing"
 
 	"github.com/onsi/gomega"
@@ -100,12 +101,12 @@ func TestSyncUplinkStateDeleteUsesCachedUplink(t *testing.T) {
 		nodeName:           "node-a",
 	}
 
-	g.Expect(controller.syncUplinkState(state.Name)).To(gomega.Succeed())
+	g.Expect(controller.syncUplinkState(context.Background(), state.Name)).To(gomega.Succeed())
 	g.Expect(routeImportManager.reconciledNetworks).To(gomega.ConsistOf("blue"))
 	routeImportManager.reconciledNetworks = nil
 
 	g.Expect(indexer.Delete(state)).To(gomega.Succeed())
-	g.Expect(controller.syncUplinkState(state.Name)).To(gomega.Succeed())
+	g.Expect(controller.syncUplinkState(context.Background(), state.Name)).To(gomega.Succeed())
 	g.Expect(routeImportManager.reconciledNetworks).To(gomega.ConsistOf("blue"))
 	g.Expect(controller.uplinkByStateKey).To(gomega.BeEmpty())
 }

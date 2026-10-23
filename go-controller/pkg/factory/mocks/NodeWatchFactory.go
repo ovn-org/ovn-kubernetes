@@ -6,6 +6,8 @@
 package mocks
 
 import (
+	context "context"
+
 	k8s_cni_cncf_iov1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/informers/externalversions/k8s.cni.cncf.io/v1"
 	v1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/informers/externalversions/adminpolicybasedroute/v1"
 	clusternetworkconnectv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/clusternetworkconnect/v1/apis/informers/externalversions/clusternetworkconnect/v1"
@@ -49,7 +51,7 @@ func (_m *NodeWatchFactory) APBRouteInformer() v1.AdminPolicyBasedExternalRouteI
 }
 
 // AddFilteredEndpointSliceHandler provides a mock function with given fields: namespace, sel, handlerFuncs, processExisting
-func (_m *NodeWatchFactory) AddFilteredEndpointSliceHandler(namespace string, sel labels.Selector, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*factory.Handler, error) {
+func (_m *NodeWatchFactory) AddFilteredEndpointSliceHandler(namespace string, sel labels.Selector, handlerFuncs cache.ResourceEventHandler, processExisting func(context.Context, []interface{}) error) (*factory.Handler, error) {
 	ret := _m.Called(namespace, sel, handlerFuncs, processExisting)
 
 	if len(ret) == 0 {
@@ -58,10 +60,10 @@ func (_m *NodeWatchFactory) AddFilteredEndpointSliceHandler(namespace string, se
 
 	var r0 *factory.Handler
 	var r1 error
-	if rf, ok := ret.Get(0).(func(string, labels.Selector, cache.ResourceEventHandler, func([]interface{}) error) (*factory.Handler, error)); ok {
+	if rf, ok := ret.Get(0).(func(string, labels.Selector, cache.ResourceEventHandler, func(context.Context, []interface{}) error) (*factory.Handler, error)); ok {
 		return rf(namespace, sel, handlerFuncs, processExisting)
 	}
-	if rf, ok := ret.Get(0).(func(string, labels.Selector, cache.ResourceEventHandler, func([]interface{}) error) *factory.Handler); ok {
+	if rf, ok := ret.Get(0).(func(string, labels.Selector, cache.ResourceEventHandler, func(context.Context, []interface{}) error) *factory.Handler); ok {
 		r0 = rf(namespace, sel, handlerFuncs, processExisting)
 	} else {
 		if ret.Get(0) != nil {
@@ -69,7 +71,7 @@ func (_m *NodeWatchFactory) AddFilteredEndpointSliceHandler(namespace string, se
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(string, labels.Selector, cache.ResourceEventHandler, func([]interface{}) error) error); ok {
+	if rf, ok := ret.Get(1).(func(string, labels.Selector, cache.ResourceEventHandler, func(context.Context, []interface{}) error) error); ok {
 		r1 = rf(namespace, sel, handlerFuncs, processExisting)
 	} else {
 		r1 = ret.Error(1)
@@ -79,7 +81,7 @@ func (_m *NodeWatchFactory) AddFilteredEndpointSliceHandler(namespace string, se
 }
 
 // AddFilteredServiceHandler provides a mock function with given fields: namespace, handlerFuncs, processExisting
-func (_m *NodeWatchFactory) AddFilteredServiceHandler(namespace string, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*factory.Handler, error) {
+func (_m *NodeWatchFactory) AddFilteredServiceHandler(namespace string, handlerFuncs cache.ResourceEventHandler, processExisting func(context.Context, []interface{}) error) (*factory.Handler, error) {
 	ret := _m.Called(namespace, handlerFuncs, processExisting)
 
 	if len(ret) == 0 {
@@ -88,10 +90,10 @@ func (_m *NodeWatchFactory) AddFilteredServiceHandler(namespace string, handlerF
 
 	var r0 *factory.Handler
 	var r1 error
-	if rf, ok := ret.Get(0).(func(string, cache.ResourceEventHandler, func([]interface{}) error) (*factory.Handler, error)); ok {
+	if rf, ok := ret.Get(0).(func(string, cache.ResourceEventHandler, func(context.Context, []interface{}) error) (*factory.Handler, error)); ok {
 		return rf(namespace, handlerFuncs, processExisting)
 	}
-	if rf, ok := ret.Get(0).(func(string, cache.ResourceEventHandler, func([]interface{}) error) *factory.Handler); ok {
+	if rf, ok := ret.Get(0).(func(string, cache.ResourceEventHandler, func(context.Context, []interface{}) error) *factory.Handler); ok {
 		r0 = rf(namespace, handlerFuncs, processExisting)
 	} else {
 		if ret.Get(0) != nil {
@@ -99,7 +101,7 @@ func (_m *NodeWatchFactory) AddFilteredServiceHandler(namespace string, handlerF
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(string, cache.ResourceEventHandler, func([]interface{}) error) error); ok {
+	if rf, ok := ret.Get(1).(func(string, cache.ResourceEventHandler, func(context.Context, []interface{}) error) error); ok {
 		r1 = rf(namespace, handlerFuncs, processExisting)
 	} else {
 		r1 = ret.Error(1)
@@ -109,7 +111,7 @@ func (_m *NodeWatchFactory) AddFilteredServiceHandler(namespace string, handlerF
 }
 
 // AddNamespaceHandler provides a mock function with given fields: handlerFuncs, processExisting
-func (_m *NodeWatchFactory) AddNamespaceHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*factory.Handler, error) {
+func (_m *NodeWatchFactory) AddNamespaceHandler(handlerFuncs cache.ResourceEventHandler, processExisting func(context.Context, []interface{}) error) (*factory.Handler, error) {
 	ret := _m.Called(handlerFuncs, processExisting)
 
 	if len(ret) == 0 {
@@ -118,10 +120,10 @@ func (_m *NodeWatchFactory) AddNamespaceHandler(handlerFuncs cache.ResourceEvent
 
 	var r0 *factory.Handler
 	var r1 error
-	if rf, ok := ret.Get(0).(func(cache.ResourceEventHandler, func([]interface{}) error) (*factory.Handler, error)); ok {
+	if rf, ok := ret.Get(0).(func(cache.ResourceEventHandler, func(context.Context, []interface{}) error) (*factory.Handler, error)); ok {
 		return rf(handlerFuncs, processExisting)
 	}
-	if rf, ok := ret.Get(0).(func(cache.ResourceEventHandler, func([]interface{}) error) *factory.Handler); ok {
+	if rf, ok := ret.Get(0).(func(cache.ResourceEventHandler, func(context.Context, []interface{}) error) *factory.Handler); ok {
 		r0 = rf(handlerFuncs, processExisting)
 	} else {
 		if ret.Get(0) != nil {
@@ -129,7 +131,7 @@ func (_m *NodeWatchFactory) AddNamespaceHandler(handlerFuncs cache.ResourceEvent
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(cache.ResourceEventHandler, func([]interface{}) error) error); ok {
+	if rf, ok := ret.Get(1).(func(cache.ResourceEventHandler, func(context.Context, []interface{}) error) error); ok {
 		r1 = rf(handlerFuncs, processExisting)
 	} else {
 		r1 = ret.Error(1)
@@ -139,7 +141,7 @@ func (_m *NodeWatchFactory) AddNamespaceHandler(handlerFuncs cache.ResourceEvent
 }
 
 // AddPodHandler provides a mock function with given fields: handlerFuncs, processExisting
-func (_m *NodeWatchFactory) AddPodHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*factory.Handler, error) {
+func (_m *NodeWatchFactory) AddPodHandler(handlerFuncs cache.ResourceEventHandler, processExisting func(context.Context, []interface{}) error) (*factory.Handler, error) {
 	ret := _m.Called(handlerFuncs, processExisting)
 
 	if len(ret) == 0 {
@@ -148,10 +150,10 @@ func (_m *NodeWatchFactory) AddPodHandler(handlerFuncs cache.ResourceEventHandle
 
 	var r0 *factory.Handler
 	var r1 error
-	if rf, ok := ret.Get(0).(func(cache.ResourceEventHandler, func([]interface{}) error) (*factory.Handler, error)); ok {
+	if rf, ok := ret.Get(0).(func(cache.ResourceEventHandler, func(context.Context, []interface{}) error) (*factory.Handler, error)); ok {
 		return rf(handlerFuncs, processExisting)
 	}
-	if rf, ok := ret.Get(0).(func(cache.ResourceEventHandler, func([]interface{}) error) *factory.Handler); ok {
+	if rf, ok := ret.Get(0).(func(cache.ResourceEventHandler, func(context.Context, []interface{}) error) *factory.Handler); ok {
 		r0 = rf(handlerFuncs, processExisting)
 	} else {
 		if ret.Get(0) != nil {
@@ -159,7 +161,7 @@ func (_m *NodeWatchFactory) AddPodHandler(handlerFuncs cache.ResourceEventHandle
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(cache.ResourceEventHandler, func([]interface{}) error) error); ok {
+	if rf, ok := ret.Get(1).(func(cache.ResourceEventHandler, func(context.Context, []interface{}) error) error); ok {
 		r1 = rf(handlerFuncs, processExisting)
 	} else {
 		r1 = ret.Error(1)
@@ -169,7 +171,7 @@ func (_m *NodeWatchFactory) AddPodHandler(handlerFuncs cache.ResourceEventHandle
 }
 
 // AddServiceHandler provides a mock function with given fields: handlerFuncs, processExisting
-func (_m *NodeWatchFactory) AddServiceHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*factory.Handler, error) {
+func (_m *NodeWatchFactory) AddServiceHandler(handlerFuncs cache.ResourceEventHandler, processExisting func(context.Context, []interface{}) error) (*factory.Handler, error) {
 	ret := _m.Called(handlerFuncs, processExisting)
 
 	if len(ret) == 0 {
@@ -178,10 +180,10 @@ func (_m *NodeWatchFactory) AddServiceHandler(handlerFuncs cache.ResourceEventHa
 
 	var r0 *factory.Handler
 	var r1 error
-	if rf, ok := ret.Get(0).(func(cache.ResourceEventHandler, func([]interface{}) error) (*factory.Handler, error)); ok {
+	if rf, ok := ret.Get(0).(func(cache.ResourceEventHandler, func(context.Context, []interface{}) error) (*factory.Handler, error)); ok {
 		return rf(handlerFuncs, processExisting)
 	}
-	if rf, ok := ret.Get(0).(func(cache.ResourceEventHandler, func([]interface{}) error) *factory.Handler); ok {
+	if rf, ok := ret.Get(0).(func(cache.ResourceEventHandler, func(context.Context, []interface{}) error) *factory.Handler); ok {
 		r0 = rf(handlerFuncs, processExisting)
 	} else {
 		if ret.Get(0) != nil {
@@ -189,7 +191,7 @@ func (_m *NodeWatchFactory) AddServiceHandler(handlerFuncs cache.ResourceEventHa
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(cache.ResourceEventHandler, func([]interface{}) error) error); ok {
+	if rf, ok := ret.Get(1).(func(cache.ResourceEventHandler, func(context.Context, []interface{}) error) error); ok {
 		r1 = rf(handlerFuncs, processExisting)
 	} else {
 		r1 = ret.Error(1)

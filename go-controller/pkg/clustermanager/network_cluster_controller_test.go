@@ -30,6 +30,7 @@ import (
 )
 
 func TestHandleNetworkRefChangeUpdatesStatusAndMetrics(t *testing.T) {
+	ctx := context.Background()
 	g := gomega.NewWithT(t)
 
 	err := config.PrepareTestConfig()
@@ -69,7 +70,7 @@ func TestHandleNetworkRefChangeUpdatesStatusAndMetrics(t *testing.T) {
 	ncc := &networkClusterController{
 		ReconcilableNetInfo: util.NewReconcilableNetInfo(netInfo),
 		nodeReconciler:      nodeController,
-		statusReporter: func(networkName, _ string, condition *metav1.Condition, _ ...*util.EventDetails) error {
+		statusReporter: func(_ context.Context, networkName, _ string, condition *metav1.Condition, _ ...*util.EventDetails) error {
 			gotNetwork = networkName
 			if condition != nil {
 				gotCondStatus = string(condition.Status)
@@ -79,38 +80,39 @@ func TestHandleNetworkRefChangeUpdatesStatusAndMetrics(t *testing.T) {
 		},
 	}
 
-	ncc.HandleNetworkRefChange("node1", true)
+	ncc.HandleNetworkRefChange(ctx, "node1", true)
 	g.Expect(gotNetwork).To(gomega.Equal(networkName))
 	g.Expect(gotCondStatus).To(gomega.Equal(string(metav1.ConditionTrue)))
 	g.Expect(gotCondMsg).To(gomega.Equal("1 node(s) rendered with network"))
 	g.Expect(getUDNNodesRenderedMetric(t, networkName)).To(gomega.Equal(1.0))
 
-	ncc.HandleNetworkRefChange("node1", true)
+	ncc.HandleNetworkRefChange(ctx, "node1", true)
 	g.Expect(gotNetwork).To(gomega.Equal(networkName))
 	g.Expect(gotCondStatus).To(gomega.Equal(string(metav1.ConditionTrue)))
 	g.Expect(gotCondMsg).To(gomega.Equal("1 node(s) rendered with network"))
 	g.Expect(getUDNNodesRenderedMetric(t, networkName)).To(gomega.Equal(1.0))
 
-	ncc.HandleNetworkRefChange("node2", true)
+	ncc.HandleNetworkRefChange(ctx, "node2", true)
 	g.Expect(gotNetwork).To(gomega.Equal(networkName))
 	g.Expect(gotCondStatus).To(gomega.Equal(string(metav1.ConditionTrue)))
 	g.Expect(gotCondMsg).To(gomega.Equal("2 node(s) rendered with network"))
 	g.Expect(getUDNNodesRenderedMetric(t, networkName)).To(gomega.Equal(2.0))
 
-	ncc.HandleNetworkRefChange("node2", false)
+	ncc.HandleNetworkRefChange(ctx, "node2", false)
 	g.Expect(gotNetwork).To(gomega.Equal(networkName))
 	g.Expect(gotCondStatus).To(gomega.Equal(string(metav1.ConditionTrue)))
 	g.Expect(gotCondMsg).To(gomega.Equal("1 node(s) rendered with network"))
 	g.Expect(getUDNNodesRenderedMetric(t, networkName)).To(gomega.Equal(1.0))
 
-	ncc.HandleNetworkRefChange("node1", false)
-	ncc.HandleNetworkRefChange("node1", false)
+	ncc.HandleNetworkRefChange(ctx, "node1", false)
+	ncc.HandleNetworkRefChange(ctx, "node1", false)
 	g.Expect(gotCondStatus).To(gomega.Equal(string(metav1.ConditionFalse)))
 	g.Expect(gotCondMsg).To(gomega.Equal("no nodes currently rendered with network"))
 	g.Expect(getUDNNodesRenderedMetric(t, networkName)).To(gomega.Equal(0.0))
 }
 
 func TestHandleNetworkRefChangeCleanupWithZeroGraceOnStart(t *testing.T) {
+	ctx := context.Background()
 	g := gomega.NewWithT(t)
 
 	err := config.PrepareTestConfig()
@@ -168,12 +170,12 @@ func TestHandleNetworkRefChangeCleanupWithZeroGraceOnStart(t *testing.T) {
 		nil,
 		nodeController,
 	)
-	g.Expect(ncc.init()).To(gomega.Succeed())
-	g.Expect(ncc.Start(context.Background())).To(gomega.Succeed())
+	g.Expect(ncc.init(ctx)).To(gomega.Succeed())
+	g.Expect(ncc.Start(ctx)).To(gomega.Succeed())
 	defer ncc.Stop()
 
 	g.Eventually(func() bool {
-		updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), node.Name, metav1.GetOptions{})
+		updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(ctx, node.Name, metav1.GetOptions{})
 		if err != nil {
 			return false
 		}
@@ -186,6 +188,7 @@ func TestHandleNetworkRefChangeCleanupWithZeroGraceOnStart(t *testing.T) {
 }
 
 func TestHandleNetworkRefChangeCleanupWithZeroGraceAfterStart(t *testing.T) {
+	ctx := context.Background()
 	g := gomega.NewWithT(t)
 
 	err := config.PrepareTestConfig()
@@ -243,19 +246,19 @@ func TestHandleNetworkRefChangeCleanupWithZeroGraceAfterStart(t *testing.T) {
 		nil,
 		nodeController,
 	)
-	g.Expect(ncc.init()).To(gomega.Succeed())
-	g.Expect(ncc.Start(context.Background())).To(gomega.Succeed())
+	g.Expect(ncc.init(ctx)).To(gomega.Succeed())
+	g.Expect(ncc.Start(ctx)).To(gomega.Succeed())
 	defer ncc.Stop()
 
-	updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), node.Name, metav1.GetOptions{})
+	updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(ctx, node.Name, metav1.GetOptions{})
 	g.Expect(err).ToNot(gomega.HaveOccurred())
 	g.Expect(util.HasNodeHostSubnetAnnotation(updatedNode, networkName)).To(gomega.BeTrue())
 
 	nm.SetNodeActive(networkName, node.Name, false)
-	ncc.HandleNetworkRefChange(node.Name, false)
+	ncc.HandleNetworkRefChange(ctx, node.Name, false)
 
 	g.Eventually(func() bool {
-		updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), node.Name, metav1.GetOptions{})
+		updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(ctx, node.Name, metav1.GetOptions{})
 		if err != nil {
 			return false
 		}
@@ -268,6 +271,7 @@ func TestHandleNetworkRefChangeCleanupWithZeroGraceAfterStart(t *testing.T) {
 }
 
 func TestHandleNetworkRefChangeAllocatesOnActivation(t *testing.T) {
+	ctx := context.Background()
 	g := gomega.NewWithT(t)
 
 	err := config.PrepareTestConfig()
@@ -317,13 +321,13 @@ func TestHandleNetworkRefChangeAllocatesOnActivation(t *testing.T) {
 		nil,
 		nodeController,
 	)
-	g.Expect(ncc.init()).To(gomega.Succeed())
-	g.Expect(ncc.Start(context.Background())).To(gomega.Succeed())
+	g.Expect(ncc.init(ctx)).To(gomega.Succeed())
+	g.Expect(ncc.Start(ctx)).To(gomega.Succeed())
 	defer ncc.Stop()
 
 	// Ensure node does not get allocated while inactive.
 	g.Consistently(func() bool {
-		updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), node.Name, metav1.GetOptions{})
+		updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(ctx, node.Name, metav1.GetOptions{})
 		if err != nil {
 			return false
 		}
@@ -332,10 +336,10 @@ func TestHandleNetworkRefChangeAllocatesOnActivation(t *testing.T) {
 
 	// Activate and verify allocation occurs via retry framework.
 	nm.SetNodeActive(networkName, node.Name, true)
-	ncc.HandleNetworkRefChange(node.Name, true)
+	ncc.HandleNetworkRefChange(ctx, node.Name, true)
 
 	g.Eventually(func() bool {
-		updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), node.Name, metav1.GetOptions{})
+		updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(ctx, node.Name, metav1.GetOptions{})
 		if err != nil {
 			return false
 		}
@@ -344,6 +348,7 @@ func TestHandleNetworkRefChangeAllocatesOnActivation(t *testing.T) {
 }
 
 func TestReconcileNodeCleansUpOnNoHostSubnetTransition(t *testing.T) {
+	ctx := context.Background()
 	g := gomega.NewWithT(t)
 
 	err := config.PrepareTestConfig()
@@ -410,11 +415,11 @@ func TestReconcileNodeCleansUpOnNoHostSubnetTransition(t *testing.T) {
 		nil,
 		nodeController,
 	)
-	g.Expect(ncc.init()).To(gomega.Succeed())
+	g.Expect(ncc.init(ctx)).To(gomega.Succeed())
 
-	g.Expect(ncc.ReconcileNode(oldNode, newNode, nil, nil)).To(gomega.Succeed())
+	g.Expect(ncc.ReconcileNode(ctx, oldNode, newNode, nil, nil)).To(gomega.Succeed())
 
-	updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), newNode.Name, metav1.GetOptions{})
+	updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(ctx, newNode.Name, metav1.GetOptions{})
 	g.Expect(err).ToNot(gomega.HaveOccurred())
 	g.Expect(util.HasNodeHostSubnetAnnotation(updatedNode, networkName)).To(gomega.BeFalse())
 	_, err = util.ParseNetworkIDAnnotation(updatedNode, networkName)
@@ -422,6 +427,7 @@ func TestReconcileNodeCleansUpOnNoHostSubnetTransition(t *testing.T) {
 }
 
 func TestReconcileNodeMarksNodeSyncFailedOnCleanupError(t *testing.T) {
+	ctx := context.Background()
 	g := gomega.NewWithT(t)
 
 	err := config.PrepareTestConfig()
@@ -473,9 +479,9 @@ func TestReconcileNodeMarksNodeSyncFailedOnCleanupError(t *testing.T) {
 		nil,
 		nodeController,
 	)
-	g.Expect(ncc.init()).To(gomega.Succeed())
+	g.Expect(ncc.init(ctx)).To(gomega.Succeed())
 
-	err = ncc.ReconcileNode(nil, node, nil, nil)
+	err = ncc.ReconcileNode(ctx, nil, node, nil, nil)
 	g.Expect(err).To(gomega.HaveOccurred())
 	_, failed := ncc.nodeSyncFailed.Load(node.Name)
 	g.Expect(failed).To(gomega.BeTrue())

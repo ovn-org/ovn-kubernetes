@@ -457,7 +457,7 @@ func startFakeController(oc *DefaultNetworkController, wg *sync.WaitGroup) []*ne
 	}
 
 	startDefaultNodeController(oc)
-	gomega.Expect(oc.StartServiceController(wg, false)).To(gomega.Succeed())
+	gomega.Expect(oc.StartServiceController(context.Background(), wg, false)).To(gomega.Succeed())
 
 	return clusterSubnets
 }
@@ -761,6 +761,7 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 			p := func(*nbdb.LogicalRouterStaticRoute) bool { return false }
 			err = libovsdbops.CreateOrReplaceLogicalRouterStaticRouteWithPredicate(nbClient,
 				types.OVNClusterRouter, badRoute, p)
+
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			ginkgo.By("Syncing node with OVNK")
 			node, err := oc.kube.GetNodeForWindows(testNode.Name)
@@ -854,12 +855,13 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 			oc.nbClient = recordingClient
 			node, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), testNode.Name, metav1.GetOptions{})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			err = oc.addUpdateLocalNodeEvent(node, &nodeSyncs{
+			err = oc.addUpdateLocalNodeEvent(context.Background(), node, &nodeSyncs{
 				syncNode:              true,
 				syncClusterRouterPort: true,
 				syncMgmtPort:          true,
 				syncGw:                true,
 			})
+
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			as, err := getNoOverlaySNATExemptionAddressSet(oc.addressSetFactory, oc.GetNetInfo(), oc.controllerName)
@@ -946,7 +948,7 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				// ensure the stale SNAT's are cleaned up
-				gomega.Expect(oc.StartServiceController(wg, false)).To(gomega.Succeed())
+				gomega.Expect(oc.StartServiceController(context.Background(), wg, false)).To(gomega.Succeed())
 				subnet := ovntest.MustParseIPNet(node1.NodeSubnet)
 				// Get node with the latest annotations set
 				testNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), testNode.Name, metav1.GetOptions{})
@@ -1023,7 +1025,7 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 				config.Gateway.DisableSNATMultipleGWs = true
 				mutableNetInfo := util.NewMutableNetInfo(oc.GetNetInfo())
 				mutableNetInfo.SetPodNetworkAdvertisedVRFs(map[string][]string{"node1": {"vrf"}})
-				return oc.Reconcile(mutableNetInfo)
+				return oc.Reconcile(context.Background(), mutableNetInfo)
 			},
 			// won't be deleted on this node since this pod belongs to node-1 and is advertised so we keep this SNAT
 			newNodeSNATWithMatch("stale-nodeNAT-UUID-3", "10.0.0.3", Node1GatewayRouterIP, "ip4.dst == $a1042611113178530741"),
@@ -1037,7 +1039,7 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 				config.OVNKubernetesFeature.EnableEgressIP = true
 				mutableNetInfo := util.NewMutableNetInfo(oc.GetNetInfo())
 				mutableNetInfo.SetPodNetworkAdvertisedVRFs(map[string][]string{"node1": {"vrf"}})
-				return oc.Reconcile(mutableNetInfo)
+				return oc.Reconcile(context.Background(), mutableNetInfo)
 			},
 			newNodeSNATWithMatch("stale-nodeNAT-UUID-4", "10.0.0.3", "172.16.16.3", "ip4.dst == $a1042611113178530741"), // won't be deleted on this node but will be deleted on the node whose IP is 172.16.16.3 since this pod belongs to this node
 		),
@@ -1818,7 +1820,7 @@ func TestController_syncNodes(t *testing.T) {
 				node1Name,
 			)
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
-			err = controller.syncNodes([]interface{}{&testNode})
+			err = controller.syncNodes(context.Background(), []interface{}{&testNode})
 			if err != nil {
 				t.Fatalf("%s: Error on syncNodes: %v", tt.name, err)
 			}

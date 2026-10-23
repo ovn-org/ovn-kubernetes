@@ -289,7 +289,7 @@ func TestPodTrackerControllerTracksTerminatingPodsUntilCompleted(t *testing.T) {
 
 	// Reconciliation caused by an unrelated event must also retain a
 	// terminating pod while its containers are still running.
-	g.Expect(ptc.reconcile("testns/pod")).To(gomega.Succeed())
+	g.Expect(ptc.reconcile(context.Background(), "testns/pod")).To(gomega.Succeed())
 	g.Expect(ptc.podToNodeNAD).To(gomega.HaveKey("testns/pod"))
 
 	// Once the pod is terminal, its update is reconciled and the last network
@@ -298,7 +298,7 @@ func TestPodTrackerControllerTracksTerminatingPodsUntilCompleted(t *testing.T) {
 	completedTerminatingPod.Status.Phase = corev1.PodSucceeded
 	g.Expect(ptc.needUpdate(terminatingPod, completedTerminatingPod)).To(gomega.BeTrue())
 	g.Expect(podIndexer.Update(completedTerminatingPod)).To(gomega.Succeed())
-	g.Expect(ptc.reconcile("testns/pod")).To(gomega.Succeed())
+	g.Expect(ptc.reconcile(context.Background(), "testns/pod")).To(gomega.Succeed())
 	g.Expect(ptc.podToNodeNAD).NotTo(gomega.HaveKey("testns/pod"))
 	g.Expect(ptc.nodeNADToPodCache).NotTo(gomega.HaveKey("node1"))
 	g.Expect(events).To(gomega.Equal([]refChange{

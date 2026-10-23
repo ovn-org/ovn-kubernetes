@@ -4,6 +4,7 @@
 package ovn
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 
@@ -115,12 +116,11 @@ func (h *networkControllerPolicyEventHandler) GetResourceFromInformerCache(key s
 // AddResource adds the specified object to the cluster according to its type and returns the error,
 // if any, yielded during object creation.
 // Given an object to add and a boolean specifying if the function was executed from iterateRetryResources
-func (h *networkControllerPolicyEventHandler) AddResource(obj interface{}, _ bool) error {
+func (h *networkControllerPolicyEventHandler) AddResource(_ context.Context, obj interface{}, _ bool) error {
 	switch h.objType {
 	case factory.LocalPodSelectorType:
 		extraParameters := h.extraParameters.(*NetworkPolicyExtraParameters)
-		return h.bnc.handleLocalPodSelectorAddFunc(
-			extraParameters.np,
+		return h.bnc.handleLocalPodSelectorAddFunc(extraParameters.np,
 			obj)
 
 	default:
@@ -140,12 +140,11 @@ func hasPolicyResourceAnUpdateFunc(objType reflect.Type) bool {
 // type and returns the error, if any, yielded during the object update.
 // Given an old and a new object; The inRetryCache boolean argument is to indicate if the given resource
 // is in the retryCache or not.
-func (h *networkControllerPolicyEventHandler) UpdateResource(_, newObj interface{}, _ bool) error {
+func (h *networkControllerPolicyEventHandler) UpdateResource(_ context.Context, _, newObj interface{}, _ bool) error {
 	switch h.objType {
 	case factory.LocalPodSelectorType:
 		extraParameters := h.extraParameters.(*NetworkPolicyExtraParameters)
-		return h.bnc.handleLocalPodSelectorAddFunc(
-			extraParameters.np,
+		return h.bnc.handleLocalPodSelectorAddFunc(extraParameters.np,
 			newObj)
 	}
 	return fmt.Errorf("no update function for object type %s", h.objType)
@@ -154,12 +153,11 @@ func (h *networkControllerPolicyEventHandler) UpdateResource(_, newObj interface
 // DeleteResource deletes the object from the cluster according to the delete logic of its resource type.
 // Given an object and optionally a cachedObj; cachedObj is the internal cache entry for this object,
 // used for now for pods and network policies.
-func (h *networkControllerPolicyEventHandler) DeleteResource(obj, _ interface{}) error {
+func (h *networkControllerPolicyEventHandler) DeleteResource(_ context.Context, obj, _ interface{}) error {
 	switch h.objType {
 	case factory.LocalPodSelectorType:
 		extraParameters := h.extraParameters.(*NetworkPolicyExtraParameters)
-		return h.bnc.handleLocalPodSelectorDelFunc(
-			extraParameters.np,
+		return h.bnc.handleLocalPodSelectorDelFunc(extraParameters.np,
 			obj)
 
 	default:
@@ -167,7 +165,7 @@ func (h *networkControllerPolicyEventHandler) DeleteResource(obj, _ interface{})
 	}
 }
 
-func (h *networkControllerPolicyEventHandler) SyncFunc(objs []interface{}) error {
+func (h *networkControllerPolicyEventHandler) SyncFunc(_ context.Context, objs []interface{}) error {
 	var syncFunc func([]interface{}) error
 
 	if h.syncFunc != nil {

@@ -4,6 +4,7 @@
 package addresssetmanager
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"slices"
@@ -383,7 +384,7 @@ func (m *AddressSetManager) EnsureAddressSet(podSelector, namespaceSelector, nod
 		// Until reconcile runs, the NB object is empty while ACLs may already reference it
 		// (e.g. on DB ID change or first ensure). This is a one-time sync on creation;
 		// existing sets are kept up to date by the async reconciler on pod/namespace/node events.
-		if reconcileErr := m.reconcileAddressSet(addrSetKey); reconcileErr != nil {
+		if reconcileErr := m.reconcileAddressSet(context.Background(), addrSetKey); reconcileErr != nil {
 			klog.Errorf("Failed to reconcile address set %s on ensure: %v", addrSetKey, reconcileErr)
 			// this only puts key to the queue, no lock
 			m.addressSetReconciler.Reconcile(addrSetKey)
@@ -465,7 +466,7 @@ func (m *AddressSetManager) podNeedUpdate(old, new *corev1.Pod) bool {
 	return false
 }
 
-func (m *AddressSetManager) reconcilePod(podKey string) error {
+func (m *AddressSetManager) reconcilePod(_ context.Context, podKey string) error {
 	namespace, name, err := cache.SplitMetaNamespaceKey(podKey)
 	if err != nil {
 		return fmt.Errorf("failed to split meta namespace key %q: %v", podKey, err)
@@ -559,7 +560,7 @@ func (m *AddressSetManager) updateHostNetworkNamespaceExists() error {
 	return nil
 }
 
-func (m *AddressSetManager) reconcileNamespace(nsKey string) error {
+func (m *AddressSetManager) reconcileNamespace(_ context.Context, nsKey string) error {
 	if config.Kubernetes.HostNetworkNamespace != "" && nsKey == config.Kubernetes.HostNetworkNamespace {
 		if err := m.updateHostNetworkNamespaceExists(); err != nil {
 			return fmt.Errorf("failed to check if host network namespace %s exists: %v", config.Kubernetes.HostNetworkNamespace, err)
@@ -626,7 +627,7 @@ func (m *AddressSetManager) nodeNeedUpdate(old, new *corev1.Node) bool {
 	return false
 }
 
-func (m *AddressSetManager) reconcileNode(nodeKey string) error {
+func (m *AddressSetManager) reconcileNode(_ context.Context, nodeKey string) error {
 	// update host network IPs first to have fresh info for addr set reconcile
 	// don't return error immediately to let other changes like node selector be propagated
 	hostNetworkErr := m.updateHostNetworkIPs(nodeKey)
@@ -793,7 +794,7 @@ func (m *AddressSetManager) getHostNamespaceAddressesForNode(node *corev1.Node) 
 	return ips, nil
 }
 
-func (m *AddressSetManager) reconcileAddressSet(key string) error {
+func (m *AddressSetManager) reconcileAddressSet(_ context.Context, key string) error {
 	return m.addressSets.DoWithLock(key, func(key string) error {
 		psAddrSet, found := m.addressSets.Load(key)
 		if !found {

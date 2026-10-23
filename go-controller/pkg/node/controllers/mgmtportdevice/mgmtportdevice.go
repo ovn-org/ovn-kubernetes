@@ -4,6 +4,7 @@
 package mgmtportdevice
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 
@@ -44,11 +45,13 @@ func NewController(nodeName, network string, nodeInformer coreinformers.NodeInfo
 	}
 
 	config := &controller.ControllerConfig[corev1.Node]{
-		RateLimiter:    workqueue.DefaultTypedControllerRateLimiter[string](),
-		MaxAttempts:    controller.InfiniteAttempts,
-		Informer:       nodeInformer.Informer(),
-		Lister:         nodeInformer.Lister().List,
-		Reconcile:      c.reconcile,
+		RateLimiter: workqueue.DefaultTypedControllerRateLimiter[string](),
+		MaxAttempts: controller.InfiniteAttempts,
+		Informer:    nodeInformer.Informer(),
+		Lister:      nodeInformer.Lister().List,
+		Reconcile: func(_ context.Context, key string) error {
+			return c.reconcile(key)
+		},
 		ObjNeedsUpdate: c.needsUpdate,
 		// Reconcile re-plumbs the ports of one management port and is not safe
 		// to run concurrently with itself.

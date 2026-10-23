@@ -42,15 +42,15 @@ type InterfaceOVN interface {
 	Interface
 	UpdateEgressFirewall(egressfirewall *egressfirewall.EgressFirewall) error
 	UpdateEgressIP(eIP *egressipv1.EgressIP) error
-	PatchEgressIP(name string, patchData []byte) error
+	PatchEgressIP(ctx context.Context, name string, patchData []byte) error
 	GetEgressIP(name string) (*egressipv1.EgressIP, error)
-	GetEgressIPs() ([]*egressipv1.EgressIP, error)
+	GetEgressIPs(ctx context.Context) ([]*egressipv1.EgressIP, error)
 	GetEgressFirewalls() ([]*egressfirewall.EgressFirewall, error)
-	CreateCloudPrivateIPConfig(cloudPrivateIPConfig *ocpcloudnetworkapi.CloudPrivateIPConfig) (*ocpcloudnetworkapi.CloudPrivateIPConfig, error)
-	UpdateCloudPrivateIPConfig(cloudPrivateIPConfig *ocpcloudnetworkapi.CloudPrivateIPConfig) (*ocpcloudnetworkapi.CloudPrivateIPConfig, error)
-	DeleteCloudPrivateIPConfig(name string) error
-	UpdateEgressServiceStatus(namespace, name, host string) error
-	UpdateIPAMClaimIPs(updatedIPAMClaim *ipamclaimsapi.IPAMClaim) error
+	CreateCloudPrivateIPConfig(ctx context.Context, cloudPrivateIPConfig *ocpcloudnetworkapi.CloudPrivateIPConfig) (*ocpcloudnetworkapi.CloudPrivateIPConfig, error)
+	UpdateCloudPrivateIPConfig(ctx context.Context, cloudPrivateIPConfig *ocpcloudnetworkapi.CloudPrivateIPConfig) (*ocpcloudnetworkapi.CloudPrivateIPConfig, error)
+	DeleteCloudPrivateIPConfig(ctx context.Context, name string) error
+	UpdateEgressServiceStatus(ctx context.Context, namespace, name, host string) error
+	UpdateIPAMClaimIPs(ctx context.Context, updatedIPAMClaim *ipamclaimsapi.IPAMClaim) error
 }
 
 // Interface represents the exported methods for dealing with getting/setting
@@ -58,14 +58,14 @@ type InterfaceOVN interface {
 type Interface interface {
 	SetAnnotationsOnPod(namespace, podName string, annotations map[string]interface{}) error
 	SetAnnotationsOnService(namespace, serviceName string, annotations map[string]interface{}) error
-	SetAnnotationsOnNode(nodeName string, annotations map[string]interface{}) error
+	SetAnnotationsOnNode(ctx context.Context, nodeName string, annotations map[string]interface{}) error
 	SetAnnotationsOnNodeWithFieldManager(nodeName string, annotations map[string]interface{}, fieldManager string) error
 	SetAnnotationsOnNamespace(namespaceName string, annotations map[string]interface{}) error
 	SetLabelsOnNode(nodeName string, labels map[string]interface{}) error
 	PatchNode(old, new *corev1.Node) error
 	PatchNodeStatus(old, new *corev1.Node) error
-	PatchNodeStatusAnnotations(oldNode, newNode *corev1.Node) error
-	PatchPodStatusAnnotations(oldPod, newPod *corev1.Pod) error
+	PatchNodeStatusAnnotations(ctx context.Context, oldNode, newNode *corev1.Node) error
+	PatchPodStatusAnnotations(ctx context.Context, oldPod, newPod *corev1.Pod) error
 	// GetNodeForWindows should only be used for windows hybrid overlay binary and never in linux code
 	GetNodeForWindows(name string) (*corev1.Node, error)
 	GetNodesForWindows() ([]*corev1.Node, error)
@@ -152,7 +152,7 @@ func escapeJSONPatchPathKey(key string) string {
 // Real informer/API pods always have a resourceVersion. If a synthetic caller
 // passes an object without one, we skip that extra guard and fall back to the
 // narrower per-key tests that are available.
-func (k *Kube) PatchPodStatusAnnotations(oldPod, newPod *corev1.Pod) error {
+func (k *Kube) PatchPodStatusAnnotations(ctx context.Context, oldPod, newPod *corev1.Pod) error {
 	if oldPod.Namespace != newPod.Namespace || oldPod.Name != newPod.Name {
 		return fmt.Errorf("cannot patch annotations for different pods %s/%s and %s/%s",
 			oldPod.Namespace, oldPod.Name, newPod.Namespace, newPod.Name)
@@ -255,7 +255,7 @@ func (k *Kube) PatchPodStatusAnnotations(oldPod, newPod *corev1.Pod) error {
 	podDesc := oldPod.Namespace + "/" + oldPod.Name
 	klog.Infof("Patching annotations on pod %s", podDesc)
 	_, err = k.KClient.CoreV1().Pods(oldPod.Namespace).Patch(
-		context.TODO(),
+		ctx,
 		oldPod.Name,
 		types.JSONPatchType,
 		patchData,
@@ -269,14 +269,18 @@ func (k *Kube) PatchPodStatusAnnotations(oldPod, newPod *corev1.Pod) error {
 }
 
 // SetAnnotationsOnNode takes the node name and map of key/value string pairs to set as annotations
-func (k *Kube) SetAnnotationsOnNode(nodeName string, annotations map[string]interface{}) error {
-	return k.SetAnnotationsOnNodeWithFieldManager(nodeName, annotations, "")
+func (k *Kube) SetAnnotationsOnNode(ctx context.Context, nodeName string, annotations map[string]interface{}) error {
+	return k.setAnnotationsOnNode(ctx, nodeName, annotations, "")
 }
 
 // SetAnnotationsOnNodeWithFieldManager is like SetAnnotationsOnNode but allows
 // specifying a field manager for the patch operation. If fieldManager is empty,
 // the server default is used.
 func (k *Kube) SetAnnotationsOnNodeWithFieldManager(nodeName string, annotations map[string]interface{}, fieldManager string) error {
+	return k.setAnnotationsOnNode(context.TODO(), nodeName, annotations, fieldManager)
+}
+
+func (k *Kube) setAnnotationsOnNode(ctx context.Context, nodeName string, annotations map[string]interface{}, fieldManager string) error {
 	patch := struct {
 		Metadata map[string]interface{} `json:"metadata"`
 	}{
@@ -297,7 +301,7 @@ func (k *Kube) SetAnnotationsOnNodeWithFieldManager(nodeName string, annotations
 		patchOpts.FieldManager = fieldManager
 	}
 
-	_, err = k.KClient.CoreV1().Nodes().Patch(context.TODO(), nodeName, types.StrategicMergePatchType, patchData, patchOpts, "status")
+	_, err = k.KClient.CoreV1().Nodes().Patch(ctx, nodeName, types.StrategicMergePatchType, patchData, patchOpts, "status")
 	if err != nil {
 		klog.Errorf("Error in setting annotation on node %s: %v", nodeName, err)
 	}
@@ -467,7 +471,7 @@ func (k *Kube) PatchNodeStatus(old, new *corev1.Node) error {
 // Real informer/API nodes always have a resourceVersion. If a synthetic caller
 // passes an object without one, we skip that extra guard and fall back to the
 // narrower per-key tests that are available.
-func (k *Kube) PatchNodeStatusAnnotations(oldNode, newNode *corev1.Node) error {
+func (k *Kube) PatchNodeStatusAnnotations(ctx context.Context, oldNode, newNode *corev1.Node) error {
 	if oldNode.Name != newNode.Name {
 		return fmt.Errorf("cannot patch annotations for different nodes %s and %s",
 			oldNode.Name, newNode.Name)
@@ -551,7 +555,7 @@ func (k *Kube) PatchNodeStatusAnnotations(oldNode, newNode *corev1.Node) error {
 
 	klog.Infof("Patching annotations on node %s", oldNode.Name)
 	_, err = k.KClient.CoreV1().Nodes().Patch(
-		context.TODO(),
+		ctx,
 		oldNode.Name,
 		types.JSONPatchType,
 		patchData,
@@ -602,8 +606,8 @@ func (k *KubeOVN) UpdateEgressIP(eIP *egressipv1.EgressIP) error {
 	return err
 }
 
-func (k *KubeOVN) PatchEgressIP(name string, patchData []byte) error {
-	_, err := k.EIPClient.K8sV1().EgressIPs().Patch(context.TODO(), name, types.JSONPatchType, patchData, metav1.PatchOptions{})
+func (k *KubeOVN) PatchEgressIP(ctx context.Context, name string, patchData []byte) error {
+	_, err := k.EIPClient.K8sV1().EgressIPs().Patch(ctx, name, types.JSONPatchType, patchData, metav1.PatchOptions{})
 	return err
 }
 
@@ -613,11 +617,11 @@ func (k *KubeOVN) GetEgressIP(name string) (*egressipv1.EgressIP, error) {
 }
 
 // GetEgressIPs returns the list of all EgressIP objects from kubernetes
-func (k *KubeOVN) GetEgressIPs() ([]*egressipv1.EgressIP, error) {
+func (k *KubeOVN) GetEgressIPs(ctx context.Context) ([]*egressipv1.EgressIP, error) {
 	list := []*egressipv1.EgressIP{}
 	err := pager.New(func(ctx context.Context, opts metav1.ListOptions) (runtime.Object, error) {
 		return k.EIPClient.K8sV1().EgressIPs().List(ctx, opts)
-	}).EachListItem(context.TODO(), metav1.ListOptions{
+	}).EachListItem(ctx, metav1.ListOptions{
 		ResourceVersion: "0",
 	}, func(obj runtime.Object) error {
 		list = append(list, obj.(*egressipv1.EgressIP))
@@ -640,37 +644,37 @@ func (k *KubeOVN) GetEgressFirewalls() ([]*egressfirewall.EgressFirewall, error)
 	return list, err
 }
 
-func (k *KubeOVN) CreateCloudPrivateIPConfig(cloudPrivateIPConfig *ocpcloudnetworkapi.CloudPrivateIPConfig) (*ocpcloudnetworkapi.CloudPrivateIPConfig, error) {
-	return k.CloudNetworkClient.CloudV1().CloudPrivateIPConfigs().Create(context.TODO(), cloudPrivateIPConfig, metav1.CreateOptions{})
+func (k *KubeOVN) CreateCloudPrivateIPConfig(ctx context.Context, cloudPrivateIPConfig *ocpcloudnetworkapi.CloudPrivateIPConfig) (*ocpcloudnetworkapi.CloudPrivateIPConfig, error) {
+	return k.CloudNetworkClient.CloudV1().CloudPrivateIPConfigs().Create(ctx, cloudPrivateIPConfig, metav1.CreateOptions{})
 }
 
-func (k *KubeOVN) UpdateCloudPrivateIPConfig(cloudPrivateIPConfig *ocpcloudnetworkapi.CloudPrivateIPConfig) (*ocpcloudnetworkapi.CloudPrivateIPConfig, error) {
-	return k.CloudNetworkClient.CloudV1().CloudPrivateIPConfigs().Update(context.TODO(), cloudPrivateIPConfig, metav1.UpdateOptions{})
+func (k *KubeOVN) UpdateCloudPrivateIPConfig(ctx context.Context, cloudPrivateIPConfig *ocpcloudnetworkapi.CloudPrivateIPConfig) (*ocpcloudnetworkapi.CloudPrivateIPConfig, error) {
+	return k.CloudNetworkClient.CloudV1().CloudPrivateIPConfigs().Update(ctx, cloudPrivateIPConfig, metav1.UpdateOptions{})
 }
 
-func (k *KubeOVN) DeleteCloudPrivateIPConfig(name string) error {
-	return k.CloudNetworkClient.CloudV1().CloudPrivateIPConfigs().Delete(context.TODO(), name, metav1.DeleteOptions{})
+func (k *KubeOVN) DeleteCloudPrivateIPConfig(ctx context.Context, name string) error {
+	return k.CloudNetworkClient.CloudV1().CloudPrivateIPConfigs().Delete(ctx, name, metav1.DeleteOptions{})
 }
 
-func (k *KubeOVN) UpdateEgressServiceStatus(namespace, name, host string) error {
-	es, err := k.EgressServiceClient.K8sV1().EgressServices(namespace).Get(context.TODO(), name, metav1.GetOptions{})
+func (k *KubeOVN) UpdateEgressServiceStatus(ctx context.Context, namespace, name, host string) error {
+	es, err := k.EgressServiceClient.K8sV1().EgressServices(namespace).Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
 		return err
 	}
 
 	es.Status.Host = host
 
-	_, err = k.EgressServiceClient.K8sV1().EgressServices(es.Namespace).UpdateStatus(context.TODO(), es, metav1.UpdateOptions{})
+	_, err = k.EgressServiceClient.K8sV1().EgressServices(es.Namespace).UpdateStatus(ctx, es, metav1.UpdateOptions{})
 	return err
 }
 
-func (k *KubeOVN) UpdateIPAMClaimIPs(updatedIPAMClaim *ipamclaimsapi.IPAMClaim) error {
-	_, err := k.IPAMClaimsClient.K8sV1alpha1().IPAMClaims(updatedIPAMClaim.Namespace).UpdateStatus(context.TODO(), updatedIPAMClaim, metav1.UpdateOptions{})
+func (k *KubeOVN) UpdateIPAMClaimIPs(ctx context.Context, updatedIPAMClaim *ipamclaimsapi.IPAMClaim) error {
+	_, err := k.IPAMClaimsClient.K8sV1alpha1().IPAMClaims(updatedIPAMClaim.Namespace).UpdateStatus(ctx, updatedIPAMClaim, metav1.UpdateOptions{})
 	return err
 }
 
 // SetAnnotationsOnNAD takes a NAD namespace and name and a map of key/value string pairs to set as annotations
-func (k *KubeOVN) SetAnnotationsOnNAD(namespace, name string, annotations map[string]string, fieldManager string) error {
+func (k *KubeOVN) SetAnnotationsOnNAD(ctx context.Context, namespace, name string, annotations map[string]string, fieldManager string) error {
 	var err error
 	var patchData []byte
 	patch := struct {
@@ -691,6 +695,6 @@ func (k *KubeOVN) SetAnnotationsOnNAD(namespace, name string, annotations map[st
 		patchOptions.FieldManager = fieldManager
 	}
 
-	_, err = k.NADClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(namespace).Patch(context.Background(), name, types.MergePatchType, patchData, patchOptions)
+	_, err = k.NADClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(namespace).Patch(ctx, name, types.MergePatchType, patchData, patchOptions)
 	return err
 }

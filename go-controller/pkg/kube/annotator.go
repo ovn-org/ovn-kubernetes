@@ -4,6 +4,7 @@
 package kube
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"reflect"
@@ -72,7 +73,7 @@ func (na *nodeAnnotator) Run() error {
 		return nil
 	}
 
-	return na.kube.SetAnnotationsOnNode(na.nodeName, na.changes)
+	return na.kube.SetAnnotationsOnNode(context.TODO(), na.nodeName, na.changes)
 }
 
 // NewPodAnnotator returns a new annotator for Pod objects

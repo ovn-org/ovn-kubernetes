@@ -168,6 +168,7 @@ func (cm *ControllerManager) GetDefaultNetworkController() networkmanager.Reconc
 }
 
 func (cm *ControllerManager) CleanupStaleNetworks(validNetworks ...util.NetInfo) error {
+	ctx := context.Background()
 	existingNetworksMap := map[string]string{}
 	validNetworksSubnets := sets.New[string]()
 	for _, network := range validNetworks {
@@ -226,7 +227,7 @@ func (cm *ControllerManager) CleanupStaleNetworks(validNetworks ...util.NetInfo)
 
 	for netName, oc := range staleNetworkControllers {
 		klog.Infof("Cleanup entities for stale network %s", netName)
-		err = oc.Cleanup()
+		err = oc.Cleanup(ctx)
 		if err != nil {
 			klog.Errorf("Failed to delete stale OVN logical entities for network %s: %v", netName, err)
 		}
@@ -521,7 +522,7 @@ func (cm *ControllerManager) setUDNLayer2NodeUsesTransitRouter() error {
 	if util.UDNLayer2NodeUsesTransitRouter(node) {
 		return nil
 	}
-	if err := cm.kube.SetAnnotationsOnNode(cm.nodeName, map[string]interface{}{
+	if err := cm.kube.SetAnnotationsOnNode(context.TODO(), cm.nodeName, map[string]interface{}{
 		util.Layer2TopologyVersion: util.TransitRouterTopoVersion}); err != nil {
 		return fmt.Errorf("failed to set annotation %s on node %s: %w", util.Layer2TopologyVersion, cm.nodeName, err)
 	}

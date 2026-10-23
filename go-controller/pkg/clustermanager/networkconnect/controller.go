@@ -4,6 +4,7 @@
 package networkconnect
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"reflect"
@@ -298,7 +299,7 @@ func cncNeedsUpdate(oldObj, newObj *networkconnectv1.ClusterNetworkConnect) bool
 	return !reflect.DeepEqual(oldObj.Spec.NetworkSelectors, newObj.Spec.NetworkSelectors)
 }
 
-func (c *Controller) reconcileNAD(key string) error {
+func (c *Controller) reconcileNAD(_ context.Context, key string) error {
 	// Use single global lock following ANP controller pattern
 	c.Lock()
 	defer c.Unlock()
@@ -483,7 +484,7 @@ func namespaceNeedsUpdate(oldObj, newObj *corev1.Namespace) bool {
 	return labelsChanged
 }
 
-func (c *Controller) reconcileNamespace(key string) error {
+func (c *Controller) reconcileNamespace(_ context.Context, key string) error {
 	c.Lock()
 	defer c.Unlock()
 

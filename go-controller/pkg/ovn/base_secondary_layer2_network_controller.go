@@ -4,6 +4,7 @@
 package ovn
 
 import (
+	"context"
 	"fmt"
 	"net"
 
@@ -107,7 +108,7 @@ func (oc *BaseLayer2UserDefinedNetworkController) cleanup() error {
 	return nil
 }
 
-func (oc *BaseLayer2UserDefinedNetworkController) run() error {
+func (oc *BaseLayer2UserDefinedNetworkController) run(_ context.Context) error {
 	// WatchNamespaces() should be started first because it has no other
 	// dependencies.
 	if err := oc.WatchNamespaces(); err != nil {

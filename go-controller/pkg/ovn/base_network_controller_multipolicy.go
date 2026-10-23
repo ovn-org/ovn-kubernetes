@@ -4,6 +4,7 @@
 package ovn
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -17,7 +18,7 @@ import (
 
 const PolicyForAnnotation = "k8s.v1.cni.cncf.io/policy-for"
 
-func (bsnc *BaseUserDefinedNetworkController) syncMultiNetworkPolicies(multiPolicies []interface{}) error {
+func (bsnc *BaseUserDefinedNetworkController) syncMultiNetworkPolicies(_ context.Context, multiPolicies []interface{}) error {
 	expectedPolicies := make(map[string]map[string]bool)
 	for _, npInterface := range multiPolicies {
 		policy, ok := npInterface.(*mnpapi.MultiNetworkPolicy)

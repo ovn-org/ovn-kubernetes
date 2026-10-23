@@ -843,7 +843,7 @@ func TestController_reconcileClusterNetworkConnect(t *testing.T) {
 			}
 
 			// Run reconciliation
-			err = c.reconcileClusterNetworkConnect(tt.reconcile)
+			err = c.reconcileClusterNetworkConnect(context.Background(), tt.reconcile)
 			if tt.wantErr {
 				g.Expect(err).To(gomega.HaveOccurred())
 				return
@@ -1238,7 +1238,7 @@ func TestController_reconcileNAD(t *testing.T) {
 				RateLimiter: workqueue.DefaultTypedControllerRateLimiter[string](),
 				Informer:    wf.ClusterNetworkConnectInformer().Informer(),
 				Lister:      wf.ClusterNetworkConnectInformer().Lister().List,
-				Reconcile: func(key string) error {
+				Reconcile: func(_ context.Context, key string) error {
 					reconciledMutex.Lock()
 					defer reconciledMutex.Unlock()
 					reconciledCNCs.Insert(key)
@@ -1271,7 +1271,7 @@ func TestController_reconcileNAD(t *testing.T) {
 			reconciledMutex.Unlock()
 
 			// Run NAD reconciliation
-			err = c.reconcileNAD(tt.reconcileNAD)
+			err = c.reconcileNAD(context.Background(), tt.reconcileNAD)
 			g.Expect(err).ToNot(gomega.HaveOccurred())
 
 			// Allow time for async reconciliation
@@ -2436,7 +2436,7 @@ func TestController_reconcileNamespace(t *testing.T) {
 				RateLimiter: workqueue.DefaultTypedControllerRateLimiter[string](),
 				Informer:    wf.ClusterNetworkConnectInformer().Informer(),
 				Lister:      wf.ClusterNetworkConnectInformer().Lister().List,
-				Reconcile: func(key string) error {
+				Reconcile: func(_ context.Context, key string) error {
 					reconciledMutex.Lock()
 					defer reconciledMutex.Unlock()
 					reconciledCNCs.Insert(key)
@@ -2466,7 +2466,7 @@ func TestController_reconcileNamespace(t *testing.T) {
 			reconciledMutex.Unlock()
 
 			// Run namespace reconciliation
-			err = c.reconcileNamespace(tt.reconcileNamespace)
+			err = c.reconcileNamespace(context.Background(), tt.reconcileNamespace)
 			g.Expect(err).ToNot(gomega.HaveOccurred())
 
 			// Allow time for async reconciliation

@@ -4,6 +4,7 @@
 package ovn
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -100,7 +101,7 @@ func (oc *DefaultNetworkController) recordPodEvent(reason string, addErr error, 
 
 // ensurePod tries to set up a pod. It returns nil on success and error on failure; failure
 // indicates the pod set up should be retried later.
-func (oc *DefaultNetworkController) ensurePod(oldPod, pod *corev1.Pod, addPort bool) error {
+func (oc *DefaultNetworkController) ensurePod(ctx context.Context, oldPod, pod *corev1.Pod, addPort bool) error {
 	// Try unscheduled pods later
 	if !util.PodScheduled(pod) {
 		return nil
@@ -108,16 +109,16 @@ func (oc *DefaultNetworkController) ensurePod(oldPod, pod *corev1.Pod, addPort b
 
 	if oc.isPodScheduledOnLocalNode(pod) {
 		klog.V(5).Infof("Ensuring zone local for Pod %s/%s in node %s", pod.Namespace, pod.Name, pod.Spec.NodeName)
-		return oc.ensureLocalZonePod(oldPod, pod, addPort)
+		return oc.ensureLocalZonePod(ctx, oldPod, pod, addPort)
 	}
 
 	klog.V(5).Infof("Ensuring zone remote for Pod %s/%s in node %s", pod.Namespace, pod.Name, pod.Spec.NodeName)
-	return oc.ensureRemoteZonePod(oldPod, pod)
+	return oc.ensureRemoteZonePod(ctx, oldPod, pod)
 }
 
 // ensureLocalZonePod tries to set up a local zone pod. It returns nil on success and error on failure; failure
 // indicates the pod set up should be retried later.
-func (oc *DefaultNetworkController) ensureLocalZonePod(oldPod, pod *corev1.Pod, addPort bool) error {
+func (oc *DefaultNetworkController) ensureLocalZonePod(ctx context.Context, oldPod, pod *corev1.Pod, addPort bool) error {
 	if config.Metrics.EnableScaleMetrics {
 		start := time.Now()
 		defer func() {
@@ -131,7 +132,7 @@ func (oc *DefaultNetworkController) ensureLocalZonePod(oldPod, pod *corev1.Pod, 
 	}
 
 	if !util.PodWantsHostNetwork(pod) && addPort {
-		if err := oc.addLogicalPort(pod); err != nil {
+		if err := oc.addLogicalPort(ctx, pod); err != nil {
 			return fmt.Errorf("addLogicalPort failed for %s/%s: %w", pod.Namespace, pod.Name, err)
 		}
 	}
@@ -166,7 +167,7 @@ func (oc *DefaultNetworkController) ensureLocalZonePod(oldPod, pod *corev1.Pod, 
 //   - For live-migratable VMs, ensures remote-zone pod-to-node routes
 //
 // It returns nil on success and error on failure; failure indicates the pod set up should be retried later.
-func (oc *DefaultNetworkController) ensureRemoteZonePod(_, pod *corev1.Pod) error {
+func (oc *DefaultNetworkController) ensureRemoteZonePod(_ context.Context, _, pod *corev1.Pod) error {
 	if kubevirt.IsPodLiveMigratable(pod) {
 		return kubevirt.EnsureRemoteZonePodAddressesToNodeRoute(oc.watchFactory, oc.nbClient, pod)
 	}
@@ -175,20 +176,20 @@ func (oc *DefaultNetworkController) ensureRemoteZonePod(_, pod *corev1.Pod) erro
 
 // removePod tries to tear down a pod. It returns nil on success and error on failure;
 // failure indicates the pod tear down should be retried later.
-func (oc *DefaultNetworkController) removePod(pod *corev1.Pod, portInfo *lpInfo) error {
+func (oc *DefaultNetworkController) removePod(ctx context.Context, pod *corev1.Pod, portInfo *lpInfo) error {
 	if err := kubevirt.CleanUpLiveMigratablePod(oc.nbClient, oc.watchFactory, pod); err != nil {
 		return err
 	}
 
 	if oc.isPodScheduledOnLocalNode(pod) {
-		return oc.removeLocalZonePod(pod, portInfo)
+		return oc.removeLocalZonePod(ctx, pod, portInfo)
 	}
-	return oc.removeRemoteZonePod(pod)
+	return oc.removeRemoteZonePod(ctx, pod)
 }
 
 // removeLocalZonePod tries to tear down a local zone pod. It returns nil on success and error on failure;
 // failure indicates the pod tear down should be retried later.
-func (oc *DefaultNetworkController) removeLocalZonePod(pod *corev1.Pod, portInfo *lpInfo) error {
+func (oc *DefaultNetworkController) removeLocalZonePod(_ context.Context, pod *corev1.Pod, portInfo *lpInfo) error {
 	oc.logicalPortCache.remove(pod, ovntypes.DefaultNetworkName)
 
 	if config.Metrics.EnableScaleMetrics {
@@ -212,7 +213,7 @@ func (oc *DefaultNetworkController) removeLocalZonePod(pod *corev1.Pod, portInfo
 // removeRemoteZonePod tries to tear down a remote zone pod bits. It returns nil on success and error on failure;
 // failure indicates the pod tear down should be retried later.
 // It removes the remote pod ips from the namespace address set.
-func (oc *DefaultNetworkController) removeRemoteZonePod(pod *corev1.Pod) error {
+func (oc *DefaultNetworkController) removeRemoteZonePod(_ context.Context, pod *corev1.Pod) error {
 	// FIXME: there are other things we are probably leaving behind and should
 	// be removed for completed VMs, like per-pod SNAT. Also
 	// removeRemoteZonePodFromNamespaceAddressSet above should probably not be
@@ -273,8 +274,7 @@ func (oc *DefaultNetworkController) syncNodeGateway(node *corev1.Node) error {
 		return fmt.Errorf("error getting gateway config for node %s: %v", node.Name, err)
 	}
 
-	if err := oc.newGatewayManager(node.Name).SyncGateway(
-		node,
+	if err := oc.newGatewayManager(node.Name).SyncGateway(node,
 		gwConfig,
 	); err != nil {
 		return fmt.Errorf("error creating gateway for node %s: %v", node.Name, err)
@@ -330,7 +330,7 @@ func shouldUpdateNode(node, oldNode *corev1.Node) bool {
 	return true
 }
 
-func (oc *DefaultNetworkController) StartServiceController(wg *sync.WaitGroup, runRepair bool) error {
+func (oc *DefaultNetworkController) StartServiceController(_ context.Context, wg *sync.WaitGroup, runRepair bool) error {
 	useLBGroups := oc.clusterLoadBalancerGroupUUID != ""
 	// use 5 workers like most of the kubernetes controllers in the
 	// kubernetes controller-manager

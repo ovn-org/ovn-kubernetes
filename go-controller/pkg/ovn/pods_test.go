@@ -502,7 +502,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 			if alreadyOwned {
 				gomega.Expect(bnc.lsManager.AllocateIPs(node1Name, bnc.podIPOwner(pod, ovntypes.DefaultNetworkName), ips)).To(gomega.Succeed())
 			}
-			_, _, err := bnc.allocatePodAnnotation(pod, lsp, pod.Name, ovntypes.DefaultNetworkName,
+			_, _, err := bnc.allocatePodAnnotation(context.Background(), pod, lsp, pod.Name, ovntypes.DefaultNetworkName,
 				&nadapi.NetworkSelectionElement{MacRequest: "invalid-mac"}, ovntypes.NetworkRolePrimary)
 			gomega.Expect(err).To(gomega.HaveOccurred())
 			gomega.Expect(bnc.lsManager.OwnsIPs(node1Name, bnc.podIPOwner(pod, ovntypes.DefaultNetworkName), ips)).To(gomega.Equal(alreadyOwned))
@@ -542,7 +542,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 			gomega.Expect(fakeOvn.controller.WatchNamespaces()).To(gomega.Succeed())
 
 			ginkgo.By("reallocating IPs because the old logical port belongs to different subnets")
-			gomega.Expect(fakeOvn.controller.addLogicalPort(pod)).To(gomega.Succeed())
+			gomega.Expect(fakeOvn.controller.addLogicalPort(context.Background(), pod)).To(gomega.Succeed())
 			updatedPod, err := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(namespace).Get(context.Background(), podName, metav1.GetOptions{})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			annotation, err := util.UnmarshalPodAnnotation(updatedPod.Annotations, ovntypes.DefaultNetworkName)
@@ -1085,7 +1085,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 						Namespace: namespaceT.Name,
 					},
 				}
-				err = fakeOvn.controller.ensurePod(nil, podObj, true) // this fails since pod doesn't exist to set annotations
+				err = fakeOvn.controller.ensurePod(context.Background(), nil, podObj, true) // this fails since pod doesn't exist to set annotations
 				gomega.Expect(err).To(gomega.HaveOccurred())
 
 				key, err := retry.GetResourceKey(podObj)
@@ -1324,7 +1324,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 
 			ginkgo.By("failing VM cleanup without disrupting ordinary pod teardown transactions")
 			oc.nbClient = &podCleanupFailureClient{Client: fakeOvn.nbClient, failDeleteTable: failDeleteTable}
-			err = oc.removePod(pod, portInfo)
+			err = oc.removePod(context.Background(), pod, portInfo)
 			gomega.Expect(err).To(gomega.MatchError(gomega.ContainSubstring("injected " + failDeleteTable + " cleanup failure")))
 			for _, ip := range ips {
 				gomega.Expect(ipallocator.IsErrAllocated(oc.lsManager.AllocateIPs(node1Name, "test-owner", []*net.IPNet{ip}))).To(
@@ -1348,7 +1348,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 
 			ginkgo.By("retrying partial VM cleanup before releasing the pod's IPs")
 			oc.nbClient = fakeOvn.nbClient
-			gomega.Expect(oc.removePod(pod, portInfo)).To(gomega.Succeed())
+			gomega.Expect(oc.removePod(context.Background(), pod, portInfo)).To(gomega.Succeed())
 			gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(
 				&nbdb.LogicalSwitch{UUID: logicalSwitch.UUID, Name: node1Name},
 				&nbdb.LogicalRouter{UUID: router.UUID, Name: ovntypes.OVNClusterRouter},
@@ -2110,15 +2110,15 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				ovntest.MustParseIPNets("10.128.1.0/24", "fd00::/64"), nil, nil)).To(gomega.Succeed())
 
 			ginkgo.By("restoring ownership from the startup snapshot")
-			gomega.Expect(oc.syncPods([]interface{}{stale, owner})).To(gomega.Succeed())
+			gomega.Expect(oc.syncPods(context.Background(), []interface{}{stale, owner})).To(gomega.Succeed())
 			gomega.Expect(oc.lsManager.OwnsIPs(node1Name, oc.podIPOwner(owner, ovntypes.DefaultNetworkName), ips)).To(gomega.BeTrue())
 			ginkgo.By("processing the old completed pod again without changing the new owner's networking")
-			gomega.Expect(oc.removePod(stale, nil)).To(gomega.Succeed())
+			gomega.Expect(oc.removePod(context.Background(), stale, nil)).To(gomega.Succeed())
 			gomega.Consistently(fakeOvn.nbClient, time.Second).Should(libovsdbtest.HaveData(initialDB.NBData...))
 			gomega.Expect(oc.lsManager.OwnsIPs(node1Name, oc.podIPOwner(owner, ovntypes.DefaultNetworkName), ips)).To(gomega.BeTrue())
 
 			ginkgo.By("removing the owner's SNATs and reservation when its own cleanup runs")
-			gomega.Expect(oc.removePod(owner, nil)).To(gomega.Succeed())
+			gomega.Expect(oc.removePod(context.Background(), owner, nil)).To(gomega.Succeed())
 			gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(
 				&nbdb.LogicalSwitch{UUID: logicalSwitch.UUID, Name: node1Name},
 				&nbdb.LogicalRouter{UUID: router.UUID, Name: router.Name},

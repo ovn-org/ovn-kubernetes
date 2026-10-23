@@ -458,7 +458,7 @@ func (pr *PodRequest) updateDHCPAndDPUAnnotations(clientset *ClientSet, kubecli 
 		}
 		return pod, nil, nil
 	}
-	if err := util.UpdatePodWithRetryOrRollback(clientset.podLister, kubecli, pod, updateFn); err != nil {
+	if err := util.UpdatePodWithRetryOrRollback(pr.ctx, clientset.podLister, kubecli, pod, updateFn); err != nil {
 		return fmt.Errorf("failed to update the DHCP and DPU annotations of pod %s/%s: %w",
 			pr.PodNamespace, pr.PodName, err)
 	}
@@ -521,7 +521,7 @@ func (pr *PodRequest) updatePodNetworksAnnotationWithDHCPResult(clientset *Clien
 		pod.Annotations = annotations
 		return pod, nil, nil
 	}
-	return util.UpdatePodWithRetryOrRollback(clientset.podLister, &kube.Kube{KClient: clientset.kclient}, pod, updateFn)
+	return util.UpdatePodWithRetryOrRollback(pr.ctx, clientset.podLister, &kube.Kube{KClient: clientset.kclient}, pod, updateFn)
 }
 
 // execDHCPDel releases the DHCP lease by executing the DHCP plugin's DEL command.

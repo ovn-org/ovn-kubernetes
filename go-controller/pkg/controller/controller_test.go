@@ -33,7 +33,7 @@ func getDefaultConfig[T any](reconcileCounter *atomic.Uint64) *ControllerConfig[
 			}
 			return !reflect.DeepEqual(oldObj, newObj)
 		},
-		Reconcile: func(string) error {
+		Reconcile: func(context.Context, string) error {
 			reconcileCounter.Add(1)
 			return nil
 		},
@@ -107,14 +107,15 @@ var _ = Describe("Level-driven controller", func() {
 		startController(getDefaultConfig(), nil, namespace, pod1, pod2)
 		checkReconcileCounterConsistently(2)
 	})
-	It("retries on failure", func() {
+	It("retries on failure and supplies context on every attempt", func() {
 		namespace := util.NewNamespace(namespace1Name)
 		pod := &corev1.Pod{
 			ObjectMeta: util.NewObjectMeta("pod1", namespace.Name),
 		}
 		config := getDefaultConfig()
 		failureCounter := atomic.Uint64{}
-		config.Reconcile = func(string) error {
+		config.Reconcile = func(ctx context.Context, _ string) error {
+			Expect(ctx).NotTo(BeNil())
 			failureCounter.Add(1)
 			if failureCounter.Load() < 3 {
 				return fmt.Errorf("failure")
@@ -133,7 +134,7 @@ var _ = Describe("Level-driven controller", func() {
 		}
 		config := getDefaultConfig()
 		failureCounter := atomic.Uint64{}
-		config.Reconcile = func(string) error {
+		config.Reconcile = func(context.Context, string) error {
 			failureCounter.Add(1)
 			return fmt.Errorf("failure")
 		}
@@ -200,7 +201,7 @@ var _ = Describe("Level-driven controller", func() {
 		}
 		config := getDefaultConfig()
 		updatedPods := sync.Map{}
-		config.Reconcile = func(key string) error {
+		config.Reconcile = func(_ context.Context, key string) error {
 			// add keys that were reconciled
 			updatedPods.LoadOrStore(key, true)
 			return nil
@@ -374,14 +375,14 @@ var _ = Describe("Level-driven controllers with shared initialSync", func() {
 		}
 		podConfig := getDefaultConfig[corev1.Pod](&reconcilePodCounter)
 		updatedObjs := sync.Map{}
-		podConfig.Reconcile = func(key string) error {
+		podConfig.Reconcile = func(_ context.Context, key string) error {
 			reconcilePodCounter.Add(1)
 			// add keys that were reconciled
 			updatedObjs.LoadOrStore(key, true)
 			return nil
 		}
 		nsConfig := getDefaultConfig[corev1.Namespace](&reconcileNsCounter)
-		nsConfig.Reconcile = func(key string) error {
+		nsConfig.Reconcile = func(_ context.Context, key string) error {
 			reconcileNsCounter.Add(1)
 			// add keys that were reconciled
 			updatedObjs.LoadOrStore(key, true)

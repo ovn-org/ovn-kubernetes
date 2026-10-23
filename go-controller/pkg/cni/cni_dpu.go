@@ -17,6 +17,7 @@ import (
 // the PodRequest. If the dpuConnDetails argument is nil, delete the NAD's DPU connection details annotation instead.
 func (pr *PodRequest) updatePodDPUConnDetailsWithRetry(kube kube.Interface, podLister corev1listers.PodLister, pod *corev1.Pod, dpuConnDetails *util.DPUConnectionDetails) error {
 	err := util.UpdatePodDPUConnDetailsWithRetry(
+		pr.ctx,
 		podLister,
 		kube,
 		pod,

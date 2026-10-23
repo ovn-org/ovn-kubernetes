@@ -4,6 +4,7 @@
 package dnsnameresolver
 
 import (
+	"context"
 	"encoding/binary"
 	"fmt"
 	"hash/fnv"
@@ -117,7 +118,7 @@ func (resInfo *resolverInfo) SyncResolverInfo(dnsNameToResolver map[string]strin
 // DNS names from the current and existing DNS names. For the newly
 // added DNS names, the addDNSName function is called and for the
 // deleted DNS names, the deleteDNSName function is called.
-func (resInfo *resolverInfo) ModifyDNSNamesForNamespace(dnsNames []string, namespace string) error {
+func (resInfo *resolverInfo) ModifyDNSNamesForNamespace(ctx context.Context, dnsNames []string, namespace string) error {
 	resInfo.lock.Lock()
 	defer resInfo.lock.Unlock()
 
@@ -138,14 +139,14 @@ func (resInfo *resolverInfo) ModifyDNSNamesForNamespace(dnsNames []string, names
 	var errorList []error
 	// Iterate through each newly added DNS name and call the addDNSName.
 	for addedDNSName := range addedDNSNames {
-		if err := resInfo.addDNSName(addedDNSName, namespace); err != nil {
+		if err := resInfo.addDNSName(ctx, addedDNSName, namespace); err != nil {
 			errorList = append(errorList, err)
 		}
 	}
 
 	// Iterate through each deleted DNS name and call the deleteDNSName.
 	for deletedDNSName := range deletedDNSNames {
-		if err := resInfo.deleteDNSName(deletedDNSName, namespace); err != nil {
+		if err := resInfo.deleteDNSName(ctx, deletedDNSName, namespace); err != nil {
 			errorList = append(errorList, err)
 		}
 	}
@@ -160,7 +161,7 @@ func (resInfo *resolverInfo) ModifyDNSNamesForNamespace(dnsNames []string, names
 
 // DeleteDNSNamesForNamespace obtains the deleted DNS names for the namespace
 // calls the deleteDNSName function for those DNS names.
-func (resInfo *resolverInfo) DeleteDNSNamesForNamespace(namespace string) error {
+func (resInfo *resolverInfo) DeleteDNSNamesForNamespace(ctx context.Context, namespace string) error {
 	resInfo.lock.Lock()
 	defer resInfo.lock.Unlock()
 
@@ -173,7 +174,7 @@ func (resInfo *resolverInfo) DeleteDNSNamesForNamespace(namespace string) error 
 	var errorList []error
 	// Iterate through each deleted DNS name of the namespace and call the deleteDNSName.
 	for deletedDNSName := range deletedDNSNames {
-		if err := resInfo.deleteDNSName(deletedDNSName, namespace); err != nil {
+		if err := resInfo.deleteDNSName(ctx, deletedDNSName, namespace); err != nil {
 			errorList = append(errorList, err)
 		}
 	}
@@ -189,7 +190,7 @@ func (resInfo *resolverInfo) DeleteDNSNamesForNamespace(namespace string) error 
 // addDNSName creates the corresponding DNSNameResolver object for the DNS name
 // if not already created. The namespace is added to the list of namespaces where
 // the DNS name is used.
-func (resInfo *resolverInfo) addDNSName(dnsName, namespace string) error {
+func (resInfo *resolverInfo) addDNSName(ctx context.Context, dnsName, namespace string) error {
 	objDetails, exists := resInfo.dnsNameToResolverDetails[dnsName]
 	if !exists {
 		objDetails = &resolverDetails{
@@ -205,7 +206,7 @@ func (resInfo *resolverInfo) addDNSName(dnsName, namespace string) error {
 			return err
 		}
 
-		if err := createDNSNameResolver(resInfo.ocpNetworkClient, objDetails.objName, dnsName); err != nil {
+		if err := createDNSNameResolver(ctx, resInfo.ocpNetworkClient, objDetails.objName, dnsName); err != nil {
 			return err
 		}
 		resInfo.resolverNameToDNSName[objDetails.objName] = dnsName
@@ -269,12 +270,12 @@ func computeHash(dnsName string, collisionCount int) string {
 // DNS name is currently used. If the DNS name, is not used in any other
 // namespace, then the corresponding DNSNameResolver object is deleted
 // and the details of the DNS name is removed.
-func (resInfo *resolverInfo) deleteDNSName(dnsName, namespace string) error {
+func (resInfo *resolverInfo) deleteDNSName(ctx context.Context, dnsName, namespace string) error {
 	objDetails, exists := resInfo.dnsNameToResolverDetails[dnsName]
 	if exists {
 		delete(objDetails.namespaces, namespace)
 		if objDetails.namespaces.Len() == 0 {
-			err := deleteDNSNameResolver(resInfo.ocpNetworkClient, objDetails.objName)
+			err := deleteDNSNameResolver(ctx, resInfo.ocpNetworkClient, objDetails.objName)
 			if err != nil {
 				// Insert back the namespace when an error is encountered
 				// while deleting the DNSNameResolver object.
