@@ -85,7 +85,6 @@ require (
 	github.com/mdlayher/ndp v1.0.1 // indirect
 	github.com/mdlayher/packet v1.1.2 // indirect
 	github.com/mdlayher/socket v0.5.1 // indirect
-	github.com/metallb/frr-k8s v0.0.21 // indirect
 	github.com/miekg/dns v1.1.43 // indirect
 	github.com/moby/docker-image-spec v1.3.1 // indirect
 	github.com/moby/spdystream v0.5.1 // indirect
@@ -172,6 +171,7 @@ require (
 	github.com/containernetworking/plugins v1.9.0
 	github.com/docker/docker v28.0.0+incompatible
 	github.com/google/goexpect v0.0.0-20210430020637-ab937bf7fd6f
+	github.com/metallb/frr-k8s v0.0.21
 	github.com/onsi/ginkgo v1.16.5
 	github.com/openshift-kni/k8sreporter v1.0.6
 	github.com/ovn-kubernetes/ovn-kubernetes/go-controller v1.0.0
