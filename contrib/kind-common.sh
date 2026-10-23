@@ -908,9 +908,21 @@ install_kubevirt_ipam_controller() {
 
 install_multus() {
   local version="v4.1.3"
+  local image="ghcr.io/k8snetworkplumbingwg/multus-cni:${version}"
   echo "Installing multus-cni $version daemonset ..."
+  # Pull the image once on the host and load it into every kind node, instead
+  # of having each node pull ~180MB from ghcr.io independently. The daemonset
+  # pins the image tag and has no imagePullPolicy, so the kubelet default
+  # (IfNotPresent) uses the preloaded image.
+  if [ "$KIND_LOCAL_REGISTRY" != true ]; then
+    "$OCI_BIN" pull "$image"
+    install_image "$image"
+  fi
+  # The upstream 50Mi memory limit gets the thin plugin OOM-killed on newer
+  # (7.0+) kernels, so bump it.
   wget -qO- "https://raw.githubusercontent.com/k8snetworkplumbingwg/multus-cni/${version}/deployments/multus-daemonset.yml" |\
-    sed -e "s|multus-cni:snapshot|multus-cni:${version}|g" |\
+    sed -e "s|multus-cni:snapshot|multus-cni:${version}|g" \
+        -e 's|memory: "50Mi"|memory: "200Mi"|g' |\
     run_kubectl apply -f -
 }
 
@@ -1071,14 +1083,33 @@ install_image() {
   if [ "$KIND_LOCAL_REGISTRY" == true ]; then
     echo "${1} should already be avaliable in local registry, not loading"
   else
-    if [ "$OCI_BIN" == "podman" ]; then
-      # podman: cf https://github.com/kubernetes-sigs/kind/issues/2027
-      rm -f /tmp/image.tar
-      podman save -o /tmp/image.tar "${1}"
-      kind load image-archive /tmp/image.tar --name "${KIND_CLUSTER_NAME}"
-    else
-      kind load docker-image "${1}" --name "${KIND_CLUSTER_NAME}"
-    fi
+    # Write the archive under a unique temporary directory per invocation:
+    # podman save refuses to write to an existing file, and concurrent or
+    # aborted runs must not clash on a shared archive path. The subshell
+    # scopes the cleanup trap to this function call.
+    (
+      archive_dir=$(mktemp -d)
+      trap 'rm -rf "${archive_dir}"' EXIT
+      archive="${archive_dir}/image.tar"
+      if [ "$OCI_BIN" == "podman" ]; then
+        # podman: cf https://github.com/kubernetes-sigs/kind/issues/2027
+        podman save -o "${archive}" "${1}"
+        kind load image-archive "${archive}" --name "${KIND_CLUSTER_NAME}"
+      else
+        # docker: with the containerd image store (default since Docker 27), an
+        # archive of a pulled multi-arch image references every platform but only
+        # contains the host platform's blobs, and the "ctr images import
+        # --all-platforms" that kind runs fails on the missing digests. Save the
+        # host platform only (docker save --platform, Docker 28+) and load the
+        # archive; older docker lacks the flag and its classic image store
+        # produces single-platform archives anyway, so fall back to kind load.
+        if docker save --platform "linux/$(docker version -f '{{.Server.Arch}}')" -o "${archive}" "${1}" 2>/dev/null; then
+          kind load image-archive "${archive}" --name "${KIND_CLUSTER_NAME}"
+        else
+          kind load docker-image "${1}" --name "${KIND_CLUSTER_NAME}"
+        fi
+      fi
+    )
   fi
 }
 

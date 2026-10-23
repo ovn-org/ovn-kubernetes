@@ -28,6 +28,11 @@ env:
   # OVN_GITREF: main
 
 jobs:
+  go-cache:
+    uses: ./.github/workflows/prepare-go-cache.yml
+    permissions:
+      contents: read
+
   performance-job:
     name: performance
     runs-on: [oracle-vm-32cpu-128gb-x86-64]
@@ -135,10 +140,7 @@ jobs:
       uses: ./.github/actions/diagnostics
 
     - name: Set up Go
-      uses: actions/setup-go@v6
-      with:
-        go-version-file: 'go-controller/go.mod'
-        cache: false
+      uses: ./.github/actions/setup-go
       id: go
 
     - name: Set up environment
@@ -189,9 +191,13 @@ jobs:
     - name: Install VRF kernel module
       run: |
         set -x
-        sudo apt update
-        sudo apt-get install linux-modules-extra-$(uname -r) -y
-        sudo modprobe vrf
+        # Newer Ubuntu kernels ship vrf in linux-modules and have no
+        # linux-modules-extra package, so only install it when needed.
+        if ! sudo modprobe vrf; then
+          sudo apt update
+          sudo apt-get install linux-modules-extra-$(uname -r) -y
+          sudo modprobe vrf
+        fi
 
     - name: Free up disk space
       uses: ./.github/actions/free-disk-space
@@ -405,6 +411,7 @@ jobs:
         path: /tmp/${{ matrix.perf-test }}/logs
 
   build-pr:
+    needs: go-cache
     name: Build-PR
     runs-on: ubuntu-24.04
     if: |
@@ -463,10 +470,7 @@ jobs:
 
     - name: Set up Go
       if: steps.is_pr_image_build_needed.outputs.PR_IMAGE_RESTORED != 'true' && success()
-      uses: actions/setup-go@v6
-      with:
-        go-version-file: 'go-controller/go.mod'
-        cache: false
+      uses: ./.github/actions/setup-go
       id: go
 
     - name: Build

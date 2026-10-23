@@ -4,10 +4,6 @@ on:
   merge_group:
   pull_request:
     branches: [ master,release-* ]
-    # Only run jobs if at least one non-doc file is changed
-    paths-ignore:
-      - '**/*.md'
-      - 'mkdocs.yml'
   schedule:
     - cron: '0 */12 * * *'
   workflow_dispatch:
@@ -40,8 +36,47 @@ env:
   # OVN_GITREF: main
 
 jobs:
+  changes:
+    name: Check changed files
+    runs-on: ubuntu-24.04
+    permissions:
+      pull-requests: read
+    outputs:
+      run_ci: ${{ steps.filter.outputs.run_ci }}
+    steps:
+    - name: Check whether CI is needed
+      id: filter
+      uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+      with:
+        script: |
+          // Scheduled, manual, and merge-group runs always run the full CI suite.
+          if (context.eventName !== 'pull_request') {
+            core.setOutput('run_ci', 'true');
+            return;
+          }
+          const files = await github.paginate(github.rest.pulls.listFiles, {
+            ...context.repo,
+            pull_number: context.issue.number,
+            per_page: 100,
+          });
+          const isDoc = path => path.startsWith('docs/') || path.endsWith('.md') ||
+            path === 'mkdocs.yml' || path.startsWith('.github/ISSUE_TEMPLATE/');
+          // The API caps results at 3000 files. Never skip CI on an incomplete list.
+          // Check both paths of a rename so moving code into docs still runs CI.
+          const runCI = files.length === 0 || files.length >= 3000 ||
+            files.some(file => !isDoc(file.filename) ||
+              (file.previous_filename && !isDoc(file.previous_filename)));
+          core.setOutput('run_ci', String(runCI));
+
+  go-cache:
+    needs: changes
+    if: needs.changes.outputs.run_ci == 'true'
+    uses: ./.github/workflows/prepare-go-cache.yml
+
   # separate job for parallelism
   lint:
+    needs: [ changes, go-cache ]
+    if: needs.changes.outputs.run_ci == 'true'
     name: Lint
     runs-on: ubuntu-24.04
     steps:
@@ -49,14 +84,7 @@ jobs:
       uses: actions/checkout@v6
 
     - name: Set up Go
-      uses: actions/setup-go@v6
-      with:
-        go-version-file: 'go-controller/go.mod'
-        # Disabling cache to avoid warnings until these two issues are fixed
-        # https://github.com/actions/setup-go/issues/424
-        # https://github.com/actions/setup-go/issues/403
-        # cache-dependency-path: "**/*.sum"
-        cache: false
+      uses: ./.github/actions/setup-go
       id: go
 
     - name: Verify
@@ -67,6 +95,8 @@ jobs:
         args: --modules-download-mode=vendor --timeout=15m0s --verbose
 
   build-base:
+    needs: changes
+    if: needs.changes.outputs.run_ci == 'true'
     name: Build-base
     runs-on: ubuntu-24.04
     steps:
@@ -112,11 +142,7 @@ jobs:
       uses: actions/setup-go@v6
       with:
         go-version-file: 'go-controller/go.mod'
-        # Disabling cache to avoid warnings until these two issues are fixed
-        # https://github.com/actions/setup-go/issues/424
-        # https://github.com/actions/setup-go/issues/403
-        # cache-dependency-path: "**/*.sum"
-        cache: false
+        cache-dependency-path: "**/*.sum"
       id: go
 
     - name: Build - from base branch
@@ -160,9 +186,23 @@ jobs:
         path: ${{ env.CI_IMAGE_BASE_TAR }}
 
   build-pr:
+    needs: [ changes, go-cache ]
+    # A failed file check must fail this required check, rather than skip it.
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.run_ci != 'false') }}
     name: Build-PR
     runs-on: ubuntu-24.04
     steps:
+    - name: Verify changed-file check succeeded
+      env:
+        CHANGES_RESULT: ${{ needs.changes.result }}
+        RUN_CI: ${{ needs.changes.outputs.run_ci }}
+      run: test "$CHANGES_RESULT" = success && test "$RUN_CI" = true
+
+    - name: Verify module cache preparation succeeded
+      env:
+        CACHE_RESULT: ${{ needs.go-cache.result }}
+      run: test "$CACHE_RESULT" = success
+
     # Create a cache for the build PR image
     - name: Restore PR image cache
       id: image_cache_pr
@@ -191,14 +231,7 @@ jobs:
 
     - name: Set up Go
       if: steps.is_pr_image_build_needed.outputs.PR_IMAGE_RESTORED != 'true' && success()
-      uses: actions/setup-go@v6
-      with:
-        go-version-file: 'go-controller/go.mod'
-        # Disabling cache to avoid warnings until these two issues are fixed
-        # https://github.com/actions/setup-go/issues/424
-        # https://github.com/actions/setup-go/issues/403
-        # cache-dependency-path: "**/*.sum"
-        cache: false
+      uses: ./.github/actions/setup-go
       id: go
 
     - name: Build - from current pr branch
@@ -249,6 +282,8 @@ jobs:
         path: ${{ env.CI_DIST_IMAGES_OUTPUT }}/${{ env.CI_IMAGE_PR_TAR }}
 
   test-pr:
+    needs: [ changes, go-cache ]
+    if: needs.changes.outputs.run_ci == 'true'
     name: Test-PR
     runs-on: ubuntu-24.04
     steps:
@@ -256,22 +291,19 @@ jobs:
       uses: actions/checkout@v6
 
     - name: Set up Go
-      uses: actions/setup-go@v6
-      with:
-        go-version-file: 'go-controller/go.mod'
-        # Disabling cache to avoid warnings until these two issues are fixed
-        # https://github.com/actions/setup-go/issues/424
-        # https://github.com/actions/setup-go/issues/403
-        # cache-dependency-path: "**/*.sum"
-        cache: false
+      uses: ./.github/actions/setup-go
       id: go
 
     - name: Install VRF kernel module
       run: |
         set -x
-        sudo apt update
-        sudo apt-get install linux-modules-extra-$(uname -r) -y
-        sudo modprobe vrf
+        # Newer Ubuntu kernels ship vrf in linux-modules and have no
+        # linux-modules-extra package, so only install it when needed.
+        if ! sudo modprobe vrf; then
+          sudo apt update
+          sudo apt-get install linux-modules-extra-$(uname -r) -y
+          sudo modprobe vrf
+        fi
 
     - name: Run unit tests
       run: |
@@ -332,10 +364,8 @@ jobs:
       uses: actions/setup-go@v6
       with:
         go-version-file: 'go-controller/go.mod'
-        # Disabling cache to avoid warnings until these two issues are fixed
-        # https://github.com/actions/setup-go/issues/424
-        # https://github.com/actions/setup-go/issues/403
-        # cache-dependency-path: "**/*.sum"
+        # Restore modules after the PR checkout below, avoiding two cache
+        # extractions into the same directory with overlapping read-only files.
         cache: false
       id: go
 
@@ -385,6 +415,9 @@ jobs:
 
     - name: Check out code into the Go module directory - from PR branch
       uses: actions/checkout@v6
+
+    - name: Restore PR Go modules
+      uses: ./.github/actions/setup-go
 
     - name: Export kind logs
       if: always()
@@ -520,7 +553,8 @@ jobs:
           - {"target": "traffic-flow-test-only", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv4", "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "1br", "ic": "ic-single-node-zones", "traffic-flow-tests": "1-24", "network-segmentation": "enable-network-segmentation"}
           - {"target": "tools", "ha": "noHA", "gateway-mode": "local", "ipfamily": "dualstack", "disable-snat-multiple-gws": "SnatGW", "second-bridge": "1br", "ic": "ic-single-node-zones", "network-segmentation": "enable-network-segmentation"}
           - {"target": "serial", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv4", "disable-snat-multiple-gws": "snatGW", "second-bridge": "1br", "ic": "ic-single-node-zones"}
-    needs: [ build-pr ]
+    needs: [ changes, build-pr ]
+    if: needs.changes.outputs.run_ci == 'true'
     env:
       JOB_NAME: "${{ matrix.target }}-${{ matrix.ha }}-${{ matrix.gateway-mode }}-${{ matrix.ipfamily }}-${{ matrix.disable-snat-multiple-gws }}-${{ matrix.second-bridge }}-${{ matrix.ic }}"
       OVN_HYBRID_OVERLAY_ENABLE: ${{ matrix.target == 'control-plane' && (matrix.ipfamily == 'ipv4' || matrix.ipfamily == 'dualstack' ) }}
@@ -571,9 +605,13 @@ jobs:
     - name: Install VRF kernel module
       run: |
         set -x
-        sudo apt update
-        sudo apt-get install linux-modules-extra-$(uname -r) -y
-        sudo modprobe vrf
+        # Newer Ubuntu kernels ship vrf in linux-modules and have no
+        # linux-modules-extra package, so only install it when needed.
+        if ! sudo modprobe vrf; then
+          sudo apt update
+          sudo apt-get install linux-modules-extra-$(uname -r) -y
+          sudo modprobe vrf
+        fi
 
     - name: Free up disk space
       uses: ./.github/actions/free-disk-space
@@ -597,14 +635,7 @@ jobs:
         docker system info
 
     - name: Set up Go
-      uses: actions/setup-go@v6
-      with:
-        go-version-file: 'go-controller/go.mod'
-        # Disabling cache to avoid warnings until these two issues are fixed
-        # https://github.com/actions/setup-go/issues/424
-        # https://github.com/actions/setup-go/issues/403
-        # cache-dependency-path: "**/*.sum"
-        cache: false
+      uses: ./.github/actions/setup-go
       id: go
 
     - name: Set up environment
@@ -802,14 +833,7 @@ jobs:
       uses: ./.github/actions/diagnostics
 
     - name: Set up Go
-      uses: actions/setup-go@v6
-      with:
-        go-version-file: 'go-controller/go.mod'
-        # Disabling cache to avoid warnings until these two issues are fixed
-        # https://github.com/actions/setup-go/issues/424
-        # https://github.com/actions/setup-go/issues/403
-        # cache-dependency-path: "**/*.sum"
-        cache: false
+      uses: ./.github/actions/setup-go
       id: go
 
     - name: Set up environment
