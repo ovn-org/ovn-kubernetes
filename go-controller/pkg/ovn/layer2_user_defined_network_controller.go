@@ -592,11 +592,12 @@ func (oc *Layer2UserDefinedNetworkController) ReconcileNode(oldNode, newNode *co
 			_, syncRerouteFailed := oc.syncEIPNodeRerouteFailed.Load(newNode.Name)
 			shouldSyncReroute := syncRerouteFailed || util.NodeHostCIDRsAnnotationChanged(oldNode, newNode)
 			_, clusterRouterPortFailed := oc.nodeClusterRouterPortFailed.Load(newNode.Name)
+			shouldSyncClusterRouterPort := clusterRouterPortFailed || nodeGatewayMTUSupportChanged(oldNode, newNode)
 			nodeParams = &nodeSyncs{
 				syncMgmtPort:          shouldSyncMgmtPort,
 				syncGw:                shouldSyncGW,
 				syncReroute:           shouldSyncReroute,
-				syncClusterRouterPort: clusterRouterPortFailed,
+				syncClusterRouterPort: shouldSyncClusterRouterPort,
 			}
 		}
 		return oc.addUpdateLocalNodeEvent(newNode, nodeParams)
