@@ -1672,6 +1672,14 @@ func (udng *UserDefinedNetworkGateway) reconcileAdvertisedState() error {
 			return err
 		}
 	}
+	// Service mark rules depend on the same advertisement flags as routing.
+	// Requeue only this network's services so existing rules converge without
+	// waiting for an unrelated Service or EndpointSlice event.
+	if udng.gateway.servicesRetryFramework != nil {
+		if err := utilerrors.Join(udng.gateway.resyncNetworkServices(udng.NetInfo)...); err != nil {
+			return fmt.Errorf("failed to resync services for network %s: %w", udng.GetNetworkName(), err)
+		}
+	}
 	return nil
 }
 

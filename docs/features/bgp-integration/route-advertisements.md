@@ -846,6 +846,20 @@ To ensure CUDN isolation in local gateway mode filtering rules are added to the 
 These rules are inhibited if OVN-Kubernetes is configured in "loose advertised
 UDN isolation mode".
 
+#### Host service marking
+
+Host service marking follows the same transport-aware routing decision as
+other gateway configuration. For primary user-defined networks, it is enabled
+for unadvertised overlay networks and networks advertised into the default VRF,
+and disabled for EVPN and non-default-VRF routing. An empty no-overlay
+advertisement mapping does not enable default-VRF service marking.
+
+Changes to the routing decision refresh the affected network's service rules,
+removing or restoring service marks even when the Service object itself has
+not changed. Removal checks the existing network mark so a service with an
+overlapping ExternalIP or LoadBalancer address does not remove another
+network's mark during advertisement reconciliation.
+
 ## Troubleshooting
 
 ### Troubleshooting RouteAdvertisements

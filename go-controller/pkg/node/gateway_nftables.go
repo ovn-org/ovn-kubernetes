@@ -10,7 +10,6 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"slices"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
@@ -744,19 +743,36 @@ func getUDNNFTRules(service *corev1.Service, netConfig *bridgeconfig.BridgeUDNCo
 	return rules
 }
 
+// shouldAddUDNServiceMarkRules reports whether host service traffic may enter
+// the primary network through the default-VRF service path.
 func shouldAddUDNServiceMarkRules(netInfo util.NetInfo, nodeName string) bool {
 	if !netInfo.IsPrimaryNetwork() {
 		return false
 	}
-	advertisedVRFs := netInfo.GetPodNetworkAdvertisedOnNodeVRFs(nodeName)
-	if len(advertisedVRFs) == 0 {
-		return true
+	// Use the same transport-aware decision as the gateway's default route
+	// and IP rules. In particular, EVPN always uses a non-default VRF, and
+	// an empty no-overlay mapping does not imply an unadvertised fallback.
+	return !util.IsPodNetworkAdvertisedAtNode(netInfo, nodeName) ||
+		util.IsPodNetworkAdvertisedAtNodeDefaultVRF(netInfo, nodeName)
+}
+
+// reconcileUDNServiceMarkRules also removes old entries when an advertisement
+// changes the service's routing domain without changing the Service object.
+func reconcileUDNServiceMarkRules(service *corev1.Service, netInfo util.NetInfo, nodeName string, netConfig *bridgeconfig.BridgeUDNConfiguration) error {
+	if !netInfo.IsPrimaryNetwork() {
+		return nil
 	}
-	// The default network name represents the default VRF target here, not the
-	// default pod network. Only install host service mark rules when the UDN is
-	// reachable through the default VRF path; VRF-lite Uplink targets must not
-	// be reachable from the default gateway interface.
-	return slices.Contains(advertisedVRFs, types.DefaultNetworkName)
+	var err error
+	if shouldAddUDNServiceMarkRules(netInfo, nodeName) {
+		err = nodenft.AddObjects(getUDNNFTRules(service, netConfig))
+	} else {
+		err = nodenft.DeleteElementsIfMatching(getUDNNFTRules(service, netConfig))
+	}
+	if err != nil {
+		return fmt.Errorf("failed to reconcile UDN service mark rules for service %s/%s: %w",
+			service.Namespace, service.Name, err)
+	}
+	return nil
 }
 
 // getUDNNFTContainerObjects returns all of the "container" objects (Sets/Maps/Chains)
