@@ -689,13 +689,15 @@ func ParseNodePrimaryIfAddr(node *corev1.Node) (*ParsedNodeEgressIPConfiguration
 	if err != nil {
 		return nil, err
 	}
-	unlimited := UnlimitedNodeCapacity
+	unlimitedIPv4 := UnlimitedNodeCapacity
+	unlimitedIPv6 := UnlimitedNodeCapacity
+	unlimitedIP := UnlimitedNodeCapacity
 	nodeEgressIPConfig := nodeEgressIPConfiguration{
 		IFAddr: ifAddr(*nodeIfAddr),
 		Capacity: Capacity{
-			IP:   &unlimited,
-			IPv4: &unlimited,
-			IPv6: &unlimited,
+			IP:   &unlimitedIP,
+			IPv4: &unlimitedIPv4,
+			IPv6: &unlimitedIPv6,
 		},
 	}
 	parsedEgressIPConfig, err := parseNodeEgressIPConfig(&nodeEgressIPConfig)
@@ -788,13 +790,15 @@ func ParseCloudEgressIPConfig(node *corev1.Node) (*ParsedNodeEgressIPConfigurati
 	if !ok {
 		return nil, newAnnotationNotSetError("%s annotation not found for node %q", cloudEgressIPConfigAnnotationKey, node.Name)
 	}
-	unlimited := UnlimitedNodeCapacity
+	unlimitedIPv4 := UnlimitedNodeCapacity
+	unlimitedIPv6 := UnlimitedNodeCapacity
+	unlimitedIP := UnlimitedNodeCapacity
 	nodeEgressIPConfig := []nodeEgressIPConfiguration{
 		{
 			Capacity: Capacity{
-				IP:   &unlimited,
-				IPv4: &unlimited,
-				IPv6: &unlimited,
+				IP:   &unlimitedIP,
+				IPv4: &unlimitedIPv4,
+				IPv6: &unlimitedIPv6,
 			},
 		},
 	}
