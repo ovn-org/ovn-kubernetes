@@ -727,11 +727,23 @@ func (oc *EFController) updateEgressFirewallForNode(nodeName string) error {
 	return nil
 }
 
+// addEgressFirewallRules builds and commits the ACL batch for an EgressFirewall.
+// It releases legacy DNS AddressSet handoffs after the batch finishes, including on failure.
 func (oc *EFController) addEgressFirewallRules(ef *egressFirewall, pgName string,
 	aclLogging *libovsdbutil.ACLLoggingLevels, ruleIDs ...int) error {
 	var ops []ovsdb.Operation
 	var err error
 	var hasDNS bool
+	// Keep address-set GC from deleting a set after Add returns but before the
+	// ACL transaction below has completed.
+	var addedDNSNames []string
+	if addCompleter, ok := oc.dnsNameResolver.(dnsnameresolver.DNSNameResolverAddCompleter); ok {
+		defer func() {
+			for _, dnsName := range addedDNSNames {
+				addCompleter.CompleteAdd(ef.namespace, dnsName)
+			}
+		}()
+	}
 	for _, rule := range ef.egressRules {
 		// check if only specific rule ids are requested to be added
 		if len(ruleIDs) > 0 {
@@ -790,6 +802,7 @@ func (oc *EFController) addEgressFirewallRules(ef *egressFirewall, pgName string
 			if err != nil {
 				return fmt.Errorf("error with DNSNameResolver - %v", err)
 			}
+			addedDNSNames = append(addedDNSNames, dnsName)
 			dnsNameIPv4ASHashName, dnsNameIPv6ASHashName := dnsNameAddressSets.GetASHashNames()
 			if dnsNameIPv4ASHashName != "" {
 				matchTargets = append(matchTargets, matchTarget{matchKindV4AddressSet, dnsNameIPv4ASHashName, rule.to.clusterSubnetIntersection})

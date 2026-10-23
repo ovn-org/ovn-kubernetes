@@ -553,8 +553,8 @@ func (as *ovnAddressSets) Destroy() error {
 	return nil
 }
 
-// setAddresses updates the given address set in OVN to be only the
-// given addresses, disregarding existing state.
+// setAddresses updates the OVN object only when its addresses differ from the
+// requested contents.
 func (as *ovnAddressSet) setAddresses(addresses []string) error {
 	uniqAddresses := getUniqueAddresses(addresses)
 
@@ -569,7 +569,7 @@ func (as *ovnAddressSet) setAddresses(addresses []string) error {
 	}
 	err := libovsdbops.UpdateAddressSetsAddresses(as.nbClient, &addrset)
 	if err != nil {
-		return fmt.Errorf("failed to update address set addresses %+v: %v", addrset, err)
+		return fmt.Errorf("failed to update address set addresses %+v: %w", addrset, err)
 	}
 
 	return nil

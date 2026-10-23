@@ -6,6 +6,7 @@ package e2e
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"strings"
@@ -479,7 +480,17 @@ func getNodeIDAnnotation(cs clientset.Interface, nodeName string) string {
 	return nodeID
 }
 
+// findOVNNBDBPod returns any running NB database pod. It is suitable for
+// queries against a shared NBDB; local-zone callers should select by node.
 func findOVNNBDBPod(cs clientset.Interface, ovnNamespace string) (*corev1.Pod, error) {
+	return findOVNNBDBPodOnNode(cs, ovnNamespace, "")
+}
+
+var errNoOVNNBDBPodOnNode = errors.New("no running local NB database pod found on node")
+
+// findOVNNBDBPodOnNode returns the running local NB database pod hosted on
+// nodeName. An empty nodeName selects any pod for callers using a shared NBDB.
+func findOVNNBDBPodOnNode(cs clientset.Interface, ovnNamespace, nodeName string) (*corev1.Pod, error) {
 	pods, err := cs.CoreV1().Pods(ovnNamespace).List(context.TODO(), metav1.ListOptions{LabelSelector: "ovn-db-pod=true"})
 	if err != nil {
 		return nil, fmt.Errorf("failed to list OVN DB pods: %w", err)
@@ -489,25 +500,82 @@ func findOVNNBDBPod(cs clientset.Interface, ovnNamespace string) (*corev1.Pod, e
 		if pod.Status.Phase != corev1.PodRunning {
 			continue
 		}
+		if nodeName != "" && pod.Spec.NodeName != nodeName {
+			continue
+		}
 		for _, container := range pod.Spec.Containers {
 			if container.Name == "nb-ovsdb" {
 				return pod, nil
 			}
 		}
 	}
+	if nodeName != "" {
+		return nil, fmt.Errorf("%w %s in namespace %s", errNoOVNNBDBPodOnNode, nodeName, ovnNamespace)
+	}
 	return nil, fmt.Errorf("no running OVN DB pod with nb-ovsdb container found in namespace %s", ovnNamespace)
 }
 
+// findOVNNBDBPodForNode selects the NB database serving nodeName in
+// local-zone deployments, or any NB database pod when NBDB is shared.
+func findOVNNBDBPodForNode(cs clientset.Interface, ovnNamespace, nodeName string) (*corev1.Pod, error) {
+	dbPod, err := findOVNNBDBPodOnNode(cs, ovnNamespace, nodeName)
+	if err == nil {
+		return dbPod, nil
+	}
+	if !errors.Is(err, errNoOVNNBDBPodOnNode) {
+		return nil, err
+	}
+	nodeLookupErr := err
+
+	// Do not fall back to another node's database when this is a local-zone
+	// installation. Its per-node NB pods are labeled app/name=ovnkube-node.
+	pods, listErr := cs.CoreV1().Pods(ovnNamespace).List(context.TODO(), metav1.ListOptions{LabelSelector: "ovn-db-pod=true"})
+	if listErr != nil {
+		return nil, fmt.Errorf("failed to list OVN DB pods: %w", listErr)
+	}
+	for i := range pods.Items {
+		pod := &pods.Items[i]
+		if !podHasContainer(pod, "nb-ovsdb") {
+			continue
+		}
+		if pod.Labels["app"] == "ovnkube-node" || pod.Labels["name"] == "ovnkube-node" {
+			return nil, fmt.Errorf("%w; found local-zone NB database pod %s on node %s, refusing to query another zone", nodeLookupErr, pod.Name, pod.Spec.NodeName)
+		}
+	}
+
+	// Centralized deployments do not have an NB database pod on each worker;
+	// their NBDB is shared, so any running NB database pod is equivalent.
+	return findOVNNBDBPod(cs, ovnNamespace)
+}
+
+// podHasContainer reports whether the pod declares a container with the given name.
+func podHasContainer(pod *corev1.Pod, containerName string) bool {
+	for _, container := range pod.Spec.Containers {
+		if container.Name == containerName {
+			return true
+		}
+	}
+	return false
+}
+
+// runOVNNBCTL runs ovn-nbctl against any available NB pod. Use it only when
+// the database is shared; callers inspecting local-zone state must select a pod.
 func runOVNNBCTL(f *framework.Framework, cs clientset.Interface, args ...string) (string, error) {
 	ovnNamespace := deploymentconfig.Get().OVNKubernetesNamespace()
 	dbPod, err := findOVNNBDBPod(cs, ovnNamespace)
 	if err != nil {
 		return "", err
 	}
+	return runOVNNBCTLInPod(f, ovnNamespace, dbPod.Name, args...)
+}
+
+// runOVNNBCTLInPod runs ovn-nbctl in the explicitly selected NB pod so a
+// caller can query the database serving a particular OVN zone.
+func runOVNNBCTLInPod(f *framework.Framework, ovnNamespace, podName string, args ...string) (string, error) {
 	cmd := append([]string{"ovn-nbctl"}, args...)
-	stdout, stderr, err := ExecCommandInContainerWithFullOutput(f, ovnNamespace, dbPod.Name, "nb-ovsdb", cmd...)
+	stdout, stderr, err := ExecCommandInContainerWithFullOutput(f, ovnNamespace, podName, "nb-ovsdb", cmd...)
 	if err != nil {
-		return stdout, fmt.Errorf("failed running ovn-nbctl %v on %s/%s: %w, stderr: %s", args, ovnNamespace, dbPod.Name, err, stderr)
+		return stdout, fmt.Errorf("failed running ovn-nbctl %v on %s/%s: %w, stderr: %s", args, ovnNamespace, podName, err, stderr)
 	}
 	return strings.TrimSpace(stdout), nil
 }

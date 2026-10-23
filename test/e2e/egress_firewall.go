@@ -37,6 +37,8 @@ import (
 	utilnet "k8s.io/utils/net"
 )
 
+// egressFirewallPolicyValidationTests registers EgressFirewall coverage for
+// the primary network and, when requested, a user-defined network topology.
 func egressFirewallPolicyValidationTests(useUDN bool, udnTopology string) {
 	testLabel := "e2e egress firewall policy validation"
 	if useUDN {
@@ -768,45 +770,6 @@ spec:
 				}
 			})
 
-			getMinTTLForDNSName := func(dnsName string, srcPodName string) int {
-				// Get the minimum TTL for the DNS name from the nslookup output.
-				// Ignore the error as it will always return an error because the
-				// cluster local DNS lookup will fail for the following DNS names:
-				// - <dnsName>.<namespace>.svc.<cluster-domain>
-				// - <dnsName>.svc.<cluster-domain>.
-				// - <dnsName>.<cluster-domain>
-				nslookupOutput, _ := e2ekubectl.RunKubectl(f.Namespace.Name, "exec", srcPodName, "--", "nslookup", "-debug", "-timeout=2", dnsName)
-				lines := strings.Split(nslookupOutput, "\n")
-				minTTL := -1
-				for i := 0; i < len(lines); i++ {
-					answerLine := strings.TrimSpace(lines[i])
-					// Skip lines until we find the answer line for the DNS name
-					if !strings.HasPrefix(answerLine, fmt.Sprintf("->  %s", dnsName)) {
-						continue
-					}
-					// Find the TTL line for the DNS name
-					for i++; i < len(lines); i++ {
-						ttlLine := strings.TrimSpace(lines[i])
-						if strings.HasPrefix(ttlLine, "ttl =") {
-							// Extract TTL value
-							ttlParts := strings.Split(ttlLine, "ttl =")
-							if len(ttlParts) == 2 {
-								ttlStr := strings.TrimSpace(ttlParts[1])
-								ttl, err := strconv.Atoi(ttlStr)
-								gomega.Expect(err).NotTo(gomega.HaveOccurred(), "failed to parse TTL value '%s': %v", ttlStr, err)
-
-								// Update minimum TTL
-								if minTTL == -1 || ttl < minTTL {
-									minTTL = ttl
-								}
-							}
-							break
-						}
-					}
-				}
-				return minTTL
-			}
-
 			ginkgo.It("Should validate that egressfirewall policy functionality for allowed DNS name", func() {
 				dnsName := "www.google.com"
 				srcPodName := "e2e-egress-fw-src-pod"
@@ -835,7 +798,7 @@ spec:
 				framework.ExpectNoError(err, "failed to curl DNS name %s", dnsName)
 
 				ginkgo.By(fmt.Sprintf("Getting the minimum TTL for DNS name %s", dnsName))
-				minTTL := getMinTTLForDNSName(dnsName, srcPodName)
+				minTTL := getMinTTLForDNSName(f, dnsName, srcPodName)
 				gomega.Expect(minTTL).NotTo(gomega.Equal(-1), "failed to parse nslookup output for DNS name %s", dnsName)
 				framework.Logf("Minimum TTL for DNS name %s is %d", dnsName, minTTL)
 
@@ -844,13 +807,238 @@ spec:
 
 				ginkgo.By(fmt.Sprintf("Verifying connectivity to DNS name %s is still permitted", dnsName))
 				_, err = e2ekubectl.RunKubectl(f.Namespace.Name, "exec", srcPodName, "--", "curl", "-g", "--max-time", "5", url)
-				framework.ExpectNoError(err, "failed to curl DNS name %s", dnsName)
+				framework.ExpectNoError(err, "failed to curl DNS name %s after TTL refresh", dnsName)
+
+				framework.Logf("Deleting EgressFirewall in namespace %s", f.Namespace.Name)
+				e2ekubectl.RunKubectlOrDie(f.Namespace.Name, "delete", "egressfirewall", "default")
+			})
+		})
+
+		ginkgo.Context("with legacy DNS name resolver", func() {
+			ginkgo.BeforeEach(func() {
+				// This recovery path belongs to the legacy resolver. The feature flag
+				// selects the separate resolver implementation at controller startup.
+				if isDNSNameResolverEnabled() {
+					e2eskipper.Skipf("legacy DNS name resolver is not enabled")
+					return
+				}
+				if !isIPv4Supported(f.ClientSet) {
+					e2eskipper.Skipf("IPv4 is not supported")
+				}
+			})
+
+			ginkgo.It("recovers an EgressFirewall DNS address set after it is deleted", func() {
+				dnsName := "www.google.com"
+				srcPodName := "e2e-egress-fw-src-pod"
+				createSrcPod(srcPodName, serverNodeInfo.name, retryInterval, retryTimeout, f)
+				ovnNamespace := deploymentconfig.Get().OVNKubernetesNamespace()
+				nbDBPod, err := findOVNNBDBPodForNode(f.ClientSet, ovnNamespace, serverNodeInfo.name)
+				framework.ExpectNoError(err, "failed to find the NB database pod for source node %s", serverNodeInfo.name)
+				// Read the DNS TTL before applying the policy. DNS lookups from a
+				// UDN pod may be denied by the EgressFirewall; the connectivity
+				// checks below use an address from the OVN AddressSet directly.
+				minTTL := getMinTTLForDNSName(f, dnsName, srcPodName)
+				// The EgressDNS controller uses the node's DNS resolver, which can
+				// return a longer TTL than the test pod's resolver observed here.
+				// Keep enough time for that controller-side TTL before declaring
+				// address-set recovery broken.
+				refreshTimeout := 10 * time.Minute
+				if minTTL >= 0 {
+					observedRefreshTimeout := time.Duration(minTTL+30) * time.Second
+					if observedRefreshTimeout > refreshTimeout {
+						refreshTimeout = observedRefreshTimeout
+					}
+					framework.Logf("Minimum observed TTL for DNS name %s is %d", dnsName, minTTL)
+				} else {
+					framework.Logf("Could not read TTL for %s before applying the EgressFirewall; using a %s refresh timeout",
+						dnsName, refreshTimeout)
+				}
+
+				egressFirewallConfig := fmt.Sprintf(`kind: EgressFirewall
+apiVersion: k8s.ovn.org/v1
+metadata:
+  name: default
+  namespace: %s
+spec:
+  egress:
+  - type: Allow
+    to:
+      dnsName: %s
+  - type: Deny
+    to:
+      cidrSelector: %s
+`, f.Namespace.Name, dnsName, denyAllCIDR)
+				applyEF(egressFirewallConfig, f.Namespace.Name)
+
+				url := fmt.Sprintf("https://%s", dnsName)
+				curlToAddressSetIPs := func(ips []string) error {
+					if len(ips) == 0 {
+						return fmt.Errorf("DNS address set for %s has no IP addresses yet", dnsName)
+					}
+					var lastErr error
+					for _, ip := range ips {
+						resolveIP := ip
+						if parsedIP := net.ParseIP(ip); parsedIP != nil && parsedIP.To4() == nil {
+							resolveIP = "[" + parsedIP.String() + "]"
+						}
+						_, curlErr := e2ekubectl.RunKubectl(f.Namespace.Name, "exec", srcPodName, "--",
+							"curl", "-g", "--max-time", "5", "--resolve",
+							fmt.Sprintf("%s:443:%s", dnsName, resolveIP), url)
+						if curlErr == nil {
+							return nil
+						}
+						lastErr = curlErr
+					}
+					return fmt.Errorf("curl to %s using AddressSet IP addresses %v failed: %w", url, ips, lastErr)
+				}
+
+				ginkgo.By(fmt.Sprintf("Waiting for the legacy resolver to populate the address set for %s", dnsName))
+				gomega.Eventually(func() error {
+					addressSetIPs, lookupErr := getEgressFirewallDNSAddressSetIPs(f, nbDBPod.Name, dnsName)
+					if lookupErr != nil {
+						return fmt.Errorf("failed to find DNS address set addresses for %s: %w", dnsName, lookupErr)
+					}
+					if len(addressSetIPs) == 0 {
+						return fmt.Errorf("DNS address set for %s has no IP addresses yet", dnsName)
+					}
+					curlErr := curlToAddressSetIPs(addressSetIPs)
+					if curlErr != nil {
+						return fmt.Errorf("curl to %s failed while waiting for AddressSet connectivity: %w", url, curlErr)
+					}
+					return nil
+				}, retryTimeout, retryInterval).Should(gomega.Succeed(),
+					"connectivity to DNS name %s was not permitted after the EgressFirewall was applied", dnsName)
+
+				ginkgo.By(fmt.Sprintf("Removing the OVN address set for DNS name %s", dnsName))
+				addressSetUUIDs, err := getEgressFirewallDNSAddressSetUUIDs(f, nbDBPod.Name, dnsName)
+				framework.ExpectNoError(err, "failed to find DNS address sets for %s", dnsName)
+				gomega.Expect(addressSetUUIDs).NotTo(gomega.BeEmpty(),
+					"expected at least one DNS address set for %s", dnsName)
+				for _, uuid := range addressSetUUIDs {
+					_, err = runOVNNBCTLInPod(f, ovnNamespace, nbDBPod.Name, "--if-exists", "destroy", "address_set", uuid)
+					framework.ExpectNoError(err, "failed to delete DNS address set %s for %s", uuid, dnsName)
+				}
+				gomega.Eventually(func() error {
+					addressSetUUIDs, err := getEgressFirewallDNSAddressSetUUIDs(f, nbDBPod.Name, dnsName)
+					if err != nil {
+						return fmt.Errorf("failed to verify DNS address sets were deleted: %w", err)
+					}
+					if len(addressSetUUIDs) != 0 {
+						return fmt.Errorf("DNS address sets still exist after deletion: %v", addressSetUUIDs)
+					}
+					return nil
+				}, 30*time.Second, 5*time.Second).Should(gomega.Succeed(),
+					"DNS address sets for %s were not deleted", dnsName)
+
+				ginkgo.By(fmt.Sprintf("Waiting for the legacy DNS refresh to recreate the address set for %s", dnsName))
+				gomega.Eventually(func() error {
+					addressSetIPs, err := getEgressFirewallDNSAddressSetIPs(f, nbDBPod.Name, dnsName)
+					if err != nil {
+						return fmt.Errorf("failed to find recreated DNS address set addresses: %w", err)
+					}
+					if len(addressSetIPs) == 0 {
+						return fmt.Errorf("DNS address set for %s has no IP addresses after refresh", dnsName)
+					}
+					return curlToAddressSetIPs(addressSetIPs)
+				}, refreshTimeout, 5*time.Second).Should(gomega.Succeed(),
+					"DNS address set for %s was not recreated after refresh", dnsName)
+
+				ginkgo.By(fmt.Sprintf("Verifying connectivity to DNS name %s is restored", dnsName))
+				gomega.Eventually(func() error {
+					addressSetIPs, lookupErr := getEgressFirewallDNSAddressSetIPs(f, nbDBPod.Name, dnsName)
+					if lookupErr != nil {
+						return fmt.Errorf("failed to find DNS address set addresses: %w", lookupErr)
+					}
+					return curlToAddressSetIPs(addressSetIPs)
+				}, refreshTimeout, 5*time.Second).Should(gomega.Succeed(),
+					"connectivity to DNS name %s was not restored after address set recovery", dnsName)
 
 				framework.Logf("Deleting EgressFirewall in namespace %s", f.Namespace.Name)
 				e2ekubectl.RunKubectlOrDie(f.Namespace.Name, "delete", "egressfirewall", "default")
 			})
 		})
 	})
+}
+
+// getEgressFirewallDNSAddressSetUUIDs returns the legacy resolver's address
+// set UUIDs for dnsName from the NB pod serving the source node's zone.
+func getEgressFirewallDNSAddressSetUUIDs(f *framework.Framework, nbDBPodName, dnsName string) ([]string, error) {
+	output, err := runOVNNBCTLInPod(f, deploymentconfig.Get().OVNKubernetesNamespace(), nbDBPodName,
+		"--data=bare", "--no-heading", "--columns=_uuid",
+		"find", "address_set",
+		"external_ids:k8s.ovn.org/owner-type=EgressFirewallDNS",
+		fmt.Sprintf("external_ids:k8s.ovn.org/name=%s", dnsName),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query DNS address sets for %s: %w", dnsName, err)
+	}
+	return strings.Fields(output), nil
+}
+
+// getEgressFirewallDNSAddressSetIPs returns the legacy resolver's current
+// addresses for dnsName from the NB pod serving the source node's zone.
+func getEgressFirewallDNSAddressSetIPs(f *framework.Framework, nbDBPodName, dnsName string) ([]string, error) {
+	output, err := runOVNNBCTLInPod(f, deploymentconfig.Get().OVNKubernetesNamespace(), nbDBPodName,
+		"--data=bare", "--no-heading", "--columns=addresses",
+		"find", "address_set",
+		"external_ids:k8s.ovn.org/owner-type=EgressFirewallDNS",
+		fmt.Sprintf("external_ids:k8s.ovn.org/name=%s", dnsName),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query DNS address-set addresses for %s: %w", dnsName, err)
+	}
+
+	var ips []string
+	seen := make(map[string]struct{})
+	for _, token := range strings.FieldsFunc(output, func(r rune) bool {
+		return strings.ContainsRune("{}[],\"' \t\r\n", r)
+	}) {
+		ip := net.ParseIP(token)
+		if ip == nil {
+			continue
+		}
+		canonicalIP := ip.String()
+		if ipv4 := ip.To4(); ipv4 != nil {
+			canonicalIP = ipv4.String()
+		}
+		if _, ok := seen[canonicalIP]; ok {
+			continue
+		}
+		seen[canonicalIP] = struct{}{}
+		ips = append(ips, canonicalIP)
+	}
+	return ips, nil
+}
+
+// getMinTTLForDNSName returns the minimum DNS answer TTL observed from the
+// source pod.
+func getMinTTLForDNSName(f *framework.Framework, dnsName, srcPodName string) int {
+	nslookupOutput, _ := e2ekubectl.RunKubectl(f.Namespace.Name, "exec", srcPodName, "--", "nslookup", "-debug", "-timeout=2", dnsName)
+	lines := strings.Split(nslookupOutput, "\n")
+	minTTL := -1
+	for i := 0; i < len(lines); i++ {
+		answerLine := strings.TrimSpace(lines[i])
+		if !strings.HasPrefix(answerLine, fmt.Sprintf("->  %s", dnsName)) {
+			continue
+		}
+		for i++; i < len(lines); i++ {
+			ttlLine := strings.TrimSpace(lines[i])
+			if !strings.HasPrefix(ttlLine, "ttl =") {
+				continue
+			}
+			ttlParts := strings.Split(ttlLine, "ttl =")
+			if len(ttlParts) != 2 {
+				break
+			}
+			ttl, err := strconv.Atoi(strings.TrimSpace(ttlParts[1]))
+			gomega.Expect(err).NotTo(gomega.HaveOccurred(), "failed to parse DNS TTL: %v", err)
+			if minTTL == -1 || ttl < minTTL {
+				minTTL = ttl
+			}
+			break
+		}
+	}
+	return minTTL
 }
 
 func init() {
