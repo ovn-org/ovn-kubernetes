@@ -6,6 +6,7 @@ package config
 import (
 	"bytes"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,6 +24,26 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 )
+
+// TestIsGatewayStaticMACBindingIP verifies completeGatewayConfig populates the
+// allow-list with the dummy next-hop and host masquerade IPs (and only those).
+func TestIsGatewayStaticMACBindingIP(t *testing.T) {
+	g := gomega.NewWithT(t)
+	g.Expect(PrepareTestConfig()).To(gomega.Succeed())
+
+	for _, ip := range []net.IP{
+		Gateway.MasqueradeIPs.V4DummyNextHopMasqueradeIP,
+		Gateway.MasqueradeIPs.V6DummyNextHopMasqueradeIP,
+		Gateway.MasqueradeIPs.V4HostMasqueradeIP,
+		Gateway.MasqueradeIPs.V6HostMasqueradeIP,
+	} {
+		g.Expect(IsGatewayStaticMACBindingIP(ip.String())).To(gomega.BeTrue(), "expected %s to be allow-listed", ip)
+	}
+
+	// the OVN masquerade IP and unrelated IPs are not programmed as static bindings.
+	g.Expect(IsGatewayStaticMACBindingIP(Gateway.MasqueradeIPs.V4OVNMasqueradeIP.String())).To(gomega.BeFalse())
+	g.Expect(IsGatewayStaticMACBindingIP("10.0.0.10")).To(gomega.BeFalse())
+}
 
 func TestConfig(t *testing.T) {
 	gomega.RegisterFailHandler(Fail)
@@ -224,6 +245,7 @@ router-subnet=10.50.0.0/16
 single-node=false
 disable-forwarding=true
 allow-no-uplink=false
+disable-udn-arp-ndp-flood=false
 
 [hybridoverlay]
 enabled=true
@@ -401,6 +423,7 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(Gateway.SingleNode).To(gomega.BeFalse())
 			gomega.Expect(Gateway.DisableForwarding).To(gomega.BeFalse())
 			gomega.Expect(Gateway.AllowNoUplink).To(gomega.BeFalse())
+			gomega.Expect(Gateway.DisableUDNARPNDPFlood).To(gomega.BeFalse())
 			gomega.Expect(OVNKubernetesFeature.EgressIPReachabiltyTotalTimeout).To(gomega.Equal(1))
 			gomega.Expect(OVNKubernetesFeature.EgressIPNodeHealthCheckPort).To(gomega.Equal(0))
 			gomega.Expect(OVNKubernetesFeature.EnableMultiNetwork).To(gomega.BeFalse())
@@ -561,6 +584,7 @@ routing-table-id-start=2002
 			"enable-multi-external-gateway=true",
 			"enable-admin-network-policy=true",
 			"enable-persistent-ips=true",
+			"disable-udn-arp-ndp-flood=true",
 		)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -641,6 +665,7 @@ routing-table-id-start=2002
 			gomega.Expect(Gateway.SingleNode).To(gomega.BeFalse())
 			gomega.Expect(Gateway.DisableForwarding).To(gomega.BeTrue())
 			gomega.Expect(Gateway.AllowNoUplink).To(gomega.BeFalse())
+			gomega.Expect(Gateway.DisableUDNARPNDPFlood).To(gomega.BeTrue())
 
 			gomega.Expect(HybridOverlay.Enabled).To(gomega.BeTrue())
 			gomega.Expect(OVNKubernetesFeature.EgressIPReachabiltyTotalTimeout).To(gomega.Equal(3))

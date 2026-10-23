@@ -1536,6 +1536,27 @@ func GetUserDefinedNetworkPrefix(netName string) string {
 	return name + "_"
 }
 
+// GetNetworkScopedNameForNetwork scopes a name to the network identified by
+// netName, without requiring a NetInfo. It mirrors NetInfo.GetNetworkScopedName:
+// the default network is unscoped, user defined networks are prefixed with
+// GetUserDefinedNetworkPrefix(netName).
+func GetNetworkScopedNameForNetwork(netName, name string) string {
+	if netName == types.DefaultNetworkName {
+		return name
+	}
+	return GetUserDefinedNetworkPrefix(netName) + name
+}
+
+// GetNetworkScopedGWRouterExtPortName returns the external Gateway Router port
+// name (the "rtoe-" router-to-external-switch port) for the given network on the
+// given node, derived from the network name alone. It is equivalent to
+// types.GWRouterToExtSwitchPrefix + NetInfo.GetNetworkScopedGWRouterName(nodeName)
+// but does not require a NetInfo.
+func GetNetworkScopedGWRouterExtPortName(netName, nodeName string) string {
+	gwRouterName := GetGatewayRouterFromNode(GetNetworkScopedNameForNetwork(netName, nodeName))
+	return types.GWRouterToExtSwitchPrefix + gwRouterName
+}
+
 func NewNetInfo(netconf *ovncnitypes.NetConf) (NetInfo, error) {
 	return newNetInfo(netconf)
 }
