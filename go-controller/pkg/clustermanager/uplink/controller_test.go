@@ -787,6 +787,74 @@ func TestUplinkControllerSetsCUDNUplinksReadyForActiveNodes(t *testing.T) {
 	))
 }
 
+func TestUplinkControllerRestoresCUDNReadinessAfterCacheLag(t *testing.T) {
+	g := gomega.NewWithT(t)
+	setSharedGatewayMode(t)
+	cudn := newCUDN("blue", "br-blue")
+	state := newResolvedUplinkState("br-blue", "node-a", "br-new")
+	controller, client := newTestController(t,
+		newNode("node-a", map[string]string{"role": "blue"}),
+		withFinalizer(newUplink("br-blue", "role", "blue", "br-new")),
+		state,
+		cudn,
+	)
+	getCUDN := func() *udnv1.ClusterUserDefinedNetwork {
+		current, err := client.UserDefinedNetworkClient.K8sV1().ClusterUserDefinedNetworks().Get(
+			context.Background(), cudn.Name, metav1.GetOptions{},
+		)
+		g.Expect(err).NotTo(gomega.HaveOccurred())
+		return current
+	}
+
+	// Control the two informer caches independently to reproduce the event
+	// ordering without sleeps or concurrent mutation of cached objects.
+	cudnIndexer := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})
+	stateIndexer := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})
+	g.Expect(cudnIndexer.Add(cudn)).To(gomega.Succeed())
+	g.Expect(stateIndexer.Add(state)).To(gomega.Succeed())
+	controller.cudnLister = udnlisters.NewClusterUserDefinedNetworkLister(cudnIndexer)
+	controller.uplinkStateLister = uplinklisters.NewUplinkStateLister(stateIndexer)
+	g.Expect(controller.reconcileCUDN(cudn.Name)).To(gomega.Succeed())
+	readyCUDN := getCUDN()
+	g.Expect(meta.FindStatusCondition(readyCUDN.Status.Conditions, conditionTypeUplinksReady).Status).
+		To(gomega.Equal(metav1.ConditionTrue))
+	g.Expect(cudnIndexer.Update(readyCUDN)).To(gomega.Succeed())
+
+	// A changed Uplink spec can be observed before its resolved state. The
+	// resulting False write has not yet reached the CUDN informer cache.
+	oldState := state.DeepCopy()
+	oldState.Status.HostInterfaceName = "br-old"
+	g.Expect(stateIndexer.Update(oldState)).To(gomega.Succeed())
+	g.Expect(controller.reconcileCUDN(cudn.Name)).To(gomega.Succeed())
+	g.Expect(meta.FindStatusCondition(getCUDN().Status.Conditions, conditionTypeUplinksReady)).To(gomega.And(
+		gomega.HaveField("Status", metav1.ConditionFalse),
+		gomega.HaveField("Reason", reasonUplinkNotResolvedForNode),
+	))
+
+	// Resolution catches up first. The cached True matches the desired
+	// condition, so reconciliation skips restoring True in the API.
+	g.Expect(stateIndexer.Update(state)).To(gomega.Succeed())
+	g.Expect(controller.reconcileCUDN(cudn.Name)).To(gomega.Succeed())
+	notReadyCUDN := getCUDN()
+	g.Expect(meta.FindStatusCondition(notReadyCUDN.Status.Conditions, conditionTypeUplinksReady).Status).
+		To(gomega.Equal(metav1.ConditionFalse))
+
+	// Observing the delayed status write must enqueue another reconcile.
+	g.Expect(cudnIndexer.Update(notReadyCUDN)).To(gomega.Succeed())
+	g.Expect(cudnNeedsUpdate(readyCUDN, notReadyCUDN)).To(gomega.BeTrue())
+	g.Expect(controller.reconcileCUDN(cudn.Name)).To(gomega.Succeed())
+	recoveredCUDN := getCUDN()
+	g.Expect(meta.FindStatusCondition(recoveredCUDN.Status.Conditions, conditionTypeUplinksReady)).To(gomega.And(
+		gomega.HaveField("Status", metav1.ConditionTrue),
+		gomega.HaveField("Reason", reasonUplinksReady),
+	))
+
+	// Readiness stays stable once the recovery write reaches the cache.
+	g.Expect(cudnIndexer.Update(recoveredCUDN)).To(gomega.Succeed())
+	g.Expect(controller.reconcileCUDN(cudn.Name)).To(gomega.Succeed())
+	g.Expect(getCUDN()).To(gomega.Equal(recoveredCUDN))
+}
+
 func TestUplinkControllerReportsCUDNUplinkNotReadyForActiveNode(t *testing.T) {
 	g := gomega.NewWithT(t)
 	setSharedGatewayMode(t)

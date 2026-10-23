@@ -1193,8 +1193,15 @@ func cudnNeedsUpdate(oldObj, newObj *udnv1.ClusterUserDefinedNetwork) bool {
 	if newObj == nil {
 		return true
 	}
+	// A readiness write can reach this cache after an UplinkState event
+	// has already reconciled against the previous condition. Reconcile
+	// our condition changes so that delayed writes cannot leave it stale.
 	return !reflect.DeepEqual(oldObj.Spec.Uplinks, newObj.Spec.Uplinks) ||
-		oldObj.DeletionTimestamp.IsZero() != newObj.DeletionTimestamp.IsZero()
+		oldObj.DeletionTimestamp.IsZero() != newObj.DeletionTimestamp.IsZero() ||
+		!reflect.DeepEqual(
+			meta.FindStatusCondition(oldObj.Status.Conditions, conditionTypeUplinksReady),
+			meta.FindStatusCondition(newObj.Status.Conditions, conditionTypeUplinksReady),
+		)
 }
 
 func nodeNeedsUpdate(oldObj, newObj *corev1.Node) bool {
