@@ -491,23 +491,44 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 		isOVNKubeControllerSyncd = &atomic.Bool{}
 	}
 
+	// libovsdbOvn clients are used by both node and kubecontroller when DisableUDNARPNDPFlood is true,
+	// otherwise node does not need libovsdbOvn clients.
+	var libovsdbOvnSBClient client.Client
+	var libovsdbOvnNBClient client.Client
+	if runMode.ovnkubeController {
+		libovsdbOvnNBClient, err = libovsdb.NewNBClient(ctx.Done())
+		if err != nil {
+			libovsdbOvnNBClientErr := fmt.Errorf("failed to initialize libovsdb NB client: %w", err)
+			cancel()
+			return libovsdbOvnNBClientErr
+		}
+
+		libovsdbOvnSBClient, err = libovsdb.NewSBClient(ctx.Done())
+		if err != nil {
+			libovsdbOvnSBClientErr := fmt.Errorf("failed to initialize libovsdb SB client: %w", err)
+			cancel()
+			return libovsdbOvnSBClientErr
+		}
+	}
+	var nodeLibovsdbOvnSBClient client.Client
+	var nodeLibovsdbOvnNBClient client.Client
+	if runMode.node {
+		// DisableUDNARPNDPFlood must always be set when node and kubecontroller are enabled
+		if config.Gateway.DisableUDNARPNDPFlood {
+			if !runMode.ovnkubeController {
+				cancel()
+				return fmt.Errorf("disable-udn-arp-ndp-flood requires controller mode; not supported in node-only mode")
+			}
+			nodeLibovsdbOvnSBClient = libovsdbOvnSBClient
+			nodeLibovsdbOvnNBClient = libovsdbOvnNBClient
+		}
+	}
+
 	if runMode.ovnkubeController {
 		wg.Add(1)
 		go func() {
 			defer cancel()
 			defer wg.Done()
-
-			libovsdbOvnNBClient, err := libovsdb.NewNBClient(ctx.Done())
-			if err != nil {
-				controllerErr = fmt.Errorf("failed to initialize libovsdb NB client: %w", err)
-				return
-			}
-
-			libovsdbOvnSBClient, err := libovsdb.NewSBClient(ctx.Done())
-			if err != nil {
-				controllerErr = fmt.Errorf("failed to initialize libovsdb SB client: %w", err)
-				return
-			}
 
 			controllerManager, err := controllermanager.NewControllerManager(
 				runMode.identity,
@@ -573,6 +594,8 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 			nodeControllerManager, err := controllermanager.NewNodeControllerManager(
 				ovnClientset,
 				watchFactory,
+				nodeLibovsdbOvnSBClient,
+				nodeLibovsdbOvnNBClient,
 				runMode.identity,
 				wg,
 				eventRecorder,

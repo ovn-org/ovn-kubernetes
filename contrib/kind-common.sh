@@ -214,6 +214,12 @@ set_common_default_params() {
     exit 1
   fi
 
+  DISABLE_UDN_ARP_NDP_FLOOD=${DISABLE_UDN_ARP_NDP_FLOOD:-false}
+  if [ "$DISABLE_UDN_ARP_NDP_FLOOD" == true ] && [ "$ENABLE_NETWORK_SEGMENTATION" != true ]; then
+    echo "Disable UDN ARP/NDP Flood requires network-segmentation (UDN) to be enabled (-nse)"
+    exit 1
+  fi
+
   ENABLE_NETWORK_CONNECT=${ENABLE_NETWORK_CONNECT:-false}
   if [[ $ENABLE_NETWORK_CONNECT == true && $ENABLE_NETWORK_SEGMENTATION != true ]]; then
     echo "Network connect requires network-segmentation to be enabled (-nse)"

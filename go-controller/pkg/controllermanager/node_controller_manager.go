@@ -34,6 +34,7 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/controllers/dpu"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/controllers/evpn"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/controllers/macbinding"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/iprulemanager"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/managementport"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/netlinkdevicemanager"
@@ -53,9 +54,13 @@ type NodeControllerManager struct {
 	ovnNodeClient *util.OVNNodeClientset
 	Kube          kube.Interface
 	watchFactory  factory.NodeWatchFactory
-	stopChan      chan struct{}
-	wg            *sync.WaitGroup
-	recorder      record.EventRecorder
+	// libovsdbOvnNBClient is used only when DisableUDNARPNDPFlood is true
+	libovsdbOvnNBClient client.Client
+	// libovsdbOvnSBClient is used only when DisableUDNARPNDPFlood is true
+	libovsdbOvnSBClient client.Client
+	stopChan            chan struct{}
+	wg                  *sync.WaitGroup
+	recorder            record.EventRecorder
 
 	// management port device manager
 	mpdm *managementport.MgmtPortDeviceManager
@@ -86,6 +91,8 @@ type NodeControllerManager struct {
 	uplinkStateGatewayStatusController *node.UplinkStateGatewayStatusController
 	// dpu controller that manages DPU representor port lifecycle for all networks
 	dpuController *dpu.Controller
+	// macBindingController disables UDN ARP/NDP fan-out/flood
+	macBindingController *macbinding.MACBindingController
 }
 
 // NewNetworkController create node user-defined network controllers for the given NetInfo
@@ -275,7 +282,7 @@ func isNetworkManagerRequiredForNode() bool {
 }
 
 // NewNodeControllerManager creates a new OVN controller manager to manage all the controller for all networks
-func NewNodeControllerManager(ovnClient *util.OVNClientset, wf factory.NodeWatchFactory, name string,
+func NewNodeControllerManager(ovnClient *util.OVNClientset, wf factory.NodeWatchFactory, libovsdbOvnSBClient, libovsdbOvnNBClient client.Client, name string,
 	wg *sync.WaitGroup, eventRecorder record.EventRecorder, routeManager *routemanager.Controller, ovsClient client.Client) (*NodeControllerManager, error) {
 	ncm := &NodeControllerManager{
 		name: name,
@@ -284,13 +291,15 @@ func NewNodeControllerManager(ovnClient *util.OVNClientset, wf factory.NodeWatch
 			AdminPolicyRouteClient: ovnClient.AdminPolicyRouteClient,
 			UplinkClient:           ovnClient.UplinkClient,
 		},
-		Kube:         &kube.Kube{KClient: ovnClient.KubeClient},
-		watchFactory: wf,
-		stopChan:     make(chan struct{}),
-		wg:           wg,
-		recorder:     eventRecorder,
-		routeManager: routeManager,
-		ovsClient:    ovsClient,
+		Kube:                &kube.Kube{KClient: ovnClient.KubeClient},
+		watchFactory:        wf,
+		libovsdbOvnSBClient: libovsdbOvnSBClient,
+		libovsdbOvnNBClient: libovsdbOvnNBClient,
+		stopChan:            make(chan struct{}),
+		wg:                  wg,
+		recorder:            eventRecorder,
+		routeManager:        routeManager,
+		ovsClient:           ovsClient,
 	}
 
 	// need to configure OVS interfaces for Pods on UDNs in the DPU mode
@@ -340,6 +349,26 @@ func NewNodeControllerManager(ovnClient *util.OVNClientset, wf factory.NodeWatch
 	}
 
 	return ncm, nil
+}
+
+// initNodeMacBindingController creates the controller for default network
+// must be instantiated after initDefaultNodeNetworkController
+func (ncm *NodeControllerManager) initNodeMacBindingController() error {
+	if config.Gateway.DisableUDNARPNDPFlood {
+		ofm, err := ncm.defaultNodeNetworkController.GetOpenflowManager()
+		if err != nil {
+			return err
+		}
+		ncm.macBindingController = macbinding.NewMACBindingController(
+			ncm.libovsdbOvnNBClient,
+			ncm.libovsdbOvnSBClient,
+			ncm.watchFactory,
+			ncm.networkManager.Interface(),
+			ofm,
+			ncm.name,
+		)
+	}
+	return nil
 }
 
 // initDefaultNodeNetworkController creates the controller for default network
@@ -431,6 +460,11 @@ func (ncm *NodeControllerManager) Start(ctx context.Context, isOVNKubeController
 		return fmt.Errorf("failed to init default node network controller: %v", err)
 	}
 
+	err = ncm.initNodeMacBindingController()
+	if err != nil {
+		return fmt.Errorf("failed to init node mac binding controller: %v", err)
+	}
+
 	if ncm.uplinkStateGatewayStatusController != nil {
 		if err := ncm.uplinkStateGatewayStatusController.Start(); err != nil {
 			return fmt.Errorf("failed to start UplinkState gateway status controller: %w", err)
@@ -448,6 +482,16 @@ func (ncm *NodeControllerManager) Start(ctx context.Context, isOVNKubeController
 		if err := ncm.uplinkController.Start(); err != nil {
 			return fmt.Errorf("failed to start Uplink controller: %w", err)
 		}
+	}
+
+	if ncm.macBindingController != nil {
+		ncm.wg.Add(1)
+		go func() {
+			defer ncm.wg.Done()
+			if err := ncm.macBindingController.Run(ncm.stopChan); err != nil {
+				klog.Errorf("MAC binding controller run failed: %v", err)
+			}
+		}()
 	}
 
 	err = ncm.defaultNodeNetworkController.Start(ctx)

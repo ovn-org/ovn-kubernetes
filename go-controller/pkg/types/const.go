@@ -375,7 +375,8 @@ const (
 	// GRMACBindingAgeThreshold is the lifetime in seconds of each MAC binding
 	// entry for the gateway routers. After this time, the entry is removed and
 	// may be refreshed with a new ARP request.
-	GRMACBindingAgeThreshold = "300"
+	GRMACBindingAgeThreshold    = "300"
+	GRMACBindingAgeThresholdInt = 300
 
 	// InvalidID signifies an invalid ID. Currently used for network and tunnel IDs.
 	InvalidID = -1

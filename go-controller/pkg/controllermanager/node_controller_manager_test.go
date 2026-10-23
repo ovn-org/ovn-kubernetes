@@ -187,7 +187,7 @@ var _ = Describe("Healthcheck tests", func() {
 			var ovsClient libovsdbclient.Client
 			ovsClient, ovsCleanup = newTestOVSClient(ovsData)
 
-			ncm, err = NewNodeControllerManager(fakeClient, &factoryMock, nodeName, &sync.WaitGroup{}, nil, routeManager, ovsClient)
+			ncm, err = NewNodeControllerManager(fakeClient, &factoryMock, nil, nil, nodeName, &sync.WaitGroup{}, nil, routeManager, ovsClient)
 			Expect(err).NotTo(HaveOccurred())
 		}
 
@@ -323,7 +323,7 @@ var _ = Describe("Healthcheck tests", func() {
 			}
 			expectUplinkInformers(&factoryMock)
 
-			ncm, err := NewNodeControllerManager(fakeClient, &factoryMock, "worker1",
+			ncm, err := NewNodeControllerManager(fakeClient, &factoryMock, nil, nil, "worker1",
 				&sync.WaitGroup{}, nil, routemanager.NewController(), nil)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(ncm.vrfManager).NotTo(BeNil())
@@ -399,7 +399,7 @@ var _ = Describe("Healthcheck tests", func() {
 			factoryMock.On("NodeCoreInformer").Return(nodeInformerMock)
 			expectUplinkInformers(&factoryMock)
 
-			ncm, err := NewNodeControllerManager(fakeClient, &factoryMock, nodeName, &sync.WaitGroup{}, nil, routeManager, nil)
+			ncm, err := NewNodeControllerManager(fakeClient, &factoryMock, nil, nil, nodeName, &sync.WaitGroup{}, nil, routeManager, nil)
 			Expect(err).NotTo(HaveOccurred())
 
 			err = testNS.Do(func(ns.NetNS) error {
@@ -477,7 +477,7 @@ var _ = Describe("Healthcheck tests", func() {
 			factoryMock.On("NodeCoreInformer").Return(nodeInformerMock)
 			expectUplinkInformers(&factoryMock)
 			Expect(err).NotTo(HaveOccurred())
-			ncm, err := NewNodeControllerManager(fakeClient, &factoryMock, nodeName, &sync.WaitGroup{}, nil, routeManager, nil)
+			ncm, err := NewNodeControllerManager(fakeClient, &factoryMock, nil, nil, nodeName, &sync.WaitGroup{}, nil, routeManager, nil)
 			Expect(err).NotTo(HaveOccurred())
 
 			err = testNS.Do(func(ns.NetNS) error {

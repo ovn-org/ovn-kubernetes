@@ -117,6 +117,13 @@ func NewSBClientWithEndpoint(endpoint string, promRegistry prometheus.Registerer
 	enableMetricsOption := client.WithMetricsRegistryNamespaceSubsystem(promRegistry,
 		"ovnkube", "master_libovsdb")
 
+	if config.Gateway.DisableUDNARPNDPFlood {
+		// used by the MAC binding controller
+		dbModel.SetIndexes(map[string][]model.ClientIndex{
+			sbdb.MACBindingTable: {{Columns: []model.ColumnKey{{Column: "logical_port"}}}},
+		})
+	}
+
 	c, err := newClient(endpoint, dbModel, enableMetricsOption)
 	if err != nil {
 		return nil, err
@@ -132,24 +139,27 @@ func NewSBClientWithEndpoint(endpoint string, promRegistry prometheus.Registerer
 	// Only Monitor Required SBDB tables to reduce memory overhead
 	chassisPrivate := sbdb.ChassisPrivate{}
 	igmpGroup := sbdb.IGMPGroup{}
-	_, err = c.Monitor(ctx,
-		c.NewMonitor(
-			// used by unidling controller
-			client.WithTable(&sbdb.ControllerEvent{}),
-			// used by node sync
-			client.WithTable(&sbdb.Chassis{}),
-			// used by zone interconnect
-			client.WithTable(&sbdb.Encap{}),
-			// used by node sync, only interested in names
-			client.WithTable(&chassisPrivate, &chassisPrivate.Name),
-			// used by node sync, only interested in Chassis reference
-			client.WithTable(&igmpGroup, &igmpGroup.Chassis),
-			// used for metrics
-			client.WithTable(&sbdb.SBGlobal{}),
-			// used for metrics
-			client.WithTable(&sbdb.PortBinding{}),
-		),
-	)
+	monitors := []client.MonitorOption{
+		// used by unidling controller
+		client.WithTable(&sbdb.ControllerEvent{}),
+		// used by node sync
+		client.WithTable(&sbdb.Chassis{}),
+		// used by zone interconnect
+		client.WithTable(&sbdb.Encap{}),
+		// used by node sync, only interested in names
+		client.WithTable(&chassisPrivate, &chassisPrivate.Name),
+		// used by node sync, only interested in Chassis reference
+		client.WithTable(&igmpGroup, &igmpGroup.Chassis),
+		// used for metrics
+		client.WithTable(&sbdb.SBGlobal{}),
+		// used for metrics
+		client.WithTable(&sbdb.PortBinding{}),
+	}
+	if config.Gateway.DisableUDNARPNDPFlood {
+		// used by the MAC binding controller
+		monitors = append(monitors, client.WithTable(&sbdb.MACBinding{}))
+	}
+	_, err = c.Monitor(ctx, c.NewMonitor(monitors...))
 	if err != nil {
 		cancel()
 		c.Close()
@@ -177,14 +187,19 @@ func NewNBClientWithEndpoint(endpoint string, promRegistry prometheus.Registerer
 		"master_libovsdb")
 
 	// define client indexes for objects that are using dbIDs
-	dbModel.SetIndexes(map[string][]model.ClientIndex{
+	indexes := map[string][]model.ClientIndex{
 		nbdb.ACLTable:           {{Columns: []model.ColumnKey{{Column: "external_ids", Key: types.PrimaryIDKey}}}},
 		nbdb.DHCPOptionsTable:   {{Columns: []model.ColumnKey{{Column: "external_ids", Key: types.PrimaryIDKey}}}},
 		nbdb.LoadBalancerTable:  {{Columns: []model.ColumnKey{{Column: "name"}}}},
 		nbdb.LogicalSwitchTable: {{Columns: []model.ColumnKey{{Column: "name"}}}},
 		nbdb.LogicalRouterTable: {{Columns: []model.ColumnKey{{Column: "name"}}}},
 		nbdb.QoSTable:           {{Columns: []model.ColumnKey{{Column: "external_ids", Key: types.PrimaryIDKey}}}},
-	})
+	}
+	if config.Gateway.DisableUDNARPNDPFlood {
+		// used by the MAC binding controller
+		indexes[nbdb.StaticMACBindingTable] = []model.ClientIndex{{Columns: []model.ColumnKey{{Column: "logical_port"}}}}
+	}
+	dbModel.SetIndexes(indexes)
 
 	c, err := newClient(endpoint, dbModel, enableMetricsOption)
 	if err != nil {

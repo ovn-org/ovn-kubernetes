@@ -75,6 +75,8 @@ global:
   enableMultiNetwork: false
   # -- Configure to use user defined networks (UDN) feature with ovn-kubernetes
   enableNetworkSegmentation: false
+  # -- Configure to disable use user defined networks (UDN) ARP/NDP flood in ovn-kubernetes
+  disableUDNARPNDPFlood: false
   # -- Configure to enable cluster network connect feature with ovn-kubernetes
   enableNetworkConnect: false
   # -- Configure to enable the uplink feature with ovn-kubernetes

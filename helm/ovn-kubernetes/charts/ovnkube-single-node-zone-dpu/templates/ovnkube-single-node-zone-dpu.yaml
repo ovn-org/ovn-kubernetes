@@ -395,6 +395,8 @@ spec:
           value: {{ hasKey .Values.global "enableMultiNetwork" | ternary .Values.global.enableMultiNetwork false | quote }}
         - name: OVN_NETWORK_SEGMENTATION_ENABLE
           value: {{ default "" .Values.global.enableNetworkSegmentation | quote }}
+        - name: OVN_DISABLE_UDN_ARP_NDP_FLOOD
+          value: {{ default "" .Values.global.disableUDNARPNDPFlood | quote }}
         - name: OVN_ROUTE_ADVERTISEMENTS_ENABLE
           value: {{ hasKey .Values.global "enableRouteAdvertisements" | ternary .Values.global.enableRouteAdvertisements false | quote }}
         - name: OVN_UPLINK_ENABLE
