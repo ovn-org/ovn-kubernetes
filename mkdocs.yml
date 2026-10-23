@@ -234,6 +234,7 @@ nav:
     - Connecting UDNs Discarded Alternatives: okeps/okep-5224-connecting-udns/discarded-alternatives.md
     - No-Overlay Mode: okeps/okep-5259-no-overlay.md
     - EVPN: okeps/okep-5088-evpn.md
+    - Support multi-NIC and multi-VTEP in IC mode: okeps/okep-5535-support-multi-nic-and-multi-vtep-in-ic-mode.md
     - DPU Healthcheck: okeps/okep-5674-dpu-healthcheck.md
     - Extend Primary UDN/CUDN to Support Multiple Cluster Subnets in Layer3 Topology: okeps/okep-5377-extend-udn-to-support-multiple-cluster-subnets-in-layer3-topology.md
     - VRF-Lite Shared Gateway Mode with Uplinks: okeps/okep-6019-vrf-lite-shared-gateway-external-bridges.md
